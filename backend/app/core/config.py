@@ -12,13 +12,16 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 天 / 7 days
 
-    # 数据库 / Database（本地阶段使用 SQLite / SQLite for local stage）
+    # 数据库 / Database（默认 SQLite，生产用环境变量 DATABASE_URL 覆盖为 Postgres）
+    # Database (defaults to SQLite; override via DATABASE_URL env for Postgres in prod)
     DATABASE_URL: str = "sqlite:///./prismx.db"
 
-    # 跨域 / CORS（本地前端地址 / local frontend origins）
+    # 跨域 / CORS（本地开发 + 生产前端域名 / local dev + production frontend origins）
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "https://prismxsignallab.com",
+        "https://www.prismxsignallab.com",
     ]
 
     # 信号引擎 / Signal engine

@@ -48,6 +48,10 @@ def _migrate_columns() -> None:
         "leverage": "INTEGER",
         "company": "VARCHAR",
     }
+    # 跨数据库的列类型映射 / cross-DB column type mapping
+    is_postgres = settings.DATABASE_URL.startswith("postgres")
+    datetime_type = "TIMESTAMP" if is_postgres else "DATETIME"
+
     inspector = inspect(engine)
     if "ea_bindings" in inspector.get_table_names():
         existing = {c["name"] for c in inspector.get_columns("ea_bindings")}
@@ -61,7 +65,7 @@ def _migrate_columns() -> None:
         order_cols = {c["name"] for c in inspector.get_columns("orders")}
         order_new = {
             "mt5_login": "VARCHAR",
-            "delivered_at": "DATETIME",
+            "delivered_at": datetime_type,
         }
         with engine.begin() as conn:
             for name, col_type in order_new.items():
