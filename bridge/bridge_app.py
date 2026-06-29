@@ -146,13 +146,18 @@ def scan_terminals() -> list[str]:
 
     分开安装的多个 MT5 = 不同的 terminal64.exe 路径，以此区分。
     Separately installed terminals have distinct terminal64.exe paths.
+
+    仅匹配 MT5 的 terminal64.exe；MT4 的 terminal.exe 不兼容 MetaTrader5
+    库，若误连会导致进程卡死，因此显式排除。
+    Only MT5's terminal64.exe is matched; MT4's terminal.exe is incompatible
+    with the MetaTrader5 library and would hang, so it is excluded.
     """
     paths: list[str] = []
     try:
         import psutil
         for proc in psutil.process_iter(["name", "exe"]):
             name = (proc.info.get("name") or "").lower()
-            if name in ("terminal64.exe", "terminal.exe"):
+            if name == "terminal64.exe":
                 exe = proc.info.get("exe")
                 if exe and exe not in paths:
                     paths.append(exe)

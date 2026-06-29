@@ -247,7 +247,9 @@ def poll_terminal(path: str, orders: list[dict] | None = None) -> dict:
         return out
 
     # 连接指定路径的终端（终端须已运行并登录）/ attach to the terminal at path
-    if not mt5.initialize(path=path):
+    # 加 timeout 防止误连到异常终端时无限阻塞（单位毫秒）。
+    # Add timeout (ms) so a bad terminal cannot block the worker indefinitely.
+    if not mt5.initialize(path=path, timeout=10000):
         out["error"] = f"initialize failed: {mt5.last_error()}"
         return out
 
