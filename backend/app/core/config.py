@@ -23,6 +23,9 @@ class Settings(BaseSettings):
         "https://prismxsignallab.com",
         "https://www.prismxsignallab.com",
     ]
+    # 额外用正则放行所有 Vercel 部署域名（含预览部署）。
+    # Regex to also allow all Vercel deployment domains (including preview deploys).
+    CORS_ORIGIN_REGEX: str = r"https://.*\.vercel\.app"
 
     # 信号引擎 / Signal engine
     SIGNAL_INTERVAL_SECONDS: int = 15  # 信号生成节拍 / signal tick interval
