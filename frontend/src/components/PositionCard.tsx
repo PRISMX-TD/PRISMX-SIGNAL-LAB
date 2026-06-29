@@ -83,7 +83,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
   }
 
   return (
-    <div className="rounded-xl border border-ink-700 bg-ink-900/50 p-4">
+    <div className="glass-neon p-4">
       {/* 头部：品种 + 方向 + 盈亏 / header: symbol + side + P&L */}
       <div className="flex items-start justify-between">
         <div>
@@ -145,7 +145,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
           <button
             onClick={() => setMode('close')}
             disabled={busy}
-            className="flex-1 rounded-lg border border-ink-600 bg-ink-800/60 py-1.5 text-xs font-medium text-slate-300 transition hover:bg-ink-700 disabled:opacity-50"
+            className="flex-1 rounded-lg border border-white/10 bg-white/[0.04] py-1.5 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08] disabled:opacity-50"
           >
             {t('positions.partialClose')}
           </button>
@@ -160,7 +160,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
       )}
 
       {canAct && mode === 'close' && (
-        <div className="mt-3 space-y-2 rounded-lg border border-ink-700 bg-ink-950/40 p-3">
+        <div className="mt-3 space-y-2 rounded-lg border border-white/10 bg-ink-950/40 p-3">
           <label className="text-xs text-slate-400">
             {t('positions.closeVolume')} (max {p.volume})
           </label>
@@ -189,7 +189,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
       )}
 
       {canAct && mode === 'modify' && (
-        <div className="mt-3 space-y-2 rounded-lg border border-ink-700 bg-ink-950/40 p-3">
+        <div className="mt-3 space-y-2 rounded-lg border border-white/10 bg-ink-950/40 p-3">
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-xs text-down">{t('positions.sl')}</label>

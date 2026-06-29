@@ -54,14 +54,16 @@ export default function BindPage() {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="font-display text-2xl font-bold text-slate-100">{t('bind.title')}</h2>
+        <h2 className="font-display text-2xl font-bold text-slate-100">
+          <span className="neon-text">{t('bind.title')}</span>
+        </h2>
         <p className="mt-1 text-sm text-slate-400">{t('bind.subtitle')}</p>
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {/* PLACEHOLDER_ACCOUNTS */}
         {accounts.length > 0 && (
-          <div className="card p-5 lg:col-span-2">
+          <div className="glass p-5 lg:col-span-2">
             <h3 className="mb-1 font-display text-lg font-semibold text-slate-100">
               {t('bind.accountsTitle')}
             </h3>
@@ -80,7 +82,7 @@ export default function BindPage() {
                 </thead>
                 <tbody>
                   {accounts.map((a) => (
-                    <tr key={a.login} className="border-t border-ink-700/60">
+                    <tr key={a.login} className="border-t border-white/5">
                       <td className="px-3 py-2 font-mono text-slate-100">{a.login}</td>
                       <td className="px-3 py-2 text-slate-300">{a.accountName || '—'}</td>
                       <td className="px-3 py-2 text-slate-400">{a.company || '—'}</td>
@@ -91,7 +93,7 @@ export default function BindPage() {
                         {a.equity != null ? a.equity.toFixed(2) : '—'}
                       </td>
                       <td className="px-3 py-2 text-center">
-                        <span className={`tag ${a.online ? 'bg-up/15 text-up' : 'bg-ink-700 text-slate-500'}`}>
+                        <span className={`tag ${a.online ? 'bg-up/15 text-up' : 'bg-white/5 text-slate-500'}`}>
                           {a.online ? t('common.online') : t('common.offline')}
                         </span>
                       </td>
@@ -104,12 +106,12 @@ export default function BindPage() {
         )}
 
         {/* PLACEHOLDER_TOKEN */}
-        <div className="card p-5">
+        <div className="glass p-5">
           <h3 className="mb-1 font-display text-lg font-semibold text-slate-100">
             {t('bind.tokenTitle')}
           </h3>
           <p className="mb-4 text-xs text-slate-500">{t('bind.tokenHint')}</p>
-          <div className="mb-3 flex items-center gap-2 rounded-xl border border-prism-600/30 bg-ink-900/60 p-3">
+          <div className="mb-3 flex items-center gap-2 rounded-xl border border-prism-600/30 bg-prism-600/5 p-3">
             <code className="flex-1 break-all font-mono text-sm text-prism-300">{apiToken}</code>
           </div>
           <div className="flex gap-3">
@@ -123,7 +125,7 @@ export default function BindPage() {
         </div>
 
         {/* PLACEHOLDER_STATUS */}
-        <div className="card p-5">
+        <div className="glass p-5">
           <h3 className="mb-4 font-display text-lg font-semibold text-slate-100">
             {t('bind.statusTitle')}
           </h3>
@@ -197,7 +199,7 @@ export default function BindPage() {
         </div>
 
         {/* PLACEHOLDER_SUFFIX */}
-        <div className="card p-5">
+        <div className="glass p-5">
           <h3 className="mb-1 font-display text-lg font-semibold text-slate-100">
             {t('bind.suffixTitle')}
           </h3>
@@ -219,14 +221,14 @@ export default function BindPage() {
         </div>
 
         {/* PLACEHOLDER_STEPS */}
-        <div className="card p-5">
+        <div className="glass p-5">
           <h3 className="mb-4 font-display text-lg font-semibold text-slate-100">
             {t('bind.steps.title')}
           </h3>
           <ol className="space-y-3">
             {['s1', 's2', 's3', 's4'].map((s, i) => (
               <li key={s} className="flex gap-3">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-prism-600/20 font-mono text-xs text-prism-300">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neon-gradient font-mono text-xs font-bold text-white shadow-prism">
                   {i + 1}
                 </span>
                 <span className="text-sm text-slate-300">{t(`bind.steps.${s}`)}</span>

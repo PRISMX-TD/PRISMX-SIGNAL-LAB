@@ -6,15 +6,16 @@ import { useAuth } from '../store/auth'
 import Logo from './Logo'
 import LanguageToggle from './LanguageToggle'
 import EAStatusBadge from './EAStatusBadge'
+import AuroraBackground from './AuroraBackground'
 
 function NavItem({ to, label }: { to: string; label: string }) {
   return (
     <NavLink
       to={to}
-      end={to === '/'}
+      end={to === '/app'}
       className={({ isActive }) =>
-        `relative px-3 py-2 text-sm font-medium transition ${
-          isActive ? 'text-prism-300' : 'text-slate-400 hover:text-slate-200'
+        `relative rounded-lg px-3 py-2 text-sm font-medium transition ${
+          isActive ? 'text-prism-200' : 'text-slate-400 hover:text-slate-100'
         }`
       }
     >
@@ -22,7 +23,7 @@ function NavItem({ to, label }: { to: string; label: string }) {
         <>
           {label}
           {isActive && (
-            <span className="absolute -bottom-px left-3 right-3 h-0.5 rounded-full bg-prism-500 shadow-prism" />
+            <span className="absolute -bottom-px left-3 right-3 h-0.5 rounded-full bg-neon-gradient shadow-prism" />
           )}
         </>
       )}
@@ -37,13 +38,14 @@ export default function Layout() {
 
   const handleLogout = () => {
     logout()
-    navigate('/login', { replace: true })
+    navigate('/', { replace: true })
   }
 
   return (
     <LiveProvider>
-      <div className="min-h-screen flex flex-col">
-        <header className="sticky top-0 z-30 border-b border-ink-700/60 bg-ink-950/80 backdrop-blur-md">
+      <div className="relative flex min-h-screen flex-col">
+        <AuroraBackground />
+        <header className="sticky top-0 z-30 border-b border-white/10 bg-ink-950/60 backdrop-blur-xl">
           <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-3 sm:px-6">
             <div className="flex items-center gap-2.5">
               <Logo size={30} />
@@ -58,7 +60,7 @@ export default function Layout() {
             </div>
 
             <nav className="hidden items-center gap-1 sm:flex">
-              <NavItem to="/" label={t('nav.signals')} />
+              <NavItem to="/app" label={t('nav.signals')} />
               <NavItem to="/bind" label={t('nav.bind')} />
               <NavItem to="/orders" label={t('nav.orders')} />
             </nav>
@@ -76,8 +78,8 @@ export default function Layout() {
           </div>
 
           {/* 移动端导航 / mobile nav */}
-          <nav className="flex items-center gap-1 border-t border-ink-800 px-4 py-1.5 sm:hidden">
-            <NavItem to="/" label={t('nav.signals')} />
+          <nav className="flex items-center gap-1 border-t border-white/10 px-4 py-1.5 sm:hidden">
+            <NavItem to="/app" label={t('nav.signals')} />
             <NavItem to="/bind" label={t('nav.bind')} />
             <NavItem to="/orders" label={t('nav.orders')} />
           </nav>

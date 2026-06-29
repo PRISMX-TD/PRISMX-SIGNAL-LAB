@@ -37,12 +37,14 @@ export default function OrdersPage() {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="font-display text-2xl font-bold text-slate-100">{t('orders.title')}</h2>
+        <h2 className="font-display text-2xl font-bold text-slate-100">
+          <span className="neon-text">{t('orders.title')}</span>
+        </h2>
         <p className="mt-1 text-sm text-slate-400">{t('orders.subtitle')}</p>
       </div>
 
       {/* 持仓概览 / positions overview */}
-      <div className="card mb-5 p-5">
+      <div className="glass mb-5 p-5">
         <h3 className="mb-3 font-display text-lg font-semibold text-slate-100">
           {t('orders.positions')}
         </h3>
@@ -58,14 +60,14 @@ export default function OrdersPage() {
       </div>
 
       {/* 订单表 / orders table */}
-      <div className="card overflow-hidden">
+      <div className="glass overflow-hidden">
         {orders.length === 0 ? (
           <p className="py-16 text-center text-sm text-slate-500">{t('orders.empty')}</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-ink-700 text-left text-xs uppercase tracking-wider text-slate-500">
+                <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-slate-500">
                   <th className="px-4 py-3 font-medium">{t('orders.colTime')}</th>
                   <th className="px-4 py-3 font-medium">{t('orders.colType')}</th>
                   <th className="px-4 py-3 font-medium">{t('orders.colAccount')}</th>
@@ -82,13 +84,13 @@ export default function OrdersPage() {
                 {orders.map((o) => (
                   <tr
                     key={o.id}
-                    className="border-b border-ink-800/60 transition hover:bg-prism-600/5"
+                    className="border-b border-white/5 transition hover:bg-prism-600/10"
                   >
                     <td className="whitespace-nowrap px-4 py-3 text-slate-400">
                       {fmtTime(o.createdAt)}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="tag bg-ink-700 text-slate-300">
+                      <span className="tag border border-white/10 bg-white/[0.05] text-slate-300">
                         {t(`orders.action.${o.action ?? 'ORDER'}`)}
                       </span>
                     </td>

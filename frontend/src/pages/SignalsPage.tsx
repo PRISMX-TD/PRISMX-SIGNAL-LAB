@@ -13,9 +13,7 @@ function SignalCard({ signal, onTrade }: { signal: Signal; onTrade: (s: Signal) 
   const expired = signal.status === 'EXPIRED'
 
   return (
-    <div className={`card animate-fade-in-up p-4 transition ${
-      expired ? 'opacity-50 grayscale' : 'hover:border-prism-600/50 hover:shadow-prism'
-    }`}>
+    <div className={`glass-neon animate-fade-in-up p-5 ${expired ? 'opacity-50 grayscale' : ''}`}>
       <div className="mb-3 flex items-start justify-between">
         <div className="flex items-center gap-2">
           <span className="font-display text-lg font-bold tracking-wide text-slate-100">
@@ -27,7 +25,7 @@ function SignalCard({ signal, onTrade }: { signal: Signal; onTrade: (s: Signal) 
         </div>
         <span
           className={`tag ${
-            expired ? 'bg-ink-700 text-slate-500' : 'bg-prism-600/15 text-prism-300'
+            expired ? 'bg-white/5 text-slate-500' : 'border border-prism-500/30 bg-prism-600/15 text-prism-300'
           }`}
         >
           {expired ? t('signals.expired') : t('signals.active')}
@@ -35,19 +33,19 @@ function SignalCard({ signal, onTrade }: { signal: Signal; onTrade: (s: Signal) 
       </div>
 
       <div className="mb-3 grid grid-cols-3 gap-2 text-center">
-        <div className="rounded-lg bg-ink-900/50 py-2">
+        <div className="rounded-lg border border-white/5 bg-white/[0.03] py-2">
           <div className="text-[10px] uppercase tracking-wider text-slate-500">
             {t('signals.entry')}
           </div>
           <div className="font-mono text-sm text-slate-100">{signal.entry}</div>
         </div>
-        <div className="rounded-lg bg-ink-900/50 py-2">
+        <div className="rounded-lg border border-white/5 bg-white/[0.03] py-2">
           <div className="text-[10px] uppercase tracking-wider text-slate-500">
             {t('signals.stopLoss')}
           </div>
           <div className="font-mono text-sm text-down">{signal.stopLoss}</div>
         </div>
-        <div className="rounded-lg bg-ink-900/50 py-2">
+        <div className="rounded-lg border border-white/5 bg-white/[0.03] py-2">
           <div className="text-[10px] uppercase tracking-wider text-slate-500">
             {t('signals.takeProfit')}
           </div>
@@ -155,17 +153,19 @@ export default function SignalsPage() {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="font-display text-2xl font-bold text-slate-100">{t('signals.title')}</h2>
+        <h2 className="font-display text-2xl font-bold text-slate-100">
+          <span className="neon-text">{t('signals.title')}</span>
+        </h2>
         <p className="mt-1 text-sm text-slate-400">{t('signals.subtitle')}</p>
       </div>
 
       {!loaded ? (
-        <div className="card flex flex-col items-center justify-center py-20 text-center">
+        <div className="glass flex flex-col items-center justify-center py-20 text-center">
           <div className="mb-3 h-10 w-10 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />
           <p className="text-sm text-slate-400">{t('common.loading')}</p>
         </div>
       ) : signals.length === 0 ? (
-        <div className="card flex flex-col items-center justify-center py-20 text-center">
+        <div className="glass flex flex-col items-center justify-center py-20 text-center">
           <p className="text-sm text-slate-400">{t('signals.empty')}</p>
         </div>
       ) : (

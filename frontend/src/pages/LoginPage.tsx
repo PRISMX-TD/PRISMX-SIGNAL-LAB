@@ -1,24 +1,28 @@
 // 登录/注册页 / Login & register page
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../store/auth'
 import Logo from '../components/Logo'
 import LanguageToggle from '../components/LanguageToggle'
+import AuroraBackground from '../components/AuroraBackground'
 
 export default function LoginPage() {
   const { t } = useTranslation()
   const { login, register, isAuthed } = useAuth()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
 
-  const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [mode, setMode] = useState<'login' | 'register'>(
+    params.get('mode') === 'register' ? 'register' : 'login',
+  )
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
   if (isAuthed) {
-    navigate('/', { replace: true })
+    navigate('/app', { replace: true })
   }
 
   const onSubmit = async (e: FormEvent) => {
@@ -28,7 +32,7 @@ export default function LoginPage() {
     try {
       if (mode === 'login') await login(email, password)
       else await register(email, password)
-      navigate('/', { replace: true })
+      navigate('/app', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : t('auth.errorFailed'))
     } finally {
@@ -38,11 +42,13 @@ export default function LoginPage() {
 
   return (
     <div className="relative min-h-screen overflow-hidden">
-      {/* 背景棱镜网格 / prism grid background */}
-      <div className="pointer-events-none absolute inset-0 bg-prism-grid bg-[size:44px_44px] opacity-40" />
-      <div className="pointer-events-none absolute -left-40 top-10 h-96 w-96 rounded-full bg-prism-700/20 blur-3xl" />
-      <div className="pointer-events-none absolute -right-32 bottom-0 h-96 w-96 rounded-full bg-prism-500/10 blur-3xl" />
+      <AuroraBackground />
 
+      <div className="absolute left-4 top-4 z-10">
+        <Link to="/" className="chip transition hover:border-prism-500/50 hover:text-slate-100">
+          <span aria-hidden>←</span> PRISMX
+        </Link>
+      </div>
       <div className="absolute right-4 top-4 z-10">
         <LanguageToggle />
       </div>
@@ -50,22 +56,24 @@ export default function LoginPage() {
       <div className="relative z-10 flex min-h-screen items-center justify-center px-4">
         <div className="w-full max-w-md">
           <div className="mb-8 flex flex-col items-center text-center">
-            <div className="mb-4 animate-glow-pulse rounded-2xl border border-prism-600/40 bg-ink-850/60 p-3">
+            <div className="mb-4 animate-glow-pulse rounded-2xl border border-prism-600/40 bg-white/[0.04] p-3 backdrop-blur-xl">
               <Logo size={44} />
             </div>
             <h1 className="font-display text-3xl font-black tracking-wider text-slate-100">
-              PRISMX <span className="text-prism-400">Signal Lab</span>
+              PRISMX <span className="neon-text animate-gradient-x">Signal Lab</span>
             </h1>
             <p className="mt-1 text-sm tracking-widest text-slate-500">棱镜信号实验室</p>
             <p className="mt-3 max-w-xs text-sm text-slate-400">{t('auth.tagline')}</p>
           </div>
 
-          <div className="card animate-fade-in-up p-6 shadow-prism-lg">
-            <div className="mb-5 flex gap-2 rounded-xl border border-ink-700 bg-ink-900/50 p-1">
+          <div className="glass animate-fade-in-up p-6 shadow-glass-lg">
+            <div className="mb-5 flex gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-1">
               <button
                 onClick={() => setMode('login')}
                 className={`flex-1 rounded-lg py-2 text-sm font-medium transition ${
-                  mode === 'login' ? 'bg-prism-600 text-white' : 'text-slate-400'
+                  mode === 'login'
+                    ? 'bg-prism-600 text-white shadow-prism'
+                    : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 {t('auth.loginTitle')}
@@ -73,7 +81,9 @@ export default function LoginPage() {
               <button
                 onClick={() => setMode('register')}
                 className={`flex-1 rounded-lg py-2 text-sm font-medium transition ${
-                  mode === 'register' ? 'bg-prism-600 text-white' : 'text-slate-400'
+                  mode === 'register'
+                    ? 'bg-prism-600 text-white shadow-prism'
+                    : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 {t('auth.registerTitle')}

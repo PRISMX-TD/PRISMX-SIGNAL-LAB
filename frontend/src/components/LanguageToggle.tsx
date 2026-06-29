@@ -7,7 +7,7 @@ export default function LanguageToggle() {
   const lang = i18n.language
 
   return (
-    <div className="inline-flex items-center rounded-lg border border-ink-700 bg-ink-900/60 p-0.5 text-sm">
+    <div className="inline-flex items-center rounded-lg border border-white/10 bg-white/[0.04] p-0.5 text-sm backdrop-blur-md">
       <button
         onClick={() => setLanguage('zh')}
         className={`rounded-md px-2.5 py-1 transition ${

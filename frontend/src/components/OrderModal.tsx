@@ -103,13 +103,13 @@ export default function OrderModal({ signal, eaOnline, accounts, onCancel, onCon
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-ink-950/80 backdrop-blur-sm" onClick={onCancel} />
-      <div className="card relative z-10 w-full max-w-md animate-fade-in-up p-6 shadow-prism-lg">
+      <div className="absolute inset-0 bg-ink-950/70 backdrop-blur-md" onClick={onCancel} />
+      <div className="glass relative z-10 w-full max-w-md animate-fade-in-up p-6 shadow-glass-lg">
         <h3 className="mb-4 font-display text-xl font-bold text-slate-100">
-          {t('order.confirmTitle')}
+          <span className="neon-text">{t('order.confirmTitle')}</span>
         </h3>
 
-        <div className="mb-4 space-y-2.5 rounded-xl border border-ink-700 bg-ink-900/50 p-4 text-sm">
+        <div className="mb-4 space-y-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
           <div className="flex justify-between">
             <span className="text-slate-400">{t('order.symbol')}</span>
             <span className="font-mono font-semibold text-slate-100">{signal.symbol}</span>
@@ -143,7 +143,7 @@ export default function OrderModal({ signal, eaOnline, accounts, onCancel, onCon
                 key={q}
                 type="button"
                 onClick={() => setVolume(q.toFixed(2))}
-                className="flex-1 rounded-lg border border-ink-600 bg-ink-800/60 py-1 font-mono text-xs text-slate-300 transition hover:border-prism-600/50 hover:text-prism-300"
+                className="flex-1 rounded-lg border border-white/10 bg-white/[0.04] py-1 font-mono text-xs text-slate-300 transition hover:border-prism-600/50 hover:text-prism-300"
               >
                 {q.toFixed(2)}
               </button>
@@ -194,7 +194,7 @@ export default function OrderModal({ signal, eaOnline, accounts, onCancel, onCon
               ))}
             </select>
             {selected && (
-              <div className="mt-2 flex justify-between rounded-lg bg-ink-900/50 px-3 py-2 text-xs">
+              <div className="mt-2 flex justify-between rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2 text-xs">
                 <span className="text-slate-400">
                   {t('bind.equity')}
                   <span className="ml-1 font-mono text-slate-200">
@@ -213,7 +213,7 @@ export default function OrderModal({ signal, eaOnline, accounts, onCancel, onCon
         )}
 
         {estMargin != null && (
-          <div className="mb-4 flex items-center justify-between rounded-lg border border-ink-700 bg-ink-900/50 px-3 py-2 text-xs">
+          <div className="mb-4 flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs">
             <span className="text-slate-400">{t('order.estMargin')}</span>
             <span className="font-mono text-slate-200">
               ≈ {estMargin.toLocaleString(undefined, { maximumFractionDigits: 0 })}{' '}
