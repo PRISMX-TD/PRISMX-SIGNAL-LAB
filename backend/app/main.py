@@ -4,9 +4,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.core.config import settings
 from app.core.database import init_db
+from app.core.rate_limit import limiter
 from app.engine.signal_engine import signal_loop
 from app.routers import auth, bridge, ea, ea_poll, orders, signals, ws
 from app.routers.bridge import offline_monitor_loop
@@ -25,6 +29,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
+
+# 限流：注册 limiter、超限处理器与中间件 / rate limiting: limiter, handler, middleware
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

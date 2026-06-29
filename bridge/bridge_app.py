@@ -14,6 +14,7 @@ import ctypes
 import json
 import logging
 import os
+import sys
 import threading
 import tkinter as tk
 from ctypes import wintypes
@@ -33,6 +34,16 @@ DEFAULT_BACKEND = "https://api.prismxsignallab.com"
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".prismx_bridge.json")
 LOG_PATH = os.path.join(os.path.expanduser("~"), ".prismx_bridge.log")
 POLL_INTERVAL = 2.0  # 后端轮询间隔（秒）/ backend poll interval (seconds)
+
+
+def resource_path(name: str) -> str:
+    """返回打包后/源码态下的资源绝对路径 / resolve a bundled resource path.
+
+    PyInstaller 解压到 sys._MEIPASS；源码态用脚本所在目录。
+    PyInstaller extracts to sys._MEIPASS; fall back to the script dir.
+    """
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, name)
 
 
 # ---------- 日志 / Logging ----------
@@ -257,6 +268,12 @@ class BridgeEngine:
                 self.token,
             )
             commands = resp.get("commands", [])
+            # 仅接受 list[dict]，过滤畸形元素，防止后续执行链异常。
+            # Only accept list[dict]; drop malformed elements to protect the chain.
+            if not isinstance(commands, list):
+                commands = []
+            else:
+                commands = [c for c in commands if isinstance(c, dict)]
             self.last_error = None
         except error.HTTPError as e:
             self.last_error = f"后端拒绝 HTTP {e.code}: {e.reason}（检查 Token）"
@@ -340,20 +357,44 @@ class BridgeGUI:
         self.saved_token = cfg.get("token", "")
 
         root.title(f"PRISMX Bridge v{APP_VERSION}")
-        root.geometry("600x520")
+        root.geometry("760x720")
+        root.resizable(False, False)
         root.configure(bg=self.BG)
+        self._set_app_icon(root)
+        self._buttons: dict[str, dict] = {}
         self._init_style()
         self._build_widgets()
 
+    def _set_app_icon(self, root: tk.Tk):
+        """设置窗口/任务栏图标 / set the window & taskbar icon."""
+        ico = resource_path("app.ico")
+        if os.path.exists(ico):
+            try:
+                root.iconbitmap(default=ico)
+            except tk.TclError:
+                pass
+            # 让任务栏使用应用自身图标而非 python 宿主图标
+            # make the taskbar use this app's icon instead of the python host
+            try:
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("PRISMX.Bridge")
+            except Exception:
+                pass
+
     # ---------- 主题配色 / theme palette ----------
-    BG = "#08080d"        # 近黑背景 / near-black background
-    PANEL = "#12121c"     # 面板 / panel
-    BORDER = "#23233a"    # 描边 / border
+    BG = "#07070c"        # 近黑背景 / near-black background
+    CARD = "#11111c"      # 卡片底 / card surface
+    CARD_HI = "#181826"   # 卡片高亮底 / elevated card surface
+    FIELD = "#0b0b13"     # 输入框底 / input field
+    BORDER = "#262640"    # 描边 / border
     ACCENT = "#8b46ff"    # 荧光紫 / neon violet
     ACCENT_HI = "#a779ff" # 亮紫 / bright violet
-    TEXT = "#e6e6f0"      # 主文字 / primary text
+    ACCENT_DK = "#5b22c9" # 深紫 / deep violet
+    OK = "#37e0a6"        # 在线绿 / online green
+    WARN = "#f5c451"      # 警告黄 / warning amber
+    ERR = "#ff5c7a"       # 错误红 / error red
+    TEXT = "#e9e9f2"      # 主文字 / primary text
     MUTED = "#8a8aa3"     # 次要文字 / muted text
-    FAINT = "#4a4a66"     # 极弱文字 / faint text
+    FAINT = "#50506e"     # 极弱文字 / faint text
 
     def _init_style(self):
         """配置 ttk 暗色主题（表格）/ configure dark ttk theme for the table."""
@@ -364,16 +405,21 @@ class BridgeGUI:
             pass
         style.configure(
             "PX.Treeview",
-            background=self.PANEL, fieldbackground=self.PANEL, foreground=self.TEXT,
-            borderwidth=0, rowheight=26, font=("Segoe UI", 9),
+            background=self.CARD_HI, fieldbackground=self.CARD_HI, foreground=self.TEXT,
+            borderwidth=0, rowheight=32, font=("Segoe UI", 9),
         )
         style.map("PX.Treeview", background=[("selected", "#2a1d4d")], foreground=[("selected", self.ACCENT_HI)])
         style.configure(
             "PX.Treeview.Heading",
-            background="#1a1a2a", foreground=self.MUTED,
-            borderwidth=0, font=("Segoe UI", 9, "bold"),
+            background=self.CARD_HI, foreground=self.MUTED, relief="flat",
+            borderwidth=0, padding=(6, 8), font=("Segoe UI", 8, "bold"),
         )
         style.map("PX.Treeview.Heading", background=[("active", "#22223a")])
+        # 滚动条暗色 / dark scrollbar
+        style.configure(
+            "PX.Vertical.TScrollbar", background=self.BORDER, troughcolor=self.CARD_HI,
+            borderwidth=0, arrowcolor=self.MUTED,
+        )
 
     def _draw_logo(self, parent, px=40):
         """用 Canvas 绘制新 logo：黑底圆角 + 荧光紫三角描边（中间镂空）。
@@ -401,81 +447,179 @@ class BridgeGUI:
         c.create_polygon(tri, outline=self.ACCENT_HI, fill="", width=1.4, joinstyle="round")
         return c
 
-    def _build_widgets(self):
-        pad = {"padx": 18, "pady": 7}
+    # ---------- 圆角绘制工具 / rounded-rect drawing helpers ----------
+    CARD_W = 716  # 卡片统一宽度 / unified card width
 
+    def _round_rect(self, cv, x1, y1, x2, y2, r, **kw):
+        """在 Canvas 上画一个平滑圆角矩形 / draw a smooth rounded rectangle."""
+        pts = [
+            x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
+            x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
+            x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
+        ]
+        return cv.create_polygon(pts, smooth=True, **kw)
+
+    def _card(self, parent, height, pad=18):
+        """创建一张圆角卡片，返回内部内容 Frame。
+        Create a rounded card; return its inner content frame.
+        """
+        w = self.CARD_W
+        cv = tk.Canvas(parent, width=w, height=height, bg=self.BG, highlightthickness=0)
+        cv.pack(padx=22, pady=7)
+        self._round_rect(cv, 1, 1, w - 1, height - 1, 20, fill=self.CARD, outline=self.BORDER, width=1)
+        inner = tk.Frame(cv, bg=self.CARD)
+        cv.create_window(pad, pad, anchor="nw", window=inner, width=w - 2 * pad, height=height - 2 * pad)
+        return inner
+
+    def _make_button(self, parent, text, command, kind="primary", width=212, height=46):
+        """创建圆角按钮（Canvas 自绘），返回状态字典。
+        Create a rounded (Canvas-drawn) button; return its state dict.
+        """
+        if kind == "primary":
+            fill, fill_hi, fg = self.ACCENT, self.ACCENT_HI, "white"
+        else:
+            fill, fill_hi, fg = "#262640", "#33335a", self.TEXT
+        cv = tk.Canvas(parent, width=width, height=height, bg=self.CARD, highlightthickness=0, cursor="hand2")
+        rect = self._round_rect(cv, 2, 2, width - 2, height - 2, (height - 4) // 2, fill=fill, outline="")
+        label = cv.create_text(width // 2, height // 2, text=text, fill=fg, font=("Segoe UI", 10, "bold"))
+        state = {"cv": cv, "rect": rect, "label": label, "fill": fill, "fill_hi": fill_hi,
+                 "fg": fg, "enabled": True, "command": command}
+
+        def on_click(_e):
+            if state["enabled"]:
+                command()
+
+        def on_enter(_e):
+            if state["enabled"]:
+                cv.itemconfig(rect, fill=fill_hi)
+
+        def on_leave(_e):
+            if state["enabled"]:
+                cv.itemconfig(rect, fill=fill)
+
+        cv.bind("<Button-1>", on_click)
+        cv.bind("<Enter>", on_enter)
+        cv.bind("<Leave>", on_leave)
+        return state
+
+    def _set_button(self, state, enabled: bool):
+        """启用/禁用圆角按钮并切换配色 / toggle a rounded button's enabled state."""
+        state["enabled"] = enabled
+        state["cv"].itemconfig(state["rect"], fill=state["fill"] if enabled else "#1a1a28")
+        state["cv"].itemconfig(state["label"], fill=state["fg"] if enabled else self.FAINT)
+        state["cv"].config(cursor="hand2" if enabled else "arrow")
+
+    def _build_widgets(self):
         # 标题区：logo + 名称 / header: logo + title
         title_row = tk.Frame(self.root, bg=self.BG)
-        title_row.pack(fill="x", padx=18, pady=(16, 8))
-        self._draw_logo(title_row, px=42).pack(side="left")
+        title_row.pack(fill="x", padx=30, pady=(22, 10))
+        self._draw_logo(title_row, px=50).pack(side="left")
         name_box = tk.Frame(title_row, bg=self.BG)
-        name_box.pack(side="left", padx=12)
+        name_box.pack(side="left", padx=16)
         tk.Label(
             name_box, text="PRISMX Bridge",
-            font=("Segoe UI", 17, "bold"), fg=self.TEXT, bg=self.BG,
+            font=("Segoe UI Semibold", 19, "bold"), fg=self.TEXT, bg=self.BG,
         ).pack(anchor="w")
         tk.Label(
-            name_box, text=f"棱镜桥接 · v{APP_VERSION}",
+            name_box, text=f"棱镜桥接 · MT5 Connector · v{APP_VERSION}",
             font=("Segoe UI", 9), fg=self.ACCENT_HI, bg=self.BG,
+        ).pack(anchor="w", pady=(2, 0))
+
+        # 连接卡片：Token 输入 + 操作按钮 / connection card
+        conn = self._card(self.root, height=212, pad=22)
+        tk.Label(
+            conn, text="API TOKEN", fg=self.MUTED, bg=self.CARD,
+            font=("Segoe UI", 8, "bold"),
         ).pack(anchor="w")
+        tk.Label(
+            conn, text="粘贴网页「绑定」页的 Token / Paste the token from the web Bind page",
+            fg=self.FAINT, bg=self.CARD, font=("Segoe UI", 8),
+        ).pack(anchor="w", pady=(3, 10))
 
-        # 分隔线 / divider
-        tk.Frame(self.root, bg=self.BORDER, height=1).pack(fill="x", padx=18, pady=(4, 10))
-
-        # Token 输入区（第一步）/ token entry (the first step)
-        form = tk.Frame(self.root, bg=self.BG)
-        form.pack(fill="x", **pad)
-
-        tk.Label(form, text="API Token", fg=self.MUTED, bg=self.BG,
-                 font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w")
+        # 圆角输入框 + 显示按钮 / rounded entry + show toggle
+        entry_row = tk.Frame(conn, bg=self.CARD)
+        entry_row.pack(fill="x")
+        field_w, field_h = 520, 46
+        field_cv = tk.Canvas(entry_row, width=field_w, height=field_h, bg=self.CARD, highlightthickness=0)
+        field_cv.pack(side="left")
+        self._round_rect(field_cv, 1, 1, field_w - 1, field_h - 1, 14, fill=self.FIELD, outline=self.BORDER, width=1)
         self.token_var = tk.StringVar(value=self.saved_token)
         self.token_entry = tk.Entry(
-            form, textvariable=self.token_var, width=46, show="•",
-            bg=self.PANEL, fg=self.TEXT, insertbackground=self.ACCENT_HI,
-            relief="flat", font=("Segoe UI", 10),
+            field_cv, textvariable=self.token_var, show="•",
+            bg=self.FIELD, fg=self.TEXT, insertbackground=self.ACCENT_HI,
+            relief="flat", font=("Consolas", 11), bd=0,
         )
-        self.token_entry.grid(row=0, column=1, padx=10, pady=4, ipady=4)
+        field_cv.create_window(16, field_h // 2, anchor="w", window=self.token_entry, width=field_w - 32)
 
-        # 后端地址固定为线上地址，对用户隐藏，无需填写。
-        # Backend URL is fixed to production and hidden from the user.
+        self._token_shown = False
+        self.eye_btn = self._make_button(entry_row, "显示", self._toggle_token, kind="ghost", width=78, height=46)
+        self.eye_btn["cv"].pack(side="left", padx=(12, 0))
+
         self.backend_var = tk.StringVar(value=DEFAULT_BACKEND)
 
         # 连接 / 断开按钮 / connect & disconnect buttons
-        btns = tk.Frame(self.root, bg=self.BG)
-        btns.pack(fill="x", **pad)
-        self.connect_btn = tk.Button(
-            btns, text="连接 / Connect", command=self._on_connect,
-            bg=self.ACCENT, fg="white", relief="flat", width=16,
-            activebackground=self.ACCENT_HI, activeforeground="white",
-            font=("Segoe UI", 10, "bold"), cursor="hand2", bd=0, pady=6,
-        )
-        self.connect_btn.pack(side="left")
-        self.disconnect_btn = tk.Button(
-            btns, text="断开 / Disconnect", command=self._on_disconnect,
-            bg="#1f1f30", fg=self.MUTED, relief="flat", width=16, state="disabled",
-            activebackground="#2a2a40", activeforeground=self.TEXT,
-            font=("Segoe UI", 10), cursor="hand2", bd=0, pady=6,
-        )
-        self.disconnect_btn.pack(side="left", padx=8)
+        btns = tk.Frame(conn, bg=self.CARD)
+        btns.pack(fill="x", pady=(16, 0))
+        self.connect_btn = self._make_button(btns, "连接 / Connect", self._on_connect, kind="primary", width=318, height=48)
+        self.connect_btn["cv"].pack(side="left")
+        self.disconnect_btn = self._make_button(btns, "断开 / Disconnect", self._on_disconnect, kind="ghost", width=318, height=48)
+        self.disconnect_btn["cv"].pack(side="left", padx=(16, 0))
+        self._set_button(self.disconnect_btn, False)
 
-        # 状态栏 / status line
-        self.status_var = tk.StringVar(value="● 未连接 / Not connected")
-        tk.Label(self.root, textvariable=self.status_var, fg=self.MUTED, bg=self.BG,
-                 font=("Segoe UI", 9)).pack(anchor="w", **pad)
+        # 状态指示灯 + 文案 / status dot + text
+        status_row = tk.Frame(self.root, bg=self.BG)
+        status_row.pack(fill="x", padx=32, pady=(12, 8))
+        self.status_dot = tk.Canvas(status_row, width=14, height=14, bg=self.BG, highlightthickness=0)
+        self.status_dot.pack(side="left")
+        self._draw_dot(self.FAINT)
+        self.status_var = tk.StringVar(value="未连接 / Not connected")
+        tk.Label(
+            status_row, textvariable=self.status_var, fg=self.MUTED, bg=self.BG,
+            font=("Segoe UI", 9),
+        ).pack(side="left", padx=10)
 
-        # 账号列表 / account table
+        # 账号卡片：标题 + 表格 / accounts card
+        acct = self._card(self.root, height=326, pad=20)
+        acct_head = tk.Frame(acct, bg=self.CARD)
+        acct_head.pack(fill="x", pady=(0, 10))
+        tk.Label(
+            acct_head, text="已连接账号 / Connected Accounts", fg=self.TEXT, bg=self.CARD,
+            font=("Segoe UI", 11, "bold"),
+        ).pack(side="left")
+        self.count_var = tk.StringVar(value="0 个")
+        tk.Label(
+            acct_head, textvariable=self.count_var, fg=self.ACCENT_HI, bg=self.CARD,
+            font=("Segoe UI", 10, "bold"),
+        ).pack(side="right")
+
+        table_wrap = tk.Frame(acct, bg=self.CARD_HI)
+        table_wrap.pack(fill="both", expand=True)
         cols = ("login", "name", "company", "balance", "equity")
-        self.tree = ttk.Treeview(self.root, columns=cols, show="headings", height=10, style="PX.Treeview")
-        for c, w in zip(cols, (90, 130, 130, 90, 90)):
-            self.tree.heading(c, text=c)
+        heads = ("账号", "名称", "券商", "余额", "净值")
+        self.tree = ttk.Treeview(
+            table_wrap, columns=cols, show="headings", height=7, style="PX.Treeview",
+        )
+        for c, h, w in zip(cols, heads, (95, 150, 150, 100, 100)):
+            self.tree.heading(c, text=h)
             self.tree.column(c, width=w, anchor="center")
-        self.tree.pack(fill="both", expand=True, padx=18, pady=8)
+        self.tree.pack(fill="both", expand=True, padx=6, pady=6)
 
-        # 底部：日志路径提示 / footer: log file hint
+        # 底部：日志路径提示 / footer
         tk.Label(
             self.root, text=f"运行日志 / Log: {LOG_PATH}",
             font=("Segoe UI", 8), fg=self.FAINT, bg=self.BG,
-        ).pack(anchor="w", padx=18, pady=(0, 8))
+        ).pack(anchor="w", padx=32, pady=(8, 12))
+
+    def _draw_dot(self, color):
+        """绘制状态指示灯 / draw the status dot."""
+        self.status_dot.delete("all")
+        self.status_dot.create_oval(2, 2, 12, 12, fill=color, outline="")
+
+    def _toggle_token(self):
+        """切换 Token 明文显示 / toggle token plaintext visibility."""
+        self._token_shown = not self._token_shown
+        self.token_entry.config(show="" if self._token_shown else "•")
+        self.eye_btn["cv"].itemconfig(self.eye_btn["label"], text="隐藏" if self._token_shown else "显示")
 
     def _on_connect(self):
         token = self.token_var.get().strip()
@@ -489,19 +633,22 @@ class BridgeGUI:
         self.engine = BridgeEngine(token, backend, self._on_status)
         self.engine.start()
         logger.info("已连接后端 / connected to backend: %s", backend)
-        self.connect_btn.config(state="disabled")
-        self.disconnect_btn.config(state="normal")
+        self._set_button(self.connect_btn, False)
+        self._set_button(self.disconnect_btn, True)
         self.token_entry.config(state="disabled")
+        self._draw_dot(self.WARN)
         self.status_var.set("已连接，正在扫描 MT5… / Connected, scanning MT5…")
 
     def _on_disconnect(self):
         if self.engine:
             self.engine.stop()
             self.engine = None
-        self.connect_btn.config(state="normal")
-        self.disconnect_btn.config(state="disabled")
+        self._set_button(self.connect_btn, True)
+        self._set_button(self.disconnect_btn, False)
         self.token_entry.config(state="normal")
+        self._draw_dot(self.FAINT)
         self.status_var.set("未连接 / Not connected")
+        self.count_var.set("0 个")
         for row in self.tree.get_children():
             self.tree.delete(row)
 
@@ -520,11 +667,15 @@ class BridgeGUI:
                 a.get("balance", ""),
                 a.get("equity", ""),
             ))
+        self.count_var.set(f"{len(accounts)} 个")
         if last_error:
-            self.status_var.set(f"在线账号 {len(accounts)} 个 · 错误: {last_error}")
+            self._draw_dot(self.ERR)
+            self.status_var.set(f"已连接 · {len(accounts)} 个账号 · 错误: {last_error}")
         elif accounts:
+            self._draw_dot(self.OK)
             self.status_var.set(f"已连接 · 在线账号 {len(accounts)} 个 / {len(accounts)} account(s) online")
         else:
+            self._draw_dot(self.WARN)
             self.status_var.set("已连接 · 未检测到已登录的 MT5 终端 / No logged-in MT5 terminal found")
 
     def on_close(self):
@@ -553,4 +704,17 @@ def main():
 
 
 if __name__ == "__main__":
+    # 隐藏自检：打包态验证 numpy / MetaTrader5 是否能正常导入
+    # hidden self-test: verify numpy / MetaTrader5 import in the bundled exe
+    if "--selftest" in sys.argv:
+        out = os.path.join(os.path.expanduser("~"), ".prismx_selftest.txt")
+        try:
+            import numpy as _np
+            import MetaTrader5 as _mt5
+            msg = f"OK numpy={_np.__version__} mt5={_mt5.__version__}"
+        except Exception as _e:  # noqa: BLE001
+            msg = f"FAIL {_e!r}"
+        with open(out, "w", encoding="utf-8") as _f:
+            _f.write(msg)
+        sys.exit(0)
     main()

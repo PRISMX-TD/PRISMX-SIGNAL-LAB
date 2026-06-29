@@ -26,7 +26,14 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void) {
         const proto = location.protocol === 'https:' ? 'wss' : 'ws'
         wsBase = `${proto}://${location.host}`
       }
-      ws = new WebSocket(`${wsBase}/ws/client?token=${token}`)
+      // 不再把 token 放进 URL（会被代理/网关日志记录），改为连接后发送首帧鉴权。
+      // Don't put the token in the URL (logged by proxies/gateways); send an AUTH frame after connect.
+      ws = new WebSocket(`${wsBase}/ws/client`)
+
+      ws.onopen = () => {
+        // 首帧提交 JWT 鉴权 / submit JWT for auth as the first frame
+        ws?.send(JSON.stringify({ type: 'AUTH', token }))
+      }
 
       ws.onmessage = (ev) => {
         try {

@@ -5,13 +5,14 @@ executes order commands via REST + API token.
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.security import authenticate_api_token
 from app.models import MT5Account, Order, Signal, User
-from app.schemas import AccountSuffixRequest, MT5AccountOut
+from app.schemas import LOGIN_PATTERN, SUFFIX_PATTERN, AccountSuffixRequest, MT5AccountOut
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user
 
@@ -29,9 +30,7 @@ def get_bridge_user(
     db: Session = Depends(get_db),
 ) -> User:
     """通过 API Token 鉴权桥接程序 / authenticate bridge app by API token."""
-    if not x_api_token:
-        raise HTTPException(status_code=401, detail="缺少 API Token / Missing API token")
-    user = db.query(User).filter(User.api_token == x_api_token).first()
+    user = authenticate_api_token(db, x_api_token)
     if not user:
         raise HTTPException(status_code=401, detail="API Token 无效 / Invalid API token")
     return user
@@ -39,15 +38,15 @@ def get_bridge_user(
 
 # ---------- 桥接程序上报的单个账号 / one account reported by the bridge ----------
 class BridgeAccount(BaseModel):
-    login: str
-    server: str | None = None
-    accountName: str | None = None
-    accountCurrency: str | None = None
+    login: str = Field(pattern=LOGIN_PATTERN)
+    server: str | None = Field(default=None, max_length=64)
+    accountName: str | None = Field(default=None, max_length=128)
+    accountCurrency: str | None = Field(default=None, max_length=16)
     balance: float | None = None
     equity: float | None = None
-    leverage: int | None = None
-    company: str | None = None
-    detectedSuffix: str | None = None
+    leverage: int | None = Field(default=None, ge=0, le=100000)
+    company: str | None = Field(default=None, max_length=128)
+    detectedSuffix: str | None = Field(default=None, pattern=SUFFIX_PATTERN)
 
 
 class BridgePollRequest(BaseModel):

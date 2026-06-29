@@ -1,8 +1,10 @@
 """认证路由：注册与登录 / Auth router: register & login."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.core.security import (
     create_access_token,
     generate_api_token,
@@ -16,11 +18,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", response_model=AuthResponse)
-def register(req: AuthRequest, db: Session = Depends(get_db)):
+@limiter.limit(settings.RATE_LIMIT_REGISTER)
+def register(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
     """注册新用户 / Register a new user."""
     existing = db.query(User).filter(User.email == req.email).first()
     if existing:
-        raise HTTPException(status_code=400, detail="邮箱已注册 / Email already registered")
+        # 统一非区分性错误，避免邮箱枚举 / generic error to avoid email enumeration
+        raise HTTPException(status_code=400, detail="无法完成注册 / Unable to register")
 
     user = User(
         email=req.email,
@@ -39,7 +43,8 @@ def register(req: AuthRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=AuthResponse)
-def login(req: AuthRequest, db: Session = Depends(get_db)):
+@limiter.limit(settings.RATE_LIMIT_LOGIN)
+def login(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
     """用户登录 / User login."""
     user = db.query(User).filter(User.email == req.email).first()
     if not user or not verify_password(req.password, user.password_hash):

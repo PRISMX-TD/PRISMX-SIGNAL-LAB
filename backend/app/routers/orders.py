@@ -213,6 +213,21 @@ def _suffix_for(user_id: str, mt5_login: str | None, db: Session) -> str:
     return (binding.symbol_suffix or "").strip() if binding else ""
 
 
+def _assert_account_owned(db: Session, user_id: str, mt5_login: str | None) -> None:
+    """校验目标账号归属当前用户（指定 mt5Login 时）。
+    Verify the target account belongs to the current user (when mt5Login given).
+    """
+    if not mt5_login:
+        return
+    acc = (
+        db.query(MT5Account)
+        .filter(MT5Account.user_id == user_id, MT5Account.login == mt5_login)
+        .first()
+    )
+    if acc is None:
+        raise HTTPException(status_code=404, detail="账号不存在或不属于当前用户 / Account not found")
+
+
 @router.post("/close", response_model=OrderOut)
 async def close_position(
     req: ClosePositionRequest,
@@ -222,10 +237,8 @@ async def close_position(
     """平仓（含部分平仓）：以 CLOSE 指令落库并下发。
     Close a position (incl. partial): persist a CLOSE command and dispatch it.
     """
-    if req.side not in ("BUY", "SELL"):
-        raise HTTPException(status_code=400, detail="方向无效 / Invalid side")
-    if req.ticket <= 0:
-        raise HTTPException(status_code=400, detail="持仓单号无效 / Invalid ticket")
+    # 校验目标账号归属，防止越权操控他人/不存在账号 / verify account ownership
+    _assert_account_owned(db, user.id, req.mt5Login)
 
     # 幂等 / idempotency by clientOrderId
     existing = (
@@ -265,8 +278,8 @@ async def modify_position(
     """修改持仓止损止盈：以 MODIFY 指令落库并下发。
     Modify a position's SL/TP: persist a MODIFY command and dispatch it.
     """
-    if req.ticket <= 0:
-        raise HTTPException(status_code=400, detail="持仓单号无效 / Invalid ticket")
+    # 校验目标账号归属，防止越权操控他人/不存在账号 / verify account ownership
+    _assert_account_owned(db, user.id, req.mt5Login)
 
     existing = (
         db.query(Order)

@@ -7,10 +7,19 @@ class Settings(BaseSettings):
     APP_NAME: str = "PRISMX Signal Lab"
     API_PREFIX: str = "/api"
 
+    # 运行环境 / Runtime environment：production 时强制安全配置。
+    # When ENV=production, security-sensitive configs are enforced.
+    ENV: str = "development"
+
     # 安全 / Security
     JWT_SECRET: str = "prismx-dev-secret-change-in-production"
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 天 / 7 days
+    JWT_EXPIRE_MINUTES: int = 60 * 24  # 1 天 / 1 day
+
+    # 限流 / Rate limiting（默认值，可用环境变量覆盖）。
+    # Rate limits (defaults; overridable via env).
+    RATE_LIMIT_LOGIN: str = "10/minute"
+    RATE_LIMIT_REGISTER: str = "5/minute"
 
     # 数据库 / Database（默认 SQLite，生产用环境变量 DATABASE_URL 覆盖为 Postgres）
     # Database (defaults to SQLite; override via DATABASE_URL env for Postgres in prod)
@@ -23,9 +32,12 @@ class Settings(BaseSettings):
         "https://prismxsignallab.com",
         "https://www.prismxsignallab.com",
     ]
-    # 额外用正则放行所有 Vercel 部署域名（含预览部署）。
-    # Regex to also allow all Vercel deployment domains (including preview deploys).
-    CORS_ORIGIN_REGEX: str = r"https://.*\.vercel\.app"
+    # 额外放行的精确预览域名（如某个固定 Vercel 部署）。默认空；按需在 .env 配置。
+    # 不再用通配正则放行所有 *.vercel.app，避免任意人部署前端即可携带凭证跨域。
+    # Extra exact preview origins (e.g. a fixed Vercel deploy). Empty by default;
+    # configure in .env as needed. We no longer allow all *.vercel.app via regex,
+    # which would let anyone deploy a frontend and make credentialed cross-origin calls.
+    CORS_ORIGIN_REGEX: str | None = None
 
     # 信号引擎 / Signal engine
     SIGNAL_INTERVAL_SECONDS: int = 15  # 信号生成节拍 / signal tick interval
@@ -51,13 +63,15 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# 安全校验：生产环境（使用非本地 SQLite 数据库，例如 Postgres）必须配置自定义 JWT_SECRET，
-# 否则用默认弱密钥签发的 token 可被任意伪造。
-# Safety check: in production (non-local DB such as Postgres) a custom JWT_SECRET
-# is mandatory, otherwise tokens signed with the default weak key are forgeable.
+# 安全校验：生产环境（ENV=production）必须配置自定义强随机 JWT_SECRET，
+# 否则用默认弱密钥签发的 token 可被任意伪造（等同认证绕过）。
+# 不再以数据库类型推断是否为生产，避免「生产仍用 SQLite」时漏判。
+# Safety check: in production (ENV=production) a custom strong JWT_SECRET is
+# mandatory; otherwise tokens signed with the default weak key are forgeable
+# (equivalent to auth bypass). We no longer infer "production" from the DB type.
 _DEFAULT_JWT_SECRET = "prismx-dev-secret-change-in-production"
-if settings.JWT_SECRET == _DEFAULT_JWT_SECRET and not settings.DATABASE_URL.startswith("sqlite"):
+if settings.ENV.lower() == "production" and settings.JWT_SECRET == _DEFAULT_JWT_SECRET:
     raise RuntimeError(
-        "JWT_SECRET 仍为默认值，生产环境必须在 .env 中设置强随机密钥。"
-        " / JWT_SECRET is still the default; set a strong random secret in .env for production."
+        "JWT_SECRET 仍为默认值，生产环境（ENV=production）必须在 .env 中设置强随机密钥。"
+        " / JWT_SECRET is still the default; set a strong random secret in .env when ENV=production."
     )

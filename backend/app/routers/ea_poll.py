@@ -4,11 +4,13 @@ EA polling bridge router (for version B): pull commands & report via REST + API 
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.security import authenticate_api_token
 from app.models import EABinding, Order, Signal, User
+from app.schemas import LOGIN_PATTERN, SUFFIX_PATTERN
 from app.services.connection_manager import manager
 
 router = APIRouter(prefix="/ea/poll", tags=["ea-poll"])
@@ -19,9 +21,7 @@ def get_ea_user(
     db: Session = Depends(get_db),
 ) -> User:
     """通过 API Token 鉴权 EA / authenticate EA by API token."""
-    if not x_api_token:
-        raise HTTPException(status_code=401, detail="缺少 API Token / Missing API token")
-    user = db.query(User).filter(User.api_token == x_api_token).first()
+    user = authenticate_api_token(db, x_api_token)
     if not user:
         raise HTTPException(status_code=401, detail="API Token 无效 / Invalid API token")
     return user
@@ -59,16 +59,16 @@ def _touch_binding(db: Session, user_id: str, req: "PollRequest"):
 
 
 class PollRequest(BaseModel):
-    mt5Login: str | None = None
-    mt5Server: str | None = None
-    accountName: str | None = None
-    accountCurrency: str | None = None
+    mt5Login: str | None = Field(default=None, pattern=LOGIN_PATTERN)
+    mt5Server: str | None = Field(default=None, max_length=64)
+    accountName: str | None = Field(default=None, max_length=128)
+    accountCurrency: str | None = Field(default=None, max_length=16)
     balance: float | None = None
     equity: float | None = None
-    leverage: int | None = None
-    company: str | None = None
+    leverage: int | None = Field(default=None, ge=0, le=100000)
+    company: str | None = Field(default=None, max_length=128)
     # EA 自动探测到的品种后缀 / suffix auto-detected by EA
-    detectedSuffix: str | None = None
+    detectedSuffix: str | None = Field(default=None, pattern=SUFFIX_PATTERN)
 
 
 @router.post("/poll")

@@ -363,17 +363,80 @@ def _modify_position(cmd: dict) -> dict:
     }
 
 
+def _validate_command(cmd: dict) -> tuple[bool, str]:
+    """校验单条指令的结构与字段范围 / validate one command's shape and field ranges.
+
+    返回 (是否合法, 错误信息)。校验失败时调用方应回执失败而非抛异常中断整批。
+    Returns (ok, error). On failure the caller should report a failed receipt
+    instead of raising and aborting the whole batch.
+    """
+    if not isinstance(cmd, dict):
+        return False, "command is not an object"
+    if not cmd.get("clientOrderId"):
+        return False, "missing clientOrderId"
+    action = (cmd.get("action") or "ORDER").upper()
+    if action not in ("ORDER", "CLOSE", "MODIFY"):
+        return False, f"unknown action: {action}"
+
+    # 数值字段必须可转为有限浮点 / numeric fields must be finite floats
+    import math
+
+    for key in ("volume", "entry", "stopLoss", "takeProfit"):
+        if key in cmd and cmd[key] is not None:
+            try:
+                v = float(cmd[key])
+            except (TypeError, ValueError):
+                return False, f"invalid number for {key}"
+            if not math.isfinite(v) or v < 0:
+                return False, f"out-of-range value for {key}"
+
+    if action in ("CLOSE", "MODIFY"):
+        try:
+            ticket = int(cmd.get("ticket", 0))
+        except (TypeError, ValueError):
+            return False, "invalid ticket"
+        if ticket <= 0:
+            return False, "invalid ticket"
+
+    if action == "ORDER":
+        side = cmd.get("side")
+        if side not in ("BUY", "SELL"):
+            return False, f"invalid side: {side}"
+        symbol = cmd.get("symbol")
+        if not symbol or not isinstance(symbol, str) or len(symbol) > 30:
+            return False, "invalid symbol"
+
+    return True, ""
+
+
 def _dispatch_command(cmd: dict) -> dict:
     """按指令类型分发执行 / dispatch by command action.
 
     action: ORDER（默认下单）/ CLOSE（平仓）/ MODIFY（改 SL·TP）。
+    校验失败或执行异常都返回失败回执，保证一条畸形指令不影响同批其它指令。
+    Validation failures and execution exceptions both yield a failure receipt so
+    a single malformed command never breaks the rest of the batch.
     """
+    ok, err = _validate_command(cmd)
+    if not ok:
+        return {
+            "clientOrderId": (cmd or {}).get("clientOrderId", ""),
+            "success": False,
+            "message": f"Invalid command: {err}",
+        }
     action = (cmd.get("action") or "ORDER").upper()
-    if action == "CLOSE":
-        return _close_position(cmd)
-    if action == "MODIFY":
-        return _modify_position(cmd)
-    return _execute_order(cmd)
+    try:
+        if action == "CLOSE":
+            return _close_position(cmd)
+        if action == "MODIFY":
+            return _modify_position(cmd)
+        return _execute_order(cmd)
+    except Exception as e:
+        return {
+            "clientOrderId": cmd.get("clientOrderId", ""),
+            "success": False,
+            "message": f"Execution error: {e}",
+        }
 
 
 def poll_terminal(path: str, orders: list[dict] | None = None) -> dict:

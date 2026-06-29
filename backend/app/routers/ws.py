@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.core.database import SessionLocal
-from app.core.security import decode_access_token
+from app.core.security import authenticate_api_token, decode_access_token
 from app.models import EABinding, Order, User
 from app.services.connection_manager import manager
 
@@ -18,9 +18,27 @@ router = APIRouter()
 async def ws_client(websocket: WebSocket):
     """前端 WebSocket：JWT 鉴权后接收信号/订单推送。
     Client WebSocket: authenticate by JWT, then receive signal/order pushes.
+
+    鉴权方式：连接后由客户端发送首帧 {"type":"AUTH","token":"<jwt>"}。
+    避免把 JWT 放在 URL query（会被代理/网关访问日志记录）。为兼容旧客户端，
+    仍接受 query 参数 token 作为回退。
+    Auth: client sends a first frame {"type":"AUTH","token":"<jwt>"} after connect.
+    Avoids putting the JWT in the URL query (logged by proxies/gateways). For
+    backward compatibility a query param token is still accepted as fallback.
     """
     await websocket.accept()
-    token = websocket.query_params.get("token", "")
+
+    # 优先使用首帧消息中的 token；回退到 query 参数 / prefer first-frame token, fall back to query
+    token = ""
+    try:
+        first = await websocket.receive_json()
+        if isinstance(first, dict) and first.get("type") == "AUTH":
+            token = str(first.get("token", "") or "")
+    except Exception:
+        token = ""
+    if not token:
+        token = websocket.query_params.get("token", "")
+
     user_id = decode_access_token(token)
     if not user_id:
         await websocket.send_json({"type": "AUTH_FAIL", "reason": "invalid token"})
@@ -63,7 +81,7 @@ async def ws_ea(websocket: WebSocket):
                 api_token = msg.get("apiToken", "")
                 db = SessionLocal()
                 try:
-                    user = db.query(User).filter(User.api_token == api_token).first()
+                    user = authenticate_api_token(db, api_token)
                     if not user:
                         await websocket.send_json({"type": "AUTH_FAIL", "reason": "invalid api token"})
                         await websocket.close()

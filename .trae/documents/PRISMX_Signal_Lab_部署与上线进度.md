@@ -1,295 +1,132 @@
-# PRISMX Signal Lab 部署与上线进度
+# PRISMX Signal Lab 运维手册
 
-> 最后更新: 2026-06-29
-> 维护者: PRISMX-TD
+> 最后更新: 2026-06-30 | 维护者: PRISMX-TD
+> 架构设计见《技术架构文档》第1节；功能需求见《产品需求文档》。
 
-## 一、当前状态概览(一图看懂)
+---
 
-```
-用户浏览器
-  │  访问 prismxsignallab.com(暂用 prismx-signal-lab.vercel.app)
-  ↓
-Vercel(前端静态托管)
-  │  调用 https://api.prismxsignallab.com
-  ↓
-腾讯云 VPS — FastAPI 后端
-  │  uvicorn + systemd(常驻) + Nginx + HTTPS
-  │  ├─ REST API(注册/登录/信号/下单)
-  │  ├─ WebSocket(/ws)(前端实时推送)
-  │  ├─ 信号引擎(每15秒生成信号)
-  │  └─ EA 桥接(/ws/ea + /api/ea/poll)
-  │
-  ↓ 读写
-Supabase(PostgreSQL 17.6)
-  │  users / ea_bindings / signals / orders
+## 一、线上环境速查
 
-Bridge.exe(用户电脑)
-  │  扫描本机 MT5(terminal64.exe)
-  ↓  下单 / 回执
-MT5 终端(真实交易/模拟)
-```
+| 项目 | 地址 / 实例 |
+|------|-----------|
+| 前端 | 正式域名 `https://prismxsignallab.com`(根域 → www，Vercel)；`prismx-signal-lab.vercel.app` 仍可用(备用) |
+| 后端 API | `https://api.prismxsignallab.com`(VPS: 43.134.110.47, Ubuntu 24.04, 2核4G) |
+| 数据库 | Supabase PostgreSQL 17.6, Session pooler: `postgres.efnnpyrauoxwpqjeqqvk@aws-1-ap-northeast-1.pooler.supabase.com:5432` |
+| GitHub | `PRISMX-TD/PRISMX-SIGNAL-LAB`(公开仓库) |
+| 域名 DNS | Namecheap, `api` A → 43.134.110.47(已配)；根域 `@` A → 216.198.79.1(Vercel)；`www` CNAME → cname.vercel-dns.com(已配) |
 
-## 二、各平台职责与关键信息
+## 二、VPS 后端
 
-| 平台 | 职责 | 关键实例/域名 | 状态 |
-|------|------|-------------|------|
-| **GitHub** | 代码仓库 | `PRISMX-TD/PRISMX-SIGNAL-LAB`(仓库公开) | ✅ |
-| **Vercel** | 前端托管(Vite, root: frontend) | `prismx-signal-lab.vercel.app`(临时) | ✅ |
-| **腾讯云 VPS** | 后端 FastAPI + Nginx + HTTPS | IP: 43.134.110.47 / 域名: `api.prismxsignallab.com` | ✅ |
-| **Supabase** | PostgreSQL 数据库 | Session pooler: `postgres.efnnpyrauoxwpqjeqqvk@aws-1-ap-northeast-1.pooler.supabase.com:5432` | ✅ |
-| **Namecheap** | 域名 DNS | `prismxsignallab.com` / `api` A 记录 → 43.134.110.47 | ⚠️ api 已配,根域待配 Vercel |
-| **Let's Encrypt** | HTTPS 证书(自动续期) | certbot + Nginx 插件,到期 2026-09-26 | ✅ |
+### 2.1 systemd 服务
 
-## 三、已完成的代码改动(Git 提交历史)
-
-| 提交 | 内容 | 影响文件 |
-|------|------|---------|
-| `52e66c3` | Initial commit(60 files) | 全部 |
-| `c10188c` | Postgres 支持: psycopg2 驱动,类型映射,生产 CORS | `requirements.txt`, `database.py`, `config.py` |
-| `df24e0e` | 前端支持 VITE_API_BASE(REST + WebSocket) | `client.ts`, `useClientSocket.ts`, `.env.example` |
-| `ad29928` | Fix: vite-env.d.ts(修复 import.meta.env TS 类型) | `vite-env.d.ts` |
-| `821a19b` | CORS 正则放行所有 `*.vercel.app`(含 preview) | `config.py`, `main.py` |
-| `e253380` | Bridge 默认连线上 + 隐藏后端地址输入框 | `bridge_app.py` |
-| `b621502` | Bridge: 只扫 MT5 terminal64.exe(排除 MT4)+ init 超时 | `bridge_app.py`, `mt5_worker.py` |
-
-### 关键代码改动细节(以后接手 AI 必读)
-
-1. **数据库切换(SQLite → Postgres)**
-   - [database.py](file:///c:/Users/REX/Downloads/PRISMX%20SIGNAL/backend/app/core/database.py) 第 37-69 行:`_migrate_columns` 现在按 `DATABASE_URL` 是否以 `postgres` 开头自动切换 `DATETIME` ↔ `TIMESTAMP` 类型
-   - `.env` 文件中 `DATABASE_URL` 设完整 Postgres 连接串即可(见"VPS 上的 .env"一节)
-   - ⚠️ 如密码含 `#`,必须转义为 `%23`
-
-2. **前端 API 地址配置**
-   - [client.ts](file:///c:/Users/REX/Downloads/PRISMX%20SIGNAL/backend/app/main.py#L14):REST 用 `VITE_API_BASE` 前缀,留空则走开发期 Vite 代理
-   - [useClientSocket.ts](file:///c:/Users/REX/Downloads/PRISMX%20SIGNAL/frontend/src/store/useClientSocket.ts#L19):WebSocket 同样用 `VITE_API_BASE`,自动 `http→ws`/`https→wss` 转换;留空则回退到 `location.host`
-   - [vite-env.d.ts](file:///c:/Users/REX/Downloads/PRISMX%20SIGNAL/frontend/src/vite-env.d.ts):声明了 `ImportMetaEnv.VITE_API_BASE`,否则 `tsc -b` 会报 TS2339
-
-3. **CORS 配置**
-   - [config.py](file:///c:/Users/REX/Downloads/PRISMX%20SIGNAL/backend/app/core/config.py#L18-L23):`CORS_ORIGINS` 放行 `prismxsignallab.com` + `www` + localhost
-   - 额外 `CORS_ORIGIN_REGEX = r"https://.*\.vercel\.app"` 放行所有 Vercel 部署域名(含预览)
-   - [main.py](file:///c:/Users/REX/Downloads/PRISMX%20SIGNAL/backend/app/main.py#L10-L17):应用 `allow_origin_regex` 参数
-
-4. **Bridge 改动**
-   - [bridge_app.py](file:///c:/Users/REX/Downloads/PRISMX%20SIGNAL/bridge/bridge_app.py#L30):`DEFAULT_BACKEND = "https://api.prismxsignallab.com"`(写死线上)
-   - 移除了"后端地址"输入框(第 365-367 行原有,现删除,只保留 Token 输入)
-   - `_on_connect` 强制用 `DEFAULT_BACKEND`
-   - `scan_terminals` **只匹配** `terminal64.exe`(MT5),**排除** `terminal.exe`(MT4),否则 MT5 库误连 MT4 会卡死
-   - [mt5_worker.py](file:///c:/Users/REX/Downloads/PRISMX%20SIGNAL/bridge/mt5_worker.py#L252):`initialize` 加了 `timeout=10000`(10秒),防止异常终端无限阻塞
-
-## 四、VPS 部署完整复盘
-
-### 4.1 VPS 配置
-
-- 服务商: 腾讯云轻量
-- 系统: Ubuntu 24.04 LTS(x86_64)
-- 配置: 2核 / 4GB / 90GB SSD
-- 公网 IP: **43.134.110.47**
-- SSH 用户: **ubuntu**(有 sudo 权限)
-
-### 4.2 安装的软件
-
-```
-python3(3.12.3,系统自带) + nginx(1.24) + git(2.43) + certbot + ufw + 虚拟环境
-```
-
-### 4.3 后端运行方式: systemd
-
-服务名称: `prismx.service`
-配置文件: `/etc/systemd/system/prismx.service`
-
-```ini
-[Unit]
-Description=PRISMX Signal Lab Backend
-After=network.target
-
-[Service]
-Type=simple
-User=ubuntu
-WorkingDirectory=/home/ubuntu/PRISMX-SIGNAL-LAB/backend
-EnvironmentFile=/home/ubuntu/PRISMX-SIGNAL-LAB/backend/.env
-ExecStart=/home/ubuntu/PRISMX-SIGNAL-LAB/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-```
-
-关键点:
-- `--host 127.0.0.1`: uvicorn 只监听本机,Nginx 反代后才对外暴露(安全)
-- `EnvironmentFile`: 自动加载 `.env`(JWT 密钥 + 数据库连接串)
-- `Restart=always`: 崩溃自动重启
-
-常用管理命令:
-```bash
-sudo systemctl status prismx      # 查看状态
-sudo systemctl restart prismx     # 重启(代码更新后必须执行)
-sudo journalctl -u prismx -f      # 查看实时日志
-```
-
-### 4.4 VPS 上的 .env(位置: /home/ubuntu/PRISMX-SIGNAL-LAB/backend/.env)
-
-**此文件不在 GitHub 仓库中,由 .gitignore 排除。** 需要两个变量:
-
-```
-JWT_SECRET=<强随机密钥,由 python3 -c "import secrets; print(secrets.token_urlsafe(48))" 生成>
-DATABASE_URL=postgresql://postgres.efnnpyrauoxwpqjeqqvk:<数据库密码>@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres
-```
-
-⚠️ 如密码含 `#` → 写成 `%23`(URL 转义)。如含 `@ : / ? &` 也需类似转义。
-
-### 4.5 Nginx 配置
-
-站点文件: `/etc/nginx/sites-available/prismx`(已软链至 sites-enabled,原 default 已删除)
-
-certbot 已自动添加 SSL 配置(自动重定向 HTTP → HTTPS,并处理 WebSocket 升级头)。
-
-### 4.6 防火墙
-
-两层:
-- 腾讯云控制台安全组: 放行 TCP 22 / 80 / 443(来源 0.0.0.0/0)
-- 服务器 ufw: OpenSSH + Nginx Full
-- ⚠️ 部署时血的教训: 只放了 80 没放 443 → HTTPS 超时,必须两层都放
-
-### 4.7 VPS 代码拉取流程(后续代码更新时在 VPS 执行)
+配置文件 `/etc/systemd/system/prismx.service`(用户 `ubuntu`,监听 `127.0.0.1:8000`,崩溃自动重启)。
 
 ```bash
-su - ubuntu                                        # 如当前是 root,切回 ubuntu
-cd ~/PRISMX-SIGNAL-LAB && git pull                 # 拉取最新代码
+sudo systemctl status prismx   # 查看状态
+sudo systemctl restart prismx  # 重启(代码更新后必须)
+sudo journalctl -u prismx -f   # 实时日志
+```
+
+### 2.2 环境变量(.env)
+
+位置 `/home/ubuntu/PRISMX-SIGNAL-LAB/backend/.env`(**不入 Git**):
+
+```
+ENV=production
+JWT_SECRET=<python3 -c "import secrets; print(secrets.token_urlsafe(48))" 生成>
+DATABASE_URL=postgresql://postgres.efnnpyrauoxwpqjeqqvk:<密码>@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres
+```
+
+> **重要(安全)**:生产必须设 `ENV=production`。此时若 `JWT_SECRET` 仍为默认弱密钥，后端会直接拒绝启动，防止 token 被伪造。
+> 可选限流覆盖:`RATE_LIMIT_LOGIN`(默认 `10/minute`)、`RATE_LIMIT_REGISTER`(默认 `5/minute`)。
+> 如需放行额外的精确预览域名,设 `CORS_ORIGINS`(逗号分隔);已不再用通配正则放行所有 `*.vercel.app`。
+
+密码含 `#` → 写 `%23`；`@ : / ? & %` 同理需 URL 转义。
+
+### 2.3 代码更新流程
+
+```bash
+su - ubuntu
+cd ~/PRISMX-SIGNAL-LAB && git pull
 cd backend && source .venv/bin/activate && pip install -r requirements.txt  # 如有新依赖
-sudo systemctl restart prismx                      # 重启后端
+sudo systemctl restart prismx
 sleep 3 && curl -s https://api.prismxsignallab.com/  # 验证
 ```
 
-### 4.8 已解决的 VPS 问题
+### 2.4 Nginx 与防火墙
 
-1. **Supabase 直连 IPv6 不可达(Network is unreachable)** → 改用 Session pooler(`aws-1-...pooler.supabase.com`),走 IPv4。详见 [database.py](file:///c:/Users/REX/Downloads/PRISMX%20SIGNAL/backend/app/core/database.py#L37-L69)
-2. **腾讯云安全组 443 未放行** → 导致 HTTPS 连接超时,加上后正常
-3. **频繁掉进 root 用户** → `su - ubuntu` 切回(ubuntu 是部署用户,代码在 `/home/ubuntu`,root 的家目录是 `/root` 没有代码)
+站点 `/etc/nginx/sites-available/prismx`(certbot 已自动配 SSL + HTTP→HTTPS 重定向 + WebSocket 升级头)。
 
-## 五、前端部署(Vercel)复盘
+双层防火墙:腾讯云安全组(TCP 22/80/443, `0.0.0.0/0`) + ufw(OpenSSH + Nginx Full)。
 
-### 5.1 Vercel 项目配置
+## 三、前端 Vercel
 
-- 仓库: `PRISMX-TD/PRISMX-SIGNAL-LAB`
-- Framework Preset: **Vite**(不是多服务模式,只部署 frontend)
-- Root Directory: **`frontend`**
-- Build Command: `npm run build`(触发 `tsc -b && vite build`)
-- Output Directory: `dist`
-- Install Command: `npm install`
+### 3.1 项目配置
 
-### 5.2 环境变量
+- Framework: Vite | Root: `frontend` | Build: `npm run build`(`tsc -b && vite build`) | Output: `dist`
+- 环境变量:**`VITE_API_BASE`** = `https://api.prismxsignallab.com`
 
-| 名称 | 值 | 说明 |
-|------|-----|------|
-| `VITE_API_BASE` | `https://api.prismxsignallab.com` | Vite 只暴露 `VITE_` 开头的变量,前端用它拼接 API 和 WebSocket 地址 |
+### 3.2 更新流程
 
-⚠️ 如以后 Vercel 预览部署也需要连后端,环境变量要勾选 `Preview` 环境(默认只 Production 生效)。
+推 GitHub → Vercel 自动构建部署。无需手动操作。
 
-### 5.3 已解决的前端构建问题
+## 四、Bridge 打包与分发
 
-1. **TS2339: Property 'env' does not exist on type 'ImportMeta'**
-   - 原因: 用了 `import.meta.env.VITE_API_BASE` 但缺少 Vite 的类型声明
-   - 修复: 创建 [vite-env.d.ts](file:///c:/Users/REX/Downloads/PRISMX%20SIGNAL/frontend/src/vite-env.d.ts),带 `/// <reference types="vite/client" />`
-   - tsconfig.json 的 `include: ["src"]` 会自动包含它
-
-2. **CORS 拦截(No 'Access-Control-Allow-Origin' header)**
-   - 原因: 后端只放行了正式域名,没放 `*.vercel.app`
-   - 修复: 加 `CORS_ORIGIN_REGEX`(见上文 三.3),然后 VPS 上 `git pull` + `sudo systemctl restart prismx`
-
-### 5.4 部署流程
-
-1. Vercel 自动检测 GitHub push → 触发构建
-2. 构建成功 → 自动部署到 `prismx-signal-lab.vercel.app`
-3. 每次 push 新代码,Vercel 自动重新部署(Production 环境)
-4. ⚠️ 如 Preview 部署报 CORS 错: Preview 生成不同子域(`xxx-git-xxx.vercel.app`),但 CORS 正则 `.*\.vercel\.app` 已覆盖所有,应正常
-
-## 六、Bridge 打包与分发
-
-### 6.1 打包命令
+### 4.1 打包命令
 
 ```bash
 python -m pip install pyinstaller psutil MetaTrader5 "numpy<2"
 python -m PyInstaller --clean --noconsole --onefile \
-    --name PRISMX-Bridge \
-    --collect-all MetaTrader5 --collect-all numpy \
-    bridge_app.py
+    --name PRISMX-Bridge --collect-all MetaTrader5 --collect-all numpy bridge_app.py
 ```
 
-产物: `dist/PRISMX-Bridge.exe`(约 33MB,含 numpy + MT5 库)
+产物 `dist/PRISMX-Bridge.exe`(约 33MB)。注意 `--collect-all` 和 `numpy<2` **缺一不可**,否则 MT5 import 失败。
 
-⚠️ 注意:
-- **必须 `numpy < 2`** — MetaTrader5 库不兼容 numpy 2.x,报错 `numpy._core.multiarray failed to import`
-- **必须 `--collect-all`** — 否则 PyInstaller 可能遗漏 numpy 的二进制文件
+### 4.2 用户使用
 
-### 6.2 当前 exe 位置
+打开 exe → 填 API Token(网站获取)→ 点连接。后端地址已内置。必须本机已登录 MT5(`terminal64.exe`)。
 
-`c:\Users\REX\Downloads\PRISMX SIGNAL\bridge\dist\PRISMX-Bridge.exe`(2026-06-29 11:16 生成,33MB)
+## 五、踩坑记录
 
-### 6.3 用户使用说明
+| # | 问题 | 原因 | 修复 | 影响文件 |
+|---|------|------|------|---------|
+| 1 | Vercel 构建 `TS2339: Property 'env' does not exist on type 'ImportMeta'` | 缺少 Vite 类型声明 | 创建 `vite-env.d.ts`(含 `/// <reference types="vite/client" />`) | `vite-env.d.ts` |
+| 2 | 注册时报 CORS `No 'Access-Control-Allow-Origin' header` | 后端未放行 `*.vercel.app` | 加 `CORS_ORIGIN_REGEX = r"https://.*\.vercel\.app"` + VPS 重启 | `config.py`, `main.py` |
+| 3 | Supabase `Network is unreachable`(IPv6) | 直连地址只解析 IPv6,腾讯云无 IPv6 | 改用 Session pooler(`aws-1-...pooler.supabase.com`),走 IPv4 | `.env` |
+| 4 | HTTPS 连接超时(`curl -v` 卡在 443) | 腾讯云安全组只放了 80,没放 443 | 安全组加 TCP 443,来源 `0.0.0.0/0` | — |
+| 5 | Bridge numpy 报错 `numpy._core.multiarray failed to import` | numpy 2.x 与 MetaTrader5 不兼容 | `numpy<2` + PyInstaller `--collect-all numpy` 重新打包 | `bridge_app.py`(打包参数) |
+| 6 | Bridge 点连接后打开 MT4,卡死 | `scan_terminals` 匹配了 `terminal.exe`(MT4),MT5 库误连 | 只匹配 `terminal64.exe`(MT5) + `initialize` 加 `timeout=10000` | `bridge_app.py`, `mt5_worker.py` |
+| 7 | VPS 操作掉进 root 用户,找不到代码 | root 家目录是 `/root`,代码在 `/home/ubuntu` | `su - ubuntu` 切回 | — |
 
-- 用户只需: 1) 打开 exe, 2) 填入 API Token(网站绑定页面获取), 3) 点连接
-- 后端地址已内置(`https://api.prismxsignallab.com`),无需用户手动填
-- ⚠️ 用户电脑必须已安装并登录 MT5 终端(进程名 `terminal64.exe`)
+## 六、安全加固(2026-06-30)
 
-### 6.4 已解决的 Bridge 问题
+对全项目做了一轮安全升级，重点防注入式攻击与认证爆破。已确认无 SQL 注入(全程 ORM 参数化)、无 XSS(React 自动转义)、无命令注入(无 eval/subprocess)。本轮加固项:
 
-1. **numpy 版本冲突 → MT5 import 失败** → `numpy 2.x` 降级为 `1.26.4` + `--collect-all numpy` 重新打包
-2. **MT4 被误当 MT5 → 卡死无响应** → `scan_terminals` 只匹配 `terminal64.exe`(MT5),排除 `terminal.exe`(MT4)
-3. **初始化卡死** → `mt5.initialize(path=..., timeout=10000)` 加 10 秒超时兜底
-4. **用户需手动填后端地址** → 改为 `DEFAULT_BACKEND` 写死 + 隐藏输入框
+| 级别 | 加固内容 | 影响文件 |
+|------|---------|---------|
+| P0 | 登录/注册按 IP 限流(slowapi),防在线密码爆破 | `core/rate_limit.py`, `main.py`, `routers/auth.py` |
+| P0 | JWT 生产判定改用 `ENV=production`,默认弱密钥在生产拒绝启动 | `core/config.py` |
+| P1 | 输入校验:password≥8、symbol/login/suffix 白名单、side 枚举、volume 范围 | `schemas.py`, `routers/bridge.py`, `routers/ea_poll.py` |
+| P1 | close/modify 补账号归属校验,修复 IDOR 缺口 | `routers/orders.py` |
+| P1 | 前端 WS 鉴权 token 移出 URL query,改首帧 AUTH 消息(避免被代理日志泄露) | `routers/ws.py`, `frontend/src/store/useClientSocket.ts` |
+| P1 | 收紧 CORS,去掉放行所有 `*.vercel.app` 的通配正则 | `core/config.py`, `main.py` |
+| P1 | Bridge 校验后端下发指令(字段白名单+范围),单条 try/except 隔离,畸形指令不中断整批 | `bridge/mt5_worker.py`, `bridge/bridge_app.py` |
+| P2 | API Token 用 `secrets.compare_digest` 常量时间比较;注册去用户枚举;JWT 有效期 7 天→1 天 | `core/security.py`, `routers/auth.py`, `core/config.py` |
 
-## 七、MT5 实盘链路验证
+部署注意:`requirements.txt` 新增 `slowapi`,VPS `git pull` 后需 `pip install -r requirements.txt` 再重启;`.env` 需新增 `ENV=production`(见 2.2)。
 
-**已通过完整端到端验证:**
+## 七、待办
 
-```
-网站下单 → Vercel 前端 → api.prismxsignallab.com 后端
-  → Supabase 落库(信号/订单)
-  → WebSocket 推送指令
-  → PRISMX Bridge(另一台 VPS)
-  → MT5 terminal64.exe
-  → 真实执行(错误码 #10027 "AutoTrading disabled by client" → 开启 Algo Trading 后成交)
-```
+- [x] 配正式域名 `prismxsignallab.com` → Vercel(Namecheap 删 URL Redirect，根域 A → 216.198.79.1、`www` CNAME → cname.vercel-dns.com；CORS 已含正式域名；SSL 已签发，`https://prismxsignallab.com` 已验证可访问)
+- [ ] Bridge.exe 下载分发(33MB,放网站下载入口)
+- [ ] EA 两个版本在 MT5 实测(WebSocket + HTTP 轮询)
+- [ ] 数据库备份策略
+- [ ] 后续:多用户性能测试、信号策略优化
 
-错误码 **#10027** 是 MT5 客户端的"自动交易被禁用"提示,不是系统问题。用户在 MT5 菜单 `Tools → Options → Expert Advisors → Allow Algo Trading` 开启即可。
+## 八、接手指南
 
-## 八、未完成的待办(优先级排序)
-
-### 8.1 高优先级
-
-- [ ] **配正式域名** `prismxsignallab.com` → Vercel
-  - Vercel 项目 → Settings → Domains → Add `prismxsignallab.com`
-  - Namecheap: 删除现有的 URL Redirect Record(域名停放跳转),添加 CNAME 或 A 记录指向 Vercel
-  - 同时添加 `www.prismxsignallab.com` 并设跳转到不带 www
-  - Vercel 自动签发正式 HTTPS 证书
-  - 后端 CORS 名单已有 `prismxsignallab.com`,域名配好后直接能用
-
-### 8.2 中优先级
-
-- [ ] **Bridge 下载分发** — 把 `dist/PRISMX-Bridge.exe`(33MB,最新版)放到用户可下载的位置,或网站提供下载入口
-- [ ] **测试 EA 两个版本**(`PRISMX_EA_WS.mq5` / `PRISMX_EA_Poll.mq5`)在真实 MT5 环境运行,确认 WebSocket 和 HTTP 轮询都能正常工作
-- [ ] **Bridge.exe 版本管理** — 后续 Bridge 源码改动后重新打包,文件大小应保持约 33MB(如果大幅变小说明 PyInstaller 没正确 `--collect-all`,会复现 numpy 问题)
-
-### 8.3 低优先级
-
-- [ ] `.gitignore` 已正确忽略 `dist/`、`build/`、`*.spec`、`.env`、`prismx.db` 等,定期检查别误传
-- [ ] Supabase 数据库备份策略
-- [ ] 监控告警(服务宕机通知)
-- [ ] 多用户/高并发下的性能测试
-
-### 8.4 后续功能开发(非部署)
-
-- MT5 EA 自动交易链路完整联调(目前下单链路已通,EA 未正式跑)
-- 多语言完善(i18n)
-- 信号策略优化
-
-## 九、接手指南(新 AI 接手后的第一步)
-
-1. 确认 GitHub 仓库 `PRISMX-TD/PRISMX-SIGNAL-LAB` 最新提交是 `b621502`
-2. 确认 VPS 可访问: `curl https://api.prismxsignallab.com/` 返回 JSON
-3. 确认前端可访问: 打开 `prismx-signal-lab.vercel.app` 能注册登录
-4. 想本地开发: `git clone` + 读 `.env.example` + 装依赖。如需连 Supabase,去 Supabase 后台拿连接串
-5. 改后端代码后: 推 GitHub → VPS 上 `git pull` + `sudo systemctl restart prismx`(不会自动更新!)
-6. 改前端代码后: 推 GitHub → Vercel 自动构建
-7. 改 Bridge 代码后: 必须在本机**重新打包 exe** + 分发(见 六.1 打包命令)
+1. 确认仓库最新 commit、`curl https://api.prismxsignallab.com/` 可通、前端可注册
+2. 改后端 → 推 GitHub → VPS `git pull` + `sudo systemctl restart prismx`
+3. 改前端 → 推 GitHub → Vercel 自动部署
+4. 改 Bridge → 推 GitHub + 本机重新打包 exe + 分发
+5. 完整架构/API/数据模型见《技术架构文档》

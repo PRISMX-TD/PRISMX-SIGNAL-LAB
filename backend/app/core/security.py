@@ -45,3 +45,22 @@ def decode_access_token(token: str) -> str | None:
 def generate_api_token() -> str:
     """生成 EA 专属 API Token / Generate a per-user API token for EA binding."""
     return "prismx_" + secrets.token_urlsafe(32)
+
+
+def authenticate_api_token(db, x_api_token: str | None):
+    """按 API Token 鉴权，返回 User 或 None / authenticate by API token.
+
+    先按 token 查询，再用 secrets.compare_digest 做常量时间比较，降低时序侧信道风险。
+    Query by token then re-verify with constant-time compare to reduce timing
+    side-channel risk.
+    """
+    from app.models import User
+
+    if not x_api_token:
+        return None
+    user = db.query(User).filter(User.api_token == x_api_token).first()
+    if user is None:
+        return None
+    if not secrets.compare_digest(user.api_token or "", x_api_token):
+        return None
+    return user

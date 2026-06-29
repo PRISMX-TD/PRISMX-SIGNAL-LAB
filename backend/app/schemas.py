@@ -1,13 +1,22 @@
 """Pydantic 请求/响应模型 / Pydantic request & response schemas."""
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
+
+# 共用校验规则 / shared validation rules
+# 品种：大写字母/数字/点，长度 1-20（含券商后缀）/ symbol: upper-alnum + dot
+SYMBOL_PATTERN = r"^[A-Za-z0-9._-]{1,20}$"
+# 券商后缀：可空，仅限有限字符集 / broker suffix: optional, limited charset
+SUFFIX_PATTERN = r"^[A-Za-z0-9._-]{0,10}$"
+# MT5 登录号：纯数字 / MT5 login: digits only
+LOGIN_PATTERN = r"^[0-9]{1,20}$"
 
 
 # ---------- 认证 / Auth ----------
 class AuthRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=8, max_length=128)
 
 
 class UserOut(BaseModel):
@@ -27,12 +36,12 @@ class EATokenOut(BaseModel):
 
 
 class MT5AccountRequest(BaseModel):
-    mt5Login: str
-    mt5Server: str
+    mt5Login: str = Field(pattern=LOGIN_PATTERN)
+    mt5Server: str = Field(min_length=1, max_length=64)
 
 
 class SymbolSuffixRequest(BaseModel):
-    symbolSuffix: str
+    symbolSuffix: str = Field(default="", pattern=SUFFIX_PATTERN)
 
 
 class EAStatusOut(BaseModel):
@@ -66,8 +75,8 @@ class MT5AccountOut(BaseModel):
 
 
 class AccountSuffixRequest(BaseModel):
-    login: str
-    symbolSuffix: str
+    login: str = Field(pattern=LOGIN_PATTERN)
+    symbolSuffix: str = Field(default="", pattern=SUFFIX_PATTERN)
 
 
 # ---------- 信号 / Signal ----------
@@ -86,37 +95,37 @@ class SignalOut(BaseModel):
 
 # ---------- 下单 / Order ----------
 class OrderRequest(BaseModel):
-    signalId: str | None = None
-    symbol: str
-    side: str
-    volume: float
-    clientOrderId: str
+    signalId: str | None = Field(default=None, max_length=64)
+    symbol: str = Field(pattern=SYMBOL_PATTERN)
+    side: Literal["BUY", "SELL"]
+    volume: float = Field(gt=0, le=10000)
+    clientOrderId: str = Field(min_length=1, max_length=64)
     # 目标 MT5 账号 login（多账号时指定）/ target MT5 login (multi-account)
-    mt5Login: str | None = None
+    mt5Login: str | None = Field(default=None, pattern=LOGIN_PATTERN)
     # 自定义止损止盈（绝对价，省略则用信号默认值）/ custom SL·TP (absolute; falls back to signal)
-    stopLoss: float | None = None
-    takeProfit: float | None = None
+    stopLoss: float | None = Field(default=None, ge=0)
+    takeProfit: float | None = Field(default=None, ge=0)
 
 
 class ClosePositionRequest(BaseModel):
-    clientOrderId: str
-    ticket: int
-    symbol: str
-    side: str
-    mt5Login: str | None = None
+    clientOrderId: str = Field(min_length=1, max_length=64)
+    ticket: int = Field(gt=0)
+    symbol: str = Field(pattern=SYMBOL_PATTERN)
+    side: Literal["BUY", "SELL"]
+    mt5Login: str | None = Field(default=None, pattern=LOGIN_PATTERN)
     # 平仓手数；省略或为 0 表示全平 / volume to close; omit or 0 means full close
-    volume: float | None = None
+    volume: float | None = Field(default=None, ge=0, le=10000)
 
 
 class ModifyPositionRequest(BaseModel):
-    clientOrderId: str
-    ticket: int
-    symbol: str
-    side: str
-    mt5Login: str | None = None
+    clientOrderId: str = Field(min_length=1, max_length=64)
+    ticket: int = Field(gt=0)
+    symbol: str = Field(pattern=SYMBOL_PATTERN)
+    side: Literal["BUY", "SELL"]
+    mt5Login: str | None = Field(default=None, pattern=LOGIN_PATTERN)
     # 新的止损止盈（绝对价，0 表示清除）/ new SL·TP (absolute; 0 clears)
-    stopLoss: float = 0.0
-    takeProfit: float = 0.0
+    stopLoss: float = Field(default=0.0, ge=0)
+    takeProfit: float = Field(default=0.0, ge=0)
 
 
 class OrderOut(BaseModel):
