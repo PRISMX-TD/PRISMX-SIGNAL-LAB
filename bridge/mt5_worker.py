@@ -232,11 +232,26 @@ def _execute_order(cmd: dict) -> dict:
             "message": f"order_send failed: {mt5.last_error()}",
         }
     success = result.retcode in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED)
+    # 成交价回退：部分经纪商在 IOC 成交时 result.price 为 0，
+    # 依次回退到成交单(deal)价、请求价，避免回执价显示为 0。
+    # Fill-price fallback: some brokers return result.price == 0 on IOC fills;
+    # fall back to the deal price, then the requested price, to avoid showing 0.
+    filled_price = float(result.price) if success else None
+    if success and (not filled_price or filled_price <= 0):
+        deal_price = 0.0
+        try:
+            if getattr(result, "deal", 0):
+                deals = mt5.history_deals_get(ticket=result.deal)
+                if deals:
+                    deal_price = float(deals[0].price)
+        except Exception:
+            deal_price = 0.0
+        filled_price = deal_price if deal_price > 0 else price
     return {
         "clientOrderId": client_order_id,
         "success": success,
         "mt5Ticket": int(result.order) if success else None,
-        "filledPrice": float(result.price) if success else None,
+        "filledPrice": filled_price,
         "message": "Order executed" if success else _reject_reason(result.retcode),
     }
 
@@ -297,11 +312,14 @@ def _close_position(cmd: dict) -> dict:
         return {"clientOrderId": client_order_id, "success": False,
                 "message": f"order_send failed: {mt5.last_error()}"}
     success = result.retcode in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED)
+    filled_price = float(result.price) if success else None
+    if success and (not filled_price or filled_price <= 0):
+        filled_price = price  # 回退到平仓时的请求价 / fall back to the close request price
     return {
         "clientOrderId": client_order_id,
         "success": success,
         "mt5Ticket": ticket,
-        "filledPrice": float(result.price) if success else None,
+        "filledPrice": filled_price,
         "message": "Position closed" if success else _reject_reason(result.retcode),
     }
 
