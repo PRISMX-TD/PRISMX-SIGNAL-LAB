@@ -48,6 +48,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
         ticket: p.ticket,
         symbol: p.symbol,
         side: p.side,
+        mt5Login: p.login ?? null,
         volume: full ? undefined : vol,
       })
       onActionDone?.(t('positions.closeSent'), 'info')
@@ -68,6 +69,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
         ticket: p.ticket,
         symbol: p.symbol,
         side: p.side,
+        mt5Login: p.login ?? null,
         stopLoss: parseFloat(sl) || 0,
         takeProfit: parseFloat(tp) || 0,
       })
