@@ -64,8 +64,10 @@ async def tradingview_webhook(request: Request, payload: TradingViewSignal):
     Receive a TradingView signal: verify secret -> dedup -> persist -> broadcast.
     """
     # 1) 来源校验：常量时间比较，密钥未配置则一律拒绝 / verify source, reject if unset
+    # 按 UTF-8 字节比较，避免非 ASCII 密钥触发 compare_digest 的 TypeError（应返回 401 而非 500）。
+    # Compare as UTF-8 bytes so a non-ASCII secret returns 401 instead of crashing compare_digest.
     if not settings.WEBHOOK_SECRET or not secrets.compare_digest(
-        payload.secret, settings.WEBHOOK_SECRET
+        payload.secret.encode("utf-8"), settings.WEBHOOK_SECRET.encode("utf-8")
     ):
         raise HTTPException(status_code=401, detail="Webhook 密钥无效 / invalid webhook secret")
 
