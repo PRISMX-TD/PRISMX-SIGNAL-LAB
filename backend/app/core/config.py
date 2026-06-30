@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     SIGNAL_INTERVAL_SECONDS: int = 15  # 信号生成节拍 / signal tick interval
     # 信号有效期（分钟）：webhook 信号超过此时长自动置为 EXPIRED。
     # Signal lifetime (minutes): webhook signals older than this become EXPIRED.
-    SIGNAL_EXPIRE_MINUTES: int = 30
+    SIGNAL_EXPIRE_MINUTES: int = 10
     # 是否启用内置模拟信号引擎（本地测试用，接入 TradingView 后设为 false）。
     # Enable the built-in mock signal engine (for local testing; set false once
     # TradingView webhooks feed real signals).

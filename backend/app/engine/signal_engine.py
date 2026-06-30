@@ -179,7 +179,7 @@ async def signal_loop() -> None:
                     indicator=result["indicator"],
                     status="ACTIVE",
                     created_at=now,
-                    expire_at=now + timedelta(minutes=10),
+                    expire_at=now + timedelta(minutes=settings.SIGNAL_EXPIRE_MINUTES),
                 )
                 db.add(sig)
                 db.commit()

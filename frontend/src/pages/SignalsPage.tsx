@@ -332,6 +332,92 @@ function Segmented<T extends string>({
   )
 }
 
+// 自定义下拉选择：替代原生 select，统一暗色玻璃霓虹风。
+// Custom dropdown: replaces native <select> with the dark glass-neon theme.
+function Dropdown<T extends string>({
+  value,
+  options,
+  onChange,
+  label,
+}: {
+  value: T
+  options: { value: T; label: string }[]
+  onChange: (v: T) => void
+  // 选中项前的固定前缀（如"方向："）/ fixed prefix before the selected label
+  label?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const selected = options.find((o) => o.value === value)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="input flex items-center justify-between gap-2 sm:w-auto"
+      >
+        <span className="truncate">
+          {label && <span className="text-slate-500">{label}: </span>}
+          <span className="text-slate-100">{selected?.label}</span>
+        </span>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          className={`shrink-0 text-prism-300 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+        >
+          <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute left-0 z-30 mt-2 min-w-full overflow-hidden rounded-xl border border-prism-500/30 bg-ink-800/95 p-1 shadow-prism-lg backdrop-blur-xl animate-fade-in-up">
+          {options.map((o) => {
+            const isSel = o.value === value
+            return (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => {
+                  onChange(o.value)
+                  setOpen(false)
+                }}
+                className={`flex w-full items-center justify-between gap-3 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm transition ${
+                  isSel
+                    ? 'bg-prism-600/30 text-prism-100'
+                    : 'text-slate-300 hover:bg-white/[0.06] hover:text-slate-100'
+                }`}
+              >
+                {o.label}
+                {isSel && (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-prism-300">
+                    <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function SignalsPage() {
   const { t } = useTranslation()
   const { signals, anyOnline, accounts, loaded, refreshAll } = useLive()
@@ -539,36 +625,33 @@ export default function SignalsPage() {
             placeholder={t('signals.searchPlaceholder')}
             className="input sm:max-w-[200px]"
           />
-          <select
+          <Dropdown<SideFilter>
             value={sideFilter}
-            onChange={(e) => setSideFilter(e.target.value as SideFilter)}
-            className="input sm:w-auto"
-          >
-            <option value="ALL">{t('signals.filterSide')}: {t('signals.all')}</option>
-            <option value="BUY">{t('common.buy')}</option>
-            <option value="SELL">{t('common.sell')}</option>
-          </select>
-          <select
+            onChange={setSideFilter}
+            label={t('signals.filterSide')}
+            options={[
+              { value: 'ALL', label: t('signals.all') },
+              { value: 'BUY', label: t('common.buy') },
+              { value: 'SELL', label: t('common.sell') },
+            ]}
+          />
+          <Dropdown<StatusFilter>
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-            className="input sm:w-auto"
-          >
-            <option value="ALL">{t('signals.filterStatus')}: {t('signals.all')}</option>
-            <option value="ACTIVE">{t('signals.active')}</option>
-            <option value="EXPIRING">{t('signals.expiringSoon')}</option>
-            <option value="EXPIRED">{t('signals.expired')}</option>
-          </select>
-          <select
+            onChange={setStatusFilter}
+            label={t('signals.filterStatus')}
+            options={[
+              { value: 'ALL', label: t('signals.all') },
+              { value: 'ACTIVE', label: t('signals.active') },
+              { value: 'EXPIRING', label: t('signals.expiringSoon') },
+              { value: 'EXPIRED', label: t('signals.expired') },
+            ]}
+          />
+          <Dropdown<SortKey>
             value={prefs.sort}
-            onChange={(e) => setPrefs((p) => ({ ...p, sort: e.target.value as SortKey }))}
-            className="input sm:w-auto"
-          >
-            {sortOptions.map((o) => (
-              <option key={o.value} value={o.value}>
-                {t('signals.sortBy')}: {o.label}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setPrefs((p) => ({ ...p, sort: v }))}
+            label={t('signals.sortBy')}
+            options={sortOptions}
+          />
         </div>
         <div className="flex items-center gap-2">
           <Segmented<Layout>
