@@ -36,7 +36,7 @@ interface Prefs {
   sort: SortKey
 }
 
-const PREFS_KEY_BASE = 'prismx.signals.prefs'
+const PREFS_KEY_BASE = 'prismx.signals.prefs.v2'
 
 // 按用户拆分偏好存储键，未登录用 guest，做到每个用户设置独立。
 // Namespace the prefs key per user (guest if none) so each user's settings are independent.
