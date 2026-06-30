@@ -2,7 +2,15 @@
 // 接收推送事件：弹系统通知，点击后打开或聚焦 /app。
 
 self.addEventListener("push", (event) => {
-  const data = event.data?.json() ?? { title: "PRISMX Signal", body: "新信号" }
+  let data = { title: "PRISMX Signal", body: "新信号" }
+  if (event.data) {
+    try {
+      data = event.data.json()
+    } catch {
+      // 非 JSON 载荷（如 DevTools 手动推送）回退为纯文本 / fallback for non-JSON payload
+      data = { title: "PRISMX Signal", body: event.data.text() }
+    }
+  }
   const promise = self.registration.showNotification(data.title, {
     body: data.body || "",
     icon: data.icon || "/favicon.svg",
