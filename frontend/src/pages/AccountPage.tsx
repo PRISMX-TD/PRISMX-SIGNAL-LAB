@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { userApi, notificationApi, pushApi } from "../api/client"
 import { fmtTime } from "../api/utils"
-import { subscribePush, unsubscribePush } from "../utils/push"
+import { subscribePush, unsubscribePush, getSWReg } from "../utils/push"
 
 type AccountInfo = Awaited<ReturnType<typeof userApi.me>>
 
@@ -28,6 +28,11 @@ export default function AccountPage() {
 
   useEffect(() => {
     load()
+    // 已授权则后台预热 Service Worker，点开关时即可省去最耗时的注册等待。
+    // If already granted, warm up the SW in the background so toggling is instant.
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      void getSWReg()
+    }
     // 卸载时清理未触发的防抖定时器 / clear pending debounce on unmount
     return () => {
       if (catSaveTimer.current) window.clearTimeout(catSaveTimer.current)
@@ -72,49 +77,67 @@ export default function AccountPage() {
   }
 
   async function handleNotifToggle(on: boolean) {
-    setNotifLoading(true)
     setNotifMsg(null)
-    try {
-      if (on) {
-        // 请求通知权限 / request notification permission
-        if (Notification.permission === "default") {
-          const granted = await Notification.requestPermission()
-          if (granted !== "granted") {
-            setNotifMsg({ kind: "err", text: t("account.notifPermissionDenied") })
-            setNotifLoading(false)
-            return
+
+    // 关闭：乐观更新——立即关掉开关，后台并行清理订阅与落库。
+    // Turn off: optimistic—flip the switch now, clean up subscription & prefs in background.
+    if (!on) {
+      setNotifEnabled(false)
+      setNotifCats([])
+      void Promise.all([
+        notificationApi.putPrefs(false, []),
+        (async () => {
+          const reg = await getSWReg()
+          const currentSub = await reg?.pushManager?.getSubscription()
+          if (currentSub) {
+            const json = currentSub.toJSON() as {
+              endpoint: string
+              keys: { p256dh: string; auth: string }
+            }
+            await pushApi.unsubscribe(json.endpoint!, json.keys!)
+            await unsubscribePush()
           }
-        } else if (Notification.permission === "denied") {
-          setNotifMsg({ kind: "err", text: t("account.notifBlocked") })
-          setNotifLoading(false)
+        })(),
+      ]).catch(() => {
+        // 清理失败则回滚开关 / roll back the switch on failure
+        setNotifEnabled(true)
+        setNotifMsg({ kind: "err", text: t("account.notifError") })
+      })
+      return
+    }
+
+    // 开启：权限校验后立即乐观翻转开关，落库与订阅链路并行后台执行。
+    // Turn on: after permission, flip optimistically; run prefs save + push subscription in parallel.
+    setNotifLoading(true)
+    try {
+      if (Notification.permission === "default") {
+        const granted = await Notification.requestPermission()
+        if (granted !== "granted") {
+          setNotifMsg({ kind: "err", text: t("account.notifPermissionDenied") })
           return
         }
-        // 注册 Service Worker + 推送订阅 / sw + push sub
-        const vapid = await pushApi.getVapidKey()
-        const sub = await subscribePush(vapid.publicKey)
-        if (sub) {
-          await pushApi.subscribe(sub.endpoint, sub.keys)
-        }
-      } else {
-        // 取消推送 / unsubscribe
-        const currentSub = await (
-          await navigator.serviceWorker?.ready
-        )?.pushManager?.getSubscription()
-        if (currentSub) {
-          const json = currentSub.toJSON() as {
-            endpoint: string
-            keys: { p256dh: string; auth: string }
-          }
-          await pushApi.unsubscribe(json.endpoint!, json.keys!)
-          await unsubscribePush()
-        }
+      } else if (Notification.permission === "denied") {
+        setNotifMsg({ kind: "err", text: t("account.notifBlocked") })
+        return
       }
 
-      const cats = on ? notifCats : []
-      await notificationApi.putPrefs(on, cats)
-      setNotifEnabled(on)
-      setNotifCats(cats)
+      // 乐观翻转：开关立刻变 ON，无需等待后续网络 / flip now, don't wait on network
+      setNotifEnabled(true)
+
+      // 并行：(a) 落库通知偏好；(b) 取 VAPID + 注册 SW + 订阅 + 上报订阅。
+      // Parallel: (a) save prefs; (b) fetch VAPID + warm SW + subscribe + report.
+      const vapidPromise = pushApi.getVapidKey()
+      await Promise.all([
+        notificationApi.putPrefs(true, notifCats),
+        (async () => {
+          const [vapid] = await Promise.all([vapidPromise, getSWReg()])
+          const sub = await subscribePush(vapid.publicKey)
+          if (sub) await pushApi.subscribe(sub.endpoint, sub.keys)
+        })(),
+      ])
     } catch (err: unknown) {
+      // 失败回滚开关 / roll back the switch on failure
+      setNotifEnabled(false)
       setNotifMsg({
         kind: "err",
         text: err instanceof Error ? err.message : t("account.notifError"),
