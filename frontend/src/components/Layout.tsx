@@ -80,10 +80,11 @@ export default function Layout() {
           </div>
 
           {/* 移动端导航 / mobile nav */}
-          <nav className="flex items-center gap-1 border-t border-white/10 px-4 py-1.5 sm:hidden">
+          <nav className="flex items-center gap-1 overflow-x-auto border-t border-white/10 px-4 py-1.5 sm:hidden">
             <NavItem to="/app" label={t('nav.signals')} />
             <NavItem to="/bind" label={t('nav.bind')} />
             <NavItem to="/orders" label={t('nav.orders')} />
+            <NavItem to="/account" label={t('nav.account')} />
             <NavItem to="/download" label={t('nav.download')} />
           </nav>
         </header>
