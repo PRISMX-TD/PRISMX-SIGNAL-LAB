@@ -146,6 +146,13 @@
       "rrLabel": "R:R",
       "newSignal": "{{symbol}} triggered a {{state}} signal"
     },
+    "quotes": {
+      "title": "Live quotes",
+      "bid": "Bid",
+      "ask": "Ask",
+      "waiting": "Waiting for quotes…",
+      "notConnected": "Connect MT5 to see live quotes"
+    },
     "symbolNames": {
       "XAUUSD": "Gold",
       "EURUSD": "EUR/USD",

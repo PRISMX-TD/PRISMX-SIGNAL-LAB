@@ -26,7 +26,7 @@ from urllib import error, request
 from mt5_worker import poll_terminal
 
 # ---------- 版本 / Version ----------
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.3.0"
 
 # ---------- 更新检测 / Update check ----------
 # 通过 GitHub Releases 检查是否有更新的安装包版本。
@@ -41,7 +41,7 @@ RELEASES_PAGE = f"https://github.com/{GITHUB_OWNER_REPO}/releases/latest"
 DEFAULT_BACKEND = "https://api.prismxsignallab.com"
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".prismx_bridge.json")
 LOG_PATH = os.path.join(os.path.expanduser("~"), ".prismx_bridge.log")
-POLL_INTERVAL = 2.0  # 后端轮询间隔（秒）/ backend poll interval (seconds)
+POLL_INTERVAL = 1.5  # 后端轮询间隔（秒）/ backend poll interval (seconds)
 
 
 def resource_path(name: str) -> str:
@@ -222,6 +222,9 @@ class BridgeEngine:
         self._executed: dict[str, dict] = {}
         # 尚未成功回报后端的结果，下一轮重试 / results not yet acked by backend, retried next tick
         self._pending_reports: list[dict] = []
+        # 上一轮上报的报价 {symbol: (bid, ask)}，仅上报变化项以省流量。
+        # Last reported quotes {symbol: (bid, ask)}; only changed entries are sent.
+        self._last_quotes: dict[str, tuple] = {}
 
     def start(self):
         self._stop.clear()
@@ -250,6 +253,7 @@ class BridgeEngine:
         # 1) 逐个终端读取账号与持仓 / read account & positions per terminal
         accounts: list = []
         positions: list = []
+        quotes_by_symbol: dict[str, dict] = {}
         login_to_path: dict[str, str] = {}
         worker_errors: list[str] = []
         for path in paths:
@@ -261,6 +265,9 @@ class BridgeEngine:
                 accounts.append(acc)
                 login_to_path[acc["login"]] = path
                 positions.extend(res.get("positions", []))
+                # 多终端同品种报价去重，先到先得 / dedup quotes across terminals
+                for q in res.get("quotes", []):
+                    quotes_by_symbol.setdefault(q["symbol"], q)
 
         if not accounts:
             msg = worker_errors[0] if worker_errors else "已连接终端但未读到已登录账号 / terminal attached but no logged-in account"
@@ -295,6 +302,20 @@ class BridgeEngine:
         # 3) 上报持仓 / report positions
         try:
             _post_json(f"{self.backend}/api/bridge/positions", {"data": positions}, self.token)
+        except Exception:
+            pass
+
+        # 3b) 上报报价：仅上报相对上一轮变化的品种以省流量。
+        # Report quotes: only entries changed since last tick to save bandwidth.
+        try:
+            changed: list = []
+            for sym, q in quotes_by_symbol.items():
+                key = (q["bid"], q["ask"])
+                if self._last_quotes.get(sym) != key:
+                    self._last_quotes[sym] = key
+                    changed.append(q)
+            if changed:
+                _post_json(f"{self.backend}/api/bridge/quotes", {"data": changed}, self.token)
         except Exception:
             pass
 

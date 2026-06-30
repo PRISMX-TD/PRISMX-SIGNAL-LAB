@@ -146,6 +146,13 @@
       "rrLabel": "盈亏比",
       "newSignal": "{{symbol}} 触发{{state}}信号"
     },
+    "quotes": {
+      "title": "实时报价",
+      "bid": "买价",
+      "ask": "卖价",
+      "waiting": "正在获取报价…",
+      "notConnected": "连接 MT5 后显示实时报价"
+    },
     "symbolNames": {
       "XAUUSD": "黄金",
       "EURUSD": "欧元美元",

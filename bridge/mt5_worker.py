@@ -16,6 +16,9 @@ except Exception as _e:  # pragma: no cover - 仅 Windows 有该包 / Windows-on
 # 常见基础品种，用于探测券商后缀 / common base symbols to probe broker suffix
 _SUFFIX_PROBE = ["EURUSD", "XAUUSD", "GBPUSD", "USDJPY", "BTCUSD"]
 
+# 网页报价区展示的品种（与前端关注列表对齐）/ symbols shown in the web quote panel
+QUOTE_SYMBOLS = ["XAUUSD", "EURUSD", "GBPUSD", "XAGUSD", "BTCUSD", "USDJPY"]
+
 
 def _detect_suffix() -> str:
     """探测券商品种后缀（如 .sc / .m）。
@@ -118,6 +121,29 @@ def _account_payload(suffix: str) -> dict | None:
         "company": info.company,
         "detectedSuffix": suffix,
     }
+
+
+def _quotes_payload(base_symbols: list[str], suffix: str = "") -> list:
+    """采集品种的 bid/ask 报价 / collect bid/ask quotes for symbols.
+
+    用「基础品种+券商后缀」向 MT5 查询，但上报基础品种名，便于网页匹配。
+    Query MT5 with "base symbol + broker suffix" but report the base symbol so
+    the web app can match regardless of broker naming.
+    """
+    out = []
+    for base in base_symbols or []:
+        broker_sym = base + suffix
+        if not mt5.symbol_select(broker_sym, True):
+            continue
+        tick = mt5.symbol_info_tick(broker_sym)
+        if tick is None or tick.bid <= 0 or tick.ask <= 0:
+            continue
+        out.append({
+            "symbol": base,
+            "bid": float(tick.bid),
+            "ask": float(tick.ask),
+        })
+    return out
 
 
 def _positions_payload() -> list:
@@ -447,11 +473,12 @@ def poll_terminal(path: str, orders: list[dict] | None = None) -> dict:
       {
         "account": {...} | None,   # 含 detectedSuffix / includes detectedSuffix
         "positions": [...],
+        "quotes": [...],           # bid/ask 报价 / bid/ask quotes
         "results": [...],          # 下单回执 / order results
         "error": str | None,
       }
     """
-    out = {"account": None, "positions": [], "results": [], "error": None}
+    out = {"account": None, "positions": [], "quotes": [], "results": [], "error": None}
     if mt5 is None:
         out["error"] = f"MetaTrader5 import failed: {_IMPORT_ERROR}"
         return out
@@ -467,6 +494,7 @@ def poll_terminal(path: str, orders: list[dict] | None = None) -> dict:
         suffix = _detect_suffix()
         out["account"] = _account_payload(suffix)
         out["positions"] = _positions_payload()
+        out["quotes"] = _quotes_payload(QUOTE_SYMBOLS, suffix)
         for cmd in orders or []:
             out["results"].append(_dispatch_command(cmd))
     except Exception as e:

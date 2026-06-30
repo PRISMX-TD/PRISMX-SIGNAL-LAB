@@ -68,6 +68,13 @@ export interface EAStatus {
   lastHeartbeat?: string | null
 }
 
+export interface Quote {
+  symbol: string
+  bid: number
+  ask: number
+  time?: string
+}
+
 export interface Position {
   ticket?: number
   symbol: string
@@ -82,7 +89,7 @@ export interface Position {
 }
 
 export interface WSMessage {
-  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'EA_STATUS' | 'POSITIONS' | 'ACCOUNTS_STATUS'
+  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'EA_STATUS' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'QUOTES'
   data?: unknown
   reason?: string
   userId?: string

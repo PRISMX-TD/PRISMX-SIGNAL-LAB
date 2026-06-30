@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useLive } from '../store/live'
 import { orderApi } from '../api/client'
 import { clientOrderId, fmtTime, calcRiskReward, calcCountdown } from '../api/utils'
-import type { Signal } from '../api/types'
+import type { Signal, Quote } from '../api/types'
 import OrderModal from '../components/OrderModal'
 
 // 信号总有效时长，与后端 expire_at = created_at + 10min 一致 / lifespan matches backend
@@ -121,17 +121,71 @@ function useFocusEntries(signals: Signal[], now: number): FocusEntry[] {
   }, [signals, now])
 }
 
+// 实时报价面板：展示桥接上报的 bid/ask。未连接 MT5 时显示占位。
+// Live quotes panel: shows bid/ask reported by the bridge; placeholder when MT5 offline.
+function QuotePanel({ quotes, mt5Online }: { quotes: Record<string, Quote>; mt5Online: boolean }) {
+  const { t } = useTranslation()
+  const nameOf = (sym: string) => t(`signals.symbolNames.${sym}`, { defaultValue: '' })
+  const rows = Object.values(quotes).sort((a, b) => a.symbol.localeCompare(b.symbol))
+
+  return (
+    <div className="glass mt-4 p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-slate-300">
+          {t('signals.quotes.title')}
+        </h3>
+        <span
+          className={`h-1.5 w-1.5 rounded-full ${mt5Online ? 'bg-up animate-breathe' : 'bg-slate-600'}`}
+        />
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-white/12 py-6 text-xs text-slate-500">
+          <span className="h-1.5 w-1.5 rounded-full bg-slate-500" />
+          {mt5Online ? t('signals.quotes.waiting') : t('signals.quotes.notConnected')}
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {/* 列头 / column header */}
+          <div className="grid grid-cols-3 px-2 text-[10px] uppercase tracking-wider text-slate-500">
+            <span>{/* symbol */}</span>
+            <span className="text-right">{t('signals.quotes.bid')}</span>
+            <span className="text-right">{t('signals.quotes.ask')}</span>
+          </div>
+          {rows.map((q) => (
+            <div
+              key={q.symbol}
+              className="grid grid-cols-3 items-center rounded-xl border border-white/8 bg-white/[0.03] px-2 py-2"
+            >
+              <div className="min-w-0">
+                <div className="truncate font-display text-sm font-semibold text-slate-100">{q.symbol}</div>
+                {nameOf(q.symbol) && <div className="truncate text-[10px] text-slate-500">{nameOf(q.symbol)}</div>}
+              </div>
+              <div className="text-right font-mono text-sm font-semibold text-up">{q.bid}</div>
+              <div className="text-right font-mono text-sm font-semibold text-down">{q.ask}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // focus 视图：单品种聚焦英雄卡 + 全市场情绪 + 其他活跃信号。
 function FocusView({
   entries,
   now,
   newIds,
   onTrade,
+  quotes,
+  anyOnline,
 }: {
   entries: FocusEntry[]
   now: number
   newIds: Set<string>
   onTrade: (s: Signal) => void
+  quotes: Record<string, Quote>
+  anyOnline: boolean
 }) {
   const { t } = useTranslation()
   const [focusIdx, setFocusIdx] = useState(0)
@@ -202,9 +256,12 @@ function FocusView({
     })
 
   return (
-    <div className="mx-auto max-w-2xl">
-      {/* 品种滑动导航 + 状态圆点 / symbol nav + colored state dots */}
-      <div className="mb-3 flex items-center justify-between">
+    <div className="mx-auto max-w-2xl lg:max-w-6xl">
+      <div className="lg:grid lg:grid-cols-2 lg:items-start lg:gap-6">
+        {/* 左栏：聚焦英雄卡 + 实时报价 / left column: hero card + live quotes */}
+        <div>
+          {/* 品种滑动导航 + 状态圆点 / symbol nav + colored state dots */}
+          <div className="mb-3 flex items-center justify-between">
         <button
           type="button"
           onClick={() => setFocusIdx((idx - 1 + entries.length) % entries.length)}
@@ -305,10 +362,15 @@ function FocusView({
         )}
       </div>
 
+          {/* 实时报价区 / live quotes panel */}
+          <QuotePanel quotes={quotes} mt5Online={anyOnline} />
+        </div>
+        {/* 右栏：其他活跃信号 / right column: other active signals */}
+        <div className="mt-5 lg:mt-0">
       {/* 其他活跃信号 / other active signals */}
       {others.length > 0 && (
         <>
-          <div className="mb-2 mt-5 flex items-center gap-2">
+          <div className="mb-2 flex items-center gap-2">
             <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-slate-300">
               {t('signals.focus.otherActive')}
             </h3>
@@ -456,13 +518,15 @@ function FocusView({
           </div>
         </>
       )}
+        </div>
+      </div>
     </div>
   )
 }
 
 export default function SignalsPage() {
   const { t } = useTranslation()
-  const { signals, anyOnline, accounts, loaded, refreshAll } = useLive()
+  const { signals, anyOnline, accounts, loaded, refreshAll, quotes } = useLive()
   const now = useNow(1000)
   const newIds = useNewSignalIds(signals)
   const focusEntries = useFocusEntries(signals, now)
@@ -562,7 +626,7 @@ export default function SignalsPage() {
           <p className="text-sm text-slate-400">{t('common.loading')}</p>
         </div>
       ) : (
-        <FocusView entries={focusEntries} now={now} newIds={newIds} onTrade={setActive} />
+        <FocusView entries={focusEntries} now={now} newIds={newIds} onTrade={setActive} quotes={quotes} anyOnline={anyOnline} />
       )}
 
       {active && (

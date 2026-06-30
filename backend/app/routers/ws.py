@@ -52,6 +52,10 @@ async def ws_client(websocket: WebSocket):
     cached = manager.get_positions(user_id)
     if cached:
         await websocket.send_json({"type": "POSITIONS", "data": cached})
+    # 连接即补推最近一次报价快照 / re-push the latest quotes snapshot on connect
+    cached_quotes = manager.get_quotes(user_id)
+    if cached_quotes:
+        await websocket.send_json({"type": "QUOTES", "data": cached_quotes})
     try:
         while True:
             # 前端通道以服务端推送为主，这里仅保活 / mainly server-push; keep alive

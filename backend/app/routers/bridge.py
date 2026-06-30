@@ -244,6 +244,34 @@ async def bridge_positions(
     return {"ok": True}
 
 
+class BridgeQuote(BaseModel):
+    symbol: str = Field(max_length=32)
+    bid: float
+    ask: float
+    ts: str | None = Field(default=None, max_length=40)
+
+
+class BridgeQuotesRequest(BaseModel):
+    data: list[BridgeQuote] = []
+
+
+@router.post("/quotes")
+async def bridge_quotes(
+    req: BridgeQuotesRequest,
+    user: User = Depends(get_bridge_user),
+):
+    """桥接程序上报实时报价（bid/ask）。仅把发生变化的条目推给前端，
+    控制 WebSocket 流量。
+    Bridge reports live bid/ask quotes. Only changed entries are pushed to
+    clients to keep WebSocket traffic minimal.
+    """
+    incoming = [q.model_dump() for q in req.data]
+    changed = manager.update_quotes(user.id, incoming)
+    if changed:
+        await manager.push_to_client(user.id, {"type": "QUOTES", "data": changed})
+    return {"ok": True}
+
+
 # ---------- 用户面向：账号列表与后缀设置 / user-facing: account list & suffix ----------
 def _is_online(row: MT5Account) -> bool:
     if not row.last_heartbeat:

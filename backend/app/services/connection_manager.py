@@ -15,6 +15,8 @@ class ConnectionManager:
         self._clients: dict[str, set[WebSocket]] = {}
         # user_id -> 最近一次持仓快照 / latest positions snapshot per user
         self._positions: dict[str, list] = {}
+        # user_id -> 最近一次报价快照 {symbol: {bid, ask, ...}} / latest quotes snapshot per user
+        self._quotes: dict[str, dict] = {}
         self._lock = asyncio.Lock()
 
     # ---------- 持仓缓存 / Positions cache ----------
@@ -24,6 +26,28 @@ class ConnectionManager:
 
     def get_positions(self, user_id: str) -> list:
         return self._positions.get(user_id, [])
+
+    # ---------- 报价缓存 / Quotes cache ----------
+    def update_quotes(self, user_id: str, quotes: list) -> list:
+        """合并某用户的报价快照，仅返回相对上次发生变化的条目。
+        Merge a user's quote snapshot; return only entries changed since last time.
+
+        quotes: [{"symbol": str, "bid": float, "ask": float, "ts": str?}, ...]
+        """
+        prev = self._quotes.setdefault(user_id, {})
+        changed: list = []
+        for q in quotes or []:
+            sym = q.get("symbol")
+            if not sym:
+                continue
+            old = prev.get(sym)
+            if old is None or old.get("bid") != q.get("bid") or old.get("ask") != q.get("ask"):
+                prev[sym] = q
+                changed.append(q)
+        return changed
+
+    def get_quotes(self, user_id: str) -> list:
+        return list(self._quotes.get(user_id, {}).values())
 
     # ---------- EA 连接 / EA connections ----------
     async def register_ea(self, user_id: str, ws: WebSocket) -> None:

@@ -1,7 +1,7 @@
 // 实时数据共享状态：EA 状态、信号、订单、持仓。
 // Shared live state: EA status, signals, orders, positions.
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
-import type { EAStatus, MT5Account, Order, Position, Signal, WSMessage } from '../api/types'
+import type { EAStatus, MT5Account, Order, Position, Quote, Signal, WSMessage } from '../api/types'
 import { accountApi, eaApi, orderApi, signalApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
 
@@ -9,6 +9,8 @@ interface LiveContextValue {
   signals: Signal[]
   orders: Order[]
   positions: Position[]
+  // 实时报价 {symbol: Quote}（由桥接经 WS 推送）/ live quotes pushed via WS
+  quotes: Record<string, Quote>
   eaStatus: EAStatus
   accounts: MT5Account[]
   // 首屏数据是否加载完成 / whether the first data load has completed
@@ -45,6 +47,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [signals, setSignals] = useState<Signal[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [positions, setPositions] = useState<Position[]>([])
+  const [quotes, setQuotes] = useState<Record<string, Quote>>({})
   const [eaStatus, setEaStatus] = useState<EAStatus>({ online: false, mt5Login: null })
   const [accounts, setAccounts] = useState<MT5Account[]>([])
   const [loaded, setLoaded] = useState(false)
@@ -110,6 +113,17 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       case 'POSITIONS':
         setPositions((msg.data as Position[]) || [])
         break
+      case 'QUOTES': {
+        // 合并变化的报价到现有快照 / merge changed quotes into the snapshot
+        const list = (msg.data as Quote[]) || []
+        if (list.length === 0) break
+        setQuotes((prev) => {
+          const next = { ...prev }
+          for (const q of list) next[q.symbol] = q
+          return next
+        })
+        break
+      }
       case 'ACCOUNTS_STATUS': {
         // 桥接程序上报账号在线变化，拉取最新账号列表 / refresh accounts on status change
         const data = msg.data as { onlineLogins?: string[] }
@@ -131,7 +145,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   return (
     <LiveContext.Provider
-      value={{ signals, orders, positions, eaStatus, accounts, loaded, anyOnline, onlineAccounts, refreshAll }}
+      value={{ signals, orders, positions, quotes, eaStatus, accounts, loaded, anyOnline, onlineAccounts, refreshAll }}
     >
       {children}
     </LiveContext.Provider>
