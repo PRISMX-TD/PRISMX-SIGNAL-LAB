@@ -79,7 +79,6 @@ def verify_google_id_token(credential: str) -> dict | None:
             return None
         return info
     except Exception as exc:
-        # 临时日志：定位 Google 校验失败根因 / temporary log to diagnose verification failure
         logger.warning("Google ID token verification failed: %r", exc)
         return None
 
