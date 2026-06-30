@@ -8,7 +8,8 @@
     "bind": "Connect MT5",
     "orders": "Orders",
     "download": "Download Bridge",
-    "logout": "Log out"
+    "logout": "Log out",
+    "account": "Account"
   },
   "common": {
     "loading": "Loading…",
@@ -167,6 +168,30 @@
     "eaOffline": "No MT5 connection online, cannot place order",
     "noBridge": "No MT5 connected yet. Open the PRISMX Bridge app, paste your token and start it, then place the order.",
     "allOffline": "All connected MT5 accounts are currently offline. Make sure the PRISMX Bridge app is running and MT5 is logged in, then retry."
+  },
+  "account": {
+    "title": "Account",
+    "loadError": "Failed to load account info",
+    "platform": "Platform Account",
+    "email": "Email",
+    "registeredAt": "Registered",
+    "mt5Accounts": "MT5 Accounts",
+    "balance": "Balance",
+    "equity": "Equity",
+    "leverage": "Leverage",
+    "changePassword": "Change password",
+    "setPassword": "Set password",
+    "oldPassword": "Old password",
+    "newPassword": "New password (min 6 chars)",
+    "pwTooShort": "New password must be at least 6 characters",
+    "pwChanged": "Password updated",
+    "pwError": "Failed to update password",
+    "notifications": "Notifications",
+    "notifEnable": "Enable push notifications for signals",
+    "notifNoCategories": "No indicator categories yet, run the signal engine first",
+    "notifPermissionDenied": "Notification permission denied; enable in browser settings",
+    "notifBlocked": "Notifications blocked by browser; enable in browser settings",
+    "notifError": "Failed to update notification settings"
   },
   "orders": {
     "title": "Orders & Receipts",

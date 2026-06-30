@@ -18,6 +18,7 @@ from app.core.database import SessionLocal
 from app.models import Signal
 from app.schemas import SignalOut
 from app.services.connection_manager import manager
+from app.services.push_dispatch import dispatch_push
 
 SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "BTCUSD"]
 
@@ -190,5 +191,10 @@ async def signal_loop() -> None:
 
             # 推送新信号给所有前端 / broadcast new signal to all clients
             await manager.broadcast_to_clients({"type": "SIGNAL_NEW", "data": payload})
+            # Web Push 通知（后台异步，不阻塞引擎）/ web push (non-blocking inline, engine keeps ticking)
+            try:
+                dispatch_push(sig)
+            except Exception:
+                pass
         except Exception as exc:  # 引擎不可因单次异常退出 / engine must not die on a single error
             print(f"[signal_engine] error: {exc}")

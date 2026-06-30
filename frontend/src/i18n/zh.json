@@ -8,7 +8,8 @@
     "bind": "连接 MT5",
     "orders": "订单回执",
     "download": "下载桥接",
-    "logout": "退出登录"
+    "logout": "退出登录",
+    "account": "账户"
   },
   "common": {
     "loading": "加载中…",
@@ -167,6 +168,30 @@
     "eaOffline": "没有在线的 MT5 连接，无法下单",
     "noBridge": "尚未连接 MT5。请打开 PRISMX 桥接程序，填入 Token 并启动后再下单。",
     "allOffline": "已连接的 MT5 账户当前都已离线。请确认 PRISMX 桥接程序在运行、MT5 已登录后重试。"
+  },
+  "account": {
+    "title": "账户详情",
+    "loadError": "加载账户信息失败",
+    "platform": "平台账户",
+    "email": "邮箱",
+    "registeredAt": "注册时间",
+    "mt5Accounts": "MT5 账户",
+    "balance": "余额",
+    "equity": "净值",
+    "leverage": "杠杆",
+    "changePassword": "修改密码",
+    "setPassword": "设置密码",
+    "oldPassword": "旧密码",
+    "newPassword": "新密码（至少 6 位）",
+    "pwTooShort": "新密码至少 6 位",
+    "pwChanged": "密码已更新",
+    "pwError": "密码更新失败",
+    "notifications": "通知设置",
+    "notifEnable": "开启信号推送通知",
+    "notifNoCategories": "暂无指标类别，信号引擎运行后将自动出现",
+    "notifPermissionDenied": "通知权限被拒绝，请在浏览器设置中开启",
+    "notifBlocked": "通知已被浏览器阻止，请在浏览器设置中开启",
+    "notifError": "通知设置失败"
   },
   "orders": {
     "title": "订单与回执",

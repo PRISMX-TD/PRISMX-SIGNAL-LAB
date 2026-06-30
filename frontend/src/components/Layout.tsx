@@ -63,6 +63,7 @@ export default function Layout() {
               <NavItem to="/app" label={t('nav.signals')} />
               <NavItem to="/bind" label={t('nav.bind')} />
               <NavItem to="/orders" label={t('nav.orders')} />
+              <NavItem to="/account" label={t('nav.account')} />
               <NavItem to="/download" label={t('nav.download')} />
             </nav>
 

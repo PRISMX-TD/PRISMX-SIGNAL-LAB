@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 
 from app.core.database import Base
 
@@ -130,3 +130,30 @@ class Order(Base):
     message = Column(String, nullable=True)
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
+class NotificationPref(Base):
+    """通知偏好（白名单模式），每个用户一条 / Notification prefs (whitelist), one per user."""
+    __tablename__ = "notification_prefs"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    # 是否启用通知 / whether notifications are enabled at all
+    enabled = Column(Boolean, default=False)
+    # 用户选择开启的指标类别（JSON array of strings）；空(非 null)表示全关闭 / selected indicator categories
+    selected_categories = Column(Text, default="[]")
+
+
+class PushSubscription(Base):
+    """Web Push 订阅：每个用户的每个设备一条 / One push subscription per device per user."""
+    __tablename__ = "push_subscriptions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "endpoint", name="uq_user_endpoint"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    endpoint = Column(String, nullable=False)
+    keys_p256dh = Column(String, nullable=False)
+    keys_auth = Column(String, nullable=False)
+    created_at = Column(DateTime, default=_now)

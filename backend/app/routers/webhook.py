@@ -22,6 +22,7 @@ from app.core.rate_limit import limiter
 from app.models import Signal
 from app.schemas import SYMBOL_PATTERN, SignalOut
 from app.services.connection_manager import manager
+from app.services.push_dispatch import dispatch_push
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
@@ -108,4 +109,9 @@ async def tradingview_webhook(request: Request, payload: TradingViewSignal):
 
     # 3) 复用现有广播：推给所有在线前端，格式与 mock 引擎一致 / broadcast like the mock engine
     await manager.broadcast_to_clients({"type": "SIGNAL_NEW", "data": data})
+    # Web Push 通知 / web push
+    try:
+        dispatch_push(sig)
+    except Exception:
+        pass
     return {"ok": True, "deduped": False, "id": data["id"]}

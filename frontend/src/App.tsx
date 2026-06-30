@@ -7,6 +7,7 @@ import SignalsPage from './pages/SignalsPage'
 import BindPage from './pages/BindPage'
 import OrdersPage from './pages/OrdersPage'
 import DownloadPage from './pages/DownloadPage'
+import AccountPage from './pages/AccountPage'
 import type { ReactNode } from 'react'
 
 function Protected({ children }: { children: ReactNode }) {
@@ -38,6 +39,7 @@ export default function App() {
             <Route path="/app" element={<SignalsPage />} />
             <Route path="/bind" element={<BindPage />} />
             <Route path="/orders" element={<OrdersPage />} />
+            <Route path="/account" element={<AccountPage />} />
             <Route path="/download" element={<DownloadPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

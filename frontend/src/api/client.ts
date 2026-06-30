@@ -151,3 +151,57 @@ export const eaApi = {
     }),
   status: () => request<EAStatus>('/ea/status'),
 }
+
+// 账户信息 / User account (profile, password)
+export const userApi = {
+  me: () =>
+    request<{
+      id: string
+      email: string
+      hasPassword: boolean
+      createdAt: string | null
+      mt5Accounts: Array<{
+        login: string
+        server: string | null
+        accountName: string | null
+        accountCurrency: string | null
+        balance: number | null
+        equity: number | null
+        leverage: number | null
+        company: string | null
+        online: boolean
+      }>
+    }>('/auth/me'),
+  changePassword: (oldPassword: string | null, newPassword: string) =>
+    request<{ ok: boolean }>('/auth/password', {
+      method: 'POST',
+      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+    }),
+}
+
+// 通知 / Notifications
+export const notificationApi = {
+  getPrefs: () =>
+    request<{ enabled: boolean; selected_categories: string[] }>('/notifications/prefs'),
+  putPrefs: (enabled: boolean, selectedCategories: string[]) =>
+    request<{ enabled: boolean; selected_categories: string[] }>('/notifications/prefs', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled, selected_categories: selectedCategories }),
+    }),
+  getIndicators: () => request<string[]>('/notifications/indicators'),
+}
+
+// 推送订阅 / Push subscriptions
+export const pushApi = {
+  getVapidKey: () => request<{ publicKey: string }>('/notifications/push/vapid-public-key'),
+  subscribe: (endpoint: string, keys: { p256dh: string; auth: string }) =>
+    request<{ ok: boolean }>('/notifications/push/subscribe', {
+      method: 'POST',
+      body: JSON.stringify({ endpoint, keys }),
+    }),
+  unsubscribe: (endpoint: string, keys: { p256dh: string; auth: string }) =>
+    request<{ ok: boolean }>('/notifications/push/unsubscribe', {
+      method: 'POST',
+      body: JSON.stringify({ endpoint, keys }),
+    }),
+}

@@ -73,6 +73,22 @@ class Settings(BaseSettings):
     # EA 心跳 / EA heartbeat
     EA_OFFLINE_TIMEOUT_SECONDS: int = 30
 
+    # Web Push / VAPID：私钥以 base64 编码的 PEM 存储（避免 .env 多行问题），
+    # 通过 vapid_private_key_pem 解码为原始 PEM。公钥与 subject 用于推送订阅。
+    # VAPID config: private key stored as base64-encoded PEM (avoids multiline .env
+    # issues); decode via vapid_private_key_pem. Public key and subject for push.
+    VAPID_PRIVATE_KEY_B64: str = ""
+    VAPID_PUBLIC_KEY: str = ""
+    VAPID_SUBJECT: str = "mailto:admin@prismxsignallab.com"
+
+    @property
+    def vapid_private_key_pem(self) -> str:
+        """将 base64 编码的私钥解码为 PEM 文本。/ Decode base64 private key to PEM text."""
+        import base64
+        if not self.VAPID_PRIVATE_KEY_B64:
+            return ""
+        return base64.b64decode(self.VAPID_PRIVATE_KEY_B64).decode("utf-8")
+
     # 订单回执超时（秒）：已下发但超时未回执的订单，允许重新下发。
     # Order ack timeout (seconds): delivered-but-unacked orders may be re-delivered.
     ORDER_ACK_TIMEOUT_SECONDS: int = 60
