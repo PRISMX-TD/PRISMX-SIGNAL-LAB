@@ -17,6 +17,7 @@ import os
 import sys
 import threading
 import tkinter as tk
+import webbrowser
 from ctypes import wintypes
 from logging.handlers import RotatingFileHandler
 from tkinter import messagebox, ttk
@@ -25,7 +26,14 @@ from urllib import error, request
 from mt5_worker import poll_terminal
 
 # ---------- 版本 / Version ----------
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
+
+# ---------- 更新检测 / Update check ----------
+# 通过 GitHub Releases 检查是否有更新的安装包版本。
+# Check GitHub Releases for a newer installer version.
+GITHUB_OWNER_REPO = "PRISMX-TD/PRISMX-SIGNAL-LAB"
+LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_OWNER_REPO}/releases/latest"
+RELEASES_PAGE = f"https://github.com/{GITHUB_OWNER_REPO}/releases/latest"
 
 # ---------- 配置 / Configuration ----------
 # 线上后端地址（所有用户默认连接，无需手动填写）。
@@ -344,6 +352,39 @@ class BridgeEngine:
         self._pending_reports = still_pending
 
 
+def _parse_version(v: str) -> tuple[int, ...]:
+    """把版本字符串解析为可比较的整数元组（忽略前缀 v 与非数字段）。
+    Parse a version string into a comparable int tuple (drop 'v' prefix / non-numeric)."""
+    nums: list[int] = []
+    for part in v.strip().lstrip("vV").split("."):
+        digits = "".join(ch for ch in part if ch.isdigit())
+        if digits == "":
+            break
+        nums.append(int(digits))
+    return tuple(nums)
+
+
+def check_latest_version(timeout: float = 6.0) -> str | None:
+    """查询 GitHub 最新 Release 的版本号（tag），失败返回 None。
+    Query the latest GitHub Release tag; return None on any failure."""
+    try:
+        req = request.Request(LATEST_RELEASE_API, method="GET")
+        req.add_header("Accept", "application/vnd.github+json")
+        req.add_header("User-Agent", f"PRISMX-Bridge/{APP_VERSION}")
+        with request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        tag = (data.get("tag_name") or data.get("name") or "").strip()
+        return tag or None
+    except Exception:
+        return None
+
+
+def is_newer_version(latest: str, current: str) -> bool:
+    """判断 latest 是否比 current 更新 / whether latest is newer than current."""
+    lv, cv = _parse_version(latest), _parse_version(current)
+    return bool(lv) and lv > cv
+
+
 # ---------- GUI ----------
 class BridgeGUI:
     """tkinter 界面：先要 Token，连接后显示多账号状态。
@@ -364,6 +405,8 @@ class BridgeGUI:
         self._buttons: dict[str, dict] = {}
         self._init_style()
         self._build_widgets()
+        # 启动后在后台检查更新（不阻塞 UI）/ check for updates in background after launch
+        self._start_update_check()
 
     def _set_app_icon(self, root: tk.Tk):
         """设置窗口/任务栏图标 / set the window & taskbar icon."""
@@ -512,6 +555,7 @@ class BridgeGUI:
     def _build_widgets(self):
         # 标题区：logo + 名称 / header: logo + title
         title_row = tk.Frame(self.root, bg=self.BG)
+        self._title_row = title_row
         title_row.pack(fill="x", padx=30, pady=(22, 10))
         self._draw_logo(title_row, px=50).pack(side="left")
         name_box = tk.Frame(title_row, bg=self.BG)
@@ -524,6 +568,24 @@ class BridgeGUI:
             name_box, text=f"棱镜桥接 · MT5 Connector · v{APP_VERSION}",
             font=("Segoe UI", 9), fg=self.ACCENT_HI, bg=self.BG,
         ).pack(anchor="w", pady=(2, 0))
+
+        # 更新提示条（默认隐藏，检测到新版本时显示）/ update banner (hidden until a newer version is found)
+        self.update_bar = tk.Frame(self.root, bg="#2a1d4d", cursor="hand2")
+        self.update_var = tk.StringVar(value="")
+        self._update_url = RELEASES_PAGE
+        bar_lbl = tk.Label(
+            self.update_bar, textvariable=self.update_var, fg=self.ACCENT_HI, bg="#2a1d4d",
+            font=("Segoe UI", 9, "bold"), anchor="w", padx=14, pady=8, cursor="hand2",
+        )
+        bar_lbl.pack(side="left", fill="x", expand=True)
+        close_lbl = tk.Label(
+            self.update_bar, text="✕", fg=self.MUTED, bg="#2a1d4d",
+            font=("Segoe UI", 9, "bold"), padx=12, cursor="hand2",
+        )
+        close_lbl.pack(side="right")
+        for w in (self.update_bar, bar_lbl):
+            w.bind("<Button-1>", lambda _e: self._open_update_page())
+        close_lbl.bind("<Button-1>", lambda _e: self.update_bar.pack_forget())
 
         # 连接卡片：Token 输入 + 操作按钮 / connection card
         conn = self._card(self.root, height=212, pad=22)
@@ -609,6 +671,32 @@ class BridgeGUI:
             self.root, text=f"运行日志 / Log: {LOG_PATH}",
             font=("Segoe UI", 8), fg=self.FAINT, bg=self.BG,
         ).pack(anchor="w", padx=32, pady=(8, 12))
+
+    def _start_update_check(self):
+        """后台线程检查 GitHub 是否有更新版本 / check GitHub for a newer version on a thread."""
+        def worker():
+            latest = check_latest_version()
+            if latest and is_newer_version(latest, APP_VERSION):
+                # 切回 UI 线程更新提示条 / marshal back to the UI thread
+                self.root.after(0, lambda: self._show_update(latest))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _show_update(self, latest: str):
+        """显示更新提示条 / reveal the update banner."""
+        self.update_var.set(
+            f"发现新版本 {latest}（当前 v{APP_VERSION}），点击下载更新  /  "
+            f"Update {latest} available — click to download"
+        )
+        # 插在标题行之后、连接卡片之前 / place it right below the header
+        self.update_bar.pack(fill="x", padx=22, pady=(0, 6), after=self._title_row)
+        logger.info("发现新版本 / update available: %s (current %s)", latest, APP_VERSION)
+
+    def _open_update_page(self):
+        """打开 GitHub 下载页 / open the GitHub releases page."""
+        try:
+            webbrowser.open(self._update_url)
+        except Exception:
+            pass
 
     def _draw_dot(self, color):
         """绘制状态指示灯 / draw the status dot."""
