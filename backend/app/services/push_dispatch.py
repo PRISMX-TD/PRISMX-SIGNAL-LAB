@@ -61,6 +61,14 @@ def dispatch_push(signal: Signal) -> None:
 
         failed_ids: list[str] = []
         sent = 0
+        # 推送头：高紧急度要求系统尽快下发（即使手机处于 Doze 省电休眠也尝试唤醒），
+        # TTL 设为信号存活时长，使离线/休眠设备在该窗口内仍能收到，过期后推送服务自动丢弃。
+        # Push headers: high urgency asks the system to deliver ASAP (even under Doze),
+        # TTL = signal lifespan so offline/sleeping devices still get it within the window.
+        push_headers = {
+            "Urgency": "high",
+            "TTL": str(settings.SIGNAL_EXPIRE_MINUTES * 60),
+        }
         for sub in subs:
             try:
                 webpush(
@@ -71,6 +79,7 @@ def dispatch_push(signal: Signal) -> None:
                     data=payload,
                     vapid_private_key=pem,
                     vapid_claims=vapid_claims,
+                    headers=push_headers,
                 )
                 sent += 1
             except WebPushException as e:
