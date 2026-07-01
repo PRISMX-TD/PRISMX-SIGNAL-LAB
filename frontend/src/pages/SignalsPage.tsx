@@ -476,17 +476,17 @@ function FocusView({
                     </div>
 
                     <div className="mt-3 grid grid-cols-3 gap-2">
-                      <div className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2 text-center">
+                      <div className="min-w-0 rounded-xl border border-white/8 bg-white/[0.03] px-1.5 py-2 text-center">
                         <div className="text-[10px] uppercase tracking-wider text-slate-500">{t('signals.colEntry')}</div>
-                        <div className="mt-0.5 font-mono text-sm font-semibold text-slate-100">{sig.entry ?? '-'}</div>
+                        <div className="mt-0.5 font-mono text-xs font-semibold tabular-nums tracking-tight text-slate-100">{sig.entry ?? '-'}</div>
                       </div>
-                      <div className="rounded-xl border border-down/15 bg-down/5 px-3 py-2 text-center">
+                      <div className="min-w-0 rounded-xl border border-down/15 bg-down/5 px-1.5 py-2 text-center">
                         <div className="text-[10px] uppercase tracking-wider text-slate-500">{t('signals.colSl')}</div>
-                        <div className="mt-0.5 font-mono text-sm font-semibold text-down">{sig.stopLoss ?? '-'}</div>
+                        <div className="mt-0.5 font-mono text-xs font-semibold tabular-nums tracking-tight text-down">{sig.stopLoss ?? '-'}</div>
                       </div>
-                      <div className="rounded-xl border border-up/15 bg-up/5 px-3 py-2 text-center">
+                      <div className="min-w-0 rounded-xl border border-up/15 bg-up/5 px-1.5 py-2 text-center">
                         <div className="text-[10px] uppercase tracking-wider text-slate-500">{t('signals.colTp')}</div>
-                        <div className="mt-0.5 font-mono text-sm font-semibold text-up">{sig.takeProfit ?? '-'}</div>
+                        <div className="mt-0.5 font-mono text-xs font-semibold tabular-nums tracking-tight text-up">{sig.takeProfit ?? '-'}</div>
                       </div>
                     </div>
 
