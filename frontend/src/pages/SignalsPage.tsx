@@ -1,4 +1,6 @@
 // 信号面板页 / Signals dashboard page
+// v2 — 一体面板 + 配色收敛
+
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { TouchEvent as ReactTouchEvent } from 'react'
 import { useTranslation } from 'react-i18next'
