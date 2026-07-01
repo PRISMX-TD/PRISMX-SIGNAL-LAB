@@ -372,11 +372,6 @@ function FocusView({
     .sort((a, b) => {
       const sa = a.e.signal!
       const sb = b.e.signal!
-      if (sortF === 'rr') {
-        const ra = calcRiskReward(sa.symbol, sa.entry, sa.stopLoss, sa.takeProfit)?.rr ?? -1
-        const rb = calcRiskReward(sb.symbol, sb.entry, sb.stopLoss, sb.takeProfit)?.rr ?? -1
-        return rb - ra
-      }
       if (sortF === 'expiry') {
         return (
           (calcCountdown(sa.expireAt, SIGNAL_LIFESPAN_MS, now)?.remainMs ?? 0) -
@@ -561,11 +556,11 @@ function FocusView({
           </div>
 
           {/* 筛选条：方向 / 状态 / 排序 + 形态切换 / filter bar + view toggle */}
-          <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+          <div className="mb-3 flex flex-wrap items-center gap-1.5 text-xs">
             <button
               type="button"
               onClick={() => setSideF((s) => (s === 'ALL' ? 'LONG' : s === 'LONG' ? 'SHORT' : 'ALL'))}
-              className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-slate-300"
+              className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-slate-300"
             >
               {t('signals.filterSide')}{' '}
               <span className="text-slate-100">
@@ -575,7 +570,7 @@ function FocusView({
             <button
               type="button"
               onClick={() => setStatusF((s) => (s === 'ALL' ? 'ACTIVE' : s === 'ACTIVE' ? 'EXPIRING' : 'ALL'))}
-              className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-slate-300"
+              className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-slate-300"
             >
               {t('signals.filterStatus')}{' '}
               <span className="text-slate-100">
@@ -584,12 +579,12 @@ function FocusView({
             </button>
             <button
               type="button"
-              onClick={() => setSortF((s) => (s === 'latest' ? 'expiry' : s === 'expiry' ? 'rr' : 'latest'))}
-              className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-slate-300"
+              onClick={() => setSortF((s) => (s === 'latest' ? 'expiry' : 'latest'))}
+              className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-slate-300"
             >
               {t('signals.sortBy')}{' '}
               <span className="text-slate-100">
-                {sortF === 'latest' ? t('signals.sort.latest') : sortF === 'expiry' ? t('signals.sort.expiry') : t('signals.sort.rr')}
+                {sortF === 'latest' ? t('signals.sort.latest') : t('signals.sort.expiry')}
               </span>
             </button>
 
