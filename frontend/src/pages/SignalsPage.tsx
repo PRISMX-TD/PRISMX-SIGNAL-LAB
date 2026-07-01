@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { TouchEvent as ReactTouchEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLive } from '../store/live'
+import { usePrefs } from '../store/prefs'
 import { orderApi } from '../api/client'
 import { clientOrderId, fmtTime, calcRiskReward, calcCountdown } from '../api/utils'
 import type { Signal, Quote, Trend, TrendDir } from '../api/types'
@@ -247,16 +248,31 @@ function FocusView({
   anyOnline: boolean
 }) {
   const { t } = useTranslation()
+  const { getPref, setPref } = usePrefs()
   const [focusIdx, setFocusIdx] = useState(0)
   // 触摸滑动切换卡片（移动端/PWA）/ touch-swipe to switch cards (mobile/PWA)
   const touchStartX = useRef<number | null>(null)
   const touchStartY = useRef<number | null>(null)
   // 其他活跃信号的筛选与排序 / filter & sort for the other-active list
-  const [sideF, setSideF] = useState<'ALL' | 'LONG' | 'SHORT'>('ALL')
-  const [statusF, setStatusF] = useState<'ALL' | 'ACTIVE' | 'EXPIRING'>('ALL')
-  const [sortF, setSortF] = useState<'latest' | 'expiry' | 'rr'>('latest')
-  // 列表形态：卡片 / 简洁，手机端与电脑端均默认卡片 / list layout: card or compact, defaults to card on both mobile & desktop
-  const [viewMode, setViewMode] = useState<'card' | 'compact'>('card')
+  const [sideF, setSideF] = useState<'ALL' | 'LONG' | 'SHORT'>(
+    () => (getPref<string>('signals', 'sideF', 'ALL')) as 'ALL' | 'LONG' | 'SHORT'
+  )
+  const [statusF, setStatusF] = useState<'ALL' | 'ACTIVE' | 'EXPIRING'>(
+    () => (getPref<string>('signals', 'statusF', 'ALL')) as 'ALL' | 'ACTIVE' | 'EXPIRING'
+  )
+  const [sortF, setSortF] = useState<'latest' | 'expiry' | 'rr'>(
+    () => (getPref<string>('signals', 'sortF', 'latest')) as 'latest' | 'expiry' | 'rr'
+  )
+  // 列表形态：卡片 / 简洁 / list layout: card or compact
+  const [viewMode, setViewMode] = useState<'card' | 'compact'>(
+    () => (getPref<string>('signals', 'viewMode', 'card')) as 'card' | 'compact'
+  )
+
+  // 持久化筛选/排序/视图偏好到云端 / persist filter/sort/view prefs to cloud
+  useEffect(() => { setPref('signals', 'sideF', sideF) }, [sideF, setPref])
+  useEffect(() => { setPref('signals', 'statusF', statusF) }, [statusF, setPref])
+  useEffect(() => { setPref('signals', 'sortF', sortF) }, [sortF, setPref])
+  useEffect(() => { setPref('signals', 'viewMode', viewMode) }, [viewMode, setPref])
 
   const idx = Math.min(focusIdx, Math.max(0, entries.length - 1))
   const cur = entries[idx]

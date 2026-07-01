@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { mt5ToTradingView } from '../api/utils'
+import { usePrefs } from '../store/prefs'
 
 // 固定品种预设：贵金属 / 能源 / 加密 / 热门货币对。
 // Fixed symbol presets: metals / energy / crypto / popular FX pairs.
@@ -36,30 +37,46 @@ const INTERVALS: { code: string; label: string }[] = [
   { code: 'D', label: '1D' },
 ]
 
+// 向后兼容的 localStorage key / backward-compat localStorage keys
 const INTERVAL_KEY = 'prismx.charts.interval'
 const SYMBOL_KEY = 'prismx.charts.symbol'
 
 export default function ChartsPage() {
   const { t } = useTranslation()
+  const { getPref, setPref, loaded } = usePrefs()
   const containerRef = useRef<HTMLDivElement>(null)
 
   const [symbol, setSymbol] = useState<string>(
     () => {
+      // 优先云端偏好 > localStorage 旧缓存 > 默认值
+      // cloud prefs > legacy localStorage > default
+      const cloud = getPref<string>('charts', 'symbol', '')
+      if (cloud && PRESET_SYMBOLS.includes(cloud)) return cloud
       const saved = localStorage.getItem(SYMBOL_KEY)
       return saved && PRESET_SYMBOLS.includes(saved) ? saved : PRESET_SYMBOLS[0]
     }
   )
   const [interval, setIntervalCode] = useState<string>(
-    () => localStorage.getItem(INTERVAL_KEY) || '15'
+    () => getPref<string>('charts', 'interval', '') || localStorage.getItem(INTERVAL_KEY) || '15'
   )
 
+  // 云端偏好加载完成后覆盖本地初始值 / override initial values when cloud prefs arrive
   useEffect(() => {
-    localStorage.setItem(SYMBOL_KEY, symbol)
-  }, [symbol])
+    if (!loaded) return
+    const cloudSym = getPref<string>('charts', 'symbol', '')
+    if (cloudSym && PRESET_SYMBOLS.includes(cloudSym)) setSymbol(cloudSym)
+    const cloudInt = getPref<string>('charts', 'interval', '')
+    if (cloudInt) setIntervalCode(cloudInt)
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only run when cloud prefs finish loading
+  }, [loaded])
 
   useEffect(() => {
-    localStorage.setItem(INTERVAL_KEY, interval)
-  }, [interval])
+    setPref('charts', 'symbol', symbol)
+  }, [symbol, setPref])
+
+  useEffect(() => {
+    setPref('charts', 'interval', interval)
+  }, [interval, setPref])
 
   const tvSymbol = mt5ToTradingView(symbol)
 

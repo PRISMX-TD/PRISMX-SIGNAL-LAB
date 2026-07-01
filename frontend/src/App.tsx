@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './store/auth'
+import { PrefsProvider } from './store/prefs'
 import Layout from './components/Layout'
 import LandingPage from './pages/LandingPage'
 import LoginPage from './pages/LoginPage'
@@ -13,7 +14,7 @@ import type { ReactNode } from 'react'
 
 function Protected({ children }: { children: ReactNode }) {
   const { isAuthed } = useAuth()
-  return isAuthed ? <>{children}</> : <Navigate to="/login" replace />
+  return isAuthed ? <PrefsProvider>{children}</PrefsProvider> : <Navigate to="/login" replace />
 }
 
 // 未登录访问根路径展示主页，已登录则进入信号面板
