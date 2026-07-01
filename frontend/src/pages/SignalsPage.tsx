@@ -197,7 +197,7 @@ function QuoteBar({ quote }: { quote?: Quote }) {
       <span className="font-semibold text-slate-200">{quote.symbol}</span>
       <span className="ml-auto text-[10px] text-slate-500">{t('signals.quotes.bidShort')}</span>
       <span className="font-mono font-bold tabular-nums text-up">{fmtPrice(quote.bid, quote.digits)}</span>
-      <span className="rounded bg-white/8 px-1.5 py-0.5 text-[10px] text-slate-400">{t('signals.quotes.spread')}</span>
+      <span className="rounded bg-white/[0.08] px-1.5 py-0.5 text-[10px] text-slate-400">{t('signals.quotes.spread')}</span>
       <span className="text-[10px] text-slate-500">{t('signals.quotes.askShort')}</span>
       <span className="font-mono font-bold tabular-nums text-down">{fmtPrice(quote.ask, quote.digits)}</span>
     </div>
@@ -486,7 +486,7 @@ function FocusView({
         </div>
 
         {/* 可执行信号：同一面板内的下半段，用分隔线相连 / executable signal: lower section within the same surface */}
-        <div className="border-t border-white/8 p-4">
+        <div className="border-t border-white/[0.08] p-4">
         <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-slate-400">
           <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
             <path d="M3 17l5-6 4 4 5-7 4 5" strokeLinecap="round" strokeLinejoin="round" />

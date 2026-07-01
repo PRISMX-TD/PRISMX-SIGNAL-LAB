@@ -141,7 +141,7 @@ export default function Layout() {
     <LiveProvider>
       <div className="relative flex min-h-screen flex-col">
         <AuroraBackground />
-        <header className="sticky top-0 z-30 border-b border-white/8 bg-ink-950/60 backdrop-blur-xl">
+        <header className="sticky top-0 z-30 border-b border-white/[0.08] bg-ink-950/60 backdrop-blur-xl">
           <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:gap-4 sm:px-6">
             <div className="flex items-center gap-2.5">
               <Logo size={30} />
@@ -197,7 +197,7 @@ export default function Layout() {
         </main>
 
         {/* 移动端底部 Tab 栏 / mobile bottom tab bar */}
-        <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/8 bg-ink-950/85 backdrop-blur-xl pb-[env(safe-area-inset-bottom)] sm:hidden">
+        <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.08] bg-ink-950/85 backdrop-blur-xl pb-[env(safe-area-inset-bottom)] sm:hidden">
           <div className="flex items-stretch gap-1 px-2 py-1.5">
             {tabs.map((tab) => (
               <TabItem key={tab.to} to={tab.to} icon={tab.icon} label={tab.label} />

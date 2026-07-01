@@ -39,7 +39,7 @@
 @layer components {
   /* 液态玻璃面板 / liquid glass surface */
   .glass {
-    @apply relative rounded-card border border-white/8 bg-white/[0.03] backdrop-blur-xl;
+    @apply relative rounded-card border border-white/[0.08] bg-white/[0.03] backdrop-blur-xl;
     box-shadow:
       0 8px 32px rgba(0, 0, 0, 0.45),
       inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -96,11 +96,11 @@
   }
 
   .btn-ghost {
-    @apply btn border border-white/8 bg-white/[0.05] text-prism-300 backdrop-blur-md hover:border-prism-500/60 hover:bg-prism-600/15 hover:text-prism-200;
+    @apply btn border border-white/[0.08] bg-white/[0.05] text-prism-300 backdrop-blur-md hover:border-prism-500/60 hover:bg-prism-600/15 hover:text-prism-200;
   }
 
   .input {
-    @apply w-full rounded-inner border border-white/8 bg-white/[0.05] px-4 py-2.5 text-slate-100 placeholder:text-slate-500 backdrop-blur-md transition focus:border-prism-500 focus:outline-none focus:ring-2 focus:ring-prism-600/30;
+    @apply w-full rounded-inner border border-white/[0.08] bg-white/[0.05] px-4 py-2.5 text-slate-100 placeholder:text-slate-500 backdrop-blur-md transition focus:border-prism-500 focus:outline-none focus:ring-2 focus:ring-prism-600/30;
   }
 
   .label {
@@ -119,6 +119,6 @@
 
   /* 玻璃药丸标签 / glass pill chip */
   .chip {
-    @apply inline-flex items-center gap-1.5 rounded-pill border border-white/8 bg-white/[0.05] px-3 py-1 text-xs text-slate-300 backdrop-blur-md;
+    @apply inline-flex items-center gap-1.5 rounded-pill border border-white/[0.08] bg-white/[0.05] px-3 py-1 text-xs text-slate-300 backdrop-blur-md;
   }
 }
