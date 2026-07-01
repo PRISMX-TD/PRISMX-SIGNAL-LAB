@@ -221,6 +221,8 @@ function FocusView({
   const [sideF, setSideF] = useState<'ALL' | 'LONG' | 'SHORT'>('ALL')
   const [statusF, setStatusF] = useState<'ALL' | 'ACTIVE' | 'EXPIRING'>('ALL')
   const [sortF, setSortF] = useState<'latest' | 'expiry' | 'rr'>('latest')
+  // 列表形态：卡片 / 简洁，手机端与电脑端均默认卡片 / list layout: card or compact, defaults to card on both mobile & desktop
+  const [viewMode, setViewMode] = useState<'card' | 'compact'>('card')
 
   const idx = Math.min(focusIdx, Math.max(0, entries.length - 1))
   const cur = entries[idx]
@@ -273,11 +275,6 @@ function FocusView({
   const others = entries
     .map((e, i) => ({ e, i }))
     .filter(({ e, i }) => i !== idx && e.state !== 'WATCH' && e.signal)
-
-  // 即将到期数量（剩余 ≤ 阈值）/ count of signals expiring soon
-  const expiringCount = others.filter(
-    ({ e }) => effectiveStatus(e.signal!, now) === 'EXPIRING',
-  ).length
 
   // 应用方向 / 状态筛选 + 排序 / apply side/status filter then sort
   const visibleOthers = others
@@ -434,17 +431,8 @@ function FocusView({
             <span className="chip">{others.length}</span>
           </div>
 
-          {/* 筛选条：即将到期 / 方向 / 状态 / 排序 / filter bar */}
+          {/* 筛选条：方向 / 状态 / 排序 + 形态切换 / filter bar + view toggle */}
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
-            <span
-              className={`rounded-full border px-3 py-1.5 ${
-                expiringCount > 0
-                  ? 'border-amber-400/30 bg-amber-400/10 text-amber-300'
-                  : 'border-white/10 bg-white/5 text-slate-400'
-              }`}
-            >
-              {t('signals.stats.expiring')} {expiringCount}
-            </span>
             <button
               type="button"
               onClick={() => setSideF((s) => (s === 'ALL' ? 'LONG' : s === 'LONG' ? 'SHORT' : 'ALL'))}
@@ -475,9 +463,31 @@ function FocusView({
                 {sortF === 'latest' ? t('signals.sort.latest') : sortF === 'expiry' ? t('signals.sort.expiry') : t('signals.sort.rr')}
               </span>
             </button>
+
+            {/* 形态切换：卡片 / 简洁 / view toggle: card / compact */}
+            <div className="ml-auto flex items-center rounded-full border border-white/10 bg-white/5 p-0.5">
+              <button
+                type="button"
+                onClick={() => setViewMode('card')}
+                className={`rounded-full px-3 py-1 transition-colors ${
+                  viewMode === 'card' ? 'bg-prism-600/40 text-slate-100' : 'text-slate-400'
+                }`}
+              >
+                {t('signals.viewCard')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('compact')}
+                className={`rounded-full px-3 py-1 transition-colors ${
+                  viewMode === 'compact' ? 'bg-prism-600/40 text-slate-100' : 'text-slate-400'
+                }`}
+              >
+                {t('signals.viewCompact')}
+              </button>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
+          <div className={viewMode === 'card' ? 'grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3' : 'grid grid-cols-1 gap-2'}>
             {visibleOthers.map(({ e, i }) => {
               const oTone = FOCUS_TONE[e.state]
               const sig = e.signal!
@@ -487,11 +497,12 @@ function FocusView({
               const sideTag = sig.side === 'BUY' ? t('common.buy') : t('common.sell')
               return (
                 <div key={e.symbol}>
-                  {/* 手机版：紧凑行 / mobile: compact row */}
+                  {/* 简洁形态：紧凑行 / compact layout: compact row */}
+                  {viewMode === 'compact' && (
                   <button
                     type="button"
                     onClick={() => setFocusIdx(i)}
-                    className={`glass flat-card flex w-full items-center gap-3 px-3 py-2.5 text-left sm:hidden ${isNew ? 'ring-2 ring-prism-500/70 animate-glow-pulse' : ''}`}
+                    className={`glass flat-card flex w-full items-center gap-3 px-3 py-2.5 text-left ${isNew ? 'ring-2 ring-prism-500/70 animate-glow-pulse' : ''}`}
                   >
                     <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ background: FOCUS_DOT[e.state] + '1f' }}>
                       <span className="h-2 w-2 rounded-full" style={{ background: FOCUS_DOT[e.state] }} />
@@ -510,10 +521,12 @@ function FocusView({
                       <div className="font-mono text-[10px] text-amber-400">{cd?.text ?? '-'}</div>
                     </div>
                   </button>
+                  )}
 
-                  {/* 桌面版：完整卡片 / desktop: full card */}
+                  {/* 卡片形态：完整卡片 / card layout: full card */}
+                  {viewMode === 'card' && (
                   <div
-                    className={`glass flat-card hidden p-4 sm:block ${isNew ? 'ring-2 ring-prism-500/70 animate-glow-pulse' : ''}`}
+                    className={`glass flat-card p-4 ${isNew ? 'ring-2 ring-prism-500/70 animate-glow-pulse' : ''}`}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-2">
@@ -569,6 +582,7 @@ function FocusView({
                       </button>
                     </div>
                   </div>
+                  )}
                 </div>
               )
             })}

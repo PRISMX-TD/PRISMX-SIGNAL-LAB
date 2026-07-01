@@ -125,6 +125,7 @@
       "avgRr": "Avg R:R"
     },
     "viewCard": "Cards",
+    "viewCompact": "Compact",
     "viewTable": "Table",
     "viewFocus": "Focus",
     "focus": {
