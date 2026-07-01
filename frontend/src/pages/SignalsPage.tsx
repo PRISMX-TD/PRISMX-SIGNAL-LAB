@@ -130,7 +130,7 @@ function QuoteBar({ quote }: { quote?: Quote }) {
     typeof digits === 'number' ? v.toFixed(digits) : String(v)
   if (!quote) return null
   return (
-    <div className="glass mb-3 flex items-center gap-2 px-3 py-2.5 text-sm">
+    <div className="glass flat-card mb-3 flex items-center gap-2 px-3 py-2.5 text-sm">
       <span className="h-2 w-2 shrink-0 rounded-full bg-up animate-breathe" />
       <span className="font-semibold text-slate-200">{quote.symbol}</span>
       <span className="ml-auto text-[10px] text-slate-500">{t('signals.quotes.bidShort')}</span>
@@ -154,7 +154,7 @@ function QuotePanel({ quotes, mt5Online }: { quotes: Record<string, Quote>; mt5O
     typeof digits === 'number' ? v.toFixed(digits) : String(v)
 
   return (
-    <div className="glass mt-4 p-4">
+    <div className="glass flat-card mt-4 p-4">
       <div className="mb-3 flex items-center gap-2">
         <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-slate-300">
           {t('signals.quotes.title')}
@@ -313,7 +313,7 @@ function FocusView({
         <button
           type="button"
           onClick={goPrev}
-          className="glass no-sheen grid h-9 w-9 place-items-center text-prism-200"
+          className="glass no-sheen flat-card grid h-9 w-9 place-items-center text-prism-200"
           aria-label="prev"
         >
           ‹
@@ -325,7 +325,7 @@ function FocusView({
         <button
           type="button"
           onClick={goNext}
-          className="glass no-sheen grid h-9 w-9 place-items-center text-prism-200"
+          className="glass no-sheen flat-card grid h-9 w-9 place-items-center text-prism-200"
           aria-label="next"
         >
           ›
@@ -491,7 +491,7 @@ function FocusView({
                   <button
                     type="button"
                     onClick={() => setFocusIdx(i)}
-                    className={`glass flex w-full items-center gap-3 px-3 py-2.5 text-left sm:hidden ${isNew ? 'ring-2 ring-prism-500/70 animate-glow-pulse' : ''}`}
+                    className={`glass flat-card flex w-full items-center gap-3 px-3 py-2.5 text-left sm:hidden ${isNew ? 'ring-2 ring-prism-500/70 animate-glow-pulse' : ''}`}
                   >
                     <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ background: FOCUS_DOT[e.state] + '1f' }}>
                       <span className="h-2 w-2 rounded-full" style={{ background: FOCUS_DOT[e.state] }} />
@@ -513,7 +513,7 @@ function FocusView({
 
                   {/* 桌面版：完整卡片 / desktop: full card */}
                   <div
-                    className={`glass hidden p-4 sm:block ${isNew ? 'ring-2 ring-prism-500/70 animate-glow-pulse' : ''}`}
+                    className={`glass flat-card hidden p-4 sm:block ${isNew ? 'ring-2 ring-prism-500/70 animate-glow-pulse' : ''}`}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-2">
@@ -678,7 +678,7 @@ export default function SignalsPage() {
       </div>
 
       {!loaded ? (
-        <div className="glass flex flex-col items-center justify-center py-20 text-center">
+        <div className="glass flat-card flex flex-col items-center justify-center py-20 text-center">
           <div className="mb-3 h-10 w-10 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />
           <p className="text-sm text-slate-400">{t('common.loading')}</p>
         </div>

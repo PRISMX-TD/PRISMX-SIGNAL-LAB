@@ -57,6 +57,11 @@
     content: none;
   }
 
+  /* 去掉卡片背后的外投影光晕，仅保留顶部内高光 / drop the outer glow shadow, keep inner top sheen */
+  .flat-card {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+  }
+
   /* 兼容旧 card 类，统一升级为玻璃风 / keep .card working, upgraded to glass */
   .card {
     @apply glass;
