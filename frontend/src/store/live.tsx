@@ -1,8 +1,8 @@
 // 实时数据共享状态：EA 状态、信号、订单、持仓。
 // Shared live state: EA status, signals, orders, positions.
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
-import type { EAStatus, MT5Account, Order, Position, Quote, Signal, WSMessage } from '../api/types'
-import { accountApi, eaApi, orderApi, signalApi } from '../api/client'
+import type { EAStatus, MT5Account, Order, Position, Quote, Signal, Trend, WSMessage } from '../api/types'
+import { accountApi, eaApi, orderApi, signalApi, trendApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
 
 interface LiveContextValue {
@@ -11,6 +11,8 @@ interface LiveContextValue {
   positions: Position[]
   // 实时报价 {symbol: Quote}（由桥接经 WS 推送）/ live quotes pushed via WS
   quotes: Record<string, Quote>
+  // 多周期趋势 {symbol: Trend}（由 TradingView 经 webhook 推送）/ trends pushed via webhook
+  trends: Record<string, Trend>
   eaStatus: EAStatus
   accounts: MT5Account[]
   // 首屏数据是否加载完成 / whether the first data load has completed
@@ -48,21 +50,24 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [orders, setOrders] = useState<Order[]>([])
   const [positions, setPositions] = useState<Position[]>([])
   const [quotes, setQuotes] = useState<Record<string, Quote>>({})
+  const [trends, setTrends] = useState<Record<string, Trend>>({})
   const [eaStatus, setEaStatus] = useState<EAStatus>({ online: false, mt5Login: null })
   const [accounts, setAccounts] = useState<MT5Account[]>([])
   const [loaded, setLoaded] = useState(false)
 
   const refreshAll = useCallback(async () => {
-    const [sig, ord, st, acc] = await Promise.all([
+    const [sig, ord, st, acc, trd] = await Promise.all([
       signalApi.list().catch(() => ({ signals: [] })),
       orderApi.list().catch(() => ({ orders: [] })),
       eaApi.status().catch(() => ({ online: false, mt5Login: null }) as EAStatus),
       accountApi.list().catch(() => ({ accounts: [] })),
+      trendApi.list().catch(() => ({ trends: [] })),
     ])
     setSignals(capExpired(sig.signals))
     setOrders(ord.orders)
     setEaStatus(st)
     setAccounts(acc.accounts)
+    setTrends(Object.fromEntries((trd.trends || []).map((t) => [t.symbol, t])))
     setLoaded(true)
   }, [])
 
@@ -124,6 +129,13 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         })
         break
       }
+      case 'TREND_UPDATE': {
+        // 某品种多周期趋势变化：按 symbol 覆盖最新快照 / overwrite the latest trend snapshot by symbol
+        const t = msg.data as Trend
+        if (!t?.symbol) break
+        setTrends((prev) => ({ ...prev, [t.symbol]: t }))
+        break
+      }
       case 'ACCOUNTS_STATUS': {
         // 桥接程序上报账号在线变化，拉取最新账号列表 / refresh accounts on status change
         const data = msg.data as { onlineLogins?: string[] }
@@ -145,7 +157,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   return (
     <LiveContext.Provider
-      value={{ signals, orders, positions, quotes, eaStatus, accounts, loaded, anyOnline, onlineAccounts, refreshAll }}
+      value={{ signals, orders, positions, quotes, trends, eaStatus, accounts, loaded, anyOnline, onlineAccounts, refreshAll }}
     >
       {children}
     </LiveContext.Provider>

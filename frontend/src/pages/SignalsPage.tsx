@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { useLive } from '../store/live'
 import { orderApi } from '../api/client'
 import { clientOrderId, fmtTime, calcRiskReward, calcCountdown } from '../api/utils'
-import type { Signal, Quote } from '../api/types'
+import type { Signal, Quote, Trend, TrendDir } from '../api/types'
 import OrderModal from '../components/OrderModal'
 
 // 信号总有效时长，与后端 expire_at = created_at + 10min 一致 / lifespan matches backend
@@ -99,6 +99,40 @@ const FOCUS_TONE: Record<FocusState, { color: string; chipBg: string; glow: stri
   SHORT: { color: 'text-down', chipBg: 'bg-down/15 text-down', glow: 'rgba(255,77,109,.28)' },
 }
 const FOCUS_DOT: Record<FocusState, string> = { WATCH: '#94a3b8', LONG: '#2fe6a0', SHORT: '#ff4d6d' }
+
+// 多周期趋势要展示的固定周期顺序 / fixed order of timeframes shown in the trend widget
+const TREND_TFS = ['M5', 'M15', 'H1', 'H4'] as const
+// 每种趋势方向的视觉：箭头 + 颜色 / visual for each trend direction
+const TREND_VIS: Record<TrendDir, { arrow: string; color: string }> = {
+  UP: { arrow: '↑', color: '#2fe6a0' },
+  DOWN: { arrow: '↓', color: '#ff4d6d' },
+  FLAT: { arrow: '→', color: '#64748b' },
+}
+
+// 多周期趋势小组件：英雄卡右上角，四格「周期 + 彩色箭头」。
+// 无趋势数据时四格显示灰色 →，等 webhook 推送后自动亮起。
+// Multi-timeframe trend widget: four "timeframe + colored arrow" cells in the hero card corner.
+function MultiTfTrend({ trend }: { trend?: Trend }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      {TREND_TFS.map((tf) => {
+        const dir: TrendDir = trend?.timeframes?.[tf] ?? 'FLAT'
+        const vis = TREND_VIS[dir]
+        return (
+          <div
+            key={tf}
+            className="flex min-w-[2.1rem] flex-col items-center rounded-md border border-white/8 bg-white/[0.03] px-1.5 py-1"
+          >
+            <span className="text-[9px] font-medium uppercase leading-none tracking-wider text-slate-500">{tf}</span>
+            <span className="font-display text-base font-bold leading-tight" style={{ color: vis.color }}>
+              {vis.arrow}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 // 由实时信号派生每个关注品种的当前状态。
 // 关注列表 = 默认清单 ∪ 任何当前有 ACTIVE 信号的品种（不漏掉引擎新出的品种）。
@@ -203,6 +237,7 @@ function FocusView({
   newIds,
   onTrade,
   quotes,
+  trends,
   anyOnline,
 }: {
   entries: FocusEntry[]
@@ -210,6 +245,7 @@ function FocusView({
   newIds: Set<string>
   onTrade: (s: Signal) => void
   quotes: Record<string, Quote>
+  trends: Record<string, Trend>
   anyOnline: boolean
 }) {
   const { t } = useTranslation()
@@ -267,7 +303,6 @@ function FocusView({
 
   const tone = FOCUS_TONE[cur.state]
   const hasSignal = cur.state !== 'WATCH' && cur.signal != null
-  const rr = cur.signal ? calcRiskReward(cur.signal.symbol, cur.signal.entry, cur.signal.stopLoss, cur.signal.takeProfit) : null
   const total = Math.max(1, sentiment.total)
   const longW = Math.round((sentiment.long / total) * 100)
   const shortW = Math.round((sentiment.short / total) * 100)
@@ -364,13 +399,11 @@ function FocusView({
             </svg>
             {t('signals.focus.heading')} · {cur.symbol}
           </div>
-          <div className="text-[11px] uppercase tracking-wider text-slate-500">{t('signals.focus.rrLabel')}</div>
+          <div className="text-[11px] uppercase tracking-wider text-slate-500">{t('signals.focus.trendLabel')}</div>
         </div>
         <div className="mt-1 flex items-end justify-between">
           <div className={`font-display text-5xl font-extrabold leading-none ${tone.color}`}>{stateLabel(cur.state)}</div>
-          <div className={`font-display text-4xl font-bold leading-none ${hasSignal ? tone.color : 'text-slate-600'}`}>
-            {hasSignal && rr?.rr != null ? `1:${rr.rr.toFixed(2)}` : '—'}
-          </div>
+          <MultiTfTrend trend={trends[cur.symbol]} />
         </div>
 
         {/* 全市场情绪条 / market sentiment bar */}
@@ -597,7 +630,7 @@ function FocusView({
 
 export default function SignalsPage() {
   const { t } = useTranslation()
-  const { signals, anyOnline, accounts, loaded, refreshAll, quotes } = useLive()
+  const { signals, anyOnline, accounts, loaded, refreshAll, quotes, trends } = useLive()
   const now = useNow(1000)
   const newIds = useNewSignalIds(signals)
   const focusEntries = useFocusEntries(signals, now)
@@ -697,7 +730,7 @@ export default function SignalsPage() {
           <p className="text-sm text-slate-400">{t('common.loading')}</p>
         </div>
       ) : (
-        <FocusView entries={focusEntries} now={now} newIds={newIds} onTrade={setActive} quotes={quotes} anyOnline={anyOnline} />
+        <FocusView entries={focusEntries} now={now} newIds={newIds} onTrade={setActive} quotes={quotes} trends={trends} anyOnline={anyOnline} />
       )}
 
       {active && (

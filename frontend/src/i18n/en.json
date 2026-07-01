@@ -145,6 +145,7 @@
       "remainingTtl": "Time left",
       "otherActive": "Other active signals",
       "rrLabel": "R:R",
+      "trendLabel": "Multi-TF trend",
       "newSignal": "{{symbol}} triggered a {{state}} signal"
     },
     "quotes": {

@@ -145,6 +145,7 @@
       "remainingTtl": "剩余时效",
       "otherActive": "其他活跃信号",
       "rrLabel": "盈亏比",
+      "trendLabel": "多周期趋势",
       "newSignal": "{{symbol}} 触发{{state}}信号"
     },
     "quotes": {
