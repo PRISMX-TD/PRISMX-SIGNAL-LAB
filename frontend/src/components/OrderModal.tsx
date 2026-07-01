@@ -61,6 +61,24 @@ export default function OrderModal({ signal, eaOnline, accounts, quote, onCancel
     return () => window.removeEventListener('keydown', onKey)
   }, [onCancel])
 
+  // PWA / 手机回退手势：关闭弹窗而非操作背景页面
+  // PWA / mobile back gesture: close modal instead of navigating background
+  useEffect(() => {
+    window.history.pushState({ __modal: true }, '', window.location.href)
+
+    const onPop = () => {
+      window.history.pushState({ __modal: true }, '', window.location.href)
+      onCancel()
+    }
+    window.addEventListener('popstate', onPop)
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      // 清理：回退掉这条历史，避免残留
+      window.history.back()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // 是否可下单：有在线 EA，或选中了一个在线账号 / can place: EA online or an account selected
   const hasAccounts = onlineAccounts.length > 0
   const canSubmit = hasAccounts ? !!login : eaOnline
