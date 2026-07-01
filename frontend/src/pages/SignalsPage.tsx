@@ -526,7 +526,7 @@ function FocusView({
               </div>
             </div>
             <button onClick={() => onTrade(cur.signal!)} className="btn-primary mt-3 w-full py-2.5 text-sm font-semibold">
-              {t('signals.focus.viewDetail')}
+              {t('signals.trade')}
             </button>
           </>
         ) : (
