@@ -138,10 +138,22 @@ class TrendSignal(BaseModel):
 
 @router.post("/trend", response_model=dict)
 @limiter.limit("120/minute")
-async def tradingview_trend(request: Request, payload: TrendSignal):
+async def tradingview_trend(request: Request):
     """接收多周期趋势：校验密钥 -> upsert 覆盖 -> 广播 TREND_UPDATE。
     Receive a multi-timeframe trend: verify secret -> upsert -> broadcast.
+
+    手动读取原始 body 再解析，不依赖 Content-Type。
+    TradingView 的 webhook 发的是 text/plain，若声明 JSON body 模型会被 FastAPI 判 422。
+    Read the raw body and parse manually, independent of Content-Type. TradingView
+    sends webhooks as text/plain, which would trigger a 422 with a declared JSON body.
     """
+    raw = await request.body()
+    try:
+        data_in = json.loads(raw)
+        payload = TrendSignal.model_validate(data_in)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="请求体不是合法 JSON / body is not valid JSON")
+
     if not settings.WEBHOOK_SECRET or not secrets.compare_digest(
         payload.secret.encode("utf-8"), settings.WEBHOOK_SECRET.encode("utf-8")
     ):
