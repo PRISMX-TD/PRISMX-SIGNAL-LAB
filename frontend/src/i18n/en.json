@@ -150,6 +150,9 @@
       "title": "Live quotes",
       "bid": "Bid",
       "ask": "Ask",
+      "bidShort": "B",
+      "askShort": "A",
+      "spread": "spread",
       "waiting": "Waiting for quotes…",
       "notConnected": "Connect MT5 to see live quotes"
     },

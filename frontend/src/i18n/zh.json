@@ -150,6 +150,9 @@
       "title": "实时报价",
       "bid": "买价",
       "ask": "卖价",
+      "bidShort": "买",
+      "askShort": "卖",
+      "spread": "点差",
       "waiting": "正在获取报价…",
       "notConnected": "连接 MT5 后显示实时报价"
     },

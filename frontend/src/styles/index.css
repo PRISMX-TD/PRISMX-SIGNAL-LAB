@@ -52,6 +52,11 @@
     background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
   }
 
+  /* 去掉顶部高光横线（用于小图标按钮等）/ remove top sheen line (for small icon buttons) */
+  .no-sheen::before {
+    content: none;
+  }
+
   /* 兼容旧 card 类，统一升级为玻璃风 / keep .card working, upgraded to glass */
   .card {
     @apply glass;

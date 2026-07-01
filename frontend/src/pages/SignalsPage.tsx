@@ -1,5 +1,6 @@
 // 信号面板页 / Signals dashboard page
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { TouchEvent as ReactTouchEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLive } from '../store/live'
 import { orderApi } from '../api/client'
@@ -121,6 +122,26 @@ function useFocusEntries(signals: Signal[], now: number): FocusEntry[] {
   }, [signals, now])
 }
 
+// 单行报价条：只显示当前聚焦品种的 bid/ask，用于移动端。
+// Single-line quote bar: shows only the focused symbol's bid/ask, for mobile.
+function QuoteBar({ quote }: { quote?: Quote }) {
+  const { t } = useTranslation()
+  const fmtPrice = (v: number, digits?: number) =>
+    typeof digits === 'number' ? v.toFixed(digits) : String(v)
+  if (!quote) return null
+  return (
+    <div className="glass mb-3 flex items-center gap-2 px-3 py-2.5 text-sm">
+      <span className="h-2 w-2 shrink-0 rounded-full bg-up animate-breathe" />
+      <span className="font-semibold text-slate-200">{quote.symbol}</span>
+      <span className="ml-auto text-[10px] text-slate-500">{t('signals.quotes.bidShort')}</span>
+      <span className="font-mono font-bold tabular-nums text-up">{fmtPrice(quote.bid, quote.digits)}</span>
+      <span className="rounded bg-white/8 px-1.5 py-0.5 text-[10px] text-slate-400">{t('signals.quotes.spread')}</span>
+      <span className="text-[10px] text-slate-500">{t('signals.quotes.askShort')}</span>
+      <span className="font-mono font-bold tabular-nums text-down">{fmtPrice(quote.ask, quote.digits)}</span>
+    </div>
+  )
+}
+
 // 实时报价面板：展示桥接上报的 bid/ask。未连接 MT5 时显示占位。
 // Live quotes panel: shows bid/ask reported by the bridge; placeholder when MT5 offline.
 function QuotePanel({ quotes, mt5Online }: { quotes: Record<string, Quote>; mt5Online: boolean }) {
@@ -193,6 +214,9 @@ function FocusView({
 }) {
   const { t } = useTranslation()
   const [focusIdx, setFocusIdx] = useState(0)
+  // 触摸滑动切换卡片（移动端/PWA）/ touch-swipe to switch cards (mobile/PWA)
+  const touchStartX = useRef<number | null>(null)
+  const touchStartY = useRef<number | null>(null)
   // 其他活跃信号的筛选与排序 / filter & sort for the other-active list
   const [sideF, setSideF] = useState<'ALL' | 'LONG' | 'SHORT'>('ALL')
   const [statusF, setStatusF] = useState<'ALL' | 'ACTIVE' | 'EXPIRING'>('ALL')
@@ -200,6 +224,26 @@ function FocusView({
 
   const idx = Math.min(focusIdx, Math.max(0, entries.length - 1))
   const cur = entries[idx]
+
+  // 循环切换 / cyclic switch
+  const goPrev = () => setFocusIdx((idx - 1 + entries.length) % entries.length)
+  const goNext = () => setFocusIdx((idx + 1) % entries.length)
+
+  // 触摸滑动：水平位移超过阈值且大于竖直位移时切换 / horizontal swipe beyond threshold switches
+  const onTouchStart = (e: ReactTouchEvent) => {
+    touchStartX.current = e.touches[0].clientX
+    touchStartY.current = e.touches[0].clientY
+  }
+  const onTouchEnd = (e: ReactTouchEvent) => {
+    if (touchStartX.current == null || touchStartY.current == null) return
+    const dx = e.changedTouches[0].clientX - touchStartX.current
+    const dy = e.changedTouches[0].clientY - touchStartY.current
+    touchStartX.current = null
+    touchStartY.current = null
+    if (Math.abs(dx) < 48 || Math.abs(dx) <= Math.abs(dy)) return
+    if (dx < 0) goNext()
+    else goPrev()
+  }
 
   const sentiment = useMemo(() => {
     let long = 0,
@@ -268,8 +312,8 @@ function FocusView({
           <div className="mb-3 flex items-center justify-between">
         <button
           type="button"
-          onClick={() => setFocusIdx((idx - 1 + entries.length) % entries.length)}
-          className="glass grid h-9 w-9 place-items-center text-prism-200"
+          onClick={goPrev}
+          className="glass no-sheen grid h-9 w-9 place-items-center text-prism-200"
           aria-label="prev"
         >
           ‹
@@ -280,8 +324,8 @@ function FocusView({
         </div>
         <button
           type="button"
-          onClick={() => setFocusIdx((idx + 1) % entries.length)}
-          className="glass grid h-9 w-9 place-items-center text-prism-200"
+          onClick={goNext}
+          className="glass no-sheen grid h-9 w-9 place-items-center text-prism-200"
           aria-label="next"
         >
           ›
@@ -303,8 +347,15 @@ function FocusView({
         ))}
       </div>
 
+      {/* 移动端单行报价条：仅显示当前品种 / mobile single-line quote bar: current symbol only */}
+      <div className="lg:hidden">
+        <QuoteBar quote={quotes[cur.symbol]} />
+      </div>
+
       {/* 英雄卡 / hero card */}
       <div
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
         className="glass animate-fade-in-up overflow-hidden p-4"
         style={{ boxShadow: `0 8px 32px rgba(0,0,0,.45), 0 0 30px ${tone.glow}, inset 0 1px 0 rgba(255,255,255,.08)` }}
       >
@@ -366,8 +417,10 @@ function FocusView({
         )}
       </div>
 
-          {/* 实时报价区 / live quotes panel */}
-          <QuotePanel quotes={quotes} mt5Online={anyOnline} />
+          {/* 实时报价区（桌面端完整面板）/ live quotes panel (desktop full panel) */}
+          <div className="hidden lg:block">
+            <QuotePanel quotes={quotes} mt5Online={anyOnline} />
+          </div>
         </div>
         {/* 右栏：其他活跃信号 / right column: other active signals */}
         <div className="mt-5 lg:mt-0">
