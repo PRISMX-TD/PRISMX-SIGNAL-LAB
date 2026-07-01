@@ -437,13 +437,14 @@ function FocusView({
         <QuoteBar quote={quotes[cur.symbol]} />
       </div>
 
-      {/* 英雄卡 / hero card */}
+      {/* 英雄卡 + 可执行信号：合并为一体面板 / hero + signal merged into one surface */}
       <div
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
-        className="glass animate-fade-in-up overflow-hidden p-4"
+        className="glass animate-fade-in-up overflow-hidden"
         style={{ boxShadow: `0 8px 32px rgba(0,0,0,.45), 0 0 30px ${tone.glow}, inset 0 1px 0 rgba(255,255,255,.08)` }}
       >
+        <div className="p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-slate-400">
             <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -454,8 +455,8 @@ function FocusView({
           </div>
           <div className="text-[11px] uppercase tracking-wider text-slate-500">{t('signals.focus.trendLabel')}</div>
         </div>
-        <div className="mt-1 flex items-end justify-between">
-          <div className={`font-display text-5xl font-extrabold leading-none ${tone.color}`}>{stanceLabel(stance)}</div>
+        <div className="mt-2 flex items-end justify-between">
+          <div className={`font-display text-4xl font-extrabold leading-none ${tone.color}`}>{stanceLabel(stance)}</div>
           <MultiTfTrend trend={trends[cur.symbol]} />
         </div>
 
@@ -480,10 +481,10 @@ function FocusView({
         <div className="mt-3 rounded-xl bg-white/[0.03] px-3 py-2.5 text-center text-sm text-slate-300">
           {stanceAdvice(stance)}
         </div>
-      </div>
+        </div>
 
-      {/* 可执行信号卡（与趋势立场解耦，独立成卡）/ executable signal card, decoupled from stance */}
-      <div className="glass flat-card mt-3 overflow-hidden p-4">
+        {/* 可执行信号：同一面板内的下半段，用分隔线相连 / executable signal: lower section within the same surface */}
+        <div className="border-t border-white/8 p-4">
         <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-slate-400">
           <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
             <path d="M3 17l5-6 4 4 5-7 4 5" strokeLinecap="round" strokeLinejoin="round" />
@@ -511,9 +512,9 @@ function FocusView({
               </div>
             </div>
             <div className="mt-3 flex items-center gap-3">
-              <div className="flex-1 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2">
+              <div className="flex-1 rounded-xl border border-prism-500/20 bg-prism-600/5 px-3 py-2">
                 <div className="text-[10px] uppercase tracking-wider text-slate-500">{t('signals.focus.remainingTtl')}</div>
-                <div className="font-mono text-sm text-amber-400">
+                <div className="font-mono text-sm text-prism-300">
                   {calcCountdown(cur.signal!.expireAt, SIGNAL_LIFESPAN_MS, now)?.text ?? '-'}
                 </div>
               </div>
@@ -528,6 +529,7 @@ function FocusView({
             {t('signals.focus.noExecutable')}
           </div>
         )}
+      </div>
       </div>
 
           {/* 实时报价区（桌面端完整面板）/ live quotes panel (desktop full panel) */}
@@ -634,7 +636,7 @@ function FocusView({
                       <div className={`font-mono text-sm font-bold ${rrTone(oRr?.rr ?? null)}`}>
                         {oRr?.rr != null ? `1:${oRr.rr.toFixed(2)}` : '-'}
                       </div>
-                      <div className="font-mono text-[10px] text-amber-400">{cd?.text ?? '-'}</div>
+                      <div className="font-mono text-[10px] text-prism-300">{cd?.text ?? '-'}</div>
                     </div>
                   </button>
                   )}
@@ -675,12 +677,12 @@ function FocusView({
                     <div className="mt-3">
                       <div className="mb-1 flex items-center justify-between text-[11px]">
                         <span className="uppercase tracking-wider text-slate-500">{t('signals.focus.remainingTtl')}</span>
-                        <span className="font-mono text-amber-400">{cd?.text ?? '-'}</span>
+                        <span className="font-mono text-prism-300">{cd?.text ?? '-'}</span>
                       </div>
                       <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
                         <div
                           className="h-full rounded-full"
-                          style={{ width: `${Math.round((cd?.fraction ?? 0) * 100)}%`, background: 'linear-gradient(90deg,#7c5cff,#2fe6a0)' }}
+                          style={{ width: `${Math.round((cd?.fraction ?? 0) * 100)}%`, background: 'linear-gradient(90deg,#7a2fff,#a779ff)' }}
                         />
                       </div>
                     </div>
