@@ -478,6 +478,21 @@
   }
 
   /* ── 执行卡片 / exec card ── */
+  .exec-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .exec-sym-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  /* 桌面端：容器不改变布局，入场价与SL/TP保持堆叠 */
+  .exec-mobile-row .sl-tp-grid {
+    margin-top: 16px;
+  }
   .entry-block {
     text-align: center;
     margin: 18px 0 2px;
@@ -1221,17 +1236,68 @@
       font-size: 22px;
     }
 
-    /* ── 执行卡收缩 / exec card compact ── */
+    /* ── 执行卡手机版紧凑重排 / exec card mobile compact ── */
+
+    /* 标题行缩小字号 */
+    .exec-title-row h3 {
+      font-size: 13px;
+    }
+    /* 品种行缩小间距 */
+    .exec-sym-row {
+      margin-top: 6px;
+      gap: 6px;
+    }
+
+    /* 入场价 + SL/TP 改为横向两列：左入场价，右SL/TP叠放 */
+    .exec-mobile-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 12px;
+      align-items: center;
+    }
+    .entry-block {
+      text-align: center;
+      margin: 0;
+    }
     .entry-block .val {
-      font-size: 26px;
+      font-size: 22px;
+    }
+    .entry-block .cap {
+      font-size: 11px;
+    }
+    /* SL/TP 在手机上叠成两行 */
+    .exec-mobile-row .sl-tp-grid {
+      grid-template-columns: 1fr;
+      gap: 7px;
+      margin-top: 0;
+    }
+    .exec-tile {
+      padding: 8px 6px;
+    }
+    .exec-tile .val {
+      font-size: 15px;
+    }
+    .exec-tile .cap {
+      font-size: 10.5px;
+    }
+
+    /* 统计行两端对齐，文字缩小 */
+    .exec-stats-row {
+      margin-top: 10px;
+    }
+    .exec-stats-row .k {
+      font-size: 11px;
     }
     .exec-stats-row .v {
-      font-size: 16px;
+      font-size: 15px;
+      margin-top: 2px;
     }
+
     .exec-full-btn {
-      height: 44px;
+      height: 42px;
       font-size: 14px;
-      margin-top: 14px;
+      margin-top: 12px;
     }
 
     /* ── 下单弹窗：底部全屏上滑 / bottom sheet ── */
