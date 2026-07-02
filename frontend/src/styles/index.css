@@ -1256,13 +1256,7 @@
       padding: 20px 18px calc(18px + env(safe-area-inset-bottom));
     }
 
-    /* ── 信号卡三列缩为两列 / signal tile 3-col → 2-col ── */
-    .sl-tp-grid.three {
-      grid-template-columns: 1fr 1fr;
-    }
-    .sl-tp-grid.three .exec-tile:first-child {
-      grid-column: 1 / -1;
-    }
+    /* ── 信号卡三列保持不变（手机端也放得下）── */
 
     /* ── 筛选器换行整齐 / filters wrap ── */
     .sig-filters {
