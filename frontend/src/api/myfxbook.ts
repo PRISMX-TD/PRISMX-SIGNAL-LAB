@@ -1,5 +1,5 @@
 // Myfxbook 社区情绪抓取 / Myfxbook community sentiment scraper
-// 开发环境通过 Vite proxy 抓取，生产环境通过 public CORS proxy。
+// 通过后端代理 /api/proxy/myfxbook 获取页面并解析 HTML
 
 export interface MyfxSentiment {
   longPct: number
@@ -9,20 +9,12 @@ export interface MyfxSentiment {
 // 关注的品种 / symbols we care about (BTC not on Myfxbook)
 const WATCH_SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'EURGBP', 'XAUUSD', 'XAGUSD']
 
-const MYFXBOOK_URL = 'https://www.myfxbook.com/community/outlook'
-
 /**
  * 从 Myfxbook 页面 HTML 解析各品种的多空比。
  * Parse long/short percentages per symbol from Myfxbook HTML.
  */
 export async function fetchMyfxbookSentiment(): Promise<Record<string, MyfxSentiment>> {
-  // 开发环境走 Vite proxy，生产环境走 CORS proxy
-  const isDev = import.meta.env.DEV
-  const url = isDev
-    ? '/proxy/myfxbook'
-    : `https://corsproxy.io/?${encodeURIComponent(MYFXBOOK_URL)}`
-
-  const res = await fetch(url)
+  const res = await fetch('/api/proxy/myfxbook')
   if (!res.ok) throw new Error(`Myfxbook fetch failed: ${res.status}`)
   const html = await res.text()
 

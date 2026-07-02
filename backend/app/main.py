@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.core.database import init_db
 from app.core.rate_limit import limiter
 from app.engine.signal_engine import signal_loop
-from app.routers import account, auth, bridge, ea, notifications, orders, signals, trends, webhook, ws
+from app.routers import account, auth, bridge, ea, notifications, orders, proxy, signals, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.orders import stale_order_monitor_loop
 
@@ -63,6 +63,7 @@ app.include_router(bridge.router, prefix=settings.API_PREFIX)
 app.include_router(webhook.router, prefix=settings.API_PREFIX)
 app.include_router(account.router, prefix=settings.API_PREFIX)
 app.include_router(notifications.router, prefix=settings.API_PREFIX)
+app.include_router(proxy.router, prefix=settings.API_PREFIX)
 # WebSocket 路由 / WebSocket routers
 app.include_router(ws.router)
 
