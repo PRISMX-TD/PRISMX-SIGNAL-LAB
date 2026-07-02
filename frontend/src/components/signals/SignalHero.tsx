@@ -76,10 +76,9 @@ const SignalHero: FC<Props> = ({
         <circle cx="300" cy="90" r="1" fill="#fff" opacity="0.6" />
       </svg>
 
-      {/* Header row */}
+      {/* Header row：多周期趋势立场 */}
       <div className="flex items-center gap-2.5 relative z-10">
-        <h2 className="text-[19px] font-bold text-white">{t('signals.title')}</h2>
-        <span className="text-xs text-slate-400">{t('signals.subtitle')}</span>
+        <h2 className="text-[19px] font-bold text-white">{t('signals.focus.heading')}</h2>
         <div className="ml-auto hero-dots">
           {Array.from({ length: focusTotal }).map((_, i) => (
             <i key={i} className={i === focusIdx ? 'on' : ''} onClick={() => onSelectIdx(i)} />
@@ -90,11 +89,8 @@ const SignalHero: FC<Props> = ({
         <button type="button" onClick={onNext} className="grid h-7 w-7 place-items-center rounded-lg bg-white/5 text-white/60 hover:text-white" aria-label="next">›</button>
       </div>
 
-      {/* Current signal label */}
-      <div className="mt-4 text-xs text-slate-400 relative z-10">{t('signals.focus.heading')}</div>
-
       {/* Symbol + side chip */}
-      <div className="mt-1.5 flex items-center gap-2.5 relative z-10">
+      <div className="mt-4 flex items-center gap-2.5 relative z-10">
         <b className="text-[27px] tracking-[0.02em] text-white">{symbol}</b>
         {cnName && <span className="text-sm text-slate-300">{cnName}</span>}
         <span className={`chip ${stance === 'BULL' ? 'chip-buy' : stance === 'BEAR' ? 'chip-sell' : 'chip-dim'}`}>
