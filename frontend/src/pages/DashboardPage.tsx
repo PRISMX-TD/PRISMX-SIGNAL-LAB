@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useLive } from '../store/live'
 import { orderApi } from '../api/client'
+import { useMyfxbookSentiment } from '../api/useMyfxbookSentiment'
 import { clientOrderId } from '../api/utils'
 import type { Signal } from '../api/types'
 import SignalHero from '../components/signals/SignalHero'
@@ -23,6 +24,7 @@ export default function DashboardPage() {
   const { signals, anyOnline, accounts, loaded, refreshAll, quotes, trends } = useLive()
   const now = useNow(1000)
   const newIds = useNewSignalIds(signals)
+  const { sentiment: myfxSentiment } = useMyfxbookSentiment()
   const focusEntries = useFocusEntries(signals, now)
 
   const [focusIdx, setFocusIdx] = useState(0)
@@ -93,7 +95,7 @@ export default function DashboardPage() {
         <div className="dash-grid">
           {cur ? (
             <>
-              <SignalHero symbol={cur.symbol} cnName={nameOf(cur.symbol)} focusIdx={idx} focusTotal={focusEntries.length} stance={stance} trend={trends[cur.symbol]} onPrev={goPrev} onNext={goNext} onSelectIdx={setFocusIdx} />
+              <SignalHero symbol={cur.symbol} cnName={nameOf(cur.symbol)} focusIdx={idx} focusTotal={focusEntries.length} stance={stance} trend={trends[cur.symbol]} myfxSentiment={myfxSentiment[cur.symbol] ?? null} onPrev={goPrev} onNext={goNext} onSelectIdx={setFocusIdx} />
               {cur.signal ? <SignalExec signal={cur.signal} now={now} onTrade={(s) => setActiveSignal(s)} /> : (
                 <section className="card glass dash-exec p-4 flex items-center justify-center text-sm text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-slate-500 animate-breathe mr-2" />{t('signals.focus.noExecutable')}</section>
               )}

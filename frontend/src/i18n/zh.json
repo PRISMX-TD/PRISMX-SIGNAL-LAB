@@ -147,6 +147,8 @@
       "waiting": "正在等待信号",
       "marketSentiment": "全市场情绪",
       "tfDistribution": "多周期分布",
+      "communitySentiment": "社区情绪",
+      "noData": "暂无数据",
       "watching": "观望",
       "symbolsTotal": "共 {{n}} 个品种",
       "noExecutable": "暂无可执行信号 · AI 持续监控中",
