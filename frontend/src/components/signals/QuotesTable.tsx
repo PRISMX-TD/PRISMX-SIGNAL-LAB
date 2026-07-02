@@ -24,9 +24,9 @@ const QuotesTable: FC<Props> = ({ quotes, mt5Online }) => {
   const { t } = useTranslation()
 
   return (
-    <section className="card glass dash-quotes">
+    <section className="card glass dash-quotes p-5">
       {/* 标题栏：左「实时行情报价」右 MT5 状态 / header: title left, MT5 status right */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-3">
         <h3 className="text-[15px] font-bold text-white">{t('signals.focus.quotesHeading', '实时行情报价')}</h3>
         <div className="flex items-center gap-2 text-xs">
           <span className={`inline-block w-[7px] h-[7px] rounded-full ${mt5Online ? 'bg-up shadow-[0_0_10px_rgba(46,224,126,0.9)] animate-breathe' : 'bg-slate-500'}`} />
