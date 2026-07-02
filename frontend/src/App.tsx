@@ -5,6 +5,7 @@ import Layout from './components/Layout'
 import LandingPage from './pages/LandingPage'
 import LoginPage from './pages/LoginPage'
 import SignalsPage from './pages/SignalsPage'
+import DashboardPage from './pages/DashboardPage'
 import ChartsPage from './pages/ChartsPage'
 import BindPage from './pages/BindPage'
 import OrdersPage from './pages/OrdersPage'
@@ -18,11 +19,11 @@ function Protected({ children }: { children: ReactNode }) {
   return isAuthed ? <>{children}</> : <Navigate to="/login" replace />
 }
 
-// 未登录访问根路径展示主页，已登录则进入信号面板
-// Show landing at root when logged out; go to signals dashboard when authed.
+// 未登录访问根路径展示主页，已登录则进入仪表盘
+// Show landing at root when logged out; go to dashboard when authed.
 function Home() {
   const { isAuthed } = useAuth()
-  return isAuthed ? <Navigate to="/app" replace /> : <LandingPage />
+  return isAuthed ? <Navigate to="/dashboard" replace /> : <LandingPage />
 }
 
 export default function App() {
@@ -41,6 +42,7 @@ export default function App() {
                 </Protected>
               }
             >
+              <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/app" element={<SignalsPage />} />
               <Route path="/charts" element={<ChartsPage />} />
               <Route path="/bind" element={<BindPage />} />

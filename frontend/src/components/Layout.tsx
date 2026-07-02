@@ -43,6 +43,15 @@ function TabIcon({ name }: { name: string }) {
     strokeLinejoin: 'round' as const,
   }
   switch (name) {
+    case 'dashboard':
+      return (
+        <svg className={c} viewBox="0 0 24 24" {...p}>
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
+        </svg>
+      )
     case 'signals':
       return (
         <svg className={c} viewBox="0 0 24 24" {...p}>
@@ -129,6 +138,7 @@ export default function Layout() {
   }
 
   const tabs = [
+    { to: '/dashboard', icon: 'dashboard', label: t('nav.dashboard') },
     { to: '/app', icon: 'signals', label: t('nav.signals') },
     { to: '/charts', icon: 'charts', label: t('nav.charts') },
     { to: '/bind', icon: 'bind', label: t('nav.bind') },
@@ -156,6 +166,7 @@ export default function Layout() {
             </div>
 
             <nav className="hidden items-center gap-1 sm:flex">
+              <NavItem to="/dashboard" label={t('nav.dashboard')} />
               <NavItem to="/app" label={t('nav.signals')} />
               <NavItem to="/charts" label={t('nav.charts')} />
               <NavItem to="/bind" label={t('nav.bind')} />

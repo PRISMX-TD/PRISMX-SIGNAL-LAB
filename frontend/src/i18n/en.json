@@ -4,6 +4,7 @@
     "subtitle": "Prism Signal Lab"
   },
   "nav": {
+    "dashboard": "Dashboard",
     "signals": "Signals",
     "charts": "Charts",
     "bind": "Connect MT5",

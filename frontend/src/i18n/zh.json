@@ -4,6 +4,7 @@
     "subtitle": "棱镜信号实验室"
   },
   "nav": {
+    "dashboard": "仪表盘",
     "signals": "信号面板",
     "charts": "行情图表",
     "bind": "连接 MT5",
