@@ -53,7 +53,7 @@ const SignalOthers: FC<Props> = ({ entries, newIds, now, onTrade, onFocus, onVie
           return (
             <div
               key={sig.id}
-              className={`card glass sig-mini-card cursor-pointer ${isNew ? 'ring-2 ring-prism-500/70 animate-glow-pulse' : ''}`}
+              className="card glass sig-mini-card cursor-pointer"
               onClick={() => onFocus(idx)}
             >
               {/* Top row: symbol + RR */}

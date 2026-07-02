@@ -387,7 +387,7 @@ export default function FocusView({
                   <button
                     type="button"
                     onClick={() => setFocusIdx(i)}
-                    className={`glass flat-card flex w-full items-center gap-3 px-3 py-2.5 text-left ${isNew ? 'ring-2 ring-prism-500/70 animate-glow-pulse' : ''}`}
+                    className="glass flat-card flex w-full items-center gap-3 px-3 py-2.5 text-left"
                   >
                     <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ background: FOCUS_DOT[e.state] + '1f' }}>
                       <span className="h-2 w-2 rounded-full" style={{ background: FOCUS_DOT[e.state] }} />
@@ -411,7 +411,7 @@ export default function FocusView({
                   {/* 卡片形态：完整卡片 / card layout: full card */}
                   {viewMode === 'card' && (
                   <div
-                    className={`glass flat-card p-4 ${isNew ? 'ring-2 ring-prism-500/70 animate-glow-pulse' : ''}`}
+                    className="glass flat-card p-4"
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-2">

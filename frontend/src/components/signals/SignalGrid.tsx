@@ -103,7 +103,7 @@ const SignalGrid: FC<Props> = ({ signals, newIds, now, onTrade }) => {
           return (
             <div
               key={sig.id}
-              className={`card glass p-4 ${isNew ? 'ring-2 ring-prism-500/70 animate-glow-pulse' : ''}`}
+              className="card glass p-4"
             >
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-2">
