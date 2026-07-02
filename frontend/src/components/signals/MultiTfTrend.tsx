@@ -6,8 +6,8 @@ import { TREND_TFS } from './signalView'
 
 // 每种趋势方向的视觉：箭头 + 颜色 / arrow + color for each trend direction
 const TREND_VIS: Record<TrendDir, { arrow: string; color: string }> = {
-  UP: { arrow: '↑', color: '#2fe6a0' },
-  DOWN: { arrow: '↓', color: '#ff4d6d' },
+  UP: { arrow: '↑', color: '#2ee07e' },
+  DOWN: { arrow: '↓', color: '#ff4d67' },
   FLAT: { arrow: '→', color: '#64748b' },
 }
 

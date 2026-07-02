@@ -223,9 +223,9 @@ export default function FocusView({
             <span className="text-down">{t('signals.focus.bear')} {sentiment.short}</span>
           </div>
           <div className="flex h-2 overflow-hidden rounded-full bg-white/[0.06]">
-            <div style={{ width: `${longW}%`, background: 'linear-gradient(90deg,#1f9e6e,#2fe6a0)' }} />
+            <div style={{ width: `${longW}%`, background: 'linear-gradient(90deg,#1f9e6e,#2ee07e)' }} />
             <div className="flex-1" />
-            <div style={{ width: `${shortW}%`, background: 'linear-gradient(90deg,#ff4d6d,#b3263f)' }} />
+            <div style={{ width: `${shortW}%`, background: 'linear-gradient(90deg,#ff4d67,#c22743)' }} />
           </div>
           <div className="mt-1.5 text-center text-[10px] text-slate-500">
             {t('signals.focus.watching')} {sentiment.watch} · {t('signals.focus.symbolsTotal', { n: sentiment.total })}
@@ -282,7 +282,7 @@ export default function FocusView({
               <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
                 <div
                   className="h-full rounded-full"
-                  style={{ width: `${Math.round((calcCountdown(cur.signal!.expireAt, SIGNAL_LIFESPAN_MS, now)?.fraction ?? 0) * 100)}%`, background: 'linear-gradient(90deg,#7a2fff,#a779ff)' }}
+                  style={{ width: `${Math.round((calcCountdown(cur.signal!.expireAt, SIGNAL_LIFESPAN_MS, now)?.fraction ?? 0) * 100)}%`, background: 'linear-gradient(90deg,#7c3aed,#a855f7)' }}
                 />
               </div>
             </div>
@@ -449,7 +449,7 @@ export default function FocusView({
                       <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
                         <div
                           className="h-full rounded-full"
-                          style={{ width: `${Math.round((cd?.fraction ?? 0) * 100)}%`, background: 'linear-gradient(90deg,#7a2fff,#a779ff)' }}
+                          style={{ width: `${Math.round((cd?.fraction ?? 0) * 100)}%`, background: 'linear-gradient(90deg,#7c3aed,#a855f7)' }}
                         />
                       </div>
                     </div>

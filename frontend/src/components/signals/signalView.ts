@@ -48,7 +48,7 @@ export const FOCUS_TONE: Record<FocusState, { color: string; chipBg: string; glo
   LONG: { color: 'text-up', chipBg: 'bg-up/15 text-up', glow: 'rgba(47,230,160,.28)' },
   SHORT: { color: 'text-down', chipBg: 'bg-down/15 text-down', glow: 'rgba(255,77,109,.28)' },
 }
-export const FOCUS_DOT: Record<FocusState, string> = { WATCH: '#94a3b8', LONG: '#2fe6a0', SHORT: '#ff4d6d' }
+export const FOCUS_DOT: Record<FocusState, string> = { WATCH: '#94a3b8', LONG: '#2ee07e', SHORT: '#ff4d67' }
 
 // 多周期趋势要展示的固定周期顺序 / fixed order of timeframes shown in the trend widget
 export const TREND_TFS = ['M5', 'M15', 'M30', 'H1', 'H4'] as const
@@ -76,7 +76,7 @@ export function trendStance(trend?: Trend): TrendStance {
 
 // 立场视觉：颜色 + 光晕 + 圆点 / stance visuals
 export const STANCE_TONE: Record<TrendStance, { color: string; glow: string; dot: string }> = {
-  BULL: { color: 'text-up', glow: 'rgba(47,230,160,.28)', dot: '#2fe6a0' },
-  BEAR: { color: 'text-down', glow: 'rgba(255,77,109,.28)', dot: '#ff4d6d' },
+  BULL: { color: 'text-up', glow: 'rgba(46,224,126,.28)', dot: '#2ee07e' },
+  BEAR: { color: 'text-down', glow: 'rgba(255,77,103,.28)', dot: '#ff4d67' },
   NEUTRAL: { color: 'text-slate-400', glow: 'rgba(148,163,184,.22)', dot: '#94a3b8' },
 }

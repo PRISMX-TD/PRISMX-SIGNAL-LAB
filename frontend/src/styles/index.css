@@ -2,6 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── CSS 变量（与设计稿 :root 对齐）/ CSS variables aligned with design tokens ── */
+:root {
+  --bg: #06040b;
+  --card-a: rgba(255, 255, 255, 0.065);
+  --card-b: rgba(255, 255, 255, 0.025);
+  --nest: rgba(255, 255, 255, 0.055);
+  --nest-hi: rgba(255, 255, 255, 0.10);
+  --line: rgba(255, 255, 255, 0.09);
+  --line-hi: rgba(255, 255, 255, 0.20);
+  --text: #ffffff;
+  --text-2: #b9b1d4;
+  --text-3: #7d74a0;
+  --purple: #8b5cf6;
+  --purple-hi: #a78bfa;
+  --purple-vivid: #a855f7;
+  --up: #2ee07e;
+  --up-bg: rgba(46, 224, 126, 0.12);
+  --down: #ff4d67;
+  --down-bg: rgba(255, 77, 103, 0.12);
+  --gold: #f6c453;
+  --r-lg: 16px;
+  --r-md: 12px;
+  --spring: cubic-bezier(0.34, 1.45, 0.64, 1);
+}
+
 @layer base {
   html,
   body,
@@ -9,60 +34,116 @@
     height: 100%;
   }
 
+  html {
+    color-scheme: dark;
+  }
+
   body {
-    @apply bg-ink-950 text-slate-200 font-sans antialiased;
-    background-image:
-      radial-gradient(circle at 12% -8%, rgba(122, 47, 255, 0.06), transparent 42%),
-      radial-gradient(circle at 92% 2%, rgba(51, 225, 255, 0.03), transparent 40%),
-      radial-gradient(circle at 82% 100%, rgba(122, 47, 255, 0.04), transparent 45%);
-    background-attachment: fixed;
+    @apply antialiased;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Space Grotesk", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* 全局背景光晕（与设计稿 body::before / ::after 一致）*/
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    background:
+      radial-gradient(900px 500px at 10% -8%, rgba(124, 58, 237, 0.20), transparent 60%),
+      radial-gradient(700px 400px at 100% 4%, rgba(124, 58, 237, 0.10), transparent 55%),
+      radial-gradient(1000px 560px at 88% 112%, rgba(139, 92, 246, 0.16), transparent 62%);
+    pointer-events: none;
+  }
+
+  body::after {
+    content: "";
+    position: fixed;
+    right: -140px;
+    bottom: -160px;
+    z-index: -1;
+    width: 560px;
+    height: 420px;
+    pointer-events: none;
+    background:
+      radial-gradient(300px 90px at 60% 60%, rgba(168, 85, 247, 0.30), transparent 70%),
+      radial-gradient(380px 130px at 45% 75%, rgba(96, 78, 220, 0.20), transparent 70%);
+    transform: rotate(-24deg);
+  }
+
+  /* 数字等宽字体 / tabular numbers */
+  .num {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
   }
 
   ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
   }
   ::-webkit-scrollbar-thumb {
     @apply rounded-full;
-    background: linear-gradient(180deg, rgba(139, 70, 255, 0.6), rgba(122, 47, 255, 0.35));
+    background: linear-gradient(180deg, rgba(139, 92, 246, 0.5), rgba(124, 58, 237, 0.3));
   }
   ::-webkit-scrollbar-track {
     @apply bg-transparent;
   }
 
   ::selection {
-    background: rgba(139, 70, 255, 0.35);
+    background: rgba(139, 92, 246, 0.35);
     color: #fff;
   }
 }
 
 @layer components {
-  /* 液态玻璃面板 / liquid glass surface */
+  /* ── 液态玻璃卡片 / liquid glass card ── */
   .glass {
-    @apply relative rounded-card border border-white/[0.08] bg-white/[0.03] backdrop-blur-xl;
-    box-shadow:
-      0 8px 32px rgba(0, 0, 0, 0.45),
-      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    position: relative;
+    background: linear-gradient(180deg, var(--card-a), var(--card-b));
+    backdrop-filter: blur(24px) saturate(1.6);
+    -webkit-backdrop-filter: blur(24px) saturate(1.6);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+    transition: border-color 0.25s, transform 0.3s var(--spring), box-shadow 0.3s;
   }
 
-  /* 顶部一道高光，营造液态质感 / top sheen for the liquid feel */
+  /* 顶部高光线 / top sheen line */
   .glass::before {
     content: '';
-    @apply pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-card;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 1px;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.28), transparent);
   }
 
-  /* 去掉顶部高光横线（用于小图标按钮等）/ remove top sheen line (for small icon buttons) */
+  /* hover 上浮效果 / hover lift */
+  .glass.lift:hover {
+    border-color: var(--line-hi);
+    transform: translateY(-2px);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  }
+
+  /* 去掉顶部高光线（小按钮等）/ no top sheen */
   .no-sheen::before {
     content: none;
   }
 
-  /* 去掉卡片背后的外投影光晕，仅保留顶部内高光 / drop the outer glow shadow, keep inner top sheen */
+  /* 去掉外阴影，只保留内高光 / drop outer glow */
   .flat-card {
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
   }
 
-  /* 兼容旧 card 类，统一升级为玻璃风 / keep .card working, upgraded to glass */
+  /* 兼容旧 .card 类 / keep .card working */
   .card {
     @apply glass;
   }
@@ -72,53 +153,222 @@
     @apply glass transition-all duration-300;
   }
   .glass-neon:hover {
-    @apply border-prism-500/40;
+    border-color: rgba(139, 92, 246, 0.4);
     box-shadow:
       0 12px 40px rgba(0, 0, 0, 0.5),
-      0 0 26px rgba(122, 47, 255, 0.22),
-      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      0 0 26px rgba(139, 92, 246, 0.22),
+      inset 0 1px 0 rgba(255, 255, 255, 0.10);
   }
 
+  /* ── 按钮 / buttons ── */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-pill px-4 py-2 font-medium transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 42px;
+    padding: 0 20px;
+    border: none;
+    border-radius: 11px;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: transform 0.28s var(--spring), box-shadow 0.25s, filter 0.2s;
+  }
+  .btn:active {
+    transform: scale(0.96);
+  }
+  .btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 
-  /* 主按钮：唯一品牌交互色（紫）/ primary button: sole brand interactive color (purple) */
-  .btn-primary {
-    @apply btn relative overflow-hidden text-white;
-    background: linear-gradient(120deg, #7a2fff, #8b46ff 70%, #a779ff);
-    box-shadow: 0 6px 18px rgba(122, 47, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  .btn-primary,
+  .btn-brand {
+    background: linear-gradient(92deg, #7c3aed, #a855f7);
+    color: #fff;
+    box-shadow: 0 4px 22px rgba(139, 92, 246, 0.50);
   }
-  .btn-primary:hover {
-    box-shadow: 0 8px 26px rgba(122, 47, 255, 0.5),
-      inset 0 1px 0 rgba(255, 255, 255, 0.25);
-    filter: brightness(1.08);
+  .btn-primary:hover,
+  .btn-brand:hover {
+    filter: brightness(1.1);
+    box-shadow: 0 6px 30px rgba(139, 92, 246, 0.65);
   }
 
   .btn-ghost {
-    @apply btn border border-white/[0.08] bg-white/[0.05] text-prism-300 backdrop-blur-md hover:border-prism-500/60 hover:bg-prism-600/15 hover:text-prism-200;
+    background: var(--nest);
+    color: var(--text-2);
+    border: 1px solid var(--line);
+  }
+  .btn-ghost:hover {
+    border-color: var(--line-hi);
+    color: #fff;
   }
 
+  /* ── 输入框 / input ── */
   .input {
-    @apply w-full rounded-inner border border-white/[0.08] bg-white/[0.05] px-4 py-2.5 text-slate-100 placeholder:text-slate-500 backdrop-blur-md transition focus:border-prism-500 focus:outline-none focus:ring-2 focus:ring-prism-600/30;
+    width: 100%;
+    border-radius: var(--r-md);
+    border: 1px solid var(--line);
+    background: var(--nest);
+    padding: 10px 16px;
+    color: var(--text);
+    font: inherit;
+    font-size: 14px;
+    backdrop-filter: blur(12px);
+    transition: border-color 0.2s;
+    outline: none;
+  }
+  .input::placeholder {
+    color: var(--text-3);
+  }
+  .input:focus {
+    border-color: var(--purple);
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.20);
   }
 
   .label {
-    @apply mb-1.5 block text-sm text-slate-400;
+    @apply mb-1.5 block text-sm;
+    color: var(--text-2);
   }
 
+  /* ── 标签 / chip / tag ── */
   .tag {
-    @apply inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium;
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 7px;
+    font-size: 11.5px;
+    font-weight: 700;
   }
 
-  /* 霓虹渐变文字（收敛为紫系）/ neon gradient text (purple-only) */
-  .neon-text {
-    @apply bg-neon-gradient bg-clip-text text-transparent;
-    background-size: 200% auto;
-  }
-
-  /* 玻璃药丸标签 / glass pill chip */
   .chip {
-    @apply inline-flex items-center gap-1.5 rounded-pill border border-white/[0.08] bg-white/[0.05] px-3 py-1 text-xs text-slate-300 backdrop-blur-md;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 7px;
+    font-size: 11.5px;
+    font-weight: 700;
   }
+  .chip.buy,
+  .chip-buy {
+    background: var(--up-bg);
+    color: var(--up);
+    border: 1px solid rgba(46, 224, 126, 0.35);
+  }
+  .chip.sell,
+  .chip-sell {
+    background: var(--down-bg);
+    color: var(--down);
+    border: 1px solid rgba(255, 77, 103, 0.35);
+  }
+  .chip.live {
+    background: var(--up-bg);
+    color: var(--up);
+    border: 1px solid rgba(46, 224, 126, 0.3);
+    font-weight: 600;
+  }
+  .chip.dim,
+  .chip-dim {
+    background: var(--nest);
+    color: var(--text-2);
+    border: 1px solid var(--line);
+    font-weight: 500;
+  }
+  /* 计数徽章 / count badge */
+  .count-badge {
+    min-width: 21px;
+    height: 21px;
+    padding: 0 6px;
+    border-radius: 7px;
+    background: rgba(139, 92, 246, 0.25);
+    color: var(--purple-hi);
+    font-size: 12px;
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    border: 1px solid rgba(168, 139, 250, 0.35);
+  }
+
+  /* ── 分段控制器 / segmented control ── */
+  .seg {
+    display: flex;
+    background: var(--nest);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 3px;
+    gap: 2px;
+  }
+  .seg button {
+    height: 28px;
+    padding: 0 13px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-3);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .seg button:hover {
+    color: var(--text-2);
+  }
+  .seg button.on {
+    background: linear-gradient(92deg, #7c3aed, #a855f7);
+    color: #fff;
+    box-shadow: 0 2px 10px rgba(139, 92, 246, 0.4);
+  }
+
+  /* ── 渐变文字 / gradient text ── */
+  .neon-text {
+    background: linear-gradient(120deg, #a855f7 0%, #7c3aed 55%, #a78bfa 100%);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  /* ── 动画 / animations ── */
+  .animate-breathe {
+    animation: breathe 2.4s ease-in-out infinite;
+  }
+  .animate-fade-in-up {
+    animation: fade-in-up 0.5s ease-out both;
+  }
+  .animate-glow-pulse {
+    animation: glow-pulse 2.5s ease-in-out infinite;
+  }
+  .animate-spin {
+    animation: spin 0.8s linear infinite;
+  }
+}
+
+/* ── 全局 keyframes ── */
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@keyframes fade-in-up {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 16px rgba(139, 92, 246, 0.3); }
+  50% { box-shadow: 0 0 32px rgba(139, 92, 246, 0.6); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes pop {
+  0% { opacity: 0; transform: translateY(10px) scale(0.97); }
+  100% { opacity: 1; }
+}
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
 }

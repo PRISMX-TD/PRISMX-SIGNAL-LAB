@@ -4,37 +4,40 @@ export default {
   theme: {
     extend: {
       colors: {
-        // 黑紫主题 / black & purple theme
+        // 设计稿主色调 / design token colors
         ink: {
-          950: '#050307',
-          900: '#0a0710',
-          850: '#0f0a18',
+          950: '#06040b',
+          900: '#08050e',
+          850: '#0d0918',
           800: '#150e22',
           700: '#1d152e',
           600: '#2a2042',
         },
         prism: {
-          200: '#ddccff',
-          300: '#cbb4ff',
-          400: '#a779ff',
-          500: '#8b46ff',
-          600: '#7a2fff',
-          700: '#6320d6',
+          200: '#e9d5ff',
+          300: '#a78bfa',
+          400: '#a855f7',
+          500: '#8b5cf6',
+          600: '#7c3aed',
+          700: '#6d28d9',
         },
-        // neon 强调色 / neon accents
+        // 强调色 / accent colors
         neon: {
-          violet: '#b388ff',
+          violet: '#a78bfa',
           cyan: '#33e1ff',
           pink: '#ff4ddb',
           lime: '#9dff5b',
         },
-        glow: '#b388ff',
-        up: '#2fe6a0',
-        down: '#ff4d6d',
+        glow: '#a78bfa',
+        up: '#2ee07e',
+        down: '#ff4d67',
+        // 设计稿语义色 / design semantic colors
+        card: 'rgba(255,255,255,0.065)',
+        line: 'rgba(255,255,255,0.09)',
       },
       fontFamily: {
-        display: ['Orbitron', 'Space Grotesk', 'sans-serif'],
-        sans: ['Sora', 'system-ui', 'sans-serif'],
+        display: ['"Space Grotesk"', 'Orbitron', 'sans-serif'],
+        sans: ['"Space Grotesk"', 'Sora', 'system-ui', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
       },
       // 统一圆角规范 / unified radius tokens: card 18 / inner 12 / pill 10
@@ -44,21 +47,21 @@ export default {
         pill: '10px',
       },
       boxShadow: {
-        prism: '0 0 24px rgba(139, 70, 255, 0.35)',
-        'prism-lg': '0 0 48px rgba(139, 70, 255, 0.45)',
+        prism: '0 0 24px rgba(139, 92, 246, 0.35)',
+        'prism-lg': '0 0 48px rgba(139, 92, 246, 0.45)',
         'neon-cyan': '0 0 24px rgba(51, 225, 255, 0.45)',
         'neon-pink': '0 0 24px rgba(255, 77, 219, 0.45)',
         // 液态玻璃：外发光 + 内高光 / liquid glass: outer glow + inner highlight
-        glass: '0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
+        glass: '0 12px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.10)',
         'glass-lg':
-          '0 24px 60px rgba(0, 0, 0, 0.55), 0 0 40px rgba(139, 70, 255, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.10)',
+          '0 24px 60px rgba(0, 0, 0, 0.55), 0 0 40px rgba(139, 92, 246, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.10)',
       },
       backgroundImage: {
         'prism-grid':
-          'linear-gradient(rgba(139,70,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(139,70,255,0.06) 1px, transparent 1px)',
+          'linear-gradient(rgba(139,92,246,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(139,92,246,0.06) 1px, transparent 1px)',
         // 收敛为紫系单义渐变：品牌/交互统一用紫 / converged to purple-only brand gradient
         'neon-gradient':
-          'linear-gradient(120deg, #a779ff 0%, #8b46ff 55%, #cbb4ff 100%)',
+          'linear-gradient(120deg, #a855f7 0%, #7c3aed 55%, #a78bfa 100%)',
         'glass-sheen':
           'linear-gradient(135deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.02) 40%, rgba(255,255,255,0) 60%)',
       },

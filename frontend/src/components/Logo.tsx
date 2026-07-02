@@ -9,8 +9,8 @@ export default function Logo({ size = 32 }: { size?: number }) {
       <defs>
         <linearGradient id={gid} x1="8" y1="6" x2="40" y2="42" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor="#c8a8ff" />
-          <stop offset="0.5" stopColor="#a779ff" />
-          <stop offset="1" stopColor="#7a2fff" />
+          <stop offset="0.5" stopColor="#a855f7" />
+          <stop offset="1" stopColor="#7c3aed" />
         </linearGradient>
         <filter id={fid} x="-40%" y="-40%" width="180%" height="180%">
           <feGaussianBlur stdDeviation="1.6" result="blur" />
