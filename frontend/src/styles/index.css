@@ -4,7 +4,7 @@
 
 /* ── CSS 变量（与设计稿 :root 对齐）/ CSS variables aligned with design tokens ── */
 :root {
-  --bg: #06040b;
+  --bg: #000000;
   --card-a: rgba(255, 255, 255, 0.065);
   --card-b: rgba(255, 255, 255, 0.025);
   --nest: rgba(255, 255, 255, 0.055);
@@ -48,33 +48,7 @@
     overflow-x: hidden;
   }
 
-  /* 全局背景光晕（与设计稿 body::before / ::after 一致）*/
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    z-index: -2;
-    background:
-      radial-gradient(900px 500px at 10% -8%, rgba(124, 58, 237, 0.20), transparent 60%),
-      radial-gradient(700px 400px at 100% 4%, rgba(124, 58, 237, 0.10), transparent 55%),
-      radial-gradient(1000px 560px at 88% 112%, rgba(139, 92, 246, 0.16), transparent 62%);
-    pointer-events: none;
-  }
-
-  body::after {
-    content: "";
-    position: fixed;
-    right: -140px;
-    bottom: -160px;
-    z-index: -1;
-    width: 560px;
-    height: 420px;
-    pointer-events: none;
-    background:
-      radial-gradient(300px 90px at 60% 60%, rgba(168, 85, 247, 0.30), transparent 70%),
-      radial-gradient(380px 130px at 45% 75%, rgba(96, 78, 220, 0.20), transparent 70%);
-    transform: rotate(-24deg);
-  }
+  /* 全局背景光晕已移除 — 纯黑背景 / global background glow removed — pure black */
 
   /* 数字等宽字体 / tabular numbers */
   .num {

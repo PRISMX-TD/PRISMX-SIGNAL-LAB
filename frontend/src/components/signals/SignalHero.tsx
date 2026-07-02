@@ -35,37 +35,6 @@ const SignalHero: FC<Props> = ({
 
   return (
     <section className="card glass hero-card dash-hero p-5">
-      {/* Nebula background */}
-      <svg className="hero-nebula" viewBox="0 0 460 320" preserveAspectRatio="xMidYMid slice">
-        <defs>
-          <linearGradient id="hng1" x1="0" y1="1" x2="1" y2="0">
-            <stop offset="0" stopColor="#4c1d95" stopOpacity="0" />
-            <stop offset="0.45" stopColor="#7c3aed" stopOpacity="0.85" />
-            <stop offset="0.8" stopColor="#a855f7" stopOpacity="0.9" />
-            <stop offset="1" stopColor="#60a5fa" stopOpacity="0.5" />
-          </linearGradient>
-          <linearGradient id="hng2" x1="0" y1="1" x2="1" y2="0">
-            <stop offset="0" stopColor="#7c3aed" stopOpacity="0" />
-            <stop offset="0.6" stopColor="#c084fc" stopOpacity="0.9" />
-            <stop offset="1" stopColor="#e879f9" stopOpacity="0.6" />
-          </linearGradient>
-        </defs>
-        <path d="M40,300 C160,270 240,200 300,140 C350,90 400,60 450,40" stroke="url(#hng1)" strokeWidth="120" fill="none" strokeLinecap="round" opacity="0.10" />
-        <path d="M40,300 C160,270 240,200 300,140 C350,90 400,60 450,40" stroke="url(#hng1)" strokeWidth="84" fill="none" strokeLinecap="round" opacity="0.14" />
-        <path d="M40,300 C160,270 240,200 300,140 C350,90 400,60 450,40" stroke="url(#hng1)" strokeWidth="54" fill="none" strokeLinecap="round" opacity="0.20" />
-        <path d="M40,300 C160,270 240,200 300,140 C350,90 400,60 450,40" stroke="url(#hng1)" strokeWidth="30" fill="none" strokeLinecap="round" opacity="0.30" />
-        <path d="M60,310 C180,280 260,210 320,150 C370,100 415,70 460,50" stroke="url(#hng2)" strokeWidth="20" fill="none" strokeLinecap="round" opacity="0.35" />
-        <path d="M60,310 C180,280 260,210 320,150 C370,100 415,70 460,50" stroke="url(#hng2)" strokeWidth="9" fill="none" strokeLinecap="round" opacity="0.7" />
-        <path d="M60,310 C180,280 260,210 320,150 C370,100 415,70 460,50" stroke="url(#hng2)" strokeWidth="2.5" fill="none" strokeLinecap="round" opacity="0.95" />
-        <path d="M120,320 C220,290 300,230 360,170" stroke="url(#hng1)" strokeWidth="46" fill="none" strokeLinecap="round" opacity="0.14" />
-        <path d="M120,320 C220,290 300,230 360,170" stroke="url(#hng1)" strokeWidth="18" fill="none" strokeLinecap="round" opacity="0.25" />
-        <circle cx="330" cy="130" r="1.6" fill="#fff" opacity="0.9" />
-        <circle cx="380" cy="80" r="1.2" fill="#e9d5ff" opacity="0.8" />
-        <circle cx="270" cy="180" r="1.4" fill="#fff" opacity="0.7" />
-        <circle cx="415" cy="140" r="1.1" fill="#e9d5ff" opacity="0.7" />
-        <circle cx="300" cy="90" r="1" fill="#fff" opacity="0.6" />
-      </svg>
-
       {/* Header row：多周期趋势立场 */}
       <div className="flex items-center gap-2.5 relative z-10">
         <h2 className="text-[19px] font-bold text-white">{t('signals.focus.heading')}</h2>
