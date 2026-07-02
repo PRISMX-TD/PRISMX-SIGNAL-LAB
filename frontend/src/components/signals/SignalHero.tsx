@@ -1,16 +1,9 @@
-// 英雄卡：当前聚焦品种的多周期趋势分析 + 全市场情绪条
-// Hero card: current focus symbol trend analysis + market sentiment bar
-import { type FC } from 'react'
+// 英雄卡：当前聚焦品种的多周期趋势 + 各周期分布条
+// Hero card: current focus symbol trend analysis + per-symbol TF distribution bar
+import { type FC, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Trend, TrendDir } from '../../api/types'
 import { TREND_TFS, type TrendStance } from './signalView'
-
-interface Sentiment {
-  long: number
-  short: number
-  watch: number
-  total: number
-}
 
 interface Props {
   symbol: string
@@ -19,7 +12,6 @@ interface Props {
   focusTotal: number
   stance: TrendStance
   trend: Trend | undefined
-  sentiment: Sentiment
   onPrev: () => void
   onNext: () => void
   onSelectIdx: (i: number) => void
@@ -33,14 +25,24 @@ const TREND_VIS: Record<TrendDir, { arrow: string; color: string }> = {
 
 const SignalHero: FC<Props> = ({
   symbol, cnName, focusIdx, focusTotal,
-  stance, trend, sentiment, onPrev, onNext, onSelectIdx,
+  stance, trend, onPrev, onNext, onSelectIdx,
 }) => {
   const { t } = useTranslation()
   const stanceLabel = stance === 'BULL' ? t('signals.focus.bull') : stance === 'BEAR' ? t('signals.focus.bear') : t('signals.focus.neutral')
   const stanceNote = stance === 'BULL' ? t('signals.focus.adviceBull') : stance === 'BEAR' ? t('signals.focus.adviceBear') : t('signals.focus.adviceNeutral')
-  const total = Math.max(1, sentiment.total)
-  const longPct = Math.round((sentiment.long / total) * 100)
-  const shortPct = Math.round((sentiment.short / total) * 100)
+
+  // 由当前品种的5个周期方向算出分布百分比 / per-symbol TF distribution
+  const tfDist = useMemo(() => {
+    let up = 0, down = 0, flat = 0
+    for (const tf of TREND_TFS) {
+      const dir = trend?.timeframes?.[tf]
+      if (dir === 'UP') up++
+      else if (dir === 'DOWN') down++
+      else flat++
+    }
+    const total = Math.max(1, up + down + flat)
+    return { upPct: Math.round((up / total) * 100), downPct: Math.round((down / total) * 100) }
+  }, [trend])
 
   return (
     <section className="card glass hero-card dash-hero p-5">
@@ -131,17 +133,17 @@ const SignalHero: FC<Props> = ({
         })}
       </div>
 
-      {/* Market sentiment bar */}
+      {/* Per-symbol TF distribution bar */}
       <div className="mt-5 relative z-10">
         <div className="flex justify-between text-xs mb-2">
-          <span className="text-slate-400">{t('signals.focus.marketSentiment')}</span>
-          <span className="text-down font-bold">{t('signals.focus.bear')} {shortPct}%</span>
+          <span className="text-slate-400">{t('signals.focus.tfDistribution')}</span>
+          <span className="text-down font-bold">{t('signals.focus.bear')} {tfDist.downPct}%</span>
         </div>
         <div className="senti-bar">
-          <i className="a" style={{ width: `${longPct}%` }} />
-          <i className="b" style={{ width: `${shortPct}%` }} />
+          <i className="a" style={{ width: `${tfDist.upPct}%` }} />
+          <i className="b" style={{ width: `${tfDist.downPct}%` }} />
         </div>
-        <div className="mt-2 text-xs text-up font-bold">{t('signals.focus.bull')} {longPct}%</div>
+        <div className="mt-2 text-xs text-up font-bold">{t('signals.focus.bull')} {tfDist.upPct}%</div>
       </div>
     </section>
   )

@@ -146,6 +146,7 @@
       "adviceShort": "Bearish pressure building, consider going short.",
       "waiting": "Waiting for a signal",
       "marketSentiment": "Market sentiment",
+      "tfDistribution": "TF Distribution",
       "watching": "Watching",
       "symbolsTotal": "{{n}} symbols",
       "noExecutable": "No executable signal · AI monitoring",
