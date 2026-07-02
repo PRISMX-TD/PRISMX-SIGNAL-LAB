@@ -84,27 +84,16 @@
     -webkit-backdrop-filter: blur(24px) saturate(1.6);
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.10);
-    transition: border-color 0.25s, transform 0.3s var(--spring), box-shadow 0.3s;
+    box-shadow: none;
+    transition: border-color 0.25s, transform 0.3s var(--spring);
   }
 
-  /* 顶部高光线 / top sheen line */
-  .glass::before {
-    content: '';
-    position: absolute;
-    inset-inline: 0;
-    top: 0;
-    height: 1px;
-    border-radius: var(--r-lg) var(--r-lg) 0 0;
-    pointer-events: none;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.28), transparent);
-  }
+  /* 顶部高光线已移除 / top sheen removed */
 
   /* hover 上浮效果 / hover lift */
   .glass.lift:hover {
     border-color: var(--line-hi);
     transform: translateY(-2px);
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
   }
 
   /* 去掉顶部高光线（小按钮等）/ no top sheen */
@@ -128,10 +117,6 @@
   }
   .glass-neon:hover {
     border-color: rgba(139, 92, 246, 0.4);
-    box-shadow:
-      0 12px 40px rgba(0, 0, 0, 0.5),
-      0 0 26px rgba(139, 92, 246, 0.22),
-      inset 0 1px 0 rgba(255, 255, 255, 0.10);
   }
 
   /* ── 按钮 / buttons ── */
