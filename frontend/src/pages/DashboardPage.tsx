@@ -114,7 +114,7 @@ export default function DashboardPage() {
                   <h2 className="text-lg font-bold text-white">{t('signals.title')}</h2>
                   <p className="text-sm text-slate-400 max-w-xs">{t('signals.waitingForSignals', '等待信号引擎或 TradingView 推送信号……')}</p>
                 </section>
-                <QuotesTable quotes={quotes} mt5Online={anyOnline} focusSymbol={cur?.symbol} />
+                <QuotesTable quotes={quotes} mt5Online={anyOnline} />
               </div>
               <div className="dash-col-2">
                 <section className="card glass dash-exec p-4 flex items-center justify-center text-sm text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-slate-500 animate-breathe mr-2" />{t('signals.focus.noExecutable')}</section>
