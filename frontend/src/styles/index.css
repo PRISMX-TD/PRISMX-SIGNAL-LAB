@@ -498,6 +498,10 @@
     grid-template-columns: 1fr 1fr;
     gap: 10px;
   }
+  /* 三列变体用于信号卡片 / 3-col variant for signal cards */
+  .sl-tp-grid.three {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
   .tile-sl {
     border: 1px solid rgba(255, 77, 103, 0.45);
     background: rgba(255, 77, 103, 0.08);

@@ -120,7 +120,7 @@ const SignalGrid: FC<Props> = ({ signals, newIds, now, onTrade }) => {
                 </div>
               </div>
 
-              <div className="sl-tp-grid mt-3">
+              <div className="sl-tp-grid three mt-3">
                 <div className="exec-tile" style={{ background: 'rgba(255,255,255,0.03)' }}>
                   <div className="cap">{t('signals.colEntry')}</div>
                   <div className="val num" style={{ color: '#fff', fontSize: '13px' }}>{sig.entry ?? '-'}</div>
