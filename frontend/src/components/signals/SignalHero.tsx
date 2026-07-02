@@ -34,7 +34,7 @@ const SignalHero: FC<Props> = ({
   const stanceNote = stance === 'BULL' ? t('signals.focus.adviceBull') : stance === 'BEAR' ? t('signals.focus.adviceBear') : t('signals.focus.adviceNeutral')
 
   return (
-    <section className="card glass hero-card dash-hero p-5">
+    <section className="dash-hero p-5" style={{ background: 'transparent', border: 'none' }}>
       {/* Nebula background */}
       <svg className="hero-nebula" viewBox="0 0 460 320" preserveAspectRatio="xMidYMid slice">
         <defs>
