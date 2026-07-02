@@ -15,7 +15,6 @@ interface Sentiment {
 interface Props {
   symbol: string
   cnName: string
-  entriesCount: number
   focusIdx: number
   focusTotal: number
   stance: TrendStance
@@ -33,7 +32,7 @@ const TREND_VIS: Record<TrendDir, { arrow: string; color: string }> = {
 }
 
 const SignalHero: FC<Props> = ({
-  symbol, cnName, entriesCount, focusIdx, focusTotal,
+  symbol, cnName, focusIdx, focusTotal,
   stance, trend, sentiment, onPrev, onNext, onSelectIdx,
 }) => {
   const { t } = useTranslation()
@@ -112,10 +111,6 @@ const SignalHero: FC<Props> = ({
               <path d="M12 5v14M5 12l7 7 7-7" />
             </svg>
           )}
-        </div>
-        <div className="pb-2">
-          <div className="text-xs text-slate-300">{t('signals.focus.trendLabel')}</div>
-          <div className="conf-val num">{entriesCount}</div>
         </div>
       </div>
 

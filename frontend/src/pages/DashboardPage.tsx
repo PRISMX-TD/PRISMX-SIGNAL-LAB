@@ -104,7 +104,7 @@ export default function DashboardPage() {
         <div className="dash-grid">
           {cur ? (
             <>
-              <SignalHero symbol={cur.symbol} cnName={nameOf(cur.symbol)} entriesCount={focusEntries.length} focusIdx={idx} focusTotal={focusEntries.length} stance={stance} trend={trends[cur.symbol]} sentiment={sentiment} onPrev={goPrev} onNext={goNext} onSelectIdx={setFocusIdx} />
+              <SignalHero symbol={cur.symbol} cnName={nameOf(cur.symbol)} focusIdx={idx} focusTotal={focusEntries.length} stance={stance} trend={trends[cur.symbol]} sentiment={sentiment} onPrev={goPrev} onNext={goNext} onSelectIdx={setFocusIdx} />
               {cur.signal ? <SignalExec signal={cur.signal} now={now} onTrade={(s) => setActiveSignal(s)} /> : (
                 <section className="card glass dash-exec p-4 flex items-center justify-center text-sm text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-slate-500 animate-breathe mr-2" />{t('signals.focus.noExecutable')}</section>
               )}
