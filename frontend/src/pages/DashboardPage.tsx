@@ -99,9 +99,7 @@ export default function DashboardPage() {
                 <QuotesTable quotes={quotes} mt5Online={anyOnline} focusSymbol={cur?.symbol} />
               </div>
               <div className="dash-col-2">
-                {cur.signal ? <SignalExec signal={cur.signal} now={now} onTrade={(s) => setActiveSignal(s)} /> : (
-                  <section className="card glass dash-exec p-4 flex items-center justify-center text-sm text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-slate-500 animate-breathe mr-2" />{t('signals.focus.noExecutable')}</section>
-                )}
+                <SignalExec signal={cur.signal} now={now} onTrade={(s) => setActiveSignal(s)} />
                 <MarketOverview signals={signals} trends={trends} />
               </div>
               <SignalOthers entries={otherEntries} now={now} onTrade={(s) => setActiveSignal(s)} onFocus={(i) => setFocusIdx(i)} onViewAll={() => navigate('/app')} />
@@ -117,7 +115,7 @@ export default function DashboardPage() {
                 <QuotesTable quotes={quotes} mt5Online={anyOnline} />
               </div>
               <div className="dash-col-2">
-                <section className="card glass dash-exec p-4 flex items-center justify-center text-sm text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-slate-500 animate-breathe mr-2" />{t('signals.focus.noExecutable')}</section>
+                <SignalExec signal={null} now={now} onTrade={(s) => setActiveSignal(s)} />
                 <MarketOverview signals={signals} trends={trends} />
               </div>
               <section className="card glass dash-others p-4 flex items-center justify-center text-sm text-slate-500">{t('signals.focus.noExecutable')}</section>

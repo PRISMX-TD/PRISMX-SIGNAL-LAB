@@ -7,19 +7,22 @@ import { calcRiskReward, calcCountdown, fmtTime } from '../../api/utils'
 import { SIGNAL_LIFESPAN_MS, rrTone } from './signalView'
 
 interface Props {
-  signal: Signal
+  signal: Signal | null
   now: number
   onTrade: (s: Signal) => void
 }
 
+// 无信号时的骨架同样撑满高度，避免卡片随有无信号忽大忽小
+// keep the same skeleton height when there's no signal, so the card
+// never shrinks/grows depending on whether a signal is present
 const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
   const { t } = useTranslation()
-  const rr = calcRiskReward(signal.symbol, signal.entry, signal.stopLoss, signal.takeProfit)
-  const cd = calcCountdown(signal.expireAt, SIGNAL_LIFESPAN_MS, now)
-  const isBuy = signal.side === 'BUY'
+  const rr = signal ? calcRiskReward(signal.symbol, signal.entry, signal.stopLoss, signal.takeProfit) : null
+  const cd = signal ? calcCountdown(signal.expireAt, SIGNAL_LIFESPAN_MS, now) : null
+  const isBuy = signal?.side === 'BUY'
   const sideTag = isBuy ? t('common.buy') : t('common.sell')
-  const symName = t(`signals.symbolNames.${signal.symbol}`, { defaultValue: '' })
-  const indicatorLabel = signal.indicator ?? t('signals.indicatorNone')
+  const symName = signal ? t(`signals.symbolNames.${signal.symbol}`, { defaultValue: '' }) : ''
+  const indicatorLabel = signal ? signal.indicator ?? t('signals.indicatorNone') : t('signals.focus.noExecutable')
 
   // 倒计时颜色：剩余不足2分钟变红 / countdown turns red when < 2 min
   const cdTone = cd && cd.remainMs < 2 * 60 * 1000 ? 'text-down' : 'text-slate-300'
@@ -47,29 +50,29 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
         {/* 品种行：名称 + 代码 + 方向 / symbol + code + side */}
         <div className="exec-sym-row">
           <span className="text-[15px] font-bold leading-none">
-            {symName || signal.symbol}
+            {signal ? symName || signal.symbol : '-'}
           </span>
           {symName && (
-            <span className="text-[11px] text-slate-400 font-mono">{signal.symbol}</span>
+            <span className="text-[11px] text-slate-400 font-mono">{signal!.symbol}</span>
           )}
-          <span className={`chip ${isBuy ? 'chip-buy' : 'chip-sell'}`}>{sideTag}</span>
+          {signal && <span className={`chip ${isBuy ? 'chip-buy' : 'chip-sell'}`}>{sideTag}</span>}
         </div>
 
         {/* 入场价 / Entry price */}
         <div className="entry-block">
           <div className="cap">{t('signals.colEntry').toUpperCase()}</div>
-          <div className="val num">{signal.entry ?? '-'}</div>
+          <div className="val num">{signal?.entry ?? '-'}</div>
         </div>
 
         {/* 止损 / 止盈 / SL + TP */}
         <div className="sl-tp-grid mt-4">
           <div className="exec-tile tile-sl">
             <div className="cap">{t('signals.colSl')}</div>
-            <div className="val num">{signal.stopLoss ?? '-'}</div>
+            <div className="val num">{signal?.stopLoss ?? '-'}</div>
           </div>
           <div className="exec-tile tile-tp">
             <div className="cap">{t('signals.colTp')}</div>
-            <div className="val num">{signal.takeProfit ?? '-'}</div>
+            <div className="val num">{signal?.takeProfit ?? '-'}</div>
           </div>
         </div>
 
@@ -90,7 +93,11 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
         </div>
 
         {/* 下单按钮 / Trade button */}
-        <button onClick={() => onTrade(signal)} className="btn btn-primary exec-full-btn mt-auto">
+        <button
+          onClick={() => signal && onTrade(signal)}
+          disabled={!signal}
+          className="btn btn-primary exec-full-btn mt-auto disabled:opacity-40 disabled:cursor-not-allowed"
+        >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
           </svg>
@@ -111,8 +118,8 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <b className="text-lg font-bold text-white">{symName || signal.symbol}</b>
-              <span className={`chip ${isBuy ? 'chip-buy' : 'chip-sell'}`}>{sideTag}</span>
+              <b className="text-lg font-bold text-white">{signal ? symName || signal.symbol : '-'}</b>
+              {signal && <span className={`chip ${isBuy ? 'chip-buy' : 'chip-sell'}`}>{sideTag}</span>}
             </div>
             {symName && (
               <div className="text-[11px] text-slate-400 mt-0.5">{indicatorLabel}</div>
@@ -129,15 +136,15 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
         <div className="sl-tp-grid three mt-3">
           <div className="exec-tile" style={{ background: 'rgba(255,255,255,0.03)' }}>
             <div className="cap">{t('signals.colEntry')}</div>
-            <div className="val num" style={{ color: '#fff', fontSize: '13px' }}>{signal.entry ?? '-'}</div>
+            <div className="val num" style={{ color: '#fff', fontSize: '13px' }}>{signal?.entry ?? '-'}</div>
           </div>
           <div className="exec-tile tile-sl">
             <div className="cap">{t('signals.colSl')}</div>
-            <div className="val num" style={{ fontSize: '13px' }}>{signal.stopLoss ?? '-'}</div>
+            <div className="val num" style={{ fontSize: '13px' }}>{signal?.stopLoss ?? '-'}</div>
           </div>
           <div className="exec-tile tile-tp">
             <div className="cap">{t('signals.colTp')}</div>
-            <div className="val num" style={{ fontSize: '13px' }}>{signal.takeProfit ?? '-'}</div>
+            <div className="val num" style={{ fontSize: '13px' }}>{signal?.takeProfit ?? '-'}</div>
           </div>
         </div>
 
@@ -154,9 +161,13 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
         <div className="flex items-center justify-between mt-3">
           <div className="min-w-0 flex-1">
             <div className="text-sm text-slate-300 truncate">{indicatorLabel}</div>
-            <div className="text-[10px] text-slate-600 mt-0.5">{fmtTime(signal.createdAt)}</div>
+            <div className="text-[10px] text-slate-600 mt-0.5">{signal ? fmtTime(signal.createdAt) : ''}</div>
           </div>
-          <button onClick={() => onTrade(signal)} className="btn btn-primary rounded-xl px-6 py-2 text-[13px] font-semibold shrink-0 ml-3">
+          <button
+            onClick={() => signal && onTrade(signal)}
+            disabled={!signal}
+            className="btn btn-primary rounded-xl px-6 py-2 text-[13px] font-semibold shrink-0 ml-3 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
             {t('signals.trade')}
           </button>
         </div>
