@@ -46,6 +46,12 @@
     font-size: 14px;
     min-height: 100vh;
     overflow-x: hidden;
+    /* 锁死缩放：禁用双击放大与文字自动缩放，营造原生 App 体验 */
+    /* Lock zoom: disable double-tap zoom and text auto-resize for a native-app feel */
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
   }
 
   /* 全局背景光晕已移除 — 纯黑背景 / global background glow removed — pure black */

@@ -60,6 +60,21 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submitting])
 
+  // 手机端返回手势/按钮：关闭本弹窗而非切换页面
+  // Mobile back gesture/button: close this modal instead of navigating pages
+  useEffect(() => {
+    let poppedByBack = false
+    window.history.pushState({ __orderModal: true }, '')
+    const onPop = () => { poppedByBack = true; onCancelRef.current() }
+    window.addEventListener('popstate', onPop)
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      // 若通过点 X / 确认关闭（非返回触发），回收压入的历史条目
+      // If closed via X / confirm (not back), pop the history entry we pushed
+      if (!poppedByBack && window.history.state?.__orderModal) window.history.back()
+    }
+  }, [])
+
   const getPct = (clientX: number) => {
     const el = trackRef.current
     if (!el) return 0

@@ -20,23 +20,17 @@ const SignalGrid: FC<Props> = ({ signals, now, onTrade }) => {
   const [sideF, setSideF] = useState<'ALL' | 'BUY' | 'SELL'>(
     () => (getPref<string>('signals', 'sideF', 'ALL')) as 'ALL' | 'BUY' | 'SELL'
   )
-  const [statusF, setStatusF] = useState<'ALL' | 'ACTIVE'>(
-    () => (getPref<string>('signals', 'statusF', 'ALL')) as 'ALL' | 'ACTIVE'
-  )
   const [sortF, setSortF] = useState<'latest' | 'expiry'>(
     () => (getPref<string>('signals', 'sortF', 'latest')) as 'latest' | 'expiry'
   )
 
   useEffect(() => { setPref('signals', 'sideF', sideF) }, [sideF, setPref])
-  useEffect(() => { setPref('signals', 'statusF', statusF) }, [statusF, setPref])
   useEffect(() => { setPref('signals', 'sortF', sortF) }, [sortF, setPref])
 
   // 手机端：点击循环切换筛选值，无需列出全部选项 / mobile: tap to cycle filter value
   const cycleSide = () => setSideF(s => (s === 'ALL' ? 'BUY' : s === 'BUY' ? 'SELL' : 'ALL'))
-  const cycleStatus = () => setStatusF(s => (s === 'ALL' ? 'ACTIVE' : 'ALL'))
   const cycleSort = () => setSortF(s => (s === 'latest' ? 'expiry' : 'latest'))
   const sideLabel = sideF === 'ALL' ? t('signals.all') : sideF === 'BUY' ? t('common.buy') : t('common.sell')
-  const statusLabel = statusF === 'ALL' ? t('signals.all') : t('signals.active')
   const sortLabel = sortF === 'latest' ? t('signals.sort.latest') : t('signals.sort.expiry')
 
   const filtered = useMemo(() => {
@@ -45,7 +39,6 @@ const SignalGrid: FC<Props> = ({ signals, now, onTrade }) => {
         const eff = effectiveStatus(s, now)
         if (eff === 'EXPIRED') return false
         if (sideF !== 'ALL' && s.side !== sideF) return false
-        if (statusF !== 'ALL' && eff !== statusF) return false
         return true
       })
     if (sortF === 'expiry') {
@@ -58,7 +51,7 @@ const SignalGrid: FC<Props> = ({ signals, now, onTrade }) => {
       list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     }
     return list
-  }, [signals, now, sideF, statusF, sortF])
+  }, [signals, now, sideF, sortF])
 
   return (
     <div>
@@ -81,14 +74,6 @@ const SignalGrid: FC<Props> = ({ signals, now, onTrade }) => {
         </div>
         <span className="fsep" />
         <div className="fgroup">
-          <span className="fk">{t('signals.filterStatus')}</span>
-          <div className="seg-pill">
-            <button className={statusF === 'ALL' ? 'on' : ''} onClick={() => setStatusF('ALL')}>{t('signals.all')}</button>
-            <button className={statusF === 'ACTIVE' ? 'on' : ''} onClick={() => setStatusF('ACTIVE')}>{t('signals.active')}</button>
-          </div>
-        </div>
-        <span className="fsep" />
-        <div className="fgroup">
           <span className="fk">{t('signals.sortBy')}</span>
           <div className="seg-pill">
             <button className={sortF === 'latest' ? 'on' : ''} onClick={() => setSortF('latest')}>{t('signals.sort.latest')}</button>
@@ -103,13 +88,6 @@ const SignalGrid: FC<Props> = ({ signals, now, onTrade }) => {
           <span className="fk">{t('signals.filterSide')}</span>
           <button className={`filter-cycle ${sideF !== 'ALL' ? 'active' : ''}`} onClick={cycleSide}>
             <span>{sideLabel}</span>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
-          </button>
-        </div>
-        <div className="fgroup">
-          <span className="fk">{t('signals.filterStatus')}</span>
-          <button className={`filter-cycle ${statusF !== 'ALL' ? 'active' : ''}`} onClick={cycleStatus}>
-            <span>{statusLabel}</span>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
           </button>
         </div>
