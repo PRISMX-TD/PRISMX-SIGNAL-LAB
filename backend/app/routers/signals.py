@@ -1,5 +1,5 @@
 """信号路由 / Signals router."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -10,6 +10,9 @@ from app.schemas import SignalOut
 from app.services.deps import get_current_user
 
 router = APIRouter(prefix="/signals", tags=["signals"])
+
+# 按天统计的天数窗口 / number of days covered by the daily stats window
+STATS_DAYS = 7
 
 
 def _expire_stale(db: Session) -> None:
@@ -58,3 +61,36 @@ def list_signals(
         for s in rows
     ]
     return {"signals": signals}
+
+
+@router.get("/stats", response_model=dict)
+def signal_stats(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """近 N 天每日信号发出量（含当天，按 UTC 日期分组）。
+    Daily signal count for the last N days (incl. today, grouped by UTC date).
+    """
+    _expire_stale(db)
+    now = datetime.now(timezone.utc)
+    start_date = (now - timedelta(days=STATS_DAYS - 1)).date()
+
+    rows = (
+        db.query(Signal.created_at)
+        .filter(Signal.created_at >= datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc))
+        .all()
+    )
+
+    # 按 UTC 日期分组计数 / count grouped by UTC date, done in Python for DB-dialect neutrality
+    counts: dict[str, int] = {}
+    for i in range(STATS_DAYS):
+        day = start_date + timedelta(days=i)
+        counts[day.isoformat()] = 0
+    for (created_at,) in rows:
+        ts = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+        key = ts.date().isoformat()
+        if key in counts:
+            counts[key] += 1
+
+    daily = [{"date": d, "count": c} for d, c in counts.items()]
+    return {"daily": daily, "total": sum(c["count"] for c in daily)}

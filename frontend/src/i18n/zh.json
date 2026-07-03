@@ -157,7 +157,11 @@
       "otherActive": "其他活跃信号",
       "rrLabel": "盈亏比",
       "trendLabel": "多周期趋势",
-      "newSignal": "{{symbol}} 触发{{state}}信号"
+      "newSignal": "{{symbol}} 触发{{state}}信号",
+      "overview": "市场概览",
+      "period7d": "7日",
+      "signalTotal": "信号总数",
+      "signalVolume7d": "信号发出量 (7日)"
     },
     "quotes": {
       "title": "实时报价",

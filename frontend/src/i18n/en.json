@@ -155,7 +155,11 @@
       "otherActive": "Other active signals",
       "rrLabel": "R:R",
       "trendLabel": "Multi-TF trend",
-      "newSignal": "{{symbol}} triggered a {{state}} signal"
+      "newSignal": "{{symbol}} triggered a {{state}} signal",
+      "overview": "Market Overview",
+      "period7d": "7D",
+      "signalTotal": "Total Signals",
+      "signalVolume7d": "Signal Volume (7D)"
     },
     "quotes": {
       "title": "Live quotes",

@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount } from './types'
 
 const TOKEN_KEY = 'prismx_token'
 
@@ -79,6 +79,7 @@ export const authApi = {
 // 信号 / Signals
 export const signalApi = {
   list: () => request<{ signals: Signal[] }>('/signals'),
+  stats: () => request<{ daily: SignalDailyCount[]; total: number }>('/signals/stats'),
 }
 
 // 多周期趋势 / Multi-timeframe trends

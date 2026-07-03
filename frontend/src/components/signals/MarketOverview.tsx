@@ -1,8 +1,9 @@
-// 市场概览卡（仪表盘右下）：环形图 + 图例 + 信号总数 + 准确率曲线
-// Market overview card (dashboard bottom-right): donut + legend + total signals + accuracy sparkline
-import { type FC, useMemo } from 'react'
+// 市场概览卡（仪表盘右下）：环形图 + 图例 + 信号总数 + 每日信号量趋势
+// Market overview card (dashboard bottom-right): donut + legend + total signals + daily signal-count sparkline
+import { type FC, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { Signal, Trend } from '../../api/types'
+import type { Signal, Trend, SignalDailyCount } from '../../api/types'
+import { signalApi } from '../../api/client'
 import { trendStance } from './signalView'
 
 interface Props {
@@ -28,6 +29,25 @@ function computeDistribution(signals: Signal[], trends: Record<string, Trend>) {
 }
 
 const CIRCUMFERENCE = 2 * Math.PI * 47 // r=47
+const SPARK_W = 259
+const SPARK_H = 56
+const SPARK_TOP_PAD = 6 // 顶部留白，避免峰值贴边 / top padding so the peak doesn't touch the edge
+
+// 把每日计数映射为折线图坐标点 / map daily counts to sparkline coordinates
+function buildSparkPoints(daily: SignalDailyCount[]): { points: string; areaPoints: string } {
+  if (daily.length === 0) return { points: '', areaPoints: '' }
+  const max = Math.max(1, ...daily.map((d) => d.count))
+  const stepX = daily.length > 1 ? SPARK_W / (daily.length - 1) : 0
+  const usableH = SPARK_H - SPARK_TOP_PAD
+  const coords = daily.map((d, i) => {
+    const x = Math.round(stepX * i)
+    const y = Math.round(SPARK_H - (d.count / max) * usableH)
+    return `${x},${y}`
+  })
+  const points = coords.join(' ')
+  const areaPoints = `0,${SPARK_H} ${points} ${SPARK_W},${SPARK_H}`
+  return { points, areaPoints }
+}
 
 const MarketOverview: FC<Props> = ({ signals, trends }) => {
   const { t } = useTranslation()
@@ -44,9 +64,20 @@ const MarketOverview: FC<Props> = ({ signals, trends }) => {
   const seg3Dash = `${neutralFrac * CIRCUMFERENCE} ${CIRCUMFERENCE}`
   const seg3Offset = -(longFrac + shortFrac) * CIRCUMFERENCE
 
-  // 准确率 placeholder（暂无真实数据源）
-  const accuracy = signals.length > 0 ? '--' : '--'
-  const sparkPoints = '0,40 37,28 74,28 111,20 148,18 185,14 222,10 259,8'
+  // 近 7 日每日信号发出量 / daily signal count for the last 7 days
+  const [daily, setDaily] = useState<SignalDailyCount[]>([])
+  useEffect(() => {
+    let mounted = true
+    signalApi.stats().then((r) => { if (mounted) setDaily(r.daily) }).catch(() => {})
+    return () => { mounted = false }
+  }, [])
+
+  const weekTotal = useMemo(() => daily.reduce((sum, d) => sum + d.count, 0), [daily])
+  const { points: sparkPoints, areaPoints } = useMemo(() => buildSparkPoints(daily), [daily])
+  const dayLabels = useMemo(
+    () => daily.map((d) => `${new Date(d.date).getMonth() + 1}/${new Date(d.date).getDate()}`),
+    [daily]
+  )
 
   return (
     <section className="card glass dash-overview p-4">
@@ -95,23 +126,25 @@ const MarketOverview: FC<Props> = ({ signals, trends }) => {
 
       <div className="acc-section">
         <div className="acc-row">
-          <span className="k">{t('signals.focus.accuracy7d', '信号准确率 (7日)')}</span>
-          <span className="v num">{accuracy}</span>
+          <span className="k">{t('signals.focus.signalVolume7d', '信号发出量 (7日)')}</span>
+          <span className="v num">{weekTotal}</span>
         </div>
-        <svg className="acc-spark" viewBox="0 0 260 56" preserveAspectRatio="none">
-          <polyline fill="none" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-            points={sparkPoints}
-          />
-          <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#a855f7" stopOpacity="0.25" />
-            <stop offset="1" stopColor="#a855f7" stopOpacity="0" />
-          </linearGradient>
-          <polygon fill="url(#sparkGrad)"
-            points="0,56 0,40 37,28 74,28 111,20 148,18 185,14 222,10 259,8 259,56"
-          />
+        <svg className="acc-spark" viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} preserveAspectRatio="none">
+          {sparkPoints && (
+            <>
+              <polyline fill="none" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                points={sparkPoints}
+              />
+              <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stopColor="#a855f7" stopOpacity="0.25" />
+                <stop offset="1" stopColor="#a855f7" stopOpacity="0" />
+              </linearGradient>
+              <polygon fill="url(#sparkGrad)" points={areaPoints} />
+            </>
+          )}
         </svg>
         <div className="acc-x-labels">
-          <span>D1</span><span>D2</span><span>D3</span><span>D4</span><span>D5</span><span>D6</span><span>D7</span>
+          {dayLabels.map((label, i) => <span key={i}>{label}</span>)}
         </div>
       </div>
     </section>

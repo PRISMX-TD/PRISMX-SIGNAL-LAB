@@ -18,6 +18,12 @@ export interface Signal {
   expireAt: string | null
 }
 
+// 近 N 天每日信号发出量统计 / daily signal count for the last N days
+export interface SignalDailyCount {
+  date: string
+  count: number
+}
+
 export type OrderStatus = 'PENDING' | 'FILLED' | 'REJECTED' | 'FAILED'
 export type OrderAction = 'ORDER' | 'CLOSE' | 'MODIFY'
 
