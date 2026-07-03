@@ -1381,6 +1381,14 @@
       grid-column: 1 !important;
       grid-row: auto !important;
     }
+    /* 手机端：把「市场概览」放到「其他活跃信号」之后（两者对调）
+       mobile: place Market Overview after Other Active Signals (swap the two) */
+    .dash-col-2 {
+      display: contents;
+    }
+    .dash-overview {
+      order: 1;
+    }
 
     /* ── 英雄卡收缩 / hero card compact ── */
     .hero-nebula {
