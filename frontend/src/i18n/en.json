@@ -11,7 +11,8 @@
     "orders": "Orders",
     "download": "Download Bridge",
     "logout": "Log out",
-    "account": "Account"
+    "account": "Account",
+    "more": "More"
   },
   "common": {
     "loading": "Loading…",

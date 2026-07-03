@@ -11,7 +11,8 @@
     "orders": "订单回执",
     "download": "下载桥接",
     "logout": "退出登录",
-    "account": "账户"
+    "account": "账户",
+    "more": "其他"
   },
   "common": {
     "loading": "加载中…",

@@ -1,7 +1,7 @@
 // 主布局：顶部导航 + 内容区 + 移动端底部 Tab 栏
 // Main layout: top nav + content + mobile bottom tab bar.
-import { Suspense } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { Suspense, useEffect, useState } from 'react'
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { LiveProvider } from '../store/live'
 import { useAuth } from '../store/auth'
@@ -96,34 +96,31 @@ function TabIcon({ name }: { name: string }) {
           <line x1="12" y1="15" x2="12" y2="3" />
         </svg>
       )
+    case 'more':
+      return (
+        <svg className={c} viewBox="0 0 24 24" fill="currentColor" stroke="none">
+          <circle cx="5" cy="12" r="1.7" />
+          <circle cx="12" cy="12" r="1.7" />
+          <circle cx="19" cy="12" r="1.7" />
+        </svg>
+      )
     default:
       return null
   }
 }
 
+// 液态玻璃底部 Tab 项 / liquid-glass bottom tab item
 function TabItem({ to, icon, label }: { to: string; icon: string; label: string }) {
   return (
     <NavLink
       to={to}
       end={to === '/app'}
-      className={({ isActive }) =>
-        `flex flex-1 flex-col items-center justify-center gap-0.5 rounded-lg py-1.5 text-[10px] font-medium transition ${
-          isActive ? 'text-prism-200' : 'text-slate-500'
-        }`
-      }
+      className={({ isActive }) => `lg-tab ${isActive ? 'on' : ''}`}
     >
-      {({ isActive }) => (
-        <>
-          <span
-            className={`flex h-8 w-full items-center justify-center rounded-lg transition ${
-              isActive ? 'bg-prism-600/20 text-prism-200' : 'text-slate-400'
-            }`}
-          >
-            <TabIcon name={icon} />
-          </span>
-          <span className="leading-none">{label}</span>
-        </>
-      )}
+      <span className="lg-ico">
+        <TabIcon name={icon} />
+      </span>
+      <span className="leading-none">{label}</span>
     </NavLink>
   )
 }
@@ -132,21 +129,42 @@ export default function Layout() {
   const { t } = useTranslation()
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const [moreOpen, setMoreOpen] = useState(false)
 
   const handleLogout = () => {
     logout()
     navigate('/', { replace: true })
   }
 
-  const tabs = [
-    { to: '/dashboard', icon: 'dashboard', label: t('nav.dashboard') },
+  // 手机底部 4 个主入口，其余收进「其他」/ 4 primary mobile tabs, the rest go under "More"
+  const mobileTabs = [
     { to: '/app', icon: 'signals', label: t('nav.signals') },
     { to: '/charts', icon: 'charts', label: t('nav.charts') },
-    { to: '/bind', icon: 'bind', label: t('nav.bind') },
+    { to: '/dashboard', icon: 'dashboard', label: t('nav.dashboard') },
     { to: '/orders', icon: 'orders', label: t('nav.orders') },
+  ]
+  const moreItems = [
+    { to: '/bind', icon: 'bind', label: t('nav.bind') },
     { to: '/account', icon: 'account', label: t('nav.account') },
     { to: '/download', icon: 'download', label: t('nav.download') },
   ]
+  const moreActive = moreItems.some((m) => location.pathname === m.to)
+
+  // 「其他」面板打开时：返回手势关闭面板而非切换页面 / back gesture closes the sheet
+  useEffect(() => {
+    if (!moreOpen) return
+    window.history.pushState({ __moreSheet: true }, '')
+    const onPop = () => setMoreOpen(false)
+    window.addEventListener('popstate', onPop)
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      if (window.history.state?.__moreSheet) window.history.back()
+    }
+  }, [moreOpen])
+
+  // 路由切换时自动关闭面板 / close the sheet on navigation
+  useEffect(() => { setMoreOpen(false) }, [location.pathname])
 
   return (
     <LiveProvider>
@@ -217,14 +235,49 @@ export default function Layout() {
           </Suspense>
         </main>
 
-        {/* 移动端底部 Tab 栏 / mobile bottom tab bar */}
-        <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.08] bg-ink-950/85 backdrop-blur-xl pb-[env(safe-area-inset-bottom)] sm:hidden">
-          <div className="flex items-stretch gap-1 px-2 py-1.5">
-            {tabs.map((tab) => (
+        {/* 移动端底部液态玻璃导航栏 / mobile liquid-glass bottom nav */}
+        <nav className="lg-tabbar sm:hidden">
+          <div className="lg-tabbar-inner">
+            {mobileTabs.map((tab) => (
               <TabItem key={tab.to} to={tab.to} icon={tab.icon} label={tab.label} />
             ))}
+            <button
+              type="button"
+              className={`lg-tab ${moreActive ? 'on' : ''}`}
+              onClick={() => setMoreOpen(true)}
+              aria-label={t('nav.more')}
+            >
+              <span className="lg-ico">
+                <TabIcon name="more" />
+              </span>
+              <span className="leading-none">{t('nav.more')}</span>
+            </button>
           </div>
         </nav>
+
+        {/* 「其他」液态玻璃弹出面板 / "More" liquid-glass sheet */}
+        {moreOpen && (
+          <div className="lg-sheet-overlay sm:hidden" onClick={() => setMoreOpen(false)}>
+            <div className="lg-sheet" onClick={(e) => e.stopPropagation()}>
+              <div className="lg-sheet-handle" />
+              <div className="lg-sheet-grid">
+                {moreItems.map((it) => (
+                  <NavLink
+                    key={it.to}
+                    to={it.to}
+                    className={({ isActive }) => `lg-sheet-item ${isActive ? 'on' : ''}`}
+                  >
+                    <TabIcon name={it.icon} />
+                    <span>{it.label}</span>
+                  </NavLink>
+                ))}
+              </div>
+              <button type="button" className="lg-sheet-logout" onClick={handleLogout}>
+                {t('nav.logout')}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </LiveProvider>
   )
