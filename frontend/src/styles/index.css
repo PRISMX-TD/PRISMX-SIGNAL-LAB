@@ -890,16 +890,24 @@
      dash-exec's variable content height no longer stretches dash-hero. */
   .dash-grid {
     display: grid;
-    grid-template-columns: 1.62fr 1fr 0.94fr;
+    /* minmax(0, …fr) 让每列宽度只由比例决定，不被卡片内容撑大，
+       从而「可执行信号」有无内容时卡片尺寸一致、整体不偏移。
+       minmax(0, …fr) sizes columns purely by ratio (never by content),
+       so the exec card keeps the same width with or without a signal. */
+    grid-template-columns: minmax(0, 1.62fr) minmax(0, 1fr) minmax(0, 0.94fr);
     align-items: start;
     gap: 16px;
+  }
+  .dash-col-1,
+  .dash-col-2,
+  .dash-others {
+    min-width: 0;
   }
   .dash-col-1,
   .dash-col-2 {
     display: flex;
     flex-direction: column;
     gap: 16px;
-    min-width: 0;
   }
   .dash-hero {
     /* 视觉上全隐形 / visually invisible */
@@ -915,7 +923,7 @@
   }
   @media (max-width: 1240px) {
     .dash-grid {
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     }
   }
 
@@ -1380,7 +1388,7 @@
 
     /* ── 仪表盘网格：单列堆叠 / single column stack ── */
     .dash-grid {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
       gap: 12px;
     }
     .dash-col-1,
