@@ -1253,7 +1253,8 @@
     bottom: 0;
     width: 0;
     background: rgba(139, 92, 246, 0.28);
-    transition: width 0.08s;
+    transition: width 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: width;
   }
   .slide-track-label {
     position: absolute;
@@ -1279,10 +1280,17 @@
     place-items: center;
     cursor: grab;
     box-shadow: 0 4px 18px rgba(139, 92, 246, 0.55);
-    transition: left 0.08s;
+    transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), background 0.2s, box-shadow 0.2s;
+    will-change: transform;
+    touch-action: none;
   }
   .slide-knob:active {
     cursor: grabbing;
+  }
+  /* 拖动中关闭过渡，让滑块与手指 1:1 实时跟随 / no transition while dragging → 1:1 finger tracking */
+  .slide-track.dragging .slide-knob,
+  .slide-track.dragging .slide-track-fill {
+    transition: none;
   }
   .slide-track.done {
     border-color: rgba(46, 224, 126, 0.5);

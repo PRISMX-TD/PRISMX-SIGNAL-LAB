@@ -23,7 +23,6 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
   const [submitting, setSubmitting] = useState(false)
   const [receipt, setReceipt] = useState<'waiting' | 'ok' | 'error' | null>(null)
   const [error, setError] = useState('')
-  const [slidePct, setSlidePct] = useState(0)
 
   const onlineAccounts = accounts.filter((a) => a.online)
   const [login, setLogin] = useState<string>(() => onlineAccounts[0]?.login ?? '')
@@ -40,7 +39,12 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
   const [tp, setTp] = useState(signal.takeProfit != null ? String(signal.takeProfit) : '')
 
   const trackRef = useRef<HTMLDivElement>(null)
+  const knobRef = useRef<HTMLDivElement>(null)
+  const fillRef = useRef<HTMLDivElement>(null)
   const sliding = useRef(false)
+  const pctRef = useRef(0)
+  const travelRef = useRef(0) // 轨道可滑动像素范围 / draggable pixel range
+  const rectRef = useRef({ left: 0, width: 0 })
   const onCancelRef = useRef(onCancel)
   onCancelRef.current = onCancel
 
@@ -75,37 +79,60 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
     }
   }, [])
 
+  // 拖动时直接操作 DOM，避免频繁 setState 触发整卡重渲染导致卡顿
+  // Drive the DOM directly while dragging so we never re-render the whole card (kills jank)
+  const paint = (pct: number) => {
+    pctRef.current = pct
+    const knob = knobRef.current
+    const fill = fillRef.current
+    if (knob) knob.style.transform = `translate(${(pct / 100) * travelRef.current}px, -50%)`
+    if (fill) fill.style.width = `${pct}%`
+  }
+
   const getPct = (clientX: number) => {
-    const el = trackRef.current
-    if (!el) return 0
-    const rect = el.getBoundingClientRect()
-    const pct = ((clientX - rect.left) / rect.width) * 100
-    return Math.max(0, Math.min(100, pct))
+    const { left, width } = rectRef.current
+    const travel = width - 56
+    if (travel <= 0) return 0
+    // 让滑块中心跟随手指 / keep the knob centered under the finger
+    const x = clientX - left - 28
+    return Math.max(0, Math.min(100, (x / travel) * 100))
   }
 
   const onStart = (clientX: number) => {
     if (submitting) return
+    const el = trackRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    rectRef.current = { left: r.left, width: r.width }
+    travelRef.current = r.width - 56
     sliding.current = true
-    setSlidePct(getPct(clientX))
+    el.classList.add('dragging')
+    paint(getPct(clientX))
   }
   const onMove = (clientX: number) => {
     if (!sliding.current || submitting) return
     const pct = getPct(clientX)
-    setSlidePct(pct)
+    paint(pct)
     if (pct >= 95) {
       sliding.current = false
-      setSlidePct(100)
+      const el = trackRef.current
+      el?.classList.remove('dragging')
+      el?.classList.add('done')
+      paint(100)
       handleSubmit()
     }
   }
   const onEnd = () => {
-    if (!sliding.current || submitting) return
+    if (!sliding.current) return
     sliding.current = false
-    if (slidePct >= 95) {
-      setSlidePct(100)
+    const el = trackRef.current
+    el?.classList.remove('dragging')
+    if (pctRef.current >= 95) {
+      el?.classList.add('done')
+      paint(100)
       handleSubmit()
     } else {
-      setSlidePct(0)
+      paint(0)
     }
   }
 
@@ -116,7 +143,6 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
     const vol = parseFloat(volume)
     if (!vol || vol <= 0) {
       setError(t('order.volume'))
-      setSlidePct(0)
       setSubmitting(false)
       setReceipt(null)
       return
@@ -132,7 +158,6 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
       setError(err instanceof Error ? err.message : 'error')
       setTimeout(() => {
         setReceipt(null)
-        setSlidePct(0)
         setSubmitting(false)
       }, 2000)
     }
@@ -303,14 +328,15 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
         {!submitting && hasAccounts && (
           <div
             ref={trackRef}
-            className={`slide-track ${slidePct >= 95 ? 'done' : ''}`}
+            className="slide-track"
             style={{ touchAction: 'none' }}
           >
-            <div className="slide-track-fill" style={{ width: `${slidePct}%` }} />
+            <div ref={fillRef} className="slide-track-fill" />
             <div className="slide-track-label">{t('order.slideToConfirm', '滑动确认下单')}</div>
             <div
+              ref={knobRef}
               className="slide-knob"
-              style={{ left: `calc(5px + ${slidePct / 100} * (100% - 56px))`, touchAction: 'none' }}
+              style={{ touchAction: 'none' }}
               onPointerDown={(e: RPointerEvent<HTMLDivElement>) => {
                 e.preventDefault()
                 e.currentTarget.setPointerCapture(e.pointerId)
