@@ -31,6 +31,14 @@ const SignalGrid: FC<Props> = ({ signals, now, onTrade }) => {
   useEffect(() => { setPref('signals', 'statusF', statusF) }, [statusF, setPref])
   useEffect(() => { setPref('signals', 'sortF', sortF) }, [sortF, setPref])
 
+  // 手机端：点击循环切换筛选值，无需列出全部选项 / mobile: tap to cycle filter value
+  const cycleSide = () => setSideF(s => (s === 'ALL' ? 'BUY' : s === 'BUY' ? 'SELL' : 'ALL'))
+  const cycleStatus = () => setStatusF(s => (s === 'ALL' ? 'ACTIVE' : 'ALL'))
+  const cycleSort = () => setSortF(s => (s === 'latest' ? 'expiry' : 'latest'))
+  const sideLabel = sideF === 'ALL' ? t('signals.all') : sideF === 'BUY' ? t('common.buy') : t('common.sell')
+  const statusLabel = statusF === 'ALL' ? t('signals.all') : t('signals.active')
+  const sortLabel = sortF === 'latest' ? t('signals.sort.latest') : t('signals.sort.expiry')
+
   const filtered = useMemo(() => {
     let list = signals
       .filter(s => {
@@ -61,8 +69,8 @@ const SignalGrid: FC<Props> = ({ signals, now, onTrade }) => {
         <p>{t('signals.subtitle')}</p>
       </div>
 
-      {/* Filters：单排药丸按钮，可横向滑动 / single-row pill filters, horizontally scrollable */}
-      <div className="sig-filters">
+      {/* Filters（桌面）：单排药丸按钮 / desktop: single-row pill filters */}
+      <div className="sig-filters hidden sm:flex">
         <div className="fgroup">
           <span className="fk">{t('signals.filterSide')}</span>
           <div className="seg-pill">
@@ -86,6 +94,31 @@ const SignalGrid: FC<Props> = ({ signals, now, onTrade }) => {
             <button className={sortF === 'latest' ? 'on' : ''} onClick={() => setSortF('latest')}>{t('signals.sort.latest')}</button>
             <button className={sortF === 'expiry' ? 'on' : ''} onClick={() => setSortF('expiry')}>{t('signals.sort.expiry')}</button>
           </div>
+        </div>
+      </div>
+
+      {/* Filters（手机）：点击循环切换，仅显示当前选项 / mobile: tap to cycle, shows current option only */}
+      <div className="sig-filters flex sm:hidden">
+        <div className="fgroup">
+          <span className="fk">{t('signals.filterSide')}</span>
+          <button className={`filter-cycle ${sideF !== 'ALL' ? 'active' : ''}`} onClick={cycleSide}>
+            <span>{sideLabel}</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
+          </button>
+        </div>
+        <div className="fgroup">
+          <span className="fk">{t('signals.filterStatus')}</span>
+          <button className={`filter-cycle ${statusF !== 'ALL' ? 'active' : ''}`} onClick={cycleStatus}>
+            <span>{statusLabel}</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
+          </button>
+        </div>
+        <div className="fgroup">
+          <span className="fk">{t('signals.sortBy')}</span>
+          <button className="filter-cycle" onClick={cycleSort}>
+            <span>{sortLabel}</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
+          </button>
         </div>
       </div>
 
