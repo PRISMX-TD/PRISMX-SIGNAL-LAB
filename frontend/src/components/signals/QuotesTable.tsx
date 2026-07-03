@@ -30,8 +30,9 @@ const QuotesTable: FC<Props> = ({ quotes, mt5Online, focusSymbol }) => {
   const focusDigits = focusQ?.digits ?? 5
   const focusBid = focusQ?.bid != null ? focusQ.bid.toFixed(focusDigits) : '-'
   const focusAsk = focusQ?.ask != null ? focusQ.ask.toFixed(focusDigits) : '-'
+  // 点差取整，不带小数点 / spread rounded to an integer, no decimals
   const spread = (focusQ?.bid != null && focusQ?.ask != null)
-    ? ((focusQ.ask - focusQ.bid) * Math.pow(10, focusDigits)).toFixed(1)
+    ? String(Math.round((focusQ.ask - focusQ.bid) * Math.pow(10, focusDigits)))
     : '-'
 
   return (
@@ -47,15 +48,10 @@ const QuotesTable: FC<Props> = ({ quotes, mt5Online, focusSymbol }) => {
         </div>
       </div>
 
-      {/* ── 手机端：单行焦点品种报价 / mobile: single focused symbol ── */}
+      {/* ── 手机端：极简单行报价，仅品种代号 + 买价/点差/卖价 / mobile: minimal single-row quote ── */}
       <div className="qt-mobile-row sm:hidden">
-        <div className="flex items-center gap-2">
-          <span className="qt-sym-ava" style={{ background: focusMeta.color + '22', color: focusMeta.color, width: 28, height: 28, fontSize: 11 }}>
-            {focusMeta.letter}
-          </span>
-          <b className="text-sm font-bold text-white">{focusMeta.sym}</b>
-        </div>
-        <div className="flex items-center gap-3 ml-auto">
+        <b className="text-sm font-bold text-white">{focusMeta.sym}</b>
+        <div className="flex items-center gap-5 ml-auto">
           <div className="text-center">
             <div className="text-[10px] text-slate-500 mb-0.5">{t('signals.quotes.bid', '买价')}</div>
             <span className="num font-bold text-sm" style={{ color: '#2ee07e' }}>{focusAsk}</span>
