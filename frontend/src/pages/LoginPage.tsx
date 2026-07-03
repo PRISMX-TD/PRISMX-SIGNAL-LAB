@@ -1,6 +1,6 @@
 // 登录/注册页 / Login & register page
 import { useState, type FormEvent } from 'react'
-import { useNavigate, useSearchParams, Link } from 'react-router-dom'
+import { Navigate, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../store/auth'
 import Logo from '../components/Logo'
@@ -22,9 +22,8 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  if (isAuthed) {
-    navigate('/app', { replace: true })
-  }
+  // 已登录直接重定向；渲染期间调用 navigate 是反模式 / declarative redirect
+  if (isAuthed) return <Navigate to="/app" replace />
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()

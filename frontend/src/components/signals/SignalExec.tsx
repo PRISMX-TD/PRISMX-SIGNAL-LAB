@@ -1,6 +1,6 @@
 // 交易信号执行卡：入场价 + SL/TP + RR + 倒计时 + 下单按钮
 // Signal exec card: entry + SL/TP + RR + countdown + trade button
-import { type FC } from 'react'
+import { memo, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Signal } from '../../api/types'
 import { calcRiskReward, calcCountdown, fmtTime } from '../../api/utils'
@@ -176,4 +176,4 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
   )
 }
 
-export default SignalExec
+export default memo(SignalExec)

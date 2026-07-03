@@ -27,6 +27,14 @@ const LiveContext = createContext<LiveContextValue | null>(null)
 // 失效信号最多保留的条数 / max number of expired signals to keep
 const MAX_EXPIRED = 30
 
+// 内容未变则保留旧引用，避免无意义的整树重渲染（持仓每 1.5 秒、账号每 5 秒
+// 会重复推送相同数据）。/ Keep the previous reference when content is
+// unchanged, so identical pushes (positions every 1.5s, accounts every 5s)
+// don't re-render the whole tree.
+function keepIfEqual<T>(prev: T, next: T): T {
+  return JSON.stringify(prev) === JSON.stringify(next) ? prev : next
+}
+
 // 保留全部有效信号，过期信号只保留最新的 MAX_EXPIRED 条（按生成时间倒序）。
 // Keep all active signals; cap expired ones to the newest MAX_EXPIRED (by created time).
 function capExpired(signals: Signal[]): Signal[] {
@@ -77,7 +85,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   // is missed, so a disconnect greys out within seconds alongside the backend monitor.
   useEffect(() => {
     const timer = window.setInterval(() => {
-      accountApi.list().then((r) => setAccounts(r.accounts)).catch(() => {})
+      accountApi.list().then((r) => setAccounts((prev) => keepIfEqual(prev, r.accounts))).catch(() => {})
     }, 5000)
     return () => window.clearInterval(timer)
   }, [])
@@ -109,7 +117,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         break
       }
       case 'POSITIONS':
-        setPositions((msg.data as Position[]) || [])
+        setPositions((prev) => keepIfEqual(prev, (msg.data as Position[]) || []))
         break
       case 'QUOTES': {
         // 合并变化的报价到现有快照 / merge changed quotes into the snapshot
@@ -136,7 +144,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         setAccounts((prev) =>
           prev.map((a) => ({ ...a, online: online.has(a.login) }))
         )
-        accountApi.list().then((r) => setAccounts(r.accounts)).catch(() => {})
+        accountApi.list().then((r) => setAccounts((prev) => keepIfEqual(prev, r.accounts))).catch(() => {})
         break
       }
     }

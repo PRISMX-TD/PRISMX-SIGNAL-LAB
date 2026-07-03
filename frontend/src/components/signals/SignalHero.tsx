@@ -1,6 +1,6 @@
 // 英雄卡：当前聚焦品种的多周期趋势 + 各周期分布条 + Myfxbook 社区情绪
 // Hero card: current focus symbol trend analysis + per-symbol TF distribution + Myfxbook sentiment
-import { type FC } from 'react'
+import { memo, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Trend, TrendDir } from '../../api/types'
 import type { MyfxSentiment } from '../../api/myfxbook'
@@ -116,4 +116,5 @@ const SignalHero: FC<Props> = ({
   )
 }
 
-export default SignalHero
+// memo：仪表盘每秒 tick 时 props 不变则跳过重渲染 / skip per-second parent re-renders
+export default memo(SignalHero)

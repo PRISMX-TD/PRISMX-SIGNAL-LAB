@@ -38,6 +38,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (token) headers.Authorization = `Bearer ${token}`
 
   const res = await fetch(`${API_BASE}/api${path}`, { ...options, headers })
+  // 滑动续期：后端在 token 剩余有效期不足一半时经此头下发新 token，
+  // 静默替换本地 token，活跃用户不再每天被踢回登录页。
+  // Sliding renewal: the backend issues a fresh token via this header when the
+  // current one is past half-life; swap it in silently so active users never
+  // get kicked back to the login page.
+  const refreshed = res.headers.get('X-Refreshed-Token')
+  if (refreshed) setToken(refreshed)
   if (!res.ok) {
     // 凭证失效：清除登录态并通知上层跳转登录页。
     // Token expired/invalid: clear auth state and notify the app to redirect.
@@ -141,9 +148,11 @@ export const accountApi = {
     }),
 }
 
-// API Token（连接 MT5 用）/ API token for connecting MT5
+// API Token（连接 MT5 用）：库中只存哈希，明文仅在重置（生成）响应中出现一次。
+// API token for connecting MT5: only the hash is stored; the plaintext
+// appears once in the reset (generation) response.
 export const eaApi = {
-  getToken: () => request<{ apiToken: string; boundAccount: string | null }>('/ea/token'),
+  getToken: () => request<{ apiToken: string | null; boundAccount: string | null }>('/ea/token'),
   resetToken: () => request<{ apiToken: string }>('/ea/token/reset', { method: 'POST' }),
 }
 

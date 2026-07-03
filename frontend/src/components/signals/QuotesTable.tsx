@@ -1,6 +1,6 @@
 // 实时行情报价表（仪表盘左下）：固定核心品种，买价 + 卖价
 // Live quotes table (dashboard bottom-left): hardcoded core symbols, bid + ask
-import { type FC } from 'react'
+import { memo, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Quote } from '../../api/types'
 
@@ -110,4 +110,5 @@ const QuotesTable: FC<Props> = ({ quotes, mt5Online, focusSymbol }) => {
   )
 }
 
-export default QuotesTable
+// memo：仅在报价快照变化时重渲染 / re-render only when the quotes snapshot changes
+export default memo(QuotesTable)

@@ -1,6 +1,6 @@
 // 其他活跃信号列表（仪表盘右栏贯通）
 // Other active signals list (dashboard right column, spans two rows)
-import { type FC } from 'react'
+import { memo, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Signal } from '../../api/types'
 import { calcRiskReward, calcCountdown, fmtTime } from '../../api/utils'
@@ -123,4 +123,4 @@ const SignalOthers: FC<Props> = ({ entries, now, onTrade, onFocus, onViewAll }) 
   )
 }
 
-export default SignalOthers
+export default memo(SignalOthers)

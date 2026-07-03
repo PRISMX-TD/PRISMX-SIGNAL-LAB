@@ -1,12 +1,10 @@
 // 仪表盘页：英雄卡 + 执行卡 + 其他信号 + 行情表 + 市场概览
 // Dashboard page: hero + exec + others + quotes + overview
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useLive } from '../store/live'
-import { orderApi } from '../api/client'
 import { useMyfxbookSentiment } from '../api/useMyfxbookSentiment'
-import { clientOrderId } from '../api/utils'
 import type { Signal } from '../api/types'
 import SignalHero from '../components/signals/SignalHero'
 import SignalExec from '../components/signals/SignalExec'
@@ -14,30 +12,21 @@ import SignalOthers from '../components/signals/SignalOthers'
 import QuotesTable from '../components/signals/QuotesTable'
 import MarketOverview from '../components/signals/MarketOverview'
 import SlideOrderModal from '../components/SlideOrderModal'
-import { useFocusEntries, useNow } from '../components/signals/hooks'
+import { useFocusEntries, useNow, useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import { trendStance, type TrendStance } from '../components/signals/signalView'
 import type { FocusState } from '../components/signals/signalView'
 
 export default function DashboardPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { signals, anyOnline, accounts, loaded, refreshAll, quotes, trends } = useLive()
+  const { signals, anyOnline, accounts, loaded, quotes, trends } = useLive()
   const now = useNow(1000)
   const { sentiment: myfxSentiment } = useMyfxbookSentiment()
   const focusEntries = useFocusEntries(signals, now)
+  const { toast, placeOrder } = useOrderPlacement()
 
   const [focusIdx, setFocusIdx] = useState(0)
   const [activeSignal, setActiveSignal] = useState<Signal | null>(null)
-  const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' | 'info' } | null>(null)
-  const toastTimer = useRef<number | undefined>(undefined)
-
-  useEffect(() => () => { if (toastTimer.current) window.clearTimeout(toastTimer.current) }, [])
-
-  const showToast = (msg: string, kind: 'success' | 'error' | 'info' = 'success', ms = 3000) => {
-    if (toastTimer.current) window.clearTimeout(toastTimer.current)
-    setToast({ msg, kind })
-    toastTimer.current = window.setTimeout(() => setToast(null), ms)
-  }
 
   const idx = Math.min(focusIdx, Math.max(0, focusEntries.length - 1))
   const cur = focusEntries[idx]
@@ -51,37 +40,20 @@ export default function DashboardPage() {
       .map(({ symbol, state, signal, i }) => ({ symbol, state: state as FocusState, signal: signal!, idx: i }))
   }, [focusEntries, idx])
 
-  const goPrev = () => setFocusIdx((i) => (i - 1 + focusEntries.length) % focusEntries.length)
-  const goNext = () => setFocusIdx((i) => (i + 1) % focusEntries.length)
+  // 稳定回调，让 memo 化的子组件不因父级重渲染而更新
+  // stable callbacks so memoized children skip parent-driven re-renders
+  const total = focusEntries.length
+  const goPrev = useCallback(() => setFocusIdx((i) => (i - 1 + total) % total), [total])
+  const goNext = useCallback(() => setFocusIdx((i) => (i + 1) % total), [total])
+  const openTrade = useCallback((s: Signal) => setActiveSignal(s), [])
+  const goSignals = useCallback(() => navigate('/app'), [navigate])
 
   const handleConfirm = async (volume: number, mt5Login: string | null, stopLoss: number | null, takeProfit: number | null) => {
     if (!activeSignal) return
-    const placed = await orderApi.place({
-      signalId: activeSignal.id, symbol: activeSignal.symbol, side: activeSignal.side,
-      volume, clientOrderId: clientOrderId(), mt5Login, stopLoss, takeProfit,
-    })
-    setActiveSignal(null); refreshAll()
-    if (placed.status === 'FILLED') { showToast(t('order.filled', { price: placed.filledPrice ?? '-' }), 'success'); return }
-    if (placed.status === 'REJECTED' || placed.status === 'FAILED') { showToast(t('order.rejected', { msg: placed.message || '-' }), 'error'); return }
-    showToast(t('order.submitted'), 'info', 8000)
-    await waitForReceipt(placed.id)
+    const sig = activeSignal
+    await placeOrder(sig, volume, mt5Login, stopLoss, takeProfit)
+    setActiveSignal(null)
   }
-
-  const waitForReceipt = async (orderId: string) => {
-    for (let i = 0; i < 10; i++) {
-      await new Promise((r) => setTimeout(r, 1500))
-      try {
-        const { orders } = await orderApi.list()
-        const o = orders.find((x) => x.id === orderId)
-        if (!o) continue
-        if (o.status === 'FILLED') { showToast(t('order.filled', { price: o.filledPrice ?? '-' }), 'success'); refreshAll(); return }
-        if (o.status === 'REJECTED' || o.status === 'FAILED') { showToast(t('order.rejected', { msg: o.message || '-' }), 'error'); refreshAll(); return }
-      } catch { /* continue polling */ }
-    }
-    showToast(t('order.ackTimeout'), 'info')
-  }
-
-  const toastStyle = toast?.kind === 'error' ? 'border-down/40 bg-down/15 text-down' : toast?.kind === 'info' ? 'border-prism-600/40 bg-prism-600/15 text-prism-300' : 'border-up/40 bg-up/15 text-up'
 
   return (
     <div className="max-w-[1520px] mx-auto">
@@ -99,10 +71,10 @@ export default function DashboardPage() {
                 <QuotesTable quotes={quotes} mt5Online={anyOnline} focusSymbol={cur?.symbol} />
               </div>
               <div className="dash-col-2">
-                <SignalExec signal={cur.signal} now={now} onTrade={(s) => setActiveSignal(s)} />
+                <SignalExec signal={cur.signal} now={now} onTrade={openTrade} />
                 <MarketOverview signals={signals} trends={trends} />
               </div>
-              <SignalOthers entries={otherEntries} now={now} onTrade={(s) => setActiveSignal(s)} onFocus={(i) => setFocusIdx(i)} onViewAll={() => navigate('/app')} />
+              <SignalOthers entries={otherEntries} now={now} onTrade={openTrade} onFocus={setFocusIdx} onViewAll={goSignals} />
             </>
           ) : (
             <>
@@ -115,7 +87,7 @@ export default function DashboardPage() {
                 <QuotesTable quotes={quotes} mt5Online={anyOnline} />
               </div>
               <div className="dash-col-2">
-                <SignalExec signal={null} now={now} onTrade={(s) => setActiveSignal(s)} />
+                <SignalExec signal={null} now={now} onTrade={openTrade} />
                 <MarketOverview signals={signals} trends={trends} />
               </div>
               <section className="card glass dash-others p-4 flex items-center justify-center text-sm text-slate-500">{t('signals.focus.noExecutable')}</section>
@@ -124,7 +96,7 @@ export default function DashboardPage() {
         </div>
       )}
       {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} quote={quotes[activeSignal.symbol]} onCancel={() => setActiveSignal(null)} onConfirm={handleConfirm} />}
-      {toast && <div className={`fixed bottom-24 left-1/2 z-50 -translate-x-1/2 animate-fade-in-up rounded-xl border px-5 py-3 text-sm shadow-prism sm:bottom-6 ${toastStyle}`}>{toast.msg}</div>}
+      {toast && <div className={`fixed bottom-24 left-1/2 z-50 -translate-x-1/2 animate-fade-in-up rounded-xl border px-5 py-3 text-sm shadow-prism sm:bottom-6 ${toastToneClass(toast.kind)}`}>{toast.msg}</div>}
     </div>
   )
 }

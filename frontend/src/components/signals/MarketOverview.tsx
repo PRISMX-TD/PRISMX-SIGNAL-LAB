@@ -1,6 +1,6 @@
 // 市场概览卡（仪表盘右下）：环形图 + 图例 + 信号总数 + 每日信号量趋势
 // Market overview card (dashboard bottom-right): donut + legend + total signals + daily signal-count sparkline
-import { type FC, useEffect, useMemo, useState } from 'react'
+import { memo, type FC, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Signal, Trend, SignalDailyCount } from '../../api/types'
 import { signalApi } from '../../api/client'
@@ -151,4 +151,5 @@ const MarketOverview: FC<Props> = ({ signals, trends }) => {
   )
 }
 
-export default MarketOverview
+// memo：仅在信号/趋势数据变化时重渲染 / re-render only when signals/trends change
+export default memo(MarketOverview)

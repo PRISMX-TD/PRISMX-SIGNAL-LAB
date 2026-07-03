@@ -19,7 +19,14 @@ export default async function handler() {
     }
     const html = await resp.text()
     return new Response(html, {
-      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        // CDN 缓存 5 分钟（与前端轮询周期一致）：所有用户共享一份缓存，
+        // 降低对 Myfxbook 的请求量，也避免被其风控拉黑。
+        // Cache at the CDN for 5 min (matches the frontend poll interval):
+        // all users share one cached copy, keeping Myfxbook traffic minimal.
+        'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+      },
     })
   } catch (e) {
     return new Response(String(e), { status: 500 })

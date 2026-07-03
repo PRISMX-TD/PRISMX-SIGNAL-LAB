@@ -1,5 +1,9 @@
 // 信号面板专用 Hook / hooks used by the signals panel
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { orderApi } from '../../api/client'
+import { clientOrderId } from '../../api/utils'
+import { useLive } from '../../store/live'
 import type { Signal } from '../../api/types'
 import {
   DEFAULT_WATCHLIST,
@@ -8,6 +12,113 @@ import {
   type FocusEntry,
   type FocusState,
 } from './signalView'
+
+// ---------- 下单 + 回执提示 / order placement + receipt toasts ----------
+
+export interface OrderToast {
+  msg: string
+  kind: 'success' | 'error' | 'info'
+}
+
+// toast 配色 / toast tone classes
+export function toastToneClass(kind: OrderToast['kind']): string {
+  if (kind === 'error') return 'border-down/40 bg-down/15 text-down'
+  if (kind === 'info') return 'border-prism-600/40 bg-prism-600/15 text-prism-300'
+  return 'border-up/40 bg-up/15 text-up'
+}
+
+// 等待回执的兜底时长：正常回执 WS 几秒内就到 / fallback window; WS receipts arrive in seconds
+const RECEIPT_FALLBACK_MS = 20000
+
+/**
+ * 下单 + 等待真实回执的共享逻辑（Dashboard 与信号页共用）。
+ * 回执经 WS ORDER_UPDATE 推入 live orders，这里监听即可，无需 REST 轮询。
+ * Shared order placement + receipt handling (dashboard & signals page).
+ * Receipts arrive via the WS ORDER_UPDATE into live orders — we just watch
+ * them instead of polling REST.
+ */
+export function useOrderPlacement() {
+  const { t } = useTranslation()
+  const { orders, refreshAll } = useLive()
+  const [toast, setToast] = useState<OrderToast | null>(null)
+  const toastTimer = useRef<number | undefined>(undefined)
+  const fallbackTimer = useRef<number | undefined>(undefined)
+  // 正在等待回执的订单 id / order id awaiting its receipt
+  const pendingId = useRef<string | null>(null)
+
+  useEffect(
+    () => () => {
+      if (toastTimer.current) window.clearTimeout(toastTimer.current)
+      if (fallbackTimer.current) window.clearTimeout(fallbackTimer.current)
+    },
+    []
+  )
+
+  const showToast = useCallback((msg: string, kind: OrderToast['kind'] = 'success', ms = 3000) => {
+    if (toastTimer.current) window.clearTimeout(toastTimer.current)
+    setToast({ msg, kind })
+    toastTimer.current = window.setTimeout(() => setToast(null), ms)
+  }, [])
+
+  // 监听 live orders：等待中的订单到达终态即提示 / watch live orders for the terminal state
+  useEffect(() => {
+    if (!pendingId.current) return
+    const o = orders.find((x) => x.id === pendingId.current)
+    if (!o) return
+    if (o.status === 'FILLED') {
+      pendingId.current = null
+      if (fallbackTimer.current) window.clearTimeout(fallbackTimer.current)
+      showToast(t('order.filled', { price: o.filledPrice ?? '-' }), 'success')
+    } else if (o.status === 'REJECTED' || o.status === 'FAILED') {
+      pendingId.current = null
+      if (fallbackTimer.current) window.clearTimeout(fallbackTimer.current)
+      showToast(t('order.rejected', { msg: o.message || '-' }), 'error')
+    }
+  }, [orders, showToast, t])
+
+  const placeOrder = useCallback(
+    async (
+      signal: Signal,
+      volume: number,
+      mt5Login: string | null,
+      stopLoss: number | null,
+      takeProfit: number | null
+    ) => {
+      // API 错误向上抛给下单弹窗展示 / API errors propagate to the modal
+      const placed = await orderApi.place({
+        signalId: signal.id,
+        symbol: signal.symbol,
+        side: signal.side,
+        volume,
+        clientOrderId: clientOrderId(),
+        mt5Login,
+        stopLoss,
+        takeProfit,
+      })
+      refreshAll()
+      if (placed.status === 'FILLED') {
+        showToast(t('order.filled', { price: placed.filledPrice ?? '-' }), 'success')
+        return
+      }
+      if (placed.status === 'REJECTED' || placed.status === 'FAILED') {
+        showToast(t('order.rejected', { msg: placed.message || '-' }), 'error')
+        return
+      }
+      showToast(t('order.submitted'), 'info', 8000)
+      pendingId.current = placed.id
+      if (fallbackTimer.current) window.clearTimeout(fallbackTimer.current)
+      fallbackTimer.current = window.setTimeout(() => {
+        if (pendingId.current === placed.id) {
+          pendingId.current = null
+          showToast(t('order.ackTimeout'), 'info')
+        }
+      }, RECEIPT_FALLBACK_MS)
+    },
+    [refreshAll, showToast, t]
+  )
+
+  return { toast, placeOrder }
+}
 
 // 每秒滴答的当前时间，用于实时倒计时 / a per-second ticking clock for live countdowns
 export function useNow(intervalMs = 1000): number {

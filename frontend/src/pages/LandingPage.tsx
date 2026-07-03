@@ -116,12 +116,12 @@ export default function LandingPage() {
           </a>
         </div>
 
-        {/* 数据指标 / stat strip */}
+        {/* 数据指标：真实事实而非营销数字 / stat strip: real facts, no made-up marketing numbers */}
         <div className="mx-auto mt-14 grid max-w-2xl grid-cols-3 gap-4">
           {[
             { v: '24/7', k: 'statSignals' },
-            { v: '<200', k: 'statLatency' },
-            { v: '99.9%', k: 'statUptime' },
+            { v: '1.5s', k: 'statLatency' },
+            { v: 'MT5', k: 'statUptime' },
           ].map((s) => (
             <div key={s.k} className="glass px-3 py-5">
               <div className="font-display text-2xl font-bold text-slate-50 sm:text-3xl">{s.v}</div>

@@ -13,18 +13,16 @@ export default function BindPage() {
   // Primary account for the status card: prefer an online one, else the first known.
   const primary = onlineAccounts[0] || accounts[0] || null
 
-  const [apiToken, setApiToken] = useState('')
+  // Token 明文仅在生成（重置）时返回一次；查询时为 null，界面显示"已隐藏"。
+  // The plaintext token is returned once at generation; reads yield null and
+  // the UI shows a "hidden" hint.
+  const [apiToken, setApiToken] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [suffix, setSuffix] = useState('')
   const [suffixSaved, setSuffixSaved] = useState(false)
 
-  const loadToken = async () => {
-    const res = await eaApi.getToken()
-    setApiToken(res.apiToken)
-  }
-
   useEffect(() => {
-    loadToken()
+    eaApi.getToken().then((res) => setApiToken(res.apiToken)).catch(() => {})
   }, [])
 
   // 把后端已保存的后缀同步到输入框 / sync saved suffix into the input
@@ -33,6 +31,7 @@ export default function BindPage() {
   }, [primary?.symbolSuffix])
 
   const copyToken = async () => {
+    if (!apiToken) return
     await navigator.clipboard.writeText(apiToken)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
@@ -115,10 +114,21 @@ export default function BindPage() {
           </h3>
           <p className="mb-4 text-xs text-slate-500">{t('bind.tokenHint')}</p>
           <div className="mb-3 flex items-center gap-2 rounded-xl border border-prism-600/30 bg-prism-600/5 p-3">
-            <code className="flex-1 break-all font-mono text-sm text-prism-300">{apiToken}</code>
+            {apiToken ? (
+              <code className="flex-1 break-all font-mono text-sm text-prism-300">{apiToken}</code>
+            ) : (
+              <span className="flex-1 text-xs leading-relaxed text-slate-400">{t('bind.tokenHidden')}</span>
+            )}
           </div>
+          {apiToken && (
+            <p className="mb-3 text-xs leading-relaxed text-amber-400/90">{t('bind.tokenJustOnce')}</p>
+          )}
           <div className="flex gap-3">
-            <button onClick={copyToken} className="btn-primary flex-1 py-2 text-sm">
+            <button
+              onClick={copyToken}
+              disabled={!apiToken}
+              className="btn-primary flex-1 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+            >
               {copied ? t('common.copied') : t('common.copy')}
             </button>
             <button onClick={resetToken} className="btn-ghost flex-1 py-2 text-sm">

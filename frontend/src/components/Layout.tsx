@@ -1,5 +1,6 @@
 // 主布局：顶部导航 + 内容区 + 移动端底部 Tab 栏
 // Main layout: top nav + content + mobile bottom tab bar.
+import { Suspense } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { LiveProvider } from '../store/live'
@@ -204,7 +205,16 @@ export default function Layout() {
         </header>
 
         <main className="mx-auto w-full max-w-7xl flex-1 px-4 pb-24 pt-6 sm:px-6 sm:pb-6">
-          <Outlet />
+          {/* 懒加载页面切换时导航保持可见 / keep the nav visible while a lazy page loads */}
+          <Suspense
+            fallback={
+              <div className="flex min-h-[40vh] items-center justify-center">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </main>
 
         {/* 移动端底部 Tab 栏 / mobile bottom tab bar */}
