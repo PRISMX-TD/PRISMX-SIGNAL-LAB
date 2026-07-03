@@ -83,10 +83,6 @@ const MarketOverview: FC<Props> = ({ signals, trends }) => {
     <section className="card glass dash-overview p-4">
       <div className="flex items-center gap-2 px-0">
         <h3 className="text-[15px] font-bold">{t('signals.focus.overview', '市场概览')}</h3>
-        <button className="ml-auto flex items-center gap-1 h-7 px-2.5 rounded-lg bg-white/5 border border-white/10 text-xs text-slate-300 font-semibold cursor-pointer font-inherit">
-          {t('signals.focus.period7d', '7日')}
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6"/></svg>
-        </button>
       </div>
 
       <div className="donut-wrap">
@@ -99,7 +95,9 @@ const MarketOverview: FC<Props> = ({ signals, trends }) => {
           </svg>
           <div className="donut-center">
             <div>
-              <b className="num">{signals.filter(s => s.status === 'ACTIVE').length}</b>
+              {/* 与图例同口径：按唯一品种统计，保证中心数 = 多头+空头+中性 */}
+              {/* same basis as the legend: unique symbols, so center = bull + bear + neutral */}
+              <b className="num">{dist.total}</b>
               <span>{t('signals.focus.signalTotal', '信号总数')}</span>
             </div>
           </div>
