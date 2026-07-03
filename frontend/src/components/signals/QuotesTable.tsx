@@ -37,8 +37,8 @@ const QuotesTable: FC<Props> = ({ quotes, mt5Online, focusSymbol }) => {
 
   return (
     <section className="card glass dash-quotes p-5">
-      {/* 标题栏：左「实时行情报价」右 MT5 状态 */}
-      <div className="flex items-center justify-between mb-3">
+      {/* 标题栏（仅桌面）：左「实时行情报价」右 MT5 状态 / title bar, desktop only */}
+      <div className="hidden sm:flex items-center justify-between mb-3">
         <h3 className="text-[15px] font-bold text-white">{t('signals.focus.quotesHeading', '实时行情报价')}</h3>
         <div className="flex items-center gap-2 text-xs">
           <span className={`inline-block w-[7px] h-[7px] rounded-full ${mt5Online ? 'bg-up shadow-[0_0_10px_rgba(46,224,126,0.9)] animate-breathe' : 'bg-slate-500'}`} />
@@ -48,9 +48,12 @@ const QuotesTable: FC<Props> = ({ quotes, mt5Online, focusSymbol }) => {
         </div>
       </div>
 
-      {/* ── 手机端：极简单行报价，仅品种代号 + 买价/点差/卖价 / mobile: minimal single-row quote ── */}
+      {/* ── 手机端：极简单行报价，品种代号 + 状态点 + 买价/点差/卖价 / mobile: minimal single-row quote ── */}
       <div className="qt-mobile-row sm:hidden">
-        <b className="text-sm font-bold text-white">{focusMeta.sym}</b>
+        <div className="flex items-center gap-2">
+          <b className="text-sm font-bold text-white">{focusMeta.sym}</b>
+          <span className={`inline-block w-[7px] h-[7px] rounded-full ${mt5Online ? 'bg-up shadow-[0_0_10px_rgba(46,224,126,0.9)] animate-breathe' : 'bg-slate-500'}`} />
+        </div>
         <div className="flex items-center gap-5 ml-auto">
           <div className="text-center">
             <div className="text-[10px] text-slate-500 mb-0.5">{t('signals.quotes.bid', '买价')}</div>
