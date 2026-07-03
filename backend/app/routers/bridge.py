@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -27,6 +28,26 @@ router = APIRouter(prefix="/bridge", tags=["bridge"])
 # Online window (s): bridge polls every 2s; allow ~3 missed cycles so a
 # disconnect is reflected within ~6-7s without flapping on a single drop.
 ONLINE_WINDOW = 7
+
+# user_id -> 上次推送给前端的在线账号集合。桥接每 1.5 秒轮询一次，
+# 状态没变化就不再重复推 ACCOUNTS_STATUS，避免无意义的 WS 流量。
+# 该状态同时被 bridge_poll 与 offline_monitor_loop 使用（单事件循环内串行访问）。
+# user_id -> last ACCOUNTS_STATUS pushed to clients. The bridge polls every
+# 1.5s; skip the push when nothing changed to avoid useless WS traffic. Shared
+# by bridge_poll and offline_monitor_loop (accessed serially on one event loop).
+_last_pushed_online: dict[str, set[str]] = {}
+
+
+async def _push_accounts_status_if_changed(user_id: str, online: set[str]) -> None:
+    """仅在在线账号集合发生变化时推送 ACCOUNTS_STATUS。
+    Push ACCOUNTS_STATUS only when the online-login set actually changed."""
+    if _last_pushed_online.get(user_id) == online:
+        return
+    _last_pushed_online[user_id] = online
+    await manager.push_to_client(
+        user_id,
+        {"type": "ACCOUNTS_STATUS", "data": {"onlineLogins": sorted(online)}},
+    )
 
 
 def get_bridge_user(
@@ -91,31 +112,25 @@ def _upsert_account(db: Session, user_id: str, acc: BridgeAccount) -> MT5Account
     return row
 
 
-@router.post("/poll")
-async def bridge_poll(
-    req: BridgePollRequest,
-    user: User = Depends(get_bridge_user),
-    db: Session = Depends(get_db),
-):
-    """桥接程序轮询：上报本机所有账号 + 拉取这些账号的待执行指令。
-    Bridge polling: report all local accounts + fetch pending commands for them.
+def _poll_db_work(
+    db: Session, user_id: str, req: BridgePollRequest
+) -> tuple[list[dict], list[dict], set[str]]:
+    """bridge_poll 的全部同步数据库工作（在线程池中执行）。
+    All blocking DB work of bridge_poll (runs in a thread pool).
+
+    返回 (待下发指令, 被作废订单的推送载荷, 在线账号集合)。
+    Returns (commands to deliver, voided-order push payloads, online logins).
     """
     # 1) upsert 本次上报的账号 / upsert reported accounts
     suffix_by_login: dict[str, str] = {}
     online_logins: set[str] = set()
     for acc in req.accounts:
-        row = _upsert_account(db, user.id, acc)
+        row = _upsert_account(db, user_id, acc)
         suffix_by_login[acc.login] = (row.symbol_suffix or "").strip()
         online_logins.add(acc.login)
     db.commit()
 
-    # 2) 推送账号状态给前端 / push account status to the client
-    await manager.push_to_client(
-        user.id,
-        {"type": "ACCOUNTS_STATUS", "data": {"onlineLogins": sorted(online_logins)}},
-    )
-
-    # 3) 取该用户、目标账号匹配的待执行订单 / fetch matching pending orders.
+    # 2) 取该用户、目标账号匹配的待执行订单 / fetch matching pending orders.
     #    包含两类：从未下发的；以及已下发但超时未回执的（可能回执丢失，需重发）。
     #    Includes: never-delivered orders, and delivered-but-unacked orders past
     #    the ack timeout (the ack may have been lost; safe to re-deliver because
@@ -124,7 +139,7 @@ async def bridge_poll(
     ack_deadline = now - timedelta(seconds=settings.ORDER_ACK_TIMEOUT_SECONDS)
     pending = (
         db.query(Order)
-        .filter(Order.user_id == user.id, Order.status == "PENDING")
+        .filter(Order.user_id == user_id, Order.status == "PENDING")
         .order_by(Order.created_at.asc())
         .all()
     )
@@ -181,10 +196,37 @@ async def bridge_poll(
         o.delivered_at = now
     db.commit()
 
+    # 被作废订单的推送载荷（推送本身回到事件循环里做）
+    # payloads for voided orders (the actual push happens back on the event loop)
+    voided_payloads = [order_update_payload(o) for o in voided]
+
+    return commands, voided_payloads, online_logins
+
+
+@router.post("/poll")
+async def bridge_poll(
+    req: BridgePollRequest,
+    user: User = Depends(get_bridge_user),
+    db: Session = Depends(get_db),
+):
+    """桥接程序轮询：上报本机所有账号 + 拉取这些账号的待执行指令。
+    Bridge polling: report all local accounts + fetch pending commands for them.
+
+    同步数据库工作放线程池执行，避免阻塞事件循环（WS 推送共用该循环）；
+    回到事件循环后再做 WS 推送。
+    Blocking DB work runs in a thread pool so it can't stall the event loop
+    (shared with the WS pushes); pushes happen back on the loop afterwards.
+    """
+    commands, voided_payloads, online_logins = await run_in_threadpool(
+        _poll_db_work, db, user.id, req
+    )
+
     # 推送被作废订单的状态给前端 / push voided orders' status to the client
-    for o in voided:
-        db.refresh(o)
-        await manager.push_to_client(user.id, order_update_payload(o))
+    for payload in voided_payloads:
+        await manager.push_to_client(user.id, payload)
+
+    # 账号在线状态：仅变化时推送 / account status: push only on change
+    await _push_accounts_status_if_changed(user.id, online_logins)
 
     return {"commands": commands}
 
@@ -351,30 +393,29 @@ async def offline_monitor_loop() -> None:
 
     from app.core.database import SessionLocal
 
-    # user_id -> 上次推送的在线账号集合 / last pushed online-login set per user
-    last_online: dict[str, set[str]] = {}
+    def _scan_online() -> dict[str, set[str]]:
+        """扫描所有账号的在线状态（同步 DB 操作）/ scan online logins (blocking DB work)."""
+        db = SessionLocal()
+        try:
+            current: dict[str, set[str]] = {}
+            for r in db.query(MT5Account).all():
+                if _is_online(r):
+                    current.setdefault(r.user_id, set()).add(r.login)
+            return current
+        finally:
+            db.close()
+
     while True:
         await asyncio.sleep(2)
         try:
-            db = SessionLocal()
-            try:
-                rows = db.query(MT5Account).all()
-                current: dict[str, set[str]] = {}
-                for r in rows:
-                    if _is_online(r):
-                        current.setdefault(r.user_id, set()).add(r.login)
-                # 合并历史里出现过的用户，确保「全部离线」也能被检测到。
-                # Include users seen before so an all-offline transition is caught.
-                for uid in set(last_online) | set(current):
-                    now_set = current.get(uid, set())
-                    if now_set != last_online.get(uid, set()):
-                        await manager.push_to_client(
-                            uid,
-                            {"type": "ACCOUNTS_STATUS", "data": {"onlineLogins": sorted(now_set)}},
-                        )
-                        last_online[uid] = now_set
-            finally:
-                db.close()
+            # DB 扫描放线程池，避免阻塞事件循环 / DB scan off the event loop
+            current = await run_in_threadpool(_scan_online)
+            # 合并历史里出现过的用户，确保「全部离线」也能被检测到；
+            # 与 bridge_poll 共用 _last_pushed_online，状态未变不重复推送。
+            # Include users seen before so an all-offline transition is caught;
+            # shares _last_pushed_online with bridge_poll to avoid duplicate pushes.
+            for uid in set(_last_pushed_online) | set(current):
+                await _push_accounts_status_if_changed(uid, current.get(uid, set()))
         except Exception:
             # 后台任务不因单次异常退出，但必须留下日志便于排查。
             # Never let the loop die on a transient error, but do log it.

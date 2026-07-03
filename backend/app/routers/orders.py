@@ -84,8 +84,13 @@ def void_stale_order(o: Order) -> None:
     o.message = STALE_ORDER_MESSAGE
 
 
+# 说明：下单/平仓/改单端点声明为普通 def——FastAPI 会放到线程池执行，
+# 同步 SQLAlchemy 查询不再阻塞事件循环（WS 推送与桥接轮询共用该循环）。
+# Note: these endpoints are plain `def` so FastAPI runs them in a thread pool;
+# the blocking SQLAlchemy calls no longer stall the event loop shared by the
+# WebSocket pushes and bridge polling.
 @router.post("", response_model=OrderOut)
-async def place_order(
+def place_order(
     req: OrderRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -207,7 +212,7 @@ def _assert_account_owned(db: Session, user_id: str, mt5_login: str | None) -> N
 
 
 @router.post("/close", response_model=OrderOut)
-async def close_position(
+def close_position(
     req: ClosePositionRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -245,7 +250,7 @@ async def close_position(
 
 
 @router.post("/modify", response_model=OrderOut)
-async def modify_position(
+def modify_position(
     req: ModifyPositionRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -293,25 +298,36 @@ async def stale_order_monitor_loop() -> None:
     Periodically void stale PENDING orders and push ORDER_UPDATE, covering the
     case where neither the orders page nor the bridge ever touches them.
     """
+    from starlette.concurrency import run_in_threadpool
+
     from app.core.database import SessionLocal
+
+    def _sweep() -> list[tuple[str, dict]]:
+        """作废超时订单（同步 DB 操作），返回 (user_id, payload) 列表。
+        Void stale orders (blocking DB work); return (user_id, payload) pairs."""
+        db = SessionLocal()
+        try:
+            voided: list[Order] = []
+            pending = db.query(Order).filter(Order.status == "PENDING").all()
+            for o in pending:
+                if is_stale_pending(o):
+                    void_stale_order(o)
+                    voided.append(o)
+            if voided:
+                db.commit()
+            out = []
+            for o in voided:
+                db.refresh(o)
+                out.append((o.user_id, order_update_payload(o)))
+            return out
+        finally:
+            db.close()
 
     while True:
         await asyncio.sleep(10)
         try:
-            db = SessionLocal()
-            try:
-                voided: list[Order] = []
-                pending = db.query(Order).filter(Order.status == "PENDING").all()
-                for o in pending:
-                    if is_stale_pending(o):
-                        void_stale_order(o)
-                        voided.append(o)
-                if voided:
-                    db.commit()
-                for o in voided:
-                    db.refresh(o)
-                    await manager.push_to_client(o.user_id, order_update_payload(o))
-            finally:
-                db.close()
+            # DB 扫描放线程池，避免阻塞事件循环 / DB sweep off the event loop
+            for user_id, payload in await run_in_threadpool(_sweep):
+                await manager.push_to_client(user_id, payload)
         except Exception:
             logger.exception("stale_order_monitor_loop error")
