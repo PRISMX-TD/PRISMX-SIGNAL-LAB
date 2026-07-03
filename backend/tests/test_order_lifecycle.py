@@ -210,3 +210,27 @@ def test_close_happy_path_pending(client, auth_headers, bridge_headers, db, user
     cmd = next(c for c in p.json()["commands"] if c["clientOrderId"] == "c-ok")
     assert cmd["action"] == "CLOSE"
     assert cmd["ticket"] == 42
+
+
+# ---------- 多账号路由校验 / multi-account routing validation ----------
+
+
+def _set_online(db, acc):
+    acc.last_heartbeat = datetime.now(timezone.utc)
+    db.commit()
+
+
+def test_unrouted_order_rejected_when_multiple_accounts_online(client, auth_headers, db, user):
+    a1 = make_account(db, user, login="10001")
+    a2 = make_account(db, user, login="10002")
+    _set_online(db, a1)
+    _set_online(db, a2)
+    r = place(client, auth_headers, coid="mr-1")  # 不带 mt5Login / no target account
+    assert r.status_code == 400
+
+
+def test_unrouted_order_allowed_with_single_online_account(client, auth_headers, db, user):
+    a1 = make_account(db, user, login="10001")
+    _set_online(db, a1)
+    r = place(client, auth_headers, coid="mr-2")
+    assert r.status_code == 200

@@ -25,7 +25,7 @@ from app.schemas import (
     OrderRequest,
 )
 from app.services.connection_manager import manager
-from app.services.deps import get_current_user, validate_order
+from app.services.deps import get_current_user, is_account_online, validate_order
 
 logger = logging.getLogger("prismx.orders")
 
@@ -110,6 +110,23 @@ def place_order(
         if acc and acc.equity:
             equity = acc.equity
     validate_order(req.symbol, req.side, req.volume, equity)
+
+    # 未指定目标账号且有多个账号在线：直接拒单并提示，而不是让指令
+    # 静默滞留 5 分钟后作废（桥接只在恰好一个在线账号时才能兜底路由）。
+    # No target account while multiple accounts are online: reject with a
+    # clear message instead of letting the command silently sit until the
+    # 5-minute void (the bridge can only fall back when exactly one is online).
+    if not req.mt5Login:
+        online_count = sum(
+            1
+            for acc in db.query(MT5Account).filter(MT5Account.user_id == user.id).all()
+            if is_account_online(acc)
+        )
+        if online_count > 1:
+            raise HTTPException(
+                status_code=400,
+                detail="多个 MT5 账号在线，请指定目标账户 / Multiple accounts online; choose a target account",
+            )
 
     # 2) 幂等：同一 clientOrderId 不重复下单 / idempotency by clientOrderId
     existing = (

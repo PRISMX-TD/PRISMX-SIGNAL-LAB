@@ -32,6 +32,32 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _migrate_columns()
+    _hash_legacy_api_tokens()
+
+
+def _hash_legacy_api_tokens() -> None:
+    """把历史明文 API Token 原地哈希（一次性迁移）。
+
+    新方案数据库只存 SHA-256；旧行以 "prismx_" 开头即为明文，哈希后覆盖。
+    用户侧无感：Bridge 里填的明文 token 请求时会先哈希再比对，仍然有效。
+
+    Hash legacy plaintext API tokens in place (one-off migration). The new
+    scheme stores only the SHA-256; legacy rows start with "prismx_" and get
+    hashed over. Transparent to users: the plaintext token in their bridge
+    still authenticates (incoming tokens are hashed before comparison).
+    """
+    from app.core.security import hash_api_token
+    from app.models import User
+
+    db = SessionLocal()
+    try:
+        legacy = db.query(User).filter(User.api_token.like("prismx\\_%", escape="\\")).all()
+        for u in legacy:
+            u.api_token = hash_api_token(u.api_token)
+        if legacy:
+            db.commit()
+    finally:
+        db.close()
 
 
 def _migrate_columns() -> None:
@@ -75,6 +101,15 @@ def _migrate_columns() -> None:
             for name, col_type in signal_new.items():
                 if name not in signal_cols:
                     conn.execute(text(f"ALTER TABLE signals ADD COLUMN {name} {col_type}"))
+
+    # 后台清扫/过期扫描用的索引：create_all 不会为已存在的表补索引，这里补。
+    # Indexes for the background sweeps: create_all won't add indexes to
+    # pre-existing tables, so do it here (IF NOT EXISTS on both dialects).
+    with engine.begin() as conn:
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_signals_status_expire ON signals(status, expire_at)"
+        ))
 
     # users 表：password_hash 改可空（Google 登录用户无密码）。
     # 旧表建表时为 NOT NULL，需放开约束，否则插入无密码用户会被拒。

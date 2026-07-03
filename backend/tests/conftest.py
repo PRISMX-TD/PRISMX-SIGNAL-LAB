@@ -20,7 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.database import Base, SessionLocal, engine, init_db
-from app.core.security import create_access_token, generate_api_token
+from app.core.security import create_access_token, generate_api_token, hash_api_token
 from app.main import app
 from app.models import MT5Account, Order, Signal, User
 
@@ -42,8 +42,15 @@ def client(db):
 
 
 @pytest.fixture()
-def user(db):
-    u = User(email="tester@example.com", password_hash="x", api_token=generate_api_token())
+def user_token():
+    """Bridge 用的明文 API Token（数据库只存其哈希）。
+    Plaintext API token for the bridge (only its hash lands in the DB)."""
+    return generate_api_token()
+
+
+@pytest.fixture()
+def user(db, user_token):
+    u = User(email="tester@example.com", password_hash="x", api_token=hash_api_token(user_token))
     db.add(u)
     db.commit()
     db.refresh(u)
@@ -56,8 +63,8 @@ def auth_headers(user):
 
 
 @pytest.fixture()
-def bridge_headers(user):
-    return {"X-Api-Token": user.api_token}
+def bridge_headers(user, user_token):
+    return {"X-Api-Token": user_token}
 
 
 def make_signal(db, minutes_left: float = 10.0, **kw) -> Signal:

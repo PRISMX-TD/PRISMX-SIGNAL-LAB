@@ -11,7 +11,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.core.config import settings
 from app.core.database import init_db
 from app.core.rate_limit import limiter
-from app.engine.signal_engine import signal_loop
+from app.engine.signal_engine import signal_expiry_loop, signal_loop
 from app.routers import account, auth, bridge, ea, notifications, orders, signals, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.orders import stale_order_monitor_loop
@@ -29,12 +29,16 @@ async def lifespan(app: FastAPI):
     )
     monitor = asyncio.create_task(offline_monitor_loop())
     stale_sweep = asyncio.create_task(stale_order_monitor_loop())
+    # 信号过期广播：独立于模拟引擎，webhook 信号也依赖它 / expiry broadcast,
+    # independent of the mock engine; webhook signals rely on it too
+    expiry_sweep = asyncio.create_task(signal_expiry_loop())
     yield
     # 关闭：停止后台任务 / shutdown: stop background tasks
     if task is not None:
         task.cancel()
     monitor.cancel()
     stale_sweep.cancel()
+    expiry_sweep.cancel()
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
@@ -51,6 +55,9 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # 暴露滑动续期头，跨域下前端 JS 才能读取 / expose the sliding-renewal
+    # header so cross-origin frontend JS can read it
+    expose_headers=["X-Refreshed-Token"],
 )
 
 # REST 路由 / REST routers

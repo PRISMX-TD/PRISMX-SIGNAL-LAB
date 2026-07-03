@@ -123,8 +123,10 @@ def _serialize(sig: Signal) -> dict:
     ).model_dump(mode="json")
 
 
-async def _expire_and_broadcast() -> None:
-    """标记到期信号为 EXPIRED 并广播给前端 / mark expired signals and broadcast."""
+def _expire_stale_signals() -> list[str]:
+    """标记到期信号为 EXPIRED，返回其 id（同步 DB 操作，放线程池执行）。
+    Mark expired signals as EXPIRED and return their ids (blocking DB work,
+    run in a thread pool)."""
     db = SessionLocal()
     expired_ids: list[str] = []
     try:
@@ -145,8 +147,30 @@ async def _expire_and_broadcast() -> None:
             db.commit()
     finally:
         db.close()
-    for sid in expired_ids:
-        await manager.broadcast_to_clients({"type": "SIGNAL_EXPIRED", "data": {"id": sid}})
+    return expired_ids
+
+
+async def signal_expiry_loop() -> None:
+    """独立的信号过期扫描任务：到期即广播 SIGNAL_EXPIRED。
+
+    与模拟信号引擎解耦——关闭 ENABLE_MOCK_SIGNAL_ENGINE 接入真实信号后，
+    webhook 信号的过期仍能实时广播到前端（此前广播只挂在引擎循环里）。
+
+    Standalone expiry sweep: broadcasts SIGNAL_EXPIRED as signals lapse.
+    Decoupled from the mock engine so webhook signals still expire in real
+    time on the frontend once ENABLE_MOCK_SIGNAL_ENGINE is turned off (the
+    broadcast used to live only inside the engine loop).
+    """
+    from starlette.concurrency import run_in_threadpool
+
+    while True:
+        await asyncio.sleep(5)
+        try:
+            expired_ids = await run_in_threadpool(_expire_stale_signals)
+            for sid in expired_ids:
+                await manager.broadcast_to_clients({"type": "SIGNAL_EXPIRED", "data": {"id": sid}})
+        except Exception:
+            logger.exception("signal_expiry_loop error")
 
 
 async def signal_loop() -> None:
@@ -158,8 +182,9 @@ async def signal_loop() -> None:
     while True:
         await asyncio.sleep(settings.SIGNAL_INTERVAL_SECONDS)
         try:
-            # 0) 标记过期信号并广播，让前端实时置灰 / expire stale signals and broadcast
-            await _expire_and_broadcast()
+            # 过期扫描由独立的 signal_expiry_loop 负责，这里只管生成新信号。
+            # Expiry is handled by the standalone signal_expiry_loop; this loop
+            # only generates new signals.
 
             # 更新所有品种价格 / advance prices for all symbols
             for sym in SYMBOLS:

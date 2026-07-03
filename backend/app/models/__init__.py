@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 
 from app.core.database import Base
 
@@ -23,6 +23,8 @@ class User(Base):
     email = Column(String, unique=True, nullable=False, index=True)
     # 密码哈希：Google 登录的用户没有密码，故可空 / nullable: Google users have no password
     password_hash = Column(String, nullable=True)
+    # API Token 的 SHA-256 哈希（明文只在生成时展示一次，不落库）
+    # SHA-256 hash of the API token (plaintext shown once at generation, never stored)
     api_token = Column(String, unique=True, nullable=False, index=True)
     created_at = Column(DateTime, default=_now)
 
@@ -66,6 +68,8 @@ class MT5Account(Base):
 class Signal(Base):
     """交易信号 / Trading signal."""
     __tablename__ = "signals"
+    # 过期扫描按 (status, expire_at) 查询 / expiry sweep filters on (status, expire_at)
+    __table_args__ = (Index("idx_signals_status_expire", "status", "expire_at"),)
 
     id = Column(String, primary_key=True, default=_uuid)
     symbol = Column(String, nullable=False)
@@ -87,7 +91,11 @@ class Signal(Base):
 class Order(Base):
     """下单指令与回执 / Order command and execution result."""
     __tablename__ = "orders"
-    __table_args__ = (UniqueConstraint("user_id", "client_order_id", name="uq_user_client_order"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "client_order_id", name="uq_user_client_order"),
+        # 后台清扫按 status 查询 / the stale-order sweep filters on status
+        Index("idx_orders_status", "status"),
+    )
 
     id = Column(String, primary_key=True, default=_uuid)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)

@@ -36,7 +36,10 @@ class AuthResponse(BaseModel):
 
 # ---------- API Token / MT5 连接凭证 ----------
 class EATokenOut(BaseModel):
-    apiToken: str
+    # 明文 token 仅在重置（生成）响应中出现一次；查询时为 None（库中只存哈希）。
+    # The plaintext token appears only once in the reset response; None on
+    # reads (the DB stores just the hash).
+    apiToken: str | None = None
     boundAccount: str | None = None
 
 

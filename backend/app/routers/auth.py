@@ -8,6 +8,7 @@ from app.core.rate_limit import limiter
 from app.core.security import (
     create_access_token,
     generate_api_token,
+    hash_api_token,
     hash_password,
     verify_google_id_token,
     verify_password,
@@ -30,7 +31,9 @@ def register(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
     user = User(
         email=req.email,
         password_hash=hash_password(req.password),
-        api_token=generate_api_token(),
+        # 只存哈希；用户首次连接 MT5 时在绑定页生成可见 token / store the hash
+        # only; the user generates a visible token on the Bind page
+        api_token=hash_api_token(generate_api_token()),
     )
     db.add(user)
     db.commit()
@@ -61,7 +64,7 @@ def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends
         user = User(
             email=email,
             password_hash=None,
-            api_token=generate_api_token(),
+            api_token=hash_api_token(generate_api_token()),
         )
         db.add(user)
         db.commit()

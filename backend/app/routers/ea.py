@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import generate_api_token
+from app.core.security import generate_api_token, hash_api_token
 from app.models import MT5Account, User
 from app.schemas import EATokenOut
 from app.services.deps import get_current_user
@@ -32,14 +32,18 @@ def _primary_login(db: Session, user_id: str) -> str | None:
 
 @router.get("/token", response_model=EATokenOut)
 def get_token(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """获取当前用户的 API Token 与主账号 / get API token and primary account."""
-    return EATokenOut(apiToken=user.api_token, boundAccount=_primary_login(db, user.id))
+    """获取主账号信息；Token 以哈希存储无法回显（仅生成时显示一次）。
+    Get the primary account; the token is stored hashed and cannot be
+    displayed again (shown only once at generation)."""
+    return EATokenOut(apiToken=None, boundAccount=_primary_login(db, user.id))
 
 
 @router.post("/token/reset", response_model=EATokenOut)
 def reset_token(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """重置 API Token（旧 Token 立即失效）/ reset API token (old token invalidated)."""
-    user.api_token = generate_api_token()
+    """重置 API Token（旧 Token 立即失效）。明文仅在本响应中出现一次，
+    数据库只存哈希。/ Reset the API token (old one invalidated). The plaintext
+    appears only in this response; the DB keeps just the hash."""
+    raw = generate_api_token()
+    user.api_token = hash_api_token(raw)
     db.commit()
-    db.refresh(user)
-    return EATokenOut(apiToken=user.api_token, boundAccount=_primary_login(db, user.id))
+    return EATokenOut(apiToken=raw, boundAccount=_primary_login(db, user.id))

@@ -17,17 +17,11 @@ from app.models import MT5Account, Order, Signal, User
 from app.routers.orders import is_stale_pending, order_update_payload, void_stale_order
 from app.schemas import LOGIN_PATTERN, SUFFIX_PATTERN, AccountSuffixRequest, MT5AccountOut
 from app.services.connection_manager import manager
-from app.services.deps import get_current_user
+from app.services.deps import get_current_user, is_account_online
 
 logger = logging.getLogger("prismx.bridge")
 
 router = APIRouter(prefix="/bridge", tags=["bridge"])
-
-# 账号在线判定窗口（秒）：桥接每 2 秒轮询一次，留 3 个周期容错，
-# 既能快速反映断线（约 6~7 秒内置灰），又不会因偶发丢包误判离线。
-# Online window (s): bridge polls every 2s; allow ~3 missed cycles so a
-# disconnect is reflected within ~6-7s without flapping on a single drop.
-ONLINE_WINDOW = 7
 
 # user_id -> 上次推送给前端的在线账号集合。桥接每 1.5 秒轮询一次，
 # 状态没变化就不再重复推 ACCOUNTS_STATUS，避免无意义的 WS 流量。
@@ -319,15 +313,6 @@ async def bridge_quotes(
 
 
 # ---------- 用户面向：账号列表与后缀设置 / user-facing: account list & suffix ----------
-def _is_online(row: MT5Account) -> bool:
-    if not row.last_heartbeat:
-        return False
-    last = row.last_heartbeat
-    if last.tzinfo is None:
-        last = last.replace(tzinfo=timezone.utc)
-    return (datetime.now(timezone.utc) - last).total_seconds() < ONLINE_WINDOW
-
-
 @router.get("/accounts", response_model=dict)
 def list_accounts(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """列出当前用户的所有 MT5 账号 / list all MT5 accounts of the user."""
@@ -349,7 +334,7 @@ def list_accounts(user: User = Depends(get_current_user), db: Session = Depends(
             leverage=r.leverage,
             company=r.company,
             symbolSuffix=r.symbol_suffix or "",
-            online=_is_online(r),
+            online=is_account_online(r),
             lastHeartbeat=r.last_heartbeat,
         )
         for r in rows
@@ -399,7 +384,7 @@ async def offline_monitor_loop() -> None:
         try:
             current: dict[str, set[str]] = {}
             for r in db.query(MT5Account).all():
-                if _is_online(r):
+                if is_account_online(r):
                     current.setdefault(r.user_id, set()).add(r.login)
             return current
         finally:

@@ -1,14 +1,41 @@
 """认证依赖与风控 / Auth dependencies and risk control."""
-from fastapi import Depends, Header, HTTPException, status
+from datetime import datetime, timezone
+
+from fastapi import Depends, Header, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import decode_access_token
+from app.core.security import create_access_token, decode_token_payload
 from app.models import User
+
+# 滑动续期响应头：token 剩余有效期不足一半时，经此头下发新 token，
+# 前端收到后自动替换本地 token，实现无感续期（不再每天被踢下线）。
+# Sliding-renewal header: when the token has less than half its lifetime
+# left, a fresh token is issued via this header; the frontend swaps it in
+# silently so active users are never forced to re-login.
+REFRESHED_TOKEN_HEADER = "X-Refreshed-Token"
+
+# 账号在线判定窗口（秒）：桥接每 1.5 秒轮询一次，留 3 个周期容错，
+# 既能快速反映断线（约 6~7 秒内置灰），又不会因偶发丢包误判离线。
+# Online window (s): bridge polls every 1.5s; allow ~3 missed cycles so a
+# disconnect is reflected within ~6-7s without flapping on a single drop.
+ONLINE_WINDOW = 7
+
+
+def is_account_online(row) -> bool:
+    """按最近心跳判断一个 MT5 账号是否在线 / whether an MT5 account is online
+    based on its last heartbeat (row is an MT5Account)."""
+    if not row.last_heartbeat:
+        return False
+    last = row.last_heartbeat
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - last).total_seconds() < ONLINE_WINDOW
 
 
 def get_current_user(
+    response: Response,
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ) -> User:
@@ -16,12 +43,21 @@ def get_current_user(
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="缺少凭证 / Missing token")
     token = authorization.split(" ", 1)[1]
-    user_id = decode_access_token(token)
+    payload = decode_token_payload(token)
+    user_id = payload.get("sub") if payload else None
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="凭证无效 / Invalid token")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在 / User not found")
+
+    # 滑动续期：剩余有效期不足一半则下发新 token / sliding renewal at half-life
+    exp = payload.get("exp")
+    if isinstance(exp, (int, float)):
+        remaining = exp - datetime.now(timezone.utc).timestamp()
+        if remaining < settings.JWT_EXPIRE_MINUTES * 60 / 2:
+            response.headers[REFRESHED_TOKEN_HEADER] = create_access_token(user.id)
+
     return user
 
 
