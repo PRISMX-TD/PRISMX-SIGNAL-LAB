@@ -36,7 +36,7 @@ const QuotesTable: FC<Props> = ({ quotes, mt5Online, focusSymbol }) => {
     : '-'
 
   return (
-    <section className="card glass dash-quotes p-5">
+    <section className="card glass dash-quotes p-4 sm:p-5">
       {/* 标题栏（仅桌面）：左「实时行情报价」右 MT5 状态 / title bar, desktop only */}
       <div className="hidden sm:flex items-center justify-between mb-3">
         <h3 className="text-[15px] font-bold text-white">{t('signals.focus.quotesHeading', '实时行情报价')}</h3>
