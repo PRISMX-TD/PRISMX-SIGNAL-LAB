@@ -91,7 +91,7 @@ const MarketOverview: FC<Props> = ({ signals, trends }) => {
 
       <div className="donut-wrap">
         <div className="donut">
-          <svg width="116" height="116" viewBox="0 0 116 116">
+          <svg className="w-full h-full" viewBox="0 0 116 116">
             <circle cx="58" cy="58" r="47" fill="none" stroke="#26262e" strokeWidth="13" />
             <circle cx="58" cy="58" r="47" fill="none" stroke="#2ee07e" strokeWidth="13" strokeLinecap="round" strokeDasharray={seg1Dash} />
             <circle cx="58" cy="58" r="47" fill="none" stroke="#ff4d67" strokeWidth="13" strokeLinecap="round" strokeDasharray={seg2Dash} strokeDashoffset={seg2Offset} />

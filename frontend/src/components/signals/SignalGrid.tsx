@@ -20,8 +20,8 @@ const SignalGrid: FC<Props> = ({ signals, now, onTrade }) => {
   const [sideF, setSideF] = useState<'ALL' | 'BUY' | 'SELL'>(
     () => (getPref<string>('signals', 'sideF', 'ALL')) as 'ALL' | 'BUY' | 'SELL'
   )
-  const [statusF, setStatusF] = useState<'ALL' | 'ACTIVE' | 'EXPIRING'>(
-    () => (getPref<string>('signals', 'statusF', 'ALL')) as 'ALL' | 'ACTIVE' | 'EXPIRING'
+  const [statusF, setStatusF] = useState<'ALL' | 'ACTIVE'>(
+    () => (getPref<string>('signals', 'statusF', 'ALL')) as 'ALL' | 'ACTIVE'
   )
   const [sortF, setSortF] = useState<'latest' | 'expiry'>(
     () => (getPref<string>('signals', 'sortF', 'latest')) as 'latest' | 'expiry'
@@ -61,27 +61,28 @@ const SignalGrid: FC<Props> = ({ signals, now, onTrade }) => {
         <p>{t('signals.subtitle')}</p>
       </div>
 
-      {/* Filters */}
+      {/* Filters：单排药丸按钮，可横向滑动 / single-row pill filters, horizontally scrollable */}
       <div className="sig-filters">
         <div className="fgroup">
           <span className="fk">{t('signals.filterSide')}</span>
-          <div className="seg">
+          <div className="seg-pill">
             <button className={sideF === 'ALL' ? 'on' : ''} onClick={() => setSideF('ALL')}>{t('signals.all')}</button>
             <button className={sideF === 'BUY' ? 'on' : ''} onClick={() => setSideF('BUY')}>{t('common.buy')}</button>
             <button className={sideF === 'SELL' ? 'on' : ''} onClick={() => setSideF('SELL')}>{t('common.sell')}</button>
           </div>
         </div>
+        <span className="fsep" />
         <div className="fgroup">
           <span className="fk">{t('signals.filterStatus')}</span>
-          <div className="seg">
+          <div className="seg-pill">
             <button className={statusF === 'ALL' ? 'on' : ''} onClick={() => setStatusF('ALL')}>{t('signals.all')}</button>
             <button className={statusF === 'ACTIVE' ? 'on' : ''} onClick={() => setStatusF('ACTIVE')}>{t('signals.active')}</button>
-            <button className={statusF === 'EXPIRING' ? 'on' : ''} onClick={() => setStatusF('EXPIRING')}>{t('signals.expiringSoon')}</button>
           </div>
         </div>
+        <span className="fsep" />
         <div className="fgroup">
           <span className="fk">{t('signals.sortBy')}</span>
-          <div className="seg">
+          <div className="seg-pill">
             <button className={sortF === 'latest' ? 'on' : ''} onClick={() => setSortF('latest')}>{t('signals.sort.latest')}</button>
             <button className={sortF === 'expiry' ? 'on' : ''} onClick={() => setSortF('expiry')}>{t('signals.sort.expiry')}</button>
           </div>
