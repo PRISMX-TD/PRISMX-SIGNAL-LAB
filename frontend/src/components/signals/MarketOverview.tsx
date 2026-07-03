@@ -11,14 +11,13 @@ interface Props {
   trends: Record<string, Trend>
 }
 
-// 品种分组：按多周期趋势立场统计 / group symbols by trend stance
+// 按多周期趋势立场统计所有活跃信号（不去重），使三段之和 = 活跃信号总数
+// count every ACTIVE signal by its symbol's trend stance (no dedup) so the
+// three segments always sum to the total number of active signals
 function computeDistribution(signals: Signal[], trends: Record<string, Trend>) {
   let long = 0, short = 0, neutral = 0
-  const seen = new Set<string>()
   for (const s of signals) {
     if (s.status !== 'ACTIVE') continue
-    if (seen.has(s.symbol)) continue
-    seen.add(s.symbol)
     const st = trendStance(trends[s.symbol])
     if (st === 'BULL') long++
     else if (st === 'BEAR') short++
@@ -95,8 +94,7 @@ const MarketOverview: FC<Props> = ({ signals, trends }) => {
           </svg>
           <div className="donut-center">
             <div>
-              {/* 与图例同口径：按唯一品种统计，保证中心数 = 多头+空头+中性 */}
-              {/* same basis as the legend: unique symbols, so center = bull + bear + neutral */}
+              {/* 活跃信号总数，且 = 多头 + 空头 + 中性 / total active signals, equals bull + bear + neutral */}
               <b className="num">{dist.total}</b>
               <span>{t('signals.focus.signalTotal', '信号总数')}</span>
             </div>
