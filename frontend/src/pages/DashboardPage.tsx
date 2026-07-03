@@ -72,7 +72,7 @@ export default function DashboardPage() {
               </div>
               <div className="dash-col-2">
                 <SignalExec signal={cur.signal} now={now} onTrade={openTrade} />
-                <MarketOverview signals={signals} trends={trends} />
+                <MarketOverview signals={signals} />
               </div>
               <SignalOthers entries={otherEntries} now={now} onTrade={openTrade} onFocus={setFocusIdx} onViewAll={goSignals} />
             </>
@@ -88,7 +88,7 @@ export default function DashboardPage() {
               </div>
               <div className="dash-col-2">
                 <SignalExec signal={null} now={now} onTrade={openTrade} />
-                <MarketOverview signals={signals} trends={trends} />
+                <MarketOverview signals={signals} />
               </div>
               <section className="card glass dash-others p-4 flex items-center justify-center text-sm text-slate-500">{t('signals.focus.noExecutable')}</section>
             </>

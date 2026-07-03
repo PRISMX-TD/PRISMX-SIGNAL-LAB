@@ -2,25 +2,21 @@
 // Market overview card (dashboard bottom-right): donut + legend + total signals + daily signal-count sparkline
 import { memo, type FC, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { Signal, Trend, SignalDailyCount } from '../../api/types'
+import type { Signal, SignalDailyCount } from '../../api/types'
 import { signalApi } from '../../api/client'
-import { trendStance } from './signalView'
 
 interface Props {
   signals: Signal[]
-  trends: Record<string, Trend>
 }
 
-// 按多周期趋势立场统计所有活跃信号（不去重），使三段之和 = 活跃信号总数
-// count every ACTIVE signal by its symbol's trend stance (no dedup) so the
-// three segments always sum to the total number of active signals
-function computeDistribution(signals: Signal[], trends: Record<string, Trend>) {
+// 按信号方向统计所有活跃信号：买入=多头，卖出=空头，三段之和 = 活跃信号总数
+// count active signals by their direction: BUY = long, SELL = short; segments sum to total
+function computeDistribution(signals: Signal[]) {
   let long = 0, short = 0, neutral = 0
   for (const s of signals) {
     if (s.status !== 'ACTIVE') continue
-    const st = trendStance(trends[s.symbol])
-    if (st === 'BULL') long++
-    else if (st === 'BEAR') short++
+    if (s.side === 'BUY') long++
+    else if (s.side === 'SELL') short++
     else neutral++
   }
   const total = long + short + neutral
@@ -48,9 +44,9 @@ function buildSparkPoints(daily: SignalDailyCount[]): { points: string; areaPoin
   return { points, areaPoints }
 }
 
-const MarketOverview: FC<Props> = ({ signals, trends }) => {
+const MarketOverview: FC<Props> = ({ signals }) => {
   const { t } = useTranslation()
-  const dist = useMemo(() => computeDistribution(signals, trends), [signals, trends])
+  const dist = useMemo(() => computeDistribution(signals), [signals])
   const total = Math.max(1, dist.total)
   const longFrac = dist.long / total
   const shortFrac = dist.short / total
