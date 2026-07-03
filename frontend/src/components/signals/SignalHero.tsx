@@ -1,6 +1,6 @@
 // 英雄卡：当前聚焦品种的多周期趋势 + 各周期分布条 + Myfxbook 社区情绪
 // Hero card: current focus symbol trend analysis + per-symbol TF distribution + Myfxbook sentiment
-import { memo, type FC } from 'react'
+import { memo, type FC, useRef, type TouchEvent as RTouchEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Trend, TrendDir } from '../../api/types'
 import type { MyfxSentiment } from '../../api/myfxbook'
@@ -33,8 +33,32 @@ const SignalHero: FC<Props> = ({
   const stanceLabel = stance === 'BULL' ? t('signals.focus.bull') : stance === 'BEAR' ? t('signals.focus.bear') : t('signals.focus.neutral')
   const stanceNote = stance === 'BULL' ? t('signals.focus.adviceBull') : stance === 'BEAR' ? t('signals.focus.adviceBear') : t('signals.focus.adviceNeutral')
 
+  // 手机端左右滑动切换聚焦品种：左滑下一个 / 右滑上一个
+  // Mobile swipe to switch focus symbol: swipe left → next, swipe right → prev
+  const touchStart = useRef<{ x: number; y: number } | null>(null)
+  const onTouchStart = (e: RTouchEvent<HTMLElement>) => {
+    const p = e.touches[0]
+    touchStart.current = { x: p.clientX, y: p.clientY }
+  }
+  const onTouchEnd = (e: RTouchEvent<HTMLElement>) => {
+    if (!touchStart.current || focusTotal <= 1) { touchStart.current = null; return }
+    const p = e.changedTouches[0]
+    const dx = p.clientX - touchStart.current.x
+    const dy = p.clientY - touchStart.current.y
+    touchStart.current = null
+    // 仅当水平位移足够大且明显大于垂直位移时才切换，避免与纵向滚动冲突
+    if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      if (dx < 0) onNext()
+      else onPrev()
+    }
+  }
+
   return (
-    <section className="card glass hero-card dash-hero p-5">
+    <section
+      className="card glass hero-card dash-hero p-5 select-none"
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+    >
       {/* Header row：多周期趋势立场 */}
       <div className="flex items-center gap-2.5 relative z-10">
         <h2 className="text-[19px] font-bold text-white">{t('signals.focus.heading')}</h2>
