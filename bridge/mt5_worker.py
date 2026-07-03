@@ -4,6 +4,13 @@
 Within one process, attach to each terminal via mt5.initialize(path=...)
 and poll them serially. This avoids the multiprocessing pitfalls of a
 PyInstaller onefile build.
+
+连接复用：MetaTrader5 库同一进程同一时刻只能附着一个终端。单终端（最常见）
+场景下保持连接不再每次轮询 initialize/shutdown；多终端场景切换时才重连。
+Connection reuse: the MetaTrader5 package attaches to one terminal at a time
+per process. With a single terminal (the common case) the attachment is kept
+across polls instead of initialize/shutdown on every tick; with multiple
+terminals we only reconnect when switching.
 """
 try:
     import MetaTrader5 as mt5
@@ -11,6 +18,42 @@ try:
 except Exception as _e:  # pragma: no cover - 仅 Windows 有该包 / Windows-only package
     mt5 = None
     _IMPORT_ERROR = repr(_e)
+
+
+# 当前附着的终端路径；None 表示未附着 / currently attached terminal path
+_attached_path: str | None = None
+
+
+def _ensure_attached(path: str) -> bool:
+    """确保当前进程附着到指定终端；已附着同一终端则直接复用。
+    Ensure this process is attached to the given terminal, reusing the
+    existing attachment when the path matches.
+
+    附着失效（终端被关闭等）时自动断开重连；切换终端时先 shutdown 再 initialize。
+    A dead attachment (terminal closed etc.) is detected and re-established;
+    switching terminals does a clean shutdown + initialize.
+    """
+    global _attached_path
+    if _attached_path == path:
+        try:
+            # terminal_info() 存活即连接有效（未登录账号时 account_info 为 None，
+            # 但连接本身仍可用）/ terminal_info() alive means the link is healthy
+            if mt5.terminal_info() is not None:
+                return True
+        except Exception:
+            pass
+    if _attached_path is not None:
+        try:
+            mt5.shutdown()
+        except Exception:
+            pass
+        _attached_path = None
+    # 加 timeout 防止误连到异常终端时无限阻塞（单位毫秒）。
+    # Add timeout (ms) so a bad terminal cannot block the worker indefinitely.
+    if not mt5.initialize(path=path, timeout=10000):
+        return False
+    _attached_path = path
+    return True
 
 
 # 常见基础品种，用于探测券商后缀 / common base symbols to probe broker suffix
@@ -488,10 +531,12 @@ def poll_terminal(path: str, orders: list[dict] | None = None) -> dict:
         out["error"] = f"MetaTrader5 import failed: {_IMPORT_ERROR}"
         return out
 
-    # 连接指定路径的终端（终端须已运行并登录）/ attach to the terminal at path
-    # 加 timeout 防止误连到异常终端时无限阻塞（单位毫秒）。
-    # Add timeout (ms) so a bad terminal cannot block the worker indefinitely.
-    if not mt5.initialize(path=path, timeout=10000):
+    # 附着指定路径的终端（终端须已运行并登录）；单终端场景连接跨轮询复用，
+    # 不再每 1.5 秒 initialize/shutdown 一次。
+    # Attach to the terminal at path (must be running & logged in); with a
+    # single terminal the attachment is reused across polls instead of
+    # initialize/shutdown every 1.5s.
+    if not _ensure_attached(path):
         out["error"] = f"initialize failed: {mt5.last_error()}"
         return out
 
@@ -504,6 +549,4 @@ def poll_terminal(path: str, orders: list[dict] | None = None) -> dict:
             out["results"].append(_dispatch_command(cmd))
     except Exception as e:
         out["error"] = str(e)
-    finally:
-        mt5.shutdown()
     return out

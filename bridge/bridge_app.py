@@ -27,7 +27,7 @@ from urllib import error, request
 from mt5_worker import poll_terminal
 
 # ---------- 版本 / Version ----------
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.3.2"
 
 # ---------- 更新检测 / Update check ----------
 # 通过 GitHub Releases 检查是否有更新的安装包版本。
@@ -46,6 +46,24 @@ DEFAULT_BACKEND = "https://api.prismxsignallab.com"
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".prismx_bridge.json")
 LOG_PATH = os.path.join(os.path.expanduser("~"), ".prismx_bridge.log")
 POLL_INTERVAL = 1.5  # 后端轮询间隔（秒）/ backend poll interval (seconds)
+
+# 已执行指令结果的本地持久化：程序重启后缓存不丢，后端超时重发同一指令时
+# 只重报缓存结果、绝不重复下单（防止"已执行但回执丢失 + 重启"导致重复开仓）。
+# Persisted cache of executed command results: survives restarts, so if the
+# backend re-delivers a command after an ack timeout we re-report the cached
+# result instead of executing again (prevents duplicate fills after a
+# "executed but ack lost + restart" sequence).
+EXECUTED_CACHE_PATH = os.path.join(os.path.expanduser("~"), ".prismx_bridge_executed.json")
+# 缓存保留时长（秒）：远大于后端 5 分钟的指令作废窗口即可 / retention (s),
+# just needs to comfortably exceed the backend's 5-minute void window
+EXECUTED_CACHE_TTL = 24 * 3600
+
+# 未成功回报后端的执行结果队列，同样持久化：回执没送达就关程序，
+# 重启后继续重试，后端不必等超时重发。
+# Queue of results not yet acked by the backend, also persisted: if the app
+# closes before a report lands, retries resume after restart instead of
+# waiting for the backend's re-delivery timeout.
+REPORTS_CACHE_PATH = os.path.join(os.path.expanduser("~"), ".prismx_bridge_reports.json")
 
 
 def resource_path(name: str) -> str:
@@ -163,6 +181,62 @@ def save_config(cfg: dict) -> None:
         pass
 
 
+def _load_executed_cache() -> tuple[dict[str, dict], dict[str, float]]:
+    """读取已执行结果缓存，过滤超龄条目 / load the executed cache, drop stale entries.
+
+    返回 (coid -> 结果, coid -> 写入时间戳)。文件损坏/缺失时返回空缓存。
+    Returns (coid -> result, coid -> timestamp); empty caches on any failure.
+    """
+    try:
+        with open(EXECUTED_CACHE_PATH, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        now = time.time()
+        results: dict[str, dict] = {}
+        stamps: dict[str, float] = {}
+        for coid, entry in (raw or {}).items():
+            if not isinstance(entry, dict) or not isinstance(entry.get("result"), dict):
+                continue
+            ts = float(entry.get("ts", 0))
+            if now - ts < EXECUTED_CACHE_TTL:
+                results[coid] = entry["result"]
+                stamps[coid] = ts
+        return results, stamps
+    except Exception:
+        return {}, {}
+
+
+def _save_executed_cache(results: dict[str, dict], stamps: dict[str, float]) -> None:
+    """把已执行结果缓存写盘；失败不影响运行 / persist the cache; never fatal."""
+    try:
+        payload = {
+            coid: {"ts": stamps.get(coid, time.time()), "result": r}
+            for coid, r in results.items()
+        }
+        with open(EXECUTED_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+    except Exception:
+        pass
+
+
+def _load_pending_reports() -> list[dict]:
+    """读取未回报队列 / load the pending-report queue; empty on any failure."""
+    try:
+        with open(REPORTS_CACHE_PATH, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        return [r for r in raw if isinstance(r, dict)] if isinstance(raw, list) else []
+    except Exception:
+        return []
+
+
+def _save_pending_reports(reports: list[dict]) -> None:
+    """把未回报队列写盘；失败不影响运行 / persist the queue; never fatal."""
+    try:
+        with open(REPORTS_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(reports, f)
+    except Exception:
+        pass
+
+
 def scan_terminals() -> list[str]:
     """扫描本机正在运行的 MT5 终端可执行路径。
     Scan running MT5 terminals' executable paths on this machine.
@@ -220,12 +294,18 @@ class BridgeEngine:
         self.last_error: str | None = None
         # 已执行订单的结果缓存：clientOrderId -> result。
         # 后端超时重发同一指令时，不重复下单，只重新回报缓存结果（幂等保护）。
+        # 缓存持久化到本地文件，程序重启后依然生效。
         # Cache of executed order results: clientOrderId -> result. If the backend
         # re-delivers the same command after an ack timeout, we DON'T place the
         # order again — we just re-report the cached result (idempotency guard).
-        self._executed: dict[str, dict] = {}
-        # 尚未成功回报后端的结果，下一轮重试 / results not yet acked by backend, retried next tick
-        self._pending_reports: list[dict] = []
+        # Persisted to a local file so it survives restarts.
+        self._executed, self._executed_at = _load_executed_cache()
+        if self._executed:
+            logger.info("已加载幂等缓存 / loaded executed cache: %d entrie(s)", len(self._executed))
+        # 尚未成功回报后端的结果，下一轮重试；持久化到本地，重启不丢。
+        # Results not yet acked by the backend, retried next tick; persisted
+        # locally so they survive restarts.
+        self._pending_reports: list[dict] = _load_pending_reports()
         # 上一轮上报的报价 {symbol: (bid, ask)}，仅上报变化项以省流量。
         # Last reported quotes {symbol: (bid, ask)}; only changed entries are sent.
         self._last_quotes: dict[str, tuple] = {}
@@ -345,7 +425,9 @@ class BridgeEngine:
                 for r in res.get("results", []):
                     coid = str(r.get("clientOrderId"))
                     if coid:
-                        self._executed[coid] = r  # 缓存以备幂等重报 / cache for idempotent retry
+                        # 缓存并落盘，以备幂等重报（重启后仍有效）
+                        # cache & persist for idempotent retry (survives restarts)
+                        self._remember_executed(coid, r)
                     logger.info(
                         "下单结果 / order result: coid=%s success=%s ticket=%s price=%s msg=%s",
                         coid, r.get("success"), r.get("mt5Ticket"),
@@ -356,6 +438,18 @@ class BridgeEngine:
         # 6) 通知 GUI 刷新 / notify GUI to refresh
         self.on_status(accounts, self.last_error)
 
+    def _remember_executed(self, coid: str, result: dict) -> None:
+        """记录一条已执行结果并落盘，同时清理超龄条目。
+        Record one executed result, persist to disk and prune stale entries."""
+        now = time.time()
+        self._executed[coid] = result
+        self._executed_at[coid] = now
+        stale = [k for k, ts in self._executed_at.items() if now - ts > EXECUTED_CACHE_TTL]
+        for k in stale:
+            self._executed.pop(k, None)
+            self._executed_at.pop(k, None)
+        _save_executed_cache(self._executed, self._executed_at)
+
     def _report_result(self, result: dict):
         """回报单条结果，失败则入队下一轮重试 / report one result, queue on failure."""
         try:
@@ -363,6 +457,7 @@ class BridgeEngine:
         except Exception:
             if result not in self._pending_reports:
                 self._pending_reports.append(result)
+                _save_pending_reports(self._pending_reports)
 
     def _flush_reports(self):
         """重试此前未成功回报的结果 / retry previously failed reports."""
@@ -374,6 +469,8 @@ class BridgeEngine:
                 _post_json(f"{self.backend}/api/bridge/result", r, self.token)
             except Exception:
                 still_pending.append(r)
+        if still_pending != self._pending_reports:
+            _save_pending_reports(still_pending)
         self._pending_reports = still_pending
 
 
