@@ -36,6 +36,13 @@
 
   html {
     color-scheme: dark;
+    /* 锁死横向滚动，避免移动端页面整体右偏 / clip horizontal scroll to keep mobile pages from shifting right */
+    overflow-x: clip;
+  }
+
+  #root {
+    overflow-x: clip;
+    max-width: 100%;
   }
 
   body {
@@ -1031,6 +1038,10 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
     gap: 14px;
+  }
+  /* 防止卡片内不可压缩内容撑破网格列 / stop rigid card content from blowing out the grid column */
+  .sig-grid > * {
+    min-width: 0;
   }
   .sig-empty {
     grid-column: 1 / -1;
