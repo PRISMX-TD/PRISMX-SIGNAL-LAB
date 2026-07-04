@@ -4,6 +4,10 @@ import { useTranslation } from 'react-i18next'
 import Logo from '../components/Logo'
 import LanguageToggle from '../components/LanguageToggle'
 import AuroraBackground from '../components/AuroraBackground'
+import HeroDemoCard from '../components/landing/HeroDemoCard'
+import WinRateRuleCard from '../components/landing/WinRateRuleCard'
+import FaqSection from '../components/landing/FaqSection'
+import MobileStickyCta from '../components/landing/MobileStickyCta'
 
 // 功能图标 / inline feature icons
 function Icon({ name }: { name: string }) {
@@ -45,10 +49,10 @@ export default function LandingPage() {
   const features = [
     { icon: 'engine', title: 'f1Title', desc: 'f1Desc' },
     { icon: 'bolt', title: 'f2Title', desc: 'f2Desc' },
-    { icon: 'receipt', title: 'f3Title', desc: 'f3Desc' },
-    { icon: 'layers', title: 'f4Title', desc: 'f4Desc' },
-    { icon: 'gauge', title: 'f5Title', desc: 'f5Desc' },
-    { icon: 'shield', title: 'f6Title', desc: 'f6Desc' },
+    { icon: 'shield', title: 'f3Title', desc: 'f3Desc' },
+    { icon: 'gauge', title: 'f4Title', desc: 'f4Desc' },
+    { icon: 'receipt', title: 'f5Title', desc: 'f5Desc' },
+    { icon: 'layers', title: 'f6Title', desc: 'f6Desc' },
   ]
 
   const steps = [
@@ -56,6 +60,20 @@ export default function LandingPage() {
     { title: 'step2Title', desc: 'step2Desc' },
     { title: 'step3Title', desc: 'step3Desc' },
   ]
+
+  const painPoints = [
+    { bad: 'pain1Bad', good: 'pain1Good' },
+    { bad: 'pain2Bad', good: 'pain2Good' },
+    { bad: 'pain3Bad', good: 'pain3Good' },
+  ]
+
+  const wrRules = ['wrRule1', 'wrRule2', 'wrRule3', 'wrRule4'] as const
+  const wrMark: Record<(typeof wrRules)[number], { glyph: string; color: string }> = {
+    wrRule1: { glyph: '✓', color: 'var(--up)' },
+    wrRule2: { glyph: '✓', color: 'var(--up)' },
+    wrRule3: { glyph: '✗', color: 'var(--down)' },
+    wrRule4: { glyph: '—', color: '#64748b' },
+  }
 
   return (
     <div className="relative min-h-screen overflow-x-hidden">
@@ -74,7 +92,9 @@ export default function LandingPage() {
 
           <nav className="ml-6 hidden items-center gap-1 md:flex">
             <a href="#features" className="rounded-lg px-3 py-2 text-sm text-slate-400 transition hover:text-slate-100">{t('landing.navFeatures')}</a>
+            <a href="#winrate" className="rounded-lg px-3 py-2 text-sm text-slate-400 transition hover:text-slate-100">{t('landing.navWinrate')}</a>
             <a href="#how" className="rounded-lg px-3 py-2 text-sm text-slate-400 transition hover:text-slate-100">{t('landing.navHow')}</a>
+            <a href="#faq" className="rounded-lg px-3 py-2 text-sm text-slate-400 transition hover:text-slate-100">{t('landing.navFaq')}</a>
           </nav>
 
           <div className="ml-auto flex items-center gap-3">
@@ -90,38 +110,48 @@ export default function LandingPage() {
       </header>
 
       {/* 英雄区 / hero */}
-      <section className="relative mx-auto max-w-7xl px-4 pb-16 pt-20 text-center sm:px-6 sm:pt-28">
-        <div className="mx-auto inline-flex animate-fade-in-up">
-          <span className="chip animate-glow-pulse">
-            <span className="h-1.5 w-1.5 rounded-full bg-prism-400 animate-breathe" />
-            {t('landing.badge')}
-          </span>
-        </div>
+      <section className="relative mx-auto max-w-7xl px-4 pb-16 pt-16 sm:px-6 sm:pt-24">
+        <div className="grid items-center gap-10 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="text-center lg:text-left">
+            <div className="mx-auto inline-flex animate-fade-in-up lg:mx-0">
+              <span className="chip animate-glow-pulse">
+                <span className="h-1.5 w-1.5 rounded-full bg-prism-400 animate-breathe" />
+                {t('landing.badge')}
+              </span>
+            </div>
 
-        <h1 className="mx-auto mt-6 max-w-4xl animate-fade-in-up font-display text-4xl font-black leading-tight tracking-tight text-slate-50 sm:text-6xl">
-          {t('landing.heroTitle1')}{' '}
-          <span className="neon-text animate-gradient-x">{t('landing.heroTitle2')}</span>
-        </h1>
+            <h1 className="mx-auto mt-6 max-w-2xl animate-fade-in-up font-display text-4xl font-black leading-tight tracking-tight text-slate-50 sm:text-6xl lg:mx-0">
+              {t('landing.heroTitle1')}{' '}
+              <span className="neon-text animate-gradient-x">{t('landing.heroTitle2')}</span>
+            </h1>
 
-        <p className="mx-auto mt-6 max-w-2xl animate-fade-in-up text-base leading-relaxed text-slate-400 sm:text-lg">
-          {t('landing.heroSubtitle')}
-        </p>
+            <p className="mx-auto mt-6 max-w-2xl animate-fade-in-up text-base leading-relaxed text-slate-400 sm:text-lg lg:mx-0">
+              {t('landing.heroSubtitle')}
+            </p>
 
-        <div className="mt-9 flex animate-fade-in-up flex-col items-center justify-center gap-3 sm:flex-row">
-          <button onClick={() => navigate('/login?mode=register')} className="btn-primary w-full px-7 py-3 text-base sm:w-auto">
-            {t('landing.ctaPrimary')}
-          </button>
-          <a href="#features" className="btn-ghost w-full px-7 py-3 text-base sm:w-auto">
-            {t('landing.ctaSecondary')}
-          </a>
+            <div className="mt-9 flex animate-fade-in-up flex-col items-center justify-center gap-3 sm:flex-row lg:justify-start">
+              <button onClick={() => navigate('/login?mode=register')} className="btn-primary w-full px-7 py-3 text-base sm:w-auto">
+                {t('landing.ctaPrimary')}
+              </button>
+              <a href="#winrate" className="btn-ghost w-full px-7 py-3 text-base sm:w-auto">
+                {t('landing.ctaSecondary')}
+              </a>
+            </div>
+
+            <p className="mt-3 animate-fade-in-up text-xs text-slate-500">{t('landing.heroNote')}</p>
+          </div>
+
+          <div className="hidden sm:block">
+            <HeroDemoCard />
+          </div>
         </div>
 
         {/* 数据指标：真实事实而非营销数字 / stat strip: real facts, no made-up marketing numbers */}
-        <div className="mx-auto mt-14 grid max-w-2xl grid-cols-3 gap-4">
+        <div className="mx-auto mt-14 grid max-w-2xl grid-cols-3 gap-4 lg:mx-0 lg:max-w-none">
           {[
-            { v: '24/7', k: 'statSignals' },
-            { v: '1.5s', k: 'statLatency' },
-            { v: 'MT5', k: 'statUptime' },
+            { v: '0', k: 'stat1' },
+            { v: '24/7', k: 'stat2' },
+            { v: '100%', k: 'stat3' },
           ].map((s) => (
             <div key={s.k} className="glass px-3 py-5">
               <div className="font-display text-2xl font-bold text-slate-50 sm:text-3xl">{s.v}</div>
@@ -130,7 +160,28 @@ export default function LandingPage() {
           ))}
         </div>
 
-        <p className="mt-10 text-xs uppercase tracking-[0.25em] text-slate-600">{t('landing.trustedBy')}</p>
+        <p className="mt-10 text-center text-xs uppercase tracking-[0.25em] text-slate-600 lg:text-left">{t('landing.statFootnote')}</p>
+      </section>
+
+      {/* 痛点共鸣区 / pain points */}
+      <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
+        <div className="mb-12 text-center">
+          <h2 className="font-display text-3xl font-bold text-slate-50 sm:text-4xl">{t('landing.painTitle')}</h2>
+        </div>
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
+          {painPoints.map((p) => (
+            <div key={p.bad} className="glass p-6">
+              <p className="flex items-start gap-2 font-semibold text-slate-200">
+                <span style={{ color: 'var(--down)' }}>✗</span>
+                <span>{t(`landing.${p.bad}`)}</span>
+              </p>
+              <p className="mt-4 flex items-start gap-2 text-sm leading-relaxed text-slate-400">
+                <span style={{ color: 'var(--up)' }}>✓</span>
+                <span>{t(`landing.${p.good}`)}</span>
+              </p>
+            </div>
+          ))}
+        </div>
       </section>
 
       {/* 功能区 / features */}
@@ -149,6 +200,42 @@ export default function LandingPage() {
               <p className="text-sm leading-relaxed text-slate-400">{t(`landing.${f.desc}`)}</p>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* 透明胜率区 / win rate */}
+      <section id="winrate" className="mx-auto max-w-7xl scroll-mt-20 px-4 py-20 sm:px-6">
+        <div className="mb-6 sm:hidden">
+          <HeroDemoCard />
+        </div>
+
+        <div className="mb-12 text-center">
+          <h2 className="font-display text-3xl font-bold text-slate-50 sm:text-4xl">{t('landing.wrTitle')}</h2>
+          <p className="mx-auto mt-3 max-w-xl text-slate-400">{t('landing.wrSubtitle')}</p>
+        </div>
+
+        <div className="grid items-start gap-8 lg:grid-cols-2">
+          <div>
+            <div className="space-y-1">
+              {wrRules.map((key) => (
+                <div key={key} className="flex items-start gap-3 py-2">
+                  <span className="mt-0.5 shrink-0 text-sm font-bold" style={{ color: wrMark[key].color }}>
+                    {wrMark[key].glyph}
+                  </span>
+                  <div>
+                    <p className="text-sm text-slate-300">{t(`landing.${key}`)}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">{t(`landing.${key}Note`)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-6 text-xs text-slate-500">{t('landing.wrNote')}</p>
+            <button onClick={() => navigate('/login?mode=register')} className="btn-primary mt-6 px-7 py-3 text-base">
+              {t('landing.wrCta')}
+            </button>
+          </div>
+
+          <WinRateRuleCard />
         </div>
       </section>
 
@@ -174,6 +261,9 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* 常见问题 / FAQ */}
+      <FaqSection />
+
       {/* 行动召唤 / CTA */}
       <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
         <div className="glass relative overflow-hidden px-6 py-14 text-center sm:px-12">
@@ -184,6 +274,7 @@ export default function LandingPage() {
           <button onClick={() => navigate('/login?mode=register')} className="btn-primary relative mt-8 px-8 py-3 text-base">
             {t('landing.ctaButton')}
           </button>
+          <p className="relative mt-3 text-xs text-slate-500">{t('landing.ctaNote')}</p>
         </div>
       </section>
 
@@ -200,6 +291,8 @@ export default function LandingPage() {
           <p className="mt-4 text-center text-[11px] leading-relaxed text-slate-600 sm:text-left">{t('landing.footerRisk')}</p>
         </div>
       </footer>
+
+      <MobileStickyCta />
     </div>
   )
 }
