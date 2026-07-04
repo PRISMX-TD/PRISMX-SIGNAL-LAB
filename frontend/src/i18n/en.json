@@ -18,10 +18,12 @@
     "loading": "Loading…",
     "confirm": "Confirm",
     "cancel": "Cancel",
+    "close": "Close",
     "copy": "Copy",
     "copied": "Copied",
     "reset": "Reset",
     "save": "Save",
+    "delete": "Delete",
     "online": "Online",
     "offline": "Offline",
     "buy": "BUY",
@@ -147,6 +149,7 @@
       "adviceShort": "Bearish pressure building, consider going short.",
       "waiting": "Waiting for a signal",
       "marketSentiment": "Market sentiment",
+      "communitySentiment": "Community sentiment",
       "tfDistribution": "TF Distribution",
       "watching": "Watching",
       "symbolsTotal": "{{n}} symbols",
@@ -160,7 +163,13 @@
       "overview": "Market Overview",
       "period7d": "7D",
       "signalTotal": "Total Signals",
-      "signalVolume7d": "Signal Volume (7D)"
+      "signalVolume7d": "Signal Volume (7D)",
+      "quotesHeading": "Live Quotes",
+      "live": "MT5 Online",
+      "offline": "MT5 Offline",
+      "symbol": "Symbol",
+      "bid": "Sell",
+      "ask": "Buy"
     },
     "quotes": {
       "title": "Live quotes",
@@ -179,7 +188,8 @@
       "XAGUSD": "Silver",
       "BTCUSD": "Bitcoin",
       "USDJPY": "USD/JPY",
-      "ETHUSD": "Ethereum"
+      "ETHUSD": "Ethereum",
+      "EURGBP": "EUR/GBP"
     },
     "sort": {
       "latest": "Latest",
@@ -214,6 +224,16 @@
     "tpPlaceholder": "Take profit (blank = none)",
     "estMargin": "Est. margin used",
     "currentPrice": "Live",
+    "sizeMode": "Sizing",
+    "sizeModeLots": "Lots",
+    "sizeModeRisk": "Risk %",
+    "riskPct": "Risk",
+    "riskNeedsSl": "Set a stop loss to size by risk %",
+    "slWrongSide": "Stop loss is on the wrong side of the current price",
+    "tpWrongSide": "Take profit is on the wrong side of the current price",
+    "signalExpiresIn": "Signal expires in",
+    "signalExpiredInModal": "This signal just expired and can no longer be traded",
+    "slTpInvalid": "Fix the stop loss / take profit before confirming",
     "riskNote": "Live prices may differ slightly from entry due to network latency. Execution is subject to your MT5 broker. Please double-check volume and side.",
     "submit": "Confirm Order",
     "submitting": "Submitting…",
@@ -259,6 +279,21 @@
     "tvLocale": "en",
     "disclaimer": "Chart data is provided by TradingView. The quote source may differ slightly from your broker and is for reference only."
   },
+  "winrate": {
+    "strategyTitle": "Signal Win Rate",
+    "strategyHint": "Based on whether price hit take-profit or stop-loss first — the same for everyone, independent of anyone's trading behavior.",
+    "personalTitle": "My Trading Performance",
+    "personalHint": "Based on your own real closed trades.",
+    "wins": "Wins",
+    "losses": "Losses",
+    "hitTp": "Hit TP",
+    "hitSl": "Hit SL",
+    "openPositions": "Open",
+    "resolvedCount": "{{n}} resolved",
+    "noData": "Not enough data yet",
+    "viewDetail": "View details",
+    "disclaimer": "Past performance does not guarantee future results."
+  },
   "orders": {
     "title": "Orders & Receipts",
     "subtitle": "Execution status and fill receipts",
@@ -273,6 +308,7 @@
     "colTicket": "MT5 Ticket",
     "colPrice": "Fill Price",
     "colMessage": "Message",
+    "colAction": "Action",
     "action": {
       "ORDER": "Open",
       "CLOSE": "Close",
@@ -282,10 +318,20 @@
       "PENDING": "Pending",
       "FILLED": "Filled",
       "REJECTED": "Rejected",
-      "FAILED": "Failed"
+      "FAILED": "Failed",
+      "CANCELLED": "Cancelled"
     },
     "positions": "Open Positions",
-    "noPositions": "No open positions"
+    "noPositions": "No open positions",
+    "summary": {
+      "positions": "Positions",
+      "totalPnl": "Total P&L"
+    },
+    "filterStatus": "Status",
+    "filterSide": "Side",
+    "filterSymbol": "Symbol",
+    "symbolPlaceholder": "e.g. XAUUSD",
+    "cancelSent": "Cancel request sent"
   },
   "positions": {
     "lots": "lots",
@@ -301,7 +347,8 @@
     "confirmModify": "Confirm",
     "closeSent": "Close command sent, waiting for receipt…",
     "modifySent": "Modify command sent, waiting for receipt…",
-    "invalidVolume": "Invalid close volume"
+    "invalidVolume": "Invalid close volume",
+    "clearHint": "0 = clear"
   },
   "bind": {
     "title": "Connect MT5",
@@ -315,10 +362,15 @@
     "server": "Server",
     "leverage": "Leverage",
     "status": "Status",
+    "actions": "Actions",
+    "deleteAccount": "Delete account",
+    "deleteNeedOffline": "Disconnect the bridge (account offline) before deleting",
+    "deleteConfirm": "Remove account {{login}} from your list? It will reappear if the bridge reports it again.",
     "tokenTitle": "Your API Token",
     "tokenHint": "This token is like a password. Keep it safe. Paste it into the PRISMX Bridge app to connect.",
     "tokenHidden": "For security the token is stored encrypted and shown only once at generation. Click \"Reset Token\" to generate and view a new one (the old token stops working).",
     "tokenJustOnce": "Copy and store it now — it cannot be viewed again after you refresh or leave this page.",
+    "tokenSavedClose": "I've saved it, close",
     "resetToken": "Reset Token",
     "resetConfirm": "Resetting invalidates the old token immediately. Any running Bridge app must be updated with the new token, or it will fail to connect. Reset?",
     "statusTitle": "MT5 Connection Status",
@@ -333,6 +385,7 @@
     "saveSuffix": "Save Suffix",
     "saved": "Saved",
     "suffixNeedAccount": "The suffix is saved per account. Run the Bridge app so an account is reported first.",
+    "suffixPerAccountHint": "Edit the suffix directly in each account's row above.",
     "steps": {
       "title": "Setup Steps",
       "s1": "Copy the API Token above",
@@ -344,7 +397,8 @@
   "connStatus": {
     "online": "MT5 Connected",
     "offline": "MT5 Disconnected",
-    "account": "Account"
+    "account": "Account",
+    "reconnecting": "Connection lost, reconnecting… quotes and positions may be stale"
   },
   "download": {
     "title": "Download PRISMX Bridge",

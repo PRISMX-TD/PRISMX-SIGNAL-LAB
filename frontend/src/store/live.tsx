@@ -1,6 +1,6 @@
 // 实时数据共享状态：EA 状态、信号、订单、持仓。
 // Shared live state: EA status, signals, orders, positions.
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from 'react'
 import type { MT5Account, Order, Position, Quote, Signal, Trend, WSMessage } from '../api/types'
 import { accountApi, orderApi, signalApi, trendApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
@@ -20,6 +20,14 @@ interface LiveContextValue {
   anyOnline: boolean
   onlineAccounts: MT5Account[]
   refreshAll: () => Promise<void>
+  // 网页自身到后端的 WebSocket 是否连通；断开时报价/持仓可能已过时。
+  // Whether the page's own WebSocket to the backend is up; quotes/positions
+  // may be stale while it's down.
+  wsConnected: boolean
+  // 曾经连上过之后又断开——用于避免首次加载瞬间的误报横幅。
+  // Was connected at least once and then dropped — avoids a false-positive
+  // banner during the brief instant right after first load.
+  wsDisconnected: boolean
 }
 
 const LiveContext = createContext<LiveContextValue | null>(null)
@@ -150,7 +158,14 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  useClientSocket(handleMessage)
+  const wsConnected = useClientSocket(handleMessage)
+
+  // 曾经连上过之后又断开，才提示"已断线"，避免首次连接前的瞬间误报。
+  // Only flag "disconnected" after having connected at least once, so the
+  // brief instant before the first connection lands doesn't false-trigger it.
+  const everConnected = useRef(false)
+  if (wsConnected) everConnected.current = true
+  const wsDisconnected = everConnected.current && !wsConnected
 
   // 以桥接上报的在线账号作为统一连接状态来源 / unified connection status from bridge accounts
   const onlineAccounts = accounts.filter((a) => a.online)
@@ -158,7 +173,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   return (
     <LiveContext.Provider
-      value={{ signals, orders, positions, quotes, trends, accounts, loaded, anyOnline, onlineAccounts, refreshAll }}
+      value={{
+        signals, orders, positions, quotes, trends, accounts, loaded,
+        anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected,
+      }}
     >
       {children}
     </LiveContext.Provider>

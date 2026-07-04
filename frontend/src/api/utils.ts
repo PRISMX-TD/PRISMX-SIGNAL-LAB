@@ -54,8 +54,43 @@ const PIP_SIZE: Record<string, number> = {
 }
 
 // 去掉券商后缀后取基础品种名 / strip broker suffix to get the base symbol
-function baseSymbol(symbol: string): string {
+export function baseSymbol(symbol: string): string {
   return symbol.toUpperCase().replace(/[._-].*$/, '')
+}
+
+// 每手合约规模（标的单位数），用于按风险百分比估算手数。
+// 与保证金估算一样是量级提示：真实合约规模以经纪商 MT5 规格为准。
+// Contract size per lot (units of the underlying), used to size volume by a
+// risk percentage. Like the margin estimate, this is indicative only — the
+// real contract size is whatever the broker's MT5 spec says.
+const CONTRACT_SIZE: Record<string, number> = {
+  XAUUSD: 100,
+  XAGUSD: 5000,
+  BTCUSD: 1,
+  ETHUSD: 1,
+}
+const DEFAULT_CONTRACT_SIZE = 100000 // 标准外汇对 / standard FX pairs
+
+export function contractSize(symbol: string): number {
+  return CONTRACT_SIZE[baseSymbol(symbol)] ?? DEFAULT_CONTRACT_SIZE
+}
+
+// 按风险百分比建议手数：riskAmount = equity * riskPct / 100，
+// 手数 = riskAmount / (止损价格距离 × 合约规模)，夹在 0.01~10 之间。
+// 止损距离为 0 或缺少净值时返回 null（无法计算）。
+// Suggest a volume from a risk percentage: riskAmount = equity * riskPct/100,
+// volume = riskAmount / (SL price distance × contract size), clamped to
+// 0.01~10. Returns null when the SL distance is 0 or equity is missing.
+export function suggestVolumeByRisk(
+  symbol: string,
+  equity: number | null | undefined,
+  riskPct: number,
+  slPriceDistance: number,
+): number | null {
+  if (!equity || equity <= 0 || !slPriceDistance || slPriceDistance <= 0 || riskPct <= 0) return null
+  const riskAmount = equity * (riskPct / 100)
+  const raw = riskAmount / (slPriceDistance * contractSize(symbol))
+  return Math.max(0.01, Math.min(10, Math.floor(raw * 100) / 100))
 }
 
 // MT5 基础品种 -> TradingView 符号（带交易所前缀）。

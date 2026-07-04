@@ -18,10 +18,12 @@
     "loading": "加载中…",
     "confirm": "确认",
     "cancel": "取消",
+    "close": "关闭",
     "copy": "复制",
     "copied": "已复制",
     "reset": "重置",
     "save": "保存",
+    "delete": "删除",
     "online": "在线",
     "offline": "离线",
     "buy": "买入",
@@ -162,7 +164,13 @@
       "overview": "市场概览",
       "period7d": "7日",
       "signalTotal": "信号总数",
-      "signalVolume7d": "信号发出量 (7日)"
+      "signalVolume7d": "信号发出量 (7日)",
+      "quotesHeading": "实时行情报价",
+      "live": "MT5 在线",
+      "offline": "MT5 离线",
+      "symbol": "交易品种",
+      "bid": "卖价",
+      "ask": "买价"
     },
     "quotes": {
       "title": "实时报价",
@@ -181,7 +189,8 @@
       "XAGUSD": "白银",
       "BTCUSD": "比特币",
       "USDJPY": "美元日元",
-      "ETHUSD": "以太坊"
+      "ETHUSD": "以太坊",
+      "EURGBP": "欧元英镑"
     },
     "sort": {
       "latest": "最新",
@@ -216,6 +225,16 @@
     "tpPlaceholder": "止盈价（留空＝不设）",
     "estMargin": "预估保证金占用",
     "currentPrice": "现价",
+    "sizeMode": "手数模式",
+    "sizeModeLots": "手数",
+    "sizeModeRisk": "风险百分比",
+    "riskPct": "风险",
+    "riskNeedsSl": "先设置止损才能按风险百分比计算手数",
+    "slWrongSide": "止损价与现价方向不对",
+    "tpWrongSide": "止盈价与现价方向不对",
+    "signalExpiresIn": "信号剩余",
+    "signalExpiredInModal": "该信号刚刚过期，无法再下单",
+    "slTpInvalid": "请先修正止损/止盈再确认下单",
     "riskNote": "当前报价可能因网络延迟与入场价存在细微偏差，实际成交以 MT5 经纪商执行为准。请再次确认手数及买卖方向。",
     "submit": "确认下单",
     "submitting": "提交中…",
@@ -261,6 +280,21 @@
     "tvLocale": "zh_CN",
     "disclaimer": "图表数据由 TradingView 提供，报价源与你的经纪商可能存在细微差异，仅供参考。"
   },
+  "winrate": {
+    "strategyTitle": "信号客观胜率",
+    "strategyHint": "基于行情是否先碰到止盈或止损判定，所有人看到的都一样，与任何人的操作习惯无关。",
+    "personalTitle": "我的交易表现",
+    "personalHint": "基于你自己真实的平仓记录。",
+    "wins": "盈利",
+    "losses": "亏损",
+    "hitTp": "命中止盈",
+    "hitSl": "命中止损",
+    "openPositions": "进行中",
+    "resolvedCount": "已判定 {{n}} 笔",
+    "noData": "数据还不够，暂不显示",
+    "viewDetail": "查看详情",
+    "disclaimer": "历史表现不代表未来收益。"
+  },
   "orders": {
     "title": "订单与回执",
     "subtitle": "下单指令的执行状态与成交回执",
@@ -275,6 +309,7 @@
     "colTicket": "MT5 单号",
     "colPrice": "成交价",
     "colMessage": "信息",
+    "colAction": "操作",
     "action": {
       "ORDER": "开仓",
       "CLOSE": "平仓",
@@ -284,10 +319,20 @@
       "PENDING": "待执行",
       "FILLED": "已成交",
       "REJECTED": "已拒绝",
-      "FAILED": "失败"
+      "FAILED": "失败",
+      "CANCELLED": "已撤销"
     },
     "positions": "当前持仓",
-    "noPositions": "暂无持仓"
+    "noPositions": "暂无持仓",
+    "summary": {
+      "positions": "持仓数",
+      "totalPnl": "总浮动盈亏"
+    },
+    "filterStatus": "状态",
+    "filterSide": "方向",
+    "filterSymbol": "品种",
+    "symbolPlaceholder": "如 XAUUSD",
+    "cancelSent": "撤销请求已发出"
   },
   "positions": {
     "lots": "手",
@@ -303,7 +348,8 @@
     "confirmModify": "确认修改",
     "closeSent": "平仓指令已发出，等待执行回执…",
     "modifySent": "改单指令已发出，等待执行回执…",
-    "invalidVolume": "平仓手数无效"
+    "invalidVolume": "平仓手数无效",
+    "clearHint": "0 = 清除"
   },
   "bind": {
     "title": "连接 MT5",
@@ -317,10 +363,15 @@
     "server": "服务器",
     "leverage": "杠杆",
     "status": "状态",
+    "actions": "操作",
+    "deleteAccount": "删除账号",
+    "deleteNeedOffline": "请先断开桥接程序（账号离线）后再删除",
+    "deleteConfirm": "确定从列表中移除账号 {{login}} 吗？若桥接程序之后再次上报该账号，它会重新出现。",
     "tokenTitle": "你的 API Token",
     "tokenHint": "此 Token 等同密码，请妥善保管。复制后粘贴到 PRISMX 桥接程序中以建立连接。",
     "tokenHidden": "出于安全，Token 已加密保存，仅在生成时显示一次。点击「重置 Token」生成并查看新 Token（旧 Token 将失效）。",
     "tokenJustOnce": "请立即复制保存：刷新或离开页面后将无法再次查看此 Token。",
+    "tokenSavedClose": "已保存，关闭",
     "resetToken": "重置 Token",
     "resetConfirm": "重置后旧 Token 立即失效，正在运行的桥接程序需要重新填入新 Token，否则会连接失败。确定重置？",
     "statusTitle": "MT5 连接状态",
@@ -335,6 +386,7 @@
     "saveSuffix": "保存后缀",
     "saved": "已保存",
     "suffixNeedAccount": "后缀按账号保存。请先运行桥接程序上报账号后再设置。",
+    "suffixPerAccountHint": "可直接在上方每个账号所在行编辑后缀。",
     "steps": {
       "title": "接入步骤",
       "s1": "复制上方 API Token",
@@ -346,7 +398,8 @@
   "connStatus": {
     "online": "MT5 已连接",
     "offline": "MT5 未连接",
-    "account": "账号"
+    "account": "账号",
+    "reconnecting": "连接已断开，正在重连……报价与持仓可能已过时"
   },
   "download": {
     "title": "下载 PRISMX 桥接程序",

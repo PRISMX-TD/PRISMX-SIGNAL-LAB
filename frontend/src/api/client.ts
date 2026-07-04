@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate } from './types'
 
 const TOKEN_KEY = 'prismx_token'
 
@@ -87,6 +87,7 @@ export const authApi = {
 export const signalApi = {
   list: () => request<{ signals: Signal[] }>('/signals'),
   stats: () => request<{ daily: SignalDailyCount[]; total: number }>('/signals/stats'),
+  winrate: () => request<SignalWinRate>('/signals/winrate'),
 }
 
 // 多周期趋势 / Multi-timeframe trends
@@ -136,6 +137,8 @@ export const orderApi = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  cancel: (id: string) => request<Order>(`/orders/${id}/cancel`, { method: 'POST' }),
+  winrate: () => request<PersonalWinRate>('/orders/winrate'),
 }
 
 // 多账号 / Multi-account
@@ -146,6 +149,11 @@ export const accountApi = {
       method: 'POST',
       body: JSON.stringify({ login, symbolSuffix }),
     }),
+  remove: (login: string, server?: string | null) =>
+    request<{ ok: boolean }>(
+      `/bridge/accounts/${encodeURIComponent(login)}${server ? `?server=${encodeURIComponent(server)}` : ''}`,
+      { method: 'DELETE' }
+    ),
 }
 
 // API Token（连接 MT5 用）：库中只存哈希，明文仅在重置（生成）响应中出现一次。

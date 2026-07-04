@@ -90,17 +90,24 @@ def _migrate_columns() -> None:
                 if name not in order_cols:
                     conn.execute(text(f"ALTER TABLE orders ADD COLUMN {name} {col_type}"))
 
-    # signals 表：补充来源与去重列 / add source & dedup columns on signals
+    # signals 表：补充来源、去重、胜负判定列 / add source, dedup & result columns on signals
     if "signals" in inspector.get_table_names():
         signal_cols = {c["name"] for c in inspector.get_columns("signals")}
         signal_new = {
             "source": "VARCHAR",
             "external_id": "VARCHAR",
+            "result": "VARCHAR",
+            "resolved_at": datetime_type,
         }
         with engine.begin() as conn:
             for name, col_type in signal_new.items():
                 if name not in signal_cols:
                     conn.execute(text(f"ALTER TABLE signals ADD COLUMN {name} {col_type}"))
+            # 旧行补默认值：新列刚加时都是 NULL，胜负判定要按 'PENDING' 才能被追踪到。
+            # Backfill existing rows: a freshly added column is NULL for old rows,
+            # but resolution logic filters on result == 'PENDING' to find them.
+            if "result" not in signal_cols:
+                conn.execute(text("UPDATE signals SET result = 'PENDING' WHERE result IS NULL"))
 
     # 后台清扫/过期扫描用的索引：create_all 不会为已存在的表补索引，这里补。
     # Indexes for the background sweeps: create_all won't add indexes to
@@ -109,6 +116,9 @@ def _migrate_columns() -> None:
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)"))
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_signals_status_expire ON signals(status, expire_at)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_signals_symbol_result ON signals(symbol, result)"
         ))
 
     # users 表：password_hash 改可空（Google 登录用户无密码）。

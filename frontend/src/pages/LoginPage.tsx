@@ -75,7 +75,7 @@ export default function LoginPage() {
             <h1 className="font-display text-3xl font-black tracking-wider text-slate-100">
               PRISMX <span className="neon-text animate-gradient-x">Signal Lab</span>
             </h1>
-            <p className="mt-1 text-sm tracking-widest text-slate-500">棱镜信号实验室</p>
+            <p className="mt-1 text-sm tracking-widest text-slate-500">{t('app.subtitle')}</p>
             <p className="mt-3 max-w-xs text-sm text-slate-400">{t('auth.tagline')}</p>
           </div>
 

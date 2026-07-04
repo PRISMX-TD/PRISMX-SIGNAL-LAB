@@ -10,15 +10,16 @@ interface Props {
   focusSymbol?: string   // 手机端只显示这个品种 / mobile: show only this symbol
 }
 
-// 核心品种列表 / core symbols
-const CORE_SYMBOLS: { sym: string; cnName: string; letter: string; color: string }[] = [
-  { sym: 'XAUUSD', cnName: '黄金', letter: 'X', color: '#f6c453' },
-  { sym: 'XAGUSD', cnName: '白银', letter: 'X', color: '#94a3b8' },
-  { sym: 'EURUSD', cnName: '欧元/美元', letter: 'E', color: '#6366f1' },
-  { sym: 'GBPUSD', cnName: '英镑/美元', letter: 'G', color: '#a855f7' },
-  { sym: 'USDJPY', cnName: '美元/日元', letter: 'U', color: '#7c3aed' },
-  { sym: 'EURGBP', cnName: '欧元/英镑', letter: 'E', color: '#8b5cf6' },
-  { sym: 'BTCUSD', cnName: '比特币', letter: 'B', color: '#f59e0b' },
+// 核心品种列表：品种名走 i18n（signals.symbolNames），此处只留展示用的字母与配色
+// core symbols: names come from i18n (signals.symbolNames); only letter + color live here
+const CORE_SYMBOLS: { sym: string; letter: string; color: string }[] = [
+  { sym: 'XAUUSD', letter: 'X', color: '#f6c453' },
+  { sym: 'XAGUSD', letter: 'X', color: '#94a3b8' },
+  { sym: 'EURUSD', letter: 'E', color: '#6366f1' },
+  { sym: 'GBPUSD', letter: 'G', color: '#a855f7' },
+  { sym: 'USDJPY', letter: 'U', color: '#7c3aed' },
+  { sym: 'EURGBP', letter: 'E', color: '#8b5cf6' },
+  { sym: 'BTCUSD', letter: 'B', color: '#f59e0b' },
 ]
 
 const QuotesTable: FC<Props> = ({ quotes, mt5Online, focusSymbol }) => {
@@ -81,7 +82,7 @@ const QuotesTable: FC<Props> = ({ quotes, mt5Online, focusSymbol }) => {
             </tr>
           </thead>
           <tbody>
-            {CORE_SYMBOLS.map(({ sym, cnName, letter, color }) => {
+            {CORE_SYMBOLS.map(({ sym, letter, color }) => {
               const q = quotes[sym]
               const digits = q?.digits ?? 5
               const bid = q?.bid != null ? q.bid.toFixed(digits) : null
@@ -93,7 +94,7 @@ const QuotesTable: FC<Props> = ({ quotes, mt5Online, focusSymbol }) => {
                       <div className="qt-sym-ava" style={{ background: color + '22', color }}>{letter}</div>
                       <div className="nm">
                         <b>{sym}</b>
-                        <span>{cnName}</span>
+                        <span>{t(`signals.symbolNames.${sym}`, { defaultValue: '' })}</span>
                       </div>
                     </div>
                   </td>

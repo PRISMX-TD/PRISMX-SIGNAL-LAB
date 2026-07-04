@@ -55,6 +55,16 @@ class Settings(BaseSettings):
     # TradingView webhooks feed real signals).
     ENABLE_MOCK_SIGNAL_ENGINE: bool = True
 
+    # 信号胜负判定的"数据源中断"保险丝（天）：一个信号追踪不到任何行情更新超过
+    # 这么久，就判定为 STALE（不计入胜率），纯粹是防御 TradingView/网络中断导致
+    # 信号永远悬而未决，不是"信号最多追多久"的业务规则。
+    # Safety-net timeout (days) for signal win/loss resolution: if a signal gets
+    # zero price updates for this long, mark it STALE (excluded from win-rate
+    # stats). This purely guards against a TradingView/network outage leaving
+    # signals unresolved forever — it is not a business rule capping how long a
+    # signal is allowed to run.
+    SIGNAL_STALE_DAYS: int = 10
+
     # TradingView Webhook：警报推送时在 JSON body 内携带的密钥，服务器据此校验来源。
     # TradingView 的 webhook 不支持自定义请求头，故密钥放在 body 的 "secret" 字段。
     # 生产环境（ENV=production）必须设置为强随机值，留空将拒绝所有 webhook 请求。

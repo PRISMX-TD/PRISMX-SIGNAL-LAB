@@ -5,6 +5,9 @@ import { useTranslation } from 'react-i18next'
 import { accountApi, eaApi } from '../api/client'
 import { useLive } from '../store/live'
 import { fmtTime } from '../api/utils'
+import ConfirmModal from '../components/ConfirmModal'
+import TokenRevealModal from '../components/TokenRevealModal'
+import type { MT5Account } from '../api/types'
 
 export default function BindPage() {
   const { t } = useTranslation()
@@ -17,18 +20,34 @@ export default function BindPage() {
   // The plaintext token is returned once at generation; reads yield null and
   // the UI shows a "hidden" hint.
   const [apiToken, setApiToken] = useState<string | null>(null)
+  const [revealToken, setRevealToken] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const [suffix, setSuffix] = useState('')
-  const [suffixSaved, setSuffixSaved] = useState(false)
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
+  const [resetting, setResetting] = useState(false)
+
+  // 每个账号的品种后缀草稿 + 保存状态 / per-account suffix draft + save state
+  const [suffixDrafts, setSuffixDrafts] = useState<Record<string, string>>({})
+  const [savingLogin, setSavingLogin] = useState<string | null>(null)
+  const [savedLogin, setSavedLogin] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<MT5Account | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   useEffect(() => {
     eaApi.getToken().then((res) => setApiToken(res.apiToken)).catch(() => {})
   }, [])
 
-  // 把后端已保存的后缀同步到输入框 / sync saved suffix into the input
+  // 把后端已保存的后缀同步到各账号的草稿输入框（不覆盖用户正在编辑的值）
+  // Sync saved suffixes into per-account drafts (without clobbering an in-progress edit)
   useEffect(() => {
-    if (primary?.symbolSuffix != null) setSuffix(primary.symbolSuffix)
-  }, [primary?.symbolSuffix])
+    setSuffixDrafts((prev) => {
+      const next = { ...prev }
+      for (const a of accounts) {
+        if (!(a.login in next)) next[a.login] = a.symbolSuffix ?? ''
+      }
+      return next
+    })
+  }, [accounts])
 
   const copyToken = async () => {
     if (!apiToken) return
@@ -38,19 +57,42 @@ export default function BindPage() {
   }
 
   const resetToken = async () => {
-    if (!confirm(t('bind.resetConfirm'))) return
-    const res = await eaApi.resetToken()
-    setApiToken(res.apiToken)
+    setResetting(true)
+    try {
+      const res = await eaApi.resetToken()
+      setApiToken(res.apiToken)
+      setRevealToken(res.apiToken)
+      setResetConfirmOpen(false)
+    } finally {
+      setResetting(false)
+    }
   }
 
-  // 后缀按账号保存（Bridge 上报的账号）；无账号时按钮置灰。
-  // Suffix is saved per account (as reported by the bridge); disabled with no account.
-  const saveSuffix = async () => {
-    if (!primary) return
-    await accountApi.setSuffix(primary.login, suffix.trim())
-    setSuffixSaved(true)
-    setTimeout(() => setSuffixSaved(false), 2000)
-    refreshAll()
+  const saveSuffix = async (login: string) => {
+    setSavingLogin(login)
+    try {
+      await accountApi.setSuffix(login, (suffixDrafts[login] ?? '').trim())
+      setSavedLogin(login)
+      setTimeout(() => setSavedLogin(null), 2000)
+      refreshAll()
+    } finally {
+      setSavingLogin(null)
+    }
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      await accountApi.remove(deleteTarget.login, deleteTarget.server)
+      setDeleteTarget(null)
+      refreshAll()
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : 'error')
+    } finally {
+      setDeleting(false)
+    }
   }
 
   return (
@@ -80,6 +122,8 @@ export default function BindPage() {
                     <th className="px-3 py-2 text-right">{t('bind.balance')}</th>
                     <th className="px-3 py-2 text-right">{t('bind.equity')}</th>
                     <th className="px-3 py-2 text-center">{t('bind.status')}</th>
+                    <th className="px-3 py-2">{t('bind.suffixLabel')}</th>
+                    <th className="px-3 py-2 text-center">{t('bind.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -98,6 +142,35 @@ export default function BindPage() {
                         <span className={`tag ${a.online ? 'bg-up/15 text-up' : 'bg-white/5 text-slate-500'}`}>
                           {a.online ? t('common.online') : t('common.offline')}
                         </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            className="input h-7 w-20 font-mono text-xs"
+                            placeholder={t('bind.suffixPlaceholder')}
+                            value={suffixDrafts[a.login] ?? ''}
+                            onChange={(e) =>
+                              setSuffixDrafts((prev) => ({ ...prev, [a.login]: e.target.value }))
+                            }
+                          />
+                          <button
+                            onClick={() => saveSuffix(a.login)}
+                            disabled={savingLogin === a.login}
+                            className="btn-ghost px-2 py-1 text-[11px] disabled:opacity-50"
+                          >
+                            {savedLogin === a.login ? t('bind.saved') : t('common.save')}
+                          </button>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <button
+                          onClick={() => setDeleteTarget(a)}
+                          disabled={a.online}
+                          title={a.online ? t('bind.deleteNeedOffline') : t('bind.deleteAccount')}
+                          className="rounded-lg border border-down/30 bg-down/5 px-2 py-1 text-[11px] font-medium text-down transition hover:bg-down/15 disabled:cursor-not-allowed disabled:opacity-30"
+                        >
+                          {t('common.delete')}
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -131,7 +204,7 @@ export default function BindPage() {
             >
               {copied ? t('common.copied') : t('common.copy')}
             </button>
-            <button onClick={resetToken} className="btn-ghost flex-1 py-2 text-sm">
+            <button onClick={() => setResetConfirmOpen(true)} className="btn-ghost flex-1 py-2 text-sm">
               {t('bind.resetToken')}
             </button>
           </div>
@@ -211,33 +284,18 @@ export default function BindPage() {
           </div>
         </div>
 
-        {/* PLACEHOLDER_SUFFIX */}
+        {/* PLACEHOLDER_SUFFIX_HINT */}
         <div className="glass p-5">
           <h3 className="mb-1 font-display text-lg font-semibold text-slate-100">
             {t('bind.suffixTitle')}
           </h3>
-          <p className="mb-4 text-xs text-slate-500">{t('bind.suffixHint')}</p>
-          <div className="space-y-3">
-            <div>
-              <label className="label">{t('bind.suffixLabel')}</label>
-              <input
-                className="input font-mono"
-                placeholder={t('bind.suffixPlaceholder')}
-                value={suffix}
-                onChange={(e) => setSuffix(e.target.value)}
-              />
-            </div>
-            <button
-              onClick={saveSuffix}
-              disabled={!primary}
-              className="btn-primary w-full py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {suffixSaved ? t('bind.saved') : t('bind.saveSuffix')}
-            </button>
-            {!primary && (
-              <p className="text-xs text-slate-500">{t('bind.suffixNeedAccount')}</p>
-            )}
-          </div>
+          <p className="text-xs leading-relaxed text-slate-500">{t('bind.suffixHint')}</p>
+          {accounts.length === 0 && (
+            <p className="mt-3 text-xs text-slate-500">{t('bind.suffixNeedAccount')}</p>
+          )}
+          {accounts.length > 0 && (
+            <p className="mt-3 text-xs text-slate-500">{t('bind.suffixPerAccountHint')}</p>
+          )}
         </div>
 
         {/* PLACEHOLDER_STEPS */}
@@ -257,6 +315,39 @@ export default function BindPage() {
           </ol>
         </div>
       </div>
+
+      {resetConfirmOpen && (
+        <ConfirmModal
+          title={t('bind.resetToken')}
+          message={t('bind.resetConfirm')}
+          confirmLabel={t('bind.resetToken')}
+          danger
+          busy={resetting}
+          onConfirm={resetToken}
+          onCancel={() => setResetConfirmOpen(false)}
+        />
+      )}
+
+      {revealToken && (
+        <TokenRevealModal token={revealToken} onClose={() => setRevealToken(null)} />
+      )}
+
+      {deleteTarget && (
+        <ConfirmModal
+          title={t('bind.deleteAccount')}
+          message={t('bind.deleteConfirm', { login: deleteTarget.login })}
+          confirmLabel={t('common.delete')}
+          danger
+          busy={deleting}
+          onConfirm={confirmDelete}
+          onCancel={() => { setDeleteTarget(null); setDeleteError('') }}
+        />
+      )}
+      {deleteError && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-down/40 bg-down/15 px-5 py-3 text-sm text-down">
+          {deleteError}
+        </div>
+      )}
     </div>
   )
 }

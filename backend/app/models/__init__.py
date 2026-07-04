@@ -68,8 +68,17 @@ class MT5Account(Base):
 class Signal(Base):
     """交易信号 / Trading signal."""
     __tablename__ = "signals"
-    # 过期扫描按 (status, expire_at) 查询 / expiry sweep filters on (status, expire_at)
-    __table_args__ = (Index("idx_signals_status_expire", "status", "expire_at"),)
+    __table_args__ = (
+        # 过期扫描按 (status, expire_at) 查询 / expiry sweep filters on (status, expire_at)
+        Index("idx_signals_status_expire", "status", "expire_at"),
+        # 行情驱动的胜负判定按 (symbol, result) 查询"该品种下所有未判定信号"，
+        # 与 status/expire_at 完全独立——一个信号过期后仍可能继续追踪到胜负。
+        # Price-driven resolution looks up "all unresolved signals for a symbol"
+        # by (symbol, result); independent of status/expire_at — a signal can
+        # keep being tracked toward a result after it's already EXPIRED for
+        # trading purposes.
+        Index("idx_signals_symbol_result", "symbol", "result"),
+    )
 
     id = Column(String, primary_key=True, default=_uuid)
     symbol = Column(String, nullable=False)
@@ -86,6 +95,17 @@ class Signal(Base):
     status = Column(String, default="ACTIVE")  # ACTIVE / EXPIRED
     created_at = Column(DateTime, default=_now)
     expire_at = Column(DateTime, nullable=True)
+
+    # 胜负判定：与 status 完全独立的第二条状态线。信号一出现即视为已进场，
+    # 不受 10 分钟 status 过期影响，一直追踪到真正碰到止盈/止损，或超过
+    # SIGNAL_STALE_DAYS 仍无行情更新（判定为 STALE，数据源可能中断，不计入胜率）。
+    # Result: a second status axis, fully independent of `status`. A signal is
+    # treated as entered the moment it's created; tracking isn't cut off by the
+    # 10-minute `status` expiry — it continues until price actually reaches TP
+    # or SL, or until SIGNAL_STALE_DAYS pass with no price update at all (marked
+    # STALE — likely a feed gap — and excluded from win-rate stats).
+    result = Column(String, default="PENDING")  # PENDING / HIT_TP / HIT_SL / STALE
+    resolved_at = Column(DateTime, nullable=True)
 
 
 class Order(Base):
@@ -114,7 +134,7 @@ class Order(Base):
     tp = Column(Float, nullable=True)
     # 目标 MT5 账号 login（多账号路由用）/ target MT5 login for routing
     mt5_login = Column(String, nullable=True)
-    status = Column(String, default="PENDING")  # PENDING / FILLED / REJECTED / FAILED
+    status = Column(String, default="PENDING")  # PENDING / FILLED / REJECTED / FAILED / CANCELLED
     # 是否已下发给 EA（轮询模式用）/ delivered to EA (used by polling mode)
     delivered = Column(Boolean, default=False)
     # 最近一次下发时间，用于超时重发判定 / last delivery time, for ack-timeout re-delivery
@@ -180,3 +200,44 @@ class Trend(Base):
     # 各周期趋势的 JSON 对象，如 {"M5":"UP","M15":"DOWN",...} / per-timeframe map as JSON
     timeframes = Column(Text, default="{}")
     updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
+class ClosedTrade(Base):
+    """一笔真实的 MT5 平仓明细（按 MT5 的成交记录，一次平仓/部分平仓一条）。
+
+    由桥接程序上报：先用魔术号码（778899）在 MT5 成交历史里找出"哪些仓位是本
+    平台开的"，再按仓位编号收集它们后续所有的平仓成交——不管那次平仓是通过
+    网页发出的指令，还是用户直接在 MT5 客户端手动操作的，只要仓位编号对得上
+    就会被记录。profit 是 MT5 自己算好的真实盈亏（账户货币），不是本平台估算的。
+
+    A real MT5 close-leg record (one row per fill of a full/partial close,
+    straight from MT5's own deal history).
+
+    Reported by the bridge app: it first uses the magic number (778899) to find
+    which positions this platform opened, then collects every subsequent
+    closing deal for those position ids — regardless of whether the close was
+    triggered by a web command or done manually in the MT5 terminal, as long as
+    the position id matches. `profit` is MT5's own computed P&L (account
+    currency), not an estimate made by this platform.
+    """
+    __tablename__ = "closed_trades"
+    __table_args__ = (
+        # 去重：桥接程序可能因重试重复上报同一笔成交 / dedup: the bridge may retry-report the same deal
+        UniqueConstraint("user_id", "deal_ticket", name="uq_user_deal_ticket"),
+        # 胜率聚合按 (user_id, mt5_login, position_ticket) 分组求和 / win-rate
+        # aggregation groups by (user_id, mt5_login, position_ticket)
+        Index("idx_closed_trades_position", "user_id", "mt5_login", "position_ticket"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    mt5_login = Column(String, nullable=False)
+    symbol = Column(String, nullable=False)
+    side = Column(String, nullable=False)  # 原仓位方向 BUY/SELL / the position's original direction
+    close_volume = Column(Float, nullable=False)  # 这一笔平仓的手数（可能是部分平仓）/ this leg's volume
+    close_price = Column(Float, nullable=False)
+    profit = Column(Float, nullable=False)  # MT5 计算的真实盈亏（账户货币）/ MT5's real P&L, account currency
+    position_ticket = Column(Integer, nullable=False)  # 仓位编号，同一仓位的多次部分平仓共享 / shared across partial closes
+    deal_ticket = Column(Integer, nullable=False)  # MT5 成交编号，用于去重 / MT5 deal ticket, for dedup
+    closed_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=_now)

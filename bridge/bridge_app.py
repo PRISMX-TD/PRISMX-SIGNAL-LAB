@@ -27,7 +27,7 @@ from urllib import error, request
 from mt5_worker import poll_terminal
 
 # ---------- 版本 / Version ----------
-APP_VERSION = "1.3.2"
+APP_VERSION = "1.3.4"
 
 # ---------- 更新检测 / Update check ----------
 # 通过 GitHub Releases 检查是否有更新的安装包版本。
@@ -35,6 +35,12 @@ APP_VERSION = "1.3.2"
 GITHUB_OWNER_REPO = "PRISMX-TD/PRISMX-SIGNAL-LAB"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_OWNER_REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{GITHUB_OWNER_REPO}/releases/latest"
+# 安装包资产文件名（须与网页下载页 DownloadPage.tsx 的 BRIDGE_FILENAME 一致）。
+# 找到匹配的资产就直接下载它，而不是把用户丢到 GitHub 发布页自己找文件。
+# Installer asset filename (must match BRIDGE_FILENAME in the web DownloadPage.tsx).
+# When found, download it directly instead of sending the user to the GitHub
+# releases page to hunt for the file themselves.
+BRIDGE_ASSET_FILENAME = "PRISMX-Bridge-Setup.exe"
 # 更新检查间隔（秒）：启动检查一次，之后每 10 分钟复查一次。
 # Update check interval (seconds): once on launch, then every 10 minutes.
 UPDATE_CHECK_INTERVAL = 600
@@ -64,6 +70,11 @@ EXECUTED_CACHE_TTL = 24 * 3600
 # closes before a report lands, retries resume after restart instead of
 # waiting for the backend's re-delivery timeout.
 REPORTS_CACHE_PATH = os.path.join(os.path.expanduser("~"), ".prismx_bridge_reports.json")
+
+# 未成功上报的真实平仓明细队列（个人胜率用），同样持久化重试。
+# Queue of closed-trade legs not yet acked by the backend (personal win-rate),
+# also persisted for retry.
+TRADES_CACHE_PATH = os.path.join(os.path.expanduser("~"), ".prismx_bridge_trades.json")
 
 
 def resource_path(name: str) -> str:
@@ -237,6 +248,25 @@ def _save_pending_reports(reports: list[dict]) -> None:
         pass
 
 
+def _load_pending_trades() -> list[dict]:
+    """读取未上报的平仓明细队列 / load the pending closed-trades queue; empty on failure."""
+    try:
+        with open(TRADES_CACHE_PATH, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        return [t for t in raw if isinstance(t, dict)] if isinstance(raw, list) else []
+    except Exception:
+        return []
+
+
+def _save_pending_trades(trades: list[dict]) -> None:
+    """把未上报的平仓明细队列写盘；失败不影响运行 / persist the queue; never fatal."""
+    try:
+        with open(TRADES_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(trades, f)
+    except Exception:
+        pass
+
+
 def scan_terminals() -> list[str]:
     """扫描本机正在运行的 MT5 终端可执行路径。
     Scan running MT5 terminals' executable paths on this machine.
@@ -306,6 +336,10 @@ class BridgeEngine:
         # Results not yet acked by the backend, retried next tick; persisted
         # locally so they survive restarts.
         self._pending_reports: list[dict] = _load_pending_reports()
+        # 未成功上报的真实平仓明细（个人胜率），持久化重试，逻辑同上。
+        # Closed-trade legs (personal win-rate) not yet acked; persisted for
+        # retry, same idea as the order-result queue above.
+        self._pending_trades: list[dict] = _load_pending_trades()
         # 上一轮上报的报价 {symbol: (bid, ask)}，仅上报变化项以省流量。
         # Last reported quotes {symbol: (bid, ask)}; only changed entries are sent.
         self._last_quotes: dict[str, tuple] = {}
@@ -338,6 +372,7 @@ class BridgeEngine:
         accounts: list = []
         positions: list = []
         quotes_by_symbol: dict[str, dict] = {}
+        closed_trades: list = []
         login_to_path: dict[str, str] = {}
         worker_errors: list[str] = []
         for path in paths:
@@ -352,6 +387,7 @@ class BridgeEngine:
                 # 多终端同品种报价去重，先到先得 / dedup quotes across terminals
                 for q in res.get("quotes", []):
                     quotes_by_symbol.setdefault(q["symbol"], q)
+                closed_trades.extend(res.get("closedTrades", []))
 
         if not accounts:
             msg = worker_errors[0] if worker_errors else "已连接终端但未读到已登录账号 / terminal attached but no logged-in account"
@@ -403,8 +439,19 @@ class BridgeEngine:
         except Exception:
             pass
 
-        # 4) 先重试上一轮未成功回报的结果 / retry results not yet acked last tick
+        # 3c) 上报新检测到的真实平仓明细（个人胜率）；失败则入队下一轮重试。
+        # Report newly detected real closed-trade legs (personal win-rate);
+        # queue for retry on failure.
+        if closed_trades:
+            try:
+                _post_json(f"{self.backend}/api/bridge/trade-history", {"data": closed_trades}, self.token)
+            except Exception:
+                self._pending_trades.extend(closed_trades)
+                _save_pending_trades(self._pending_trades)
+
+        # 4) 先重试上一轮未成功回报的结果 / retry results & trades not yet acked last tick
         self._flush_reports()
+        self._flush_trades()
 
         # 5) 按 login 分组指令执行；已执行过的只重报缓存结果，不重复下单。
         #    Group commands by login & execute; for already-executed ones just
@@ -473,6 +520,18 @@ class BridgeEngine:
             _save_pending_reports(still_pending)
         self._pending_reports = still_pending
 
+    def _flush_trades(self):
+        """重试此前未成功上报的平仓明细 / retry previously failed closed-trade reports."""
+        if not self._pending_trades:
+            return
+        try:
+            _post_json(f"{self.backend}/api/bridge/trade-history", {"data": self._pending_trades}, self.token)
+            self._pending_trades = []
+            _save_pending_trades(self._pending_trades)
+        except Exception:
+            # 留在队列里，下一轮再试；不清空、不落盘 / stays queued for the next tick
+            pass
+
 
 def _parse_version(v: str) -> tuple[int, ...]:
     """把版本字符串解析为可比较的整数元组（忽略前缀 v 与非数字段）。
@@ -486,9 +545,20 @@ def _parse_version(v: str) -> tuple[int, ...]:
     return tuple(nums)
 
 
-def check_latest_version(timeout: float = 6.0) -> str | None:
-    """查询 GitHub 最新 Release 的版本号（tag），失败返回 None。
-    Query the latest GitHub Release tag; return None on any failure."""
+def check_latest_release(timeout: float = 6.0) -> dict | None:
+    """查询 GitHub 最新 Release：版本号 + 安装包资产的直链，失败返回 None。
+
+    直链（browser_download_url）指向 GitHub 对象存储，打开即触发浏览器直接
+    下载该文件，不会展示任何 GitHub 页面——这是比跳转发布页更省心的更新体验。
+    找不到匹配文件名的资产时 download_url 为 None，调用方回退到发布页。
+
+    Query the latest GitHub Release: version tag + the installer asset's direct
+    URL; return None on any failure. The asset's browser_download_url points at
+    GitHub's object storage and triggers an immediate browser download with no
+    GitHub page in between — a smoother update flow than opening the releases
+    page. download_url is None if no asset matches the expected filename; the
+    caller then falls back to the releases page.
+    """
     try:
         req = request.Request(LATEST_RELEASE_API, method="GET")
         req.add_header("Accept", "application/vnd.github+json")
@@ -496,7 +566,14 @@ def check_latest_version(timeout: float = 6.0) -> str | None:
         with request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         tag = (data.get("tag_name") or data.get("name") or "").strip()
-        return tag or None
+        if not tag:
+            return None
+        download_url = None
+        for asset in data.get("assets", []) or []:
+            if asset.get("name") == BRIDGE_ASSET_FILENAME:
+                download_url = asset.get("browser_download_url")
+                break
+        return {"tag": tag, "download_url": download_url}
     except Exception:
         return None
 
@@ -802,26 +879,34 @@ class BridgeGUI:
         """
         def worker():
             while True:
-                latest = check_latest_version()
-                if latest and is_newer_version(latest, APP_VERSION):
+                release = check_latest_release()
+                if release and is_newer_version(release["tag"], APP_VERSION):
                     # 切回 UI 线程更新提示条 / marshal back to the UI thread
-                    self.root.after(0, lambda v=latest: self._show_update(v))
+                    self.root.after(0, lambda r=release: self._show_update(r))
                     return  # 已提示则停止轮询 / stop polling once notified
                 time.sleep(UPDATE_CHECK_INTERVAL)
         threading.Thread(target=worker, daemon=True).start()
 
-    def _show_update(self, latest: str):
+    def _show_update(self, release: dict):
         """显示更新提示条 / reveal the update banner."""
+        latest = release["tag"]
+        # 优先直接下载安装包；找不到匹配资产才退回发布页。
+        # Prefer downloading the installer directly; fall back to the releases
+        # page only if no matching asset was found.
+        self._update_url = release.get("download_url") or RELEASES_PAGE
         self.update_var.set(
-            f"发现新版本 {latest}（当前 v{APP_VERSION}），点击下载更新  /  "
-            f"Update {latest} available — click to download"
+            f"发现新版本 {latest}（当前 v{APP_VERSION}），点击直接下载安装包  /  "
+            f"Update {latest} available — click to download the installer"
         )
         # 插在标题行之后、连接卡片之前 / place it right below the header
         self.update_bar.pack(fill="x", padx=22, pady=(0, 6), after=self._title_row)
         logger.info("发现新版本 / update available: %s (current %s)", latest, APP_VERSION)
 
     def _open_update_page(self):
-        """打开 GitHub 下载页 / open the GitHub releases page."""
+        """打开安装包直链（触发浏览器直接下载）；无直链则退回发布页。
+        Open the installer's direct link (triggers an immediate browser
+        download); falls back to the releases page if no direct link exists.
+        """
         try:
             webbrowser.open(self._update_url)
         except Exception:

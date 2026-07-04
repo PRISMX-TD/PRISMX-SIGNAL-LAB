@@ -120,6 +120,8 @@ def _serialize(sig: Signal) -> dict:
         status=sig.status,
         createdAt=sig.created_at,
         expireAt=sig.expire_at,
+        result=sig.result or "PENDING",
+        resolvedAt=sig.resolved_at,
     ).model_dump(mode="json")
 
 

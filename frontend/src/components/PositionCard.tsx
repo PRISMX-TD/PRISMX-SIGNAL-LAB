@@ -197,7 +197,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
                 type="number"
                 step="0.00001"
                 className="input font-mono text-sm"
-                placeholder="0 = 清除"
+                placeholder={t('positions.clearHint')}
                 value={sl}
                 onChange={(e) => setSl(e.target.value)}
               />
@@ -208,7 +208,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
                 type="number"
                 step="0.00001"
                 className="input font-mono text-sm"
-                placeholder="0 = 清除"
+                placeholder={t('positions.clearHint')}
                 value={tp}
                 onChange={(e) => setTp(e.target.value)}
               />

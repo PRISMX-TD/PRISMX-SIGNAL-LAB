@@ -11,6 +11,8 @@ import SignalExec from '../components/signals/SignalExec'
 import SignalOthers from '../components/signals/SignalOthers'
 import QuotesTable from '../components/signals/QuotesTable'
 import MarketOverview from '../components/signals/MarketOverview'
+import StrategyWinRateCard from '../components/signals/StrategyWinRateCard'
+import PersonalWinRateCard from '../components/PersonalWinRateCard'
 import SlideOrderModal from '../components/SlideOrderModal'
 import { useFocusEntries, useNow, useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import { trendStance, type TrendStance } from '../components/signals/signalView'
@@ -73,6 +75,8 @@ export default function DashboardPage() {
               <div className="dash-col-2">
                 <SignalExec signal={cur.signal} now={now} onTrade={openTrade} />
                 <MarketOverview signals={signals} />
+                <StrategyWinRateCard />
+                <PersonalWinRateCard />
               </div>
               <SignalOthers entries={otherEntries} now={now} onTrade={openTrade} onFocus={setFocusIdx} onViewAll={goSignals} />
             </>
@@ -89,6 +93,8 @@ export default function DashboardPage() {
               <div className="dash-col-2">
                 <SignalExec signal={null} now={now} onTrade={openTrade} />
                 <MarketOverview signals={signals} />
+                <StrategyWinRateCard />
+                <PersonalWinRateCard />
               </div>
               <section className="card glass dash-others p-4 flex items-center justify-center text-sm text-slate-500">{t('signals.focus.noExecutable')}</section>
             </>

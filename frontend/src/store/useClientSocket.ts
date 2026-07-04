@@ -1,12 +1,16 @@
 // 前端 WebSocket Hook：接收信号/订单/EA 状态推送。
 // Client WebSocket hook: receive signal/order/EA-status pushes.
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getToken, API_BASE } from '../api/client'
 import type { WSMessage } from '../api/types'
 
-export function useClientSocket(onMessage: (msg: WSMessage) => void) {
+// 返回当前 WebSocket 连接状态，供上层在断线时提示"数据可能已过时"。
+// Returns the current WebSocket connection state, so callers can warn that
+// quotes/positions may be stale while disconnected.
+export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
   const handlerRef = useRef(onMessage)
   handlerRef.current = onMessage
+  const [connected, setConnected] = useState(false)
 
   useEffect(() => {
     const token = getToken()
@@ -51,6 +55,9 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void) {
             ws?.close()
             return
           }
+          // 鉴权通过才算真正连上：onopen 只代表握手完成 / only AUTH_OK counts as connected;
+          // onopen merely means the handshake finished
+          if (msg.type === 'AUTH_OK') setConnected(true)
           handlerRef.current(msg)
         } catch {
           /* ignore malformed */
@@ -58,6 +65,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void) {
       }
 
       ws.onclose = () => {
+        setConnected(false)
         if (!closed) {
           // 断线自动重连 / auto reconnect
           reconnectTimer = window.setTimeout(connect, 2000)
@@ -69,8 +77,11 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void) {
 
     return () => {
       closed = true
+      setConnected(false)
       if (reconnectTimer) window.clearTimeout(reconnectTimer)
       ws?.close()
     }
   }, [])
+
+  return connected
 }

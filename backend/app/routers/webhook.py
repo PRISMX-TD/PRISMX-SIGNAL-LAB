@@ -23,6 +23,7 @@ from app.models import Signal, Trend
 from app.schemas import SYMBOL_PATTERN, SignalOut
 from app.services.connection_manager import manager
 from app.services.push_dispatch import dispatch_push_async
+from app.services.signal_resolution import resolve_signals_with_price
 
 import json
 
@@ -56,6 +57,8 @@ def _serialize(sig: Signal) -> dict:
         status=sig.status,
         createdAt=sig.created_at,
         expireAt=sig.expire_at,
+        result=sig.result or "PENDING",
+        resolvedAt=sig.resolved_at,
     ).model_dump(mode="json")
 
 
@@ -150,6 +153,13 @@ class TrendSignal(BaseModel):
     symbol: str = Field(pattern=SYMBOL_PATTERN)
     # 各周期趋势，键为周期名(M5/M15/H1/H4)，值为方向 / per-timeframe map
     trends: dict[str, TrendDir]
+    # 该指标所在图表周期（如 5 分钟）当前 K 线的最高/最低价，用于顺带判定该品种
+    # 下所有未分胜负信号是否命中止盈/止损。两者都缺省则跳过胜负判定，仅更新趋势。
+    # High/low of the current bar on this indicator's chart timeframe (e.g. 5m),
+    # used to opportunistically resolve any pending signals on this symbol
+    # against TP/SL. Skips resolution (trend-only update) if either is missing.
+    high: float | None = Field(default=None, ge=0)
+    low: float | None = Field(default=None, ge=0)
     # 外部编号，仅用于日志/幂等参考，可空 / external id, optional
     id: str | None = Field(default=None, max_length=128)
 
@@ -213,6 +223,16 @@ async def tradingview_trend(request: Request):
                 row.updated_at = now
                 db.commit()
         data = {"symbol": symbol, "timeframes": tf_map, "updatedAt": now.isoformat()}
+
+        # 顺带用这根 K 线的高低点判定该品种下所有未分胜负信号是否命中 TP/SL。
+        # 与趋势更新共用同一次 webhook 调用，不需要额外的行情通道。
+        # Opportunistically resolve pending signals on this symbol against this
+        # bar's high/low, riding on the same webhook call as the trend update —
+        # no separate price channel needed.
+        if payload.high is not None and payload.low is not None:
+            resolved = resolve_signals_with_price(db, symbol, payload.low, payload.high)
+            if resolved:
+                db.commit()
     finally:
         db.close()
 

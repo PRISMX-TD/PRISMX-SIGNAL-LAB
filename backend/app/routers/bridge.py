@@ -7,13 +7,14 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import authenticate_api_token
-from app.models import MT5Account, Order, Signal, User
+from app.models import ClosedTrade, MT5Account, Order, Signal, User
 from app.routers.orders import is_stale_pending, order_update_payload, void_stale_order
 from app.schemas import LOGIN_PATTERN, SUFFIX_PATTERN, AccountSuffixRequest, MT5AccountOut
 from app.services.connection_manager import manager
@@ -231,6 +232,15 @@ class BridgeResultRequest(BaseModel):
     mt5Ticket: int | None = None
     filledPrice: float | None = None
     message: str | None = None
+    # 实际执行该指令的 MT5 账号 login。未指定目标账号、靠"唯一在线账号"兜底
+    # 路由时，落库的指令本身不知道最终打到了哪个账号；有了这个字段，个人胜率
+    # 按 (login, position ticket) 匹配平仓明细时才不会因为 mt5_login 缺失而配不上。
+    # The MT5 login the command actually executed on. When an order has no
+    # target account and was routed via the single-online-account fallback,
+    # the stored command otherwise never learns which account it landed on;
+    # this field lets personal win-rate matching key on (login, position
+    # ticket) without falling over from a missing mt5_login.
+    login: str | None = Field(default=None, pattern=LOGIN_PATTERN)
 
 
 @router.post("/result")
@@ -261,6 +271,11 @@ async def bridge_result(
     order.mt5_ticket = req.mt5Ticket
     order.filled_price = req.filledPrice
     order.message = req.message
+    # 兜底路由时补上实际执行账号，指定过目标账号的订单不覆盖已有值。
+    # Backfill the actual executing account for fallback-routed orders; never
+    # overwrite an order that already specified its target account.
+    if req.login and not order.mt5_login:
+        order.mt5_login = req.login
     db.commit()
     db.refresh(order)
 
@@ -312,6 +327,67 @@ async def bridge_quotes(
     return {"ok": True}
 
 
+# ---------- 真实平仓明细上报（个人胜率用）/ closed-trade reporting (for personal win-rate) ----------
+class BridgeClosedTrade(BaseModel):
+    """桥接程序上报的一笔 MT5 平仓成交（可能是部分平仓）。
+    One MT5 closing deal reported by the bridge (may be a partial close)."""
+
+    login: str = Field(pattern=LOGIN_PATTERN)
+    symbol: str = Field(max_length=32)
+    side: str = Field(pattern=r"^(BUY|SELL)$")
+    closeVolume: float = Field(gt=0, le=10000)
+    closePrice: float = Field(ge=0)
+    profit: float
+    positionTicket: int = Field(gt=0)
+    dealTicket: int = Field(gt=0)
+    closedAt: datetime
+
+
+class BridgeClosedTradesRequest(BaseModel):
+    data: list[BridgeClosedTrade] = []
+
+
+@router.post("/trade-history")
+def bridge_trade_history(
+    req: BridgeClosedTradesRequest,
+    user: User = Depends(get_bridge_user),
+    db: Session = Depends(get_db),
+):
+    """桥接程序上报真实平仓明细：按 (用户, MT5 成交编号) 去重后落库。
+
+    与用户是否通过网页下单/平仓无关——只要仓位当初是本平台开的（魔术号码
+    匹配），后续不管是网页平仓还是在 MT5 客户端手动平仓，都会被上报到这里。
+
+    Bridge reports real closing deals; deduped by (user, MT5 deal ticket).
+    Independent of whether the close was triggered via the web app — as long
+    as the position was originally opened by this platform (magic-number
+    matched), any subsequent close (web or manual in the MT5 terminal) lands
+    here.
+    """
+    inserted = 0
+    for leg in req.data:
+        row = ClosedTrade(
+            user_id=user.id,
+            mt5_login=leg.login,
+            symbol=leg.symbol,
+            side=leg.side,
+            close_volume=leg.closeVolume,
+            close_price=leg.closePrice,
+            profit=leg.profit,
+            position_ticket=leg.positionTicket,
+            deal_ticket=leg.dealTicket,
+            closed_at=leg.closedAt,
+        )
+        db.add(row)
+        try:
+            db.commit()
+            inserted += 1
+        except IntegrityError:
+            # 唯一约束冲突：已经上报过这笔成交，跳过 / already reported this deal, skip
+            db.rollback()
+    return {"ok": True, "inserted": inserted}
+
+
 # ---------- 用户面向：账号列表与后缀设置 / user-facing: account list & suffix ----------
 @router.get("/accounts", response_model=dict)
 def list_accounts(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -340,6 +416,44 @@ def list_accounts(user: User = Depends(get_current_user), db: Session = Depends(
         for r in rows
     ]
     return {"accounts": [a.model_dump(mode="json") for a in accounts]}
+
+
+@router.delete("/accounts/{login}")
+def delete_account(
+    login: str,
+    server: str | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """删除一个已知 MT5 账号（如已换券商的旧账号）。
+
+    在线账号拒绝删除：桥接仍在上报的话，下次轮询会立刻把它重新插回，
+    删除只会看起来"闪一下又出现"，不如直接提示用户先断开。
+
+    Delete a known MT5 account (e.g. a stale one after switching brokers).
+    Refuses to delete an online account: if the bridge is still reporting it,
+    the next poll would just re-insert the row, so deletion would appear to
+    flicker back — better to tell the user to disconnect first.
+    """
+    row = (
+        db.query(MT5Account)
+        .filter(
+            MT5Account.user_id == user.id,
+            MT5Account.login == login,
+            MT5Account.server == (server or None),
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="账号不存在 / Account not found")
+    if is_account_online(row):
+        raise HTTPException(
+            status_code=409,
+            detail="账号仍在线，请先断开桥接程序再删除 / Account is online; disconnect the bridge before deleting",
+        )
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/accounts/suffix")

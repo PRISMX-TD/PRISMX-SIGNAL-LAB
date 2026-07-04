@@ -24,7 +24,29 @@ export interface SignalDailyCount {
   count: number
 }
 
-export type OrderStatus = 'PENDING' | 'FILLED' | 'REJECTED' | 'FAILED'
+// 信号客观胜率：基于行情是否先碰到止盈/止损判定，与任何用户操作无关，全平台统一
+// Objective signal win rate: based on whether price hit TP or SL first,
+// independent of any user's behavior; the same for everyone on the platform
+export interface SignalWinRate {
+  hitTp: number
+  hitSl: number
+  pending: number
+  stale: number
+  totalResolved: number
+  winRate: number | null
+}
+
+// 个人跟单胜率：基于真实平仓明细，只有自己能看到自己的
+// Personal win rate: based on real closed trades, visible only to the user themself
+export interface PersonalWinRate {
+  wins: number
+  losses: number
+  totalResolved: number
+  winRate: number | null
+  openPositions: number
+}
+
+export type OrderStatus = 'PENDING' | 'FILLED' | 'REJECTED' | 'FAILED' | 'CANCELLED'
 export type OrderAction = 'ORDER' | 'CLOSE' | 'MODIFY'
 
 export interface Order {

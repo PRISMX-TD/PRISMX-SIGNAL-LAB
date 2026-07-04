@@ -76,6 +76,9 @@ class SignalOut(BaseModel):
     status: str
     createdAt: datetime
     expireAt: datetime | None = None
+    # 胜负判定：PENDING / HIT_TP / HIT_SL / STALE，与 status 独立 / independent of status
+    result: str = "PENDING"
+    resolvedAt: datetime | None = None
 
 
 # ---------- 下单 / Order ----------

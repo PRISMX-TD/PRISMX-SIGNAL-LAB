@@ -12,6 +12,8 @@ per process. With a single terminal (the common case) the attachment is kept
 across polls instead of initialize/shutdown on every tick; with multiple
 terminals we only reconnect when switching.
 """
+from datetime import datetime, timedelta, timezone
+
 try:
     import MetaTrader5 as mt5
     _IMPORT_ERROR = None
@@ -54,6 +56,23 @@ def _ensure_attached(path: str) -> bool:
         return False
     _attached_path = path
     return True
+
+
+# 本平台下单一律打这个魔术号码，用来在 MT5 成交历史里认出"哪些仓位是我们开的"
+# （个人胜率统计用，见 _closed_trades_payload）。
+# Every order this platform places carries this magic number, used to identify
+# "which positions did we open" in MT5's deal history (for personal win-rate
+# stats; see _closed_trades_payload).
+PRISMX_MAGIC = 778899
+
+
+def _current_login() -> str | None:
+    """当前附着终端的账号 login，取不到则 None / current terminal's account login, or None."""
+    try:
+        info = mt5.account_info()
+        return str(info.login) if info else None
+    except Exception:
+        return None
 
 
 # 常见基础品种，用于探测券商后缀 / common base symbols to probe broker suffix
@@ -222,6 +241,82 @@ def _positions_payload() -> list:
     return out
 
 
+# 每个终端路径记一个"上次检查到哪个时间点"的游标，避免每次轮询都重新扫一遍
+# 全部历史。首次轮询只回看 1 小时，不把很久以前的平仓一次性倒灌进来。
+# Per-terminal-path cursor of "checked up to when", so each poll doesn't
+# rescan the whole history. The first poll only looks back 1 hour, so old
+# closes don't flood in all at once.
+_last_deal_check: dict[str, datetime] = {}
+_DEAL_LOOKBACK_ON_FIRST_POLL = timedelta(hours=1)
+
+
+def _closed_trades_payload(path: str) -> list:
+    """检测该终端账号新出现的平仓成交，且仅限本平台开的仓位（个人胜率用）。
+
+    先按仓位编号在 MT5 历史里查这个仓位的开仓成交是不是打了 PRISMX 的魔术号
+    码——不管后续这笔平仓是网页发的指令，还是用户直接在 MT5 客户端手动点的，
+    只要仓位编号对得上就会被上报。
+
+    Detect newly closed deals for this terminal's account, restricted to
+    positions this platform opened (for personal win-rate stats). Checks each
+    closing deal's position by MT5 ticket to see whether its opening deal
+    carries the PRISMX magic number — regardless of whether the close itself
+    was a web command or a manual click in the MT5 terminal, as long as the
+    position id matches.
+    """
+    now = datetime.now()
+    since = _last_deal_check.get(path)
+    if since is None:
+        since = now - _DEAL_LOOKBACK_ON_FIRST_POLL
+    _last_deal_check[path] = now
+
+    try:
+        deals = mt5.history_deals_get(since, now)
+    except Exception:
+        return []
+    if not deals:
+        return []
+
+    login = _current_login()
+    if not login:
+        return []
+
+    out = []
+    # 同一次轮询内，同一仓位是否是我们开的只查一次 / cache per-position lookups within one pass
+    position_is_ours: dict[int, bool] = {}
+    for d in deals:
+        if d.entry != mt5.DEAL_ENTRY_OUT:
+            continue  # 只关心平仓成交（含部分平仓）/ only closing deals (incl. partial)
+        pos_id = int(d.position_id)
+        if pos_id not in position_is_ours:
+            try:
+                pos_deals = mt5.history_deals_get(position=pos_id)
+            except Exception:
+                pos_deals = None
+            position_is_ours[pos_id] = bool(
+                pos_deals and any(getattr(pd, "magic", 0) == PRISMX_MAGIC for pd in pos_deals)
+            )
+        if not position_is_ours[pos_id]:
+            continue  # 不是本平台开的仓位 / not a position this platform opened
+
+        # 平仓成交的方向与原仓位相反：SELL 平的是多单，BUY 平的是空单
+        # a closing SELL deal flattens a BUY position, and vice versa
+        side = "BUY" if d.type == mt5.DEAL_TYPE_SELL else "SELL"
+        out.append({
+            "login": login,
+            "symbol": d.symbol,
+            "side": side,
+            "closeVolume": float(d.volume),
+            "closePrice": float(d.price),
+            # 含隔夜利息与手续费才是这笔平仓真正到手的盈亏 / swap & commission included for the true net P&L
+            "profit": float(d.profit) + float(d.swap) + float(d.commission),
+            "positionTicket": pos_id,
+            "dealTicket": int(d.ticket),
+            "closedAt": datetime.fromtimestamp(d.time, tz=timezone.utc).isoformat(),
+        })
+    return out
+
+
 def _reject_reason(retcode: int) -> str:
     """把 MT5 下单返回码翻译成简短的中英文原因。
     Translate an MT5 retcode into a short bilingual reason.
@@ -288,7 +383,7 @@ def _execute_order(cmd: dict) -> dict:
         "type": order_type,
         "price": price,
         "deviation": 20,
-        "magic": 778899,
+        "magic": PRISMX_MAGIC,
         "comment": "PRISMX",
         "type_time": mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_IOC,
@@ -327,6 +422,7 @@ def _execute_order(cmd: dict) -> dict:
         "mt5Ticket": int(result.order) if success else None,
         "filledPrice": filled_price,
         "message": "Order executed" if success else _reject_reason(result.retcode),
+        "login": _current_login(),
     }
 
 
@@ -376,7 +472,7 @@ def _close_position(cmd: dict) -> dict:
         "position": ticket,
         "price": price,
         "deviation": 20,
-        "magic": 778899,
+        "magic": PRISMX_MAGIC,
         "comment": "PRISMX close",
         "type_time": mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_IOC,
@@ -395,6 +491,7 @@ def _close_position(cmd: dict) -> dict:
         "mt5Ticket": ticket,
         "filledPrice": filled_price,
         "message": "Position closed" if success else _reject_reason(result.retcode),
+        "login": _current_login(),
     }
 
 
@@ -422,7 +519,7 @@ def _modify_position(cmd: dict) -> dict:
         "position": ticket,
         "sl": sl,
         "tp": tp,
-        "magic": 778899,
+        "magic": PRISMX_MAGIC,
     }
     result = mt5.order_send(request)
     if result is None:
@@ -523,10 +620,11 @@ def poll_terminal(path: str, orders: list[dict] | None = None) -> dict:
         "positions": [...],
         "quotes": [...],           # bid/ask 报价 / bid/ask quotes
         "results": [...],          # 下单回执 / order results
+        "closedTrades": [...],     # 新检测到的真实平仓明细（个人胜率用）/ newly detected real closes (personal win-rate)
         "error": str | None,
       }
     """
-    out = {"account": None, "positions": [], "quotes": [], "results": [], "error": None}
+    out = {"account": None, "positions": [], "quotes": [], "results": [], "closedTrades": [], "error": None}
     if mt5 is None:
         out["error"] = f"MetaTrader5 import failed: {_IMPORT_ERROR}"
         return out
@@ -547,6 +645,7 @@ def poll_terminal(path: str, orders: list[dict] | None = None) -> dict:
         out["quotes"] = _quotes_payload(QUOTE_SYMBOLS, suffix)
         for cmd in orders or []:
             out["results"].append(_dispatch_command(cmd))
+        out["closedTrades"] = _closed_trades_payload(path)
     except Exception as e:
         out["error"] = str(e)
     return out

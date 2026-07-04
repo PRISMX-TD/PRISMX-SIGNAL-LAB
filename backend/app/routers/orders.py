@@ -26,6 +26,7 @@ from app.schemas import (
 )
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user, is_account_online, validate_order
+from app.services.trade_performance import compute_personal_winrate
 
 logger = logging.getLogger("prismx.orders")
 
@@ -211,6 +212,57 @@ def list_orders(
         .all()
     )
     return {"orders": [_serialize(o) for o in rows]}
+
+
+@router.post("/{order_id}/cancel", response_model=OrderOut)
+def cancel_order(
+    order_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """撤销一条尚未执行的挂单（PENDING）。
+
+    只能撤销仍处于 PENDING 的指令；一旦桥接已回执（FILLED/REJECTED/FAILED）
+    或已作废，撤销请求直接拒绝。桥接若恰好已把该指令发给 MT5，撤销无法追回
+    那次执行——这是本地队列式下单模型的固有限制。
+
+    Cancel a not-yet-executed (PENDING) order. Orders already in a terminal
+    state are rejected. If the bridge already dispatched the command to MT5
+    moments earlier, cancelling here can't undo that fill — an inherent limit
+    of the queued-command model.
+    """
+    order = (
+        db.query(Order)
+        .filter(Order.id == order_id, Order.user_id == user.id)
+        .first()
+    )
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在 / Order not found")
+    if order.status != "PENDING":
+        raise HTTPException(
+            status_code=409,
+            detail="订单已不是待执行状态，无法撤销 / Order is no longer pending and cannot be cancelled",
+        )
+    order.status = "CANCELLED"
+    order.message = "用户已撤销 / Cancelled by user"
+    db.commit()
+    db.refresh(order)
+    return _serialize(order)
+
+
+@router.get("/winrate", response_model=dict)
+def order_winrate(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """当前用户的个人跟单胜率：基于真实平仓明细，一个仓位全部平完才算数
+    （方案 B，见 app/services/trade_performance.py）。只有自己能看到自己的。
+
+    The current user's personal win rate, based on real close records; a
+    position only counts once fully closed (design B). Visible only to the
+    user themself.
+    """
+    return compute_personal_winrate(db, user.id)
 
 
 def _assert_account_owned(db: Session, user_id: str, mt5_login: str | None) -> None:

@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { LiveProvider } from '../store/live'
+import { LiveProvider, useLive } from '../store/live'
 import { useAuth } from '../store/auth'
 import Logo from './Logo'
 import LanguageToggle from './LanguageToggle'
@@ -125,6 +125,21 @@ function TabItem({ to, icon, label }: { to: string; icon: string; label: string 
   )
 }
 
+// 断线提示条：网页自身的 WebSocket 掉线时提醒用户报价/持仓可能已过时
+// Disconnect banner: warns that quotes/positions may be stale while the
+// page's own WebSocket connection is down
+function WsDisconnectBanner() {
+  const { t } = useTranslation()
+  const { wsDisconnected } = useLive()
+  if (!wsDisconnected) return null
+  return (
+    <div className="sticky top-[57px] z-20 flex items-center justify-center gap-2 border-b border-amber-400/30 bg-amber-400/10 px-3 py-1.5 text-xs font-medium text-amber-300 sm:top-[65px]">
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+      {t('connStatus.reconnecting')}
+    </div>
+  )
+}
+
 export default function Layout() {
   const { t } = useTranslation()
   const { user, logout } = useAuth()
@@ -221,6 +236,7 @@ export default function Layout() {
             </div>
           </div>
         </header>
+        <WsDisconnectBanner />
 
         <main className="mx-auto w-full max-w-7xl flex-1 px-4 pb-24 pt-6 sm:px-6 sm:pb-6">
           {/* 懒加载页面切换时导航保持可见 / keep the nav visible while a lazy page loads */}

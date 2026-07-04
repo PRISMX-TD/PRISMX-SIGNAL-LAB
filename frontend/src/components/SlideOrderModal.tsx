@@ -2,6 +2,9 @@
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { MT5Account, Quote, Signal } from '../api/types'
+import { calcCountdown, contractSize, suggestVolumeByRisk } from '../api/utils'
+import { SIGNAL_LIFESPAN_MS } from './signals/signalView'
+import { useNow } from './signals/hooks'
 
 interface Props {
   signal: Signal
@@ -38,6 +41,19 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
   const [sl, setSl] = useState(signal.stopLoss != null ? String(signal.stopLoss) : '')
   const [tp, setTp] = useState(signal.takeProfit != null ? String(signal.takeProfit) : '')
 
+  // 手数模式：快捷手数 / 按风险百分比建议 / sizing mode: quick lots vs risk-percent suggestion
+  const [sizeMode, setSizeMode] = useState<'quick' | 'risk'>('quick')
+  const [riskPct, setRiskPct] = useState('1')
+  const QUICK_RISK_PCTS = [0.5, 1, 2, 3]
+
+  // 倒计时：弹窗打开期间信号也可能到期，到期即禁止滑动确认。
+  // Countdown: the signal can expire while this modal is open; once expired,
+  // the slide-to-confirm is disabled.
+  const now = useNow(1000)
+  const cd = calcCountdown(signal.expireAt, SIGNAL_LIFESPAN_MS, now)
+  const expired = cd?.expired ?? false
+  const cdTone = cd && cd.remainMs < 2 * 60 * 1000 ? 'text-down' : 'text-slate-300'
+
   const trackRef = useRef<HTMLDivElement>(null)
   const knobRef = useRef<HTMLDivElement>(null)
   const fillRef = useRef<HTMLDivElement>(null)
@@ -55,6 +71,35 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
   useEffect(() => {
     setVolume(suggestVolume(selected?.equity))
   }, [selected?.login])
+
+  // 校验止损/止盈是否在正确的方向：买单止损须低于现价、止盈须高于现价，卖单相反。
+  // Validate SL/TP sit on the correct side of the reference price: for a BUY
+  // the SL must be below and TP above the price; reversed for a SELL.
+  const isBuy = signal.side === 'BUY'
+  const entryRef = quote != null
+    ? (isBuy ? quote.ask ?? signal.entry : quote.bid ?? signal.entry)
+    : signal.entry
+  const slNum = sl.trim() === '' ? null : parseFloat(sl)
+  const tpNum = tp.trim() === '' ? null : parseFloat(tp)
+  const slInvalid =
+    slNum != null && !Number.isNaN(slNum) && entryRef != null &&
+    (isBuy ? slNum >= entryRef : slNum <= entryRef)
+  const tpInvalid =
+    tpNum != null && !Number.isNaN(tpNum) && entryRef != null &&
+    (isBuy ? tpNum <= entryRef : tpNum >= entryRef)
+
+  // 按风险百分比建议手数：净值 × 风险% ÷ 止损距离，随 SL/净值/风险%变化自动重算。
+  // Suggest volume from a risk percentage: equity × risk% ÷ SL distance;
+  // recomputed whenever SL, equity or the risk percentage changes.
+  useEffect(() => {
+    if (sizeMode !== 'risk') return
+    if (slNum == null || Number.isNaN(slNum) || entryRef == null) return
+    const distance = Math.abs(entryRef - slNum)
+    const pct = parseFloat(riskPct) || 0
+    const suggested = suggestVolumeByRisk(signal.symbol, selected?.equity, pct, distance)
+    if (suggested != null) setVolume(suggested.toFixed(2))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- entryRef/slNum derived each render; deps below cover real inputs
+  }, [sizeMode, riskPct, sl, selected?.equity, signal.symbol, quote?.bid, quote?.ask])
 
   // Escape key（用 ref 避免依赖漂移 / use ref to avoid dependency drift）
   useEffect(() => {
@@ -137,6 +182,14 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
   }
 
   const handleSubmit = async () => {
+    if (expired) {
+      setError(t('order.signalExpiredInModal'))
+      return
+    }
+    if (slInvalid || tpInvalid) {
+      setError(t('order.slTpInvalid'))
+      return
+    }
     setReceipt('waiting')
     setSubmitting(true)
     setError('')
@@ -147,8 +200,6 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
       setReceipt(null)
       return
     }
-    const slNum = sl.trim() === '' ? null : parseFloat(sl)
-    const tpNum = tp.trim() === '' ? null : parseFloat(tp)
     try {
       await onConfirm(vol, login || null, slNum, tpNum)
       setReceipt('ok')
@@ -169,7 +220,6 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
     setVolume(String(next))
   }
 
-  const isBuy = signal.side === 'BUY'
   const symLetter = (signal.symbol[0] ?? '?').toUpperCase()
   const avaBg = isBuy ? 'rgba(46,224,126,0.15)' : 'rgba(255,77,103,0.15)'
   const avaColor = isBuy ? 'var(--up)' : 'var(--down)'
@@ -177,17 +227,18 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
 
   const hasAccounts = onlineAccounts.length > 0
   const offlineMsg = accounts.length === 0 ? t('order.noBridge') : t('order.allOffline')
+  const canSubmit = hasAccounts && !expired && !slInvalid && !tpInvalid
 
   const fmtMoney = (n?: number | null) =>
     n == null ? '-' : n.toLocaleString(undefined, { maximumFractionDigits: 2 })
 
-  // 粗估保证金占用：手数 × 合约规模(假定 100k) / 杠杆，仅作量级提示
-  // Rough margin estimate: lots × contract size (assume 100k) / leverage, indicative only
+  // 粗估保证金占用：手数 × 品种合约规模 / 杠杆，仅作量级提示
+  // Rough margin estimate: lots × the symbol's contract size / leverage, indicative only
   const estMargin = (() => {
     const vol = parseFloat(volume)
     const lev = selected?.leverage
     if (!vol || vol <= 0 || !lev || lev <= 0) return null
-    return (vol * 100000) / lev
+    return (vol * contractSize(signal.symbol)) / lev
   })()
 
   return (
@@ -198,16 +249,27 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
         </button>
 
         <div className="slide-sheet-head">
-          <div className="slide-sheet-ava" style={{ background: avaBg, color: avaColor }}>{symLetter}</div>
+          <div className="flex items-center justify-center gap-2">
+            <div className="slide-sheet-ava" style={{ background: avaBg, color: avaColor }}>{symLetter}</div>
+          </div>
           <h3 className="text-lg mt-2.5 text-white font-bold">
             {isBuy ? t('common.buy') : t('common.sell')} {signal.symbol}
           </h3>
           <p className="text-xs text-slate-300 mt-1">
-            现价 <span className="num" style={{ color: priceColor }}>
+            {t('order.currentPrice')} <span className="num" style={{ color: priceColor }}>
               {quote ? (isBuy ? (quote.ask?.toFixed(quote.digits ?? 5) ?? signal.entry) : (quote.bid?.toFixed(quote.digits ?? 5) ?? signal.entry)) : signal.entry ?? '-'}
             </span>
-            {selected && <> · 账户 {selected.login}</>}
+            {selected && <> · {t('order.account')} {selected.login}</>}
           </p>
+          {cd && (
+            <div className={`mt-2 flex items-center justify-center gap-1.5 text-xs font-semibold ${cdTone}`}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+              </svg>
+              <span>{t('order.signalExpiresIn')}</span>
+              <span className="num">{cd.text}</span>
+            </div>
+          )}
         </div>
 
         <div className="slide-sheet-rows">
@@ -253,6 +315,25 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
             </div>
           )}
           <div className="slide-row">
+            <span className="k">{t('order.sizeMode')}</span>
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                onClick={() => setSizeMode('quick')}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium border ${sizeMode === 'quick' ? 'border-prism-500/60 bg-prism-600/20 text-prism-200' : 'border-white/10 bg-white/5 text-slate-400'}`}
+              >
+                {t('order.sizeModeLots')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSizeMode('risk')}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium border ${sizeMode === 'risk' ? 'border-prism-500/60 bg-prism-600/20 text-prism-200' : 'border-white/10 bg-white/5 text-slate-400'}`}
+              >
+                {t('order.sizeModeRisk')}
+              </button>
+            </div>
+          </div>
+          <div className="slide-row">
             <span className="k">{t('order.volume')}</span>
             <span className="stepper">
               <button onClick={() => stepLot(-1)}>−</button>
@@ -269,24 +350,55 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
               <button onClick={() => stepLot(1)}>+</button>
             </span>
           </div>
-          <div className="slide-row">
-            <span className="k" />
-            <div className="flex gap-1.5">
-              {QUICK_LOTS.map((q) => (
-                <button key={q} onClick={() => setVolume(q.toFixed(2))} className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-xs text-slate-300 hover:border-prism-500/50 hover:text-prism-300 font-mono">
-                  {q.toFixed(2)}
-                </button>
-              ))}
+          {sizeMode === 'quick' ? (
+            <div className="slide-row">
+              <span className="k" />
+              <div className="flex gap-1.5">
+                {QUICK_LOTS.map((q) => (
+                  <button key={q} onClick={() => setVolume(q.toFixed(2))} className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-xs text-slate-300 hover:border-prism-500/50 hover:text-prism-300 font-mono">
+                    {q.toFixed(2)}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="slide-row">
+              <span className="k">{t('order.riskPct')}</span>
+              <div className="flex items-center gap-1.5">
+                {QUICK_RISK_PCTS.map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setRiskPct(String(p))}
+                    className={`px-2 py-0.5 rounded-md border text-xs font-mono ${riskPct === String(p) ? 'border-prism-500/60 bg-prism-600/20 text-prism-200' : 'border-white/10 bg-white/5 text-slate-300'}`}
+                  >
+                    {p}%
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {sizeMode === 'risk' && slNum == null && (
+            <div className="slide-row">
+              <span className="k" />
+              <span className="text-xs text-amber-400/90">{t('order.riskNeedsSl')}</span>
+            </div>
+          )}
           <div className="slide-row">
             <span className="k">{t('signals.colSl')} / {t('signals.colTp')}</span>
             <div className="flex items-center gap-2">
-              <input className="h-8 w-[90px] rounded-lg bg-white/5 border border-down/40 px-2 text-sm num text-down text-right" value={sl} onChange={(e) => setSl(e.target.value)} placeholder={signal.stopLoss != null ? String(signal.stopLoss) : 'SL'} />
+              <input className={`h-8 w-[90px] rounded-lg bg-white/5 border px-2 text-sm num text-down text-right ${slInvalid ? 'border-down' : 'border-down/40'}`} value={sl} onChange={(e) => setSl(e.target.value)} placeholder={signal.stopLoss != null ? String(signal.stopLoss) : 'SL'} />
               <i className="text-slate-500">/</i>
-              <input className="h-8 w-[90px] rounded-lg bg-white/5 border border-up/40 px-2 text-sm num text-up text-right" value={tp} onChange={(e) => setTp(e.target.value)} placeholder={signal.takeProfit != null ? String(signal.takeProfit) : 'TP'} />
+              <input className={`h-8 w-[90px] rounded-lg bg-white/5 border px-2 text-sm num text-up text-right ${tpInvalid ? 'border-down' : 'border-up/40'}`} value={tp} onChange={(e) => setTp(e.target.value)} placeholder={signal.takeProfit != null ? String(signal.takeProfit) : 'TP'} />
             </div>
           </div>
+          {(slInvalid || tpInvalid) && (
+            <div className="slide-row">
+              <span className="k" />
+              <span className="text-xs text-down">
+                {slInvalid ? t('order.slWrongSide') : t('order.tpWrongSide')}
+              </span>
+            </div>
+          )}
           {estMargin != null && (
             <div className="slide-row">
               <span className="k">{t('order.estMargin')}</span>
@@ -305,6 +417,9 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
 
         {!hasAccounts && (
           <div className="mb-3 rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down">{offlineMsg}</div>
+        )}
+        {hasAccounts && expired && (
+          <div className="mb-3 rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down">{t('order.signalExpiredInModal')}</div>
         )}
         {error && (
           <div className="mb-3 rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down">{error}</div>
@@ -325,7 +440,7 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
             touch-action:none 防止移动端拖动时带动页面滚动。
             Pointer capture keeps the drag tracking even outside the track;
             touch-action none stops the page from scrolling under the drag. */}
-        {!submitting && hasAccounts && (
+        {!submitting && canSubmit && (
           <div
             ref={trackRef}
             className="slide-track"

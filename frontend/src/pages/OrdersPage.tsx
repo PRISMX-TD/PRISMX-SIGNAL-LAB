@@ -1,23 +1,34 @@
 // 订单与回执页 / Orders & receipts page
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLive } from '../store/live'
+import { orderApi } from '../api/client'
 import { fmtTime } from '../api/utils'
 import type { OrderStatus } from '../api/types'
 import PositionCard from '../components/PositionCard'
+import PersonalWinRateCard from '../components/PersonalWinRateCard'
 
 const statusStyle: Record<OrderStatus, string> = {
   PENDING: 'bg-amber-500/15 text-amber-400',
   FILLED: 'bg-up/15 text-up',
   REJECTED: 'bg-down/15 text-down',
   FAILED: 'bg-down/15 text-down',
+  CANCELLED: 'bg-white/10 text-slate-400',
 }
+
+type StatusFilter = 'ALL' | OrderStatus
+type SideFilter = 'ALL' | 'BUY' | 'SELL'
 
 export default function OrdersPage() {
   const { t } = useTranslation()
   const { orders, positions, refreshAll } = useLive()
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' | 'info' } | null>(null)
   const toastTimer = useRef<number | undefined>(undefined)
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
+
+  const [statusF, setStatusF] = useState<StatusFilter>('ALL')
+  const [sideF, setSideF] = useState<SideFilter>('ALL')
+  const [symbolF, setSymbolF] = useState('')
 
   const showToast = (msg: string, kind: 'success' | 'error' | 'info' = 'success') => {
     if (toastTimer.current) window.clearTimeout(toastTimer.current)
@@ -34,6 +45,40 @@ export default function OrdersPage() {
         ? 'border-prism-600/40 bg-prism-600/15 text-prism-300'
         : 'border-up/40 bg-up/15 text-up'
 
+  // 持仓汇总：总浮动盈亏 + 持仓数 + 多空拆分 / positions summary: total floating P&L, count, long/short split
+  const posSummary = useMemo(() => {
+    let pnl = 0
+    let buy = 0
+    let sell = 0
+    for (const p of positions) {
+      pnl += p.profit
+      if (p.side === 'BUY') buy += 1
+      else sell += 1
+    }
+    return { pnl, buy, sell, total: positions.length }
+  }, [positions])
+
+  const filteredOrders = useMemo(() => {
+    return orders.filter((o) => {
+      if (statusF !== 'ALL' && o.status !== statusF) return false
+      if (sideF !== 'ALL' && o.side !== sideF) return false
+      if (symbolF.trim() && !o.symbol.toLowerCase().includes(symbolF.trim().toLowerCase())) return false
+      return true
+    })
+  }, [orders, statusF, sideF, symbolF])
+
+  const doCancel = async (id: string) => {
+    setCancellingId(id)
+    try {
+      await orderApi.cancel(id)
+      showToast(t('orders.cancelSent'), 'info')
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'error', 'error')
+    } finally {
+      setCancellingId(null)
+    }
+  }
+
   return (
     <div>
       <div className="mb-6">
@@ -45,9 +90,31 @@ export default function OrdersPage() {
 
       {/* 持仓概览 / positions overview */}
       <div className="glass mb-5 p-5">
-        <h3 className="mb-3 font-display text-lg font-semibold text-slate-100">
-          {t('orders.positions')}
-        </h3>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="font-display text-lg font-semibold text-slate-100">
+            {t('orders.positions')}
+          </h3>
+          {positions.length > 0 && (
+            <div className="flex flex-wrap items-center gap-4 text-xs">
+              <span className="text-slate-400">
+                {t('orders.summary.positions')}{' '}
+                <b className="font-mono text-sm text-slate-100">{posSummary.total}</b>
+              </span>
+              <span className="text-slate-400">
+                {t('common.buy')} <b className="font-mono text-sm text-up">{posSummary.buy}</b>
+                {' '}/{' '}
+                {t('common.sell')} <b className="font-mono text-sm text-down">{posSummary.sell}</b>
+              </span>
+              <span className="text-slate-400">
+                {t('orders.summary.totalPnl')}{' '}
+                <b className={`font-mono text-sm ${posSummary.pnl >= 0 ? 'text-up' : 'text-down'}`}>
+                  {posSummary.pnl >= 0 ? '+' : ''}
+                  {posSummary.pnl.toFixed(2)}
+                </b>
+              </span>
+            </div>
+          )}
+        </div>
         {positions.length === 0 ? (
           <p className="py-4 text-center text-sm text-slate-500">{t('orders.noPositions')}</p>
         ) : (
@@ -59,9 +126,54 @@ export default function OrdersPage() {
         )}
       </div>
 
+      {/* 个人跟单表现 / personal trading performance */}
+      <div className="mb-5">
+        <PersonalWinRateCard variant="detailed" />
+      </div>
+
+      {/* 筛选条 / filter bar */}
+      <div className="glass mb-3 flex flex-wrap items-center gap-3 p-3">
+        <label className="flex items-center gap-2 text-xs">
+          <span className="text-slate-500">{t('orders.filterStatus')}</span>
+          <select
+            value={statusF}
+            onChange={(e) => setStatusF(e.target.value as StatusFilter)}
+            className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-slate-100 outline-none transition focus:border-prism-500"
+          >
+            <option value="ALL">{t('signals.all')}</option>
+            <option value="PENDING">{t('orders.status.PENDING')}</option>
+            <option value="FILLED">{t('orders.status.FILLED')}</option>
+            <option value="REJECTED">{t('orders.status.REJECTED')}</option>
+            <option value="FAILED">{t('orders.status.FAILED')}</option>
+            <option value="CANCELLED">{t('orders.status.CANCELLED')}</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-xs">
+          <span className="text-slate-500">{t('orders.filterSide')}</span>
+          <select
+            value={sideF}
+            onChange={(e) => setSideF(e.target.value as SideFilter)}
+            className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-slate-100 outline-none transition focus:border-prism-500"
+          >
+            <option value="ALL">{t('signals.all')}</option>
+            <option value="BUY">{t('common.buy')}</option>
+            <option value="SELL">{t('common.sell')}</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-xs">
+          <span className="text-slate-500">{t('orders.filterSymbol')}</span>
+          <input
+            value={symbolF}
+            onChange={(e) => setSymbolF(e.target.value)}
+            placeholder={t('orders.symbolPlaceholder')}
+            className="w-28 rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-slate-100 outline-none transition focus:border-prism-500"
+          />
+        </label>
+      </div>
+
       {/* 订单表 / orders table */}
       <div className="glass overflow-hidden">
-        {orders.length === 0 ? (
+        {filteredOrders.length === 0 ? (
           <p className="py-16 text-center text-sm text-slate-500">{t('orders.empty')}</p>
         ) : (
           <>
@@ -80,10 +192,11 @@ export default function OrdersPage() {
                   <th className="px-4 py-3 font-medium">{t('orders.colTicket')}</th>
                   <th className="px-4 py-3 font-medium">{t('orders.colPrice')}</th>
                   <th className="px-4 py-3 font-medium">{t('orders.colMessage')}</th>
+                  <th className="px-4 py-3 font-medium">{t('orders.colAction')}</th>
                 </tr>
               </thead>
               <tbody>
-                {orders.map((o) => (
+                {filteredOrders.map((o) => (
                   <tr
                     key={o.id}
                     className="border-b border-white/5 transition hover:bg-prism-600/10"
@@ -118,6 +231,17 @@ export default function OrdersPage() {
                     <td className="max-w-[200px] truncate px-4 py-3 text-slate-400">
                       {o.message ?? '-'}
                     </td>
+                    <td className="px-4 py-3">
+                      {o.status === 'PENDING' && (
+                        <button
+                          onClick={() => doCancel(o.id)}
+                          disabled={cancellingId === o.id}
+                          className="rounded-lg border border-down/40 bg-down/10 px-2.5 py-1 text-xs font-medium text-down transition hover:bg-down/20 disabled:opacity-50"
+                        >
+                          {t('common.cancel')}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -126,7 +250,7 @@ export default function OrdersPage() {
 
             {/* 移动端卡片列表 / mobile card list */}
             <div className="divide-y divide-white/5 md:hidden">
-              {orders.map((o) => (
+              {filteredOrders.map((o) => (
                 <div key={o.id} className="p-4">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2">
@@ -173,6 +297,16 @@ export default function OrdersPage() {
 
                   {o.message && (
                     <p className="mt-2 break-words text-xs text-slate-500">{o.message}</p>
+                  )}
+
+                  {o.status === 'PENDING' && (
+                    <button
+                      onClick={() => doCancel(o.id)}
+                      disabled={cancellingId === o.id}
+                      className="mt-3 w-full rounded-lg border border-down/40 bg-down/10 py-1.5 text-xs font-medium text-down transition hover:bg-down/20 disabled:opacity-50"
+                    >
+                      {t('common.cancel')}
+                    </button>
                   )}
                 </div>
               ))}

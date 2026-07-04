@@ -15,6 +15,7 @@ from app.engine.signal_engine import signal_expiry_loop, signal_loop
 from app.routers import account, auth, bridge, ea, notifications, orders, signals, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.orders import stale_order_monitor_loop
+from app.services.signal_resolution import stale_signal_sweep_loop
 
 
 @asynccontextmanager
@@ -32,6 +33,9 @@ async def lifespan(app: FastAPI):
     # 信号过期广播：独立于模拟引擎，webhook 信号也依赖它 / expiry broadcast,
     # independent of the mock engine; webhook signals rely on it too
     expiry_sweep = asyncio.create_task(signal_expiry_loop())
+    # 信号胜负判定的保险丝：清扫长期无行情更新的 PENDING 信号 / win-rate safety
+    # net: sweep PENDING signals stuck without any price update
+    stale_signal_sweep = asyncio.create_task(stale_signal_sweep_loop())
     yield
     # 关闭：停止后台任务 / shutdown: stop background tasks
     if task is not None:
@@ -39,6 +43,7 @@ async def lifespan(app: FastAPI):
     monitor.cancel()
     stale_sweep.cancel()
     expiry_sweep.cancel()
+    stale_signal_sweep.cancel()
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
