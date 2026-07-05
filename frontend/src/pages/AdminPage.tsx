@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../api/client'
 import { fmtTime } from '../api/utils'
+import Select from '../components/Select'
 import type { AdminBrokerSettings, AdminMetrics, AdminUser, UserPlan, UserRole } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PLUS', 'PRO']
@@ -259,12 +260,11 @@ export default function AdminPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <select className="input w-auto" value={planFilter} onChange={(e) => setPlanFilter(e.target.value)}>
-          <option value="">{t('signals.all')}</option>
-          {PLAN_OPTIONS.map((p) => (
-            <option key={p} value={p}>{p}</option>
-          ))}
-        </select>
+        <Select
+          value={planFilter}
+          onChange={setPlanFilter}
+          options={[{ value: '', label: t('signals.all') }, ...PLAN_OPTIONS.map((p) => ({ value: p, label: p }))]}
+        />
         <button type="submit" className="btn-primary px-5 py-2 text-sm">{t('admin.search')}</button>
         <span className="ml-auto text-xs text-slate-500">{t('admin.totalCount', { n: total })}</span>
       </form>
@@ -302,26 +302,18 @@ export default function AdminPage() {
                       <div className="mt-1 text-[11px] text-slate-500">{fmtTime(u.createdAt)}</div>
                     </td>
                     <td className="px-4 py-3">
-                      <select
-                        className="input w-auto py-1 text-xs"
+                      <Select
                         value={d.role}
-                        onChange={(e) => updateDraft(u.id, { role: e.target.value as UserRole })}
-                      >
-                        {ROLE_OPTIONS.map((r) => (
-                          <option key={r} value={r}>{r}</option>
-                        ))}
-                      </select>
+                        onChange={(v) => updateDraft(u.id, { role: v as UserRole })}
+                        options={ROLE_OPTIONS.map((r) => ({ value: r, label: r }))}
+                      />
                     </td>
                     <td className="px-4 py-3">
-                      <select
-                        className="input w-auto py-1 text-xs"
+                      <Select
                         value={d.plan}
-                        onChange={(e) => updateDraft(u.id, { plan: e.target.value as UserPlan })}
-                      >
-                        {PLAN_OPTIONS.map((p) => (
-                          <option key={p} value={p}>{p}</option>
-                        ))}
-                      </select>
+                        onChange={(v) => updateDraft(u.id, { plan: v as UserPlan })}
+                        options={PLAN_OPTIONS.map((p) => ({ value: p, label: p }))}
+                      />
                     </td>
                     <td className="px-4 py-3">
                       <input
