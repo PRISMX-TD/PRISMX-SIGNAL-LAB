@@ -342,8 +342,9 @@
     "title": "Charts",
     "subtitle": "Live candlestick view; symbol follows your positions and signals",
     "symbol": "Symbol",
-    "tvLocale": "en",
-    "disclaimer": "Chart data is provided by TradingView. The quote source may differ slightly from your broker and is for reference only."
+    "disclaimer": "Chart data comes from the platform's own feed and is for reference only; it may differ slightly from your broker's quotes.",
+    "empty": "Chart data is loading or temporarily unavailable…",
+    "stale": "Data delayed"
   },
   "winrate": {
     "strategyTitle": "Signal Win Rate",

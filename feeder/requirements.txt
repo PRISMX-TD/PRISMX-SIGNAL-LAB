@@ -1,0 +1,3 @@
+# PRISMX 图表喂价器依赖 / Chart feeder dependencies (Windows only)
+MetaTrader5>=5.0.45
+requests>=2.31.0

@@ -73,6 +73,15 @@ class Settings(BaseSettings):
     # In production a strong random value is mandatory; empty rejects all webhooks.
     WEBHOOK_SECRET: str = ""
 
+    # 图表喂价器鉴权：独立的 Windows 喂价程序（feeder/chart_feeder.py）用
+    # X-Feed-Token 头写入 K 线数据。留空则拒绝所有喂价写入（图表将没有数据，
+    # 不影响交易主链路），因此不像 JWT_SECRET/WEBHOOK_SECRET 那样强制校验。
+    # Chart feeder auth: the standalone Windows feeder program writes candles
+    # via the X-Feed-Token header. Empty rejects all feed writes (charts show
+    # no data, but the trading path is unaffected), so — unlike JWT_SECRET/
+    # WEBHOOK_SECRET — this is not enforced as mandatory in production.
+    FEED_TOKEN: str = ""
+
     # 风控 / Risk control
     MAX_VOLUME_PER_ORDER: float = 10.0  # 单笔最大手数 / max lots per order
     MIN_VOLUME_PER_ORDER: float = 0.01  # 单笔最小手数 / min lots per order

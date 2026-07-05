@@ -5,9 +5,9 @@ import { PrefsProvider } from './store/prefs'
 import Layout from './components/Layout'
 import PwaBackGuard from './components/PwaBackGuard'
 
-// 路由级代码分割：首屏只加载当前页面的代码，其余按需加载（如 TradingView 图表页）。
+// 路由级代码分割：首屏只加载当前页面的代码，其余按需加载（如图表页）。
 // Route-level code splitting: only the current page's code loads up front;
-// heavy pages (e.g. the TradingView charts) load on demand.
+// heavy pages (e.g. the charts page) load on demand.
 const LandingPage = lazy(() => import('./pages/LandingPage'))
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const SignalsPage = lazy(() => import('./pages/SignalsPage'))

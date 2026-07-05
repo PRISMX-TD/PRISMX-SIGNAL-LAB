@@ -1,18 +1,30 @@
-// 实时行情图表页：嵌入 TradingView 高级图表 Widget。
-// Live charts page: embeds the TradingView Advanced Chart widget.
+// 实时行情图表页：自建 Lightweight Charts + 自建中央 MT5 喂价源。
+// Live charts page: self-hosted Lightweight Charts + a self-hosted central MT5 feed.
 //
-// 数据由用户浏览器直连 TradingView，不经过后端 / VPS，因此无论多少用户都
-// 不会给后端带来额外负载。品种为固定预设列表（贵金属/能源/加密/热门货币对）。
-// Candle data is fetched by the browser directly from TradingView (never via
-// our backend/VPS), so it adds no server load regardless of user count. The
-// symbol list is a fixed preset (metals/energy/crypto/popular FX pairs).
+// 历史 K 线由后端 /api/chart/history 返回（一次性快照，切品种/周期时拉取），
+// 实时更新由 /api/chart/latest 轮询获得。两者都来自我们自己的域名，因此在
+// 任何网络环境（含中国大陆）都可访问——不再依赖 TradingView 的脚本与行情
+// 数据通道。详见项目根目录 CHART_SELFHOST_PLAN.md。
+//
+// History candles come from the backend's /api/chart/history (a one-shot
+// snapshot fetched on symbol/interval change); live updates are polled from
+// /api/chart/latest. Both are served from our own domain, so the page works
+// in any network environment (including mainland China) — it no longer
+// depends on TradingView's script or data channel. See CHART_SELFHOST_PLAN.md
+// at the repo root.
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { mt5ToTradingView } from '../api/utils'
+import { createChart, ColorType, type IChartApi, type ISeriesApi, type UTCTimestamp } from 'lightweight-charts'
+import { chartApi } from '../api/client'
+import type { Candle } from '../api/types'
 import { usePrefs } from '../store/prefs'
 
 // 固定品种预设：贵金属 / 能源 / 加密 / 热门货币对。
-// Fixed symbol presets: metals / energy / crypto / popular FX pairs.
+// 须与 feeder/chart_feeder.py 的 BASE_SYMBOLS、backend/app/routers/chart.py
+// 的 ALLOWED_INTERVALS 保持一致（见 CHART_SELFHOST_PLAN.md §2）。
+// Fixed symbol presets: metals / energy / crypto / popular FX pairs. Must
+// match feeder/chart_feeder.py's BASE_SYMBOLS and the interval codes allowed
+// by backend/app/routers/chart.py (see CHART_SELFHOST_PLAN.md §2).
 const PRESET_SYMBOLS = [
   'XAUUSD',
   'XAGUSD',
@@ -41,10 +53,25 @@ const INTERVALS: { code: string; label: string }[] = [
 const INTERVAL_KEY = 'prismx.charts.interval'
 const SYMBOL_KEY = 'prismx.charts.symbol'
 
+// 最新价轮询间隔（毫秒）/ latest-price poll interval (ms)
+const POLL_MS = 2000
+// 超过这么久没收到喂价更新，视为数据延迟 / no feed update for this long => stale
+const STALE_MS = 30_000
+
+// 涨跌配色（与 signalView 的 FOCUS_DOT 一致）/ up/down colors (match signalView's FOCUS_DOT)
+const UP_COLOR = '#2ee07e'
+const DOWN_COLOR = '#ff4d67'
+
+function toLwPoint(b: Candle) {
+  return { time: b.t as UTCTimestamp, open: b.o, high: b.h, low: b.l, close: b.c }
+}
+
 export default function ChartsPage() {
   const { t } = useTranslation()
   const { getPref, setPref, loaded } = usePrefs()
   const containerRef = useRef<HTMLDivElement>(null)
+  const chartRef = useRef<IChartApi | null>(null)
+  const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
 
   const [symbol, setSymbol] = useState<string>(
     () => {
@@ -59,6 +86,10 @@ export default function ChartsPage() {
   const [interval, setIntervalCode] = useState<string>(
     () => getPref<string>('charts', 'interval', '') || localStorage.getItem(INTERVAL_KEY) || '15'
   )
+  // 数据状态：加载中 / 有数据 / 空（该品种周期暂无数据）/延迟
+  // data status: loading / has data / empty (no data for this symbol+interval) / stale
+  const [hasData, setHasData] = useState(false)
+  const [stale, setStale] = useState(false)
 
   // 云端偏好加载完成后覆盖本地初始值 / override initial values when cloud prefs arrive
   useEffect(() => {
@@ -78,51 +109,116 @@ export default function ChartsPage() {
     setPref('charts', 'interval', interval)
   }, [interval, setPref])
 
-  const tvSymbol = mt5ToTradingView(symbol)
-
-  // 每次品种 / 周期变化时重建 widget。TradingView 脚本以子节点形式注入，
-  // 销毁时清空容器即可。Rebuild the widget on symbol/interval change.
+  // 建图（只建一次），容器尺寸变化时自适配 / build the chart once; auto-sizes with the container
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    el.innerHTML = ''
 
-    const widget = document.createElement('div')
-    widget.className = 'tradingview-widget-container__widget h-full w-full'
-    el.appendChild(widget)
-
-    const script = document.createElement('script')
-    script.src =
-      'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js'
-    script.type = 'text/javascript'
-    script.async = true
-    script.innerHTML = JSON.stringify({
-      symbol: tvSymbol,
-      interval,
-      autosize: true,
-      timezone: 'Asia/Kuala_Lumpur',
-      theme: 'dark',
-      style: '1',
-      locale: t('charts.tvLocale'),
-      // 黑紫主题配色 / black & purple theme styling
-      backgroundColor: 'rgba(10, 7, 16, 1)',
-      gridColor: 'rgba(139, 70, 255, 0.08)',
-      hide_top_toolbar: false,
-      hide_legend: false,
-      // 不默认加载任何指标（含成交量）/ don't load any default study (incl. volume)
-      hide_volume: true,
-      studies: [],
-      allow_symbol_change: false,
-      save_image: false,
-      withdateranges: true,
-      support_host: 'https://www.tradingview.com',
+    const chart = createChart(el, {
+      layout: {
+        background: { type: ColorType.Solid, color: 'rgba(10, 7, 16, 1)' },
+        textColor: '#94a3b8',
+      },
+      grid: {
+        vertLines: { color: 'rgba(139, 70, 255, 0.08)' },
+        horzLines: { color: 'rgba(139, 70, 255, 0.08)' },
+      },
+      rightPriceScale: { borderColor: 'rgba(139, 70, 255, 0.15)' },
+      timeScale: {
+        borderColor: 'rgba(139, 70, 255, 0.15)',
+        timeVisible: true,
+        secondsVisible: false,
+        // 固定按马来西亚时区展示，与旧 TradingView widget 的观感保持一致
+        // (喂价器已把时间戳归一化到真 UTC，见 CHART_SELFHOST_PLAN.md §3.1.1)
+        // Fixed to Malaysia time, matching the old TradingView widget's look
+        // (the feeder normalizes timestamps to true UTC — see plan §3.1.1)
+        tickMarkFormatter: (time: UTCTimestamp) =>
+          new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Asia/Kuala_Lumpur',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+          }).format(new Date(time * 1000)),
+      },
+      crosshair: { mode: 0 },
+      width: el.clientWidth,
+      height: el.clientHeight,
     })
-    el.appendChild(script)
+    const series = chart.addCandlestickSeries({
+      upColor: UP_COLOR,
+      downColor: DOWN_COLOR,
+      wickUpColor: UP_COLOR,
+      wickDownColor: DOWN_COLOR,
+      borderVisible: false,
+    })
+    chartRef.current = chart
+    seriesRef.current = series
+
+    // 自适配容器尺寸：手动管理而不是用 lightweight-charts 的 autoSize 选项，
+    // 在部分渲染环境下其内部 ResizeObserver 不会触发重绘（canvas 位图分辨率
+    // 卡在浏览器默认的 300x150），显式 resize() 更可靠。
+    // Track the container size ourselves instead of the library's autoSize
+    // option — in some rendering environments its internal ResizeObserver
+    // never repaints (the canvas bitmap resolution stays stuck at the
+    // browser's default 300x150); an explicit resize() call is more reliable.
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      const { width, height } = entry.contentRect
+      // forceRepaint=true：跳过内部按 requestAnimationFrame 批处理的重绘排期，
+      // 立即同步重绘，resize 时不会有一帧尺寸不对的闪烁。
+      // forceRepaint=true: skips the internal requestAnimationFrame-batched
+      // redraw scheduling and repaints immediately/synchronously, avoiding a
+      // one-frame flash of the wrong size on resize.
+      if (width > 0 && height > 0) chart.resize(width, height, true)
+    })
+    ro.observe(el)
 
     return () => {
-      el.innerHTML = ''
+      ro.disconnect()
+      chart.remove()
+      chartRef.current = null
+      seriesRef.current = null
     }
-  }, [tvSymbol, interval, t])
+  }, [])
+
+  // 切品种/周期：拉历史快照 + 起轮询最新价 / on symbol or interval change: fetch history + poll latest
+  useEffect(() => {
+    const series = seriesRef.current
+    if (!series) return
+    let alive = true
+    setHasData(false)
+    setStale(false)
+
+    chartApi.history(symbol, interval).then((r) => {
+      if (!alive) return
+      if (r.bars.length > 0) {
+        series.setData(r.bars.map(toLwPoint))
+        chartRef.current?.timeScale().fitContent()
+        setHasData(true)
+      } else {
+        setHasData(false)
+      }
+    }).catch(() => {
+      if (alive) setHasData(false)
+    })
+
+    const timer = window.setInterval(() => {
+      chartApi.latest(symbol, interval).then((r) => {
+        if (!alive) return
+        for (const b of r.bars) series.update(toLwPoint(b))
+        if (r.bars.length > 0) setHasData(true)
+        const fresh = r.updatedAt != null && Date.now() / 1000 - r.updatedAt < STALE_MS / 1000
+        setStale(r.updatedAt != null && !fresh)
+      }).catch(() => {})
+    }, POLL_MS)
+
+    return () => {
+      alive = false
+      window.clearInterval(timer)
+    }
+  }, [symbol, interval])
 
   return (
     <div className="flex flex-col">
@@ -167,15 +263,23 @@ export default function ChartsPage() {
             </button>
           ))}
         </div>
+
+        {stale && (
+          <span className="rounded-md bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-400">
+            {t('charts.stale')}
+          </span>
+        )}
       </div>
 
       {/* 图表容器：跟随视口高度自适应，移动端给底部 Tab 栏留空间 */}
       {/* Chart container: viewport-relative height, leaves room for the mobile tab bar */}
       <div className="glass relative overflow-hidden p-1.5 h-[70vh] min-h-[420px] sm:h-[calc(100vh-15rem)]">
-        <div
-          ref={containerRef}
-          className="tradingview-widget-container h-full w-full"
-        />
+        <div ref={containerRef} className="h-full w-full" />
+        {!hasData && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-500">
+            {t('charts.empty')}
+          </div>
+        )}
       </div>
 
       <p className="mt-3 text-center text-[11px] text-slate-600">

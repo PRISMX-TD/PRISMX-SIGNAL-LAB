@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.core.database import init_db
 from app.core.rate_limit import limiter
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
-from app.routers import account, admin, auth, automation, bridge, ea, notifications, orders, signals, trends, webhook, ws
+from app.routers import account, admin, auth, automation, bridge, chart, ea, notifications, orders, signals, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.orders import stale_order_monitor_loop
 from app.services.signal_resolution import stale_signal_sweep_loop
@@ -72,6 +72,7 @@ app.include_router(trends.router, prefix=settings.API_PREFIX)
 app.include_router(orders.router, prefix=settings.API_PREFIX)
 app.include_router(ea.router, prefix=settings.API_PREFIX)
 app.include_router(bridge.router, prefix=settings.API_PREFIX)
+app.include_router(chart.router, prefix=settings.API_PREFIX)
 app.include_router(webhook.router, prefix=settings.API_PREFIX)
 app.include_router(account.router, prefix=settings.API_PREFIX)
 app.include_router(notifications.router, prefix=settings.API_PREFIX)

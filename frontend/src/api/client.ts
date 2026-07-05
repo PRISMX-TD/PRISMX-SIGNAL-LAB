@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, AdminUser, AdminMetrics, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, AdminUser, AdminMetrics, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle } from './types'
 
 const TOKEN_KEY = 'prismx_token'
 
@@ -93,6 +93,19 @@ export const signalApi = {
 // 多周期趋势 / Multi-timeframe trends
 export const trendApi = {
   list: () => request<{ trends: Trend[] }>('/trends'),
+}
+
+// 行情 K 线（自建中央 MT5 喂价源，取代 TradingView Widget）
+// Chart candles from the self-hosted central MT5 feed (replaces the TradingView widget)
+export const chartApi = {
+  history: (symbol: string, interval: string, limit = 500) =>
+    request<{ symbol: string; interval: string; bars: Candle[] }>(
+      `/chart/history?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${limit}`
+    ),
+  latest: (symbol: string, interval: string) =>
+    request<{ bars: Candle[]; updatedAt: number | null }>(
+      `/chart/latest?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`
+    ),
 }
 
 // 下单 / Orders

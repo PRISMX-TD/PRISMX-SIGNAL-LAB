@@ -147,6 +147,16 @@ export interface Quote {
   time?: string
 }
 
+// 一根 K 线（自建中央 MT5 喂价源）：t=epoch 秒(UTC)，o/h/l/c=开高低收
+// One candle (self-hosted central MT5 feed): t=epoch seconds (UTC), o/h/l/c=OHLC
+export interface Candle {
+  t: number
+  o: number
+  h: number
+  l: number
+  c: number
+}
+
 // 单周期趋势方向：多 / 空 / 震荡(或无数据) / per-timeframe trend direction
 export type TrendDir = 'UP' | 'DOWN' | 'FLAT'
 

@@ -93,36 +93,6 @@ export function suggestVolumeByRisk(
   return Math.max(0.01, Math.min(10, Math.floor(raw * 100) / 100))
 }
 
-// MT5 基础品种 -> TradingView 符号（带交易所前缀）。
-// TradingView 需要 "EXCHANGE:SYMBOL" 形式，且报价源与用户经纪商不同，仅供看走势。
-// 未在表内的品种回退为裸符号，由 TradingView 自行解析。
-// Map an MT5 base symbol to a TradingView "EXCHANGE:SYMBOL". The quote source
-// differs from the user's broker, so it's for trend viewing only. Unknown
-// symbols fall back to the bare symbol for TradingView to resolve.
-const TV_SYMBOL_MAP: Record<string, string> = {
-  EURUSD: 'FX:EURUSD',
-  GBPUSD: 'FX:GBPUSD',
-  AUDUSD: 'FX:AUDUSD',
-  NZDUSD: 'FX:NZDUSD',
-  USDCHF: 'FX:USDCHF',
-  USDCAD: 'FX:USDCAD',
-  USDJPY: 'FX:USDJPY',
-  EURGBP: 'FX:EURGBP',
-  EURJPY: 'FX:EURJPY',
-  GBPJPY: 'FX:GBPJPY',
-  XAUUSD: 'OANDA:XAUUSD',
-  XAGUSD: 'OANDA:XAGUSD',
-  USOIL: 'TVC:USOIL',
-  WTICOUSD: 'TVC:USOIL',
-  XTIUSD: 'TVC:USOIL',
-  BTCUSD: 'BITSTAMP:BTCUSD',
-  ETHUSD: 'BITSTAMP:ETHUSD',
-}
-
-export function mt5ToTradingView(symbol: string): string {
-  return TV_SYMBOL_MAP[baseSymbol(symbol)] || baseSymbol(symbol)
-}
-
 // 价差换算为点数；未知品种返回 null / price distance to pips; null if unknown symbol
 export function toPips(symbol: string, priceDiff: number): number | null {
   const size = PIP_SIZE[baseSymbol(symbol)]
