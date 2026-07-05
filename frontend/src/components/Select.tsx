@@ -17,11 +17,16 @@ export default function Select({
   options,
   onChange,
   className = '',
+  openUpward = false,
 }: {
   value: string
   options: SelectOption[]
   onChange: (value: string) => void
   className?: string
+  // 菜单是否向上弹出（用于紧贴在其他内容上方的触发器，避免向下弹出时盖住下方内容）
+  // Open the menu upward (for triggers sitting right above other content, so
+  // it doesn't cover what's below when it opens downward instead)
+  openUpward?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -47,7 +52,7 @@ export default function Select({
       {open && (
         <>
           <div className="select-backdrop" onClick={() => setOpen(false)} />
-          <div className="select-menu">
+          <div className={`select-menu ${openUpward ? 'up' : ''}`}>
             {options.map((o) => (
               <button
                 type="button"

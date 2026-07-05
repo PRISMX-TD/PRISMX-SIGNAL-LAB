@@ -62,6 +62,12 @@ export default function AdminPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkRole, setBulkRole] = useState('')
   const [bulkPlan, setBulkPlan] = useState('')
+  // 到期时间需要单独一个"是否要改"开关：日期本身留空是合法值（永不到期），
+  // 不能用空字符串同时表示"不改"和"清除到期时间" / expiry needs its own
+  // on/off switch — an empty date is a valid value (never expires), so an
+  // empty string can't double as both "leave unchanged" and "clear it"
+  const [bulkSetExpiry, setBulkSetExpiry] = useState(false)
+  const [bulkExpiry, setBulkExpiry] = useState('')
   const [bulkSaving, setBulkSaving] = useState(false)
   const headerCheckboxRef = useRef<HTMLInputElement>(null)
 
@@ -152,17 +158,20 @@ export default function AdminPage() {
   }
 
   const applyBulk = async () => {
-    if (!bulkRole && !bulkPlan) return
+    if (!bulkRole && !bulkPlan && !bulkSetExpiry) return
     setBulkSaving(true)
     try {
-      const payload: Partial<{ role: UserRole; plan: UserPlan }> = {}
+      const payload: Partial<{ role: UserRole; plan: UserPlan; planExpiresAt: string | null }> = {}
       if (bulkRole) payload.role = bulkRole as UserRole
       if (bulkPlan) payload.plan = bulkPlan as UserPlan
+      if (bulkSetExpiry) payload.planExpiresAt = bulkExpiry ? new Date(`${bulkExpiry}T00:00:00Z`).toISOString() : null
       const res = await adminApi.bulkUpdateUsers(Array.from(selectedIds), payload)
       showToast('ok', t('admin.bulkSaved', { n: res.updated }))
       setSelectedIds(new Set())
       setBulkRole('')
       setBulkPlan('')
+      setBulkSetExpiry(false)
+      setBulkExpiry('')
       load()
     } catch (err) {
       showToast('err', err instanceof Error ? err.message : t('admin.saveError'))
@@ -333,17 +342,36 @@ export default function AdminPage() {
           <Select
             value={bulkRole}
             onChange={setBulkRole}
+            openUpward
             options={[{ value: '', label: t('admin.bulkNoChange') }, ...ROLE_OPTIONS.map((r) => ({ value: r, label: r }))]}
           />
           <span className="text-xs text-slate-500">{t('admin.colPlan')}</span>
           <Select
             value={bulkPlan}
             onChange={setBulkPlan}
+            openUpward
             options={[{ value: '', label: t('admin.bulkNoChange') }, ...PLAN_OPTIONS.map((p) => ({ value: p, label: p }))]}
           />
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-500">
+            <input
+              type="checkbox"
+              checked={bulkSetExpiry}
+              onChange={(e) => setBulkSetExpiry(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-white/20 bg-white/5 accent-prism-500"
+            />
+            {t('admin.colExpiresAt')}
+          </label>
+          {bulkSetExpiry && (
+            <input
+              type="date"
+              className="input w-auto py-1 text-xs"
+              value={bulkExpiry}
+              onChange={(e) => setBulkExpiry(e.target.value)}
+            />
+          )}
           <button
             className="btn-primary px-4 py-1.5 text-xs disabled:opacity-40"
-            disabled={(!bulkRole && !bulkPlan) || bulkSaving}
+            disabled={(!bulkRole && !bulkPlan && !bulkSetExpiry) || bulkSaving}
             onClick={applyBulk}
           >
             {bulkSaving ? t('common.loading') : t('admin.bulkApply')}
