@@ -27,13 +27,14 @@ def _user_out(user: User) -> UserOut:
 @limiter.limit(settings.RATE_LIMIT_REGISTER)
 def register(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
     """注册新用户 / Register a new user."""
-    existing = db.query(User).filter(User.email == req.email).first()
+    email = req.email.lower()
+    existing = db.query(User).filter(User.email == email).first()
     if existing:
         # 统一非区分性错误，避免邮箱枚举 / generic error to avoid email enumeration
         raise HTTPException(status_code=400, detail="无法完成注册 / Unable to register")
 
     user = User(
-        email=req.email,
+        email=email,
         password_hash=hash_password(req.password),
         # 只存哈希；用户首次连接 MT5 时在绑定页生成可见 token / store the hash
         # only; the user generates a visible token on the Bind page
@@ -82,7 +83,8 @@ def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends
 @limiter.limit(settings.RATE_LIMIT_LOGIN)
 def login(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
     """用户登录 / User login."""
-    user = db.query(User).filter(User.email == req.email).first()
+    email = req.email.lower()
+    user = db.query(User).filter(User.email == email).first()
     if not user or not verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=401, detail="邮箱或密码错误 / Invalid email or password")
 
