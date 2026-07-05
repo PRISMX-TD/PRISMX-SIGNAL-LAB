@@ -19,27 +19,28 @@ import { chartApi } from '../api/client'
 import type { Candle } from '../api/types'
 import { usePrefs } from '../store/prefs'
 
-// 固定品种预设：贵金属 / 能源 / 加密 / 热门货币对。
-// 须与 feeder/chart_feeder.py 的 BASE_SYMBOLS、backend/app/routers/chart.py
-// 的 ALLOWED_INTERVALS 保持一致（见 CHART_SELFHOST_PLAN.md §2）。
-// Fixed symbol presets: metals / energy / crypto / popular FX pairs. Must
-// match feeder/chart_feeder.py's BASE_SYMBOLS and the interval codes allowed
-// by backend/app/routers/chart.py (see CHART_SELFHOST_PLAN.md §2).
-const PRESET_SYMBOLS = [
-  'XAUUSD',
-  'XAGUSD',
-  'USOIL',
-  'BTCUSD',
-  'EURUSD',
-  'GBPUSD',
-  'USDJPY',
-  'AUDUSD',
-  'USDCAD',
-  'USDCHF',
-  'NZDUSD',
-  'EURJPY',
-  'GBPJPY',
-]
+// 固定品种预设：贵金属 / 能源 / 热门货币对。
+// 须与 feeder/chart_feeder.py 的 BASE_SYMBOLS 保持一致（该文件仍会拉取更多品种，
+// 多拉的不会在这里展示，无需为了收窄这个列表而重新打包喂价器）。
+// Fixed symbol presets: metals / energy / popular FX pairs. Must stay a
+// subset of feeder/chart_feeder.py's BASE_SYMBOLS (the feeder can keep
+// fetching more than this list shows; no need to rebuild it just to narrow
+// this selector).
+const PRESET_SYMBOLS = ['XAUUSD', 'XAGUSD', 'USOIL', 'EURUSD', 'GBPUSD', 'USDJPY']
+
+// 图表价格轴的小数位数：贵金属/原油 2~3 位，外汇对按经纪商常见的 5 位报价
+// （日元对 3 位）。未在表中的品种回退到 2 位。
+// Decimal precision for the price scale: metals/oil use 2~3 digits, FX pairs
+// use the broker-standard 5-digit quoting (JPY pairs use 3). Unlisted
+// symbols fall back to 2 digits.
+const SYMBOL_DECIMALS: Record<string, number> = {
+  XAUUSD: 2,
+  XAGUSD: 3,
+  USOIL: 2,
+  EURUSD: 5,
+  GBPUSD: 5,
+  USDJPY: 3,
+}
 const INTERVALS: { code: string; label: string }[] = [
   { code: '1', label: '1m' },
   { code: '5', label: '5m' },
@@ -118,6 +119,12 @@ export default function ChartsPage() {
       layout: {
         background: { type: ColorType.Solid, color: 'rgba(10, 7, 16, 1)' },
         textColor: '#94a3b8',
+        // 关闭库自带的 TradingView 署名 logo；Apache-2.0 许可要求的署名改用
+        // 下方免责声明旁边的文字链接满足（见 charts.disclaimer 附近的 <a>）。
+        // Disable the library's built-in TradingView attribution logo; the
+        // Apache-2.0 license's attribution requirement is satisfied instead
+        // via the text link next to the disclaimer below.
+        attributionLogo: false,
       },
       grid: {
         vertLines: { color: 'rgba(139, 70, 255, 0.08)' },
@@ -190,6 +197,15 @@ export default function ChartsPage() {
     let alive = true
     setHasData(false)
     setStale(false)
+
+    // 按品种设置价格轴小数位数，否则默认按 2 位显示，外汇对（如 EURUSD）
+    // 会把 1.08543 截断成 1.09 这种不可用的精度。
+    // Set the price-scale precision per symbol; otherwise it defaults to 2
+    // digits, truncating FX pairs (e.g. EURUSD) to an unusable 1.08543 -> 1.09.
+    const decimals = SYMBOL_DECIMALS[symbol] ?? 2
+    series.applyOptions({
+      priceFormat: { type: 'price', precision: decimals, minMove: Math.pow(10, -decimals) },
+    })
 
     chartApi.history(symbol, interval).then((r) => {
       if (!alive) return
@@ -283,7 +299,15 @@ export default function ChartsPage() {
       </div>
 
       <p className="mt-3 text-center text-[11px] text-slate-600">
-        {t('charts.disclaimer')}
+        {t('charts.disclaimer')}{' '}
+        <a
+          href="https://www.tradingview.com/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline decoration-dotted hover:text-slate-400"
+        >
+          Charting library by TradingView
+        </a>
       </p>
     </div>
   )
