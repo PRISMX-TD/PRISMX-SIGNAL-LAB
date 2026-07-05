@@ -23,7 +23,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
 
   // 已登录直接重定向；渲染期间调用 navigate 是反模式 / declarative redirect
-  if (isAuthed) return <Navigate to="/app" replace />
+  if (isAuthed) return <Navigate to="/dashboard" replace />
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -32,7 +32,7 @@ export default function LoginPage() {
     try {
       if (mode === 'login') await login(email, password)
       else await register(email, password)
-      navigate('/app', { replace: true })
+      navigate('/dashboard', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : t('auth.errorFailed'))
     } finally {
@@ -45,7 +45,7 @@ export default function LoginPage() {
     setLoading(true)
     try {
       await loginWithGoogle(credential)
-      navigate('/app', { replace: true })
+      navigate('/dashboard', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : t('auth.googleError'))
     } finally {

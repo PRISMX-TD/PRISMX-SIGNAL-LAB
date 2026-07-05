@@ -184,7 +184,7 @@
     "viewTable": "表格",
     "viewFocus": "聚焦",
     "focus": {
-      "heading": "多周期趋势立场",
+      "heading": "多周期趋势",
       "watch": "观望",
       "long": "做多",
       "short": "做空",
@@ -201,7 +201,7 @@
       "waiting": "正在等待信号",
       "marketSentiment": "全市场情绪",
       "tfDistribution": "多周期分布",
-      "communitySentiment": "社区情绪",
+      "communitySentiment": "市场情绪",
       "noData": "暂无数据",
       "watching": "观望",
       "symbolsTotal": "共 {{n}} 个品种",
