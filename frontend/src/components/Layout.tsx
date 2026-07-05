@@ -16,7 +16,7 @@ function NavItem({ to, label }: { to: string; label: string }) {
       to={to}
       end={to === '/app'}
       className={({ isActive }) =>
-        `relative rounded-lg px-3 py-2 text-sm font-medium transition ${
+        `relative whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition ${
           isActive ? 'text-prism-200' : 'text-slate-400 hover:text-slate-100'
         }`
       }
@@ -209,7 +209,7 @@ export default function Layout() {
               </div>
             </div>
 
-            <nav className="hidden items-center gap-1 sm:flex">
+            <nav className="hidden flex-1 items-center justify-center gap-1 sm:flex lg:gap-2">
               <NavItem to="/dashboard" label={t('nav.dashboard')} />
               <NavItem to="/app" label={t('nav.signals')} />
               <NavItem to="/charts" label={t('nav.charts')} />
