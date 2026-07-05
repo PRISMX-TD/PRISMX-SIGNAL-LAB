@@ -140,6 +140,7 @@
     "tagline": "Indicator-driven signals · One click to MT5",
     "errorFailed": "Failed. Please check email and password",
     "or": "or",
+    "googleContinue": "Continue with Google",
     "googleError": "Google sign-in failed. Please try again"
   },
   "signals": {

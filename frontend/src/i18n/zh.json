@@ -140,6 +140,7 @@
     "tagline": "技术指标驱动的交易信号 · 一键直达 MT5",
     "errorFailed": "操作失败，请检查邮箱与密码",
     "or": "或",
+    "googleContinue": "使用 Google 账户继续",
     "googleError": "Google 登录失败，请重试"
   },
   "signals": {
