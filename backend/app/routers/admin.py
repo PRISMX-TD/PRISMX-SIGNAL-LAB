@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import AdminAuditLog, MT5Account, User
-from app.schemas import AdminBrokerSettings, AdminMetricsOut, AdminUserOut, AdminUserUpdate
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminMetricsOut, AdminUserOut, AdminUserUpdate
 from app.services.deps import require_admin
 from app.services.settings_store import get_broker_settings, invalidate_settings_cache, set_setting
 
@@ -102,6 +102,49 @@ def _log_change(db: Session, admin_id: str, target_id: str, field: str, old_valu
             new_value=new_s,
         )
     )
+
+
+@router.patch("/users/bulk", response_model=dict)
+def bulk_update_users(
+    body: AdminBulkUserUpdate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """批量调整多个用户的角色/等级/到期时间/备注，逻辑与单个用户的 PATCH 完全一致，
+    只是对一批目标各跑一遍；每个用户每个实际变化的字段仍各写一条审计日志——
+    批量操作不会因为"批量"而降低可追责性。
+
+    注册路由时必须排在 PATCH /users/{{user_id}} 之前：否则 "bulk" 会被当成
+    user_id 匹配到那条参数化路由上。
+
+    Bulk-adjust role/plan/expiry/note for multiple users at once — same logic
+    as the single-user PATCH, just run per target; every field that actually
+    changes on every user still gets its own audit row. A bulk operation
+    doesn't get less traceable just for being bulk.
+
+    Must be registered before PATCH /users/{{user_id}} — otherwise "bulk"
+    would be captured as a user_id by that parameterized route.
+    """
+    fields = body.model_dump(exclude_unset=True, exclude={"userIds"})
+    if not fields:
+        raise HTTPException(status_code=400, detail="没有要修改的字段 / No fields to update")
+
+    targets = db.query(User).filter(User.id.in_(body.userIds)).all()
+    for target in targets:
+        if "role" in fields and fields["role"] is not None:
+            _log_change(db, admin.id, target.id, "role", target.role, fields["role"])
+            target.role = fields["role"]
+        if "plan" in fields and fields["plan"] is not None:
+            _log_change(db, admin.id, target.id, "plan", target.plan, fields["plan"])
+            target.plan = fields["plan"]
+        if "planExpiresAt" in fields:
+            _log_change(db, admin.id, target.id, "plan_expires_at", target.plan_expires_at, fields["planExpiresAt"])
+            target.plan_expires_at = fields["planExpiresAt"]
+        if "planNote" in fields:
+            _log_change(db, admin.id, target.id, "plan_note", target.plan_note, fields["planNote"])
+            target.plan_note = fields["planNote"]
+    db.commit()
+    return {"updated": len(targets)}
 
 
 @router.patch("/users/{user_id}", response_model=AdminUserOut)

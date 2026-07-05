@@ -62,6 +62,13 @@ class AdminUserUpdate(BaseModel):
     planNote: str | None = Field(default=None, max_length=256)
 
 
+class AdminBulkUserUpdate(AdminUserUpdate):
+    # 目标用户 id 列表；其余字段语义与 AdminUserUpdate 完全一致（仅传要改的字段）。
+    # Target user ids; remaining fields behave exactly like AdminUserUpdate
+    # (only send the fields you want to change).
+    userIds: list[str] = Field(min_length=1, max_length=500)
+
+
 class AdminMetricsOut(BaseModel):
     totalUsers: int
     dau: int  # 近 24 小时活跃 / active within the last 24h

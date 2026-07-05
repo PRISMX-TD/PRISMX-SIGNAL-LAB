@@ -1,5 +1,5 @@
-// 管理后台页：运营指标 + 用户列表（可调整角色/订阅等级）
-// Admin page: operating metrics + user list (role/plan adjustable)
+// 管理后台页：运营指标 + 用户列表（可调整角色/订阅等级，支持批量修改）
+// Admin page: operating metrics + user list (role/plan adjustable, bulk edit supported)
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../api/client'
@@ -57,6 +57,14 @@ export default function AdminPage() {
   const [brokerPatternsText, setBrokerPatternsText] = useState('')
   const [savingBroker, setSavingBroker] = useState(false)
 
+  // 批量选择与批量修改：勾选后统一改角色/等级，空字符串代表"不修改该字段"
+  // bulk selection & bulk edit: '' means "leave this field unchanged"
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkRole, setBulkRole] = useState('')
+  const [bulkPlan, setBulkPlan] = useState('')
+  const [bulkSaving, setBulkSaving] = useState(false)
+  const headerCheckboxRef = useRef<HTMLInputElement>(null)
+
   const showToast = (kind: 'ok' | 'err', text: string) => {
     if (toastTimer.current) window.clearTimeout(toastTimer.current)
     setToast({ kind, text })
@@ -112,7 +120,55 @@ export default function AdminPage() {
 
   const handleSearch = (e: FormEvent) => {
     e.preventDefault()
+    setSelectedIds(new Set())
     load()
+  }
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const allSelected = users.length > 0 && users.every((u) => selectedIds.has(u.id))
+  const someSelected = users.some((u) => selectedIds.has(u.id))
+
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = someSelected && !allSelected
+    }
+  }, [someSelected, allSelected])
+
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) => {
+      if (allSelected) return new Set()
+      const next = new Set(prev)
+      users.forEach((u) => next.add(u.id))
+      return next
+    })
+  }
+
+  const applyBulk = async () => {
+    if (!bulkRole && !bulkPlan) return
+    setBulkSaving(true)
+    try {
+      const payload: Partial<{ role: UserRole; plan: UserPlan }> = {}
+      if (bulkRole) payload.role = bulkRole as UserRole
+      if (bulkPlan) payload.plan = bulkPlan as UserPlan
+      const res = await adminApi.bulkUpdateUsers(Array.from(selectedIds), payload)
+      showToast('ok', t('admin.bulkSaved', { n: res.updated }))
+      setSelectedIds(new Set())
+      setBulkRole('')
+      setBulkPlan('')
+      load()
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : t('admin.saveError'))
+    } finally {
+      setBulkSaving(false)
+    }
   }
 
   const updateDraft = (id: string, patch: Partial<Draft>) => {
@@ -269,6 +325,35 @@ export default function AdminPage() {
         <span className="ml-auto text-xs text-slate-500">{t('admin.totalCount', { n: total })}</span>
       </form>
 
+      {/* 批量操作条：勾选至少一位用户后出现 / bulk action bar, shown once ≥1 user is selected */}
+      {selectedIds.size > 0 && (
+        <div className="glass mb-4 flex flex-wrap items-center gap-3 border-prism-600/40 p-4">
+          <span className="text-sm font-medium text-prism-200">{t('admin.bulkSelected', { n: selectedIds.size })}</span>
+          <span className="text-xs text-slate-500">{t('admin.colRole')}</span>
+          <Select
+            value={bulkRole}
+            onChange={setBulkRole}
+            options={[{ value: '', label: t('admin.bulkNoChange') }, ...ROLE_OPTIONS.map((r) => ({ value: r, label: r }))]}
+          />
+          <span className="text-xs text-slate-500">{t('admin.colPlan')}</span>
+          <Select
+            value={bulkPlan}
+            onChange={setBulkPlan}
+            options={[{ value: '', label: t('admin.bulkNoChange') }, ...PLAN_OPTIONS.map((p) => ({ value: p, label: p }))]}
+          />
+          <button
+            className="btn-primary px-4 py-1.5 text-xs disabled:opacity-40"
+            disabled={(!bulkRole && !bulkPlan) || bulkSaving}
+            onClick={applyBulk}
+          >
+            {bulkSaving ? t('common.loading') : t('admin.bulkApply')}
+          </button>
+          <button className="btn-ghost px-4 py-1.5 text-xs" onClick={() => setSelectedIds(new Set())}>
+            {t('admin.bulkClear')}
+          </button>
+        </div>
+      )}
+
       {/* 用户表 / user table */}
       <div className="glass overflow-x-auto p-0">
         {loading ? (
@@ -281,6 +366,16 @@ export default function AdminPage() {
           <table className="w-full min-w-[900px] text-left text-sm">
             <thead>
               <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-slate-500">
+                <th className="px-4 py-3">
+                  <input
+                    ref={headerCheckboxRef}
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={toggleSelectAll}
+                    className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
+                    aria-label={t('admin.bulkSelectAll')}
+                  />
+                </th>
                 <th className="px-4 py-3 font-medium">{t('admin.colEmail')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.colRole')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.colPlan')}</th>
@@ -296,7 +391,16 @@ export default function AdminPage() {
                 const d = drafts[u.id] ?? toDraft(u)
                 const dirty = isDirty(u, d)
                 return (
-                  <tr key={u.id} className="border-b border-white/5 align-top last:border-0">
+                  <tr key={u.id} className={`border-b border-white/5 align-top last:border-0 ${selectedIds.has(u.id) ? 'bg-prism-600/[0.06]' : ''}`}>
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(u.id)}
+                        onChange={() => toggleSelected(u.id)}
+                        className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
+                        aria-label={u.email}
+                      />
+                    </td>
                     <td className="px-4 py-3">
                       <div className="max-w-[220px] truncate font-mono text-xs text-slate-200">{u.email}</div>
                       <div className="mt-1 text-[11px] text-slate-500">{fmtTime(u.createdAt)}</div>

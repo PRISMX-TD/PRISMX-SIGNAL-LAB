@@ -233,6 +233,14 @@ export const adminApi = {
       method: 'PATCH',
       body: JSON.stringify(payload),
     }),
+  bulkUpdateUsers: (
+    userIds: string[],
+    payload: Partial<{ role: UserRole; plan: UserPlan; planExpiresAt: string | null; planNote: string | null }>
+  ) =>
+    request<{ updated: number }>('/admin/users/bulk', {
+      method: 'PATCH',
+      body: JSON.stringify({ userIds, ...payload }),
+    }),
   metrics: () => request<AdminMetrics>('/admin/metrics'),
   getSettings: () => request<AdminBrokerSettings>('/admin/settings'),
   updateSettings: (payload: AdminBrokerSettings) =>
