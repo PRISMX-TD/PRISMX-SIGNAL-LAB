@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.models import Signal, User
 from app.schemas import SignalOut
 from app.services.deps import get_current_user
+from app.services.plans import is_realtime_plan
 
 router = APIRouter(prefix="/signals", tags=["signals"])
 
@@ -42,9 +43,21 @@ def list_signals(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """获取信号列表（最新在前）/ list signals, newest first."""
+    """获取信号列表（最新在前）/ list signals, newest first.
+
+    FREE 等级只能看到已过期（EXPIRED）的信号：一个信号从生成到过期共
+    SIGNAL_EXPIRE_MINUTES 分钟，这段时间内它对 FREE 用户完全不可见，
+    过期之后才连同最终判定结果一起出现——等同于"延迟到无法再下单才可见"。
+    FREE tier only sees EXPIRED signals: for the SIGNAL_EXPIRE_MINUTES it's
+    tradeable, it's invisible to FREE users; it appears (with its final
+    result) only once expired — effectively "visible only once it can no
+    longer be traded".
+    """
     _expire_stale(db)
-    rows = db.query(Signal).order_by(Signal.created_at.desc()).limit(50).all()
+    query = db.query(Signal)
+    if not is_realtime_plan(user.plan):
+        query = query.filter(Signal.status == "EXPIRED")
+    rows = query.order_by(Signal.created_at.desc()).limit(50).all()
     signals = [
         SignalOut(
             id=s.id,

@@ -15,7 +15,8 @@ from pywebpush import WebPushException, webpush
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.models import NotificationPref, PushSubscription, Signal
+from app.models import NotificationPref, PushSubscription, Signal, User
+from app.services.plans import can_use_push
 from app.utils.indicator import indicator_category
 
 logger = logging.getLogger("push")
@@ -32,8 +33,23 @@ async def dispatch_push_async(signal: Signal) -> None:
 
 def _matched_user_ids(db, cat: str) -> set[str]:
     """解析每个用户的白名单 JSON 并做精确匹配（不用 SQL LIKE，避免类别名互为
-    子串时误匹配）。/ Parse each user's whitelist JSON and match exactly —
-    SQL LIKE would false-match categories that are substrings of one another."""
+    子串时误匹配），再按当前订阅等级过滤掉 FREE。
+
+    这条新信号此刻仍是 ACTIVE（尚未过期），FREE 等级要等它过期后才能在
+    REST/WS 里看到——这里必须同步过滤，否则一个此前是付费用户、开过推送、
+    后来被降级为 FREE 的账号，会绕过延迟机制提前用推送收到通知（偏好行的
+    enabled=True 不会因降级自动清空）。
+
+    Parse each user's whitelist JSON and match exactly (SQL LIKE would
+    false-match categories that are substrings of one another), then filter
+    out FREE-plan users.
+
+    This signal is still ACTIVE (not yet expired); FREE tier only sees it via
+    REST/WS once it expires. Filtering here is required — otherwise a user
+    who was once paid, enabled push, and later got downgraded to FREE would
+    keep receiving push for brand-new signals ahead of the delay (their pref
+    row's enabled=True doesn't get cleared by a downgrade).
+    """
     user_ids: set[str] = set()
     prefs = db.query(NotificationPref).filter(NotificationPref.enabled == True).all()  # noqa: E712
     for p in prefs:
@@ -43,7 +59,14 @@ def _matched_user_ids(db, cat: str) -> set[str]:
             continue
         if isinstance(cats, list) and cat in cats:
             user_ids.add(p.user_id)
-    return user_ids
+    if not user_ids:
+        return user_ids
+    realtime_ids = {
+        uid
+        for uid, plan in db.query(User.id, User.plan).filter(User.id.in_(user_ids)).all()
+        if can_use_push(plan)
+    }
+    return realtime_ids
 
 
 def dispatch_push(signal: Signal) -> None:

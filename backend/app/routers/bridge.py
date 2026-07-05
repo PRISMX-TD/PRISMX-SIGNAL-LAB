@@ -17,8 +17,11 @@ from app.core.security import authenticate_api_token
 from app.models import ClosedTrade, MT5Account, Order, Signal, User
 from app.routers.orders import is_stale_pending, order_update_payload, void_stale_order
 from app.schemas import LOGIN_PATTERN, SUFFIX_PATTERN, AccountSuffixRequest, MT5AccountOut
+from app.services.auto_manage import evaluate_positions
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user, is_account_online
+from app.services.plans import max_mt5_accounts
+from app.services.settings_store import get_broker_settings, server_matches_broker
 
 logger = logging.getLogger("prismx.bridge")
 
@@ -73,8 +76,16 @@ class BridgePollRequest(BaseModel):
     accounts: list[BridgeAccount] = []
 
 
-def _upsert_account(db: Session, user_id: str, acc: BridgeAccount) -> MT5Account:
-    """插入或更新一个账号记录 / insert or update one account row."""
+def _upsert_account(
+    db: Session, user_id: str, acc: BridgeAccount, existing_count: int, account_limit: int | None
+) -> tuple[MT5Account | None, bool]:
+    """插入或更新一个账号记录。若是全新账号且该用户等级的账户上限已用满，
+    返回 (None, False)，不插入——调用方据此把该 login 记入"超额被拒"列表。
+
+    Insert or update one account row. If this is a brand-new account and the
+    user's plan-based account limit is already reached, returns (None, False)
+    without inserting — the caller records this login as rejected.
+    """
     row = (
         db.query(MT5Account)
         .filter(
@@ -84,9 +95,13 @@ def _upsert_account(db: Session, user_id: str, acc: BridgeAccount) -> MT5Account
         )
         .first()
     )
+    created = False
     if row is None:
+        if account_limit is not None and existing_count >= account_limit:
+            return None, False
         row = MT5Account(user_id=user_id, login=acc.login, server=acc.server, source="bridge")
         db.add(row)
+        created = True
     if acc.accountName is not None:
         row.account_name = acc.accountName
     if acc.accountCurrency is not None:
@@ -104,23 +119,52 @@ def _upsert_account(db: Session, user_id: str, acc: BridgeAccount) -> MT5Account
         row.symbol_suffix = acc.detectedSuffix
     row.online = True
     row.last_heartbeat = datetime.now(timezone.utc)
-    return row
+    return row, created
 
 
 def _poll_db_work(
-    db: Session, user_id: str, req: BridgePollRequest
-) -> tuple[list[dict], list[dict], set[str]]:
+    db: Session, user: User, req: BridgePollRequest
+) -> tuple[list[dict], list[dict], set[str], list[str], list[str]]:
     """bridge_poll 的全部同步数据库工作（在线程池中执行）。
     All blocking DB work of bridge_poll (runs in a thread pool).
 
-    返回 (待下发指令, 被作废订单的推送载荷, 在线账号集合)。
-    Returns (commands to deliver, voided-order push payloads, online logins).
+    返回 (待下发指令, 被作废订单的推送载荷, 在线账号集合, 超额被拒的 login 列表,
+    非合作券商被拒的 login 列表)。
+    Returns (commands to deliver, voided-order push payloads, online logins,
+    logins rejected for exceeding the plan's account limit, logins rejected
+    for not matching the partner broker).
     """
-    # 1) upsert 本次上报的账号 / upsert reported accounts
+    # 1) upsert 本次上报的账号。两道闸门，先券商后配额：
+    #    ① 合作券商锁开启时，MT5 服务器名不含任一关键字的账号一律拒绝——
+    #       包括锁开启前就绑定过的旧账号（跳过 upsert 即不再刷新心跳，数秒内
+    #       转为离线，指令也不会再路由过去）；
+    #    ② 全新账号超出该用户等级的账户数上限时拒绝。
+    #    Upsert reported accounts behind two gates, broker first then quota:
+    #    ① with the partner-broker lock on, any account whose MT5 server name
+    #       contains none of the keywords is rejected — including accounts
+    #       bound before the lock was enabled (skipping the upsert stops the
+    #       heartbeat, so they drop offline within seconds and no commands
+    #       route to them);
+    #    ② brand-new accounts beyond the plan's account limit are rejected.
+    broker = get_broker_settings(db)
+    broker_lock = bool(broker.get("broker_lock_enabled"))
+    broker_patterns = broker.get("broker_patterns") or []
+    account_limit = max_mt5_accounts(user.plan)
+    existing_count = db.query(MT5Account).filter(MT5Account.user_id == user.id).count()
     suffix_by_login: dict[str, str] = {}
     online_logins: set[str] = set()
+    rejected_logins: list[str] = []
+    broker_rejected: list[str] = []
     for acc in req.accounts:
-        row = _upsert_account(db, user_id, acc)
+        if broker_lock and not server_matches_broker(acc.server, broker_patterns):
+            broker_rejected.append(acc.login)
+            continue
+        row, created = _upsert_account(db, user.id, acc, existing_count, account_limit)
+        if row is None:
+            rejected_logins.append(acc.login)
+            continue
+        if created:
+            existing_count += 1
         suffix_by_login[acc.login] = (row.symbol_suffix or "").strip()
         online_logins.add(acc.login)
     db.commit()
@@ -134,7 +178,7 @@ def _poll_db_work(
     ack_deadline = now - timedelta(seconds=settings.ORDER_ACK_TIMEOUT_SECONDS)
     pending = (
         db.query(Order)
-        .filter(Order.user_id == user_id, Order.status == "PENDING")
+        .filter(Order.user_id == user.id, Order.status == "PENDING")
         .order_by(Order.created_at.asc())
         .all()
     )
@@ -195,7 +239,7 @@ def _poll_db_work(
     # payloads for voided orders (the actual push happens back on the event loop)
     voided_payloads = [order_update_payload(o) for o in voided]
 
-    return commands, voided_payloads, online_logins
+    return commands, voided_payloads, online_logins, rejected_logins, broker_rejected
 
 
 @router.post("/poll")
@@ -212,8 +256,8 @@ async def bridge_poll(
     Blocking DB work runs in a thread pool so it can't stall the event loop
     (shared with the WS pushes); pushes happen back on the loop afterwards.
     """
-    commands, voided_payloads, online_logins = await run_in_threadpool(
-        _poll_db_work, db, user.id, req
+    commands, voided_payloads, online_logins, rejected_logins, broker_rejected = await run_in_threadpool(
+        _poll_db_work, db, user, req
     )
 
     # 推送被作废订单的状态给前端 / push voided orders' status to the client
@@ -223,7 +267,18 @@ async def bridge_poll(
     # 账号在线状态：仅变化时推送 / account status: push only on change
     await _push_accounts_status_if_changed(user.id, online_logins)
 
-    return {"commands": commands}
+    # accountLimitExceeded：超出当前订阅等级账户上限、未被接受的 login 列表。
+    # brokerRejected：MT5 服务器名不匹配合作券商、未被接受的 login 列表。
+    # 当前桥接程序版本尚未读取这两个字段，供后续版本据此提示用户升级/换券商。
+    # accountLimitExceeded: logins rejected for exceeding the plan's account
+    # limit. brokerRejected: logins rejected because the MT5 server name
+    # doesn't match the partner broker. The current bridge app doesn't read
+    # these yet; a future version can surface them to the user.
+    return {
+        "commands": commands,
+        "accountLimitExceeded": rejected_logins,
+        "brokerRejected": broker_rejected,
+    }
 
 
 class BridgeResultRequest(BaseModel):
@@ -291,10 +346,24 @@ class BridgePositionsRequest(BaseModel):
 async def bridge_positions(
     req: BridgePositionsRequest,
     user: User = Depends(get_bridge_user),
+    db: Session = Depends(get_db),
 ):
-    """桥接程序上报持仓 / bridge reports open positions."""
+    """桥接程序上报持仓 / bridge reports open positions.
+
+    上报同时驱动自动仓位管理（PRO）：对本平台开出的仓位评估保本/追踪/分批
+    规则，需要动作时向指令队列写入 MODIFY/CLOSE，由桥接下一拍拉取执行。
+    评估失败绝不影响持仓上报本身。
+    The report also drives auto position management (PRO): platform-opened
+    positions are evaluated against the break-even/trailing/partial rules and
+    any required MODIFY/CLOSE commands are enqueued for the bridge's next
+    poll. An evaluation failure never breaks the report itself.
+    """
     manager.set_positions(user.id, req.data)
     await manager.push_to_client(user.id, {"type": "POSITIONS", "data": req.data})
+    try:
+        await run_in_threadpool(evaluate_positions, db, user.id, req.data)
+    except Exception:
+        logger.exception("auto_manage evaluation failed (user=%s)", user.id)
     return {"ok": True}
 
 
@@ -415,7 +484,20 @@ def list_accounts(user: User = Depends(get_current_user), db: Session = Depends(
         )
         for r in rows
     ]
-    return {"accounts": [a.model_dump(mode="json") for a in accounts]}
+    # accountLimit：当前订阅等级最多可连接的账户数，null 表示不限。
+    # brokerLock：合作券商限制的展示信息，供绑定页提示"仅支持 XX 账户"。
+    # accountLimit: max accounts allowed by the current plan; null means unlimited.
+    # brokerLock: partner-broker lock display info for the Bind page notice.
+    broker = get_broker_settings(db)
+    return {
+        "accounts": [a.model_dump(mode="json") for a in accounts],
+        "accountLimit": max_mt5_accounts(user.plan),
+        "brokerLock": {
+            "enabled": bool(broker.get("broker_lock_enabled")),
+            "displayName": broker.get("broker_display_name") or "",
+            "referralUrl": broker.get("broker_referral_url") or "",
+        },
+    }
 
 
 @router.delete("/accounts/{login}")

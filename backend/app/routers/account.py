@@ -16,6 +16,7 @@ router = APIRouter(prefix="/auth", tags=["account"])
 class AccountInfoOut(BaseModel):
     id: str
     email: str
+    plan: str
     hasPassword: bool
     createdAt: str | None
     mt5Accounts: list[dict]
@@ -37,6 +38,7 @@ def get_account(
     return AccountInfoOut(
         id=current_user.id,
         email=current_user.email,
+        plan=current_user.plan,
         hasPassword=current_user.password_hash is not None,
         createdAt=current_user.created_at.isoformat() if current_user.created_at else None,
         mt5Accounts=[

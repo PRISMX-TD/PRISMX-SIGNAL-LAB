@@ -22,6 +22,12 @@ REFRESHED_TOKEN_HEADER = "X-Refreshed-Token"
 # disconnect is reflected within ~6-7s without flapping on a single drop.
 ONLINE_WINDOW = 7
 
+# last_active_at 落库节流窗口（秒）：DAU 只需要"今天活跃与否"的精度，
+# 没必要每个请求都触发一次 UPDATE。
+# Throttle window (s) for persisting last_active_at: DAU only needs
+# day-level precision, so there's no need to UPDATE on every single request.
+LAST_ACTIVE_THROTTLE_SECONDS = 300
+
 
 def is_account_online(row) -> bool:
     """按最近心跳判断一个 MT5 账号是否在线 / whether an MT5 account is online
@@ -58,6 +64,29 @@ def get_current_user(
         if remaining < settings.JWT_EXPIRE_MINUTES * 60 / 2:
             response.headers[REFRESHED_TOKEN_HEADER] = create_access_token(user.id)
 
+    _touch_last_active(db, user)
+    return user
+
+
+def _touch_last_active(db: Session, user: User) -> None:
+    """限流写入 last_active_at：同一用户 5 分钟内只落库一次，供 DAU 统计用。
+    Throttled last_active_at write: at most once per 5 minutes per user, for DAU."""
+    now = datetime.now(timezone.utc)
+    last = user.last_active_at
+    if last is not None:
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        if (now - last).total_seconds() < LAST_ACTIVE_THROTTLE_SECONDS:
+            return
+    user.last_active_at = now
+    db.commit()
+
+
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    """要求当前用户具备管理员权限（role == "admin"）。
+    Require the current user to hold admin rights (role == "admin")."""
+    if user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限 / Admin privileges required")
     return user
 
 

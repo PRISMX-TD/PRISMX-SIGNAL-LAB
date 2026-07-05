@@ -17,10 +17,21 @@ const BindPage = lazy(() => import('./pages/BindPage'))
 const OrdersPage = lazy(() => import('./pages/OrdersPage'))
 const DownloadPage = lazy(() => import('./pages/DownloadPage'))
 const AccountPage = lazy(() => import('./pages/AccountPage'))
+const AdminPage = lazy(() => import('./pages/AdminPage'))
 
 function Protected({ children }: { children: ReactNode }) {
   const { isAuthed } = useAuth()
   return isAuthed ? <>{children}</> : <Navigate to="/login" replace />
+}
+
+// 管理员专属路由：登录态之外还要求 role === 'admin'，否则送回仪表盘。
+// 真正的权限边界在后端每个 /admin/* 接口上；这里只是不让非管理员看到入口。
+// Admin-only route: on top of being logged in, requires role === 'admin',
+// otherwise redirect to the dashboard. The real boundary is enforced by the
+// backend on every /admin/* endpoint; this just hides the entry point.
+function AdminOnly({ children }: { children: ReactNode }) {
+  const { user } = useAuth()
+  return user?.role === 'admin' ? <>{children}</> : <Navigate to="/dashboard" replace />
 }
 
 // 未登录访问根路径展示主页，已登录则进入仪表盘
@@ -63,6 +74,14 @@ export default function App() {
               <Route path="/orders" element={<OrdersPage />} />
               <Route path="/account" element={<AccountPage />} />
               <Route path="/download" element={<DownloadPage />} />
+              <Route
+                path="/admin"
+                element={
+                  <AdminOnly>
+                    <AdminPage />
+                  </AdminOnly>
+                }
+              />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

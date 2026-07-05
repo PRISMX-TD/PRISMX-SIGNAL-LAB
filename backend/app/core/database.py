@@ -132,3 +132,30 @@ def _migrate_columns() -> None:
         if pw_col is not None and not pw_col["nullable"] and is_postgres:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL"))
+
+        # 用户分级：补充 role / plan 及相关列（旧表建表时没有）。
+        # User tiering: add role / plan and related columns (missing on pre-existing tables).
+        user_cols = {c["name"] for c in inspector.get_columns("users")}
+        user_new = {
+            "role": "VARCHAR",
+            "plan": "VARCHAR",
+            "plan_expires_at": datetime_type,
+            "plan_note": "VARCHAR",
+            "last_active_at": datetime_type,
+        }
+        with engine.begin() as conn:
+            for name, col_type in user_new.items():
+                if name not in user_cols:
+                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {col_type}"))
+            # 旧行补默认值：新列刚加时为 NULL，但 role/plan 声明为 NOT NULL。
+            # Backfill existing rows: a freshly added column is NULL, but
+            # role/plan are declared NOT NULL.
+            if "role" not in user_cols:
+                conn.execute(text("UPDATE users SET role = 'user' WHERE role IS NULL"))
+            if "plan" not in user_cols:
+                conn.execute(text("UPDATE users SET plan = 'FREE' WHERE plan IS NULL"))
+            # 等级体系从五级并为三级（FREE/PLUS/PRO），历史值就地映射（幂等）。
+            # Tier system consolidated from five to three (FREE/PLUS/PRO);
+            # remap legacy values in place (idempotent).
+            conn.execute(text("UPDATE users SET plan = 'PLUS' WHERE plan = 'BETA'"))
+            conn.execute(text("UPDATE users SET plan = 'PRO' WHERE plan IN ('PARTNER', 'ELITE')"))

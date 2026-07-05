@@ -1,0 +1,267 @@
+"""管理后台路由：用户列表/搜索、调整角色与订阅等级、基础指标看板。
+
+所有端点都挂在 require_admin 之后——role 不是 admin 一律 403。每次修改角色
+或订阅等级都写一条 AdminAuditLog，记录谁在什么时候把哪个字段从什么改成了
+什么，供团队不止一人管理时追责/核对。
+
+Admin router: user list/search, role & plan adjustment, basic metrics.
+
+Every endpoint sits behind require_admin — anything but role == "admin" gets
+a 403. Every role/plan change writes an AdminAuditLog row (who changed what
+field, from what, to what, when), so once more than one person has admin
+access there's a record to check against.
+"""
+import json
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.models import AdminAuditLog, MT5Account, User
+from app.schemas import AdminBrokerSettings, AdminMetricsOut, AdminUserOut, AdminUserUpdate
+from app.services.deps import require_admin
+from app.services.settings_store import get_broker_settings, invalidate_settings_cache, set_setting
+
+router = APIRouter(prefix="/admin", tags=["admin"])
+
+PAGE_SIZE_DEFAULT = 50
+PAGE_SIZE_MAX = 200
+
+
+def _aware(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+@router.get("/users", response_model=dict)
+def list_users(
+    q: str | None = Query(default=None, max_length=128, description="按邮箱模糊搜索 / fuzzy search by email"),
+    plan: str | None = Query(default=None),
+    role: str | None = Query(default=None),
+    limit: int = Query(default=PAGE_SIZE_DEFAULT, ge=1, le=PAGE_SIZE_MAX),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """用户列表：支持按邮箱模糊搜索、按 plan/role 过滤，分页返回。
+    User list: fuzzy email search, plan/role filters, paginated."""
+    query = db.query(User)
+    if q:
+        query = query.filter(User.email.ilike(f"%{q}%"))
+    if plan:
+        query = query.filter(User.plan == plan)
+    if role:
+        query = query.filter(User.role == role)
+
+    total = query.count()
+    rows = query.order_by(User.created_at.desc()).offset(offset).limit(limit).all()
+
+    # 批量取这批用户各自绑定的 MT5 账号数，避免逐用户单独查询 / batch-fetch account counts
+    user_ids = [u.id for u in rows]
+    counts: dict[str, int] = {}
+    if user_ids:
+        for uid, cnt in (
+            db.query(MT5Account.user_id, func.count(MT5Account.id))
+            .filter(MT5Account.user_id.in_(user_ids))
+            .group_by(MT5Account.user_id)
+            .all()
+        ):
+            counts[uid] = cnt
+
+    users = [
+        AdminUserOut(
+            id=u.id,
+            email=u.email,
+            role=u.role,
+            plan=u.plan,
+            planExpiresAt=u.plan_expires_at,
+            planNote=u.plan_note,
+            createdAt=u.created_at,
+            lastActiveAt=u.last_active_at,
+            mt5AccountCount=counts.get(u.id, 0),
+        )
+        for u in rows
+    ]
+    return {"users": [x.model_dump(mode="json") for x in users], "total": total, "limit": limit, "offset": offset}
+
+
+def _log_change(db: Session, admin_id: str, target_id: str, field: str, old_value, new_value) -> None:
+    old_s = "" if old_value is None else str(old_value)
+    new_s = "" if new_value is None else str(new_value)
+    if old_s == new_s:
+        return
+    db.add(
+        AdminAuditLog(
+            admin_user_id=admin_id,
+            target_user_id=target_id,
+            field=field,
+            old_value=old_s,
+            new_value=new_s,
+        )
+    )
+
+
+@router.patch("/users/{user_id}", response_model=AdminUserOut)
+def update_user(
+    user_id: str,
+    body: AdminUserUpdate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """调整某用户的角色 / 订阅等级 / 到期时间 / 备注，每个实际变化的字段各写一条审计日志。
+    Adjust a user's role / plan / expiry / note; each field that actually
+    changes gets its own audit log row."""
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在 / User not found")
+
+    fields = body.model_dump(exclude_unset=True)
+
+    if "role" in fields and fields["role"] is not None:
+        _log_change(db, admin.id, target.id, "role", target.role, fields["role"])
+        target.role = fields["role"]
+    if "plan" in fields and fields["plan"] is not None:
+        _log_change(db, admin.id, target.id, "plan", target.plan, fields["plan"])
+        target.plan = fields["plan"]
+    if "planExpiresAt" in fields:
+        _log_change(db, admin.id, target.id, "plan_expires_at", target.plan_expires_at, fields["planExpiresAt"])
+        target.plan_expires_at = fields["planExpiresAt"]
+    if "planNote" in fields:
+        _log_change(db, admin.id, target.id, "plan_note", target.plan_note, fields["planNote"])
+        target.plan_note = fields["planNote"]
+
+    db.commit()
+    db.refresh(target)
+
+    account_count = db.query(func.count(MT5Account.id)).filter(MT5Account.user_id == target.id).scalar() or 0
+    return AdminUserOut(
+        id=target.id,
+        email=target.email,
+        role=target.role,
+        plan=target.plan,
+        planExpiresAt=target.plan_expires_at,
+        planNote=target.plan_note,
+        createdAt=target.created_at,
+        lastActiveAt=target.last_active_at,
+        mt5AccountCount=account_count,
+    )
+
+
+# ---------- 平台设置：合作券商锁 / platform settings: partner-broker lock ----------
+
+def _broker_settings_out(data: dict) -> AdminBrokerSettings:
+    return AdminBrokerSettings(
+        brokerLockEnabled=bool(data.get("broker_lock_enabled")),
+        brokerPatterns=list(data.get("broker_patterns") or []),
+        brokerDisplayName=data.get("broker_display_name") or "",
+        brokerReferralUrl=data.get("broker_referral_url") or "",
+    )
+
+
+@router.get("/settings", response_model=AdminBrokerSettings)
+def get_settings(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """读取合作券商锁设置 / read the partner-broker lock settings."""
+    return _broker_settings_out(get_broker_settings(db))
+
+
+@router.put("/settings", response_model=AdminBrokerSettings)
+def put_settings(
+    body: AdminBrokerSettings,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """保存合作券商锁设置：整份覆盖，每个实际变化的键各写一条审计日志。
+
+    审计日志的 target_user_id 记为管理员自己（该表的目标列非空且指向用户，
+    平台设置没有目标用户，用操作者自身占位；field 前缀 "setting:" 区分）。
+
+    Save the partner-broker lock settings: full overwrite, one audit row per
+    key that actually changed. The audit row's target_user_id is set to the
+    admin themself (the column is non-null and points at a user; platform
+    settings have no target user, so the actor stands in; the "setting:"
+    field prefix disambiguates).
+    """
+    patterns = [p.strip() for p in body.brokerPatterns if p.strip()]
+    if body.brokerLockEnabled and not patterns:
+        raise HTTPException(
+            status_code=400,
+            detail="启用券商限制时至少需要一个匹配关键字 / At least one keyword is required while the broker lock is enabled",
+        )
+
+    current = get_broker_settings(db)
+    updates = {
+        "broker_lock_enabled": body.brokerLockEnabled,
+        "broker_patterns": patterns,
+        "broker_display_name": body.brokerDisplayName.strip(),
+        "broker_referral_url": body.brokerReferralUrl.strip(),
+    }
+    for key, new_value in updates.items():
+        old_value = current.get(key)
+        if old_value != new_value:
+            _log_change(
+                db,
+                admin.id,
+                admin.id,
+                f"setting:{key}",
+                json.dumps(old_value, ensure_ascii=False),
+                json.dumps(new_value, ensure_ascii=False),
+            )
+            set_setting(db, key, new_value)
+    db.commit()
+    invalidate_settings_cache()
+    return _broker_settings_out(get_broker_settings(db))
+
+
+@router.get("/metrics", response_model=AdminMetricsOut)
+def metrics(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """基础运营指标：总用户数、DAU/WAU（按 last_active_at）、各等级人数、近 7 天注册量。
+    Basic operating metrics: total users, DAU/WAU (by last_active_at), plan
+    breakdown, and signups over the last 7 days."""
+    now = datetime.now(timezone.utc)
+    total_users = db.query(func.count(User.id)).scalar() or 0
+
+    dau_cutoff = now - timedelta(hours=24)
+    wau_cutoff = now - timedelta(days=7)
+    dau = db.query(func.count(User.id)).filter(User.last_active_at >= dau_cutoff).scalar() or 0
+    wau = db.query(func.count(User.id)).filter(User.last_active_at >= wau_cutoff).scalar() or 0
+
+    plan_counts: dict[str, int] = {}
+    for plan_value, cnt in db.query(User.plan, func.count(User.id)).group_by(User.plan).all():
+        plan_counts[plan_value or "FREE"] = cnt
+
+    # 近 7 天每日注册量（含今天，按 UTC 日期分组，Python 侧分组以跨数据库一致）
+    # Daily signups for the last 7 days (incl. today, grouped in Python for
+    # cross-DB consistency, same approach as signals.signal_stats)
+    start_date = (now - timedelta(days=6)).date()
+    rows = db.query(User.created_at).filter(
+        User.created_at >= datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+    ).all()
+    counts: dict[str, int] = {}
+    for i in range(7):
+        day = start_date + timedelta(days=i)
+        counts[day.isoformat()] = 0
+    for (created_at,) in rows:
+        ts = _aware(created_at)
+        if ts is None:
+            continue
+        key = ts.date().isoformat()
+        if key in counts:
+            counts[key] += 1
+    signups_last_7d = [{"date": d, "count": c} for d, c in counts.items()]
+
+    return AdminMetricsOut(
+        totalUsers=total_users,
+        dau=dau,
+        wau=wau,
+        planCounts=plan_counts,
+        signupsLast7d=signups_last_7d,
+    )

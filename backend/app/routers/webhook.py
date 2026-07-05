@@ -23,6 +23,7 @@ from app.models import Signal, Trend
 from app.schemas import SYMBOL_PATTERN, SignalOut
 from app.services.connection_manager import manager
 from app.services.push_dispatch import dispatch_push_async
+from app.services.signal_broadcast import broadcast_signal_new_realtime
 from app.services.signal_resolution import resolve_signals_with_price
 
 import json
@@ -114,8 +115,9 @@ async def tradingview_webhook(request: Request, payload: TradingViewSignal):
     finally:
         db.close()
 
-    # 3) 复用现有广播：推给所有在线前端，格式与 mock 引擎一致 / broadcast like the mock engine
-    await manager.broadcast_to_clients({"type": "SIGNAL_NEW", "data": data})
+    # 3) 推送：只给实时等级的在线用户；FREE 等级要等信号过期后才第一次看到
+    # push: real-time-tier clients only; FREE tier sees it once it expires
+    await broadcast_signal_new_realtime(data)
     # Web Push 通知：线程池执行，避免阻塞事件循环 / web push off the event loop
     await dispatch_push_async(sig)
     return {"ok": True, "deduped": False, "id": data["id"]}

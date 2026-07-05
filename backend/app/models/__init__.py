@@ -28,6 +28,29 @@ class User(Base):
     api_token = Column(String, unique=True, nullable=False, index=True)
     created_at = Column(DateTime, default=_now)
 
+    # 权力轴：user（默认）/ admin。与订阅等级（plan）完全独立——管理员权限
+    # 不代表任何信号等级，订阅等级也不授予任何后台管理权限。
+    # Power axis: user (default) / admin. Fully independent of `plan` — admin
+    # rights don't imply any signal tier, and no plan grants admin rights.
+    role = Column(String, default="user", nullable=False)
+    # 商业轴：FREE（默认）/ PLUS / PRO。三级各自的定位与权益见
+    # services/plans.py 顶部说明。
+    # Business axis: FREE (default) / PLUS / PRO. See the header of
+    # services/plans.py for what each tier means and grants.
+    plan = Column(String, default="FREE", nullable=False)
+    # 订阅到期时间，空 = 永久（内部赠送/内测用户不设到期）。
+    # Subscription expiry; null = never expires (comp/beta users typically unset).
+    plan_expires_at = Column(DateTime, nullable=True)
+    # 内部备注，供管理员留痕（如"KOL 合作赠送"），不展示给用户本人。
+    # Internal note for admins (e.g. "KOL partnership grant"); never shown to the user.
+    plan_note = Column(String, nullable=True)
+    # 最近一次带凭证请求的时间，用于计算 DAU；在 get_current_user 里限流更新
+    # （同一用户 5 分钟内只写一次库），避免每个请求都触发一次 UPDATE。
+    # Last authenticated request time, used to compute DAU; throttled in
+    # get_current_user (written at most once per 5 minutes per user) to avoid
+    # an UPDATE on every single request.
+    last_active_at = Column(DateTime, nullable=True)
+
 
 # 说明：旧的 EABinding（ea_bindings 表，EA 单账号绑定）已随 EA 接入方式移除。
 # 生产库中的旧表保留不删，只是不再读写；多账号统一使用 MT5Account。
@@ -240,4 +263,110 @@ class ClosedTrade(Base):
     position_ticket = Column(Integer, nullable=False)  # 仓位编号，同一仓位的多次部分平仓共享 / shared across partial closes
     deal_ticket = Column(Integer, nullable=False)  # MT5 成交编号，用于去重 / MT5 deal ticket, for dedup
     closed_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=_now)
+
+
+class AutoManageSettings(Base):
+    """自动仓位管理设置（PRO 专属），每个用户一条。
+
+    所有阈值以 R 为单位——R = 仓位开仓时的止损距离 |入场价 - 初始止损|。
+    开仓时没有止损的仓位无法定义 R，自动管理会跳过它们。
+
+    Auto position-management settings (PRO only), one row per user.
+    All thresholds are in R units — R = the position's initial stop distance
+    |entry - initial SL|. Positions opened without a stop have no defined R
+    and are skipped.
+    """
+    __tablename__ = "auto_manage_settings"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    # 总开关 / master switch
+    enabled = Column(Boolean, default=False, nullable=False)
+    # 保本：浮盈达到 trigger R 时把止损移到入场价 / break-even: move SL to entry at trigger R
+    be_enabled = Column(Boolean, default=True, nullable=False)
+    be_trigger_r = Column(Float, default=1.0, nullable=False)
+    # 追踪止损：浮盈达到 trigger R 后，止损跟随现价保持 distance R 的距离
+    # trailing stop: once past trigger R, SL follows price at distance R behind
+    trail_enabled = Column(Boolean, default=False, nullable=False)
+    trail_trigger_r = Column(Float, default=1.5, nullable=False)
+    trail_distance_r = Column(Float, default=1.0, nullable=False)
+    # 分批止盈：浮盈达到 trigger R 时平掉 fraction 比例的仓位（每仓只执行一次）
+    # partial take-profit: close `fraction` of the position at trigger R (once per position)
+    ptp_enabled = Column(Boolean, default=False, nullable=False)
+    ptp_trigger_r = Column(Float, default=1.0, nullable=False)
+    ptp_fraction = Column(Float, default=0.5, nullable=False)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
+class AutoManagedPosition(Base):
+    """自动仓位管理的每仓状态：初始止损距离快照 + 分批止盈是否已执行。
+
+    R 的分母必须用"开仓时"的止损距离——止损被移动后 |入场-当前SL| 会变，
+    所以在第一次见到该仓位时就把入场价/初始止损拍下来存档。
+
+    Per-position state for auto management: a snapshot of the initial stop
+    distance plus whether the partial take-profit already fired. The R
+    denominator must be the stop distance AT OPEN — |entry - current SL|
+    changes once the stop is moved — so entry/initial SL are snapshotted the
+    first time the position is seen.
+    """
+    __tablename__ = "auto_managed_positions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "position_ticket", name="uq_auto_pos_user_ticket"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    position_ticket = Column(Integer, nullable=False)
+    mt5_login = Column(String, nullable=True)
+    entry = Column(Float, nullable=True)
+    initial_sl = Column(Float, nullable=True)  # 0/None = 开仓无止损，无法自动管理 / no SL at open, unmanageable
+    risk = Column(Float, nullable=True)  # |entry - initial_sl|；None = 无法定义 R / undefined R
+    partial_done = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
+class PlatformSetting(Base):
+    """平台级设置（键值对，值为 JSON 字符串）。
+
+    存放"管理员想在后台改、不想改代码"的运营配置——当前是合作券商锁
+    （broker_lock_enabled / broker_patterns / broker_display_name /
+    broker_referral_url），未来的同类配置也放这里。读取走
+    services/settings_store.py 的进程内缓存，未写入的键回落到代码里的默认值。
+
+    Platform-wide settings (key-value, JSON-encoded values). Holds operational
+    config admins want to change from the panel without a deploy — currently
+    the partner-broker lock; future knobs of the same kind belong here too.
+    Reads go through the in-process cache in services/settings_store.py, and
+    missing keys fall back to code defaults.
+    """
+    __tablename__ = "platform_settings"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    key = Column(String, unique=True, nullable=False, index=True)
+    value = Column(Text, nullable=False)  # JSON 编码 / JSON-encoded
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
+class AdminAuditLog(Base):
+    """管理员操作审计日志：谁在什么时候把哪个用户的哪个字段改成了什么。
+
+    只记录管理后台发起的用户等级/权限变更，不记录一般业务操作。团队不止一人
+    管理时，这是唯一能查清"谁改的、改成了什么"的依据。
+
+    Admin action audit log: who changed which field on which user, and when.
+    Only covers admin-initiated role/plan changes, not general business
+    actions. Once more than one person has admin access, this is the sole
+    record of who changed what.
+    """
+    __tablename__ = "admin_audit_logs"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    admin_user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    target_user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    field = Column(String, nullable=False)  # role / plan / plan_expires_at / plan_note
+    old_value = Column(String, nullable=True)
+    new_value = Column(String, nullable=True)
     created_at = Column(DateTime, default=_now)

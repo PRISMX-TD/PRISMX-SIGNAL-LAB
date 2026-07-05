@@ -74,6 +74,12 @@ class ConnectionManager:
         for user_id in list(self._clients.keys()):
             await self.push_to_client(user_id, message)
 
+    def connected_user_ids(self) -> list[str]:
+        """当前有前端连接的用户 id 列表，供按等级过滤广播时查询这些用户的 plan。
+        User ids with an active client connection right now, so callers can
+        look up these users' plans before a plan-filtered broadcast."""
+        return list(self._clients.keys())
+
 
 manager = ConnectionManager()
 

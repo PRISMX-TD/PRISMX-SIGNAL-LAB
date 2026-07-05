@@ -1,7 +1,7 @@
 // 实时数据共享状态：EA 状态、信号、订单、持仓。
 // Shared live state: EA status, signals, orders, positions.
 import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from 'react'
-import type { MT5Account, Order, Position, Quote, Signal, Trend, WSMessage } from '../api/types'
+import type { BrokerLock, MT5Account, Order, Position, Quote, Signal, Trend, WSMessage } from '../api/types'
 import { accountApi, orderApi, signalApi, trendApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
 
@@ -14,6 +14,10 @@ interface LiveContextValue {
   // 多周期趋势 {symbol: Trend}（由 TradingView 经 webhook 推送）/ trends pushed via webhook
   trends: Record<string, Trend>
   accounts: MT5Account[]
+  // 当前订阅等级最多可连接的账户数，null 表示不限 / max accounts for the current plan; null = unlimited
+  accountLimit: number | null
+  // 合作券商限制展示信息，null = 尚未加载 / partner-broker lock info; null = not loaded yet
+  brokerLock: BrokerLock | null
   // 首屏数据是否加载完成 / whether the first data load has completed
   loaded: boolean
   // 聚合连接状态（以桥接上报的账号为准）/ aggregated connection (bridge accounts are the source of truth)
@@ -67,18 +71,22 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [quotes, setQuotes] = useState<Record<string, Quote>>({})
   const [trends, setTrends] = useState<Record<string, Trend>>({})
   const [accounts, setAccounts] = useState<MT5Account[]>([])
+  const [accountLimit, setAccountLimit] = useState<number | null>(null)
+  const [brokerLock, setBrokerLock] = useState<BrokerLock | null>(null)
   const [loaded, setLoaded] = useState(false)
 
   const refreshAll = useCallback(async () => {
     const [sig, ord, acc, trd] = await Promise.all([
       signalApi.list().catch(() => ({ signals: [] })),
       orderApi.list().catch(() => ({ orders: [] })),
-      accountApi.list().catch(() => ({ accounts: [] })),
+      accountApi.list().catch(() => ({ accounts: [], accountLimit: null, brokerLock: null })),
       trendApi.list().catch(() => ({ trends: [] })),
     ])
     setSignals(capExpired(sig.signals))
     setOrders(ord.orders)
     setAccounts(acc.accounts)
+    setAccountLimit(acc.accountLimit)
+    setBrokerLock((prev) => keepIfEqual(prev, acc.brokerLock))
     setTrends(Object.fromEntries((trd.trends || []).map((t) => [t.symbol, t])))
     setLoaded(true)
   }, [])
@@ -174,7 +182,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   return (
     <LiveContext.Provider
       value={{
-        signals, orders, positions, quotes, trends, accounts, loaded,
+        signals, orders, positions, quotes, trends, accounts, accountLimit, brokerLock, loaded,
         anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected,
       }}
     >

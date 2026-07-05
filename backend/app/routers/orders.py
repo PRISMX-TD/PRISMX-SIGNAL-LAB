@@ -26,6 +26,7 @@ from app.schemas import (
 )
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user, is_account_online, validate_order
+from app.services.plans import is_realtime_plan
 from app.services.trade_performance import compute_personal_winrate
 
 logger = logging.getLogger("prismx.orders")
@@ -152,6 +153,16 @@ def place_order(
                 if exp.tzinfo is None:
                     exp = exp.replace(tzinfo=timezone.utc)
                 is_expired = exp < datetime.now(timezone.utc)
+            # FREE 等级只能看到已过期的信号；这里再兜底拒绝一次，防止有人
+            # 拿到一条仍在有效期内的 signalId（如降级前保存的）绕过延迟限制。
+            # FREE tier only ever sees expired signals; this is a server-side
+            # backstop in case someone obtains a still-live signalId (e.g. one
+            # saved before downgrading) and tries to bypass the delay.
+            if not is_realtime_plan(user.plan) and not is_expired:
+                raise HTTPException(
+                    status_code=403,
+                    detail="免费版信号延迟显示，请升级查看实时信号后再下单 / Free tier sees delayed signals only; upgrade for real-time trading",
+                )
             if is_expired:
                 raise HTTPException(
                     status_code=409,

@@ -11,7 +11,8 @@ import type { MT5Account } from '../api/types'
 
 export default function BindPage() {
   const { t } = useTranslation()
-  const { accounts, anyOnline, onlineAccounts, refreshAll } = useLive()
+  const { accounts, accountLimit, brokerLock, anyOnline, onlineAccounts, refreshAll } = useLive()
+  const atAccountLimit = accountLimit != null && accounts.length >= accountLimit
   // 状态卡片展示的主账号：优先在线账号，否则第一个已知账号。
   // Primary account for the status card: prefer an online one, else the first known.
   const primary = onlineAccounts[0] || accounts[0] || null
@@ -104,14 +105,45 @@ export default function BindPage() {
         <p className="mt-1 text-sm text-slate-400">{t('bind.subtitle')}</p>
       </div>
 
+      {/* 合作券商限制提示 / partner-broker lock notice */}
+      {brokerLock?.enabled && (
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-prism-600/30 bg-prism-600/10 px-4 py-3">
+          <p className="text-sm text-prism-200">
+            {t('bind.brokerOnly', { name: brokerLock.displayName })}
+          </p>
+          {brokerLock.referralUrl && (
+            <a
+              href={brokerLock.referralUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-primary px-4 py-1.5 text-xs"
+            >
+              {t('bind.brokerOpenAccount')}
+            </a>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {/* PLACEHOLDER_ACCOUNTS */}
         {accounts.length > 0 && (
           <div className="glass p-5 lg:col-span-2">
-            <h3 className="mb-1 font-display text-lg font-semibold text-slate-100">
-              {t('bind.accountsTitle')}
-            </h3>
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-display text-lg font-semibold text-slate-100">
+                {t('bind.accountsTitle')}
+              </h3>
+              <span className={`tag text-xs ${atAccountLimit ? 'bg-amber-500/15 text-amber-400' : 'bg-white/5 text-slate-400'}`}>
+                {accountLimit == null
+                  ? t('bind.accountQuotaUnlimited', { n: accounts.length })
+                  : t('bind.accountQuota', { n: accounts.length, max: accountLimit })}
+              </span>
+            </div>
             <p className="mb-4 text-xs text-slate-500">{t('bind.accountsHint')}</p>
+            {atAccountLimit && (
+              <p className="mb-4 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-300">
+                {t('bind.accountQuotaReached')}
+              </p>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>

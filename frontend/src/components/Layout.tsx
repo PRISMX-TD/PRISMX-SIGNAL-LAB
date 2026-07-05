@@ -104,6 +104,13 @@ function TabIcon({ name }: { name: string }) {
           <circle cx="19" cy="12" r="1.7" />
         </svg>
       )
+    case 'admin':
+      return (
+        <svg className={c} viewBox="0 0 24 24" {...p}>
+          <path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z" />
+          <path d="M9.5 12l1.8 1.8L14.5 10" />
+        </svg>
+      )
     default:
       return null
   }
@@ -152,6 +159,8 @@ export default function Layout() {
     navigate('/', { replace: true })
   }
 
+  const isAdmin = user?.role === 'admin'
+
   // 手机底部 4 个主入口，其余收进「其他」/ 4 primary mobile tabs, the rest go under "More"
   const mobileTabs = [
     { to: '/app', icon: 'signals', label: t('nav.signals') },
@@ -163,6 +172,7 @@ export default function Layout() {
     { to: '/bind', icon: 'bind', label: t('nav.bind') },
     { to: '/account', icon: 'account', label: t('nav.account') },
     { to: '/download', icon: 'download', label: t('nav.download') },
+    ...(isAdmin ? [{ to: '/admin', icon: 'admin', label: t('nav.admin') }] : []),
   ]
   const moreActive = moreItems.some((m) => location.pathname === m.to)
 
@@ -207,6 +217,7 @@ export default function Layout() {
               <NavItem to="/orders" label={t('nav.orders')} />
               <NavItem to="/account" label={t('nav.account')} />
               <NavItem to="/download" label={t('nav.download')} />
+              {isAdmin && <NavItem to="/admin" label={t('nav.admin')} />}
             </nav>
 
             <div className="ml-auto flex items-center gap-2 sm:gap-3">

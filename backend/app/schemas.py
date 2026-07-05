@@ -27,11 +27,58 @@ class GoogleAuthRequest(BaseModel):
 class UserOut(BaseModel):
     id: str
     email: str
+    role: str = "user"
+    plan: str = "FREE"
 
 
 class AuthResponse(BaseModel):
     token: str
     user: UserOut
+
+
+# ---------- 管理后台 / Admin ----------
+class AdminUserOut(BaseModel):
+    id: str
+    email: str
+    role: str
+    plan: str
+    planExpiresAt: datetime | None = None
+    planNote: str | None = None
+    createdAt: datetime | None = None
+    lastActiveAt: datetime | None = None
+    mt5AccountCount: int = 0
+
+
+class AdminUserUpdate(BaseModel):
+    # 仅传入要修改的字段；省略的字段保持不变 / only send fields to change; omitted ones are left alone
+    role: Literal["user", "admin"] | None = None
+    plan: Literal["FREE", "PLUS", "PRO"] | None = None
+    # 显式传 null 表示清除到期时间（永久）；不传表示不修改。用 sentinel 区分二者较繁琐，
+    # 这里采用「传字段就是要设置这个值，包括 None」的简单约定，交由前端保证语义。
+    # Explicit null clears the expiry (never expires); omitting the field
+    # entirely leaves it unchanged. We rely on Pydantic's exclude_unset to
+    # tell "omitted" from "explicitly set to null" instead of a sentinel.
+    planExpiresAt: datetime | None = Field(default=None)
+    planNote: str | None = Field(default=None, max_length=256)
+
+
+class AdminMetricsOut(BaseModel):
+    totalUsers: int
+    dau: int  # 近 24 小时活跃 / active within the last 24h
+    wau: int  # 近 7 天活跃 / active within the last 7 days
+    planCounts: dict[str, int]
+    signupsLast7d: list[dict]  # [{date, count}]
+
+
+class AdminBrokerSettings(BaseModel):
+    """合作券商锁设置（管理后台读写用同一形状）。
+    Partner-broker lock settings (same shape for admin read & write)."""
+
+    brokerLockEnabled: bool
+    # 服务器名匹配关键字，大小写不敏感的包含匹配 / server-name keywords, case-insensitive substring
+    brokerPatterns: list[str] = Field(default_factory=list, max_length=20)
+    brokerDisplayName: str = Field(default="", max_length=64)
+    brokerReferralUrl: str = Field(default="", max_length=512)
 
 
 # ---------- API Token / MT5 连接凭证 ----------

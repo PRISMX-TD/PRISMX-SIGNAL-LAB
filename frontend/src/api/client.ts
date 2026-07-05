@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, AdminUser, AdminMetrics, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings } from './types'
 
 const TOKEN_KEY = 'prismx_token'
 
@@ -143,7 +143,9 @@ export const orderApi = {
 
 // 多账号 / Multi-account
 export const accountApi = {
-  list: () => request<{ accounts: MT5Account[] }>('/bridge/accounts'),
+  // accountLimit：当前订阅等级最多可连接的账户数，null 表示不限；brokerLock：合作券商限制展示信息
+  // accountLimit: max accounts for the current plan (null = unlimited); brokerLock: partner-broker lock info
+  list: () => request<{ accounts: MT5Account[]; accountLimit: number | null; brokerLock: BrokerLock }>('/bridge/accounts'),
   setSuffix: (login: string, symbolSuffix: string) =>
     request<{ ok: boolean; login: string; symbolSuffix: string }>('/bridge/accounts/suffix', {
       method: 'POST',
@@ -170,6 +172,7 @@ export const userApi = {
     request<{
       id: string
       email: string
+      plan: UserPlan
       hasPassword: boolean
       createdAt: string | null
       mt5Accounts: Array<{
@@ -208,6 +211,45 @@ export const notificationApi = {
       body: JSON.stringify({ enabled, selected_categories: selectedCategories }),
     }),
   getIndicators: () => request<string[]>('/notifications/indicators'),
+}
+
+// 管理后台 / Admin
+export const adminApi = {
+  listUsers: (params: { q?: string; plan?: string; role?: string; limit?: number; offset?: number } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.q) qs.set('q', params.q)
+    if (params.plan) qs.set('plan', params.plan)
+    if (params.role) qs.set('role', params.role)
+    if (params.limit) qs.set('limit', String(params.limit))
+    if (params.offset) qs.set('offset', String(params.offset))
+    const suffix = qs.toString() ? `?${qs.toString()}` : ''
+    return request<{ users: AdminUser[]; total: number; limit: number; offset: number }>(`/admin/users${suffix}`)
+  },
+  updateUser: (
+    userId: string,
+    payload: Partial<{ role: UserRole; plan: UserPlan; planExpiresAt: string | null; planNote: string | null }>
+  ) =>
+    request<AdminUser>(`/admin/users/${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  metrics: () => request<AdminMetrics>('/admin/metrics'),
+  getSettings: () => request<AdminBrokerSettings>('/admin/settings'),
+  updateSettings: (payload: AdminBrokerSettings) =>
+    request<AdminBrokerSettings>('/admin/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+}
+
+// 自动仓位管理（PRO）/ auto position management (PRO)
+export const automationApi = {
+  getSettings: () => request<AutoManageSettings>('/automation/settings'),
+  putSettings: (payload: AutoManageSettings) =>
+    request<AutoManageSettings>('/automation/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
 }
 
 // 推送订阅 / Push subscriptions

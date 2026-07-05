@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.models import NotificationPref, PushSubscription, Signal, User
 from app.services.deps import get_current_user
+from app.services.plans import can_use_push
 from app.utils.indicator import indicator_category
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -56,6 +57,11 @@ def put_prefs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # 开启通知需要非 FREE 等级；关闭则任何等级都放行，避免降级用户被锁在"开"状态。
+    # Turning notifications on requires a non-FREE plan; turning off is always
+    # allowed so a downgraded user isn't stuck unable to switch it off.
+    if body.enabled and not can_use_push(current_user.plan):
+        raise HTTPException(status_code=403, detail="免费版不支持通知推送，请升级解锁 / Free tier doesn't include push notifications; upgrade to unlock")
     pref = _get_or_create_pref(db, current_user.id)
     pref.enabled = body.enabled
     pref.selected_categories = json.dumps(body.selected_categories, ensure_ascii=False)
@@ -95,6 +101,8 @@ def push_subscribe(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if not can_use_push(current_user.plan):
+        raise HTTPException(status_code=403, detail="免费版不支持通知推送，请升级解锁 / Free tier doesn't include push notifications; upgrade to unlock")
     keys = body.keys or {}
     p256dh = keys.get("p256dh", "")
     auth = keys.get("auth", "")

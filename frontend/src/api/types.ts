@@ -1,8 +1,65 @@
 // 共享类型定义 / Shared type definitions
 
+export type UserRole = 'user' | 'admin'
+export type UserPlan = 'FREE' | 'PLUS' | 'PRO'
+
+// 合作券商锁的展示信息（绑定页提示用）/ partner-broker lock display info for the Bind page
+export interface BrokerLock {
+  enabled: boolean
+  displayName: string
+  referralUrl: string
+}
+
+// 管理后台：合作券商锁设置 / admin: partner-broker lock settings
+export interface AdminBrokerSettings {
+  brokerLockEnabled: boolean
+  brokerPatterns: string[]
+  brokerDisplayName: string
+  brokerReferralUrl: string
+}
+
+// 自动仓位管理设置（PRO 专属）；阈值以 R 为单位（R = 开仓时的止损距离）
+// auto position-management settings (PRO only); thresholds in R units
+// (R = the stop distance at open)
+export interface AutoManageSettings {
+  enabled: boolean
+  beEnabled: boolean
+  beTriggerR: number
+  trailEnabled: boolean
+  trailTriggerR: number
+  trailDistanceR: number
+  ptpEnabled: boolean
+  ptpTriggerR: number
+  ptpFraction: number
+}
+
 export interface User {
   id: string
   email: string
+  role: UserRole
+  plan: UserPlan
+}
+
+// 管理后台：用户列表条目 / admin: one row in the user list
+export interface AdminUser {
+  id: string
+  email: string
+  role: UserRole
+  plan: UserPlan
+  planExpiresAt: string | null
+  planNote: string | null
+  createdAt: string | null
+  lastActiveAt: string | null
+  mt5AccountCount: number
+}
+
+// 管理后台：基础运营指标 / admin: basic operating metrics
+export interface AdminMetrics {
+  totalUsers: number
+  dau: number
+  wau: number
+  planCounts: Record<string, number>
+  signupsLast7d: Array<{ date: string; count: number }>
 }
 
 export interface Signal {

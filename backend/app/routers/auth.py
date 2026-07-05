@@ -19,6 +19,10 @@ from app.schemas import AuthRequest, AuthResponse, GoogleAuthRequest, UserOut
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _user_out(user: User) -> UserOut:
+    return UserOut(id=user.id, email=user.email, role=user.role, plan=user.plan)
+
+
 @router.post("/register", response_model=AuthResponse)
 @limiter.limit(settings.RATE_LIMIT_REGISTER)
 def register(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
@@ -40,7 +44,7 @@ def register(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
     db.refresh(user)
 
     token = create_access_token(user.id)
-    return AuthResponse(token=token, user=UserOut(id=user.id, email=user.email))
+    return AuthResponse(token=token, user=_user_out(user))
 
 
 @router.post("/google", response_model=AuthResponse)
@@ -71,7 +75,7 @@ def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends
         db.refresh(user)
 
     token = create_access_token(user.id)
-    return AuthResponse(token=token, user=UserOut(id=user.id, email=user.email))
+    return AuthResponse(token=token, user=_user_out(user))
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -83,4 +87,4 @@ def login(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="邮箱或密码错误 / Invalid email or password")
 
     token = create_access_token(user.id)
-    return AuthResponse(token=token, user=UserOut(id=user.id, email=user.email))
+    return AuthResponse(token=token, user=_user_out(user))

@@ -20,6 +20,7 @@ from app.models import Signal
 from app.schemas import SignalOut
 from app.services.connection_manager import manager
 from app.services.push_dispatch import dispatch_push_async
+from app.services.signal_broadcast import broadcast_signal_new_free_tier, broadcast_signal_new_realtime
 
 logger = logging.getLogger("prismx.engine")
 
@@ -125,12 +126,21 @@ def _serialize(sig: Signal) -> dict:
     ).model_dump(mode="json")
 
 
-def _expire_stale_signals() -> list[str]:
-    """标记到期信号为 EXPIRED，返回其 id（同步 DB 操作，放线程池执行）。
-    Mark expired signals as EXPIRED and return their ids (blocking DB work,
-    run in a thread pool)."""
+def _expire_stale_signals() -> list[dict]:
+    """标记到期信号为 EXPIRED，返回其完整序列化载荷（同步 DB 操作，放线程池执行）。
+
+    返回完整载荷而非仅 id：FREE 等级第一次看到某条信号，正是它过期的这一刻，
+    需要连同最终状态一起推给他们（见 signal_broadcast.broadcast_signal_new_free_tier）。
+
+    Mark expired signals as EXPIRED and return their full serialized payloads
+    (blocking DB work, run in a thread pool).
+
+    Returns full payloads, not just ids: the moment a signal expires is
+    exactly when FREE-tier users see it for the first time, and they need
+    the full payload (see signal_broadcast.broadcast_signal_new_free_tier).
+    """
     db = SessionLocal()
-    expired_ids: list[str] = []
+    expired_payloads: list[dict] = []
     try:
         now = datetime.now(timezone.utc)
         active = (
@@ -138,27 +148,32 @@ def _expire_stale_signals() -> list[str]:
             .filter(Signal.status == "ACTIVE", Signal.expire_at.isnot(None))
             .all()
         )
+        newly_expired: list[Signal] = []
         for s in active:
             exp = s.expire_at
             if exp.tzinfo is None:
                 exp = exp.replace(tzinfo=timezone.utc)
             if exp < now:
                 s.status = "EXPIRED"
-                expired_ids.append(s.id)
-        if expired_ids:
+                newly_expired.append(s)
+        if newly_expired:
             db.commit()
+            expired_payloads = [_serialize(s) for s in newly_expired]
     finally:
         db.close()
-    return expired_ids
+    return expired_payloads
 
 
 async def signal_expiry_loop() -> None:
-    """独立的信号过期扫描任务：到期即广播 SIGNAL_EXPIRED。
+    """独立的信号过期扫描任务：到期即广播 SIGNAL_EXPIRED，并让 FREE 等级
+    第一次看到这条已过期的信号。
 
     与模拟信号引擎解耦——关闭 ENABLE_MOCK_SIGNAL_ENGINE 接入真实信号后，
     webhook 信号的过期仍能实时广播到前端（此前广播只挂在引擎循环里）。
 
-    Standalone expiry sweep: broadcasts SIGNAL_EXPIRED as signals lapse.
+    Standalone expiry sweep: broadcasts SIGNAL_EXPIRED, and gives FREE-tier
+    users their first look at this now-expired signal.
+
     Decoupled from the mock engine so webhook signals still expire in real
     time on the frontend once ENABLE_MOCK_SIGNAL_ENGINE is turned off (the
     broadcast used to live only inside the engine loop).
@@ -168,9 +183,12 @@ async def signal_expiry_loop() -> None:
     while True:
         await asyncio.sleep(5)
         try:
-            expired_ids = await run_in_threadpool(_expire_stale_signals)
-            for sid in expired_ids:
-                await manager.broadcast_to_clients({"type": "SIGNAL_EXPIRED", "data": {"id": sid}})
+            expired_payloads = await run_in_threadpool(_expire_stale_signals)
+            for payload in expired_payloads:
+                # 实时等级早已看到该信号，只需翻转状态 / real-time tiers already have it, just flip status
+                await manager.broadcast_to_clients({"type": "SIGNAL_EXPIRED", "data": {"id": payload["id"]}})
+                # FREE 等级的第一次揭晓：连同最终状态一起推送 / FREE tier's first reveal, with final state
+                await broadcast_signal_new_free_tier(payload)
         except Exception:
             logger.exception("signal_expiry_loop error")
 
@@ -219,8 +237,9 @@ async def signal_loop() -> None:
             finally:
                 db.close()
 
-            # 推送新信号给所有前端 / broadcast new signal to all clients
-            await manager.broadcast_to_clients({"type": "SIGNAL_NEW", "data": payload})
+            # 推送新信号：只给实时等级的在线用户；FREE 等级要等它过期后才看到
+            # broadcast new signal to real-time-tier clients only; FREE tier sees it once expired
+            await broadcast_signal_new_realtime(payload)
             # Web Push 通知：线程池执行，不阻塞引擎与事件循环。
             # Web push runs in a thread pool; the engine and event loop keep ticking.
             await dispatch_push_async(sig)
