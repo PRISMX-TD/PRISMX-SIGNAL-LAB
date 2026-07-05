@@ -465,8 +465,8 @@
     }
   },
   "connStatus": {
-    "online": "MT5 Connected",
-    "offline": "MT5 Disconnected",
+    "online": "Connected",
+    "offline": "Disconnected",
     "account": "Account",
     "reconnecting": "Connection lost, reconnecting… quotes and positions may be stale"
   },

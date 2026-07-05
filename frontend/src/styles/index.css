@@ -158,6 +158,13 @@
   }
 
   .btn-primary,
+  .btn-brand,
+  .btn-ghost {
+    border-radius: 11px;
+    white-space: nowrap;
+  }
+
+  .btn-primary,
   .btn-brand {
     background: linear-gradient(92deg, #7c3aed, #a855f7);
     color: #fff;

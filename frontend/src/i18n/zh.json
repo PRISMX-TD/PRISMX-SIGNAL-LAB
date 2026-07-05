@@ -466,8 +466,8 @@
     }
   },
   "connStatus": {
-    "online": "MT5 已连接",
-    "offline": "MT5 未连接",
+    "online": "已连接",
+    "offline": "未连接",
     "account": "账号",
     "reconnecting": "连接已断开，正在重连……报价与持仓可能已过时"
   },
