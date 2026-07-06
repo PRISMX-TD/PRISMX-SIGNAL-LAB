@@ -73,6 +73,14 @@ export default function ChartsPage() {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
+  // 已应用到图表的最新一根 K 线时间戳（epoch 秒）。lightweight-charts 的
+  // series.update() 只接受 >= 最后一根的时间，喂价时间更早的 bar 会抛错并
+  // 中断本次更新，导致最新价看似“不跳动、刷新才动”。用它过滤掉更早的 bar。
+  // Timestamp (epoch s) of the newest bar already applied to the chart.
+  // series.update() only accepts a time >= the last bar's; an earlier bar
+  // throws and aborts the update, making the price look "stuck until refresh".
+  // Use this to skip any bar older than what we've already applied.
+  const lastTimeRef = useRef<number>(0)
 
   const [symbol, setSymbol] = useState<string>(
     () => {
@@ -197,6 +205,18 @@ export default function ChartsPage() {
     let alive = true
     setHasData(false)
     setStale(false)
+    lastTimeRef.current = 0
+
+    // 把一根 bar 应用到图表：只在其时间 >= 已应用的最新时间时更新，避免
+    // lightweight-charts 对更早时间抛错而中断实时刷新。
+    // Apply one bar to the chart, but only when its time >= the newest applied
+    // time — otherwise lightweight-charts throws on an older time and the live
+    // refresh stalls.
+    const applyBar = (b: Candle) => {
+      if (b.t < lastTimeRef.current) return
+      series.update(toLwPoint(b))
+      lastTimeRef.current = b.t
+    }
 
     // 按品种设置价格轴小数位数，否则默认按 2 位显示，外汇对（如 EURUSD）
     // 会把 1.08543 截断成 1.09 这种不可用的精度。
@@ -211,6 +231,7 @@ export default function ChartsPage() {
       if (!alive) return
       if (r.bars.length > 0) {
         series.setData(r.bars.map(toLwPoint))
+        lastTimeRef.current = r.bars[r.bars.length - 1].t
         chartRef.current?.timeScale().fitContent()
         setHasData(true)
       } else {
@@ -223,7 +244,7 @@ export default function ChartsPage() {
     const timer = window.setInterval(() => {
       chartApi.latest(symbol, interval).then((r) => {
         if (!alive) return
-        for (const b of r.bars) series.update(toLwPoint(b))
+        for (const b of r.bars) applyBar(b)
         if (r.bars.length > 0) setHasData(true)
         const fresh = r.updatedAt != null && Date.now() / 1000 - r.updatedAt < STALE_MS / 1000
         setStale(r.updatedAt != null && !fresh)
