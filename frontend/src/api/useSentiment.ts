@@ -1,14 +1,14 @@
-// Myfxbook 社区情绪 hook：读后端缓存接口，不再直连/代理 Myfxbook。
-// Myfxbook community sentiment hook: reads the backend cache endpoint,
-// no longer fetches/proxies Myfxbook directly.
+// 社区多空情绪 hook：读后端缓存接口（数据源见后端 sentiment_store.py 说明）。
+// Community sentiment hook: reads the backend cache endpoint (data source
+// documented in the backend's sentiment_store.py).
 import { useState, useEffect, useRef } from 'react'
-import { myfxbookApi } from './client'
-import type { MyfxSentiment } from './types'
+import { sentimentApi } from './client'
+import type { SentimentRatio } from './types'
 
 const POLL_MS = 5 * 60 * 1000 // 每 5 分钟刷新一次 / refresh every 5 min
 
-export function useMyfxbookSentiment() {
-  const [sentiment, setSentiment] = useState<Record<string, MyfxSentiment>>({})
+export function useSentiment() {
+  const [sentiment, setSentiment] = useState<Record<string, SentimentRatio>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const mountedRef = useRef(true)
@@ -18,7 +18,7 @@ export function useMyfxbookSentiment() {
 
     const refresh = async () => {
       try {
-        const data = await myfxbookApi.sentiment()
+        const data = await sentimentApi.get()
         if (mountedRef.current) {
           setSentiment(data.sentiment)
           setError(null)

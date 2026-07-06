@@ -12,10 +12,10 @@ from app.core.config import settings
 from app.core.database import init_db
 from app.core.rate_limit import limiter
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
-from app.routers import account, admin, auth, automation, bridge, chart, ea, myfxbook, notifications, orders, signals, trends, webhook, ws
+from app.routers import account, admin, auth, automation, bridge, chart, ea, notifications, orders, sentiment, signals, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.orders import stale_order_monitor_loop
-from app.services.myfxbook_store import myfxbook_sentiment_loop
+from app.services.sentiment_store import sentiment_loop
 from app.services.signal_resolution import stale_signal_sweep_loop
 
 
@@ -37,10 +37,10 @@ async def lifespan(app: FastAPI):
     # 信号胜负判定的保险丝：清扫长期无行情更新的 PENDING 信号 / win-rate safety
     # net: sweep PENDING signals stuck without any price update
     stale_signal_sweep = asyncio.create_task(stale_signal_sweep_loop())
-    # Myfxbook 情绪定时抓取（后端固定 IP，替代此前被拦截的 Vercel Edge 代理）
-    # Myfxbook sentiment periodic fetch (stable backend IP, replaces the old
-    # Vercel Edge proxy that kept getting blocked)
-    myfxbook_task = asyncio.create_task(myfxbook_sentiment_loop())
+    # 社区情绪定时抓取（FXSSI 公开聚合数据，见 services/sentiment_store.py）
+    # Community sentiment periodic fetch (FXSSI's public aggregate data, see
+    # services/sentiment_store.py)
+    sentiment_task = asyncio.create_task(sentiment_loop())
     yield
     # 关闭：停止后台任务 / shutdown: stop background tasks
     if task is not None:
@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
     stale_sweep.cancel()
     expiry_sweep.cancel()
     stale_signal_sweep.cancel()
-    myfxbook_task.cancel()
+    sentiment_task.cancel()
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
@@ -84,7 +84,7 @@ app.include_router(account.router, prefix=settings.API_PREFIX)
 app.include_router(notifications.router, prefix=settings.API_PREFIX)
 app.include_router(admin.router, prefix=settings.API_PREFIX)
 app.include_router(automation.router, prefix=settings.API_PREFIX)
-app.include_router(myfxbook.router, prefix=settings.API_PREFIX)
+app.include_router(sentiment.router, prefix=settings.API_PREFIX)
 # WebSocket 路由 / WebSocket routers
 app.include_router(ws.router)
 

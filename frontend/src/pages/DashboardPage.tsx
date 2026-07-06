@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useLive } from '../store/live'
-import { useMyfxbookSentiment } from '../api/useMyfxbookSentiment'
+import { useSentiment } from '../api/useSentiment'
 import type { Signal } from '../api/types'
 import SignalHero from '../components/signals/SignalHero'
 import SignalExec from '../components/signals/SignalExec'
@@ -24,7 +24,7 @@ export default function DashboardPage() {
   const navigate = useNavigate()
   const { signals, anyOnline, accounts, loaded, quotes, trends } = useLive()
   const now = useNow(1000)
-  const { sentiment: myfxSentiment } = useMyfxbookSentiment()
+  const { sentiment } = useSentiment()
   const focusEntries = useFocusEntries(signals, now)
   const { toast, placeOrder } = useOrderPlacement()
 
@@ -70,7 +70,7 @@ export default function DashboardPage() {
           {cur ? (
             <>
               <div className="dash-col-1">
-                <SignalHero symbol={cur.symbol} cnName={nameOf(cur.symbol)} focusIdx={idx} focusTotal={focusEntries.length} stance={stance} trend={trends[cur.symbol]} myfxSentiment={myfxSentiment[cur.symbol] ?? null} onPrev={goPrev} onNext={goNext} onSelectIdx={setFocusIdx} />
+                <SignalHero symbol={cur.symbol} cnName={nameOf(cur.symbol)} focusIdx={idx} focusTotal={focusEntries.length} stance={stance} trend={trends[cur.symbol]} sentiment={sentiment[cur.symbol] ?? null} onPrev={goPrev} onNext={goNext} onSelectIdx={setFocusIdx} />
                 <QuotesTable quotes={quotes} mt5Online={anyOnline} focusSymbol={cur?.symbol} />
               </div>
               <div className="dash-col-2">

@@ -1,8 +1,8 @@
-// 英雄卡：当前聚焦品种的多周期趋势 + 各周期分布条 + Myfxbook 社区情绪
-// Hero card: current focus symbol trend analysis + per-symbol TF distribution + Myfxbook sentiment
+// 英雄卡：当前聚焦品种的多周期趋势 + 各周期分布条 + 社区多空情绪
+// Hero card: current focus symbol trend analysis + per-symbol TF distribution + community sentiment
 import { memo, type FC, useRef, type TouchEvent as RTouchEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { Trend, TrendDir, MyfxSentiment } from '../../api/types'
+import type { Trend, TrendDir, SentimentRatio } from '../../api/types'
 import { TREND_TFS, type TrendStance } from './signalView'
 
 interface Props {
@@ -12,7 +12,7 @@ interface Props {
   focusTotal: number
   stance: TrendStance
   trend: Trend | undefined
-  myfxSentiment?: MyfxSentiment | null
+  sentiment?: SentimentRatio | null
   onPrev: () => void
   onNext: () => void
   onSelectIdx: (i: number) => void
@@ -26,7 +26,7 @@ const TREND_VIS: Record<TrendDir, { arrow: string; color: string }> = {
 
 const SignalHero: FC<Props> = ({
   symbol, cnName, focusIdx, focusTotal,
-  stance, trend, myfxSentiment, onPrev, onNext, onSelectIdx,
+  stance, trend, sentiment, onPrev, onNext, onSelectIdx,
 }) => {
   const { t } = useTranslation()
   const stanceLabel = stance === 'BULL' ? t('signals.focus.bull') : stance === 'BEAR' ? t('signals.focus.bear') : t('signals.focus.neutral')
@@ -114,25 +114,25 @@ const SignalHero: FC<Props> = ({
         })}
       </div>
 
-      {/* Myfxbook community sentiment bar — BTC not on Myfxbook, show grey */}
+      {/* 社区多空情绪条 —— BTC 无数据来源，显示灰色占位 / community sentiment bar — no data source for BTC, shows grey */}
       <div className="mt-5 relative z-10">
         <div className="flex items-center justify-between text-xs mb-2">
           <span className="text-slate-400">{t('signals.focus.communitySentiment')}</span>
         </div>
-        {myfxSentiment ? (
-          <div className="senti-bar senti-bar--myfx">
-            <i className="a" style={{ width: `${myfxSentiment.longPct}%` }} />
-            <i className="b" style={{ width: `${myfxSentiment.shortPct}%` }} />
+        {sentiment ? (
+          <div className="senti-bar">
+            <i className="a" style={{ width: `${sentiment.longPct}%` }} />
+            <i className="b" style={{ width: `${sentiment.shortPct}%` }} />
           </div>
         ) : (
-          <div className="senti-bar senti-bar--myfx">
+          <div className="senti-bar">
             <i className="a" style={{ width: '50%', background: '#334155' }} />
             <i className="b" style={{ width: '50%', background: '#334155' }} />
           </div>
         )}
         <div className="flex items-center justify-between text-xs mt-2">
-          <span className="text-up font-bold">{t('signals.focus.bull')} {myfxSentiment?.longPct ?? '-'}%</span>
-          <span className="text-down font-bold">{t('signals.focus.bear')} {myfxSentiment?.shortPct ?? '-'}%</span>
+          <span className="text-up font-bold">{t('signals.focus.bull')} {sentiment?.longPct ?? '-'}%</span>
+          <span className="text-down font-bold">{t('signals.focus.bear')} {sentiment?.shortPct ?? '-'}%</span>
         </div>
       </div>
     </section>
