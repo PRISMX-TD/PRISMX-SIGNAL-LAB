@@ -169,6 +169,14 @@ export interface Trend {
   updatedAt?: string
 }
 
+// Myfxbook 社区多空情绪（单品种）：后端定时抓取 + 缓存，见 GET /api/myfxbook/sentiment
+// Myfxbook community long/short sentiment (one symbol): fetched & cached by
+// the backend on a timer, see GET /api/myfxbook/sentiment
+export interface MyfxSentiment {
+  longPct: number
+  shortPct: number
+}
+
 export interface Position {
   ticket?: number
   symbol: string

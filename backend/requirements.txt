@@ -15,3 +15,9 @@ slowapi==0.1.9
 google-auth==2.35.0
 requests==2.32.3
 pywebpush==2.0.0
+# Myfxbook 抓取专用：模拟 Chrome TLS 指纹，绕过 Cloudflare 对 requests/urllib3
+# 握手特征的拦截（见 app/services/myfxbook_store.py 顶部说明）。
+# Used only for Myfxbook scraping: impersonates a Chrome TLS fingerprint to
+# get past Cloudflare's block on requests/urllib3's handshake signature (see
+# the header comment in app/services/myfxbook_store.py).
+curl_cffi==0.15.0

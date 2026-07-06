@@ -2,8 +2,7 @@
 // Hero card: current focus symbol trend analysis + per-symbol TF distribution + Myfxbook sentiment
 import { memo, type FC, useRef, type TouchEvent as RTouchEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { Trend, TrendDir } from '../../api/types'
-import type { MyfxSentiment } from '../../api/myfxbook'
+import type { Trend, TrendDir, MyfxSentiment } from '../../api/types'
 import { TREND_TFS, type TrendStance } from './signalView'
 
 interface Props {

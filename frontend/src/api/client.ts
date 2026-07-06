@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, AdminUser, AdminMetrics, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, AdminUser, AdminMetrics, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, MyfxSentiment } from './types'
 
 const TOKEN_KEY = 'prismx_token'
 
@@ -271,6 +271,17 @@ export const automationApi = {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
+}
+
+// Myfxbook 社区情绪：读后端缓存（后端固定 IP 定时抓取，替代此前被拦截的 Vercel Edge 代理）
+// Myfxbook community sentiment: reads the backend's cache (fetched periodically
+// from the backend's stable IP, replacing the old Vercel Edge proxy that kept
+// getting blocked)
+export const myfxbookApi = {
+  sentiment: () =>
+    request<{ sentiment: Record<string, MyfxSentiment>; updatedAt: number | null; stale: boolean }>(
+      '/myfxbook/sentiment'
+    ),
 }
 
 // 推送订阅 / Push subscriptions
