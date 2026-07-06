@@ -15,3 +15,15 @@ slowapi==0.1.9
 google-auth==2.35.0
 requests==2.32.3
 pywebpush==2.0.0
+# Myfxbook 抓取专用：Cloudflare 对生产 VPS 的 IP 下发 JS 挑战（非简单 403），
+# 纯 HTTP 客户端无法通过，需要真实浏览器引擎跑完挑战 JS（见
+# app/services/myfxbook_store.py 顶部说明）。部署后还需额外跑一次
+# `playwright install --with-deps chromium` 下载浏览器二进制，pip 安装本身
+# 不含浏览器。
+# Used only for Myfxbook scraping: Cloudflare issues a JS challenge (not a
+# plain 403) to the production VPS's IP, which no pure HTTP client can pass —
+# it requires a real browser engine to run the challenge JS (see the header
+# comment in app/services/myfxbook_store.py). After deploying, also run
+# `playwright install --with-deps chromium` once to download the browser
+# binary; the pip package alone doesn't include it.
+playwright==1.47.0

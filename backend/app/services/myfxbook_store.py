@@ -6,31 +6,48 @@ Function 直连（被 Cloudflare 拦截），后改成后端用 curl_cffi 模拟
 能通但 VPS 不行，说明 Cloudflare 是按腾讯云这类云服务商的 IP/ASN 信誉整体拦截，
 不是针对单次请求的指纹/头伪装能绕开的）。
 
-这里改用 Myfxbook 官方 API（需要一个 Myfxbook 账号换 session），是结构性的
-解法：走的是官方开放给第三方开发者的接口，不再是网页抓取，自然不会被同一层
-反爬拦截。免费额度每 24 小时 100 次，因此把刷新间隔放宽到 20 分钟（约 72
-次/天），留出余量给失败重试。
+改用 Myfxbook 官方 API（需要账号换 session）本以为是结构性解法，结果生产 VPS
+上连 `/api/login.json` 都被 Cloudflare 拦下——而且不是简单 403，是一个
+"Just a moment..." 的 **JS 挑战页**（Managed Challenge，需要真正执行 JS 才能
+过）。这说明 Cloudflare 是对这台 VPS 的**整个域名**按 IP/ASN 信誉下发挑战，
+跟走 HTML 页面还是官方 API 无关，任何纯 HTTP 客户端（requests/curl_cffi）
+都无法通过——必须有能跑 JS 的浏览器引擎。
+
+因此这里改用 Playwright 起一个无头 Chromium，真正加载页面、跑完挑战的 JS、
+拿到过关后的 cookie，再读页面里渲染出的 JSON 文本解析（登录和查询复用同一个
+浏览器 context，过一次挑战即可，不用两次都触发）。免费 API 额度每 24 小时
+100 次，因此把刷新间隔放宽到 20 分钟（约 72 次/天），留出余量给失败重试。
+**这依然是尽力而为**：如果这台 VPS 的 IP 触发的是需要人工交互的挑战（而非
+纯 JS 自动过关的 managed 挑战），无头浏览器也无能为力。
 
 Myfxbook community long/short sentiment: official API + in-process cache.
 
-Two earlier attempts scraped myfxbook.com's HTML and regex-parsed it: first
-via a browser/Vercel Edge Function (blocked by Cloudflare), then via the
-backend using curl_cffi (Chrome TLS impersonation) with session warm-up and
-fingerprint rotation (still a consistent 403 from the production VPS — worked
-fine from other networks, pointing to Cloudflare blocking by source IP/ASN
-reputation, a layer that per-request fingerprint spoofing can't get past).
+Switching to Myfxbook's official API (an account exchanged for a session) was
+meant to be the structural fix, but the production VPS gets blocked even on
+`/api/login.json` — not a plain 403, but a "Just a moment..." **JS challenge**
+page (Cloudflare Managed Challenge, which requires actually executing JS to
+pass). This means Cloudflare issues the challenge for the VPS's IP/ASN across
+the **entire domain**, regardless of whether the request targets an HTML page
+or the official API — no pure HTTP client (requests/curl_cffi) can get past
+that; it takes a real JS-executing browser engine.
 
-Switched to Myfxbook's official API (requires an account, exchanged for a
-session) as the structural fix: it's a real third-party developer endpoint,
-not scraping, so it isn't subject to the same anti-bot layer. Free tier is
-100 calls/24h, so the refresh interval here is widened to 20 minutes (~72
-calls/day), leaving headroom for retries.
+So this now uses Playwright to drive a headless Chromium: actually load the
+page, let the challenge JS run to completion, capture the resulting cookies,
+then read and parse the JSON rendered in the page body (login and the outlook
+query share one browser context, so the challenge only needs to be solved
+once per refresh, not twice). The free API tier is 100 calls/24h, so the
+refresh interval is widened to 20 minutes (~72 calls/day), leaving headroom
+for retries. **Still best-effort**: if this VPS's IP triggers a challenge that
+needs human interaction (rather than a pure-JS "managed" challenge), a
+headless browser can't solve it either.
 """
 import asyncio
+import json
 import logging
 import time
+from urllib.parse import urlencode
 
-import requests
+from playwright.sync_api import sync_playwright
 
 from app.core.config import settings
 
@@ -39,14 +56,24 @@ logger = logging.getLogger("prismx.myfxbook")
 LOGIN_URL = "https://www.myfxbook.com/api/login.json"
 OUTLOOK_URL = "https://www.myfxbook.com/api/get-community-outlook.json"
 REFRESH_INTERVAL_SECONDS = 20 * 60  # 20 分钟，配合免费额度 100 次/天留余量
-FETCH_TIMEOUT_SECONDS = 15
+FETCH_TIMEOUT_SECONDS = 20
+
+# 一个能跑挑战 JS 的真实浏览器 UA；无头模式默认的 UA 会带 "Headless" 字样，
+# 单这一点就足以被基础检测识别，所以显式换成普通 Chrome 的 UA。
+# A real-browser UA that can run challenge JS; headless mode's default UA
+# includes the word "Headless", which alone is enough for basic detection to
+# flag it, so it's explicitly swapped for a plain desktop Chrome UA.
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+# Cloudflare JS 挑战跑完到内容真正渲染出来的最长等待时间（秒）。
+# Max time (s) to wait for the Cloudflare JS challenge to finish and the real
+# content to render.
+_CHALLENGE_MAX_WAIT_SECONDS = 20
 
 # 关注的品种（BTC 不在 Myfxbook 上）/ symbols we care about (BTC isn't on Myfxbook)
 WATCH_SYMBOLS = {"EURUSD", "GBPUSD", "USDJPY", "EURGBP", "XAUUSD", "XAGUSD"}
-
-# 当前登录 session；失效（"Invalid session"）时清空并在下次 refresh 重新登录。
-# Current login session; cleared on "Invalid session" so the next refresh re-logs-in.
-_session: str | None = None
 
 # 最近一次成功解析的结果，随时可读；抓取失败时保留旧值不覆盖。
 # Last successfully parsed result; kept as-is (not cleared) when a refresh fails.
@@ -55,53 +82,82 @@ _updated_at: float | None = None
 _last_error: str | None = None
 
 
-def _login() -> str:
-    """用配置的账号换取 session；账号未配置或登录失败均抛异常。
+def _goto_json(page, url: str) -> dict:
+    """导航到一个返回 JSON 的 URL，等 Cloudflare 挑战（若触发）跑完，读取
+    页面渲染出的文本按 JSON 解析。
 
-    登录请求把密码放在 URL query string 里（Myfxbook API 的设计，我们改不了），
-    requests 的 HTTPError 默认 str() 会把完整请求 URL（含密码）带进异常消息——
-    这里统一捕获后抛出不含 URL 的 sanitized 异常，避免密码经 _last_error/日志
-    泄露。
+    浏览器打开一个 JSON 接口时，内容会被渲染进 <body>（通常包在 <pre> 里），
+    用 innerText 取比拿完整 HTML 再挖字符串更直接。
 
-    Exchange the configured account for a session; raises if unconfigured or
-    the login itself fails.
+    Navigate to a URL that returns JSON, wait out the Cloudflare challenge (if
+    triggered), and parse the rendered body text as JSON.
 
-    The login request carries the password in the URL query string (Myfxbook's
-    API design, not something we control); requests' HTTPError.__str__()
-    includes the full request URL (password included) by default. Catch it
-    here and raise a sanitized, URL-free error so the password never leaks via
-    _last_error/logs.
+    When a browser opens a JSON endpoint, the content is rendered into <body>
+    (typically wrapped in a <pre>); reading innerText is more direct than
+    pulling the raw HTML and digging the text out.
+    """
+    page.goto(url, wait_until="domcontentloaded", timeout=FETCH_TIMEOUT_SECONDS * 1000)
+    deadline = time.time() + _CHALLENGE_MAX_WAIT_SECONDS
+    text = page.evaluate("() => document.body.innerText")
+    while "Just a moment" in text and time.time() < deadline:
+        page.wait_for_timeout(1000)
+        text = page.evaluate("() => document.body.innerText")
+    return json.loads(text)
+
+
+def _fetch_via_browser() -> dict[str, dict[str, int]]:
+    """用无头 Chromium 依次访问登录接口、情绪接口；同一个 browser context
+    复用 cookie，挑战只需过一次。账号未配置直接抛异常。阻塞调用，调用方须
+    放线程池执行。
+
+    Visit the login endpoint then the outlook endpoint with a headless
+    Chromium; both share one browser context's cookies, so the challenge only
+    needs solving once. Raises immediately if the account isn't configured.
+    Blocking call; caller must offload to a thread pool.
     """
     if not settings.MYFXBOOK_EMAIL or not settings.MYFXBOOK_PASSWORD:
         raise RuntimeError("MYFXBOOK_EMAIL/MYFXBOOK_PASSWORD not configured")
-    try:
-        resp = requests.get(
-            LOGIN_URL,
-            params={"email": settings.MYFXBOOK_EMAIL, "password": settings.MYFXBOOK_PASSWORD},
-            timeout=FETCH_TIMEOUT_SECONDS,
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled"],
         )
-        resp.raise_for_status()
-        data = resp.json()
-    except requests.RequestException as e:
-        raise RuntimeError(f"Myfxbook login request failed: HTTP {getattr(e.response, 'status_code', '?')}") from None
-    if data.get("error"):
-        # 不把密码回显进异常消息 / never echo the password into the exception message
-        raise RuntimeError(f"Myfxbook login failed: {data.get('message')}")
-    return data["session"]
+        try:
+            context = browser.new_context(user_agent=_BROWSER_UA, locale="en-US")
+            # navigator.webdriver=true 是最基础的无头检测信号之一，抹掉它。
+            # navigator.webdriver=true is one of the most basic headless-detection
+            # signals; strip it.
+            context.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            )
+            page = context.new_page()
 
+            # Playwright 的导航异常常把完整目标 URL 回显进异常文本，登录 URL 里
+            # 带着密码——这里统一捕获后抛出不含 URL 的 sanitized 异常，避免密码
+            # 经 _last_error/日志泄露。
+            # Playwright's navigation exceptions often echo the full target URL
+            # into their text, and the login URL carries the password — catch
+            # broadly here and raise a sanitized, URL-free error so the
+            # password never leaks via _last_error/logs.
+            login_qs = urlencode({"email": settings.MYFXBOOK_EMAIL, "password": settings.MYFXBOOK_PASSWORD})
+            try:
+                login_data = _goto_json(page, f"{LOGIN_URL}?{login_qs}")
+            except Exception:
+                raise RuntimeError("Myfxbook login navigation failed") from None
+            if login_data.get("error"):
+                raise RuntimeError(f"Myfxbook login failed: {login_data.get('message')}")
+            session = login_data["session"]
 
-def _fetch_outlook(session: str) -> dict[str, dict[str, int]]:
-    """用给定 session 拉取社区多空情绪，过滤到我们关注的品种。
-    Fetch community sentiment with the given session, filtered to WATCH_SYMBOLS."""
-    resp = requests.get(
-        OUTLOOK_URL, params={"session": session}, timeout=FETCH_TIMEOUT_SECONDS
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    if data.get("error"):
-        raise RuntimeError(f"Myfxbook outlook failed: {data.get('message')}")
+            outlook_qs = urlencode({"session": session})
+            outlook_data = _goto_json(page, f"{OUTLOOK_URL}?{outlook_qs}")
+        finally:
+            browser.close()
+
+    if outlook_data.get("error"):
+        raise RuntimeError(f"Myfxbook outlook failed: {outlook_data.get('message')}")
     result: dict[str, dict[str, int]] = {}
-    for row in data.get("symbols", []):
+    for row in outlook_data.get("symbols", []):
         name = row.get("name")
         if name in WATCH_SYMBOLS:
             result[name] = {
@@ -113,32 +169,13 @@ def _fetch_outlook(session: str) -> dict[str, dict[str, int]]:
     return result
 
 
-def _fetch_once() -> dict[str, dict[str, int]]:
-    """复用现有 session；若无 session 或已失效（Invalid session）则重新登录一次
-    再重试。阻塞网络调用，调用方须放线程池执行。
-    Reuse the existing session; if there is none, or it's invalid, log in once
-    and retry. Blocking network calls; caller must offload to a thread pool."""
-    global _session
-    if _session is None:
-        _session = _login()
-    try:
-        return _fetch_outlook(_session)
-    except RuntimeError as e:
-        if "session" not in str(e).lower():
-            raise
-        # session 过期：重新登录一次再试，仍失败就让异常往上抛
-        # session expired: re-login once and retry; a second failure propagates
-        _session = _login()
-        return _fetch_outlook(_session)
-
-
 def refresh() -> bool:
     """抓取一次并在成功时更新缓存；失败只记录错误，缓存保持上次的值。
     Fetch once and update the cache on success; on failure, just log — the
     cache keeps its last value. 返回是否成功 / returns whether it succeeded."""
     global _cache, _updated_at, _last_error
     try:
-        parsed = _fetch_once()
+        parsed = _fetch_via_browser()
         _cache = parsed
         _updated_at = time.time()
         _last_error = None
