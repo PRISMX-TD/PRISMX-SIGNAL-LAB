@@ -44,6 +44,7 @@ headless browser can't solve it either.
 import asyncio
 import json
 import logging
+import re
 import time
 from urllib.parse import urlencode
 
@@ -80,6 +81,15 @@ WATCH_SYMBOLS = {"EURUSD", "GBPUSD", "USDJPY", "EURGBP", "XAUUSD", "XAGUSD"}
 _cache: dict[str, dict[str, int]] = {}
 _updated_at: float | None = None
 _last_error: str | None = None
+
+
+def _redact(text: str) -> str:
+    """把异常文本里 URL query string 中的 password 值打码，保留其余诊断信息
+    （异常类型、超时/解析失败等），不像之前那样整个吞掉。
+    Redact the password value out of a URL query string embedded in exception
+    text, while keeping the rest of the diagnostic detail (exception type,
+    timeout vs. parse failure, etc.) instead of swallowing it wholesale."""
+    return re.sub(r"password=[^&\s\"']+", "password=***", text)
 
 
 def _goto_json(page, url: str) -> dict:
@@ -134,17 +144,20 @@ def _fetch_via_browser() -> dict[str, dict[str, int]]:
             page = context.new_page()
 
             # Playwright 的导航异常常把完整目标 URL 回显进异常文本，登录 URL 里
-            # 带着密码——这里统一捕获后抛出不含 URL 的 sanitized 异常，避免密码
-            # 经 _last_error/日志泄露。
+            # 带着密码——这里捕获后只打码 password 的值，其余诊断信息（异常
+            # 类型、是超时还是解析失败等）保留，不再像早前那样整句吞掉。
             # Playwright's navigation exceptions often echo the full target URL
             # into their text, and the login URL carries the password — catch
-            # broadly here and raise a sanitized, URL-free error so the
-            # password never leaks via _last_error/logs.
+            # here and redact only the password value, keeping the rest of the
+            # diagnostic detail (exception type, timeout vs. parse failure,
+            # etc.) instead of swallowing the whole message like before.
             login_qs = urlencode({"email": settings.MYFXBOOK_EMAIL, "password": settings.MYFXBOOK_PASSWORD})
             try:
                 login_data = _goto_json(page, f"{LOGIN_URL}?{login_qs}")
-            except Exception:
-                raise RuntimeError("Myfxbook login navigation failed") from None
+            except Exception as e:
+                raise RuntimeError(
+                    f"Myfxbook login navigation failed: {type(e).__name__}: {_redact(str(e))}"
+                ) from None
             if login_data.get("error"):
                 raise RuntimeError(f"Myfxbook login failed: {login_data.get('message')}")
             session = login_data["session"]
