@@ -108,8 +108,17 @@ def _goto_json(page, url: str) -> dict:
     """
     page.goto(url, wait_until="domcontentloaded", timeout=FETCH_TIMEOUT_SECONDS * 1000)
     deadline = time.time() + _CHALLENGE_MAX_WAIT_SECONDS
+    # 刚 domcontentloaded 时 <body> 可能还没渲染出任何文本（JSON 接口的内容
+    # 靠脚本写入，挑战页的文案也需要 JS 跑一下才出现）——空字符串同样要继续
+    # 等，不能只在看到"Just a moment"字样时才等，否则空文本会被直接当成
+    # "没有挑战"去解析 JSON 而当场失败。
+    # Right after domcontentloaded, <body> may not have any text yet (a JSON
+    # endpoint's content is written by script, and the challenge page's own
+    # text needs a JS tick to appear) — an empty string must also keep
+    # waiting, not just the "Just a moment" case, or the empty text gets
+    # treated as "no challenge" and fails immediately trying to parse it.
     text = page.evaluate("() => document.body.innerText")
-    while "Just a moment" in text and time.time() < deadline:
+    while (not text.strip() or "Just a moment" in text) and time.time() < deadline:
         page.wait_for_timeout(1000)
         text = page.evaluate("() => document.body.innerText")
     return json.loads(text)
