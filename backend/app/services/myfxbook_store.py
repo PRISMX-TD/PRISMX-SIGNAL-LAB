@@ -57,17 +57,33 @@ _last_error: str | None = None
 
 def _login() -> str:
     """用配置的账号换取 session；账号未配置或登录失败均抛异常。
+
+    登录请求把密码放在 URL query string 里（Myfxbook API 的设计，我们改不了），
+    requests 的 HTTPError 默认 str() 会把完整请求 URL（含密码）带进异常消息——
+    这里统一捕获后抛出不含 URL 的 sanitized 异常，避免密码经 _last_error/日志
+    泄露。
+
     Exchange the configured account for a session; raises if unconfigured or
-    the login itself fails."""
+    the login itself fails.
+
+    The login request carries the password in the URL query string (Myfxbook's
+    API design, not something we control); requests' HTTPError.__str__()
+    includes the full request URL (password included) by default. Catch it
+    here and raise a sanitized, URL-free error so the password never leaks via
+    _last_error/logs.
+    """
     if not settings.MYFXBOOK_EMAIL or not settings.MYFXBOOK_PASSWORD:
         raise RuntimeError("MYFXBOOK_EMAIL/MYFXBOOK_PASSWORD not configured")
-    resp = requests.get(
-        LOGIN_URL,
-        params={"email": settings.MYFXBOOK_EMAIL, "password": settings.MYFXBOOK_PASSWORD},
-        timeout=FETCH_TIMEOUT_SECONDS,
-    )
-    resp.raise_for_status()
-    data = resp.json()
+    try:
+        resp = requests.get(
+            LOGIN_URL,
+            params={"email": settings.MYFXBOOK_EMAIL, "password": settings.MYFXBOOK_PASSWORD},
+            timeout=FETCH_TIMEOUT_SECONDS,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.RequestException as e:
+        raise RuntimeError(f"Myfxbook login request failed: HTTP {getattr(e.response, 'status_code', '?')}") from None
     if data.get("error"):
         # 不把密码回显进异常消息 / never echo the password into the exception message
         raise RuntimeError(f"Myfxbook login failed: {data.get('message')}")
