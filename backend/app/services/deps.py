@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import create_access_token, decode_token_payload
 from app.models import User
+from app.services.plan_expiry import downgrade_if_expired
 
 # 滑动续期响应头：token 剩余有效期不足一半时，经此头下发新 token，
 # 前端收到后自动替换本地 token，实现无感续期（不再每天被踢下线）。
@@ -56,6 +57,18 @@ def get_current_user(
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在 / User not found")
+
+    # 会员到期即时生效：本人任一带凭证请求都会自愈等级——到期后第一次请求就把
+    # plan 落库改回 FREE，之后所有 is_realtime_plan(user.plan) 等判断自然看到 FREE。
+    # 不发请求、但仍被 WS 广播/推送直接按 DB plan 命中的在线用户，由后台
+    # plan_expiry_sweep_loop 兜底。
+    # Membership expiry takes effect immediately: any authenticated request by
+    # the user self-heals — the first request after expiry persists plan back to
+    # FREE, so every downstream is_realtime_plan(user.plan) check sees FREE.
+    # Users who don't make requests but are still hit by WS broadcast/push via
+    # the DB plan are covered by the background plan_expiry_sweep_loop.
+    if downgrade_if_expired(db, user):
+        db.commit()
 
     # 滑动续期：剩余有效期不足一半则下发新 token / sliding renewal at half-life
     exp = payload.get("exp")

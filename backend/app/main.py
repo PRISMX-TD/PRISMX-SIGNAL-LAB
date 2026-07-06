@@ -15,6 +15,7 @@ from app.engine.signal_engine import signal_expiry_loop, signal_loop
 from app.routers import account, admin, auth, automation, bridge, chart, ea, notifications, orders, sentiment, signals, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.orders import stale_order_monitor_loop
+from app.services.plan_expiry import plan_expiry_sweep_loop
 from app.services.sentiment_store import sentiment_loop
 from app.services.signal_resolution import stale_signal_sweep_loop
 
@@ -41,6 +42,12 @@ async def lifespan(app: FastAPI):
     # Community sentiment periodic fetch (FXSSI's public aggregate data, see
     # services/sentiment_store.py)
     sentiment_task = asyncio.create_task(sentiment_loop())
+    # 会员到期自动降级：把到期的付费用户落库改回 FREE（读取时即时降级的兜底，
+    # 覆盖只被 WS 广播/推送按 DB plan 命中的在线用户，见 services/plan_expiry.py）
+    # Auto-downgrade expired memberships to FREE in the DB (a safety net behind
+    # the read-time downgrade, covering online users only hit via the DB plan by
+    # WS broadcast/push; see services/plan_expiry.py)
+    plan_expiry_task = asyncio.create_task(plan_expiry_sweep_loop())
     yield
     # 关闭：停止后台任务 / shutdown: stop background tasks
     if task is not None:
@@ -50,6 +57,7 @@ async def lifespan(app: FastAPI):
     expiry_sweep.cancel()
     stale_signal_sweep.cancel()
     sentiment_task.cancel()
+    plan_expiry_task.cancel()
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)

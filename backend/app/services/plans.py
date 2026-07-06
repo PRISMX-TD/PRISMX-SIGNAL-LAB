@@ -22,7 +22,26 @@ Legacy tiers (BETA/PARTNER/ELITE) were merged; existing rows are remapped
 automatically in database._migrate_columns: BETA→PLUS, PARTNER→PRO, ELITE→PRO.
 """
 
+from datetime import datetime, timezone
+
 PLANS = ("FREE", "PLUS", "PRO")
+
+
+def is_plan_expired(plan: str | None, expires_at: datetime | None, now: datetime | None = None) -> bool:
+    """付费等级是否已过期。FREE 无所谓到期；expires_at 为空表示永久（内测/赠送）。
+    纯判定，不碰数据库；实际的落库降级见 services/plan_expiry.py。
+
+    Whether a paid plan has expired. FREE has no expiry; a null expires_at
+    means "never" (beta/comp grants). Pure predicate, no DB — the actual
+    persisted downgrade lives in services/plan_expiry.py.
+    """
+    if plan is None or plan == "FREE" or expires_at is None:
+        return False
+    if now is None:
+        now = datetime.now(timezone.utc)
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at < now
 
 
 def is_realtime_plan(plan: str | None) -> bool:
