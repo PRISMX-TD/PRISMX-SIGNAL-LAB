@@ -82,6 +82,17 @@ class Settings(BaseSettings):
     # WEBHOOK_SECRET — this is not enforced as mandatory in production.
     FEED_TOKEN: str = ""
 
+    # Myfxbook 官方 API 账号：用于换取 session 调用 get-community-outlook.json
+    # 拿社区多空情绪（见 services/myfxbook_store.py）。免费额度 100 次/天，留空
+    # 则该功能静默跳过（情绪条显示占位符，不影响其他功能）。
+    # Myfxbook official API account: exchanged for a session to call
+    # get-community-outlook.json for community sentiment (see
+    # services/myfxbook_store.py). Free tier: 100 calls/day. Empty silently
+    # disables the feature (sentiment bar shows a placeholder; nothing else
+    # is affected).
+    MYFXBOOK_EMAIL: str = ""
+    MYFXBOOK_PASSWORD: str = ""
+
     # 风控 / Risk control
     MAX_VOLUME_PER_ORDER: float = 10.0  # 单笔最大手数 / max lots per order
     MIN_VOLUME_PER_ORDER: float = 0.01  # 单笔最小手数 / min lots per order

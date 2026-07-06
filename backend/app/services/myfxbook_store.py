@@ -1,81 +1,52 @@
-"""Myfxbook 社区多空情绪：后端抓取 + 内存缓存，替代此前的 Vercel Edge Function 代理。
+"""Myfxbook 社区多空情绪：官方 API + 内存缓存。
 
-之前的实现让浏览器/Vercel Edge Function 直接请求 myfxbook.com，被其 Cloudflare
-风控拦截；排查证实**不是** User-Agent/请求头的问题——本地用 `curl` 或 `curl_cffi`
-（模拟 Chrome TLS 指纹）都能稳定拿到 200，但从生产 VPS（腾讯云）用完全一样的
-`curl_cffi` 请求却持续 403。两地结果不同，说明 Cloudflare 这次拦截的不(仅)是
-TLS/HTTP 指纹，很可能是**按来源 IP/ASN 信誉**拦截——腾讯云这类云服务商的出口
-IP 段常被云端风控归为"数据中心流量"直接降权/拦截，这一层无法靠伪装单次请求的
-指纹绕开。
+早先两版实现都是抓 myfxbook.com 的网页再正则解析：先是浏览器/Vercel Edge
+Function 直连（被 Cloudflare 拦截），后改成后端用 curl_cffi 模拟 Chrome TLS
+指纹 + session 热身 + 多套指纹轮换抓（生产 VPS 上依然稳定 403——本地其他网络
+能通但 VPS 不行，说明 Cloudflare 是按腾讯云这类云服务商的 IP/ASN 信誉整体拦截，
+不是针对单次请求的指纹/头伪装能绕开的）。
 
-这里退而求其次，做两件成本低、无需账号的补救：① 用同一个会话先访问首页拿
-cookie，再访问情绪页（模拟真实用户先进站再点子页面，而非冷启动直接打子页面）；
-② 轮流尝试多套 Chrome/Edge TLS 指纹，记住上次成功的指纹下次优先用。如果 VPS
-的 IP/ASN 本身被基于信誉整体拦截，这两招大概率也无效——真正稳定的路子是
-Myfxbook 官方 API（需要账号换 session），见本文件历史 diff 的讨论。
+这里改用 Myfxbook 官方 API（需要一个 Myfxbook 账号换 session），是结构性的
+解法：走的是官方开放给第三方开发者的接口，不再是网页抓取，自然不会被同一层
+反爬拦截。免费额度每 24 小时 100 次，因此把刷新间隔放宽到 20 分钟（约 72
+次/天），留出余量给失败重试。
 
-从后端 VPS 定时抓取一次，解析结果落进程内缓存；接口只读缓存，从不在请求路径上
-现抓，抓取失败时也照常返回上一次成功的数据（陈旧但可用）。
+Myfxbook community long/short sentiment: official API + in-process cache.
 
-Myfxbook community long/short sentiment: fetched and cached in-process on the
-backend, replacing the old Vercel Edge Function proxy. Confirmed this is
-**not** (only) a header/User-Agent problem — `curl`/`curl_cffi` (Chrome TLS
-impersonation) both reliably return 200 locally, but the exact same
-`curl_cffi` call from the production VPS (Tencent Cloud) consistently gets
-403. Different results from different networks point to Cloudflare blocking
-by **source IP/ASN reputation** — cloud-provider egress ranges are commonly
-downranked/blocked as "data center traffic" by bot management, a layer that
-spoofing a single request's fingerprint can't get around.
+Two earlier attempts scraped myfxbook.com's HTML and regex-parsed it: first
+via a browser/Vercel Edge Function (blocked by Cloudflare), then via the
+backend using curl_cffi (Chrome TLS impersonation) with session warm-up and
+fingerprint rotation (still a consistent 403 from the production VPS — worked
+fine from other networks, pointing to Cloudflare blocking by source IP/ASN
+reputation, a layer that per-request fingerprint spoofing can't get past).
 
-Two low-cost, account-free mitigations here: ① warm up a session by visiting
-the homepage first and reusing its cookies for the outlook page (mimicking a
-real user landing then clicking through, rather than a cold hit on the
-sub-page); ② rotate through several Chrome/Edge TLS fingerprints, remembering
-the last one that worked. If the VPS's IP/ASN is reputation-blocked outright,
-neither trick is likely to help — the durable fix is Myfxbook's official API
-(requires an account to exchange for a session).
-
-Fetches periodically from the backend VPS and caches the parsed result; the
-read path never fetches on-demand, and a failed refresh still serves the last
-known-good data (stale but usable).
+Switched to Myfxbook's official API (requires an account, exchanged for a
+session) as the structural fix: it's a real third-party developer endpoint,
+not scraping, so it isn't subject to the same anti-bot layer. Free tier is
+100 calls/24h, so the refresh interval here is widened to 20 minutes (~72
+calls/day), leaving headroom for retries.
 """
 import asyncio
 import logging
-import re
 import time
 
-from curl_cffi import requests
+import requests
+
+from app.core.config import settings
 
 logger = logging.getLogger("prismx.myfxbook")
 
-MYFXBOOK_HOME_URL = "https://www.myfxbook.com/"
-MYFXBOOK_URL = "https://www.myfxbook.com/community/outlook"
-REFRESH_INTERVAL_SECONDS = 5 * 60  # 与前端原轮询周期一致 / matches the old frontend poll cadence
+LOGIN_URL = "https://www.myfxbook.com/api/login.json"
+OUTLOOK_URL = "https://www.myfxbook.com/api/get-community-outlook.json"
+REFRESH_INTERVAL_SECONDS = 20 * 60  # 20 分钟，配合免费额度 100 次/天留余量
 FETCH_TIMEOUT_SECONDS = 15
 
-# 依次尝试的 TLS 指纹；成功过的会被记到 _last_good_impersonate 并优先重试。
-# TLS fingerprints to try in order; the last one that worked is remembered in
-# _last_good_impersonate and tried first next time.
-IMPERSONATE_CANDIDATES = ["chrome124", "chrome131", "chrome120", "chrome110", "edge101"]
-_last_good_impersonate: str | None = None
-
 # 关注的品种（BTC 不在 Myfxbook 上）/ symbols we care about (BTC isn't on Myfxbook)
-WATCH_SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "EURGBP", "XAUUSD", "XAGUSD"]
+WATCH_SYMBOLS = {"EURUSD", "GBPUSD", "USDJPY", "EURGBP", "XAUUSD", "XAGUSD"}
 
-_SYMBOL_PATTERNS = {
-    sym: re.compile(
-        rf"/community/outlook/{sym}[\s\S]*?Short[\s\S]*?(\d+)%[\s\S]*?Long[\s\S]*?(\d+)%",
-        re.IGNORECASE,
-    )
-    for sym in WATCH_SYMBOLS
-}
-
-# curl_cffi 的 impersonate 目标已经带上匹配对应浏览器版本的请求头/TLS 指纹组合，
-# 这里只再加一个 Referer——真正起作用的是 impersonate，不是这些头。
-# curl_cffi's impersonate target already sends a header set matching the
-# corresponding browser version alongside the TLS fingerprint; Referer is the
-# only header added on top — impersonate is what actually matters, not headers.
-_HEADERS = {"Referer": "https://www.myfxbook.com/"}
+# 当前登录 session；失效（"Invalid session"）时清空并在下次 refresh 重新登录。
+# Current login session; cleared on "Invalid session" so the next refresh re-logs-in.
+_session: str | None = None
 
 # 最近一次成功解析的结果，随时可读；抓取失败时保留旧值不覆盖。
 # Last successfully parsed result; kept as-is (not cleared) when a refresh fails.
@@ -84,56 +55,65 @@ _updated_at: float | None = None
 _last_error: str | None = None
 
 
-def _parse(html: str) -> dict[str, dict[str, int]]:
+def _login() -> str:
+    """用配置的账号换取 session；账号未配置或登录失败均抛异常。
+    Exchange the configured account for a session; raises if unconfigured or
+    the login itself fails."""
+    if not settings.MYFXBOOK_EMAIL or not settings.MYFXBOOK_PASSWORD:
+        raise RuntimeError("MYFXBOOK_EMAIL/MYFXBOOK_PASSWORD not configured")
+    resp = requests.get(
+        LOGIN_URL,
+        params={"email": settings.MYFXBOOK_EMAIL, "password": settings.MYFXBOOK_PASSWORD},
+        timeout=FETCH_TIMEOUT_SECONDS,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("error"):
+        # 不把密码回显进异常消息 / never echo the password into the exception message
+        raise RuntimeError(f"Myfxbook login failed: {data.get('message')}")
+    return data["session"]
+
+
+def _fetch_outlook(session: str) -> dict[str, dict[str, int]]:
+    """用给定 session 拉取社区多空情绪，过滤到我们关注的品种。
+    Fetch community sentiment with the given session, filtered to WATCH_SYMBOLS."""
+    resp = requests.get(
+        OUTLOOK_URL, params={"session": session}, timeout=FETCH_TIMEOUT_SECONDS
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("error"):
+        raise RuntimeError(f"Myfxbook outlook failed: {data.get('message')}")
     result: dict[str, dict[str, int]] = {}
-    for sym, pattern in _SYMBOL_PATTERNS.items():
-        m = pattern.search(html)
-        if m:
-            result[sym] = {"shortPct": int(m.group(1)), "longPct": int(m.group(2))}
+    for row in data.get("symbols", []):
+        name = row.get("name")
+        if name in WATCH_SYMBOLS:
+            result[name] = {
+                "shortPct": int(row.get("shortPercentage", 0)),
+                "longPct": int(row.get("longPercentage", 0)),
+            }
+    if not result:
+        raise ValueError("no watched symbols found in Myfxbook outlook response")
     return result
 
 
-def _try_fetch(impersonate: str) -> dict[str, dict[str, int]]:
-    """用指定 TLS 指纹尝试一次：先热身访问首页拿 cookie，复用同一 session
-    访问情绪页，减少"冷启动直接打子页面"的机器人特征。
-    Attempt one fetch with the given TLS fingerprint: warm up by visiting the
-    homepage first, then reuse the same session's cookies for the outlook
-    page — reduces the "cold hit on a sub-page" bot signal."""
-    with requests.Session(impersonate=impersonate) as s:
-        s.get(MYFXBOOK_HOME_URL, headers=_HEADERS, timeout=FETCH_TIMEOUT_SECONDS)
-        resp = s.get(MYFXBOOK_URL, headers=_HEADERS, timeout=FETCH_TIMEOUT_SECONDS)
-    resp.raise_for_status()
-    html = resp.text
-    if not html or len(html) < 1000 or "community/outlook" not in html:
-        raise ValueError("unexpected response body from Myfxbook")
-    parsed = _parse(html)
-    if not parsed:
-        raise ValueError("no sentiment data parsed from Myfxbook response")
-    return parsed
-
-
 def _fetch_once() -> dict[str, dict[str, int]]:
-    """依次尝试各 TLS 指纹（上次成功的排最前），第一个成功的即返回；
-    全部失败则抛出最后一个异常。阻塞网络调用，调用方须放线程池执行。
-    Try each TLS fingerprint in turn (last-successful one first); return on
-    the first success, or raise the last exception if all fail. Blocking
-    network call; caller must offload to a thread pool."""
-    global _last_good_impersonate
-    order = IMPERSONATE_CANDIDATES
-    if _last_good_impersonate and _last_good_impersonate in order:
-        order = [_last_good_impersonate] + [x for x in order if x != _last_good_impersonate]
-
-    last_exc: Exception | None = None
-    for impersonate in order:
-        try:
-            parsed = _try_fetch(impersonate)
-            _last_good_impersonate = impersonate
-            return parsed
-        except Exception as e:  # noqa: BLE001 — try the next fingerprint
-            last_exc = e
-            continue
-    assert last_exc is not None
-    raise last_exc
+    """复用现有 session；若无 session 或已失效（Invalid session）则重新登录一次
+    再重试。阻塞网络调用，调用方须放线程池执行。
+    Reuse the existing session; if there is none, or it's invalid, log in once
+    and retry. Blocking network calls; caller must offload to a thread pool."""
+    global _session
+    if _session is None:
+        _session = _login()
+    try:
+        return _fetch_outlook(_session)
+    except RuntimeError as e:
+        if "session" not in str(e).lower():
+            raise
+        # session 过期：重新登录一次再试，仍失败就让异常往上抛
+        # session expired: re-login once and retry; a second failure propagates
+        _session = _login()
+        return _fetch_outlook(_session)
 
 
 def refresh() -> bool:
