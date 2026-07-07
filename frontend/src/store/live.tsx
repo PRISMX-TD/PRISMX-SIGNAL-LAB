@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, useCallback, useRef, ty
 import type { BrokerLock, MT5Account, Order, Position, Quote, Signal, Trend, WSMessage } from '../api/types'
 import { accountApi, orderApi, signalApi, trendApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
+import { usePrefs } from './prefs'
 
 interface LiveContextValue {
   signals: Signal[]
@@ -65,6 +66,7 @@ function capExpired(signals: Signal[]): Signal[] {
 }
 
 export function LiveProvider({ children }: { children: ReactNode }) {
+  const { applyRemotePrefs } = usePrefs()
   const [signals, setSignals] = useState<Signal[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [positions, setPositions] = useState<Position[]>([])
@@ -153,6 +155,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         setTrends((prev) => ({ ...prev, [t.symbol]: t }))
         break
       }
+      case 'PREFS_UPDATE': {
+        // 其它设备保存了偏好（如画线）：实时应用到本设备 / another device saved prefs (e.g. drawings)
+        applyRemotePrefs((msg.data as Record<string, unknown>) || {})
+        break
+      }
       case 'ACCOUNTS_STATUS': {
         // 桥接程序上报账号在线变化，拉取最新账号列表 / refresh accounts on status change
         const data = msg.data as { onlineLogins?: string[] }
@@ -164,7 +171,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         break
       }
     }
-  }, [])
+  }, [applyRemotePrefs])
 
   const wsConnected = useClientSocket(handleMessage)
 

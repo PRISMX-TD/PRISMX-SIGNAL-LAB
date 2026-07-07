@@ -17,6 +17,8 @@ interface PrefsContextValue {
   getPref: <T>(ns: string, key: string, fallback: T) => T
   /** 写入偏好值（乐观更新 + 防抖落库）/ write a pref value (optimistic + debounced save) */
   setPref: (ns: string, key: string, value: unknown) => void
+  /** 应用来自其它设备的远端偏好（WS 推送），不触发回存 / apply remote prefs pushed via WS, without saving back */
+  applyRemotePrefs: (data: Record<string, unknown>) => void
 }
 
 const PrefsContext = createContext<PrefsContextValue | null>(null)
@@ -100,12 +102,35 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
     })
   }, [saveToCloud])
 
+  // 应用其它设备经 WebSocket 推来的最新偏好（PREFS_UPDATE）。只更新本地状态与
+  // 缓存, 并把 lastSaved 对齐为该份数据, 从而不会再触发一次回存——否则两台设备
+  // 会互相回声、无限对推。若收到的正是本设备自己刚存的内容(回声), 直接忽略。
+  // Apply the latest prefs pushed from another device via WebSocket. Updates
+  // local state/cache only and aligns lastSaved to this payload so it won't
+  // trigger a save-back (otherwise two devices would echo each other forever).
+  // If it's this device's own echo, ignore it.
+  const applyRemotePrefs = useCallback((data: Record<string, unknown>) => {
+    const doc = data ?? {}
+    const json = JSON.stringify(doc)
+    if (json === lastSaved.current) return
+    lastSaved.current = json
+    localStorage.setItem(PREFS_CACHE_KEY, json)
+    setPrefsState(doc)
+    // 同步云端语言偏好(与初始加载一致)/ sync cloud language preference like initial load
+    const cloudLang = (doc as Record<string, unknown>)?.lang as Record<string, unknown> | undefined
+    const lang = cloudLang?.lang as string | undefined
+    if (lang && (lang === 'zh' || lang === 'en') && lang !== i18n.language) {
+      i18n.changeLanguage(lang)
+      localStorage.setItem('prismx_lang', lang)
+    }
+  }, [])
+
   // 如果已登录但偏好未加载完, 子组件用 localStorage 缓存值先行渲染, 加载完成后自动覆盖。
   // If authed but prefs haven't loaded, children render with cached localStorage values;
   // they will be overridden once cloud prefs arrive.
 
   return (
-    <PrefsContext.Provider value={{ prefs, loaded, getPref, setPref }}>
+    <PrefsContext.Provider value={{ prefs, loaded, getPref, setPref, applyRemotePrefs }}>
       {children}
     </PrefsContext.Provider>
   )

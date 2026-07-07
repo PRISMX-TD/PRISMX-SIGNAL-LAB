@@ -12,12 +12,16 @@
 // in any network environment (including mainland China) — it no longer
 // depends on TradingView's script or data channel. See CHART_SELFHOST_PLAN.md
 // at the repo root.
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createChart, ColorType, type IChartApi, type ISeriesApi, type UTCTimestamp } from 'lightweight-charts'
 import { chartApi } from '../api/client'
 import type { Candle } from '../api/types'
 import { usePrefs } from '../store/prefs'
+import { useLive } from '../store/live'
+import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
+import DrawLayer from '../components/charts/DrawLayer'
+import ChartOrderModal from '../components/ChartOrderModal'
 
 // 固定品种预设：贵金属 / 能源 / 热门货币对。
 // 须与 feeder/chart_feeder.py 的 BASE_SYMBOLS 保持一致（该文件仍会拉取更多品种，
@@ -81,6 +85,12 @@ export default function ChartsPage() {
   // throws and aborts the update, making the price look "stuck until refresh".
   // Use this to skip any bar older than what we've already applied.
   const lastTimeRef = useRef<number>(0)
+  // 当前品种/周期的全部 K 线时间（升序），供画图层把非本周期锚点的时间插值成
+  // 屏幕坐标（画线按品种保存、需跨周期显示）。/ ascending bar times of the current
+  // symbol+interval, used by the draw layer to interpolate an anchor's time to
+  // an x coordinate across intervals (drawings are saved per symbol).
+  const barTimesRef = useRef<number[]>([])
+  const getBarTimes = useCallback(() => barTimesRef.current, [])
 
   const [symbol, setSymbol] = useState<string>(
     () => {
@@ -99,6 +109,28 @@ export default function ChartsPage() {
   // data status: loading / has data / empty (no data for this symbol+interval) / stale
   const [hasData, setHasData] = useState(false)
   const [stale, setStale] = useState(false)
+
+  // 画图层就绪标记：图表实例建好后再挂载 DrawLayer / mount DrawLayer once the chart is built
+  const [drawReady, setDrawReady] = useState(false)
+  // 最新收盘价：喂给画图层做重绘侦测，并作为无实时报价时的下单参考价
+  // latest close: feeds the draw layer's repaint detection and the order modal's fallback price
+  const [lastPrice, setLastPrice] = useState(0)
+  // 手动下单弹窗：null 表示关闭 / manual order modal: null = closed
+  const [orderSide, setOrderSide] = useState<'BUY' | 'SELL' | null>(null)
+
+  const { accounts, quotes } = useLive()
+  const { toast, placeManualOrder } = useOrderPlacement()
+
+  const handleOrderConfirm = async (
+    volume: number,
+    mt5Login: string | null,
+    stopLoss: number | null,
+    takeProfit: number | null,
+  ) => {
+    if (!orderSide) return
+    await placeManualOrder(symbol, orderSide, volume, mt5Login, stopLoss, takeProfit)
+    setOrderSide(null)
+  }
 
   // 云端偏好加载完成后覆盖本地初始值 / override initial values when cloud prefs arrive
   useEffect(() => {
@@ -169,6 +201,7 @@ export default function ChartsPage() {
     })
     chartRef.current = chart
     seriesRef.current = series
+    setDrawReady(true)
 
     // 自适配容器尺寸：手动管理而不是用 lightweight-charts 的 autoSize 选项，
     // 在部分渲染环境下其内部 ResizeObserver 不会触发重绘（canvas 位图分辨率
@@ -195,6 +228,7 @@ export default function ChartsPage() {
       chart.remove()
       chartRef.current = null
       seriesRef.current = null
+      setDrawReady(false)
     }
   }, [])
 
@@ -205,7 +239,9 @@ export default function ChartsPage() {
     let alive = true
     setHasData(false)
     setStale(false)
+    setLastPrice(0)
     lastTimeRef.current = 0
+    barTimesRef.current = []
 
     // 把一根 bar 应用到图表：只在其时间 >= 已应用的最新时间时更新，避免
     // lightweight-charts 对更早时间抛错而中断实时刷新。
@@ -232,6 +268,8 @@ export default function ChartsPage() {
       if (r.bars.length > 0) {
         series.setData(r.bars.map(toLwPoint))
         lastTimeRef.current = r.bars[r.bars.length - 1].t
+        setLastPrice(r.bars[r.bars.length - 1].c)
+        barTimesRef.current = r.bars.map((b) => b.t)
         chartRef.current?.timeScale().fitContent()
         setHasData(true)
       } else {
@@ -245,7 +283,15 @@ export default function ChartsPage() {
       chartApi.latest(symbol, interval).then((r) => {
         if (!alive) return
         for (const b of r.bars) applyBar(b)
-        if (r.bars.length > 0) setHasData(true)
+        // 追加新出现的 bar 时间，保持 barTimesRef 与图表同步 / keep bar times in sync
+        for (const b of r.bars) {
+          const arr = barTimesRef.current
+          if (arr.length && b.t > arr[arr.length - 1]) arr.push(b.t)
+        }
+        if (r.bars.length > 0) {
+          setHasData(true)
+          setLastPrice(r.bars[r.bars.length - 1].c)
+        }
         const fresh = r.updatedAt != null && Date.now() / 1000 - r.updatedAt < STALE_MS / 1000
         setStale(r.updatedAt != null && !fresh)
       }).catch(() => {})
@@ -306,12 +352,40 @@ export default function ChartsPage() {
             {t('charts.stale')}
           </span>
         )}
+
+        {/* 买 / 卖：点击弹出确认弹窗 / Buy / Sell: open the confirm modal */}
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setOrderSide('BUY')}
+            className="rounded-lg px-5 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:brightness-110"
+            style={{ background: 'var(--up)' }}
+          >
+            {t('charts.order.buy')}
+          </button>
+          <button
+            onClick={() => setOrderSide('SELL')}
+            className="rounded-lg px-5 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:brightness-110"
+            style={{ background: 'var(--down)' }}
+          >
+            {t('charts.order.sell')}
+          </button>
+        </div>
       </div>
 
       {/* 图表容器：跟随视口高度自适应，移动端给底部 Tab 栏留空间 */}
       {/* Chart container: viewport-relative height, leaves room for the mobile tab bar */}
       <div className="glass relative overflow-hidden p-1.5 h-[70vh] min-h-[420px] sm:h-[calc(100vh-15rem)]">
         <div ref={containerRef} className="h-full w-full" />
+        {drawReady && chartRef.current && seriesRef.current && containerRef.current && (
+          <DrawLayer
+            chart={chartRef.current}
+            series={seriesRef.current}
+            host={containerRef.current}
+            symbol={symbol}
+            lastPrice={lastPrice}
+            barTimes={getBarTimes}
+          />
+        )}
         {!hasData && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-500">
             {t('charts.empty')}
@@ -330,6 +404,25 @@ export default function ChartsPage() {
           Charting library by TradingView
         </a>
       </p>
+
+      {orderSide && (
+        <ChartOrderModal
+          symbol={symbol}
+          side={orderSide}
+          accounts={accounts}
+          quote={quotes[symbol]}
+          refPrice={lastPrice}
+          digits={SYMBOL_DECIMALS[symbol] ?? 2}
+          onCancel={() => setOrderSide(null)}
+          onConfirm={handleOrderConfirm}
+        />
+      )}
+
+      {toast && (
+        <div className={`fixed bottom-24 left-1/2 z-50 -translate-x-1/2 animate-fade-in-up rounded-xl border px-5 py-3 text-sm shadow-prism sm:bottom-6 ${toastToneClass(toast.kind)}`}>
+          {toast.msg}
+        </div>
+      )}
     </div>
   )
 }

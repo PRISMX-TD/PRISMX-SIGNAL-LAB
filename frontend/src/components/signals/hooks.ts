@@ -76,25 +76,20 @@ export function useOrderPlacement() {
     }
   }, [orders, showToast, t])
 
-  const placeOrder = useCallback(
-    async (
-      signal: Signal,
-      volume: number,
-      mt5Login: string | null,
-      stopLoss: number | null,
+  // 下单 + 等待回执的共享核心；signalId 为 null 即手动下单（图表页）。
+  // Shared submit + receipt core; signalId=null means a manual order (charts page).
+  const submitOrder = useCallback(
+    async (payload: {
+      signalId: string | null
+      symbol: string
+      side: 'BUY' | 'SELL'
+      volume: number
+      mt5Login: string | null
+      stopLoss: number | null
       takeProfit: number | null
-    ) => {
+    }) => {
       // API 错误向上抛给下单弹窗展示 / API errors propagate to the modal
-      const placed = await orderApi.place({
-        signalId: signal.id,
-        symbol: signal.symbol,
-        side: signal.side,
-        volume,
-        clientOrderId: clientOrderId(),
-        mt5Login,
-        stopLoss,
-        takeProfit,
-      })
+      const placed = await orderApi.place({ ...payload, clientOrderId: clientOrderId() })
       refreshAll()
       if (placed.status === 'FILLED') {
         showToast(t('order.filled', { price: placed.filledPrice ?? '-' }), 'success')
@@ -117,7 +112,40 @@ export function useOrderPlacement() {
     [refreshAll, showToast, t]
   )
 
-  return { toast, placeOrder }
+  const placeOrder = useCallback(
+    (
+      signal: Signal,
+      volume: number,
+      mt5Login: string | null,
+      stopLoss: number | null,
+      takeProfit: number | null
+    ) =>
+      submitOrder({
+        signalId: signal.id,
+        symbol: signal.symbol,
+        side: signal.side,
+        volume,
+        mt5Login,
+        stopLoss,
+        takeProfit,
+      }),
+    [submitOrder]
+  )
+
+  // 图表页手动下单（不绑定信号）/ manual order from the charts page (no signal)
+  const placeManualOrder = useCallback(
+    (
+      symbol: string,
+      side: 'BUY' | 'SELL',
+      volume: number,
+      mt5Login: string | null,
+      stopLoss: number | null,
+      takeProfit: number | null
+    ) => submitOrder({ signalId: null, symbol, side, volume, mt5Login, stopLoss, takeProfit }),
+    [submitOrder]
+  )
+
+  return { toast, placeOrder, placeManualOrder }
 }
 
 // 每秒滴答的当前时间，用于实时倒计时 / a per-second ticking clock for live countdowns

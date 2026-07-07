@@ -4,10 +4,12 @@ import json
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.core.database import get_db
 from app.core.security import hash_password, verify_password
 from app.models import MT5Account, User, UserPref
+from app.services.connection_manager import manager
 from app.services.deps import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["account"])
@@ -120,13 +122,33 @@ def get_prefs(
 
 
 @router.put("/prefs", response_model=UserPrefsOut)
-def put_prefs(
+async def put_prefs(
     body: UserPrefsIn,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """整份覆盖保存当前用户的界面偏好 JSON。"""
-    pref = _get_or_create_prefs(db, current_user.id)
-    pref.data = json.dumps(body.data, ensure_ascii=False)
-    db.commit()
+    """整份覆盖保存当前用户的界面偏好 JSON，并实时推送给该用户其它在线设备。
+
+    落库是阻塞的同步操作，放线程池执行，避免卡住事件循环（WS 推送/桥接轮询
+    共用该循环，与 orders/bridge 的写法一致）。保存后经 WebSocket 把最新偏好推
+    给该用户的所有在线连接——其它设备即时收到画线等改动；发起保存的本设备也会
+    收到同一条，但前端是幂等应用、不会再回存，不会形成回环。
+
+    Overwrite-save the prefs JSON and push it live to the user's other devices.
+    The blocking DB write runs in a thread pool so it doesn't stall the event
+    loop (shared by WS pushes and bridge polling, matching orders/bridge). After
+    saving, the latest prefs are pushed over WebSocket to all of the user's
+    connections — other devices update instantly (drawings, etc.). The device
+    that saved also receives it, but the frontend applies it idempotently
+    without re-saving, so there's no echo loop.
+    """
+    def _save() -> None:
+        pref = _get_or_create_prefs(db, current_user.id)
+        pref.data = json.dumps(body.data, ensure_ascii=False)
+        db.commit()
+
+    await run_in_threadpool(_save)
+    await manager.push_to_client(
+        current_user.id, {"type": "PREFS_UPDATE", "data": body.data}
+    )
     return UserPrefsOut(data=body.data)
