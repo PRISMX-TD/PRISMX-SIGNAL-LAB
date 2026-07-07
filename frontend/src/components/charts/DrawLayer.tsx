@@ -12,8 +12,8 @@ import { useTranslation } from 'react-i18next'
 import type { IChartApi, ISeriesApi, UTCTimestamp } from 'lightweight-charts'
 import { usePrefs } from '../../store/prefs'
 
-type Tool = 'cursor' | 'trend' | 'hline' | 'rect'
-type DrawType = 'trend' | 'hline' | 'rect'
+type Tool = 'cursor' | 'trend' | 'hline' | 'rect' | 'fib'
+type DrawType = 'trend' | 'hline' | 'rect' | 'fib'
 
 // 一个锚点：时间(epoch 秒) + 价格。水平线只用到 price。
 // An anchor point: time (epoch seconds) + price. Horizontal lines use price only.
@@ -39,12 +39,16 @@ interface Props {
   // 当前周期全部 K 线时间（升序）：把非本周期的锚点时间插值成 x 坐标
   // ascending bar times of the current interval, to interpolate off-interval anchors to x
   barTimes: () => number[]
+  // 价格显示小数位（斐波那契价位标签用）/ price precision for Fibonacci level labels
+  digits?: number
 }
 
 // 命中判定容差（屏幕像素）/ hit-test tolerance in screen pixels
-const TOL = 6
-const HANDLE = 7
+const TOL = 8
+const HANDLE = 9
 const COLORS = ['#22d3ee', '#a78bfa', '#2ee07e', '#ff4d67', '#f5c451']
+// 斐波那契回调价位 / Fibonacci retracement levels
+const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]
 
 const uid = () => 'dw_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 
@@ -60,7 +64,7 @@ function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, b
   return Math.hypot(px - cx, py - cy)
 }
 
-export default function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes }: Props) {
+export default function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 2 }: Props) {
   const { t } = useTranslation()
   const { getPref, setPref } = usePrefs()
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -129,7 +133,31 @@ export default function DrawLayer({ chart, series, host, symbol, lastPrice, barT
     [chart, barTimes]
   )
   const yOf = useCallback((p: number) => series.priceToCoordinate(p), [series])
-  const tOf = useCallback((x: number) => chart.timeScale().coordinateToTime(x) as number | null, [chart])
+  // x → 时间：图表数据区内直接换算；落在右侧空白/超出数据范围时，用 logical 索引
+  // 在 barTimes 上插值/外推，避免返回 null——否则拖到空白处一放手画线就被丢弃。
+  // x → time: convert directly inside the data area; when the point lands in the
+  // right-side whitespace or beyond the data range, interpolate/extrapolate over
+  // barTimes via the logical index instead of returning null — otherwise dropping
+  // a shape in the whitespace would discard it on release.
+  const tOf = useCallback(
+    (x: number): number | null => {
+      const ts = chart.timeScale()
+      const exact = ts.coordinateToTime(x) as number | null
+      if (exact != null) return exact
+      const times = barTimes()
+      if (times.length < 2) return exact
+      const logical = ts.coordinateToLogical(x) as number | null
+      if (logical == null) return exact
+      const last = times.length - 1
+      let i0: number
+      if (logical <= 0) i0 = 0
+      else if (logical >= last) i0 = last - 1
+      else i0 = Math.floor(logical)
+      const step = times[i0 + 1] - times[i0]
+      return Math.round(times[i0] + (logical - i0) * step)
+    },
+    [chart, barTimes]
+  )
   const pOf = useCallback((y: number) => series.coordinateToPrice(y) as number | null, [series])
 
   // ---------- 加载/保存（按品种，云端同步）/ load & save (per symbol, cloud sync) ----------
@@ -215,6 +243,42 @@ export default function DrawLayer({ chart, series, host, symbol, lastPrice, barT
           paintHandle(px[0].x, px[0].y)
           paintHandle(px[1].x, px[1].y)
         }
+      } else if (type === 'fib') {
+        const xL = Math.min(px[0].x, px[1].x)
+        const xR = Math.max(px[0].x, px[1].x)
+        const yA = px[0].y // ratio 1（第一个锚点）/ ratio 1 (first anchor)
+        const yB = px[1].y // ratio 0（第二个锚点）/ ratio 0 (second anchor)
+        // 连接两锚点的淡对角线 / faint diagonal joining the two anchors
+        ctx.globalAlpha = 0.45
+        ctx.beginPath()
+        ctx.moveTo(px[0].x, px[0].y)
+        ctx.lineTo(px[1].x, px[1].y)
+        ctx.stroke()
+        ctx.globalAlpha = 1
+        ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace'
+        ctx.textBaseline = 'middle'
+        let prevY: number | null = null
+        for (const lv of FIB_LEVELS) {
+          const ly = yB + (yA - yB) * lv // lv=0 → yB, lv=1 → yA
+          if (prevY != null) {
+            ctx.fillStyle = col + '14'
+            ctx.fillRect(xL, Math.min(prevY, ly), xR - xL, Math.abs(ly - prevY))
+          }
+          prevY = ly
+          ctx.strokeStyle = col
+          ctx.lineWidth = 1
+          ctx.beginPath()
+          ctx.moveTo(xL, ly)
+          ctx.lineTo(xR, ly)
+          ctx.stroke()
+          const price = pOf(ly)
+          ctx.fillStyle = col
+          ctx.fillText(`${(lv * 100).toFixed(1)}%${price != null ? '  ' + price.toFixed(digits) : ''}`, xR + 4, ly)
+        }
+        if (selected) {
+          paintHandle(px[0].x, px[0].y)
+          paintHandle(px[1].x, px[1].y)
+        }
       } else {
         const x = Math.min(px[0].x, px[1].x)
         const y = Math.min(px[0].y, px[1].y)
@@ -237,7 +301,7 @@ export default function DrawLayer({ chart, series, host, symbol, lastPrice, barT
     }
     // 正在绘制/拖动的工作副本 / the in-progress working copy
     if (workRef.current) paint(workRef.current.type, workRef.current.px, workRef.current.color, true)
-  }, [host, toPx])
+  }, [host, toPx, pOf, digits])
 
   // ---------- 画布尺寸自适配 / keep canvas sized to the host ----------
   useEffect(() => {
@@ -312,6 +376,17 @@ export default function DrawLayer({ chart, series, host, symbol, lastPrice, barT
         if (d.type === 'hline') {
           if (Math.abs(y - px[0].y) <= TOL) return d
         } else if (d.type === 'trend') {
+          if (distToSeg(x, y, px[0].x, px[0].y, px[1].x, px[1].y) <= TOL) return d
+        } else if (d.type === 'fib') {
+          const xL = Math.min(px[0].x, px[1].x)
+          const xR = Math.max(px[0].x, px[1].x)
+          if (x >= xL - TOL && x <= xR + TOL) {
+            const yA = px[0].y
+            const yB = px[1].y
+            for (const lv of FIB_LEVELS) {
+              if (Math.abs(y - (yB + (yA - yB) * lv)) <= TOL) return d
+            }
+          }
           if (distToSeg(x, y, px[0].x, px[0].y, px[1].x, px[1].y) <= TOL) return d
         } else {
           const x1 = Math.min(px[0].x, px[1].x)
@@ -452,10 +527,16 @@ export default function DrawLayer({ chart, series, host, symbol, lastPrice, barT
   }
 
   // ---------- 悬停时动态切换 canvas 是否拦截指针 / toggle pointer interception on hover ----------
+  // 监听器挂在 window 的捕获阶段：lightweight-charts 在自己的 canvas 上绑定了
+  // mousemove/mousedown/touchstart 且可能吞掉冒泡，挂 wrapper 冒泡会漏事件导致
+  // “画完的东西点不中”。捕获阶段在图表处理之前必定触发，因此可靠。
+  // The listener is attached to window in the capture phase: lightweight-charts
+  // binds mousemove/mousedown/touchstart on its own canvas and may swallow
+  // bubbling, so a wrapper bubble-phase listener misses events and makes existing
+  // drawings hard to click. Capture always fires before the chart, so it's reliable.
   useEffect(() => {
     const cv = canvasRef.current
-    const wrap = cv?.parentElement
-    if (!cv || !wrap) return
+    if (!cv) return
     const onHover = (e: PointerEvent) => {
       if (dragRef.current) {
         cv.style.pointerEvents = 'auto'
@@ -466,7 +547,13 @@ export default function DrawLayer({ chart, series, host, symbol, lastPrice, barT
         cv.style.cursor = 'crosshair'
         return
       }
-      const { x, y } = localXY(e)
+      const r = cv.getBoundingClientRect()
+      const x = e.clientX - r.left
+      const y = e.clientY - r.top
+      if (x < 0 || y < 0 || x > r.width || y > r.height) {
+        cv.style.pointerEvents = 'none'
+        return
+      }
       const onHandle = hitHandle(x, y) >= 0
       const onBody = onHandle || hitDrawing(x, y) != null
       if (onBody) {
@@ -477,8 +564,8 @@ export default function DrawLayer({ chart, series, host, symbol, lastPrice, barT
         cv.style.cursor = 'default'
       }
     }
-    wrap.addEventListener('pointermove', onHover)
-    return () => wrap.removeEventListener('pointermove', onHover)
+    window.addEventListener('pointermove', onHover, true)
+    return () => window.removeEventListener('pointermove', onHover, true)
   }, [hitHandle, hitDrawing])
 
   // 工具切换：绘制工具下让画布常驻拦截，光标模式交回悬停逻辑
@@ -571,6 +658,11 @@ export default function DrawLayer({ chart, series, host, symbol, lastPrice, barT
           'rect',
           t('charts.draw.rect'),
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="6" width="16" height="12" rx="1" /></svg>
+        )}
+        {toolBtn(
+          'fib',
+          t('charts.draw.fib'),
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5h18M3 10h18M3 14h18M3 19h18" /><path d="M4 19L20 5" opacity="0.5" /></svg>
         )}
 
         <div className="my-0.5 h-px w-full bg-white/10" />

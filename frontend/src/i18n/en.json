@@ -351,6 +351,7 @@
       "trend": "Trend line",
       "hline": "Horizontal line",
       "rect": "Rectangle",
+      "fib": "Fibonacci",
       "color": "Color",
       "delete": "Delete selected",
       "clear": "Clear all",

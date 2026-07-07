@@ -384,6 +384,7 @@ export default function ChartsPage() {
             symbol={symbol}
             lastPrice={lastPrice}
             barTimes={getBarTimes}
+            digits={SYMBOL_DECIMALS[symbol] ?? 2}
           />
         )}
         {!hasData && (
