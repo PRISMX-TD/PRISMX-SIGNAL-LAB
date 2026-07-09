@@ -1,7 +1,7 @@
 // 认证状态 / Auth context
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { User } from '../api/types'
-import { authApi, clearToken, getToken, setToken, setUnauthorizedHandler } from '../api/client'
+import { authApi, clearToken, getToken, setToken, setUnauthorizedHandler, userApi } from '../api/client'
 
 interface AuthContextValue {
   user: User | null
@@ -10,6 +10,7 @@ interface AuthContextValue {
   register: (email: string, password: string) => Promise<void>
   loginWithGoogle: (credential: string) => Promise<void>
   logout: () => void
+  refreshUser: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -61,8 +62,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }
 
+  const refreshUser = async () => {
+    if (!getToken()) return
+    try {
+      const me = await userApi.me()
+      setUser((prev) => {
+        if (!prev) return null
+        return { ...prev, plan: me.plan }
+      })
+      const stored = localStorage.getItem(USER_KEY)
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        parsed.plan = me.plan
+        localStorage.setItem(USER_KEY, JSON.stringify(parsed))
+      }
+    } catch {
+      // token 可能已过期，忽略
+    }
+  }
+
   return (
-    <AuthContext.Provider value={{ user, isAuthed: !!user, login, register, loginWithGoogle, logout }}>
+    <AuthContext.Provider value={{ user, isAuthed: !!user, login, register, loginWithGoogle, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   )

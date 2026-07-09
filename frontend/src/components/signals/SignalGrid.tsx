@@ -3,7 +3,7 @@
 import { type FC, useState, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../../store/prefs'
-import type { Signal } from '../../api/types'
+import type { Signal, UserPlan } from '../../api/types'
 import { calcRiskReward, calcCountdown, fmtTime } from '../../api/utils'
 import { SIGNAL_LIFESPAN_MS, effectiveStatus, rrTone } from './signalView'
 
@@ -13,7 +13,7 @@ interface Props {
   onTrade: (s: Signal) => void
 }
 
-const SignalGrid: FC<Props> = ({ signals, now, onTrade }) => {
+const SignalGrid: FC<Props> = ({ signals, now, onTrade, userPlan }) => {
   const { t } = useTranslation()
   const { getPref, setPref } = usePrefs()
 
@@ -33,11 +33,15 @@ const SignalGrid: FC<Props> = ({ signals, now, onTrade }) => {
   const sideLabel = sideF === 'ALL' ? t('signals.all') : sideF === 'BUY' ? t('common.buy') : t('common.sell')
   const sortLabel = sortF === 'latest' ? t('signals.sort.latest') : t('signals.sort.expiry')
 
+  const isFree = userPlan === 'FREE'
+
   const filtered = useMemo(() => {
     let list = signals
       .filter(s => {
         const eff = effectiveStatus(s, now)
-        if (eff === 'EXPIRED') return false
+        // PRO 用户隐藏已过期信号（他们已通过 WS 实时看过 ACTIVE 阶段）
+        // FREE 用户保留 EXPIRED 信号（这是他们唯一能看到的信号）
+        if (!isFree && eff === 'EXPIRED') return false
         if (sideF !== 'ALL' && s.side !== sideF) return false
         return true
       })

@@ -22,7 +22,7 @@ type SideFilter = 'ALL' | 'BUY' | 'SELL'
 
 export default function OrdersPage() {
   const { t } = useTranslation()
-  const { user } = useAuth()
+  const { user, refreshUser } = useAuth()
   const { orders, positions, accounts, refreshAll } = useLive()
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' | 'info' } | null>(null)
   const toastTimer = useRef<number | undefined>(undefined)
@@ -40,6 +40,7 @@ export default function OrdersPage() {
   const isPro = user?.plan === 'PRO'
 
   useEffect(() => {
+    refreshUser()                        // 每次进入页面刷新 plan，确保管理员升级后即时生效
     automationApi.getSettings().then(setAutoCfg).catch(() => {})
   }, [])
 
