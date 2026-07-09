@@ -11,6 +11,7 @@ interface Props {
   signals: Signal[]
   now: number
   onTrade: (s: Signal) => void
+  userPlan?: UserPlan
 }
 
 const SignalGrid: FC<Props> = ({ signals, now, onTrade, userPlan }) => {
