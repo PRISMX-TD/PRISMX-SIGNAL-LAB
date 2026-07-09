@@ -1,20 +1,39 @@
 // 信号面板独立视图：筛选器 + 信号网格
 // Signal panel view: filters + signal cards grid
-import { type FC, useState, useEffect, useMemo } from 'react'
+import { type FC, memo, useState, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../../store/prefs'
 import type { Signal, UserPlan } from '../../api/types'
-import { calcRiskReward, calcCountdown, fmtTime } from '../../api/utils'
+import { calcRiskReward, calcCountdown, fmtTime, parseTime } from '../../api/utils'
 import { SIGNAL_LIFESPAN_MS, effectiveStatus, rrTone } from './signalView'
+import { useClock } from './hooks'
 
 interface Props {
   signals: Signal[]
-  now: number
   onTrade: (s: Signal) => void
   userPlan?: UserPlan
 }
 
-const SignalGrid: FC<Props> = ({ signals, now, onTrade, userPlan }) => {
+// 倒计时叶子：订阅共享时钟自行每秒刷新，不牵动整张卡片/网格重渲染。
+// Countdown leaf: subscribes to the shared clock and ticks on its own, without
+// dragging the whole card/grid into a per-second re-render.
+const Countdown: FC<{ expireAt: string | null; label: string }> = memo(({ expireAt, label }) => {
+  const now = useClock()
+  const cd = calcCountdown(expireAt, SIGNAL_LIFESPAN_MS, now)
+  return (
+    <>
+      <div className="flex justify-between text-[11px] mb-1">
+        <span className="text-slate-500">{label}</span>
+        <span className="num text-prism-300">{cd?.text ?? '-'}</span>
+      </div>
+      <div className="sig-ttl-bar">
+        <i style={{ width: `${Math.round((cd?.fraction ?? 0) * 100)}%` }} />
+      </div>
+    </>
+  )
+})
+
+const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
   const { t } = useTranslation()
   const { getPref, setPref } = usePrefs()
 
@@ -37,9 +56,15 @@ const SignalGrid: FC<Props> = ({ signals, now, onTrade, userPlan }) => {
   const isFree = userPlan === 'FREE'
 
   const filtered = useMemo(() => {
+    // 到期判定只在信号数组变化时求值（新信号 / WS 置为 EXPIRED 都会触发重算），
+    // 不再依赖每秒的时钟，避免整张网格每秒重新过滤/排序。
+    // Expiry is evaluated only when the signals array changes (a new signal or a
+    // WS EXPIRED flip both trigger it); no longer tied to the per-second clock,
+    // so the whole grid stops re-filtering/sorting every second.
+    const evalNow = Date.now()
     let list = signals
       .filter(s => {
-        const eff = effectiveStatus(s, now)
+        const eff = effectiveStatus(s, evalNow)
         // PRO 用户隐藏已过期信号（他们已通过 WS 实时看过 ACTIVE 阶段）
         // FREE 用户保留 EXPIRED 信号（这是他们唯一能看到的信号）
         if (!isFree && eff === 'EXPIRED') return false
@@ -47,16 +72,13 @@ const SignalGrid: FC<Props> = ({ signals, now, onTrade, userPlan }) => {
         return true
       })
     if (sortF === 'expiry') {
-      list.sort((a, b) => {
-        const ca = calcCountdown(a.expireAt, SIGNAL_LIFESPAN_MS, now)
-        const cb = calcCountdown(b.expireAt, SIGNAL_LIFESPAN_MS, now)
-        return (ca?.remainMs ?? 0) - (cb?.remainMs ?? 0)
-      })
+      // 按到期时间升序 = 按剩余时间升序，无需当前时间 / expireAt asc == remaining asc
+      list.sort((a, b) => (parseTime(a.expireAt)?.getTime() ?? 0) - (parseTime(b.expireAt)?.getTime() ?? 0))
     } else {
       list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     }
     return list
-  }, [signals, now, sideF, sortF])
+  }, [signals, sideF, sortF, isFree])
 
   return (
     <div>
@@ -112,7 +134,6 @@ const SignalGrid: FC<Props> = ({ signals, now, onTrade, userPlan }) => {
         )}
         {filtered.map((sig) => {
           const oRr = calcRiskReward(sig.symbol, sig.entry, sig.stopLoss, sig.takeProfit)
-          const cd = calcCountdown(sig.expireAt, SIGNAL_LIFESPAN_MS, now)
           const isBuy = sig.side === 'BUY'
 
           return (
@@ -151,13 +172,7 @@ const SignalGrid: FC<Props> = ({ signals, now, onTrade, userPlan }) => {
               </div>
 
               <div className="mt-3">
-                <div className="flex justify-between text-[11px] mb-1">
-                  <span className="text-slate-500">{t('signals.focus.remainingTtl')}</span>
-                  <span className="num text-prism-300">{cd?.text ?? '-'}</span>
-                </div>
-                <div className="sig-ttl-bar">
-                  <i style={{ width: `${Math.round((cd?.fraction ?? 0) * 100)}%` }} />
-                </div>
+                <Countdown expireAt={sig.expireAt} label={t('signals.focus.remainingTtl')} />
               </div>
 
               <div className="flex items-center justify-between mt-3">
@@ -177,4 +192,7 @@ const SignalGrid: FC<Props> = ({ signals, now, onTrade, userPlan }) => {
   )
 }
 
-export default SignalGrid
+// memo：signals/onTrade/userPlan 不变时跳过重渲染（如父页因报价刷新而重渲染）。
+// memo: skip re-render when signals/onTrade/userPlan are unchanged (e.g. when the
+// parent page re-renders due to a quote tick).
+export default memo(SignalGrid)

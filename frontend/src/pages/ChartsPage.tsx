@@ -18,7 +18,7 @@ import { createChart, ColorType, type IChartApi, type ISeriesApi, type UTCTimest
 import { chartApi } from '../api/client'
 import type { Candle } from '../api/types'
 import { usePrefs } from '../store/prefs'
-import { useLive } from '../store/live'
+import { useLive, useQuotes } from '../store/live'
 import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import DrawLayer from '../components/charts/DrawLayer'
 import ChartOrderModal from '../components/ChartOrderModal'
@@ -118,7 +118,8 @@ export default function ChartsPage() {
   // 手动下单弹窗：null 表示关闭 / manual order modal: null = closed
   const [orderSide, setOrderSide] = useState<'BUY' | 'SELL' | null>(null)
 
-  const { accounts, quotes } = useLive()
+  const { accounts } = useLive()
+  const quotes = useQuotes()
   const { toast, placeManualOrder } = useOrderPlacement()
 
   const handleOrderConfirm = async (

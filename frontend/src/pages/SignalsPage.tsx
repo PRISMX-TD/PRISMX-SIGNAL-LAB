@@ -4,18 +4,18 @@ import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../store/auth'
-import { useLive } from '../store/live'
+import { useLive, useQuotes } from '../store/live'
 import type { Signal } from '../api/types'
 import SignalGrid from '../components/signals/SignalGrid'
 import SlideOrderModal from '../components/SlideOrderModal'
-import { useNow, useOrderPlacement, toastToneClass } from '../components/signals/hooks'
+import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 
 export default function SignalsPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { user } = useAuth()
-  const { signals, accounts, loaded, quotes } = useLive()
-  const now = useNow(1000)
+  const { signals, accounts, loaded } = useLive()
+  const quotes = useQuotes()
   const [activeSignal, setActiveSignal] = useState<Signal | null>(null)
   const { toast, placeOrder } = useOrderPlacement()
 
@@ -41,7 +41,7 @@ export default function SignalsPage() {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
             {t('signals.focus.backToDashboard', '返回仪表盘')}
           </button>
-          <SignalGrid signals={signals} now={now} onTrade={openTrade} userPlan={user?.plan} />
+          <SignalGrid signals={signals} onTrade={openTrade} userPlan={user?.plan} />
         </div>
       )}
       {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} quote={quotes[activeSignal.symbol]} onCancel={() => setActiveSignal(null)} onConfirm={handleConfirm} />}

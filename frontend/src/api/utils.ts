@@ -26,7 +26,7 @@ export function fmtTime(iso: string | null | undefined): string {
 }
 
 // 解析后端时间为带时区的 Date / parse backend time as a tz-aware Date
-function parseTime(iso: string | null | undefined): Date | null {
+export function parseTime(iso: string | null | undefined): Date | null {
   if (!iso) return null
   const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)
   return new Date(hasTz ? iso : iso + 'Z')

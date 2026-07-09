@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
-import { useLive } from '../store/live'
+import { useLive, useQuotes } from '../store/live'
 import { useSentiment } from '../api/useSentiment'
 import type { Signal } from '../api/types'
 import SignalHero from '../components/signals/SignalHero'
@@ -22,7 +22,8 @@ import type { FocusState } from '../components/signals/signalView'
 export default function DashboardPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { signals, anyOnline, accounts, loaded, quotes, trends } = useLive()
+  const { signals, anyOnline, accounts, loaded, trends } = useLive()
+  const quotes = useQuotes()
   const now = useNow(1000)
   const { sentiment } = useSentiment()
   const focusEntries = useFocusEntries(signals, now)

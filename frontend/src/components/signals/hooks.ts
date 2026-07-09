@@ -1,5 +1,5 @@
 // 信号面板专用 Hook / hooks used by the signals panel
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { orderApi } from '../../api/client'
 import { clientOrderId } from '../../api/utils'
@@ -156,6 +156,39 @@ export function useNow(intervalMs = 1000): number {
     return () => window.clearInterval(t)
   }, [intervalMs])
   return now
+}
+
+// ---------- 全局共享秒级时钟 / global shared per-second clock ----------
+// 单一定时器 + 订阅：只让订阅的叶子节点（如倒计时）重渲染，而不是整个列表；
+// 无订阅者时自动停表，避免空转。
+// One interval + subscribers: only subscribed leaves (e.g. countdowns) re-render,
+// not the whole list; the timer stops when nobody is listening.
+let clockNow = Date.now()
+const clockSubs = new Set<() => void>()
+let clockTimer: number | undefined
+
+function subscribeClock(cb: () => void): () => void {
+  clockSubs.add(cb)
+  if (clockTimer == null) {
+    clockTimer = window.setInterval(() => {
+      clockNow = Date.now()
+      clockSubs.forEach((fn) => fn())
+    }, 1000)
+  }
+  return () => {
+    clockSubs.delete(cb)
+    if (clockSubs.size === 0 && clockTimer != null) {
+      window.clearInterval(clockTimer)
+      clockTimer = undefined
+    }
+  }
+}
+
+// 订阅共享时钟：组件每秒拿到最新时间戳，但不会牵动父组件重渲染。
+// Subscribe to the shared clock: the component gets a fresh timestamp each
+// second without dragging its parent into a re-render.
+export function useClock(): number {
+  return useSyncExternalStore(subscribeClock, () => clockNow, () => clockNow)
 }
 
 // 跟踪新到达的信号 id，用于短暂高亮 / track freshly arrived signal ids for a brief highlight

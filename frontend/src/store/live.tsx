@@ -1,6 +1,6 @@
 // 实时数据共享状态：EA 状态、信号、订单、持仓。
 // Shared live state: EA status, signals, orders, positions.
-import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from 'react'
 import type { BrokerLock, MT5Account, Order, Position, Quote, Signal, Trend, WSMessage } from '../api/types'
 import { accountApi, orderApi, signalApi, trendApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
@@ -9,9 +9,6 @@ import { usePrefs } from './prefs'
 interface LiveContextValue {
   signals: Signal[]
   orders: Order[]
-  positions: Position[]
-  // 实时报价 {symbol: Quote}（由桥接经 WS 推送）/ live quotes pushed via WS
-  quotes: Record<string, Quote>
   // 多周期趋势 {symbol: Trend}（由 TradingView 经 webhook 推送）/ trends pushed via webhook
   trends: Record<string, Trend>
   accounts: MT5Account[]
@@ -36,16 +33,43 @@ interface LiveContextValue {
 }
 
 const LiveContext = createContext<LiveContextValue | null>(null)
+// 高频推送的报价与持仓单独放各自的 Context，避免它们变化时把只关心信号/账号的
+// 组件也一起重渲染。/ Quotes & positions get their own contexts so their frequent
+// updates don't re-render components that only care about signals/accounts.
+const QuotesContext = createContext<Record<string, Quote>>({})
+const PositionsContext = createContext<Position[]>([])
 
 // 失效信号最多保留的条数 / max number of expired signals to keep
 const MAX_EXPIRED = 30
 
+// 浅比较两个对象的自有字段（值均为原始类型时可靠）/ shallow-compare own fields
+function shallowEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (a == null || b == null || typeof a !== 'object' || typeof b !== 'object') return false
+  const ka = Object.keys(a as object)
+  const kb = Object.keys(b as object)
+  if (ka.length !== kb.length) return false
+  for (const k of ka) {
+    if ((a as Record<string, unknown>)[k] !== (b as Record<string, unknown>)[k]) return false
+  }
+  return true
+}
+
 // 内容未变则保留旧引用，避免无意义的整树重渲染（持仓每 1.5 秒、账号每 5 秒
-// 会重复推送相同数据）。/ Keep the previous reference when content is
-// unchanged, so identical pushes (positions every 1.5s, accounts every 5s)
-// don't re-render the whole tree.
+// 会重复推送相同数据）。改用浅比较替代双重 JSON.stringify，省下主线程序列化开销。
+// Keep the previous reference when content is unchanged, so identical pushes
+// (positions every 1.5s, accounts every 5s) don't re-render. Uses a shallow
+// comparison instead of a double JSON.stringify to save main-thread work.
 function keepIfEqual<T>(prev: T, next: T): T {
-  return JSON.stringify(prev) === JSON.stringify(next) ? prev : next
+  if (prev === next) return prev
+  if (Array.isArray(prev) && Array.isArray(next)) {
+    if (prev.length !== next.length) return next
+    for (let i = 0; i < prev.length; i++) {
+      if (!shallowEqual(prev[i], next[i])) return next
+    }
+    return prev
+  }
+  return shallowEqual(prev, next) ? prev : next
 }
 
 // 保留全部有效信号，过期信号只保留最新的 MAX_EXPIRED 条（按生成时间倒序）。
@@ -183,17 +207,30 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const wsDisconnected = everConnected.current && !wsConnected
 
   // 以桥接上报的在线账号作为统一连接状态来源 / unified connection status from bridge accounts
-  const onlineAccounts = accounts.filter((a) => a.online)
+  const onlineAccounts = useMemo(() => accounts.filter((a) => a.online), [accounts])
   const anyOnline = onlineAccounts.length > 0
 
+  // memo 化主 value：仅在这些字段真正变化时才换新引用；报价/持仓走各自 Context，
+  // 因此它们高频更新不会让 useLive() 的消费者重渲染。
+  // Memoize the main value so its identity only changes when these fields change;
+  // quotes/positions live in their own contexts, so their frequent updates never
+  // re-render useLive() consumers.
+  const value = useMemo<LiveContextValue>(
+    () => ({
+      signals, orders, trends, accounts, accountLimit, brokerLock, loaded,
+      anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected,
+    }),
+    [signals, orders, trends, accounts, accountLimit, brokerLock, loaded,
+     anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected]
+  )
+
   return (
-    <LiveContext.Provider
-      value={{
-        signals, orders, positions, quotes, trends, accounts, accountLimit, brokerLock, loaded,
-        anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected,
-      }}
-    >
-      {children}
+    <LiveContext.Provider value={value}>
+      <PositionsContext.Provider value={positions}>
+        <QuotesContext.Provider value={quotes}>
+          {children}
+        </QuotesContext.Provider>
+      </PositionsContext.Provider>
     </LiveContext.Provider>
   )
 }
@@ -202,4 +239,14 @@ export function useLive() {
   const ctx = useContext(LiveContext)
   if (!ctx) throw new Error('useLive must be used within LiveProvider')
   return ctx
+}
+
+// 只订阅实时报价，避免因信号/账号变化而重渲染 / subscribe to quotes only
+export function useQuotes() {
+  return useContext(QuotesContext)
+}
+
+// 只订阅持仓 / subscribe to positions only
+export function usePositions() {
+  return useContext(PositionsContext)
 }

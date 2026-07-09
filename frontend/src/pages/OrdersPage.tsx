@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../store/auth'
-import { useLive } from '../store/live'
+import { useLive, usePositions } from '../store/live'
 import { orderApi, automationApi } from '../api/client'
 import { fmtTime } from '../api/utils'
 import type { AutoManageSettings, OrderStatus } from '../api/types'
@@ -23,7 +23,8 @@ type SideFilter = 'ALL' | 'BUY' | 'SELL'
 export default function OrdersPage() {
   const { t } = useTranslation()
   const { user, refreshUser } = useAuth()
-  const { orders, positions, accounts, refreshAll } = useLive()
+  const { orders, accounts, refreshAll } = useLive()
+  const positions = usePositions()
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' | 'info' } | null>(null)
   const toastTimer = useRef<number | undefined>(undefined)
   const [cancellingId, setCancellingId] = useState<string | null>(null)
