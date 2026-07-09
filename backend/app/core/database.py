@@ -5,13 +5,24 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from app.core.config import settings
 
 # SQLite 需要 check_same_thread=False 以支持多线程 / SQLite needs this for multithreading
-connect_args = (
-    {"check_same_thread": False}
-    if settings.DATABASE_URL.startswith("sqlite")
-    else {}
-)
+_is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+connect_args = {"check_same_thread": False} if _is_sqlite else {}
 
-engine = create_engine(settings.DATABASE_URL, connect_args=connect_args)
+# 连接池参数仅对 Postgres 等真实连接池生效；SQLite 不使用 QueuePool，传了会报错。
+# pool_pre_ping：取用前先探活，跨区/Pooler 断连时自动重连，避免拿到坏连接。
+# Pool params apply to real pools (Postgres); SQLite doesn't use QueuePool.
+# pool_pre_ping checks a connection before use so a dropped cross-region /
+# pooler connection is transparently replaced instead of erroring.
+_engine_kwargs: dict = {"connect_args": connect_args}
+if not _is_sqlite:
+    _engine_kwargs.update(
+        pool_size=settings.DB_POOL_SIZE,
+        max_overflow=settings.DB_MAX_OVERFLOW,
+        pool_recycle=settings.DB_POOL_RECYCLE,
+        pool_pre_ping=True,
+    )
+
+engine = create_engine(settings.DATABASE_URL, **_engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

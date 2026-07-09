@@ -31,6 +31,23 @@ class Settings(BaseSettings):
     # Database (defaults to SQLite; override via DATABASE_URL env for Postgres in prod)
     DATABASE_URL: str = "sqlite:///./prismx.db"
 
+    # 数据库连接池（仅 Postgres 生效；SQLite 忽略）。桥接高频轮询下，可用连接数
+    # 直接决定并发上限。pool_size 是常驻连接，max_overflow 是峰值可临时新增的连接，
+    # 二者之和 = 同时可用的最大连接数。务必与 Supabase Pooler 的 "Pool Size" 上限对齐，
+    # 设得比 Pooler 上限还大不会有额外收益（会话模式下多出的连接只会排队）。
+    # DB connection pool (Postgres only; ignored for SQLite). Under the bridge's
+    # high-frequency polling, the number of usable connections is the direct cap
+    # on concurrency. pool_size = persistent connections; max_overflow = extra
+    # connections spun up at peak; their sum is the max concurrent connections.
+    # Keep this aligned with Supabase Pooler's "Pool Size" — setting it larger
+    # than the pooler's limit gains nothing (extra sessions just queue).
+    DB_POOL_SIZE: int = 15
+    DB_MAX_OVERFLOW: int = 15
+    # 连接回收秒数：超过此空闲时长的连接下次使用前先重建，规避 Supabase Pooler
+    # 主动断开空闲连接后拿到坏连接。/ recycle idle connections to avoid stale ones
+    # dropped by the Supabase pooler.
+    DB_POOL_RECYCLE: int = 1800
+
     # 跨域 / CORS（本地开发 + 生产前端域名 / local dev + production frontend origins）
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",

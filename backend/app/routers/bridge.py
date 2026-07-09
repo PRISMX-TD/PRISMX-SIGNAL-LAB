@@ -3,7 +3,9 @@ Bridge router: the Python desktop app reports multiple MT5 accounts and
 executes order commands via REST + API token.
 """
 import logging
+import time
 from datetime import datetime, timedelta, timezone
+from threading import Lock
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -13,7 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import authenticate_api_token
+from app.core.security import authenticate_api_token, hash_api_token
 from app.models import ClosedTrade, MT5Account, Order, Signal, User
 from app.routers.orders import is_stale_pending, order_update_payload, void_stale_order
 from app.schemas import LOGIN_PATTERN, SUFFIX_PATTERN, AccountSuffixRequest, MT5AccountOut
@@ -53,9 +55,45 @@ def get_bridge_user(
     db: Session = Depends(get_db),
 ) -> User:
     """通过 API Token 鉴权桥接程序 / authenticate bridge app by API token."""
-    user = authenticate_api_token(db, x_api_token)
+    user = _authenticate_cached(db, x_api_token)
     if not user:
         raise HTTPException(status_code=401, detail="API Token 无效 / Invalid API token")
+    return user
+
+
+# ---------- Token 鉴权缓存 / API-token auth cache ----------
+# 桥接每秒发多个请求，每个请求都要查库做 Token 鉴权，是最重复的一笔 DB 开销。
+# 这里按 token 哈希缓存已鉴权用户一小段时间（TTL 秒级），命中即跳过查库。
+# 代价：用户等级变更 / Token 撤销最多延迟 TTL 秒生效——对高频轮询完全可接受。
+# 只读取 user.id / user.plan 这类已加载的标量列，detached 实例访问是安全的。
+# The bridge fires several requests per second and each re-queries the DB just
+# to authenticate its token — the single most repeated DB cost. Cache the
+# authenticated user per token-hash for a few seconds; on a hit we skip the DB
+# query. Cost: a plan change / token revocation takes at most TTL seconds to
+# apply — fine for high-frequency polling. We only read already-loaded scalar
+# columns (user.id / user.plan), which is safe on a detached instance.
+_AUTH_CACHE_TTL = 10.0  # 秒 / seconds
+_auth_cache: dict[str, tuple[float, User]] = {}
+_auth_cache_lock = Lock()
+
+
+def _authenticate_cached(db: Session, x_api_token: str | None) -> User | None:
+    if not x_api_token:
+        return None
+    key = hash_api_token(x_api_token)
+    now = time.monotonic()
+    hit = _auth_cache.get(key)
+    if hit is not None and hit[0] > now:
+        return hit[1]
+    user = authenticate_api_token(db, x_api_token)
+    if user is not None:
+        with _auth_cache_lock:
+            _auth_cache[key] = (now + _AUTH_CACHE_TTL, user)
+            # 简单容量兜底：条目过多时清掉已过期项 / prune expired entries when large
+            if len(_auth_cache) > 5000:
+                for k, (exp, _u) in list(_auth_cache.items()):
+                    if exp <= now:
+                        _auth_cache.pop(k, None)
     return user
 
 
