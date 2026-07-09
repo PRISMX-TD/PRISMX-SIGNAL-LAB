@@ -33,9 +33,9 @@ class User(Base):
     # Power axis: user (default) / admin. Fully independent of `plan` — admin
     # rights don't imply any signal tier, and no plan grants admin rights.
     role = Column(String, default="user", nullable=False)
-    # 商业轴：FREE（默认）/ PLUS / PRO。三级各自的定位与权益见
+    # 商业轴：FREE（默认）/ PRO。两级各自的定位与权益见
     # services/plans.py 顶部说明。
-    # Business axis: FREE (default) / PLUS / PRO. See the header of
+    # Business axis: FREE (default) / PRO. See the header of
     # services/plans.py for what each tier means and grants.
     plan = Column(String, default="FREE", nullable=False)
     # 订阅到期时间，空 = 永久（内部赠送/内测用户不设到期）。

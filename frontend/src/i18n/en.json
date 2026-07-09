@@ -415,7 +415,9 @@
     "filterSide": "Side",
     "filterSymbol": "Symbol",
     "symbolPlaceholder": "e.g. XAUUSD",
-    "cancelSent": "Cancel request sent"
+    "cancelSent": "Cancel request sent",
+    "proExclusive": "PRO Exclusive",
+    "mt5Accounts": "MT5 Account Details"
   },
   "positions": {
     "lots": "lots",

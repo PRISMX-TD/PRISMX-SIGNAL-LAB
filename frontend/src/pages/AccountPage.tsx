@@ -1,10 +1,9 @@
-// 账户详情页 / Account page: profile, MT5 accounts, password, notifications, automation
+// 账户详情页 / Account page: profile, MT5 accounts, password, notifications
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { userApi, notificationApi, pushApi, automationApi } from "../api/client"
+import { userApi, notificationApi, pushApi } from "../api/client"
 import { fmtTime } from "../api/utils"
 import { subscribePush, unsubscribePush, getSWReg } from "../utils/push"
-import type { AutoManageSettings } from "../api/types"
 
 type AccountInfo = Awaited<ReturnType<typeof userApi.me>>
 
@@ -27,11 +26,6 @@ export default function AccountPage() {
   // 分类偏好防抖落库 / debounce saving category prefs
   const catSaveTimer = useRef<number | undefined>(undefined)
 
-  // 自动仓位管理（PRO）/ auto position management (PRO)
-  const [autoCfg, setAutoCfg] = useState<AutoManageSettings | null>(null)
-  const [autoSaving, setAutoSaving] = useState(false)
-  const [autoMsg, setAutoMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
-
   useEffect(() => {
     load()
     // 已授权则后台预热 Service Worker，点开关时即可省去最耗时的注册等待。
@@ -48,36 +42,19 @@ export default function AccountPage() {
   async function load() {
     setLoading(true)
     try {
-      const [infoRes, prefsRes, catsRes, autoRes] = await Promise.all([
+      const [infoRes, prefsRes, catsRes] = await Promise.all([
         userApi.me(),
         notificationApi.getPrefs(),
         notificationApi.getIndicators(),
-        automationApi.getSettings(),
       ])
       setInfo(infoRes)
       setNotifEnabled(prefsRes.enabled)
       setNotifCats(prefsRes.selected_categories)
       setAllCats(catsRes)
-      setAutoCfg(autoRes)
     } catch (err: unknown) {
       console.error("account load:", err)
     } finally {
       setLoading(false)
-    }
-  }
-
-  async function saveAutoCfg() {
-    if (!autoCfg) return
-    setAutoSaving(true)
-    setAutoMsg(null)
-    try {
-      const updated = await automationApi.putSettings(autoCfg)
-      setAutoCfg(updated)
-      setAutoMsg({ kind: "ok", text: t("account.autoSaved") })
-    } catch (err: unknown) {
-      setAutoMsg({ kind: "err", text: err instanceof Error ? err.message : t("account.autoSaveError") })
-    } finally {
-      setAutoSaving(false)
     }
   }
 
@@ -362,131 +339,6 @@ export default function AccountPage() {
               )}
             </div>
           </section>
-
-          {/* 自动仓位管理（PRO）/ auto position management (PRO) */}
-          {autoCfg && (
-            <section className="glass-neon p-5">
-              <div className="flex items-center justify-between">
-                <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-slate-300">
-                  {t("account.autoTitle")}
-                </h3>
-                <span className="tag bg-prism-600/20 text-prism-300">PRO</span>
-              </div>
-              <p className="mt-2 text-xs leading-relaxed text-slate-500">{t("account.autoHint")}</p>
-
-              {info.plan !== "PRO" ? (
-                <p className="mt-3 text-xs text-slate-500">{t("account.autoUpgradeRequired")}</p>
-              ) : (
-                <div className="mt-4 space-y-4">
-                  <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-100">
-                    <input
-                      type="checkbox"
-                      checked={autoCfg.enabled}
-                      onChange={(e) => setAutoCfg({ ...autoCfg, enabled: e.target.checked })}
-                      className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-                    />
-                    {t("account.autoEnable")}
-                  </label>
-
-                  {autoCfg.enabled && (
-                    <div className="space-y-4 rounded-lg border border-white/5 bg-white/[0.03] p-4">
-                      {/* 保本 / break-even */}
-                      <div className="flex flex-wrap items-center gap-3">
-                        <label className="flex w-40 cursor-pointer items-center gap-2 text-sm text-slate-200">
-                          <input
-                            type="checkbox"
-                            checked={autoCfg.beEnabled}
-                            onChange={(e) => setAutoCfg({ ...autoCfg, beEnabled: e.target.checked })}
-                            className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-                          />
-                          {t("account.autoBe")}
-                        </label>
-                        <span className="text-xs text-slate-500">{t("account.autoTriggerAt")}</span>
-                        <input
-                          type="number" step={0.1} min={0.1} max={10}
-                          className="input h-8 w-20 text-xs"
-                          value={autoCfg.beTriggerR}
-                          onChange={(e) => setAutoCfg({ ...autoCfg, beTriggerR: Number(e.target.value) })}
-                        />
-                        <span className="text-xs text-slate-500">R</span>
-                      </div>
-
-                      {/* 追踪止损 / trailing stop */}
-                      <div className="flex flex-wrap items-center gap-3">
-                        <label className="flex w-40 cursor-pointer items-center gap-2 text-sm text-slate-200">
-                          <input
-                            type="checkbox"
-                            checked={autoCfg.trailEnabled}
-                            onChange={(e) => setAutoCfg({ ...autoCfg, trailEnabled: e.target.checked })}
-                            className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-                          />
-                          {t("account.autoTrail")}
-                        </label>
-                        <span className="text-xs text-slate-500">{t("account.autoTriggerAt")}</span>
-                        <input
-                          type="number" step={0.1} min={0.1} max={10}
-                          className="input h-8 w-20 text-xs"
-                          value={autoCfg.trailTriggerR}
-                          onChange={(e) => setAutoCfg({ ...autoCfg, trailTriggerR: Number(e.target.value) })}
-                        />
-                        <span className="text-xs text-slate-500">R · {t("account.autoTrailDistance")}</span>
-                        <input
-                          type="number" step={0.1} min={0.1} max={10}
-                          className="input h-8 w-20 text-xs"
-                          value={autoCfg.trailDistanceR}
-                          onChange={(e) => setAutoCfg({ ...autoCfg, trailDistanceR: Number(e.target.value) })}
-                        />
-                        <span className="text-xs text-slate-500">R</span>
-                      </div>
-
-                      {/* 分批止盈 / partial take-profit */}
-                      <div className="flex flex-wrap items-center gap-3">
-                        <label className="flex w-40 cursor-pointer items-center gap-2 text-sm text-slate-200">
-                          <input
-                            type="checkbox"
-                            checked={autoCfg.ptpEnabled}
-                            onChange={(e) => setAutoCfg({ ...autoCfg, ptpEnabled: e.target.checked })}
-                            className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-                          />
-                          {t("account.autoPtp")}
-                        </label>
-                        <span className="text-xs text-slate-500">{t("account.autoTriggerAt")}</span>
-                        <input
-                          type="number" step={0.1} min={0.1} max={10}
-                          className="input h-8 w-20 text-xs"
-                          value={autoCfg.ptpTriggerR}
-                          onChange={(e) => setAutoCfg({ ...autoCfg, ptpTriggerR: Number(e.target.value) })}
-                        />
-                        <span className="text-xs text-slate-500">R · {t("account.autoPtpFraction")}</span>
-                        <input
-                          type="number" step={5} min={10} max={90}
-                          className="input h-8 w-20 text-xs"
-                          value={Math.round(autoCfg.ptpFraction * 100)}
-                          onChange={(e) => setAutoCfg({ ...autoCfg, ptpFraction: Number(e.target.value) / 100 })}
-                        />
-                        <span className="text-xs text-slate-500">%</span>
-                      </div>
-
-                      <p className="text-[11px] leading-relaxed text-slate-600">{t("account.autoScopeNote")}</p>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={saveAutoCfg}
-                    disabled={autoSaving}
-                    className="btn-primary px-5 py-2 text-sm disabled:opacity-40"
-                  >
-                    {autoSaving ? t("common.loading") : t("common.save")}
-                  </button>
-                  {autoMsg && (
-                    <p className={`text-sm ${autoMsg.kind === "err" ? "text-down" : "text-up"}`}>
-                      {autoMsg.text}
-                    </p>
-                  )}
-                </div>
-              )}
-            </section>
-          )}
         </>
       )}
     </div>

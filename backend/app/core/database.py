@@ -154,8 +154,7 @@ def _migrate_columns() -> None:
                 conn.execute(text("UPDATE users SET role = 'user' WHERE role IS NULL"))
             if "plan" not in user_cols:
                 conn.execute(text("UPDATE users SET plan = 'FREE' WHERE plan IS NULL"))
-            # 等级体系从五级并为三级（FREE/PLUS/PRO），历史值就地映射（幂等）。
-            # Tier system consolidated from five to three (FREE/PLUS/PRO);
+            # 等级体系并为两级（FREE/PRO），历史值就地映射（幂等）。
+            # Tier system consolidated to two (FREE/PRO);
             # remap legacy values in place (idempotent).
-            conn.execute(text("UPDATE users SET plan = 'PLUS' WHERE plan = 'BETA'"))
-            conn.execute(text("UPDATE users SET plan = 'PRO' WHERE plan IN ('PARTNER', 'ELITE')"))
+            conn.execute(text("UPDATE users SET plan = 'PRO' WHERE plan IN ('BETA', 'PLUS', 'PARTNER', 'ELITE')"))

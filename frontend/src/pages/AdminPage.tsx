@@ -7,7 +7,7 @@ import { fmtTime } from '../api/utils'
 import Select from '../components/Select'
 import type { AdminBrokerSettings, AdminMetrics, AdminUser, UserPlan, UserRole } from '../api/types'
 
-const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PLUS', 'PRO']
+const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
 const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
 
 interface Draft {
@@ -34,7 +34,6 @@ function isDirty(u: AdminUser, d: Draft | undefined): boolean {
 
 const planChipClass: Record<UserPlan, string> = {
   FREE: 'bg-white/5 text-slate-400',
-  PLUS: 'bg-amber-500/15 text-amber-400',
   PRO: 'bg-prism-600/20 text-prism-300',
 }
 

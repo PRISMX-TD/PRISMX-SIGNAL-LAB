@@ -1,7 +1,7 @@
 // 共享类型定义 / Shared type definitions
 
 export type UserRole = 'user' | 'admin'
-export type UserPlan = 'FREE' | 'PLUS' | 'PRO'
+export type UserPlan = 'FREE' | 'PRO'
 
 // 合作券商锁的展示信息（绑定页提示用）/ partner-broker lock display info for the Bind page
 export interface BrokerLock {

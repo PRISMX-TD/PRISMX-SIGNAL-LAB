@@ -52,7 +52,7 @@ class AdminUserOut(BaseModel):
 class AdminUserUpdate(BaseModel):
     # 仅传入要修改的字段；省略的字段保持不变 / only send fields to change; omitted ones are left alone
     role: Literal["user", "admin"] | None = None
-    plan: Literal["FREE", "PLUS", "PRO"] | None = None
+    plan: Literal["FREE", "PRO"] | None = None
     # 显式传 null 表示清除到期时间（永久）；不传表示不修改。用 sentinel 区分二者较繁琐，
     # 这里采用「传字段就是要设置这个值，包括 None」的简单约定，交由前端保证语义。
     # Explicit null clears the expiry (never expires); omitting the field

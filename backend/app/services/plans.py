@@ -2,29 +2,26 @@
 Subscription plan rules: one place to decide "can this plan do X", instead of
 scattering `if user.plan == "PRO"` checks across routers.
 
-三级制 / Three tiers:
+两级制 / Two tiers:
 - FREE：信任层——延迟信号、公开胜率，几乎不能实操。
-- PLUS：完整核心体验（实时信号、一键下单、推送、个人胜率），限 1 个 MT5 账户。
-  内测用户、合作券商返佣客户、未来的低档订阅都放这一级（管理后台手动升级）。
-- PRO：PLUS 全部 + MT5 账户数不限；未来的高级权益（新品种优先等）也挂这里。
+- PRO：完整核心体验（实时信号、一键下单、推送、个人胜率）+ MT5 账户数不限；
+  未来的高级权益（新品种优先等）也挂这里。管理后台手动升级。
 
 - FREE: the trust layer — delayed signals and the public win rate, little else.
-- PLUS: the full core experience (real-time signals, one-click trading, push,
-  personal win rate) capped at 1 MT5 account. Beta testers, partner-broker
-  rebate clients and a future entry-level subscription all live here
-  (granted manually from the admin panel).
-- PRO: everything in PLUS + unlimited MT5 accounts; future premium perks
-  (e.g. early access to new symbols) attach here too.
+- PRO: the full core experience (real-time signals, one-click trading, push,
+  personal win rate) + unlimited MT5 accounts; future premium perks
+  (e.g. early access to new symbols) attach here too. Granted manually from
+  the admin panel.
 
-旧等级（BETA/PARTNER/ELITE）已合并，历史数据由 database._migrate_columns
-自动映射：BETA→PLUS，PARTNER→PRO，ELITE→PRO。
-Legacy tiers (BETA/PARTNER/ELITE) were merged; existing rows are remapped
-automatically in database._migrate_columns: BETA→PLUS, PARTNER→PRO, ELITE→PRO.
+旧等级（BETA/PARTNER/ELITE/PLUS）已合并，历史数据由 database._migrate_columns
+自动映射：BETA→PRO，PLUS→PRO，PARTNER→PRO，ELITE→PRO。
+Legacy tiers (BETA/PARTNER/ELITE/PLUS) were merged; existing rows are remapped
+automatically in database._migrate_columns: BETA→PRO, PLUS→PRO, PARTNER→PRO, ELITE→PRO.
 """
 
 from datetime import datetime, timezone
 
-PLANS = ("FREE", "PLUS", "PRO")
+PLANS = ("FREE", "PRO")
 
 
 def is_plan_expired(plan: str | None, expires_at: datetime | None, now: datetime | None = None) -> bool:
@@ -32,8 +29,8 @@ def is_plan_expired(plan: str | None, expires_at: datetime | None, now: datetime
     纯判定，不碰数据库；实际的落库降级见 services/plan_expiry.py。
 
     Whether a paid plan has expired. FREE has no expiry; a null expires_at
-    means "never" (beta/comp grants). Pure predicate, no DB — the actual
-    persisted downgrade lives in services/plan_expiry.py.
+    means "never" (beta/comp grants). Pure predicate, no DB — the persisted
+    downgrade lives in services/plan_expiry.py.
     """
     if plan is None or plan == "FREE" or expires_at is None:
         return False
@@ -54,7 +51,6 @@ def is_realtime_plan(plan: str | None) -> bool:
 # Max MT5 accounts per plan; None means unlimited.
 ACCOUNT_LIMITS: dict[str, int | None] = {
     "FREE": 1,
-    "PLUS": 1,
     "PRO": None,
 }
 

@@ -416,7 +416,9 @@
     "filterSide": "方向",
     "filterSymbol": "品种",
     "symbolPlaceholder": "如 XAUUSD",
-    "cancelSent": "撤销请求已发出"
+    "cancelSent": "撤销请求已发出",
+    "proExclusive": "PRO专属",
+    "mt5Accounts": "MT5 账户详情"
   },
   "positions": {
     "lots": "手",
