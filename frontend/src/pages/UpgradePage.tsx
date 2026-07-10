@@ -426,7 +426,9 @@ export default function UpgradePage() {
 
             {/* 地址卡 / address card */}
             <div className="glass mt-4 p-6">
-              <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">{t("upgrade.sendTo")} · {meta.label}</div>
+              <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                {t("upgrade.sendTo")} · <span className="text-prism-300">{meta.label}</span>
+              </div>
               <div className="mt-3 break-all rounded-inner border border-line bg-black/20 p-3.5 font-mono text-sm leading-relaxed text-slate-200">
                 {state.payAddress}
               </div>
