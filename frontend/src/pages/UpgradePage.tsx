@@ -163,7 +163,7 @@ export default function UpgradePage() {
   return (
     <div className="relative min-h-screen overflow-x-hidden">
       <AuroraBackground />
-      <div className="relative mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
+      <div className="relative mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
         {state.step === "select" && renderSelect()}
         {state.step === "pay" && renderPay()}
         {state.step === "done" && renderDone()}
@@ -221,11 +221,13 @@ export default function UpgradePage() {
               <span className="font-display text-lg font-bold text-slate-200">{t("upgrade.planFree")}</span>
               {!isPro && <span className="tag bg-white/5 text-slate-400 ring-1 ring-white/10">{t("upgrade.currentPlan")}</span>}
             </div>
-            <div className="mt-4 flex items-baseline gap-1">
-              <span className="font-display text-4xl font-black text-slate-100">$0</span>
+            <div className="mt-4 h-[70px]">
+              <div className="flex items-baseline gap-1">
+                <span className="font-display text-5xl font-black text-slate-100">$0</span>
+              </div>
+              <p className="mt-1.5 text-sm text-slate-500">{t("upgrade.freeTagline")}</p>
             </div>
-            <p className="mt-1 text-sm text-slate-500">{t("upgrade.freeTagline")}</p>
-            <div className="my-6 h-px bg-white/10" />
+            <div className="my-5 h-px bg-white/10" />
             <ul className="flex flex-col gap-3">
               {FEATURES.map((f) => (
                 <li key={f.key} className="flex items-start gap-3 text-sm">
@@ -252,17 +254,21 @@ export default function UpgradePage() {
                 {isPro ? t("upgrade.currentPlan") : t("upgrade.mostPopular")}
               </span>
             </div>
-            <div className="relative mt-4 flex items-baseline gap-2">
-              <span className="font-display text-5xl font-black text-white">${selectedPlan?.price_usd ?? monthly?.price_usd ?? "—"}</span>
-              {selectedPlan?.original_price_usd != null && selectedPlan.original_price_usd !== selectedPlan.price_usd && (
-                <span className="font-display text-xl text-slate-500 line-through">${selectedPlan.original_price_usd}</span>
-              )}
-              <span className="text-sm text-slate-400">/ {chosenPlan === "pro_yearly" ? t("upgrade.yearly") : t("upgrade.monthly")}</span>
+            <div className="relative mt-4 h-[70px]">
+              <div className="flex items-baseline gap-2">
+                <span className="font-display text-5xl font-black text-white">${selectedPlan?.price_usd ?? monthly?.price_usd ?? "—"}</span>
+                {selectedPlan?.original_price_usd != null && selectedPlan.original_price_usd !== selectedPlan.price_usd && (
+                  <span className="font-display text-xl text-slate-500 line-through">${selectedPlan.original_price_usd}</span>
+                )}
+                <span className="text-sm text-slate-400">/ {chosenPlan === "pro_yearly" ? t("upgrade.yearly") : t("upgrade.monthly")}</span>
+              </div>
+              <p className="mt-1.5 text-sm text-prism-300">
+                {chosenPlan === "pro_yearly" && yearly
+                  ? t("upgrade.perMonth", { price: (yearly.price_usd / 12).toFixed(0) })
+                  : t("upgrade.proTagline")}
+              </p>
             </div>
-            {chosenPlan === "pro_yearly" && yearly && (
-              <p className="relative mt-1 text-sm text-prism-300">{t("upgrade.perMonth", { price: (yearly.price_usd / 12).toFixed(0) })}</p>
-            )}
-            <div className="relative my-6 h-px bg-prism-500/20" />
+            <div className="relative my-5 h-px bg-prism-500/20" />
             <ul className="relative flex flex-col gap-3">
               {FEATURES.map((f) => (
                 <li key={f.key} className="flex items-start gap-3 text-sm">
@@ -285,9 +291,18 @@ export default function UpgradePage() {
             {t("upgrade.alreadyPro")}
           </div>
         ) : (
-          <div className="mx-auto mt-12 max-w-2xl">
-            <h3 className="mb-4 text-center text-xs font-bold uppercase tracking-[0.15em] text-slate-500">{t("upgrade.chooseCoin")}</h3>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div className="glass-neon relative mx-auto mt-12 max-w-2xl overflow-hidden p-7 sm:p-8"
+               style={{ boxShadow: "0 24px 60px rgba(0,0,0,0.5)" }}>
+            <div className="pointer-events-none absolute -left-20 -bottom-20 h-52 w-52 rounded-full bg-prism-600/15 blur-[90px]" />
+
+            {/* 步骤标题 / step label */}
+            <div className="relative flex items-center gap-2.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-prism-600/25 text-xs font-bold text-prism-200 ring-1 ring-prism-500/40">1</span>
+              <h3 className="text-sm font-bold text-slate-200">{t("upgrade.chooseCoin")}</h3>
+            </div>
+
+            {/* 币种网格 / coin grid */}
+            <div className="relative mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
               {currencies.map((code) => {
                 const meta = USDT_META[code] ?? { label: code.toUpperCase(), note: "" };
                 const active = chosenCoin === code;
@@ -296,26 +311,60 @@ export default function UpgradePage() {
                   <button
                     key={code}
                     onClick={() => setChosenCoin(code)}
-                    className={`glass flex flex-col items-start p-3.5 text-left transition ${active ? "ring-2 ring-prism-500/60" : "hover:border-prism-500/30"}`}
+                    className={`relative flex flex-col items-start rounded-inner border p-3 text-left transition ${
+                      active
+                        ? "border-prism-500/70 bg-prism-600/10 ring-1 ring-prism-500/40"
+                        : "border-line bg-black/20 hover:border-prism-500/40 hover:bg-white/5"
+                    }`}
                   >
+                    {active && (
+                      <span className="absolute right-2 top-2 flex h-4 w-4 items-center justify-center rounded-full bg-prism-500 text-white">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="h-2.5 w-2.5"><path d="M20 6L9 17l-5-5" /></svg>
+                      </span>
+                    )}
                     <div className="flex items-center gap-1.5">
                       <span className="font-display text-sm font-bold text-slate-100">USDT</span>
-                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-prism-600/25 text-prism-200" : "bg-white/5 text-slate-400"}`}>{meta.label}</span>
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-prism-600/30 text-prism-200" : "bg-white/5 text-slate-400"}`}>{meta.label}</span>
                     </div>
-                    <span className="mt-1 text-[11px] text-slate-500">{isTrc ? t("upgrade.recommended") : meta.note}</span>
+                    <span className={`mt-1 text-[11px] ${isTrc ? "text-prism-300" : "text-slate-500"}`}>{isTrc ? t("upgrade.recommended") : meta.note}</span>
                   </button>
                 );
               })}
             </div>
 
+            {/* 分割线 / divider */}
+            <div className="relative my-6 h-px bg-white/10" />
+
+            {/* 总价行 / total row */}
+            <div className="relative flex items-end justify-between">
+              <div>
+                <div className="text-xs font-medium uppercase tracking-wider text-slate-500">{t("upgrade.totalDue")}</div>
+                <div className="mt-1 text-xs text-slate-500">
+                  {chosenPlan === "pro_yearly" ? t("upgrade.yearly") : t("upgrade.monthly")} · USDT {USDT_META[chosenCoin]?.label ?? ""}
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="font-display text-3xl font-black text-white">${selectedPlan?.price_usd ?? "—"}</span>
+                <span className="ml-1 text-sm text-slate-400">USDT</span>
+              </div>
+            </div>
+
+            {/* 主按钮 / CTA */}
             <button
               onClick={handlePay}
               disabled={loading || !selectedPlan}
-              className="btn-primary mt-7 w-full py-3.5 text-base"
+              className="btn-primary relative mt-6 flex w-full items-center justify-center gap-2 py-3.5 text-base disabled:opacity-60"
             >
-              {loading ? "…" : t("upgrade.payButton", { price: selectedPlan ? `$${selectedPlan.price_usd}` : "" })}
+              {loading ? (
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+              ) : (
+                t("upgrade.payButton", { price: selectedPlan ? `$${selectedPlan.price_usd}` : "" })
+              )}
             </button>
-            <p className="mt-4 text-center text-xs leading-relaxed text-slate-500">{t("upgrade.secureNote")}</p>
+            <p className="relative mt-4 flex items-center justify-center gap-1.5 text-center text-xs leading-relaxed text-slate-500">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5 flex-none"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+              {t("upgrade.secureNote")}
+            </p>
           </div>
         )}
       </div>

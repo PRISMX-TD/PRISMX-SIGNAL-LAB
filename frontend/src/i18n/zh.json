@@ -528,6 +528,8 @@
     "planFree": "免费版",
     "planPro": "PRO 版",
     "freeTagline": "体验基础功能，随时升级",
+    "proTagline": "全功能解锁，即时开通",
+    "totalDue": "应付总额",
     "featSignals": "交易信号",
     "featSignalsFree": "延迟（仅已过期）",
     "featSignalsPro": "实时·即时推送",

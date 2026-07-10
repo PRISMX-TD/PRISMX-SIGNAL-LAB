@@ -527,6 +527,8 @@
     "planFree": "FREE",
     "planPro": "PRO",
     "freeTagline": "Try the basics, upgrade anytime",
+    "proTagline": "Everything unlocked, instant activation",
+    "totalDue": "Total due",
     "featSignals": "Trading signals",
     "featSignalsFree": "Delayed (expired only)",
     "featSignalsPro": "Real-time, instant",
