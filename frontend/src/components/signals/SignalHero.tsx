@@ -3,7 +3,7 @@
 import { memo, type FC, useRef, type TouchEvent as RTouchEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Trend, TrendDir, SentimentRatio } from '../../api/types'
-import { TREND_TFS, type TrendStance } from './signalView'
+import { TREND_TFS, type TrendStance } from './SignalView'
 
 interface Props {
   symbol: string

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 
 import { useTranslation } from 'react-i18next'
 import type { MT5Account, Quote, Signal } from '../api/types'
 import { calcCountdown, contractSize, suggestVolumeByRisk } from '../api/utils'
-import { SIGNAL_LIFESPAN_MS } from './signals/signalView'
+import { SIGNAL_LIFESPAN_MS } from './signals/SignalView'
 import { useNow } from './signals/hooks'
 
 interface Props {

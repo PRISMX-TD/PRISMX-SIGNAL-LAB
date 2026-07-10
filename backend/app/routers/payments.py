@@ -270,14 +270,17 @@ async def ipn_webhook(request: Request, db: Session = Depends(get_db)):
 
 
 def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_data: dict):
-    """同步 NOWPayments 的回调/查询状态到本地 Payment 表，支付完成时升级用户。
+    """同步 NOWPayments 的回调/查询状态到本地 Payment 表，支付完成时升级/续期用户。
 
     Sync NOWPayments callback/query status to local Payment record.
-    On "finished", upgrade user to PRO.
-    """
-    already_finished = record.status == "FINISHED"
+    On "finished", upgrade the user to PRO or extend an existing PRO.
 
-    # 更新本地状态 / update local status
+    IPN webhook 与前端轮询可能并发同步同一笔支付：FINISHED 转换用条件 UPDATE
+    原子抢占，只有抢到的一方给用户加时长，杜绝双重续期。
+    The IPN webhook and the frontend poll may sync the same payment concurrently;
+    the FINISHED transition is claimed via a conditional UPDATE so only one side
+    credits the time — never both.
+    """
     new_status = np_status_val.upper()
     if np_status_val in ("waiting", "confirming", "sending"):
         new_status = "PROCESSING"
@@ -290,19 +293,52 @@ def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_da
     elif np_status_val in ("failed", "refunded"):
         new_status = "FAILED"
 
-    if record.status != new_status:
+    if new_status == "FINISHED":
+        now = datetime.now(timezone.utc)
+        # 原子抢占：只有把状态从非 FINISHED 改成 FINISHED 的这一方负责加时长
+        # Atomic claim: only the session that flips status to FINISHED credits time
+        claimed = (
+            db.query(Payment)
+            .filter(Payment.id == record.id, Payment.status != "FINISHED")
+            .update({"status": "FINISHED", "finished_at": now}, synchronize_session=False)
+        )
+        if claimed:
+            # 锁住用户行，防止同一用户两笔支付同时完成时互相覆盖到期时间
+            # Lock the user row so two payments finishing at once can't clobber
+            # each other's expiry (SQLite ignores FOR UPDATE — fine for tests)
+            user = (
+                db.query(User)
+                .filter(User.id == record.user_id)
+                .with_for_update()
+                .first()
+            )
+            if user:
+                if user.plan == "PRO" and user.plan_expires_at is None:
+                    # 永久 PRO（内测/赠送，无到期时间）：付款不能把「永久」改成有期限
+                    # Permanent PRO (comp grant, no expiry): a payment must not
+                    # replace "never expires" with a deadline — leave it untouched.
+                    pass
+                else:
+                    # 续费从「现有到期时间」与「现在」的较晚者起算，提前续费不损失
+                    # 剩余天数；新购或已过期则从现在起算。
+                    # Renewals extend from the later of the current expiry and now,
+                    # so paying early never loses days; fresh or lapsed starts now.
+                    days = PLAN_DAYS.get(record.plan, 30)
+                    base = now
+                    current = user.plan_expires_at
+                    if user.plan == "PRO" and current is not None:
+                        if current.tzinfo is None:
+                            current = current.replace(tzinfo=timezone.utc)
+                        if current > base:
+                            base = current
+                    user.plan = "PRO"
+                    user.plan_expires_at = base + timedelta(days=days)
+        db.commit()
+        # 让调用方拿到抢占后的最新字段（status/finished_at）
+        # Reload so callers see the claimed values (status/finished_at)
+        db.refresh(record)
+    elif record.status != "FINISHED" and record.status != new_status:
+        # FINISHED 是终态：乱序迟到的旧回调不允许把它改回 PROCESSING 等
+        # FINISHED is terminal — a late out-of-order callback must not regress it
         record.status = new_status
-
-    # 支付完成 → 升级用户 / payment finished → upgrade user
-    if new_status == "FINISHED" and not already_finished:
-        record.finished_at = datetime.now(timezone.utc)
-
-        # 升级用户到 PRO / upgrade user to PRO
-        user = db.query(User).filter(User.id == record.user_id).first()
-        if user and user.plan != "PRO":
-            user.plan = "PRO"
-            # 设置到期时间 / set expiry based on purchased plan
-            days = PLAN_DAYS.get(record.plan, 30)
-            user.plan_expires_at = datetime.now(timezone.utc) + timedelta(days=days)
-
-    db.commit()
+        db.commit()

@@ -4,7 +4,7 @@ import { memo, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Signal } from '../../api/types'
 import { calcRiskReward, calcCountdown, fmtTime } from '../../api/utils'
-import { SIGNAL_LIFESPAN_MS, type FocusState } from './signalView'
+import { SIGNAL_LIFESPAN_MS, type FocusState } from './SignalView'
 
 interface OtherEntry {
   symbol: string

@@ -1,3 +1,4 @@
 # PRISMX Bridge 依赖 / dependencies (Windows only)
 MetaTrader5>=5.0.45
 psutil>=5.9.0
+numpy<2

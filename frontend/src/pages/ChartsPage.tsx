@@ -63,7 +63,7 @@ const POLL_MS = 2000
 // 超过这么久没收到喂价更新，视为数据延迟 / no feed update for this long => stale
 const STALE_MS = 30_000
 
-// 涨跌配色（与 signalView 的 FOCUS_DOT 一致）/ up/down colors (match signalView's FOCUS_DOT)
+// 涨跌配色（与 SignalView 的 FOCUS_DOT 一致）/ up/down colors (match SignalView's FOCUS_DOT)
 const UP_COLOR = '#2ee07e'
 const DOWN_COLOR = '#ff4d67'
 

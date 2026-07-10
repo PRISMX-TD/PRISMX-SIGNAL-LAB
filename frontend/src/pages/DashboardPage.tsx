@@ -16,8 +16,8 @@ import MarketOverview from '../components/signals/MarketOverview'
 import PersonalWinRateCard from '../components/PersonalWinRateCard'
 import SlideOrderModal from '../components/SlideOrderModal'
 import { useFocusEntries, useNow, useOrderPlacement, toastToneClass } from '../components/signals/hooks'
-import { trendStance, type TrendStance } from '../components/signals/signalView'
-import type { FocusState } from '../components/signals/signalView'
+import { trendStance, type TrendStance } from '../components/signals/SignalView'
+import type { FocusState } from '../components/signals/SignalView'
 
 export default function DashboardPage() {
   const { t } = useTranslation()

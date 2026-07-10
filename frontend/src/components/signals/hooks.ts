@@ -11,7 +11,7 @@ import {
   effectiveStatus,
   type FocusEntry,
   type FocusState,
-} from './signalView'
+} from './SignalView'
 
 // ---------- 下单 + 回执提示 / order placement + receipt toasts ----------
 
