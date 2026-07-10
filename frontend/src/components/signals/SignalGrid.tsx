@@ -1,6 +1,7 @@
 // 信号面板独立视图：筛选器 + 信号网格
 // Signal panel view: filters + signal cards grid
 import { type FC, memo, useState, useEffect, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../../store/prefs'
 import type { Signal, UserPlan } from '../../api/types'
@@ -88,6 +89,16 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
         <span className="count-badge">{filtered.length}</span>
         <p>{t('signals.subtitle')}</p>
       </div>
+
+      {/* FREE 用户提醒：升级看实时信号 / FREE tier notice: upgrade for live signals */}
+      {isFree && (
+        <div className="mb-4 rounded-xl border border-prism-400/30 bg-prism-500/10 px-4 py-3 text-sm text-slate-300">
+          {t('upgrade.freeBanner')}{" "}
+          <Link to="/upgrade" className="font-semibold text-prism-400 underline hover:text-prism-300">
+            {t('nav.upgrade')}
+          </Link>
+        </div>
+      )}
 
       {/* Filters（桌面）：单排药丸按钮 / desktop: single-row pill filters */}
       <div className="sig-filters hidden sm:flex">

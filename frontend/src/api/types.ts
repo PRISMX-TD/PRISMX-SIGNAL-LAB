@@ -62,6 +62,16 @@ export interface AdminMetrics {
   signupsLast7d: Array<{ date: string; count: number }>
 }
 
+// 管理后台：订阅定价设置 / admin: subscription pricing settings
+export interface AdminPricingSettings {
+  proMonthlyPrice: number
+  proYearlyPrice: number
+  saleEnabled: boolean
+  salePercent: number
+  saleBadge: string
+  saleEndAt: string
+}
+
 export interface Signal {
   id: string
   symbol: string

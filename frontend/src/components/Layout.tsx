@@ -111,6 +111,12 @@ function TabIcon({ name }: { name: string }) {
           <path d="M9.5 12l1.8 1.8L14.5 10" />
         </svg>
       )
+    case 'upgrade':
+      return (
+        <svg className={c} viewBox="0 0 24 24" {...p}>
+          <polygon points="12 2 22 22 2 22" />
+        </svg>
+      )
     default:
       return null
   }
@@ -172,6 +178,7 @@ export default function Layout() {
     { to: '/bind', icon: 'bind', label: t('nav.bind') },
     { to: '/account', icon: 'account', label: t('nav.account') },
     { to: '/download', icon: 'download', label: t('nav.download') },
+    ...(user?.plan !== 'PRO' ? [{ to: '/upgrade', icon: 'upgrade', label: t('nav.upgrade') }] : []),
     ...(isAdmin ? [{ to: '/admin', icon: 'admin', label: t('nav.admin') }] : []),
   ]
   const moreActive = moreItems.some((m) => location.pathname === m.to)
@@ -216,6 +223,7 @@ export default function Layout() {
               <NavItem to="/bind" label={t('nav.bind')} />
               <NavItem to="/orders" label={t('nav.orders')} />
               <NavItem to="/account" label={t('nav.account')} />
+              {user?.plan !== 'PRO' && <NavItem to="/upgrade" label={t('nav.upgrade')} />}
               <NavItem to="/download" label={t('nav.download')} />
               {isAdmin && <NavItem to="/admin" label={t('nav.admin')} />}
             </nav>

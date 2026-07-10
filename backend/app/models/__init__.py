@@ -350,6 +350,31 @@ class PlatformSetting(Base):
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
 
+class Payment(Base):
+    """NOWPayments 支付记录 / NOWPayments payment record.
+
+    每笔用户发起的支付（购买 PRO 套餐），记录对应 NOWPayments 支付 ID、
+    应付款项、到账地址、状态等。支付完成时自动将用户升级为 PRO。
+    """
+
+    __tablename__ = "payments"
+    __table_args__ = (
+        UniqueConstraint("nowpayments_payment_id", name="uq_np_payment_id"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    nowpayments_payment_id = Column(String, nullable=False, unique=True, index=True)
+    plan = Column(String, nullable=False)  # pro_monthly / pro_yearly
+    amount_usd = Column(Float, nullable=False)
+    pay_currency = Column(String, nullable=False)  # btc / eth / usdttrc20 ...
+    pay_amount = Column(Float, nullable=True)
+    pay_address = Column(String, nullable=True)
+    status = Column(String, default="NEW")  # NEW / PENDING / PROCESSING / FINISHED / EXPIRED / FAILED
+    created_at = Column(DateTime, default=_now)
+    finished_at = Column(DateTime, nullable=True)
+
+
 class AdminAuditLog(Base):
     """管理员操作审计日志：谁在什么时候把哪个用户的哪个字段改成了什么。
 

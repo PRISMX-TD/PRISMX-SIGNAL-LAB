@@ -1,5 +1,6 @@
 // 订单与回执页 / Orders & receipts page
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../store/auth'
 import { useLive, usePositions } from '../store/live'
@@ -217,7 +218,12 @@ export default function OrdersPage() {
           <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('account.autoHint')}</p>
 
           {!isPro ? (
-            <p className="mt-3 text-xs text-slate-500">{t('account.autoUpgradeRequired')}</p>
+            <p className="mt-3 text-xs text-slate-500">
+              {t('account.autoUpgradeRequired')}{" "}
+              <Link to="/upgrade" className="text-prism-400 underline hover:text-prism-300">
+                {t('nav.upgrade')}
+              </Link>
+            </p>
           ) : (
             <div className="mt-4 space-y-4">
               <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-100">

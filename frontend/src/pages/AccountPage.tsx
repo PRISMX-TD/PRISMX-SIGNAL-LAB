@@ -1,5 +1,6 @@
 // 账户详情页 / Account page: profile, MT5 accounts, password, notifications
 import { useEffect, useRef, useState } from "react"
+import { Link } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { userApi, notificationApi, pushApi } from "../api/client"
 import { fmtTime } from "../api/utils"
@@ -311,7 +312,12 @@ export default function AccountPage() {
                 )}
               </div>
               {info.plan === "FREE" && (
-                <p className="text-xs text-slate-500">{t("account.notifUpgradeRequired")}</p>
+                <p className="text-xs text-slate-500">
+                  {t("account.notifUpgradeRequired")}{" "}
+                  <Link to="/upgrade" className="text-prism-400 underline hover:text-prism-300">
+                    {t("nav.upgrade")}
+                  </Link>
+                </p>
               )}
               {notifEnabled && (
                 <div className="space-y-2 pl-1">

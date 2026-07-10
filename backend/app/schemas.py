@@ -88,6 +88,17 @@ class AdminBrokerSettings(BaseModel):
     brokerReferralUrl: str = Field(default="", max_length=512)
 
 
+class AdminPricingSettings(BaseModel):
+    """订阅定价设置 / Subscription pricing settings."""
+
+    proMonthlyPrice: float = Field(ge=0, le=99999)
+    proYearlyPrice: float = Field(ge=0, le=999999)
+    saleEnabled: bool = False
+    salePercent: int = Field(default=0, ge=0, le=100)
+    saleBadge: str = Field(default="", max_length=32)
+    saleEndAt: str = Field(default="", max_length=25)  # ISO date string or empty
+
+
 # ---------- API Token / MT5 连接凭证 ----------
 class EATokenOut(BaseModel):
     # 明文 token 仅在重置（生成）响应中出现一次；查询时为 None（库中只存哈希）。

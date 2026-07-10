@@ -57,3 +57,6 @@ feeder/*.spec
 *.swp
 .DS_Store
 Thumbs.db
+
+# ===== AI 工具辅助文件（不纳入仓库）=====
+.claude/

@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, AdminUser, AdminMetrics, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, AdminUser, AdminMetrics, AdminPricingSettings, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio } from './types'
 
 const TOKEN_KEY = 'prismx_token'
 
@@ -257,11 +257,17 @@ export const adminApi = {
   metrics: () => request<AdminMetrics>('/admin/metrics'),
   getSettings: () => request<AdminBrokerSettings>('/admin/settings'),
   updateSettings: (payload: AdminBrokerSettings) =>
-    request<AdminBrokerSettings>('/admin/settings', {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    }),
-}
+      request<AdminBrokerSettings>('/admin/settings', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+    getPricing: () => request<AdminPricingSettings>('/admin/pricing'),
+    updatePricing: (payload: AdminPricingSettings) =>
+      request<AdminPricingSettings>('/admin/pricing', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+  }
 
 // 自动仓位管理（PRO）/ auto position management (PRO)
 export const automationApi = {
@@ -281,6 +287,43 @@ export const sentimentApi = {
     request<{ sentiment: Record<string, SentimentRatio>; updatedAt: number | null; stale: boolean }>(
       '/sentiment'
     ),
+}
+
+// 支付（NOWPayments 加密货币）/ Payments (NOWPayments crypto)
+export const paymentApi = {
+  getPlans: () =>
+    request<{
+      plans: Array<{ id: string; name: string; price_usd: number; days: number; tag?: string }>
+    }>('/payments/plans'),
+  getCurrencies: () => request<{ currencies: string[] }>('/payments/currencies'),
+  create: (plan: string, payCurrency: string) =>
+    request<{
+      id: string
+      payment_id: string
+      pay_address: string
+      pay_amount: number
+      pay_currency: string
+      amount_usd: number
+      plan: string
+      status: string
+      created_at: string
+    }>('/payments/create', {
+      method: 'POST',
+      body: JSON.stringify({ plan, pay_currency: payCurrency }),
+    }),
+  status: (paymentId: string) =>
+    request<{
+      id: string
+      payment_id: string
+      pay_address: string
+      pay_amount: number
+      pay_currency: string
+      amount_usd: number
+      plan: string
+      status: string
+      finished_at: string | null
+      created_at: string
+    }>(`/payments/status/${paymentId}`),
 }
 
 // 推送订阅 / Push subscriptions

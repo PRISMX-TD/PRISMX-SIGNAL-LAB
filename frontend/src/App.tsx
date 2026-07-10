@@ -15,6 +15,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const ChartsPage = lazy(() => import('./pages/ChartsPage'))
 const BindPage = lazy(() => import('./pages/BindPage'))
 const OrdersPage = lazy(() => import('./pages/OrdersPage'))
+const UpgradePage = lazy(() => import('./pages/UpgradePage'))
 const DownloadPage = lazy(() => import('./pages/DownloadPage'))
 const AccountPage = lazy(() => import('./pages/AccountPage'))
 const AdminPage = lazy(() => import('./pages/AdminPage'))
@@ -72,6 +73,7 @@ export default function App() {
               <Route path="/charts" element={<ChartsPage />} />
               <Route path="/bind" element={<BindPage />} />
               <Route path="/orders" element={<OrdersPage />} />
+              <Route path="/upgrade" element={<UpgradePage />} />
               <Route path="/account" element={<AccountPage />} />
               <Route path="/download" element={<DownloadPage />} />
               <Route

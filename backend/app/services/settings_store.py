@@ -38,6 +38,17 @@ BROKER_DEFAULTS: dict = {
     "broker_referral_url": "",
 }
 
+# 定价默认值。DB 无记录时使用，管理员在后台修改后写入 PlatformSetting。
+# Pricing defaults. Used when no DB row exists; admin changes persist to PlatformSetting.
+PRICING_DEFAULTS: dict = {
+    "pro_monthly_price": 49.0,
+    "pro_yearly_price": 470.0,
+    "sale_enabled": False,
+    "sale_percent": 0,
+    "sale_badge": "",
+    "sale_end_at": None,  # ISO 8601 string or null
+}
+
 _CACHE_TTL_SECONDS = 30
 _cache: dict = {}
 _cache_at: float = 0.0
@@ -52,7 +63,7 @@ def invalidate_settings_cache() -> None:
         _cache_at = 0.0
 
 
-def _load_from_db(db) -> dict:
+def _load_broker_from_db(db) -> dict:
     data = dict(BROKER_DEFAULTS)
     for row in db.query(PlatformSetting).all():
         if row.key not in BROKER_DEFAULTS:
@@ -64,6 +75,22 @@ def _load_from_db(db) -> dict:
     return data
 
 
+def _load_pricing_from_db(db) -> dict:
+    """从 DB 读定价 JSON，缺失的 key 回落到默认值。"""
+    data = dict(PRICING_DEFAULTS)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "pricing").first()
+    if row:
+        try:
+            stored = json.loads(row.value)
+            if isinstance(stored, dict):
+                for k in PRICING_DEFAULTS:
+                    if k in stored:
+                        data[k] = stored[k]
+        except (ValueError, TypeError):
+            logger.warning("platform_settings: invalid JSON for pricing, using defaults")
+    return data
+
+
 def get_broker_settings(db) -> dict:
     """读取合作券商设置（带缓存）。调用方传入现成的 db session。
     Read partner-broker settings (cached). Caller supplies its db session."""
@@ -72,11 +99,50 @@ def get_broker_settings(db) -> dict:
     with _lock:
         if _cache and now - _cache_at < _CACHE_TTL_SECONDS:
             return dict(_cache)
-    data = _load_from_db(db)
+    data = _load_broker_from_db(db)
     with _lock:
         _cache = data
         _cache_at = now
     return dict(data)
+
+
+# ---- 定价独立缓存（短 TTL，保证管理员改了后台几乎立即生效） ----
+_pricing_cache: dict = {}
+_pricing_cache_at: float = 0.0
+
+
+def invalidate_pricing_cache() -> None:
+    global _pricing_cache_at
+    with _lock:
+        _pricing_cache_at = 0.0
+
+
+def get_pricing_settings(db) -> dict:
+    """读取订阅定价设置（独立缓存，与券商设置分开）。
+    Read subscription pricing settings (separate cache from broker settings)."""
+    global _pricing_cache, _pricing_cache_at
+    now = time.time()
+    with _lock:
+        if _pricing_cache and now - _pricing_cache_at < _CACHE_TTL_SECONDS:
+            return dict(_pricing_cache)
+    data = _load_pricing_from_db(db)
+    with _lock:
+        _pricing_cache = data
+        _pricing_cache_at = now
+    return dict(data)
+
+
+def save_pricing_settings(db, data: dict) -> None:
+    """写入定价设置（不提交，调用方 commit 后 invalidate）。
+    Write pricing settings (no commit; caller commits then invalidates cache)."""
+    merged = _load_pricing_from_db(db)
+    merged.update(data)
+    encoded = json.dumps(merged, ensure_ascii=False)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "pricing").first()
+    if row is None:
+        db.add(PlatformSetting(key="pricing", value=encoded))
+    else:
+        row.value = encoded
 
 
 def set_setting(db, key: str, value) -> None:

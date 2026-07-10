@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { adminApi } from '../api/client'
 import { fmtTime } from '../api/utils'
 import Select from '../components/Select'
-import type { AdminBrokerSettings, AdminMetrics, AdminUser, UserPlan, UserRole } from '../api/types'
+import type { AdminBrokerSettings, AdminMetrics, AdminPricingSettings, AdminUser, UserPlan, UserRole } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
 const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
@@ -56,6 +56,10 @@ export default function AdminPage() {
   const [brokerPatternsText, setBrokerPatternsText] = useState('')
   const [savingBroker, setSavingBroker] = useState(false)
 
+  // 订阅定价设置 / subscription pricing settings
+  const [pricing, setPricing] = useState<AdminPricingSettings | null>(null)
+  const [savingPricing, setSavingPricing] = useState(false)
+
   // 批量选择与批量修改：勾选后统一改角色/等级，空字符串代表"不修改该字段"
   // bulk selection & bulk edit: '' means "leave this field unchanged"
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -79,10 +83,11 @@ export default function AdminPage() {
   const load = async (opts: { q?: string; plan?: string } = {}) => {
     setLoading(true)
     try {
-      const [usersRes, metricsRes, settingsRes] = await Promise.all([
+      const [usersRes, metricsRes, settingsRes, pricingRes] = await Promise.all([
         adminApi.listUsers({ q: (opts.q ?? query) || undefined, plan: (opts.plan ?? planFilter) || undefined, limit: 100 }),
         adminApi.metrics(),
         adminApi.getSettings(),
+        adminApi.getPricing(),
       ])
       setUsers(usersRes.users)
       setTotal(usersRes.total)
@@ -90,6 +95,7 @@ export default function AdminPage() {
       setDrafts(Object.fromEntries(usersRes.users.map((u) => [u.id, toDraft(u)])))
       setBrokerSettings(settingsRes)
       setBrokerPatternsText(settingsRes.brokerPatterns.join(', '))
+      setPricing(pricingRes)
     } catch (err) {
       showToast('err', err instanceof Error ? err.message : t('admin.loadError'))
     } finally {
@@ -112,6 +118,20 @@ export default function AdminPage() {
       showToast('err', err instanceof Error ? err.message : t('admin.saveError'))
     } finally {
       setSavingBroker(false)
+    }
+  }
+
+  const savePricing = async () => {
+    if (!pricing) return
+    setSavingPricing(true)
+    try {
+      const updated = await adminApi.updatePricing(pricing)
+      setPricing(updated)
+      showToast('ok', t('admin.saved'))
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : t('admin.saveError'))
+    } finally {
+      setSavingPricing(false)
     }
   }
 
@@ -312,6 +332,99 @@ export default function AdminPage() {
             onClick={saveBrokerSettings}
           >
             {savingBroker ? t('common.loading') : t('common.save')}
+          </button>
+        </div>
+      )}
+
+      {/* 订阅定价设置 / subscription pricing settings */}
+      {pricing && (
+        <div className="glass mb-5 p-5">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h3 className="font-display text-lg font-semibold text-slate-100">{t('admin.pricingTitle')}</h3>
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={pricing.saleEnabled}
+                onChange={(e) => setPricing({ ...pricing, saleEnabled: e.target.checked })}
+                className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
+              />
+              {t('admin.saleEnabled')}
+            </label>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <div>
+              <label className="label">{t('admin.proMonthlyPrice')}</label>
+              <div className="flex items-center gap-1">
+                <span className="text-slate-400">$</span>
+                <input
+                  type="number"
+                  className="input"
+                  step="0.01"
+                  min="0"
+                  value={pricing.proMonthlyPrice}
+                  onChange={(e) => setPricing({ ...pricing, proMonthlyPrice: parseFloat(e.target.value) || 0 })}
+                />
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">{t('admin.proMonthlyPriceHint')}</p>
+            </div>
+            <div>
+              <label className="label">{t('admin.proYearlyPrice')}</label>
+              <div className="flex items-center gap-1">
+                <span className="text-slate-400">$</span>
+                <input
+                  type="number"
+                  className="input"
+                  step="0.01"
+                  min="0"
+                  value={pricing.proYearlyPrice}
+                  onChange={(e) => setPricing({ ...pricing, proYearlyPrice: parseFloat(e.target.value) || 0 })}
+                />
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">{t('admin.proYearlyPriceHint')}</p>
+            </div>
+            <div>
+              <label className="label">{t('admin.salePercent')}</label>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  className="input"
+                  min="0"
+                  max="100"
+                  value={pricing.salePercent}
+                  onChange={(e) => setPricing({ ...pricing, salePercent: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) })}
+                  disabled={!pricing.saleEnabled}
+                />
+                <span className="text-slate-400">%</span>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">{t('admin.salePercentHint')}</p>
+            </div>
+            <div>
+              <label className="label">{t('admin.saleBadge')}</label>
+              <input
+                className="input"
+                value={pricing.saleBadge}
+                onChange={(e) => setPricing({ ...pricing, saleBadge: e.target.value })}
+                disabled={!pricing.saleEnabled}
+                placeholder="SUMMER"
+                maxLength={32}
+              />
+              <p className="mt-1 text-[11px] text-slate-500">{t('admin.saleBadgeHint')}</p>
+            </div>
+          </div>
+          {pricing.saleEnabled && (
+            <div className="mt-4 rounded-lg border border-prism-400/20 bg-prism-500/10 px-4 py-3 text-sm text-prism-300">
+              {t('admin.salePreview')}:{" "}
+              <strong>${pricing.proMonthlyPrice * (1 - pricing.salePercent / 100)}</strong> /{t('upgrade.monthly')}{" "}
+              &middot;{" "}
+              <strong>${pricing.proYearlyPrice * (1 - pricing.salePercent / 100)}</strong> /{t('upgrade.yearly')}
+            </div>
+          )}
+          <button
+            className="btn-primary mt-4 px-5 py-2 text-sm disabled:opacity-40"
+            disabled={savingPricing}
+            onClick={savePricing}
+          >
+            {savingPricing ? t('common.loading') : t('common.save')}
           </button>
         </div>
       )}

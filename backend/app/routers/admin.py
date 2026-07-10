@@ -20,9 +20,16 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import AdminAuditLog, MT5Account, User
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminMetricsOut, AdminUserOut, AdminUserUpdate
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminMetricsOut, AdminPricingSettings, AdminUserOut, AdminUserUpdate
 from app.services.deps import require_admin
-from app.services.settings_store import get_broker_settings, invalidate_settings_cache, set_setting
+from app.services.settings_store import (
+    get_broker_settings,
+    get_pricing_settings,
+    invalidate_pricing_cache,
+    invalidate_settings_cache,
+    save_pricing_settings,
+    set_setting,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -308,3 +315,48 @@ def metrics(
         planCounts=plan_counts,
         signupsLast7d=signups_last_7d,
     )
+
+
+# ---------- 订阅定价设置 / subscription pricing settings ----------
+
+@router.get("/pricing", response_model=AdminPricingSettings)
+def get_pricing(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """读取订阅定价。Read subscription pricing."""
+    p = get_pricing_settings(db)
+    return AdminPricingSettings(
+        proMonthlyPrice=float(p["pro_monthly_price"]),
+        proYearlyPrice=float(p["pro_yearly_price"]),
+        saleEnabled=bool(p["sale_enabled"]),
+        salePercent=int(p["sale_percent"]),
+        saleBadge=str(p.get("sale_badge", "")),
+        saleEndAt=str(p.get("sale_end_at") or ""),
+    )
+
+
+@router.put("/pricing", response_model=AdminPricingSettings)
+def put_pricing(
+    body: AdminPricingSettings,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """保存订阅定价。Save subscription pricing."""
+    if body.proYearlyPrice > 0 and body.proMonthlyPrice > 0:
+        if body.proYearlyPrice >= body.proMonthlyPrice * 12:
+            pass  # 年付可以贵于月付×12（虽然不推荐），不拦截
+
+    data = {
+        "pro_monthly_price": body.proMonthlyPrice,
+        "pro_yearly_price": body.proYearlyPrice,
+        "sale_enabled": body.saleEnabled,
+        "sale_percent": body.salePercent,
+        "sale_badge": body.saleBadge.strip(),
+        "sale_end_at": body.saleEndAt.strip() or None,
+    }
+    save_pricing_settings(db, data)
+    _log_change(db, admin.id, admin.id, "setting:pricing", None, json.dumps(data))
+    db.commit()
+    invalidate_pricing_cache()
+    return get_pricing(db, admin)

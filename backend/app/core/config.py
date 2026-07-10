@@ -99,6 +99,19 @@ class Settings(BaseSettings):
     # WEBHOOK_SECRET — this is not enforced as mandatory in production.
     FEED_TOKEN: str = ""
 
+    # NOWPayments 加密货币支付 / Crypto payment gateway
+    # API Key + IPN Secret（IPN 密钥仅在 NOWPayments 后台生成时展示一次!!）
+    # API Key + IPN Secret (IPN secret shown ONLY ONCE in the NOWPayments dashboard!)
+    NOWPAYMENTS_API_KEY: str = ""
+    NOWPAYMENTS_IPN_SECRET: str = ""
+    # 是否使用 Sandbox 测试环境 / Whether to use the sandbox test environment
+    NOWPAYMENTS_SANDBOX: bool = True
+    # 本站基础 URL（用于构造 IPN 回调地址）/ site base URL (used to build IPN callback URL)
+    SITE_BASE_URL: str = "https://prismxsignallab.com"
+    # PRO 订阅价格（美元）/ PRO subscription pricing (USD)
+    PRO_MONTHLY_PRICE_USD: float = 49.0
+    PRO_YEARLY_PRICE_USD: float = 470.0
+
     # 风控 / Risk control
     MAX_VOLUME_PER_ORDER: float = 10.0  # 单笔最大手数 / max lots per order
     MIN_VOLUME_PER_ORDER: float = 0.01  # 单笔最小手数 / min lots per order
