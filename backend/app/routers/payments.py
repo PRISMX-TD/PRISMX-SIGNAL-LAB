@@ -114,6 +114,10 @@ async def create_payment_order(
     if body.plan not in PLAN_DAYS:
         raise HTTPException(status_code=400, detail=f"Invalid plan: {body.plan}")
 
+    # 只接受 USDT（多链）/ accept USDT only (any chain)
+    if not body.pay_currency.lower().startswith("usdt"):
+        raise HTTPException(status_code=400, detail="Only USDT is accepted")
+
     days = PLAN_DAYS[body.plan]
     pricing = _resolve_pricing(db)
     sale = pricing.get("sale")

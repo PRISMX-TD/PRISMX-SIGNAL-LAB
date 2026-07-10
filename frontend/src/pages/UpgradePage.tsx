@@ -12,6 +12,21 @@ type PaymentState =
   | { step: "done" }
   | { step: "error"; msg: string };
 
+// 只接受 USDT，按手续费/速度优先排序展示不同链 / accept USDT only, networks ordered by fee & speed
+const USDT_NETWORKS: Array<{ code: string; label: string }> = [
+  { code: "usdttrc20", label: "USDT · TRC-20 (Tron)" },
+  { code: "usdterc20", label: "USDT · ERC-20 (Ethereum)" },
+  { code: "usdtbsc", label: "USDT · BEP-20 (BSC)" },
+  { code: "usdtsol", label: "USDT · Solana" },
+  { code: "usdtmatic", label: "USDT · Polygon" },
+  { code: "usdtarb", label: "USDT · Arbitrum" },
+  { code: "usdtton", label: "USDT · TON" },
+];
+
+const USDT_LABELS: Record<string, string> = Object.fromEntries(
+  USDT_NETWORKS.map((n) => [n.code, n.label]),
+);
+
 export default function UpgradePage() {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -33,11 +48,14 @@ export default function UpgradePage() {
       setSale(r.sale ?? null);
     }).catch(() => {});
     paymentApi.getCurrencies().then((r) => {
-      setCurrencies(r.currencies);
+      // 只接受 USDT（多链），按偏好顺序过滤 / accept USDT only (multi-chain), filtered by preference
+      const usdtOnly = USDT_NETWORKS.filter((n) => r.currencies.some((c) => c.toLowerCase() === n.code));
+      const available = usdtOnly.length ? usdtOnly.map((n) => n.code) : r.currencies.filter((c) => c.toLowerCase().startsWith("usdt"));
+      setCurrencies(available);
       // 优先选 usdttrc20（TRC-20 USDT 手续费低、速度快）
-      const preferred = r.currencies.find((c) => c.toLowerCase() === "usdttrc20");
+      const preferred = available.find((c) => c.toLowerCase() === "usdttrc20");
       if (preferred) setChosenCoin(preferred);
-      else if (r.currencies.length) setChosenCoin(r.currencies[0]);
+      else if (available.length) setChosenCoin(available[0]);
     }).catch(() => {});
   }, [t]);
 
@@ -194,23 +212,32 @@ export default function UpgradePage() {
           {currencies.length === 0 ? (
             <span style={{ fontSize: 13, color: "var(--ink-muted)" }}>{t("common.loading")}</span>
           ) : (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {currencies.map((c) => (
                 <button
                   key={c}
                   onClick={() => setChosenCoin(c)}
                   style={{
-                    padding: "6px 14px",
-                    borderRadius: 8,
+                    padding: "12px 16px",
+                    borderRadius: 10,
                     border: chosenCoin === c ? "1px solid var(--neon)" : "1px solid var(--glass-border)",
                     background: chosenCoin === c ? "var(--glass)" : "transparent",
                     color: chosenCoin === c ? "var(--neon)" : "var(--ink-primary)",
                     cursor: "pointer",
-                    fontSize: 13,
-                    textTransform: "uppercase",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    textAlign: "left",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
                   }}
                 >
-                  {c}
+                  <span>{USDT_LABELS[c.toLowerCase()] ?? c.toUpperCase()}</span>
+                  {c.toLowerCase() === "usdttrc20" && (
+                    <span style={{ fontSize: 11, color: "var(--neon)", fontWeight: 700 }}>
+                      {t("upgrade.recommended")}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
