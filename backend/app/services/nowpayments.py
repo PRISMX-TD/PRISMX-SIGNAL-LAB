@@ -54,6 +54,9 @@ async def create_payment(
         body["order_description"] = order_description
     if ipn_callback_url:
         body["ipn_callback_url"] = ipn_callback_url
+    # 沙盒模式传 case 参数，自动模拟完整支付流程 / sandbox passes case to simulate the full payment flow
+    if settings.NOWPAYMENTS_SANDBOX:
+        body["case"] = "success"
 
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(f"{_NP_BASE}/v1/payment", json=body, headers=_headers())
