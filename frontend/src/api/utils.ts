@@ -25,13 +25,28 @@ export function fmtTime(iso: string | null | undefined): string {
   })
 }
 
+// 格式化为含年月日的完整日期时间（用于订阅到期等需要明确年份的场景）
+// Format with full date incl. year (for subscription expiry etc. where the year matters).
+export function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return '-'
+  const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)
+  const d = new Date(hasTz ? iso : iso + 'Z')
+  return d.toLocaleString('en-GB', {
+    timeZone: 'Asia/Kuala_Lumpur',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 // 解析后端时间为带时区的 Date / parse backend time as a tz-aware Date
 export function parseTime(iso: string | null | undefined): Date | null {
   if (!iso) return null
   const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)
   return new Date(hasTz ? iso : iso + 'Z')
 }
-
 // 每个品种一个 pip 的价格大小，用于把价差换算成点数。
 // 匹配不到的品种返回 null，调用方只显示价差、不显示点数。
 // Price size of one pip per symbol, to convert price distance into pips.

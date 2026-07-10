@@ -54,8 +54,16 @@ export default function GoogleLoginButton({ onCredential, onError }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const onCredentialRef = useRef(onCredential)
   onCredentialRef.current = onCredential
+  const onErrorRef = useRef(onError)
+  onErrorRef.current = onError
+  const tRef = useRef(t)
+  tRef.current = t
   const [ready, setReady] = useState(false)
 
+  // 只在挂载时初始化一次；回调/翻译通过 ref 读取最新值，避免依赖变化导致
+  // 重复 initialize() 或在 initialize() 之前就 renderButton()。
+  // Init once on mount; read latest callback/t via refs so dep changes don't
+  // re-initialize GSI or render the button before initialize() has run.
   useEffect(() => {
     if (!CLIENT_ID) return
     const container = containerRef.current
@@ -63,10 +71,12 @@ export default function GoogleLoginButton({ onCredential, onError }: Props) {
     if (!container || !wrapper) return
 
     let cancelled = false
+    let initialized = false
 
     const render = () => {
       const gsi = window.google?.accounts?.id
-      if (!gsi || cancelled) return
+      // 必须先 initialize() 再 renderButton() / must initialize before rendering
+      if (!gsi || cancelled || !initialized) return
       // 覆盖层的实际宽度用于官方按钮，保证透明点击区与可见按钮对齐
       // measure wrapper so the (transparent) official button covers our visible one
       const width = Math.min(400, Math.max(200, Math.round(wrapper.clientWidth)))
@@ -91,16 +101,17 @@ export default function GoogleLoginButton({ onCredential, onError }: Props) {
         client_id: CLIENT_ID,
         callback: (resp) => {
           if (resp.credential) onCredentialRef.current(resp.credential)
-          else onError?.(t('auth.googleError'))
+          else onErrorRef.current?.(tRef.current('auth.googleError'))
         },
       })
+      initialized = true
       render()
     }, 100)
 
     // 宽度变化（如旋转屏幕）时重新渲染官方按钮以保持覆盖对齐
     // re-render on resize so the transparent overlay keeps covering the visible button
     const ro = new ResizeObserver(() => {
-      if (window.google?.accounts?.id) render()
+      if (initialized) render()
     })
     ro.observe(wrapper)
 
@@ -109,7 +120,7 @@ export default function GoogleLoginButton({ onCredential, onError }: Props) {
       window.clearInterval(timer)
       ro.disconnect()
     }
-  }, [t, onError])
+  }, [])
 
   // 未配置 Client ID 时不渲染（如本地未设环境变量）/ render nothing if not configured
   if (!CLIENT_ID) return null

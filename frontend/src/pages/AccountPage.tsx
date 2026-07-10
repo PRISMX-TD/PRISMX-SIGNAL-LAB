@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { userApi, notificationApi, pushApi } from "../api/client"
-import { fmtTime } from "../api/utils"
+import { fmtTime, fmtDate } from "../api/utils"
 import { subscribePush, unsubscribePush, getSWReg } from "../utils/push"
 
 type AccountInfo = Awaited<ReturnType<typeof userApi.me>>
@@ -210,7 +210,7 @@ export default function AccountPage() {
                 <div>
                   <span className="text-slate-500">{t("account.expiresAt")}</span>
                   <div className="font-mono text-slate-100">
-                    {info.planExpiresAt ? fmtTime(info.planExpiresAt) : t("account.neverExpires")}
+                    {info.planExpiresAt ? fmtDate(info.planExpiresAt) : t("account.neverExpires")}
                   </div>
                 </div>
               )}
