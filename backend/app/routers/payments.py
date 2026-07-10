@@ -23,7 +23,7 @@ from app.services.nowpayments import (
 from app.core.config import settings
 from app.services.settings_store import get_pricing_settings
 
-router = APIRouter(tags=["payments"])
+router = APIRouter(prefix="/payments", tags=["payments"])
 
 # ═══ 定价 / Pricing ═══
 PLAN_DAYS: dict[str, int] = {"pro_monthly": 30, "pro_yearly": 365}
