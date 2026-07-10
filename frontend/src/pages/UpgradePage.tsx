@@ -13,18 +13,18 @@ type PaymentState =
   | { step: "error"; msg: string };
 
 // 只接受 USDT，按手续费/速度优先排序展示不同链 / accept USDT only, networks ordered by fee & speed
-const USDT_NETWORKS: Array<{ code: string; label: string }> = [
-  { code: "usdttrc20", label: "USDT · TRC-20 (Tron)" },
-  { code: "usdterc20", label: "USDT · ERC-20 (Ethereum)" },
-  { code: "usdtbsc", label: "USDT · BEP-20 (BSC)" },
-  { code: "usdtsol", label: "USDT · Solana" },
-  { code: "usdtmatic", label: "USDT · Polygon" },
-  { code: "usdtarb", label: "USDT · Arbitrum" },
-  { code: "usdtton", label: "USDT · TON" },
+const USDT_NETWORKS: Array<{ code: string; label: string; note: string }> = [
+  { code: "usdttrc20", label: "TRC-20", note: "Tron" },
+  { code: "usdterc20", label: "ERC-20", note: "Ethereum" },
+  { code: "usdtbsc", label: "BEP-20", note: "BSC" },
+  { code: "usdtsol", label: "Solana", note: "SOL" },
+  { code: "usdtmatic", label: "Polygon", note: "MATIC" },
+  { code: "usdtarb", label: "Arbitrum", note: "ARB" },
+  { code: "usdtton", label: "TON", note: "Ton" },
 ];
 
-const USDT_LABELS: Record<string, string> = Object.fromEntries(
-  USDT_NETWORKS.map((n) => [n.code, n.label]),
+const USDT_META: Record<string, { label: string; note: string }> = Object.fromEntries(
+  USDT_NETWORKS.map((n) => [n.code, { label: n.label, note: n.note }]),
 );
 
 export default function UpgradePage() {
@@ -38,6 +38,7 @@ export default function UpgradePage() {
   const [chosenCoin, setChosenCoin] = useState<string>("usdttrc20");
   const [state, setState] = useState<PaymentState>({ step: "select" });
   const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // 加载套餐和可用币种列表 / load plans and coin list
@@ -52,7 +53,6 @@ export default function UpgradePage() {
       const usdtOnly = USDT_NETWORKS.filter((n) => r.currencies.some((c) => c.toLowerCase() === n.code));
       const available = usdtOnly.length ? usdtOnly.map((n) => n.code) : r.currencies.filter((c) => c.toLowerCase().startsWith("usdt"));
       setCurrencies(available);
-      // 优先选 usdttrc20（TRC-20 USDT 手续费低、速度快）
       const preferred = available.find((c) => c.toLowerCase() === "usdttrc20");
       if (preferred) setChosenCoin(preferred);
       else if (available.length) setChosenCoin(available[0]);
@@ -66,7 +66,6 @@ export default function UpgradePage() {
     };
   }, []);
 
-  // 获取已选套餐信息
   const selectedPlan = plans.find((p) => p.id === chosenPlan);
 
   // 发起支付 / create payment
@@ -83,7 +82,6 @@ export default function UpgradePage() {
         amountUsd: res.amount_usd,
         plan: res.plan,
       });
-      // 启动轮询 / start polling
       const pid = res.payment_id;
       pollRef.current = setInterval(async () => {
         try {
@@ -91,7 +89,6 @@ export default function UpgradePage() {
           if (s.status === "FINISHED") {
             if (pollRef.current) clearInterval(pollRef.current);
             setState({ step: "done" });
-            // 刷新用户信息/重新请求 me 让 App 更新 plan
             window.dispatchEvent(new Event("auth-refresh"));
           } else if (s.status === "EXPIRED" || s.status === "FAILED") {
             if (pollRef.current) clearInterval(pollRef.current);
@@ -109,227 +106,278 @@ export default function UpgradePage() {
     }
   }, [chosenPlan, chosenCoin, t]);
 
-  // 重试 / retry
   const handleRetry = () => {
     if (pollRef.current) clearInterval(pollRef.current);
     setState({ step: "select" });
   };
 
-  // 复制地址 / copy address
   const copyAddress = (addr: string) => {
     navigator.clipboard.writeText(addr).catch(() => {});
-    alert(t("upgrade.copied"));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
-  // ---- 选择套餐和币种 / select plan & coin ----
-  if (state.step === "select") {
+  // PRISMX_UPGRADE_RENDER
+  return renderContent();
+
+  function renderContent() {
+    if (state.step === "select") return renderSelect();
+    if (state.step === "pay") return renderPay();
+    if (state.step === "done") return renderDone();
+    if (state.step === "error") return renderError();
+    return null;
+  }
+
+  function renderSelect() {
+    const isPro = user?.plan === "PRO";
     return (
-      <div style={{ maxWidth: 520, margin: "0 auto", padding: "32px 16px" }}>
-        <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>{t("upgrade.title")}</h2>
-        <p style={{ color: "var(--ink-muted)", marginBottom: 24, fontSize: 14 }}>
-          {t("upgrade.subtitle")}
-        </p>
+      <div style={{ maxWidth: 560, margin: "0 auto", padding: "40px 16px 64px" }}>
+        {/* 标题 / header */}
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{
+            display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 12px",
+            borderRadius: 999, background: "rgba(139,92,246,0.14)",
+            border: "1px solid rgba(139,92,246,0.35)", marginBottom: 14,
+          }}>
+            <span style={{ color: "var(--purple-hi)", fontSize: 12, fontWeight: 700, letterSpacing: "0.04em" }}>PRO</span>
+          </div>
+          <h2 style={{ fontSize: 26, fontWeight: 800, color: "var(--text)", margin: "0 0 8px" }}>
+            {t("upgrade.title")}
+          </h2>
+          <p style={{ color: "var(--text-2)", fontSize: 14, margin: 0, lineHeight: 1.6 }}>
+            {t("upgrade.subtitle")}
+          </p>
+        </div>
 
         {/* 促销横幅 / sale banner */}
         {sale?.badge && (
-          <div style={{
-            marginBottom: 20, padding: "12px 20px", borderRadius: 12,
-            background: "linear-gradient(135deg, rgba(139,92,246,0.15), rgba(59,130,246,0.15))",
-            border: "1px solid var(--neon)", textAlign: "center",
+          <div className="glass" style={{
+            padding: "14px 20px", marginBottom: 20, textAlign: "center",
+            background: "linear-gradient(135deg, rgba(168,85,247,0.20), rgba(139,92,246,0.10))",
+            border: "1px solid rgba(168,85,247,0.45)",
           }}>
-            <span style={{ color: "var(--neon)", fontWeight: 700, fontSize: 15 }}>
-              {sale.badge} — {sale.percent}% OFF
-            </span>
+            <div style={{ color: "var(--purple-hi)", fontWeight: 800, fontSize: 16, letterSpacing: "0.02em" }}>
+              {sale.badge} · {sale.percent}% OFF
+            </div>
             {sale.end_at && (
-              <span style={{ display: "block", color: "var(--ink-muted)", fontSize: 12, marginTop: 2 }}>
+              <div style={{ color: "var(--text-2)", fontSize: 12, marginTop: 4 }}>
                 {t("upgrade.saleEnds")}: {sale.end_at.slice(0, 10)}
-              </span>
+              </div>
             )}
           </div>
         )}
 
         {/* 套餐选择 / plan selector */}
-        <div style={{ marginBottom: 24 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{t("upgrade.choosePlan")}</h3>
-          <div style={{ display: "flex", gap: 12 }}>
-            {plans.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => setChosenPlan(p.id)}
-                style={{
-                  flex: 1,
-                  padding: "16px",
-                  borderRadius: 12,
-                  border: chosenPlan === p.id ? "2px solid var(--neon)" : "1px solid var(--glass-border)",
-                  background: chosenPlan === p.id ? "var(--glass)" : "var(--ink-deep)",
-                  color: "var(--ink-primary)",
-                  cursor: "pointer",
-                  textAlign: "left",
-                  position: "relative",
-                }}
-              >
-                {(p.tag || sale?.badge) && (
-                  <span style={{
-                    position: "absolute", top: -8, right: -4,
-                    background: sale?.badge ? "var(--neon)" : "var(--neon)",
-                    color: "#000", fontSize: 11,
-                    padding: "2px 8px", borderRadius: 8, fontWeight: 700,
-                  }}>
-                    {sale?.badge
-                      ? `${sale.percent}% OFF`
-                      : p.tag === "save_20"
-                      ? t("upgrade.save20")
-                      : p.tag}
-                  </span>
-                )}
-                <div style={{ fontSize: 20, fontWeight: 700 }}>
-                  ${p.price_usd}
-                  {p.original_price_usd != null && p.original_price_usd !== p.price_usd && (
+        <div style={{ marginBottom: 26 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 700, color: "var(--text-2)", margin: "0 0 12px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            {t("upgrade.choosePlan")}
+          </h3>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            {plans.map((p) => {
+              const active = chosenPlan === p.id;
+              const badge = sale?.badge ? `${sale.percent}% OFF` : p.tag === "save_20" ? t("upgrade.save20") : p.tag;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => setChosenPlan(p.id)}
+                  className="glass"
+                  style={{
+                    padding: "20px 18px", cursor: "pointer", textAlign: "left", position: "relative",
+                    border: active ? "1.5px solid var(--purple)" : "1px solid var(--line)",
+                    background: active
+                      ? "linear-gradient(180deg, rgba(139,92,246,0.16), rgba(139,92,246,0.05))"
+                      : "linear-gradient(180deg, var(--card-a), var(--card-b))",
+                    boxShadow: active ? "0 0 0 3px rgba(139,92,246,0.15)" : "none",
+                    transition: "all 0.2s",
+                  }}
+                >
+                  {badge && (
                     <span style={{
-                      fontSize: 14, color: "var(--ink-muted)", textDecoration: "line-through",
-                      marginLeft: 8, fontWeight: 400,
+                      position: "absolute", top: 12, right: 12,
+                      background: "linear-gradient(92deg,#7c3aed,#a855f7)", color: "#fff",
+                      fontSize: 10, fontWeight: 800, padding: "3px 8px", borderRadius: 6, letterSpacing: "0.02em",
                     }}>
-                      ${p.original_price_usd}
+                      {badge}
                     </span>
                   )}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--ink-muted)" }}>
-                  {p.days === 30 ? t("upgrade.monthly") : t("upgrade.yearly")}
-                </div>
-                {p.days === 365 && !sale && (
-                  <div style={{ fontSize: 11, color: "var(--ink-muted)", marginTop: 2 }}>
-                    {t("upgrade.perMonth", { price: (p.price_usd / 12).toFixed(0) })}
+                  <div style={{ color: "var(--text-2)", fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                    {p.days === 30 ? t("upgrade.monthly") : t("upgrade.yearly")}
                   </div>
-                )}
-              </button>
-            ))}
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                    <span className="num" style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>
+                      ${p.price_usd}
+                    </span>
+                    {p.original_price_usd != null && p.original_price_usd !== p.price_usd && (
+                      <span className="num" style={{ fontSize: 15, color: "var(--text-3)", textDecoration: "line-through" }}>
+                        ${p.original_price_usd}
+                      </span>
+                    )}
+                  </div>
+                  {p.days === 365 && !sale && (
+                    <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 6 }}>
+                      {t("upgrade.perMonth", { price: (p.price_usd / 12).toFixed(0) })}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
         {/* 币种选择 / coin selector */}
-        <div style={{ marginBottom: 24 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{t("upgrade.chooseCoin")}</h3>
+        <div style={{ marginBottom: 28 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 700, color: "var(--text-2)", margin: "0 0 12px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            {t("upgrade.chooseCoin")}
+          </h3>
           {currencies.length === 0 ? (
-            <span style={{ fontSize: 13, color: "var(--ink-muted)" }}>{t("common.loading")}</span>
+            <div className="glass" style={{ padding: 16, color: "var(--text-3)", fontSize: 13, textAlign: "center" }}>
+              {t("common.loading")}
+            </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {currencies.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setChosenCoin(c)}
-                  style={{
-                    padding: "12px 16px",
-                    borderRadius: 10,
-                    border: chosenCoin === c ? "1px solid var(--neon)" : "1px solid var(--glass-border)",
-                    background: chosenCoin === c ? "var(--glass)" : "transparent",
-                    color: chosenCoin === c ? "var(--neon)" : "var(--ink-primary)",
-                    cursor: "pointer",
-                    fontSize: 14,
-                    fontWeight: 600,
-                    textAlign: "left",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <span>{USDT_LABELS[c.toLowerCase()] ?? c.toUpperCase()}</span>
-                  {c.toLowerCase() === "usdttrc20" && (
-                    <span style={{ fontSize: 11, color: "var(--neon)", fontWeight: 700 }}>
-                      {t("upgrade.recommended")}
-                    </span>
-                  )}
-                </button>
-              ))}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {currencies.map((c) => {
+                const meta = USDT_META[c.toLowerCase()] ?? { label: c.toUpperCase(), note: "" };
+                const active = chosenCoin === c;
+                const recommended = c.toLowerCase() === "usdttrc20";
+                return (
+                  <button
+                    key={c}
+                    onClick={() => setChosenCoin(c)}
+                    className="glass"
+                    style={{
+                      padding: "14px 16px", cursor: "pointer", textAlign: "left", position: "relative",
+                      border: active ? "1.5px solid var(--purple)" : "1px solid var(--line)",
+                      background: active
+                        ? "linear-gradient(180deg, rgba(139,92,246,0.16), rgba(139,92,246,0.05))"
+                        : "linear-gradient(180deg, var(--card-a), var(--card-b))",
+                      boxShadow: active ? "0 0 0 3px rgba(139,92,246,0.15)" : "none",
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>USDT</span>
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, color: active ? "var(--purple-hi)" : "var(--text-2)",
+                        padding: "2px 7px", borderRadius: 5, background: active ? "rgba(139,92,246,0.18)" : "var(--nest)",
+                      }}>
+                        {meta.label}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 6 }}>
+                      {recommended ? t("upgrade.recommended") : meta.note}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
 
+        {/* 支付按钮 / pay button */}
         <button
+          className="btn btn-primary"
           onClick={handlePay}
-          disabled={loading || currencies.length === 0 || user?.plan === "PRO"}
-          style={{
-            width: "100%", padding: "14px",
-            borderRadius: 12, border: "none",
-            background: loading ? "var(--ink-muted)" : "var(--neon)",
-            color: "#000", fontWeight: 700, fontSize: 16,
-            cursor: loading ? "not-allowed" : "pointer",
-          }}
+          disabled={loading || currencies.length === 0 || isPro}
+          style={{ width: "100%", height: 52, fontSize: 16 }}
         >
-          {user?.plan === "PRO"
+          {isPro
             ? t("upgrade.alreadyPro")
             : loading
             ? t("common.loading")
             : t("upgrade.payButton", { price: `$${selectedPlan?.price_usd ?? ""}` })}
         </button>
+        <p style={{ textAlign: "center", color: "var(--text-3)", fontSize: 12, marginTop: 14, lineHeight: 1.6 }}>
+          {t("upgrade.secureNote")}
+        </p>
       </div>
     );
   }
-
-  // ---- 支付中：展示地址和金额 / paying: show address & amount ----
-  if (state.step === "pay") {
+  function renderPay() {
+    if (state.step !== "pay") return null;
+    const meta = USDT_META[state.payCurrency.toLowerCase()] ?? { label: state.payCurrency.toUpperCase(), note: "" };
     return (
-      <div style={{ maxWidth: 520, margin: "0 auto", padding: "32px 16px", textAlign: "center" }}>
-        <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>{t("upgrade.payTitle")}</h2>
-        <p style={{ color: "var(--ink-muted)", marginBottom: 24, fontSize: 14 }}>
+      <div style={{ maxWidth: 480, margin: "0 auto", padding: "40px 16px 64px", textAlign: "center" }}>
+        <h2 style={{ fontSize: 24, fontWeight: 800, color: "var(--text)", margin: "0 0 6px" }}>
+          {t("upgrade.payTitle")}
+        </h2>
+        <p style={{ color: "var(--text-2)", fontSize: 14, margin: "0 0 24px", lineHeight: 1.6 }}>
           {t("upgrade.payHint")}
         </p>
 
-        {/* 金额 / amount */}
-        <div style={{
-          background: "var(--glass)", borderRadius: 12, padding: 20, marginBottom: 16,
-          border: "1px solid var(--glass-border)",
-        }}>
-          <div style={{ color: "var(--ink-muted)", fontSize: 13, marginBottom: 4 }}>{t("upgrade.sendAmount")}</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: "var(--neon)" }}>
-            {state.payAmount} {state.payCurrency.toUpperCase()}
+        {/* 金额卡 / amount card */}
+        <div className="glass" style={{ padding: 24, marginBottom: 14 }}>
+          <div style={{ color: "var(--text-2)", fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
+            {t("upgrade.sendAmount")}
           </div>
-          <div style={{ color: "var(--ink-muted)", fontSize: 13, marginTop: 4 }}>≈ ${state.amountUsd} USD</div>
+          <div className="num" style={{ fontSize: 34, fontWeight: 800, color: "var(--text)", lineHeight: 1.1 }}>
+            {state.payAmount}
+          </div>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 10, padding: "4px 12px", borderRadius: 999, background: "rgba(139,92,246,0.14)", border: "1px solid rgba(139,92,246,0.3)" }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>USDT</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--purple-hi)" }}>{meta.label}</span>
+          </div>
+          <div style={{ color: "var(--text-3)", fontSize: 13, marginTop: 12 }}>≈ ${state.amountUsd} USD</div>
         </div>
 
-        {/* 地址 / address */}
-        <div style={{
-          background: "var(--glass)", borderRadius: 12, padding: 20, marginBottom: 24,
-          border: "1px solid var(--glass-border)", wordBreak: "break-all",
-        }}>
-          <div style={{ color: "var(--ink-muted)", fontSize: 13, marginBottom: 4 }}>{t("upgrade.sendTo")}</div>
-          <div style={{ fontSize: 15, fontFamily: "monospace", color: "var(--ink-primary)" }}>
+        {/* 地址卡 / address card */}
+        <div className="glass" style={{ padding: 24, marginBottom: 20 }}>
+          <div style={{ color: "var(--text-2)", fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>
+            {t("upgrade.sendTo")} · {meta.label}
+          </div>
+          <div style={{
+            fontSize: 14, fontFamily: "'JetBrains Mono', ui-monospace, monospace", color: "var(--text)",
+            wordBreak: "break-all", padding: "12px 14px", borderRadius: 10,
+            background: "var(--nest)", border: "1px solid var(--line)", lineHeight: 1.5,
+          }}>
             {state.payAddress}
           </div>
           <button
+            className="btn btn-ghost"
             onClick={() => copyAddress(state.payAddress)}
-            style={{
-              marginTop: 12, padding: "8px 20px", borderRadius: 8,
-              border: "1px solid var(--glass-border)", background: "transparent",
-              color: "var(--ink-primary)", cursor: "pointer", fontSize: 13,
-            }}
+            style={{ marginTop: 14, width: "100%", height: 44 }}
           >
-            {t("common.copy")}
+            {copied ? t("upgrade.copied") : t("common.copy")}
           </button>
         </div>
 
-        <p style={{ fontSize: 13, color: "var(--ink-muted)" }}>
+        {/* 轮询提示 / polling hint */}
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 10, color: "var(--text-2)", fontSize: 13 }}>
+          <span style={{
+            width: 8, height: 8, borderRadius: "50%", background: "var(--gold)",
+            boxShadow: "0 0 8px var(--gold)", animation: "pulse 1.5s ease-in-out infinite",
+          }} />
           {t("upgrade.pollingHint")}
-        </p>
+        </div>
+
+        <div style={{ marginTop: 24 }}>
+          <button className="btn btn-ghost" onClick={handleRetry} style={{ height: 40 }}>
+            {t("common.cancel")}
+          </button>
+        </div>
       </div>
     );
   }
 
-  // ---- 支付成功 / payment done ----
-  if (state.step === "done") {
+  function renderDone() {
     return (
-      <div style={{ maxWidth: 520, margin: "0 auto", padding: "64px 16px", textAlign: "center" }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>🎉</div>
-        <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>{t("upgrade.successTitle")}</h2>
-        <p style={{ color: "var(--ink-muted)", marginBottom: 24, fontSize: 14 }}>
+      <div style={{ maxWidth: 480, margin: "0 auto", padding: "72px 16px", textAlign: "center" }}>
+        <div style={{
+          width: 72, height: 72, borderRadius: "50%", margin: "0 auto 24px",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: "var(--up-bg)", border: "1px solid rgba(46,224,126,0.4)",
+        }}>
+          <span style={{ fontSize: 36 }}>✓</span>
+        </div>
+        <h2 style={{ fontSize: 24, fontWeight: 800, color: "var(--text)", margin: "0 0 10px" }}>
+          {t("upgrade.successTitle")}
+        </h2>
+        <p style={{ color: "var(--text-2)", fontSize: 14, margin: "0 0 28px", lineHeight: 1.6 }}>
           {t("upgrade.successDesc")}
         </p>
         <button
+          className="btn btn-primary"
           onClick={() => { window.location.href = "/dashboard"; }}
-          style={{
-            padding: "14px 32px", borderRadius: 12, border: "none",
-            background: "var(--neon)", color: "#000", fontWeight: 700, fontSize: 16,
-            cursor: "pointer",
-          }}
+          style={{ height: 50, padding: "0 40px", fontSize: 16 }}
         >
           {t("upgrade.goDashboard")}
         </button>
@@ -337,25 +385,31 @@ export default function UpgradePage() {
     );
   }
 
-  // ---- 错误 / error ----
-  if (state.step === "error") {
+  function renderError() {
+    if (state.step !== "error") return null;
     return (
-      <div style={{ maxWidth: 520, margin: "0 auto", padding: "64px 16px", textAlign: "center" }}>
-        <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>{t("upgrade.errorTitle")}</h2>
-        <p style={{ color: "var(--ink-muted)", marginBottom: 24, fontSize: 14 }}>{state.msg}</p>
+      <div style={{ maxWidth: 480, margin: "0 auto", padding: "72px 16px", textAlign: "center" }}>
+        <div style={{
+          width: 72, height: 72, borderRadius: "50%", margin: "0 auto 24px",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: "var(--down-bg)", border: "1px solid rgba(255,77,103,0.4)",
+        }}>
+          <span style={{ fontSize: 36, color: "var(--down)" }}>!</span>
+        </div>
+        <h2 style={{ fontSize: 24, fontWeight: 800, color: "var(--text)", margin: "0 0 10px" }}>
+          {t("upgrade.errorTitle")}
+        </h2>
+        <p style={{ color: "var(--text-2)", fontSize: 14, margin: "0 0 28px", lineHeight: 1.6, wordBreak: "break-word" }}>
+          {state.msg}
+        </p>
         <button
+          className="btn btn-primary"
           onClick={handleRetry}
-          style={{
-            padding: "14px 32px", borderRadius: 12, border: "none",
-            background: "var(--neon)", color: "#000", fontWeight: 700, fontSize: 16,
-            cursor: "pointer",
-          }}
+          style={{ height: 50, padding: "0 40px", fontSize: 16 }}
         >
           {t("upgrade.retry")}
         </button>
       </div>
     );
   }
-
-  return null;
 }

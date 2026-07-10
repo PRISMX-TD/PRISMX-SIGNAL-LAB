@@ -27,6 +27,11 @@
   --spring: cubic-bezier(0.34, 1.45, 0.64, 1);
 }
 
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
 @layer base {
   html,
   body,
