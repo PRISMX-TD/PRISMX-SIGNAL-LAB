@@ -309,6 +309,7 @@ export const paymentApi = {
       plan: string
       status: string
       created_at: string
+      valid_until: string | null
     }>('/payments/create', {
       method: 'POST',
       body: JSON.stringify({ plan, pay_currency: payCurrency }),

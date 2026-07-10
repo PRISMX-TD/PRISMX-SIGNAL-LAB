@@ -132,11 +132,16 @@ async def create_payment_order(
     # IPN 回调 URL / callback URL for NOWPayments to POST back
     ipn_url = f"{settings.SITE_BASE_URL}/api/payments/webhook"
 
+    # 以 USDT 计价（price_currency 与 pay_currency 同币种），避免美元→USDT 换算产生
+    # 的小数尾巴，让客户看到的应付金额与套餐价格整齐对齐。USDT≈USD，价格数值不变。
+    # Price directly in USDT (price_currency == pay_currency) so there's no USD→USDT
+    # conversion tail — the amount shown matches the plan price exactly. USDT≈USD.
+    pay_currency = body.pay_currency.lower()
     try:
         np_result = await np_create(
             price_amount=price_usd,
-            price_currency="usd",
-            pay_currency=body.pay_currency.lower(),
+            price_currency=pay_currency,
+            pay_currency=pay_currency,
             order_id=order_id,
             order_description=f"PRISMX PRO - {days} days",
             ipn_callback_url=ipn_url,
@@ -156,7 +161,7 @@ async def create_payment_order(
         nowpayments_payment_id=str(payment_id),
         plan=body.plan,
         amount_usd=price_usd,
-        pay_currency=body.pay_currency.lower(),
+        pay_currency=pay_currency,
         pay_amount=float(np_result.get("pay_amount", 0)),
         pay_address=np_result.get("pay_address", ""),
         status="PENDING",
@@ -174,6 +179,8 @@ async def create_payment_order(
         "plan": record.plan,
         "status": record.status,
         "created_at": record.created_at.isoformat(),
+        # NOWPayments 返回的支付有效期，用于前端倒计时 / payment validity window for the countdown
+        "valid_until": np_result.get("valid_until") or np_result.get("expiration_estimate_date"),
     }
 
 
