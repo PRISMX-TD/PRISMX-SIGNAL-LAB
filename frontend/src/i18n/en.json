@@ -306,6 +306,8 @@
     "platform": "Platform Account",
     "email": "Email",
     "registeredAt": "Registered",
+    "expiresAt": "PRO Expires",
+    "neverExpires": "No expiry",
     "mt5Accounts": "MT5 Accounts",
     "balance": "Balance",
     "equity": "Equity",

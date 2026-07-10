@@ -206,6 +206,14 @@ export default function AccountPage() {
                 <span className="text-slate-500">{t("account.registeredAt")}</span>
                 <div className="font-mono text-slate-100">{fmtTime(info.createdAt)}</div>
               </div>
+              {info.plan === "PRO" && (
+                <div>
+                  <span className="text-slate-500">{t("account.expiresAt")}</span>
+                  <div className="font-mono text-slate-100">
+                    {info.planExpiresAt ? fmtTime(info.planExpiresAt) : t("account.neverExpires")}
+                  </div>
+                </div>
+              )}
             </div>
           </section>
 

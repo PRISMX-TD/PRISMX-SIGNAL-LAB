@@ -19,6 +19,7 @@ class AccountInfoOut(BaseModel):
     id: str
     email: str
     plan: str
+    planExpiresAt: str | None
     hasPassword: bool
     createdAt: str | None
     mt5Accounts: list[dict]
@@ -41,6 +42,7 @@ def get_account(
         id=current_user.id,
         email=current_user.email,
         plan=current_user.plan,
+        planExpiresAt=current_user.plan_expires_at.isoformat() if current_user.plan_expires_at else None,
         hasPassword=current_user.password_hash is not None,
         createdAt=current_user.created_at.isoformat() if current_user.created_at else None,
         mt5Accounts=[

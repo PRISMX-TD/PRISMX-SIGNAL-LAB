@@ -307,6 +307,8 @@
     "platform": "平台账户",
     "email": "邮箱",
     "registeredAt": "注册时间",
+    "expiresAt": "PRO 到期",
+    "neverExpires": "永不过期",
     "mt5Accounts": "MT5 账户",
     "balance": "余额",
     "equity": "净值",

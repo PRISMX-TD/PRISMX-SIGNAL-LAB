@@ -186,6 +186,7 @@ export const userApi = {
       id: string
       email: string
       plan: UserPlan
+      planExpiresAt: string | null
       hasPassword: boolean
       createdAt: string | null
       mt5Accounts: Array<{
