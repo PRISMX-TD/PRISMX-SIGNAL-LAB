@@ -196,7 +196,7 @@ async def get_payment_status_local(
         raise HTTPException(status_code=404, detail="Payment not found")
 
     # 若本地不是终态，从 NOWPayments 拉最新状态同步 / sync from NP if not terminal
-    if record.status in ("PENDING", "NEW"):
+    if record.status in ("PENDING", "NEW", "PROCESSING"):
         try:
             np_data = await np_status(payment_id)
             np_status_val = np_data.get("payment_status", "").lower()
