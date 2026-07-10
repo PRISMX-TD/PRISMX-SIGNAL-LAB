@@ -1,7 +1,7 @@
-import type { CSSProperties } from "react";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { QRCodeSVG } from "qrcode.react";
+import AuroraBackground from "../components/AuroraBackground";
 import { useAuth } from "../store/auth";
 import { paymentApi } from "../api/client";
 
@@ -28,16 +28,25 @@ const USDT_META: Record<string, { label: string; note: string }> = Object.fromEn
   USDT_NETWORKS.map((n) => [n.code, { label: n.label, note: n.note }]),
 );
 
-// 权益对比表数据（键指向 i18n）/ feature comparison rows (keys point to i18n)
-const COMPARE_ROWS: Array<{ feat: string; free: string; pro: string }> = [
-  { feat: "featSignals", free: "featSignalsFree", pro: "featSignalsPro" },
-  { feat: "featWinrate", free: "featWinrateFree", pro: "featWinratePro" },
-  { feat: "featMt5", free: "featMt5Free", pro: "featMt5Pro" },
-  { feat: "featTrade", free: "featTradeFree", pro: "featTradePro" },
-  { feat: "featAuto", free: "featAutoFree", pro: "featAutoPro" },
-  { feat: "featPush", free: "featPushFree", pro: "featPushPro" },
-  { feat: "featSupport", free: "featSupportFree", pro: "featSupportPro" },
+// 权益对比行（键指向 i18n）/ feature comparison rows (keys point to i18n)
+const FEATURES: Array<{ key: string; free: string; pro: string }> = [
+  { key: "featSignals", free: "featSignalsFree", pro: "featSignalsPro" },
+  { key: "featWinrate", free: "featWinrateFree", pro: "featWinratePro" },
+  { key: "featMt5", free: "featMt5Free", pro: "featMt5Pro" },
+  { key: "featTrade", free: "featTradeFree", pro: "featTradePro" },
+  { key: "featAuto", free: "featAutoFree", pro: "featAutoPro" },
+  { key: "featPush", free: "featPushFree", pro: "featPushPro" },
+  { key: "featSupport", free: "featSupportFree", pro: "featSupportPro" },
 ];
+
+// CheckIcon / DashIcon 内联图标 / inline icons
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+      <path d="M20 6L9 17l-5-5" />
+    </svg>
+  );
+}
 
 export default function UpgradePage() {
   const { t } = useTranslation();
@@ -55,7 +64,6 @@ export default function UpgradePage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const clockRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // 加载套餐和可用币种列表 / load plans and coin list
   useEffect(() => {
     document.title = t("upgrade.title");
     paymentApi.getPlans().then((r) => {
@@ -63,7 +71,6 @@ export default function UpgradePage() {
       setSale(r.sale ?? null);
     }).catch(() => {});
     paymentApi.getCurrencies().then((r) => {
-      // 只接受白名单里的低费率 USDT 链；NP 未返回时退回完整白名单，绝不显示贵链
       const usdtOnly = USDT_NETWORKS.filter((n) => r.currencies.some((c) => c.toLowerCase() === n.code));
       const available = usdtOnly.length ? usdtOnly.map((n) => n.code) : USDT_NETWORKS.map((n) => n.code);
       setCurrencies(available);
@@ -73,7 +80,6 @@ export default function UpgradePage() {
     }).catch(() => {});
   }, [t]);
 
-  // 清理定时器 / cleanup timers
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -83,7 +89,6 @@ export default function UpgradePage() {
 
   const selectedPlan = plans.find((p) => p.id === chosenPlan);
 
-  // 启动支付有效期倒计时 / start the payment-validity countdown
   const startCountdown = useCallback((validUntil: string | null) => {
     if (clockRef.current) clearInterval(clockRef.current);
     if (!validUntil) { setRemaining(null); return; }
@@ -97,7 +102,6 @@ export default function UpgradePage() {
     clockRef.current = setInterval(tick, 1000);
   }, []);
 
-  // 发起支付 / create payment
   const handlePay = useCallback(async () => {
     setLoading(true);
     try {
@@ -127,9 +131,7 @@ export default function UpgradePage() {
             if (clockRef.current) clearInterval(clockRef.current);
             setState({ step: "error", msg: t("upgrade.paymentExpired") });
           }
-        } catch {
-          /* 轮询失败静默跳过 / silently skip poll errors */
-        }
+        } catch { /* silently skip poll errors */ }
       }, 5000);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Unknown error";
@@ -158,213 +160,164 @@ export default function UpgradePage() {
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
-  return renderContent();
-
-  function renderContent() {
-    if (state.step === "select") return renderSelect();
-    if (state.step === "pay") return renderPay();
-    if (state.step === "done") return renderDone();
-    if (state.step === "error") return renderError();
-    return null;
-  }
+  return (
+    <div className="relative min-h-screen overflow-x-hidden">
+      <AuroraBackground />
+      <div className="relative mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
+        {state.step === "select" && renderSelect()}
+        {state.step === "pay" && renderPay()}
+        {state.step === "done" && renderDone()}
+        {state.step === "error" && renderError()}
+      </div>
+    </div>
+  );
 
   function renderSelect() {
     const isPro = user?.plan === "PRO";
+    const monthly = plans.find((p) => p.days === 30);
+    const yearly = plans.find((p) => p.days === 365);
     return (
-      <div style={{ maxWidth: 620, margin: "0 auto", padding: "40px 16px 72px" }}>
-        {/* 标题 / header */}
-        <div style={{ textAlign: "center", marginBottom: 30 }}>
-          <div style={{
-            display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 14px",
-            borderRadius: 999, background: "rgba(139,92,246,0.14)",
-            border: "1px solid rgba(139,92,246,0.35)", marginBottom: 16,
-          }}>
-            <span style={{ color: "var(--purple-hi)", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em" }}>PRO</span>
-          </div>
-          <h2 style={{ fontSize: 28, fontWeight: 800, color: "var(--text)", margin: "0 0 10px", letterSpacing: "-0.01em" }}>
+      <div className="animate-fade-in-up">
+        {/* 标题 / hero header */}
+        <div className="mx-auto max-w-2xl text-center">
+          <span className="chip mx-auto animate-glow-pulse">
+            <span className="h-1.5 w-1.5 rounded-full bg-prism-400 animate-breathe" />
+            PRO
+          </span>
+          <h1 className="mt-6 font-display text-4xl font-black leading-tight tracking-tight text-slate-50 sm:text-5xl">
             {t("upgrade.title")}
-          </h2>
-          <p style={{ color: "var(--text-2)", fontSize: 14.5, margin: "0 auto", maxWidth: 440, lineHeight: 1.65 }}>
+          </h1>
+          <p className="mx-auto mt-4 max-w-lg text-base leading-relaxed text-slate-400">
             {t("upgrade.subtitle")}
           </p>
         </div>
 
         {/* 促销横幅 / sale banner */}
         {sale?.badge && (
-          <div className="glass" style={{
-            padding: "14px 20px", marginBottom: 22, textAlign: "center",
-            background: "linear-gradient(135deg, rgba(168,85,247,0.20), rgba(139,92,246,0.10))",
-            border: "1px solid rgba(168,85,247,0.45)",
-          }}>
-            <div style={{ color: "var(--purple-hi)", fontWeight: 800, fontSize: 16, letterSpacing: "0.02em" }}>
-              {sale.badge} · {sale.percent}% OFF
-            </div>
-            {sale.end_at && (
-              <div style={{ color: "var(--text-2)", fontSize: 12, marginTop: 4 }}>
-                {t("upgrade.saleEnds")}: {sale.end_at.slice(0, 10)}
-              </div>
-            )}
+          <div className="glass mx-auto mt-8 max-w-md px-5 py-3 text-center">
+            <span className="font-display text-lg font-bold text-prism-300">{sale.badge} · {sale.percent}% OFF</span>
+            {sale.end_at && <div className="mt-0.5 text-xs text-slate-500">{t("upgrade.saleEnds")}: {sale.end_at.slice(0, 10)}</div>}
           </div>
         )}
 
-        {/* 权益对比表 / feature comparison */}
-        {renderCompareTable(isPro)}
-
-        {/* 套餐选择 / plan selector */}
-        <div style={{ marginTop: 34, marginBottom: 26 }}>
-          <h3 style={sectionLabel}>{t("upgrade.choosePlan")}</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            {plans.map((p) => {
-              const active = chosenPlan === p.id;
-              const badge = sale?.badge ? `${sale.percent}% OFF` : p.tag === "save_20" ? t("upgrade.save20") : p.tag;
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => setChosenPlan(p.id)}
-                  className="glass"
-                  style={{
-                    padding: "20px 18px", cursor: "pointer", textAlign: "left", position: "relative",
-                    border: active ? "1.5px solid var(--purple)" : "1px solid var(--line)",
-                    background: active
-                      ? "linear-gradient(180deg, rgba(139,92,246,0.16), rgba(139,92,246,0.05))"
-                      : "linear-gradient(180deg, var(--card-a), var(--card-b))",
-                    boxShadow: active ? "0 0 0 3px rgba(139,92,246,0.15)" : "none",
-                    transition: "all 0.2s",
-                  }}
-                >
-                  {badge && (
-                    <span style={{
-                      position: "absolute", top: 12, right: 12,
-                      background: "linear-gradient(92deg,#7c3aed,#a855f7)", color: "#fff",
-                      fontSize: 10, fontWeight: 800, padding: "3px 8px", borderRadius: 6, letterSpacing: "0.02em",
-                    }}>
-                      {badge}
-                    </span>
-                  )}
-                  <div style={{ color: "var(--text-2)", fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-                    {p.days === 30 ? t("upgrade.monthly") : t("upgrade.yearly")}
-                  </div>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                    <span className="num" style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>
-                      ${p.price_usd}
-                    </span>
-                    {p.original_price_usd != null && p.original_price_usd !== p.price_usd && (
-                      <span className="num" style={{ fontSize: 15, color: "var(--text-3)", textDecoration: "line-through" }}>
-                        ${p.original_price_usd}
-                      </span>
-                    )}
-                  </div>
-                  {p.days === 365 && !sale && (
-                    <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 6 }}>
-                      {t("upgrade.perMonth", { price: (p.price_usd / 12).toFixed(0) })}
-                    </div>
-                  )}
-                </button>
-              );
-            })}
+        {/* 计费周期切换 / billing cycle toggle */}
+        <div className="mt-10 flex justify-center">
+          <div className="seg">
+            <button className={chosenPlan === "pro_monthly" ? "on" : ""} onClick={() => setChosenPlan("pro_monthly")}>
+              {t("upgrade.monthly")}
+            </button>
+            <button className={chosenPlan === "pro_yearly" ? "on" : ""} onClick={() => setChosenPlan("pro_yearly")}>
+              {t("upgrade.yearly")}
+              {yearly && !sale && <span className="ml-1.5 text-[10px] font-bold text-prism-300">-20%</span>}
+            </button>
           </div>
         </div>
 
-        {/* 币种选择 / coin selector */}
-        <div style={{ marginBottom: 28 }}>
-          <h3 style={sectionLabel}>{t("upgrade.chooseCoin")}</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            {currencies.map((code) => {
-              const meta = USDT_META[code] ?? { label: code.toUpperCase(), note: "" };
-              const active = chosenCoin === code;
-              const isTrc = code === "usdttrc20";
-              return (
-                <button
-                  key={code}
-                  onClick={() => setChosenCoin(code)}
-                  className="glass"
-                  style={{
-                    padding: "14px 16px", cursor: "pointer", textAlign: "left",
-                    border: active ? "1.5px solid var(--purple)" : "1px solid var(--line)",
-                    background: active
-                      ? "linear-gradient(180deg, rgba(139,92,246,0.14), rgba(139,92,246,0.04))"
-                      : "var(--nest)",
-                    transition: "all 0.2s",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>USDT</span>
-                    <span style={{
-                      fontSize: 11, fontWeight: 700, color: active ? "var(--purple-hi)" : "var(--text-2)",
-                      background: active ? "rgba(139,92,246,0.16)" : "var(--card-b)",
-                      padding: "2px 8px", borderRadius: 6,
-                    }}>{meta.label}</span>
-                  </div>
-                  <div style={{ color: "var(--text-3)", fontSize: 12, marginTop: 6 }}>
-                    {isTrc ? t("upgrade.recommended") : meta.note}
-                  </div>
-                </button>
-              );
-            })}
+        {/* 双卡定价并排 / two pricing cards */}
+        <div className="mx-auto mt-8 grid max-w-4xl grid-cols-1 gap-5 md:grid-cols-2">
+          {/* FREE 卡 */}
+          <div className="glass flex flex-col p-7">
+            <div className="flex items-center justify-between">
+              <span className="font-display text-lg font-bold text-slate-200">{t("upgrade.planFree")}</span>
+              {!isPro && <span className="tag bg-white/5 text-slate-400 ring-1 ring-white/10">{t("upgrade.currentPlan")}</span>}
+            </div>
+            <div className="mt-4 flex items-baseline gap-1">
+              <span className="font-display text-4xl font-black text-slate-100">$0</span>
+            </div>
+            <p className="mt-1 text-sm text-slate-500">{t("upgrade.freeTagline")}</p>
+            <div className="my-6 h-px bg-white/10" />
+            <ul className="flex flex-col gap-3">
+              {FEATURES.map((f) => (
+                <li key={f.key} className="flex items-start gap-3 text-sm">
+                  <span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-white/5 text-slate-600">
+                    <span className="text-xs">·</span>
+                  </span>
+                  <span className="text-slate-400">
+                    <span className="text-slate-300">{t(`upgrade.${f.key}`)}</span>
+                    <span className="text-slate-500"> — {t(`upgrade.${f.free}`)}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* PRO 卡（高亮）*/}
+          <div className="glass-neon relative flex flex-col p-7 ring-1 ring-prism-500/40"
+               style={{ boxShadow: "0 24px 60px rgba(0,0,0,0.55), 0 0 40px rgba(139,92,246,0.18)" }}>
+            {/* 光晕 / glow orb */}
+            <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-prism-600/25 blur-[90px]" />
+            <div className="relative flex items-center justify-between">
+              <span className="font-display text-lg font-bold text-prism-200">{t("upgrade.planPro")}</span>
+              <span className="tag bg-prism-600/20 text-prism-200 ring-1 ring-prism-500/40">
+                {isPro ? t("upgrade.currentPlan") : t("upgrade.mostPopular")}
+              </span>
+            </div>
+            <div className="relative mt-4 flex items-baseline gap-2">
+              <span className="font-display text-5xl font-black text-white">${selectedPlan?.price_usd ?? monthly?.price_usd ?? "—"}</span>
+              {selectedPlan?.original_price_usd != null && selectedPlan.original_price_usd !== selectedPlan.price_usd && (
+                <span className="font-display text-xl text-slate-500 line-through">${selectedPlan.original_price_usd}</span>
+              )}
+              <span className="text-sm text-slate-400">/ {chosenPlan === "pro_yearly" ? t("upgrade.yearly") : t("upgrade.monthly")}</span>
+            </div>
+            {chosenPlan === "pro_yearly" && yearly && (
+              <p className="relative mt-1 text-sm text-prism-300">{t("upgrade.perMonth", { price: (yearly.price_usd / 12).toFixed(0) })}</p>
+            )}
+            <div className="relative my-6 h-px bg-prism-500/20" />
+            <ul className="relative flex flex-col gap-3">
+              {FEATURES.map((f) => (
+                <li key={f.key} className="flex items-start gap-3 text-sm">
+                  <span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-prism-600/25 text-prism-300 ring-1 ring-prism-500/40">
+                    <CheckIcon />
+                  </span>
+                  <span>
+                    <span className="font-medium text-slate-100">{t(`upgrade.${f.key}`)}</span>
+                    <span className="text-slate-400"> — {t(`upgrade.${f.pro}`)}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
 
-        {/* 支付按钮 / pay button */}
+        {/* 支付区 / payment area */}
         {isPro ? (
-          <div className="glass" style={{ padding: 18, textAlign: "center", color: "var(--up)", fontWeight: 700 }}>
+          <div className="glass mx-auto mt-10 max-w-md px-6 py-5 text-center font-semibold text-up">
             {t("upgrade.alreadyPro")}
           </div>
         ) : (
-          <>
+          <div className="mx-auto mt-12 max-w-2xl">
+            <h3 className="mb-4 text-center text-xs font-bold uppercase tracking-[0.15em] text-slate-500">{t("upgrade.chooseCoin")}</h3>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {currencies.map((code) => {
+                const meta = USDT_META[code] ?? { label: code.toUpperCase(), note: "" };
+                const active = chosenCoin === code;
+                const isTrc = code === "usdttrc20";
+                return (
+                  <button
+                    key={code}
+                    onClick={() => setChosenCoin(code)}
+                    className={`glass flex flex-col items-start p-3.5 text-left transition ${active ? "ring-2 ring-prism-500/60" : "hover:border-prism-500/30"}`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-display text-sm font-bold text-slate-100">USDT</span>
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-prism-600/25 text-prism-200" : "bg-white/5 text-slate-400"}`}>{meta.label}</span>
+                    </div>
+                    <span className="mt-1 text-[11px] text-slate-500">{isTrc ? t("upgrade.recommended") : meta.note}</span>
+                  </button>
+                );
+              })}
+            </div>
+
             <button
-              className="btn btn-primary"
               onClick={handlePay}
               disabled={loading || !selectedPlan}
-              style={{ width: "100%", height: 54, fontSize: 16, fontWeight: 700 }}
+              className="btn-primary mt-7 w-full py-3.5 text-base"
             >
               {loading ? "…" : t("upgrade.payButton", { price: selectedPlan ? `$${selectedPlan.price_usd}` : "" })}
             </button>
-            <p style={{ color: "var(--text-3)", fontSize: 12.5, textAlign: "center", marginTop: 16, lineHeight: 1.6 }}>
-              {t("upgrade.secureNote")}
-            </p>
-          </>
-        )}
-      </div>
-    );
-  }
-
-  function renderCompareTable(isPro: boolean) {
-    return (
-      <div>
-        <h3 style={sectionLabel}>{t("upgrade.compareTitle")}</h3>
-        <div className="glass" style={{ overflow: "hidden", padding: 0 }}>
-          {/* 表头 / table header */}
-          <div style={{
-            display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", alignItems: "center",
-            padding: "12px 16px", borderBottom: "1px solid var(--line)",
-            background: "linear-gradient(180deg, rgba(139,92,246,0.06), transparent)",
-          }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-              {t("upgrade.compareFeature")}
-            </div>
-            <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: "var(--text-2)" }}>
-              {t("upgrade.planFree")}
-              {!isPro && <span style={badgeNow}>{t("upgrade.currentPlan")}</span>}
-            </div>
-            <div style={{ textAlign: "center", fontSize: 12, fontWeight: 800, color: "var(--purple-hi)" }}>
-              {t("upgrade.planPro")}
-              {isPro && <span style={badgeNow}>{t("upgrade.currentPlan")}</span>}
-            </div>
+            <p className="mt-4 text-center text-xs leading-relaxed text-slate-500">{t("upgrade.secureNote")}</p>
           </div>
-          {/* 表行 / rows */}
-          {COMPARE_ROWS.map((row, i) => (
-            <div key={row.feat} style={{
-              display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", alignItems: "center",
-              padding: "12px 16px",
-              borderBottom: i < COMPARE_ROWS.length - 1 ? "1px solid var(--line)" : "none",
-              background: i % 2 === 1 ? "rgba(255,255,255,0.015)" : "transparent",
-            }}>
-              <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text)" }}>{t(`upgrade.${row.feat}`)}</div>
-              <div style={{ textAlign: "center", fontSize: 12.5, color: "var(--text-3)" }}>{t(`upgrade.${row.free}`)}</div>
-              <div style={{ textAlign: "center", fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>{t(`upgrade.${row.pro}`)}</div>
-            </div>
-          ))}
-        </div>
+        )}
       </div>
     );
   }
@@ -373,125 +326,80 @@ export default function UpgradePage() {
     if (state.step !== "pay") return null;
     const meta = USDT_META[state.payCurrency] ?? { label: state.payCurrency.toUpperCase(), note: "" };
     const expired = remaining !== null && remaining <= 0;
-    // 二维码内容：优先纯地址，最大化钱包兼容性 / QR = plain address for best wallet compatibility
-    const qrValue = state.payAddress;
     return (
-      <div style={{ maxWidth: 480, margin: "0 auto", padding: "40px 16px 64px", textAlign: "center" }}>
-        <h2 style={{ fontSize: 24, fontWeight: 800, color: "var(--text)", margin: "0 0 6px" }}>
-          {t("upgrade.payTitle")}
-        </h2>
-        <p style={{ color: "var(--text-2)", fontSize: 14, margin: "0 0 22px", lineHeight: 1.6 }}>
-          {t("upgrade.payHint")}
-        </p>
+      <div className="mx-auto max-w-lg animate-fade-in-up">
+        {/* 标题 / header */}
+        <div className="text-center">
+          <h1 className="font-display text-3xl font-black tracking-tight text-slate-50">{t("upgrade.payTitle")}</h1>
+          <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-slate-400">{t("upgrade.payHint")}</p>
+        </div>
 
         {/* 倒计时 / countdown */}
         {remaining !== null && (
-          <div className="glass" style={{
-            display: "inline-flex", alignItems: "center", gap: 10, padding: "8px 16px", marginBottom: 18,
-            border: expired ? "1px solid rgba(255,77,103,0.4)" : "1px solid rgba(230,184,74,0.35)",
-            background: expired ? "var(--down-bg)" : "rgba(230,184,74,0.08)",
-          }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-2)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              {t("upgrade.timeLeft")}
-            </span>
-            <span className="num" style={{ fontSize: 18, fontWeight: 800, color: expired ? "var(--down)" : "var(--gold)" }}>
-              {expired ? "0:00" : fmtCountdown(remaining)}
-            </span>
+          <div className="mt-6 flex justify-center">
+            <div className={`inline-flex items-center gap-2.5 rounded-pill px-4 py-2 ring-1 ${expired ? "bg-down/10 ring-down/40" : "bg-amber-400/10 ring-amber-400/30"}`}>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{t("upgrade.timeLeft")}</span>
+              <span className={`font-mono text-lg font-bold ${expired ? "text-down" : "text-amber-300"}`}>
+                {expired ? "0:00" : fmtCountdown(remaining)}
+              </span>
+            </div>
           </div>
         )}
 
         {expired ? (
-          <div className="glass" style={{ padding: 22, marginBottom: 20 }}>
-            <p style={{ color: "var(--text-2)", fontSize: 14, margin: "0 0 18px", lineHeight: 1.6 }}>
-              {t("upgrade.expiredRetry")}
-            </p>
-            <button className="btn btn-primary" onClick={handleRetry} style={{ height: 46, padding: "0 28px" }}>
-              {t("upgrade.retry")}
-            </button>
+          <div className="glass mt-6 p-8 text-center">
+            <p className="text-sm leading-relaxed text-slate-400">{t("upgrade.expiredRetry")}</p>
+            <button onClick={handleRetry} className="btn-primary mt-5 px-7 py-2.5">{t("upgrade.retry")}</button>
           </div>
         ) : (
           <>
             {/* 二维码卡 / QR card */}
-            <div className="glass" style={{ padding: 24, marginBottom: 14 }}>
-              <div style={{
-                background: "#fff", borderRadius: 14, padding: 16, width: 208, height: 208,
-                margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "center",
-                boxShadow: "0 8px 30px rgba(0,0,0,0.35)",
-              }}>
-                <QRCodeSVG value={qrValue} size={176} level="M" />
+            <div className="glass relative mt-6 overflow-hidden p-7 text-center">
+              <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-prism-600/20 blur-[80px]" />
+              <div className="relative mx-auto flex h-52 w-52 items-center justify-center rounded-card bg-white p-4 shadow-glass-lg">
+                <QRCodeSVG value={state.payAddress} size={176} level="M" />
               </div>
-              <div style={{ color: "var(--text)", fontSize: 13.5, fontWeight: 600, marginTop: 16 }}>
-                {t("upgrade.scanToPay")}
-              </div>
-              <div style={{ color: "var(--text-3)", fontSize: 12, marginTop: 4 }}>
-                {t("upgrade.orCopyManually")}
-              </div>
+              <div className="relative mt-5 font-medium text-slate-100">{t("upgrade.scanToPay")}</div>
+              <div className="relative mt-1 text-xs text-slate-500">{t("upgrade.orCopyManually")}</div>
             </div>
 
             {/* 金额卡 / amount card */}
-            <div className="glass" style={{ padding: 22, marginBottom: 14 }}>
-              <div style={{ color: "var(--text-2)", fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
-                {t("upgrade.sendAmount")}
+            <div className="glass mt-4 p-6 text-center">
+              <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">{t("upgrade.sendAmount")}</div>
+              <div className="mt-2 break-all font-display text-3xl font-black text-white">{state.payAmount}</div>
+              <div className="mt-3 inline-flex items-center gap-1.5 rounded-pill bg-prism-600/15 px-3 py-1 ring-1 ring-prism-500/30">
+                <span className="text-sm font-bold text-slate-100">USDT</span>
+                <span className="text-xs font-bold text-prism-300">{meta.label}</span>
               </div>
-              <div className="num" style={{ fontSize: 32, fontWeight: 800, color: "var(--text)", lineHeight: 1.1, wordBreak: "break-all" }}>
-                {state.payAmount}
-              </div>
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 10, padding: "4px 12px", borderRadius: 999, background: "rgba(139,92,246,0.14)", border: "1px solid rgba(139,92,246,0.3)" }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>USDT</span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: "var(--purple-hi)" }}>{meta.label}</span>
-              </div>
-              <div style={{ color: "var(--text-3)", fontSize: 13, marginTop: 12 }}>≈ ${state.amountUsd} USD</div>
-              <div style={{ color: "var(--gold)", fontSize: 12, marginTop: 10, lineHeight: 1.5 }}>
-                {t("upgrade.amountExact")}
-              </div>
+              <div className="mt-3 text-xs text-slate-500">≈ ${state.amountUsd} USD</div>
+              <div className="mt-2.5 text-xs leading-relaxed text-amber-300/90">{t("upgrade.amountExact")}</div>
             </div>
 
             {/* 地址卡 / address card */}
-            <div className="glass" style={{ padding: 22, marginBottom: 16 }}>
-              <div style={{ color: "var(--text-2)", fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>
-                {t("upgrade.sendTo")} · {meta.label}
-              </div>
-              <div style={{
-                fontSize: 14, fontFamily: "'JetBrains Mono', ui-monospace, monospace", color: "var(--text)",
-                wordBreak: "break-all", padding: "12px 14px", borderRadius: 10,
-                background: "var(--nest)", border: "1px solid var(--line)", lineHeight: 1.5,
-              }}>
+            <div className="glass mt-4 p-6">
+              <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">{t("upgrade.sendTo")} · {meta.label}</div>
+              <div className="mt-3 break-all rounded-inner border border-line bg-black/20 p-3.5 font-mono text-sm leading-relaxed text-slate-200">
                 {state.payAddress}
               </div>
-              <button
-                className="btn btn-ghost"
-                onClick={() => copyAddress(state.payAddress)}
-                style={{ marginTop: 14, width: "100%", height: 44 }}
-              >
+              <button onClick={() => copyAddress(state.payAddress)} className="btn-ghost mt-3.5 w-full py-2.5">
                 {copied ? t("upgrade.copied") : t("common.copy")}
               </button>
             </div>
 
             {/* 截图提示 / screenshot tip */}
-            <div style={{
-              display: "flex", alignItems: "flex-start", gap: 10, textAlign: "left",
-              padding: "12px 14px", marginBottom: 18, borderRadius: 10,
-              background: "rgba(96,165,250,0.06)", border: "1px solid rgba(96,165,250,0.22)",
-            }}>
-              <span style={{ fontSize: 15, lineHeight: 1.4 }}>📸</span>
-              <span style={{ color: "var(--text-2)", fontSize: 12.5, lineHeight: 1.6 }}>
-                {t("upgrade.screenshotTip")}
-              </span>
+            <div className="mt-4 flex items-start gap-2.5 rounded-inner border border-sky-400/20 bg-sky-400/5 p-3.5">
+              <span className="text-base leading-tight">📸</span>
+              <span className="text-xs leading-relaxed text-slate-400">{t("upgrade.screenshotTip")}</span>
             </div>
 
             {/* 轮询提示 / polling hint */}
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 10, color: "var(--text-2)", fontSize: 13 }}>
-              <span style={{
-                width: 8, height: 8, borderRadius: "50%", background: "var(--gold)",
-                boxShadow: "0 0 8px var(--gold)", animation: "pulse 1.5s ease-in-out infinite",
-              }} />
+            <div className="mt-6 flex items-center justify-center gap-2.5 text-sm text-slate-400">
+              <span className="h-2 w-2 rounded-full bg-amber-400 shadow-[0_0_8px_theme(colors.amber.400)] animate-breathe" />
               {t("upgrade.pollingHint")}
             </div>
 
-            <div style={{ marginTop: 22 }}>
-              <button className="btn btn-ghost" onClick={handleRetry} style={{ height: 40 }}>
-                {t("common.cancel")}
-              </button>
+            <div className="mt-5 text-center">
+              <button onClick={handleRetry} className="btn-ghost px-6 py-2">{t("common.cancel")}</button>
             </div>
           </>
         )}
@@ -501,25 +409,15 @@ export default function UpgradePage() {
 
   function renderDone() {
     return (
-      <div style={{ maxWidth: 480, margin: "0 auto", padding: "72px 16px", textAlign: "center" }}>
-        <div style={{
-          width: 72, height: 72, borderRadius: "50%", margin: "0 auto 24px",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          background: "var(--up-bg)", border: "1px solid rgba(46,224,126,0.4)",
-        }}>
-          <span style={{ fontSize: 36 }}>✓</span>
+      <div className="mx-auto max-w-md animate-fade-in-up py-16 text-center">
+        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-up/10 text-up ring-1 ring-up/40">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="h-9 w-9">
+            <path d="M20 6L9 17l-5-5" />
+          </svg>
         </div>
-        <h2 style={{ fontSize: 24, fontWeight: 800, color: "var(--text)", margin: "0 0 10px" }}>
-          {t("upgrade.successTitle")}
-        </h2>
-        <p style={{ color: "var(--text-2)", fontSize: 14, margin: "0 0 28px", lineHeight: 1.6 }}>
-          {t("upgrade.successDesc")}
-        </p>
-        <button
-          className="btn btn-primary"
-          onClick={() => { window.location.href = "/dashboard"; }}
-          style={{ height: 50, padding: "0 40px", fontSize: 16 }}
-        >
+        <h1 className="mt-6 font-display text-2xl font-black text-slate-50">{t("upgrade.successTitle")}</h1>
+        <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-slate-400">{t("upgrade.successDesc")}</p>
+        <button onClick={() => { window.location.href = "/dashboard"; }} className="btn-primary mt-7 px-8 py-3">
           {t("upgrade.goDashboard")}
         </button>
       </div>
@@ -529,41 +427,14 @@ export default function UpgradePage() {
   function renderError() {
     if (state.step !== "error") return null;
     return (
-      <div style={{ maxWidth: 480, margin: "0 auto", padding: "72px 16px", textAlign: "center" }}>
-        <div style={{
-          width: 72, height: 72, borderRadius: "50%", margin: "0 auto 24px",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          background: "var(--down-bg)", border: "1px solid rgba(255,77,103,0.4)",
-        }}>
-          <span style={{ fontSize: 36, color: "var(--down)" }}>!</span>
+      <div className="mx-auto max-w-md animate-fade-in-up py-16 text-center">
+        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-down/10 text-down ring-1 ring-down/40">
+          <span className="font-display text-4xl">!</span>
         </div>
-        <h2 style={{ fontSize: 24, fontWeight: 800, color: "var(--text)", margin: "0 0 10px" }}>
-          {t("upgrade.errorTitle")}
-        </h2>
-        <p style={{ color: "var(--text-2)", fontSize: 14, margin: "0 0 28px", lineHeight: 1.6, wordBreak: "break-word" }}>
-          {state.msg}
-        </p>
-        <button
-          className="btn btn-primary"
-          onClick={handleRetry}
-          style={{ height: 50, padding: "0 40px", fontSize: 16 }}
-        >
-          {t("upgrade.retry")}
-        </button>
+        <h1 className="mt-6 font-display text-2xl font-black text-slate-50">{t("upgrade.errorTitle")}</h1>
+        <p className="mx-auto mt-3 max-w-sm break-words text-sm leading-relaxed text-slate-400">{state.msg}</p>
+        <button onClick={handleRetry} className="btn-primary mt-7 px-8 py-3">{t("upgrade.retry")}</button>
       </div>
     );
   }
 }
-
-const sectionLabel: CSSProperties = {
-  fontSize: 13, fontWeight: 700, color: "var(--text-2)", margin: "0 0 12px",
-  textTransform: "uppercase", letterSpacing: "0.06em",
-};
-
-// 「当前套餐」小标签 / small "current plan" chip
-const badgeNow: CSSProperties = {
-  display: "inline-block", marginLeft: 6, padding: "1px 6px", borderRadius: 5,
-  fontSize: 9, fontWeight: 700, verticalAlign: "middle",
-  color: "var(--text-2)", background: "var(--card-b)", border: "1px solid var(--line)",
-};
-
