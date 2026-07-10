@@ -293,7 +293,8 @@ export const sentimentApi = {
 export const paymentApi = {
   getPlans: () =>
     request<{
-      plans: Array<{ id: string; name: string; price_usd: number; days: number; tag?: string }>
+      plans: Array<{ id: string; name: string; price_usd: number; original_price_usd?: number | null; days: number; tag?: string }>
+      sale?: { percent: number; badge: string; end_at: string; monthly: number; yearly: number } | null
     }>('/payments/plans'),
   getCurrencies: () => request<{ currencies: string[] }>('/payments/currencies'),
   create: (plan: string, payCurrency: string) =>

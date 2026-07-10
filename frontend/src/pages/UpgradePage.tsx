@@ -12,8 +12,6 @@ type PaymentState =
   | { step: "done" }
   | { step: "error"; msg: string };
 
-const POPULAR_COINS = ["btc", "eth", "usdttrc20", "usdc", "ltc", "trx"];
-
 export default function UpgradePage() {
   const { t } = useTranslation();
   const { user } = useAuth();
