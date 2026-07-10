@@ -79,7 +79,7 @@ def _current_login() -> str | None:
 _SUFFIX_PROBE = ["EURUSD", "XAUUSD", "GBPUSD", "USDJPY", "BTCUSD"]
 
 # 网页报价区展示的品种（与前端关注列表对齐）/ symbols shown in the web quote panel
-QUOTE_SYMBOLS = ["XAUUSD", "EURUSD", "GBPUSD", "XAGUSD", "BTCUSD", "USDJPY"]
+QUOTE_SYMBOLS = ["XAUUSD", "EURUSD", "GBPUSD", "XAGUSD", "BTCUSD", "USDJPY", "EURGBP"]
 
 
 def _detect_suffix() -> str:
