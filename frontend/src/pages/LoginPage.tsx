@@ -58,20 +58,20 @@ export default function LoginPage() {
     <div className="relative min-h-screen overflow-hidden">
       <AuroraBackground />
 
-      <div className="absolute left-4 top-4 z-10">
+      <div className="absolute left-4 top-4 z-20">
         <Link to="/" className="chip transition hover:border-prism-500/50 hover:text-slate-100">
           <span aria-hidden>←</span> PRISMX
         </Link>
       </div>
-      <div className="absolute right-4 top-4 z-10">
+      <div className="absolute right-4 top-4 z-20">
         <LanguageToggle />
       </div>
 
       <div className="relative z-10 flex min-h-screen items-center justify-center px-4">
         <div className="w-full max-w-md">
           <div className="mb-8 flex flex-col items-center text-center">
-            <div className="mb-4 animate-glow-pulse rounded-2xl border border-prism-600/40 bg-white/[0.04] p-3 backdrop-blur-xl">
-              <Logo size={44} />
+            <div className="mb-4 [filter:drop-shadow(0_0_16px_rgba(139,92,246,0.55))]">
+              <Logo size={56} />
             </div>
             <h1 className="font-display text-3xl font-black tracking-wider text-slate-100">
               PRISMX <span className="neon-text animate-gradient-x">Signal Lab</span>

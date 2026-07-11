@@ -8,11 +8,7 @@ export default function FaqSection() {
   const { t } = useTranslation()
 
   return (
-    <section id="faq" className="mx-auto max-w-7xl scroll-mt-20 px-4 py-20 sm:px-6">
-      <div className="reveal mb-12 text-center">
-        <span className="eyebrow">{t('landing.faqEyebrow')}</span>
-        <h2 className="mt-3 font-display text-3xl font-bold text-slate-50 sm:text-4xl">{t('landing.faqTitle')}</h2>
-      </div>
+    <section id="faq" className="mx-auto max-w-7xl scroll-mt-24 px-4 pb-14 pt-6 sm:px-6 sm:pb-20 sm:pt-8">
       <div className="mx-auto max-w-3xl">
         {FAQ_IDS.map((n) => (
           <details key={n} className="glass group mb-3 p-0">
