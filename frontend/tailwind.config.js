@@ -104,6 +104,10 @@ export default {
           '50%': { transform: 'translate(-1%, 1%) scale(1.02)' },
           '75%': { transform: 'translate(1.5%, 0.5%) scale(1.03)' },
         },
+        fadein: {
+          '0%': { opacity: '0', transform: 'translateY(8px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
       },
       animation: {
         breathe: 'breathe 2s ease-in-out infinite',
@@ -116,6 +120,7 @@ export default {
         marquee: 'marquee 30s linear infinite',
         drift: 'drift 18s ease-in-out infinite',
         'drift-slow': 'drift 24s ease-in-out infinite',
+        fadein: 'fadein 1s ease-out both',
       },
     },
   },
