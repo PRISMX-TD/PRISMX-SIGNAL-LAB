@@ -86,11 +86,9 @@ const fragmentShader = /* glsl */ `
     float aspect=uRes.x/max(uRes.y,1.0);
     vec2 p=(uv-0.5)*vec2(aspect,1.0)*2.2;
 
-    // 滚动演化：越往下流速略增、整体缓慢平移 / scroll drives flow speed + drift
-    float flow=1.0+uScroll*0.2;
+    // 滚动只极轻微影响时间流速，不产生空间位移 / scroll barely modulates time flow
+    float flow=1.0+uScroll*0.08;
     float t=uTime*0.2*flow;
-    p.y+=uScroll*0.45;              // 往下滚，画面像在向纵深穿行（幅度收敛）
-    p.x+=sin(uScroll*3.1415)*0.15;
 
     // 光标局部扰动涟漪 / localized pointer ripple (not a global shift)
     vec2 mp=uMouse*vec2(aspect,1.0)*1.1;
@@ -170,8 +168,8 @@ function AuroraPlane({ pointer, scroll, lite }: { pointer: Pointer; scroll: Reac
     // 扰动强度：移动时被拉高(在外部置位)，此处持续衰减 / decay ripple
     uniforms.uPointer.value += (pointer.current.active - uniforms.uPointer.value) * 0.06
     pointer.current.active *= 0.9
-    // 滚动进度平滑逼近 / ease scroll progress
-    uniforms.uScroll.value += (scroll.current - uniforms.uScroll.value) * 0.06
+    // 滚动进度极慢逼近，仅做超长周期调色板漂移 / barely-there scroll response
+    uniforms.uScroll.value += (scroll.current - uniforms.uScroll.value) * 0.015
   })
 
   return (
