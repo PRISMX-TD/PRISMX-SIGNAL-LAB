@@ -237,8 +237,11 @@
     "plStep2Desc": "Review the signal in your PRISMX panel, then send it to your own broker's MT5 with one click. Your funds stay in your account — we never touch them.",
     "plStep3Title": "Public Verdict · Immutable",
     "plStep3Desc": "The market scores every trade. TP first = win, SL first = loss, edge cases count against us. Every result is engraved in the public ledger — no delete button exists.",
+    "dc1Title": "Stop-Loss Lock",
     "dc1": "The moment you open, the stop is written and locked. You can't override it — that is discipline.",
+    "dc2Title": "Auto Break-Even",
     "dc2": "When floating profit hits the threshold, stop moves to break-even. From that moment on, this trade can never lose.",
+    "dc3Title": "Trailing Stop",
     "dc3": "As profit runs, stop trails the market automatically. You don't need to watch the screen — sleep is safe.",
     "footerRights": "All rights reserved",
     "footerRisk": "Risk warning: trading forex, precious metals and crypto assets carries a high level of risk and may result in the loss of your capital. Past signal performance does not guarantee future results. PRISMX provides technical signals and execution tooling only and does not constitute investment advice; whether and how to trade remains entirely your decision."
