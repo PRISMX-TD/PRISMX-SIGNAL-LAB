@@ -9,6 +9,12 @@ import * as THREE from 'three'
 
 type Pointer = React.MutableRefObject<{ x: number; y: number; active: number }>
 
+// 帧率哨兵：低于 MIN_FPS 视为设备带不动着色器，切 CSS 降级并在本次会话内记住，
+// 避免用户返回首页时再卡一次 / frame-rate sentinel: below MIN_FPS we swap to the
+// CSS fallback and remember the verdict for this session
+const SLOW_KEY = 'prismx:webgl-slow'
+const MIN_FPS = 12
+
 const vertexShader = /* glsl */ `
   varying vec2 vUv;
   void main() {
@@ -137,7 +143,7 @@ const fragmentShader = /* glsl */ `
   }
 `
 
-function AuroraPlane({ pointer, scroll, lite }: { pointer: Pointer; scroll: React.MutableRefObject<number>; lite: boolean }) {
+function AuroraPlane({ pointer, scroll, lite, frames }: { pointer: Pointer; scroll: React.MutableRefObject<number>; lite: boolean; frames: React.MutableRefObject<number> }) {
   const mat = useRef<THREE.ShaderMaterial>(null)
   const { size, viewport } = useThree()
   const mouse = useRef(new THREE.Vector2(0, 0))
@@ -159,6 +165,7 @@ function AuroraPlane({ pointer, scroll, lite }: { pointer: Pointer; scroll: Reac
 
   useFrame((_, delta) => {
     if (!mat.current) return
+    frames.current += 1
     // 移动端限速，减轻 GPU / slow down on lite
     uniforms.uTime.value += delta * (lite ? 0.6 : 1)
     // 光标位置平滑跟随 / smooth follow pointer
@@ -194,22 +201,76 @@ function CssFallback() {
 export default function PrismScene() {
   const pointer = useRef({ x: 0, y: 0, active: 0 })
   const scroll = useRef(0)
+  const frames = useRef(0)
   const [enabled, setEnabled] = useState(true)
   const [lite, setLite] = useState(false)
 
   useEffect(() => {
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const mobile = window.matchMedia('(max-width: 768px)').matches
+    // 本会话已判定过"带不动"就不再重试 / already flagged slow this session
+    let slow = false
+    try {
+      slow = sessionStorage.getItem(SLOW_KEY) === '1'
+    } catch {
+      slow = false
+    }
     let webgl = false
+    let software = false
     try {
       const c = document.createElement('canvas')
-      webgl = !!(c.getContext('webgl2') || c.getContext('webgl'))
+      const gl = (c.getContext('webgl2') || c.getContext('webgl')) as WebGLRenderingContext | null
+      webgl = !!gl
+      if (gl) {
+        // 软件渲染器（SwiftShader/llvmpipe 等，常见于虚拟机/远程桌面）跑不动
+        // 全屏 FBM，首帧就可能把 GPU 进程整个卡死——渲染前就判定降级
+        // software rasterizers can freeze the GPU process on the very first
+        // frame of this shader — bail out before rendering anything
+        const dbg = gl.getExtension('WEBGL_debug_renderer_info')
+        const renderer = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : ''
+        software = /swiftshader|llvmpipe|softpipe|software|basic render/i.test(renderer)
+        gl.getExtension('WEBGL_lose_context')?.loseContext()
+      }
     } catch {
       webgl = false
     }
-    if (!webgl || reduce) setEnabled(false)
+    if (!webgl || software || slow || reduce) setEnabled(false)
     if (mobile) setLite(true)
   }, [])
+
+  // 帧率哨兵：WebGL 存在但实际跑不动（老集显/远程桌面等）时自动切 CSS 降级
+  // frame-rate sentinel: WebGL that exists but crawls falls back to CSS
+  useEffect(() => {
+    if (!enabled) return
+    let timer: number
+    let passes = 0
+    let last = { frames: frames.current, at: performance.now() }
+    const check = () => {
+      const now = performance.now()
+      if (document.hidden) {
+        // 后台标签页 rAF 被浏览器节流，测出来必然接近 0 帧，不作数
+        // rAF throttles in hidden tabs — retest once the tab is visible
+        last = { frames: frames.current, at: now }
+        timer = window.setTimeout(check, 2200)
+        return
+      }
+      const fps = ((frames.current - last.frames) * 1000) / Math.max(now - last.at, 1)
+      last = { frames: frames.current, at: now }
+      if (fps < MIN_FPS) {
+        try {
+          sessionStorage.setItem(SLOW_KEY, '1')
+        } catch {
+          // 隐私模式写不进 sessionStorage 就只降级本次 / private mode: degrade without persisting
+        }
+        setEnabled(false)
+        return
+      }
+      // 连续两次达标即认定设备没问题，停止监测 / two healthy passes end the watch
+      if (++passes < 2) timer = window.setTimeout(check, 2200)
+    }
+    timer = window.setTimeout(check, 2200)
+    return () => window.clearTimeout(timer)
+  }, [enabled])
 
   useEffect(() => {
     if (!enabled) return
@@ -246,7 +307,7 @@ export default function PrismScene() {
       gl={{ antialias: false, alpha: false, powerPreference: 'high-performance' }}
       frameloop="always"
     >
-      <AuroraPlane pointer={pointer} scroll={scroll} lite={lite} />
+      <AuroraPlane pointer={pointer} scroll={scroll} lite={lite} frames={frames} />
     </Canvas>
   )
 }
