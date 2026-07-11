@@ -125,14 +125,12 @@ function ExitBeams() {
     if (!groupRef.current) return
     const s = 1 + Math.sin(state.clock.elapsedTime * 0.8) * 0.08
     beams.forEach((_, i) => {
-      const child = groupRef.current.children[i]
-      if (child) {
+      const child = groupRef.current.children[i] as THREE.Mesh
+      if (child?.scale) {
         child.scale.setScalar(s)
-        if (child.material && Array.isArray(child.material)) {
-          // skip
-        } else if ((child as THREE.Mesh).material && 'opacity' in (child as THREE.Mesh).material) {
-          ;((child as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity =
-            0.35 + Math.sin(state.clock.elapsedTime * 1.2 + i) * 0.15
+        const mat = child.material as THREE.MeshBasicMaterial
+        if (mat && 'opacity' in mat) {
+          mat.opacity = 0.35 + Math.sin(state.clock.elapsedTime * 1.2 + i) * 0.15
         }
       }
     })

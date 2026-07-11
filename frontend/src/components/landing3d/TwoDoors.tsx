@@ -27,8 +27,8 @@ function DoorFrame({ position, color, glowColor }: { position: [number, number, 
     return new THREE.ExtrudeGeometry(shape, { depth: 0.06, bevelEnabled: true, bevelThickness: 0.02, bevelSize: 0.02, bevelSegments: 2 })
   }, [])
 
-  useFrame((state) => {
-    const s = 1 + Math.sin(state.clock.elapsedTime * 0.5) * 0.03
+  useFrame(({ clock }) => {
+    const s = 1 + Math.sin(clock.elapsedTime * 0.5) * 0.03
     frameRef.current.scale.setScalar(s)
   })
 
@@ -62,7 +62,7 @@ function DoorParticles({ position, color }: { position: [number, number, number]
     return p
   }, [position])
 
-  useFrame((state) => {
+  useFrame(() => {
     if (!ref.current) return
     const pos = ref.current.geometry.attributes.position.array as Float32Array
     for (let i = 0; i < count; i++) {
@@ -94,7 +94,7 @@ function OrbitRing({ position, color }: { position: [number, number, number]; co
   const ringRef = useRef<THREE.Mesh>(null!)
   const geo = useMemo(() => new THREE.TorusGeometry(0.7, 0.015, 16, 60), [])
 
-  useFrame((state) => {
+  useFrame(() => {
     ringRef.current.rotation.y += 0.01
     ringRef.current.rotation.x += 0.005
   })

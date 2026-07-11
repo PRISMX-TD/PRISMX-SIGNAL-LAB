@@ -2,7 +2,7 @@
 // Signal pipeline: 3D tunnel showing a signal's journey from generation to verdict
 import { useRef, useMemo, Suspense } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Float, Text, PointMaterial } from '@react-three/drei'
+import { Float } from '@react-three/drei'
 import * as THREE from 'three'
 import { useTranslation } from 'react-i18next'
 
@@ -11,7 +11,7 @@ function LightTunnel() {
   const tunnelRef = useRef<THREE.Mesh>(null!)
   const tunnelGeo = useMemo(() => new THREE.TorusGeometry(1.4, 0.02, 16, 80), [])
 
-  useFrame((state) => {
+  useFrame(() => {
     tunnelRef.current.rotation.x += 0.004
     tunnelRef.current.rotation.y += 0.003
     tunnelRef.current.rotation.z += 0.002
@@ -72,14 +72,15 @@ function SignalStream() {
   }
 
   useFrame((state) => {
-    particles.forEach(({ mesh, offset }) => {
+    particles.forEach(({ mesh: m, offset }) => {
       const t = (state.clock.elapsedTime * 0.4 + offset) % (Math.PI * 2)
       const angle = t
       const radius = 1.3 + Math.sin(t * 3) * 0.15
-      mesh.position.x = Math.cos(angle) * radius
-      mesh.position.y = Math.sin(angle * 2) * 0.5
-      mesh.position.z = Math.sin(angle) * radius
-      mesh.material.opacity = 0.3 + Math.sin(t * 2) * 0.3
+      m.position.x = Math.cos(angle) * radius
+      m.position.y = Math.sin(angle * 2) * 0.5
+      m.position.z = Math.sin(angle) * radius
+      const mat = m.material as THREE.MeshBasicMaterial
+      mat.opacity = 0.3 + Math.sin(t * 2) * 0.3
     })
   })
 
@@ -121,7 +122,7 @@ function LedgerPlate() {
 /* ── 管道入口与出口节点 / entry & exit nodes ── */
 function PipelineNodes() {
   const nodes = useMemo(() => {
-    const positions = [
+    const positions: { pos: [number, number, number]; label: string; color: string }[] = [
       { pos: [-1.6, 0, 0], label: 'SIGNAL', color: '#a855f7' },
       { pos: [1.6, 0, 0], label: 'VERDICT', color: '#33e1ff' },
     ]
@@ -158,9 +159,10 @@ function Connectors() {
   }, [])
 
   return (
-    <line geometry={line}>
+    <mesh>
+      <primitive object={line} attach="geometry" />
       <lineBasicMaterial color="#a78bfa" transparent opacity={0.25} />
-    </line>
+    </mesh>
   )
 }
 

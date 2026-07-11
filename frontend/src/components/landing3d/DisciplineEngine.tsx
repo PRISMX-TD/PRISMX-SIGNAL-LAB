@@ -2,7 +2,7 @@
 // Discipline Engine: 3D geometric shield encasing a position card with locked SL/TP/BE pillars
 import { useRef, useMemo, Suspense } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Float, PointMaterial } from '@react-three/drei'
+import { Float } from '@react-three/drei'
 import * as THREE from 'three'
 import { useTranslation } from 'react-i18next'
 
@@ -11,10 +11,10 @@ function ShieldDome() {
   const domeRef = useRef<THREE.Mesh>(null!)
   const geo = useMemo(() => new THREE.IcosahedronGeometry(1.5, 3), [])
 
-  useFrame((state) => {
+  useFrame(({ clock }) => {
     domeRef.current.rotation.y += 0.003
     domeRef.current.rotation.x += 0.002
-    const p = 1 + Math.sin(state.clock.elapsedTime * 0.6) * 0.05
+    const p = 1 + Math.sin(clock.elapsedTime * 0.6) * 0.05
     domeRef.current.scale.setScalar(p)
   })
 
@@ -39,7 +39,7 @@ function ShieldWireframe() {
   const wireRef = useRef<THREE.Mesh>(null!)
   const geo = useMemo(() => new THREE.IcosahedronGeometry(1.55, 3), [])
 
-  useFrame((state) => {
+  useFrame(() => {
     wireRef.current.rotation.y += 0.003
     wireRef.current.rotation.x += 0.002
   })
