@@ -1,44 +1,367 @@
-// PRISMX Signal Lab · Product-forward · Inspired by Stripe + Robinhood 2024
-import { useEffect, useRef, useState } from 'react'
+// PRISMX Signal Lab · Parallax Explosion · GSAP ScrollTrigger
+import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import gsap from 'gsap'
+import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import Logo from '../components/Logo'
 import LanguageToggle from '../components/LanguageToggle'
 import FaqSection from '../components/landing/FaqSection'
 import MobileStickyCta from '../components/landing/MobileStickyCta'
 
-/* ── 滚动渐现 ── */
-function Re({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+gsap.registerPlugin(ScrollTrigger)
+
+/* ═════════════════════════ 视差层组件 ═════════════════════════ */
+function ParallaxLayer({ speed, className, children }: { speed: number; className?: string; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
-  const [v, setV] = useState(false)
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    const o = new IntersectionObserver(([e]) => { if (e.isIntersecting) setV(true) }, { threshold: 0.1, rootMargin: '0px 0px -30px 0px' })
-    o.observe(el)
-    return () => o.disconnect()
-  }, [])
-  return <div ref={ref} className={`transition-all duration-700 ${v ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'} ${className}`}>{children}</div>
+    gsap.to(el, {
+      y: () => window.innerHeight * speed * 0.5,
+      ease: 'none',
+      scrollTrigger: { trigger: el.parentElement!, start: 'top bottom', end: 'bottom top', scrub: true },
+    })
+  }, [speed])
+  return <div ref={ref} className={className}>{children}</div>
 }
 
-/* ── 导航 ── */
-function Navbar({ t, navigate }: { t: (k: string) => string; navigate: ReturnType<typeof useNavigate> }) {
-  const [s, setS] = useState(false)
-  useEffect(() => { const h = () => setS(window.scrollY > 20); window.addEventListener('scroll', h, { passive: true }); return () => window.removeEventListener('scroll', h) }, [])
+/* ═════════════════════════ 滚动浮动入场 ═════════════════════════ */
+function Reveal({ children, className = '', delay = 0, from = 'bottom' }: { children: React.ReactNode; className?: string; delay?: number; from?: 'left' | 'right' | 'bottom' | 'scale' }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const dirs: Record<string, gsap.TweenVars> = {
+      bottom: { y: 60, opacity: 0 },
+      left: { x: -80, opacity: 0 },
+      right: { x: 80, opacity: 0 },
+      scale: { scale: 0.8, opacity: 0 },
+    }
+    gsap.fromTo(el, dirs[from] || dirs.bottom, {
+      y: 0, x: 0, scale: 1, opacity: 1, duration: 0.9, delay, ease: 'power3.out',
+      scrollTrigger: { trigger: el, start: 'top 85%', toggleActions: 'play none none none' },
+    })
+  }, [from, delay])
+  return <div ref={ref} className={className}>{children}</div>
+}
+
+/* ═════════════════════════ 交互悬浮卡片 ═════════════════════════ */
+function HoverCard({ children, glow = false }: { children: React.ReactNode; glow?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const onMove = (e: MouseEvent) => {
+      const r = el.getBoundingClientRect()
+      const x = (e.clientX - r.left) / r.width - 0.5
+      const y = (e.clientY - r.top) / r.height - 0.5
+      gsap.to(el, { rotateY: x * 8, rotateX: -y * 8, scale: 1.03, duration: 0.4, ease: 'power2.out' })
+      if (glow) el.style.boxShadow = `0 15px 40px rgba(139,92,246,${0.08 + Math.abs(x + y) * 0.06}), 0 0 2px rgba(139,92,246,0.1)`
+    }
+    const onLeave = () => {
+      gsap.to(el, { rotateY: 0, rotateX: 0, scale: 1, duration: 0.5, ease: 'power2.out' })
+      if (glow) el.style.boxShadow = ''
+    }
+    el.addEventListener('mousemove', onMove)
+    el.addEventListener('mouseleave', onLeave)
+    return () => { el.removeEventListener('mousemove', onMove); el.removeEventListener('mouseleave', onLeave) }
+  }, [glow])
   return (
-    <header className={`fixed inset-x-0 top-0 z-50 transition-all duration-300 ${s ? 'border-b border-white/[0.05] bg-[#07080D]/80 backdrop-blur-2xl' : ''}`}>
+    <div ref={ref} className="rounded-2xl border border-white/[0.06] bg-[#0B0B12]/80 backdrop-blur-md p-6 transition-colors duration-300 hover:border-white/[0.12]" style={{ perspective: '800px', transformStyle: 'preserve-3d' }}>
+      {children}
+    </div>
+  )
+}
+
+/* ═════════════════════════ 导航 ═════════════════════════ */
+function Navbar({ t, navigate }: { t: (k: string) => string; navigate: ReturnType<typeof useNavigate> }) {
+  const ref = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const onScroll = () => { if (el) el.style.borderBottom = window.scrollY > 30 ? '1px solid rgba(255,255,255,0.05)' : '1px solid transparent' }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+  return (
+    <header ref={ref} className="fixed inset-x-0 top-0 z-50 bg-black/60 backdrop-blur-2xl transition-colors border-b border-transparent">
       <div className="mx-auto flex h-14 max-w-[1200px] items-center gap-6 px-5">
-        <a href="#" className="flex items-center gap-2.5"><Logo size={26} /><span className="text-sm font-semibold tracking-wide">PRISMX</span><span className="text-[10px] uppercase tracking-[0.18em] text-neutral-600">Signal Lab</span></a>
+        <a href="#" className="flex items-center gap-2.5"><Logo size={26} /><span className="text-sm font-semibold">PRISMX</span><span className="text-[10px] uppercase tracking-[0.2em] text-neutral-600">Signal Lab</span></a>
         <nav className="ml-2 hidden items-center gap-1 md:flex">
-          {[{ h: '#product', k: 'navShowcase' }, { h: '#guard', k: 'navWinrate' }, { h: '#pricing', k: 'navPricing' }, { h: '#faq', k: 'navFaq' }].map(l => <a key={l.h} href={l.h} className="rounded-md px-3 py-2 text-[13px] text-neutral-500 transition-colors hover:text-white">{t(`landing.${l.k}`)}</a>)}
+          {[{ h: '#showcase', k: 'navShowcase' }, { h: '#guard', k: 'navWinrate' }, { h: '#pricing', k: 'navPricing' }, { h: '#faq', k: 'navFaq' }].map(l => <a key={l.h} href={l.h} className="rounded-md px-3 py-2 text-[13px] text-neutral-500 transition-colors hover:text-white">{t(`landing.${l.k}`)}</a>)}
         </nav>
-        <div className="ml-auto flex items-center gap-2"><LanguageToggle /><button onClick={() => navigate('/login')} className="rounded-md px-3 py-2 text-[13px] text-neutral-500 transition-colors hover:text-white">{t('landing.signIn')}</button><button onClick={() => navigate('/login?mode=register')} className="rounded-lg bg-white px-4 py-2 text-[13px] font-semibold text-black transition-all hover:scale-[1.03]">{t('landing.getStarted')}</button></div>
+        <div className="ml-auto flex items-center gap-2"><LanguageToggle /><a href="/login" className="rounded-md px-3 py-2 text-[13px] text-neutral-500 transition-colors hover:text-white">{t('landing.signIn')}</a><button onClick={() => navigate('/login?mode=register')} className="rounded-lg bg-violet-500 px-4 py-2 text-[13px] font-semibold text-white transition-all hover:bg-violet-400 hover:scale-105">{t('landing.getStarted')}</button></div>
       </div>
     </header>
   )
 }
 
-/* ── Footer ── */
+/* ═════════════════════════ Hero 视差层 ═════════════════════════ */
+function Hero({ t, navigate }: { t: (k: string) => string; navigate: ReturnType<typeof useNavigate> }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const titleRef = useRef<HTMLHeadingElement>(null)
+  const subRef = useRef<HTMLParagraphElement>(null)
+  const ctaRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const tl = gsap.timeline({ defaults: { ease: 'power3.out' } })
+    tl.fromTo(titleRef.current, { y: 80, opacity: 0 }, { y: 0, opacity: 1, duration: 1 })
+      .fromTo(subRef.current, { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.8 }, '-=0.5')
+      .fromTo(ctaRef.current, { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.7 }, '-=0.4')
+  }, [])
+
+  return (
+    <section ref={containerRef} className="relative flex min-h-[100vh] flex-col items-center justify-center overflow-hidden px-5 text-center" style={{ perspective: '1200px' }}>
+      {/* Layer 1: 深空背景 (最慢) */}
+      <ParallaxLayer speed={-0.15} className="absolute inset-0">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_70%_50%_at_50%_30%,#1a1040_0%,transparent_55%)] opacity-40" />
+        <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,0.15), transparent), radial-gradient(1px 1px at 50% 70%, rgba(255,255,255,0.1), transparent), radial-gradient(1.5px 1.5px at 80% 20%, rgba(255,255,255,0.12), transparent), radial-gradient(1px 1px at 40% 60%, rgba(255,255,255,0.08), transparent), radial-gradient(1px 1px at 70% 80%, rgba(255,255,255,0.1), transparent)' }} />
+      </ParallaxLayer>
+
+      {/* Layer 2: 浮动的光球 (中速) */}
+      <ParallaxLayer speed={-0.3} className="absolute inset-0 pointer-events-none">
+        <div className="absolute left-[10%] top-[20%] h-[300px] w-[300px] rounded-full bg-violet-600/15 blur-[100px] animate-[float_8s_ease-in-out_infinite]" />
+        <div className="absolute right-[5%] top-[50%] h-[250px] w-[250px] rounded-full bg-cyan-500/10 blur-[80px] animate-[float_10s_ease-in-out_infinite_2s]" />
+        <div className="absolute left-[50%] bottom-[10%] h-[200px] w-[200px] rounded-full bg-fuchsia-500/8 blur-[90px] animate-[float_12s_ease-in-out_infinite_4s]" />
+      </ParallaxLayer>
+
+      {/* Layer 3: 几何线条 (稍快) */}
+      <ParallaxLayer speed={-0.45} className="absolute inset-0 pointer-events-none opacity-20">
+        <div className="absolute left-[5%] top-[15%] h-[1px] w-[200px] rotate-12 bg-gradient-to-r from-transparent via-violet-400 to-transparent" />
+        <div className="absolute right-[10%] top-[35%] h-[1px] w-[160px] -rotate-6 bg-gradient-to-r from-transparent via-cyan-400 to-transparent" />
+        <div className="absolute left-[20%] bottom-[25%] h-[1px] w-[180px] rotate-3 bg-gradient-to-r from-transparent via-violet-300 to-transparent" />
+      </ParallaxLayer>
+
+      {/* Layer 4: 文字内容 (正常速度, 在最前) */}
+      <div className="relative z-10">
+        <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-1.5 backdrop-blur">
+          <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
+          <span className="text-[11px] text-neutral-400">{t('landing.badge')}</span>
+        </div>
+
+        <h1 ref={titleRef} className="mx-auto max-w-4xl font-display text-5xl font-black leading-[1.06] tracking-[-0.03em] sm:text-6xl md:text-7xl lg:text-8xl">
+          <span className="bg-gradient-to-b from-white via-white to-neutral-400 bg-clip-text text-transparent">{t('landing.heroTitle1')}</span>
+          <br />
+          <span className="bg-gradient-to-r from-violet-300 via-violet-400 to-cyan-300 bg-clip-text text-transparent">{t('landing.heroTitle2')}</span>
+        </h1>
+
+        <p ref={subRef} className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-neutral-400 sm:text-lg">{t('landing.heroSubtitle')}</p>
+
+        <div ref={ctaRef} className="mt-10 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+          <button onClick={() => navigate('/login?mode=register')} className="group relative overflow-hidden rounded-xl bg-violet-500 px-8 py-3.5 text-[15px] font-bold text-white transition-all hover:bg-violet-400 hover:scale-105 hover:shadow-[0_0_40px_rgba(139,92,246,0.35)]">
+            <span className="relative z-10">{t('landing.ctaPrimary')}</span>
+            <div className="absolute inset-0 -translate-x-full group-hover:translate-x-0 transition-transform duration-500 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+          </button>
+          <a href="#showcase" className="text-[14px] text-neutral-500 underline-offset-4 transition hover:text-neutral-300 hover:underline">{t('landing.ctaSecondary')}</a>
+        </div>
+        <p className="mt-4 text-[13px] text-neutral-600">{t('landing.heroNote')}</p>
+      </div>
+    </section>
+  )
+}
+
+/* ═════════════════════════ Stats ═════════════════════════ */
+function Stats({ t }: { t: (k: string) => string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    gsap.fromTo('.stat-card', { y: 60, opacity: 0, scale: 0.9 }, { y: 0, opacity: 1, scale: 1, duration: 0.8, stagger: 0.12, ease: 'back.out(1.5)', scrollTrigger: { trigger: el, start: 'top 80%' } })
+  }, [])
+  return (
+    <section ref={ref} className="mx-auto max-w-[1200px] px-5 pb-24">
+      <div className="grid grid-cols-3 gap-4">
+        {[{ k: 'stat1', v: '0' }, { k: 'stat2', v: '24/7' }, { k: 'stat3', v: '100%' }].map(s => (
+          <div key={s.k} className="stat-card rounded-2xl border border-white/[0.06] bg-white/[0.02] px-5 py-7 text-center backdrop-blur">
+            <div className="text-3xl font-black sm:text-4xl">{s.v}</div>
+            <div className="mt-1.5 text-[13px] text-neutral-500">{t(`landing.${s.k}`)}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/* ═════════════════════════ 产品轮播展示区（Sticky Pin） ═════════════════════════ */
+function Showcase({ t }: { t: (k: string) => string }) {
+  const sectionRef = useRef<HTMLDivElement>(null)
+  const cardRefs = useRef<(HTMLDivElement | null)[]>([])
+
+  useEffect(() => {
+    const section = sectionRef.current
+    if (!section) return
+    const cards = cardRefs.current.filter(Boolean) as HTMLDivElement[]
+
+    cards.forEach((card, i) => {
+      gsap.fromTo(card, { opacity: 0, x: i % 2 === 0 ? -100 : 100, rotateY: i % 2 === 0 ? 15 : -15 }, {
+        opacity: 1, x: 0, rotateY: 0, duration: 1, ease: 'power3.out',
+        scrollTrigger: { trigger: card, start: 'top 75%', toggleActions: 'play none none none' },
+      })
+    })
+  }, [])
+
+  const steps = [
+    { n: '01', title: 'plStep1Title', desc: 'plStep1Desc', icon: '⚡' },
+    { n: '02', title: 'plStep2Title', desc: 'plStep2Desc', icon: '→' },
+    { n: '03', title: 'plStep3Title', desc: 'plStep3Desc', icon: '✓' },
+  ]
+
+  return (
+    <section ref={sectionRef} id="showcase" className="mx-auto max-w-[900px] scroll-mt-20 px-5 pb-24">
+      <Reveal className="mb-16 text-center" from="scale">
+        <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-violet-400">{t('landing.plEyebrow')}</p>
+        <h2 className="mt-3 font-display text-3xl font-black tracking-[-0.02em] sm:text-4xl">{t('landing.plTitle')}</h2>
+      </Reveal>
+
+      <div className="relative space-y-6">
+        <div className="absolute left-7 top-0 hidden h-full w-px bg-gradient-to-b from-violet-500/50 via-transparent to-violet-500/50 sm:block" />
+        {steps.map((s, i) => (
+          <div key={s.n} ref={el => { cardRefs.current[i] = el }} className="flex gap-5 sm:gap-8">
+            <div className="relative z-10 flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl border border-white/[0.08] bg-black text-xl backdrop-blur shadow-[0_0_20px_rgba(139,92,246,0.15)]">{s.icon}</div>
+            <HoverCard>
+              <span className="font-mono text-[10px] font-bold text-violet-500">{s.n}</span>
+              <h3 className="mt-2 text-lg font-bold">{t(`landing.${s.title}`)}</h3>
+              <p className="mt-1.5 text-[14px] leading-relaxed text-neutral-400">{t(`landing.${s.desc}`)}</p>
+            </HoverCard>
+          </div>
+        ))}
+      </div>
+
+      <Reveal className="mt-10 text-center" from="scale">
+        <p className="text-sm text-neutral-500">{t('landing.plFootnote')}</p>
+        <p className="mt-2 font-mono text-lg font-bold text-violet-400">{t('landing.plCounter')}</p>
+      </Reveal>
+    </section>
+  )
+}
+
+/* ═════════════════════════ 三项哨兵 ═════════════════════════ */
+function Guard({ t }: { t: (k: string) => string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    gsap.fromTo('.guard-card', { y: 80, opacity: 0 }, { y: 0, opacity: 1, duration: 0.8, stagger: 0.15, ease: 'back.out(1.4)', scrollTrigger: { trigger: ref.current, start: 'top 78%' } })
+  }, [])
+  return (
+    <section ref={ref} id="guard" className="mx-auto max-w-[1200px] scroll-mt-20 px-5 pb-24">
+      <Reveal className="mb-16 text-center" from="scale">
+        <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-violet-400">{t('landing.deEyebrow')}</p>
+        <h2 className="mt-3 font-display text-3xl font-black tracking-[-0.02em] sm:text-4xl">{t('landing.deTitle')}</h2>
+        <p className="mt-3 text-sm text-neutral-500">{t('landing.deSubtitle')}</p>
+      </Reveal>
+
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
+        {[
+          { n: '01', t: 'dc1Title', d: 'dc1', acc: 'border-l-red-500', l: '#EF4444' },
+          { n: '02', t: 'dc2Title', d: 'dc2', acc: 'border-l-violet-500', l: '#8B5CF6' },
+          { n: '03', t: 'dc3Title', d: 'dc3', acc: 'border-l-emerald-500', l: '#22C55E' },
+        ].map(g => (
+          <div key={g.n} className="guard-card">
+            <HoverCard glow>
+              <div className={`border-l-2 ${g.acc} pl-4`}>
+                <div className="font-mono text-2xl font-black text-white/5">{g.n}</div>
+                <h3 className="mt-2 text-lg font-bold">{t(`landing.${g.t}`)}</h3>
+                <p className="mt-2 text-[14px] leading-relaxed text-neutral-400">{t(`landing.${g.d}`)}</p>
+              </div>
+            </HoverCard>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/* ═════════════════════════ 7 Truths ═════════════════════════ */
+function Truths({ t }: { t: (k: string) => string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    gsap.fromTo('.truth-card', { y: 60, opacity: 0, rotateX: 5 }, { y: 0, opacity: 1, rotateX: 0, duration: 0.7, stagger: 0.06, ease: 'power2.out', scrollTrigger: { trigger: ref.current, start: 'top 78%' } })
+  }, [])
+  return (
+    <section ref={ref} className="mx-auto max-w-[1200px] scroll-mt-20 px-5 pb-24">
+      <Reveal className="mb-16 text-center" from="scale">
+        <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-violet-400">{t('landing.expEyebrow')}</p>
+        <h2 className="mt-3 font-display text-3xl font-black tracking-[-0.02em] sm:text-4xl">{t('landing.expTitle')}</h2>
+      </Reveal>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {[
+          ['expDark1', 'expMirror1'], ['expDark2', 'expMirror2'], ['expDark3', 'expMirror3'],
+          ['expDark4', 'expMirror4'], ['expDark5', 'expMirror5'], ['expDark6', 'expMirror6'],
+        ].map(([d, m], i) => (
+          <div key={i} className="truth-card">
+            <HoverCard>
+              <span className="rounded-md bg-red-500/10 px-2 py-0.5 text-[10px] font-bold text-red-400">TRICK #{i + 1}</span>
+              <p className="mt-3 text-[13px] leading-relaxed text-neutral-400">{t(`landing.${d}`)}</p>
+              <div className="my-3 h-px bg-gradient-to-r from-violet-500/30 to-transparent" />
+              <p className="text-[13px] leading-relaxed">{t(`landing.${m}`)}</p>
+            </HoverCard>
+          </div>
+        ))}
+      </div>
+
+      <Reveal className="mt-4 flex justify-center" from="scale">
+        <div className="w-full max-w-md">
+          <HoverCard>
+            <span className="rounded-md bg-red-500/10 px-2 py-0.5 text-[10px] font-bold text-red-400">TRICK #7</span>
+            <p className="mt-3 text-[13px] leading-relaxed text-neutral-400">{t('landing.expDark7')}</p>
+            <div className="my-3 h-px bg-gradient-to-r from-violet-500/30 to-transparent" />
+            <p className="text-[13px] leading-relaxed">{t('landing.expMirror7')}</p>
+          </HoverCard>
+        </div>
+      </Reveal>
+    </section>
+  )
+}
+
+/* ═════════════════════════ Pricing ═════════════════════════ */
+function Pricing({ t, navigate }: { t: (k: string) => string; navigate: ReturnType<typeof useNavigate> }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    gsap.fromTo('.price-card', { y: 80, opacity: 0 }, { y: 0, opacity: 1, duration: 0.9, stagger: 0.2, ease: 'back.out(1.3)', scrollTrigger: { trigger: ref.current, start: 'top 78%' } })
+  }, [])
+  return (
+    <section ref={ref} id="pricing" className="mx-auto max-w-[900px] scroll-mt-20 px-5 pb-24">
+      <Reveal className="mb-16 text-center" from="scale">
+        <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-violet-400">{t('landing.tdEyebrow')}</p>
+        <h2 className="mt-3 font-display text-3xl font-black tracking-[-0.02em] sm:text-4xl">{t('landing.tdTitle')}</h2>
+      </Reveal>
+
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+        <div className="price-card">
+          <HoverCard>
+            <div className="text-center py-2">
+              <p className="text-[11px] uppercase tracking-wider text-neutral-500">{t('landing.tdDoorA')}</p>
+              <div className="mt-3 font-display text-5xl font-black">$49</div>
+              <p className="mt-1 text-sm text-neutral-500">{t('landing.tdPerMonth')}</p>
+              <p className="mt-4 text-[14px] leading-relaxed text-neutral-400">{t('landing.tdDoorADesc')}</p>
+              <button onClick={() => navigate('/login?mode=register')} className="mt-6 w-full rounded-xl border border-white/[0.08] py-2.5 text-[14px] font-semibold text-white transition-all hover:border-violet-500/30 hover:bg-violet-500/10">{t('landing.getStarted')}</button>
+            </div>
+          </HoverCard>
+        </div>
+
+        <div className="price-card">
+          <HoverCard glow>
+            <div className="relative text-center py-2">
+              <div className="absolute -top-5 left-1/2 -translate-x-1/2 rounded-full bg-violet-500 px-4 py-0.5 text-[10px] font-black uppercase tracking-wider text-white shadow-[0_0_20px_rgba(139,92,246,0.4)]">RECOMMENDED</div>
+              <p className="text-[11px] uppercase tracking-wider text-neutral-500">{t('landing.tdDoorB')}</p>
+              <div className="mt-3 font-display text-5xl font-black">$500</div>
+              <p className="mt-1 text-sm text-neutral-500">{t('landing.tdDeposit')}</p>
+              <p className="mt-4 text-[14px] leading-relaxed text-neutral-400">{t('landing.tdDoorBDesc')}</p>
+              <button onClick={() => navigate('/login?mode=register')} className="mt-6 w-full rounded-xl bg-violet-500 py-2.5 text-[14px] font-bold text-white transition-all hover:bg-violet-400 hover:shadow-[0_0_30px_rgba(139,92,246,0.4)]">{t('landing.getStarted')}</button>
+            </div>
+          </HoverCard>
+        </div>
+      </div>
+
+      <Reveal className="mt-6 text-center" from="scale">
+        <p className="text-[13px] text-neutral-600">{t('landing.tdFootnote')}</p>
+      </Reveal>
+    </section>
+  )
+}
+
+/* ═════════════════════════ Footer ═════════════════════════ */
 function Foot({ t }: { t: (k: string) => string }) {
   return (
     <footer className="border-t border-white/[0.04] px-5 py-8">
@@ -51,266 +374,59 @@ function Foot({ t }: { t: (k: string) => string }) {
   )
 }
 
-/* ── 模拟信号卡片（产品预览） ── */
-function SignalCardMockup({ symbol, direction, entry, sl, tp, rr, accent = false }: { symbol: string; direction: string; entry: string; sl: string; tp: string; rr: string; accent?: boolean }) {
-  const dirColor = direction === 'BUY' ? 'text-emerald-400' : 'text-red-400'
-  const dirBg = direction === 'BUY' ? 'bg-emerald-400/10' : 'bg-red-400/10'
-  return (
-    <div className={`rounded-xl border px-4 py-3.5 backdrop-blur transition-all duration-300 hover:scale-[1.02] ${accent ? 'border-violet-500/30 bg-violet-500/[0.04]' : 'border-white/[0.05] bg-white/[0.02]'}`}>
-      <div className="flex items-center justify-between mb-2.5">
-        <span className="font-mono text-[11px] font-semibold tracking-wider text-white/80">{symbol}</span>
-        <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-bold ${dirColor} ${dirBg}`}>{direction}</span>
-      </div>
-      <div className="grid grid-cols-4 gap-2 text-center">
-        <div><div className="text-[10px] text-neutral-600">ENTRY</div><div className="mt-0.5 font-mono text-[13px] font-medium">{entry}</div></div>
-        <div><div className="text-[10px] text-neutral-600">SL</div><div className="mt-0.5 font-mono text-[13px] font-medium text-red-400">{sl}</div></div>
-        <div><div className="text-[10px] text-neutral-600">TP</div><div className="mt-0.5 font-mono text-[13px] font-medium text-emerald-400">{tp}</div></div>
-        <div><div className="text-[10px] text-neutral-600">R:R</div><div className="mt-0.5 font-mono text-[13px] font-medium text-violet-400">{rr}</div></div>
-      </div>
-    </div>
-  )
-}
-
-/* ── 产品面板 Mockup（hero 右侧） ── */
-function ProductPanel() {
-  return (
-    <div className="w-full max-w-[420px] animate-fadein">
-      <div className="rounded-2xl border border-white/[0.06] bg-[#0D0E14]/70 backdrop-blur-xl p-4">
-        {/* 顶部栏 */}
-        <div className="flex items-center gap-2 mb-4 pb-3 border-b border-white/[0.04]">
-          <div className="flex gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-red-400/60" /><span className="h-2.5 w-2.5 rounded-full bg-amber-400/60" /><span className="h-2.5 w-2.5 rounded-full bg-emerald-400/60" /></div>
-          <span className="ml-2 font-mono text-[10px] text-neutral-600">PRISMX · Signal Panel</span>
-          <span className="ml-auto flex h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-        </div>
-        {/* 账户摘要 */}
-        <div className="flex items-center justify-between mb-3 px-1">
-          <div><div className="text-[9px] uppercase tracking-wider text-neutral-600">Account</div><div className="font-mono text-xs font-medium mt-1">MT5 · Demo</div></div>
-          <div className="text-right"><div className="text-[9px] uppercase tracking-wider text-neutral-600">Balance</div><div className="font-mono text-xs font-medium mt-1 text-emerald-400">$10,000.00</div></div>
-        </div>
-        {/* 信号列表 */}
-        <div className="flex flex-col gap-2.5">
-          <SignalCardMockup symbol="XAUUSD" direction="BUY" entry="2,340.60" sl="2,320.80" tp="2,368.80" rr="1:2.2" accent />
-          <SignalCardMockup symbol="EURUSD" direction="SELL" entry="1.0852" sl="1.0890" tp="1.0785" rr="1:1.8" />
-        </div>
-        {/* 底部按钮 */}
-        <div className="mt-3 flex gap-2">
-          <div className="flex-1 rounded-lg border border-white/[0.06] py-1.5 text-center text-[10px] font-medium text-neutral-500">SEND TO MT5</div>
-          <div className="flex-1 rounded-lg bg-violet-500/20 border border-violet-500/30 py-1.5 text-center text-[10px] font-medium text-violet-300">SENT ✓</div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/* ── 流水线步骤卡 ── */
-function StepCard({ n, t: title, d }: { n: string; t: string; d: string }) {
-  return (
-    <div className="rounded-xl border border-white/[0.05] bg-white/[0.01] p-5 transition-all duration-300 hover:border-white/[0.1]">
-      <span className="font-mono text-[10px] font-semibold text-neutral-700">{n}</span>
-      <h3 className="mt-2 text-sm font-semibold">{title}</h3>
-      <p className="mt-1 text-[13px] leading-relaxed text-neutral-500">{d}</p>
-    </div>
-  )
-}
-
-/* ── 主页 ── */
+/* ═════════════════════════ 主页 ═════════════════════════ */
 export default function LandingPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
 
+  useEffect(() => { ScrollTrigger.refresh() }, [])
+
   return (
-    <div className="min-h-screen bg-[#07080D] text-white selection:bg-violet-500/30">
+    <div className="min-h-screen bg-black text-white">
       <Navbar t={t} navigate={navigate} />
 
-      {/* ═══ HERO: 左边文字 + 右边产品面板 ═══ */}
-      <section className="relative mx-auto flex min-h-[92vh] max-w-[1200px] flex-col items-center justify-center gap-10 px-5 pt-16 lg:flex-row lg:gap-16">
-        {/* 背景柔光 */}
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="absolute right-[-10%] top-[10%] h-[600px] w-[600px] rounded-full bg-violet-600/[0.06] blur-[120px]" />
-          <div className="absolute left-[-5%] bottom-[15%] h-[400px] w-[400px] rounded-full bg-cyan-500/[0.04] blur-[100px]" />
-        </div>
+      <Hero t={t} navigate={navigate} />
+      <Stats t={t} />
+      <Showcase t={t} />
+      <Guard t={t} />
+      <Truths t={t} />
+      <Pricing t={t} navigate={navigate} />
 
-        {/* 左：文字 */}
-        <Re className="relative z-10 flex flex-col items-start max-w-lg lg:items-start">
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-3.5 py-1.5 text-[11px] text-neutral-400 mb-6">
-            <span className="h-1.5 w-1.5 rounded-full bg-violet-400" />
-            {t('landing.badge')}
-          </span>
-          <h1 className="font-display text-4xl font-bold leading-[1.08] tracking-[-0.02em] sm:text-5xl lg:text-6xl">
-            {t('landing.heroTitle1')}
-            <br />
-            <span className="text-violet-400">{t('landing.heroTitle2')}</span>
-          </h1>
-          <p className="mt-5 text-[15px] leading-relaxed text-neutral-400 sm:text-base max-w-md">{t('landing.heroSubtitle')}</p>
-          <div className="mt-8 flex flex-wrap items-center gap-3">
-            <button onClick={() => navigate('/login?mode=register')} className="rounded-xl bg-white px-7 py-3 text-[15px] font-semibold text-black transition-all hover:scale-[1.03] hover:bg-neutral-100">{t('landing.ctaPrimary')}</button>
-            <a href="#product" className="text-[14px] text-neutral-600 underline-offset-4 transition hover:text-neutral-400 hover:underline">{t('landing.ctaSecondary')}</a>
-          </div>
-          <p className="mt-4 text-[13px] text-neutral-700">{t('landing.heroNote')}</p>
-        </Re>
-
-        {/* 右：产品面板 */}
-        <Re className="relative z-10">
-          <ProductPanel />
-        </Re>
-      </section>
-
-      {/* ═══ 信任指标 ═══ */}
-      <section className="mx-auto max-w-[1200px] px-5 pb-20">
-        <div className="grid grid-cols-3 gap-4">
-          {[{ k: 'stat1', v: '0' }, { k: 'stat2', v: '24/7' }, { k: 'stat3', v: '100', s: '%' }].map(s => (
-            <Re key={s.k}>
-              <div className="rounded-xl border border-white/[0.05] bg-white/[0.01] px-5 py-6 text-center">
-                <div className="text-3xl font-bold">{s.v}{s.s && <span className="text-violet-400">{s.s}</span>}</div>
-                <div className="mt-1 text-[13px] text-neutral-500">{t(`landing.${s.k}`)}</div>
-              </div>
-            </Re>
-          ))}
-        </div>
-        <p className="mt-5 text-center text-[10px] uppercase tracking-[0.2em] text-neutral-800">{t('landing.statFootnote')}</p>
-      </section>
-
-      {/* ═══ 产品展示区 ═══ */}
-      <section id="product" className="mx-auto max-w-[1200px] scroll-mt-20 px-5 pb-24">
-        <Re className="mb-14 text-center">
-          <p className="text-[11px] font-medium uppercase tracking-[0.15em] text-violet-400">{t('landing.plEyebrow')}</p>
-          <h2 className="mt-3 font-display text-3xl font-bold tracking-[-0.02em] sm:text-4xl">{t('landing.plTitle')}</h2>
-          <p className="mt-3 max-w-lg mx-auto text-sm text-neutral-500">{t('landing.expSubtitle')}</p>
-        </Re>
-
-        {/* 三步骤 */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          {[
-            { n: '01', t: 'plStep1Title', d: 'plStep1Desc' },
-            { n: '02', t: 'plStep2Title', d: 'plStep2Desc' },
-            { n: '03', t: 'plStep3Title', d: 'plStep3Desc' },
-          ].map(s => <Re key={s.n}><StepCard n={s.n} t={t(`landing.${s.t}`)} d={t(`landing.${s.d}`)} /></Re>)}
-        </div>
-
-        <Re className="mt-10 text-center">
-          <p className="text-sm text-neutral-500">{t('landing.plFootnote')}</p>
-          <p className="mt-2 font-mono text-lg font-semibold text-violet-400">{t('landing.plCounter')}</p>
-        </Re>
-      </section>
-
-      {/* ═══ 哨兵三柱 ═══ */}
-      <section id="guard" className="mx-auto max-w-[1200px] scroll-mt-20 px-5 pb-24">
-        <Re className="mb-14 text-center">
-          <p className="text-[11px] font-medium uppercase tracking-[0.15em] text-violet-400">{t('landing.deEyebrow')}</p>
-          <h2 className="mt-3 font-display text-3xl font-bold tracking-[-0.02em] sm:text-4xl">{t('landing.deTitle')}</h2>
-          <p className="mt-3 text-sm text-neutral-500">{t('landing.deSubtitle')}</p>
-        </Re>
-
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          {[
-            { i: '01', t: 'dc1Title', d: 'dc1', a: 'border-l-red-500/60' },
-            { i: '02', t: 'dc2Title', d: 'dc2', a: 'border-l-violet-500/60' },
-            { i: '03', t: 'dc3Title', d: 'dc3', a: 'border-l-emerald-500/60' },
-          ].map(g => (
-            <Re key={g.i}>
-              <div className={`rounded-xl border border-white/[0.05] bg-white/[0.01] p-6 border-l-2 ${g.a} transition-all duration-300 hover:border-white/[0.1]`}>
-                <div className="mb-3 font-mono text-2xl font-light text-white/5">{g.i}</div>
-                <h3 className="font-semibold">{t(`landing.${g.t}`)}</h3>
-                <p className="mt-2 text-[14px] leading-relaxed text-neutral-500">{t(`landing.${g.d}`)}</p>
-              </div>
-            </Re>
-          ))}
-        </div>
-      </section>
-
-      {/* ═══ 7 truths ═══ */}
-      <section id="truth" className="mx-auto max-w-[1200px] scroll-mt-20 px-5 pb-24">
-        <Re className="mb-14 text-center">
-          <p className="text-[11px] font-medium uppercase tracking-[0.15em] text-violet-400">{t('landing.expEyebrow')}</p>
-          <h2 className="mt-3 font-display text-3xl font-bold tracking-[-0.02em] sm:text-4xl">{t('landing.expTitle')}</h2>
-        </Re>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {[
-            ['expDark1', 'expMirror1'], ['expDark2', 'expMirror2'], ['expDark3', 'expMirror3'],
-            ['expDark4', 'expMirror4'], ['expDark5', 'expMirror5'], ['expDark6', 'expMirror6'],
-          ].map(([d, m], i) => (
-            <Re key={i}>
-              <div className="group rounded-xl border border-white/[0.05] bg-white/[0.01] p-5 transition-all duration-300 hover:border-white/[0.1]">
-                <span className="rounded bg-red-400/10 px-2 py-0.5 text-[10px] font-semibold text-red-400">#{i + 1}</span>
-                <p className="mt-2.5 text-[13px] leading-relaxed text-neutral-400">{t(`landing.${d}`)}</p>
-                <div className="my-3 h-px bg-white/[0.04]" />
-                <p className="text-[13px] leading-relaxed text-neutral-200">{t(`landing.${m}`)}</p>
-              </div>
-            </Re>
-          ))}
-        </div>
-        <Re className="mt-3 flex justify-center">
-          <div className="w-full max-w-md rounded-xl border border-white/[0.05] bg-white/[0.01] p-5 transition-all hover:border-white/[0.1]">
-            <span className="rounded bg-red-400/10 px-2 py-0.5 text-[10px] font-semibold text-red-400">#7</span>
-            <p className="mt-2.5 text-[13px] leading-relaxed text-neutral-400">{t('landing.expDark7')}</p>
-            <div className="my-3 h-px bg-white/[0.04]" />
-            <p className="text-[13px] leading-relaxed text-neutral-200">{t('landing.expMirror7')}</p>
-          </div>
-        </Re>
-        <p className="mt-8 text-center text-[12px] text-neutral-700">{t('landing.expNote')}</p>
-      </section>
-
-      {/* ═══ 定价 ═══ */}
-      <section id="pricing" className="mx-auto max-w-[900px] scroll-mt-20 px-5 pb-24">
-        <Re className="mb-14 text-center">
-          <p className="text-[11px] font-medium uppercase tracking-[0.15em] text-violet-400">{t('landing.tdEyebrow')}</p>
-          <h2 className="mt-3 font-display text-3xl font-bold tracking-[-0.02em] sm:text-4xl">{t('landing.tdTitle')}</h2>
-        </Re>
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Re>
-            <div className="rounded-xl border border-white/[0.05] bg-white/[0.01] p-8 text-center transition-all hover:border-white/[0.1]">
-              <p className="text-[11px] uppercase tracking-wider text-neutral-600">{t('landing.tdDoorA')}</p>
-              <div className="mt-3 font-display text-5xl font-bold">$49</div>
-              <p className="mt-1 text-sm text-neutral-500">{t('landing.tdPerMonth')}</p>
-              <p className="mt-4 text-[14px] leading-relaxed text-neutral-500">{t('landing.tdDoorADesc')}</p>
-              <button onClick={() => navigate('/login?mode=register')} className="mt-6 w-full rounded-xl border border-white/[0.08] py-2.5 text-[14px] font-medium transition-all hover:border-white/[0.15] hover:bg-white/[0.03]">{t('landing.getStarted')}</button>
-            </div>
-          </Re>
-
-          <Re>
-            <div className="relative rounded-xl border border-violet-500/30 bg-white/[0.02] p-8 text-center transition-all hover:border-violet-500/50">
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-violet-500 px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">RECOMMENDED</div>
-              <p className="text-[11px] uppercase tracking-wider text-neutral-600">{t('landing.tdDoorB')}</p>
-              <div className="mt-3 font-display text-5xl font-bold">$500</div>
-              <p className="mt-1 text-sm text-neutral-500">{t('landing.tdDeposit')}</p>
-              <p className="mt-4 text-[14px] leading-relaxed text-neutral-500">{t('landing.tdDoorBDesc')}</p>
-              <button onClick={() => navigate('/login?mode=register')} className="mt-6 w-full rounded-xl bg-violet-500 py-2.5 text-[14px] font-semibold text-white transition-all hover:bg-violet-400">{t('landing.getStarted')}</button>
-            </div>
-          </Re>
-        </div>
-        <Re><p className="mt-5 text-center text-[13px] text-neutral-700">{t('landing.tdFootnote')}</p></Re>
-      </section>
-
-      {/* ═══ 三步开始 ═══ */}
+      {/* Steps */}
       <section className="mx-auto max-w-[1200px] px-5 pb-24">
-        <Re className="mb-14 text-center">
-          <p className="text-[11px] font-medium uppercase tracking-[0.15em] text-violet-400">{t('landing.howEyebrow')}</p>
-          <h2 className="mt-3 font-display text-3xl font-bold tracking-[-0.02em] sm:text-4xl">{t('landing.howTitle')}</h2>
-        </Re>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <Reveal className="mb-16 text-center" from="scale">
+          <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-violet-400">{t('landing.howEyebrow')}</p>
+          <h2 className="mt-3 font-display text-3xl font-black tracking-[-0.02em] sm:text-4xl">{t('landing.howTitle')}</h2>
+        </Reveal>
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
           {[{ t: 'step1Title', d: 'step1Desc' }, { t: 'step2Title', d: 'step2Desc' }, { t: 'step3Title', d: 'step3Desc' }].map((h, i) => (
-            <Re key={h.t}>
-              <StepCard n={`0${i + 1}`} t={t(`landing.${h.t}`)} d={t(`landing.${h.d}`)} />
-            </Re>
+            <Reveal key={h.t} delay={i * 0.12} from={i === 0 ? 'left' : i === 1 ? 'bottom' : 'right'}>
+              <HoverCard>
+                <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] font-mono text-sm font-bold text-violet-400">{i + 1}</div>
+                <h3 className="font-bold">{t(`landing.${h.t}`)}</h3>
+                <p className="mt-2 text-[14px] leading-relaxed text-neutral-400">{t(`landing.${h.d}`)}</p>
+              </HoverCard>
+            </Reveal>
           ))}
         </div>
       </section>
 
-      {/* ═══ FAQ ═══ */}
       <FaqSection />
 
-      {/* ═══ CTA ═══ */}
+      {/* CTA */}
       <section className="mx-auto max-w-[1200px] px-5 pb-24">
-        <Re>
-          <div className="rounded-2xl border border-white/[0.05] bg-white/[0.01] px-8 py-16 text-center sm:px-16">
-            <h2 className="font-display text-3xl font-bold tracking-[-0.02em] sm:text-4xl">{t('landing.ctaTitle')}</h2>
-            <p className="mx-auto mt-3 max-w-md text-neutral-500">{t('landing.ctaSubtitle')}</p>
-            <button onClick={() => navigate('/login?mode=register')} className="mt-8 rounded-xl bg-white px-8 py-3.5 text-[15px] font-semibold text-black transition-all hover:scale-[1.03] hover:bg-neutral-100">{t('landing.ctaButton')}</button>
-            <p className="mt-3 text-[13px] text-neutral-700">{t('landing.ctaNote')}</p>
+        <Reveal from="scale">
+          <div className="relative overflow-hidden rounded-3xl border border-white/[0.06] bg-[#0B0B12]/80 backdrop-blur-md px-8 py-16 text-center sm:px-16">
+            <div className="pointer-events-none absolute -inset-1 bg-gradient-to-r from-violet-500/10 via-transparent to-cyan-500/10 blur-xl" />
+            <h2 className="relative font-display text-3xl font-black tracking-[-0.02em] sm:text-4xl">{t('landing.ctaTitle')}</h2>
+            <p className="relative mx-auto mt-3 max-w-md text-neutral-400">{t('landing.ctaSubtitle')}</p>
+            <button onClick={() => navigate('/login?mode=register')} className="relative mt-8 group overflow-hidden rounded-xl bg-violet-500 px-8 py-3.5 text-[15px] font-bold text-white transition-all hover:bg-violet-400 hover:scale-105 hover:shadow-[0_0_40px_rgba(139,92,246,0.35)]">
+              <span className="relative z-10">{t('landing.ctaButton')}</span>
+              <div className="absolute inset-0 -translate-x-full group-hover:translate-x-0 transition-transform duration-500 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+            </button>
+            <p className="relative mt-3 text-[13px] text-neutral-600">{t('landing.ctaNote')}</p>
           </div>
-        </Re>
+        </Reveal>
       </section>
 
       <Foot t={t} />
