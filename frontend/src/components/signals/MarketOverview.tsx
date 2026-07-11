@@ -75,7 +75,7 @@ const MarketOverview: FC<Props> = ({ signals }) => {
   )
 
   return (
-    <section className="card glass dash-overview p-4">
+    <section className="card glass dash-overview p-[18px]">
       <div className="flex items-center gap-2 px-0">
         <h3 className="text-[15px] font-bold">{t('signals.focus.overview', '市场概览')}</h3>
       </div>
@@ -86,7 +86,8 @@ const MarketOverview: FC<Props> = ({ signals }) => {
             <circle cx="58" cy="58" r="47" fill="none" stroke="#26262e" strokeWidth="13" />
             <circle cx="58" cy="58" r="47" fill="none" stroke="#2ee07e" strokeWidth="13" strokeLinecap="round" strokeDasharray={seg1Dash} />
             <circle cx="58" cy="58" r="47" fill="none" stroke="#ff4d67" strokeWidth="13" strokeLinecap="round" strokeDasharray={seg2Dash} strokeDashoffset={seg2Offset} />
-            <circle cx="58" cy="58" r="47" fill="none" stroke="#a855f7" strokeWidth="13" strokeLinecap="round" strokeDasharray={seg3Dash} strokeDashoffset={seg3Offset} />
+            {/* 中性段用冷灰蓝：紫色只做品牌，不做数据语义 / neutral segment in slate: purple stays brand-only, never data */}
+            <circle cx="58" cy="58" r="47" fill="none" stroke="#64748b" strokeWidth="13" strokeLinecap="round" strokeDasharray={seg3Dash} strokeDashoffset={seg3Offset} />
           </svg>
           <div className="donut-center">
             <div>
@@ -109,7 +110,7 @@ const MarketOverview: FC<Props> = ({ signals }) => {
             <span className="v num">{Math.round(shortFrac * 100)}% <i>({dist.short})</i></span>
           </div>
           <div className="row">
-            <span className="sw" style={{ background: '#a855f7' }} />
+            <span className="sw" style={{ background: '#64748b' }} />
             <span className="k">{t('signals.focus.neutral')}</span>
             <span className="v num">{Math.round(neutralFrac * 100)}% <i>({dist.neutral})</i></span>
           </div>
@@ -124,9 +125,14 @@ const MarketOverview: FC<Props> = ({ signals }) => {
         <svg className="acc-spark" viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} preserveAspectRatio="none">
           {sparkPoints && (
             <>
-              <polyline fill="none" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+              <polyline fill="none" stroke="url(#sparkLineGrad)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
                 points={sparkPoints}
               />
+              {/* 折线紫→青：极光谱系的色彩故事 / violet→cyan line, the aurora spectrum */}
+              <linearGradient id="sparkLineGrad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stopColor="#a78bfa" />
+                <stop offset="1" stopColor="#22d3ee" />
+              </linearGradient>
               <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0" stopColor="#a855f7" stopOpacity="0.25" />
                 <stop offset="1" stopColor="#a855f7" stopOpacity="0" />

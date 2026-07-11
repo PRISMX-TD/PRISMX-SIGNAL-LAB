@@ -27,7 +27,7 @@ export default function PersonalWinRateCard({ variant = 'compact' }: Props) {
   const detailed = variant === 'detailed'
 
   return (
-    <section className={`card glass ${detailed ? 'p-5' : 'p-4'}`}>
+    <section className={`card glass ${detailed ? 'p-5' : 'p-[18px]'}`}>
       <div className="flex items-center justify-between">
         <h3 className={`font-bold text-white ${detailed ? 'text-lg' : 'text-[15px]'}`}>
           {t('winrate.personalTitle')}

@@ -30,7 +30,7 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
   return (
     <>
       {/* ══ 桌面版：完整执行卡 / desktop: full exec card ══ */}
-      <section className="card glass dash-exec p-4 flex-col hidden sm:flex">
+      <section className="card glass dash-exec p-[18px] flex-col hidden sm:flex">
         {/* 标题行：可执行信号 + 倒计时 / title + countdown */}
         <div className="exec-title-row">
           <div className="flex items-center gap-2">
@@ -106,7 +106,7 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
       </section>
 
       {/* ══ 手机版：套用普通信号卡设计 / mobile: reuse signal card design ══ */}
-      <div className="card glass p-4 sm:hidden">
+      <div className="card glass p-[18px] sm:hidden">
         {/* 顶部标签："可执行信号" */}
         <div className="flex items-center gap-1.5 text-[11px] font-semibold text-prism-300 mb-2">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

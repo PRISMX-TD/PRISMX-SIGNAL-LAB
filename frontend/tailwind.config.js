@@ -4,6 +4,9 @@ export default {
   theme: {
     extend: {
       colors: {
+        // 暖白替代纯白：暗底上的纯白文字长时间看会眩光
+        // warm white replaces pure white: #fff text on dark glares over time
+        white: '#f2f2f7',
         // 设计稿主色调 / design token colors
         ink: {
           950: '#06040b',

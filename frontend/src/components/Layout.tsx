@@ -25,7 +25,7 @@ function NavItem({ to, label }: { to: string; label: string }) {
         <>
           {label}
           {isActive && (
-            <span className="absolute -bottom-px left-3 right-3 h-0.5 rounded-full bg-neon-gradient shadow-prism" />
+            <span className="absolute -bottom-px left-3 right-3 h-0.5 rounded-full bg-gradient-to-r from-prism-500 to-[#22d3ee]" />
           )}
         </>
       )}

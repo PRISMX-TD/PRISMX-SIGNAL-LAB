@@ -67,8 +67,8 @@ const SignalHero: FC<Props> = ({
           ))}
         </div>
         {/* Prev/Next nav */}
-        <button type="button" onClick={onPrev} className="ml-1 grid h-7 w-7 place-items-center rounded-lg bg-white/5 text-white/60 hover:text-white" aria-label="prev">‹</button>
-        <button type="button" onClick={onNext} className="grid h-7 w-7 place-items-center rounded-lg bg-white/5 text-white/60 hover:text-white" aria-label="next">›</button>
+        <button type="button" onClick={onPrev} className="ml-1 grid h-[34px] w-[34px] place-items-center rounded-lg bg-white/5 text-base text-white/60 hover:text-white" aria-label="prev">‹</button>
+        <button type="button" onClick={onNext} className="grid h-[34px] w-[34px] place-items-center rounded-lg bg-white/5 text-base text-white/60 hover:text-white" aria-label="next">›</button>
       </div>
 
       {/* Symbol + side chip */}
@@ -98,7 +98,7 @@ const SignalHero: FC<Props> = ({
       </div>
 
       {/* Stance note */}
-      <div className="mt-2 text-[13px] text-slate-300 relative z-10">{stanceNote}</div>
+      <div className="mt-2 text-[13px] leading-relaxed text-slate-300 relative z-10">{stanceNote}</div>
 
       {/* Multi-TF tags */}
       <div className="mt-3.5 flex gap-2 flex-wrap relative z-10">
