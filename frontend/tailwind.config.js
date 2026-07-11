@@ -98,6 +98,12 @@ export default {
           '0%': { transform: 'translateX(0)' },
           '100%': { transform: 'translateX(-50%)' },
         },
+        drift: {
+          '0%, 100%': { transform: 'translate(0, 0) scale(1)' },
+          '25%': { transform: 'translate(2%, -1.5%) scale(1.04)' },
+          '50%': { transform: 'translate(-1%, 1%) scale(1.02)' },
+          '75%': { transform: 'translate(1.5%, 0.5%) scale(1.03)' },
+        },
       },
       animation: {
         breathe: 'breathe 2s ease-in-out infinite',
@@ -108,6 +114,8 @@ export default {
         'gradient-x': 'gradient-x 6s ease infinite',
         shimmer: 'shimmer 2.5s ease-in-out infinite',
         marquee: 'marquee 30s linear infinite',
+        drift: 'drift 18s ease-in-out infinite',
+        'drift-slow': 'drift 24s ease-in-out infinite',
       },
     },
   },
