@@ -2,15 +2,16 @@
 // FAQ accordion built on native <details>/<summary>, no JS state needed
 import { useTranslation } from 'react-i18next'
 
-const FAQ_IDS = [1, 2, 3, 4, 5, 6, 7, 8] as const
+const FAQ_IDS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const
 
 export default function FaqSection() {
   const { t } = useTranslation()
 
   return (
     <section id="faq" className="mx-auto max-w-7xl scroll-mt-20 px-4 py-20 sm:px-6">
-      <div className="mb-12 text-center">
-        <h2 className="font-display text-3xl font-bold text-slate-50 sm:text-4xl">{t('landing.faqTitle')}</h2>
+      <div className="reveal mb-12 text-center">
+        <span className="eyebrow">{t('landing.faqEyebrow')}</span>
+        <h2 className="mt-3 font-display text-3xl font-bold text-slate-50 sm:text-4xl">{t('landing.faqTitle')}</h2>
       </div>
       <div className="mx-auto max-w-3xl">
         {FAQ_IDS.map((n) => (

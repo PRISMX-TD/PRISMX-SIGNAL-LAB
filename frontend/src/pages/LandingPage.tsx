@@ -5,17 +5,21 @@ import Logo from '../components/Logo'
 import LanguageToggle from '../components/LanguageToggle'
 import AuroraBackground from '../components/AuroraBackground'
 import HeroDemoCard from '../components/landing/HeroDemoCard'
+import ComparisonSection from '../components/landing/ComparisonSection'
+import PhoneShowcase from '../components/landing/PhoneShowcase'
+import PricingSection from '../components/landing/PricingSection'
 import WinRateRuleCard from '../components/landing/WinRateRuleCard'
 import FaqSection from '../components/landing/FaqSection'
 import MobileStickyCta from '../components/landing/MobileStickyCta'
+import useReveal from '../components/landing/useReveal'
 
 // 功能图标 / inline feature icons
 function Icon({ name }: { name: string }) {
   const common = 'h-6 w-6'
   switch (name) {
-    case 'engine':
+    case 'gauge':
       return (
-        <svg className={common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l5-5 4 4 8-9" /><path d="M3 21h18" /></svg>
+        <svg className={common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 13l4-4" /><path d="M3 18a9 9 0 1 1 18 0" /></svg>
       )
     case 'bolt':
       return (
@@ -25,18 +29,6 @@ function Icon({ name }: { name: string }) {
       return (
         <svg className={common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3v18l2-1 2 1 2-1 2 1 2-1 2 1V3l-2 1-2-1-2 1-2-1-2 1-2-1z" /><path d="M9 8h6M9 12h6" /></svg>
       )
-    case 'layers':
-      return (
-        <svg className={common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l9 5-9 5-9-5 9-5z" /><path d="M3 12l9 5 9-5M3 17l9 5 9-5" /></svg>
-      )
-    case 'shield':
-      return (
-        <svg className={common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5l8-3z" /><path d="M9 12l2 2 4-4" /></svg>
-      )
-    case 'gauge':
-      return (
-        <svg className={common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 13l4-4" /><path d="M3 18a9 9 0 1 1 18 0" /></svg>
-      )
     default:
       return null
   }
@@ -45,14 +37,12 @@ function Icon({ name }: { name: string }) {
 export default function LandingPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  useReveal()
 
-  const features = [
-    { icon: 'engine', title: 'f1Title', desc: 'f1Desc' },
-    { icon: 'bolt', title: 'f2Title', desc: 'f2Desc' },
-    { icon: 'shield', title: 'f3Title', desc: 'f3Desc' },
-    { icon: 'gauge', title: 'f4Title', desc: 'f4Desc' },
-    { icon: 'receipt', title: 'f5Title', desc: 'f5Desc' },
-    { icon: 'layers', title: 'f6Title', desc: 'f6Desc' },
+  const extras = [
+    { icon: 'gauge', title: 'ex1Title', desc: 'ex1Desc' },
+    { icon: 'bolt', title: 'ex2Title', desc: 'ex2Desc' },
+    { icon: 'receipt', title: 'ex3Title', desc: 'ex3Desc' },
   ]
 
   const steps = [
@@ -61,22 +51,10 @@ export default function LandingPage() {
     { title: 'step3Title', desc: 'step3Desc' },
   ]
 
-  const painPoints = [
-    { bad: 'pain1Bad', good: 'pain1Good' },
-    { bad: 'pain2Bad', good: 'pain2Good' },
-    { bad: 'pain3Bad', good: 'pain3Good' },
-  ]
-
-  const wrRules = ['wrRule1', 'wrRule2', 'wrRule3', 'wrRule4'] as const
-  const wrMark: Record<(typeof wrRules)[number], { glyph: string; color: string }> = {
-    wrRule1: { glyph: '✓', color: 'var(--up)' },
-    wrRule2: { glyph: '✓', color: 'var(--up)' },
-    wrRule3: { glyph: '✗', color: 'var(--down)' },
-    wrRule4: { glyph: '—', color: '#64748b' },
-  }
-
   return (
-    <div className="relative min-h-screen overflow-x-hidden">
+    // overflow-x 必须用 clip：hidden 会把本容器变成 sticky 的锚定滚动容器，
+    // 导致顶栏与手机样机的 position: sticky 全部失效（与 body 同款陷阱）
+    <div className="relative min-h-screen overflow-x-clip">
       <AuroraBackground />
 
       {/* 顶部导航 / top nav */}
@@ -91,9 +69,10 @@ export default function LandingPage() {
           </div>
 
           <nav className="ml-6 hidden items-center gap-1 md:flex">
-            <a href="#features" className="rounded-lg px-3 py-2 text-sm text-slate-400 transition hover:text-slate-100">{t('landing.navFeatures')}</a>
+            <a href="#compare" className="rounded-lg px-3 py-2 text-sm text-slate-400 transition hover:text-slate-100">{t('landing.navCompare')}</a>
+            <a href="#showcase" className="rounded-lg px-3 py-2 text-sm text-slate-400 transition hover:text-slate-100">{t('landing.navShowcase')}</a>
             <a href="#winrate" className="rounded-lg px-3 py-2 text-sm text-slate-400 transition hover:text-slate-100">{t('landing.navWinrate')}</a>
-            <a href="#how" className="rounded-lg px-3 py-2 text-sm text-slate-400 transition hover:text-slate-100">{t('landing.navHow')}</a>
+            <a href="#pricing" className="rounded-lg px-3 py-2 text-sm text-slate-400 transition hover:text-slate-100">{t('landing.navPricing')}</a>
             <a href="#faq" className="rounded-lg px-3 py-2 text-sm text-slate-400 transition hover:text-slate-100">{t('landing.navFaq')}</a>
           </nav>
 
@@ -163,36 +142,26 @@ export default function LandingPage() {
         <p className="mt-10 text-center text-xs uppercase tracking-[0.25em] text-slate-600 lg:text-left">{t('landing.statFootnote')}</p>
       </section>
 
-      {/* 痛点共鸣区 / pain points */}
-      <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
-        <div className="mb-12 text-center">
-          <h2 className="font-display text-3xl font-bold text-slate-50 sm:text-4xl">{t('landing.painTitle')}</h2>
-        </div>
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
-          {painPoints.map((p) => (
-            <div key={p.bad} className="glass p-6">
-              <p className="flex items-start gap-2 font-semibold text-slate-200">
-                <span style={{ color: 'var(--down)' }}>✗</span>
-                <span>{t(`landing.${p.bad}`)}</span>
-              </p>
-              <p className="mt-4 flex items-start gap-2 text-sm leading-relaxed text-slate-400">
-                <span style={{ color: 'var(--up)' }}>✓</span>
-                <span>{t(`landing.${p.good}`)}</span>
-              </p>
-            </div>
-          ))}
-        </div>
+      {/* 移动端补位示例卡 / mobile fallback demo card */}
+      <section className="mx-auto max-w-7xl px-4 sm:hidden">
+        <HeroDemoCard />
       </section>
 
-      {/* 功能区 / features */}
-      <section id="features" className="mx-auto max-w-7xl scroll-mt-20 px-4 py-20 sm:px-6">
-        <div className="mb-12 text-center">
-          <h2 className="font-display text-3xl font-bold text-slate-50 sm:text-4xl">{t('landing.featuresTitle')}</h2>
-          <p className="mx-auto mt-3 max-w-xl text-slate-400">{t('landing.featuresSubtitle')}</p>
+      {/* 信号群对比区 / signal-group comparison */}
+      <ComparisonSection />
+
+      {/* 3D 手机滚动叙事 / 3D phone scrollytelling */}
+      <PhoneShowcase />
+
+      {/* 细节兜底 / defensive details */}
+      <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
+        <div className="reveal mb-12 text-center">
+          <span className="eyebrow">{t('landing.exEyebrow')}</span>
+          <h2 className="mt-3 font-display text-3xl font-bold text-slate-50 sm:text-4xl">{t('landing.exTitle')}</h2>
         </div>
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {features.map((f) => (
-            <div key={f.title} className="glass-neon group p-6">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+          {extras.map((f, i) => (
+            <div key={f.title} className={`reveal ${i === 1 ? 'reveal-d1' : i === 2 ? 'reveal-d2' : ''} glass-neon group p-6`}>
               <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-inner border border-prism-500/30 bg-prism-600/15 text-prism-300 transition group-hover:text-prism-200 group-hover:shadow-prism">
                 <Icon name={f.icon} />
               </div>
@@ -205,29 +174,33 @@ export default function LandingPage() {
 
       {/* 透明胜率区 / win rate */}
       <section id="winrate" className="mx-auto max-w-7xl scroll-mt-20 px-4 py-20 sm:px-6">
-        <div className="mb-6 sm:hidden">
-          <HeroDemoCard />
-        </div>
-
-        <div className="mb-12 text-center">
-          <h2 className="font-display text-3xl font-bold text-slate-50 sm:text-4xl">{t('landing.wrTitle')}</h2>
+        <div className="reveal mb-12 text-center">
+          <span className="eyebrow">{t('landing.wrEyebrow')}</span>
+          <h2 className="mt-3 font-display text-3xl font-bold text-slate-50 sm:text-4xl">{t('landing.wrTitle')}</h2>
           <p className="mx-auto mt-3 max-w-xl text-slate-400">{t('landing.wrSubtitle')}</p>
         </div>
 
         <div className="grid items-start gap-8 lg:grid-cols-2">
-          <div>
+          <div className="reveal">
             <div className="space-y-1">
-              {wrRules.map((key) => (
-                <div key={key} className="flex items-start gap-3 py-2">
-                  <span className="mt-0.5 shrink-0 text-sm font-bold" style={{ color: wrMark[key].color }}>
-                    {wrMark[key].glyph}
-                  </span>
-                  <div>
-                    <p className="text-sm text-slate-300">{t(`landing.${key}`)}</p>
-                    <p className="mt-0.5 text-xs text-slate-500">{t(`landing.${key}Note`)}</p>
+              {(['wrRule1', 'wrRule2', 'wrRule3', 'wrRule4'] as const).map((key) => {
+                const mark =
+                  key === 'wrRule1' ? { glyph: '✓', color: 'var(--up)' }
+                  : key === 'wrRule2' ? { glyph: '✗', color: 'var(--down)' }
+                  : key === 'wrRule3' ? { glyph: '⚠', color: 'var(--gold)' }
+                  : { glyph: '—', color: '#64748b' }
+                return (
+                  <div key={key} className="flex items-start gap-3 py-2">
+                    <span className="mt-0.5 shrink-0 text-sm font-bold" style={{ color: mark.color }}>
+                      {mark.glyph}
+                    </span>
+                    <div>
+                      <p className="text-sm text-slate-300">{t(`landing.${key}`)}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">{t(`landing.${key}Note`)}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
             <p className="mt-6 text-xs text-slate-500">{t('landing.wrNote')}</p>
             <button onClick={() => navigate('/login?mode=register')} className="btn-primary mt-6 px-7 py-3 text-base">
@@ -235,19 +208,25 @@ export default function LandingPage() {
             </button>
           </div>
 
-          <WinRateRuleCard />
+          <div className="reveal reveal-d1">
+            <WinRateRuleCard />
+          </div>
         </div>
       </section>
 
+      {/* 定价 / pricing */}
+      <PricingSection />
+
       {/* 运作方式 / how it works */}
       <section id="how" className="mx-auto max-w-7xl scroll-mt-20 px-4 py-20 sm:px-6">
-        <div className="mb-12 text-center">
-          <h2 className="font-display text-3xl font-bold text-slate-50 sm:text-4xl">{t('landing.howTitle')}</h2>
+        <div className="reveal mb-12 text-center">
+          <span className="eyebrow">{t('landing.howEyebrow')}</span>
+          <h2 className="mt-3 font-display text-3xl font-bold text-slate-50 sm:text-4xl">{t('landing.howTitle')}</h2>
           <p className="mx-auto mt-3 max-w-xl text-slate-400">{t('landing.howSubtitle')}</p>
         </div>
         <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
           {steps.map((s, i) => (
-            <div key={s.title} className="glass relative p-6">
+            <div key={s.title} className={`reveal ${i === 1 ? 'reveal-d1' : i === 2 ? 'reveal-d2' : ''} glass relative p-6`}>
               <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-neon-gradient font-display text-xl font-bold text-white shadow-prism">
                 {i + 1}
               </div>
@@ -266,7 +245,7 @@ export default function LandingPage() {
 
       {/* 行动召唤 / CTA */}
       <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
-        <div className="glass relative overflow-hidden px-6 py-14 text-center sm:px-12">
+        <div className="reveal glass relative overflow-hidden px-6 py-14 text-center sm:px-12">
           <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-prism-600/30 blur-[100px]" />
           <div className="pointer-events-none absolute -bottom-20 -left-20 h-64 w-64 rounded-full bg-prism-700/20 blur-[100px]" />
           <h2 className="relative font-display text-3xl font-bold text-slate-50 sm:text-4xl">{t('landing.ctaTitle')}</h2>

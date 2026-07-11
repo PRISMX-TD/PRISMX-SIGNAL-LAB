@@ -57,7 +57,14 @@
     font-family: "Space Grotesk", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
     font-size: 14px;
     min-height: 100vh;
-    overflow-x: hidden;
+    /* 必须用 clip 而不是 hidden：hidden 会让 overflow-y 计算为 auto，把 body 变成
+       滚动容器（window.scrollY 恒为 0，一切依赖 window 滚动的逻辑失效——吸底 CTA、
+       3D 滚动叙事都是受害者）；clip 只裁剪、不产生滚动容器，滚动回到视口。
+       Must be clip, not hidden: hidden computes overflow-y to auto and turns body
+       into the scroll container (window.scrollY stays 0, breaking everything that
+       listens to window scroll — the sticky CTA and the 3D scrollytelling both).
+       clip only clips without creating a scroller, so the viewport scrolls again. */
+    overflow-x: clip;
     /* 锁死缩放：禁用双击放大与文字自动缩放，营造原生 App 体验 */
     /* Lock zoom: disable double-tap zoom and text auto-resize for a native-app feel */
     touch-action: manipulation;
@@ -1749,4 +1756,232 @@
 @keyframes marquee {
   0% { transform: translateX(0); }
   100% { transform: translateX(-50%); }
+}
+
+/* ══════════════════════════════════════════════
+   Landing 3D 重设计追加样式（2026-07）
+   ══════════════════════════════════════════════ */
+
+/* 平滑锚点滚动（尊重减少动态偏好） */
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
+/* ── 小节眉题 / section eyebrow ── */
+.eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--purple-hi);
+}
+
+/* ── 滚动显现 / scroll reveal ── */
+.reveal {
+  opacity: 0;
+  transform: translateY(22px);
+  transition: opacity 0.7s ease, transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.reveal.in {
+  opacity: 1;
+  transform: none;
+}
+.reveal-d1 { transition-delay: 0.08s; }
+.reveal-d2 { transition-delay: 0.16s; }
+.reveal-d3 { transition-delay: 0.24s; }
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+}
+
+/* ── Hero 示例卡 3D 微倾 / hero card tilt ── */
+.tilt-3d {
+  transform-style: preserve-3d;
+  will-change: transform;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ── 3D 手机样机 / phone mockup ── */
+.ph-stage { perspective: 1400px; }
+.ph-scale {
+  width: 250px;
+  height: 530px;
+  margin: 0 auto;
+}
+.ph-frame {
+  position: relative;
+  width: 250px;
+  height: 520px;
+  border-radius: 44px;
+  background: linear-gradient(160deg, #17131f, #0b0812);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 40px 90px rgba(0, 0, 0, 0.6),
+    0 0 60px rgba(139, 92, 246, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  padding: 9px;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+/* 侧键 / side buttons */
+.ph-frame::before {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: 110px;
+  width: 3px;
+  height: 54px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.18);
+}
+.ph-frame::after {
+  content: '';
+  position: absolute;
+  right: -2px;
+  top: 130px;
+  width: 3px;
+  height: 34px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.18);
+}
+.ph-screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 36px;
+  overflow: hidden;
+  background: radial-gradient(120% 90% at 50% 0%, #151022 0%, #0a0714 55%, #070510 100%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ph-island {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 78px;
+  height: 22px;
+  border-radius: 999px;
+  background: #000;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  z-index: 5;
+}
+.ph-status {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 18px 0;
+  font-size: 10px;
+  color: var(--text-3);
+  font-family: 'JetBrains Mono', monospace;
+}
+.ph-view {
+  position: absolute;
+  inset: 44px 12px 58px;
+  opacity: 0;
+  transform: translateY(14px) scale(0.985);
+  transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+  overflow: hidden;
+}
+.ph-view.on {
+  opacity: 1;
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ph-view { transform: none; transition: opacity 0.4s ease; }
+}
+.ph-tabbar {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  height: 40px;
+  border-radius: 16px;
+  background: rgba(28, 25, 44, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.ph-tab-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.14);
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.ph-tab-dot.on {
+  background: linear-gradient(130deg, #7c3aed, #a855f7);
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.6);
+}
+/* 屏内迷你卡 / in-screen mini card */
+.ph-card {
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  padding: 10px;
+}
+/* 屏内三列价格瓦片 / in-screen price tiles */
+.ph-tile {
+  border-radius: 9px;
+  padding: 6px 2px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  min-width: 0;
+}
+.ph-tile .cap { font-size: 8.5px; color: var(--text-3); }
+.ph-tile .val { font-size: 10.5px; font-weight: 700; margin-top: 2px; color: #fff; }
+.ph-tile.sl { border-color: rgba(255, 77, 103, 0.4); background: rgba(255, 77, 103, 0.07); }
+.ph-tile.sl .val { color: var(--down); }
+.ph-tile.tp { border-color: rgba(46, 224, 126, 0.4); background: rgba(46, 224, 126, 0.07); }
+.ph-tile.tp .val { color: var(--up); }
+/* 移动端：等比缩小 + 吸顶 */
+@media (max-width: 1023.5px) {
+  .ph-scale {
+    transform: scale(0.68);
+    transform-origin: top center;
+    width: 170px;
+    height: 368px;
+  }
+}
+
+/* ── 滚动叙事步骤 / showcase steps ── */
+.sh-step {
+  min-height: 52vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  opacity: 0.35;
+  transition: opacity 0.45s ease;
+}
+.sh-step.on { opacity: 1; }
+@media (min-width: 1024px) {
+  .sh-step { min-height: 58vh; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sh-step { opacity: 1; }
+}
+.sh-step-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--purple-hi);
+  letter-spacing: 0.2em;
+}
+/* 移动端吸顶样机的底部渐隐垫层 */
+.ph-sticky-mask {
+  position: sticky;
+  top: 57px;
+  z-index: 30;
+  padding: 10px 0 18px;
+  background: linear-gradient(to bottom, #000 0%, #000 78%, transparent 100%);
+}
+@media (min-width: 1024px) {
+  .ph-sticky-mask {
+    position: sticky;
+    top: 96px;
+    background: none;
+    padding: 0;
+  }
 }
