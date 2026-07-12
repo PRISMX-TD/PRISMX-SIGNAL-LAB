@@ -86,8 +86,19 @@ def make_signal(db, minutes_left: float = 10.0, **kw) -> Signal:
     return sig
 
 
-def make_account(db, user, login="10001", equity=None) -> MT5Account:
-    acc = MT5Account(user_id=user.id, login=login, server="Test-Server", equity=equity)
+# 合作券商锁默认启用（settings_store.BROKER_DEFAULTS，关键字 "MakeCapital"）。
+# 桥接上报的账号服务器名必须命中该关键字，才能通过券商锁、上线并接收指令；
+# 因此测试造的账号与轮询上报都用这个服务器名（poll 辅助函数从这里导入复用）。
+# The partner-broker lock is enabled by default (settings_store.BROKER_DEFAULTS,
+# keyword "MakeCapital"). A reported account's server name must contain it to
+# pass the lock, come online and receive commands — so both the accounts made
+# in tests and the poll payloads use this server name (the poll helper imports
+# it from here to stay in sync).
+BROKER_SERVER = "MakeCapital-Demo"
+
+
+def make_account(db, user, login="10001", equity=None, server=BROKER_SERVER) -> MT5Account:
+    acc = MT5Account(user_id=user.id, login=login, server=server, equity=equity)
     db.add(acc)
     db.commit()
     db.refresh(acc)

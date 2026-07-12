@@ -5,7 +5,7 @@ delivery & re-delivery, idempotent results, stale-pending voiding.
 from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings
-from tests.conftest import get_order, make_account, make_signal
+from tests.conftest import BROKER_SERVER, get_order, make_account, make_signal
 
 
 def place(client, auth_headers, coid="c-1", **kw):
@@ -21,9 +21,14 @@ def place(client, auth_headers, coid="c-1", **kw):
 
 
 def poll(client, bridge_headers, login="10001"):
+    # 上报的服务器名须命中券商锁关键字（默认 "MakeCapital"），否则账号被券商锁
+    # 拒绝、不上线，指令永不下发。与 conftest.make_account 用同一服务器名。
+    # The reported server name must match the broker-lock keyword (default
+    # "MakeCapital") or the account is rejected, never comes online, and no
+    # command is ever dispatched. Same server name as conftest.make_account.
     return client.post(
         "/api/bridge/poll",
-        json={"accounts": [{"login": login}]},
+        json={"accounts": [{"login": login, "server": BROKER_SERVER}]},
         headers=bridge_headers,
     )
 
