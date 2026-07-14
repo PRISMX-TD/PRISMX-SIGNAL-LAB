@@ -72,6 +72,14 @@ export interface AdminPricingSettings {
   saleEndAt: string
 }
 
+// 信号客观胜负：与 status（能否下单）完全独立的第二条状态线，见后端
+// signal_resolution.py。PENDING = 还没判出；STALE = 追踪中断太久，不计入胜率。
+// Objective win/loss for the signal: a second status axis, independent of
+// `status` (whether it can still be traded) — see the backend's
+// signal_resolution.py. PENDING = not yet resolved; STALE = tracking was
+// interrupted for too long, excluded from the win rate.
+export type SignalResult = 'PENDING' | 'HIT_TP' | 'HIT_SL' | 'STALE'
+
 export interface Signal {
   id: string
   symbol: string
@@ -83,6 +91,8 @@ export interface Signal {
   status: 'ACTIVE' | 'EXPIRED'
   createdAt: string
   expireAt: string | null
+  result: SignalResult
+  resolvedAt: string | null
 }
 
 // 近 N 天每日信号发出量统计 / daily signal count for the last N days
@@ -111,6 +121,21 @@ export interface PersonalWinRate {
   totalResolved: number
   winRate: number | null
   openPositions: number
+}
+
+// 真实平仓成交明细（逐笔），个人跟单胜率同一份数据源，只有自己能看到自己的
+// A single real closed-trade leg; same data source as the personal win rate,
+// visible only to the user themself.
+export interface ClosedTrade {
+  id: string
+  symbol: string
+  side: 'BUY' | 'SELL'
+  closeVolume: number
+  closePrice: number | null
+  profit: number
+  positionTicket: number
+  dealTicket: number
+  closedAt: string | null
 }
 
 export type OrderStatus = 'PENDING' | 'FILLED' | 'REJECTED' | 'FAILED' | 'CANCELLED'

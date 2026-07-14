@@ -9,6 +9,7 @@ import Logo from './Logo'
 import LanguageToggle from './LanguageToggle'
 import EAStatusBadge from './EAStatusBadge'
 import AuroraBackground from './AuroraBackground'
+import ConfirmModal from './ConfirmModal'
 
 function NavItem({ to, label }: { to: string; label: string }) {
   return (
@@ -159,8 +160,15 @@ export default function Layout() {
   const navigate = useNavigate()
   const location = useLocation()
   const [moreOpen, setMoreOpen] = useState(false)
+  // 移动端登出容易误触（图标按钮/滑动面板里的整宽按钮），加一步确认；
+  // 桌面端文字按钮误触概率低，不加这道确认以免多余打扰。
+  // Mobile logout is easy to fat-finger (an icon-only button / a full-width
+  // button inside a swipe-up sheet), so gate it behind a confirmation;
+  // skipped on the desktop text button where accidental clicks are rare.
+  const [confirmLogout, setConfirmLogout] = useState(false)
 
   const handleLogout = () => {
+    setConfirmLogout(false)
     logout()
     navigate('/', { replace: true })
   }
@@ -242,7 +250,7 @@ export default function Layout() {
               </button>
               {/* 移动端登出图标按钮 / mobile icon-only logout */}
               <button
-                onClick={handleLogout}
+                onClick={() => setConfirmLogout(true)}
                 aria-label={t('nav.logout')}
                 className="btn-ghost px-2 py-1.5 sm:hidden"
               >
@@ -307,11 +315,22 @@ export default function Layout() {
                   </NavLink>
                 ))}
               </div>
-              <button type="button" className="lg-sheet-logout" onClick={handleLogout}>
+              <button type="button" className="lg-sheet-logout" onClick={() => setConfirmLogout(true)}>
                 {t('nav.logout')}
               </button>
             </div>
           </div>
+        )}
+
+        {confirmLogout && (
+          <ConfirmModal
+            title={t('nav.logout')}
+            message={t('nav.logoutConfirm')}
+            confirmLabel={t('nav.logout')}
+            danger
+            onConfirm={handleLogout}
+            onCancel={() => setConfirmLogout(false)}
+          />
         )}
       </div>
     </LiveProvider>

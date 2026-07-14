@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, AdminUser, AdminMetrics, AdminPricingSettings, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPricingSettings, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio } from './types'
 
 const TOKEN_KEY = 'prismx_token'
 
@@ -110,7 +110,20 @@ export const chartApi = {
 
 // 下单 / Orders
 export const orderApi = {
-  list: () => request<{ orders: Order[] }>('/orders'),
+  // 不传参数时行为不变(最新 100 条),供 useLive() 的实时订单跟踪继续用；
+  // 传 limit/offset/since/until 时用于订单页的分页与日期筛选浏览历史。
+  // Unparameterized behavior is unchanged (latest 100), used by useLive()'s
+  // real-time order tracking; pass limit/offset/since/until for the Orders
+  // page's paginated, date-filtered history browsing.
+  list: (params: { limit?: number; offset?: number; since?: string; until?: string } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.limit) qs.set('limit', String(params.limit))
+    if (params.offset) qs.set('offset', String(params.offset))
+    if (params.since) qs.set('since', params.since)
+    if (params.until) qs.set('until', params.until)
+    const suffix = qs.toString() ? `?${qs.toString()}` : ''
+    return request<{ orders: Order[]; total: number }>(`/orders${suffix}`)
+  },
   place: (payload: {
     signalId: string | null
     symbol: string
@@ -152,6 +165,7 @@ export const orderApi = {
     }),
   cancel: (id: string) => request<Order>(`/orders/${id}/cancel`, { method: 'POST' }),
   winrate: () => request<PersonalWinRate>('/orders/winrate'),
+  closedTrades: () => request<{ trades: ClosedTrade[] }>('/orders/closed-trades'),
 }
 
 // 多账号 / Multi-account
@@ -208,21 +222,31 @@ export const userApi = {
     }),
   // 跨设备同步的界面偏好 / cross-device UI prefs
   getPrefs: () => request<{ data: Record<string, unknown> }>('/auth/prefs'),
-  putPrefs: (data: Record<string, unknown>) =>
+  // 只传发生变化的那一个命名空间，服务端合并进已存文档（不再整份覆盖），
+  // 返回/推送的都是合并后的完整文档。见后端 account.py 的 UserPrefsIn 说明。
+  // Only the namespace that changed; the server merges it into the stored
+  // document (no longer a full overwrite); the response/push both carry the
+  // merged, complete document. See the backend's UserPrefsIn docstring.
+  putPrefs: (namespace: string, data: Record<string, unknown>) =>
     request<{ data: Record<string, unknown> }>('/auth/prefs', {
       method: 'PUT',
-      body: JSON.stringify({ data }),
+      body: JSON.stringify({ namespace, data }),
     }),
 }
 
 // 通知 / Notifications
 export const notificationApi = {
   getPrefs: () =>
-    request<{ enabled: boolean; selected_categories: string[] }>('/notifications/prefs'),
-  putPrefs: (enabled: boolean, selectedCategories: string[]) =>
-    request<{ enabled: boolean; selected_categories: string[] }>('/notifications/prefs', {
+    request<{ enabled: boolean; selected_categories: string[]; event_types: string[] }>('/notifications/prefs'),
+  // eventTypes：账户/交易事件白名单（订单成交/拒绝、自动仓管触发、Bridge 掉线），
+  // 与 selectedCategories（信号指标类别白名单）是两套独立设置。
+  // eventTypes: account/trading event whitelist (order fill/reject, auto-manage
+  // trigger, bridge offline) — a separate whitelist from selectedCategories
+  // (the signal indicator-category whitelist).
+  putPrefs: (enabled: boolean, selectedCategories: string[], eventTypes: string[] = []) =>
+    request<{ enabled: boolean; selected_categories: string[]; event_types: string[] }>('/notifications/prefs', {
       method: 'PUT',
-      body: JSON.stringify({ enabled, selected_categories: selectedCategories }),
+      body: JSON.stringify({ enabled, selected_categories: selectedCategories, event_types: eventTypes }),
     }),
   getIndicators: () => request<string[]>('/notifications/indicators'),
 }

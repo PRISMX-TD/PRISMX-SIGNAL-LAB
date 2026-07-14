@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { accountApi, eaApi } from '../api/client'
 import { useLive } from '../store/live'
-import { fmtTime } from '../api/utils'
+import { fmtTime, localizeApiError } from '../api/utils'
 import ConfirmModal from '../components/ConfirmModal'
 import TokenRevealModal from '../components/TokenRevealModal'
 import type { MT5Account } from '../api/types'
@@ -13,6 +13,14 @@ export default function BindPage() {
   const { t } = useTranslation()
   const { accounts, accountLimit, brokerLock, anyOnline, onlineAccounts, refreshAll } = useLive()
   const atAccountLimit = accountLimit != null && accounts.length >= accountLimit
+  // 从未连接过任何账号：还没有 Bridge 在用这个 token，"重置"框架的危险确认
+  // 没有意义——对这种用户，第一次拿 token 应该叫"生成"，而不是让人以为要
+  // 冒险搞坏点什么才能拿到它。
+  // Never connected any account: no Bridge is using this token yet, so the
+  // "reset" framing's danger confirmation doesn't apply — for this user,
+  // getting their first token should read as "generate", not something that
+  // sounds like it risks breaking anything.
+  const neverConnected = accounts.length === 0
   // 状态卡片展示的主账号：优先在线账号，否则第一个已知账号。
   // Primary account for the status card: prefer an online one, else the first known.
   const primary = onlineAccounts[0] || accounts[0] || null
@@ -90,7 +98,7 @@ export default function BindPage() {
       setDeleteTarget(null)
       refreshAll()
     } catch (e) {
-      setDeleteError(e instanceof Error ? e.message : 'error')
+      setDeleteError(e instanceof Error ? localizeApiError(e.message) : 'error')
     } finally {
       setDeleting(false)
     }
@@ -222,24 +230,36 @@ export default function BindPage() {
             {apiToken ? (
               <code className="flex-1 break-all font-mono text-sm text-prism-300">{apiToken}</code>
             ) : (
-              <span className="flex-1 text-xs leading-relaxed text-slate-400">{t('bind.tokenHidden')}</span>
+              <span className="flex-1 text-xs leading-relaxed text-slate-400">
+                {neverConnected ? t('bind.tokenNeverGenerated') : t('bind.tokenHidden')}
+              </span>
             )}
           </div>
           {apiToken && (
             <p className="mb-3 text-xs leading-relaxed text-amber-400/90">{t('bind.tokenJustOnce')}</p>
           )}
-          <div className="flex gap-3">
+          {!apiToken && neverConnected ? (
             <button
-              onClick={copyToken}
-              disabled={!apiToken}
-              className="btn-primary flex-1 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={resetToken}
+              disabled={resetting}
+              className="btn-primary w-full py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {copied ? t('common.copied') : t('common.copy')}
+              {resetting ? t('common.loading') : t('bind.generateToken')}
             </button>
-            <button onClick={() => setResetConfirmOpen(true)} className="btn-ghost flex-1 py-2 text-sm">
-              {t('bind.resetToken')}
-            </button>
-          </div>
+          ) : (
+            <div className="flex gap-3">
+              <button
+                onClick={copyToken}
+                disabled={!apiToken}
+                className="btn-primary flex-1 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {copied ? t('common.copied') : t('common.copy')}
+              </button>
+              <button onClick={() => setResetConfirmOpen(true)} className="btn-ghost flex-1 py-2 text-sm">
+                {t('bind.resetToken')}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* PLACEHOLDER_STATUS */}

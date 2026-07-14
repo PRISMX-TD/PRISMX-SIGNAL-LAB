@@ -55,8 +55,9 @@ export default function DashboardPage() {
   const handleConfirm = async (volume: number, mt5Login: string | null, stopLoss: number | null, takeProfit: number | null) => {
     if (!activeSignal) return
     const sig = activeSignal
+    // 不在这里关弹窗，理由见 SignalsPage.tsx 同名函数的注释。
+    // Don't close the modal here — see SignalsPage.tsx's matching comment.
     await placeOrder(sig, volume, mt5Login, stopLoss, takeProfit)
-    setActiveSignal(null)
   }
 
   return (

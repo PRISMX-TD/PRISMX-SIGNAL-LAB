@@ -3,8 +3,9 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { orderApi } from '../api/client'
-import { clientOrderId } from '../api/utils'
+import { clientOrderId, localizeApiError } from '../api/utils'
 import type { Position } from '../api/types'
+import ConfirmModal from './ConfirmModal'
 
 interface Props {
   position: Position
@@ -17,6 +18,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
   const { t } = useTranslation()
   const [mode, setMode] = useState<Mode>('view')
   const [busy, setBusy] = useState(false)
+  const [confirmCloseAll, setConfirmCloseAll] = useState(false)
   const [closeVol, setCloseVol] = useState(String(p.volume))
   const [sl, setSl] = useState(p.stopLoss ? String(p.stopLoss) : '')
   const [tp, setTp] = useState(p.takeProfit ? String(p.takeProfit) : '')
@@ -54,7 +56,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
       onActionDone?.(t('positions.closeSent'), 'info')
       setMode('view')
     } catch (e) {
-      onActionDone?.(e instanceof Error ? e.message : 'error', 'error')
+      onActionDone?.(e instanceof Error ? localizeApiError(e.message) : 'error', 'error')
     } finally {
       setBusy(false)
     }
@@ -76,7 +78,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
       onActionDone?.(t('positions.modifySent'), 'info')
       setMode('view')
     } catch (e) {
-      onActionDone?.(e instanceof Error ? e.message : 'error', 'error')
+      onActionDone?.(e instanceof Error ? localizeApiError(e.message) : 'error', 'error')
     } finally {
       setBusy(false)
     }
@@ -136,7 +138,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
       {canAct && mode === 'view' && (
         <div className="mt-3 flex gap-2">
           <button
-            onClick={() => doClose(true)}
+            onClick={() => setConfirmCloseAll(true)}
             disabled={busy}
             className="flex-1 rounded-lg border border-down/40 bg-down/10 py-1.5 text-xs font-medium text-down transition hover:bg-down/20 disabled:opacity-50"
           >
@@ -227,6 +229,18 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
             </button>
           </div>
         </div>
+      )}
+
+      {confirmCloseAll && (
+        <ConfirmModal
+          title={t('positions.closeAllConfirmTitle')}
+          message={t('positions.closeAllConfirm', { symbol: p.symbol, volume: p.volume })}
+          confirmLabel={t('positions.closeAll')}
+          danger
+          busy={busy}
+          onConfirm={() => { setConfirmCloseAll(false); doClose(true) }}
+          onCancel={() => setConfirmCloseAll(false)}
+        />
       )}
     </div>
   )

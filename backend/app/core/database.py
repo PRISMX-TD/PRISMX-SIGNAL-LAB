@@ -121,6 +121,17 @@ def _migrate_columns() -> None:
             if "result" not in signal_cols:
                 conn.execute(text("UPDATE signals SET result = 'PENDING' WHERE result IS NULL"))
 
+    # notification_prefs 表：补充事件类通知白名单（订单成交/拒绝、自动仓管
+    # 触发、Bridge 掉线），与既有的指标类别白名单分开存放。
+    # notification_prefs: add the event-notification whitelist (order
+    # fill/reject, auto-manage trigger, bridge offline), stored separately
+    # from the existing indicator-category whitelist.
+    if "notification_prefs" in inspector.get_table_names():
+        notif_cols = {c["name"] for c in inspector.get_columns("notification_prefs")}
+        if "event_types" not in notif_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE notification_prefs ADD COLUMN event_types TEXT"))
+
     # 后台清扫/过期扫描用的索引：create_all 不会为已存在的表补索引，这里补。
     # Indexes for the background sweeps: create_all won't add indexes to
     # pre-existing tables, so do it here (IF NOT EXISTS on both dialects).

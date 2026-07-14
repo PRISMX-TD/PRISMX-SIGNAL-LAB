@@ -1,9 +1,10 @@
 // PRISMX Signal Lab · 3D 棱镜主页重设计 / 3D prism landing redesign
 // Hero 采用可交互 WebGL 玻璃棱镜场景（PrismScene）；其余分区走极简暗黑 +
 // 克制的滚动显现，保留全部原有 i18n 文案键，不新增未翻译文案。
-import { lazy, Suspense, useEffect, useRef } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { paymentApi } from '../api/client'
 import Logo from '../components/Logo'
 import LanguageToggle from '../components/LanguageToggle'
 import FaqSection from '../components/landing/FaqSection'
@@ -249,6 +250,26 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
   const ref = useReveal<HTMLDivElement>()
   const freeFeatures = ['prFreeF1', 'prFreeF2', 'prFreeF3', 'prFreeF4']
   const proFeatures = ['prProF1', 'prProF2', 'prProF3', 'prProF4', 'prProF5', 'prProF6', 'prProF7']
+
+  // 落地页此前定价卡只有功能列表、没有具体数字——主打"透明"的产品却把价格
+  // 本身藏起来，得注册登录才看到，略显自相矛盾。GET /api/payments/plans 本来
+  // 就是公开接口（未登录已在用它算 /upgrade 页价格），落地页直接复用同一份
+  // 数据源，不会和升级页的数字对不上。
+  // The pricing cards used to show only feature lists with no numbers at all —
+  // a product built on "transparency" hiding its own price behind a signup
+  // felt contradictory. GET /api/payments/plans is already public (unauthenticated
+  // callers use it to price the /upgrade page), so the landing page reuses the
+  // exact same source instead of risking a second, drifting set of numbers.
+  const [monthlyPrice, setMonthlyPrice] = useState<number | null>(null)
+  useEffect(() => {
+    paymentApi.getPlans()
+      .then((r) => {
+        const monthly = r.plans.find((p) => p.days === 30)
+        if (monthly) setMonthlyPrice(monthly.price_usd)
+      })
+      .catch(() => {})
+  }, [])
+
   return (
     <section ref={ref} id="pricing" className="mx-auto max-w-[960px] scroll-mt-24 px-4 py-14 sm:px-5 sm:py-20">
       <SectionHead eyebrow={t('landing.tdEyebrow')} title={t('landing.tdTitle')} subtitle={t('landing.prSubtitle')} />
@@ -258,6 +279,9 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
           <div className="flex items-baseline justify-between">
             <span className="font-display text-2xl font-bold text-white">{t('landing.prFreeName')}</span>
             <span className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">{t('landing.prFreeTag')}</span>
+          </div>
+          <div className="mt-3 flex items-baseline gap-1">
+            <span className="font-display text-4xl font-black text-white">$0</span>
           </div>
           <p className="mt-2 text-sm text-neutral-500">{t('landing.badge')}</p>
           <ul className="mt-7 space-y-3">
@@ -280,6 +304,12 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
           <div className="flex items-baseline justify-between">
             <span className="font-display text-2xl font-bold text-white">{t('landing.prProName')}</span>
             <span className="text-[11px] uppercase tracking-[0.18em] text-violet-300">{t('landing.prProTag')}</span>
+          </div>
+          <div className="mt-3 flex items-baseline gap-1.5">
+            <span className="font-display text-4xl font-black text-white">
+              {monthlyPrice != null ? `$${monthlyPrice}` : '—'}
+            </span>
+            <span className="text-sm text-neutral-400">/{t('landing.prPerMonth')}</span>
           </div>
           <p className="mt-2 text-sm text-neutral-400">{t('landing.prSponsor')}</p>
           <ul className="mt-7 space-y-3">

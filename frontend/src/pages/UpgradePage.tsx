@@ -4,6 +4,7 @@ import { QRCodeSVG } from "qrcode.react";
 import AuroraBackground from "../components/AuroraBackground";
 import { useAuth } from "../store/auth";
 import { paymentApi } from "../api/client";
+import { localizeApiError } from "../api/utils";
 
 type Plan = { id: string; name: string; price_usd: number; original_price_usd?: number | null; days: number; tag?: string };
 type SaleInfo = { percent: number; badge: string; end_at: string; monthly: number; yearly: number } | null;
@@ -48,9 +49,46 @@ function CheckIcon() {
   );
 }
 
+// 未完成支付的本地持久化：用户扫码转账后切走/刷新/锁屏太久回来，页面状态
+// 全在内存里会直接丢回选套餐页——此时 USDT 可能已经转出去了，界面却像是
+// 要重新下单。存一份到 localStorage，挂载时用它先恢复界面，再用真实状态核实。
+// Persist an in-flight payment locally: if the user navigates away, refreshes,
+// or their phone locks mid-scan, in-memory-only state would drop them back to
+// plan selection — even though the USDT may already be on its way. Cache it in
+// localStorage so the page can restore on mount, then verify against the
+// server's actual status.
+const PENDING_PAYMENT_KEY = "prismx_pending_payment";
+type PendingPayment = Extract<PaymentState, { step: "pay" }>;
+
+function loadPendingPayment(): PendingPayment | null {
+  try {
+    const raw = localStorage.getItem(PENDING_PAYMENT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PendingPayment>;
+    if (parsed && parsed.step === "pay" && typeof parsed.paymentId === "string") {
+      return parsed as PendingPayment;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function savePendingPayment(s: PendingPayment) {
+  try {
+    localStorage.setItem(PENDING_PAYMENT_KEY, JSON.stringify(s));
+  } catch { /* ignore */ }
+}
+
+function clearPendingPayment() {
+  try {
+    localStorage.removeItem(PENDING_PAYMENT_KEY);
+  } catch { /* ignore */ }
+}
+
 export default function UpgradePage() {
   const { t } = useTranslation();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
 
   const [plans, setPlans] = useState<Plan[]>([]);
   const [sale, setSale] = useState<SaleInfo>(null);
@@ -102,11 +140,74 @@ export default function UpgradePage() {
     clockRef.current = setInterval(tick, 1000);
   }, []);
 
+  // 轮询单笔支付状态直到终态；抽成独立函数供 handlePay 与挂载恢复共用。
+  // Poll one payment's status to a terminal state; shared by handlePay and the
+  // mount-time recovery effect below.
+  const pollPayment = useCallback((paymentId: string) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const s = await paymentApi.status(paymentId);
+        if (s.status === "FINISHED") {
+          if (pollRef.current) clearInterval(pollRef.current);
+          if (clockRef.current) clearInterval(clockRef.current);
+          clearPendingPayment();
+          setState({ step: "done" });
+          // 立即刷新本地 user.plan：之前用一个没人监听的自定义事件通知全局
+          // 刷新，付款成功后仪表盘/导航仍显示 FREE，需要用户手动切页才会更新。
+          // Refresh the cached user.plan right away — this used to dispatch a
+          // custom event nobody listened for, so the dashboard/nav kept
+          // showing FREE right after a successful payment until the user
+          // navigated to a page that happened to refetch it.
+          void refreshUser();
+        } else if (s.status === "EXPIRED" || s.status === "FAILED") {
+          if (pollRef.current) clearInterval(pollRef.current);
+          if (clockRef.current) clearInterval(clockRef.current);
+          clearPendingPayment();
+          setState({ step: "error", msg: t("upgrade.paymentExpired") });
+        }
+      } catch { /* silently skip poll errors */ }
+    }, 5000);
+  }, [t, refreshUser]);
+
+  // 恢复未完成的支付：挂载时若本地存着一笔未完成的支付，先用它乐观恢复
+  // 支付页（不让用户以为要重新下单），再向后端核实真实状态。
+  // Recover an in-flight payment on mount: optimistically restore the pay
+  // screen from the local cache (so the user doesn't think they must start
+  // over), then confirm the real status with the backend.
+  useEffect(() => {
+    const pending = loadPendingPayment();
+    if (!pending) return;
+    let cancelled = false;
+    setState(pending);
+    startCountdown(pending.validUntil);
+    paymentApi.status(pending.paymentId).then((s) => {
+      if (cancelled) return;
+      if (s.status === "FINISHED") {
+        clearPendingPayment();
+        setState({ step: "done" });
+        void refreshUser();
+      } else if (s.status === "EXPIRED" || s.status === "FAILED") {
+        clearPendingPayment();
+        setState({ step: "error", msg: t("upgrade.paymentExpired") });
+      } else {
+        pollPayment(pending.paymentId);
+      }
+    }).catch(() => {
+      // 查询失败（网络问题）：保留乐观恢复的支付页，轮询会继续重试确认。
+      // Status check failed (network): keep the optimistically-restored pay
+      // screen; polling keeps retrying to confirm.
+      if (!cancelled) pollPayment(pending.paymentId);
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount only
+  }, []);
+
   const handlePay = useCallback(async () => {
     setLoading(true);
     try {
       const res = await paymentApi.create(chosenPlan, chosenCoin);
-      setState({
+      const payState: PendingPayment = {
         step: "pay",
         paymentId: res.payment_id,
         payAddress: res.pay_address,
@@ -115,35 +216,23 @@ export default function UpgradePage() {
         amountUsd: res.amount_usd,
         plan: res.plan,
         validUntil: res.valid_until,
-      });
+      };
+      setState(payState);
+      savePendingPayment(payState);
       startCountdown(res.valid_until);
-      const pid = res.payment_id;
-      pollRef.current = setInterval(async () => {
-        try {
-          const s = await paymentApi.status(pid);
-          if (s.status === "FINISHED") {
-            if (pollRef.current) clearInterval(pollRef.current);
-            if (clockRef.current) clearInterval(clockRef.current);
-            setState({ step: "done" });
-            window.dispatchEvent(new Event("auth-refresh"));
-          } else if (s.status === "EXPIRED" || s.status === "FAILED") {
-            if (pollRef.current) clearInterval(pollRef.current);
-            if (clockRef.current) clearInterval(clockRef.current);
-            setState({ step: "error", msg: t("upgrade.paymentExpired") });
-          }
-        } catch { /* silently skip poll errors */ }
-      }, 5000);
+      pollPayment(res.payment_id);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Unknown error";
+      const msg = e instanceof Error ? localizeApiError(e.message) : "Unknown error";
       setState({ step: "error", msg });
     } finally {
       setLoading(false);
     }
-  }, [chosenPlan, chosenCoin, t, startCountdown]);
+  }, [chosenPlan, chosenCoin, startCountdown, pollPayment]);
 
   const handleRetry = () => {
     if (pollRef.current) clearInterval(pollRef.current);
     if (clockRef.current) clearInterval(clockRef.current);
+    clearPendingPayment();
     setRemaining(null);
     setState({ step: "select" });
   };
@@ -176,6 +265,16 @@ export default function UpgradePage() {
     const isPro = user?.plan === "PRO";
     const monthly = plans.find((p) => p.days === 30);
     const yearly = plans.find((p) => p.days === 365);
+    // 年付折扣角标此前写死 "-20%"，不管后台把价格改成多少都不变。改成按
+    // 月付价格 ×12 与年付价格的真实差算出百分比，后台改价立刻联动。
+    // The yearly-discount badge used to be hardcoded "-20%" regardless of
+    // whatever price the admin actually set. Compute the real percentage
+    // from monthly price × 12 vs. the yearly price so it stays in sync with
+    // whatever the admin configures.
+    const yearlyDiscountPct =
+      monthly && yearly && monthly.price_usd > 0
+        ? Math.round((1 - yearly.price_usd / (monthly.price_usd * 12)) * 100)
+        : null;
     return (
       <div className="animate-fade-in-up">
         {/* 标题 / hero header */}
@@ -208,7 +307,9 @@ export default function UpgradePage() {
             </button>
             <button className={chosenPlan === "pro_yearly" ? "on" : ""} onClick={() => setChosenPlan("pro_yearly")}>
               {t("upgrade.yearly")}
-              {yearly && !sale && <span className="ml-1.5 text-[10px] font-bold text-prism-300">-20%</span>}
+              {!sale && yearlyDiscountPct != null && yearlyDiscountPct > 0 && (
+                <span className="ml-1.5 text-[10px] font-bold text-prism-300">-{yearlyDiscountPct}%</span>
+              )}
             </button>
           </div>
         </div>

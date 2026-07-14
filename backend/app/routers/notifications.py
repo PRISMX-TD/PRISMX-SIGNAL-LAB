@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.models import NotificationPref, PushSubscription, Signal, User
 from app.services.deps import get_current_user
 from app.services.plans import can_use_push
+from app.services.push_dispatch import EVENT_TYPES
 from app.utils.indicator import indicator_category
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -20,12 +21,16 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 
 class NotificationPrefsOut(BaseModel):
     enabled: bool
-    selected_categories: list[str]  # 白名单 / whitelist
+    selected_categories: list[str]  # 信号指标类别白名单 / signal indicator-category whitelist
+    # 事件类通知白名单：order_filled / order_rejected / auto_manage / bridge_offline
+    # Event-notification whitelist
+    event_types: list[str] = Field(default_factory=list)
 
 
 class NotificationPrefsIn(BaseModel):
     enabled: bool = False
     selected_categories: list[str] = Field(default_factory=list)
+    event_types: list[str] = Field(default_factory=list)
 
 
 def _get_or_create_pref(db: Session, user_id: str) -> NotificationPref:
@@ -48,7 +53,12 @@ def get_prefs(
         cats = json.loads(pref.selected_categories or "[]")
     except (json.JSONDecodeError, TypeError):
         cats = []
-    return NotificationPrefsOut(enabled=pref.enabled, selected_categories=cats)
+    events = []
+    try:
+        events = json.loads(pref.event_types or "[]")
+    except (json.JSONDecodeError, TypeError):
+        events = []
+    return NotificationPrefsOut(enabled=pref.enabled, selected_categories=cats, event_types=events)
 
 
 @router.put("/prefs", response_model=NotificationPrefsOut)
@@ -62,11 +72,14 @@ def put_prefs(
     # allowed so a downgraded user isn't stuck unable to switch it off.
     if body.enabled and not can_use_push(current_user.plan):
         raise HTTPException(status_code=403, detail="免费版不支持通知推送，请升级解锁 / Free tier doesn't include push notifications; upgrade to unlock")
+    # 过滤掉未知事件类型，防止前端传了旧值/脏数据 / drop unknown event types (stale/bad client data)
+    events = [e for e in body.event_types if e in EVENT_TYPES]
     pref = _get_or_create_pref(db, current_user.id)
     pref.enabled = body.enabled
     pref.selected_categories = json.dumps(body.selected_categories, ensure_ascii=False)
+    pref.event_types = json.dumps(events, ensure_ascii=False)
     db.commit()
-    return NotificationPrefsOut(enabled=pref.enabled, selected_categories=body.selected_categories)
+    return NotificationPrefsOut(enabled=pref.enabled, selected_categories=body.selected_categories, event_types=events)
 
 
 # ---- 指标类别列表 / indicator category list ----

@@ -12,6 +12,7 @@
     "upgrade": "Upgrade",
     "download": "Download Bridge",
     "logout": "Log out",
+    "logoutConfirm": "Log out of your account?",
     "account": "Account",
     "more": "More",
     "admin": "Admin"
@@ -22,6 +23,8 @@
     "cancel": "Cancel",
     "close": "Close",
     "copy": "Copy",
+    "prevPage": "Previous",
+    "nextPage": "Next",
     "copied": "Copied",
     "reset": "Reset",
     "save": "Save",
@@ -152,6 +155,7 @@
     "prCta": "Register free, upgrade inside",
     "prNote": "Both tiers exist permanently: upgrade or downgrade anytime. Upgrading happens on the in-app Upgrade page (USDT supported).",
     "prSponsor": "Or let the partner broker cover it: open a MakeCapital account and keep it active, and PRO is sponsored. Details coming soon.",
+    "prPerMonth": "mo",
     "howEyebrow": "Getting started",
     "howTitle": "Three steps from signup to your first trade",
     "howSubtitle": "About 5 minutes end to end. No coding required",
@@ -277,6 +281,11 @@
     "expired": "Expired",
     "active": "Active",
     "expiringSoon": "Expiring",
+    "resultHitTp": "✓ Hit take-profit",
+    "resultHitSl": "✗ Hit stop-loss",
+    "resultStale": "Tracking interrupted, excluded from win rate",
+    "resultPending": "Result pending",
+    "proSawFirst": "PRO users saw this 10 min earlier",
     "trade": "Trade",
     "rr": "R:R",
     "pips": "pips",
@@ -323,6 +332,7 @@
       "marketSentiment": "Market sentiment",
       "communitySentiment": "Community sentiment",
       "tfDistribution": "TF Distribution",
+      "noData": "No data",
       "watching": "Watching",
       "symbolsTotal": "{{n}} symbols",
       "noExecutable": "No executable signal · AI monitoring",
@@ -401,6 +411,7 @@
     "sizeModeRisk": "Risk %",
     "riskPct": "Risk",
     "riskNeedsSl": "Set a stop loss to size by risk %",
+    "riskUnsupportedPair": "Risk-based sizing isn't supported for this pair yet — enter the volume manually",
     "slWrongSide": "Stop loss is on the wrong side of the current price",
     "tpWrongSide": "Take profit is on the wrong side of the current price",
     "signalExpiresIn": "Signal expires in",
@@ -442,6 +453,14 @@
     "notifEnable": "Enable push notifications for signals",
     "notifUpgradeRequired": "Push notifications aren't included in the free tier — upgrade to unlock",
     "notifNoCategories": "No indicator categories yet, run the signal engine first",
+    "notifCatsHeading": "Signal alerts",
+    "notifEventsHeading": "Trading & account alerts",
+    "notifEvent": {
+      "order_filled": "Order filled",
+      "order_rejected": "Order rejected",
+      "auto_manage": "Auto position management triggered",
+      "bridge_offline": "PRISMX Bridge went offline"
+    },
     "notifPermissionDenied": "Notification permission denied; enable in browser settings",
     "notifBlocked": "Notifications blocked by browser; enable in browser settings",
     "notifError": "Failed to update notification settings",
@@ -467,6 +486,8 @@
     "disclaimer": "Chart data comes from the platform's own feed and is for reference only; it may differ slightly from your broker's quotes.",
     "empty": "Chart data is loading or temporarily unavailable…",
     "stale": "Data delayed",
+    "utcBadge": "UTC",
+    "utcHint": "The time axis and all timestamps are shown in UTC, not your local time",
     "draw": {
       "tools": "Drawing tools",
       "cursor": "Cursor",
@@ -498,7 +519,11 @@
     "resolvedCount": "{{n}} resolved",
     "noData": "Not enough data yet",
     "viewDetail": "View details",
-    "disclaimer": "Past performance does not guarantee future results."
+    "disclaimer": "Past performance does not guarantee future results.",
+    "closedTradesTitle": "Closed Trade History",
+    "closedTradesHint": "Every real fill — the raw records the win rate above is built from.",
+    "closedTradesEmpty": "No closed trades yet",
+    "profit": "P&L"
   },
   "orders": {
     "title": "Orders & Receipts",
@@ -528,6 +553,7 @@
       "CANCELLED": "Cancelled"
     },
     "positions": "Open Positions",
+    "positionsScopeHint": "Only shows positions opened via PRISMX orders; positions you open manually in the MT5 client never appear here and are never affected by actions here.",
     "noPositions": "No open positions",
     "summary": {
       "positions": "Positions",
@@ -537,6 +563,10 @@
     "filterSide": "Side",
     "filterSymbol": "Symbol",
     "symbolPlaceholder": "e.g. XAUUSD",
+    "filterFrom": "From date",
+    "filterTo": "To date",
+    "clearDateFilter": "Clear dates",
+    "pageInfo": "Page {{page}} / {{totalPages}} · {{total}} total",
     "cancelSent": "Cancel request sent",
     "proExclusive": "PRO Exclusive",
     "mt5Accounts": "MT5 Account Details"
@@ -556,7 +586,9 @@
     "closeSent": "Close command sent, waiting for receipt…",
     "modifySent": "Modify command sent, waiting for receipt…",
     "invalidVolume": "Invalid close volume",
-    "clearHint": "0 = clear"
+    "clearHint": "0 = clear",
+    "closeAllConfirmTitle": "Confirm close all",
+    "closeAllConfirm": "Close all {{volume}} lots of {{symbol}}? This cannot be undone."
   },
   "bind": {
     "title": "Connect MT5",
@@ -582,6 +614,8 @@
     "tokenTitle": "Your API Token",
     "tokenHint": "This token is like a password. Keep it safe. Paste it into the PRISMX Bridge app to connect.",
     "tokenHidden": "For security the token is stored encrypted and shown only once at generation. Click \"Reset Token\" to generate and view a new one (the old token stops working).",
+    "tokenNeverGenerated": "You haven't generated a token yet. Click below to create your token for connecting PRISMX Bridge.",
+    "generateToken": "Generate Token",
     "tokenJustOnce": "Copy and store it now — it cannot be viewed again after you refresh or leave this page.",
     "tokenSavedClose": "I've saved it, close",
     "resetToken": "Reset Token",
@@ -703,7 +737,7 @@
     "g4Title": "4. Paste the token and connect",
     "g4Desc": "Open the bridge, paste your token, and click Connect. Once the status turns online, you can place orders from the signal panel.",
     "notesTitle": "Important notes",
-    "n1": "The bridge must stay running. Closing it stops receiving and executing trades.",
+    "n1": "Clicking the window's close button minimizes it to the system tray and keeps it running in the background. To fully quit, right-click the tray icon and choose \"Exit\" — that's when it stops receiving and executing trades.",
     "n2": "Run the bridge on the same computer where MT5 is logged in.",
     "n3": "Enable \"Allow algorithmic trading\" in MT5, otherwise orders will be rejected by the terminal.",
     "n4": "Your API token is like a password. Never share it; if you suspect a leak, reset it anytime on the Connect MT5 page.",

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.models import MT5Account, Order, Signal, User
+from app.models import ClosedTrade, MT5Account, Order, Signal, User
 from app.schemas import (
     ClosePositionRequest,
     ModifyPositionRequest,
@@ -199,11 +199,28 @@ def place_order(
 
 @router.get("", response_model=dict)
 def list_orders(
+    limit: int = 100,
+    offset: int = 0,
+    since: datetime | None = None,
+    until: datetime | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """查询当前用户订单（先作废超时的 PENDING）。
-    List current user's orders (voiding stale PENDING ones first)."""
+
+    limit/offset 支持分页；since/until 可选，按 created_at 筛选时间范围
+    （until 用 < 而非 <=，前端传"选中截止日+1天"实现"含当天"的直觉）。
+    不传这些参数时行为与此前完全一致（最新 100 条），不影响 useLive() 里
+    依赖这个接口做实时订单跟踪的既有调用方。
+
+    List current user's orders (voiding stale PENDING ones first).
+
+    limit/offset support pagination; since/until optionally filter by
+    created_at (until uses < rather than <=; the frontend sends "selected end
+    date + 1 day" to make the picked end date feel inclusive). Behavior is
+    unchanged (latest 100) when none of these are passed, so the live-order
+    tracking that already calls this endpoint via useLive() isn't affected.
+    """
     stale = [
         o
         for o in db.query(Order)
@@ -215,14 +232,16 @@ def list_orders(
         for o in stale:
             void_stale_order(o)
         db.commit()
-    rows = (
-        db.query(Order)
-        .filter(Order.user_id == user.id)
-        .order_by(Order.created_at.desc())
-        .limit(100)
-        .all()
-    )
-    return {"orders": [_serialize(o) for o in rows]}
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+    query = db.query(Order).filter(Order.user_id == user.id)
+    if since is not None:
+        query = query.filter(Order.created_at >= since)
+    if until is not None:
+        query = query.filter(Order.created_at < until)
+    total = query.count()
+    rows = query.order_by(Order.created_at.desc()).offset(offset).limit(limit).all()
+    return {"orders": [_serialize(o) for o in rows], "total": total}
 
 
 @router.post("/{order_id}/cancel", response_model=OrderOut)
@@ -274,6 +293,50 @@ def order_winrate(
     user themself.
     """
     return compute_personal_winrate(db, user.id)
+
+
+@router.get("/closed-trades", response_model=dict)
+def list_closed_trades(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """当前用户的真实平仓成交明细，最新在前。只有自己能看到自己的。
+
+    与个人跟单胜率同一份数据源（ClosedTrade），但这里给出逐笔记录而非聚合
+    数字——"透明度"承诺不能只停在一个百分比上，用户应该能看到构成这个百分比
+    的每一笔真实成交。
+
+    The current user's real closed-trade legs, newest first. Visible only to
+    the user themself.
+
+    Same underlying data as the personal win rate (ClosedTrade), but exposed
+    as individual records instead of an aggregate — the "transparency"
+    promise shouldn't stop at a single percentage; the user should be able to
+    see every real fill that number is built from.
+    """
+    rows = (
+        db.query(ClosedTrade)
+        .filter(ClosedTrade.user_id == user.id)
+        .order_by(ClosedTrade.closed_at.desc())
+        .limit(200)
+        .all()
+    )
+    return {
+        "trades": [
+            {
+                "id": r.id,
+                "symbol": r.symbol,
+                "side": r.side,
+                "closeVolume": r.close_volume,
+                "closePrice": r.close_price,
+                "profit": r.profit,
+                "positionTicket": r.position_ticket,
+                "dealTicket": r.deal_ticket,
+                "closedAt": r.closed_at.isoformat() if r.closed_at else None,
+            }
+            for r in rows
+        ]
+    }
 
 
 def _assert_account_owned(db: Session, user_id: str, mt5_login: str | None) -> None:

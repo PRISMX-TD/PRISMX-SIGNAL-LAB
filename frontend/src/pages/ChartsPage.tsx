@@ -129,8 +129,12 @@ export default function ChartsPage() {
     takeProfit: number | null,
   ) => {
     if (!orderSide) return
+    // 不在这里关弹窗：ChartOrderModal 自己会展示"已提交"回执卡片，再调用
+    // onCancel 关闭；立刻关闭会让回执卡片还没渲染出来就被卸载。
+    // Don't close the modal here: ChartOrderModal shows its own "submitted"
+    // receipt card and calls onCancel itself; closing immediately would
+    // unmount it before the receipt card ever gets to render.
     await placeManualOrder(symbol, orderSide, volume, mt5Login, stopLoss, takeProfit)
-    setOrderSide(null)
   }
 
   // 云端偏好加载完成后覆盖本地初始值 / override initial values when cloud prefs arrive
@@ -176,13 +180,18 @@ export default function ChartsPage() {
         borderColor: 'rgba(139, 70, 255, 0.15)',
         timeVisible: true,
         secondsVisible: false,
-        // 固定按马来西亚时区展示，与旧 TradingView widget 的观感保持一致
+        // 固定按 UTC 展示，并在工具条标注"UTC"徽标(见下方 JSX)。此前固定按
+        // 马来西亚时区却完全不标注，非马来西亚用户对着 K 线时间轴会以为看的
+        // 是自己当地时间，读错开盘/信号触发的实际时刻。
         // (喂价器已把时间戳归一化到真 UTC，见 CHART_SELFHOST_PLAN.md §3.1.1)
-        // Fixed to Malaysia time, matching the old TradingView widget's look
+        // Fixed to UTC, with a "UTC" badge in the toolbar below. This used to
+        // be hardcoded to Malaysia time with zero indication — a non-Malaysia
+        // user reading the candle time axis would assume it was their own
+        // local time and misread when things actually happened.
         // (the feeder normalizes timestamps to true UTC — see plan §3.1.1)
         tickMarkFormatter: (time: UTCTimestamp) =>
           new Intl.DateTimeFormat('en-GB', {
-            timeZone: 'Asia/Kuala_Lumpur',
+            timeZone: 'UTC',
             month: '2-digit',
             day: '2-digit',
             hour: '2-digit',
@@ -347,6 +356,10 @@ export default function ChartsPage() {
             </button>
           ))}
         </div>
+
+        <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-medium text-slate-400" title={t('charts.utcHint')}>
+          {t('charts.utcBadge')}
+        </span>
 
         {stale && (
           <span className="rounded-md bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-400">

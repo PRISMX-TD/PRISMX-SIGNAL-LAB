@@ -19,10 +19,16 @@ from app.core.security import authenticate_api_token, hash_api_token
 from app.models import ClosedTrade, MT5Account, Order, Signal, User
 from app.routers.orders import is_stale_pending, order_update_payload, void_stale_order
 from app.schemas import LOGIN_PATTERN, SUFFIX_PATTERN, AccountSuffixRequest, MT5AccountOut
-from app.services.auto_manage import evaluate_positions
+from app.services.auto_manage import AUTO_PREFIX, evaluate_positions
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user, is_account_online
 from app.services.plans import max_mt5_accounts
+from app.services.push_dispatch import (
+    EVENT_BRIDGE_OFFLINE,
+    EVENT_ORDER_FILLED,
+    EVENT_ORDER_REJECTED,
+    dispatch_event_push_async,
+)
 from app.services.settings_store import get_broker_settings, server_matches_broker
 from app.services.trade_performance import mark_positions_seen
 
@@ -40,11 +46,31 @@ _last_pushed_online: dict[str, set[str]] = {}
 
 
 async def _push_accounts_status_if_changed(user_id: str, online: set[str]) -> None:
-    """仅在在线账号集合发生变化时推送 ACCOUNTS_STATUS。
-    Push ACCOUNTS_STATUS only when the online-login set actually changed."""
-    if _last_pushed_online.get(user_id) == online:
+    """仅在在线账号集合发生变化时推送 ACCOUNTS_STATUS；若从"有账号在线"变为
+    "全部离线"，额外触发一次 bridge_offline 事件通知（若用户已开启）。
+
+    Push ACCOUNTS_STATUS only when the online-login set actually changed; if
+    the transition is from "some accounts online" to "all offline", also fire
+    a bridge_offline event notification (if the user has it enabled).
+    """
+    previous = _last_pushed_online.get(user_id)
+    if previous == online:
         return
     _last_pushed_online[user_id] = online
+    # 只有"以前确实在线过、现在变空"才算真正的断线；previous 为 None 只是
+    # 第一次观测到这个用户（比如刚启动服务、或用户从未连接过），不是真的
+    # 从在线掉线，不该触发"离线"提醒。
+    # Only "was previously online, now empty" counts as a real disconnect;
+    # previous being None just means this is the first observation of this
+    # user (e.g. right after the service starts, or they've never connected)
+    # — not an actual online-to-offline transition, so it shouldn't fire an
+    # "offline" alert.
+    if previous and not online:
+        await dispatch_event_push_async(
+            user_id, EVENT_BRIDGE_OFFLINE,
+            "PRISMX Bridge 已离线",
+            "检测到你的 MT5 桥接程序已断开连接，新信号将无法自动下单执行。",
+        )
     await manager.push_to_client(
         user_id,
         {"type": "ACCOUNTS_STATUS", "data": {"onlineLogins": sorted(online)}},
@@ -374,6 +400,27 @@ async def bridge_result(
     db.refresh(order)
 
     await manager.push_to_client(user.id, order_update_payload(order))
+
+    # Web Push 通知（若用户开启了对应事件类型）：跳过自动仓管生成的指令——
+    # 那类指令已经在触发那一刻（auto_manage.evaluate_positions）单独推送过
+    # 一次"自动仓管触发"通知，回执阶段不用再重复通知同一个动作。
+    # Web Push notification (if the user has this event type enabled): skip
+    # commands auto-management generated — those already got an
+    # "auto-manage triggered" push at the moment the rule fired
+    # (auto_manage.evaluate_positions), no need to notify the same action twice.
+    if not order.client_order_id.startswith(AUTO_PREFIX):
+        if order.status == "FILLED":
+            await dispatch_event_push_async(
+                user.id, EVENT_ORDER_FILLED,
+                f"订单已成交 {order.symbol}",
+                f"{order.side} {order.volume} 手 @ {order.filled_price}",
+            )
+        else:
+            await dispatch_event_push_async(
+                user.id, EVENT_ORDER_REJECTED,
+                f"订单被拒绝 {order.symbol}",
+                order.message or "-",
+            )
     return {"ok": True}
 
 

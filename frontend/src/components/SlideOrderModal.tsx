@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { MT5Account, Quote, Signal } from '../api/types'
-import { calcCountdown, contractSize, suggestVolumeByRisk } from '../api/utils'
+import { calcCountdown, contractSize, localizeApiError, suggestVolumeByRisk, usdMarginBasis } from '../api/utils'
 import { SIGNAL_LIFESPAN_MS } from './signals/SignalView'
 import { useNow } from './signals/hooks'
 
@@ -96,7 +96,7 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
     if (slNum == null || Number.isNaN(slNum) || entryRef == null) return
     const distance = Math.abs(entryRef - slNum)
     const pct = parseFloat(riskPct) || 0
-    const suggested = suggestVolumeByRisk(signal.symbol, selected?.equity, pct, distance)
+    const suggested = suggestVolumeByRisk(signal.symbol, selected?.equity, pct, distance, entryRef)
     if (suggested != null) setVolume(suggested.toFixed(2))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- entryRef/slNum derived each render; deps below cover real inputs
   }, [sizeMode, riskPct, sl, selected?.equity, signal.symbol, quote?.bid, quote?.ask])
@@ -206,7 +206,7 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
       setTimeout(() => onCancel(), 2000)
     } catch (err) {
       setReceipt('error')
-      setError(err instanceof Error ? err.message : 'error')
+      setError(err instanceof Error ? localizeApiError(err.message) : 'error')
       setTimeout(() => {
         setReceipt(null)
         setSubmitting(false)
@@ -232,13 +232,29 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
   const fmtMoney = (n?: number | null) =>
     n == null ? '-' : n.toLocaleString(undefined, { maximumFractionDigits: 2 })
 
-  // 粗估保证金占用：手数 × 品种合约规模 / 杠杆，仅作量级提示
-  // Rough margin estimate: lots × the symbol's contract size / leverage, indicative only
+  // 粗估保证金占用（假定账户货币为 USD）：'quote' 基准品种(如 XAUUSD/EURUSD)
+  // 是 手数×合约规模×现价/杠杆——此前漏乘现价，黄金/白银/加密货币等的估算
+  // 会偏小上千倍；'base' 基准品种(如 USDJPY)现价已经内含在合约规模的美元
+  // 价值里，不应再乘现价。基准未知的交叉盘(如 EURGBP)没有可靠现价能单独
+  // 换算成美元，返回 null 而不是给一个算错的数字。
+  // Rough margin estimate (assumes a USD account currency): 'quote'-basis
+  // symbols (XAUUSD/EURUSD, ...) need lots × contract size × current price /
+  // leverage — this used to omit the price factor, understating gold/silver/
+  // crypto estimates by up to thousands of times; 'base'-basis symbols
+  // (USDJPY, ...) already have their USD notional value in the contract size
+  // alone and must NOT be multiplied by price again. Cross pairs with an
+  // unknown basis (EURGBP, ...) have no single reliable price to convert to
+  // USD with, so this returns null rather than a plausible-looking wrong number.
   const estMargin = (() => {
     const vol = parseFloat(volume)
     const lev = selected?.leverage
     if (!vol || vol <= 0 || !lev || lev <= 0) return null
-    return (vol * contractSize(signal.symbol)) / lev
+    const basis = usdMarginBasis(signal.symbol)
+    if (basis == null) return null
+    const size = contractSize(signal.symbol)
+    if (basis === 'base') return (vol * size) / lev
+    if (!entryRef || entryRef <= 0) return null
+    return (vol * size * entryRef) / lev
   })()
 
   return (
@@ -383,6 +399,12 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
               <span className="text-xs text-amber-400/90">{t('order.riskNeedsSl')}</span>
             </div>
           )}
+          {sizeMode === 'risk' && slNum != null && usdMarginBasis(signal.symbol) == null && (
+            <div className="slide-row">
+              <span className="k" />
+              <span className="text-xs text-amber-400/90">{t('order.riskUnsupportedPair')}</span>
+            </div>
+          )}
           <div className="slide-row">
             <span className="k">{t('signals.colSl')} / {t('signals.colTp')}</span>
             <div className="flex items-center gap-2">
@@ -430,7 +452,15 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
           <div className="receipt-card">
             <div className={`receipt-line ${receipt === 'ok' ? 'ok' : 'wait'}`}>
               {receipt === 'waiting' && <><span className="spinner" />{t('order.submitting')}...</>}
-              {receipt === 'ok' && <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>{t('order.filled', { price: '' })}</>}
+              {/* 提交成功那一刻订单几乎总是还是 PENDING（真正成交要等桥接轮询执行+回执），
+                  之前这里显示"已成交"是假的；改成如实的"已提交，等待成交回执"，
+                  真正的成交/拒绝结果由页面级 toast（监听 WS ORDER_UPDATE）稍后报告。
+                  The order is almost always still PENDING the instant submit resolves
+                  (the real fill happens later via the bridge's poll+execute+ack); this
+                  used to claim "filled", which wasn't true. Show the honest "submitted,
+                  awaiting receipt" instead — the real fill/reject result is reported a
+                  moment later by the page-level toast that watches WS ORDER_UPDATE. */}
+              {receipt === 'ok' && <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>{t('order.submitted')}</>}
               {receipt === 'error' && <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round"><circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/></svg>{error || t('order.rejected', { msg: '' })}</>}
             </div>
           </div>

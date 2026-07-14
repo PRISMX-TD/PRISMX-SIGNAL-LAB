@@ -1,5 +1,5 @@
 // 信号面板共享常量与纯函数 / shared constants & pure helpers for the signals panel
-import type { Signal, Trend } from '../../api/types'
+import type { Signal, SignalResult, Trend } from '../../api/types'
 import { calcCountdown } from '../../api/utils'
 
 // 信号总有效时长，与后端 expire_at = created_at + 10min 一致 / lifespan matches backend
@@ -40,6 +40,30 @@ export function rrTone(rr: number | null): string {
   if (rr >= 2) return 'text-up'
   if (rr >= 1) return 'text-prism-300'
   return 'text-down'
+}
+
+// 信号客观胜负的颜色与文案：FREE 用户只能看到已过期的信号，展示它最终判定
+// 的输赢结果（而不是让"下单"按钮点开才告知过期）。
+// Color and label for a signal's objective win/loss: FREE users only ever
+// see already-expired signals, so show the final judged result instead of
+// only revealing "it's expired" once they tap Trade.
+export function resultTone(result: SignalResult): string {
+  if (result === 'HIT_TP') return 'text-up'
+  if (result === 'HIT_SL') return 'text-down'
+  return 'text-slate-400'
+}
+
+export function resultLabel(result: SignalResult, t: (key: string) => string): string {
+  switch (result) {
+    case 'HIT_TP':
+      return t('signals.resultHitTp')
+    case 'HIT_SL':
+      return t('signals.resultHitSl')
+    case 'STALE':
+      return t('signals.resultStale')
+    default:
+      return t('signals.resultPending')
+  }
 }
 
 // focus 状态的视觉映射 / visual mapping for each focus state

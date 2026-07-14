@@ -104,7 +104,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const refreshAll = useCallback(async () => {
     const [sig, ord, acc, trd] = await Promise.all([
       signalApi.list().catch(() => ({ signals: [] })),
-      orderApi.list().catch(() => ({ orders: [] })),
+      orderApi.list().catch(() => ({ orders: [], total: 0 })),
       accountApi.list().catch(() => ({ accounts: [], accountLimit: null, brokerLock: null })),
       trendApi.list().catch(() => ({ trends: [] })),
     ])
@@ -123,13 +123,26 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   // 兜底轮询：每 5 秒刷新一次账号在线状态，防止 WebSocket 推送丢失导致状态卡住。
   // 配合后端 ~7s 在线窗口与离线检测任务，断线可在数秒内置灰。
+  // 页面在后台（切到别的 App、手机息屏）时跳过，避免无意义耗电；切回前台
+  // 立即补一次，不用等最多 5 秒才刷新出最新状态。
   // Fallback polling: refresh account online status every 5s in case a WS push
-  // is missed, so a disconnect greys out within seconds alongside the backend monitor.
+  // is missed, so a disconnect greys out within seconds alongside the backend
+  // monitor. Skipped while the page is backgrounded (switched app, screen
+  // locked) to avoid pointless battery drain; refetches immediately on
+  // returning to the foreground instead of waiting up to 5s for the next tick.
   useEffect(() => {
-    const timer = window.setInterval(() => {
+    const poll = () => {
       accountApi.list().then((r) => setAccounts((prev) => keepIfEqual(prev, r.accounts))).catch(() => {})
+    }
+    const timer = window.setInterval(() => {
+      if (!document.hidden) poll()
     }, 5000)
-    return () => window.clearInterval(timer)
+    const onVisible = () => { if (!document.hidden) poll() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [])
 
   const handleMessage = useCallback((msg: WSMessage) => {

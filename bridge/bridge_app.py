@@ -19,6 +19,7 @@ import threading
 import time
 import tkinter as tk
 import webbrowser
+import winreg
 from ctypes import wintypes
 from logging.handlers import RotatingFileHandler
 from tkinter import messagebox, ttk
@@ -26,8 +27,20 @@ from urllib import error, request
 
 from mt5_worker import poll_terminal
 
+# 系统托盘：可选依赖，缺失时静默降级为"点 X 直接退出"的旧行为，不影响主功能。
+# System tray: optional dependency; missing it silently falls back to the old
+# "X quits immediately" behavior instead of breaking the app.
+try:
+    import pystray
+    from PIL import Image as PILImage
+    _TRAY_AVAILABLE = True
+except Exception:
+    pystray = None
+    PILImage = None
+    _TRAY_AVAILABLE = False
+
 # ---------- 版本 / Version ----------
-APP_VERSION = "1.3.5"
+APP_VERSION = "1.3.7"
 
 # ---------- 更新检测 / Update check ----------
 # 通过 GitHub Releases 检查是否有更新的安装包版本。
@@ -190,6 +203,49 @@ def save_config(cfg: dict) -> None:
             json.dump(out, f)
     except Exception:
         pass
+
+
+# ---------- 开机自启 / Start with Windows ----------
+# 只对打包后的 exe 生效（注册表指向可执行文件路径）；源码态运行没有单一可
+# 执行文件可指向，跳过。用当前用户级 Run 键，不需要管理员权限。
+# Only meaningful for the packaged exe (the registry entry points at an
+# executable path); running from source has no single file to point at, so
+# this is skipped. Uses the per-user Run key, no admin rights required.
+_AUTOSTART_KEY_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
+_AUTOSTART_VALUE_NAME = "PRISMXBridge"
+
+
+def autostart_supported() -> bool:
+    """是否处于可以设置开机自启的环境（打包态）/ whether autostart can be offered (frozen build)."""
+    return bool(getattr(sys, "frozen", False))
+
+
+def is_autostart_enabled() -> bool:
+    """查询开机自启是否已启用 / check whether autostart is currently enabled."""
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_KEY_PATH, 0, winreg.KEY_READ) as key:
+            value, _ = winreg.QueryValueEx(key, _AUTOSTART_VALUE_NAME)
+            return bool(value)
+    except OSError:
+        return False
+
+
+def set_autostart_enabled(enabled: bool) -> bool:
+    """启用/关闭开机自启；返回是否成功 / enable or disable autostart; returns success."""
+    if enabled and not autostart_supported():
+        return False
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_KEY_PATH, 0, winreg.KEY_WRITE) as key:
+            if enabled:
+                winreg.SetValueEx(key, _AUTOSTART_VALUE_NAME, 0, winreg.REG_SZ, f'"{sys.executable}"')
+            else:
+                try:
+                    winreg.DeleteValue(key, _AUTOSTART_VALUE_NAME)
+                except FileNotFoundError:
+                    pass
+        return True
+    except OSError:
+        return False
 
 
 def _load_executed_cache() -> tuple[dict[str, dict], dict[str, float]]:
@@ -396,6 +452,7 @@ class BridgeEngine:
 
         # 2) 上报账号 + 拉取待执行指令 / report accounts + fetch commands
         commands = []
+        warning = None
         try:
             resp = _post_json(
                 f"{self.backend}/api/bridge/poll",
@@ -410,6 +467,35 @@ class BridgeEngine:
             else:
                 commands = [c for c in commands if isinstance(c, dict)]
             self.last_error = None
+            # 被拒绝入库的账号：此前这两个字段完全没读取，用户唯一能看到的
+            # 现象是本机绿灯"已连接"、网页「连接 MT5」页却什么账户都没有,
+            # 却没有任何解释。把拒绝原因摊在状态栏上，而不是让用户自己去猜
+            # 是不是产品坏了。
+            # Accounts the backend rejected: these two fields used to be
+            # completely unread. The only symptom a user could see was this
+            # app showing a green "connected" light while the web Bind page
+            # showed nothing — with zero explanation. Surface the reason in
+            # the status line instead of leaving the user to guess the
+            # product is broken.
+            broker_rejected = [
+                str(x) for x in (resp.get("brokerRejected") or []) if x
+            ]
+            limit_exceeded = [
+                str(x) for x in (resp.get("accountLimitExceeded") or []) if x
+            ]
+            parts = []
+            if broker_rejected:
+                parts.append(
+                    f"{len(broker_rejected)} 个账号非合作券商被拒 ({', '.join(broker_rejected)})"
+                    f" / not a partner broker"
+                )
+            if limit_exceeded:
+                parts.append(
+                    f"{len(limit_exceeded)} 个账号超出套餐额度 ({', '.join(limit_exceeded)})"
+                    f" / over your plan's account limit"
+                )
+            if parts:
+                warning = "；".join(parts) + "，详见网页「连接 MT5」页 / see the web Bind page for details"
         except error.HTTPError as e:
             self.last_error = f"后端拒绝 HTTP {e.code}: {e.reason}（检查 Token）"
             self.on_status(accounts, self.last_error)
@@ -483,7 +569,7 @@ class BridgeEngine:
                     self._report_result(r)
 
         # 6) 通知 GUI 刷新 / notify GUI to refresh
-        self.on_status(accounts, self.last_error)
+        self.on_status(accounts, self.last_error, warning)
 
     def _remember_executed(self, coid: str, result: dict) -> None:
         """记录一条已执行结果并落盘，同时清理超龄条目。
@@ -593,6 +679,7 @@ class BridgeGUI:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.engine: BridgeEngine | None = None
+        self.tray_icon = None  # pystray.Icon | None，惰性创建 / created lazily
         cfg = load_config()
         self.saved_token = cfg.get("token", "")
 
@@ -606,6 +693,14 @@ class BridgeGUI:
         self._build_widgets()
         # 启动后在后台检查更新（不阻塞 UI）/ check for updates in background after launch
         self._start_update_check()
+        # 记住 token 却要求每次开机手动点「连接」，对一个理应 7×24 挂机的
+        # 程序来说很烦——本地存过 token 就自动连接，用户仍可随时手动断开。
+        # Remembering the token but still requiring a manual "Connect" click
+        # every launch is annoying for an app meant to run around the clock —
+        # auto-connect whenever a token is already saved; the user can still
+        # disconnect manually at any time.
+        if self.saved_token:
+            self.root.after(300, self._on_connect)
 
     def _set_app_icon(self, root: tk.Tk):
         """设置窗口/任务栏图标 / set the window & taskbar icon."""
@@ -827,6 +922,20 @@ class BridgeGUI:
         self.disconnect_btn["cv"].pack(side="left", padx=(16, 0))
         self._set_button(self.disconnect_btn, False)
 
+        # 开机自启开关：只在打包态展示（源码运行没有单一可执行文件可指向）。
+        # Autostart toggle: only shown in the packaged build (source-run has no
+        # single executable path to register).
+        if autostart_supported():
+            self.autostart_var = tk.BooleanVar(value=is_autostart_enabled())
+            autostart_cb = tk.Checkbutton(
+                conn, text="开机自启动 / Start with Windows",
+                variable=self.autostart_var, command=self._on_toggle_autostart,
+                bg=self.CARD, fg=self.MUTED, activebackground=self.CARD, activeforeground=self.TEXT,
+                selectcolor=self.FIELD, font=("Segoe UI", 9), bd=0, highlightthickness=0,
+                anchor="w", cursor="hand2",
+            )
+            autostart_cb.pack(fill="x", pady=(10, 0))
+
         # 状态指示灯 + 文案 / status dot + text
         status_row = tk.Frame(self.root, bg=self.BG)
         status_row.pack(fill="x", padx=32, pady=(12, 8))
@@ -923,6 +1032,19 @@ class BridgeGUI:
         self.token_entry.config(show="" if self._token_shown else "•")
         self.eye_btn["cv"].itemconfig(self.eye_btn["label"], text="隐藏" if self._token_shown else "显示")
 
+    def _on_toggle_autostart(self):
+        """勾选/取消开机自启；失败则回滚勾选框并提示。
+        Toggle autostart; roll back the checkbox and warn on failure."""
+        wanted = self.autostart_var.get()
+        ok = set_autostart_enabled(wanted)
+        if not ok:
+            self.autostart_var.set(not wanted)
+            messagebox.showwarning(
+                "PRISMX Bridge",
+                "设置开机自启失败，请检查权限后重试。\n"
+                "Failed to update the Windows startup setting; check permissions and try again.",
+            )
+
     def _on_connect(self):
         token = self.token_var.get().strip()
         # 后端地址固定为线上地址，不再从用户输入或旧配置读取。
@@ -954,11 +1076,11 @@ class BridgeGUI:
         for row in self.tree.get_children():
             self.tree.delete(row)
 
-    def _on_status(self, accounts: list, last_error: str | None):
+    def _on_status(self, accounts: list, last_error: str | None, warning: str | None = None):
         """后台线程回调，切回主线程更新界面 / marshal back to the UI thread."""
-        self.root.after(0, lambda: self._render(accounts, last_error))
+        self.root.after(0, lambda: self._render(accounts, last_error, warning))
 
-    def _render(self, accounts: list, last_error: str | None):
+    def _render(self, accounts: list, last_error: str | None, warning: str | None = None):
         for row in self.tree.get_children():
             self.tree.delete(row)
         for a in accounts:
@@ -974,15 +1096,92 @@ class BridgeGUI:
             self._draw_dot(self.ERR)
             self.status_var.set(f"已连接 · {len(accounts)} 个账号 · 错误: {last_error}")
         elif accounts:
-            self._draw_dot(self.OK)
-            self.status_var.set(f"已连接 · 在线账号 {len(accounts)} 个 / {len(accounts)} account(s) online")
+            # 有账号被后端拒绝（非合作券商/超出套餐额度）：显示为警告而非绿色
+            # 正常态，避免用户误以为一切正常。
+            # Some accounts were rejected by the backend (wrong broker / over
+            # the plan's limit): show as a warning rather than plain green, so
+            # the user doesn't assume everything is fine.
+            self._draw_dot(self.WARN if warning else self.OK)
+            base = f"已连接 · 在线账号 {len(accounts)} 个 / {len(accounts)} account(s) online"
+            self.status_var.set(f"{base} · ⚠ {warning}" if warning else base)
         else:
             self._draw_dot(self.WARN)
             self.status_var.set("已连接 · 未检测到已登录的 MT5 终端 / No logged-in MT5 terminal found")
 
     def on_close(self):
-        # 连接中关闭时二次确认：退出后无法接收/执行交易。
-        # Confirm on close while connected: quitting stops receiving/executing trades.
+        """窗口 X 按钮：有托盘就最小化到托盘,继续在后台接收/执行交易；
+        没有托盘依赖时退回旧行为(直接走真正退出的确认流程)。
+
+        Window's X button: minimize to the system tray when available so
+        trading keeps running in the background; without the tray dependency,
+        fall back to the old behavior (go straight to the real-exit confirm).
+        """
+        if _TRAY_AVAILABLE:
+            self._minimize_to_tray()
+        else:
+            self._do_exit()
+
+    def _minimize_to_tray(self):
+        """隐藏主窗口，惰性创建并显示托盘图标 / hide the window; lazily create & show the tray icon."""
+        self.root.withdraw()
+        first_time = self.tray_icon is None
+        if self.tray_icon is None:
+            self.tray_icon = self._build_tray_icon()
+            threading.Thread(target=self.tray_icon.run, daemon=True).start()
+        if first_time:
+            # 只在第一次最小化时提示一次，避免用户以为点 X 真的退出了程序。
+            # Only notify on the first minimize, so the user doesn't think X
+            # actually quit the app.
+            try:
+                self.tray_icon.notify(
+                    "仍在后台运行，交易照常执行 / Still running in the background",
+                    "PRISMX Bridge",
+                )
+            except Exception:
+                pass
+
+    def _build_tray_icon(self):
+        """构造托盘图标 + 右键菜单（显示窗口 / 退出）。
+        Build the tray icon + right-click menu (Show window / Exit)."""
+        try:
+            ico_path = resource_path("app.ico")
+            image = PILImage.open(ico_path) if os.path.exists(ico_path) else PILImage.new("RGB", (32, 32), "#8b46ff")
+        except Exception:
+            image = PILImage.new("RGB", (32, 32), "#8b46ff")
+        menu = pystray.Menu(
+            pystray.MenuItem("显示窗口 / Show window", self._tray_show, default=True),
+            pystray.MenuItem("退出 / Exit", self._tray_exit),
+        )
+        return pystray.Icon("prismx_bridge", image, "PRISMX Bridge", menu)
+
+    def _tray_show(self, icon=None, item=None):
+        # pystray 的回调跑在它自己的线程上，切回 tkinter 主线程再动窗口。
+        # pystray callbacks run on its own thread; marshal back to the tkinter
+        # main thread before touching the window.
+        self.root.after(0, self._restore_window)
+
+    def _restore_window(self):
+        if self.tray_icon is not None:
+            self.tray_icon.stop()
+            self.tray_icon = None
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
+    def _tray_exit(self, icon=None, item=None):
+        self.root.after(0, self._do_exit)
+
+    def _do_exit(self):
+        """真正退出：连接中二次确认，停引擎、收托盘、关窗口。
+        The real exit: confirm while connected, stop the engine, tear down
+        the tray icon, close the window."""
+        # 从托盘发起退出时窗口是隐藏的，askyesno 弹窗在这种状态下仍能正常
+        # 显示在最前，但先取消隐藏更保险，避免弹窗被父窗口挡住/找不到。
+        # Exiting from the tray leaves the window hidden; askyesno still shows
+        # up fine, but un-hiding first is safer so the dialog isn't hidden
+        # behind/lost relative to its (invisible) parent.
+        if self.root.state() == "withdrawn":
+            self.root.deiconify()
         if self.engine is not None:
             ok = messagebox.askyesno(
                 "PRISMX Bridge",
@@ -995,6 +1194,8 @@ class BridgeGUI:
                 return
             self.engine.stop()
         logger.info("应用退出 / app closed")
+        if self.tray_icon is not None:
+            self.tray_icon.stop()
         self.root.destroy()
 
 

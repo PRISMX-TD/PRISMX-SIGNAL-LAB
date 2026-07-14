@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { MT5Account, Quote } from '../api/types'
-import { contractSize, suggestVolumeByRisk } from '../api/utils'
+import { contractSize, localizeApiError, suggestVolumeByRisk, usdMarginBasis } from '../api/utils'
 
 interface Props {
   symbol: string
@@ -99,7 +99,7 @@ export default function ChartOrderModal({ symbol, side, accounts, quote, refPric
     if (slNum == null || Number.isNaN(slNum) || entryRef == null) return
     const distance = Math.abs(entryRef - slNum)
     const pct = parseFloat(riskPct) || 0
-    const suggested = suggestVolumeByRisk(symbol, selected?.equity, pct, distance)
+    const suggested = suggestVolumeByRisk(symbol, selected?.equity, pct, distance, entryRef)
     if (suggested != null) setVolume(suggested.toFixed(2))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sizeMode, riskPct, sl, selected?.equity, symbol, quote?.bid, quote?.ask, refPrice])
@@ -198,7 +198,7 @@ export default function ChartOrderModal({ symbol, side, accounts, quote, refPric
       setTimeout(() => onCancel(), 2000)
     } catch (err) {
       setReceipt('error')
-      setError(err instanceof Error ? err.message : 'error')
+      setError(err instanceof Error ? localizeApiError(err.message) : 'error')
       setTimeout(() => {
         setReceipt(null)
         setSubmitting(false)
@@ -224,11 +224,18 @@ export default function ChartOrderModal({ symbol, side, accounts, quote, refPric
   const fmtMoney = (n?: number | null) => (n == null ? '-' : n.toLocaleString(undefined, { maximumFractionDigits: 2 }))
   const fmtPrice = (n?: number | null) => (n == null ? '-' : n.toFixed(digits))
 
+  // 保证金估算公式说明见 SlideOrderModal.tsx 同名注释
+  // see SlideOrderModal.tsx's matching comment for the formula rationale
   const estMargin = (() => {
     const vol = parseFloat(volume)
     const lev = selected?.leverage
     if (!vol || vol <= 0 || !lev || lev <= 0) return null
-    return (vol * contractSize(symbol)) / lev
+    const basis = usdMarginBasis(symbol)
+    if (basis == null) return null
+    const size = contractSize(symbol)
+    if (basis === 'base') return (vol * size) / lev
+    if (!entryRef || entryRef <= 0) return null
+    return (vol * size * entryRef) / lev
   })()
 
   return (
@@ -357,6 +364,12 @@ export default function ChartOrderModal({ symbol, side, accounts, quote, refPric
             <div className="slide-row">
               <span className="k" />
               <span className="text-xs text-amber-400/90">{t('order.riskNeedsSl')}</span>
+            </div>
+          )}
+          {sizeMode === 'risk' && slNum != null && usdMarginBasis(symbol) == null && (
+            <div className="slide-row">
+              <span className="k" />
+              <span className="text-xs text-amber-400/90">{t('order.riskUnsupportedPair')}</span>
             </div>
           )}
           <div className="slide-row">

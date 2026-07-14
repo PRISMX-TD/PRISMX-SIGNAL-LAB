@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { orderApi } from '../../api/client'
-import { clientOrderId } from '../../api/utils'
+import { clientOrderId, localizeApiError } from '../../api/utils'
 import { useLive } from '../../store/live'
 import type { Signal } from '../../api/types'
 import {
@@ -72,7 +72,7 @@ export function useOrderPlacement() {
     } else if (o.status === 'REJECTED' || o.status === 'FAILED') {
       pendingId.current = null
       if (fallbackTimer.current) window.clearTimeout(fallbackTimer.current)
-      showToast(t('order.rejected', { msg: o.message || '-' }), 'error')
+      showToast(t('order.rejected', { msg: o.message ? localizeApiError(o.message) : '-' }), 'error')
     }
   }, [orders, showToast, t])
 
@@ -96,7 +96,7 @@ export function useOrderPlacement() {
         return
       }
       if (placed.status === 'REJECTED' || placed.status === 'FAILED') {
-        showToast(t('order.rejected', { msg: placed.message || '-' }), 'error')
+        showToast(t('order.rejected', { msg: placed.message ? localizeApiError(placed.message) : '-' }), 'error')
         return
       }
       showToast(t('order.submitted'), 'info', 8000)

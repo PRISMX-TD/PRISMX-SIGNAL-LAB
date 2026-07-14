@@ -13,14 +13,32 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
   const [connected, setConnected] = useState(false)
 
   useEffect(() => {
-    const token = getToken()
-    if (!token) return
+    if (!getToken()) return
 
     let ws: WebSocket | null = null
     let reconnectTimer: number | undefined
     let closed = false
 
     const connect = () => {
+      // 每次(重)连都重新读取 token，而不是在 effect 顶层读一次存进闭包。
+      // 该 effect 只在挂载时跑一次（deps=[]），如果 token 只读一次，页面挂着
+      // 超过 JWT 有效期（1 天）后，即便滑动续期早把 localStorage 里的 token
+      // 换新了，这里重连时仍在用最初那个、此刻已真正过期的 token——鉴权必
+      // 然失败，导致下面的分支永久停止重连，断线横幅却一直显示"正在重连"。
+      // Re-read the token on every (re)connect instead of once at the top of
+      // the effect. This effect only runs once on mount (deps=[]); if the
+      // token were captured once, a page left open past the JWT lifetime
+      // (1 day) would keep reconnecting with that original, now genuinely
+      // expired token — even though sliding renewal has long since swapped in
+      // a fresh one in localStorage. Auth would keep failing, permanently
+      // stopping reconnects below, while the banner kept claiming otherwise.
+      const token = getToken()
+      if (!token) {
+        // 挂载期间登出：没有 token 就不再尝试连接 / signed out while mounted: nothing to connect with
+        closed = true
+        return
+      }
+
       // 优先用 VITE_API_BASE 指向的线上后端；未配置则回退到当前页面 host（开发期走代理）。
       // Prefer the backend from VITE_API_BASE; fall back to current host (dev proxy) when unset.
       let wsBase: string
@@ -42,16 +60,14 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
       ws.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data) as WSMessage
-          // WS 鉴权失败：只停止重连，不强制登出。
-          // WS 仅是实时推送通道，其鉴权失败不应清除登录态——登录态是否失效
-          // 应只由 REST 的 401 决定（见 client.ts）。否则一旦 WS 协议/部署不一致，
-          // 会把用户直接踢回登录页。
-          // WS auth failure: just stop reconnecting; do NOT sign the user out.
-          // The WS is only a push channel; session validity is decided solely by
-          // REST 401s. Otherwise a WS protocol/deploy mismatch would kick the
-          // user back to the login page.
+          // WS 鉴权失败：关闭并交给 onclose 用下一轮读到的新 token 重试，
+          // 不强制登出、也不永久放弃——登录态是否失效只由 REST 的 401 决定
+          // （见 client.ts）。真正登出时上面的"没有 token"分支会停止重连。
+          // WS auth failure: close and let onclose retry with whatever fresh
+          // token the next attempt reads; never sign the user out here and
+          // never give up permanently — session validity is decided solely by
+          // REST 401s. A real logout is caught by the "no token" branch above.
           if (msg.type === 'AUTH_FAIL') {
-            closed = true
             ws?.close()
             return
           }

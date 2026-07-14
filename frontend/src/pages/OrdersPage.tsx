@@ -5,10 +5,11 @@ import { useTranslation } from 'react-i18next'
 import { useAuth } from '../store/auth'
 import { useLive, usePositions } from '../store/live'
 import { orderApi, automationApi } from '../api/client'
-import { fmtTime } from '../api/utils'
-import type { AutoManageSettings, OrderStatus } from '../api/types'
+import { fmtTime, localizeApiError } from '../api/utils'
+import type { AutoManageSettings, Order, OrderStatus } from '../api/types'
 import PositionCard from '../components/PositionCard'
 import PersonalWinRateCard from '../components/PersonalWinRateCard'
+import ClosedTradesList from '../components/ClosedTradesList'
 
 const statusStyle: Record<OrderStatus, string> = {
   PENDING: 'bg-amber-500/15 text-amber-400',
@@ -34,6 +35,54 @@ export default function OrdersPage() {
   const [sideF, setSideF] = useState<SideFilter>('ALL')
   const [symbolF, setSymbolF] = useState('')
 
+  // 日期筛选 + 分页：此前 /api/orders 恒返回最新 100 条、订单页无翻页能力，
+  // 超过 100 条的历史订单彻底看不到、也没法按日期查旧单。不带日期筛选/停
+  // 在第一页时继续用 useLive().orders（WS 实时更新，秒级新鲜）；一旦设了
+  // 日期或翻到后面几页，改成向后端按 limit/offset/since/until 单独请求，
+  // 不影响实时跟踪用的那份 orders 状态。
+  // Date filter + pagination: /api/orders used to always return the latest
+  // 100, with no way to page through older history or filter by date.
+  // Unfiltered on page 0, this still uses useLive().orders (WS-live, always
+  // fresh); once a date filter is set or the user pages forward, it switches
+  // to a dedicated backend fetch with limit/offset/since/until instead,
+  // without touching the orders state used for real-time tracking.
+  const ORDERS_PAGE_SIZE = 50
+  const [sinceF, setSinceF] = useState('')
+  const [untilF, setUntilF] = useState('')
+  const [page, setPage] = useState(0)
+  const [serverOrders, setServerOrders] = useState<Order[] | null>(null)
+  const [serverTotal, setServerTotal] = useState(0)
+  const [pageLoading, setPageLoading] = useState(false)
+  const dateFilterActive = !!sinceF || !!untilF
+  const usingServerPage = dateFilterActive || page > 0
+
+  useEffect(() => { setPage(0) }, [sinceF, untilF])
+
+  useEffect(() => {
+    if (!usingServerPage) { setServerOrders(null); return }
+    let alive = true
+    setPageLoading(true)
+    // until 传"选中截止日 + 1 天"的零点，让用户选的截止日本身也算在内
+    // (后端用 < 而非 <=)。/ pass "selected end date + 1 day" at midnight so
+    // the picked end date itself is included (backend uses < not <=).
+    const untilParam = untilF
+      ? new Date(new Date(untilF + 'T00:00:00Z').getTime() + 24 * 3600 * 1000).toISOString()
+      : undefined
+    orderApi.list({
+      limit: ORDERS_PAGE_SIZE,
+      offset: page * ORDERS_PAGE_SIZE,
+      since: sinceF ? `${sinceF}T00:00:00Z` : undefined,
+      until: untilParam,
+    })
+      .then((r) => { if (alive) { setServerOrders(r.orders); setServerTotal(r.total) } })
+      .catch(() => { if (alive) { setServerOrders([]); setServerTotal(0) } })
+      .finally(() => { if (alive) setPageLoading(false) })
+    return () => { alive = false }
+  }, [usingServerPage, page, sinceF, untilF])
+
+  const baseOrders = usingServerPage ? (serverOrders ?? []) : orders
+  const totalPages = usingServerPage ? Math.max(1, Math.ceil(serverTotal / ORDERS_PAGE_SIZE)) : 1
+
   // 自动仓位管理 / auto position management
   const [autoCfg, setAutoCfg] = useState<AutoManageSettings | null>(null)
   const [autoSaving, setAutoSaving] = useState(false)
@@ -55,7 +104,7 @@ export default function OrdersPage() {
       setAutoCfg(updated)
       setAutoMsg({ kind: "ok", text: t("account.autoSaved") })
     } catch (err: unknown) {
-      setAutoMsg({ kind: "err", text: err instanceof Error ? err.message : t("account.autoSaveError") })
+      setAutoMsg({ kind: "err", text: err instanceof Error ? localizeApiError(err.message) : t("account.autoSaveError") })
     } finally {
       setAutoSaving(false)
     }
@@ -89,13 +138,13 @@ export default function OrdersPage() {
   }, [positions])
 
   const filteredOrders = useMemo(() => {
-    return orders.filter((o) => {
+    return baseOrders.filter((o) => {
       if (statusF !== 'ALL' && o.status !== statusF) return false
       if (sideF !== 'ALL' && o.side !== sideF) return false
       if (symbolF.trim() && !o.symbol.toLowerCase().includes(symbolF.trim().toLowerCase())) return false
       return true
     })
-  }, [orders, statusF, sideF, symbolF])
+  }, [baseOrders, statusF, sideF, symbolF])
 
   const doCancel = async (id: string) => {
     setCancellingId(id)
@@ -103,7 +152,7 @@ export default function OrdersPage() {
       await orderApi.cancel(id)
       showToast(t('orders.cancelSent'), 'info')
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'error', 'error')
+      showToast(e instanceof Error ? localizeApiError(e.message) : 'error', 'error')
     } finally {
       setCancellingId(null)
     }
@@ -185,6 +234,7 @@ export default function OrdersPage() {
             </div>
           )}
         </div>
+        <p className="mb-3 text-xs text-slate-500">{t('orders.positionsScopeHint')}</p>
         {positions.length === 0 ? (
           <p className="py-4 text-center text-sm text-slate-500">{t('orders.noPositions')}</p>
         ) : (
@@ -199,6 +249,11 @@ export default function OrdersPage() {
       {/* 个人跟单表现 / personal trading performance */}
       <div className="mb-5">
         <PersonalWinRateCard variant="detailed" />
+      </div>
+
+      {/* 已平仓交易明细 / closed trade history */}
+      <div className="mb-5">
+        <ClosedTradesList />
       </div>
 
       {/* 自动仓位管理 / auto position management */}
@@ -374,6 +429,34 @@ export default function OrdersPage() {
             className="w-28 rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-slate-100 outline-none transition focus:border-prism-500"
           />
         </label>
+        <label className="flex items-center gap-2 text-xs">
+          <span className="text-slate-500">{t('orders.filterFrom')}</span>
+          <input
+            type="date"
+            value={sinceF}
+            max={untilF || undefined}
+            onChange={(e) => setSinceF(e.target.value)}
+            className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-slate-100 outline-none transition focus:border-prism-500"
+          />
+        </label>
+        <label className="flex items-center gap-2 text-xs">
+          <span className="text-slate-500">{t('orders.filterTo')}</span>
+          <input
+            type="date"
+            value={untilF}
+            min={sinceF || undefined}
+            onChange={(e) => setUntilF(e.target.value)}
+            className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-slate-100 outline-none transition focus:border-prism-500"
+          />
+        </label>
+        {dateFilterActive && (
+          <button
+            onClick={() => { setSinceF(''); setUntilF('') }}
+            className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-400 transition hover:text-slate-100"
+          >
+            {t('orders.clearDateFilter')}
+          </button>
+        )}
       </div>
 
       {/* 订单表 / orders table */}
@@ -434,7 +517,7 @@ export default function OrdersPage() {
                     <td className="px-4 py-3 font-mono text-slate-400">{o.mt5Ticket ?? '-'}</td>
                     <td className="px-4 py-3 font-mono text-slate-200">{o.filledPrice ?? '-'}</td>
                     <td className="max-w-[200px] truncate px-4 py-3 text-slate-400">
-                      {o.message ?? '-'}
+                      {o.message ? localizeApiError(o.message) : '-'}
                     </td>
                     <td className="px-4 py-3">
                       {o.status === 'PENDING' && (
@@ -501,7 +584,7 @@ export default function OrdersPage() {
                   </div>
 
                   {o.message && (
-                    <p className="mt-2 break-words text-xs text-slate-500">{o.message}</p>
+                    <p className="mt-2 break-words text-xs text-slate-500">{localizeApiError(o.message)}</p>
                   )}
 
                   {o.status === 'PENDING' && (
@@ -518,6 +601,37 @@ export default function OrdersPage() {
             </div>
           </>
         )}
+      </div>
+
+      {/* 分页：不设日期筛选、停在第一页时用 useLive() 的实时 100 条；点「下一页」
+          或设了日期筛选后改成向后端按页请求，可以看到 100 条以外的历史订单。
+          Pagination: on page 0 with no date filter this uses useLive()'s live
+          100; clicking "next" or setting a date filter switches to a paged
+          backend fetch, so history beyond the live 100 becomes reachable. */}
+      <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
+        <span>
+          {pageLoading
+            ? t('common.loading')
+            : usingServerPage
+              ? t('orders.pageInfo', { page: page + 1, totalPages, total: serverTotal })
+              : ''}
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0 || pageLoading}
+            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {t('common.prevPage')}
+          </button>
+          <button
+            onClick={() => setPage((p) => p + 1)}
+            disabled={pageLoading || (usingServerPage && page + 1 >= totalPages)}
+            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {t('common.nextPage')}
+          </button>
+        </div>
       </div>
 
       {toast && (

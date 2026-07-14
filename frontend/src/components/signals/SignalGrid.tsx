@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../../store/prefs'
 import type { Signal, UserPlan } from '../../api/types'
 import { calcRiskReward, calcCountdown, fmtTime, parseTime } from '../../api/utils'
-import { SIGNAL_LIFESPAN_MS, effectiveStatus, rrTone } from './SignalView'
+import { SIGNAL_LIFESPAN_MS, effectiveStatus, resultLabel, resultTone, rrTone } from './SignalView'
 import { useClock } from './hooks'
 
 interface Props {
@@ -146,6 +146,14 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
         {filtered.map((sig) => {
           const oRr = calcRiskReward(sig.symbol, sig.entry, sig.stopLoss, sig.takeProfit)
           const isBuy = sig.side === 'BUY'
+          // FREE 用户是这个网格里唯一会看到 EXPIRED 信号的人(PRO 已在上面被过滤掉)；
+          // 过期信号点「下单」只会在弹窗里被告知已过期，与其让按钮看起来能点却总是
+          // 走空,不如直接禁用并如实标注状态。
+          // FREE users are the only ones who ever see an EXPIRED signal in this grid
+          // (PRO's are filtered out above); tapping "Trade" on one only reveals it's
+          // expired inside the modal. Disable it up front and label it honestly
+          // instead of a button that looks live but always dead-ends.
+          const isExpired = sig.status === 'EXPIRED'
 
           return (
             <div
@@ -182,17 +190,42 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
                 </div>
               </div>
 
-              <div className="mt-3">
-                <Countdown expireAt={sig.expireAt} label={t('signals.focus.remainingTtl')} />
-              </div>
+              {isExpired ? (
+                // FREE 用户唯一能看到的信号就是这些已过期的——让延迟信号本身说话：
+                // 展示它最终判定的输赢，并提示 PRO 用户提前看到了它。数据早就在
+                // 后端返回体里（signal_resolution.py 判定），此前前端完全没用它。
+                // FREE users only ever see already-expired signals — let the delayed
+                // signal make its own case: show its final win/loss and note that PRO
+                // users saw it before it expired. The data was already in the API
+                // response (judged by signal_resolution.py); the frontend just never
+                // used it before.
+                <div className="mt-3 flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
+                  <span className={`text-xs font-bold ${resultTone(sig.result)}`}>
+                    {resultLabel(sig.result, t)}
+                  </span>
+                  <span className="text-[10px] text-slate-500">{t('signals.proSawFirst')}</span>
+                </div>
+              ) : (
+                <div className="mt-3">
+                  <Countdown expireAt={sig.expireAt} label={t('signals.focus.remainingTtl')} />
+                </div>
+              )}
 
               <div className="flex items-center justify-between mt-3">
                 <div className="min-w-0 flex-1">
                   <div className="text-sm text-slate-300 truncate">{sig.indicator || '-'}</div>
                   <div className="text-[10px] text-slate-600 mt-0.5">{fmtTime(sig.createdAt)}</div>
                 </div>
-                <button onClick={() => onTrade(sig)} className="btn btn-primary rounded-xl px-6 py-2 text-[13px] font-semibold shrink-0 ml-3">
-                  {t('signals.trade')}
+                <button
+                  onClick={() => !isExpired && onTrade(sig)}
+                  disabled={isExpired}
+                  className={`btn rounded-xl px-6 py-2 text-[13px] font-semibold shrink-0 ml-3 ${
+                    isExpired
+                      ? 'cursor-not-allowed border border-white/10 bg-white/5 text-slate-500'
+                      : 'btn-primary'
+                  }`}
+                >
+                  {isExpired ? t('signals.expired') : t('signals.trade')}
                 </button>
               </div>
             </div>

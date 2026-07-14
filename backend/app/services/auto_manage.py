@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 
 from app.models import AutoManagedPosition, AutoManageSettings, Order, User
 from app.services.plans import can_auto_manage
+from app.services.push_dispatch import EVENT_AUTO_MANAGE, dispatch_event_push
 
 logger = logging.getLogger("prismx.auto_manage")
 
@@ -149,6 +150,12 @@ def evaluate_positions(db: Session, user_id: str, positions: list) -> int:
 
     now = datetime.now(timezone.utc)
     created = 0
+    # 通知延迟到函数末尾 db.commit() 成功之后才真正发送，避免"规则决定要
+    # 改单但最终提交失败/回滚"时用户却收到了一条其实没发生的通知。
+    # Notifications are deferred until after the final db.commit() succeeds,
+    # so a rule that decided to act but whose commit later failed/rolled back
+    # never results in a push about something that didn't actually happen.
+    pending_pushes: list[tuple[str, str]] = []
     for p in positions:
         ticket = int(p.get("ticket") or 0)
         if ticket not in platform_tickets:
@@ -226,6 +233,11 @@ def evaluate_positions(db: Session, user_id: str, positions: list) -> int:
                 ))
                 created += 1
                 pending_auto_tickets.add(ticket)
+                kind = "保本" if desired == entry else "追踪止损"
+                pending_pushes.append((
+                    f"自动仓位管理：{symbol}",
+                    f"止损已自动移至 {desired:.5f}（{kind}）",
+                ))
 
         # ---- 分批止盈：每仓只执行一次 ----
         # ---- partial take-profit: fires once per position ----
@@ -256,6 +268,10 @@ def evaluate_positions(db: Session, user_id: str, positions: list) -> int:
                 state.partial_done = True
                 created += 1
                 pending_auto_tickets.add(ticket)
+                pending_pushes.append((
+                    f"自动仓位管理：{symbol}",
+                    f"已自动分批止盈 {close_vol} 手",
+                ))
 
     # 清理久未出现的状态行（仓位早已平掉）/ prune rows for long-gone positions
     cutoff = now - timedelta(days=STATE_RETENTION_DAYS)
@@ -267,4 +283,14 @@ def evaluate_positions(db: Session, user_id: str, positions: list) -> int:
     db.commit()
     if created:
         logger.info("auto_manage: user=%s enqueued %d command(s)", user_id, created)
+        # 提交成功后才真正发送通知（见 pending_pushes 声明处的说明）；单条
+        # 推送失败不影响其它推送或本函数的返回值。
+        # Only send notifications after the commit actually succeeds (see the
+        # note where pending_pushes is declared); one failed push must not
+        # affect the others or this function's return value.
+        for title, body in pending_pushes:
+            try:
+                dispatch_event_push(user_id, EVENT_AUTO_MANAGE, title, body)
+            except Exception:
+                logger.exception("auto_manage: push failed (user=%s)", user_id)
     return created

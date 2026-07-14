@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { userApi, notificationApi, pushApi } from "../api/client"
-import { fmtTime, fmtDate } from "../api/utils"
+import { fmtTime, fmtDate, localizeApiError } from "../api/utils"
 import { subscribePush, unsubscribePush, getSWReg } from "../utils/push"
 
 type AccountInfo = Awaited<ReturnType<typeof userApi.me>>
@@ -22,10 +22,21 @@ export default function AccountPage() {
   const [notifEnabled, setNotifEnabled] = useState(false)
   const [notifCats, setNotifCats] = useState<string[]>([])
   const [allCats, setAllCats] = useState<string[]>([])
+  // 账户/交易事件白名单：订单成交/拒绝、自动仓管触发、Bridge 掉线。此前推送
+  // 只有"新信号"一种，这些账户层面的事都是静默的。与 notifCats（信号指标
+  // 类别白名单）是两套独立设置，分开落库、分开渲染。
+  // Account/trading event whitelist: order fill/reject, auto-manage trigger,
+  // bridge offline. Push used to only ever cover "new signal" — these
+  // account-level events were all silent. A separate whitelist from notifCats
+  // (the signal indicator-category whitelist), saved and rendered independently.
+  const [notifEvents, setNotifEvents] = useState<string[]>([])
   const [notifMsg, setNotifMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
   const [notifLoading, setNotifLoading] = useState(false)
-  // 分类偏好防抖落库 / debounce saving category prefs
+  // 分类/事件偏好防抖落库 / debounce saving category & event prefs
   const catSaveTimer = useRef<number | undefined>(undefined)
+  const eventSaveTimer = useRef<number | undefined>(undefined)
+
+  const EVENT_TYPES = ["order_filled", "order_rejected", "auto_manage", "bridge_offline"] as const
 
   useEffect(() => {
     load()
@@ -37,6 +48,7 @@ export default function AccountPage() {
     // 卸载时清理未触发的防抖定时器 / clear pending debounce on unmount
     return () => {
       if (catSaveTimer.current) window.clearTimeout(catSaveTimer.current)
+      if (eventSaveTimer.current) window.clearTimeout(eventSaveTimer.current)
     }
   }, [])
 
@@ -51,6 +63,7 @@ export default function AccountPage() {
       setInfo(infoRes)
       setNotifEnabled(prefsRes.enabled)
       setNotifCats(prefsRes.selected_categories)
+      setNotifEvents(prefsRes.event_types ?? [])
       setAllCats(catsRes)
     } catch (err: unknown) {
       console.error("account load:", err)
@@ -72,7 +85,7 @@ export default function AccountPage() {
     } catch (err: unknown) {
       setPwMsg({
         kind: "err",
-        text: err instanceof Error ? err.message : t("account.pwError"),
+        text: err instanceof Error ? localizeApiError(err.message) : t("account.pwError"),
       })
     }
   }
@@ -92,8 +105,9 @@ export default function AccountPage() {
     if (!on) {
       setNotifEnabled(false)
       setNotifCats([])
+      setNotifEvents([])
       void Promise.all([
-        notificationApi.putPrefs(false, []),
+        notificationApi.putPrefs(false, [], []),
         (async () => {
           const reg = await getSWReg()
           const currentSub = await reg?.pushManager?.getSubscription()
@@ -136,7 +150,7 @@ export default function AccountPage() {
       // Parallel: (a) save prefs; (b) fetch VAPID + warm SW + subscribe + report.
       const vapidPromise = pushApi.getVapidKey()
       await Promise.all([
-        notificationApi.putPrefs(true, notifCats),
+        notificationApi.putPrefs(true, notifCats, notifEvents),
         (async () => {
           const [vapid] = await Promise.all([vapidPromise, getSWReg()])
           const sub = await subscribePush(vapid.publicKey)
@@ -148,7 +162,7 @@ export default function AccountPage() {
       setNotifEnabled(false)
       setNotifMsg({
         kind: "err",
-        text: err instanceof Error ? err.message : t("account.notifError"),
+        text: err instanceof Error ? localizeApiError(err.message) : t("account.notifError"),
       })
     } finally {
       setNotifLoading(false)
@@ -162,9 +176,26 @@ export default function AccountPage() {
       const next = on ? [...prev, cat] : prev.filter((c) => c !== cat)
       if (catSaveTimer.current) window.clearTimeout(catSaveTimer.current)
       catSaveTimer.current = window.setTimeout(() => {
-        notificationApi.putPrefs(notifEnabled, next).catch(() => {
+        notificationApi.putPrefs(notifEnabled, next, notifEvents).catch(() => {
           // 落库失败则回滚该项 / roll back this toggle on failure
           setNotifCats((cur) => (on ? cur.filter((c) => c !== cat) : [...cur, cat]))
+          setNotifMsg({ kind: "err", text: t("account.notifError") })
+        })
+      }, 400)
+      return next
+    })
+  }
+
+  function handleNotifEventToggle(eventType: string, on: boolean) {
+    // 乐观更新：先即时更新 UI，再防抖落库 / optimistic UI then debounced save
+    setNotifMsg(null)
+    setNotifEvents((prev) => {
+      const next = on ? [...prev, eventType] : prev.filter((e) => e !== eventType)
+      if (eventSaveTimer.current) window.clearTimeout(eventSaveTimer.current)
+      eventSaveTimer.current = window.setTimeout(() => {
+        notificationApi.putPrefs(notifEnabled, notifCats, next).catch(() => {
+          // 落库失败则回滚该项 / roll back this toggle on failure
+          setNotifEvents((cur) => (on ? cur.filter((e) => e !== eventType) : [...cur, eventType]))
           setNotifMsg({ kind: "err", text: t("account.notifError") })
         })
       }, 400)
@@ -329,6 +360,9 @@ export default function AccountPage() {
               )}
               {notifEnabled && (
                 <div className="space-y-2 pl-1">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    {t("account.notifCatsHeading")}
+                  </p>
                   {allCats.length === 0 ? (
                     <p className="text-xs text-slate-500">{t("account.notifNoCategories")}</p>
                   ) : (
@@ -344,6 +378,24 @@ export default function AccountPage() {
                       </label>
                     ))
                   )}
+                </div>
+              )}
+              {notifEnabled && (
+                <div className="space-y-2 border-t border-white/5 pt-4 pl-1">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    {t("account.notifEventsHeading")}
+                  </p>
+                  {EVENT_TYPES.map((ev) => (
+                    <label key={ev} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={notifEvents.includes(ev)}
+                        onChange={(e) => handleNotifEventToggle(ev, e.target.checked)}
+                        className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500"
+                      />
+                      <span className="text-slate-300">{t(`account.notifEvent.${ev}`)}</span>
+                    </label>
+                  ))}
                 </div>
               )}
               {notifMsg && (

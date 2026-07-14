@@ -95,8 +95,18 @@ class UserPrefsOut(BaseModel):
 
 
 class UserPrefsIn(BaseModel):
-    # 整份偏好文档；前端按命名空间合并（如 {"signals": {...}}）
-    # Whole prefs document; frontend merges by namespace (e.g. {"signals": {...}})
+    # 只传发生变化的那一个命名空间（如 "signals"），服务端与已存的其它命名空间
+    # 合并——不再整份覆盖。此前整份覆盖时，两台设备几乎同时改了不同命名空间
+    # （如手机改了筛选、电脑同时在画线）后保存的那次会用它本地那份（可能还
+    # 没收到对方 WS 推来的最新值）整个覆盖掉，先保存的改动就丢了。
+    # Only the namespace that changed (e.g. "signals"); the server merges it
+    # into the existing document instead of overwriting the whole thing. This
+    # used to be a full overwrite: if two devices changed different namespaces
+    # at nearly the same time (e.g. the phone changed a filter while the
+    # desktop was mid-drawing), whichever PUT landed second would overwrite
+    # everything with its own (possibly stale, if it hadn't yet received the
+    # other device's WS push) local copy — silently dropping the first change.
+    namespace: str = Field(min_length=1, max_length=64)
     data: dict = Field(default_factory=dict)
 
 
@@ -129,28 +139,44 @@ async def put_prefs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """整份覆盖保存当前用户的界面偏好 JSON，并实时推送给该用户其它在线设备。
+    """按命名空间合并保存偏好 JSON，并把合并后的完整文档实时推送给该用户其它
+    在线设备。
 
-    落库是阻塞的同步操作，放线程池执行，避免卡住事件循环（WS 推送/桥接轮询
-    共用该循环，与 orders/bridge 的写法一致）。保存后经 WebSocket 把最新偏好推
-    给该用户的所有在线连接——其它设备即时收到画线等改动；发起保存的本设备也会
-    收到同一条，但前端是幂等应用、不会再回存，不会形成回环。
+    只覆盖 body.namespace 对应的那一段，其它命名空间原样保留——避免两台设备
+    并发改动不同命名空间时互相覆盖（见 UserPrefsIn 的说明）。落库是阻塞的
+    同步操作，放线程池执行，避免卡住事件循环（WS 推送/桥接轮询共用该循环，
+    与 orders/bridge 的写法一致）。推送的是合并后的完整文档而不是只有这个
+    命名空间——其它设备的前端状态是整份替换的，只推局部会让它们丢失自己
+    本地持有、但这次请求里没提到的其它命名空间。
 
-    Overwrite-save the prefs JSON and push it live to the user's other devices.
-    The blocking DB write runs in a thread pool so it doesn't stall the event
-    loop (shared by WS pushes and bridge polling, matching orders/bridge). After
-    saving, the latest prefs are pushed over WebSocket to all of the user's
-    connections — other devices update instantly (drawings, etc.). The device
-    that saved also receives it, but the frontend applies it idempotently
-    without re-saving, so there's no echo loop.
+    Merge-save the prefs JSON by namespace and push the merged, complete
+    document live to the user's other devices.
+
+    Only the body.namespace segment is overwritten; every other namespace is
+    left untouched — this is what prevents two devices concurrently editing
+    different namespaces from clobbering each other (see UserPrefsIn's
+    docstring). The blocking DB write runs in a thread pool so it doesn't
+    stall the event loop (shared by WS pushes and bridge polling, matching
+    orders/bridge). The push carries the full merged document, not just this
+    namespace — other devices replace their entire local state on receipt, so
+    pushing only the changed namespace would make them drop whatever other
+    namespaces they hold locally that this request never mentioned.
     """
-    def _save() -> None:
+    def _save() -> dict:
         pref = _get_or_create_prefs(db, current_user.id)
-        pref.data = json.dumps(body.data, ensure_ascii=False)
+        try:
+            existing = json.loads(pref.data or "{}")
+        except (json.JSONDecodeError, TypeError):
+            existing = {}
+        if not isinstance(existing, dict):
+            existing = {}
+        existing[body.namespace] = body.data
+        pref.data = json.dumps(existing, ensure_ascii=False)
         db.commit()
+        return existing
 
-    await run_in_threadpool(_save)
+    merged = await run_in_threadpool(_save)
     await manager.push_to_client(
-        current_user.id, {"type": "PREFS_UPDATE", "data": body.data}
+        current_user.id, {"type": "PREFS_UPDATE", "data": merged}
     )
-    return UserPrefsOut(data=body.data)
+    return UserPrefsOut(data=merged)

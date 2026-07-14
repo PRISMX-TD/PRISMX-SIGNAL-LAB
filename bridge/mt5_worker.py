@@ -121,16 +121,25 @@ def _normalize_volume(symbol: str, volume: float) -> float:
 
 
 def _compute_stops(symbol: str, side: str, entry: float, sig_sl: float, sig_tp: float):
-    """把信号 SL/TP 按比例换算到真实市价并夹紧最小止损距离。
-    Rescale signal SL/TP onto the live price and clamp to the broker stop level.
+    """把 SL/TP 换算到真实市价并夹紧最小止损距离。
+    Rescale SL/TP onto the live price and clamp to the broker stop level.
 
-    信号价是平台合成价，直接用会触发 Invalid stops，因此用相对 entry 的比例
-    套到真实市价上。The signal price is synthetic; use it as a ratio off entry.
+    entry > 0（信号下单）：信号价是平台合成价，直接用会触发 Invalid stops，
+    因此用相对 entry 的比例套到真实市价上。
+    entry <= 0（图表页手动下单，无关联信号）：sig_sl/sig_tp 本身就是用户对着
+    实时报价/图表价填的真实绝对价格，不需要也不能再按比例换算——此前这里对
+    entry<=0 直接返回 (0, 0)，导致手动下单的止损止盈被静默丢弃，用户以为带
+    了止损、实际在 MT5 里是一张裸单。
+    entry > 0 (signal order): the signal price is synthetic; using it directly
+    would trigger Invalid Stops, so rescale it as a ratio onto the live price.
+    entry <= 0 (manual order from the charts page, no signal): sig_sl/sig_tp
+    are already real absolute prices the user typed against the live quote/
+    chart price, so they must be used as-is. This used to return (0, 0) for
+    entry<=0, silently dropping the SL/TP on manual orders — the user thought
+    they had a stop-loss but the MT5 fill was actually a bare position.
     """
     out_sl = 0.0
     out_tp = 0.0
-    if entry <= 0:
-        return out_sl, out_tp
     info = mt5.symbol_info(symbol)
     tick = mt5.symbol_info_tick(symbol)
     if info is None or tick is None:
@@ -141,10 +150,16 @@ def _compute_stops(symbol: str, side: str, entry: float, sig_sl: float, sig_tp: 
     if price <= 0:
         return out_sl, out_tp
 
-    if sig_sl > 0:
-        out_sl = price * (sig_sl / entry)
-    if sig_tp > 0:
-        out_tp = price * (sig_tp / entry)
+    if entry > 0:
+        if sig_sl > 0:
+            out_sl = price * (sig_sl / entry)
+        if sig_tp > 0:
+            out_tp = price * (sig_tp / entry)
+    else:
+        if sig_sl > 0:
+            out_sl = sig_sl
+        if sig_tp > 0:
+            out_tp = sig_tp
 
     stops_level = getattr(info, "trade_stops_level", 0) or 0
     min_dist = (stops_level if stops_level > 0 else 10) * point
@@ -216,16 +231,36 @@ def _quotes_payload(base_symbols: list[str], suffix: str = "") -> list:
 def _positions_payload() -> list:
     """读取持仓 / read open positions.
 
+    只上报本平台开的仓位（魔术号匹配 PRISMX_MAGIC）：网页只管理它自己开出的
+    仓，用户在 MT5 客户端手动开的仓不会出现在这里、也就不会被网页误平——
+    与自动仓位管理、平仓成交明细统计（两者均已只认魔术号）口径保持一致。
+    此前这里上报账户下的全部持仓，与文档承诺的"只管平台开的仓"及自动仓管
+    的管辖范围不一致，也让用户可能通过网页误平自己手动开的仓。
+
     除基础字段外，补充 ticket（平仓/改单定位用）、入场价、现价、SL/TP，
     便于网页展示与执行平仓/改 SL·TP。
+
+    Only report positions this platform opened (magic number matches
+    PRISMX_MAGIC): the web app only manages positions it opened itself, so a
+    position the user opened manually in the MT5 client never shows up here
+    and can't be accidentally closed from the web — consistent with auto
+    position management and the closed-trade stats, both of which already key
+    off the magic number alone. This used to report every open position on
+    the account, which didn't match the documented "only manages positions
+    this platform opened" scope and let a user accidentally close a manually
+    opened position from the web app.
+
     Besides the basics, include ticket (needed to close/modify), entry price,
     current price and SL/TP so the web app can display and act on positions.
     """
     positions = mt5.positions_get()
     if not positions:
         return []
+    login = str(mt5.account_info().login) if mt5.account_info() else None
     out = []
     for p in positions:
+        if getattr(p, "magic", 0) != PRISMX_MAGIC:
+            continue
         out.append({
             "ticket": int(p.ticket),
             "symbol": p.symbol,
@@ -236,7 +271,7 @@ def _positions_payload() -> list:
             "currentPrice": float(p.price_current),
             "stopLoss": float(p.sl),
             "takeProfit": float(p.tp),
-            "login": str(mt5.account_info().login) if mt5.account_info() else None,
+            "login": login,
         })
     return out
 

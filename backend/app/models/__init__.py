@@ -190,6 +190,14 @@ class NotificationPref(Base):
     enabled = Column(Boolean, default=False)
     # 用户选择开启的指标类别（JSON array of strings）；空(非 null)表示全关闭 / selected indicator categories
     selected_categories = Column(Text, default="[]")
+    # 事件类通知白名单（JSON array）：order_filled / order_rejected /
+    # auto_manage / bridge_offline。与上面的指标类别是两套独立的白名单——
+    # 指标类别只管"新信号推送该不该发"，这个字段管"账户/交易事件该不该推"。
+    # Event-notification whitelist (JSON array): order_filled / order_rejected
+    # / auto_manage / bridge_offline. A separate whitelist from the indicator
+    # categories above — those gate "should a new-signal push fire", this
+    # gates "should an account/trading-event push fire".
+    event_types = Column(Text, default="[]")
 
 
 class PushSubscription(Base):

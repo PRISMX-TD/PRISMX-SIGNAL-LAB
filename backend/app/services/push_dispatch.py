@@ -21,6 +21,20 @@ from app.utils.indicator import indicator_category
 
 logger = logging.getLogger("push")
 
+# 事件类通知的合法取值：订单成交/拒绝、自动仓管触发、Bridge 掉线。
+# 此前推送只有"新信号"一种，账户/交易层面发生的事都是静默的——包括自动仓管
+# 这种会动用户仓位的后台动作，用户可能压根不知道发生过。
+# Valid event-notification kinds: order fill/reject, auto-manage trigger,
+# bridge offline. Push used to only ever fire for "new signal" — everything
+# at the account/trading layer was silent, including auto-management actually
+# touching the user's position in the background without them necessarily
+# knowing it happened.
+EVENT_ORDER_FILLED = "order_filled"
+EVENT_ORDER_REJECTED = "order_rejected"
+EVENT_AUTO_MANAGE = "auto_manage"
+EVENT_BRIDGE_OFFLINE = "bridge_offline"
+EVENT_TYPES = {EVENT_ORDER_FILLED, EVENT_ORDER_REJECTED, EVENT_AUTO_MANAGE, EVENT_BRIDGE_OFFLINE}
+
 
 async def dispatch_push_async(signal: Signal) -> None:
     """在线程池中执行推送派发，避免阻塞事件循环。
@@ -69,6 +83,31 @@ def _matched_user_ids(db, cat: str) -> set[str]:
     return realtime_ids
 
 
+def _webpush_one(
+    sub: PushSubscription, payload: str, pem: str, vapid_claims: dict, headers: dict
+) -> tuple[bool, bool]:
+    """向单个订阅推送一条消息。返回 (是否发送成功, 是否应清理该订阅)。
+    Push one message to a single subscription. Returns (sent ok, should prune)."""
+    try:
+        webpush(
+            subscription_info={
+                "endpoint": sub.endpoint,
+                "keys": {"p256dh": sub.keys_p256dh, "auth": sub.keys_auth},
+            },
+            data=payload,
+            vapid_private_key=pem,
+            vapid_claims=vapid_claims,
+            headers=headers,
+        )
+        return True, False
+    except WebPushException as e:
+        # 过期或无效订阅，标记清理 / mark stale subscriptions for cleanup
+        status = e.response.status_code if e.response is not None else "?"
+        logger.warning("[push] webpush failed sub=%s status=%s: %s", sub.id, status, e)
+        stale = e.response is not None and e.response.status_code in (410, 404)
+        return False, stale
+
+
 def dispatch_push(signal: Signal) -> None:
     """对一条新生成的信号，找出匹配的通知偏好用户并推送到其所有设备。
     Match a newly generated signal against users' notification prefs, then
@@ -113,25 +152,11 @@ def dispatch_push(signal: Signal) -> None:
             "TTL": str(settings.SIGNAL_EXPIRE_MINUTES * 60),
         }
         for sub in subs:
-            try:
-                webpush(
-                    subscription_info={
-                        "endpoint": sub.endpoint,
-                        "keys": {"p256dh": sub.keys_p256dh, "auth": sub.keys_auth},
-                    },
-                    data=payload,
-                    vapid_private_key=pem,
-                    vapid_claims=vapid_claims,
-                    headers=push_headers,
-                )
+            ok, stale = _webpush_one(sub, payload, pem, vapid_claims, push_headers)
+            if ok:
                 sent += 1
-            except WebPushException as e:
-                # 过期或无效订阅，标记清理 / mark stale subscriptions for cleanup
-                status = e.response.status_code if e.response is not None else "?"
-                logger.warning("[push] webpush failed sub=%s status=%s: %s", sub.id, status, e)
-                if e.response is not None and e.response.status_code in (410, 404):
-                    failed_ids.append(sub.id)
-                continue
+            if stale:
+                failed_ids.append(sub.id)
         logger.info("[push] signal %s (%s): sent=%d failed=%d", signal.symbol, cat, sent, len(failed_ids))
 
         # 清理失败/过期的订阅 / remove stale subscriptions
@@ -144,3 +169,80 @@ def dispatch_push(signal: Signal) -> None:
         logger.exception("[push] Error dispatching push notifications")
     finally:
         db.close()
+
+
+# ---------- 事件类通知（单用户）/ event notifications (single user) ----------
+# 与上面按指标类别向多个用户扇出的信号推送不同：这类通知只针对触发事件的
+# 那一个用户，按他自己的事件类型偏好过滤。此前推送只覆盖"新信号"，订单
+# 成交/拒绝、自动仓管的后台动作、Bridge 掉线全都是静默的。
+# Unlike the signal push above (fanned out to many users by indicator
+# category), these fire for exactly the one user who triggered the event,
+# gated by that user's own event-type prefs. Push used to only ever cover
+# "new signal" — order fills/rejections, auto-management acting on a
+# position in the background, and the bridge going offline were all silent.
+
+
+def _event_prefs_allow(db, user_id: str, event_type: str) -> bool:
+    """该用户是否开启了通知总开关、这个事件类型在其白名单里、且订阅等级允许推送。
+    Whether the user has notifications on, this event type whitelisted, and
+    their plan allows push at all."""
+    pref = db.query(NotificationPref).filter(NotificationPref.user_id == user_id).first()
+    if not pref or not pref.enabled:
+        return False
+    try:
+        event_types = json.loads(pref.event_types or "[]")
+    except (json.JSONDecodeError, TypeError):
+        return False
+    if not isinstance(event_types, list) or event_type not in event_types:
+        return False
+    plan = db.query(User.plan).filter(User.id == user_id).scalar()
+    return can_use_push(plan)
+
+
+def dispatch_event_push(user_id: str, event_type: str, title: str, body: str) -> None:
+    """给触发了某个事件的用户推送一条通知（若其偏好允许）。同步、阻塞网络 IO，
+    调用方须放线程池（见 dispatch_event_push_async）。
+    Push one notification to the user who triggered an event (if their prefs
+    allow it). Synchronous, blocking network IO — callers must use a thread
+    pool (see dispatch_event_push_async)."""
+    if event_type not in EVENT_TYPES:
+        logger.warning("[push] unknown event_type %r, skipping", event_type)
+        return
+    pem = settings.vapid_private_key
+    if not pem or not settings.VAPID_PUBLIC_KEY:
+        return
+    db = SessionLocal()
+    try:
+        if not _event_prefs_allow(db, user_id, event_type):
+            return
+        subs = db.query(PushSubscription).filter(PushSubscription.user_id == user_id).all()
+        if not subs:
+            return
+        vapid_claims = {"sub": settings.VAPID_SUBJECT}
+        payload = json.dumps({"title": title, "body": body, "icon": "/favicon.svg"})
+        # 账户/交易事件时效性不如新信号那么强，TTL 给固定 1 小时即可。
+        # Account/trading events aren't as time-critical as a fresh signal; a flat 1h TTL is enough.
+        push_headers = {"Urgency": "high", "TTL": str(3600)}
+        failed_ids: list[str] = []
+        for sub in subs:
+            _ok, stale = _webpush_one(sub, payload, pem, vapid_claims, push_headers)
+            if stale:
+                failed_ids.append(sub.id)
+        if failed_ids:
+            db.query(PushSubscription).filter(
+                PushSubscription.id.in_(failed_ids)
+            ).delete(synchronize_session=False)
+            db.commit()
+    except Exception:
+        logger.exception("[push] dispatch_event_push error (user=%s, event=%s)", user_id, event_type)
+    finally:
+        db.close()
+
+
+async def dispatch_event_push_async(user_id: str, event_type: str, title: str, body: str) -> None:
+    """在线程池中执行事件推送，避免阻塞事件循环。
+    Run event push dispatching in a thread pool to keep the event loop responsive."""
+    try:
+        await run_in_threadpool(dispatch_event_push, user_id, event_type, title, body)
+    except Exception:
+        logger.exception("dispatch_event_push_async error")

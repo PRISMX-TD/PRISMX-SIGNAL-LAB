@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../api/client'
-import { fmtTime } from '../api/utils'
+import { fmtTime, localizeApiError } from '../api/utils'
 import Select from '../components/Select'
 import type { AdminBrokerSettings, AdminMetrics, AdminPricingSettings, AdminUser, UserPlan, UserRole } from '../api/types'
 
@@ -97,7 +97,7 @@ export default function AdminPage() {
       setBrokerPatternsText(settingsRes.brokerPatterns.join(', '))
       setPricing(pricingRes)
     } catch (err) {
-      showToast('err', err instanceof Error ? err.message : t('admin.loadError'))
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.loadError'))
     } finally {
       setLoading(false)
     }
@@ -115,7 +115,7 @@ export default function AdminPage() {
       setBrokerPatternsText(updated.brokerPatterns.join(', '))
       showToast('ok', t('admin.saved'))
     } catch (err) {
-      showToast('err', err instanceof Error ? err.message : t('admin.saveError'))
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
     } finally {
       setSavingBroker(false)
     }
@@ -129,7 +129,7 @@ export default function AdminPage() {
       setPricing(updated)
       showToast('ok', t('admin.saved'))
     } catch (err) {
-      showToast('err', err instanceof Error ? err.message : t('admin.saveError'))
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
     } finally {
       setSavingPricing(false)
     }
@@ -193,7 +193,7 @@ export default function AdminPage() {
       setBulkExpiry('')
       load()
     } catch (err) {
-      showToast('err', err instanceof Error ? err.message : t('admin.saveError'))
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
     } finally {
       setBulkSaving(false)
     }
@@ -222,7 +222,7 @@ export default function AdminPage() {
       setDrafts((prev) => ({ ...prev, [u.id]: toDraft(updated) }))
       showToast('ok', t('admin.saved'))
     } catch (err) {
-      showToast('err', err instanceof Error ? err.message : t('admin.saveError'))
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
     } finally {
       setSavingId(null)
     }

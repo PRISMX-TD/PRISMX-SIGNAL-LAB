@@ -24,8 +24,14 @@ export default function SignalsPage() {
   const handleConfirm = async (volume: number, mt5Login: string | null, stopLoss: number | null, takeProfit: number | null) => {
     if (!activeSignal) return
     const sig = activeSignal
+    // 提交成功后不在这里关弹窗：SlideOrderModal 自己会展示"已提交"回执卡片，
+    // 再等 2 秒调用 onCancel 关闭。这里若立刻 setActiveSignal(null)，弹窗会
+    // 在回执卡片渲染出来之前就被卸载，用户永远看不到提交确认。
+    // Don't close the modal here on success: SlideOrderModal shows its own
+    // "submitted" receipt card and calls onCancel itself ~2s later. Closing it
+    // immediately here used to unmount the modal before the receipt card ever
+    // got to render, so the user never saw a submit confirmation.
     await placeOrder(sig, volume, mt5Login, stopLoss, takeProfit)
-    setActiveSignal(null)
   }
 
   return (

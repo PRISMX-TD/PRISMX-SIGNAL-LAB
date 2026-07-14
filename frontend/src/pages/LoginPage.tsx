@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { Navigate, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../store/auth'
+import { localizeApiError } from '../api/utils'
 import Logo from '../components/Logo'
 import LanguageToggle from '../components/LanguageToggle'
 import AuroraBackground from '../components/AuroraBackground'
@@ -35,7 +36,7 @@ export default function LoginPage() {
       else await register(email, password)
       navigate('/dashboard', { replace: true })
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('auth.errorFailed'))
+      setError(err instanceof Error ? localizeApiError(err.message) : t('auth.errorFailed'))
     } finally {
       setLoading(false)
     }
@@ -48,7 +49,7 @@ export default function LoginPage() {
       await loginWithGoogle(credential)
       navigate('/dashboard', { replace: true })
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('auth.googleError'))
+      setError(err instanceof Error ? localizeApiError(err.message) : t('auth.googleError'))
     } finally {
       setLoading(false)
     }

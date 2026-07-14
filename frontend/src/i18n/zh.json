@@ -12,6 +12,7 @@
     "upgrade": "升级 PRO",
     "download": "下载桥接",
     "logout": "退出登录",
+    "logoutConfirm": "确认退出登录？",
     "account": "账户",
     "more": "其他",
     "admin": "管理者页面"
@@ -22,6 +23,8 @@
     "cancel": "取消",
     "close": "关闭",
     "copy": "复制",
+    "prevPage": "上一页",
+    "nextPage": "下一页",
     "copied": "已复制",
     "reset": "重置",
     "save": "保存",
@@ -152,6 +155,7 @@
     "prCta": "先免费注册，进去再升级",
     "prNote": "两档永久并存，随时可升可降。升级在登录后的「升级」页完成，支持 USDT 支付。",
     "prSponsor": "也可以让合作券商替你付：在 MakeCapital 开户并保持活跃账户，PRO 由券商赞助——细则即将公布。",
+    "prPerMonth": "月",
     "howEyebrow": "三步上手",
     "howTitle": "三步，从注册到第一单",
     "howSubtitle": "全程约 5 分钟，不需要任何编程知识",
@@ -277,6 +281,11 @@
     "expired": "已过期",
     "active": "有效",
     "expiringSoon": "即将到期",
+    "resultHitTp": "✓ 命中止盈",
+    "resultHitSl": "✗ 命中止损",
+    "resultStale": "追踪中断，未计入胜率",
+    "resultPending": "结果判定中",
+    "proSawFirst": "PRO 用户已提前 10 分钟看到",
     "trade": "下单",
     "rr": "风险回报比",
     "pips": "点",
@@ -402,6 +411,7 @@
     "sizeModeRisk": "风险百分比",
     "riskPct": "风险",
     "riskNeedsSl": "先设置止损才能按风险百分比计算手数",
+    "riskUnsupportedPair": "该品种暂不支持按风险百分比估算手数，请手动填写手数",
     "slWrongSide": "止损价与现价方向不对",
     "tpWrongSide": "止盈价与现价方向不对",
     "signalExpiresIn": "信号剩余",
@@ -443,6 +453,14 @@
     "notifEnable": "开启信号推送通知",
     "notifUpgradeRequired": "免费版不支持通知推送，升级后即可解锁",
     "notifNoCategories": "暂无指标类别，信号引擎运行后将自动出现",
+    "notifCatsHeading": "信号提醒",
+    "notifEventsHeading": "交易与账户提醒",
+    "notifEvent": {
+      "order_filled": "订单成交",
+      "order_rejected": "订单被拒绝",
+      "auto_manage": "自动仓位管理触发",
+      "bridge_offline": "PRISMX Bridge 掉线"
+    },
     "notifPermissionDenied": "通知权限被拒绝，请在浏览器设置中开启",
     "notifBlocked": "通知已被浏览器阻止，请在浏览器设置中开启",
     "notifError": "通知设置失败",
@@ -468,6 +486,8 @@
     "disclaimer": "图表行情来自平台自有数据源，仅供参考，报价源与你的经纪商可能存在细微差异。",
     "empty": "图表数据加载中或暂不可用…",
     "stale": "数据延迟",
+    "utcBadge": "UTC",
+    "utcHint": "图表时间轴与所有时间戳均以协调世界时（UTC）显示，非本地时间",
     "draw": {
       "tools": "画图工具",
       "cursor": "光标",
@@ -499,7 +519,11 @@
     "resolvedCount": "已判定 {{n}} 笔",
     "noData": "数据还不够，暂不显示",
     "viewDetail": "查看详情",
-    "disclaimer": "历史表现不代表未来收益。"
+    "disclaimer": "历史表现不代表未来收益。",
+    "closedTradesTitle": "已平仓交易明细",
+    "closedTradesHint": "每一笔真实成交，构成上面胜率数字的原始记录。",
+    "closedTradesEmpty": "暂无已平仓记录",
+    "profit": "盈亏"
   },
   "orders": {
     "title": "订单与回执",
@@ -529,6 +553,7 @@
       "CANCELLED": "已撤销"
     },
     "positions": "当前持仓",
+    "positionsScopeHint": "仅显示经 PRISMX 下单开出的仓位；在 MT5 客户端手动开的仓不会出现在这里，也不会被这里的操作影响。",
     "noPositions": "暂无持仓",
     "summary": {
       "positions": "持仓数",
@@ -538,6 +563,10 @@
     "filterSide": "方向",
     "filterSymbol": "品种",
     "symbolPlaceholder": "如 XAUUSD",
+    "filterFrom": "起始日期",
+    "filterTo": "截止日期",
+    "clearDateFilter": "清除日期",
+    "pageInfo": "第 {{page}} / {{totalPages}} 页 · 共 {{total}} 条",
     "cancelSent": "撤销请求已发出",
     "proExclusive": "PRO专属",
     "mt5Accounts": "MT5 账户详情"
@@ -557,7 +586,9 @@
     "closeSent": "平仓指令已发出，等待执行回执…",
     "modifySent": "改单指令已发出，等待执行回执…",
     "invalidVolume": "平仓手数无效",
-    "clearHint": "0 = 清除"
+    "clearHint": "0 = 清除",
+    "closeAllConfirmTitle": "确认全部平仓",
+    "closeAllConfirm": "确认平掉 {{symbol}} 的全部 {{volume}} 手持仓？此操作不可撤销。"
   },
   "bind": {
     "title": "连接 MT5",
@@ -583,6 +614,8 @@
     "tokenTitle": "你的 API Token",
     "tokenHint": "此 Token 等同密码，请妥善保管。复制后粘贴到 PRISMX 桥接程序中以建立连接。",
     "tokenHidden": "出于安全，Token 已加密保存，仅在生成时显示一次。点击「重置 Token」生成并查看新 Token（旧 Token 将失效）。",
+    "tokenNeverGenerated": "你还没有生成过 Token。点击下方按钮生成专属 Token，用于连接 PRISMX Bridge。",
+    "generateToken": "生成 Token",
     "tokenJustOnce": "请立即复制保存：刷新或离开页面后将无法再次查看此 Token。",
     "tokenSavedClose": "已保存，关闭",
     "resetToken": "重置 Token",
@@ -704,7 +737,7 @@
     "g4Title": "4. 填入 Token 并连接",
     "g4Desc": "打开桥接程序，把 Token 粘贴进去，点击「连接」。状态变为在线后，即可在信号面板一键下单。",
     "notesTitle": "注意事项",
-    "n1": "桥接程序必须保持运行，关闭后将无法接收和执行交易指令。",
+    "n1": "点击窗口的关闭按钮会最小化到系统托盘并继续在后台运行；要彻底退出，请在托盘图标右键选择「退出」——退出后将无法接收和执行交易指令。",
     "n2": "请在已登录 MT5 的同一台电脑上运行桥接程序。",
     "n3": "需要在 MT5 中启用「允许算法交易」，否则下单会被终端拒绝。",
     "n4": "API Token 等同密码，切勿分享给他人；如怀疑泄露，可在「连接 MT5」页面随时重置。",
