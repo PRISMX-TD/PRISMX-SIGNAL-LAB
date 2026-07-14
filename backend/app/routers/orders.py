@@ -325,6 +325,7 @@ def list_closed_trades(
         "trades": [
             {
                 "id": r.id,
+                "mt5Login": r.mt5_login,
                 "symbol": r.symbol,
                 "side": r.side,
                 "closeVolume": r.close_volume,

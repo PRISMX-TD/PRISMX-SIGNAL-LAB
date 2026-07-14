@@ -128,6 +128,7 @@ export interface PersonalWinRate {
 // visible only to the user themself.
 export interface ClosedTrade {
   id: string
+  mt5Login: string
   symbol: string
   side: 'BUY' | 'SELL'
   closeVolume: number

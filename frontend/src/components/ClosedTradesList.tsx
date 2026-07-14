@@ -63,6 +63,7 @@ export default function ClosedTradesList() {
               <thead>
                 <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-slate-500">
                   <th className="px-3 py-2 font-medium">{t('orders.colTime')}</th>
+                  <th className="px-3 py-2 font-medium">{t('orders.colAccount')}</th>
                   <th className="px-3 py-2 font-medium">{t('orders.colSymbol')}</th>
                   <th className="px-3 py-2 font-medium">{t('orders.colSide')}</th>
                   <th className="px-3 py-2 font-medium">{t('orders.colVolume')}</th>
@@ -74,6 +75,7 @@ export default function ClosedTradesList() {
                 {trades.map((tr) => (
                   <tr key={tr.id} className="border-b border-white/5">
                     <td className="whitespace-nowrap px-3 py-2 text-slate-400">{fmtTime(tr.closedAt)}</td>
+                    <td className="px-3 py-2 font-mono text-slate-300">{tr.mt5Login}</td>
                     <td className="px-3 py-2 font-mono text-slate-100">{tr.symbol}</td>
                     <td className="px-3 py-2">
                       <span className={`tag ${tr.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
@@ -108,8 +110,9 @@ export default function ClosedTradesList() {
                 </div>
                 <div className="mt-1 flex justify-between text-xs text-slate-500">
                   <span>{tr.closeVolume} {t('positions.lots')} @ {tr.closePrice ?? '-'}</span>
-                  <span>{fmtTime(tr.closedAt)}</span>
+                  <span className="font-mono">{tr.mt5Login}</span>
                 </div>
+                <div className="mt-0.5 text-right text-xs text-slate-500">{fmtTime(tr.closedAt)}</div>
               </div>
             ))}
           </div>
