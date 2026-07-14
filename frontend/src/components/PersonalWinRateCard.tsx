@@ -19,8 +19,27 @@ export default function PersonalWinRateCard({ variant = 'compact' }: Props) {
 
   useEffect(() => {
     let mounted = true
-    orderApi.winrate().then((r) => { if (mounted) setData(r) }).catch(() => {})
-    return () => { mounted = false }
+    const load = () => {
+      orderApi.winrate().then((r) => { if (mounted) setData(r) }).catch(() => {})
+    }
+    load()
+    // 定时刷新 + 回到页面时立即刷新，让战绩随平仓近实时更新，无需手动刷新整页。
+    // 页面在后台时跳过轮询（rAF/定时器也会被浏览器节流），切回前台再补一次。
+    // Poll + refetch on focus so the record tracks new closes in near-real-time
+    // without a full page reload. Skip polling while hidden and refetch on
+    // return so a backgrounded tab doesn't hammer the API.
+    const timer = window.setInterval(() => {
+      if (!document.hidden) load()
+    }, 45_000)
+    const onVisible = () => { if (!document.hidden) load() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => {
+      mounted = false
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+    }
   }, [])
 
   const pct = data?.winRate != null ? Math.round(data.winRate * 100) : null

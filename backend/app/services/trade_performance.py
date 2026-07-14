@@ -32,34 +32,50 @@ def compute_personal_winrate(db, user_id: str) -> dict:
         )
         .all()
     )
-    order_by_ticket = {o.mt5_ticket: o for o in orders}
-    if not order_by_ticket:
+    if not orders:
         return {"wins": 0, "losses": 0, "totalResolved": 0, "winRate": None, "openPositions": 0}
+    # 一个"仓位"用 (MT5 账号, 仓位编号) 唯一标识：MT5 的仓位编号只在单个交易
+    # 账号内递增，同一用户绑定多个账号时编号可能撞车。只按编号聚合会漏算仓位
+    # （字典键相撞覆盖），还会把 A 账号的平仓明细错算进 B 账号的仓位——胜率和
+    # 平仓完成度都会偏。对齐 idx_closed_trades_position 的 (user, login, ticket)。
+    # Key a "position" by (mt5_login, ticket): MT5 ticket numbers only increment
+    # within a single account, so a user with several accounts can have colliding
+    # tickets. Keying by ticket alone drops positions (dict-key collisions) and
+    # mis-attributes one account's close-legs onto another's position, skewing
+    # both the win rate and the volume-completion check. This matches the
+    # idx_closed_trades_position (user, login, ticket) grouping.
+    orders_by_pos = {(o.mt5_login, o.mt5_ticket): o for o in orders}
 
     # 2) 这些仓位目前为止上报过的所有平仓明细（可能只是部分平仓）/ every reported close-leg for those tickets so far
     legs = (
         db.query(ClosedTrade)
         .filter(
             ClosedTrade.user_id == user_id,
-            ClosedTrade.position_ticket.in_(list(order_by_ticket.keys())),
+            ClosedTrade.position_ticket.in_(list({o.mt5_ticket for o in orders})),
         )
         .all()
     )
-    legs_by_ticket: dict[int, list[ClosedTrade]] = {}
+    legs_by_pos: dict[tuple, list[ClosedTrade]] = {}
+    legs_by_ticket: dict[int, list[ClosedTrade]] = {}  # 兜底：账号未回填的历史订单 / fallback for legacy orders lacking a login
     for leg in legs:
+        legs_by_pos.setdefault((leg.mt5_login, leg.position_ticket), []).append(leg)
         legs_by_ticket.setdefault(leg.position_ticket, []).append(leg)
 
     wins = losses = open_positions = 0
-    for ticket, order in order_by_ticket.items():
-        ticket_legs = legs_by_ticket.get(ticket)
-        if not ticket_legs:
+    for (login, ticket), order in orders_by_pos.items():
+        # 正常情况按 (账号, 编号) 精确匹配；账号未知的历史订单退回只按编号匹配，
+        # 避免把它误判成一直未平仓 / exact (login, ticket) match normally; legacy
+        # orders with no backfilled login fall back to ticket-only matching so
+        # they aren't wrongly counted as never-closed
+        pos_legs = legs_by_pos.get((login, ticket)) if login is not None else legs_by_ticket.get(ticket)
+        if not pos_legs:
             open_positions += 1  # 还没有任何平仓记录 / no close reported yet, still open
             continue
-        closed_volume = sum(leg.close_volume for leg in ticket_legs)
+        closed_volume = sum(leg.close_volume for leg in pos_legs)
         if closed_volume + _VOLUME_EPS < order.volume:
             open_positions += 1  # 只是部分平仓，还没平完 / partially closed, not fully resolved yet
             continue
-        total_profit = sum(leg.profit for leg in ticket_legs)
+        total_profit = sum(leg.profit for leg in pos_legs)
         if total_profit > 0:
             wins += 1
         else:
