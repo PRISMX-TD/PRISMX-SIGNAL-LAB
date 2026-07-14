@@ -13,12 +13,35 @@ export default function ClosedTradesList() {
   const { t } = useTranslation()
   const [trades, setTrades] = useState<ClosedTrade[] | null>(null)
 
+  // 此前只在挂载时拉一次，用户开着这个页面去平仓、回来看到的还是打开页面
+  // 那一刻的旧快照。改成和 PersonalWinRateCard 一样的节奏：定时轮询 + 切回
+  // 页面时立即补一次，让新成交近实时出现，不用手动刷新整页。页面在后台时
+  // 跳过轮询，省电。
+  // This used to fetch only once on mount — if the user had this page open,
+  // went and closed a position, then came back, they'd still see the stale
+  // snapshot from when the page first loaded. Now matches PersonalWinRateCard's
+  // cadence: poll + refetch on return-to-foreground, so a fresh close shows up
+  // without a manual full-page reload. Skips polling while backgrounded.
   useEffect(() => {
     let mounted = true
-    orderApi.closedTrades()
-      .then((r) => { if (mounted) setTrades(r.trades) })
-      .catch(() => { if (mounted) setTrades([]) })
-    return () => { mounted = false }
+    const load = () => {
+      orderApi.closedTrades()
+        .then((r) => { if (mounted) setTrades(r.trades) })
+        .catch(() => { if (mounted) setTrades((prev) => prev ?? []) })
+    }
+    load()
+    const timer = window.setInterval(() => {
+      if (!document.hidden) load()
+    }, 45_000)
+    const onVisible = () => { if (!document.hidden) load() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => {
+      mounted = false
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+    }
   }, [])
 
   return (
