@@ -165,6 +165,17 @@ class Order(Base):
     mt5_ticket = Column(Integer, nullable=True)
     filled_price = Column(Float, nullable=True)
     message = Column(String, nullable=True)
+    # 桥接最近一次把该仓位报为"仍持仓"的时间；用于拿 MT5 实时持仓对账个人胜率
+    # ——平仓明细可能因桥接离线/手动平仓漏报，仅靠平仓记录会让仓位永远卡在
+    # "进行中"。近期没被报为持仓、又没有完整平仓记录的仓位视为已在别处平掉、
+    # 不再计入"进行中"（见 services/trade_performance.py）。
+    # Last time the bridge reported this position as still open; used to
+    # reconcile personal win-rate against MT5's live positions. Close-legs can
+    # be missed (bridge offline / manual close), so relying on close records
+    # alone strands positions at "进行中" forever. A position not seen open
+    # recently and without a complete close record is treated as closed
+    # elsewhere and dropped from the open count (see trade_performance.py).
+    position_last_seen_open = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 

@@ -13,10 +13,28 @@ volume; win/loss is decided by the sign of the sum of all its partial closes'
 profit — not by how many individual closes happened, but by whether the whole
 position ended up profitable.
 """
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import tuple_
+
 from app.models import ClosedTrade, Order
 
 # 手数浮点误差容忍度 / float tolerance when comparing cumulative volumes
 _VOLUME_EPS = 1e-6
+
+# 实时持仓对账窗口：桥接约每 1.5 秒上报一次持仓，只要仓位还开着就会被不断刷新。
+# 超过这个时长没被报为"仍持仓"、又没有完整平仓记录的仓位，判定为已在别处平掉
+# （手动平仓/桥接离线时平掉，平仓明细没上报），不再计入"进行中"。窗口取得比上报
+# 间隔宽很多，好容忍桥接重启和短暂断线；桥接长时间离线时，真实持仓也会暂时
+# 退出"进行中"，等桥接恢复上报即自愈。
+# Live-position reconciliation window: the bridge reports positions ~every 1.5s,
+# refreshing any still-open position continuously. A position not seen open
+# within this window and lacking a complete close record is treated as closed
+# elsewhere (manual/offline close whose close-legs never arrived) and dropped
+# from "进行中". The window is far wider than the report interval to tolerate
+# bridge restarts and brief drops; during a long bridge outage genuinely-open
+# positions also fall out of "进行中" and self-heal once reporting resumes.
+_OPEN_FRESHNESS = timedelta(minutes=20)
 
 
 def compute_personal_winrate(db, user_id: str) -> dict:
@@ -61,6 +79,8 @@ def compute_personal_winrate(db, user_id: str) -> dict:
         legs_by_pos.setdefault((leg.mt5_login, leg.position_ticket), []).append(leg)
         legs_by_ticket.setdefault(leg.position_ticket, []).append(leg)
 
+    open_cutoff = datetime.now(timezone.utc) - _OPEN_FRESHNESS
+
     wins = losses = open_positions = 0
     for (login, ticket), order in orders_by_pos.items():
         # 正常情况按 (账号, 编号) 精确匹配；账号未知的历史订单退回只按编号匹配，
@@ -68,18 +88,25 @@ def compute_personal_winrate(db, user_id: str) -> dict:
         # orders with no backfilled login fall back to ticket-only matching so
         # they aren't wrongly counted as never-closed
         pos_legs = legs_by_pos.get((login, ticket)) if login is not None else legs_by_ticket.get(ticket)
-        if not pos_legs:
-            open_positions += 1  # 还没有任何平仓记录 / no close reported yet, still open
-            continue
-        closed_volume = sum(leg.close_volume for leg in pos_legs)
-        if closed_volume + _VOLUME_EPS < order.volume:
-            open_positions += 1  # 只是部分平仓，还没平完 / partially closed, not fully resolved yet
-            continue
-        total_profit = sum(leg.profit for leg in pos_legs)
-        if total_profit > 0:
-            wins += 1
-        else:
-            losses += 1
+        fully_closed = False
+        if pos_legs:
+            closed_volume = sum(leg.close_volume for leg in pos_legs)
+            fully_closed = closed_volume + _VOLUME_EPS >= order.volume
+        if fully_closed:
+            total_profit = sum(leg.profit for leg in pos_legs)
+            if total_profit > 0:
+                wins += 1
+            else:
+                losses += 1
+        elif _is_live_open(order, open_cutoff):
+            # 没有完整平仓记录，但 MT5 最近仍把它报为持仓 → 确实在进行中。
+            # No complete close record, yet MT5 still reports it open → genuinely open.
+            open_positions += 1
+        # 否则：既没平仓记录、MT5 也不再报为持仓——多半是在别处平掉、平仓明细漏报，
+        # 判定为已结束但无盈亏可归属，整笔从统计里剔除（不计胜负、也不计进行中）。
+        # Else: no close record and no longer reported open — closed elsewhere with
+        # its close-legs missed; drop the whole position from the stats (neither
+        # win/loss nor open) since we have no P&L to attribute.
 
     resolved = wins + losses
     return {
@@ -89,3 +116,53 @@ def compute_personal_winrate(db, user_id: str) -> dict:
         "winRate": wins / resolved if resolved > 0 else None,
         "openPositions": open_positions,
     }
+
+
+def _is_live_open(order: Order, cutoff: datetime) -> bool:
+    """该仓位是否在对账窗口内被 MT5 报为仍持仓。
+    Whether the position was reported still-open within the reconciliation window."""
+    ts = order.position_last_seen_open
+    if ts is None:
+        return False
+    # SQLite / Postgres 读回来是 naive，按 UTC 补齐再比较 / stored naive, treat as UTC
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts >= cutoff
+
+
+def mark_positions_seen(db, user_id: str, positions: list) -> int:
+    """桥接每次上报持仓时，把其中"本平台开的、仍持仓"的仓位打上最新时间戳。
+
+    这就是拿 MT5 实时持仓对账个人胜率的写入侧：只要仓位还开着，这个时间戳就被
+    持续刷新；一旦仓位在别处平掉、不再出现在上报里，时间戳就停在最后一次，超过
+    _OPEN_FRESHNESS 后 compute_personal_winrate 便不再把它算作"进行中"。返回刷新的行数。
+
+    On every bridge position report, stamp the platform-opened positions that are
+    still open. This is the write side of reconciling win-rate against MT5's live
+    positions: an open position keeps getting refreshed; once it's closed
+    elsewhere and stops appearing, the stamp freezes and, past _OPEN_FRESHNESS,
+    compute_personal_winrate stops counting it as open. Returns rows refreshed.
+    """
+    # 按 (账号, 仓位编号) 精确匹配：仓位编号只在单个账号内唯一，只按编号刷新会把
+    # 另一账号同号的已平仓位错误地续成"仍持仓"。/ match by (login, ticket): tickets
+    # are only unique within an account, so ticket-only refresh would wrongly keep
+    # a same-numbered, already-closed position on another account looking open.
+    pairs = {
+        (str(p["login"]), int(p["ticket"]))
+        for p in positions
+        if p.get("login") is not None and p.get("ticket")
+    }
+    if not pairs:
+        return 0
+    updated = (
+        db.query(Order)
+        .filter(
+            Order.user_id == user_id,
+            Order.action == "ORDER",
+            Order.status == "FILLED",
+            tuple_(Order.mt5_login, Order.mt5_ticket).in_(list(pairs)),
+        )
+        .update({Order.position_last_seen_open: datetime.now(timezone.utc)}, synchronize_session=False)
+    )
+    db.commit()
+    return updated

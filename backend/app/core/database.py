@@ -95,6 +95,7 @@ def _migrate_columns() -> None:
             "ticket": "INTEGER",
             "sl": "FLOAT",
             "tp": "FLOAT",
+            "position_last_seen_open": datetime_type,
         }
         with engine.begin() as conn:
             for name, col_type in order_new.items():

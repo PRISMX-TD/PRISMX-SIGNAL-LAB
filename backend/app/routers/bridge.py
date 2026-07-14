@@ -24,6 +24,7 @@ from app.services.connection_manager import manager
 from app.services.deps import get_current_user, is_account_online
 from app.services.plans import max_mt5_accounts
 from app.services.settings_store import get_broker_settings, server_matches_broker
+from app.services.trade_performance import mark_positions_seen
 
 logger = logging.getLogger("prismx.bridge")
 
@@ -398,6 +399,15 @@ async def bridge_positions(
     """
     manager.set_positions(user.id, req.data)
     await manager.push_to_client(user.id, {"type": "POSITIONS", "data": req.data})
+    # 拿实时持仓给个人胜率对账：给仍持仓的本平台仓位盖时间戳，让平仓明细漏报的
+    # 仓位最终退出"进行中"。对账失败绝不影响持仓上报本身。
+    # Reconcile personal win-rate against live positions: stamp still-open
+    # platform positions so ones with missed close-legs eventually leave
+    # "进行中". A reconciliation failure never breaks the report itself.
+    try:
+        await run_in_threadpool(mark_positions_seen, db, user.id, req.data)
+    except Exception:
+        logger.exception("position reconciliation failed (user=%s)", user.id)
     try:
         await run_in_threadpool(evaluate_positions, db, user.id, req.data)
     except Exception:
