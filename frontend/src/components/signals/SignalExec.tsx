@@ -3,7 +3,7 @@
 import { memo, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Signal } from '../../api/types'
-import { calcRiskReward, calcCountdown, fmtTime } from '../../api/utils'
+import { calcRiskReward, calcCountdown, displaySymbol, fmtTime } from '../../api/utils'
 import { SIGNAL_LIFESPAN_MS, rrTone } from './SignalView'
 
 interface Props {
@@ -50,10 +50,10 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
         {/* 品种行：名称 + 代码 + 方向 / symbol + code + side */}
         <div className="exec-sym-row">
           <span className="text-[15px] font-bold leading-none">
-            {signal ? symName || signal.symbol : '-'}
+            {signal ? symName || displaySymbol(signal.symbol) : '-'}
           </span>
           {symName && (
-            <span className="text-[11px] text-slate-400 font-mono">{signal!.symbol}</span>
+            <span className="text-[11px] text-slate-400 font-mono">{displaySymbol(signal!.symbol)}</span>
           )}
           {signal && <span className={`chip ${isBuy ? 'chip-buy' : 'chip-sell'}`}>{sideTag}</span>}
         </div>
@@ -118,7 +118,7 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <b className="text-lg font-bold text-white">{signal ? symName || signal.symbol : '-'}</b>
+              <b className="text-lg font-bold text-white">{signal ? symName || displaySymbol(signal.symbol) : '-'}</b>
               {signal && <span className={`chip ${isBuy ? 'chip-buy' : 'chip-sell'}`}>{sideTag}</span>}
             </div>
             {symName && (

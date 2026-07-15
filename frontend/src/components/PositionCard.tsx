@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { orderApi } from '../api/client'
-import { clientOrderId, localizeApiError } from '../api/utils'
+import { clientOrderId, displaySymbol, localizeApiError } from '../api/utils'
 import type { Position } from '../api/types'
 import ConfirmModal from './ConfirmModal'
 
@@ -90,7 +90,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <span className="font-mono text-base font-semibold text-slate-100">{p.symbol}</span>
+            <span className="font-mono text-base font-semibold text-slate-100">{displaySymbol(p.symbol)}</span>
             <span className={`tag ${isBuy ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
               {isBuy ? t('common.buy') : t('common.sell')}
             </span>
@@ -234,7 +234,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
       {confirmCloseAll && (
         <ConfirmModal
           title={t('positions.closeAllConfirmTitle')}
-          message={t('positions.closeAllConfirm', { symbol: p.symbol, volume: p.volume })}
+          message={t('positions.closeAllConfirm', { symbol: displaySymbol(p.symbol), volume: p.volume })}
           confirmLabel={t('positions.closeAll')}
           danger
           busy={busy}

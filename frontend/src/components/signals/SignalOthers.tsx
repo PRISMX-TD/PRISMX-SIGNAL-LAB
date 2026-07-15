@@ -3,7 +3,7 @@
 import { memo, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Signal } from '../../api/types'
-import { calcRiskReward, calcCountdown, fmtTime } from '../../api/utils'
+import { calcRiskReward, calcCountdown, displaySymbol, fmtTime } from '../../api/utils'
 import { SIGNAL_LIFESPAN_MS, type FocusState } from './SignalView'
 
 interface OtherEntry {
@@ -57,7 +57,7 @@ const SignalOthers: FC<Props> = ({ entries, now, onTrade, onFocus, onViewAll }) 
               {/* Top row: symbol + RR */}
               <div className="sig-mini-top">
                 <div>
-                  <b className="text-base text-white">{symbol}</b>
+                  <b className="text-base text-white">{displaySymbol(symbol)}</b>
                   <div className="text-[11px] text-slate-400 mt-0.5">{sig.indicator || '-'}</div>
                 </div>
                 <span className={`chip shrink-0 ${isBuy ? 'chip-buy' : 'chip-sell'}`}>{sideTag}</span>

@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { orderApi } from '../api/client'
-import { fmtTime } from '../api/utils'
+import { displaySymbol, fmtTime } from '../api/utils'
 import type { ClosedTrade } from '../api/types'
 
 const PAGE_SIZE = 10
@@ -137,7 +137,7 @@ export default function ClosedTradesList() {
                   <tr key={tr.id} className="border-b border-white/5">
                     <td className="whitespace-nowrap px-3 py-2 text-slate-400">{fmtTime(tr.closedAt)}</td>
                     {!multiAccount && <td className="px-3 py-2 font-mono text-slate-300">{tr.mt5Login}</td>}
-                    <td className="px-3 py-2 font-mono text-slate-100">{tr.symbol}</td>
+                    <td className="px-3 py-2 font-mono text-slate-100">{displaySymbol(tr.symbol)}</td>
                     <td className="px-3 py-2">
                       <span className={`tag ${tr.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
                         {tr.side === 'BUY' ? t('common.buy') : t('common.sell')}
@@ -160,7 +160,7 @@ export default function ClosedTradesList() {
               <div key={tr.id} className="py-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm font-semibold text-slate-100">{tr.symbol}</span>
+                    <span className="font-mono text-sm font-semibold text-slate-100">{displaySymbol(tr.symbol)}</span>
                     <span className={`tag ${tr.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
                       {tr.side === 'BUY' ? t('common.buy') : t('common.sell')}
                     </span>

@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { useAuth } from '../store/auth'
 import { useLive, usePositions } from '../store/live'
 import { orderApi, automationApi } from '../api/client'
-import { fmtTime, localizeApiError } from '../api/utils'
+import { displaySymbol, fmtTime, localizeApiError } from '../api/utils'
 import type { AutoManageSettings, Order, OrderStatus } from '../api/types'
 import PositionCard from '../components/PositionCard'
 import PersonalWinRateCard from '../components/PersonalWinRateCard'
@@ -136,7 +136,13 @@ export default function OrdersPage() {
     return baseOrders.filter((o) => {
       if (statusF !== 'ALL' && o.status !== statusF) return false
       if (sideF !== 'ALL' && o.side !== sideF) return false
-      if (symbolF.trim() && !o.symbol.toLowerCase().includes(symbolF.trim().toLowerCase())) return false
+      // 品种搜索框按用户看到的名字来，BTCUSD 展示成 BTCUSDT 后，搜索框也得认
+      // "BTCUSDT" 才能搜出那些行，不能只匹配后端原始的 BTCUSD 字符串。
+      // The symbol search box should match what the user actually sees — now
+      // that BTCUSD displays as BTCUSDT, typing "BTCUSDT" must still find
+      // those rows, not just the raw backend BTCUSD string.
+      const q = symbolF.trim().toLowerCase()
+      if (q && !o.symbol.toLowerCase().includes(q) && !displaySymbol(o.symbol).toLowerCase().includes(q)) return false
       return true
     })
   }, [baseOrders, statusF, sideF, symbolF])
@@ -522,7 +528,7 @@ export default function OrdersPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 font-mono text-slate-300">{o.mt5Login ?? '-'}</td>
-                    <td className="px-4 py-3 font-mono text-slate-100">{o.symbol}</td>
+                    <td className="px-4 py-3 font-mono text-slate-100">{displaySymbol(o.symbol)}</td>
                     <td className="px-4 py-3">
                       <span
                         className={`tag ${
@@ -566,7 +572,7 @@ export default function OrdersPage() {
                 <div key={o.id} className="p-4">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-base font-bold text-slate-100">{o.symbol}</span>
+                      <span className="font-mono text-base font-bold text-slate-100">{displaySymbol(o.symbol)}</span>
                       <span
                         className={`tag ${
                           o.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'

@@ -101,6 +101,24 @@ export function baseSymbol(symbol: string): string {
   return symbol.toUpperCase().replace(/[._-].*$/, '')
 }
 
+// 展示名映射：MT5/信号引擎/桥接上下行全程用的都是 BTCUSD（这是 MT5 上实际的
+// 品种名，下单、报价、持仓、成交明细全靠这个字符串精确匹配），但用户更熟悉
+// "BTCUSDT" 这个叫法。只在渲染给用户看的地方转换显示文本，绝不能把转换后的
+// 值传回下单/查价/i18n 键名等逻辑路径——那些地方仍然只认 BTCUSD。
+// Display-name mapping: everywhere upstream (MT5, the signal engine, the
+// bridge) the symbol is literally "BTCUSD" — that's the real MT5 symbol name
+// and every order/quote/position/closed-trade match depends on that exact
+// string — but users know it as "BTCUSDT". Only convert at render sites;
+// never feed the converted value back into order placement, quote lookups,
+// or i18n key names, which still only recognize BTCUSD.
+const SYMBOL_DISPLAY_NAMES: Record<string, string> = {
+  BTCUSD: 'BTCUSDT',
+}
+
+export function displaySymbol(symbol: string): string {
+  return SYMBOL_DISPLAY_NAMES[baseSymbol(symbol)] ?? symbol
+}
+
 // 每手合约规模（标的单位数），用于按风险百分比估算手数。
 // 与保证金估算一样是量级提示：真实合约规模以经纪商 MT5 规格为准。
 // Contract size per lot (units of the underlying), used to size volume by a

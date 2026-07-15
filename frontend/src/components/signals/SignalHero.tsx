@@ -3,6 +3,7 @@
 import { memo, type FC, useRef, type TouchEvent as RTouchEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Trend, TrendDir, SentimentRatio } from '../../api/types'
+import { displaySymbol } from '../../api/utils'
 import { TREND_TFS, type TrendStance } from './SignalView'
 
 interface Props {
@@ -73,7 +74,7 @@ const SignalHero: FC<Props> = ({
 
       {/* Symbol + side chip */}
       <div className="mt-4 flex items-center gap-2.5 relative z-10">
-        <b className="text-[27px] tracking-[0.02em] text-white">{symbol}</b>
+        <b className="text-[27px] tracking-[0.02em] text-white">{displaySymbol(symbol)}</b>
         {cnName && <span className="text-sm text-slate-300">{cnName}</span>}
         <span className={`chip ${stance === 'BULL' ? 'chip-buy' : stance === 'BEAR' ? 'chip-sell' : 'chip-dim'}`}>
           {stanceLabel}

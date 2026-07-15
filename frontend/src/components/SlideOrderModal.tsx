@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { MT5Account, Quote, Signal } from '../api/types'
-import { calcCountdown, contractSize, localizeApiError, suggestVolumeByRisk, usdMarginBasis } from '../api/utils'
+import { calcCountdown, contractSize, displaySymbol, localizeApiError, suggestVolumeByRisk, usdMarginBasis } from '../api/utils'
 import { SIGNAL_LIFESPAN_MS } from './signals/SignalView'
 import { useNow } from './signals/hooks'
 
@@ -269,7 +269,7 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
             <div className="slide-sheet-ava" style={{ background: avaBg, color: avaColor }}>{symLetter}</div>
           </div>
           <h3 className="text-lg mt-2.5 text-white font-bold">
-            {isBuy ? t('common.buy') : t('common.sell')} {signal.symbol}
+            {isBuy ? t('common.buy') : t('common.sell')} {displaySymbol(signal.symbol)}
           </h3>
           <p className="text-xs text-slate-300 mt-1">
             {t('order.currentPrice')} <span className="num" style={{ color: priceColor }}>

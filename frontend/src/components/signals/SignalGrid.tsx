@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../../store/prefs'
 import type { Signal, UserPlan } from '../../api/types'
-import { calcRiskReward, calcCountdown, fmtTime, parseTime } from '../../api/utils'
+import { calcRiskReward, calcCountdown, displaySymbol, fmtTime, parseTime } from '../../api/utils'
 import { SIGNAL_LIFESPAN_MS, effectiveStatus, resultLabel, resultTone, rrTone } from './SignalView'
 import { useClock } from './hooks'
 
@@ -162,7 +162,7 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
             >
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-2">
-                  <b className="text-lg font-bold text-white">{sig.symbol}</b>
+                  <b className="text-lg font-bold text-white">{displaySymbol(sig.symbol)}</b>
                   <span className={`chip ${isBuy ? 'chip-buy' : 'chip-sell'}`}>
                     {isBuy ? t('common.buy') : t('common.sell')}
                   </span>

@@ -3,6 +3,7 @@
 import { memo, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Quote } from '../../api/types'
+import { displaySymbol } from '../../api/utils'
 
 interface Props {
   quotes: Record<string, Quote>
@@ -52,7 +53,7 @@ const QuotesTable: FC<Props> = ({ quotes, mt5Online, focusSymbol }) => {
       {/* ── 手机端：极简单行报价，品种代号 + 状态点 + 买价/点差/卖价 / mobile: minimal single-row quote ── */}
       <div className="qt-mobile-row sm:hidden">
         <div className="flex items-center gap-2">
-          <b className="text-sm font-bold text-white">{focusMeta.sym}</b>
+          <b className="text-sm font-bold text-white">{displaySymbol(focusMeta.sym)}</b>
           <span className={`inline-block w-[7px] h-[7px] rounded-full ${mt5Online ? 'bg-up shadow-[0_0_10px_rgba(46,224,126,0.9)] animate-breathe' : 'bg-slate-500'}`} />
         </div>
         <div className="flex items-center gap-5 ml-auto">
@@ -93,7 +94,7 @@ const QuotesTable: FC<Props> = ({ quotes, mt5Online, focusSymbol }) => {
                     <div className="qt-sym-cell">
                       <div className="qt-sym-ava" style={{ background: color + '22', color }}>{letter}</div>
                       <div className="nm">
-                        <b>{sym}</b>
+                        <b>{displaySymbol(sym)}</b>
                         <span>{t(`signals.symbolNames.${sym}`, { defaultValue: '' })}</span>
                       </div>
                     </div>

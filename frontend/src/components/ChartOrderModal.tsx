@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { MT5Account, Quote } from '../api/types'
-import { contractSize, localizeApiError, suggestVolumeByRisk, usdMarginBasis } from '../api/utils'
+import { contractSize, displaySymbol, localizeApiError, suggestVolumeByRisk, usdMarginBasis } from '../api/utils'
 
 interface Props {
   symbol: string
@@ -250,7 +250,7 @@ export default function ChartOrderModal({ symbol, side, accounts, quote, refPric
             <div className="slide-sheet-ava" style={{ background: avaBg, color: avaColor }}>{symLetter}</div>
           </div>
           <h3 className="text-lg mt-2.5 text-white font-bold">
-            {isBuy ? t('common.buy') : t('common.sell')} {symbol}
+            {isBuy ? t('common.buy') : t('common.sell')} {displaySymbol(symbol)}
           </h3>
           <p className="text-xs text-slate-300 mt-1">
             {t('order.currentPrice')}{' '}
