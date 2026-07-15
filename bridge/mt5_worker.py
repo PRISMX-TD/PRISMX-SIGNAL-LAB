@@ -303,14 +303,29 @@ def _closed_trades_payload(path: str) -> list:
     since = _last_deal_check.get(path)
     if since is None:
         since = now - _DEAL_LOOKBACK_ON_FIRST_POLL
-    _last_deal_check[path] = now
+    # 注意：游标（_last_deal_check）只在下方确认"这轮真的完整处理成功"之后
+    # 才会推进——不在这里提前写入。以前在这里无条件推进，只要 MT5 查询、
+    # 账号信息、或某笔仓位归属判断当中任何一步瞬时失败，那段时间窗口的平仓
+    # 记录就会被永久跳过、再也补不回来（表现为"胜率统计漏单/不及时"）。
+    # 现在任何一步失败都保持游标原地不动，下一轮（1.5s 后）用同一个时间
+    # 窗口重试；已经成功上报过的成交由后端按 (用户, 成交编号) 去重，重复
+    # 查询/上报是安全的。
+    # Note: the cursor (_last_deal_check) only advances after this poll is
+    # confirmed fully successful below — not written eagerly up front. It
+    # used to advance unconditionally here; any single transient failure in
+    # the MT5 query, account lookup, or a position's ownership check would
+    # silently and permanently skip that time window's closes (surfacing as
+    # "missing / delayed win-rate stats"). Now any failure leaves the cursor
+    # untouched so the next poll (1.5s later) retries the same window;
+    # already-reported deals are deduped server-side by (user, deal ticket),
+    # so re-querying/re-reporting is safe.
 
     try:
         deals = mt5.history_deals_get(since, now)
     except Exception:
         return []
-    if not deals:
-        return []
+    if deals is None:
+        return []  # MT5 查询本身失败（区别于"查到了但确实没有成交"）/ the MT5 call itself failed (distinct from "queried fine, just empty")
 
     login = _current_login()
     if not login:
@@ -319,6 +334,8 @@ def _closed_trades_payload(path: str) -> list:
     out = []
     # 同一次轮询内，同一仓位是否是我们开的只查一次 / cache per-position lookups within one pass
     position_is_ours: dict[int, bool] = {}
+    fully_resolved = True  # 本轮是否每笔平仓的归属都确认成功；只有全部成功才推进游标
+                            # whether every close's ownership was confirmed this round; cursor only advances if so
     for d in deals:
         if d.entry != mt5.DEAL_ENTRY_OUT:
             continue  # 只关心平仓成交（含部分平仓）/ only closing deals (incl. partial)
@@ -328,9 +345,15 @@ def _closed_trades_payload(path: str) -> list:
                 pos_deals = mt5.history_deals_get(position=pos_id)
             except Exception:
                 pos_deals = None
-            position_is_ours[pos_id] = bool(
-                pos_deals and any(getattr(pd, "magic", 0) == PRISMX_MAGIC for pd in pos_deals)
-            )
+            if pos_deals is None:
+                # 这次没查到该仓位的完整历史，无法确定是否本平台开的仓——
+                # 跳过这笔（不缓存归属结果），并且不推进游标，留给下一轮重试。
+                # Couldn't fetch this position's full history, so ownership is
+                # undetermined — skip this deal (don't cache a result) and
+                # don't advance the cursor; retry next round.
+                fully_resolved = False
+                continue
+            position_is_ours[pos_id] = any(getattr(pd, "magic", 0) == PRISMX_MAGIC for pd in pos_deals)
         if not position_is_ours[pos_id]:
             continue  # 不是本平台开的仓位 / not a position this platform opened
 
@@ -349,6 +372,9 @@ def _closed_trades_payload(path: str) -> list:
             "dealTicket": int(d.ticket),
             "closedAt": datetime.fromtimestamp(d.time, tz=timezone.utc).isoformat(),
         })
+
+    if fully_resolved:
+        _last_deal_check[path] = now
     return out
 
 
