@@ -11,15 +11,20 @@ interface Props {
   focusSymbol?: string   // 手机端只显示这个品种 / mobile: show only this symbol
 }
 
-// 核心品种列表：品种名走 i18n（signals.symbolNames），此处只留展示用的字母与配色
-// core symbols: names come from i18n (signals.symbolNames); only letter + color live here
+// 核心品种列表：与 EA（ea/PRISMX_MarketFeed.mq5）默认推送的品种矩阵对齐——
+// 只列 EA 实际会推送的品种，避免表里出现从不会有数据的行。品种名走 i18n
+// （signals.symbolNames），此处只留展示用的字母与配色。
+// Core symbols: aligned with the EA's (ea/PRISMX_MarketFeed.mq5) default push
+// matrix — only symbols the EA actually pushes are listed, so the table never
+// shows a row that can never have data. Names come from i18n
+// (signals.symbolNames); only letter + color live here.
 const CORE_SYMBOLS: { sym: string; letter: string; color: string }[] = [
   { sym: 'XAUUSD', letter: 'X', color: '#f6c453' },
   { sym: 'XAGUSD', letter: 'X', color: '#94a3b8' },
+  { sym: 'USOIL', letter: 'O', color: '#d97757' },
   { sym: 'EURUSD', letter: 'E', color: '#6366f1' },
   { sym: 'GBPUSD', letter: 'G', color: '#a855f7' },
   { sym: 'USDJPY', letter: 'U', color: '#7c3aed' },
-  { sym: 'EURGBP', letter: 'E', color: '#8b5cf6' },
   { sym: 'BTCUSD', letter: 'B', color: '#f59e0b' },
 ]
 
