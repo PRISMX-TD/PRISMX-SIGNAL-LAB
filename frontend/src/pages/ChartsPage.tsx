@@ -71,6 +71,28 @@ function toLwPoint(b: Candle) {
   return { time: b.t as UTCTimestamp, open: b.o, high: b.h, low: b.l, close: b.c }
 }
 
+// 时间轴刻度和十字准线悬浮时间标签是 lightweight-charts 两套独立的格式化配置
+// （timeScale.tickMarkFormatter 只管坐标轴刻度；localization.timeFormatter 才
+// 管鼠标悬停时显示的精确时间）。之前只设了前者，鼠标悬停显示的还是浏览器本地
+// 时区，跟坐标轴上标的 UTC+8 对不上——这正是"图表时间还是不对"的真正原因。
+// 两处统一用同一个格式化函数，确保悬停时间与坐标轴时间口径一致。
+// Tick-mark labels and the crosshair's hover time readout are two separate
+// lightweight-charts formatting hooks (timeScale.tickMarkFormatter only
+// controls the axis ticks; localization.timeFormatter controls the precise
+// time shown while hovering). Only the former was set, so hovering still
+// showed the browser's local timezone while the axis said UTC+8 — this
+// mismatch was the actual "chart time is still wrong" bug. Both now share one
+// formatter so the hover time and the axis time always agree.
+function fmtChartTime(time: UTCTimestamp): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(time * 1000))
+}
+
 export default function ChartsPage() {
   const { t } = useTranslation()
   const { getPref, setPref, loaded } = usePrefs()
@@ -180,25 +202,16 @@ export default function ChartsPage() {
         borderColor: 'rgba(139, 70, 255, 0.15)',
         timeVisible: true,
         secondsVisible: false,
-        // 2026-07-15：按要求全站固定展示 UTC+8，并在工具条标注"UTC+8"徽标
-        // (见下方 JSX)，而不是裸时间轴——不标注时区会让用户把它当成自己的
-        // 本地时间、读错开盘/信号触发的实际时刻，这条教训依然适用，只是展示
-        // 的时区从 UTC 换回了 UTC+8。
-        // (喂价器已把时间戳归一化到真 UTC，格式化时统一转 UTC+8 展示)
-        // 2026-07-15: per request, fixed to UTC+8 site-wide, with a "UTC+8"
-        // badge in the toolbar below rather than a bare time axis — an
-        // unlabeled axis reads as the viewer's local time and gets misread;
-        // only the fixed timezone shown has changed back from UTC to UTC+8.
-        // (the feeder normalizes timestamps to true UTC; formatting converts to UTC+8)
-        tickMarkFormatter: (time: UTCTimestamp) =>
-          new Intl.DateTimeFormat('en-GB', {
-            timeZone: 'Asia/Shanghai',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-          }).format(new Date(time * 1000)),
+        // 坐标轴刻度用的格式化函数，见上方 fmtChartTime 的说明。
+        // Axis tick-mark formatter — see fmtChartTime's comment above.
+        tickMarkFormatter: fmtChartTime,
       },
+      // localization.timeFormatter 管十字准线悬停时显示的精确时间，必须跟
+      // tickMarkFormatter 用同一个函数，否则悬停时间会掉回浏览器本地时区。
+      // localization.timeFormatter controls the crosshair's hover time
+      // readout; must share the same formatter as tickMarkFormatter or the
+      // hover time falls back to the browser's local timezone.
+      localization: { timeFormatter: fmtChartTime },
       crosshair: { mode: 0 },
       width: el.clientWidth,
       height: el.clientHeight,
