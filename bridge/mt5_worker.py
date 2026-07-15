@@ -12,7 +12,14 @@ per process. With a single terminal (the common case) the attachment is kept
 across polls instead of initialize/shutdown on every tick; with multiple
 terminals we only reconnect when switching.
 """
+import logging
 from datetime import datetime, timedelta, timezone
+
+# 复用 bridge_app.py 里已经配置好 handler 的同名 logger，直接写进
+# ~/.prismx_bridge.log，不需要重新配置。
+# Reuse the same-named logger bridge_app.py already attached a handler to —
+# writes straight into ~/.prismx_bridge.log, no reconfiguration needed here.
+logger = logging.getLogger("prismx_bridge")
 
 try:
     import MetaTrader5 as mt5
@@ -343,14 +350,22 @@ def _closed_trades_payload(path: str) -> list:
 
     try:
         deals = mt5.history_deals_get(since, query_until)
-    except Exception:
+    except Exception as e:
+        logger.warning("平仓检测：history_deals_get(%s, %s) 抛异常 / threw: %s", since, query_until, e)
         return []
     if deals is None:
-        return []  # MT5 查询本身失败（区别于"查到了但确实没有成交"）/ the MT5 call itself failed (distinct from "queried fine, just empty")
+        # MT5 查询本身失败（区别于"查到了但确实没有成交"），可用 mt5.last_error() 看原因。
+        # The MT5 call itself failed (distinct from "queried fine, just empty"); mt5.last_error() has the reason.
+        logger.warning("平仓检测：history_deals_get(%s, %s) 返回 None，mt5.last_error()=%s", since, query_until, mt5.last_error())
+        return []
 
     login = _current_login()
     if not login:
+        logger.warning("平仓检测：_current_login() 拿不到账号，本轮跳过 / no login, skipping this round")
         return []
+
+    if deals:
+        logger.info("平仓检测：窗口 [%s, %s] 内查到 %d 条原始成交 / %d raw deal(s) in window", since, query_until, len(deals), len(deals))
 
     out = []
     # 同一次轮询内，同一仓位是否是我们开的只查一次 / cache per-position lookups within one pass
@@ -364,7 +379,8 @@ def _closed_trades_payload(path: str) -> list:
         if pos_id not in position_is_ours:
             try:
                 pos_deals = mt5.history_deals_get(position=pos_id)
-            except Exception:
+            except Exception as e:
+                logger.warning("平仓检测：history_deals_get(position=%s) 抛异常 / threw: %s", pos_id, e)
                 pos_deals = None
             if pos_deals is None:
                 # 这次没查到该仓位的完整历史，无法确定是否本平台开的仓——
@@ -372,9 +388,14 @@ def _closed_trades_payload(path: str) -> list:
                 # Couldn't fetch this position's full history, so ownership is
                 # undetermined — skip this deal (don't cache a result) and
                 # don't advance the cursor; retry next round.
+                logger.warning("平仓检测：仓位 %s 的历史查不到（mt5.last_error()=%s），归属未知，本轮跳过并保留游标重试", pos_id, mt5.last_error())
                 fully_resolved = False
                 continue
             position_is_ours[pos_id] = any(getattr(pd, "magic", 0) == PRISMX_MAGIC for pd in pos_deals)
+            logger.info(
+                "平仓检测：仓位 %s 共 %d 条历史成交，魔术号匹配=%s / position %s has %d deal(s), magic match=%s",
+                pos_id, len(pos_deals), position_is_ours[pos_id], pos_id, len(pos_deals), position_is_ours[pos_id],
+            )
         if not position_is_ours[pos_id]:
             continue  # 不是本平台开的仓位 / not a position this platform opened
 
@@ -394,6 +415,11 @@ def _closed_trades_payload(path: str) -> list:
             "closedAt": datetime.fromtimestamp(d.time, tz=timezone.utc).isoformat(),
         })
 
+    if deals:
+        logger.info(
+            "平仓检测：本轮产出 %d 条待上报记录，游标%s推进到 %s / this round produced %d entrie(s), cursor %s to %s",
+            len(out), "已" if fully_resolved else "未", query_until, len(out), "advanced" if fully_resolved else "NOT advanced", query_until,
+        )
     if fully_resolved:
         _last_deal_check[path] = query_until
     return out

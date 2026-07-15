@@ -40,7 +40,7 @@ except Exception:
     _TRAY_AVAILABLE = False
 
 # ---------- 版本 / Version ----------
-APP_VERSION = "1.3.10"
+APP_VERSION = "1.3.11"
 
 # ---------- 更新检测 / Update check ----------
 # 通过 GitHub Releases 检查是否有更新的安装包版本。
@@ -441,6 +441,15 @@ class BridgeEngine:
             res = poll_terminal(path)
             if res.get("error"):
                 worker_errors.append(res["error"])
+                # 只要账号在线（accounts 非空），这个错误此前完全不会展示在状态栏
+                # 也不会写日志，会悄悄跳过账号/持仓/报价/平仓检测里失败的那部分——
+                # 现在无论账号是否在线都记一行日志，不再无声无息。
+                # Whenever accounts is non-empty this error used to never surface
+                # in the status bar or the log — whichever of
+                # account/positions/quotes/closed-trade-detection failed just
+                # silently got skipped. Now it's logged regardless of whether
+                # accounts came back, instead of vanishing silently.
+                logger.warning("poll_terminal(%s) 报错 / error: %s", path, res["error"])
             acc = res.get("account")
             if acc:
                 accounts.append(acc)

@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 const GITHUB_REPO = 'https://github.com/PRISMX-TD/PRISMX-SIGNAL-LAB'
 const BRIDGE_FILENAME = 'PRISMX-Bridge-Setup.exe'
 const DOWNLOAD_URL = `${GITHUB_REPO}/releases/latest/download/${BRIDGE_FILENAME}`
-const APP_VERSION = 'v1.3.10'
+const APP_VERSION = 'v1.3.11'
 
 export default function DownloadPage() {
   const { t } = useTranslation()
