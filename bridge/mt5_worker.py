@@ -294,6 +294,67 @@ def _positions_payload() -> list:
 _TRADE_SCAN_WINDOW = timedelta(minutes=15)
 
 
+def _server_now() -> datetime | None:
+    """MT5/经纪商服务器当前时间：由某个品种最新报价的时间戳推算。
+
+    `history_deals_get()`的时间参数是按 MT5 服务器时间解读的，不是本地
+    电脑时间——经纪商服务器常年跑在自己的时区（比如 EET），跟本地电脑的
+    系统时间可以差好几个小时，且这个差值不是"时区"那种整点偏移就能简单
+    换算的（还跟经纪商服务器自己的夏令时规则有关）。用本地 `datetime.now()`
+    直接当查询参数，会让整个查询窗口偏出去好几个小时，不管窗口开多宽都
+    查不到——这是排查一次真实漏报、对照 MT5 客户端"历史"标签页的时间后
+    才发现的（本地记录 06:49:44，MT5 历史显示 01:49:44，差了 5 小时）。
+
+    优先用当前持仓品种的最新报价（最活跃，时间戳最新鲜）；没有持仓则退
+    化到报价面板的常见品种探测一个。都拿不到就返回 None，调用方据此放弃
+    这一轮平仓检测（宁可这一轮跳过，也不要用错误的时间窗口误判"没有成交"）。
+
+    The MT5/broker server's current time, inferred from a recent quote's
+    timestamp.
+
+    history_deals_get()'s date parameters are interpreted in MT5 server time,
+    not local machine time — broker servers run year-round in their own
+    timezone (e.g. EET), which can differ from the local machine's clock by
+    several hours, and that difference isn't a simple fixed offset (it also
+    depends on the broker server's own DST rules). Using local datetime.now()
+    directly as the query bound shifts the entire scan window off by hours,
+    so no window width fixes it — discovered by comparing a real missed
+    report against the MT5 client's own History tab (local log said 06:49:44,
+    MT5 History showed 01:49:44, a 5-hour gap).
+
+    Prefers the latest quote for a currently-open position's symbol (most
+    active, freshest timestamp); falls back to probing a common quote-panel
+    symbol if there's no open position. Returns None if neither works, and
+    the caller skips this round's closed-trade check entirely — better to
+    skip a round than silently scan the wrong window and conclude "nothing
+    closed".
+    """
+    symbol = None
+    try:
+        positions = mt5.positions_get()
+    except Exception:
+        positions = None
+    if positions:
+        symbol = positions[0].symbol
+    if symbol is None:
+        for base in QUOTE_SYMBOLS:
+            try:
+                if mt5.symbol_select(base, True):
+                    symbol = base
+                    break
+            except Exception:
+                continue
+    if symbol is None:
+        return None
+    try:
+        tick = mt5.symbol_info_tick(symbol)
+    except Exception:
+        return None
+    if tick is None or tick.time <= 0:
+        return None
+    return datetime.fromtimestamp(tick.time)
+
+
 def _closed_trades_payload(path: str) -> list:
     """检测该终端账号最近的平仓成交，且仅限本平台开的仓位（个人胜率用）。
 
@@ -301,16 +362,21 @@ def _closed_trades_payload(path: str) -> list:
     码——不管后续这笔平仓是网页发的指令，还是用户直接在 MT5 客户端手动点的，
     只要仓位编号对得上就会被上报。
 
-    设计说明——为什么放弃"增量游标"改成"固定回看窗口"：
-    之前用一个"游标"记录"上次检查到哪个时间点"，每轮只查游标到现在这一小段
-    （1.5~2 秒），本意是避免重复扫描。但排查一次真实漏报时发现：即使游标
-    对应的窗口精确盖住了平仓的那一刻，`history_deals_get` 依然查不到那笔
-    成交——本地电脑时钟与 MT5/经纪商服务器时钟的哪怕几秒误差，配合这么窄的
-    窗口，就足以让查询整个擦肩而过。窗口越窄，对时钟精度的要求就越苛刻，
-    出这类问题的概率反而越高。改成每轮都固定回看最近 15 分钟，不管时钟
-    有没有偏差、MT5 内部同步快慢，15 分钟的窗口都能稳稳盖住——代价是同一笔
-    成交会在窗口有效期内被反复查到、反复上报，但后端按 (用户, 成交编号)
-    去重，重复上报没有副作用。用一点点重复查询的开销换彻底不再漏报。
+    设计说明——两层修复：
+    ① 为什么放弃"增量游标"改成"固定回看窗口"：之前用一个"游标"记录"上次
+       检查到哪个时间点"，每轮只查游标到现在这一小段（1.5~2 秒），本意是
+       避免重复扫描；改成每轮都固定回看最近 15 分钟，不管有多少毫秒/秒级
+       误差都能稳稳盖住，代价是同一笔成交会被反复查到、反复上报，但后端
+       按 (用户, 成交编号) 去重，无副作用。
+    ② 更关键的一层：查询用的"现在"时间，必须是 MT5 服务器时间，不能是本地
+       电脑时间。真实排查一次漏报时，对照 MT5 客户端"历史"标签页发现记录
+       时间是 01:49:44，而本地日志（用 datetime.now()）记的是 06:49:44——
+       差了整整 5 小时。这不是"时钟稍微不准"的量级，是"参照系整个用错了"：
+       经纪商服务器常年跑在自己的时区，`history_deals_get()` 的时间参数
+       按服务器时间解读，用本地时间传参会让整段查询窗口偏出去好几个小时，
+       不管①的窗口开多宽都补不回来（15 分钟 vs 5 小时偏差，差两个数量级）。
+       现在改用 _server_now()（从最新报价的时间戳推算服务器时间）而不是
+       datetime.now() 来算查询边界，从根上解决参照系错位的问题。
 
     Detect this terminal's account's recent closing deals, restricted to
     positions this platform opened (for personal win-rate stats). Checks each
@@ -319,22 +385,34 @@ def _closed_trades_payload(path: str) -> list:
     was a web command or a manual click in the MT5 terminal, as long as the
     position id matches.
 
-    Design note — why a fixed lookback window replaced an incremental cursor:
-    A cursor used to track "checked up to when", with each poll only
-    scanning the ~1.5-2s since the last check, to avoid rescanning. But
-    debugging a real missed report revealed that even when the cursor's
-    window precisely bracketed the moment of the close, history_deals_get
-    still didn't find it — a clock difference of even a few seconds between
-    the local machine and the MT5/broker server, combined with such a narrow
-    window, was enough for the query to miss it entirely. The narrower the
-    window, the more it demands clock precision, and the more likely this
-    class of bug becomes. Every poll now always rescans the last 15 minutes
-    regardless of any clock skew or MT5-side sync delay — the cost is the
-    same deal getting re-queried/re-reported repeatedly while still within
-    the window, which is harmless since the backend dedupes by (user, deal
-    ticket). A little redundant querying in exchange for never missing one.
+    Design note — two layers of fix:
+    (1) Why a fixed lookback window replaced an incremental cursor: a cursor
+        used to track "checked up to when", each poll only scanning the
+        ~1.5-2s since the last check, to avoid rescanning. Every poll now
+        always rescans the last 15 minutes instead, comfortably absorbing any
+        millisecond/second-level jitter — the same deal may be re-queried and
+        re-reported while still in the window, harmless since the backend
+        dedupes by (user, deal ticket).
+    (2) The more critical layer: the "now" used for the query must be MT5
+        server time, not the local machine's clock. Debugging a real missed
+        report against the MT5 client's own History tab found the deal
+        recorded at 01:49:44 there, while the local log (using
+        datetime.now()) recorded 06:49:44 — a 5-hour gap. That's not clock
+        jitter, that's an entirely wrong reference frame: broker servers run
+        year-round in their own timezone, and history_deals_get()'s date
+        parameters are interpreted in that server time — passing local time
+        shifts the whole scan window off by hours, which no width from (1)
+        can compensate for (15 minutes vs. a 5-hour gap is two orders of
+        magnitude short). Now uses _server_now() (inferred from a fresh
+        quote's timestamp) instead of datetime.now() for the query bounds,
+        fixing the reference-frame mismatch at its root.
     """
-    now = datetime.now()
+    # 必须用服务器时间，不能用本地电脑时间——见 _server_now() 的详细说明。
+    # Must use server time, not the local machine's clock — see _server_now()'s comment.
+    now = _server_now()
+    if now is None:
+        logger.warning("平仓检测：拿不到服务器时间（没有持仓也探测不到品种报价），本轮跳过 / can't determine server time, skipping this round")
+        return []
     since = now - _TRADE_SCAN_WINDOW
 
     try:
