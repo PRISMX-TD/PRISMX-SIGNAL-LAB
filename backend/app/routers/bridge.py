@@ -465,11 +465,19 @@ async def bridge_positions(
 class BridgeQuote(BaseModel):
     symbol: str = Field(max_length=32)
     # 上报该报价的 MT5 账号 login：下单确认页按用户选中的账户取对应报价，
-    # 而不是跨账户合并后的一份，不同交易商的报价可能不同。
+    # 而不是跨账户合并后的一份，不同交易商的报价可能不同。可选（而非必填）
+    # 是迁移期的兼容考虑：旧版 Bridge.exe（v1.3.7 及更早）还没打包发布这个
+    # 新字段，若设为必填，旧版桌面程序上报的每一条报价都会被 422 拒收——
+    # 见 manager.update_quotes，缺 login 的条目会被安静丢弃而不是报错。
     # The MT5 login that reported this quote: the order-confirmation page
     # looks up the quote for whichever account the user selected, rather than
     # a cross-account merged one — different brokers can quote differently.
-    login: str = Field(pattern=LOGIN_PATTERN)
+    # Optional (not required) for migration compatibility: older Bridge.exe
+    # builds (v1.3.7 and earlier) haven't been repackaged with this new field
+    # yet: making it required would 422-reject every quote reported by the
+    # currently-deployed desktop app — see manager.update_quotes, which
+    # silently drops entries missing login instead of erroring.
+    login: str | None = Field(default=None, pattern=LOGIN_PATTERN)
     bid: float
     ask: float
     digits: int | None = Field(default=None, ge=0, le=10)
