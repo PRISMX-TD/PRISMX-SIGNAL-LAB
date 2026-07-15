@@ -96,7 +96,22 @@ def _webpush_one(
             },
             data=payload,
             vapid_private_key=pem,
-            vapid_claims=vapid_claims,
+            # 必须按订阅复制：pywebpush 会把 aud（按第一个 endpoint 的推送服务
+            # 域名推导）原地写进传入的 claims 字典且此后不再覆盖。调用方在循环里
+            # 复用同一个字典时，第一个订阅是哪家推送服务（FCM/Apple/Mozilla），
+            # aud 就永远是哪家——后续所有落在其它推送服务上的订阅（典型：桌面
+            # Chrome + iPhone 混用的用户）全部因 aud 不匹配被 403 BadJwtToken
+            # 拒收，而 403 不在清理名单里，会一直静默失败。生产日志已实锤。
+            # Must copy per subscription: pywebpush writes aud (derived from the
+            # first endpoint's push-service origin) into the caller's claims
+            # dict in place and never overwrites it. With one dict reused
+            # across a loop, whichever push service the first subscription
+            # lives on (FCM/Apple/Mozilla) becomes the aud forever — every
+            # later subscription on a different service (typical: a user with
+            # desktop Chrome + an iPhone) gets rejected 403 BadJwtToken, and
+            # 403 isn't in the prune list, so it fails silently indefinitely.
+            # Confirmed in production logs.
+            vapid_claims=dict(vapid_claims),
             headers=headers,
         )
         return True, False

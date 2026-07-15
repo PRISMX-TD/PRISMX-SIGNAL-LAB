@@ -477,7 +477,9 @@
     "autoPtpFraction": "平仓比例",
     "autoScopeNote": "止损只会朝有利方向移动，绝不放大风险。指令经由桥接程序在你的 MT5 上执行，桥接离线时不会有任何动作。",
     "autoSaved": "自动仓位管理设置已保存",
-    "autoSaveError": "保存失败"
+    "autoSaveError": "保存失败",
+    "notifUnsupported": "当前打开方式不支持推送通知。iPhone/iPad 用户请先在 Safari 分享菜单中「添加到主屏幕」，然后从主屏幕图标打开本站再开启通知（需 iOS 16.4 及以上）。",
+    "notifDeviceHint": "通知已在账号层面开启，但这台设备还未授权推送。请把上方开关关掉再打开一次，为本设备完成授权。"
   },
   "charts": {
     "title": "行情图表",

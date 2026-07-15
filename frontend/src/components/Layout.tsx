@@ -5,6 +5,8 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { LiveProvider, useLive } from '../store/live'
 import { useAuth } from '../store/auth'
+import { notificationApi, pushApi } from '../api/client'
+import { ensurePushSubscription, pushSupported } from '../utils/push'
 import Logo from './Logo'
 import LanguageToggle from './LanguageToggle'
 import EAStatusBadge from './EAStatusBadge'
@@ -205,6 +207,36 @@ export default function Layout() {
 
   // 路由切换时自动关闭面板 / close the sheet on navigation
   useEffect(() => { setMoreOpen(false) }, [location.pathname])
+
+  // 每次进入 App 补齐"本设备"的推送订阅。通知开关是账号级的（跨设备同步），
+  // 推送订阅却是设备级的——此前只在用户翻动开关的那台设备上创建。桌面开启后
+  // 手机端开关显示"已开启"但手机从未订阅，一条通知也收不到。仅在本设备已授
+  // 权（说明用户在这台设备上主动开过通知）且账号开关为开时静默补订阅/重新上
+  // 报，权限未授予时绝不弹窗打扰。
+  // Ensure THIS device's push subscription on every app entry. The toggle is
+  // account-level (synced across devices) but a subscription is per-device —
+  // it was only ever created on the device where the user flipped the toggle.
+  // Enable on desktop and the phone showed "on" with no subscription, so it
+  // never received anything. Runs silently only when this device already has
+  // permission (the user opted in here at some point) and the account toggle
+  // is on; never prompts.
+  useEffect(() => {
+    if (!pushSupported() || Notification.permission !== 'granted') return
+    let cancelled = false
+    void (async () => {
+      try {
+        const prefs = await notificationApi.getPrefs()
+        if (cancelled || !prefs.enabled) return
+        await ensurePushSubscription(
+          async () => (await pushApi.getVapidKey()).publicKey,
+          (endpoint, keys) => pushApi.subscribe(endpoint, keys),
+        )
+      } catch {
+        // 静默失败：这里只是自愈，不该打扰正常使用 / silent — self-healing only
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   return (
     <LiveProvider>

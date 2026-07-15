@@ -477,7 +477,9 @@
     "autoPtpFraction": "close",
     "autoScopeNote": "The stop only ever moves in your favor — risk is never widened. Commands execute on your MT5 via the bridge; nothing happens while the bridge is offline.",
     "autoSaved": "Auto-management settings saved",
-    "autoSaveError": "Failed to save"
+    "autoSaveError": "Failed to save",
+    "notifUnsupported": "Push notifications are not available in this browsing mode. On iPhone/iPad, tap Share in Safari and choose \"Add to Home Screen\", then open the site from that icon and enable notifications (requires iOS 16.4+).",
+    "notifDeviceHint": "Notifications are enabled for your account, but this device has not been authorized yet. Toggle the switch off and on once to authorize this device."
   },
   "charts": {
     "title": "Charts",

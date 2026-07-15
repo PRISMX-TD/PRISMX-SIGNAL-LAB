@@ -4,7 +4,7 @@ import { Link } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { userApi, notificationApi, pushApi } from "../api/client"
 import { fmtTime, fmtDate, localizeApiError } from "../api/utils"
-import { subscribePush, unsubscribePush, getSWReg } from "../utils/push"
+import { subscribePush, unsubscribePush, getSWReg, pushSupported } from "../utils/push"
 
 type AccountInfo = Awaited<ReturnType<typeof userApi.me>>
 
@@ -128,6 +128,23 @@ export default function AccountPage() {
       return
     }
 
+    // 当前环境根本没有 Web Push 能力时直接明确拒绝，不再静默"假开启"。
+    // 此前 subscribePush 拿不到 SW 注册就默默返回 null，开关照样翻成 ON、
+    // 偏好照样落库——iOS 用户在 Safari 里（或书签式主屏幕打开）看到"已开启"
+    // 却永远收不到通知，正是这个假开启造成的。iOS 需要先把网站添加到主屏幕、
+    // 再从主屏幕图标以独立模式打开（iOS 16.4+），Push API 才存在。
+    // Refuse loudly when this environment has no Web Push capability at all —
+    // no more silent "fake enable". Previously subscribePush quietly returned
+    // null without a SW registration while the toggle still flipped ON and
+    // prefs were saved; an iOS user in Safari (or a bookmark-style home-screen
+    // launch) saw "enabled" yet could never receive anything. On iOS the site
+    // must be added to the Home Screen and launched from that icon in
+    // standalone mode (iOS 16.4+) before the Push API even exists.
+    if (!pushSupported()) {
+      setNotifMsg({ kind: "err", text: t("account.notifUnsupported") })
+      return
+    }
+
     // 开启：权限校验后立即乐观翻转开关，落库与订阅链路并行后台执行。
     // Turn on: after permission, flip optimistically; run prefs save + push subscription in parallel.
     setNotifLoading(true)
@@ -143,14 +160,27 @@ export default function AccountPage() {
         return
       }
 
+      // 白名单为空时默认全选：类别/事件都是白名单语义（空 = 什么都不推），
+      // 用户只翻总开关、没逐个勾选时会"已开启却一条都收不到"。开启的直觉
+      // 语义就是"给我发通知"，所以空白名单在开启时补成全选，用户仍可再取消勾选。
+      // Default to select-all when the whitelists are empty: both categories
+      // and events are whitelist-semantics (empty = push nothing), so a user
+      // who only flips the master toggle without ticking boxes gets "enabled
+      // yet receives nothing". Flipping ON plainly means "send me stuff" —
+      // fill empty whitelists with everything; they can still untick.
+      const cats = notifCats.length > 0 ? notifCats : allCats
+      const events = notifEvents.length > 0 ? notifEvents : [...EVENT_TYPES]
+
       // 乐观翻转：开关立刻变 ON，无需等待后续网络 / flip now, don't wait on network
       setNotifEnabled(true)
+      setNotifCats(cats)
+      setNotifEvents(events)
 
       // 并行：(a) 落库通知偏好；(b) 取 VAPID + 注册 SW + 订阅 + 上报订阅。
       // Parallel: (a) save prefs; (b) fetch VAPID + warm SW + subscribe + report.
       const vapidPromise = pushApi.getVapidKey()
       await Promise.all([
-        notificationApi.putPrefs(true, notifCats, notifEvents),
+        notificationApi.putPrefs(true, cats, events),
         (async () => {
           const [vapid] = await Promise.all([vapidPromise, getSWReg()])
           const sub = await subscribePush(vapid.publicKey)
@@ -357,6 +387,22 @@ export default function AccountPage() {
                     {t("nav.upgrade")}
                   </Link>
                 </p>
+              )}
+              {/* 账号级开关已开、但"这台设备"还没法收推送时给出设备级提示——
+                  开关状态跨设备同步，很容易让人误以为手机也已生效。两种情形：
+                  ① 本环境没有 Push API（iOS 未从主屏幕独立打开）；② 有 API
+                  但本设备从未授权过通知权限。
+                  Device-level hint when the account toggle is ON but THIS
+                  device can't receive pushes yet — the toggle syncs across
+                  devices, which easily reads as "the phone works too". Two
+                  cases: ① no Push API here (iOS not launched standalone from
+                  the Home Screen); ② API exists but this device never granted
+                  notification permission. */}
+              {notifEnabled && !pushSupported() && (
+                <p className="text-xs text-amber-400">{t("account.notifUnsupported")}</p>
+              )}
+              {notifEnabled && pushSupported() && Notification.permission !== "granted" && (
+                <p className="text-xs text-amber-400">{t("account.notifDeviceHint")}</p>
               )}
               {notifEnabled && (
                 <div className="space-y-2 pl-1">

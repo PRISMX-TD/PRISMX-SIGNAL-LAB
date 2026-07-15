@@ -6,6 +6,25 @@
     <meta name="color-scheme" content="dark" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- PWA manifest（display: standalone）。iOS 16.4+ 的 Web Push 只对"以独立
+         模式从主屏幕启动"的 Web App 开放：没有这份 manifest 时，加到主屏幕的
+         图标只是个 Safari 书签，打开后 Notification/PushManager 根本不存在，
+         通知永远不可能出现。Android 端有了它才是可安装的真 PWA。
+         PWA manifest (display: standalone). iOS 16.4+ only exposes Web Push to
+         web apps launched standalone from the Home Screen: without this
+         manifest the home-screen icon is just a Safari bookmark where
+         Notification/PushManager don't exist at all. It also makes the app a
+         real installable PWA on Android. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#06030f" />
+    <!-- iOS 主屏幕 Web App 声明与图标（iOS 不读 manifest 的 icons，只认
+         apple-touch-icon）/ iOS home-screen web-app declaration & icon (iOS
+         ignores manifest icons; only apple-touch-icon is honored) -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="PRISMX" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <title>PRISMX Signal Lab · 棱镜信号实验室</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
