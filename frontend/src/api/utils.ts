@@ -115,6 +115,7 @@ export function baseSymbol(symbol: string): string {
 // or i18n key names, which still only recognize BTCUSD.
 const SYMBOL_DISPLAY_NAMES: Record<string, string> = {
   BTCUSD: 'BTCUSDT',
+  USOIL: 'WTI',
 }
 
 export function displaySymbol(symbol: string): string {

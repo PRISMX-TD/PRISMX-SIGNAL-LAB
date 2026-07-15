@@ -44,8 +44,17 @@ CURRENT_RATIOS_URL = "https://fxssi.com/api/current-ratios"
 REFRESH_INTERVAL_SECONDS = 5 * 60  # 与前端原轮询周期一致 / matches the old frontend poll cadence
 FETCH_TIMEOUT_SECONDS = 15
 
-# 关注的品种 / symbols we care about
-WATCH_SYMBOLS = {"EURUSD", "GBPUSD", "USDJPY", "EURGBP", "XAUUSD", "XAGUSD"}
+# 关注的品种：与 EA（ea/PRISMX_MarketFeed.mq5）默认推送的品种矩阵对齐。
+# FXSSI 不一定对每个品种都有数据（尤其 USOIL/BTCUSD 这类非主流外汇对）——
+# _fetch_once() 已经按 "average is None 就跳过" 处理，抓不到的品种自然不
+#出现在结果里，前端相应显示占位，不会报错。
+# Symbols we care about: aligned with the EA's (ea/PRISMX_MarketFeed.mq5)
+# default push matrix. FXSSI won't necessarily have data for every one of
+# these (especially USOIL/BTCUSD, which aren't mainstream FX pairs) —
+# _fetch_once() already skips a symbol when "average is None", so anything
+# unavailable simply doesn't appear in the result and the frontend shows its
+# placeholder instead of erroring.
+WATCH_SYMBOLS = {"XAUUSD", "XAGUSD", "USOIL", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD"}
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",

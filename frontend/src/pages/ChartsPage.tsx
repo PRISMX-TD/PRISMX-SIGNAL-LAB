@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next'
 import { createChart, ColorType, type IChartApi, type ISeriesApi, type UTCTimestamp } from 'lightweight-charts'
 import { chartApi } from '../api/client'
 import type { Candle } from '../api/types'
+import { displaySymbol } from '../api/utils'
 import { usePrefs } from '../store/prefs'
 import { useLive, useQuotes } from '../store/live'
 import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
@@ -348,7 +349,7 @@ export default function ChartsPage() {
           >
             {PRESET_SYMBOLS.map((s) => (
               <option key={s} value={s}>
-                {s}
+                {displaySymbol(s)}
               </option>
             ))}
           </select>
