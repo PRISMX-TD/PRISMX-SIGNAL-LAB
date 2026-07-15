@@ -311,7 +311,7 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
             </span>
             <span className="text-sm text-neutral-400">/{t('landing.prPerMonth')}</span>
           </div>
-          <p className="mt-2 text-sm text-neutral-400">{t('landing.prSponsor')}</p>
+
           <ul className="mt-7 space-y-3">
             {proFeatures.map((k) => (
               <li key={k} className="flex gap-2.5 text-[13.5px] leading-relaxed text-neutral-200">
@@ -377,7 +377,7 @@ function Foot({ t }: { t: T }) {
         </nav>
 
         {/* 版权 / copyright */}
-        <p className="mt-8 text-[12px] text-neutral-600">© {new Date().getFullYear()} Signal Lab · {t('landing.footerRights')}</p>
+        <p className="mt-8 text-[12px] text-neutral-600">© {new Date().getFullYear()} PRISMX · {t('landing.footerRights')}</p>
 
         {/* 风险提示 / risk disclaimer */}
         <p className="mt-6 max-w-3xl border-t border-white/[0.05] pt-6 text-[11.5px] leading-relaxed text-neutral-600">{t('landing.footerRisk')}</p>
