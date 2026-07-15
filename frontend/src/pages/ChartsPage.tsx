@@ -23,20 +23,18 @@ import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import DrawLayer from '../components/charts/DrawLayer'
 import ChartOrderModal from '../components/ChartOrderModal'
 
-// 固定品种预设：贵金属 / 能源 / 热门货币对。
-// 须与 feeder/chart_feeder.py 的 BASE_SYMBOLS 保持一致（该文件仍会拉取更多品种，
-// 多拉的不会在这里展示，无需为了收窄这个列表而重新打包喂价器）。
-// Fixed symbol presets: metals / energy / popular FX pairs. Must stay a
-// subset of feeder/chart_feeder.py's BASE_SYMBOLS (the feeder can keep
-// fetching more than this list shows; no need to rebuild it just to narrow
-// this selector).
-const PRESET_SYMBOLS = ['XAUUSD', 'XAGUSD', 'USOIL', 'EURUSD', 'GBPUSD', 'USDJPY']
+// 固定品种预设：须与 EA（ea/PRISMX_MarketFeed.mq5）默认推送的品种矩阵一致——
+// 只列 EA 实际会推送的品种，避免选择器里出现从不会有数据的品种。
+// Fixed symbol presets: must match the EA's (ea/PRISMX_MarketFeed.mq5) default
+// push matrix — only symbols the EA actually pushes are listed, so the picker
+// never offers a symbol that can never have data.
+const PRESET_SYMBOLS = ['XAUUSD', 'XAGUSD', 'USOIL', 'EURUSD', 'GBPUSD', 'USDJPY', 'BTCUSD']
 
 // 图表价格轴的小数位数：贵金属/原油 2~3 位，外汇对按经纪商常见的 5 位报价
-// （日元对 3 位）。未在表中的品种回退到 2 位。
+// （日元对 3 位），加密货币 2 位。未在表中的品种回退到 2 位。
 // Decimal precision for the price scale: metals/oil use 2~3 digits, FX pairs
-// use the broker-standard 5-digit quoting (JPY pairs use 3). Unlisted
-// symbols fall back to 2 digits.
+// use the broker-standard 5-digit quoting (JPY pairs use 3), crypto uses 2.
+// Unlisted symbols fall back to 2 digits.
 const SYMBOL_DECIMALS: Record<string, number> = {
   XAUUSD: 2,
   XAGUSD: 3,
@@ -44,6 +42,7 @@ const SYMBOL_DECIMALS: Record<string, number> = {
   EURUSD: 5,
   GBPUSD: 5,
   USDJPY: 3,
+  BTCUSD: 2,
 }
 const INTERVALS: { code: string; label: string }[] = [
   { code: '1', label: '1m' },
