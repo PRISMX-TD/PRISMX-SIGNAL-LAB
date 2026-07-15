@@ -88,10 +88,11 @@ export const FOCUS_TONE: Record<FocusState, { color: string; chipBg: string; glo
 export const FOCUS_DOT: Record<FocusState, string> = { WATCH: '#94a3b8', LONG: '#2ee07e', SHORT: '#ff4d67' }
 
 // 多周期趋势要展示的固定周期顺序 / fixed order of timeframes shown in the trend widget
-export const TREND_TFS = ['M5', 'M15', 'M30', 'H1', 'H4'] as const
+export const TREND_TFS = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4'] as const
 
-// 多周期加权：越大周期权重越高 / per-timeframe weights, larger TF weighs more
-const TF_WEIGHT: Record<string, number> = { M5: 1, M15: 1, M30: 2, H1: 3, H4: 3 }
+// 多周期加权：越大周期权重越高，M1 噪声最大给最低权重 / per-timeframe weights,
+// larger TF weighs more; M1 is the noisiest so it gets the lowest weight
+const TF_WEIGHT: Record<string, number> = { M1: 1, M5: 1, M15: 1, M30: 2, H1: 3, H4: 3 }
 // 表态阈值：|score| ≥ 此值才看多/看空，中间地带为观望 / stance threshold
 const STANCE_THRESHOLD = 3
 

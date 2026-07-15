@@ -115,7 +115,6 @@ export function baseSymbol(symbol: string): string {
 // or i18n key names, which still only recognize BTCUSD.
 const SYMBOL_DISPLAY_NAMES: Record<string, string> = {
   BTCUSD: 'BTCUSDT',
-  USOIL: 'WTI',
 }
 
 export function displaySymbol(symbol: string): string {
@@ -132,8 +131,8 @@ const CONTRACT_SIZE: Record<string, number> = {
   XAGUSD: 5000,
   BTCUSD: 1,
   ETHUSD: 1,
-  USOIL: 1000, // 常见经纪商 WTI CFD 标准手规模(桶)，各家可能不同,仅作量级提示
-               // common broker standard-lot size (barrels) for WTI CFDs; varies by broker, indicative only
+  WTI: 1000, // 常见经纪商 WTI CFD 标准手规模(桶)，各家可能不同,仅作量级提示
+             // common broker standard-lot size (barrels) for WTI CFDs; varies by broker, indicative only
 }
 const DEFAULT_CONTRACT_SIZE = 100000 // 标准外汇对 / standard FX pairs
 
@@ -161,7 +160,7 @@ export function contractSize(symbol: string): number {
 // wrong number.
 const USD_MARGIN_BASIS: Record<string, 'quote' | 'base'> = {
   EURUSD: 'quote', GBPUSD: 'quote', AUDUSD: 'quote', NZDUSD: 'quote',
-  XAUUSD: 'quote', XAGUSD: 'quote', BTCUSD: 'quote', ETHUSD: 'quote', USOIL: 'quote',
+  XAUUSD: 'quote', XAGUSD: 'quote', BTCUSD: 'quote', ETHUSD: 'quote', WTI: 'quote',
   USDJPY: 'base', USDCHF: 'base', USDCAD: 'base',
 }
 

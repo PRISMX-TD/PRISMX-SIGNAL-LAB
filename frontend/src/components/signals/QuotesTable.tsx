@@ -21,7 +21,7 @@ interface Props {
 const CORE_SYMBOLS: { sym: string; letter: string; color: string }[] = [
   { sym: 'XAUUSD', letter: 'X', color: '#f6c453' },
   { sym: 'XAGUSD', letter: 'X', color: '#94a3b8' },
-  { sym: 'USOIL', letter: 'O', color: '#d97757' },
+  { sym: 'WTI', letter: 'W', color: '#d97757' },
   { sym: 'EURUSD', letter: 'E', color: '#6366f1' },
   { sym: 'GBPUSD', letter: 'G', color: '#a855f7' },
   { sym: 'USDJPY', letter: 'U', color: '#7c3aed' },

@@ -29,7 +29,7 @@ import ChartOrderModal from '../components/ChartOrderModal'
 // Fixed symbol presets: must match the EA's (ea/PRISMX_MarketFeed.mq5) default
 // push matrix — only symbols the EA actually pushes are listed, so the picker
 // never offers a symbol that can never have data.
-const PRESET_SYMBOLS = ['XAUUSD', 'XAGUSD', 'USOIL', 'EURUSD', 'GBPUSD', 'USDJPY', 'BTCUSD']
+const PRESET_SYMBOLS = ['XAUUSD', 'XAGUSD', 'WTI', 'EURUSD', 'GBPUSD', 'USDJPY', 'BTCUSD']
 
 // 图表价格轴的小数位数：贵金属/原油 2~3 位，外汇对按经纪商常见的 5 位报价
 // （日元对 3 位），加密货币 2 位。未在表中的品种回退到 2 位。
@@ -39,7 +39,7 @@ const PRESET_SYMBOLS = ['XAUUSD', 'XAGUSD', 'USOIL', 'EURUSD', 'GBPUSD', 'USDJPY
 const SYMBOL_DECIMALS: Record<string, number> = {
   XAUUSD: 2,
   XAGUSD: 3,
-  USOIL: 2,
+  WTI: 2,
   EURUSD: 5,
   GBPUSD: 5,
   USDJPY: 3,
