@@ -51,6 +51,10 @@ feeder/*.spec
 # ===== 文档 / Markdown（不纳入仓库）=====
 *.md
 
+# ===== EA：本地/MT5 机器专用，不纳入公开仓库 =====
+# EA: local/MT5-machine only, kept out of the public repo
+ea/
+
 # ===== 编辑器 / 系统文件 =====
 .vscode/
 .idea/
