@@ -40,7 +40,7 @@ except Exception:
     _TRAY_AVAILABLE = False
 
 # ---------- 版本 / Version ----------
-APP_VERSION = "1.3.9"
+APP_VERSION = "1.3.10"
 
 # ---------- 更新检测 / Update check ----------
 # 通过 GitHub Releases 检查是否有更新的安装包版本。
@@ -536,12 +536,21 @@ class BridgeEngine:
             pass
 
         # 3c) 上报新检测到的真实平仓明细（个人胜率）；失败则入队下一轮重试。
+        # 这一步之前完全不写日志，无论成功失败都看不出"到底有没有尝试上报"，
+        # 排查漏报问题时只能靠猜——现在两种结果都记一行，成交编号写进去，
+        # 方便日后对着后端日志核对是否真的到账。
         # Report newly detected real closed-trade legs (personal win-rate);
-        # queue for retry on failure.
+        # queue for retry on failure. This step used to log nothing either
+        # way, making "did it even try to report" unknowable when debugging a
+        # missing trade — now both outcomes are logged with the deal
+        # ticket(s), so it can be cross-checked against the backend log.
         if closed_trades:
+            tickets = [t.get("dealTicket") for t in closed_trades]
             try:
                 _post_json(f"{self.backend}/api/bridge/trade-history", {"data": closed_trades}, self.token)
-            except Exception:
+                logger.info("已上报平仓明细 / reported closed trades: dealTickets=%s", tickets)
+            except Exception as e:
+                logger.warning("平仓明细上报失败，已入队重试 / closed-trade report failed, queued for retry: dealTickets=%s err=%s", tickets, e)
                 self._pending_trades.extend(closed_trades)
                 _save_pending_trades(self._pending_trades)
 

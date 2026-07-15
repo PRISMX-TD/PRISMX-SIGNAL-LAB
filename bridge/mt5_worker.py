@@ -727,7 +727,25 @@ def poll_terminal(path: str, orders: list[dict] | None = None) -> dict:
         out["quotes"] = _quotes_payload(QUOTE_SYMBOLS, suffix)
         for cmd in orders or []:
             out["results"].append(_dispatch_command(cmd))
-        out["closedTrades"] = _closed_trades_payload(path)
     except Exception as e:
         out["error"] = str(e)
+
+    # 已平仓明细检测独立成一个 try，不与上面账号/持仓/报价/下单共用同一个
+    # 失败开关——以前四者中任何一个抛异常都会让整个 try 提前中断，"已平仓
+    # 明细检测"这一步就完全不会被执行到（哪怕前面几步早已成功过、上报过），
+    # 这正是个人胜率统计"平仓记录莫名其妙不上报"的一个根因，且比
+    # _closed_trades_payload 内部的重试逻辑更上一层，之前两轮修复都没覆盖到。
+    # Closed-trade detection gets its own try, independent from the
+    # account/positions/quotes/orders block above — previously, an exception
+    # in any of those four would abort the shared try early, so closed-trade
+    # detection never even ran that poll (even though the earlier steps had
+    # already succeeded and reported fine). This was a root cause of closed
+    # trades silently never being reported, one level above
+    # _closed_trades_payload's own internal retry logic, and wasn't covered
+    # by either of the previous two fixes.
+    try:
+        out["closedTrades"] = _closed_trades_payload(path)
+    except Exception as e:
+        if not out["error"]:
+            out["error"] = str(e)
     return out
