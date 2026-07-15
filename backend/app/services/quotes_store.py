@@ -55,8 +55,21 @@ ACTIVE_WINDOW_SECONDS = 30
 
 
 def get_active_symbols() -> list[str]:
-    """当前仍在被 EA 推送的品种（近 ACTIVE_WINDOW_SECONDS 秒内有报价更新）。
+    """当前仍在被 EA 推送的品种（近 ACTIVE_WINDOW_SECONDS 秒内有报价更新），
+    顺序对齐 EA 的 InpSymbols 输入顺序，而不是按字母排序。
+    _quotes 是 Python dict，保留"某个品种第一次被写入"时的插入顺序——
+    EA 每次推送都按 InpSymbols 解析出的顺序遍历品种，所以只要某个品种的
+    报价在本次后端进程生命周期内是第一次出现，它在 _quotes 里的位置就等于
+    它在 InpSymbols 里的位置；同一品种之后不管报价怎么变，重新赋值已存在的
+    key 不会改变它在 dict 里的顺序。
     Symbols the EA is currently pushing (had a quote update within the last
-    ACTIVE_WINDOW_SECONDS seconds)."""
+    ACTIVE_WINDOW_SECONDS seconds), ordered to match the EA's InpSymbols
+    input order rather than alphabetically. _quotes is a Python dict, which
+    preserves the insertion order of each symbol's first-ever write — the EA
+    always iterates symbols in InpSymbols order when pushing, so as long as a
+    symbol's quote is new within this backend process's lifetime, its
+    position in _quotes matches its position in InpSymbols; re-assigning an
+    already-existing key's value never reorders it.
+    """
     cutoff = time.time() - ACTIVE_WINDOW_SECONDS
-    return sorted(sym for sym, ts in _updated_at.items() if ts >= cutoff)
+    return [sym for sym in _quotes if _updated_at.get(sym, 0) >= cutoff]
