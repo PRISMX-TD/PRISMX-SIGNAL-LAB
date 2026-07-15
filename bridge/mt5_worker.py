@@ -437,6 +437,17 @@ def _closed_trades_payload(path: str) -> list:
     out = []
     # 同一次轮询内，同一仓位是否是我们开的只查一次 / cache per-position lookups within one pass
     position_is_ours: dict[int, bool] = {}
+    # 仓位总手续费+隔夜利息 与 全部平仓成交的总手数——用于按手数占比把费用分摊
+    # 到每一笔平仓上。有些经纪商把手续费整笔记在开仓成交上、平仓成交的
+    # commission 字段是 0；只看平仓这一笔会漏掉开仓那笔的手续费，导致上报的
+    # 盈亏比 MT5 实际显示的偏高（少算了手续费）。
+    # Total commission+swap for the position, and total volume across all its
+    # closing deals — used to allocate fees proportionally to each close.
+    # Some brokers record the full commission on the opening deal, leaving
+    # the closing deal's own commission field at 0; looking only at the
+    # closing deal then misses that fee, overstating the reported profit
+    # versus what MT5 itself shows.
+    position_fees: dict[int, tuple[float, float]] = {}  # pos_id -> (total_fees, total_out_volume)
     for d in deals:
         if d.entry != mt5.DEAL_ENTRY_OUT:
             continue  # 只关心平仓成交（含部分平仓）/ only closing deals (incl. partial)
@@ -461,9 +472,13 @@ def _closed_trades_payload(path: str) -> list:
                 logger.warning("平仓检测：仓位 %s 的历史查不到（mt5.last_error()=%s），归属未知，本轮跳过，下一轮重试", pos_id, mt5.last_error())
                 continue
             position_is_ours[pos_id] = any(getattr(pd, "magic", 0) == PRISMX_MAGIC for pd in pos_deals)
+            total_fees = sum(float(pd.commission) + float(pd.swap) for pd in pos_deals)
+            total_out_volume = sum(float(pd.volume) for pd in pos_deals if pd.entry == mt5.DEAL_ENTRY_OUT) or 1.0
+            position_fees[pos_id] = (total_fees, total_out_volume)
             logger.info(
-                "平仓检测：仓位 %s 共 %d 条历史成交，魔术号匹配=%s / position %s has %d deal(s), magic match=%s",
-                pos_id, len(pos_deals), position_is_ours[pos_id], pos_id, len(pos_deals), position_is_ours[pos_id],
+                "平仓检测：仓位 %s 共 %d 条历史成交，魔术号匹配=%s，总手续费+隔夜利息=%.2f / "
+                "position %s has %d deal(s), magic match=%s, total commission+swap=%.2f",
+                pos_id, len(pos_deals), position_is_ours[pos_id], total_fees, pos_id, len(pos_deals), position_is_ours[pos_id], total_fees,
             )
         if not position_is_ours[pos_id]:
             continue  # 不是本平台开的仓位 / not a position this platform opened
@@ -471,14 +486,24 @@ def _closed_trades_payload(path: str) -> list:
         # 平仓成交的方向与原仓位相反：SELL 平的是多单，BUY 平的是空单
         # a closing SELL deal flattens a BUY position, and vice versa
         side = "BUY" if d.type == mt5.DEAL_TYPE_SELL else "SELL"
+        total_fees, total_out_volume = position_fees[pos_id]
+        # 按这笔平仓手数占全部平仓手数的比例，分摊仓位总手续费+隔夜利息
+        # （只有一次性全部平仓时，占比就是 100%，等价于把开仓那笔的手续费
+        # 也算全）。/ Allocate the position's total fees to this close by its
+        # share of the total closed volume (a single full close gets 100% of
+        # it, equivalent to also counting the opening deal's commission in full).
+        fee_share = total_fees * (float(d.volume) / total_out_volume)
         out.append({
             "login": login,
             "symbol": d.symbol,
             "side": side,
             "closeVolume": float(d.volume),
             "closePrice": float(d.price),
-            # 含隔夜利息与手续费才是这笔平仓真正到手的盈亏 / swap & commission included for the true net P&L
-            "profit": float(d.profit) + float(d.swap) + float(d.commission),
+            # 这笔平仓自身的盈亏，加上按手数占比分摊到的仓位总手续费+隔夜利息，
+            # 才是这笔平仓真正到手的净盈亏。/ This close's own P&L plus its
+            # volume-weighted share of the position's total fees is the true
+            # net P&L for this close.
+            "profit": float(d.profit) + fee_share,
             "positionTicket": pos_id,
             "dealTicket": int(d.ticket),
             "closedAt": datetime.fromtimestamp(d.time, tz=timezone.utc).isoformat(),
