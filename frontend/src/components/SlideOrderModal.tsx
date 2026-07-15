@@ -9,7 +9,11 @@ import { useNow } from './signals/hooks'
 interface Props {
   signal: Signal
   accounts: MT5Account[]
-  quote?: Quote
+  // 按交易商账户区分的报价：login -> {symbol: Quote}。选中哪个账户就用哪个
+  // 交易商的报价，而不是跨账户合并的一份。/ Per-broker-account quotes:
+  // login -> {symbol: Quote}. Whichever account is selected drives which
+  // broker's quote is used, instead of a cross-account merged one.
+  quotesByAccount: Record<string, Record<string, Quote>>
   onCancel: () => void
   onConfirm: (
     volume: number,
@@ -21,7 +25,7 @@ interface Props {
 
 const QUICK_LOTS = [0.01, 0.10, 0.50, 1.00]
 
-export default function SlideOrderModal({ signal, accounts, quote, onCancel, onConfirm }: Props) {
+export default function SlideOrderModal({ signal, accounts, quotesByAccount, onCancel, onConfirm }: Props) {
   const { t } = useTranslation()
   const [submitting, setSubmitting] = useState(false)
   const [receipt, setReceipt] = useState<'waiting' | 'ok' | 'error' | null>(null)
@@ -31,6 +35,10 @@ export default function SlideOrderModal({ signal, accounts, quote, onCancel, onC
   const [login, setLogin] = useState<string>(() => onlineAccounts[0]?.login ?? '')
   const selected = onlineAccounts.find((a) => a.login === login) || null
   const [acctMenuOpen, setAcctMenuOpen] = useState(false)
+  // 选中账户对应交易商的实时报价：账户切换时自动跟着换成那家交易商的价格
+  // The selected account's own broker quote: switching accounts automatically
+  // switches which broker's price is used
+  const quote = quotesByAccount[login]?.[signal.symbol]
 
   const suggestVolume = (eq?: number | null): string => {
     if (!eq || eq <= 0) return '0.10'

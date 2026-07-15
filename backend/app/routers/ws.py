@@ -11,6 +11,7 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.core.security import decode_access_token
+from app.services import quotes_store
 from app.services.connection_manager import manager
 
 logger = logging.getLogger("prismx.ws")
@@ -57,10 +58,15 @@ async def ws_client(websocket: WebSocket):
     cached = manager.get_positions(user_id)
     if cached:
         await websocket.send_json({"type": "POSITIONS", "data": cached})
-    # 连接即补推最近一次报价快照 / re-push the latest quotes snapshot on connect
+    # 连接即补推最近一次报价快照（按交易商账户区分，下单确认页用）
+    # re-push the latest per-account quotes snapshot on connect (order-confirm page)
     cached_quotes = manager.get_quotes(user_id)
     if cached_quotes:
         await websocket.send_json({"type": "QUOTES", "data": cached_quotes})
+    # 连接即补推全站统一报价快照（展示用）/ re-push the site-wide quotes snapshot (display)
+    cached_global_quotes = quotes_store.get_all()
+    if cached_global_quotes:
+        await websocket.send_json({"type": "GLOBAL_QUOTES", "data": cached_global_quotes})
     try:
         while True:
             # 前端通道以服务端推送为主，这里仅保活 / mainly server-push; keep alive

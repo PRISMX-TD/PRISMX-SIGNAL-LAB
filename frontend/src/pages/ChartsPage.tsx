@@ -141,7 +141,7 @@ export default function ChartsPage() {
   const [orderSide, setOrderSide] = useState<'BUY' | 'SELL' | null>(null)
 
   const { accounts } = useLive()
-  const quotes = useQuotes()
+  const accountQuotes = useQuotes()
   const { toast, placeManualOrder } = useOrderPlacement()
 
   const handleOrderConfirm = async (
@@ -447,7 +447,7 @@ export default function ChartsPage() {
           symbol={symbol}
           side={orderSide}
           accounts={accounts}
-          quote={quotes[symbol]}
+          quotesByAccount={accountQuotes}
           refPrice={lastPrice}
           digits={SYMBOL_DECIMALS[symbol] ?? 2}
           onCancel={() => setOrderSide(null)}

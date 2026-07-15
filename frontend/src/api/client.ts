@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPricingSettings, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPricingSettings, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote } from './types'
 
 const TOKEN_KEY = 'prismx_token'
 
@@ -93,6 +93,13 @@ export const signalApi = {
 // 多周期趋势 / Multi-timeframe trends
 export const trendApi = {
   list: () => request<{ trends: Trend[] }>('/trends'),
+}
+
+// 全站统一报价快照（EA 推送，不区分用户/账户；首屏用，之后靠 WS GLOBAL_QUOTES 增量）
+// Site-wide quote snapshot (EA-pushed, not user/account-scoped); first load,
+// WS GLOBAL_QUOTES delivers deltas afterwards
+export const quoteApi = {
+  list: () => request<{ quotes: Quote[] }>('/quotes'),
 }
 
 // 行情 K 线（自建中央 MT5 喂价源，取代 TradingView Widget）

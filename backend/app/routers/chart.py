@@ -1,14 +1,18 @@
-"""图表行情路由：喂价器写入 K 线 + 前端读取 K 线。
-Chart market-data router: the feeder writes candles, the frontend reads them.
+"""图表行情路由：EA（或 legacy 喂价器）写入 K 线/报价 + 前端读取。
+Chart market-data router: the EA (or the legacy feeder) writes candles/quotes,
+the frontend reads them.
 
-写入（/feed/candles）由独立的 Windows 喂价器程序调用，用 X-Feed-Token 头鉴权
-（不是用户，没有 JWT）。读取（/chart/history、/chart/latest）复用站内登录态，
-与 ChartsPage 的其它接口一致。详见 CHART_SELFHOST_PLAN.md。
+写入（/feed/candles、/feed/quotes）由 MT5 EA 调用，用 X-EA-Token 头鉴权
+（不是用户，没有 JWT）；迁移期内 /feed/candles 也接受 legacy 喂价器的
+X-Feed-Token，待 EA 稳定后可去掉。读取（/chart/history、/chart/latest、
+/quotes）复用站内登录态，与 ChartsPage 的其它接口一致。详见 CHART_SELFHOST_PLAN.md。
 
-Writes (/feed/candles) are called by the standalone Windows feeder program,
-authenticated via the X-Feed-Token header (it's not a user, no JWT). Reads
-(/chart/history, /chart/latest) reuse the site's normal login, consistent
-with ChartsPage's other endpoints. See CHART_SELFHOST_PLAN.md for context.
+Writes (/feed/candles, /feed/quotes) are called by the MT5 EA, authenticated
+via the X-EA-Token header (it's not a user, no JWT); during the migration
+window /feed/candles also accepts the legacy feeder's X-Feed-Token, droppable
+once the EA is confirmed stable. Reads (/chart/history, /chart/latest,
+/quotes) reuse the site's normal login, consistent with ChartsPage's other
+endpoints. See CHART_SELFHOST_PLAN.md for context.
 """
 import secrets
 
@@ -17,7 +21,8 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.models import User
-from app.services import chart_store
+from app.services import chart_store, quotes_store
+from app.services.connection_manager import manager
 from app.services.deps import get_current_user
 
 router = APIRouter(tags=["chart"])
@@ -25,6 +30,28 @@ router = APIRouter(tags=["chart"])
 # 前端 ChartsPage 的周期 code 集合，须与 chart_feeder.py 的 INTERVAL_TF 保持一致。
 # Frontend ChartsPage's interval codes; must match chart_feeder.py's INTERVAL_TF.
 ALLOWED_INTERVALS = {"1", "5", "15", "60", "240", "D"}
+
+
+def _valid_ea_or_feed_token(token: str | None) -> bool:
+    """校验 EA 或 legacy 喂价器令牌，任一匹配即通过。
+    Accept either the EA token or the legacy feeder token."""
+    if not token:
+        return False
+    if settings.EA_TOKEN and secrets.compare_digest(
+        token.encode("utf-8"), settings.EA_TOKEN.encode("utf-8")
+    ):
+        return True
+    if settings.FEED_TOKEN and secrets.compare_digest(
+        token.encode("utf-8"), settings.FEED_TOKEN.encode("utf-8")
+    ):
+        return True
+    return False
+
+
+def _valid_ea_token(token: str | None) -> bool:
+    if not settings.EA_TOKEN or not token:
+        return False
+    return secrets.compare_digest(token.encode("utf-8"), settings.EA_TOKEN.encode("utf-8"))
 
 
 # ---------- 喂价器写入 / feeder write ----------
@@ -48,13 +75,17 @@ class FeedRequest(BaseModel):
 
 
 @router.post("/feed/candles")
-async def feed_candles(req: FeedRequest, x_feed_token: str | None = Header(default=None)):
-    """喂价器上报 K 线：mode=backfill 整段替换，mode=tick 合并最新几根。
-    Feeder reports candles: mode=backfill replaces the full series, mode=tick
-    merges the latest few bars."""
-    if not settings.FEED_TOKEN or not x_feed_token or not secrets.compare_digest(
-        x_feed_token.encode("utf-8"), settings.FEED_TOKEN.encode("utf-8")
-    ):
+async def feed_candles(
+    req: FeedRequest,
+    x_ea_token: str | None = Header(default=None),
+    x_feed_token: str | None = Header(default=None),
+):
+    """EA（或迁移期内的 legacy 喂价器）上报 K 线：mode=backfill 整段替换，
+    mode=tick 合并最新几根。
+    EA (or, during the migration window, the legacy feeder) reports candles:
+    mode=backfill replaces the full series, mode=tick merges the latest few
+    bars."""
+    if not _valid_ea_or_feed_token(x_ea_token or x_feed_token):
         raise HTTPException(status_code=401, detail="invalid feed token")
     for s in req.series:
         if s.interval not in ALLOWED_INTERVALS:
@@ -65,6 +96,42 @@ async def feed_candles(req: FeedRequest, x_feed_token: str | None = Header(defau
         else:
             chart_store.merge_bars(s.symbol.upper(), s.interval, bars)
     return {"ok": True}
+
+
+# ---------- EA 全局报价写入 / EA global quotes write ----------
+class FeedQuote(BaseModel):
+    symbol: str = Field(max_length=32)
+    bid: float
+    ask: float
+    digits: int | None = Field(default=None, ge=0, le=10)
+
+
+class FeedQuotesRequest(BaseModel):
+    data: list[FeedQuote] = []
+
+
+@router.post("/feed/quotes")
+async def feed_quotes(req: FeedQuotesRequest, x_ea_token: str | None = Header(default=None)):
+    """EA 上报全站统一报价（不区分用户）。仅把发生变化的条目广播给所有在线
+    前端，控制 WebSocket 流量。
+    EA reports one site-wide quote snapshot (not per-user). Only changed
+    entries are broadcast to all online clients to keep WebSocket traffic
+    minimal."""
+    if not _valid_ea_token(x_ea_token):
+        raise HTTPException(status_code=401, detail="invalid EA token")
+    incoming = [{"symbol": q.symbol.upper(), "bid": q.bid, "ask": q.ask, "digits": q.digits} for q in req.data]
+    changed = quotes_store.update(incoming)
+    if changed:
+        await manager.broadcast_to_clients({"type": "GLOBAL_QUOTES", "data": changed})
+    return {"ok": True}
+
+
+@router.get("/quotes")
+async def list_quotes(user: User = Depends(get_current_user)):
+    """前端读取全站统一报价快照（首屏用，之后靠 WS GLOBAL_QUOTES 增量更新）。
+    Frontend reads the site-wide quote snapshot (first load; WS GLOBAL_QUOTES
+    delivers deltas afterwards)."""
+    return {"quotes": quotes_store.get_all()}
 
 
 # ---------- 前端读取 / frontend read ----------

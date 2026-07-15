@@ -16,7 +16,9 @@ interface Props {
   symbol: string
   side: 'BUY' | 'SELL'
   accounts: MT5Account[]
-  quote?: Quote
+  // 按交易商账户区分的报价：login -> {symbol: Quote}，见 SlideOrderModal.tsx 同名注释
+  // Per-broker-account quotes: login -> {symbol: Quote}; see SlideOrderModal.tsx's matching comment
+  quotesByAccount: Record<string, Record<string, Quote>>
   // 图表最新收盘价：无实时报价时作为参考价 / chart's latest close, used when no live quote
   refPrice?: number
   // 价格显示小数位 / price display precision
@@ -33,7 +35,7 @@ interface Props {
 const QUICK_LOTS = [0.01, 0.1, 0.5, 1.0]
 const QUICK_RISK_PCTS = [0.5, 1, 2, 3]
 
-export default function ChartOrderModal({ symbol, side, accounts, quote, refPrice, digits = 2, onCancel, onConfirm }: Props) {
+export default function ChartOrderModal({ symbol, side, accounts, quotesByAccount, refPrice, digits = 2, onCancel, onConfirm }: Props) {
   const { t } = useTranslation()
   const [submitting, setSubmitting] = useState(false)
   const [receipt, setReceipt] = useState<'waiting' | 'ok' | 'error' | null>(null)
@@ -44,6 +46,8 @@ export default function ChartOrderModal({ symbol, side, accounts, quote, refPric
   const [login, setLogin] = useState<string>(() => onlineAccounts[0]?.login ?? '')
   const selected = onlineAccounts.find((a) => a.login === login) || null
   const [acctMenuOpen, setAcctMenuOpen] = useState(false)
+  // 选中账户对应交易商的实时报价 / the selected account's own broker quote
+  const quote = quotesByAccount[login]?.[symbol]
 
   const suggestVolume = (eq?: number | null): string => {
     if (!eq || eq <= 0) return '0.10'

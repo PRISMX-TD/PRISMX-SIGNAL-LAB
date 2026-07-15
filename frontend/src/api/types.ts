@@ -181,6 +181,10 @@ export interface Quote {
   ask: number
   digits?: number
   time?: string
+  // 上报该报价的 MT5 账号 login：仅按账户区分的报价（下单确认页用）携带此字段，
+  // 全站统一展示报价（EA 推送）没有 / present only on per-account quotes (order
+  // confirmation); absent on the site-wide display feed (EA-pushed).
+  login?: string
 }
 
 // 一根 K 线（自建中央 MT5 喂价源）：t=epoch 秒(UTC)，o/h/l/c=开高低收
@@ -227,7 +231,7 @@ export interface Position {
 }
 
 export interface WSMessage {
-  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'QUOTES' | 'TREND_UPDATE' | 'PREFS_UPDATE'
+  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'QUOTES' | 'GLOBAL_QUOTES' | 'TREND_UPDATE' | 'PREFS_UPDATE'
   data?: unknown
   reason?: string
   userId?: string

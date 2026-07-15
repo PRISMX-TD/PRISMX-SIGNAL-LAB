@@ -127,6 +127,25 @@ async def tradingview_webhook(request: Request, payload: TradingViewSignal):
 TrendDir = Literal["UP", "DOWN", "FLAT"]
 
 
+def _valid_trend_secret(secret: str) -> bool:
+    """趋势推送的密钥校验：接受 WEBHOOK_SECRET（TradingView 指标，legacy）或
+    EA_TOKEN（MT5 EA），任一匹配即通过。两者都放在 JSON body 的 "secret"
+    字段里，与 TradingView 不支持自定义请求头的限制保持一致。
+    Trend-push secret check: accept either WEBHOOK_SECRET (the legacy
+    TradingView indicator) or EA_TOKEN (the MT5 EA). Both are carried in the
+    body's "secret" field, consistent with TradingView's no-custom-headers
+    limitation."""
+    if settings.WEBHOOK_SECRET and secrets.compare_digest(
+        secret.encode("utf-8"), settings.WEBHOOK_SECRET.encode("utf-8")
+    ):
+        return True
+    if settings.EA_TOKEN and secrets.compare_digest(
+        secret.encode("utf-8"), settings.EA_TOKEN.encode("utf-8")
+    ):
+        return True
+    return False
+
+
 def _extract_json_block(text: str) -> str | None:
     """从任意文本中抠出第一个大括号平衡的 JSON 对象。
     Extract the first brace-balanced JSON object from arbitrary text.
@@ -195,9 +214,7 @@ async def tradingview_trend(request: Request):
     if payload is None:
         raise HTTPException(status_code=422, detail="请求体未包含合法趋势 JSON / no valid trend JSON in body")
 
-    if not settings.WEBHOOK_SECRET or not secrets.compare_digest(
-        payload.secret.encode("utf-8"), settings.WEBHOOK_SECRET.encode("utf-8")
-    ):
+    if not _valid_trend_secret(payload.secret):
         raise HTTPException(status_code=401, detail="Webhook 密钥无效 / invalid webhook secret")
 
     symbol = payload.symbol.upper()

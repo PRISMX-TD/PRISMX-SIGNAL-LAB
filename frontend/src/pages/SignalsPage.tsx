@@ -15,7 +15,7 @@ export default function SignalsPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const { signals, accounts, loaded } = useLive()
-  const quotes = useQuotes()
+  const accountQuotes = useQuotes()
   const [activeSignal, setActiveSignal] = useState<Signal | null>(null)
   const { toast, placeOrder } = useOrderPlacement()
 
@@ -50,7 +50,7 @@ export default function SignalsPage() {
           <SignalGrid signals={signals} onTrade={openTrade} userPlan={user?.plan} />
         </div>
       )}
-      {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} quote={quotes[activeSignal.symbol]} onCancel={() => setActiveSignal(null)} onConfirm={handleConfirm} />}
+      {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} quotesByAccount={accountQuotes} onCancel={() => setActiveSignal(null)} onConfirm={handleConfirm} />}
       {toast && <div className={`fixed bottom-24 left-1/2 z-50 -translate-x-1/2 animate-fade-in-up rounded-xl border px-5 py-3 text-sm shadow-prism sm:bottom-6 ${toastToneClass(toast.kind)}`}>{toast.msg}</div>}
     </div>
   )

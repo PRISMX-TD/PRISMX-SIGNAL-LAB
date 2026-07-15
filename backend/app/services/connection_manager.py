@@ -13,8 +13,14 @@ class ConnectionManager:
         self._clients: dict[str, set[WebSocket]] = {}
         # user_id -> 最近一次持仓快照 / latest positions snapshot per user
         self._positions: dict[str, list] = {}
-        # user_id -> 最近一次报价快照 {symbol: {bid, ask, ...}} / latest quotes snapshot per user
-        self._quotes: dict[str, dict] = {}
+        # user_id -> login -> {symbol: {bid, ask, login, ...}}：按交易商账户区分的
+        # 报价快照，供下单确认页按所选账户取对应报价。全站统一展示报价另见
+        # quotes_store.py（EA 推送，不区分用户/账户）。
+        # user_id -> login -> {symbol: {bid, ask, login, ...}}: per-broker-account
+        # quote snapshot, so the order-confirmation page can look up the quote
+        # for whichever account is selected. The site-wide display feed is
+        # separate; see quotes_store.py (EA-pushed, not user/account-scoped).
+        self._quotes: dict[str, dict[str, dict]] = {}
         self._lock = asyncio.Lock()
 
     # ---------- 持仓缓存 / Positions cache ----------
@@ -27,25 +33,31 @@ class ConnectionManager:
 
     # ---------- 报价缓存 / Quotes cache ----------
     def update_quotes(self, user_id: str, quotes: list) -> list:
-        """合并某用户的报价快照，仅返回相对上次发生变化的条目。
-        Merge a user's quote snapshot; return only entries changed since last time.
+        """合并某用户按账户区分的报价快照，仅返回相对上次发生变化的条目。
+        Merge a user's per-account quote snapshot; return only entries changed
+        since last time.
 
-        quotes: [{"symbol": str, "bid": float, "ask": float, "ts": str?}, ...]
+        quotes: [{"symbol": str, "login": str, "bid": float, "ask": float, "digits": int?}, ...]
         """
         prev = self._quotes.setdefault(user_id, {})
         changed: list = []
         for q in quotes or []:
             sym = q.get("symbol")
-            if not sym:
+            login = q.get("login")
+            if not sym or not login:
                 continue
-            old = prev.get(sym)
+            by_symbol = prev.setdefault(login, {})
+            old = by_symbol.get(sym)
             if old is None or old.get("bid") != q.get("bid") or old.get("ask") != q.get("ask"):
-                prev[sym] = q
+                by_symbol[sym] = q
                 changed.append(q)
         return changed
 
     def get_quotes(self, user_id: str) -> list:
-        return list(self._quotes.get(user_id, {}).values())
+        out: list = []
+        for by_symbol in self._quotes.get(user_id, {}).values():
+            out.extend(by_symbol.values())
+        return out
 
     # ---------- 前端连接 / Client connections ----------
     async def register_client(self, user_id: str, ws: WebSocket) -> None:

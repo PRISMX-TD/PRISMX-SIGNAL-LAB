@@ -2,7 +2,7 @@
 // Shared live state: EA status, signals, orders, positions.
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from 'react'
 import type { BrokerLock, MT5Account, Order, Position, Quote, Signal, Trend, WSMessage } from '../api/types'
-import { accountApi, orderApi, signalApi, trendApi } from '../api/client'
+import { accountApi, orderApi, quoteApi, signalApi, trendApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
 import { usePrefs } from './prefs'
 
@@ -36,7 +36,13 @@ const LiveContext = createContext<LiveContextValue | null>(null)
 // 高频推送的报价与持仓单独放各自的 Context，避免它们变化时把只关心信号/账号的
 // 组件也一起重渲染。/ Quotes & positions get their own contexts so their frequent
 // updates don't re-render components that only care about signals/accounts.
-const QuotesContext = createContext<Record<string, Quote>>({})
+// 按交易商账户区分的报价（桥接上报），下单确认页用：login -> {symbol: Quote}。
+// Per-broker-account quotes (bridge-reported), used by the order-confirmation
+// pages: login -> {symbol: Quote}.
+const QuotesContext = createContext<Record<string, Record<string, Quote>>>({})
+// 全站统一展示报价（EA 推送，不区分账户）：symbol -> Quote。
+// Site-wide display quotes (EA-pushed, not account-scoped): symbol -> Quote.
+const GlobalQuotesContext = createContext<Record<string, Quote>>({})
 const PositionsContext = createContext<Position[]>([])
 
 // 失效信号最多保留的条数 / max number of expired signals to keep
@@ -94,7 +100,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [signals, setSignals] = useState<Signal[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [positions, setPositions] = useState<Position[]>([])
-  const [quotes, setQuotes] = useState<Record<string, Quote>>({})
+  const [quotes, setQuotes] = useState<Record<string, Record<string, Quote>>>({})
+  const [globalQuotes, setGlobalQuotes] = useState<Record<string, Quote>>({})
   const [trends, setTrends] = useState<Record<string, Trend>>({})
   const [accounts, setAccounts] = useState<MT5Account[]>([])
   const [accountLimit, setAccountLimit] = useState<number | null>(null)
@@ -102,11 +109,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [loaded, setLoaded] = useState(false)
 
   const refreshAll = useCallback(async () => {
-    const [sig, ord, acc, trd] = await Promise.all([
+    const [sig, ord, acc, trd, gq] = await Promise.all([
       signalApi.list().catch(() => ({ signals: [] })),
       orderApi.list().catch(() => ({ orders: [], total: 0 })),
       accountApi.list().catch(() => ({ accounts: [], accountLimit: null, brokerLock: null })),
       trendApi.list().catch(() => ({ trends: [] })),
+      quoteApi.list().catch(() => ({ quotes: [] })),
     ])
     setSignals(capExpired(sig.signals))
     setOrders(ord.orders)
@@ -114,6 +122,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     setAccountLimit(acc.accountLimit)
     setBrokerLock((prev) => keepIfEqual(prev, acc.brokerLock))
     setTrends(Object.fromEntries((trd.trends || []).map((t) => [t.symbol, t])))
+    setGlobalQuotes(Object.fromEntries((gq.quotes || []).map((q) => [q.symbol, q])))
     setLoaded(true)
   }, [])
 
@@ -175,10 +184,27 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         setPositions((prev) => keepIfEqual(prev, (msg.data as Position[]) || []))
         break
       case 'QUOTES': {
-        // 合并变化的报价到现有快照 / merge changed quotes into the snapshot
+        // 按交易商账户区分的报价（下单确认页用），合并变化项到现有快照
+        // Per-broker-account quotes (order-confirmation pages), merge changed
+        // entries into the snapshot
         const list = (msg.data as Quote[]) || []
         if (list.length === 0) break
         setQuotes((prev) => {
+          const next = { ...prev }
+          for (const q of list) {
+            if (!q.login) continue
+            next[q.login] = { ...next[q.login], [q.symbol]: q }
+          }
+          return next
+        })
+        break
+      }
+      case 'GLOBAL_QUOTES': {
+        // 全站统一展示报价（EA 推送），合并变化的报价到现有快照
+        // Site-wide display quotes (EA-pushed); merge changed entries into the snapshot
+        const list = (msg.data as Quote[]) || []
+        if (list.length === 0) break
+        setGlobalQuotes((prev) => {
           const next = { ...prev }
           for (const q of list) next[q.symbol] = q
           return next
@@ -241,7 +267,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     <LiveContext.Provider value={value}>
       <PositionsContext.Provider value={positions}>
         <QuotesContext.Provider value={quotes}>
-          {children}
+          <GlobalQuotesContext.Provider value={globalQuotes}>
+            {children}
+          </GlobalQuotesContext.Provider>
         </QuotesContext.Provider>
       </PositionsContext.Provider>
     </LiveContext.Provider>
@@ -254,9 +282,16 @@ export function useLive() {
   return ctx
 }
 
-// 只订阅实时报价，避免因信号/账号变化而重渲染 / subscribe to quotes only
+// 只订阅按交易商账户区分的报价（下单确认页用），避免因信号/账号变化而重渲染
+// Subscribe to per-broker-account quotes only (order-confirmation pages)
 export function useQuotes() {
   return useContext(QuotesContext)
+}
+
+// 只订阅全站统一展示报价（EA 推送），避免因信号/账号变化而重渲染
+// Subscribe to the site-wide display quotes only (EA-pushed)
+export function useGlobalQuotes() {
+  return useContext(GlobalQuotesContext)
 }
 
 // 只订阅持仓 / subscribe to positions only

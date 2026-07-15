@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
-import { useLive, useQuotes } from '../store/live'
+import { useGlobalQuotes, useLive, useQuotes } from '../store/live'
 import { useSentiment } from '../api/useSentiment'
 import type { Signal } from '../api/types'
 import SignalHero from '../components/signals/SignalHero'
@@ -23,7 +23,10 @@ export default function DashboardPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { signals, anyOnline, accounts, loaded, trends } = useLive()
-  const quotes = useQuotes()
+  // 展示用全站统一报价（英雄板/报价表）与按账户区分的报价（下单确认页）分开取
+  // Site-wide display quotes (hero/quotes table) vs per-account quotes (order confirmation)
+  const globalQuotes = useGlobalQuotes()
+  const accountQuotes = useQuotes()
   const now = useNow(1000)
   const { sentiment } = useSentiment()
   const focusEntries = useFocusEntries(signals, now)
@@ -73,7 +76,7 @@ export default function DashboardPage() {
             <>
               <div className="dash-col-1">
                 <SignalHero symbol={cur.symbol} cnName={nameOf(cur.symbol)} focusIdx={idx} focusTotal={focusEntries.length} stance={stance} trend={trends[cur.symbol]} sentiment={sentiment[cur.symbol] ?? null} onPrev={goPrev} onNext={goNext} onSelectIdx={setFocusIdx} />
-                <QuotesTable quotes={quotes} mt5Online={anyOnline} focusSymbol={cur?.symbol} />
+                <QuotesTable quotes={globalQuotes} mt5Online={anyOnline} focusSymbol={cur?.symbol} />
               </div>
               <div className="dash-col-2">
                 <SignalExec signal={cur.signal} now={now} onTrade={openTrade} />
@@ -92,7 +95,7 @@ export default function DashboardPage() {
                   <h2 className="text-lg font-bold text-white">{t('signals.title')}</h2>
                   <p className="text-sm text-slate-400 max-w-xs">{t('signals.waitingForSignals', '等待信号引擎或 TradingView 推送信号……')}</p>
                 </section>
-                <QuotesTable quotes={quotes} mt5Online={anyOnline} />
+                <QuotesTable quotes={globalQuotes} mt5Online={anyOnline} />
               </div>
               <div className="dash-col-2">
                 <SignalExec signal={null} now={now} onTrade={openTrade} />
@@ -106,7 +109,7 @@ export default function DashboardPage() {
           )}
         </div>
       )}
-      {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} quote={quotes[activeSignal.symbol]} onCancel={() => setActiveSignal(null)} onConfirm={handleConfirm} />}
+      {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} quotesByAccount={accountQuotes} onCancel={() => setActiveSignal(null)} onConfirm={handleConfirm} />}
       {toast && <div className={`fixed bottom-24 left-1/2 z-50 -translate-x-1/2 animate-fade-in-up rounded-xl border px-5 py-3 text-sm shadow-prism sm:bottom-6 ${toastToneClass(toast.kind)}`}>{toast.msg}</div>}
     </div>
   )

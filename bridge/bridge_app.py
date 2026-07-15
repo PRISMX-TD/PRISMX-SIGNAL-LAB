@@ -396,9 +396,15 @@ class BridgeEngine:
         # Closed-trade legs (personal win-rate) not yet acked; persisted for
         # retry, same idea as the order-result queue above.
         self._pending_trades: list[dict] = _load_pending_trades()
-        # 上一轮上报的报价 {symbol: (bid, ask)}，仅上报变化项以省流量。
-        # Last reported quotes {symbol: (bid, ask)}; only changed entries are sent.
-        self._last_quotes: dict[str, tuple] = {}
+        # 上一轮上报的报价 {(login, symbol): (bid, ask)}，仅上报变化项以省流量。
+        # 按 (账号, 品种) 区分，而不是跨账户合并——下单确认页要按所选账户取
+        # 对应交易商的报价，不同交易商同一品种的报价本就可能不同。
+        # Last reported quotes {(login, symbol): (bid, ask)}; only changed
+        # entries are sent. Keyed per (account, symbol) rather than merged
+        # across accounts — the order-confirmation page looks up the quote for
+        # whichever broker account is selected, and different brokers can
+        # legitimately quote the same symbol differently.
+        self._last_quotes: dict[tuple, tuple] = {}
 
     def start(self):
         self._stop.clear()
@@ -427,7 +433,7 @@ class BridgeEngine:
         # 1) 逐个终端读取账号与持仓 / read account & positions per terminal
         accounts: list = []
         positions: list = []
-        quotes_by_symbol: dict[str, dict] = {}
+        quotes_by_account: list = []
         closed_trades: list = []
         login_to_path: dict[str, str] = {}
         worker_errors: list[str] = []
@@ -440,9 +446,12 @@ class BridgeEngine:
                 accounts.append(acc)
                 login_to_path[acc["login"]] = path
                 positions.extend(res.get("positions", []))
-                # 多终端同品种报价去重，先到先得 / dedup quotes across terminals
+                # 按账户上报，不跨终端合并——下单确认页要按选中账户取对应
+                # 交易商的报价。/ report per account, no cross-terminal merge —
+                # the order-confirmation page needs the selected account's own
+                # broker quote.
                 for q in res.get("quotes", []):
-                    quotes_by_symbol.setdefault(q["symbol"], q)
+                    quotes_by_account.append({**q, "login": acc["login"]})
                 closed_trades.extend(res.get("closedTrades", []))
 
         if not accounts:
@@ -511,14 +520,15 @@ class BridgeEngine:
         except Exception:
             pass
 
-        # 3b) 上报报价：仅上报相对上一轮变化的品种以省流量。
-        # Report quotes: only entries changed since last tick to save bandwidth.
+        # 3b) 上报报价：仅上报相对上一轮变化的 (账号, 品种) 以省流量。
+        # Report quotes: only (account, symbol) entries changed since last tick.
         try:
             changed: list = []
-            for sym, q in quotes_by_symbol.items():
-                key = (q["bid"], q["ask"])
-                if self._last_quotes.get(sym) != key:
-                    self._last_quotes[sym] = key
+            for q in quotes_by_account:
+                key = (q["login"], q["symbol"])
+                val = (q["bid"], q["ask"])
+                if self._last_quotes.get(key) != val:
+                    self._last_quotes[key] = val
                     changed.append(q)
             if changed:
                 _post_json(f"{self.backend}/api/bridge/quotes", {"data": changed}, self.token)

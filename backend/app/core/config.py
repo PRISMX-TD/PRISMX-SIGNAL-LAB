@@ -90,14 +90,27 @@ class Settings(BaseSettings):
     # In production a strong random value is mandatory; empty rejects all webhooks.
     WEBHOOK_SECRET: str = ""
 
-    # 图表喂价器鉴权：独立的 Windows 喂价程序（feeder/chart_feeder.py）用
-    # X-Feed-Token 头写入 K 线数据。留空则拒绝所有喂价写入（图表将没有数据，
-    # 不影响交易主链路），因此不像 JWT_SECRET/WEBHOOK_SECRET 那样强制校验。
-    # Chart feeder auth: the standalone Windows feeder program writes candles
-    # via the X-Feed-Token header. Empty rejects all feed writes (charts show
+    # 图表喂价器鉴权（legacy）：独立的 Windows 喂价程序（feeder/chart_feeder.py）
+    # 用 X-Feed-Token 头写入 K 线数据。正在被 EA_TOKEN 取代——迁移期内两者皆
+    # 可用，待 EA 稳定运行后可清空本项并停用 feeder。
+    # Chart feeder auth (legacy): the standalone Windows feeder program writes
+    # candles via the X-Feed-Token header. Being superseded by EA_TOKEN — both
+    # are accepted during the migration window; clear this once the EA is
+    # confirmed stable and the feeder is retired.
+    FEED_TOKEN: str = ""
+
+    # EA 行情鉴权：MT5 EA（ea/PRISMX_MarketFeed.mq5）用 X-EA-Token 头推送
+    # K 线（/feed/candles）、报价（/feed/quotes）与多周期趋势（/webhook/trend，
+    # 作为 WEBHOOK_SECRET 的替代校验值）。留空则拒绝所有 EA 写入（图表/报价/
+    # 趋势将没有数据，不影响交易主链路），因此不像 JWT_SECRET/WEBHOOK_SECRET
+    # 那样强制校验。
+    # EA market-data auth: the MT5 EA (ea/PRISMX_MarketFeed.mq5) pushes candles
+    # (/feed/candles), quotes (/feed/quotes) and multi-timeframe trend
+    # (/webhook/trend, accepted as an alternate to WEBHOOK_SECRET) via the
+    # X-EA-Token header. Empty rejects all EA writes (charts/quotes/trend show
     # no data, but the trading path is unaffected), so — unlike JWT_SECRET/
     # WEBHOOK_SECRET — this is not enforced as mandatory in production.
-    FEED_TOKEN: str = ""
+    EA_TOKEN: str = ""
 
     # NOWPayments 加密货币支付 / Crypto payment gateway
     # API Key + IPN Secret（IPN 密钥仅在 NOWPayments 后台生成时展示一次!!）

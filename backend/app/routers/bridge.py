@@ -464,6 +464,12 @@ async def bridge_positions(
 
 class BridgeQuote(BaseModel):
     symbol: str = Field(max_length=32)
+    # 上报该报价的 MT5 账号 login：下单确认页按用户选中的账户取对应报价，
+    # 而不是跨账户合并后的一份，不同交易商的报价可能不同。
+    # The MT5 login that reported this quote: the order-confirmation page
+    # looks up the quote for whichever account the user selected, rather than
+    # a cross-account merged one — different brokers can quote differently.
+    login: str = Field(pattern=LOGIN_PATTERN)
     bid: float
     ask: float
     digits: int | None = Field(default=None, ge=0, le=10)
@@ -479,10 +485,10 @@ async def bridge_quotes(
     req: BridgeQuotesRequest,
     user: User = Depends(get_bridge_user),
 ):
-    """桥接程序上报实时报价（bid/ask）。仅把发生变化的条目推给前端，
-    控制 WebSocket 流量。
-    Bridge reports live bid/ask quotes. Only changed entries are pushed to
-    clients to keep WebSocket traffic minimal.
+    """桥接程序上报按账户区分的实时报价（bid/ask）。仅把发生变化的条目推给
+    前端，控制 WebSocket 流量。
+    Bridge reports live bid/ask quotes per account. Only changed entries are
+    pushed to clients to keep WebSocket traffic minimal.
     """
     incoming = [q.model_dump() for q in req.data]
     changed = manager.update_quotes(user.id, incoming)
