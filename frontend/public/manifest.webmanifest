@@ -1,6 +1,6 @@
 {
-  "name": "PRISMX Signal Lab",
-  "short_name": "PRISMX",
+  "name": "Signal Lab",
+  "short_name": "Signal Lab",
   "description": "技术指标驱动的交易信号 · 一键直达 MT5",
   "start_url": "/",
   "scope": "/",

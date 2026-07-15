@@ -247,11 +247,11 @@ export default function Layout() {
             <div className="flex items-center gap-2.5">
               <Logo size={30} />
               <div className="leading-tight">
-                <div className="font-display text-[17px] font-bold tracking-[0.14em] text-white">
-                  PRISMX
-                </div>
-                <div className="text-[9.5px] font-semibold uppercase tracking-[0.34em] text-prism-300">
+                <div className="font-display text-[17px] font-bold tracking-[0.06em] text-white">
                   Signal Lab
+                </div>
+                <div className="text-[9px] font-medium uppercase tracking-[0.18em] text-neutral-500">
+                  by PRISMX
                 </div>
               </div>
             </div>

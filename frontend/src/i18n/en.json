@@ -1,7 +1,7 @@
 {
   "app": {
-    "name": "PRISMX Signal Lab",
-    "subtitle": "Prism Signal Lab"
+    "name": "Signal Lab",
+    "subtitle": "by PRISMX"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -56,10 +56,10 @@
     "stat3": "Every signal scored on record, rules published in full",
     "statFootnote": "Official partner broker MakeCapital. Live and demo MT5 accounts supported",
     "cmpEyebrow": "Why we're different",
-    "cmpTitle": "Signal groups vs PRISMX",
+    "cmpTitle": "Signal groups vs Signal Lab",
     "cmpSubtitle": "Everything this industry hides, we turned into product features.",
     "cmpThem": "Typical signal groups",
-    "cmpUs": "PRISMX",
+    "cmpUs": "Signal Lab",
     "cmpBad1": "Post winning screenshots only. Losing calls quietly disappear.",
     "cmpGood1": "The market scores every signal automatically. Full record kept: we never built a delete button.",
     "cmpBad2": "Calls are just a direction: \"Gold is going up, get in!\"",
@@ -269,7 +269,7 @@
   },
   "signals": {
     "title": "Live Trading Signals",
-    "subtitle": "Powered by PRISMX quant factors",
+    "subtitle": "Powered by Signal Lab quant factors",
     "empty": "No signals yet, the engine is analyzing the market…",
     "noMatch": "No signals match your filters",
     "entry": "Entry",
@@ -725,7 +725,7 @@
   },
   "download": {
     "title": "Download PRISMX Bridge",
-    "subtitle": "The local app that links your MT5 terminals to PRISMX Signal Lab",
+    "subtitle": "The local app that links your MT5 terminals to Signal Lab",
     "version": "Current version",
     "platform": "Works on Windows 10 / 11 (64-bit)",
     "downloadBtn": "Download for Windows",

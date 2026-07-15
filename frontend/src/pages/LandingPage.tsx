@@ -1,4 +1,4 @@
-// PRISMX Signal Lab · 3D 棱镜主页重设计 / 3D prism landing redesign
+// Signal Lab · 3D 棱镜主页 / 3D prism landing page
 // Hero 采用可交互 WebGL 玻璃棱镜场景（PrismScene）；其余分区走极简暗黑 +
 // 克制的滚动显现，保留全部原有 i18n 文案键，不新增未翻译文案。
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
@@ -75,8 +75,8 @@ function Navbar({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate
       <div className="mx-auto flex h-16 max-w-[1180px] items-center gap-6 px-5">
         <a href="#" className="flex items-center gap-2.5">
           <Logo size={26} />
-          <span className="text-sm font-semibold tracking-tight">PRISMX</span>
-          <span className="hidden text-[10px] font-bold uppercase tracking-[0.25em] text-violet-400/60 sm:inline">Signal Lab</span>
+          <span className="text-sm font-semibold tracking-tight">Signal Lab</span>
+          <span className="hidden text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-500 sm:inline">by PRISMX</span>
         </a>
         <nav className="ml-2 hidden items-center gap-1 md:flex">
           {links.map((l) => (
@@ -363,8 +363,8 @@ function Foot({ t }: { t: T }) {
         {/* 品牌 / brand */}
         <div className="flex items-center gap-2.5">
           <Logo size={24} />
-          <span className="text-base font-semibold tracking-tight">PRISMX</span>
-          <span className="text-[10px] font-bold uppercase tracking-[0.25em] text-violet-400/60">Signal Lab</span>
+          <span className="text-base font-semibold tracking-tight">Signal Lab</span>
+          <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-500">by PRISMX</span>
         </div>
 
         {/* 导航链接 / nav links */}
@@ -377,7 +377,7 @@ function Foot({ t }: { t: T }) {
         </nav>
 
         {/* 版权 / copyright */}
-        <p className="mt-8 text-[12px] text-neutral-600">© {new Date().getFullYear()} PRISMX Signal Lab · {t('landing.footerRights')}</p>
+        <p className="mt-8 text-[12px] text-neutral-600">© {new Date().getFullYear()} Signal Lab · {t('landing.footerRights')}</p>
 
         {/* 风险提示 / risk disclaimer */}
         <p className="mt-6 max-w-3xl border-t border-white/[0.05] pt-6 text-[11.5px] leading-relaxed text-neutral-600">{t('landing.footerRisk')}</p>

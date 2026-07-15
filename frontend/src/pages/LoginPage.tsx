@@ -61,7 +61,7 @@ export default function LoginPage() {
 
       <div className="absolute left-4 top-4 z-20">
         <Link to="/" className="chip transition hover:border-prism-500/50 hover:text-slate-100">
-          <span aria-hidden>←</span> PRISMX
+          <span aria-hidden>←</span> Signal Lab
         </Link>
       </div>
       <div className="absolute right-4 top-4 z-20">
@@ -75,9 +75,9 @@ export default function LoginPage() {
               <Logo size={56} />
             </div>
             <h1 className="font-display text-3xl font-black tracking-wider text-slate-100">
-              PRISMX <span className="neon-text animate-gradient-x">Signal Lab</span>
+              <span className="neon-text animate-gradient-x">Signal Lab</span>
             </h1>
-            <p className="mt-1 text-sm tracking-widest text-slate-500">{t('app.subtitle')}</p>
+            <p className="mt-1 text-xs font-medium uppercase tracking-[0.15em] text-slate-600">by PRISMX</p>
             <p className="mt-3 max-w-xs text-sm text-slate-400">{t('auth.tagline')}</p>
           </div>
 

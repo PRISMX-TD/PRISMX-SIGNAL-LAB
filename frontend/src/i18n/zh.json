@@ -1,7 +1,7 @@
 {
   "app": {
-    "name": "PRISMX Signal Lab",
-    "subtitle": "棱镜信号实验室"
+    "name": "信号实验室",
+    "subtitle": "by PRISMX"
   },
   "nav": {
     "dashboard": "仪表盘",
@@ -56,10 +56,10 @@
     "stat3": "信号赢输全记录，判定规则公开",
     "statFootnote": "官方合作券商 MakeCapital · 实盘与模拟 MT5 账户均可接入",
     "cmpEyebrow": "为什么不一样",
-    "cmpTitle": "传统信号群 vs PRISMX",
+    "cmpTitle": "传统信号群 vs Signal Lab",
     "cmpSubtitle": "这个行业不敢公开的部分，我们逐条做成了产品功能。",
     "cmpThem": "传统信号群",
-    "cmpUs": "PRISMX",
+    "cmpUs": "Signal Lab",
     "cmpBad1": "只晒盈利截图，亏损的单子悄悄消失。",
     "cmpGood1": "输赢由行情自动判定、全量记录——系统里连删除按钮都没做。",
     "cmpBad2": "喊单只给方向：「黄金要涨，冲！」",
@@ -725,7 +725,7 @@
   },
   "download": {
     "title": "下载 PRISMX 桥接程序",
-    "subtitle": "连接你本机 MT5 终端与 PRISMX 信号实验室的本地程序",
+    "subtitle": "连接你本机 MT5 终端与 Signal Lab 信号实验室的本地程序",
     "version": "当前版本",
     "platform": "适用系统：Windows 10 / 11（64 位）",
     "downloadBtn": "下载 Windows 版",
