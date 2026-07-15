@@ -35,18 +35,17 @@ export default function OrdersPage() {
   const [sideF, setSideF] = useState<SideFilter>('ALL')
   const [symbolF, setSymbolF] = useState('')
 
-  // 日期筛选 + 分页：此前 /api/orders 恒返回最新 100 条、订单页无翻页能力，
-  // 超过 100 条的历史订单彻底看不到、也没法按日期查旧单。不带日期筛选/停
-  // 在第一页时继续用 useLive().orders（WS 实时更新，秒级新鲜）；一旦设了
-  // 日期或翻到后面几页，改成向后端按 limit/offset/since/until 单独请求，
-  // 不影响实时跟踪用的那份 orders 状态。
-  // Date filter + pagination: /api/orders used to always return the latest
-  // 100, with no way to page through older history or filter by date.
-  // Unfiltered on page 0, this still uses useLive().orders (WS-live, always
-  // fresh); once a date filter is set or the user pages forward, it switches
-  // to a dedicated backend fetch with limit/offset/since/until instead,
-  // without touching the orders state used for real-time tracking.
-  const ORDERS_PAGE_SIZE = 50
+  // 操作记录：每页 10 条。不设日期筛选时用 useLive().orders（WS 实时更新、秒级
+  // 新鲜，覆盖最近约 100 条），在本地按 10 条一页切片——下单/成交能即时看到，
+  // 翻页也不发请求。一旦设了日期区间，改成向后端按 offset/limit(=10) 请求那段
+  // 历史（可翻到实时那 100 条之外的旧单），不影响实时跟踪用的那份 orders 状态。
+  // Activity log: 10 rows per page. With no date filter it uses
+  // useLive().orders (WS-live, always fresh, ~latest 100) and client-slices by
+  // 10 — new fills show instantly and paging costs no request. Once a date
+  // range is set it switches to a backend fetch (offset/limit=10) for that
+  // window, reaching history beyond the live 100, without touching the orders
+  // state used for real-time tracking.
+  const ORDERS_PAGE_SIZE = 10
   const [sinceF, setSinceF] = useState('')
   const [untilF, setUntilF] = useState('')
   const [page, setPage] = useState(0)
@@ -54,12 +53,9 @@ export default function OrdersPage() {
   const [serverTotal, setServerTotal] = useState(0)
   const [pageLoading, setPageLoading] = useState(false)
   const dateFilterActive = !!sinceF || !!untilF
-  const usingServerPage = dateFilterActive || page > 0
-
-  useEffect(() => { setPage(0) }, [sinceF, untilF])
 
   useEffect(() => {
-    if (!usingServerPage) { setServerOrders(null); return }
+    if (!dateFilterActive) { setServerOrders(null); return }
     let alive = true
     setPageLoading(true)
     // until 传"选中截止日 + 1 天"的零点，让用户选的截止日本身也算在内
@@ -78,10 +74,9 @@ export default function OrdersPage() {
       .catch(() => { if (alive) { setServerOrders([]); setServerTotal(0) } })
       .finally(() => { if (alive) setPageLoading(false) })
     return () => { alive = false }
-  }, [usingServerPage, page, sinceF, untilF])
+  }, [dateFilterActive, page, sinceF, untilF])
 
-  const baseOrders = usingServerPage ? (serverOrders ?? []) : orders
-  const totalPages = usingServerPage ? Math.max(1, Math.ceil(serverTotal / ORDERS_PAGE_SIZE)) : 1
+  const baseOrders = dateFilterActive ? (serverOrders ?? []) : orders
 
   // 自动仓位管理 / auto position management
   const [autoCfg, setAutoCfg] = useState<AutoManageSettings | null>(null)
@@ -145,6 +140,29 @@ export default function OrdersPage() {
       return true
     })
   }, [baseOrders, statusF, sideF, symbolF])
+
+  // 状态/方向/品种筛选变化时回到第一页，避免停在一个筛选后已不存在的页码上。
+  // 日期筛选的回第一页放在各自的 onChange 里同步做（见下方日期输入框），这样切到
+  // 服务端分页时不会先按旧页码多发一次请求。
+  // Reset to page 0 when the status/side/symbol filters change. Date-filter
+  // resets happen synchronously in their own onChange handlers (see the date
+  // inputs below) so switching into server pagination doesn't fire an extra
+  // request at the stale page first.
+  useEffect(() => { setPage(0) }, [statusF, sideF, symbolF])
+
+  // 分页派生：日期筛选时服务端每页只取 10 条（serverTotal 为该区间总数）；否则在
+  // 实时集合上本地切 10 条一页。safePage 夹紧，防止数据刷新后停在越界页码。
+  // Pagination: with a date filter the server returns 10 per page (serverTotal
+  // is the range total); otherwise slice the live set locally, 10 per page.
+  // safePage clamps so a live refresh can't leave us on an out-of-range page.
+  const totalPages = dateFilterActive
+    ? Math.max(1, Math.ceil(serverTotal / ORDERS_PAGE_SIZE))
+    : Math.max(1, Math.ceil(filteredOrders.length / ORDERS_PAGE_SIZE))
+  const safePage = Math.min(page, totalPages - 1)
+  const visibleOrders = dateFilterActive
+    ? filteredOrders
+    : filteredOrders.slice(safePage * ORDERS_PAGE_SIZE, safePage * ORDERS_PAGE_SIZE + ORDERS_PAGE_SIZE)
+  const pageTotal = dateFilterActive ? serverTotal : filteredOrders.length
 
   const doCancel = async (id: string) => {
     setCancellingId(id)
@@ -246,14 +264,9 @@ export default function OrdersPage() {
         )}
       </div>
 
-      {/* 个人跟单表现 / personal trading performance */}
+      {/* 我的交易表现 / personal trading performance */}
       <div className="mb-5">
         <PersonalWinRateCard variant="detailed" />
-      </div>
-
-      {/* 已平仓交易明细 / closed trade history */}
-      <div className="mb-5">
-        <ClosedTradesList />
       </div>
 
       {/* 自动仓位管理 / auto position management */}
@@ -391,6 +404,17 @@ export default function OrdersPage() {
         </div>
       )}
 
+      {/* 已平仓交易明细 / closed trade history */}
+      <div className="mb-5">
+        <ClosedTradesList />
+      </div>
+
+      {/* 操作记录 / activity log */}
+      <div className="mb-3">
+        <h3 className="font-display text-lg font-semibold text-slate-100">{t('orders.historyTitle')}</h3>
+        <p className="mt-1 text-xs text-slate-500">{t('orders.historyHint')}</p>
+      </div>
+
       {/* 筛选条 / filter bar */}
       <div className="glass mb-3 flex flex-wrap items-center gap-3 p-3">
         <label className="flex items-center gap-2 text-xs">
@@ -435,7 +459,7 @@ export default function OrdersPage() {
             type="date"
             value={sinceF}
             max={untilF || undefined}
-            onChange={(e) => setSinceF(e.target.value)}
+            onChange={(e) => { setSinceF(e.target.value); setPage(0) }}
             className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-slate-100 outline-none transition focus:border-prism-500"
           />
         </label>
@@ -445,13 +469,13 @@ export default function OrdersPage() {
             type="date"
             value={untilF}
             min={sinceF || undefined}
-            onChange={(e) => setUntilF(e.target.value)}
+            onChange={(e) => { setUntilF(e.target.value); setPage(0) }}
             className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-slate-100 outline-none transition focus:border-prism-500"
           />
         </label>
         {dateFilterActive && (
           <button
-            onClick={() => { setSinceF(''); setUntilF('') }}
+            onClick={() => { setSinceF(''); setUntilF(''); setPage(0) }}
             className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-400 transition hover:text-slate-100"
           >
             {t('orders.clearDateFilter')}
@@ -461,7 +485,7 @@ export default function OrdersPage() {
 
       {/* 订单表 / orders table */}
       <div className="glass overflow-hidden">
-        {filteredOrders.length === 0 ? (
+        {visibleOrders.length === 0 ? (
           <p className="py-16 text-center text-sm text-slate-500">{t('orders.empty')}</p>
         ) : (
           <>
@@ -484,7 +508,7 @@ export default function OrdersPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredOrders.map((o) => (
+                {visibleOrders.map((o) => (
                   <tr
                     key={o.id}
                     className="border-b border-white/5 transition hover:bg-prism-600/10"
@@ -538,7 +562,7 @@ export default function OrdersPage() {
 
             {/* 移动端卡片列表 / mobile card list */}
             <div className="divide-y divide-white/5 md:hidden">
-              {filteredOrders.map((o) => (
+              {visibleOrders.map((o) => (
                 <div key={o.id} className="p-4">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2">
@@ -603,36 +627,36 @@ export default function OrdersPage() {
         )}
       </div>
 
-      {/* 分页：不设日期筛选、停在第一页时用 useLive() 的实时 100 条；点「下一页」
-          或设了日期筛选后改成向后端按页请求，可以看到 100 条以外的历史订单。
-          Pagination: on page 0 with no date filter this uses useLive()'s live
-          100; clicking "next" or setting a date filter switches to a paged
-          backend fetch, so history beyond the live 100 becomes reachable. */}
-      <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
-        <span>
-          {pageLoading
-            ? t('common.loading')
-            : usingServerPage
-              ? t('orders.pageInfo', { page: page + 1, totalPages, total: serverTotal })
-              : ''}
-        </span>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-            disabled={page === 0 || pageLoading}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {t('common.prevPage')}
-          </button>
-          <button
-            onClick={() => setPage((p) => p + 1)}
-            disabled={pageLoading || (usingServerPage && page + 1 >= totalPages)}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {t('common.nextPage')}
-          </button>
+      {/* 分页：每页 10 条。不设日期筛选时在实时集合上本地翻页（新单即时可见）；
+          设了日期筛选则向后端按页请求，可翻到实时那 100 条之外的历史订单。
+          Pagination: 10 per page. Without a date filter, page the live set
+          locally (new orders show instantly); with a date filter, page via the
+          backend, reaching history beyond the live 100. */}
+      {(visibleOrders.length > 0 || dateFilterActive) && (
+        <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
+          <span>
+            {pageLoading
+              ? t('common.loading')
+              : t('orders.pageInfo', { page: safePage + 1, totalPages, total: pageTotal })}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage(Math.max(0, safePage - 1))}
+              disabled={safePage === 0 || pageLoading}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {t('common.prevPage')}
+            </button>
+            <button
+              onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))}
+              disabled={pageLoading || safePage + 1 >= totalPages}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {t('common.nextPage')}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {toast && (
         <div

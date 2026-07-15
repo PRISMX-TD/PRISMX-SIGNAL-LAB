@@ -523,7 +523,8 @@
     "closedTradesTitle": "已平仓交易明细",
     "closedTradesHint": "每一笔真实成交，构成上面胜率数字的原始记录。",
     "closedTradesEmpty": "暂无已平仓记录",
-    "profit": "盈亏"
+    "profit": "盈亏",
+    "closedTradesAccount": "账户 {{login}}"
   },
   "orders": {
     "title": "订单与回执",
@@ -569,7 +570,9 @@
     "pageInfo": "第 {{page}} / {{totalPages}} 页 · 共 {{total}} 条",
     "cancelSent": "撤销请求已发出",
     "proExclusive": "PRO专属",
-    "mt5Accounts": "MT5 账户详情"
+    "mt5Accounts": "MT5 账户详情",
+    "historyTitle": "操作记录",
+    "historyHint": "下单、平仓、改单、撤单的每一笔指令及其执行状态与回执。"
   },
   "positions": {
     "lots": "手",
