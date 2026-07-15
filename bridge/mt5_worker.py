@@ -283,6 +283,23 @@ def _positions_payload() -> list:
 # closes don't flood in all at once.
 _last_deal_check: dict[str, datetime] = {}
 _DEAL_LOOKBACK_ON_FIRST_POLL = timedelta(hours=1)
+# MT5 终端把一笔刚成交的记录同步进"历史成交"查询接口需要一点点时间，不是
+# 瞬间可查——极快开平仓（几秒到十几秒内平掉）时，若直接查到"此刻"，那笔
+# 平仓很可能还没同步进去：查询本身不报错、就是查不到，代码会误判"这段
+# 时间已经查完了"而推进游标，永久漏掉这笔还没来得及同步的记录。用这个
+# 安全缓冲把查询上界往回退几秒，游标也只推进到这个更早的点，下一轮会用
+# 重叠的时间窗口重新查一次，直到该笔成交真正同步出现为止。
+# The MT5 terminal takes a moment to sync a just-executed deal into the
+# history query API — it's not instantaneous. A very fast open-then-close
+# (closed within seconds) can mean that closing deal simply isn't queryable
+# yet when we ask for "right now": the query itself doesn't error, it just
+# doesn't include it yet, and the code would wrongly conclude "this window
+# is fully checked" and advance the cursor past it — permanently missing a
+# deal that just hadn't synced in time. This safety margin pulls the query's
+# upper bound back a few seconds, and the cursor only advances to that same
+# earlier point, so the next poll re-queries an overlapping window until the
+# deal actually shows up.
+_DEAL_SYNC_SAFETY_MARGIN = timedelta(seconds=10)
 
 
 def _closed_trades_payload(path: str) -> list:
@@ -300,6 +317,10 @@ def _closed_trades_payload(path: str) -> list:
     position id matches.
     """
     now = datetime.now()
+    # 查询上界留一截安全缓冲，给刚成交的记录留出同步时间——见 _DEAL_SYNC_SAFETY_MARGIN
+    # 的说明。/ Query upper bound trails "now" by a safety margin — see
+    # _DEAL_SYNC_SAFETY_MARGIN's comment.
+    query_until = now - _DEAL_SYNC_SAFETY_MARGIN
     since = _last_deal_check.get(path)
     if since is None:
         since = now - _DEAL_LOOKBACK_ON_FIRST_POLL
@@ -321,7 +342,7 @@ def _closed_trades_payload(path: str) -> list:
     # so re-querying/re-reporting is safe.
 
     try:
-        deals = mt5.history_deals_get(since, now)
+        deals = mt5.history_deals_get(since, query_until)
     except Exception:
         return []
     if deals is None:
@@ -374,7 +395,7 @@ def _closed_trades_payload(path: str) -> list:
         })
 
     if fully_resolved:
-        _last_deal_check[path] = now
+        _last_deal_check[path] = query_until
     return out
 
 
