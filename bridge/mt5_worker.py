@@ -331,6 +331,18 @@ def _closed_trades_payload(path: str) -> list:
     since = _last_deal_check.get(path)
     if since is None:
         since = now - _DEAL_LOOKBACK_ON_FIRST_POLL
+
+    # 无条件打一行——纯诊断用，确认这个函数本身有没有被跑到（上一版加的日志
+    # 全部依赖"查到了/失败了"才打印，如果这个函数压根没被调用到，那些日志
+    # 一行都不会出现，跟"调用了但一直查空"是没法区分的两种情况）。确认好
+    # 之后这行会降频或删掉，不会一直这么吵。
+    # Unconditional line — diagnostic only, to confirm whether this function
+    # is even being invoked at all (every log added in the last release only
+    # prints on "found something" or "failed somehow"; if this function were
+    # never called, none of those would ever appear, indistinguishable from
+    # "called but genuinely always empty"). Will be throttled or removed once
+    # confirmed working; not meant to stay this chatty long-term.
+    logger.info("平仓检测：本轮开始 / round start — path=%s since=%s query_until=%s", path, since, query_until)
     # 注意：游标（_last_deal_check）只在下方确认"这轮真的完整处理成功"之后
     # 才会推进——不在这里提前写入。以前在这里无条件推进，只要 MT5 查询、
     # 账号信息、或某笔仓位归属判断当中任何一步瞬时失败，那段时间窗口的平仓
