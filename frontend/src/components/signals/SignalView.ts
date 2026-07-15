@@ -9,23 +9,30 @@ export const EXPIRING_THRESHOLD_MS = 2 * 60 * 1000
 // 新信号高亮持续时间 / how long a new signal stays highlighted
 export const NEW_HIGHLIGHT_MS = 6000
 
-// focus 视图默认关注品种（与后端引擎产出对齐，XAGUSD 暂无信号则恒显观望）。
+// focus 视图默认关注品种：与 EA（ea/PRISMX_MarketFeed.mq5）推送的品种矩阵
+// 对齐，让英雄卡始终展示 EA 有数据的品种，不再要求"必须先有活跃信号才会
+// 出现在英雄卡"——没有信号的品种就停在"观望"态，趋势/情绪照常显示。
+//
 // 比特币不在这个固定列表里：真实信号上报的品种名本来就是 "BTCUSDT"（与 MT5
 // 报价用的 "BTCUSD" 是两个不同的字符串），若再把 "BTCUSD" 塞进这份常驻观望
-// 列表，2026-07-15 加的展示映射会把它也渲染成 "BTCUSDT"，英雄卡的切换点里
-// 就会同时出现一个真实信号驱动的 BTCUSDT 和一个只是改了显示名的旧 BTCUSD 观望位——
-// 两个标签相同却是两份不同数据，用户会以为界面重复了。比特币只在真的有活跃
-// 信号（symbol="BTCUSDT"）时才会经 useFocusEntries 的动态追加逻辑出现一次。
-// Default watchlist (aligned with the engine's symbols; XAGUSD stays in "watch"
-// until it ever emits a signal). Bitcoin is deliberately NOT in this fixed
-// list: real signals report it as "BTCUSDT" (a different string from the
-// MT5-quote symbol "BTCUSD"). Keeping "BTCUSD" here as a permanent watch slot
-// would, after the 2026-07-15 display-alias change, render as "BTCUSDT" too —
-// producing a second hero-card stop with the same label as the real
-// signal-driven one, backed by different data. Bitcoin now only appears once,
-// dynamically appended by useFocusEntries whenever an actual live signal
-// (symbol="BTCUSDT") exists.
-export const DEFAULT_WATCHLIST = ['XAUUSD', 'EURUSD', 'GBPUSD', 'XAGUSD']
+// 列表，展示映射会把它也渲染成 "BTCUSDT"，英雄卡的切换点里就会同时出现一个
+// 真实信号驱动的 BTCUSDT 和一个只是改了显示名的旧 BTCUSD 观望位——两个标签
+// 相同却是两份不同数据，用户会以为界面重复了。比特币只在真的有活跃信号
+// （symbol="BTCUSDT"）时才会经 useFocusEntries 的动态追加逻辑出现一次。
+//
+// Default watchlist: aligned with the EA's (ea/PRISMX_MarketFeed.mq5) pushed
+// symbol matrix, so the hero card always shows whatever the EA has data for
+// — no longer gated on "must have an active signal first". Symbols with no
+// signal just sit in the "watch" state; trend/sentiment still render normally.
+//
+// Bitcoin is deliberately NOT in this fixed list: real signals report it as
+// "BTCUSDT" (a different string from the MT5-quote symbol "BTCUSD"). Keeping
+// "BTCUSD" here as a permanent watch slot would render as "BTCUSDT" too (via
+// the display-name mapping) — producing a second hero-card stop with the
+// same label as the real signal-driven one, backed by different data.
+// Bitcoin now only appears once, dynamically appended by useFocusEntries
+// whenever an actual live signal (symbol="BTCUSDT") exists.
+export const DEFAULT_WATCHLIST = ['XAUUSD', 'XAGUSD', 'WTI', 'EURUSD', 'GBPUSD', 'USDJPY']
 
 // 品种在 focus 视图下的状态：观望 / 做多 / 做空 / per-symbol state in the focus view
 export type FocusState = 'WATCH' | 'LONG' | 'SHORT'

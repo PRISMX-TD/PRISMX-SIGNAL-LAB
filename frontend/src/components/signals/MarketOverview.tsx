@@ -9,18 +9,17 @@ interface Props {
   signals: Signal[]
 }
 
-// 按信号方向统计所有活跃信号：买入=多头，卖出=空头，三段之和 = 活跃信号总数
+// 按信号方向统计所有活跃信号：买入=多头，卖出=空头，两段之和 = 活跃信号总数
 // count active signals by their direction: BUY = long, SELL = short; segments sum to total
 function computeDistribution(signals: Signal[]) {
-  let long = 0, short = 0, neutral = 0
+  let long = 0, short = 0
   for (const s of signals) {
     if (s.status !== 'ACTIVE') continue
     if (s.side === 'BUY') long++
-    else if (s.side === 'SELL') short++
-    else neutral++
+    else short++
   }
-  const total = long + short + neutral
-  return { long, short, neutral, total }
+  const total = long + short
+  return { long, short, total }
 }
 
 const CIRCUMFERENCE = 2 * Math.PI * 47 // r=47
@@ -50,14 +49,11 @@ const MarketOverview: FC<Props> = ({ signals }) => {
   const total = Math.max(1, dist.total)
   const longFrac = dist.long / total
   const shortFrac = dist.short / total
-  const neutralFrac = dist.neutral / total
 
   // 环形图各段 dasharray / donut segment dasharray
   const seg1Dash = `${longFrac * CIRCUMFERENCE} ${CIRCUMFERENCE}`
   const seg2Dash = `${shortFrac * CIRCUMFERENCE} ${CIRCUMFERENCE}`
   const seg2Offset = -longFrac * CIRCUMFERENCE
-  const seg3Dash = `${neutralFrac * CIRCUMFERENCE} ${CIRCUMFERENCE}`
-  const seg3Offset = -(longFrac + shortFrac) * CIRCUMFERENCE
 
   // 近 7 日每日信号发出量 / daily signal count for the last 7 days
   const [daily, setDaily] = useState<SignalDailyCount[]>([])
@@ -86,12 +82,10 @@ const MarketOverview: FC<Props> = ({ signals }) => {
             <circle cx="58" cy="58" r="47" fill="none" stroke="#26262e" strokeWidth="13" />
             <circle cx="58" cy="58" r="47" fill="none" stroke="#2ee07e" strokeWidth="13" strokeLinecap="round" strokeDasharray={seg1Dash} />
             <circle cx="58" cy="58" r="47" fill="none" stroke="#ff4d67" strokeWidth="13" strokeLinecap="round" strokeDasharray={seg2Dash} strokeDashoffset={seg2Offset} />
-            {/* 中性段用冷灰蓝：紫色只做品牌，不做数据语义 / neutral segment in slate: purple stays brand-only, never data */}
-            <circle cx="58" cy="58" r="47" fill="none" stroke="#64748b" strokeWidth="13" strokeLinecap="round" strokeDasharray={seg3Dash} strokeDashoffset={seg3Offset} />
           </svg>
           <div className="donut-center">
             <div>
-              {/* 活跃信号总数，且 = 多头 + 空头 + 中性 / total active signals, equals bull + bear + neutral */}
+              {/* 活跃信号总数，且 = 多头 + 空头 / total active signals, equals bull + bear */}
               <b className="num">{dist.total}</b>
               <span>{t('signals.focus.signalTotal', '信号总数')}</span>
             </div>
@@ -108,11 +102,6 @@ const MarketOverview: FC<Props> = ({ signals }) => {
             <span className="sw" style={{ background: '#ff4d67' }} />
             <span className="k">{t('signals.focus.bear')}</span>
             <span className="v num">{Math.round(shortFrac * 100)}% <i>({dist.short})</i></span>
-          </div>
-          <div className="row">
-            <span className="sw" style={{ background: '#64748b' }} />
-            <span className="k">{t('signals.focus.neutral')}</span>
-            <span className="v num">{Math.round(neutralFrac * 100)}% <i>({dist.neutral})</i></span>
           </div>
         </div>
       </div>
