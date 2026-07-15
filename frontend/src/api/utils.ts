@@ -31,26 +31,28 @@ export function localizeApiError(message: string): string {
 // 格式化时间 / format timestamp
 // 后端统一存 UTC 时间。若字符串无时区标记（Postgres TIMESTAMP 读出时常无），
 // 补 'Z' 当作 UTC 解析，避免被浏览器按本地时区误读导致差 8 小时。
-// 之前这里固定按马来西亚时区显示却完全不标注，国际用户看到的时间点会跟自己
-// 的钟差 8 小时却毫无察觉；改为统一显示 UTC 并显式标注"UTC"后缀，不再依赖
-// 用户猜时区、也不用再按用户所在地做时区转换。
+// 2026-07-15：按用户要求全站统一显示 UTC+8（马来西亚/新加坡/中国标准时间，
+// 全年无夏令时切换）。仍然显式标注"UTC+8"后缀而不是裸时间——不标注时区的
+// 教训（国际用户会把它当成自己的本地时间、读错实际发生时刻）依然适用，只是
+// 现在固定展示的时区从 UTC 换成了 UTC+8。
 // Backend stores UTC. If the string carries no tz marker, treat it as UTC.
-// This used to render in a hardcoded Malaysia timezone with no label at
-// all — an international user's clock would silently be off by up to 8
-// hours from what they saw. Now always shown in UTC with an explicit "UTC"
-// suffix, so nobody has to guess the timezone or needs per-user conversion.
+// 2026-07-15: per request, the whole site now displays UTC+8 (Malaysia/
+// Singapore/China standard time, no DST year-round). Still labeled explicitly
+// with a "UTC+8" suffix rather than a bare time — the earlier lesson (an
+// unlabeled time reads as the viewer's own local time and gets misread)
+// still applies; only the fixed timezone being shown has changed.
 export function fmtTime(iso: string | null | undefined): string {
   if (!iso) return '-'
   const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)
   const d = new Date(hasTz ? iso : iso + 'Z')
   return d.toLocaleString('en-GB', {
-    timeZone: 'UTC',
+    timeZone: 'Asia/Shanghai',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-  }) + ' UTC'
+  }) + ' UTC+8'
 }
 
 // 格式化为含年月日的完整日期时间（用于订阅到期等需要明确年份的场景）
@@ -60,13 +62,13 @@ export function fmtDate(iso: string | null | undefined): string {
   const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)
   const d = new Date(hasTz ? iso : iso + 'Z')
   return d.toLocaleString('en-GB', {
-    timeZone: 'UTC',
+    timeZone: 'Asia/Shanghai',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-  }) + ' UTC'
+  }) + ' UTC+8'
 }
 
 // 解析后端时间为带时区的 Date / parse backend time as a tz-aware Date

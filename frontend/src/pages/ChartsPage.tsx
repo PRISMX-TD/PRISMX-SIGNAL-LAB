@@ -180,18 +180,19 @@ export default function ChartsPage() {
         borderColor: 'rgba(139, 70, 255, 0.15)',
         timeVisible: true,
         secondsVisible: false,
-        // 固定按 UTC 展示，并在工具条标注"UTC"徽标(见下方 JSX)。此前固定按
-        // 马来西亚时区却完全不标注，非马来西亚用户对着 K 线时间轴会以为看的
-        // 是自己当地时间，读错开盘/信号触发的实际时刻。
-        // (喂价器已把时间戳归一化到真 UTC，见 CHART_SELFHOST_PLAN.md §3.1.1)
-        // Fixed to UTC, with a "UTC" badge in the toolbar below. This used to
-        // be hardcoded to Malaysia time with zero indication — a non-Malaysia
-        // user reading the candle time axis would assume it was their own
-        // local time and misread when things actually happened.
-        // (the feeder normalizes timestamps to true UTC — see plan §3.1.1)
+        // 2026-07-15：按要求全站固定展示 UTC+8，并在工具条标注"UTC+8"徽标
+        // (见下方 JSX)，而不是裸时间轴——不标注时区会让用户把它当成自己的
+        // 本地时间、读错开盘/信号触发的实际时刻，这条教训依然适用，只是展示
+        // 的时区从 UTC 换回了 UTC+8。
+        // (喂价器已把时间戳归一化到真 UTC，格式化时统一转 UTC+8 展示)
+        // 2026-07-15: per request, fixed to UTC+8 site-wide, with a "UTC+8"
+        // badge in the toolbar below rather than a bare time axis — an
+        // unlabeled axis reads as the viewer's local time and gets misread;
+        // only the fixed timezone shown has changed back from UTC to UTC+8.
+        // (the feeder normalizes timestamps to true UTC; formatting converts to UTC+8)
         tickMarkFormatter: (time: UTCTimestamp) =>
           new Intl.DateTimeFormat('en-GB', {
-            timeZone: 'UTC',
+            timeZone: 'Asia/Shanghai',
             month: '2-digit',
             day: '2-digit',
             hour: '2-digit',

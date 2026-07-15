@@ -486,8 +486,8 @@
     "disclaimer": "Chart data comes from the platform's own feed and is for reference only; it may differ slightly from your broker's quotes.",
     "empty": "Chart data is loading or temporarily unavailable…",
     "stale": "Data delayed",
-    "utcBadge": "UTC",
-    "utcHint": "The time axis and all timestamps are shown in UTC, not your local time",
+    "utcBadge": "UTC+8",
+    "utcHint": "The time axis and all timestamps are shown in UTC+8 (Malaysia/Singapore/China Standard Time)",
     "draw": {
       "tools": "Drawing tools",
       "cursor": "Cursor",
