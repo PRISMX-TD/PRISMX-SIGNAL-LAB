@@ -283,92 +283,69 @@ def _positions_payload() -> list:
     return out
 
 
-# 每个终端路径记一个"上次检查到哪个时间点"的游标，避免每次轮询都重新扫一遍
-# 全部历史。首次轮询只回看 1 小时，不把很久以前的平仓一次性倒灌进来。
-# Per-terminal-path cursor of "checked up to when", so each poll doesn't
-# rescan the whole history. The first poll only looks back 1 hour, so old
-# closes don't flood in all at once.
-_last_deal_check: dict[str, datetime] = {}
-_DEAL_LOOKBACK_ON_FIRST_POLL = timedelta(hours=1)
-# MT5 终端把一笔刚成交的记录同步进"历史成交"查询接口需要一点点时间，不是
-# 瞬间可查——极快开平仓（几秒到十几秒内平掉）时，若直接查到"此刻"，那笔
-# 平仓很可能还没同步进去：查询本身不报错、就是查不到，代码会误判"这段
-# 时间已经查完了"而推进游标，永久漏掉这笔还没来得及同步的记录。用这个
-# 安全缓冲把查询上界往回退几秒，游标也只推进到这个更早的点，下一轮会用
-# 重叠的时间窗口重新查一次，直到该笔成交真正同步出现为止。
-# The MT5 terminal takes a moment to sync a just-executed deal into the
-# history query API — it's not instantaneous. A very fast open-then-close
-# (closed within seconds) can mean that closing deal simply isn't queryable
-# yet when we ask for "right now": the query itself doesn't error, it just
-# doesn't include it yet, and the code would wrongly conclude "this window
-# is fully checked" and advance the cursor past it — permanently missing a
-# deal that just hadn't synced in time. This safety margin pulls the query's
-# upper bound back a few seconds, and the cursor only advances to that same
-# earlier point, so the next poll re-queries an overlapping window until the
-# deal actually shows up.
-_DEAL_SYNC_SAFETY_MARGIN = timedelta(seconds=10)
+# 每次轮询都固定回看这么长时间，不再用"游标"记上次查到哪——见下方
+# _closed_trades_payload 顶部的详细说明（这是踩了三轮增量游标的坑之后改的
+# 设计）。15 分钟对单账户的 MT5 历史查询开销可以忽略不计。
+# Every poll always looks back this far, instead of a "cursor" tracking where
+# the last check left off — see the detailed note at the top of
+# _closed_trades_payload (this design replaces three rounds of a fragile
+# incremental cursor). 15 minutes is a trivially cheap MT5 history query for
+# one account.
+_TRADE_SCAN_WINDOW = timedelta(minutes=15)
 
 
 def _closed_trades_payload(path: str) -> list:
-    """检测该终端账号新出现的平仓成交，且仅限本平台开的仓位（个人胜率用）。
+    """检测该终端账号最近的平仓成交，且仅限本平台开的仓位（个人胜率用）。
 
     先按仓位编号在 MT5 历史里查这个仓位的开仓成交是不是打了 PRISMX 的魔术号
     码——不管后续这笔平仓是网页发的指令，还是用户直接在 MT5 客户端手动点的，
     只要仓位编号对得上就会被上报。
 
-    Detect newly closed deals for this terminal's account, restricted to
+    设计说明——为什么放弃"增量游标"改成"固定回看窗口"：
+    之前用一个"游标"记录"上次检查到哪个时间点"，每轮只查游标到现在这一小段
+    （1.5~2 秒），本意是避免重复扫描。但排查一次真实漏报时发现：即使游标
+    对应的窗口精确盖住了平仓的那一刻，`history_deals_get` 依然查不到那笔
+    成交——本地电脑时钟与 MT5/经纪商服务器时钟的哪怕几秒误差，配合这么窄的
+    窗口，就足以让查询整个擦肩而过。窗口越窄，对时钟精度的要求就越苛刻，
+    出这类问题的概率反而越高。改成每轮都固定回看最近 15 分钟，不管时钟
+    有没有偏差、MT5 内部同步快慢，15 分钟的窗口都能稳稳盖住——代价是同一笔
+    成交会在窗口有效期内被反复查到、反复上报，但后端按 (用户, 成交编号)
+    去重，重复上报没有副作用。用一点点重复查询的开销换彻底不再漏报。
+
+    Detect this terminal's account's recent closing deals, restricted to
     positions this platform opened (for personal win-rate stats). Checks each
     closing deal's position by MT5 ticket to see whether its opening deal
     carries the PRISMX magic number — regardless of whether the close itself
     was a web command or a manual click in the MT5 terminal, as long as the
     position id matches.
+
+    Design note — why a fixed lookback window replaced an incremental cursor:
+    A cursor used to track "checked up to when", with each poll only
+    scanning the ~1.5-2s since the last check, to avoid rescanning. But
+    debugging a real missed report revealed that even when the cursor's
+    window precisely bracketed the moment of the close, history_deals_get
+    still didn't find it — a clock difference of even a few seconds between
+    the local machine and the MT5/broker server, combined with such a narrow
+    window, was enough for the query to miss it entirely. The narrower the
+    window, the more it demands clock precision, and the more likely this
+    class of bug becomes. Every poll now always rescans the last 15 minutes
+    regardless of any clock skew or MT5-side sync delay — the cost is the
+    same deal getting re-queried/re-reported repeatedly while still within
+    the window, which is harmless since the backend dedupes by (user, deal
+    ticket). A little redundant querying in exchange for never missing one.
     """
     now = datetime.now()
-    # 查询上界留一截安全缓冲，给刚成交的记录留出同步时间——见 _DEAL_SYNC_SAFETY_MARGIN
-    # 的说明。/ Query upper bound trails "now" by a safety margin — see
-    # _DEAL_SYNC_SAFETY_MARGIN's comment.
-    query_until = now - _DEAL_SYNC_SAFETY_MARGIN
-    since = _last_deal_check.get(path)
-    if since is None:
-        since = now - _DEAL_LOOKBACK_ON_FIRST_POLL
-
-    # 无条件打一行——纯诊断用，确认这个函数本身有没有被跑到（上一版加的日志
-    # 全部依赖"查到了/失败了"才打印，如果这个函数压根没被调用到，那些日志
-    # 一行都不会出现，跟"调用了但一直查空"是没法区分的两种情况）。确认好
-    # 之后这行会降频或删掉，不会一直这么吵。
-    # Unconditional line — diagnostic only, to confirm whether this function
-    # is even being invoked at all (every log added in the last release only
-    # prints on "found something" or "failed somehow"; if this function were
-    # never called, none of those would ever appear, indistinguishable from
-    # "called but genuinely always empty"). Will be throttled or removed once
-    # confirmed working; not meant to stay this chatty long-term.
-    logger.info("平仓检测：本轮开始 / round start — path=%s since=%s query_until=%s", path, since, query_until)
-    # 注意：游标（_last_deal_check）只在下方确认"这轮真的完整处理成功"之后
-    # 才会推进——不在这里提前写入。以前在这里无条件推进，只要 MT5 查询、
-    # 账号信息、或某笔仓位归属判断当中任何一步瞬时失败，那段时间窗口的平仓
-    # 记录就会被永久跳过、再也补不回来（表现为"胜率统计漏单/不及时"）。
-    # 现在任何一步失败都保持游标原地不动，下一轮（1.5s 后）用同一个时间
-    # 窗口重试；已经成功上报过的成交由后端按 (用户, 成交编号) 去重，重复
-    # 查询/上报是安全的。
-    # Note: the cursor (_last_deal_check) only advances after this poll is
-    # confirmed fully successful below — not written eagerly up front. It
-    # used to advance unconditionally here; any single transient failure in
-    # the MT5 query, account lookup, or a position's ownership check would
-    # silently and permanently skip that time window's closes (surfacing as
-    # "missing / delayed win-rate stats"). Now any failure leaves the cursor
-    # untouched so the next poll (1.5s later) retries the same window;
-    # already-reported deals are deduped server-side by (user, deal ticket),
-    # so re-querying/re-reporting is safe.
+    since = now - _TRADE_SCAN_WINDOW
 
     try:
-        deals = mt5.history_deals_get(since, query_until)
+        deals = mt5.history_deals_get(since, now)
     except Exception as e:
-        logger.warning("平仓检测：history_deals_get(%s, %s) 抛异常 / threw: %s", since, query_until, e)
+        logger.warning("平仓检测：history_deals_get(%s, %s) 抛异常 / threw: %s", since, now, e)
         return []
     if deals is None:
         # MT5 查询本身失败（区别于"查到了但确实没有成交"），可用 mt5.last_error() 看原因。
         # The MT5 call itself failed (distinct from "queried fine, just empty"); mt5.last_error() has the reason.
-        logger.warning("平仓检测：history_deals_get(%s, %s) 返回 None，mt5.last_error()=%s", since, query_until, mt5.last_error())
+        logger.warning("平仓检测：history_deals_get(%s, %s) 返回 None，mt5.last_error()=%s", since, now, mt5.last_error())
         return []
 
     login = _current_login()
@@ -377,13 +354,11 @@ def _closed_trades_payload(path: str) -> list:
         return []
 
     if deals:
-        logger.info("平仓检测：窗口 [%s, %s] 内查到 %d 条原始成交 / %d raw deal(s) in window", since, query_until, len(deals), len(deals))
+        logger.info("平仓检测：窗口 [%s, %s] 内查到 %d 条原始成交 / %d raw deal(s) in window", since, now, len(deals), len(deals))
 
     out = []
     # 同一次轮询内，同一仓位是否是我们开的只查一次 / cache per-position lookups within one pass
     position_is_ours: dict[int, bool] = {}
-    fully_resolved = True  # 本轮是否每笔平仓的归属都确认成功；只有全部成功才推进游标
-                            # whether every close's ownership was confirmed this round; cursor only advances if so
     for d in deals:
         if d.entry != mt5.DEAL_ENTRY_OUT:
             continue  # 只关心平仓成交（含部分平仓）/ only closing deals (incl. partial)
@@ -395,13 +370,17 @@ def _closed_trades_payload(path: str) -> list:
                 logger.warning("平仓检测：history_deals_get(position=%s) 抛异常 / threw: %s", pos_id, e)
                 pos_deals = None
             if pos_deals is None:
-                # 这次没查到该仓位的完整历史，无法确定是否本平台开的仓——
-                # 跳过这笔（不缓存归属结果），并且不推进游标，留给下一轮重试。
+                # 这次没查到该仓位的完整历史，无法确定是否本平台开的仓——跳过
+                # 这笔（不缓存归属结果）。不需要担心"这轮跳过就永久漏了"：
+                # 固定回看窗口下，只要这笔平仓还在最近 15 分钟内，下一轮
+                # （1.5s 后）会重新扫到同一笔成交，再试一次归属判定。
                 # Couldn't fetch this position's full history, so ownership is
-                # undetermined — skip this deal (don't cache a result) and
-                # don't advance the cursor; retry next round.
-                logger.warning("平仓检测：仓位 %s 的历史查不到（mt5.last_error()=%s），归属未知，本轮跳过并保留游标重试", pos_id, mt5.last_error())
-                fully_resolved = False
+                # undetermined — skip this deal (don't cache a result). No
+                # need to worry this makes it permanently missed: under the
+                # fixed lookback window, as long as this close is still within
+                # the last 15 minutes, the next poll (1.5s later) rescans the
+                # same deal and retries ownership resolution.
+                logger.warning("平仓检测：仓位 %s 的历史查不到（mt5.last_error()=%s），归属未知，本轮跳过，下一轮重试", pos_id, mt5.last_error())
                 continue
             position_is_ours[pos_id] = any(getattr(pd, "magic", 0) == PRISMX_MAGIC for pd in pos_deals)
             logger.info(
@@ -428,12 +407,7 @@ def _closed_trades_payload(path: str) -> list:
         })
 
     if deals:
-        logger.info(
-            "平仓检测：本轮产出 %d 条待上报记录，游标%s推进到 %s / this round produced %d entrie(s), cursor %s to %s",
-            len(out), "已" if fully_resolved else "未", query_until, len(out), "advanced" if fully_resolved else "NOT advanced", query_until,
-        )
-    if fully_resolved:
-        _last_deal_check[path] = query_until
+        logger.info("平仓检测：本轮产出 %d 条待上报记录 / this round produced %d entrie(s)", len(out), len(out))
     return out
 
 
