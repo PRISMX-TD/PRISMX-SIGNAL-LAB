@@ -40,3 +40,23 @@ def update(quotes: list[dict]) -> list[dict]:
 
 def get_all() -> list[dict]:
     return list(_quotes.values())
+
+
+# 品种"当前活跃"的判定窗口（秒）：EA 报价推送间隔默认 2 秒，30 秒足够容忍
+# 几次推送丢失/延迟，又能在 EA 端 InpSymbols 增删品种后的半分钟内跟上——
+# 不需要 EA 显式上报"我现在配置了哪些品种"，谁在推谁就是活跃品种，谁停推
+# 谁就在这个窗口后自然掉出列表。/ Freshness window (seconds) for "currently
+# active": the EA's default quote-push interval is 2s, so 30s comfortably
+# tolerates a few missed/delayed pushes while still catching an InpSymbols
+# add/remove on the EA side within half a minute — no need for the EA to
+# explicitly report its configured symbol list; whoever is actively pushing
+# is active, and a symbol that stops falls out after this window.
+ACTIVE_WINDOW_SECONDS = 30
+
+
+def get_active_symbols() -> list[str]:
+    """当前仍在被 EA 推送的品种（近 ACTIVE_WINDOW_SECONDS 秒内有报价更新）。
+    Symbols the EA is currently pushing (had a quote update within the last
+    ACTIVE_WINDOW_SECONDS seconds)."""
+    cutoff = time.time() - ACTIVE_WINDOW_SECONDS
+    return sorted(sym for sym, ts in _updated_at.items() if ts >= cutoff)

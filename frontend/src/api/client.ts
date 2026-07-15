@@ -102,6 +102,15 @@ export const quoteApi = {
   list: () => request<{ quotes: Quote[] }>('/quotes'),
 }
 
+// 当前活跃品种：EA 的 InpSymbols 实际在推什么，就返回什么，不是写死的列表。
+// 报价表/图表选择器/仪表盘英雄板都应以此为准渲染。
+// Currently active symbols: whatever the EA's InpSymbols is actually
+// pushing, not a hardcoded list. The quotes table / chart symbol picker /
+// dashboard hero should all render from this.
+export const symbolApi = {
+  list: () => request<{ symbols: string[] }>('/symbols'),
+}
+
 // 行情 K 线（自建中央 MT5 喂价源，取代 TradingView Widget）
 // Chart candles from the self-hosted central MT5 feed (replaces the TradingView widget)
 export const chartApi = {

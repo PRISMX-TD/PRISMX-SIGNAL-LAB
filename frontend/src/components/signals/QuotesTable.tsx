@@ -1,39 +1,46 @@
-// 实时行情报价表（仪表盘左下）：固定核心品种，买价 + 卖价
-// Live quotes table (dashboard bottom-left): hardcoded core symbols, bid + ask
+// 实时行情报价表（仪表盘左下）：品种列表跟着 EA 实际推送的走，买价 + 卖价
+// Live quotes table (dashboard bottom-left): symbol list follows whatever
+// the EA actually pushes, bid + ask
 import { memo, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Quote } from '../../api/types'
 import { displaySymbol } from '../../api/utils'
 
 interface Props {
+  symbols: string[]        // 当前活跃品种（来自 useLive().activeSymbols）/ currently active symbols
   quotes: Record<string, Quote>
   mt5Online: boolean
   focusSymbol?: string   // 手机端只显示这个品种 / mobile: show only this symbol
 }
 
-// 核心品种列表：与 EA（ea/PRISMX_MarketFeed.mq5）默认推送的品种矩阵对齐——
-// 只列 EA 实际会推送的品种，避免表里出现从不会有数据的行。品种名走 i18n
-// （signals.symbolNames），此处只留展示用的字母与配色。
-// Core symbols: aligned with the EA's (ea/PRISMX_MarketFeed.mq5) default push
-// matrix — only symbols the EA actually pushes are listed, so the table never
-// shows a row that can never have data. Names come from i18n
-// (signals.symbolNames); only letter + color live here.
-const CORE_SYMBOLS: { sym: string; letter: string; color: string }[] = [
-  { sym: 'XAUUSD', letter: 'X', color: '#f6c453' },
-  { sym: 'XAGUSD', letter: 'X', color: '#94a3b8' },
-  { sym: 'WTI', letter: 'W', color: '#d97757' },
-  { sym: 'EURUSD', letter: 'E', color: '#6366f1' },
-  { sym: 'GBPUSD', letter: 'G', color: '#a855f7' },
-  { sym: 'USDJPY', letter: 'U', color: '#7c3aed' },
-  { sym: 'BTCUSD', letter: 'B', color: '#f59e0b' },
-]
+// 已知品种的展示元数据（字母 + 配色）；活跃列表里出现未在此列出的新品种时，
+// 用品种名首字母 + 统一灰色兜底，不需要为了新品种改这份表才能显示。
+// 品种名走 i18n（signals.symbolNames）。
+// Known display metadata (letter + color) for a handful of symbols; a symbol
+// appearing in the active list but not listed here falls back to its own
+// first letter + a neutral color, so a brand-new symbol shows up without
+// needing a code change here. Names come from i18n (signals.symbolNames).
+const SYMBOL_META: Record<string, { letter: string; color: string }> = {
+  XAUUSD: { letter: 'X', color: '#f6c453' },
+  XAGUSD: { letter: 'X', color: '#94a3b8' },
+  WTI: { letter: 'W', color: '#d97757' },
+  EURUSD: { letter: 'E', color: '#6366f1' },
+  GBPUSD: { letter: 'G', color: '#a855f7' },
+  USDJPY: { letter: 'U', color: '#7c3aed' },
+  BTCUSD: { letter: 'B', color: '#f59e0b' },
+}
+const DEFAULT_META = { color: '#64748b' }
+function symbolMeta(sym: string): { letter: string; color: string } {
+  return SYMBOL_META[sym] ?? { letter: sym.charAt(0).toUpperCase() || '?', color: DEFAULT_META.color }
+}
 
-const QuotesTable: FC<Props> = ({ quotes, mt5Online, focusSymbol }) => {
+const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => {
   const { t } = useTranslation()
 
-  // 手机端单行报价：优先用焦点品种，找不到则用第一个核心品种 / mobile: focus symbol or fallback
-  const focusMeta = CORE_SYMBOLS.find(s => s.sym === focusSymbol) ?? CORE_SYMBOLS[0]
-  const focusQ = quotes[focusMeta.sym]
+  // 手机端单行报价：优先用焦点品种，找不到则用第一个活跃品种 / mobile: focus symbol or fallback
+  const focusSym = (focusSymbol && symbols.includes(focusSymbol)) ? focusSymbol : symbols[0]
+  const focusMeta = focusSym ? { sym: focusSym, ...symbolMeta(focusSym) } : null
+  const focusQ = focusMeta ? quotes[focusMeta.sym] : undefined
   const focusDigits = focusQ?.digits ?? 5
   const focusBid = focusQ?.bid != null ? focusQ.bid.toFixed(focusDigits) : '-'
   const focusAsk = focusQ?.ask != null ? focusQ.ask.toFixed(focusDigits) : '-'
@@ -58,7 +65,7 @@ const QuotesTable: FC<Props> = ({ quotes, mt5Online, focusSymbol }) => {
       {/* ── 手机端：极简单行报价，品种代号 + 状态点 + 买价/点差/卖价 / mobile: minimal single-row quote ── */}
       <div className="qt-mobile-row sm:hidden">
         <div className="flex items-center gap-2">
-          <b className="text-sm font-bold text-white">{displaySymbol(focusMeta.sym)}</b>
+          <b className="text-sm font-bold text-white">{focusMeta ? displaySymbol(focusMeta.sym) : '-'}</b>
           <span className={`inline-block w-[7px] h-[7px] rounded-full ${mt5Online ? 'bg-up shadow-[0_0_10px_rgba(46,224,126,0.9)] animate-breathe' : 'bg-slate-500'}`} />
         </div>
         <div className="flex items-center gap-5 ml-auto">
@@ -88,27 +95,32 @@ const QuotesTable: FC<Props> = ({ quotes, mt5Online, focusSymbol }) => {
             </tr>
           </thead>
           <tbody>
-            {CORE_SYMBOLS.map(({ sym, letter, color }) => {
-              const q = quotes[sym]
-              const digits = q?.digits ?? 5
-              const bid = q?.bid != null ? q.bid.toFixed(digits) : null
-              const ask = q?.ask != null ? q.ask.toFixed(digits) : null
-              return (
-                <tr key={sym}>
-                  <td>
-                    <div className="qt-sym-cell">
-                      <div className="qt-sym-ava" style={{ background: color + '22', color }}>{letter}</div>
-                      <div className="nm">
-                        <b>{displaySymbol(sym)}</b>
-                        <span>{t(`signals.symbolNames.${sym}`, { defaultValue: '' })}</span>
+            {symbols.length === 0 ? (
+              <tr><td colSpan={3} className="text-center text-sm text-slate-500 py-4">{t('common.loading')}</td></tr>
+            ) : (
+              symbols.map((sym) => {
+                const { letter, color } = symbolMeta(sym)
+                const q = quotes[sym]
+                const digits = q?.digits ?? 5
+                const bid = q?.bid != null ? q.bid.toFixed(digits) : null
+                const ask = q?.ask != null ? q.ask.toFixed(digits) : null
+                return (
+                  <tr key={sym}>
+                    <td>
+                      <div className="qt-sym-cell">
+                        <div className="qt-sym-ava" style={{ background: color + '22', color }}>{letter}</div>
+                        <div className="nm">
+                          <b>{displaySymbol(sym)}</b>
+                          <span>{t(`signals.symbolNames.${sym}`, { defaultValue: '' })}</span>
+                        </div>
                       </div>
-                    </div>
-                  </td>
-                  <td><span className="qt-price num" style={{ color: '#ff4d67' }}>{bid ?? '-'}</span></td>
-                  <td><span className="qt-price num" style={{ color: '#2ee07e' }}>{ask ?? '-'}</span></td>
-                </tr>
-              )
-            })}
+                    </td>
+                    <td><span className="qt-price num" style={{ color: '#ff4d67' }}>{bid ?? '-'}</span></td>
+                    <td><span className="qt-price num" style={{ color: '#2ee07e' }}>{ask ?? '-'}</span></td>
+                  </tr>
+                )
+              })
+            )}
           </tbody>
         </table>
       </div>

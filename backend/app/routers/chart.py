@@ -134,6 +134,19 @@ async def list_quotes(user: User = Depends(get_current_user)):
     return {"quotes": quotes_store.get_all()}
 
 
+@router.get("/symbols")
+async def list_active_symbols(user: User = Depends(get_current_user)):
+    """当前活跃品种：EA 的 InpSymbols 里配了什么、正在推什么，这里就返回什么，
+    不是写死的列表。前端的报价表/图表选择器/仪表盘英雄板都应该以这份列表为
+    准渲染，EA 端增删品种后数十秒内前端会自动跟上，不需要改前端代码。
+    Currently active symbols: whatever the EA's InpSymbols is configured with
+    and actively pushing, not a hardcoded list. The frontend's quotes table /
+    chart symbol picker / dashboard hero should all render from this list —
+    adding or removing a symbol on the EA side is reflected within seconds,
+    no frontend code change needed."""
+    return {"symbols": quotes_store.get_active_symbols()}
+
+
 # ---------- 前端读取 / frontend read ----------
 @router.get("/chart/history")
 async def chart_history(

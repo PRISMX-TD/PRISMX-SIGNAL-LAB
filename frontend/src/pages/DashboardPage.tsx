@@ -22,14 +22,14 @@ import type { FocusState } from '../components/signals/SignalView'
 export default function DashboardPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { signals, anyOnline, accounts, loaded, trends } = useLive()
+  const { signals, anyOnline, accounts, loaded, trends, activeSymbols } = useLive()
   // 展示用全站统一报价（英雄板/报价表）与按账户区分的报价（下单确认页）分开取
   // Site-wide display quotes (hero/quotes table) vs per-account quotes (order confirmation)
   const globalQuotes = useGlobalQuotes()
   const accountQuotes = useQuotes()
   const now = useNow(1000)
   const { sentiment } = useSentiment()
-  const focusEntries = useFocusEntries(signals, now)
+  const focusEntries = useFocusEntries(signals, now, activeSymbols)
   const { toast, placeOrder } = useOrderPlacement()
 
   const [focusIdx, setFocusIdx] = useState(0)
@@ -76,7 +76,7 @@ export default function DashboardPage() {
             <>
               <div className="dash-col-1">
                 <SignalHero symbol={cur.symbol} cnName={nameOf(cur.symbol)} focusIdx={idx} focusTotal={focusEntries.length} stance={stance} trend={trends[cur.symbol]} sentiment={sentiment[cur.symbol] ?? null} onPrev={goPrev} onNext={goNext} onSelectIdx={setFocusIdx} />
-                <QuotesTable quotes={globalQuotes} mt5Online={anyOnline} focusSymbol={cur?.symbol} />
+                <QuotesTable symbols={activeSymbols} quotes={globalQuotes} mt5Online={anyOnline} focusSymbol={cur?.symbol} />
               </div>
               <div className="dash-col-2">
                 <SignalExec signal={cur.signal} now={now} onTrade={openTrade} />
@@ -95,7 +95,7 @@ export default function DashboardPage() {
                   <h2 className="text-lg font-bold text-white">{t('signals.title')}</h2>
                   <p className="text-sm text-slate-400 max-w-xs">{t('signals.waitingForSignals', '等待信号引擎或 TradingView 推送信号……')}</p>
                 </section>
-                <QuotesTable quotes={globalQuotes} mt5Online={anyOnline} />
+                <QuotesTable symbols={activeSymbols} quotes={globalQuotes} mt5Online={anyOnline} />
               </div>
               <div className="dash-col-2">
                 <SignalExec signal={null} now={now} onTrade={openTrade} />

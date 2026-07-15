@@ -6,7 +6,6 @@ import { clientOrderId, localizeApiError } from '../../api/utils'
 import { useLive } from '../../store/live'
 import type { Signal } from '../../api/types'
 import {
-  DEFAULT_WATCHLIST,
   NEW_HIGHLIGHT_MS,
   effectiveStatus,
   type FocusEntry,
@@ -225,9 +224,28 @@ export function useNewSignalIds(signals: Signal[]): Set<string> {
   return newIds
 }
 
+// 比特币不进关注列表：真实信号上报的品种名是 "BTCUSDT"（与 EA/报价用的
+// "BTCUSD" 是两个不同字符串）。若把 EA 活跃列表里的 "BTCUSD" 也当常驻关注
+// 品种，一旦真的来一条 BTCUSDT 信号，切换点里会同时出现一个信号驱动的
+// "BTCUSDT" 卡和一个只是改了显示名的旧 "BTCUSD" 观望卡——两个标签相同却是
+// 两份不同数据。比特币只在真的有活跃信号时才经下面的动态追加逻辑出现一次。
+// Bitcoin is excluded from the watchlist: real signals report it as
+// "BTCUSDT" (a different string from the EA/quote symbol "BTCUSD"). If the
+// EA's active "BTCUSD" were kept as a permanent watch slot, a real BTCUSDT
+// signal would produce a second focus stop with the same rendered label,
+// backed by different data. Bitcoin only appears once, dynamically, when an
+// actual active signal exists.
+const HERO_EXCLUDED = new Set(['BTCUSD'])
+
 // 由实时信号派生每个关注品种的当前状态。
-// 关注列表 = 默认清单 ∪ 任何当前有 ACTIVE 信号的品种（不漏掉引擎新出的品种）。
-export function useFocusEntries(signals: Signal[], now: number): FocusEntry[] {
+// 关注列表 = 活跃品种列表（EA 实际在推的，见 useLive().activeSymbols，剔除
+// BTCUSD）∪ 任何当前有 ACTIVE 信号的品种（不漏掉信号里出现但 EA 未配置的
+// 品种）。
+// Focus-view watchlist derived from live signals. Watchlist = the active
+// symbol list (whatever the EA is actually pushing, see
+// useLive().activeSymbols, minus BTCUSD) ∪ any symbol with a current ACTIVE
+// signal (so a signal for a symbol the EA isn't configured with still shows up).
+export function useFocusEntries(signals: Signal[], now: number, activeSymbols: string[]): FocusEntry[] {
   return useMemo(() => {
     const repBySymbol = new Map<string, Signal>()
     for (const s of signals) {
@@ -237,12 +255,12 @@ export function useFocusEntries(signals: Signal[], now: number): FocusEntry[] {
         repBySymbol.set(s.symbol, s)
       }
     }
-    const symbols = [...DEFAULT_WATCHLIST]
+    const symbols = activeSymbols.filter((s) => !HERO_EXCLUDED.has(s))
     for (const sym of repBySymbol.keys()) if (!symbols.includes(sym)) symbols.push(sym)
     return symbols.map((symbol) => {
       const signal = repBySymbol.get(symbol) ?? null
       const state: FocusState = !signal ? 'WATCH' : signal.side === 'BUY' ? 'LONG' : 'SHORT'
       return { symbol, state, signal }
     })
-  }, [signals, now])
+  }, [signals, now, activeSymbols])
 }

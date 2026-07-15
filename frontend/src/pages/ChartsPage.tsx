@@ -24,13 +24,6 @@ import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import DrawLayer from '../components/charts/DrawLayer'
 import ChartOrderModal from '../components/ChartOrderModal'
 
-// 固定品种预设：须与 EA（ea/PRISMX_MarketFeed.mq5）默认推送的品种矩阵一致——
-// 只列 EA 实际会推送的品种，避免选择器里出现从不会有数据的品种。
-// Fixed symbol presets: must match the EA's (ea/PRISMX_MarketFeed.mq5) default
-// push matrix — only symbols the EA actually pushes are listed, so the picker
-// never offers a symbol that can never have data.
-const PRESET_SYMBOLS = ['XAUUSD', 'XAGUSD', 'WTI', 'EURUSD', 'GBPUSD', 'USDJPY', 'BTCUSD']
-
 // 图表价格轴的小数位数：贵金属/原油 2~3 位，外汇对按经纪商常见的 5 位报价
 // （日元对 3 位），加密货币 2 位。未在表中的品种回退到 2 位。
 // Decimal precision for the price scale: metals/oil use 2~3 digits, FX pairs
@@ -114,15 +107,15 @@ export default function ChartsPage() {
   const barTimesRef = useRef<number[]>([])
   const getBarTimes = useCallback(() => barTimesRef.current, [])
 
+  // 初始值只是尽力猜测（此刻 activeSymbols 还没从后端加载回来，无法校验是否
+  // 真的还活跃）；下面那个 effect 会在 activeSymbols 就绪后校正——若猜的品种
+  // 已不在活跃列表里（或还没猜出来，是空字符串），改成活跃列表的第一个。
+  // The initial value is only a best-effort guess (activeSymbols hasn't
+  // loaded from the backend yet, so we can't verify it's still active); the
+  // effect below corrects it once activeSymbols is ready — falls back to the
+  // active list's first entry if the guess is no longer active (or empty).
   const [symbol, setSymbol] = useState<string>(
-    () => {
-      // 优先云端偏好 > localStorage 旧缓存 > 默认值
-      // cloud prefs > legacy localStorage > default
-      const cloud = getPref<string>('charts', 'symbol', '')
-      if (cloud && PRESET_SYMBOLS.includes(cloud)) return cloud
-      const saved = localStorage.getItem(SYMBOL_KEY)
-      return saved && PRESET_SYMBOLS.includes(saved) ? saved : PRESET_SYMBOLS[0]
-    }
+    () => getPref<string>('charts', 'symbol', '') || localStorage.getItem(SYMBOL_KEY) || ''
   )
   const [interval, setIntervalCode] = useState<string>(
     () => getPref<string>('charts', 'interval', '') || localStorage.getItem(INTERVAL_KEY) || '15'
@@ -140,7 +133,7 @@ export default function ChartsPage() {
   // 手动下单弹窗：null 表示关闭 / manual order modal: null = closed
   const [orderSide, setOrderSide] = useState<'BUY' | 'SELL' | null>(null)
 
-  const { accounts } = useLive()
+  const { accounts, activeSymbols } = useLive()
   const accountQuotes = useQuotes()
   const { toast, placeManualOrder } = useOrderPlacement()
 
@@ -163,13 +156,28 @@ export default function ChartsPage() {
   useEffect(() => {
     if (!loaded) return
     const cloudSym = getPref<string>('charts', 'symbol', '')
-    if (cloudSym && PRESET_SYMBOLS.includes(cloudSym)) setSymbol(cloudSym)
+    if (cloudSym) setSymbol(cloudSym)
     const cloudInt = getPref<string>('charts', 'interval', '')
     if (cloudInt) setIntervalCode(cloudInt)
   // eslint-disable-next-line react-hooks/exhaustive-deps -- only run when cloud prefs finish loading
   }, [loaded])
 
+  // 校正当前品种：activeSymbols 首次加载完成前是空数组，此时任何猜测都无法
+  // 校验；一旦有了真实列表，若当前品种已不在其中（EA 端删掉了、或还没猜出
+  // 值），改用活跃列表的第一个。EA 增删品种时也会顺带把已失效的选择带回来。
+  // Correct the current symbol: activeSymbols is empty until it first loads,
+  // so nothing can be validated yet. Once the real list is in, if the current
+  // symbol isn't in it (removed on the EA side, or never resolved), fall back
+  // to the active list's first entry. Also re-corrects if the EA's symbol set
+  // changes later and the current selection falls out of it.
   useEffect(() => {
+    if (activeSymbols.length === 0) return
+    if (!activeSymbols.includes(symbol)) setSymbol(activeSymbols[0])
+  }, [activeSymbols, symbol])
+
+  useEffect(() => {
+    if (!symbol) return // 尚未校正出有效品种前不写回偏好，避免用空字符串覆盖已保存的选择
+                         // don't persist before a valid symbol is resolved, so we never overwrite a saved pref with ''
     setPref('charts', 'symbol', symbol)
   }, [symbol, setPref])
 
@@ -259,7 +267,8 @@ export default function ChartsPage() {
   // 切品种/周期：拉历史快照 + 起轮询最新价 / on symbol or interval change: fetch history + poll latest
   useEffect(() => {
     const series = seriesRef.current
-    if (!series) return
+    if (!series || !symbol) return // symbol 为空说明 activeSymbols 还没校正出有效值，等下一轮
+                                    // empty symbol means activeSymbols hasn't resolved a valid value yet
     let alive = true
     setHasData(false)
     setStale(false)
@@ -345,13 +354,18 @@ export default function ChartsPage() {
           <select
             value={symbol}
             onChange={(e) => setSymbol(e.target.value)}
-            className="rounded-lg border border-white/10 bg-ink-800/80 px-3 py-1.5 text-sm text-slate-100 outline-none transition focus:border-prism-500"
+            disabled={activeSymbols.length === 0}
+            className="rounded-lg border border-white/10 bg-ink-800/80 px-3 py-1.5 text-sm text-slate-100 outline-none transition focus:border-prism-500 disabled:opacity-50"
           >
-            {PRESET_SYMBOLS.map((s) => (
-              <option key={s} value={s}>
-                {displaySymbol(s)}
-              </option>
-            ))}
+            {activeSymbols.length === 0 ? (
+              <option value="">{t('common.loading')}</option>
+            ) : (
+              activeSymbols.map((s) => (
+                <option key={s} value={s}>
+                  {displaySymbol(s)}
+                </option>
+              ))
+            )}
           </select>
         </label>
 

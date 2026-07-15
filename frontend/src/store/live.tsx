@@ -2,7 +2,7 @@
 // Shared live state: EA status, signals, orders, positions.
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from 'react'
 import type { BrokerLock, MT5Account, Order, Position, Quote, Signal, Trend, WSMessage } from '../api/types'
-import { accountApi, orderApi, quoteApi, signalApi, trendApi } from '../api/client'
+import { accountApi, orderApi, quoteApi, signalApi, symbolApi, trendApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
 import { usePrefs } from './prefs'
 
@@ -11,6 +11,12 @@ interface LiveContextValue {
   orders: Order[]
   // 多周期趋势 {symbol: Trend}（由 TradingView 经 webhook 推送）/ trends pushed via webhook
   trends: Record<string, Trend>
+  // 当前活跃品种：EA 的 InpSymbols 实际在推什么，就是什么，不是写死的列表——
+  // 报价表/图表选择器/仪表盘英雄板都应以此为准渲染。
+  // Currently active symbols: whatever the EA's InpSymbols is actually
+  // pushing. The quotes table / chart symbol picker / dashboard hero should
+  // all render from this instead of a hardcoded list.
+  activeSymbols: string[]
   accounts: MT5Account[]
   // 当前订阅等级最多可连接的账户数，null 表示不限 / max accounts for the current plan; null = unlimited
   accountLimit: number | null
@@ -103,18 +109,20 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [quotes, setQuotes] = useState<Record<string, Record<string, Quote>>>({})
   const [globalQuotes, setGlobalQuotes] = useState<Record<string, Quote>>({})
   const [trends, setTrends] = useState<Record<string, Trend>>({})
+  const [activeSymbols, setActiveSymbols] = useState<string[]>([])
   const [accounts, setAccounts] = useState<MT5Account[]>([])
   const [accountLimit, setAccountLimit] = useState<number | null>(null)
   const [brokerLock, setBrokerLock] = useState<BrokerLock | null>(null)
   const [loaded, setLoaded] = useState(false)
 
   const refreshAll = useCallback(async () => {
-    const [sig, ord, acc, trd, gq] = await Promise.all([
+    const [sig, ord, acc, trd, gq, sym] = await Promise.all([
       signalApi.list().catch(() => ({ signals: [] })),
       orderApi.list().catch(() => ({ orders: [], total: 0 })),
       accountApi.list().catch(() => ({ accounts: [], accountLimit: null, brokerLock: null })),
       trendApi.list().catch(() => ({ trends: [] })),
       quoteApi.list().catch(() => ({ quotes: [] })),
+      symbolApi.list().catch(() => ({ symbols: [] })),
     ])
     setSignals(capExpired(sig.signals))
     setOrders(ord.orders)
@@ -123,12 +131,35 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     setBrokerLock((prev) => keepIfEqual(prev, acc.brokerLock))
     setTrends(Object.fromEntries((trd.trends || []).map((t) => [t.symbol, t])))
     setGlobalQuotes(Object.fromEntries((gq.quotes || []).map((q) => [q.symbol, q])))
+    setActiveSymbols((prev) => keepIfEqual(prev, sym.symbols || []))
     setLoaded(true)
   }, [])
 
   useEffect(() => {
     refreshAll()
   }, [refreshAll])
+
+  // 兜底轮询：每 20 秒刷新一次活跃品种列表——EA 在 InpSymbols 里增删品种后，
+  // 不需要等用户手动刷新页面，网页会在这个间隔内自动跟上。页面在后台时跳过，
+  // 避免无意义请求；切回前台立即补一次。
+  // Fallback polling: refresh the active-symbol list every 20s, so adding or
+  // removing a symbol in the EA's InpSymbols is picked up without a manual
+  // page refresh. Skipped while backgrounded; refetches immediately on
+  // returning to the foreground.
+  useEffect(() => {
+    const poll = () => {
+      symbolApi.list().then((r) => setActiveSymbols((prev) => keepIfEqual(prev, r.symbols || []))).catch(() => {})
+    }
+    const timer = window.setInterval(() => {
+      if (!document.hidden) poll()
+    }, 20000)
+    const onVisible = () => { if (!document.hidden) poll() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [])
 
   // 兜底轮询：每 5 秒刷新一次账号在线状态，防止 WebSocket 推送丢失导致状态卡住。
   // 配合后端 ~7s 在线窗口与离线检测任务，断线可在数秒内置灰。
@@ -209,6 +240,16 @@ export function LiveProvider({ children }: { children: ReactNode }) {
           for (const q of list) next[q.symbol] = q
           return next
         })
+        // 顺带把没见过的新品种加进活跃列表——EA 新增品种后不用等 20 秒轮询，
+        // 第一条报价一到就能立刻出现。移除品种仍靠轮询的活跃窗口过期判定。
+        // Also fold any never-seen symbol into the active list — a symbol the
+        // EA newly starts pushing shows up the instant its first quote
+        // arrives, instead of waiting for the 20s poll. Removal still relies
+        // on the poll's freshness-window expiry.
+        setActiveSymbols((prev) => {
+          const fresh = list.map((q) => q.symbol).filter((s) => !prev.includes(s))
+          return fresh.length === 0 ? prev : [...prev, ...fresh].sort()
+        })
         break
       }
       case 'TREND_UPDATE': {
@@ -256,10 +297,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   // re-render useLive() consumers.
   const value = useMemo<LiveContextValue>(
     () => ({
-      signals, orders, trends, accounts, accountLimit, brokerLock, loaded,
+      signals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
       anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected,
     }),
-    [signals, orders, trends, accounts, accountLimit, brokerLock, loaded,
+    [signals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
      anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected]
   )
 
