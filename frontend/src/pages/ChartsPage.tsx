@@ -358,10 +358,6 @@ export default function ChartsPage() {
           ))}
         </div>
 
-        <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-medium text-slate-400" title={t('charts.utcHint')}>
-          {t('charts.utcBadge')}
-        </span>
-
         {stale && (
           <span className="rounded-md bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-400">
             {t('charts.stale')}
@@ -409,7 +405,19 @@ export default function ChartsPage() {
         )}
       </div>
 
-      <p className="mt-3 text-center text-[11px] text-slate-600">
+      {/* 时区标注：紧贴在图表下方，而不是塞进顶部一堆控件里，让"这是 UTC+8"
+          这件事离图表本身最近，不容易被忽略。
+          Timezone label: sits right under the chart itself rather than buried
+          in the top control row, so "this is UTC+8" stays next to the chart
+          it describes and isn't easy to miss. */}
+      <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-slate-500">
+        <span>{t('charts.utcHint')}</span>
+        <span className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 font-medium text-slate-400">
+          {t('charts.utcBadge')}
+        </span>
+      </div>
+
+      <p className="mt-2 text-center text-[11px] text-slate-600">
         {t('charts.disclaimer')}{' '}
         <a
           href="https://www.tradingview.com/"
