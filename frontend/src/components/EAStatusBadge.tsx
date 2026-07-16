@@ -14,10 +14,14 @@ export default function EAStatusBadge() {
       }`}
     >
       <span className={`h-2 w-2 shrink-0 rounded-full ${online ? 'bg-up animate-breathe shadow-[0_0_8px_rgba(47,230,160,0.8)]' : 'bg-slate-500'}`} />
-      {/* 移动端仅显示状态点，文字在 sm 以上展示 / dot-only on mobile, text from sm up */}
-      <span className="hidden sm:inline">{online ? t('connStatus.online') : t('connStatus.offline')}</span>
+      {/* 窄桌面（sm~lg 之间）英文下 "Connected"/"Disconnected" 加上 5 项导航
+          很容易把头部挤出屏幕，这个区间只留状态点；宽屏（lg+）才展示文字。
+          On narrower desktop widths (sm–lg), "Connected"/"Disconnected" in
+          English plus the 5 nav items is enough to overflow the header — only
+          the dot shows there; full text only appears from lg up. */}
+      <span className="hidden lg:inline">{online ? t('connStatus.online') : t('connStatus.offline')}</span>
       {online && onlineAccounts.length === 1 && (
-        <span className="hidden font-mono text-xs text-slate-400 sm:inline">
+        <span className="hidden font-mono text-xs text-slate-400 lg:inline">
           {onlineAccounts[0].login}
         </span>
       )}

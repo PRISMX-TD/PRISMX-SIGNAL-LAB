@@ -11,6 +11,7 @@ import Logo from './Logo'
 import LanguageToggle from './LanguageToggle'
 import EAStatusBadge from './EAStatusBadge'
 import NotificationBell from './NotificationBell'
+import UserMenu from './UserMenu'
 import AuroraBackground from './AuroraBackground'
 import ConfirmModal from './ConfirmModal'
 import BridgeUpdateNotice from './BridgeUpdateNotice'
@@ -258,36 +259,50 @@ export default function Layout() {
               </div>
             </div>
 
-            <nav className="hidden flex-1 items-center justify-center gap-1 sm:flex lg:gap-2">
+            {/* 主导航只留高频项；账户/下载桥接/升级/管理页这些低频项收进右侧用户
+                菜单——英文标签普遍比中文长，9 项塞不下会在英文下直接溢出屏幕。
+                桌面导航在 sm~lg 之间（约 640–1000px）实测仍然挤不下 5 项 + 右侧
+                一排图标，所以把"桌面/移动布局"的切换点从 sm 整体挪到 lg：这段
+                过渡宽度改用手机的底部 Tab 栏（本来就是为窄屏设计的固定网格，
+                天然不会溢出），比硬挤横向导航更稳妥。
+                Primary nav keeps only the high-frequency items; account/download
+                bridge/upgrade/admin (low-frequency) collapse into the user menu
+                on the right — English labels run longer than Chinese, and 9
+                items don't fit without overflowing in English. Measured that
+                even 5 items plus the right-hand icon row still doesn't fit
+                between sm and lg (~640–1000px), so the desktop/mobile layout
+                switch moved from sm to lg entirely: that in-between band now
+                gets the mobile bottom tab bar (a fixed grid built for narrow
+                screens, which just doesn't overflow) instead of a cramped
+                horizontal nav. */}
+            <nav className="hidden flex-1 items-center justify-center gap-1 lg:flex lg:gap-2">
               <NavItem to="/dashboard" label={t('nav.dashboard')} />
               <NavItem to="/app" label={t('nav.signals')} />
               <NavItem to="/charts" label={t('nav.charts')} />
               <NavItem to="/bind" label={t('nav.bind')} />
               <NavItem to="/orders" label={t('nav.orders')} />
-              <NavItem to="/account" label={t('nav.account')} />
-              {user?.plan !== 'PRO' && <NavItem to="/upgrade" label={t('nav.upgrade')} />}
-              <NavItem to="/download" label={t('nav.download')} />
-              {isAdmin && <NavItem to="/admin" label={t('nav.admin')} />}
             </nav>
 
             <div className="ml-auto flex items-center gap-2 sm:gap-3">
               <EAStatusBadge />
               <NotificationBell />
               <LanguageToggle />
-              <div className="hidden text-right md:block">
-                <div className="max-w-[160px] truncate text-xs text-slate-400">{user?.email}</div>
+              {/* 桌面：头像菜单收纳账户/下载/升级/管理/退出 / desktop: avatar menu */}
+              <div className="hidden lg:block">
+                <UserMenu
+                  email={user?.email}
+                  showUpgrade={user?.plan !== 'PRO'}
+                  isAdmin={isAdmin}
+                  onLogout={handleLogout}
+                />
               </div>
-              <button
-                onClick={handleLogout}
-                className="btn-ghost hidden px-3 py-1.5 text-sm sm:inline-flex"
-              >
-                {t('nav.logout')}
-              </button>
-              {/* 移动端登出图标按钮 / mobile icon-only logout */}
+              {/* 移动端登出图标按钮：其余低频项在底部"其他"面板里 / mobile
+                  icon-only logout — the rest of the low-frequency items live
+                  in the bottom "more" sheet */}
               <button
                 onClick={() => setConfirmLogout(true)}
                 aria-label={t('nav.logout')}
-                className="btn-ghost px-2 py-1.5 sm:hidden"
+                className="btn-ghost px-2 py-1.5 lg:hidden"
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
@@ -314,7 +329,7 @@ export default function Layout() {
         </main>
 
         {/* 移动端底部液态玻璃导航栏 / mobile liquid-glass bottom nav */}
-        <nav className="lg-tabbar sm:hidden">
+        <nav className="lg-tabbar lg:hidden">
           <div className="lg-tabbar-inner">
             {mobileTabs.map((tab) => (
               <TabItem key={tab.to} to={tab.to} icon={tab.icon} label={tab.label} />
@@ -335,7 +350,7 @@ export default function Layout() {
 
         {/* 「其他」液态玻璃弹出面板 / "More" liquid-glass sheet */}
         {moreOpen && (
-          <div className="lg-sheet-overlay sm:hidden" onClick={() => setMoreOpen(false)}>
+          <div className="lg-sheet-overlay lg:hidden" onClick={() => setMoreOpen(false)}>
             <div className="lg-sheet" onClick={(e) => e.stopPropagation()}>
               <div className="lg-sheet-handle" />
               <div className="lg-sheet-grid">

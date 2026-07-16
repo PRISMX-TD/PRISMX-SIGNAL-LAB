@@ -275,17 +275,17 @@ export default function AccountPage() {
               </h3>
               <span className="tag bg-prism-600/20 text-prism-300">{info.plan}</span>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-              <div>
+            <div className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+              <div className="min-w-0">
                 <span className="text-slate-500">{t("account.email")}</span>
-                <div className="font-mono text-slate-100">{info.email}</div>
+                <div className="break-all font-mono text-slate-100">{info.email}</div>
               </div>
-              <div>
+              <div className="min-w-0">
                 <span className="text-slate-500">{t("account.registeredAt")}</span>
                 <div className="font-mono text-slate-100">{fmtTime(info.createdAt)}</div>
               </div>
               {info.plan === "PRO" && (
-                <div>
+                <div className="min-w-0">
                   <span className="text-slate-500">{t("account.expiresAt")}</span>
                   <div className="font-mono text-slate-100">
                     {info.planExpiresAt ? fmtDate(info.planExpiresAt) : t("account.neverExpires")}

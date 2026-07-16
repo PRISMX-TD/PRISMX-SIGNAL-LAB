@@ -6,31 +6,21 @@ import { usePrefs } from '../store/prefs'
 export default function LanguageToggle() {
   const { i18n } = useTranslation()
   const { setPref } = usePrefs()
-  const lang = i18n.language
+  const lang = i18n.language === 'en' ? 'en' : 'zh'
+  const next = lang === 'zh' ? 'en' : 'zh'
 
-  const handleSwitch = (l: 'zh' | 'en') => {
-    setLanguage(l)
-    setPref('lang', 'lang', l)
+  const handleToggle = () => {
+    setLanguage(next)
+    setPref('lang', 'lang', next)
   }
 
   return (
-    <div className="inline-flex items-center rounded-lg border border-white/10 bg-white/[0.04] p-0.5 text-sm backdrop-blur-md">
-      <button
-        onClick={() => handleSwitch('zh')}
-        className={`rounded-md px-2.5 py-1 transition ${
-          lang === 'zh' ? 'bg-prism-600 text-white shadow-prism' : 'text-slate-400 hover:text-slate-200'
-        }`}
-      >
-        中
-      </button>
-      <button
-        onClick={() => handleSwitch('en')}
-        className={`rounded-md px-2.5 py-1 transition ${
-          lang === 'en' ? 'bg-prism-600 text-white shadow-prism' : 'text-slate-400 hover:text-slate-200'
-        }`}
-      >
-        EN
-      </button>
-    </div>
+    <button
+      onClick={handleToggle}
+      aria-label={`Switch to ${next === 'zh' ? '中文' : 'English'}`}
+      className="rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-sm font-medium text-slate-300 backdrop-blur-md transition hover:text-slate-100"
+    >
+      {lang === 'zh' ? '中' : 'EN'}
+    </button>
   )
 }
