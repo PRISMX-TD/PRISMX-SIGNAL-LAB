@@ -33,6 +33,33 @@ interface Props {
   onClose: () => void
 }
 
+// 数字输入框：内部维护一份独立于父级的文本缓冲区，输入过程中任意打字/清空
+// 都不会被父级的受控 value 弹回去；只有失焦（或按回车）那一刻才解析、夹紧到
+// [min,max] 并真正回传给父级。
+// 之前的实现是"每敲一下键就解析+夹紧+立刻回传"：清空到空字符串时
+// parseInt("")=NaN，直接跳过不回传，但输入框仍然受控绑定着父级那个没变的
+// 旧值，于是 React 下一帧就把它弹回原样——表现为"删不空、卡住"。更隐蔽的是
+// 那些下限是两位数的字段（如 RSI 超买 min=50）：哪怕清空成功，敲第一位数字
+// (比如从 70 改成 55，敲了个 "5") parseInt("5")=5 会被 Math.max(50,5) 立刻
+// 夹成 50 并回传，父级 value 一变，下一帧又把输入框强制刷成 "50"，用户还没
+// 来得及敲第二个 "5"，第一个数字就已经被吞掉——这正是"剩个位数直接卡住"的
+// 根因。现在把夹紧这一步推迟到失焦时才做，输入过程中完全不介入。
+// Number input: keeps its own text buffer independent of the parent's
+// controlled value, so typing or clearing mid-edit is never bounced back;
+// only on blur (or Enter) does it parse, clamp to [min,max], and actually
+// propagate to the parent.
+// The previous implementation parsed + clamped + propagated on every
+// keystroke: clearing to an empty string made parseInt("") = NaN, which was
+// skipped (not propagated) — but the input was still bound to the parent's
+// unchanged old value, so React snapped it back next frame, reading as
+// "won't clear, stuck". More subtly, for fields whose minimum is two digits
+// (e.g. RSI overbought, min=50): even after successfully clearing, typing the
+// first digit (say going from 70 to 55, typing "5") had parseInt("5")=5
+// immediately clamped by Math.max(50,5) to 50 and propagated — the parent's
+// value changed, so next frame the input was force-refreshed to "50" before
+// the user could type the second "5", swallowing the first digit. That's the
+// exact "stuck on a single digit" bug. Clamping is now deferred to blur;
+// nothing interferes while the user is still typing.
 function NumberField({
   label,
   value,
@@ -46,18 +73,34 @@ function NumberField({
   min?: number
   max?: number
 }) {
+  const [text, setText] = useState(String(value))
+  // 父级 value 变化时（比如"恢复默认"按钮）同步本地缓冲区；用户自己打字导致
+  // 的变化不会触发这里，因为那时 value 还没变（要等失焦才回传）。
+  // Sync the local buffer when the parent's value changes (e.g. the "reset
+  // to defaults" button); the user's own typing never triggers this, because
+  // value hasn't changed yet at that point (it only updates on blur).
+  useEffect(() => {
+    setText(String(value))
+  }, [value])
+
+  const commit = () => {
+    const n = parseInt(text, 10)
+    const clamped = Number.isNaN(n) ? value : Math.min(max, Math.max(min, n))
+    setText(String(clamped))
+    if (clamped !== value) onChange(clamped)
+  }
+
   return (
     <label className="flex flex-col gap-1">
       <span className="text-[10px] uppercase tracking-wide text-slate-500">{label}</span>
       <input
         type="number"
         className="input w-16 px-1.5 py-1 text-center text-xs"
-        min={min}
-        max={max}
-        value={value}
-        onChange={(e) => {
-          const n = parseInt(e.target.value, 10)
-          if (!Number.isNaN(n)) onChange(Math.min(max, Math.max(min, n)))
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
         }}
       />
     </label>
@@ -93,20 +136,19 @@ function ColorPicker({ label, value, onChange }: { label?: string; value: string
         aria-label={label}
       />
       {open && (
-        // 移动端（<640px）：不跟着按钮悬浮定位，改成贴底固定的小抽屉——
-        // inset-x-4 保证不管按钮在弹窗里多靠右，色板永远整体落在屏幕可见
-        // 范围内，不会被裁切/伸到屏幕外。桌面端（sm: 以上）维持贴着按钮下方
-        // 的小悬浮面板，给一个明确宽度（w-40）而不是让内容撑开，避免网格在
-        // 窄父级里挤压出圆点重叠的观感。
-        // Mobile (<640px): don't float-anchor to the button — become a small
-        // fixed bottom drawer instead. inset-x-4 guarantees the palette
-        // always lands fully within the visible screen regardless of how far
-        // right the triggering button sits, so it can never get clipped or
-        // pushed off-screen. Desktop (sm: and up) keeps the small popover
-        // anchored just below the button, given an explicit width (w-40)
-        // instead of shrink-to-fit, so the grid never gets squeezed into
-        // overlapping-looking circles by an ambiguous parent width.
-        <div className="fixed inset-x-4 bottom-4 z-30 grid grid-cols-5 gap-2 rounded-xl border border-white/10 bg-ink-900/95 p-3 shadow-prism backdrop-blur sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:top-full sm:z-30 sm:mt-1 sm:w-40 sm:gap-1.5 sm:rounded-lg sm:p-2">
+        // 贴着按钮本身弹出（不去屏幕底部单开一个抽屉，那没有必要）；给一个
+        // 明确宽度（w-36）而不是让内容撑开，避免网格在窄父级里挤压出圆点
+        // 重叠的观感；right-0/left-0 各占一半屏幕时用 CSS 的
+        // max(calc(...)) 兜底不必要——弹窗本身已经是移动端全宽抽屉，两侧
+        // 留白足够，贴左对齐通常就不会出屏幕。
+        // Anchored to the button itself (no separate bottom-of-screen drawer
+        // — unnecessary). Given an explicit width (w-36) instead of
+        // shrink-to-fit, so the grid never gets squeezed into
+        // overlapping-looking circles by an ambiguous parent width. The
+        // modal itself is already a full-width bottom sheet on mobile with
+        // comfortable side margins, so a left-anchored popover has enough
+        // room without needing edge-avoidance logic.
+        <div className="absolute left-0 top-full z-30 mt-1 grid w-36 grid-cols-5 gap-1.5 rounded-lg border border-white/10 bg-ink-900/95 p-2 shadow-prism backdrop-blur">
           {COLOR_PRESETS.map((c) => (
             <button
               key={c}
@@ -115,7 +157,7 @@ function ColorPicker({ label, value, onChange }: { label?: string; value: string
                 onChange(c)
                 setOpen(false)
               }}
-              className={`h-6 w-6 shrink-0 rounded-full border-2 transition hover:border-white/70 sm:h-5 sm:w-5 ${c === value ? 'border-white' : 'border-white/20'}`}
+              className={`h-5 w-5 shrink-0 rounded-full border-2 transition hover:border-white/70 ${c === value ? 'border-white' : 'border-white/20'}`}
               style={{ background: c }}
             />
           ))}
