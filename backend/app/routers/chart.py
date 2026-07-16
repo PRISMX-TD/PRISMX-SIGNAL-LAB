@@ -61,6 +61,12 @@ class FeedBar(BaseModel):
     h: float
     l: float
     c: float
+    # v = 成交量（EA 发 MT5 的 tick_volume）。默认 0 让不带该字段的 legacy
+    # 喂价器（chart_feeder.py，迁移期内仍可能在推）不会 422；EA v1.01+ 会带上。
+    # v = volume (the EA sends MT5's tick_volume). Defaulting to 0 keeps the
+    # legacy feeder (chart_feeder.py, may still push during migration) from
+    # 422-ing when it omits the field; the EA v1.01+ includes it.
+    v: float = 0
 
 
 class FeedSeries(BaseModel):

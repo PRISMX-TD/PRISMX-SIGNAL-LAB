@@ -187,14 +187,21 @@ export interface Quote {
   login?: string
 }
 
-// 一根 K 线（自建中央 MT5 喂价源）：t=epoch 秒(UTC)，o/h/l/c=开高低收
-// One candle (self-hosted central MT5 feed): t=epoch seconds (UTC), o/h/l/c=OHLC
+// 一根 K 线（自建中央 MT5 喂价源）：t=epoch 秒(UTC)，o/h/l/c=开高低收，
+// v=成交量（EA 上报的 MT5 tick_volume，即该 bar 内报价跳动次数；现货外汇/CFD
+// 无交易所真实成交量，这是唯一可用的量能代理）。后端 FeedBar 默认 0，故永远有值。
+// One candle (self-hosted central MT5 feed): t=epoch seconds (UTC), o/h/l/c=OHLC,
+// v=volume (MT5 tick_volume reported by the EA — the number of price changes
+// within the bar; spot FX/CFDs have no exchange volume, so this is the only
+// available volume proxy). The backend's FeedBar defaults it to 0, so it's
+// always present.
 export interface Candle {
   t: number
   o: number
   h: number
   l: number
   c: number
+  v: number
 }
 
 // 单周期趋势方向：多 / 空 / 震荡(或无数据) / per-timeframe trend direction

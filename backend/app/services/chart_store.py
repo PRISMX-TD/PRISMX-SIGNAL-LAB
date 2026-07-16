@@ -10,8 +10,13 @@ import time
 
 MAX_BARS = 500
 
-# (symbol, interval) -> K 线列表，按时间升序，每根 {"t","o","h","l","c"}
-# (symbol, interval) -> candle list, ascending by time, each {"t","o","h","l","c"}
+# (symbol, interval) -> K 线列表，按时间升序，每根 {"t","o","h","l","c","v"}
+# （v=成交量/tick_volume，见 routers/chart.py 的 FeedBar；本模块只透传 dict，
+# 不关心具体字段，加字段无需改这里的合并/替换逻辑）
+# (symbol, interval) -> candle list, ascending by time, each
+# {"t","o","h","l","c","v"} (v=volume/tick_volume, see FeedBar in
+# routers/chart.py; this module just passes dicts through and is agnostic to
+# the fields, so adding one needs no change to the merge/replace logic here)
 _candles: dict[tuple[str, str], list[dict]] = {}
 
 # (symbol, interval) -> 最近一次被喂价器写入的 epoch 秒
