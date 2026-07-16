@@ -29,6 +29,7 @@ from app.services.push_dispatch import (
     EVENT_ORDER_REJECTED,
     dispatch_event_push_async,
 )
+from app.services import bridge_version_check
 from app.services.settings_store import get_broker_settings, server_matches_broker
 from app.services.trade_performance import mark_positions_seen
 
@@ -139,6 +140,12 @@ class BridgeAccount(BaseModel):
 
 class BridgePollRequest(BaseModel):
     accounts: list[BridgeAccount] = []
+    # Bridge 桌面程序自身的版本号（如 "1.3.15"），用于网页端提示更新——
+    # 见 bridge_version_check.py。旧版 Bridge 不带这个字段，可选。
+    # The Bridge desktop app's own version (e.g. "1.3.15"), used to power the
+    # web app's update notice — see bridge_version_check.py. Older Bridge
+    # builds don't send this field, so it's optional.
+    bridgeVersion: str | None = Field(default=None, max_length=32)
 
 
 def _upsert_account(
@@ -232,6 +239,11 @@ def _poll_db_work(
             existing_count += 1
         suffix_by_login[acc.login] = (row.symbol_suffix or "").strip()
         online_logins.add(acc.login)
+    # 记录这个用户最近上报的 Bridge 版本，供网页端"有新版本可更新"提示使用。
+    # Record this user's most recently reported Bridge version, for the web
+    # app's "a newer version is available" notice.
+    if req.bridgeVersion and req.bridgeVersion != user.bridge_version:
+        user.bridge_version = req.bridgeVersion
     db.commit()
 
     # 2) 取该用户、目标账号匹配的待执行订单 / fetch matching pending orders.
@@ -564,6 +576,26 @@ def bridge_trade_history(
             # 唯一约束冲突：已经上报过这笔成交，跳过 / already reported this deal, skip
             db.rollback()
     return {"ok": True, "inserted": inserted}
+
+
+# ---------- 用户面向：Bridge 版本状态 / user-facing: Bridge version status ----------
+@router.get("/version-status")
+async def bridge_version_status(user: User = Depends(get_current_user)):
+    """网页端"有新版本 Bridge 可更新"提示用：该用户最近上报的版本 + 当前
+    GitHub 最新发布版本。`current` 为 null 表示这个用户从未连过带版本号
+    上报的 Bridge（旧版或从未连接）——前端此时不应该提示更新（没有基准可比）。
+    Powers the web app's "a newer Bridge is available" notice: this user's
+    most recently reported version + the current latest GitHub release.
+    `current` being null means this user has never connected a
+    version-reporting Bridge (an old build, or never connected) — the
+    frontend shouldn't show an update notice with nothing to compare against.
+    """
+    latest = await run_in_threadpool(bridge_version_check.get_latest)
+    return {
+        "current": user.bridge_version,
+        "latest": (latest or {}).get("latest"),
+        "downloadUrl": (latest or {}).get("downloadUrl"),
+    }
 
 
 # ---------- 用户面向：账号列表与后缀设置 / user-facing: account list & suffix ----------

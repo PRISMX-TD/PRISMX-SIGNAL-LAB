@@ -12,6 +12,7 @@ import LanguageToggle from './LanguageToggle'
 import EAStatusBadge from './EAStatusBadge'
 import AuroraBackground from './AuroraBackground'
 import ConfirmModal from './ConfirmModal'
+import BridgeUpdateNotice from './BridgeUpdateNotice'
 
 function NavItem({ to, label }: { to: string; label: string }) {
   return (
@@ -364,6 +365,8 @@ export default function Layout() {
             onCancel={() => setConfirmLogout(false)}
           />
         )}
+
+        <BridgeUpdateNotice />
       </div>
     </LiveProvider>
   )

@@ -165,6 +165,7 @@ def _migrate_columns() -> None:
             "plan_expires_at": datetime_type,
             "plan_note": "VARCHAR",
             "last_active_at": datetime_type,
+            "bridge_version": "VARCHAR",
         }
         with engine.begin() as conn:
             for name, col_type in user_new.items():

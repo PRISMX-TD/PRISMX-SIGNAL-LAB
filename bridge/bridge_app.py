@@ -474,7 +474,7 @@ class BridgeEngine:
         try:
             resp = _post_json(
                 f"{self.backend}/api/bridge/poll",
-                {"accounts": accounts},
+                {"accounts": accounts, "bridgeVersion": APP_VERSION},
                 self.token,
             )
             commands = resp.get("commands", [])

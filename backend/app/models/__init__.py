@@ -50,6 +50,14 @@ class User(Base):
     # get_current_user (written at most once per 5 minutes per user) to avoid
     # an UPDATE on every single request.
     last_active_at = Column(DateTime, nullable=True)
+    # 该用户最近一次上报的 Bridge 桌面程序版本号（如 "1.3.15"），随
+    # POST /api/bridge/poll 上报，用于网页端提示"有新版本 Bridge 可更新"。
+    # 空表示还没连过带这个字段的新版 Bridge（或从未连过）。
+    # This user's most recently reported Bridge desktop app version (e.g.
+    # "1.3.15"), reported via POST /api/bridge/poll, used to power the web
+    # app's "a newer Bridge is available" notice. Null means no Bridge build
+    # carrying this field has reported in yet (or none ever has).
+    bridge_version = Column(String, nullable=True)
 
 
 # 说明：旧的 EABinding（ea_bindings 表，EA 单账号绑定）已随 EA 接入方式移除。

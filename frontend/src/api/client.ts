@@ -201,6 +201,15 @@ export const accountApi = {
     ),
 }
 
+// Bridge 版本状态：该用户最近上报的版本 + 当前最新发布版本，用于"有新版本
+// 可更新"提示。current 为 null 表示该用户从未连过带版本号上报的 Bridge。
+// Bridge version status: this user's most recently reported version + the
+// current latest release, for the "a newer version is available" notice.
+// current is null if this user has never connected a version-reporting Bridge.
+export const bridgeVersionApi = {
+  status: () => request<{ current: string | null; latest: string | null; downloadUrl: string | null }>('/bridge/version-status'),
+}
+
 // API Token（连接 MT5 用）：库中只存哈希，明文仅在重置（生成）响应中出现一次。
 // API token for connecting MT5: only the hash is stored; the plaintext
 // appears once in the reset (generation) response.

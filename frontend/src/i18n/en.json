@@ -3,6 +3,12 @@
     "name": "Signal Lab",
     "subtitle": "by PRISMX"
   },
+  "bridgeUpdate": {
+    "title": "Bridge update available",
+    "body": "You're on v{{current}}, latest is v{{latest}} — update for the newest fixes.",
+    "update": "Update now",
+    "dismiss": "Don't remind me"
+  },
   "nav": {
     "dashboard": "Dashboard",
     "signals": "Signals",

@@ -279,3 +279,33 @@ export function calcCountdown(
     text,
   }
 }
+
+// 版本号解析/比较：与 bridge_app.py 的 _parse_version/is_newer_version 逻辑对齐
+// （去掉前缀 v、按 "." 拆段、每段只取数字前缀、忽略非数字段）。
+// Version parsing/comparison, mirroring bridge_app.py's
+// _parse_version/is_newer_version (strip a leading "v", split on ".", take
+// each segment's leading digits, drop non-numeric segments).
+function parseVersion(v: string): number[] {
+  return v
+    .trim()
+    .replace(/^v/i, '')
+    .split('.')
+    .map((part) => {
+      const digits = part.replace(/[^0-9]/g, '')
+      return digits === '' ? NaN : parseInt(digits, 10)
+    })
+    .filter((n) => !Number.isNaN(n))
+}
+
+export function isNewerVersion(latest: string, current: string): boolean {
+  const lv = parseVersion(latest)
+  const cv = parseVersion(current)
+  if (lv.length === 0) return false
+  const len = Math.max(lv.length, cv.length)
+  for (let i = 0; i < len; i++) {
+    const l = lv[i] ?? 0
+    const c = cv[i] ?? 0
+    if (l !== c) return l > c
+  }
+  return false
+}
