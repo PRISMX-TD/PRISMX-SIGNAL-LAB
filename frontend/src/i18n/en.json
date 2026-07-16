@@ -9,6 +9,10 @@
     "update": "Update now",
     "dismiss": "Don't remind me"
   },
+  "notifPanel": {
+    "title": "Notifications",
+    "fullSettings": "Full settings"
+  },
   "nav": {
     "dashboard": "Dashboard",
     "signals": "Signals",
@@ -460,7 +464,12 @@
     "notifEnable": "Enable push notifications for signals",
     "notifUpgradeRequired": "Push notifications aren't included in the free tier — upgrade to unlock",
     "notifNoCategories": "No indicator categories yet, run the signal engine first",
+    "notifNoSymbols": "No symbols yet, run the signal engine first",
     "notifCatsHeading": "Signal alerts",
+    "notifFilterHint": "A signal only notifies when both dimensions match — e.g. ticking \"AIFT + Gold\" only notifies for AIFT signals on gold. Tick \"All\" to leave that dimension unrestricted, which also auto-covers symbols added later.",
+    "notifStrategyLabel": "By strategy",
+    "notifSymbolLabel": "By symbol",
+    "notifAll": "All",
     "notifEventsHeading": "Trading & account alerts",
     "notifEvent": {
       "order_filled": "Order filled",

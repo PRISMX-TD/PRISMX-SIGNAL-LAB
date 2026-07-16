@@ -262,18 +262,41 @@ export const userApi = {
 // 通知 / Notifications
 export const notificationApi = {
   getPrefs: () =>
-    request<{ enabled: boolean; selected_categories: string[]; event_types: string[] }>('/notifications/prefs'),
+    request<{
+      enabled: boolean
+      selected_categories: string[]
+      selected_symbols: string[]
+      event_types: string[]
+    }>('/notifications/prefs'),
   // eventTypes：账户/交易事件白名单（订单成交/拒绝、自动仓管触发、Bridge 掉线），
-  // 与 selectedCategories（信号指标类别白名单）是两套独立设置。
+  // 与 selectedCategories/selectedSymbols（信号策略类别·品种白名单）是独立设置——
+  // 后两者按"与"关系联合过滤同一条信号推送。
   // eventTypes: account/trading event whitelist (order fill/reject, auto-manage
-  // trigger, bridge offline) — a separate whitelist from selectedCategories
-  // (the signal indicator-category whitelist).
-  putPrefs: (enabled: boolean, selectedCategories: string[], eventTypes: string[] = []) =>
-    request<{ enabled: boolean; selected_categories: string[]; event_types: string[] }>('/notifications/prefs', {
+  // trigger, bridge offline) — independent from selectedCategories/selectedSymbols
+  // (the signal strategy-category & symbol whitelists, ANDed together to gate the
+  // same signal push).
+  putPrefs: (
+    enabled: boolean,
+    selectedCategories: string[],
+    eventTypes: string[] = [],
+    selectedSymbols: string[] = [],
+  ) =>
+    request<{
+      enabled: boolean
+      selected_categories: string[]
+      selected_symbols: string[]
+      event_types: string[]
+    }>('/notifications/prefs', {
       method: 'PUT',
-      body: JSON.stringify({ enabled, selected_categories: selectedCategories, event_types: eventTypes }),
+      body: JSON.stringify({
+        enabled,
+        selected_categories: selectedCategories,
+        selected_symbols: selectedSymbols,
+        event_types: eventTypes,
+      }),
     }),
   getIndicators: () => request<string[]>('/notifications/indicators'),
+  getSymbols: () => request<string[]>('/notifications/symbols'),
 }
 
 // 管理后台 / Admin

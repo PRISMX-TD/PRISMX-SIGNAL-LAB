@@ -1,10 +1,18 @@
 // 账户详情页 / Account page: profile, MT5 accounts, password, notifications
 import { useEffect, useRef, useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useLocation } from "react-router-dom"
 import { useTranslation } from "react-i18next"
-import { userApi, notificationApi, pushApi } from "../api/client"
+import { userApi, notificationApi } from "../api/client"
 import { fmtTime, fmtDate, localizeApiError } from "../api/utils"
-import { subscribePush, unsubscribePush, getSWReg, pushSupported } from "../utils/push"
+import { getSWReg, pushSupported } from "../utils/push"
+import {
+  ALL_SENTINEL,
+  EVENT_TYPES,
+  ENABLE_ERROR_KEYS,
+  disableNotifications,
+  enableNotifications,
+  NotifEnableError,
+} from "../utils/notifications"
 
 type AccountInfo = Awaited<ReturnType<typeof userApi.me>>
 
@@ -19,24 +27,32 @@ export default function AccountPage() {
   const [pwMsg, setPwMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
 
   // 通知 / notifications
+  const location = useLocation()
   const [notifEnabled, setNotifEnabled] = useState(false)
   const [notifCats, setNotifCats] = useState<string[]>([])
   const [allCats, setAllCats] = useState<string[]>([])
+  // 品种白名单：与 notifCats（策略类别）按"与"关系联合过滤——一条信号必须
+  // 两边都命中才推送。列表随 EA/信号引擎实际推送过的品种变化，不写死。
+  // Symbol whitelist: ANDed with notifCats (strategy categories) — a signal
+  // only pushes if both match. The list tracks whatever symbols the EA/signal
+  // engine has actually pushed, not a hardcoded set.
+  const [notifSymbols, setNotifSymbols] = useState<string[]>([])
+  const [allSymbols, setAllSymbols] = useState<string[]>([])
   // 账户/交易事件白名单：订单成交/拒绝、自动仓管触发、Bridge 掉线。此前推送
-  // 只有"新信号"一种，这些账户层面的事都是静默的。与 notifCats（信号指标
-  // 类别白名单）是两套独立设置，分开落库、分开渲染。
+  // 只有"新信号"一种，这些账户层面的事都是静默的。与 notifCats/notifSymbols
+  // （信号策略·品种白名单）是独立设置，分开落库、分开渲染。
   // Account/trading event whitelist: order fill/reject, auto-manage trigger,
   // bridge offline. Push used to only ever cover "new signal" — these
-  // account-level events were all silent. A separate whitelist from notifCats
-  // (the signal indicator-category whitelist), saved and rendered independently.
+  // account-level events were all silent. Independent from notifCats/notifSymbols
+  // (the signal strategy/symbol whitelists), saved and rendered independently.
   const [notifEvents, setNotifEvents] = useState<string[]>([])
   const [notifMsg, setNotifMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
   const [notifLoading, setNotifLoading] = useState(false)
-  // 分类/事件偏好防抖落库 / debounce saving category & event prefs
+  // 分类/品种/事件偏好防抖落库 / debounce saving category, symbol & event prefs
   const catSaveTimer = useRef<number | undefined>(undefined)
+  const symbolSaveTimer = useRef<number | undefined>(undefined)
   const eventSaveTimer = useRef<number | undefined>(undefined)
-
-  const EVENT_TYPES = ["order_filled", "order_rejected", "auto_manage", "bridge_offline"] as const
+  const notifSectionRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     load()
@@ -48,23 +64,35 @@ export default function AccountPage() {
     // 卸载时清理未触发的防抖定时器 / clear pending debounce on unmount
     return () => {
       if (catSaveTimer.current) window.clearTimeout(catSaveTimer.current)
+      if (symbolSaveTimer.current) window.clearTimeout(symbolSaveTimer.current)
       if (eventSaveTimer.current) window.clearTimeout(eventSaveTimer.current)
     }
   }, [])
 
+  // 从铃铛弹层等处深链跳转过来（/account#notifications）时，定位到通知设置区块。
+  // Deep-linked here from e.g. the bell popover (/account#notifications): scroll to the notifications section.
+  useEffect(() => {
+    if (location.hash === "#notifications" && !loading) {
+      notifSectionRef.current?.scrollIntoView({ block: "start" })
+    }
+  }, [location.hash, loading])
+
   async function load() {
     setLoading(true)
     try {
-      const [infoRes, prefsRes, catsRes] = await Promise.all([
+      const [infoRes, prefsRes, catsRes, symsRes] = await Promise.all([
         userApi.me(),
         notificationApi.getPrefs(),
         notificationApi.getIndicators(),
+        notificationApi.getSymbols(),
       ])
       setInfo(infoRes)
       setNotifEnabled(prefsRes.enabled)
       setNotifCats(prefsRes.selected_categories)
+      setNotifSymbols(prefsRes.selected_symbols ?? [])
       setNotifEvents(prefsRes.event_types ?? [])
       setAllCats(catsRes)
+      setAllSymbols(symsRes)
     } catch (err: unknown) {
       console.error("account load:", err)
     } finally {
@@ -105,22 +133,9 @@ export default function AccountPage() {
     if (!on) {
       setNotifEnabled(false)
       setNotifCats([])
+      setNotifSymbols([])
       setNotifEvents([])
-      void Promise.all([
-        notificationApi.putPrefs(false, [], []),
-        (async () => {
-          const reg = await getSWReg()
-          const currentSub = await reg?.pushManager?.getSubscription()
-          if (currentSub) {
-            const json = currentSub.toJSON() as {
-              endpoint: string
-              keys: { p256dh: string; auth: string }
-            }
-            await pushApi.unsubscribe(json.endpoint!, json.keys!)
-            await unsubscribePush()
-          }
-        })(),
-      ]).catch(() => {
+      void disableNotifications().catch(() => {
         // 清理失败则回滚开关 / roll back the switch on failure
         setNotifEnabled(true)
         setNotifMsg({ kind: "err", text: t("account.notifError") })
@@ -128,87 +143,75 @@ export default function AccountPage() {
       return
     }
 
-    // 当前环境根本没有 Web Push 能力时直接明确拒绝，不再静默"假开启"。
-    // 此前 subscribePush 拿不到 SW 注册就默默返回 null，开关照样翻成 ON、
-    // 偏好照样落库——iOS 用户在 Safari 里（或书签式主屏幕打开）看到"已开启"
-    // 却永远收不到通知，正是这个假开启造成的。iOS 需要先把网站添加到主屏幕、
-    // 再从主屏幕图标以独立模式打开（iOS 16.4+），Push API 才存在。
-    // Refuse loudly when this environment has no Web Push capability at all —
-    // no more silent "fake enable". Previously subscribePush quietly returned
-    // null without a SW registration while the toggle still flipped ON and
-    // prefs were saved; an iOS user in Safari (or a bookmark-style home-screen
-    // launch) saw "enabled" yet could never receive anything. On iOS the site
-    // must be added to the Home Screen and launched from that icon in
-    // standalone mode (iOS 16.4+) before the Push API even exists.
-    if (!pushSupported()) {
-      setNotifMsg({ kind: "err", text: t("account.notifUnsupported") })
-      return
-    }
-
     // 开启：权限校验后立即乐观翻转开关，落库与订阅链路并行后台执行。
     // Turn on: after permission, flip optimistically; run prefs save + push subscription in parallel.
     setNotifLoading(true)
     try {
-      if (Notification.permission === "default") {
-        const granted = await Notification.requestPermission()
-        if (granted !== "granted") {
-          setNotifMsg({ kind: "err", text: t("account.notifPermissionDenied") })
-          return
-        }
-      } else if (Notification.permission === "denied") {
-        setNotifMsg({ kind: "err", text: t("account.notifBlocked") })
-        return
-      }
-
-      // 白名单为空时默认全选：类别/事件都是白名单语义（空 = 什么都不推），
-      // 用户只翻总开关、没逐个勾选时会"已开启却一条都收不到"。开启的直觉
-      // 语义就是"给我发通知"，所以空白名单在开启时补成全选，用户仍可再取消勾选。
-      // Default to select-all when the whitelists are empty: both categories
-      // and events are whitelist-semantics (empty = push nothing), so a user
-      // who only flips the master toggle without ticking boxes gets "enabled
-      // yet receives nothing". Flipping ON plainly means "send me stuff" —
-      // fill empty whitelists with everything; they can still untick.
-      const cats = notifCats.length > 0 ? notifCats : allCats
-      const events = notifEvents.length > 0 ? notifEvents : [...EVENT_TYPES]
-
-      // 乐观翻转：开关立刻变 ON，无需等待后续网络 / flip now, don't wait on network
+      const { cats, syms, events } = await enableNotifications(() =>
+        Promise.resolve({
+          selected_categories: notifCats,
+          selected_symbols: notifSymbols,
+          event_types: notifEvents,
+        }),
+      )
       setNotifEnabled(true)
       setNotifCats(cats)
+      setNotifSymbols(syms)
       setNotifEvents(events)
-
-      // 并行：(a) 落库通知偏好；(b) 取 VAPID + 注册 SW + 订阅 + 上报订阅。
-      // Parallel: (a) save prefs; (b) fetch VAPID + warm SW + subscribe + report.
-      const vapidPromise = pushApi.getVapidKey()
-      await Promise.all([
-        notificationApi.putPrefs(true, cats, events),
-        (async () => {
-          const [vapid] = await Promise.all([vapidPromise, getSWReg()])
-          const sub = await subscribePush(vapid.publicKey)
-          if (sub) await pushApi.subscribe(sub.endpoint, sub.keys)
-        })(),
-      ])
     } catch (err: unknown) {
       // 失败回滚开关 / roll back the switch on failure
       setNotifEnabled(false)
-      setNotifMsg({
-        kind: "err",
-        text: err instanceof Error ? localizeApiError(err.message) : t("account.notifError"),
-      })
+      if (err instanceof NotifEnableError) {
+        setNotifMsg({ kind: "err", text: t(ENABLE_ERROR_KEYS[err.reason]) })
+      } else {
+        setNotifMsg({
+          kind: "err",
+          text: err instanceof Error ? localizeApiError(err.message) : t("account.notifError"),
+        })
+      }
     } finally {
       setNotifLoading(false)
     }
+  }
+
+  // 通用的"策略/品种白名单"切换：两个维度都支持 ALL_SENTINEL（全部）——
+  // 勾选"全部"清空其余具体项，勾选任意具体项则自动取消"全部"。
+  // Shared toggle for the strategy/symbol whitelists: both dimensions support
+  // the ALL_SENTINEL ("全部") — ticking it clears specific picks, ticking any
+  // specific item automatically clears "全部".
+  function toggleWhitelistValue(prev: string[], value: string, on: boolean): string[] {
+    if (value === ALL_SENTINEL) return on ? [ALL_SENTINEL] : []
+    const withoutAll = prev.filter((v) => v !== ALL_SENTINEL)
+    return on ? [...withoutAll, value] : withoutAll.filter((v) => v !== value)
   }
 
   function handleNotifCatToggle(cat: string, on: boolean) {
     // 乐观更新：先即时更新 UI，再防抖落库 / optimistic UI then debounced save
     setNotifMsg(null)
     setNotifCats((prev) => {
-      const next = on ? [...prev, cat] : prev.filter((c) => c !== cat)
+      const next = toggleWhitelistValue(prev, cat, on)
       if (catSaveTimer.current) window.clearTimeout(catSaveTimer.current)
       catSaveTimer.current = window.setTimeout(() => {
-        notificationApi.putPrefs(notifEnabled, next, notifEvents).catch(() => {
+        notificationApi.putPrefs(notifEnabled, next, notifEvents, notifSymbols).catch(() => {
           // 落库失败则回滚该项 / roll back this toggle on failure
-          setNotifCats((cur) => (on ? cur.filter((c) => c !== cat) : [...cur, cat]))
+          setNotifCats(prev)
+          setNotifMsg({ kind: "err", text: t("account.notifError") })
+        })
+      }, 400)
+      return next
+    })
+  }
+
+  function handleNotifSymbolToggle(symbol: string, on: boolean) {
+    // 乐观更新：先即时更新 UI，再防抖落库 / optimistic UI then debounced save
+    setNotifMsg(null)
+    setNotifSymbols((prev) => {
+      const next = toggleWhitelistValue(prev, symbol, on)
+      if (symbolSaveTimer.current) window.clearTimeout(symbolSaveTimer.current)
+      symbolSaveTimer.current = window.setTimeout(() => {
+        notificationApi.putPrefs(notifEnabled, notifCats, notifEvents, next).catch(() => {
+          // 落库失败则回滚该项 / roll back this toggle on failure
+          setNotifSymbols(prev)
           setNotifMsg({ kind: "err", text: t("account.notifError") })
         })
       }, 400)
@@ -223,7 +226,7 @@ export default function AccountPage() {
       const next = on ? [...prev, eventType] : prev.filter((e) => e !== eventType)
       if (eventSaveTimer.current) window.clearTimeout(eventSaveTimer.current)
       eventSaveTimer.current = window.setTimeout(() => {
-        notificationApi.putPrefs(notifEnabled, notifCats, next).catch(() => {
+        notificationApi.putPrefs(notifEnabled, notifCats, next, notifSymbols).catch(() => {
           // 落库失败则回滚该项 / roll back this toggle on failure
           setNotifEvents((cur) => (on ? cur.filter((e) => e !== eventType) : [...cur, eventType]))
           setNotifMsg({ kind: "err", text: t("account.notifError") })
@@ -354,7 +357,7 @@ export default function AccountPage() {
           </section>
 
           {/* 通知设置 / Notifications */}
-          <section className="glass-neon p-5">
+          <section id="notifications" ref={notifSectionRef} className="glass-neon scroll-mt-20 p-5">
             <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-slate-300">
               {t("account.notifications")}
             </h3>
@@ -405,24 +408,75 @@ export default function AccountPage() {
                 <p className="text-xs text-amber-400">{t("account.notifDeviceHint")}</p>
               )}
               {notifEnabled && (
+                <p className="text-xs leading-relaxed text-slate-500">{t("account.notifFilterHint")}</p>
+              )}
+              {notifEnabled && (
                 <div className="space-y-2 pl-1">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                    {t("account.notifCatsHeading")}
+                    {t("account.notifStrategyLabel")}
                   </p>
                   {allCats.length === 0 ? (
                     <p className="text-xs text-slate-500">{t("account.notifNoCategories")}</p>
                   ) : (
-                    allCats.map((cat) => (
-                      <label key={cat} className="flex items-center gap-2 text-sm">
+                    <>
+                      <label className="flex items-center gap-2 text-sm">
                         <input
                           type="checkbox"
-                          checked={notifCats.includes(cat)}
-                          onChange={(e) => handleNotifCatToggle(cat, e.target.checked)}
+                          checked={notifCats.includes(ALL_SENTINEL)}
+                          onChange={(e) => handleNotifCatToggle(ALL_SENTINEL, e.target.checked)}
                           className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500"
                         />
-                        <span className="text-slate-300">{cat}</span>
+                        <span className="font-medium text-slate-200">{t("account.notifAll")}</span>
                       </label>
-                    ))
+                      {allCats.map((cat) => (
+                        <label key={cat} className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={notifCats.includes(cat) || notifCats.includes(ALL_SENTINEL)}
+                            disabled={notifCats.includes(ALL_SENTINEL)}
+                            onChange={(e) => handleNotifCatToggle(cat, e.target.checked)}
+                            className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500 disabled:opacity-50"
+                          />
+                          <span className="text-slate-300">{cat}</span>
+                        </label>
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
+              {notifEnabled && (
+                <div className="space-y-2 border-t border-white/5 pt-4 pl-1">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    {t("account.notifSymbolLabel")}
+                  </p>
+                  {allSymbols.length === 0 ? (
+                    <p className="text-xs text-slate-500">{t("account.notifNoSymbols")}</p>
+                  ) : (
+                    <>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={notifSymbols.includes(ALL_SENTINEL)}
+                          onChange={(e) => handleNotifSymbolToggle(ALL_SENTINEL, e.target.checked)}
+                          className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500"
+                        />
+                        <span className="font-medium text-slate-200">{t("account.notifAll")}</span>
+                      </label>
+                      {allSymbols.map((sym) => (
+                        <label key={sym} className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={notifSymbols.includes(sym) || notifSymbols.includes(ALL_SENTINEL)}
+                            disabled={notifSymbols.includes(ALL_SENTINEL)}
+                            onChange={(e) => handleNotifSymbolToggle(sym, e.target.checked)}
+                            className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500 disabled:opacity-50"
+                          />
+                          <span className="text-slate-300">
+                            {t(`signals.symbolNames.${sym}`, { defaultValue: "" }) || sym}
+                          </span>
+                        </label>
+                      ))}
+                    </>
                   )}
                 </div>
               )}

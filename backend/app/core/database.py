@@ -131,6 +131,22 @@ def _migrate_columns() -> None:
         if "event_types" not in notif_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE notification_prefs ADD COLUMN event_types TEXT"))
+        # 品种白名单是新加的第二道过滤维度：老行加这列前从未按品种过滤过，
+        # 直接补默认值 "[]" 会让所有已开启通知的老用户瞬间收不到任何推送
+        # （与品种维度做"与"时，空白名单恒为假）。回填 __ALL__ 哨兵，保持
+        # 老用户升级前后行为不变。
+        # The symbol whitelist is a new second filter dimension: existing rows
+        # never filtered by symbol before this column existed, so leaving it
+        # at the plain "[]" default would silently stop all push for every
+        # user who already had notifications on (empty ANDed with symbol is
+        # always false). Backfill the __ALL__ sentinel so upgrading doesn't
+        # change existing users' behavior.
+        if "selected_symbols" not in notif_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE notification_prefs ADD COLUMN selected_symbols TEXT"))
+                conn.execute(text(
+                    'UPDATE notification_prefs SET selected_symbols = \'["__ALL__"]\' WHERE selected_symbols IS NULL'
+                ))
 
     # 后台清扫/过期扫描用的索引：create_all 不会为已存在的表补索引，这里补。
     # Indexes for the background sweeps: create_all won't add indexes to

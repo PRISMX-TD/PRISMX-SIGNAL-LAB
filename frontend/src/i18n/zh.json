@@ -9,6 +9,10 @@
     "update": "去更新",
     "dismiss": "不再提醒"
   },
+  "notifPanel": {
+    "title": "通知",
+    "fullSettings": "完整设置"
+  },
   "nav": {
     "dashboard": "仪表盘",
     "signals": "信号面板",
@@ -460,7 +464,12 @@
     "notifEnable": "开启信号推送通知",
     "notifUpgradeRequired": "免费版不支持通知推送，升级后即可解锁",
     "notifNoCategories": "暂无指标类别，信号引擎运行后将自动出现",
+    "notifNoSymbols": "暂无品种，信号引擎运行后将自动出现",
     "notifCatsHeading": "信号提醒",
+    "notifFilterHint": "策略与品种需同时命中才会推送，例如勾选「AIFT + 黄金」时只有 AIFT 发出的黄金信号才会通知。勾选「全部」则该维度不做限制，且后续新增的品种也会自动覆盖。",
+    "notifStrategyLabel": "按策略",
+    "notifSymbolLabel": "按品种",
+    "notifAll": "全部",
     "notifEventsHeading": "交易与账户提醒",
     "notifEvent": {
       "order_filled": "订单成交",

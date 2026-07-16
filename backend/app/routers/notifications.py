@@ -22,6 +22,8 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 class NotificationPrefsOut(BaseModel):
     enabled: bool
     selected_categories: list[str]  # 信号指标类别白名单 / signal indicator-category whitelist
+    # 品种白名单，与 selected_categories 按"与"关系联合过滤 / symbol whitelist, ANDed with selected_categories
+    selected_symbols: list[str] = Field(default_factory=list)
     # 事件类通知白名单：order_filled / order_rejected / auto_manage / bridge_offline
     # Event-notification whitelist
     event_types: list[str] = Field(default_factory=list)
@@ -30,6 +32,7 @@ class NotificationPrefsOut(BaseModel):
 class NotificationPrefsIn(BaseModel):
     enabled: bool = False
     selected_categories: list[str] = Field(default_factory=list)
+    selected_symbols: list[str] = Field(default_factory=list)
     event_types: list[str] = Field(default_factory=list)
 
 
@@ -53,12 +56,19 @@ def get_prefs(
         cats = json.loads(pref.selected_categories or "[]")
     except (json.JSONDecodeError, TypeError):
         cats = []
+    syms = []
+    try:
+        syms = json.loads(pref.selected_symbols or "[]")
+    except (json.JSONDecodeError, TypeError):
+        syms = []
     events = []
     try:
         events = json.loads(pref.event_types or "[]")
     except (json.JSONDecodeError, TypeError):
         events = []
-    return NotificationPrefsOut(enabled=pref.enabled, selected_categories=cats, event_types=events)
+    return NotificationPrefsOut(
+        enabled=pref.enabled, selected_categories=cats, selected_symbols=syms, event_types=events
+    )
 
 
 @router.put("/prefs", response_model=NotificationPrefsOut)
@@ -77,9 +87,15 @@ def put_prefs(
     pref = _get_or_create_pref(db, current_user.id)
     pref.enabled = body.enabled
     pref.selected_categories = json.dumps(body.selected_categories, ensure_ascii=False)
+    pref.selected_symbols = json.dumps(body.selected_symbols, ensure_ascii=False)
     pref.event_types = json.dumps(events, ensure_ascii=False)
     db.commit()
-    return NotificationPrefsOut(enabled=pref.enabled, selected_categories=body.selected_categories, event_types=events)
+    return NotificationPrefsOut(
+        enabled=pref.enabled,
+        selected_categories=body.selected_categories,
+        selected_symbols=body.selected_symbols,
+        event_types=events,
+    )
 
 
 # ---- 指标类别列表 / indicator category list ----
@@ -98,6 +114,17 @@ def list_indicators(
         if c:
             cats.add(c)
     return sorted(cats)
+
+
+@router.get("/symbols")
+def list_symbols(
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> list[str]:
+    """从现有信号中提取去重后的品种列表，供前端通知设置页渲染品种筛选。
+    随信号引擎/EA 实际推送过的品种变化而变化，不写死。"""
+    rows = db.query(Signal.symbol).filter(Signal.symbol != None, Signal.symbol != "").distinct().all()
+    return sorted({sym for (sym,) in rows if sym})
 
 
 # ---- 推送订阅 / Push subscriptions ----

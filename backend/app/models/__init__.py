@@ -198,6 +198,14 @@ class NotificationPref(Base):
     enabled = Column(Boolean, default=False)
     # 用户选择开启的指标类别（JSON array of strings）；空(非 null)表示全关闭 / selected indicator categories
     selected_categories = Column(Text, default="[]")
+    # 用户选择开启的品种白名单（JSON array of strings），与 selected_categories
+    # 按"与"关系联合过滤：一条新信号必须策略类别与品种都命中才推送。列表内容
+    # 可以是 "__ALL__" 哨兵值（不限品种，且自动覆盖后续新增品种）或具体品种代码。
+    # Selected symbol whitelist (JSON array), ANDed with selected_categories: a
+    # new signal only pushes if BOTH its category and its symbol match. Entries
+    # can be the "__ALL__" sentinel (matches any symbol, including ones added
+    # later) or specific symbol codes.
+    selected_symbols = Column(Text, default="[]")
     # 事件类通知白名单（JSON array）：order_filled / order_rejected /
     # auto_manage / bridge_offline。与上面的指标类别是两套独立的白名单——
     # 指标类别只管"新信号推送该不该发"，这个字段管"账户/交易事件该不该推"。

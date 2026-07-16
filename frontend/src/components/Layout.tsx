@@ -10,6 +10,7 @@ import { ensurePushSubscription, pushSupported } from '../utils/push'
 import Logo from './Logo'
 import LanguageToggle from './LanguageToggle'
 import EAStatusBadge from './EAStatusBadge'
+import NotificationBell from './NotificationBell'
 import AuroraBackground from './AuroraBackground'
 import ConfirmModal from './ConfirmModal'
 import BridgeUpdateNotice from './BridgeUpdateNotice'
@@ -271,6 +272,7 @@ export default function Layout() {
 
             <div className="ml-auto flex items-center gap-2 sm:gap-3">
               <EAStatusBadge />
+              <NotificationBell />
               <LanguageToggle />
               <div className="hidden text-right md:block">
                 <div className="max-w-[160px] truncate text-xs text-slate-400">{user?.email}</div>

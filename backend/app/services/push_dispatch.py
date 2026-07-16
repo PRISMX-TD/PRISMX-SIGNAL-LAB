@@ -35,6 +35,18 @@ EVENT_AUTO_MANAGE = "auto_manage"
 EVENT_BRIDGE_OFFLINE = "bridge_offline"
 EVENT_TYPES = {EVENT_ORDER_FILLED, EVENT_ORDER_REJECTED, EVENT_AUTO_MANAGE, EVENT_BRIDGE_OFFLINE}
 
+# 白名单哨兵值："不限"，命中任意取值（含此刻还不存在、以后才出现的品种/类别）。
+# Whitelist sentinel meaning "unrestricted" — matches any value, including
+# ones (like a symbol) that don't exist yet and only show up later.
+ALL_SENTINEL = "__ALL__"
+
+
+def _list_matches(selected: list, value: str) -> bool:
+    """selected 是否放行 value：命中哨兵值即不限，否则要求精确匹配。
+    Whether the whitelist `selected` allows `value`: the sentinel means
+    unrestricted, otherwise an exact match is required."""
+    return ALL_SENTINEL in selected or value in selected
+
 
 async def dispatch_push_async(signal: Signal) -> None:
     """在线程池中执行推送派发，避免阻塞事件循环。
@@ -45,9 +57,12 @@ async def dispatch_push_async(signal: Signal) -> None:
         logger.exception("dispatch_push_async error")
 
 
-def _matched_user_ids(db, cat: str) -> set[str]:
+def _matched_user_ids(db, cat: str, symbol: str) -> set[str]:
     """解析每个用户的白名单 JSON 并做精确匹配（不用 SQL LIKE，避免类别名互为
     子串时误匹配），再按当前订阅等级过滤掉 FREE。
+
+    策略类别与品种是两条独立白名单，按"与"关系联合：一条信号必须两边都命中
+    才通知，例如只勾了"AIFT + 黄金"的用户收不到"AIFT + 欧美"或"云指标 + 黄金"。
 
     这条新信号此刻仍是 ACTIVE（尚未过期），FREE 等级要等它过期后才能在
     REST/WS 里看到——这里必须同步过滤，否则一个此前是付费用户、开过推送、
@@ -57,6 +72,10 @@ def _matched_user_ids(db, cat: str) -> set[str]:
     Parse each user's whitelist JSON and match exactly (SQL LIKE would
     false-match categories that are substrings of one another), then filter
     out FREE-plan users.
+
+    Category and symbol are two independent whitelists ANDed together: a
+    signal only notifies if both match — e.g. a user who only ticked
+    "AIFT + gold" won't get "AIFT + EURUSD" or "cloud-indicator + gold".
 
     This signal is still ACTIVE (not yet expired); FREE tier only sees it via
     REST/WS once it expires. Filtering here is required — otherwise a user
@@ -69,9 +88,12 @@ def _matched_user_ids(db, cat: str) -> set[str]:
     for p in prefs:
         try:
             cats = json.loads(p.selected_categories or "[]")
+            syms = json.loads(p.selected_symbols or "[]")
         except (ValueError, TypeError):
             continue
-        if isinstance(cats, list) and cat in cats:
+        if not isinstance(cats, list) or not isinstance(syms, list):
+            continue
+        if _list_matches(cats, cat) and _list_matches(syms, symbol):
             user_ids.add(p.user_id)
     if not user_ids:
         return user_ids
@@ -139,8 +161,8 @@ def dispatch_push(signal: Signal) -> None:
 
     db = SessionLocal()
     try:
-        user_ids = _matched_user_ids(db, cat)
-        logger.debug("[push] category %r matched %d user(s)", cat, len(user_ids))
+        user_ids = _matched_user_ids(db, cat, signal.symbol)
+        logger.debug("[push] category %r symbol %r matched %d user(s)", cat, signal.symbol, len(user_ids))
         if not user_ids:
             return
 
