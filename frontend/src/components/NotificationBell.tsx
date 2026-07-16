@@ -107,7 +107,20 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-40 mt-2 w-72 rounded-xl border border-white/10 bg-ink-900/95 p-4 shadow-prism backdrop-blur-xl">
+        // 铃铛在头部右侧一组图标里并不是最靠右的那个（语言切换、退出登录还在它
+        // 右边），"贴右边缘"的 right-0 只是相对铃铛自己这个 40px 宽的容器，不是
+        // 相对屏幕——288px 宽的面板会整体往左边探出容器，在手机宽度下直接探出
+        // 屏幕左边。窄屏（<sm）改用 fixed + 左右内边距，与铃铛位置无关，永远贴着
+        // 屏幕内侧；sm 及以上视口更宽，退回原来贴按钮右边缘的样式。
+        // The bell isn't the rightmost icon in the header's right-hand cluster
+        // (language toggle and logout sit to its right), so "hug the right
+        // edge" via right-0 is relative to the bell's own ~40px wrapper, not
+        // the screen — a 288px panel spills leftward past that wrapper, which
+        // runs off the left edge of the screen on phone widths. Below sm, use
+        // fixed positioning with side insets instead, independent of where the
+        // bell sits, always flush inside the viewport; sm and up revert to the
+        // original button-anchored dropdown where there's room to spare.
+        <div className="fixed inset-x-3 top-[60px] z-40 rounded-xl border border-white/10 bg-ink-900/95 p-4 shadow-prism backdrop-blur-xl sm:absolute sm:inset-x-auto sm:top-auto sm:right-0 sm:mt-2 sm:w-72">
           <div className="text-sm font-bold text-white">{t("notifPanel.title")}</div>
 
           <div className="mt-3 flex items-center gap-3">

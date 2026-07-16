@@ -79,14 +79,28 @@ export default function AccountPage() {
 
   async function load() {
     setLoading(true)
+    // 账户信息是这个页面能否渲染的前提，单独取、失败就整页报错。通知相关的
+    // 三个接口分开取——任何一个失败（如后端刚上线新端点还没部署到位）只让
+    // 通知区块退化为空列表，不该把密码/MT5 账户等其余板块也一起拖挂掉。
+    // Account info is the precondition for rendering this page at all — fetch
+    // it alone; on failure, show the page-level error. The three
+    // notification-related calls are fetched separately: if any one fails
+    // (e.g. a new endpoint the backend hasn't finished deploying yet), only
+    // the notifications section degrades to empty lists — it shouldn't take
+    // down the password/MT5-accounts sections too.
     try {
-      const [infoRes, prefsRes, catsRes, symsRes] = await Promise.all([
-        userApi.me(),
+      setInfo(await userApi.me())
+    } catch (err: unknown) {
+      console.error("account load:", err)
+      setLoading(false)
+      return
+    }
+    try {
+      const [prefsRes, catsRes, symsRes] = await Promise.all([
         notificationApi.getPrefs(),
         notificationApi.getIndicators(),
         notificationApi.getSymbols(),
       ])
-      setInfo(infoRes)
       setNotifEnabled(prefsRes.enabled)
       setNotifCats(prefsRes.selected_categories)
       setNotifSymbols(prefsRes.selected_symbols ?? [])
@@ -94,7 +108,7 @@ export default function AccountPage() {
       setAllCats(catsRes)
       setAllSymbols(symsRes)
     } catch (err: unknown) {
-      console.error("account load:", err)
+      console.error("account load (notifications):", err)
     } finally {
       setLoading(false)
     }
