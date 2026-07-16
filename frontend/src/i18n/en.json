@@ -506,6 +506,15 @@
     "stale": "Data delayed",
     "utcBadge": "UTC+8",
     "utcHint": "The time axis and all timestamps are shown in UTC+8 (Malaysia/Singapore/China Standard Time)",
+    "indicators": {
+      "button": "Indicators",
+      "ma": "MA (7 / 25 / 99)",
+      "ema": "EMA (12 / 26)",
+      "boll": "Bollinger Bands (20, 2)",
+      "volume": "Volume",
+      "rsi": "RSI (14)",
+      "macd": "MACD (12, 26, 9)"
+    },
     "draw": {
       "tools": "Drawing tools",
       "cursor": "Cursor",

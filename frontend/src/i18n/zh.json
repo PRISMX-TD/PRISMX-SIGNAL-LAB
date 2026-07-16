@@ -506,6 +506,15 @@
     "stale": "数据延迟",
     "utcBadge": "UTC+8",
     "utcHint": "图表时间轴与所有时间戳均以 UTC+8（马来西亚/新加坡/中国标准时间）显示",
+    "indicators": {
+      "button": "指标",
+      "ma": "MA 均线 (7/25/99)",
+      "ema": "EMA 指数均线 (12/26)",
+      "boll": "布林带 (20, 2)",
+      "volume": "成交量",
+      "rsi": "RSI (14)",
+      "macd": "MACD (12, 26, 9)"
+    },
     "draw": {
       "tools": "画图工具",
       "cursor": "光标",
