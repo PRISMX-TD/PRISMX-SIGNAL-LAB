@@ -6,7 +6,7 @@ positions whose close-legs were missed and would otherwise stick at "进行中")
 """
 from datetime import datetime, timedelta, timezone
 
-from app.models import ClosedTrade, Order
+from app.models import ClosedTrade, MT5Account, Order
 from app.services.trade_performance import compute_personal_winrate, mark_positions_seen
 
 
@@ -107,6 +107,36 @@ def test_legacy_order_without_login_falls_back_to_ticket(db, user):
     assert (r["wins"], r["losses"], r["openPositions"]) == (1, 0, 0)
 
 
+def test_bound_logins_excludes_unbound_account(db, user):
+    # 传了 bound_logins 时，不在其中的账号（比如被用户删掉的旧账号）不计入"全部"，
+    # 但没账号信息的历史订单(login=None)仍保留，避免老用户战绩突然消失。
+    # With bound_logins given, an account not in it (e.g. one the user deleted)
+    # doesn't count toward "all accounts", but legacy orders with no login info
+    # are still kept so an existing user's track record doesn't vanish outright.
+    _order(db, user, ticket=100, login="10001")
+    _leg(db, user, ticket=100, login="10001", profit=12.5)  # 已删除账号的旧战绩 / a deleted account's old record
+    _order(db, user, ticket=101, login="20002")
+    _leg(db, user, ticket=101, login="20002", profit=9.0)  # 仍绑定的账号 / still-bound account
+    _order(db, user, ticket=102, login=None)
+    _leg(db, user, ticket=102, login="20002", profit=3.0)  # 历史脏数据，无账号信息 / legacy, no login info
+
+    r = compute_personal_winrate(db, user.id, bound_logins=["20002"])
+    assert (r["wins"], r["losses"], r["totalResolved"]) == (2, 0, 2)  # 10001 的一笔被排除在外
+
+
+def test_login_param_narrows_to_one_account_and_drops_legacy(db, user):
+    # 选中单个账号时更严格：没账号信息的历史订单不再兜底进来。
+    # Selecting a single account is stricter: legacy orders without login info
+    # no longer fall back into the count.
+    _order(db, user, ticket=200, login="20002")
+    _leg(db, user, ticket=200, login="20002", profit=5.0)
+    _order(db, user, ticket=201, login=None)
+    _leg(db, user, ticket=201, login="20002", profit=-1.0)
+
+    r = compute_personal_winrate(db, user.id, bound_logins=["20002"], login="20002")
+    assert (r["wins"], r["losses"], r["totalResolved"]) == (1, 0, 1)  # 只有明确 login="20002" 的那笔
+
+
 def test_stale_open_without_close_is_dropped(db, user):
     # 核心修复：既没有平仓明细、MT5 也很久没把它报为持仓（或从没报过）——判定为已
     # 在别处平掉、平仓明细漏报，从"进行中"里剔除，不再永远卡着。
@@ -159,6 +189,15 @@ def test_http_bridge_positions_reconciles_winrate(client, auth_headers, bridge_h
     # Real HTTP end-to-end: a dirty position isn't counted open; after the bridge
     # POSTs /bridge/positions, GET /orders/winrate counts it open — exercises the
     # bridge -> trade_performance wiring (async endpoint + threadpool + its own session).
+    # 账号先"已绑定"：/orders/winrate 现在按当前绑定账号过滤（见
+    # orders.py::_bound_logins），/bridge/positions 本身不会创建 MT5Account 行
+    # （那是 /bridge/poll 的账号心跳负责的），真实场景里桥接总会先或同时轮询过。
+    # The account is bound first: /orders/winrate now scopes to currently-bound
+    # accounts (see orders.py::_bound_logins). /bridge/positions alone never
+    # creates an MT5Account row (that's the /bridge/poll heartbeat's job) — in
+    # real usage the bridge always polls before or alongside reporting positions.
+    db.add(MT5Account(user_id=user.id, login="10001"))
+    db.commit()
     _order(db, user, ticket=1234, login="10001", last_seen=None)
 
     r0 = client.get("/api/orders/winrate", headers=auth_headers)
@@ -175,3 +214,34 @@ def test_http_bridge_positions_reconciles_winrate(client, auth_headers, bridge_h
 
     r1 = client.get("/api/orders/winrate", headers=auth_headers)
     assert r1.status_code == 200 and r1.json()["openPositions"] == 1
+
+
+def test_http_winrate_and_closed_trades_scoped_to_bound_accounts(client, auth_headers, db, user):
+    # 端到端：账号 10001 绑定中，20002 已被删除（没有 MT5Account 行）——"全部"
+    # 只看 10001；?login=10001 与之相同；?login=20002（未绑定）404；?login=10001
+    # 单独选中时数字不变（本例只有一个账号）。/orders/closed-trades 同理排除 20002。
+    # End-to-end: account 10001 is bound, 20002 has been deleted (no MT5Account
+    # row) — "all accounts" only sees 10001; ?login=10001 matches it; ?login=20002
+    # (unbound) 404s. /orders/closed-trades excludes 20002 the same way.
+    db.add(MT5Account(user_id=user.id, login="10001"))
+    db.commit()
+    _order(db, user, ticket=300, login="10001")
+    _leg(db, user, ticket=300, login="10001", profit=10.0)
+    _order(db, user, ticket=301, login="20002")
+    _leg(db, user, ticket=301, login="20002", profit=-5.0)
+
+    r_all = client.get("/api/orders/winrate", headers=auth_headers)
+    assert r_all.status_code == 200
+    assert (r_all.json()["wins"], r_all.json()["losses"]) == (1, 0)
+
+    r_login = client.get("/api/orders/winrate?login=10001", headers=auth_headers)
+    assert r_login.status_code == 200
+    assert (r_login.json()["wins"], r_login.json()["losses"]) == (1, 0)
+
+    r_deleted = client.get("/api/orders/winrate?login=20002", headers=auth_headers)
+    assert r_deleted.status_code == 404
+
+    r_trades = client.get("/api/orders/closed-trades", headers=auth_headers)
+    assert r_trades.status_code == 200
+    logins = {t["mt5Login"] for t in r_trades.json()["trades"]}
+    assert logins == {"10001"}

@@ -11,17 +11,24 @@ import type { PersonalWinRate } from '../api/types'
 
 interface Props {
   variant?: 'compact' | 'detailed'
+  // 只看这一个账号（订单页的账号标签驱动）；不传则是当前绑定的全部账号。
+  // Narrow to one account (driven by the Orders page's account tab); omitted covers all currently-bound accounts.
+  login?: string
 }
 
-export default function PersonalWinRateCard({ variant = 'compact' }: Props) {
+export default function PersonalWinRateCard({ variant = 'compact', login }: Props) {
   const { t } = useTranslation()
   const [data, setData] = useState<PersonalWinRate | null>(null)
 
   useEffect(() => {
     let mounted = true
     const load = () => {
-      orderApi.winrate().then((r) => { if (mounted) setData(r) }).catch(() => {})
+      orderApi.winrate(login).then((r) => { if (mounted) setData(r) }).catch(() => {})
     }
+    // 切换账号标签时先清空旧数字再拉新的，避免短暂显示"上一个账号的胜率"。
+    // Clear the stale number before refetching on an account switch, so the
+    // previous account's win rate doesn't flash before the new one loads.
+    setData(null)
     load()
     // 定时刷新 + 回到页面时立即刷新，让战绩随平仓近实时更新，无需手动刷新整页。
     // 页面在后台时跳过轮询（rAF/定时器也会被浏览器节流），切回前台再补一次。
@@ -40,7 +47,7 @@ export default function PersonalWinRateCard({ variant = 'compact' }: Props) {
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
     }
-  }, [])
+  }, [login])
 
   const pct = data?.winRate != null ? Math.round(data.winRate * 100) : null
   const detailed = variant === 'detailed'

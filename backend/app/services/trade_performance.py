@@ -15,7 +15,7 @@ position ended up profitable.
 """
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import tuple_
+from sqlalchemy import or_, tuple_
 
 from app.models import ClosedTrade, Order
 
@@ -37,19 +37,47 @@ _VOLUME_EPS = 1e-6
 _OPEN_FRESHNESS = timedelta(minutes=20)
 
 
-def compute_personal_winrate(db, user_id: str) -> dict:
-    """计算某用户的个人跟单胜率 / compute one user's personal win rate."""
+def compute_personal_winrate(
+    db, user_id: str, bound_logins: list[str] | None = None, login: str | None = None
+) -> dict:
+    """计算某用户的个人跟单胜率 / compute one user's personal win rate.
+
+    bound_logins：该用户当前仍绑定的 MT5 账号（由调用方传入）。传了就把统计
+    范围限定在这些账号内——用户删掉一个旧账号后，它的历史战绩不再计入"全部"，
+    重新绑回后自动恢复（数据从不删除，只是这里不再选中它）。历史遗留、从未
+    回填过账号的订单（login 为空）视为无法归属到任何单一账号，在"全部"里
+    仍保留，避免老用户的战绩突然消失；但选中单个账号时不包含这类订单，因为
+    没有账号信息就没法确认它属于这个账号。
+
+    login：进一步限定到某一个账号（订单页的账号标签），此时不做上面的历史
+    兜底——只看这个账号名下、账号信息明确的订单。
+
+    bound_logins: the MT5 accounts this user still has bound (supplied by the
+    caller). When given, scopes the stats to those accounts — deleting an old
+    account drops its history from "all accounts"; re-binding it restores the
+    view automatically (data is never deleted, just deselected here). Legacy
+    orders that never got a login backfilled are kept in the "all accounts"
+    view (they can't be attributed to a specific account, but dropping them
+    would make an existing user's track record vanish); they're excluded once
+    a single account is selected, since there's no account info to confirm
+    they belong to it.
+
+    login: further narrows to one specific account (the Orders page's account
+    tab); the legacy-null fallback above doesn't apply here — only orders with
+    a confirmed matching login count.
+    """
     # 1) 该用户所有成功开仓、且已知 MT5 仓位编号的下单记录 / this user's filled opens with a known MT5 ticket
-    orders = (
-        db.query(Order)
-        .filter(
-            Order.user_id == user_id,
-            Order.action == "ORDER",
-            Order.status == "FILLED",
-            Order.mt5_ticket.isnot(None),
-        )
-        .all()
+    query = db.query(Order).filter(
+        Order.user_id == user_id,
+        Order.action == "ORDER",
+        Order.status == "FILLED",
+        Order.mt5_ticket.isnot(None),
     )
+    if login is not None:
+        query = query.filter(Order.mt5_login == login)
+    elif bound_logins is not None:
+        query = query.filter(or_(Order.mt5_login.in_(bound_logins), Order.mt5_login.is_(None)))
+    orders = query.all()
     if not orders:
         return {"wins": 0, "losses": 0, "totalResolved": 0, "winRate": None, "openPositions": 0}
     # 一个"仓位"用 (MT5 账号, 仓位编号) 唯一标识：MT5 的仓位编号只在单个交易

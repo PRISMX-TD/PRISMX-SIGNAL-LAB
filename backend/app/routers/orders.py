@@ -280,19 +280,36 @@ def cancel_order(
     return _serialize(order)
 
 
+def _bound_logins(db: Session, user_id: str) -> list[str]:
+    """该用户当前仍绑定的 MT5 账号登录名（已删除/换绑的旧账号不在内）。
+    This user's currently-bound MT5 account logins (deleted/replaced accounts excluded)."""
+    return [row[0] for row in db.query(MT5Account.login).filter(MT5Account.user_id == user_id).all()]
+
+
 @router.get("/winrate", response_model=dict)
 def order_winrate(
+    login: str | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """当前用户的个人跟单胜率：基于真实平仓明细，一个仓位全部平完才算数
     （方案 B，见 app/services/trade_performance.py）。只有自己能看到自己的。
 
+    不传 login：统计范围限定在当前仍绑定的账号（已删除的旧账号不计入）。
+    传 login：进一步只看这一个账号——账号必须是当前绑定的，否则视为不存在。
+
     The current user's personal win rate, based on real close records; a
     position only counts once fully closed (design B). Visible only to the
     user themself.
+
+    Without login: scoped to currently-bound accounts (deleted ones excluded).
+    With login: narrowed to that one account — it must be currently bound, or
+    it's treated as not found.
     """
-    return compute_personal_winrate(db, user.id)
+    bound = _bound_logins(db, user.id)
+    if login is not None and login not in bound:
+        raise HTTPException(status_code=404, detail="账号不存在 / Account not found")
+    return compute_personal_winrate(db, user.id, bound_logins=bound, login=login)
 
 
 @router.get("/closed-trades", response_model=dict)
@@ -300,23 +317,27 @@ def list_closed_trades(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """当前用户的真实平仓成交明细，最新在前。只有自己能看到自己的。
+    """当前用户的真实平仓成交明细，最新在前，限定当前仍绑定的账号（已删除的
+    旧账号不再出现；重新绑回后自动恢复，记录从不删除）。只有自己能看到自己的。
 
     与个人跟单胜率同一份数据源（ClosedTrade），但这里给出逐笔记录而非聚合
     数字——"透明度"承诺不能只停在一个百分比上，用户应该能看到构成这个百分比
     的每一笔真实成交。
 
-    The current user's real closed-trade legs, newest first. Visible only to
-    the user themself.
+    The current user's real closed-trade legs, newest first, scoped to
+    currently-bound accounts (a deleted account's history disappears; it comes
+    back automatically once re-bound — nothing is ever deleted). Visible only
+    to the user themself.
 
     Same underlying data as the personal win rate (ClosedTrade), but exposed
     as individual records instead of an aggregate — the "transparency"
     promise shouldn't stop at a single percentage; the user should be able to
     see every real fill that number is built from.
     """
+    bound = _bound_logins(db, user.id)
     rows = (
         db.query(ClosedTrade)
-        .filter(ClosedTrade.user_id == user.id)
+        .filter(ClosedTrade.user_id == user.id, ClosedTrade.mt5_login.in_(bound))
         .order_by(ClosedTrade.closed_at.desc())
         .limit(200)
         .all()

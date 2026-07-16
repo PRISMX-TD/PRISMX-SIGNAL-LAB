@@ -180,7 +180,10 @@ export const orderApi = {
       body: JSON.stringify(payload),
     }),
   cancel: (id: string) => request<Order>(`/orders/${id}/cancel`, { method: 'POST' }),
-  winrate: () => request<PersonalWinRate>('/orders/winrate'),
+  // login：只看这一个账号（订单页的账号标签）；不传则统计当前仍绑定的全部账号。
+  // login: narrow to one account (the Orders page's account tab); omitted scopes to all currently-bound accounts.
+  winrate: (login?: string) =>
+    request<PersonalWinRate>(`/orders/winrate${login ? `?login=${encodeURIComponent(login)}` : ''}`),
   closedTrades: () => request<{ trades: ClosedTrade[] }>('/orders/closed-trades'),
 }
 

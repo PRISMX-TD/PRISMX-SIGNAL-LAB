@@ -542,7 +542,8 @@
     "closedTradesHint": "每一笔真实成交，构成上面胜率数字的原始记录。",
     "closedTradesEmpty": "暂无已平仓记录",
     "profit": "盈亏",
-    "closedTradesAccount": "账户 {{login}}"
+    "closedTradesAccount": "账户 {{login}}",
+    "allAccounts": "全部账户"
   },
   "orders": {
     "title": "订单与回执",

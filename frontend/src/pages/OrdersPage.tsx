@@ -6,7 +6,7 @@ import { useAuth } from '../store/auth'
 import { useLive, usePositions } from '../store/live'
 import { orderApi, automationApi } from '../api/client'
 import { displaySymbol, fmtTime, localizeApiError } from '../api/utils'
-import type { AutoManageSettings, Order, OrderStatus } from '../api/types'
+import type { AutoManageSettings, ClosedTrade, Order, OrderStatus } from '../api/types'
 import PositionCard from '../components/PositionCard'
 import PersonalWinRateCard from '../components/PersonalWinRateCard'
 import ClosedTradesList from '../components/ClosedTradesList'
@@ -89,6 +89,58 @@ export default function OrdersPage() {
     refreshUser()                        // 每次进入页面刷新 plan，确保管理员升级后即时生效
     automationApi.getSettings().then(setAutoCfg).catch(() => {})
   }, [])
+
+  // 我的交易表现：已平仓明细在这里统一拉取，账号标签同时驱动上方的胜率卡
+  // （见下方 JSX）——一次点击，数字和明细一起切换，不会出现"胜率含旧账号
+  // 战绩、明细却看不到"的不一致。
+  // Personal trading performance: closed trades are fetched here once; the
+  // account tab drives both the win-rate card above it and the list below
+  // (see the JSX further down) — one click switches both, so the win-rate
+  // number never disagrees with the visible records it's supposed to be built from.
+  const [trades, setTrades] = useState<ClosedTrade[] | null>(null)
+  const [selectedLogin, setSelectedLogin] = useState<string | null>(null) // null = 全部账户 / all accounts
+
+  useEffect(() => {
+    let mounted = true
+    const load = () => {
+      orderApi.closedTrades()
+        .then((r) => { if (mounted) setTrades(r.trades) })
+        .catch(() => { if (mounted) setTrades((prev) => prev ?? []) })
+    }
+    load()
+    const timer = window.setInterval(() => {
+      if (!document.hidden) load()
+    }, 45_000)
+    const onVisible = () => { if (!document.hidden) load() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => {
+      mounted = false
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+    }
+  }, [])
+
+  // 记录里出现过的账号（去重、排序）；只有超过一个才需要显示"全部/单个"标签。
+  // Distinct account logins seen in the records; tabs only appear when >1.
+  const tradeLogins = useMemo(() => {
+    if (!trades) return []
+    return [...new Set(trades.map((tr) => tr.mt5Login))].sort()
+  }, [trades])
+  const multiAccount = tradeLogins.length > 1
+
+  // 选中账号已不在记录里（如刚被删掉）时回退到"全部" / fall back to "all" if the selected login vanished
+  useEffect(() => {
+    if (selectedLogin !== null && trades !== null && !tradeLogins.includes(selectedLogin)) {
+      setSelectedLogin(null)
+    }
+  }, [selectedLogin, trades, tradeLogins])
+
+  const visibleTrades = useMemo(() => {
+    if (!trades) return trades
+    return selectedLogin ? trades.filter((tr) => tr.mt5Login === selectedLogin) : trades
+  }, [trades, selectedLogin])
 
   async function saveAutoCfg() {
     if (!autoCfg) return
@@ -270,9 +322,41 @@ export default function OrdersPage() {
         )}
       </div>
 
-      {/* 我的交易表现 / personal trading performance */}
+      {/* 我的交易表现：账号标签同时驱动胜率卡与下方明细，两者数字永远对得上 /
+          Personal trading performance: the account tab drives both the
+          win-rate card and the detail list below, so the numbers never disagree */}
       <div className="mb-5">
-        <PersonalWinRateCard variant="detailed" />
+        {multiAccount && (
+          <div className="mb-3 flex flex-wrap gap-2">
+            <button
+              onClick={() => setSelectedLogin(null)}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+                selectedLogin === null
+                  ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'
+                  : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-100'
+              }`}
+            >
+              {t('winrate.allAccounts')}
+            </button>
+            {tradeLogins.map((login) => (
+              <button
+                key={login}
+                onClick={() => setSelectedLogin(login)}
+                className={`rounded-lg border px-3 py-1.5 font-mono text-xs transition ${
+                  selectedLogin === login
+                    ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'
+                    : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-100'
+                }`}
+              >
+                {t('winrate.closedTradesAccount', { login })}
+              </button>
+            ))}
+          </div>
+        )}
+        <PersonalWinRateCard variant="detailed" login={selectedLogin ?? undefined} />
+        <div className="mt-5">
+          <ClosedTradesList trades={visibleTrades} showAccountColumn={multiAccount && selectedLogin === null} />
+        </div>
       </div>
 
       {/* 自动仓位管理 / auto position management */}
@@ -409,11 +493,6 @@ export default function OrdersPage() {
           )}
         </div>
       )}
-
-      {/* 已平仓交易明细 / closed trade history */}
-      <div className="mb-5">
-        <ClosedTradesList />
-      </div>
 
       {/* 操作记录 / activity log */}
       <div className="mb-3">
