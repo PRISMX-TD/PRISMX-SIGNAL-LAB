@@ -23,6 +23,7 @@ import {
   HistogramSeries,
   type IChartApi,
   type ISeriesApi,
+  type IPriceLine,
   type UTCTimestamp,
 } from 'lightweight-charts'
 import { chartApi } from '../api/client'
@@ -32,8 +33,14 @@ import { usePrefs } from '../store/prefs'
 import { useLive, useQuotes } from '../store/live'
 import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import { sma, ema, bollinger, rsi, macd, closes } from '../utils/indicators'
+import {
+  DEFAULT_INDICATOR_SETTINGS,
+  mergeIndicatorSettings,
+  type IndicatorSettings,
+} from '../components/charts/indicatorSettings'
 import DrawLayer from '../components/charts/DrawLayer'
 import ChartOrderModal from '../components/ChartOrderModal'
+import IndicatorSettingsModal from '../components/charts/IndicatorSettingsModal'
 
 // 图表价格轴的小数位数：贵金属/原油 2~3 位，外汇对按经纪商常见的 5 位报价
 // （日元对 3 位），加密货币 2 位。未在表中的品种回退到 2 位。
@@ -72,17 +79,14 @@ const STALE_MS = 30_000
 // long-lived page session.
 const MAX_CLIENT_BARS = 500
 
-// 涨跌配色（与 SignalView 的 FOCUS_DOT 一致）/ up/down colors (match SignalView's FOCUS_DOT)
+// 涨跌配色（与 SignalView 的 FOCUS_DOT 一致，K 线本身固定用这套，不做客制化）
+// up/down colors (match SignalView's FOCUS_DOT; the candles themselves stay
+// fixed to this palette — only the sub-indicators are user-customizable)
 const UP_COLOR = '#2ee07e'
 const DOWN_COLOR = '#ff4d67'
 
-// ---------- 指标开关与默认参数 / indicator toggles & default parameters ----------
-// 周期/参数暂不做用户可调（先把"有没有"这道坎迈过去），后续如需自定义窗口
-// 长度可以在这批常量上加输入框，不影响下面的计算与渲染管线。
-// Periods/parameters aren't user-tunable yet (getting these onto the chart at
-// all is this pass's goal); adding period inputs later only touches these
-// constants, not the calc/render pipeline below.
-interface IndicatorFlags {
+// ---------- 指标开关 / indicator toggles ----------
+export interface IndicatorFlags {
   ma: boolean
   ema: boolean
   boll: boolean
@@ -98,18 +102,27 @@ const DEFAULT_INDICATORS: IndicatorFlags = {
   rsi: false,
   macd: false,
 }
-const INDICATOR_KEYS = Object.keys(DEFAULT_INDICATORS) as (keyof IndicatorFlags)[]
-
-const MA_PERIODS = [7, 25, 99] as const
-const MA_COLORS = ['#f5c451', '#a78bfa', '#22d3ee']
-const EMA_PERIODS = [12, 26] as const
-const EMA_COLORS = ['#38bdf8', '#fb7185']
-const BOLL_PERIOD = 20
-const BOLL_MULT = 2
-const RSI_PERIOD = 14
-const MACD_FAST = 12
-const MACD_SLOW = 26
-const MACD_SIGNAL = 9
+// 十字准线/触摸拖动悬停时展示的各指标"当前值"；不悬停时回退到最新一根的值
+// （见 recomputeIndicators 与 subscribeCrosshairMove 的说明）。
+// The indicator values shown while hovering the crosshair or touch-dragging;
+// falls back to the latest bar's values when not hovering (see
+// recomputeIndicators and the subscribeCrosshairMove wiring below).
+interface LegendValues {
+  ma: (number | null)[]
+  ema: (number | null)[]
+  boll: { mid: number | null; upper: number | null; lower: number | null }
+  volume: number | null
+  rsi: number | null
+  macd: { macd: number | null; signal: number | null; hist: number | null }
+}
+const EMPTY_LEGEND: LegendValues = {
+  ma: [null, null, null],
+  ema: [null, null],
+  boll: { mid: null, upper: null, lower: null },
+  volume: null,
+  rsi: null,
+  macd: { macd: null, signal: null, hist: null },
+}
 
 function toLwPoint(b: Candle) {
   return { time: b.t as UTCTimestamp, open: b.o, high: b.h, low: b.l, close: b.c }
@@ -130,13 +143,23 @@ function toLinePoints(times: UTCTimestamp[], values: (number | null)[]): { time:
 }
 
 // MACD 柱状图：同上但带正负配色 / MACD histogram: same, but colored by sign
-function toHistPoints(times: UTCTimestamp[], values: (number | null)[]): { time: UTCTimestamp; value: number; color: string }[] {
+function toHistPoints(
+  times: UTCTimestamp[],
+  values: (number | null)[],
+  upColor: string,
+  downColor: string
+): { time: UTCTimestamp; value: number; color: string }[] {
   const out: { time: UTCTimestamp; value: number; color: string }[] = []
   for (let i = 0; i < values.length; i++) {
     const v = values[i]
-    if (v != null) out.push({ time: times[i], value: v, color: v >= 0 ? UP_COLOR : DOWN_COLOR })
+    if (v != null) out.push({ time: times[i], value: v, color: v >= 0 ? upColor : downColor })
   }
   return out
+}
+
+// 数字格式化：null 显示为占位符 / format a number for the legend; null renders as a placeholder
+function fmtLegendNum(v: number | null | undefined, digits: number): string {
+  return v == null ? '—' : v.toFixed(digits)
 }
 
 // 时间轴刻度和十字准线悬浮时间标签是 lightweight-charts 两套独立的格式化配置
@@ -203,14 +226,41 @@ export default function ChartsPage() {
 
   // 副图指标（成交量/RSI/MACD）的 series 句柄：这三个各自占一个独立 pane，
   // 关闭时整个 series 连同 pane 一起移除（隐藏 series 并不会让 pane 消失，
-  // 会留一条空白的轴），开启时重新创建，见下方的开关 effect。
+  // 会留一条空白的轴），开启时重新创建，见下方的开关 effect。RSI 额外持有
+  // 30/70（可客制化）参考线的句柄，供设置变化时更新价位而不必重建整条 series。
   // Sub-pane indicators (volume/RSI/MACD): each occupies its own pane, so
   // turning one off removes the series (and its now-empty pane) entirely
   // (merely hiding the series would leave a blank axis gutter behind); turning
-  // it on recreates it — see the toggle effect below.
+  // it on recreates it — see the toggle effect below. RSI additionally holds
+  // its (customizable) overbought/oversold reference-line handles, so a
+  // settings change can update their price without rebuilding the whole series.
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null)
-  const rsiSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const rsiSeriesRef = useRef<{ series: ISeriesApi<'Line'>; obLine: IPriceLine; osLine: IPriceLine } | null>(null)
   const macdSeriesRef = useRef<{ macd: ISeriesApi<'Line'>; signal: ISeriesApi<'Line'>; hist: ISeriesApi<'Histogram'> } | null>(null)
+
+  // 图例的"最新值"缓存：不悬停十字准线时用这份兜底（见 recomputeIndicators）。
+  // Cached "latest value" snapshot for the legend: used when the crosshair
+  // isn't being hovered/dragged (see recomputeIndicators).
+  const latestLegendRef = useRef<LegendValues>(EMPTY_LEGEND)
+  // 当前是否正悬停/触摸拖动十字准线（由 onCrosshairMove 维护）。真正修复的
+  // bug：每 2 秒一次的报价轮询会调用 recomputeIndicators()，若它无条件
+  // setLegend(latest)，会把用户正悬停的那个历史值每 2 秒打回"最新值"一次——
+  // 实测就是这个问题，而不是十字准线没接住数据（用临时调试钩子直接读了
+  // lightweight-charts 在悬停点的原始 seriesData，证实库本身给的值完全正确，
+  // 是这里的"轮询无条件覆盖"吃掉了它）。recomputeIndicators 因此只在没有
+  // 悬停时才更新图例，悬停时的图例完全交给 onCrosshairMove 自己维护。
+  // Whether the crosshair is currently being hovered/touch-dragged
+  // (maintained by onCrosshairMove). This ref exists to fix a real bug: the
+  // 2-second quote-poll timer calls recomputeIndicators(), and if that
+  // unconditionally called setLegend(latest), it would stomp the user's
+  // currently-hovered historical value back to "latest" every 2 seconds —
+  // confirmed via a temporary debug hook that read lightweight-charts' raw
+  // seriesData at the hovered point directly, proving the library itself
+  // supplies the correct value and the poll's unconditional overwrite was
+  // what erased it. recomputeIndicators now only updates the legend while
+  // not hovering; the legend while hovering is owned entirely by
+  // onCrosshairMove.
+  const hoveringRef = useRef(false)
 
   // 初始值只是尽力猜测（此刻 activeSymbols 还没从后端加载回来，无法校验是否
   // 真的还活跃）；下面那个 effect 会在 activeSymbols 就绪后校正——若猜的品种
@@ -225,15 +275,29 @@ export default function ChartsPage() {
   const [interval, setIntervalCode] = useState<string>(
     () => getPref<string>('charts', 'interval', '') || localStorage.getItem(INTERVAL_KEY) || '15'
   )
-  // 指标开关：按品种/周期无关，跟随用户走（云端同步，见下方持久化 effect）。
-  // Indicator toggles: independent of symbol/interval, follow the user (cloud
-  // synced; see the persistence effect below).
+  // 指标开关 + 参数：都跟随用户走，云端同步（见下方持久化 effect），与
+  // 品种/周期无关。/ Indicator toggles + settings: follow the user, cloud
+  // synced (see the persistence effects below); independent of symbol/interval.
   const [indicators, setIndicatorsState] = useState<IndicatorFlags>(
     () => ({ ...DEFAULT_INDICATORS, ...getPref<Partial<IndicatorFlags>>('charts', 'indicators', {}) })
   )
-  // 指标面板展开态 + 面板外点击收起 / indicator panel open state + outside-click-to-close
-  const [indPanelOpen, setIndPanelOpen] = useState(false)
-  const indPanelRef = useRef<HTMLDivElement>(null)
+  const [indicatorSettings, setIndicatorSettingsState] = useState<IndicatorSettings>(() =>
+    mergeIndicatorSettings(DEFAULT_INDICATOR_SETTINGS, getPref<Partial<IndicatorSettings>>('charts', 'indicatorSettings', {}))
+  )
+  // 指标设置弹窗展开态 / indicator settings modal open state
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  // 图例：随十字准线/触摸拖动更新，初始为空占位 / legend: updates with the crosshair/touch drag; starts as an empty placeholder
+  const [legend, setLegend] = useState<LegendValues>(EMPTY_LEGEND)
+  // 各已开启副图（成交量/RSI/MACD）pane 的顶部像素偏移，供图例定位；由
+  // applyPaneHeights 在每次布局变化时一并算出。/ top pixel offset of each
+  // enabled sub-pane (volume/RSI/MACD), for positioning its legend; computed
+  // by applyPaneHeights alongside the pane heights themselves whenever the
+  // layout changes.
+  const [paneOffsets, setPaneOffsets] = useState<{ volume: number | null; rsi: number | null; macd: number | null }>({
+    volume: null,
+    rsi: null,
+    macd: null,
+  })
 
   // 数据状态：加载中 / 有数据 / 空（该品种周期暂无数据）/延迟
   // data status: loading / has data / empty (no data for this symbol+interval) / stale
@@ -276,6 +340,8 @@ export default function ChartsPage() {
     if (cloudInt) setIntervalCode(cloudInt)
     const cloudInd = getPref<Partial<IndicatorFlags> | null>('charts', 'indicators', null)
     if (cloudInd) setIndicatorsState({ ...DEFAULT_INDICATORS, ...cloudInd })
+    const cloudSettings = getPref<Partial<IndicatorSettings> | null>('charts', 'indicatorSettings', null)
+    if (cloudSettings) setIndicatorSettingsState(mergeIndicatorSettings(DEFAULT_INDICATOR_SETTINGS, cloudSettings))
   // eslint-disable-next-line react-hooks/exhaustive-deps -- only run when cloud prefs finish loading
   }, [loaded])
 
@@ -302,119 +368,176 @@ export default function ChartsPage() {
     setPref('charts', 'interval', interval)
   }, [interval, setPref])
 
-  // 指标开关落库：与 symbol/interval 同一套模式——只在 setState 的更新函数
-  // 里做纯粹的状态计算，落库放到单独的 effect 里对状态变化作出反应。
-  // 之前的实现在 setIndicatorsState 的更新函数内部直接调用 setPref（属于
-  // PrefsProvider 的另一个 setState），触发了 React 的
-  // "Cannot update a component while rendering a different component" 警告——
-  // 更新函数在某些时序下会被多次调用，连带 setPref 也跟着多次触发，实测会
-  // 导致开关状态被异常带乱（例如只点一个开关，另外几个也跟着变了）。
-  // Persist indicator toggles the same way symbol/interval already do: the
-  // setState updater only computes the next state; persisting happens in its
-  // own effect reacting to the state change. The previous implementation
-  // called setPref (another component's — PrefsProvider's — setState)
-  // directly inside setIndicatorsState's updater function, which is exactly
-  // what triggers React's "Cannot update a component while rendering a
-  // different component" warning — the updater can be invoked more than once
-  // under certain timings, and setPref would fire right along with it,
-  // observed in testing to scramble the toggle state (e.g. clicking one
-  // toggle also flipping others).
+  // 指标开关/参数落库：与 symbol/interval 同一套模式——setState 的更新函数
+  // 只做纯粹的状态计算，落库放到单独的 effect 里对状态变化作出反应，绝不在
+  // 更新函数内部直接调用 setPref（那是另一个组件 PrefsProvider 的
+  // setState）。曾经的实现在更新函数里直接调 setPref，触发过 React 的
+  // "Cannot update a component while rendering a different component" 警告，
+  // 实测会导致开关状态被异常带乱（点一个开关，另外几个也跟着变了）。
+  // Persist indicator toggles/settings the same way symbol/interval already
+  // do: the setState updater only computes the next state; persisting
+  // happens in its own effect. Never call setPref (another component's —
+  // PrefsProvider's — setState) directly inside an updater function — an
+  // earlier version of this code did exactly that and triggered React's
+  // "Cannot update a component while rendering a different component"
+  // warning, observed in testing to scramble the toggle state (clicking one
+  // toggle also flipped others).
   useEffect(() => {
     setPref('charts', 'indicators', indicators)
   }, [indicators, setPref])
+
+  useEffect(() => {
+    setPref('charts', 'indicatorSettings', indicatorSettings)
+  }, [indicatorSettings, setPref])
 
   const toggleIndicator = useCallback((key: keyof IndicatorFlags) => {
     setIndicatorsState((prev) => ({ ...prev, [key]: !prev[key] }))
   }, [])
 
-  // 指标面板展开时，点击面板外部收起 / while the indicator panel is open, close it on an outside click
-  useEffect(() => {
-    if (!indPanelOpen) return
-    const onClick = (e: MouseEvent) => {
-      if (indPanelRef.current && !indPanelRef.current.contains(e.target as Node)) setIndPanelOpen(false)
-    }
-    document.addEventListener('mousedown', onClick)
-    return () => document.removeEventListener('mousedown', onClick)
-  }, [indPanelOpen])
+  const resetIndicatorSettings = useCallback(() => {
+    setIndicatorSettingsState(DEFAULT_INDICATOR_SETTINGS)
+  }, [])
 
-  // 按当前 candlesRef 重算全部指标并写回各自的 series。用 useCallback 空依赖
-  // 数组保持函数引用稳定（只依赖 ref，不依赖任何 state），这样无论从哪个
-  // effect/定时器闭包里调用，读到的都是当时最新的 candlesRef 内容,不会有
-  // 陈旧闭包的问题。主图叠加（MA/EMA/BOLL）的 series 从建图起就常驻，因此
-  // 不论开关与否都照算——代价可忽略（几百个点的数组运算），换来的是打开开关
-  // 那一刻数据已经是对的，不需要额外补一次"刚打开，先算一遍"的逻辑。副图
-  // （成交量/RSI/MACD）的 series 只在打开时才存在，靠 ref 是否为 null 天然
-  // 跳过关闭状态的计算。
-  // Recompute every indicator from the current candlesRef and write it back
-  // to its series. useCallback with an empty dep array keeps this function's
-  // identity stable (it only reads refs, no state), so no matter which
-  // effect/timer closure calls it, it always sees the latest candlesRef
-  // contents — no stale-closure risk. Main-pane overlays (MA/EMA/BOLL) always
-  // exist once the chart is built, so they're recomputed unconditionally
-  // regardless of their toggle (negligible cost for a few-hundred-point
-  // array), which means the moment a toggle flips on the data is already
-  // correct — no separate "just turned on, backfill now" step needed.
-  // Sub-pane indicators (volume/RSI/MACD) only exist while enabled, so a
-  // null ref naturally skips the work while off.
+  // 按当前 candlesRef 重算全部指标并写回各自的 series，同时刷新"最新值"图例
+  // 缓存。用 useCallback 空依赖数组保持函数引用稳定（只依赖 ref，不依赖任何
+  // state），这样无论从哪个 effect/定时器闭包里调用，读到的都是当时最新的
+  // candlesRef/indicatorSettingsRef 内容，不会有陈旧闭包的问题。主图叠加
+  // （MA/EMA/BOLL）的 series 从建图起就常驻，因此不论开关与否都照算——代价
+  // 可忽略（几百个点的数组运算），换来的是打开开关那一刻数据已经是对的，不
+  // 需要额外补一次"刚打开，先算一遍"的逻辑。副图（成交量/RSI/MACD）的
+  // series 只在打开时才存在，靠 ref 是否为 null 天然跳过关闭状态的计算。
+  // Recompute every indicator from the current candlesRef, write it back to
+  // its series, and refresh the "latest value" legend cache. useCallback with
+  // an empty dep array keeps this function's identity stable (it only reads
+  // refs, no state), so no matter which effect/timer closure calls it, it
+  // always sees the latest candlesRef/indicatorSettingsRef contents — no
+  // stale-closure risk. Main-pane overlays (MA/EMA/BOLL) always exist once
+  // the chart is built, so they're recomputed unconditionally regardless of
+  // their toggle (negligible cost for a few-hundred-point array), which means
+  // the moment a toggle flips on the data is already correct — no separate
+  // "just turned on, backfill now" step needed. Sub-pane indicators
+  // (volume/RSI/MACD) only exist while enabled, so a null ref naturally skips
+  // the work while off.
+  const indicatorSettingsRef = useRef(indicatorSettings)
+  useEffect(() => {
+    indicatorSettingsRef.current = indicatorSettings
+  }, [indicatorSettings])
+
   const recomputeIndicators = useCallback(() => {
     const bars = candlesRef.current
     if (bars.length === 0) return
     const times = bars.map((b) => b.t as UTCTimestamp)
     const cl = closes(bars)
+    const s = indicatorSettingsRef.current
+    const next: LegendValues = {
+      ma: [null, null, null],
+      ema: [null, null],
+      boll: { mid: null, upper: null, lower: null },
+      volume: null,
+      rsi: null,
+      macd: { macd: null, signal: null, hist: null },
+    }
 
-    MA_PERIODS.forEach((period, i) => {
-      maSeriesRef.current[i]?.setData(toLinePoints(times, sma(cl, period)))
+    s.ma.periods.forEach((period, i) => {
+      const line = sma(cl, period)
+      maSeriesRef.current[i]?.setData(toLinePoints(times, line))
+      next.ma[i] = line[line.length - 1] ?? null
     })
-    EMA_PERIODS.forEach((period, i) => {
-      emaSeriesRef.current[i]?.setData(toLinePoints(times, ema(cl, period)))
+    s.ema.periods.forEach((period, i) => {
+      const line = ema(cl, period)
+      emaSeriesRef.current[i]?.setData(toLinePoints(times, line))
+      next.ema[i] = line[line.length - 1] ?? null
     })
     if (bollSeriesRef.current) {
-      const { mid, upper, lower } = bollinger(cl, BOLL_PERIOD, BOLL_MULT)
+      const { mid, upper, lower } = bollinger(cl, s.boll.period, s.boll.mult)
       bollSeriesRef.current.mid.setData(toLinePoints(times, mid))
       bollSeriesRef.current.upper.setData(toLinePoints(times, upper))
       bollSeriesRef.current.lower.setData(toLinePoints(times, lower))
+      next.boll = { mid: mid[mid.length - 1] ?? null, upper: upper[upper.length - 1] ?? null, lower: lower[lower.length - 1] ?? null }
     }
     if (volumeSeriesRef.current) {
       volumeSeriesRef.current.setData(
-        bars.map((b) => ({ time: b.t as UTCTimestamp, value: b.v, color: b.c >= b.o ? UP_COLOR : DOWN_COLOR }))
+        bars.map((b) => ({ time: b.t as UTCTimestamp, value: b.v, color: b.c >= b.o ? s.volume.upColor : s.volume.downColor }))
       )
+      next.volume = bars[bars.length - 1]?.v ?? null
     }
     if (rsiSeriesRef.current) {
-      rsiSeriesRef.current.setData(toLinePoints(times, rsi(cl, RSI_PERIOD)))
+      const line = rsi(cl, s.rsi.period)
+      rsiSeriesRef.current.series.setData(toLinePoints(times, line))
+      next.rsi = line[line.length - 1] ?? null
     }
     if (macdSeriesRef.current) {
-      const { macd: macdLine, signal, hist } = macd(cl, MACD_FAST, MACD_SLOW, MACD_SIGNAL)
+      const { macd: macdLine, signal, hist } = macd(cl, s.macd.fast, s.macd.slow, s.macd.signal)
       macdSeriesRef.current.macd.setData(toLinePoints(times, macdLine))
       macdSeriesRef.current.signal.setData(toLinePoints(times, signal))
-      macdSeriesRef.current.hist.setData(toHistPoints(times, hist))
+      macdSeriesRef.current.hist.setData(toHistPoints(times, hist, UP_COLOR, DOWN_COLOR))
+      next.macd = {
+        macd: macdLine[macdLine.length - 1] ?? null,
+        signal: signal[signal.length - 1] ?? null,
+        hist: hist[hist.length - 1] ?? null,
+      }
     }
+
+    latestLegendRef.current = next
+    // 只在没有悬停/触摸拖动时才更新图例；正悬停时图例完全交给
+    // onCrosshairMove 维护，避免 2 秒一次的报价轮询把用户正看着的历史值打回
+    // "最新值"（见 hoveringRef 的说明）。
+    // Only update the legend while not hovering/touch-dragging; while
+    // hovering, the legend is owned entirely by onCrosshairMove — otherwise
+    // the 2-second quote-poll timer would stomp the user's currently-viewed
+    // historical value back to "latest" (see hoveringRef's comment).
+    if (!hoveringRef.current) setLegend(next)
   }, [])
 
   // 按容器高度重新分配各 pane 的高度：主图占大头，副图（成交量/RSI/MACD）
-  // 平分剩余空间，每个不低于 70px 以保证波形仍可辨认。resize 与副图开关都
-  // 会调用它。/ Redistribute pane heights from the container's height: the
-  // main pane gets the lion's share, sub-panes (volume/RSI/MACD) split what's
-  // left, each floored at 70px so the waveform stays legible. Called on
-  // resize and whenever a sub-pane indicator is toggled.
+  // 平分剩余空间，每个不低于 70px 以保证波形仍可辨认；同时把每个已开启副图
+  // 的顶部像素偏移记下来供图例定位（顺序固定为 成交量→RSI→MACD，与下方开关
+  // effect 里创建它们的顺序一致）。resize 与副图开关都会调用它。
+  // Redistribute pane heights from the container's height: the main pane gets
+  // the lion's share, sub-panes (volume/RSI/MACD) split what's left, each
+  // floored at 70px so the waveform stays legible; also records each enabled
+  // sub-pane's top pixel offset for positioning its legend (fixed order:
+  // volume -> RSI -> MACD, matching the creation order in the toggle effect
+  // below). Called on resize and whenever a sub-pane indicator is toggled.
   const applyPaneHeights = useCallback(() => {
     const chart = chartRef.current
     const host = containerRef.current
     if (!chart || !host) return
     const panes = chart.panes()
     const total = host.clientHeight
-    if (panes.length <= 1 || total <= 0) return
+    if (panes.length <= 1 || total <= 0) {
+      setPaneOffsets({ volume: null, rsi: null, macd: null })
+      return
+    }
     const subCount = panes.length - 1
     const subTotal = Math.max(total * 0.35, subCount * 70)
     const mainHeight = Math.max(total - subTotal, total * 0.4)
     const subHeight = Math.floor((total - mainHeight) / subCount)
     panes[0].setHeight(Math.floor(mainHeight))
     for (let i = 1; i < panes.length; i++) panes[i].setHeight(subHeight)
+
+    let offset = Math.floor(mainHeight)
+    const offsets: { volume: number | null; rsi: number | null; macd: number | null } = { volume: null, rsi: null, macd: null }
+    if (volumeSeriesRef.current) {
+      offsets.volume = offset
+      offset += subHeight
+    }
+    if (rsiSeriesRef.current) {
+      offsets.rsi = offset
+      offset += subHeight
+    }
+    if (macdSeriesRef.current) {
+      offsets.macd = offset
+      offset += subHeight
+    }
+    setPaneOffsets(offsets)
   }, [])
 
   // 建图（只建一次），容器尺寸变化时自适配 / build the chart once; auto-sizes with the container
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
+    const initSettings = indicatorSettingsRef.current
 
     const chart = createChart(el, {
       layout: {
@@ -468,40 +591,117 @@ export default function ChartsPage() {
     seriesRef.current = series
 
     // 主图叠加指标 series：一次性建好、常驻，初始 visible:false，真正的可见性
-    // 由下方按开关同步的 effect 立即接管（见 indicators.ma/ema/boll 那个
-    // effect），这里的初始值只是个无所谓的占位。
+    // 由下方按开关同步的 effect 立即接管。crosshairMarkerVisible:false 去掉
+    // 十字准线悬停时每条线上出现的圆点——那是 lightweight-charts 的默认行为，
+    // 用户反馈这些圆点没有必要、观感上是噪音。
     // Main-pane overlay series: created once, permanent; start with
     // visible:false — the actual visibility is taken over immediately by the
-    // effect below that syncs it to the toggles (see the
-    // indicators.ma/ema/boll effect); the initial value here is a
-    // don't-care placeholder.
-    maSeriesRef.current = MA_PERIODS.map((_, i) =>
-      chart.addSeries(LineSeries, { color: MA_COLORS[i], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, visible: false })
+    // effect below that syncs it to the toggles. crosshairMarkerVisible:false
+    // removes the little circle lightweight-charts draws on each line at the
+    // crosshair's position by default — user feedback was that these dots
+    // are unnecessary visual noise.
+    maSeriesRef.current = initSettings.ma.periods.map((_, i) =>
+      chart.addSeries(LineSeries, {
+        color: initSettings.ma.colors[i],
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+        visible: false,
+      })
     )
-    emaSeriesRef.current = EMA_PERIODS.map((_, i) =>
-      chart.addSeries(LineSeries, { color: EMA_COLORS[i], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, visible: false })
+    emaSeriesRef.current = initSettings.ema.periods.map((_, i) =>
+      chart.addSeries(LineSeries, {
+        color: initSettings.ema.colors[i],
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+        visible: false,
+      })
     )
     bollSeriesRef.current = {
-      mid: chart.addSeries(LineSeries, { color: '#a78bfa', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, visible: false }),
+      mid: chart.addSeries(LineSeries, {
+        color: initSettings.boll.color,
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+        visible: false,
+      }),
       upper: chart.addSeries(LineSeries, {
-        color: '#a78bfa',
+        color: initSettings.boll.color,
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
         priceLineVisible: false,
         lastValueVisible: false,
+        crosshairMarkerVisible: false,
         visible: false,
       }),
       lower: chart.addSeries(LineSeries, {
-        color: '#a78bfa',
+        color: initSettings.boll.color,
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
         priceLineVisible: false,
         lastValueVisible: false,
+        crosshairMarkerVisible: false,
         visible: false,
       }),
     }
 
     setDrawReady(true)
+
+    // 十字准线/触摸拖动 → 图例：param.time 有值表示鼠标悬停或手指拖动落在
+    // 数据区内，用 param.seriesData 查该时刻各 series 的值；undefined 表示
+    // 鼠标移出图表/未在拖动，回退到 recomputeIndicators 缓存的"最新值"。
+    // lightweight-charts 对触摸事件的处理与鼠标共用同一套订阅，移动端手指
+    // 拖动天然会触发这个回调，不需要额外适配；v5 默认的 trackingMode
+    // （OnNextTap）也已经让触摸场景下十字准线在松手后继续停留，直到下一次点击。
+    // Crosshair hover / touch-drag -> legend: param.time is set when the
+    // mouse is hovering or a finger is dragging within the data area; look up
+    // each series' value at that moment via param.seriesData. undefined means
+    // the mouse left the chart / no active drag, so fall back to
+    // recomputeIndicators' cached "latest value". lightweight-charts routes
+    // touch events through the same subscription as mouse events, so a
+    // finger drag on mobile fires this callback with no extra wiring needed;
+    // v5's default trackingMode (OnNextTap) already keeps the crosshair
+    // in place after lifting the finger, until the next tap elsewhere.
+    const onCrosshairMove: Parameters<typeof chart.subscribeCrosshairMove>[0] = (param) => {
+      if (param.time == null) {
+        hoveringRef.current = false
+        setLegend(latestLegendRef.current)
+        return
+      }
+      hoveringRef.current = true
+      const readLine = (s: ISeriesApi<'Line'> | undefined): number | null => {
+        if (!s) return null
+        const d = param.seriesData.get(s) as { value?: number } | undefined
+        return d?.value ?? null
+      }
+      const readHist = (s: ISeriesApi<'Histogram'> | undefined): number | null => {
+        if (!s) return null
+        const d = param.seriesData.get(s) as { value?: number } | undefined
+        return d?.value ?? null
+      }
+      const next: LegendValues = {
+        ma: maSeriesRef.current.map((s) => readLine(s)),
+        ema: emaSeriesRef.current.map((s) => readLine(s)),
+        boll: {
+          mid: readLine(bollSeriesRef.current?.mid),
+          upper: readLine(bollSeriesRef.current?.upper),
+          lower: readLine(bollSeriesRef.current?.lower),
+        },
+        volume: readHist(volumeSeriesRef.current ?? undefined),
+        rsi: readLine(rsiSeriesRef.current?.series),
+        macd: {
+          macd: readLine(macdSeriesRef.current?.macd),
+          signal: readLine(macdSeriesRef.current?.signal),
+          hist: readHist(macdSeriesRef.current?.hist),
+        },
+      }
+      setLegend(next)
+    }
+    chart.subscribeCrosshairMove(onCrosshairMove)
 
     // 自适配容器尺寸：手动管理而不是用 lightweight-charts 的 autoSize 选项，
     // 在部分渲染环境下其内部 ResizeObserver 不会触发重绘（canvas 位图分辨率
@@ -528,6 +728,7 @@ export default function ChartsPage() {
 
     return () => {
       ro.disconnect()
+      chart.unsubscribeCrosshairMove(onCrosshairMove)
       chart.remove()
       chartRef.current = null
       seriesRef.current = null
@@ -542,18 +743,53 @@ export default function ChartsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- build the chart once; applyPaneHeights is stable (empty deps)
   }, [])
 
-  // 主图叠加指标可见性同步：MA/EMA/布林带的 series 常驻，开关只切换 visible。
-  // Sync main-pane overlay visibility: MA/EMA/Bollinger series are permanent;
-  // toggling only flips `visible`.
+  // 主图叠加指标可见性 + 颜色同步：MA/EMA/布林带的 series 常驻，开关只切换
+  // visible；颜色/周期改动也在这里连带应用（周期变化影响的是数值本身，交给
+  // 下面单独的重算 effect）。
+  // Sync main-pane overlay visibility + color: MA/EMA/Bollinger series are
+  // permanent; toggling only flips `visible`. Color changes are applied here
+  // too (period changes affect the values themselves, handled by the
+  // recompute effect below).
   useEffect(() => {
-    maSeriesRef.current.forEach((s) => s.applyOptions({ visible: indicators.ma }))
-    emaSeriesRef.current.forEach((s) => s.applyOptions({ visible: indicators.ema }))
+    maSeriesRef.current.forEach((s, i) => s.applyOptions({ visible: indicators.ma, color: indicatorSettings.ma.colors[i] }))
+    emaSeriesRef.current.forEach((s, i) => s.applyOptions({ visible: indicators.ema, color: indicatorSettings.ema.colors[i] }))
     if (bollSeriesRef.current) {
-      bollSeriesRef.current.mid.applyOptions({ visible: indicators.boll })
-      bollSeriesRef.current.upper.applyOptions({ visible: indicators.boll })
-      bollSeriesRef.current.lower.applyOptions({ visible: indicators.boll })
+      const c = indicatorSettings.boll.color
+      bollSeriesRef.current.mid.applyOptions({ visible: indicators.boll, color: c })
+      bollSeriesRef.current.upper.applyOptions({ visible: indicators.boll, color: c })
+      bollSeriesRef.current.lower.applyOptions({ visible: indicators.boll, color: c })
     }
-  }, [indicators.ma, indicators.ema, indicators.boll])
+  }, [indicators.ma, indicators.ema, indicators.boll, indicatorSettings.ma.colors, indicatorSettings.ema.colors, indicatorSettings.boll.color])
+
+  // RSI 参考线价位同步：overbought/oversold 可客制化，改动时更新已存在的两条
+  // 价格线，不需要重建整条 series。/ Sync RSI reference-line prices:
+  // overbought/oversold are customizable; update the two existing price
+  // lines on change without rebuilding the whole series.
+  useEffect(() => {
+    if (!rsiSeriesRef.current) return
+    rsiSeriesRef.current.obLine.applyOptions({ price: indicatorSettings.rsi.overbought, title: String(indicatorSettings.rsi.overbought) })
+    rsiSeriesRef.current.osLine.applyOptions({ price: indicatorSettings.rsi.oversold, title: String(indicatorSettings.rsi.oversold) })
+    rsiSeriesRef.current.series.applyOptions({ color: indicatorSettings.rsi.color })
+  }, [indicatorSettings.rsi.overbought, indicatorSettings.rsi.oversold, indicatorSettings.rsi.color])
+
+  // MACD 线条颜色同步 / sync MACD line colors
+  useEffect(() => {
+    if (!macdSeriesRef.current) return
+    macdSeriesRef.current.macd.applyOptions({ color: indicatorSettings.macd.macdColor })
+    macdSeriesRef.current.signal.applyOptions({ color: indicatorSettings.macd.signalColor })
+  }, [indicatorSettings.macd.macdColor, indicatorSettings.macd.signalColor])
+
+  // 任何会影响数值本身的参数变化（周期、布林带倍数、成交量涨跌配色等）都要
+  // 重新计算——直接依赖整个 indicatorSettings 对象最简单：多算几遍主图叠加
+  // 指标的开销可忽略，换来不必逐字段精确列依赖的简单性。
+  // Any change that affects the values themselves (periods, Bollinger
+  // multiplier, volume up/down colors, etc.) needs a recompute — depending on
+  // the whole indicatorSettings object is simplest: the extra cost of
+  // recomputing the always-present main-pane overlays a few more times is
+  // negligible, in exchange for not having to list every field individually.
+  useEffect(() => {
+    recomputeIndicators()
+  }, [indicatorSettings, recomputeIndicators])
 
   // 副图指标（成交量/RSI/MACD）开关：先整体拆掉旧的三个副图 series（移除后
   // 空 pane 会被库自动删除），再按当前开关状态依次重建，用
@@ -568,13 +804,14 @@ export default function ChartsPage() {
   useEffect(() => {
     const chart = chartRef.current
     if (!chart) return
+    const s = indicatorSettingsRef.current
 
     if (volumeSeriesRef.current) {
       chart.removeSeries(volumeSeriesRef.current)
       volumeSeriesRef.current = null
     }
     if (rsiSeriesRef.current) {
-      chart.removeSeries(rsiSeriesRef.current)
+      chart.removeSeries(rsiSeriesRef.current.series)
       rsiSeriesRef.current = null
     }
     if (macdSeriesRef.current) {
@@ -592,21 +829,43 @@ export default function ChartsPage() {
       )
     }
     if (indicators.rsi) {
-      const s = chart.addSeries(
+      const line = chart.addSeries(
         LineSeries,
-        { color: '#facc15', lineWidth: 1, priceLineVisible: false, lastValueVisible: false },
+        { color: s.rsi.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false },
         chart.panes().length
       )
-      // 30/70 参考线：超买/超卖的传统阈值 / 30/70 reference lines: the conventional overbought/oversold thresholds
-      s.createPriceLine({ price: 70, color: 'rgba(148,163,184,0.5)', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: '70' })
-      s.createPriceLine({ price: 30, color: 'rgba(148,163,184,0.5)', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: '30' })
-      rsiSeriesRef.current = s
+      // 超买/超卖参考线（价位可客制化，见上方同步 effect）/ overbought/oversold reference lines (customizable price, see the sync effect above)
+      const obLine = line.createPriceLine({
+        price: s.rsi.overbought,
+        color: 'rgba(148,163,184,0.5)',
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: String(s.rsi.overbought),
+      })
+      const osLine = line.createPriceLine({
+        price: s.rsi.oversold,
+        color: 'rgba(148,163,184,0.5)',
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: String(s.rsi.oversold),
+      })
+      rsiSeriesRef.current = { series: line, obLine, osLine }
     }
     if (indicators.macd) {
       const paneIndex = chart.panes().length
       const hist = chart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, paneIndex)
-      const macdLine = chart.addSeries(LineSeries, { color: '#38bdf8', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }, paneIndex)
-      const signal = chart.addSeries(LineSeries, { color: '#fb7185', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }, paneIndex)
+      const macdLine = chart.addSeries(
+        LineSeries,
+        { color: s.macd.macdColor, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false },
+        paneIndex
+      )
+      const signal = chart.addSeries(
+        LineSeries,
+        { color: s.macd.signalColor, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false },
+        paneIndex
+      )
       macdSeriesRef.current = { macd: macdLine, signal, hist }
     }
 
@@ -707,6 +966,8 @@ export default function ChartsPage() {
     }
   }, [symbol, interval, recomputeIndicators])
 
+  const decimals = SYMBOL_DECIMALS[symbol] ?? 2
+
   return (
     <div className="flex flex-col">
       <div className="mb-5">
@@ -756,35 +1017,14 @@ export default function ChartsPage() {
           ))}
         </div>
 
-        {/* 指标开关面板 / indicator toggle panel */}
-        <div className="relative" ref={indPanelRef}>
-          <button
-            type="button"
-            onClick={() => setIndPanelOpen((v) => !v)}
-            className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-              indPanelOpen
-                ? 'border-prism-500/60 bg-prism-600/20 text-prism-200'
-                : 'border-white/10 bg-ink-800/50 text-slate-400 hover:text-slate-100'
-            }`}
-          >
-            {t('charts.indicators.button')}
-          </button>
-          {indPanelOpen && (
-            <div className="absolute left-0 top-full z-30 mt-2 w-56 rounded-xl border border-white/10 bg-ink-900/95 p-3 shadow-prism backdrop-blur">
-              {INDICATOR_KEYS.map((key) => (
-                <label key={key} className="flex cursor-pointer items-center justify-between gap-2 py-1.5 text-sm text-slate-300">
-                  <span>{t(`charts.indicators.${key}`)}</span>
-                  <input
-                    type="checkbox"
-                    checked={indicators[key]}
-                    onChange={() => toggleIndicator(key)}
-                    className="h-4 w-4 accent-prism-500"
-                  />
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
+        {/* 指标：开关 + 客制化周期/颜色都在同一个弹窗里 / Indicators: toggles + period/color customization live in the same modal */}
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          className="rounded-lg border border-white/10 bg-ink-800/50 px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:text-slate-100"
+        >
+          {t('charts.indicators.button')}
+        </button>
 
         {stale && (
           <span className="rounded-md bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-400">
@@ -823,12 +1063,66 @@ export default function ChartsPage() {
             symbol={symbol}
             lastPrice={lastPrice}
             barTimes={getBarTimes}
-            digits={SYMBOL_DECIMALS[symbol] ?? 2}
+            digits={decimals}
           />
         )}
         {!hasData && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-500">
             {t('charts.empty')}
+          </div>
+        )}
+
+        {/* 主图指标图例：留出左侧画图工具栏的宽度 / main-pane indicator legend: clears the draw toolbar on the left */}
+        {(indicators.ma || indicators.ema || indicators.boll) && (
+          <div className="pointer-events-none absolute left-14 top-3 z-20 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-ink-900/40 px-2 py-1 font-mono text-[11px] backdrop-blur-sm">
+            {indicators.ma &&
+              indicatorSettings.ma.periods.map((p, i) => (
+                <span key={`ma${i}`} style={{ color: indicatorSettings.ma.colors[i] }}>
+                  MA{p} {fmtLegendNum(legend.ma[i], decimals)}
+                </span>
+              ))}
+            {indicators.ema &&
+              indicatorSettings.ema.periods.map((p, i) => (
+                <span key={`ema${i}`} style={{ color: indicatorSettings.ema.colors[i] }}>
+                  EMA{p} {fmtLegendNum(legend.ema[i], decimals)}
+                </span>
+              ))}
+            {indicators.boll && (
+              <span style={{ color: indicatorSettings.boll.color }}>
+                BOLL {fmtLegendNum(legend.boll.upper, decimals)}/{fmtLegendNum(legend.boll.mid, decimals)}/{fmtLegendNum(legend.boll.lower, decimals)}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* 副图图例：定位在各自 pane 顶部，偏移量由 applyPaneHeights 算出 */}
+        {/* Sub-pane legends: positioned at the top of their own pane; offsets computed by applyPaneHeights */}
+        {indicators.volume && paneOffsets.volume != null && (
+          <div
+            className="pointer-events-none absolute left-3 z-20 rounded-md bg-ink-900/40 px-2 py-0.5 font-mono text-[11px] text-slate-300 backdrop-blur-sm"
+            style={{ top: paneOffsets.volume + 6 }}
+          >
+            {t('charts.indicators.volume')} {legend.volume != null ? Math.round(legend.volume).toLocaleString() : '—'}
+          </div>
+        )}
+        {indicators.rsi && paneOffsets.rsi != null && (
+          <div
+            className="pointer-events-none absolute left-3 z-20 rounded-md bg-ink-900/40 px-2 py-0.5 font-mono text-[11px] backdrop-blur-sm"
+            style={{ top: paneOffsets.rsi + 6, color: indicatorSettings.rsi.color }}
+          >
+            RSI({indicatorSettings.rsi.period}) {fmtLegendNum(legend.rsi, 2)}
+          </div>
+        )}
+        {indicators.macd && paneOffsets.macd != null && (
+          <div
+            className="pointer-events-none absolute left-3 z-20 flex gap-2 rounded-md bg-ink-900/40 px-2 py-0.5 font-mono text-[11px] backdrop-blur-sm"
+            style={{ top: paneOffsets.macd + 6 }}
+          >
+            <span style={{ color: indicatorSettings.macd.macdColor }}>MACD {fmtLegendNum(legend.macd.macd, 4)}</span>
+            <span style={{ color: indicatorSettings.macd.signalColor }}>Sig {fmtLegendNum(legend.macd.signal, 4)}</span>
+            <span style={{ color: legend.macd.hist != null && legend.macd.hist >= 0 ? 'var(--up)' : 'var(--down)' }}>
+              Hist {fmtLegendNum(legend.macd.hist, 4)}
+            </span>
           </div>
         )}
       </div>
@@ -857,6 +1151,17 @@ export default function ChartsPage() {
         </a>
       </p>
 
+      {settingsOpen && (
+        <IndicatorSettingsModal
+          indicators={indicators}
+          onToggle={toggleIndicator}
+          settings={indicatorSettings}
+          onChange={setIndicatorSettingsState}
+          onReset={resetIndicatorSettings}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+
       {orderSide && (
         <ChartOrderModal
           symbol={symbol}
@@ -864,7 +1169,7 @@ export default function ChartsPage() {
           accounts={accounts}
           quotesByAccount={accountQuotes}
           refPrice={lastPrice}
-          digits={SYMBOL_DECIMALS[symbol] ?? 2}
+          digits={decimals}
           onCancel={() => setOrderSide(null)}
           onConfirm={handleOrderConfirm}
         />
