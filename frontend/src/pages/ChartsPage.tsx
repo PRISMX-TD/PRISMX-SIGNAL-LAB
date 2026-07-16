@@ -116,8 +116,8 @@ interface LegendValues {
   macd: { macd: number | null; signal: number | null; hist: number | null }
 }
 const EMPTY_LEGEND: LegendValues = {
-  ma: [null, null, null],
-  ema: [null, null],
+  ma: [],
+  ema: [],
   boll: { mid: null, upper: null, lower: null },
   volume: null,
   rsi: null,
@@ -430,8 +430,8 @@ export default function ChartsPage() {
     const cl = closes(bars)
     const s = indicatorSettingsRef.current
     const next: LegendValues = {
-      ma: [null, null, null],
-      ema: [null, null],
+      ma: new Array(s.ma.periods.length).fill(null),
+      ema: new Array(s.ema.periods.length).fill(null),
       boll: { mid: null, upper: null, lower: null },
       volume: null,
       rsi: null,
@@ -590,36 +590,22 @@ export default function ChartsPage() {
     chartRef.current = chart
     seriesRef.current = series
 
-    // 主图叠加指标 series：一次性建好、常驻，初始 visible:false，真正的可见性
-    // 由下方按开关同步的 effect 立即接管。crosshairMarkerVisible:false 去掉
-    // 十字准线悬停时每条线上出现的圆点——那是 lightweight-charts 的默认行为，
-    // 用户反馈这些圆点没有必要、观感上是噪音。
-    // Main-pane overlay series: created once, permanent; start with
-    // visible:false — the actual visibility is taken over immediately by the
-    // effect below that syncs it to the toggles. crosshairMarkerVisible:false
-    // removes the little circle lightweight-charts draws on each line at the
-    // crosshair's position by default — user feedback was that these dots
-    // are unnecessary visual noise.
-    maSeriesRef.current = initSettings.ma.periods.map((_, i) =>
-      chart.addSeries(LineSeries, {
-        color: initSettings.ma.colors[i],
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        crosshairMarkerVisible: false,
-        visible: false,
-      })
-    )
-    emaSeriesRef.current = initSettings.ema.periods.map((_, i) =>
-      chart.addSeries(LineSeries, {
-        color: initSettings.ema.colors[i],
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        crosshairMarkerVisible: false,
-        visible: false,
-      })
-    )
+    // 布林带 series：一次性建好、常驻，初始 visible:false，真正的可见性由下方
+    // 按开关同步的 effect 立即接管。crosshairMarkerVisible:false 去掉十字准线
+    // 悬停时每条线上出现的圆点——那是 lightweight-charts 的默认行为，用户反馈
+    // 这些圆点没有必要、观感上是噪音。MA/EMA 不在这里创建——它们是条数可变的
+    // 均线列表（用户可加/删），由各自专门的 effect（见下方）负责创建/重建，
+    // 那个 effect 在挂载时也会跑一次，天然完成"初始创建"，不需要在这里重复。
+    // Bollinger series: created once, permanent; starts with visible:false —
+    // the actual visibility is taken over immediately by the effect below
+    // that syncs it to the toggles. crosshairMarkerVisible:false removes the
+    // little circle lightweight-charts draws on each line at the crosshair's
+    // position by default — user feedback was that these dots are
+    // unnecessary visual noise. MA/EMA are NOT created here — they're
+    // variable-length line lists (the user can add/remove lines), owned by
+    // their own dedicated effects below, which also run once on mount and
+    // naturally handle the "initial creation" case, so there's no need to
+    // duplicate it here.
     bollSeriesRef.current = {
       mid: chart.addSeries(LineSeries, {
         color: initSettings.boll.color,
@@ -743,23 +729,76 @@ export default function ChartsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- build the chart once; applyPaneHeights is stable (empty deps)
   }, [])
 
-  // 主图叠加指标可见性 + 颜色同步：MA/EMA/布林带的 series 常驻，开关只切换
-  // visible；颜色/周期改动也在这里连带应用（周期变化影响的是数值本身，交给
-  // 下面单独的重算 effect）。
-  // Sync main-pane overlay visibility + color: MA/EMA/Bollinger series are
-  // permanent; toggling only flips `visible`. Color changes are applied here
-  // too (period changes affect the values themselves, handled by the
-  // recompute effect below).
+  // MA 均线：条数可变（用户可在设置弹窗里逐条加/删），条数变化时整体拆掉重建
+  // （同一 pane 内，不涉及 pane 下标管理，比副图的动态增删简单）；只是编辑
+  // 已有条目的周期/颜色或开关时不重建，只更新 visible/color 并重算数值。
+  // 这个 effect 在挂载时也会跑一次（此时 maSeriesRef.current 是空数组，长度
+  // 必然不等于设置里的条数），天然完成初始创建，不需要在建图 effect 里重复。
+  // MA lines: variable count (the user can add/remove lines one at a time in
+  // the settings modal); a count change tears down and rebuilds the whole set
+  // (simpler than the sub-panes' dynamic add/remove since this stays within
+  // the same pane — no pane-index bookkeeping involved). Editing an existing
+  // line's period/color, or just toggling on/off, doesn't rebuild — only
+  // updates visible/color and recomputes the values. This effect also runs
+  // once on mount (maSeriesRef.current starts empty, so its length never
+  // matches the settings' line count), naturally handling initial creation
+  // without duplicating it in the chart-build effect.
   useEffect(() => {
-    maSeriesRef.current.forEach((s, i) => s.applyOptions({ visible: indicators.ma, color: indicatorSettings.ma.colors[i] }))
-    emaSeriesRef.current.forEach((s, i) => s.applyOptions({ visible: indicators.ema, color: indicatorSettings.ema.colors[i] }))
-    if (bollSeriesRef.current) {
-      const c = indicatorSettings.boll.color
-      bollSeriesRef.current.mid.applyOptions({ visible: indicators.boll, color: c })
-      bollSeriesRef.current.upper.applyOptions({ visible: indicators.boll, color: c })
-      bollSeriesRef.current.lower.applyOptions({ visible: indicators.boll, color: c })
+    const chart = chartRef.current
+    if (!chart) return
+    const want = indicatorSettings.ma.periods.length
+    if (maSeriesRef.current.length !== want) {
+      maSeriesRef.current.forEach((s) => chart.removeSeries(s))
+      maSeriesRef.current = indicatorSettings.ma.periods.map((_, i) =>
+        chart.addSeries(LineSeries, {
+          color: indicatorSettings.ma.colors[i],
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+          visible: indicators.ma,
+        })
+      )
+    } else {
+      maSeriesRef.current.forEach((s, i) => s.applyOptions({ visible: indicators.ma, color: indicatorSettings.ma.colors[i] }))
     }
-  }, [indicators.ma, indicators.ema, indicators.boll, indicatorSettings.ma.colors, indicatorSettings.ema.colors, indicatorSettings.boll.color])
+    recomputeIndicators()
+  }, [indicators.ma, indicatorSettings.ma, recomputeIndicators])
+
+  // EMA：与上面 MA 的处理完全一致，只是换一套 ref/设置 / EMA: identical handling to MA above, just a different ref/settings pair
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+    const want = indicatorSettings.ema.periods.length
+    if (emaSeriesRef.current.length !== want) {
+      emaSeriesRef.current.forEach((s) => chart.removeSeries(s))
+      emaSeriesRef.current = indicatorSettings.ema.periods.map((_, i) =>
+        chart.addSeries(LineSeries, {
+          color: indicatorSettings.ema.colors[i],
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+          visible: indicators.ema,
+        })
+      )
+    } else {
+      emaSeriesRef.current.forEach((s, i) => s.applyOptions({ visible: indicators.ema, color: indicatorSettings.ema.colors[i] }))
+    }
+    recomputeIndicators()
+  }, [indicators.ema, indicatorSettings.ema, recomputeIndicators])
+
+  // 布林带可见性 + 颜色同步：固定 3 条线（中/上/下轨），形状不像 MA/EMA 那样
+  // 可变，不需要重建逻辑。/ Sync Bollinger visibility + color: a fixed shape
+  // (mid/upper/lower), unlike MA/EMA it's never variable-length, so no
+  // rebuild logic is needed.
+  useEffect(() => {
+    if (!bollSeriesRef.current) return
+    const c = indicatorSettings.boll.color
+    bollSeriesRef.current.mid.applyOptions({ visible: indicators.boll, color: c })
+    bollSeriesRef.current.upper.applyOptions({ visible: indicators.boll, color: c })
+    bollSeriesRef.current.lower.applyOptions({ visible: indicators.boll, color: c })
+  }, [indicators.boll, indicatorSettings.boll.color])
 
   // RSI 参考线价位同步：overbought/oversold 可客制化，改动时更新已存在的两条
   // 价格线，不需要重建整条 series。/ Sync RSI reference-line prices:

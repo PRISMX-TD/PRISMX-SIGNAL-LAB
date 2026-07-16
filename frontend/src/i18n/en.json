@@ -528,7 +528,9 @@
       "slow": "Slow",
       "signal": "Signal",
       "reset": "Reset to defaults",
-      "done": "Done"
+      "done": "Done",
+      "addLine": "Add line",
+      "removeLine": "Remove line"
     },
     "draw": {
       "tools": "Drawing tools",
