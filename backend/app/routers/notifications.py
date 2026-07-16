@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.models import NotificationPref, PushSubscription, Signal, User
+from app.services import quotes_store
 from app.services.deps import get_current_user
 from app.services.plans import can_use_push
 from app.services.push_dispatch import EVENT_TYPES
@@ -118,13 +119,24 @@ def list_indicators(
 
 @router.get("/symbols")
 def list_symbols(
-    db: Session = Depends(get_db),
     _current_user: User = Depends(get_current_user),
 ) -> list[str]:
-    """从现有信号中提取去重后的品种列表，供前端通知设置页渲染品种筛选。
-    随信号引擎/EA 实际推送过的品种变化而变化，不写死。"""
-    rows = db.query(Signal.symbol).filter(Signal.symbol != None, Signal.symbol != "").distinct().all()
-    return sorted({sym for (sym,) in rows if sym})
+    """当前活跃品种，供前端通知设置页渲染品种筛选——与英雄卡/报价表/图表选择器
+    同一份数据源（EA 正在推送的品种），不是历史信号里出现过的所有品种。这两者
+    有实质差别：signals 表会永久累积每个出现过的品种，其中可能包含 EA 早已
+    不再配置、纯属历史/测试数据的品种（比如改过 InpSymbols 之前留下的行），
+    选这份列表会让品种筛选里堆满 EA 根本不会再推的品种。
+
+    Currently active symbols, for the notification settings' symbol filter —
+    the same data source as the hero card/quotes table/chart symbol picker
+    (whatever the EA is actively pushing), not every symbol that has ever
+    appeared in signal history. The two meaningfully differ: the signals
+    table accumulates every symbol forever, including ones the EA no longer
+    configures at all (e.g. left over from before InpSymbols was changed, or
+    test data) — using that as the source would clutter the filter with
+    symbols the EA will never push again.
+    """
+    return sorted(quotes_store.get_active_symbols())
 
 
 # ---- 推送订阅 / Push subscriptions ----

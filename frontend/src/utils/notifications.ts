@@ -96,14 +96,22 @@ export async function enableNotifications(
   // 白名单为空时默认全选：策略/品种/事件都是白名单语义（空 = 什么都不推），
   // 用户只翻总开关、没逐个勾选时会"已开启却一条都收不到"。品种维度用哨兵值
   // 而非展开当前品种列表，这样以后 EA 新增品种也自动覆盖，不会过时。
+  // `?? []` 兜底：selected_symbols 是本次新增字段，若调用方的数据源来自尚未
+  // 部署新版本的后端，响应里根本没有这个键，undefined.length 会直接抛错，
+  // 把"开启通知"整个搞崩——新老版本混跑（滚动发布、CDN 缓存）时必然会遇到。
   // Default to select-all when whitelists are empty: category/symbol/event are
   // all whitelist-semantics (empty = push nothing), so a user who only flips
   // the master toggle would see "enabled yet receives nothing". The symbol
   // dimension uses the sentinel rather than expanding the current symbol
   // list, so a symbol the EA adds later stays covered automatically.
-  const cats = current.selected_categories.length > 0 ? current.selected_categories : [ALL_SENTINEL]
-  const syms = current.selected_symbols.length > 0 ? current.selected_symbols : [ALL_SENTINEL]
-  const events = current.event_types.length > 0 ? current.event_types : [...EVENT_TYPES]
+  // `?? []` guards against selected_symbols being absent entirely: it's a
+  // newly added field, so a caller backed by a not-yet-redeployed backend
+  // gets a response without that key at all, and undefined.length would
+  // crash the whole enable flow — bound to happen during a rolling deploy or
+  // CDN cache lag where old and new code run side by side.
+  const cats = current.selected_categories?.length > 0 ? current.selected_categories : [ALL_SENTINEL]
+  const syms = current.selected_symbols?.length > 0 ? current.selected_symbols : [ALL_SENTINEL]
+  const events = current.event_types?.length > 0 ? current.event_types : [...EVENT_TYPES]
 
   const vapidPromise = pushApi.getVapidKey()
   await Promise.all([
