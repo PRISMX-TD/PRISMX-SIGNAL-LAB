@@ -14,7 +14,7 @@
 // at the repo root.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { createChart, ColorType, type IChartApi, type ISeriesApi, type UTCTimestamp } from 'lightweight-charts'
+import { createChart, ColorType, CandlestickSeries, type IChartApi, type ISeriesApi, type UTCTimestamp } from 'lightweight-charts'
 import { chartApi } from '../api/client'
 import type { Candle } from '../api/types'
 import { displaySymbol } from '../api/utils'
@@ -224,7 +224,14 @@ export default function ChartsPage() {
       width: el.clientWidth,
       height: el.clientHeight,
     })
-    const series = chart.addCandlestickSeries({
+    // v5：series 创建统一走 addSeries(SeriesType, options)，取代 v4 的
+    // addCandlestickSeries(options)；坐标换算类 API（DrawLayer 用到的
+    // timeToCoordinate/priceToCoordinate 等）在 v4→v5 之间未变。
+    // v5: series creation is unified as addSeries(SeriesType, options),
+    // replacing v4's addCandlestickSeries(options); the coordinate-conversion
+    // APIs (timeToCoordinate/priceToCoordinate etc., used by DrawLayer) are
+    // unchanged between v4 and v5.
+    const series = chart.addSeries(CandlestickSeries, {
       upColor: UP_COLOR,
       downColor: DOWN_COLOR,
       wickUpColor: UP_COLOR,
