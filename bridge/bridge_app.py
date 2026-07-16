@@ -40,7 +40,7 @@ except Exception:
     _TRAY_AVAILABLE = False
 
 # ---------- 版本 / Version ----------
-APP_VERSION = "1.3.15"
+APP_VERSION = "1.3.16"
 
 # ---------- 更新检测 / Update check ----------
 # 通过 GitHub Releases 检查是否有更新的安装包版本。
