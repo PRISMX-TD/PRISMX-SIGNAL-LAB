@@ -88,12 +88,25 @@ function ColorPicker({ label, value, onChange }: { label?: string; value: string
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="h-6 w-6 shrink-0 rounded-full border border-white/25 transition hover:scale-110"
+        className="h-6 w-6 shrink-0 rounded-full border-2 border-white/25 transition hover:border-white/50"
         style={{ background: value }}
         aria-label={label}
       />
       {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 grid grid-cols-5 gap-1.5 rounded-lg border border-white/10 bg-ink-900/95 p-2 shadow-prism backdrop-blur">
+        // 移动端（<640px）：不跟着按钮悬浮定位，改成贴底固定的小抽屉——
+        // inset-x-4 保证不管按钮在弹窗里多靠右，色板永远整体落在屏幕可见
+        // 范围内，不会被裁切/伸到屏幕外。桌面端（sm: 以上）维持贴着按钮下方
+        // 的小悬浮面板，给一个明确宽度（w-40）而不是让内容撑开，避免网格在
+        // 窄父级里挤压出圆点重叠的观感。
+        // Mobile (<640px): don't float-anchor to the button — become a small
+        // fixed bottom drawer instead. inset-x-4 guarantees the palette
+        // always lands fully within the visible screen regardless of how far
+        // right the triggering button sits, so it can never get clipped or
+        // pushed off-screen. Desktop (sm: and up) keeps the small popover
+        // anchored just below the button, given an explicit width (w-40)
+        // instead of shrink-to-fit, so the grid never gets squeezed into
+        // overlapping-looking circles by an ambiguous parent width.
+        <div className="fixed inset-x-4 bottom-4 z-30 grid grid-cols-5 gap-2 rounded-xl border border-white/10 bg-ink-900/95 p-3 shadow-prism backdrop-blur sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:top-full sm:z-30 sm:mt-1 sm:w-40 sm:gap-1.5 sm:rounded-lg sm:p-2">
           {COLOR_PRESETS.map((c) => (
             <button
               key={c}
@@ -102,7 +115,7 @@ function ColorPicker({ label, value, onChange }: { label?: string; value: string
                 onChange(c)
                 setOpen(false)
               }}
-              className={`h-5 w-5 rounded-full border transition hover:scale-110 ${c === value ? 'border-white' : 'border-white/20'}`}
+              className={`h-6 w-6 shrink-0 rounded-full border-2 transition hover:border-white/70 sm:h-5 sm:w-5 ${c === value ? 'border-white' : 'border-white/20'}`}
               style={{ background: c }}
             />
           ))}
@@ -196,7 +209,24 @@ export default function IndicatorSettingsModal({ indicators, onToggle, settings,
 
   return (
     <div className="slide-overlay" onClick={onClose}>
-      <div className="slide-sheet" style={{ width: 480 }} onClick={(e) => e.stopPropagation()}>
+      {/* 宽度不用内联 style：.slide-sheet 自带的移动端媒体查询
+          （<640px 时变成贴底全屏抽屉）靠的就是 CSS 类选择器，内联 style 的
+          优先级会盖过媒体查询把它废掉——之前 style={{width:480}} 正是这样
+          在手机上把全站统一的抽屉式弹窗行为顶掉，导致内容在窄屏上溢出。
+          这里改用 Tailwind 的 sm: 前缀只在桌面宽度（≥640px，与站内媒体查询
+          的断点严丝合缝互补）加宽到 480px，移动端完全交还给已验证过的
+          抽屉样式。
+          No inline style for width: .slide-sheet's own mobile media query
+          (becomes a full-width bottom sheet below 640px) relies on a plain
+          CSS class selector, and an inline style's specificity beats a media
+          query outright — that's exactly how the previous
+          style={{width:480}} clobbered the site-wide bottom-sheet modal
+          behavior on phones, causing content to overflow on narrow screens.
+          Using Tailwind's sm: prefix here only widens to 480px at desktop
+          widths (>=640px, which dovetails exactly with the site's own
+          breakpoint), leaving mobile entirely to the already-proven sheet
+          style. */}
+      <div className="slide-sheet sm:w-[480px]" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-white">{t('charts.indicators.settingsTitle')}</h3>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-white" aria-label={t('common.close')}>
