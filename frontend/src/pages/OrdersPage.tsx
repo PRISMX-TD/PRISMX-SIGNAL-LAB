@@ -360,11 +360,13 @@ export default function OrdersPage() {
             ))}
           </div>
         )}
-        <PersonalWinRateCard variant="detailed" login={selectedLogin ?? undefined} />
-        {isAdmin && (
-          <div className="mt-5">
+        {isAdmin ? (
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+            <PersonalWinRateCard variant="detailed" login={selectedLogin ?? undefined} />
             <DisciplineScoreCard login={selectedLogin ?? undefined} isPro={isPro} />
           </div>
+        ) : (
+          <PersonalWinRateCard variant="detailed" login={selectedLogin ?? undefined} />
         )}
         <div className="mt-5">
           <ClosedTradesList trades={visibleTrades} showAccountColumn={multiAccount && selectedLogin === null} />

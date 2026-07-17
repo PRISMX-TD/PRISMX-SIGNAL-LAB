@@ -207,7 +207,7 @@ export default function DisciplineScoreCard({ login, isPro }: Props) {
 
   const trendPoints = data ? buildTrendPoints(data.trend) : ''
 
-  return (
+  const card = (
     <section className="card glass p-5">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
@@ -277,8 +277,21 @@ export default function DisciplineScoreCard({ login, isPro }: Props) {
         </>
       )}
       <p className="mt-3 text-[10px] text-slate-600">{t('discipline.disclaimer')}</p>
-
-      {helpOpen && <DisciplineHelpModal onClose={() => setHelpOpen(false)} />}
     </section>
+  )
+
+  // 弹窗必须挂在 .card.glass 这个 section 之外——.glass 用了 backdrop-filter，
+  // 会给里面的 position:fixed 后代建立一个新的包含块，导致弹窗被这张卡片的
+  // 尺寸/位置困住，而不是覆盖整个视口，看起来就像被其它卡片挡住/切掉一样。
+  // Must render outside the .card.glass section — .glass sets backdrop-filter,
+  // which creates a new containing block for any position:fixed descendant.
+  // Left inside, the overlay gets trapped to this card's box instead of
+  // covering the full viewport, which is exactly why it looked clipped by
+  // neighboring cards.
+  return (
+    <>
+      {card}
+      {helpOpen && <DisciplineHelpModal onClose={() => setHelpOpen(false)} />}
+    </>
   )
 }
