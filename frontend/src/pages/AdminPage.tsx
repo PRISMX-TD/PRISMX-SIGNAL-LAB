@@ -2,6 +2,7 @@
 // Admin page: operating metrics + user list (role/plan adjustable, bulk edit supported)
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router-dom'
 import { adminApi } from '../api/client'
 import { fmtTime, localizeApiError } from '../api/utils'
 import Select from '../components/Select'
@@ -659,6 +660,19 @@ export default function AdminPage() {
             </tbody>
           </table>
         )}
+      </div>
+
+      {/* 历史信号回放：功能内部试用中，暂不对普通用户开放，也不放进主导航或
+          仪表盘/订单页——入口只留在管理者页面最底下，需要的人自己找得到，
+          不需要的人完全看不见。真正的权限边界仍在后端 require_admin。
+          Signal replay: in internal trial, not released to regular users, and
+          kept out of the main nav / dashboard / orders page — the only entry
+          point is this quiet link at the bottom of the admin page. The real
+          boundary is still the backend's require_admin. */}
+      <div className="mt-8 border-t border-white/5 pt-4 text-right">
+        <Link to="/simulator" className="text-xs text-slate-600 hover:text-slate-400">
+          {t('simulator.entry')}
+        </Link>
       </div>
     </div>
   )
