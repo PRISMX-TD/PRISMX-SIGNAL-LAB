@@ -106,6 +106,18 @@ class AdminTrialSettings(BaseModel):
     trialDays: int = Field(default=7, ge=1, le=90)
 
 
+class AdminDisciplineSettings(BaseModel):
+    """纪律分参数设置 / Discipline-score parameter settings."""
+
+    windowDays: int = Field(default=90, ge=7, le=365)
+    weightStop: int = Field(default=40, ge=0, le=100)
+    weightVolume: int = Field(default=30, ge=0, le=100)
+    weightExit: int = Field(default=30, ge=0, le=100)
+    slTolerancePct: float = Field(default=0.10, ge=0, le=1)
+    volumeMultiple: float = Field(default=3.0, ge=1, le=20)
+    volumeHistoryMin: int = Field(default=5, ge=1, le=50)
+
+
 # ---------- API Token / MT5 连接凭证 ----------
 class EATokenOut(BaseModel):
     # 明文 token 仅在重置（生成）响应中出现一次；查询时为 None（库中只存哈希）。

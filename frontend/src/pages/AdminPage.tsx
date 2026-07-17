@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom'
 import { adminApi } from '../api/client'
 import { fmtTime, localizeApiError } from '../api/utils'
 import Select from '../components/Select'
-import type { AdminBrokerSettings, AdminMetrics, AdminPricingSettings, AdminTrialSettings, AdminUser, UserPlan, UserRole } from '../api/types'
+import type { AdminBrokerSettings, AdminMetrics, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminUser, UserPlan, UserRole } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
 const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
@@ -65,6 +65,10 @@ export default function AdminPage() {
   const [trial, setTrial] = useState<AdminTrialSettings | null>(null)
   const [savingTrial, setSavingTrial] = useState(false)
 
+  // 纪律分参数设置 / discipline-score parameter settings
+  const [discipline, setDiscipline] = useState<AdminDisciplineSettings | null>(null)
+  const [savingDiscipline, setSavingDiscipline] = useState(false)
+
   // 批量选择与批量修改：勾选后统一改角色/等级，空字符串代表"不修改该字段"
   // bulk selection & bulk edit: '' means "leave this field unchanged"
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -88,12 +92,13 @@ export default function AdminPage() {
   const load = async (opts: { q?: string; plan?: string } = {}) => {
     setLoading(true)
     try {
-      const [usersRes, metricsRes, settingsRes, pricingRes, trialRes] = await Promise.all([
+      const [usersRes, metricsRes, settingsRes, pricingRes, trialRes, disciplineRes] = await Promise.all([
         adminApi.listUsers({ q: (opts.q ?? query) || undefined, plan: (opts.plan ?? planFilter) || undefined, limit: 100 }),
         adminApi.metrics(),
         adminApi.getSettings(),
         adminApi.getPricing(),
         adminApi.getTrial(),
+        adminApi.getDiscipline(),
       ])
       setUsers(usersRes.users)
       setTotal(usersRes.total)
@@ -103,6 +108,7 @@ export default function AdminPage() {
       setBrokerPatternsText(settingsRes.brokerPatterns.join(', '))
       setPricing(pricingRes)
       setTrial(trialRes)
+      setDiscipline(disciplineRes)
     } catch (err) {
       showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.loadError'))
     } finally {
@@ -153,6 +159,20 @@ export default function AdminPage() {
       showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
     } finally {
       setSavingTrial(false)
+    }
+  }
+
+  const saveDiscipline = async () => {
+    if (!discipline) return
+    setSavingDiscipline(true)
+    try {
+      const updated = await adminApi.updateDiscipline(discipline)
+      setDiscipline(updated)
+      showToast('ok', t('admin.saved'))
+    } catch (err) {
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
+    } finally {
+      setSavingDiscipline(false)
     }
   }
 
@@ -485,6 +505,101 @@ export default function AdminPage() {
             onClick={saveTrial}
           >
             {savingTrial ? t('common.loading') : t('common.save')}
+          </button>
+        </div>
+      )}
+
+      {/* 纪律分参数设置 / discipline-score parameter settings */}
+      {discipline && (
+        <div className="glass mb-5 p-5">
+          <h3 className="mb-4 font-display text-lg font-semibold text-slate-100">{t('admin.disciplineTitle')}</h3>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <div>
+              <label className="label">{t('admin.dscWindowDays')}</label>
+              <input
+                type="number"
+                className="input"
+                min="7"
+                max="365"
+                value={discipline.windowDays}
+                onChange={(e) => setDiscipline({ ...discipline, windowDays: Math.min(365, Math.max(7, parseInt(e.target.value) || 7)) })}
+              />
+            </div>
+            <div>
+              <label className="label">{t('admin.dscWeightStop')}</label>
+              <input
+                type="number"
+                className="input"
+                min="0"
+                max="100"
+                value={discipline.weightStop}
+                onChange={(e) => setDiscipline({ ...discipline, weightStop: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) })}
+              />
+            </div>
+            <div>
+              <label className="label">{t('admin.dscWeightVolume')}</label>
+              <input
+                type="number"
+                className="input"
+                min="0"
+                max="100"
+                value={discipline.weightVolume}
+                onChange={(e) => setDiscipline({ ...discipline, weightVolume: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) })}
+              />
+            </div>
+            <div>
+              <label className="label">{t('admin.dscWeightExit')}</label>
+              <input
+                type="number"
+                className="input"
+                min="0"
+                max="100"
+                value={discipline.weightExit}
+                onChange={(e) => setDiscipline({ ...discipline, weightExit: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) })}
+              />
+            </div>
+            <div>
+              <label className="label">{t('admin.dscSlTolerance')}</label>
+              <input
+                type="number"
+                className="input"
+                min="0"
+                max="1"
+                step="0.01"
+                value={discipline.slTolerancePct}
+                onChange={(e) => setDiscipline({ ...discipline, slTolerancePct: Math.min(1, Math.max(0, parseFloat(e.target.value) || 0)) })}
+              />
+            </div>
+            <div>
+              <label className="label">{t('admin.dscVolumeMultiple')}</label>
+              <input
+                type="number"
+                className="input"
+                min="1"
+                max="20"
+                step="0.1"
+                value={discipline.volumeMultiple}
+                onChange={(e) => setDiscipline({ ...discipline, volumeMultiple: Math.min(20, Math.max(1, parseFloat(e.target.value) || 1)) })}
+              />
+            </div>
+            <div>
+              <label className="label">{t('admin.dscHistoryMin')}</label>
+              <input
+                type="number"
+                className="input"
+                min="1"
+                max="50"
+                value={discipline.volumeHistoryMin}
+                onChange={(e) => setDiscipline({ ...discipline, volumeHistoryMin: Math.min(50, Math.max(1, parseInt(e.target.value) || 1)) })}
+              />
+            </div>
+          </div>
+          <button
+            className="btn-primary mt-4 px-5 py-2 text-sm disabled:opacity-40"
+            disabled={savingDiscipline}
+            onClick={saveDiscipline}
+          >
+            {savingDiscipline ? t('common.loading') : t('common.save')}
           </button>
         </div>
       )}

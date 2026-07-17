@@ -83,6 +83,17 @@ export interface AdminTrialSettings {
   trialDays: number
 }
 
+// 管理后台：纪律分参数设置 / admin: discipline-score parameter settings
+export interface AdminDisciplineSettings {
+  windowDays: number
+  weightStop: number
+  weightVolume: number
+  weightExit: number
+  slTolerancePct: number
+  volumeMultiple: number
+  volumeHistoryMin: number
+}
+
 // 免费试用当前状态（用户端）/ current free-trial status (user-facing)
 export interface TrialStatus {
   enabled: boolean
@@ -182,6 +193,34 @@ export interface PersonalWinRate {
   totalResolved: number
   winRate: number | null
   openPositions: number
+}
+
+// 纪律分单一维度的评分明细 / one scoring dimension of the discipline score
+export interface DisciplineDimension {
+  score: number | null
+  violations: number
+  samples: number
+}
+
+// 纪律分：回答"有没有按计划执行"，与赚不赚钱无关，只有自己能看到自己的。
+// **当前仅管理员可访问**（后端 require_admin），功能先内部试用；对外开放时
+// 只需放开后端依赖与前端入口判断，FREE/PRO 裁剪逻辑本身已按最终设计写好。
+// Discipline score: whether the plan was followed, independent of P&L,
+// visible only to the user themself. **Admin-only for now** (backend
+// require_admin) while trialed internally; releasing it means loosening the
+// backend dep + entry checks — the FREE/PRO gating below is already final.
+export interface DisciplineScore {
+  total: number | null
+  windowDays: number
+  positions: number
+  trend: Array<{ date: string; total: number | null }>
+  // 只有 PRO 才有这个键（后端按 user.plan 裁剪，不是前端隐藏）
+  // Present only for PRO (gated server-side by user.plan, not hidden client-side)
+  dimensions?: {
+    stopLoss: DisciplineDimension
+    volume: DisciplineDimension
+    exit: DisciplineDimension
+  }
 }
 
 // 真实平仓成交明细（逐笔），个人跟单胜率同一份数据源，只有自己能看到自己的

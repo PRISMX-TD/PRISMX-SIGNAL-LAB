@@ -9,6 +9,7 @@ import { displaySymbol, fmtTime, localizeApiError } from '../api/utils'
 import type { AutoManageSettings, ClosedTrade, Order, OrderStatus } from '../api/types'
 import PositionCard from '../components/PositionCard'
 import PersonalWinRateCard from '../components/PersonalWinRateCard'
+import DisciplineScoreCard from '../components/DisciplineScoreCard'
 import ClosedTradesList from '../components/ClosedTradesList'
 
 const statusStyle: Record<OrderStatus, string> = {
@@ -84,6 +85,12 @@ export default function OrdersPage() {
   const [autoMsg, setAutoMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
 
   const isPro = user?.plan === 'PRO'
+  // 纪律分卡的可见性（功能内部试用中，仅管理员）——后端 GET /orders/discipline
+  // 也是 require_admin，这里只是不给非管理员看到入口。
+  // Discipline-score card visibility (feature in internal trial, admins
+  // only) — the backend endpoint is likewise require_admin; this just hides
+  // the entry for non-admins.
+  const isAdmin = user?.role === 'admin'
 
   useEffect(() => {
     refreshUser()                        // 每次进入页面刷新 plan，确保管理员升级后即时生效
@@ -354,6 +361,11 @@ export default function OrdersPage() {
           </div>
         )}
         <PersonalWinRateCard variant="detailed" login={selectedLogin ?? undefined} />
+        {isAdmin && (
+          <div className="mt-5">
+            <DisciplineScoreCard login={selectedLogin ?? undefined} isPro={isPro} />
+          </div>
+        )}
         <div className="mt-5">
           <ClosedTradesList trades={visibleTrades} showAccountColumn={multiAccount && selectedLogin === null} />
         </div>

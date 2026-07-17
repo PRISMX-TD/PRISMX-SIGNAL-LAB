@@ -849,7 +849,27 @@
     "salePreview": "用户将看到",
     "trialTitle": "免费试用设置",
     "trialEnabled": "开放免费试用",
-    "trialDays": "试用天数"
+    "trialDays": "试用天数",
+    "disciplineTitle": "纪律分参数",
+    "dscWindowDays": "统计窗口（天）",
+    "dscWeightStop": "止损权重",
+    "dscWeightVolume": "仓位权重",
+    "dscWeightExit": "出场权重",
+    "dscSlTolerance": "止损容差（0–1）",
+    "dscVolumeMultiple": "手数违规倍数",
+    "dscHistoryMin": "手数基准最少样本"
+  },
+  "discipline": {
+    "title": "纪律分",
+    "windowHint": "近 {{n}} 天已结束仓位",
+    "noData": "暂无足够的已结束仓位可评分",
+    "dimStop": "止损纪律",
+    "dimVolume": "仓位纪律",
+    "dimExit": "出场纪律",
+    "violations": "{{v}}/{{n}} 笔违规",
+    "insufficient": "样本不足",
+    "upgradeHint": "升级 PRO 查看逐维度明细，看清每一分丢在哪",
+    "disclaimer": "仅统计经本平台发起的信号单操作；在 MT5 客户端直接进行的操作不计入。"
   },
   "simulator": {
     "title": "历史信号回放",

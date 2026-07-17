@@ -370,6 +370,29 @@ class AutoManagedPosition(Base):
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
 
+class DisciplineSnapshot(Base):
+    """纪律分每日快照：驱动前端 30 天趋势线。当日分数由后台循环 upsert，
+    实时值另由 API 现算——快照只为趋势，不是实时值的缓存。
+
+    Daily discipline-score snapshot, powering the 30-day trend line. Upserted
+    by a background loop; the live value is computed on demand by the API —
+    snapshots exist for the trend, not as a cache of the live number.
+    """
+    __tablename__ = "discipline_snapshots"
+    __table_args__ = (
+        # login 为空字符串表示"全部绑定账号"聚合行 / "" = the all-accounts aggregate row
+        UniqueConstraint("user_id", "login", "date", name="uq_discipline_user_login_date"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    login = Column(String, nullable=False, default="")
+    date = Column(String, nullable=False)  # UTC 日期 ISO 字符串 "2026-07-17"
+    total = Column(Float, nullable=True)   # 当日总分；样本不足无法评分时为 NULL
+    dimensions = Column(Text, default="{}")  # 三维度明细 JSON（结构见 discipline.py）
+    created_at = Column(DateTime, default=_now)
+
+
 class PlatformSetting(Base):
     """平台级设置（键值对，值为 JSON 字符串）。
 

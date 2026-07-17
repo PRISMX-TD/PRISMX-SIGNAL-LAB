@@ -849,7 +849,27 @@
     "salePreview": "Users will see",
     "trialTitle": "Free Trial Settings",
     "trialEnabled": "Enable free trial",
-    "trialDays": "Trial days"
+    "trialDays": "Trial days",
+    "disciplineTitle": "Discipline Score Parameters",
+    "dscWindowDays": "Window (days)",
+    "dscWeightStop": "Stop-loss weight",
+    "dscWeightVolume": "Volume weight",
+    "dscWeightExit": "Exit weight",
+    "dscSlTolerance": "SL tolerance (0–1)",
+    "dscVolumeMultiple": "Volume violation multiple",
+    "dscHistoryMin": "Min history for volume baseline"
+  },
+  "discipline": {
+    "title": "Discipline Score",
+    "windowHint": "Closed positions, last {{n}} days",
+    "noData": "Not enough closed positions to score yet",
+    "dimStop": "Stop-loss discipline",
+    "dimVolume": "Position-size discipline",
+    "dimExit": "Exit discipline",
+    "violations": "{{v}}/{{n}} violations",
+    "insufficient": "Not enough data",
+    "upgradeHint": "Upgrade to PRO to see the per-dimension breakdown",
+    "disclaimer": "Only covers signal orders placed and managed through this platform; actions taken directly in the MT5 terminal are not counted."
   },
   "simulator": {
     "title": "Signal History Replay",

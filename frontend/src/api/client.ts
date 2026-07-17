@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPricingSettings, AdminTrialSettings, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote } from './types'
 
 const TOKEN_KEY = 'prismx_token'
 
@@ -197,6 +197,12 @@ export const orderApi = {
   winrate: (login?: string) =>
     request<PersonalWinRate>(`/orders/winrate${login ? `?login=${encodeURIComponent(login)}` : ''}`),
   closedTrades: () => request<{ trades: ClosedTrade[] }>('/orders/closed-trades'),
+  // 纪律分：**当前仅管理员可用**（后端 require_admin），非管理员会拿到 403——
+  // 功能先内部试用，见 api/types.ts 的 DisciplineScore 注释。
+  // Discipline score: **admin-only for now** (backend require_admin);
+  // non-admins get a 403 — the feature is in internal trial.
+  discipline: (login?: string) =>
+    request<DisciplineScore>(`/orders/discipline${login ? `?login=${encodeURIComponent(login)}` : ''}`),
 }
 
 // 多账号 / Multi-account
@@ -361,6 +367,12 @@ export const adminApi = {
     getTrial: () => request<AdminTrialSettings>('/admin/trial'),
     updateTrial: (payload: AdminTrialSettings) =>
       request<AdminTrialSettings>('/admin/trial', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+    getDiscipline: () => request<AdminDisciplineSettings>('/admin/discipline'),
+    updateDiscipline: (payload: AdminDisciplineSettings) =>
+      request<AdminDisciplineSettings>('/admin/discipline', {
         method: 'PUT',
         body: JSON.stringify(payload),
       }),

@@ -20,15 +20,18 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import AdminAuditLog, MT5Account, User
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminMetricsOut, AdminPricingSettings, AdminTrialSettings, AdminUserOut, AdminUserUpdate
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminDisciplineSettings, AdminMetricsOut, AdminPricingSettings, AdminTrialSettings, AdminUserOut, AdminUserUpdate
 from app.services.deps import require_admin
 from app.services.settings_store import (
     get_broker_settings,
+    get_discipline_settings,
     get_pricing_settings,
     get_trial_settings,
+    invalidate_discipline_cache,
     invalidate_pricing_cache,
     invalidate_settings_cache,
     invalidate_trial_cache,
+    save_discipline_settings,
     save_pricing_settings,
     save_trial_settings,
     set_setting,
@@ -402,3 +405,53 @@ def put_trial(
     db.commit()
     invalidate_trial_cache()
     return get_trial(db, admin)
+
+
+# ---------- 纪律分参数设置 / discipline-score parameter settings ----------
+
+@router.get("/discipline", response_model=AdminDisciplineSettings)
+def get_discipline(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """读取纪律分参数。Read discipline-score parameters."""
+    c = get_discipline_settings(db)
+    return AdminDisciplineSettings(
+        windowDays=int(c["window_days"]),
+        weightStop=int(c["weight_stop"]),
+        weightVolume=int(c["weight_volume"]),
+        weightExit=int(c["weight_exit"]),
+        slTolerancePct=float(c["sl_tolerance_pct"]),
+        volumeMultiple=float(c["volume_multiple"]),
+        volumeHistoryMin=int(c["volume_history_min"]),
+    )
+
+
+@router.put("/discipline", response_model=AdminDisciplineSettings)
+def put_discipline(
+    body: AdminDisciplineSettings,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """保存纪律分参数。三个权重不能全为零，否则总分永远算不出来。
+    Save discipline-score parameters. The three weights can't all be zero,
+    or the total score could never be computed."""
+    if body.weightStop + body.weightVolume + body.weightExit <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="权重不能全为零 / Weights cannot all be zero",
+        )
+    data = {
+        "window_days": body.windowDays,
+        "weight_stop": body.weightStop,
+        "weight_volume": body.weightVolume,
+        "weight_exit": body.weightExit,
+        "sl_tolerance_pct": body.slTolerancePct,
+        "volume_multiple": body.volumeMultiple,
+        "volume_history_min": body.volumeHistoryMin,
+    }
+    save_discipline_settings(db, data)
+    _log_change(db, admin.id, admin.id, "setting:discipline", None, json.dumps(data))
+    db.commit()
+    invalidate_discipline_cache()
+    return get_discipline(db, admin)

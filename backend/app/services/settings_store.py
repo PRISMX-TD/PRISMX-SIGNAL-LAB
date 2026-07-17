@@ -208,6 +208,76 @@ def save_trial_settings(db, data: dict) -> None:
         row.value = encoded
 
 
+# ---- 纪律分参数独立缓存（与其它设置分开） ----
+# 纪律分默认值。DB 无记录时使用，管理员在后台修改后写入 PlatformSetting（key="discipline"）。
+# 三个权重之和不要求恰为 100，计算时按非 None 维度归一化（见 discipline.py）。
+# Discipline-score defaults. Used when no DB row exists; admin changes persist
+# to PlatformSetting (key="discipline"). The three weights need not sum to 100
+# — they're normalized over non-None dimensions at scoring time.
+DISCIPLINE_DEFAULTS: dict = {
+    "window_days": 90,
+    "weight_stop": 40,
+    "weight_volume": 30,
+    "weight_exit": 30,
+    "sl_tolerance_pct": 0.10,
+    "volume_multiple": 3.0,
+    "volume_history_min": 5,
+}
+
+_discipline_cache: dict = {}
+_discipline_cache_at: float = 0.0
+
+
+def invalidate_discipline_cache() -> None:
+    global _discipline_cache_at
+    with _lock:
+        _discipline_cache_at = 0.0
+
+
+def _load_discipline_from_db(db) -> dict:
+    """从 DB 读纪律分参数 JSON，缺失的 key 回落到默认值。"""
+    data = dict(DISCIPLINE_DEFAULTS)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "discipline").first()
+    if row:
+        try:
+            stored = json.loads(row.value)
+            if isinstance(stored, dict):
+                for k in DISCIPLINE_DEFAULTS:
+                    if k in stored:
+                        data[k] = stored[k]
+        except (ValueError, TypeError):
+            logger.warning("platform_settings: invalid JSON for discipline, using defaults")
+    return data
+
+
+def get_discipline_settings(db) -> dict:
+    """读取纪律分参数设置（独立缓存）。
+    Read discipline-score parameter settings (separate cache)."""
+    global _discipline_cache, _discipline_cache_at
+    now = time.time()
+    with _lock:
+        if _discipline_cache and now - _discipline_cache_at < _CACHE_TTL_SECONDS:
+            return dict(_discipline_cache)
+    data = _load_discipline_from_db(db)
+    with _lock:
+        _discipline_cache = data
+        _discipline_cache_at = now
+    return dict(data)
+
+
+def save_discipline_settings(db, data: dict) -> None:
+    """写入纪律分参数设置（不提交，调用方 commit 后 invalidate）。
+    Write discipline-score settings (no commit; caller commits then invalidates cache)."""
+    merged = _load_discipline_from_db(db)
+    merged.update(data)
+    encoded = json.dumps(merged, ensure_ascii=False)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "discipline").first()
+    if row is None:
+        db.add(PlatformSetting(key="discipline", value=encoded))
+    else:
+        row.value = encoded
+
+
 def set_setting(db, key: str, value) -> None:
     """写入单个设置项（不提交事务，调用方负责 commit 后再 invalidate）。
     Write one setting (no commit; caller commits, then invalidates the cache)."""

@@ -15,6 +15,7 @@ from app.engine.signal_engine import signal_expiry_loop, signal_loop
 from app.routers import account, admin, auth, automation, bridge, chart, ea, notifications, orders, payments, sentiment, signals, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.orders import stale_order_monitor_loop
+from app.services.discipline import discipline_snapshot_loop
 from app.services.plan_expiry import plan_expiry_sweep_loop
 from app.services.sentiment_store import sentiment_loop
 from app.services.signal_resolution import stale_signal_sweep_loop
@@ -48,6 +49,11 @@ async def lifespan(app: FastAPI):
     # the read-time downgrade, covering online users only hit via the DB plan by
     # WS broadcast/push; see services/plan_expiry.py)
     plan_expiry_task = asyncio.create_task(plan_expiry_sweep_loop())
+    # 纪律分每日快照：给近期有信号单成交的用户落库当日纪律分，驱动前端 30 天
+    # 趋势线（见 services/discipline.py）。
+    # Discipline-score daily snapshot: persists today's score for recently
+    # active users, powering the frontend's 30-day trend line.
+    discipline_task = asyncio.create_task(discipline_snapshot_loop())
     yield
     # 关闭：停止后台任务 / shutdown: stop background tasks
     if task is not None:
@@ -58,6 +64,7 @@ async def lifespan(app: FastAPI):
     stale_signal_sweep.cancel()
     sentiment_task.cancel()
     plan_expiry_task.cancel()
+    discipline_task.cancel()
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
