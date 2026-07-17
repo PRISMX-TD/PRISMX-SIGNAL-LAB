@@ -20,6 +20,9 @@ class AccountInfoOut(BaseModel):
     email: str
     plan: str
     planExpiresAt: str | None
+    # 当前 PRO 是否为免费试用（而非正式付费/管理员赠送）/ whether the current
+    # PRO is a free trial, as opposed to a paid or admin-granted plan.
+    planIsTrial: bool = False
     hasPassword: bool
     createdAt: str | None
     mt5Accounts: list[dict]
@@ -43,6 +46,7 @@ def get_account(
         email=current_user.email,
         plan=current_user.plan,
         planExpiresAt=current_user.plan_expires_at.isoformat() if current_user.plan_expires_at else None,
+        planIsTrial=bool(current_user.plan_is_trial),
         hasPassword=current_user.password_hash is not None,
         createdAt=current_user.created_at.isoformat() if current_user.created_at else None,
         mt5Accounts=[

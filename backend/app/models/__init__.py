@@ -44,6 +44,13 @@ class User(Base):
     # 内部备注，供管理员留痕（如"KOL 合作赠送"），不展示给用户本人。
     # Internal note for admins (e.g. "KOL partnership grant"); never shown to the user.
     plan_note = Column(String, nullable=True)
+    # 免费试用：领取时间（终身一次的凭据，NULL=从未用过）；是否处于试用期
+    # （试用领取时置 True，付费转正/到期降级/管理员改动时清 False）。
+    # Free trial: claim time (lifetime-once credential; NULL = never used), and
+    # whether the current PRO is a trial (set on claim; cleared on paid
+    # conversion, expiry downgrade, or any admin plan change).
+    trial_used_at = Column(DateTime, nullable=True)
+    plan_is_trial = Column(Boolean, default=False, nullable=False)
     # 最近一次带凭证请求的时间，用于计算 DAU；在 get_current_user 里限流更新
     # （同一用户 5 分钟内只写一次库），避免每个请求都触发一次 UPDATE。
     # Last authenticated request time, used to compute DAU; throttled in

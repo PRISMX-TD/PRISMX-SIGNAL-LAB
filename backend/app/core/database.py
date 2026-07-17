@@ -182,6 +182,8 @@ def _migrate_columns() -> None:
             "plan_note": "VARCHAR",
             "last_active_at": datetime_type,
             "bridge_version": "VARCHAR",
+            "trial_used_at": datetime_type,
+            "plan_is_trial": "BOOLEAN",
         }
         with engine.begin() as conn:
             for name, col_type in user_new.items():
@@ -198,3 +200,7 @@ def _migrate_columns() -> None:
             # Tier system consolidated to two (FREE/PRO);
             # remap legacy values in place (idempotent).
             conn.execute(text("UPDATE users SET plan = 'PRO' WHERE plan IN ('BETA', 'PLUS', 'PARTNER', 'ELITE')"))
+            # 免费试用标记：新列刚加时为 NULL，但声明为 NOT NULL。
+            # Free-trial flag: a freshly added column is NULL, but it's declared NOT NULL.
+            if "plan_is_trial" not in user_cols:
+                conn.execute(text("UPDATE users SET plan_is_trial = FALSE WHERE plan_is_trial IS NULL"))

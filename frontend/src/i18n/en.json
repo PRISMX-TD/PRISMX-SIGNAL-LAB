@@ -449,6 +449,7 @@
     "registeredAt": "Registered",
     "expiresAt": "PRO Expires",
     "neverExpires": "No expiry",
+    "planTrialTag": "PRO (Trial)",
     "mt5Accounts": "MT5 Accounts",
     "balance": "Balance",
     "equity": "Equity",
@@ -708,6 +709,11 @@
     "perMonth": "~${{price}} / mo",
     "payButton": "Pay {{price}} with crypto",
     "alreadyPro": "You are already PRO",
+    "trialTitle": "Free PRO Trial",
+    "trialDesc": "Try every PRO feature free for {{n}} days. No payment needed; your plan reverts to FREE automatically when it ends — nothing is ever charged. One trial per account.",
+    "trialCta": "Start free trial",
+    "trialStarted": "Trial started — PRO is active until {{date}}",
+    "trialActiveNotice": "You are on a PRO trial (until {{date}}). Subscribe now and your paid time starts from the payment date.",
     "payTitle": "Send payment",
     "payHint": "Send the exact amount below from your own wallet. Your account will upgrade automatically once the payment is confirmed.",
     "sendAmount": "Send exactly",
@@ -840,6 +846,9 @@
     "salePercentHint": "Discount off the base prices",
     "saleBadge": "Sale badge (optional)",
     "saleBadgeHint": "Big text on the pricing page, e.g. \"SUMMER\" or \"LAUNCH\"",
-    "salePreview": "Users will see"
+    "salePreview": "Users will see",
+    "trialTitle": "Free Trial Settings",
+    "trialEnabled": "Enable free trial",
+    "trialDays": "Trial days"
   }
 }

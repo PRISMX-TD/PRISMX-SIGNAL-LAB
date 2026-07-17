@@ -3,8 +3,9 @@ import { useTranslation } from "react-i18next";
 import { QRCodeSVG } from "qrcode.react";
 import AuroraBackground from "../components/AuroraBackground";
 import { useAuth } from "../store/auth";
-import { paymentApi } from "../api/client";
-import { localizeApiError } from "../api/utils";
+import { paymentApi, userApi } from "../api/client";
+import { localizeApiError, fmtDate } from "../api/utils";
+import type { TrialStatus } from "../api/types";
 
 type Plan = { id: string; name: string; price_usd: number; original_price_usd?: number | null; days: number; tag?: string };
 type SaleInfo = { percent: number; badge: string; end_at: string; monthly: number; yearly: number } | null;
@@ -102,6 +103,25 @@ export default function UpgradePage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const clockRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // 免费试用状态：独立请求 + 独立 catch，失败只当"不可用"处理，绝不能因为
+  // 这一个次要请求失败就拖垮套餐/支付区的渲染（2026-07-16 账户页的部署时序
+  // 教训——见产品需求文档 6.17 节"上线注意"）。
+  // Free-trial status: its own request with its own catch — a failure here
+  // only means "treat as unavailable", it must never take down the plans/
+  // payment area's rendering (the 2026-07-16 Account-page deploy-timing
+  // lesson, see the product spec's 6.17 "上线注意").
+  const [trialStatus, setTrialStatus] = useState<TrialStatus | null>(null);
+  const [claimingTrial, setClaimingTrial] = useState(false);
+  const [trialClaimError, setTrialClaimError] = useState<string | null>(null);
+  const [trialClaimedUntil, setTrialClaimedUntil] = useState<string | null>(null);
+  // 试用中提示要展示到期日期，AccountPage 同样是直接调 userApi.me() 取
+  // planExpiresAt（该字段不在全局 user store 里），此处照抄同一模式而不是
+  // 为了这一个日期扩大全局状态。/ The trial-active notice needs the expiry
+  // date; AccountPage sources it the same way (planExpiresAt isn't in the
+  // global user store) — mirrored here rather than growing global state for
+  // one date field.
+  const [planExpiresAt, setPlanExpiresAt] = useState<string | null>(null);
+
   useEffect(() => {
     document.title = t("upgrade.title");
     paymentApi.getPlans().then((r) => {
@@ -116,7 +136,25 @@ export default function UpgradePage() {
       if (preferred) setChosenCoin(preferred);
       else if (available.length) setChosenCoin(available[0]);
     }).catch(() => {});
+    paymentApi.getTrial().then(setTrialStatus).catch(() => setTrialStatus(null));
+    userApi.me().then((r) => setPlanExpiresAt(r.planExpiresAt)).catch(() => {});
   }, [t]);
+
+  const handleClaimTrial = useCallback(async () => {
+    setClaimingTrial(true);
+    setTrialClaimError(null);
+    try {
+      const res = await paymentApi.claimTrial();
+      setTrialClaimedUntil(res.planExpiresAt);
+      setPlanExpiresAt(res.planExpiresAt);
+      await refreshUser();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? localizeApiError(e.message) : "Unknown error";
+      setTrialClaimError(msg);
+    } finally {
+      setClaimingTrial(false);
+    }
+  }, [refreshUser]);
 
   useEffect(() => {
     return () => {
@@ -263,6 +301,14 @@ export default function UpgradePage() {
 
   function renderSelect() {
     const isPro = user?.plan === "PRO";
+    // 试用中的用户 plan 也是 "PRO"（等级判断全部复用既有权益逻辑），但他们
+    // 不是"已经付费"——支付区必须继续对他们展示（他们是最该被转化的人），
+    // 只有真正付费/管理员赠送的 PRO 才隐藏支付区、显示"已是 PRO"。
+    // A trialing user's plan is also "PRO" (all entitlement checks are reused
+    // as-is), but they haven't paid — the payment area must stay visible for
+    // them (they're the prime conversion target). Only a genuinely paid or
+    // admin-granted PRO hides the payment area and shows "already PRO".
+    const isPaidPro = isPro && !user?.planIsTrial;
     const monthly = plans.find((p) => p.days === 30);
     const yearly = plans.find((p) => p.days === 365);
     // 年付折扣角标此前写死 "-20%"，不管后台把价格改成多少都不变。改成按
@@ -313,6 +359,36 @@ export default function UpgradePage() {
             </button>
           </div>
         </div>
+
+        {/* 免费试用横幅：仅当后台开放且该用户从未用过时展示 / free-trial banner,
+            shown only while the admin switch is on and this user hasn't claimed yet */}
+        {trialStatus?.eligible && !trialClaimedUntil && (
+          <div className="glass mx-auto mt-8 max-w-md p-6 text-center">
+            <h3 className="font-display text-lg font-bold text-prism-200">{t("upgrade.trialTitle")}</h3>
+            <p className="mt-2 text-sm leading-relaxed text-slate-400">
+              {t("upgrade.trialDesc", { n: trialStatus.days })}
+            </p>
+            {trialClaimError && (
+              <p className="mt-3 text-xs text-down">{trialClaimError}</p>
+            )}
+            <button
+              onClick={handleClaimTrial}
+              disabled={claimingTrial}
+              className="btn-primary mt-4 w-full py-2.5 disabled:opacity-60"
+            >
+              {claimingTrial ? (
+                <span className="mx-auto h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+              ) : (
+                t("upgrade.trialCta")
+              )}
+            </button>
+          </div>
+        )}
+        {trialClaimedUntil && (
+          <div className="glass mx-auto mt-8 max-w-md p-6 text-center font-semibold text-up">
+            {t("upgrade.trialStarted", { date: fmtDate(trialClaimedUntil) })}
+          </div>
+        )}
 
         {/* 双卡定价并排 / two pricing cards */}
         <div className="mx-auto mt-8 grid max-w-4xl grid-cols-1 gap-5 md:grid-cols-2">
@@ -387,7 +463,7 @@ export default function UpgradePage() {
         </div>
 
         {/* 支付区 / payment area */}
-        {isPro ? (
+        {isPaidPro ? (
           <div className="glass mx-auto mt-10 max-w-md px-6 py-5 text-center font-semibold text-up">
             {t("upgrade.alreadyPro")}
           </div>
@@ -395,6 +471,16 @@ export default function UpgradePage() {
           <div className="glass-neon relative mx-auto mt-12 max-w-2xl overflow-hidden p-7 sm:p-8"
                style={{ boxShadow: "0 24px 60px rgba(0,0,0,0.5)" }}>
             <div className="pointer-events-none absolute -left-20 -bottom-20 h-52 w-52 rounded-full bg-prism-600/15 blur-[90px]" />
+
+            {/* 试用中提示：订阅后付费时长从付款日起算，不叠加试用剩余天数
+                (与后端 _sync_payment_status 的规则一致) / trial-active notice:
+                subscribing now starts paid time from the payment date, not
+                stacked on top of remaining trial days (matches the backend rule) */}
+            {user?.planIsTrial && user?.plan === "PRO" && (
+              <div className="relative mb-6 rounded-inner border border-amber-400/20 bg-amber-400/5 p-3.5 text-xs leading-relaxed text-amber-200/90">
+                {t("upgrade.trialActiveNotice", { date: fmtDate(planExpiresAt) })}
+              </div>
+            )}
 
             {/* 步骤标题 / step label */}
             <div className="relative flex items-center gap-2.5">

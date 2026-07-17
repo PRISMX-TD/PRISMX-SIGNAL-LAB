@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { adminApi } from '../api/client'
 import { fmtTime, localizeApiError } from '../api/utils'
 import Select from '../components/Select'
-import type { AdminBrokerSettings, AdminMetrics, AdminPricingSettings, AdminUser, UserPlan, UserRole } from '../api/types'
+import type { AdminBrokerSettings, AdminMetrics, AdminPricingSettings, AdminTrialSettings, AdminUser, UserPlan, UserRole } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
 const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
@@ -60,6 +60,10 @@ export default function AdminPage() {
   const [pricing, setPricing] = useState<AdminPricingSettings | null>(null)
   const [savingPricing, setSavingPricing] = useState(false)
 
+  // 免费试用设置 / free-trial settings
+  const [trial, setTrial] = useState<AdminTrialSettings | null>(null)
+  const [savingTrial, setSavingTrial] = useState(false)
+
   // 批量选择与批量修改：勾选后统一改角色/等级，空字符串代表"不修改该字段"
   // bulk selection & bulk edit: '' means "leave this field unchanged"
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -83,11 +87,12 @@ export default function AdminPage() {
   const load = async (opts: { q?: string; plan?: string } = {}) => {
     setLoading(true)
     try {
-      const [usersRes, metricsRes, settingsRes, pricingRes] = await Promise.all([
+      const [usersRes, metricsRes, settingsRes, pricingRes, trialRes] = await Promise.all([
         adminApi.listUsers({ q: (opts.q ?? query) || undefined, plan: (opts.plan ?? planFilter) || undefined, limit: 100 }),
         adminApi.metrics(),
         adminApi.getSettings(),
         adminApi.getPricing(),
+        adminApi.getTrial(),
       ])
       setUsers(usersRes.users)
       setTotal(usersRes.total)
@@ -96,6 +101,7 @@ export default function AdminPage() {
       setBrokerSettings(settingsRes)
       setBrokerPatternsText(settingsRes.brokerPatterns.join(', '))
       setPricing(pricingRes)
+      setTrial(trialRes)
     } catch (err) {
       showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.loadError'))
     } finally {
@@ -132,6 +138,20 @@ export default function AdminPage() {
       showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
     } finally {
       setSavingPricing(false)
+    }
+  }
+
+  const saveTrial = async () => {
+    if (!trial) return
+    setSavingTrial(true)
+    try {
+      const updated = await adminApi.updateTrial(trial)
+      setTrial(updated)
+      showToast('ok', t('admin.saved'))
+    } catch (err) {
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
+    } finally {
+      setSavingTrial(false)
     }
   }
 
@@ -425,6 +445,45 @@ export default function AdminPage() {
             onClick={savePricing}
           >
             {savingPricing ? t('common.loading') : t('common.save')}
+          </button>
+        </div>
+      )}
+
+      {/* 免费试用设置 / free-trial settings */}
+      {trial && (
+        <div className="glass mb-5 p-5">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h3 className="font-display text-lg font-semibold text-slate-100">{t('admin.trialTitle')}</h3>
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={trial.trialEnabled}
+                onChange={(e) => setTrial({ ...trial, trialEnabled: e.target.checked })}
+                className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
+              />
+              {t('admin.trialEnabled')}
+            </label>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <div>
+              <label className="label">{t('admin.trialDays')}</label>
+              <input
+                type="number"
+                className="input"
+                min="1"
+                max="90"
+                value={trial.trialDays}
+                onChange={(e) => setTrial({ ...trial, trialDays: Math.min(90, Math.max(1, parseInt(e.target.value) || 1)) })}
+                disabled={!trial.trialEnabled}
+              />
+            </div>
+          </div>
+          <button
+            className="btn-primary mt-4 px-5 py-2 text-sm disabled:opacity-40"
+            disabled={savingTrial}
+            onClick={saveTrial}
+          >
+            {savingTrial ? t('common.loading') : t('common.save')}
           </button>
         </div>
       )}

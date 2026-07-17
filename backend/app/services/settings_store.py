@@ -49,6 +49,14 @@ PRICING_DEFAULTS: dict = {
     "sale_end_at": None,  # ISO 8601 string or null
 }
 
+# 免费试用默认值。DB 无记录时使用，管理员在后台修改后写入 PlatformSetting（key="trial"）。
+# Free-trial defaults. Used when no DB row exists; admin changes persist to
+# PlatformSetting (key="trial").
+TRIAL_DEFAULTS: dict = {
+    "trial_enabled": False,
+    "trial_days": 7,
+}
+
 _CACHE_TTL_SECONDS = 30
 _cache: dict = {}
 _cache_at: float = 0.0
@@ -141,6 +149,61 @@ def save_pricing_settings(db, data: dict) -> None:
     row = db.query(PlatformSetting).filter(PlatformSetting.key == "pricing").first()
     if row is None:
         db.add(PlatformSetting(key="pricing", value=encoded))
+    else:
+        row.value = encoded
+
+
+# ---- 免费试用独立缓存（与券商/定价设置分开） ----
+_trial_cache: dict = {}
+_trial_cache_at: float = 0.0
+
+
+def invalidate_trial_cache() -> None:
+    global _trial_cache_at
+    with _lock:
+        _trial_cache_at = 0.0
+
+
+def _load_trial_from_db(db) -> dict:
+    """从 DB 读试用设置 JSON，缺失的 key 回落到默认值。"""
+    data = dict(TRIAL_DEFAULTS)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "trial").first()
+    if row:
+        try:
+            stored = json.loads(row.value)
+            if isinstance(stored, dict):
+                for k in TRIAL_DEFAULTS:
+                    if k in stored:
+                        data[k] = stored[k]
+        except (ValueError, TypeError):
+            logger.warning("platform_settings: invalid JSON for trial, using defaults")
+    return data
+
+
+def get_trial_settings(db) -> dict:
+    """读取免费试用设置（独立缓存）。
+    Read free-trial settings (separate cache)."""
+    global _trial_cache, _trial_cache_at
+    now = time.time()
+    with _lock:
+        if _trial_cache and now - _trial_cache_at < _CACHE_TTL_SECONDS:
+            return dict(_trial_cache)
+    data = _load_trial_from_db(db)
+    with _lock:
+        _trial_cache = data
+        _trial_cache_at = now
+    return dict(data)
+
+
+def save_trial_settings(db, data: dict) -> None:
+    """写入免费试用设置（不提交，调用方 commit 后 invalidate）。
+    Write free-trial settings (no commit; caller commits then invalidates cache)."""
+    merged = _load_trial_from_db(db)
+    merged.update(data)
+    encoded = json.dumps(merged, ensure_ascii=False)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "trial").first()
+    if row is None:
+        db.add(PlatformSetting(key="trial", value=encoded))
     else:
         row.value = encoded
 

@@ -449,6 +449,7 @@
     "registeredAt": "注册时间",
     "expiresAt": "PRO 到期",
     "neverExpires": "永不过期",
+    "planTrialTag": "PRO（试用）",
     "mt5Accounts": "MT5 账户",
     "balance": "余额",
     "equity": "净值",
@@ -708,6 +709,11 @@
     "perMonth": "约 ${{price}} / 月",
     "payButton": "用加密货币支付 {{price}}",
     "alreadyPro": "你已经是 PRO 了",
+    "trialTitle": "免费试用 PRO",
+    "trialDesc": "免费体验 {{n}} 天完整 PRO 权益，无需付款，到期自动恢复 FREE，不自动扣费。每个账号仅限一次。",
+    "trialCta": "开始免费试用",
+    "trialStarted": "试用已开始，PRO 权益有效至 {{date}}",
+    "trialActiveNotice": "你正在试用 PRO（至 {{date}}）。现在订阅，付费时长从付款日起算。",
     "payTitle": "请支付",
     "payHint": "用你自己的钱包向下方地址发送精确金额，支付完成后自动升级",
     "sendAmount": "应付金额",
@@ -840,6 +846,9 @@
     "salePercentHint": "在基础价格上的打折力度",
     "saleBadge": "促销标语（可选）",
     "saleBadgeHint": "定价页面的醒目文字，如「SUMMER」「LAUNCH」",
-    "salePreview": "用户将看到"
+    "salePreview": "用户将看到",
+    "trialTitle": "免费试用设置",
+    "trialEnabled": "开放免费试用",
+    "trialDays": "试用天数"
   }
 }

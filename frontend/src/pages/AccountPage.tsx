@@ -273,7 +273,9 @@ export default function AccountPage() {
               <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-slate-300">
                 {t("account.platform")}
               </h3>
-              <span className="tag bg-prism-600/20 text-prism-300">{info.plan}</span>
+              <span className="tag bg-prism-600/20 text-prism-300">
+                {info.plan === "PRO" && info.planIsTrial ? t("account.planTrialTag") : info.plan}
+              </span>
             </div>
             <div className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
               <div className="min-w-0">

@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPricingSettings, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPricingSettings, AdminTrialSettings, TrialStatus, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote } from './types'
 
 const TOKEN_KEY = 'prismx_token'
 
@@ -229,6 +229,9 @@ export const userApi = {
       email: string
       plan: UserPlan
       planExpiresAt: string | null
+      // 当前 PRO 是否为免费试用（区别于正式付费/管理员赠送）
+      // whether the current PRO is a free trial (vs. paid or admin-granted)
+      planIsTrial: boolean
       hasPassword: boolean
       createdAt: string | null
       mt5Accounts: Array<{
@@ -343,6 +346,12 @@ export const adminApi = {
         method: 'PUT',
         body: JSON.stringify(payload),
       }),
+    getTrial: () => request<AdminTrialSettings>('/admin/trial'),
+    updateTrial: (payload: AdminTrialSettings) =>
+      request<AdminTrialSettings>('/admin/trial', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
   }
 
 // 自动仓位管理（PRO）/ auto position management (PRO)
@@ -402,6 +411,11 @@ export const paymentApi = {
       finished_at: string | null
       created_at: string
     }>(`/payments/status/${paymentId}`),
+  getTrial: () => request<TrialStatus>('/payments/trial'),
+  claimTrial: () =>
+    request<{ ok: boolean; planExpiresAt: string; days: number }>('/payments/trial/claim', {
+      method: 'POST',
+    }),
 }
 
 // 推送订阅 / Push subscriptions

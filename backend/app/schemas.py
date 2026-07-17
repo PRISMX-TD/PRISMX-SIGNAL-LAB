@@ -99,6 +99,13 @@ class AdminPricingSettings(BaseModel):
     saleEndAt: str = Field(default="", max_length=25)  # ISO date string or empty
 
 
+class AdminTrialSettings(BaseModel):
+    """免费试用设置 / Free-trial settings."""
+
+    trialEnabled: bool = False
+    trialDays: int = Field(default=7, ge=1, le=90)
+
+
 # ---------- API Token / MT5 连接凭证 ----------
 class EATokenOut(BaseModel):
     # 明文 token 仅在重置（生成）响应中出现一次；查询时为 None（库中只存哈希）。

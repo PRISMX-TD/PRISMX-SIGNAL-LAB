@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import Payment, User
+from app.models import AdminAuditLog, Payment, User
 from app.services.deps import get_current_user
 from app.services.nowpayments import (
     create_payment as np_create,
@@ -21,7 +21,7 @@ from app.services.nowpayments import (
     verify_ipn_signature,
 )
 from app.core.config import settings
-from app.services.settings_store import get_pricing_settings
+from app.services.settings_store import get_pricing_settings, get_trial_settings
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
@@ -97,6 +97,89 @@ async def get_payment_currencies():
         return {"currencies": currencies}
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"NOWPayments error: {e}")
+
+
+# ═══ 免费试用 / Free trial ═══
+
+@router.get("/trial")
+def get_trial_status(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """当前用户能否领取免费试用 / whether the current user may claim a free trial.
+
+    资格三条件同时满足：① 管理后台开关为开；② 从未用过试用；③ 当前等级是 FREE。
+    Eligible only if all three hold: ① the admin switch is on; ② never claimed
+    before; ③ the current plan is FREE.
+    """
+    trial = get_trial_settings(db)
+    enabled = bool(trial["trial_enabled"])
+    eligible = enabled and user.trial_used_at is None and user.plan == "FREE"
+    return {
+        "enabled": enabled,
+        "days": int(trial["trial_days"]),
+        "eligible": eligible,
+        "usedAt": user.trial_used_at.isoformat() if user.trial_used_at else None,
+    }
+
+
+@router.post("/trial/claim")
+def claim_trial(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """领取免费试用：立即升级为 PRO，到期由既有的会员到期机制自动降回 FREE。
+
+    Claim the free trial: upgrades to PRO immediately; the existing membership
+    expiry mechanism (services/plan_expiry.py) auto-downgrades back to FREE.
+
+    用条件 UPDATE 原子抢占资格（而不是先读后写），防止同一用户并发点两次都
+    成功——思路与 payments._sync_payment_status 抢占 FINISHED 状态完全一致。
+    Claims eligibility via a conditional UPDATE (not read-then-write) so two
+    concurrent clicks from the same user can't both succeed — same approach as
+    the FINISHED-state claim in _sync_payment_status.
+    """
+    trial = get_trial_settings(db)
+    if not trial["trial_enabled"]:
+        raise HTTPException(status_code=400, detail="试用功能未开放 / Free trial is not available")
+
+    days = int(trial["trial_days"])
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(days=days)
+
+    claimed = (
+        db.query(User)
+        .filter(User.id == user.id, User.trial_used_at.is_(None), User.plan == "FREE")
+        .update(
+            {
+                "plan": "PRO",
+                "plan_expires_at": expires,
+                "trial_used_at": now,
+                "plan_is_trial": True,
+            },
+            synchronize_session=False,
+        )
+    )
+    if not claimed:
+        db.rollback()
+        fresh = db.query(User).filter(User.id == user.id).first()
+        if fresh and fresh.trial_used_at is not None:
+            raise HTTPException(status_code=409, detail="试用已被使用 / Trial already used")
+        raise HTTPException(status_code=409, detail="当前等级无需试用 / Current plan does not need a trial")
+
+    # 审计留痕：沿用"无管理员操作者时用户自身占位"的仓库约定
+    # （见 services/plan_expiry.py 的 field="plan:auto_expire" 同款写法）。
+    db.add(
+        AdminAuditLog(
+            admin_user_id=user.id,
+            target_user_id=user.id,
+            field="plan:trial_claim",
+            old_value="FREE",
+            new_value=f"PRO({days}d)",
+        )
+    )
+    db.commit()
+    return {"ok": True, "planExpiresAt": expires.isoformat(), "days": days}
 
 
 @router.post("/create")
@@ -313,7 +396,24 @@ def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_da
                 .first()
             )
             if user:
-                if user.plan == "PRO" and user.plan_expires_at is None:
+                was_trial = user.plan_is_trial
+                if was_trial:
+                    # 试用期内付费转正：付费时长从付款时刻起算，不叠加试用剩余
+                    # 天数——否则"先领试用再付费"会比直接付费多得天数，试用就
+                    # 变成人人必薅的漏洞。清空到期时间让下面的 base 退回 now。
+                    # was_trial 记在清空之前，避免下面的"永久 PRO"判断把刚清空
+                    # 出的 None 误认成赠送的永久 PRO 而跳过计费。
+                    # Paid conversion during a trial starts from "now", discarding
+                    # the trial's remaining days — otherwise claiming a trial
+                    # before paying would always yield extra days, turning the
+                    # trial into a mandatory exploit. Clearing the expiry makes
+                    # `base` fall back to now below. was_trial is captured before
+                    # clearing so the "permanent PRO" check below doesn't mistake
+                    # the freshly-cleared None for a comp grant and skip billing.
+                    user.plan_is_trial = False
+                    user.plan_expires_at = None
+
+                if user.plan == "PRO" and user.plan_expires_at is None and not was_trial:
                     # 永久 PRO（内测/赠送，无到期时间）：付款不能把「永久」改成有期限
                     # Permanent PRO (comp grant, no expiry): a payment must not
                     # replace "never expires" with a deadline — leave it untouched.

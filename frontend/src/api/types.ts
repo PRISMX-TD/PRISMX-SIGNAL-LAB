@@ -38,6 +38,11 @@ export interface User {
   email: string
   role: UserRole
   plan: UserPlan
+  // 当前 PRO 是否为免费试用；登录/注册响应不带这个字段（未知），
+  // 只有 refreshUser()（调 GET /auth/me）之后才会补上。
+  // Whether the current PRO is a free trial; absent (unknown) on the
+  // login/register response — only populated after refreshUser() (GET /auth/me).
+  planIsTrial?: boolean
 }
 
 // 管理后台：用户列表条目 / admin: one row in the user list
@@ -70,6 +75,20 @@ export interface AdminPricingSettings {
   salePercent: number
   saleBadge: string
   saleEndAt: string
+}
+
+// 管理后台：免费试用设置 / admin: free-trial settings
+export interface AdminTrialSettings {
+  trialEnabled: boolean
+  trialDays: number
+}
+
+// 免费试用当前状态（用户端）/ current free-trial status (user-facing)
+export interface TrialStatus {
+  enabled: boolean
+  days: number
+  eligible: boolean
+  usedAt: string | null
 }
 
 // 信号客观胜负：与 status（能否下单）完全独立的第二条状态线，见后端

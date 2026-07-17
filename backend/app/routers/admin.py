@@ -20,14 +20,17 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import AdminAuditLog, MT5Account, User
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminMetricsOut, AdminPricingSettings, AdminUserOut, AdminUserUpdate
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminMetricsOut, AdminPricingSettings, AdminTrialSettings, AdminUserOut, AdminUserUpdate
 from app.services.deps import require_admin
 from app.services.settings_store import (
     get_broker_settings,
     get_pricing_settings,
+    get_trial_settings,
     invalidate_pricing_cache,
     invalidate_settings_cache,
+    invalidate_trial_cache,
     save_pricing_settings,
+    save_trial_settings,
     set_setting,
 )
 
@@ -144,6 +147,9 @@ def bulk_update_users(
         if "plan" in fields and fields["plan"] is not None:
             _log_change(db, admin.id, target.id, "plan", target.plan, fields["plan"])
             target.plan = fields["plan"]
+            # 管理员手动改等级视为权威操作，覆盖任何试用状态。
+            # An admin's manual plan change is authoritative and overrides any trial state.
+            target.plan_is_trial = False
         if "planExpiresAt" in fields:
             _log_change(db, admin.id, target.id, "plan_expires_at", target.plan_expires_at, fields["planExpiresAt"])
             target.plan_expires_at = fields["planExpiresAt"]
@@ -176,6 +182,9 @@ def update_user(
     if "plan" in fields and fields["plan"] is not None:
         _log_change(db, admin.id, target.id, "plan", target.plan, fields["plan"])
         target.plan = fields["plan"]
+        # 管理员手动改等级视为权威操作，覆盖任何试用状态。
+        # An admin's manual plan change is authoritative and overrides any trial state.
+        target.plan_is_trial = False
     if "planExpiresAt" in fields:
         _log_change(db, admin.id, target.id, "plan_expires_at", target.plan_expires_at, fields["planExpiresAt"])
         target.plan_expires_at = fields["planExpiresAt"]
@@ -360,3 +369,36 @@ def put_pricing(
     db.commit()
     invalidate_pricing_cache()
     return get_pricing(db, admin)
+
+
+# ---------- 免费试用设置 / free-trial settings ----------
+
+@router.get("/trial", response_model=AdminTrialSettings)
+def get_trial(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """读取免费试用设置。Read free-trial settings."""
+    t = get_trial_settings(db)
+    return AdminTrialSettings(
+        trialEnabled=bool(t["trial_enabled"]),
+        trialDays=int(t["trial_days"]),
+    )
+
+
+@router.put("/trial", response_model=AdminTrialSettings)
+def put_trial(
+    body: AdminTrialSettings,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """保存免费试用设置。Save free-trial settings."""
+    data = {
+        "trial_enabled": body.trialEnabled,
+        "trial_days": body.trialDays,
+    }
+    save_trial_settings(db, data)
+    _log_change(db, admin.id, admin.id, "setting:trial", None, json.dumps(data))
+    db.commit()
+    invalidate_trial_cache()
+    return get_trial(db, admin)

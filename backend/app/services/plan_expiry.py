@@ -76,6 +76,10 @@ def downgrade_if_expired(db: Session, user: User) -> bool:
     )
     user.plan = "FREE"
     user.plan_expires_at = None
+    # 试用与付费到期共用这条路径，无条件清理是安全的（非试用用户本就是 False）。
+    # Trial and paid expiry share this path; clearing unconditionally is safe
+    # (non-trial users are already False).
+    user.plan_is_trial = False
     return True
 
 

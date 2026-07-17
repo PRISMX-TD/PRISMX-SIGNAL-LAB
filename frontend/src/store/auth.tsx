@@ -68,12 +68,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const me = await userApi.me()
       setUser((prev) => {
         if (!prev) return null
-        return { ...prev, plan: me.plan }
+        return { ...prev, plan: me.plan, planIsTrial: me.planIsTrial }
       })
       const stored = localStorage.getItem(USER_KEY)
       if (stored) {
         const parsed = JSON.parse(stored)
         parsed.plan = me.plan
+        parsed.planIsTrial = me.planIsTrial
         localStorage.setItem(USER_KEY, JSON.stringify(parsed))
       }
     } catch {
