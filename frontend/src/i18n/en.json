@@ -869,7 +869,21 @@
     "violations": "{{v}}/{{n}} violations",
     "insufficient": "Not enough data",
     "upgradeHint": "Upgrade to PRO to see the per-dimension breakdown",
-    "disclaimer": "Only covers signal orders placed and managed through this platform; actions taken directly in the MT5 terminal are not counted."
+    "disclaimer": "Only covers signal orders placed and managed through this platform; actions taken directly in the MT5 terminal are not counted.",
+    "levelGreat": "Great discipline",
+    "levelOk": "Doing okay",
+    "levelPoor": "Needs work",
+    "helpButton": "What is this?",
+    "helpTitle": "How is the discipline score calculated?",
+    "helpIntro": "This score only looks at whether you followed the plan — it has nothing to do with whether the trade made money. The total is a weighted average of the three checks below (stop-loss 40%, position size 30%, exit 30%).",
+    "helpStopTitle": "Stop-loss discipline",
+    "helpStopBody": "Checks whether you undid the signal's stop-loss — opening without a stop, moving the stop in the losing direction, or removing it entirely all count as a violation. The system's own automatic adjustments (break-even, trailing stop) don't count against you.",
+    "helpVolumeTitle": "Position-size discipline",
+    "helpVolumeBody": "Checks whether this trade's size is much bigger than what you normally place (over 3x). A sudden jump in size is often a \"revenge trade\" trying to win back a loss — flagged as a violation.",
+    "helpExitTitle": "Exit discipline",
+    "helpExitBody": "Checks whether you manually closed a position before it hit its stop-loss or take-profit. Closing at a loss counts as a violation (likely a panic exit); closing at a profit doesn't.",
+    "helpNote": "Only counts orders placed against a signal, and only actions taken through the website — anything done directly in the MT5 terminal isn't visible to the system and is treated as compliant.",
+    "helpGotIt": "Got it"
   },
   "simulator": {
     "title": "Signal History Replay",
