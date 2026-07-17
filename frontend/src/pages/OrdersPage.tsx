@@ -85,12 +85,6 @@ export default function OrdersPage() {
   const [autoMsg, setAutoMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
 
   const isPro = user?.plan === 'PRO'
-  // 纪律分卡的可见性（功能内部试用中，仅管理员）——后端 GET /orders/discipline
-  // 也是 require_admin，这里只是不给非管理员看到入口。
-  // Discipline-score card visibility (feature in internal trial, admins
-  // only) — the backend endpoint is likewise require_admin; this just hides
-  // the entry for non-admins.
-  const isAdmin = user?.role === 'admin'
 
   useEffect(() => {
     refreshUser()                        // 每次进入页面刷新 plan，确保管理员升级后即时生效
@@ -360,14 +354,10 @@ export default function OrdersPage() {
             ))}
           </div>
         )}
-        {isAdmin ? (
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-            <PersonalWinRateCard variant="detailed" login={selectedLogin ?? undefined} />
-            <DisciplineScoreCard login={selectedLogin ?? undefined} isPro={isPro} />
-          </div>
-        ) : (
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
           <PersonalWinRateCard variant="detailed" login={selectedLogin ?? undefined} />
-        )}
+          <DisciplineScoreCard login={selectedLogin ?? undefined} isPro={isPro} />
+        </div>
         <div className="mt-5">
           <ClosedTradesList trades={visibleTrades} showAccountColumn={multiAccount && selectedLogin === null} />
         </div>

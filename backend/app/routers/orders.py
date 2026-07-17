@@ -25,7 +25,7 @@ from app.schemas import (
     OrderRequest,
 )
 from app.services.connection_manager import manager
-from app.services.deps import get_current_user, is_account_online, require_admin, validate_order
+from app.services.deps import get_current_user, is_account_online, validate_order
 from app.services.discipline import compute_discipline
 from app.services.plans import is_realtime_plan
 from app.services.trade_performance import compute_personal_winrate
@@ -316,7 +316,7 @@ def order_winrate(
 @router.get("/discipline", response_model=dict)
 def order_discipline(
     login: str | None = None,
-    user: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """当前用户的纪律分：回答"有没有按计划执行"，与赚不赚钱无关，纯只读统计。
@@ -326,10 +326,6 @@ def order_discipline(
     dimensions 逐维度明细——门槛直接判 user.plan == "PRO"，不经
     services.plans.can_auto_manage 之类的旁支，明细展示与自动仓管没有关系。
 
-    **当前仅管理员可用**（`require_admin`，功能内部试用中，未对普通用户开放，
-    见《产品路线图与决策记录》）。放开时把依赖换回 `get_current_user`，
-    下面的 FREE/PRO 逐维度裁剪逻辑本身已经按最终设计写好，无需改动。
-
     The current user's discipline score: whether the plan was followed,
     independent of P&L. Purely read-only.
 
@@ -338,12 +334,6 @@ def order_discipline(
     positions/trend only; PRO also gets the per-dimension breakdown — gated
     directly on user.plan == "PRO", not via services.plans.can_auto_manage or
     similar (the detail view has nothing to do with auto-management).
-
-    **Admin-only for now** (`require_admin`; the feature is in internal
-    trial, not released to regular users — see the roadmap doc). To release
-    it, swap the dependency back to `get_current_user` — the FREE/PRO
-    per-dimension gating below is already written for the final design and
-    needs no change.
     """
     bound = _bound_logins(db, user.id)
     if login is not None and login not in bound:

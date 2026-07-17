@@ -1,7 +1,4 @@
 // 纪律分卡：回答"有没有按计划执行"，与赚不赚钱无关。只有自己能看到自己的。
-// **当前仅管理员可见**——挂载点由父组件（OrdersPage）用 isAdmin 判断，本组件
-// 不做权限判断；后端 GET /orders/discipline 也是 require_admin。功能内部
-// 试用中，对外开放时把两处判断去掉即可，本组件不需要改动。
 //
 // 2026-07-17 重新设计：总分旁边加一个"这是什么"小圆点按钮，点开一个用大白话
 // 讲清楚三个维度怎么判的说明弹窗（面向完全不懂技术的普通交易者，不讲实现
@@ -9,10 +6,7 @@
 // 还可以/需要加强"），比一个孤零零的数字更容易一眼看懂。
 //
 // Discipline Score card: whether the plan was followed, independent of P&L.
-// Visible only to the user themself. **Admin-only for now** — gated by the
-// parent (OrdersPage) via isAdmin; this component itself has no permission
-// logic. The backend endpoint is likewise require_admin. Releasing the
-// feature means dropping both gates; this component needs no change.
+// Visible only to the user themself.
 //
 // 2026-07-17 redesign: a small "what is this" info button next to the score
 // opens a plain-language modal explaining how each dimension is judged

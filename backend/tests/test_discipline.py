@@ -363,10 +363,10 @@ def test_snapshot_upsert_idempotent(db, user):
     assert len(rows) == 1
 
 
-def test_requires_admin(client, db, auth_headers):
-    """普通用户拿不到：功能先内部试用，未对外开放。
-    Regular users are refused — the feature is in internal trial, not released."""
-    assert client.get("/api/orders/discipline", headers=auth_headers).status_code == 403
+def test_requires_auth(client, db, auth_headers):
+    """任何登录用户都能拿到自己的纪律分；匿名请求被拒绝。
+    Any logged-in user can fetch their own discipline score; anonymous requests are refused."""
+    assert client.get("/api/orders/discipline", headers=auth_headers).status_code == 200
     assert client.get("/api/orders/discipline").status_code == 401
 
 
