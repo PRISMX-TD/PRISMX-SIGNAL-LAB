@@ -7,6 +7,7 @@ import { useLive } from '../store/live'
 import { fmtTime, localizeApiError } from '../api/utils'
 import ConfirmModal from '../components/ConfirmModal'
 import TokenRevealModal from '../components/TokenRevealModal'
+import { useBackToClose } from '../utils/useBackToClose'
 import type { MT5Account } from '../api/types'
 
 export default function BindPage() {
@@ -41,6 +42,17 @@ export default function BindPage() {
   const [deleteTarget, setDeleteTarget] = useState<MT5Account | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+
+  // 这三个都是全屏弹窗，手机上划返回应该先关掉弹窗、而不是直接退出本页面
+  // （见 useBackToClose 的说明）。/ All three are full-screen modals; on
+  // mobile, swiping back should close the modal first rather than exiting
+  // this page outright (see useBackToClose's comment).
+  useBackToClose(resetConfirmOpen, () => setResetConfirmOpen(false))
+  useBackToClose(revealToken != null, () => setRevealToken(null))
+  useBackToClose(deleteTarget != null, () => {
+    setDeleteTarget(null)
+    setDeleteError('')
+  })
 
   useEffect(() => {
     eaApi.getToken().then((res) => setApiToken(res.apiToken)).catch(() => {})

@@ -23,6 +23,7 @@ import {
   type IndicatorSettings,
   type LinesConfig,
 } from './indicatorSettings'
+import { useBackToClose } from '../../utils/useBackToClose'
 
 interface Props {
   indicators: IndicatorFlags
@@ -115,6 +116,12 @@ function NumberField({
 function ColorPicker({ label, value, onChange }: { label?: string; value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  // 这个色板套在指标设置弹窗内部，是"弹窗里的弹窗"：划返回应该先收起色板，
+  // 再收起外层的整个设置弹窗，而不是一划直接把设置弹窗也带走。
+  // This palette nests inside the indicator settings modal — a "modal within
+  // a modal": swiping back should close the palette first, then the outer
+  // settings modal on a second swipe, not take both out in one go.
+  useBackToClose(open, () => setOpen(false))
 
   useEffect(() => {
     if (!open) return

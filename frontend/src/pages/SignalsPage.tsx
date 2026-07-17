@@ -9,6 +9,7 @@ import type { Signal } from '../api/types'
 import SignalGrid from '../components/signals/SignalGrid'
 import SlideOrderModal from '../components/SlideOrderModal'
 import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
+import { useBackToClose } from '../utils/useBackToClose'
 
 export default function SignalsPage() {
   const { t } = useTranslation()
@@ -17,6 +18,11 @@ export default function SignalsPage() {
   const { signals, accounts, loaded } = useLive()
   const accountQuotes = useQuotes()
   const [activeSignal, setActiveSignal] = useState<Signal | null>(null)
+  // 下单弹窗是全屏的，手机上划返回应该先关掉弹窗、而不是直接退出信号面板页
+  // （见 useBackToClose 的说明）。/ The order modal is full-screen; on
+  // mobile, swiping back should close it first rather than exiting the
+  // signals page outright (see useBackToClose's comment).
+  useBackToClose(activeSignal != null, () => setActiveSignal(null))
   const { toast, placeOrder } = useOrderPlacement()
 
   const openTrade = useCallback((s: Signal) => setActiveSignal(s), [])

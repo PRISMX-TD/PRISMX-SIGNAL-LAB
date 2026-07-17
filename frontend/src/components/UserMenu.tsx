@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
+import { useBackToClose } from "../utils/useBackToClose"
 
 export default function UserMenu({
   email,
@@ -23,6 +24,12 @@ export default function UserMenu({
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
+  // 头部下拉不是全屏遮罩，但同样应该让划返回先收起菜单，而不是直接离开页面
+  // （见 useBackToClose 的说明；NotificationBell 也是同样处理）。
+  // The header dropdown isn't a full-screen overlay either, but swiping back
+  // should still close the menu first rather than leaving the page (see
+  // useBackToClose's comment; NotificationBell gets the same treatment).
+  useBackToClose(open, () => setOpen(false))
   const rootRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {

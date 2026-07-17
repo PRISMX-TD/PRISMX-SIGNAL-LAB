@@ -19,6 +19,7 @@ import SlideOrderModal from '../components/SlideOrderModal'
 import { useFocusEntries, useNow, useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import { trendStance, type TrendStance } from '../components/signals/SignalView'
 import type { FocusState } from '../components/signals/SignalView'
+import { useBackToClose } from '../utils/useBackToClose'
 
 export default function DashboardPage() {
   const { t } = useTranslation()
@@ -35,6 +36,11 @@ export default function DashboardPage() {
 
   const [focusIdx, setFocusIdx] = useState(0)
   const [activeSignal, setActiveSignal] = useState<Signal | null>(null)
+  // 下单弹窗是全屏的，手机上划返回应该先关掉弹窗、而不是直接退出仪表盘
+  // （见 useBackToClose 的说明）。/ The order modal is full-screen; on
+  // mobile, swiping back should close it first rather than exiting the
+  // dashboard outright (see useBackToClose's comment).
+  useBackToClose(activeSignal != null, () => setActiveSignal(null))
 
   const idx = Math.min(focusIdx, Math.max(0, focusEntries.length - 1))
   const cur = focusEntries[idx]

@@ -15,6 +15,7 @@ import UserMenu from './UserMenu'
 import AuroraBackground from './AuroraBackground'
 import ConfirmModal from './ConfirmModal'
 import BridgeUpdateNotice from './BridgeUpdateNotice'
+import { useBackToClose } from '../utils/useBackToClose'
 
 function NavItem({ to, label }: { to: string; label: string }) {
   return (
@@ -171,6 +172,11 @@ export default function Layout() {
   // button inside a swipe-up sheet), so gate it behind a confirmation;
   // skipped on the desktop text button where accidental clicks are rare.
   const [confirmLogout, setConfirmLogout] = useState(false)
+  // 全屏确认弹窗，手机上划返回应该先关掉它、而不是直接退出当前页面
+  // （见 useBackToClose 的说明）。/ A full-screen confirm modal; on mobile,
+  // swiping back should close it first rather than exiting the current page
+  // outright (see useBackToClose's comment).
+  useBackToClose(confirmLogout, () => setConfirmLogout(false))
 
   const handleLogout = () => {
     setConfirmLogout(false)

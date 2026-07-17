@@ -6,6 +6,7 @@ import { orderApi } from '../api/client'
 import { clientOrderId, displaySymbol, localizeApiError } from '../api/utils'
 import type { Position } from '../api/types'
 import ConfirmModal from './ConfirmModal'
+import { useBackToClose } from '../utils/useBackToClose'
 
 interface Props {
   position: Position
@@ -19,6 +20,11 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
   const [mode, setMode] = useState<Mode>('view')
   const [busy, setBusy] = useState(false)
   const [confirmCloseAll, setConfirmCloseAll] = useState(false)
+  // 全屏确认弹窗，手机上划返回应该先关掉它、而不是直接退出当前页面
+  // （见 useBackToClose 的说明）。/ A full-screen confirm modal; on mobile,
+  // swiping back should close it first rather than exiting the current page
+  // outright (see useBackToClose's comment).
+  useBackToClose(confirmCloseAll, () => setConfirmCloseAll(false))
   const [closeVol, setCloseVol] = useState(String(p.volume))
   const [sl, setSl] = useState(p.stopLoss ? String(p.stopLoss) : '')
   const [tp, setTp] = useState(p.takeProfit ? String(p.takeProfit) : '')

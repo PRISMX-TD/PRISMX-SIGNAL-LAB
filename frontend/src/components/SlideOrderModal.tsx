@@ -5,6 +5,7 @@ import type { MT5Account, Quote, Signal } from '../api/types'
 import { calcCountdown, contractSize, displaySymbol, localizeApiError, suggestVolumeByRisk, usdMarginBasis } from '../api/utils'
 import { SIGNAL_LIFESPAN_MS } from './signals/SignalView'
 import { useNow } from './signals/hooks'
+import { useBackToClose } from '../utils/useBackToClose'
 
 interface Props {
   signal: Signal
@@ -35,6 +36,12 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
   const [login, setLogin] = useState<string>(() => onlineAccounts[0]?.login ?? '')
   const selected = onlineAccounts.find((a) => a.login === login) || null
   const [acctMenuOpen, setAcctMenuOpen] = useState(false)
+  // 账户切换菜单套在这个（已全屏的）弹窗内部：划返回应该先收起菜单，
+  // 再收起外层弹窗，而不是一划就把两层都带走。
+  // The account-switcher menu nests inside this (already full-screen) modal:
+  // swiping back should close the menu first, then the outer modal on a
+  // second swipe, not take both out in one go.
+  useBackToClose(acctMenuOpen, () => setAcctMenuOpen(false))
   // 选中账户对应交易商的实时报价：账户切换时自动跟着换成那家交易商的价格
   // The selected account's own broker quote: switching accounts automatically
   // switches which broker's price is used

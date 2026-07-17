@@ -10,12 +10,22 @@ import { Link } from "react-router-dom"
 import { notificationApi } from "../api/client"
 import { pushSupported } from "../utils/push"
 import { disableNotifications, enableNotifications, ENABLE_ERROR_KEYS, NotifEnableError } from "../utils/notifications"
+import { useBackToClose } from "../utils/useBackToClose"
 
 type Status = "off" | "on" | "attention"
 
 export default function NotificationBell() {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
+  // 弹层不是全屏遮罩，理论上打开时还能点穿到别的导航链接——useBackToClose
+  // 内部已经对"打开期间发生了别的真实导航"这种情况做了防护（不会误把那次
+  // 导航撤销掉），所以这里可以放心接入，划返回时先收起弹层而不是离开页面。
+  // The panel isn't a full-screen overlay, so in principle a nav link could
+  // still be clicked while it's open — useBackToClose already guards against
+  // "a real navigation happened while open" (won't undo that navigation), so
+  // it's safe to wire in here too: swiping back closes the panel first
+  // rather than leaving the page.
+  useBackToClose(open, () => setOpen(false))
   const [enabled, setEnabled] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)

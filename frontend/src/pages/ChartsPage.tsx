@@ -33,6 +33,7 @@ import { usePrefs } from '../store/prefs'
 import { useLive, useQuotes } from '../store/live'
 import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import { sma, ema, bollinger, rsi, macd, closes } from '../utils/indicators'
+import { useBackToClose } from '../utils/useBackToClose'
 import {
   DEFAULT_INDICATOR_SETTINGS,
   mergeIndicatorSettings,
@@ -311,6 +312,13 @@ export default function ChartsPage() {
   const [lastPrice, setLastPrice] = useState(0)
   // 手动下单弹窗：null 表示关闭 / manual order modal: null = closed
   const [orderSide, setOrderSide] = useState<'BUY' | 'SELL' | null>(null)
+
+  // 这两个都是全屏弹窗，手机上划返回应该先关掉弹窗、而不是直接退出图表页
+  // （见 useBackToClose 的说明）。/ Both are full-screen modals; on mobile,
+  // swiping back should close the modal first rather than exiting the charts
+  // page outright (see useBackToClose's comment).
+  useBackToClose(settingsOpen, () => setSettingsOpen(false))
+  useBackToClose(orderSide != null, () => setOrderSide(null))
 
   const { accounts, activeSymbols } = useLive()
   const accountQuotes = useQuotes()
