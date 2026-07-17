@@ -84,6 +84,9 @@ export default function OrdersPage() {
   const [autoMsg, setAutoMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
 
   const isPro = user?.plan === 'PRO'
+  // 历史信号回放入口的可见性（功能内部试用中，仅管理员）/ replay entry visibility
+  // (feature in internal trial, admins only)
+  const isAdmin = user?.role === 'admin'
 
   useEffect(() => {
     refreshUser()                        // 每次进入页面刷新 plan，确保管理员升级后即时生效
@@ -326,6 +329,17 @@ export default function OrdersPage() {
           Personal trading performance: the account tab drives both the
           win-rate card and the detail list below, so the numbers never disagree */}
       <div className="mb-5">
+        {/* 历史信号回放入口：只对管理员显示——功能内部试用中，未对普通用户开放
+            （真正的边界在后端 require_admin，这里只是不给非管理员看到入口）。
+            Replay entry: admins only — the feature is in internal trial (the
+            real boundary is the backend's require_admin; this hides the link). */}
+        {isAdmin && (
+          <div className="mb-2 flex justify-end">
+            <Link to="/simulator" className="text-xs text-prism-300 hover:text-prism-200">
+              {t('simulator.entry')}
+            </Link>
+          </div>
+        )}
         {multiAccount && (
           <div className="mb-3 flex flex-wrap gap-2">
             <button

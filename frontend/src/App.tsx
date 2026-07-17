@@ -19,6 +19,7 @@ const UpgradePage = lazy(() => import('./pages/UpgradePage'))
 const DownloadPage = lazy(() => import('./pages/DownloadPage'))
 const AccountPage = lazy(() => import('./pages/AccountPage'))
 const AdminPage = lazy(() => import('./pages/AdminPage'))
+const SimulatorPage = lazy(() => import('./pages/SimulatorPage'))
 
 function Protected({ children }: { children: ReactNode }) {
   const { isAuthed } = useAuth()
@@ -81,6 +82,21 @@ export default function App() {
                 element={
                   <AdminOnly>
                     <AdminPage />
+                  </AdminOnly>
+                }
+              />
+              {/* 历史信号回放：暂时挂在 AdminOnly 下——功能先内部试用，未对
+                  普通用户开放。对外开放时把这层包装去掉、并放开后端端点的
+                  require_admin 即可（页面本身不依赖任何管理员数据）。
+                  Signal replay: behind AdminOnly for now — the feature is in
+                  internal trial, not released to regular users. To release it,
+                  drop this wrapper and loosen the backend's require_admin (the
+                  page itself depends on no admin-only data). */}
+              <Route
+                path="/simulator"
+                element={
+                  <AdminOnly>
+                    <SimulatorPage />
                   </AdminOnly>
                 }
               />

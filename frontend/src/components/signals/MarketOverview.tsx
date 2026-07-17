@@ -2,8 +2,10 @@
 // Market overview card (dashboard bottom-right): donut + legend + total signals + daily signal-count sparkline
 import { memo, type FC, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router-dom'
 import type { Signal, SignalDailyCount } from '../../api/types'
 import { signalApi } from '../../api/client'
+import { useAuth } from '../../store/auth'
 
 interface Props {
   signals: Signal[]
@@ -45,6 +47,12 @@ function buildSparkPoints(daily: SignalDailyCount[]): { points: string; areaPoin
 
 const MarketOverview: FC<Props> = ({ signals }) => {
   const { t } = useTranslation()
+  // 历史信号回放入口：只对管理员显示——功能内部试用中，未对普通用户开放。
+  // 真正的边界在后端（端点是 require_admin），这里只是不给非管理员看到入口。
+  // Replay entry: shown to admins only — the feature is in internal trial.
+  // The real boundary is the backend (require_admin); this just hides the link.
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const dist = useMemo(() => computeDistribution(signals), [signals])
   const total = Math.max(1, dist.total)
   const longFrac = dist.long / total
@@ -72,8 +80,13 @@ const MarketOverview: FC<Props> = ({ signals }) => {
 
   return (
     <section className="card glass dash-overview p-[18px]">
-      <div className="flex items-center gap-2 px-0">
+      <div className="flex items-center justify-between gap-2 px-0">
         <h3 className="text-[15px] font-bold">{t('signals.focus.overview', '市场概览')}</h3>
+        {isAdmin && (
+          <Link to="/simulator" className="text-xs text-prism-300 hover:text-prism-200">
+            {t('simulator.entry')}
+          </Link>
+        )}
       </div>
 
       <div className="donut-wrap">

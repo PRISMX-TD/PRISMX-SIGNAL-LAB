@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPricingSettings, AdminTrialSettings, TrialStatus, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPricingSettings, AdminTrialSettings, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote } from './types'
 
 const TOKEN_KEY = 'prismx_token'
 
@@ -88,6 +88,18 @@ export const signalApi = {
   list: () => request<{ signals: Signal[] }>('/signals'),
   stats: () => request<{ daily: SignalDailyCount[]; total: number }>('/signals/stats'),
   winrate: () => request<SignalWinRate>('/signals/winrate'),
+}
+
+// 历史信号回放（模拟器）：**当前仅管理员可调**（后端 require_admin），
+// 非管理员会拿到 403——功能先内部试用，入口也只对管理员显示。
+// Historical signal replay: **admin-only for now** (backend require_admin);
+// non-admins get a 403. The feature is in internal trial and its entry points
+// are likewise admin-gated.
+export const simulateApi = {
+  run: (params: { days: number; risk: number; capital: number; mode: 'compound' | 'flat' }) =>
+    request<SimulateResult>(
+      `/signals/simulate?days=${params.days}&risk=${params.risk}&capital=${params.capital}&mode=${params.mode}`
+    ),
 }
 
 // 多周期趋势 / Multi-timeframe trends

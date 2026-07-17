@@ -132,6 +132,48 @@ export interface SignalWinRate {
   winRate: number | null
 }
 
+// 历史信号回放（模拟器）：用已判定的真实信号回放净值曲线。数据源是全局信号表，
+// 不含任何用户私有数据。**当前仅管理员可访问**（后端 require_admin），功能先内部
+// 试用；对外开放时只需放开后端依赖与前端入口判断。
+// Historical signal replay (simulator): an equity curve from real, resolved
+// signals. Sourced from the global signals table — no user-private data.
+// **Admin-only for now** (backend require_admin) while the feature is trialed
+// internally; releasing it means loosening the backend dep + the entry checks.
+export interface SimulateTrade {
+  id: string
+  symbol: string
+  side: 'BUY' | 'SELL'
+  createdAt: string | null
+  resolvedAt: string | null
+  result: 'HIT_TP' | 'HIT_SL'
+  rr: number
+  pnlPct: number
+  equityAfter: number
+}
+
+export interface SimulateSummary {
+  finalEquity: number
+  returnPct: number
+  maxDrawdownPct: number
+  maxLossStreak: number
+  wins: number
+  losses: number
+  winRate: number | null
+  avgRr: number | null
+  // 数据不完整、未参与回放的信号数（如实展示，不静默丢弃）
+  // signals skipped as incomplete (disclosed, never silently dropped)
+  skipped: number
+  // 净值在回放中途归零，其后信号不再累计 / equity wiped out mid-replay
+  busted: boolean
+}
+
+export interface SimulateResult {
+  params: { days: number; risk: number; capital: number; mode: 'compound' | 'flat' }
+  summary: SimulateSummary
+  points: Array<{ t: string | null; equity: number }>
+  trades: SimulateTrade[]
+}
+
 // 个人跟单胜率：基于真实平仓明细，只有自己能看到自己的
 // Personal win rate: based on real closed trades, visible only to the user themself
 export interface PersonalWinRate {
