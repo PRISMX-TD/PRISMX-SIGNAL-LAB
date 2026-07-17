@@ -1,9 +1,9 @@
-"""图表 K 线内存缓存：喂价器写入，前端读取。
+"""图表 K 线内存缓存：EA 写入，前端读取。
 
-进程重启即空，靠喂价器每 60 秒的 backfill 自愈（见 CHART_SELFHOST_PLAN.md）。
-不落库：K 线是可重新拉取的派生数据，没有持久化的必要。
-In-memory candle cache: written by the feeder, read by the frontend. Cleared
-on restart; the feeder's periodic backfill re-populates it. Not persisted —
+进程重启即空，靠 EA 每 60 秒的 backfill 自愈。不落库：K 线是可重新拉取的
+派生数据，没有持久化的必要。
+In-memory candle cache: written by the EA, read by the frontend. Cleared
+on restart; the EA's periodic backfill re-populates it. Not persisted —
 candles are re-fetchable derived data, no need to durably store them.
 """
 import time
@@ -19,8 +19,8 @@ MAX_BARS = 500
 # the fields, so adding one needs no change to the merge/replace logic here)
 _candles: dict[tuple[str, str], list[dict]] = {}
 
-# (symbol, interval) -> 最近一次被喂价器写入的 epoch 秒
-# (symbol, interval) -> epoch seconds of the last feeder write
+# (symbol, interval) -> 最近一次被 EA 写入的 epoch 秒
+# (symbol, interval) -> epoch seconds of the last EA write
 _updated_at: dict[tuple[str, str], float] = {}
 
 

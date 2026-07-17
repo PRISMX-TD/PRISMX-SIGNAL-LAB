@@ -1,18 +1,14 @@
-"""图表行情路由：EA（或 legacy 喂价器）写入 K 线/报价 + 前端读取。
-Chart market-data router: the EA (or the legacy feeder) writes candles/quotes,
-the frontend reads them.
+"""图表行情路由：EA 写入 K 线/报价 + 前端读取。
+Chart market-data router: the EA writes candles/quotes, the frontend reads them.
 
 写入（/feed/candles、/feed/quotes）由 MT5 EA 调用，用 X-EA-Token 头鉴权
-（不是用户，没有 JWT）；迁移期内 /feed/candles 也接受 legacy 喂价器的
-X-Feed-Token，待 EA 稳定后可去掉。读取（/chart/history、/chart/latest、
-/quotes）复用站内登录态，与 ChartsPage 的其它接口一致。详见 CHART_SELFHOST_PLAN.md。
+（不是用户，没有 JWT）。读取（/chart/history、/chart/latest、/quotes）复用
+站内登录态，与 ChartsPage 的其它接口一致。
 
 Writes (/feed/candles, /feed/quotes) are called by the MT5 EA, authenticated
-via the X-EA-Token header (it's not a user, no JWT); during the migration
-window /feed/candles also accepts the legacy feeder's X-Feed-Token, droppable
-once the EA is confirmed stable. Reads (/chart/history, /chart/latest,
-/quotes) reuse the site's normal login, consistent with ChartsPage's other
-endpoints. See CHART_SELFHOST_PLAN.md for context.
+via the X-EA-Token header (it's not a user, no JWT). Reads (/chart/history,
+/chart/latest, /quotes) reuse the site's normal login, consistent with
+ChartsPage's other endpoints.
 """
 import secrets
 
@@ -27,25 +23,9 @@ from app.services.deps import get_current_user
 
 router = APIRouter(tags=["chart"])
 
-# 前端 ChartsPage 的周期 code 集合，须与 chart_feeder.py 的 INTERVAL_TF 保持一致。
-# Frontend ChartsPage's interval codes; must match chart_feeder.py's INTERVAL_TF.
+# 前端 ChartsPage 的周期 code 集合，须与 EA 推送的周期保持一致。
+# Frontend ChartsPage's interval codes; must match what the EA pushes.
 ALLOWED_INTERVALS = {"1", "5", "15", "60", "240", "D"}
-
-
-def _valid_ea_or_feed_token(token: str | None) -> bool:
-    """校验 EA 或 legacy 喂价器令牌，任一匹配即通过。
-    Accept either the EA token or the legacy feeder token."""
-    if not token:
-        return False
-    if settings.EA_TOKEN and secrets.compare_digest(
-        token.encode("utf-8"), settings.EA_TOKEN.encode("utf-8")
-    ):
-        return True
-    if settings.FEED_TOKEN and secrets.compare_digest(
-        token.encode("utf-8"), settings.FEED_TOKEN.encode("utf-8")
-    ):
-        return True
-    return False
 
 
 def _valid_ea_token(token: str | None) -> bool:
@@ -54,18 +34,13 @@ def _valid_ea_token(token: str | None) -> bool:
     return secrets.compare_digest(token.encode("utf-8"), settings.EA_TOKEN.encode("utf-8"))
 
 
-# ---------- 喂价器写入 / feeder write ----------
+# ---------- EA 写入 / EA write ----------
 class FeedBar(BaseModel):
     t: int
     o: float
     h: float
     l: float
     c: float
-    # v = 成交量（EA 发 MT5 的 tick_volume）。默认 0 让不带该字段的 legacy
-    # 喂价器（chart_feeder.py，迁移期内仍可能在推）不会 422；EA v1.01+ 会带上。
-    # v = volume (the EA sends MT5's tick_volume). Defaulting to 0 keeps the
-    # legacy feeder (chart_feeder.py, may still push during migration) from
-    # 422-ing when it omits the field; the EA v1.01+ includes it.
     v: float = 0
 
 
@@ -84,14 +59,11 @@ class FeedRequest(BaseModel):
 async def feed_candles(
     req: FeedRequest,
     x_ea_token: str | None = Header(default=None),
-    x_feed_token: str | None = Header(default=None),
 ):
-    """EA（或迁移期内的 legacy 喂价器）上报 K 线：mode=backfill 整段替换，
-    mode=tick 合并最新几根。
-    EA (or, during the migration window, the legacy feeder) reports candles:
-    mode=backfill replaces the full series, mode=tick merges the latest few
-    bars."""
-    if not _valid_ea_or_feed_token(x_ea_token or x_feed_token):
+    """EA 上报 K 线：mode=backfill 整段替换，mode=tick 合并最新几根。
+    EA reports candles: mode=backfill replaces the full series, mode=tick
+    merges the latest few bars."""
+    if not _valid_ea_token(x_ea_token):
         raise HTTPException(status_code=401, detail="invalid feed token")
     for s in req.series:
         if s.interval not in ALLOWED_INTERVALS:

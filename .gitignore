@@ -41,13 +41,6 @@ bridge/*.spec
 bridge/build_log.txt
 bridge/*.log
 
-# ===== 图表喂价器：真实配置含 FEED_TOKEN，勿入库；打包产物同 bridge 一样不入库
-# chart feeder: real config holds FEED_TOKEN, keep out of the repo; build
-# artifacts excluded the same way as bridge's =====
-feeder/feeder_config.json
-feeder/*.log
-feeder/*.spec
-
 # ===== 文档 / Markdown（不纳入仓库）=====
 *.md
 

@@ -90,15 +90,6 @@ class Settings(BaseSettings):
     # In production a strong random value is mandatory; empty rejects all webhooks.
     WEBHOOK_SECRET: str = ""
 
-    # 图表喂价器鉴权（legacy）：独立的 Windows 喂价程序（feeder/chart_feeder.py）
-    # 用 X-Feed-Token 头写入 K 线数据。正在被 EA_TOKEN 取代——迁移期内两者皆
-    # 可用，待 EA 稳定运行后可清空本项并停用 feeder。
-    # Chart feeder auth (legacy): the standalone Windows feeder program writes
-    # candles via the X-Feed-Token header. Being superseded by EA_TOKEN — both
-    # are accepted during the migration window; clear this once the EA is
-    # confirmed stable and the feeder is retired.
-    FEED_TOKEN: str = ""
-
     # EA 行情鉴权：MT5 EA（ea/PRISMX_MarketFeed.mq5）用 X-EA-Token 头推送
     # K 线（/feed/candles）、报价（/feed/quotes）与多周期趋势（/webhook/trend，
     # 作为 WEBHOOK_SECRET 的替代校验值）。留空则拒绝所有 EA 写入（图表/报价/

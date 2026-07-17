@@ -1,9 +1,0 @@
-{
-  "backend_url": "https://api.prismxsignallab.com",
-  "feed_token": "REPLACE-WITH-THE-SAME-STRONG-RANDOM-STRING-AS-BACKEND-FEED_TOKEN",
-  "mt5_path": "",
-  "server_utc_offset": 10800,
-  "tick_interval": 2,
-  "backfill_interval": 60,
-  "max_bars": 500
-}
