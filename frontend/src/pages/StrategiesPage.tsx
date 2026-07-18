@@ -743,7 +743,7 @@ function StrategyBuilder({
 export default function StrategiesPage() {
   const { t } = useTranslation()
   const { user } = useAuth()
-  const { accounts, activeSymbols } = useLive()
+  const { accounts, activeSymbols, refreshAll } = useLive()
   const quotesByAccount = useQuotes()
   const { toast, placeManualOrder } = useOrderPlacement()
 
@@ -754,10 +754,13 @@ export default function StrategiesPage() {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<UserStrategy | null>(null)
   const [orderTarget, setOrderTarget] = useState<StrategySignal | null>(null)
+  const [clearingSignals, setClearingSignals] = useState(false)
+  const [confirmClearSignals, setConfirmClearSignals] = useState(false)
 
   useBackToClose(draft != null, () => setDraft(null))
   useBackToClose(deleteTarget != null, () => setDeleteTarget(null))
   useBackToClose(orderTarget != null, () => setOrderTarget(null))
+  useBackToClose(confirmClearSignals, () => setConfirmClearSignals(false))
 
   const isPro = user?.plan === 'PRO'
 
@@ -829,6 +832,22 @@ export default function StrategiesPage() {
     await strategyApi.remove(deleteTarget.id)
     setStrategies((prev) => prev.filter((p) => p.id !== deleteTarget.id))
     setDeleteTarget(null)
+  }
+
+  const doClearSignals = async () => {
+    setClearingSignals(true)
+    try {
+      await strategyApi.clearSignals()
+      setSignals([])
+      // 仪表盘/信号面板页也读同一份 strategySignals（live.tsx），一并刷新，
+      // 避免清空后那两处还挂着旧数据。
+      // The dashboard/signals page read the same strategySignals slice
+      // (live.tsx); refresh it too, so cleared signals don't linger there.
+      await refreshAll()
+    } finally {
+      setClearingSignals(false)
+      setConfirmClearSignals(false)
+    }
   }
 
   const handleOrderConfirm = async (volume: number, mt5Login: string | null, stopLoss: number | null, takeProfit: number | null) => {
@@ -909,7 +928,14 @@ export default function StrategiesPage() {
 
       {/* 我的策略信号 / my strategy signals */}
       <section className="glass mb-5 p-5">
-        <h3 className="font-display text-lg font-semibold text-slate-100">{t('strategy.mySignals')}</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-lg font-semibold text-slate-100">{t('strategy.mySignals')}</h3>
+          {signals.length > 0 && (
+            <button onClick={() => setConfirmClearSignals(true)} className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-400 transition hover:border-down/30 hover:text-down">
+              {t('strategy.clearSignals')}
+            </button>
+          )}
+        </div>
         {signals.length === 0 ? (
           <div className="mt-4 py-6 text-center text-sm text-slate-500">{t('strategy.noSignals')}</div>
         ) : (
@@ -933,6 +959,17 @@ export default function StrategiesPage() {
       </section>
 
       <p className="text-xs leading-relaxed text-slate-500">{t('strategy.disclaimer')}</p>
+
+      {confirmClearSignals && (
+        <ConfirmModal
+          title={t('strategy.clearSignals')}
+          message={t('strategy.clearSignalsConfirm')}
+          danger
+          busy={clearingSignals}
+          onConfirm={doClearSignals}
+          onCancel={() => setConfirmClearSignals(false)}
+        />
+      )}
 
       {deleteTarget && (
         <ConfirmModal

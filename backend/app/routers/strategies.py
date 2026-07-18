@@ -142,6 +142,23 @@ def update_strategy(strategy_id: str, body: StrategyUpdate, db: Session = Depend
     return _to_out(row)
 
 
+@router.delete("/signals", response_model=dict)
+def clear_my_signals(db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    """清空当前用户已触发的全部个人策略信号历史,不影响策略本身的启用状态与
+    去重游标(last_signal_bar_t)——清空只是清列表,不会让已经触发过的那根
+    K 线重新触发一次信号。注册顺序必须排在 DELETE /{strategy_id} 之前——
+    否则 "signals" 会被当成 strategy_id 匹配到那条路由,永远走不到这里。
+    Clears all of the current user's fired personal strategy signal history.
+    Doesn't touch the strategies' enabled state or the de-dup cursor
+    (last_signal_bar_t) — clearing only empties the list, it never makes an
+    already-fired bar re-fire a signal. Must be registered before
+    DELETE /{strategy_id} — otherwise "signals" matches that route's path
+    param first and this one is never reached."""
+    db.query(StrategySignal).filter(StrategySignal.user_id == user.id).delete()
+    db.commit()
+    return {"ok": True}
+
+
 @router.delete("/{strategy_id}", response_model=dict)
 def delete_strategy(strategy_id: str, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     row = db.query(UserStrategy).filter(UserStrategy.id == strategy_id, UserStrategy.user_id == user.id).first()

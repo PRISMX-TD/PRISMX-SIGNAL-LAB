@@ -1002,6 +1002,8 @@
     "deleteConfirm": "Delete this strategy? Past signals it already fired are unaffected.",
     "mySignals": "My Strategy Signals",
     "noSignals": "No signals fired yet — once a strategy is enabled, matching signals will appear here automatically",
+    "clearSignals": "Clear",
+    "clearSignalsConfirm": "Clear the entire fired-signal history? This doesn't affect the strategies' enabled state — the dashboard and signals page will be cleared too.",
     "oneClickOrder": "One-Click Order",
     "signalTriggeredAt": "Triggered at",
     "disclaimer": "Strategy signals are generated only when your configured condition is met — a read-only check that never places an order automatically. Backtests likewise exclude spreads, slippage and swap costs, are not a promise of returns, and past performance does not indicate future results."

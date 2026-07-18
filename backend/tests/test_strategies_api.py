@@ -157,6 +157,30 @@ def test_list_my_signals_only_returns_current_user_rows(client, db, auth_headers
     assert signals[0]["strategyId"] == strat.id
 
 
+def test_clear_my_signals_only_deletes_current_user_rows(client, db, auth_headers, user):
+    _make_admin(db, user)
+    strat = UserStrategy(user_id=user.id, template="ma_cross", symbol="XAUUSD", interval="15", params="{}")
+    db.add(strat)
+    db.commit()
+    db.refresh(strat)
+    db.add(StrategySignal(strategy_id=strat.id, user_id=user.id, symbol="XAUUSD", side="BUY", entry=100, stop_loss=99, take_profit=102, bar_t=1))
+    db.add(StrategySignal(strategy_id="other-strat", user_id="someone-else", symbol="XAUUSD", side="BUY", entry=100, stop_loss=99, take_profit=102, bar_t=1))
+    db.commit()
+
+    res = client.delete("/api/strategies/signals", headers=auth_headers)
+    assert res.status_code == 200
+    assert res.json()["ok"] is True
+
+    remaining = db.query(StrategySignal).all()
+    assert len(remaining) == 1
+    assert remaining[0].user_id == "someone-else"
+
+    # 策略本身不受影响,仍然存在且保留原有的启用状态
+    # The strategy itself is untouched — still exists with its original enabled state
+    still_there = db.query(UserStrategy).filter(UserStrategy.id == strat.id).first()
+    assert still_there is not None
+
+
 def test_new_closed_candle_triggers_enabled_strategy_and_fires_personal_signal(client, db, auth_headers, user, monkeypatch):
     """完整链路：启用一个策略 → EA 推 K 线到 /feed/candles → 最新一根收盘 K 线
     满足入场条件 → 生成一条只属于这个用户的策略信号。

@@ -249,6 +249,7 @@ export const strategyApi = {
     mode: 'compound' | 'flat'
   }) => request<StrategyBacktestResult>('/strategies/backtest', { method: 'POST', body: JSON.stringify(payload) }),
   signals: (limit = 50) => request<{ signals: StrategySignal[] }>(`/strategies/signals?limit=${limit}`),
+  clearSignals: () => request<{ ok: boolean }>('/strategies/signals', { method: 'DELETE' }),
 }
 
 // 多账号 / Multi-account
