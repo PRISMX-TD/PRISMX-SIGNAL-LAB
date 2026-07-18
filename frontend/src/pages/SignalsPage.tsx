@@ -1,32 +1,40 @@
 // 信号面板页：信号网格 + 返回仪表盘
 // Signals page: signal grid + back to dashboard
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../store/auth'
 import { useLive, useQuotes } from '../store/live'
-import type { Signal } from '../api/types'
 import SignalGrid from '../components/signals/SignalGrid'
-import MyStrategySignals from '../components/signals/MyStrategySignals'
 import SlideOrderModal from '../components/SlideOrderModal'
 import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
+import { strategySignalToDisplay, type DisplaySignal } from '../components/signals/SignalView'
 import { useBackToClose } from '../utils/useBackToClose'
 
 export default function SignalsPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { user } = useAuth()
-  const { signals, accounts, loaded } = useLive()
+  const { signals, strategySignals, accounts, loaded } = useLive()
   const accountQuotes = useQuotes()
-  const [activeSignal, setActiveSignal] = useState<Signal | null>(null)
+  const [activeSignal, setActiveSignal] = useState<DisplaySignal | null>(null)
   // 下单弹窗是全屏的，手机上划返回应该先关掉弹窗、而不是直接退出信号面板页
   // （见 useBackToClose 的说明）。/ The order modal is full-screen; on
   // mobile, swiping back should close it first rather than exiting the
   // signals page outright (see useBackToClose's comment).
   useBackToClose(activeSignal != null, () => setActiveSignal(null))
-  const { toast, placeOrder } = useOrderPlacement()
+  const { toast, placeOrder, placeManualOrder } = useOrderPlacement()
 
-  const openTrade = useCallback((s: Signal) => setActiveSignal(s), [])
+  // 个人策略信号混进普通信号网格一起展示——同样的卡片、按时间统一排序，
+  // 不再单独占一块地方。/ Personal strategy signals are folded into the
+  // normal signal grid — same card, sorted into the same chronological
+  // order, no separate section.
+  const combinedSignals = useMemo(
+    () => [...signals, ...strategySignals.map((s) => strategySignalToDisplay(s, t('strategy.myStrategyBadge')))],
+    [signals, strategySignals, t]
+  )
+
+  const openTrade = useCallback((s: DisplaySignal) => setActiveSignal(s), [])
 
   const handleConfirm = async (volume: number, mt5Login: string | null, stopLoss: number | null, takeProfit: number | null) => {
     if (!activeSignal) return
@@ -38,7 +46,16 @@ export default function SignalsPage() {
     // "submitted" receipt card and calls onCancel itself ~2s later. Closing it
     // immediately here used to unmount the modal before the receipt card ever
     // got to render, so the user never saw a submit confirmation.
-    await placeOrder(sig, volume, mt5Login, stopLoss, takeProfit)
+    // 个人策略信号没有真实 signalId,走不带 signalId 的手动下单路径,避免
+    // 污染平台胜率统计;平台信号照常走 placeOrder。
+    // Personal strategy signals have no real signalId — submit through the
+    // signalId-less manual path so they never pollute the platform win-rate
+    // stats; platform signals still go through placeOrder as before.
+    if (sig.strategySignal) {
+      await placeManualOrder(sig.symbol, sig.side, volume, mt5Login, stopLoss, takeProfit)
+    } else {
+      await placeOrder(sig, volume, mt5Login, stopLoss, takeProfit)
+    }
   }
 
   return (
@@ -54,8 +71,7 @@ export default function SignalsPage() {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
             {t('signals.focus.backToDashboard', '返回仪表盘')}
           </button>
-          <MyStrategySignals />
-          <SignalGrid signals={signals} onTrade={openTrade} userPlan={user?.plan} />
+          <SignalGrid signals={combinedSignals} onTrade={openTrade} userPlan={user?.plan} />
         </div>
       )}
       {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} quotesByAccount={accountQuotes} onCancel={() => setActiveSignal(null)} onConfirm={handleConfirm} />}

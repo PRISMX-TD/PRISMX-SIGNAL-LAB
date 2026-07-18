@@ -1,6 +1,38 @@
 // 信号面板共享常量与纯函数 / shared constants & pure helpers for the signals panel
-import type { Signal, SignalResult, Trend } from '../../api/types'
+import type { Signal, SignalResult, StrategySignal, Trend } from '../../api/types'
 import { calcCountdown } from '../../api/utils'
+
+// 个人策略信号在 UI 上混进普通信号流展示（同样的卡片、同样按时间排位），
+// 不再单独开一块区域；strategySignal 标记只用于下单时选择提交路径（不带
+// signalId，避免污染平台胜率统计）和排除出「市场概览」这类全平台口径的
+// 聚合统计，卡片渲染本身完全一视同仁。
+// Personal strategy signals are folded into the normal signal stream for
+// display (same card, same chronological ranking) instead of a separate
+// section. The strategySignal flag exists only to pick the right order
+// submit path (no signalId, so it never pollutes the platform win-rate
+// stats) and to exclude it from platform-wide aggregates like Market
+// Overview — the card itself renders identically either way.
+export interface DisplaySignal extends Signal {
+  strategySignal?: true
+}
+
+export function strategySignalToDisplay(sig: StrategySignal, myStrategyLabel: string): DisplaySignal {
+  return {
+    id: sig.id,
+    symbol: sig.symbol,
+    side: sig.side,
+    entry: sig.entry,
+    stopLoss: sig.stopLoss,
+    takeProfit: sig.takeProfit,
+    indicator: myStrategyLabel,
+    status: 'ACTIVE',
+    createdAt: sig.createdAt,
+    expireAt: null,
+    result: 'PENDING',
+    resolvedAt: null,
+    strategySignal: true,
+  }
+}
 
 // 信号总有效时长，与后端 expire_at = created_at + 10min 一致 / lifespan matches backend
 export const SIGNAL_LIFESPAN_MS = 10 * 60 * 1000
