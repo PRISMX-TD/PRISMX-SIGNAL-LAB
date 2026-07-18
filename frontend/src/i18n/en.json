@@ -477,7 +477,8 @@
       "order_filled": "Order filled",
       "order_rejected": "Order rejected",
       "auto_manage": "Auto position management triggered",
-      "bridge_offline": "PRISMX Bridge went offline"
+      "bridge_offline": "PRISMX Bridge went offline",
+      "strategy_signal": "My strategy signals"
     },
     "notifPermissionDenied": "Notification permission denied; enable in browser settings",
     "notifBlocked": "Notifications blocked by browser; enable in browser settings",

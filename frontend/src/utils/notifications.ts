@@ -14,7 +14,7 @@ import { subscribePush, unsubscribePush, getSWReg, pushSupported } from "./push"
 // don't exist yet). Kept in sync with the backend's ALL_SENTINEL.
 export const ALL_SENTINEL = "__ALL__"
 
-export const EVENT_TYPES = ["order_filled", "order_rejected", "auto_manage", "bridge_offline"] as const
+export const EVENT_TYPES = ["order_filled", "order_rejected", "auto_manage", "bridge_offline", "strategy_signal"] as const
 
 export type NotifPrefs = {
   enabled: boolean

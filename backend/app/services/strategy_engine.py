@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from app.core.database import SessionLocal
 from app.models import Candle, StrategySignal, UserStrategy
 from app.services.connection_manager import manager
+from app.services.push_dispatch import EVENT_STRATEGY_SIGNAL, dispatch_event_push_async
 
 logger = logging.getLogger("prismx.strategy_engine")
 
@@ -387,6 +388,24 @@ def clamp_take_profit(method: str, value: float) -> float:
     return max(0.00001, min(1_000_000.0, value))
 
 
+def _round_price(value: float) -> float:
+    """按价格量级四舍五入到合理小数位，清掉百分比/方式换算里残留的浮点误差
+    （如 63619.50399999999）。按量级而非逐品种维护白名单——自定义策略可以
+    跑在任意 EA 在报的品种上，不能只覆盖写死的那几个。
+
+    Round to a sane decimal precision based on price magnitude, clearing
+    floating-point residue left over from the percent/method math (e.g.
+    63619.50399999999). Magnitude-based rather than a per-symbol whitelist —
+    custom strategies can run on any symbol the EA is feeding, not just a
+    hardcoded few.
+    """
+    if value >= 100:
+        return round(value, 2)
+    if value >= 1:
+        return round(value, 4)
+    return round(value, 6)
+
+
 def _entry_exit_prices(
     side: str, entry: float,
     stop_loss_method: str, stop_loss_value: float,
@@ -407,8 +426,10 @@ def _entry_exit_prices(
     else:
         tp_dist = take_profit_value
     if side == "BUY":
-        return entry - sl_dist, entry + tp_dist
-    return entry + sl_dist, entry - tp_dist
+        sl, tp = entry - sl_dist, entry + tp_dist
+    else:
+        sl, tp = entry + sl_dist, entry - tp_dist
+    return _round_price(sl), _round_price(tp)
 
 
 def run_backtest(
@@ -601,5 +622,19 @@ async def evaluate_new_candle(symbol: str, interval: str) -> None:
                     "createdAt": sig.created_at.isoformat() if sig.created_at else None,
                 },
             })
+            # 与平台信号一样可推送通知,但只发给这一个用户(触发它的策略主人),
+            # 走事件类通知(与 order_filled/auto_manage 同一条单用户推送路径),
+            # 受用户自己的通知偏好开关控制,不是强制打扰。
+            # Pushable just like a platform signal, but only to the one user
+            # who owns the triggering strategy — goes through the same
+            # single-user event-notification path as order_filled/
+            # auto_manage, gated by that user's own notification prefs, not
+            # a forced interruption.
+            strat_label = strat.name or strat.template
+            await dispatch_event_push_async(
+                strat.user_id, EVENT_STRATEGY_SIGNAL,
+                f"我的策略信号 {symbol}",
+                f"{side} · {strat_label}",
+            )
     finally:
         db.close()

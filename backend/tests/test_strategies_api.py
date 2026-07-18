@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings
 from app.models import Candle, StrategySignal, UserStrategy
+import app.services.strategy_engine as strategy_engine
 
 
 def _make_pro(db, user):
@@ -200,6 +201,18 @@ def test_new_closed_candle_triggers_enabled_strategy_and_fires_personal_signal(c
     db.commit()
     db.refresh(strat)
 
+    # 命中时应像平台信号一样可推送通知,但只发给触发它的这一个用户
+    # (event 类通知,见 push_dispatch.py 的 EVENT_STRATEGY_SIGNAL)。
+    # A hit should be pushable just like a platform signal, but only to the
+    # one user who triggered it (event-type notification, see push_dispatch.py's
+    # EVENT_STRATEGY_SIGNAL).
+    push_calls = []
+
+    async def _fake_dispatch(user_id, event_type, title, body):
+        push_calls.append((user_id, event_type, title, body))
+
+    monkeypatch.setattr(strategy_engine, "dispatch_event_push_async", _fake_dispatch)
+
     # 收盘价序列在最后一根才发生金叉(见测试文件旁的推导脚本);每根间隔 60 秒,
     # 最后一根的收盘时间刚好是"现在减 60 秒"，满足"已走完"的判定。
     # The close sequence crosses only at the very last bar; bars are 60s
@@ -223,6 +236,11 @@ def test_new_closed_candle_triggers_enabled_strategy_and_fires_personal_signal(c
     assert signals[0].side == "BUY"
     refreshed = db.query(UserStrategy).filter(UserStrategy.id == strat.id).first()
     assert refreshed.last_signal_bar_t == bars[-1]["t"]
+
+    assert len(push_calls) == 1
+    pushed_user_id, event_type, _title, _body = push_calls[0]
+    assert pushed_user_id == user.id
+    assert event_type == strategy_engine.EVENT_STRATEGY_SIGNAL
 
 
 def test_disabled_strategy_never_fires(client, db, auth_headers, user, monkeypatch):

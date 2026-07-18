@@ -191,6 +191,31 @@ def test_unknown_template_still_rejected_after_expansion():
         se.entry_signals(_bars_from_closes([1.0, 2.0, 3.0]), "not_a_template", {})
 
 
+# ---------- 止损止盈价格:清掉浮点误差残留 ----------
+# ---------- SL/TP prices: floating-point residue is cleared ----------
+def test_entry_exit_prices_have_no_floating_point_residue():
+    """百分比换算最容易在这类价位上产生 63619.50399999999 这种浮点残留
+    （曾在真实自定义策略信号上出现）；_entry_exit_prices 必须把它清干净。
+    Percent-based math easily produces floating-point residue like
+    63619.50399999999 at this price level (seen on a real fired custom-
+    strategy signal); _entry_exit_prices must come out clean."""
+    sl, tp = se._entry_exit_prices("BUY", 63939.2, "percent", 0.5, "rr", 1.0)
+    assert sl == 63619.5
+    assert tp == 64258.9
+    assert len(str(sl).split(".")[-1]) <= 2
+    assert len(str(tp).split(".")[-1]) <= 2
+
+
+def test_entry_exit_prices_round_by_magnitude():
+    # 大额价位(>=100):2 位小数 / high-magnitude prices (>=100): 2 decimals
+    sl, _ = se._entry_exit_prices("SELL", 2400.333333, "percent", 1.0, "rr", 2.0)
+    assert sl == round(sl, 2)
+    # 中等价位(1~100):4 位小数,足够覆盖大多数非日元外汇对的报价精度
+    # mid-range prices (1-100): 4 decimals, enough for most non-JPY forex quotes
+    sl2, _ = se._entry_exit_prices("SELL", 1.123456789, "percent", 1.0, "rr", 2.0)
+    assert sl2 == round(sl2, 4)
+
+
 # ---------- 回测引擎:成交与净值结算(用打桩的入场信号,隔离测试撮合/净值逻辑) ----------
 # ---------- Backtest engine: trade resolution & equity (entry signals stubbed
 #             to isolate the fill/equity bookkeeping from crossing detection) ----------

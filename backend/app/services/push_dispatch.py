@@ -33,7 +33,14 @@ EVENT_ORDER_FILLED = "order_filled"
 EVENT_ORDER_REJECTED = "order_rejected"
 EVENT_AUTO_MANAGE = "auto_manage"
 EVENT_BRIDGE_OFFLINE = "bridge_offline"
-EVENT_TYPES = {EVENT_ORDER_FILLED, EVENT_ORDER_REJECTED, EVENT_AUTO_MANAGE, EVENT_BRIDGE_OFFLINE}
+# 用户自建策略命中条件、生成个人信号时的通知——像平台信号一样可以推送，
+# 但只对触发它的那一个用户,走事件类通知这条单用户路径,不是按类别扇出。
+# Fired when the user's own strategy condition is met and a personal signal
+# is generated — pushable just like a platform signal, but only to the one
+# user who owns it, so it goes through the single-user event-notification
+# path rather than the category fan-out.
+EVENT_STRATEGY_SIGNAL = "strategy_signal"
+EVENT_TYPES = {EVENT_ORDER_FILLED, EVENT_ORDER_REJECTED, EVENT_AUTO_MANAGE, EVENT_BRIDGE_OFFLINE, EVENT_STRATEGY_SIGNAL}
 
 # 白名单哨兵值："不限"，命中任意取值（含此刻还不存在、以后才出现的品种/类别）。
 # Whitelist sentinel meaning "unrestricted" — matches any value, including

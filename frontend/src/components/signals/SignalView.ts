@@ -1,6 +1,6 @@
 // 信号面板共享常量与纯函数 / shared constants & pure helpers for the signals panel
 import type { Signal, SignalResult, StrategySignal, Trend } from '../../api/types'
-import { calcCountdown } from '../../api/utils'
+import { calcCountdown, parseTime } from '../../api/utils'
 
 // 个人策略信号在 UI 上混进普通信号流展示（同样的卡片、同样按时间排位），
 // 不再单独开一块区域；strategySignal 标记只用于下单时选择提交路径（不带
@@ -17,6 +17,24 @@ export interface DisplaySignal extends Signal {
 }
 
 export function strategySignalToDisplay(sig: StrategySignal, myStrategyLabel: string): DisplaySignal {
+  // 倒计时/过期跟平台信号同一套机制(effectiveStatus + calcCountdown),
+  // 所以给一个真实的 expireAt(创建时间 + 与平台一致的存活时长),而不是
+  // null——null 会让倒计时永远显示"-"、到期也不会自然消失。
+  // Countdown/expiry uses the same mechanism as platform signals
+  // (effectiveStatus + calcCountdown), so give it a real expireAt (created
+  // time + the same lifespan as platform signals) instead of null — null
+  // would leave the countdown stuck at "-" and it would never naturally
+  // expire out of the list.
+  // createdAt 是后端裸时间戳(无时区后缀),必须走 parseTime()按 UTC 解释,
+  // 不能直接 new Date(...)——那会按浏览器本地时区解释,在非 UTC 时区下
+  // 算出的 expireAt 会整体偏移,可能刚生成就被判定"已过期"。
+  // createdAt is a bare backend timestamp (no timezone suffix) and must go
+  // through parseTime() to be interpreted as UTC — a raw new Date(...)
+  // would parse it in the browser's local timezone, skewing the computed
+  // expireAt in any non-UTC zone and potentially marking a signal expired
+  // the instant it's created.
+  const created = parseTime(sig.createdAt)?.getTime() ?? Date.now()
+  const expireAt = new Date(created + SIGNAL_LIFESPAN_MS).toISOString()
   return {
     id: sig.id,
     symbol: sig.symbol,
@@ -27,7 +45,7 @@ export function strategySignalToDisplay(sig: StrategySignal, myStrategyLabel: st
     indicator: myStrategyLabel,
     status: 'ACTIVE',
     createdAt: sig.createdAt,
-    expireAt: null,
+    expireAt,
     result: 'PENDING',
     resolvedAt: null,
     strategySignal: true,

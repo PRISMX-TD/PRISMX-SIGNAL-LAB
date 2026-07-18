@@ -477,7 +477,8 @@
       "order_filled": "订单成交",
       "order_rejected": "订单被拒绝",
       "auto_manage": "自动仓位管理触发",
-      "bridge_offline": "PRISMX Bridge 掉线"
+      "bridge_offline": "PRISMX Bridge 掉线",
+      "strategy_signal": "我的策略信号"
     },
     "notifPermissionDenied": "通知权限被拒绝，请在浏览器设置中开启",
     "notifBlocked": "通知已被浏览器阻止，请在浏览器设置中开启",
