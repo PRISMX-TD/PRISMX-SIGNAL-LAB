@@ -133,7 +133,7 @@ class AdminStrategySettings(BaseModel):
 
 # ---------- 自定义策略 / User strategies ----------
 class StrategyCreate(BaseModel):
-    template: Literal["ma_cross", "rsi_reversal", "bollinger_reversion"]
+    template: Literal["ma_cross", "rsi_reversal", "bollinger_reversion", "macd_cross", "ma_pullback", "bollinger_breakout", "rsi_momentum", "donchian_breakout", "momentum_breakout", "trend_rsi_filter"]
     symbol: str = Field(pattern=SYMBOL_PATTERN)
     interval: str
     params: dict = Field(default_factory=dict)
@@ -161,7 +161,7 @@ class StrategyOut(BaseModel):
 
 
 class StrategyBacktestRequest(BaseModel):
-    template: Literal["ma_cross", "rsi_reversal", "bollinger_reversion"]
+    template: Literal["ma_cross", "rsi_reversal", "bollinger_reversion", "macd_cross", "ma_pullback", "bollinger_breakout", "rsi_momentum", "donchian_breakout", "momentum_breakout", "trend_rsi_filter"]
     symbol: str = Field(pattern=SYMBOL_PATTERN)
     interval: str
     params: dict = Field(default_factory=dict)

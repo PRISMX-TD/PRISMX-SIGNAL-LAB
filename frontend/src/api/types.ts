@@ -320,7 +320,17 @@ export type StrategyParamSpec =
   | { type: 'int'; min: number; max: number; default: number }
   | { type: 'float'; min: number; max: number; default: number }
 
-export type StrategyTemplateKey = 'ma_cross' | 'rsi_reversal' | 'bollinger_reversion'
+export type StrategyTemplateKey =
+  | 'ma_cross'
+  | 'rsi_reversal'
+  | 'bollinger_reversion'
+  | 'macd_cross'
+  | 'ma_pullback'
+  | 'bollinger_breakout'
+  | 'rsi_momentum'
+  | 'donchian_breakout'
+  | 'momentum_breakout'
+  | 'trend_rsi_filter'
 
 export type StrategyTemplateSchemas = Record<StrategyTemplateKey, Record<string, StrategyParamSpec>>
 
@@ -356,13 +366,29 @@ export interface StrategyBacktestSummary {
   busted: boolean
 }
 
+// 策略回测的逐单明细：在 SimulateTrade 的字段基础上,多带入场/出场那根 K 线的
+// epoch 秒与成交价,供图表精确定位标记，不用把 ISO 时间字符串再解析回时间戳。
+// A strategy-backtest trade: like SimulateTrade, plus the entry/exit bar's
+// epoch seconds and fill price, so the chart can place markers precisely
+// without re-parsing the ISO timestamp strings.
+export interface StrategyBacktestTrade extends SimulateTrade {
+  entryTime: number
+  exitTime: number
+  entryPrice: number
+  exitPrice: number
+}
+
 export interface StrategyBacktestResult {
   params: Record<string, unknown>
   summary: StrategyBacktestSummary
   points: Array<{ t: string | null; equity: number }>
-  trades: SimulateTrade[]
+  trades: StrategyBacktestTrade[]
   insufficientData: boolean
   barsAvailable: number
+  // 回测用到的那段 K 线,原样带回来画蜡烛图,不用再单独拉一次历史。
+  // The candles used for the backtest, returned as-is so the frontend can
+  // render a candlestick chart without a second history round-trip.
+  bars: Candle[]
 }
 
 // 策略触发的个人信号：只有策略主人自己能看到 / a strategy-fired personal

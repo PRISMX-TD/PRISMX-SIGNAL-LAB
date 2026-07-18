@@ -9,15 +9,17 @@
 // signals table); one-click order reuses the same manual-order modal as the
 // charts page (ChartOrderModal + placeManualOrder) — no signalId involved,
 // no Order-side backend changes.
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
+import { createChart, ColorType, CandlestickSeries, LineSeries, createSeriesMarkers, type UTCTimestamp } from 'lightweight-charts'
 import { useAuth } from '../store/auth'
 import { useLive, useQuotes } from '../store/live'
 import { strategyApi } from '../api/client'
 import { displaySymbol, fmtTime, localizeApiError } from '../api/utils'
 import type {
   StrategyBacktestResult,
+  StrategyBacktestTrade,
   StrategyParamSpec,
   StrategySignal,
   StrategyTemplateKey,
@@ -38,16 +40,34 @@ const INTERVALS = [
   { code: 'D', label: '1D' },
 ] as const
 
-const TEMPLATE_KEYS: StrategyTemplateKey[] = ['ma_cross', 'rsi_reversal', 'bollinger_reversion']
+const TEMPLATE_KEYS: StrategyTemplateKey[] = [
+  'ma_cross', 'rsi_reversal', 'bollinger_reversion',
+  'macd_cross', 'ma_pullback', 'bollinger_breakout', 'rsi_momentum',
+  'donchian_breakout', 'momentum_breakout', 'trend_rsi_filter',
+]
 const TEMPLATE_LABEL_KEYS: Record<StrategyTemplateKey, string> = {
   ma_cross: 'strategy.templateMaCross',
   rsi_reversal: 'strategy.templateRsiReversal',
   bollinger_reversion: 'strategy.templateBollingerReversion',
+  macd_cross: 'strategy.templateMacdCross',
+  ma_pullback: 'strategy.templateMaPullback',
+  bollinger_breakout: 'strategy.templateBollingerBreakout',
+  rsi_momentum: 'strategy.templateRsiMomentum',
+  donchian_breakout: 'strategy.templateDonchianBreakout',
+  momentum_breakout: 'strategy.templateMomentumBreakout',
+  trend_rsi_filter: 'strategy.templateTrendRsiFilter',
 }
 const TEMPLATE_DESC_KEYS: Record<StrategyTemplateKey, string> = {
   ma_cross: 'strategy.templateMaCrossDesc',
   rsi_reversal: 'strategy.templateRsiReversalDesc',
   bollinger_reversion: 'strategy.templateBollingerReversionDesc',
+  macd_cross: 'strategy.templateMacdCrossDesc',
+  ma_pullback: 'strategy.templateMaPullbackDesc',
+  bollinger_breakout: 'strategy.templateBollingerBreakoutDesc',
+  rsi_momentum: 'strategy.templateRsiMomentumDesc',
+  donchian_breakout: 'strategy.templateDonchianBreakoutDesc',
+  momentum_breakout: 'strategy.templateMomentumBreakoutDesc',
+  trend_rsi_filter: 'strategy.templateTrendRsiFilterDesc',
 }
 const PARAM_LABEL_KEYS: Record<string, string> = {
   maType: 'strategy.maType',
@@ -58,6 +78,12 @@ const PARAM_LABEL_KEYS: Record<string, string> = {
   oversold: 'strategy.oversold',
   overbought: 'strategy.overbought',
   mult: 'strategy.bollMult',
+  signalPeriod: 'strategy.signalPeriod',
+  touchTolerancePct: 'strategy.touchTolerancePct',
+  lookback: 'strategy.lookback',
+  thresholdPct: 'strategy.thresholdPct',
+  trendPeriod: 'strategy.trendPeriod',
+  rsiPeriod: 'strategy.rsiPeriod',
 }
 const ENUM_OPTION_LABEL_KEYS: Record<string, Record<string, string>> = {
   maType: { SMA: 'strategy.maTypeSma', EMA: 'strategy.maTypeEma' },
@@ -103,6 +129,170 @@ function EquityCurve({ points, capital }: { points: Array<{ equity: number }>; c
   )
 }
 
+const UP_COLOR = '#22c55e'
+const DOWN_COLOR = '#ef4444'
+
+// 回测 K 线图：真实蜡烛图 + 每笔交易的入场/出场标记 + 一条连接两点的细线，
+// 这样用户看到的不只是一条抽象的净值曲线，而是"这笔单在当时的行情里到底
+// 长什么样"。复用行情图表页已经在用的 lightweight-charts（v5），marker 用
+// createSeriesMarkers 插件 API，连线用每笔交易各一条只有两个点的 LineSeries。
+//
+// Backtest candlestick chart: real candles + an entry/exit marker for every
+// trade + a thin line connecting the two, so the user sees not just an
+// abstract equity curve but what the market actually looked like when each
+// trade fired. Reuses the same lightweight-charts (v5) already used by the
+// charts page; markers go through the createSeriesMarkers plugin API, and
+// each trade gets its own 2-point LineSeries for the connecting line.
+function BacktestChart({ bars, trades }: { bars: StrategyBacktestResult['bars']; trades: StrategyBacktestTrade[] }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || bars.length === 0) return
+
+    const chart = createChart(el, {
+      layout: {
+        background: { type: ColorType.Solid, color: 'transparent' },
+        textColor: '#94a3b8',
+        attributionLogo: false,
+      },
+      grid: {
+        vertLines: { color: 'rgba(139, 70, 255, 0.08)' },
+        horzLines: { color: 'rgba(139, 70, 255, 0.08)' },
+      },
+      rightPriceScale: { borderColor: 'rgba(139, 70, 255, 0.15)' },
+      timeScale: { borderColor: 'rgba(139, 70, 255, 0.15)', timeVisible: true, secondsVisible: false },
+      crosshair: { mode: 0 },
+      // 故意先建成一个明显偏小的占位尺寸，而不是直接传 el.clientWidth——见下方
+      // resize 那段注释的完整解释：真实根因是 lightweight-charts 在这类环境下
+      // 如果 resize() 传的目标尺寸和创建时的尺寸"一样"，会被当成没有变化直接
+      // 跳过，canvas 位图分辨率永远不会被真正刷新到位；创建时故意留一个必然
+      // 不同的占位尺寸，后面第一次 resize() 才会被库判定为"真的变了"而生效。
+      // Deliberately create at an obviously-too-small placeholder size instead
+      // of el.clientWidth directly — see the full explanation in the resize
+      // comment below. The real root cause: in this rendering environment,
+      // lightweight-charts treats a resize() call whose target size matches
+      // the size it was created with as a no-op and skips it, so the canvas
+      // bitmap resolution never actually gets painted. Leaving a deliberately
+      // different placeholder size at creation guarantees the first real
+      // resize() call afterward is seen as an actual change and takes effect.
+      width: 2,
+      height: 2,
+    })
+    const series = chart.addSeries(CandlestickSeries, {
+      upColor: UP_COLOR, downColor: DOWN_COLOR, wickUpColor: UP_COLOR, wickDownColor: DOWN_COLOR, borderVisible: false,
+    })
+    series.setData(bars.map((b) => ({ time: b.t as UTCTimestamp, open: b.o, high: b.h, low: b.l, close: b.c })))
+
+    const markers = trades.flatMap((t) => {
+      const win = t.result === 'HIT_TP'
+      return [
+        {
+          time: t.entryTime as UTCTimestamp,
+          position: (t.side === 'BUY' ? 'belowBar' : 'aboveBar') as 'belowBar' | 'aboveBar',
+          shape: (t.side === 'BUY' ? 'arrowUp' : 'arrowDown') as 'arrowUp' | 'arrowDown',
+          color: t.side === 'BUY' ? UP_COLOR : DOWN_COLOR,
+        },
+        {
+          time: t.exitTime as UTCTimestamp,
+          position: (t.side === 'BUY' ? 'aboveBar' : 'belowBar') as 'belowBar' | 'aboveBar',
+          shape: 'circle' as const,
+          color: win ? UP_COLOR : DOWN_COLOR,
+        },
+      ]
+    })
+    createSeriesMarkers(series, markers)
+
+    // 每笔交易一条独立的两点连线,标出"从哪进、到哪出" / one 2-point line
+    // series per trade, tracing "where it entered, where it exited"
+    const tradeLines = trades.map((t) => {
+      const line = chart.addSeries(LineSeries, {
+        color: t.result === 'HIT_TP' ? 'rgba(34, 197, 94, 0.55)' : 'rgba(239, 68, 68, 0.55)',
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      })
+      line.setData([
+        { time: t.entryTime as UTCTimestamp, value: t.entryPrice },
+        { time: t.exitTime as UTCTimestamp, value: t.exitPrice },
+      ])
+      return line
+    })
+
+    chart.timeScale().fitContent()
+
+    // 立即把占位尺寸纠正成容器的真实尺寸。这一步必须存在——见上方 createChart
+    // 里 width:2/height:2 占位的注释：lightweight-charts 在这类环境下，如果
+    // resize() 的目标尺寸和"创建时的尺寸"一样会被当成没有变化直接跳过（canvas
+    // 位图分辨率卡在浏览器默认的 300x150，即使容器自身的 CSS 尺寸完全正确）。
+    // 用占位尺寸打底后，这里第一次 resize() 到真实宽高必然与创建时不同，
+    // 会被库判定为"真的变了"而真正生效——手测反复验证过，同样的调用换成和
+    // 创建时一样的尺寸就会被吞掉。之后的 ResizeObserver 只负责窗口真的发生
+    // 尺寸变化时跟着调整，与 ChartsPage.tsx 同一套模式。全程用 chart.resize()
+    // 而不是 chart.applyOptions()——后者只改 CSS 尺寸，不会刷新 canvas 位图。
+    // Immediately correct the placeholder size to the container's real size.
+    // This step is required — see the width:2/height:2 comment on createChart
+    // above: in this rendering environment, lightweight-charts treats a
+    // resize() call whose target size matches the size it was created with as
+    // a no-op and skips it (the canvas bitmap resolution stays stuck at the
+    // browser's default 300x150 even though the container's own CSS size is
+    // fully correct). Starting from a placeholder size guarantees this first
+    // resize() to the real dimensions is different from the creation size and
+    // is genuinely applied — verified by repeated manual testing, where the
+    // identical call with the creation-time size was silently swallowed. The
+    // ResizeObserver below only needs to handle genuine later window resizes,
+    // same pattern as ChartsPage.tsx. Everywhere uses chart.resize(), never
+    // chart.applyOptions() — the latter only updates the CSS size, never the
+    // canvas bitmap.
+    // "打两下"：先 resize 到一个必然不同的临时值，再 resize 到真正目标值——
+    // 不仅创建时的占位尺寸需要这样纠正，后续 ResizeObserver 报告的每一次真实
+    // 尺寸变化（比如手机端从桌面宽度变窄）同样会撞上"目标尺寸和当前内部记录
+    // 的尺寸一样就判定没变化、直接跳过"这个坑（哪怕这次真的是一次不同的变化，
+    // 内部记录的状态有时也没能正确同步，手测时切到手机宽度就复现过一次）。
+    // A "double kick": resize to a deliberately different transient value
+    // first, then to the real target — not just the placeholder-size
+    // correction at creation needs this; every later genuine size change
+    // reported by the ResizeObserver (e.g. switching to a narrower mobile
+    // width) can hit the same "target matches what the library thinks is
+    // already the current size, so it's treated as a no-op" pitfall, because
+    // its internal size bookkeeping doesn't always stay in sync — reproduced
+    // once during manual testing by switching to the mobile viewport.
+    const forceResize = (width: number, height: number) => {
+      chart.resize(width - 1, height, true)
+      chart.resize(width, height, true)
+    }
+    if (el.clientWidth > 0) forceResize(el.clientWidth, 320)
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      const { width, height } = entry.contentRect
+      if (width > 0 && height > 0) forceResize(width, height)
+    })
+    ro.observe(el)
+    // 双保险：ResizeObserver 在这类环境下偶尔连续两次都不触发（同一个页面里
+    // 手测时，切到手机宽度那次生效了，切回桌面宽度那次又没触发），窗口级的
+    // resize 事件作为独立的第二条路径兜底，两者中任何一个触发都够。
+    // Belt-and-braces: the ResizeObserver occasionally misses two transitions
+    // in a row in this kind of environment (manual testing: it caught the
+    // switch to mobile width but missed the switch back to desktop width in
+    // the same session) — a window-level resize listener is an independent
+    // second path; either one firing is enough.
+    const onWindowResize = () => {
+      if (el.clientWidth > 0) forceResize(el.clientWidth, el.clientHeight || 320)
+    }
+    window.addEventListener('resize', onWindowResize)
+    return () => {
+      window.removeEventListener('resize', onWindowResize)
+      ro.disconnect()
+      tradeLines.forEach((l) => chart.removeSeries(l))
+      chart.remove()
+    }
+  }, [bars, trades])
+
+  return <div ref={containerRef} className="h-[320px] w-full" />
+}
+
 interface Draft {
   id?: string
   template: StrategyTemplateKey
@@ -133,6 +323,8 @@ function StrategyBuilder({
   const [backtesting, setBacktesting] = useState(false)
   const [backtestError, setBacktestError] = useState<string | null>(null)
   const [result, setResult] = useState<StrategyBacktestResult | null>(null)
+  const [tradePage, setTradePage] = useState(0)
+  const TRADE_PAGE_SIZE = 20
 
   const schema = templates[draft.template]
 
@@ -155,6 +347,7 @@ function StrategyBuilder({
         days: btDays, riskPct: btRisk, capital: btCapital, mode: btMode,
       })
       setResult(res)
+      setTradePage(0)
     } catch (e) {
       setBacktestError(e instanceof Error ? localizeApiError(e.message) : 'Unknown error')
     } finally {
@@ -341,9 +534,91 @@ function StrategyBuilder({
                 <div className="num mt-1 text-lg font-bold text-slate-100">{result.summary.avgRr == null ? '-' : `${result.summary.avgRr.toFixed(2)}R`}</div>
               </div>
             </div>
+            {/* K 线图 + 每笔交易的入场/出场标记与连线——"这笔单在当时的行情里
+                长什么样",而不只是一条抽象的净值曲线。
+                Candlestick chart + each trade's entry/exit markers and
+                connecting line — what the trade actually looked like against
+                real price action, not just an abstract equity curve. */}
             <div className="mt-4">
+              <div className="mb-2 text-[11px] text-slate-500">
+                {t('strategy.chartHint', { n: result.trades.length })}
+              </div>
+              <BacktestChart bars={result.bars} trades={result.trades} />
+            </div>
+
+            <div className="mt-4">
+              <div className="mb-2 text-[11px] text-slate-500">{t('simulator.equityCurve')}</div>
               <EquityCurve points={result.points} capital={btCapital} />
             </div>
+
+            {result.trades.length > 0 && (
+              <div className="mt-4">
+                <div className="mb-2 text-[11px] text-slate-500">{t('simulator.trades')}</div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-slate-500">
+                        <th className="px-3 py-2 font-medium">{t('orders.colTime')}</th>
+                        <th className="px-3 py-2 font-medium">{t('orders.colSide')}</th>
+                        <th className="px-3 py-2 font-medium">{t('simulator.result')}</th>
+                        <th className="px-3 py-2 text-right font-medium">{t('simulator.tradeRr')}</th>
+                        <th className="px-3 py-2 text-right font-medium">{t('simulator.tradePnl')}</th>
+                        <th className="px-3 py-2 text-right font-medium">{t('simulator.equityAfter')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.trades.slice(tradePage * TRADE_PAGE_SIZE, tradePage * TRADE_PAGE_SIZE + TRADE_PAGE_SIZE).map((tr) => (
+                        <tr key={tr.id} className="border-b border-white/5">
+                          <td className="whitespace-nowrap px-3 py-2 text-slate-400">{fmtTime(tr.createdAt)}</td>
+                          <td className="px-3 py-2">
+                            <span className={`tag ${tr.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
+                              {tr.side === 'BUY' ? t('common.buy') : t('common.sell')}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">
+                            <span className={`tag ${tr.result === 'HIT_TP' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
+                              {t(`winrate.${tr.result === 'HIT_TP' ? 'hitTp' : 'hitSl'}`)}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-slate-300">{tr.rr.toFixed(2)}R</td>
+                          <td className={`px-3 py-2 text-right font-mono font-semibold ${tr.pnlPct >= 0 ? 'text-up' : 'text-down'}`}>
+                            {tr.pnlPct >= 0 ? '+' : ''}{tr.pnlPct.toFixed(2)}%
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-slate-200">${fmtMoney(tr.equityAfter)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {result.trades.length > TRADE_PAGE_SIZE && (
+                  <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
+                    <span>
+                      {t('orders.pageInfo', {
+                        page: tradePage + 1,
+                        totalPages: Math.ceil(result.trades.length / TRADE_PAGE_SIZE),
+                        total: result.trades.length,
+                      })}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setTradePage((p) => Math.max(0, p - 1))}
+                        disabled={tradePage === 0}
+                        className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {t('common.prevPage')}
+                      </button>
+                      <button
+                        onClick={() => setTradePage((p) => Math.min(Math.ceil(result.trades.length / TRADE_PAGE_SIZE) - 1, p + 1))}
+                        disabled={(tradePage + 1) * TRADE_PAGE_SIZE >= result.trades.length}
+                        className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {t('common.nextPage')}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

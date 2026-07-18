@@ -175,7 +175,10 @@ def backtest_strategy(body: StrategyBacktestRequest, db: Session = Depends(get_d
         bars, body.template, params, body.stopLossPct, body.takeProfitR,
         body.riskPct, body.capital, body.mode, body.symbol.upper(),
     )
-    return {"params": body.model_dump(), "barsAvailable": len(bars), "insufficientData": False, **result}
+    # bars 原样带回给前端画蜡烛图 + 标交易点，避免再单独拉一次历史。
+    # Return the bars as-is for the frontend's candlestick chart + trade
+    # markers, avoiding a second history round-trip.
+    return {"params": body.model_dump(), "barsAvailable": len(bars), "insufficientData": False, "bars": bars, **result}
 
 
 @router.get("/signals", response_model=dict)

@@ -44,6 +44,43 @@ TEMPLATE_SCHEMAS: dict[str, dict] = {
         "mult": {"type": "float", "min": 0.5, "max": 5.0, "default": 2.0},
         "direction": {"type": "enum", "options": ["both", "long", "short"], "default": "both"},
     },
+    "macd_cross": {
+        "fastPeriod": {"type": "int", "min": 2, "max": 50, "default": 12},
+        "slowPeriod": {"type": "int", "min": 3, "max": 100, "default": 26},
+        "signalPeriod": {"type": "int", "min": 2, "max": 50, "default": 9},
+        "direction": {"type": "enum", "options": ["both", "long", "short"], "default": "both"},
+    },
+    "ma_pullback": {
+        "maType": {"type": "enum", "options": ["SMA", "EMA"], "default": "EMA"},
+        "period": {"type": "int", "min": 5, "max": 200, "default": 20},
+        "touchTolerancePct": {"type": "float", "min": 0.05, "max": 2.0, "default": 0.3},
+        "direction": {"type": "enum", "options": ["both", "long", "short"], "default": "both"},
+    },
+    "bollinger_breakout": {
+        "period": {"type": "int", "min": 5, "max": 100, "default": 20},
+        "mult": {"type": "float", "min": 0.5, "max": 5.0, "default": 2.0},
+        "direction": {"type": "enum", "options": ["both", "long", "short"], "default": "both"},
+    },
+    "rsi_momentum": {
+        "period": {"type": "int", "min": 2, "max": 50, "default": 14},
+        "direction": {"type": "enum", "options": ["both", "long", "short"], "default": "both"},
+    },
+    "donchian_breakout": {
+        "period": {"type": "int", "min": 5, "max": 100, "default": 20},
+        "direction": {"type": "enum", "options": ["both", "long", "short"], "default": "both"},
+    },
+    "momentum_breakout": {
+        "lookback": {"type": "int", "min": 2, "max": 100, "default": 10},
+        "thresholdPct": {"type": "float", "min": 0.1, "max": 20.0, "default": 1.0},
+        "direction": {"type": "enum", "options": ["both", "long", "short"], "default": "both"},
+    },
+    "trend_rsi_filter": {
+        "trendPeriod": {"type": "int", "min": 10, "max": 200, "default": 50},
+        "rsiPeriod": {"type": "int", "min": 2, "max": 50, "default": 14},
+        "oversold": {"type": "int", "min": 1, "max": 49, "default": 30},
+        "overbought": {"type": "int", "min": 51, "max": 99, "default": 70},
+        "direction": {"type": "enum", "options": ["both", "long", "short"], "default": "both"},
+    },
 }
 
 # 回测/实时评估共用的历史窗口深度：要盖住最大周期(慢线 300)的预热期。
@@ -78,7 +115,7 @@ def validate_and_clamp_params(template: str, raw: dict) -> dict:
                 out[key] = max(spec["min"], min(spec["max"], float(val)))
             except (TypeError, ValueError):
                 out[key] = spec["default"]
-    if template == "ma_cross" and out["slowPeriod"] <= out["fastPeriod"]:
+    if template in ("ma_cross", "macd_cross") and out["slowPeriod"] <= out["fastPeriod"]:
         out["slowPeriod"] = out["fastPeriod"] + 1
     return out
 
@@ -149,6 +186,45 @@ def _bollinger(values: list[float], period: int, mult: float) -> tuple[list[floa
     return upper, lower
 
 
+def _macd(values: list[float], fast: int, slow: int, signal_period: int) -> tuple[list[float | None], list[float | None]]:
+    """MACD：DIF=快慢 EMA 之差，DEA(signal)=DIF 的 EMA——移植自 indicators.ts 的
+    macd()，同样先抽出 DIF 里第一个非空值开始的连续段再算 EMA，再按原位置拼回去
+    （慢线预热期会让 DIF 数组开头有一段 None）。
+    MACD: DIF = fast EMA - slow EMA, signal (DEA) = EMA of DIF — ported from
+    indicators.ts's macd(), pulling out the dense run starting at DIF's first
+    non-null value before running EMA over it (the slow EMA's warm-up leaves a
+    None head), then splicing the result back into position."""
+    fast_ema = _ema(values, fast)
+    slow_ema = _ema(values, slow)
+    macd_line: list[float | None] = [
+        None if fast_ema[i] is None or slow_ema[i] is None else fast_ema[i] - slow_ema[i]
+        for i in range(len(values))
+    ]
+    first_valid = next((i for i, v in enumerate(macd_line) if v is not None), -1)
+    signal: list[float | None] = [None] * len(values)
+    if first_valid >= 0:
+        dense = macd_line[first_valid:]
+        dense_signal = _ema(dense, signal_period)
+        for i, v in enumerate(dense_signal):
+            signal[first_valid + i] = v
+    return macd_line, signal
+
+
+def _rolling_max_excl(values: list[float], period: int, i: int) -> float | None:
+    """第 i 根 bar 之前(不含)最近 period 根的最大值,历史不够时返回 None。
+    Max of the `period` bars strictly before index i; None if there isn't
+    enough history yet."""
+    if i < period:
+        return None
+    return max(values[i - period:i])
+
+
+def _rolling_min_excl(values: list[float], period: int, i: int) -> float | None:
+    if i < period:
+        return None
+    return min(values[i - period:i])
+
+
 def _apply_direction(side: str | None, direction: str) -> str | None:
     if side is None:
         return None
@@ -164,6 +240,8 @@ def entry_signals(bars: list[dict], template: str, params: dict) -> list[str | N
     Computes the per-bar entry signal ("BUY"/"SELL"/None) over the whole
     series, same length as `bars`."""
     closes = [b["c"] for b in bars]
+    highs = [b["h"] for b in bars]
+    lows = [b["l"] for b in bars]
     n = len(closes)
     out: list[str | None] = [None] * n
     direction = params.get("direction", "both")
@@ -200,6 +278,92 @@ def entry_signals(bars: list[dict], template: str, params: dict) -> list[str | N
             if upper[i] is not None and upper[i - 1] is not None:
                 if closes[i - 1] >= upper[i - 1] and closes[i] < upper[i]:
                     out[i] = _apply_direction("SELL", direction)
+
+    elif template == "macd_cross":
+        dif, dea = _macd(closes, params["fastPeriod"], params["slowPeriod"], params["signalPeriod"])
+        for i in range(1, n):
+            if None in (dif[i], dea[i], dif[i - 1], dea[i - 1]):
+                continue
+            if dif[i - 1] <= dea[i - 1] and dif[i] > dea[i]:
+                out[i] = _apply_direction("BUY", direction)
+            elif dif[i - 1] >= dea[i - 1] and dif[i] < dea[i]:
+                out[i] = _apply_direction("SELL", direction)
+
+    elif template == "ma_pullback":
+        fn = _ema if params["maType"] == "EMA" else _sma
+        ma = fn(closes, params["period"])
+        tol = params["touchTolerancePct"] / 100.0
+        for i in range(1, n):
+            if ma[i] is None or ma[i - 1] is None:
+                continue
+            # 上升趋势中回踩均线后收回：前一根收在均线上方，本根探到均线附近
+            # 但收盘仍站上均线。/ Uptrend pullback: prior close above the MA,
+            # this bar dips toward it but still closes back above.
+            if closes[i - 1] > ma[i - 1] and lows[i] <= ma[i] * (1 + tol) and closes[i] > ma[i]:
+                out[i] = _apply_direction("BUY", direction)
+            elif closes[i - 1] < ma[i - 1] and highs[i] >= ma[i] * (1 - tol) and closes[i] < ma[i]:
+                out[i] = _apply_direction("SELL", direction)
+
+    elif template == "bollinger_breakout":
+        upper, lower = _bollinger(closes, params["period"], params["mult"])
+        for i in range(1, n):
+            if upper[i] is not None and upper[i - 1] is not None:
+                if closes[i - 1] <= upper[i - 1] and closes[i] > upper[i]:
+                    out[i] = _apply_direction("BUY", direction)
+            if lower[i] is not None and lower[i - 1] is not None:
+                if closes[i - 1] >= lower[i - 1] and closes[i] < lower[i]:
+                    out[i] = _apply_direction("SELL", direction)
+
+    elif template == "rsi_momentum":
+        r = _rsi(closes, params["period"])
+        for i in range(1, n):
+            if r[i] is None or r[i - 1] is None:
+                continue
+            if r[i - 1] <= 50 < r[i]:
+                out[i] = _apply_direction("BUY", direction)
+            elif r[i - 1] >= 50 > r[i]:
+                out[i] = _apply_direction("SELL", direction)
+
+    elif template == "donchian_breakout":
+        period = params["period"]
+        for i in range(1, n):
+            hi_prev, hi_now = _rolling_max_excl(highs, period, i - 1), _rolling_max_excl(highs, period, i)
+            lo_prev, lo_now = _rolling_min_excl(lows, period, i - 1), _rolling_min_excl(lows, period, i)
+            # 只在"刚突破"那一根触发一次，避免价格站稳在通道外时每根都重复报信号。
+            # Fire only on the bar that newly breaks out, so a price that
+            # stays outside the channel doesn't re-signal every bar.
+            if hi_now is not None and hi_prev is not None and closes[i - 1] <= hi_prev and closes[i] > hi_now:
+                out[i] = _apply_direction("BUY", direction)
+            elif lo_now is not None and lo_prev is not None and closes[i - 1] >= lo_prev and closes[i] < lo_now:
+                out[i] = _apply_direction("SELL", direction)
+
+    elif template == "momentum_breakout":
+        lookback, threshold = params["lookback"], params["thresholdPct"] / 100.0
+        for i in range(lookback + 1, n):
+            prev_score = closes[i - 1] / closes[i - 1 - lookback] - 1
+            score = closes[i] / closes[i - lookback] - 1
+            if prev_score <= threshold < score:
+                out[i] = _apply_direction("BUY", direction)
+            elif prev_score >= -threshold > score:
+                out[i] = _apply_direction("SELL", direction)
+
+    elif template == "trend_rsi_filter":
+        trend_ma = _ema(closes, params["trendPeriod"])
+        r = _rsi(closes, params["rsiPeriod"])
+        oversold, overbought = params["oversold"], params["overbought"]
+        for i in range(1, n):
+            if trend_ma[i] is None or r[i] is None or r[i - 1] is None:
+                continue
+            # 上升趋势里只接受"回调到超卖区再反弹"的买入；下降趋势对称地只接受
+            # "反弹到超买区再回落"的卖出——趋势方向本身就是过滤器。
+            # In an uptrend, only accept a "pulled back into oversold, now
+            # bouncing" buy; symmetric for a downtrend's sell — the trend
+            # direction itself is the filter.
+            if closes[i] > trend_ma[i] and r[i - 1] <= oversold < r[i]:
+                out[i] = _apply_direction("BUY", direction)
+            elif closes[i] < trend_ma[i] and r[i - 1] >= overbought > r[i]:
+                out[i] = _apply_direction("SELL", direction)
+
     else:
         raise ValueError(f"未知策略模板 / unknown strategy template: {template}")
 
@@ -303,6 +467,15 @@ def run_backtest(
             "side": side,
             "createdAt": datetime.fromtimestamp(bars[i]["t"], tz=timezone.utc).isoformat(),
             "resolvedAt": bar_time,
+            # entry/exitTime：入场/出场那根 K 线的 epoch 秒，供前端在图表上精确
+            # 定位标记，不用把 ISO 字符串再解析回时间戳。
+            # entry/exitTime: epoch seconds of the entry/exit bar, so the
+            # frontend can place chart markers precisely without re-parsing
+            # the ISO strings back into timestamps.
+            "entryTime": bars[i]["t"],
+            "exitTime": bars[exit_j]["t"],
+            "entryPrice": entry_price,
+            "exitPrice": sl if exit_result == "HIT_SL" else tp,
             "result": exit_result,
             "rr": rr,
             "pnlPct": pnl_pct * 100,
