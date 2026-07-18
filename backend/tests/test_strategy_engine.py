@@ -201,7 +201,7 @@ def test_backtest_records_a_win_when_take_profit_is_hit(monkeypatch):
         {"t": 2, "o": 100, "h": 103, "l": 99.5, "c": 102},  # 摸到止盈(102),没摸到止损(99) / hits TP, not SL
     ]
     monkeypatch.setattr(se, "entry_signals", lambda b, t, p: [None, "BUY", None])
-    result = se.run_backtest(bars, "ma_cross", {}, stop_loss_pct=1.0, take_profit_r=2.0, risk_pct=1.0, capital=10000, mode="compound", symbol="TEST")
+    result = se.run_backtest(bars, "ma_cross", {}, stop_loss_method="percent", stop_loss_value=1.0, take_profit_method="rr", take_profit_value=2.0, risk_pct=1.0, capital=10000, mode="compound", symbol="TEST")
     assert result["summary"]["wins"] == 1
     assert result["summary"]["losses"] == 0
     assert result["summary"]["finalEquity"] > 10000
@@ -215,7 +215,7 @@ def test_backtest_records_a_loss_when_stop_loss_is_hit(monkeypatch):
         {"t": 2, "o": 100, "h": 100.5, "l": 98.0, "c": 99},  # 摸到止损(99),没摸到止盈(102) / hits SL, not TP
     ]
     monkeypatch.setattr(se, "entry_signals", lambda b, t, p: [None, "BUY", None])
-    result = se.run_backtest(bars, "ma_cross", {}, stop_loss_pct=1.0, take_profit_r=2.0, risk_pct=1.0, capital=10000, mode="compound", symbol="TEST")
+    result = se.run_backtest(bars, "ma_cross", {}, stop_loss_method="percent", stop_loss_value=1.0, take_profit_method="rr", take_profit_value=2.0, risk_pct=1.0, capital=10000, mode="compound", symbol="TEST")
     assert result["summary"]["wins"] == 0
     assert result["summary"]["losses"] == 1
     assert result["summary"]["finalEquity"] < 10000
@@ -231,7 +231,7 @@ def test_backtest_same_bar_hitting_both_sl_and_tp_counts_as_loss(monkeypatch):
         {"t": 2, "o": 100, "h": 110, "l": 90, "c": 100},  # 同一根摸到两边 / both SL and TP touched in one bar
     ]
     monkeypatch.setattr(se, "entry_signals", lambda b, t, p: [None, "BUY", None])
-    result = se.run_backtest(bars, "ma_cross", {}, stop_loss_pct=1.0, take_profit_r=2.0, risk_pct=1.0, capital=10000, mode="compound", symbol="TEST")
+    result = se.run_backtest(bars, "ma_cross", {}, stop_loss_method="percent", stop_loss_value=1.0, take_profit_method="rr", take_profit_value=2.0, risk_pct=1.0, capital=10000, mode="compound", symbol="TEST")
     assert result["trades"][0]["result"] == "HIT_SL"
 
 
@@ -241,7 +241,7 @@ def test_backtest_unresolved_trade_at_end_of_data_is_not_counted(monkeypatch):
         {"t": 1, "o": 100, "h": 100, "l": 100, "c": 100},  # 入场后没有更多 K 线可以判定结果 / no more bars to resolve it
     ]
     monkeypatch.setattr(se, "entry_signals", lambda b, t, p: [None, "BUY"])
-    result = se.run_backtest(bars, "ma_cross", {}, stop_loss_pct=1.0, take_profit_r=2.0, risk_pct=1.0, capital=10000, mode="compound", symbol="TEST")
+    result = se.run_backtest(bars, "ma_cross", {}, stop_loss_method="percent", stop_loss_value=1.0, take_profit_method="rr", take_profit_value=2.0, risk_pct=1.0, capital=10000, mode="compound", symbol="TEST")
     assert result["summary"]["wins"] == 0
     assert result["summary"]["losses"] == 0
     assert result["trades"] == []

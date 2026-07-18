@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyTemplateSchemas, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyTemplateSchemas, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod } from './types'
 
 const TOKEN_KEY = 'prismx_token'
 
@@ -212,15 +212,26 @@ export const strategyApi = {
   list: () => request<{ strategies: UserStrategy[] }>('/strategies'),
   create: (payload: {
     template: StrategyTemplateKey
+    name?: string | null
     symbol: string
     interval: string
     params: Record<string, string | number>
-    stopLossPct: number
-    takeProfitR: number
+    stopLossMethod: StopLossMethod
+    stopLossValue: number
+    takeProfitMethod: TakeProfitMethod
+    takeProfitValue: number
   }) => request<UserStrategy>('/strategies', { method: 'POST', body: JSON.stringify(payload) }),
   update: (
     id: string,
-    payload: Partial<{ params: Record<string, string | number>; stopLossPct: number; takeProfitR: number; enabled: boolean }>
+    payload: Partial<{
+      name: string | null
+      params: Record<string, string | number>
+      stopLossMethod: StopLossMethod
+      stopLossValue: number
+      takeProfitMethod: TakeProfitMethod
+      takeProfitValue: number
+      enabled: boolean
+    }>
   ) => request<UserStrategy>(`/strategies/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   remove: (id: string) => request<{ ok: boolean }>(`/strategies/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   backtest: (payload: {
@@ -228,8 +239,10 @@ export const strategyApi = {
     symbol: string
     interval: string
     params: Record<string, string | number>
-    stopLossPct: number
-    takeProfitR: number
+    stopLossMethod: StopLossMethod
+    stopLossValue: number
+    takeProfitMethod: TakeProfitMethod
+    takeProfitValue: number
     days: number
     riskPct: number
     capital: number

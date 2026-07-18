@@ -1,13 +1,18 @@
 // 实时数据共享状态：EA 状态、信号、订单、持仓。
 // Shared live state: EA status, signals, orders, positions.
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from 'react'
-import type { BrokerLock, MT5Account, Order, Position, Quote, Signal, Trend, WSMessage } from '../api/types'
-import { accountApi, orderApi, quoteApi, signalApi, symbolApi, trendApi } from '../api/client'
+import type { BrokerLock, MT5Account, Order, Position, Quote, Signal, StrategySignal, Trend, WSMessage } from '../api/types'
+import { accountApi, orderApi, quoteApi, signalApi, strategyApi, symbolApi, trendApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
 import { usePrefs } from './prefs'
 
 interface LiveContextValue {
   signals: Signal[]
+  // 用户自建策略触发的个人信号——与 signals 完全独立（见 strategy_engine.py
+  // 的分表说明），最新在前。/ Personal signals fired by the user's own
+  // strategies — fully separate from `signals` (see strategy_engine.py's
+  // rationale for the split table), newest first.
+  strategySignals: StrategySignal[]
   orders: Order[]
   // 多周期趋势 {symbol: Trend}（由 TradingView 经 webhook 推送）/ trends pushed via webhook
   trends: Record<string, Trend>
@@ -104,6 +109,7 @@ function capExpired(signals: Signal[]): Signal[] {
 export function LiveProvider({ children }: { children: ReactNode }) {
   const { applyRemotePrefs } = usePrefs()
   const [signals, setSignals] = useState<Signal[]>([])
+  const [strategySignals, setStrategySignals] = useState<StrategySignal[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [positions, setPositions] = useState<Position[]>([])
   const [quotes, setQuotes] = useState<Record<string, Record<string, Quote>>>({})
@@ -116,8 +122,13 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [loaded, setLoaded] = useState(false)
 
   const refreshAll = useCallback(async () => {
-    const [sig, ord, acc, trd, gq, sym] = await Promise.all([
+    const [sig, stratSig, ord, acc, trd, gq, sym] = await Promise.all([
       signalApi.list().catch(() => ({ signals: [] })),
+      // 目前仅管理员可用（功能内部试用中）；非管理员在此静默拿回空数组，
+      // 不影响其它数据的加载。/ Admin-only for now (feature in internal
+      // trial); non-admins silently get an empty array here, without
+      // affecting the rest of the load.
+      strategyApi.signals(20).catch(() => ({ signals: [] })),
       orderApi.list().catch(() => ({ orders: [], total: 0 })),
       accountApi.list().catch(() => ({ accounts: [], accountLimit: null, brokerLock: null })),
       trendApi.list().catch(() => ({ trends: [] })),
@@ -125,6 +136,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       symbolApi.list().catch(() => ({ symbols: [] })),
     ])
     setSignals(capExpired(sig.signals))
+    setStrategySignals(stratSig.signals)
     setOrders(ord.orders)
     setAccounts(acc.accounts)
     setAccountLimit(acc.accountLimit)
@@ -198,6 +210,14 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         )
         break
       }
+      case 'STRATEGY_SIGNAL':
+        // 命中即推：与 SIGNAL_NEW 同样的"新增插到最前"模式,只是没有过期概念
+        // (个人策略信号不会像平台信号那样被标记 EXPIRED)。
+        // Pushed on fire, same "prepend" pattern as SIGNAL_NEW — no expiry
+        // concept here (personal strategy signals are never marked EXPIRED
+        // the way platform signals are).
+        setStrategySignals((prev) => [msg.data as StrategySignal, ...prev].slice(0, 50))
+        break
       case 'ORDER_UPDATE': {
         const updated = msg.data as Order
         setOrders((prev) => {
@@ -297,10 +317,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   // re-render useLive() consumers.
   const value = useMemo<LiveContextValue>(
     () => ({
-      signals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
+      signals, strategySignals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
       anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected,
     }),
-    [signals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
+    [signals, strategySignals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
      anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected]
   )
 

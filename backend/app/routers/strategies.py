@@ -38,7 +38,13 @@ from app.schemas import StrategyBacktestRequest, StrategyCreate, StrategyOut, St
 from app.services.candle_store import INTERVAL_SECONDS
 from app.services.deps import require_admin
 from app.services.settings_store import get_strategy_settings
-from app.services.strategy_engine import TEMPLATE_SCHEMAS, run_backtest, validate_and_clamp_params
+from app.services.strategy_engine import (
+    TEMPLATE_SCHEMAS,
+    clamp_stop_loss,
+    clamp_take_profit,
+    run_backtest,
+    validate_and_clamp_params,
+)
 
 router = APIRouter(prefix="/strategies", tags=["strategies"])
 
@@ -55,9 +61,11 @@ def _check_access(db: Session, user: User) -> None:
 
 def _to_out(s: UserStrategy) -> StrategyOut:
     return StrategyOut(
-        id=s.id, template=s.template, symbol=s.symbol, interval=s.interval,
-        params=json.loads(s.params or "{}"), stopLossPct=s.stop_loss_pct,
-        takeProfitR=s.take_profit_r, enabled=s.enabled, createdAt=s.created_at,
+        id=s.id, template=s.template, name=s.name, symbol=s.symbol, interval=s.interval,
+        params=json.loads(s.params or "{}"),
+        stopLossMethod=s.stop_loss_method, stopLossValue=s.stop_loss_value,
+        takeProfitMethod=s.take_profit_method, takeProfitValue=s.take_profit_value,
+        enabled=s.enabled, createdAt=s.created_at,
     )
 
 
@@ -93,9 +101,11 @@ def create_strategy(body: StrategyCreate, db: Session = Depends(get_db), user: U
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     row = UserStrategy(
-        user_id=user.id, template=body.template, symbol=body.symbol.upper(), interval=body.interval,
+        user_id=user.id, template=body.template, name=(body.name or "").strip() or None,
+        symbol=body.symbol.upper(), interval=body.interval,
         params=json.dumps(params, ensure_ascii=False),
-        stop_loss_pct=body.stopLossPct, take_profit_r=body.takeProfitR,
+        stop_loss_method=body.stopLossMethod, stop_loss_value=clamp_stop_loss(body.stopLossMethod, body.stopLossValue),
+        take_profit_method=body.takeProfitMethod, take_profit_value=clamp_take_profit(body.takeProfitMethod, body.takeProfitValue),
     )
     db.add(row)
     db.commit()
@@ -111,15 +121,21 @@ def update_strategy(strategy_id: str, body: StrategyUpdate, db: Session = Depend
     if body.enabled is not None:
         _check_access(db, user)
         row.enabled = body.enabled
+    if body.name is not None:
+        row.name = body.name.strip() or None
     if body.params is not None:
         try:
             row.params = json.dumps(validate_and_clamp_params(row.template, body.params), ensure_ascii=False)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
-    if body.stopLossPct is not None:
-        row.stop_loss_pct = body.stopLossPct
-    if body.takeProfitR is not None:
-        row.take_profit_r = body.takeProfitR
+    if body.stopLossMethod is not None:
+        row.stop_loss_method = body.stopLossMethod
+    if body.stopLossValue is not None:
+        row.stop_loss_value = clamp_stop_loss(row.stop_loss_method, body.stopLossValue)
+    if body.takeProfitMethod is not None:
+        row.take_profit_method = body.takeProfitMethod
+    if body.takeProfitValue is not None:
+        row.take_profit_value = clamp_take_profit(row.take_profit_method, body.takeProfitValue)
     row.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(row)
@@ -172,7 +188,9 @@ def backtest_strategy(body: StrategyBacktestRequest, db: Session = Depends(get_d
         }
 
     result = run_backtest(
-        bars, body.template, params, body.stopLossPct, body.takeProfitR,
+        bars, body.template, params,
+        body.stopLossMethod, clamp_stop_loss(body.stopLossMethod, body.stopLossValue),
+        body.takeProfitMethod, clamp_take_profit(body.takeProfitMethod, body.takeProfitValue),
         body.riskPct, body.capital, body.mode, body.symbol.upper(),
     )
     # bars 原样带回给前端画蜡烛图 + 标交易点，避免再单独拉一次历史。

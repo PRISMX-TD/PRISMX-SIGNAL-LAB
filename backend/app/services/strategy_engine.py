@@ -370,16 +370,51 @@ def entry_signals(bars: list[dict], template: str, params: dict) -> list[str | N
     return out
 
 
-def _entry_exit_prices(side: str, entry: float, stop_loss_pct: float, take_profit_r: float) -> tuple[float, float]:
-    dist = entry * (stop_loss_pct / 100.0)
+def clamp_stop_loss(method: str, value: float) -> float:
+    """按 method 夹到合理区间——百分比距离与固定价格距离量纲不同，各自的边界
+    不能共用一套。/ Clamp to a sane range per method — percent-distance and
+    fixed-price-distance are different units, so they need separate bounds."""
+    if method == "percent":
+        return max(0.1, min(10.0, value))
+    return max(0.00001, min(1_000_000.0, value))
+
+
+def clamp_take_profit(method: str, value: float) -> float:
+    if method == "rr":
+        return max(0.5, min(10.0, value))
+    if method == "percent":
+        return max(0.1, min(50.0, value))
+    return max(0.00001, min(1_000_000.0, value))
+
+
+def _entry_exit_prices(
+    side: str, entry: float,
+    stop_loss_method: str, stop_loss_value: float,
+    take_profit_method: str, take_profit_value: float,
+) -> tuple[float, float]:
+    """按各自的方式独立算出止损/止盈距离，而不是只有"百分比距离 + R 倍数"
+    一种固定组合——用户可以自由搭配（如止损用百分比、止盈用固定价格距离）。
+
+    Independently computes the SL/TP distance per its own method rather than
+    one fixed "% distance + R multiple" combo — users can mix and match
+    (e.g. percent SL with a fixed price-distance TP).
+    """
+    sl_dist = entry * (stop_loss_value / 100.0) if stop_loss_method == "percent" else stop_loss_value
+    if take_profit_method == "rr":
+        tp_dist = sl_dist * take_profit_value
+    elif take_profit_method == "percent":
+        tp_dist = entry * (take_profit_value / 100.0)
+    else:
+        tp_dist = take_profit_value
     if side == "BUY":
-        return entry - dist, entry + dist * take_profit_r
-    return entry + dist, entry - dist * take_profit_r
+        return entry - sl_dist, entry + tp_dist
+    return entry + sl_dist, entry - tp_dist
 
 
 def run_backtest(
     bars: list[dict], template: str, params: dict,
-    stop_loss_pct: float, take_profit_r: float,
+    stop_loss_method: str, stop_loss_value: float,
+    take_profit_method: str, take_profit_value: float,
     risk_pct: float, capital: float, mode: str, symbol: str,
 ) -> dict:
     """吃已入库的 K 线历史,回放这个模板+参数组合过去的表现。
@@ -412,7 +447,7 @@ def run_backtest(
             i += 1
             continue
         entry_price = bars[i]["c"]
-        sl, tp = _entry_exit_prices(side, entry_price, stop_loss_pct, take_profit_r)
+        sl, tp = _entry_exit_prices(side, entry_price, stop_loss_method, stop_loss_value, take_profit_method, take_profit_value)
         exit_result = None
         exit_j = None
         for j in range(i + 1, n):
@@ -545,7 +580,11 @@ async def evaluate_new_candle(symbol: str, interval: str) -> None:
             if side is None:
                 continue
             entry_price = last_bar["c"]
-            sl, tp = _entry_exit_prices(side, entry_price, strat.stop_loss_pct, strat.take_profit_r)
+            sl, tp = _entry_exit_prices(
+                side, entry_price,
+                strat.stop_loss_method, strat.stop_loss_value,
+                strat.take_profit_method, strat.take_profit_value,
+            )
             sig = StrategySignal(
                 strategy_id=strat.id, user_id=strat.user_id, symbol=symbol, side=side,
                 entry=entry_price, stop_loss=sl, take_profit=tp, bar_t=last_bar["t"],

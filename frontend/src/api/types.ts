@@ -334,17 +334,28 @@ export type StrategyTemplateKey =
 
 export type StrategyTemplateSchemas = Record<StrategyTemplateKey, Record<string, StrategyParamSpec>>
 
+// 止损方式：percent(按入场价百分比距离) / price(固定价格距离,同报价单位)
+// 止盈方式：rr(止损距离的倍数) / percent / price
+// Stop-loss method: percent (distance as % of entry) / price (fixed price
+// distance, same unit as quotes). Take-profit method: rr (multiple of the SL
+// distance) / percent / price.
+export type StopLossMethod = 'percent' | 'price'
+export type TakeProfitMethod = 'rr' | 'percent' | 'price'
+
 // 用户自定义策略：模板 + 调好的参数,对某个品种/周期持续评估
 // A user-customized strategy: a template + tuned params, continuously
 // evaluated against one symbol/interval
 export interface UserStrategy {
   id: string
   template: StrategyTemplateKey
+  name: string | null
   symbol: string
   interval: string
   params: Record<string, string | number>
-  stopLossPct: number
-  takeProfitR: number
+  stopLossMethod: StopLossMethod
+  stopLossValue: number
+  takeProfitMethod: TakeProfitMethod
+  takeProfitValue: number
   enabled: boolean
   createdAt: string
 }
@@ -438,7 +449,7 @@ export interface Position {
 }
 
 export interface WSMessage {
-  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'QUOTES' | 'GLOBAL_QUOTES' | 'TREND_UPDATE' | 'PREFS_UPDATE'
+  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'QUOTES' | 'GLOBAL_QUOTES' | 'TREND_UPDATE' | 'PREFS_UPDATE' | 'STRATEGY_SIGNAL'
   data?: unknown
   reason?: string
   userId?: string

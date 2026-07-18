@@ -7,6 +7,7 @@ import { useAuth } from '../store/auth'
 import { useLive, useQuotes } from '../store/live'
 import type { Signal } from '../api/types'
 import SignalGrid from '../components/signals/SignalGrid'
+import MyStrategySignals from '../components/signals/MyStrategySignals'
 import SlideOrderModal from '../components/SlideOrderModal'
 import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import { useBackToClose } from '../utils/useBackToClose'
@@ -53,6 +54,7 @@ export default function SignalsPage() {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
             {t('signals.focus.backToDashboard', '返回仪表盘')}
           </button>
+          <MyStrategySignals />
           <SignalGrid signals={signals} onTrade={openTrade} userPlan={user?.plan} />
         </div>
       )}

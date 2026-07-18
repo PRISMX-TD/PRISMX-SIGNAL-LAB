@@ -479,15 +479,23 @@ class UserStrategy(Base):
     id = Column(String, primary_key=True, default=_uuid)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     template = Column(String, nullable=False)  # ma_cross / rsi_reversal / bollinger_reversion
+    # 用户自定义名称，留空则前端按模板名兜底展示 / user-given name; falls back to the template label when empty
+    name = Column(String, nullable=True)
     symbol = Column(String, nullable=False)
     interval = Column(String, nullable=False)
     params = Column(Text, default="{}")  # 模板专属参数 JSON / template-specific params JSON
-    # 止损/止盈：止损按入场价的百分比距离，止盈按止损距离的倍数（R 值），
-    # 与 auto_manage.py 的 R 值约定一致。
-    # SL/TP: stop-loss as a % distance from entry, take-profit as a multiple
-    # of that distance (R), consistent with auto_manage.py's R convention.
-    stop_loss_pct = Column(Float, nullable=False, default=1.0)
-    take_profit_r = Column(Float, nullable=False, default=2.0)
+    # 止损/止盈方式可独立选择，而不是只有"百分比距离 + R 倍数"一种组合：
+    # 止损 method: percent(按入场价百分比距离) / price(固定价格距离，同 EA 报价单位)。
+    # 止盈 method: rr(止损距离的倍数，与 auto_manage.py 的 R 值约定一致) / percent / price。
+    # SL/TP method is independently selectable rather than one fixed combo:
+    # stop_loss method: percent (distance as % of entry) / price (fixed price
+    # distance, same unit as the EA's quotes). take_profit method: rr
+    # (multiple of the SL distance, consistent with auto_manage.py's R
+    # convention) / percent / price.
+    stop_loss_method = Column(String, nullable=False, default="percent")
+    stop_loss_value = Column(Float, nullable=False, default=1.0)
+    take_profit_method = Column(String, nullable=False, default="rr")
+    take_profit_value = Column(Float, nullable=False, default=2.0)
     enabled = Column(Boolean, default=False)
     # 防止同一根 K 线重复触发信号 / de-dup guard: last bar this strategy fired a signal on
     last_signal_bar_t = Column(Integer, nullable=True)

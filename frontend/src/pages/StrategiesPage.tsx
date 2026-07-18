@@ -18,16 +18,19 @@ import { useLive, useQuotes } from '../store/live'
 import { strategyApi } from '../api/client'
 import { displaySymbol, fmtDate, fmtTime, localizeApiError } from '../api/utils'
 import type {
+  StopLossMethod,
   StrategyBacktestResult,
   StrategyBacktestTrade,
   StrategyParamSpec,
   StrategySignal,
   StrategyTemplateKey,
   StrategyTemplateSchemas,
+  TakeProfitMethod,
   UserStrategy,
 } from '../api/types'
 import ChartOrderModal from '../components/ChartOrderModal'
 import ConfirmModal from '../components/ConfirmModal'
+import Select from '../components/Select'
 import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import { useBackToClose } from '../utils/useBackToClose'
 
@@ -342,11 +345,14 @@ function NumberField({
 interface Draft {
   id?: string
   template: StrategyTemplateKey
+  name: string
   symbol: string
   interval: string
   params: Record<string, string | number>
-  stopLossPct: number
-  takeProfitR: number
+  stopLossMethod: StopLossMethod
+  stopLossValue: number
+  takeProfitMethod: TakeProfitMethod
+  takeProfitValue: number
 }
 
 function StrategyBuilder({
@@ -395,7 +401,8 @@ function StrategyBuilder({
     try {
       const res = await strategyApi.backtest({
         template: draft.template, symbol: draft.symbol, interval: draft.interval, params: draft.params,
-        stopLossPct: draft.stopLossPct, takeProfitR: draft.takeProfitR,
+        stopLossMethod: draft.stopLossMethod, stopLossValue: draft.stopLossValue,
+        takeProfitMethod: draft.takeProfitMethod, takeProfitValue: draft.takeProfitValue,
         days: btDays, riskPct: btRisk, capital: btCapital, mode: btMode,
       })
       setResult(res)
@@ -414,12 +421,17 @@ function StrategyBuilder({
       let saved: UserStrategy
       if (draft.id) {
         saved = await strategyApi.update(draft.id, {
-          params: draft.params, stopLossPct: draft.stopLossPct, takeProfitR: draft.takeProfitR, enabled,
+          name: draft.name.trim() || null, params: draft.params,
+          stopLossMethod: draft.stopLossMethod, stopLossValue: draft.stopLossValue,
+          takeProfitMethod: draft.takeProfitMethod, takeProfitValue: draft.takeProfitValue,
+          enabled,
         })
       } else {
         saved = await strategyApi.create({
-          template: draft.template, symbol: draft.symbol, interval: draft.interval,
-          params: draft.params, stopLossPct: draft.stopLossPct, takeProfitR: draft.takeProfitR,
+          template: draft.template, name: draft.name.trim() || null, symbol: draft.symbol, interval: draft.interval,
+          params: draft.params,
+          stopLossMethod: draft.stopLossMethod, stopLossValue: draft.stopLossValue,
+          takeProfitMethod: draft.takeProfitMethod, takeProfitValue: draft.takeProfitValue,
         })
         if (enabled) saved = await strategyApi.update(saved.id, { enabled: true })
       }
@@ -438,33 +450,39 @@ function StrategyBuilder({
 
   return (
     <section className="glass mb-5 p-5">
+      {/* 策略命名：留空则用模板名兜底展示 */}
+      <div className="mb-4">
+        <span className="mb-1.5 block text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.name')}</span>
+        <input
+          type="text"
+          className="input w-full sm:w-80"
+          maxLength={60}
+          placeholder={t(TEMPLATE_LABEL_KEYS[draft.template])}
+          value={draft.name}
+          onChange={(e) => onChange({ ...draft, name: e.target.value })}
+        />
+      </div>
+
       {/* 模板选择：随时可切换,切换会重置该模板的参数为默认值 */}
       <div className="mb-4">
         <span className="mb-1.5 block text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.template')}</span>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          {TEMPLATE_KEYS.map((key) => (
-            <button
-              key={key}
-              onClick={() => switchTemplate(key)}
-              className={`rounded-lg border p-3 text-left transition ${
-                draft.template === key ? 'border-prism-500/50 bg-prism-600/10' : 'border-white/10 bg-white/[0.02] hover:border-white/20'
-              }`}
-            >
-              <div className="text-sm font-semibold text-slate-100">{t(TEMPLATE_LABEL_KEYS[key])}</div>
-              <div className="mt-1 text-xs leading-relaxed text-slate-500">{t(TEMPLATE_DESC_KEYS[key])}</div>
-            </button>
-          ))}
-        </div>
+        <Select
+          className="w-full sm:w-80"
+          value={draft.template}
+          options={TEMPLATE_KEYS.map((key) => ({ value: key, label: t(TEMPLATE_LABEL_KEYS[key]) }))}
+          onChange={(v) => switchTemplate(v as StrategyTemplateKey)}
+        />
+        <p className="mt-2 text-xs leading-relaxed text-slate-500">{t(TEMPLATE_DESC_KEYS[draft.template])}</p>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1.5">
           <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.symbol')}</span>
-          <select className="input" value={draft.symbol} onChange={(e) => onChange({ ...draft, symbol: e.target.value })}>
-            {activeSymbols.map((s) => (
-              <option key={s} value={s}>{displaySymbol(s)}</option>
-            ))}
-          </select>
+          <Select
+            value={draft.symbol}
+            options={activeSymbols.map((s) => ({ value: s, label: displaySymbol(s) }))}
+            onChange={(v) => onChange({ ...draft, symbol: v })}
+          />
         </label>
         <label className="flex flex-col gap-1.5">
           <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.interval')}</span>
@@ -504,10 +522,42 @@ function StrategyBuilder({
             />
           )
         ))}
-        <NumberField label={t('strategy.stopLossPct')} value={draft.stopLossPct} min={0.1} max={10} isFloat
-          onChange={(v) => onChange({ ...draft, stopLossPct: v })} />
-        <NumberField label={t('strategy.takeProfitR')} value={draft.takeProfitR} min={0.5} max={10} isFloat
-          onChange={(v) => onChange({ ...draft, takeProfitR: v })} />
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.stopLossMethod')}</span>
+          <div className="flex flex-wrap gap-2">
+            {(['percent', 'price'] as const).map((m) => (
+              <button key={m} onClick={() => onChange({ ...draft, stopLossMethod: m })} className={segBtn(draft.stopLossMethod === m)}>
+                {t(m === 'percent' ? 'strategy.methodPercent' : 'strategy.methodPrice')}
+              </button>
+            ))}
+          </div>
+        </div>
+        <NumberField
+          label={draft.stopLossMethod === 'percent' ? t('strategy.stopLossPct') : t('strategy.stopLossPrice')}
+          value={draft.stopLossValue}
+          min={draft.stopLossMethod === 'percent' ? 0.1 : 0.00001}
+          max={draft.stopLossMethod === 'percent' ? 10 : 100000}
+          isFloat
+          onChange={(v) => onChange({ ...draft, stopLossValue: v })}
+        />
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.takeProfitMethod')}</span>
+          <div className="flex flex-wrap gap-2">
+            {(['rr', 'percent', 'price'] as const).map((m) => (
+              <button key={m} onClick={() => onChange({ ...draft, takeProfitMethod: m })} className={segBtn(draft.takeProfitMethod === m)}>
+                {t(m === 'rr' ? 'strategy.methodRR' : m === 'percent' ? 'strategy.methodPercent' : 'strategy.methodPrice')}
+              </button>
+            ))}
+          </div>
+        </div>
+        <NumberField
+          label={draft.takeProfitMethod === 'rr' ? t('strategy.takeProfitR') : draft.takeProfitMethod === 'percent' ? t('strategy.takeProfitPct') : t('strategy.takeProfitPrice')}
+          value={draft.takeProfitValue}
+          min={draft.takeProfitMethod === 'rr' ? 0.5 : draft.takeProfitMethod === 'percent' ? 0.1 : 0.00001}
+          max={draft.takeProfitMethod === 'rr' ? 10 : draft.takeProfitMethod === 'percent' ? 50 : 100000}
+          isFloat
+          onChange={(v) => onChange({ ...draft, takeProfitValue: v })}
+        />
       </div>
 
       {/* 回测参数与结果 */}
@@ -743,13 +793,19 @@ export default function StrategiesPage() {
   const openNewDraft = (template: StrategyTemplateKey) => {
     if (!templates) return
     setDraft({
-      template, symbol: activeSymbols[0] ?? 'XAUUSD', interval: '15',
-      params: defaultParams(templates[template]), stopLossPct: 1.0, takeProfitR: 2.0,
+      template, name: '', symbol: activeSymbols[0] ?? 'XAUUSD', interval: '15',
+      params: defaultParams(templates[template]),
+      stopLossMethod: 'percent', stopLossValue: 1.0,
+      takeProfitMethod: 'rr', takeProfitValue: 2.0,
     })
   }
 
   const openEditDraft = (s: UserStrategy) => {
-    setDraft({ id: s.id, template: s.template, symbol: s.symbol, interval: s.interval, params: s.params, stopLossPct: s.stopLossPct, takeProfitR: s.takeProfitR })
+    setDraft({
+      id: s.id, template: s.template, name: s.name ?? '', symbol: s.symbol, interval: s.interval, params: s.params,
+      stopLossMethod: s.stopLossMethod, stopLossValue: s.stopLossValue,
+      takeProfitMethod: s.takeProfitMethod, takeProfitValue: s.takeProfitValue,
+    })
   }
 
   const onSaved = (s: UserStrategy) => {
@@ -807,13 +863,9 @@ export default function StrategiesPage() {
         <div className="flex items-center justify-between">
           <h3 className="font-display text-lg font-semibold text-slate-100">{t('strategy.myStrategies')}</h3>
           {isPro && !draft && (
-            <div className="flex flex-wrap gap-2">
-              {TEMPLATE_KEYS.map((key) => (
-                <button key={key} onClick={() => openNewDraft(key)} className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:border-prism-400/50 hover:text-prism-200">
-                  {t('strategy.newStrategy')} · {t(TEMPLATE_LABEL_KEYS[key])}
-                </button>
-              ))}
-            </div>
+            <button onClick={() => openNewDraft(TEMPLATE_KEYS[0])} className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:border-prism-400/50 hover:text-prism-200">
+              {t('strategy.newStrategy')}
+            </button>
           )}
         </div>
 
@@ -825,7 +877,8 @@ export default function StrategiesPage() {
               <div key={s.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.02] p-3">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-slate-100">{t(TEMPLATE_LABEL_KEYS[s.template])}</span>
+                    <span className="text-sm font-semibold text-slate-100">{s.name?.trim() || t(TEMPLATE_LABEL_KEYS[s.template])}</span>
+                    {s.name?.trim() && <span className="text-xs text-slate-500">{t(TEMPLATE_LABEL_KEYS[s.template])}</span>}
                     <span className="tag bg-white/5 text-slate-400">{displaySymbol(s.symbol)}</span>
                     <span className="tag bg-white/5 text-slate-400">{INTERVALS.find((iv) => iv.code === s.interval)?.label ?? s.interval}</span>
                     <span className={`tag ${s.enabled ? 'bg-up/15 text-up' : 'bg-white/5 text-slate-500'}`}>

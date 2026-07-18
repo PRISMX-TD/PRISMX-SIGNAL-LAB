@@ -134,28 +134,38 @@ class AdminStrategySettings(BaseModel):
 # ---------- 自定义策略 / User strategies ----------
 class StrategyCreate(BaseModel):
     template: Literal["ma_cross", "rsi_reversal", "bollinger_reversion", "macd_cross", "ma_pullback", "bollinger_breakout", "rsi_momentum", "donchian_breakout", "momentum_breakout", "trend_rsi_filter"]
+    # 用户自定义名称，留空由前端按模板名兜底 / user-given name; frontend falls back to the template label when empty
+    name: str | None = Field(default=None, max_length=60)
     symbol: str = Field(pattern=SYMBOL_PATTERN)
     interval: str
     params: dict = Field(default_factory=dict)
-    stopLossPct: float = Field(default=1.0, ge=0.1, le=10)
-    takeProfitR: float = Field(default=2.0, ge=0.5, le=10)
+    stopLossMethod: Literal["percent", "price"] = "percent"
+    stopLossValue: float = Field(default=1.0, gt=0, le=1_000_000)
+    takeProfitMethod: Literal["rr", "percent", "price"] = "rr"
+    takeProfitValue: float = Field(default=2.0, gt=0, le=1_000_000)
 
 
 class StrategyUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=60)
     params: dict | None = None
-    stopLossPct: float | None = Field(default=None, ge=0.1, le=10)
-    takeProfitR: float | None = Field(default=None, ge=0.5, le=10)
+    stopLossMethod: Literal["percent", "price"] | None = None
+    stopLossValue: float | None = Field(default=None, gt=0, le=1_000_000)
+    takeProfitMethod: Literal["rr", "percent", "price"] | None = None
+    takeProfitValue: float | None = Field(default=None, gt=0, le=1_000_000)
     enabled: bool | None = None
 
 
 class StrategyOut(BaseModel):
     id: str
     template: str
+    name: str | None = None
     symbol: str
     interval: str
     params: dict
-    stopLossPct: float
-    takeProfitR: float
+    stopLossMethod: str
+    stopLossValue: float
+    takeProfitMethod: str
+    takeProfitValue: float
     enabled: bool
     createdAt: datetime
 
@@ -165,8 +175,10 @@ class StrategyBacktestRequest(BaseModel):
     symbol: str = Field(pattern=SYMBOL_PATTERN)
     interval: str
     params: dict = Field(default_factory=dict)
-    stopLossPct: float = Field(default=1.0, ge=0.1, le=10)
-    takeProfitR: float = Field(default=2.0, ge=0.5, le=10)
+    stopLossMethod: Literal["percent", "price"] = "percent"
+    stopLossValue: float = Field(default=1.0, gt=0, le=1_000_000)
+    takeProfitMethod: Literal["rr", "percent", "price"] = "rr"
+    takeProfitValue: float = Field(default=2.0, gt=0, le=1_000_000)
     days: int = Field(default=90, ge=7, le=730)
     riskPct: float = Field(default=1.0, ge=0.1, le=3.0)
     capital: float = Field(default=10000, ge=1, le=1e9)
