@@ -979,6 +979,8 @@
     "runBacktest": "运行回测",
     "backtesting": "回测中…",
     "insufficientData": "这个品种/周期的历史 K 线还不够长，暂时无法回测——数据会随时间自动积累，晚点再试。",
+    "resultsTitle": "回测结果",
+    "chartTitle": "K 线走势与交易点位",
     "chartHint": "共 {{n}} 笔交易，已标在下方 K 线图中（绿色箭头=买入进场，红色箭头=卖出进场，圆点=出场）",
     "saveAndEnable": "保存并启用",
     "saveOnly": "仅保存（不启用）",

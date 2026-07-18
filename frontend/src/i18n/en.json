@@ -979,6 +979,8 @@
     "runBacktest": "Run Backtest",
     "backtesting": "Backtesting…",
     "insufficientData": "Not enough candle history yet for this symbol/interval — it builds up over time, try again later.",
+    "resultsTitle": "Backtest Results",
+    "chartTitle": "Price Action & Trade Markers",
     "chartHint": "{{n}} trades, marked on the chart below (green arrow = buy entry, red arrow = sell entry, dot = exit)",
     "saveAndEnable": "Save & Enable",
     "saveOnly": "Save Only (don't enable)",

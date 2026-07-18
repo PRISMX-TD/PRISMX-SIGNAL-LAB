@@ -16,7 +16,7 @@ import { createChart, ColorType, CandlestickSeries, LineSeries, createSeriesMark
 import { useAuth } from '../store/auth'
 import { useLive, useQuotes } from '../store/live'
 import { strategyApi } from '../api/client'
-import { displaySymbol, fmtTime, localizeApiError } from '../api/utils'
+import { displaySymbol, fmtDate, fmtTime, localizeApiError } from '../api/utils'
 import type {
   StrategyBacktestResult,
   StrategyBacktestTrade,
@@ -293,6 +293,52 @@ function BacktestChart({ bars, trades }: { bars: StrategyBacktestResult['bars'];
   return <div ref={containerRef} className="h-[320px] w-full" />
 }
 
+// 数字输入框：自己维护一份文本缓冲，只在失焦（或回车）时才解析+夹紧+回传。
+// 沿用回放模拟器的 CapitalField 同款修法（见产品需求文档 6.18 节）——每敲一个
+// 字符就立刻解析夹紧，会让用户清空重打或改动带下限的字段时被强制弹回旧值，
+// 根本删不掉、也打不进新数字。这里所有可调参数（模板参数、止损止盈比例、
+// 回测本金）统一用这一个组件，不再各自手写一份 parseInt/parseFloat。
+// Number input: keeps its own text buffer, parsing/clamping/propagating only
+// on blur (or Enter). Mirrors the replay simulator's CapitalField fix —
+// parsing on every keystroke bounces the user back to the old value mid-edit,
+// making it impossible to clear the field or type past a lower bound. Every
+// tunable number here (template params, SL/TP ratios, backtest capital)
+// shares this one component instead of each hand-rolling parseInt/parseFloat.
+function NumberField({
+  label, value, onChange, min, max, isFloat,
+}: {
+  label: string
+  value: number
+  onChange: (v: number) => void
+  min: number
+  max: number
+  isFloat: boolean
+}) {
+  const [text, setText] = useState(String(value))
+  useEffect(() => { setText(String(value)) }, [value])
+
+  const commit = () => {
+    const n = isFloat ? parseFloat(text) : parseInt(text, 10)
+    const clamped = !Number.isFinite(n) ? value : Math.min(max, Math.max(min, n))
+    setText(String(clamped))
+    if (clamped !== value) onChange(clamped)
+  }
+
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className="text-[11px] uppercase tracking-wide text-slate-500">{label}</span>
+      <input
+        type="number"
+        className="input"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+      />
+    </label>
+  )
+}
+
 interface Draft {
   id?: string
   template: StrategyTemplateKey
@@ -325,6 +371,12 @@ function StrategyBuilder({
   const [result, setResult] = useState<StrategyBacktestResult | null>(null)
   const [tradePage, setTradePage] = useState(0)
   const TRADE_PAGE_SIZE = 20
+  // 逐单明细按新到旧展示；后端按回放顺序（旧到新）返回，这里单独倒一份供表格用，
+  // 图表标记仍然吃原始顺序（时间正序），互不影响。
+  // The trade table shows newest first; the backend returns replay order
+  // (oldest first). Reverse a separate copy for the table only — the chart's
+  // markers still consume the original ascending-time order.
+  const tradesDesc = result ? [...result.trades].reverse() : []
 
   const schema = templates[draft.template]
 
@@ -429,9 +481,9 @@ function StrategyBuilder({
       {/* 模板专属参数：完全按后端模板 schema 动态渲染,不写死字段列表 */}
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
         {Object.entries(schema).map(([key, spec]) => (
-          <label key={key} className="flex flex-col gap-1.5">
-            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t(PARAM_LABEL_KEYS[key] ?? key)}</span>
-            {spec.type === 'enum' ? (
+          spec.type === 'enum' ? (
+            <div key={key} className="flex flex-col gap-1.5">
+              <span className="text-[11px] uppercase tracking-wide text-slate-500">{t(PARAM_LABEL_KEYS[key] ?? key)}</span>
               <div className="flex flex-wrap gap-2">
                 {spec.options.map((opt) => (
                   <button key={opt} onClick={() => setParam(key, opt)} className={segBtn(draft.params[key] === opt)}>
@@ -439,29 +491,23 @@ function StrategyBuilder({
                   </button>
                 ))}
               </div>
-            ) : (
-              <input
-                type="number"
-                className="input"
-                min={spec.min}
-                max={spec.max}
-                step={spec.type === 'float' ? 0.1 : 1}
-                value={draft.params[key] ?? spec.default}
-                onChange={(e) => setParam(key, spec.type === 'float' ? parseFloat(e.target.value) : parseInt(e.target.value, 10))}
-              />
-            )}
-          </label>
+            </div>
+          ) : (
+            <NumberField
+              key={key}
+              label={t(PARAM_LABEL_KEYS[key] ?? key)}
+              value={typeof draft.params[key] === 'number' ? draft.params[key] as number : spec.default as number}
+              min={spec.min}
+              max={spec.max}
+              isFloat={spec.type === 'float'}
+              onChange={(v) => setParam(key, v)}
+            />
+          )
         ))}
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.stopLossPct')}</span>
-          <input type="number" className="input" min={0.1} max={10} step={0.1} value={draft.stopLossPct}
-            onChange={(e) => onChange({ ...draft, stopLossPct: Math.min(10, Math.max(0.1, parseFloat(e.target.value) || 0.1)) })} />
-        </label>
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.takeProfitR')}</span>
-          <input type="number" className="input" min={0.5} max={10} step={0.1} value={draft.takeProfitR}
-            onChange={(e) => onChange({ ...draft, takeProfitR: Math.min(10, Math.max(0.5, parseFloat(e.target.value) || 0.5)) })} />
-        </label>
+        <NumberField label={t('strategy.stopLossPct')} value={draft.stopLossPct} min={0.1} max={10} isFloat
+          onChange={(v) => onChange({ ...draft, stopLossPct: v })} />
+        <NumberField label={t('strategy.takeProfitR')} value={draft.takeProfitR} min={0.5} max={10} isFloat
+          onChange={(v) => onChange({ ...draft, takeProfitR: v })} />
       </div>
 
       {/* 回测参数与结果 */}
@@ -479,10 +525,9 @@ function StrategyBuilder({
             <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('simulator.risk')} · {btRisk.toFixed(1)}%</span>
             <input type="range" min={0.1} max={3} step={0.1} value={btRisk} onChange={(e) => setBtRisk(parseFloat(e.target.value))} className="w-32 accent-prism-500" />
           </label>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('simulator.capital')}</span>
-            <input type="number" className="input w-32" min={1} value={btCapital} onChange={(e) => setBtCapital(Math.max(1, parseInt(e.target.value, 10) || 1))} />
-          </label>
+          <div className="w-32">
+            <NumberField label={t('simulator.capital')} value={btCapital} min={1} max={1e9} isFloat={false} onChange={setBtCapital} />
+          </div>
           <div className="flex flex-col gap-1.5">
             <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('simulator.mode')}</span>
             <div className="flex gap-2">
@@ -502,7 +547,8 @@ function StrategyBuilder({
         )}
 
         {result && !result.insufficientData && (
-          <div className="mt-4">
+          <div className="mt-5 border-t border-white/10 pt-4">
+            <h4 className="mb-3 text-sm font-semibold text-slate-200">{t('strategy.resultsTitle')}</h4>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
                 <div className="text-[11px] text-slate-500">{t('simulator.finalEquity')}</div>
@@ -539,22 +585,25 @@ function StrategyBuilder({
                 Candlestick chart + each trade's entry/exit markers and
                 connecting line — what the trade actually looked like against
                 real price action, not just an abstract equity curve. */}
-            <div className="mt-4">
-              <div className="mb-2 text-[11px] text-slate-500">
-                {t('strategy.chartHint', { n: result.trades.length })}
+            <div className="mt-5 border-t border-white/10 pt-4">
+              <h4 className="text-sm font-semibold text-slate-200">{t('strategy.chartTitle')}</h4>
+              <p className="mt-1 text-xs text-slate-500">{t('strategy.chartHint', { n: result.trades.length })}</p>
+              <div className="mt-3">
+                <BacktestChart bars={result.bars} trades={result.trades} />
               </div>
-              <BacktestChart bars={result.bars} trades={result.trades} />
             </div>
 
-            <div className="mt-4">
-              <div className="mb-2 text-[11px] text-slate-500">{t('simulator.equityCurve')}</div>
-              <EquityCurve points={result.points} capital={btCapital} />
+            <div className="mt-5 border-t border-white/10 pt-4">
+              <h4 className="text-sm font-semibold text-slate-200">{t('simulator.equityCurve')}</h4>
+              <div className="mt-3">
+                <EquityCurve points={result.points} capital={btCapital} />
+              </div>
             </div>
 
             {result.trades.length > 0 && (
-              <div className="mt-4">
-                <div className="mb-2 text-[11px] text-slate-500">{t('simulator.trades')}</div>
-                <div className="overflow-x-auto">
+              <div className="mt-5 border-t border-white/10 pt-4">
+                <h4 className="text-sm font-semibold text-slate-200">{t('simulator.trades')}</h4>
+                <div className="mt-3 overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-slate-500">
@@ -567,9 +616,11 @@ function StrategyBuilder({
                       </tr>
                     </thead>
                     <tbody>
-                      {result.trades.slice(tradePage * TRADE_PAGE_SIZE, tradePage * TRADE_PAGE_SIZE + TRADE_PAGE_SIZE).map((tr) => (
+                      {/* 新到旧排列：最近的一笔交易最先看到，与订单页/成交明细的既有约定一致
+                          Newest first, consistent with the orders page's existing convention */}
+                      {tradesDesc.slice(tradePage * TRADE_PAGE_SIZE, tradePage * TRADE_PAGE_SIZE + TRADE_PAGE_SIZE).map((tr) => (
                         <tr key={tr.id} className="border-b border-white/5">
-                          <td className="whitespace-nowrap px-3 py-2 text-slate-400">{fmtTime(tr.createdAt)}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-slate-400">{fmtDate(tr.createdAt)}</td>
                           <td className="px-3 py-2">
                             <span className={`tag ${tr.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
                               {tr.side === 'BUY' ? t('common.buy') : t('common.sell')}
