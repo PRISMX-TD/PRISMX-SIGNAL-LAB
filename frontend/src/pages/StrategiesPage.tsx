@@ -533,6 +533,7 @@ interface Draft {
   stopLossValue: number
   takeProfitMethod: TakeProfitMethod
   takeProfitValue: number
+  oneTradeAtATime: boolean
 }
 
 function StrategyBuilder({
@@ -583,6 +584,7 @@ function StrategyBuilder({
         template: draft.template, symbol: draft.symbol, interval: draft.interval, params: draft.params,
         stopLossMethod: draft.stopLossMethod, stopLossValue: draft.stopLossValue,
         takeProfitMethod: draft.takeProfitMethod, takeProfitValue: draft.takeProfitValue,
+        oneTradeAtATime: draft.oneTradeAtATime,
         days: btDays, riskPct: btRisk, capital: btCapital, mode: btMode,
       })
       setResult(res)
@@ -604,6 +606,7 @@ function StrategyBuilder({
           name: draft.name.trim() || null, params: draft.params,
           stopLossMethod: draft.stopLossMethod, stopLossValue: draft.stopLossValue,
           takeProfitMethod: draft.takeProfitMethod, takeProfitValue: draft.takeProfitValue,
+          oneTradeAtATime: draft.oneTradeAtATime,
           enabled,
         })
       } else {
@@ -612,6 +615,7 @@ function StrategyBuilder({
           params: draft.params,
           stopLossMethod: draft.stopLossMethod, stopLossValue: draft.stopLossValue,
           takeProfitMethod: draft.takeProfitMethod, takeProfitValue: draft.takeProfitValue,
+          oneTradeAtATime: draft.oneTradeAtATime,
         })
         if (enabled) saved = await strategyApi.update(saved.id, { enabled: true })
       }
@@ -755,6 +759,21 @@ function StrategyBuilder({
               />
             </div>
           </div>
+        </div>
+
+        <div className="mt-4 flex flex-col gap-1.5">
+          <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.oneTradeAtATime')}</span>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => onChange({ ...draft, oneTradeAtATime: true })} className={segBtn(draft.oneTradeAtATime)}>
+              {t('strategy.oneTradeAtATimeOn')}
+            </button>
+            <button onClick={() => onChange({ ...draft, oneTradeAtATime: false })} className={segBtn(!draft.oneTradeAtATime)}>
+              {t('strategy.oneTradeAtATimeOff')}
+            </button>
+          </div>
+          <p className="text-xs leading-relaxed text-slate-500">
+            {draft.oneTradeAtATime ? t('strategy.oneTradeAtATimeOnHint') : t('strategy.oneTradeAtATimeOffHint')}
+          </p>
         </div>
       </div>
 
@@ -1002,6 +1021,7 @@ export default function StrategiesPage() {
       params: defaultParams(templates[template]),
       stopLossMethod: 'percent', stopLossValue: 1.0,
       takeProfitMethod: 'rr', takeProfitValue: 2.0,
+      oneTradeAtATime: true,
     })
   }
 
@@ -1010,6 +1030,7 @@ export default function StrategiesPage() {
       id: s.id, template: s.template, name: s.name ?? '', symbol: s.symbol, interval: s.interval, params: s.params,
       stopLossMethod: s.stopLossMethod, stopLossValue: s.stopLossValue,
       takeProfitMethod: s.takeProfitMethod, takeProfitValue: s.takeProfitValue,
+      oneTradeAtATime: s.oneTradeAtATime,
     })
   }
 

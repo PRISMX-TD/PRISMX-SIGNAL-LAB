@@ -220,6 +220,7 @@ export const strategyApi = {
     stopLossValue: number
     takeProfitMethod: TakeProfitMethod
     takeProfitValue: number
+    oneTradeAtATime: boolean
   }) => request<UserStrategy>('/strategies', { method: 'POST', body: JSON.stringify(payload) }),
   update: (
     id: string,
@@ -230,6 +231,7 @@ export const strategyApi = {
       stopLossValue: number
       takeProfitMethod: TakeProfitMethod
       takeProfitValue: number
+      oneTradeAtATime: boolean
       enabled: boolean
     }>
   ) => request<UserStrategy>(`/strategies/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
@@ -243,6 +245,7 @@ export const strategyApi = {
     stopLossValue: number
     takeProfitMethod: TakeProfitMethod
     takeProfitValue: number
+    oneTradeAtATime: boolean
     days: number
     riskPct: number
     capital: number

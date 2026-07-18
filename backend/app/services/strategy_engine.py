@@ -432,23 +432,98 @@ def _entry_exit_prices(
     return _round_price(sl), _round_price(tp)
 
 
+def _resolve_trade(bars: list[dict], entry_i: int, side: str, sl: float, tp: float) -> tuple[str | None, int | None]:
+    """从入场的下一根开始找先摸到止损还是止盈；同一根摸到两者按止损处理——
+    保守假设，与既有模拟器"规则公开、不偏袒"的口径一致。数据走到底还没
+    结果则返回 (None, None)。
+
+    Search forward from the bar after entry for the first SL/TP touch; a bar
+    touching both counts as a stop-loss (conservative, matching the existing
+    simulator's "rules are public, never favor the outcome" stance). Returns
+    (None, None) if the data runs out before it resolves.
+    """
+    for j in range(entry_i + 1, len(bars)):
+        hi, lo = bars[j]["h"], bars[j]["l"]
+        hit_sl = (lo <= sl) if side == "BUY" else (hi >= sl)
+        hit_tp = (hi >= tp) if side == "BUY" else (lo <= tp)
+        if hit_sl:
+            return "HIT_SL", j
+        if hit_tp:
+            return "HIT_TP", j
+    return None, None
+
+
 def run_backtest(
     bars: list[dict], template: str, params: dict,
     stop_loss_method: str, stop_loss_value: float,
     take_profit_method: str, take_profit_value: float,
     risk_pct: float, capital: float, mode: str, symbol: str,
+    one_trade_at_a_time: bool = True,
 ) -> dict:
     """吃已入库的 K 线历史,回放这个模板+参数组合过去的表现。
 
     返回结构与既有「如果你跟了」信号回测（`GET /api/signals/simulate`）完全
     一致（summary/points/trades),前端可以复用同一套净值曲线/汇总卡片组件。
 
+    one_trade_at_a_time=True（默认）：一次只算一笔仓位，某笔信号入场后要等
+    它摸到止损/止盈平仓，期间新出现的信号被跳过，不开新的模拟单——与
+    evaluate_new_candle() 的"一次一单"实盘门槛用同一套语义。False 时任何
+    满足入场条件的 bar 都独立开一笔，彼此互不影响，最后按出场时间重新
+    排序结算，保证净值曲线的时间线正确（不同笔交易的出场先后顺序不一定
+    等于入场先后顺序）。
+
     Replays this template+param combo's historical performance against stored
     candle history. Returns the exact same shape as the existing "what if you
     followed" signal replay (summary/points/trades) so the frontend can reuse
     the same equity-curve/summary-tile components.
+
+    one_trade_at_a_time=True (default): only one position at a time — after a
+    signal enters, wait for it to hit SL/TP before considering new signals;
+    matches evaluate_new_candle()'s live "one trade at a time" gate. False:
+    every bar meeting the entry condition opens its own independent trade;
+    trades are re-sorted by exit time before settlement so the equity curve's
+    timeline stays correct (exit order isn't necessarily entry order).
     """
     signals = entry_signals(bars, template, params)
+    n = len(bars)
+
+    # 第一步：只找出每笔交易的入场/出场，不牵扯净值结算。
+    # Step 1: find each trade's entry/exit only, no equity bookkeeping yet.
+    raw: list[dict] = []
+    if one_trade_at_a_time:
+        i = 0
+        while i < n:
+            side = signals[i]
+            if side is None:
+                i += 1
+                continue
+            entry_price = bars[i]["c"]
+            sl, tp = _entry_exit_prices(side, entry_price, stop_loss_method, stop_loss_value, take_profit_method, take_profit_value)
+            exit_result, exit_j = _resolve_trade(bars, i, side, sl, tp)
+            if exit_result is None:
+                # 到数据末尾还没走出结果,这笔不计入统计(既不是赢也不是输)
+                # Ran out of data before resolving; not counted as a win or loss.
+                break
+            raw.append({"i": i, "side": side, "entry_price": entry_price, "sl": sl, "tp": tp, "exit_result": exit_result, "exit_j": exit_j})
+            i = exit_j + 1
+    else:
+        for i in range(n):
+            side = signals[i]
+            if side is None:
+                continue
+            entry_price = bars[i]["c"]
+            sl, tp = _entry_exit_prices(side, entry_price, stop_loss_method, stop_loss_value, take_profit_method, take_profit_value)
+            exit_result, exit_j = _resolve_trade(bars, i, side, sl, tp)
+            if exit_result is None:
+                continue
+            raw.append({"i": i, "side": side, "entry_price": entry_price, "sl": sl, "tp": tp, "exit_result": exit_result, "exit_j": exit_j})
+        raw.sort(key=lambda t: t["exit_j"])
+
+    # 第二步：按出场先后顺序结算净值/胜负/回撤，与一次一单时的原逻辑完全
+    # 一样，只是数据来源换成了上面统一构造好的 raw 列表。
+    # Step 2: settle equity/win-loss/drawdown in exit order — identical to
+    # the original one-trade-at-a-time logic, just fed from the raw list
+    # built above.
     risk_frac = risk_pct / 100.0
     equity = 1.0
     peak = 1.0
@@ -460,36 +535,11 @@ def run_backtest(
     points: list[dict] = []
     trades: list[dict] = []
 
-    i = 0
-    n = len(bars)
-    while i < n and not busted:
-        side = signals[i]
-        if side is None:
-            i += 1
-            continue
-        entry_price = bars[i]["c"]
-        sl, tp = _entry_exit_prices(side, entry_price, stop_loss_method, stop_loss_value, take_profit_method, take_profit_value)
-        exit_result = None
-        exit_j = None
-        for j in range(i + 1, n):
-            hi, lo = bars[j]["h"], bars[j]["l"]
-            hit_sl = (lo <= sl) if side == "BUY" else (hi >= sl)
-            hit_tp = (hi >= tp) if side == "BUY" else (lo <= tp)
-            # 同一根 K 线内先摸到止损再摸到止盈也算止损——保守假设,与既有
-            # 模拟器"规则公开、不偏袒"的口径一致。
-            # If a bar touches both SL and TP, count it as SL — the
-            # conservative assumption, consistent with the existing
-            # simulator's "rules are public, never favor the outcome" stance.
-            if hit_sl:
-                exit_result, exit_j = "HIT_SL", j
-                break
-            if hit_tp:
-                exit_result, exit_j = "HIT_TP", j
-                break
-        if exit_result is None:
-            # 到数据末尾还没走出结果,这笔不计入统计(既不是赢也不是输)
-            # Ran out of data before resolving; not counted as a win or loss.
+    for t in raw:
+        if busted:
             break
+        i, side, entry_price, sl, tp = t["i"], t["side"], t["entry_price"], t["sl"], t["tp"]
+        exit_result, exit_j = t["exit_result"], t["exit_j"]
 
         rr = abs(tp - entry_price) / abs(entry_price - sl)
         rr_sum += rr
@@ -537,7 +587,6 @@ def run_backtest(
             "pnlPct": pnl_pct * 100,
             "equityAfter": equity,
         })
-        i = exit_j + 1
 
     resolved = wins + losses
     summary = {
@@ -593,6 +642,41 @@ async def evaluate_new_candle(symbol: str, interval: str) -> None:
         for strat in strategies:
             if strat.last_signal_bar_t == last_bar["t"]:
                 continue
+            # 一次一单：上一笔触发的信号还没摸到止损/止盈就不开新仓——用这根
+            # 新收盘 K 线的高低点顺带判定上一笔是否已经平仓,与回测的
+            # _resolve_trade 用同一套"同根摸到两边按止损处理"的保守假设。
+            # One trade at a time: don't fire while the previous signal hasn't
+            # hit its SL/TP yet — this newly closed bar's high/low doubles as
+            # the check for whether it just did, using the same conservative
+            # "both touched in one bar counts as SL" assumption as the
+            # backtest's _resolve_trade.
+            if strat.one_trade_at_a_time:
+                pending = (
+                    db.query(StrategySignal)
+                    .filter(StrategySignal.strategy_id == strat.id, StrategySignal.result == "PENDING")
+                    .order_by(StrategySignal.created_at.desc())
+                    .first()
+                )
+                if pending is not None:
+                    hi, lo = last_bar["h"], last_bar["l"]
+                    if pending.side == "BUY":
+                        hit_tp = hi >= pending.take_profit
+                        hit_sl = lo <= pending.stop_loss
+                    else:
+                        hit_tp = lo <= pending.take_profit
+                        hit_sl = hi >= pending.stop_loss
+                    if hit_sl or hit_tp:
+                        pending.result = "HIT_SL" if hit_sl else "HIT_TP"
+                        pending.resolved_at = datetime.now(timezone.utc)
+                        db.commit()
+                    # 不管这根 K 线是否刚把上一笔判定平仓,这根都不再开新仓——
+                    # 平仓和开新仓不共用同一根 K 线,与回测 i = exit_j + 1 的
+                    # 语义一致。
+                    # Whether or not this bar just resolved the pending trade,
+                    # it never opens a new one on the same bar — exit and next
+                    # entry never share a bar, matching the backtest's
+                    # i = exit_j + 1 semantics.
+                    continue
             try:
                 params = validate_and_clamp_params(strat.template, json.loads(strat.params or "{}"))
                 side = entry_signals(bars, strat.template, params)[-1]

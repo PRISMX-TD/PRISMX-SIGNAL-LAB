@@ -356,6 +356,10 @@ export interface UserStrategy {
   stopLossValue: number
   takeProfitMethod: TakeProfitMethod
   takeProfitValue: number
+  // 一次一单：开着仓时不再触发新信号，关闭则只要条件满足就触发
+  // One trade at a time: no new signal while a position is open; off means
+  // any bar meeting the condition fires regardless
+  oneTradeAtATime: boolean
   enabled: boolean
   createdAt: string
 }

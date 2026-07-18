@@ -65,6 +65,7 @@ def _to_out(s: UserStrategy) -> StrategyOut:
         params=json.loads(s.params or "{}"),
         stopLossMethod=s.stop_loss_method, stopLossValue=s.stop_loss_value,
         takeProfitMethod=s.take_profit_method, takeProfitValue=s.take_profit_value,
+        oneTradeAtATime=s.one_trade_at_a_time,
         enabled=s.enabled, createdAt=s.created_at,
     )
 
@@ -106,6 +107,7 @@ def create_strategy(body: StrategyCreate, db: Session = Depends(get_db), user: U
         params=json.dumps(params, ensure_ascii=False),
         stop_loss_method=body.stopLossMethod, stop_loss_value=clamp_stop_loss(body.stopLossMethod, body.stopLossValue),
         take_profit_method=body.takeProfitMethod, take_profit_value=clamp_take_profit(body.takeProfitMethod, body.takeProfitValue),
+        one_trade_at_a_time=body.oneTradeAtATime,
     )
     db.add(row)
     db.commit()
@@ -136,6 +138,8 @@ def update_strategy(strategy_id: str, body: StrategyUpdate, db: Session = Depend
         row.take_profit_method = body.takeProfitMethod
     if body.takeProfitValue is not None:
         row.take_profit_value = clamp_take_profit(row.take_profit_method, body.takeProfitValue)
+    if body.oneTradeAtATime is not None:
+        row.one_trade_at_a_time = body.oneTradeAtATime
     row.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(row)
@@ -209,6 +213,7 @@ def backtest_strategy(body: StrategyBacktestRequest, db: Session = Depends(get_d
         body.stopLossMethod, clamp_stop_loss(body.stopLossMethod, body.stopLossValue),
         body.takeProfitMethod, clamp_take_profit(body.takeProfitMethod, body.takeProfitValue),
         body.riskPct, body.capital, body.mode, body.symbol.upper(),
+        one_trade_at_a_time=body.oneTradeAtATime,
     )
     # bars 原样带回给前端画蜡烛图 + 标交易点，避免再单独拉一次历史。
     # Return the bars as-is for the frontend's candlestick chart + trade

@@ -221,6 +221,7 @@ def _migrate_columns() -> None:
             "stop_loss_value": "FLOAT",
             "take_profit_method": "VARCHAR",
             "take_profit_value": "FLOAT",
+            "one_trade_at_a_time": "BOOLEAN",
         }
         with engine.begin() as conn:
             for name, col_type in us_new.items():
@@ -248,3 +249,27 @@ def _migrate_columns() -> None:
                         "UPDATE user_strategies SET take_profit_method = 'rr', take_profit_value = 2.0 "
                         "WHERE take_profit_method IS NULL"
                     ))
+            # 一次一单默认开启,对已有的启用中策略同样生效(不是只对新建策略);
+            # 这是一个刻意收紧的默认行为——防止已经开着仓时还不断重复触发信号。
+            # One-trade-at-a-time defaults on for existing enabled strategies
+            # too, not just newly created ones — a deliberately tightened
+            # default that stops a strategy from repeatedly firing while a
+            # position is presumably still open.
+            if "one_trade_at_a_time" not in us_cols:
+                conn.execute(text(
+                    "UPDATE user_strategies SET one_trade_at_a_time = TRUE WHERE one_trade_at_a_time IS NULL"
+                ))
+
+    # strategy_signals 表：补充胜负判定字段,供"一次一单"开关判断上一笔是否
+    # 还开着(见 UserStrategy.one_trade_at_a_time 的说明)。
+    # strategy_signals: add win/loss resolution columns, used by the
+    # "one trade at a time" gate to tell whether the previous trade is still
+    # open (see UserStrategy.one_trade_at_a_time's docstring).
+    if "strategy_signals" in inspector.get_table_names():
+        ss_cols = {c["name"] for c in inspector.get_columns("strategy_signals")}
+        with engine.begin() as conn:
+            if "result" not in ss_cols:
+                conn.execute(text("ALTER TABLE strategy_signals ADD COLUMN result VARCHAR"))
+                conn.execute(text("UPDATE strategy_signals SET result = 'PENDING' WHERE result IS NULL"))
+            if "resolved_at" not in ss_cols:
+                conn.execute(text(f"ALTER TABLE strategy_signals ADD COLUMN resolved_at {datetime_type}"))

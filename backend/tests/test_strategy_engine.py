@@ -270,3 +270,45 @@ def test_backtest_unresolved_trade_at_end_of_data_is_not_counted(monkeypatch):
     assert result["summary"]["wins"] == 0
     assert result["summary"]["losses"] == 0
     assert result["trades"] == []
+
+
+def test_backtest_one_trade_at_a_time_skips_signal_while_position_open(monkeypatch):
+    """一次一单(默认)：第 1 笔在第 2 根入场,要等到第 4 根摸到止盈才平仓;
+    第 3 根同样满足入场条件,但第 1 笔还没平仓,应被跳过——全程只计 1 笔。
+    One trade at a time (default): trade 1 enters at bar 2, doesn't resolve
+    until bar 4 hits TP; bar 3 also meets the entry condition but trade 1 is
+    still open, so it's skipped — only 1 trade counted overall."""
+    bars = [
+        {"t": 0, "o": 100, "h": 100, "l": 100, "c": 100},
+        {"t": 1, "o": 100, "h": 100, "l": 100, "c": 100},  # 入场 1 / entry 1
+        {"t": 2, "o": 100, "h": 100, "l": 100, "c": 100},  # 满足条件但仓位还开着 / condition met, but a position is open
+        {"t": 3, "o": 100, "h": 103, "l": 99.5, "c": 100},  # 摸到止盈,平掉第 1 笔 / hits TP, closes trade 1
+    ]
+    monkeypatch.setattr(se, "entry_signals", lambda b, t, p: [None, "BUY", "BUY", None])
+    result = se.run_backtest(
+        bars, "ma_cross", {}, stop_loss_method="percent", stop_loss_value=1.0, take_profit_method="rr", take_profit_value=2.0,
+        risk_pct=1.0, capital=10000, mode="compound", symbol="TEST", one_trade_at_a_time=True,
+    )
+    assert len(result["trades"]) == 1
+    assert result["trades"][0]["result"] == "HIT_TP"
+
+
+def test_backtest_one_trade_at_a_time_off_opens_overlapping_trades(monkeypatch):
+    """关闭一次一单：第 1、2 根各自独立开一笔,哪怕第 1 笔在第 2 根时还没
+    平仓;两笔都在第 4 根摸到止盈,按出场时间结算,全程计 2 笔。
+    One trade at a time off: bars 2 and 3 each open their own independent
+    trade, even though trade 1 hasn't resolved yet when trade 2 enters; both
+    hit TP on the same bar and are settled in exit order — 2 trades total."""
+    bars = [
+        {"t": 0, "o": 100, "h": 100, "l": 100, "c": 100},
+        {"t": 1, "o": 100, "h": 100, "l": 100, "c": 100},  # 入场 1 / entry 1
+        {"t": 2, "o": 100, "h": 100, "l": 100, "c": 100},  # 入场 2,独立于 1 / entry 2, independent of 1
+        {"t": 3, "o": 100, "h": 103, "l": 99.5, "c": 100},  # 两笔都摸到止盈 / both hit TP
+    ]
+    monkeypatch.setattr(se, "entry_signals", lambda b, t, p: [None, "BUY", "BUY", None])
+    result = se.run_backtest(
+        bars, "ma_cross", {}, stop_loss_method="percent", stop_loss_value=1.0, take_profit_method="rr", take_profit_value=2.0,
+        risk_pct=1.0, capital=10000, mode="compound", symbol="TEST", one_trade_at_a_time=False,
+    )
+    assert len(result["trades"]) == 2
+    assert all(t["result"] == "HIT_TP" for t in result["trades"])

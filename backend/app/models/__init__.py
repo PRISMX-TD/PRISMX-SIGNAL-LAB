@@ -496,6 +496,15 @@ class UserStrategy(Base):
     stop_loss_value = Column(Float, nullable=False, default=1.0)
     take_profit_method = Column(String, nullable=False, default="rr")
     take_profit_value = Column(Float, nullable=False, default=2.0)
+    # 一次一单：开着仓时(上一次触发的信号还没等到止损/止盈)不再触发新信号，
+    # 关闭则只要入场条件满足就触发,不管前一笔是否还"开着"。回测与实盘评估
+    # 都读这个开关,见 strategy_engine.py 的 run_backtest/evaluate_new_candle。
+    # One trade at a time: while a position is open (the previous fired
+    # signal hasn't hit its SL/TP yet), no new signal fires; when off, any
+    # bar meeting the entry condition fires regardless of whether the prior
+    # one is still open. Read by both the backtest and the live evaluator —
+    # see run_backtest/evaluate_new_candle in strategy_engine.py.
+    one_trade_at_a_time = Column(Boolean, nullable=False, default=True)
     enabled = Column(Boolean, default=False)
     # 防止同一根 K 线重复触发信号 / de-dup guard: last bar this strategy fired a signal on
     last_signal_bar_t = Column(Integer, nullable=True)
@@ -525,6 +534,18 @@ class StrategySignal(Base):
     stop_loss = Column(Float, nullable=False)
     take_profit = Column(Float, nullable=False)
     bar_t = Column(Integer, nullable=False)  # 触发那根 K 线的时间 / the triggering bar's time
+    # 胜负判定：与 signals 表 result 字段同一套口径(PENDING/HIT_TP/HIT_SL)，
+    # 由 evaluate_new_candle() 在每根新收盘 K 线到达时顺带判定——不是单独的
+    # 后台清扫任务,因为策略信号天然绑定"这个品种/周期有新 K 线才有必要看"。
+    # "一次一单"开关就是靠这个字段判断"上一笔是否还开着"。
+    # Win/loss resolution, same vocabulary as the signals table's `result`
+    # column (PENDING/HIT_TP/HIT_SL). Resolved inline by evaluate_new_candle()
+    # whenever a new bar closes — not a separate sweep job, since a strategy
+    # signal is naturally tied to "there's a new bar for this symbol/interval
+    # worth checking" anyway. The "one trade at a time" gate reads this field
+    # to know whether the previous trade is still open.
+    result = Column(String, nullable=False, default="PENDING")
+    resolved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_now)
 
 

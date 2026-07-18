@@ -243,6 +243,138 @@ def test_new_closed_candle_triggers_enabled_strategy_and_fires_personal_signal(c
     assert event_type == strategy_engine.EVENT_STRATEGY_SIGNAL
 
 
+def test_one_trade_at_a_time_blocks_new_signal_until_previous_resolves(client, db, auth_headers, user, monkeypatch):
+    """一次一单(默认开启):上一笔信号还没摸到止损/止盈,新的一根 K 线哪怕仍然
+    满足入场条件也不再开新仓;真的平仓那一根同样不开新仓(平仓与开新仓不
+    共用一根 K 线);再下一根才重新允许开仓。
+
+    One trade at a time (default on): a new bar doesn't fire a fresh signal
+    while the previous one hasn't hit SL/TP yet, even if the entry condition
+    is still (nominally) true; the bar that actually resolves it also doesn't
+    open a new one (exit and entry never share a bar); the bar after that is
+    free to fire again.
+    """
+    monkeypatch.setattr(settings, "EA_TOKEN", "test-ea-token")
+    _make_pro(db, user)
+    strat = UserStrategy(
+        user_id=user.id, template="ma_cross", symbol="XAUUSD", interval="1",
+        params='{}', enabled=True,
+        stop_loss_method="percent", stop_loss_value=1.0,
+        take_profit_method="rr", take_profit_value=2.0,
+        one_trade_at_a_time=True,
+    )
+    db.add(strat)
+    db.commit()
+
+    now = int(datetime.now(timezone.utc).timestamp())
+
+    def _feed(t_offset, c, h=None, l=None):
+        bar = {"t": now - t_offset, "o": c, "h": h if h is not None else c, "l": l if l is not None else c, "c": c, "v": 1}
+        res = client.post(
+            "/api/feed/candles",
+            headers={"X-EA-Token": "test-ea-token"},
+            json={"mode": "tick", "series": [{"symbol": "XAUUSD", "interval": "1", "bars": [bar]}]},
+        )
+        assert res.status_code == 200
+
+    # evaluate_new_candle 要求库里至少有 5 根收盘 K 线才会求值,先垫几根早于
+    # bar1 的历史；这一步用真实(未打桩)的 entry_signals——全平走势不会有
+    # 交叉，不会意外触发。/ evaluate_new_candle requires at least 5 closed
+    # bars in the DB before it evaluates anything — seed a few older bars
+    # ahead of bar1; this step uses the real (unstubbed) entry_signals — a
+    # flat series never crosses, so it won't fire unexpectedly.
+    warmup = [{"t": now - 240 - (5 - i) * 60, "o": 100, "h": 100, "l": 100, "c": 100, "v": 1} for i in range(5)]
+    res = client.post(
+        "/api/feed/candles",
+        headers={"X-EA-Token": "test-ea-token"},
+        json={"mode": "backfill", "series": [{"symbol": "XAUUSD", "interval": "1", "bars": warmup}]},
+    )
+    assert res.status_code == 200
+    db.expire_all()
+    assert db.query(StrategySignal).filter(StrategySignal.user_id == user.id).count() == 0
+
+    # 打桩成"最后一根永远是 BUY"，隔离掉均线交叉的具体数学，只测一次一单
+    # 的门槛逻辑本身——只在垫完历史之后才打桩，避免连历史回填那一步都被
+    # 当成信号触发。/ Stub "the last bar is always BUY" to isolate the
+    # one-trade-at-a-time gate from the actual MA-cross math — only applied
+    # after the warmup backfill, so that step itself isn't mistaken for a
+    # signal trigger too.
+    monkeypatch.setattr(strategy_engine, "entry_signals", lambda b, t, p: [None] * (len(b) - 1) + ["BUY"])
+
+    # bar1: 没有正在跟踪的仓位,正常开仓 entry=100 → sl=99, tp=102
+    # bar1: nothing pending yet, fires normally — entry=100 → sl=99, tp=102
+    _feed(240, 100)
+    db.expire_all()
+    sigs = db.query(StrategySignal).filter(StrategySignal.user_id == user.id).all()
+    assert len(sigs) == 1
+    assert sigs[0].result == "PENDING"
+
+    # bar2: 价格仍在 [99, 102] 区间内,上一笔还没平仓 → 门槛拦下,不开新仓
+    # bar2: price still inside [99, 102], previous trade still open — gated, no new signal
+    _feed(180, 100)
+    db.expire_all()
+    assert db.query(StrategySignal).filter(StrategySignal.user_id == user.id).count() == 1
+
+    # bar3: 摸到止盈(104>=102) → 上一笔就地判定为 HIT_TP,但这一根本身不开新仓
+    # bar3: touches TP (104>=102) — resolves the previous trade as HIT_TP, but this bar itself still doesn't open a new one
+    _feed(120, 104, h=104, l=104)
+    db.expire_all()
+    sigs = db.query(StrategySignal).filter(StrategySignal.user_id == user.id).order_by(StrategySignal.created_at.asc()).all()
+    assert len(sigs) == 1
+    assert sigs[0].result == "HIT_TP"
+
+    # bar4: 上一笔已平仓,重新允许开仓 → 第二笔信号
+    # bar4: previous trade is resolved, allowed to fire again — second signal
+    _feed(60, 100)
+    db.expire_all()
+    sigs = db.query(StrategySignal).filter(StrategySignal.user_id == user.id).order_by(StrategySignal.created_at.asc()).all()
+    assert len(sigs) == 2
+    assert sigs[1].result == "PENDING"
+
+
+def test_one_trade_at_a_time_off_fires_every_bar(client, db, auth_headers, user, monkeypatch):
+    """关闭一次一单:哪怕上一笔还没平仓,只要新收盘的 K 线满足入场条件就照样
+    触发新信号。
+    One trade at a time off: fires a new signal on every bar meeting the
+    entry condition, even while the previous one is still open."""
+    monkeypatch.setattr(settings, "EA_TOKEN", "test-ea-token")
+    _make_pro(db, user)
+    strat = UserStrategy(
+        user_id=user.id, template="ma_cross", symbol="XAUUSD", interval="1",
+        params='{}', enabled=True,
+        stop_loss_method="percent", stop_loss_value=1.0,
+        take_profit_method="rr", take_profit_value=2.0,
+        one_trade_at_a_time=False,
+    )
+    db.add(strat)
+    db.commit()
+
+    now = int(datetime.now(timezone.utc).timestamp())
+    warmup = [{"t": now - 240 - (5 - i) * 60, "o": 100, "h": 100, "l": 100, "c": 100, "v": 1} for i in range(5)]
+    res = client.post(
+        "/api/feed/candles",
+        headers={"X-EA-Token": "test-ea-token"},
+        json={"mode": "backfill", "series": [{"symbol": "XAUUSD", "interval": "1", "bars": warmup}]},
+    )
+    assert res.status_code == 200
+    db.expire_all()
+    assert db.query(StrategySignal).filter(StrategySignal.user_id == user.id).count() == 0
+
+    monkeypatch.setattr(strategy_engine, "entry_signals", lambda b, t, p: [None] * (len(b) - 1) + ["BUY"])
+
+    for offset in (180, 120, 60):
+        bar = {"t": now - offset, "o": 100, "h": 100, "l": 100, "c": 100, "v": 1}
+        res = client.post(
+            "/api/feed/candles",
+            headers={"X-EA-Token": "test-ea-token"},
+            json={"mode": "tick", "series": [{"symbol": "XAUUSD", "interval": "1", "bars": [bar]}]},
+        )
+        assert res.status_code == 200
+
+    db.expire_all()
+    assert db.query(StrategySignal).filter(StrategySignal.user_id == user.id).count() == 3
+
+
 def test_disabled_strategy_never_fires(client, db, auth_headers, user, monkeypatch):
     monkeypatch.setattr(settings, "EA_TOKEN", "test-ea-token")
     _make_pro(db, user)

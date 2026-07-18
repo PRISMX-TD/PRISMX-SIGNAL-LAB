@@ -143,6 +143,10 @@ class StrategyCreate(BaseModel):
     stopLossValue: float = Field(default=1.0, gt=0, le=1_000_000)
     takeProfitMethod: Literal["rr", "percent", "price"] = "rr"
     takeProfitValue: float = Field(default=2.0, gt=0, le=1_000_000)
+    # 一次一单：开着仓时不再触发新信号，关闭则只要条件满足就触发
+    # One trade at a time: no new signal while a position is open; off means
+    # any bar meeting the condition fires regardless
+    oneTradeAtATime: bool = True
 
 
 class StrategyUpdate(BaseModel):
@@ -152,6 +156,7 @@ class StrategyUpdate(BaseModel):
     stopLossValue: float | None = Field(default=None, gt=0, le=1_000_000)
     takeProfitMethod: Literal["rr", "percent", "price"] | None = None
     takeProfitValue: float | None = Field(default=None, gt=0, le=1_000_000)
+    oneTradeAtATime: bool | None = None
     enabled: bool | None = None
 
 
@@ -166,6 +171,7 @@ class StrategyOut(BaseModel):
     stopLossValue: float
     takeProfitMethod: str
     takeProfitValue: float
+    oneTradeAtATime: bool
     enabled: bool
     createdAt: datetime
 
@@ -179,6 +185,7 @@ class StrategyBacktestRequest(BaseModel):
     stopLossValue: float = Field(default=1.0, gt=0, le=1_000_000)
     takeProfitMethod: Literal["rr", "percent", "price"] = "rr"
     takeProfitValue: float = Field(default=2.0, gt=0, le=1_000_000)
+    oneTradeAtATime: bool = True
     days: int = Field(default=90, ge=7, le=730)
     riskPct: float = Field(default=1.0, ge=0.1, le=3.0)
     capital: float = Field(default=10000, ge=1, le=1e9)
