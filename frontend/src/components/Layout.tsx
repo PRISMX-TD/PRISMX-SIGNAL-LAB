@@ -95,6 +95,17 @@ function TabIcon({ name }: { name: string }) {
           <path d="M5 20a7 7 0 0 1 14 0" />
         </svg>
       )
+    case 'strategies':
+      return (
+        <svg className={c} viewBox="0 0 24 24" {...p}>
+          <line x1="4" y1="6" x2="20" y2="6" />
+          <line x1="4" y1="12" x2="20" y2="12" />
+          <line x1="4" y1="18" x2="20" y2="18" />
+          <circle cx="9" cy="6" r="1.8" fill="currentColor" />
+          <circle cx="16" cy="12" r="1.8" fill="currentColor" />
+          <circle cx="11" cy="18" r="1.8" fill="currentColor" />
+        </svg>
+      )
     case 'download':
       return (
         <svg className={c} viewBox="0 0 24 24" {...p}>
@@ -198,6 +209,9 @@ export default function Layout() {
     { to: '/account', icon: 'account', label: t('nav.account') },
     { to: '/download', icon: 'download', label: t('nav.download') },
     ...(user?.plan !== 'PRO' ? [{ to: '/upgrade', icon: 'upgrade', label: t('nav.upgrade') }] : []),
+    // 自定义策略：暂时仅管理员可见，见 App.tsx 路由处的说明
+    // Custom strategies: admin-only for now, see the comment at the App.tsx route
+    ...(isAdmin ? [{ to: '/strategies', icon: 'strategies', label: t('nav.strategies') }] : []),
     ...(isAdmin ? [{ to: '/admin', icon: 'admin', label: t('nav.admin') }] : []),
   ]
   const moreActive = moreItems.some((m) => location.pathname === m.to)

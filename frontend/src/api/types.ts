@@ -203,12 +203,9 @@ export interface DisciplineDimension {
 }
 
 // 纪律分：回答"有没有按计划执行"，与赚不赚钱无关，只有自己能看到自己的。
-// **当前仅管理员可访问**（后端 require_admin），功能先内部试用；对外开放时
-// 只需放开后端依赖与前端入口判断，FREE/PRO 裁剪逻辑本身已按最终设计写好。
+// 对所有登录用户开放。
 // Discipline score: whether the plan was followed, independent of P&L,
-// visible only to the user themself. **Admin-only for now** (backend
-// require_admin) while trialed internally; releasing it means loosening the
-// backend dep + entry checks — the FREE/PRO gating below is already final.
+// visible only to the user themself. Open to all logged-in users.
 export interface DisciplineScore {
   total: number | null
   windowDays: number
@@ -302,6 +299,83 @@ export interface Candle {
   l: number
   c: number
   v: number
+}
+
+// 管理后台：K 线历史保留策略设置 / admin: candle-history retention settings
+export interface AdminCandleSettings {
+  m1RetentionDays: number
+}
+
+// 管理后台：自定义策略平台设置 / admin: custom-strategy platform settings
+export interface AdminStrategySettings {
+  maxStrategiesPerUser: number
+  proOnly: boolean
+}
+
+// 自定义策略：模板名 + 该模板一个参数的定义（用于动态渲染调参表单，不写死）
+// Custom strategy: one template parameter's definition, used to render the
+// tuning form dynamically instead of hardcoding it
+export type StrategyParamSpec =
+  | { type: 'enum'; options: string[]; default: string }
+  | { type: 'int'; min: number; max: number; default: number }
+  | { type: 'float'; min: number; max: number; default: number }
+
+export type StrategyTemplateKey = 'ma_cross' | 'rsi_reversal' | 'bollinger_reversion'
+
+export type StrategyTemplateSchemas = Record<StrategyTemplateKey, Record<string, StrategyParamSpec>>
+
+// 用户自定义策略：模板 + 调好的参数,对某个品种/周期持续评估
+// A user-customized strategy: a template + tuned params, continuously
+// evaluated against one symbol/interval
+export interface UserStrategy {
+  id: string
+  template: StrategyTemplateKey
+  symbol: string
+  interval: string
+  params: Record<string, string | number>
+  stopLossPct: number
+  takeProfitR: number
+  enabled: boolean
+  createdAt: string
+}
+
+// 与 SimulateSummary 结构近似,但策略回测不存在"数据不完整的信号被跳过"这个
+// 概念(没有 skipped 字段),故单独定义,不复用 SimulateSummary。
+// Structurally similar to SimulateSummary, but a strategy backtest has no
+// "incomplete signal, skipped" concept — no `skipped` field — so this is its
+// own type rather than reusing SimulateSummary.
+export interface StrategyBacktestSummary {
+  finalEquity: number
+  returnPct: number
+  maxDrawdownPct: number
+  maxLossStreak: number
+  wins: number
+  losses: number
+  winRate: number | null
+  avgRr: number | null
+  busted: boolean
+}
+
+export interface StrategyBacktestResult {
+  params: Record<string, unknown>
+  summary: StrategyBacktestSummary
+  points: Array<{ t: string | null; equity: number }>
+  trades: SimulateTrade[]
+  insufficientData: boolean
+  barsAvailable: number
+}
+
+// 策略触发的个人信号：只有策略主人自己能看到 / a strategy-fired personal
+// signal, visible only to its owner
+export interface StrategySignal {
+  id: string
+  strategyId: string
+  symbol: string
+  side: 'BUY' | 'SELL'
+  entry: number
+  stopLoss: number
+  takeProfit: number
+  createdAt: string
 }
 
 // 单周期趋势方向：多 / 空 / 震荡(或无数据) / per-timeframe trend direction

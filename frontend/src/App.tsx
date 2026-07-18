@@ -20,6 +20,7 @@ const DownloadPage = lazy(() => import('./pages/DownloadPage'))
 const AccountPage = lazy(() => import('./pages/AccountPage'))
 const AdminPage = lazy(() => import('./pages/AdminPage'))
 const SimulatorPage = lazy(() => import('./pages/SimulatorPage'))
+const StrategiesPage = lazy(() => import('./pages/StrategiesPage'))
 
 function Protected({ children }: { children: ReactNode }) {
   const { isAuthed } = useAuth()
@@ -74,6 +75,24 @@ export default function App() {
               <Route path="/charts" element={<ChartsPage />} />
               <Route path="/bind" element={<BindPage />} />
               <Route path="/orders" element={<OrdersPage />} />
+              {/* 自定义策略：暂时挂在 AdminOnly 下——功能先内部试用，未对普通
+                  用户开放。对外开放时把这层包装去掉、并把后端每个端点的
+                  require_admin 换回 get_current_user 即可（PRO 专属开关与
+                  策略数上限本身已按最终设计写好，不用改）。
+                  Custom strategies: behind AdminOnly for now — the feature is
+                  in internal trial, not released to regular users. To
+                  release it, drop this wrapper and swap the backend's
+                  require_admin back to get_current_user on every endpoint
+                  (the PRO-exclusive gate and strategy-count limit are already
+                  final, no change needed there). */}
+              <Route
+                path="/strategies"
+                element={
+                  <AdminOnly>
+                    <StrategiesPage />
+                  </AdminOnly>
+                }
+              />
               <Route path="/upgrade" element={<UpgradePage />} />
               <Route path="/account" element={<AccountPage />} />
               <Route path="/download" element={<DownloadPage />} />

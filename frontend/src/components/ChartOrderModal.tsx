@@ -24,6 +24,11 @@ interface Props {
   refPrice?: number
   // 价格显示小数位 / price display precision
   digits?: number
+  // 预填止损止盈（如来自自定义策略触发的信号）；省略则保持原有空白手填行为
+  // Prefilled SL/TP (e.g. from a triggered custom-strategy signal); omitted
+  // keeps the original blank-and-fill-by-hand behavior
+  initialStopLoss?: number
+  initialTakeProfit?: number
   onCancel: () => void
   onConfirm: (
     volume: number,
@@ -36,7 +41,7 @@ interface Props {
 const QUICK_LOTS = [0.01, 0.1, 0.5, 1.0]
 const QUICK_RISK_PCTS = [0.5, 1, 2, 3]
 
-export default function ChartOrderModal({ symbol, side, accounts, quotesByAccount, refPrice, digits = 2, onCancel, onConfirm }: Props) {
+export default function ChartOrderModal({ symbol, side, accounts, quotesByAccount, refPrice, digits = 2, initialStopLoss, initialTakeProfit, onCancel, onConfirm }: Props) {
   const { t } = useTranslation()
   const [submitting, setSubmitting] = useState(false)
   const [receipt, setReceipt] = useState<'waiting' | 'ok' | 'error' | null>(null)
@@ -62,8 +67,8 @@ export default function ChartOrderModal({ symbol, side, accounts, quotesByAccoun
     return (Math.floor(v * 100) / 100).toFixed(2)
   }
   const [volume, setVolume] = useState(() => suggestVolume(onlineAccounts[0]?.equity))
-  const [sl, setSl] = useState('')
-  const [tp, setTp] = useState('')
+  const [sl, setSl] = useState(() => (initialStopLoss != null ? String(initialStopLoss) : ''))
+  const [tp, setTp] = useState(() => (initialTakeProfit != null ? String(initialTakeProfit) : ''))
   const [sizeMode, setSizeMode] = useState<'quick' | 'risk'>('quick')
   const [riskPct, setRiskPct] = useState('1')
 

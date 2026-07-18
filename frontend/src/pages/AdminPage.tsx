@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom'
 import { adminApi } from '../api/client'
 import { fmtTime, localizeApiError } from '../api/utils'
 import Select from '../components/Select'
-import type { AdminBrokerSettings, AdminMetrics, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminUser, UserPlan, UserRole } from '../api/types'
+import type { AdminBrokerSettings, AdminMetrics, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
 const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
@@ -69,6 +69,14 @@ export default function AdminPage() {
   const [discipline, setDiscipline] = useState<AdminDisciplineSettings | null>(null)
   const [savingDiscipline, setSavingDiscipline] = useState(false)
 
+  // K 线历史保留策略设置 / candle-history retention settings
+  const [candleSettings, setCandleSettings] = useState<AdminCandleSettings | null>(null)
+  const [savingCandle, setSavingCandle] = useState(false)
+
+  // 自定义策略平台设置 / custom-strategy platform settings
+  const [strategySettings, setStrategySettings] = useState<AdminStrategySettings | null>(null)
+  const [savingStrategy, setSavingStrategy] = useState(false)
+
   // 批量选择与批量修改：勾选后统一改角色/等级，空字符串代表"不修改该字段"
   // bulk selection & bulk edit: '' means "leave this field unchanged"
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -92,13 +100,15 @@ export default function AdminPage() {
   const load = async (opts: { q?: string; plan?: string } = {}) => {
     setLoading(true)
     try {
-      const [usersRes, metricsRes, settingsRes, pricingRes, trialRes, disciplineRes] = await Promise.all([
+      const [usersRes, metricsRes, settingsRes, pricingRes, trialRes, disciplineRes, candleRes, strategyRes] = await Promise.all([
         adminApi.listUsers({ q: (opts.q ?? query) || undefined, plan: (opts.plan ?? planFilter) || undefined, limit: 100 }),
         adminApi.metrics(),
         adminApi.getSettings(),
         adminApi.getPricing(),
         adminApi.getTrial(),
         adminApi.getDiscipline(),
+        adminApi.getCandleHistory(),
+        adminApi.getStrategySettings(),
       ])
       setUsers(usersRes.users)
       setTotal(usersRes.total)
@@ -109,6 +119,8 @@ export default function AdminPage() {
       setPricing(pricingRes)
       setTrial(trialRes)
       setDiscipline(disciplineRes)
+      setCandleSettings(candleRes)
+      setStrategySettings(strategyRes)
     } catch (err) {
       showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.loadError'))
     } finally {
@@ -173,6 +185,34 @@ export default function AdminPage() {
       showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
     } finally {
       setSavingDiscipline(false)
+    }
+  }
+
+  const saveCandleSettings = async () => {
+    if (!candleSettings) return
+    setSavingCandle(true)
+    try {
+      const updated = await adminApi.updateCandleHistory(candleSettings)
+      setCandleSettings(updated)
+      showToast('ok', t('admin.saved'))
+    } catch (err) {
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
+    } finally {
+      setSavingCandle(false)
+    }
+  }
+
+  const saveStrategySettings = async () => {
+    if (!strategySettings) return
+    setSavingStrategy(true)
+    try {
+      const updated = await adminApi.updateStrategySettings(strategySettings)
+      setStrategySettings(updated)
+      showToast('ok', t('admin.saved'))
+    } catch (err) {
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
+    } finally {
+      setSavingStrategy(false)
     }
   }
 
@@ -600,6 +640,71 @@ export default function AdminPage() {
             onClick={saveDiscipline}
           >
             {savingDiscipline ? t('common.loading') : t('common.save')}
+          </button>
+        </div>
+      )}
+
+      {/* K 线历史保留策略设置 / candle-history retention settings */}
+      {candleSettings && (
+        <div className="glass mb-5 p-5">
+          <h3 className="mb-4 font-display text-lg font-semibold text-slate-100">{t('admin.candleHistoryTitle')}</h3>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <div>
+              <label className="label">{t('admin.candleM1Retention')}</label>
+              <input
+                type="number"
+                className="input"
+                min="1"
+                max="365"
+                value={candleSettings.m1RetentionDays}
+                onChange={(e) => setCandleSettings({ m1RetentionDays: Math.min(365, Math.max(1, parseInt(e.target.value) || 1)) })}
+              />
+            </div>
+          </div>
+          <button
+            className="btn-primary mt-4 px-5 py-2 text-sm disabled:opacity-40"
+            disabled={savingCandle}
+            onClick={saveCandleSettings}
+          >
+            {savingCandle ? t('common.loading') : t('common.save')}
+          </button>
+        </div>
+      )}
+
+      {/* 自定义策略平台设置 / custom-strategy platform settings */}
+      {strategySettings && (
+        <div className="glass mb-5 p-5">
+          <h3 className="mb-4 font-display text-lg font-semibold text-slate-100">{t('admin.strategyPlatformTitle')}</h3>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <div>
+              <label className="label">{t('admin.strategyMaxPerUser')}</label>
+              <input
+                type="number"
+                className="input"
+                min="1"
+                max="50"
+                value={strategySettings.maxStrategiesPerUser}
+                onChange={(e) => setStrategySettings({ ...strategySettings, maxStrategiesPerUser: Math.min(50, Math.max(1, parseInt(e.target.value) || 1)) })}
+              />
+            </div>
+            <div className="flex items-end pb-2">
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={strategySettings.proOnly}
+                  onChange={(e) => setStrategySettings({ ...strategySettings, proOnly: e.target.checked })}
+                  className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
+                />
+                {t('admin.strategyProOnly')}
+              </label>
+            </div>
+          </div>
+          <button
+            className="btn-primary mt-4 px-5 py-2 text-sm disabled:opacity-40"
+            disabled={savingStrategy}
+            onClick={saveStrategySettings}
+          >
+            {savingStrategy ? t('common.loading') : t('common.save')}
           </button>
         </div>
       )}

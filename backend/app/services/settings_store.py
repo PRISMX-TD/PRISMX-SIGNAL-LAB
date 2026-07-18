@@ -278,6 +278,118 @@ def save_discipline_settings(db, data: dict) -> None:
         row.value = encoded
 
 
+CANDLE_DEFAULTS: dict = {
+    "m1_retention_days": 30,
+}
+
+_candle_cache: dict = {}
+_candle_cache_at: float = 0.0
+
+
+def invalidate_candle_cache() -> None:
+    global _candle_cache_at
+    with _lock:
+        _candle_cache_at = 0.0
+
+
+def _load_candle_from_db(db) -> dict:
+    data = dict(CANDLE_DEFAULTS)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "candle_history").first()
+    if row:
+        try:
+            stored = json.loads(row.value)
+            if isinstance(stored, dict):
+                for k in CANDLE_DEFAULTS:
+                    if k in stored:
+                        data[k] = stored[k]
+        except (ValueError, TypeError):
+            logger.warning("platform_settings: invalid JSON for candle_history, using defaults")
+    return data
+
+
+def get_candle_settings(db) -> dict:
+    """读取 K 线历史保留策略设置（独立缓存）。
+    Read candle-history retention settings (separate cache)."""
+    global _candle_cache, _candle_cache_at
+    now = time.time()
+    with _lock:
+        if _candle_cache and now - _candle_cache_at < _CACHE_TTL_SECONDS:
+            return dict(_candle_cache)
+    data = _load_candle_from_db(db)
+    with _lock:
+        _candle_cache = data
+        _candle_cache_at = now
+    return dict(data)
+
+
+def save_candle_settings(db, data: dict) -> None:
+    merged = _load_candle_from_db(db)
+    merged.update(data)
+    encoded = json.dumps(merged, ensure_ascii=False)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "candle_history").first()
+    if row is None:
+        db.add(PlatformSetting(key="candle_history", value=encoded))
+    else:
+        row.value = encoded
+
+
+STRATEGY_DEFAULTS: dict = {
+    "max_strategies_per_user": 3,
+    "pro_only": True,
+}
+
+_strategy_settings_cache: dict = {}
+_strategy_settings_cache_at: float = 0.0
+
+
+def invalidate_strategy_settings_cache() -> None:
+    global _strategy_settings_cache_at
+    with _lock:
+        _strategy_settings_cache_at = 0.0
+
+
+def _load_strategy_settings_from_db(db) -> dict:
+    data = dict(STRATEGY_DEFAULTS)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "strategy").first()
+    if row:
+        try:
+            stored = json.loads(row.value)
+            if isinstance(stored, dict):
+                for k in STRATEGY_DEFAULTS:
+                    if k in stored:
+                        data[k] = stored[k]
+        except (ValueError, TypeError):
+            logger.warning("platform_settings: invalid JSON for strategy, using defaults")
+    return data
+
+
+def get_strategy_settings(db) -> dict:
+    """读取自定义策略平台参数（每用户策略数上限、是否 PRO 专属，独立缓存）。
+    Read the custom-strategy platform settings (max strategies per user,
+    PRO-exclusive flag; separate cache)."""
+    global _strategy_settings_cache, _strategy_settings_cache_at
+    now = time.time()
+    with _lock:
+        if _strategy_settings_cache and now - _strategy_settings_cache_at < _CACHE_TTL_SECONDS:
+            return dict(_strategy_settings_cache)
+    data = _load_strategy_settings_from_db(db)
+    with _lock:
+        _strategy_settings_cache = data
+        _strategy_settings_cache_at = now
+    return dict(data)
+
+
+def save_strategy_settings(db, data: dict) -> None:
+    merged = _load_strategy_settings_from_db(db)
+    merged.update(data)
+    encoded = json.dumps(merged, ensure_ascii=False)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "strategy").first()
+    if row is None:
+        db.add(PlatformSetting(key="strategy", value=encoded))
+    else:
+        row.value = encoded
+
+
 def set_setting(db, key: str, value) -> None:
     """写入单个设置项（不提交事务，调用方负责 commit 后再 invalidate）。
     Write one setting (no commit; caller commits, then invalidates the cache)."""

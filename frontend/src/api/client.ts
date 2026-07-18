@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyTemplateSchemas, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey } from './types'
 
 const TOKEN_KEY = 'prismx_token'
 
@@ -197,12 +197,45 @@ export const orderApi = {
   winrate: (login?: string) =>
     request<PersonalWinRate>(`/orders/winrate${login ? `?login=${encodeURIComponent(login)}` : ''}`),
   closedTrades: () => request<{ trades: ClosedTrade[] }>('/orders/closed-trades'),
-  // 纪律分：**当前仅管理员可用**（后端 require_admin），非管理员会拿到 403——
-  // 功能先内部试用，见 api/types.ts 的 DisciplineScore 注释。
-  // Discipline score: **admin-only for now** (backend require_admin);
-  // non-admins get a 403 — the feature is in internal trial.
+  // 纪律分：对所有登录用户开放，FREE/PRO 的明细裁剪见 api/types.ts 的 DisciplineScore 注释。
+  // Discipline score: open to all logged-in users; FREE/PRO detail gating is
+  // described in api/types.ts's DisciplineScore comment.
   discipline: (login?: string) =>
     request<DisciplineScore>(`/orders/discipline${login ? `?login=${encodeURIComponent(login)}` : ''}`),
+}
+
+// 自定义策略：模板选好参数 → 回测 → 启用 → 触发个人信号 → 一键下单
+// Custom strategies: pick a template, tune it, backtest, enable, get
+// personal signals on trigger, one-click order
+export const strategyApi = {
+  templates: () => request<{ templates: StrategyTemplateSchemas }>('/strategies/templates'),
+  list: () => request<{ strategies: UserStrategy[] }>('/strategies'),
+  create: (payload: {
+    template: StrategyTemplateKey
+    symbol: string
+    interval: string
+    params: Record<string, string | number>
+    stopLossPct: number
+    takeProfitR: number
+  }) => request<UserStrategy>('/strategies', { method: 'POST', body: JSON.stringify(payload) }),
+  update: (
+    id: string,
+    payload: Partial<{ params: Record<string, string | number>; stopLossPct: number; takeProfitR: number; enabled: boolean }>
+  ) => request<UserStrategy>(`/strategies/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  remove: (id: string) => request<{ ok: boolean }>(`/strategies/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  backtest: (payload: {
+    template: StrategyTemplateKey
+    symbol: string
+    interval: string
+    params: Record<string, string | number>
+    stopLossPct: number
+    takeProfitR: number
+    days: number
+    riskPct: number
+    capital: number
+    mode: 'compound' | 'flat'
+  }) => request<StrategyBacktestResult>('/strategies/backtest', { method: 'POST', body: JSON.stringify(payload) }),
+  signals: (limit = 50) => request<{ signals: StrategySignal[] }>(`/strategies/signals?limit=${limit}`),
 }
 
 // 多账号 / Multi-account
@@ -373,6 +406,18 @@ export const adminApi = {
     getDiscipline: () => request<AdminDisciplineSettings>('/admin/discipline'),
     updateDiscipline: (payload: AdminDisciplineSettings) =>
       request<AdminDisciplineSettings>('/admin/discipline', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+    getCandleHistory: () => request<AdminCandleSettings>('/admin/candle-history'),
+    updateCandleHistory: (payload: AdminCandleSettings) =>
+      request<AdminCandleSettings>('/admin/candle-history', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+    getStrategySettings: () => request<AdminStrategySettings>('/admin/strategy-settings'),
+    updateStrategySettings: (payload: AdminStrategySettings) =>
+      request<AdminStrategySettings>('/admin/strategy-settings', {
         method: 'PUT',
         body: JSON.stringify(payload),
       }),

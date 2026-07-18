@@ -440,6 +440,86 @@ class Payment(Base):
     finished_at = Column(DateTime, nullable=True)
 
 
+class Candle(Base):
+    """K 线历史：EA 推送的、已经走完（收盘）的 K 线长期落库，供策略回测与
+    未来更长回看使用；仍在形成中的那根不落库。内存里的 `chart_store` 继续
+    单独负责图表的实时读取，两者互不影响、互不依赖。
+
+    Candle history: closed (finished) bars pushed by the EA, persisted
+    long-term for strategy backtesting and future lookback; the
+    still-forming bar is never written here. The in-memory `chart_store`
+    remains solely responsible for the chart's live reads — independent of,
+    and unaffected by, this table.
+    """
+    __tablename__ = "candles"
+    __table_args__ = (
+        UniqueConstraint("symbol", "interval", "t", name="uq_candle_symbol_interval_t"),
+        Index("idx_candle_symbol_interval_t", "symbol", "interval", "t"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    symbol = Column(String, nullable=False)
+    interval = Column(String, nullable=False)
+    t = Column(Integer, nullable=False)  # K 线开盘时间, epoch 秒 / bar open time, epoch seconds
+    o = Column(Float, nullable=False)
+    h = Column(Float, nullable=False)
+    l = Column(Float, nullable=False)
+    c = Column(Float, nullable=False)
+    v = Column(Float, default=0)
+
+
+class UserStrategy(Base):
+    """用户自定义策略：从模板选一个、调好参数，对指定品种/周期持续评估。
+
+    User-customized strategy: pick a template, tune its parameters, and it's
+    continuously evaluated against a chosen symbol/interval.
+    """
+    __tablename__ = "user_strategies"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    template = Column(String, nullable=False)  # ma_cross / rsi_reversal / bollinger_reversion
+    symbol = Column(String, nullable=False)
+    interval = Column(String, nullable=False)
+    params = Column(Text, default="{}")  # 模板专属参数 JSON / template-specific params JSON
+    # 止损/止盈：止损按入场价的百分比距离，止盈按止损距离的倍数（R 值），
+    # 与 auto_manage.py 的 R 值约定一致。
+    # SL/TP: stop-loss as a % distance from entry, take-profit as a multiple
+    # of that distance (R), consistent with auto_manage.py's R convention.
+    stop_loss_pct = Column(Float, nullable=False, default=1.0)
+    take_profit_r = Column(Float, nullable=False, default=2.0)
+    enabled = Column(Boolean, default=False)
+    # 防止同一根 K 线重复触发信号 / de-dup guard: last bar this strategy fired a signal on
+    last_signal_bar_t = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now)
+
+
+class StrategySignal(Base):
+    """用户策略触发的个人信号：只有策略所有者自己能看到，与全站信号表完全
+    独立（全站信号表假定"所有人共享同一份"，个人策略信号天然不满足这个前提，
+    分开建表避免污染客观胜率/纪律分等既有统计口径）。
+
+    A signal fired by a user's own strategy: visible only to its owner,
+    intentionally kept separate from the shared, platform-wide `signals`
+    table (which assumes "the same row is shared by everyone" — personal
+    strategy signals don't fit that, so a separate table avoids polluting
+    the objective-win-rate/discipline-score statistics built on `signals`).
+    """
+    __tablename__ = "strategy_signals"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    strategy_id = Column(String, ForeignKey("user_strategies.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    symbol = Column(String, nullable=False)
+    side = Column(String, nullable=False)  # BUY / SELL
+    entry = Column(Float, nullable=False)
+    stop_loss = Column(Float, nullable=False)
+    take_profit = Column(Float, nullable=False)
+    bar_t = Column(Integer, nullable=False)  # 触发那根 K 线的时间 / the triggering bar's time
+    created_at = Column(DateTime, default=_now)
+
+
 class AdminAuditLog(Base):
     """管理员操作审计日志：谁在什么时候把哪个用户的哪个字段改成了什么。
 

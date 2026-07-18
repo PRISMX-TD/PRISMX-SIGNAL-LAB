@@ -12,9 +12,10 @@ from app.core.config import settings
 from app.core.database import init_db
 from app.core.rate_limit import limiter
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
-from app.routers import account, admin, auth, automation, bridge, chart, ea, notifications, orders, payments, sentiment, signals, trends, webhook, ws
+from app.routers import account, admin, auth, automation, bridge, chart, ea, notifications, orders, payments, sentiment, signals, strategies, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.orders import stale_order_monitor_loop
+from app.services.candle_store import candle_retention_sweep_loop
 from app.services.discipline import discipline_snapshot_loop
 from app.services.plan_expiry import plan_expiry_sweep_loop
 from app.services.sentiment_store import sentiment_loop
@@ -54,6 +55,9 @@ async def lifespan(app: FastAPI):
     # Discipline-score daily snapshot: persists today's score for recently
     # active users, powering the frontend's 30-day trend line.
     discipline_task = asyncio.create_task(discipline_snapshot_loop())
+    # K 线历史保留策略：每天清理过期的 1 分钟线（见 services/candle_store.py）
+    # Candle retention sweep: trims expired 1-minute candles daily
+    candle_retention_task = asyncio.create_task(candle_retention_sweep_loop())
     yield
     # 关闭：停止后台任务 / shutdown: stop background tasks
     if task is not None:
@@ -65,6 +69,7 @@ async def lifespan(app: FastAPI):
     sentiment_task.cancel()
     plan_expiry_task.cancel()
     discipline_task.cancel()
+    candle_retention_task.cancel()
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
@@ -101,6 +106,7 @@ app.include_router(admin.router, prefix=settings.API_PREFIX)
 app.include_router(automation.router, prefix=settings.API_PREFIX)
 app.include_router(sentiment.router, prefix=settings.API_PREFIX)
 app.include_router(payments.router, prefix=settings.API_PREFIX)
+app.include_router(strategies.router, prefix=settings.API_PREFIX)
 # WebSocket 路由 / WebSocket routers
 app.include_router(ws.router)
 

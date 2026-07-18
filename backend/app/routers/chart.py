@@ -15,9 +15,12 @@ import secrets
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from sqlalchemy.orm import Session
+
 from app.core.config import settings
+from app.core.database import get_db
 from app.models import User
-from app.services import chart_store, quotes_store
+from app.services import candle_store, chart_store, quotes_store, strategy_engine
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user
 
@@ -59,20 +62,36 @@ class FeedRequest(BaseModel):
 async def feed_candles(
     req: FeedRequest,
     x_ea_token: str | None = Header(default=None),
+    db: Session = Depends(get_db),
 ):
     """EA 上报 K 线：mode=backfill 整段替换，mode=tick 合并最新几根。
     EA reports candles: mode=backfill replaces the full series, mode=tick
-    merges the latest few bars."""
+    merges the latest few bars.
+
+    顺手把已经走完的 K 线写进数据库长期保存（供策略回测/更长回看用），并对
+    这个品种/周期下所有已启用的用户策略求值——两者都只在真的有一根新
+    K 线收盘时才触发实质工作，绝大多数 tick 调用（bar 还在形成中）直接
+    是空操作。见 services/candle_store.py、services/strategy_engine.py。
+
+    Also persists closed bars to the database (for strategy backtests/longer
+    lookback) and evaluates every enabled user strategy on this symbol/
+    interval — both are near-no-ops on most tick calls (the bar is still
+    forming); real work only happens when a bar has actually just closed.
+    """
     if not _valid_ea_token(x_ea_token):
         raise HTTPException(status_code=401, detail="invalid feed token")
     for s in req.series:
         if s.interval not in ALLOWED_INTERVALS:
             continue
+        symbol = s.symbol.upper()
         bars = [b.model_dump() for b in s.bars]
         if req.mode == "backfill":
-            chart_store.replace_series(s.symbol.upper(), s.interval, bars)
+            chart_store.replace_series(symbol, s.interval, bars)
         else:
-            chart_store.merge_bars(s.symbol.upper(), s.interval, bars)
+            chart_store.merge_bars(symbol, s.interval, bars)
+        new_count = candle_store.persist_closed_bars(db, symbol, s.interval, bars)
+        if new_count:
+            await strategy_engine.evaluate_new_candle(symbol, s.interval)
     return {"ok": True}
 
 

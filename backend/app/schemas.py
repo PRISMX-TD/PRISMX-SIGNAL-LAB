@@ -118,6 +118,72 @@ class AdminDisciplineSettings(BaseModel):
     volumeHistoryMin: int = Field(default=5, ge=1, le=50)
 
 
+class AdminCandleSettings(BaseModel):
+    """K 线历史保留策略设置 / Candle-history retention settings."""
+
+    m1RetentionDays: int = Field(default=30, ge=1, le=365)
+
+
+class AdminStrategySettings(BaseModel):
+    """自定义策略平台设置 / Custom-strategy platform settings."""
+
+    maxStrategiesPerUser: int = Field(default=3, ge=1, le=50)
+    proOnly: bool = Field(default=True)
+
+
+# ---------- 自定义策略 / User strategies ----------
+class StrategyCreate(BaseModel):
+    template: Literal["ma_cross", "rsi_reversal", "bollinger_reversion"]
+    symbol: str = Field(pattern=SYMBOL_PATTERN)
+    interval: str
+    params: dict = Field(default_factory=dict)
+    stopLossPct: float = Field(default=1.0, ge=0.1, le=10)
+    takeProfitR: float = Field(default=2.0, ge=0.5, le=10)
+
+
+class StrategyUpdate(BaseModel):
+    params: dict | None = None
+    stopLossPct: float | None = Field(default=None, ge=0.1, le=10)
+    takeProfitR: float | None = Field(default=None, ge=0.5, le=10)
+    enabled: bool | None = None
+
+
+class StrategyOut(BaseModel):
+    id: str
+    template: str
+    symbol: str
+    interval: str
+    params: dict
+    stopLossPct: float
+    takeProfitR: float
+    enabled: bool
+    createdAt: datetime
+
+
+class StrategyBacktestRequest(BaseModel):
+    template: Literal["ma_cross", "rsi_reversal", "bollinger_reversion"]
+    symbol: str = Field(pattern=SYMBOL_PATTERN)
+    interval: str
+    params: dict = Field(default_factory=dict)
+    stopLossPct: float = Field(default=1.0, ge=0.1, le=10)
+    takeProfitR: float = Field(default=2.0, ge=0.5, le=10)
+    days: int = Field(default=90, ge=7, le=730)
+    riskPct: float = Field(default=1.0, ge=0.1, le=3.0)
+    capital: float = Field(default=10000, ge=1, le=1e9)
+    mode: Literal["compound", "flat"] = "compound"
+
+
+class StrategySignalOut(BaseModel):
+    id: str
+    strategyId: str
+    symbol: str
+    side: str
+    entry: float
+    stopLoss: float
+    takeProfit: float
+    createdAt: datetime
+
+
 # ---------- API Token / MT5 连接凭证 ----------
 class EATokenOut(BaseModel):
     # 明文 token 仅在重置（生成）响应中出现一次；查询时为 None（库中只存哈希）。

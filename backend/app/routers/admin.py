@@ -20,19 +20,24 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import AdminAuditLog, MT5Account, User
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminDisciplineSettings, AdminMetricsOut, AdminPricingSettings, AdminTrialSettings, AdminUserOut, AdminUserUpdate
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPricingSettings, AdminStrategySettings, AdminTrialSettings, AdminUserOut, AdminUserUpdate
 from app.services.deps import require_admin
 from app.services.settings_store import (
     get_broker_settings,
+    get_candle_settings,
     get_discipline_settings,
     get_pricing_settings,
+    get_strategy_settings,
     get_trial_settings,
+    invalidate_candle_cache,
     invalidate_discipline_cache,
-    invalidate_pricing_cache,
     invalidate_settings_cache,
+    invalidate_strategy_settings_cache,
     invalidate_trial_cache,
+    save_candle_settings,
     save_discipline_settings,
     save_pricing_settings,
+    save_strategy_settings,
     save_trial_settings,
     set_setting,
 )
@@ -455,3 +460,64 @@ def put_discipline(
     db.commit()
     invalidate_discipline_cache()
     return get_discipline(db, admin)
+
+
+# ---------- K 线历史保留策略设置 / candle-history retention settings ----------
+
+@router.get("/candle-history", response_model=AdminCandleSettings)
+def get_candle_history(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """读取 K 线历史保留天数。Read the candle-history retention window."""
+    c = get_candle_settings(db)
+    return AdminCandleSettings(m1RetentionDays=int(c["m1_retention_days"]))
+
+
+@router.put("/candle-history", response_model=AdminCandleSettings)
+def put_candle_history(
+    body: AdminCandleSettings,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """保存 K 线历史保留天数（只影响 1 分钟线；其余周期永久保留）。
+    Save the candle-history retention window (only affects 1-minute candles;
+    other intervals are kept permanently)."""
+    data = {"m1_retention_days": body.m1RetentionDays}
+    save_candle_settings(db, data)
+    _log_change(db, admin.id, admin.id, "setting:candle_history", None, json.dumps(data))
+    db.commit()
+    invalidate_candle_cache()
+    return get_candle_history(db, admin)
+
+
+# ---------- 自定义策略平台设置 / custom-strategy platform settings ----------
+
+@router.get("/strategy-settings", response_model=AdminStrategySettings)
+def get_strategy_platform_settings(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """读取自定义策略平台设置。Read the custom-strategy platform settings."""
+    c = get_strategy_settings(db)
+    return AdminStrategySettings(
+        maxStrategiesPerUser=int(c["max_strategies_per_user"]),
+        proOnly=bool(c["pro_only"]),
+    )
+
+
+@router.put("/strategy-settings", response_model=AdminStrategySettings)
+def put_strategy_platform_settings(
+    body: AdminStrategySettings,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """保存自定义策略平台设置（每用户策略数上限、是否 PRO 专属）。
+    Save the custom-strategy platform settings (max strategies per user,
+    whether the feature is PRO-exclusive)."""
+    data = {"max_strategies_per_user": body.maxStrategiesPerUser, "pro_only": body.proOnly}
+    save_strategy_settings(db, data)
+    _log_change(db, admin.id, admin.id, "setting:strategy", None, json.dumps(data))
+    db.commit()
+    invalidate_strategy_settings_cache()
+    return get_strategy_platform_settings(db, admin)
