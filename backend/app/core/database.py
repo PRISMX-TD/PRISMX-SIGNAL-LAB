@@ -204,3 +204,47 @@ def _migrate_columns() -> None:
             # Free-trial flag: a freshly added column is NULL, but it's declared NOT NULL.
             if "plan_is_trial" not in user_cols:
                 conn.execute(text("UPDATE users SET plan_is_trial = FALSE WHERE plan_is_trial IS NULL"))
+
+    # user_strategies 表：止损止盈从"百分比距离 + R 倍数"一种固定组合改成
+    # 两个方式独立可选，外加策略命名。已启用的策略要按原逻辑等价换算成新
+    # 表示，不能让正在跑的策略静默换成别的止损止盈行为。
+    # user_strategies: SL/TP moved from one fixed "% distance + R multiple"
+    # combo to two independently selectable methods, plus a name field.
+    # Backfill existing rows to the equivalent new representation — an
+    # already-enabled strategy must not silently switch to different SL/TP
+    # behavior on upgrade.
+    if "user_strategies" in inspector.get_table_names():
+        us_cols = {c["name"] for c in inspector.get_columns("user_strategies")}
+        us_new = {
+            "name": "VARCHAR",
+            "stop_loss_method": "VARCHAR",
+            "stop_loss_value": "FLOAT",
+            "take_profit_method": "VARCHAR",
+            "take_profit_value": "FLOAT",
+        }
+        with engine.begin() as conn:
+            for name, col_type in us_new.items():
+                if name not in us_cols:
+                    conn.execute(text(f"ALTER TABLE user_strategies ADD COLUMN {name} {col_type}"))
+            if "stop_loss_method" not in us_cols:
+                if "stop_loss_pct" in us_cols:
+                    conn.execute(text(
+                        "UPDATE user_strategies SET stop_loss_method = 'percent', stop_loss_value = stop_loss_pct "
+                        "WHERE stop_loss_method IS NULL"
+                    ))
+                else:
+                    conn.execute(text(
+                        "UPDATE user_strategies SET stop_loss_method = 'percent', stop_loss_value = 1.0 "
+                        "WHERE stop_loss_method IS NULL"
+                    ))
+            if "take_profit_method" not in us_cols:
+                if "take_profit_r" in us_cols:
+                    conn.execute(text(
+                        "UPDATE user_strategies SET take_profit_method = 'rr', take_profit_value = take_profit_r "
+                        "WHERE take_profit_method IS NULL"
+                    ))
+                else:
+                    conn.execute(text(
+                        "UPDATE user_strategies SET take_profit_method = 'rr', take_profit_value = 2.0 "
+                        "WHERE take_profit_method IS NULL"
+                    ))
