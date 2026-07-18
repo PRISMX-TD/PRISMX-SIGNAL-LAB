@@ -12,11 +12,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { createChart, ColorType, CandlestickSeries, LineSeries, createSeriesMarkers, type UTCTimestamp } from 'lightweight-charts'
+import { createChart, ColorType, CandlestickSeries, LineSeries, LineStyle, createSeriesMarkers, type UTCTimestamp } from 'lightweight-charts'
 import { useAuth } from '../store/auth'
 import { useLive, useQuotes } from '../store/live'
 import { strategyApi } from '../api/client'
 import { displaySymbol, fmtDate, fmtTime, localizeApiError } from '../api/utils'
+import { bollinger, ema, macd, rsi, sma } from '../utils/indicators'
 import type {
   StopLossMethod,
   StrategyBacktestResult,
@@ -135,6 +136,126 @@ function EquityCurve({ points, capital }: { points: Array<{ equity: number }>; c
 const UP_COLOR = '#22c55e'
 const DOWN_COLOR = '#ef4444'
 
+// 一条指标线：pane 0 = 叠在主图价格轴上(均线/布林带/唐奇安通道)，
+// pane 1 = 独立副图,与主图共用时间轴但价格轴分开(RSI/MACD/动量分数这类
+// 量纲和价格完全不同的指标)。dashed 用于超买超卖/中线/阈值这类参考线。
+// One indicator line: pane 0 overlays the main price axis (MA/Bollinger/
+// Donchian), pane 1 is a separate sub-pane sharing the time axis but with
+// its own price scale (RSI/MACD/momentum-score — indicators whose scale has
+// nothing to do with price). dashed marks reference lines (overbought/
+// oversold/midline/threshold).
+interface IndicatorLine {
+  pane: 0 | 1
+  label: string
+  color: string
+  values: (number | null)[]
+  dashed?: boolean
+}
+
+// 按模板生成"入场条件用到的那些指标"的可视化线,让用户能在图上直接对照
+// 每笔交易触发时指标长什么样,而不是只能"相信"回测数字。数学全部复用
+// frontend/src/utils/indicators.ts(与图表页、以及后端 strategy_engine.py
+// 的 Python 移植版本同一套口径),这里只是按模板把该画哪几条线组织起来。
+// Builds the "indicator actually used for entry" visualization lines per
+// template, so the user can check each trade against what the indicator
+// looked like at the time instead of just trusting the backtest numbers.
+// All math reuses frontend/src/utils/indicators.ts (the same math the
+// charts page uses, and that strategy_engine.py's Python port mirrors) —
+// this just organizes which lines to draw per template.
+function buildIndicatorLines(
+  template: StrategyTemplateKey,
+  params: Record<string, string | number>,
+  bars: StrategyBacktestResult['bars']
+): IndicatorLine[] {
+  const cs = bars.map((b) => b.c)
+  const highs = bars.map((b) => b.h)
+  const lows = bars.map((b) => b.l)
+  const n = cs.length
+  const num = (key: string) => Number(params[key])
+  const maFn = params.maType === 'SMA' ? sma : ema
+  const flat = (v: number) => new Array(n).fill(v) as (number | null)[]
+
+  switch (template) {
+    case 'ma_cross':
+      return [
+        { pane: 0, label: 'Fast MA', color: '#fbbf24', values: maFn(cs, num('fastPeriod')) },
+        { pane: 0, label: 'Slow MA', color: '#38bdf8', values: maFn(cs, num('slowPeriod')) },
+      ]
+    case 'ma_pullback':
+      return [{ pane: 0, label: 'MA', color: '#fbbf24', values: maFn(cs, num('period')) }]
+    case 'bollinger_reversion':
+    case 'bollinger_breakout': {
+      const { upper, mid, lower } = bollinger(cs, num('period'), num('mult'))
+      return [
+        { pane: 0, label: 'Upper', color: '#38bdf8', values: upper },
+        { pane: 0, label: 'Mid', color: '#94a3b8', values: mid, dashed: true },
+        { pane: 0, label: 'Lower', color: '#38bdf8', values: lower },
+      ]
+    }
+    case 'donchian_breakout': {
+      const period = num('period')
+      const upper: (number | null)[] = new Array(n).fill(null)
+      const lower: (number | null)[] = new Array(n).fill(null)
+      for (let i = period; i < n; i++) {
+        upper[i] = Math.max(...highs.slice(i - period, i))
+        lower[i] = Math.min(...lows.slice(i - period, i))
+      }
+      return [
+        { pane: 0, label: 'Upper', color: '#38bdf8', values: upper },
+        { pane: 0, label: 'Lower', color: '#38bdf8', values: lower },
+      ]
+    }
+    case 'rsi_reversal':
+    case 'rsi_momentum': {
+      const r = rsi(cs, num('period'))
+      const lines: IndicatorLine[] = [{ pane: 1, label: 'RSI', color: '#a78bfa', values: r }]
+      if (template === 'rsi_reversal') {
+        lines.push({ pane: 1, label: 'Oversold', color: '#64748b', values: flat(num('oversold')), dashed: true })
+        lines.push({ pane: 1, label: 'Overbought', color: '#64748b', values: flat(num('overbought')), dashed: true })
+      } else {
+        lines.push({ pane: 1, label: 'Mid', color: '#64748b', values: flat(50), dashed: true })
+      }
+      return lines
+    }
+    case 'macd_cross': {
+      const { macd: dif, signal: dea } = macd(cs, num('fastPeriod'), num('slowPeriod'), num('signalPeriod'))
+      return [
+        { pane: 1, label: 'DIF', color: '#38bdf8', values: dif },
+        { pane: 1, label: 'DEA', color: '#fbbf24', values: dea },
+      ]
+    }
+    case 'momentum_breakout': {
+      const lookback = num('lookback')
+      const threshold = num('thresholdPct')
+      const score: (number | null)[] = new Array(n).fill(null)
+      for (let i = lookback; i < n; i++) score[i] = (cs[i] / cs[i - lookback] - 1) * 100
+      return [
+        { pane: 1, label: 'Momentum %', color: '#a78bfa', values: score },
+        { pane: 1, label: '+Threshold', color: '#64748b', values: flat(threshold), dashed: true },
+        { pane: 1, label: '-Threshold', color: '#64748b', values: flat(-threshold), dashed: true },
+      ]
+    }
+    case 'trend_rsi_filter':
+      return [
+        { pane: 0, label: 'Trend MA', color: '#fbbf24', values: ema(cs, num('trendPeriod')) },
+        { pane: 1, label: 'RSI', color: '#a78bfa', values: rsi(cs, num('rsiPeriod')) },
+        { pane: 1, label: 'Oversold', color: '#64748b', values: flat(num('oversold')), dashed: true },
+        { pane: 1, label: 'Overbought', color: '#64748b', values: flat(num('overbought')), dashed: true },
+      ]
+    default:
+      return []
+  }
+}
+
+function toLinePoints(bars: StrategyBacktestResult['bars'], values: (number | null)[]): { time: UTCTimestamp; value: number }[] {
+  const out: { time: UTCTimestamp; value: number }[] = []
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i]
+    if (v != null) out.push({ time: bars[i].t as UTCTimestamp, value: v })
+  }
+  return out
+}
+
 // 回测 K 线图：真实蜡烛图 + 每笔交易的入场/出场标记 + 一条连接两点的细线，
 // 这样用户看到的不只是一条抽象的净值曲线，而是"这笔单在当时的行情里到底
 // 长什么样"。复用行情图表页已经在用的 lightweight-charts（v5），marker 用
@@ -146,8 +267,23 @@ const DOWN_COLOR = '#ef4444'
 // trade fired. Reuses the same lightweight-charts (v5) already used by the
 // charts page; markers go through the createSeriesMarkers plugin API, and
 // each trade gets its own 2-point LineSeries for the connecting line.
-function BacktestChart({ bars, trades }: { bars: StrategyBacktestResult['bars']; trades: StrategyBacktestTrade[] }) {
+function BacktestChart({
+  bars, trades, template, params,
+}: {
+  bars: StrategyBacktestResult['bars']
+  trades: StrategyBacktestTrade[]
+  template: StrategyTemplateKey
+  params: Record<string, string | number>
+}) {
+  const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
+  // 默认开启：一眼能对照每笔交易触发时指标长什么样,而不是只能"相信"回测
+  // 数字;需要看干净蜡烛图时再手动关掉。
+  // On by default: lets the user check each trade against what the
+  // indicator looked like at the time, instead of only trusting the
+  // backtest numbers; turn it off if a clean candlestick view is wanted.
+  const [showIndicator, setShowIndicator] = useState(true)
+  const indicatorLines = buildIndicatorLines(template, params, bars)
 
   useEffect(() => {
     const el = containerRef.current
@@ -223,6 +359,36 @@ function BacktestChart({ bars, trades }: { bars: StrategyBacktestResult['bars'];
       return line
     })
 
+    // 指标线：pane 0 的叠在主图价格轴上,pane 1 的一条独立指标副图,与主图
+    // 共享时间轴。所有 pane 1 的线共用同一个新建的 pane,只在第一次遇到
+    // pane 1 的线时创建。/ Indicator lines: pane 0 overlays the main price
+    // axis, pane 1 is one shared sub-pane with its own price scale (sharing
+    // the main pane's time axis). All pane-1 lines reuse the single new pane
+    // created the first time one is needed.
+    const indicatorSeries: ReturnType<typeof chart.addSeries>[] = []
+    if (showIndicator) {
+      let subPaneIndex: number | null = null
+      for (const line of indicatorLines) {
+        const paneIndex = line.pane === 0 ? 0 : (subPaneIndex ??= chart.panes().length)
+        const s = chart.addSeries(
+          LineSeries,
+          {
+            color: line.color,
+            lineWidth: line.dashed ? 1 : 2,
+            lineStyle: line.dashed ? LineStyle.Dashed : LineStyle.Solid,
+            priceLineVisible: false,
+            lastValueVisible: !line.dashed,
+            crosshairMarkerVisible: !line.dashed,
+            title: line.label,
+          },
+          paneIndex
+        )
+        s.setData(toLinePoints(bars, line.values))
+        indicatorSeries.push(s)
+      }
+      if (subPaneIndex != null) chart.panes()[subPaneIndex]?.setHeight(100)
+    }
+
     chart.timeScale().fitContent()
 
     // 立即把占位尺寸纠正成容器的真实尺寸。这一步必须存在——见上方 createChart
@@ -289,11 +455,25 @@ function BacktestChart({ bars, trades }: { bars: StrategyBacktestResult['bars'];
       window.removeEventListener('resize', onWindowResize)
       ro.disconnect()
       tradeLines.forEach((l) => chart.removeSeries(l))
+      indicatorSeries.forEach((s) => chart.removeSeries(s))
       chart.remove()
     }
-  }, [bars, trades])
+  }, [bars, trades, template, params, showIndicator])
 
-  return <div ref={containerRef} className="h-[320px] w-full" />
+  return (
+    <div>
+      <label className="mb-2 flex items-center gap-2 text-xs text-slate-400">
+        <input
+          type="checkbox"
+          checked={showIndicator}
+          onChange={(e) => setShowIndicator(e.target.checked)}
+          className="h-3.5 w-3.5 rounded border-white/20 bg-white/5 accent-prism-500"
+        />
+        {t('strategy.showIndicator')}
+      </label>
+      <div ref={containerRef} className="h-[320px] w-full" />
+    </div>
+  )
 }
 
 // 数字输入框：自己维护一份文本缓冲，只在失焦（或回车）时才解析+夹紧+回传。
@@ -450,119 +630,138 @@ function StrategyBuilder({
 
   return (
     <section className="glass mb-5 p-5">
-      {/* 策略命名：留空则用模板名兜底展示 */}
-      <div className="mb-4">
-        <span className="mb-1.5 block text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.name')}</span>
-        <input
-          type="text"
-          className="input w-full sm:w-80"
-          maxLength={60}
-          placeholder={t(TEMPLATE_LABEL_KEYS[draft.template])}
-          value={draft.name}
-          onChange={(e) => onChange({ ...draft, name: e.target.value })}
-        />
-      </div>
+      {/* 基本信息:命名 + 模板选择 + 品种/周期 */}
+      <div>
+        <h4 className="mb-3 text-sm font-semibold text-slate-300">{t('strategy.sectionBasics')}</h4>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <label className="flex flex-col gap-1.5 sm:col-span-2">
+            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.name')}</span>
+            <input
+              type="text"
+              className="input"
+              maxLength={60}
+              placeholder={t(TEMPLATE_LABEL_KEYS[draft.template])}
+              value={draft.name}
+              onChange={(e) => onChange({ ...draft, name: e.target.value })}
+            />
+          </label>
 
-      {/* 模板选择：随时可切换,切换会重置该模板的参数为默认值 */}
-      <div className="mb-4">
-        <span className="mb-1.5 block text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.template')}</span>
-        <Select
-          className="w-full sm:w-80"
-          value={draft.template}
-          options={TEMPLATE_KEYS.map((key) => ({ value: key, label: t(TEMPLATE_LABEL_KEYS[key]) }))}
-          onChange={(v) => switchTemplate(v as StrategyTemplateKey)}
-        />
-        <p className="mt-2 text-xs leading-relaxed text-slate-500">{t(TEMPLATE_DESC_KEYS[draft.template])}</p>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.symbol')}</span>
-          <Select
-            value={draft.symbol}
-            options={activeSymbols.map((s) => ({ value: s, label: displaySymbol(s) }))}
-            onChange={(v) => onChange({ ...draft, symbol: v })}
-          />
-        </label>
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.interval')}</span>
-          <div className="flex flex-wrap gap-2">
-            {INTERVALS.map((iv) => (
-              <button key={iv.code} onClick={() => onChange({ ...draft, interval: iv.code })} className={segBtn(draft.interval === iv.code)}>
-                {iv.label}
-              </button>
-            ))}
+          {/* 模板选择：随时可切换,切换会重置该模板的参数为默认值 */}
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.template')}</span>
+            <Select
+              className="w-full"
+              value={draft.template}
+              options={TEMPLATE_KEYS.map((key) => ({ value: key, label: t(TEMPLATE_LABEL_KEYS[key]) }))}
+              onChange={(v) => switchTemplate(v as StrategyTemplateKey)}
+            />
+            <p className="text-xs leading-relaxed text-slate-500">{t(TEMPLATE_DESC_KEYS[draft.template])}</p>
           </div>
-        </label>
+
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.symbol')}</span>
+            <Select
+              value={draft.symbol}
+              options={activeSymbols.map((s) => ({ value: s, label: displaySymbol(s) }))}
+              onChange={(v) => onChange({ ...draft, symbol: v })}
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.interval')}</span>
+            <div className="flex flex-wrap gap-2">
+              {INTERVALS.map((iv) => (
+                <button key={iv.code} onClick={() => onChange({ ...draft, interval: iv.code })} className={segBtn(draft.interval === iv.code)}>
+                  {iv.label}
+                </button>
+              ))}
+            </div>
+          </label>
+        </div>
       </div>
 
       {/* 模板专属参数：完全按后端模板 schema 动态渲染,不写死字段列表 */}
-      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {Object.entries(schema).map(([key, spec]) => (
-          spec.type === 'enum' ? (
-            <div key={key} className="flex flex-col gap-1.5">
-              <span className="text-[11px] uppercase tracking-wide text-slate-500">{t(PARAM_LABEL_KEYS[key] ?? key)}</span>
-              <div className="flex flex-wrap gap-2">
-                {spec.options.map((opt) => (
-                  <button key={opt} onClick={() => setParam(key, opt)} className={segBtn(draft.params[key] === opt)}>
-                    {t(ENUM_OPTION_LABEL_KEYS[key]?.[opt] ?? opt)}
-                  </button>
-                ))}
+      <div className="mt-5 border-t border-white/10 pt-4">
+        <h4 className="mb-3 text-sm font-semibold text-slate-300">{t('strategy.sectionTemplateParams')}</h4>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          {Object.entries(schema).map(([key, spec]) => (
+            spec.type === 'enum' ? (
+              <div key={key} className="flex flex-col gap-1.5">
+                <span className="text-[11px] uppercase tracking-wide text-slate-500">{t(PARAM_LABEL_KEYS[key] ?? key)}</span>
+                <div className="flex flex-wrap gap-2">
+                  {spec.options.map((opt) => (
+                    <button key={opt} onClick={() => setParam(key, opt)} className={segBtn(draft.params[key] === opt)}>
+                      {t(ENUM_OPTION_LABEL_KEYS[key]?.[opt] ?? opt)}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          ) : (
-            <NumberField
-              key={key}
-              label={t(PARAM_LABEL_KEYS[key] ?? key)}
-              value={typeof draft.params[key] === 'number' ? draft.params[key] as number : spec.default as number}
-              min={spec.min}
-              max={spec.max}
-              isFloat={spec.type === 'float'}
-              onChange={(v) => setParam(key, v)}
-            />
-          )
-        ))}
-        <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.stopLossMethod')}</span>
-          <div className="flex flex-wrap gap-2">
-            {(['percent', 'price'] as const).map((m) => (
-              <button key={m} onClick={() => onChange({ ...draft, stopLossMethod: m })} className={segBtn(draft.stopLossMethod === m)}>
-                {t(m === 'percent' ? 'strategy.methodPercent' : 'strategy.methodPrice')}
-              </button>
-            ))}
-          </div>
+            ) : (
+              <NumberField
+                key={key}
+                label={t(PARAM_LABEL_KEYS[key] ?? key)}
+                value={typeof draft.params[key] === 'number' ? draft.params[key] as number : spec.default as number}
+                min={spec.min}
+                max={spec.max}
+                isFloat={spec.type === 'float'}
+                onChange={(v) => setParam(key, v)}
+              />
+            )
+          ))}
         </div>
-        <NumberField
-          label={draft.stopLossMethod === 'percent' ? t('strategy.stopLossPct') : t('strategy.stopLossPrice')}
-          value={draft.stopLossValue}
-          min={draft.stopLossMethod === 'percent' ? 0.1 : 0.00001}
-          max={draft.stopLossMethod === 'percent' ? 10 : 100000}
-          isFloat
-          onChange={(v) => onChange({ ...draft, stopLossValue: v })}
-        />
-        <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.takeProfitMethod')}</span>
-          <div className="flex flex-wrap gap-2">
-            {(['rr', 'percent', 'price'] as const).map((m) => (
-              <button key={m} onClick={() => onChange({ ...draft, takeProfitMethod: m })} className={segBtn(draft.takeProfitMethod === m)}>
-                {t(m === 'rr' ? 'strategy.methodRR' : m === 'percent' ? 'strategy.methodPercent' : 'strategy.methodPrice')}
-              </button>
-            ))}
-          </div>
-        </div>
-        <NumberField
-          label={draft.takeProfitMethod === 'rr' ? t('strategy.takeProfitR') : draft.takeProfitMethod === 'percent' ? t('strategy.takeProfitPct') : t('strategy.takeProfitPrice')}
-          value={draft.takeProfitValue}
-          min={draft.takeProfitMethod === 'rr' ? 0.5 : draft.takeProfitMethod === 'percent' ? 0.1 : 0.00001}
-          max={draft.takeProfitMethod === 'rr' ? 10 : draft.takeProfitMethod === 'percent' ? 50 : 100000}
-          isFloat
-          onChange={(v) => onChange({ ...draft, takeProfitValue: v })}
-        />
       </div>
 
-      {/* 回测参数与结果 */}
+      {/* 风险管理:止损/止盈方式各自成一张卡片,方式选择器与对应数值紧挨着,
+          不再跟模板参数混排在同一个网格里 */}
       <div className="mt-5 border-t border-white/10 pt-4">
-        <div className="flex flex-wrap items-end gap-4">
+        <h4 className="mb-3 text-sm font-semibold text-slate-300">{t('strategy.sectionRisk')}</h4>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.stopLossMethod')}</span>
+            <div className="mt-1.5 flex flex-wrap gap-2">
+              {(['percent', 'price'] as const).map((m) => (
+                <button key={m} onClick={() => onChange({ ...draft, stopLossMethod: m })} className={segBtn(draft.stopLossMethod === m)}>
+                  {t(m === 'percent' ? 'strategy.methodPercent' : 'strategy.methodPrice')}
+                </button>
+              ))}
+            </div>
+            <div className="mt-3">
+              <NumberField
+                label={draft.stopLossMethod === 'percent' ? t('strategy.stopLossPct') : t('strategy.stopLossPrice')}
+                value={draft.stopLossValue}
+                min={draft.stopLossMethod === 'percent' ? 0.1 : 0.00001}
+                max={draft.stopLossMethod === 'percent' ? 10 : 100000}
+                isFloat
+                onChange={(v) => onChange({ ...draft, stopLossValue: v })}
+              />
+            </div>
+          </div>
+          <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.takeProfitMethod')}</span>
+            <div className="mt-1.5 flex flex-wrap gap-2">
+              {(['rr', 'percent', 'price'] as const).map((m) => (
+                <button key={m} onClick={() => onChange({ ...draft, takeProfitMethod: m })} className={segBtn(draft.takeProfitMethod === m)}>
+                  {t(m === 'rr' ? 'strategy.methodRR' : m === 'percent' ? 'strategy.methodPercent' : 'strategy.methodPrice')}
+                </button>
+              ))}
+            </div>
+            <div className="mt-3">
+              <NumberField
+                label={draft.takeProfitMethod === 'rr' ? t('strategy.takeProfitR') : draft.takeProfitMethod === 'percent' ? t('strategy.takeProfitPct') : t('strategy.takeProfitPrice')}
+                value={draft.takeProfitValue}
+                min={draft.takeProfitMethod === 'rr' ? 0.5 : draft.takeProfitMethod === 'percent' ? 0.1 : 0.00001}
+                max={draft.takeProfitMethod === 'rr' ? 10 : draft.takeProfitMethod === 'percent' ? 50 : 100000}
+                isFloat
+                onChange={(v) => onChange({ ...draft, takeProfitValue: v })}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 回测设置 */}
+      <div className="mt-5 border-t border-white/10 pt-4">
+        <h4 className="mb-3 text-sm font-semibold text-slate-300">{t('strategy.sectionBacktest')}</h4>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div className="flex flex-col gap-1.5">
             <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('simulator.range')}</span>
             <div className="flex flex-wrap gap-2">
@@ -573,11 +772,9 @@ function StrategyBuilder({
           </div>
           <label className="flex flex-col gap-1.5">
             <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('simulator.risk')} · {btRisk.toFixed(1)}%</span>
-            <input type="range" min={0.1} max={3} step={0.1} value={btRisk} onChange={(e) => setBtRisk(parseFloat(e.target.value))} className="w-32 accent-prism-500" />
+            <input type="range" min={0.1} max={3} step={0.1} value={btRisk} onChange={(e) => setBtRisk(parseFloat(e.target.value))} className="w-full accent-prism-500" />
           </label>
-          <div className="w-32">
-            <NumberField label={t('simulator.capital')} value={btCapital} min={1} max={1e9} isFloat={false} onChange={setBtCapital} />
-          </div>
+          <NumberField label={t('simulator.capital')} value={btCapital} min={1} max={1e9} isFloat={false} onChange={setBtCapital} />
           <div className="flex flex-col gap-1.5">
             <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('simulator.mode')}</span>
             <div className="flex gap-2">
@@ -585,10 +782,10 @@ function StrategyBuilder({
               <button onClick={() => setBtMode('flat')} className={segBtn(btMode === 'flat')}>{t('simulator.modeFlat')}</button>
             </div>
           </div>
-          <button onClick={runBacktest} disabled={backtesting} className="btn-primary ml-auto px-5 py-2 text-sm disabled:opacity-40">
-            {backtesting ? t('strategy.backtesting') : t('strategy.runBacktest')}
-          </button>
         </div>
+        <button onClick={runBacktest} disabled={backtesting} className="btn-primary mt-4 w-full px-5 py-2 text-sm disabled:opacity-40 sm:w-auto">
+          {backtesting ? t('strategy.backtesting') : t('strategy.runBacktest')}
+        </button>
 
         {backtestError && <p className="mt-3 text-sm text-down">{backtestError}</p>}
 
@@ -639,7 +836,12 @@ function StrategyBuilder({
               <h4 className="text-sm font-semibold text-slate-200">{t('strategy.chartTitle')}</h4>
               <p className="mt-1 text-xs text-slate-500">{t('strategy.chartHint', { n: result.trades.length })}</p>
               <div className="mt-3">
-                <BacktestChart bars={result.bars} trades={result.trades} />
+                <BacktestChart
+                  bars={result.bars}
+                  trades={result.trades}
+                  template={(result.params.template as StrategyTemplateKey | undefined) ?? draft.template}
+                  params={(result.params.params as Record<string, string | number> | undefined) ?? draft.params}
+                />
               </div>
             </div>
 
@@ -725,7 +927,7 @@ function StrategyBuilder({
       </div>
 
       {saveError && <p className="mt-3 text-sm text-down">{saveError}</p>}
-      <div className="mt-5 flex flex-wrap gap-3">
+      <div className="mt-5 flex flex-wrap gap-3 border-t border-white/10 pt-4">
         <button onClick={() => save(true)} disabled={saving} className="btn-primary px-5 py-2 text-sm disabled:opacity-40">
           {t('strategy.saveAndEnable')}
         </button>
