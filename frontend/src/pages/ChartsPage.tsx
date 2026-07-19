@@ -350,20 +350,26 @@ export default function ChartsPage() {
 
   // 纯 CSS 全屏（fixed inset-0 z-60）：不用浏览器原生 Fullscreen API，因为
   // window.confirm（清空画线时）会让浏览器退出原生全屏，触发 fullscreenchange
-  // 把我们的全屏态也一起关掉——这就是"删除内容时自动跳出去"的根因。
-  // Pure-CSS fullscreen (fixed inset-0 z-60): we deliberately avoid the native
-  // Fullscreen API because window.confirm (used when clearing drawings) makes
-  // the browser leave native fullscreen, firing fullscreenchange and tearing
-  // down our state too — that's the "deleting kicks me out" bug.
+  // 把我们的全屏态也一起关掉。横屏通过 Screen Orientation API 独立控制——它不
+  // 受 confirm 对话框影响，退出全屏时 unlock 回到默认方向。
+  // Pure-CSS fullscreen (fixed inset-0 z-60): avoids native Fullscreen API
+  // because window.confirm (clear drawings) would tear it down. Landscape is
+  // driven by the Screen Orientation API independently — not affected by
+  // confirm dialogs; exit unlocks back to the default orientation.
   const enterFullscreen = useCallback(() => {
     setIsFullscreen(true)
     document.body.classList.add('chart-fullscreen')
+    const orient = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> } | null
+    orient?.lock?.('landscape').catch(() => {})
   }, [])
 
   const exitFullscreen = useCallback(() => {
     setIsFullscreen(false)
     document.body.classList.remove('chart-fullscreen')
     setFsToolbarPos(null)
+    if (screen.orientation && 'unlock' in screen.orientation) {
+      ;(screen.orientation as ScreenOrientation & { unlock: () => void }).unlock()
+    }
   }, [])
 
   useBackToClose(isFullscreen, exitFullscreen)
@@ -1267,37 +1273,30 @@ export default function ChartsPage() {
       <div className={`glass relative overflow-hidden p-1.5 h-[70vh] min-h-[420px] sm:h-[calc(100vh-15rem)] ${
         isFullscreen ? 'chart-fullscreen-container' : ''
       }`}>
-        {/* 全屏按钮（仅手机端显示） */}
+        {/* 全屏开关按钮（仅手机端显示）：同一个按钮进出，进入自动横屏，退出恢复竖屏 */}
         <button
           type="button"
-          onClick={enterFullscreen}
-          aria-label={t('charts.fullscreen.enter')}
-          title={t('charts.fullscreen.enter')}
+          onClick={isFullscreen ? exitFullscreen : enterFullscreen}
+          aria-label={isFullscreen ? t('charts.fullscreen.exit') : t('charts.fullscreen.enter')}
+          title={isFullscreen ? t('charts.fullscreen.exit') : t('charts.fullscreen.enter')}
           className="lg:hidden absolute top-2 left-2 z-30 flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-ink-900/70 text-slate-300 backdrop-blur-sm transition hover:text-white hover:border-white/20 active:scale-90"
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 3 21 3 21 9" />
-            <polyline points="9 21 3 21 3 15" />
-            <line x1="21" y1="3" x2="14" y2="10" />
-            <line x1="3" y1="21" x2="10" y2="14" />
-          </svg>
-        </button>
-
-        {/* 退出全屏按钮（全屏态显示） */}
-        {isFullscreen && (
-          <button
-            type="button"
-            onClick={exitFullscreen}
-            aria-label={t('charts.fullscreen.exit')}
-            title={t('charts.fullscreen.exit')}
-            className="absolute top-2 right-2 z-30 flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-ink-900/80 text-slate-300 backdrop-blur-sm transition hover:text-white hover:border-white/30 active:scale-90"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
+          {isFullscreen ? (
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="4 14 10 14 10 20" />
+              <polyline points="20 10 14 10 14 4" />
+              <line x1="14" y1="10" x2="21" y2="3" />
+              <line x1="10" y1="14" x2="3" y2="21" />
             </svg>
-          </button>
-        )}
+          ) : (
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 3 21 3 21 9" />
+              <polyline points="9 21 3 21 3 15" />
+              <line x1="21" y1="3" x2="14" y2="10" />
+              <line x1="3" y1="21" x2="10" y2="14" />
+            </svg>
+          )}
+        </button>
 
         <div ref={containerRef} className="h-full w-full" />
         {drawReady && chartRef.current && seriesRef.current && containerRef.current && (
