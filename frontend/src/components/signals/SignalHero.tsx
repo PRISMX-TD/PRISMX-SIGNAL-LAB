@@ -59,9 +59,9 @@ const SignalHero: FC<Props> = ({
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
-      {/* Header row：多周期趋势立场 */}
-      <div className="flex items-center gap-2.5 relative z-10">
-        <h2 className="text-[19px] font-bold text-white">{t('signals.focus.heading')}</h2>
+      {/* Header row：多周期趋势立场（手机端隐藏标题文字，收紧顶部空间）*/}
+      <div className="flex items-center gap-2.5 relative z-10 hero-header-row">
+        <h2 className="text-[19px] font-bold text-white hero-heading">{t('signals.focus.heading')}</h2>
         <div className="ml-auto hero-dots">
           {Array.from({ length: focusTotal }).map((_, i) => (
             <i key={i} className={i === focusIdx ? 'on' : ''} onClick={() => onSelectIdx(i)} />

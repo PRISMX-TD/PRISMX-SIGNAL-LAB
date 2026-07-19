@@ -1681,6 +1681,16 @@
     }
 
     /* ── 英雄卡收缩 / hero card compact ── */
+    /* 手机端隐藏「多周期趋势」标题文字，省出顶部空间；圆点/翻页按钮保留 */
+    .hero-heading {
+      display: none;
+    }
+    .hero-header-row {
+      min-height: 34px;
+    }
+    .hero-card {
+      padding-top: 14px !important;
+    }
     .hero-nebula {
       width: 46%;
       opacity: 0.55;
