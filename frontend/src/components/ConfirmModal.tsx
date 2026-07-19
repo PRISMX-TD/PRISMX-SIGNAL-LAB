@@ -9,6 +9,7 @@ interface Props {
   cancelLabel?: string
   danger?: boolean
   busy?: boolean
+  center?: boolean
   onConfirm: () => void
   onCancel: () => void
 }
@@ -20,14 +21,22 @@ export default function ConfirmModal({
   cancelLabel,
   danger,
   busy,
+  center,
   onConfirm,
   onCancel,
 }: Props) {
   const { t } = useTranslation()
 
+  const overlayClass = center
+    ? 'fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-6'
+    : 'slide-overlay'
+  const sheetClass = center
+    ? 'glass-card w-full max-w-sm p-6'
+    : 'slide-sheet'
+
   return (
-    <div className="slide-overlay" onClick={onCancel}>
-      <div className="slide-sheet" style={{ width: 360 }} onClick={(e) => e.stopPropagation()}>
+    <div className={overlayClass} onClick={onCancel}>
+      <div className={sheetClass} style={center ? undefined : { width: 360 }} onClick={(e) => e.stopPropagation()}>
         <h3 className="text-lg font-bold text-white">{title}</h3>
         <p className="mt-3 text-sm leading-relaxed text-slate-300">{message}</p>
         <div className="mt-5 flex gap-3">

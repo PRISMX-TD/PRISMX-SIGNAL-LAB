@@ -771,6 +771,7 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
           message={t('charts.draw.clearConfirm', { symbol })}
           confirmLabel={t('charts.draw.clear')}
           danger
+          center
           onConfirm={doClearAll}
           onCancel={() => setConfirmOpen(false)}
         />
