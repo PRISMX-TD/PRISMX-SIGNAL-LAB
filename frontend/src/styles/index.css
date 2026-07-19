@@ -396,27 +396,30 @@
      跨端统一（桌面+手机都用这个），替代旧的圆点/计数器/箭头组合。
      Story-style segmented indicator: a row of thin bars; the active one widens
      with a gradient fill; tap any to jump. Unified across desktop and mobile. */
+  /* 点 + 线指示器：未选中为圆点，当前项为一条渐变短线。
+     Dot + line indicator: inactive items are dots, the current one is a bar. */
   .hero-segs {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
   }
   .hero-seg {
-    width: 16px;
-    height: 4px;
+    width: 6px;
+    height: 6px;
     border: none;
     padding: 0;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.22);
     cursor: pointer;
     transition: width 0.32s cubic-bezier(0.34, 1.4, 0.64, 1), background 0.28s ease;
     -webkit-tap-highlight-color: transparent;
   }
   .hero-seg:hover {
-    background: rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.36);
   }
   .hero-seg.on {
-    width: 30px;
+    width: 22px;
+    height: 6px;
     background: linear-gradient(90deg, #7c3aed, #a855f7);
     box-shadow: 0 0 10px rgba(124, 58, 237, 0.5);
   }
@@ -1753,11 +1756,17 @@
     .hero-heading {
       display: none;
     }
+    /* 指示器居中 + 收紧上下留白 */
     .hero-header-row {
-      min-height: 18px;
+      min-height: 0;
+      justify-content: center;
+      margin-bottom: 2px;
+    }
+    .hero-segs {
+      margin: 0 auto;
     }
     .hero-card {
-      padding-top: 14px !important;
+      padding-top: 10px !important;
     }
     .hero-nebula {
       width: 46%;
