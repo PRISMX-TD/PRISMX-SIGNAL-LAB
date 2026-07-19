@@ -348,31 +348,54 @@ export default function ChartsPage() {
   const fsDragRef = useRef<{ startX: number; startY: number; left: number; top: number } | null>(null)
   const [fsToolbarPos, setFsToolbarPos] = useState<{ left: number; top: number } | null>(null)
 
-  // 纯 CSS 全屏（fixed inset-0 z-60）：不用浏览器原生 Fullscreen API，因为
-  // window.confirm（清空画线时）会让浏览器退出原生全屏，触发 fullscreenchange
-  // 把我们的全屏态也一起关掉。横屏通过 Screen Orientation API 独立控制——它不
-  // 受 confirm 对话框影响，退出全屏时 unlock 回到默认方向。
-  // Pure-CSS fullscreen (fixed inset-0 z-60): avoids native Fullscreen API
-  // because window.confirm (clear drawings) would tear it down. Landscape is
-  // driven by the Screen Orientation API independently — not affected by
-  // confirm dialogs; exit unlocks back to the default orientation.
+  // CSS 全屏 + 原生 Fullscreen API（横屏锁定需要后者才能生效）。
+  // CSS fullscreen (fixed inset-0 z-60) + native Fullscreen API —
+  // screen.orientation.lock('landscape') only works inside a native fullscreen
+  // context on mobile browsers (iOS Safari & Android Chrome both require it).
   const enterFullscreen = useCallback(() => {
     setIsFullscreen(true)
     document.body.classList.add('chart-fullscreen')
-    const orient = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> } | null
-    orient?.lock?.('landscape').catch(() => {})
+    // 先请求浏览器原生全屏，再锁定横屏（lock 在原生全屏上下文里才生效）
+    const el = containerRef.current?.closest('.glass') as HTMLElement | null
+    if (el && document.fullscreenEnabled) {
+      el.requestFullscreen().then(() => {
+        const orient = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> } | null
+        orient?.lock?.('landscape').catch(() => {})
+      }).catch(() => {
+        // 降级：原生全屏失败仍尝试锁横屏（部分 Android 浏览器不要求先全屏）
+        const orient = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> } | null
+        orient?.lock?.('landscape').catch(() => {})
+      })
+    } else {
+      const orient = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> } | null
+      orient?.lock?.('landscape').catch(() => {})
+    }
   }, [])
 
   const exitFullscreen = useCallback(() => {
     setIsFullscreen(false)
     document.body.classList.remove('chart-fullscreen')
     setFsToolbarPos(null)
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {})
+    }
     if (screen.orientation && 'unlock' in screen.orientation) {
       ;(screen.orientation as ScreenOrientation & { unlock: () => void }).unlock()
     }
   }, [])
 
   useBackToClose(isFullscreen, exitFullscreen)
+
+  // 用户通过系统手势/返回键退出原生全屏时，同步 CSS 全屏状态
+  useEffect(() => {
+    const onFsChange = () => {
+      if (!document.fullscreenElement && isFullscreen) {
+        exitFullscreen()
+      }
+    }
+    document.addEventListener('fullscreenchange', onFsChange)
+    return () => document.removeEventListener('fullscreenchange', onFsChange)
+  }, [isFullscreen, exitFullscreen])
 
   // 全屏画线工具栏拖动：setPointerCapture 必须挂在真正监听事件的元素上
   // （即拖动把手本身，e.currentTarget），否则 pointermove 不会被捕获路由回来，
