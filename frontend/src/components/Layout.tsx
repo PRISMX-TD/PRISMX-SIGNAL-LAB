@@ -268,7 +268,7 @@ export default function Layout() {
         <header className="sticky top-0 z-30 border-b border-white/[0.08] bg-ink-950/60 backdrop-blur-xl">
           <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:gap-4 sm:px-6">
             <div className="flex items-center gap-2.5">
-              <Logo size={30} />
+              <Logo size={40} />
               <div className="leading-tight">
                 <div className="font-display text-[17px] font-bold tracking-[0.06em] text-white">
                   Signal Lab

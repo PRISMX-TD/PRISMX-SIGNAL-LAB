@@ -74,7 +74,7 @@ function Navbar({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate
     <header ref={ref} className="fixed inset-x-0 top-0 z-50 border-b border-transparent backdrop-blur-xl transition-colors duration-300">
       <div className="mx-auto flex h-16 max-w-[1180px] items-center gap-6 px-5">
         <a href="#" className="flex items-center gap-2.5">
-          <Logo size={26} />
+          <Logo size={36} />
           <span className="text-sm font-semibold tracking-tight">Signal Lab</span>
           <span className="hidden text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-500 sm:inline">by PRISMX</span>
         </a>
@@ -362,7 +362,7 @@ function Foot({ t }: { t: T }) {
       <div className="mx-auto flex max-w-[1180px] flex-col items-center text-center">
         {/* 品牌 / brand */}
         <div className="flex items-center gap-2.5">
-          <Logo size={24} />
+          <Logo size={32} />
           <span className="text-base font-semibold tracking-tight">Signal Lab</span>
           <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-500">by PRISMX</span>
         </div>

@@ -72,7 +72,7 @@ export default function LoginPage() {
         <div className="w-full max-w-md">
           <div className="mb-8 flex flex-col items-center text-center">
             <div className="mb-4 [filter:drop-shadow(0_0_16px_rgba(139,92,246,0.55))]">
-              <Logo size={56} />
+              <Logo size={72} />
             </div>
             <h1 className="font-display text-3xl font-black tracking-wider text-slate-100">
               <span className="neon-text animate-gradient-x">Signal Lab</span>
