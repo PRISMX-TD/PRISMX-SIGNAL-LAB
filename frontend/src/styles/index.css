@@ -414,6 +414,19 @@
     border-radius: 6px;
     background-image: linear-gradient(90deg, #7c3aed, #a855f7);
   }
+  /* 极简计数器（如 "2/6"）：默认隐藏，仅手机端替代圆点显示 */
+  .hero-counter {
+    display: none;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text-3);
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
   .stance-word {
     font-size: 56px;
     font-weight: 700;
@@ -1644,6 +1657,62 @@
   }
 
   /* ══════════════════════════════════════════════
+     图表全屏模式 / Chart fullscreen mode
+     ══════════════════════════════════════════════ */
+  /* body 锁滚动，同时隐藏 header 和底部 Tab 栏（它们 z-index 低于全屏容器） */
+  body.chart-fullscreen {
+    overflow: hidden;
+    /* 防止 iOS Safari 弹性滚动拉出白底 */
+    position: fixed;
+    inset: 0;
+  }
+  /* 全屏容器：覆盖整个视口，z-60 盖过 header(z-30) 和 tabbar(z-40) */
+  .chart-fullscreen-container {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 60 !important;
+    height: 100dvh !important;
+    min-height: unset !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+    padding: 6px !important;
+    background: #080510 !important;
+  }
+
+  /* 全屏态悬浮画线工具栏 */
+  .chart-fs-toolbar {
+    position: absolute;
+    z-index: 70;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    padding: 6px 8px 7px;
+    border-radius: 14px;
+    background: rgba(18, 14, 34, 0.85);
+    backdrop-filter: blur(20px) saturate(1.6);
+    -webkit-backdrop-filter: blur(20px) saturate(1.6);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.55),
+      0 1px 4px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .chart-fs-toolbar-handle {
+    display: flex;
+    justify-content: center;
+    padding: 5px 0 2px;
+    cursor: grab;
+    touch-action: none;
+  }
+  .chart-fs-toolbar-handle:active {
+    cursor: grabbing;
+  }
+
+  /* ══════════════════════════════════════════════
      手机端响应式 / Mobile responsive  (< 640px)
      ══════════════════════════════════════════════ */
   @media (max-width: 639px) {
@@ -1681,7 +1750,7 @@
     }
 
     /* ── 英雄卡收缩 / hero card compact ── */
-    /* 手机端隐藏「多周期趋势」标题文字，省出顶部空间；圆点/翻页按钮保留 */
+    /* 手机端隐藏「多周期趋势」标题文字，省出顶部空间 */
     .hero-heading {
       display: none;
     }
@@ -1692,14 +1761,12 @@
     .hero-nav-btn {
       display: none;
     }
-    /* 圆点指示器缩小，占用更少空间 */
-    .hero-dots i {
-      width: 11px;
-      height: 11px;
-      border-width: 3px;
+    /* 圆点指示器换成「1/6」文字计数器，几乎不占空间 */
+    .hero-dots {
+      display: none;
     }
-    .hero-dots i.on {
-      width: 18px;
+    .hero-counter {
+      display: block;
     }
     .hero-card {
       padding-top: 14px !important;

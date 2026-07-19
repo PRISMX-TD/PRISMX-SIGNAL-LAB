@@ -59,7 +59,7 @@ const SignalHero: FC<Props> = ({
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
-      {/* Header row：多周期趋势立场（手机端隐藏标题文字，收紧顶部空间）*/}
+      {/* Header row：多周期趋势立场（手机端隐藏标题文字，圆点换成 1/6 计数器，收紧顶部空间）*/}
       <div className="flex items-center gap-2.5 relative z-10 hero-header-row">
         <h2 className="text-[19px] font-bold text-white hero-heading">{t('signals.focus.heading')}</h2>
         <div className="ml-auto hero-dots">
@@ -67,6 +67,12 @@ const SignalHero: FC<Props> = ({
             <i key={i} className={i === focusIdx ? 'on' : ''} onClick={() => onSelectIdx(i)} />
           ))}
         </div>
+        {/* 手机端计数器：极简文字替代圆点，几乎不占空间，点按可切下一个 */}
+        {focusTotal > 1 && (
+          <button type="button" onClick={onNext} className="ml-auto hero-counter" aria-label="next">
+            {focusIdx + 1}/{focusTotal}
+          </button>
+        )}
         {/* Prev/Next nav：手机端已支持左右滑动切换，隐藏按钮省空间 */}
         <button type="button" onClick={onPrev} className="ml-1 grid h-[34px] w-[34px] place-items-center rounded-lg bg-white/5 text-base text-white/60 hover:text-white hero-nav-btn" aria-label="prev">‹</button>
         <button type="button" onClick={onNext} className="grid h-[34px] w-[34px] place-items-center rounded-lg bg-white/5 text-base text-white/60 hover:text-white hero-nav-btn" aria-label="next">›</button>

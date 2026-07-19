@@ -549,6 +549,10 @@
       "clearConfirm": "Clear all drawings on {{symbol}}?",
       "hint": "Pick a tool and drag on the chart to draw; in cursor mode you can select, move or delete existing drawings. Drawings are saved per symbol and synced across devices."
     },
+    "fullscreen": {
+      "enter": "Fullscreen",
+      "exit": "Exit fullscreen"
+    },
     "order": {
       "buy": "Buy",
       "sell": "Sell"
