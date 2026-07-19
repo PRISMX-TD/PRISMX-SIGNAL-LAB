@@ -11,6 +11,8 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import { useTranslation } from 'react-i18next'
 import type { IChartApi, ISeriesApi, UTCTimestamp } from 'lightweight-charts'
 import { usePrefs } from '../../store/prefs'
+import ConfirmModal from '../ConfirmModal'
+import { useBackToClose } from '../../utils/useBackToClose'
 
 export type Tool = 'cursor' | 'trend' | 'hline' | 'rect' | 'fib'
 type DrawType = 'trend' | 'hline' | 'rect' | 'fib'
@@ -83,6 +85,13 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [drawings, setDrawings] = useState<Drawing[]>([])
   const [drawCount, setDrawCount] = useState(0)
+
+  // 清空确认弹窗：不用 window.confirm()，改用项目统一 ConfirmModal，
+  // 避免原生弹窗在全屏模式下把浏览器踢出全屏状态。
+  // Clear-confirm modal: replaces window.confirm() with the project's
+  // ConfirmModal so native dialogs don't break fullscreen state.
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  useBackToClose(confirmOpen, () => setConfirmOpen(false))
 
   useImperativeHandle(ref, () => ({
     tool,
@@ -632,7 +641,10 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
   }
   const clearAll = () => {
     if (drawings.length === 0) return
-    if (!window.confirm(t('charts.draw.clearConfirm', { symbol }))) return
+    setConfirmOpen(true)
+  }
+  const doClearAll = () => {
+    setConfirmOpen(false)
     commit([])
     setSelectedId(null)
   }
@@ -751,6 +763,18 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
         onPointerUp={onUp}
         onPointerCancel={onUp}
       />
+
+      {/* 清空确认弹窗 / clear-all confirm modal */}
+      {confirmOpen && (
+        <ConfirmModal
+          title={t('charts.draw.clear')}
+          message={t('charts.draw.clearConfirm', { symbol })}
+          confirmLabel={t('charts.draw.clear')}
+          danger
+          onConfirm={doClearAll}
+          onCancel={() => setConfirmOpen(false)}
+        />
+      )}
     </>
   )
 }
