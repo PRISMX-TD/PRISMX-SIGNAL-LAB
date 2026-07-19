@@ -182,7 +182,7 @@ def dispatch_push(signal: Signal) -> None:
         payload = json.dumps({
             "title": f"新信号 {signal.symbol}",
             "body": f"{signal.side} · {cat}",
-            "icon": "/favicon.svg",
+            "icon": "/icons/icon-192.png",
         })
 
         failed_ids: list[str] = []
@@ -263,7 +263,7 @@ def dispatch_event_push(user_id: str, event_type: str, title: str, body: str) ->
         if not subs:
             return
         vapid_claims = {"sub": settings.VAPID_SUBJECT}
-        payload = json.dumps({"title": title, "body": body, "icon": "/favicon.svg"})
+        payload = json.dumps({"title": title, "body": body, "icon": "/icons/icon-192.png"})
         # 账户/交易事件时效性不如新信号那么强，TTL 给固定 1 小时即可。
         # Account/trading events aren't as time-critical as a fresh signal; a flat 1h TTL is enough.
         push_headers = {"Urgency": "high", "TTL": str(3600)}
