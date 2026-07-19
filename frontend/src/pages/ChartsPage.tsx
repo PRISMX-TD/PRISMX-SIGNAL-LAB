@@ -1321,6 +1321,25 @@ export default function ChartsPage() {
           )}
         </button>
 
+        {/* 全屏态时间周期切换：右上角横排，紧凑按钮，方便横屏时切周期 */}
+        {isFullscreen && (
+          <div className="absolute top-2 right-12 z-30 flex items-center gap-0.5 rounded-lg border border-white/10 bg-ink-900/70 backdrop-blur-sm p-0.5">
+            {INTERVALS.map((iv) => (
+              <button
+                key={iv.code}
+                onClick={() => setIntervalCode(iv.code)}
+                className={`rounded-md px-2 py-1 text-[11px] font-medium transition ${
+                  interval === iv.code
+                    ? 'bg-prism-600/40 text-prism-200'
+                    : 'text-slate-400 hover:text-slate-100'
+                }`}
+              >
+                {iv.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div ref={containerRef} className="h-full w-full" />
         {drawReady && chartRef.current && seriesRef.current && containerRef.current && (
           <DrawLayer
