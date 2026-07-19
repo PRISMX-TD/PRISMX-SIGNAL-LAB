@@ -1686,7 +1686,20 @@
       display: none;
     }
     .hero-header-row {
-      min-height: 34px;
+      min-height: 18px;
+    }
+    /* 翻页按钮：手机端靠滑动切换即可，隐藏以节省横向空间 */
+    .hero-nav-btn {
+      display: none;
+    }
+    /* 圆点指示器缩小，占用更少空间 */
+    .hero-dots i {
+      width: 11px;
+      height: 11px;
+      border-width: 3px;
+    }
+    .hero-dots i.on {
+      width: 18px;
     }
     .hero-card {
       padding-top: 14px !important;

@@ -67,9 +67,9 @@ const SignalHero: FC<Props> = ({
             <i key={i} className={i === focusIdx ? 'on' : ''} onClick={() => onSelectIdx(i)} />
           ))}
         </div>
-        {/* Prev/Next nav */}
-        <button type="button" onClick={onPrev} className="ml-1 grid h-[34px] w-[34px] place-items-center rounded-lg bg-white/5 text-base text-white/60 hover:text-white" aria-label="prev">‹</button>
-        <button type="button" onClick={onNext} className="grid h-[34px] w-[34px] place-items-center rounded-lg bg-white/5 text-base text-white/60 hover:text-white" aria-label="next">›</button>
+        {/* Prev/Next nav：手机端已支持左右滑动切换，隐藏按钮省空间 */}
+        <button type="button" onClick={onPrev} className="ml-1 grid h-[34px] w-[34px] place-items-center rounded-lg bg-white/5 text-base text-white/60 hover:text-white hero-nav-btn" aria-label="prev">‹</button>
+        <button type="button" onClick={onNext} className="grid h-[34px] w-[34px] place-items-center rounded-lg bg-white/5 text-base text-white/60 hover:text-white hero-nav-btn" aria-label="next">›</button>
       </div>
 
       {/* Symbol + side chip */}
