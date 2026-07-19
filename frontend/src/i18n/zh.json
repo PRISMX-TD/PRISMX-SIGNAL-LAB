@@ -511,7 +511,7 @@
     "utcBadge": "UTC+8",
     "utcHint": "图表时间轴与所有时间戳均以 UTC+8（马来西亚/新加坡/中国标准时间）显示",
     "indicators": {
-      "button": "指标",
+      "button": "添加指标",
       "ma": "MA 均线",
       "ema": "EMA 指数均线",
       "boll": "布林带",

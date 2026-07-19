@@ -39,7 +39,7 @@ import {
   mergeIndicatorSettings,
   type IndicatorSettings,
 } from '../components/charts/indicatorSettings'
-import DrawLayer from '../components/charts/DrawLayer'
+import DrawLayer, { type DrawLayerHandle, type Tool } from '../components/charts/DrawLayer'
 import ChartOrderModal from '../components/ChartOrderModal'
 import IndicatorSettingsModal from '../components/charts/IndicatorSettingsModal'
 
@@ -65,6 +65,24 @@ const INTERVALS: { code: string; label: string }[] = [
   { code: '240', label: '4H' },
   { code: 'D', label: '1D' },
 ]
+
+const ToolList: Tool[] = ['cursor', 'trend', 'hline', 'rect', 'fib']
+
+// 画线工具图标（提取到 ChartsPage 里复用，避免在 DrawLayer 内写死竖排布局）
+function DrawToolIcon({ tool }: { tool: Tool }) {
+  switch (tool) {
+    case 'cursor':
+      return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 3l7 17 2.5-6.5L20 11 4 3z" /></svg>
+    case 'trend':
+      return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20L20 4" /><circle cx="4" cy="20" r="2" /><circle cx="20" cy="4" r="2" /></svg>
+    case 'hline':
+      return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h18" /><circle cx="12" cy="12" r="2" /></svg>
+    case 'rect':
+      return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="6" width="16" height="12" rx="1" /></svg>
+    case 'fib':
+      return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5h18M3 10h18M3 14h18M3 19h18" /><path d="M4 19L20 5" opacity="0.5" /></svg>
+  }
+}
 
 // 向后兼容的 localStorage key / backward-compat localStorage keys
 const INTERVAL_KEY = 'prismx.charts.interval'
@@ -189,6 +207,7 @@ export default function ChartsPage() {
   const { t } = useTranslation()
   const { getPref, setPref, loaded } = usePrefs()
   const containerRef = useRef<HTMLDivElement>(null)
+  const drawLayerRef = useRef<DrawLayerHandle>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   // 已应用到图表的最新一根 K 线时间戳（epoch 秒）。lightweight-charts 的
@@ -287,6 +306,8 @@ export default function ChartsPage() {
   )
   // 指标设置弹窗展开态 / indicator settings modal open state
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [drawVersion, setDrawVersion] = useState(0)
+  const bumpDraw = useCallback(() => setDrawVersion((v) => v + 1), [])
   // 图例：随十字准线/触摸拖动更新，初始为空占位 / legend: updates with the crosshair/touch drag; starts as an empty placeholder
   const [legend, setLegend] = useState<LegendValues>(EMPTY_LEGEND)
   // 各已开启副图（成交量/RSI/MACD）pane 的顶部像素偏移，供图例定位；由
@@ -578,6 +599,8 @@ export default function ChartsPage() {
       // hover time falls back to the browser's local timezone.
       localization: { timeFormatter: fmtChartTime },
       crosshair: { mode: 0 },
+      // 移动端纵向滑动穿透到页面滚动，保留横向拖动平移图表
+      handleScroll: { vertTouchDrag: false, horzTouchDrag: true, mouseWheel: true },
       width: el.clientWidth,
       height: el.clientHeight,
     })
@@ -1017,15 +1040,16 @@ export default function ChartsPage() {
 
   return (
     <div className="flex flex-col">
-      <div className="mb-5">
+      {/* drawVersion 用于外部画线工具栏状态变更时强制 ChartsPage 重渲染 */}
+      {void drawVersion}
+      <div className="mb-3">
         <h2 className="font-display text-2xl font-bold text-slate-100">
           <span className="neon-text">{t('charts.title')}</span>
         </h2>
-        <p className="mt-1 text-sm text-slate-400">{t('charts.subtitle')}</p>
       </div>
 
-      {/* 控制条：品种 + 周期 + 指标 / controls: symbol + interval + indicators */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      {/* 控制条第 1 行：品种 + 买卖（左）… 周期 + 添加指标（右） */}
+      <div className="mb-2 flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2">
           <span className="text-xs uppercase tracking-wider text-slate-500">
             {t('charts.symbol')}
@@ -1048,39 +1072,8 @@ export default function ChartsPage() {
           </select>
         </label>
 
-        <div className="flex items-center gap-1 rounded-lg border border-white/10 bg-ink-800/50 p-1">
-          {INTERVALS.map((iv) => (
-            <button
-              key={iv.code}
-              onClick={() => setIntervalCode(iv.code)}
-              className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                interval === iv.code
-                  ? 'bg-prism-600/30 text-prism-200 shadow-prism'
-                  : 'text-slate-400 hover:text-slate-100'
-              }`}
-            >
-              {iv.label}
-            </button>
-          ))}
-        </div>
-
-        {/* 指标：开关 + 客制化周期/颜色都在同一个弹窗里 / Indicators: toggles + period/color customization live in the same modal */}
-        <button
-          type="button"
-          onClick={() => setSettingsOpen(true)}
-          className="rounded-lg border border-white/10 bg-ink-800/50 px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:text-slate-100"
-        >
-          {t('charts.indicators.button')}
-        </button>
-
-        {stale && (
-          <span className="rounded-md bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-400">
-            {t('charts.stale')}
-          </span>
-        )}
-
-        {/* 买 / 卖：点击弹出确认弹窗 / Buy / Sell: open the confirm modal */}
-        <div className="ml-auto flex items-center gap-2">
+        {/* 买 / 卖（紧挨品种右边） */}
+        <div className="flex items-center gap-2">
           <button
             onClick={() => setOrderSide('BUY')}
             className="rounded-lg px-5 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:brightness-110"
@@ -1096,7 +1089,98 @@ export default function ChartsPage() {
             {t('charts.order.sell')}
           </button>
         </div>
+
+        {/* 右侧：周期 + 添加指标（靠右） */}
+        <div className="ml-auto flex items-center gap-3">
+          <div className="flex items-center gap-1 rounded-lg border border-white/10 bg-ink-800/50 p-1">
+            {INTERVALS.map((iv) => (
+              <button
+                key={iv.code}
+                onClick={() => setIntervalCode(iv.code)}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                  interval === iv.code
+                    ? 'bg-prism-600/30 text-prism-200 shadow-prism'
+                    : 'text-slate-400 hover:text-slate-100'
+                }`}
+              >
+                {iv.label}
+              </button>
+            ))}
+          </div>
+
+          {/* 添加指标：品牌色高亮 */}
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="rounded-lg border border-prism-500/40 bg-prism-600/15 px-3 py-1.5 text-xs font-semibold text-prism-300 transition hover:border-prism-400 hover:bg-prism-600/30 hover:text-prism-200"
+          >
+            {t('charts.indicators.button')}
+          </button>
+
+          {stale && (
+            <span className="rounded-md bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-400">
+              {t('charts.stale')}
+            </span>
+          )}
+        </div>
       </div>
+
+      {/* 控制条第 2 行：画线工具（横向，放在周期选择下方） */}
+      {drawReady && (
+        <div className="mb-4 flex flex-wrap items-center gap-1.5 rounded-lg border border-white/10 bg-ink-800/30 px-2 py-1.5">
+          {(ToolList as Tool[]).map((toolName) => (
+            <button
+              key={toolName}
+              type="button"
+              title={String(t(`charts.draw.${toolName}`))}
+              aria-label={String(t(`charts.draw.${toolName}`))}
+              onClick={() => { drawLayerRef.current?.setTool(toolName); bumpDraw() }}
+              className={`flex h-7 w-7 items-center justify-center rounded-md border transition ${
+                drawLayerRef.current?.tool === toolName
+                  ? 'border-prism-500/60 bg-prism-600/25 text-prism-200'
+                  : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'
+              }`}
+            >
+              <DrawToolIcon tool={toolName} />
+            </button>
+          ))}
+          <span className="mx-1 h-5 w-px bg-white/10" />
+          {['#22d3ee', '#a78bfa', '#2ee07e', '#ff4d67', '#f5c451'].map((c) => (
+            <button
+              key={c}
+              type="button"
+              title={t('charts.draw.color')}
+              aria-label={t('charts.draw.color')}
+              onClick={() => { drawLayerRef.current?.applyColor(c); bumpDraw() }}
+              className={`h-4 w-4 rounded-full border transition ${
+                drawLayerRef.current?.color === c ? 'border-white scale-110' : 'border-white/20'
+              }`}
+              style={{ background: c }}
+            />
+          ))}
+          <span className="mx-1 h-5 w-px bg-white/10" />
+          <button
+            type="button"
+            title={t('charts.draw.delete')}
+            aria-label={t('charts.draw.delete')}
+            onClick={() => { drawLayerRef.current?.deleteSelected(); bumpDraw() }}
+            disabled={!drawLayerRef.current?.selectedId}
+            className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-down disabled:opacity-30 disabled:hover:text-slate-400"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>
+          </button>
+          <button
+            type="button"
+            title={t('charts.draw.clear')}
+            aria-label={t('charts.draw.clear')}
+            onClick={() => { drawLayerRef.current?.clearAll(); bumpDraw() }}
+            disabled={(drawLayerRef.current?.drawCount ?? 0) === 0}
+            className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-down disabled:opacity-30 disabled:hover:text-slate-400"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 5L5 19M5 5l14 14" /></svg>
+          </button>
+        </div>
+      )}
 
       {/* 图表容器：跟随视口高度自适应，移动端给底部 Tab 栏留空间 */}
       {/* Chart container: viewport-relative height, leaves room for the mobile tab bar */}
@@ -1104,6 +1188,7 @@ export default function ChartsPage() {
         <div ref={containerRef} className="h-full w-full" />
         {drawReady && chartRef.current && seriesRef.current && containerRef.current && (
           <DrawLayer
+            ref={drawLayerRef}
             chart={chartRef.current}
             series={seriesRef.current}
             host={containerRef.current}
@@ -1111,6 +1196,7 @@ export default function ChartsPage() {
             lastPrice={lastPrice}
             barTimes={getBarTimes}
             digits={decimals}
+            hideToolbar
           />
         )}
         {!hasData && (

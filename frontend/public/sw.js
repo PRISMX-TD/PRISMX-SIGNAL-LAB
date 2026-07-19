@@ -13,8 +13,8 @@ self.addEventListener("push", (event) => {
   }
   const promise = self.registration.showNotification(data.title, {
     body: data.body || "",
-    icon: data.icon || "/favicon.svg",
-    badge: "/favicon.svg",
+    icon: data.icon || "/icons/icon-192.png",
+    badge: "/icons/icon-192.png",
     // 每条信号用唯一 tag，避免后一条覆盖前一条导致“丢通知”；renotify 确保每条都提醒。
     // Unique tag per signal so a new one doesn't replace the previous; renotify alerts each time.
     tag: data.tag || `prismx-signal-${Date.now()}`,

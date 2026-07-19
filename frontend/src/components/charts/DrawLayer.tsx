@@ -7,13 +7,25 @@
 // lines and rectangles. Anchors are stored in (time, price) data coordinates
 // and repainted as the chart pans/zooms; drawings are saved per symbol into
 // the user's cloud prefs and synced across devices (see store/prefs).
-import { useCallback, useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { IChartApi, ISeriesApi, UTCTimestamp } from 'lightweight-charts'
 import { usePrefs } from '../../store/prefs'
 
-type Tool = 'cursor' | 'trend' | 'hline' | 'rect' | 'fib'
+export type Tool = 'cursor' | 'trend' | 'hline' | 'rect' | 'fib'
 type DrawType = 'trend' | 'hline' | 'rect' | 'fib'
+
+export interface DrawLayerHandle {
+  tool: Tool
+  setTool: (t: Tool) => void
+  color: string
+  setColor: (c: string) => void
+  selectedId: string | null
+  drawCount: number
+  deleteSelected: () => void
+  clearAll: () => void
+  applyColor: (c: string) => void
+}
 
 // 一个锚点：时间(epoch 秒) + 价格。水平线只用到 price。
 // An anchor point: time (epoch seconds) + price. Horizontal lines use price only.
@@ -32,15 +44,12 @@ interface Drawing {
 interface Props {
   chart: IChartApi
   series: ISeriesApi<'Candlestick'>
-  host: HTMLDivElement // 图表容器（canvas 与它等大）/ chart container (canvas matches its box)
+  host: HTMLDivElement
   symbol: string
-  // 最新收盘价：用于 rAF 侦测价格轴自动缩放，触发重绘 / used to detect price-axis rescale
   lastPrice: number
-  // 当前周期全部 K 线时间（升序）：把非本周期的锚点时间插值成 x 坐标
-  // ascending bar times of the current interval, to interpolate off-interval anchors to x
   barTimes: () => number[]
-  // 价格显示小数位（斐波那契价位标签用）/ price precision for Fibonacci level labels
   digits?: number
+  hideToolbar?: boolean
 }
 
 // 命中判定容差（屏幕像素）/ hit-test tolerance in screen pixels
@@ -64,7 +73,7 @@ function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, b
   return Math.hypot(px - cx, py - cy)
 }
 
-export default function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 2 }: Props) {
+function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 2, hideToolbar }: Props, ref: React.Ref<DrawLayerHandle>) {
   const { t } = useTranslation()
   const { getPref, setPref } = usePrefs()
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -73,7 +82,19 @@ export default function DrawLayer({ chart, series, host, symbol, lastPrice, barT
   const [color, setColor] = useState<string>(COLORS[0])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [drawings, setDrawings] = useState<Drawing[]>([])
-  const [drawCount, setDrawCount] = useState(0) // 仅用于工具栏按钮启用态 / drives toolbar enabled state
+  const [drawCount, setDrawCount] = useState(0)
+
+  useImperativeHandle(ref, () => ({
+    tool,
+    setTool,
+    color,
+    setColor,
+    selectedId,
+    drawCount,
+    deleteSelected,
+    clearAll,
+    applyColor,
+  }))
 
   // 交互期间用可变引用避免频繁 setState / mutable refs to avoid re-render during interaction
   const toolRef = useRef(tool)
@@ -615,6 +636,10 @@ export default function DrawLayer({ chart, series, host, symbol, lastPrice, barT
     commit([])
     setSelectedId(null)
   }
+  const applyColor = (c: string) => {
+    setColor(c)
+    if (selectedId) commit(drawings.map((d) => (d.id === selectedId ? { ...d, color: c } : d)))
+  }
 
   const toolBtn = (id: Tool, label: string, icon: JSX.Element) => (
     <button
@@ -638,6 +663,7 @@ export default function DrawLayer({ chart, series, host, symbol, lastPrice, barT
   return (
     <>
       {/* 左侧浮动工具栏 / floating left toolbar */}
+      {!hideToolbar && (
       <div className="absolute left-3 top-3 z-20 flex flex-col gap-1.5 rounded-xl border border-white/10 bg-ink-900/80 p-1.5 backdrop-blur">
         {toolBtn(
           'cursor',
@@ -709,6 +735,7 @@ export default function DrawLayer({ chart, series, host, symbol, lastPrice, barT
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 5L5 19M5 5l14 14" /></svg>
         </button>
       </div>
+      )}
 
       {/* 叠加画布：与图表内容区等大（外层 .glass 有 p-1.5=6px 内边距）。
           pointer-events 默认 none（Tailwind 类），由各 effect 直接改写内联样式动态
@@ -727,3 +754,5 @@ export default function DrawLayer({ chart, series, host, symbol, lastPrice, barT
     </>
   )
 }
+
+export default forwardRef(DrawLayer)

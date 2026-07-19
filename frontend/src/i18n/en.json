@@ -511,7 +511,7 @@
     "utcBadge": "UTC+8",
     "utcHint": "The time axis and all timestamps are shown in UTC+8 (Malaysia/Singapore/China Standard Time)",
     "indicators": {
-      "button": "Indicators",
+      "button": "Add Indicators",
       "ma": "MA",
       "ema": "EMA",
       "boll": "Bollinger Bands",
