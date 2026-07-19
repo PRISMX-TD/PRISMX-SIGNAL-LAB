@@ -31,7 +31,18 @@ def update(quotes: list[dict]) -> list[dict]:
         if not sym:
             continue
         old = _quotes.get(sym)
-        if old is None or old.get("bid") != q.get("bid") or old.get("ask") != q.get("ask"):
+        if (
+            old is None
+            or old.get("bid") != q.get("bid")
+            or old.get("ask") != q.get("ask")
+            # closed 翻转(休市↔恢复)也算变化,即使兜底价格本身没变——否则前端
+            # 要等到下一次真正的价格变动才会看到"休市"标签更新。
+            # A closed-state flip (closing ↔ reopening) counts as a change too,
+            # even if the fallback price itself is unchanged — otherwise the
+            # frontend wouldn't see the "closed" label update until the next
+            # genuine price move.
+            or old.get("closed") != q.get("closed")
+        ):
             _quotes[sym] = q
             changed.append(q)
         _updated_at[sym] = now

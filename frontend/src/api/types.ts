@@ -278,6 +278,12 @@ export interface Quote {
   ask: number
   digits?: number
   time?: string
+  // 休市兜底：EA 在市场关闭读不到实时报价时退回最后成交价继续推送，
+  // true 表示这不是实时跳动的价格。仅全站统一展示报价（EA 推送）携带。
+  // Closed-market fallback: true means this is the EA's last-known trade
+  // price re-sent while the market is closed, not a live-moving quote.
+  // Present only on the site-wide display feed (EA-pushed).
+  closed?: boolean
   // 上报该报价的 MT5 账号 login：仅按账户区分的报价（下单确认页用）携带此字段，
   // 全站统一展示报价（EA 推送）没有 / present only on per-account quotes (order
   // confirmation); absent on the site-wide display feed (EA-pushed).

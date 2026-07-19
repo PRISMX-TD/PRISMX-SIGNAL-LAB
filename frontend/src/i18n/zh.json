@@ -358,6 +358,7 @@
       "signalTotal": "信号总数",
       "signalVolume7d": "信号发出量 (7日)",
       "quotesHeading": "实时行情报价",
+      "marketClosed": "休市",
       "live": "MT5 在线",
       "offline": "MT5 离线",
       "symbol": "交易品种",

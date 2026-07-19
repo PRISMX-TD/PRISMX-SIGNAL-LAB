@@ -358,6 +358,7 @@
       "signalTotal": "Total Signals",
       "signalVolume7d": "Signal Volume (7D)",
       "quotesHeading": "Live Quotes",
+      "marketClosed": "Closed",
       "live": "MT5 Online",
       "offline": "MT5 Offline",
       "symbol": "Symbol",

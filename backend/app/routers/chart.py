@@ -101,6 +101,15 @@ class FeedQuote(BaseModel):
     bid: float
     ask: float
     digits: int | None = Field(default=None, ge=0, le=10)
+    # 休市兜底：EA 在市场关闭、SymbolInfoDouble 读不到实时报价时,退回最后一次
+    # 真实成交价继续推送(不然该品种会因收不到报价而被判定"不活跃"从网页消失),
+    # 并用这个字段告诉后端/前端"这不是实时跳动的价格"。
+    # Closed-market fallback: the EA falls back to each symbol's last genuine
+    # trade price when the market is closed and SymbolInfoDouble can't read a
+    # live quote (otherwise the symbol goes quiet long enough to be marked
+    # inactive and vanish from the web app); this field tells the backend/
+    # frontend "this isn't a live-moving price".
+    closed: bool = False
 
 
 class FeedQuotesRequest(BaseModel):
@@ -116,7 +125,7 @@ async def feed_quotes(req: FeedQuotesRequest, x_ea_token: str | None = Header(de
     minimal."""
     if not _valid_ea_token(x_ea_token):
         raise HTTPException(status_code=401, detail="invalid EA token")
-    incoming = [{"symbol": q.symbol.upper(), "bid": q.bid, "ask": q.ask, "digits": q.digits} for q in req.data]
+    incoming = [{"symbol": q.symbol.upper(), "bid": q.bid, "ask": q.ask, "digits": q.digits, "closed": q.closed} for q in req.data]
     changed = quotes_store.update(incoming)
     if changed:
         await manager.broadcast_to_clients({"type": "GLOBAL_QUOTES", "data": changed})
