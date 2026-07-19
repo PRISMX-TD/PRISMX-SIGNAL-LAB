@@ -348,56 +348,48 @@ export default function ChartsPage() {
   const fsDragRef = useRef<{ startX: number; startY: number; left: number; top: number } | null>(null)
   const [fsToolbarPos, setFsToolbarPos] = useState<{ left: number; top: number } | null>(null)
 
+  // 纯 CSS 全屏（fixed inset-0 z-60）：不用浏览器原生 Fullscreen API，因为
+  // window.confirm（清空画线时）会让浏览器退出原生全屏，触发 fullscreenchange
+  // 把我们的全屏态也一起关掉——这就是"删除内容时自动跳出去"的根因。
+  // Pure-CSS fullscreen (fixed inset-0 z-60): we deliberately avoid the native
+  // Fullscreen API because window.confirm (used when clearing drawings) makes
+  // the browser leave native fullscreen, firing fullscreenchange and tearing
+  // down our state too — that's the "deleting kicks me out" bug.
   const enterFullscreen = useCallback(() => {
     setIsFullscreen(true)
     document.body.classList.add('chart-fullscreen')
-    // 渐进增强：浏览器全屏 API + 横屏锁定（仅支持的浏览器生效）
-    const el = containerRef.current?.closest('.glass') as HTMLElement | null
-    if (el && document.fullscreenEnabled) {
-      el.requestFullscreen().catch(() => {})
-    }
-    const orient = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> } | null
-    if (orient?.lock) {
-      orient.lock('landscape').catch(() => {})
-    }
   }, [])
 
   const exitFullscreen = useCallback(() => {
     setIsFullscreen(false)
     document.body.classList.remove('chart-fullscreen')
     setFsToolbarPos(null)
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {})
-    }
-    if (screen.orientation && 'unlock' in screen.orientation) {
-      ;(screen.orientation as ScreenOrientation & { unlock: () => void }).unlock()
-    }
   }, [])
 
   useBackToClose(isFullscreen, exitFullscreen)
 
-  // 浏览器原生退出全屏时同步状态
-  useEffect(() => {
-    const onFs = () => {
-      if (!document.fullscreenElement && isFullscreen) {
-        exitFullscreen()
-      }
-    }
-    document.addEventListener('fullscreenchange', onFs)
-    return () => document.removeEventListener('fullscreenchange', onFs)
-  }, [isFullscreen, exitFullscreen])
-
-  // 全屏画线工具栏拖动
+  // 全屏画线工具栏拖动：setPointerCapture 必须挂在真正监听事件的元素上
+  // （即拖动把手本身，e.currentTarget），否则 pointermove 不会被捕获路由回来，
+  // 表现为"很难拖动"。初始位置用 getBoundingClientRect 相对父容器换算，避免从
+  // bottom 定位切到 top 定位时的跳变。
+  // Drag: setPointerCapture must live on the element that actually listens
+  // (the handle, e.currentTarget), otherwise pointermove isn't routed back —
+  // which felt like "hard to drag". The start offset is derived from
+  // getBoundingClientRect relative to the parent so switching from bottom- to
+  // top-anchoring doesn't jump.
   const onFsToolbarPointerDown = useCallback((e: RPointerEvent<HTMLDivElement>) => {
     const el = fsToolbarRef.current
     if (!el) return
     e.preventDefault()
-    el.setPointerCapture(e.pointerId)
+    e.currentTarget.setPointerCapture(e.pointerId)
+    const parent = el.offsetParent as HTMLElement | null
+    const pr = parent?.getBoundingClientRect()
+    const r = el.getBoundingClientRect()
     fsDragRef.current = {
       startX: e.clientX,
       startY: e.clientY,
-      left: el.offsetLeft,
-      top: el.offsetTop,
+      left: r.left - (pr?.left ?? 0),
+      top: r.top - (pr?.top ?? 0),
     }
   }, [])
 
@@ -407,17 +399,21 @@ export default function ChartsPage() {
     const dy = e.clientY - fsDragRef.current.startY
     const el = fsToolbarRef.current
     if (!el) return
-    const parent = el.parentElement!
-    const maxX = parent.clientWidth - el.clientWidth
-    const maxY = parent.clientHeight - el.clientHeight
+    const parent = el.offsetParent as HTMLElement | null
+    if (!parent) return
+    const maxX = parent.clientWidth - el.offsetWidth
+    const maxY = parent.clientHeight - el.offsetHeight
     setFsToolbarPos({
       left: Math.max(0, Math.min(fsDragRef.current.left + dx, maxX)),
       top: Math.max(0, Math.min(fsDragRef.current.top + dy, maxY)),
     })
   }, [])
 
-  const onFsToolbarPointerUp = useCallback(() => {
+  const onFsToolbarPointerUp = useCallback((e: RPointerEvent<HTMLDivElement>) => {
     fsDragRef.current = null
+    if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
   }, [])
 
   const { accounts, activeSymbols } = useLive()
@@ -1388,7 +1384,7 @@ export default function ChartsPage() {
                 : { left: 8, bottom: 32 }
             }
           >
-            {/* 拖动把手 */}
+            {/* 拖动把手：整条都是热区，配一个明显的抓手图标，方便拖动 */}
             <div
               className="chart-fs-toolbar-handle"
               onPointerDown={onFsToolbarPointerDown}
@@ -1396,8 +1392,9 @@ export default function ChartsPage() {
               onPointerUp={onFsToolbarPointerUp}
               onPointerCancel={onFsToolbarPointerUp}
             >
-              <svg width="16" height="3" viewBox="0 0 16 3" fill="currentColor" opacity="0.4">
-                <rect width="16" height="3" rx="1.5" />
+              <svg width="26" height="12" viewBox="0 0 26 12" fill="currentColor" opacity="0.5">
+                <circle cx="7" cy="4" r="1.4" /><circle cx="13" cy="4" r="1.4" /><circle cx="19" cy="4" r="1.4" />
+                <circle cx="7" cy="8" r="1.4" /><circle cx="13" cy="8" r="1.4" /><circle cx="19" cy="8" r="1.4" />
               </svg>
             </div>
             {/* 工具按钮 */}

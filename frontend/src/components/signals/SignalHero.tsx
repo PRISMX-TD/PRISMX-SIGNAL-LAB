@@ -59,23 +59,29 @@ const SignalHero: FC<Props> = ({
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
-      {/* Header row：多周期趋势立场（手机端隐藏标题文字，圆点换成 1/6 计数器，收紧顶部空间）*/}
-      <div className="flex items-center gap-2.5 relative z-10 hero-header-row">
+      {/* Header row：多周期趋势立场（手机端隐藏标题文字，用故事式分段指示器切换）*/}
+      <div className="flex items-center gap-3 relative z-10 hero-header-row">
         <h2 className="text-[19px] font-bold text-white hero-heading">{t('signals.focus.heading')}</h2>
-        <div className="ml-auto hero-dots">
-          {Array.from({ length: focusTotal }).map((_, i) => (
-            <i key={i} className={i === focusIdx ? 'on' : ''} onClick={() => onSelectIdx(i)} />
-          ))}
-        </div>
-        {/* 手机端计数器：极简文字替代圆点，几乎不占空间，点按可切下一个 */}
+        {/* 故事式分段指示器：一排细条，当前项高亮，点按任意段直接跳转。
+            视觉干净、跨端统一，替代原先的圆点 + "1/6" 计数器 + 左右箭头组合。
+            Story-style segmented indicator: a row of thin bars, current one
+            highlighted, tap any segment to jump. Clean and consistent across
+            devices, replacing the old dots + "1/6" counter + prev/next combo. */}
         {focusTotal > 1 && (
-          <button type="button" onClick={onNext} className="ml-auto hero-counter" aria-label="next">
-            {focusIdx + 1}/{focusTotal}
-          </button>
+          <div className="ml-auto hero-segs" role="tablist">
+            {Array.from({ length: focusTotal }).map((_, i) => (
+              <button
+                key={i}
+                type="button"
+                role="tab"
+                aria-selected={i === focusIdx}
+                aria-label={`${i + 1}/${focusTotal}`}
+                className={`hero-seg ${i === focusIdx ? 'on' : ''}`}
+                onClick={() => onSelectIdx(i)}
+              />
+            ))}
+          </div>
         )}
-        {/* Prev/Next nav：手机端已支持左右滑动切换，隐藏按钮省空间 */}
-        <button type="button" onClick={onPrev} className="ml-1 grid h-[34px] w-[34px] place-items-center rounded-lg bg-white/5 text-base text-white/60 hover:text-white hero-nav-btn" aria-label="prev">‹</button>
-        <button type="button" onClick={onNext} className="grid h-[34px] w-[34px] place-items-center rounded-lg bg-white/5 text-base text-white/60 hover:text-white hero-nav-btn" aria-label="next">›</button>
       </div>
 
       {/* Symbol + side chip */}
