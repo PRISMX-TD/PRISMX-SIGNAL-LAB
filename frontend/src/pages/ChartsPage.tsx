@@ -1496,33 +1496,11 @@ export default function ChartsPage() {
         )}
       </div>
 
-      {/* 全屏模式下隐藏时区标注和免责声明 */}
+      {/* 全屏模式下隐藏时区 + 免责声明 */}
       {!isFullscreen && (
-        <>
-          {/* 时区标注：紧贴在图表下方，而不是塞进顶部一堆控件里，让"这是 UTC+8"
-              这件事离图表本身最近，不容易被忽略。
-              Timezone label: sits right under the chart itself rather than buried
-              in the top control row, so "this is UTC+8" stays next to the chart
-              it describes and isn't easy to miss. */}
-          <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-slate-500">
-            <span>{t('charts.utcHint')}</span>
-            <span className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 font-medium text-slate-400">
-              {t('charts.utcBadge')}
-            </span>
-          </div>
-
-          <p className="mt-2 text-center text-[11px] text-slate-600">
-            {t('charts.disclaimer')}{' '}
-            <a
-              href="https://www.tradingview.com/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline decoration-dotted hover:text-slate-400"
-            >
-              Charting library by TradingView
-            </a>
-          </p>
-        </>
+        <p className="mt-2 text-center text-[11px] text-slate-500">
+          {t('charts.footer')}
+        </p>
       )}
 
       {settingsOpen && (

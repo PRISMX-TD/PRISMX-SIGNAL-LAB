@@ -505,11 +505,9 @@
     "title": "Charts",
     "subtitle": "Live candlestick view; symbol follows your positions and signals",
     "symbol": "Symbol",
-    "disclaimer": "Chart data comes from the platform's own feed and is for reference only; it may differ slightly from your broker's quotes.",
+    "footer": "UTC+8 · Data from platform feed, for reference only",
     "empty": "Chart data is loading or temporarily unavailable…",
     "stale": "Data delayed",
-    "utcBadge": "UTC+8",
-    "utcHint": "The time axis and all timestamps are shown in UTC+8 (Malaysia/Singapore/China Standard Time)",
     "indicators": {
       "button": "Add Indicators",
       "ma": "MA",
