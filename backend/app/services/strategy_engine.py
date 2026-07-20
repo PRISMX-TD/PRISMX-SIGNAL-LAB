@@ -507,11 +507,13 @@ def run_backtest(
     等于入场先后顺序）。
 
     某笔仓位到数据末尾都没摸到止损/止盈时（"还开着"），不计入 trades/summary——
-    但会把它记在返回值的 `openPosition` 里，而不是悄无声息地丢掉。这点很重要：
+    但会把它记在返回值的 `openPositions` 里，而不是悄无声息地丢掉。这点很重要：
     K 线历史本身就是有限的窗口（尤其是刚上线不久、1 分钟/5 分钟这类周期历史很
-    短的品种），只要最早的一笔一直没等到结果，之前的实现会直接放弃继续往后扫，
-    连同它之后所有本该正常出结果的信号一起消失，界面上只看到一个没有任何解释
-    的"0 笔交易"。
+    短的品种，或者一次一单关闭时，回测窗口尾部经常同时有好几笔各自独立"还
+    没等到结果"），只要最早的一笔一直没等到结果，之前的实现会直接放弃继续
+    往后扫，连同它之后所有本该正常出结果的信号一起消失，界面上只看到一个
+    没有任何解释的"0 笔交易"；即便改成不放弃继续扫，若只报"举例性的"一条，
+    用户依然会以为后面只是偶然多出一笔，而看不出这类仓位其实有好几笔。
 
     Replays this template+param combo's historical performance against stored
     candle history. Returns the exact same shape as the existing "what if you
@@ -526,13 +528,16 @@ def run_backtest(
     timeline stays correct (exit order isn't necessarily entry order).
 
     A position that never hits SL/TP by the end of the data ("still open")
-    isn't counted in trades/summary — but is reported back via `openPosition`
-    instead of silently vanishing. This matters because the candle history is
-    a bounded window (especially for symbols/intervals with a short history,
-    like 1m/5m soon after launch): if the very first signal never resolves,
-    the previous implementation gave up scanning entirely, taking every later
-    — otherwise perfectly resolvable — signal down with it, leaving the UI
-    with an unexplained "0 trades".
+    isn't counted in trades/summary — but is reported back via
+    `openPositions` instead of silently vanishing. This matters because the
+    candle history is a bounded window (especially for symbols/intervals with
+    a short history, like 1m/5m soon after launch): if the very first signal
+    never resolves, the previous implementation gave up scanning entirely,
+    taking every later — otherwise perfectly resolvable — signal down with
+    it, leaving the UI with an unexplained "0 trades". With
+    one_trade_at_a_time=False in particular, more than one signal can end up
+    still open at once (each entry is independent) — every one of them is
+    collected, not just a single "example".
     """
     signals = entry_signals(bars, template, params)
     n = len(bars)
@@ -540,12 +545,17 @@ def run_backtest(
     # 第一步：只找出每笔交易的入场/出场，不牵扯净值结算。
     # Step 1: find each trade's entry/exit only, no equity bookkeeping yet.
     raw: list[dict] = []
-    # 未摸到止损/止盈就到了数据末尾的那一笔（如果有）——只记最后遇到的一笔，
-    # 供前端解释"为什么统计里没有它"，而不是让调用方猜。
-    # The one position (if any) that never hit SL/TP before the data ran out —
-    # only the last one encountered is kept, so the frontend can explain why
-    # it's missing from the stats instead of the caller having to guess.
-    open_position: dict | None = None
+    # 未摸到止损/止盈就到了数据末尾的那些仓位——不计入统计,但一个不漏地报
+    # 回去,而不是只留"举例性的"最后一条,让调用方误以为后面只有一笔还挂着。
+    # 一次一单模式下循环一碰到未解决就整体 break,这里最多只会有一条;关掉
+    # 一次一单时,同一时间可以有多笔各自独立"还开着",全部收进来。
+    # Positions that never hit SL/TP before the data ran out — every one is
+    # collected, not just a single "example" that would make the caller think
+    # only one is still pending. Under one-trade-at-a-time the loop breaks
+    # entirely on the first unresolved one, so this list holds at most one
+    # entry there; with it off, several independent entries can be open at
+    # once and all of them end up here.
+    open_positions: list[dict] = []
     if one_trade_at_a_time:
         i = 0
         while i < n:
@@ -564,7 +574,7 @@ def run_backtest(
                 # loss, but recorded explicitly — one-trade-at-a-time can't
                 # keep scanning past it (the position is still "open"), that
                 # doesn't mean the strategy never fires again after this.
-                open_position = {"side": side, "entryPrice": entry_price, "stopLoss": sl, "takeProfit": tp, "entryTime": bars[i]["t"]}
+                open_positions.append({"side": side, "entryPrice": entry_price, "stopLoss": sl, "takeProfit": tp, "entryTime": bars[i]["t"]})
                 break
             raw.append({"i": i, "side": side, "entry_price": entry_price, "sl": sl, "tp": tp, "exit_result": exit_result, "exit_j": exit_j})
             i = exit_j + 1
@@ -577,7 +587,7 @@ def run_backtest(
             sl, tp = _entry_exit_prices(side, entry_price, stop_loss_method, stop_loss_value, take_profit_method, take_profit_value)
             exit_result, exit_j = _resolve_trade(bars, i, side, sl, tp)
             if exit_result is None:
-                open_position = {"side": side, "entryPrice": entry_price, "stopLoss": sl, "takeProfit": tp, "entryTime": bars[i]["t"]}
+                open_positions.append({"side": side, "entryPrice": entry_price, "stopLoss": sl, "takeProfit": tp, "entryTime": bars[i]["t"]})
                 continue
             raw.append({"i": i, "side": side, "entry_price": entry_price, "sl": sl, "tp": tp, "exit_result": exit_result, "exit_j": exit_j})
         raw.sort(key=lambda t: t["exit_j"])
@@ -667,7 +677,7 @@ def run_backtest(
         "summary": summary,
         "points": [{"t": p["t"], "equity": p["equity"] * capital} for p in points],
         "trades": [{**t, "equityAfter": t["equityAfter"] * capital} for t in trades],
-        "openPosition": open_position,
+        "openPositions": open_positions,
     }
 
 

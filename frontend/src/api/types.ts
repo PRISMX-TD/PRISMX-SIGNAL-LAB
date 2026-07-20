@@ -399,14 +399,18 @@ export interface StrategyBacktestTrade extends SimulateTrade {
   exitPrice: number
 }
 
-// 一次一单模式下,到数据末尾都没摸到止损/止盈的那一笔——不计入 trades/summary,
-// 但通过这个字段明确告诉前端"不是没有信号,是这笔还开着",避免用户看到一份
-// 没有任何解释的"0 笔交易"。entryTime 是那根入场 K 线的 epoch 秒。
-// Under one-trade-at-a-time, the position (if any) that never hit SL/TP
-// before the data ran out — excluded from trades/summary, but surfaced here
-// so the frontend can explain "not zero signals, just still open" instead of
-// showing an unexplained 0-trades result. entryTime is the entry bar's epoch
-// seconds.
+// 到数据末尾都没摸到止损/止盈的仓位——不计入 trades/summary,但通过这个
+// 字段明确告诉前端"不是没有信号,是这些还开着",避免用户看到一份没有任何
+// 解释的"0 笔交易"。一次一单模式下最多只有 1 条(一碰到未解决就不再继续
+// 扫描);关掉一次一单时,同一时间可以有多笔各自独立"还开着",全部列出。
+// entryTime 是那根入场 K 线的 epoch 秒。
+// Positions (if any) that never hit SL/TP before the data ran out —
+// excluded from trades/summary, but surfaced here so the frontend can
+// explain "not zero signals, just still open" instead of showing an
+// unexplained 0-trades result. Under one-trade-at-a-time there's at most
+// one (scanning stops entirely on the first unresolved signal); with it
+// off, several independent positions can be open at once, all listed here.
+// entryTime is the entry bar's epoch seconds.
 export interface StrategyBacktestOpenPosition {
   side: 'BUY' | 'SELL'
   entryPrice: number
@@ -420,7 +424,7 @@ export interface StrategyBacktestResult {
   summary: StrategyBacktestSummary
   points: Array<{ t: string | null; equity: number }>
   trades: StrategyBacktestTrade[]
-  openPosition: StrategyBacktestOpenPosition | null
+  openPositions: StrategyBacktestOpenPosition[]
   insufficientData: boolean
   barsAvailable: number
   // 回测用到的那段 K 线,原样带回来画蜡烛图,不用再单独拉一次历史。

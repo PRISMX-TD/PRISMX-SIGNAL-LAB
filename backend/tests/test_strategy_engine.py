@@ -318,20 +318,20 @@ def test_backtest_unresolved_trade_at_end_of_data_is_not_counted(monkeypatch):
     assert result["trades"] == []
     # 不计入统计不等于凭空消失——调用方能看到"其实有一笔还开着"。
     # Not counted isn't the same as vanishing — the caller can see "one is still open".
-    assert result["openPosition"] == {"side": "BUY", "entryPrice": 100, "stopLoss": 99.0, "takeProfit": 102.0, "entryTime": 1}
+    assert result["openPositions"] == [{"side": "BUY", "entryPrice": 100, "stopLoss": 99.0, "takeProfit": 102.0, "entryTime": 1}]
 
 
 def test_backtest_stuck_open_position_no_longer_swallows_later_resolvable_trades(monkeypatch):
     """回归测试：修复前，一次一单模式下第 1 笔如果一直没等到止损/止盈，
     会让循环直接放弃，第 2 笔哪怕能正常摸到止损也会被一起丢掉，整份回测
     看起来像"压根没有任何交易"。现在第 1 笔仍不计入 trades，但通过
-    openPosition 明确报告；关掉一次一单后，第 2 笔应该被正常发现并结算。
+    openPositions 明确报告；关掉一次一单后，第 2 笔应该被正常发现并结算。
 
     Regression test: before the fix, if trade 1 never resolved under
     one-trade-at-a-time, the loop simply gave up — trade 2 was dropped too
     even though it clearly hits its stop, making the whole backtest look like
     "no trades at all". Now trade 1 is still excluded from `trades`, but
-    reported via `openPosition`; with one-trade-at-a-time off, trade 2 is
+    reported via `openPositions`; with one-trade-at-a-time off, trade 2 is
     found and settled normally.
     """
     bars = [
@@ -347,12 +347,41 @@ def test_backtest_stuck_open_position_no_longer_swallows_later_resolvable_trades
 
     result_on = se.run_backtest(bars, "ma_cross", {}, one_trade_at_a_time=True, **kwargs)
     assert result_on["trades"] == []
-    assert result_on["openPosition"] is not None and result_on["openPosition"]["side"] == "BUY"
+    assert len(result_on["openPositions"]) == 1 and result_on["openPositions"][0]["side"] == "BUY"
 
     result_off = se.run_backtest(bars, "ma_cross", {}, one_trade_at_a_time=False, **kwargs)
     assert len(result_off["trades"]) == 1
     assert result_off["trades"][0]["side"] == "SELL"
     assert result_off["trades"][0]["result"] == "HIT_SL"
+
+
+def test_backtest_one_trade_at_a_time_off_reports_every_still_open_position(monkeypatch):
+    """一次一单关闭时,同一时间可以有多笔各自独立"还开着"——不能只报一条
+    "举例性的",用户会看不出后面其实还有好几笔信号真的触发了,只是都还没
+    等到结果(这正是用户实测均线交叉+关闭一次一单时反馈的场景：图表后段
+    明显还有交叉,但完全看不到任何提示)。
+
+    With one-trade-at-a-time off, several independent positions can be open
+    at once — reporting only a single "example" would hide the fact that
+    several more signals genuinely fired, they just haven't resolved yet
+    (this is exactly the scenario a real user hit testing ma_cross with one-
+    trade-at-a-time off: the tail of the chart clearly still has crossovers,
+    but nothing acknowledged them at all).
+    """
+    bars = [
+        {"t": 0, "o": 100, "h": 100, "l": 100, "c": 100},
+        {"t": 1, "o": 100, "h": 100, "l": 100, "c": 100},  # 入场1,全程未被触发 / entry 1, never touched
+        {"t": 2, "o": 100, "h": 100, "l": 100, "c": 100},  # 入场2,全程未被触发 / entry 2, never touched
+        {"t": 3, "o": 100, "h": 100, "l": 100, "c": 100},  # 入场3,全程未被触发 / entry 3, never touched
+    ]
+    monkeypatch.setattr(se, "entry_signals", lambda b, t, p: [None, "BUY", "BUY", "BUY"])
+    result = se.run_backtest(
+        bars, "ma_cross", {}, stop_loss_method="percent", stop_loss_value=1.0, take_profit_method="rr", take_profit_value=2.0,
+        risk_pct=1.0, capital=10000, mode="compound", symbol="TEST", one_trade_at_a_time=False,
+    )
+    assert result["trades"] == []
+    assert len(result["openPositions"]) == 3
+    assert [p["entryTime"] for p in result["openPositions"]] == [1, 2, 3]
 
 
 def test_backtest_one_trade_at_a_time_skips_signal_while_position_open(monkeypatch):

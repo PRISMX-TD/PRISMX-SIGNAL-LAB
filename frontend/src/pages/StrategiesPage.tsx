@@ -20,6 +20,7 @@ import { displaySymbol, fmtDate, fmtTime, localizeApiError } from '../api/utils'
 import { bollinger, ema, macd, rsi, sma } from '../utils/indicators'
 import type {
   StopLossMethod,
+  StrategyBacktestOpenPosition,
   StrategyBacktestResult,
   StrategyBacktestTrade,
   StrategyParamSpec,
@@ -135,6 +136,7 @@ function EquityCurve({ points, capital }: { points: Array<{ equity: number }>; c
 
 const UP_COLOR = '#22c55e'
 const DOWN_COLOR = '#ef4444'
+const PENDING_COLOR = '#fbbf24'
 
 // 一条指标线：pane 0 = 叠在主图价格轴上(均线/布林带/唐奇安通道)，
 // pane 1 = 独立副图,与主图共用时间轴但价格轴分开(RSI/MACD/动量分数这类
@@ -268,10 +270,11 @@ function toLinePoints(bars: StrategyBacktestResult['bars'], values: (number | nu
 // charts page; markers go through the createSeriesMarkers plugin API, and
 // each trade gets its own 2-point LineSeries for the connecting line.
 function BacktestChart({
-  bars, trades, template, params,
+  bars, trades, openPositions, template, params,
 }: {
   bars: StrategyBacktestResult['bars']
   trades: StrategyBacktestTrade[]
+  openPositions: StrategyBacktestOpenPosition[]
   template: StrategyTemplateKey
   params: Record<string, string | number>
 }) {
@@ -340,7 +343,19 @@ function BacktestChart({
         },
       ]
     })
-    createSeriesMarkers(series, markers)
+    // 还没等到止损/止盈结果的入场——只标入场箭头(没有出场点/连线,因为还
+    // 没有出场),用琥珀色和上面赢/亏的绿/红区分开,一眼能看出"这笔跟其他
+    // 笔不一样,还没有结果"。/ Entries that haven't hit SL/TP yet — only an
+    // entry arrow (no exit marker/line, since there's no exit), colored amber
+    // to visually stand apart from the win/loss green/red above, so it reads
+    // as "this one's different, no result yet".
+    const pendingMarkers = openPositions.map((p) => ({
+      time: p.entryTime as UTCTimestamp,
+      position: (p.side === 'BUY' ? 'belowBar' : 'aboveBar') as 'belowBar' | 'aboveBar',
+      shape: (p.side === 'BUY' ? 'arrowUp' : 'arrowDown') as 'arrowUp' | 'arrowDown',
+      color: PENDING_COLOR,
+    }))
+    createSeriesMarkers(series, [...markers, ...pendingMarkers])
 
     // 每笔交易一条独立的两点连线,标出"从哪进、到哪出" / one 2-point line
     // series per trade, tracing "where it entered, where it exited"
@@ -458,7 +473,7 @@ function BacktestChart({
       indicatorSeries.forEach((s) => chart.removeSeries(s))
       chart.remove()
     }
-  }, [bars, trades, template, params, showIndicator])
+  }, [bars, trades, openPositions, template, params, showIndicator])
 
   return (
     <div>
@@ -812,17 +827,29 @@ function StrategyBuilder({
           <p className="mt-3 rounded-lg border border-amber-400/20 bg-amber-400/5 p-3 text-xs text-amber-200">{t('strategy.insufficientData')}</p>
         )}
 
-        {result && !result.insufficientData && result.openPosition && (
+        {result && !result.insufficientData && result.openPositions.length > 0 && (
           <div className="mt-3 rounded-lg border border-amber-400/20 bg-amber-400/5 p-3 text-xs text-amber-200">
-            <p>{t('strategy.openPositionNotice')}</p>
-            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-amber-100/90">
-              <span className={`tag ${result.openPosition.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
-                {result.openPosition.side === 'BUY' ? t('common.buy') : t('common.sell')}
-              </span>
-              <span>{t('signals.entry')} {result.openPosition.entryPrice}</span>
-              <span>{t('signals.stopLoss')} {result.openPosition.stopLoss}</span>
-              <span>{t('signals.takeProfit')} {result.openPosition.takeProfit}</span>
-              <span>{fmtDate(new Date(result.openPosition.entryTime * 1000).toISOString())}</span>
+            <p>{t('strategy.openPositionNotice', { count: result.openPositions.length })}</p>
+            {/* 每一笔都列出来,而不是只挑一条"举例"——关掉一次一单时同一时间
+                可以有好几笔各自独立还没等到结果,只报一条会让用户误以为后面
+                只是偶然多出一笔。K 线图上用琥珀色箭头标出同样这些位置。
+                Every one is listed, not just a single "example" — with one-
+                trade-at-a-time off, several can be independently still open
+                at once; reporting only one would make it look like just a
+                single stray signal. The chart above marks these same
+                positions with amber arrows. */}
+            <div className="mt-2 max-h-40 space-y-1.5 overflow-y-auto pr-1">
+              {result.openPositions.map((p, i) => (
+                <div key={i} className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-amber-100/90">
+                  <span className={`tag ${p.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
+                    {p.side === 'BUY' ? t('common.buy') : t('common.sell')}
+                  </span>
+                  <span>{t('signals.entry')} {p.entryPrice}</span>
+                  <span>{t('signals.stopLoss')} {p.stopLoss}</span>
+                  <span>{t('signals.takeProfit')} {p.takeProfit}</span>
+                  <span>{fmtDate(new Date(p.entryTime * 1000).toISOString())}</span>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -873,6 +900,7 @@ function StrategyBuilder({
                 <BacktestChart
                   bars={result.bars}
                   trades={result.trades}
+                  openPositions={result.openPositions}
                   template={(result.params.template as StrategyTemplateKey | undefined) ?? draft.template}
                   params={(result.params.params as Record<string, string | number> | undefined) ?? draft.params}
                 />

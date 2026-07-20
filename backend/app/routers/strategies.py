@@ -203,7 +203,7 @@ def backtest_strategy(body: StrategyBacktestRequest, db: Session = Depends(get_d
                 "finalEquity": body.capital, "returnPct": 0.0, "maxDrawdownPct": 0.0,
                 "maxLossStreak": 0, "wins": 0, "losses": 0, "winRate": None, "avgRr": None, "busted": False,
             },
-            "points": [], "trades": [], "openPosition": None,
+            "points": [], "trades": [], "openPositions": [],
             "insufficientData": True,
             "barsAvailable": len(bars),
         }
