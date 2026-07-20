@@ -565,7 +565,7 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
       dragRef.current = { mode: 'handle', id: selectedRef.current!, handle: h }
       const sel = drawingsRef.current.find((d) => d.id === selectedRef.current)!; workRef.current = { type: sel.type, color: sel.color, px: toPx(sel)!, lineWidth: sel.lineWidth, lineStyle: sel.lineStyle }; draw(); return
     }
-    const hit = hitDrawing(x, y)
+    const hit = hitDrawing(x, y, true)
     if (hit) {
       // 锁定线：可选中、可解锁，但禁止拖动/删除 / locked: selectable, unlockable, but no drag/delete
       if (hit.locked) {
