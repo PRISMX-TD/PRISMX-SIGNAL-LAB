@@ -113,13 +113,18 @@ interface Point { t: number; p: number }
 interface Drawing { id: string; type: DrawType; pts: Point[]; color: string; locked?: boolean; lineWidth?: number; lineStyle?: 'solid' | 'dashed' | 'dotted' }
 interface Props { chart: IChartApi; series: ISeriesApi<'Candlestick'>; host: HTMLDivElement; symbol: string; lastPrice: number; barTimes: () => number[]; digits?: number; hideToolbar?: boolean }
 
-const TOL = 12
-const HANDLE = 10
+const TOL_DESKTOP = 12
+const TOL_MOBILE = 18
+const HANDLE_DESKTOP = 10
+const HANDLE_MOBILE = 14
 const UNDO_MAX = 30
 const COLORS = ['#22d3ee', '#a78bfa', '#2ee07e', '#ff4d67', '#f5c451']
 const LINE_WIDTHS = [1, 2, 3, 4]
 const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]
-const SNAP_DIST = 8 // 磁吸距离 / snap distance (pixels)
+const SNAP_DIST = 8
+
+// 检测触屏设备 / detect touch device
+const isTouchDevice = typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)').matches || navigator.maxTouchPoints > 0)
 
 const uid = () => 'dw_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 
@@ -135,6 +140,10 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
   const { t } = useTranslation()
   const { getPref, setPref } = usePrefs()
   const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  // 触屏设备用更大的命中容差 / larger hit tolerance for touch devices
+  const tol = isTouchDevice ? TOL_MOBILE : TOL_DESKTOP
+  const handleSz = isTouchDevice ? HANDLE_MOBILE : HANDLE_DESKTOP
 
   // 核心状态 / core state
   const [tool, setTool] = useState<Tool>('cursor')
@@ -370,7 +379,7 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
     const paintHandle = (x: number, y: number) => {
       ctx.globalAlpha = 1; ctx.fillStyle = '#0a0710'; ctx.strokeStyle = '#ffffff'
       ctx.lineWidth = 1.5; ctx.beginPath()
-      ctx.rect(x - HANDLE / 2, y - HANDLE / 2, HANDLE, HANDLE); ctx.fill(); ctx.stroke()
+      ctx.rect(x - handleSz / 2, y - handleSz / 2, handleSz, handleSz); ctx.fill(); ctx.stroke()
     }
 
     const setLineDashStyle = (ls?: 'solid' | 'dashed' | 'dotted') => {
@@ -470,10 +479,10 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
   const hitHandle = useCallback((x: number, y: number): number => {
     const sel = drawingsRef.current.find((d) => d.id === selectedRef.current && !d.locked); if (!sel) return -1
     const px = toPx(sel); if (!px) return -1
-    const checkCorner = (cx: number, cy: number) => Math.abs(x - cx) <= HANDLE + 2 && Math.abs(y - cy) <= HANDLE + 2
-    if (sel.type === 'hline') return Math.hypot(x - host.clientWidth / 2, y - px[0].y) <= HANDLE + 2 ? 0 : -1
-    if (sel.type === 'vline') return Math.hypot(x - px[0].x, y - host.clientHeight / 2) <= HANDLE + 2 ? 0 : -1
-    if (sel.type === 'crossline') return (Math.abs(x - px[0].x) <= HANDLE + 2 && Math.abs(y - px[0].y) <= HANDLE + 2) ? 0 : -1
+    const checkCorner = (cx: number, cy: number) => Math.abs(x - cx) <= handleSz + 2 && Math.abs(y - cy) <= handleSz + 2
+    if (sel.type === 'hline') return Math.hypot(x - host.clientWidth / 2, y - px[0].y) <= handleSz + 2 ? 0 : -1
+    if (sel.type === 'vline') return Math.hypot(x - px[0].x, y - host.clientHeight / 2) <= handleSz + 2 ? 0 : -1
+    if (sel.type === 'crossline') return (Math.abs(x - px[0].x) <= handleSz + 2 && Math.abs(y - px[0].y) <= handleSz + 2) ? 0 : -1
     if (sel.type === 'rect') {
       const x1 = Math.min(px[0].x, px[1].x), y1 = Math.min(px[0].y, px[1].y), x2 = Math.max(px[0].x, px[1].x), y2 = Math.max(px[0].y, px[1].y)
       const corners = [{ x: x1, y: y1 }, { x: x2, y: y1 }, { x: x1, y: y2 }, { x: x2, y: y2 }]
@@ -486,25 +495,25 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
 
   const hitSingle = useCallback((x: number, y: number, d: Drawing): Drawing | null => {
     const px = toPx(d); if (!px) return null
-    if (d.type === 'hline') { if (Math.abs(y - px[0].y) <= TOL) return d }
-    else if (d.type === 'vline') { if (Math.abs(x - px[0].x) <= TOL) return d }
-    else if (d.type === 'crossline') { if (Math.abs(x - px[0].x) <= TOL || Math.abs(y - px[0].y) <= TOL) return d }
+    if (d.type === 'hline') { if (Math.abs(y - px[0].y) <= tol) return d }
+    else if (d.type === 'vline') { if (Math.abs(x - px[0].x) <= tol) return d }
+    else if (d.type === 'crossline') { if (Math.abs(x - px[0].x) <= tol || Math.abs(y - px[0].y) <= tol) return d }
     else if (d.type === 'trend' || d.type === 'ray') {
-      if (distToSeg(x, y, px[0].x, px[0].y, px[1].x, px[1].y) <= TOL) return d
-      if (Math.hypot(x - px[0].x, y - px[0].y) <= TOL || Math.hypot(x - px[1].x, y - px[1].y) <= TOL) return d
+      if (distToSeg(x, y, px[0].x, px[0].y, px[1].x, px[1].y) <= tol) return d
+      if (Math.hypot(x - px[0].x, y - px[0].y) <= tol || Math.hypot(x - px[1].x, y - px[1].y) <= tol) return d
     } else if (d.type === 'fib') {
       const xL = Math.min(px[0].x, px[1].x), xR = Math.max(px[0].x, px[1].x)
-      if (x >= xL - TOL && x <= xR + TOL) {
+      if (x >= xL - tol && x <= xR + tol) {
         const yA = px[0].y, yB = px[1].y
-        for (const lv of FIB_LEVELS) { if (Math.abs(y - (yB + (yA - yB) * lv)) <= TOL) return d }
+        for (const lv of FIB_LEVELS) { if (Math.abs(y - (yB + (yA - yB) * lv)) <= tol) return d }
       }
-      if (distToSeg(x, y, px[0].x, px[0].y, px[1].x, px[1].y) <= TOL) return d
+      if (distToSeg(x, y, px[0].x, px[0].y, px[1].x, px[1].y) <= tol) return d
     } else {
       const x1 = Math.min(px[0].x, px[1].x), x2 = Math.max(px[0].x, px[1].x), y1 = Math.min(px[0].y, px[1].y), y2 = Math.max(px[0].y, px[1].y)
-      if (((x >= x1 - TOL && x <= x2 + TOL) && (Math.abs(y - y1) <= TOL || Math.abs(y - y2) <= TOL)) || ((y >= y1 - TOL && y <= y2 + TOL) && (Math.abs(x - x1) <= TOL || Math.abs(x - x2) <= TOL))) return d
+      if (((x >= x1 - tol && x <= x2 + tol) && (Math.abs(y - y1) <= tol || Math.abs(y - y2) <= tol)) || ((y >= y1 - tol && y <= y2 + tol) && (Math.abs(x - x1) <= tol || Math.abs(x - x2) <= tol))) return d
     }
     return null
-  }, [toPx])
+  }, [toPx, tol])
 
   const hitDrawing = useCallback((x: number, y: number, includeLocked = false): Drawing | null => {
     const list = drawingsRef.current, sel = selectedRef.current
@@ -558,6 +567,18 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
     }
     const hit = hitDrawing(x, y)
     if (hit) {
+      // 锁定线：可选中、可解锁，但禁止拖动/删除 / locked: selectable, unlockable, but no drag/delete
+      if (hit.locked) {
+        setSelectedId(hit.id); setPropsPanel({ drawingId: hit.id })
+        const now = Date.now()
+        if (lastClickRef.current && lastClickRef.current.id === hit.id && now - lastClickRef.current.time < 350) {
+          commit(drawingsRef.current.map((d) => d.id === hit.id ? { ...d, locked: false } : d))
+          lastClickRef.current = null
+          return
+        }
+        lastClickRef.current = { id: hit.id, time: now }
+        return
+      }
       const now = Date.now()
       if (lastClickRef.current && lastClickRef.current.id === hit.id && now - lastClickRef.current.time < 350) { setPropsPanel({ drawingId: hit.id }); lastClickRef.current = null; return }
       lastClickRef.current = { id: hit.id, time: now }
@@ -633,6 +654,36 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
     else { cv.style.pointerEvents = 'none'; cv.style.cursor = tool === 'cross' ? 'crosshair' : 'default' }
   }, [tool])
 
+  // ──── 右键菜单点击外部关闭 + 手机长按 / context-menu click-outside + mobile long-press ────
+  useEffect(() => {
+    if (!ctxMenu) return
+    const onDocClick = () => setCtxMenu(null)
+    const t = setTimeout(() => document.addEventListener('click', onDocClick), 100)
+    return () => { clearTimeout(t); document.removeEventListener('click', onDocClick) }
+  }, [ctxMenu])
+
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (!isTouchDevice) return
+    const cv = canvasRef.current; if (!cv) return
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return
+      const touch = e.touches[0]
+      longPressTimer.current = setTimeout(() => {
+        if (toolRef.current !== 'cursor' && toolRef.current !== 'cross') return
+        const r = cv.getBoundingClientRect()
+        const x = touch.clientX - r.left, y = touch.clientY - r.top
+        const hit = hitDrawing(x, y, true)
+        if (hit) { setSelectedId(hit.id); setCtxMenu({ x: touch.clientX, y: touch.clientY, drawingId: hit.id }) }
+      }, 500)
+    }
+    const onEnd = () => { if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null } }
+    cv.addEventListener('touchstart', onStart, { passive: true })
+    cv.addEventListener('touchend', onEnd, { passive: true })
+    cv.addEventListener('touchmove', onEnd, { passive: true })
+    return () => { cv.removeEventListener('touchstart', onStart); cv.removeEventListener('touchend', onEnd); cv.removeEventListener('touchmove', onEnd) }
+  }, [hitDrawing])
+
   // ──── 键盘 / keyboard ────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -662,7 +713,9 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
     <>
       {/* 左侧浮动工具栏 / floating left toolbar */}
       {!hideToolbar && (
-        <div className="absolute left-3 top-3 z-20 flex flex-col gap-1 rounded-xl border border-white/10 bg-ink-900/80 p-1.5 backdrop-blur" style={{ maxHeight: 'calc(100% - 60px)', overflowY: 'auto' }}>
+        <div className="absolute left-3 top-3 z-20 flex flex-col rounded-xl border border-white/10 bg-ink-900/80 p-1.5 backdrop-blur" style={{ maxHeight: 'calc(100% - 60px)' }}>
+          {/* 可滚动工具区 / scrollable tools area */}
+          <div className="flex flex-col gap-1 overflow-y-auto" style={{ flex: '1 1 auto', minHeight: 0 }}>
           {/* 可折叠分组 / collapsible groups */}
           {TOOL_GROUPS.map((group) => {
             const isCollapsed = collapsed[group.key]
@@ -736,10 +789,12 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
           <button type="button" title={t('charts.draw.clear')} aria-label={t('charts.draw.clear')} onClick={clearAll} disabled={drawCount === 0}
             className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 hover:text-down disabled:opacity-30"
           ><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 5L5 19M5 5l14 14" /></svg></button>
+          </div>{/* end scrollable tools */}
 
           <div className="my-0.5 h-px w-full bg-white/10" />
 
-          {/* ──── 底部工具控制栏 / bottom utility bar ──── */}
+          {/* ──── 底部工具控制栏（始终可见） / bottom utility bar (always visible) ──── */}
+          <div className="flex flex-col gap-1 shrink-0">
           {/* 磁吸 */}
           <button type="button" title={t('charts.draw.magnet')} aria-label={t('charts.draw.magnet')}
             onClick={() => setMagnet(magnet === 'off' ? 'weak' : 'off')}
@@ -757,6 +812,7 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
             onClick={() => setVisible(!visible)}
             className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${!visible ? 'border-amber-400/60 bg-amber-400/15 text-amber-300' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`}
           ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{visible ? <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></> : <><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></>}</svg></button>
+          </div>{/* end sticky utility bar */}
         </div>
       )}
 
@@ -773,28 +829,35 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
         }}
       />
 
-      {/* 浮动属性栏 / floating properties panel */}
+      {/* 浮动属性栏 / floating properties panel — 桌面版更大 */}
       {propsPanel && selectedId && (() => { const d = drawings.find((dw) => dw.id === selectedId); if (!d) return null; return (
-        <div className="absolute right-3 top-3 z-30 flex items-center gap-1.5 rounded-lg border border-white/10 bg-ink-900/90 px-2 py-1.5 backdrop-blur shadow-lg">
+        <div className={`absolute right-3 top-3 z-30 flex items-center gap-1.5 rounded-lg border border-white/10 bg-ink-900/90 px-2 py-1.5 backdrop-blur shadow-lg sm:gap-2.5 sm:px-3 sm:py-2.5`}>
           {/* 线宽 / line width */}
           {LINE_WIDTHS.map((w) => (
             <button key={w} type="button" title={`${w}px`} onClick={() => applyLineWidth(w)}
-              className={`flex items-center justify-center rounded border transition ${(d.lineWidth || 1) === w ? 'border-prism-500/60 bg-prism-600/25' : 'border-white/10 hover:border-white/20'}`}
-              style={{ width: 20, height: 20 }}
+              className={`flex items-center justify-center rounded border transition sm:w-7 sm:h-7 ${(d.lineWidth || 1) === w ? 'border-prism-500/60 bg-prism-600/25' : 'border-white/10 hover:border-white/20'}`}
+              style={{ width: isTouchDevice ? 20 : 28, height: isTouchDevice ? 20 : 28 }}
             ><span style={{ display: 'block', width: w * 4 + 4, height: w, background: d.color, borderRadius: 1 }} /></button>
           ))}
-          <span className="w-px h-5 bg-white/10" />
+          <span className="w-px h-5 sm:h-6 bg-white/10" />
           {/* 线型 / line style */}
           {(['solid', 'dashed', 'dotted'] as const).map((s) => (
             <button key={s} type="button" title={String(t(`charts.draw.${s}`))} onClick={() => applyLineStyle(s)}
-              className={`flex h-5 w-7 items-center justify-center rounded border text-[9px] transition ${(d.lineStyle || 'solid') === s ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 text-slate-500 hover:text-slate-300'}`}
+              className={`flex items-center justify-center rounded border transition ${(d.lineStyle || 'solid') === s ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 text-slate-500 hover:text-slate-300'}`}
+              style={{ height: isTouchDevice ? 20 : 26, width: isTouchDevice ? 28 : 36, fontSize: isTouchDevice ? 9 : 12 }}
             >{s === 'solid' ? '━━' : s === 'dashed' ? '┅┅' : '┅'}</button>
           ))}
-          <span className="w-px h-5 bg-white/10" />
+          <span className="w-px h-5 sm:h-6 bg-white/10" />
           {/* 锁定按钮 */}
-          <button type="button" onClick={toggleLock} className={`rounded border px-1.5 h-5 text-[10px] transition ${d.locked ? 'border-amber-400/60 text-amber-300' : 'border-white/10 text-slate-400 hover:text-slate-100'}`}>🔒</button>
+          <button type="button" onClick={toggleLock}
+            className={`rounded border px-1.5 transition sm:px-2 ${d.locked ? 'border-amber-400/60 text-amber-300' : 'border-white/10 text-slate-400 hover:text-slate-100'}`}
+            style={{ height: isTouchDevice ? 20 : 26, fontSize: isTouchDevice ? 10 : 12 }}
+          >{d.locked ? '�' : '��'}</button>
           {/* 删除按钮 */}
-          <button type="button" onClick={deleteSelected} className="rounded border border-white/10 px-1.5 h-5 text-[10px] text-slate-400 hover:text-down">🗑</button>
+          <button type="button" onClick={deleteSelected}
+            className="rounded border border-white/10 px-1.5 text-slate-400 hover:text-down sm:px-2"
+            style={{ height: isTouchDevice ? 20 : 26, fontSize: isTouchDevice ? 10 : 12 }}
+          >🗑</button>
         </div>
       )})()}
 
