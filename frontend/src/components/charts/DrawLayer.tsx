@@ -7,10 +7,11 @@
 // chart primitive rendered & hit-tested by the engine. No canvas overlay.
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { CanvasRenderingTarget2D } from 'fancy-canvas'
 import type {
   IChartApi, ISeriesApi, UTCTimestamp, IPrimitivePaneView,
   IPrimitivePaneRenderer, PrimitiveHoveredItem, AutoscaleInfo,
-  CanvasRenderingTarget2D, Logical, DrawingUtils,
+  Logical, PrimitivePaneViewZOrder,
 } from 'lightweight-charts'
 import { usePrefs } from '../../store/prefs'
 import ConfirmModal from '../ConfirmModal'
@@ -117,9 +118,9 @@ class DrawPrimitive {
 
   private _chart: IChartApi | null = null
   private _series: ISeriesApi<'Candlestick'> | null = null
-  private _requestUpdate: (() => void) | null = null
-  private _paneView: PaneViewImpl
-  _digits: number
+  private _ru: (() => void) | null = null
+  _pv: PaneViewImpl
+  digits: number
 
   constructor(d: Drawing, digits: number) {
     this.id = d.id
@@ -129,25 +130,25 @@ class DrawPrimitive {
     this.lineStyle = d.lineStyle || 'solid'
     this.locked = !!d.locked
     this.pts = d.pts.map((p) => ({ t: p.t, p: p.p }))
-    this._digits = digits
-    this._paneView = new PaneViewImpl(this)
+    this.digits = digits
+    this._pv = new PaneViewImpl(this)
   }
 
   // ISeriesPrimitive lifecycle
   attached(p: { chart: IChartApi; series: ISeriesApi<'Candlestick'>; requestUpdate: () => void }) {
     this._chart = p.chart
     this._series = p.series
-    this._requestUpdate = p.requestUpdate
+    this._ru = p.requestUpdate
   }
 
   detached() {
     this._chart = null
     this._series = null
-    this._requestUpdate = null
+    this._ru = null
   }
 
   paneViews(): readonly IPrimitivePaneView[] {
-    return [this._paneView]
+    return [this._pv]
   }
 
   updateAllViews() { /* no-op, renderer reads live state */ }
@@ -161,52 +162,42 @@ class DrawPrimitive {
 
   hitTest(x: number, y: number): PrimitiveHoveredItem | null {
     if (!this._chart || !this._series) return null
-    const w = this._chart.timeScale().width()
-    const h = (this._chart as any)._container?.clientHeight ?? 600
-    // convert x,y (pane-relative pixels) to chart coords for hit testing
-    // We use the same pixel-space hit testing as before but with proper chart dimensions
     const px = this._toPixel()
     if (!px) return null
-    const hit = this._testHit(px, x, y)
-    if (hit) {
+    const d = this._testHit(px, x, y)
+    if (d != null) {
       return {
         externalId: this.id,
         cursorStyle: this.locked ? 'default' : 'move',
         hitTestPriority: 1,
-        distance: hit,
+        distance: d,
+        zOrder: 'normal' as PrimitivePaneViewZOrder,
       }
     }
     return null
   }
 
   requestUpdate() {
-    this._requestUpdate?.()
+    this._ru?.()
   }
 
   // pixel conversion using chart APIs
   _toPixel(): { x: number; y: number }[] | null {
     if (!this._chart || !this._series) return null
     const ts = this._chart.timeScale()
-    if (this.type === 'hline') {
-      const y = this._series.priceToCoordinate(this.pts[0].p)
-      if (y == null) return null
-      return [{ x: 0, y }]
-    }
-    if (this.type === 'vline') {
-      const x = ts.timeToCoordinate(this.pts[0].t as UTCTimestamp)
-      if (x == null) return null
-      return [{ x, y: 0 }]
-    }
+    const tx = (t: number) => ts.timeToCoordinate(t as UTCTimestamp) as number | null
+    const ty = (p: number) => this._series!.priceToCoordinate(p) as number | null
+
+    if (this.type === 'hline') { const y = ty(this.pts[0].p); return y != null ? [{ x: 0, y }] : null }
+    if (this.type === 'vline') { const x = tx(this.pts[0].t); return x != null ? [{ x, y: 0 }] : null }
     if (this.type === 'crossline') {
-      const x = ts.timeToCoordinate(this.pts[0].t as UTCTimestamp)
-      const y = this._series.priceToCoordinate(this.pts[0].p)
-      if (x == null || y == null) return null
-      return [{ x, y }]
+      const x = tx(this.pts[0].t), y = ty(this.pts[0].p)
+      return (x != null && y != null) ? [{ x, y }] : null
     }
-    const a = { x: ts.timeToCoordinate(this.pts[0].t as UTCTimestamp), y: this._series.priceToCoordinate(this.pts[0].p) }
-    const b = { x: ts.timeToCoordinate(this.pts[1].t as UTCTimestamp), y: this._series.priceToCoordinate(this.pts[1].p) }
+    const a = { x: tx(this.pts[0].t), y: ty(this.pts[0].p) }
+    const b = { x: tx(this.pts[1].t), y: ty(this.pts[1].p) }
     if (a.x == null || a.y == null || b.x == null || b.y == null) return null
-    return [a, b]
+    return [a as { x: number; y: number }, b as { x: number; y: number }]
   }
 
   _testHit(px: { x: number; y: number }[], mx: number, my: number): number | null {
@@ -343,7 +334,7 @@ class DrawPrimitive {
           setDash()
           const price = this._series?.coordinateToPrice(ly)
           ctx.fillStyle = col
-          ctx.fillText(`${(lv * 100).toFixed(1)}%${price != null ? '  ' + (price as number).toFixed(this._digits) : ''}`, xR + 4, ly)
+          ctx.fillText(`${(lv * 100).toFixed(1)}%${price != null ? '  ' + (price as number).toFixed(this.digits) : ''}`, xR + 4, ly)
         }
         paintHandle(px[0].x, px[0].y); paintHandle(px[1].x, px[1].y)
         break
@@ -376,13 +367,11 @@ class DrawPrimitive {
   }
 }
 
-// ──── IPrimitivePaneView & IPrimitivePaneRenderer 实现 / view & renderer ────
+// ──── IPrimitivePaneView & IPrimitivePaneRenderer ────
 class PaneViewImpl implements IPrimitivePaneView {
-  private _prim: DrawPrimitive
-  private _renderer: RendererImpl
+  _renderer: RendererImpl
 
   constructor(prim: DrawPrimitive) {
-    this._prim = prim
     this._renderer = new RendererImpl(prim)
   }
 
@@ -399,7 +388,7 @@ class RendererImpl implements IPrimitivePaneRenderer {
     this._prim = prim
   }
 
-  draw(target: CanvasRenderingTarget2D, _utils?: DrawingUtils): void {
+  draw(target: CanvasRenderingTarget2D): void {
     const ctx = target.useMediaCoordinateSpace()
     const w = target.mediaSize.width
     const h = target.mediaSize.height
@@ -408,7 +397,7 @@ class RendererImpl implements IPrimitivePaneRenderer {
 }
 
 // ──── 组件 / component ────
-function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes: _barTimes, digits = 2, hideToolbar }: Props, ref: React.Ref<DrawLayerHandle>) {
+function DrawLayer({ chart, series, host, symbol, barTimes: _barTimes, digits = 2, hideToolbar }: Props, ref: React.Ref<DrawLayerHandle>) {
   const { t } = useTranslation()
   const { getPref, setPref } = usePrefs()
 
@@ -486,14 +475,14 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes: _barTimes
         prim.lineWidth = d.lineWidth || 1
         prim.lineStyle = d.lineStyle || 'solid'
         prim.locked = !!d.locked
-        prim._digits = digits
+        prim.digits = digits
         prim.requestUpdate()
       }
     }
 
     // sync selected state on renderers
     for (const [id, prim] of map) {
-      prim._paneView._renderer._selected = id === selectedRef.current
+      prim._pv._renderer._selected = id === selectedRef.current
     }
   }, [series, digits])
 
@@ -513,7 +502,7 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes: _barTimes
     syncPrims(next)
     // refresh selected renderer states
     for (const [id, prim] of primsRef.current) {
-      prim._paneView._renderer._selected = id === selectedRef.current
+      prim._pv._renderer._selected = id === selectedRef.current
     }
   }, [setPref, symbol, syncPrims])
 
