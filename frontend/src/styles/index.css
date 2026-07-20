@@ -423,6 +423,32 @@
     background: linear-gradient(90deg, #7c3aed, #a855f7);
     box-shadow: 0 0 10px rgba(124, 58, 237, 0.5);
   }
+  /* 桌面端左右箭头：无按钮背景，纯图标点击；手机端隐藏（靠滑动切换即可）
+     Desktop prev/next arrows: no button background, icon-only; hidden on
+     mobile where swipe already handles navigation. */
+  .hero-arrow-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    background: none;
+    border: none;
+    color: var(--text-3);
+    cursor: pointer;
+    transition: color 0.2s ease, transform 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .hero-arrow-btn:hover {
+    color: #fff;
+  }
+  .hero-arrow-btn:active {
+    transform: scale(0.88);
+  }
+  @media (min-width: 640px) {
+    .hero-arrow-btn {
+      display: flex;
+    }
+  }
   .stance-word {
     font-size: 56px;
     font-weight: 700;

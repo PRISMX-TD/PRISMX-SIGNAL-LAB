@@ -68,18 +68,37 @@ const SignalHero: FC<Props> = ({
             highlighted, tap any segment to jump. Clean and consistent across
             devices, replacing the old dots + "1/6" counter + prev/next combo. */}
         {focusTotal > 1 && (
-          <div className="ml-auto hero-segs" role="tablist">
-            {Array.from({ length: focusTotal }).map((_, i) => (
-              <button
-                key={i}
-                type="button"
-                role="tab"
-                aria-selected={i === focusIdx}
-                aria-label={`${i + 1}/${focusTotal}`}
-                className={`hero-seg ${i === focusIdx ? 'on' : ''}`}
-                onClick={() => onSelectIdx(i)}
-              />
-            ))}
+          <div className="ml-auto flex items-center gap-2">
+            {/* 桌面端左右箭头：无按钮背景，纯图标点击，手机端隐藏（靠滑动切换）*/}
+            <button
+              type="button"
+              onClick={onPrev}
+              aria-label="prev"
+              className="hero-arrow-btn"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+            </button>
+            <div className="hero-segs" role="tablist">
+              {Array.from({ length: focusTotal }).map((_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  role="tab"
+                  aria-selected={i === focusIdx}
+                  aria-label={`${i + 1}/${focusTotal}`}
+                  className={`hero-seg ${i === focusIdx ? 'on' : ''}`}
+                  onClick={() => onSelectIdx(i)}
+                />
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={onNext}
+              aria-label="next"
+              className="hero-arrow-btn"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+            </button>
           </div>
         )}
       </div>
