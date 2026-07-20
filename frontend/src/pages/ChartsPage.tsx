@@ -1179,8 +1179,8 @@ export default function ChartsPage() {
               </select>
             </label>
 
-            {/* 买 / 卖（紧挨品种右边） */}
-            <div className="flex items-center gap-2">
+            {/* 买 / 卖：手机端靠右对齐，桌面端紧挨品种右边 */}
+            <div className="flex items-center gap-2 max-lg:ml-auto">
               <button
                 onClick={() => setOrderSide('BUY')}
                 className="rounded-lg px-5 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:brightness-110"
