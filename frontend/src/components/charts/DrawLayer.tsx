@@ -637,7 +637,7 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
       if (toolRef.current !== 'cursor' && toolRef.current !== 'cross') { cv.style.pointerEvents = 'auto'; cv.style.cursor = 'crosshair'; return }
       const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top
       if (x < 0 || y < 0 || x > r.width || y > r.height) { cv.style.pointerEvents = 'none'; return }
-      const onHandle = hitHandle(x, y) >= 0, onBody = onHandle || hitDrawing(x, y) != null
+      const onHandle = hitHandle(x, y) >= 0, onBody = onHandle || hitDrawing(x, y, true) != null
       if (onBody) {
         cv.style.pointerEvents = 'auto'
         if (onHandle) { const sel = drawingsRef.current.find((d) => d.id === selectedRef.current); if (sel && sel.type === 'rect') { const h = hitHandle(x, y); cv.style.cursor = h === 0 || h === 3 ? 'nwse-resize' : 'nesw-resize' } else cv.style.cursor = 'grab' }
@@ -713,9 +713,7 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
     <>
       {/* 左侧浮动工具栏 / floating left toolbar */}
       {!hideToolbar && (
-        <div className="absolute left-3 top-3 z-20 flex flex-col rounded-xl border border-white/10 bg-ink-900/80 p-1.5 backdrop-blur" style={{ maxHeight: 'calc(100dvh - 80px)' }}>
-          {/* 可滚动工具区 / scrollable tools area */}
-          <div className="flex flex-col gap-1 overflow-y-auto" style={{ flex: '1 1 0', minHeight: 0 }}>
+        <div className="absolute left-3 top-3 z-20 flex flex-col overflow-y-auto rounded-xl border border-white/10 bg-ink-900/80 p-1.5 backdrop-blur" style={{ maxHeight: 'calc(100dvh - 80px)' }}>
           {/* 可折叠分组 / collapsible groups */}
           {TOOL_GROUPS.map((group) => {
             const isCollapsed = collapsed[group.key]
@@ -789,12 +787,11 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
           <button type="button" title={t('charts.draw.clear')} aria-label={t('charts.draw.clear')} onClick={clearAll} disabled={drawCount === 0}
             className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 hover:text-down disabled:opacity-30"
           ><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 5L5 19M5 5l14 14" /></svg></button>
-          </div>{/* end scrollable tools */}
 
           <div className="my-0.5 h-px w-full bg-white/10" />
 
-          {/* ──── 底部工具控制栏（始终可见） / bottom utility bar (always visible) ──── */}
-          <div className="flex flex-col gap-1 shrink-0">
+          {/* ──── 底部工具控制栏（sticky 始终可见） / sticky utility bar ──── */}
+          <div className="sticky bottom-0 flex flex-col gap-1 bg-ink-900/95 py-1 -mx-1.5 px-1.5 backdrop-blur border-t border-white/10">
           {/* 磁吸 */}
           <button type="button" title={t('charts.draw.magnet')} aria-label={t('charts.draw.magnet')}
             onClick={() => setMagnet(magnet === 'off' ? 'weak' : 'off')}
