@@ -1087,7 +1087,7 @@ export default function StrategiesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl py-6">
+    <div>
       <div className="mb-5">
         <h2 className="font-display text-2xl font-bold text-slate-50">{t('strategy.title')}</h2>
         <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-400">{t('strategy.subtitle')}</p>

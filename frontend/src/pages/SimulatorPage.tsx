@@ -179,7 +179,7 @@ export default function SimulatorPage() {
     }`
 
   return (
-    <div className="mx-auto max-w-5xl py-6">
+    <div>
       {/* 标题 / header */}
       <div className="mb-5">
         <div className="flex flex-wrap items-center gap-2">
