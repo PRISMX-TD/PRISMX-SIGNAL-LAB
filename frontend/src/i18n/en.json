@@ -548,6 +548,7 @@
       "lock": "Lock selected",
       "unlock": "Unlock selected",
       "lockAll": "Lock all",
+      "unlockAll": "Unlock all",
       "undo": "Undo",
       "redo": "Redo",
       "hint": "Pick a tool and drag on the chart to draw; in cursor mode you can select, move or delete existing drawings. Drawings are saved per symbol and synced across devices."

@@ -549,20 +549,20 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
   )
 
   const hitDrawing = useCallback(
-    (x: number, y: number): Drawing | null => {
+    (x: number, y: number, includeLocked = false): Drawing | null => {
       const list = drawingsRef.current
       const sel = selectedRef.current
       // 已选中的画线优先判定 / prioritize the currently selected drawing
       if (sel) {
         const sd = list.find((d) => d.id === sel)
-        if (sd && !sd.locked) {
+        if (sd && (includeLocked || !sd.locked)) {
           const hit = hitSingle(x, y, sd)
           if (hit) return hit
         }
       }
       for (let i = list.length - 1; i >= 0; i--) {
         const d = list[i]
-        if (d.locked) continue // 跳过锁定的 / skip locked
+        if (!includeLocked && d.locked) continue // 跳过锁定的（上下文菜单除外）/ skip locked (except context menu)
         if (d.id === sel) continue // 上面已判过 / already tested above
         const hit = hitSingle(x, y, d)
         if (hit) return hit
@@ -930,6 +930,16 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" /><line x1="12" y1="15" x2="12" y2="18" /></svg>
         </button>
+        <button
+          type="button"
+          title={t('charts.draw.unlockAll')}
+          aria-label={t('charts.draw.unlockAll')}
+          onClick={unlockAll}
+          disabled={lockedCount === 0}
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-slate-100 disabled:opacity-30 disabled:hover:text-slate-400"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 019.9-1" /><line x1="12" y1="15" x2="12" y2="18" /></svg>
+        </button>
 
         <div className="my-0.5 h-px w-full bg-white/10" />
 
@@ -1021,7 +1031,7 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
           const r = cv.getBoundingClientRect()
           const x = e.clientX - r.left
           const y = e.clientY - r.top
-          const hit = hitDrawing(x, y)
+          const hit = hitDrawing(x, y, true) // include locked so user can unlock
           if (hit) {
             setSelectedId(hit.id)
             setCtxMenu({ x: e.clientX, y: e.clientY, drawingId: hit.id })
