@@ -1025,6 +1025,14 @@
   .sig-filters::-webkit-scrollbar {
     display: none;
   }
+  /* 通用隐藏滚动条工具类（横向滑动工具栏等） */
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
   .sig-filters .fgroup {
     display: flex;
     align-items: center;

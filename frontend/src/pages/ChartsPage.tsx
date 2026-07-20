@@ -1197,8 +1197,8 @@ export default function ChartsPage() {
               </button>
             </div>
 
-            {/* 右侧：周期 + 添加指标（靠右） */}
-            <div className="ml-auto flex items-center gap-3">
+            {/* 周期 + 添加指标：手机端换行后靠左（去掉 ml-auto），桌面端靠右 */}
+            <div className="flex w-full items-center gap-3 lg:ml-auto lg:w-auto">
               <div className="flex items-center gap-1 rounded-lg border border-white/10 bg-ink-800/50 p-1">
                 {INTERVALS.map((iv) => (
                   <button
@@ -1232,9 +1232,9 @@ export default function ChartsPage() {
             </div>
           </div>
 
-          {/* 控制条第 2 行：画线工具（横向，放在周期选择下方） */}
+          {/* 控制条第 2 行：画线工具做成完整的一排，横向可滑动展示后面的工具 */}
           {drawReady && (
-            <div className="mb-4 flex flex-wrap items-center gap-1.5 rounded-lg border border-white/10 bg-ink-800/30 px-2 py-1.5">
+            <div className="no-scrollbar mb-4 flex flex-nowrap items-center gap-1.5 overflow-x-auto rounded-lg border border-white/10 bg-ink-800/30 px-2 py-1.5">
               {(ToolList as Tool[]).map((toolName) => (
                 <button
                   key={toolName}
@@ -1242,7 +1242,7 @@ export default function ChartsPage() {
                   title={String(t(`charts.draw.${toolName}`))}
                   aria-label={String(t(`charts.draw.${toolName}`))}
                   onClick={() => { drawLayerRef.current?.setTool(toolName); bumpDraw() }}
-                  className={`flex h-7 w-7 items-center justify-center rounded-md border transition ${
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition ${
                     drawLayerRef.current?.tool === toolName
                       ? 'border-prism-500/60 bg-prism-600/25 text-prism-200'
                       : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'
@@ -1251,7 +1251,7 @@ export default function ChartsPage() {
                   <DrawToolIcon tool={toolName} />
                 </button>
               ))}
-              <span className="mx-1 h-5 w-px bg-white/10" />
+              <span className="mx-1 h-5 w-px shrink-0 bg-white/10" />
               {['#22d3ee', '#a78bfa', '#2ee07e', '#ff4d67', '#f5c451'].map((c) => (
                 <button
                   key={c}
@@ -1259,20 +1259,20 @@ export default function ChartsPage() {
                   title={t('charts.draw.color')}
                   aria-label={t('charts.draw.color')}
                   onClick={() => { drawLayerRef.current?.applyColor(c); bumpDraw() }}
-                  className={`h-4 w-4 rounded-full border transition ${
+                  className={`h-4 w-4 shrink-0 rounded-full border transition ${
                     drawLayerRef.current?.color === c ? 'border-white scale-110' : 'border-white/20'
                   }`}
                   style={{ background: c }}
                 />
               ))}
-              <span className="mx-1 h-5 w-px bg-white/10" />
+              <span className="mx-1 h-5 w-px shrink-0 bg-white/10" />
               <button
                 type="button"
                 title={t('charts.draw.delete')}
                 aria-label={t('charts.draw.delete')}
                 onClick={() => { drawLayerRef.current?.deleteSelected(); bumpDraw() }}
                 disabled={!drawLayerRef.current?.selectedId}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-down disabled:opacity-30 disabled:hover:text-slate-400"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-down disabled:opacity-30 disabled:hover:text-slate-400"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>
               </button>
@@ -1282,7 +1282,7 @@ export default function ChartsPage() {
                 aria-label={t('charts.draw.clear')}
                 onClick={() => { drawLayerRef.current?.clearAll(); bumpDraw() }}
                 disabled={(drawLayerRef.current?.drawCount ?? 0) === 0}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-down disabled:opacity-30 disabled:hover:text-slate-400"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-down disabled:opacity-30 disabled:hover:text-slate-400"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 5L5 19M5 5l14 14" /></svg>
               </button>
