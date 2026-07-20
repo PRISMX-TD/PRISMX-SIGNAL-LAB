@@ -389,10 +389,9 @@ class RendererImpl implements IPrimitivePaneRenderer {
   }
 
   draw(target: CanvasRenderingTarget2D): void {
-    const ctx = target.useMediaCoordinateSpace()
-    const w = target.mediaSize.width
-    const h = target.mediaSize.height
-    this._prim._render(ctx as any, w, h, this._selected)
+    target.useMediaCoordinateSpace((scope) => {
+      this._prim._render(scope.context, scope.mediaSize.width, scope.mediaSize.height, this._selected)
+    })
   }
 }
 
