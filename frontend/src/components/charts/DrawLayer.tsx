@@ -307,14 +307,15 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
   // 磁吸：将点击位置吸附到最近 K 线的 OHLC 价格 / snap click to nearest candle OHLC
   const snapOHLC = useCallback((x: number, y: number): number | null => {
     const tm = tOf(x); if (tm == null) return null
-    const times = barTimes()
-    let idx = -1; for (let i = 0; i < times.length; i++) { if (times[i] === tm || (i < times.length - 1 && tm > times[i] && tm < times[i + 1])) { idx = i; break } }
-    if (idx < 0) return null
-    const candle = (series as any)._data?.[idx] ?? (series as any)._bars?.[idx]
+    // 用官方 API 获取数据 / use public API to get candle data
+    const data = (series as any).data?.() as { time: number; open: number; high: number; low: number; close: number }[] | undefined
+    if (!data || data.length === 0) return null
+    // 二分查找最近 K 线 / binary search nearest candle
+    let lo = 0, hi = data.length - 1
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if ((data[mid].time as number) <= tm) lo = mid; else hi = mid - 1 }
+    const candle = data[lo]
     if (!candle || candle.open == null) return null
-    const ohlc = [candle.open, candle.high, candle.low, candle.close].filter((v: number) => v != null)
-    if (ohlc.length === 0) return null
-    // 找到距离点击 Y 最近的 OHLC 值，且在 SNAP_DIST 像素内
+    const ohlc = [candle.open, candle.high, candle.low, candle.close]
     let bestVal = ohlc[0], bestD = Infinity
     for (const v of ohlc) {
       const vy = yOf(v)
@@ -323,7 +324,7 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
       if (d < bestD && d <= SNAP_DIST) { bestD = d; bestVal = v }
     }
     return bestVal
-  }, [tOf, yOf, barTimes, series])
+  }, [tOf, yOf, series])
 
   // ──── 加载/保存 / load & save ────
   useEffect(() => {
