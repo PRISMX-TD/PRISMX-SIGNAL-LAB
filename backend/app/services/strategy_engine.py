@@ -236,6 +236,40 @@ def _apply_direction(side: str | None, direction: str) -> str | None:
     return side
 
 
+def _cmp(a: float, b: float, rel_tol: float = 1e-9) -> int:
+    """带容差比较两个浮点数,返回 -1/0/1。
+
+    两条完全由同一批重复价格递推出来的 EMA,理论上应该分毫不差——但
+    `prev = value*k + prev*(1-k)` 这种递归乘加运算,只要平滑系数 k=2/(period+1)
+    在二进制浮点下不能精确表示(取决于具体的 period,不可预测哪些值会中招,
+    实测 period=30 就会、12/26/9/14/50 不会),就会残留 1e-13~1e-14 级别的
+    误差(比如 100.0 变成 100.00000000000001)。这点误差如果直接拿去和另一
+    条均线做严格的 `<`/`>` 比较,会被误判成"刚刚穿越",凭空报出一个不存在
+    的交叉。容差取两数量级的 1e-9 倍(至少 1e-9),比这类浮点残留大出几个
+    数量级,又远小于任何真实报价的最小变动单位,不会掩盖真实的交叉。
+
+    Tolerance-based float compare, returns -1/0/1.
+
+    Two EMAs built off literally the same repeated prices should be
+    identical in theory — but the recursive multiply-add `prev = value*k +
+    prev*(1-k)` leaves ~1e-13-to-1e-14-level residue (e.g. 100.0 becomes
+    100.00000000000001) whenever the smoothing constant k=2/(period+1) isn't
+    exactly representable in binary floating point — which specific periods
+    trigger this is unpredictable (period=30 does, 12/26/9/14/50 don't, in
+    this codebase's own tests). Feeding that residue straight into a strict
+    `<`/`>` comparison against another series misreads it as "just crossed",
+    firing a signal out of thin air. The tolerance is 1e-9 relative (1e-9
+    floor) — orders of magnitude above that residue, and orders of magnitude
+    below any real quote's tick size, so it never masks an actual crossover.
+    """
+    tol = max(abs(a), abs(b)) * rel_tol + rel_tol
+    if a > b + tol:
+        return 1
+    if a < b - tol:
+        return -1
+    return 0
+
+
 def entry_signals(bars: list[dict], template: str, params: dict) -> list[str | None]:
     """对整段 K 线算出每根 bar 的入场信号("BUY"/"SELL"/None),长度与 bars 一致。
     Computes the per-bar entry signal ("BUY"/"SELL"/None) over the whole
@@ -254,9 +288,9 @@ def entry_signals(bars: list[dict], template: str, params: dict) -> list[str | N
         for i in range(1, n):
             if None in (fast[i], slow[i], fast[i - 1], slow[i - 1]):
                 continue
-            if fast[i - 1] <= slow[i - 1] and fast[i] > slow[i]:
+            if _cmp(fast[i - 1], slow[i - 1]) <= 0 and _cmp(fast[i], slow[i]) > 0:
                 out[i] = _apply_direction("BUY", direction)
-            elif fast[i - 1] >= slow[i - 1] and fast[i] < slow[i]:
+            elif _cmp(fast[i - 1], slow[i - 1]) >= 0 and _cmp(fast[i], slow[i]) < 0:
                 out[i] = _apply_direction("SELL", direction)
 
     elif template == "rsi_reversal":
@@ -285,9 +319,9 @@ def entry_signals(bars: list[dict], template: str, params: dict) -> list[str | N
         for i in range(1, n):
             if None in (dif[i], dea[i], dif[i - 1], dea[i - 1]):
                 continue
-            if dif[i - 1] <= dea[i - 1] and dif[i] > dea[i]:
+            if _cmp(dif[i - 1], dea[i - 1]) <= 0 and _cmp(dif[i], dea[i]) > 0:
                 out[i] = _apply_direction("BUY", direction)
-            elif dif[i - 1] >= dea[i - 1] and dif[i] < dea[i]:
+            elif _cmp(dif[i - 1], dea[i - 1]) >= 0 and _cmp(dif[i], dea[i]) < 0:
                 out[i] = _apply_direction("SELL", direction)
 
     elif template == "ma_pullback":
@@ -300,9 +334,9 @@ def entry_signals(bars: list[dict], template: str, params: dict) -> list[str | N
             # 上升趋势中回踩均线后收回：前一根收在均线上方，本根探到均线附近
             # 但收盘仍站上均线。/ Uptrend pullback: prior close above the MA,
             # this bar dips toward it but still closes back above.
-            if closes[i - 1] > ma[i - 1] and lows[i] <= ma[i] * (1 + tol) and closes[i] > ma[i]:
+            if _cmp(closes[i - 1], ma[i - 1]) > 0 and lows[i] <= ma[i] * (1 + tol) and _cmp(closes[i], ma[i]) > 0:
                 out[i] = _apply_direction("BUY", direction)
-            elif closes[i - 1] < ma[i - 1] and highs[i] >= ma[i] * (1 - tol) and closes[i] < ma[i]:
+            elif _cmp(closes[i - 1], ma[i - 1]) < 0 and highs[i] >= ma[i] * (1 - tol) and _cmp(closes[i], ma[i]) < 0:
                 out[i] = _apply_direction("SELL", direction)
 
     elif template == "bollinger_breakout":
@@ -360,9 +394,9 @@ def entry_signals(bars: list[dict], template: str, params: dict) -> list[str | N
             # In an uptrend, only accept a "pulled back into oversold, now
             # bouncing" buy; symmetric for a downtrend's sell — the trend
             # direction itself is the filter.
-            if closes[i] > trend_ma[i] and r[i - 1] <= oversold < r[i]:
+            if _cmp(closes[i], trend_ma[i]) > 0 and r[i - 1] <= oversold < r[i]:
                 out[i] = _apply_direction("BUY", direction)
-            elif closes[i] < trend_ma[i] and r[i - 1] >= overbought > r[i]:
+            elif _cmp(closes[i], trend_ma[i]) < 0 and r[i - 1] >= overbought > r[i]:
                 out[i] = _apply_direction("SELL", direction)
 
     else:
@@ -472,6 +506,13 @@ def run_backtest(
     排序结算，保证净值曲线的时间线正确（不同笔交易的出场先后顺序不一定
     等于入场先后顺序）。
 
+    某笔仓位到数据末尾都没摸到止损/止盈时（"还开着"），不计入 trades/summary——
+    但会把它记在返回值的 `openPosition` 里，而不是悄无声息地丢掉。这点很重要：
+    K 线历史本身就是有限的窗口（尤其是刚上线不久、1 分钟/5 分钟这类周期历史很
+    短的品种），只要最早的一笔一直没等到结果，之前的实现会直接放弃继续往后扫，
+    连同它之后所有本该正常出结果的信号一起消失，界面上只看到一个没有任何解释
+    的"0 笔交易"。
+
     Replays this template+param combo's historical performance against stored
     candle history. Returns the exact same shape as the existing "what if you
     followed" signal replay (summary/points/trades) so the frontend can reuse
@@ -483,6 +524,15 @@ def run_backtest(
     every bar meeting the entry condition opens its own independent trade;
     trades are re-sorted by exit time before settlement so the equity curve's
     timeline stays correct (exit order isn't necessarily entry order).
+
+    A position that never hits SL/TP by the end of the data ("still open")
+    isn't counted in trades/summary — but is reported back via `openPosition`
+    instead of silently vanishing. This matters because the candle history is
+    a bounded window (especially for symbols/intervals with a short history,
+    like 1m/5m soon after launch): if the very first signal never resolves,
+    the previous implementation gave up scanning entirely, taking every later
+    — otherwise perfectly resolvable — signal down with it, leaving the UI
+    with an unexplained "0 trades".
     """
     signals = entry_signals(bars, template, params)
     n = len(bars)
@@ -490,6 +540,12 @@ def run_backtest(
     # 第一步：只找出每笔交易的入场/出场，不牵扯净值结算。
     # Step 1: find each trade's entry/exit only, no equity bookkeeping yet.
     raw: list[dict] = []
+    # 未摸到止损/止盈就到了数据末尾的那一笔（如果有）——只记最后遇到的一笔，
+    # 供前端解释"为什么统计里没有它"，而不是让调用方猜。
+    # The one position (if any) that never hit SL/TP before the data ran out —
+    # only the last one encountered is kept, so the frontend can explain why
+    # it's missing from the stats instead of the caller having to guess.
+    open_position: dict | None = None
     if one_trade_at_a_time:
         i = 0
         while i < n:
@@ -501,8 +557,14 @@ def run_backtest(
             sl, tp = _entry_exit_prices(side, entry_price, stop_loss_method, stop_loss_value, take_profit_method, take_profit_value)
             exit_result, exit_j = _resolve_trade(bars, i, side, sl, tp)
             if exit_result is None:
-                # 到数据末尾还没走出结果,这笔不计入统计(既不是赢也不是输)
-                # Ran out of data before resolving; not counted as a win or loss.
+                # 到数据末尾还没走出结果,这笔不计入统计(既不是赢也不是输),
+                # 但明确记下来——一次一单下没法再继续扫后面的信号(仓位仍
+                # "开着"),不代表策略之后就再也不触发了。
+                # Ran out of data before resolving; not counted as a win or
+                # loss, but recorded explicitly — one-trade-at-a-time can't
+                # keep scanning past it (the position is still "open"), that
+                # doesn't mean the strategy never fires again after this.
+                open_position = {"side": side, "entryPrice": entry_price, "stopLoss": sl, "takeProfit": tp, "entryTime": bars[i]["t"]}
                 break
             raw.append({"i": i, "side": side, "entry_price": entry_price, "sl": sl, "tp": tp, "exit_result": exit_result, "exit_j": exit_j})
             i = exit_j + 1
@@ -515,6 +577,7 @@ def run_backtest(
             sl, tp = _entry_exit_prices(side, entry_price, stop_loss_method, stop_loss_value, take_profit_method, take_profit_value)
             exit_result, exit_j = _resolve_trade(bars, i, side, sl, tp)
             if exit_result is None:
+                open_position = {"side": side, "entryPrice": entry_price, "stopLoss": sl, "takeProfit": tp, "entryTime": bars[i]["t"]}
                 continue
             raw.append({"i": i, "side": side, "entry_price": entry_price, "sl": sl, "tp": tp, "exit_result": exit_result, "exit_j": exit_j})
         raw.sort(key=lambda t: t["exit_j"])
@@ -604,6 +667,7 @@ def run_backtest(
         "summary": summary,
         "points": [{"t": p["t"], "equity": p["equity"] * capital} for p in points],
         "trades": [{**t, "equityAfter": t["equityAfter"] * capital} for t in trades],
+        "openPosition": open_position,
     }
 
 

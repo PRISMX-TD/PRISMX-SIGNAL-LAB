@@ -1023,6 +1023,7 @@
     "runBacktest": "Run Backtest",
     "backtesting": "Backtesting…",
     "insufficientData": "Not enough candle history yet for this symbol/interval — it builds up over time, try again later.",
+    "openPositionNotice": "The strategy's most recent signal is still \"open\" — it hasn't hit its stop-loss or take-profit yet, so it isn't counted in the stats below. That doesn't mean the strategy never fired; this one just hasn't resolved yet. Re-run the backtest once more history has built up and you'll typically see completed trades.",
     "resultsTitle": "Backtest Results",
     "chartTitle": "Price Action & Trade Markers",
     "chartHint": "{{n}} trades, marked on the chart below (green arrow = buy entry, red arrow = sell entry, dot = exit)",

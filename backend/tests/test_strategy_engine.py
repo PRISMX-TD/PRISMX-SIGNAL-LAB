@@ -191,6 +191,52 @@ def test_unknown_template_still_rejected_after_expansion():
         se.entry_signals(_bars_from_closes([1.0, 2.0, 3.0]), "not_a_template", {})
 
 
+# ---------- 浮点容差:完全持平的价格不该凭空报出交叉 ----------
+# ---------- Float tolerance: a perfectly flat price shouldn't fire a phantom cross ----------
+def test_ma_cross_no_phantom_signal_on_perfectly_flat_price():
+    """两条完全由同一批重复价格递推出来的 EMA,理论上该分毫不差,但递归
+    乘加运算在某些周期下会残留 ~1e-14 级浮点误差(如 100.0 变成
+    100.00000000000001)——slowPeriod=30 恰好就是这样一个周期,且正是本
+    模板的默认值。不做容差处理会被误判成"刚刚穿越",凭空报出一个不存在
+    的信号。
+
+    Two EMAs built off literally the same repeated prices should be
+    identical in theory, but the recursive multiply-add leaves ~1e-14-level
+    residue for certain periods (e.g. 100.0 becomes 100.00000000000001) —
+    slowPeriod=30 happens to be exactly such a period, and is this
+    template's own default. Without tolerance this gets misread as "just
+    crossed", firing a signal that was never really there."""
+    closes = [100.0] * 60
+    bars = _bars_from_closes(closes)
+    params = se.validate_and_clamp_params("ma_cross", {"maType": "EMA", "fastPeriod": 10, "slowPeriod": 30})
+    signals = se.entry_signals(bars, "ma_cross", params)
+    assert all(s is None for s in signals)
+
+
+def test_macd_cross_no_phantom_signal_on_perfectly_flat_price():
+    closes = [100.0] * 60
+    bars = _bars_from_closes(closes)
+    params = se.validate_and_clamp_params("macd_cross", {})
+    signals = se.entry_signals(bars, "macd_cross", params)
+    assert all(s is None for s in signals)
+
+
+def test_ma_pullback_no_phantom_signal_on_perfectly_flat_price():
+    closes = [100.0] * 60
+    bars = _bars_from_closes(closes)
+    params = se.validate_and_clamp_params("ma_pullback", {"maType": "EMA", "period": 30, "touchTolerancePct": 0.3})
+    signals = se.entry_signals(bars, "ma_pullback", params)
+    assert all(s is None for s in signals)
+
+
+def test_trend_rsi_filter_no_phantom_signal_on_perfectly_flat_price():
+    closes = [100.0] * 60
+    bars = _bars_from_closes(closes)
+    params = se.validate_and_clamp_params("trend_rsi_filter", {"trendPeriod": 30, "rsiPeriod": 14})
+    signals = se.entry_signals(bars, "trend_rsi_filter", params)
+    assert all(s is None for s in signals)
+
+
 # ---------- 止损止盈价格:清掉浮点误差残留 ----------
 # ---------- SL/TP prices: floating-point residue is cleared ----------
 def test_entry_exit_prices_have_no_floating_point_residue():
@@ -270,6 +316,43 @@ def test_backtest_unresolved_trade_at_end_of_data_is_not_counted(monkeypatch):
     assert result["summary"]["wins"] == 0
     assert result["summary"]["losses"] == 0
     assert result["trades"] == []
+    # 不计入统计不等于凭空消失——调用方能看到"其实有一笔还开着"。
+    # Not counted isn't the same as vanishing — the caller can see "one is still open".
+    assert result["openPosition"] == {"side": "BUY", "entryPrice": 100, "stopLoss": 99.0, "takeProfit": 102.0, "entryTime": 1}
+
+
+def test_backtest_stuck_open_position_no_longer_swallows_later_resolvable_trades(monkeypatch):
+    """回归测试：修复前，一次一单模式下第 1 笔如果一直没等到止损/止盈，
+    会让循环直接放弃，第 2 笔哪怕能正常摸到止损也会被一起丢掉，整份回测
+    看起来像"压根没有任何交易"。现在第 1 笔仍不计入 trades，但通过
+    openPosition 明确报告；关掉一次一单后，第 2 笔应该被正常发现并结算。
+
+    Regression test: before the fix, if trade 1 never resolved under
+    one-trade-at-a-time, the loop simply gave up — trade 2 was dropped too
+    even though it clearly hits its stop, making the whole backtest look like
+    "no trades at all". Now trade 1 is still excluded from `trades`, but
+    reported via `openPosition`; with one-trade-at-a-time off, trade 2 is
+    found and settled normally.
+    """
+    bars = [
+        {"t": 0, "o": 100, "h": 100, "l": 100, "c": 100},
+        {"t": 1, "o": 100, "h": 100, "l": 100, "c": 100},          # 入场1 BUY@100,SL=99 TP=102,全程未被触发 / entry 1, never touched
+        {"t": 2, "o": 100.5, "h": 100.5, "l": 100, "c": 100.5},
+        {"t": 3, "o": 100.5, "h": 100.5, "l": 100.5, "c": 100.5},  # 入场2 SELL@100.5,SL=101.505 TP=98.49
+        {"t": 4, "o": 101.6, "h": 101.6, "l": 100.5, "c": 101.6},  # 摸到入场2止损,但没碰到入场1止盈(102) / hits entry 2's SL, stays under entry 1's TP
+        {"t": 5, "o": 101.6, "h": 101.6, "l": 101.6, "c": 101.6},
+    ]
+    monkeypatch.setattr(se, "entry_signals", lambda b, t, p: [None, "BUY", None, "SELL", None, None])
+    kwargs = dict(stop_loss_method="percent", stop_loss_value=1.0, take_profit_method="rr", take_profit_value=2.0, risk_pct=1.0, capital=10000, mode="compound", symbol="TEST")
+
+    result_on = se.run_backtest(bars, "ma_cross", {}, one_trade_at_a_time=True, **kwargs)
+    assert result_on["trades"] == []
+    assert result_on["openPosition"] is not None and result_on["openPosition"]["side"] == "BUY"
+
+    result_off = se.run_backtest(bars, "ma_cross", {}, one_trade_at_a_time=False, **kwargs)
+    assert len(result_off["trades"]) == 1
+    assert result_off["trades"][0]["side"] == "SELL"
+    assert result_off["trades"][0]["result"] == "HIT_SL"
 
 
 def test_backtest_one_trade_at_a_time_skips_signal_while_position_open(monkeypatch):

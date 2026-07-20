@@ -812,6 +812,21 @@ function StrategyBuilder({
           <p className="mt-3 rounded-lg border border-amber-400/20 bg-amber-400/5 p-3 text-xs text-amber-200">{t('strategy.insufficientData')}</p>
         )}
 
+        {result && !result.insufficientData && result.openPosition && (
+          <div className="mt-3 rounded-lg border border-amber-400/20 bg-amber-400/5 p-3 text-xs text-amber-200">
+            <p>{t('strategy.openPositionNotice')}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-amber-100/90">
+              <span className={`tag ${result.openPosition.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
+                {result.openPosition.side === 'BUY' ? t('common.buy') : t('common.sell')}
+              </span>
+              <span>{t('signals.entry')} {result.openPosition.entryPrice}</span>
+              <span>{t('signals.stopLoss')} {result.openPosition.stopLoss}</span>
+              <span>{t('signals.takeProfit')} {result.openPosition.takeProfit}</span>
+              <span>{fmtDate(new Date(result.openPosition.entryTime * 1000).toISOString())}</span>
+            </div>
+          </div>
+        )}
+
         {result && !result.insufficientData && (
           <div className="mt-5 border-t border-white/10 pt-4">
             <h4 className="mb-3 text-sm font-semibold text-slate-200">{t('strategy.resultsTitle')}</h4>
