@@ -1295,11 +1295,6 @@ export default function ChartsPage() {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 5L5 19M5 5l14 14" /></svg>
               </button>
               <span className="mx-0.5 h-5 w-px shrink-0 bg-white/10" />
-              {/* 磁吸 */}
-              <button type="button" title={t('charts.draw.magnet')} aria-label={t('charts.draw.magnet')}
-                onClick={() => { drawLayerRef.current?.setMagnet(drawLayerRef.current?.magnet === 'off' ? 'weak' : 'off'); bumpDraw() }}
-                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition ${drawLayerRef.current?.magnet !== 'off' ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`}
-              ><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 6l-2 2 2 2M6 6v6a4 4 0 004 4h4a4 4 0 004-4V6l2 2 2-2" /></svg></button>
               {/* 连续绘制 */}
               <button type="button" title={t('charts.draw.stayInDraw')} aria-label={t('charts.draw.stayInDraw')}
                 onClick={() => { drawLayerRef.current?.setStayInDraw(!drawLayerRef.current?.stayInDraw); bumpDraw() }}
@@ -1514,9 +1509,6 @@ export default function ChartsPage() {
                 className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-down disabled:opacity-30 disabled:hover:text-slate-400"
               ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 5L5 19M5 5l14 14" /></svg></button>
               <span className="mx-0.5 h-5 w-px bg-white/10" />
-              <button type="button" title={t('charts.draw.magnet')} aria-label={t('charts.draw.magnet')} onClick={() => { drawLayerRef.current?.setMagnet(drawLayerRef.current?.magnet === 'off' ? 'weak' : 'off'); bumpDraw() }}
-                className={`flex h-6 w-6 items-center justify-center rounded-md border transition ${drawLayerRef.current?.magnet !== 'off' ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`}
-              ><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l-2 2 2 2M6 6v6a4 4 0 004 4h4a4 4 0 004-4V6l2 2 2-2" /></svg></button>
               <button type="button" title={t('charts.draw.stayInDraw')} aria-label={t('charts.draw.stayInDraw')} onClick={() => { drawLayerRef.current?.setStayInDraw(!drawLayerRef.current?.stayInDraw); bumpDraw() }}
                 className={`flex h-6 w-6 items-center justify-center rounded-md border transition ${drawLayerRef.current?.stayInDraw ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`}
               ><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3l4 4-4 4" /><path d="M3 17l4 4-4 4" /><line x1="21" y1="7" x2="7" y2="21" /><line x1="7" y1="3" x2="21" y2="17" /></svg></button>
