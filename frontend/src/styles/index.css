@@ -1756,17 +1756,17 @@
     .hero-heading {
       display: none;
     }
-    /* 指示器居中 + 收紧上下留白 */
+    /* 指示器居中，上下留白对称且收紧 */
     .hero-header-row {
       min-height: 0;
       justify-content: center;
-      margin-bottom: 2px;
+      margin-bottom: 6px;
     }
     .hero-segs {
       margin: 0 auto;
     }
     .hero-card {
-      padding-top: 10px !important;
+      padding-top: 6px !important;
     }
     .hero-nebula {
       width: 46%;
