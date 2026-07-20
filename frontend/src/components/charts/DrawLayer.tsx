@@ -713,9 +713,9 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
     <>
       {/* 左侧浮动工具栏 / floating left toolbar */}
       {!hideToolbar && (
-        <div className="absolute left-3 top-3 z-20 flex flex-col rounded-xl border border-white/10 bg-ink-900/80 p-1.5 backdrop-blur" style={{ maxHeight: 'calc(100% - 60px)' }}>
+        <div className="absolute left-3 top-3 z-20 flex flex-col rounded-xl border border-white/10 bg-ink-900/80 p-1.5 backdrop-blur" style={{ maxHeight: 'calc(100dvh - 80px)' }}>
           {/* 可滚动工具区 / scrollable tools area */}
-          <div className="flex flex-col gap-1 overflow-y-auto" style={{ flex: '1 1 auto', minHeight: 0 }}>
+          <div className="flex flex-col gap-1 overflow-y-auto" style={{ flex: '1 1 0', minHeight: 0 }}>
           {/* 可折叠分组 / collapsible groups */}
           {TOOL_GROUPS.map((group) => {
             const isCollapsed = collapsed[group.key]
