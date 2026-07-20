@@ -1,12 +1,14 @@
 // 图表画图层：在 lightweight-charts 之上叠加一个 canvas，支持趋势线 / 水平线 /
-// 矩形的绘制、选中、拖动与删除。画线锚定在 (时间, 价格) 数据坐标上，随图表
-// 平移/缩放自动重绘；按品种保存到用户云端偏好，跨设备同步（见 store/prefs）。
+// 矩形 / 斐波那契的绘制、选中、拖动、锁定与删除。画线锚定在 (时间, 价格) 数据
+// 坐标上，随图表平移/缩放自动重绘；按品种保存到用户云端偏好，跨设备同步。
+// 支持撤销/重做、右键菜单、双击锁定、矩形四角手柄、动态容差命中。
 //
 // Chart drawing layer: an overlay canvas on top of lightweight-charts that
-// supports drawing / selecting / moving / deleting trend lines, horizontal
-// lines and rectangles. Anchors are stored in (time, price) data coordinates
-// and repainted as the chart pans/zooms; drawings are saved per symbol into
-// the user's cloud prefs and synced across devices (see store/prefs).
+// supports drawing / selecting / moving / locking / deleting trend lines,
+// horizontal lines, rectangles & fibs. Anchors are stored in (time, price)
+// and repainted as the chart pans/zooms; locked drawings skip hit-testing.
+// Supports undo/redo, right-click context menu, double-click to lock,
+// 4-corner handles for rectangles, and dynamic hit tolerance.
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { IChartApi, ISeriesApi, UTCTimestamp } from 'lightweight-charts'
@@ -24,9 +26,15 @@ export interface DrawLayerHandle {
   setColor: (c: string) => void
   selectedId: string | null
   drawCount: number
+  lockedCount: number
   deleteSelected: () => void
   clearAll: () => void
   applyColor: (c: string) => void
+  toggleLock: () => void
+  lockAll: () => void
+  unlockAll: () => void
+  undo: () => void
+  redo: () => void
 }
 
 // 一个锚点：时间(epoch 秒) + 价格。水平线只用到 price。
@@ -39,8 +47,9 @@ interface Point {
 interface Drawing {
   id: string
   type: DrawType
-  pts: Point[] // hline: [{t:0,p}]; trend/rect: [a, b]
+  pts: Point[] // hline: [{t:0,p}]; trend/rect/fib: [a, b]
   color: string
+  locked?: boolean
 }
 
 interface Props {
@@ -55,8 +64,9 @@ interface Props {
 }
 
 // 命中判定容差（屏幕像素）/ hit-test tolerance in screen pixels
-const TOL = 8
-const HANDLE = 9
+const TOL = 12
+const HANDLE = 10
+const UNDO_MAX = 30
 const COLORS = ['#22d3ee', '#a78bfa', '#2ee07e', '#ff4d67', '#f5c451']
 // 斐波那契回调价位 / Fibonacci retracement levels
 const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]
@@ -86,12 +96,100 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
   const [drawings, setDrawings] = useState<Drawing[]>([])
   const [drawCount, setDrawCount] = useState(0)
 
+  // 撤销/重做 / undo / redo
+  const undoStackRef = useRef<Drawing[][]>([])
+  const redoStackRef = useRef<Drawing[][]>([])
+  const [canUndo, setCanUndo] = useState(false)
+  const [canRedo, setCanRedo] = useState(false)
+
+  // 右键上下文菜单 / right-click context menu
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; drawingId: string } | null>(null)
+  useBackToClose(!!ctxMenu, () => setCtxMenu(null))
+
   // 清空确认弹窗：不用 window.confirm()，改用项目统一 ConfirmModal，
   // 避免原生弹窗在全屏模式下把浏览器踢出全屏状态。
   // Clear-confirm modal: replaces window.confirm() with the project's
   // ConfirmModal so native dialogs don't break fullscreen state.
   const [confirmOpen, setConfirmOpen] = useState(false)
   useBackToClose(confirmOpen, () => setConfirmOpen(false))
+
+  const pushUndo = useCallback((current: Drawing[]) => {
+    undoStackRef.current.push(current)
+    if (undoStackRef.current.length > UNDO_MAX) undoStackRef.current.shift()
+    redoStackRef.current = []
+    setCanUndo(true)
+    setCanRedo(false)
+  }, [])
+
+  const undo = useCallback(() => {
+    const stack = undoStackRef.current
+    if (stack.length === 0) return
+    const prev = stack.pop()!
+    redoStackRef.current.push(drawingsRef.current)
+    commitNoHistory(prev)
+    setCanUndo(stack.length > 0)
+    setCanRedo(true)
+    setSelectedId(null)
+  }, [])
+
+  const redo = useCallback(() => {
+    const stack = redoStackRef.current
+    if (stack.length === 0) return
+    const next = stack.pop()!
+    undoStackRef.current.push(drawingsRef.current)
+    commitNoHistory(next)
+    setCanUndo(true)
+    setCanRedo(stack.length > 0)
+    setSelectedId(null)
+  }, [])
+
+  const lockedCount = drawings.filter((d) => d.locked).length
+
+  const toggleLock = useCallback(() => {
+    if (!selectedId) return
+    const next = drawings.map((d) => d.id === selectedId ? { ...d, locked: !d.locked } : d)
+    commit(next)
+    // 锁定后自动取消选中 / deselect after lock to prevent accidental dragging
+    if (next.find((d) => d.id === selectedId)?.locked) setSelectedId(null)
+  }, [selectedId, drawings])
+
+  const lockAll = useCallback(() => {
+    commit(drawings.map((d) => ({ ...d, locked: true })))
+    setSelectedId(null)
+  }, [drawings])
+
+  const unlockAll = useCallback(() => {
+    commit(drawings.map((d) => ({ ...d, locked: false })))
+  }, [drawings])
+
+  const deleteSelected = useCallback(() => {
+    if (!selectedId) return
+    commit(drawings.filter((d) => d.id !== selectedId))
+    setSelectedId(null)
+  }, [selectedId, drawings])
+
+  const clearAll = useCallback(() => {
+    if (drawings.length === 0) return
+    setConfirmOpen(true)
+  }, [drawings.length])
+
+  const doClearAll = useCallback(() => {
+    setConfirmOpen(false)
+    commit([])
+    setSelectedId(null)
+  }, [])
+
+  const applyColor = useCallback((c: string) => {
+    setColor(c)
+    if (selectedId) commit(drawings.map((d) => (d.id === selectedId ? { ...d, color: c } : d)))
+  }, [selectedId, drawings])
+
+  const ctxDeleteDrawing = useCallback(() => {
+    if (!ctxMenu) return
+    commit(drawings.filter((d) => d.id !== ctxMenu.drawingId))
+    if (selectedId === ctxMenu.drawingId) setSelectedId(null)
+    setCtxMenu(null)
+  }, [ctxMenu, drawings, selectedId])
 
   useImperativeHandle(ref, () => ({
     tool,
@@ -100,10 +198,16 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
     setColor,
     selectedId,
     drawCount,
+    lockedCount,
     deleteSelected,
     clearAll,
     applyColor,
-  }))
+    toggleLock,
+    lockAll,
+    unlockAll,
+    undo,
+    redo,
+  }), [tool, color, selectedId, drawCount, lockedCount, deleteSelected, clearAll, applyColor, toggleLock, lockAll, unlockAll, undo, redo])
 
   // 交互期间用可变引用避免频繁 setState / mutable refs to avoid re-render during interaction
   const toolRef = useRef(tool)
@@ -121,6 +225,8 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
   // 已应用到状态的画线快照，避免"保存后云端回传"把选中态重置 / snapshot to skip reload-after-save
   const appliedRef = useRef('')
   const symRef = useRef(symbol)
+  // 双击检测 / double-click detection
+  const lastClickRef = useRef<{ id: string; time: number } | null>(null)
 
   toolRef.current = tool
   colorRef.current = color
@@ -205,6 +311,19 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
 
   const commit = useCallback(
     (next: Drawing[]) => {
+      pushUndo(drawingsRef.current)
+      appliedRef.current = JSON.stringify(next)
+      drawingsRef.current = next
+      setDrawings(next)
+      setDrawCount(next.length)
+      setPref('chartDraw', symbol, next)
+    },
+    [setPref, symbol, pushUndo]
+  )
+
+  // 无历史提交（撤销/重做时使用）/ commit without pushing undo (used by undo/redo)
+  const commitNoHistory = useCallback(
+    (next: Drawing[]) => {
       appliedRef.current = JSON.stringify(next)
       drawingsRef.current = next
       setDrawings(next)
@@ -254,44 +373,47 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
       ctx.stroke()
     }
 
-    const paint = (type: DrawType, px: { x: number; y: number }[], col: string, selected: boolean) => {
+    const paint = (type: DrawType, px: { x: number; y: number }[], col: string, selected: boolean, locked: boolean) => {
       ctx.strokeStyle = col
       ctx.lineWidth = selected ? 2 : 1.5
+      // 锁定画线降低不透明度 / locked drawings are semi-transparent
+      const alpha = locked ? 0.35 : 1
+      ctx.globalAlpha = alpha
       if (type === 'hline') {
         const y = px[0].y
         ctx.beginPath()
         ctx.moveTo(0, y)
         ctx.lineTo(w, y)
         ctx.stroke()
-        if (selected) paintHandle(w / 2, y)
+        if (selected && !locked) paintHandle(w / 2, y)
       } else if (type === 'trend') {
         ctx.beginPath()
         ctx.moveTo(px[0].x, px[0].y)
         ctx.lineTo(px[1].x, px[1].y)
         ctx.stroke()
-        if (selected) {
+        if (selected && !locked) {
           paintHandle(px[0].x, px[0].y)
           paintHandle(px[1].x, px[1].y)
         }
       } else if (type === 'fib') {
         const xL = Math.min(px[0].x, px[1].x)
         const xR = Math.max(px[0].x, px[1].x)
-        const yA = px[0].y // ratio 1（第一个锚点）/ ratio 1 (first anchor)
-        const yB = px[1].y // ratio 0（第二个锚点）/ ratio 0 (second anchor)
-        // 连接两锚点的淡对角线 / faint diagonal joining the two anchors
-        ctx.globalAlpha = 0.45
+        const yA = px[0].y
+        const yB = px[1].y
+        // 连接两锚点的淡对角线
+        ctx.globalAlpha = locked ? 0.18 : 0.45
         ctx.beginPath()
         ctx.moveTo(px[0].x, px[0].y)
         ctx.lineTo(px[1].x, px[1].y)
         ctx.stroke()
-        ctx.globalAlpha = 1
+        ctx.globalAlpha = alpha
         ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace'
         ctx.textBaseline = 'middle'
         let prevY: number | null = null
         for (const lv of FIB_LEVELS) {
-          const ly = yB + (yA - yB) * lv // lv=0 → yB, lv=1 → yA
+          const ly = yB + (yA - yB) * lv
           if (prevY != null) {
-            ctx.fillStyle = col + '14'
+            ctx.fillStyle = col + (locked ? '08' : '14')
             ctx.fillRect(xL, Math.min(prevY, ly), xR - xL, Math.abs(ly - prevY))
           }
           prevY = ly
@@ -305,7 +427,7 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
           ctx.fillStyle = col
           ctx.fillText(`${(lv * 100).toFixed(1)}%${price != null ? '  ' + price.toFixed(digits) : ''}`, xR + 4, ly)
         }
-        if (selected) {
+        if (selected && !locked) {
           paintHandle(px[0].x, px[0].y)
           paintHandle(px[1].x, px[1].y)
         }
@@ -314,23 +436,38 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
         const y = Math.min(px[0].y, px[1].y)
         const rw = Math.abs(px[1].x - px[0].x)
         const rh = Math.abs(px[1].y - px[0].y)
-        ctx.fillStyle = col + '22'
+        ctx.fillStyle = col + (locked ? '0a' : '22')
         ctx.fillRect(x, y, rw, rh)
         ctx.strokeRect(x, y, rw, rh)
-        if (selected) {
-          paintHandle(px[0].x, px[0].y)
-          paintHandle(px[1].x, px[1].y)
+        if (selected && !locked) {
+          // 矩形四角把手 / 4 corner handles for rectangle
+          paintHandle(x, y)
+          paintHandle(x + rw, y)
+          paintHandle(x, y + rh)
+          paintHandle(x + rw, y + rh)
         }
       }
+      // 锁定画线末端显示小锁图标 / small lock icon on locked drawings
+      if (locked) {
+        const cx = type === 'hline' ? w / 2 : (px[0].x + (px.length > 1 ? px[1].x : px[0].x)) / 2
+        const cy = type === 'hline' ? px[0].y - 10 : Math.min(px[0].y, px.length > 1 ? px[1].y : px[0].y) - 10
+        ctx.globalAlpha = 0.5
+        ctx.fillStyle = '#ffffff'
+        ctx.font = '9px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText('🔒', cx, cy)
+        ctx.textAlign = 'start'
+      }
+      ctx.globalAlpha = 1
     }
 
     for (const d of drawingsRef.current) {
       if (workRef.current && dragRef.current && 'id' in dragRef.current && dragRef.current.id === d.id) continue
       const px = toPx(d)
-      if (px) paint(d.type, px, d.color, d.id === selectedRef.current)
+      if (px) paint(d.type, px, d.color, d.id === selectedRef.current, !!d.locked)
     }
     // 正在绘制/拖动的工作副本 / the in-progress working copy
-    if (workRef.current) paint(workRef.current.type, workRef.current.px, workRef.current.color, true)
+    if (workRef.current) paint(workRef.current.type, workRef.current.px, workRef.current.color, true, false)
   }, [host, toPx, pOf, digits])
 
   // ---------- 画布尺寸自适配 / keep canvas sized to the host ----------
@@ -377,15 +514,30 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
   }, [drawings, selectedId, tool, color, draw])
 
   // ---------- 命中判定 / hit-testing (screen coords) ----------
-  // 返回选中画线的某个把手序号（-1 表示未命中把手）/ handle index of the selected drawing (-1 = none)
+  // 返回选中画线的某个把手序号（-1 表示未命中）
+  // 矩形返回 0-3（四角），其余返回 0-1（两端）
+  // handle index of the selected drawing (-1 = none)
+  // rectangle returns 0-3 (4 corners), others return 0-1 (2 ends)
   const hitHandle = useCallback(
     (x: number, y: number): number => {
-      const sel = drawingsRef.current.find((d) => d.id === selectedRef.current)
+      const sel = drawingsRef.current.find((d) => d.id === selectedRef.current && !d.locked)
       if (!sel) return -1
       const px = toPx(sel)
       if (!px) return -1
       if (sel.type === 'hline') {
         if (Math.hypot(x - host.clientWidth / 2, y - px[0].y) <= HANDLE + 2) return 0
+        return -1
+      }
+      if (sel.type === 'rect') {
+        // 矩形的四个角 / 4 corners of the rectangle
+        const x1 = Math.min(px[0].x, px[1].x)
+        const y1 = Math.min(px[0].y, px[1].y)
+        const x2 = Math.max(px[0].x, px[1].x)
+        const y2 = Math.max(px[0].y, px[1].y)
+        const corners = [{ x: x1, y: y1 }, { x: x2, y: y1 }, { x: x1, y: y2 }, { x: x2, y: y2 }]
+        for (let i = 0; i < 4; i++) {
+          if (Math.abs(x - corners[i].x) <= HANDLE + 2 && Math.abs(y - corners[i].y) <= HANDLE + 2) return i
+        }
         return -1
       }
       for (let i = 0; i < px.length; i++) {
@@ -399,34 +551,59 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
   const hitDrawing = useCallback(
     (x: number, y: number): Drawing | null => {
       const list = drawingsRef.current
+      const sel = selectedRef.current
+      // 已选中的画线优先判定 / prioritize the currently selected drawing
+      if (sel) {
+        const sd = list.find((d) => d.id === sel)
+        if (sd && !sd.locked) {
+          const hit = hitSingle(x, y, sd)
+          if (hit) return hit
+        }
+      }
       for (let i = list.length - 1; i >= 0; i--) {
         const d = list[i]
-        const px = toPx(d)
-        if (!px) continue
-        if (d.type === 'hline') {
-          if (Math.abs(y - px[0].y) <= TOL) return d
-        } else if (d.type === 'trend') {
-          if (distToSeg(x, y, px[0].x, px[0].y, px[1].x, px[1].y) <= TOL) return d
-        } else if (d.type === 'fib') {
-          const xL = Math.min(px[0].x, px[1].x)
-          const xR = Math.max(px[0].x, px[1].x)
-          if (x >= xL - TOL && x <= xR + TOL) {
-            const yA = px[0].y
-            const yB = px[1].y
-            for (const lv of FIB_LEVELS) {
-              if (Math.abs(y - (yB + (yA - yB) * lv)) <= TOL) return d
-            }
+        if (d.locked) continue // 跳过锁定的 / skip locked
+        if (d.id === sel) continue // 上面已判过 / already tested above
+        const hit = hitSingle(x, y, d)
+        if (hit) return hit
+      }
+      return null
+    },
+    []
+  )
+
+  // 单条画线命中判定 / hit-test for a single drawing
+  const hitSingle = useCallback(
+    (x: number, y: number, d: Drawing): Drawing | null => {
+      const px = toPx(d)
+      if (!px) return null
+      if (d.type === 'hline') {
+        if (Math.abs(y - px[0].y) <= TOL) return d
+      } else if (d.type === 'trend') {
+        // 线段判定 / segment distance
+        if (distToSeg(x, y, px[0].x, px[0].y, px[1].x, px[1].y) <= TOL) return d
+        // 端点圆形命中区 / circular hit zone at endpoints
+        if (Math.hypot(x - px[0].x, y - px[0].y) <= TOL) return d
+        if (Math.hypot(x - px[1].x, y - px[1].y) <= TOL) return d
+      } else if (d.type === 'fib') {
+        const xL = Math.min(px[0].x, px[1].x)
+        const xR = Math.max(px[0].x, px[1].x)
+        if (x >= xL - TOL && x <= xR + TOL) {
+          const yA = px[0].y
+          const yB = px[1].y
+          for (const lv of FIB_LEVELS) {
+            if (Math.abs(y - (yB + (yA - yB) * lv)) <= TOL) return d
           }
-          if (distToSeg(x, y, px[0].x, px[0].y, px[1].x, px[1].y) <= TOL) return d
-        } else {
-          const x1 = Math.min(px[0].x, px[1].x)
-          const x2 = Math.max(px[0].x, px[1].x)
-          const y1 = Math.min(px[0].y, px[1].y)
-          const y2 = Math.max(px[0].y, px[1].y)
-          const nearV = (x >= x1 - TOL && x <= x2 + TOL) && (Math.abs(y - y1) <= TOL || Math.abs(y - y2) <= TOL)
-          const nearH = (y >= y1 - TOL && y <= y2 + TOL) && (Math.abs(x - x1) <= TOL || Math.abs(x - x2) <= TOL)
-          if (nearV || nearH) return d
         }
+        if (distToSeg(x, y, px[0].x, px[0].y, px[1].x, px[1].y) <= TOL) return d
+      } else {
+        const x1 = Math.min(px[0].x, px[1].x)
+        const x2 = Math.max(px[0].x, px[1].x)
+        const y1 = Math.min(px[0].y, px[1].y)
+        const y2 = Math.max(px[0].y, px[1].y)
+        const nearV = (x >= x1 - TOL && x <= x2 + TOL) && (Math.abs(y - y1) <= TOL || Math.abs(y - y2) <= TOL)
+        const nearH = (y >= y1 - TOL && y <= y2 + TOL) && (Math.abs(x - x1) <= TOL || Math.abs(x - x2) <= TOL)
+        if (nearV || nearH) return d
       }
       return null
     },
@@ -480,6 +657,14 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
     }
     const hit = hitDrawing(x, y)
     if (hit) {
+      // 双击快速切换锁定 / double-click to toggle lock
+      const now = Date.now()
+      if (lastClickRef.current && lastClickRef.current.id === hit.id && now - lastClickRef.current.time < 350) {
+        commit(drawingsRef.current.map((d) => d.id === hit.id ? { ...d, locked: !d.locked } : d))
+        lastClickRef.current = null
+        return
+      }
+      lastClickRef.current = { id: hit.id, time: now }
       setSelectedId(hit.id)
       dragRef.current = { mode: 'move', id: hit.id, startX: x, startY: y, origPx: toPx(hit)! }
       workRef.current = { type: hit.type, color: hit.color, px: toPx(hit)! }
@@ -500,7 +685,21 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
       const dy = y - drag.startY
       workRef.current.px = drag.origPx.map((p) => ({ x: p.x + dx, y: p.y + dy }))
     } else {
-      workRef.current.px[drag.handle] = { x, y }
+      const hi = drag.handle
+      // 矩形的四角手柄映射回两个锚点 / map 4-corner handle index back to anchor points
+      if (workRef.current.type === 'rect' && hi >= 0) {
+        const x1 = Math.min(workRef.current.px[0].x, workRef.current.px[1].x)
+        const y1 = Math.min(workRef.current.px[0].y, workRef.current.px[1].y)
+        const x2 = Math.max(workRef.current.px[0].x, workRef.current.px[1].x)
+        const y2 = Math.max(workRef.current.px[0].y, workRef.current.px[1].y)
+        // hi: 0=TL, 1=TR, 2=BL, 3=BR
+        if (hi === 0) { workRef.current.px = [{ x, y }, { x: x2, y: y2 }] }
+        else if (hi === 1) { workRef.current.px = [{ x: x1, y }, { x, y: y2 }] }
+        else if (hi === 2) { workRef.current.px = [{ x, y: y1 }, { x: x2, y }] }
+        else { workRef.current.px = [{ x: x1, y: y1 }, { x, y }] }
+      } else {
+        workRef.current.px[hi] = { x, y }
+      }
     }
     draw()
   }
@@ -588,7 +787,19 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
       const onBody = onHandle || hitDrawing(x, y) != null
       if (onBody) {
         cv.style.pointerEvents = 'auto'
-        cv.style.cursor = onHandle ? 'crosshair' : 'move'
+        if (onHandle) {
+          // 根据把手位置选择缩放方向光标 / pick resize cursor based on handle position
+          const sel = drawingsRef.current.find((d) => d.id === selectedRef.current)
+          if (sel && sel.type === 'rect') {
+            const h = hitHandle(x, y)
+            // 0=TL, 1=TR, 2=BL, 3=BR
+            cv.style.cursor = h === 0 || h === 3 ? 'nwse-resize' : 'nesw-resize'
+          } else {
+            cv.style.cursor = 'grab'
+          }
+        } else {
+          cv.style.cursor = 'move'
+        }
       } else {
         cv.style.pointerEvents = 'none'
         cv.style.cursor = 'default'
@@ -612,7 +823,7 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
     }
   }, [tool])
 
-  // ---------- 键盘：Esc 取消 / Delete 删除所选 ----------
+  // ---------- 键盘：Esc 取消 / Delete 删除 / Ctrl+Z 撤销 / Ctrl+Shift+Z 重做 ----------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -623,6 +834,14 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
         }
         setTool('cursor')
         setSelectedId(null)
+        setCtxMenu(null)
+      } else if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault()
+        if (e.shiftKey) {
+          redo()
+        } else {
+          undo()
+        }
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedRef.current) {
         const target = e.target as HTMLElement | null
         if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return
@@ -632,26 +851,7 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [commit, draw])
-
-  const deleteSelected = () => {
-    if (!selectedId) return
-    commit(drawings.filter((d) => d.id !== selectedId))
-    setSelectedId(null)
-  }
-  const clearAll = () => {
-    if (drawings.length === 0) return
-    setConfirmOpen(true)
-  }
-  const doClearAll = () => {
-    setConfirmOpen(false)
-    commit([])
-    setSelectedId(null)
-  }
-  const applyColor = (c: string) => {
-    setColor(c)
-    if (selectedId) commit(drawings.map((d) => (d.id === selectedId ? { ...d, color: c } : d)))
-  }
+  }, [commit, draw, undo, redo])
 
   const toolBtn = (id: Tool, label: string, icon: JSX.Element) => (
     <button
@@ -702,6 +902,58 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
           t('charts.draw.fib'),
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5h18M3 10h18M3 14h18M3 19h18" /><path d="M4 19L20 5" opacity="0.5" /></svg>
         )}
+
+        <div className="my-0.5 h-px w-full bg-white/10" />
+
+        {/* 锁定 / lock controls */}
+        <button
+          type="button"
+          title={selectedId && drawings.find((d) => d.id === selectedId)?.locked ? t('charts.draw.unlock') : t('charts.draw.lock')}
+          aria-label={t('charts.draw.lock')}
+          onClick={toggleLock}
+          disabled={!selectedId}
+          className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${
+            selectedId && drawings.find((d) => d.id === selectedId)?.locked
+              ? 'border-amber-400/60 bg-amber-400/15 text-amber-300'
+              : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'
+          } disabled:opacity-30 disabled:hover:text-slate-400`}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg>
+        </button>
+        <button
+          type="button"
+          title={t('charts.draw.lockAll')}
+          aria-label={t('charts.draw.lockAll')}
+          onClick={lockAll}
+          disabled={drawCount === 0}
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-amber-300 disabled:opacity-30 disabled:hover:text-slate-400"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" /><line x1="12" y1="15" x2="12" y2="18" /></svg>
+        </button>
+
+        <div className="my-0.5 h-px w-full bg-white/10" />
+
+        {/* 撤销/重做 / undo/redo */}
+        <button
+          type="button"
+          title={t('charts.draw.undo')}
+          aria-label={t('charts.draw.undo')}
+          onClick={undo}
+          disabled={!canUndo}
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-slate-100 disabled:opacity-30 disabled:hover:text-slate-400"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 102.13-9.36L1 10" /></svg>
+        </button>
+        <button
+          type="button"
+          title={t('charts.draw.redo')}
+          aria-label={t('charts.draw.redo')}
+          onClick={redo}
+          disabled={!canRedo}
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-slate-100 disabled:opacity-30 disabled:hover:text-slate-400"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" /></svg>
+        </button>
 
         <div className="my-0.5 h-px w-full bg-white/10" />
 
@@ -762,7 +1014,47 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
         onPointerMove={onMove}
         onPointerUp={onUp}
         onPointerCancel={onUp}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          if (tool !== 'cursor') return
+          const cv = canvasRef.current!
+          const r = cv.getBoundingClientRect()
+          const x = e.clientX - r.left
+          const y = e.clientY - r.top
+          const hit = hitDrawing(x, y)
+          if (hit) {
+            setSelectedId(hit.id)
+            setCtxMenu({ x: e.clientX, y: e.clientY, drawingId: hit.id })
+          }
+        }}
       />
+
+      {/* 右键上下文菜单 / right-click context menu */}
+      {ctxMenu && (
+        <div
+          className="fixed z-50 min-w-[140px] rounded-lg border border-white/10 bg-ink-900/95 p-1 shadow-xl backdrop-blur"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => {
+              const d = drawings.find((dw) => dw.id === ctxMenu.drawingId)
+              if (d) commit(drawings.map((dw) => dw.id === ctxMenu.drawingId ? { ...dw, locked: !dw.locked } : dw))
+              setCtxMenu(null)
+            }}
+            className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10"
+          >
+            {drawings.find((d) => d.id === ctxMenu.drawingId)?.locked ? '🔓' : '🔒'}
+            {drawings.find((d) => d.id === ctxMenu.drawingId)?.locked ? t('charts.draw.unlock') : t('charts.draw.lock')}
+          </button>
+          <button
+            onClick={ctxDeleteDrawing}
+            className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs text-down hover:bg-white/10"
+          >
+            🗑 {t('charts.draw.delete')}
+          </button>
+        </div>
+      )}
 
       {/* 清空确认弹窗 / clear-all confirm modal */}
       {confirmOpen && (
