@@ -714,6 +714,25 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
       {/* 左侧浮动工具栏 / floating left toolbar */}
       {!hideToolbar && (
         <div className="absolute left-3 top-3 z-20 flex flex-col overflow-y-auto rounded-xl border border-white/10 bg-ink-900/80 p-1.5 backdrop-blur" style={{ maxHeight: 'calc(100dvh - 80px)' }}>
+          {/* ──── 顶部工具控制栏 / top utility bar ──── */}
+          <div className="flex flex-col gap-1 -mx-0.5 px-0.5 pb-1 border-b border-white/10 mb-1">
+          {/* 磁吸 */}
+          <button type="button" title={t('charts.draw.magnet')} aria-label={t('charts.draw.magnet')}
+            onClick={() => setMagnet(magnet === 'off' ? 'weak' : 'off')}
+            className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${magnet !== 'off' ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`}
+          ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 6l-2 2 2 2M6 6v6a4 4 0 004 4h4a4 4 0 004-4V6l2 2 2-2" /></svg></button>
+          {/* 连续绘制 */}
+          <button type="button" title={t('charts.draw.stayInDraw')} aria-label={t('charts.draw.stayInDraw')}
+            onClick={() => setStayInDraw(!stayInDraw)}
+            className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${stayInDraw ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`}
+          ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3l4 4-4 4" /><path d="M3 17l4 4-4 4" /><line x1="21" y1="7" x2="7" y2="21" /><line x1="7" y1="3" x2="21" y2="17" /></svg></button>
+          {/* 显示/隐藏 */}
+          <button type="button" title={visible ? t('charts.draw.hideAll') : t('charts.draw.showAll')} aria-label={visible ? t('charts.draw.hideAll') : t('charts.draw.showAll')}
+            onClick={() => setVisible(!visible)}
+            className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${!visible ? 'border-amber-400/60 bg-amber-400/15 text-amber-300' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`}
+          ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{visible ? <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></> : <><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></>}</svg></button>
+          </div>
+
           {/* 可折叠分组 / collapsible groups */}
           {TOOL_GROUPS.map((group) => {
             const isCollapsed = collapsed[group.key]
@@ -787,29 +806,6 @@ function DrawLayer({ chart, series, host, symbol, lastPrice, barTimes, digits = 
           <button type="button" title={t('charts.draw.clear')} aria-label={t('charts.draw.clear')} onClick={clearAll} disabled={drawCount === 0}
             className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 hover:text-down disabled:opacity-30"
           ><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 5L5 19M5 5l14 14" /></svg></button>
-
-          <div className="my-0.5 h-px w-full bg-white/10" />
-
-          {/* ──── 底部工具控制栏（sticky 始终可见） / sticky utility bar ──── */}
-          <div className="sticky bottom-0 flex flex-col gap-1 bg-ink-900/95 py-1 -mx-1.5 px-1.5 backdrop-blur border-t border-white/10">
-          {/* 磁吸 */}
-          <button type="button" title={t('charts.draw.magnet')} aria-label={t('charts.draw.magnet')}
-            onClick={() => setMagnet(magnet === 'off' ? 'weak' : 'off')}
-            className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${magnet !== 'off' ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`}
-          ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 6l-2 2 2 2M6 6v6a4 4 0 004 4h4a4 4 0 004-4V6l2 2 2-2" /></svg></button>
-
-          {/* 连续绘制 */}
-          <button type="button" title={t('charts.draw.stayInDraw')} aria-label={t('charts.draw.stayInDraw')}
-            onClick={() => setStayInDraw(!stayInDraw)}
-            className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${stayInDraw ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`}
-          ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3l4 4-4 4" /><path d="M3 17l4 4-4 4" /><line x1="21" y1="7" x2="7" y2="21" /><line x1="7" y1="3" x2="21" y2="17" /></svg></button>
-
-          {/* 显示/隐藏 */}
-          <button type="button" title={visible ? t('charts.draw.hideAll') : t('charts.draw.showAll')} aria-label={visible ? t('charts.draw.hideAll') : t('charts.draw.showAll')}
-            onClick={() => setVisible(!visible)}
-            className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${!visible ? 'border-amber-400/60 bg-amber-400/15 text-amber-300' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`}
-          ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{visible ? <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></> : <><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></>}</svg></button>
-          </div>{/* end sticky utility bar */}
         </div>
       )}
 
