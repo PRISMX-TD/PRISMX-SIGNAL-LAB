@@ -1756,24 +1756,24 @@
     .hero-heading {
       display: none;
     }
-    /* 指示器居中，上下留白对称且收紧。
-       上方间距来自 <main> 的 pt-6(24px)，用负 margin 抵消一部分；
-       下方间距来自品种块的 mt-4，统一改成与上方相等的 12px。 */
+    /* 指示器居中，上下留白对称。
+       上方间距来自 <main> 的 pt-6(24px)：用等量负 margin 完全抵消，
+       再由卡片自身 padding-top 与品种块 margin-top 提供对称的 14px。 */
     .hero-header-row {
       min-height: 0;
       justify-content: center;
-      margin-bottom: 0;
+      margin: 0;
     }
     .hero-segs {
       margin: 0 auto;
     }
     .hero-card {
-      margin-top: -12px !important;
-      padding-top: 0 !important;
+      margin-top: -24px !important;
+      padding-top: 14px !important;
     }
-    /* 指示器行的下一个兄弟（品种块）：把上间距压到与顶部对称 */
+    /* 指示器行的下一个兄弟（品种块）：上间距与卡片顶 padding 相等 */
     .hero-header-row + div {
-      margin-top: 12px !important;
+      margin-top: 14px !important;
     }
     .hero-nebula {
       width: 46%;
