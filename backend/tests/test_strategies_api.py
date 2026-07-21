@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings
 from app.models import Candle, StrategySignal, UserStrategy
+from app.routers import strategies as strategies_router
 import app.services.strategy_engine as strategy_engine
 
 
@@ -140,6 +141,54 @@ def test_backtest_runs_against_seeded_candle_history(client, db, auth_headers, u
     body = res.json()
     assert body["insufficientData"] is False
     assert "summary" in body and "points" in body and "trades" in body
+
+
+def test_backtest_returns_most_recent_bars_when_history_exceeds_cap(client, db, auth_headers, user, monkeypatch):
+    """回归测试：`days` 窗口内的实际行数超过 MAX_BACKTEST_BARS 时,必须拿最新
+    的一段,不能拿最早的一段——否则窗口里不管之后再插入多少新数据,回测永远
+    卡在最早那一段,看起来就像"数据不再更新"(真实场景:K 线历史入库刚上线
+    没几天,1 分钟线单一品种几天内就能攒够 5000+ 根)。用一个很小的容量上限
+    复现,不用真插 5000+ 行。
+
+    Regression test: when the `days` window actually holds more rows than
+    MAX_BACKTEST_BARS, the backtest must fetch the newest slice, not the
+    oldest — otherwise no matter how much new data arrives afterward, the
+    backtest stays pinned to the earliest slice forever, looking exactly like
+    "data stopped updating" (real scenario: candle-history ingestion only
+    just launched, and a single 1-minute symbol can accumulate 5000+ rows
+    within days). Reproduced with a tiny cap instead of actually inserting
+    5000+ rows.
+    """
+    # 上限必须仍然 >= 30(路由的"数据不足"判定阈值),否则会先撞上
+    # insufficientData 分支,测不到真正想验证的截取逻辑。
+    # The cap must stay >= 30 (the router's own "insufficient data"
+    # threshold), otherwise the insufficientData branch trips first and the
+    # slicing logic under test is never reached.
+    monkeypatch.setattr(strategies_router, "MAX_BACKTEST_BARS", 40)
+    _make_admin_pro(db, user)
+    now = datetime.now(timezone.utc)
+    # 插 120 根,是容量上限(40)的 3 倍——全部已收盘、全部落在 90 天默认窗口内。
+    # Insert 120 bars, 3x the cap — all closed, all within the default 90-day window.
+    all_times = [int((now - timedelta(minutes=15 * (120 - i))).timestamp()) for i in range(120)]
+    for t in all_times:
+        db.add(Candle(symbol="XAUUSD", interval="15", t=t, o=100, h=101, l=99, c=100, v=1))
+    db.commit()
+
+    res = client.post(
+        "/api/strategies/backtest", headers=auth_headers,
+        json={"template": "ma_cross", "symbol": "XAUUSD", "interval": "15", "params": {}},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["insufficientData"] is False
+    returned_times = [b["t"] for b in body["bars"]]
+    assert len(returned_times) == 40
+    # 必须是最新的 40 根(最接近"现在"),不是最早插入的那 40 根。
+    # Must be the newest 40 bars (closest to "now"), not the earliest 40 inserted.
+    assert returned_times == sorted(all_times)[-40:]
+    # 依然按时间升序交给前端/回测引擎,不是仅仅"不丢数据"但顺序倒了。
+    # Still handed over in ascending order, not just "no data lost" with the order flipped.
+    assert returned_times == sorted(returned_times)
 
 
 def test_list_my_signals_only_returns_current_user_rows(client, db, auth_headers, user):

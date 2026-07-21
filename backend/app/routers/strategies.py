@@ -188,13 +188,29 @@ def backtest_strategy(body: StrategyBacktestRequest, db: Session = Depends(get_d
 
     seconds = INTERVAL_SECONDS[body.interval]
     cutoff = (datetime.now(timezone.utc) - timedelta(days=body.days)).timestamp()
+    # 按时间倒序取最新的 MAX_BACKTEST_BARS 根,再翻回正序——不能直接正序 limit。
+    # `days` 窗口里的实际行数完全可能超过 5000(比如 1 分钟线,K 线历史入库
+    # 才上线没几天,单一品种几天内就能攒够);正序 limit 会永远只拿到窗口里
+    # 最早的那 5000 根,新增的数据无论多久之后都追不上,回测就会像卡住在
+    # 某个固定日期不再往前一样——这正是 evaluate_new_candle() 已经在用的
+    # 同一种取法,这里此前没跟上。
+    # Fetch the newest MAX_BACKTEST_BARS rows in descending order, then
+    # reverse back to ascending — can't limit on ascending order directly.
+    # The `days` window can easily hold more than 5000 rows (e.g. 1-minute
+    # candles: candle-history ingestion only just launched, and a single
+    # symbol can accumulate that many within days); an ascending limit would
+    # forever return only the earliest 5000 rows in the window, with no
+    # amount of newly-arrived data ever catching up — the backtest would look
+    # permanently stuck on some fixed date. Same fetch pattern
+    # evaluate_new_candle() already uses; this call site just hadn't matched it.
     rows = (
         db.query(Candle)
         .filter(Candle.symbol == body.symbol.upper(), Candle.interval == body.interval, Candle.t >= cutoff)
-        .order_by(Candle.t.asc())
+        .order_by(Candle.t.desc())
         .limit(MAX_BACKTEST_BARS)
         .all()
     )
+    rows.reverse()
     bars = [{"t": r.t, "o": r.o, "h": r.h, "l": r.l, "c": r.c, "v": r.v} for r in rows]
     if len(bars) < 30:
         return {
