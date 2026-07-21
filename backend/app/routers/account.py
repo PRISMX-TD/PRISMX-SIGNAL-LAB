@@ -2,7 +2,7 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
@@ -112,6 +112,17 @@ class UserPrefsIn(BaseModel):
     # other device's WS push) local copy — silently dropping the first change.
     namespace: str = Field(min_length=1, max_length=64)
     data: dict = Field(default_factory=dict)
+
+    @field_validator("data")
+    @classmethod
+    def _cap_size(cls, v: dict) -> dict:
+        # 偏好是界面设置/画线这类小数据，序列化后设个上限，防止把超大 JSON
+        # 塞进这个每次登录都要整份读回来的字段。/ Prefs are small UI/drawing
+        # settings; cap the serialized size so an oversized JSON can't be
+        # stuffed into this field, which is read back in full on every login.
+        if len(json.dumps(v, ensure_ascii=False)) > 256 * 1024:
+            raise ValueError("偏好数据过大 / prefs payload too large")
+        return v
 
 
 def _get_or_create_prefs(db: Session, user_id: str) -> UserPref:

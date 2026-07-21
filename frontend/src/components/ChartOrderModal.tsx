@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { MT5Account, Quote } from '../api/types'
-import { contractSize, displaySymbol, localizeApiError, suggestVolumeByRisk, usdMarginBasis } from '../api/utils'
+import { clientOrderId, contractSize, displaySymbol, localizeApiError, suggestVolumeByRisk, usdMarginBasis } from '../api/utils'
 import { useBackToClose } from '../utils/useBackToClose'
 
 interface Props {
@@ -35,6 +35,7 @@ interface Props {
     mt5Login: string | null,
     stopLoss: number | null,
     takeProfit: number | null,
+    clientOrderId: string,
   ) => Promise<void>
 }
 
@@ -81,6 +82,13 @@ export default function ChartOrderModal({ symbol, side, accounts, quotesByAccoun
   const rectRef = useRef({ left: 0, width: 0 })
   const onCancelRef = useRef(onCancel)
   onCancelRef.current = onCancel
+
+  // 本次下单的幂等号：整个弹窗生命周期内固定不变，重试复用同一个号，避免
+  // 重复下单（详见 SlideOrderModal.tsx 同名注释）。
+  // Idempotency key for this order, fixed for the modal's lifetime so retries
+  // reuse it and never double-place (see SlideOrderModal.tsx's matching note).
+  const orderIdRef = useRef<string>('')
+  if (!orderIdRef.current) orderIdRef.current = clientOrderId()
 
   useEffect(() => {
     if (!login && onlineAccounts[0]) setLogin(onlineAccounts[0].login)
@@ -209,7 +217,7 @@ export default function ChartOrderModal({ symbol, side, accounts, quotesByAccoun
     setSubmitting(true)
     setError('')
     try {
-      await onConfirm(vol, login || null, slNum, tpNum)
+      await onConfirm(vol, login || null, slNum, tpNum, orderIdRef.current)
       setReceipt('ok')
       setTimeout(() => onCancel(), 2000)
     } catch (err) {

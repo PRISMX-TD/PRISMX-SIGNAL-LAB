@@ -641,6 +641,17 @@ def _close_position(cmd: dict) -> dict:
             "message": "Position already closed",
         }
     pos = poss[0]
+    # 只允许平掉本平台开的仓（魔术号匹配）：网页只展示本平台仓位，正常永远
+    # 不会发来别的 ticket；这里再兜一道，即便有人手工构造请求也动不了用户在
+    # MT5 客户端手动开的单，与持仓上报/自动仓管的"只碰本平台仓位"边界一致。
+    # Only close positions this platform opened (magic match): the web app only
+    # ever shows platform positions, so a foreign ticket never arrives normally.
+    # This backstop means even a hand-crafted request can't touch a position the
+    # user opened manually in the MT5 terminal — matching the "platform
+    # positions only" boundary used by position reporting and auto-management.
+    if getattr(pos, "magic", 0) != PRISMX_MAGIC:
+        return {"clientOrderId": client_order_id, "success": False,
+                "message": "Not a PRISMX-managed position"}
     symbol = pos.symbol
     if not mt5.symbol_select(symbol, True):
         return {"clientOrderId": client_order_id, "success": False,
@@ -704,6 +715,11 @@ def _modify_position(cmd: dict) -> dict:
         return {"clientOrderId": client_order_id, "success": False,
                 "message": "Position not found"}
     pos = poss[0]
+    # 只允许改本平台开的仓（魔术号匹配），理由同 _close_position。
+    # Only modify positions this platform opened (magic match); see _close_position.
+    if getattr(pos, "magic", 0) != PRISMX_MAGIC:
+        return {"clientOrderId": client_order_id, "success": False,
+                "message": "Not a PRISMX-managed position"}
     symbol = pos.symbol
     info = mt5.symbol_info(symbol)
     digits = info.digits if info else 5

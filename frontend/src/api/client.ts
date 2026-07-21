@@ -55,7 +55,23 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     let detail = `HTTP ${res.status}`
     try {
       const body = await res.json()
-      detail = body.detail || detail
+      // FastAPI 的字段校验错误（422）里 detail 是一个对象数组（{loc,msg,type}...），
+      // 直接当字符串抛会显示成 "[object Object]"。这里把它拍平成可读的 msg 文本；
+      // 普通业务错误的 detail 本就是字符串，原样使用。
+      // FastAPI's field-validation errors (422) put an array of objects in
+      // detail ({loc,msg,type}...); throwing that as-is renders "[object
+      // Object]". Flatten it to readable msg text; ordinary business errors
+      // already carry a string detail and are used as-is.
+      if (Array.isArray(body.detail)) {
+        const msgs = body.detail
+          .map((e: unknown) =>
+            e && typeof e === 'object' && 'msg' in e ? String((e as { msg: unknown }).msg) : String(e)
+          )
+          .filter(Boolean)
+        detail = msgs.join('; ') || detail
+      } else if (body.detail) {
+        detail = body.detail
+      }
     } catch {
       /* ignore */
     }

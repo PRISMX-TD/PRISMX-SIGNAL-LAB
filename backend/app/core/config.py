@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     RATE_LIMIT_LOGIN: str = "10/minute"
     RATE_LIMIT_REGISTER: str = "5/minute"
     RATE_LIMIT_GOOGLE: str = "10/minute"
+    # 交易端点限流（下单/平仓/改单/撤单）。刻意设得很宽——每秒 2 笔，远超任何
+    # 正常手动交易节奏，只拦住病态刷接口的行为，不影响真实用户。按客户端 IP 计。
+    # Rate limit for trading endpoints (place/close/modify/cancel). Deliberately
+    # generous — 2/sec, well above any real manual pace — so it only stops
+    # pathological hammering without touching real users. Keyed by client IP.
+    RATE_LIMIT_ORDER: str = "120/minute"
 
     # 数据库 / Database（默认 SQLite，生产用环境变量 DATABASE_URL 覆盖为 Postgres）
     # Database (defaults to SQLite; override via DATABASE_URL env for Postgres in prod)

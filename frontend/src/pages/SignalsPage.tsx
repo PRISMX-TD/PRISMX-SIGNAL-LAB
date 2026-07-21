@@ -36,7 +36,7 @@ export default function SignalsPage() {
 
   const openTrade = useCallback((s: DisplaySignal) => setActiveSignal(s), [])
 
-  const handleConfirm = async (volume: number, mt5Login: string | null, stopLoss: number | null, takeProfit: number | null) => {
+  const handleConfirm = async (volume: number, mt5Login: string | null, stopLoss: number | null, takeProfit: number | null, clientOrderId: string) => {
     if (!activeSignal) return
     const sig = activeSignal
     // 提交成功后不在这里关弹窗：SlideOrderModal 自己会展示"已提交"回执卡片，
@@ -52,9 +52,9 @@ export default function SignalsPage() {
     // signalId-less manual path so they never pollute the platform win-rate
     // stats; platform signals still go through placeOrder as before.
     if (sig.strategySignal) {
-      await placeManualOrder(sig.symbol, sig.side, volume, mt5Login, stopLoss, takeProfit)
+      await placeManualOrder(sig.symbol, sig.side, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
     } else {
-      await placeOrder(sig, volume, mt5Login, stopLoss, takeProfit)
+      await placeOrder(sig, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
     }
   }
 

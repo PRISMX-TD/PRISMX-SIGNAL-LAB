@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { MT5Account, Quote, Signal } from '../api/types'
-import { calcCountdown, contractSize, displaySymbol, localizeApiError, suggestVolumeByRisk, usdMarginBasis } from '../api/utils'
+import { calcCountdown, clientOrderId, contractSize, displaySymbol, localizeApiError, suggestVolumeByRisk, usdMarginBasis } from '../api/utils'
 import { SIGNAL_LIFESPAN_MS } from './signals/SignalView'
 import { useNow } from './signals/hooks'
 import { useBackToClose } from '../utils/useBackToClose'
@@ -21,6 +21,7 @@ interface Props {
     mt5Login: string | null,
     stopLoss: number | null,
     takeProfit: number | null,
+    clientOrderId: string,
   ) => Promise<void>
 }
 
@@ -78,6 +79,16 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
   const rectRef = useRef({ left: 0, width: 0 })
   const onCancelRef = useRef(onCancel)
   onCancelRef.current = onCancel
+
+  // 本次下单的幂等号：整个弹窗生命周期内固定不变，重试（滑动失败后再滑）复用
+  // 同一个号，避免"已收单但没收到回执→再滑一次"重复下单。弹窗每次打开都是
+  // 新实例（activeSignal 变化时重新挂载），自然拿到新号。
+  // Idempotency key for this order: fixed for the modal's whole lifetime so a
+  // retry (slide again after a failure) reuses it, preventing a duplicate order
+  // on "received but no receipt → slide again". Each open is a fresh instance
+  // (remounts when activeSignal changes), so it naturally gets a new key.
+  const orderIdRef = useRef<string>('')
+  if (!orderIdRef.current) orderIdRef.current = clientOrderId()
 
   useEffect(() => {
     if (!login && onlineAccounts[0]) setLogin(onlineAccounts[0].login)
@@ -216,7 +227,7 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
       return
     }
     try {
-      await onConfirm(vol, login || null, slNum, tpNum)
+      await onConfirm(vol, login || null, slNum, tpNum, orderIdRef.current)
       setReceipt('ok')
       setTimeout(() => onCancel(), 2000)
     } catch (err) {

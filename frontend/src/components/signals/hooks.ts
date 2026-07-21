@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { orderApi } from '../../api/client'
-import { clientOrderId, localizeApiError } from '../../api/utils'
+import { localizeApiError } from '../../api/utils'
 import { useLive } from '../../store/live'
 import type { Signal } from '../../api/types'
 import {
@@ -76,7 +76,15 @@ export function useOrderPlacement() {
   }, [orders, showToast, t])
 
   // 下单 + 等待回执的共享核心；signalId 为 null 即手动下单（图表页）。
-  // Shared submit + receipt core; signalId=null means a manual order (charts page).
+  // clientOrderId 由下单弹窗持有并在重试间保持不变（一个弹窗=一笔下单意图），
+  // 这样"发出去了但没收到回执→用户再滑一次"时，服务端按同一个幂等号识别为
+  // 同一笔，不会重复下单。绝不能在这里现生成——那样每次重试都是新号，幂等失效。
+  // Shared submit + receipt core; signalId=null means a manual order (charts
+  // page). clientOrderId is owned by the order modal and kept stable across
+  // retries (one modal = one order intent), so a "sent but no receipt → user
+  // slides again" retry is deduped server-side by the same id instead of
+  // double-placing. It must NOT be generated here — that would mint a fresh id
+  // per retry and defeat idempotency.
   const submitOrder = useCallback(
     async (payload: {
       signalId: string | null
@@ -86,9 +94,10 @@ export function useOrderPlacement() {
       mt5Login: string | null
       stopLoss: number | null
       takeProfit: number | null
+      clientOrderId: string
     }) => {
       // API 错误向上抛给下单弹窗展示 / API errors propagate to the modal
-      const placed = await orderApi.place({ ...payload, clientOrderId: clientOrderId() })
+      const placed = await orderApi.place(payload)
       refreshAll()
       if (placed.status === 'FILLED') {
         showToast(t('order.filled', { price: placed.filledPrice ?? '-' }), 'success')
@@ -117,7 +126,8 @@ export function useOrderPlacement() {
       volume: number,
       mt5Login: string | null,
       stopLoss: number | null,
-      takeProfit: number | null
+      takeProfit: number | null,
+      clientOrderId: string
     ) =>
       submitOrder({
         signalId: signal.id,
@@ -127,6 +137,7 @@ export function useOrderPlacement() {
         mt5Login,
         stopLoss,
         takeProfit,
+        clientOrderId,
       }),
     [submitOrder]
   )
@@ -139,8 +150,9 @@ export function useOrderPlacement() {
       volume: number,
       mt5Login: string | null,
       stopLoss: number | null,
-      takeProfit: number | null
-    ) => submitOrder({ signalId: null, symbol, side, volume, mt5Login, stopLoss, takeProfit }),
+      takeProfit: number | null,
+      clientOrderId: string
+    ) => submitOrder({ signalId: null, symbol, side, volume, mt5Login, stopLoss, takeProfit, clientOrderId }),
     [submitOrder]
   )
 

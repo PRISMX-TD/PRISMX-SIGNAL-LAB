@@ -462,6 +462,7 @@ export default function ChartsPage() {
     mt5Login: string | null,
     stopLoss: number | null,
     takeProfit: number | null,
+    clientOrderId: string,
   ) => {
     if (!orderSide) return
     // 不在这里关弹窗：ChartOrderModal 自己会展示"已提交"回执卡片，再调用
@@ -469,7 +470,7 @@ export default function ChartsPage() {
     // Don't close the modal here: ChartOrderModal shows its own "submitted"
     // receipt card and calls onCancel itself; closing immediately would
     // unmount it before the receipt card ever gets to render.
-    await placeManualOrder(symbol, orderSide, volume, mt5Login, stopLoss, takeProfit)
+    await placeManualOrder(symbol, orderSide, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
   }
 
   // 云端偏好加载完成后覆盖本地初始值 / override initial values when cloud prefs arrive

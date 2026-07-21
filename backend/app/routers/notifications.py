@@ -143,7 +143,8 @@ def list_symbols(
 
 
 class PushSubscribeIn(BaseModel):
-    endpoint: str
+    # 长度上限防止塞入超大字符串占用存储 / length caps guard against oversized blobs
+    endpoint: str = Field(min_length=1, max_length=1024)
     keys: dict
 
 
@@ -160,6 +161,12 @@ def push_subscribe(
     auth = keys.get("auth", "")
     if not p256dh or not auth:
         raise HTTPException(status_code=400, detail="缺少 p256dh 或 auth 密钥 / missing p256dh or auth key")
+    # Web Push 密钥是短的 base64 值（p256dh 65 字节、auth 16 字节），远小于此。
+    # 超长一律拒绝，防止把任意大字符串塞进订阅表。
+    # Web Push keys are short base64 values (p256dh 65 bytes, auth 16 bytes),
+    # far below this cap; reject anything longer to keep oversized strings out.
+    if not isinstance(p256dh, str) or not isinstance(auth, str) or len(p256dh) > 256 or len(auth) > 256:
+        raise HTTPException(status_code=400, detail="p256dh 或 auth 密钥格式无效 / invalid p256dh or auth key")
 
     existing = (
         db.query(PushSubscription)

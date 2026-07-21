@@ -33,6 +33,23 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
   const profitUp = p.profit >= 0
   const canAct = !!p.ticket
 
+  // 改止损止盈的方向校验：买单止损须低于现价、止盈须高于现价，卖单相反。
+  // 和开仓弹窗（SlideOrderModal）同样的规则——此前改单表单完全不校验，方向
+  // 填反了也照发，最后被 MT5 拒绝，弹一句看不懂的错误。现价缺失时不校验。
+  // Direction check for SL/TP edits: a BUY's SL must be below and TP above the
+  // current price (reversed for a SELL) — same rule as the order modal. The
+  // modify form used to validate nothing, so a wrong-side value went through
+  // and got rejected by MT5 with a cryptic message. Skip when no current price.
+  const modSl = sl.trim() === '' ? null : parseFloat(sl)
+  const modTp = tp.trim() === '' ? null : parseFloat(tp)
+  const modRef = p.currentPrice
+  const slInvalid =
+    modSl != null && !Number.isNaN(modSl) && modRef != null && modRef > 0 &&
+    (isBuy ? modSl >= modRef : modSl <= modRef)
+  const tpInvalid =
+    modTp != null && !Number.isNaN(modTp) && modRef != null && modRef > 0 &&
+    (isBuy ? modTp <= modRef : modTp >= modRef)
+
   // 浮盈百分比（相对入场价的价格变动）/ floating P&L percent vs entry
   const pnlPct =
     p.entryPrice && p.currentPrice && p.entryPrice > 0
@@ -45,7 +62,12 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
   const doClose = async (full: boolean) => {
     if (!p.ticket) return
     const vol = full ? undefined : parseFloat(closeVol)
-    if (!full && (!vol || vol <= 0 || vol > p.volume)) {
+    // 部分平仓：手数须在 [0.01, 持仓量] 之间。低于 0.01 手 MT5 无法成交，
+    // 之前只挡了 ≤0，会把拆不开的小额平仓发出去再被拒。
+    // Partial close volume must be within [0.01, position size]. Below 0.01
+    // lots MT5 can't fill; the old check only blocked ≤0, letting an
+    // un-fillable tiny close get sent only to be rejected.
+    if (!full && (vol == null || Number.isNaN(vol) || vol < 0.01 || vol > p.volume)) {
       onActionDone?.(t('positions.invalidVolume'), 'error')
       return
     }
@@ -70,6 +92,10 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
 
   const doModify = async () => {
     if (!p.ticket) return
+    if (slInvalid || tpInvalid) {
+      onActionDone?.(t(slInvalid ? 'order.slWrongSide' : 'order.tpWrongSide'), 'error')
+      return
+    }
     setBusy(true)
     try {
       await orderApi.modify({
@@ -204,7 +230,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
               <input
                 type="number"
                 step="0.00001"
-                className="input font-mono text-sm"
+                className={`input font-mono text-sm ${slInvalid ? 'border-down' : ''}`}
                 placeholder={t('positions.clearHint')}
                 value={sl}
                 onChange={(e) => setSl(e.target.value)}
@@ -215,21 +241,26 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
               <input
                 type="number"
                 step="0.00001"
-                className="input font-mono text-sm"
+                className={`input font-mono text-sm ${tpInvalid ? 'border-down' : ''}`}
                 placeholder={t('positions.clearHint')}
                 value={tp}
                 onChange={(e) => setTp(e.target.value)}
               />
             </div>
           </div>
+          {(slInvalid || tpInvalid) && (
+            <p className="text-xs text-down">
+              {slInvalid ? t('order.slWrongSide') : t('order.tpWrongSide')}
+            </p>
+          )}
           <div className="flex gap-2">
             <button onClick={() => setMode('view')} className="btn-ghost flex-1 py-1.5 text-xs">
               {t('common.cancel')}
             </button>
             <button
               onClick={doModify}
-              disabled={busy}
-              className="btn-primary flex-1 py-1.5 text-xs"
+              disabled={busy || slInvalid || tpInvalid}
+              className="btn-primary flex-1 py-1.5 text-xs disabled:opacity-50"
             >
               {t('positions.confirmModify')}
             </button>

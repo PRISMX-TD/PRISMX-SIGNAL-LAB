@@ -12,11 +12,12 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.models import ClosedTrade, DisciplineSnapshot, MT5Account, Order, Signal, User
 from app.schemas import (
     ClosePositionRequest,
@@ -93,7 +94,9 @@ def void_stale_order(o: Order) -> None:
 # the blocking SQLAlchemy calls no longer stall the event loop shared by the
 # WebSocket pushes and bridge polling.
 @router.post("", response_model=OrderOut)
+@limiter.limit(settings.RATE_LIMIT_ORDER)
 def place_order(
+    request: Request,
     req: OrderRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -246,7 +249,9 @@ def list_orders(
 
 
 @router.post("/{order_id}/cancel", response_model=OrderOut)
+@limiter.limit(settings.RATE_LIMIT_ORDER)
 def cancel_order(
+    request: Request,
     order_id: str,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -430,7 +435,9 @@ def _assert_account_owned(db: Session, user_id: str, mt5_login: str | None) -> N
 
 
 @router.post("/close", response_model=OrderOut)
+@limiter.limit(settings.RATE_LIMIT_ORDER)
 def close_position(
+    request: Request,
     req: ClosePositionRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -440,6 +447,17 @@ def close_position(
     """
     # 校验目标账号归属，防止越权操控他人/不存在账号 / verify account ownership
     _assert_account_owned(db, user.id, req.mt5Login)
+
+    # 部分平仓手数不得低于单笔最小手数（省略或 0 表示全平，不受此限）。
+    # 否则一笔拆不开的小额平仓会被下发、再由 MT5 拒绝，白白回执一条报错。
+    # A partial-close volume must not fall below the per-order minimum (omit or
+    # 0 means full close, which is exempt). Otherwise an un-fillable tiny close
+    # gets dispatched only to be rejected by MT5, wasting an error receipt.
+    if req.volume is not None and 0 < req.volume < settings.MIN_VOLUME_PER_ORDER:
+        raise HTTPException(
+            status_code=400,
+            detail=f"低于单笔最小手数 {settings.MIN_VOLUME_PER_ORDER} / Below min volume",
+        )
 
     # 幂等 / idempotency by clientOrderId
     existing = (
@@ -468,7 +486,9 @@ def close_position(
 
 
 @router.post("/modify", response_model=OrderOut)
+@limiter.limit(settings.RATE_LIMIT_ORDER)
 def modify_position(
+    request: Request,
     req: ModifyPositionRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),

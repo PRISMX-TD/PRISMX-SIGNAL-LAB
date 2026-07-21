@@ -123,6 +123,12 @@ export default function LoginPage() {
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
+                    // 注册要求密码至少 8 位（与后端一致）；不加限制时短密码会被
+                    // 后端 422 拒绝，错误信息还会显示得很难懂。
+                    // Registration requires ≥8 chars (matches the backend);
+                    // without this a short password is rejected by the backend
+                    // 422 with a hard-to-read message.
+                    minLength={mode === 'register' ? 8 : undefined}
                     className="input pr-10"
                     placeholder={t('auth.passwordPlaceholder')}
                     value={password}

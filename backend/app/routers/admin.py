@@ -31,6 +31,7 @@ from app.services.settings_store import (
     get_trial_settings,
     invalidate_candle_cache,
     invalidate_discipline_cache,
+    invalidate_pricing_cache,
     invalidate_settings_cache,
     invalidate_strategy_settings_cache,
     invalidate_trial_cache,

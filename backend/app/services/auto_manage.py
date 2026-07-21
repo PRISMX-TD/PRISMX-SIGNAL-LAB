@@ -187,6 +187,19 @@ def evaluate_positions(db: Session, user_id: str, positions: list) -> int:
             states[ticket] = state
         else:
             state.updated_at = now
+            # 首次见到该仓位时若还没挂止损，R 记为未知；等止损随后补上，这里
+            # 用它回填一次 R，否则这个仓位会被永久跳过（下面 not state.risk 的
+            # 分支），保本/追踪止损再也不会对它生效。只在 R 仍未定义时补，已定
+            # 义的 R 是开仓时的初始风险基准，不因后续手动改止损而变。
+            # If the position had no stop the first time we saw it, R stays
+            # undefined; once a stop appears later, backfill R here — otherwise
+            # the position is skipped forever (the `not state.risk` branch
+            # below) and break-even/trailing never apply to it. Only backfill
+            # while R is still undefined; an already-defined R is the initial
+            # risk baseline and must not shift when the stop is later moved.
+            if (not state.risk or state.risk <= 0) and current_sl > 0:
+                state.risk = abs(entry - current_sl)
+                state.initial_sl = current_sl
 
         if not state.risk or state.risk <= 0:
             continue  # 开仓无止损，R 无定义 / no SL at open, R undefined
