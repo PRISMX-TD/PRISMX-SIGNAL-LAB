@@ -71,7 +71,32 @@ class FeedRequest(BaseModel):
     series: list[FeedSeries] = []
 
 
-def _correct_future_skew(bars: list[dict], now: float) -> tuple[list[dict], float]:
+# 每个(品种,周期)当前生效的纠偏量(秒)。用带迟滞的"同一挡位内取最小值"
+# 缓存,不能直接拿"这一刻现算的偏差"——同一根 bar 在形成期间(最长可以是
+# 整个周期的时长,比如日线最长 24 小时)自己的时间戳不变,服务器时钟却一直
+# 在走,两者差值会持续缩小(见 _correct_future_skew 内的详细注释);如果每次
+# 请求都直接用现算值纠正,同一根还在形成中的 bar 会在其形成过程中被纠正到
+# 不停变化的时间点,chart_store 把每次都当成一根新 bar,图表看起来就像"每次
+# 请求都冒出一根新蜡烛"(2026-07-21 真实回归:纠偏功能刚上线当天就复现)。
+# 进程重启后自然清空,不需要持久化。
+# The correction currently in effect per (symbol, interval), in seconds. Uses
+# a hysteresis-and-maximum cache — not "whatever the skew computes to right
+# now": a single bar's own timestamp doesn't change for as long as it's
+# forming (up to the interval's full duration, e.g. 24h for a daily bar)
+# while the server clock keeps advancing, so the raw gap between them keeps
+# shrinking (see the detailed comment inside _correct_future_skew). Applying
+# the raw value on every request would correct the same still-forming bar to
+# a different point in time each time, and chart_store would treat every one
+# as a brand-new bar — the chart appears to spawn a fresh candle on every
+# request (a real regression reproduced the day this correction feature
+# shipped, 2026-07-21). Resets naturally on process restart; no persistence
+# needed.
+_skew_cache: dict[tuple[str, str], float] = {}
+
+
+def _correct_future_skew(
+    bars: list[dict], now: float, cache_key: tuple[str, str], interval_seconds: int,
+) -> tuple[list[dict], float, bool]:
     """喂价端(EA/其运行机器)时钟跑偏、把 K 线时间戳打进"未来"时,用这一批里
     最新一根(通常是仍在形成中的那根)跟服务器当前时间的差值反向纠正全部
     时间戳,让存进内存缓存/数据库的都是对齐服务器时钟的时间——不依赖喂价端
@@ -81,7 +106,18 @@ def _correct_future_skew(bars: list[dict], now: float) -> tuple[list[dict], floa
     行情在收市期间原地不动导致最新一根落在过去,都不触发纠正——那种情况下
     "把旧数据往前挪"只是瞎猜，不是纠正。
 
-    返回(纠正后的 bars,本次检测到的偏差秒数——0 表示没有纠正/无需纠正)。
+    纠偏量不能直接拿"这一刻现算的偏差"——同一根 bar 在形成期间(最长可以是
+    整个周期时长)自己的时间戳不变,服务器时钟却一直在走,两者差值会持续
+    缩小;一到下一根 bar 开始形成,差值又跳回接近真实基准偏差的高点。这是
+    一个随每根 bar 重复的"锯齿"形状:每根 bar 刚开始形成、刚被观测到时差值
+    最大、最接近真实基准偏差(这一刻服务器时钟还没来得及在这根 bar 自己的
+    时间戳上"追"出多少差距);越往后同一根 bar 被反复请求,差值越小,到下
+    一根 bar 开始时跳回高点。直接用现算值会让同一根 bar 在形成过程中被纠正
+    到不停变化的时间点。用带迟滞的"同一挡位内取最大值"缓存锁定纠偏量:
+    偏差量真的跳变(超出这个周期一整根 bar 的自然漂移范围,说明喂价端断线
+    重连、DST 切换等真的换挡了)才重新起算,否则在同一挡位内持续取观测到
+    的最大值——收敛到真实基准偏差,不会被同一根 bar 形成越久、差值越小的
+    后续观测拉低,也不会因为反复现算而抖动。
 
     If the feed's (EA / its host machine) clock runs fast, it stamps bars
     into the "future" — use the newest bar in the batch (usually the one
@@ -96,28 +132,46 @@ def _correct_future_skew(bars: list[dict], now: float) -> tuple[list[dict], floa
     never triggers this — shifting old data "forward" would be a guess, not
     a correction.
 
-    Returns (corrected bars, the detected skew in seconds — 0 means no
-    correction was applied/needed).
+    The correction can't just be "whatever the skew computes to right now" —
+    a single bar's own timestamp doesn't change for as long as it's forming
+    (up to the interval's full duration), so the gap naturally shrinks as the
+    server clock keeps advancing (a sawtooth that resets — largest, closest
+    to the true base offset, right when a bar is first observed just as it
+    starts forming — the server clock hasn't had time to "catch up" against
+    that bar's own fixed timestamp yet — then shrinks the longer that same
+    bar keeps getting re-requested, resetting back up at the next bar). Using
+    the raw value directly would correct the same forming bar to a different
+    point in time on every request. A hysteresis-and-maximum cache pins the
+    correction instead: only re-anchor when the skew jumps by more than this
+    interval's own full duration (a genuine regime change — the feed
+    reconnecting, a DST transition); otherwise keep the maximum observed
+    value within the current regime, converging to the true base offset
+    instead of getting pulled down by later, deeper-into-formation
+    observations of the same bar, and without jitter from re-deriving it on
+    every request.
+
+    返回(纠正后的 bars,本次生效的纠偏量,这次是不是刚发生了"换挡"——仅供
+    调用方决定要不要打日志,不代表本次是否真的做了纠正)。
+    Returns (corrected bars, the correction currently in effect, whether this
+    call just detected a regime change — for the caller's logging decision
+    only, not whether a correction was actually applied this call).
     """
     if not bars:
-        return bars, 0.0
-    skew = max(b["t"] for b in bars) - now
-    if skew <= FUTURE_SKEW_CORRECTION_THRESHOLD_SECONDS:
-        return bars, 0.0
-    shift = int(skew)
-    return [{**b, "t": b["t"] - shift} for b in bars], skew
+        return bars, 0.0, False
+    latest_t = max(b["t"] for b in bars)
+    raw_skew = latest_t - now
+    if raw_skew <= FUTURE_SKEW_CORRECTION_THRESHOLD_SECONDS:
+        _skew_cache.pop(cache_key, None)
+        return bars, 0.0, False
 
+    hysteresis = interval_seconds + 60  # 覆盖这个周期一整根 bar 的自然漂移 + 余量
+    cached = _skew_cache.get(cache_key)
+    is_new_regime = cached is None or abs(raw_skew - cached) > hysteresis
+    cached = raw_skew if is_new_regime else max(cached, raw_skew)
+    _skew_cache[cache_key] = cached
 
-# 记一下"最近一次给这个品种/周期打纠偏日志时,偏差量是多少"——tick 模式几秒
-# 一次,同一个偏差值没必要每次都重复打日志,只在第一次出现、或者偏差量发生
-# 明显变化(比如喂价端断线重连、DST 切换)时才打一次,避免长期存在的偏差把
-# 日志刷屏。进程重启后自然清空,不需要持久化。
-# Tracks "the skew value we last logged a correction for, per symbol/
-# interval" — tick mode fires every few seconds; no need to re-log an
-# unchanged skew every time, only the first occurrence or a meaningful shift
-# (e.g. the feed reconnecting, a DST transition). Resets naturally on process
-# restart; no persistence needed.
-_last_logged_skew: dict[tuple[str, str], float] = {}
+    shift = int(cached)
+    return [{**b, "t": b["t"] - shift} for b in bars], cached, is_new_regime
 
 
 @router.post("/feed/candles")
@@ -148,18 +202,15 @@ async def feed_candles(
             continue
         symbol = s.symbol.upper()
         bars = [b.model_dump() for b in s.bars]
-        bars, skew = _correct_future_skew(bars, now)
-        if skew:
-            key = (symbol, s.interval)
-            last = _last_logged_skew.get(key)
-            if last is None or abs(skew - last) > 60:
-                logger.warning(
-                    "feed_candles: %s/%s feed clock is %.1fh ahead of server time, "
-                    "correcting timestamps by -%ds before storing (check the EA/its "
-                    "host machine's clock if this persists)",
-                    symbol, s.interval, skew / 3600, int(skew),
-                )
-                _last_logged_skew[key] = skew
+        interval_seconds = candle_store.INTERVAL_SECONDS.get(s.interval, 60)
+        bars, skew, is_new_regime = _correct_future_skew(bars, now, (symbol, s.interval), interval_seconds)
+        if is_new_regime:
+            logger.warning(
+                "feed_candles: %s/%s feed clock is %.1fh ahead of server time, "
+                "correcting timestamps by -%ds before storing (check the EA/its "
+                "host machine's clock if this persists)",
+                symbol, s.interval, skew / 3600, int(skew),
+            )
         if req.mode == "backfill":
             chart_store.replace_series(symbol, s.interval, bars)
         else:
