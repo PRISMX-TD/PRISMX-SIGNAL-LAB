@@ -260,6 +260,41 @@ def _migrate_columns() -> None:
                     "UPDATE user_strategies SET one_trade_at_a_time = TRUE WHERE one_trade_at_a_time IS NULL"
                 ))
 
+        # 放开历史遗留列的 NOT NULL 约束。止损止盈从 stop_loss_pct / take_profit_pct
+        # / take_profit_r（旧结构）改成 method + value 后，这些旧列已不在模型里、
+        # 新建策略不再给它们赋值；但生产旧表里它们仍是 NOT NULL，导致 INSERT 因
+        # “旧列为 NULL”被 Postgres 拒绝（NotNullViolation），自定义策略无法保存。
+        # 对任何“不在当前模型、却仍 NOT NULL”的旧列去掉非空约束即可，幂等
+        # （已放开的列下次因 nullable 为真自动跳过）。仅 Postgres：全新 SQLite 库
+        # 本就只按当前模型建表，不存在这些遗留列。
+        # Relax NOT NULL on legacy leftover columns. After SL/TP moved from
+        # stop_loss_pct / take_profit_pct / take_profit_r to method + value, those
+        # old columns are gone from the model and no longer written on insert; but
+        # in the production table they're still NOT NULL, so an INSERT is rejected
+        # for leaving them NULL (Postgres NotNullViolation) and no custom strategy
+        # can be saved. Drop NOT NULL on any column not in the current model that
+        # is still NOT NULL — idempotent (already-nullable columns are skipped on
+        # the next run). Postgres only: a fresh SQLite DB is built straight from
+        # the current model and never has these leftovers.
+        if is_postgres:
+            current_us_cols = {
+                "id", "user_id", "template", "name", "symbol", "interval", "params",
+                "stop_loss_method", "stop_loss_value", "take_profit_method",
+                "take_profit_value", "one_trade_at_a_time", "enabled",
+                "last_signal_bar_t", "created_at", "updated_at",
+            }
+            legacy_notnull = [
+                c["name"]
+                for c in inspector.get_columns("user_strategies")
+                if c["name"] not in current_us_cols and not c["nullable"]
+            ]
+            if legacy_notnull:
+                with engine.begin() as conn:
+                    for name in legacy_notnull:
+                        conn.execute(text(
+                            f'ALTER TABLE user_strategies ALTER COLUMN "{name}" DROP NOT NULL'
+                        ))
+
     # strategy_signals 表：补充胜负判定字段,供"一次一单"开关判断上一笔是否
     # 还开着(见 UserStrategy.one_trade_at_a_time 的说明)。
     # strategy_signals: add win/loss resolution columns, used by the
