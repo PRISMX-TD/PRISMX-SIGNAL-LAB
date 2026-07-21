@@ -764,19 +764,19 @@ function StrategyBuilder({
           <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
             <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.stopLossMethod')}</span>
             <div className="mt-1.5 flex flex-wrap gap-2">
-              {(['percent', 'price'] as const).map((m) => (
+              {(['percent', 'steps'] as const).map((m) => (
                 <button key={m} onClick={() => onChange({ ...draft, stopLossMethod: m })} className={segBtn(draft.stopLossMethod === m)}>
-                  {t(m === 'percent' ? 'strategy.methodPercent' : 'strategy.methodPrice')}
+                  {t(m === 'percent' ? 'strategy.methodPercent' : 'strategy.methodSteps')}
                 </button>
               ))}
             </div>
             <div className="mt-3">
               <NumberField
-                label={draft.stopLossMethod === 'percent' ? t('strategy.stopLossPct') : t('strategy.stopLossPrice')}
+                label={draft.stopLossMethod === 'percent' ? t('strategy.stopLossPct') : t('strategy.stopLossSteps')}
                 value={draft.stopLossValue}
-                min={draft.stopLossMethod === 'percent' ? 0.1 : 0.00001}
-                max={draft.stopLossMethod === 'percent' ? 10 : 100000}
-                isFloat
+                min={draft.stopLossMethod === 'percent' ? 0.1 : 1}
+                max={draft.stopLossMethod === 'percent' ? 10 : 1000000}
+                isFloat={draft.stopLossMethod === 'percent'}
                 onChange={(v) => onChange({ ...draft, stopLossValue: v })}
               />
             </div>
@@ -784,19 +784,19 @@ function StrategyBuilder({
           <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
             <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.takeProfitMethod')}</span>
             <div className="mt-1.5 flex flex-wrap gap-2">
-              {(['rr', 'percent', 'price'] as const).map((m) => (
+              {(['rr', 'percent', 'steps'] as const).map((m) => (
                 <button key={m} onClick={() => onChange({ ...draft, takeProfitMethod: m })} className={segBtn(draft.takeProfitMethod === m)}>
-                  {t(m === 'rr' ? 'strategy.methodRR' : m === 'percent' ? 'strategy.methodPercent' : 'strategy.methodPrice')}
+                  {t(m === 'rr' ? 'strategy.methodRR' : m === 'percent' ? 'strategy.methodPercent' : 'strategy.methodSteps')}
                 </button>
               ))}
             </div>
             <div className="mt-3">
               <NumberField
-                label={draft.takeProfitMethod === 'rr' ? t('strategy.takeProfitR') : draft.takeProfitMethod === 'percent' ? t('strategy.takeProfitPct') : t('strategy.takeProfitPrice')}
+                label={draft.takeProfitMethod === 'rr' ? t('strategy.takeProfitR') : draft.takeProfitMethod === 'percent' ? t('strategy.takeProfitPct') : t('strategy.takeProfitSteps')}
                 value={draft.takeProfitValue}
-                min={draft.takeProfitMethod === 'rr' ? 0.5 : draft.takeProfitMethod === 'percent' ? 0.1 : 0.00001}
-                max={draft.takeProfitMethod === 'rr' ? 10 : draft.takeProfitMethod === 'percent' ? 50 : 100000}
-                isFloat
+                min={draft.takeProfitMethod === 'rr' ? 0.5 : draft.takeProfitMethod === 'percent' ? 0.1 : 1}
+                max={draft.takeProfitMethod === 'rr' ? 10 : draft.takeProfitMethod === 'percent' ? 50 : 1000000}
+                isFloat={draft.takeProfitMethod !== 'steps'}
                 onChange={(v) => onChange({ ...draft, takeProfitValue: v })}
               />
             </div>

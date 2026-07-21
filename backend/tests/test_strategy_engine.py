@@ -7,7 +7,7 @@ backtest engine's trade-resolution/equity bookkeeping.
 """
 import pytest
 
-from app.services import strategy_engine as se
+from app.services import quotes_store, strategy_engine as se
 
 
 def _bars_from_closes(closes: list[float]) -> list[dict]:
@@ -245,7 +245,7 @@ def test_entry_exit_prices_have_no_floating_point_residue():
     Percent-based math easily produces floating-point residue like
     63619.50399999999 at this price level (seen on a real fired custom-
     strategy signal); _entry_exit_prices must come out clean."""
-    sl, tp = se._entry_exit_prices("BUY", 63939.2, "percent", 0.5, "rr", 1.0)
+    sl, tp = se._entry_exit_prices("BUY", 63939.2, "BTCUSD", "percent", 0.5, "rr", 1.0)
     assert sl == 63619.5
     assert tp == 64258.9
     assert len(str(sl).split(".")[-1]) <= 2
@@ -254,12 +254,57 @@ def test_entry_exit_prices_have_no_floating_point_residue():
 
 def test_entry_exit_prices_round_by_magnitude():
     # 大额价位(>=100):2 位小数 / high-magnitude prices (>=100): 2 decimals
-    sl, _ = se._entry_exit_prices("SELL", 2400.333333, "percent", 1.0, "rr", 2.0)
+    sl, _ = se._entry_exit_prices("SELL", 2400.333333, "XAUUSD", "percent", 1.0, "rr", 2.0)
     assert sl == round(sl, 2)
     # 中等价位(1~100):4 位小数,足够覆盖大多数非日元外汇对的报价精度
     # mid-range prices (1-100): 4 decimals, enough for most non-JPY forex quotes
-    sl2, _ = se._entry_exit_prices("SELL", 1.123456789, "percent", 1.0, "rr", 2.0)
+    sl2, _ = se._entry_exit_prices("SELL", 1.123456789, "EURUSD", "percent", 1.0, "rr", 2.0)
     assert sl2 == round(sl2, 4)
+
+
+# ---------- 止损止盈"steps"(点数)方式:换算成实际价格距离 ----------
+# ---------- SL/TP "steps" (points) method: converted to a real price distance ----------
+@pytest.fixture(autouse=True)
+def _reset_quotes_store():
+    """quotes_store._quotes 是模块级全局状态,不清空会在测试用例之间互相污染。
+    quotes_store._quotes is module-level global state; must be cleared between
+    tests or they'll contaminate each other."""
+    quotes_store._quotes.clear()
+    yield
+    quotes_store._quotes.clear()
+
+
+def test_point_size_uses_ea_reported_digits_when_available():
+    quotes_store._quotes["XAUUSD"] = {"symbol": "XAUUSD", "bid": 2400.0, "ask": 2400.5, "digits": 2}
+    assert se._point_size("XAUUSD", 2400.0) == pytest.approx(0.01)
+
+
+def test_point_size_falls_back_to_magnitude_when_digits_unknown():
+    # 品种从未上报过报价(digits 未知)时,按价格量级估算,与 _round_price 同一套分档
+    # A symbol that has never reported a quote (digits unknown) falls back to a
+    # magnitude-based estimate, same bucketing as _round_price
+    assert se._point_size("UNKNOWNSYM", 2400.0) == pytest.approx(0.01)
+    assert se._point_size("UNKNOWNSYM", 50.0) == pytest.approx(0.0001)
+    assert se._point_size("UNKNOWNSYM", 0.5) == pytest.approx(0.000001)
+
+
+def test_entry_exit_prices_steps_method_uses_point_size():
+    quotes_store._quotes["XAUUSD"] = {"symbol": "XAUUSD", "bid": 2400.0, "ask": 2400.5, "digits": 2}
+    sl, tp = se._entry_exit_prices("BUY", 2400.0, "XAUUSD", "steps", 500, "steps", 1000)
+    assert sl == pytest.approx(2400.0 - 500 * 0.01)
+    assert tp == pytest.approx(2400.0 + 1000 * 0.01)
+
+
+def test_clamp_stop_loss_steps_rounds_to_whole_number_and_clamps():
+    assert se.clamp_stop_loss("steps", 12.6) == 13
+    assert se.clamp_stop_loss("steps", 0) == 1
+    assert se.clamp_stop_loss("steps", 5_000_000) == 1_000_000
+
+
+def test_clamp_take_profit_steps_rounds_to_whole_number_and_clamps():
+    assert se.clamp_take_profit("steps", 12.4) == 12
+    assert se.clamp_take_profit("steps", -5) == 1
+    assert se.clamp_take_profit("steps", 5_000_000) == 1_000_000
 
 
 # ---------- 回测引擎:成交与净值结算(用打桩的入场信号,隔离测试撮合/净值逻辑) ----------

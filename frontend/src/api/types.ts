@@ -193,6 +193,7 @@ export interface PersonalWinRate {
   totalResolved: number
   winRate: number | null
   openPositions: number
+  bySymbol: { symbol: string; count: number }[]
 }
 
 // 纪律分单一维度的评分明细 / one scoring dimension of the discipline score
@@ -345,8 +346,8 @@ export type StrategyTemplateSchemas = Record<StrategyTemplateKey, Record<string,
 // Stop-loss method: percent (distance as % of entry) / price (fixed price
 // distance, same unit as quotes). Take-profit method: rr (multiple of the SL
 // distance) / percent / price.
-export type StopLossMethod = 'percent' | 'price'
-export type TakeProfitMethod = 'rr' | 'percent' | 'price'
+export type StopLossMethod = 'percent' | 'steps'
+export type TakeProfitMethod = 'rr' | 'percent' | 'steps'
 
 // 用户自定义策略：模板 + 调好的参数,对某个品种/周期持续评估
 // A user-customized strategy: a template + tuned params, continuously

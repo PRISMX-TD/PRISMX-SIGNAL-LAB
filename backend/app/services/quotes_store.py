@@ -53,6 +53,15 @@ def get_all() -> list[dict]:
     return list(_quotes.values())
 
 
+def get_digits(symbol: str) -> int | None:
+    """该品种最近一次上报的价格小数位数（EA `FeedQuote.digits`），从未收到过
+    这个品种的报价则返回 None。
+    Most recently reported decimal-digit count for this symbol (the EA's
+    `FeedQuote.digits`); None if a quote for this symbol has never arrived."""
+    q = _quotes.get(symbol)
+    return q.get("digits") if q else None
+
+
 # 品种"当前活跃"的判定窗口（秒）：EA 报价推送间隔默认 2 秒，30 秒足够容忍
 # 几次推送丢失/延迟，又能在 EA 端 InpSymbols 增删品种后的半分钟内跟上——
 # 不需要 EA 显式上报"我现在配置了哪些品种"，谁在推谁就是活跃品种，谁停推

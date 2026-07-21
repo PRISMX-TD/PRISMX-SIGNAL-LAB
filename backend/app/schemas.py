@@ -139,9 +139,9 @@ class StrategyCreate(BaseModel):
     symbol: str = Field(pattern=SYMBOL_PATTERN)
     interval: str
     params: dict = Field(default_factory=dict)
-    stopLossMethod: Literal["percent", "price"] = "percent"
+    stopLossMethod: Literal["percent", "steps"] = "percent"
     stopLossValue: float = Field(default=1.0, gt=0, le=1_000_000)
-    takeProfitMethod: Literal["rr", "percent", "price"] = "rr"
+    takeProfitMethod: Literal["rr", "percent", "steps"] = "rr"
     takeProfitValue: float = Field(default=2.0, gt=0, le=1_000_000)
     # 一次一单：开着仓时不再触发新信号，关闭则只要条件满足就触发
     # One trade at a time: no new signal while a position is open; off means
@@ -152,9 +152,9 @@ class StrategyCreate(BaseModel):
 class StrategyUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=60)
     params: dict | None = None
-    stopLossMethod: Literal["percent", "price"] | None = None
+    stopLossMethod: Literal["percent", "steps"] | None = None
     stopLossValue: float | None = Field(default=None, gt=0, le=1_000_000)
-    takeProfitMethod: Literal["rr", "percent", "price"] | None = None
+    takeProfitMethod: Literal["rr", "percent", "steps"] | None = None
     takeProfitValue: float | None = Field(default=None, gt=0, le=1_000_000)
     oneTradeAtATime: bool | None = None
     enabled: bool | None = None
@@ -181,9 +181,9 @@ class StrategyBacktestRequest(BaseModel):
     symbol: str = Field(pattern=SYMBOL_PATTERN)
     interval: str
     params: dict = Field(default_factory=dict)
-    stopLossMethod: Literal["percent", "price"] = "percent"
+    stopLossMethod: Literal["percent", "steps"] = "percent"
     stopLossValue: float = Field(default=1.0, gt=0, le=1_000_000)
-    takeProfitMethod: Literal["rr", "percent", "price"] = "rr"
+    takeProfitMethod: Literal["rr", "percent", "steps"] = "rr"
     takeProfitValue: float = Field(default=2.0, gt=0, le=1_000_000)
     oneTradeAtATime: bool = True
     days: int = Field(default=90, ge=7, le=730)
