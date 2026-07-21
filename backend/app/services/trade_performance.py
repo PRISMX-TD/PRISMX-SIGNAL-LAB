@@ -79,7 +79,7 @@ def compute_personal_winrate(
         query = query.filter(or_(Order.mt5_login.in_(bound_logins), Order.mt5_login.is_(None)))
     orders = query.all()
     if not orders:
-        return {"wins": 0, "losses": 0, "totalResolved": 0, "winRate": None, "openPositions": 0}
+        return {"wins": 0, "losses": 0, "totalResolved": 0, "winRate": None, "openPositions": 0, "bySymbol": []}
     # 一个"仓位"用 (MT5 账号, 仓位编号) 唯一标识：MT5 的仓位编号只在单个交易
     # 账号内递增，同一用户绑定多个账号时编号可能撞车。只按编号聚合会漏算仓位
     # （字典键相撞覆盖），还会把 A 账号的平仓明细错算进 B 账号的仓位——胜率和
@@ -110,6 +110,7 @@ def compute_personal_winrate(
     open_cutoff = datetime.now(timezone.utc) - _OPEN_FRESHNESS
 
     wins = losses = open_positions = 0
+    symbol_counts: dict[str, int] = {}
     for (login, ticket), order in orders_by_pos.items():
         # 正常情况按 (账号, 编号) 精确匹配；账号未知的历史订单退回只按编号匹配，
         # 避免把它误判成一直未平仓 / exact (login, ticket) match normally; legacy
@@ -126,6 +127,7 @@ def compute_personal_winrate(
                 wins += 1
             else:
                 losses += 1
+            symbol_counts[order.symbol] = symbol_counts.get(order.symbol, 0) + 1
         elif _is_live_open(order, open_cutoff):
             # 没有完整平仓记录，但 MT5 最近仍把它报为持仓 → 确实在进行中。
             # No complete close record, yet MT5 still reports it open → genuinely open.
@@ -137,12 +139,18 @@ def compute_personal_winrate(
         # win/loss nor open) since we have no P&L to attribute.
 
     resolved = wins + losses
+    by_symbol = sorted(
+        ({"symbol": sym, "count": cnt} for sym, cnt in symbol_counts.items()),
+        key=lambda row: row["count"],
+        reverse=True,
+    )
     return {
         "wins": wins,
         "losses": losses,
         "totalResolved": resolved,
         "winRate": wins / resolved if resolved > 0 else None,
         "openPositions": open_positions,
+        "bySymbol": by_symbol,
     }
 
 

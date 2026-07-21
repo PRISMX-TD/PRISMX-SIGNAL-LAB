@@ -5,33 +5,13 @@ import { memo, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Quote } from '../../api/types'
 import { displaySymbol } from '../../api/utils'
+import { symbolMeta } from '../../utils/symbolMeta'
 
 interface Props {
   symbols: string[]        // 当前活跃品种（来自 useLive().activeSymbols）/ currently active symbols
   quotes: Record<string, Quote>
   mt5Online: boolean
   focusSymbol?: string   // 手机端只显示这个品种 / mobile: show only this symbol
-}
-
-// 已知品种的展示元数据（字母 + 配色）；活跃列表里出现未在此列出的新品种时，
-// 用品种名首字母 + 统一灰色兜底，不需要为了新品种改这份表才能显示。
-// 品种名走 i18n（signals.symbolNames）。
-// Known display metadata (letter + color) for a handful of symbols; a symbol
-// appearing in the active list but not listed here falls back to its own
-// first letter + a neutral color, so a brand-new symbol shows up without
-// needing a code change here. Names come from i18n (signals.symbolNames).
-const SYMBOL_META: Record<string, { letter: string; color: string }> = {
-  XAUUSD: { letter: 'X', color: '#f6c453' },
-  XAGUSD: { letter: 'X', color: '#94a3b8' },
-  WTI: { letter: 'W', color: '#d97757' },
-  EURUSD: { letter: 'E', color: '#6366f1' },
-  GBPUSD: { letter: 'G', color: '#a855f7' },
-  USDJPY: { letter: 'U', color: '#7c3aed' },
-  BTCUSD: { letter: 'B', color: '#f59e0b' },
-}
-const DEFAULT_META = { color: '#64748b' }
-function symbolMeta(sym: string): { letter: string; color: string } {
-  return SYMBOL_META[sym] ?? { letter: sym.charAt(0).toUpperCase() || '?', color: DEFAULT_META.color }
 }
 
 const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => {

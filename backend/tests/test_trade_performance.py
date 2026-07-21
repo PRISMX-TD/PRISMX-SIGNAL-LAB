@@ -14,7 +14,7 @@ def _now():
     return datetime.now(timezone.utc)
 
 
-def _order(db, user, ticket, login, volume=1.0, last_seen="fresh"):
+def _order(db, user, ticket, login, volume=1.0, last_seen="fresh", symbol="XAUUSD"):
     # last_seen: "fresh" = 最近仍持仓 / recently open; "stale" = 很久没被报为持仓;
     # None = 从没被报过（历史脏数据）/ never reported (legacy dirty data)
     if last_seen == "fresh":
@@ -28,7 +28,7 @@ def _order(db, user, ticket, login, volume=1.0, last_seen="fresh"):
         client_order_id=f"co-{login}-{ticket}",
         action="ORDER",
         status="FILLED",
-        symbol="XAUUSD",
+        symbol=symbol,
         side="BUY",
         volume=volume,
         mt5_login=login,
@@ -60,7 +60,7 @@ def _leg(db, user, ticket, login, profit, volume=1.0, deal=None):
 
 def test_no_orders_returns_empty(db, user):
     assert compute_personal_winrate(db, user.id) == {
-        "wins": 0, "losses": 0, "totalResolved": 0, "winRate": None, "openPositions": 0
+        "wins": 0, "losses": 0, "totalResolved": 0, "winRate": None, "openPositions": 0, "bySymbol": []
     }
 
 
@@ -74,6 +74,24 @@ def test_single_account_win_loss_open(db, user):
     r = compute_personal_winrate(db, user.id)
     assert (r["wins"], r["losses"], r["totalResolved"], r["openPositions"]) == (1, 1, 2, 1)
     assert r["winRate"] == 0.5
+
+
+def test_by_symbol_breakdown_counts_resolved_positions_per_symbol(db, user):
+    # 两笔黄金(一赢一输)+ 一笔欧美(赢)——已判定的仓位才计入品种分布,
+    # 仍持仓的不算(还没有结果，不该占到某个品种的份额里)。
+    # Two gold positions (one win, one loss) + one EURUSD win — only resolved
+    # positions count toward the symbol breakdown; a still-open one doesn't
+    # (no outcome yet, shouldn't count toward any symbol's share).
+    _order(db, user, ticket=300, login="10001", symbol="XAUUSD")
+    _leg(db, user, ticket=300, login="10001", profit=10.0)
+    _order(db, user, ticket=301, login="10001", symbol="XAUUSD")
+    _leg(db, user, ticket=301, login="10001", profit=-5.0)
+    _order(db, user, ticket=302, login="10001", symbol="EURUSD")
+    _leg(db, user, ticket=302, login="10001", profit=3.0)
+    _order(db, user, ticket=303, login="10001", symbol="EURUSD", last_seen="fresh")  # 仍持仓,不计入
+
+    r = compute_personal_winrate(db, user.id)
+    assert r["bySymbol"] == [{"symbol": "XAUUSD", "count": 2}, {"symbol": "EURUSD", "count": 1}]
 
 
 def test_partial_close_still_open(db, user):

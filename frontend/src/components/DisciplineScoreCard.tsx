@@ -19,6 +19,7 @@ import { Link } from 'react-router-dom'
 import { orderApi } from '../api/client'
 import { useBackToClose } from '../utils/useBackToClose'
 import type { DisciplineScore } from '../api/types'
+import RadialGauge from './RadialGauge'
 
 interface Props {
   // 只看这一个账号（订单页的账号标签驱动）；不传则是当前绑定的全部账号。
@@ -52,6 +53,17 @@ function scoreBarClass(score: number): string {
   if (score >= 80) return 'bg-up'
   if (score >= 50) return 'bg-slate-400'
   return 'bg-down'
+}
+
+// 环形进度表用的颜色——三档配色跟上面两个函数是同一套阈值,只是要一个
+// SVG stroke 能直接用的颜色值,不是 Tailwind 类名。
+// Color for the radial gauge — same three-tier thresholds as the two
+// functions above, just needs a raw color value SVG stroke can use directly,
+// not a Tailwind class name.
+function scoreGaugeColor(score: number): string {
+  if (score >= 80) return 'var(--up)'
+  if (score >= 50) return '#94a3b8'
+  return 'var(--down)'
 }
 
 // 定性总结：一句话比孤零零的数字更快让人读懂"这算好还是不好"。
@@ -222,20 +234,26 @@ export default function DisciplineScoreCard({ login, isPro }: Props) {
         <div className="mt-3 py-3 text-center text-sm text-slate-500">{t('discipline.noData')}</div>
       ) : (
         <>
-          <div className="mt-3 flex items-baseline gap-2">
-            <b className={`num text-4xl font-bold ${scoreColorClass(data.total)}`}>{Math.round(data.total)}</b>
-            <span className={`text-sm font-medium ${scoreColorClass(data.total)}`}>{t(scoreLevelKey(data.total))}</span>
+          <div className="mt-4 flex items-center gap-4">
+            <RadialGauge value={data.total} color={scoreGaugeColor(data.total)} size={116} strokeWidth={10}>
+              <b className={`num font-bold text-3xl ${scoreColorClass(data.total)}`}>{Math.round(data.total)}</b>
+              <span className={`mt-0.5 text-center text-[10px] font-medium leading-tight ${scoreColorClass(data.total)}`}>
+                {t(scoreLevelKey(data.total))}
+              </span>
+            </RadialGauge>
+            {trendPoints && (
+              <div className="flex-1">
+                <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('discipline.trendLabel')}</span>
+                <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="mt-1.5 w-full text-prism-300" preserveAspectRatio="none">
+                  <polyline
+                    fill="none" stroke="currentColor" strokeWidth="2"
+                    strokeLinecap="round" strokeLinejoin="round" points={trendPoints}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </svg>
+              </div>
+            )}
           </div>
-
-          {trendPoints && (
-            <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="mt-3 w-full text-prism-300" preserveAspectRatio="none">
-              <polyline
-                fill="none" stroke="currentColor" strokeWidth="2"
-                strokeLinecap="round" strokeLinejoin="round" points={trendPoints}
-                vectorEffect="non-scaling-stroke"
-              />
-            </svg>
-          )}
 
           {data.dimensions ? (
             <div className="mt-4 flex flex-col gap-3">

@@ -7,7 +7,10 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { orderApi } from '../api/client'
+import { displaySymbol } from '../api/utils'
 import type { PersonalWinRate } from '../api/types'
+import RadialGauge from './RadialGauge'
+import { symbolMeta } from '../utils/symbolMeta'
 
 interface Props {
   variant?: 'compact' | 'detailed'
@@ -70,26 +73,51 @@ export default function PersonalWinRateCard({ variant = 'compact', login }: Prop
         <div className="mt-3 py-3 text-center text-sm text-slate-500">{t('winrate.noData')}</div>
       ) : (
         <>
-          <div className="mt-3 flex items-end gap-2">
-            <b className={`num font-bold text-up ${detailed ? 'text-4xl' : 'text-3xl'}`}>{pct}%</b>
-            <span className="mb-1 text-xs text-slate-500">
-              {t('winrate.resolvedCount', { n: data!.totalResolved })}
-            </span>
+          <div className="mt-4 flex items-center gap-4">
+            <RadialGauge value={pct} color="var(--up)" size={detailed ? 116 : 88} strokeWidth={detailed ? 10 : 8}>
+              <b className={`num font-bold text-up ${detailed ? 'text-3xl' : 'text-2xl'}`}>{pct}%</b>
+              <span className="mt-0.5 text-center text-[10px] leading-tight text-slate-500">
+                {t('winrate.resolvedCount', { n: data!.totalResolved })}
+              </span>
+            </RadialGauge>
+            <div className="grid flex-1 grid-cols-1 gap-1.5 text-xs">
+              <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
+                <span className="text-slate-500">{t('winrate.wins')}</span>
+                <span className="num font-bold text-up">{data!.wins}</span>
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
+                <span className="text-slate-500">{t('winrate.losses')}</span>
+                <span className="num font-bold text-down">{data!.losses}</span>
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
+                <span className="text-slate-500">{t('winrate.openPositions')}</span>
+                <span className="num font-bold text-slate-300">{data!.openPositions}</span>
+              </div>
+            </div>
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-            <div className="rounded-lg bg-white/[0.03] px-3 py-2">
-              <div className="text-slate-500">{t('winrate.wins')}</div>
-              <div className="num mt-0.5 font-bold text-up">{data!.wins}</div>
+
+          {detailed && data!.bySymbol.length > 0 && (
+            <div className="mt-4 border-t border-white/10 pt-3">
+              <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('winrate.bySymbol')}</span>
+              <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-white/[0.06]">
+                {data!.bySymbol.map((row) => (
+                  <div
+                    key={row.symbol}
+                    style={{ width: `${(row.count / data!.totalResolved) * 100}%`, backgroundColor: symbolMeta(row.symbol).color }}
+                  />
+                ))}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+                {data!.bySymbol.map((row) => (
+                  <div key={row.symbol} className="flex items-center gap-1.5 text-[11px]">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: symbolMeta(row.symbol).color }} />
+                    <span className="text-slate-300">{displaySymbol(row.symbol)}</span>
+                    <span className="text-slate-500">{Math.round((row.count / data!.totalResolved) * 100)}%</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="rounded-lg bg-white/[0.03] px-3 py-2">
-              <div className="text-slate-500">{t('winrate.losses')}</div>
-              <div className="num mt-0.5 font-bold text-down">{data!.losses}</div>
-            </div>
-            <div className="rounded-lg bg-white/[0.03] px-3 py-2">
-              <div className="text-slate-500">{t('winrate.openPositions')}</div>
-              <div className="num mt-0.5 font-bold text-slate-300">{data!.openPositions}</div>
-            </div>
-          </div>
+          )}
         </>
       )}
       {detailed && <p className="mt-3 text-[10px] text-slate-600">{t('winrate.disclaimer')}</p>}
