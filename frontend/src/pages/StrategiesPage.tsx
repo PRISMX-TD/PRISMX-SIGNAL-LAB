@@ -102,6 +102,29 @@ function fmtMoney(v: number): string {
   return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+// 时间轴刻度与十字准线悬浮时间标签是 lightweight-charts 两套独立的格式化配置
+// （timeScale.tickMarkFormatter 只管坐标轴刻度；localization.timeFormatter 才
+// 管鼠标悬停/触摸拖动时显示的精确时间）。这里之前两个都没设，回退成库自己的
+// 默认格式化——不是 UTC+8，是浏览器本地时区/UTC，跟全站其它时间显示的口径对
+// 不上。照抄 ChartsPage.tsx 的 fmtChartTime 同款实现，两处统一挂上,不是新写
+// 一遍不同的逻辑。/ Tick-mark labels and the crosshair's hover time readout
+// are two separate lightweight-charts formatting hooks (tickMarkFormatter
+// only controls the axis ticks; localization.timeFormatter controls the
+// precise time shown on hover/touch-drag). Neither was set here, so it fell
+// back to the library's own default formatting — not UTC+8, but the
+// browser's local timezone/UTC, disagreeing with the rest of the site's time
+// display convention. Copied from ChartsPage.tsx's fmtChartTime (same
+// implementation, not a divergent rewrite), wired into both hooks here too.
+function fmtChartTime(time: UTCTimestamp): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(time * 1000))
+}
+
 function defaultParams(schema: Record<string, StrategyParamSpec>): Record<string, string | number> {
   const out: Record<string, string | number> = {}
   for (const [k, spec] of Object.entries(schema)) out[k] = spec.default
@@ -303,7 +326,11 @@ function BacktestChart({
         horzLines: { color: 'rgba(139, 70, 255, 0.08)' },
       },
       rightPriceScale: { borderColor: 'rgba(139, 70, 255, 0.15)' },
-      timeScale: { borderColor: 'rgba(139, 70, 255, 0.15)', timeVisible: true, secondsVisible: false },
+      timeScale: {
+        borderColor: 'rgba(139, 70, 255, 0.15)', timeVisible: true, secondsVisible: false,
+        tickMarkFormatter: fmtChartTime,
+      },
+      localization: { timeFormatter: fmtChartTime },
       crosshair: { mode: 0 },
       // 故意先建成一个明显偏小的占位尺寸，而不是直接传 el.clientWidth——见下方
       // resize 那段注释的完整解释：真实根因是 lightweight-charts 在这类环境下
