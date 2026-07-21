@@ -47,6 +47,12 @@ def persist_closed_bars(db, symbol: str, interval: str, bars: list[dict]) -> int
         return 0
     now = datetime.now(timezone.utc).timestamp()
     closed = [b for b in bars if b["t"] + seconds <= now]
+    # TEMP DEBUG（排查 1 分钟线数据库停止增长问题，排查完删除）
+    if interval == "1":
+        logger.warning(
+            "TEMPDEBUG persist_closed_bars symbol=%s now=%.0f bars_t=%s closed_t=%s",
+            symbol, now, [b["t"] for b in bars], [b["t"] for b in closed],
+        )
     if not closed:
         return 0
 
