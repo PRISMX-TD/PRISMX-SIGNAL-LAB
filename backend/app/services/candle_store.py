@@ -46,23 +46,50 @@ def persist_closed_bars(db, symbol: str, interval: str, bars: list[dict]) -> int
     if seconds is None or not bars:
         return 0
     now = datetime.now(timezone.utc).timestamp()
-    closed = [b for b in bars if b["t"] + seconds <= now]
+    # 一根 bar 满足下面任一条件就算"已收盘"：
+    # ① 绝对时钟判定——bar 的收盘时刻早于等于服务器当前时间(常规情况下这条
+    #    就够了)；
+    # ② 相对判定——同一批里存在时间戳比它更晚的 bar,说明喂价端已经开始形成
+    #    更新的一根,这一根必然已经走完,不管喂价端的时钟跟服务器时钟是否对
+    #    得上都成立(tick 模式固定推最新 2 根、backfill 模式最后一根才是仍在
+    #    形成中的,前面的都有"更晚的邻居"作证)。
+    # 加②是为了在喂价端(EA/其运行机器)时钟跑偏、且两边时钟都不方便/不允许
+    # 改动时依然能正确判定——真实事故:EA 时钟超前约 11 小时,MT5 服务器时间
+    # 改不了、本地系统时间本身是对的也不该为了这个去改,①在这种情况下永远
+    # 为假,1 分钟线永远插不进数据库。②不依赖任何一边的绝对时钟,天然免疫
+    # 这类偏差。
+    # A bar counts as "closed" if EITHER: ① the absolute-clock check — its
+    # close time is at or before the server's current time (sufficient under
+    # normal conditions); OR ② the relative check — this batch also contains
+    # a bar with a strictly later timestamp, proving the feed has already
+    # started forming a newer bar, so this one must be finished regardless of
+    # whether the feed's clock agrees with the server's (tick mode always
+    # sends the latest 2 bars; in backfill mode only the very last bar is
+    # still forming — every earlier one has a "later neighbor" vouching for it).
+    # ② exists so a skewed feed clock (EA / its host machine) doesn't
+    # permanently block persistence in situations where neither clock can
+    # reasonably be changed — a real incident had the EA clock running ~11h
+    # fast, with the broker's server time not being user-adjustable and the
+    # local system clock already correct and not something to touch just for
+    # this. ① would stay permanently false in that case; ② doesn't depend on
+    # either side's absolute clock, so it's immune to this class of skew.
+    latest_t = max(b["t"] for b in bars)
+    closed = [b for b in bars if b["t"] + seconds <= now or b["t"] < latest_t]
     if not closed:
-        # 一批里一根都没被判定为"已收盘"是异常情况——稳态下 tick 模式至少该有
-        # 上一根已经收盘的 bar,backfill 模式的窗口更是横跨好几个小时,正常不该
-        # 一根都摸不到"已收盘"的门槛。持续出现通常意味着喂价端(EA/其运行机器)
-        # 的时钟或时区算错了、把 K 线时间戳打成了"未来"，不是这段判定逻辑本身
-        # 的问题——之前一次真实事故里，这个状态安安静静地持续了三天才被发现，
-        # 加这行 WARNING 让它下次能立刻在日志里现形。
-        # None of a batch being judged "closed" is abnormal — in steady state,
-        # tick mode should always have at least the previous, already-finished
-        # bar, and backfill's window spans hours, so missing the "closed"
-        # threshold entirely shouldn't happen. If this keeps recurring it
-        # usually means the feed's (EA / its host machine) clock or timezone
-        # computation is off and stamping bars into the "future", not a bug in
-        # this check — a real incident once had this silently persist for three
-        # days before anyone noticed; this WARNING makes it show up in the logs
-        # immediately instead.
+        # 有了②(相对判定)之后,这条分支只在批次里连"更晚的邻居"都找不到时才
+        # 会走到——也就是这批实际上只有一根独一无二的时间戳,且它本身还没到
+        # 绝对时钟的收盘门槛(单根 tick 的极端情况;正常 tick/backfill 批次都有
+        # 至少 2 根,不会触发这里)。比引入②之前更少见,但一旦出现仍然值得关注,
+        # 打一行 WARNING 方便第一时间在日志里发现——之前一次真实事故里,喂价端
+        # 时钟跑偏导致的类似状态安安静静持续了三天才被发现。
+        # With ② (the relative check) in place, this branch is only reached
+        # when the batch doesn't even have a "later neighbor" to fall back on
+        # — i.e. it's effectively a single unique timestamp that also misses
+        # the absolute-clock threshold (an edge case; normal tick/backfill
+        # batches always have at least 2 bars and won't hit this). Rarer than
+        # before ② existed, but still worth flagging — a real incident once
+        # had a feed-clock-skew situation like this persist silently for three
+        # days before anyone noticed; this WARNING surfaces it immediately.
         latest_gap_hours = (max(b["t"] for b in bars) - now) / 3600
         logger.warning(
             "persist_closed_bars: %s/%s got %d bar(s) but none are closed yet "
