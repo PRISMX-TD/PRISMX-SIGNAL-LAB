@@ -961,20 +961,34 @@ function DrawLayer({ chart, series, host, symbol, barTimes: _barTimes, digits = 
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey)
   }, [commit, undo, redo, removeTempPrim])
 
-  // ──── 悬停光标样式 / hover cursor ────
+  // ──── 悬停光标样式 + 动态 pointer-events / hover cursor + dynamic pointer-events ────
+  // 叠加层默认不接管指针事件(pointer-events: none),只有真的"有事可做"时
+  // (正在拖拽 / 画图工具已激活 / 悬停在某条画线或手柄上)才切成 auto 去抢
+  // 事件——不然它常驻盖住整块图表,原生的拖动平移/滚轮缩放永远传不到底下
+  // 真正的图表 canvas 上。这是 ISeriesPrimitive 重写(f2a6f1b)时被误删的
+  // 一段逻辑,重写前的 canvas 叠加层本来就是这么做的,这里原样恢复。
+  // The overlay defaults to not capturing pointer events (pointer-events:
+  // none), only switching to auto when there's actually something to do
+  // (mid-drag / a drawing tool is active / hovering a drawing or its handle)
+  // — otherwise it permanently sits on top of the whole chart and the native
+  // drag-to-pan / wheel-to-zoom gestures never reach the real chart canvas
+  // underneath. This logic was accidentally dropped during the
+  // ISeriesPrimitive rewrite (f2a6f1b); the pre-rewrite canvas overlay did
+  // exactly this, restored here as-is.
   const [cursorStyle, setCursorStyle] = useState<string>('')
   useEffect(() => {
     const el = overlayRef.current; if (!el) return
     const onHover = (e: PointerEvent) => {
-      if (dragRef.current) return
+      if (dragRef.current) { el.style.pointerEvents = 'auto'; return }
       if (toolRef.current !== 'cursor' && toolRef.current !== 'cross') {
-        setCursorStyle('crosshair'); return
+        el.style.pointerEvents = 'auto'; setCursorStyle('crosshair'); return
       }
       const r = el.getBoundingClientRect()
       const x = e.clientX - r.left, y = e.clientY - r.top
-      if (x < 0 || y < 0 || x > r.width || y > r.height) { setCursorStyle(''); return }
+      if (x < 0 || y < 0 || x > r.width || y > r.height) { el.style.pointerEvents = 'none'; setCursorStyle(''); return }
       const h = hitDrawing(x, y, true)
       if (h) {
+        el.style.pointerEvents = 'auto'
         if (h.locked) { setCursorStyle('default'); return }
         const hi = hitHandle(h, x, y)
         if (hi >= 0) {
@@ -982,12 +996,24 @@ function DrawLayer({ chart, series, host, symbol, barTimes: _barTimes, digits = 
           else { setCursorStyle('grab') }
         } else { setCursorStyle('move') }
       } else {
+        el.style.pointerEvents = 'none'
         setCursorStyle(toolRef.current === 'cross' ? 'crosshair' : '')
       }
     }
     window.addEventListener('pointermove', onHover, true)
     return () => window.removeEventListener('pointermove', onHover, true)
   }, [hitDrawing, hitHandle])
+
+  // 切换工具时立即同步一次,不用等下一次 pointermove 才生效(比如从画图工具
+  // 切回光标,鼠标没动过的话之前的 onHover 判定还停留在"auto")。
+  // Sync immediately on tool switch instead of waiting for the next
+  // pointermove (e.g. switching from a drawing tool back to cursor without
+  // moving the mouse would otherwise leave the last onHover verdict at "auto").
+  useEffect(() => {
+    const el = overlayRef.current; if (!el) return
+    if (tool !== 'cursor' && tool !== 'cross') { el.style.pointerEvents = 'auto'; setCursorStyle('crosshair') }
+    else { el.style.pointerEvents = 'none'; setCursorStyle('') }
+  }, [tool])
 
   // ──── 工具栏 UI helpers ────
   const toolBtn = (id: Tool, icon: JSX.Element, label: string) => (
@@ -1003,7 +1029,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes: _barTimes, digits = 
       {/* 叠加交互层 / transparent interaction layer */}
       <div
         ref={overlayRef}
-        className="absolute inset-1.5 z-10"
+        className="pointer-events-none absolute inset-1.5 z-10 touch-none"
         style={{ display: visible ? '' : 'none', cursor: cursorStyle || (tool !== 'cursor' && tool !== 'cross' ? 'crosshair' : 'default') }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
         onContextMenu={(e) => {
