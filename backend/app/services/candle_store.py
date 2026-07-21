@@ -48,6 +48,28 @@ def persist_closed_bars(db, symbol: str, interval: str, bars: list[dict]) -> int
     now = datetime.now(timezone.utc).timestamp()
     closed = [b for b in bars if b["t"] + seconds <= now]
     if not closed:
+        # 一批里一根都没被判定为"已收盘"是异常情况——稳态下 tick 模式至少该有
+        # 上一根已经收盘的 bar,backfill 模式的窗口更是横跨好几个小时,正常不该
+        # 一根都摸不到"已收盘"的门槛。持续出现通常意味着喂价端(EA/其运行机器)
+        # 的时钟或时区算错了、把 K 线时间戳打成了"未来"，不是这段判定逻辑本身
+        # 的问题——之前一次真实事故里，这个状态安安静静地持续了三天才被发现，
+        # 加这行 WARNING 让它下次能立刻在日志里现形。
+        # None of a batch being judged "closed" is abnormal — in steady state,
+        # tick mode should always have at least the previous, already-finished
+        # bar, and backfill's window spans hours, so missing the "closed"
+        # threshold entirely shouldn't happen. If this keeps recurring it
+        # usually means the feed's (EA / its host machine) clock or timezone
+        # computation is off and stamping bars into the "future", not a bug in
+        # this check — a real incident once had this silently persist for three
+        # days before anyone noticed; this WARNING makes it show up in the logs
+        # immediately instead.
+        latest_gap_hours = (max(b["t"] for b in bars) - now) / 3600
+        logger.warning(
+            "persist_closed_bars: %s/%s got %d bar(s) but none are closed yet "
+            "(latest bar is %.1fh ahead of server time; positive means the feed's "
+            "clock is running fast — check the EA/feeder's time source if this recurs)",
+            symbol, interval, len(bars), latest_gap_hours,
+        )
         return 0
 
     existing = {

@@ -43,6 +43,40 @@ def test_unknown_interval_is_ignored(db):
     assert db.query(Candle).count() == 0
 
 
+def test_warns_when_entire_batch_is_not_yet_closed(db, caplog):
+    """一批里一根都没被判定为"已收盘"要打 WARNING——复现真实事故场景：喂价端
+    (EA)时钟算错、把 K 线时间戳打进了"未来"，导致这个判断永远为假、数据库
+    安静地停止增长，直到三天后才被发现。
+
+    A batch where nothing is judged "closed" yet must log a WARNING —
+    reproduces the real incident where the feed's (EA) clock was off and
+    stamped bars into the "future", making this check permanently false and
+    silently halting the database for three days before anyone noticed."""
+    future_bars = [
+        {"t": _epoch(-60), "o": 1, "h": 2, "l": 0.5, "c": 1.5, "v": 10},   # 1 小时后 / 1h from now
+        {"t": _epoch(-120), "o": 1, "h": 2, "l": 0.5, "c": 1.5, "v": 10},  # 2 小时后 / 2h from now
+    ]
+    with caplog.at_level("WARNING"):
+        n = persist_closed_bars(db, "XAUUSD", "1", future_bars)
+    assert n == 0
+    assert db.query(Candle).count() == 0
+    assert any("none are closed yet" in r.message for r in caplog.records)
+    assert any("XAUUSD/1" in r.message for r in caplog.records)
+
+
+def test_no_warning_when_at_least_one_bar_is_closed(db, caplog):
+    """正常情况(至少有一根已收盘)不该打这条 WARNING——避免稳态运行时刷屏。
+    Normal operation (at least one closed bar) must not trigger this WARNING
+    — avoids flooding the logs during steady-state runs."""
+    bars = [
+        {"t": _epoch(5), "o": 1, "h": 2, "l": 0.5, "c": 1.5, "v": 10},
+        {"t": _epoch(0), "o": 1.5, "h": 1.6, "l": 1.4, "c": 1.55, "v": 3},
+    ]
+    with caplog.at_level("WARNING"):
+        persist_closed_bars(db, "XAUUSD", "1", bars)
+    assert not any("none are closed yet" in r.message for r in caplog.records)
+
+
 def test_cleanup_only_deletes_expired_m1(db):
     old_m1 = _epoch(60 * 24 * 40)  # 40 天前 / 40 days ago
     fresh_m1 = _epoch(60 * 24 * 5)  # 5 天前 / 5 days ago
