@@ -198,6 +198,38 @@ def test_genuine_regime_change_beyond_hysteresis_reanchors():
     assert skew2 == pytest.approx(second_skew, abs=1)
 
 
+def test_correction_preserves_the_bars_own_period_grid():
+    """回归测试：纠偏量必须是周期长度的整数倍,否则同一根 bar 在纠偏缓存
+    随后续请求微调(比如从"刚换挡"到"收敛到最大值")时,会被反复纠正到
+    网格上不同的残数位置——存进数据库后每次都是不同的 t,造出好几行,图表
+    上表现为错位/重复的蜡烛。真实场景里时钟偏差几乎不可能刚好是周期长度
+    的整数倍(这里特意用一个不整除的偏差量,此前的测试全部凑巧用了能整除
+    的 11 小时,掩盖了这个问题)。
+
+    Regression test: the correction must be a whole multiple of the bar's own
+    period length, or the same bar gets corrected to a different residue on
+    the grid as the cached skew gets nudged across requests (e.g. "just
+    re-anchored" vs "converged to the maximum") — each producing a different
+    stored t, i.e. multiple rows for what should be one bar, rendering as a
+    duplicate/misaligned candle on the chart. Real-world clock skew is
+    essentially never an exact multiple of the interval (this test
+    deliberately picks a skew that doesn't divide evenly — every earlier test
+    happened to use 11h, which divides every interval here cleanly, masking
+    this)."""
+    interval_seconds = 300  # 5 分钟线 / M5
+    now = _now()
+    aligned_t = int(now // interval_seconds) * interval_seconds  # 已对齐网格的原始时间戳 / already grid-aligned
+    skew_seconds = 39623  # 不是 300 的整数倍 / not a multiple of 300
+    bars = [{"t": aligned_t + skew_seconds, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1}]
+
+    corrected, _skew, _is_new = _correct_future_skew(bars, now, ("XAUUSD", "5"), interval_seconds)
+
+    # 纠正只应该挪动整数根周期,不改变 bar 落在自己网格里的残数位置。
+    # Correction must shift by whole periods only, never changing which slot
+    # within the period the bar's own timestamp falls into.
+    assert corrected[0]["t"] % interval_seconds == bars[0]["t"] % interval_seconds
+
+
 def test_large_interval_tolerates_its_own_full_bar_duration_of_drift():
     """周期越长,同一根仍在形成中的 bar 天然能漂移的范围越大(比如日线最长
     24 小时)——迟滞阈值必须按周期本身的秒数放大,不能对所有周期用同一个

@@ -170,7 +170,21 @@ def _correct_future_skew(
     cached = raw_skew if is_new_regime else max(cached, raw_skew)
     _skew_cache[cache_key] = cached
 
-    shift = int(cached)
+    # 纠偏量必须是这个周期长度的整数倍,否则减完之后 bar 的时间戳会偏离自己
+    # 所在的周期网格(比如 5 分钟线不再落在 :00/:05/:10 这种整点上),存进数据库
+    # 后跟同周期其它干净的 bar 对不上格,图表上看起来就是错位/重复的蜡烛——
+    # 这正是 2026-07-21 那次回测图表蜡烛错位事故的根因。四舍五入到最近的整
+    # 周期数,既贴近真实偏差,又保证纠正后的时间戳和原始时间戳落在同一个网格。
+    # The correction must be a whole multiple of this interval's length,
+    # otherwise subtracting it knocks the bar's timestamp off its own periodic
+    # grid (e.g. a 5-minute bar no longer lands on :00/:05/:10) — once stored,
+    # it won't line up with the other clean bars of the same interval, and the
+    # chart renders it as a duplicate/misaligned candle. This was the root
+    # cause of the 2026-07-21 backtest-chart misaligned-candle incident.
+    # Rounding to the nearest whole interval keeps the correction close to the
+    # true offset while guaranteeing the corrected timestamp stays on the same
+    # grid as the original.
+    shift = round(cached / interval_seconds) * interval_seconds
     return [{**b, "t": b["t"] - shift} for b in bars], cached, is_new_regime
 
 
