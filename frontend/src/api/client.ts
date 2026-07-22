@@ -330,8 +330,15 @@ export const userApi = {
         online: boolean
       }>
     }>('/auth/me'),
+  // 后端会在改密时让所有旧 token 失效（见 account.py 的说明），并随响应
+  // 带回一个已盖新会话版本号的 token——调用方必须用它替换本地 token，
+  // 否则这次请求自己带的旧 token 也已失效，下一个请求会被 401 踢出登录。
+  // The backend invalidates every old token on a password change (see
+  // account.py's docstring) and returns a freshly stamped one in the
+  // response — callers must swap it into local storage, or even this
+  // request's own (now-invalidated) token will 401 on the very next call.
   changePassword: (oldPassword: string | null, newPassword: string) =>
-    request<{ ok: boolean }>('/auth/password', {
+    request<{ ok: boolean; token: string }>('/auth/password', {
       method: 'POST',
       body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
     }),
@@ -510,6 +517,12 @@ export const paymentApi = {
       amount_usd: number
       plan: string
       status: string
+      // NOWPayments 报告的实际到账金额（同 pay_currency 计价）；null 表示
+      // 尚无数据或从未同步过。低于 pay_amount 说明用户少转了。
+      // Actual amount received (same currency as pay_currency), as reported
+      // by NOWPayments; null means no data yet / never synced. Less than
+      // pay_amount means the user under-sent.
+      actually_paid: number | null
       finished_at: string | null
       created_at: string
     }>(`/payments/status/${paymentId}`),

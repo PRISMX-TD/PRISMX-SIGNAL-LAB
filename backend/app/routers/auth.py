@@ -44,7 +44,7 @@ def register(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
-    token = create_access_token(user.id)
+    token = create_access_token(user.id, user.token_version)
     return AuthResponse(token=token, user=_user_out(user))
 
 
@@ -75,7 +75,7 @@ def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends
         db.commit()
         db.refresh(user)
 
-    token = create_access_token(user.id)
+    token = create_access_token(user.id, user.token_version)
     return AuthResponse(token=token, user=_user_out(user))
 
 
@@ -88,5 +88,5 @@ def login(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
     if not user or not verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=401, detail="邮箱或密码错误 / Invalid email or password")
 
-    token = create_access_token(user.id)
+    token = create_access_token(user.id, user.token_version)
     return AuthResponse(token=token, user=_user_out(user))

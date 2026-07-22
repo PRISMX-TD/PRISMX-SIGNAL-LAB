@@ -4,6 +4,7 @@
 NOWPayments 的 IPN 回调也走这个路由（无需用户认证）。
 """
 
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -27,6 +28,18 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 
 # ═══ 定价 / Pricing ═══
 PLAN_DAYS: dict[str, int] = {"pro_monthly": 30, "pro_yearly": 365}
+
+# 币种列表进程内缓存：这份列表几乎不变，之前每次调用都不带登录校验、也不
+# 缓存地直接转发给 NOWPayments——任何人（不用登录）反复刷这个接口就能把
+# 第三方调用成本转嫁到我们身上、拖慢真实用户的响应。加登录校验 + 短 TTL
+# 缓存后，同一分钟内的重复请求都不再打到 NOWPayments。
+# In-process cache for the currency list: it almost never changes, but this
+# endpoint used to require no login and forward to NOWPayments on every call
+# — anyone (no auth needed) could hammer it to run up our third-party call
+# cost and slow down real users. Login + a short TTL cache mean repeated
+# calls within the same window never reach NOWPayments again.
+_CURRENCY_CACHE_TTL_SECONDS = 300
+_currency_cache: tuple[float, list[str]] | None = None
 
 
 def _resolve_pricing(db: Session) -> dict:
@@ -90,13 +103,19 @@ def get_plans(db: Session = Depends(get_db)):
 
 
 @router.get("/currencies")
-async def get_payment_currencies():
-    """获取 NOWPayments 支持的可用币种列表 / List available payment currencies."""
+async def get_payment_currencies(_user: User = Depends(get_current_user)):
+    """获取 NOWPayments 支持的可用币种列表（登录必需，短 TTL 缓存）。
+    List available payment currencies (login required, short-TTL cached)."""
+    global _currency_cache
+    now = time.monotonic()
+    if _currency_cache is not None and now - _currency_cache[0] < _CURRENCY_CACHE_TTL_SECONDS:
+        return {"currencies": _currency_cache[1]}
     try:
         currencies = await np_currencies()
-        return {"currencies": currencies}
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"NOWPayments error: {e}")
+    _currency_cache = (now, currencies)
+    return {"currencies": currencies}
 
 
 # ═══ 免费试用 / Free trial ═══
@@ -303,6 +322,12 @@ async def get_payment_status_local(
         "amount_usd": record.amount_usd,
         "plan": record.plan,
         "status": record.status,
+        # 实际到账金额：低于 pay_amount 说明用户少转了。让前端能提示"已收到
+        # 部分金额"，而不是只有一句"已过期"却不知道钱去哪儿了。
+        # Actual amount received: less than pay_amount means the user
+        # under-sent. Lets the frontend show "partial amount received"
+        # instead of just "expired" with no idea where the funds went.
+        "actually_paid": record.actually_paid,
         "finished_at": record.finished_at.isoformat() if record.finished_at else None,
         "created_at": record.created_at.isoformat(),
     }
@@ -376,6 +401,27 @@ def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_da
     elif np_status_val in ("failed", "refunded"):
         new_status = "FAILED"
 
+    # 实际到账金额：不管是否终态都更新，让用户在支付窗口还开着、甚至已经
+    # 过期/失败之后都能看到"收到了多少"，而不是钱看起来凭空消失。单独track
+    # 是否真的变化了：状态本身没变化时（如仍处于 PROCESSING）下面的分支不会
+    # 触发 commit，这个金额的更新就得靠它自己补一次 commit，否则悄悄丢失。
+    # Actual amount received: updated regardless of terminal state, so the
+    # user can see "how much arrived" whether the window is still open or the
+    # payment has already expired/failed — instead of the funds appearing to
+    # vanish. Tracked separately: when the status itself doesn't change (e.g.
+    # still PROCESSING), the branches below never commit, so this needs its
+    # own commit or the amount update is silently lost.
+    actually_paid_changed = False
+    actually_paid = np_data.get("actually_paid")
+    if actually_paid is not None:
+        try:
+            parsed = float(actually_paid)
+            if record.actually_paid != parsed:
+                record.actually_paid = parsed
+                actually_paid_changed = True
+        except (TypeError, ValueError):
+            pass
+
     if new_status == "FINISHED":
         now = datetime.now(timezone.utc)
         # 原子抢占：只有把状态从非 FINISHED 改成 FINISHED 的这一方负责加时长
@@ -441,4 +487,11 @@ def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_da
         # FINISHED 是终态：乱序迟到的旧回调不允许把它改回 PROCESSING 等
         # FINISHED is terminal — a late out-of-order callback must not regress it
         record.status = new_status
+        db.commit()
+    elif actually_paid_changed:
+        # 状态本身没变化（如仍是 PROCESSING），但到账金额有新数据——单独提交，
+        # 否则用户少转后再多补一笔，这次追加的金额永远不会落库。
+        # Status itself is unchanged (e.g. still PROCESSING) but the received
+        # amount has fresh data — commit it on its own, or a top-up sent after
+        # an initial under-payment would never get persisted.
         db.commit()

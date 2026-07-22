@@ -110,6 +110,8 @@ def _migrate_columns() -> None:
             "external_id": "VARCHAR",
             "result": "VARCHAR",
             "resolved_at": datetime_type,
+            "baseline_high": "FLOAT",
+            "baseline_low": "FLOAT",
         }
         with engine.begin() as conn:
             for name, col_type in signal_new.items():
@@ -184,6 +186,7 @@ def _migrate_columns() -> None:
             "bridge_version": "VARCHAR",
             "trial_used_at": datetime_type,
             "plan_is_trial": "BOOLEAN",
+            "token_version": "INTEGER",
         }
         with engine.begin() as conn:
             for name, col_type in user_new.items():
@@ -204,6 +207,13 @@ def _migrate_columns() -> None:
             # Free-trial flag: a freshly added column is NULL, but it's declared NOT NULL.
             if "plan_is_trial" not in user_cols:
                 conn.execute(text("UPDATE users SET plan_is_trial = FALSE WHERE plan_is_trial IS NULL"))
+            # 会话版本号：新列刚加时为 NULL，但声明为 NOT NULL；老 token 里没有
+            # "tv" 字段，鉴权时按 0 处理，与这里回填的默认值一致。
+            # Session/token version: a freshly added column is NULL, but it's
+            # declared NOT NULL; old tokens carry no "tv" claim and are treated
+            # as version 0 at auth time, matching the backfill here.
+            if "token_version" not in user_cols:
+                conn.execute(text("UPDATE users SET token_version = 0 WHERE token_version IS NULL"))
 
     # user_strategies 表：止损止盈从"百分比距离 + R 倍数"一种固定组合改成
     # 两个方式独立可选，外加策略命名。已启用的策略要按原逻辑等价换算成新
@@ -308,3 +318,14 @@ def _migrate_columns() -> None:
                 conn.execute(text("UPDATE strategy_signals SET result = 'PENDING' WHERE result IS NULL"))
             if "resolved_at" not in ss_cols:
                 conn.execute(text(f"ALTER TABLE strategy_signals ADD COLUMN resolved_at {datetime_type}"))
+
+    # payments 表：补充 NOWPayments 实际到账金额，用于向少转/漏转的用户如实
+    # 展示"已收到部分金额"而不是让钱看起来凭空消失。
+    # payments: add the NOWPayments-reported actual amount received, so a
+    # user who under-sent sees "partial amount received" instead of the funds
+    # appearing to vanish.
+    if "payments" in inspector.get_table_names():
+        payment_cols = {c["name"] for c in inspector.get_columns("payments")}
+        if "actually_paid" not in payment_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE payments ADD COLUMN actually_paid FLOAT"))

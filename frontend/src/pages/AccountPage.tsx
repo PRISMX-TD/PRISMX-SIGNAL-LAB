@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { useTranslation } from "react-i18next"
-import { userApi, notificationApi } from "../api/client"
+import { userApi, notificationApi, setToken } from "../api/client"
 import { fmtTime, fmtDate, localizeApiError } from "../api/utils"
 import { getSWReg, pushSupported } from "../utils/push"
 import {
@@ -53,6 +53,32 @@ export default function AccountPage() {
   const symbolSaveTimer = useRef<number | undefined>(undefined)
   const eventSaveTimer = useRef<number | undefined>(undefined)
   const notifSectionRef = useRef<HTMLElement | null>(null)
+
+  // 三个防抖计时器各自的回调都要把"当前完整偏好"整份 PUT 给后端（后端是
+  // 整份覆盖，不是按维度合并）。若各自直接读取闭包里捕获的 notifCats/
+  // notifSymbols/notifEvents，当用户在同一个 400ms 窗口内连续切换两个不同
+  // 维度时，先触发的那个计时器会用它触发那一刻捕获的、尚未包含后一次改动
+  // 的旧值去覆盖后一次改动，把刚保存成功的那一项改动悄悄覆盖回去。这几个
+  // ref 随每次渲染同步到最新 state，计时器触发时读它们而不是闭包变量，就
+  // 总能拿到"这一刻"真正最新的值。
+  // All three debounce timers' callbacks PUT the full preference set (the
+  // backend fully overwrites, not merges, per dimension). If each read the
+  // notifCats/notifSymbols/notifEvents captured in its own handler's
+  // closure, then toggling two different dimensions within the same 400ms
+  // window would let the earlier-scheduled timer fire with the value it
+  // captured at handler-call time — before the later toggle — silently
+  // clobbering that just-saved change back to the old value. These refs
+  // stay in sync with the latest state on every render; reading them instead
+  // of the closure variables at fire time always gets what's actually
+  // current "right now".
+  const catsRef = useRef(notifCats)
+  const symbolsRef = useRef(notifSymbols)
+  const eventsRef = useRef(notifEvents)
+  const enabledRef = useRef(notifEnabled)
+  useEffect(() => { catsRef.current = notifCats }, [notifCats])
+  useEffect(() => { symbolsRef.current = notifSymbols }, [notifSymbols])
+  useEffect(() => { eventsRef.current = notifEvents }, [notifEvents])
+  useEffect(() => { enabledRef.current = notifEnabled }, [notifEnabled])
 
   useEffect(() => {
     load()
@@ -120,7 +146,13 @@ export default function AccountPage() {
       return
     }
     try {
-      await userApi.changePassword(oldPw || null, newPw)
+      const res = await userApi.changePassword(oldPw || null, newPw)
+      // 改密后端会让旧 token 失效，响应带回新 token——必须立即替换本地存的
+      // 那份，否则接下来的任何请求都会因为带着已失效的旧 token 被 401 踢出。
+      // The backend invalidates the old token on a password change and
+      // returns a new one — swap it in immediately, or the very next request
+      // 401s on the now-invalidated old token.
+      if (res.token) setToken(res.token)
       setPwMsg({ kind: "ok", text: t("account.pwChanged") })
       setOldPw("")
       setNewPw("")
@@ -206,7 +238,12 @@ export default function AccountPage() {
       const next = toggleWhitelistValue(prev, cat, on)
       if (catSaveTimer.current) window.clearTimeout(catSaveTimer.current)
       catSaveTimer.current = window.setTimeout(() => {
-        notificationApi.putPrefs(notifEnabled, next, notifEvents, notifSymbols).catch(() => {
+        // 其它两个维度从 ref 取"此刻最新值"，而不是本次调用时闭包捕获的
+        // notifEvents/notifSymbols——见 refs 声明处的说明。
+        // The other two dimensions come from the refs ("right now"), not the
+        // notifEvents/notifSymbols this call's closure captured — see the
+        // refs' declaration comment.
+        notificationApi.putPrefs(enabledRef.current, next, eventsRef.current, symbolsRef.current).catch(() => {
           // 落库失败则回滚该项 / roll back this toggle on failure
           setNotifCats(prev)
           setNotifMsg({ kind: "err", text: t("account.notifError") })
@@ -223,7 +260,7 @@ export default function AccountPage() {
       const next = toggleWhitelistValue(prev, symbol, on)
       if (symbolSaveTimer.current) window.clearTimeout(symbolSaveTimer.current)
       symbolSaveTimer.current = window.setTimeout(() => {
-        notificationApi.putPrefs(notifEnabled, notifCats, notifEvents, next).catch(() => {
+        notificationApi.putPrefs(enabledRef.current, catsRef.current, eventsRef.current, next).catch(() => {
           // 落库失败则回滚该项 / roll back this toggle on failure
           setNotifSymbols(prev)
           setNotifMsg({ kind: "err", text: t("account.notifError") })
@@ -240,7 +277,7 @@ export default function AccountPage() {
       const next = on ? [...prev, eventType] : prev.filter((e) => e !== eventType)
       if (eventSaveTimer.current) window.clearTimeout(eventSaveTimer.current)
       eventSaveTimer.current = window.setTimeout(() => {
-        notificationApi.putPrefs(notifEnabled, notifCats, next, notifSymbols).catch(() => {
+        notificationApi.putPrefs(enabledRef.current, catsRef.current, next, symbolsRef.current).catch(() => {
           // 落库失败则回滚该项 / roll back this toggle on failure
           setNotifEvents((cur) => (on ? cur.filter((e) => e !== eventType) : [...cur, eventType]))
           setNotifMsg({ kind: "err", text: t("account.notifError") })

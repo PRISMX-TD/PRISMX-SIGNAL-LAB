@@ -791,6 +791,8 @@
     "timeLeft": "剩余时间",
     "expiresIn": "收款地址有时效，请在倒计时内完成转账",
     "amountExact": "请转账此精确金额，否则可能无法识别到账",
+    "partialPaymentNotice": "已收到 {{paid}}，但金额不足。请向同一地址再转账 {{remaining}} 以补足差额完成支付。",
+    "partialPaymentExpiredNotice": "本次支付时效内已收到 {{paid}} {{currency}}，这笔钱不会丢失。请联系客服并提供支付信息，以便为你的账户补记这笔金额。",
     "screenshotTip": "小提示：建议截图保存钱包「转账完成」的收据，以备需要联系客服时使用。",
     "networkLabel": "网络",
     "step1": "打开钱包，扫描二维码或粘贴收款地址",

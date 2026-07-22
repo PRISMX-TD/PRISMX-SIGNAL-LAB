@@ -26,28 +26,6 @@ def _aware(dt: datetime | None) -> datetime | None:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
-def _expire_stale(db: Session) -> None:
-    """把已过有效期但仍标记 ACTIVE 的信号置为 EXPIRED。
-    Mark ACTIVE signals past their expiry as EXPIRED.
-    """
-    now = datetime.now(timezone.utc)
-    active = (
-        db.query(Signal)
-        .filter(Signal.status == "ACTIVE", Signal.expire_at.isnot(None))
-        .all()
-    )
-    changed = False
-    for s in active:
-        exp = s.expire_at
-        if exp.tzinfo is None:
-            exp = exp.replace(tzinfo=timezone.utc)
-        if exp < now:
-            s.status = "EXPIRED"
-            changed = True
-    if changed:
-        db.commit()
-
-
 @router.get("", response_model=dict)
 def list_signals(
     user: User = Depends(get_current_user),
@@ -62,8 +40,18 @@ def list_signals(
     tradeable, it's invisible to FREE users; it appears (with its final
     result) only once expired — effectively "visible only once it can no
     longer be traded".
+
+    过期扫描交给独立的后台任务 signal_expiry_loop（每 5 秒一次，见
+    engine/signal_engine.py），这里不再重复现算——避免每次请求都全表扫一遍
+    ACTIVE 信号；FREE 用户看到某条信号变为 EXPIRED 最多晚 5 秒，与后台任务
+    的扫描节拍一致，且已经有 WS SIGNAL_EXPIRED 推送兜底及时性。
+    Expiry sweeping is delegated to the standalone signal_expiry_loop
+    background task (every 5s, see engine/signal_engine.py) instead of being
+    recomputed on every request here — this used to scan every ACTIVE signal
+    per page load. A FREE user sees a signal flip to EXPIRED at most 5s late,
+    matching the sweep's own cadence, with the WS SIGNAL_EXPIRED push already
+    covering timeliness for connected clients.
     """
-    _expire_stale(db)
     query = db.query(Signal)
     if not is_realtime_plan(user.plan):
         query = query.filter(Signal.status == "EXPIRED")
@@ -96,7 +84,6 @@ def signal_stats(
     """近 N 天每日信号发出量（含当天，按 UTC 日期分组）。
     Daily signal count for the last N days (incl. today, grouped by UTC date).
     """
-    _expire_stale(db)
     now = datetime.now(timezone.utc)
     start_date = (now - timedelta(days=STATS_DAYS - 1)).date()
 

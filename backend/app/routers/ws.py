@@ -10,13 +10,38 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.core.security import decode_access_token
+from app.core.database import SessionLocal
+from app.core.security import decode_token_payload
+from app.models import User
 from app.services import quotes_store
 from app.services.connection_manager import manager
 
 logger = logging.getLogger("prismx.ws")
 
 router = APIRouter()
+
+
+def _authenticate(token: str) -> str | None:
+    """校验 token 并返回 user_id；会话版本不匹配（改密码后已失效）返回 None。
+    与 services/deps.get_current_user 同一套 tv 校验规则，见其说明。
+
+    Validate the token and return the user_id; a session-version mismatch
+    (invalidated by a password change) returns None. Same "tv" check as
+    services/deps.get_current_user — see its docstring for the rationale.
+    """
+    payload = decode_token_payload(token)
+    user_id = payload.get("sub") if payload else None
+    if not user_id:
+        return None
+    token_tv = payload.get("tv") if isinstance(payload.get("tv"), int) else 0
+    db = SessionLocal()
+    try:
+        current_tv = db.query(User.token_version).filter(User.id == user_id).scalar()
+    finally:
+        db.close()
+    if current_tv is None or token_tv != (current_tv or 0):
+        return None
+    return user_id
 
 
 # ---------- 前端通道 / Client channel ----------
@@ -27,10 +52,16 @@ async def ws_client(websocket: WebSocket):
 
     鉴权方式：连接后由客户端发送首帧 {"type":"AUTH","token":"<jwt>"}。
     避免把 JWT 放在 URL query（会被代理/网关访问日志记录）。为兼容旧客户端，
-    仍接受 query 参数 token 作为回退。
+    仍接受 query 参数 token 作为回退。只在建连这一刻校验会话版本——已经建立
+    的连接不会因为期间发生的密码修改被强制断开，会随该连接下次重连时自然
+    生效（前端重连时会带上刷新过的新 token）。
     Auth: client sends a first frame {"type":"AUTH","token":"<jwt>"} after connect.
     Avoids putting the JWT in the URL query (logged by proxies/gateways). For
     backward compatibility a query param token is still accepted as fallback.
+    The session-version check only runs at connect time — an already-open
+    connection isn't force-dropped by a password change that happens while
+    it's live; it takes effect the next time that connection reconnects
+    (picking up the refreshed token the frontend stores by then).
     """
     await websocket.accept()
 
@@ -45,7 +76,7 @@ async def ws_client(websocket: WebSocket):
     if not token:
         token = websocket.query_params.get("token", "")
 
-    user_id = decode_access_token(token)
+    user_id = _authenticate(token)
     if not user_id:
         await websocket.send_json({"type": "AUTH_FAIL", "reason": "invalid token"})
         await websocket.close()

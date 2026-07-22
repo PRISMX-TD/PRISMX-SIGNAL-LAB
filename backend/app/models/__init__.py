@@ -65,6 +65,16 @@ class User(Base):
     # app's "a newer Bridge is available" notice. Null means no Bridge build
     # carrying this field has reported in yet (or none ever has).
     bridge_version = Column(String, nullable=True)
+    # 会话版本号：写进每个 JWT 的 "tv" 字段，登录时校验必须与当前值一致。
+    # 改密码时自增一次，使改密前签发的所有旧 token（包括被盗的）立即失效；
+    # 改密的这次请求会拿到一个带新版本号的 token 作为响应，避免用户改完自己
+    # 的密码后被自己刚发起的这次操作反手登出。
+    # Session/token version: stamped into every JWT's "tv" claim; login
+    # requires it to match the current value. Incremented on password change,
+    # instantly invalidating every token (including a stolen one) issued
+    # before the change; the password-change request itself gets back a
+    # freshly stamped token so the user isn't logged out by their own action.
+    token_version = Column(Integer, default=0, nullable=False)
 
 
 # 说明：旧的 EABinding（ea_bindings 表，EA 单账号绑定）已随 EA 接入方式移除。
@@ -144,6 +154,18 @@ class Signal(Base):
     # STALE — likely a feed gap — and excluded from win-rate stats).
     result = Column(String, default="PENDING")  # PENDING / HIT_TP / HIT_SL / STALE
     resolved_at = Column(DateTime, nullable=True)
+    # 价格基线：首次被行情判定逻辑观测到时的该品种 K 线高/低点快照。首次
+    # 观测只记录基线、不判定胜负——那根 K 线可能早于信号创建就已经在形成，
+    # 其高低点会混入信号创建前的价格波动。此后只有超出基线的新极值才计入
+    # 判定，见 services/signal_resolution.py。
+    # Price baseline: a snapshot of the symbol's bar high/low the first time
+    # win/loss resolution observes this signal. The first observation only
+    # records the baseline and never resolves — that bar may have started
+    # forming before the signal existed, so its high/low can include
+    # pre-signal price action. Only extremes beyond the baseline count from
+    # then on; see services/signal_resolution.py.
+    baseline_high = Column(Float, nullable=True)
+    baseline_low = Column(Float, nullable=True)
 
 
 class Order(Base):
@@ -436,6 +458,17 @@ class Payment(Base):
     pay_amount = Column(Float, nullable=True)
     pay_address = Column(String, nullable=True)
     status = Column(String, default="NEW")  # NEW / PENDING / PROCESSING / FINISHED / EXPIRED / FAILED
+    # NOWPayments 报告的实际到账金额（同 pay_currency 计价）：低于 pay_amount
+    # 说明用户少转了（常见于没算准链上手续费）。同步时持续更新，不止终态才写，
+    # 让用户在支付窗口还开着的时候就能看到"已收到部分金额"，而不是只有一句
+    # "已过期"却不知道钱去哪儿了。
+    # Actual amount received, as reported by NOWPayments (same currency as
+    # pay_currency): less than pay_amount means the user under-sent (commonly
+    # from misjudging the network fee). Updated on every sync, not just at a
+    # terminal state, so the user can see "partial amount received" while the
+    # payment window is still open, instead of just an "expired" message with
+    # no idea where the funds went.
+    actually_paid = Column(Float, nullable=True)
     created_at = Column(DateTime, default=_now)
     finished_at = Column(DateTime, nullable=True)
 

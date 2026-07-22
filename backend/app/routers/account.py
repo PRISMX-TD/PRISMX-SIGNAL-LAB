@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.core.database import get_db
-from app.core.security import hash_password, verify_password
+from app.core.security import create_access_token, hash_password, verify_password
 from app.models import MT5Account, User, UserPref
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user
@@ -78,7 +78,21 @@ def change_password(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """修改密码；Google 用户首次调用时为设置密码。"""
+    """修改密码；Google 用户首次调用时为设置密码。
+
+    会话版本号（token_version）自增一次，使改密前签发的所有旧 token（包括
+    已经泄露、仍在别处被使用的）立即失效——仅清客户端本地 token 做不到这点。
+    本次请求自己带的 token 也会随之失效，因此响应里附带一个已盖新版本号的
+    新 token，前端据此原地替换，不会把用户反手登出。
+
+    Increments the session version (token_version) once, instantly
+    invalidating every token issued before this change — including one
+    that's leaked and still being used elsewhere; merely clearing the
+    client's local token can't do that. This request's own token is
+    invalidated by the same bump, so the response carries a freshly stamped
+    token for the frontend to swap in, so changing your own password never
+    logs you out.
+    """
     if current_user.password_hash:
         # 已有密码 → 须校验旧密码 / existing password → verify old
         if not body.old_password:
@@ -87,8 +101,10 @@ def change_password(
             raise HTTPException(status_code=403, detail="旧密码错误 / old password is wrong")
     # 设置/修改密码 / set or change password
     current_user.password_hash = hash_password(body.new_password)
+    current_user.token_version = (current_user.token_version or 0) + 1
     db.commit()
-    return {"ok": True}
+    new_token = create_access_token(current_user.id, current_user.token_version)
+    return {"ok": True, "token": new_token}
 
 
 # ---- 用户偏好（跨设备同步）/ User prefs (cross-device sync) ----

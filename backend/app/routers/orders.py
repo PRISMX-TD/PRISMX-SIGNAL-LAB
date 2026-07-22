@@ -104,17 +104,28 @@ def place_order(
     """提交下单：风控 + 幂等，落库为 PENDING 等待桥接拉取。
     Place an order: risk check + idempotency; persist as PENDING for the bridge.
     """
-    # 1) 风控校验：若指定目标账号，按其净值粗估手数上限。
-    #    Risk validation: if a target account is given, cap volume by its equity.
-    equity = None
+    # 1) 风控校验：按净值粗估手数上限。指定了目标账号就用它；没指定但只有
+    #    一个账号在线时，也用那唯一的在线账号——它正是桥接稍后单账号兜底
+    #    路由会实际打过去的目标（见 bridge.py 的 target 逻辑），不取它的净值
+    #    会让"不传 mt5Login"变成绕开净值上限的漏洞。只有多个账号在线、
+    #    确实无法确定目标账号时才不做净值校验（后面的 online_count 检查会
+    #    直接拒单，不会走到下单这一步）。
+    #    Risk validation: cap volume by equity. Use the named target account if
+    #    given; if none was given but exactly one account is online, use that
+    #    one too — it's exactly the account the bridge's single-account
+    #    fallback would route the order to (see bridge.py's `target` logic),
+    #    so skipping its equity would let omitting mt5Login bypass the cap
+    #    entirely. Only when multiple accounts are online (target genuinely
+    #    unknown) is the equity check skipped — but that case is rejected
+    #    outright by the online_count check below before an order is ever placed.
+    accounts = db.query(MT5Account).filter(MT5Account.user_id == user.id).all()
+    online_accounts = [acc for acc in accounts if is_account_online(acc)]
+    target_acc = None
     if req.mt5Login:
-        acc = (
-            db.query(MT5Account)
-            .filter(MT5Account.user_id == user.id, MT5Account.login == req.mt5Login)
-            .first()
-        )
-        if acc and acc.equity:
-            equity = acc.equity
+        target_acc = next((acc for acc in accounts if acc.login == req.mt5Login), None)
+    elif len(online_accounts) == 1:
+        target_acc = online_accounts[0]
+    equity = target_acc.equity if target_acc and target_acc.equity else None
     validate_order(req.symbol, req.side, req.volume, equity)
 
     # 未指定目标账号且有多个账号在线：直接拒单并提示，而不是让指令
@@ -122,17 +133,11 @@ def place_order(
     # No target account while multiple accounts are online: reject with a
     # clear message instead of letting the command silently sit until the
     # 5-minute void (the bridge can only fall back when exactly one is online).
-    if not req.mt5Login:
-        online_count = sum(
-            1
-            for acc in db.query(MT5Account).filter(MT5Account.user_id == user.id).all()
-            if is_account_online(acc)
+    if not req.mt5Login and len(online_accounts) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="多个 MT5 账号在线，请指定目标账户 / Multiple accounts online; choose a target account",
         )
-        if online_count > 1:
-            raise HTTPException(
-                status_code=400,
-                detail="多个 MT5 账号在线，请指定目标账户 / Multiple accounts online; choose a target account",
-            )
 
     # 2) 幂等：同一 clientOrderId 不重复下单 / idempotency by clientOrderId
     existing = (

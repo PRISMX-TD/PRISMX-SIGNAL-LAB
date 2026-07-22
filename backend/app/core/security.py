@@ -33,10 +33,20 @@ def verify_password(plain: str, hashed: str | None) -> bool:
         return False
 
 
-def create_access_token(user_id: str) -> str:
-    """生成 JWT 访问令牌 / Create a JWT access token."""
+def create_access_token(user_id: str, token_version: int = 0) -> str:
+    """生成 JWT 访问令牌 / Create a JWT access token.
+
+    token_version 写入 "tv" 字段：改密码时用户的会话版本号自增一次，之后
+    get_current_user 会拒绝任何 tv 与当前值不符的旧 token——这是撤销"改密码
+    前已签发、可能已泄露"的 token 的唯一途径（JWT 本身在过期前无法单独撤销）。
+    token_version is stamped into the "tv" claim: incrementing the user's
+    session version on password change makes get_current_user reject any
+    older token whose tv no longer matches — the only way to revoke a token
+    issued (and possibly leaked) before the change, since a JWT can't be
+    individually revoked before it expires.
+    """
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
-    payload = {"sub": user_id, "exp": expire}
+    payload = {"sub": user_id, "exp": expire, "tv": token_version}
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 

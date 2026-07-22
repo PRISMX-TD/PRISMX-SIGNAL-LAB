@@ -111,6 +111,10 @@ export default function BindPage() {
       refreshAll()
     } catch (e) {
       setDeleteError(e instanceof Error ? localizeApiError(e.message) : 'error')
+      // 与本页 "copied" 提示同款自动消失，不让这条错误一直挂在屏幕上。
+      // Auto-dismiss like this page's "copied" hint, so the error doesn't
+      // linger on screen forever.
+      setTimeout(() => setDeleteError(''), 4000)
     } finally {
       setDeleting(false)
     }

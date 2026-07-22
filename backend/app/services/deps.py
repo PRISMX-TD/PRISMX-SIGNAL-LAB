@@ -58,6 +58,17 @@ def get_current_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在 / User not found")
 
+    # 会话版本校验：token 的 "tv" 必须与用户当前的 token_version 一致，否则
+    # 说明这个 token 是改密码之前签发的旧凭证（可能已泄露），拒绝。老 token
+    # 没有 "tv" 字段，视为版本 0，与迁移里给存量用户回填的默认值一致。
+    # Session-version check: the token's "tv" must match the user's current
+    # token_version, or this is a stale credential issued before a password
+    # change (possibly leaked) — reject it. Tokens with no "tv" claim are
+    # treated as version 0, matching the backfill for existing users.
+    token_tv = payload.get("tv") if isinstance(payload.get("tv"), int) else 0
+    if token_tv != (user.token_version or 0):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="会话已失效，请重新登录 / Session invalidated, please log in again")
+
     # 会员到期即时生效：本人任一带凭证请求都会自愈等级——到期后第一次请求就把
     # plan 落库改回 FREE，之后所有 is_realtime_plan(user.plan) 等判断自然看到 FREE。
     # 不发请求、但仍被 WS 广播/推送直接按 DB plan 命中的在线用户，由后台
@@ -75,7 +86,7 @@ def get_current_user(
     if isinstance(exp, (int, float)):
         remaining = exp - datetime.now(timezone.utc).timestamp()
         if remaining < settings.JWT_EXPIRE_MINUTES * 60 / 2:
-            response.headers[REFRESHED_TOKEN_HEADER] = create_access_token(user.id)
+            response.headers[REFRESHED_TOKEN_HEADER] = create_access_token(user.id, user.token_version or 0)
 
     _touch_last_active(db, user)
     return user

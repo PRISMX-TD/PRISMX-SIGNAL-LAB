@@ -791,6 +791,8 @@
     "timeLeft": "Time remaining",
     "expiresIn": "Address valid for a limited time — send within the window",
     "amountExact": "Send this exact amount, otherwise the payment may not be recognized",
+    "partialPaymentNotice": "We've received {{paid}} so far — that's less than the required amount. Please send the remaining {{remaining}} to the same address to complete the payment.",
+    "partialPaymentExpiredNotice": "We received a partial payment of {{paid}} {{currency}} before this window closed — those funds are not lost. Please contact support with your payment details so we can apply them to your account.",
     "screenshotTip": "Tip: take a screenshot of your wallet's \"Transfer complete\" receipt in case you need support.",
     "networkLabel": "Network",
     "step1": "Open your wallet and scan the QR or paste the address",

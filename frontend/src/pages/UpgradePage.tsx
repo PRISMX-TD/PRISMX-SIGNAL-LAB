@@ -14,7 +14,12 @@ type PaymentState =
   | { step: "pay"; paymentId: string; payAddress: string; payAmount: number; payCurrency: string; amountUsd: number; plan: string; validUntil: string | null }
   | { step: "processing" }
   | { step: "done" }
-  | { step: "error"; msg: string };
+  // partialAmount：过期/失败时若已收到部分金额（>0），一并带出来在错误页
+  // 提示用户"钱到了一部分"，而不是让人以为已转的钱凭空消失。
+  // partialAmount: if a nonzero partial amount was received before the
+  // payment expired/failed, carried along so the error screen can tell the
+  // user "part of it arrived" instead of leaving them thinking it vanished.
+  | { step: "error"; msg: string; partialAmount?: number; payCurrency?: string };
 
 // 只接受 USDT，且仅保留低网络费的链（去掉最贵的 ERC-20 / Arbitrum）
 // accept USDT only, keeping just the low-network-fee chains (dropped pricey ERC-20 / Arbitrum)
@@ -100,6 +105,12 @@ export default function UpgradePage() {
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [remaining, setRemaining] = useState<number | null>(null);
+  // 支付窗口仍开着时，NOWPayments 已确认收到的部分金额（低于应付金额即为
+  // 少转）；null = 还没有数据。用于在倒计时期间就提示"钱到了一部分"。
+  // Amount NOWPayments has confirmed receiving while the payment window is
+  // still open (less than the full amount means an under-send); null = no
+  // data yet. Powers the "partial amount received" notice during the countdown.
+  const [actuallyPaid, setActuallyPaid] = useState<number | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const clockRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -202,7 +213,17 @@ export default function UpgradePage() {
           if (pollRef.current) clearInterval(pollRef.current);
           if (clockRef.current) clearInterval(clockRef.current);
           clearPendingPayment();
-          setState({ step: "error", msg: t("upgrade.paymentExpired") });
+          setState({
+            step: "error",
+            msg: t("upgrade.paymentExpired"),
+            partialAmount: s.actually_paid ?? undefined,
+            payCurrency: s.pay_currency,
+          });
+        } else {
+          // 仍在处理中：同步已到账的部分金额，供支付页在倒计时期间提示。
+          // Still processing: sync the partial amount received so far, shown
+          // on the pay screen during the countdown.
+          setActuallyPaid(s.actually_paid ?? null);
         }
       } catch { /* silently skip poll errors */ }
     }, 5000);
@@ -227,8 +248,14 @@ export default function UpgradePage() {
         void refreshUser();
       } else if (s.status === "EXPIRED" || s.status === "FAILED") {
         clearPendingPayment();
-        setState({ step: "error", msg: t("upgrade.paymentExpired") });
+        setState({
+          step: "error",
+          msg: t("upgrade.paymentExpired"),
+          partialAmount: s.actually_paid ?? undefined,
+          payCurrency: s.pay_currency,
+        });
       } else {
+        setActuallyPaid(s.actually_paid ?? null);
         pollPayment(pending.paymentId);
       }
     }).catch(() => {
@@ -243,6 +270,7 @@ export default function UpgradePage() {
 
   const handlePay = useCallback(async () => {
     setLoading(true);
+    setActuallyPaid(null);
     try {
       const res = await paymentApi.create(chosenPlan, chosenCoin);
       const payState: PendingPayment = {
@@ -272,6 +300,7 @@ export default function UpgradePage() {
     if (clockRef.current) clearInterval(clockRef.current);
     clearPendingPayment();
     setRemaining(null);
+    setActuallyPaid(null);
     setState({ step: "select" });
   };
 
@@ -611,6 +640,21 @@ export default function UpgradePage() {
               <div className="mt-2.5 text-xs leading-relaxed text-amber-300/90">{t("upgrade.amountExact")}</div>
             </div>
 
+            {/* 部分到账提示：转账已收到一部分但不够，还没到终态（过期/失败），
+                钱不是凭空消失，补上差额即可完成。/ Partial-payment notice: some
+                funds arrived but not enough, still not terminal (expired/
+                failed) — the funds aren't lost, sending the remainder finishes it. */}
+            {actuallyPaid != null && actuallyPaid > 0 && actuallyPaid < state.payAmount && (
+              <div className="glass mt-4 border border-amber-400/30 bg-amber-400/5 p-4 text-center">
+                <p className="text-sm font-semibold text-amber-200">
+                  {t("upgrade.partialPaymentNotice", {
+                    paid: actuallyPaid,
+                    remaining: (state.payAmount - actuallyPaid).toFixed(6).replace(/0+$/, "").replace(/\.$/, ""),
+                  })}
+                </p>
+              </div>
+            )}
+
             {/* 地址卡 / address card */}
             <div className="glass mt-4 p-6">
               <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">
@@ -664,6 +708,12 @@ export default function UpgradePage() {
 
   function renderError() {
     if (state.step !== "error") return null;
+    // 有部分到账金额时改用专门的提示：告知用户钱已经到了一部分、没有消失，
+    // 应联系客服处理，而不是让"重试"看起来像是要重新掏一遍全款。
+    // With a nonzero partial amount, swap in a dedicated notice: tell the
+    // user part of the funds arrived and weren't lost, and to contact
+    // support — instead of letting "retry" read as "pay the full amount again".
+    const hasPartial = state.partialAmount != null && state.partialAmount > 0;
     return (
       <div className="mx-auto max-w-md animate-fade-in-up py-16 text-center">
         <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-down/10 text-down ring-1 ring-down/40">
@@ -671,6 +721,16 @@ export default function UpgradePage() {
         </div>
         <h1 className="mt-6 font-display text-2xl font-black text-slate-50">{t("upgrade.errorTitle")}</h1>
         <p className="mx-auto mt-3 max-w-sm break-words text-sm leading-relaxed text-slate-400">{state.msg}</p>
+        {hasPartial && (
+          <div className="glass mx-auto mt-5 max-w-sm border border-amber-400/30 bg-amber-400/5 p-4 text-left">
+            <p className="text-sm leading-relaxed text-amber-200">
+              {t("upgrade.partialPaymentExpiredNotice", {
+                paid: state.partialAmount,
+                currency: (USDT_META[state.payCurrency ?? ""] ?? { label: (state.payCurrency ?? "").toUpperCase() }).label,
+              })}
+            </p>
+          </div>
+        )}
         <button onClick={handleRetry} className="btn-primary mt-7 px-8 py-3">{t("upgrade.retry")}</button>
       </div>
     );
