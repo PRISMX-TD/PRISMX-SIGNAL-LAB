@@ -76,13 +76,14 @@ graph TD
 - 后台：Python + FastAPI（REST + WebSocket 一体），uvicorn 运行；模拟信号引擎用 pandas/numpy 算技术指标；限流用 slowapi(按 IP);Web Push 用 pywebpush;Google 登录用 google-auth 校验 ID Token；加密货币支付经 NOWPayments（USDT 多链，httpx 调用，见 4.13 节）。
 - 部署：前端 Vercel(自动构建+部署),后端腾讯云 VPS(Ubuntu 24.04)通过 systemd 常驻 + Nginx 反代 + Let's Encrypt HTTPS。
 - 数据库：支持双模式 — 本地开发默认 SQLite(`DATABASE_URL` 未设置时);生产通过 `.env` 中 `DATABASE_URL` 指定 Supabase PostgreSQL。ORM 用 SQLAlchemy,`_migrate_columns` 做轻量迁移并自动适配类型(SQLite DATETIME ↔ Postgres TIMESTAMP)。生产用 Session pooler 连接,连接池大小与断连自愈参数走 `.env`(`DB_POOL_SIZE`/`DB_MAX_OVERFLOW`/`DB_POOL_RECYCLE`,见「数据库连接池」)。
-- 认证：JWT（用户登录,密钥由环境变量 `JWT_SECRET` 提供,HS256,有效期 1 天）,并做**滑动续期**——任一 JWT 保护接口在 token 剩余有效期不足一半时,经响应头 `X-Refreshed-Token` 下发新 token,前端静默替换,活跃用户不会每天被踢下线(见 [deps.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/app/services/deps.py#L43-L68) 与 [client.ts](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/frontend/src/api/client.ts#L40-L47))。Bridge 使用 per-user API Token(`X-Api-Token` 头);**Token 在数据库中只存 SHA-256 哈希**,明文仅在绑定页重置(生成)时返回一次,泄库也无法冒充 Bridge(见 [security.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/app/core/security.py#L103-L122))。另支持 Google 一键登录。密码规则统一 ≥8 位(注册与改密一致)。
+- 认证：JWT（用户登录,密钥由环境变量 `JWT_SECRET` 提供,HS256,有效期 **2 小时**,2026-07-22 起从 1 天缩短——单纯降低前端 localStorage 里 token 一旦被 XSS 窃取后的可用窗口,不影响活跃用户,因为下面的滑动续期本来就会在用户持续操作时自动换发新 token）,并做**滑动续期**——任一 JWT 保护接口在 token 剩余有效期不足一半时,经响应头 `X-Refreshed-Token` 下发新 token,前端静默替换,活跃用户不会每天被踢下线(见 [deps.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/app/services/deps.py#L43-L68) 与 [client.ts](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/frontend/src/api/client.ts#L40-L47))。Bridge 使用 per-user API Token(`X-Api-Token` 头);**Token 在数据库中只存 SHA-256 哈希**,明文仅在绑定页重置(生成)时返回一次,泄库也无法冒充 Bridge(见 [security.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/app/core/security.py#L103-L122))。另支持 Google 一键登录。密码规则统一 ≥8 位(注册与改密一致)。
 - Bridge：Python + tkinter GUI,打包为独立 exe(PyInstaller),当前源码版本 **v1.3.16**(1.3.7 之后到 1.3.16 之间的逐版改动——已平仓交易明细漏报/延迟/金额修复、EURGBP 报价补齐、Bridge 版本上报——详见《部署与上线进度》第六节「已上线功能清单」,这里不重复;[bridge_app.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/bridge/bridge_app.py#L30) 的 `APP_VERSION`,与前端下载页 [DownloadPage.tsx](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/frontend/src/pages/DownloadPage.tsx#L13) 硬编码的展示版本一致;两处是独立硬编码,没有自动化机制检查,发布新版时需手动同步两处)。连接时扫描本机 MT5(`terminal64.exe`),对后端走 HTTP 轮询(每 1.5 秒),后端地址写死 `https://api.prismxsignallab.com`,Token 用 DPAPI 加密存盘,用户只需填 API Token(**v1.3.7 起记住 Token 后启动即自动连接**,免去每次手动点连接)。支持多账号与开仓/平仓/改单,并上报实时报价(bid/ask)与**真实平仓成交明细**(魔术号 `778899` 认领本平台开的仓位,供个人跟单胜率统计,见 [mt5_worker.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/bridge/mt5_worker.py) 的 `_closed_trades_payload`)。**已执行指令结果与未回报队列均持久化到本地文件**(`~/.prismx_bridge_executed.json`、`~/.prismx_bridge_reports.json`),程序重启后不重复下单、断点续报,配合后端超时重发实现端到端幂等。**v1.3.7 桌面体验**:系统托盘最小化(`pystray`+`Pillow`,可选降级)+ 开机自启(Windows 注册表)。**Bridge 是唯一的 MT5 交易接入方式**——原 MQL5 EA 两个版本(WS 实时版 / HTTP 轮询版)已于 2026-07-02 连同 `/ws/ea`、`/api/ea/poll/*` 端点一并移除。
 - 订单超时保护：PENDING 指令落库后超过 `ORDER_PENDING_TIMEOUT_SECONDS`(默认 300 秒)未执行即自动作废为 FAILED(轮询下发前拦截 + 每 10 秒后台清扫),防止桥接离线期间的陈旧指令在很久之后按过时价格成交;若桥接实际已执行、回执迟到,真实回执仍会覆盖 FAILED(以实际执行结果为准)。
 - 图表行情：图表页(`/charts`)不再用 TradingView Widget,改为**自建中央行情源**。**2026-07-15 起主数据源是 MT5 EA**([ea/PRISMX_MarketFeed.mq5](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/ea/README.md),不进本仓库,详见第 7 节末尾与《部署与上线进度》第七节)——单文件 EA 挂在任意一张图表上,按配置品种批量推 K 线(`POST /api/feed/candles`,`X-EA-Token` 头)、全站统一报价(`POST /api/feed/quotes`)、多周期趋势。旧的独立程序 `feeder/chart_feeder.py`(`X-Feed-Token` 头)已于 **2026-07-17** 确认 EA 稳定运行后停用,连同 `feeder/` 整个目录、后端 `FEED_TOKEN` 配置项与鉴权分支一并移除,`/api/feed/candles` 现在只认 `X-EA-Token`。后端用**内存缓存** [chart_store.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/app/services/chart_store.py)(每组合最多 500 根,进程重启即空、靠 EA 每 60 秒 backfill 自愈,不落库)存放,前端经 `GET /api/chart/history` 与 `/api/chart/latest`(均需 JWT)读取。EA 与用户端 Bridge 无任何代码依赖,只读不下单。**2026-07-17 起 K 线带成交量**(`FeedBar.v`,EA 发 MT5 的 tick_volume,默认 0)。
 - 图表技术指标：图表页 2026-07-17 起支持 MA/EMA/布林带/成交量/RSI/MACD 六个常见指标,纯前端计算(`frontend/src/utils/indicators.ts`,不依赖任何图表库,只吃 OHLCV 数组吐 `(number|null)[]`,可独立单测)。为承载 RSI/MACD 这类需要独立坐标轴的副图指标,`lightweight-charts` 由 4.2.3 升级到 **5.2.0**(原生多窗格 pane,v4 没有);主图叠加指标(MA/EMA/布林带)常驻建好、开关只切换 `visible`,成交量/RSI/MACD 三个副图各占一个独立 pane、开关时动态创建/销毁(移除 series 会连带自动删除空 pane)。指标设置(周期、颜色、MA/EMA 均线条数)存进用户偏好的 `charts`/`indicatorSettings` 命名空间,云端同步;MA/EMA 支持用户自行增删均线条数(1~6 条)。悬停十字准线/触摸拖动时,图例显示悬停点对应 K 线的指标数值,松开回退显示最新值(通过 `chart.subscribeCrosshairMove` 与 2 秒报价轮询的写入时序协调实现,详见 `ChartsPage.tsx` 里 `hoveringRef` 的说明)。
 - 双轨胜率追踪:**信号客观胜率**(全平台统一,`GET /api/signals/winrate`)由 [signal_resolution.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/app/services/signal_resolution.py) 用行情判定每条 TradingView 信号先碰到止盈还是止损(`Signal.result`:PENDING/HIT_TP/HIT_SL/STALE),与 `status`(能否下单)完全独立;**个人跟单胜率**(每用户私有,`GET /api/orders/winrate`)由 [trade_performance.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/app/services/trade_performance.py) 按真实平仓明细(`ClosedTrade`)聚合。详见第 2 节「信号胜负判定」与第 6 节数据模型。
-- 测试：`backend/tests/` 下有 11 个 pytest 文件共 **127 例**——[test_order_lifecycle.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_order_lifecycle.py)(15 例)、[test_token_refresh.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_token_refresh.py)(4 例)、[test_trade_performance.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_trade_performance.py)(12 例)、[test_simulate.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_simulate.py)(11 例)、[test_trial.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_trial.py)(11 例)、[test_discipline.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_discipline.py)(19 例)、[test_strategy_engine.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_strategy_engine.py)(30 例)、[test_strategies_api.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_strategies_api.py)(13 例)、[test_candle_store.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_candle_store.py)(4 例)、[test_candle_admin_settings.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_candle_admin_settings.py)(4 例)、[test_quotes_store.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_quotes_store.py)(4 例)。测试用独立 SQLite 库,依赖装 `requirements-dev.txt`,运行 `cd backend && python -m pytest tests/`。**Windows 本地跑测试须开 Python UTF-8 模式**:`slowapi` 初始化 `Limiter` 时用系统默认编码读 `backend/.env`,中文 Windows(GBK/cp936)会 `UnicodeDecodeError` 崩在 conftest 导入阶段(生产 Ubuntu 是 UTF-8 locale,无此问题);本地改用 `PYTHONUTF8=1 python -m pytest tests/`(或先 `set PYTHONUTF8=1`)即可。**桥接下发相关的测试须让上报账号命中合作券商锁**:券商锁默认启用(关键字 `MakeCapital`,见 4.10 节),故 `conftest.py` 的 `make_account` 与 `test_order_lifecycle.py` 的 `poll` 辅助函数统一用服务器名 `MakeCapital-Demo`(共享常量 `conftest.BROKER_SERVER`)上报——否则账号会被券商锁拒绝、不上线,指令永不下发,`test_bridge_poll_*` / `test_close_happy_path_pending` 会失败。
+- **信号胜负判定新增价格基线（2026-07-22 修复）**：`resolve_signals_with_price` 此前直接拿趋势 webhook 上报的整根 K 线高低点判定，而这根线可能早于信号创建就已经在形成（如 H1 线一开盘就在追踪、信号却是开盘后才生成），高低点会混入信号创建前、与该信号无关的价格波动，可能把巧合记成命中。新增 `Signal.baseline_high`/`baseline_low` 两列：首次观测到某个信号时只记录基线、不判定胜负；此后只有真正超出基线的新极值（信号存在期间才发生的价格行为）才计入判定。基线随每次上报单调扩张，不会漏判任何真实发生在信号创建之后的命中。属于统计口径收紧，不改变接口形状。
+- 测试：`backend/tests/` 下有 12 个 pytest 文件共 **162 例**（2026-07-22 起，此前 159 例；`test_order_lifecycle.py` 新增降级账户上限、FREE 信号门槛被拒、FREE 手动下单放行三个用例，见《产品需求文档》6.24 节）——[test_order_lifecycle.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_order_lifecycle.py)(18 例)、[test_token_refresh.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_token_refresh.py)(4 例)、[test_trade_performance.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_trade_performance.py)(13 例)、[test_simulate.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_simulate.py)(16 例)、[test_trial.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_trial.py)(11 例)、[test_discipline.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_discipline.py)(19 例)、[test_strategy_engine.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_strategy_engine.py)(41 例)、[test_strategies_api.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_strategies_api.py)(14 例)、[test_candle_store.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_candle_store.py)(7 例)、[test_candle_admin_settings.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_candle_admin_settings.py)(4 例)、[test_quotes_store.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_quotes_store.py)(4 例)、[test_chart_feed.py](file:///c:/Users/Rex/Downloads/PRISMX%20SIGNAL%2014.7.26/backend/tests/test_chart_feed.py)(11 例)。测试用独立 SQLite 库,依赖装 `requirements-dev.txt`,运行 `cd backend && python -m pytest tests/`。**Windows 本地跑测试须开 Python UTF-8 模式**:`slowapi` 初始化 `Limiter` 时用系统默认编码读 `backend/.env`,中文 Windows(GBK/cp936)会 `UnicodeDecodeError` 崩在 conftest 导入阶段(生产 Ubuntu 是 UTF-8 locale,无此问题);本地改用 `PYTHONUTF8=1 python -m pytest tests/`(或先 `set PYTHONUTF8=1`)即可。**桥接下发相关的测试须让上报账号命中合作券商锁**:券商锁默认启用(关键字 `MakeCapital`,见 4.10 节),故 `conftest.py` 的 `make_account` 与 `test_order_lifecycle.py` 的 `poll` 辅助函数统一用服务器名 `MakeCapital-Demo`(共享常量 `conftest.BROKER_SERVER`)上报——否则账号会被券商锁拒绝、不上线,指令永不下发,`test_bridge_poll_*` / `test_close_happy_path_pending` 会失败。
 
 ### 关键配置说明
 
@@ -153,15 +154,19 @@ graph TD
 
 | 方法 | 路径 | 鉴权 | 说明 |
 |------|------|------|------|
-| POST | /api/auth/register | 公开(限流 5/min) | 邮箱+密码注册(password≥8),创建 User(生成 api_token),签发 JWT。邮箱已存在返回 400(防枚举) |
-| POST | /api/auth/login | 公开(限流 10/min) | 邮箱+密码登录,失败 401 |
-| POST | /api/auth/google | 公开(限流 10/min) | Google ID Token 登录,按 email 找或建无密码用户。未配 GOOGLE_CLIENT_ID 返回 503 |
+| POST | /api/auth/register | 公开(限流 5/min) | 邮箱+密码注册(password≥8),创建 User(生成 api_token),签发 JWT。邮箱已存在返回 400(防枚举)。**2026-07-21 起注册表单的密码输入框同步加了 `minLength={8}`**——此前只有后端校验，短密码会先打一次 422 往返才被拒绝，且旧版前端错误处理把 422 的字段级 `detail`（数组）直接当字符串抛出会显示成 `[object Object]`（见下方说明），体验上是"看不懂的报错"；现在浏览器原生表单校验在提交前直接拦下 |
+| POST | /api/auth/login | 公开(限流 10/min) | 邮箱+密码登录,失败 401。**2026-07-22 起新增按邮箱维度的失败锁定**（`rate_limit.py` 的 `is_login_locked`/`record_failed_login`）：同一邮箱连续失败 8 次后锁定 5 分钟、返回 429,登录成功清零计数。此前的限流只按客户端 IP（`RATE_LIMIT_LOGIN`）,攻击者换 IP（如用代理池）就能对同一个账号无限次撞库,这层按邮箱的计数堵住了这个绕过路径,与按 IP 的限流并存、互不替代 |
+| POST | /api/auth/google | 公开(限流 10/min) | Google ID Token 登录,按 email 找或建无密码用户。未配 GOOGLE_CLIENT_ID 返回 503。**2026-07-22 修复账号预劫持漏洞**：此前只要 email 能在库里找到对应用户就直接签发 JWT 登入,完全不检查这个账号是不是"密码账号"——攻击者可以抢先用受害者的邮箱 + 攻击者自己设置的密码走 `/auth/register` 注册（注册本身没有邮箱归属校验）,等真正的邮箱主人第一次点"用 Google 登录"时,系统只按 email 匹配就把他悄悄登进攻击者控制、攻击者仍握有密码的那个账号,后续攻击者可随时用密码登入接管。现在改为：命中的已有用户若 `password_hash is not None`（即已经是密码账号）,一律拒绝并返回 409,提示"该邮箱已注册密码账号,请使用密码登录",不再自动放行 |
 | GET | /api/auth/me | JWT | 账户资料 + 名下 MT5 账户列表 |
-| POST | /api/auth/password | JWT | 改密(已有密码须验旧密码;Google 用户首次为设置密码),new_password≥8 |
+| POST | /api/auth/password | JWT(限流 10/min,`RATE_LIMIT_PASSWORD`) | 改密(已有密码须验旧密码;Google 用户首次为设置密码),new_password≥8。**2026-07-22 起改密会让所有旧 token 立即失效**（见下方「会话版本」说明），响应体从 `{ ok }` 扩为 `{ ok, token }`——前端必须用返回的新 token 替换本地那份，否则连这次请求自己带的 token 都已失效，下一个请求会被 401 踢出。**同日再加限流**：此前是全站唯一没有限流的认证类写操作，已有密码时每次调用都要验旧密码，token 一旦泄露可无限次尝试猜旧密码 |
 | GET | /api/auth/prefs | JWT | 读整份用户通用偏好(JSON,跨设备同步信号面板设置与图表画图层内容) |
-| PUT | /api/auth/prefs | JWT | `{ namespace, data }`——**只传发生变化的那一个命名空间(如 "signals")，服务端与已存的其它命名空间合并**(2026-07-15 起,此前是整份覆盖;整份覆盖时两台设备并发改不同命名空间，后保存的会用它本地那份可能还没收到对方 WS 推送的旧数据整个覆盖掉，先保存的改动就丢了)。响应体与 WebSocket 推的 `PREFS_UPDATE`(见 4.9 节)都是**合并后的完整文档**，其它设备整份替换本地状态即可、不会丢自己持有的其它命名空间 |
+| PUT | /api/auth/prefs | JWT | `{ namespace, data }`——**只传发生变化的那一个命名空间(如 "signals")，服务端与已存的其它命名空间合并**(2026-07-15 起,此前是整份覆盖;整份覆盖时两台设备并发改不同命名空间，后保存的会用它本地那份可能还没收到对方 WS 推送的旧数据整个覆盖掉，先保存的改动就丢了)。响应体与 WebSocket 推的 `PREFS_UPDATE`(见 4.9 节)都是**合并后的完整文档**，其它设备整份替换本地状态即可、不会丢自己持有的其它命名空间。2026-07-21 起 `data` 序列化后上限 256KB（`UserPrefsIn` 的 `field_validator`），超限 422——界面偏好/画线内容本就很小，纯防御性上限，避免整份文档被灌入超大 JSON |
 
 注册/登录/Google 响应均为 `{ "token": string, "user": { "id", "email", "role", "plan" } }`（`role`/`plan` 见 6.1 节「用户分级」）。`GET /api/auth/me` 的账户资料同样带 `plan`。
+
+> **前端统一拍平 422 字段校验错误（2026-07-21 修复，`frontend/src/api/client.ts`）**：FastAPI 对 Pydantic 校验失败的响应里，`detail` 是一个 `[{loc, msg, type}, ...]` 对象数组，不是普通业务错误惯用的字符串；此前 `request()` 不做区分，直接把 `detail` 塞进 `Error` 的 message，`Array.toString()` 隐式转换的结果是 `[object Object]`——任何触发字段校验（而非业务逻辑 4xx）的表单都会显示这个看不懂的错误。改为判断 `detail` 是否数组，是则取每项的 `msg` 拼接成可读文本；普通字符串 `detail`（各路由 `HTTPException(detail=...)` 手写的业务错误）不受影响，原样使用。这是全站通用的请求封装，一次修复覆盖所有接口，不需要逐个表单单独处理。
+
+> **会话版本 / token 失效机制（2026-07-22 新增，`security.py`/`deps.py`）**：`users` 表新增 `token_version`（默认 0）；每个 JWT 新增 `tv` 字段固定该值。`get_current_user`（REST）与 `ws.py` 的 WebSocket 鉴权都会校验 token 里的 `tv` 与用户当前 `token_version` 是否一致，不一致就拒绝（401/`AUTH_FAIL`）。改密码时 `token_version` 自增一次，使改密前签发的所有旧 token（包括已经泄露、仍在别处被使用的）立即失效——这是撤销一个未过期 JWT 的唯一途径。旧 token 没有 `tv` 字段，鉴权时按 0 处理，与迁移给存量用户回填的默认值一致，不影响老会话。**已知的残留行为**：WS 的会话版本校验只在建连那一刻做一次，改密码发生时已经打开的 WebSocket 连接不会被强制断开，会在它下一次重连时才生效（不影响 REST 接口，改密瞬间就拒绝旧 token）。
 
 #### 4.2 API Token 管理（ea.py，挂 `/api/ea`，均需 JWT）
 
@@ -210,7 +215,9 @@ GET /api/signals/simulate?days&risk&capital&mode  (JWT + require_admin)
 
 #### 4.4 下单 / 平仓 / 改单（orders.py，挂 `/api/orders`，均需 JWT）
 
-三种操作共用 `Order` 模型(字段 `action` 区分 ORDER/CLOSE/MODIFY),`(user_id, clientOrderId)` 唯一约束实现幂等。
+三种操作共用 `Order` 模型(字段 `action` 区分 ORDER/CLOSE/MODIFY),`(user_id, clientOrderId)` 唯一约束实现幂等。**这个幂等键必须由前端在一次下单意图的整个生命周期内保持不变**（2026-07-21 修复）：此前每次提交都现生成一个新键（`clientOrderId()`），若订单已被服务端接收但前端因网络问题没收到回执、用户误以为失败而再滑一次确认，两次请求各带不同的键，`(user_id, clientOrderId)` 幂等约束对两个不同的键各自放行，会造成重复下单。改成幂等键随下单弹窗（`SlideOrderModal`/`ChartOrderModal`）的挂载生命周期固定一次（`orderIdRef`），弹窗内任何次数的重试都复用同一个键；弹窗关闭重开视为新的下单意图，才会生成新键。**2026-07-22 起三个交易端点各自新增并发兜底**（`_commit_order_or_existing`）：先查后插（check-then-insert）本身存在一个理论竞态窗口——两个带同一 `clientOrderId` 的并发请求都可能在对方提交前通过查询,但数据库唯一约束仍能保证只有一条落库,第二个请求原先会直接收到未处理的 `IntegrityError` 而 500;现在捕获该异常、回滚后重新查询并返回那条已存在的订单,行为上与直接命中幂等查询一致,不会产生真正的重复下单,只是把原本的 500 改成了正常响应。三个交易端点（`POST /orders`、`/orders/close`、`/orders/modify`）与撤单端点同批新增限流（`RATE_LIMIT_ORDER`，默认 `120/分钟`），此前这四个端点是全站唯二没有限流的写操作（另一个是账户读写类，登录/注册/webhook 均已有限流），阈值刻意设得很宽，只挡病态刷接口不影响正常手动交易节奏。
+
+> **止损止盈方向校验的盲区（2026-07-22 修复，`SlideOrderModal.tsx`/`ChartOrderModal.tsx`）**：两个下单弹窗原来只在能拿到参考价（实时报价，或退回信号自带的 `entry`）时才校验止损/止盈是否落在正确方向（买单止损须低于现价、止盈须高于现价，卖单相反）；参考价缺失（没有实时报价、信号又没带 `entry`，`entryRef` 为 `null`）时，止损止盈校验整体短路为"不校验"，把两者整个填反也不会被前端拦下，要等指令发到 MT5 才被拒。新增一条不依赖参考价的相对关系校验：只要止损止盈都填了，买单必须止损<止盈、卖单必须止损>止盈，与是否拿得到参考价无关。
 
 ```
 POST /api/orders          // 开仓 action=ORDER
@@ -226,10 +233,17 @@ Request: {
 //   FREE 正常只能看到已过期信号，此为服务端兜底，防止拿到降级前保存的 signalId 绕过延迟)；
 // 未指定 mt5Login 且有多个账号在线 → 400(需明确目标账号,避免指令滞留后作废);
 // 手数越界/超净值上限 → 400；成功 → 返回 Order(status=PENDING)
+// 2026-07-22 起：按净值估算的手数上限不再只在传了 mt5Login 时才生效——未传
+// mt5Login 但恰好只有一个账号在线时，也用那唯一账号的净值校验（它正是桥接
+// 单账号兜底路由会实际打过去的目标，见 4.5 节）。此前不传 mt5Login 会让这道
+// 净值上限被完全跳过，是一处可被绕开的风控缺口；只有多个账号在线、目标账号
+// 确实无法确定时才不做净值校验（会被上面那条 400 直接拒单，走不到下单）。
 
 POST /api/orders/close    // 平仓/部分平仓 action=CLOSE
 Request: { "clientOrderId", "ticket"(>0), "symbol", "side", "mt5Login"?, "volume"? }
 // volume 省略或 0 = 全平；校验账号归属，不属本人 → 404
+// 2026-07-21 起：部分平仓（volume>0 且 <全平）不得低于 MIN_VOLUME_PER_ORDER(0.01) → 400；
+// 此前只挡了 volume<=0，低于最小手数的部分平仓会被下发到桥接，再被 MT5 拒绝，前后端各补一道
 
 POST /api/orders/modify   // 改 SL·TP action=MODIFY
 Request: { "clientOrderId", "ticket"(>0), "symbol", "side", "mt5Login"?, "stopLoss"(0=清除), "takeProfit"(0=清除) }
@@ -251,7 +265,9 @@ GET /api/orders/winrate?login=<可选>  (JWT) -> {
   "wins": number, "losses": number,
   "totalResolved": number,          // = wins + losses（已完全平仓的仓位数）
   "winRate": number|null,           // = wins / totalResolved
-  "openPositions": number           // 尚未平完的仓位数
+  "openPositions": number,          // 尚未平完的仓位数
+  "bySymbol": Array<{ "symbol": string, "count": number }>  // 2026-07-21 新增，按 count 降序；
+                                     // 只统计"已判定"（fully_closed）的仓位，进行中的不占任何品种的份额
 }
 // 个人「跟单胜率」：每用户私有，基于 Bridge 上报的真实平仓明细(ClosedTrade)。
 // 方案 B——一个仓位分批平完(累计平仓手数≥开仓手数)才算"分出胜负"，按该仓位所有分批盈亏之和的正负判赢输。
@@ -262,6 +278,12 @@ GET /api/orders/winrate?login=<可选>  (JWT) -> {
 // mt5_login 的订单在"全部账户"聚合时仍保留（避免老用户战绩突然消失），但选中单个账号时
 // 不再兜底（没有账号信息，无法确认归属）。见 trade_performance.py::compute_personal_winrate
 // 的 bound_logins/login 两个参数与 orders.py::_bound_logins。
+// 2026-07-21：订单页「我的交易表现」「纪律分」两张卡片视觉重新设计（内容不变，主要是
+// 呈现方式）——共用新抽出的 RadialGauge 组件（frontend/src/components/RadialGauge.tsx，
+// 纯展示的 SVG 环形进度表，颜色/数值由调用方决定），胜率/纪律分总数从纯文字大字号改成
+// 环形可视化；同批给「我的交易表现」加了按品种分布的小图表（堆叠横条+图例），颜色取自
+// frontend/src/utils/symbolMeta.ts（原先私有在 QuotesTable.tsx 里，这次抽成共享模块，
+// 全站同一品种的配色统一，不会报价表一个颜色、这里又是另一个颜色）。
 
 GET /api/orders/closed-trades  (JWT) -> { "trades": ClosedTradeOut[] }
 // 2026-07-15 新增。当前用户的真实平仓成交明细，最新在前，最多 200 条；与个人跟单胜率
@@ -340,7 +362,11 @@ Order = {
 
 **`/api/bridge/poll` 的两道账号闸门(2026-07-05)**:上报的账号先过合作券商锁(服务器名不含配置关键字 → 拒绝,见 4.10 节),再过等级账户数上限(见 6.1 节 `plans.py`);两类被拒的 login 分别放进响应的 `accountLimitExceeded`/`brokerRejected` 数组。**Bridge v1.3.6 起会读取这两个字段并渲染到状态栏**(黄点 + `⚠` 告警文字),此前版本(≤1.3.5)不读取、只能从网页「连接 MT5」页看到账户没出现/离线来间接发现——这是 2026-07-15 补的体验修复,不再是有意保留的范围边界。
 
+> **账户数上限须同时约束已绑定的旧账号（2026-07-22 修复）**：`_upsert_account` 原来的账户数上限判断只在 `row is None`（**新账号**）分支里生效——已经绑定过的老账号完全不受限。一个连了多个账号的 PRO 用户降级到 FREE（上限 1 个）后，其余账号在轮询里照样 upsert 成功、照样刷新心跳、照样接单，等于降级完全没有生效。改成每次轮询先按 `login` 升序取出该用户全部已绑定账号，只保留"前 N 个"（N = `max_mt5_accounts(user.plan)`）继续 upsert，其余的连 upsert 都不进入、直接归进 `accountLimitExceeded`——不再刷新心跳，与被合作券商锁拒绝的账号一样在数秒内转离线、不再收到任何指令。**保留哪些账号按"绑定 login 升序"而非"本次上报顺序"**：如果按上报顺序取前 N 个，桥接每次上报的账号顺序若有变化，被保留/被踢的账号会跟着抖动；按绑定时就固定的 login 排序则每次轮询结果一致。`account_limit is None`（PRO）时这道闸门完全不生效，原有的"新账号超额拦截"逻辑不变。
+
 **`/api/bridge/positions` 同时驱动自动仓位管理(2026-07-05,PRO 专属)**:每次持仓上报都会对该用户的持仓跑一遍规则引擎(`app/services/auto_manage.py`),需要动作时把 `MODIFY`/`CLOSE` 指令写入普通订单队列,下一拍由该用户的 Bridge 正常拉取执行、正常回执,跟手动操作走同一条链路,不是独立通道。详见 4.11 节。
+
+**平仓/改单的魔术号校验（2026-07-21 加固，`mt5_worker.py::_close_position`/`_modify_position`）**：此前这两个函数只按 `ticket` 定位持仓就直接执行，不像持仓上报（上文）与自动仓管那样校验"只碰本平台开的仓"（魔术号 778899），是纵深防御上的一处遗漏——实际风险很低（Bridge 只连用户自己电脑上的自己账户，威胁模型里没有第三方能直接对着某个用户的 Bridge 发指令），但补上与持仓上报一致的校验后，即便有人手工构造请求也动不了用户在 MT5 客户端手动开的仓。**这项改动只在 Bridge 源码里生效，需要打包发布新版 `PRISMX-Bridge.exe`、用户升级后才真正生效**，不随后端 `systemctl restart prismx` 或前端 Vercel 部署自动生效，见《部署与上线进度》第四节打包流程。
 
 #### 4.6 多周期趋势（trends.py，挂 `/api/trends`，需 JWT）
 
@@ -381,7 +407,7 @@ Response: { "ok": true, "symbol": string }
 | GET / PUT | /api/notifications/prefs | JWT | 读/写通知偏好 `{ enabled, selected_categories[], selected_symbols[], event_types[] }`(白名单模式)。**PUT 时 `enabled=true` 需要非 FREE 等级(403),`enabled=false` 任何等级都放行**(降级用户不会被锁在"开"状态)。`event_types` 传入值会按已知集合过滤未知项。`selected_symbols` 为 2026-07-16 新增字段,见下方「策略 × 品种双维度过滤」说明 |
 | GET | /api/notifications/indicators | JWT | 现有信号的指标类别去重列表,供前端勾选 |
 | GET | /api/notifications/symbols | JWT | 2026-07-16 新增。当前**活跃**品种去重列表,供前端"按品种"筛选勾选——数据源是 `quotes_store.get_active_symbols()`,与仪表盘英雄卡/报价表/图表选择器同一份(EA 正在推送的品种),**不是**历史 `signals` 表里出现过的所有品种。这个区别很关键:最初实现直接查 `Signal.symbol` 去重,结果列表里堆满了 EA 早已不再配置的历史/测试品种(AAPL、VIX、SPCX 等),改成读活跃品种后自动只剩 EA 真正在推的那几个,且随 EA 增删品种自动跟着变 |
-| POST | /api/notifications/push/subscribe | JWT | 订阅推送 `{ endpoint, keys{p256dh,auth} }`。**FREE 等级 403** |
+| POST | /api/notifications/push/subscribe | JWT | 订阅推送 `{ endpoint, keys{p256dh,auth} }`。**FREE 等级 403**。2026-07-21 起 `endpoint` 上限 1024 字符、`p256dh`/`auth` 各上限 256 字符（真实 Web Push 密钥远小于此，纯粹防御性上限，避免任意大字符串占用存储） |
 | POST | /api/notifications/push/unsubscribe | JWT | 取消订阅 |
 | GET | /api/notifications/push/vapid-public-key | 公开 | `{ publicKey }`(前端订阅用) |
 
@@ -399,7 +425,7 @@ Response: { "ok": true, "symbol": string }
 
 #### 4.9 WebSocket 通道（ws.py，无 `/api` 前缀）
 
-前端通道 `/ws/client`（JWT 鉴权）：连接后客户端发首帧 `{ "type":"AUTH", "token":"<jwt>" }`(token 不放 URL,避免被代理日志记录;为兼容旧客户端仍接受 query 参数 `?token=` 作回退),失败回 `AUTH_FAIL`。**WS 鉴权失败只停止重连、不清除登录态**——登录态是否失效仅由 REST 的 401 决定,避免 WS 协议/部署不一致把用户误踢回登录页。连接建立即补推最近一次持仓与报价快照。服务端推送类型:
+前端通道 `/ws/client`（JWT 鉴权）：连接后客户端发首帧 `{ "type":"AUTH", "token":"<jwt>" }`(token 不放 URL,避免被代理日志记录;为兼容旧客户端仍接受 query 参数 `?token=` 作回退),失败回 `AUTH_FAIL`。**WS 鉴权失败只停止重连、不清除登录态**——登录态是否失效仅由 REST 的 401 决定,避免 WS 协议/部署不一致把用户误踢回登录页。**2026-07-22 起建连时同步校验会话版本**（`token_version`/`tv`，见 4.1 节「会话版本」说明）——改密码后失效的旧 token 无法再建立新的 WS 连接，只是已经打开的连接不会被强制断开。连接建立即补推最近一次持仓与报价快照。服务端推送类型:
 ```
 { "type": "AUTH_OK", "userId": string }
 { "type": "AUTH_FAIL", "reason": string }
@@ -503,6 +529,10 @@ AutoManageSettings = {
 
 规则引擎 `app/services/auto_manage.py` 的 `evaluate_positions(db, user_id, positions)` 由 `bridge.py` 的 `bridge_positions` 端点调用（见 4.5 节），不是独立轮询任务；`_is_eligible` 做 30 秒 TTL 的资格缓存，非 PRO 或未开启的用户零额外数据库开销。三条规则（保本/追踪止损/分批止盈）均以 R 为单位（R = 该仓位开仓时的止损距离，首次见到该仓位时快照 `entry`/`initial_sl` 到 `AutoManagedPosition`，止损后续被移动不影响 R 的分母）。只管理通过 PRISMX 下单开出的仓位（按 `Order.mt5_ticket` 匹配平台持仓），止损只朝有利方向移动，开仓无止损的仓位（`risk` 为空/0）直接跳过。
 
+> **止损后补的仓位不再被永久跳过（2026-07-21 修复）**：R 的快照只在**首次见到某个仓位**时发生——若开仓那一刻止损还没挂上（例如成交与挂止损之间存在时间差），`risk` 被记为 `None`，此后该仓位每次上报都会命中"开仓无止损，R 无定义"这条跳过分支，哪怕止损后来真的补上了也不会重算，这个仓位从此永远不受保本/追踪止损管理。修复：非首次见到的仓位，只要 `risk` 仍未定义且这次上报的 `stopLoss` 已经非零，就补算一次 `risk = abs(entry - current_sl)` 并回填 `initial_sl`；已经定义过的 `risk` 不会被后续的手动改止损影响（它是开仓时刻的风险基准，不是"当前止损距离"）。
+
+**限制**：只有下一次 `bridge_positions` 上报（间隔约 1.5~3 秒，取决于 Bridge 轮询节奏）真正带着已挂好的止损值时，这条补算逻辑才会被触发——若某个仓位开仓后一直不设止损，仍然会一直停在"跳过"状态，这是设计上的合理行为（R 无法定义），不是这次修复要解决的问题。
+
 ## 4.12 图表行情（chart.py，写入无前缀路由、读取挂在 `/api` 下）
 
 图表页不用第三方 Widget,K 线来自**自建中央 MT5 EA 喂价源**。写入端(EA)用 `X-EA-Token` 头鉴权(不是用户,无 JWT);读取端(前端)复用站内 JWT 登录态。数据只在**后端内存**(`chart_store.py`),不落库,进程重启即空、靠 EA 每 60 秒 backfill 自愈。
@@ -517,7 +547,11 @@ AutoManageSettings = {
 
 > **时间轴与十字准线时区（2026-07-15）**：K 线时间戳后端存储/接口传输始终是真 UTC（EA 归一化），前端展示层固定转换为 UTC+8。`lightweight-charts` 的坐标轴刻度与十字准线悬停时间是**两套独立的格式化配置**——`timeScale.tickMarkFormatter` 只管坐标轴刻度，`localization.timeFormatter` 才管鼠标悬停时显示的精确时间，未设置 `localization.timeFormatter` 时默认按浏览器本地时区格式化。踩过这个坑：早期只设了前者，坐标轴显示 UTC+8 但悬停时间仍是本地时区，两者对不上；现在 `ChartsPage.tsx` 用同一个 `fmtChartTime()` 函数同时喂给这两个配置项，从结构上保证二者永远一致。UTC+8 角标（`charts.utcBadge`/`utcHint`）渲染在图表容器正下方（紧邻免责声明行），不放在顶部品种/周期控制条里,避免被其它控件挤得不显眼。
 
-> **K 线历史入库（2026-07-18 新增，见 services/candle_store.py 与《产品需求文档》6.22 节）**：`POST /feed/candles` 在写入上面这份内存缓存的同时，把这批 bar 里"已经走完（收盘）"的部分**额外持久化到数据库**（新表 `candles`），与内存缓存完全独立、互不依赖——内存缓存继续负责图表实时画图（重启即空），数据库这份是给策略回测/更长回看用的长期历史。判定一根 bar 是否已收盘：`t + INTERVAL_SECONDS[interval] <= now`；对 `(symbol, interval, t)` 做存在性检查，已存在则跳过，避免 EA 每 60 秒一次的 backfill 重复插入。**只有 1 分钟线设保留期**（默认 30 天，管理后台可调，见 4.10 节），其余周期永久保留；每天一次的后台循环（`candle_retention_sweep_loop`，`main.py` 注册）清理过期的 1 分钟线。若这批 bar 里有新收盘的，同一次请求内顺带调用 `strategy_engine.evaluate_new_candle(symbol, interval)`——见 4.14 节。
+> **K 线历史入库（2026-07-18 新增，见 services/candle_store.py 与《产品需求文档》6.22 节）**：`POST /feed/candles` 在写入上面这份内存缓存的同时，把这批 bar 里"已经走完（收盘）"的部分**额外持久化到数据库**（新表 `candles`），与内存缓存完全独立、互不依赖——内存缓存继续负责图表实时画图（重启即空），数据库这份是给策略回测/更长回看用的长期历史。判定一根 bar 是否已收盘用**双重判定**（2026-07-21 改，见下方"喂价端时钟纠偏"）：① 绝对判定 `t + INTERVAL_SECONDS[interval] <= now`；② 相对判定——同一批里存在时间戳更晚的 bar，说明喂价端已经在形成更新的一根，这一根必然已经走完，不依赖任意一端的绝对时钟。满足任一条件即算收盘；一整批里一根都不满足时打 WARNING 日志（`persist_closed_bars: ... none are closed yet`）。对 `(symbol, interval, t)` 做存在性检查，已存在则跳过，避免 EA 每 60 秒一次的 backfill 重复插入。**只有 1 分钟线设保留期**（默认 30 天，管理后台可调，见 4.10 节），其余周期永久保留；每天一次的后台循环（`candle_retention_sweep_loop`，`main.py` 注册）清理过期的 1 分钟线。若这批 bar 里有新收盘的，同一次请求内顺带调用 `strategy_engine.evaluate_new_candle(symbol, interval)`——见 4.14 节。
+
+> **喂价端时钟纠偏（2026-07-21 新增，见 routers/chart.py 的 `_correct_future_skew`）**：真实事故——EA 所在机器的系统时钟比服务器快约 11 小时，导致 K 线时间戳被打进"未来"，① 绝对判定永远为假，1 分钟线连续 3 天插不进数据库（直到上面②相对判定上线才恢复写入）。但恢复写入后存进库里的时间戳本身依然是错的——经纪商服务器时间、本地系统时间双方都不方便/不允许调整，只能在 `/feed/candles` 入口识别偏差并纠正。做法：用一批里最新一根（通常是仍在形成中的那根）与服务器当前时间的差值反向平移全部时间戳，只在差值超过 `FUTURE_SKEW_CORRECTION_THRESHOLD_SECONDS`（300 秒）时才纠正，避免把正常网络延迟当异常。**两轮真实回归，都已修复并各自留有专门的回归测试（`tests/test_chart_feed.py`）**：
+> 1. **纠偏量抖动**——同一根仍在形成中的 bar，自己的时间戳不变、服务器时钟持续前进，现算差值随之持续缩小（锯齿形状，每根 bar 刚开始形成时差值最大、最接近真实基准）；若每次请求都直接用现算值纠正，同一根 bar 会在形成过程中被纠正到不停变化的时间点，`chart_store` 把每次都当成新 bar，图表表现为"每次请求都冒出一根新蜡烛"。改用按 `(symbol, interval)` 缓存、带迟滞（阈值 = 周期秒数 + 60 秒余量）的"同一挡位内取最大值"方案：偏差量真正跳变（超出这个周期一整根 bar 的自然漂移范围，如断线重连/DST 切换）才重新起算，否则持续收敛到区间内观测到的最大值。
+> 2. **网格错位**——纠偏量最初直接 `int(cached)` 取整秒，不是周期长度的整数倍；同一根 bar 在缓存收敛过程中被纠正到网格上不同的残数位置（比如 5 分钟线不再落在 :00/:05/:10 整点），数据库里为同一根 bar 造出好几行不同 `t` 的记录，回测图表上表现为重复/错位的蜡烛。改成 `round(cached / interval_seconds) * interval_seconds`，保证纠正后的时间戳与纠正前落在同一网格残数上。**这次连带查出 `candles` 表里有一批长期存在、根因未知的历史脏数据**（每个 symbol/interval 几乎每个交易日都会额外多出十几行网格错位记录，最早可追溯到 2024 年建库当时，与本次纠偏 bug 无关——EA 源码不在本仓库，查不到根因）；用"时间戳是否落在该 symbol/interval 出现次数最多的网格残数上"这一客观标准一次性清理，2026-07-21 从 `candles` 表删除 307,709 行、保留 43,024 行真正对齐网格的历史。
 
 ## 4.13 支付（payments.py，挂 `/api/payments`）
 
@@ -526,9 +560,9 @@ AutoManageSettings = {
 | 方法 | 路径 | 鉴权 | 说明 |
 |------|------|------|------|
 | GET | /api/payments/plans | 公开 | 返回当前定价（含促销折扣）:`{ plans: [{id, name, price_usd, original_price_usd, days}], sale }` |
-| GET | /api/payments/currencies | 公开 | 代理 NOWPayments `/v1/currencies`,前端据此过滤出实际可用的 USDT 链 |
+| GET | /api/payments/currencies | JWT | 代理 NOWPayments `/v1/currencies`,前端据此过滤出实际可用的 USDT 链。**2026-07-22 起需登录 + 进程内 5 分钟 TTL 缓存**——此前无鉴权且不缓存，任何人（不用登录）反复刷这个接口都会直接转发给 NOWPayments，可被用来刷第三方调用成本、拖慢真实用户 |
 | POST | /api/payments/create | JWT | 建立支付订单。`{ plan: "pro_monthly"\|"pro_yearly", pay_currency }`（**只接受 USDT**，`pay_currency` 必须以 `usdt` 开头，否则 400）。以 USDT 计价（`price_currency == pay_currency`，无美元换算尾差）；返回 `{ id, payment_id, pay_address, pay_amount, pay_currency, amount_usd, plan, status, valid_until }` |
-| GET | /api/payments/status/{payment_id} | JWT | 查询本地记录的支付状态；若本地非终态（PENDING/NEW/PROCESSING）则先向 NOWPayments 拉一次最新状态同步，NOWPayments 不可用时静默返回本地缓存值 |
+| GET | /api/payments/status/{payment_id} | JWT | 查询本地记录的支付状态；若本地非终态（PENDING/NEW/PROCESSING）则先向 NOWPayments 拉一次最新状态同步，NOWPayments 不可用时静默返回本地缓存值。**2026-07-22 起响应体新增 `actually_paid`**（NOWPayments 报告的实际到账金额，同 `pay_currency` 计价，`null`=尚无数据）——低于 `pay_amount` 说明用户少转了（常见于没算准链上手续费）；此前没有这个字段，用户少转后界面只会一直转圈、最终显示"已过期"，看不出钱到底有没有到账，升级页据此在倒计时期间提示"已收到部分金额，请补足差额"，过期/失败后提示"这笔钱没有丢失，请联系客服" |
 | POST | /api/payments/webhook | 公开(HMAC 验签) | NOWPayments IPN 回调，无 JWT。用 `x-nowpayments-sig` 头做 HMAC-SHA512 签名校验（`verify_ipn_signature`，对 JSON body 按 key 排序后计算摘要，`hmac.compare_digest` 常量时间比较），不符 401 |
 
 **支付状态机**（`Payment.status`）：`NEW → PENDING/PROCESSING → FINISHED`(或 `EXPIRED`/`FAILED`)。NOWPayments 原始状态映射：`waiting/confirming/sending → PROCESSING`；`partially_paid → PROCESSING`(NOWPayments 后台配置了容错率，实付金额在套餐价 2% 以内会自动判定 `finished`，不会真的卡在 `partially_paid`)；`expired → EXPIRED`；`failed/refunded → FAILED`。
@@ -561,11 +595,13 @@ AutoManageSettings = {
 | POST | /strategies | 创建策略：`{ template, name?, symbol, interval, params, stopLossMethod, stopLossValue, takeProfitMethod, takeProfitValue, oneTradeAtATime }`；先过 PRO 专属门槛，再查每用户数量上限（默认 3，超限 400），参数按 schema 校验/夹紧（越界夹到边界内，不拒绝）。`name` 留空由前端按模板名兜底展示 |
 | PATCH | /strategies/{id} | 改 `name`/`params`/`stopLossMethod`/`stopLossValue`/`takeProfitMethod`/`takeProfitValue`/`oneTradeAtATime`/`enabled`；`enabled` 变化时重新过一次 PRO 门槛；不属于当前用户 → 404 |
 | DELETE | /strategies/{id} | 删除；不影响该策略已经触发过的历史信号 |
-| POST | /strategies/backtest | 拿数据库里 `candles` 表存的真实历史（`days` 范围的窗口，上限 5000 根），回放这个模板+参数组合，返回结构与既有「如果你跟了」信号回放（4.3 节 `/signals/simulate`）同源但字段有扩展：`{ summary, points, trades, bars, barsAvailable, insufficientData }`——`bars` 是这次回测用到的完整 K 线（前端画蜡烛图用），每笔 `trades` 除了原有字段外多带 `entryTime`/`exitTime`(epoch 秒)/`entryPrice`/`exitPrice`，供前端在图上精确定位标记，不用把 ISO 时间字符串再解析回时间戳。历史不足 30 根 → `insufficientData:true`，`summary` 全零、`trades`/`points`/`bars` 为空数组（不是报错，是"数据还没攒够"这个合法状态） |
+| POST | /strategies/backtest | 拿数据库里 `candles` 表存的真实历史（`days` 范围的窗口，上限 `MAX_BACKTEST_BARS=5000` 根——**2026-07-21 修复**：查询原来是 `order_by(t.asc()).limit(5000)`，总量一旦超过上限就永远返回最早的一批，越往后积累数据反而让回测卡死在最老的历史；改成 `order_by(t.desc()).limit(5000)` 取最新一批再反转顺序），回放这个模板+参数组合，返回结构与既有「如果你跟了」信号回放（4.3 节 `/signals/simulate`）同源但字段有扩展：`{ summary, points, trades, bars, barsAvailable, insufficientData, openPositions }`——`bars` 是这次回测用到的完整 K 线（前端画蜡烛图用），每笔 `trades` 除了原有字段外多带 `entryTime`/`exitTime`(epoch 秒)/`entryPrice`/`exitPrice`，供前端在图上精确定位标记，不用把 ISO 时间字符串再解析回时间戳。`openPositions`（2026-07-21 新增）是回测结束时仍未摸到止损/止盈的持仓列表——**修复前这类信号会被静默丢弃**：一次一单模式下，第一笔信号只要到数据末尾都没出结果，后面所有能正常出结果的信号会被连带跳过（`break` 提前退出整个循环），现改成收集进 `openPositions` 单独返回、不影响后续信号的正常统计，前端渲染成横幅提示+图上琥珀色标记。历史不足 30 根 → `insufficientData:true`，`summary` 全零、`trades`/`points`/`bars`/`openPositions` 为空数组（不是报错，是"数据还没攒够"这个合法状态） |
 | GET | /strategies/signals?limit | 当前用户已触发的个人策略信号，最新在前，默认 50 条上限 200 |
 | DELETE | /strategies/signals | 清空当前用户全部已触发的策略信号历史（2026-07-19 新增）；不影响策略的启用状态与 `last_signal_bar_t` 去重游标。**注册顺序必须排在 `DELETE /{strategy_id}` 之前**——否则路径参数 `strategy_id` 会把字面量 `"signals"` 当成一个策略 id 吞掉，这条路由永远走不到 |
 
-**止损止盈方式（2026-07-18 起，替换旧的 `stopLossPct`/`takeProfitR` 固定组合）**：`UserStrategy.stop_loss_method` 取 `percent`（按入场价百分比距离）/`price`（固定价格距离，同 EA 报价单位），`take_profit_method` 取 `rr`（止损距离的倍数，与 `auto_manage.py` 的 R 值约定一致）/`percent`/`price`，两者可以任意搭配。`_entry_exit_prices(side, entry, sl_method, sl_value, tp_method, tp_value)` 按各自方式独立算出距离，越界用 `clamp_stop_loss`/`clamp_take_profit`（不同 method 边界不同，同一套"夹到边界内不拒绝"的校验风格）。计算结果统一经 `_round_price()` 按价格量级四舍五入（≥100 两位小数、1~100 四位、其余六位）——百分比换算在部分价位上会残留浮点误差（如 `63619.50399999999`），此前直接透传给前端展示；改成按量级而非逐品种维护小数位白名单，因为自定义策略可以跑在任何 EA 在报的品种上。
+**止损止盈方式（2026-07-18 起，替换旧的 `stopLossPct`/`takeProfitR` 固定组合；2026-07-21 起 `price` 方式改名并改按点数计算）**：`UserStrategy.stop_loss_method` 取 `percent`（按入场价百分比距离）/`steps`（按点数距离），`take_profit_method` 取 `rr`（止损距离的倍数，与 `auto_manage.py` 的 R 值约定一致）/`percent`/`steps`，两者可以任意搭配。（**2026-07-21**：`stop_loss_pct`/`take_profit_pct` 两个被这次替换掉的旧列在生产表里一度仍是 NOT NULL、导致创建策略报 500，修复详见 6.1 节 2026-07-18～19 迁移说明的补充段落与《部署与上线进度》踩坑记录 #27。）`_entry_exit_prices(side, entry, symbol, sl_method, sl_value, tp_method, tp_value)` 按各自方式独立算出距离，越界用 `clamp_stop_loss`/`clamp_take_profit`（不同 method 边界不同，同一套"夹到边界内不拒绝"的校验风格；`steps` 夹到 1~1,000,000 的整数）。计算结果统一经 `_round_price()` 按价格量级四舍五入（≥100 两位小数、1~100 四位、其余六位）——百分比换算在部分价位上会残留浮点误差（如 `63619.50399999999`），此前直接透传给前端展示；改成按量级而非逐品种维护小数位白名单，因为自定义策略可以跑在任何 EA 在报的品种上。
+
+**`steps`（点数）方式的换算（2026-07-21 新增，见 `_point_size()`）**：原来的 `price` 方式直接填一个价格差值，不同品种价格量级差异巨大（黄金填 5 是 5 美元的距离，欧美汇率填 5 就离谱地大），同一个数字在不同品种上含义完全不一致。`steps` 方式改成填点数，`_point_size(symbol, price)` 优先用 `quotes_store.get_digits(symbol)`（EA 最近一次上报的该品种小数位数，`FeedQuote.digits`）算出真实的最小报价变动单位（`10 ** -digits`），EA 还没推送过这个品种的报价（digits 未知）时退回按价格量级估算（与 `_round_price` 同一套分档：≥100 → 0.01，≥1 → 0.0001，其余 → 0.000001）。实际距离 = 点数 × point_size。**这是内部试用中的功能改动，没有做旧值的静默单位迁移**——已用旧 `price` 方式配置过的策略，部署后需要手动重新选一次止损/止盈方式，否则前端会显示一个未识别的 method。
 
 **一次一单（`UserStrategy.one_trade_at_a_time`，默认开启，2026-07-19 新增）**：开启时，开着仓（上一次触发的信号还没摸到止损/止盈）不再触发新信号；关闭时只要满足入场条件就照样触发，不管前一笔是否还"开着"。回测与实盘评估读同一个字段，行为对齐：
 - **回测**：`run_backtest()` 分两步——第一步只找出每笔交易的入场/出场（`_resolve_trade()`，从入场下一根开始向后扫，先摸到止损还是止盈判定胜负，同一根摸到两者按止损处理），一次一单时按入场顺序前进（摸到出场前不再开新仓，等价于旧实现）；关闭时每根满足条件的 bar 都独立开一笔，按出场时间重新排序后再进入第二步——净值/回撤/连亏/胜率的累计逻辑与之前完全一样，只是数据源换成了统一构造好的交易列表，保证净值曲线的时间线正确（不同笔交易的出场先后顺序不一定等于入场先后顺序）。
@@ -587,6 +623,8 @@ AutoManageSettings = {
 | `trend_rsi_filter` | 收盘价在趋势均线上方（上升趋势）且 RSI 上穿超卖阈值才买入；下降趋势对称卖出——趋势方向本身是过滤器 |
 
 每个模板都有独立的 `direction`（`both`/`long`/`short`）参数进一步限制只接受哪个方向的信号；`validate_and_clamp_params()` 校验模板参数，越界数值夹到边界内而非拒绝（用户拖滑块拖到头是正常操作）。
+
+> **浮点误差导致的幻影信号（2026-07-21 修复）**：`ma_cross`/`macd_cross`/`ma_pullback`/`trend_rsi_filter` 四个模板判定"上穿/下穿"用的是直接比较（`fast > slow`），但均线/EMA 递归计算在价格完全走平或反复出现相同数值时会残留浮点误差（如两根均线本该相等，实际算出 `100.0` 与 `100.00000000000001`），被误判成真实穿越，在没有任何行情波动的地方触发信号——这正是用户最初反馈"均线交叉放到 1 分钟/5 分钟图完全没有交易"这个问题的根源之一：短周期图价格重复/走平的情况远比大周期常见，幻影信号 + 下面这条排序 bug 叠加，实盘表现为"该有的交易没有，不该有的信号又一堆"。修复：新增 `_cmp(a, b, rel_tol=1e-9)` 容差比较，取代四个模板里的直接大小比较。
 
 **回测引擎**（`run_backtest()`）：走一遍 `entry_signals()` 判出的每个入场点，从下一根开始向后扫，先摸到止损还是止盈判定这笔的胜负（同一根 K 线内两者都摸到时按止损处理——保守假设，与既有回放模拟器"规则公开、不偏袒"的口径一致），到数据末尾还没走出结果的这笔不计入统计（不算赢也不算输）。净值/回撤/连亏/胜率的累计口径与 `/signals/simulate` 完全同构，方便横向比较。一次一单/并发模式的差异见上文。
 
@@ -863,7 +901,7 @@ erDiagram
 > **PRO 免费试用(2026-07-17)**:`users` 表补 `trial_used_at`/`plan_is_trial` 两列(`_migrate_columns` 迁移，回填 `plan_is_trial = FALSE`)；试用总开关与天数存进已有的 `platform_settings` 表(键 `"trial"`，与定价/券商锁的键分开，同款独立缓存模式)。本功能未新增任何独立表，纯复用 `users`/`platform_settings`/`admin_audit_logs`。详见 4.10、4.13 节与《产品需求文档》6.19 节。
 > **纪律分(2026-07-17)**:新增 `discipline_snapshots` 表(`(user_id, login, date)` 唯一约束)，`create_all` 自动建表，无需迁移；参数(窗口天数/三维度权重/止损容差/仓位违规倍数/仓位基准最少样本)存进已有的 `platform_settings` 表(键 `"discipline"`，与定价/试用/券商锁各自独立缓存)。详见 4.4、4.10 节与《产品需求文档》6.21 节。
 > **K 线历史入库 + 自定义策略平台(2026-07-18)**:新增三张表，均 `create_all` 自动建表、无需迁移——`candles`(`(symbol, interval, t)` 唯一约束，只存已收盘的 K 线，与内存态 `chart_store` 完全独立)、`user_strategies`(每条一个用户的一个策略配置)、`strategy_signals`(策略触发的个人信号，与全站共享的 `signals` 表完全隔离，不会污染客观胜率/纪律分等统计口径)。参数(1 分钟线保留天数/每用户策略数上限/是否 PRO 专属)存进已有的 `platform_settings` 表(键分别是 `"candle_history"`、`"strategy"`)。详见 4.12、4.14、4.10 节与《产品需求文档》6.22 节。
-> **止损止盈方式 + 策略命名 + 一次一单(2026-07-18～19)**:`user_strategies` 表在既有三张新表之上（属于已存在的表，不能靠 `create_all`，必须走 `_migrate_columns`）追加 `name`、`stop_loss_method`/`stop_loss_value`、`take_profit_method`/`take_profit_value`（替换旧的 `stop_loss_pct`/`take_profit_r`，**迁移时按原逻辑等价换算旧值**，不让已启用的策略静默换成别的止损止盈行为）、`one_trade_at_a_time`（迁移时**统一回填为 `TRUE`**，是刻意收紧的默认值，不是只对新建策略生效）。`strategy_signals` 表追加 `result`（`PENDING`/`HIT_TP`/`HIT_SL`，与 `signals.result` 同一套判定词汇，供一次一单门槛判断上一笔是否已出场）与 `resolved_at`（迁移回填 `result = 'PENDING'`）。**踩过一次坑**：`user_strategies` 首次上线时是全新表用 `create_all` 建的，这批加字段时忘了同步加进 `_migrate_columns`，导致生产库（Postgres，表已存在）升级后 `evaluate_new_candle` 每次都因缺列报 500——已修复并在本地用模拟的旧表结构验证过迁移路径。详见 4.14 节与《产品需求文档》6.23 节。
+> **止损止盈方式 + 策略命名 + 一次一单(2026-07-18～19)**:`user_strategies` 表在既有三张新表之上（属于已存在的表，不能靠 `create_all`，必须走 `_migrate_columns`）追加 `name`、`stop_loss_method`/`stop_loss_value`、`take_profit_method`/`take_profit_value`（替换旧的 `stop_loss_pct`/`take_profit_r`，**迁移时按原逻辑等价换算旧值**，不让已启用的策略静默换成别的止损止盈行为）、`one_trade_at_a_time`（迁移时**统一回填为 `TRUE`**，是刻意收紧的默认值，不是只对新建策略生效）。`strategy_signals` 表追加 `result`（`PENDING`/`HIT_TP`/`HIT_SL`，与 `signals.result` 同一套判定词汇，供一次一单门槛判断上一笔是否已出场）与 `resolved_at`（迁移回填 `result = 'PENDING'`）。**踩过一次坑**：`user_strategies` 首次上线时是全新表用 `create_all` 建的，这批加字段时忘了同步加进 `_migrate_columns`，导致生产库（Postgres，表已存在）升级后 `evaluate_new_candle` 每次都因缺列报 500——已修复并在本地用模拟的旧表结构验证过迁移路径。**同一次字段替换踩的第二个坑（2026-07-21 发现并修复）**：加新列、回填数据这两步当时都做了，但**忘了同步放开被替换的旧列 `stop_loss_pct`/`take_profit_pct` 的 NOT NULL 约束**——代码从这次改动起就不再往这两个旧列写值，但生产表里它们仍是 `NOT NULL`，导致 `POST /strategies`（创建策略）插入新行时命中 `NotNullViolation` 报 500；由于自定义策略是仅管理员可见的内部试用功能，上线以来一直没人真正新建过策略，这颗雷一直没暴露，直到用户第一次实测创建策略才触发（完整排查过程见《部署与上线进度》踩坑记录 #27）。修复：`_migrate_columns` 新增一段，用 inspector 读出 `user_strategies` 当前全部列、与 ORM 模型当前声明的字段集合取差集，找出"表里有、模型里没有、却仍 NOT NULL"的遗留列，逐条 `ALTER COLUMN ... DROP NOT NULL`（不写死列名，任何以后再被替换的旧列都会被同一段逻辑覆盖；幂等，仅 Postgres 生效）。**教训固化**：字段替换类迁移除了"加新列+回填"，必须同时检查被替换的旧列要不要放开约束——这类遗漏在只读路径和其它写路径上完全不会暴露，只在真正走到那条特定的 INSERT 时才现形。详见 4.14 节与《产品需求文档》6.23 节。
 
 ### 6.2 数据定义语言
 
@@ -884,7 +922,9 @@ CREATE TABLE users (
     plan_note TEXT,                         -- 管理员内部备注
     last_active_at TIMESTAMP,               -- DAU/WAU 统计，限流写入
     trial_used_at TIMESTAMP,                -- 终身一次的免费试用凭据，空=从未领取过
-    plan_is_trial BOOLEAN NOT NULL DEFAULT FALSE  -- 当前 PRO 是否为免费试用（区别于付费/赠送）
+    plan_is_trial BOOLEAN NOT NULL DEFAULT FALSE, -- 当前 PRO 是否为免费试用（区别于付费/赠送）
+    token_version INTEGER NOT NULL DEFAULT 0 -- 会话版本号，写进每个 JWT 的 tv 字段；改密码时自增，
+                                             -- 使改密前签发的所有旧 token 立即失效（2026-07-22 新增）
 );
 
 -- 管理员操作审计日志（每次改动用户等级/角色或平台设置各写一条）
@@ -952,7 +992,9 @@ CREATE TABLE signals (
     status TEXT DEFAULT 'ACTIVE',                 -- ACTIVE / EXPIRED
     result TEXT DEFAULT 'PENDING',                -- PENDING / HIT_TP / HIT_SL / STALE
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, expire_at TIMESTAMP,
-    resolved_at TIMESTAMP                         -- 判出胜负的时刻，可空
+    resolved_at TIMESTAMP,                        -- 判出胜负的时刻，可空
+    baseline_high REAL, baseline_low REAL         -- 首次观测到该信号时的价格基线，可空；
+                                                   -- 防止把信号创建前的价格波动误判成命中（2026-07-22 新增）
 );
 CREATE INDEX idx_signals_status_expire ON signals(status, expire_at);
 CREATE INDEX idx_signals_symbol_result ON signals(symbol, result);
@@ -1031,6 +1073,8 @@ CREATE TABLE payments (
     pay_currency TEXT NOT NULL,      -- usdttrc20 / usdtbsc / usdtsol / usdtmatic / usdtton
     pay_amount REAL, pay_address TEXT,
     status TEXT DEFAULT 'NEW',       -- NEW/PENDING/PROCESSING/FINISHED/EXPIRED/FAILED
+    actually_paid REAL,               -- NOWPayments 报告的实际到账金额，可空；低于 pay_amount
+                                      -- 说明用户少转了（2026-07-22 新增，每次同步都更新，不止终态才写）
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     finished_at TIMESTAMP
 );

@@ -13,6 +13,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -205,10 +206,7 @@ def place_order(
         mt5_login=req.mt5Login,
         status="PENDING",
     )
-    db.add(order)
-    db.commit()
-    db.refresh(order)
-    return _serialize(order)
+    return _commit_order_or_existing(db, order, user.id, req.clientOrderId)
 
 
 @router.get("", response_model=dict)
@@ -292,6 +290,30 @@ def cancel_order(
     order.status = "CANCELLED"
     order.message = "用户已撤销 / Cancelled by user"
     db.commit()
+    db.refresh(order)
+    return _serialize(order)
+
+
+def _commit_order_or_existing(db: Session, order: Order, user_id: str, client_order_id: str):
+    """提交新订单；若与并发请求撞上同一 clientOrderId 的唯一约束，回滚后
+    返回那个已存在的订单而非把 500 抛给客户端。
+    Commit a new order; if a concurrent request races us on the same
+    clientOrderId's unique constraint, roll back and return the order that
+    won instead of surfacing a raw 500.
+    """
+    db.add(order)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = (
+            db.query(Order)
+            .filter(Order.user_id == user_id, Order.client_order_id == client_order_id)
+            .first()
+        )
+        if existing:
+            return _serialize(existing)
+        raise
     db.refresh(order)
     return _serialize(order)
 
@@ -489,10 +511,7 @@ def close_position(
         mt5_login=req.mt5Login,
         status="PENDING",
     )
-    db.add(order)
-    db.commit()
-    db.refresh(order)
-    return _serialize(order)
+    return _commit_order_or_existing(db, order, user.id, req.clientOrderId)
 
 
 @router.post("/modify", response_model=OrderOut)
@@ -530,10 +549,7 @@ def modify_position(
         mt5_login=req.mt5Login,
         status="PENDING",
     )
-    db.add(order)
-    db.commit()
-    db.refresh(order)
-    return _serialize(order)
+    return _commit_order_or_existing(db, order, user.id, req.clientOrderId)
 
 
 # ---------- 超时订单后台清理 / stale-order background sweep ----------

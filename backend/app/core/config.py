@@ -14,7 +14,14 @@ class Settings(BaseSettings):
     # 安全 / Security
     JWT_SECRET: str = "prismx-dev-secret-change-in-production"
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES: int = 60 * 24  # 1 天 / 1 day
+    # 2 小时；deps.get_current_user 在剩余不到一半时通过 X-Refreshed-Token
+    # 自动续期，只要用户仍在活跃操作就不会被登出——缩短这个值只是缩小一个
+    # 被窃取 token（如 XSS 偷取 localStorage）在用户不活跃时仍然可用的时间窗。
+    # 2 hours; deps.get_current_user auto-renews via X-Refreshed-Token once
+    # less than half the lifetime remains, so an active user is never logged
+    # out. Shortening this only shrinks the window a stolen token (e.g. via
+    # XSS reading localStorage) stays usable while the user is inactive.
+    JWT_EXPIRE_MINUTES: int = 120
 
     # Google 登录 / Google Sign-In：在 Google Cloud Console 创建的 OAuth Web Client ID。
     # 留空则关闭 Google 登录端点。 / OAuth Web Client ID from Google Cloud Console;

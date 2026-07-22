@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.rate_limit import limiter
+from app.core.rate_limit import clear_failed_logins, is_login_locked, limiter, record_failed_login
 from app.core.security import (
     create_access_token,
     generate_api_token,
@@ -74,6 +74,22 @@ def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends
         db.add(user)
         db.commit()
         db.refresh(user)
+    elif user.password_hash is not None:
+        # 该邮箱已被一个设有密码的账号占用：不能自动登入，否则任何人都可以
+        # 提前用受害者邮箱注册密码账号，等受害者第一次用 Google 登录时被
+        # 悄悄接入攻击者控制的账号（账号预劫持）。
+        # This email already belongs to a password-protected account: refuse
+        # to auto sign-in here. Otherwise an attacker could pre-register the
+        # victim's email with a password of their own choosing, then silently
+        # take over the account the moment the real owner first tries Google
+        # sign-in (a classic account pre-hijack).
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "该邮箱已注册密码账号，请使用密码登录 / "
+                "This email already has a password-protected account. Please log in with your password."
+            ),
+        )
 
     token = create_access_token(user.id, user.token_version)
     return AuthResponse(token=token, user=_user_out(user))
@@ -84,9 +100,19 @@ def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends
 def login(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
     """用户登录 / User login."""
     email = req.email.lower()
+    if is_login_locked(email):
+        # 单个账号在短时间内失败次数过多：即使攻击者轮换 IP 绕过按 IP 限流，
+        # 也无法继续对这一个账号撞库。
+        # Too many failed attempts for this one account recently: blocks
+        # credential-stuffing against a single account even if the attacker
+        # rotates IPs to dodge the per-IP limiter above.
+        raise HTTPException(status_code=429, detail="登录尝试过于频繁，请稍后再试 / Too many login attempts, please try again later")
+
     user = db.query(User).filter(User.email == email).first()
     if not user or not verify_password(req.password, user.password_hash):
+        record_failed_login(email)
         raise HTTPException(status_code=401, detail="邮箱或密码错误 / Invalid email or password")
 
+    clear_failed_logins(email)
     token = create_access_token(user.id, user.token_version)
     return AuthResponse(token=token, user=_user_out(user))
