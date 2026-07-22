@@ -222,7 +222,36 @@ def _poll_db_work(
     broker_lock = bool(broker.get("broker_lock_enabled"))
     broker_patterns = broker.get("broker_patterns") or []
     account_limit = max_mt5_accounts(user.plan)
-    existing_count = db.query(MT5Account).filter(MT5Account.user_id == user.id).count()
+    # 该用户所有已绑定账号的 login，按 login 升序——用于账户数上限的"稳定裁剪"。
+    # This user's bound account logins, sorted ascending — the stable ordering
+    # used to enforce the plan's account-count cap.
+    bound_logins_ordered = [
+        row[0]
+        for row in db.query(MT5Account.login)
+        .filter(MT5Account.user_id == user.id)
+        .order_by(MT5Account.login.asc())
+        .all()
+    ]
+    existing_count = len(bound_logins_ordered)
+    bound_set = set(bound_logins_ordered)
+    # 受订阅等级账户数上限约束时，已绑定账号里只有"按 login 升序的前 N 个"允许
+    # 继续在线；超出的旧账号（典型是从 PRO 降级到 FREE 后多出来的账号）本次跳过
+    # upsert——不再刷新心跳，数秒内转离线、不再接收任何指令。此前 _upsert_account
+    # 只拦"新账号超额"，已绑定的老账号不受限，导致降级用户仍能多账号交易。
+    # None 表示不限（PRO），走原有逻辑。选"前 N 个"而非"本次上报的前 N 个"是为了
+    # 稳定：保留的账号不随每次上报的账号集合变化而抖动。
+    # When the plan caps the account count, only the first N bound logins (by
+    # ascending login) may stay online; any extra older accounts (typically the
+    # ones left over after a PRO→FREE downgrade) skip the upsert this poll — no
+    # heartbeat refresh, so they drop offline within seconds and receive no
+    # commands. Previously _upsert_account only blocked *new* over-limit
+    # accounts; already-bound ones were exempt, letting a downgraded user keep
+    # trading on multiple accounts. None means unlimited (PRO). Using "first N
+    # bound" rather than "first N reported" keeps the kept set stable across
+    # polls instead of flapping with whatever the bridge happens to report.
+    allowed_bound: set[str] | None = (
+        set(bound_logins_ordered[:account_limit]) if account_limit is not None else None
+    )
     suffix_by_login: dict[str, str] = {}
     online_logins: set[str] = set()
     rejected_logins: list[str] = []
@@ -230,6 +259,14 @@ def _poll_db_work(
     for acc in req.accounts:
         if broker_lock and not server_matches_broker(acc.server, broker_patterns):
             broker_rejected.append(acc.login)
+            continue
+        # 已绑定但超出账户数上限（降级后的多余旧账号）：跳过，令其转离线。
+        # 新账号的超额拦截仍由 _upsert_account 负责（见其 existing_count 判断）。
+        # Already bound but over the cap (leftover accounts after a downgrade):
+        # skip so it goes offline. New-account over-cap rejection is still
+        # handled inside _upsert_account (its existing_count check).
+        if allowed_bound is not None and acc.login in bound_set and acc.login not in allowed_bound:
+            rejected_logins.append(acc.login)
             continue
         row, created = _upsert_account(db, user.id, acc, existing_count, account_limit)
         if row is None:

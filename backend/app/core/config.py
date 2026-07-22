@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     # generous — 2/sec, well above any real manual pace — so it only stops
     # pathological hammering without touching real users. Keyed by client IP.
     RATE_LIMIT_ORDER: str = "120/minute"
+    # 改密码/设置密码限流：已有密码时每次都要校验旧密码，若 token 泄露，攻击者
+    # 可借此暴力猜旧密码——限流把这条路堵上。按客户端 IP 计。
+    # Rate limit for change/set-password: with an existing password every call
+    # verifies the old one, so a leaked token could be used to brute-force it —
+    # this throttle closes that path. Keyed by client IP.
+    RATE_LIMIT_PASSWORD: str = "10/minute"
 
     # 数据库 / Database（默认 SQLite，生产用环境变量 DATABASE_URL 覆盖为 Postgres）
     # Database (defaults to SQLite; override via DATABASE_URL env for Postgres in prod)

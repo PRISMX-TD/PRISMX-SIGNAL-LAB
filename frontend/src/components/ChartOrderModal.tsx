@@ -112,10 +112,19 @@ export default function ChartOrderModal({ symbol, side, accounts, quotesByAccoun
 
   const slNum = sl.trim() === '' ? null : parseFloat(sl)
   const tpNum = tp.trim() === '' ? null : parseFloat(tp)
+  // 止损/止盈相对关系校验：即便拿不到参考价（entryRef 为 null），只要两者都填了，
+  // 买单必须止损 < 止盈、卖单必须止损 > 止盈，挡住"把 SL / TP 填反"这类错误。
+  // Relative SL/TP check: even with no reference price (entryRef null), if both
+  // are filled a BUY needs SL < TP and a SELL needs SL > TP — catches a swapped SL/TP.
+  const slTpCross =
+    slNum != null && tpNum != null && !Number.isNaN(slNum) && !Number.isNaN(tpNum) &&
+    (isBuy ? slNum >= tpNum : slNum <= tpNum)
   const slInvalid =
-    slNum != null && !Number.isNaN(slNum) && entryRef != null && (isBuy ? slNum >= entryRef : slNum <= entryRef)
+    slTpCross ||
+    (slNum != null && !Number.isNaN(slNum) && entryRef != null && (isBuy ? slNum >= entryRef : slNum <= entryRef))
   const tpInvalid =
-    tpNum != null && !Number.isNaN(tpNum) && entryRef != null && (isBuy ? tpNum <= entryRef : tpNum >= entryRef)
+    slTpCross ||
+    (tpNum != null && !Number.isNaN(tpNum) && entryRef != null && (isBuy ? tpNum <= entryRef : tpNum >= entryRef))
 
   // 按风险百分比建议手数 / suggest volume from a risk percentage
   useEffect(() => {

@@ -107,12 +107,24 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
     : signal.entry
   const slNum = sl.trim() === '' ? null : parseFloat(sl)
   const tpNum = tp.trim() === '' ? null : parseFloat(tp)
+  // 止损/止盈相对关系校验：即便拿不到参考价（既无实时报价、信号又无入场价，
+  // entryRef 为 null），只要两者都填了，买单必须止损 < 止盈、卖单必须止损 > 止盈。
+  // 这挡住"把 SL / TP 填反"这类和参考价无关的错误——否则要等指令发到 MT5 才被拒。
+  // Relative SL/TP check: even with no reference price (no live quote and the
+  // signal carries no entry, so entryRef is null), if both are filled a BUY
+  // needs SL < TP and a SELL needs SL > TP. Catches a swapped SL/TP — an error
+  // independent of the reference price — instead of only surfacing once MT5 rejects it.
+  const slTpCross =
+    slNum != null && tpNum != null && !Number.isNaN(slNum) && !Number.isNaN(tpNum) &&
+    (isBuy ? slNum >= tpNum : slNum <= tpNum)
   const slInvalid =
-    slNum != null && !Number.isNaN(slNum) && entryRef != null &&
-    (isBuy ? slNum >= entryRef : slNum <= entryRef)
+    slTpCross ||
+    (slNum != null && !Number.isNaN(slNum) && entryRef != null &&
+      (isBuy ? slNum >= entryRef : slNum <= entryRef))
   const tpInvalid =
-    tpNum != null && !Number.isNaN(tpNum) && entryRef != null &&
-    (isBuy ? tpNum <= entryRef : tpNum >= entryRef)
+    slTpCross ||
+    (tpNum != null && !Number.isNaN(tpNum) && entryRef != null &&
+      (isBuy ? tpNum <= entryRef : tpNum >= entryRef))
 
   // 按风险百分比建议手数：净值 × 风险% ÷ 止损距离，随 SL/净值/风险%变化自动重算。
   // Suggest volume from a risk percentage: equity × risk% ÷ SL distance;

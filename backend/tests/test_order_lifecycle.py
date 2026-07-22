@@ -66,6 +66,53 @@ def test_equity_based_volume_cap(client, auth_headers, db, user):
     assert place(client, auth_headers, coid="eq-2", volume=0.5, mt5Login="10001").status_code == 200
 
 
+# ---------- 免费版信号门槛 / free-tier signal gating ----------
+
+
+def test_free_user_cannot_place_signal_order(client, auth_headers, db, user):
+    """FREE 只能用行情图表手动下单，不能跟信号下单：带 signalId 且信号仍有效时，
+    FREE 直接调 /api/orders 会被 403 拒绝。/ FREE may trade manually from the
+    chart but not follow signals: a FREE user placing an order with a signalId on
+    a still-live signal is rejected with 403."""
+    user.plan = "FREE"
+    db.commit()
+    sig = make_signal(db, minutes_left=10)  # 仍有效 / still live
+    assert place(client, auth_headers, coid="fs-1", signalId=sig.id).status_code == 403
+
+
+def test_free_user_can_place_manual_chart_order(client, auth_headers, db, user):
+    """不带 signalId 的手动图表下单：FREE 也放行（免费用户的下单入口就是行情图表）。
+    Manual chart order (no signalId): allowed for FREE too — the chart is the
+    free tier's trading entry point."""
+    user.plan = "FREE"
+    db.commit()
+    assert place(client, auth_headers, coid="fm-1").status_code == 200
+
+
+# ---------- 账户数上限 / account cap ----------
+
+
+def test_free_plan_caps_bound_accounts_on_poll(client, bridge_headers, db, user):
+    """降级到 FREE（账户上限 1）后，之前绑定的多余账号在桥接轮询时被拒、转离线——
+    不再只拦"新账号超额"。保留的是按 login 升序的第一个（10001），10002 被拒。
+    After a downgrade to FREE (account cap 1), the extra already-bound account is
+    rejected on the bridge poll and goes offline — not just new over-cap accounts.
+    The kept one is the first by ascending login (10001); 10002 is rejected."""
+    user.plan = "FREE"
+    make_account(db, user, login="10001")
+    make_account(db, user, login="10002")
+    db.commit()
+    r = client.post(
+        "/api/bridge/poll",
+        json={"accounts": [
+            {"login": "10001", "server": BROKER_SERVER},
+            {"login": "10002", "server": BROKER_SERVER},
+        ]},
+        headers=bridge_headers,
+    )
+    assert r.json()["accountLimitExceeded"] == ["10002"]
+
+
 # ---------- 桥接下发与重发 / bridge delivery & re-delivery ----------
 
 

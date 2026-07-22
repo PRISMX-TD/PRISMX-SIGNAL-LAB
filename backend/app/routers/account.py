@@ -1,12 +1,14 @@
 """账户路由：查询个人信息、修改密码、用户偏好 / Account router: profile, password & prefs."""
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from app.core.config import settings
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models import MT5Account, User, UserPref
 from app.services.connection_manager import manager
@@ -73,7 +75,9 @@ class ChangePasswordRequest(BaseModel):
 
 
 @router.post("/password")
+@limiter.limit(settings.RATE_LIMIT_PASSWORD)
 def change_password(
+    request: Request,
     body: ChangePasswordRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),

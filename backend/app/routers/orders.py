@@ -162,11 +162,16 @@ def place_order(
                 if exp.tzinfo is None:
                     exp = exp.replace(tzinfo=timezone.utc)
                 is_expired = exp < datetime.now(timezone.utc)
-            # FREE 等级只能看到已过期的信号；这里再兜底拒绝一次，防止有人
-            # 拿到一条仍在有效期内的 signalId（如降级前保存的）绕过延迟限制。
-            # FREE tier only ever sees expired signals; this is a server-side
-            # backstop in case someone obtains a still-live signalId (e.g. one
-            # saved before downgrading) and tries to bypass the delay.
+            # FREE 只能用行情图表手动下单，不能跟信号下单：带 signalId 且信号仍
+            # 有效时，FREE 一律拒绝（免费只看得到已过期信号，这里再兜底一层，
+            # 防止有人拿到一条仍在有效期内的 signalId——如降级前保存的——绕过）。
+            # 不带 signalId 的手动图表下单不走这里，任何等级都放行。
+            # FREE users may trade manually from the chart but not by following
+            # signals: with a signalId on a still-live signal, FREE is rejected
+            # (FREE only ever sees expired signals; this is the server-side
+            # backstop in case someone obtains a still-live signalId, e.g. one
+            # saved before downgrading). Manual chart orders carry no signalId,
+            # never reach here, and are allowed on any plan.
             if not is_realtime_plan(user.plan) and not is_expired:
                 raise HTTPException(
                     status_code=403,
