@@ -2439,30 +2439,31 @@
 }
 .term-symhead-m-chg.up { background: var(--up-bg); color: var(--up); }
 .term-symhead-m-chg.down { background: var(--down-bg); color: var(--down); }
-/* 价格 + 次要统计同一行：价格靠左，买卖价/点差/日内高低填进价格右侧本来空着
-   的位置，排成两行小字——不再单独占一整行，省高度。
-   Price + secondary stats share one row: price on the left, bid/ask/spread/
-   day-range fill the space that used to sit empty to its right, as two small
-   lines — no longer a separate full-width row, saving height. */
-.term-symhead-m-mid { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.term-symhead-m-price { font-size: 27px; font-weight: 700; line-height: 1.15; color: var(--text); flex-shrink: 0; }
+/* 价格独占一行，左对齐大字号。/ Price on its own left-aligned big-number row. */
+.term-symhead-m-price { font-size: 30px; font-weight: 700; line-height: 1.1; color: var(--text); margin-top: 2px; }
 .term-symhead-m-price.up { color: var(--up); }
 .term-symhead-m-price.down { color: var(--down); }
+/* 次要统计：价格下方一排等宽小列（标签在上、数值在下），整齐平铺、不换行。
+   Secondary stats: a row of equal-width mini columns below the price (label
+   over value), evenly tiled, no wrapping. */
 .term-symhead-m-stats {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  overflow-x: auto;
-  font-size: 10.5px;
-  color: var(--text-3);
-  white-space: nowrap;
-  text-align: right;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  gap: 4px;
 }
-.term-symhead-m-stats b { font-weight: 600; color: var(--text-2); margin-right: 7px; }
-.term-symhead-m-stats b:last-child { margin-right: 0; }
-.term-symhead-m-stats b.up { color: var(--up); }
-.term-symhead-m-stats b.down { color: var(--down); }
+.term-mstat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.term-mstat-k { font-size: 10px; color: var(--text-3); white-space: nowrap; }
+.term-mstat-v { font-size: 12.5px; font-weight: 600; color: var(--text-2); white-space: nowrap; }
+.term-mstat-v.up { color: var(--up); }
+.term-mstat-v.down { color: var(--down); }
 /* 自定义策略入口：价格卡片下方一条细长可点行，箭头暗示"点开跳转"。
    Custom-strategy entry: a slim tappable row under the price card; the arrow
    hints "tap to go". */

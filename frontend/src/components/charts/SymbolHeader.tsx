@@ -83,15 +83,14 @@ export default function SymbolHeader({ symbol, bid, ask, digits, dayStats, fallb
       </div>
 
       {/* 手机端行情卡：参考 Web3 手机交易 App（Hyperliquid/dYdX 等）的"品种名 +
-          一个大字号价格 + 涨跌徽章"呈现。买卖价/点差/日内高低不再单独占一整行
-          ——大价格数字右边本来就空着一大块，这些次要信息挪进那块空位、排成
-          两行小字，紧贴价格右侧，省下一整行的高度。
+          一个大字号价格 + 涨跌徽章"呈现。价格独占一行左对齐；买卖价/点差/日内
+          高低改成价格下方一排等宽的"标签在上、数值在下"小列——比挤在价格右侧
+          的两行小字更整齐好读。
           Mobile quote card: symbol + one big price + a change badge, the way
-          Web3 mobile trading apps (Hyperliquid, dYdX, …) lead. Bid/ask/spread/
-          day range no longer get their own full-width row — the space to the
-          right of the big price number was sitting empty anyway, so the
-          secondary figures move into it as two compact lines, saving a full
-          row of height. */}
+          Web3 mobile trading apps (Hyperliquid, dYdX, …) lead. The price gets
+          its own left-aligned row; bid/ask/spread/day range become a row of
+          evenly-spaced label-over-value mini columns below the price — tidier
+          and more legible than two cramped lines crowded to the price's right. */}
       <div className="lg:hidden">
         <div className="term-symhead-m">
           <div className="term-symhead-m-top">
@@ -103,14 +102,15 @@ export default function SymbolHeader({ symbol, bid, ask, digits, dayStats, fallb
               {changeStr}
             </span>
           </div>
-          <div className="term-symhead-m-mid">
-            <div className={`term-symhead-m-price num ${changePct == null ? '' : up ? 'up' : 'down'}`}>
-              {midStr}
-            </div>
-            <div className="term-symhead-m-stats no-sb">
-              <div>买 <b className="num up">{bidStr}</b> 卖 <b className="num down">{askStr}</b></div>
-              <div>点差 <b className="num">{spread == null ? '—' : spread}</b> 高 <b className="num">{fmt(dayStats?.high, digits)}</b> 低 <b className="num">{fmt(dayStats?.low, digits)}</b></div>
-            </div>
+          <div className={`term-symhead-m-price num ${changePct == null ? '' : up ? 'up' : 'down'}`}>
+            {midStr}
+          </div>
+          <div className="term-symhead-m-stats">
+            <MStat k="买价 Bid" v={bidStr} tone="up" />
+            <MStat k="卖价 Ask" v={askStr} tone="down" />
+            <MStat k="点差" v={spread == null ? '—' : String(spread)} />
+            <MStat k="日内高" v={fmt(dayStats?.high, digits)} />
+            <MStat k="日内低" v={fmt(dayStats?.low, digits)} />
           </div>
           {/* 自定义策略入口（PRO 专属功能，2026-07 起对全体用户开放）：放在价格
               卡片正下方，点开直接跳转策略页；未订阅 PRO 的用户进页面会看到
@@ -135,6 +135,18 @@ function Stat({ k, v, tone }: { k: string; v: string; tone?: 'up' | 'down' }) {
     <div className="term-sstat">
       <span className="term-sstat-k">{k}</span>
       <span className={`term-sstat-v num ${cls}`}>{v}</span>
+    </div>
+  )
+}
+
+// 手机端行情头的单个统计小列：标签在上、数值在下，一排等宽平铺。
+// Mobile quote-header stat: label over value, laid out in an even row.
+function MStat({ k, v, tone }: { k: string; v: string; tone?: 'up' | 'down' }) {
+  const cls = tone === 'up' ? 'up' : tone === 'down' ? 'down' : ''
+  return (
+    <div className="term-mstat">
+      <span className="term-mstat-k">{k}</span>
+      <span className={`term-mstat-v num ${cls}`}>{v}</span>
     </div>
   )
 }
