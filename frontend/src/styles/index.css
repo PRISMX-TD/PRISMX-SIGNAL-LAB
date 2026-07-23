@@ -2419,15 +2419,21 @@
 .term-symhead-m {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 10px 12px;
+  gap: 4px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.028), transparent);
 }
-.term-symhead-m-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.term-symhead-m-id { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+/* 品种名 + 大价格 + 涨跌徽章同一行：品种钉左，价格居中弹性撑开，徽章钉右。
+   Symbol + big price + change badge on one row: symbol pinned left, price
+   grows in the middle, badge pinned right. */
+.term-symhead-m-top { display: flex; align-items: baseline; gap: 8px; }
+.term-symhead-m-id { display: flex; align-items: baseline; gap: 7px; min-width: 0; flex-shrink: 0; }
 .term-symhead-m-id .sym { font-size: 15px; font-weight: 700; letter-spacing: 0.01em; }
 .term-symhead-m-id .nm { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.term-symhead-m-price { flex: 1 1 auto; text-align: right; font-size: 22px; font-weight: 700; line-height: 1.1; color: var(--text); min-width: 0; }
+.term-symhead-m-price.up { color: var(--up); }
+.term-symhead-m-price.down { color: var(--down); }
 .term-symhead-m-chg {
   flex-shrink: 0;
   font-size: 12px;
@@ -2439,31 +2445,20 @@
 }
 .term-symhead-m-chg.up { background: var(--up-bg); color: var(--up); }
 .term-symhead-m-chg.down { background: var(--down-bg); color: var(--down); }
-/* 价格独占一行，左对齐大字号。/ Price on its own left-aligned big-number row. */
-.term-symhead-m-price { font-size: 30px; font-weight: 700; line-height: 1.1; color: var(--text); margin-top: 2px; }
-.term-symhead-m-price.up { color: var(--up); }
-.term-symhead-m-price.down { color: var(--down); }
-/* 次要统计：价格下方一排等宽小列（标签在上、数值在下），整齐平铺、不换行。
-   Secondary stats: a row of equal-width mini columns below the price (label
-   over value), evenly tiled, no wrapping. */
+/* 次要统计：价格下方一条横排内联小字，可横滑，不换行。
+   Secondary stats: a single inline row of small text below, horizontally
+   scrollable, no wrapping. */
 .term-symhead-m-stats {
   display: flex;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-  gap: 4px;
+  flex-wrap: wrap;
+  gap: 3px 12px;
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
 }
-.term-mstat {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1 1 0;
-  min-width: 0;
-}
-.term-mstat-k { font-size: 10px; color: var(--text-3); white-space: nowrap; }
-.term-mstat-v { font-size: 12.5px; font-weight: 600; color: var(--text-2); white-space: nowrap; }
-.term-mstat-v.up { color: var(--up); }
-.term-mstat-v.down { color: var(--down); }
+.term-symhead-m-stats b { font-weight: 600; color: var(--text-2); margin-left: 3px; }
+.term-symhead-m-stats b.up { color: var(--up); }
+.term-symhead-m-stats b.down { color: var(--down); }
 /* 自定义策略入口：价格卡片下方一条细长可点行，箭头暗示"点开跳转"。
    Custom-strategy entry: a slim tappable row under the price card; the arrow
    hints "tap to go". */
