@@ -75,24 +75,19 @@ export default function App() {
               <Route path="/charts" element={<ChartsPage />} />
               <Route path="/bind" element={<BindPage />} />
               <Route path="/orders" element={<OrdersPage />} />
-              {/* 自定义策略：暂时挂在 AdminOnly 下——功能先内部试用，未对普通
-                  用户开放。对外开放时把这层包装去掉、并把后端每个端点的
-                  require_admin 换回 get_current_user 即可（PRO 专属开关与
-                  策略数上限本身已按最终设计写好，不用改）。
-                  Custom strategies: behind AdminOnly for now — the feature is
-                  in internal trial, not released to regular users. To
-                  release it, drop this wrapper and swap the backend's
-                  require_admin back to get_current_user on every endpoint
-                  (the PRO-exclusive gate and strategy-count limit are already
-                  final, no change needed there). */}
-              <Route
-                path="/strategies"
-                element={
-                  <AdminOnly>
-                    <StrategiesPage />
-                  </AdminOnly>
-                }
-              />
+              {/* 自定义策略：已对全体登录用户开放（2026-07 起）。登录即可进入
+                  页面，PRO 专属开关与每用户策略数上限在后端按端点校验（见
+                  services/settings_store.get_strategy_settings 与
+                  routers/strategies.py 的 _check_access），非 PRO 用户点启用
+                  会拿到清楚的 403 提示，不需要在路由层再挡一层。
+                  Custom strategies: open to all logged-in users (since
+                  2026-07). The PRO-exclusive gate and per-user strategy limit
+                  are enforced backend-side per endpoint (see
+                  services/settings_store.get_strategy_settings and
+                  routers/strategies.py's _check_access) — a non-PRO user gets
+                  a clear 403 on enabling, so no extra route-level gate is
+                  needed. */}
+              <Route path="/strategies" element={<StrategiesPage />} />
               <Route path="/upgrade" element={<UpgradePage />} />
               <Route path="/account" element={<AccountPage />} />
               <Route path="/download" element={<DownloadPage />} />

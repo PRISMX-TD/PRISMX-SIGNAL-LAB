@@ -209,9 +209,12 @@ export default function Layout() {
     { to: '/account', icon: 'account', label: t('nav.account') },
     { to: '/download', icon: 'download', label: t('nav.download') },
     ...(user?.plan !== 'PRO' ? [{ to: '/upgrade', icon: 'upgrade', label: t('nav.upgrade') }] : []),
-    // 自定义策略：暂时仅管理员可见，见 App.tsx 路由处的说明
-    // Custom strategies: admin-only for now, see the comment at the App.tsx route
-    ...(isAdmin ? [{ to: '/strategies', icon: 'strategies', label: t('nav.strategies') }] : []),
+    // 自定义策略：已对全体登录用户开放，见 App.tsx 路由处的说明；PRO 门槛在
+    // 页面内/后端接口层生效，导航入口不再需要管理员身份。
+    // Custom strategies: open to all logged-in users now, see the comment at
+    // the App.tsx route; the PRO gate lives in-page/backend, so the nav entry
+    // no longer needs admin status.
+    { to: '/strategies', icon: 'strategies', label: t('nav.strategies') },
     ...(isAdmin ? [{ to: '/admin', icon: 'admin', label: t('nav.admin') }] : []),
   ]
   const moreActive = moreItems.some((m) => location.pathname === m.to)

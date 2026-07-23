@@ -1,15 +1,14 @@
-"""自定义策略 API 的端到端测试：**当前所有端点都是 require_admin**（功能内部
-试用中，见 routers/strategies.py 顶部说明）、PRO 专属门槛、每用户数量上限、
-CRUD、回测端点、我的策略信号列表，以及"新 K 线收盘时自动评估已启用策略"这条
-实时链路（该链路走 /feed/candles，与 require_admin 无关，鉴权是 EA Token）。
+"""自定义策略 API 的端到端测试：所有端点对登录用户开放，写操作端点前挡着
+PRO 专属门槛、每用户数量上限、CRUD、回测端点、我的策略信号列表，以及"新
+K 线收盘时自动评估已启用策略"这条实时链路（该链路走 /feed/candles，鉴权是
+EA Token，与用户登录态无关）。
 
-End-to-end tests for the custom-strategy API: **every endpoint is currently
-require_admin** (the feature is in internal trial, see the header comment in
-routers/strategies.py), the PRO-exclusive gate, the per-user strategy count
-limit, CRUD, the backtest endpoint, the "my strategy signals" list, and the
-live "evaluate enabled strategies whenever a bar closes" path (that path goes
-through /feed/candles, which is EA-Token-authenticated and unrelated to
-require_admin).
+End-to-end tests for the custom-strategy API: every endpoint is open to any
+logged-in user, with the PRO-exclusive gate in front of the write endpoints,
+the per-user strategy count limit, CRUD, the backtest endpoint, the "my
+strategy signals" list, and the live "evaluate enabled strategies whenever a
+bar closes" path (that path goes through /feed/candles, EA-Token-authenticated,
+unrelated to the calling user's login).
 """
 from datetime import datetime, timedelta, timezone
 
@@ -38,24 +37,24 @@ def _make_admin_pro(db, user):
     db.commit()
 
 
-def test_non_admin_blocked_regardless_of_plan(client, db, auth_headers, user):
-    """非管理员一律拿不到,即便已经是 PRO——功能先内部试用,管理员门槛在 PRO
-    门槛之前。Non-admins are refused regardless of plan — the admin gate sits
-    in front of the PRO gate while the feature is in internal trial."""
+def test_pro_non_admin_user_can_create_strategy(client, db, auth_headers, user):
+    """功能已对全体用户开放：普通(非管理员) PRO 用户能正常创建策略——不再
+    需要管理员身份。Feature is open to everyone now: an ordinary (non-admin)
+    PRO user can create a strategy — admin status is no longer required."""
     _make_pro(db, user)
     res = client.post(
         "/api/strategies",
         headers=auth_headers,
         json={"template": "ma_cross", "symbol": "XAUUSD", "interval": "15", "params": {}},
     )
-    assert res.status_code == 403
+    assert res.status_code == 200
 
 
-def test_admin_but_free_blocked_by_pro_only_gate(client, db, auth_headers, user):
-    """管理员身份不能替代 PRO 专属门槛——两道闸门各司其职。
-    Being an admin doesn't substitute for the PRO-exclusive gate — the two
-    gates are independent."""
-    _make_admin(db, user)
+def test_free_non_admin_user_blocked_by_pro_only_gate(client, db, auth_headers, user):
+    """普通(非管理员) FREE 用户被 PRO 专属门槛挡下——管理员身份从未参与这道
+    判断，门槛只看订阅等级。An ordinary (non-admin) FREE user is blocked by
+    the PRO-exclusive gate — admin status was never part of this check; it's
+    plan-only."""
     res = client.post(
         "/api/strategies",
         headers=auth_headers,

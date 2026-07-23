@@ -6,9 +6,10 @@
 既有的手动下单端点（`POST /orders`，不传 signalId，直接传 symbol/side/
 stopLoss/takeProfit），不需要任何 Order 相关的改动。
 
-**当前仅管理员可用**（`require_admin`，功能内部试用中，未对普通用户开放）。
-放开时把下面每个端点的依赖换回 `get_current_user` 即可；PRO 专属开关
-（`_check_access`）与每用户策略数上限逻辑本身已按最终设计写好，无需改动。
+**2026-07 起已对全体登录用户开放**（原先挂在 `require_admin` 下内部试用，
+现已放开，改回 `get_current_user`）。PRO 专属开关（`_check_access`）与每
+用户策略数上限仍按原设计在各写操作端点生效，非 PRO 用户点启用会拿到清楚
+的 403，不需要额外的路由级门槛。
 
 Custom-strategy router: template CRUD + backtest + "my strategy" signals.
 
@@ -19,11 +20,11 @@ signals (read via `GET /strategies/signals`). One-click order reuses the
 existing manual-order endpoint (`POST /orders`, no signalId, explicit
 symbol/side/stopLoss/takeProfit) — no Order-side changes needed at all.
 
-**Admin-only for now** (`require_admin`; the feature is in internal trial,
-not released to regular users). To release it, swap every endpoint's
-dependency back to `get_current_user` — the PRO-exclusive gate
-(`_check_access`) and per-user strategy limit are already written for the
-final design and need no change.
+**Open to all logged-in users since 2026-07** (was `require_admin`-gated
+during internal trial; now `get_current_user`). The PRO-exclusive gate
+(`_check_access`) and per-user strategy limit still apply on the write
+endpoints as originally designed — a non-PRO user gets a clear 403 on enable,
+so no extra route-level gate is needed.
 """
 import json
 from datetime import datetime, timedelta, timezone
@@ -36,7 +37,7 @@ from app.models import Candle, StrategySignal, User, UserStrategy
 from app.routers.chart import ALLOWED_INTERVALS
 from app.schemas import StrategyBacktestRequest, StrategyCreate, StrategyOut, StrategySignalOut, StrategyUpdate
 from app.services.candle_store import INTERVAL_SECONDS
-from app.services.deps import require_admin
+from app.services.deps import get_current_user
 from app.services.settings_store import get_strategy_settings
 from app.services.strategy_engine import (
     TEMPLATE_SCHEMAS,
@@ -71,7 +72,7 @@ def _to_out(s: UserStrategy) -> StrategyOut:
 
 
 @router.get("/templates", response_model=dict)
-def list_templates(_user: User = Depends(require_admin)):
+def list_templates(_user: User = Depends(get_current_user)):
     """列出可用的策略模板与其参数定义,前端据此动态渲染调参表单,不写死。
     Lists available strategy templates and their parameter schemas; the
     frontend renders the tuning form from this, nothing hardcoded."""
@@ -79,13 +80,13 @@ def list_templates(_user: User = Depends(require_admin)):
 
 
 @router.get("", response_model=dict)
-def list_strategies(db: Session = Depends(get_db), user: User = Depends(require_admin)):
+def list_strategies(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     rows = db.query(UserStrategy).filter(UserStrategy.user_id == user.id).order_by(UserStrategy.created_at.asc()).all()
     return {"strategies": [_to_out(s) for s in rows]}
 
 
 @router.post("", response_model=StrategyOut)
-def create_strategy(body: StrategyCreate, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+def create_strategy(body: StrategyCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     _check_access(db, user)
     if body.interval not in ALLOWED_INTERVALS:
         raise HTTPException(status_code=400, detail="不支持的周期 / unsupported interval")
@@ -116,7 +117,7 @@ def create_strategy(body: StrategyCreate, db: Session = Depends(get_db), user: U
 
 
 @router.patch("/{strategy_id}", response_model=StrategyOut)
-def update_strategy(strategy_id: str, body: StrategyUpdate, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+def update_strategy(strategy_id: str, body: StrategyUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     row = db.query(UserStrategy).filter(UserStrategy.id == strategy_id, UserStrategy.user_id == user.id).first()
     if row is None:
         raise HTTPException(status_code=404, detail="策略不存在 / strategy not found")
@@ -147,7 +148,7 @@ def update_strategy(strategy_id: str, body: StrategyUpdate, db: Session = Depend
 
 
 @router.delete("/signals", response_model=dict)
-def clear_my_signals(db: Session = Depends(get_db), user: User = Depends(require_admin)):
+def clear_my_signals(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """清空当前用户已触发的全部个人策略信号历史,不影响策略本身的启用状态与
     去重游标(last_signal_bar_t)——清空只是清列表,不会让已经触发过的那根
     K 线重新触发一次信号。注册顺序必须排在 DELETE /{strategy_id} 之前——
@@ -164,7 +165,7 @@ def clear_my_signals(db: Session = Depends(get_db), user: User = Depends(require
 
 
 @router.delete("/{strategy_id}", response_model=dict)
-def delete_strategy(strategy_id: str, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+def delete_strategy(strategy_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     row = db.query(UserStrategy).filter(UserStrategy.id == strategy_id, UserStrategy.user_id == user.id).first()
     if row is None:
         raise HTTPException(status_code=404, detail="策略不存在 / strategy not found")
@@ -174,7 +175,7 @@ def delete_strategy(strategy_id: str, db: Session = Depends(get_db), user: User 
 
 
 @router.post("/backtest", response_model=dict)
-def backtest_strategy(body: StrategyBacktestRequest, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+def backtest_strategy(body: StrategyBacktestRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """吃已入库的 K 线历史回放这个模板+参数组合,保存前就能看到历史表现。
     Replays this template+param combo against stored candle history — usable
     before the strategy is even saved."""
@@ -238,7 +239,7 @@ def backtest_strategy(body: StrategyBacktestRequest, db: Session = Depends(get_d
 
 
 @router.get("/signals", response_model=dict)
-def list_my_signals(limit: int = 50, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+def list_my_signals(limit: int = 50, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """当前用户已触发的个人策略信号,最新在前。
     The current user's fired personal strategy signals, newest first."""
     rows = (

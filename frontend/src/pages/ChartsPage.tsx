@@ -516,8 +516,25 @@ export default function ChartsPage() {
   const enterFullscreen = useCallback(() => {
     setIsFullscreen(true)
     document.body.classList.add('chart-fullscreen')
-    // 先请求浏览器原生全屏，再锁定横屏（lock 在原生全屏上下文里才生效）
-    const el = containerRef.current?.closest('.glass') as HTMLElement | null
+    // 先请求浏览器原生全屏，再锁定横屏（lock 在原生全屏上下文里才生效）。
+    // 目标元素取 containerRef 的直接父节点（即 .term-chart，见 JSX：
+    // <div className="term-chart ..."><div ref={containerRef} />...</div>）。
+    // 之前用 closest('.glass') 找——无缝框重排时那层的 .glass 类被去掉了，
+    // closest 从此永远找不到，导致原生全屏与横屏锁定悄悄失效（只剩纯 CSS
+    // 视觉铺满，不是真全屏、不会转横屏），这正是用户反馈"点全屏不转横屏"的
+    // 根因。改用直接父节点引用，不再依赖某个可能被样式重构改掉的类名。
+    // Request native fullscreen first, then lock landscape (lock only works
+    // inside a native fullscreen context). Target element is containerRef's
+    // direct parent (.term-chart; see the JSX structure above). This used to
+    // look it up via closest('.glass') — the seamless-frame layout rework
+    // dropped that class from this element, so the lookup started silently
+    // returning null forever, meaning native fullscreen + orientation lock
+    // quietly stopped working (only the CSS full-viewport look remained — no
+    // real fullscreen, no rotation) — this is the root cause of "tapping
+    // fullscreen doesn't rotate to landscape". Using the direct parent ref
+    // instead removes the dependency on a class name that styling reworks can
+    // change out from under it.
+    const el = containerRef.current?.parentElement ?? null
     if (el && document.fullscreenEnabled) {
       el.requestFullscreen().then(() => {
         const orient = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> } | null
@@ -1496,6 +1513,26 @@ export default function ChartsPage() {
         </div>
       )}
 
+      {/* 手机端·常驻买卖条：紧贴周期/工具栏下方（不再挤在图表下面要滚动才能
+          看到），矮一些更省高度。点开走既有的滑动确认下单弹窗（ChartOrderModal）。
+          桌面隐藏（右栏已有完整下单面板）。全屏时隐藏。
+          Mobile docked buy/sell bar: right under the interval/toolbar row
+          (no longer squeezed below the chart, out of easy reach), shorter to
+          save height. Opens the existing slide-to-confirm order modal. Hidden
+          on desktop (the right rail has the full ticket) and in fullscreen. */}
+      {!isFullscreen && (
+        <div className="term-mbuysell lg:hidden">
+          <button type="button" className="sell" onClick={() => setOrderSide('SELL')}>
+            <span className="lab">卖 SELL</span>
+            <span className="px num">{activeQuote?.bid != null ? activeQuote.bid.toFixed(decimals) : lastPrice ? lastPrice.toFixed(decimals) : '—'}</span>
+          </button>
+          <button type="button" className="buy" onClick={() => setOrderSide('BUY')}>
+            <span className="lab">买 BUY</span>
+            <span className="px num">{activeQuote?.ask != null ? activeQuote.ask.toFixed(decimals) : lastPrice ? lastPrice.toFixed(decimals) : '—'}</span>
+          </button>
+        </div>
+      )}
+
       {/* 图表容器：无缝（无自身边框/圆角/内边距），窄屏 70vh，桌面填满中栏剩余
           高度（.term-chart 内处理）。/ Chart container: seamless (no own border/
           radius/padding); 70vh on narrow screens, fills the center column on
@@ -1702,24 +1739,6 @@ export default function ChartsPage() {
           </div>
         )}
       </div>
-
-      {/* 手机端·图表视图常驻买卖条：图表正下方、拇指可达，点开走既有的滑动确认
-          下单弹窗（ChartOrderModal）。桌面隐藏（右栏已有完整下单面板）。全屏时
-          隐藏。/ Mobile chart-view docked buy/sell bar: right under the chart,
-          thumb-reachable; opens the existing slide-to-confirm order modal.
-          Hidden on desktop (the right rail has the full ticket) and in fullscreen. */}
-      {!isFullscreen && (
-        <div className="term-mbuysell lg:hidden">
-          <button type="button" className="sell" onClick={() => setOrderSide('SELL')}>
-            <span className="lab">卖 SELL</span>
-            <span className="px num">{activeQuote?.bid != null ? activeQuote.bid.toFixed(decimals) : lastPrice ? lastPrice.toFixed(decimals) : '—'}</span>
-          </button>
-          <button type="button" className="buy" onClick={() => setOrderSide('BUY')}>
-            <span className="lab">买 BUY</span>
-            <span className="px num">{activeQuote?.ask != null ? activeQuote.ask.toFixed(decimals) : lastPrice ? lastPrice.toFixed(decimals) : '—'}</span>
-          </button>
-        </div>
-      )}
       </div>
       {/* /term-chartview */}
 

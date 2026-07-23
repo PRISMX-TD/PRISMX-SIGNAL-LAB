@@ -65,11 +65,9 @@ export default function UserMenu({
           <Link to="/account" onClick={() => setOpen(false)} className={linkClass}>
             {t("nav.account")}
           </Link>
-          {isAdmin && (
-            <Link to="/strategies" onClick={() => setOpen(false)} className={linkClass}>
-              {t("nav.strategies")}
-            </Link>
-          )}
+          <Link to="/strategies" onClick={() => setOpen(false)} className={linkClass}>
+            {t("nav.strategies")}
+          </Link>
           <Link to="/download" onClick={() => setOpen(false)} className={linkClass}>
             {t("nav.download")}
           </Link>

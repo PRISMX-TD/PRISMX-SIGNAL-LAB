@@ -8,6 +8,8 @@
 // Bid/ask come from the site-wide quote feed (EA-pushed, useGlobalQuotes);
 // day high/low and change% are computed by ChartsPage from the loaded candle
 // window and passed in (dayStats). All from existing data — no new backend.
+import { Link } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { displaySymbol } from '../../api/utils'
 
 export interface DayStats {
@@ -33,6 +35,7 @@ function fmt(v: number | null | undefined, digits: number): string {
 }
 
 export default function SymbolHeader({ symbol, bid, ask, digits, dayStats, fallbackPrice }: Props) {
+  const { t } = useTranslation()
   // 点差按最小价位单位（point）计：(ask - bid) × 10^digits，四舍五入。
   // Spread in points: (ask - bid) × 10^digits, rounded.
   const spread =
@@ -80,12 +83,15 @@ export default function SymbolHeader({ symbol, bid, ask, digits, dayStats, fallb
       </div>
 
       {/* 手机端行情卡：参考 Web3 手机交易 App（Hyperliquid/dYdX 等）的"品种名 +
-          一个大字号价格 + 涨跌徽章"呈现，买卖价/点差/日内高低降级为底部一行
-          小字——次要信息还在，但不再跟主价格抢视觉重量。
+          一个大字号价格 + 涨跌徽章"呈现。买卖价/点差/日内高低不再单独占一整行
+          ——大价格数字右边本来就空着一大块，这些次要信息挪进那块空位、排成
+          两行小字，紧贴价格右侧，省下一整行的高度。
           Mobile quote card: symbol + one big price + a change badge, the way
-          Web3 mobile trading apps (Hyperliquid, dYdX, …) lead — bid/ask/spread/
-          day range drop to a small caption row below, still present but no
-          longer competing with the headline number for visual weight. */}
+          Web3 mobile trading apps (Hyperliquid, dYdX, …) lead. Bid/ask/spread/
+          day range no longer get their own full-width row — the space to the
+          right of the big price number was sitting empty anyway, so the
+          secondary figures move into it as two compact lines, saving a full
+          row of height. */}
       <div className="lg:hidden">
         <div className="term-symhead-m">
           <div className="term-symhead-m-top">
@@ -97,16 +103,26 @@ export default function SymbolHeader({ symbol, bid, ask, digits, dayStats, fallb
               {changeStr}
             </span>
           </div>
-          <div className={`term-symhead-m-price num ${changePct == null ? '' : up ? 'up' : 'down'}`}>
-            {midStr}
+          <div className="term-symhead-m-mid">
+            <div className={`term-symhead-m-price num ${changePct == null ? '' : up ? 'up' : 'down'}`}>
+              {midStr}
+            </div>
+            <div className="term-symhead-m-stats no-sb">
+              <div>买 <b className="num up">{bidStr}</b> 卖 <b className="num down">{askStr}</b></div>
+              <div>点差 <b className="num">{spread == null ? '—' : spread}</b> 高 <b className="num">{fmt(dayStats?.high, digits)}</b> 低 <b className="num">{fmt(dayStats?.low, digits)}</b></div>
+            </div>
           </div>
-          <div className="term-symhead-m-sub no-sb">
-            <span>买 <b className="num up">{bidStr}</b></span>
-            <span>卖 <b className="num down">{askStr}</b></span>
-            <span>点差 <b className="num">{spread == null ? '—' : spread}</b></span>
-            <span>高 <b className="num">{fmt(dayStats?.high, digits)}</b></span>
-            <span>低 <b className="num">{fmt(dayStats?.low, digits)}</b></span>
-          </div>
+          {/* 自定义策略入口（PRO 专属功能，2026-07 起对全体用户开放）：放在价格
+              卡片正下方，点开直接跳转策略页；未订阅 PRO 的用户进页面会看到
+              清楚的升级提示，这里不用重复判断。/ Custom-strategy entry point
+              (PRO-exclusive, opened to everyone in 2026-07): sits right under
+              the price card, tapping goes straight to the strategies page — a
+              non-PRO user sees a clear upgrade hint once there, no need to
+              duplicate that check here. */}
+          <Link to="/strategies" className="term-symhead-m-strat">
+            <span>{t('nav.strategies')}</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
+          </Link>
         </div>
       </div>
     </>

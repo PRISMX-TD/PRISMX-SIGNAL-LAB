@@ -75,6 +75,24 @@
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
+    /* 关掉长按文字弹出的系统"选择/复制"气泡：PWA 里长按报价、按钮文字这些
+       界面元素被原生选择菜单打断，观感一下就"网页化"了，原生 App 完全没有
+       这个问题。input/textarea/可编辑区域单独放开——那些地方是真的要选中/
+       复制/编辑文本的（见下方例外规则）。
+       Disable the system "Select/Copy" callout on long-press: in the PWA,
+       long-pressing a quote or button label popping up the native text-
+       selection menu instantly breaks the native-app illusion — real native
+       apps never have this problem. Explicitly re-enabled on inputs/textareas/
+       editable regions below, where selecting/copying/editing text is the
+       actual point. */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  input, textarea, [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
   }
 
   /* 全局背景光晕已移除 — 纯黑背景 / global background glow removed — pure black */
@@ -1154,7 +1172,14 @@
     border-radius: var(--r-lg);
   }
 
-  /* ── 滑动确认弹窗 / slide-to-confirm ── */
+  /* ── 滑动确认弹窗 / slide-to-confirm ──
+     背景淡入复用 .lg-sheet 那套 lg-fade 动效，手机端下面还会让 .slide-sheet
+     叠加 lg-slide-up——让下单确认/二次确认这些弹窗跟"其他"面板一样，是从
+     底部滑上来盖住当前页，而不是毫无动效地凭空出现，贴近原生 App 手感。
+     Backdrop fade reuses the same lg-fade animation as .lg-sheet; the mobile
+     block below additionally layers lg-slide-up onto .slide-sheet — so order
+     confirmations feel like the "More" panel: sliding up from the bottom to
+     cover the page, not popping in with no motion, closer to a native app. */
   .slide-overlay {
     position: fixed;
     inset: 0;
@@ -1163,6 +1188,7 @@
     backdrop-filter: blur(10px);
     display: grid;
     place-items: center;
+    animation: lg-fade 0.2s ease;
   }
   .slide-sheet {
     position: relative;
@@ -1842,6 +1868,12 @@
       border-radius: 20px 20px 0 0;
       max-height: 92vh;
       padding: 20px 18px calc(18px + env(safe-area-inset-bottom));
+      /* 只在真正贴底成为 bottom sheet 的手机端才叠加上滑动效——桌面居中弹窗
+         用位移动画会显得突兀，desktop 那份只保留上面 overlay 的淡入。
+         Only layer the slide-up here, where it's actually a bottom sheet — a
+         translateY entrance on a centered desktop dialog would look odd; the
+         desktop version keeps just the overlay fade above. */
+      animation: lg-slide-up 0.3s cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     /* ── 信号卡三列保持不变（手机端也放得下）── */
@@ -2322,15 +2354,21 @@
 /* 手机端图表视图的常驻买卖条：图表正下方，实色绿红、大热区，拇指可达。
    Mobile chart-view docked buy/sell bar: right under the chart, solid green/red,
    big tap targets, thumb-reachable. */
-.term-mbuysell { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; flex-shrink: 0; }
+/* 挪到周期/工具栏正下方后改矮一档（原来在图表下面单独占一整块，现在夹在
+   工具栏和图表之间，得更省高度）；左右各留一点外边距做视觉呼吸。
+   Shrunk a step now that it sits right under the interval/toolbar row instead
+   of alone below the chart — needs to be leaner to fit; a little side margin
+   keeps it from touching the frame edges. */
+.term-mbuysell { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 6px 4px; flex-shrink: 0; }
 .term-mbuysell button {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 9px 0;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 0;
   border: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   color: #fff;
   font: inherit;
   cursor: pointer;
@@ -2338,8 +2376,8 @@
 }
 .term-mbuysell button:active { transform: scale(0.98); }
 .term-mbuysell button:hover { filter: brightness(1.06); }
-.term-mbuysell .lab { font-size: 12.5px; font-weight: 700; letter-spacing: 0.05em; }
-.term-mbuysell .px { font-size: 13px; font-weight: 600; opacity: 0.95; }
+.term-mbuysell .lab { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; }
+.term-mbuysell .px { font-size: 12px; font-weight: 600; opacity: 0.9; }
 .term-mbuysell button.sell { background: linear-gradient(92deg, #c53350, var(--down)); }
 .term-mbuysell button.buy { background: linear-gradient(92deg, #1f9d5b, var(--up)); }
 
@@ -2401,20 +2439,48 @@
 }
 .term-symhead-m-chg.up { background: var(--up-bg); color: var(--up); }
 .term-symhead-m-chg.down { background: var(--down-bg); color: var(--down); }
-.term-symhead-m-price { font-size: 27px; font-weight: 700; line-height: 1.15; color: var(--text); }
+/* 价格 + 次要统计同一行：价格靠左，买卖价/点差/日内高低填进价格右侧本来空着
+   的位置，排成两行小字——不再单独占一整行，省高度。
+   Price + secondary stats share one row: price on the left, bid/ask/spread/
+   day-range fill the space that used to sit empty to its right, as two small
+   lines — no longer a separate full-width row, saving height. */
+.term-symhead-m-mid { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.term-symhead-m-price { font-size: 27px; font-weight: 700; line-height: 1.15; color: var(--text); flex-shrink: 0; }
 .term-symhead-m-price.up { color: var(--up); }
 .term-symhead-m-price.down { color: var(--down); }
-.term-symhead-m-sub {
+.term-symhead-m-stats {
   display: flex;
-  gap: 12px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
   overflow-x: auto;
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text-3);
   white-space: nowrap;
+  text-align: right;
 }
-.term-symhead-m-sub b { font-weight: 600; color: var(--text-2); }
-.term-symhead-m-sub b.up { color: var(--up); }
-.term-symhead-m-sub b.down { color: var(--down); }
+.term-symhead-m-stats b { font-weight: 600; color: var(--text-2); margin-right: 7px; }
+.term-symhead-m-stats b:last-child { margin-right: 0; }
+.term-symhead-m-stats b.up { color: var(--up); }
+.term-symhead-m-stats b.down { color: var(--down); }
+/* 自定义策略入口：价格卡片下方一条细长可点行，箭头暗示"点开跳转"。
+   Custom-strategy entry: a slim tappable row under the price card; the arrow
+   hints "tap to go". */
+.term-symhead-m-strat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 2px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(139, 92, 246, 0.28);
+  background: rgba(139, 92, 246, 0.09);
+  color: var(--purple-hi);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.term-symhead-m-strat:active { background: rgba(139, 92, 246, 0.16); }
 
 /* ── 单条工具栏：周期（钉左）· 画线工具（中部可横滑）· 添加指标（钉右）──
    Single toolbar: interval (pinned left) · draw tools (scrollable middle) ·
