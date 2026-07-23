@@ -536,6 +536,7 @@
     },
     "draw": {
       "tools": "画图工具",
+      "button": "画线工具",
       "cursors": "光标",
       "cursor": "圆点光标",
       "cross": "十字光标",

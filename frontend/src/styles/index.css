@@ -2277,27 +2277,36 @@
   .term-chartview { flex: 1; }
 }
 
-/* 手机端顶部视图切换（分段控件）/ mobile top view switcher (segmented control) */
+/* 手机端顶部视图切换（分段控件）：比标准 Tab 栏更轻——高度矮、字号小、
+   背景弱化，读起来像一组 chip 切换而不是"又一条导航栏"，不跟 App 全局底部
+   Tab 栏抢视觉权重（那才是真正的一级导航）。参考 Web3 手机交易 App 里
+   Markets/Trade 页顶部常见的轻量分段控件。
+   Mobile top view switcher: deliberately lighter than a standard tab bar —
+   shorter, smaller type, a quieter background — so it reads as a chip toggle
+   rather than "yet another nav bar" competing with the app's global bottom tab
+   bar (the actual primary navigation). Mirrors the light segmented control
+   Web3 mobile trading apps put atop their Markets/Trade screens. */
 .term-mtabs {
   display: flex;
   gap: 2px;
-  margin-bottom: 8px;
-  padding: 3px;
+  margin-bottom: 10px;
+  padding: 2px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 8px;
   background: var(--nest);
 }
 .term-mtabs button {
   flex: 1;
-  height: 32px;
+  height: 28px;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--text-3);
   font: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
+  transition: color 0.15s, background-color 0.15s;
 }
 .term-mtabs button.on { background: linear-gradient(92deg, #7c3aed, #a855f7); color: #fff; }
 
@@ -2366,6 +2375,47 @@
 .term-sstat-k { font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); }
 .term-sstat-v { font-size: 14px; font-weight: 600; }
 
+/* ── 手机端行情卡：大字号价格 + 涨跌徽章，次要信息降级为底部小字一行 ──
+   Mobile quote card: big price + change badge, secondary details drop to a
+   small caption row underneath. */
+.term-symhead-m {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.028), transparent);
+}
+.term-symhead-m-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.term-symhead-m-id { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.term-symhead-m-id .sym { font-size: 15px; font-weight: 700; letter-spacing: 0.01em; }
+.term-symhead-m-id .nm { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.term-symhead-m-chg {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--nest);
+  color: var(--text-2);
+}
+.term-symhead-m-chg.up { background: var(--up-bg); color: var(--up); }
+.term-symhead-m-chg.down { background: var(--down-bg); color: var(--down); }
+.term-symhead-m-price { font-size: 27px; font-weight: 700; line-height: 1.15; color: var(--text); }
+.term-symhead-m-price.up { color: var(--up); }
+.term-symhead-m-price.down { color: var(--down); }
+.term-symhead-m-sub {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.term-symhead-m-sub b { font-weight: 600; color: var(--text-2); }
+.term-symhead-m-sub b.up { color: var(--up); }
+.term-symhead-m-sub b.down { color: var(--down); }
+
 /* ── 单条工具栏：周期（钉左）· 画线工具（中部可横滑）· 添加指标（钉右）──
    Single toolbar: interval (pinned left) · draw tools (scrollable middle) ·
    add-indicator (pinned right). */
@@ -2409,6 +2459,13 @@
   min-width: 0;
   overflow-x: auto;
 }
+/* wrap 变体：手机端展开行用——铺满宽度换行显示，不用横向滚动藏起后面的工具
+   （发现性更好），按钮/颜色点也放大一档更好点按。/ wrap variant: used by the
+   mobile expand row — wraps to fill the width instead of scrolling tools out of
+   sight (better discoverability); buttons/dots also size up for easier tapping. */
+.term-toolbar-tools.wrap { flex-wrap: wrap; overflow: visible; row-gap: 8px; }
+.term-toolbar-tools.wrap .term-tool-btn { width: 32px; height: 32px; }
+.term-toolbar-tools.wrap .term-color-dot { width: 20px; height: 20px; }
 .term-toolbar-divider { width: 1px; height: 18px; flex-shrink: 0; background: var(--line); }
 .term-tool-btn {
   display: grid;
@@ -2453,6 +2510,27 @@
 }
 .term-tool-indicator:hover { background: rgba(139, 92, 246, 0.24); }
 .term-stale { font-size: 11px; font-weight: 600; color: var(--gold); background: rgba(246, 196, 83, 0.12); border-radius: 5px; padding: 2px 7px; white-space: nowrap; }
+
+/* ── 手机端工具栏：周期钉左 · 画笔开关 + 添加指标钉右（画线工具默认收起）──
+   Mobile toolbar: interval pinned left · draw toggle + add-indicator pinned
+   right (draw tools start collapsed). */
+.term-toolbar-m {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--line);
+}
+.term-toolbar-m-right { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-shrink: 0; }
+/* 展开的画线工具行：贴着工具栏下方，浅底色跟折叠态区分开，换行铺满。
+   Expanded draw-tool row: sits right under the toolbar, a faint tint sets it
+   apart from the collapsed state, wraps to fill the width. */
+.term-toolbar-m-expand {
+  padding: 10px 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(139, 92, 246, 0.045);
+}
 
 /* ── 图表容器：无缝、无自身边框圆角内边距（K 线自带深色背景）──
    Chart container: seamless, no own border/radius/padding (candles have their

@@ -536,6 +536,7 @@
     },
     "draw": {
       "tools": "Drawing tools",
+      "button": "Draw tools",
       "cursors": "Cursors",
       "cursor": "Dot cursor",
       "cross": "Crosshair",

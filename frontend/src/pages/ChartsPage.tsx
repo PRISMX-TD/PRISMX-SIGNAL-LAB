@@ -12,7 +12,7 @@
 // in any network environment (including mainland China) — it no longer
 // depends on TradingView's script or data channel. See CHART_SELFHOST_PLAN.md
 // at the repo root.
-import { useCallback, useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type PointerEvent as RPointerEvent, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   createChart,
@@ -95,6 +95,94 @@ function DrawToolIcon({ tool }: { tool: Tool }) {
     case 'fib':
       return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5h18M3 10h18M3 14h18M3 19h18" /><path d="M4 19L20 5" opacity="0.5" /></svg>
   }
+}
+
+// 画线工具整排（图标 + 颜色点 + 删除/清空/连续绘制/显隐）：桌面工具栏与手机端
+// 可展开行共用同一份，避免同样ー套按钮抄两遍。wrap=true 时允许换行（手机展开行，
+// 铺满宽度更好点），false 时横向滚动（桌面工具栏，节省垂直空间）。
+// The full draw-tool row (icons + color dots + delete/clear/stay/hide): shared
+// by the desktop toolbar and the mobile expandable row so the same button set
+// isn't duplicated. wrap=true allows wrapping (mobile: full-width is available
+// and wrapping beats a hidden horizontal scroll); false scrolls horizontally
+// (desktop: saves vertical space).
+function DrawToolsRow({
+  drawLayerRef,
+  bumpDraw,
+  t,
+  wrap = false,
+}: {
+  drawLayerRef: RefObject<DrawLayerHandle>
+  bumpDraw: () => void
+  t: (key: string) => unknown
+  wrap?: boolean
+}) {
+  return (
+    <div className={`term-toolbar-tools no-sb ${wrap ? 'wrap' : ''}`}>
+      {(ToolList as Tool[]).map((toolName) => (
+        <button
+          key={toolName}
+          type="button"
+          title={String(t(`charts.draw.${toolName}`))}
+          aria-label={String(t(`charts.draw.${toolName}`))}
+          onClick={() => { drawLayerRef.current?.setTool(toolName); bumpDraw() }}
+          className={`term-tool-btn ${drawLayerRef.current?.tool === toolName ? 'on' : ''}`}
+        >
+          <DrawToolIcon tool={toolName} />
+        </button>
+      ))}
+      <span className="term-toolbar-divider" />
+      {['#22d3ee', '#a78bfa', '#2ee07e', '#ff4d67', '#f5c451'].map((c) => (
+        <button
+          key={c}
+          type="button"
+          title={String(t('charts.draw.color'))}
+          aria-label={String(t('charts.draw.color'))}
+          onClick={() => { drawLayerRef.current?.applyColor(c); bumpDraw() }}
+          className={`term-color-dot ${drawLayerRef.current?.color === c ? 'on' : ''}`}
+          style={{ background: c }}
+        />
+      ))}
+      <span className="term-toolbar-divider" />
+      <button
+        type="button"
+        title={String(t('charts.draw.delete'))}
+        aria-label={String(t('charts.draw.delete'))}
+        onClick={() => { drawLayerRef.current?.deleteSelected(); bumpDraw() }}
+        disabled={!drawLayerRef.current?.selectedId}
+        className="term-tool-btn"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>
+      </button>
+      <button
+        type="button"
+        title={String(t('charts.draw.clear'))}
+        aria-label={String(t('charts.draw.clear'))}
+        onClick={() => { drawLayerRef.current?.clearAll(); bumpDraw() }}
+        disabled={(drawLayerRef.current?.drawCount ?? 0) === 0}
+        className="term-tool-btn"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 5L5 19M5 5l14 14" /></svg>
+      </button>
+      <button
+        type="button"
+        title={String(t('charts.draw.stayInDraw'))}
+        aria-label={String(t('charts.draw.stayInDraw'))}
+        onClick={() => { drawLayerRef.current?.setStayInDraw(!drawLayerRef.current?.stayInDraw); bumpDraw() }}
+        className={`term-tool-btn ${drawLayerRef.current?.stayInDraw ? 'on' : ''}`}
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3l4 4-4 4" /><path d="M3 17l4 4-4 4" /><line x1="21" y1="7" x2="7" y2="21" /><line x1="7" y1="3" x2="21" y2="17" /></svg>
+      </button>
+      <button
+        type="button"
+        title={String(drawLayerRef.current?.visible ? t('charts.draw.hideAll') : t('charts.draw.showAll'))}
+        aria-label={String(drawLayerRef.current?.visible ? t('charts.draw.hideAll') : t('charts.draw.showAll'))}
+        onClick={() => { drawLayerRef.current?.setVisible(!drawLayerRef.current?.visible); bumpDraw() }}
+        className={`term-tool-btn warn ${!drawLayerRef.current?.visible ? 'on' : ''}`}
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{drawLayerRef.current?.visible ? <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></> : <><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></>}</svg>
+      </button>
+    </div>
+  )
 }
 
 // 向后兼容的 localStorage key / backward-compat localStorage keys
@@ -395,6 +483,17 @@ export default function ChartsPage() {
   // via CSS when switched away, never unmounted — that would drop the
   // lightweight-charts instance and drawings).
   const [mobileView, setMobileView] = useState<'chart' | 'watchlist' | 'trade' | 'positions'>('chart')
+  // 手机端画线工具是否展开：桌面工具栏一直平铺展示全部画线工具，手机端默认
+  // 收起（只留周期切换 + 画笔开关 + 添加指标三件套），点画笔才展开完整工具行
+  // ——参考 Web3 手机端交易 App（如 Hyperliquid/dYdX）默认界面精简、进阶操作
+  // 收进一个入口的做法，避免小屏被十几个小图标塞满。
+  // Whether the mobile draw-tool row is expanded: the desktop toolbar always
+  // shows every draw tool inline; mobile starts collapsed (interval switch +
+  // a draw toggle + add-indicator only) and expands the full row on tap —
+  // mirrors how Web3 mobile trading apps (Hyperliquid, dYdX) keep the default
+  // screen lean and tuck power-user controls behind one entry point instead of
+  // packing a dozen small icons onto a narrow screen.
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false)
 
   // 这两个都是全屏弹窗，手机上划返回应该先关掉弹窗、而不是直接退出图表页
   // （见 useBackToClose 的说明）。/ Both are full-screen modals; on mobile,
@@ -1313,100 +1412,87 @@ export default function ChartsPage() {
           />
         )}
 
-      {/* 单条工具栏（全屏时隐藏）：周期钉左 · 画线工具中部横滑 · 添加指标钉右。
-          取代原来"周期悬右一行 + 画线工具单独一框"的两条割裂控制条。
-          Single toolbar (hidden in fullscreen): interval pinned left · draw tools
-          scroll in the middle · add-indicator pinned right. Replaces the old two
-          disjointed rows (interval floating right + a separate draw-tool box). */}
+      {/* 桌面单条工具栏（全屏时隐藏）：周期钉左 · 画线工具中部横滑 · 添加指标钉右。
+          可见性放在这层普通 wrapper 上而不是直接给 .term-toolbar 加 hidden——
+          .term-toolbar 自带 display:flex，在样式表里排在 Tailwind .hidden 之后会
+          盖掉它（与左栏自选同一个坑，见其注释）。
+          Desktop single toolbar (hidden in fullscreen): interval pinned left ·
+          draw tools scroll in the middle · add-indicator pinned right.
+          Visibility lives on this plain wrapper, not on .term-toolbar directly —
+          it has its own display:flex which would override Tailwind's .hidden
+          coming earlier in the sheet (same pitfall as the watchlist; see its
+          comment). */}
       {!isFullscreen && (
-        <div className="term-toolbar">
-          <div className="term-ivseg">
-            {INTERVALS.map((iv) => (
-              <button
-                key={iv.code}
-                type="button"
-                onClick={() => setIntervalCode(iv.code)}
-                className={interval === iv.code ? 'on' : ''}
-              >
-                {iv.label}
-              </button>
-            ))}
-          </div>
-
-          {drawReady && (
-            <div className="term-toolbar-tools no-sb">
-              {(ToolList as Tool[]).map((toolName) => (
+        <div className="hidden lg:block">
+          <div className="term-toolbar">
+            <div className="term-ivseg">
+              {INTERVALS.map((iv) => (
                 <button
-                  key={toolName}
+                  key={iv.code}
                   type="button"
-                  title={String(t(`charts.draw.${toolName}`))}
-                  aria-label={String(t(`charts.draw.${toolName}`))}
-                  onClick={() => { drawLayerRef.current?.setTool(toolName); bumpDraw() }}
-                  className={`term-tool-btn ${drawLayerRef.current?.tool === toolName ? 'on' : ''}`}
+                  onClick={() => setIntervalCode(iv.code)}
+                  className={interval === iv.code ? 'on' : ''}
                 >
-                  <DrawToolIcon tool={toolName} />
+                  {iv.label}
                 </button>
               ))}
-              <span className="term-toolbar-divider" />
-              {['#22d3ee', '#a78bfa', '#2ee07e', '#ff4d67', '#f5c451'].map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  title={t('charts.draw.color')}
-                  aria-label={t('charts.draw.color')}
-                  onClick={() => { drawLayerRef.current?.applyColor(c); bumpDraw() }}
-                  className={`term-color-dot ${drawLayerRef.current?.color === c ? 'on' : ''}`}
-                  style={{ background: c }}
-                />
-              ))}
-              <span className="term-toolbar-divider" />
-              <button
-                type="button"
-                title={t('charts.draw.delete')}
-                aria-label={t('charts.draw.delete')}
-                onClick={() => { drawLayerRef.current?.deleteSelected(); bumpDraw() }}
-                disabled={!drawLayerRef.current?.selectedId}
-                className="term-tool-btn"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>
-              </button>
-              <button
-                type="button"
-                title={t('charts.draw.clear')}
-                aria-label={t('charts.draw.clear')}
-                onClick={() => { drawLayerRef.current?.clearAll(); bumpDraw() }}
-                disabled={(drawLayerRef.current?.drawCount ?? 0) === 0}
-                className="term-tool-btn"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 5L5 19M5 5l14 14" /></svg>
-              </button>
-              <button
-                type="button"
-                title={t('charts.draw.stayInDraw')}
-                aria-label={t('charts.draw.stayInDraw')}
-                onClick={() => { drawLayerRef.current?.setStayInDraw(!drawLayerRef.current?.stayInDraw); bumpDraw() }}
-                className={`term-tool-btn ${drawLayerRef.current?.stayInDraw ? 'on' : ''}`}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3l4 4-4 4" /><path d="M3 17l4 4-4 4" /><line x1="21" y1="7" x2="7" y2="21" /><line x1="7" y1="3" x2="21" y2="17" /></svg>
-              </button>
-              <button
-                type="button"
-                title={drawLayerRef.current?.visible ? t('charts.draw.hideAll') : t('charts.draw.showAll')}
-                aria-label={drawLayerRef.current?.visible ? t('charts.draw.hideAll') : t('charts.draw.showAll')}
-                onClick={() => { drawLayerRef.current?.setVisible(!drawLayerRef.current?.visible); bumpDraw() }}
-                className={`term-tool-btn warn ${!drawLayerRef.current?.visible ? 'on' : ''}`}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{drawLayerRef.current?.visible ? <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></> : <><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></>}</svg>
+            </div>
+            {drawReady && <DrawToolsRow drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} />}
+            <div className="term-toolbar-right">
+              {stale && <span className="term-stale">{t('charts.stale')}</span>}
+              <button type="button" onClick={() => setSettingsOpen(true)} className="term-tool-indicator">
+                {t('charts.indicators.button')}
               </button>
             </div>
-          )}
-
-          <div className="term-toolbar-right">
-            {stale && <span className="term-stale">{t('charts.stale')}</span>}
-            <button type="button" onClick={() => setSettingsOpen(true)} className="term-tool-indicator">
-              {t('charts.indicators.button')}
-            </button>
           </div>
+        </div>
+      )}
+
+      {/* 手机端工具栏（全屏时隐藏）：周期切换 + 画笔开关 + 添加指标三件套，参考
+          Web3 手机交易 App 的精简默认界面——画线工具默认收起，点画笔才展开成
+          下面的可换行工具行，避免十几个小图标常驻挤在窄屏上。
+          Mobile toolbar (hidden in fullscreen): interval switch + a draw toggle +
+          add-indicator only, mirroring the lean default screen of Web3 mobile
+          trading apps — draw tools start collapsed and expand into the wrapping
+          row below on tap, instead of a dozen small icons permanently crowding a
+          narrow screen. */}
+      {!isFullscreen && (
+        <div className="lg:hidden">
+          <div className="term-toolbar-m">
+            <div className="term-ivseg">
+              {INTERVALS.map((iv) => (
+                <button
+                  key={iv.code}
+                  type="button"
+                  onClick={() => setIntervalCode(iv.code)}
+                  className={interval === iv.code ? 'on' : ''}
+                >
+                  {iv.label}
+                </button>
+              ))}
+            </div>
+            <div className="term-toolbar-m-right">
+              {stale && <span className="term-stale">{t('charts.stale')}</span>}
+              {drawReady && (
+                <button
+                  type="button"
+                  onClick={() => setMobileToolsOpen((v) => !v)}
+                  aria-label={String(t('charts.draw.button'))}
+                  className={`term-tool-btn ${mobileToolsOpen ? 'on' : ''}`}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+                </button>
+              )}
+              <button type="button" onClick={() => setSettingsOpen(true)} className="term-tool-indicator">
+                {t('charts.indicators.button')}
+              </button>
+            </div>
+          </div>
+          {drawReady && mobileToolsOpen && (
+            <div className="term-toolbar-m-expand">
+              <DrawToolsRow drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} wrap />
+            </div>
+          )}
         </div>
       )}
 
