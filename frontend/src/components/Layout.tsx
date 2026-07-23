@@ -344,7 +344,14 @@ export default function Layout() {
               </div>
             }
           >
-            <Outlet />
+            {/* key=pathname 让每次导航都重挂载这层容器，触发一次 page-enter 柔和
+                淡入——切换页面不再是硬弹出现。减少动态偏好下 CSS 会自动跳过动画。
+                key=pathname remounts this wrapper on every navigation, replaying
+                the page-enter fade so switching pages no longer hard-pops. CSS
+                skips the animation under reduced-motion. */}
+            <div key={location.pathname} className="page-enter">
+              <Outlet />
+            </div>
           </Suspense>
         </main>
 

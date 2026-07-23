@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.models import AdminAuditLog, Payment, User
 from app.services.deps import get_current_user
 from app.services.nowpayments import (
@@ -202,6 +203,7 @@ def claim_trial(
 
 
 @router.post("/create")
+@limiter.limit(settings.RATE_LIMIT_PAYMENT)
 async def create_payment_order(
     body: CreatePaymentRequest,
     request: Request,
@@ -219,6 +221,28 @@ async def create_payment_order(
     # 只接受 USDT（多链）/ accept USDT only (any chain)
     if not body.pay_currency.lower().startswith("usdt"):
         raise HTTPException(status_code=400, detail="Only USDT is accepted")
+
+    # 未完成支付订单数量上限：限流之外的第二道闸，防止在库里堆积大量悬而未决
+    # 的支付记录，也避免每次进付款页都新开一笔。达到上限时提示用户先完成或
+    # 等待现有订单过期。/ Cap unfinished payments as a second gate beyond the
+    # rate limit — keeps stale pending rows from piling up and stops a fresh
+    # payment being opened on every visit to the pay page.
+    open_count = (
+        db.query(Payment)
+        .filter(
+            Payment.user_id == _user.id,
+            Payment.status.in_(("NEW", "PENDING", "PROCESSING")),
+        )
+        .count()
+    )
+    if open_count >= settings.MAX_OPEN_PAYMENTS_PER_USER:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "有未完成的支付订单，请先完成或等待其过期后再创建新的 / "
+                "You have unfinished payments; complete or let them expire before creating a new one"
+            ),
+        )
 
     days = PLAN_DAYS[body.plan]
     pricing = _resolve_pricing(db)

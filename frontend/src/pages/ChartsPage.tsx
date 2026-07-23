@@ -42,6 +42,12 @@ import {
 import DrawLayer, { type DrawLayerHandle, type Tool } from '../components/charts/DrawLayer'
 import ChartOrderModal from '../components/ChartOrderModal'
 import IndicatorSettingsModal from '../components/charts/IndicatorSettingsModal'
+import SymbolHeader, { type DayStats } from '../components/charts/SymbolHeader'
+import WatchlistPanel from '../components/charts/WatchlistPanel'
+import AccountSummary from '../components/charts/AccountSummary'
+import OrderTicket from '../components/charts/OrderTicket'
+import PositionsDock from '../components/charts/PositionsDock'
+import { useGlobalQuotes, usePositions } from '../store/live'
 
 // 图表价格轴的小数位数：贵金属/原油 2~3 位，外汇对按经纪商常见的 5 位报价
 // （日元对 3 位），加密货币 2 位。未在表中的品种回退到 2 位。
@@ -187,6 +193,39 @@ function toHistPoints(
 // 数字格式化：null 显示为占位符 / format a number for the legend; null renders as a placeholder
 function fmtLegendNum(v: number | null | undefined, digits: number): string {
   return v == null ? '—' : v.toFixed(digits)
+}
+
+// 从 K 线窗口算行情头的日内高低 + 涨跌幅，按自然日（UTC+8，与图表坐标轴
+// 同一时区）取当日 K 线：high/low 为当日极值，涨跌幅以当日首根开盘价为基准
+// （(最新收 − 当日开)/当日开）。这样统计口径与所选周期无关，切 1m 还是 1H
+// 看到的都是"今天涨跌多少"，而不是"当前窗口首尾涨跌多少"。当日暂无 K 线时
+// （如日线周期一天才一根、或数据早于今日）退回整窗口，避免显示空。
+// Compute the header's day range + change% from the candle window, scoped to
+// the current natural day (UTC+8, same timezone as the chart axis): high/low
+// are today's extremes, change% uses today's first open as the reference
+// ((latest close − today's open)/today's open). This makes the figures
+// interval-independent — 1m or 1H both show "how much today is up/down" rather
+// than "first vs last of the current window". Falls back to the whole window
+// when there are no bars for today yet (e.g. a daily interval, or data older
+// than today), so it never renders empty.
+function computeDayStats(bars: { t: number; o: number; h: number; l: number; c: number }[]): DayStats | null {
+  if (bars.length === 0) return null
+  // UTC+8 无夏令时，当日零点的 epoch 秒 / UTC+8 has no DST; epoch of today's midnight
+  const TZ_OFFSET = 8 * 3600
+  const nowSec = Date.now() / 1000
+  const dayStart = Math.floor((nowSec + TZ_OFFSET) / 86400) * 86400 - TZ_OFFSET
+  const today = bars.filter((b) => b.t >= dayStart)
+  const use = today.length > 0 ? today : bars
+  let high = -Infinity
+  let low = Infinity
+  for (const b of use) {
+    if (b.h > high) high = b.h
+    if (b.l < low) low = b.l
+  }
+  const open = use[0].o
+  const close = use[use.length - 1].c
+  const changePct = open > 0 ? (close - open) / open : 0
+  return { high, low, changePct }
 }
 
 // 时间轴刻度和十字准线悬浮时间标签是 lightweight-charts 两套独立的格式化配置
@@ -339,8 +378,24 @@ export default function ChartsPage() {
   // 最新收盘价：喂给画图层做重绘侦测，并作为无实时报价时的下单参考价
   // latest close: feeds the draw layer's repaint detection and the order modal's fallback price
   const [lastPrice, setLastPrice] = useState(0)
+  // 品种行情头的日内高低 + 涨跌幅：从已加载的 K 线窗口现算（首根开盘为基准），
+  // 不需要新后端。切品种时清空，历史/轮询到数据后更新。
+  // Symbol-header day range + change%: computed from the loaded candle window
+  // (first open as the reference), no new backend. Cleared on symbol change,
+  // updated once history/poll data lands.
+  const [dayStats, setDayStats] = useState<DayStats | null>(null)
   // 手动下单弹窗：null 表示关闭 / manual order modal: null = closed
   const [orderSide, setOrderSide] = useState<'BUY' | 'SELL' | null>(null)
+
+  // 手机端终端视图切换：图表 / 自选 / 交易 / 持仓。桌面（lg+）忽略此状态，
+  // 三栏同时展示；手机上用顶部分段控件一次切一个视图。图表容器始终挂载
+  // （切走时只用 CSS 隐藏，绝不卸载——否则会丢掉 lightweight-charts 实例与画线）。
+  // Mobile terminal view switch: chart / watchlist / trade / positions. Ignored
+  // at lg+ (all three columns show at once); on mobile a top segmented control
+  // shows one view at a time. The chart container stays mounted always (hidden
+  // via CSS when switched away, never unmounted — that would drop the
+  // lightweight-charts instance and drawings).
+  const [mobileView, setMobileView] = useState<'chart' | 'watchlist' | 'trade' | 'positions'>('chart')
 
   // 这两个都是全屏弹窗，手机上划返回应该先关掉弹窗、而不是直接退出图表页
   // （见 useBackToClose 的说明）。/ Both are full-screen modals; on mobile,
@@ -453,9 +508,25 @@ export default function ChartsPage() {
     }
   }, [])
 
-  const { accounts, activeSymbols } = useLive()
+  const { accounts, activeSymbols, orders } = useLive()
   const accountQuotes = useQuotes()
-  const { toast, placeManualOrder } = useOrderPlacement()
+  const globalQuotes = useGlobalQuotes()
+  const positions = usePositions()
+  const { toast, placeManualOrder, showToast } = useOrderPlacement()
+
+  // 每个品种的价格轴小数位（与图表 series 精度一致），供自选列表/行情头统一取用。
+  // Per-symbol price precision (matches the chart series), shared by the
+  // watchlist and symbol header.
+  const digitsFor = useCallback((s: string) => SYMBOL_DECIMALS[s] ?? 2, [])
+
+  // 当前品种的全站统一报价（EA 推送，含 bid/ask）；行情头与右栏下单价用它。
+  // The active symbol's site-wide quote (EA-pushed, bid/ask); used by the
+  // symbol header and the order price on the right rail.
+  const activeQuote = symbol ? globalQuotes[symbol] : undefined
+
+  // 右栏账户摘要展示的账户：优先在线账号，否则第一个绑定的。
+  // Account shown in the right-rail summary: prefer an online one, else the first bound.
+  const primaryAccount = accounts.find((a) => a.online) ?? accounts[0] ?? null
 
   const handleOrderConfirm = async (
     volume: number,
@@ -1065,6 +1136,7 @@ export default function ChartsPage() {
     setHasData(false)
     setStale(false)
     setLastPrice(0)
+    setDayStats(null)
     lastTimeRef.current = 0
     barTimesRef.current = []
     candlesRef.current = []
@@ -1114,6 +1186,7 @@ export default function ChartsPage() {
         barTimesRef.current = r.bars.map((b) => b.t)
         candlesRef.current = r.bars.slice(-MAX_CLIENT_BARS)
         recomputeIndicators()
+        setDayStats(computeDayStats(candlesRef.current))
         chartRef.current?.timeScale().fitContent()
         setHasData(true)
       } else {
@@ -1137,6 +1210,7 @@ export default function ChartsPage() {
           setHasData(true)
           setLastPrice(r.bars[r.bars.length - 1].c)
           recomputeIndicators()
+          setDayStats(computeDayStats(candlesRef.current))
         }
         const fresh = r.updatedAt != null && Date.now() / 1000 - r.updatedAt < STALE_MS / 1000
         setStale(r.updatedAt != null && !fresh)
@@ -1149,24 +1223,106 @@ export default function ChartsPage() {
     }
   }, [symbol, interval, recomputeIndicators])
 
+  // 手机端切回"图表"视图时强制重绘：容器此前是 display:none（尺寸为 0），
+  // 恢复显示后 ResizeObserver 一般会触发，但个别浏览器不稳，这里主动补一次
+  // resize，确保图表填满、不残留 300×150 默认位图。桌面（lg+）此状态恒为
+  // 'chart'，effect 只在挂载时跑一次，无副作用。
+  // Force a repaint when returning to the "chart" view on mobile: the container
+  // was display:none (zero size), and while the ResizeObserver usually fires on
+  // reveal, some browsers are flaky — so proactively resize once to ensure the
+  // chart fills and doesn't keep the 300×150 default bitmap. At lg+ this stays
+  // 'chart', so the effect runs once on mount with no side effect.
+  useEffect(() => {
+    if (mobileView !== 'chart') return
+    const el = containerRef.current
+    const chart = chartRef.current
+    if (!el || !chart) return
+    const raf = requestAnimationFrame(() => {
+      if (el.clientWidth > 0 && el.clientHeight > 0) {
+        chart.resize(el.clientWidth, el.clientHeight, true)
+        applyPaneHeights()
+      }
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [mobileView, applyPaneHeights])
+
   const decimals = SYMBOL_DECIMALS[symbol] ?? 2
 
   return (
-    <div className="flex flex-col">
+    <div className="term-shell">
       {/* drawVersion 用于外部画线工具栏状态变更时强制 ChartsPage 重渲染 */}
       {void drawVersion}
-      <div className="mb-3">
-        <h2 className="font-display text-2xl font-bold text-slate-100">
-          <span className="neon-text">{t('charts.title')}</span>
-        </h2>
+
+      {/* 左栏：自选品种列表（桌面常驻；窄屏隐藏，手机端终端在阶段 3 单独做）。
+          可见性放在这层普通 wrapper 上，而不是直接给 .term-panel 加 hidden——
+          .term-panel 的 display:flex 在样式表里排在 Tailwind .hidden 之后，会盖
+          掉它，wrapper 不是 .term-panel 就没有这个冲突。
+          Left column: watchlist (desktop only for now). Visibility lives on this
+          plain wrapper, not on .term-panel directly — .term-panel's display:flex
+          comes after Tailwind's .hidden in the sheet and would override it; the
+          wrapper isn't a .term-panel so there's no conflict. */}
+      <div className="hidden min-h-0 lg:flex lg:flex-col">
+        <WatchlistPanel
+          className="flex-1"
+          symbols={activeSymbols}
+          quotes={globalQuotes}
+          active={symbol}
+          onSelect={setSymbol}
+          digitsFor={digitsFor}
+        />
       </div>
+
+      {/* 中栏：行情头 + 控制条 + 图表 / center: symbol header + controls + chart */}
+      <div className="term-center">
+        {/* 手机端视图切换（桌面隐藏；全屏时隐藏）：图表 / 自选 / 交易 / 持仓。
+            Mobile view switcher (hidden on desktop & in fullscreen). */}
+        {!isFullscreen && (
+          <div className="term-mtabs lg:hidden">
+            {([
+              ['chart', '图表'],
+              ['watchlist', '自选'],
+              ['trade', '交易'],
+              ['positions', '持仓'],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                className={mobileView === key ? 'on' : ''}
+                onClick={() => setMobileView(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* 图表视图：桌面恒显示（三栏之一）；手机端仅在"图表"视图显示。
+            图表容器无论如何都保持挂载，切走时靠外层 max-lg:hidden 隐藏而非卸载。
+            Chart view: always shown on desktop; on mobile only in the chart view.
+            The chart stays mounted regardless — hidden via max-lg:hidden, never
+            unmounted. */}
+        <div className={`term-chartview ${mobileView === 'chart' ? '' : 'max-lg:hidden'}`}>
+        {/* 品种行情头（全屏时隐藏）/ symbol header (hidden in fullscreen) */}
+        {!isFullscreen && (
+          <SymbolHeader
+            symbol={symbol}
+            bid={activeQuote?.bid ?? null}
+            ask={activeQuote?.ask ?? null}
+            digits={decimals}
+            dayStats={dayStats}
+            fallbackPrice={lastPrice}
+          />
+        )}
 
       {/* 全屏模式下隐藏控制栏 */}
       {!isFullscreen && (
         <>
-          {/* 控制条第 1 行：品种 + 买卖（左）… 周期 + 添加指标（右） */}
+          {/* 控制条第 1 行：品种 + 买卖（左）… 周期 + 添加指标（右）。
+              桌面终端里品种改由左栏自选、买卖改由右栏面板，故这两项在 lg 隐藏。
+              On the desktop terminal the symbol comes from the watchlist and
+              buy/sell from the right rail, so those two are hidden at lg. */}
           <div className="mb-2 flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-2">
+            <label className="flex items-center gap-2 lg:hidden">
               <span className="text-xs uppercase tracking-wider text-slate-500">
                 {t('charts.symbol')}
               </span>
@@ -1188,8 +1344,11 @@ export default function ChartsPage() {
               </select>
             </label>
 
-            {/* 买 / 卖：手机端靠右对齐，桌面端紧挨品种右边 */}
-            <div className="flex items-center gap-2 max-lg:ml-auto">
+            {/* 买 / 卖：桌面由右栏下单面板负责，手机由图表下方常驻买卖条负责，
+                故这里彻底隐藏（避免三处重复）。/ Buy/sell lives in the right rail
+                on desktop and the docked bottom bar on mobile, so hide it here
+                entirely to avoid a third redundant copy. */}
+            <div className="hidden items-center gap-2 max-lg:ml-auto">
               <button
                 onClick={() => setOrderSide('BUY')}
                 className="rounded-lg px-5 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:brightness-110"
@@ -1311,9 +1470,10 @@ export default function ChartsPage() {
         </>
       )}
 
-      {/* 图表容器：跟随视口高度自适应，移动端给底部 Tab 栏留空间 */}
-      {/* Chart container: viewport-relative height, leaves room for the mobile tab bar */}
-      <div className={`glass relative overflow-hidden p-1.5 h-[70vh] min-h-[420px] sm:h-[calc(100vh-15rem)] ${
+      {/* 图表容器：窄屏跟随视口高度，桌面终端里填满中栏剩余高度（flex-1）。
+          Chart container: viewport-height on narrow screens; on the desktop
+          terminal it fills the center column's remaining height (flex-1). */}
+      <div className={`glass relative overflow-hidden p-1.5 h-[70vh] min-h-[420px] sm:h-[calc(100vh-15rem)] lg:h-auto lg:min-h-0 lg:flex-1 ${
         isFullscreen ? 'chart-fullscreen-container' : ''
       }`}>
         {/* 全屏开关按钮（仅手机端显示）：同一个按钮进出，进入自动横屏，退出恢复竖屏 */}
@@ -1518,12 +1678,119 @@ export default function ChartsPage() {
         )}
       </div>
 
-      {/* 全屏模式下隐藏时区 + 免责声明 */}
+      {/* 手机端·图表视图常驻买卖条：图表正下方、拇指可达，点开走既有的滑动确认
+          下单弹窗（ChartOrderModal）。桌面隐藏（右栏已有完整下单面板）。全屏时
+          隐藏。/ Mobile chart-view docked buy/sell bar: right under the chart,
+          thumb-reachable; opens the existing slide-to-confirm order modal.
+          Hidden on desktop (the right rail has the full ticket) and in fullscreen. */}
       {!isFullscreen && (
-        <p className="mt-2 text-center text-[11px] text-slate-500">
+        <div className="term-mbuysell lg:hidden">
+          <button type="button" className="sell" onClick={() => setOrderSide('SELL')}>
+            <span className="lab">卖 SELL</span>
+            <span className="px num">{activeQuote?.bid != null ? activeQuote.bid.toFixed(decimals) : lastPrice ? lastPrice.toFixed(decimals) : '—'}</span>
+          </button>
+          <button type="button" className="buy" onClick={() => setOrderSide('BUY')}>
+            <span className="lab">买 BUY</span>
+            <span className="px num">{activeQuote?.ask != null ? activeQuote.ask.toFixed(decimals) : lastPrice ? lastPrice.toFixed(decimals) : '—'}</span>
+          </button>
+        </div>
+      )}
+      </div>
+      {/* /term-chartview */}
+
+      {/* 底部持仓 / 挂单（桌面终端常驻；全屏时隐藏）。固定高度，不抢图表的
+          flex 空间。手机端由下方"持仓"视图承载。
+          Positions/orders dock (desktop terminal; hidden in fullscreen). Fixed
+          height so it doesn't steal the chart's flex space. On mobile the
+          "positions" view below carries this instead. */}
+      {!isFullscreen && (
+        <div className="hidden lg:flex lg:h-[196px] lg:flex-shrink-0 lg:flex-col">
+          <PositionsDock
+            className="flex-1"
+            positions={positions}
+            orders={orders}
+            digitsFor={digitsFor}
+            onToast={showToast}
+          />
+        </div>
+      )}
+
+      {/* 手机端·自选视图：点某品种即切换主图并跳回图表视图 / mobile watchlist
+          view: tapping a symbol switches the chart and jumps back to it */}
+      {!isFullscreen && (
+        <div className={`term-mview lg:hidden ${mobileView === 'watchlist' ? 'flex flex-col' : 'hidden'}`}>
+          <WatchlistPanel
+            className="flex-1"
+            symbols={activeSymbols}
+            quotes={globalQuotes}
+            active={symbol}
+            onSelect={(s) => { setSymbol(s); setMobileView('chart') }}
+            digitsFor={digitsFor}
+          />
+        </div>
+      )}
+
+      {/* 手机端·交易视图：完整停靠下单面板 / mobile trade view: full docked ticket */}
+      {!isFullscreen && (
+        <div className={`term-mview lg:hidden ${mobileView === 'trade' ? 'flex flex-col' : 'hidden'}`}>
+          <OrderTicket
+            className="flex-1"
+            symbol={symbol}
+            accounts={accounts}
+            quotesByAccount={accountQuotes}
+            globalQuote={activeQuote}
+            refPrice={lastPrice}
+            digits={decimals}
+            onPlace={(side, volume, mt5Login, stopLoss, takeProfit, coid) =>
+              placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid)
+            }
+          />
+        </div>
+      )}
+
+      {/* 手机端·持仓视图：持仓/挂单 + 账户摘要 / mobile positions view */}
+      {!isFullscreen && (
+        <div className={`term-mview lg:hidden ${mobileView === 'positions' ? 'flex flex-col gap-2.5' : 'hidden'}`}>
+          <PositionsDock
+            className="flex-1"
+            positions={positions}
+            orders={orders}
+            digitsFor={digitsFor}
+            onToast={showToast}
+          />
+          <AccountSummary account={primaryAccount} />
+        </div>
+      )}
+
+      {/* 免责声明：仅手机端图表视图显示 / disclaimer: mobile chart view only */}
+      {!isFullscreen && mobileView === 'chart' && (
+        <p className="mt-2 text-center text-[11px] text-slate-500 lg:hidden">
           {t('charts.footer')}
         </p>
       )}
+      </div>
+      {/* /term-center */}
+
+      {/* 右栏：停靠式下单面板 + 账户摘要（桌面常驻；窄屏隐藏，手机端在阶段 3
+          单独做）。下单面板占据剩余高度并可内部滚动，账户摘要固定在底部。
+          Right column: docked order ticket + account summary (desktop only).
+          The ticket takes the remaining height and scrolls internally; the
+          account summary stays pinned at the bottom. */}
+      <div className="term-right hidden min-h-0 flex-col gap-2.5 lg:flex">
+        <OrderTicket
+          className="min-h-0 flex-1"
+          symbol={symbol}
+          accounts={accounts}
+          quotesByAccount={accountQuotes}
+          globalQuote={activeQuote}
+          refPrice={lastPrice}
+          digits={decimals}
+          onPlace={(side, volume, mt5Login, stopLoss, takeProfit, coid) =>
+            placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid)
+          }
+        />
+        <AccountSummary account={primaryAccount} />
+      </div>
 
       {settingsOpen && (
         <IndicatorSettingsModal

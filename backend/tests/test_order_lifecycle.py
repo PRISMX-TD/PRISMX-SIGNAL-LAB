@@ -116,9 +116,11 @@ def test_free_plan_caps_bound_accounts_on_poll(client, bridge_headers, db, user)
 # ---------- 桥接下发与重发 / bridge delivery & re-delivery ----------
 
 
-def test_bridge_poll_delivers_once_within_ack_window(client, auth_headers, bridge_headers, db):
+def test_bridge_poll_delivers_once_within_ack_window(client, auth_headers, bridge_headers, db, user):
+    # 指定目标账号必须是已绑定的自己的账号（下单归属校验）——先建账号再下单，
+    # 与真实流程一致：用户只能选到自己已连接过的账号。
+    make_account(db, user, login="10001")
     r = place(client, auth_headers, coid="d-1", mt5Login="10001")
-    # 下单时账号还不存在也允许（不指定归属校验）——先让桥接上报账号
     assert r.status_code == 200
 
     p1 = poll(client, bridge_headers)
@@ -130,7 +132,8 @@ def test_bridge_poll_delivers_once_within_ack_window(client, auth_headers, bridg
     assert p2.json()["commands"] == []
 
 
-def test_bridge_poll_redelivers_after_ack_timeout(client, auth_headers, bridge_headers, db):
+def test_bridge_poll_redelivers_after_ack_timeout(client, auth_headers, bridge_headers, db, user):
+    make_account(db, user, login="10001")
     r = place(client, auth_headers, coid="rd-1", mt5Login="10001")
     order_id = r.json()["id"]
     poll(client, bridge_headers)
@@ -146,9 +149,11 @@ def test_bridge_poll_redelivers_after_ack_timeout(client, auth_headers, bridge_h
     assert [c["clientOrderId"] for c in p.json()["commands"]] == ["rd-1"]
 
 
-def test_unrouted_order_without_online_target_not_delivered(client, auth_headers, bridge_headers):
+def test_unrouted_order_without_online_target_not_delivered(client, auth_headers, bridge_headers, db, user):
+    # 目标账号 99999 已绑定但不在线（桥接只上报 10001）→ 不下发。
+    # 归属校验要求账号存在，故先建账号；不在线由投递逻辑拦下。
+    make_account(db, user, login="99999")
     place(client, auth_headers, coid="t-1", mt5Login="99999")
-    # 目标账号 99999 不在线（桥接只上报 10001）→ 不下发
     p = poll(client, bridge_headers)
     assert p.json()["commands"] == []
 
@@ -156,7 +161,8 @@ def test_unrouted_order_without_online_target_not_delivered(client, auth_headers
 # ---------- 回执 / results ----------
 
 
-def test_result_fills_and_duplicate_is_ignored(client, auth_headers, bridge_headers, db):
+def test_result_fills_and_duplicate_is_ignored(client, auth_headers, bridge_headers, db, user):
+    make_account(db, user, login="10001")
     r = place(client, auth_headers, coid="f-1", mt5Login="10001")
     order_id = r.json()["id"]
     poll(client, bridge_headers)
@@ -192,7 +198,8 @@ def _make_stale(db, order_id):
     db.commit()
 
 
-def test_stale_pending_voided_on_bridge_poll(client, auth_headers, bridge_headers, db):
+def test_stale_pending_voided_on_bridge_poll(client, auth_headers, bridge_headers, db, user):
+    make_account(db, user, login="10001")
     r = place(client, auth_headers, coid="s-1", mt5Login="10001")
     _make_stale(db, r.json()["id"])
 
@@ -211,8 +218,9 @@ def test_stale_pending_voided_on_list(client, auth_headers, db):
     assert target["status"] == "FAILED"
 
 
-def test_late_genuine_result_overrides_voided_failed(client, auth_headers, bridge_headers, db):
+def test_late_genuine_result_overrides_voided_failed(client, auth_headers, bridge_headers, db, user):
     """已作废 FAILED 的订单收到真实回执：以实际执行结果为准。"""
+    make_account(db, user, login="10001")
     r = place(client, auth_headers, coid="s-3", mt5Login="10001")
     order_id = r.json()["id"]
     poll(client, bridge_headers)

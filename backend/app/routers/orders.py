@@ -105,6 +105,17 @@ def place_order(
     """提交下单：风控 + 幂等，落库为 PENDING 等待桥接拉取。
     Place an order: risk check + idempotency; persist as PENDING for the bridge.
     """
+    # 0) 指定了目标账号就校验归属，防止传入不属于自己/不存在的 mt5Login——
+    #    否则该单会绕过下面的"按净值限手数"风控（找不到账号 → equity 为
+    #    None → 跳过净值上限），入库后再滞留 5 分钟被作废，白白坑一次用户。
+    #    与 /orders/close、/orders/modify 的 _assert_account_owned 校验对齐。
+    #    Verify ownership when a target account is named, so a mt5Login that
+    #    isn't the user's (or doesn't exist) can't be submitted — otherwise the
+    #    order bypasses the equity-based lot cap below (no account → equity None
+    #    → cap skipped) only to sit 5 minutes and get voided, wasting the user's
+    #    attempt. Mirrors the _assert_account_owned check in close/modify.
+    _assert_account_owned(db, user.id, req.mt5Login)
+
     # 1) 风控校验：按净值粗估手数上限。指定了目标账号就用它；没指定但只有
     #    一个账号在线时，也用那唯一的在线账号——它正是桥接稍后单账号兜底
     #    路由会实际打过去的目标（见 bridge.py 的 target 逻辑），不取它的净值

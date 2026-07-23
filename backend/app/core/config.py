@@ -45,6 +45,20 @@ class Settings(BaseSettings):
     # verifies the old one, so a leaked token could be used to brute-force it —
     # this throttle closes that path. Keyed by client IP.
     RATE_LIMIT_PASSWORD: str = "10/minute"
+    # 创建支付订单限流：每次都会真实调用一次 NOWPayments 接口并插一条 Payment
+    # 记录，不限流则登录用户可反复刷、把第三方调用成本与数据库写入转嫁给我们。
+    # 正常用户一分钟内不会创建很多支付单，设得足够宽。按客户端 IP 计。
+    # Rate limit for creating a payment: each call hits NOWPayments for real and
+    # inserts a Payment row, so without a limit a logged-in user could hammer it,
+    # offloading third-party cost and DB writes onto us. Real users don't create
+    # many payments per minute; kept generous. Keyed by client IP.
+    RATE_LIMIT_PAYMENT: str = "5/minute"
+    # 单用户未完成（PENDING/PROCESSING）支付订单上限：超过则先复用旧订单，
+    # 避免刷接口在库里堆积大量悬而未决的支付记录。
+    # Cap on a single user's unfinished (PENDING/PROCESSING) payments: beyond
+    # this the user must reuse an existing one, so hammering can't pile up stale
+    # pending rows.
+    MAX_OPEN_PAYMENTS_PER_USER: int = 3
 
     # 数据库 / Database（默认 SQLite，生产用环境变量 DATABASE_URL 覆盖为 Postgres）
     # Database (defaults to SQLite; override via DATABASE_URL env for Postgres in prod)
@@ -232,4 +246,37 @@ if settings.ENV.lower() == "production" and not settings.WEBHOOK_SECRET:
     raise RuntimeError(
         "WEBHOOK_SECRET 未设置，生产环境（ENV=production）必须在 .env 中配置强随机密钥。"
         " / WEBHOOK_SECRET is empty; set a strong random secret in .env when ENV=production."
+    )
+
+# 模拟信号引擎：本地测试用的随机游走假信号会像真信号一样推给 PRO 用户、可被
+# 一键下单到真实 MT5 账户。生产环境（ENV=production）必须显式关闭，否则漏配
+# 一行 .env 就会让用户照着随机数下真单——与 JWT_SECRET/WEBHOOK_SECRET 同等
+# 危险，故同样在启动时硬性拒绝，绝不放行"默认开着"。
+# Mock signal engine: its random-walk fake signals are pushed to PRO users just
+# like real ones and can be one-click-traded into a live MT5 account. It must be
+# explicitly disabled in production (ENV=production); otherwise a single missing
+# .env line has users trading real money off random numbers — as dangerous as a
+# default JWT_SECRET/WEBHOOK_SECRET, so it's refused at startup the same way
+# rather than silently left on.
+if settings.ENV.lower() == "production" and settings.ENABLE_MOCK_SIGNAL_ENGINE:
+    raise RuntimeError(
+        "ENABLE_MOCK_SIGNAL_ENGINE 仍为开启，生产环境（ENV=production）必须在 .env 中设为 false，"
+        "否则会向用户推送随机生成的假信号。"
+        " / ENABLE_MOCK_SIGNAL_ENGINE is on; set it to false in .env when ENV=production,"
+        " or users will be shown randomly-generated fake signals."
+    )
+
+# 支付沙盒：沙盒模式打到 NOWPayments 测试域名，且创建支付时自动带 case=success
+# 模拟"支付成功"（见 services/nowpayments.py）。生产环境若忘了关，真实付款无法
+# 到账、测试流程还可能把人误升成 PRO。生产强制要求关闭。
+# Payment sandbox: sandbox mode targets NOWPayments' test host and auto-sends
+# case=success to simulate a successful payment (see services/nowpayments.py).
+# Left on in production, real payments never settle and the test flow can wrongly
+# upgrade users to PRO. Mandatory to disable in production.
+if settings.ENV.lower() == "production" and settings.NOWPAYMENTS_SANDBOX:
+    raise RuntimeError(
+        "NOWPAYMENTS_SANDBOX 仍为开启，生产环境（ENV=production）必须在 .env 中设为 false，"
+        "否则支付走的是沙盒测试环境。"
+        " / NOWPAYMENTS_SANDBOX is on; set it to false in .env when ENV=production,"
+        " or payments run against the sandbox test environment."
     )

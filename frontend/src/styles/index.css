@@ -2183,3 +2183,450 @@
     padding: 0;
   }
 }
+
+/* ══════════════════════════════════════════════
+   交易终端 / trading terminal (charts page)
+   混合风格：品牌紫作强调色 + 终端级信息密度（收紧留白、等宽数字、高对比）。
+   Hybrid: brand violet as accent + terminal-grade density.
+   ══════════════════════════════════════════════ */
+
+/* 隐藏滚动条但保留滚动（终端里溢出兜底区不该露出滚动条）。
+   Hide the scrollbar but keep scrolling (overflow gutters in the terminal). */
+.no-sb { scrollbar-width: none; }
+.no-sb::-webkit-scrollbar { display: none; }
+
+/* 三栏骨架：左自选 ▏中图表 ▏右下单/账户。桌面填满视口高度，窄屏退回单列
+   （仅中栏，侧栏 hidden，手机端终端在阶段 3 单独做）。
+   Three columns: watchlist ▏chart ▏ticket/account. Fills the viewport height on
+   desktop; collapses to the center column on narrow screens (side panels hidden;
+   the mobile terminal is built separately in phase 3). */
+.term-shell {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+@media (min-width: 1024px) {
+  .term-shell {
+    grid-template-columns: 240px minmax(0, 1fr) 290px;
+    height: calc(100vh - 8.5rem);
+  }
+}
+
+.term-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.012));
+  overflow: hidden;
+}
+
+.term-pane-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.term-pane-head-r {
+  margin-left: auto;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-3);
+}
+
+/* ── 中栏 / center column ── */
+.term-center {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  gap: 8px;
+}
+
+/* 图表视图容器：桌面填满中栏剩余高度（图表在其内部再 flex-1）。
+   Chart-view wrapper: fills the center column's remaining height on desktop
+   (the chart itself is flex-1 within it). */
+.term-chartview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+@media (min-width: 1024px) {
+  .term-chartview { flex: 1; min-height: 0; }
+}
+
+/* 手机端顶部视图切换（分段控件）/ mobile top view switcher (segmented control) */
+.term-mtabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--nest);
+}
+.term-mtabs button {
+  flex: 1;
+  height: 32px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.term-mtabs button.on { background: linear-gradient(92deg, #7c3aed, #a855f7); color: #fff; }
+
+/* 手机端单视图容器：撑起大半屏，内部面板自行滚动，底部给 App 全局 Tab 栏留白。
+   Mobile single-view container: fills most of the screen; inner panels scroll
+   themselves, leaving room at the bottom for the app's global tab bar. */
+.term-mview {
+  height: calc(100vh - 12.5rem);
+  min-height: 340px;
+  min-width: 0;
+}
+
+/* 手机端图表视图的常驻买卖条：图表正下方，实色绿红、大热区，拇指可达。
+   Mobile chart-view docked buy/sell bar: right under the chart, solid green/red,
+   big tap targets, thumb-reachable. */
+.term-mbuysell { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; flex-shrink: 0; }
+.term-mbuysell button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 9px 0;
+  border: 0;
+  border-radius: 10px;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+  transition: transform 0.1s, filter 0.15s;
+}
+.term-mbuysell button:active { transform: scale(0.98); }
+.term-mbuysell button:hover { filter: brightness(1.06); }
+.term-mbuysell .lab { font-size: 12.5px; font-weight: 700; letter-spacing: 0.05em; }
+.term-mbuysell .px { font-size: 13px; font-weight: 600; opacity: 0.95; }
+.term-mbuysell button.sell { background: linear-gradient(92deg, #c53350, var(--down)); }
+.term-mbuysell button.buy { background: linear-gradient(92deg, #1f9d5b, var(--up)); }
+
+/* ── 品种行情头 / symbol header ── */
+.term-symhead {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012));
+  overflow: hidden;
+}
+.term-symhead-id {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8px 16px;
+  min-width: 148px;
+  border-right: 1px solid var(--line);
+}
+.term-symhead-sym { font-size: 18px; font-weight: 700; letter-spacing: 0.01em; }
+.term-symhead-name { font-size: 11px; color: var(--text-3); }
+.term-symhead-stats { display: flex; flex: 1; overflow-x: auto; }
+.term-sstat {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 16px;
+  border-right: 1px solid var(--line);
+  white-space: nowrap;
+}
+.term-sstat-k { font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); }
+.term-sstat-v { font-size: 14px; font-weight: 600; }
+
+/* ── 自选列表 / watchlist ── */
+.term-wl-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 10px;
+  padding: 0 9px;
+  height: 30px;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--nest);
+  color: var(--text-3);
+}
+.term-wl-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+.term-wl { flex: 1; overflow-y: auto; }
+.term-wl-empty { padding: 20px 12px; font-size: 12.5px; color: var(--text-3); text-align: center; }
+.term-wl-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 12px 7px 10px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.term-wl-row:hover { background: rgba(255, 255, 255, 0.03); }
+.term-wl-row.on {
+  border-left-color: var(--purple);
+  background: linear-gradient(90deg, rgba(139, 92, 246, 0.14), transparent 82%);
+}
+.term-wl-badge {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.term-wl-id { display: flex; flex-direction: column; min-width: 0; }
+.term-wl-sym { font-size: 13px; font-weight: 600; letter-spacing: 0.01em; }
+.term-wl-nm { font-size: 10.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.term-wl-px { font-size: 13px; font-weight: 600; text-align: right; transition: color 0.4s; }
+
+/* ── 账户摘要 / account summary ── */
+.term-account-body { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.term-account-empty { font-size: 12px; color: var(--text-3); line-height: 1.6; }
+.term-account-row { display: flex; align-items: baseline; justify-content: space-between; font-size: 12.5px; }
+.term-account-k { color: var(--text-3); }
+.term-account-v { font-weight: 600; }
+.term-account-v.strong { font-size: 14px; }
+.term-account-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+/* ── 右栏快速下单 / right-rail quick order ── */
+.term-quickorder { display: flex; flex-direction: column; gap: 9px; padding: 12px; }
+.term-bs-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.term-bs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--nest);
+  color: var(--text-3);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.18s, background-color 0.18s, transform 0.12s;
+}
+.term-bs:active { transform: scale(0.97); }
+.term-bs .lab { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; }
+.term-bs .px { font-size: 15px; font-weight: 600; }
+.term-bs.buy:hover { border-color: rgba(46, 224, 126, 0.55); background: var(--up-bg); color: var(--up); }
+.term-bs.sell:hover { border-color: rgba(255, 77, 103, 0.55); background: var(--down-bg); color: var(--down); }
+.term-quickorder-hint { margin: 0; font-size: 11px; color: var(--text-3); text-align: center; }
+
+/* ── 停靠下单面板 / docked order ticket ── */
+.term-ticket { display: flex; flex-direction: column; gap: 9px; padding: 11px; overflow-y: auto; }
+.term-field { display: flex; flex-direction: column; gap: 4px; }
+.term-field-k { font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); }
+.term-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.term-select {
+  height: 32px; border: 1px solid var(--line); border-radius: 7px; background: var(--nest);
+  color: var(--text); font: inherit; font-size: 13px; padding: 0 8px; outline: none;
+}
+.term-select:focus { border-color: var(--purple); }
+.term-seg2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 3px; background: var(--nest); border: 1px solid var(--line); border-radius: 8px; }
+.term-seg2 button {
+  height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--text-3);
+  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.term-seg2 button.on { background: linear-gradient(92deg, #7c3aed, #a855f7); color: #fff; }
+.term-stepper { display: flex; align-items: center; gap: 6px; }
+.term-stepper input {
+  flex: 1; min-width: 0; height: 32px; border: 1px solid var(--line); border-radius: 7px;
+  background: var(--nest); color: var(--text); font-size: 14px; text-align: center; outline: none;
+}
+.term-stepper input:focus { border-color: var(--purple); }
+.term-stepper button {
+  width: 32px; height: 32px; flex-shrink: 0; border: 1px solid var(--line); border-radius: 7px;
+  background: var(--nest); color: var(--text-2); font-size: 16px; cursor: pointer;
+}
+.term-stepper button:hover { border-color: var(--line-hi); color: var(--text); }
+.term-chips { display: flex; gap: 6px; }
+.term-chip {
+  flex: 1; height: 26px; border: 1px solid var(--line); border-radius: 6px; background: var(--nest);
+  color: var(--text-2); font-size: 12px; cursor: pointer;
+}
+.term-chip:hover { border-color: var(--line-hi); color: var(--text); }
+.term-chip.on { border-color: rgba(139, 92, 246, 0.55); background: rgba(139, 92, 246, 0.16); color: var(--purple-hi); }
+.term-inp { height: 32px; border: 1px solid var(--line); border-radius: 7px; background: var(--nest); display: flex; align-items: center; padding: 0 9px; }
+.term-inp input { width: 100%; border: 0; background: transparent; color: var(--text); font-size: 13px; text-align: right; outline: none; }
+.term-inp.bad { border-color: var(--down); }
+.term-risk {
+  display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; padding: 9px 11px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--nest); font-size: 11.5px;
+}
+.term-risk .k { color: var(--text-3); }
+.term-risk .v { text-align: right; font-family: var(--font-mono, "JetBrains Mono", ui-monospace, monospace); font-weight: 600; }
+.term-place {
+  height: 40px; border: 0; border-radius: 9px; font: inherit; font-size: 14px; font-weight: 700;
+  color: #fff; cursor: pointer; letter-spacing: 0.02em; transition: filter 0.15s, transform 0.1s;
+}
+.term-place:active { transform: scale(0.98); }
+.term-place:disabled { opacity: 0.45; cursor: not-allowed; }
+.term-place.buy { background: linear-gradient(92deg, #1f9d5b, var(--up)); box-shadow: 0 5px 18px -6px rgba(46, 224, 126, 0.5); }
+.term-place.sell { background: linear-gradient(92deg, #c53350, var(--down)); box-shadow: 0 5px 18px -6px rgba(255, 77, 103, 0.5); }
+.term-place:not(:disabled):hover { filter: brightness(1.08); }
+.term-ticket-warn { margin: 0; font-size: 11px; color: var(--gold); }
+.term-ticket-receipt { margin: 0; font-size: 12px; text-align: center; }
+.term-ticket-receipt.ok { color: var(--up); }
+.term-ticket-receipt.error { color: var(--down); }
+.term-ticket-receipt.info { color: var(--text-2); }
+
+/* ── 底部持仓 / 挂单 / positions & orders dock ── */
+.term-dock { flex-shrink: 0; }
+.term-dock-tabs { display: flex; gap: 2px; padding: 5px 8px 0; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.term-dock-tab {
+  display: flex; align-items: center; gap: 6px; padding: 6px 12px 8px; border: 0; background: transparent;
+  color: var(--text-3); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.term-dock-tab.on { color: var(--text); border-bottom-color: var(--purple); }
+.term-dock-cnt { font-family: var(--font-mono, ui-monospace, monospace); font-size: 10px; background: rgba(139, 92, 246, 0.2); color: var(--purple-hi); border-radius: 5px; padding: 0 5px; }
+.term-dock-body { overflow: auto; }
+.term-dock-empty { padding: 22px 12px; text-align: center; font-size: 12.5px; color: var(--text-3); }
+.term-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.term-tbl th {
+  position: sticky; top: 0; z-index: 1; text-align: right; padding: 7px 12px; white-space: nowrap;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3);
+  background: var(--bg); border-bottom: 1px solid var(--line);
+}
+.term-tbl th:first-child, .term-tbl td:first-child { text-align: left; }
+.term-tbl td { padding: 7px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid rgba(255, 255, 255, 0.035); }
+.term-tbl tr:hover td { background: rgba(255, 255, 255, 0.02); }
+.term-tbl-sym { font-weight: 600; }
+.term-tbl-status { color: var(--gold); }
+.term-pill { font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 5px; }
+.term-pill.buy { background: var(--up-bg); color: var(--up); }
+.term-pill.sell { background: var(--down-bg); color: var(--down); }
+.term-tbl-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.term-x-btn { border: 1px solid var(--line); background: var(--nest); color: var(--text-3); border-radius: 5px; font-size: 11px; padding: 3px 9px; cursor: pointer; }
+.term-x-btn:hover:not(:disabled) { color: var(--down); border-color: rgba(255, 77, 103, 0.4); }
+.term-x-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.term-x-btn.alt:hover:not(:disabled) { color: var(--purple-hi); border-color: rgba(139, 92, 246, 0.45); }
+.term-x-btn.alt.on { color: var(--purple-hi); border-color: rgba(139, 92, 246, 0.5); background: rgba(139, 92, 246, 0.14); }
+
+/* 仓位管理展开面板：部分平仓 + 改止损止盈 / position manage panel */
+.term-tbl-open td { background: rgba(139, 92, 246, 0.05); border-bottom-color: transparent; }
+.term-pos-expand td { padding: 0; }
+.term-pos-panel {
+  display: flex; flex-wrap: wrap; gap: 14px;
+  padding: 10px 12px 12px;
+  background: rgba(139, 92, 246, 0.05);
+  border-bottom: 1px solid var(--line);
+}
+.term-pos-group { display: flex; flex-direction: column; gap: 5px; }
+.term-pos-group-k { font-size: 10.5px; color: var(--text-3); letter-spacing: 0.03em; }
+.term-pos-row { display: flex; align-items: center; gap: 6px; }
+.term-pos-inp {
+  width: 92px; height: 30px; border: 1px solid var(--line); border-radius: 6px; background: var(--nest);
+  color: var(--text); font-size: 12.5px; text-align: right; padding: 0 8px; outline: none;
+}
+.term-pos-inp:focus { border-color: var(--purple); }
+.term-pos-inp.bad { border-color: var(--down); }
+.term-pos-btn {
+  height: 30px; padding: 0 12px; border: 1px solid rgba(139, 92, 246, 0.4); border-radius: 6px;
+  background: rgba(139, 92, 246, 0.15); color: var(--purple-hi); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  white-space: nowrap;
+}
+.term-pos-btn:hover:not(:disabled) { background: rgba(139, 92, 246, 0.25); }
+.term-pos-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.term-pos-warn { font-size: 10.5px; color: var(--down); }
+
+/* 涨跌色（终端内复用）/ up-down colors reused inside the terminal */
+.term-panel .up, .term-symhead .up { color: var(--up); }
+.term-panel .down, .term-symhead .down { color: var(--down); }
+
+/* ══════════════════════════════════════════════
+   全局流畅度优化 / global smoothness polish
+   ══════════════════════════════════════════════ */
+
+/* 页面切换柔和淡入：路由变化时内容不再"硬弹"出现，而是快速上浮淡入，
+   让每次导航都有一致的、轻盈的呈现节奏（在 Layout 里按 pathname 重挂载触发）。
+   Soft page-enter on route change: content rises + fades in instead of hard-
+   popping, giving every navigation a consistent, light rhythm (re-triggered by
+   remounting on pathname in Layout). */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.page-enter {
+  animation: page-enter 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* 滚动体验：阻断滚动链导致的回弹抖动 + iOS 惯性滚动，内部滚动区更跟手。
+   Scroll feel: stop scroll-chaining bounce jitter + iOS momentum scrolling so
+   inner scroll regions track the finger. */
+html,
+body {
+  overscroll-behavior-y: contain;
+}
+:where(.overflow-auto, .overflow-y-auto, .overflow-x-auto, .overflow-scroll) {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* 减少动态偏好：停用装饰性无限动画（背景光球/漂移/走马灯/呼吸/辉光/流光），
+   并取消页面淡入，回到即时呈现；加载指示（spin）保留。既是无障碍支持，也让
+   低端/低电量设备省掉持续合成开销。
+   Reduced motion: pause decorative infinite animations and the page-enter
+   fade for instant presentation; the loading spinner stays. Accessibility plus
+   a battery/perf win on low-end devices that no longer composite continuously. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-float,
+  .animate-float-slow,
+  .animate-drift,
+  .animate-drift-slow,
+  .animate-breathe,
+  .animate-glow-pulse,
+  .animate-marquee,
+  .animate-shimmer,
+  .animate-gradient-x,
+  .page-enter {
+    animation: none !important;
+  }
+}

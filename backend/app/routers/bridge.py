@@ -294,10 +294,18 @@ def _poll_db_work(
         suffix_by_login[acc.login] = (row.symbol_suffix or "").strip()
         online_logins.add(acc.login)
     # 记录这个用户最近上报的 Bridge 版本，供网页端"有新版本可更新"提示使用。
-    # Record this user's most recently reported Bridge version, for the web
-    # app's "a newer version is available" notice.
+    # 注意：这里的 `user` 可能来自 get_bridge_user 的鉴权缓存（脱离本 db 会话的
+    # detached 实例），直接改它的属性不会被 db.commit() 落库。必须按 id 显式
+    # UPDATE，才能真正写进数据库。
+    # Record this user's most recently reported Bridge version. NOTE: `user` may
+    # come from get_bridge_user's auth cache (a detached instance not attached to
+    # this db session), so mutating its attribute would NOT be persisted by
+    # db.commit(). Persist via an explicit UPDATE keyed by id instead.
     if req.bridgeVersion and req.bridgeVersion != user.bridge_version:
-        user.bridge_version = req.bridgeVersion
+        db.query(User).filter(User.id == user.id).update(
+            {"bridge_version": req.bridgeVersion}, synchronize_session=False
+        )
+        user.bridge_version = req.bridgeVersion  # 同步缓存实例，避免下拍重复 UPDATE / keep the cached instance in sync
     db.commit()
 
     # 2) 取该用户、目标账号匹配的待执行订单 / fetch matching pending orders.

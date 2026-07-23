@@ -156,7 +156,11 @@ export function useOrderPlacement() {
     [submitOrder]
   )
 
-  return { toast, placeOrder, placeManualOrder }
+  // showToast 暴露给终端的持仓/挂单面板：平仓/撤单直接走 orderApi（不经
+  // submitOrder），需要复用同一套 toast 展示。/ Exposed so the terminal's
+  // positions/orders dock (which calls orderApi.close/cancel directly, not via
+  // submitOrder) can surface feedback through the same toast.
+  return { toast, placeOrder, placeManualOrder, showToast }
 }
 
 // 每秒滴答的当前时间，用于实时倒计时 / a per-second ticking clock for live countdowns
