@@ -101,24 +101,27 @@ export default function SymbolHeader({ symbol, bid, ask, digits, dayStats, fallb
               {changeStr}
             </span>
           </div>
-          <div className="term-symhead-m-stats no-sb">
-            <span>买 <b className="num up">{bidStr}</b></span>
-            <span>卖 <b className="num down">{askStr}</b></span>
-            <span>点差 <b className="num">{spread == null ? '—' : spread}</b></span>
-            <span>高 <b className="num">{fmt(dayStats?.high, digits)}</b></span>
-            <span>低 <b className="num">{fmt(dayStats?.low, digits)}</b></span>
+          {/* 次要统计与策略入口同一行：统计小字靠左（可横滑），自定义策略缩成
+              右侧一个小 chip——不再占一整行的大按钮。
+              Secondary stats and the strategy entry share one row: stats on the
+              left (scrollable), custom-strategy shrinks to a small chip on the
+              right — no longer a full-width button taking its own row.
+              自定义策略为 PRO 功能，2026-07 起对全体开放；未订阅者进页面会看到
+              升级提示，这里不用重复判断。/ Custom-strategy is PRO, opened to all
+              in 2026-07; non-PRO users get an upgrade hint on the page itself. */}
+          <div className="term-symhead-m-btm">
+            <div className="term-symhead-m-stats no-sb">
+              <span>买 <b className="num up">{bidStr}</b></span>
+              <span>卖 <b className="num down">{askStr}</b></span>
+              <span>点差 <b className="num">{spread == null ? '—' : spread}</b></span>
+              <span>高 <b className="num">{fmt(dayStats?.high, digits)}</b></span>
+              <span>低 <b className="num">{fmt(dayStats?.low, digits)}</b></span>
+            </div>
+            <Link to="/strategies" className="term-symhead-m-strat" aria-label={t('nav.strategies')}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg>
+              <span>{t('nav.strategies')}</span>
+            </Link>
           </div>
-          {/* 自定义策略入口（PRO 专属功能，2026-07 起对全体用户开放）：放在价格
-              卡片正下方，点开直接跳转策略页；未订阅 PRO 的用户进页面会看到
-              清楚的升级提示，这里不用重复判断。/ Custom-strategy entry point
-              (PRO-exclusive, opened to everyone in 2026-07): sits right under
-              the price card, tapping goes straight to the strategies page — a
-              non-PRO user sees a clear upgrade hint once there, no need to
-              duplicate that check here. */}
-          <Link to="/strategies" className="term-symhead-m-strat">
-            <span>{t('nav.strategies')}</span>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
-          </Link>
         </div>
       </div>
     </>

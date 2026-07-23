@@ -2445,38 +2445,43 @@
 }
 .term-symhead-m-chg.up { background: var(--up-bg); color: var(--up); }
 .term-symhead-m-chg.down { background: var(--down-bg); color: var(--down); }
-/* 次要统计：价格下方一条横排内联小字，可横滑，不换行。
-   Secondary stats: a single inline row of small text below, horizontally
-   scrollable, no wrapping. */
+/* 底部行：次要统计（靠左，可横滑）+ 自定义策略小 chip（钉右）同一行。
+   Bottom row: secondary stats (left, scrollable) + custom-strategy chip
+   (pinned right) on one line. */
+.term-symhead-m-btm { display: flex; align-items: center; gap: 10px; }
 .term-symhead-m-stats {
   display: flex;
-  flex-wrap: wrap;
-  gap: 3px 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  gap: 12px;
   font-size: 11px;
   color: var(--text-3);
   white-space: nowrap;
 }
+.term-symhead-m-stats span { flex-shrink: 0; }
 .term-symhead-m-stats b { font-weight: 600; color: var(--text-2); margin-left: 3px; }
 .term-symhead-m-stats b.up { color: var(--up); }
 .term-symhead-m-stats b.down { color: var(--down); }
-/* 自定义策略入口：价格卡片下方一条细长可点行，箭头暗示"点开跳转"。
-   Custom-strategy entry: a slim tappable row under the price card; the arrow
-   hints "tap to go". */
+/* 自定义策略入口：缩成右侧一个紧凑小 chip（图标 + 短文案），不再占整行。
+   Custom-strategy entry: a compact chip on the right (icon + short label),
+   no longer a full-width row. */
 .term-symhead-m-strat {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  margin-top: 2px;
-  padding: 7px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(139, 92, 246, 0.28);
-  background: rgba(139, 92, 246, 0.09);
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(139, 92, 246, 0.32);
+  background: rgba(139, 92, 246, 0.1);
   color: var(--purple-hi);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
   text-decoration: none;
+  white-space: nowrap;
 }
-.term-symhead-m-strat:active { background: rgba(139, 92, 246, 0.16); }
+.term-symhead-m-strat:active { background: rgba(139, 92, 246, 0.18); }
 
 /* ── 单条工具栏：周期（钉左）· 画线工具（中部可横滑）· 添加指标（钉右）──
    Single toolbar: interval (pinned left) · draw tools (scrollable middle) ·
