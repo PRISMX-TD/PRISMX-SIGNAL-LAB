@@ -272,6 +272,8 @@
     "toLogin": "Have an account? Sign in",
     "emailPlaceholder": "you@example.com",
     "passwordPlaceholder": "Enter password",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
     "tagline": "Indicator-driven signals · One click to MT5",
     "errorFailed": "Failed. Please check email and password",
     "or": "or",
@@ -281,6 +283,7 @@
   "signals": {
     "title": "Live Trading Signals",
     "subtitle": "Powered by Signal Lab quant factors",
+    "waitingForSignals": "Waiting for the signal engine or TradingView to push signals…",
     "empty": "No signals yet, the engine is analyzing the market…",
     "noMatch": "No signals match your filters",
     "entry": "Entry",
@@ -325,6 +328,9 @@
     "viewTable": "Table",
     "viewFocus": "Focus",
     "focus": {
+      "backToDashboard": "Back to dashboard",
+      "prev": "Previous signal",
+      "next": "Next signal",
       "heading": "Multi-TF trend stance",
       "watch": "Wait",
       "long": "Long",
@@ -411,6 +417,7 @@
   },
   "order": {
     "confirmTitle": "Confirm Order",
+    "slideToConfirm": "Slide to confirm",
     "symbol": "Symbol",
     "side": "Side",
     "volume": "Volume (Lots)",

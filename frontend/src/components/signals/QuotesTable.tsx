@@ -46,7 +46,7 @@ const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => 
       <div className="qt-mobile-row sm:hidden">
         <div className="flex items-center gap-2">
           <b className="text-sm font-bold text-white">{focusMeta ? displaySymbol(focusMeta.sym) : '-'}</b>
-          {focusQ?.closed && <span className="tag bg-white/5 text-slate-400 text-[10px]">{t('signals.marketClosed', '休市')}</span>}
+          {focusQ?.closed && <span className="tag bg-white/5 text-slate-400 text-[10px]">{t('signals.focus.marketClosed', '休市')}</span>}
           <span className={`inline-block w-[7px] h-[7px] rounded-full ${mt5Online ? 'bg-up shadow-[0_0_10px_rgba(46,224,126,0.9)] animate-breathe' : 'bg-slate-500'}`} />
         </div>
         <div className="flex items-center gap-5 ml-auto">
@@ -93,7 +93,7 @@ const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => 
                         <div className="nm">
                           <b className="flex items-center gap-1.5">
                             {displaySymbol(sym)}
-                            {q?.closed && <span className="tag bg-white/5 text-slate-400 text-[10px]">{t('signals.marketClosed', '休市')}</span>}
+                            {q?.closed && <span className="tag bg-white/5 text-slate-400 text-[10px]">{t('signals.focus.marketClosed', '休市')}</span>}
                           </b>
                           <span>{t(`signals.symbolNames.${sym}`, { defaultValue: '' })}</span>
                         </div>

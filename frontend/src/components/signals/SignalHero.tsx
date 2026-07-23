@@ -73,7 +73,7 @@ const SignalHero: FC<Props> = ({
             <button
               type="button"
               onClick={onPrev}
-              aria-label="prev"
+              aria-label={String(t('signals.focus.prev', '上一个信号'))}
               className="hero-arrow-btn"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
@@ -94,7 +94,7 @@ const SignalHero: FC<Props> = ({
             <button
               type="button"
               onClick={onNext}
-              aria-label="next"
+              aria-label={String(t('signals.focus.next', '下一个信号'))}
               className="hero-arrow-btn"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>

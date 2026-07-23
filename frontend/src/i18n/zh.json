@@ -272,6 +272,8 @@
     "toLogin": "已有账户？去登录",
     "emailPlaceholder": "you@example.com",
     "passwordPlaceholder": "请输入密码",
+    "showPassword": "显示密码",
+    "hidePassword": "隐藏密码",
     "tagline": "技术指标驱动的交易信号 · 一键直达 MT5",
     "errorFailed": "操作失败，请检查邮箱与密码",
     "or": "或",
@@ -281,6 +283,7 @@
   "signals": {
     "title": "实时交易信号",
     "subtitle": "棱镜量化因子驱动",
+    "waitingForSignals": "等待信号引擎或 TradingView 推送信号……",
     "empty": "暂无信号，引擎正在分析行情…",
     "noMatch": "没有符合筛选条件的信号",
     "entry": "入场价",
@@ -325,6 +328,9 @@
     "viewTable": "表格",
     "viewFocus": "聚焦",
     "focus": {
+      "backToDashboard": "返回仪表盘",
+      "prev": "上一个信号",
+      "next": "下一个信号",
       "heading": "多周期趋势",
       "watch": "观望",
       "long": "做多",
@@ -411,6 +417,7 @@
   },
   "order": {
     "confirmTitle": "确认下单",
+    "slideToConfirm": "滑动确认下单",
     "symbol": "品种",
     "side": "方向",
     "volume": "手数（Lots）",

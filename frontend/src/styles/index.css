@@ -1395,6 +1395,21 @@
     color: var(--text-3);
     transition: transform 0.15s;
   }
+  /* 触发按钮的文字超出容器宽度时省略号截断（如很长的交易商账户名）；flex 子项
+     默认按内容撑开、不会自动收缩，必须显式 min-width: 0 才会让 ellipsis 生效。
+     只截断触发按钮本身——下拉列表里的选项（.select-opt）保持完整文字不截断。
+     Ellipsis-truncate the trigger's label when it overflows the container
+     (e.g. a long broker account name); a flex item defaults to sizing by its
+     content and won't shrink on its own — min-width: 0 is required for the
+     ellipsis to take effect. Only the trigger truncates — the dropdown list's
+     options (.select-opt) keep the full untruncated text.
+   */
+  .select-trigger span {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
   .select-backdrop {
     position: fixed;
     inset: 0;
@@ -2524,22 +2539,45 @@
   gap: 5px;
   flex: 1;
   min-width: 0;
+  height: 30px;
   overflow-x: auto;
+  overflow-y: hidden;
   scrollbar-width: thin;
-  scrollbar-color: var(--line-hi) transparent;
+  scrollbar-color: rgba(167, 139, 250, 0.55) transparent;
 }
-/* 桌面工具栏放不下时露出一条细横向滚动条，让被裁掉的颜色点/操作按钮可被发现、
-   可滑到。/ Show a slim horizontal scrollbar when the desktop toolbar overflows,
-   so the clipped color dots / action buttons are discoverable and reachable. */
+/* 桌面端没有触屏手势，鼠标用户全靠这条滚动条才知道"这里能拖、还有内容在右边"，
+   不能像移动端那样直接隐藏——但固定 30px 行高（= 26px 图标 + 给滚动条预留的
+   4px）意味着滚动条不管渲染成多高都只占用预留出来的这部分空间，绝不会把图标
+   行顶高、挤走旁边的按钮。颜色用主题紫（--purple-hi 同色号）而不是默认灰，
+   一眼就能看出这是"可拖动"的提示，不是普通滚动条噪音。
+   Desktop has no touch gestures, so mouse users rely entirely on this bar to
+   know "this row drags, there's more to the right" — it can't just be hidden
+   like on mobile. The fixed 30px row height (26px icons + 4px reserved for the
+   bar) means the scrollbar only ever eats into that reserved space, never
+   stretching the icon row or displacing the button next to it. Colored in the
+   theme's purple (same hue as --purple-hi) instead of default gray, so it
+   reads as a deliberate "draggable" affordance rather than scrollbar noise. */
 .term-toolbar-tools::-webkit-scrollbar { height: 3px; }
 .term-toolbar-tools::-webkit-scrollbar-track { background: transparent; }
-.term-toolbar-tools::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
-.term-toolbar-tools:hover::-webkit-scrollbar-thumb { background: var(--line-hi); }
+.term-toolbar-tools::-webkit-scrollbar-thumb { background: rgba(167, 139, 250, 0.55); border-radius: 999px; }
+.term-toolbar-tools:hover::-webkit-scrollbar-thumb,
+.term-toolbar-tools:active::-webkit-scrollbar-thumb { background: rgba(167, 139, 250, 0.9); }
 /* wrap 变体：手机端展开行用——铺满宽度换行显示，不用横向滚动藏起后面的工具
-   （发现性更好），按钮/颜色点也放大一档更好点按。/ wrap variant: used by the
-   mobile expand row — wraps to fill the width instead of scrolling tools out of
-   sight (better discoverability); buttons/dots also size up for easier tapping. */
-.term-toolbar-tools.wrap { flex-wrap: wrap; overflow: visible; row-gap: 8px; }
+   （发现性更好），按钮/颜色点也放大一档更好点按。手机有触屏手势不需要这条
+   拖动提示条，固定高度也不适用（多行换行需要按内容自适应高度），一并重置。
+   wrap variant: used by the mobile expand row — wraps to fill the width
+   instead of scrolling tools out of sight (better discoverability);
+   buttons/dots also size up for easier tapping. Mobile has touch gestures so
+   doesn't need this drag affordance, and the fixed height doesn't apply here
+   (wrapped rows need to grow with content) — both reset for this variant. */
+.term-toolbar-tools.wrap {
+  flex-wrap: wrap;
+  overflow: visible;
+  height: auto;
+  row-gap: 8px;
+  scrollbar-width: none;
+}
+.term-toolbar-tools.wrap::-webkit-scrollbar { display: none; }
 .term-toolbar-tools.wrap .term-tool-btn { width: 32px; height: 32px; }
 .term-toolbar-tools.wrap .term-color-dot { width: 20px; height: 20px; }
 .term-toolbar-divider { width: 1px; height: 18px; flex-shrink: 0; background: var(--line); }
