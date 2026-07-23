@@ -1415,12 +1415,14 @@
     inset: 0;
     z-index: 40;
   }
+  /* portal 到 <body>，用 fixed 定位（left/top/width/bottom 由组件按触发器坐标
+     内联注入），因此这里不再写死 top/left，避免被祖先 overflow 裁切。
+     Portaled to <body> with fixed positioning (left/top/width/bottom injected
+     inline by the component from the trigger rect), so no hard-coded top/left
+     here — this is what escapes ancestor overflow clipping. */
   .select-menu {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    z-index: 41;
-    min-width: 100%;
+    position: fixed;
+    z-index: 60;
     max-height: 240px;
     overflow-y: auto;
     background: #17171d;
@@ -1428,10 +1430,6 @@
     border-radius: 10px;
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
     padding: 4px;
-  }
-  .select-menu.up {
-    top: auto;
-    bottom: calc(100% + 4px);
   }
   .select-opt {
     display: block;
@@ -2557,7 +2555,14 @@
    stretching the icon row or displacing the button next to it. Colored in the
    theme's purple (same hue as --purple-hi) instead of default gray, so it
    reads as a deliberate "draggable" affordance rather than scrollbar noise. */
-.term-toolbar-tools::-webkit-scrollbar { height: 3px; }
+/* 细化约 70%：轨道从原来 ~3px（外加系统默认的箭头按钮占位，实际渲染更粗）压到
+   2px 的极细发丝条，并显式去掉两端的箭头按钮（部分平台/经典滚动条会渲染它们，
+   正是截图里那对箭头 + 粗轨道的来源）。
+   ~70% slimmer: the track drops to a 2px hairline and the end-arrow buttons are
+   explicitly removed (some platforms/classic scrollbars render them — the arrows
+   + thick track seen in the screenshot). */
+.term-toolbar-tools::-webkit-scrollbar { height: 2px; }
+.term-toolbar-tools::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 .term-toolbar-tools::-webkit-scrollbar-track { background: transparent; }
 .term-toolbar-tools::-webkit-scrollbar-thumb { background: rgba(167, 139, 250, 0.55); border-radius: 999px; }
 .term-toolbar-tools:hover::-webkit-scrollbar-thumb,
