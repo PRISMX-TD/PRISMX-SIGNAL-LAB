@@ -2525,7 +2525,16 @@
   flex: 1;
   min-width: 0;
   overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-hi) transparent;
 }
+/* 桌面工具栏放不下时露出一条细横向滚动条，让被裁掉的颜色点/操作按钮可被发现、
+   可滑到。/ Show a slim horizontal scrollbar when the desktop toolbar overflows,
+   so the clipped color dots / action buttons are discoverable and reachable. */
+.term-toolbar-tools::-webkit-scrollbar { height: 6px; }
+.term-toolbar-tools::-webkit-scrollbar-track { background: transparent; }
+.term-toolbar-tools::-webkit-scrollbar-thumb { background: var(--line-hi); border-radius: 3px; }
+.term-toolbar-tools::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
 /* wrap 变体：手机端展开行用——铺满宽度换行显示，不用横向滚动藏起后面的工具
    （发现性更好），按钮/颜色点也放大一档更好点按。/ wrap variant: used by the
    mobile expand row — wraps to fill the width instead of scrolling tools out of
@@ -2723,10 +2732,33 @@
 .term-field-k { font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); }
 .term-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .term-select {
-  height: 32px; border: 1px solid var(--line); border-radius: 7px; background: var(--nest);
-  color: var(--text); font: inherit; font-size: 13px; padding: 0 8px; outline: none;
+  width: 100%;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background-color: var(--nest);
+  /* 自绘下拉箭头：原生 select 在深色主题下箭头不可见/样式不统一，用 appearance:none
+     + 内联 SVG 背景补一个。/ Custom chevron: native select arrows are invisible or
+     inconsistent on the dark theme, so drop the native look and paint one via SVG. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a0a3b1' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 0 30px 0 10px;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  transition: border-color 0.18s, background-color 0.18s;
 }
+.term-select:hover { border-color: var(--line-hi); }
 .term-select:focus { border-color: var(--purple); }
+/* 下拉展开的选项列表：原生渲染，仅统一底色与文字色，避免深色主题下白底黑边。
+   Options list: keep native rendering but align colors with the dark theme. */
+.term-select option { background: var(--panel, #14161f); color: var(--text); }
 .term-seg2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 3px; background: var(--nest); border: 1px solid var(--line); border-radius: 8px; }
 .term-seg2 button {
   height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--text-3);

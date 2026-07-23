@@ -11,6 +11,7 @@
 // inline receipt. Validation (SL/TP direction, risk-% sizing, margin estimate)
 // matches ChartOrderModal.
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { MT5Account, Quote } from '../../api/types'
 import {
   clientOrderId,
@@ -40,6 +41,10 @@ interface Props {
     takeProfit: number | null,
     clientOrderId: string,
   ) => Promise<void>
+  // 受控的选中账户 login（由父级 ChartsPage 持有，用于联动账户摘要/持仓/挂单）。
+  // Controlled selected-account login (owned by ChartsPage to sync the summary/positions/orders).
+  selectedLogin?: string
+  onSelectLogin?: (login: string) => void
   className?: string
 }
 
@@ -52,10 +57,16 @@ function suggestVolume(eq?: number | null): string {
   return (Math.floor(v * 100) / 100).toFixed(2)
 }
 
-export default function OrderTicket({ symbol, accounts, quotesByAccount, globalQuote, refPrice, digits, onPlace, className = '' }: Props) {
+export default function OrderTicket({ symbol, accounts, quotesByAccount, globalQuote, refPrice, digits, onPlace, selectedLogin, onSelectLogin, className = '' }: Props) {
+  const { t } = useTranslation()
   const onlineAccounts = useMemo(() => accounts.filter((a) => a.online), [accounts])
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY')
-  const [login, setLogin] = useState<string>(() => onlineAccounts[0]?.login ?? '')
+  // 账户选择受控优先：父级传了 selectedLogin 就用它，否则回落到内部默认（第一个在线账户）。
+  // 通过 setLogin 统一出口，既更新本地兜底、也通知父级。/ Controlled selection takes
+  // priority; setLogin updates the local fallback and notifies the parent.
+  const [localLogin, setLocalLogin] = useState<string>(() => onlineAccounts[0]?.login ?? '')
+  const login = selectedLogin || localLogin
+  const setLogin = (v: string) => { setLocalLogin(v); onSelectLogin?.(v) }
   const [volume, setVolume] = useState(() => suggestVolume(onlineAccounts[0]?.equity))
   const [sl, setSl] = useState('')
   const [tp, setTp] = useState('')
@@ -157,17 +168,17 @@ export default function OrderTicket({ symbol, accounts, quotesByAccount, globalQ
   const submit = async () => {
     const vol = parseFloat(volume)
     if (!vol || vol <= 0) {
-      setReceipt({ kind: 'error', msg: '手数无效 / invalid volume' })
+      setReceipt({ kind: 'error', msg: String(t('charts.ticket.invalidVolume')) })
       return
     }
     setSubmitting(true)
-    setReceipt({ kind: 'info', msg: '提交中…' })
+    setReceipt({ kind: 'info', msg: String(t('charts.ticket.submitting')) })
     try {
       await onPlace(side, vol, login || null, slNum, tpNum, clientOrderId())
-      setReceipt({ kind: 'ok', msg: '已提交，等待回执' })
+      setReceipt({ kind: 'ok', msg: String(t('charts.ticket.submitted')) })
       setTimeout(() => setReceipt(null), 2500)
     } catch (e) {
-      setReceipt({ kind: 'error', msg: e instanceof Error ? localizeApiError(e.message) : '下单失败' })
+      setReceipt({ kind: 'error', msg: e instanceof Error ? localizeApiError(e.message) : String(t('charts.ticket.placeFailed')) })
     } finally {
       setSubmitting(false)
     }
@@ -180,17 +191,17 @@ export default function OrderTicket({ symbol, accounts, quotesByAccount, globalQ
   return (
     <div className={`term-panel ${className}`}>
       <div className="term-pane-head">
-        快速下单 <span className="term-pane-head-r">{symbol || '—'}</span>
+        {t('charts.ticket.title')} <span className="term-pane-head-r">{symbol || '—'}</span>
       </div>
       <div className="term-ticket no-sb">
         {/* 买卖切换 / buy-sell toggle */}
         <div className="term-bs-row">
           <button type="button" className={`term-bs sell ${!isBuy ? 'on' : ''}`} onClick={() => setSide('SELL')}>
-            <span className="lab">卖 SELL</span>
+            <span className="lab">{t('charts.ticket.sell')}</span>
             <span className="px num">{px(bid)}</span>
           </button>
           <button type="button" className={`term-bs buy ${isBuy ? 'on' : ''}`} onClick={() => setSide('BUY')}>
-            <span className="lab">买 BUY</span>
+            <span className="lab">{t('charts.ticket.buy')}</span>
             <span className="px num">{px(ask)}</span>
           </button>
         </div>
@@ -198,7 +209,7 @@ export default function OrderTicket({ symbol, accounts, quotesByAccount, globalQ
         {/* 账户选择（多个在线账户时）/ account picker (when >1 online) */}
         {onlineAccounts.length > 1 && (
           <label className="term-field">
-            <span className="term-field-k">账户 Account</span>
+            <span className="term-field-k">{t('charts.ticket.account')}</span>
             <select className="term-select num" value={login} onChange={(e) => setLogin(e.target.value)}>
               {onlineAccounts.map((a) => (
                 <option key={a.login} value={a.login}>
@@ -211,13 +222,13 @@ export default function OrderTicket({ symbol, accounts, quotesByAccount, globalQ
 
         {/* 手数模式切换 / size mode */}
         <div className="term-seg2">
-          <button type="button" className={sizeMode === 'quick' ? 'on' : ''} onClick={() => setSizeMode('quick')}>手数</button>
-          <button type="button" className={sizeMode === 'risk' ? 'on' : ''} onClick={() => setSizeMode('risk')}>按风险%</button>
+          <button type="button" className={sizeMode === 'quick' ? 'on' : ''} onClick={() => setSizeMode('quick')}>{t('charts.ticket.sizeLots')}</button>
+          <button type="button" className={sizeMode === 'risk' ? 'on' : ''} onClick={() => setSizeMode('risk')}>{t('charts.ticket.sizeRisk')}</button>
         </div>
 
         {/* 手数输入 / volume */}
         <label className="term-field">
-          <span className="term-field-k">手数 Volume</span>
+          <span className="term-field-k">{t('charts.ticket.volume')}</span>
           <div className="term-stepper">
             <button type="button" onClick={() => stepLot(-1)}>−</button>
             <input
@@ -257,43 +268,43 @@ export default function OrderTicket({ symbol, accounts, quotesByAccount, globalQ
           </div>
         )}
         {sizeMode === 'risk' && slNum == null && (
-          <p className="term-ticket-warn">按风险%估手数需要先填止损 / risk sizing needs a stop-loss</p>
+          <p className="term-ticket-warn">{t('charts.ticket.riskNeedsSl')}</p>
         )}
 
         {/* 止损止盈 / SL & TP */}
         <div className="term-field-row">
           <label className="term-field">
-            <span className="term-field-k down">止损 SL</span>
+            <span className="term-field-k down">{t('charts.ticket.sl')}</span>
             <div className={`term-inp ${slInvalid ? 'bad' : ''}`}>
               <input className="num" value={sl} inputMode="decimal" placeholder="—" onChange={(e) => setSl(e.target.value.replace(/[^0-9.]/g, ''))} />
             </div>
           </label>
           <label className="term-field">
-            <span className="term-field-k up">止盈 TP</span>
+            <span className="term-field-k up">{t('charts.ticket.tp')}</span>
             <div className={`term-inp ${tpInvalid ? 'bad' : ''}`}>
               <input className="num" value={tp} inputMode="decimal" placeholder="—" onChange={(e) => setTp(e.target.value.replace(/[^0-9.]/g, ''))} />
             </div>
           </label>
         </div>
         {(slInvalid || tpInvalid) && (
-          <p className="term-ticket-warn">止损止盈方向填反了 / SL and TP are on the wrong side</p>
+          <p className="term-ticket-warn">{t('charts.ticket.slTpWrong')}</p>
         )}
 
         {/* 风险预览 / risk preview */}
         <div className="term-risk">
-          <span className="k">风险金额</span>
+          <span className="k">{t('charts.ticket.riskAmount')}</span>
           <span className="v down">{rrPreview?.riskUsd != null ? `−${money(rrPreview.riskUsd)} ${ccy}` : '—'}</span>
-          <span className="k">潜在盈利</span>
+          <span className="k">{t('charts.ticket.potentialProfit')}</span>
           <span className="v up">{rrPreview?.rewardUsd != null ? `+${money(rrPreview.rewardUsd)} ${ccy}` : '—'}</span>
-          <span className="k">盈亏比</span>
+          <span className="k">{t('charts.ticket.rr')}</span>
           <span className="v">{rrPreview?.rr != null ? `1 : ${rrPreview.rr.toFixed(2)}` : '—'}</span>
-          <span className="k">所需保证金</span>
+          <span className="k">{t('charts.ticket.requiredMargin')}</span>
           <span className="v">{estMargin != null ? `≈ ${money(estMargin)} ${ccy}` : '—'}</span>
         </div>
 
         {!hasAccounts && (
           <p className="term-ticket-warn">
-            {accounts.length === 0 ? '未连接 MT5，先连接 PRISMX Bridge' : '账户离线，先连接桥接程序'}
+            {accounts.length === 0 ? t('charts.ticket.noBridge') : t('charts.ticket.offline')}
           </p>
         )}
 
@@ -303,7 +314,9 @@ export default function OrderTicket({ symbol, accounts, quotesByAccount, globalQ
           disabled={!canSubmit}
           onClick={submit}
         >
-          {submitting ? '提交中…' : `${isBuy ? '买入 BUY' : '卖出 SELL'} · ${parseFloat(volume) || 0} 手`}
+          {submitting
+            ? t('charts.ticket.submitting')
+            : t('charts.ticket.place', { side: isBuy ? t('charts.ticket.buy') : t('charts.ticket.sell'), volume: parseFloat(volume) || 0 })}
         </button>
 
         {receipt && (

@@ -12,7 +12,7 @@
 // in any network environment (including mainland China) — it no longer
 // depends on TradingView's script or data channel. See CHART_SELFHOST_PLAN.md
 // at the repo root.
-import { useCallback, useEffect, useRef, useState, type PointerEvent as RPointerEvent, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   createChart,
@@ -117,7 +117,7 @@ function DrawToolsRow({
   wrap?: boolean
 }) {
   return (
-    <div className={`term-toolbar-tools no-sb ${wrap ? 'wrap' : ''}`}>
+    <div className={`term-toolbar-tools ${wrap ? 'wrap no-sb' : ''}`}>
       {(ToolList as Tool[]).map((toolName) => (
         <button
           key={toolName}
@@ -642,6 +642,34 @@ export default function ChartsPage() {
   // 右栏账户摘要展示的账户：优先在线账号，否则第一个绑定的。
   // Account shown in the right-rail summary: prefer an online one, else the first bound.
   const primaryAccount = accounts.find((a) => a.online) ?? accounts[0] ?? null
+
+  // 当前选中的交易账户（login）——由下单面板的账户下拉驱动，提升到这里让账户摘要、
+  // 底部持仓/挂单都跟着切换，而不是永远只显示第一个账户。空串表示还没手动选，
+  // 走 primaryAccount 兜底。/ Currently selected trading account (login), driven by
+  // the ticket's account picker and lifted here so the account summary and the
+  // positions/orders dock all follow the selection instead of being stuck on the
+  // first account. Empty string means no manual pick yet — falls back to primary.
+  const [selectedLogin, setSelectedLogin] = useState<string>('')
+  const activeAccount = accounts.find((a) => a.login === selectedLogin) ?? primaryAccount
+
+  // 选中账户不存在（账户列表变化）时，把选择重置回兜底账户。
+  // Reset the pick to the fallback when the selected account disappears.
+  useEffect(() => {
+    if (selectedLogin && !accounts.some((a) => a.login === selectedLogin)) setSelectedLogin('')
+  }, [accounts, selectedLogin])
+
+  // 按选中账户过滤持仓/挂单：多账户时才过滤，单账户或数据没带 login 时照旧全展示，
+  // 避免误伤。/ Filter positions/orders by the selected account — only when there
+  // are multiple accounts; single-account or login-less data shows as-is.
+  const multiAccount = accounts.length > 1
+  const accountPositions = useMemo(
+    () => (multiAccount && activeAccount ? positions.filter((p) => String(p.login ?? '') === String(activeAccount.login)) : positions),
+    [multiAccount, activeAccount, positions],
+  )
+  const accountOrders = useMemo(
+    () => (multiAccount && activeAccount ? orders.filter((o) => String(o.mt5Login ?? '') === String(activeAccount.login)) : orders),
+    [multiAccount, activeAccount, orders],
+  )
 
   const handleOrderConfirm = async (
     volume: number,
@@ -1398,19 +1426,14 @@ export default function ChartsPage() {
             Mobile view switcher (hidden on desktop & in fullscreen). */}
         {!isFullscreen && (
           <div className="term-mtabs lg:hidden">
-            {([
-              ['chart', '图表'],
-              ['watchlist', '自选'],
-              ['trade', '交易'],
-              ['positions', '持仓'],
-            ] as const).map(([key, label]) => (
+            {(['chart', 'watchlist', 'trade', 'positions'] as const).map((key) => (
               <button
                 key={key}
                 type="button"
                 className={mobileView === key ? 'on' : ''}
                 onClick={() => setMobileView(key)}
               >
-                {label}
+                {t(`charts.mtabs.${key}`)}
               </button>
             ))}
           </div>
@@ -1528,11 +1551,11 @@ export default function ChartsPage() {
       {!isFullscreen && (
         <div className="term-mbuysell lg:hidden">
           <button type="button" className="sell" onClick={() => setOrderSide('SELL')}>
-            <span className="lab">卖 SELL</span>
+            <span className="lab">{t('charts.ticket.sell')}</span>
             <span className="px num">{activeQuote?.bid != null ? activeQuote.bid.toFixed(decimals) : lastPrice ? lastPrice.toFixed(decimals) : '—'}</span>
           </button>
           <button type="button" className="buy" onClick={() => setOrderSide('BUY')}>
-            <span className="lab">买 BUY</span>
+            <span className="lab">{t('charts.ticket.buy')}</span>
             <span className="px num">{activeQuote?.ask != null ? activeQuote.ask.toFixed(decimals) : lastPrice ? lastPrice.toFixed(decimals) : '—'}</span>
           </button>
         </div>
@@ -1756,8 +1779,8 @@ export default function ChartsPage() {
         <div className="hidden lg:flex lg:h-[196px] lg:flex-shrink-0 lg:flex-col">
           <PositionsDock
             className="flex-1"
-            positions={positions}
-            orders={orders}
+            positions={accountPositions}
+            orders={accountOrders}
             digitsFor={digitsFor}
             onToast={showToast}
           />
@@ -1790,6 +1813,8 @@ export default function ChartsPage() {
             globalQuote={activeQuote}
             refPrice={lastPrice}
             digits={decimals}
+            selectedLogin={selectedLogin}
+            onSelectLogin={setSelectedLogin}
             onPlace={(side, volume, mt5Login, stopLoss, takeProfit, coid) =>
               placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid)
             }
@@ -1802,12 +1827,12 @@ export default function ChartsPage() {
         <div className={`term-mview lg:hidden ${mobileView === 'positions' ? 'flex flex-col gap-2.5' : 'hidden'}`}>
           <PositionsDock
             className="flex-1"
-            positions={positions}
-            orders={orders}
+            positions={accountPositions}
+            orders={accountOrders}
             digitsFor={digitsFor}
             onToast={showToast}
           />
-          <AccountSummary account={primaryAccount} />
+          <AccountSummary account={activeAccount} />
         </div>
       )}
 
@@ -1834,11 +1859,13 @@ export default function ChartsPage() {
           globalQuote={activeQuote}
           refPrice={lastPrice}
           digits={decimals}
+          selectedLogin={selectedLogin}
+          onSelectLogin={setSelectedLogin}
           onPlace={(side, volume, mt5Login, stopLoss, takeProfit, coid) =>
             placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid)
           }
         />
-        <AccountSummary account={primaryAccount} />
+        <AccountSummary account={activeAccount} />
       </div>
 
       {settingsOpen && (

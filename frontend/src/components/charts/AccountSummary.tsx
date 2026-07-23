@@ -7,6 +7,7 @@
 // an online one, else the first. Used/free margin and margin level aren't
 // separately reported by the bridge yet, so we show what balance/equity give us
 // and mark the rest "—" — never fabricate numbers.
+import { useTranslation } from 'react-i18next'
 import type { MT5Account } from '../../api/types'
 
 interface Props {
@@ -20,6 +21,7 @@ function money(v: number | null | undefined, ccy: string): string {
 }
 
 export default function AccountSummary({ account, className = '' }: Props) {
+  const { t } = useTranslation()
   const ccy = account?.accountCurrency || 'USD'
   const balance = account?.balance ?? null
   const equity = account?.equity ?? null
@@ -30,27 +32,27 @@ export default function AccountSummary({ account, className = '' }: Props) {
   return (
     <div className={`term-panel term-account ${className}`}>
       <div className="term-pane-head">
-        账户
-        <span className="term-pane-head-r">{account ? `#${account.login}` : '未连接'}</span>
+        {t('charts.account.title')}
+        <span className="term-pane-head-r">{account ? `#${account.login}` : t('charts.account.disconnected')}</span>
       </div>
       <div className="term-account-body">
         {!account ? (
           <div className="term-account-empty">
-            连接 PRISMX Bridge 后显示账户余额、净值与保证金。
+            {t('charts.account.empty')}
           </div>
         ) : (
           <>
-            <Row k="余额 Balance" v={money(balance, ccy)} />
-            <Row k="净值 Equity" v={money(equity, ccy)} strong />
+            <Row k={String(t('charts.account.balance'))} v={money(balance, ccy)} />
+            <Row k={String(t('charts.account.equity'))} v={money(equity, ccy)} strong />
             <Row
-              k="浮动盈亏"
+              k={String(t('charts.account.floating'))}
               v={money(floating, ccy)}
               tone={floating == null ? undefined : floating >= 0 ? 'up' : 'down'}
             />
             <div className="term-account-meta">
-              <span>{account.leverage ? `杠杆 1:${account.leverage}` : ''}</span>
+              <span>{account.leverage ? t('charts.account.leverage', { leverage: account.leverage }) : ''}</span>
               <span className={account.online ? 'up' : ''}>
-                {account.online ? '● 在线' : '○ 离线'} · {account.server || account.company || ''}
+                {account.online ? t('charts.account.online') : t('charts.account.offlineDot')} · {account.server || account.company || ''}
               </span>
             </div>
           </>

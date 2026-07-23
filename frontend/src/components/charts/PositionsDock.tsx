@@ -11,6 +11,7 @@
 // backend flow as the orders page / position card, just rendered as a dense
 // terminal table.
 import { Fragment, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Order, Position } from '../../api/types'
 import { orderApi } from '../../api/client'
 import { clientOrderId, displaySymbol, localizeApiError } from '../../api/utils'
@@ -27,6 +28,7 @@ interface Props {
 type Tab = 'positions' | 'orders'
 
 export default function PositionsDock({ positions, orders, digitsFor, onToast, className = '' }: Props) {
+  const { t } = useTranslation()
   const [tab, setTab] = useState<Tab>('positions')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [confirmClose, setConfirmClose] = useState<Position | null>(null)
@@ -60,10 +62,10 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
         mt5Login: p.login ?? null,
         volume,
       })
-      onToast(volume != null ? '部分平仓指令已发出' : '平仓指令已发出', 'info')
+      onToast(volume != null ? String(t('charts.dock.partialCloseSent')) : String(t('charts.dock.closeSent')), 'info')
       setExpanded(null)
     } catch (e) {
-      onToast(e instanceof Error ? localizeApiError(e.message) : '平仓失败', 'error')
+      onToast(e instanceof Error ? localizeApiError(e.message) : String(t('charts.dock.closeFailed')), 'error')
     } finally {
       setBusyId(null)
     }
@@ -82,10 +84,10 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
         stopLoss: sl,
         takeProfit: tp,
       })
-      onToast('改止损止盈指令已发出', 'info')
+      onToast(String(t('charts.dock.modifySent')), 'info')
       setExpanded(null)
     } catch (e) {
-      onToast(e instanceof Error ? localizeApiError(e.message) : '改单失败', 'error')
+      onToast(e instanceof Error ? localizeApiError(e.message) : String(t('charts.dock.modifyFailed')), 'error')
     } finally {
       setBusyId(null)
     }
@@ -95,9 +97,9 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
     setBusyId(`o-${o.id}`)
     try {
       await orderApi.cancel(o.id)
-      onToast('已撤销挂单', 'info')
+      onToast(String(t('charts.dock.cancelSent')), 'info')
     } catch (e) {
-      onToast(e instanceof Error ? localizeApiError(e.message) : '撤销失败', 'error')
+      onToast(e instanceof Error ? localizeApiError(e.message) : String(t('charts.dock.cancelFailed')), 'error')
     } finally {
       setBusyId(null)
     }
@@ -110,23 +112,23 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
     <div className={`term-panel term-dock ${className}`}>
       <div className="term-dock-tabs">
         <button type="button" className={`term-dock-tab ${tab === 'positions' ? 'on' : ''}`} onClick={() => setTab('positions')}>
-          持仓 <span className="term-dock-cnt">{positions.length}</span>
+          {t('charts.dock.positions')} <span className="term-dock-cnt">{positions.length}</span>
         </button>
         <button type="button" className={`term-dock-tab ${tab === 'orders' ? 'on' : ''}`} onClick={() => setTab('orders')}>
-          挂单 <span className="term-dock-cnt">{pendingOrders.length}</span>
+          {t('charts.dock.orders')} <span className="term-dock-cnt">{pendingOrders.length}</span>
         </button>
       </div>
 
       <div className="term-dock-body no-sb">
         {tab === 'positions' ? (
           positions.length === 0 ? (
-            <div className="term-dock-empty">暂无持仓 / No open positions</div>
+            <div className="term-dock-empty">{t('charts.dock.noPositions')}</div>
           ) : (
             <table className="term-tbl">
               <thead>
                 <tr>
-                  <th>品种</th><th>方向</th><th>手数</th><th>开仓价</th><th>现价</th>
-                  <th>止损</th><th>止盈</th><th>浮动盈亏</th><th></th>
+                  <th>{t('charts.dock.colSymbol')}</th><th>{t('charts.dock.colSide')}</th><th>{t('charts.dock.colVolume')}</th><th>{t('charts.dock.colEntry')}</th><th>{t('charts.dock.colCurrent')}</th>
+                  <th>{t('charts.dock.colSl')}</th><th>{t('charts.dock.colTp')}</th><th>{t('charts.dock.colPnl')}</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -149,7 +151,7 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
                     <Fragment key={p.ticket ?? i}>
                       <tr className={isOpen ? 'term-tbl-open' : ''}>
                         <td className="term-tbl-sym">{displaySymbol(p.symbol)}</td>
-                        <td><span className={`term-pill ${isBuy ? 'buy' : 'sell'}`}>{isBuy ? '买' : '卖'}</span></td>
+                        <td><span className={`term-pill ${isBuy ? 'buy' : 'sell'}`}>{isBuy ? t('charts.dock.buy') : t('charts.dock.sell')}</span></td>
                         <td className="num">{p.volume.toFixed(2)}</td>
                         <td className="num">{fmt(p.entryPrice, d)}</td>
                         <td className="num">{fmt(p.currentPrice, d)}</td>
@@ -163,7 +165,7 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
                             disabled={!p.ticket || busy}
                             onClick={() => setConfirmClose(p)}
                           >
-                            平仓
+                            {t('charts.dock.close')}
                           </button>
                           <button
                             type="button"
@@ -171,7 +173,7 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
                             disabled={!p.ticket || busy}
                             onClick={() => toggleExpand(p)}
                           >
-                            管理
+                            {t('charts.dock.manage')}
                           </button>
                         </td>
                       </tr>
@@ -181,7 +183,7 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
                             <div className="term-pos-panel">
                               {/* 部分平仓 / partial close */}
                               <div className="term-pos-group">
-                                <span className="term-pos-group-k">部分平仓（最多 {p.volume}）</span>
+                                <span className="term-pos-group-k">{t('charts.dock.partialClose', { max: p.volume })}</span>
                                 <div className="term-pos-row">
                                   <input
                                     className={`term-pos-inp num ${volBad ? 'bad' : ''}`}
@@ -195,24 +197,24 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
                                     disabled={busy || volBad}
                                     onClick={() => closePosition(p, volNum)}
                                   >
-                                    平掉 {volBad ? '' : volNum} 手
+                                    {t('charts.dock.closeLots', { lots: volBad ? '' : volNum })}
                                   </button>
                                 </div>
                               </div>
                               {/* 改止损止盈 / modify SL·TP */}
                               <div className="term-pos-group">
-                                <span className="term-pos-group-k">改止损 / 止盈（0 或留空清除）</span>
+                                <span className="term-pos-group-k">{t('charts.dock.modifySlTp')}</span>
                                 <div className="term-pos-row">
                                   <input
                                     className={`term-pos-inp num ${slBad ? 'bad' : ''}`}
-                                    placeholder="止损 SL"
+                                    placeholder={String(t('charts.ticket.sl'))}
                                     value={form.sl}
                                     inputMode="decimal"
                                     onChange={(e) => setForm((f) => ({ ...f, sl: e.target.value.replace(/[^0-9.]/g, '') }))}
                                   />
                                   <input
                                     className={`term-pos-inp num ${tpBad ? 'bad' : ''}`}
-                                    placeholder="止盈 TP"
+                                    placeholder={String(t('charts.ticket.tp'))}
                                     value={form.tp}
                                     inputMode="decimal"
                                     onChange={(e) => setForm((f) => ({ ...f, tp: e.target.value.replace(/[^0-9.]/g, '') }))}
@@ -223,10 +225,10 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
                                     disabled={busy || slBad || tpBad}
                                     onClick={() => modifyPosition(p, parseFloat(form.sl) || 0, parseFloat(form.tp) || 0)}
                                   >
-                                    修改
+                                    {t('charts.dock.modify')}
                                   </button>
                                 </div>
-                                {(slBad || tpBad) && <span className="term-pos-warn">方向填反了：买单止损须低于现价、止盈须高于现价</span>}
+                                {(slBad || tpBad) && <span className="term-pos-warn">{t('charts.dock.slTpWrong')}</span>}
                               </div>
                             </div>
                           </td>
@@ -239,21 +241,21 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
             </table>
           )
         ) : pendingOrders.length === 0 ? (
-          <div className="term-dock-empty">暂无挂单 / No pending orders</div>
+          <div className="term-dock-empty">{t('charts.dock.noOrders')}</div>
         ) : (
           <table className="term-tbl">
             <thead>
               <tr>
-                <th>品种</th><th>方向</th><th>手数</th><th>状态</th><th></th>
+                <th>{t('charts.dock.colSymbol')}</th><th>{t('charts.dock.colSide')}</th><th>{t('charts.dock.colVolume')}</th><th>{t('charts.dock.colStatus')}</th><th></th>
               </tr>
             </thead>
             <tbody>
               {pendingOrders.map((o) => (
                 <tr key={o.id}>
                   <td className="term-tbl-sym">{displaySymbol(o.symbol)}</td>
-                  <td><span className={`term-pill ${o.side === 'BUY' ? 'buy' : 'sell'}`}>{o.side === 'BUY' ? '买' : '卖'}</span></td>
+                  <td><span className={`term-pill ${o.side === 'BUY' ? 'buy' : 'sell'}`}>{o.side === 'BUY' ? t('charts.dock.buy') : t('charts.dock.sell')}</span></td>
                   <td className="num">{o.volume.toFixed(2)}</td>
-                  <td className="term-tbl-status">待执行</td>
+                  <td className="term-tbl-status">{t('charts.dock.pending')}</td>
                   <td>
                     <button
                       type="button"
@@ -261,7 +263,7 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
                       disabled={busyId === `o-${o.id}`}
                       onClick={() => cancelOrder(o)}
                     >
-                      撤销
+                      {t('charts.dock.cancel')}
                     </button>
                   </td>
                 </tr>
@@ -273,9 +275,13 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
 
       {confirmClose && (
         <ConfirmModal
-          title="全部平仓"
-          message={`确认平掉 ${displaySymbol(confirmClose.symbol)} ${confirmClose.side === 'BUY' ? '买' : '卖'} ${confirmClose.volume} 手？`}
-          confirmLabel="平仓"
+          title={String(t('charts.dock.confirmCloseTitle'))}
+          message={String(t('charts.dock.confirmCloseMsg', {
+            symbol: displaySymbol(confirmClose.symbol),
+            side: confirmClose.side === 'BUY' ? t('charts.dock.buy') : t('charts.dock.sell'),
+            volume: confirmClose.volume,
+          }))}
+          confirmLabel={String(t('charts.dock.close'))}
           danger
           busy={busyId === `p-${confirmClose.ticket}`}
           onConfirm={() => {
