@@ -27,7 +27,7 @@ from app.schemas import (
     OrderRequest,
 )
 from app.services.connection_manager import manager
-from app.services.deps import get_current_user, is_account_online, validate_order
+from app.services.deps import get_current_user, is_account_online, validate_order, validate_sl_tp_direction
 from app.services.discipline import compute_discipline
 from app.services.plans import is_realtime_plan
 from app.services.trade_performance import compute_personal_winrate
@@ -191,6 +191,11 @@ def place_order(
         stop_loss = req.stopLoss
     if req.takeProfit is not None:
         take_profit = req.takeProfit
+
+    # 止损止盈方向校验：两者都填时买单必须 SL<TP、卖单 SL>TP，挡住绕过前端
+    # 直接发的"填反了"订单（前端已拦一层，这里是服务端兜底）。
+    # SL/TP direction check (server-side backstop for the UI's own check).
+    validate_sl_tp_direction(req.side, stop_loss, take_profit)
 
     # 4) 落库为 PENDING，等待桥接轮询拉取 / persist as PENDING for the bridge to poll
     order = Order(
@@ -527,6 +532,10 @@ def modify_position(
     """
     # 校验目标账号归属，防止越权操控他人/不存在账号 / verify account ownership
     _assert_account_owned(db, user.id, req.mt5Login)
+
+    # 止损止盈方向校验：两者都非 0 时买单必须 SL<TP、卖单 SL>TP（0 表示清除该侧）。
+    # SL/TP direction check (0 means "clear that side" and is skipped).
+    validate_sl_tp_direction(req.side, req.stopLoss, req.takeProfit)
 
     existing = (
         db.query(Order)

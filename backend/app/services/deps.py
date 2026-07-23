@@ -146,3 +146,35 @@ def validate_order(symbol: str, side: str, volume: float, equity: float | None =
                     f" / Volume exceeds equity-based cap (~{max_by_equity:.2f} lots)"
                 ),
             )
+
+
+def validate_sl_tp_direction(
+    side: str, stop_loss: float | None, take_profit: float | None
+) -> None:
+    """服务端止损/止盈方向校验：两者都填时，买单必须 SL < TP、卖单必须 SL > TP。
+
+    只做相对关系判断，不需要参考入场价——纯粹挡住"把止损止盈填反"的错误订单。
+    前端 ChartOrderModal 已经拦了一层，这里是服务端兜底：绕过网页直接发请求
+    时，这种明显填反的单也不会被静默接受再丢给 MT5。0 / None 表示该侧未设置
+    （下单时省略、改单时 0 表示清除），跳过不校验。
+
+    Server-side SL/TP direction check: when both are set, a BUY needs SL < TP and
+    a SELL needs SL > TP. Purely relative — no entry reference needed — it just
+    catches a swapped SL/TP. The frontend already blocks this in the order
+    modal; this is the server-side backstop so an API request crafted around the
+    UI can't get an obviously-inverted order silently forwarded to MT5. A value
+    of 0 / None means that side isn't set (omitted on place, 0 clears on modify)
+    and is skipped.
+    """
+    if not stop_loss or not take_profit or stop_loss <= 0 or take_profit <= 0:
+        return
+    if side == "BUY" and stop_loss >= take_profit:
+        raise HTTPException(
+            status_code=400,
+            detail="买单止损必须低于止盈 / For a BUY, stop-loss must be below take-profit",
+        )
+    if side == "SELL" and stop_loss <= take_profit:
+        raise HTTPException(
+            status_code=400,
+            detail="卖单止损必须高于止盈 / For a SELL, stop-loss must be above take-profit",
+        )

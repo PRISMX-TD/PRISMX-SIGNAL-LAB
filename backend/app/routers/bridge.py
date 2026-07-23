@@ -105,6 +105,23 @@ _auth_cache: dict[str, tuple[float, User]] = {}
 _auth_cache_lock = Lock()
 
 
+def invalidate_auth_cache_for_hash(token_hash: str | None) -> None:
+    """按 token 哈希清除鉴权缓存条目。Token 重置时调用，让旧 Token 立即失效，
+    不再有"重置后旧 Token 仍能用最多 TTL 秒"的窗口——重置本就是为了封掉一个
+    可能已泄露的 Token，这个窗口必须归零。数据库里存的 user.api_token 就是
+    Token 的 SHA-256 哈希，与本缓存的键完全一致，所以传旧的哈希即可精确命中。
+    Drop a token-hash entry from the auth cache. Called on token reset so the old
+    token stops working immediately, closing the "old token still valid for up to
+    TTL seconds after reset" window — resetting exists precisely to kill a
+    possibly-leaked token, so that window must be zero. The stored
+    user.api_token is the token's SHA-256 hash, identical to this cache's key, so
+    passing the old hash targets the exact entry."""
+    if not token_hash:
+        return
+    with _auth_cache_lock:
+        _auth_cache.pop(token_hash, None)
+
+
 def _authenticate_cached(db: Session, x_api_token: str | None) -> User | None:
     if not x_api_token:
         return None

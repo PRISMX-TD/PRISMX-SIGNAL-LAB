@@ -67,6 +67,26 @@ class Settings(BaseSettings):
     # dropped by the Supabase pooler.
     DB_POOL_RECYCLE: int = 1800
 
+    # 反向代理信任列表：应用挂在同机 Nginx 反代后面，客户端真实 IP 在
+    # X-Forwarded-For 头里。只有当直连对端（即 Nginx，本机 127.0.0.1）在此
+    # 列表内时才采信该头，把 request.client.host 改写成真实客户端 IP——否则
+    # slowapi 会把所有请求都算成 Nginx 的本机 IP，按 IP 的限流与按邮箱的登录
+    # 锁定全部形同虚设（大家共用同一个桶）。列表外的对端一律不采信，攻击者
+    # 直连或伪造 X-Forwarded-For 都无法借此绕过限流。设为 "*" 表示信任所有
+    # 对端（仅当上游一定是可信代理时才用）；留空则彻底关闭该改写（回到只认
+    # 直连 IP 的行为）。多个用逗号分隔。
+    # Trusted reverse-proxy list: the app runs behind a same-host Nginx, so the
+    # real client IP lives in X-Forwarded-For. Only when the immediate peer (the
+    # local Nginx, 127.0.0.1) is in this list is that header honored to rewrite
+    # request.client.host to the real client IP — otherwise slowapi keys every
+    # request on Nginx's loopback IP, collapsing the per-IP rate limit and
+    # per-email login lockout into one shared bucket. A peer not in the list is
+    # never trusted, so a direct connection or a forged X-Forwarded-For can't use
+    # this to dodge limits. "*" trusts every peer (only if the upstream is always
+    # a trusted proxy); empty disables the rewrite entirely (back to the raw peer
+    # IP). Comma-separated.
+    TRUSTED_PROXY_IPS: str = "127.0.0.1"
+
     # 跨域 / CORS（本地开发 + 生产前端域名 / local dev + production frontend origins）
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",

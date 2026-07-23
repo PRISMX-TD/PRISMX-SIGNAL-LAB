@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.core.config import settings
 from app.core.database import init_db
@@ -90,6 +91,23 @@ app.add_middleware(
     # header so cross-origin frontend JS can read it
     expose_headers=["X-Refreshed-Token"],
 )
+
+# 反代真实 IP 还原：挂在同机 Nginx 后面时，把 X-Forwarded-For 里的真实客户端
+# IP 还原到 request.client.host，让 slowapi 的按 IP 限流与按邮箱登录锁定按真
+# 实客户端计数，而不是全部落在 Nginx 的本机 IP 上（否则等于没有限流）。只信
+# 任 TRUSTED_PROXY_IPS 里的对端，直连或伪造 XFF 无法借此绕过。必须最后添加
+# ——Starlette 里后添加的中间件在最外层、最先执行，才能在 SlowAPIMiddleware
+# 之前把 client 改写好。留空则不启用（如本地开发直连）。
+# Restore the real client IP behind the same-host Nginx: rewrite
+# request.client.host from X-Forwarded-For so slowapi's per-IP rate limits and
+# per-email login lockout count per real client instead of collapsing onto
+# Nginx's loopback IP. Only peers in TRUSTED_PROXY_IPS are trusted, so a direct
+# connection or a forged XFF can't abuse it. Added last on purpose — in
+# Starlette the most-recently-added middleware is outermost and runs first, so
+# it rewrites `client` before SlowAPIMiddleware sees it. Empty disables it (e.g.
+# local dev with a direct connection).
+if settings.TRUSTED_PROXY_IPS.strip():
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=settings.TRUSTED_PROXY_IPS)
 
 # REST 路由 / REST routers
 app.include_router(auth.router, prefix=settings.API_PREFIX)
