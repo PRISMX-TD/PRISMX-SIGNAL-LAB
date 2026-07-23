@@ -106,6 +106,79 @@ function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, b
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
 }
 
+// ──── 时间 ⇄ 像素坐标转换（支持超出最新 K 线的空白区）────
+// lightweight-charts 的 timeToCoordinate/coordinateToTime 只在有数据的区间内
+// 有效——在最新 K 线右侧（或最早 K 线左侧）的空白区会返回 null，导致画线无法
+// 画到、也无法渲染到未来区域。这里改用「逻辑索引 Logical」通道：逻辑索引与
+// 像素坐标是线性且无界的，配合已加载的 bar 时间数组做外推，就能把时间映射到
+// 空白区、并反向还原，既能画到未来又能稳定持久化（存的仍是真实/外推时间）。
+// The engine's time<->coordinate conversions only work within the data range;
+// they return null in the whitespace to the right of the last bar (or left of
+// the first), so drawings can't be placed or rendered in the future area. We
+// bridge through the Logical index instead — logical<->coordinate is linear and
+// unbounded — extrapolating with the loaded bar-time array. This lets drawings
+// extend past the latest candle while still persisting stable time values.
+
+// 模块级 bar 时间访问器，由 DrawLayer 组件挂上；primitive 渲染时读取。
+// Module-level bar-times accessor, set by the DrawLayer component; read by the
+// primitive during rendering.
+let _barTimesGetter: () => number[] = () => []
+
+function barInterval(bt: number[]): number {
+  const n = bt.length
+  if (n < 2) return 0
+  return bt[n - 1] - bt[n - 2]
+}
+
+// 时间 → 逻辑索引（可外推到数据范围之外，返回小数/负数）。
+function timeToLogical(bt: number[], t: number): number | null {
+  const n = bt.length
+  if (n === 0) return null
+  if (n === 1) return 0
+  const iv = barInterval(bt)
+  if (t <= bt[0]) return iv ? (t - bt[0]) / iv : 0
+  if (t >= bt[n - 1]) return iv ? (n - 1) + (t - bt[n - 1]) / iv : n - 1
+  let lo = 0, hi = n - 1
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (bt[mid] < t) lo = mid + 1; else hi = mid }
+  if (bt[lo] === t) return lo
+  const prev = lo - 1
+  const span = bt[lo] - bt[prev] || 1
+  return prev + (t - bt[prev]) / span
+}
+
+// 逻辑索引 → 时间（同样支持外推）。
+function logicalToTime(bt: number[], logical: number): number | null {
+  const n = bt.length
+  if (n === 0) return null
+  if (n === 1) return bt[0]
+  const iv = barInterval(bt)
+  if (logical <= 0) return Math.round(bt[0] + logical * iv)
+  if (logical >= n - 1) return Math.round(bt[n - 1] + (logical - (n - 1)) * iv)
+  const lo = Math.floor(logical), hi = Math.ceil(logical)
+  if (lo === hi) return bt[lo]
+  return Math.round(bt[lo] + (bt[hi] - bt[lo]) * (logical - lo))
+}
+
+// 时间 → x 像素：先走原生转换（快路径），落空则经逻辑索引外推。
+function timeToX(chart: IChartApi, t: number): number | null {
+  const ts = chart.timeScale()
+  const c = ts.timeToCoordinate(t as UTCTimestamp) as number | null
+  if (c != null) return c
+  const lg = timeToLogical(_barTimesGetter(), t)
+  if (lg == null) return null
+  return ts.logicalToCoordinate(lg as Logical) as number | null
+}
+
+// x 像素 → 时间：先走原生转换，落空则经逻辑索引外推。
+function xToTime(chart: IChartApi, x: number): number | null {
+  const ts = chart.timeScale()
+  const t = ts.coordinateToTime(x) as number | null
+  if (t != null) return t
+  const lg = ts.coordinateToLogical(x) as number | null
+  if (lg == null) return null
+  return logicalToTime(_barTimesGetter(), lg)
+}
+
 // ──── ISeriesPrimitive 画线基类 / drawing primitive base ────
 class DrawPrimitive {
   id: string
@@ -154,10 +227,12 @@ class DrawPrimitive {
   updateAllViews() { /* no-op, renderer reads live state */ }
 
   autoscaleInfo(_start: Logical, _end: Logical): AutoscaleInfo | null {
-    if (this.pts.length === 0) return null
-    const prices = this.pts.map((a) => a.p).filter((p) => p > 0)
-    if (prices.length === 0) return null
-    return { priceRange: { minValue: Math.min(...prices), maxValue: Math.max(...prices) } }
+    // 画线不参与价格轴自动缩放：否则一条画到远离行情的线会把价格范围强行
+    // 撑大，导致 K 线被压扁。画线只是叠加物，应随图表缩放，而非反向影响它。
+    // Drawings opt out of price autoscale: otherwise a line drawn far from the
+    // current price forces the range to expand and squashes the candles.
+    // Drawings are overlays — they should follow the chart's scale, not drive it.
+    return null
   }
 
   hitTest(x: number, y: number): PrimitiveHoveredItem | null {
@@ -181,11 +256,10 @@ class DrawPrimitive {
     this._ru?.()
   }
 
-  // pixel conversion using chart APIs
+  // pixel conversion using chart APIs (tx 经逻辑索引外推，支持空白区渲染)
   _toPixel(): { x: number; y: number }[] | null {
     if (!this._chart || !this._series) return null
-    const ts = this._chart.timeScale()
-    const tx = (t: number) => ts.timeToCoordinate(t as UTCTimestamp) as number | null
+    const tx = (t: number) => timeToX(this._chart!, t)
     const ty = (p: number) => this._series!.priceToCoordinate(p) as number | null
 
     if (this.type === 'hline') { const y = ty(this.pts[0].p); return y != null ? [{ x: 0, y }] : null }
@@ -396,9 +470,14 @@ class RendererImpl implements IPrimitivePaneRenderer {
 }
 
 // ──── 组件 / component ────
-function DrawLayer({ chart, series, host, symbol, barTimes: _barTimes, digits = 2, hideToolbar }: Props, ref: React.Ref<DrawLayerHandle>) {
+function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, hideToolbar }: Props, ref: React.Ref<DrawLayerHandle>) {
   const { t } = useTranslation()
   const { getPref, setPref } = usePrefs()
+
+  // 把 bar 时间访问器挂到模块级，供 primitive 渲染与坐标外推读取（见文件顶部
+  // timeToX/xToTime）。/ Expose the bar-times accessor at module scope for the
+  // primitive renderer and coordinate extrapolation (see timeToX/xToTime above).
+  _barTimesGetter = barTimes
 
   const tol = isTouchDevice ? TOL_MOBILE : TOL_DESKTOP
   const handleSz = isTouchDevice ? HANDLE_MOBILE : HANDLE_DESKTOP
@@ -624,8 +703,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes: _barTimes, digits = 
 
   const hitHandle = useCallback((d: Drawing, x: number, y: number): number => {
     if (d.locked) return -1
-    const ts = chart.timeScale()
-    const toPx = (pt: Point) => ({ x: ts.timeToCoordinate(pt.t as UTCTimestamp), y: series.priceToCoordinate(pt.p) })
+    const toPx = (pt: Point) => ({ x: timeToX(chart, pt.t), y: series.priceToCoordinate(pt.p) })
     const check = (cx: number | null, cy: number | null) => cx != null && cy != null && Math.abs(x - cx) <= handleSz + 2 && Math.abs(y - cy) <= handleSz + 2
 
     if (d.type === 'hline') {
@@ -633,11 +711,11 @@ function DrawLayer({ chart, series, host, symbol, barTimes: _barTimes, digits = 
       return check(host.clientWidth / 2, py) ? 0 : -1
     }
     if (d.type === 'vline') {
-      const px = ts.timeToCoordinate(d.pts[0].t as UTCTimestamp)
+      const px = timeToX(chart, d.pts[0].t)
       return check(px, host.clientHeight / 2) ? 0 : -1
     }
     if (d.type === 'crossline') {
-      const px = ts.timeToCoordinate(d.pts[0].t as UTCTimestamp)
+      const px = timeToX(chart, d.pts[0].t)
       const py = series.priceToCoordinate(d.pts[0].p)
       return check(px, py) ? 0 : -1
     }
@@ -655,20 +733,19 @@ function DrawLayer({ chart, series, host, symbol, barTimes: _barTimes, digits = 
   }, [chart, series, host, handleSz])
 
   const hitSingle = useCallback((x: number, y: number, d: Drawing): Drawing | null => {
-    const ts = chart.timeScale()
-    const toPx = (pt: Point) => ({ x: ts.timeToCoordinate(pt.t as UTCTimestamp), y: series.priceToCoordinate(pt.p) })
+    const toPx = (pt: Point) => ({ x: timeToX(chart, pt.t), y: series.priceToCoordinate(pt.p) })
     if (d.type === 'hline') {
       const py = series.priceToCoordinate(d.pts[0].p)
       if (py != null && Math.abs(y - py) <= tol) return d
       return null
     }
     if (d.type === 'vline') {
-      const px = ts.timeToCoordinate(d.pts[0].t as UTCTimestamp)
+      const px = timeToX(chart, d.pts[0].t)
       if (px != null && Math.abs(x - px) <= tol) return d
       return null
     }
     if (d.type === 'crossline') {
-      const px = ts.timeToCoordinate(d.pts[0].t as UTCTimestamp)
+      const px = timeToX(chart, d.pts[0].t)
       const py = series.priceToCoordinate(d.pts[0].p)
       if ((px != null && Math.abs(x - px) <= tol) || (py != null && Math.abs(y - py) <= tol)) return d
       return null
@@ -727,7 +804,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes: _barTimes, digits = 
       // single-click tools
       if (cur === 'hline' || cur === 'vline' || cur === 'crossline') {
         const p = series.coordinateToPrice(y) as number | null
-        const tm = chart.timeScale().coordinateToTime(x) as number | null
+        const tm = xToTime(chart, x)
         if (cur === 'hline') {
           if (p == null) return
           const d: Drawing = { id: uid(), type: 'hline', pts: [{ t: 0, p }], color: colorRef.current }
@@ -802,9 +879,9 @@ function DrawLayer({ chart, series, host, symbol, barTimes: _barTimes, digits = 
       const temp = tempPrimRef.current
       if (!temp) return
       const p = series.coordinateToPrice(y) as number | null
-      const tm = chart.timeScale().coordinateToTime(x) as number | null
+      const tm = xToTime(chart, x)
       const p0 = series.coordinateToPrice(drag.startY) as number | null
-      const tm0 = chart.timeScale().coordinateToTime(drag.startX) as number | null
+      const tm0 = xToTime(chart, drag.startX)
       if (drag.type === 'hline') {
         if (p != null) temp.pts = [{ t: 0, p }]
       } else if (drag.type === 'vline') {
@@ -819,13 +896,12 @@ function DrawLayer({ chart, series, host, symbol, barTimes: _barTimes, digits = 
       temp.requestUpdate()
     } else if (drag.mode === 'move') {
       const dx = x - drag.startX, dy = y - drag.startY
-      const ts = chart.timeScale()
       const newPts = drag.origPts.map((pt) => {
-        const origX = ts.timeToCoordinate(pt.t as UTCTimestamp)
+        const origX = timeToX(chart, pt.t)
         const origY = series.priceToCoordinate(pt.p)
         if (origX == null || origY == null) return pt
         const newX = origX + dx, newY = origY + dy
-        const newT = ts.coordinateToTime(newX) as number | null
+        const newT = xToTime(chart, newX)
         const newP = series.coordinateToPrice(newY) as number | null
         if (newT == null || newP == null) return pt
         return { t: newT, p: newP }
@@ -839,7 +915,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes: _barTimes, digits = 
       }
     } else if (drag.mode === 'handle') {
       const p = series.coordinateToPrice(y) as number | null
-      const tm = chart.timeScale().coordinateToTime(x) as number | null
+      const tm = xToTime(chart, x)
       if (p == null || tm == null) return
       const list = drawingsRef.current
       const d = list.find((d) => d.id === drag.id)
@@ -879,9 +955,8 @@ function DrawLayer({ chart, series, host, symbol, barTimes: _barTimes, digits = 
       }
       if (d.type !== 'hline' && d.type !== 'vline' && d.type !== 'crossline') {
         // check min drag distance
-        const ts = chart.timeScale()
-        const a = ts.timeToCoordinate(d.pts[0].t as UTCTimestamp)
-        const b = ts.timeToCoordinate(d.pts[1].t as UTCTimestamp)
+        const a = timeToX(chart, d.pts[0].t)
+        const b = timeToX(chart, d.pts[1].t)
         const ay = series.priceToCoordinate(d.pts[0].p)
         const by = series.priceToCoordinate(d.pts[1].p)
         if (a != null && b != null && ay != null && by != null && Math.hypot(b - a, by - ay) < 4) return

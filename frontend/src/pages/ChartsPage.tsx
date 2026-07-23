@@ -887,6 +887,11 @@ export default function ChartsPage() {
         borderColor: 'rgba(139, 70, 255, 0.15)',
         timeVisible: true,
         secondsVisible: false,
+        // 最新 K 线右侧预留一段空白，便于把趋势线/斐波那契等画到未来区域
+        // （配合 DrawLayer 的逻辑索引外推坐标转换）。/ Reserve whitespace to the
+        // right of the latest candle so trend lines / fib etc. can be drawn into
+        // the future (works with DrawLayer's logical-index coordinate mapping).
+        rightOffset: 8,
         // 坐标轴刻度用的格式化函数，见上方 fmtChartTime 的说明。
         // Axis tick-mark formatter — see fmtChartTime's comment above.
         tickMarkFormatter: fmtChartTime,
