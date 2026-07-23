@@ -75,6 +75,33 @@ class User(Base):
     # before the change; the password-change request itself gets back a
     # freshly stamped token so the user isn't logged out by their own action.
     token_version = Column(Integer, default=0, nullable=False)
+    # 该邮箱首次成功通过 Google 验证的时间；null = 从未通过 Google 验证过。
+    # 唯一用途：区分"账号预劫持"防护里两种表面相同、实质不同的情况——
+    # ① 攻击者抢先用受害者邮箱注册了密码账号，受害者第一次尝试 Google 登录
+    #    时，此邮箱的 Google 身份从未被验证过，必须拒绝（见 routers/auth.py
+    #    google_login 的说明）；
+    # ② 用户本来就是通过 Google 登录创建的账号（此刻即验证成功，见
+    #    google_login 里创建分支），后来自己在账户设置里为账号加了一个密码
+    #    （见 routers/account.py 的 change_password）——这个邮箱的 Google 身份
+    #    早就验证过，用密码登录是他自己的选择，不该反过来把 Google 登录堵死。
+    # 没有这个字段时两种情况在"password_hash 是否非空"这一个信号上完全无法
+    # 区分，导致②被误杀——这正是 2026-07 报告的"设置密码后再也无法用 Google
+    # 登录"的问题根因。
+    # When this email first passed Google verification; null = never verified
+    # via Google. Sole purpose: disambiguate two situations the account-
+    # pre-hijack guard otherwise can't tell apart from "password_hash is set"
+    # alone — ① an attacker pre-registered the victim's email with a password
+    # before the victim's first Google login ever verifies that email (must
+    # stay blocked, see google_login's docstring); ② the account originated
+    # from Google login itself (verified at creation, see google_login's
+    # create branch) and the user later chose to add a password from their own
+    # account settings (see account.py's change_password) — this email's
+    # Google identity was already verified, so choosing to also use a password
+    # is the user's own choice and must not lock out Google login afterward.
+    # Without this field the two are indistinguishable, wrongly blocking ②,
+    # which is exactly the "can't use Google login after setting a password"
+    # bug reported 2026-07.
+    google_linked_at = Column(DateTime, nullable=True)
 
 
 # 说明：旧的 EABinding（ea_bindings 表，EA 单账号绑定）已随 EA 接入方式移除。

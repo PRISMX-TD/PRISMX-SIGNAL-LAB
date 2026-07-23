@@ -187,11 +187,39 @@ def _migrate_columns() -> None:
             "trial_used_at": datetime_type,
             "plan_is_trial": "BOOLEAN",
             "token_version": "INTEGER",
+            "google_linked_at": datetime_type,
         }
         with engine.begin() as conn:
             for name, col_type in user_new.items():
                 if name not in user_cols:
                     conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {col_type}"))
+            # google_linked_at 回填：这个字段刚加进来时，无法从历史数据反推
+            # "谁的账号最初是通过 Google 验证创建的"——干脆把当前所有已持有
+            # 密码的老用户一律回填为已验证（用 created_at 兜底一个时间戳），
+            # 即"新规则只管这次上线之后新出现的账号，老用户一个都不因为这次
+            # 加固被反悔"。这正是本字段要修的那个问题（见 User 模型该列的
+            # 说明）——回填错了方向，等于这次修复上线当天就把所有"Google 用户
+            # 后来设了密码"的老用户重新坑一遍。留空（NULL）的分支才是真正
+            # 该继续拦截的：这一行永远是 password_hash 非空、google_linked_at
+            # 为空的组合，只可能出现在这次上线之后才创建的新密码账号上。
+            # google_linked_at backfill: when this column first appears there is
+            # no way to recover "which accounts originally came from Google" from
+            # history — so every existing password-holding user is backfilled as
+            # already-verified (created_at as a stand-in timestamp). In other
+            # words: the stricter new rule only governs accounts that appear
+            # after this ships; no existing user is retroactively punished by
+            # it — which is exactly the bug this column exists to fix (see the
+            # column's comment on the User model). Backfilling the other
+            # direction would re-inflict the exact "set a password, Google login
+            # breaks" bug on every existing Google-then-password user the day
+            # this migration runs. The row shape that should keep being blocked
+            # (password_hash set, google_linked_at null) can then only arise for
+            # brand-new password accounts created after this ships.
+            if "google_linked_at" not in user_cols:
+                conn.execute(text(
+                    "UPDATE users SET google_linked_at = created_at "
+                    "WHERE password_hash IS NOT NULL AND google_linked_at IS NULL"
+                ))
             # 旧行补默认值：新列刚加时为 NULL，但 role/plan 声明为 NOT NULL。
             # Backfill existing rows: a freshly added column is NULL, but
             # role/plan are declared NOT NULL.

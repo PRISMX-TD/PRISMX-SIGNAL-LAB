@@ -1,4 +1,6 @@
 """认证路由：注册与登录 / Auth router: register & login."""
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -64,25 +66,48 @@ def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends
     email = info["email"].lower()
     user = db.query(User).filter(User.email == email).first()
     if user is None:
-        # 首次用 Google 登录：创建无密码用户。
-        # First-time Google login: create a password-less user.
+        # 首次用 Google 登录：创建无密码用户，同时记下这个邮箱的 Google 身份
+        # 已在此刻验证过——后面即便这个用户自己在账户设置里加了密码，这个
+        # 时间戳也不会被清空，Google 登录会一直放行（见下面 elif 分支与
+        # User.google_linked_at 的说明）。
+        # First-time Google login: create a password-less user, and record
+        # that this email's Google identity is verified as of right now — even
+        # if the user later adds a password from their own account settings,
+        # this timestamp is never cleared, so Google login keeps working (see
+        # the elif branch below and User.google_linked_at's comment).
         user = User(
             email=email,
             password_hash=None,
             api_token=hash_api_token(generate_api_token()),
+            google_linked_at=datetime.now(timezone.utc),
         )
         db.add(user)
         db.commit()
         db.refresh(user)
-    elif user.password_hash is not None:
-        # 该邮箱已被一个设有密码的账号占用：不能自动登入，否则任何人都可以
-        # 提前用受害者邮箱注册密码账号，等受害者第一次用 Google 登录时被
-        # 悄悄接入攻击者控制的账号（账号预劫持）。
-        # This email already belongs to a password-protected account: refuse
-        # to auto sign-in here. Otherwise an attacker could pre-register the
-        # victim's email with a password of their own choosing, then silently
-        # take over the account the moment the real owner first tries Google
-        # sign-in (a classic account pre-hijack).
+    elif user.password_hash is not None and user.google_linked_at is None:
+        # 有密码、且这个邮箱的 Google 身份从未验证过：不能自动登入，否则任何
+        # 人都可以提前用受害者邮箱注册密码账号，等受害者第一次用 Google 登录
+        # 时被悄悄接入攻击者控制的账号（账号预劫持）。
+        #
+        # 只看"是否有密码"不够——账号本来就是靠 Google 登录创建的用户，后来
+        # 自己在账户设置里加了一个密码（见 account.py 的 change_password），
+        # 这个邮箱其实早就验证过，此时 google_linked_at 非空，不会走进这个
+        # 分支，Google 登录照常放行。两种"有密码"的账号表面相同、实质不同，
+        # 靠这个字段才分得清（详见 User 模型该列的说明）。
+        #
+        # This email has a password AND this email's Google identity has never
+        # been verified: refuse to auto sign-in here. Otherwise an attacker
+        # could pre-register the victim's email with a password of their own
+        # choosing, then silently take over the account the moment the real
+        # owner first tries Google sign-in (a classic account pre-hijack).
+        #
+        # "Has a password" alone isn't enough to decide this — an account that
+        # originated from Google login and later had a password added by its
+        # own owner (see account.py's change_password) has google_linked_at
+        # already set, so it never reaches this branch and Google login keeps
+        # working normally. The two "has a password" cases look identical but
+        # aren't; this field is what tells them apart (see the column's
+        # comment on the User model).
         raise HTTPException(
             status_code=409,
             detail=(
