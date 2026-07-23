@@ -8,6 +8,7 @@
 // countdown/expiry; the reference price comes from the live quote or the
 // chart's latest price.
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { MT5Account, Quote } from '../api/types'
 import { clientOrderId, contractSize, displaySymbol, localizeApiError, suggestVolumeByRisk, usdMarginBasis } from '../api/utils'
@@ -271,7 +272,12 @@ export default function ChartOrderModal({ symbol, side, accounts, quotesByAccoun
     return (vol * size * entryRef) / lev
   })()
 
-  return (
+  // 用 Portal 挂到 body：见 SlideOrderModal.tsx 同名说明——页面内容外层
+  // .page-enter 的 transform 动画会成为 fixed 的包含块，导致弹窗定位错乱。
+  // Portal to body: see SlideOrderModal.tsx's matching note — the .page-enter
+  // wrapper's transform animation becomes the containing block for fixed and
+  // mislocates the modal.
+  return createPortal(
     <div className="slide-overlay" onClick={onCancel}>
       <div className="slide-sheet" onClick={(e) => e.stopPropagation()}>
         <button className="slide-cancel-x" onClick={onCancel}>
@@ -476,6 +482,7 @@ export default function ChartOrderModal({ symbol, side, accounts, quotesByAccoun
           <button onClick={onCancel} className="btn btn-ghost slide-close-btn">{t('common.close')}</button>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -1,5 +1,6 @@
 // 滑动确认下单弹窗 / Slide-to-confirm order modal
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { MT5Account, Quote, Signal } from '../api/types'
 import { calcCountdown, clientOrderId, contractSize, displaySymbol, localizeApiError, suggestVolumeByRisk, usdMarginBasis } from '../api/utils'
@@ -295,7 +296,14 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
     return (vol * size * entryRef) / lev
   })()
 
-  return (
+  // 用 Portal 挂到 body：页面内容外层 .page-enter 有 transform 动画，会成为
+  // fixed 定位的包含块，导致弹窗相对内容区而非视口定位、位置错乱。挂到 body
+  // 可脱离该祖先，让 fixed 重新相对视口。/ Portal to body: the .page-enter
+  // wrapper around page content has a transform animation, which becomes the
+  // containing block for fixed positioning and mislocates the modal relative to
+  // the content area instead of the viewport. Portaling to body escapes that
+  // ancestor so fixed positions against the viewport again.
+  return createPortal(
     <div className="slide-overlay" onClick={onCancel}>
       <div className="slide-sheet" onClick={(e) => e.stopPropagation()}>
         <button className="slide-cancel-x" onClick={onCancel}>
@@ -541,6 +549,7 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
           </button>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
