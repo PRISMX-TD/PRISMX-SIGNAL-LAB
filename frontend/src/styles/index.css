@@ -2556,12 +2556,12 @@
    theme's purple (same hue as --purple-hi) instead of default gray, so it
    reads as a deliberate "draggable" affordance rather than scrollbar noise. */
 /* 细化约 70%：轨道从原来 ~3px（外加系统默认的箭头按钮占位，实际渲染更粗）压到
-   2px 的极细发丝条，并显式去掉两端的箭头按钮（部分平台/经典滚动条会渲染它们，
+   0.2px 的极细发丝条，并显式去掉两端的箭头按钮（部分平台/经典滚动条会渲染它们，
    正是截图里那对箭头 + 粗轨道的来源）。
-   ~70% slimmer: the track drops to a 2px hairline and the end-arrow buttons are
+   ~70% slimmer: the track drops to a 0.2px hairline and the end-arrow buttons are
    explicitly removed (some platforms/classic scrollbars render them — the arrows
    + thick track seen in the screenshot). */
-.term-toolbar-tools::-webkit-scrollbar { height: 2px; }
+.term-toolbar-tools::-webkit-scrollbar { height: 0.2px; }
 .term-toolbar-tools::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 .term-toolbar-tools::-webkit-scrollbar-track { background: transparent; }
 .term-toolbar-tools::-webkit-scrollbar-thumb { background: rgba(167, 139, 250, 0.55); border-radius: 999px; }
