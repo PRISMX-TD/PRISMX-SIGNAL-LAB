@@ -2531,42 +2531,58 @@
 }
 .term-ivseg button:hover { color: var(--text-2); }
 .term-ivseg button.on { background: linear-gradient(92deg, #7c3aed, #a855f7); color: #fff; }
+/* 桌面端画线工具行的外层：占据中部弹性空间，纵向堆叠"工具行 + 自定义拖拽条"。
+   固定 30px 高（26px 图标行 + 4px 拖拽条区），拖拽条绝对定位在底部，不参与
+   布局、不会把图标行顶高。
+   Desktop draw-tools wrapper: takes the flexible middle space and stacks the
+   icon row above the custom drag bar. Fixed 30px tall (26px icons + 4px bar);
+   the bar is absolutely positioned at the bottom so it never displaces icons. */
+.term-toolbar-scroll {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+}
 .term-toolbar-tools {
   display: flex;
   align-items: center;
   gap: 5px;
-  flex: 1;
-  min-width: 0;
-  height: 30px;
+  height: 26px;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(167, 139, 250, 0.55) transparent;
 }
-/* 桌面端没有触屏手势，鼠标用户全靠这条滚动条才知道"这里能拖、还有内容在右边"，
-   不能像移动端那样直接隐藏——但固定 30px 行高（= 26px 图标 + 给滚动条预留的
-   4px）意味着滚动条不管渲染成多高都只占用预留出来的这部分空间，绝不会把图标
-   行顶高、挤走旁边的按钮。颜色用主题紫（--purple-hi 同色号）而不是默认灰，
-   一眼就能看出这是"可拖动"的提示，不是普通滚动条噪音。
-   Desktop has no touch gestures, so mouse users rely entirely on this bar to
-   know "this row drags, there's more to the right" — it can't just be hidden
-   like on mobile. The fixed 30px row height (26px icons + 4px reserved for the
-   bar) means the scrollbar only ever eats into that reserved space, never
-   stretching the icon row or displacing the button next to it. Colored in the
-   theme's purple (same hue as --purple-hi) instead of default gray, so it
-   reads as a deliberate "draggable" affordance rather than scrollbar noise. */
-/* 细化约 70%：轨道从原来 ~3px（外加系统默认的箭头按钮占位，实际渲染更粗）压到
-   0.2px 的极细发丝条，并显式去掉两端的箭头按钮（部分平台/经典滚动条会渲染它们，
-   正是截图里那对箭头 + 粗轨道的来源）。
-   ~70% slimmer: the track drops to a 0.2px hairline and the end-arrow buttons are
-   explicitly removed (some platforms/classic scrollbars render them — the arrows
-   + thick track seen in the screenshot). */
-.term-toolbar-tools::-webkit-scrollbar { height: 0.2px; }
-.term-toolbar-tools::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
-.term-toolbar-tools::-webkit-scrollbar-track { background: transparent; }
-.term-toolbar-tools::-webkit-scrollbar-thumb { background: rgba(167, 139, 250, 0.55); border-radius: 999px; }
-.term-toolbar-tools:hover::-webkit-scrollbar-thumb,
-.term-toolbar-tools:active::-webkit-scrollbar-thumb { background: rgba(167, 139, 250, 0.9); }
+/* 隐藏原生滚动条（no-sb 兜底同样处理），厚度改由下面的自定义拖拽条掌控。
+   Hide the native scrollbar (no-sb also covers it); thickness is now owned by
+   the custom drag bar below. */
+.term-toolbar-tools {
+  scrollbar-width: none;
+}
+.term-toolbar-tools::-webkit-scrollbar { display: none; }
+/* 自定义超细拖拽条：轨道透明贴底，thumb 就是这里写死的 2px 高——不受任何浏览器
+   原生滚动条最小厚度下限影响，想多细就多细。颜色用主题紫，一眼是"可拖动"提示。
+   Custom ultra-thin drag bar: transparent track pinned to the bottom; the thumb
+   is exactly the 2px height set here — free of any browser's native-scrollbar
+   minimum, as thin as we want. Purple = a clear "draggable" affordance. */
+.term-toolbar-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  display: flex;
+  align-items: center;
+}
+.term-toolbar-thumb {
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(167, 139, 250, 0.55);
+  cursor: grab;
+  transition: background-color 0.15s;
+  touch-action: none;
+}
+.term-toolbar-thumb:hover,
+.term-toolbar-thumb:active { background: rgba(167, 139, 250, 0.9); }
+.term-toolbar-thumb:active { cursor: grabbing; }
 /* wrap 变体：手机端展开行用——铺满宽度换行显示，不用横向滚动藏起后面的工具
    （发现性更好），按钮/颜色点也放大一档更好点按。手机有触屏手势不需要这条
    拖动提示条，固定高度也不适用（多行换行需要按内容自适应高度），一并重置。
