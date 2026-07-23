@@ -2203,22 +2203,34 @@
 .term-shell {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 10px;
+  gap: 8px;
 }
 @media (min-width: 1024px) {
+  /* 桌面：整块无缝终端——一层外框 + 内部发丝线分隔，不再是"各自带圆角边框、
+     中间留缝"的浮动卡片。/ Desktop: one seamless terminal — a single outer
+     frame with internal hairline dividers, not floating rounded cards + gaps. */
   .term-shell {
-    grid-template-columns: 240px minmax(0, 1fr) 290px;
-    height: calc(100vh - 8.5rem);
+    grid-template-columns: 236px minmax(0, 1fr) 288px;
+    gap: 0;
+    height: calc(100vh - 8rem);
+    border: 1px solid var(--line-hi);
+    border-radius: 14px;
+    overflow: hidden;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.006));
   }
+  .term-col-left { border-right: 1px solid var(--line); }
+  .term-col-right { border-left: 1px solid var(--line); }
 }
 
+/* 面板在无缝框里不再各自带边框/圆角/背景，避免"浮动卡片 + 裂缝"观感；
+   区块之间的分隔改用发丝线（见各自的 border-bottom/top）。
+   Inside the seamless frame, panels drop their own border/radius/background so
+   they don't read as floating cards; sections are separated by hairlines. */
 .term-panel {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.012));
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -2250,26 +2262,26 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  gap: 8px;
 }
 
-/* 图表视图容器：桌面填满中栏剩余高度（图表在其内部再 flex-1）。
-   Chart-view wrapper: fills the center column's remaining height on desktop
-   (the chart itself is flex-1 within it). */
+/* 图表视图容器：桌面填满中栏剩余高度（图表在其内部再 flex-1）。无缝——各区块
+   靠发丝线分隔，不留缝。/ Chart-view wrapper: fills the center column's
+   remaining height on desktop; seamless, sections split by hairlines. */
 .term-chartview {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   min-width: 0;
+  min-height: 0;
 }
 @media (min-width: 1024px) {
-  .term-chartview { flex: 1; min-height: 0; }
+  .term-chartview { flex: 1; }
 }
 
 /* 手机端顶部视图切换（分段控件）/ mobile top view switcher (segmented control) */
 .term-mtabs {
   display: flex;
   gap: 2px;
+  margin-bottom: 8px;
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -2301,7 +2313,7 @@
 /* 手机端图表视图的常驻买卖条：图表正下方，实色绿红、大热区，拇指可达。
    Mobile chart-view docked buy/sell bar: right under the chart, solid green/red,
    big tap targets, thumb-reachable. */
-.term-mbuysell { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; flex-shrink: 0; }
+.term-mbuysell { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; flex-shrink: 0; }
 .term-mbuysell button {
   display: flex;
   flex-direction: column;
@@ -2327,9 +2339,8 @@
   display: flex;
   align-items: stretch;
   flex-shrink: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012));
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.028), transparent);
   overflow: hidden;
 }
 .term-symhead-id {
@@ -2354,6 +2365,107 @@
 }
 .term-sstat-k { font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); }
 .term-sstat-v { font-size: 14px; font-weight: 600; }
+
+/* ── 单条工具栏：周期（钉左）· 画线工具（中部可横滑）· 添加指标（钉右）──
+   Single toolbar: interval (pinned left) · draw tools (scrollable middle) ·
+   add-indicator (pinned right). */
+.term-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  flex-shrink: 0;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+}
+.term-ivseg {
+  display: flex;
+  flex-shrink: 0;
+  padding: 2px;
+  gap: 1px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--nest);
+}
+.term-ivseg button {
+  height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.term-ivseg button:hover { color: var(--text-2); }
+.term-ivseg button.on { background: linear-gradient(92deg, #7c3aed, #a855f7); color: #fff; }
+.term-toolbar-tools {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+.term-toolbar-divider { width: 1px; height: 18px; flex-shrink: 0; background: var(--line); }
+.term-tool-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--nest);
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+}
+.term-tool-btn:hover:not(:disabled) { color: var(--text); border-color: var(--line-hi); }
+.term-tool-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.term-tool-btn.on { color: var(--purple-hi); border-color: rgba(139, 92, 246, 0.5); background: rgba(139, 92, 246, 0.14); }
+.term-tool-btn.warn.on { color: var(--gold); border-color: rgba(246, 196, 83, 0.5); background: rgba(246, 196, 83, 0.14); }
+.term-color-dot {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+.term-color-dot.on { border-color: #fff; transform: scale(1.15); }
+.term-toolbar-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.term-tool-indicator {
+  height: 26px;
+  padding: 0 11px;
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  border-radius: 6px;
+  background: rgba(139, 92, 246, 0.14);
+  color: var(--purple-hi);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.term-tool-indicator:hover { background: rgba(139, 92, 246, 0.24); }
+.term-stale { font-size: 11px; font-weight: 600; color: var(--gold); background: rgba(246, 196, 83, 0.12); border-radius: 5px; padding: 2px 7px; white-space: nowrap; }
+
+/* ── 图表容器：无缝、无自身边框圆角内边距（K 线自带深色背景）──
+   Chart container: seamless, no own border/radius/padding (candles have their
+   own dark background). */
+.term-chart {
+  position: relative;
+  overflow: hidden;
+  height: 70vh;
+  min-height: 420px;
+}
+@media (min-width: 1024px) {
+  .term-chart { height: auto; min-height: 0; flex: 1; }
+}
 
 /* ── 自选列表 / watchlist ── */
 .term-wl-search {
@@ -2419,6 +2531,7 @@
 .term-wl-px { font-size: 13px; font-weight: 600; text-align: right; transition: color 0.4s; }
 
 /* ── 账户摘要 / account summary ── */
+.term-account { border-top: 1px solid var(--line); }
 .term-account-body { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
 .term-account-empty { font-size: 12px; color: var(--text-3); line-height: 1.6; }
 .term-account-row { display: flex; align-items: baseline; justify-content: space-between; font-size: 12.5px; }
@@ -2518,7 +2631,7 @@
 .term-ticket-receipt.info { color: var(--text-2); }
 
 /* ── 底部持仓 / 挂单 / positions & orders dock ── */
-.term-dock { flex-shrink: 0; }
+.term-dock { flex-shrink: 0; border-top: 1px solid var(--line); }
 .term-dock-tabs { display: flex; gap: 2px; padding: 5px 8px 0; border-bottom: 1px solid var(--line); flex-shrink: 0; }
 .term-dock-tab {
   display: flex; align-items: center; gap: 6px; padding: 6px 12px 8px; border: 0; background: transparent;

@@ -28,7 +28,6 @@ import {
 } from 'lightweight-charts'
 import { chartApi } from '../api/client'
 import type { Candle } from '../api/types'
-import { displaySymbol } from '../api/utils'
 import { usePrefs } from '../store/prefs'
 import { useLive, useQuotes } from '../store/live'
 import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
@@ -1261,7 +1260,7 @@ export default function ChartsPage() {
           plain wrapper, not on .term-panel directly — .term-panel's display:flex
           comes after Tailwind's .hidden in the sheet and would override it; the
           wrapper isn't a .term-panel so there's no conflict. */}
-      <div className="hidden min-h-0 lg:flex lg:flex-col">
+      <div className="term-col-left hidden min-h-0 lg:flex lg:flex-col">
         <WatchlistPanel
           className="flex-1"
           symbols={activeSymbols}
@@ -1314,95 +1313,28 @@ export default function ChartsPage() {
           />
         )}
 
-      {/* 全屏模式下隐藏控制栏 */}
+      {/* 单条工具栏（全屏时隐藏）：周期钉左 · 画线工具中部横滑 · 添加指标钉右。
+          取代原来"周期悬右一行 + 画线工具单独一框"的两条割裂控制条。
+          Single toolbar (hidden in fullscreen): interval pinned left · draw tools
+          scroll in the middle · add-indicator pinned right. Replaces the old two
+          disjointed rows (interval floating right + a separate draw-tool box). */}
       {!isFullscreen && (
-        <>
-          {/* 控制条第 1 行：品种 + 买卖（左）… 周期 + 添加指标（右）。
-              桌面终端里品种改由左栏自选、买卖改由右栏面板，故这两项在 lg 隐藏。
-              On the desktop terminal the symbol comes from the watchlist and
-              buy/sell from the right rail, so those two are hidden at lg. */}
-          <div className="mb-2 flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-2 lg:hidden">
-              <span className="text-xs uppercase tracking-wider text-slate-500">
-                {t('charts.symbol')}
-              </span>
-              <select
-                value={symbol}
-                onChange={(e) => setSymbol(e.target.value)}
-                disabled={activeSymbols.length === 0}
-                className="rounded-lg border border-white/10 bg-ink-800/80 px-3 py-1.5 text-sm text-slate-100 outline-none transition focus:border-prism-500 disabled:opacity-50"
-              >
-                {activeSymbols.length === 0 ? (
-                  <option value="">{t('common.loading')}</option>
-                ) : (
-                  activeSymbols.map((s) => (
-                    <option key={s} value={s}>
-                      {displaySymbol(s)}
-                    </option>
-                  ))
-                )}
-              </select>
-            </label>
-
-            {/* 买 / 卖：桌面由右栏下单面板负责，手机由图表下方常驻买卖条负责，
-                故这里彻底隐藏（避免三处重复）。/ Buy/sell lives in the right rail
-                on desktop and the docked bottom bar on mobile, so hide it here
-                entirely to avoid a third redundant copy. */}
-            <div className="hidden items-center gap-2 max-lg:ml-auto">
+        <div className="term-toolbar">
+          <div className="term-ivseg">
+            {INTERVALS.map((iv) => (
               <button
-                onClick={() => setOrderSide('BUY')}
-                className="rounded-lg px-5 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:brightness-110"
-                style={{ background: 'var(--up)' }}
-              >
-                {t('charts.order.buy')}
-              </button>
-              <button
-                onClick={() => setOrderSide('SELL')}
-                className="rounded-lg px-5 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:brightness-110"
-                style={{ background: 'var(--down)' }}
-              >
-                {t('charts.order.sell')}
-              </button>
-            </div>
-
-            {/* 周期 + 添加指标：手机端换行后靠左（去掉 ml-auto），桌面端靠右 */}
-            <div className="flex w-full items-center gap-3 lg:ml-auto lg:w-auto">
-              <div className="flex items-center gap-1 rounded-lg border border-white/10 bg-ink-800/50 p-1">
-                {INTERVALS.map((iv) => (
-                  <button
-                    key={iv.code}
-                    onClick={() => setIntervalCode(iv.code)}
-                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                      interval === iv.code
-                        ? 'bg-prism-600/30 text-prism-200 shadow-prism'
-                        : 'text-slate-400 hover:text-slate-100'
-                    }`}
-                  >
-                    {iv.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* 添加指标：品牌色高亮 */}
-              <button
+                key={iv.code}
                 type="button"
-                onClick={() => setSettingsOpen(true)}
-                className="rounded-lg border border-prism-500/40 bg-prism-600/15 px-3 py-1.5 text-xs font-semibold text-prism-300 transition hover:border-prism-400 hover:bg-prism-600/30 hover:text-prism-200"
+                onClick={() => setIntervalCode(iv.code)}
+                className={interval === iv.code ? 'on' : ''}
               >
-                {t('charts.indicators.button')}
+                {iv.label}
               </button>
-
-              {stale && (
-                <span className="rounded-md bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-400">
-                  {t('charts.stale')}
-                </span>
-              )}
-            </div>
+            ))}
           </div>
 
-          {/* 控制条第 2 行：画线工具做成完整的一排，横向可滑动展示后面的工具 */}
           {drawReady && (
-            <div className="no-scrollbar mb-4 flex flex-nowrap items-center gap-1.5 overflow-x-auto rounded-lg border border-white/10 bg-ink-800/30 px-2 py-1.5">
+            <div className="term-toolbar-tools no-sb">
               {(ToolList as Tool[]).map((toolName) => (
                 <button
                   key={toolName}
@@ -1410,16 +1342,12 @@ export default function ChartsPage() {
                   title={String(t(`charts.draw.${toolName}`))}
                   aria-label={String(t(`charts.draw.${toolName}`))}
                   onClick={() => { drawLayerRef.current?.setTool(toolName); bumpDraw() }}
-                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition ${
-                    drawLayerRef.current?.tool === toolName
-                      ? 'border-prism-500/60 bg-prism-600/25 text-prism-200'
-                      : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'
-                  }`}
+                  className={`term-tool-btn ${drawLayerRef.current?.tool === toolName ? 'on' : ''}`}
                 >
                   <DrawToolIcon tool={toolName} />
                 </button>
               ))}
-              <span className="mx-1 h-5 w-px shrink-0 bg-white/10" />
+              <span className="term-toolbar-divider" />
               {['#22d3ee', '#a78bfa', '#2ee07e', '#ff4d67', '#f5c451'].map((c) => (
                 <button
                   key={c}
@@ -1427,22 +1355,20 @@ export default function ChartsPage() {
                   title={t('charts.draw.color')}
                   aria-label={t('charts.draw.color')}
                   onClick={() => { drawLayerRef.current?.applyColor(c); bumpDraw() }}
-                  className={`h-4 w-4 shrink-0 rounded-full border transition ${
-                    drawLayerRef.current?.color === c ? 'border-white scale-110' : 'border-white/20'
-                  }`}
+                  className={`term-color-dot ${drawLayerRef.current?.color === c ? 'on' : ''}`}
                   style={{ background: c }}
                 />
               ))}
-              <span className="mx-1 h-5 w-px shrink-0 bg-white/10" />
+              <span className="term-toolbar-divider" />
               <button
                 type="button"
                 title={t('charts.draw.delete')}
                 aria-label={t('charts.draw.delete')}
                 onClick={() => { drawLayerRef.current?.deleteSelected(); bumpDraw() }}
                 disabled={!drawLayerRef.current?.selectedId}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-down disabled:opacity-30 disabled:hover:text-slate-400"
+                className="term-tool-btn"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>
               </button>
               <button
                 type="button"
@@ -1450,32 +1376,45 @@ export default function ChartsPage() {
                 aria-label={t('charts.draw.clear')}
                 onClick={() => { drawLayerRef.current?.clearAll(); bumpDraw() }}
                 disabled={(drawLayerRef.current?.drawCount ?? 0) === 0}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-down disabled:opacity-30 disabled:hover:text-slate-400"
+                className="term-tool-btn"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 5L5 19M5 5l14 14" /></svg>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 5L5 19M5 5l14 14" /></svg>
               </button>
-              <span className="mx-0.5 h-5 w-px shrink-0 bg-white/10" />
-              {/* 连续绘制 */}
-              <button type="button" title={t('charts.draw.stayInDraw')} aria-label={t('charts.draw.stayInDraw')}
+              <button
+                type="button"
+                title={t('charts.draw.stayInDraw')}
+                aria-label={t('charts.draw.stayInDraw')}
                 onClick={() => { drawLayerRef.current?.setStayInDraw(!drawLayerRef.current?.stayInDraw); bumpDraw() }}
-                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition ${drawLayerRef.current?.stayInDraw ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`}
-              ><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3l4 4-4 4" /><path d="M3 17l4 4-4 4" /><line x1="21" y1="7" x2="7" y2="21" /><line x1="7" y1="3" x2="21" y2="17" /></svg></button>
-              {/* 显示/隐藏 */}
-              <button type="button" title={drawLayerRef.current?.visible ? t('charts.draw.hideAll') : t('charts.draw.showAll')} aria-label={drawLayerRef.current?.visible ? t('charts.draw.hideAll') : t('charts.draw.showAll')}
+                className={`term-tool-btn ${drawLayerRef.current?.stayInDraw ? 'on' : ''}`}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3l4 4-4 4" /><path d="M3 17l4 4-4 4" /><line x1="21" y1="7" x2="7" y2="21" /><line x1="7" y1="3" x2="21" y2="17" /></svg>
+              </button>
+              <button
+                type="button"
+                title={drawLayerRef.current?.visible ? t('charts.draw.hideAll') : t('charts.draw.showAll')}
+                aria-label={drawLayerRef.current?.visible ? t('charts.draw.hideAll') : t('charts.draw.showAll')}
                 onClick={() => { drawLayerRef.current?.setVisible(!drawLayerRef.current?.visible); bumpDraw() }}
-                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition ${!drawLayerRef.current?.visible ? 'border-amber-400/60 bg-amber-400/15 text-amber-300' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`}
-              ><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{drawLayerRef.current?.visible ? <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></> : <><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></>}</svg></button>
+                className={`term-tool-btn warn ${!drawLayerRef.current?.visible ? 'on' : ''}`}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{drawLayerRef.current?.visible ? <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></> : <><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></>}</svg>
+              </button>
             </div>
           )}
-        </>
+
+          <div className="term-toolbar-right">
+            {stale && <span className="term-stale">{t('charts.stale')}</span>}
+            <button type="button" onClick={() => setSettingsOpen(true)} className="term-tool-indicator">
+              {t('charts.indicators.button')}
+            </button>
+          </div>
+        </div>
       )}
 
-      {/* 图表容器：窄屏跟随视口高度，桌面终端里填满中栏剩余高度（flex-1）。
-          Chart container: viewport-height on narrow screens; on the desktop
-          terminal it fills the center column's remaining height (flex-1). */}
-      <div className={`glass relative overflow-hidden p-1.5 h-[70vh] min-h-[420px] sm:h-[calc(100vh-15rem)] lg:h-auto lg:min-h-0 lg:flex-1 ${
-        isFullscreen ? 'chart-fullscreen-container' : ''
-      }`}>
+      {/* 图表容器：无缝（无自身边框/圆角/内边距），窄屏 70vh，桌面填满中栏剩余
+          高度（.term-chart 内处理）。/ Chart container: seamless (no own border/
+          radius/padding); 70vh on narrow screens, fills the center column on
+          desktop (handled in .term-chart). */}
+      <div className={`term-chart ${isFullscreen ? 'chart-fullscreen-container' : ''}`}>
         {/* 全屏开关按钮（仅手机端显示）：同一个按钮进出，进入自动横屏，退出恢复竖屏 */}
         <button
           type="button"
@@ -1776,7 +1715,7 @@ export default function ChartsPage() {
           Right column: docked order ticket + account summary (desktop only).
           The ticket takes the remaining height and scrolls internally; the
           account summary stays pinned at the bottom. */}
-      <div className="term-right hidden min-h-0 flex-col gap-2.5 lg:flex">
+      <div className="term-col-right term-right hidden min-h-0 flex-col lg:flex">
         <OrderTicket
           className="min-h-0 flex-1"
           symbol={symbol}
