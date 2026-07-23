@@ -12,6 +12,7 @@
 // matches ChartOrderModal.
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import Select from '../Select'
 import type { MT5Account, Quote } from '../../api/types'
 import {
   clientOrderId,
@@ -210,13 +211,15 @@ export default function OrderTicket({ symbol, accounts, quotesByAccount, globalQ
         {onlineAccounts.length > 1 && (
           <label className="term-field">
             <span className="term-field-k">{t('charts.ticket.account')}</span>
-            <select className="term-select num" value={login} onChange={(e) => setLogin(e.target.value)}>
-              {onlineAccounts.map((a) => (
-                <option key={a.login} value={a.login}>
-                  {a.login}{a.accountName ? ` · ${a.accountName}` : ''}
-                </option>
-              ))}
-            </select>
+            <Select
+              className="term-acct-select"
+              value={login}
+              onChange={setLogin}
+              options={onlineAccounts.map((a) => ({
+                value: a.login,
+                label: `${a.login}${a.accountName ? ` · ${a.accountName}` : ''}`,
+              }))}
+            />
           </label>
         )}
 

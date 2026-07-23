@@ -583,6 +583,26 @@
       "trade": "Trade",
       "positions": "Positions"
     },
+    "symhead": {
+      "bid": "Bid",
+      "ask": "Ask",
+      "spread": "Spread",
+      "high": "High",
+      "low": "Low",
+      "change": "Chg",
+      "mBid": "Bid",
+      "mAsk": "Ask",
+      "mSpread": "Spr",
+      "mHigh": "H",
+      "mLow": "L"
+    },
+    "watchlist": {
+      "title": "Watchlist",
+      "searchPlaceholder": "Search symbol…",
+      "searchLabel": "Search symbol",
+      "loading": "Loading…",
+      "noMatch": "No matching symbol"
+    },
     "ticket": {
       "title": "Quick Order",
       "sell": "SELL",

@@ -583,6 +583,26 @@
       "trade": "交易",
       "positions": "持仓"
     },
+    "symhead": {
+      "bid": "买价 Bid",
+      "ask": "卖价 Ask",
+      "spread": "点差",
+      "high": "日内高",
+      "low": "日内低",
+      "change": "涨跌",
+      "mBid": "买",
+      "mAsk": "卖",
+      "mSpread": "点差",
+      "mHigh": "高",
+      "mLow": "低"
+    },
+    "watchlist": {
+      "title": "自选",
+      "searchPlaceholder": "搜索品种…",
+      "searchLabel": "搜索品种",
+      "loading": "加载中…",
+      "noMatch": "无匹配品种"
+    },
     "ticket": {
       "title": "快速下单",
       "sell": "卖 SELL",

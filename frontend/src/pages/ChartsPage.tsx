@@ -1804,9 +1804,8 @@ export default function ChartsPage() {
 
       {/* 手机端·交易视图：完整停靠下单面板 / mobile trade view: full docked ticket */}
       {!isFullscreen && (
-        <div className={`term-mview lg:hidden ${mobileView === 'trade' ? 'flex flex-col' : 'hidden'}`}>
+        <div className={`term-mview lg:hidden ${mobileView === 'trade' ? 'flex flex-col gap-2.5' : 'hidden'}`}>
           <OrderTicket
-            className="flex-1"
             symbol={symbol}
             accounts={accounts}
             quotesByAccount={accountQuotes}
@@ -1819,6 +1818,11 @@ export default function ChartsPage() {
               placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid)
             }
           />
+          {/* 手机交易视图也带上账户摘要——桌面端常驻、手机端此前只在持仓视图有，
+              交易页填补了下单按钮下方的空白。/ Show the account summary here too;
+              on desktop it's always visible, mobile previously only had it on the
+              positions view — this fills the blank below the place button. */}
+          <AccountSummary account={activeAccount} />
         </div>
       )}
 

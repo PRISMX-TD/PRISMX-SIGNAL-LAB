@@ -72,12 +72,12 @@ export default function SymbolHeader({ symbol, bid, ask, digits, dayStats, fallb
             <div className="term-symhead-name">{symbol ? displaySymbol(symbol) : ''}</div>
           </div>
           <div className="term-symhead-stats no-sb">
-            <Stat k="买价 Bid" v={bidStr} tone="up" />
-            <Stat k="卖价 Ask" v={askStr} tone="down" />
-            <Stat k="点差" v={spread == null ? '—' : String(spread)} />
-            <Stat k="日内高" v={fmt(dayStats?.high, digits)} />
-            <Stat k="日内低" v={fmt(dayStats?.low, digits)} />
-            <Stat k="涨跌" v={changeStr} tone={changePct == null ? undefined : up ? 'up' : 'down'} />
+            <Stat k={String(t('charts.symhead.bid'))} v={bidStr} tone="up" />
+            <Stat k={String(t('charts.symhead.ask'))} v={askStr} tone="down" />
+            <Stat k={String(t('charts.symhead.spread'))} v={spread == null ? '—' : String(spread)} />
+            <Stat k={String(t('charts.symhead.high'))} v={fmt(dayStats?.high, digits)} />
+            <Stat k={String(t('charts.symhead.low'))} v={fmt(dayStats?.low, digits)} />
+            <Stat k={String(t('charts.symhead.change'))} v={changeStr} tone={changePct == null ? undefined : up ? 'up' : 'down'} />
           </div>
         </div>
       </div>
@@ -111,11 +111,11 @@ export default function SymbolHeader({ symbol, bid, ask, digits, dayStats, fallb
               in 2026-07; non-PRO users get an upgrade hint on the page itself. */}
           <div className="term-symhead-m-btm">
             <div className="term-symhead-m-stats no-sb">
-              <span>买 <b className="num up">{bidStr}</b></span>
-              <span>卖 <b className="num down">{askStr}</b></span>
-              <span>点差 <b className="num">{spread == null ? '—' : spread}</b></span>
-              <span>高 <b className="num">{fmt(dayStats?.high, digits)}</b></span>
-              <span>低 <b className="num">{fmt(dayStats?.low, digits)}</b></span>
+              <span>{t('charts.symhead.mBid')} <b className="num up">{bidStr}</b></span>
+              <span>{t('charts.symhead.mAsk')} <b className="num down">{askStr}</b></span>
+              <span>{t('charts.symhead.mSpread')} <b className="num">{spread == null ? '—' : spread}</b></span>
+              <span>{t('charts.symhead.mHigh')} <b className="num">{fmt(dayStats?.high, digits)}</b></span>
+              <span>{t('charts.symhead.mLow')} <b className="num">{fmt(dayStats?.low, digits)}</b></span>
             </div>
             <Link to="/strategies" className="term-symhead-m-strat" aria-label={t('nav.strategies')}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg>

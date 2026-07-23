@@ -10,6 +10,7 @@
 // its last tick (green up / red down) — a live feel with no new backend. Clicking
 // a row switches the main chart symbol.
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Quote } from '../../api/types'
 import { displaySymbol } from '../../api/utils'
 import { symbolMeta } from '../../utils/symbolMeta'
@@ -26,6 +27,7 @@ interface Props {
 type Dir = 'up' | 'down' | null
 
 export default function WatchlistPanel({ symbols, quotes, active, onSelect, digitsFor, className = '' }: Props) {
+  const { t } = useTranslation()
   const [query, setQuery] = useState('')
   // 记录每个品种上一次的中间价，用来判断本次报价是涨还是跌（决定上色）。
   // Track each symbol's previous mid price to color the current tick up/down.
@@ -56,7 +58,7 @@ export default function WatchlistPanel({ symbols, quotes, active, onSelect, digi
   return (
     <div className={`term-panel term-watchlist ${className}`}>
       <div className="term-pane-head">
-        自选 <span className="term-pane-head-r">{symbols.length}</span>
+        {t('charts.watchlist.title')} <span className="term-pane-head-r">{symbols.length}</span>
       </div>
       <div className="term-wl-search">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -66,13 +68,13 @@ export default function WatchlistPanel({ symbols, quotes, active, onSelect, digi
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="搜索品种…"
-          aria-label="搜索品种"
+          placeholder={String(t('charts.watchlist.searchPlaceholder'))}
+          aria-label={String(t('charts.watchlist.searchLabel'))}
         />
       </div>
       <div className="term-wl no-sb">
         {filtered.length === 0 ? (
-          <div className="term-wl-empty">{symbols.length === 0 ? '加载中…' : '无匹配品种'}</div>
+          <div className="term-wl-empty">{symbols.length === 0 ? t('charts.watchlist.loading') : t('charts.watchlist.noMatch')}</div>
         ) : (
           filtered.map((sym) => {
             const q = quotes[sym]
