@@ -37,6 +37,8 @@ pnpm-debug.log*
 # ===== Bridge 打包产物 / build artifacts =====
 bridge/build/
 bridge/dist/
+bridge/build_clean/
+bridge/dist_clean/
 bridge/*.spec
 bridge/build_log.txt
 bridge/*.log
