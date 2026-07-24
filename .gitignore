@@ -37,14 +37,15 @@ pnpm-debug.log*
 # ===== Bridge 打包产物 / build artifacts =====
 bridge/build/
 bridge/dist/
-bridge/build_clean/
-bridge/dist_clean/
 bridge/*.spec
 bridge/build_log.txt
 bridge/*.log
 
-# ===== 文档 / Markdown（不纳入仓库）=====
+# ===== 文档 / Markdown（不纳入仓库；md 里常含密钥/内部信息）=====
+# Docs / Markdown — never committed; may contain keys or internal info.
 *.md
+docs/
+.trae/
 
 # ===== EA：本地/MT5 机器专用，不纳入公开仓库 =====
 # EA: local/MT5-machine only, kept out of the public repo
