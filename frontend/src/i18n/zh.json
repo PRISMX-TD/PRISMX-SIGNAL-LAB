@@ -950,9 +950,17 @@
     },
     "pageStats": {
       "title": "页面访问统计（近 7 天）",
-      "summary": "共 {{views}} 次访问 · 平均停留 {{avg}}",
-      "privacyHint": "全站汇总数据，不记录具体是哪位用户访问了哪个页面。",
-      "empty": "暂无访问数据，上线后开始累积。"
+      "summary": "{{visitors}} 人访问 · 共 {{views}} 次 · 平均停留 {{avg}}",
+      "privacyHint": "只按天统计每个页面有多少人来过，不记录访问时刻、时长归属或访问顺序。",
+      "empty": "暂无访问数据，上线后开始累积。",
+      "metricLabel": "统计指标",
+      "metric": {
+        "visitors": "访问人数",
+        "views": "访问次数",
+        "avgSeconds": "平均停留"
+      },
+      "peak": "峰值 {{value}}",
+      "colPage": "页面"
     },
     "searchPlaceholder": "按邮箱搜索…",
     "search": "搜索",

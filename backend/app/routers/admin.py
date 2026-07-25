@@ -12,15 +12,15 @@ field, from what, to what, when), so once more than one person has admin
 access there's a record to check against.
 """
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import AdminAuditLog, MT5Account, PageViewStat, User
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategySettings, AdminTrialSettings, AdminUserOut, AdminUserUpdate, PageStatOut
+from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategySettings, AdminTrialSettings, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut
 from app.services.deps import require_admin
 from app.services.settings_store import (
     get_broker_settings,
@@ -341,52 +341,150 @@ def page_stats(
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
-    """页面访问排行与平均停留时长（全站聚合，无个人身份）。
+    """页面访问统计：每页每天的访问人数、访问次数、平均停留时长。
 
     平均值一律用 SUM(total_seconds) / SUM(views) 现算，不能先按桶求平均再平均——
     小时桶的访问量差别很大（凌晨可能只有 1 次、白天几百次），等权平均会让一个
-    冷清时段的极端值和一个繁忙时段权重相同，算出来的"平均停留"是错的。
+    冷清时段的极端值和一个繁忙时段权重相同，算出来的"平均停留"是错的。同理，
+    汇总行的平均值也不是各天平均值的平均，而是重新按总量加权。
 
-    Page-view ranking and average dwell time (site-wide aggregate, no identity).
+    人数与次数来自两张不同的表，**不能互相推导**：次数在 PageViewStat（无身份），
+    人数靠 PageVisitorDay 的去重标记 COUNT(DISTINCT)。因此汇总的"总人数"是
+    整个窗口内的去重人数，不等于各天人数相加（同一个人连来 7 天，按天算是 7、
+    去重后是 1），这是两个不同的问题，别为了让数字"对得上"而改成累加。
+
+    Page stats: visitors, views and average dwell per page per day.
+
     Averages are always SUM(total_seconds) / SUM(views), never the mean of
     per-bucket means: hourly buckets differ wildly in volume (one view at 4am
     versus hundreds at midday), so equal-weighting buckets would give an
     outlier-heavy quiet hour the same weight as a busy one and yield a wrong
-    "average dwell".
+    "average dwell". Likewise summary averages re-weight by totals rather than
+    averaging the daily averages.
+
+    Visitors and views come from two different tables and CANNOT be derived from
+    one another: views live in PageViewStat (identity-free), visitors come from
+    COUNT(DISTINCT) over PageVisitorDay markers. So the summary "total visitors"
+    is the distinct count across the whole window, which is NOT the sum of the
+    daily figures (one person visiting 7 days running is 7 by day, 1 distinct) —
+    two different questions; don't "fix" the mismatch by summing.
     """
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
-    rows = (
+    today = datetime.now(timezone.utc).date()
+    # 含今天在内的 days 天，所以起点回退 days-1 天。用日期而非"当前时刻减 N×24h"，
+    # 否则窗口边界会落在半天中间，首尾两天的数据都是残缺的、折线图看着像是掉了。
+    # A window of `days` days including today, so the start is days-1 back. Date
+    # based rather than "now minus N×24h", which would cut the first and last day
+    # mid-way and make the line chart look like a dip at both ends.
+    start_day = today - timedelta(days=days - 1)
+    cutoff = datetime.combine(start_day, time.min)
+
+    view_rows = (
         db.query(
             PageViewStat.path,
+            func.date(PageViewStat.time_bucket).label("day"),
             func.sum(PageViewStat.views),
             func.sum(PageViewStat.total_seconds),
         )
         .filter(PageViewStat.time_bucket >= cutoff)
-        .group_by(PageViewStat.path)
+        .group_by(PageViewStat.path, func.date(PageViewStat.time_bucket))
         .all()
     )
+    visitor_rows = (
+        db.query(
+            PageVisitorDay.path,
+            PageVisitorDay.day,
+            func.count(func.distinct(PageVisitorDay.user_id)),
+        )
+        .filter(PageVisitorDay.day >= start_day)
+        .group_by(PageVisitorDay.path, PageVisitorDay.day)
+        .all()
+    )
+    # 每页的窗口去重人数：一次分组查完，不要在页面循环里逐页查（12 个路由就是
+    # 12 次查询）。这个值不能由上面的按天人数相加得出——同一个人连来 7 天，
+    # 按天是 7 人次、去重后是 1 个人。
+    # Per-page distinct visitors for the window: one grouped query, not one per
+    # page inside the loop. It cannot be summed from the daily figures above —
+    # one person visiting 7 days is 7 daily entries but 1 distinct visitor.
+    page_visitors = {
+        path: int(count or 0)
+        for path, count in db.query(
+            PageVisitorDay.path,
+            func.count(func.distinct(PageVisitorDay.user_id)),
+        )
+        .filter(PageVisitorDay.day >= start_day)
+        .group_by(PageVisitorDay.path)
+        .all()
+    }
+    total_visitors = int(
+        db.query(func.count(func.distinct(PageVisitorDay.user_id)))
+        .filter(PageVisitorDay.day >= start_day)
+        .scalar()
+        or 0
+    )
+
+    # 按 (path, day) 归拢两张表的结果。func.date() 在 SQLite 下返回字符串、
+    # 在其他驱动下可能返回 date 对象，统一成 ISO 字符串再当键用。
+    # Merge both tables keyed by (path, day). func.date() yields a string on
+    # SQLite but may yield a date elsewhere, so normalise to an ISO string.
+    def _day_key(value) -> str:
+        return value.isoformat() if hasattr(value, "isoformat") else str(value)[:10]
+
+    per_page: dict[str, dict[str, dict]] = {}
+    for path, day, views, seconds in view_rows:
+        cell = per_page.setdefault(path, {}).setdefault(
+            _day_key(day), {"views": 0, "seconds": 0.0, "visitors": 0}
+        )
+        cell["views"] += int(views or 0)
+        cell["seconds"] += float(seconds or 0.0)
+    for path, day, visitors in visitor_rows:
+        cell = per_page.setdefault(path, {}).setdefault(
+            _day_key(day), {"views": 0, "seconds": 0.0, "visitors": 0}
+        )
+        cell["visitors"] += int(visitors or 0)
+
+    # 补齐窗口内没有数据的日期为 0：折线图必须拿到连续日期序列，否则前端会把
+    # "这天没人来"画成直接跨过去，看起来像访问量没掉过。
+    # Backfill empty days with zeros: the line chart needs a contiguous date
+    # series, otherwise a day with no traffic gets skipped and reads as "traffic
+    # never dropped".
+    day_keys = [(start_day + timedelta(days=i)).isoformat() for i in range(days)]
 
     pages: list[PageStatOut] = []
-    total_views = 0
-    total_seconds = 0.0
-    for path, views, seconds in rows:
-        views = int(views or 0)
-        seconds = float(seconds or 0.0)
-        if views <= 0:
+    for path, by_day in per_page.items():
+        page_views = sum(c["views"] for c in by_day.values())
+        page_seconds = sum(c["seconds"] for c in by_day.values())
+        if page_views <= 0 and not any(c["visitors"] for c in by_day.values()):
             continue
-        total_views += views
-        total_seconds += seconds
+        series = [
+            PageDayPointOut(
+                date=key,
+                views=by_day.get(key, {}).get("views", 0),
+                visitors=by_day.get(key, {}).get("visitors", 0),
+                avgSeconds=(
+                    round(by_day[key]["seconds"] / by_day[key]["views"], 1)
+                    if by_day.get(key, {}).get("views")
+                    else 0.0
+                ),
+            )
+            for key in day_keys
+        ]
         pages.append(PageStatOut(
             path=path,
-            views=views,
-            avgSeconds=round(seconds / views, 1),
+            views=page_views,
+            visitors=page_visitors.get(path, 0),
+            avgSeconds=round(page_seconds / page_views, 1) if page_views else 0.0,
+            daily=series,
         ))
 
     pages.sort(key=lambda p: p.views, reverse=True)
+    total_views = sum(p.views for p in pages)
+    total_seconds = sum(c["seconds"] for by_day in per_page.values() for c in by_day.values())
     return AdminPageStatsOut(
         days=days,
         totalViews=total_views,
+        totalVisitors=total_visitors,
         avgSecondsOverall=round(total_seconds / total_views, 1) if total_views else 0.0,
+        dates=day_keys,
         pages=pages,
     )
 

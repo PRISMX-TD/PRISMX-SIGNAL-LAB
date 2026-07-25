@@ -1,8 +1,10 @@
-"""页面访问上报：把「某页面被看了一次、停留 N 秒」累加进小时桶。
+"""页面访问上报：把「某页面被看了一次、停留 N 秒」累加进小时桶，
+并按天登记一次「这个用户今天来过这一页」用于算访问人数。
 
-**不记录是哪个用户**——见 PageViewStat 模型的说明。这里仍然要求登录，
-理由不是为了知道"谁"，而是为了不让这个端点变成任何人都能往库里写数据的
-开放写入口；user 拿到后即丢弃，不落库。
+访问次数与停留时长进 PageViewStat（不含任何身份）；访问人数靠
+PageVisitorDay 的「页面 × 天 × 用户」去重标记算 COUNT(DISTINCT)。
+两张表的分工与隐私边界见各自的模型说明——简单说：能答"周二有几个人
+看过图表页"，不能答"某人几点看了多久"。
 
 两条硬约束，都是为了防止这个端点被用来把表写爆：
 1. path 必须在白名单里。表体积之所以恒定，前提是 path 的取值集合有限；
@@ -11,12 +13,14 @@
    彻底拉歪，所以超过上限按上限计。
 
 Page-view reporting: accumulates "this page was viewed once, for N seconds"
-into an hourly bucket.
+into an hourly bucket, and registers "this user visited this page today" once
+per day for visitor counts.
 
-NO user identity is stored — see the PageViewStat model docstring. Login is
-still required, not to learn *who*, but to keep this from being an open
-write endpoint anyone can push rows through; the user is discarded, never
-persisted.
+View counts and dwell time go to PageViewStat (identity-free); visitor counts
+come from COUNT(DISTINCT) over PageVisitorDay's (page, day, user) dedup
+markers. See each model's docstring for the split and its privacy boundary —
+in short: it can answer "how many people opened the chart page on Tuesday",
+not "who was there at what time for how long".
 
 Two hard limits, both to stop this endpoint from being used to bloat the table:
 1. path must be in a whitelist. Constant table size depends on path having a
@@ -33,7 +37,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import PageViewStat, User
+from app.models import PageVisitorDay, PageViewStat, User
 from app.schemas import PageViewIn
 from app.services.deps import get_current_user
 
@@ -68,7 +72,7 @@ MAX_DWELL_SECONDS = 1800.0
 def report_pageview(
     payload: PageViewIn,
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     """累加一次页面访问。返回 204，前端不需要任何响应体。
 
@@ -107,6 +111,10 @@ def report_pageview(
         ))
         try:
             db.commit()
+            # 新桶已建好，计数部分到此结束；人数登记仍要走，别在这里直接 return。
+            # Bucket created, counting done; the visitor marker still needs
+            # writing — don't return early here.
+            _mark_visitor(db, payload.path, bucket.date(), user.id)
             return
         except IntegrityError:
             db.rollback()
@@ -119,3 +127,25 @@ def report_pageview(
     row.views = (row.views or 0) + 1
     row.total_seconds = (row.total_seconds or 0.0) + seconds
     db.commit()
+    _mark_visitor(db, payload.path, bucket.date(), user.id)
+
+
+def _mark_visitor(db: Session, path: str, day, user_id: str) -> None:
+    """登记「该用户当天来过该页」，重复登记是无操作。
+
+    用 INSERT 撞唯一约束来判重，而不是先 SELECT 再 INSERT：后者在并发下
+    两个请求可能都查到"没有"然后都插，多出来的那行会让人数被重复计算。
+    这里让数据库的唯一约束做唯一裁判，撞了就回滚忽略。
+
+    Registers "this user visited this page today"; repeats are no-ops.
+
+    Dedup is done by letting an INSERT hit the unique constraint rather than
+    SELECT-then-INSERT: under concurrency the latter lets two requests both see
+    "absent" and both insert, and the extra row would double-count a visitor.
+    The DB constraint is the single arbiter; on conflict we roll back and ignore.
+    """
+    db.add(PageVisitorDay(path=path, day=day, user_id=user_id))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()

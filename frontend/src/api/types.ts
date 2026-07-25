@@ -67,13 +67,32 @@ export interface AdminMetrics {
   signupsLast7d: Array<{ date: string; count: number }>
 }
 
-// 管理后台：页面访问统计（全站聚合，不含个人身份）
-// admin: page-view stats (site-wide aggregate, no personal identity)
+// 管理后台：页面访问统计（每页每天的人数/次数/平均停留）
+// admin: page stats (visitors/views/avg dwell per page per day)
+export interface AdminPageDayPoint {
+  date: string // YYYY-MM-DD (UTC)
+  visitors: number
+  views: number
+  avgSeconds: number
+}
+
+export interface AdminPageStat {
+  path: string
+  views: number
+  // 窗口内去重人数，不等于 daily 各天 visitors 之和（同一个人多天来只算一个）
+  // Distinct visitors for the window; not the sum of daily visitors
+  visitors: number
+  avgSeconds: number
+  daily: AdminPageDayPoint[] // 与 AdminPageStats.dates 同序、同长度
+}
+
 export interface AdminPageStats {
   days: number
   totalViews: number
+  totalVisitors: number
   avgSecondsOverall: number
-  pages: Array<{ path: string; views: number; avgSeconds: number }>
+  dates: string[] // 公共日期轴，连续无缺口 / contiguous shared date axis
+  pages: AdminPageStat[]
 }
 
 // 管理后台：订阅定价设置 / admin: subscription pricing settings

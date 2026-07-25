@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.core.database import SessionLocal
 from app.models import Candle
+from app.services.page_stats import prune_visitor_days
 from app.services.settings_store import get_candle_settings
 
 logger = logging.getLogger("prismx.candle_store")
@@ -151,6 +152,13 @@ async def candle_retention_sweep_loop() -> None:
                 deleted = cleanup_old_m1(db, int(cfg["m1_retention_days"]))
                 if deleted:
                     logger.info("candle_retention_sweep_loop: deleted %d expired 1m candle(s)", deleted)
+                # 顺带清页面统计的去重标记：同样是每天一次的保留期清理，
+                # 为一张小表另开一个后台任务不值得（VPS 是 2 核单进程）。
+                # Also prune page-stat dedup markers: same daily retention job,
+                # not worth a separate background task for one small table.
+                pruned = prune_visitor_days(db)
+                if pruned:
+                    logger.info("candle_retention_sweep_loop: pruned %d expired visitor marker(s)", pruned)
             finally:
                 db.close()
         except Exception:

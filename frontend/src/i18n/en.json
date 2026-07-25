@@ -950,9 +950,17 @@
     },
     "pageStats": {
       "title": "Page views (last 7 days)",
-      "summary": "{{views}} views · {{avg}} average dwell",
-      "privacyHint": "Site-wide totals only; no record of which user visited which page.",
-      "empty": "No view data yet — it accumulates once this is live."
+      "summary": "{{visitors}} visitors · {{views}} views · {{avg}} average dwell",
+      "privacyHint": "Counts how many people opened each page per day; no visit times, per-person dwell or browsing order is kept.",
+      "empty": "No view data yet — it accumulates once this is live.",
+      "metricLabel": "Metric",
+      "metric": {
+        "visitors": "Visitors",
+        "views": "Views",
+        "avgSeconds": "Avg dwell"
+      },
+      "peak": "peak {{value}}",
+      "colPage": "Page"
     },
     "searchPlaceholder": "Search by email…",
     "search": "Search",

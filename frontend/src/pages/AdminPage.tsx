@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom'
 import { adminApi } from '../api/client'
 import { fmtTime, localizeApiError } from '../api/utils'
 import Select from '../components/Select'
+import PageStatsCard from '../components/admin/PageStatsCard'
 import type { AdminBrokerSettings, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
@@ -24,17 +25,6 @@ const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
 // made the original single page an unnavigable pile of seven config groups.
 type AdminTab = 'data' | 'users' | 'ops' | 'system'
 const ADMIN_TABS: AdminTab[] = ['data', 'users', 'ops', 'system']
-
-// 平均停留时长按量级选单位：几十秒显示秒，超过一分钟显示"x 分 y 秒"。
-// 统一显示秒的话，"平均停留 847 秒"读起来要在脑子里做除法。
-// Pick a unit by magnitude: seconds below a minute, "Xm Ys" above. Showing raw
-// seconds throughout would force mental arithmetic on "847s average dwell".
-function fmtDwell(seconds: number): string {
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  const m = Math.floor(seconds / 60)
-  const s = Math.round(seconds % 60)
-  return s === 0 ? `${m}m` : `${m}m ${s}s`
-}
 
 interface Draft {
   role: UserRole
@@ -413,50 +403,9 @@ export default function AdminPage() {
         ))}
       </div>
 
-      {/* 页面访问统计：近 7 天各页面被打开次数与平均停留时长。
-          横条宽度按"占最高项的比例"而非"占总量的比例"——后者在页面多的时候
-          每根条都很短，看不出差距；前者让最热的页面占满宽度，排名差异一眼可见。
-          Page-view stats: opens and average dwell per page over 7 days. Bar width
-          is relative to the top item, not to the total — the latter makes every
-          bar short once there are many pages, hiding the differences; the former
-          fills the width for the hottest page so the ranking reads at a glance. */}
-      <div className="glass mb-5 p-5">
-        <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold text-white">{t('admin.pageStats.title')}</h2>
-          {pageStats && pageStats.totalViews > 0 && (
-            <span className="text-xs text-slate-400">
-              {t('admin.pageStats.summary', {
-                views: pageStats.totalViews,
-                avg: fmtDwell(pageStats.avgSecondsOverall),
-              })}
-            </span>
-          )}
-        </div>
-        <p className="mb-4 text-xs text-slate-500">{t('admin.pageStats.privacyHint')}</p>
-        {!pageStats || pageStats.pages.length === 0 ? (
-          <p className="py-3 text-sm text-slate-500">{t('admin.pageStats.empty')}</p>
-        ) : (
-          <div className="space-y-2.5">
-            {pageStats.pages.map((p) => {
-              const pct = Math.round((p.views / pageStats.pages[0].views) * 100)
-              return (
-                <div key={p.path} className="flex items-center gap-3">
-                  <code className="w-28 shrink-0 truncate text-xs text-slate-300">{p.path}</code>
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/5">
-                    <div className="h-full rounded-full bg-prism-500/60" style={{ width: `${pct}%` }} />
-                  </div>
-                  <span className="w-16 shrink-0 text-right text-xs tabular-nums text-slate-200">
-                    {p.views}
-                  </span>
-                  <span className="w-16 shrink-0 text-right text-xs tabular-nums text-slate-400">
-                    {fmtDwell(p.avgSeconds)}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
+      {/* 页面访问统计：按天折线图 + 各页面明细表，见 admin/PageStatsCard.tsx。
+          Page stats: per-day line chart plus per-page table; see admin/PageStatsCard.tsx */}
+      <PageStatsCard stats={pageStats} />
         </>
       )}
 

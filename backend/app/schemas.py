@@ -94,16 +94,39 @@ class PageViewIn(BaseModel):
     seconds: float
 
 
+class PageDayPointOut(BaseModel):
+    """某页面某一天的三个指标。没有数据的日期也会返回（三项全为 0），
+    因为折线图需要连续的日期轴，缺日期会被画成直线跨过去。
+
+    One day's three metrics for a page. Days with no data are still returned
+    (all zeros): the line chart needs a contiguous date axis, and a missing day
+    would be drawn as a straight line across the gap.
+    """
+
+    date: str  # ISO 日期 YYYY-MM-DD（UTC）
+    visitors: int  # 当天访问过该页的去重用户数
+    views: int
+    avgSeconds: float
+
+
 class PageStatOut(BaseModel):
     path: str
     views: int
+    # 窗口内访问过该页的去重人数。**不等于 daily 里各天 visitors 之和**：
+    # 同一个人多天来访，按天各算一次、去重后只算一个。
+    # Distinct visitors for the window; NOT the sum of daily visitors, since one
+    # person visiting on several days counts once here.
+    visitors: int
     avgSeconds: float  # total_seconds / views，跨小时桶加权后的均值
+    daily: list[PageDayPointOut]  # 按日期升序 / ascending by date
 
 
 class AdminPageStatsOut(BaseModel):
     days: int  # 统计窗口天数 / window size in days
     totalViews: int
+    totalVisitors: int  # 全站去重人数，同样不是各页人数之和（一个人可看多页）
     avgSecondsOverall: float
+    dates: list[str]  # 公共日期轴，与每个 page.daily 的顺序一致
     pages: list[PageStatOut]  # 按访问次数降序 / sorted by views desc
 
 

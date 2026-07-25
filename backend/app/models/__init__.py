@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 
 from app.core.database import Base
 
@@ -632,13 +632,18 @@ class AdminAuditLog(Base):
 
 
 class PageViewStat(Base):
-    """页面访问统计：按「页面 × 小时」预聚合，**不记录是哪个用户**。
+    """页面访问统计：按「页面 × 小时」预聚合，本表**不记录是哪个用户**。
 
     刻意不存 user_id：后台只需要回答"哪些页面最常被打开、平均看多久"，
     这不需要个人身份。存了 user_id 就变成可下钻到个人的行为轨迹，性质从
     产品度量变成用户监控，也让表随「用户数 × 页面数」膨胀。按小时分桶后
     表体积只随「页面数 × 小时」增长（12 个静态路由，一天最多 288 行），
     多久都不用清理。
+
+    访问**人数**不在本表，见 PageVisitorDay——那张表只为去重而存在，
+    同样不保留任何时刻与时长信息。次数与人数分两张表而不是合并成一张，
+    正是为了让本表保持"无身份"这个性质：合并后每行都会带上 user_id，
+    连"某人某小时看了某页多久"都能读出来。
 
     time_bucket 是截断到整小时的 UTC 时间。累加而非插明细：同一小时同一页
     的第 N 次访问只更新这一行，因此写放大恒定，不会因为用户多就把库写爆。
@@ -680,3 +685,63 @@ class PageViewStat(Base):
     time_bucket = Column(DateTime, nullable=False)  # 截断到整小时的 UTC 时间
     views = Column(Integer, default=0, nullable=False)
     total_seconds = Column(Float, default=0.0, nullable=False)
+
+
+class PageVisitorDay(Base):
+    """页面日活去重标记：「某用户某天访问过某页」，一天一页一人**只有一行**。
+
+    存在的唯一目的是让 COUNT(DISTINCT) 能算出访问人数——这是 PageViewStat
+    的纯计数模型无法回答的问题（10 次访问是 1 个人还是 10 个人，聚合完就
+    永远分不出来了）。
+
+    **刻意只存到"天"这个粒度，且不存任何时长或时刻**。这是隐私与功能之间
+    的取舍点：知道"周二有 8 个人看过图表页"是产品数据，知道"张三周二下午
+    3 点看了图表页 12 分钟"是行为监控。省掉小时与时长后，本表能回答前者、
+    无法回答后者，而这正是后台需要的全部。
+
+    与 PageViewStat 的分工：本表只管人数，次数与停留时长仍走那张无身份的
+    表。所以任何"每人平均停留多久"之类的下钻都做不到，是设计使然。
+
+    体积：随「活跃用户数 × 其访问过的页面数 × 天数」增长，不像纯聚合表那样
+    有硬上界，因此配了 RETENTION_DAYS 定期清理（见 services/page_stats.py）。
+
+    Per-day unique-visitor markers: "user U opened page P on day D", exactly one
+    row per (page, day, user).
+
+    Its only purpose is to make COUNT(DISTINCT) possible for visitor counts — a
+    question PageViewStat's pure counters cannot answer (once aggregated, 10
+    views are indistinguishable between 1 person and 10).
+
+    Deliberately stored only at DAY granularity, with no dwell time and no
+    timestamp. That is the privacy/utility trade-off: "8 people opened the chart
+    page on Tuesday" is a product metric; "Alice spent 12 minutes on the chart
+    page at 3pm Tuesday" is behavioural surveillance. Dropping the hour and the
+    duration means this table can answer the former and not the latter, which is
+    all the admin view needs.
+
+    Division of labour with PageViewStat: this table only supplies visitor
+    counts; view counts and dwell time stay in that identity-free table. Any
+    per-person dwell drill-down is therefore impossible by construction.
+
+    Size grows with active users × pages they visited × days, so unlike a pure
+    aggregate it has no hard ceiling — hence RETENTION_DAYS pruning (see
+    services/page_stats.py).
+    """
+    __tablename__ = "page_visitor_days"
+    __table_args__ = (
+        # 去重靠这条约束本身实现：重复上报撞唯一约束后忽略即可
+        # Dedup is enforced by this constraint: repeat reports hit it and are ignored
+        UniqueConstraint("path", "day", "user_id", name="uq_page_visitor_day"),
+        # 按天范围扫 + 按天分组，都走这个索引
+        # Both the range scan and the group-by run on this index
+        Index("idx_page_visitor_day", "day"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    path = Column(String, nullable=False)
+    day = Column(Date, nullable=False)  # UTC 日期 / UTC calendar date
+    # 不加外键：用户注销后这行留着也无妨（它只是个去重标记，不含任何个人信息），
+    # 反而避免删用户时被外键挡住。
+    # No FK: leaving the row after a user is deleted is harmless (it is a dedup
+    # marker holding no personal data) and avoids blocking user deletion.
+    user_id = Column(String, nullable=False)
