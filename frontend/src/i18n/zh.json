@@ -942,6 +942,18 @@
     "wau": "周活跃 (7d)",
     "signupsLast7d": "近 7 天注册",
     "planBreakdown": "等级分布",
+    "tab": {
+      "data": "数据看板",
+      "users": "用户管理",
+      "ops": "运营设置",
+      "system": "系统参数"
+    },
+    "pageStats": {
+      "title": "页面访问统计（近 7 天）",
+      "summary": "共 {{views}} 次访问 · 平均停留 {{avg}}",
+      "privacyHint": "全站汇总数据，不记录具体是哪位用户访问了哪个页面。",
+      "empty": "暂无访问数据，上线后开始累积。"
+    },
     "searchPlaceholder": "按邮箱搜索…",
     "search": "搜索",
     "totalCount": "共 {{n}} 位用户",

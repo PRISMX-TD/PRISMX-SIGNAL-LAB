@@ -19,8 +19,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import AdminAuditLog, MT5Account, User
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPricingSettings, AdminStrategySettings, AdminTrialSettings, AdminUserOut, AdminUserUpdate
+from app.models import AdminAuditLog, MT5Account, PageViewStat, User
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategySettings, AdminTrialSettings, AdminUserOut, AdminUserUpdate, PageStatOut
 from app.services.deps import require_admin
 from app.services.settings_store import (
     get_broker_settings,
@@ -332,6 +332,62 @@ def metrics(
         wau=wau,
         planCounts=plan_counts,
         signupsLast7d=signups_last_7d,
+    )
+
+
+@router.get("/page-stats", response_model=AdminPageStatsOut)
+def page_stats(
+    days: int = Query(7, ge=1, le=90),
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """页面访问排行与平均停留时长（全站聚合，无个人身份）。
+
+    平均值一律用 SUM(total_seconds) / SUM(views) 现算，不能先按桶求平均再平均——
+    小时桶的访问量差别很大（凌晨可能只有 1 次、白天几百次），等权平均会让一个
+    冷清时段的极端值和一个繁忙时段权重相同，算出来的"平均停留"是错的。
+
+    Page-view ranking and average dwell time (site-wide aggregate, no identity).
+    Averages are always SUM(total_seconds) / SUM(views), never the mean of
+    per-bucket means: hourly buckets differ wildly in volume (one view at 4am
+    versus hundreds at midday), so equal-weighting buckets would give an
+    outlier-heavy quiet hour the same weight as a busy one and yield a wrong
+    "average dwell".
+    """
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+    rows = (
+        db.query(
+            PageViewStat.path,
+            func.sum(PageViewStat.views),
+            func.sum(PageViewStat.total_seconds),
+        )
+        .filter(PageViewStat.time_bucket >= cutoff)
+        .group_by(PageViewStat.path)
+        .all()
+    )
+
+    pages: list[PageStatOut] = []
+    total_views = 0
+    total_seconds = 0.0
+    for path, views, seconds in rows:
+        views = int(views or 0)
+        seconds = float(seconds or 0.0)
+        if views <= 0:
+            continue
+        total_views += views
+        total_seconds += seconds
+        pages.append(PageStatOut(
+            path=path,
+            views=views,
+            avgSeconds=round(seconds / views, 1),
+        ))
+
+    pages.sort(key=lambda p: p.views, reverse=True)
+    return AdminPageStatsOut(
+        days=days,
+        totalViews=total_views,
+        avgSecondsOverall=round(total_seconds / total_views, 1) if total_views else 0.0,
+        pages=pages,
     )
 
 

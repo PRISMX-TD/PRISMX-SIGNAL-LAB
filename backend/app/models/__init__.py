@@ -629,3 +629,54 @@ class AdminAuditLog(Base):
     old_value = Column(String, nullable=True)
     new_value = Column(String, nullable=True)
     created_at = Column(DateTime, default=_now)
+
+
+class PageViewStat(Base):
+    """页面访问统计：按「页面 × 小时」预聚合，**不记录是哪个用户**。
+
+    刻意不存 user_id：后台只需要回答"哪些页面最常被打开、平均看多久"，
+    这不需要个人身份。存了 user_id 就变成可下钻到个人的行为轨迹，性质从
+    产品度量变成用户监控，也让表随「用户数 × 页面数」膨胀。按小时分桶后
+    表体积只随「页面数 × 小时」增长（12 个静态路由，一天最多 288 行），
+    多久都不用清理。
+
+    time_bucket 是截断到整小时的 UTC 时间。累加而非插明细：同一小时同一页
+    的第 N 次访问只更新这一行，因此写放大恒定，不会因为用户多就把库写爆。
+
+    total_seconds 存的是停留秒数总和，平均值由 total_seconds / views 在查询
+    时算出——存总和而不是存平均，才能在跨桶合并时正确加权（先平均再平均是
+    错的）。
+
+    Page-view stats, pre-aggregated per (path, hour), with NO user identity.
+    Deliberately no user_id: the admin view only needs "which pages get opened
+    most, and how long people stay", which requires no personal identity.
+    Storing user_id would turn this into per-person behavioural tracking rather
+    than a product metric, and would grow the table by users × pages. Bucketed
+    hourly, size grows only with pages × hours (12 static routes, at most 288
+    rows/day), so it never needs pruning.
+
+    time_bucket is a UTC timestamp truncated to the hour. Rows accumulate
+    instead of storing raw events: the Nth visit to the same page in the same
+    hour just updates this row, so write amplification stays constant no matter
+    how many users there are.
+
+    total_seconds holds the SUM of dwell seconds; the average is derived as
+    total_seconds / views at query time — storing the sum rather than the
+    average is what makes merging buckets correctly weighted (averaging
+    averages is wrong).
+    """
+    __tablename__ = "page_view_stats"
+    __table_args__ = (
+        # 累加的前提：(path, time_bucket) 唯一，靠它做 upsert 定位
+        # Accumulation relies on (path, time_bucket) being unique for upserts
+        UniqueConstraint("path", "time_bucket", name="uq_page_view_path_bucket"),
+        # 后台查的是"最近 N 天"，按时间桶范围扫
+        # The admin view queries a recent window, scanned by bucket range
+        Index("idx_page_view_bucket", "time_bucket"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    path = Column(String, nullable=False)  # 前端路由 pathname，如 /dashboard
+    time_bucket = Column(DateTime, nullable=False)  # 截断到整小时的 UTC 时间
+    views = Column(Integer, default=0, nullable=False)
+    total_seconds = Column(Float, default=0.0, nullable=False)

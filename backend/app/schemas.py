@@ -77,6 +77,36 @@ class AdminMetricsOut(BaseModel):
     signupsLast7d: list[dict]  # [{date, count}]
 
 
+class PageViewIn(BaseModel):
+    """页面访问上报体。seconds 是本次在该页的停留秒数。
+
+    上限交给路由层的 MAX_DWELL_SECONDS 截断而不在这里用 le= 卡死：超限是
+    "挂着页面没看"这种正常现象，按上限计入即可，不该让整个请求 422 失败而
+    丢掉这一次访问计数。负数则直接归零。
+
+    Page-view report body; seconds is the dwell time on that page this visit.
+    The cap is applied by the router's MAX_DWELL_SECONDS rather than a le=
+    constraint here: exceeding it means "tab left open", a normal occurrence
+    that should be clamped and counted, not 422'd into losing the view entirely.
+    Negatives are floored at zero.
+    """
+    path: str = Field(max_length=200)
+    seconds: float
+
+
+class PageStatOut(BaseModel):
+    path: str
+    views: int
+    avgSeconds: float  # total_seconds / views，跨小时桶加权后的均值
+
+
+class AdminPageStatsOut(BaseModel):
+    days: int  # 统计窗口天数 / window size in days
+    totalViews: int
+    avgSecondsOverall: float
+    pages: list[PageStatOut]  # 按访问次数降序 / sorted by views desc
+
+
 class AdminBrokerSettings(BaseModel):
     """合作券商锁设置（管理后台读写用同一形状）。
     Partner-broker lock settings (same shape for admin read & write)."""

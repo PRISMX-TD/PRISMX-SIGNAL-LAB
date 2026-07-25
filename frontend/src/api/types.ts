@@ -67,6 +67,15 @@ export interface AdminMetrics {
   signupsLast7d: Array<{ date: string; count: number }>
 }
 
+// 管理后台：页面访问统计（全站聚合，不含个人身份）
+// admin: page-view stats (site-wide aggregate, no personal identity)
+export interface AdminPageStats {
+  days: number
+  totalViews: number
+  avgSecondsOverall: number
+  pages: Array<{ path: string; views: number; avgSeconds: number }>
+}
+
 // 管理后台：订阅定价设置 / admin: subscription pricing settings
 export interface AdminPricingSettings {
   proMonthlyPrice: number

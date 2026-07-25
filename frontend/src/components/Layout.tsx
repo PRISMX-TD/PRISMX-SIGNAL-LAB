@@ -1,6 +1,6 @@
 // 主布局：顶部导航 + 内容区 + 移动端底部 Tab 栏
 // Main layout: top nav + content + mobile bottom tab bar.
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { LiveProvider, useLive } from '../store/live'
@@ -16,6 +16,7 @@ import AuroraBackground from './AuroraBackground'
 import ConfirmModal from './ConfirmModal'
 import BridgeUpdateNotice from './BridgeUpdateNotice'
 import { useBackToClose } from '../utils/useBackToClose'
+import { reportPageView } from '../utils/pageTracking'
 
 function NavItem({ to, label }: { to: string; label: string }) {
   return (
@@ -233,6 +234,53 @@ export default function Layout() {
 
   // 路由切换时自动关闭面板 / close the sheet on navigation
   useEffect(() => { setMoreOpen(false) }, [location.pathname])
+
+  // 页面停留上报：Layout 是全部受保护路由的共同父组件，所以这一处就覆盖了所有
+  // 需要统计的页面。计时起点存在 ref 里而不是 state——它每次路由切换都要重置，
+  // 用 state 会多触发一轮渲染，而这个值从不参与渲染。
+  //
+  // 两个触发点缺一不可：
+  // - cleanup：路由切换时上报上一个页面（站内跳转走这里）；
+  // - pagehide：关标签页/切到别的网站时上报（这种情况 React 不会跑 cleanup，
+  //   只靠上面那个会永久丢掉每个会话的最后一个页面）。用 pagehide 而不是
+  //   unload，因为移动端 Safari 把页面放进后台缓存时根本不触发 unload。
+  //
+  // Dwell reporting: Layout is the common parent of every protected route, so
+  // this single hook covers all tracked pages. The start timestamp lives in a
+  // ref, not state — it resets on every navigation and never participates in
+  // rendering, so state would only cost an extra render.
+  //
+  // Both triggers are required:
+  // - cleanup: reports the previous page on in-app navigation;
+  // - pagehide: reports when the tab closes or the user leaves the site, where
+  //   React never runs cleanup — without it every session would permanently
+  //   lose its final page. pagehide rather than unload, because mobile Safari
+  //   doesn't fire unload when putting a page into the back/forward cache.
+  // done 标记防重复上报：pagehide 之后 React 仍可能跑 cleanup（例如从后台缓存
+  // 恢复再跳转），两条路径都调 flush 就会把同一次访问算两遍，把访问量和总时长
+  // 一起抬高。每个 effect 周期只允许上报一次。
+  // The `done` flag prevents double-counting: React may still run cleanup after
+  // pagehide (e.g. restored from the back/forward cache, then navigated away),
+  // and having both paths flush would count one visit twice, inflating views and
+  // total time together. One report per effect cycle, at most.
+  const dwellStartRef = useRef<number>(Date.now())
+  useEffect(() => {
+    const path = location.pathname
+    dwellStartRef.current = Date.now()
+    let done = false
+
+    const flush = () => {
+      if (done) return
+      done = true
+      const seconds = (Date.now() - dwellStartRef.current) / 1000
+      reportPageView(path, seconds)
+    }
+    window.addEventListener('pagehide', flush)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      flush()
+    }
+  }, [location.pathname])
 
   // 每次进入 App 补齐"本设备"的推送订阅。通知开关是账号级的（跨设备同步），
   // 推送订阅却是设备级的——此前只在用户翻动开关的那台设备上创建。桌面开启后

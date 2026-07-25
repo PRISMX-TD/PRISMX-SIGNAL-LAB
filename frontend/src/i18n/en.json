@@ -942,6 +942,18 @@
     "wau": "WAU (7d)",
     "signupsLast7d": "Signups (7d)",
     "planBreakdown": "Plan breakdown",
+    "tab": {
+      "data": "Dashboard",
+      "users": "Users",
+      "ops": "Operations",
+      "system": "System"
+    },
+    "pageStats": {
+      "title": "Page views (last 7 days)",
+      "summary": "{{views}} views · {{avg}} average dwell",
+      "privacyHint": "Site-wide totals only; no record of which user visited which page.",
+      "empty": "No view data yet — it accumulates once this is live."
+    },
     "searchPlaceholder": "Search by email…",
     "search": "Search",
     "totalCount": "{{n}} users total",

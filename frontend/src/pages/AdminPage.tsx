@@ -6,10 +6,35 @@ import { Link } from 'react-router-dom'
 import { adminApi } from '../api/client'
 import { fmtTime, localizeApiError } from '../api/utils'
 import Select from '../components/Select'
-import type { AdminBrokerSettings, AdminMetrics, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole } from '../api/types'
+import type { AdminBrokerSettings, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
 const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
+
+// 后台分为四类，与订单页的 Tab 模式一致：
+// data   看数据（指标、页面访问统计）
+// users  管人（搜索、批量、用户表）
+// ops    改运营策略（定价、试用、券商锁）——影响用户看到什么、付多少钱
+// system 调系统参数（纪律分算法、K 线保留、策略平台上限）——影响后台怎么算
+// ops 与 system 的界线是"改了之后谁受影响"：ops 直接改变商业条款，system 改变
+// 计算与存储行为。混在一起就是原来那个 7 组配置堆在一页、找不到东西的样子。
+// Four sections, mirroring the Orders page tab pattern. The ops/system split is
+// by blast radius: ops changes commercial terms users see and pay, system
+// changes how the backend computes and stores. Lumping them together is what
+// made the original single page an unnavigable pile of seven config groups.
+type AdminTab = 'data' | 'users' | 'ops' | 'system'
+const ADMIN_TABS: AdminTab[] = ['data', 'users', 'ops', 'system']
+
+// 平均停留时长按量级选单位：几十秒显示秒，超过一分钟显示"x 分 y 秒"。
+// 统一显示秒的话，"平均停留 847 秒"读起来要在脑子里做除法。
+// Pick a unit by magnitude: seconds below a minute, "Xm Ys" above. Showing raw
+// seconds throughout would force mental arithmetic on "847s average dwell".
+function fmtDwell(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  const m = Math.floor(seconds / 60)
+  const s = Math.round(seconds % 60)
+  return s === 0 ? `${m}m` : `${m}m ${s}s`
+}
 
 interface Draft {
   role: UserRole
@@ -43,6 +68,9 @@ export default function AdminPage() {
   const [users, setUsers] = useState<AdminUser[]>([])
   const [total, setTotal] = useState(0)
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null)
+  const [pageStats, setPageStats] = useState<AdminPageStats | null>(null)
+  // 当前分类页签 / active section tab
+  const [tab, setTab] = useState<AdminTab>('data')
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
   const [planFilter, setPlanFilter] = useState('')
@@ -100,9 +128,10 @@ export default function AdminPage() {
   const load = async (opts: { q?: string; plan?: string } = {}) => {
     setLoading(true)
     try {
-      const [usersRes, metricsRes, settingsRes, pricingRes, trialRes, disciplineRes, candleRes, strategyRes] = await Promise.all([
+      const [usersRes, metricsRes, pageStatsRes, settingsRes, pricingRes, trialRes, disciplineRes, candleRes, strategyRes] = await Promise.all([
         adminApi.listUsers({ q: (opts.q ?? query) || undefined, plan: (opts.plan ?? planFilter) || undefined, limit: 100 }),
         adminApi.metrics(),
+        adminApi.pageStats(7),
         adminApi.getSettings(),
         adminApi.getPricing(),
         adminApi.getTrial(),
@@ -113,6 +142,7 @@ export default function AdminPage() {
       setUsers(usersRes.users)
       setTotal(usersRes.total)
       setMetrics(metricsRes)
+      setPageStats(pageStatsRes)
       setDrafts(Object.fromEntries(usersRes.users.map((u) => [u.id, toDraft(u)])))
       setBrokerSettings(settingsRes)
       setBrokerPatternsText(settingsRes.brokerPatterns.join(', '))
@@ -330,6 +360,27 @@ export default function AdminPage() {
         </div>
       )}
 
+      {/* 分类页签 / section tabs */}
+      <div className="mb-5 flex flex-wrap gap-2" role="tablist">
+        {ADMIN_TABS.map((key) => (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => setTab(key)}
+            className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+              tab === key
+                ? 'bg-prism-600/20 text-prism-200'
+                : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+            }`}
+          >
+            {t(`admin.tab.${key}`)}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'data' && (
+        <>
       {/* 运营指标 / operating metrics */}
       <div className="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div className="glass px-4 py-4">
@@ -362,6 +413,55 @@ export default function AdminPage() {
         ))}
       </div>
 
+      {/* 页面访问统计：近 7 天各页面被打开次数与平均停留时长。
+          横条宽度按"占最高项的比例"而非"占总量的比例"——后者在页面多的时候
+          每根条都很短，看不出差距；前者让最热的页面占满宽度，排名差异一眼可见。
+          Page-view stats: opens and average dwell per page over 7 days. Bar width
+          is relative to the top item, not to the total — the latter makes every
+          bar short once there are many pages, hiding the differences; the former
+          fills the width for the hottest page so the ranking reads at a glance. */}
+      <div className="glass mb-5 p-5">
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-white">{t('admin.pageStats.title')}</h2>
+          {pageStats && pageStats.totalViews > 0 && (
+            <span className="text-xs text-slate-400">
+              {t('admin.pageStats.summary', {
+                views: pageStats.totalViews,
+                avg: fmtDwell(pageStats.avgSecondsOverall),
+              })}
+            </span>
+          )}
+        </div>
+        <p className="mb-4 text-xs text-slate-500">{t('admin.pageStats.privacyHint')}</p>
+        {!pageStats || pageStats.pages.length === 0 ? (
+          <p className="py-3 text-sm text-slate-500">{t('admin.pageStats.empty')}</p>
+        ) : (
+          <div className="space-y-2.5">
+            {pageStats.pages.map((p) => {
+              const pct = Math.round((p.views / pageStats.pages[0].views) * 100)
+              return (
+                <div key={p.path} className="flex items-center gap-3">
+                  <code className="w-28 shrink-0 truncate text-xs text-slate-300">{p.path}</code>
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/5">
+                    <div className="h-full rounded-full bg-prism-500/60" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="w-16 shrink-0 text-right text-xs tabular-nums text-slate-200">
+                    {p.views}
+                  </span>
+                  <span className="w-16 shrink-0 text-right text-xs tabular-nums text-slate-400">
+                    {fmtDwell(p.avgSeconds)}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+        </>
+      )}
+
+      {tab === 'ops' && (
+        <>
       {/* 合作券商锁设置 / partner-broker lock settings */}
       {brokerSettings && (
         <div className="glass mb-5 p-5">
@@ -549,6 +649,11 @@ export default function AdminPage() {
         </div>
       )}
 
+        </>
+      )}
+
+      {tab === 'system' && (
+        <>
       {/* 纪律分参数设置 / discipline-score parameter settings */}
       {discipline && (
         <div className="glass mb-5 p-5">
@@ -709,6 +814,11 @@ export default function AdminPage() {
         </div>
       )}
 
+        </>
+      )}
+
+      {tab === 'users' && (
+        <>
       {/* 搜索与筛选 / search & filter */}
       <form onSubmit={handleSearch} className="glass mb-4 flex flex-wrap items-center gap-3 p-4">
         <input
@@ -881,6 +991,8 @@ export default function AdminPage() {
           </table>
         )}
       </div>
+        </>
+      )}
 
       {/* 历史信号回放：功能内部试用中，暂不对普通用户开放，也不放进主导航或
           仪表盘/订单页——入口只留在管理者页面最底下，需要的人自己找得到，
