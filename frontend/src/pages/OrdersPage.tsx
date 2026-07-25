@@ -101,6 +101,19 @@ export default function OrdersPage() {
   const [trades, setTrades] = useState<ClosedTrade[] | null>(null)
   const [selectedLogin, setSelectedLogin] = useState<string | null>(null) // null = 全部账户 / all accounts
 
+  // MT5 账户详情卡：一次只显示一个账号，避免多账号并排堆叠。默认选第一个，
+  // 选中的账号失效时回退到第一个。/ MT5 account-details card shows one account
+  // at a time instead of stacking them; defaults to the first and falls back
+  // to it if the selection disappears.
+  const [accountLogin, setAccountLogin] = useState<string | null>(null)
+  useEffect(() => {
+    if (accounts.length === 0) return
+    if (accountLogin === null || !accounts.some((a) => a.login === accountLogin)) {
+      setAccountLogin(accounts[0].login)
+    }
+  }, [accounts, accountLogin])
+  const activeAccount = accounts.find((a) => a.login === accountLogin) ?? accounts[0]
+
   useEffect(() => {
     let mounted = true
     const load = () => {
@@ -244,42 +257,59 @@ export default function OrdersPage() {
         <p className="mt-1 text-sm text-slate-400">{t('orders.subtitle')}</p>
       </div>
 
-      {/* MT5 账户详情 / MT5 account details */}
-      {accounts.length > 0 && (
+      {/* MT5 账户详情：一次只显示所选的一个账号 / MT5 account details: shows only the selected account */}
+      {accounts.length > 0 && activeAccount && (
         <div className="glass mb-5 p-5">
-          <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-slate-300">
-            {t('orders.mt5Accounts')}
-          </h3>
-          <div className="mt-3 space-y-3">
-            {accounts.map((a, i) => (
-              <div key={i} className="rounded-lg border border-white/5 bg-white/[0.03] p-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-sm text-slate-100">
-                    {a.login}
-                    {a.server ? ` @${a.server}` : ""}
-                  </span>
-                  <span
-                    className={`tag text-xs ${a.online ? "bg-up/15 text-up" : "bg-white/5 text-slate-500"}`}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-slate-300">
+              {t('orders.mt5Accounts')}
+            </h3>
+            {accounts.length > 1 && (
+              <div className="flex flex-wrap gap-2">
+                {accounts.map((a) => (
+                  <button
+                    key={a.login}
+                    onClick={() => setAccountLogin(a.login)}
+                    className={`rounded-lg border px-3 py-1.5 font-mono text-xs transition ${
+                      a.login === accountLogin
+                        ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'
+                        : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-100'
+                    }`}
                   >
-                    {a.online ? t("common.online") : t("common.offline")}
-                  </span>
+                    {a.login}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="mt-3">
+            <div className="rounded-lg border border-white/5 bg-white/[0.03] p-3">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-sm text-slate-100">
+                  {activeAccount.login}
+                  {activeAccount.server ? ` @${activeAccount.server}` : ""}
+                </span>
+                <span
+                  className={`tag text-xs ${activeAccount.online ? "bg-up/15 text-up" : "bg-white/5 text-slate-500"}`}
+                >
+                  {activeAccount.online ? t("common.online") : t("common.offline")}
+                </span>
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <span className="text-slate-500">{t("account.balance")}</span>
+                  <div className="font-mono text-slate-100">{activeAccount.balance?.toFixed(2) ?? "-"}</div>
                 </div>
-                <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-                  <div>
-                    <span className="text-slate-500">{t("account.balance")}</span>
-                    <div className="font-mono text-slate-100">{a.balance?.toFixed(2) ?? "-"}</div>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">{t("account.equity")}</span>
-                    <div className="font-mono text-slate-100">{a.equity?.toFixed(2) ?? "-"}</div>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">{t("account.leverage")}</span>
-                    <div className="font-mono text-slate-100">{a.leverage ? `1:${a.leverage}` : "-"}</div>
-                  </div>
+                <div>
+                  <span className="text-slate-500">{t("account.equity")}</span>
+                  <div className="font-mono text-slate-100">{activeAccount.equity?.toFixed(2) ?? "-"}</div>
+                </div>
+                <div>
+                  <span className="text-slate-500">{t("account.leverage")}</span>
+                  <div className="font-mono text-slate-100">{activeAccount.leverage ? `1:${activeAccount.leverage}` : "-"}</div>
                 </div>
               </div>
-            ))}
+            </div>
           </div>
         </div>
       )}
