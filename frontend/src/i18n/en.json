@@ -960,7 +960,19 @@
         "avgSeconds": "Avg dwell"
       },
       "peak": "peak {{value}}",
-      "colPage": "Page"
+      "colPage": "Page",
+      "page": {
+        "/dashboard": "Dashboard",
+        "/app": "Signals",
+        "/charts": "Charts",
+        "/bind": "Connect MT5",
+        "/orders": "Orders",
+        "/strategies": "Strategies",
+        "/upgrade": "Upgrade",
+        "/account": "Account",
+        "/download": "Bridge download",
+        "/simulator": "Simulator"
+      }
     },
     "searchPlaceholder": "Search by email…",
     "search": "Search",

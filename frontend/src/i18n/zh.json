@@ -960,7 +960,19 @@
         "avgSeconds": "平均停留"
       },
       "peak": "峰值 {{value}}",
-      "colPage": "页面"
+      "colPage": "页面",
+      "page": {
+        "/dashboard": "仪表盘",
+        "/app": "信号面板",
+        "/charts": "行情图表",
+        "/bind": "连接 MT5",
+        "/orders": "订单回执",
+        "/strategies": "自定义策略",
+        "/upgrade": "升级 PRO",
+        "/account": "账户设置",
+        "/download": "下载桥接",
+        "/simulator": "模拟器"
+      }
     },
     "searchPlaceholder": "按邮箱搜索…",
     "search": "搜索",

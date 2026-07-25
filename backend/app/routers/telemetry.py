@@ -45,9 +45,17 @@ router = APIRouter(prefix="/telemetry", tags=["telemetry"])
 
 # 允许上报的前端路由，与 App.tsx 的受保护路由一一对应。新增页面时要同步加，
 # 否则该页的访问不会被统计（宁可漏统计，也不放开任意 path 写入）。
+#
+# 刻意排除 /admin：后台只有管理员自己会进，统计它等于统计自己看统计的次数，
+# 反而会在排行里占一席、把真实用户页面挤下去。
+#
 # Reportable frontend routes, mirroring the protected routes in App.tsx. Add
 # here when adding a page, otherwise its views go uncounted — under-counting is
 # preferable to accepting arbitrary paths.
+#
+# /admin is deliberately excluded: only admins ever open it, so counting it just
+# measures how often you check your own stats while taking a slot in the ranking
+# away from real user-facing pages.
 ALLOWED_PATHS = frozenset({
     "/dashboard",
     "/app",
@@ -58,7 +66,6 @@ ALLOWED_PATHS = frozenset({
     "/upgrade",
     "/account",
     "/download",
-    "/admin",
     "/simulator",
 })
 

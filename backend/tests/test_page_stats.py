@@ -220,5 +220,34 @@ def test_prune_visitor_days_drops_only_expired_markers(db, user):
     assert remaining[0].day == today
 
 
+def test_pageview_ignores_admin_page(client, db, auth_headers):
+    """后台自己不统计：/admin 已不在白名单，上报被静默忽略。"""
+    res = client.post("/api/telemetry/pageview", headers=auth_headers,
+                      json={"path": "/admin", "seconds": 30})
+    assert res.status_code == 204
+    assert db.query(PageViewStat).count() == 0
+    assert db.query(PageVisitorDay).count() == 0
+
+
+def test_page_stats_excludes_historical_admin_rows(client, db, user):
+    """库里已有的 /admin 历史数据也要滤掉。
+
+    白名单改了只能挡住新上报，之前累积的行还在表里；查询侧不滤的话，后台页会
+    一直挂在排行里，人数也会把管理员算进去。
+    """
+    now = datetime.now(timezone.utc).replace(tzinfo=None, minute=0, second=0, microsecond=0)
+    today = datetime.now(timezone.utc).date()
+    db.add(PageViewStat(path="/admin", time_bucket=now, views=9, total_seconds=531.0))
+    db.add(PageVisitorDay(path="/admin", day=today, user_id=user.id))
+    db.add(PageViewStat(path="/orders", time_bucket=now, views=2, total_seconds=20.0))
+    db.add(PageVisitorDay(path="/orders", day=today, user_id=user.id))
+    db.commit()
+
+    body = client.get("/api/admin/page-stats?days=7", headers=_admin_headers(db)).json()
+    assert [p["path"] for p in body["pages"]] == ["/orders"]
+    assert body["totalViews"] == 2
+    assert body["totalVisitors"] == 1
+
+
 def test_page_stats_requires_admin(client, db, auth_headers):
     assert client.get("/api/admin/page-stats", headers=auth_headers).status_code == 403

@@ -48,8 +48,21 @@ function fmtMetric(metric: Metric, value: number): string {
   return metric === 'avgSeconds' ? fmtDwell(value) : String(value)
 }
 
+// 页面名走 i18n（admin.pageStats.page.<路径>），后端只回原始路径。
+// defaultValue 回退到路径本身：新页面上线时若忘了补翻译，显示 /foo 也比显示
+// 一串 key 或空白好，而且一眼就能看出漏了哪个。
+// Page names come from i18n (admin.pageStats.page.<path>); the API only returns
+// raw paths. defaultValue falls back to the path itself so a newly shipped page
+// with no translation shows /foo rather than a raw key or a blank cell — and it
+// is immediately obvious which one is missing.
+function usePageName() {
+  const { t } = useTranslation()
+  return (path: string) => t(`admin.pageStats.page.${path}`, { defaultValue: path })
+}
+
 export default function PageStatsCard({ stats }: { stats: AdminPageStats | null }) {
   const { t } = useTranslation()
+  const pageName = usePageName()
   const [metric, setMetric] = useState<Metric>('visitors')
 
   const charted = useMemo(() => (stats ? stats.pages.slice(0, MAX_LINES) : []), [stats])
@@ -171,7 +184,7 @@ export default function PageStatsCard({ stats }: { stats: AdminPageStats | null 
             {lines.map((line) => (
               <span key={line.path} className="flex items-center gap-1.5 text-[11px] text-slate-400">
                 <i className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: line.color }} />
-                <code>{line.path}</code>
+                {pageName(line.path)}
               </span>
             ))}
           </div>
@@ -189,7 +202,14 @@ export default function PageStatsCard({ stats }: { stats: AdminPageStats | null 
               <tbody>
                 {stats.pages.map((p) => (
                   <tr key={p.path} className="border-t border-white/5">
-                    <td className="py-1.5"><code className="text-slate-300">{p.path}</code></td>
+                    {/* 中文名为主、路径为辅：只显示中文名的话，排查"这条对应哪个路由"
+                        又得回头翻代码；路径用小字灰色跟在后面，不抢视线。
+                        Name first, path as a hint: showing only the name would send you
+                        back to the code to work out which route a row is. */}
+                    <td className="py-1.5">
+                      <span className="text-slate-200">{pageName(p.path)}</span>
+                      <code className="ml-2 text-[10px] text-slate-500">{p.path}</code>
+                    </td>
                     <td className="py-1.5 text-right tabular-nums text-slate-200">{p.visitors}</td>
                     <td className="py-1.5 text-right tabular-nums text-slate-200">{p.views}</td>
                     <td className="py-1.5 text-right tabular-nums text-slate-400">{fmtDwell(p.avgSeconds)}</td>

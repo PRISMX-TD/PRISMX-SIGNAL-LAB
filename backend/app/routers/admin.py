@@ -378,6 +378,11 @@ def page_stats(
     start_day = today - timedelta(days=days - 1)
     cutoff = datetime.combine(start_day, time.min)
 
+    # 排除后台自己：/admin 已从上报白名单移除，但库里还有之前累积的行，
+    # 查询侧也要滤掉，否则历史数据会一直挂在排行里。
+    # Exclude the admin page itself: /admin is off the reporting whitelist, but
+    # previously accumulated rows remain in the DB, so filter here too or the
+    # historical data would sit in the ranking forever.
     view_rows = (
         db.query(
             PageViewStat.path,
@@ -385,17 +390,23 @@ def page_stats(
             func.sum(PageViewStat.views),
             func.sum(PageViewStat.total_seconds),
         )
-        .filter(PageViewStat.time_bucket >= cutoff)
+        .filter(PageViewStat.time_bucket >= cutoff, PageViewStat.path != "/admin")
         .group_by(PageViewStat.path, func.date(PageViewStat.time_bucket))
         .all()
     )
+    # 三个人数查询共用同一组过滤条件。抽出来是因为漏掉任何一个的 path != "/admin"
+    # 都不会报错，只会让某个数字悄悄把后台自己算进去。
+    # The three visitor queries share one filter. Extracted because omitting the
+    # path != "/admin" clause anywhere fails silently, just quietly folding the
+    # admin page into one of the numbers.
+    visitor_window = (PageVisitorDay.day >= start_day, PageVisitorDay.path != "/admin")
     visitor_rows = (
         db.query(
             PageVisitorDay.path,
             PageVisitorDay.day,
             func.count(func.distinct(PageVisitorDay.user_id)),
         )
-        .filter(PageVisitorDay.day >= start_day)
+        .filter(*visitor_window)
         .group_by(PageVisitorDay.path, PageVisitorDay.day)
         .all()
     )
@@ -411,13 +422,13 @@ def page_stats(
             PageVisitorDay.path,
             func.count(func.distinct(PageVisitorDay.user_id)),
         )
-        .filter(PageVisitorDay.day >= start_day)
+        .filter(*visitor_window)
         .group_by(PageVisitorDay.path)
         .all()
     }
     total_visitors = int(
         db.query(func.count(func.distinct(PageVisitorDay.user_id)))
-        .filter(PageVisitorDay.day >= start_day)
+        .filter(*visitor_window)
         .scalar()
         or 0
     )

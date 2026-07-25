@@ -27,8 +27,10 @@ import { API_BASE, getToken } from '../api/client'
 
 // 与后端 telemetry.ALLOWED_PATHS 对应。这里也过滤一遍，纯粹是省掉注定被
 // 后端忽略的无用请求（例如 /login、/ 这些不在统计范围内的路径）。
+// 不含 /admin：后台页不参与统计（理由见后端 ALLOWED_PATHS 的注释）。
 // Mirrors the backend's telemetry.ALLOWED_PATHS. Filtering here too simply
-// avoids firing requests the backend is guaranteed to ignore.
+// avoids firing requests the backend is guaranteed to ignore. /admin is absent
+// on purpose — see the backend ALLOWED_PATHS comment.
 const TRACKED_PATHS = new Set([
   '/dashboard',
   '/app',
@@ -39,7 +41,6 @@ const TRACKED_PATHS = new Set([
   '/upgrade',
   '/account',
   '/download',
-  '/admin',
   '/simulator',
 ])
 
