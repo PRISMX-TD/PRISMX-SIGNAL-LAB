@@ -13,7 +13,6 @@ import {
   enableNotifications,
   NotifEnableError,
 } from "../utils/notifications"
-import AutoManageCard from "../components/AutoManageCard"
 
 type AccountInfo = Awaited<ReturnType<typeof userApi.me>>
 
@@ -559,11 +558,6 @@ export default function AccountPage() {
               )}
             </div>
           </section>
-
-          {/* 自动仓位管理：从订单页搬来的设置项，和通知设置并列 /
-              Auto position management: moved off the Orders page to sit
-              alongside the other settings */}
-          <AutoManageCard isPro={info.plan === "PRO"} />
         </>
       )}
     </div>

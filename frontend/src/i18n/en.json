@@ -729,6 +729,7 @@
     },
     "positions": "Open Positions",
     "positionsScopeHint": "Only shows positions opened via PRISMX orders; positions you open manually in the MT5 client never appear here and are never affected by actions here.",
+    "autoManageScopeHint": "These settings apply to every MT5 account you've linked; they don't change with the account selected above.",
     "noPositions": "No open positions",
     "summary": {
       "positions": "Positions",

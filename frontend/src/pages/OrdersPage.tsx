@@ -10,6 +10,7 @@ import PositionCard from '../components/PositionCard'
 import PersonalWinRateCard from '../components/PersonalWinRateCard'
 import DisciplineScoreCard from '../components/DisciplineScoreCard'
 import ClosedTradesList from '../components/ClosedTradesList'
+import AutoManageCard from '../components/AutoManageCard'
 
 const statusStyle: Record<OrderStatus, string> = {
   PENDING: 'bg-amber-500/15 text-amber-400',
@@ -368,6 +369,25 @@ export default function OrdersPage() {
                 ))}
               </div>
             )}
+          </div>
+
+          {/* 自动仓位管理：放在持仓下方（管理对象就是上面这些仓位，挨着看最直观），
+              但必须显式划出来——它是每用户一条的全局配置（AutoManageSettings 的
+              user_id 上有 unique 约束），不跟随页头的账号选择器，而本 Tab 其余内容
+              都跟随。不加区分的话，用户在账号 A 下调完阈值、切到 B 看见同样的值，
+              会以为"串号了"或"没保存上"。所以用一条分隔线 + 明确的作用范围说明把它
+              和上面按账号过滤的区域隔开。
+              Auto position management sits below the positions it acts on (most
+              intuitive adjacent), but is deliberately set apart: it's a single
+              per-user config (unique constraint on AutoManageSettings.user_id)
+              that does NOT follow the page-head account selector, while
+              everything else in this tab does. Without the separation, a user
+              who tunes it under account A and switches to B sees identical
+              values and reasonably concludes it leaked across accounts or
+              failed to save. Hence the divider plus an explicit scope note. */}
+          <div className="mt-6 border-t border-white/10 pt-6">
+            <p className="mb-3 text-xs text-slate-500">{t('orders.autoManageScopeHint')}</p>
+            <AutoManageCard isPro={isPro} />
           </div>
         </>
       )}

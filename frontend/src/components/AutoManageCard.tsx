@@ -1,12 +1,23 @@
 // 自动仓位管理设置卡（保本 / 追踪止损 / 分批止盈）。
-// 这是一块"配置"，不是"行情"或"回执"，所以住在 /account 设置页而不是订单页——
-// 订单页只回答"我的仓位怎么了、我的成绩如何、我下过什么单"这三个问题。
-// 自己拉取、自己保存，调用方不需要传任何状态进来。
+// 住在订单页"持仓与账户"Tab 的持仓列表下方——管理对象就是上面那些仓位，挨着
+// 看最直观，放进设置页则没人找得到。
+// ⚠️ 这是每用户一条的全局配置（后端 AutoManageSettings 在 user_id 上有 unique
+// 约束），对绑定的全部 MT5 账号生效，**不随订单页页头的账号选择器变化**，而那个
+// Tab 里其余内容都随之变化。所以调用点必须保留分隔线与 orders.autoManageScopeHint
+// 那句作用范围说明，否则用户在账号 A 下调完、切到 B 看见同样的值会以为串号或没存上。
+// 自己拉取、自己保存，调用方只需传 isPro。
 // Auto position-management settings (break-even / trailing stop / partial TP).
-// This is configuration, not live data or receipts, so it lives on the
-// /account settings page rather than the Orders page — Orders only answers
-// "how are my positions", "how am I doing", "what did I submit".
-// Self-fetching and self-saving; callers pass nothing in.
+// Lives below the positions list in the Orders page's "positions & account"
+// tab — it acts on exactly those positions, so adjacency is the most intuitive
+// placement; buried in settings, nobody finds it.
+// ⚠️ This is a single per-user config (unique constraint on the backend's
+// AutoManageSettings.user_id) applying to every linked MT5 account, and it does
+// NOT follow the Orders page-head account selector even though everything else
+// in that tab does. Call sites must therefore keep the divider and the
+// orders.autoManageScopeHint scope note, or a user who tunes it under account A
+// and switches to B will read the identical values as cross-account leakage or
+// a failed save.
+// Self-fetching and self-saving; callers pass only isPro.
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
