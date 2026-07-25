@@ -60,10 +60,29 @@ function usePageName() {
   return (path: string) => t(`admin.pageStats.page.${path}`, { defaultValue: path })
 }
 
-export default function PageStatsCard({ stats }: { stats: AdminPageStats | null }) {
+// 可选窗口。上界 90 天与后端 Query 约束一致，别在这里放更大的值——后端会
+// 直接 422，而前端拿不到数据只会显示成"这段时间没人来"。
+// Selectable windows. The 90-day cap matches the backend Query constraint; a
+// larger value here would 422 and surface as a misleading empty chart.
+const DAY_OPTIONS = [7, 14, 30, 90]
+
+export default function PageStatsCard({
+  stats,
+  days,
+  onDaysChange,
+}: {
+  stats: AdminPageStats | null
+  days: number
+  onDaysChange: (days: number) => void
+}) {
   const { t } = useTranslation()
   const pageName = usePageName()
   const [metric, setMetric] = useState<Metric>('visitors')
+  // 鼠标悬停的日期下标；null 表示没悬停。存下标而不是日期字符串，因为要用它
+  // 直接索引每条线的 daily 数组。
+  // Index of the hovered date, null when not hovering. An index rather than a
+  // date string, since it directly indexes each line's daily array.
+  const [hover, setHover] = useState<number | null>(null)
 
   const charted = useMemo(() => (stats ? stats.pages.slice(0, MAX_LINES) : []), [stats])
 
@@ -91,29 +110,41 @@ export default function PageStatsCard({ stats }: { stats: AdminPageStats | null 
     // 只有一个日期时除数会是 0，直接把点放在左边界
     // With a single date the divisor would be 0; pin the point to the left edge
     const stepX = n > 1 ? innerW / (n - 1) : 0
-    return charted.map((page, i) => ({
-      path: page.path,
-      color: LINE_COLORS[i % LINE_COLORS.length],
-      points: page.daily
-        .map((point, idx) => {
-          const x = PAD_L + idx * stepX
-          // yMax 为 0（该指标全窗口都没数据）时全部贴底，不能除以 0
-          // When yMax is 0 (no data for this metric) everything sits on the
-          // baseline; never divide by zero
-          const ratio = yMax > 0 ? point[metric] / yMax : 0
-          const y = PAD_T + innerH - ratio * innerH
-          return `${x.toFixed(1)},${y.toFixed(1)}`
-        })
-        .join(' '),
-    }))
+    return charted.map((page, i) => {
+      // 坐标算一次、两处用：polyline 的 points 字符串和悬停时的圆点位置。
+      // 分开各算一遍迟早会漂移。
+      // Computed once, used twice: the polyline points string and the hover dot
+      // position. Two separate calculations would drift apart eventually.
+      const coords = page.daily.map((point, idx) => {
+        const x = PAD_L + idx * stepX
+        // yMax 为 0（该指标全窗口都没数据）时全部贴底，不能除以 0
+        // When yMax is 0 (no data for this metric) everything sits on the
+        // baseline; never divide by zero
+        const ratio = yMax > 0 ? point[metric] / yMax : 0
+        return { x, y: PAD_T + innerH - ratio * innerH }
+      })
+      return {
+        path: page.path,
+        color: LINE_COLORS[i % LINE_COLORS.length],
+        coords,
+        points: coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' '),
+      }
+    })
   }, [charted, stats, metric, yMax])
 
   const hasData = stats != null && stats.pages.length > 0
 
+  // 悬停列在窗口里的横向比例，用于摆放数值面板。分母兜底为 1：只有一个日期时
+  // 分母会是 0，算出 NaN 后面板的 left 会变成非法值、整块跑到左上角。
+  // Horizontal ratio of the hovered column, used to place the value panel. The
+  // divisor floors at 1: with a single date it would be 0, and the resulting NaN
+  // would produce an invalid left offset that throws the panel to the corner.
+  const hoverRatio = hover === null || !stats ? 0 : hover / Math.max(stats.dates.length - 1, 1)
+
   return (
     <div className="glass mb-5 p-5">
       <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-white">{t('admin.pageStats.title')}</h2>
+        <h2 className="text-sm font-semibold text-white">{t('admin.pageStats.title', { days })}</h2>
         {hasData && (
           <span className="text-xs text-slate-400">
             {t('admin.pageStats.summary', {
@@ -124,7 +155,30 @@ export default function PageStatsCard({ stats }: { stats: AdminPageStats | null 
           </span>
         )}
       </div>
-      <p className="mb-4 text-xs text-slate-500">{t('admin.pageStats.privacyHint')}</p>
+      <p className="mb-3 text-xs text-slate-500">{t('admin.pageStats.privacyHint')}</p>
+
+      {/* 天数选择放在空数据判断之外：窗口没数据时更需要能换个范围试试，
+          按钮跟着一起藏起来就没法操作了。
+          The window picker sits outside the empty check: an empty window is
+          exactly when you want to try a different range, so hiding the buttons
+          along with the chart would leave nothing to click. */}
+      <div className="mb-4 flex flex-wrap gap-1.5" role="group" aria-label={t('admin.pageStats.daysLabel')}>
+        {DAY_OPTIONS.map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            aria-pressed={days === opt}
+            onClick={() => onDaysChange(opt)}
+            className={`rounded-full px-3 py-1 text-xs transition ${
+              days === opt
+                ? 'bg-white/10 text-slate-100 ring-1 ring-white/20'
+                : 'text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            {t('admin.pageStats.daysOption', { days: opt })}
+          </button>
+        ))}
+      </div>
 
       {!hasData ? (
         <p className="py-3 text-sm text-slate-500">{t('admin.pageStats.empty')}</p>
@@ -149,7 +203,7 @@ export default function PageStatsCard({ stats }: { stats: AdminPageStats | null 
             ))}
           </div>
 
-          <div className="relative">
+          <div className="relative" onMouseLeave={() => setHover(null)}>
             {/* preserveAspectRatio="none" 让线横向铺满容器；配 vectorEffect 保持线宽
                 不被拉伸变形（与 DisciplineScoreCard 的趋势线同一套做法）。
                 preserveAspectRatio="none" stretches the plot to the container width;
@@ -170,7 +224,95 @@ export default function PageStatsCard({ stats }: { stats: AdminPageStats | null 
                   vectorEffect="non-scaling-stroke"
                 />
               ))}
+
+              {/* 悬停：竖线 + 每条线上的圆点。
+                  圆点半径要抵掉横向拉伸——preserveAspectRatio="none" 会把 <circle>
+                  压成椭圆，所以用 <rect> 画小方块而不是圆。
+                  Hover: a vertical rule plus a dot per line. Radii would be squashed
+                  by preserveAspectRatio="none" (circles become ellipses), so these are
+                  small rects rather than circles. */}
+              {hover !== null && lines.length > 0 && (
+                <>
+                  <line
+                    x1={lines[0].coords[hover].x}
+                    y1={PAD_T}
+                    x2={lines[0].coords[hover].x}
+                    y2={SVG_H - PAD_B}
+                    stroke="rgba(255,255,255,0.25)"
+                    strokeWidth="1"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {lines.map((line) => (
+                    <rect
+                      key={line.path}
+                      x={line.coords[hover].x - 3}
+                      y={line.coords[hover].y - 3}
+                      width="6"
+                      height="6"
+                      rx="1"
+                      fill={line.color}
+                    />
+                  ))}
+                </>
+              )}
+
+              {/* 每天一列透明矩形接住鼠标。用列而不是"找最近的点"，是因为列的
+                  命中区从上到下贯通，鼠标在图里任何高度都能触发；只在点附近响应
+                  的话，线贴着底部时几乎点不到。
+                  One transparent column per day catches the pointer. Columns rather
+                  than nearest-point hit-testing: a column spans the full height, so
+                  any vertical position works — with per-point targets, lines hugging
+                  the baseline would be nearly impossible to hit. */}
+              {stats.dates.map((date, idx) => {
+                const w = (SVG_W - PAD_L - PAD_R) / stats.dates.length
+                return (
+                  <rect
+                    key={date}
+                    x={PAD_L + idx * w}
+                    y={0}
+                    width={w}
+                    height={SVG_H}
+                    fill="transparent"
+                    onMouseEnter={() => setHover(idx)}
+                  />
+                )
+              })}
             </svg>
+
+            {/* 数值面板。左右位置按悬停列在窗口里的比例走，靠右半边时向左翻转，
+                否则最后几天的面板会被卡片右边缘截掉。
+                pointer-events-none 是必须的：面板盖在命中列上方，能接收鼠标事件的
+                话，鼠标一移到面板上就等于离开了图表，面板闪一下自己消失。
+                Value panel. Positioned by the hovered column's ratio, flipping to the
+                left past the midpoint so the last few days aren't clipped by the card
+                edge. pointer-events-none is required: the panel sits above the hit
+                columns, and if it captured events, moving onto it would count as
+                leaving the chart and it would flicker away. */}
+            {hover !== null && (
+              <div
+                className="pointer-events-none absolute top-0 z-10 min-w-[9rem] rounded-lg border border-white/10 bg-ink-900/95 p-2.5 shadow-xl"
+                style={
+                  hoverRatio > 0.5
+                    ? { right: `${100 - hoverRatio * 100}%`, marginRight: 8 }
+                    : { left: `${hoverRatio * 100}%`, marginLeft: 8 }
+                }
+              >
+                <p className="mb-1.5 text-[10px] text-slate-400">{stats.dates[hover]}</p>
+                {charted.map((page, i) => (
+                  <p key={page.path} className="flex items-center gap-2 text-[11px] leading-5">
+                    <i
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: LINE_COLORS[i % LINE_COLORS.length] }}
+                    />
+                    <span className="flex-1 truncate text-slate-300">{pageName(page.path)}</span>
+                    <span className="tabular-nums text-slate-100">
+                      {fmtMetric(metric, page.daily[hover][metric])}
+                    </span>
+                  </p>
+                ))}
+              </div>
+            )}
+
             <div className="mt-1 flex justify-between text-[10px] text-slate-500">
               <span>{stats.dates[0]}</span>
               <span className="tabular-nums">

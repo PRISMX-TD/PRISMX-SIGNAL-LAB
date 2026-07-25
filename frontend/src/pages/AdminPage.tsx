@@ -59,6 +59,11 @@ export default function AdminPage() {
   const [total, setTotal] = useState(0)
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null)
   const [pageStats, setPageStats] = useState<AdminPageStats | null>(null)
+  // 统计窗口天数。切换时只重取这一个接口，不走整页 load()——那会顺带重拉用户
+  // 列表和 7 组配置，只为换个天数拉七八个接口不合适。
+  // Stats window in days. Switching refetches only this endpoint rather than the
+  // whole load(), which would also re-pull the user list and seven config groups.
+  const [pageStatsDays, setPageStatsDays] = useState(7)
   // 当前分类页签 / active section tab
   const [tab, setTab] = useState<AdminTab>('data')
   const [loading, setLoading] = useState(true)
@@ -121,7 +126,7 @@ export default function AdminPage() {
       const [usersRes, metricsRes, pageStatsRes, settingsRes, pricingRes, trialRes, disciplineRes, candleRes, strategyRes] = await Promise.all([
         adminApi.listUsers({ q: (opts.q ?? query) || undefined, plan: (opts.plan ?? planFilter) || undefined, limit: 100 }),
         adminApi.metrics(),
-        adminApi.pageStats(7),
+        adminApi.pageStats(pageStatsDays),
         adminApi.getSettings(),
         adminApi.getPricing(),
         adminApi.getTrial(),
@@ -145,6 +150,20 @@ export default function AdminPage() {
       showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.loadError'))
     } finally {
       setLoading(false)
+    }
+  }
+
+  // 切换统计窗口：立刻更新天数（按钮马上有反馈），再单独重取统计接口。
+  // 失败时不清空已有数据——保留旧图比让整块变空白有用，只提示一下。
+  // Switching the stats window: update the day count first so the button responds
+  // immediately, then refetch just this endpoint. On failure keep the existing
+  // data rather than blanking the card; a stale chart beats an empty one.
+  const changePageStatsDays = async (days: number) => {
+    setPageStatsDays(days)
+    try {
+      setPageStats(await adminApi.pageStats(days))
+    } catch (err) {
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.loadError'))
     }
   }
 
@@ -405,7 +424,11 @@ export default function AdminPage() {
 
       {/* 页面访问统计：按天折线图 + 各页面明细表，见 admin/PageStatsCard.tsx。
           Page stats: per-day line chart plus per-page table; see admin/PageStatsCard.tsx */}
-      <PageStatsCard stats={pageStats} />
+      <PageStatsCard
+        stats={pageStats}
+        days={pageStatsDays}
+        onDaysChange={changePageStatsDays}
+      />
         </>
       )}
 

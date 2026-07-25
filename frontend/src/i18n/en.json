@@ -949,7 +949,9 @@
       "system": "System"
     },
     "pageStats": {
-      "title": "Page views (last 7 days)",
+      "title": "Page views (last {{days}} days)",
+      "daysLabel": "Window",
+      "daysOption": "{{days}}d",
       "summary": "{{visitors}} visitors · {{views}} views · {{avg}} average dwell",
       "privacyHint": "Counts how many people opened each page per day; no visit times, per-person dwell or browsing order is kept. Admin visits are excluded.",
       "empty": "No view data yet — it accumulates once this is live.",
