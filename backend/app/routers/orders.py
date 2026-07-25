@@ -231,6 +231,7 @@ def list_orders(
     offset: int = 0,
     since: datetime | None = None,
     until: datetime | None = None,
+    login: str | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -238,6 +239,10 @@ def list_orders(
 
     limit/offset 支持分页；since/until 可选，按 created_at 筛选时间范围
     （until 用 < 而非 <=，前端传"选中截止日+1天"实现"含当天"的直觉）。
+    login 可选，只看某一个 MT5 账号的指令——过滤在 SQL 里做，所以 total 与
+    分页数字始终和筛选结果一致（前端按页本地过滤会让页码算错）。与
+    /orders/winrate 不同，这里不校验账号是否仍绑定：订单是历史操作日志，
+    换绑后仍应查得到。
     不传这些参数时行为与此前完全一致（最新 100 条），不影响 useLive() 里
     依赖这个接口做实时订单跟踪的既有调用方。
 
@@ -245,9 +250,15 @@ def list_orders(
 
     limit/offset support pagination; since/until optionally filter by
     created_at (until uses < rather than <=; the frontend sends "selected end
-    date + 1 day" to make the picked end date feel inclusive). Behavior is
-    unchanged (latest 100) when none of these are passed, so the live-order
-    tracking that already calls this endpoint via useLive() isn't affected.
+    date + 1 day" to make the picked end date feel inclusive). login optionally
+    narrows to one MT5 account — filtered in SQL so total and page numbers stay
+    consistent with the filtered set (client-side per-page filtering would
+    corrupt the page count). Unlike /orders/winrate this does not require the
+    account to still be bound: orders are a historical action log and should
+    remain queryable after a rebind.
+    Behavior is unchanged (latest 100) when none of these are passed, so the
+    live-order tracking that already calls this endpoint via useLive() isn't
+    affected.
     """
     stale = [
         o
@@ -267,6 +278,8 @@ def list_orders(
         query = query.filter(Order.created_at >= since)
     if until is not None:
         query = query.filter(Order.created_at < until)
+    if login is not None:
+        query = query.filter(Order.mt5_login == login)
     total = query.count()
     rows = query.order_by(Order.created_at.desc()).offset(offset).limit(limit).all()
     return {"orders": [_serialize(o) for o in rows], "total": total}

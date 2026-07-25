@@ -155,16 +155,20 @@ export const chartApi = {
 // 下单 / Orders
 export const orderApi = {
   // 不传参数时行为不变(最新 100 条),供 useLive() 的实时订单跟踪继续用；
-  // 传 limit/offset/since/until 时用于订单页的分页与日期筛选浏览历史。
+  // 传 limit/offset/since/until/login 时用于订单页的分页、日期与账号筛选。
+  // login 交给后端在 SQL 里过滤，这样 total 和页码与筛选结果一致。
   // Unparameterized behavior is unchanged (latest 100), used by useLive()'s
-  // real-time order tracking; pass limit/offset/since/until for the Orders
-  // page's paginated, date-filtered history browsing.
-  list: (params: { limit?: number; offset?: number; since?: string; until?: string } = {}) => {
+  // real-time order tracking; pass limit/offset/since/until/login for the
+  // Orders page's paginated, date- and account-filtered history browsing.
+  // login is filtered server-side in SQL so total and page numbers match the
+  // filtered set.
+  list: (params: { limit?: number; offset?: number; since?: string; until?: string; login?: string } = {}) => {
     const qs = new URLSearchParams()
     if (params.limit) qs.set('limit', String(params.limit))
     if (params.offset) qs.set('offset', String(params.offset))
     if (params.since) qs.set('since', params.since)
     if (params.until) qs.set('until', params.until)
+    if (params.login) qs.set('login', params.login)
     const suffix = qs.toString() ? `?${qs.toString()}` : ''
     return request<{ orders: Order[]; total: number }>(`/orders${suffix}`)
   },

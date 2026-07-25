@@ -699,9 +699,7 @@
     "closedTradesTitle": "Closed Trade History",
     "closedTradesHint": "Every real fill — the raw records the win rate above is built from.",
     "closedTradesEmpty": "No closed trades yet",
-    "profit": "P&L",
-    "closedTradesAccount": "Account {{login}}",
-    "allAccounts": "All accounts"
+    "profit": "P&L"
   },
   "orders": {
     "title": "Orders & Receipts",
@@ -709,7 +707,6 @@
     "empty": "No orders yet",
     "colTime": "Time",
     "colType": "Type",
-    "colAccount": "Account",
     "colSymbol": "Symbol",
     "colSide": "Side",
     "colVolume": "Vol",
@@ -747,8 +744,11 @@
     "pageInfo": "Page {{page}} / {{totalPages}} · {{total}} total",
     "cancelSent": "Cancel request sent",
     "proExclusive": "PRO Exclusive",
-    "mt5Accounts": "MT5 Account Details",
-    "historyTitle": "Activity log",
+    "tab": {
+      "positions": "Positions & Account",
+      "performance": "Performance",
+      "activity": "Activity Log"
+    },
     "historyHint": "Every order, close, modify and cancel command with its execution status and receipt."
   },
   "positions": {

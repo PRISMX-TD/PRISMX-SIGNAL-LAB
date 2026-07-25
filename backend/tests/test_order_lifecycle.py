@@ -218,6 +218,27 @@ def test_stale_pending_voided_on_list(client, auth_headers, db):
     assert target["status"] == "FAILED"
 
 
+def test_list_login_filter_scopes_orders_and_total(client, auth_headers, db, user):
+    """login 过滤在 SQL 里做，所以返回行和 total 都只算那个账号——
+    前端翻页依赖 total，若过滤只作用于行会算出多余的空白页。
+    The login filter runs in SQL, so both rows and total count only that
+    account; the frontend paginates on total, and filtering rows alone would
+    produce phantom empty pages."""
+    make_account(db, user, login="10001")
+    make_account(db, user, login="20002")
+    place(client, auth_headers, coid="f-1", mt5Login="10001")
+    place(client, auth_headers, coid="f-2", mt5Login="20002")
+    place(client, auth_headers, coid="f-3", mt5Login="20002")
+
+    body = client.get("/api/orders", params={"login": "20002"}, headers=auth_headers).json()
+    assert body["total"] == 2
+    assert {o["clientOrderId"] for o in body["orders"]} == {"f-2", "f-3"}
+    assert all(o["mt5Login"] == "20002" for o in body["orders"])
+
+    # 不传 login 时行为不变，仍返回该用户全部订单 / omitting login is unchanged
+    assert client.get("/api/orders", headers=auth_headers).json()["total"] == 3
+
+
 def test_late_genuine_result_overrides_voided_failed(client, auth_headers, bridge_headers, db, user):
     """已作废 FAILED 的订单收到真实回执：以实际执行结果为准。"""
     make_account(db, user, login="10001")

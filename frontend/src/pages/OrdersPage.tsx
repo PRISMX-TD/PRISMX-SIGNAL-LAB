@@ -1,12 +1,11 @@
 // 订单与回执页 / Orders & receipts page
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../store/auth'
 import { useLive, usePositions } from '../store/live'
-import { orderApi, automationApi } from '../api/client'
+import { orderApi } from '../api/client'
 import { displaySymbol, fmtTime, localizeApiError } from '../api/utils'
-import type { AutoManageSettings, ClosedTrade, Order, OrderStatus } from '../api/types'
+import type { ClosedTrade, Order, OrderStatus } from '../api/types'
 import PositionCard from '../components/PositionCard'
 import PersonalWinRateCard from '../components/PersonalWinRateCard'
 import DisciplineScoreCard from '../components/DisciplineScoreCard'
@@ -23,6 +22,17 @@ const statusStyle: Record<OrderStatus, string> = {
 type StatusFilter = 'ALL' | OrderStatus
 type SideFilter = 'ALL' | 'BUY' | 'SELL'
 
+// 页面分三个 Tab：实时（持仓与账户）、回顾（绩效分析）、查询（操作记录）。
+// 三者节奏完全不同，摊在一条滚动线上会让页面过长；分开后每屏只回答一个问题。
+// Tab 选择记在 localStorage，刷新后仍停在原来那个 Tab。
+// Three tabs: live (positions & account), retrospective (performance), lookup
+// (activity log). Their rhythms differ completely, and stacking them made one
+// endless scroll; split, each screen answers one question. The choice persists
+// in localStorage so a refresh keeps you on the same tab.
+type OrdersTab = 'positions' | 'performance' | 'activity'
+const TAB_STORAGE_KEY = 'prismx.orders.tab'
+const TABS: OrdersTab[] = ['positions', 'performance', 'activity']
+
 export default function OrdersPage() {
   const { t } = useTranslation()
   const { user, refreshUser } = useAuth()
@@ -35,6 +45,31 @@ export default function OrdersPage() {
   const [statusF, setStatusF] = useState<StatusFilter>('ALL')
   const [sideF, setSideF] = useState<SideFilter>('ALL')
   const [symbolF, setSymbolF] = useState('')
+
+  // 全页只有一个账号选择器：页头选中的账号同时决定账户横条、持仓、胜率卡、
+  // 纪律分、已平仓明细和操作记录。以前账户卡和绩效区各有一套，点了上面那套
+  // 发现下面数字没变，很容易误解成数据不对。声明放在最前面，因为下面的订单
+  // 请求和各处派生值都要用它。
+  // One account selector for the whole page: the header choice drives the
+  // account bar, positions, win-rate card, discipline score, closed trades and
+  // the activity log alike. Previously the account card and the performance
+  // section each had their own, so clicking one left the other's numbers
+  // unchanged — easy to misread as bad data. Declared first because the order
+  // fetch and several derived values below depend on it.
+  const [selectedLogin, setSelectedLogin] = useState<string | null>(null)
+  useEffect(() => {
+    if (accounts.length === 0) return
+    if (selectedLogin === null || !accounts.some((a) => a.login === selectedLogin)) {
+      setSelectedLogin(accounts[0].login)
+    }
+  }, [accounts, selectedLogin])
+  const activeAccount = accounts.find((a) => a.login === selectedLogin) ?? accounts[0]
+
+  const [tab, setTab] = useState<OrdersTab>(() => {
+    const saved = localStorage.getItem(TAB_STORAGE_KEY)
+    return TABS.includes(saved as OrdersTab) ? (saved as OrdersTab) : 'positions'
+  })
+  useEffect(() => { localStorage.setItem(TAB_STORAGE_KEY, tab) }, [tab])
 
   // 操作记录：每页 10 条。不设日期筛选时用 useLive().orders（WS 实时更新、秒级
   // 新鲜，覆盖最近约 100 条），在本地按 10 条一页切片——下单/成交能即时看到，
@@ -70,49 +105,38 @@ export default function OrdersPage() {
       offset: page * ORDERS_PAGE_SIZE,
       since: sinceF ? `${sinceF}T00:00:00Z` : undefined,
       until: untilParam,
+      login: selectedLogin ?? undefined,
     })
       .then((r) => { if (alive) { setServerOrders(r.orders); setServerTotal(r.total) } })
       .catch(() => { if (alive) { setServerOrders([]); setServerTotal(0) } })
       .finally(() => { if (alive) setPageLoading(false) })
     return () => { alive = false }
-  }, [dateFilterActive, page, sinceF, untilF])
+  }, [dateFilterActive, page, sinceF, untilF, selectedLogin])
 
-  const baseOrders = dateFilterActive ? (serverOrders ?? []) : orders
-
-  // 自动仓位管理 / auto position management
-  const [autoCfg, setAutoCfg] = useState<AutoManageSettings | null>(null)
-  const [autoSaving, setAutoSaving] = useState(false)
-  const [autoMsg, setAutoMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
+  // 账号过滤分两条路：设了日期筛选走后端（login 参数，见上），否则在实时集合上
+  // 本地过滤。两条路都限定在选中的那个账号内，页码统计也跟着走。
+  // Account filtering takes two paths: with a date filter the backend does it
+  // (login param, above); otherwise filter the live set locally. Both stay
+  // within the selected account, and the page counts follow suit.
+  const baseOrders = useMemo(() => {
+    const source = dateFilterActive ? (serverOrders ?? []) : orders
+    if (dateFilterActive || !selectedLogin) return source
+    return source.filter((o) => String(o.mt5Login ?? '') === String(selectedLogin))
+  }, [dateFilterActive, serverOrders, orders, selectedLogin])
 
   const isPro = user?.plan === 'PRO'
 
   useEffect(() => {
     refreshUser()                        // 每次进入页面刷新 plan，确保管理员升级后即时生效
-    automationApi.getSettings().then(setAutoCfg).catch(() => {})
   }, [])
 
-  // 我的交易表现：已平仓明细在这里统一拉取，账号标签同时驱动上方的胜率卡
-  // （见下方 JSX）——一次点击，数字和明细一起切换，不会出现"胜率含旧账号
-  // 战绩、明细却看不到"的不一致。
-  // Personal trading performance: closed trades are fetched here once; the
-  // account tab drives both the win-rate card above it and the list below
-  // (see the JSX further down) — one click switches both, so the win-rate
-  // number never disagrees with the visible records it's supposed to be built from.
+  // 已平仓明细一次拉全（接口不分页），按页头选中的账号在前端过滤——与胜率卡、
+  // 纪律分用的是同一份数据源，所以数字和明细永远对得上。
+  // Closed trades are fetched in full (the endpoint isn't paginated) and
+  // filtered client-side by the header's account — the same data source the
+  // win-rate card and discipline score use, so the aggregates always agree
+  // with the records shown beneath them.
   const [trades, setTrades] = useState<ClosedTrade[] | null>(null)
-  const [selectedLogin, setSelectedLogin] = useState<string | null>(null) // null = 全部账户 / all accounts
-
-  // MT5 账户详情卡：一次只显示一个账号，避免多账号并排堆叠。默认选第一个，
-  // 选中的账号失效时回退到第一个。/ MT5 account-details card shows one account
-  // at a time instead of stacking them; defaults to the first and falls back
-  // to it if the selection disappears.
-  const [accountLogin, setAccountLogin] = useState<string | null>(null)
-  useEffect(() => {
-    if (accounts.length === 0) return
-    if (accountLogin === null || !accounts.some((a) => a.login === accountLogin)) {
-      setAccountLogin(accounts[0].login)
-    }
-  }, [accounts, accountLogin])
-  const activeAccount = accounts.find((a) => a.login === accountLogin) ?? accounts[0]
 
   useEffect(() => {
     let mounted = true
@@ -136,40 +160,20 @@ export default function OrdersPage() {
     }
   }, [])
 
-  // 记录里出现过的账号（去重、排序）；只有超过一个才需要显示"全部/单个"标签。
-  // Distinct account logins seen in the records; tabs only appear when >1.
-  const tradeLogins = useMemo(() => {
-    if (!trades) return []
-    return [...new Set(trades.map((tr) => tr.mt5Login))].sort()
-  }, [trades])
-  const multiAccount = tradeLogins.length > 1
-
-  // 选中账号已不在记录里（如刚被删掉）时回退到"全部" / fall back to "all" if the selected login vanished
-  useEffect(() => {
-    if (selectedLogin !== null && trades !== null && !tradeLogins.includes(selectedLogin)) {
-      setSelectedLogin(null)
-    }
-  }, [selectedLogin, trades, tradeLogins])
-
   const visibleTrades = useMemo(() => {
     if (!trades) return trades
     return selectedLogin ? trades.filter((tr) => tr.mt5Login === selectedLogin) : trades
   }, [trades, selectedLogin])
 
-  async function saveAutoCfg() {
-    if (!autoCfg) return
-    setAutoSaving(true)
-    setAutoMsg(null)
-    try {
-      const updated = await automationApi.putSettings(autoCfg)
-      setAutoCfg(updated)
-      setAutoMsg({ kind: "ok", text: t("account.autoSaved") })
-    } catch (err: unknown) {
-      setAutoMsg({ kind: "err", text: err instanceof Error ? localizeApiError(err.message) : t("account.autoSaveError") })
-    } finally {
-      setAutoSaving(false)
-    }
-  }
+  // 持仓也跟着页头的账号走。position.login 可能缺失（旧记录），此时不显示在
+  // 单账号视角下，避免把别的账号的仓位算进汇总。
+  // Positions follow the header's account too. position.login can be missing
+  // on older records; those are left out of the single-account view rather than
+  // risk counting another account's exposure in the summary.
+  const visiblePositions = useMemo(
+    () => (selectedLogin ? positions.filter((p) => String(p.login ?? '') === String(selectedLogin)) : positions),
+    [positions, selectedLogin],
+  )
 
   const showToast = (msg: string, kind: 'success' | 'error' | 'info' = 'success') => {
     if (toastTimer.current) window.clearTimeout(toastTimer.current)
@@ -190,13 +194,13 @@ export default function OrdersPage() {
     let pnl = 0
     let buy = 0
     let sell = 0
-    for (const p of positions) {
+    for (const p of visiblePositions) {
       pnl += p.profit
       if (p.side === 'BUY') buy += 1
       else sell += 1
     }
-    return { pnl, buy, sell, total: positions.length }
-  }, [positions])
+    return { pnl, buy, sell, total: visiblePositions.length }
+  }, [visiblePositions])
 
   const filteredOrders = useMemo(() => {
     return baseOrders.filter((o) => {
@@ -220,7 +224,7 @@ export default function OrdersPage() {
   // resets happen synchronously in their own onChange handlers (see the date
   // inputs below) so switching into server pagination doesn't fire an extra
   // request at the stale page first.
-  useEffect(() => { setPage(0) }, [statusF, sideF, symbolF])
+  useEffect(() => { setPage(0) }, [statusF, sideF, symbolF, selectedLogin])
 
   // 分页派生：日期筛选时服务端每页只取 10 条（serverTotal 为该区间总数）；否则在
   // 实时集合上本地切 10 条一页。safePage 夹紧，防止数据刷新后停在越界页码。
@@ -250,289 +254,148 @@ export default function OrdersPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h2 className="font-display text-2xl font-bold text-slate-100">
-          <span className="neon-text">{t('orders.title')}</span>
-        </h2>
-        <p className="mt-1 text-sm text-slate-400">{t('orders.subtitle')}</p>
-      </div>
-
-      {/* MT5 账户详情：一次只显示所选的一个账号 / MT5 account details: shows only the selected account */}
-      {accounts.length > 0 && activeAccount && (
-        <div className="glass mb-5 p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-slate-300">
-              {t('orders.mt5Accounts')}
-            </h3>
-            {accounts.length > 1 && (
-              <div className="flex flex-wrap gap-2">
-                {accounts.map((a) => (
-                  <button
-                    key={a.login}
-                    onClick={() => setAccountLogin(a.login)}
-                    className={`rounded-lg border px-3 py-1.5 font-mono text-xs transition ${
-                      a.login === accountLogin
-                        ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'
-                        : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-100'
-                    }`}
-                  >
-                    {a.login}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="mt-3">
-            <div className="rounded-lg border border-white/5 bg-white/[0.03] p-3">
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-sm text-slate-100">
-                  {activeAccount.login}
-                  {activeAccount.server ? ` @${activeAccount.server}` : ""}
-                </span>
-                <span
-                  className={`tag text-xs ${activeAccount.online ? "bg-up/15 text-up" : "bg-white/5 text-slate-500"}`}
-                >
-                  {activeAccount.online ? t("common.online") : t("common.offline")}
-                </span>
-              </div>
-              <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-                <div>
-                  <span className="text-slate-500">{t("account.balance")}</span>
-                  <div className="font-mono text-slate-100">{activeAccount.balance?.toFixed(2) ?? "-"}</div>
-                </div>
-                <div>
-                  <span className="text-slate-500">{t("account.equity")}</span>
-                  <div className="font-mono text-slate-100">{activeAccount.equity?.toFixed(2) ?? "-"}</div>
-                </div>
-                <div>
-                  <span className="text-slate-500">{t("account.leverage")}</span>
-                  <div className="font-mono text-slate-100">{activeAccount.leverage ? `1:${activeAccount.leverage}` : "-"}</div>
-                </div>
-              </div>
-            </div>
-          </div>
+      {/* 页头：标题 + 全页统一账号切换器 / page head: title + page-wide account switcher */}
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-display text-2xl font-bold text-slate-100">
+            <span className="neon-text">{t('orders.title')}</span>
+          </h2>
+          <p className="mt-1 text-sm text-slate-400">{t('orders.subtitle')}</p>
         </div>
-      )}
-
-      {/* 持仓概览 / positions overview */}
-      <div className="glass mb-5 p-5">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h3 className="font-display text-lg font-semibold text-slate-100">
-            {t('orders.positions')}
-          </h3>
-          {positions.length > 0 && (
-            <div className="flex flex-wrap items-center gap-4 text-xs">
-              <span className="text-slate-400">
-                {t('orders.summary.positions')}{' '}
-                <b className="font-mono text-sm text-slate-100">{posSummary.total}</b>
-              </span>
-              <span className="text-slate-400">
-                {t('common.buy')} <b className="font-mono text-sm text-up">{posSummary.buy}</b>
-                {' '}/{' '}
-                {t('common.sell')} <b className="font-mono text-sm text-down">{posSummary.sell}</b>
-              </span>
-              <span className="text-slate-400">
-                {t('orders.summary.totalPnl')}{' '}
-                <b className={`font-mono text-sm ${posSummary.pnl >= 0 ? 'text-up' : 'text-down'}`}>
-                  {posSummary.pnl >= 0 ? '+' : ''}
-                  {posSummary.pnl.toFixed(2)}
-                </b>
-              </span>
-            </div>
-          )}
-        </div>
-        <p className="mb-3 text-xs text-slate-500">{t('orders.positionsScopeHint')}</p>
-        {positions.length === 0 ? (
-          <p className="py-4 text-center text-sm text-slate-500">{t('orders.noPositions')}</p>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {positions.map((p, i) => (
-              <PositionCard key={p.ticket ?? i} position={p} onActionDone={showToast} />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* 我的交易表现：账号标签同时驱动胜率卡与下方明细，两者数字永远对得上 /
-          Personal trading performance: the account tab drives both the
-          win-rate card and the detail list below, so the numbers never disagree */}
-      <div className="mb-5">
-        {multiAccount && (
-          <div className="mb-3 flex flex-wrap gap-2">
-            <button
-              onClick={() => setSelectedLogin(null)}
-              className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-                selectedLogin === null
-                  ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'
-                  : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-100'
-              }`}
-            >
-              {t('winrate.allAccounts')}
-            </button>
-            {tradeLogins.map((login) => (
+        {accounts.length > 1 && (
+          <div className="flex flex-wrap gap-2">
+            {accounts.map((a) => (
               <button
-                key={login}
-                onClick={() => setSelectedLogin(login)}
+                key={a.login}
+                onClick={() => setSelectedLogin(a.login)}
                 className={`rounded-lg border px-3 py-1.5 font-mono text-xs transition ${
-                  selectedLogin === login
+                  a.login === selectedLogin
                     ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'
                     : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-100'
                 }`}
               >
-                {t('winrate.closedTradesAccount', { login })}
+                {a.login}
               </button>
             ))}
           </div>
         )}
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-          <PersonalWinRateCard variant="detailed" login={selectedLogin ?? undefined} />
-          <DisciplineScoreCard login={selectedLogin ?? undefined} isPro={isPro} />
-        </div>
-        <div className="mt-5">
-          <ClosedTradesList trades={visibleTrades} showAccountColumn={multiAccount && selectedLogin === null} />
-        </div>
       </div>
 
-      {/* 自动仓位管理 / auto position management */}
-      {autoCfg && (
-        <div className={`glass mb-5 p-5 ${!isPro ? 'opacity-60' : ''}`}>
-          <div className="flex items-center justify-between">
-            <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-slate-300">
-              {t('account.autoTitle')}
-            </h3>
-            {!isPro && (
-              <span className="tag bg-white/10 text-slate-500">{t('orders.proExclusive')}</span>
-            )}
-            {isPro && (
-              <span className="tag bg-prism-600/20 text-prism-300">PRO</span>
-            )}
-          </div>
-          <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('account.autoHint')}</p>
+      {/* Tab 导航 / tab navigation */}
+      <div className="mb-5 flex gap-1 border-b border-white/10" role="tablist">
+        {TABS.map((key) => (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => setTab(key)}
+            className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+              tab === key
+                ? 'border-prism-500 text-prism-200'
+                : 'border-transparent text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            {t(`orders.tab.${key}`)}
+          </button>
+        ))}
+      </div>
 
-          {!isPro ? (
-            <p className="mt-3 text-xs text-slate-500">
-              {t('account.autoUpgradeRequired')}{" "}
-              <Link to="/upgrade" className="text-prism-400 underline hover:text-prism-300">
-                {t('nav.upgrade')}
-              </Link>
-            </p>
-          ) : (
-            <div className="mt-4 space-y-4">
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-100">
-                <input
-                  type="checkbox"
-                  checked={autoCfg.enabled}
-                  onChange={(e) => setAutoCfg({ ...autoCfg, enabled: e.target.checked })}
-                  className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-                />
-                {t('account.autoEnable')}
-              </label>
-
-              {autoCfg.enabled && (
-                <div className="space-y-4 rounded-lg border border-white/5 bg-white/[0.03] p-4">
-                  {/* 保本 / break-even */}
-                  <div className="flex flex-wrap items-center gap-3">
-                    <label className="flex w-40 cursor-pointer items-center gap-2 text-sm text-slate-200">
-                      <input
-                        type="checkbox"
-                        checked={autoCfg.beEnabled}
-                        onChange={(e) => setAutoCfg({ ...autoCfg, beEnabled: e.target.checked })}
-                        className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-                      />
-                      {t('account.autoBe')}
-                    </label>
-                    <span className="text-xs text-slate-500">{t('account.autoTriggerAt')}</span>
-                    <input
-                      type="number" step={0.1} min={0.1} max={10}
-                      className="input h-8 w-20 text-xs"
-                      value={autoCfg.beTriggerR}
-                      onChange={(e) => setAutoCfg({ ...autoCfg, beTriggerR: Number(e.target.value) })}
-                    />
-                    <span className="text-xs text-slate-500">R</span>
-                  </div>
-
-                  {/* 追踪止损 / trailing stop */}
-                  <div className="flex flex-wrap items-center gap-3">
-                    <label className="flex w-40 cursor-pointer items-center gap-2 text-sm text-slate-200">
-                      <input
-                        type="checkbox"
-                        checked={autoCfg.trailEnabled}
-                        onChange={(e) => setAutoCfg({ ...autoCfg, trailEnabled: e.target.checked })}
-                        className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-                      />
-                      {t('account.autoTrail')}
-                    </label>
-                    <span className="text-xs text-slate-500">{t('account.autoTriggerAt')}</span>
-                    <input
-                      type="number" step={0.1} min={0.1} max={10}
-                      className="input h-8 w-20 text-xs"
-                      value={autoCfg.trailTriggerR}
-                      onChange={(e) => setAutoCfg({ ...autoCfg, trailTriggerR: Number(e.target.value) })}
-                    />
-                    <span className="text-xs text-slate-500">R · {t('account.autoTrailDistance')}</span>
-                    <input
-                      type="number" step={0.1} min={0.1} max={10}
-                      className="input h-8 w-20 text-xs"
-                      value={autoCfg.trailDistanceR}
-                      onChange={(e) => setAutoCfg({ ...autoCfg, trailDistanceR: Number(e.target.value) })}
-                    />
-                    <span className="text-xs text-slate-500">R</span>
-                  </div>
-
-                  {/* 分批止盈 / partial take-profit */}
-                  <div className="flex flex-wrap items-center gap-3">
-                    <label className="flex w-40 cursor-pointer items-center gap-2 text-sm text-slate-200">
-                      <input
-                        type="checkbox"
-                        checked={autoCfg.ptpEnabled}
-                        onChange={(e) => setAutoCfg({ ...autoCfg, ptpEnabled: e.target.checked })}
-                        className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-                      />
-                      {t('account.autoPtp')}
-                    </label>
-                    <span className="text-xs text-slate-500">{t('account.autoTriggerAt')}</span>
-                    <input
-                      type="number" step={0.1} min={0.1} max={10}
-                      className="input h-8 w-20 text-xs"
-                      value={autoCfg.ptpTriggerR}
-                      onChange={(e) => setAutoCfg({ ...autoCfg, ptpTriggerR: Number(e.target.value) })}
-                    />
-                    <span className="text-xs text-slate-500">R · {t('account.autoPtpFraction')}</span>
-                    <input
-                      type="number" step={5} min={10} max={90}
-                      className="input h-8 w-20 text-xs"
-                      value={Math.round(autoCfg.ptpFraction * 100)}
-                      onChange={(e) => setAutoCfg({ ...autoCfg, ptpFraction: Number(e.target.value) / 100 })}
-                    />
-                    <span className="text-xs text-slate-500">%</span>
-                  </div>
-
-                  <p className="text-[11px] leading-relaxed text-slate-600">{t('account.autoScopeNote')}</p>
-                </div>
-              )}
-
-              <button
-                onClick={saveAutoCfg}
-                disabled={autoSaving}
-                className="btn-primary px-5 py-2 text-sm disabled:opacity-40"
-              >
-                {autoSaving ? t('common.loading') : t('common.save')}
-              </button>
-              {autoMsg && (
-                <p className={`text-sm ${autoMsg.kind === "err" ? "text-down" : "text-up"}`}>
-                  {autoMsg.text}
-                </p>
-              )}
+      {tab === 'positions' && (
+        <>
+          {/* 账户状态紧凑横条：详细的账号管理在 /account 页，这里只回答"这个账号
+              现在什么状态"。/ Compact account bar: detailed account management
+              lives on /account; this only answers "how is this account doing". */}
+          {activeAccount && (
+            <div className="glass mb-5 flex flex-wrap items-center gap-x-6 gap-y-2 px-5 py-3 text-xs">
+              <span className="font-mono text-sm text-slate-100">
+                {activeAccount.login}
+                {activeAccount.server ? ` @${activeAccount.server}` : ''}
+              </span>
+              <span className={`tag text-xs ${activeAccount.online ? 'bg-up/15 text-up' : 'bg-white/5 text-slate-500'}`}>
+                {activeAccount.online ? t('common.online') : t('common.offline')}
+              </span>
+              <span className="text-slate-500">
+                {t('account.balance')}{' '}
+                <b className="font-mono text-sm font-medium text-slate-100">{activeAccount.balance?.toFixed(2) ?? '-'}</b>
+              </span>
+              <span className="text-slate-500">
+                {t('account.equity')}{' '}
+                <b className="font-mono text-sm font-medium text-slate-100">{activeAccount.equity?.toFixed(2) ?? '-'}</b>
+              </span>
+              <span className="text-slate-500">
+                {t('account.leverage')}{' '}
+                <b className="font-mono text-sm font-medium text-slate-100">
+                  {activeAccount.leverage ? `1:${activeAccount.leverage}` : '-'}
+                </b>
+              </span>
             </div>
           )}
-        </div>
+
+          {/* 持仓概览 / positions overview */}
+          <div className="glass p-5">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+              <h3 className="font-display text-lg font-semibold text-slate-100">
+                {t('orders.positions')}
+              </h3>
+              {visiblePositions.length > 0 && (
+                <div className="flex flex-wrap items-center gap-4 text-xs">
+                  <span className="text-slate-400">
+                    {t('orders.summary.positions')}{' '}
+                    <b className="font-mono text-sm text-slate-100">{posSummary.total}</b>
+                  </span>
+                  <span className="text-slate-400">
+                    {t('common.buy')} <b className="font-mono text-sm text-up">{posSummary.buy}</b>
+                    {' '}/{' '}
+                    {t('common.sell')} <b className="font-mono text-sm text-down">{posSummary.sell}</b>
+                  </span>
+                  <span className="text-slate-400">
+                    {t('orders.summary.totalPnl')}{' '}
+                    <b className={`font-mono text-sm ${posSummary.pnl >= 0 ? 'text-up' : 'text-down'}`}>
+                      {posSummary.pnl >= 0 ? '+' : ''}
+                      {posSummary.pnl.toFixed(2)}
+                    </b>
+                  </span>
+                </div>
+              )}
+            </div>
+            <p className="mb-3 text-xs text-slate-500">{t('orders.positionsScopeHint')}</p>
+            {visiblePositions.length === 0 ? (
+              <p className="py-4 text-center text-sm text-slate-500">{t('orders.noPositions')}</p>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {visiblePositions.map((p, i) => (
+                  <PositionCard key={p.ticket ?? i} position={p} onActionDone={showToast} />
+                ))}
+              </div>
+            )}
+          </div>
+        </>
       )}
 
-      {/* 操作记录 / activity log */}
-      <div className="mb-3">
-        <h3 className="font-display text-lg font-semibold text-slate-100">{t('orders.historyTitle')}</h3>
-        <p className="mt-1 text-xs text-slate-500">{t('orders.historyHint')}</p>
-      </div>
+      {/* 绩效分析：胜率卡、纪律分与已平仓明细都跟着页头选中的账号 /
+          Performance: win-rate card, discipline score and closed trades all
+          follow the account selected in the page head */}
+      {tab === 'performance' && (
+        <>
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+            <PersonalWinRateCard variant="detailed" login={selectedLogin ?? undefined} />
+            <DisciplineScoreCard login={selectedLogin ?? undefined} isPro={isPro} />
+          </div>
+          <div className="mt-5">
+            <ClosedTradesList trades={visibleTrades} />
+          </div>
+        </>
+      )}
+
+
+      {/* 操作记录：只列选中账号的指令，所以表里不再重复"账户"一列 /
+          Activity log: scoped to the selected account, so the table no longer
+          repeats an "account" column */}
+      {tab === 'activity' && (
+      <>
+      {/* Tab 名已经写着"操作记录"，这里不再重复标题，只留一行说明 /
+          the tab is already labelled "Activity Log", so no repeated heading */}
+      <p className="mb-3 text-xs text-slate-500">{t('orders.historyHint')}</p>
 
       {/* 筛选条 / filter bar */}
       <div className="glass mb-3 flex flex-wrap items-center gap-3 p-3">
@@ -615,7 +478,6 @@ export default function OrdersPage() {
                 <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-slate-500">
                   <th className="px-4 py-3 font-medium">{t('orders.colTime')}</th>
                   <th className="px-4 py-3 font-medium">{t('orders.colType')}</th>
-                  <th className="px-4 py-3 font-medium">{t('orders.colAccount')}</th>
                   <th className="px-4 py-3 font-medium">{t('orders.colSymbol')}</th>
                   <th className="px-4 py-3 font-medium">{t('orders.colSide')}</th>
                   <th className="px-4 py-3 font-medium">{t('orders.colVolume')}</th>
@@ -640,7 +502,6 @@ export default function OrdersPage() {
                         {t(`orders.action.${o.action ?? 'ORDER'}`)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 font-mono text-slate-300">{o.mt5Login ?? '-'}</td>
                     <td className="px-4 py-3 font-mono text-slate-100">{displaySymbol(o.symbol)}</td>
                     <td className="px-4 py-3">
                       <span
@@ -709,10 +570,6 @@ export default function OrdersPage() {
                       <span className="font-mono text-slate-200">{o.volume}</span>
                     </div>
                     <div className="flex justify-between gap-2">
-                      <span className="text-slate-500">{t('orders.colAccount')}</span>
-                      <span className="font-mono text-slate-300">{o.mt5Login ?? '-'}</span>
-                    </div>
-                    <div className="flex justify-between gap-2">
                       <span className="text-slate-500">{t('orders.colPrice')}</span>
                       <span className="font-mono text-slate-200">{o.filledPrice ?? '-'}</span>
                     </div>
@@ -775,6 +632,8 @@ export default function OrdersPage() {
             </button>
           </div>
         </div>
+      )}
+      </>
       )}
 
       {toast && (

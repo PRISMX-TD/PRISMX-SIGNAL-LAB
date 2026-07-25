@@ -17,10 +17,13 @@ const PAGE_SIZE = 10
 
 interface Props {
   trades: ClosedTrade[] | null // null = 加载中 / loading
-  showAccountColumn: boolean
 }
 
-export default function ClosedTradesList({ trades, showAccountColumn }: Props) {
+// 不再有"账户"列：调用方（订单页绩效 Tab）已经把记录限定在单个账号内，
+// 每行再重复同一个 login 只是噪音。
+// No account column: the caller (the Orders page performance tab) already
+// scopes records to one account, so repeating the same login per row is noise.
+export default function ClosedTradesList({ trades }: Props) {
   const { t } = useTranslation()
   const [page, setPage] = useState(0)
 
@@ -50,7 +53,6 @@ export default function ClosedTradesList({ trades, showAccountColumn }: Props) {
               <thead>
                 <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-slate-500">
                   <th className="px-3 py-2 font-medium">{t('orders.colTime')}</th>
-                  {showAccountColumn && <th className="px-3 py-2 font-medium">{t('orders.colAccount')}</th>}
                   <th className="px-3 py-2 font-medium">{t('orders.colSymbol')}</th>
                   <th className="px-3 py-2 font-medium">{t('orders.colSide')}</th>
                   <th className="px-3 py-2 font-medium">{t('orders.colVolume')}</th>
@@ -62,7 +64,6 @@ export default function ClosedTradesList({ trades, showAccountColumn }: Props) {
                 {pageTrades.map((tr) => (
                   <tr key={tr.id} className="border-b border-white/5">
                     <td className="whitespace-nowrap px-3 py-2 text-slate-400">{fmtTime(tr.closedAt)}</td>
-                    {showAccountColumn && <td className="px-3 py-2 font-mono text-slate-300">{tr.mt5Login}</td>}
                     <td className="px-3 py-2 font-mono text-slate-100">{displaySymbol(tr.symbol)}</td>
                     <td className="px-3 py-2">
                       <span className={`tag ${tr.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
@@ -97,7 +98,6 @@ export default function ClosedTradesList({ trades, showAccountColumn }: Props) {
                 </div>
                 <div className="mt-1 flex justify-between text-xs text-slate-500">
                   <span>{tr.closeVolume} {t('positions.lots')} @ {tr.closePrice ?? '-'}</span>
-                  {showAccountColumn && <span className="font-mono">{tr.mt5Login}</span>}
                 </div>
                 <div className="mt-0.5 text-right text-xs text-slate-500">{fmtTime(tr.closedAt)}</div>
               </div>
