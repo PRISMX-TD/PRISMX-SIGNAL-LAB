@@ -15,6 +15,7 @@
 // score ("great / okay / needs work") reads faster than a bare number alone.
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { orderApi } from '../api/client'
 import { useBackToClose } from '../utils/useBackToClose'
@@ -136,7 +137,21 @@ function DisciplineHelpModal({ onClose }: { onClose: () => void }) {
     { titleKey: 'discipline.helpExitTitle', bodyKey: 'discipline.helpExitBody' },
   ]
 
-  return (
+  // 必须 portal 到 body：本弹窗的调用点在 .glass 卡片内部，而 .glass 带
+  // backdrop-filter；backdrop-filter 会让该元素成为 fixed 定位的包含块，于是
+  // .slide-overlay 的 inset:0 只铺满那张纪律分卡片而不是整个视口——表现就是
+  // 弹窗偏离屏幕中心、遮罩与背景模糊只糊住卡片那一小块区域。外层 .page-enter
+  // 的 transform 动画同样会造成这个问题（见 SlideOrderModal/ChartOrderModal
+  // 里同样的注释）。挂到 body 才能脱离这两类祖先，让 fixed 重新相对视口。
+  // Portal to body, mandatory: this modal is rendered from inside a .glass
+  // card, and .glass has a backdrop-filter — which makes that element the
+  // containing block for fixed positioning, so .slide-overlay's inset:0 covers
+  // only the discipline card instead of the viewport. That's exactly the
+  // off-center dialog with a backdrop blur confined to one card. The
+  // .page-enter wrapper's transform animation causes the same thing (see the
+  // matching notes in SlideOrderModal/ChartOrderModal). Portaling to body
+  // escapes both so fixed positions against the viewport again.
+  return createPortal(
     <div className="slide-overlay" onClick={onClose}>
       {/* 桌面端加宽到 480px 用 Tailwind 的 sm: 前缀，不要用内联 style——
           .slide-sheet 自己的移动端媒体查询（<640px 变成贴底全屏抽屉）靠的是
@@ -172,7 +187,8 @@ function DisciplineHelpModal({ onClose }: { onClose: () => void }) {
           {t('discipline.helpGotIt')}
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
