@@ -2420,7 +2420,6 @@
   justify-content: center;
   gap: 2px;
   padding: 8px 16px;
-  border-right: 1px solid var(--line);
   white-space: nowrap;
 }
 .term-sstat-k { font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); }
