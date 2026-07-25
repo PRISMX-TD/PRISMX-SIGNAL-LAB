@@ -302,7 +302,7 @@ export default function Layout() {
               <NavItem to="/dashboard" label={t('nav.dashboard')} />
               <NavItem to="/app" label={t('nav.signals')} />
               <NavItem to="/charts" label={t('nav.charts')} />
-              <NavItem to="/bind" label={t('nav.bind')} />
+              <NavItem to="/strategies" label={t('nav.strategies')} />
               <NavItem to="/orders" label={t('nav.orders')} />
             </nav>
 
