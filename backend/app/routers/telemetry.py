@@ -86,12 +86,35 @@ def report_pageview(
     不在白名单的 path 静默忽略（照样返回 204）——这是埋点上报，不是业务操作，
     为一个统计问题给用户弹错误没有意义，也免得前端为此写错误处理分支。
 
+    管理员的访问一概不计（见下方注释），同样静默返回。
+
     Accumulates one page view. Returns 204; the client needs no response body.
     Unknown paths are silently ignored (still 204) — this is telemetry, not a
     business action; surfacing an error to the user over a stats issue serves
     no one and would force the client to handle a failure it can't act on.
+    Admin visits are never counted (see the comment below), also silently.
     """
     if payload.path not in ALLOWED_PATHS:
+        return
+
+    # 管理员的访问不计入统计。这里过滤的是"人"而不是"某个页面"：管理员为了
+    # 检查功能会把每个页面都点一遍，那不是用户行为，会把每个页面的数字都抬高
+    # 一点。在总人数只有个位数的阶段，一个人的噪声占比大到足以看错趋势。
+    #
+    # 放在这里（而不是查询侧）是因为这是唯一能判断"谁在访问"的地方——统计表
+    # 里的 page_view_stats 刻意不存 user_id，聚合之后就再也分不出哪几次是
+    # 管理员的了。宁可不写进去，也不能指望事后过滤。
+    #
+    # Admin visits are excluded. This filters a person, not a page: an admin
+    # clicking through every page to check things isn't user behaviour, and it
+    # inflates every page's numbers. While the user count is in single digits,
+    # one person's noise is enough to misread a trend.
+    #
+    # It belongs here rather than in the query because this is the only place
+    # that knows *who* is visiting — page_view_stats deliberately stores no
+    # user_id, so once aggregated the admin's views can never be separated out.
+    # Better to never write them than to hope for a later filter.
+    if user.role == "admin":
         return
 
     seconds = min(max(payload.seconds, 0.0), MAX_DWELL_SECONDS)

@@ -229,6 +229,44 @@ def test_pageview_ignores_admin_page(client, db, auth_headers):
     assert db.query(PageVisitorDay).count() == 0
 
 
+def test_pageview_ignores_admin_user_on_every_page(client, db):
+    """管理员在任何页面的访问都不计——过滤的是人，不是某个页面。
+
+    管理员检查功能时会把每个页面点一遍，那不是用户行为。这里用普通用户页
+    /orders 验证：若只按 path 过滤（漏了角色判断），这条会写进库。
+    """
+    headers = _admin_headers(db)
+    res = client.post("/api/telemetry/pageview", headers=headers,
+                      json={"path": "/orders", "seconds": 30})
+    assert res.status_code == 204
+    assert db.query(PageViewStat).count() == 0
+    assert db.query(PageVisitorDay).count() == 0
+
+
+def test_purge_admin_visitors_keeps_normal_users(db, user):
+    """清理管理员的人数标记，普通用户的不动。
+
+    上报侧已挡住新数据，但改动前累积的行还在，不清就会一直把管理员算进人数。
+    """
+    from app.services.page_stats import purge_admin_visitors
+
+    admin = User(email="boss@example.com", password_hash="x",
+                 api_token=hash_api_token(generate_api_token()), role="admin")
+    db.add(admin)
+    db.commit()
+    db.refresh(admin)
+
+    today = datetime.now(timezone.utc).date()
+    db.add(PageVisitorDay(path="/orders", day=today, user_id=admin.id))
+    db.add(PageVisitorDay(path="/orders", day=today, user_id=user.id))
+    db.commit()
+
+    assert purge_admin_visitors(db) == 1
+    remaining = db.query(PageVisitorDay).all()
+    assert len(remaining) == 1
+    assert remaining[0].user_id == user.id
+
+
 def test_page_stats_excludes_historical_admin_rows(client, db, user):
     """库里已有的 /admin 历史数据也要滤掉。
 

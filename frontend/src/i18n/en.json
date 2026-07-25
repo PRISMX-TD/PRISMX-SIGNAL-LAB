@@ -951,7 +951,7 @@
     "pageStats": {
       "title": "Page views (last 7 days)",
       "summary": "{{visitors}} visitors · {{views}} views · {{avg}} average dwell",
-      "privacyHint": "Counts how many people opened each page per day; no visit times, per-person dwell or browsing order is kept.",
+      "privacyHint": "Counts how many people opened each page per day; no visit times, per-person dwell or browsing order is kept. Admin visits are excluded.",
       "empty": "No view data yet — it accumulates once this is live.",
       "metricLabel": "Metric",
       "metric": {

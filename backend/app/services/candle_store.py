@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.core.database import SessionLocal
 from app.models import Candle
-from app.services.page_stats import prune_visitor_days
+from app.services.page_stats import prune_visitor_days, purge_admin_visitors
 from app.services.settings_store import get_candle_settings
 
 logger = logging.getLogger("prismx.candle_store")
@@ -159,6 +159,9 @@ async def candle_retention_sweep_loop() -> None:
                 pruned = prune_visitor_days(db)
                 if pruned:
                     logger.info("candle_retention_sweep_loop: pruned %d expired visitor marker(s)", pruned)
+                purged = purge_admin_visitors(db)
+                if purged:
+                    logger.info("candle_retention_sweep_loop: purged %d admin visitor marker(s)", purged)
             finally:
                 db.close()
         except Exception:
