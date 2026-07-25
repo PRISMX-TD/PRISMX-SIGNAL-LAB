@@ -45,6 +45,11 @@ const INTERVALS = [
   { code: 'D', label: '1D' },
 ] as const
 
+// 策略信号有效期：与平台信号一致固定 10 分钟，过期后置灰并隐藏一键下单。
+// Strategy-signal lifespan: fixed 10 min like platform signals; once expired
+// the row greys out and the one-click order button is hidden.
+const SIGNAL_TTL_MS = 10 * 60 * 1000
+
 const TEMPLATE_KEYS: StrategyTemplateKey[] = [
   'ma_cross', 'rsi_reversal', 'bollinger_reversion',
   'macd_cross', 'ma_pullback', 'bollinger_breakout', 'rsi_momentum',
@@ -1047,6 +1052,11 @@ export default function StrategiesPage() {
   const [orderTarget, setOrderTarget] = useState<StrategySignal | null>(null)
   const [clearingSignals, setClearingSignals] = useState(false)
   const [confirmClearSignals, setConfirmClearSignals] = useState(false)
+  // 每秒走一次的时钟，用于让策略信号到期时实时置灰、隐藏一键下单按钮
+  // （与平台信号一样固定 10 分钟有效期）。/ 1s tick so strategy signals grey
+  // out and lose the one-click button live on expiry (fixed 10-min lifespan,
+  // same as platform signals).
+  const [now, setNow] = useState(() => Date.now())
 
   useBackToClose(draft != null, () => setDraft(null))
   useBackToClose(deleteTarget != null, () => setDeleteTarget(null))
@@ -1069,6 +1079,13 @@ export default function StrategiesPage() {
 
   useEffect(() => { document.title = t('strategy.title') }, [t])
   useEffect(() => { load() }, [load])
+
+  // 每秒推进一次本地时钟，驱动信号到期的实时置灰 / advance a local clock each
+  // second to drive live expiry greying-out
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   // 我的策略信号轮询：与胜率卡/纪律分卡同一节奏(45 秒 + 切回页面立即刷)
   // Poll my strategy signals: same 45s cadence as the win-rate/discipline cards
@@ -1233,20 +1250,30 @@ export default function StrategiesPage() {
           <div className="mt-4 py-6 text-center text-sm text-slate-500">{t('strategy.noSignals')}</div>
         ) : (
           <div className="mt-4 flex flex-col gap-2">
-            {signals.map((sig) => (
-              <div key={sig.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.02] p-3">
-                <div className="flex items-center gap-2">
-                  <span className={`tag ${sig.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
-                    {sig.side === 'BUY' ? t('common.buy') : t('common.sell')}
-                  </span>
-                  <span className="font-mono text-sm text-slate-100">{displaySymbol(sig.symbol)}</span>
-                  <span className="text-xs text-slate-500">{t('strategy.signalTriggeredAt')} {fmtTime(sig.createdAt)}</span>
+            {signals.map((sig) => {
+              const createdMs = new Date(sig.createdAt).getTime()
+              const expired = Number.isFinite(createdMs) && now - createdMs >= SIGNAL_TTL_MS
+              return (
+                <div key={sig.id} className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.02] p-3 ${expired ? 'opacity-50' : ''}`}>
+                  <div className="flex items-center gap-2">
+                    <span className={`tag ${sig.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
+                      {sig.side === 'BUY' ? t('common.buy') : t('common.sell')}
+                    </span>
+                    <span className="font-mono text-sm text-slate-100">{displaySymbol(sig.symbol)}</span>
+                    <span className="text-xs text-slate-500">{t('strategy.signalTriggeredAt')} {fmtTime(sig.createdAt)}</span>
+                  </div>
+                  {expired ? (
+                    <span className="rounded-lg border border-white/10 bg-white/5 px-4 py-1.5 text-xs text-slate-500">
+                      {t('strategy.signalExpired')}
+                    </span>
+                  ) : (
+                    <button onClick={() => setOrderTarget(sig)} className="btn-primary px-4 py-1.5 text-xs">
+                      {t('strategy.oneClickOrder')}
+                    </button>
+                  )}
                 </div>
-                <button onClick={() => setOrderTarget(sig)} className="btn-primary px-4 py-1.5 text-xs">
-                  {t('strategy.oneClickOrder')}
-                </button>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </section>
