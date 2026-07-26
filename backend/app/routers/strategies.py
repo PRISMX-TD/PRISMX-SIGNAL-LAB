@@ -39,6 +39,8 @@ from app.schemas import StrategyBacktestRequest, StrategyCreate, StrategyOut, St
 from app.services.candle_store import INTERVAL_SECONDS
 from app.services.deps import get_current_user
 from app.services.settings_store import get_strategy_settings
+from app.services.strategy.coverage import active_symbols, coverage_matrix
+from app.services.strategy.rules import MAX_SYMBOLS
 from app.services.strategy_engine import (
     TEMPLATE_SCHEMAS,
     clamp_stop_loss,
@@ -77,6 +79,43 @@ def list_templates(_user: User = Depends(get_current_user)):
     Lists available strategy templates and their parameter schemas; the
     frontend renders the tuning form from this, nothing hardcoded."""
     return {"templates": TEMPLATE_SCHEMAS}
+
+
+@router.get("/coverage", response_model=dict)
+def get_coverage(
+    symbols: str = "",
+    intervals: str = "",
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """某些 (品种, 周期) 的实际可用数据量与断档情况，回测执行之前就能看到。
+
+    不传 symbols 时用当前有报价的全部品种；不传 intervals 时用六档全部。
+    前端据此在回测前显示"已选 365 天，实际可用 47 天"，并把未接入品种置灰。
+
+    Actual available data and gaps for some (symbol, interval) pairs, visible
+    before a backtest runs. Empty symbols means every currently quoted symbol;
+    empty intervals means all six. The frontend uses this to show "365 days
+    requested, 47 days available" up front and to grey out unfed symbols.
+    """
+    _check_access(db, user)
+    sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()] or active_symbols()
+    itv_list = [i.strip() for i in intervals.split(",") if i.strip()] or sorted(INTERVAL_SECONDS)
+    if len(sym_list) > MAX_SYMBOLS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"一次最多查询 {MAX_SYMBOLS} 个品种 / at most {MAX_SYMBOLS} symbols per request",
+        )
+    for itv in itv_list:
+        if itv not in INTERVAL_SECONDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"不支持的周期 {itv}，可选 {sorted(INTERVAL_SECONDS)} / unsupported interval",
+            )
+    return {
+        "coverage": coverage_matrix(db, sym_list, itv_list),
+        "activeSymbols": active_symbols(),
+    }
 
 
 @router.get("", response_model=dict)
