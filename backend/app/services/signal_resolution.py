@@ -73,6 +73,15 @@ def resolve_signals_with_price(db: Session, symbol: str, low: float, high: float
         logger.warning("resolve_signals_with_price: low > high for %s, skipping", symbol)
         return []
 
+    # baseline 核心已提取到 strategy/resolution.py，两表共用（策略胜率与平台
+    # 胜率因此是同一个口径，可直接对比）。本函数只保留"查哪些行、写哪些字段"
+    # 这部分平台侧特有的逻辑。
+    # The baseline core now lives in strategy/resolution.py and is shared by
+    # both tables, so strategy and platform win rates are the same measurement
+    # and directly comparable. What stays here is the platform-specific part:
+    # which rows to load and which fields to write.
+    from app.services.strategy.resolution import apply_baseline
+
     pending = (
         db.query(Signal)
         .filter(Signal.symbol == symbol, Signal.result == "PENDING")
@@ -81,33 +90,10 @@ def resolve_signals_with_price(db: Session, symbol: str, low: float, high: float
     resolved: list[Signal] = []
     now = datetime.now(timezone.utc)
     for sig in pending:
-        if sig.stop_loss is None or sig.take_profit is None:
-            continue  # 缺 SL/TP 无法判定，留给 STALE 兜底 / can't resolve, stale sweep handles it eventually
-
-        if sig.baseline_high is None or sig.baseline_low is None:
-            # 首次观测：只建立基线，不判定（见函数说明）。
-            # First observation: establish the baseline only, never resolve.
-            sig.baseline_high = high
-            sig.baseline_low = low
+        outcome = apply_baseline(sig, low, high)
+        if outcome is None:
             continue
-
-        new_high = high > sig.baseline_high
-        new_low = low < sig.baseline_low
-        sig.baseline_high = max(sig.baseline_high, high)
-        sig.baseline_low = min(sig.baseline_low, low)
-
-        if sig.side == "BUY":
-            hit_tp = new_high and high >= sig.take_profit
-            hit_sl = new_low and low <= sig.stop_loss
-        else:  # SELL
-            hit_tp = new_low and low <= sig.take_profit
-            hit_sl = new_high and high >= sig.stop_loss
-
-        if not (hit_sl or hit_tp):
-            continue
-
-        # 同一次上报里双触发，保守按止损 / same-report double-touch, conservative SL
-        sig.result = "HIT_SL" if hit_sl else "HIT_TP"
+        sig.result = outcome
         sig.resolved_at = now
         resolved.append(sig)
 

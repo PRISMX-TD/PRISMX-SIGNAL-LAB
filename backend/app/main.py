@@ -21,6 +21,7 @@ from app.services.discipline import discipline_snapshot_loop
 from app.services.plan_expiry import plan_expiry_sweep_loop
 from app.services.sentiment_store import sentiment_loop
 from app.services.signal_resolution import stale_signal_sweep_loop
+from app.services.strategy.resolution import stale_strategy_signal_sweep_loop
 
 
 @asynccontextmanager
@@ -41,6 +42,14 @@ async def lifespan(app: FastAPI):
     # 信号胜负判定的保险丝：清扫长期无行情更新的 PENDING 信号 / win-rate safety
     # net: sweep PENDING signals stuck without any price update
     stale_signal_sweep = asyncio.create_task(stale_signal_sweep_loop())
+    # 策略信号的 STALE 兜底：数据源中断会让策略信号永久 PENDING，进而使「一次
+    # 一单」策略永久卡死不再触发。与平台信号的清扫各自独立，因为两张表的
+    # PENDING 集合与判定驱动源不同。
+    # STALE safety net for strategy signals: a feed outage would leave them
+    # PENDING forever, which in turn permanently jams any one-trade-at-a-time
+    # strategy. Kept separate from the platform sweep since the two tables have
+    # different PENDING sets and different resolution triggers.
+    stale_strategy_sweep = asyncio.create_task(stale_strategy_signal_sweep_loop())
     # 社区情绪定时抓取（FXSSI 公开聚合数据，见 services/sentiment_store.py）
     # Community sentiment periodic fetch (FXSSI's public aggregate data, see
     # services/sentiment_store.py)
@@ -67,6 +76,7 @@ async def lifespan(app: FastAPI):
     stale_sweep.cancel()
     expiry_sweep.cancel()
     stale_signal_sweep.cancel()
+    stale_strategy_sweep.cancel()
     sentiment_task.cancel()
     plan_expiry_task.cancel()
     discipline_task.cancel()
