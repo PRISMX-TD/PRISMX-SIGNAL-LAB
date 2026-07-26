@@ -1,60 +1,63 @@
-// 自定义策略页：模板选参数 → 回测 → 启用 → 触发个人信号 → 一键下单。
-// 只有触发这个用户自己的信号（strategy_signals 表，与全站信号表完全独立），
-// 一键下单复用图表页同款的手动下单弹窗（ChartOrderModal + placeManualOrder），
-// 不经过 signalId，没有任何 Order 相关的后端改动。
+// 自定义策略页：搭规则树 → 查数据覆盖 → 回测 → 启用 → 触发个人信号 → 一键下单。
+// 只触发这个用户自己的信号（strategy_signals 表，与全站信号表完全独立），一键下单
+// 复用图表页同款的手动下单弹窗（ChartOrderModal + placeManualOrder），不经过
+// signalId，没有任何 Order 相关的后端改动。
 //
-// Custom strategies page: pick a template, tune it, backtest, enable it, get
-// personal signals on trigger, one-click order. Fires only this user's own
-// signals (the strategy_signals table, fully separate from the shared
-// signals table); one-click order reuses the same manual-order modal as the
-// charts page (ChartOrderModal + placeManualOrder) — no signalId involved,
-// no Order-side backend changes.
-import { useCallback, useEffect, useRef, useState } from 'react'
+// 本页只做编排：状态管理、数据加载、弹窗接线。规则构建器、回测面板、策略卡片、
+// 信号列表都在 components/strategies/ 下——此前这些全挤在本文件的 1321 行里，
+// 加入 AST 构建器与成本/样本外展示后必然失控。
+//
+// Custom strategies page: build a rule tree, check data coverage, backtest,
+// enable, get personal signals on trigger, one-click order. Fires only this
+// user's own signals (the strategy_signals table, fully separate from the shared
+// signals table); one-click order reuses the charts page's manual-order modal
+// (ChartOrderModal + placeManualOrder) — no signalId involved, no Order-side
+// backend changes.
+//
+// This page is orchestration only: state, data loading, modal wiring. The rule
+// builder, backtest panel, strategy card and signal list all live under
+// components/strategies/ — they used to be crammed into this file's 1321 lines,
+// which adding an AST builder plus cost/out-of-sample views would have made
+// unmanageable.
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { createChart, ColorType, CandlestickSeries, LineSeries, LineStyle, createSeriesMarkers, type UTCTimestamp } from 'lightweight-charts'
 import { useAuth } from '../store/auth'
 import { useLive, useQuotes } from '../store/live'
 import { strategyApi } from '../api/client'
-import { displaySymbol, fmtDate, fmtTime, localizeApiError } from '../api/utils'
-import { bollinger, ema, macd, rsi, sma } from '../utils/indicators'
+import { displaySymbol, localizeApiError } from '../api/utils'
 import type {
   StopLossMethod,
-  StrategyBacktestOpenPosition,
   StrategyBacktestResult,
-  StrategyBacktestTrade,
-  StrategyParamSpec,
+  StrategyPerformance,
   StrategySignal,
   StrategyTemplateKey,
-  StrategyTemplateSchemas,
   TakeProfitMethod,
   UserStrategy,
 } from '../api/types'
 import ChartOrderModal from '../components/ChartOrderModal'
 import ConfirmModal from '../components/ConfirmModal'
-import Select from '../components/Select'
+import BacktestPanel from '../components/strategies/BacktestPanel'
+import RuleGroupEditor from '../components/strategies/RuleGroup'
+import StrategyCard from '../components/strategies/StrategyCard'
+import StrategySignalList from '../components/strategies/StrategySignalList'
+import { NumberField } from '../components/strategies/OperandPicker'
+import {
+  INTERVALS,
+  RULE_LIMITS,
+  collectIntervals,
+  emptyGroup,
+  ruleUsage,
+  type RuleEnvelope,
+} from '../components/strategies/ruleTypes'
 import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import { useBackToClose } from '../utils/useBackToClose'
 
-const INTERVALS = [
-  { code: '1', label: '1m' },
-  { code: '5', label: '5m' },
-  { code: '15', label: '15m' },
-  { code: '60', label: '1H' },
-  { code: '240', label: '4H' },
-  { code: 'D', label: '1D' },
-] as const
-
-// 策略信号有效期：与平台信号一致固定 10 分钟，过期后置灰并隐藏一键下单。
-// Strategy-signal lifespan: fixed 10 min like platform signals; once expired
-// the row greys out and the one-click order button is hidden.
-const SIGNAL_TTL_MS = 10 * 60 * 1000
-
-const TEMPLATE_KEYS: StrategyTemplateKey[] = [
-  'ma_cross', 'rsi_reversal', 'bollinger_reversion',
-  'macd_cross', 'ma_pullback', 'bollinger_breakout', 'rsi_momentum',
-  'donchian_breakout', 'momentum_breakout', 'trend_rsi_filter',
-]
+// 模板名称仍需要：迁移过来的旧策略 template 非 null，未命名时用模板名作显示名。
+// 模板的参数表单已被规则构建器取代，所以这里只留标签映射。
+// Template names are still needed: a migrated strategy has a non-null template,
+// and an unnamed one displays its template's name. The per-template param form is
+// gone (replaced by the rule builder), so only the label map remains.
 const TEMPLATE_LABEL_KEYS: Record<StrategyTemplateKey, string> = {
   ma_cross: 'strategy.templateMaCross',
   rsi_reversal: 'strategy.templateRsiReversal',
@@ -67,603 +70,147 @@ const TEMPLATE_LABEL_KEYS: Record<StrategyTemplateKey, string> = {
   momentum_breakout: 'strategy.templateMomentumBreakout',
   trend_rsi_filter: 'strategy.templateTrendRsiFilter',
 }
-const TEMPLATE_DESC_KEYS: Record<StrategyTemplateKey, string> = {
-  ma_cross: 'strategy.templateMaCrossDesc',
-  rsi_reversal: 'strategy.templateRsiReversalDesc',
-  bollinger_reversion: 'strategy.templateBollingerReversionDesc',
-  macd_cross: 'strategy.templateMacdCrossDesc',
-  ma_pullback: 'strategy.templateMaPullbackDesc',
-  bollinger_breakout: 'strategy.templateBollingerBreakoutDesc',
-  rsi_momentum: 'strategy.templateRsiMomentumDesc',
-  donchian_breakout: 'strategy.templateDonchianBreakoutDesc',
-  momentum_breakout: 'strategy.templateMomentumBreakoutDesc',
-  trend_rsi_filter: 'strategy.templateTrendRsiFilterDesc',
-}
-const PARAM_LABEL_KEYS: Record<string, string> = {
-  maType: 'strategy.maType',
-  fastPeriod: 'strategy.fastPeriod',
-  slowPeriod: 'strategy.slowPeriod',
-  direction: 'strategy.direction',
-  period: 'strategy.period',
-  oversold: 'strategy.oversold',
-  overbought: 'strategy.overbought',
-  mult: 'strategy.bollMult',
-  signalPeriod: 'strategy.signalPeriod',
-  touchTolerancePct: 'strategy.touchTolerancePct',
-  lookback: 'strategy.lookback',
-  thresholdPct: 'strategy.thresholdPct',
-  trendPeriod: 'strategy.trendPeriod',
-  rsiPeriod: 'strategy.rsiPeriod',
-}
-const ENUM_OPTION_LABEL_KEYS: Record<string, Record<string, string>> = {
-  maType: { SMA: 'strategy.maTypeSma', EMA: 'strategy.maTypeEma' },
-  direction: { both: 'strategy.directionBoth', long: 'strategy.directionLong', short: 'strategy.directionShort' },
-}
 
-const CURVE_W = 600
-const CURVE_H = 180
+// 未保存草稿的回测结果归属键。用一个不可能与 UUID 冲突的字面量。
+// Key under which an unsaved draft's backtest result is stored; a literal that
+// can't collide with a UUID.
+const NEW_DRAFT_KEY = '__draft__'
 
-function fmtMoney(v: number): string {
-  return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
-// 时间轴刻度与十字准线悬浮时间标签是 lightweight-charts 两套独立的格式化配置
-// （timeScale.tickMarkFormatter 只管坐标轴刻度；localization.timeFormatter 才
-// 管鼠标悬停/触摸拖动时显示的精确时间）。这里之前两个都没设，回退成库自己的
-// 默认格式化——不是 UTC+8，是浏览器本地时区/UTC，跟全站其它时间显示的口径对
-// 不上。照抄 ChartsPage.tsx 的 fmtChartTime 同款实现，两处统一挂上,不是新写
-// 一遍不同的逻辑。/ Tick-mark labels and the crosshair's hover time readout
-// are two separate lightweight-charts formatting hooks (tickMarkFormatter
-// only controls the axis ticks; localization.timeFormatter controls the
-// precise time shown on hover/touch-drag). Neither was set here, so it fell
-// back to the library's own default formatting — not UTC+8, but the
-// browser's local timezone/UTC, disagreeing with the rest of the site's time
-// display convention. Copied from ChartsPage.tsx's fmtChartTime (same
-// implementation, not a divergent rewrite), wired into both hooks here too.
-function fmtChartTime(time: UTCTimestamp): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Shanghai',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(time * 1000))
-}
-
-function defaultParams(schema: Record<string, StrategyParamSpec>): Record<string, string | number> {
-  const out: Record<string, string | number> = {}
-  for (const [k, spec] of Object.entries(schema)) out[k] = spec.default
-  return out
-}
-
-// 净值曲线：与 SimulatorPage 同款纯 SVG 实现（该页无导出可复用组件，逻辑简单，
-// 直接照抄比额外抽公共组件更省事）。
-// Equity curve: same plain-SVG approach as SimulatorPage (that page exports
-// nothing reusable; the logic is simple enough that copying it here beats
-// extracting a shared component for one more caller).
-function EquityCurve({ points, capital }: { points: Array<{ equity: number }>; capital: number }) {
-  if (points.length < 2) return null
-  const values = [...points.map((p) => p.equity), capital]
-  const lo = Math.min(...values) * 0.98
-  const hi = Math.max(...values) * 1.02
-  const span = hi - lo || 1
-  const y = (v: number) => CURVE_H - ((v - lo) / span) * CURVE_H
-  const x = (i: number) => (i * CURVE_W) / (points.length - 1)
-  const line = points.map((p, i) => `${x(i).toFixed(1)},${y(p.equity).toFixed(1)}`).join(' ')
-  const toneClass = points[points.length - 1].equity >= capital ? 'text-up' : 'text-down'
-  const baselineY = y(capital)
-  return (
-    <div className={toneClass}>
-      <svg viewBox={`0 0 ${CURVE_W} ${CURVE_H}`} className="w-full" preserveAspectRatio="none" role="img">
-        <line x1="0" y1={baselineY} x2={CURVE_W} y2={baselineY} stroke="currentColor" strokeOpacity="0.25" strokeWidth="1" strokeDasharray="4 4" className="text-slate-400" />
-        <polyline fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" points={line} vectorEffect="non-scaling-stroke" />
-      </svg>
-    </div>
-  )
-}
-
-const UP_COLOR = '#22c55e'
-const DOWN_COLOR = '#ef4444'
-const PENDING_COLOR = '#fbbf24'
-
-// 一条指标线：pane 0 = 叠在主图价格轴上(均线/布林带/唐奇安通道)，
-// pane 1 = 独立副图,与主图共用时间轴但价格轴分开(RSI/MACD/动量分数这类
-// 量纲和价格完全不同的指标)。dashed 用于超买超卖/中线/阈值这类参考线。
-// One indicator line: pane 0 overlays the main price axis (MA/Bollinger/
-// Donchian), pane 1 is a separate sub-pane sharing the time axis but with
-// its own price scale (RSI/MACD/momentum-score — indicators whose scale has
-// nothing to do with price). dashed marks reference lines (overbought/
-// oversold/midline/threshold).
-interface IndicatorLine {
-  pane: 0 | 1
-  label: string
-  color: string
-  values: (number | null)[]
-  dashed?: boolean
-}
-
-// 按模板生成"入场条件用到的那些指标"的可视化线,让用户能在图上直接对照
-// 每笔交易触发时指标长什么样,而不是只能"相信"回测数字。数学全部复用
-// frontend/src/utils/indicators.ts(与图表页、以及后端 strategy_engine.py
-// 的 Python 移植版本同一套口径),这里只是按模板把该画哪几条线组织起来。
-// Builds the "indicator actually used for entry" visualization lines per
-// template, so the user can check each trade against what the indicator
-// looked like at the time instead of just trusting the backtest numbers.
-// All math reuses frontend/src/utils/indicators.ts (the same math the
-// charts page uses, and that strategy_engine.py's Python port mirrors) —
-// this just organizes which lines to draw per template.
-function buildIndicatorLines(
-  template: StrategyTemplateKey,
-  params: Record<string, string | number>,
-  bars: StrategyBacktestResult['bars']
-): IndicatorLine[] {
-  const cs = bars.map((b) => b.c)
-  const highs = bars.map((b) => b.h)
-  const lows = bars.map((b) => b.l)
-  const n = cs.length
-  const num = (key: string) => Number(params[key])
-  const maFn = params.maType === 'SMA' ? sma : ema
-  const flat = (v: number) => new Array(n).fill(v) as (number | null)[]
-
-  switch (template) {
-    case 'ma_cross':
-      return [
-        { pane: 0, label: 'Fast MA', color: '#fbbf24', values: maFn(cs, num('fastPeriod')) },
-        { pane: 0, label: 'Slow MA', color: '#38bdf8', values: maFn(cs, num('slowPeriod')) },
-      ]
-    case 'ma_pullback':
-      return [{ pane: 0, label: 'MA', color: '#fbbf24', values: maFn(cs, num('period')) }]
-    case 'bollinger_reversion':
-    case 'bollinger_breakout': {
-      const { upper, mid, lower } = bollinger(cs, num('period'), num('mult'))
-      return [
-        { pane: 0, label: 'Upper', color: '#38bdf8', values: upper },
-        { pane: 0, label: 'Mid', color: '#94a3b8', values: mid, dashed: true },
-        { pane: 0, label: 'Lower', color: '#38bdf8', values: lower },
-      ]
-    }
-    case 'donchian_breakout': {
-      const period = num('period')
-      const upper: (number | null)[] = new Array(n).fill(null)
-      const lower: (number | null)[] = new Array(n).fill(null)
-      for (let i = period; i < n; i++) {
-        upper[i] = Math.max(...highs.slice(i - period, i))
-        lower[i] = Math.min(...lows.slice(i - period, i))
-      }
-      return [
-        { pane: 0, label: 'Upper', color: '#38bdf8', values: upper },
-        { pane: 0, label: 'Lower', color: '#38bdf8', values: lower },
-      ]
-    }
-    case 'rsi_reversal':
-    case 'rsi_momentum': {
-      const r = rsi(cs, num('period'))
-      const lines: IndicatorLine[] = [{ pane: 1, label: 'RSI', color: '#a78bfa', values: r }]
-      if (template === 'rsi_reversal') {
-        lines.push({ pane: 1, label: 'Oversold', color: '#64748b', values: flat(num('oversold')), dashed: true })
-        lines.push({ pane: 1, label: 'Overbought', color: '#64748b', values: flat(num('overbought')), dashed: true })
-      } else {
-        lines.push({ pane: 1, label: 'Mid', color: '#64748b', values: flat(50), dashed: true })
-      }
-      return lines
-    }
-    case 'macd_cross': {
-      const { macd: dif, signal: dea } = macd(cs, num('fastPeriod'), num('slowPeriod'), num('signalPeriod'))
-      return [
-        { pane: 1, label: 'DIF', color: '#38bdf8', values: dif },
-        { pane: 1, label: 'DEA', color: '#fbbf24', values: dea },
-      ]
-    }
-    case 'momentum_breakout': {
-      const lookback = num('lookback')
-      const threshold = num('thresholdPct')
-      const score: (number | null)[] = new Array(n).fill(null)
-      for (let i = lookback; i < n; i++) score[i] = (cs[i] / cs[i - lookback] - 1) * 100
-      return [
-        { pane: 1, label: 'Momentum %', color: '#a78bfa', values: score },
-        { pane: 1, label: '+Threshold', color: '#64748b', values: flat(threshold), dashed: true },
-        { pane: 1, label: '-Threshold', color: '#64748b', values: flat(-threshold), dashed: true },
-      ]
-    }
-    case 'trend_rsi_filter':
-      return [
-        { pane: 0, label: 'Trend MA', color: '#fbbf24', values: ema(cs, num('trendPeriod')) },
-        { pane: 1, label: 'RSI', color: '#a78bfa', values: rsi(cs, num('rsiPeriod')) },
-        { pane: 1, label: 'Oversold', color: '#64748b', values: flat(num('oversold')), dashed: true },
-        { pane: 1, label: 'Overbought', color: '#64748b', values: flat(num('overbought')), dashed: true },
-      ]
-    default:
-      return []
-  }
-}
-
-function toLinePoints(bars: StrategyBacktestResult['bars'], values: (number | null)[]): { time: UTCTimestamp; value: number }[] {
-  const out: { time: UTCTimestamp; value: number }[] = []
-  for (let i = 0; i < values.length; i++) {
-    const v = values[i]
-    if (v != null) out.push({ time: bars[i].t as UTCTimestamp, value: v })
-  }
-  return out
-}
-
-// 回测 K 线图：真实蜡烛图 + 每笔交易的入场/出场标记 + 一条连接两点的细线，
-// 这样用户看到的不只是一条抽象的净值曲线，而是"这笔单在当时的行情里到底
-// 长什么样"。复用行情图表页已经在用的 lightweight-charts（v5），marker 用
-// createSeriesMarkers 插件 API，连线用每笔交易各一条只有两个点的 LineSeries。
-//
-// Backtest candlestick chart: real candles + an entry/exit marker for every
-// trade + a thin line connecting the two, so the user sees not just an
-// abstract equity curve but what the market actually looked like when each
-// trade fired. Reuses the same lightweight-charts (v5) already used by the
-// charts page; markers go through the createSeriesMarkers plugin API, and
-// each trade gets its own 2-point LineSeries for the connecting line.
-function BacktestChart({
-  bars, trades, openPositions, template, params,
-}: {
-  bars: StrategyBacktestResult['bars']
-  trades: StrategyBacktestTrade[]
-  openPositions: StrategyBacktestOpenPosition[]
-  template: StrategyTemplateKey
-  params: Record<string, string | number>
-}) {
-  const { t } = useTranslation()
-  const containerRef = useRef<HTMLDivElement>(null)
-  // 默认开启：一眼能对照每笔交易触发时指标长什么样,而不是只能"相信"回测
-  // 数字;需要看干净蜡烛图时再手动关掉。
-  // On by default: lets the user check each trade against what the
-  // indicator looked like at the time, instead of only trusting the
-  // backtest numbers; turn it off if a clean candlestick view is wanted.
-  const [showIndicator, setShowIndicator] = useState(true)
-  const indicatorLines = buildIndicatorLines(template, params, bars)
-
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el || bars.length === 0) return
-
-    const chart = createChart(el, {
-      layout: {
-        background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: '#94a3b8',
-        attributionLogo: false,
-      },
-      grid: {
-        vertLines: { color: 'rgba(139, 70, 255, 0.08)' },
-        horzLines: { color: 'rgba(139, 70, 255, 0.08)' },
-      },
-      rightPriceScale: { borderColor: 'rgba(139, 70, 255, 0.15)' },
-      timeScale: {
-        borderColor: 'rgba(139, 70, 255, 0.15)', timeVisible: true, secondsVisible: false,
-        tickMarkFormatter: fmtChartTime,
-      },
-      localization: { timeFormatter: fmtChartTime },
-      crosshair: { mode: 0 },
-      // 故意先建成一个明显偏小的占位尺寸，而不是直接传 el.clientWidth——见下方
-      // resize 那段注释的完整解释：真实根因是 lightweight-charts 在这类环境下
-      // 如果 resize() 传的目标尺寸和创建时的尺寸"一样"，会被当成没有变化直接
-      // 跳过，canvas 位图分辨率永远不会被真正刷新到位；创建时故意留一个必然
-      // 不同的占位尺寸，后面第一次 resize() 才会被库判定为"真的变了"而生效。
-      // Deliberately create at an obviously-too-small placeholder size instead
-      // of el.clientWidth directly — see the full explanation in the resize
-      // comment below. The real root cause: in this rendering environment,
-      // lightweight-charts treats a resize() call whose target size matches
-      // the size it was created with as a no-op and skips it, so the canvas
-      // bitmap resolution never actually gets painted. Leaving a deliberately
-      // different placeholder size at creation guarantees the first real
-      // resize() call afterward is seen as an actual change and takes effect.
-      width: 2,
-      height: 2,
-    })
-    const series = chart.addSeries(CandlestickSeries, {
-      upColor: UP_COLOR, downColor: DOWN_COLOR, wickUpColor: UP_COLOR, wickDownColor: DOWN_COLOR, borderVisible: false,
-    })
-    series.setData(bars.map((b) => ({ time: b.t as UTCTimestamp, open: b.o, high: b.h, low: b.l, close: b.c })))
-
-    const markers = trades.flatMap((t) => {
-      const win = t.result === 'HIT_TP'
-      return [
-        {
-          time: t.entryTime as UTCTimestamp,
-          position: (t.side === 'BUY' ? 'belowBar' : 'aboveBar') as 'belowBar' | 'aboveBar',
-          shape: (t.side === 'BUY' ? 'arrowUp' : 'arrowDown') as 'arrowUp' | 'arrowDown',
-          color: t.side === 'BUY' ? UP_COLOR : DOWN_COLOR,
-        },
-        {
-          time: t.exitTime as UTCTimestamp,
-          position: (t.side === 'BUY' ? 'aboveBar' : 'belowBar') as 'belowBar' | 'aboveBar',
-          shape: 'circle' as const,
-          color: win ? UP_COLOR : DOWN_COLOR,
-        },
-      ]
-    })
-    // 还没等到止损/止盈结果的入场——只标入场箭头(没有出场点/连线,因为还
-    // 没有出场),用琥珀色和上面赢/亏的绿/红区分开,一眼能看出"这笔跟其他
-    // 笔不一样,还没有结果"。/ Entries that haven't hit SL/TP yet — only an
-    // entry arrow (no exit marker/line, since there's no exit), colored amber
-    // to visually stand apart from the win/loss green/red above, so it reads
-    // as "this one's different, no result yet".
-    const pendingMarkers = openPositions.map((p) => ({
-      time: p.entryTime as UTCTimestamp,
-      position: (p.side === 'BUY' ? 'belowBar' : 'aboveBar') as 'belowBar' | 'aboveBar',
-      shape: (p.side === 'BUY' ? 'arrowUp' : 'arrowDown') as 'arrowUp' | 'arrowDown',
-      color: PENDING_COLOR,
-    }))
-    createSeriesMarkers(series, [...markers, ...pendingMarkers])
-
-    // 每笔交易一条独立的两点连线,标出"从哪进、到哪出" / one 2-point line
-    // series per trade, tracing "where it entered, where it exited"
-    const tradeLines = trades.map((t) => {
-      const line = chart.addSeries(LineSeries, {
-        color: t.result === 'HIT_TP' ? 'rgba(34, 197, 94, 0.55)' : 'rgba(239, 68, 68, 0.55)',
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        crosshairMarkerVisible: false,
-      })
-      line.setData([
-        { time: t.entryTime as UTCTimestamp, value: t.entryPrice },
-        { time: t.exitTime as UTCTimestamp, value: t.exitPrice },
-      ])
-      return line
-    })
-
-    // 指标线：pane 0 的叠在主图价格轴上,pane 1 的一条独立指标副图,与主图
-    // 共享时间轴。所有 pane 1 的线共用同一个新建的 pane,只在第一次遇到
-    // pane 1 的线时创建。/ Indicator lines: pane 0 overlays the main price
-    // axis, pane 1 is one shared sub-pane with its own price scale (sharing
-    // the main pane's time axis). All pane-1 lines reuse the single new pane
-    // created the first time one is needed.
-    const indicatorSeries: ReturnType<typeof chart.addSeries>[] = []
-    if (showIndicator) {
-      let subPaneIndex: number | null = null
-      for (const line of indicatorLines) {
-        const paneIndex = line.pane === 0 ? 0 : (subPaneIndex ??= chart.panes().length)
-        const s = chart.addSeries(
-          LineSeries,
-          {
-            color: line.color,
-            lineWidth: line.dashed ? 1 : 2,
-            lineStyle: line.dashed ? LineStyle.Dashed : LineStyle.Solid,
-            priceLineVisible: false,
-            lastValueVisible: !line.dashed,
-            crosshairMarkerVisible: !line.dashed,
-            title: line.label,
-          },
-          paneIndex
-        )
-        s.setData(toLinePoints(bars, line.values))
-        indicatorSeries.push(s)
-      }
-      if (subPaneIndex != null) chart.panes()[subPaneIndex]?.setHeight(100)
-    }
-
-    chart.timeScale().fitContent()
-
-    // 立即把占位尺寸纠正成容器的真实尺寸。这一步必须存在——见上方 createChart
-    // 里 width:2/height:2 占位的注释：lightweight-charts 在这类环境下，如果
-    // resize() 的目标尺寸和"创建时的尺寸"一样会被当成没有变化直接跳过（canvas
-    // 位图分辨率卡在浏览器默认的 300x150，即使容器自身的 CSS 尺寸完全正确）。
-    // 用占位尺寸打底后，这里第一次 resize() 到真实宽高必然与创建时不同，
-    // 会被库判定为"真的变了"而真正生效——手测反复验证过，同样的调用换成和
-    // 创建时一样的尺寸就会被吞掉。之后的 ResizeObserver 只负责窗口真的发生
-    // 尺寸变化时跟着调整，与 ChartsPage.tsx 同一套模式。全程用 chart.resize()
-    // 而不是 chart.applyOptions()——后者只改 CSS 尺寸，不会刷新 canvas 位图。
-    // Immediately correct the placeholder size to the container's real size.
-    // This step is required — see the width:2/height:2 comment on createChart
-    // above: in this rendering environment, lightweight-charts treats a
-    // resize() call whose target size matches the size it was created with as
-    // a no-op and skips it (the canvas bitmap resolution stays stuck at the
-    // browser's default 300x150 even though the container's own CSS size is
-    // fully correct). Starting from a placeholder size guarantees this first
-    // resize() to the real dimensions is different from the creation size and
-    // is genuinely applied — verified by repeated manual testing, where the
-    // identical call with the creation-time size was silently swallowed. The
-    // ResizeObserver below only needs to handle genuine later window resizes,
-    // same pattern as ChartsPage.tsx. Everywhere uses chart.resize(), never
-    // chart.applyOptions() — the latter only updates the CSS size, never the
-    // canvas bitmap.
-    // "打两下"：先 resize 到一个必然不同的临时值，再 resize 到真正目标值——
-    // 不仅创建时的占位尺寸需要这样纠正，后续 ResizeObserver 报告的每一次真实
-    // 尺寸变化（比如手机端从桌面宽度变窄）同样会撞上"目标尺寸和当前内部记录
-    // 的尺寸一样就判定没变化、直接跳过"这个坑（哪怕这次真的是一次不同的变化，
-    // 内部记录的状态有时也没能正确同步，手测时切到手机宽度就复现过一次）。
-    // A "double kick": resize to a deliberately different transient value
-    // first, then to the real target — not just the placeholder-size
-    // correction at creation needs this; every later genuine size change
-    // reported by the ResizeObserver (e.g. switching to a narrower mobile
-    // width) can hit the same "target matches what the library thinks is
-    // already the current size, so it's treated as a no-op" pitfall, because
-    // its internal size bookkeeping doesn't always stay in sync — reproduced
-    // once during manual testing by switching to the mobile viewport.
-    const forceResize = (width: number, height: number) => {
-      chart.resize(width - 1, height, true)
-      chart.resize(width, height, true)
-    }
-    if (el.clientWidth > 0) forceResize(el.clientWidth, 320)
-    const ro = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (!entry) return
-      const { width, height } = entry.contentRect
-      if (width > 0 && height > 0) forceResize(width, height)
-    })
-    ro.observe(el)
-    // 双保险：ResizeObserver 在这类环境下偶尔连续两次都不触发（同一个页面里
-    // 手测时，切到手机宽度那次生效了，切回桌面宽度那次又没触发），窗口级的
-    // resize 事件作为独立的第二条路径兜底，两者中任何一个触发都够。
-    // Belt-and-braces: the ResizeObserver occasionally misses two transitions
-    // in a row in this kind of environment (manual testing: it caught the
-    // switch to mobile width but missed the switch back to desktop width in
-    // the same session) — a window-level resize listener is an independent
-    // second path; either one firing is enough.
-    const onWindowResize = () => {
-      if (el.clientWidth > 0) forceResize(el.clientWidth, el.clientHeight || 320)
-    }
-    window.addEventListener('resize', onWindowResize)
-    return () => {
-      window.removeEventListener('resize', onWindowResize)
-      ro.disconnect()
-      tradeLines.forEach((l) => chart.removeSeries(l))
-      indicatorSeries.forEach((s) => chart.removeSeries(s))
-      chart.remove()
-    }
-  }, [bars, trades, openPositions, template, params, showIndicator])
-
-  return (
-    <div>
-      <label className="mb-2 flex items-center gap-2 text-xs text-slate-400">
-        <input
-          type="checkbox"
-          checked={showIndicator}
-          onChange={(e) => setShowIndicator(e.target.checked)}
-          className="h-3.5 w-3.5 rounded border-white/20 bg-white/5 accent-prism-500"
-        />
-        {t('strategy.showIndicator')}
-      </label>
-      <div ref={containerRef} className="h-[320px] w-full" />
-    </div>
-  )
-}
-
-// 数字输入框：自己维护一份文本缓冲，只在失焦（或回车）时才解析+夹紧+回传。
-// 沿用回放模拟器的 CapitalField 同款修法（见产品需求文档 6.18 节）——每敲一个
-// 字符就立刻解析夹紧，会让用户清空重打或改动带下限的字段时被强制弹回旧值，
-// 根本删不掉、也打不进新数字。这里所有可调参数（模板参数、止损止盈比例、
-// 回测本金）统一用这一个组件，不再各自手写一份 parseInt/parseFloat。
-// Number input: keeps its own text buffer, parsing/clamping/propagating only
-// on blur (or Enter). Mirrors the replay simulator's CapitalField fix —
-// parsing on every keystroke bounces the user back to the old value mid-edit,
-// making it impossible to clear the field or type past a lower bound. Every
-// tunable number here (template params, SL/TP ratios, backtest capital)
-// shares this one component instead of each hand-rolling parseInt/parseFloat.
-function NumberField({
-  label, value, onChange, min, max, isFloat,
-}: {
-  label: string
-  value: number
-  onChange: (v: number) => void
-  min: number
-  max: number
-  isFloat: boolean
-}) {
-  const [text, setText] = useState(String(value))
-  useEffect(() => { setText(String(value)) }, [value])
-
-  const commit = () => {
-    const n = isFloat ? parseFloat(text) : parseInt(text, 10)
-    const clamped = !Number.isFinite(n) ? value : Math.min(max, Math.max(min, n))
-    setText(String(clamped))
-    if (clamped !== value) onChange(clamped)
-  }
-
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-[11px] uppercase tracking-wide text-slate-500">{label}</span>
-      <input
-        type="number"
-        className="input"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-      />
-    </label>
-  )
-}
-
+// 草稿：编辑中的策略。template 只记录"从哪个预设起步"，从零搭起时为 null。
+// A draft strategy being edited. `template` only records which preset it started
+// from, and is null when built from scratch.
 interface Draft {
   id?: string
-  template: StrategyTemplateKey
+  template: StrategyTemplateKey | null
   name: string
-  symbol: string
-  interval: string
-  params: Record<string, string | number>
+  rules: RuleEnvelope
+  symbols: string[]
+  intervals: string[]
   stopLossMethod: StopLossMethod
   stopLossValue: number
   takeProfitMethod: TakeProfitMethod
   takeProfitValue: number
   oneTradeAtATime: boolean
+  exitTimeoutBars: number | null
+  dailySignalCap: number | null
+  cooldownMinutes: number | null
 }
 
-function StrategyBuilder({
-  draft, templates, activeSymbols, onChange, onCancel, onSaved,
-}: {
+function emptyDraft(symbol: string): Draft {
+  return {
+    template: null,
+    name: '',
+    rules: { long: emptyGroup(), short: null },
+    symbols: [symbol],
+    intervals: ['15'],
+    stopLossMethod: 'percent',
+    stopLossValue: 1.0,
+    takeProfitMethod: 'rr',
+    takeProfitValue: 2.0,
+    oneTradeAtATime: true,
+    exitTimeoutBars: null,
+    dailySignalCap: null,
+    cooldownMinutes: null,
+  }
+}
+
+function draftFromStrategy(s: UserStrategy): Draft {
+  return {
+    id: s.id,
+    template: s.template,
+    name: s.name ?? '',
+    rules: s.rules,
+    symbols: s.symbols,
+    intervals: s.intervals,
+    stopLossMethod: s.stopLossMethod,
+    stopLossValue: s.stopLossValue,
+    takeProfitMethod: s.takeProfitMethod,
+    takeProfitValue: s.takeProfitValue,
+    oneTradeAtATime: s.oneTradeAtATime,
+    exitTimeoutBars: s.exitTimeoutBars,
+    dailySignalCap: s.dailySignalCap,
+    cooldownMinutes: s.cooldownMinutes,
+  }
+}
+interface StrategyEditorProps {
   draft: Draft
-  templates: StrategyTemplateSchemas
+  // 有报价在推的品种。未接入的品种在下拉里置灰并标注原因（spec 验收标准第 4 条）。
+  // Symbols with a live feed. Unfed ones grey out in the dropdown with the reason
+  // stated (spec acceptance criterion 4).
   activeSymbols: string[]
+  // 全部候选品种（含未接入的）：来自 coverage 端点，让用户看到"这个品种存在但没
+  // 接入"，而不是干脆看不到它。
+  // Every candidate symbol including unfed ones, from the coverage endpoint, so the
+  // user sees "this symbol exists but isn't fed" rather than not seeing it at all.
+  allSymbols: string[]
   onChange: (d: Draft) => void
   onCancel: () => void
   onSaved: (s: UserStrategy) => void
-}) {
+  onBacktestResult: (strategyId: string | null, result: StrategyBacktestResult) => void
+}
+
+function StrategyEditor({
+  draft, activeSymbols, allSymbols, onChange, onCancel, onSaved, onBacktestResult,
+}: StrategyEditorProps) {
   const { t } = useTranslation()
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [btDays, setBtDays] = useState(90)
-  const [btRisk, setBtRisk] = useState(1.0)
-  const [btCapital, setBtCapital] = useState(10000)
-  const [btMode, setBtMode] = useState<'compound' | 'flat'>('compound')
-  const [backtesting, setBacktesting] = useState(false)
-  const [backtestError, setBacktestError] = useState<string | null>(null)
-  const [result, setResult] = useState<StrategyBacktestResult | null>(null)
-  const [tradePage, setTradePage] = useState(0)
-  const TRADE_PAGE_SIZE = 20
-  // 逐单明细按新到旧展示；后端按回放顺序（旧到新）返回，这里单独倒一份供表格用，
-  // 图表标记仍然吃原始顺序（时间正序），互不影响。
-  // The trade table shows newest first; the backend returns replay order
-  // (oldest first). Reverse a separate copy for the table only — the chart's
-  // markers still consume the original ascending-time order.
-  const tradesDesc = result ? [...result.trades].reverse() : []
+  // 回测目标：策略可订阅多个品种/周期，但回测一次只跑一个组合。
+  // Backtest target: a strategy may subscribe to several symbols/intervals, but one
+  // run covers a single pair.
+  const [btSymbol, setBtSymbol] = useState(draft.symbols[0] ?? activeSymbols[0] ?? 'XAUUSD')
+  const [btInterval, setBtInterval] = useState(draft.intervals[0] ?? '15')
 
-  const schema = templates[draft.template]
+  const usage = ruleUsage(draft.rules)
+  // 规则引用的周期必须是订阅周期的子集，否则那一路指标永远取不到数据，后端创建时
+  // 会 400。在这里先说清楚，用户不必靠报错才知道。
+  // Intervals referenced by the rules must be a subset of the subscribed ones, or
+  // that indicator branch never has data and the backend 400s on create. Say it
+  // here so the user doesn't need the error to find out.
+  const unsubscribed = collectIntervals(draft.rules).filter((iv) => !draft.intervals.includes(iv))
+  const noSide = !draft.rules.long && !draft.rules.short
+  const canSave = !noSide && unsubscribed.length === 0 && draft.symbols.length > 0 && draft.intervals.length > 0
 
-  const switchTemplate = (template: StrategyTemplateKey) => {
-    onChange({ ...draft, template, params: defaultParams(templates[template]) })
-    setResult(null)
+  const toggleSymbol = (sym: string) => {
+    const has = draft.symbols.includes(sym)
+    if (!has && draft.symbols.length >= RULE_LIMITS.maxSymbols) return
+    // 最后一个品种不允许取消：策略必须至少盯一个品种，允许清空只会让保存必然 400。
+    // The last symbol can't be deselected: a strategy must watch at least one, and
+    // allowing an empty list would only guarantee a 400 on save.
+    if (has && draft.symbols.length === 1) return
+    onChange({ ...draft, symbols: has ? draft.symbols.filter((s) => s !== sym) : [...draft.symbols, sym] })
   }
 
-  const setParam = (key: string, value: string | number) => {
-    onChange({ ...draft, params: { ...draft.params, [key]: value } })
-  }
-
-  const runBacktest = async () => {
-    setBacktesting(true)
-    setBacktestError(null)
-    try {
-      const res = await strategyApi.backtest({
-        template: draft.template, symbol: draft.symbol, interval: draft.interval, params: draft.params,
-        stopLossMethod: draft.stopLossMethod, stopLossValue: draft.stopLossValue,
-        takeProfitMethod: draft.takeProfitMethod, takeProfitValue: draft.takeProfitValue,
-        oneTradeAtATime: draft.oneTradeAtATime,
-        days: btDays, riskPct: btRisk, capital: btCapital, mode: btMode,
-      })
-      setResult(res)
-      setTradePage(0)
-    } catch (e) {
-      setBacktestError(e instanceof Error ? localizeApiError(e.message) : 'Unknown error')
-    } finally {
-      setBacktesting(false)
-    }
+  const toggleInterval = (code: string) => {
+    const has = draft.intervals.includes(code)
+    if (!has && draft.intervals.length >= RULE_LIMITS.maxIntervals) return
+    if (has && draft.intervals.length === 1) return
+    onChange({ ...draft, intervals: has ? draft.intervals.filter((c) => c !== code) : [...draft.intervals, code] })
   }
 
   const save = async (enabled: boolean) => {
     setSaving(true)
     setSaveError(null)
     try {
+      const payload = {
+        name: draft.name.trim() || null,
+        rules: draft.rules,
+        symbols: draft.symbols,
+        intervals: draft.intervals,
+        stopLossMethod: draft.stopLossMethod,
+        stopLossValue: draft.stopLossValue,
+        takeProfitMethod: draft.takeProfitMethod,
+        takeProfitValue: draft.takeProfitValue,
+        oneTradeAtATime: draft.oneTradeAtATime,
+        exitTimeoutBars: draft.exitTimeoutBars,
+        dailySignalCap: draft.dailySignalCap,
+        cooldownMinutes: draft.cooldownMinutes,
+      }
       let saved: UserStrategy
       if (draft.id) {
-        saved = await strategyApi.update(draft.id, {
-          name: draft.name.trim() || null, params: draft.params,
-          stopLossMethod: draft.stopLossMethod, stopLossValue: draft.stopLossValue,
-          takeProfitMethod: draft.takeProfitMethod, takeProfitValue: draft.takeProfitValue,
-          oneTradeAtATime: draft.oneTradeAtATime,
-          enabled,
-        })
+        saved = await strategyApi.update(draft.id, { ...payload, enabled })
       } else {
-        saved = await strategyApi.create({
-          template: draft.template, name: draft.name.trim() || null, symbol: draft.symbol, interval: draft.interval,
-          params: draft.params,
-          stopLossMethod: draft.stopLossMethod, stopLossValue: draft.stopLossValue,
-          takeProfitMethod: draft.takeProfitMethod, takeProfitValue: draft.takeProfitValue,
-          oneTradeAtATime: draft.oneTradeAtATime,
-        })
+        saved = await strategyApi.create({ ...payload, template: draft.template })
         if (enabled) saved = await strategyApi.update(saved.id, { enabled: true })
       }
       onSaved(saved)
@@ -674,114 +221,171 @@ function StrategyBuilder({
     }
   }
 
-  const segBtn = (active: boolean) =>
+  const segBtn = (active: boolean, disabled = false) =>
     `rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-      active ? 'border-prism-500/50 bg-prism-600/20 text-prism-200' : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-100'
+      disabled
+        ? 'cursor-not-allowed border-white/5 bg-white/[0.02] text-slate-600'
+        : active
+          ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'
+          : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-100'
     }`
 
   return (
     <section className="glass mb-5 p-5">
-      {/* 基本信息:命名 + 模板选择 + 品种/周期 */}
+      {/* 基本信息：命名 + 品种（多选）+ 周期（多选）
+          Basics: name, symbols (multi), intervals (multi) */}
       <div>
         <h4 className="mb-3 text-sm font-semibold text-slate-300">{t('strategy.sectionBasics')}</h4>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <label className="flex flex-col gap-1.5 sm:col-span-2">
-            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.name')}</span>
-            <input
-              type="text"
-              className="input"
-              maxLength={60}
-              placeholder={t(TEMPLATE_LABEL_KEYS[draft.template])}
-              value={draft.name}
-              onChange={(e) => onChange({ ...draft, name: e.target.value })}
-            />
-          </label>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.name')}</span>
+          <input
+            type="text"
+            className="input"
+            maxLength={60}
+            placeholder={draft.template ? t(TEMPLATE_LABEL_KEYS[draft.template]) : t('strategy.nameplaceholderCustom')}
+            value={draft.name}
+            onChange={(e) => onChange({ ...draft, name: e.target.value })}
+          />
+        </label>
 
-          {/* 模板选择：随时可切换,切换会重置该模板的参数为默认值 */}
-          <div className="flex flex-col gap-1.5 sm:col-span-2">
-            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.template')}</span>
-            <Select
-              className="w-full"
-              value={draft.template}
-              options={TEMPLATE_KEYS.map((key) => ({ value: key, label: t(TEMPLATE_LABEL_KEYS[key]) }))}
-              onChange={(v) => switchTemplate(v as StrategyTemplateKey)}
-            />
-            <p className="text-xs leading-relaxed text-slate-500">{t(TEMPLATE_DESC_KEYS[draft.template])}</p>
-          </div>
-
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.symbol')}</span>
-            <Select
-              value={draft.symbol}
-              options={activeSymbols.map((s) => ({ value: s, label: displaySymbol(s) }))}
-              onChange={(v) => onChange({ ...draft, symbol: v })}
-            />
-          </label>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.interval')}</span>
-            <div className="flex flex-wrap gap-2">
-              {INTERVALS.map((iv) => (
-                <button key={iv.code} onClick={() => onChange({ ...draft, interval: iv.code })} className={segBtn(draft.interval === iv.code)}>
-                  {iv.label}
+        <div className="mt-4 flex flex-col gap-1.5">
+          <span className="text-[11px] uppercase tracking-wide text-slate-500">
+            {t('strategy.symbolsLabel', { used: draft.symbols.length, max: RULE_LIMITS.maxSymbols })}
+          </span>
+          <div className="flex flex-wrap gap-2">
+            {/* 未接入行情的品种置灰并标注原因（spec 验收标准第 4 条）：此前用户能选
+                中它，然后只得到一个没有解释的 insufficientData。
+                Symbols without a live feed grey out with the reason stated (spec
+                acceptance criterion 4): they used to be selectable, yielding only an
+                unexplained insufficientData later. */}
+            {allSymbols.map((sym) => {
+              const fed = activeSymbols.includes(sym)
+              const on = draft.symbols.includes(sym)
+              return (
+                <button
+                  key={sym}
+                  type="button"
+                  disabled={!fed}
+                  title={fed ? undefined : t('strategy.symbolNotFed')}
+                  aria-pressed={on}
+                  onClick={() => toggleSymbol(sym)}
+                  className={segBtn(on, !fed)}
+                >
+                  {displaySymbol(sym)}
+                  {!fed && <span className="ml-1 text-[10px]">· {t('strategy.symbolNotFedShort')}</span>}
                 </button>
-              ))}
-            </div>
-          </label>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-col gap-1.5">
+          <span className="text-[11px] uppercase tracking-wide text-slate-500">
+            {t('strategy.intervalsLabel', { used: draft.intervals.length, max: RULE_LIMITS.maxIntervals })}
+          </span>
+          <div className="flex flex-wrap gap-2">
+            {INTERVALS.map((iv) => (
+              <button
+                key={iv.code}
+                type="button"
+                aria-pressed={draft.intervals.includes(iv.code)}
+                onClick={() => toggleInterval(iv.code)}
+                className={segBtn(draft.intervals.includes(iv.code))}
+              >
+                {iv.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* 模板专属参数：完全按后端模板 schema 动态渲染,不写死字段列表 */}
+      {/* 入场规则：多空两侧各一棵树，任一侧可关闭
+          Entry rules: one tree per side, either side can be turned off */}
       <div className="mt-5 border-t border-white/10 pt-4">
-        <h4 className="mb-3 text-sm font-semibold text-slate-300">{t('strategy.sectionTemplateParams')}</h4>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {Object.entries(schema).map(([key, spec]) => (
-            spec.type === 'enum' ? (
-              <div key={key} className="flex flex-col gap-1.5">
-                <span className="text-[11px] uppercase tracking-wide text-slate-500">{t(PARAM_LABEL_KEYS[key] ?? key)}</span>
-                <div className="flex flex-wrap gap-2">
-                  {spec.options.map((opt) => (
-                    <button key={opt} onClick={() => setParam(key, opt)} className={segBtn(draft.params[key] === opt)}>
-                      {t(ENUM_OPTION_LABEL_KEYS[key]?.[opt] ?? opt)}
-                    </button>
-                  ))}
-                </div>
+        <div className="flex flex-wrap items-baseline gap-3">
+          <h4 className="text-sm font-semibold text-slate-300">{t('strategy.sectionRules')}</h4>
+          <span className="text-[11px] text-slate-500">
+            {t('strategy.ruleUsageConditions', { used: usage.conditions, max: RULE_LIMITS.maxConditions })}
+            {' · '}
+            {t('strategy.ruleUsageIndicators', { used: usage.indicatorInstances, max: RULE_LIMITS.maxIndicatorInstances })}
+          </span>
+        </div>
+
+        {(['long', 'short'] as const).map((side) => (
+          <div key={side} className="mt-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <h5 className="text-xs font-semibold text-slate-200">
+                {side === 'long' ? t('strategy.rulesLong') : t('strategy.rulesShort')}
+              </h5>
+              <label className="flex items-center gap-2 text-xs text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={draft.rules[side] != null}
+                  onChange={(e) =>
+                    onChange({ ...draft, rules: { ...draft.rules, [side]: e.target.checked ? emptyGroup() : null } })
+                  }
+                  className="h-3.5 w-3.5 rounded border-white/20 bg-white/5 accent-prism-500"
+                />
+                {t('strategy.rulesSideEnable')}
+              </label>
+            </div>
+            {draft.rules[side] ? (
+              <div className="mt-2">
+                <RuleGroupEditor
+                  group={draft.rules[side]!}
+                  onChange={(next) => onChange({ ...draft, rules: { ...draft.rules, [side]: next } })}
+                  depth={1}
+                  usage={usage}
+                  availableIntervals={draft.intervals}
+                />
               </div>
             ) : (
-              <NumberField
-                key={key}
-                label={t(PARAM_LABEL_KEYS[key] ?? key)}
-                value={typeof draft.params[key] === 'number' ? draft.params[key] as number : spec.default as number}
-                min={spec.min}
-                max={spec.max}
-                isFloat={spec.type === 'float'}
-                onChange={(v) => setParam(key, v)}
-              />
-            )
-          ))}
-        </div>
+              <p className="mt-1.5 text-xs text-slate-500">{t('strategy.rulesSideDisabled')}</p>
+            )}
+          </div>
+        ))}
+
+        {noSide && <p className="mt-3 text-xs text-down" role="alert">{t('strategy.rulesNeedOneSide')}</p>}
+        {unsubscribed.length > 0 && (
+          <p className="mt-3 rounded-lg border border-amber-400/20 bg-amber-400/5 p-3 text-xs text-amber-200" role="alert">
+            {t('strategy.rulesUnsubscribedInterval', { intervals: unsubscribed.join(', ') })}
+          </p>
+        )}
       </div>
 
-      {/* 风险管理:止损/止盈方式各自成一张卡片,方式选择器与对应数值紧挨着,
-          不再跟模板参数混排在同一个网格里 */}
+      {/* 风险管理：止损 / 止盈各一张卡，方式与数值紧挨着
+          Risk management: one card each for SL and TP, method next to its value */}
       <div className="mt-5 border-t border-white/10 pt-4">
         <h4 className="mb-3 text-sm font-semibold text-slate-300">{t('strategy.sectionRisk')}</h4>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
             <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.stopLossMethod')}</span>
             <div className="mt-1.5 flex flex-wrap gap-2">
-              {(['percent', 'steps'] as const).map((m) => (
-                <button key={m} onClick={() => onChange({ ...draft, stopLossMethod: m })} className={segBtn(draft.stopLossMethod === m)}>
-                  {t(m === 'percent' ? 'strategy.methodPercent' : 'strategy.methodSteps')}
+              {(['percent', 'steps', 'atr'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  aria-pressed={draft.stopLossMethod === m}
+                  onClick={() => onChange({ ...draft, stopLossMethod: m })}
+                  className={segBtn(draft.stopLossMethod === m)}
+                >
+                  {t(m === 'percent' ? 'strategy.methodPercent' : m === 'steps' ? 'strategy.methodSteps' : 'strategy.methodAtr')}
                 </button>
               ))}
             </div>
             <div className="mt-3">
               <NumberField
-                label={draft.stopLossMethod === 'percent' ? t('strategy.stopLossPct') : t('strategy.stopLossSteps')}
+                label={
+                  draft.stopLossMethod === 'percent'
+                    ? t('strategy.stopLossPct')
+                    : draft.stopLossMethod === 'steps'
+                      ? t('strategy.stopLossSteps')
+                      : t('strategy.stopLossAtr')
+                }
                 value={draft.stopLossValue}
-                min={draft.stopLossMethod === 'percent' ? 0.1 : 1}
-                max={draft.stopLossMethod === 'percent' ? 10 : 1000000}
-                isFloat={draft.stopLossMethod === 'percent'}
+                min={draft.stopLossMethod === 'steps' ? 1 : 0.1}
+                max={draft.stopLossMethod === 'steps' ? 1000000 : 10}
+                isFloat={draft.stopLossMethod !== 'steps'}
                 onChange={(v) => onChange({ ...draft, stopLossValue: v })}
               />
             </div>
@@ -789,18 +393,40 @@ function StrategyBuilder({
           <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
             <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.takeProfitMethod')}</span>
             <div className="mt-1.5 flex flex-wrap gap-2">
-              {(['rr', 'percent', 'steps'] as const).map((m) => (
-                <button key={m} onClick={() => onChange({ ...draft, takeProfitMethod: m })} className={segBtn(draft.takeProfitMethod === m)}>
-                  {t(m === 'rr' ? 'strategy.methodRR' : m === 'percent' ? 'strategy.methodPercent' : 'strategy.methodSteps')}
+              {(['rr', 'percent', 'steps', 'atr'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  aria-pressed={draft.takeProfitMethod === m}
+                  onClick={() => onChange({ ...draft, takeProfitMethod: m })}
+                  className={segBtn(draft.takeProfitMethod === m)}
+                >
+                  {t(
+                    m === 'rr'
+                      ? 'strategy.methodRR'
+                      : m === 'percent'
+                        ? 'strategy.methodPercent'
+                        : m === 'steps'
+                          ? 'strategy.methodSteps'
+                          : 'strategy.methodAtr'
+                  )}
                 </button>
               ))}
             </div>
             <div className="mt-3">
               <NumberField
-                label={draft.takeProfitMethod === 'rr' ? t('strategy.takeProfitR') : draft.takeProfitMethod === 'percent' ? t('strategy.takeProfitPct') : t('strategy.takeProfitSteps')}
+                label={
+                  draft.takeProfitMethod === 'rr'
+                    ? t('strategy.takeProfitR')
+                    : draft.takeProfitMethod === 'percent'
+                      ? t('strategy.takeProfitPct')
+                      : draft.takeProfitMethod === 'steps'
+                        ? t('strategy.takeProfitSteps')
+                        : t('strategy.takeProfitAtr')
+                }
                 value={draft.takeProfitValue}
-                min={draft.takeProfitMethod === 'rr' ? 0.5 : draft.takeProfitMethod === 'percent' ? 0.1 : 1}
-                max={draft.takeProfitMethod === 'rr' ? 10 : draft.takeProfitMethod === 'percent' ? 50 : 1000000}
+                min={draft.takeProfitMethod === 'steps' ? 1 : draft.takeProfitMethod === 'rr' ? 0.5 : 0.1}
+                max={draft.takeProfitMethod === 'steps' ? 1000000 : draft.takeProfitMethod === 'percent' ? 50 : 10}
                 isFloat={draft.takeProfitMethod !== 'steps'}
                 onChange={(v) => onChange({ ...draft, takeProfitValue: v })}
               />
@@ -811,10 +437,20 @@ function StrategyBuilder({
         <div className="mt-4 flex flex-col gap-1.5">
           <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.oneTradeAtATime')}</span>
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => onChange({ ...draft, oneTradeAtATime: true })} className={segBtn(draft.oneTradeAtATime)}>
+            <button
+              type="button"
+              aria-pressed={draft.oneTradeAtATime}
+              onClick={() => onChange({ ...draft, oneTradeAtATime: true })}
+              className={segBtn(draft.oneTradeAtATime)}
+            >
               {t('strategy.oneTradeAtATimeOn')}
             </button>
-            <button onClick={() => onChange({ ...draft, oneTradeAtATime: false })} className={segBtn(!draft.oneTradeAtATime)}>
+            <button
+              type="button"
+              aria-pressed={!draft.oneTradeAtATime}
+              onClick={() => onChange({ ...draft, oneTradeAtATime: false })}
+              className={segBtn(!draft.oneTradeAtATime)}
+            >
               {t('strategy.oneTradeAtATimeOff')}
             </button>
           </div>
@@ -822,213 +458,77 @@ function StrategyBuilder({
             {draft.oneTradeAtATime ? t('strategy.oneTradeAtATimeOnHint') : t('strategy.oneTradeAtATimeOffHint')}
           </p>
         </div>
-      </div>
 
-      {/* 回测设置 */}
-      <div className="mt-5 border-t border-white/10 pt-4">
-        <h4 className="mb-3 text-sm font-semibold text-slate-300">{t('strategy.sectionBacktest')}</h4>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('simulator.range')}</span>
-            <div className="flex flex-wrap gap-2">
-              {[30, 90, 180, 365].map((d) => (
-                <button key={d} onClick={() => setBtDays(d)} className={segBtn(btDays === d)}>{d}</button>
-              ))}
-            </div>
-          </div>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('simulator.risk')} · {btRisk.toFixed(1)}%</span>
-            <input type="range" min={0.1} max={3} step={0.1} value={btRisk} onChange={(e) => setBtRisk(parseFloat(e.target.value))} className="w-full accent-prism-500" />
-          </label>
-          <NumberField label={t('simulator.capital')} value={btCapital} min={1} max={1e9} isFloat={false} onChange={setBtCapital} />
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('simulator.mode')}</span>
-            <div className="flex gap-2">
-              <button onClick={() => setBtMode('compound')} className={segBtn(btMode === 'compound')}>{t('simulator.modeCompound')}</button>
-              <button onClick={() => setBtMode('flat')} className={segBtn(btMode === 'flat')}>{t('simulator.modeFlat')}</button>
-            </div>
-          </div>
+        {/* 超时平仓 / 每日上限 / 冷却：三个可空设定，0 视为不启用（写 null）
+            Timeout exit / daily cap / cooldown: three nullable settings, where 0
+            means "off" and is sent as null */}
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <NumberField
+            label={t('strategy.exitTimeoutBars')}
+            value={draft.exitTimeoutBars ?? 0}
+            min={0}
+            max={1000}
+            isFloat={false}
+            onChange={(v) => onChange({ ...draft, exitTimeoutBars: v > 0 ? v : null })}
+          />
+          <NumberField
+            label={t('strategy.dailySignalCap')}
+            value={draft.dailySignalCap ?? 0}
+            min={0}
+            max={100}
+            isFloat={false}
+            onChange={(v) => onChange({ ...draft, dailySignalCap: v > 0 ? v : null })}
+          />
+          <NumberField
+            label={t('strategy.cooldownMinutes')}
+            value={draft.cooldownMinutes ?? 0}
+            min={0}
+            max={1440}
+            isFloat={false}
+            onChange={(v) => onChange({ ...draft, cooldownMinutes: v > 0 ? v : null })}
+          />
         </div>
-        <button onClick={runBacktest} disabled={backtesting} className="btn-primary mt-4 w-full px-5 py-2 text-sm disabled:opacity-40 sm:w-auto">
-          {backtesting ? t('strategy.backtesting') : t('strategy.runBacktest')}
-        </button>
-
-        {backtestError && <p className="mt-3 text-sm text-down">{backtestError}</p>}
-
-        {result?.insufficientData && (
-          <p className="mt-3 rounded-lg border border-amber-400/20 bg-amber-400/5 p-3 text-xs text-amber-200">{t('strategy.insufficientData')}</p>
-        )}
-
-        {result && !result.insufficientData && result.openPositions.length > 0 && (
-          <div className="mt-3 rounded-lg border border-amber-400/20 bg-amber-400/5 p-3 text-xs text-amber-200">
-            <p>{t('strategy.openPositionNotice', { count: result.openPositions.length })}</p>
-            {/* 每一笔都列出来,而不是只挑一条"举例"——关掉一次一单时同一时间
-                可以有好几笔各自独立还没等到结果,只报一条会让用户误以为后面
-                只是偶然多出一笔。K 线图上用琥珀色箭头标出同样这些位置。
-                Every one is listed, not just a single "example" — with one-
-                trade-at-a-time off, several can be independently still open
-                at once; reporting only one would make it look like just a
-                single stray signal. The chart above marks these same
-                positions with amber arrows. */}
-            <div className="mt-2 max-h-40 space-y-1.5 overflow-y-auto pr-1">
-              {result.openPositions.map((p, i) => (
-                <div key={i} className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-amber-100/90">
-                  <span className={`tag ${p.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
-                    {p.side === 'BUY' ? t('common.buy') : t('common.sell')}
-                  </span>
-                  <span>{t('signals.entry')} {p.entryPrice}</span>
-                  <span>{t('signals.stopLoss')} {p.stopLoss}</span>
-                  <span>{t('signals.takeProfit')} {p.takeProfit}</span>
-                  <span>{fmtDate(new Date(p.entryTime * 1000).toISOString())}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {result && !result.insufficientData && (
-          <div className="mt-5 border-t border-white/10 pt-4">
-            <h4 className="mb-3 text-sm font-semibold text-slate-200">{t('strategy.resultsTitle')}</h4>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-slate-500">{t('simulator.finalEquity')}</div>
-                <div className="num mt-1 text-lg font-bold text-slate-100">${fmtMoney(result.summary.finalEquity)}</div>
-              </div>
-              <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-slate-500">{t('simulator.returnPct')}</div>
-                <div className={`num mt-1 text-lg font-bold ${result.summary.returnPct >= 0 ? 'text-up' : 'text-down'}`}>
-                  {result.summary.returnPct >= 0 ? '+' : ''}{result.summary.returnPct.toFixed(2)}%
-                </div>
-              </div>
-              <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-slate-500">{t('simulator.maxDrawdown')}</div>
-                <div className="num mt-1 text-lg font-bold text-down">-{result.summary.maxDrawdownPct.toFixed(2)}%</div>
-              </div>
-              <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-slate-500">{t('simulator.maxLossStreak')}</div>
-                <div className="num mt-1 text-lg font-bold text-down">{result.summary.maxLossStreak}</div>
-              </div>
-              <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-slate-500">{t('simulator.winRate')}</div>
-                <div className="num mt-1 text-lg font-bold text-slate-100">
-                  {result.summary.winRate == null ? '-' : `${Math.round(result.summary.winRate * 100)}%`}
-                  <span className="ml-1.5 text-xs font-normal text-slate-500">{result.summary.wins}/{result.summary.wins + result.summary.losses}</span>
-                </div>
-              </div>
-              <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-slate-500">{t('simulator.avgRr')}</div>
-                <div className="num mt-1 text-lg font-bold text-slate-100">{result.summary.avgRr == null ? '-' : `${result.summary.avgRr.toFixed(2)}R`}</div>
-              </div>
-            </div>
-            {/* K 线图 + 每笔交易的入场/出场标记与连线——"这笔单在当时的行情里
-                长什么样",而不只是一条抽象的净值曲线。
-                Candlestick chart + each trade's entry/exit markers and
-                connecting line — what the trade actually looked like against
-                real price action, not just an abstract equity curve. */}
-            <div className="mt-5 border-t border-white/10 pt-4">
-              <h4 className="text-sm font-semibold text-slate-200">{t('strategy.chartTitle')}</h4>
-              <p className="mt-1 text-xs text-slate-500">{t('strategy.chartHint', { n: result.trades.length })}</p>
-              <div className="mt-3">
-                <BacktestChart
-                  bars={result.bars}
-                  trades={result.trades}
-                  openPositions={result.openPositions}
-                  template={(result.params.template as StrategyTemplateKey | undefined) ?? draft.template}
-                  params={(result.params.params as Record<string, string | number> | undefined) ?? draft.params}
-                />
-              </div>
-            </div>
-
-            <div className="mt-5 border-t border-white/10 pt-4">
-              <h4 className="text-sm font-semibold text-slate-200">{t('simulator.equityCurve')}</h4>
-              <div className="mt-3">
-                <EquityCurve points={result.points} capital={btCapital} />
-              </div>
-            </div>
-
-            {result.trades.length > 0 && (
-              <div className="mt-5 border-t border-white/10 pt-4">
-                <h4 className="text-sm font-semibold text-slate-200">{t('simulator.trades')}</h4>
-                <div className="mt-3 overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-slate-500">
-                        <th className="px-3 py-2 font-medium">{t('orders.colTime')}</th>
-                        <th className="px-3 py-2 font-medium">{t('orders.colSide')}</th>
-                        <th className="px-3 py-2 font-medium">{t('simulator.result')}</th>
-                        <th className="px-3 py-2 text-right font-medium">{t('simulator.tradeRr')}</th>
-                        <th className="px-3 py-2 text-right font-medium">{t('simulator.tradePnl')}</th>
-                        <th className="px-3 py-2 text-right font-medium">{t('simulator.equityAfter')}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {/* 新到旧排列：最近的一笔交易最先看到，与订单页/成交明细的既有约定一致
-                          Newest first, consistent with the orders page's existing convention */}
-                      {tradesDesc.slice(tradePage * TRADE_PAGE_SIZE, tradePage * TRADE_PAGE_SIZE + TRADE_PAGE_SIZE).map((tr) => (
-                        <tr key={tr.id} className="border-b border-white/5">
-                          <td className="whitespace-nowrap px-3 py-2 text-slate-400">{fmtDate(tr.createdAt)}</td>
-                          <td className="px-3 py-2">
-                            <span className={`tag ${tr.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
-                              {tr.side === 'BUY' ? t('common.buy') : t('common.sell')}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2">
-                            <span className={`tag ${tr.result === 'HIT_TP' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
-                              {t(`winrate.${tr.result === 'HIT_TP' ? 'hitTp' : 'hitSl'}`)}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2 text-right font-mono text-slate-300">{tr.rr.toFixed(2)}R</td>
-                          <td className={`px-3 py-2 text-right font-mono font-semibold ${tr.pnlPct >= 0 ? 'text-up' : 'text-down'}`}>
-                            {tr.pnlPct >= 0 ? '+' : ''}{tr.pnlPct.toFixed(2)}%
-                          </td>
-                          <td className="px-3 py-2 text-right font-mono text-slate-200">${fmtMoney(tr.equityAfter)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {result.trades.length > TRADE_PAGE_SIZE && (
-                  <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
-                    <span>
-                      {t('orders.pageInfo', {
-                        page: tradePage + 1,
-                        totalPages: Math.ceil(result.trades.length / TRADE_PAGE_SIZE),
-                        total: result.trades.length,
-                      })}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setTradePage((p) => Math.max(0, p - 1))}
-                        disabled={tradePage === 0}
-                        className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        {t('common.prevPage')}
-                      </button>
-                      <button
-                        onClick={() => setTradePage((p) => Math.min(Math.ceil(result.trades.length / TRADE_PAGE_SIZE) - 1, p + 1))}
-                        disabled={(tradePage + 1) * TRADE_PAGE_SIZE >= result.trades.length}
-                        className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        {t('common.nextPage')}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+        <p className="mt-1.5 text-xs leading-relaxed text-slate-500">{t('strategy.optionalZeroHint')}</p>
       </div>
 
-      {saveError && <p className="mt-3 text-sm text-down">{saveError}</p>}
+      {/* 回测 / backtest */}
+      <div className="mt-5 border-t border-white/10 pt-4">
+        <BacktestPanel
+          rules={draft.rules}
+          symbol={btSymbol}
+          interval={btInterval}
+          symbolOptions={draft.symbols}
+          intervalOptions={draft.intervals}
+          onTargetChange={(sym, itv) => { setBtSymbol(sym); setBtInterval(itv) }}
+          stopLossMethod={draft.stopLossMethod}
+          stopLossValue={draft.stopLossValue}
+          takeProfitMethod={draft.takeProfitMethod}
+          takeProfitValue={draft.takeProfitValue}
+          oneTradeAtATime={draft.oneTradeAtATime}
+          exitTimeoutBars={draft.exitTimeoutBars}
+          onResult={(res) => onBacktestResult(draft.id ?? null, res)}
+        />
+      </div>
+
+      {saveError && <p className="mt-3 text-sm text-down" role="alert">{saveError}</p>}
       <div className="mt-5 flex flex-wrap gap-3 border-t border-white/10 pt-4">
-        <button onClick={() => save(true)} disabled={saving} className="btn-primary px-5 py-2 text-sm disabled:opacity-40">
+        <button type="button" onClick={() => save(true)} disabled={saving || !canSave} className="btn-primary px-5 py-2 text-sm disabled:opacity-40">
           {t('strategy.saveAndEnable')}
         </button>
-        <button onClick={() => save(false)} disabled={saving} className="rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-slate-300 transition hover:text-white disabled:opacity-40">
+        <button
+          type="button"
+          onClick={() => save(false)}
+          disabled={saving || !canSave}
+          className="rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-slate-300 transition hover:text-white disabled:opacity-40"
+        >
           {t('strategy.saveOnly')}
         </button>
-        <button onClick={onCancel} disabled={saving} className="ml-auto rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-slate-400 transition hover:text-white">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          className="ml-auto rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-slate-400 transition hover:text-white"
+        >
           {t('common.cancel')}
         </button>
       </div>
@@ -1043,19 +543,31 @@ export default function StrategiesPage() {
   const quotesByAccount = useQuotes()
   const { toast, placeManualOrder } = useOrderPlacement()
 
-  const [templates, setTemplates] = useState<StrategyTemplateSchemas | null>(null)
   const [strategies, setStrategies] = useState<UserStrategy[]>([])
   const [signals, setSignals] = useState<StrategySignal[]>([])
+  // 每个策略一份实盘绩效。按 id 存 map 而不是塞进 strategies：绩效来自另一个端点，
+  // 混进策略对象会让"策略没变但绩效变了"也触发整列表重渲染。
+  // One live-performance record per strategy, keyed by id rather than merged into
+  // `strategies`: it comes from a separate endpoint, and merging would re-render
+  // the whole list whenever only a win rate moved.
+  const [performance, setPerformance] = useState<Record<string, StrategyPerformance>>({})
+  // 本次会话内每个策略最近一次回测的胜率。key 用 strategy id；新建（未保存）策略
+  // 的回测结果无处归属，用 NEW_DRAFT_KEY 兜着，保存后不迁移——它对比的是"这一版
+  // 规则"，保存后的策略应该重新跑一次才有意义。
+  // Win rate of the latest backtest per strategy in this session, keyed by id. A
+  // run on an unsaved draft has no id, so it lands under NEW_DRAFT_KEY and is not
+  // migrated on save: it reflects that draft's rules, and a saved strategy
+  // deserves a fresh run.
+  const [backtestWinRates, setBacktestWinRates] = useState<Record<string, number | null>>({})
+  const [allSymbols, setAllSymbols] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<UserStrategy | null>(null)
   const [orderTarget, setOrderTarget] = useState<StrategySignal | null>(null)
   const [clearingSignals, setClearingSignals] = useState(false)
   const [confirmClearSignals, setConfirmClearSignals] = useState(false)
-  // 每秒走一次的时钟，用于让策略信号到期时实时置灰、隐藏一键下单按钮
-  // （与平台信号一样固定 10 分钟有效期）。/ 1s tick so strategy signals grey
-  // out and lose the one-click button live on expiry (fixed 10-min lifespan,
-  // same as platform signals).
+  // 每秒走一次的时钟，驱动信号 TTL 到期时的实时置灰。
+  // A 1s clock driving live grey-out when a signal's TTL expires.
   const [now, setNow] = useState(() => Date.now())
 
   useBackToClose(draft != null, () => setDraft(null))
@@ -1068,10 +580,19 @@ export default function StrategiesPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [tRes, sRes, sigRes] = await Promise.all([strategyApi.templates(), strategyApi.list(), strategyApi.signals(20)])
-      setTemplates(tRes.templates)
+      // coverage 不传参：拿"当前有报价的全部品种"，用于把未接入品种也列出来并置灰。
+      // 三个请求互不依赖，并行发出。
+      // coverage with no args returns every currently quoted symbol, so unfed ones
+      // can still be listed (greyed out). The three requests are independent.
+      const [sRes, sigRes, covRes] = await Promise.all([
+        strategyApi.list(),
+        strategyApi.signals(20),
+        strategyApi.coverage(),
+      ])
       setStrategies(sRes.strategies)
       setSignals(sigRes.signals)
+      const syms = Array.from(new Set(covRes.coverage.map((c) => c.symbol)))
+      setAllSymbols(syms.length > 0 ? syms : covRes.activeSymbols)
     } finally {
       setLoading(false)
     }
@@ -1080,17 +601,37 @@ export default function StrategiesPage() {
   useEffect(() => { document.title = t('strategy.title') }, [t])
   useEffect(() => { load() }, [load])
 
-  // 每秒推进一次本地时钟，驱动信号到期的实时置灰 / advance a local clock each
-  // second to drive live expiry greying-out
+  // 绩效逐个策略拉取（端点是 /{id}/performance，没有批量形态）。失败的那个静默跳过，
+  // 不能因为一个策略的绩效 500 就让整页没有绩效。
+  // Performance is fetched per strategy (the endpoint is /{id}/performance, with no
+  // batch form). A failing one is skipped silently: one strategy's 500 must not
+  // strip performance from the whole page.
+  useEffect(() => {
+    if (strategies.length === 0) return
+    let cancelled = false
+    Promise.all(
+      strategies.map((s) => strategyApi.performance(s.id).then((p) => p).catch(() => null)),
+    ).then((rows) => {
+      if (cancelled) return
+      const next: Record<string, StrategyPerformance> = {}
+      rows.forEach((p) => { if (p) next[p.strategyId] = p })
+      setPerformance(next)
+    })
+    return () => { cancelled = true }
+  }, [strategies])
+
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [])
 
-  // 我的策略信号轮询：与胜率卡/纪律分卡同一节奏(45 秒 + 切回页面立即刷)
-  // Poll my strategy signals: same 45s cadence as the win-rate/discipline cards
+  // 我的策略信号轮询：与胜率卡/纪律分卡同一节奏（45 秒 + 切回页面立即刷）。
+  // Poll my strategy signals on the same 45s cadence as the win-rate/discipline
+  // cards, plus an immediate refresh when the tab regains focus.
   useEffect(() => {
-    const refresh = () => { if (!document.hidden) strategyApi.signals(20).then((r) => setSignals(r.signals)).catch(() => {}) }
+    const refresh = () => {
+      if (!document.hidden) strategyApi.signals(20).then((r) => setSignals(r.signals)).catch(() => {})
+    }
     const timer = window.setInterval(refresh, 45_000)
     document.addEventListener('visibilitychange', refresh)
     window.addEventListener('focus', refresh)
@@ -1101,25 +642,8 @@ export default function StrategiesPage() {
     }
   }, [])
 
-  const openNewDraft = (template: StrategyTemplateKey) => {
-    if (!templates) return
-    setDraft({
-      template, name: '', symbol: activeSymbols[0] ?? 'XAUUSD', interval: '15',
-      params: defaultParams(templates[template]),
-      stopLossMethod: 'percent', stopLossValue: 1.0,
-      takeProfitMethod: 'rr', takeProfitValue: 2.0,
-      oneTradeAtATime: true,
-    })
-  }
-
-  const openEditDraft = (s: UserStrategy) => {
-    setDraft({
-      id: s.id, template: s.template, name: s.name ?? '', symbol: s.symbol, interval: s.interval, params: s.params,
-      stopLossMethod: s.stopLossMethod, stopLossValue: s.stopLossValue,
-      takeProfitMethod: s.takeProfitMethod, takeProfitValue: s.takeProfitValue,
-      oneTradeAtATime: s.oneTradeAtATime,
-    })
-  }
+  const openNewDraft = () => setDraft(emptyDraft(activeSymbols[0] ?? allSymbols[0] ?? 'XAUUSD'))
+  const openEditDraft = (s: UserStrategy) => setDraft(draftFromStrategy(s))
 
   const onSaved = (s: UserStrategy) => {
     setStrategies((prev) => {
@@ -1130,6 +654,15 @@ export default function StrategiesPage() {
       return next
     })
     setDraft(null)
+  }
+
+  // 回测结果只取胜率一项存下来供卡片对比。insufficientData 时 summary 缺席，
+  // 必须先判这一项，否则读到 undefined。
+  // Only the win rate is kept for the card comparison. With insufficientData the
+  // summary is absent, so that flag has to be checked first or this reads undefined.
+  const onBacktestResult = (strategyId: string | null, result: StrategyBacktestResult) => {
+    const rate = result.insufficientData ? null : result.summary.winRate
+    setBacktestWinRates((prev) => ({ ...prev, [strategyId ?? NEW_DRAFT_KEY]: rate }))
   }
 
   const toggleEnabled = async (s: UserStrategy) => {
@@ -1160,7 +693,10 @@ export default function StrategiesPage() {
     }
   }
 
-  const handleOrderConfirm = async (volume: number, mt5Login: string | null, stopLoss: number | null, takeProfit: number | null, clientOrderId: string) => {
+  const handleOrderConfirm = async (
+    volume: number, mt5Login: string | null, stopLoss: number | null,
+    takeProfit: number | null, clientOrderId: string,
+  ) => {
     if (!orderTarget) return
     await placeManualOrder(orderTarget.symbol, orderTarget.side, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
   }
@@ -1192,7 +728,11 @@ export default function StrategiesPage() {
         <div className="flex items-center justify-between">
           <h3 className="font-display text-lg font-semibold text-slate-100">{t('strategy.myStrategies')}</h3>
           {isPro && !draft && (
-            <button onClick={() => openNewDraft(TEMPLATE_KEYS[0])} className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:border-prism-400/50 hover:text-prism-200">
+            <button
+              type="button"
+              onClick={openNewDraft}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:border-prism-400/50 hover:text-prism-200"
+            >
               {t('strategy.newStrategy')}
             </button>
           )}
@@ -1203,37 +743,31 @@ export default function StrategiesPage() {
         ) : (
           <div className="mt-4 flex flex-col gap-2">
             {strategies.map((s) => (
-              <div key={s.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.02] p-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-slate-100">{s.name?.trim() || t(TEMPLATE_LABEL_KEYS[s.template])}</span>
-                    {s.name?.trim() && <span className="text-xs text-slate-500">{t(TEMPLATE_LABEL_KEYS[s.template])}</span>}
-                    <span className="tag bg-white/5 text-slate-400">{displaySymbol(s.symbol)}</span>
-                    <span className="tag bg-white/5 text-slate-400">{INTERVALS.find((iv) => iv.code === s.interval)?.label ?? s.interval}</span>
-                    <span className={`tag ${s.enabled ? 'bg-up/15 text-up' : 'bg-white/5 text-slate-500'}`}>
-                      {s.enabled ? t('strategy.enabled') : t('strategy.disabled')}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={() => openEditDraft(s)} className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white">
-                    {t('strategy.editStrategy')}
-                  </button>
-                  <button onClick={() => toggleEnabled(s)} className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white">
-                    {s.enabled ? t('strategy.disable') : t('strategy.enable')}
-                  </button>
-                  <button onClick={() => setDeleteTarget(s)} className="rounded-lg border border-down/30 bg-down/5 px-3 py-1.5 text-xs text-down transition hover:bg-down/10">
-                    {t('strategy.delete')}
-                  </button>
-                </div>
-              </div>
+              <StrategyCard
+                key={s.id}
+                strategy={s}
+                performance={performance[s.id] ?? null}
+                backtestWinRate={backtestWinRates[s.id] ?? null}
+                fallbackName={s.template ? t(TEMPLATE_LABEL_KEYS[s.template]) : t('strategy.nameplaceholderCustom')}
+                onEdit={() => openEditDraft(s)}
+                onToggle={() => toggleEnabled(s)}
+                onDelete={() => setDeleteTarget(s)}
+              />
             ))}
           </div>
         )}
       </section>
 
-      {draft && templates && (
-        <StrategyBuilder draft={draft} templates={templates} activeSymbols={activeSymbols} onChange={setDraft} onCancel={() => setDraft(null)} onSaved={onSaved} />
+      {draft && (
+        <StrategyEditor
+          draft={draft}
+          activeSymbols={activeSymbols}
+          allSymbols={allSymbols.length > 0 ? allSymbols : activeSymbols}
+          onChange={setDraft}
+          onCancel={() => setDraft(null)}
+          onSaved={onSaved}
+          onBacktestResult={onBacktestResult}
+        />
       )}
 
       {/* 我的策略信号 / my strategy signals */}
@@ -1241,41 +775,16 @@ export default function StrategiesPage() {
         <div className="flex items-center justify-between">
           <h3 className="font-display text-lg font-semibold text-slate-100">{t('strategy.mySignals')}</h3>
           {signals.length > 0 && (
-            <button onClick={() => setConfirmClearSignals(true)} className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-400 transition hover:border-down/30 hover:text-down">
+            <button
+              type="button"
+              onClick={() => setConfirmClearSignals(true)}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-400 transition hover:border-down/30 hover:text-down"
+            >
               {t('strategy.clearSignals')}
             </button>
           )}
         </div>
-        {signals.length === 0 ? (
-          <div className="mt-4 py-6 text-center text-sm text-slate-500">{t('strategy.noSignals')}</div>
-        ) : (
-          <div className="mt-4 flex flex-col gap-2">
-            {signals.map((sig) => {
-              const createdMs = new Date(sig.createdAt).getTime()
-              const expired = Number.isFinite(createdMs) && now - createdMs >= SIGNAL_TTL_MS
-              return (
-                <div key={sig.id} className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.02] p-3 ${expired ? 'opacity-50' : ''}`}>
-                  <div className="flex items-center gap-2">
-                    <span className={`tag ${sig.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
-                      {sig.side === 'BUY' ? t('common.buy') : t('common.sell')}
-                    </span>
-                    <span className="font-mono text-sm text-slate-100">{displaySymbol(sig.symbol)}</span>
-                    <span className="text-xs text-slate-500">{t('strategy.signalTriggeredAt')} {fmtTime(sig.createdAt)}</span>
-                  </div>
-                  {expired ? (
-                    <span className="rounded-lg border border-white/10 bg-white/5 px-4 py-1.5 text-xs text-slate-500">
-                      {t('strategy.signalExpired')}
-                    </span>
-                  ) : (
-                    <button onClick={() => setOrderTarget(sig)} className="btn-primary px-4 py-1.5 text-xs">
-                      {t('strategy.oneClickOrder')}
-                    </button>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
+        <StrategySignalList signals={signals} now={now} onOrder={setOrderTarget} />
       </section>
 
       <p className="text-xs leading-relaxed text-slate-500">{t('strategy.disclaimer')}</p>
@@ -1315,7 +824,11 @@ export default function StrategiesPage() {
         />
       )}
 
-      {toast && <div className={`fixed bottom-24 left-1/2 z-50 -translate-x-1/2 animate-fade-in-up rounded-xl border px-5 py-3 text-sm shadow-prism sm:bottom-6 ${toastToneClass(toast.kind)}`}>{toast.msg}</div>}
+      {toast && (
+        <div className={`fixed bottom-24 left-1/2 z-50 -translate-x-1/2 animate-fade-in-up rounded-xl border px-5 py-3 text-sm shadow-prism sm:bottom-6 ${toastToneClass(toast.kind)}`}>
+          {toast.msg}
+        </div>
+      )}
     </div>
   )
 }
