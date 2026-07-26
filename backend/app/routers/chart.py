@@ -22,9 +22,10 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.models import User
-from app.services import candle_store, chart_store, quotes_store, strategy_engine
+from app.services import candle_store, chart_store, quotes_store
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user
+from app.services.strategy import live as strategy_live
 
 logger = logging.getLogger("prismx.chart")
 
@@ -201,7 +202,7 @@ async def feed_candles(
     顺手把已经走完的 K 线写进数据库长期保存（供策略回测/更长回看用），并对
     这个品种/周期下所有已启用的用户策略求值——两者都只在真的有一根新
     K 线收盘时才触发实质工作，绝大多数 tick 调用（bar 还在形成中）直接
-    是空操作。见 services/candle_store.py、services/strategy_engine.py。
+    是空操作。见 services/candle_store.py、services/strategy/live.py。
 
     Also persists closed bars to the database (for strategy backtests/longer
     lookback) and evaluates every enabled user strategy on this symbol/
@@ -231,7 +232,15 @@ async def feed_candles(
             chart_store.merge_bars(symbol, s.interval, bars)
         new_count = candle_store.persist_closed_bars(db, symbol, s.interval, bars)
         if new_count:
-            await strategy_engine.evaluate_new_candle(symbol, s.interval)
+            # 策略评估是同步 SQLAlchemy + 纯 Python 指标循环：留在事件循环里会
+            # 拖住 WebSocket 推送与桥接轮询（生产 2 核单进程）。推送部分本身是
+            # 异步的，由 live 内部在提交之后自行 await（见 strategy/live.py）。
+            # Strategy evaluation is blocking SQLAlchemy plus a pure-Python
+            # indicator loop: leaving it on the event loop stalls the WebSocket
+            # pushes and bridge polling it shares (2 cores, single process in
+            # production). The push half is async and awaited inside live after
+            # the commit.
+            await strategy_live.evaluate_new_candle(symbol, s.interval)
     return {"ok": True}
 
 

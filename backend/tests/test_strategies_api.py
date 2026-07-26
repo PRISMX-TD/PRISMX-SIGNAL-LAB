@@ -10,14 +10,16 @@ strategy signals" list, and the live "evaluate enabled strategies whenever a
 bar closes" path (that path goes through /feed/candles, EA-Token-authenticated,
 unrelated to the calling user's login).
 """
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from app.core.config import settings
-from app.models import Candle, StrategySignal, UserStrategy
+from app.models import Candle, StrategySignal, StrategyWatch, UserStrategy
 from app.routers import strategies as strategies_router
-import app.services.strategy_engine as strategy_engine
+from app.services.strategy import live as strategy_live
+from app.services.strategy import presets
 
 
 @pytest.fixture(autouse=True)
@@ -257,14 +259,22 @@ def test_new_closed_candle_triggers_enabled_strategy_and_fires_personal_signal(c
     """
     monkeypatch.setattr(settings, "EA_TOKEN", "test-ea-token")
     _make_pro(db, user)
+    params = {"maType": "SMA", "fastPeriod": 2, "slowPeriod": 4, "direction": "both"}
     strat = UserStrategy(
         user_id=user.id, template="ma_cross", symbol="XAUUSD", interval="1",
-        params='{"maType": "SMA", "fastPeriod": 2, "slowPeriod": 4, "direction": "both"}',
+        params=json.dumps(params),
+        rules=json.dumps(presets.template_to_ast("ma_cross", params)),
+        symbols='["XAUUSD"]', intervals='["1"]',
         enabled=True,
     )
     db.add(strat)
     db.commit()
     db.refresh(strat)
+    # 实时评估的候选来自 strategy_watch，不补这行策略永远不会被选中。
+    # Live candidates come from strategy_watch; without this row the strategy is
+    # never picked up.
+    db.add(StrategyWatch(strategy_id=strat.id, symbol="XAUUSD", interval="1"))
+    db.commit()
 
     # 命中时应像平台信号一样可推送通知,但只发给触发它的这一个用户
     # (event 类通知,见 push_dispatch.py 的 EVENT_STRATEGY_SIGNAL)。
@@ -276,7 +286,7 @@ def test_new_closed_candle_triggers_enabled_strategy_and_fires_personal_signal(c
     async def _fake_dispatch(user_id, event_type, title, body):
         push_calls.append((user_id, event_type, title, body))
 
-    monkeypatch.setattr(strategy_engine, "dispatch_event_push_async", _fake_dispatch)
+    monkeypatch.setattr(strategy_live, "dispatch_event_push_async", _fake_dispatch)
 
     # 收盘价序列在最后一根才发生金叉(见测试文件旁的推导脚本);每根间隔 60 秒,
     # 最后一根的收盘时间刚好是"现在减 60 秒"，满足"已走完"的判定。
@@ -305,7 +315,7 @@ def test_new_closed_candle_triggers_enabled_strategy_and_fires_personal_signal(c
     assert len(push_calls) == 1
     pushed_user_id, event_type, _title, _body = push_calls[0]
     assert pushed_user_id == user.id
-    assert event_type == strategy_engine.EVENT_STRATEGY_SIGNAL
+    assert event_type == strategy_live.EVENT_STRATEGY_SIGNAL
 
 
 def test_one_trade_at_a_time_blocks_new_signal_until_previous_resolves(client, db, auth_headers, user, monkeypatch):
@@ -323,12 +333,16 @@ def test_one_trade_at_a_time_blocks_new_signal_until_previous_resolves(client, d
     _make_pro(db, user)
     strat = UserStrategy(
         user_id=user.id, template="ma_cross", symbol="XAUUSD", interval="1",
-        params='{}', enabled=True,
+        params='{}', rules=json.dumps(presets.PRESET_RULES["ma_cross"]),
+        symbols='["XAUUSD"]', intervals='["1"]', enabled=True,
         stop_loss_method="percent", stop_loss_value=1.0,
         take_profit_method="rr", take_profit_value=2.0,
         one_trade_at_a_time=True,
     )
     db.add(strat)
+    db.commit()
+    db.refresh(strat)
+    db.add(StrategyWatch(strategy_id=strat.id, symbol="XAUUSD", interval="1"))
     db.commit()
 
     now = int(datetime.now(timezone.utc).timestamp())
@@ -364,7 +378,13 @@ def test_one_trade_at_a_time_blocks_new_signal_until_previous_resolves(client, d
     # one-trade-at-a-time gate from the actual MA-cross math — only applied
     # after the warmup backfill, so that step itself isn't mistaken for a
     # signal trigger too.
-    monkeypatch.setattr(strategy_engine, "entry_signals", lambda b, t, p: [None] * (len(b) - 1) + ["BUY"])
+    # 打桩落在 live 模块自己的名字上：live.py 用的是 from-import，打 presets 不生效。
+    # Patch live's own name: live.py from-imports evaluate_strategy, so patching
+    # presets has no effect.
+    monkeypatch.setattr(
+        strategy_live, "evaluate_strategy",
+        lambda bars, rules, extra_series=None, memo=None: [None] * (len(bars) - 1) + ["BUY"],
+    )
 
     # bar1: 没有正在跟踪的仓位,正常开仓 entry=100 → sl=99, tp=102
     # bar1: nothing pending yet, fires normally — entry=100 → sl=99, tp=102
@@ -406,12 +426,16 @@ def test_one_trade_at_a_time_off_fires_every_bar(client, db, auth_headers, user,
     _make_pro(db, user)
     strat = UserStrategy(
         user_id=user.id, template="ma_cross", symbol="XAUUSD", interval="1",
-        params='{}', enabled=True,
+        params='{}', rules=json.dumps(presets.PRESET_RULES["ma_cross"]),
+        symbols='["XAUUSD"]', intervals='["1"]', enabled=True,
         stop_loss_method="percent", stop_loss_value=1.0,
         take_profit_method="rr", take_profit_value=2.0,
         one_trade_at_a_time=False,
     )
     db.add(strat)
+    db.commit()
+    db.refresh(strat)
+    db.add(StrategyWatch(strategy_id=strat.id, symbol="XAUUSD", interval="1"))
     db.commit()
 
     now = int(datetime.now(timezone.utc).timestamp())
@@ -425,7 +449,10 @@ def test_one_trade_at_a_time_off_fires_every_bar(client, db, auth_headers, user,
     db.expire_all()
     assert db.query(StrategySignal).filter(StrategySignal.user_id == user.id).count() == 0
 
-    monkeypatch.setattr(strategy_engine, "entry_signals", lambda b, t, p: [None] * (len(b) - 1) + ["BUY"])
+    monkeypatch.setattr(
+        strategy_live, "evaluate_strategy",
+        lambda bars, rules, extra_series=None, memo=None: [None] * (len(bars) - 1) + ["BUY"],
+    )
 
     for offset in (180, 120, 60):
         bar = {"t": now - offset, "o": 100, "h": 100, "l": 100, "c": 100, "v": 1}
@@ -443,12 +470,21 @@ def test_one_trade_at_a_time_off_fires_every_bar(client, db, auth_headers, user,
 def test_disabled_strategy_never_fires(client, db, auth_headers, user, monkeypatch):
     monkeypatch.setattr(settings, "EA_TOKEN", "test-ea-token")
     _make_pro(db, user)
+    params = {"maType": "SMA", "fastPeriod": 2, "slowPeriod": 4, "direction": "both"}
     strat = UserStrategy(
         user_id=user.id, template="ma_cross", symbol="XAUUSD", interval="1",
-        params='{"maType": "SMA", "fastPeriod": 2, "slowPeriod": 4, "direction": "both"}',
+        params=json.dumps(params),
+        rules=json.dumps(presets.template_to_ast("ma_cross", params)),
+        symbols='["XAUUSD"]', intervals='["1"]',
         enabled=False,
     )
     db.add(strat)
+    db.commit()
+    db.refresh(strat)
+    # 有 watch 行但 enabled=False：测的是启用开关本身，而不是"根本没被盯着"。
+    # Watched but disabled: this tests the enabled gate itself, not "nothing
+    # watches this combo".
+    db.add(StrategyWatch(strategy_id=strat.id, symbol="XAUUSD", interval="1"))
     db.commit()
 
     closes = [100.0] * 10 + [100.0, 170.0]

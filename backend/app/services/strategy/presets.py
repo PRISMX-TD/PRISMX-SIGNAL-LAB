@@ -178,7 +178,10 @@ def collect_rules_intervals(rules: dict) -> set[str]:
 
 
 def evaluate_strategy(
-    bars: list[dict], rules: dict, extra_series: dict[str, list[dict]] | None = None
+    bars: list[dict],
+    rules: dict,
+    extra_series: dict[str, list[dict]] | None = None,
+    memo: dict | None = None,
 ) -> list[str | None]:
     """对整段 bars 求值信封，逐 bar 返回 "BUY" / "SELL" / None。
 
@@ -194,8 +197,8 @@ def evaluate_strategy(
         return []
     long_side = rules.get("long")
     short_side = rules.get("short")
-    longs = evaluate_rules(bars, long_side, extra_series) if long_side else [False] * n
-    shorts = evaluate_rules(bars, short_side, extra_series) if short_side else [False] * n
+    longs = evaluate_rules(bars, long_side, extra_series, memo) if long_side else [False] * n
+    shorts = evaluate_rules(bars, short_side, extra_series, memo) if short_side else [False] * n
     out: list[str | None] = [None] * n
     for i in range(n):
         if longs[i]:

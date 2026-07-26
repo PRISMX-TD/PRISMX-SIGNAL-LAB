@@ -236,6 +236,7 @@ def _series_for_operand(
     operand: dict,
     bars: list[dict],
     extra_series: dict[str, list[dict]] | None,
+    memo: dict | None = None,
 ) -> list[float | None]:
     """把一个操作数解析成与 bars 等长的数值序列。
     Resolve an operand into a series the same length as bars."""
@@ -259,7 +260,7 @@ def _series_for_operand(
         field = {"open": "o", "high": "h", "low": "l", "close": "c"}[operand["field"]]
         raw: list[float | None] = [b[field] for b in source]
     elif kind == "indicator":
-        raw = _indicator_series(operand["fn"], operand.get("params") or {}, source)
+        raw = _indicator_series(operand["fn"], operand.get("params") or {}, source, memo)
     else:
         raise RuleError(f"未知操作数类型 {kind} / unknown operand kind {kind}")
 
@@ -295,9 +296,38 @@ def _apply_shift_scale(operand: dict, series: list[float | None]) -> list[float 
     return out
 
 
-def _indicator_series(fn: str, params: dict, source: list[dict]) -> list[float | None]:
-    """按指标名在给定 bars 上算出数值序列。
-    Compute an indicator series over the given bars."""
+def _indicator_series(
+    fn: str, params: dict, source: list[dict], memo: dict | None = None
+) -> list[float | None]:
+    """按指标名在给定 bars 上算出数值序列，可选复用 memo 里已算好的结果。
+
+    memo 的 key 必须包含数据本身的身份（首末 bar 时间 + 长度），而不只是指标
+    参数——同一次实时评估里不同策略可能引用不同周期的 bars，只按参数做 key 会
+    把另一组数据的结果错发出去。
+
+    Compute an indicator series over the given bars, optionally reusing a
+    memoised result. The memo key has to identify the data too (first/last bar
+    time plus length), not just the indicator params: within one live evaluation
+    different strategies can reference different intervals, and keying on params
+    alone would hand back a series computed from a different dataset.
+    """
+    if memo is None:
+        return _compute_indicator(fn, params, source)
+    key = (
+        fn,
+        tuple(sorted(params.items())),
+        source[0]["t"] if source else None,
+        source[-1]["t"] if source else None,
+        len(source),
+    )
+    if key not in memo:
+        memo[key] = _compute_indicator(fn, params, source)
+    return memo[key]
+
+
+def _compute_indicator(fn: str, params: dict, source: list[dict]) -> list[float | None]:
+    """原 _indicator_series 的函数体，一字不改地搬进来。
+    The original _indicator_series body, moved here verbatim."""
     closes = [b["c"] for b in source]
     highs = [b["h"] for b in source]
     lows = [b["l"] for b in source]
@@ -372,19 +402,25 @@ def _compare_series(
 
 
 def _eval_node(
-    node: dict, bars: list[dict], extra_series: dict[str, list[dict]] | None
+    node: dict,
+    bars: list[dict],
+    extra_series: dict[str, list[dict]] | None,
+    memo: dict | None = None,
 ) -> list[bool]:
     if "logic" in node:
-        child_results = [_eval_node(c, bars, extra_series) for c in node["children"]]
+        child_results = [_eval_node(c, bars, extra_series, memo) for c in node["children"]]
         combine = all if node["logic"] == "AND" else any
         return [combine(r[i] for r in child_results) for i in range(len(bars))]
-    left = _series_for_operand(node["left"], bars, extra_series)
-    right = _series_for_operand(node["right"], bars, extra_series)
+    left = _series_for_operand(node["left"], bars, extra_series, memo)
+    right = _series_for_operand(node["right"], bars, extra_series, memo)
     return _compare_series(left, right, node["op"])
 
 
 def evaluate_rules(
-    bars: list[dict], ast: dict, extra_series: dict[str, list[dict]] | None = None
+    bars: list[dict],
+    ast: dict,
+    extra_series: dict[str, list[dict]] | None = None,
+    memo: dict | None = None,
 ) -> list[bool]:
     """对 bars 求值整棵规则树，返回等长布尔序列。
 
@@ -400,4 +436,4 @@ def evaluate_rules(
     """
     if not bars:
         return []
-    return _eval_node(ast, bars, extra_series)
+    return _eval_node(ast, bars, extra_series, memo)
