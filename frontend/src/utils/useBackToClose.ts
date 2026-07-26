@@ -68,7 +68,7 @@ export function useBackToClose(isOpen: boolean, onClose: () => void) {
     if (!isOpen) return
 
     const id = nextId++
-    window.history.pushState({ __modalBack: true }, '', window.location.href)
+    window.history.pushState({ __modalBack: true, __modalId: id }, '', window.location.href)
     pendingRef.current = true
     openStack.push(id)
 
@@ -111,7 +111,20 @@ export function useBackToClose(isOpen: boolean, onClose: () => void) {
       // lets clicks through to a nav link), the top of history is no longer
       // ours, and blindly calling back() would undo the navigation the user
       // just made. Leaving a harmless dead entry behind is the safer choice.
-      if (!(window.history.state as { __modalBack?: boolean } | null)?.__modalBack) return
+      // 必须比对实例 id，不能只看 __modalBack 标记：一次渲染里可能一个弹窗关闭、
+      // 另一个同时打开（策略页点「从空白开始」正是如此——预设面板关闭、编辑器打开），
+      // 此时 history 顶端那条是新打开的那个实例刚压的。只认布尔标记会让即将关闭的
+      // 实例把别人的记录 back() 掉，随之而来的 popstate 又被新实例认作「关闭我」，
+      // 结果新打开的弹窗当场被关掉——表现为点击毫无反应。
+      // Compare the instance id, not just the __modalBack flag: one modal can close
+      // while another opens in the same render (exactly what "start blank" does on
+      // the strategies page — picker closes, editor opens), leaving the top history
+      // entry owned by the newly opened instance. Matching only the boolean would
+      // make the closing instance back() out someone else's entry, and the
+      // resulting popstate would be read by the new instance as "close me" — the
+      // just-opened modal dies instantly, which looks like a dead click.
+      const top = window.history.state as { __modalBack?: boolean; __modalId?: number } | null
+      if (!top?.__modalBack || top.__modalId !== id) return
 
       // 关键点：这里主动调用的 history.back() 会异步触发一次 popstate——
       // PwaBackGuard 的监听器（挂载得比这里早，同一事件里总是先跑）此时也会
