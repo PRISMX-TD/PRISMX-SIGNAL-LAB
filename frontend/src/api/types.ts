@@ -479,12 +479,18 @@ export interface StrategyCoverageResponse {
   activeSymbols: string[]
 }
 
-// 策略回测的逐单明细：在 SimulateTrade 的字段基础上,多带入场/出场那根 K 线的
-// epoch 秒与成交价,供图表精确定位标记，不用把 ISO 时间字符串再解析回时间戳。
-// A strategy-backtest trade: like SimulateTrade, plus the entry/exit bar's
-// epoch seconds and fill price, so the chart can place markers precisely
-// without re-parsing the ISO timestamp strings.
-export interface StrategyBacktestTrade extends SimulateTrade {
+// 策略回测的逐单明细：在 SimulateTrade 的字段基础上，多带入场/出场那根 K 线的
+// epoch 秒与成交价，供图表精确定位标记，不用把 ISO 时间字符串再解析回时间戳。
+// result 比 SimulateTrade 多一种 TIMEOUT（超时平仓，按当根收盘价出场）——平台
+// 信号回放没有这个概念，所以只能在这里把该字段覆写宽一档，不能直接继承。
+// A strategy-backtest trade: like SimulateTrade, plus the entry/exit bar's epoch
+// seconds and fill price, so the chart can place markers precisely without
+// re-parsing the ISO timestamps. `result` carries one more case than
+// SimulateTrade — TIMEOUT (a timeout exit at that bar's close) — a notion the
+// platform-signal replay doesn't have, so the field is widened here by override
+// rather than inherited as-is.
+export interface StrategyBacktestTrade extends Omit<SimulateTrade, 'result'> {
+  result: 'HIT_TP' | 'HIT_SL' | 'TIMEOUT'
   entryTime: number
   exitTime: number
   entryPrice: number
