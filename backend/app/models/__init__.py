@@ -565,6 +565,41 @@ class UserStrategy(Base):
     # one is still open. Read by both the backtest and the live evaluator —
     # see run_backtest/evaluate_new_candle in strategy_engine.py.
     one_trade_at_a_time = Column(Boolean, nullable=False, default=True)
+    # 规则 AST（JSON）：{"long": 条件组|null, "short": 条件组|null}。模板降级为
+    # 这个字段的预设值，引擎侧不再有模板概念（见 services/strategy/presets.py）。
+    # template 列保留：它是"这条策略当初从哪个预设起步"的唯一记录，前端据此高亮
+    # 预设，且旧行的 rules 回填也依赖它。
+    # Rule AST (JSON): {"long": group|null, "short": group|null}. Templates
+    # demote to preset values of this column; the engine no longer knows what a
+    # template is (see services/strategy/presets.py). The `template` column
+    # stays: it's the only record of which preset a strategy started from (the
+    # frontend highlights it, and the legacy rules backfill needs it).
+    rules = Column(Text, nullable=True)
+    # 多品种/多周期：JSON 数组。原 symbol / interval 单值列保留以完成迁移，
+    # 迁移后不再被读取（读取一律走这两列 + strategy_watch）。
+    # Multi-symbol/interval JSON arrays. The original single-value symbol /
+    # interval columns are kept for the migration and never read afterwards
+    # (reads go through these plus strategy_watch).
+    symbols = Column(Text, nullable=True)
+    intervals = Column(Text, nullable=True)
+    # 超时平仓：持仓超过 N 根 K 线仍未触及 SL/TP 则按当根收盘价平仓，记为
+    # TIMEOUT。None = 不启用。回测与实盘同口径。
+    # Timeout exit: after N bars without an SL/TP touch, close at that bar's
+    # close and record TIMEOUT. None disables it. Same semantics in backtest
+    # and live.
+    exit_timeout_bars = Column(Integer, nullable=True)
+    # 交易时段过滤：JSON {"startHour": int, "endHour": int}，UTC+8 小时区间，
+    # 左闭右开。None = 不限制。跨零点由 startHour > endHour 表达。
+    # Session filter: JSON {"startHour", "endHour"} in UTC+8, half-open. None
+    # means no restriction; startHour > endHour expresses a window over midnight.
+    session_filter = Column(Text, nullable=True)
+    # 每日信号上限与时间冷却（分钟）。与既有的"同一根 K 线不重复"并存，不互相
+    # 替代——前者按自然日计数，后者按分钟计时，各挡一类过度触发。
+    # Daily signal cap and cooldown in minutes. Both coexist with the existing
+    # "never twice on one bar" guard rather than replacing it — one counts per
+    # calendar day, the other measures elapsed minutes.
+    daily_signal_cap = Column(Integer, nullable=True)
+    cooldown_minutes = Column(Integer, nullable=True)
     enabled = Column(Boolean, default=False)
     # 防止同一根 K 线重复触发信号 / de-dup guard: last bar this strategy fired a signal on
     last_signal_bar_t = Column(Integer, nullable=True)
@@ -584,6 +619,9 @@ class StrategySignal(Base):
     the objective-win-rate/discipline-score statistics built on `signals`).
     """
     __tablename__ = "strategy_signals"
+    __table_args__ = (
+        Index("idx_strategy_signals_strategy_result", "strategy_id", "result"),
+    )
 
     id = Column(String, primary_key=True, default=_uuid)
     strategy_id = Column(String, ForeignKey("user_strategies.id"), nullable=False, index=True)
@@ -594,6 +632,27 @@ class StrategySignal(Base):
     stop_loss = Column(Float, nullable=False)
     take_profit = Column(Float, nullable=False)
     bar_t = Column(Integer, nullable=False)  # 触发那根 K 线的时间 / the triggering bar's time
+    # 触发该信号的周期。多值化后同一策略可产生不同周期的信号，判定与超时计数
+    # 都需要知道具体是哪一个。
+    # The interval that fired this signal. After multi-interval support the same
+    # strategy can fire on several, and both resolution and timeout counting
+    # need to know which.
+    interval = Column(String, nullable=True)
+    # 价格基线：与平台信号 (Signal 表) 同名同义。首次观测只记录基线不判定，
+    # 此后只有超出基线的新极值才计入命中——避免把信号出现之前的波动记成命中。
+    # 详见 services/strategy/resolution.py。
+    # Price baseline, same meaning as on the platform Signal table: the first
+    # observation only records it, and only later extremes beyond it count as a
+    # hit — so price action from before the signal existed can't be recorded as
+    # one. See services/strategy/resolution.py.
+    baseline_high = Column(Float, nullable=True)
+    baseline_low = Column(Float, nullable=True)
+    # 自触发以来经过的收盘 K 线数，每次判定递增；达到策略的 exit_timeout_bars
+    # 时按当根收盘价平仓并记为 TIMEOUT。
+    # Closed bars elapsed since firing, incremented on each resolution pass;
+    # at the strategy's exit_timeout_bars it closes at that bar's close as
+    # TIMEOUT.
+    bars_held = Column(Integer, nullable=False, default=0)
     # 胜负判定：与 signals 表 result 字段同一套口径(PENDING/HIT_TP/HIT_SL)，
     # 由 evaluate_new_candle() 在每根新收盘 K 线到达时顺带判定——不是单独的
     # 后台清扫任务,因为策略信号天然绑定"这个品种/周期有新 K 线才有必要看"。
@@ -604,9 +663,43 @@ class StrategySignal(Base):
     # signal is naturally tied to "there's a new bar for this symbol/interval
     # worth checking" anyway. The "one trade at a time" gate reads this field
     # to know whether the previous trade is still open.
+    # 允许值：PENDING / HIT_TP / HIT_SL / TIMEOUT / STALE。
+    # TIMEOUT 计入绩效（按平仓价的实际盈亏），STALE 不计入（数据源中断的兜底）。
+    # Allowed: PENDING / HIT_TP / HIT_SL / TIMEOUT / STALE. TIMEOUT counts
+    # toward performance (real P&L at the close price); STALE does not (it's the
+    # feed-outage safety net).
     result = Column(String, nullable=False, default="PENDING")
     resolved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_now)
+
+
+class StrategyWatch(Base):
+    """策略盯盘三元组 (策略, 品种, 周期)：多品种多周期展开成行，让实时评估仍能
+    用一次索引查询取候选。
+
+    不用"取全部 enabled 策略再在应用层过滤 JSON 数组"：那样候选集随平台启用
+    策略总数增长，而每根新收盘 K 线都要评估一次（6 周期 × N 品种），在 2 核
+    单进程的生产环境上不可接受。
+
+    A (strategy, symbol, interval) watch triple: the multi-symbol/interval
+    cartesian product flattened into rows so live evaluation still fetches its
+    candidates with a single indexed query.
+
+    The alternative — load every enabled strategy and filter the JSON arrays in
+    Python — grows the candidate set with the platform's total enabled strategy
+    count, and evaluation runs on every closed bar (6 intervals x N symbols),
+    which a 2-core single-process deployment can't absorb.
+    """
+    __tablename__ = "strategy_watch"
+    __table_args__ = (
+        UniqueConstraint("strategy_id", "symbol", "interval", name="uq_strategy_watch_triple"),
+        Index("idx_strategy_watch_symbol_interval", "symbol", "interval"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    strategy_id = Column(String, ForeignKey("user_strategies.id"), nullable=False, index=True)
+    symbol = Column(String, nullable=False)
+    interval = Column(String, nullable=False)
 
 
 class AdminAuditLog(Base):

@@ -161,6 +161,14 @@ def _migrate_columns() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_signals_symbol_result ON signals(symbol, result)"
         ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_strategy_signals_strategy_result "
+            "ON strategy_signals(strategy_id, result)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_strategy_watch_symbol_interval "
+            "ON strategy_watch(symbol, interval)"
+        ))
 
     # users 表：password_hash 改可空（Google 登录用户无密码）。
     # 旧表建表时为 NOT NULL，需放开约束，否则插入无密码用户会被拒。
@@ -260,6 +268,13 @@ def _migrate_columns() -> None:
             "take_profit_method": "VARCHAR",
             "take_profit_value": "FLOAT",
             "one_trade_at_a_time": "BOOLEAN",
+            "rules": "TEXT",
+            "symbols": "TEXT",
+            "intervals": "TEXT",
+            "exit_timeout_bars": "INTEGER",
+            "session_filter": "TEXT",
+            "daily_signal_cap": "INTEGER",
+            "cooldown_minutes": "INTEGER",
         }
         with engine.begin() as conn:
             for name, col_type in us_new.items():
@@ -297,6 +312,27 @@ def _migrate_columns() -> None:
                 conn.execute(text(
                     "UPDATE user_strategies SET one_trade_at_a_time = TRUE WHERE one_trade_at_a_time IS NULL"
                 ))
+            # 多值化回填：旧行的单值 symbol / interval 变成单元素数组。用 SQL 的
+            # 字符串拼接而不是逐行 Python 循环——这是一次性数据搬运，行数可能不小。
+            # Multi-value backfill: an old row's single symbol/interval becomes a
+            # one-element array. Done in SQL rather than a per-row Python loop —
+            # it's a one-off data move and the row count isn't necessarily small.
+            conn.execute(text(
+                "UPDATE user_strategies SET symbols = '[\"' || symbol || '\"]' "
+                "WHERE symbols IS NULL AND symbol IS NOT NULL"
+            ))
+            conn.execute(text(
+                "UPDATE user_strategies SET intervals = '[\"' || interval || '\"]' "
+                "WHERE intervals IS NULL AND interval IS NOT NULL"
+            ))
+
+        # rules 与 strategy_watch 的回填要跑 Python 侧的转换/笛卡尔积，单独成
+        # 函数，各自独立事务，幂等（只补 NULL / 只插缺失行）。
+        # Backfilling rules and strategy_watch needs the Python-side conversion
+        # and cartesian product, so they get their own idempotent functions
+        # (NULL-only updates / missing-row inserts) in their own transactions.
+        _backfill_strategy_rules()
+        _backfill_strategy_watch()
 
         # 放开历史遗留列的 NOT NULL 约束。止损止盈从 stop_loss_pct / take_profit_pct
         # / take_profit_r（旧结构）改成 method + value 后，这些旧列已不在模型里、
@@ -320,6 +356,8 @@ def _migrate_columns() -> None:
                 "stop_loss_method", "stop_loss_value", "take_profit_method",
                 "take_profit_value", "one_trade_at_a_time", "enabled",
                 "last_signal_bar_t", "created_at", "updated_at",
+                "rules", "symbols", "intervals", "exit_timeout_bars",
+                "session_filter", "daily_signal_cap", "cooldown_minutes",
             }
             legacy_notnull = [
                 c["name"]
@@ -340,12 +378,36 @@ def _migrate_columns() -> None:
     # open (see UserStrategy.one_trade_at_a_time's docstring).
     if "strategy_signals" in inspector.get_table_names():
         ss_cols = {c["name"] for c in inspector.get_columns("strategy_signals")}
+        ss_new = {
+            "result": "VARCHAR",
+            "resolved_at": datetime_type,
+            "baseline_high": "FLOAT",
+            "baseline_low": "FLOAT",
+            "interval": "VARCHAR",
+            "bars_held": "INTEGER",
+        }
         with engine.begin() as conn:
+            for name, col_type in ss_new.items():
+                if name not in ss_cols:
+                    conn.execute(text(f"ALTER TABLE strategy_signals ADD COLUMN {name} {col_type}"))
             if "result" not in ss_cols:
-                conn.execute(text("ALTER TABLE strategy_signals ADD COLUMN result VARCHAR"))
                 conn.execute(text("UPDATE strategy_signals SET result = 'PENDING' WHERE result IS NULL"))
-            if "resolved_at" not in ss_cols:
-                conn.execute(text(f"ALTER TABLE strategy_signals ADD COLUMN resolved_at {datetime_type}"))
+            # bars_held 声明为 NOT NULL default 0，新列刚加时为 NULL。
+            # bars_held is NOT NULL default 0, but a freshly added column is NULL.
+            conn.execute(text("UPDATE strategy_signals SET bars_held = 0 WHERE bars_held IS NULL"))
+            # interval 回填：旧信号表没有周期列，唯一可靠来源是它所属策略当时的
+            # 单值 interval 列。取不到的留 NULL，由判定逻辑当"周期未知"处理
+            # （不参与超时计数），而不是猜一个值。
+            # Backfill interval: the old table had no interval column, and the
+            # only reliable source is the owning strategy's single-value column.
+            # Rows where that's unavailable stay NULL and are treated as
+            # "interval unknown" by resolution (excluded from timeout counting)
+            # rather than guessed.
+            conn.execute(text(
+                "UPDATE strategy_signals SET interval = ("
+                "  SELECT us.interval FROM user_strategies us WHERE us.id = strategy_signals.strategy_id"
+                ") WHERE interval IS NULL"
+            ))
 
     # payments 表：补充 NOWPayments 实际到账金额，用于向少转/漏转的用户如实
     # 展示"已收到部分金额"而不是让钱看起来凭空消失。
@@ -357,3 +419,76 @@ def _migrate_columns() -> None:
         if "actually_paid" not in payment_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE payments ADD COLUMN actually_paid FLOAT"))
+
+
+def _backfill_strategy_rules() -> None:
+    """把旧策略的 template + params 转成等价 AST 写入 rules（仅补 NULL，幂等）。
+
+    转换等价性由 tests/test_strategy_presets.py 逐模板逐 bar 证明；这里只负责
+    搬运。单个策略转换失败（模板已不存在等脏数据）记日志跳过，不让一条坏行
+    阻塞整个启动流程。
+
+    Convert legacy template+params into an equivalent AST in `rules`
+    (NULL-only, idempotent). Equivalence is proven per template, bar by bar, in
+    tests/test_strategy_presets.py; this only moves data. A single row that
+    fails to convert (dirty data such as a template that no longer exists) is
+    logged and skipped rather than blocking startup.
+    """
+    import json as _json
+    import logging as _logging
+
+    from app.services.strategy.presets import template_to_ast
+
+    log = _logging.getLogger("prismx.migration")
+    db = SessionLocal()
+    try:
+        from app.models import UserStrategy
+
+        rows = db.query(UserStrategy).filter(UserStrategy.rules.is_(None)).all()
+        changed = 0
+        for row in rows:
+            try:
+                params = _json.loads(row.params or "{}")
+                ast = template_to_ast(row.template, params if isinstance(params, dict) else {})
+            except Exception:
+                log.warning("backfill_strategy_rules: skipped strategy %s (template=%s)", row.id, row.template)
+                continue
+            row.rules = _json.dumps(ast, ensure_ascii=False)
+            changed += 1
+        if changed:
+            db.commit()
+            log.info("backfill_strategy_rules: backfilled %d strategy rule set(s)", changed)
+    finally:
+        db.close()
+
+
+def _backfill_strategy_watch() -> None:
+    """按 symbols × intervals 的笛卡尔积补齐 strategy_watch 缺失行（幂等）。
+    Insert the missing strategy_watch rows for each strategy's symbols x
+    intervals product (idempotent)."""
+    import json as _json
+
+    db = SessionLocal()
+    try:
+        from app.models import StrategyWatch, UserStrategy
+
+        existing = {(w.strategy_id, w.symbol, w.interval) for w in db.query(StrategyWatch).all()}
+        added = 0
+        for row in db.query(UserStrategy).all():
+            try:
+                symbols = _json.loads(row.symbols or "[]")
+                intervals = _json.loads(row.intervals or "[]")
+            except (ValueError, TypeError):
+                continue
+            for sym in symbols:
+                for itv in intervals:
+                    key = (row.id, sym, itv)
+                    if key in existing:
+                        continue
+                    db.add(StrategyWatch(strategy_id=row.id, symbol=sym, interval=itv))
+                    existing.add(key)
+                    added += 1
+        if added:
+            db.commit()
+    finally:
+        db.close()
