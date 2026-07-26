@@ -17,6 +17,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
+from app.services.strategy import indicators as ind
+
 ALLOWED_INTERVALS = frozenset({"1", "5", "15", "60", "240", "D"})
 LOGIC_OPS = frozenset({"AND", "OR"})
 INDICATORS: tuple[str, ...] = ("ma", "macd", "rsi", "bollinger", "donchian", "atr")
@@ -61,10 +63,6 @@ class UsageSpec:
     evaluate: Callable[[list[dict], dict], list[bool]] = field(default=None, repr=False)  # type: ignore[assignment]
 
 
-def _todo_eval(bars: list[dict], params: dict) -> list[bool]:
-    raise NotImplementedError
-
-
 _MA_TYPE = ParamSpec(kind="enum", default="EMA", options=("SMA", "EMA"))
 _MA_PERIOD = ParamSpec(kind="int", default=20, minimum=2, maximum=300)
 _RSI_PERIOD = ParamSpec(kind="int", default=14, minimum=2, maximum=50)
@@ -100,7 +98,10 @@ def _spec(
         params=params,
         mirror=mirror,
         mirror_level_flip=mirror_level_flip,
-        evaluate=_todo_eval,
+        # _EVALUATORS 定义在文件末尾，lambda 只在调用时查表，故定义顺序无碍。
+        # _EVALUATORS is defined at the bottom of the file; the lambda looks it
+        # up at call time, so definition order doesn't matter.
+        evaluate=lambda bars, p, _k=key: _EVALUATORS[_k](bars, resolve_params(_k, p)),
     )
 
 
@@ -247,3 +248,296 @@ def validate_conditions(payload: object) -> None:
                 f"usage {usage} belongs to indicator {USAGES[usage].indicator}"
             )
         _validate_params(usage, item.get("params") or {})
+
+
+def _closes(bars: list[dict]) -> list[float]:
+    return [float(b["c"]) for b in bars]
+
+
+def _as_optional(values: list[float]) -> list[float | None]:
+    return list(values)
+
+
+def _ma_line(bars: list[dict], params: dict) -> list[float | None]:
+    period = int(params["period"])
+    closes = _closes(bars)
+    return ind.ema(closes, period) if params["maType"] == "EMA" else ind.sma(closes, period)
+
+
+def _above(series: list[float | None], ref: list[float | None]) -> list[bool]:
+    """series 严格大于 ref；任一为 None 则 False。用 cmp_with_tol 避免浮点
+    残留被误判成穿越。
+    series strictly above ref; None on either side yields False. cmp_with_tol
+    keeps float residue from reading as a crossover."""
+    out = [False] * len(series)
+    for i in range(len(series)):
+        a, b = series[i], ref[i]
+        if a is None or b is None:
+            continue
+        out[i] = ind.cmp_with_tol(a, b) > 0
+    return out
+
+
+def _crosses(series: list[float | None], ref: list[float | None], up: bool) -> list[bool]:
+    """前一根未越过、当根越过。四个值任一为 None 则 False。
+    Not past on the previous bar, past on this one; any None yields False."""
+    out = [False] * len(series)
+    for i in range(1, len(series)):
+        a0, b0, a1, b1 = series[i - 1], ref[i - 1], series[i], ref[i]
+        if a0 is None or b0 is None or a1 is None or b1 is None:
+            continue
+        prev = ind.cmp_with_tol(a0, b0)
+        now = ind.cmp_with_tol(a1, b1)
+        out[i] = (prev <= 0 and now > 0) if up else (prev >= 0 and now < 0)
+    return out
+
+
+def _slope(series: list[float | None], up: bool) -> list[bool]:
+    """与前一根比较自身走向 / compares the series with its own previous value."""
+    shifted: list[float | None] = [None] + series[:-1]
+    return _above(series, shifted) if up else _above(shifted, series)
+
+
+def _const_series(n: int, value: float) -> list[float | None]:
+    return [value] * n
+
+
+def _eval_ma_cross_above(bars, params):
+    return _crosses(_as_optional(_closes(bars)), _ma_line(bars, params), up=True)
+
+
+def _eval_ma_cross_below(bars, params):
+    return _crosses(_as_optional(_closes(bars)), _ma_line(bars, params), up=False)
+
+
+def _eval_ma_price_above(bars, params):
+    return _above(_as_optional(_closes(bars)), _ma_line(bars, params))
+
+
+def _eval_ma_price_below(bars, params):
+    return _above(_ma_line(bars, params), _as_optional(_closes(bars)))
+
+
+def _eval_ma_rising(bars, params):
+    return _slope(_ma_line(bars, params), up=True)
+
+
+def _eval_ma_falling(bars, params):
+    return _slope(_ma_line(bars, params), up=False)
+
+
+def _macd_pair(bars: list[dict], params: dict):
+    return ind.macd(_closes(bars), int(params["fast"]), int(params["slow"]), int(params["signal"]))
+
+
+def _eval_macd_cross_above_zero(bars, params):
+    line, _sig = _macd_pair(bars, params)
+    return _crosses(line, _const_series(len(bars), 0.0), up=True)
+
+
+def _eval_macd_cross_below_zero(bars, params):
+    line, _sig = _macd_pair(bars, params)
+    return _crosses(line, _const_series(len(bars), 0.0), up=False)
+
+
+def _eval_macd_above_zero(bars, params):
+    line, _sig = _macd_pair(bars, params)
+    return _above(line, _const_series(len(bars), 0.0))
+
+
+def _eval_macd_below_zero(bars, params):
+    line, _sig = _macd_pair(bars, params)
+    return _above(_const_series(len(bars), 0.0), line)
+
+
+def _eval_macd_cross_above_signal(bars, params):
+    line, sig = _macd_pair(bars, params)
+    return _crosses(line, sig, up=True)
+
+
+def _eval_macd_cross_below_signal(bars, params):
+    line, sig = _macd_pair(bars, params)
+    return _crosses(line, sig, up=False)
+
+
+def _eval_macd_rising(bars, params):
+    line, _sig = _macd_pair(bars, params)
+    return _slope(line, up=True)
+
+
+def _eval_macd_falling(bars, params):
+    line, _sig = _macd_pair(bars, params)
+    return _slope(line, up=False)
+
+
+def _rsi_series(bars: list[dict], params: dict) -> list[float | None]:
+    return ind.rsi(_closes(bars), int(params["period"]))
+
+
+def _eval_rsi_below_level(bars, params):
+    return _above(_const_series(len(bars), float(params["level"])), _rsi_series(bars, params))
+
+
+def _eval_rsi_above_level(bars, params):
+    return _above(_rsi_series(bars, params), _const_series(len(bars), float(params["level"])))
+
+
+def _eval_rsi_cross_above_level(bars, params):
+    return _crosses(_rsi_series(bars, params), _const_series(len(bars), float(params["level"])), up=True)
+
+
+def _eval_rsi_cross_below_level(bars, params):
+    return _crosses(_rsi_series(bars, params), _const_series(len(bars), float(params["level"])), up=False)
+
+
+def _eval_rsi_rising(bars, params):
+    return _slope(_rsi_series(bars, params), up=True)
+
+
+def _eval_rsi_falling(bars, params):
+    return _slope(_rsi_series(bars, params), up=False)
+
+
+def _boll(bars: list[dict], params: dict):
+    return ind.bollinger(_closes(bars), int(params["period"]), float(params["mult"]))
+
+
+def _eval_boll_break_upper(bars, params):
+    upper, _m, _l = _boll(bars, params)
+    return _above(_as_optional(_closes(bars)), upper)
+
+
+def _eval_boll_break_lower(bars, params):
+    _u, _m, lower = _boll(bars, params)
+    return _above(lower, _as_optional(_closes(bars)))
+
+
+def _eval_boll_back_above_middle(bars, params):
+    _u, middle, _l = _boll(bars, params)
+    return _crosses(_as_optional(_closes(bars)), middle, up=True)
+
+
+def _eval_boll_back_below_middle(bars, params):
+    _u, middle, _l = _boll(bars, params)
+    return _crosses(_as_optional(_closes(bars)), middle, up=False)
+
+
+def _eval_boll_bounce_off_lower(bars, params):
+    _u, _m, lower = _boll(bars, params)
+    return _crosses(_as_optional(_closes(bars)), lower, up=True)
+
+
+def _eval_boll_reject_off_upper(bars, params):
+    upper, _m, _l = _boll(bars, params)
+    return _crosses(_as_optional(_closes(bars)), upper, up=False)
+
+
+def _donchian(bars: list[dict], params: dict):
+    period = int(params["period"])
+    return (
+        ind.donchian_high([float(b["h"]) for b in bars], period),
+        ind.donchian_low([float(b["l"]) for b in bars], period),
+    )
+
+
+def _eval_donchian_new_high(bars, params):
+    high, _low = _donchian(bars, params)
+    return _above(_as_optional(_closes(bars)), high)
+
+
+def _eval_donchian_new_low(bars, params):
+    _high, low = _donchian(bars, params)
+    return _above(low, _as_optional(_closes(bars)))
+
+
+def _donchian_mid(bars: list[dict], params: dict) -> list[float | None]:
+    high, low = _donchian(bars, params)
+    return [
+        None if high[i] is None or low[i] is None else (high[i] + low[i]) / 2
+        for i in range(len(bars))
+    ]
+
+
+def _eval_donchian_upper_half(bars, params):
+    return _above(_as_optional(_closes(bars)), _donchian_mid(bars, params))
+
+
+def _eval_donchian_lower_half(bars, params):
+    return _above(_donchian_mid(bars, params), _as_optional(_closes(bars)))
+
+
+def _atr_vs_average(bars: list[dict], params: dict):
+    """当前 ATR 与「ATR 自身近期均值」的比较基准。均值窗口取 period 的 3 倍，
+    使「近期」明显长于 ATR 本身的平滑窗口，否则两者几乎同步、判定永远贴着门槛。
+    Current ATR against the mean of ATR itself. The mean window is 3x period so
+    that "recent" is clearly longer than ATR's own smoothing window; otherwise
+    the two move together and the verdict sits on the threshold forever."""
+    period = int(params["period"])
+    series = ind.atr(
+        [float(b["h"]) for b in bars], [float(b["l"]) for b in bars], _closes(bars), period
+    )
+    window = period * 3
+    baseline: list[float | None] = [None] * len(bars)
+    seen: list[float] = []
+    for i, v in enumerate(series):
+        if v is None:
+            continue
+        seen.append(v)
+        if len(seen) < window:
+            continue
+        baseline[i] = sum(seen[-window:]) / window * float(params["mult"])
+    return series, baseline
+
+
+def _eval_atr_above_average(bars, params):
+    series, baseline = _atr_vs_average(bars, params)
+    return _above(series, baseline)
+
+
+def _eval_atr_below_average(bars, params):
+    series, baseline = _atr_vs_average(bars, params)
+    return _above(baseline, series)
+
+
+_EVALUATORS: dict[str, Callable[[list[dict], dict], list[bool]]] = {
+    "ma.price_cross_above": _eval_ma_cross_above,
+    "ma.price_cross_below": _eval_ma_cross_below,
+    "ma.price_above": _eval_ma_price_above,
+    "ma.price_below": _eval_ma_price_below,
+    "ma.rising": _eval_ma_rising,
+    "ma.falling": _eval_ma_falling,
+    "macd.cross_above_zero": _eval_macd_cross_above_zero,
+    "macd.cross_below_zero": _eval_macd_cross_below_zero,
+    "macd.above_zero": _eval_macd_above_zero,
+    "macd.below_zero": _eval_macd_below_zero,
+    "macd.cross_above_signal": _eval_macd_cross_above_signal,
+    "macd.cross_below_signal": _eval_macd_cross_below_signal,
+    "macd.rising": _eval_macd_rising,
+    "macd.falling": _eval_macd_falling,
+    "rsi.below_level": _eval_rsi_below_level,
+    "rsi.above_level": _eval_rsi_above_level,
+    "rsi.cross_above_level": _eval_rsi_cross_above_level,
+    "rsi.cross_below_level": _eval_rsi_cross_below_level,
+    "rsi.rising": _eval_rsi_rising,
+    "rsi.falling": _eval_rsi_falling,
+    "bollinger.break_upper": _eval_boll_break_upper,
+    "bollinger.break_lower": _eval_boll_break_lower,
+    "bollinger.back_above_middle": _eval_boll_back_above_middle,
+    "bollinger.back_below_middle": _eval_boll_back_below_middle,
+    "bollinger.bounce_off_lower": _eval_boll_bounce_off_lower,
+    "bollinger.reject_off_upper": _eval_boll_reject_off_upper,
+    "donchian.new_high": _eval_donchian_new_high,
+    "donchian.new_low": _eval_donchian_new_low,
+    "donchian.upper_half": _eval_donchian_upper_half,
+    "donchian.lower_half": _eval_donchian_lower_half,
+    "atr.volatility_above_average": _eval_atr_above_average,
+    "atr.volatility_below_average": _eval_atr_below_average,
+}
+
+
+def evaluate_usage(bars: list[dict], usage: str, params: dict) -> list[bool]:
+    """逐 bar 求值单个用法，返回与 bars 等长的布尔序列。
+    Evaluate one usage bar by bar, returning a bool series as long as bars."""
+    if not bars:
+        return []
+    return _EVALUATORS[usage](bars, resolve_params(usage, params))
