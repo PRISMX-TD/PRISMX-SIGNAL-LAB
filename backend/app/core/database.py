@@ -370,6 +370,20 @@ def _migrate_columns() -> None:
                         conn.execute(text(
                             f'ALTER TABLE user_strategies ALTER COLUMN "{name}" DROP NOT NULL'
                         ))
+            # template 从必填变为可空：纯自定义 AST 的策略没有起源模板。旧表里它
+            # 仍是 NOT NULL，不放开会让"不选预设直接搭规则"的保存被 Postgres 拒绝。
+            # template went from required to nullable: a pure-custom-AST strategy
+            # has no originating preset. It's still NOT NULL in an existing table,
+            # so without relaxing it, saving a from-scratch rule tree is rejected.
+            template_col = next(
+                (c for c in inspector.get_columns("user_strategies") if c["name"] == "template"),
+                None,
+            )
+            if template_col is not None and not template_col["nullable"]:
+                with engine.begin() as conn:
+                    conn.execute(text(
+                        "ALTER TABLE user_strategies ALTER COLUMN template DROP NOT NULL"
+                    ))
 
     # strategy_signals 表：补充胜负判定字段,供"一次一单"开关判断上一笔是否
     # 还开着(见 UserStrategy.one_trade_at_a_time 的说明)。

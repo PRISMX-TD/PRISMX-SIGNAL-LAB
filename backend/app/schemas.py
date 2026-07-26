@@ -1,8 +1,11 @@
 """Pydantic 请求/响应模型 / Pydantic request & response schemas."""
+import re
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+from app.services.strategy.presets import TEMPLATE_KEYS as STRATEGY_TEMPLATES
 
 # 共用校验规则 / shared validation rules
 # 品种：大写字母/数字/点，长度 1-20（含券商后缀）/ symbol: upper-alnum + dot
@@ -11,6 +14,22 @@ SYMBOL_PATTERN = r"^[A-Za-z0-9._-]{1,20}$"
 SUFFIX_PATTERN = r"^[A-Za-z0-9._-]{0,10}$"
 # MT5 登录号：纯数字 / MT5 login: digits only
 LOGIN_PATTERN = r"^[0-9]{1,20}$"
+
+
+def _normalize_symbols(v: list[str]) -> list[str]:
+    """统一大写、去空白、去重且保持顺序；逐个按 SYMBOL_PATTERN 校验。
+    Upper-case, strip, de-duplicate while preserving order; validate each
+    against SYMBOL_PATTERN."""
+    out: list[str] = []
+    for raw in v:
+        s = raw.strip().upper()
+        if not s:
+            continue
+        if not re.fullmatch(SYMBOL_PATTERN, s):
+            raise ValueError(f"非法品种代码 {raw} / invalid symbol code")
+        if s not in out:
+            out.append(s)
+    return out
 
 
 # ---------- 认证 / Auth ----------
@@ -207,75 +226,179 @@ class AdminStrategyCosts(BaseModel):
 
 
 # ---------- 自定义策略 / User strategies ----------
+# 模板清单的唯一来源在引擎侧（services/strategy/presets.py）。此前这里有两份
+# 硬写的 Literal，加一个模板要改三处、漏一处就是"能建不能回测"的静默不一致。
+# 品种数/周期数的上限同理不在这里硬写：它们的唯一来源是 rules.MAX_SYMBOLS /
+# MAX_INTERVALS，由端点校验并返回点名上限值的 400。
+# The template list has a single source of truth on the engine side
+# (services/strategy/presets.py). There used to be two hardcoded Literals here;
+# adding a template meant editing three places, and missing one produced a
+# silent "creatable but not backtestable" inconsistency. Symbol/interval count
+# caps likewise aren't hardcoded here — rules.MAX_SYMBOLS / MAX_INTERVALS own
+# them, and the endpoint returns a 400 naming the actual limit.
+
+
+def validate_template_key(v: str | None) -> str | None:
+    """两个请求模型共用的模板名校验器，取代原先各写一遍的 Literal。
+    Shared template-name validator for both request models, replacing the
+    per-model Literals."""
+    if v is None:
+        return None
+    if v not in STRATEGY_TEMPLATES:
+        raise ValueError(f"未知模板 {v}，可选 {list(STRATEGY_TEMPLATES)} / unknown template")
+    return v
+
+
+class SessionFilterIn(BaseModel):
+    """交易时段过滤：UTC+8 小时区间，左闭右开。startHour > endHour 表示跨零点。
+    Session filter: UTC+8 hour range, half-open. startHour > endHour spans
+    midnight."""
+
+    startHour: int = Field(ge=0, le=23)
+    endHour: int = Field(ge=0, le=23)
+
+
 class StrategyCreate(BaseModel):
-    template: Literal["ma_cross", "rsi_reversal", "bollinger_reversion", "macd_cross", "ma_pullback", "bollinger_breakout", "rsi_momentum", "donchian_breakout", "momentum_breakout", "trend_rsi_filter"]
+    # template 现在只是"从哪个预设起步"的记录，可以完全不传（纯自定义 AST）。
+    # 不传 rules 时用该 template 的预设 AST；两者都不传则 400。
+    # `template` is now just a record of which preset this started from and may
+    # be omitted entirely (pure custom AST). With no `rules`, the template's
+    # preset AST is used; omitting both is a 400.
+    template: str | None = None
     # 用户自定义名称，留空由前端按模板名兜底 / user-given name; frontend falls back to the template label when empty
     name: str | None = Field(default=None, max_length=60)
-    symbol: str = Field(pattern=SYMBOL_PATTERN)
-    interval: str
-    params: dict = Field(default_factory=dict)
-    stopLossMethod: Literal["percent", "steps"] = "percent"
+    rules: dict | None = None
+    symbols: list[str] = Field(default_factory=list)
+    intervals: list[str] = Field(default_factory=list)
+    stopLossMethod: Literal["percent", "steps", "atr"] = "percent"
     stopLossValue: float = Field(default=1.0, gt=0, le=1_000_000)
-    takeProfitMethod: Literal["rr", "percent", "steps"] = "rr"
+    takeProfitMethod: Literal["rr", "percent", "steps", "atr"] = "rr"
     takeProfitValue: float = Field(default=2.0, gt=0, le=1_000_000)
     # 一次一单：开着仓时不再触发新信号，关闭则只要条件满足就触发
     # One trade at a time: no new signal while a position is open; off means
     # any bar meeting the condition fires regardless
     oneTradeAtATime: bool = True
+    exitTimeoutBars: int | None = Field(default=None, ge=1, le=1000)
+    sessionFilter: SessionFilterIn | None = None
+    dailySignalCap: int | None = Field(default=None, ge=1, le=100)
+    cooldownMinutes: int | None = Field(default=None, ge=1, le=10_080)
+
+    @field_validator("template")
+    @classmethod
+    def _check_template(cls, v: str | None) -> str | None:
+        return validate_template_key(v)
+
+    @field_validator("symbols")
+    @classmethod
+    def _check_symbols(cls, v: list[str]) -> list[str]:
+        return _normalize_symbols(v)
 
 
 class StrategyUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=60)
-    params: dict | None = None
-    stopLossMethod: Literal["percent", "steps"] | None = None
+    rules: dict | None = None
+    symbols: list[str] | None = None
+    intervals: list[str] | None = None
+    stopLossMethod: Literal["percent", "steps", "atr"] | None = None
     stopLossValue: float | None = Field(default=None, gt=0, le=1_000_000)
-    takeProfitMethod: Literal["rr", "percent", "steps"] | None = None
+    takeProfitMethod: Literal["rr", "percent", "steps", "atr"] | None = None
     takeProfitValue: float | None = Field(default=None, gt=0, le=1_000_000)
     oneTradeAtATime: bool | None = None
+    exitTimeoutBars: int | None = Field(default=None, ge=1, le=1000)
+    sessionFilter: SessionFilterIn | None = None
+    dailySignalCap: int | None = Field(default=None, ge=1, le=100)
+    cooldownMinutes: int | None = Field(default=None, ge=1, le=10_080)
     enabled: bool | None = None
+
+    @field_validator("symbols")
+    @classmethod
+    def _check_symbols(cls, v: list[str] | None) -> list[str] | None:
+        return None if v is None else _normalize_symbols(v)
 
 
 class StrategyOut(BaseModel):
     id: str
-    template: str
+    template: str | None = None
     name: str | None = None
-    symbol: str
-    interval: str
-    params: dict
+    rules: dict
+    symbols: list[str]
+    intervals: list[str]
     stopLossMethod: str
     stopLossValue: float
     takeProfitMethod: str
     takeProfitValue: float
     oneTradeAtATime: bool
+    exitTimeoutBars: int | None = None
+    sessionFilter: dict | None = None
+    dailySignalCap: int | None = None
+    cooldownMinutes: int | None = None
     enabled: bool
     createdAt: datetime
 
 
 class StrategyBacktestRequest(BaseModel):
-    template: Literal["ma_cross", "rsi_reversal", "bollinger_reversion", "macd_cross", "ma_pullback", "bollinger_breakout", "rsi_momentum", "donchian_breakout", "momentum_breakout", "trend_rsi_filter"]
+    # 回测一次只跑一个 (品种, 周期) 组合：多组合的净值无法叠加成一条有意义的
+    # 曲线（同时持多品种仓位是另一回事，不在本次范围）。前端要比多个组合就
+    # 分别发请求。
+    # A backtest covers exactly one (symbol, interval) pair: equity across pairs
+    # can't be summed into one meaningful curve (holding positions in several
+    # symbols at once is a different feature, out of scope). The frontend issues
+    # one request per pair.
+    template: str | None = None
+    rules: dict | None = None
     symbol: str = Field(pattern=SYMBOL_PATTERN)
     interval: str
-    params: dict = Field(default_factory=dict)
-    stopLossMethod: Literal["percent", "steps"] = "percent"
+    stopLossMethod: Literal["percent", "steps", "atr"] = "percent"
     stopLossValue: float = Field(default=1.0, gt=0, le=1_000_000)
-    takeProfitMethod: Literal["rr", "percent", "steps"] = "rr"
+    takeProfitMethod: Literal["rr", "percent", "steps", "atr"] = "rr"
     takeProfitValue: float = Field(default=2.0, gt=0, le=1_000_000)
     oneTradeAtATime: bool = True
+    exitTimeoutBars: int | None = Field(default=None, ge=1, le=1000)
     days: int = Field(default=90, ge=7, le=730)
     riskPct: float = Field(default=1.0, ge=0.1, le=3.0)
     capital: float = Field(default=10000, ge=1, le=1e9)
     mode: Literal["compound", "flat"] = "compound"
+
+    @field_validator("template")
+    @classmethod
+    def _check_template(cls, v: str | None) -> str | None:
+        return validate_template_key(v)
 
 
 class StrategySignalOut(BaseModel):
     id: str
     strategyId: str
     symbol: str
+    interval: str | None = None
     side: str
     entry: float
     stopLoss: float
     takeProfit: float
+    result: str
+    barsHeld: int
+    resolvedAt: datetime | None = None
     createdAt: datetime
+
+
+class StrategyPerformanceOut(BaseModel):
+    """实盘绩效 + 最近一次回测的对照。已判定不足 sampleThreshold 笔时
+    winRate / avgRr 为 None，前端显示"样本不足"而不是把 1 胜 0 负写成 100%。
+    Live performance plus the latest backtest for comparison. Below
+    sampleThreshold resolved trades, winRate/avgRr are None so the frontend
+    shows "insufficient sample" instead of rendering 1-0 as 100%."""
+
+    strategyId: str
+    resolved: int
+    wins: int
+    losses: int
+    timeouts: int
+    pending: int
+    winRate: float | None = None
+    avgRr: float | None = None
+    maxLossStreak: int
+    insufficientSample: bool
+    sampleThreshold: int
+    backtest: dict | None = None
 
 
 # ---------- API Token / MT5 连接凭证 ----------

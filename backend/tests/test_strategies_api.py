@@ -37,6 +37,44 @@ def _no_user_rate_limit():
     user_limiter.enabled = True
 
 
+@pytest.fixture(autouse=True)
+def _clean_backtest_cache():
+    """回测结果缓存是进程级的，而每个测试各自重建库：不清空会让上一个测试的
+    结果被下一个测试命中（键里的"最新 bar 时间"可能恰好相同）。
+    The backtest cache is process-global while each test rebuilds the DB: without
+    clearing, one test can hit the previous test's entry (the "latest bar time"
+    in the key may coincide)."""
+    from app.core.strategy_limits import cache_clear
+
+    cache_clear()
+    yield
+    cache_clear()
+
+
+# 一条永真的最小 AST：close > 0。规则组必须带 logic（AND/OR），比较节点才用 op。
+# A minimal always-true AST: close > 0. A group carries `logic` (AND/OR); only a
+# comparison node carries `op`.
+_AST = {
+    "long": {
+        "logic": "AND",
+        "children": [
+            {
+                "left": {"kind": "price", "field": "close"},
+                "op": "gt",
+                "right": {"kind": "const", "value": 0},
+            }
+        ],
+    },
+    "short": None,
+}
+
+
+def _feed(monkeypatch, symbols=("XAUUSD",)):
+    """把"哪些品种有行情"打桩掉——测试环境没有 EA 在推报价。
+    Stub out "which symbols are fed"; no EA pushes quotes in tests."""
+    monkeypatch.setattr(strategies_router, "active_symbols", lambda: list(symbols))
+
+
 def _make_pro(db, user):
     user.plan = "PRO"
     db.add(user)
@@ -56,15 +94,16 @@ def _make_admin_pro(db, user):
     db.commit()
 
 
-def test_pro_non_admin_user_can_create_strategy(client, db, auth_headers, user):
+def test_pro_non_admin_user_can_create_strategy(client, db, auth_headers, user, monkeypatch):
     """功能已对全体用户开放：普通(非管理员) PRO 用户能正常创建策略——不再
     需要管理员身份。Feature is open to everyone now: an ordinary (non-admin)
     PRO user can create a strategy — admin status is no longer required."""
     _make_pro(db, user)
+    _feed(monkeypatch)
     res = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"template": "ma_cross", "symbol": "XAUUSD", "interval": "15", "params": {}},
+        json={"template": "ma_cross", "symbols": ["XAUUSD"], "intervals": ["15"]},
     )
     assert res.status_code == 200
 
@@ -77,19 +116,20 @@ def test_free_non_admin_user_blocked_by_pro_only_gate(client, db, auth_headers, 
     res = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"template": "ma_cross", "symbol": "XAUUSD", "interval": "15", "params": {}},
+        json={"template": "ma_cross", "symbols": ["XAUUSD"], "intervals": ["15"]},
     )
     assert res.status_code == 403
 
 
-def test_admin_and_pro_can_create_list_update_delete(client, db, auth_headers, user):
+def test_admin_and_pro_can_create_list_update_delete(client, db, auth_headers, user, monkeypatch):
     _make_admin_pro(db, user)
+    _feed(monkeypatch)
     create = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"template": "rsi_reversal", "symbol": "XAUUSD", "interval": "15", "params": {"period": 14}},
+        json={"template": "rsi_reversal", "symbols": ["XAUUSD"], "intervals": ["15"]},
     )
-    assert create.status_code == 200
+    assert create.status_code == 200, create.text
     body = create.json()
     assert body["template"] == "rsi_reversal"
     assert body["enabled"] is False
@@ -107,24 +147,27 @@ def test_admin_and_pro_can_create_list_update_delete(client, db, auth_headers, u
     assert client.get("/api/strategies", headers=auth_headers).json()["strategies"] == []
 
 
-def test_max_strategies_per_user_enforced(client, db, auth_headers, user):
+def test_max_strategies_per_user_enforced(client, db, auth_headers, user, monkeypatch):
     _make_admin_pro(db, user)
+    _feed(monkeypatch)
     for i in range(3):
         res = client.post(
             "/api/strategies", headers=auth_headers,
-            json={"template": "ma_cross", "symbol": "XAUUSD", "interval": "15", "params": {}},
+            json={"template": "ma_cross", "symbols": ["XAUUSD"], "intervals": ["15"]},
         )
         assert res.status_code == 200, f"strategy #{i} should succeed"
     fourth = client.post(
         "/api/strategies", headers=auth_headers,
-        json={"template": "ma_cross", "symbol": "XAUUSD", "interval": "15", "params": {}},
+        json={"template": "ma_cross", "symbols": ["XAUUSD"], "intervals": ["15"]},
     )
     assert fourth.status_code == 400
 
 
 def test_cannot_update_or_delete_another_users_strategy(client, db, auth_headers, user):
     _make_admin_pro(db, user)
-    other = UserStrategy(user_id="someone-else", template="ma_cross", symbol="XAUUSD", interval="15", params="{}")
+    other = UserStrategy(user_id="someone-else", template="ma_cross", symbol="XAUUSD", interval="15",
+                         symbols='["XAUUSD"]', intervals='["15"]',
+                         rules=json.dumps(presets.PRESET_RULES["ma_cross"]), params="{}")
     db.add(other)
     db.commit()
     db.refresh(other)
@@ -133,18 +176,20 @@ def test_cannot_update_or_delete_another_users_strategy(client, db, auth_headers
     assert client.delete(f"/api/strategies/{other.id}", headers=auth_headers).status_code == 404
 
 
-def test_backtest_reports_insufficient_data_with_no_candle_history(client, db, auth_headers, user):
+def test_backtest_reports_insufficient_data_with_no_candle_history(client, db, auth_headers, user, monkeypatch):
     _make_admin_pro(db, user)
+    _feed(monkeypatch)
     res = client.post(
         "/api/strategies/backtest", headers=auth_headers,
-        json={"template": "ma_cross", "symbol": "XAUUSD", "interval": "15", "params": {}},
+        json={"template": "ma_cross", "symbol": "XAUUSD", "interval": "15"},
     )
     assert res.status_code == 200
     assert res.json()["insufficientData"] is True
 
 
-def test_backtest_runs_against_seeded_candle_history(client, db, auth_headers, user):
+def test_backtest_runs_against_seeded_candle_history(client, db, auth_headers, user, monkeypatch):
     _make_admin_pro(db, user)
+    _feed(monkeypatch)
     now = datetime.now(timezone.utc)
     for i in range(60):
         t = int((now - timedelta(minutes=15 * (60 - i))).timestamp())
@@ -153,7 +198,7 @@ def test_backtest_runs_against_seeded_candle_history(client, db, auth_headers, u
 
     res = client.post(
         "/api/strategies/backtest", headers=auth_headers,
-        json={"template": "ma_cross", "symbol": "XAUUSD", "interval": "15", "params": {"fastPeriod": 3, "slowPeriod": 8}},
+        json={"template": "ma_cross", "symbol": "XAUUSD", "interval": "15"},
     )
     assert res.status_code == 200
     body = res.json()
@@ -184,6 +229,7 @@ def test_backtest_returns_most_recent_bars_when_history_exceeds_cap(client, db, 
     # slicing logic under test is never reached.
     monkeypatch.setattr(strategies_router, "MAX_BACKTEST_BARS", 40)
     _make_admin_pro(db, user)
+    _feed(monkeypatch)
     now = datetime.now(timezone.utc)
     # 插 120 根,是容量上限(40)的 3 倍——全部已收盘、全部落在 90 天默认窗口内。
     # Insert 120 bars, 3x the cap — all closed, all within the default 90-day window.
@@ -192,15 +238,32 @@ def test_backtest_returns_most_recent_bars_when_history_exceeds_cap(client, db, 
         db.add(Candle(symbol="XAUUSD", interval="15", t=t, o=100, h=101, l=99, c=100, v=1))
     db.commit()
 
+    # 响应不再回传 bars（体积），改为截获真正交给回测引擎的那一段——被测的截取
+    # 逻辑本身没变，只是观测点从响应体挪到了引擎入参。
+    # The response no longer echoes bars (size), so capture the slice actually
+    # handed to the engine: the slicing logic under test is unchanged, only the
+    # observation point moved from the body to the engine's argument.
+    from app.services.strategy import backtest as bt
+
+    seen = {}
+    real = bt.run_backtest
+
+    def _capturing(bars, *a, **kw):
+        seen["times"] = [b["t"] for b in bars]
+        return real(bars, *a, **kw)
+
+    monkeypatch.setattr(strategies_router, "run_backtest", _capturing)
+
     res = client.post(
         "/api/strategies/backtest", headers=auth_headers,
-        json={"template": "ma_cross", "symbol": "XAUUSD", "interval": "15", "params": {}},
+        json={"template": "ma_cross", "symbol": "XAUUSD", "interval": "15"},
     )
     assert res.status_code == 200
     body = res.json()
     assert body["insufficientData"] is False
-    returned_times = [b["t"] for b in body["bars"]]
+    returned_times = seen["times"]
     assert len(returned_times) == 40
+    assert body["barsUsed"] == 40
     # 必须是最新的 40 根(最接近"现在"),不是最早插入的那 40 根。
     # Must be the newest 40 bars (closest to "now"), not the earliest 40 inserted.
     assert returned_times == sorted(all_times)[-40:]
@@ -211,7 +274,9 @@ def test_backtest_returns_most_recent_bars_when_history_exceeds_cap(client, db, 
 
 def test_list_my_signals_only_returns_current_user_rows(client, db, auth_headers, user):
     _make_admin(db, user)
-    strat = UserStrategy(user_id=user.id, template="ma_cross", symbol="XAUUSD", interval="15", params="{}")
+    strat = UserStrategy(user_id=user.id, template="ma_cross", symbol="XAUUSD", interval="15",
+                         symbols='["XAUUSD"]', intervals='["15"]',
+                         rules=json.dumps(presets.PRESET_RULES["ma_cross"]), params="{}")
     db.add(strat)
     db.commit()
     db.refresh(strat)
@@ -227,7 +292,9 @@ def test_list_my_signals_only_returns_current_user_rows(client, db, auth_headers
 
 def test_clear_my_signals_only_deletes_current_user_rows(client, db, auth_headers, user):
     _make_admin(db, user)
-    strat = UserStrategy(user_id=user.id, template="ma_cross", symbol="XAUUSD", interval="15", params="{}")
+    strat = UserStrategy(user_id=user.id, template="ma_cross", symbol="XAUUSD", interval="15",
+                         symbols='["XAUUSD"]', intervals='["15"]',
+                         rules=json.dumps(presets.PRESET_RULES["ma_cross"]), params="{}")
     db.add(strat)
     db.commit()
     db.refresh(strat)
@@ -498,3 +565,447 @@ def test_disabled_strategy_never_fires(client, db, auth_headers, user, monkeypat
         json={"mode": "backfill", "series": [{"symbol": "XAUUSD", "interval": "1", "bars": bars}]},
     )
     assert db.query(StrategySignal).count() == 0
+
+
+# ---------- 模板清单单一来源 / single source of truth for the template list ----------
+
+def test_schema_template_list_is_engine_owned():
+    """schemas 不再自己抄一份模板清单——它引用引擎侧的 TEMPLATE_KEYS。
+    schemas no longer keeps its own copy of the template list; it references the
+    engine-side TEMPLATE_KEYS."""
+    from app import schemas
+
+    assert schemas.STRATEGY_TEMPLATES is presets.TEMPLATE_KEYS
+
+
+def test_unknown_template_rejected_by_schema(client, db, auth_headers, user):
+    _make_pro(db, user)
+    res = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"template": "not_a_template", "symbols": ["XAUUSD"], "intervals": ["15"]},
+    )
+    assert res.status_code == 422
+
+
+# ---------- AST 形态的 CRUD / AST-shaped CRUD ----------
+
+def test_create_with_explicit_ast(client, db, auth_headers, user, monkeypatch):
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    res = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"name": "自定义", "rules": _AST, "symbols": ["XAUUSD"], "intervals": ["15", "60"]},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["rules"] == _AST
+    assert body["symbols"] == ["XAUUSD"]
+    assert sorted(body["intervals"]) == ["15", "60"]
+    assert body["template"] is None
+
+
+def test_create_from_template_fills_preset_ast(client, db, auth_headers, user, monkeypatch):
+    """只传 template 不传 rules 时，服务端用该模板的预设 AST 落库——模板降级为
+    "AST 的一组预设值"，落库后与手写 AST 无区别。
+    Passing only a template fills in that template's preset AST: a template is
+    just a set of preset values for the rules column."""
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    res = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"template": "ma_cross", "symbols": ["XAUUSD"], "intervals": ["15"]},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["rules"] == presets.PRESET_RULES["ma_cross"]
+
+
+def test_create_syncs_strategy_watch_rows(client, db, auth_headers, user, monkeypatch):
+    _make_pro(db, user)
+    _feed(monkeypatch, ("XAUUSD", "EURUSD"))
+    res = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"rules": _AST, "symbols": ["XAUUSD", "EURUSD"], "intervals": ["15", "60"]},
+    )
+    assert res.status_code == 200, res.text
+    sid = res.json()["id"]
+    triples = {
+        (w.symbol, w.interval)
+        for w in db.query(StrategyWatch).filter(StrategyWatch.strategy_id == sid).all()
+    }
+    assert triples == {("XAUUSD", "15"), ("XAUUSD", "60"), ("EURUSD", "15"), ("EURUSD", "60")}
+
+
+def test_update_replaces_strategy_watch_rows(client, db, auth_headers, user, monkeypatch):
+    _make_pro(db, user)
+    _feed(monkeypatch, ("XAUUSD", "EURUSD"))
+    sid = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"rules": _AST, "symbols": ["XAUUSD"], "intervals": ["15"]},
+    ).json()["id"]
+    res = client.patch(
+        f"/api/strategies/{sid}",
+        headers=auth_headers,
+        json={"symbols": ["EURUSD"], "intervals": ["60"]},
+    )
+    assert res.status_code == 200, res.text
+    triples = {
+        (w.symbol, w.interval)
+        for w in db.query(StrategyWatch).filter(StrategyWatch.strategy_id == sid).all()
+    }
+    assert triples == {("EURUSD", "60")}
+
+
+def test_delete_strategy_removes_watch_rows(client, db, auth_headers, user, monkeypatch):
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    sid = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"rules": _AST, "symbols": ["XAUUSD"], "intervals": ["15"]},
+    ).json()["id"]
+    assert client.delete(f"/api/strategies/{sid}", headers=auth_headers).status_code == 200
+    assert db.query(StrategyWatch).filter(StrategyWatch.strategy_id == sid).count() == 0
+
+
+# ---------- 400 错误的具体性 / specificity of the 400s ----------
+
+def test_invalid_ast_returns_400_naming_the_violation(client, db, auth_headers, user, monkeypatch):
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    bad = {"long": {"logic": "AND", "children": [
+        {"left": {"kind": "indicator", "fn": "no_such_indicator", "params": {}},
+         "op": "gt", "right": {"kind": "const", "value": 1}}
+    ]}, "short": None}
+    res = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"rules": bad, "symbols": ["XAUUSD"], "intervals": ["15"]},
+    )
+    assert res.status_code == 400
+    assert "no_such_indicator" in res.json()["detail"]
+
+
+def test_rules_referencing_unsubscribed_interval_returns_400(client, db, auth_headers, user, monkeypatch):
+    """AST 引用了策略没订阅的周期：400 并点名那个周期，而不是上线后静默不触发。
+    An AST referencing an interval the strategy doesn't subscribe to 400s and
+    names it, instead of silently never firing once enabled."""
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    rules = {"long": {"logic": "AND", "children": [
+        {"left": {"kind": "indicator", "fn": "sma", "params": {"period": 5}, "interval": "240"},
+         "op": "gt", "right": {"kind": "const", "value": 1}}
+    ]}, "short": None}
+    res = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"rules": rules, "symbols": ["XAUUSD"], "intervals": ["15"]},
+    )
+    assert res.status_code == 400
+    assert "240" in res.json()["detail"]
+
+
+def test_unfed_symbol_returns_400_not_empty_result(client, db, auth_headers, user, monkeypatch):
+    """未接入品种直接 400 并点名该品种，而不是照样建好、等回测时才吐
+    insufficientData。An unfed symbol 400s and names the symbol, instead of
+    saving fine and only surfacing insufficientData at backtest time."""
+    _make_pro(db, user)
+    _feed(monkeypatch, ("XAUUSD",))
+    res = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"rules": _AST, "symbols": ["NOPE"], "intervals": ["15"]},
+    )
+    assert res.status_code == 400
+    assert "NOPE" in res.json()["detail"]
+
+
+def test_too_many_symbols_returns_400_naming_the_limit(client, db, auth_headers, user, monkeypatch):
+    _make_pro(db, user)
+    _feed(monkeypatch, ("S1", "S2", "S3", "S4", "S5", "S6"))
+    res = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"rules": _AST, "symbols": ["S1", "S2", "S3", "S4", "S5", "S6"], "intervals": ["15"]},
+    )
+    assert res.status_code == 400
+    assert "5" in res.json()["detail"]
+
+
+def test_too_many_intervals_returns_400(client, db, auth_headers, user, monkeypatch):
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    res = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"rules": _AST, "symbols": ["XAUUSD"], "intervals": ["1", "5", "15", "60"]},
+    )
+    assert res.status_code == 400
+    assert "3" in res.json()["detail"]
+
+
+def test_empty_symbols_returns_400(client, db, auth_headers, user, monkeypatch):
+    """一个品种都不选：400 而不是建出一条永远不会被评估的策略。
+    No symbols at all: 400 rather than a strategy that can never be evaluated."""
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    res = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"rules": _AST, "symbols": [], "intervals": ["15"]},
+    )
+    assert res.status_code == 400
+
+
+def test_neither_rules_nor_template_returns_400(client, db, auth_headers, user, monkeypatch):
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    res = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"symbols": ["XAUUSD"], "intervals": ["15"]},
+    )
+    assert res.status_code == 400
+
+
+# ---------- 回测端点 / backtest endpoint ----------
+
+def _seed_candles(db, symbol="XAUUSD", interval="15", count=200):
+    """种一段单调上行的 K 线，够指标预热也够样本内外都出交易。
+    Seed a monotonically rising series: enough for indicator warm-up and for
+    both samples to produce trades."""
+    base = int((datetime.now(timezone.utc) - timedelta(days=10)).timestamp())
+    for i in range(count):
+        px = 2000.0 + i * 0.5
+        db.add(Candle(
+            symbol=symbol, interval=interval, t=base + i * 900,
+            o=px, h=px + 0.4, l=px - 0.4, c=px + 0.2, v=10,
+        ))
+    db.commit()
+
+
+def test_backtest_accepts_ast_and_returns_both_samples(client, db, auth_headers, user, monkeypatch):
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    _seed_candles(db)
+    res = client.post(
+        "/api/strategies/backtest",
+        headers=auth_headers,
+        json={"rules": _AST, "symbol": "XAUUSD", "interval": "15", "days": 30},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    for key in ("summary", "inSample", "outOfSample", "overfitRisk", "totalCost", "withoutCosts", "coverage"):
+        assert key in body
+
+
+def test_backtest_response_omits_full_bars(client, db, auth_headers, user, monkeypatch):
+    """响应不再原样回传全部 bars——只回绘图所需的净值点与交易点。
+    The response no longer echoes every bar; only equity/trade points needed for
+    the chart."""
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    _seed_candles(db)
+    body = client.post(
+        "/api/strategies/backtest",
+        headers=auth_headers,
+        json={"rules": _AST, "symbol": "XAUUSD", "interval": "15", "days": 30},
+    ).json()
+    assert "bars" not in body
+
+
+def test_backtest_includes_coverage_and_actual_range(client, db, auth_headers, user, monkeypatch):
+    """请求 365 天但库里只有 10 天时，响应里能看出实际用到多少。
+    Asking for 365 days with only 10 in store: the response says what was
+    actually used."""
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    _seed_candles(db)
+    body = client.post(
+        "/api/strategies/backtest",
+        headers=auth_headers,
+        json={"rules": _AST, "symbol": "XAUUSD", "interval": "15", "days": 365},
+    ).json()
+    assert body["requestedDays"] == 365
+    assert body["coverage"]["spanDays"] < 365
+    assert body["barsUsed"] > 0
+
+
+def test_backtest_on_unfed_symbol_returns_400(client, db, auth_headers, user, monkeypatch):
+    _make_pro(db, user)
+    _feed(monkeypatch, ("XAUUSD",))
+    res = client.post(
+        "/api/strategies/backtest",
+        headers=auth_headers,
+        json={"rules": _AST, "symbol": "NOPE", "interval": "15", "days": 30},
+    )
+    assert res.status_code == 400
+    assert "NOPE" in res.json()["detail"]
+
+
+def test_backtest_second_identical_request_is_cached(client, db, auth_headers, user, monkeypatch):
+    """同一 (AST, 品种, 周期, 天数, 成本版本) 的重复请求直接吃缓存，不再算一遍。
+    A repeat of the same (AST, symbol, interval, days, cost version) is served
+    from cache instead of recomputed."""
+    from app.core import strategy_limits as sl
+    from app.services.strategy import backtest as bt
+
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    _seed_candles(db)
+    sl.cache_clear()
+    calls = {"n": 0}
+    real = bt.run_backtest
+
+    def _counting(*a, **kw):
+        calls["n"] += 1
+        return real(*a, **kw)
+
+    monkeypatch.setattr(strategies_router, "run_backtest", _counting)
+    payload = {"rules": _AST, "symbol": "XAUUSD", "interval": "15", "days": 30}
+    first = client.post("/api/strategies/backtest", headers=auth_headers, json=payload)
+    second = client.post("/api/strategies/backtest", headers=auth_headers, json=payload)
+    assert first.status_code == second.status_code == 200
+    assert calls["n"] == 1
+    assert second.json()["cached"] is True
+
+
+def test_backtest_over_cost_cap_returns_400(client, db, auth_headers, user, monkeypatch):
+    """bars 数 × 条件数超硬上限时 400，不让单次请求占满 CPU。
+    400 when bars x conditions exceeds the hard cap, so one request can't peg
+    the CPU."""
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    _seed_candles(db)
+    monkeypatch.setattr(settings, "MAX_BACKTEST_COST_UNITS", 1)
+    res = client.post(
+        "/api/strategies/backtest",
+        headers=auth_headers,
+        json={"rules": _AST, "symbol": "XAUUSD", "interval": "15", "days": 30},
+    )
+    assert res.status_code == 400
+
+
+# ---------- 绩效端点 / performance endpoint ----------
+
+def _seed_signals(db, user, strategy_id, results):
+    base = int(datetime.now(timezone.utc).timestamp())
+    for i, r in enumerate(results):
+        db.add(StrategySignal(
+            strategy_id=strategy_id, user_id=user.id, symbol="XAUUSD", interval="15",
+            side="BUY", entry=2000.0, stop_loss=1990.0, take_profit=2020.0,
+            bar_t=base + i * 900, result=r,
+            resolved_at=None if r == "PENDING" else datetime.now(timezone.utc),
+        ))
+    db.commit()
+
+
+def _new_strategy(client, auth_headers):
+    res = client.post(
+        "/api/strategies", headers=auth_headers,
+        json={"rules": _AST, "symbols": ["XAUUSD"], "intervals": ["15"]},
+    )
+    assert res.status_code == 200, res.text
+    return res.json()["id"]
+
+
+def test_performance_hides_percentages_below_sample_threshold(client, db, auth_headers, user, monkeypatch):
+    """1 胜 0 负不能呈现为 100%——不足 10 笔一律不给百分比。
+    1-0 must not read as 100%: no percentages below 10 resolved trades."""
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    sid = _new_strategy(client, auth_headers)
+    _seed_signals(db, user, sid, ["HIT_TP"])
+    body = client.get(f"/api/strategies/{sid}/performance", headers=auth_headers).json()
+    assert body["resolved"] == 1
+    assert body["insufficientSample"] is True
+    assert body["winRate"] is None
+    assert body["avgRr"] is None
+    assert body["sampleThreshold"] == 10
+
+
+def test_performance_reports_win_rate_at_threshold(client, db, auth_headers, user, monkeypatch):
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    sid = _new_strategy(client, auth_headers)
+    _seed_signals(db, user, sid, ["HIT_TP"] * 6 + ["HIT_SL"] * 4)
+    body = client.get(f"/api/strategies/{sid}/performance", headers=auth_headers).json()
+    assert body["resolved"] == 10
+    assert body["insufficientSample"] is False
+    assert body["winRate"] == pytest.approx(0.6)
+    assert body["maxLossStreak"] == 4
+
+
+def test_performance_excludes_pending_and_stale_counts_timeout(client, db, auth_headers, user, monkeypatch):
+    """PENDING 与 STALE 不进分母，TIMEOUT 进分母但单列计数（无出场价可判方向）。
+    PENDING and STALE stay out of the denominator; TIMEOUT counts in it but is
+    tallied separately (no exit price to judge direction)."""
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    sid = _new_strategy(client, auth_headers)
+    _seed_signals(db, user, sid, ["HIT_TP", "HIT_SL", "TIMEOUT", "STALE", "PENDING"])
+    body = client.get(f"/api/strategies/{sid}/performance", headers=auth_headers).json()
+    assert (body["wins"], body["losses"], body["timeouts"]) == (1, 1, 1)
+    assert body["resolved"] == 3
+    assert body["pending"] == 1
+
+
+def test_performance_404_for_another_users_strategy(client, db, auth_headers, user):
+    """跨用户读绩效返回 404 而不是 403：403 会确认"这个 id 确实存在"。
+    Reading another user's performance is a 404, not a 403 — a 403 would confirm
+    the id exists."""
+    other = UserStrategy(user_id="someone-else", symbols='["XAUUSD"]', intervals='["15"]',
+                         symbol="XAUUSD", interval="15", template="ma_cross",
+                         rules=json.dumps(_AST), params="{}")
+    db.add(other)
+    db.commit()
+    db.refresh(other)
+    assert client.get(f"/api/strategies/{other.id}/performance", headers=auth_headers).status_code == 404
+
+
+def test_another_users_token_cannot_read_or_mutate_my_strategy(client, db, auth_headers, user, monkeypatch):
+    """用真实的第二个用户的 token 访问用户 A 的策略：读绩效/改/删一律 404，
+    且不会误删 A 的 watch 行。
+    With a real second user's token, every access to user A's strategy 404s and
+    A's watch rows survive."""
+    from app.core.security import create_access_token, generate_api_token, hash_api_token
+    from app.models import User
+
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    sid = _new_strategy(client, auth_headers)
+
+    intruder = User(
+        email="intruder@example.com", password_hash="x", plan="PRO",
+        api_token=hash_api_token(generate_api_token()),
+    )
+    db.add(intruder)
+    db.commit()
+    db.refresh(intruder)
+    intruder_headers = {"Authorization": f"Bearer {create_access_token(intruder.id)}"}
+
+    assert client.get(f"/api/strategies/{sid}/performance", headers=intruder_headers).status_code == 404
+    assert client.patch(f"/api/strategies/{sid}", headers=intruder_headers, json={"enabled": True}).status_code == 404
+    assert client.delete(f"/api/strategies/{sid}", headers=intruder_headers).status_code == 404
+    # 入侵者的策略列表里看不到这条，A 的 watch 行也还在。
+    # The intruder's list doesn't contain it, and A's watch rows are intact.
+    assert client.get("/api/strategies", headers=intruder_headers).json()["strategies"] == []
+    assert db.query(StrategyWatch).filter(StrategyWatch.strategy_id == sid).count() == 1
+    assert db.query(UserStrategy).filter(UserStrategy.id == sid).first() is not None
+
+
+def test_performance_only_counts_this_strategys_signals(client, db, auth_headers, user, monkeypatch):
+    """同一用户的另一条策略的信号不能算进本策略的绩效。
+    Signals from the same user's other strategy mustn't count here."""
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    mine = _new_strategy(client, auth_headers)
+    other = _new_strategy(client, auth_headers)
+    _seed_signals(db, user, mine, ["HIT_TP", "HIT_SL"])
+    _seed_signals(db, user, other, ["HIT_SL"] * 5)
+    body = client.get(f"/api/strategies/{mine}/performance", headers=auth_headers).json()
+    assert (body["wins"], body["losses"]) == (1, 1)

@@ -538,7 +538,10 @@ class UserStrategy(Base):
 
     id = Column(String, primary_key=True, default=_uuid)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
-    template = Column(String, nullable=False)  # ma_cross / rsi_reversal / bollinger_reversion
+    # 纯自定义 AST 的策略没有起源模板，因此可空；有值时表示"从哪个预设起步"。
+    # A pure-custom-AST strategy has no originating preset, hence nullable; when
+    # set, it records which preset the strategy started from.
+    template = Column(String, nullable=True)  # ma_cross / rsi_reversal / bollinger_reversion
     # 用户自定义名称，留空则前端按模板名兜底展示 / user-given name; falls back to the template label when empty
     name = Column(String, nullable=True)
     symbol = Column(String, nullable=False)
