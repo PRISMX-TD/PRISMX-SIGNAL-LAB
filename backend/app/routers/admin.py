@@ -20,24 +20,27 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategySettings, AdminTrialSettings, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminTrialSettings, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut
 from app.services.deps import require_admin
 from app.services.settings_store import (
     get_broker_settings,
     get_candle_settings,
     get_discipline_settings,
     get_pricing_settings,
+    get_strategy_costs,
     get_strategy_settings,
     get_trial_settings,
     invalidate_candle_cache,
     invalidate_discipline_cache,
     invalidate_pricing_cache,
     invalidate_settings_cache,
+    invalidate_strategy_costs_cache,
     invalidate_strategy_settings_cache,
     invalidate_trial_cache,
     save_candle_settings,
     save_discipline_settings,
     save_pricing_settings,
+    save_strategy_costs,
     save_strategy_settings,
     save_trial_settings,
     set_setting,
@@ -687,3 +690,59 @@ def put_strategy_platform_settings(
     db.commit()
     invalidate_strategy_settings_cache()
     return get_strategy_platform_settings(db, admin)
+
+
+# ---------- 策略交易成本设置 / strategy trading-cost settings ----------
+
+@router.get("/strategy-costs", response_model=AdminStrategyCosts)
+def get_strategy_cost_settings(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """读取策略回测/实盘的交易成本配置。
+    Read the trading-cost config used by strategy backtests and live eval."""
+    c = get_strategy_costs(db)
+    per_symbol = [
+        AdminStrategyCostEntry(
+            symbol=sym,
+            spread=float(v.get("spread", c["default_spread"])),
+            commissionPerLot=float(v.get("commissionPerLot", c["default_commission_per_lot"])),
+            slippage=float(v.get("slippage", c["default_slippage"])),
+        )
+        for sym, v in sorted((c.get("per_symbol") or {}).items())
+    ]
+    return AdminStrategyCosts(
+        defaultSpread=float(c["default_spread"]),
+        defaultCommissionPerLot=float(c["default_commission_per_lot"]),
+        defaultSlippage=float(c["default_slippage"]),
+        perSymbol=per_symbol,
+    )
+
+
+@router.put("/strategy-costs", response_model=AdminStrategyCosts)
+def put_strategy_cost_settings(
+    body: AdminStrategyCosts,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """保存交易成本配置：写审计日志、提交后失效缓存，与 candle-history 同构。
+    Save the trading-cost config: audit-logged, cache invalidated after commit;
+    same shape as the candle-history endpoint."""
+    data = {
+        "default_spread": body.defaultSpread,
+        "default_commission_per_lot": body.defaultCommissionPerLot,
+        "default_slippage": body.defaultSlippage,
+        "per_symbol": {
+            e.symbol.upper(): {
+                "spread": e.spread,
+                "commissionPerLot": e.commissionPerLot,
+                "slippage": e.slippage,
+            }
+            for e in body.perSymbol
+        },
+    }
+    save_strategy_costs(db, data)
+    _log_change(db, admin.id, admin.id, "setting:strategy_costs", None, json.dumps(data))
+    db.commit()
+    invalidate_strategy_costs_cache()
+    return get_strategy_cost_settings(db, admin)

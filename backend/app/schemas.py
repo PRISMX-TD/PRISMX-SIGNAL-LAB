@@ -184,6 +184,28 @@ class AdminStrategySettings(BaseModel):
     proOnly: bool = Field(default=True)
 
 
+class AdminStrategyCostEntry(BaseModel):
+    """单个品种的成本覆盖项 / one symbol's cost override."""
+
+    symbol: str = Field(pattern=SYMBOL_PATTERN)
+    spread: float = Field(ge=0, le=10_000)
+    commissionPerLot: float = Field(ge=0, le=10_000)
+    slippage: float = Field(ge=0, le=10_000)
+
+
+class AdminStrategyCosts(BaseModel):
+    """策略回测/实盘的交易成本配置。点差与滑点为价格单位；手续费为一手往返
+    合计、折算到价格单位（见 services/strategy/costs.py）。
+    Trading-cost config for strategy backtests and live evaluation. Spread and
+    slippage are price units; commission is per lot, round trip, in price units
+    (see services/strategy/costs.py)."""
+
+    defaultSpread: float = Field(default=0.2, ge=0, le=10_000)
+    defaultCommissionPerLot: float = Field(default=0.0, ge=0, le=10_000)
+    defaultSlippage: float = Field(default=0.05, ge=0, le=10_000)
+    perSymbol: list[AdminStrategyCostEntry] = Field(default_factory=list)
+
+
 # ---------- 自定义策略 / User strategies ----------
 class StrategyCreate(BaseModel):
     template: Literal["ma_cross", "rsi_reversal", "bollinger_reversion", "macd_cross", "ma_pullback", "bollinger_breakout", "rsi_momentum", "donchian_breakout", "momentum_breakout", "trend_rsi_filter"]

@@ -390,6 +390,76 @@ def save_strategy_settings(db, data: dict) -> None:
         row.value = encoded
 
 
+# 交易成本默认值。点差/滑点为价格单位；手续费为「一手往返合计、折算到价格
+# 单位」——回测在价格空间结算（见 strategy/backtest.py），不引入合约规模与
+# 点值假设，故手续费必须与价格同量纲。per_symbol 为 品种 -> 覆盖项 的映射，
+# 缺失的字段逐项回落到 default_*。
+# Trading-cost defaults. Spread/slippage are in price units; commission is
+# "per lot, round trip, expressed in price units" — the backtest settles in
+# price space (see strategy/backtest.py) and deliberately assumes no contract
+# size or point value, so commission has to share the price unit. per_symbol
+# maps symbol -> overrides, each missing field falling back to its default_*.
+STRATEGY_COST_DEFAULTS: dict = {
+    "default_spread": 0.2,
+    "default_commission_per_lot": 0.0,
+    "default_slippage": 0.05,
+    "per_symbol": {},
+}
+
+_strategy_costs_cache: dict = {}
+_strategy_costs_cache_at: float = 0.0
+
+
+def invalidate_strategy_costs_cache() -> None:
+    global _strategy_costs_cache_at
+    with _lock:
+        _strategy_costs_cache_at = 0.0
+
+
+def _load_strategy_costs_from_db(db) -> dict:
+    data = dict(STRATEGY_COST_DEFAULTS)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "strategy_costs").first()
+    if row:
+        try:
+            stored = json.loads(row.value)
+            if isinstance(stored, dict):
+                for k in STRATEGY_COST_DEFAULTS:
+                    if k in stored:
+                        data[k] = stored[k]
+        except (ValueError, TypeError):
+            logger.warning("platform_settings: invalid JSON for strategy_costs, using defaults")
+    if not isinstance(data.get("per_symbol"), dict):
+        data["per_symbol"] = {}
+    return data
+
+
+def get_strategy_costs(db) -> dict:
+    """读取按品种的交易成本配置（独立缓存，与其他设置段互不影响）。
+    Read the per-symbol trading-cost config (its own cache, independent of the
+    other settings sections)."""
+    global _strategy_costs_cache, _strategy_costs_cache_at
+    now = time.time()
+    with _lock:
+        if _strategy_costs_cache and now - _strategy_costs_cache_at < _CACHE_TTL_SECONDS:
+            return dict(_strategy_costs_cache)
+    data = _load_strategy_costs_from_db(db)
+    with _lock:
+        _strategy_costs_cache = data
+        _strategy_costs_cache_at = now
+    return dict(data)
+
+
+def save_strategy_costs(db, data: dict) -> None:
+    merged = _load_strategy_costs_from_db(db)
+    merged.update(data)
+    encoded = json.dumps(merged, ensure_ascii=False)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "strategy_costs").first()
+    if row is None:
+        db.add(PlatformSetting(key="strategy_costs", value=encoded))
+    else:
+        row.value = encoded
+
+
 def set_setting(db, key: str, value) -> None:
     """写入单个设置项（不提交事务，调用方负责 commit 后再 invalidate）。
     Write one setting (no commit; caller commits, then invalidates the cache)."""
