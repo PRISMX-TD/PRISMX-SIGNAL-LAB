@@ -126,3 +126,40 @@ def test_coverage_endpoint_rejects_unknown_interval(client, db, auth_headers, us
 
 def test_coverage_endpoint_requires_auth(client, db):
     assert client.get("/api/strategies/coverage").status_code in (401, 403)
+
+
+def test_coverage_endpoint_defaults_to_all_active_symbols(client, db, auth_headers, user, monkeypatch):
+    """不传 symbols 时必须能查全部已接入品种，即使数量超过单条策略的品种上限。
+
+    生产上线时这里 400 了：平台接入 7 个品种，而端点拿 MAX_SYMBOLS（单条策略最多
+    盯 5 个品种，用途是控制实时评估的计算量）去卡这个只读聚合查询，导致默认分支
+    在品种数 > 5 时永远失败。覆盖度的用途正是"把未接入品种置灰"，天然要看全部。
+    原有端点测试全部显式传 symbols=XAUUSD，从未走到这条默认分支。
+
+    Omitting symbols must return every fed symbol, even when there are more than
+    one strategy may watch. This 400'd in production: with 7 fed symbols, the
+    endpoint applied MAX_SYMBOLS (a per-strategy watch cap that exists to bound
+    live-evaluation cost) to a read-only aggregate, so the default branch always
+    failed past 5 symbols. Greying out unfed symbols inherently needs them all.
+    The pre-existing endpoint tests all passed symbols=XAUUSD explicitly and
+    never reached this branch.
+    """
+    user.plan = "PRO"
+    db.commit()
+    seven = ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "EURGBP", "AUDUSD"]
+    monkeypatch.setattr("app.routers.strategies.active_symbols", lambda: seven)
+    _seed(db, count=8)
+    res = client.get("/api/strategies/coverage?intervals=15", headers=auth_headers)
+    assert res.status_code == 200
+    assert {r["symbol"] for r in res.json()["coverage"]} == set(seven)
+
+
+def test_coverage_endpoint_still_caps_an_explicit_symbol_list(client, db, auth_headers, user):
+    """放开默认分支后，显式传入的清单仍要有防滥用上限。
+    The anti-abuse cap must still apply to an explicitly requested list."""
+    user.plan = "PRO"
+    db.commit()
+    too_many = ",".join(f"SYM{i}" for i in range(cv.MAX_COVERAGE_SYMBOLS + 1))
+    res = client.get(f"/api/strategies/coverage?symbols={too_many}", headers=auth_headers)
+    assert res.status_code == 400
+    assert str(cv.MAX_COVERAGE_SYMBOLS) in res.json()["detail"]

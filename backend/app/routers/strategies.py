@@ -59,7 +59,12 @@ from app.services.deps import get_current_user
 from app.services.settings_store import get_strategy_settings
 from app.services.strategy import costs as ct
 from app.services.strategy.backtest import MIN_PERF_SAMPLE, ExitSpec, run_backtest
-from app.services.strategy.coverage import active_symbols, coverage_for, coverage_matrix
+from app.services.strategy.coverage import (
+    MAX_COVERAGE_SYMBOLS,
+    active_symbols,
+    coverage_for,
+    coverage_matrix,
+)
 from app.services.strategy.presets import (
     PRESET_RULES,
     TEMPLATE_SCHEMAS,
@@ -235,12 +240,26 @@ def get_coverage(
     requested, 47 days available" up front and to grey out unfed symbols.
     """
     _check_access(db, user)
-    sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()] or active_symbols()
+    asked = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    sym_list = asked or active_symbols()
     itv_list = [i.strip() for i in intervals.split(",") if i.strip()] or sorted(INTERVAL_SECONDS)
-    if len(sym_list) > MAX_SYMBOLS:
+    # 上限只约束显式传入的清单，不约束 active_symbols() 默认值。MAX_SYMBOLS 是
+    # "单条策略最多盯几个品种"（为了控制实时评估的计算量），拿它卡这个只读聚合
+    # 查询是张冠李戴：覆盖度的用途正是把未接入品种置灰，天然要看全部品种。上线
+    # 时平台接入 7 个品种，默认分支因此永远 400，整个策略页加载即失败。
+    # The cap applies only to an explicitly requested list, never to the
+    # active_symbols() default. MAX_SYMBOLS is a per-strategy watch cap (there to
+    # bound live-evaluation cost); applying it to this read-only aggregate was a
+    # category error, since greying out unfed symbols inherently needs them all.
+    # In production 7 symbols are fed, so the default branch always 400'd and the
+    # whole strategies page failed to load.
+    if len(asked) > MAX_COVERAGE_SYMBOLS:
         raise HTTPException(
             status_code=400,
-            detail=f"一次最多查询 {MAX_SYMBOLS} 个品种 / at most {MAX_SYMBOLS} symbols per request",
+            detail=(
+                f"一次最多查询 {MAX_COVERAGE_SYMBOLS} 个品种 / "
+                f"at most {MAX_COVERAGE_SYMBOLS} symbols per request"
+            ),
         )
     for itv in itv_list:
         if itv not in INTERVAL_SECONDS:

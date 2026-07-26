@@ -26,6 +26,18 @@ from app.services.candle_store import INTERVAL_SECONDS
 # perfectly normal series as riddled with gaps.
 GAP_TOLERANCE_MULTIPLIER = 1.5
 
+# 显式查询覆盖度时的品种数上限。刻意独立于 rules.MAX_SYMBOLS：后者是"单条策略最多
+# 盯几个品种"（约束实时评估的计算量），而这里是只读聚合查询，用途是把未接入品种
+# 置灰，必须能一次看完平台全部品种。取 32 是留足接入余量的防滥用护栏，不是业务规则；
+# 不传 symbols 时走 active_symbols() 全量，不受本上限约束。
+# Cap on symbols for an explicit coverage query. Deliberately separate from
+# rules.MAX_SYMBOLS: that one caps how many symbols a single strategy may watch
+# (bounding live-evaluation cost), whereas this is a read-only aggregate whose
+# purpose is greying out unfed symbols, so it must cover every fed symbol at
+# once. 32 is an anti-abuse guardrail with room to grow, not a business rule;
+# omitting symbols uses the full active_symbols() list and is not subject to it.
+MAX_COVERAGE_SYMBOLS = 32
+
 
 def active_symbols() -> list[str]:
     """当前有报价在推的品种。可用品种由 EA 端 InpSymbols 决定，后端不维护白名单，
