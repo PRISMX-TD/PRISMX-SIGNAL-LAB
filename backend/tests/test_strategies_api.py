@@ -693,6 +693,55 @@ def test_update_replaces_strategy_watch_rows(client, db, auth_headers, user, mon
     assert pairs == {("EURUSD", "60")}
 
 
+def test_legacy_ast_rules_are_served_as_empty_conditions(client, db, auth_headers, user, monkeypatch):
+    """旧 AST 结构的策略必须以合法条件结构发出，否则客户端读 conditions 会崩。
+
+    迁移只停用这类策略、不重写它们的 rules，所以库里会长期留着 {long, short} 这种
+    形状。此前接口把它原样发出，前端一点「编辑」就白屏。
+
+    A legacy-AST strategy must be served as a valid condition structure, or a
+    client reading `conditions` crashes. The migration only disables such
+    strategies without rewriting their rules, so shapes like {long, short} stay in
+    the database indefinitely. The endpoint used to serve them verbatim, blanking
+    the frontend the moment "edit" was clicked.
+    """
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    sid = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"rules": _rules(), "symbol": "XAUUSD", "interval": "15"},
+    ).json()["id"]
+    # 绕过接口直接写回旧结构：接口本身会拒绝它，而要复现的正是「库里已经存在」。
+    # Write the legacy shape straight to the row: the endpoint rejects it on the
+    # way in, and what's being reproduced is a row that already holds it.
+    row = db.query(UserStrategy).filter(UserStrategy.id == sid).one()
+    row.rules = json.dumps({
+        "long": {"logic": "AND", "children": [{"left": {"kind": "indicator"}, "op": "gt"}]},
+        "short": None,
+    })
+    db.commit()
+
+    for payload in (
+        client.get("/api/strategies", headers=auth_headers).json()["strategies"][0],
+        client.patch(f"/api/strategies/{sid}", headers=auth_headers, json={"name": "x"}).json(),
+    ):
+        rules = payload["rules"]
+        assert rules["conditions"] == []
+        assert rules["symbol"] == "XAUUSD"
+        assert rules["interval"] == "15"
+        # 发出的形状必须是新引擎认得的，只是没有条件——否则客户端仍要自己判形状。
+        # The shape served has to be one the new engine recognises, merely without
+        # conditions; otherwise clients still have to sniff the shape themselves.
+        assert rules["logic"] in ("AND", "OR")
+
+    # 库里的原始 rules 不被读接口改写：保留可读痕迹，也不做不可逆改动。
+    # Reading doesn't rewrite the stored rules: the trace stays readable and no
+    # irreversible change is made.
+    db.refresh(row)
+    assert "long" in json.loads(row.rules)
+
+
 def test_delete_strategy_removes_watch_rows(client, db, auth_headers, user, monkeypatch):
     _make_pro(db, user)
     _feed(monkeypatch)

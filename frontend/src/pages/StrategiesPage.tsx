@@ -88,6 +88,12 @@ interface Draft {
   // fields below: the backend 400s on a mismatch. Every place that changes the
   // symbol or interval therefore has to update all three.
   rules: ConditionPayload
+  // 这条策略是从旧 AST 结构载入的，条件已被换成初始值，需要用户重新配置后再保存。
+  // 只用于在编辑器里显示提示，不参与提交。
+  // This draft was loaded from a legacy AST strategy and its conditions were
+  // replaced with a starting value, so the user has to reconfigure before saving.
+  // Display-only; never submitted.
+  legacyRules?: boolean
   symbol: string
   interval: string
   stopLossMethod: StopLossMethod
@@ -138,12 +144,30 @@ function emptyDraft(symbol: string, interval: string, catalog: UsageCatalog): Dr
   }
 }
 
-function draftFromStrategy(s: UserStrategy): Draft {
+// 旧 AST 结构的策略在库里原样留着：迁移只把它们停用，没有重写 rules（旧 AST 的
+// 表达力超出新结构，自动映射只能是猜测）。所以接口照样会把 { long, short } 这种
+// 形状发过来，编辑器一读 rules.conditions 就是 undefined。
+// 这里识别出来并换成一条合法初始条件，配合 legacyRules 提示让用户重新配置——直接
+// 放行会让「点编辑就白屏」，而白屏比要求重配一次坏得多。
+// Legacy-AST strategies stay in the database as-is: the migration only disabled
+// them and left `rules` untouched (the old AST out-expresses the new structure,
+// so any mapping would be guesswork). The API therefore still serves shapes like
+// { long, short }, where the editor reads rules.conditions as undefined.
+// This detects them and substitutes one valid starting condition, paired with the
+// legacyRules notice so the user reconfigures — passing them through would mean a
+// blank screen on clicking edit, which is far worse than asking for a redo.
+const isLegacyRules = (rules: ConditionPayload | undefined | null): boolean =>
+  !rules || !Array.isArray(rules.conditions) || rules.conditions.length === 0
+
+function draftFromStrategy(s: UserStrategy, catalog: UsageCatalog): Draft {
+  const legacy = isLegacyRules(s.rules)
+  const base = emptyDraft(s.symbol, s.interval, catalog)
   return {
     id: s.id,
     template: s.template,
     name: s.name ?? '',
-    rules: s.rules,
+    rules: legacy ? base.rules : { ...s.rules, symbol: s.symbol, interval: s.interval },
+    legacyRules: legacy,
     symbol: s.symbol,
     interval: s.interval,
     stopLossMethod: s.stopLossMethod,
@@ -358,6 +382,16 @@ function StrategyEditor({
           editor for it, that has to be stated or users assume half is missing. */}
       <div className="mt-5 border-t border-white/10 pt-4">
         <h4 className="text-sm font-semibold text-slate-300">{t('strategy.sectionConditions')}</h4>
+        {/* 旧结构策略的条件已被换成初始值，不说清楚的话用户会以为自己原来的条件
+            还在，保存后才发现被替换了。
+            A legacy strategy's conditions were replaced with a starting value;
+            unsaid, the user assumes their original conditions survived and only
+            finds out after saving. */}
+        {draft.legacyRules && (
+          <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-300/5 px-3 py-2 text-xs text-amber-200/90">
+            {t('strategy.legacyRulesReset')}
+          </p>
+        )}
         <div className="mt-3">
           <ConditionList
             logic={draft.rules.logic}
@@ -728,7 +762,15 @@ export default function StrategiesPage() {
     setPicking(false)
   }
 
-  const openEditDraft = (s: UserStrategy) => setDraft(draftFromStrategy(s))
+  // 目录未到手时不开编辑器：旧结构策略要靠目录才能拿到合法的替代条件，没有它就
+  // 只能塞一份空条件，反而把「点编辑就崩」换成「保存必然 400」。
+  // Don't open the editor before the catalogue arrives: a legacy-structure
+  // strategy needs it to obtain a valid replacement condition, and without one
+  // we'd only trade "crashes on edit" for "guaranteed 400 on save".
+  const openEditDraft = (s: UserStrategy) => {
+    if (!catalog) return
+    setDraft(draftFromStrategy(s, catalog))
+  }
 
   const onSaved = (s: UserStrategy) => {
     setStrategies((prev) => {

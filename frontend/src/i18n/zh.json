@@ -1125,6 +1125,7 @@
     "symbolLabel": "品种",
     "intervalLabel": "周期",
     "singlePairHint": "一条策略盯一个品种的一个周期。想覆盖更多组合就多建几条，各自独立统计绩效。",
+    "legacyRulesReset": "这条策略是用旧版规则搭的，新版条件结构无法自动换算，原有条件没有保留。下面是一条初始条件，请重新配置后再保存启用。",
     "ind": {
       "ma": "均线 MA",
       "macd": "MACD",

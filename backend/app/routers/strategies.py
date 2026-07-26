@@ -161,10 +161,39 @@ def _sync_watches(db: Session, row: UserStrategy) -> None:
     db.add(StrategyWatch(strategy_id=row.id, symbol=row.symbol, interval=row.interval))
 
 
+def _rules_out(s: UserStrategy) -> dict:
+    """把存库的 rules 读成响应用的条件结构；不是新结构就返回空条件列表。
+
+    迁移刻意不重写旧 AST（表达力超出新结构，自动映射只能是猜测），只把策略停用。
+    但停用的策略照样要能被读取和编辑，于是旧形状会经这里发给客户端——客户端拿到
+    没有 conditions 的对象就崩了，实际表现是「点编辑白屏」。
+    这里统一收敛成合法形状：conditions 为空，客户端据此提示重新配置即可。库里的
+    原始 rules 不动，保留可读痕迹，也不做不可逆改写。
+
+    Read the stored rules into the response's condition structure, falling back to
+    an empty condition list when it isn't the new shape.
+
+    The migration deliberately leaves a legacy AST unrewritten (it out-expresses
+    the new structure, so any mapping is guesswork) and only disables the
+    strategy. Disabled strategies still have to be readable and editable, though,
+    so the old shape would travel to clients through here — and a client handed an
+    object with no `conditions` crashes, which shows up as a blank screen on edit.
+    This narrows it to a valid shape with empty conditions, letting the client
+    prompt for reconfiguration. The stored rules stay untouched, keeping a
+    readable trace and avoiding an irreversible rewrite.
+    """
+    raw = json.loads(s.rules or "{}")
+    try:
+        validate_conditions(raw)
+    except (ConditionError, ValueError, TypeError):
+        return {"logic": "AND", "symbol": s.symbol, "interval": s.interval, "conditions": []}
+    return raw
+
+
 def _to_out(s: UserStrategy) -> StrategyOut:
     return StrategyOut(
         id=s.id, template=s.template, name=s.name,
-        rules=json.loads(s.rules or "{}"),
+        rules=_rules_out(s),
         symbol=s.symbol,
         interval=s.interval,
         stopLossMethod=s.stop_loss_method, stopLossValue=s.stop_loss_value,
