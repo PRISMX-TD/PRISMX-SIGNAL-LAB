@@ -588,6 +588,34 @@ def test_unknown_template_rejected_by_schema(client, db, auth_headers, user):
     assert res.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("stopLossValue", 0),
+        ("stopLossValue", 5_000_000),
+        ("takeProfitValue", 0),
+        ("takeProfitValue", 5_000_000),
+    ],
+)
+def test_out_of_range_sl_tp_value_rejected_not_clamped(
+    client, db, auth_headers, user, monkeypatch, field, value
+):
+    """越界的止损/止盈数值必须被 Pydantic 直接拒绝（422），而不是像旧引擎那样
+    夹取到边界后照常落库——夹取会让用户以为自己填的值生效了。
+    Out-of-range SL/TP values must be rejected outright (422) instead of being
+    silently clamped to the bound the way the old engine did: clamping leaves the
+    user believing the value they typed took effect."""
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    res = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"rules": _AST, "symbols": ["XAUUSD"], "intervals": ["15"], field: value},
+    )
+    assert res.status_code == 422, res.text
+    assert db.query(UserStrategy).count() == 0
+
+
 # ---------- AST 形态的 CRUD / AST-shaped CRUD ----------
 
 def test_create_with_explicit_ast(client, db, auth_headers, user, monkeypatch):

@@ -89,6 +89,31 @@ def test_rejects_param_out_of_range_instead_of_clamping():
     assert "300" in str(exc.value)
 
 
+def test_rejects_macd_slow_period_not_above_fast():
+    """MACD 的快慢周期关系由校验拒绝，不再像旧引擎那样悄悄把 slow 顶到 fast+1：
+    夹取后用户拿到的是一条自己没设定的策略。
+    MACD's fast/slow relation is rejected at validation instead of being bumped to
+    fast+1 the way the old engine did: clamping hands the user a strategy they
+    never configured."""
+    ast = {
+        "logic": "AND",
+        "children": [
+            {
+                "left": {
+                    "kind": "indicator",
+                    "fn": "macd_dif",
+                    "params": {"fastPeriod": 26, "slowPeriod": 12, "signalPeriod": 9},
+                },
+                "op": "gt",
+                "right": {"kind": "const", "value": 0.0},
+            }
+        ],
+    }
+    with pytest.raises(RuleError) as exc:
+        validate_rules(ast)
+    assert "slowPeriod" in str(exc.value)
+
+
 def test_rejects_missing_required_param():
     ast = {
         "logic": "AND",

@@ -7,13 +7,14 @@ Preset-AST tests. The acceptance bar: for each of the 10 templates, the
 converted AST must produce a bar-for-bar identical signal series to the old
 engine on the same history. Also covers the new shift/scale operand fields.
 """
+import json
 import math
+import pathlib
 
 import pytest
 
 from app.services.strategy import presets as ps
 from app.services.strategy.rules import RuleError, evaluate_rules, validate_rules
-from app.services.strategy_engine import entry_signals, validate_and_clamp_params
 
 
 def _bars(closes, highs=None, lows=None, start_t=0, step=900):
@@ -145,14 +146,47 @@ EQUIV_CASES = [
 ]
 
 
+def _golden() -> dict:
+    """旧引擎在 _history() 上的信号序列快照。旧引擎删除后，「迁移后逐 bar 一致」
+    这条验收标准靠这个文件继续被验证——把基准从「另一份实现」换成「另一份实现在
+    删除前留下的输出」，断言强度不变。
+    Snapshot of the old engine's signal sequences over _history(). After the old
+    engine is deleted, this file keeps the "bar-for-bar identical after
+    migration" acceptance criterion verifiable: the baseline moves from another
+    implementation to that implementation's recorded output, with no loss of
+    assertion strength."""
+    path = pathlib.Path(__file__).parent / "golden_template_signals.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _golden_key(template, params, direction) -> str:
+    return f"{template}|{json.dumps(params, sort_keys=True)}|{direction}"
+
+
 @pytest.mark.parametrize("template,params", EQUIV_CASES)
 @pytest.mark.parametrize("direction", ["both", "long", "short"])
 def test_converted_ast_matches_old_engine_bar_for_bar(template, params, direction):
     bars = _history()
     raw = {**params, "direction": direction}
-    old = entry_signals(bars, template, validate_and_clamp_params(template, raw))
+    old = _golden()[_golden_key(template, params, direction)]
     new = ps.evaluate_strategy(bars, ps.template_to_ast(template, raw))
+    assert len(new) == len(bars)
     assert new == old
+
+
+def test_golden_snapshot_covers_every_equivalence_case():
+    """快照必须恰好覆盖 EQUIV_CASES × 三个方向。少一条会让对应断言 KeyError，
+    多一条说明 EQUIV_CASES 改过而快照没重新生成。
+    The snapshot must cover exactly EQUIV_CASES x three directions: a missing key
+    would KeyError, and an extra one means EQUIV_CASES changed without the
+    snapshot being regenerated."""
+    expected = {
+        _golden_key(t, p, d)
+        for t, p in EQUIV_CASES
+        for d in ("both", "long", "short")
+    }
+    assert set(_golden()) == expected
+    assert len(expected) == 33
 
 
 @pytest.mark.parametrize("template,params", EQUIV_CASES)
@@ -176,7 +210,7 @@ def test_rsi_momentum_midline_defaults_to_fifty_and_is_tunable():
     The old branch hardcoded a midline of 50; it's now a tunable constant
     defaulting to 50 so migrated strategies behave identically."""
     bars = _history()
-    old = entry_signals(bars, "rsi_momentum", validate_and_clamp_params("rsi_momentum", {"period": 14}))
+    old = _golden()[_golden_key("rsi_momentum", {"period": 14}, "both")]
     assert ps.evaluate_strategy(bars, ps.template_to_ast("rsi_momentum", {"period": 14})) == old
     shifted = ps.evaluate_strategy(
         bars, ps.template_to_ast("rsi_momentum", {"period": 14, "midline": 60})

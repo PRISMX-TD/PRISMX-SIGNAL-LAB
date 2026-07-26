@@ -561,12 +561,14 @@ class UserStrategy(Base):
     take_profit_value = Column(Float, nullable=False, default=2.0)
     # 一次一单：开着仓时(上一次触发的信号还没等到止损/止盈)不再触发新信号，
     # 关闭则只要入场条件满足就触发,不管前一笔是否还"开着"。回测与实盘评估
-    # 都读这个开关,见 strategy_engine.py 的 run_backtest/evaluate_new_candle。
+    # 都读这个开关,见 services/strategy/backtest.py 的 run_backtest 与
+    # services/strategy/live.py 的 evaluate_new_candle。
     # One trade at a time: while a position is open (the previous fired
     # signal hasn't hit its SL/TP yet), no new signal fires; when off, any
     # bar meeting the entry condition fires regardless of whether the prior
-    # one is still open. Read by both the backtest and the live evaluator —
-    # see run_backtest/evaluate_new_candle in strategy_engine.py.
+    # one is still open. Read by both the backtest and the live evaluator — see
+    # run_backtest in services/strategy/backtest.py and evaluate_new_candle in
+    # services/strategy/live.py.
     one_trade_at_a_time = Column(Boolean, nullable=False, default=True)
     # 规则 AST（JSON）：{"long": 条件组|null, "short": 条件组|null}。模板降级为
     # 这个字段的预设值，引擎侧不再有模板概念（见 services/strategy/presets.py）。
