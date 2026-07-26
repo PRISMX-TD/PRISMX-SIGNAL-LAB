@@ -541,3 +541,95 @@ def evaluate_usage(bars: list[dict], usage: str, params: dict) -> list[bool]:
     if not bars:
         return []
     return _EVALUATORS[usage](bars, resolve_params(usage, params))
+
+
+def mirror_condition(condition: dict) -> dict | None:
+    """把一个条件换成交易语义相反的那个。无镜像（ATR）返回 None。
+
+    RSI 阈值类同时把 level 换成 100 - level：「RSI 低于 30 做多」的反面是
+    「RSI 高于 70 做空」，而不是「RSI 高于 30 做空」——后者在 30~70 之间也会
+    触发，等于把中性区当成看跌信号。
+
+    Turn a condition into its trading-wise opposite; None when there's no
+    mirror (ATR). RSI threshold usages also map level to 100 - level: the
+    opposite of "buy when RSI is below 30" is "sell when RSI is above 70", not
+    "sell when RSI is above 30" — the latter fires anywhere in 30..70, treating
+    the neutral zone as bearish.
+    """
+    usage = condition["usage"]
+    spec = USAGES[usage]
+    if spec.mirror is None:
+        return None
+    params = resolve_params(usage, condition.get("params") or {})
+    if spec.mirror_level_flip:
+        params["level"] = 100 - int(params["level"])
+    return {"indicator": spec.indicator, "usage": spec.mirror, "params": params}
+
+
+def mirror_conditions(payload: dict) -> list[dict]:
+    """整条策略的空头条件。无镜像的条件原样保留——波动率条件多空共用同一判定，
+    丢掉它会让空头侧比多头侧少一道门槛。
+    A whole strategy's short-side conditions. Mirror-less conditions are kept
+    as-is: a volatility filter applies to both directions, and dropping it
+    would leave the short side with one fewer gate than the long side."""
+    out: list[dict] = []
+    for c in payload.get("conditions") or []:
+        out.append(mirror_condition(c) or resolve_condition(c))
+    return out
+
+
+def resolve_condition(condition: dict) -> dict:
+    usage = condition["usage"]
+    return {
+        "indicator": USAGES[usage].indicator,
+        "usage": usage,
+        "params": resolve_params(usage, condition.get("params") or {}),
+    }
+
+
+def evaluate_side(bars: list[dict], conditions: list[dict], logic: str) -> list[bool]:
+    """把一侧的多个条件按 AND/OR 合并成逐 bar 的布尔序列。
+
+    空列表返回全 False 而不是全 True：一侧没有条件意味着「无从判断」，
+    AND 的数学恒等元会让这一侧每根 bar 都开仓。
+
+    Combine one side's conditions into a per-bar bool series under AND/OR. An
+    empty list yields all-False rather than all-True: no conditions means "no
+    basis to act", and AND's identity element would open a position on every
+    single bar.
+    """
+    if not bars:
+        return []
+    if not conditions:
+        return [False] * len(bars)
+    series = [evaluate_usage(bars, c["usage"], c.get("params") or {}) for c in conditions]
+    if logic == "OR":
+        return [any(s[i] for s in series) for i in range(len(bars))]
+    return [all(s[i] for s in series) for i in range(len(bars))]
+
+
+def evaluate_conditions(bars: list[dict], payload: dict) -> list[str | None]:
+    """整条策略逐 bar 求值，返回 "BUY" / "SELL" / None。
+
+    两侧同时成立时取多头：ATR 这类无镜像条件会让两侧判定完全一致，此时必须有
+    个确定的偏向，否则同一根 bar 的结果取决于字典遍历顺序。
+
+    Evaluate a whole strategy bar by bar into "BUY" / "SELL" / None. When both
+    sides hold, long wins: mirror-less conditions like ATR make both sides
+    identical, and without a fixed preference the verdict for a bar would hinge
+    on iteration order.
+    """
+    if not bars:
+        return []
+    logic = payload.get("logic") or "AND"
+    longs = evaluate_side(bars, payload.get("conditions") or [], logic)
+    shorts = evaluate_side(bars, mirror_conditions(payload), logic)
+    out: list[str | None] = []
+    for i in range(len(bars)):
+        if longs[i]:
+            out.append("BUY")
+        elif shorts[i]:
+            out.append("SELL")
+        else:
+            out.append(None)
+    return out
