@@ -4,8 +4,8 @@
 // 成本双套并列是 spec 的验收标准之一：只给一个含成本的数字，用户无从判断成本
 // 到底吃掉了多少，也就无从判断"回测是否可信"这个原始诉求。
 //
-// 不再按模板画指标线：AST 化之后入场条件是一棵任意树，没有"这个模板用哪几条线"
-// 这个映射了。图上保留蜡烛、入场/出场标记与连线——这几样与规则形态无关。
+// 不再按模板画指标线：入场条件是用户自选的一串条件，没有"这个模板用哪几条线"
+// 这个映射了。图上保留蜡烛、入场/出场标记与连线——这几样与条件形态无关。
 //
 // The backtest panel: params → coverage notice → run → with/without-cost result
 // pairs → in/out-of-sample sections → overfit warning → trade table → candles
@@ -15,20 +15,19 @@
 // criteria: a single cost-inclusive number leaves the user unable to see how much
 // cost ate, which is the original "can I trust the backtest" complaint.
 //
-// No per-template indicator lines any more: with the AST, entry conditions are an
-// arbitrary tree and the "which lines does this template use" mapping no longer
-// exists. Candles, entry/exit markers and their connecting lines stay — none of
-// those depend on the rule shape.
+// No per-template indicator lines any more: entry conditions are a user-picked
+// list and the "which lines does this template use" mapping no longer exists.
+// Candles, entry/exit markers and their connecting lines stay — none of those
+// depend on the condition shape.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createChart, ColorType, CandlestickSeries, LineSeries, createSeriesMarkers, type UTCTimestamp } from 'lightweight-charts'
 import { chartApi, strategyApi } from '../../api/client'
-import { displaySymbol, fmtDate, localizeApiError } from '../../api/utils'
-import Select from '../Select'
+import { fmtDate, localizeApiError } from '../../api/utils'
 import CoverageNotice from './CoverageNotice'
 import EquityCurve from './EquityCurve'
-import { NumberField } from './OperandPicker'
-import { INTERVALS, type RuleEnvelope } from './ruleTypes'
+import { NumberField } from './NumberField'
+import type { ConditionPayload } from './conditionTypes'
 import type {
   Candle,
   StopLossMethod,
@@ -312,22 +311,17 @@ function SampleSectionView({ title, section }: SampleSectionViewProps) {
 }
 
 export interface BacktestPanelProps {
-  // 当前编辑中的规则信封。回测直接吃 AST，不再传 template + params。
-  // The rule envelope being edited. The backtest consumes the AST directly; no
+  // 当前编辑中的条件配置。回测直接吃它，不再传 template + params。
+  // The condition payload being edited. The backtest consumes it directly; no
   // more template + params.
-  rules: RuleEnvelope
-  // 回测一次只跑一个 (品种, 周期)：多组合的净值无法叠成一条曲线。这两个值由
-  // 页面从策略的 symbols / intervals 里选一个传进来。
-  // One (symbol, interval) per run: equity across pairs can't be summed into one
-  // curve. The page picks one of the strategy's symbols/intervals and passes it.
+  rules: ConditionPayload
+  // 策略盯的那一个 (品种, 周期)，由页面从草稿传入。面板内不再提供切换器：
+  // 一条策略只对应一个组合，改组合是改策略本身，属于上面的基本信息区。
+  // The single (symbol, interval) the strategy watches, passed down from the
+  // draft. No in-panel picker any more: a strategy is one pair, so changing it
+  // means editing the strategy itself, up in the basics section.
   symbol: string
   interval: string
-  // 可选的品种 / 周期（该策略订阅的那些），供面板内切换回测目标。
-  // The selectable symbols/intervals (those the strategy subscribes to), for
-  // switching the backtest target inside the panel.
-  symbolOptions: string[]
-  intervalOptions: string[]
-  onTargetChange: (symbol: string, interval: string) => void
   stopLossMethod: StopLossMethod
   stopLossValue: number
   takeProfitMethod: TakeProfitMethod
@@ -345,7 +339,7 @@ export interface BacktestPanelProps {
 const DAY_CHOICES = [30, 90, 180, 365]
 
 export default function BacktestPanel({
-  rules, symbol, interval, symbolOptions, intervalOptions, onTargetChange,
+  rules, symbol, interval,
   stopLossMethod, stopLossValue, takeProfitMethod, takeProfitValue,
   oneTradeAtATime, exitTimeoutBars, onResult,
 }: BacktestPanelProps) {
@@ -434,46 +428,12 @@ export default function BacktestPanel({
     <div>
       <h4 className="mb-3 text-sm font-semibold text-slate-300">{t('strategy.sectionBacktest')}</h4>
 
-      {/* 回测目标：一次只跑一个 (品种, 周期)，从策略订阅的那些里选
-          Backtest target: one (symbol, interval) per run, chosen from the ones
-          the strategy subscribes to */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.symbol')}</span>
-          <Select
-            value={symbol}
-            options={symbolOptions.map((s) => ({ value: s, label: displaySymbol(s) }))}
-            onChange={(v) => onTargetChange(v, interval)}
-          />
-        </label>
-        <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-slate-500" id="bt-interval-label">{t('strategy.interval')}</span>
-          {/* 一组互斥选项用 radiogroup 语义，读屏能播报"3 项中的第 2 项"以及当前选中
-              的是哪一个，而不是把它们读成三个孤立按钮。
-              A mutually exclusive set gets radiogroup semantics so a screen reader
-              announces "2 of 3" and which one is selected, rather than reading
-              three unrelated buttons. */}
-          <div className="flex flex-wrap gap-2" role="radiogroup" aria-labelledby="bt-interval-label">
-            {intervalOptions.map((code) => (
-              <button
-                key={code}
-                type="button"
-                role="radio"
-                aria-checked={interval === code}
-                onClick={() => onTargetChange(symbol, code)}
-                className={segBtn(interval === code)}
-              >
-                {INTERVALS.find((iv) => iv.code === code)?.label ?? code}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* 覆盖度提示在按钮之上、执行之前——先看清有多少数据，再决定跑不跑
+      {/* 覆盖度提示在按钮之上、执行之前——先看清有多少数据，再决定跑不跑。
+          它的标题句里已经带上品种与周期，所以这里不再另设一行目标回显。
           The coverage notice sits above the button, before any run: see how much
-          data exists first, then decide whether to run */}
-      <div className="mt-4">
+          data exists first, then decide whether to run. Its headline already
+          names the symbol and interval, so no separate target readout here. */}
+      <div>
         <CoverageNotice coverage={coverage} requestedDays={days} loading={coverageLoading} />
       </div>
 

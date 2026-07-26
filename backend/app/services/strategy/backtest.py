@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from app.services.strategy import costs as ct
-from app.services.strategy.presets import evaluate_strategy
+from app.services.strategy.conditions import evaluate_conditions
 
 SL_METHODS = frozenset({"percent", "steps", "atr"})
 TP_METHODS = frozenset({"rr", "percent", "steps", "atr"})
@@ -351,7 +351,6 @@ def run_backtest(
     mode: str,
     one_trade_at_a_time: bool = True,
     costs: ct.SymbolCosts | None = None,
-    extra_series: dict[str, list[dict]] | None = None,
 ) -> dict:
     """回放这套规则在给定 K 线上的表现，返回含成本与不含成本两套结果。
 
@@ -377,7 +376,7 @@ def run_backtest(
             "barsUsed": 0,
         }
 
-    signals = evaluate_strategy(bars, rules, extra_series)
+    signals = evaluate_conditions(bars, rules)
     atrs = _atr_series(bars) if "atr" in (spec.sl_method, spec.tp_method) else []
 
     def _run(
@@ -405,7 +404,7 @@ def run_backtest(
     # The out-of-sample section is re-evaluated on its own: slicing `signals`
     # would leave its first bars without the preceding bars that indicator
     # warm-up and crossing detection need, silently dropping signals.
-    out_signals = evaluate_strategy(out_bars, rules, extra_series) if out_bars else []
+    out_signals = evaluate_conditions(out_bars, rules) if out_bars else []
     out_atrs = _atr_series(out_bars) if atrs else []
     out_summary, _, out_trades, _, _ = _run(out_bars, out_signals, out_atrs, c)
 

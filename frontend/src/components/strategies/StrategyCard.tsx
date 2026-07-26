@@ -15,7 +15,7 @@
 // threshold comes from the backend's sampleThreshold; it is not hardcoded here.
 import { useTranslation } from 'react-i18next'
 import { displaySymbol } from '../../api/utils'
-import { INTERVALS } from './ruleTypes'
+import { intervalLabel } from './conditionTypes'
 import type { StrategyPerformance, UserStrategy } from '../../api/types'
 
 export interface StrategyCardProps {
@@ -65,14 +65,8 @@ export default function StrategyCard({
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-slate-100">{named || fallbackName}</span>
           {named && <span className="text-xs text-slate-500">{fallbackName}</span>}
-          {strategy.symbols.map((s) => (
-            <span key={s} className="tag bg-white/5 text-slate-400">{displaySymbol(s)}</span>
-          ))}
-          {strategy.intervals.map((code) => (
-            <span key={code} className="tag bg-white/5 text-slate-400">
-              {INTERVALS.find((iv) => iv.code === code)?.label ?? code}
-            </span>
-          ))}
+          <span className="tag bg-white/5 text-slate-400">{displaySymbol(strategy.symbol)}</span>
+          <span className="tag bg-white/5 text-slate-400">{intervalLabel(strategy.interval)}</span>
           <span className={`tag ${strategy.enabled ? 'bg-up/15 text-up' : 'bg-white/5 text-slate-500'}`}>
             {strategy.enabled ? t('strategy.enabled') : t('strategy.disabled')}
           </span>

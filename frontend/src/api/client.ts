@@ -1,6 +1,6 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyTemplateSchemas, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter } from './types'
-import type { RuleEnvelope } from '../components/strategies/ruleTypes'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter } from './types'
+import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 
 const TOKEN_KEY = 'prismx_token'
 
@@ -225,19 +225,20 @@ export const orderApi = {
     request<DisciplineScore>(`/orders/discipline${login ? `?login=${encodeURIComponent(login)}` : ''}`),
 }
 
-// 自定义策略：搭规则树 → 查数据覆盖 → 回测 → 启用 → 触发个人信号 → 一键下单
-// Custom strategies: build a rule tree, check data coverage, backtest, enable,
-// get personal signals on trigger, one-click order
+// 自定义策略：挑条件 → 查数据覆盖 → 回测 → 启用 → 触发个人信号 → 一键下单
+// Custom strategies: pick conditions, check data coverage, backtest, enable, get
+// personal signals on trigger, one-click order
 export const strategyApi = {
-  // presets 是「从预设起步」唯一需要的部分：模板参数定义（templates）已被规则
-  // 构建器取代，前端不再渲染参数表单。两者同一个响应，类型上都留着。
-  // `presets` is the only part "start from a preset" needs: the param schemas
-  // (`templates`) were replaced by the rule builder and no longer render a form.
-  // Both come in one response and both stay in the type.
-  templates: () =>
-    request<{ templates: StrategyTemplateSchemas; presets: Record<StrategyTemplateKey, RuleEnvelope> }>(
-      '/strategies/templates',
-    ),
+  // 六条新手预设的逻辑与条件列表，不含品种周期（用户自己选）。
+  // The six beginner presets' logic and condition lists, without symbol/interval
+  // (the user picks those).
+  templates: () => request<{ presets: StrategyPresets }>('/strategies/templates'),
+  // 指标与用法目录：参数规格、取值范围、镜像关系。指标选择器与参数表单完全由它
+  // 驱动，前端不带副本——两边各存一份的话，加一个用法就得改两处。
+  // The indicator/usage catalogue: param specs, ranges and mirrors. It drives the
+  // indicator picker and param forms entirely; the frontend keeps no copy, since
+  // two copies mean adding a usage takes two edits.
+  usages: () => request<UsageCatalog>('/strategies/usages'),
   list: () => request<{ strategies: UserStrategy[] }>('/strategies'),
   // 不传参即查"当前有报价的全部品种 × 六档周期"。回测之前调用，用来显示实际
   // 可用范围并把未接入品种置灰。
@@ -251,12 +252,17 @@ export const strategyApi = {
     const suffix = qs.toString()
     return request<StrategyCoverageResponse>(`/strategies/coverage${suffix ? `?${suffix}` : ''}`)
   },
+  // rules 与 template 二选一：给了 rules 就按它建，只给 template 则后端填该预设的
+  // 条件。rules 里的 symbol / interval 必须与顶层的一致，否则 400。
+  // Either rules or template: with rules it's built from them, with only a
+  // template the backend fills in that preset's conditions. The symbol/interval
+  // inside rules must equal the top-level ones or it's a 400.
   create: (payload: {
     template?: StrategyTemplateKey | null
     name?: string | null
-    rules?: RuleEnvelope
-    symbols: string[]
-    intervals: string[]
+    rules?: ConditionPayload
+    symbol: string
+    interval: string
     stopLossMethod: StopLossMethod
     stopLossValue: number
     takeProfitMethod: TakeProfitMethod
@@ -271,9 +277,9 @@ export const strategyApi = {
     id: string,
     payload: Partial<{
       name: string | null
-      rules: RuleEnvelope
-      symbols: string[]
-      intervals: string[]
+      rules: ConditionPayload
+      symbol: string
+      interval: string
       stopLossMethod: StopLossMethod
       stopLossValue: number
       takeProfitMethod: TakeProfitMethod
@@ -287,13 +293,14 @@ export const strategyApi = {
     }>
   ) => request<UserStrategy>(`/strategies/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   remove: (id: string) => request<{ ok: boolean }>(`/strategies/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  // 回测一次只跑一个 (品种, 周期)：多组合的净值无法叠成一条曲线。要比多个组合
-  // 就分别调用。
-  // One (symbol, interval) per backtest: equity across pairs can't be summed into
-  // one curve. Call once per pair to compare.
+  // 回测的 symbol / interval 与策略本身一致，单独传是因为回测不必先存策略——
+  // 草稿状态就能试。
+  // The backtest's symbol/interval match the strategy's own; they're passed
+  // separately because a backtest doesn't require saving first — a draft can be
+  // tried as-is.
   backtest: (payload: {
     template?: StrategyTemplateKey | null
-    rules?: RuleEnvelope
+    rules?: ConditionPayload
     symbol: string
     interval: string
     stopLossMethod: StopLossMethod

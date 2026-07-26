@@ -125,17 +125,12 @@ def test_cap_default_allows_a_realistic_worst_case():
 
 def _rules():
     return {
-        "long": {
-            "logic": "AND",
-            "children": [
-                {
-                    "left": {"kind": "price", "field": "close"},
-                    "op": "gt",
-                    "right": {"kind": "const", "value": 1.0},
-                }
-            ],
-        },
-        "short": None,
+        "logic": "AND",
+        "symbol": "XAUUSD",
+        "interval": "15",
+        "conditions": [
+            {"indicator": "rsi", "usage": "rsi.below_level", "params": {"period": 14, "level": 30}},
+        ],
     }
 
 
@@ -155,19 +150,26 @@ def test_cache_key_depends_on_every_input():
     assert sl.cache_key(_rules(), "XAUUSD", "15", 30, "v1") != base
     assert sl.cache_key(_rules(), "XAUUSD", "15", 90, "v2") != base
     other = _rules()
-    other["long"]["children"][0]["right"]["value"] = 2.0
+    other["conditions"][0]["params"]["level"] = 40
     assert sl.cache_key(other, "XAUUSD", "15", 90, "v1") != base
 
 
 def test_cache_key_is_stable_across_dict_ordering():
-    """AST 的 key 顺序不同但语义相同时必须命中同一缓存。
-    Semantically identical ASTs with differently ordered keys must share a key."""
-    a = {"long": {"logic": "AND", "children": [
-        {"left": {"kind": "const", "value": 1.0}, "op": "gt", "right": {"kind": "const", "value": 0.0}}
-    ]}, "short": None}
-    b = {"short": None, "long": {"children": [
-        {"op": "gt", "right": {"value": 0.0, "kind": "const"}, "left": {"value": 1.0, "kind": "const"}}
-    ], "logic": "AND"}}
+    """条件配置的 key 顺序不同但语义相同时必须命中同一缓存。
+    Semantically identical payloads with differently ordered keys must share a
+    key."""
+    a = {
+        "logic": "AND",
+        "symbol": "XAUUSD",
+        "interval": "15",
+        "conditions": [{"indicator": "rsi", "usage": "rsi.below_level", "params": {"period": 14, "level": 30}}],
+    }
+    b = {
+        "conditions": [{"usage": "rsi.below_level", "params": {"level": 30, "period": 14}, "indicator": "rsi"}],
+        "interval": "15",
+        "symbol": "XAUUSD",
+        "logic": "AND",
+    }
     assert sl.cache_key(a, "XAUUSD", "15", 90, "v1") == sl.cache_key(b, "XAUUSD", "15", 90, "v1")
 
 
@@ -209,7 +211,7 @@ def _fresh_limiter():
 
 
 def _backtest_body():
-    return {"template": "ma_cross", "symbol": "XAUUSD", "interval": "15", "days": 30}
+    return {"template": "ma_trend", "symbol": "XAUUSD", "interval": "15", "days": 30}
 
 
 def test_backtest_endpoint_returns_429_past_the_short_window(client, db, user, auth_headers, _fresh_limiter):

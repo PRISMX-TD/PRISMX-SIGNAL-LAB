@@ -1,6 +1,6 @@
-"""自定义策略路由：规则 AST 的 CRUD + 回测 + 我的策略信号 + 实盘绩效。
+"""自定义策略路由：条件列表的 CRUD + 回测 + 我的策略信号 + 实盘绩效。
 
-用户搭一套规则 AST（或从某个模板预设起步）、选多品种多周期、拿存好的 K 线历史
+用户选一个品种一个周期、加几个指标条件（或从某个预设起步）、拿存好的 K 线历史
 回测、满意再启用；启用后由 `chart.py` 的 K 线入库钩子驱动
 `services.strategy.live.evaluate_new_candle` 持续评估，命中生成个人信号
 （`GET /strategies/signals` 读取），一键下单复用既有的手动下单端点
@@ -12,11 +12,12 @@
 用户策略数上限仍按原设计在各写操作端点生效，非 PRO 用户点启用会拿到清楚
 的 403，不需要额外的路由级门槛。
 
-Custom-strategy router: rule-AST CRUD + backtest + "my strategy" signals + live
-performance.
+Custom-strategy router: condition-list CRUD + backtest + "my strategy" signals +
+live performance.
 
-Users build a rule AST (or start from a template preset), pick symbols and
-intervals, backtest against stored candle history, then enable it; once enabled,
+Users pick one symbol and one interval, add a few indicator conditions (or start
+from a preset), backtest against stored candle history, then enable it; once
+enabled,
 `chart.py`'s candle-ingestion hook drives
 `services.strategy.live.evaluate_new_candle` to keep evaluating it, firing
 personal signals (read via `GET /strategies/signals`). One-click order reuses the
@@ -65,14 +66,15 @@ from app.services.strategy.coverage import (
     coverage_for,
     coverage_matrix,
 )
-from app.services.strategy.presets import (
-    PRESET_RULES,
-    TEMPLATE_SCHEMAS,
-    collect_rules_intervals,
-    count_conditions,
-    validate_strategy_rules,
+from app.services.strategy.conditions import (
+    ALLOWED_INTERVALS,
+    INDICATORS,
+    MAX_CONDITIONS,
+    ConditionError,
+    usage_specs_for,
+    validate_conditions,
 )
-from app.services.strategy.rules import INTERVAL_SECONDS, MAX_INTERVALS, MAX_SYMBOLS, RuleError
+from app.services.strategy.presets import PRESET_CONDITIONS, PRESET_LOGIC, TEMPLATE_KEYS, preset_payload
 
 router = APIRouter(prefix="/strategies", tags=["strategies"])
 
@@ -91,109 +93,80 @@ def _check_access(db: Session, user: User) -> None:
         raise HTTPException(status_code=403, detail="自定义策略是 PRO 专属功能 / Custom strategies are a PRO-exclusive feature")
 
 
-def _assert_symbols_fed(symbols: list[str]) -> None:
+def _assert_symbol_fed(symbol: str) -> None:
     """未接入行情的品种直接 400 并点名，不让用户建完策略再靠 insufficientData
     才发现。判断依据是"当前是否有报价在推"，与 K 线历史深度是两件事（后者由
     coverage 端点回答）。
-    400 and name any symbol with no live feed, instead of letting the user save a
-    strategy and only discover it via insufficientData later. The check is "are
-    quotes arriving", which is distinct from candle-history depth (answered by
-    the coverage endpoint)."""
-    fed = set(active_symbols())
-    missing = [s for s in symbols if s not in fed]
-    if missing:
+    400 and name the symbol if it has no live feed, instead of letting the user
+    save a strategy and only discover it via insufficientData later. The check is
+    "are quotes arriving", which is distinct from candle-history depth (answered
+    by the coverage endpoint)."""
+    if symbol not in set(active_symbols()):
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"品种 {', '.join(missing)} 未接入行情，无法评估 / "
-                f"no live feed for {', '.join(missing)}"
-            ),
+            detail=f"品种 {symbol} 未接入行情，无法评估 / no live feed for {symbol}",
         )
 
 
-def _assert_scope(symbols: list[str], intervals: list[str]) -> None:
-    """品种数与周期数的滥用上限，超限点名具体上限值。上限的唯一来源是
-    rules.MAX_SYMBOLS / MAX_INTERVALS，不在 schema 里再抄一份。
-    Abuse caps on symbol/interval counts; the message names the actual limit.
-    rules.MAX_SYMBOLS / MAX_INTERVALS are the single source — not duplicated in
-    the schema."""
-    if not symbols:
-        raise HTTPException(status_code=400, detail="至少要选一个品种 / at least one symbol required")
-    if not intervals:
-        raise HTTPException(status_code=400, detail="至少要选一个周期 / at least one interval required")
-    if len(symbols) > MAX_SYMBOLS:
+def _assert_interval(interval: str) -> None:
+    if interval not in ALLOWED_INTERVALS:
         raise HTTPException(
             status_code=400,
-            detail=f"最多 {MAX_SYMBOLS} 个品种，当前 {len(symbols)} 个 / at most {MAX_SYMBOLS} symbols",
-        )
-    if len(intervals) > MAX_INTERVALS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"最多 {MAX_INTERVALS} 个周期，当前 {len(intervals)} 个 / at most {MAX_INTERVALS} intervals",
-        )
-    for itv in intervals:
-        if itv not in INTERVAL_SECONDS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"不支持的周期 {itv}，可选 {sorted(INTERVAL_SECONDS)} / unsupported interval",
-            )
-
-
-def _assert_intervals_subscribed(rules: dict, intervals: list[str]) -> None:
-    """AST 里引用的周期必须是本策略订阅的周期的子集，否则实时评估时那一路指标
-    永远取不到数据——校验期就说清楚，而不是上线后静默不触发。
-    Intervals referenced by the AST must be a subset of the strategy's own
-    intervals, or that indicator branch would never have data at evaluation
-    time. Say so at validation time instead of silently never firing."""
-    unsubscribed = sorted(collect_rules_intervals(rules) - set(intervals))
-    if unsubscribed:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"规则引用了未订阅的周期 {', '.join(unsubscribed)}，请把它加入 intervals / "
-                f"rules reference unsubscribed interval(s) {', '.join(unsubscribed)}"
-            ),
+            detail=f"不支持的周期 {interval}，可选 {sorted(ALLOWED_INTERVALS)} / unsupported interval",
         )
 
 
-def _resolve_rules(template: str | None, rules: dict | None) -> dict:
-    """确定这个策略实际用哪套 AST：显式 rules 优先，否则用模板预设；都没有则 400。
-    校验失败时把 RuleError 的消息原样带给用户——那条消息就是"违反了哪一项"。
-    Decide which AST this strategy actually uses: explicit rules win, else the
-    template preset; neither is a 400. On validation failure the RuleError
-    message is passed through verbatim — that message *is* the violated rule."""
+def _resolve_rules(template: str | None, rules: dict | None, symbol: str, interval: str) -> dict:
+    """确定这个策略实际用哪套条件：显式 rules 优先，否则用模板预设；都没有则 400。
+
+    rules 里的 symbol / interval 必须与请求顶层一致。两处都存是为了让 rules 自
+    成一体（求值时不必再传上下文），但两者一旦不一致，实盘按顶层订阅、求值按
+    rules 里的值，用户会看到一条订阅了 15 分钟却按 1 小时判定的策略。
+
+    Decide which conditions this strategy uses: explicit rules win, else the
+    template preset; neither is a 400. The symbol/interval inside `rules` must
+    match the top-level request. Both carry them so that `rules` is
+    self-contained at evaluation time, but if they diverge, live evaluation
+    subscribes by the top-level pair and judges by the one in `rules` — a
+    strategy watching 15m but deciding on 1h.
+    """
     if rules is None:
         if template is None:
             raise HTTPException(
                 status_code=400,
                 detail="必须提供 rules 或 template 之一 / either rules or template is required",
             )
-        rules = PRESET_RULES[template]
+        rules = preset_payload(template, symbol, interval)
     try:
-        validate_strategy_rules(rules)
-    except RuleError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        validate_conditions(rules)
+    except ConditionError as e:
+        raise HTTPException(status_code=400, detail=e.message) from e
+    if rules["symbol"] != symbol or rules["interval"] != interval:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"rules 里的品种/周期（{rules['symbol']}/{rules['interval']}）与请求"
+                f"（{symbol}/{interval}）不一致 / rules symbol/interval must match the request"
+            ),
+        )
     return rules
 
 
 def _sync_watches(db: Session, row: UserStrategy) -> None:
-    """按 symbols x intervals 重建该策略的盯盘三元组。整删整建而不是差分——
-    组合数上限是 5 x 3 = 15 行，差分的复杂度换不来任何东西。调用方管事务。
-    Rebuild this strategy's watch triples from symbols x intervals. Delete-all
-    then insert rather than diffing: the combination count is capped at 5 x 3 =
-    15 rows, so diffing buys nothing. The caller owns the transaction."""
+    """重建该策略的盯盘行。一条策略只有一个 (品种, 周期)，整删整建即可。
+    Rebuild this strategy's watch row. A strategy has exactly one (symbol,
+    interval) pair, so delete-then-insert is all that's needed. The caller owns
+    the transaction."""
     db.query(StrategyWatch).filter(StrategyWatch.strategy_id == row.id).delete()
-    for sym in json.loads(row.symbols or "[]"):
-        for itv in json.loads(row.intervals or "[]"):
-            db.add(StrategyWatch(strategy_id=row.id, symbol=sym, interval=itv))
+    db.add(StrategyWatch(strategy_id=row.id, symbol=row.symbol, interval=row.interval))
 
 
 def _to_out(s: UserStrategy) -> StrategyOut:
     return StrategyOut(
         id=s.id, template=s.template, name=s.name,
         rules=json.loads(s.rules or "{}"),
-        symbols=json.loads(s.symbols or "[]"),
-        intervals=json.loads(s.intervals or "[]"),
+        symbol=s.symbol,
+        interval=s.interval,
         stopLossMethod=s.stop_loss_method, stopLossValue=s.stop_loss_value,
         takeProfitMethod=s.take_profit_method, takeProfitValue=s.take_profit_value,
         oneTradeAtATime=s.one_trade_at_a_time,
@@ -205,21 +178,60 @@ def _to_out(s: UserStrategy) -> StrategyOut:
     )
 
 
+@router.get("/usages", response_model=dict)
+def list_usages(_user: User = Depends(get_current_user)):
+    """指标与用法清单：参数规格、取值范围、镜像关系。
+
+    前端的指标选择器与参数表单完全由这份清单驱动。清单只在后端维护，前端不带
+    副本——两边各存一份的话，加一个用法就得改两处，漏改的那次就是用户填了合法
+    参数却被 400。
+
+    The indicator/usage catalogue: param specs, ranges and mirrors. The
+    frontend's indicator picker and param forms are driven entirely by this. It
+    lives only in the backend; the frontend keeps no copy, because two copies
+    mean adding a usage requires two edits, and the edit you forget shows up as a
+    400 on params the user was told were valid.
+    """
+    return {
+        "intervals": sorted(ALLOWED_INTERVALS, key=lambda v: (v == "D", int(v) if v != "D" else 0)),
+        "maxConditions": MAX_CONDITIONS,
+        "indicators": [
+            {
+                "key": indicator,
+                "usages": [
+                    {
+                        "key": u.key,
+                        "mirror": u.mirror,
+                        "params": {
+                            name: {
+                                "kind": ps.kind,
+                                "default": ps.default,
+                                "min": ps.minimum,
+                                "max": ps.maximum,
+                                "options": list(ps.options) if ps.options else None,
+                            }
+                            for name, ps in u.params.items()
+                        },
+                    }
+                    for u in usage_specs_for(indicator)
+                ],
+            }
+            for indicator in INDICATORS
+        ],
+    }
+
+
 @router.get("/templates", response_model=dict)
 def list_templates(_user: User = Depends(get_current_user)):
-    """列出模板的参数定义与预设 AST。
-
-    前端要的是 presets：模板参数表单已被规则构建器取代，「从预设起步」载入的是
-    这一份预设信封，载入后完全可改。templates（参数定义）保留给后台与旧客户端，
-    删掉它是一处无谓的破坏性改动。
-
-    Lists each template's param schema plus its preset AST. The frontend wants
-    `presets`: the param form is gone (replaced by the rule builder), and
-    "start from a preset" loads these envelopes, freely editable afterwards.
-    `templates` (the param schemas) stays for the admin side and older clients —
-    removing it would be a pointless breaking change.
-    """
-    return {"templates": TEMPLATE_SCHEMAS, "presets": PRESET_RULES}
+    """列出 6 条新手预设的条件组合。载入后完全可改，引擎侧不认识 template。
+    Lists the six beginner presets' condition sets. Freely editable once loaded;
+    the engine knows nothing about templates."""
+    return {
+        "presets": {
+            key: {"logic": PRESET_LOGIC[key], "conditions": PRESET_CONDITIONS[key]}
+            for key in TEMPLATE_KEYS
+        }
+    }
 
 
 @router.get("/coverage", response_model=dict)
@@ -242,17 +254,14 @@ def get_coverage(
     _check_access(db, user)
     asked = [s.strip().upper() for s in symbols.split(",") if s.strip()]
     sym_list = asked or active_symbols()
-    itv_list = [i.strip() for i in intervals.split(",") if i.strip()] or sorted(INTERVAL_SECONDS)
-    # 上限只约束显式传入的清单，不约束 active_symbols() 默认值。MAX_SYMBOLS 是
-    # "单条策略最多盯几个品种"（为了控制实时评估的计算量），拿它卡这个只读聚合
-    # 查询是张冠李戴：覆盖度的用途正是把未接入品种置灰，天然要看全部品种。上线
-    # 时平台接入 7 个品种，默认分支因此永远 400，整个策略页加载即失败。
+    itv_list = [i.strip() for i in intervals.split(",") if i.strip()] or sorted(ALLOWED_INTERVALS)
+    # 上限只约束显式传入的清单，不约束 active_symbols() 默认值：覆盖度的用途
+    # 正是把未接入品种置灰，天然要看全部品种，拿单条策略的盯盘上限卡这个只读
+    # 聚合查询会让默认分支永远 400，整个策略页加载即失败。
     # The cap applies only to an explicitly requested list, never to the
-    # active_symbols() default. MAX_SYMBOLS is a per-strategy watch cap (there to
-    # bound live-evaluation cost); applying it to this read-only aggregate was a
-    # category error, since greying out unfed symbols inherently needs them all.
-    # In production 7 symbols are fed, so the default branch always 400'd and the
-    # whole strategies page failed to load.
+    # active_symbols() default: greying out unfed symbols inherently needs them
+    # all, and applying a per-strategy watch cap to this read-only aggregate
+    # would 400 the default branch and fail the whole strategies page.
     if len(asked) > MAX_COVERAGE_SYMBOLS:
         raise HTTPException(
             status_code=400,
@@ -262,11 +271,7 @@ def get_coverage(
             ),
         )
     for itv in itv_list:
-        if itv not in INTERVAL_SECONDS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"不支持的周期 {itv}，可选 {sorted(INTERVAL_SECONDS)} / unsupported interval",
-            )
+        _assert_interval(itv)
     return {
         "coverage": coverage_matrix(db, sym_list, itv_list),
         "activeSymbols": active_symbols(),
@@ -288,10 +293,9 @@ def create_strategy(
     user: User = Depends(get_current_user),
 ):
     _check_access(db, user)
-    _assert_scope(body.symbols, body.intervals)
-    _assert_symbols_fed(body.symbols)
-    rules = _resolve_rules(body.template, body.rules)
-    _assert_intervals_subscribed(rules, body.intervals)
+    _assert_interval(body.interval)
+    _assert_symbol_fed(body.symbol)
+    rules = _resolve_rules(body.template, body.rules, body.symbol, body.interval)
     cfg = get_strategy_settings(db)
     count = db.query(UserStrategy).filter(UserStrategy.user_id == user.id).count()
     if count >= int(cfg["max_strategies_per_user"]):
@@ -303,11 +307,7 @@ def create_strategy(
     row = UserStrategy(
         user_id=user.id, template=body.template, name=(body.name or "").strip() or None,
         rules=json.dumps(rules, ensure_ascii=False),
-        symbols=json.dumps(body.symbols), intervals=json.dumps(body.intervals),
-        # 旧的单值列仍非空约束，写入第一个值以兼容；读取一律走 symbols/intervals。
-        # The legacy single-value columns are still NOT NULL; write the first
-        # value for compatibility. Reads always go through symbols/intervals.
-        symbol=body.symbols[0], interval=body.intervals[0],
+        symbol=body.symbol, interval=body.interval,
         params="{}",
         stop_loss_method=body.stopLossMethod, stop_loss_value=body.stopLossValue,
         take_profit_method=body.takeProfitMethod, take_profit_value=body.takeProfitValue,
@@ -343,28 +343,22 @@ def update_strategy(
     if body.name is not None:
         row.name = body.name.strip() or None
 
-    # 品种/周期/规则任一变动都要整体重新校验：三者的约束是耦合的（AST 引用的
-    # 周期必须在订阅列表里），单独校验改动的那一项会漏掉组合后的非法状态。
-    # Any change to symbols/intervals/rules triggers a full re-validation: the
-    # three constraints are coupled (AST-referenced intervals must be subscribed),
-    # so validating only the changed field would miss illegal combinations.
-    touches_scope = body.symbols is not None or body.intervals is not None or body.rules is not None
+    # 品种/周期/条件任一变动都要整体重新校验：rules 里也存着品种周期，只校验
+    # 改动的那一项会留下「顶层改了、rules 没改」的错位状态。
+    # Any change to symbol/interval/rules triggers a full re-validation: `rules`
+    # carries its own symbol/interval, so validating only the changed field would
+    # leave the top-level pair and the one inside rules out of sync.
+    touches_scope = body.symbol is not None or body.interval is not None or body.rules is not None
     if touches_scope:
-        symbols = body.symbols if body.symbols is not None else json.loads(row.symbols or "[]")
-        intervals = body.intervals if body.intervals is not None else json.loads(row.intervals or "[]")
-        _assert_scope(symbols, intervals)
-        if body.symbols is not None:
-            _assert_symbols_fed(symbols)
+        symbol = body.symbol if body.symbol is not None else row.symbol
+        interval = body.interval if body.interval is not None else row.interval
+        _assert_interval(interval)
+        if body.symbol is not None:
+            _assert_symbol_fed(symbol)
         rules = body.rules if body.rules is not None else json.loads(row.rules or "{}")
-        try:
-            validate_strategy_rules(rules)
-        except RuleError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-        _assert_intervals_subscribed(rules, intervals)
+        rules = _resolve_rules(None, rules, symbol, interval)
         row.rules = json.dumps(rules, ensure_ascii=False)
-        row.symbols = json.dumps(symbols)
-        row.intervals = json.dumps(intervals)
-        row.symbol, row.interval = symbols[0], intervals[0]
+        row.symbol, row.interval = symbol, interval
 
     if body.stopLossMethod is not None:
         row.stop_loss_method = body.stopLossMethod
@@ -472,19 +466,9 @@ def backtest_strategy(
     """
     _check_access(db, user)
     symbol = body.symbol.upper()
-    _assert_scope([symbol], [body.interval])
-    _assert_symbols_fed([symbol])
-    rules = _resolve_rules(body.template, body.rules)
-    referenced = collect_rules_intervals(rules)
-    unsubscribed = sorted(referenced - {body.interval})
-    if unsubscribed:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"回测只跑单周期 {body.interval}，但规则引用了 {', '.join(unsubscribed)} / "
-                f"backtest runs one interval; rules reference {', '.join(unsubscribed)}"
-            ),
-        )
+    _assert_interval(body.interval)
+    _assert_symbol_fed(symbol)
+    rules = _resolve_rules(body.template, body.rules, symbol, body.interval)
 
     cov = coverage_for(db, symbol, body.interval)
     version = ct.costs_version(db)
@@ -537,7 +521,7 @@ def backtest_strategy(
     bars = [{"t": r.t, "o": r.o, "h": r.h, "l": r.l, "c": r.c, "v": r.v} for r in rows]
 
     try:
-        assert_within_cost_cap(len(bars), count_conditions(rules))
+        assert_within_cost_cap(len(bars), len(rules.get("conditions") or []))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

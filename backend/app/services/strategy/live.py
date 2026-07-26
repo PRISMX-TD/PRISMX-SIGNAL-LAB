@@ -32,7 +32,7 @@ from app.services.connection_manager import manager
 from app.services.push_dispatch import EVENT_STRATEGY_SIGNAL, dispatch_event_push_async
 from app.services.strategy import costs as ct
 from app.services.strategy.backtest import ExitSpec, exit_prices
-from app.services.strategy.presets import collect_rules_intervals, evaluate_strategy
+from app.services.strategy.conditions import evaluate_conditions
 from app.services.strategy.resolution import resolve_strategy_signals
 
 logger = logging.getLogger("prismx.strategy_live")
@@ -184,7 +184,6 @@ def _evaluate_sync(symbol: str, interval: str) -> list[tuple]:
 
         now = datetime.now(timezone.utc)
         memo: dict = {}
-        extra_cache: dict[str, list[dict]] = {}
 
         for strat in candidates:
             try:
@@ -198,16 +197,7 @@ def _evaluate_sync(symbol: str, interval: str) -> list[tuple]:
                     continue
 
                 rules = json.loads(strat.rules or "{}")
-                # 多周期引用：按需拉取并在本次评估内复用。
-                # Multi-interval references: fetched on demand, reused within
-                # this evaluation.
-                extra: dict[str, list[dict]] = {}
-                for itv in collect_rules_intervals(rules):
-                    if itv not in extra_cache:
-                        extra_cache[itv] = _load_bars(db, symbol, itv)
-                    extra[itv] = extra_cache[itv]
-
-                side = evaluate_strategy(bars, rules, extra or None, memo=memo)[-1]
+                side = evaluate_conditions(bars, rules, memo=memo)[-1]
                 if side is None:
                     continue
 

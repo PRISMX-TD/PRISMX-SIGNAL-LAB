@@ -269,8 +269,6 @@ def _migrate_columns() -> None:
             "take_profit_value": "FLOAT",
             "one_trade_at_a_time": "BOOLEAN",
             "rules": "TEXT",
-            "symbols": "TEXT",
-            "intervals": "TEXT",
             "exit_timeout_bars": "INTEGER",
             "session_filter": "TEXT",
             "daily_signal_cap": "INTEGER",
@@ -312,26 +310,32 @@ def _migrate_columns() -> None:
                 conn.execute(text(
                     "UPDATE user_strategies SET one_trade_at_a_time = TRUE WHERE one_trade_at_a_time IS NULL"
                 ))
-            # 多值化回填：旧行的单值 symbol / interval 变成单元素数组。用 SQL 的
-            # 字符串拼接而不是逐行 Python 循环——这是一次性数据搬运，行数可能不小。
-            # Multi-value backfill: an old row's single symbol/interval becomes a
-            # one-element array. Done in SQL rather than a per-row Python loop —
-            # it's a one-off data move and the row count isn't necessarily small.
+            # 回到单品种单周期后，多值时期建下的盯盘行会有一部分不再对应策略自己
+            # 声明的 (symbol, interval)。留着它们等于让策略在它已经不声明的组合上
+            # 继续被评估，必须删。策略行本身不用改：symbol / interval 两列在多值
+            # 时期一直被同步写入（值为数组的首项），始终有效。
+            # Back on one symbol and one interval, some watch rows created during
+            # the multi-value era no longer match the strategy's own declared
+            # (symbol, interval). Leaving them would keep evaluating a strategy on
+            # combos it no longer declares, so they're deleted. The strategy rows
+            # themselves need no change: the symbol/interval columns were kept
+            # written throughout (holding the arrays' first entries) and stay valid.
             conn.execute(text(
-                "UPDATE user_strategies SET symbols = '[\"' || symbol || '\"]' "
-                "WHERE symbols IS NULL AND symbol IS NOT NULL"
-            ))
-            conn.execute(text(
-                "UPDATE user_strategies SET intervals = '[\"' || interval || '\"]' "
-                "WHERE intervals IS NULL AND interval IS NOT NULL"
+                "DELETE FROM strategy_watch WHERE NOT EXISTS ("
+                "  SELECT 1 FROM user_strategies s"
+                "  WHERE s.id = strategy_watch.strategy_id"
+                "    AND s.symbol = strategy_watch.symbol"
+                "    AND s.interval = strategy_watch.interval"
+                ")"
             ))
 
-        # rules 与 strategy_watch 的回填要跑 Python 侧的转换/笛卡尔积，单独成
-        # 函数，各自独立事务，幂等（只补 NULL / 只插缺失行）。
-        # Backfilling rules and strategy_watch needs the Python-side conversion
-        # and cartesian product, so they get their own idempotent functions
-        # (NULL-only updates / missing-row inserts) in their own transactions.
-        _backfill_strategy_rules()
+        # 遗留策略的停用与 strategy_watch 的回填都要跑 Python 侧逻辑，单独成
+        # 函数，各自独立事务，幂等（只改不合法的行 / 只插缺失行）。
+        # Disabling legacy strategies and backfilling strategy_watch both need
+        # Python-side logic, so they get their own idempotent functions (only
+        # touching invalid rows / inserting missing rows) in their own
+        # transactions.
+        _disable_legacy_strategies()
         _backfill_strategy_watch()
 
         # 放开历史遗留列的 NOT NULL 约束。止损止盈从 stop_loss_pct / take_profit_pct
@@ -356,7 +360,7 @@ def _migrate_columns() -> None:
                 "stop_loss_method", "stop_loss_value", "take_profit_method",
                 "take_profit_value", "one_trade_at_a_time", "enabled",
                 "last_signal_bar_t", "created_at", "updated_at",
-                "rules", "symbols", "intervals", "exit_timeout_bars",
+                "rules", "exit_timeout_bars",
                 "session_filter", "daily_signal_cap", "cooldown_minutes",
             }
             legacy_notnull = [
@@ -435,53 +439,53 @@ def _migrate_columns() -> None:
                 conn.execute(text("ALTER TABLE payments ADD COLUMN actually_paid FLOAT"))
 
 
-def _backfill_strategy_rules() -> None:
-    """把旧策略的 template + params 转成等价 AST 写入 rules（仅补 NULL，幂等）。
+def _disable_legacy_strategies() -> None:
+    """把 rules 不符合新条件结构的策略停用（幂等）。
 
-    转换等价性由 tests/test_strategy_presets.py 逐模板逐 bar 证明；这里只负责
-    搬运。单个策略转换失败（模板已不存在等脏数据）记日志跳过，不让一条坏行
-    阻塞整个启动流程。
+    旧 AST 交给新引擎不会报错，只会对每根 bar 返回 None——策略看着是启用的却
+    永远不触发。静默失效比停用更坏：用户不会去检查一条"正常启用"的策略。停用
+    后用户在页面上能看到它被停了，重新配置一次即可。这里不尝试自动转换：旧 AST
+    的表达能力（嵌套分组、任意操作数、多周期引用）超出新结构，任何自动映射都
+    只能是猜测。
 
-    Convert legacy template+params into an equivalent AST in `rules`
-    (NULL-only, idempotent). Equivalence is proven per template, bar by bar, in
-    tests/test_strategy_presets.py; this only moves data. A single row that
-    fails to convert (dirty data such as a template that no longer exists) is
-    logged and skipped rather than blocking startup.
+    Disable strategies whose `rules` don't match the new condition structure
+    (idempotent). A legacy AST doesn't raise in the new engine — it just yields
+    None for every bar, leaving a strategy that looks enabled but can never
+    fire. Silent failure is worse than being switched off: nobody audits a
+    strategy that reads as healthy. Once disabled the user sees it and can
+    reconfigure. No automatic conversion is attempted: the old AST's expressive
+    range (nested groups, arbitrary operands, cross-interval references) exceeds
+    the new structure, so any mapping would be guesswork.
     """
     import json as _json
     import logging as _logging
 
-    from app.services.strategy.presets import template_to_ast
+    from app.services.strategy.conditions import ConditionError, validate_conditions
 
     log = _logging.getLogger("prismx.migration")
     db = SessionLocal()
     try:
         from app.models import UserStrategy
 
-        rows = db.query(UserStrategy).filter(UserStrategy.rules.is_(None)).all()
         changed = 0
-        for row in rows:
+        for row in db.query(UserStrategy).filter(UserStrategy.enabled.is_(True)).all():
             try:
-                params = _json.loads(row.params or "{}")
-                ast = template_to_ast(row.template, params if isinstance(params, dict) else {})
-            except Exception:
-                log.warning("backfill_strategy_rules: skipped strategy %s (template=%s)", row.id, row.template)
-                continue
-            row.rules = _json.dumps(ast, ensure_ascii=False)
-            changed += 1
+                validate_conditions(_json.loads(row.rules or "{}"))
+            except (ConditionError, ValueError, TypeError):
+                row.enabled = False
+                changed += 1
+                log.warning("disable_legacy_strategies: disabled strategy %s (legacy rules)", row.id)
         if changed:
             db.commit()
-            log.info("backfill_strategy_rules: backfilled %d strategy rule set(s)", changed)
+            log.info("disable_legacy_strategies: disabled %d legacy strategy row(s)", changed)
     finally:
         db.close()
 
 
 def _backfill_strategy_watch() -> None:
-    """按 symbols × intervals 的笛卡尔积补齐 strategy_watch 缺失行（幂等）。
-    Insert the missing strategy_watch rows for each strategy's symbols x
-    intervals product (idempotent)."""
-    import json as _json
-
+    """按每条策略的单个 (品种, 周期) 补齐 strategy_watch 缺失行（幂等）。
+    Insert the missing strategy_watch row for each strategy's single
+    (symbol, interval) pair (idempotent)."""
     db = SessionLocal()
     try:
         from app.models import StrategyWatch, UserStrategy
@@ -489,19 +493,14 @@ def _backfill_strategy_watch() -> None:
         existing = {(w.strategy_id, w.symbol, w.interval) for w in db.query(StrategyWatch).all()}
         added = 0
         for row in db.query(UserStrategy).all():
-            try:
-                symbols = _json.loads(row.symbols or "[]")
-                intervals = _json.loads(row.intervals or "[]")
-            except (ValueError, TypeError):
+            if not row.symbol or not row.interval:
                 continue
-            for sym in symbols:
-                for itv in intervals:
-                    key = (row.id, sym, itv)
-                    if key in existing:
-                        continue
-                    db.add(StrategyWatch(strategy_id=row.id, symbol=sym, interval=itv))
-                    existing.add(key)
-                    added += 1
+            key = (row.id, row.symbol, row.interval)
+            if key in existing:
+                continue
+            db.add(StrategyWatch(strategy_id=row.id, symbol=row.symbol, interval=row.interval))
+            existing.add(key)
+            added += 1
         if added:
             db.commit()
     finally:

@@ -10,7 +10,7 @@
 // entering at a level that no longer exists.
 import { useTranslation } from 'react-i18next'
 import { displaySymbol, fmtTime } from '../../api/utils'
-import { INTERVALS } from './ruleTypes'
+import { intervalLabel } from './conditionTypes'
 import type { StrategySignal } from '../../api/types'
 
 export const SIGNAL_TTL_MS = 10 * 60 * 1000
@@ -56,7 +56,7 @@ export default function StrategySignalList({ signals, now, onOrder }: StrategySi
               <span className="font-mono text-sm text-slate-100">{displaySymbol(sig.symbol)}</span>
               {sig.interval && (
                 <span className="tag bg-white/5 text-slate-400">
-                  {INTERVALS.find((iv) => iv.code === sig.interval)?.label ?? sig.interval}
+                  {intervalLabel(sig.interval)}
                 </span>
               )}
               <span className="text-xs text-slate-500">{t('strategy.signalTriggeredAt')} {fmtTime(sig.createdAt)}</span>

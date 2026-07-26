@@ -541,7 +541,7 @@ class UserStrategy(Base):
     # 纯自定义 AST 的策略没有起源模板，因此可空；有值时表示"从哪个预设起步"。
     # A pure-custom-AST strategy has no originating preset, hence nullable; when
     # set, it records which preset the strategy started from.
-    template = Column(String, nullable=True)  # ma_cross / rsi_reversal / bollinger_reversion
+    template = Column(String, nullable=True)  # ma_trend / rsi_reversal / macd_rsi_combo ...
     # 用户自定义名称，留空则前端按模板名兜底展示 / user-given name; falls back to the template label when empty
     name = Column(String, nullable=True)
     symbol = Column(String, nullable=False)
@@ -570,23 +570,22 @@ class UserStrategy(Base):
     # run_backtest in services/strategy/backtest.py and evaluate_new_candle in
     # services/strategy/live.py.
     one_trade_at_a_time = Column(Boolean, nullable=False, default=True)
-    # 规则 AST（JSON）：{"long": 条件组|null, "short": 条件组|null}。模板降级为
-    # 这个字段的预设值，引擎侧不再有模板概念（见 services/strategy/presets.py）。
-    # template 列保留：它是"这条策略当初从哪个预设起步"的唯一记录，前端据此高亮
-    # 预设，且旧行的 rules 回填也依赖它。
-    # Rule AST (JSON): {"long": group|null, "short": group|null}. Templates
+    # 条件配置（JSON）：{"symbol", "interval", "logic": AND|OR, "conditions": [...]}。
+    # 每个条件是 {indicator, usage, params}，做空侧由 usage 的镜像自动推出，不单独
+    # 存。模板降级为这个字段的预设值，引擎侧不再有模板概念（见
+    # services/strategy/presets.py）。symbol / interval 在这里与外层列各存一份：
+    # 外层列供订阅与查询（strategy_watch、索引），这里的副本让 rules 在求值时自
+    # 成一体。写入路径保证两者一致，见 routers/strategies.py 的 _resolve_rules。
+    # Condition payload (JSON): {"symbol", "interval", "logic": AND|OR,
+    # "conditions": [...]}, each condition being {indicator, usage, params}. The
+    # short side is derived from each usage's mirror rather than stored. Templates
     # demote to preset values of this column; the engine no longer knows what a
-    # template is (see services/strategy/presets.py). The `template` column
-    # stays: it's the only record of which preset a strategy started from (the
-    # frontend highlights it, and the legacy rules backfill needs it).
+    # template is (see services/strategy/presets.py). symbol/interval live both
+    # here and in the columns above: the columns drive subscription and queries
+    # (strategy_watch, indexes), while this copy keeps `rules` self-contained at
+    # evaluation time. The write path keeps them equal — see _resolve_rules in
+    # routers/strategies.py.
     rules = Column(Text, nullable=True)
-    # 多品种/多周期：JSON 数组。原 symbol / interval 单值列保留以完成迁移，
-    # 迁移后不再被读取（读取一律走这两列 + strategy_watch）。
-    # Multi-symbol/interval JSON arrays. The original single-value symbol /
-    # interval columns are kept for the migration and never read afterwards
-    # (reads go through these plus strategy_watch).
-    symbols = Column(Text, nullable=True)
-    intervals = Column(Text, nullable=True)
     # 超时平仓：持仓超过 N 根 K 线仍未触及 SL/TP 则按当根收盘价平仓，记为
     # TIMEOUT。None = 不启用。回测与实盘同口径。
     # Timeout exit: after N bars without an SL/TP touch, close at that bar's

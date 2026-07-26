@@ -1,11 +1,15 @@
 // 共享类型定义 / Shared type definitions
 
-// 规则 AST 的形状定义在规则构建器目录、由这里引用（而不是反过来）：AST 的形状是
+// 条件配置的形状定义在条件构建器目录、由这里引用（而不是反过来）：那份形状是
 // 构建器的领域知识，构建器是它唯一的生产者。
-// The rule AST's shape lives in the builder's directory and is imported here
-// (not the other way round): that shape is the builder's domain knowledge and
-// the builder is its only producer.
-import type { RuleEnvelope } from '../components/strategies/ruleTypes'
+// The condition payload's shape lives in the builder's directory and is imported
+// here (not the other way round): that shape is the builder's domain knowledge
+// and the builder is its only producer.
+import type {
+  ConditionLogic,
+  ConditionPayload,
+  StrategyCondition,
+} from '../components/strategies/conditionTypes'
 
 export type UserRole = 'user' | 'admin'
 export type UserPlan = 'FREE' | 'PRO'
@@ -354,27 +358,27 @@ export interface AdminStrategySettings {
   proOnly: boolean
 }
 
-// 自定义策略：模板名 + 该模板一个参数的定义（用于动态渲染调参表单，不写死）
-// Custom strategy: one template parameter's definition, used to render the
-// tuning form dynamically instead of hardcoding it
-export type StrategyParamSpec =
-  | { type: 'enum'; options: string[]; default: string }
-  | { type: 'int'; min: number; max: number; default: number }
-  | { type: 'float'; min: number; max: number; default: number }
-
+// 六条新手预设，与后端 presets.TEMPLATE_KEYS 一致。载入后条件完全可改，引擎侧
+// 不认识 template，它只记录「这条策略当初从哪个预设起步」。
+// The six beginner presets, matching the backend's presets.TEMPLATE_KEYS. The
+// conditions are freely editable once loaded; the engine knows nothing about
+// templates, which only record which preset a strategy started from.
 export type StrategyTemplateKey =
-  | 'ma_cross'
-  | 'rsi_reversal'
-  | 'bollinger_reversion'
+  | 'ma_trend'
   | 'macd_cross'
-  | 'ma_pullback'
+  | 'rsi_reversal'
   | 'bollinger_breakout'
-  | 'rsi_momentum'
   | 'donchian_breakout'
-  | 'momentum_breakout'
-  | 'trend_rsi_filter'
+  | 'macd_rsi_combo'
 
-export type StrategyTemplateSchemas = Record<StrategyTemplateKey, Record<string, StrategyParamSpec>>
+// 预设只给逻辑与条件，不含品种周期：那两项由用户在表单里选，前端补齐后才是一份
+// 完整的 rules。
+// A preset carries only logic and conditions, no symbol/interval: the user picks
+// those in the form and the frontend fills them in to make a complete `rules`.
+export type StrategyPresets = Record<
+  StrategyTemplateKey,
+  { logic: ConditionLogic; conditions: StrategyCondition[] }
+>
 
 // 止损方式：percent(按入场价百分比距离) / steps(点数) / atr(ATR 的倍数)
 // 止盈方式：rr(止损距离的倍数) / percent / steps / atr
@@ -390,18 +394,23 @@ export interface StrategySessionFilter {
   endHour: number
 }
 
-// 用户自定义策略：一棵规则树（AST）+ 出场设定，对若干品种/周期持续评估。
+// 用户自定义策略：一份条件配置 + 出场设定，盯一个 (品种, 周期) 持续评估。
+// 一条策略只对应一个组合——想覆盖多个组合就建多条，各自独立的绩效与去重游标。
 // template 仅记录"从哪个预设起步"，纯自定义策略为 null。
-// A user strategy: one rule tree (AST) plus exit settings, evaluated
-// continuously across several symbols/intervals. `template` only records which
-// preset it started from and is null for a from-scratch strategy.
+// rules 里也带着 symbol / interval，与外层两个字段始终相等（后端写入时保证）。
+// A user strategy: one condition payload plus exit settings, evaluated on one
+// (symbol, interval). One strategy means one pair — covering several means
+// several strategies, each with its own performance and de-dup cursor.
+// `template` only records which preset it started from and is null for a
+// from-scratch strategy. `rules` carries symbol/interval too, always equal to
+// the outer fields (the backend guarantees it on write).
 export interface UserStrategy {
   id: string
   template: StrategyTemplateKey | null
   name: string | null
-  rules: RuleEnvelope
-  symbols: string[]
-  intervals: string[]
+  rules: ConditionPayload
+  symbol: string
+  interval: string
   stopLossMethod: StopLossMethod
   stopLossValue: number
   takeProfitMethod: TakeProfitMethod

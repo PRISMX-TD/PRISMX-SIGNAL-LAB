@@ -16,20 +16,13 @@ SUFFIX_PATTERN = r"^[A-Za-z0-9._-]{0,10}$"
 LOGIN_PATTERN = r"^[0-9]{1,20}$"
 
 
-def _normalize_symbols(v: list[str]) -> list[str]:
-    """统一大写、去空白、去重且保持顺序；逐个按 SYMBOL_PATTERN 校验。
-    Upper-case, strip, de-duplicate while preserving order; validate each
-    against SYMBOL_PATTERN."""
-    out: list[str] = []
-    for raw in v:
-        s = raw.strip().upper()
-        if not s:
-            continue
-        if not re.fullmatch(SYMBOL_PATTERN, s):
-            raise ValueError(f"非法品种代码 {raw} / invalid symbol code")
-        if s not in out:
-            out.append(s)
-    return out
+def _normalize_symbol(v: str) -> str:
+    """统一大写、去空白，并按 SYMBOL_PATTERN 校验。
+    Upper-case, strip, and validate against SYMBOL_PATTERN."""
+    s = v.strip().upper()
+    if not re.fullmatch(SYMBOL_PATTERN, s):
+        raise ValueError(f"非法品种代码 {v} / invalid symbol code")
+    return s
 
 
 # ---------- 认证 / Auth ----------
@@ -268,8 +261,8 @@ class StrategyCreate(BaseModel):
     # 用户自定义名称，留空由前端按模板名兜底 / user-given name; frontend falls back to the template label when empty
     name: str | None = Field(default=None, max_length=60)
     rules: dict | None = None
-    symbols: list[str] = Field(default_factory=list)
-    intervals: list[str] = Field(default_factory=list)
+    symbol: str = Field(min_length=1, max_length=20)
+    interval: str = Field(min_length=1, max_length=4)
     stopLossMethod: Literal["percent", "steps", "atr"] = "percent"
     stopLossValue: float = Field(default=1.0, gt=0, le=1_000_000)
     takeProfitMethod: Literal["rr", "percent", "steps", "atr"] = "rr"
@@ -288,17 +281,17 @@ class StrategyCreate(BaseModel):
     def _check_template(cls, v: str | None) -> str | None:
         return validate_template_key(v)
 
-    @field_validator("symbols")
+    @field_validator("symbol")
     @classmethod
-    def _check_symbols(cls, v: list[str]) -> list[str]:
-        return _normalize_symbols(v)
+    def _check_symbol(cls, v: str) -> str:
+        return _normalize_symbol(v)
 
 
 class StrategyUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=60)
     rules: dict | None = None
-    symbols: list[str] | None = None
-    intervals: list[str] | None = None
+    symbol: str | None = Field(default=None, min_length=1, max_length=20)
+    interval: str | None = Field(default=None, min_length=1, max_length=4)
     stopLossMethod: Literal["percent", "steps", "atr"] | None = None
     stopLossValue: float | None = Field(default=None, gt=0, le=1_000_000)
     takeProfitMethod: Literal["rr", "percent", "steps", "atr"] | None = None
@@ -310,10 +303,10 @@ class StrategyUpdate(BaseModel):
     cooldownMinutes: int | None = Field(default=None, ge=1, le=10_080)
     enabled: bool | None = None
 
-    @field_validator("symbols")
+    @field_validator("symbol")
     @classmethod
-    def _check_symbols(cls, v: list[str] | None) -> list[str] | None:
-        return None if v is None else _normalize_symbols(v)
+    def _check_symbol(cls, v: str | None) -> str | None:
+        return None if v is None else _normalize_symbol(v)
 
 
 class StrategyOut(BaseModel):
@@ -321,8 +314,8 @@ class StrategyOut(BaseModel):
     template: str | None = None
     name: str | None = None
     rules: dict
-    symbols: list[str]
-    intervals: list[str]
+    symbol: str
+    interval: str
     stopLossMethod: str
     stopLossValue: float
     takeProfitMethod: str

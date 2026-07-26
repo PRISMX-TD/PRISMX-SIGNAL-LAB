@@ -20,6 +20,7 @@ from app.models import Candle, StrategySignal, StrategyWatch, UserStrategy
 from app.routers import strategies as strategies_router
 from app.services.strategy import live as strategy_live
 from app.services.strategy import presets
+from app.services.strategy.conditions import validate_conditions
 
 
 @pytest.fixture(autouse=True)
@@ -51,22 +52,27 @@ def _clean_backtest_cache():
     cache_clear()
 
 
-# 一条永真的最小 AST：close > 0。规则组必须带 logic（AND/OR），比较节点才用 op。
-# A minimal always-true AST: close > 0. A group carries `logic` (AND/OR); only a
-# comparison node carries `op`.
-_AST = {
-    "long": {
-        "logic": "AND",
-        "children": [
-            {
-                "left": {"kind": "price", "field": "close"},
-                "op": "gt",
-                "right": {"kind": "const", "value": 0},
-            }
+def _rules(symbol="XAUUSD", interval="15", logic="AND"):
+    """一份最小的合法条件配置：单条「收盘价在 SMA5 上方」。
+
+    条件列表是固定形态：logic + 品种 + 周期 + conditions，每个条件是
+    (indicator, usage, params) 三元组，空头侧由 usage 的镜像自动推出，不入参。
+    rules 里的品种/周期必须与请求顶层一致，故这里参数化。
+
+    A minimal valid condition payload: one "close is above SMA5" condition. The
+    shape is fixed — logic + symbol + interval + conditions, each condition an
+    (indicator, usage, params) triple, with the short side derived from the
+    usage's mirror rather than passed in. The symbol/interval inside `rules` must
+    match the top-level request, hence the parameters.
+    """
+    return {
+        "logic": logic,
+        "symbol": symbol,
+        "interval": interval,
+        "conditions": [
+            {"indicator": "ma", "usage": "ma.price_above", "params": {"maType": "SMA", "period": 5}},
         ],
-    },
-    "short": None,
-}
+    }
 
 
 def _feed(monkeypatch, symbols=("XAUUSD",)):
@@ -103,7 +109,7 @@ def test_pro_non_admin_user_can_create_strategy(client, db, auth_headers, user, 
     res = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"template": "ma_cross", "symbols": ["XAUUSD"], "intervals": ["15"]},
+        json={"template": "ma_trend", "symbol": "XAUUSD", "interval": "15"},
     )
     assert res.status_code == 200
 
@@ -116,7 +122,7 @@ def test_free_non_admin_user_blocked_by_pro_only_gate(client, db, auth_headers, 
     res = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"template": "ma_cross", "symbols": ["XAUUSD"], "intervals": ["15"]},
+        json={"template": "ma_trend", "symbol": "XAUUSD", "interval": "15"},
     )
     assert res.status_code == 403
 
@@ -127,7 +133,7 @@ def test_admin_and_pro_can_create_list_update_delete(client, db, auth_headers, u
     create = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"template": "rsi_reversal", "symbols": ["XAUUSD"], "intervals": ["15"]},
+        json={"template": "rsi_reversal", "symbol": "XAUUSD", "interval": "15"},
     )
     assert create.status_code == 200, create.text
     body = create.json()
@@ -153,21 +159,20 @@ def test_max_strategies_per_user_enforced(client, db, auth_headers, user, monkey
     for i in range(3):
         res = client.post(
             "/api/strategies", headers=auth_headers,
-            json={"template": "ma_cross", "symbols": ["XAUUSD"], "intervals": ["15"]},
+            json={"template": "ma_trend", "symbol": "XAUUSD", "interval": "15"},
         )
         assert res.status_code == 200, f"strategy #{i} should succeed"
     fourth = client.post(
         "/api/strategies", headers=auth_headers,
-        json={"template": "ma_cross", "symbols": ["XAUUSD"], "intervals": ["15"]},
+        json={"template": "ma_trend", "symbol": "XAUUSD", "interval": "15"},
     )
     assert fourth.status_code == 400
 
 
 def test_cannot_update_or_delete_another_users_strategy(client, db, auth_headers, user):
     _make_admin_pro(db, user)
-    other = UserStrategy(user_id="someone-else", template="ma_cross", symbol="XAUUSD", interval="15",
-                         symbols='["XAUUSD"]', intervals='["15"]',
-                         rules=json.dumps(presets.PRESET_RULES["ma_cross"]), params="{}")
+    other = UserStrategy(user_id="someone-else", template="ma_trend", symbol="XAUUSD", interval="15",
+                         rules=json.dumps(presets.preset_payload("ma_trend", "XAUUSD", "15")), params="{}")
     db.add(other)
     db.commit()
     db.refresh(other)
@@ -181,7 +186,7 @@ def test_backtest_reports_insufficient_data_with_no_candle_history(client, db, a
     _feed(monkeypatch)
     res = client.post(
         "/api/strategies/backtest", headers=auth_headers,
-        json={"template": "ma_cross", "symbol": "XAUUSD", "interval": "15"},
+        json={"template": "ma_trend", "symbol": "XAUUSD", "interval": "15"},
     )
     assert res.status_code == 200
     assert res.json()["insufficientData"] is True
@@ -198,7 +203,7 @@ def test_backtest_runs_against_seeded_candle_history(client, db, auth_headers, u
 
     res = client.post(
         "/api/strategies/backtest", headers=auth_headers,
-        json={"template": "ma_cross", "symbol": "XAUUSD", "interval": "15"},
+        json={"template": "ma_trend", "symbol": "XAUUSD", "interval": "15"},
     )
     assert res.status_code == 200
     body = res.json()
@@ -256,7 +261,7 @@ def test_backtest_returns_most_recent_bars_when_history_exceeds_cap(client, db, 
 
     res = client.post(
         "/api/strategies/backtest", headers=auth_headers,
-        json={"template": "ma_cross", "symbol": "XAUUSD", "interval": "15"},
+        json={"template": "ma_trend", "symbol": "XAUUSD", "interval": "15"},
     )
     assert res.status_code == 200
     body = res.json()
@@ -274,9 +279,8 @@ def test_backtest_returns_most_recent_bars_when_history_exceeds_cap(client, db, 
 
 def test_list_my_signals_only_returns_current_user_rows(client, db, auth_headers, user):
     _make_admin(db, user)
-    strat = UserStrategy(user_id=user.id, template="ma_cross", symbol="XAUUSD", interval="15",
-                         symbols='["XAUUSD"]', intervals='["15"]',
-                         rules=json.dumps(presets.PRESET_RULES["ma_cross"]), params="{}")
+    strat = UserStrategy(user_id=user.id, template="ma_trend", symbol="XAUUSD", interval="15",
+                         rules=json.dumps(presets.preset_payload("ma_trend", "XAUUSD", "15")), params="{}")
     db.add(strat)
     db.commit()
     db.refresh(strat)
@@ -292,9 +296,8 @@ def test_list_my_signals_only_returns_current_user_rows(client, db, auth_headers
 
 def test_clear_my_signals_only_deletes_current_user_rows(client, db, auth_headers, user):
     _make_admin(db, user)
-    strat = UserStrategy(user_id=user.id, template="ma_cross", symbol="XAUUSD", interval="15",
-                         symbols='["XAUUSD"]', intervals='["15"]',
-                         rules=json.dumps(presets.PRESET_RULES["ma_cross"]), params="{}")
+    strat = UserStrategy(user_id=user.id, template="ma_trend", symbol="XAUUSD", interval="15",
+                         rules=json.dumps(presets.preset_payload("ma_trend", "XAUUSD", "15")), params="{}")
     db.add(strat)
     db.commit()
     db.refresh(strat)
@@ -326,12 +329,10 @@ def test_new_closed_candle_triggers_enabled_strategy_and_fires_personal_signal(c
     """
     monkeypatch.setattr(settings, "EA_TOKEN", "test-ea-token")
     _make_pro(db, user)
-    params = {"maType": "SMA", "fastPeriod": 2, "slowPeriod": 4, "direction": "both"}
     strat = UserStrategy(
-        user_id=user.id, template="ma_cross", symbol="XAUUSD", interval="1",
-        params=json.dumps(params),
-        rules=json.dumps(presets.template_to_ast("ma_cross", params)),
-        symbols='["XAUUSD"]', intervals='["1"]',
+        user_id=user.id, template="ma_trend", symbol="XAUUSD", interval="1",
+        params="{}",
+        rules=json.dumps(_rules("XAUUSD", "1")),
         enabled=True,
     )
     db.add(strat)
@@ -355,11 +356,13 @@ def test_new_closed_candle_triggers_enabled_strategy_and_fires_personal_signal(c
 
     monkeypatch.setattr(strategy_live, "dispatch_event_push_async", _fake_dispatch)
 
-    # 收盘价序列在最后一根才发生金叉(见测试文件旁的推导脚本);每根间隔 60 秒,
-    # 最后一根的收盘时间刚好是"现在减 60 秒"，满足"已走完"的判定。
-    # The close sequence crosses only at the very last bar; bars are 60s
-    # apart, and the last bar's close time is exactly "now minus 60s" — just
-    # closed.
+    # 收盘价一路走平,只有最后一根跳上去,所以「收盘价在 SMA5 上方」只在最后
+    # 一根成立(走平时收盘价等于均线,不是严格大于);每根间隔 60 秒,最后一根的
+    # 收盘时间刚好是"现在减 60 秒"，满足"已走完"的判定。
+    # The closes are flat until the last bar jumps, so "close above SMA5" only
+    # holds on that final bar (a flat series has close equal to the MA, not
+    # strictly above). Bars are 60s apart, and the last bar's close time is
+    # exactly "now minus 60s" — just closed.
     closes = [100.0] * 10 + [100.0, 170.0]
     now = int(datetime.now(timezone.utc).timestamp())
     n = len(closes)
@@ -399,9 +402,9 @@ def test_one_trade_at_a_time_blocks_new_signal_until_previous_resolves(client, d
     monkeypatch.setattr(settings, "EA_TOKEN", "test-ea-token")
     _make_pro(db, user)
     strat = UserStrategy(
-        user_id=user.id, template="ma_cross", symbol="XAUUSD", interval="1",
-        params='{}', rules=json.dumps(presets.PRESET_RULES["ma_cross"]),
-        symbols='["XAUUSD"]', intervals='["1"]', enabled=True,
+        user_id=user.id, template="ma_trend", symbol="XAUUSD", interval="1",
+        params='{}', rules=json.dumps(_rules("XAUUSD", "1")),
+        enabled=True,
         stop_loss_method="percent", stop_loss_value=1.0,
         take_profit_method="rr", take_profit_value=2.0,
         one_trade_at_a_time=True,
@@ -424,11 +427,12 @@ def test_one_trade_at_a_time_blocks_new_signal_until_previous_resolves(client, d
         assert res.status_code == 200
 
     # evaluate_new_candle 要求库里至少有 5 根收盘 K 线才会求值,先垫几根早于
-    # bar1 的历史；这一步用真实(未打桩)的 entry_signals——全平走势不会有
-    # 交叉，不会意外触发。/ evaluate_new_candle requires at least 5 closed
+    # bar1 的历史；这一步用真实(未打桩)的求值——全平走势不会满足
+    # 条件，不会意外触发。/ evaluate_new_candle requires at least 5 closed
     # bars in the DB before it evaluates anything — seed a few older bars
-    # ahead of bar1; this step uses the real (unstubbed) entry_signals — a
-    # flat series never crosses, so it won't fire unexpectedly.
+    # ahead of bar1; this step uses the real (unstubbed) evaluation — a flat
+    # series never puts close strictly above the MA, so it won't fire
+    # unexpectedly.
     warmup = [{"t": now - 240 - (5 - i) * 60, "o": 100, "h": 100, "l": 100, "c": 100, "v": 1} for i in range(5)]
     res = client.post(
         "/api/feed/candles",
@@ -439,18 +443,18 @@ def test_one_trade_at_a_time_blocks_new_signal_until_previous_resolves(client, d
     db.expire_all()
     assert db.query(StrategySignal).filter(StrategySignal.user_id == user.id).count() == 0
 
-    # 打桩成"最后一根永远是 BUY"，隔离掉均线交叉的具体数学，只测一次一单
+    # 打桩成"最后一根永远是 BUY"，隔离掉指标条件的具体数学，只测一次一单
     # 的门槛逻辑本身——只在垫完历史之后才打桩，避免连历史回填那一步都被
     # 当成信号触发。/ Stub "the last bar is always BUY" to isolate the
-    # one-trade-at-a-time gate from the actual MA-cross math — only applied
+    # one-trade-at-a-time gate from the actual indicator math — only applied
     # after the warmup backfill, so that step itself isn't mistaken for a
     # signal trigger too.
-    # 打桩落在 live 模块自己的名字上：live.py 用的是 from-import，打 presets 不生效。
-    # Patch live's own name: live.py from-imports evaluate_strategy, so patching
-    # presets has no effect.
+    # 打桩落在 live 模块自己的名字上：live.py 用的是 from-import，打 conditions 不生效。
+    # Patch live's own name: live.py from-imports evaluate_conditions, so
+    # patching conditions has no effect.
     monkeypatch.setattr(
-        strategy_live, "evaluate_strategy",
-        lambda bars, rules, extra_series=None, memo=None: [None] * (len(bars) - 1) + ["BUY"],
+        strategy_live, "evaluate_conditions",
+        lambda bars, rules, memo=None: [None] * (len(bars) - 1) + ["BUY"],
     )
 
     # bar1: 没有正在跟踪的仓位,正常开仓 entry=100 → sl=99, tp=102
@@ -492,9 +496,9 @@ def test_one_trade_at_a_time_off_fires_every_bar(client, db, auth_headers, user,
     monkeypatch.setattr(settings, "EA_TOKEN", "test-ea-token")
     _make_pro(db, user)
     strat = UserStrategy(
-        user_id=user.id, template="ma_cross", symbol="XAUUSD", interval="1",
-        params='{}', rules=json.dumps(presets.PRESET_RULES["ma_cross"]),
-        symbols='["XAUUSD"]', intervals='["1"]', enabled=True,
+        user_id=user.id, template="ma_trend", symbol="XAUUSD", interval="1",
+        params='{}', rules=json.dumps(_rules("XAUUSD", "1")),
+        enabled=True,
         stop_loss_method="percent", stop_loss_value=1.0,
         take_profit_method="rr", take_profit_value=2.0,
         one_trade_at_a_time=False,
@@ -517,8 +521,8 @@ def test_one_trade_at_a_time_off_fires_every_bar(client, db, auth_headers, user,
     assert db.query(StrategySignal).filter(StrategySignal.user_id == user.id).count() == 0
 
     monkeypatch.setattr(
-        strategy_live, "evaluate_strategy",
-        lambda bars, rules, extra_series=None, memo=None: [None] * (len(bars) - 1) + ["BUY"],
+        strategy_live, "evaluate_conditions",
+        lambda bars, rules, memo=None: [None] * (len(bars) - 1) + ["BUY"],
     )
 
     for offset in (180, 120, 60):
@@ -537,12 +541,10 @@ def test_one_trade_at_a_time_off_fires_every_bar(client, db, auth_headers, user,
 def test_disabled_strategy_never_fires(client, db, auth_headers, user, monkeypatch):
     monkeypatch.setattr(settings, "EA_TOKEN", "test-ea-token")
     _make_pro(db, user)
-    params = {"maType": "SMA", "fastPeriod": 2, "slowPeriod": 4, "direction": "both"}
     strat = UserStrategy(
-        user_id=user.id, template="ma_cross", symbol="XAUUSD", interval="1",
-        params=json.dumps(params),
-        rules=json.dumps(presets.template_to_ast("ma_cross", params)),
-        symbols='["XAUUSD"]', intervals='["1"]',
+        user_id=user.id, template="ma_trend", symbol="XAUUSD", interval="1",
+        params="{}",
+        rules=json.dumps(_rules("XAUUSD", "1")),
         enabled=False,
     )
     db.add(strat)
@@ -583,7 +585,7 @@ def test_unknown_template_rejected_by_schema(client, db, auth_headers, user):
     res = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"template": "not_a_template", "symbols": ["XAUUSD"], "intervals": ["15"]},
+        json={"template": "not_a_template", "symbol": "XAUUSD", "interval": "15"},
     )
     assert res.status_code == 422
 
@@ -610,44 +612,47 @@ def test_out_of_range_sl_tp_value_rejected_not_clamped(
     res = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"rules": _AST, "symbols": ["XAUUSD"], "intervals": ["15"], field: value},
+        json={"rules": _rules(), "symbol": "XAUUSD", "interval": "15", field: value},
     )
     assert res.status_code == 422, res.text
     assert db.query(UserStrategy).count() == 0
 
 
-# ---------- AST 形态的 CRUD / AST-shaped CRUD ----------
+# ---------- 条件列表形态的 CRUD / condition-list-shaped CRUD ----------
 
-def test_create_with_explicit_ast(client, db, auth_headers, user, monkeypatch):
+def test_create_with_explicit_conditions(client, db, auth_headers, user, monkeypatch):
     _make_pro(db, user)
     _feed(monkeypatch)
+    rules = _rules("XAUUSD", "60")
     res = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"name": "自定义", "rules": _AST, "symbols": ["XAUUSD"], "intervals": ["15", "60"]},
+        json={"name": "自定义", "rules": rules, "symbol": "XAUUSD", "interval": "60"},
     )
     assert res.status_code == 200, res.text
     body = res.json()
-    assert body["rules"] == _AST
-    assert body["symbols"] == ["XAUUSD"]
-    assert sorted(body["intervals"]) == ["15", "60"]
+    assert body["rules"] == rules
+    assert body["symbol"] == "XAUUSD"
+    assert body["interval"] == "60"
     assert body["template"] is None
 
 
-def test_create_from_template_fills_preset_ast(client, db, auth_headers, user, monkeypatch):
-    """只传 template 不传 rules 时，服务端用该模板的预设 AST 落库——模板降级为
-    "AST 的一组预设值"，落库后与手写 AST 无区别。
-    Passing only a template fills in that template's preset AST: a template is
-    just a set of preset values for the rules column."""
+def test_create_from_template_fills_preset_conditions(client, db, auth_headers, user, monkeypatch):
+    """只传 template 不传 rules 时，服务端用该模板的预设条件落库（并把选中的
+    品种/周期拼进去）——模板降级为"条件列表的一组预设值"，落库后与手搭的条件
+    列表无区别。
+    Passing only a template stores that template's preset conditions with the
+    chosen symbol/interval spliced in: a template is just a set of preset values
+    for the rules column."""
     _make_pro(db, user)
     _feed(monkeypatch)
     res = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"template": "ma_cross", "symbols": ["XAUUSD"], "intervals": ["15"]},
+        json={"template": "ma_trend", "symbol": "XAUUSD", "interval": "15"},
     )
     assert res.status_code == 200, res.text
-    assert res.json()["rules"] == presets.PRESET_RULES["ma_cross"]
+    assert res.json()["rules"] == presets.preset_payload("ma_trend", "XAUUSD", "15")
 
 
 def test_create_syncs_strategy_watch_rows(client, db, auth_headers, user, monkeypatch):
@@ -656,15 +661,15 @@ def test_create_syncs_strategy_watch_rows(client, db, auth_headers, user, monkey
     res = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"rules": _AST, "symbols": ["XAUUSD", "EURUSD"], "intervals": ["15", "60"]},
+        json={"rules": _rules("EURUSD", "60"), "symbol": "EURUSD", "interval": "60"},
     )
     assert res.status_code == 200, res.text
     sid = res.json()["id"]
-    triples = {
+    pairs = {
         (w.symbol, w.interval)
         for w in db.query(StrategyWatch).filter(StrategyWatch.strategy_id == sid).all()
     }
-    assert triples == {("XAUUSD", "15"), ("XAUUSD", "60"), ("EURUSD", "15"), ("EURUSD", "60")}
+    assert pairs == {("EURUSD", "60")}
 
 
 def test_update_replaces_strategy_watch_rows(client, db, auth_headers, user, monkeypatch):
@@ -673,19 +678,19 @@ def test_update_replaces_strategy_watch_rows(client, db, auth_headers, user, mon
     sid = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"rules": _AST, "symbols": ["XAUUSD"], "intervals": ["15"]},
+        json={"rules": _rules(), "symbol": "XAUUSD", "interval": "15"},
     ).json()["id"]
     res = client.patch(
         f"/api/strategies/{sid}",
         headers=auth_headers,
-        json={"symbols": ["EURUSD"], "intervals": ["60"]},
+        json={"rules": _rules("EURUSD", "60"), "symbol": "EURUSD", "interval": "60"},
     )
     assert res.status_code == 200, res.text
-    triples = {
+    pairs = {
         (w.symbol, w.interval)
         for w in db.query(StrategyWatch).filter(StrategyWatch.strategy_id == sid).all()
     }
-    assert triples == {("EURUSD", "60")}
+    assert pairs == {("EURUSD", "60")}
 
 
 def test_delete_strategy_removes_watch_rows(client, db, auth_headers, user, monkeypatch):
@@ -694,7 +699,7 @@ def test_delete_strategy_removes_watch_rows(client, db, auth_headers, user, monk
     sid = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"rules": _AST, "symbols": ["XAUUSD"], "intervals": ["15"]},
+        json={"rules": _rules(), "symbol": "XAUUSD", "interval": "15"},
     ).json()["id"]
     assert client.delete(f"/api/strategies/{sid}", headers=auth_headers).status_code == 200
     assert db.query(StrategyWatch).filter(StrategyWatch.strategy_id == sid).count() == 0
@@ -702,39 +707,77 @@ def test_delete_strategy_removes_watch_rows(client, db, auth_headers, user, monk
 
 # ---------- 400 错误的具体性 / specificity of the 400s ----------
 
-def test_invalid_ast_returns_400_naming_the_violation(client, db, auth_headers, user, monkeypatch):
+def test_unknown_usage_returns_400_naming_the_violation(client, db, auth_headers, user, monkeypatch):
+    """用法不在枚举表里：400 并点名那个用法，而不是笼统的"参数错误"。
+    A usage outside the enum table 400s and names it, rather than a generic
+    "bad payload"."""
     _make_pro(db, user)
     _feed(monkeypatch)
-    bad = {"long": {"logic": "AND", "children": [
-        {"left": {"kind": "indicator", "fn": "no_such_indicator", "params": {}},
-         "op": "gt", "right": {"kind": "const", "value": 1}}
-    ]}, "short": None}
+    bad = _rules()
+    bad["conditions"] = [{"indicator": "ma", "usage": "ma.no_such_usage", "params": {}}]
     res = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"rules": bad, "symbols": ["XAUUSD"], "intervals": ["15"]},
+        json={"rules": bad, "symbol": "XAUUSD", "interval": "15"},
     )
     assert res.status_code == 400
-    assert "no_such_indicator" in res.json()["detail"]
+    assert "ma.no_such_usage" in res.json()["detail"]
 
 
-def test_rules_referencing_unsubscribed_interval_returns_400(client, db, auth_headers, user, monkeypatch):
-    """AST 引用了策略没订阅的周期：400 并点名那个周期，而不是上线后静默不触发。
-    An AST referencing an interval the strategy doesn't subscribe to 400s and
-    names it, instead of silently never firing once enabled."""
+def test_out_of_range_condition_param_returns_400_naming_the_bound(client, db, auth_headers, user, monkeypatch):
+    """参数越界：400 并点名参数与边界，让用户知道改哪个数字。参数不被夹取到
+    边界后照常落库——夹取会让用户以为自己填的值生效了。
+    An out-of-range param 400s and names the param and the bound, so the user
+    knows which number to change. It is not clamped and stored: clamping leaves
+    the user believing the value they typed took effect."""
     _make_pro(db, user)
     _feed(monkeypatch)
-    rules = {"long": {"logic": "AND", "children": [
-        {"left": {"kind": "indicator", "fn": "sma", "params": {"period": 5}, "interval": "240"},
-         "op": "gt", "right": {"kind": "const", "value": 1}}
-    ]}, "short": None}
+    bad = _rules()
+    # period 上限 300 / period caps at 300
+    bad["conditions"] = [
+        {"indicator": "ma", "usage": "ma.price_above", "params": {"maType": "SMA", "period": 9999}},
+    ]
     res = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"rules": rules, "symbols": ["XAUUSD"], "intervals": ["15"]},
+        json={"rules": bad, "symbol": "XAUUSD", "interval": "15"},
     )
     assert res.status_code == 400
-    assert "240" in res.json()["detail"]
+    detail = res.json()["detail"]
+    assert "period" in detail and "300" in detail
+    assert db.query(UserStrategy).count() == 0
+
+
+def test_rules_interval_disagreeing_with_request_returns_400(client, db, auth_headers, user, monkeypatch):
+    """rules 里的周期与请求顶层不一致：400 并点名两者，而不是上线后按一个周期
+    订阅、按另一个周期判定。
+    A `rules` interval diverging from the top-level one 400s and names both,
+    instead of subscribing by one interval and deciding by another once live."""
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    res = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"rules": _rules("XAUUSD", "240"), "symbol": "XAUUSD", "interval": "15"},
+    )
+    assert res.status_code == 400
+    detail = res.json()["detail"]
+    assert "240" in detail and "15" in detail
+
+
+def test_rules_symbol_disagreeing_with_request_returns_400(client, db, auth_headers, user, monkeypatch):
+    """品种同理：rules 与顶层必须是同一个品种。
+    Same for the symbol: `rules` and the top level must name the same one."""
+    _make_pro(db, user)
+    _feed(monkeypatch, ("XAUUSD", "EURUSD"))
+    res = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"rules": _rules("EURUSD", "15"), "symbol": "XAUUSD", "interval": "15"},
+    )
+    assert res.status_code == 400
+    detail = res.json()["detail"]
+    assert "EURUSD" in detail and "XAUUSD" in detail
 
 
 def test_unfed_symbol_returns_400_not_empty_result(client, db, auth_headers, user, monkeypatch):
@@ -746,47 +789,59 @@ def test_unfed_symbol_returns_400_not_empty_result(client, db, auth_headers, use
     res = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"rules": _AST, "symbols": ["NOPE"], "intervals": ["15"]},
+        json={"rules": _rules("NOPE", "15"), "symbol": "NOPE", "interval": "15"},
     )
     assert res.status_code == 400
     assert "NOPE" in res.json()["detail"]
 
 
-def test_too_many_symbols_returns_400_naming_the_limit(client, db, auth_headers, user, monkeypatch):
-    _make_pro(db, user)
-    _feed(monkeypatch, ("S1", "S2", "S3", "S4", "S5", "S6"))
-    res = client.post(
-        "/api/strategies",
-        headers=auth_headers,
-        json={"rules": _AST, "symbols": ["S1", "S2", "S3", "S4", "S5", "S6"], "intervals": ["15"]},
-    )
-    assert res.status_code == 400
-    assert "5" in res.json()["detail"]
-
-
-def test_too_many_intervals_returns_400(client, db, auth_headers, user, monkeypatch):
+def test_missing_symbol_returns_422(client, db, auth_headers, user, monkeypatch):
+    """一条策略只能有一个品种，且必填：不传直接被 schema 拒（422），不会建出
+    一条永远不会被评估的策略。多选与"一个都不选"在新形态下结构上不可能出现。
+    A strategy carries exactly one required symbol: omitting it is rejected by
+    the schema (422) rather than saving a strategy that can never be evaluated.
+    Multi-select and "none selected" are structurally impossible now."""
     _make_pro(db, user)
     _feed(monkeypatch)
     res = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"rules": _AST, "symbols": ["XAUUSD"], "intervals": ["1", "5", "15", "60"]},
+        json={"rules": _rules(), "interval": "15"},
     )
-    assert res.status_code == 400
-    assert "3" in res.json()["detail"]
+    assert res.status_code == 422, res.text
+    assert db.query(UserStrategy).count() == 0
 
 
-def test_empty_symbols_returns_400(client, db, auth_headers, user, monkeypatch):
-    """一个品种都不选：400 而不是建出一条永远不会被评估的策略。
-    No symbols at all: 400 rather than a strategy that can never be evaluated."""
+def test_blank_symbol_returns_422(client, db, auth_headers, user, monkeypatch):
+    """空白品种同样被 schema 拒——空串不是"未选"的合法表达。
+    A blank symbol is rejected by the schema too; an empty string isn't a valid
+    way to say "unset"."""
     _make_pro(db, user)
     _feed(monkeypatch)
     res = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"rules": _AST, "symbols": [], "intervals": ["15"]},
+        json={"rules": _rules(), "symbol": "   ", "interval": "15"},
     )
-    assert res.status_code == 400
+    assert res.status_code == 422, res.text
+    assert db.query(UserStrategy).count() == 0
+
+
+def test_unsupported_interval_returns_400_naming_the_options(client, db, auth_headers, user, monkeypatch):
+    """周期只能是六档之一：不支持的周期 400 并列出可选值，而不是建出一条永远
+    等不到 K 线的策略。
+    The interval must be one of the six: an unsupported one 400s and lists the
+    options instead of saving a strategy that never sees a bar."""
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    res = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={"rules": _rules("XAUUSD", "7"), "symbol": "XAUUSD", "interval": "7"},
+    )
+    assert res.status_code == 400, res.text
+    assert "7" in res.json()["detail"]
+    assert db.query(UserStrategy).count() == 0
 
 
 def test_neither_rules_nor_template_returns_400(client, db, auth_headers, user, monkeypatch):
@@ -795,7 +850,7 @@ def test_neither_rules_nor_template_returns_400(client, db, auth_headers, user, 
     res = client.post(
         "/api/strategies",
         headers=auth_headers,
-        json={"symbols": ["XAUUSD"], "intervals": ["15"]},
+        json={"symbol": "XAUUSD", "interval": "15"},
     )
     assert res.status_code == 400
 
@@ -816,14 +871,14 @@ def _seed_candles(db, symbol="XAUUSD", interval="15", count=200):
     db.commit()
 
 
-def test_backtest_accepts_ast_and_returns_both_samples(client, db, auth_headers, user, monkeypatch):
+def test_backtest_accepts_conditions_and_returns_both_samples(client, db, auth_headers, user, monkeypatch):
     _make_pro(db, user)
     _feed(monkeypatch)
     _seed_candles(db)
     res = client.post(
         "/api/strategies/backtest",
         headers=auth_headers,
-        json={"rules": _AST, "symbol": "XAUUSD", "interval": "15", "days": 30},
+        json={"rules": _rules(), "symbol": "XAUUSD", "interval": "15", "days": 30},
     )
     assert res.status_code == 200, res.text
     body = res.json()
@@ -841,7 +896,7 @@ def test_backtest_response_omits_full_bars(client, db, auth_headers, user, monke
     body = client.post(
         "/api/strategies/backtest",
         headers=auth_headers,
-        json={"rules": _AST, "symbol": "XAUUSD", "interval": "15", "days": 30},
+        json={"rules": _rules(), "symbol": "XAUUSD", "interval": "15", "days": 30},
     ).json()
     assert "bars" not in body
 
@@ -856,7 +911,7 @@ def test_backtest_includes_coverage_and_actual_range(client, db, auth_headers, u
     body = client.post(
         "/api/strategies/backtest",
         headers=auth_headers,
-        json={"rules": _AST, "symbol": "XAUUSD", "interval": "15", "days": 365},
+        json={"rules": _rules(), "symbol": "XAUUSD", "interval": "15", "days": 365},
     ).json()
     assert body["requestedDays"] == 365
     assert body["coverage"]["spanDays"] < 365
@@ -869,16 +924,17 @@ def test_backtest_on_unfed_symbol_returns_400(client, db, auth_headers, user, mo
     res = client.post(
         "/api/strategies/backtest",
         headers=auth_headers,
-        json={"rules": _AST, "symbol": "NOPE", "interval": "15", "days": 30},
+        json={"rules": _rules("NOPE", "15"), "symbol": "NOPE", "interval": "15", "days": 30},
     )
     assert res.status_code == 400
     assert "NOPE" in res.json()["detail"]
 
 
 def test_backtest_second_identical_request_is_cached(client, db, auth_headers, user, monkeypatch):
-    """同一 (AST, 品种, 周期, 天数, 成本版本) 的重复请求直接吃缓存，不再算一遍。
-    A repeat of the same (AST, symbol, interval, days, cost version) is served
-    from cache instead of recomputed."""
+    """同一 (条件配置, 品种, 周期, 天数, 成本版本) 的重复请求直接吃缓存，不再
+    算一遍。
+    A repeat of the same (conditions, symbol, interval, days, cost version) is
+    served from cache instead of recomputed."""
     from app.core import strategy_limits as sl
     from app.services.strategy import backtest as bt
 
@@ -894,7 +950,7 @@ def test_backtest_second_identical_request_is_cached(client, db, auth_headers, u
         return real(*a, **kw)
 
     monkeypatch.setattr(strategies_router, "run_backtest", _counting)
-    payload = {"rules": _AST, "symbol": "XAUUSD", "interval": "15", "days": 30}
+    payload = {"rules": _rules(), "symbol": "XAUUSD", "interval": "15", "days": 30}
     first = client.post("/api/strategies/backtest", headers=auth_headers, json=payload)
     second = client.post("/api/strategies/backtest", headers=auth_headers, json=payload)
     assert first.status_code == second.status_code == 200
@@ -913,7 +969,7 @@ def test_backtest_over_cost_cap_returns_400(client, db, auth_headers, user, monk
     res = client.post(
         "/api/strategies/backtest",
         headers=auth_headers,
-        json={"rules": _AST, "symbol": "XAUUSD", "interval": "15", "days": 30},
+        json={"rules": _rules(), "symbol": "XAUUSD", "interval": "15", "days": 30},
     )
     assert res.status_code == 400
 
@@ -935,7 +991,7 @@ def _seed_signals(db, user, strategy_id, results):
 def _new_strategy(client, auth_headers):
     res = client.post(
         "/api/strategies", headers=auth_headers,
-        json={"rules": _AST, "symbols": ["XAUUSD"], "intervals": ["15"]},
+        json={"rules": _rules(), "symbol": "XAUUSD", "interval": "15"},
     )
     assert res.status_code == 200, res.text
     return res.json()["id"]
@@ -986,9 +1042,8 @@ def test_performance_404_for_another_users_strategy(client, db, auth_headers, us
     """跨用户读绩效返回 404 而不是 403：403 会确认"这个 id 确实存在"。
     Reading another user's performance is a 404, not a 403 — a 403 would confirm
     the id exists."""
-    other = UserStrategy(user_id="someone-else", symbols='["XAUUSD"]', intervals='["15"]',
-                         symbol="XAUUSD", interval="15", template="ma_cross",
-                         rules=json.dumps(_AST), params="{}")
+    other = UserStrategy(user_id="someone-else", symbol="XAUUSD", interval="15",
+                         template="ma_trend", rules=json.dumps(_rules()), params="{}")
     db.add(other)
     db.commit()
     db.refresh(other)
@@ -1041,21 +1096,29 @@ def test_performance_only_counts_this_strategys_signals(client, db, auth_headers
 
 # ---------- 预设 AST 暴露与时段过滤清空 / preset exposure & clearing the session filter ----------
 
-def test_templates_endpoint_exposes_preset_asts(client, auth_headers):
-    """前端「从预设起步」要的是预设 AST，不是参数定义——参数表单已被规则构建器
-    取代。两者同响应返回，键集合必须与 TEMPLATE_KEYS 一致。
-    The frontend's "start from a preset" needs the preset ASTs, not the param
-    schemas (the param form is gone, replaced by the rule builder). Both come in
-    the same response, and the key set must match TEMPLATE_KEYS."""
+def test_templates_endpoint_exposes_preset_conditions(client, auth_headers):
+    """前端「从预设起步」要的是预设的条件列表，不是参数定义——参数表单已被条件
+    构建器取代。键集合必须与 TEMPLATE_KEYS 一致。
+
+    响应里只有 logic + conditions，没有 symbol / interval：预设与品种周期无关，
+    那两项由用户在表单里选，前端补齐后才成为一份完整的 rules。
+
+    The frontend's "start from a preset" needs the preset condition lists, not
+    param schemas (the param form is gone, replaced by the condition builder),
+    and the key set must match TEMPLATE_KEYS. The response carries only
+    logic + conditions: presets are symbol/interval-agnostic, the user picks
+    those in the form, and the frontend fills them in to make a complete `rules`.
+    """
     res = client.get("/api/strategies/templates", headers=auth_headers)
     assert res.status_code == 200, res.text
     body = res.json()
     assert set(body["presets"]) == set(presets.TEMPLATE_KEYS)
-    assert body["presets"]["ma_cross"] == presets.PRESET_RULES["ma_cross"]
-    # 每个预设都是合法信封，前端载入后可直接交给构建器编辑。
-    # Every preset is a valid envelope, editable by the builder as-is.
+    # 补上品种周期后即为合法配置，构建器可直接编辑。
+    # Valid once symbol/interval are added, editable by the builder as-is.
     for key in presets.TEMPLATE_KEYS:
-        presets.validate_strategy_rules(body["presets"][key])
+        preset = body["presets"][key]
+        assert set(preset) == {"logic", "conditions"}
+        validate_conditions({**preset, "symbol": "XAUUSD", "interval": "15"})
 
 
 def test_update_can_clear_session_filter(client, db, auth_headers, user, monkeypatch):
@@ -1070,9 +1133,9 @@ def test_update_can_clear_session_filter(client, db, auth_headers, user, monkeyp
         "/api/strategies",
         headers=auth_headers,
         json={
-            "rules": _AST,
-            "symbols": ["XAUUSD"],
-            "intervals": ["15"],
+            "rules": _rules(),
+            "symbol": "XAUUSD",
+            "interval": "15",
             "sessionFilter": {"startHour": 22, "endHour": 2},
         },
     ).json()["id"]
@@ -1096,9 +1159,9 @@ def test_update_without_session_filter_key_keeps_it(client, db, auth_headers, us
         "/api/strategies",
         headers=auth_headers,
         json={
-            "rules": _AST,
-            "symbols": ["XAUUSD"],
-            "intervals": ["15"],
+            "rules": _rules(),
+            "symbol": "XAUUSD",
+            "interval": "15",
             "sessionFilter": {"startHour": 9, "endHour": 17},
         },
     ).json()["id"]

@@ -1,23 +1,23 @@
-// 自定义策略页：搭规则树 → 查数据覆盖 → 回测 → 启用 → 触发个人信号 → 一键下单。
+// 自定义策略页：挑条件 → 查数据覆盖 → 回测 → 启用 → 触发个人信号 → 一键下单。
 // 只触发这个用户自己的信号（strategy_signals 表，与全站信号表完全独立），一键下单
 // 复用图表页同款的手动下单弹窗（ChartOrderModal + placeManualOrder），不经过
 // signalId，没有任何 Order 相关的后端改动。
 //
-// 本页只做编排：状态管理、数据加载、弹窗接线。规则构建器、回测面板、策略卡片、
+// 本页只做编排：状态管理、数据加载、弹窗接线。条件编辑器、回测面板、策略卡片、
 // 信号列表都在 components/strategies/ 下——此前这些全挤在本文件的 1321 行里，
-// 加入 AST 构建器与成本/样本外展示后必然失控。
+// 加入条件编辑器与成本/样本外展示后必然失控。
 //
-// Custom strategies page: build a rule tree, check data coverage, backtest,
+// Custom strategies page: pick conditions, check data coverage, backtest,
 // enable, get personal signals on trigger, one-click order. Fires only this
 // user's own signals (the strategy_signals table, fully separate from the shared
 // signals table); one-click order reuses the charts page's manual-order modal
 // (ChartOrderModal + placeManualOrder) — no signalId involved, no Order-side
 // backend changes.
 //
-// This page is orchestration only: state, data loading, modal wiring. The rule
-// builder, backtest panel, strategy card and signal list all live under
+// This page is orchestration only: state, data loading, modal wiring. The
+// condition editor, backtest panel, strategy card and signal list all live under
 // components/strategies/ — they used to be crammed into this file's 1321 lines,
-// which adding an AST builder plus cost/out-of-sample views would have made
+// which adding a condition editor plus cost/out-of-sample views would have made
 // unmanageable.
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -30,6 +30,7 @@ import type {
   StopLossMethod,
   StrategyBacktestResult,
   StrategyPerformance,
+  StrategyPresets,
   StrategySessionFilter,
   StrategySignal,
   StrategyTemplateKey,
@@ -39,39 +40,34 @@ import type {
 import ChartOrderModal from '../components/ChartOrderModal'
 import ConfirmModal from '../components/ConfirmModal'
 import BacktestPanel from '../components/strategies/BacktestPanel'
-import RuleGroupEditor from '../components/strategies/RuleGroup'
+import ConditionList from '../components/strategies/ConditionList'
 import PresetPicker from '../components/strategies/PresetPicker'
 import SessionFilterField from '../components/strategies/SessionFilterField'
 import StrategyCard from '../components/strategies/StrategyCard'
 import StrategySignalList from '../components/strategies/StrategySignalList'
-import { NumberField } from '../components/strategies/OperandPicker'
+import { NumberField } from '../components/strategies/NumberField'
 import {
-  INTERVALS,
-  RULE_LIMITS,
-  collectIntervals,
-  emptyGroup,
-  ruleUsage,
-  type RuleEnvelope,
-} from '../components/strategies/ruleTypes'
+  defaultParams,
+  intervalLabel,
+  type ConditionPayload,
+  type UsageCatalog,
+} from '../components/strategies/conditionTypes'
 import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import { useBackToClose } from '../utils/useBackToClose'
 
-// 模板名称仍需要：迁移过来的旧策略 template 非 null，未命名时用模板名作显示名。
-// 模板的参数表单已被规则构建器取代，所以这里只留标签映射。
-// Template names are still needed: a migrated strategy has a non-null template,
-// and an unnamed one displays its template's name. The per-template param form is
-// gone (replaced by the rule builder), so only the label map remains.
+// 模板名称仍需要：从预设起步的策略 template 非 null，未命名时用模板名作显示名。
+// 模板的参数表单已被条件编辑器取代，所以这里只留标签映射。
+// Template names are still needed: a strategy started from a preset has a
+// non-null template, and an unnamed one displays its template's name. The
+// per-template param form is gone (replaced by the condition editor), so only the
+// label map remains.
 const TEMPLATE_LABEL_KEYS: Record<StrategyTemplateKey, string> = {
-  ma_cross: 'strategy.templateMaCross',
-  rsi_reversal: 'strategy.templateRsiReversal',
-  bollinger_reversion: 'strategy.templateBollingerReversion',
+  ma_trend: 'strategy.templateMaTrend',
   macd_cross: 'strategy.templateMacdCross',
-  ma_pullback: 'strategy.templateMaPullback',
+  rsi_reversal: 'strategy.templateRsiReversal',
   bollinger_breakout: 'strategy.templateBollingerBreakout',
-  rsi_momentum: 'strategy.templateRsiMomentum',
   donchian_breakout: 'strategy.templateDonchianBreakout',
-  momentum_breakout: 'strategy.templateMomentumBreakout',
-  trend_rsi_filter: 'strategy.templateTrendRsiFilter',
+  macd_rsi_combo: 'strategy.templateMacdRsiCombo',
 }
 
 // 未保存草稿的回测结果归属键。用一个不可能与 UUID 冲突的字面量。
@@ -86,9 +82,14 @@ interface Draft {
   id?: string
   template: StrategyTemplateKey | null
   name: string
-  rules: RuleEnvelope
-  symbols: string[]
-  intervals: string[]
+  // rules 里也带着 symbol / interval，必须与下面两个字段始终相等——后端把不一致
+  // 当 400。所以改品种或周期的地方必须同时改这三处。
+  // `rules` carries its own symbol/interval, which must always equal the two
+  // fields below: the backend 400s on a mismatch. Every place that changes the
+  // symbol or interval therefore has to update all three.
+  rules: ConditionPayload
+  symbol: string
+  interval: string
   stopLossMethod: StopLossMethod
   stopLossValue: number
   takeProfitMethod: TakeProfitMethod
@@ -100,13 +101,31 @@ interface Draft {
   sessionFilter: StrategySessionFilter | null
 }
 
-function emptyDraft(symbol: string): Draft {
+// 新草稿的初始条件只能由后端目录给出：合法的 (指标, 用法, 参数) 组合与参数默认值
+// 都登记在 usages 里，前端凭空造一条就是在复制一份会漂移的副本。所以 emptyDraft
+// 要求先拿到目录，页面在目录到手之前不渲染编辑器。
+// A new draft's first condition can only come from the backend catalogue: the
+// legal (indicator, usage, params) combinations and their defaults are registered
+// in `usages`, and inventing one here would be a second copy that drifts. So
+// emptyDraft demands the catalogue, and the page holds the editor back until it
+// has arrived.
+function emptyDraft(symbol: string, interval: string, catalog: UsageCatalog): Draft {
+  const indicator = catalog.indicators[0]
+  const usage = indicator?.usages[0]
   return {
     template: null,
     name: '',
-    rules: { long: emptyGroup(), short: null },
-    symbols: [symbol],
-    intervals: ['15'],
+    rules: {
+      logic: 'AND',
+      symbol,
+      interval,
+      conditions:
+        indicator && usage
+          ? [{ indicator: indicator.key, usage: usage.key, params: defaultParams(usage) }]
+          : [],
+    },
+    symbol,
+    interval,
     stopLossMethod: 'percent',
     stopLossValue: 1.0,
     takeProfitMethod: 'rr',
@@ -125,8 +144,8 @@ function draftFromStrategy(s: UserStrategy): Draft {
     template: s.template,
     name: s.name ?? '',
     rules: s.rules,
-    symbols: s.symbols,
-    intervals: s.intervals,
+    symbol: s.symbol,
+    interval: s.interval,
     stopLossMethod: s.stopLossMethod,
     stopLossValue: s.stopLossValue,
     takeProfitMethod: s.takeProfitMethod,
@@ -139,15 +158,15 @@ function draftFromStrategy(s: UserStrategy): Draft {
   }
 }
 
-// 预设规则树必须深拷贝再进 Draft：`templates()` 的响应被缓存在页面 state 里，
-// 直接把同一个对象引用塞进 Draft，用户编辑规则时会就地改掉这份缓存——下次再
+// 预设条件必须深拷贝再进 Draft：`templates()` 的响应被缓存在页面 state 里，
+// 直接把同一个对象引用塞进 Draft，用户改条件参数时会就地改掉这份缓存——下次再
 // 从同一个预设起步就不是原始预设了。
-// Deep-copy a preset tree before it enters a Draft: the templates() response is
-// cached in page state, so handing the same object reference to the Draft would
-// let rule edits mutate that cache in place — starting from the same preset a
-// second time would no longer give the original.
-function cloneEnvelope(env: RuleEnvelope): RuleEnvelope {
-  return JSON.parse(JSON.stringify(env)) as RuleEnvelope
+// Deep-copy a preset's conditions before they enter a Draft: the templates()
+// response is cached in page state, so handing the same object reference to the
+// Draft would let param edits mutate that cache in place — starting from the same
+// preset a second time would no longer give the original.
+function cloneEnvelope(payload: ConditionPayload): ConditionPayload {
+  return JSON.parse(JSON.stringify(payload)) as ConditionPayload
 }
 
 interface StrategyEditorProps {
@@ -161,6 +180,10 @@ interface StrategyEditorProps {
   // Every candidate symbol including unfed ones, from the coverage endpoint, so the
   // user sees "this symbol exists but isn't fed" rather than not seeing it at all.
   allSymbols: string[]
+  // 指标与用法目录：可选周期、条件数上限、指标清单全部来自它，前端不带副本。
+  // The indicator/usage catalogue: selectable intervals, the condition cap and the
+  // indicator list all come from it; the frontend keeps no copy.
+  catalog: UsageCatalog
   onChange: (d: Draft) => void
   onCancel: () => void
   onSaved: (s: UserStrategy) => void
@@ -168,42 +191,25 @@ interface StrategyEditorProps {
 }
 
 function StrategyEditor({
-  draft, activeSymbols, allSymbols, onChange, onCancel, onSaved, onBacktestResult,
+  draft, activeSymbols, allSymbols, catalog, onChange, onCancel, onSaved, onBacktestResult,
 }: StrategyEditorProps) {
   const { t } = useTranslation()
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  // 回测目标：策略可订阅多个品种/周期，但回测一次只跑一个组合。
-  // Backtest target: a strategy may subscribe to several symbols/intervals, but one
-  // run covers a single pair.
-  const [btSymbol, setBtSymbol] = useState(draft.symbols[0] ?? activeSymbols[0] ?? 'XAUUSD')
-  const [btInterval, setBtInterval] = useState(draft.intervals[0] ?? '15')
 
-  const usage = ruleUsage(draft.rules)
-  // 规则引用的周期必须是订阅周期的子集，否则那一路指标永远取不到数据，后端创建时
-  // 会 400。在这里先说清楚，用户不必靠报错才知道。
-  // Intervals referenced by the rules must be a subset of the subscribed ones, or
-  // that indicator branch never has data and the backend 400s on create. Say it
-  // here so the user doesn't need the error to find out.
-  const unsubscribed = collectIntervals(draft.rules).filter((iv) => !draft.intervals.includes(iv))
-  const noSide = !draft.rules.long && !draft.rules.short
-  const canSave = !noSide && unsubscribed.length === 0 && draft.symbols.length > 0 && draft.intervals.length > 0
+  const canSave = draft.rules.conditions.length > 0 && draft.symbol !== '' && draft.interval !== ''
 
-  const toggleSymbol = (sym: string) => {
-    const has = draft.symbols.includes(sym)
-    if (!has && draft.symbols.length >= RULE_LIMITS.maxSymbols) return
-    // 最后一个品种不允许取消：策略必须至少盯一个品种，允许清空只会让保存必然 400。
-    // The last symbol can't be deselected: a strategy must watch at least one, and
-    // allowing an empty list would only guarantee a 400 on save.
-    if (has && draft.symbols.length === 1) return
-    onChange({ ...draft, symbols: has ? draft.symbols.filter((s) => s !== sym) : [...draft.symbols, sym] })
+  // 品种与周期各改三处：顶层两个字段 + rules 里那一份。后端要求两处完全相等，
+  // 只改顶层会在保存时 400。
+  // Changing the symbol or interval touches three places: the two top-level
+  // fields plus the copy inside `rules`. The backend requires them to be equal,
+  // so updating only the top level would 400 on save.
+  const pickSymbol = (symbol: string) => {
+    onChange({ ...draft, symbol, rules: { ...draft.rules, symbol } })
   }
 
-  const toggleInterval = (code: string) => {
-    const has = draft.intervals.includes(code)
-    if (!has && draft.intervals.length >= RULE_LIMITS.maxIntervals) return
-    if (has && draft.intervals.length === 1) return
-    onChange({ ...draft, intervals: has ? draft.intervals.filter((c) => c !== code) : [...draft.intervals, code] })
+  const pickInterval = (interval: string) => {
+    onChange({ ...draft, interval, rules: { ...draft.rules, interval } })
   }
 
   const save = async (enabled: boolean) => {
@@ -213,8 +219,8 @@ function StrategyEditor({
       const payload = {
         name: draft.name.trim() || null,
         rules: draft.rules,
-        symbols: draft.symbols,
-        intervals: draft.intervals,
+        symbol: draft.symbol,
+        interval: draft.interval,
         stopLossMethod: draft.stopLossMethod,
         stopLossValue: draft.stopLossValue,
         takeProfitMethod: draft.takeProfitMethod,
@@ -255,8 +261,8 @@ function StrategyEditor({
 
   return (
     <section className="glass mb-5 p-5">
-      {/* 基本信息：命名 + 品种（多选）+ 周期（多选）
-          Basics: name, symbols (multi), intervals (multi) */}
+      {/* 基本信息：命名 + 品种（单选）+ 周期（单选）
+          Basics: name, symbol (single), interval (single) */}
       <div>
         <h4 className="mb-3 text-sm font-semibold text-slate-300">{t('strategy.sectionBasics')}</h4>
         <label className="flex flex-col gap-1.5">
@@ -277,11 +283,23 @@ function StrategyEditor({
           <p className="mt-1.5 text-xs text-prism-200/80">{t('strategy.presetLoaded')}</p>
         )}
 
+        {/* 一条策略只盯一个组合，所以品种与周期都是单选。说清这一点，用户才知道
+            "想覆盖更多组合" 的做法是多建几条而不是在这里多选。
+            One strategy watches one pair, so both pickers are single-select. Saying
+            so is what tells the user that covering more pairs means creating more
+            strategies rather than multi-selecting here. */}
+        <p className="mt-3 text-xs leading-relaxed text-slate-500">{t('strategy.singlePairHint')}</p>
+
         <div className="mt-4 flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-slate-500">
-            {t('strategy.symbolsLabel', { used: draft.symbols.length, max: RULE_LIMITS.maxSymbols })}
+          <span className="text-[11px] uppercase tracking-wide text-slate-500" id="draft-symbol-label">
+            {t('strategy.symbolLabel')}
           </span>
-          <div className="flex flex-wrap gap-2">
+          {/* 一组互斥选项用 radiogroup 语义，读屏能播报"n 项中的第 m 项"以及当前选中
+              的是哪一个，而不是把它们读成一堆孤立按钮。
+              A mutually exclusive set gets radiogroup semantics so a screen reader
+              announces "m of n" and which one is selected, rather than reading a
+              pile of unrelated buttons. */}
+          <div className="flex flex-wrap gap-2" role="radiogroup" aria-labelledby="draft-symbol-label">
             {/* 未接入行情的品种置灰并标注原因（spec 验收标准第 4 条）：此前用户能选
                 中它，然后只得到一个没有解释的 insufficientData。
                 Symbols without a live feed grey out with the reason stated (spec
@@ -289,15 +307,16 @@ function StrategyEditor({
                 unexplained insufficientData later. */}
             {allSymbols.map((sym) => {
               const fed = activeSymbols.includes(sym)
-              const on = draft.symbols.includes(sym)
+              const on = draft.symbol === sym
               return (
                 <button
                   key={sym}
                   type="button"
+                  role="radio"
                   disabled={!fed}
                   title={fed ? undefined : t('strategy.symbolNotFed')}
-                  aria-pressed={on}
-                  onClick={() => toggleSymbol(sym)}
+                  aria-checked={on}
+                  onClick={() => pickSymbol(sym)}
                   className={segBtn(on, !fed)}
                 >
                   {displaySymbol(sym)}
@@ -309,77 +328,46 @@ function StrategyEditor({
         </div>
 
         <div className="mt-4 flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-slate-500">
-            {t('strategy.intervalsLabel', { used: draft.intervals.length, max: RULE_LIMITS.maxIntervals })}
+          <span className="text-[11px] uppercase tracking-wide text-slate-500" id="draft-interval-label">
+            {t('strategy.intervalLabel')}
           </span>
-          <div className="flex flex-wrap gap-2">
-            {INTERVALS.map((iv) => (
+          {/* 可选周期来自 usages 目录，不是前端常量：后端加减一档周期时这里跟着变。
+              The selectable intervals come from the usages catalogue rather than a
+              frontend constant, so adding or dropping one backend-side lands here. */}
+          <div className="flex flex-wrap gap-2" role="radiogroup" aria-labelledby="draft-interval-label">
+            {catalog.intervals.map((code) => (
               <button
-                key={iv.code}
+                key={code}
                 type="button"
-                aria-pressed={draft.intervals.includes(iv.code)}
-                onClick={() => toggleInterval(iv.code)}
-                className={segBtn(draft.intervals.includes(iv.code))}
+                role="radio"
+                aria-checked={draft.interval === code}
+                onClick={() => pickInterval(code)}
+                className={segBtn(draft.interval === code)}
               >
-                {iv.label}
+                {intervalLabel(code)}
               </button>
             ))}
           </div>
         </div>
       </div>
 
-      {/* 入场规则：多空两侧各一棵树，任一侧可关闭
-          Entry rules: one tree per side, either side can be turned off */}
+      {/* 入场条件：只编辑做多方向的一列条件。做空侧由后端按每个用法登记的镜像
+          用法推出，这里没有对应的编辑区，所以必须明说，否则用户会以为漏了一半。
+          Entry conditions: only the long direction's list is edited here. The short
+          side is derived from each usage's registered mirror, and since there's no
+          editor for it, that has to be stated or users assume half is missing. */}
       <div className="mt-5 border-t border-white/10 pt-4">
-        <div className="flex flex-wrap items-baseline gap-3">
-          <h4 className="text-sm font-semibold text-slate-300">{t('strategy.sectionRules')}</h4>
-          <span className="text-[11px] text-slate-500">
-            {t('strategy.ruleUsageConditions', { used: usage.conditions, max: RULE_LIMITS.maxConditions })}
-            {' · '}
-            {t('strategy.ruleUsageIndicators', { used: usage.indicatorInstances, max: RULE_LIMITS.maxIndicatorInstances })}
-          </span>
+        <h4 className="text-sm font-semibold text-slate-300">{t('strategy.sectionConditions')}</h4>
+        <div className="mt-3">
+          <ConditionList
+            logic={draft.rules.logic}
+            conditions={draft.rules.conditions}
+            indicators={catalog.indicators}
+            maxConditions={catalog.maxConditions}
+            onChange={({ logic, conditions }) => onChange({ ...draft, rules: { ...draft.rules, logic, conditions } })}
+          />
         </div>
-
-        {(['long', 'short'] as const).map((side) => (
-          <div key={side} className="mt-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <h5 className="text-xs font-semibold text-slate-200">
-                {side === 'long' ? t('strategy.rulesLong') : t('strategy.rulesShort')}
-              </h5>
-              <label className="flex items-center gap-2 text-xs text-slate-400">
-                <input
-                  type="checkbox"
-                  checked={draft.rules[side] != null}
-                  onChange={(e) =>
-                    onChange({ ...draft, rules: { ...draft.rules, [side]: e.target.checked ? emptyGroup() : null } })
-                  }
-                  className="h-3.5 w-3.5 rounded border-white/20 bg-white/5 accent-prism-500"
-                />
-                {t('strategy.rulesSideEnable')}
-              </label>
-            </div>
-            {draft.rules[side] ? (
-              <div className="mt-2">
-                <RuleGroupEditor
-                  group={draft.rules[side]!}
-                  onChange={(next) => onChange({ ...draft, rules: { ...draft.rules, [side]: next } })}
-                  depth={1}
-                  usage={usage}
-                  availableIntervals={draft.intervals}
-                />
-              </div>
-            ) : (
-              <p className="mt-1.5 text-xs text-slate-500">{t('strategy.rulesSideDisabled')}</p>
-            )}
-          </div>
-        ))}
-
-        {noSide && <p className="mt-3 text-xs text-down" role="alert">{t('strategy.rulesNeedOneSide')}</p>}
-        {unsubscribed.length > 0 && (
-          <p className="mt-3 rounded-lg border border-amber-400/20 bg-amber-400/5 p-3 text-xs text-amber-200" role="alert">
-            {t('strategy.rulesUnsubscribedInterval', { intervals: unsubscribed.join(', ') })}
-          </p>
-        )}
+        <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('strategy.condShortHint')}</p>
       </div>
 
       {/* 风险管理：止损 / 止盈各一张卡，方式与数值紧挨着
@@ -534,11 +522,8 @@ function StrategyEditor({
       <div className="mt-5 border-t border-white/10 pt-4">
         <BacktestPanel
           rules={draft.rules}
-          symbol={btSymbol}
-          interval={btInterval}
-          symbolOptions={draft.symbols}
-          intervalOptions={draft.intervals}
-          onTargetChange={(sym, itv) => { setBtSymbol(sym); setBtInterval(itv) }}
+          symbol={draft.symbol}
+          interval={draft.interval}
           stopLossMethod={draft.stopLossMethod}
           stopLossValue={draft.stopLossValue}
           takeProfitMethod={draft.takeProfitMethod}
@@ -601,8 +586,14 @@ export default function StrategiesPage() {
   const [allSymbols, setAllSymbols] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [draft, setDraft] = useState<Draft | null>(null)
-  const [presets, setPresets] = useState<Record<StrategyTemplateKey, RuleEnvelope> | null>(null)
+  const [presets, setPresets] = useState<StrategyPresets | null>(null)
   const [presetError, setPresetError] = useState<string | null>(null)
+  // 指标与用法目录。新建草稿的初始条件、可选周期、条件数上限都要用它，所以目录
+  // 没到手之前不能进编辑器——凭空造条件就是在前端复制一份会漂移的规格副本。
+  // The indicator/usage catalogue. A new draft's first condition, the selectable
+  // intervals and the condition cap all come from it, so the editor stays shut
+  // until it arrives: inventing a condition here would fork the spec.
+  const [catalog, setCatalog] = useState<UsageCatalog | null>(null)
   // 打开「新建」时先进预设选择，选完才进编辑器 / show the preset picker first
   const [picking, setPicking] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<UserStrategy | null>(null)
@@ -625,18 +616,22 @@ export default function StrategiesPage() {
     setLoading(true)
     try {
       // coverage 不传参：拿"当前有报价的全部品种"，用于把未接入品种也列出来并置灰。
-      // 三个请求互不依赖，并行发出。
+      // 这几个请求互不依赖，并行发出。
       // coverage with no args returns every currently quoted symbol, so unfed ones
-      // can still be listed (greyed out). The three requests are independent.
+      // can still be listed (greyed out). These requests are all independent.
       // templates() 单独 catch：预设拿不到不该让整页加载失败——策略列表、信号、
       // 覆盖度都与它无关。
       // templates() catches on its own: failing to fetch presets must not fail
       // the whole page — the list, signals and coverage don't depend on them.
-      const [tRes, sRes, sigRes, covRes] = await Promise.all([
+      // usages() 也单独 catch：目录拿不到只该挡住编辑器，策略列表与信号照样能看。
+      // usages() catches on its own too: a missing catalogue should only hold the
+      // editor back, leaving the list and signals readable.
+      const [tRes, uRes, sRes, sigRes, covRes] = await Promise.all([
         strategyApi.templates().catch((e) => {
           setPresetError(e instanceof Error ? localizeApiError(e.message) : 'Unknown error')
           return null
         }),
+        strategyApi.usages().catch(() => null),
         strategyApi.list(),
         strategyApi.signals(20),
         strategyApi.coverage(),
@@ -645,6 +640,7 @@ export default function StrategiesPage() {
         setPresets(tRes.presets)
         setPresetError(null)
       }
+      if (uRes) setCatalog(uRes)
       setStrategies(sRes.strategies)
       setSignals(sigRes.signals)
       const syms = Array.from(new Set(covRes.coverage.map((c) => c.symbol)))
@@ -703,14 +699,30 @@ export default function StrategiesPage() {
     setPicking(true)
   }
 
-  // template 为 null 表示从空白开始；否则载入该预设的规则树（深拷贝）。
-  // A null template means start blank; otherwise load that preset's tree (deep-copied).
+  // template 为 null 表示从空白开始；否则载入该预设的条件列表（深拷贝）。
+  // 预设只有 logic + conditions，品种与周期得用草稿当前选中的那一对补齐才是一份
+  // 完整的 rules——后端要求 rules 里的两项与顶层完全相等。
+  // A null template means start blank; otherwise load that preset's conditions
+  // (deep-copied). A preset carries only logic + conditions, so the draft's own
+  // symbol/interval are spliced in to make a complete `rules`: the backend
+  // requires those two to equal the top-level fields exactly.
   const startFromPreset = (template: StrategyTemplateKey | null) => {
-    const base = emptyDraft(activeSymbols[0] ?? allSymbols[0] ?? 'XAUUSD')
+    if (!catalog) return
+    // 默认周期优先 15m：目录按周期长短排序，第一项是 1m，而 1m 上噪声远多于信号，
+    // 拿它当新手默认值只会让第一次回测看起来一塌糊涂。目录里没有 15 才退回首项。
+    // Default to 15m when offered: the catalogue is ordered by length so the first
+    // entry is 1m, where noise swamps signal — a poor default that would make a
+    // beginner's first backtest look broken. Falls back to the first entry.
+    const interval = catalog.intervals.includes('15') ? '15' : catalog.intervals[0] ?? '15'
+    const base = emptyDraft(activeSymbols[0] ?? allSymbols[0] ?? 'XAUUSD', interval, catalog)
     const preset = template != null ? presets?.[template] : null
     setDraft(
       preset != null
-        ? { ...base, template, rules: cloneEnvelope(preset) }
+        ? {
+            ...base,
+            template,
+            rules: cloneEnvelope({ ...preset, symbol: base.symbol, interval: base.interval }),
+          }
         : base,
     )
     setPicking(false)
@@ -800,11 +812,17 @@ export default function StrategiesPage() {
       <section className="glass mb-5 p-5">
         <div className="flex items-center justify-between">
           <h3 className="font-display text-lg font-semibold text-slate-100">{t('strategy.myStrategies')}</h3>
+          {/* 目录拿不到时禁用新建：新草稿的第一条条件必须由目录给出，放进去只会
+              得到一个编不出合法条件的空编辑器。
+              New drafts are disabled without the catalogue: a new draft's first
+              condition has to come from it, and going ahead would only open an
+              editor that can't produce a valid condition. */}
           {isPro && !draft && (
             <button
               type="button"
               onClick={openNewDraft}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:border-prism-400/50 hover:text-prism-200"
+              disabled={!catalog}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:border-prism-400/50 hover:text-prism-200 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t('strategy.newStrategy')}
             </button>
@@ -848,11 +866,22 @@ export default function StrategiesPage() {
         />
       )}
 
-      {draft && (
+      {/* 目录未到手（拉取失败）时不渲染编辑器：指标清单、可选周期、条件数上限全靠
+          它，缺了只能编出必然被后端拒掉的条件。这里显示加载态而不是空白编辑器。
+          No editor without the catalogue (i.e. its fetch failed): the indicator
+          list, selectable intervals and condition cap all come from it, and without
+          them the only thing editable is a payload the backend will reject. Show a
+          loading state rather than an empty editor. */}
+      {draft && !catalog && (
+        <section className="glass mb-5 p-5 text-center text-sm text-slate-500">{t('common.loading')}</section>
+      )}
+
+      {draft && catalog && (
         <StrategyEditor
           draft={draft}
           activeSymbols={activeSymbols}
           allSymbols={allSymbols.length > 0 ? allSymbols : activeSymbols}
+          catalog={catalog}
           onChange={setDraft}
           onCancel={() => setDraft(null)}
           onSaved={onSaved}

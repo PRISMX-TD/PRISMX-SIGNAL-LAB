@@ -535,12 +535,28 @@ _EVALUATORS: dict[str, Callable[[list[dict], dict], list[bool]]] = {
 }
 
 
-def evaluate_usage(bars: list[dict], usage: str, params: dict) -> list[bool]:
+def evaluate_usage(bars: list[dict], usage: str, params: dict, memo: dict | None = None) -> list[bool]:
     """逐 bar 求值单个用法，返回与 bars 等长的布尔序列。
-    Evaluate one usage bar by bar, returning a bool series as long as bars."""
+
+    memo 在同一批 bars 上跨策略复用结果：实时链路一根 bar 收盘要评估几十条策略，
+    「RSI(14) 低于 30」这种常见条件会被反复算。键里不含 bars，所以同一个 memo
+    只能配同一批 bars 用。
+
+    Evaluate one usage bar by bar into a bool series as long as bars. `memo`
+    shares results across strategies over the same bars: one closed bar can mean
+    evaluating dozens of strategies, and a common condition like "RSI(14) below
+    30" would otherwise be recomputed each time. The key excludes bars, so a
+    given memo is only valid for one batch of bars.
+    """
     if not bars:
         return []
-    return _EVALUATORS[usage](bars, resolve_params(usage, params))
+    resolved = resolve_params(usage, params)
+    if memo is None:
+        return _EVALUATORS[usage](bars, resolved)
+    key = (usage, tuple(sorted(resolved.items())))
+    if key not in memo:
+        memo[key] = _EVALUATORS[usage](bars, resolved)
+    return memo[key]
 
 
 def mirror_condition(condition: dict) -> dict | None:
@@ -587,7 +603,9 @@ def resolve_condition(condition: dict) -> dict:
     }
 
 
-def evaluate_side(bars: list[dict], conditions: list[dict], logic: str) -> list[bool]:
+def evaluate_side(
+    bars: list[dict], conditions: list[dict], logic: str, memo: dict | None = None
+) -> list[bool]:
     """把一侧的多个条件按 AND/OR 合并成逐 bar 的布尔序列。
 
     空列表返回全 False 而不是全 True：一侧没有条件意味着「无从判断」，
@@ -602,13 +620,13 @@ def evaluate_side(bars: list[dict], conditions: list[dict], logic: str) -> list[
         return []
     if not conditions:
         return [False] * len(bars)
-    series = [evaluate_usage(bars, c["usage"], c.get("params") or {}) for c in conditions]
+    series = [evaluate_usage(bars, c["usage"], c.get("params") or {}, memo) for c in conditions]
     if logic == "OR":
         return [any(s[i] for s in series) for i in range(len(bars))]
     return [all(s[i] for s in series) for i in range(len(bars))]
 
 
-def evaluate_conditions(bars: list[dict], payload: dict) -> list[str | None]:
+def evaluate_conditions(bars: list[dict], payload: dict, memo: dict | None = None) -> list[str | None]:
     """整条策略逐 bar 求值，返回 "BUY" / "SELL" / None。
 
     两侧同时成立时取多头：ATR 这类无镜像条件会让两侧判定完全一致，此时必须有
@@ -622,8 +640,8 @@ def evaluate_conditions(bars: list[dict], payload: dict) -> list[str | None]:
     if not bars:
         return []
     logic = payload.get("logic") or "AND"
-    longs = evaluate_side(bars, payload.get("conditions") or [], logic)
-    shorts = evaluate_side(bars, mirror_conditions(payload), logic)
+    longs = evaluate_side(bars, payload.get("conditions") or [], logic, memo)
+    shorts = evaluate_side(bars, mirror_conditions(payload), logic, memo)
     out: list[str | None] = []
     for i in range(len(bars)):
         if longs[i]:

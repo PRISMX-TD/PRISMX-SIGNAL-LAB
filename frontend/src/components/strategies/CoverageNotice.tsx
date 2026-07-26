@@ -12,7 +12,7 @@
 // unknown length.
 import { useTranslation } from 'react-i18next'
 import { displaySymbol, fmtDate } from '../../api/utils'
-import { INTERVALS } from './ruleTypes'
+import { intervalLabel } from './conditionTypes'
 import type { StrategyCoverage } from '../../api/types'
 
 export interface CoverageNoticeProps {
@@ -35,7 +35,6 @@ export default function CoverageNotice({ coverage, requestedDays, loading }: Cov
   }
   if (!coverage) return null
 
-  const intervalLabel = INTERVALS.find((iv) => iv.code === coverage.interval)?.label ?? coverage.interval
   const available = Math.floor(coverage.spanDays)
   // 实际可用不足所选的 80% 才算"明显短于预期"。留 20% 余量是因为周末休市本身
   // 就会让 spanDays 低于自然日天数，卡死等号会让每次回测都亮警告，警告随即失效。
@@ -62,7 +61,7 @@ export default function CoverageNotice({ coverage, requestedDays, loading }: Cov
       <div className="font-medium">
         {t('strategy.coverageHeadline', {
           symbol: displaySymbol(coverage.symbol),
-          interval: intervalLabel,
+          interval: intervalLabel(coverage.interval),
           requested: requestedDays,
           available,
         })}

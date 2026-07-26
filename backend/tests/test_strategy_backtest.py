@@ -16,6 +16,20 @@ from app.services.strategy.costs import SymbolCosts
 NO_COSTS = SymbolCosts(spread=0.0, commission_per_lot=0.0, slippage=0.0)
 
 
+@pytest.fixture(autouse=True)
+def _always_buy(monkeypatch):
+    """把信号求值打桩成「每根 bar 都 BUY」。
+
+    打桩点是 backtest 自己 import 进来的名字：run_backtest 内部按模块全局名调用，
+    改 conditions 模块上的原函数不会影响这个已绑定的引用。
+
+    Stub signal evaluation to "BUY on every bar". The patch target is the name
+    backtest imported: run_backtest calls it through its own module global, so
+    patching the original in `conditions` would leave this binding untouched.
+    """
+    monkeypatch.setattr(bt, "evaluate_conditions", lambda bars, rules, memo=None: ["BUY"] * len(bars))
+
+
 def _bars(rows, start_t=0, step=900):
     """rows 为 (open, high, low, close) 四元组序列。
     rows is a sequence of (open, high, low, close) tuples."""
@@ -29,18 +43,16 @@ def _flat_bars(n, price=100.0, start_t=0, step=900):
     return _bars([(price, price, price, price)] * n, start_t=start_t, step=step)
 
 
-def _rule_on(field="close", op="gt", value=0.0):
-    """恒真规则（收盘价永远大于 0）/ an always-true rule."""
+def _long_only():
+    """占位条件配置：信号由 _always_buy 打桩决定，这里只要结构合法。
+    Placeholder conditions: signals come from the _always_buy stub, so this only
+    needs to be structurally valid."""
     return {
         "logic": "AND",
-        "children": [
-            {"left": {"kind": "price", "field": field}, "op": op, "right": {"kind": "const", "value": value}}
-        ],
+        "interval": "15",
+        "symbol": "XAUUSD",
+        "conditions": [{"indicator": "rsi", "usage": "rsi.below_level", "params": {"period": 14, "level": 30}}],
     }
-
-
-def _long_only(value=0.0):
-    return {"long": _rule_on(value=value), "short": None}
 
 
 def _spec(sl_method="percent", sl_value=1.0, tp_method="rr", tp_value=2.0, timeout_bars=None):

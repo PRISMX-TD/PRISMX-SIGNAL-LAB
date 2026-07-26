@@ -1,17 +1,18 @@
 // 新建策略的第一步：从预设起步，还是从空白开始。
 //
-// 预设就是 10 个老模板的规则树（后端 presets.PRESET_RULES，经 GET
-// /strategies/templates 的 presets 字段下发）。载入后规则树完全可改——预设只是
-// 一组初值，不是不可动的黑盒，这正是本次改造把「模板 + 参数表单」换成「AST +
-// 构建器」的意义。
+// 预设就是 6 条新手条件组合（后端 presets.PRESET_CONDITIONS，经 GET
+// /strategies/templates 的 presets 字段下发，只含 logic 与 conditions，品种周期
+// 由用户自己选）。载入后条件完全可改——预设只是一组初值，不是不可动的黑盒，这正是
+// 本次改造把「模板 + 参数表单」换成「条件列表编辑器」的意义。
 //
 // Step one of creating a strategy: start from a preset, or from blank.
 //
-// A preset is one of the ten legacy templates' rule trees (backend
-// presets.PRESET_RULES, delivered in the `presets` field of GET
-// /strategies/templates). Once loaded the tree is fully editable — a preset is a
-// set of starting values, not an opaque box. That's the whole point of replacing
-// "template + param form" with "AST + builder".
+// A preset is one of the six beginner condition sets (backend
+// presets.PRESET_CONDITIONS, delivered in the `presets` field of GET
+// /strategies/templates as logic + conditions only, with the user picking the
+// symbol and interval). Once loaded the conditions are fully editable — a preset
+// is a set of starting values, not an opaque box. That's the whole point of
+// replacing "template + param form" with a condition-list editor.
 import { useTranslation } from 'react-i18next'
 import type { StrategyTemplateKey } from '../../api/types'
 

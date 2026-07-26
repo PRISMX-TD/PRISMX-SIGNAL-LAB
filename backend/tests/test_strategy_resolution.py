@@ -11,20 +11,20 @@ from datetime import datetime, timedelta, timezone
 from app.core.config import settings
 from app.models import StrategySignal, UserStrategy
 from app.services import signal_resolution as sr
-from app.services.strategy import presets as ps
 from app.services.strategy import resolution as res
+from app.services.strategy.presets import preset_payload
 from tests.conftest import make_signal
 
 
 def _strategy(db, user, **kw):
+    symbol = kw.get("symbol", "XAUUSD")
+    interval = kw.get("interval", "15")
     row = UserStrategy(
         user_id=user.id,
-        template="ma_cross",
-        symbol=kw.get("symbol", "XAUUSD"),
-        interval=kw.get("interval", "15"),
-        rules=json.dumps(ps.PRESET_RULES["ma_cross"]),
-        symbols=json.dumps([kw.get("symbol", "XAUUSD")]),
-        intervals=json.dumps([kw.get("interval", "15")]),
+        template="rsi_reversal",
+        symbol=symbol,
+        interval=interval,
+        rules=json.dumps(preset_payload("rsi_reversal", symbol, interval)),
         one_trade_at_a_time=kw.get("one_trade_at_a_time", True),
         exit_timeout_bars=kw.get("exit_timeout_bars"),
         enabled=True,

@@ -8,6 +8,8 @@ import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.core.database import SessionLocal
 from app.models import Candle, StrategySignal, StrategyWatch, UserStrategy
 from app.services.strategy import live
@@ -17,33 +19,48 @@ from app.services.strategy import live
 TZ8 = timezone(timedelta(hours=8))
 
 
-def _always_long():
-    """恒真的多头规则：收盘价大于 0。
-    Always-true long rule: close > 0."""
+@pytest.fixture(autouse=True)
+def _always_buy(monkeypatch):
+    """把条件求值打桩成「本根 bar 一定 BUY」。
+
+    这些用例测的是候选选取、过滤、提交与推送，不是指标数学（那部分在
+    test_strategy_conditions_*.py）。种子 K 线是恒定价格，任何真实条件在上面都
+    不必然命中，用真条件会让这些用例的通过与否取决于跟它们无关的指标细节。
+
+    Stub condition evaluation to "BUY on this bar". These cases exercise
+    candidate selection, filters, commit and push — not indicator math (covered
+    in test_strategy_conditions_*.py). The seeded candles are flat, where no real
+    condition reliably fires, so using one would make these tests hinge on
+    indicator details unrelated to what they assert.
+    """
+    monkeypatch.setattr(live, "evaluate_conditions", lambda bars, rules, memo=None: ["BUY"] * len(bars))
+
+
+def _conditions(symbol="XAUUSD", interval="15", usage="rsi.below_level", params=None):
+    """一条合法的单条件配置。多数用例并不关心具体条件是否命中——命中与否由
+    _always_buy 打桩决定，这里只提供结构合法的载荷。
+    One valid single-condition payload. Most cases don't care whether the
+    condition actually fires (the _always_buy stub decides that); this just
+    supplies a structurally valid payload."""
     return {
-        "long": {
-            "logic": "AND",
-            "children": [
-                {
-                    "left": {"kind": "price", "field": "close"},
-                    "op": "gt",
-                    "right": {"kind": "const", "value": 0.0},
-                }
-            ],
-        },
-        "short": None,
+        "logic": "AND",
+        "symbol": symbol,
+        "interval": interval,
+        "conditions": [{
+            "indicator": usage.split(".")[0],
+            "usage": usage,
+            "params": params if params is not None else {"period": 14, "level": 30},
+        }],
     }
 
 
-def _strategy(db, user, rules=None, symbols=("XAUUSD",), intervals=("15",), **kw):
+def _strategy(db, user, rules=None, symbol="XAUUSD", interval="15", **kw):
     row = UserStrategy(
         user_id=user.id,
-        template="ma_cross",
-        symbol=symbols[0],
-        interval=intervals[0],
-        rules=json.dumps(rules if rules is not None else _always_long()),
-        symbols=json.dumps(list(symbols)),
-        intervals=json.dumps(list(intervals)),
+        template="rsi_reversal",
+        symbol=symbol,
+        interval=interval,
+        rules=json.dumps(rules if rules is not None else _conditions(symbol, interval)),
         stop_loss_method=kw.get("stop_loss_method", "percent"),
         stop_loss_value=kw.get("stop_loss_value", 1.0),
         take_profit_method=kw.get("take_profit_method", "rr"),
@@ -58,9 +75,7 @@ def _strategy(db, user, rules=None, symbols=("XAUUSD",), intervals=("15",), **kw
     db.add(row)
     db.commit()
     db.refresh(row)
-    for s in symbols:
-        for i in intervals:
-            db.add(StrategyWatch(strategy_id=row.id, symbol=s, interval=i))
+    db.add(StrategyWatch(strategy_id=row.id, symbol=symbol, interval=interval))
     db.commit()
     return row
 
@@ -168,37 +183,26 @@ def test_disabled_strategy_never_fires(db, user):
 
 
 def test_strategy_watching_another_combo_is_not_evaluated(db, user):
-    strat = _strategy(db, user, symbols=("EURUSD",), intervals=("60",))
+    strat = _strategy(db, user, symbol="EURUSD", interval="60")
     _seed_candles(db)
     _run()
     db.expire_all()
     assert db.query(StrategySignal).filter(StrategySignal.strategy_id == strat.id).count() == 0
 
 
-def test_multi_symbol_strategy_fires_per_symbol_independently(db, user):
-    """一条策略盯两个品种时，每个品种各自出信号。
-
-    两点必须注意，都是既有 schema 的直接后果，不是本测试的偷懒：
-    last_signal_bar_t 是策略级单列（不分品种），所以两个品种的最后一根 K 线
-    时间必须不同，否则第二个品种会被去重游标当成"同一根"跳过；一次一单同样
-    是策略级开关，开着时第一个品种的 PENDING 会挡住第二个品种。
-
-    One strategy watching two symbols fires on each. Two constraints, both
-    direct consequences of the existing schema rather than test shortcuts:
-    last_signal_bar_t is a single strategy-level column (not per symbol), so the
-    two symbols' last bars must differ in time or the de-dup cursor treats the
-    second as "the same bar"; and one-trade-at-a-time is likewise
-    strategy-level, so the first symbol's PENDING row would gate the second.
-    """
-    strat = _strategy(db, user, symbols=("XAUUSD", "EURUSD"), intervals=("15",),
-                      one_trade_at_a_time=False)
+def test_two_strategies_on_different_symbols_fire_independently(db, user):
+    """一条策略只盯一个品种，想覆盖两个品种就建两条，各自独立出信号。
+    A strategy watches exactly one symbol; covering two means two strategies,
+    each firing on its own."""
+    gold = _strategy(db, user, symbol="XAUUSD", interval="15")
+    euro = _strategy(db, user, symbol="EURUSD", interval="15")
     _seed_candles(db, symbol="XAUUSD")
-    _seed_candles(db, symbol="EURUSD", start_t=1_700_000_000 + 60)
+    _seed_candles(db, symbol="EURUSD")
     _run("XAUUSD", "15")
     _run("EURUSD", "15")
     db.expire_all()
-    sigs = db.query(StrategySignal).filter(StrategySignal.strategy_id == strat.id).all()
-    assert {s.symbol for s in sigs} == {"XAUUSD", "EURUSD"}
+    sigs = db.query(StrategySignal).filter(StrategySignal.strategy_id.in_([gold.id, euro.id])).all()
+    assert {(s.strategy_id, s.symbol) for s in sigs} == {(gold.id, "XAUUSD"), (euro.id, "EURUSD")}
 
 
 def test_no_watch_rows_means_no_work(db, user):
@@ -434,34 +438,32 @@ def test_indicator_results_are_shared_across_strategies(db, user, monkeypatch):
     """同 (品种, 周期) 下多策略用同一套指标参数时只算一次。
     Strategies on the same (symbol, interval) sharing indicator params compute
     once."""
-    from app.services.strategy import rules as rl
+    from app.services.strategy import conditions as cond
+
+    # 这条用例要走真实求值路径才能观察到 memo 生效，故撤掉 _always_buy 的打桩。
+    # This case needs the real evaluation path for the memo to be observable, so
+    # undo the _always_buy stub.
+    monkeypatch.setattr(live, "evaluate_conditions", cond.evaluate_conditions)
 
     calls = {"n": 0}
-    real_ema = rl.ind.ema
+    real_rsi = cond.ind.rsi
 
-    def counting_ema(values, period):
+    def counting_rsi(values, period):
         calls["n"] += 1
-        return real_ema(values, period)
+        return real_rsi(values, period)
 
-    # 打桩点是 rules.ind（指标真正被调用的地方），不是 live 自己的引用。
-    # Patch rules.ind — where the indicator is actually called — not live's own
-    # reference.
-    monkeypatch.setattr(rl.ind, "ema", counting_ema)
-    rules = {
-        "long": {
-            "logic": "AND",
-            "children": [
-                {
-                    "left": {"kind": "indicator", "fn": "ema", "params": {"period": 5}},
-                    "op": "gt",
-                    "right": {"kind": "const", "value": 0.0},
-                }
-            ],
-        },
-        "short": None,
-    }
+    # 打桩点是 conditions.ind（指标真正被调用的地方），不是 live 自己的引用。
+    # Patch conditions.ind — where the indicator is actually called — not live's
+    # own reference.
+    monkeypatch.setattr(cond.ind, "rsi", counting_rsi)
+    rules = _conditions(usage="rsi.below_level", params={"period": 14, "level": 30})
     for _ in range(3):
         _strategy(db, user, rules=rules)
     _seed_candles(db)
     _run()
-    assert calls["n"] == 1
+    # 3 条策略共 2 次：做多的 rsi.below_level 与它的镜像 rsi.above_level 各一次，
+    # 两者是不同的 usage，memo 键不同。没有 memo 的话是 6 次。
+    # Two calls for three strategies: rsi.below_level and its mirror
+    # rsi.above_level are distinct usages with distinct memo keys. Without the
+    # memo it would be six.
+    assert calls["n"] == 2
