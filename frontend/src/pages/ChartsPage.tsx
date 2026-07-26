@@ -46,6 +46,7 @@ import WatchlistPanel from '../components/charts/WatchlistPanel'
 import AccountSummary from '../components/charts/AccountSummary'
 import OrderTicket from '../components/charts/OrderTicket'
 import PositionsDock from '../components/charts/PositionsDock'
+import PositionOverlay from '../components/charts/PositionOverlay'
 import { useGlobalQuotes, usePositions } from '../store/live'
 
 // 图表价格轴的小数位数：贵金属/原油 2~3 位，外汇对按经纪商常见的 5 位报价
@@ -285,6 +286,43 @@ function DrawToolsRow({
     return <div className="term-toolbar-tools wrap no-sb">{content}</div>
   }
   return <ScrollRow>{content}</ScrollRow>
+}
+
+// 持仓标记显隐开关：桌面/手机/全屏三处工具栏共用一个按钮，图标用"标了价位的
+// 水平线"，比眼睛图标更能说明它管的是哪一类东西（眼睛已被画线显隐占用）。
+// Position-marker visibility toggle, shared by the desktop / mobile /
+// fullscreen toolbars. The icon is a price-tagged horizontal line rather than
+// an eye — the eye already means "show/hide drawings" here.
+function PositionMarkerToggle({
+  on,
+  onToggle,
+  t,
+  compact = false,
+}: {
+  on: boolean
+  onToggle: () => void
+  t: (key: string) => unknown
+  compact?: boolean
+}) {
+  const label = String(t(on ? 'charts.posmark.hide' : 'charts.posmark.show'))
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      aria-pressed={on}
+      onClick={onToggle}
+      className={compact
+        ? `flex h-6 w-6 items-center justify-center rounded-md border transition ${on ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`
+        : `term-tool-btn ${on ? 'on' : ''}`}
+    >
+      <svg width={compact ? 11 : 13} height={compact ? 11 : 13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="2" y1="7" x2="22" y2="7" strokeDasharray="4 3" />
+        <line x1="2" y1="17" x2="22" y2="17" strokeDasharray="4 3" />
+        <rect x="8" y="10.5" width="8" height="3" />
+      </svg>
+    </button>
+  )
 }
 
 // 向后兼容的 localStorage key / backward-compat localStorage keys
@@ -544,6 +582,14 @@ export default function ChartsPage() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [drawVersion, setDrawVersion] = useState(0)
   const bumpDraw = useCallback(() => setDrawVersion((v) => v + 1), [])
+  // 持仓标记显隐：跟随用户走、云端同步（与指标开关同一套持久化模式）。默认开，
+  // 有单时直接看得到入场/止损/止盈，不需要先去翻某个开关。
+  // Position-marker visibility: follows the user, cloud synced (same persistence
+  // pattern as the indicator toggles). On by default so an open position's
+  // entry/SL/TP show up without hunting for a toggle first.
+  const [showPositions, setShowPositions] = useState<boolean>(
+    () => getPref<boolean>('charts', 'showPositions', true)
+  )
   // 图例：随十字准线/触摸拖动更新，初始为空占位 / legend: updates with the crosshair/touch drag; starts as an empty placeholder
   const [legend, setLegend] = useState<LegendValues>(EMPTY_LEGEND)
   // 各已开启副图（成交量/RSI/MACD）pane 的顶部像素偏移，供图例定位；由
@@ -800,6 +846,8 @@ export default function ChartsPage() {
     if (cloudInd) setIndicatorsState({ ...DEFAULT_INDICATORS, ...cloudInd })
     const cloudSettings = getPref<Partial<IndicatorSettings> | null>('charts', 'indicatorSettings', null)
     if (cloudSettings) setIndicatorSettingsState(mergeIndicatorSettings(DEFAULT_INDICATOR_SETTINGS, cloudSettings))
+    const cloudShowPos = getPref<boolean | null>('charts', 'showPositions', null)
+    if (cloudShowPos != null) setShowPositions(cloudShowPos)
   // eslint-disable-next-line react-hooks/exhaustive-deps -- only run when cloud prefs finish loading
   }, [loaded])
 
@@ -847,6 +895,10 @@ export default function ChartsPage() {
   useEffect(() => {
     setPref('charts', 'indicatorSettings', indicatorSettings)
   }, [indicatorSettings, setPref])
+
+  useEffect(() => {
+    setPref('charts', 'showPositions', showPositions)
+  }, [showPositions, setPref])
 
   const toggleIndicator = useCallback((key: keyof IndicatorFlags) => {
     setIndicatorsState((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -1587,6 +1639,7 @@ export default function ChartsPage() {
             {drawReady && <DrawToolsRow drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} />}
             <div className="term-toolbar-right">
               {stale && <span className="term-stale">{t('charts.stale')}</span>}
+              <PositionMarkerToggle on={showPositions} onToggle={() => setShowPositions((v) => !v)} t={t} />
               <button type="button" onClick={() => setSettingsOpen(true)} className="term-tool-indicator">
                 {t('charts.indicators.button')}
               </button>
@@ -1620,6 +1673,7 @@ export default function ChartsPage() {
             </div>
             <div className="term-toolbar-m-right">
               {stale && <span className="term-stale">{t('charts.stale')}</span>}
+              <PositionMarkerToggle on={showPositions} onToggle={() => setShowPositions((v) => !v)} t={t} />
               {drawReady && (
                 <button
                   type="button"
@@ -1713,6 +1767,24 @@ export default function ChartsPage() {
         )}
 
         <div ref={containerRef} className="h-full w-full" />
+        {/* 持仓标记层：入场价/止损/止盈线 + 拖动改单。刻意排在画图层之前——两层
+            都用「悬停到自己的目标才抢指针事件」的策略，DOM 上后者在上，于是画线
+            操作天然优先于拖止损线，不会互相抢。/ Position markers: entry/SL/TP
+            lines + drag-to-modify. Deliberately mounted before the draw layer:
+            both only capture pointer events while hovering their own targets, and
+            being later in the DOM puts the draw layer on top, so drawing
+            naturally takes precedence over dragging an SL line. */}
+        {drawReady && chartRef.current && seriesRef.current && (
+          <PositionOverlay
+            chart={chartRef.current}
+            series={seriesRef.current}
+            positions={accountPositions}
+            symbol={symbol}
+            digits={decimals}
+            visible={showPositions}
+            onToast={showToast}
+          />
+        )}
         {drawReady && chartRef.current && seriesRef.current && containerRef.current && (
           <DrawLayer
             ref={drawLayerRef}
@@ -1865,6 +1937,7 @@ export default function ChartsPage() {
               <button type="button" title={t('charts.draw.stayInDraw')} aria-label={t('charts.draw.stayInDraw')} onClick={() => { drawLayerRef.current?.setStayInDraw(!drawLayerRef.current?.stayInDraw); bumpDraw() }}
                 className={`flex h-6 w-6 items-center justify-center rounded-md border transition ${drawLayerRef.current?.stayInDraw ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`}
               ><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3l4 4-4 4" /><path d="M3 17l4 4-4 4" /><line x1="21" y1="7" x2="7" y2="21" /><line x1="7" y1="3" x2="21" y2="17" /></svg></button>
+              <PositionMarkerToggle on={showPositions} onToggle={() => setShowPositions((v) => !v)} t={t} compact />
             </div>
           </div>
         )}

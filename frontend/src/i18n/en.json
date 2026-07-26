@@ -576,6 +576,10 @@
       "dotted": "Dotted",
       "hint": "Pick a tool and draw on chart; in cursor mode you can select, move or delete drawings. Supports magnet/lock/undo."
     },
+    "posmark": {
+      "show": "Show position markers",
+      "hide": "Hide position markers"
+    },
     "fullscreen": {
       "enter": "Fullscreen",
       "exit": "Exit fullscreen"
