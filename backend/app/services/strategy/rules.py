@@ -25,6 +25,17 @@ MAX_INDICATOR_INSTANCES = 8
 MAX_INTERVALS = 3
 MAX_SYMBOLS = 5
 
+# 操作数可回看的最大根数。momentum_breakout 的 lookback 上限是 100，留出余量。
+# Max bars an operand may look back. momentum_breakout's lookback caps at 100;
+# this leaves headroom.
+MAX_SHIFT = 300
+# 操作数缩放因子的合法区间。用于「均线的 1.003 倍」这类容差带与「N 根前收盘价
+# 的 1.01 倍」这类阈值带；不允许当成任意倍数放大器用。
+# Valid range for an operand's scale factor: tolerance bands like "1.003x the
+# MA" and threshold bands like "1.01x the close N bars ago" — not a
+# general-purpose multiplier.
+SCALE_RANGE = (0.5, 1.5)
+
 # 每个指标的参数规格：名称 -> (最小值, 最大值, 是否整数)
 # Per-indicator parameter spec: name -> (min, max, is_int)
 INDICATOR_SPECS: dict[str, dict[str, tuple[float, float, bool]]] = {
@@ -57,7 +68,28 @@ def _indicator_key(operand: dict) -> tuple:
         operand.get("fn"),
         tuple(sorted((k, params[k]) for k in params)),
         operand.get("interval") or "",
+        int(operand.get("shift") or 0),
+        float(operand.get("scale") if operand.get("scale") is not None else 1.0),
     )
+
+
+def _validate_shift_scale(operand: dict) -> None:
+    """校验 shift / scale 这两个所有非常量操作数都可带的可选字段。
+    Validate shift/scale, the two optional fields every non-const operand may
+    carry."""
+    shift = operand.get("shift")
+    if shift is not None:
+        if isinstance(shift, bool) or not isinstance(shift, int):
+            raise RuleError("shift 必须是整数 / shift must be an integer")
+        if shift < 0 or shift > MAX_SHIFT:
+            raise RuleError(f"shift 超出范围，合法区间 0-{MAX_SHIFT} / shift out of range 0-{MAX_SHIFT}")
+    scale = operand.get("scale")
+    if scale is not None:
+        if isinstance(scale, bool) or not isinstance(scale, (int, float)):
+            raise RuleError("scale 必须是数字 / scale must be a number")
+        lo, hi = SCALE_RANGE
+        if scale < lo or scale > hi:
+            raise RuleError(f"scale 超出范围，合法区间 {lo}-{hi} / scale out of range {lo}-{hi}")
 
 
 def _validate_operand(operand: object) -> None:
@@ -71,6 +103,7 @@ def _validate_operand(operand: object) -> None:
     if kind == "price":
         if operand.get("field") not in PRICE_FIELDS:
             raise RuleError(f"未知价格字段，可选 {sorted(PRICE_FIELDS)} / unknown price field")
+        _validate_shift_scale(operand)
         return
     if kind == "indicator":
         fn = operand.get("fn")
@@ -100,6 +133,7 @@ def _validate_operand(operand: object) -> None:
             raise RuleError(f"未知周期 {interval}，可选 {sorted(ALLOWED_INTERVALS)} / unknown interval")
         if fn in ("macd_dif", "macd_dea") and params["slowPeriod"] <= params["fastPeriod"]:
             raise RuleError("slowPeriod 必须大于 fastPeriod / slowPeriod must exceed fastPeriod")
+        _validate_shift_scale(operand)
         return
     raise RuleError("操作数 kind 必须是 indicator/const/price / operand kind must be indicator, const or price")
 
@@ -230,13 +264,35 @@ def _series_for_operand(
         raise RuleError(f"未知操作数类型 {kind} / unknown operand kind {kind}")
 
     if not interval:
-        return raw
-    return align_series(
+        return _apply_shift_scale(operand, raw)
+    aligned = align_series(
         [b["t"] for b in bars],
         [b["t"] for b in source],
         raw,
         INTERVAL_SECONDS[interval],
     )
+    return _apply_shift_scale(operand, aligned)
+
+
+def _apply_shift_scale(operand: dict, series: list[float | None]) -> list[float | None]:
+    """按 shift 右移序列（前端补 None），再按 scale 逐位缩放。
+
+    顺序很重要：调用点先按周期对齐再 shift，因为 shift 的单位是主周期根数，
+    而不是被引用周期的根数。
+
+    Shift the series right by `shift` (padding with None), then scale it. Order
+    matters: callers align to the primary timeline first, because shift counts
+    primary-timeline bars, not bars of the referenced interval.
+    """
+    shift = int(operand.get("shift") or 0)
+    scale = operand.get("scale")
+    out = series
+    if shift:
+        out = [None] * shift + series[: len(series) - shift] if shift <= len(series) else [None] * len(series)
+    if scale is not None and float(scale) != 1.0:
+        factor = float(scale)
+        out = [None if v is None else v * factor for v in out]
+    return out
 
 
 def _indicator_series(fn: str, params: dict, source: list[dict]) -> list[float | None]:
