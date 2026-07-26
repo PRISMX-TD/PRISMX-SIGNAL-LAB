@@ -29,10 +29,12 @@ so no extra route-level gate is needed.
 import json
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
+from app.core.strategy_limits import user_limiter
 from app.models import Candle, StrategySignal, User, UserStrategy
 from app.routers.chart import ALLOWED_INTERVALS
 from app.schemas import StrategyBacktestRequest, StrategyCreate, StrategyOut, StrategySignalOut, StrategyUpdate
@@ -125,7 +127,8 @@ def list_strategies(db: Session = Depends(get_db), user: User = Depends(get_curr
 
 
 @router.post("", response_model=StrategyOut)
-def create_strategy(body: StrategyCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+@user_limiter.limit(settings.RATE_LIMIT_STRATEGY_WRITE)
+def create_strategy(request: Request, body: StrategyCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     _check_access(db, user)
     if body.interval not in ALLOWED_INTERVALS:
         raise HTTPException(status_code=400, detail="不支持的周期 / unsupported interval")
@@ -156,7 +159,8 @@ def create_strategy(body: StrategyCreate, db: Session = Depends(get_db), user: U
 
 
 @router.patch("/{strategy_id}", response_model=StrategyOut)
-def update_strategy(strategy_id: str, body: StrategyUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+@user_limiter.limit(settings.RATE_LIMIT_STRATEGY_WRITE)
+def update_strategy(request: Request, strategy_id: str, body: StrategyUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     row = db.query(UserStrategy).filter(UserStrategy.id == strategy_id, UserStrategy.user_id == user.id).first()
     if row is None:
         raise HTTPException(status_code=404, detail="策略不存在 / strategy not found")
@@ -187,7 +191,8 @@ def update_strategy(strategy_id: str, body: StrategyUpdate, db: Session = Depend
 
 
 @router.delete("/signals", response_model=dict)
-def clear_my_signals(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+@user_limiter.limit(settings.RATE_LIMIT_STRATEGY_WRITE)
+def clear_my_signals(request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """清空当前用户已触发的全部个人策略信号历史,不影响策略本身的启用状态与
     去重游标(last_signal_bar_t)——清空只是清列表,不会让已经触发过的那根
     K 线重新触发一次信号。注册顺序必须排在 DELETE /{strategy_id} 之前——
@@ -214,7 +219,9 @@ def delete_strategy(strategy_id: str, db: Session = Depends(get_db), user: User 
 
 
 @router.post("/backtest", response_model=dict)
-def backtest_strategy(body: StrategyBacktestRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+@user_limiter.limit(settings.RATE_LIMIT_BACKTEST_SHORT)
+@user_limiter.limit(settings.RATE_LIMIT_BACKTEST_LONG)
+def backtest_strategy(request: Request, body: StrategyBacktestRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """吃已入库的 K 线历史回放这个模板+参数组合,保存前就能看到历史表现。
     Replays this template+param combo against stored candle history — usable
     before the strategy is even saved."""

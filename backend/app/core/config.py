@@ -60,6 +60,36 @@ class Settings(BaseSettings):
     # pending rows.
     MAX_OPEN_PAYMENTS_PER_USER: int = 3
 
+    # 策略回测限流：按用户维度（不是 IP），双窗口并存。回测是重 CPU 操作——单次
+    # 请求要拉至多 5000 行、跑纯 Python 指标循环；按 IP 限流不足，同一用户换 IP
+    # 即可绕过，而共享出口 IP 的多个用户又会互相挤占。短窗口挡突发，长窗口挡
+    # 慢速持续消耗。
+    # Strategy-backtest limits, keyed by user rather than IP, with two windows.
+    # A backtest is CPU-heavy (up to 5000 rows and a pure-Python indicator loop
+    # per request); IP keying is both bypassable by rotating IPs and unfair to
+    # users behind a shared egress IP. The short window stops bursts, the long
+    # one stops slow sustained draining.
+    RATE_LIMIT_BACKTEST_SHORT: str = "6/minute"
+    RATE_LIMIT_BACKTEST_LONG: str = "60/hour"
+    # 策略写操作（创建/更新/删除信号）限流，同样按用户维度。
+    # Strategy write endpoints (create/update/clear signals), also per user.
+    RATE_LIMIT_STRATEGY_WRITE: str = "30/minute"
+    # 单次回测的成本上限：bars 数 × 规则条件数。纯速率限制无法阻止"一次请求就
+    # 占满 CPU 很久"，这一层直接把单次请求的工作量封顶。默认 60000 = 5000 根 ×
+    # 12 条，恰好容纳滥用上限下的最坏合法情况。
+    # Per-request cost cap: bars x rule conditions. Rate limits alone can't stop
+    # one request from saturating a core for a long time; this caps the work of a
+    # single request. The default 60000 = 5000 bars x 12 conditions, exactly the
+    # worst legitimate case allowed by the abuse limits.
+    MAX_BACKTEST_COST_UNITS: int = 60_000
+    # 回测结果缓存：同一 (AST, 品种, 周期, 天数, 成本版本) 的重复请求直接返回
+    # 缓存。TTL 短，因为新 K 线会不断进来。
+    # Backtest result cache: repeat requests for the same (AST, symbol,
+    # interval, days, cost version) return the cached result. Short TTL, since
+    # new bars keep arriving.
+    BACKTEST_CACHE_TTL_SECONDS: int = 300
+    BACKTEST_CACHE_MAX_ENTRIES: int = 64
+
     # 数据库 / Database（默认 SQLite，生产用环境变量 DATABASE_URL 覆盖为 Postgres）
     # Database (defaults to SQLite; override via DATABASE_URL env for Postgres in prod)
     DATABASE_URL: str = "sqlite:///./prismx.db"

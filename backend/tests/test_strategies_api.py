@@ -12,10 +12,27 @@ unrelated to the calling user's login).
 """
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.core.config import settings
 from app.models import Candle, StrategySignal, UserStrategy
 from app.routers import strategies as strategies_router
 import app.services.strategy_engine as strategy_engine
+
+
+@pytest.fixture(autouse=True)
+def _no_user_rate_limit():
+    """限流值在装饰器求值时固化，运行期改配置无效，只能整体关掉限流器。
+    本文件测的是端点行为本身，不该被按用户限流的计数干扰（限流本身由
+    test_strategy_limits.py 覆盖）。
+    Limits are baked in when the decorator is evaluated, so patching settings at
+    runtime does nothing — the limiter itself has to be switched off. This file
+    tests endpoint behaviour, not throttling (that's test_strategy_limits.py)."""
+    from app.core.strategy_limits import user_limiter
+
+    user_limiter.enabled = False
+    yield
+    user_limiter.enabled = True
 
 
 def _make_pro(db, user):

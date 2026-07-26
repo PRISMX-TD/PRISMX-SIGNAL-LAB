@@ -12,6 +12,7 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from app.core.config import settings
 from app.core.database import init_db
 from app.core.rate_limit import limiter
+from app.core.strategy_limits import user_limiter
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
 from app.routers import account, admin, auth, automation, bridge, chart, ea, notifications, orders, payments, sentiment, signals, strategies, telemetry, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
@@ -87,6 +88,12 @@ app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
 
 # 限流：注册 limiter、超限处理器与中间件 / rate limiting: limiter, handler, middleware
 app.state.limiter = limiter
+# 策略端点用按用户维度的第二个限流器；slowapi 的中间件读 app.state.limiter，
+# 因此用户维度的这个通过端点装饰器直接生效，只需把超限异常处理器共用。
+# The strategy endpoints use a second, user-keyed limiter. slowapi's middleware
+# reads app.state.limiter, so the user-keyed one takes effect through its
+# endpoint decorators; only the rate-limit exception handler is shared.
+app.state.user_limiter = user_limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
