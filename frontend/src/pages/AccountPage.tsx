@@ -296,14 +296,28 @@ export default function AccountPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    // 页面宽度交给 Layout 的 max-w-7xl 统一决定，与订单/策略等页面对齐——这里
+    // 以前自己套了一层 max-w-2xl，导致切到本页时内容块明显比别的页面窄一截。
+    // 铺满后靠下面的两栏栅格控制可读行宽，而不是把整页压窄。
+    // Page width is left to Layout's max-w-7xl so this matches the orders /
+    // strategies pages — it used to add its own max-w-2xl, which made the page
+    // visibly narrower than the rest. Readable line length now comes from the
+    // two-column grid below instead of squeezing the whole page.
+    <div className="space-y-6">
       <h2 className="font-display text-2xl font-bold text-slate-100">
         <span className="neon-text">{t("account.title")}</span>
       </h2>
       {!info ? (
         <div className="glass p-6 text-center text-sm text-slate-400">{t("account.loadError")}</div>
       ) : (
-        <>
+        // 宽屏两栏：左栏放账户信息与密码，右栏单独留给最长的通知设置，避免一栏
+        // 到底时右侧大片空白。items-start 让两栏各自按内容高度收边。
+        // Two columns on wide screens: account info and password on the left, the
+        // much taller notification settings alone on the right, so a single
+        // column doesn't leave a large empty gutter. items-start lets each
+        // column end at its own content height.
+        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
+          <div className="space-y-6">
           {/* 平台账户 / Platform account */}
           <section className="glass-neon p-5">
             <div className="flex items-center justify-between">
@@ -408,6 +422,7 @@ export default function AccountPage() {
               )}
             </div>
           </section>
+          </div>
 
           {/* 通知设置 / Notifications */}
           <section id="notifications" ref={notifSectionRef} className="glass-neon scroll-mt-20 p-5">
@@ -558,7 +573,7 @@ export default function AccountPage() {
               )}
             </div>
           </section>
-        </>
+        </div>
       )}
     </div>
   )
