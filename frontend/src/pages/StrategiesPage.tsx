@@ -628,6 +628,12 @@ export default function StrategiesPage() {
   // intervals and the condition cap all come from it, so the editor stays shut
   // until it arrives: inventing a condition here would fork the spec.
   const [catalog, setCatalog] = useState<UsageCatalog | null>(null)
+  // 目录拉取失败必须能看见。此前这里是静默 catch，结果是「点按钮毫无反应」——
+  // 编辑器靠 catalog 才能开，拿不到就每次点击都被挡掉，而用户看不到任何原因。
+  // A failed catalogue fetch has to be visible. This used to be a silent catch,
+  // which surfaced as buttons that simply do nothing: the editor needs the
+  // catalogue to open, so every click was refused with no reason shown.
+  const [catalogError, setCatalogError] = useState<string | null>(null)
   // 打开「新建」时先进预设选择，选完才进编辑器 / show the preset picker first
   const [picking, setPicking] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<UserStrategy | null>(null)
@@ -665,7 +671,10 @@ export default function StrategiesPage() {
           setPresetError(e instanceof Error ? localizeApiError(e.message) : 'Unknown error')
           return null
         }),
-        strategyApi.usages().catch(() => null),
+        strategyApi.usages().catch((e) => {
+          setCatalogError(e instanceof Error ? localizeApiError(e.message) : 'Unknown error')
+          return null
+        }),
         strategyApi.list(),
         strategyApi.signals(20),
         strategyApi.coverage(),
@@ -674,7 +683,10 @@ export default function StrategiesPage() {
         setPresets(tRes.presets)
         setPresetError(null)
       }
-      if (uRes) setCatalog(uRes)
+      if (uRes) {
+        setCatalog(uRes)
+        setCatalogError(null)
+      }
       setStrategies(sRes.strategies)
       setSignals(sigRes.signals)
       const syms = Array.from(new Set(covRes.coverage.map((c) => c.symbol)))
@@ -847,6 +859,17 @@ export default function StrategiesPage() {
         <div className="glass mb-5 border-prism-500/20 bg-prism-600/5 p-4 text-center text-sm text-slate-300">
           {t('strategy.proOnlyHint')}{' '}
           <Link to="/upgrade" className="text-prism-300 underline hover:text-prism-200">{t('winrate.viewDetail')}</Link>
+        </div>
+      )}
+
+      {/* 目录拉不到时新建与编辑都开不了，必须把原因摆在页面上。此前是静默失败，
+          用户看到的是「按钮点了没反应」，无从判断是自己点错还是服务出问题。
+          Without the catalogue neither creating nor editing can open, so the reason
+          belongs on the page. This used to fail silently, leaving the user with
+          buttons that do nothing and no way to tell a misclick from an outage. */}
+      {catalogError && (
+        <div className="glass mb-5 border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-200">
+          {t('strategy.catalogUnavailable')} {catalogError}
         </div>
       )}
 

@@ -1126,6 +1126,7 @@
     "intervalLabel": "Timeframe",
     "singlePairHint": "One strategy watches one symbol on one timeframe. Cover more by creating more, each with its own performance stats.",
     "legacyRulesReset": "This strategy was built with the old rule format, which can't be converted to the new condition structure, so its original conditions weren't kept. Below is a starting condition — reconfigure it before saving and enabling.",
+    "catalogUnavailable": "The indicator catalogue failed to load, so creating and editing strategies is unavailable. Refresh to retry; if it keeps failing, the backend service is usually not on the latest version.",
     "ind": {
       "ma": "Moving average",
       "macd": "MACD",
