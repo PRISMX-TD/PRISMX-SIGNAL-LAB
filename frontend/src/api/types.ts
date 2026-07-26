@@ -1,5 +1,12 @@
 // 共享类型定义 / Shared type definitions
 
+// 规则 AST 的形状定义在规则构建器目录、由这里引用（而不是反过来）：AST 的形状是
+// 构建器的领域知识，构建器是它唯一的生产者。
+// The rule AST's shape lives in the builder's directory and is imported here
+// (not the other way round): that shape is the builder's domain knowledge and
+// the builder is its only producer.
+import type { RuleEnvelope } from '../components/strategies/ruleTypes'
+
 export type UserRole = 'user' | 'admin'
 export type UserPlan = 'FREE' | 'PRO'
 
@@ -369,24 +376,32 @@ export type StrategyTemplateKey =
 
 export type StrategyTemplateSchemas = Record<StrategyTemplateKey, Record<string, StrategyParamSpec>>
 
-// 止损方式：percent(按入场价百分比距离) / price(固定价格距离,同报价单位)
-// 止盈方式：rr(止损距离的倍数) / percent / price
-// Stop-loss method: percent (distance as % of entry) / price (fixed price
-// distance, same unit as quotes). Take-profit method: rr (multiple of the SL
-// distance) / percent / price.
-export type StopLossMethod = 'percent' | 'steps'
-export type TakeProfitMethod = 'rr' | 'percent' | 'steps'
+// 止损方式：percent(按入场价百分比距离) / steps(点数) / atr(ATR 的倍数)
+// 止盈方式：rr(止损距离的倍数) / percent / steps / atr
+// SL: percent (distance as % of entry) / steps (points) / atr (multiple of ATR).
+// TP: rr (multiple of the SL distance) / percent / steps / atr.
+export type StopLossMethod = 'percent' | 'steps' | 'atr'
+export type TakeProfitMethod = 'rr' | 'percent' | 'steps' | 'atr'
 
-// 用户自定义策略：模板 + 调好的参数,对某个品种/周期持续评估
-// A user-customized strategy: a template + tuned params, continuously
-// evaluated against one symbol/interval
+// 交易时段过滤：UTC+8 小时区间，左闭右开；startHour > endHour 表示跨零点
+// Session filter: UTC+8 hour range, half-open; startHour > endHour spans midnight
+export interface StrategySessionFilter {
+  startHour: number
+  endHour: number
+}
+
+// 用户自定义策略：一棵规则树（AST）+ 出场设定，对若干品种/周期持续评估。
+// template 仅记录"从哪个预设起步"，纯自定义策略为 null。
+// A user strategy: one rule tree (AST) plus exit settings, evaluated
+// continuously across several symbols/intervals. `template` only records which
+// preset it started from and is null for a from-scratch strategy.
 export interface UserStrategy {
   id: string
-  template: StrategyTemplateKey
+  template: StrategyTemplateKey | null
   name: string | null
-  symbol: string
-  interval: string
-  params: Record<string, string | number>
+  rules: RuleEnvelope
+  symbols: string[]
+  intervals: string[]
   stopLossMethod: StopLossMethod
   stopLossValue: number
   takeProfitMethod: TakeProfitMethod
@@ -395,6 +410,13 @@ export interface UserStrategy {
   // One trade at a time: no new signal while a position is open; off means
   // any bar meeting the condition fires regardless
   oneTradeAtATime: boolean
+  // 超时平仓：持仓超过 N 根 K 线仍未触及 SL/TP 则按收盘价平掉，null = 不启用
+  // Timeout exit: close at the bar's close after N bars without an SL/TP touch;
+  // null disables it
+  exitTimeoutBars: number | null
+  sessionFilter: StrategySessionFilter | null
+  dailySignalCap: number | null
+  cooldownMinutes: number | null
   enabled: boolean
   createdAt: string
 }
@@ -414,6 +436,47 @@ export interface StrategyBacktestSummary {
   winRate: number | null
   avgRr: number | null
   busted: boolean
+}
+
+// 样本内 / 样本外各一套完整指标。切分固定 70/30，无开关。
+// A full metric set for each of the in- and out-of-sample sections. The split is
+// fixed at 70/30 with no toggle.
+export interface StrategySampleSection {
+  barsUsed: number
+  summary: StrategyBacktestSummary
+  trades: StrategyBacktestTrade[]
+}
+
+// 过拟合判定。insufficientSample 为 true 时不作判断（任一段不足 10 笔），
+// 此时 flagged 恒为 false，界面应显示"样本不足，未评估"而不是"无风险"。
+// Overfit verdict. With insufficientSample true no judgement is made (either
+// section has fewer than 10 trades); flagged is then always false and the UI
+// must read "not evaluated, insufficient sample" rather than "no risk".
+export interface StrategyOverfitRisk {
+  flagged: boolean
+  reason: 'winRateDrop' | 'returnFlip' | null
+  insufficientSample: boolean
+}
+
+// 某个 (品种, 周期) 的实际数据覆盖情况。回测执行之前就能拿到，用来告诉用户
+// "已选 365 天，实际可用 47 天"，以及把未接入品种置灰。
+// Actual data coverage for one (symbol, interval), available before a backtest
+// runs: powers "365 days requested, 47 available" and greying out unfed symbols.
+export interface StrategyCoverage {
+  symbol: string
+  interval: string
+  bars: number
+  earliestT: number | null
+  latestT: number | null
+  spanDays: number
+  gapCount: number
+  missingSeconds: number
+  feedActive: boolean
+}
+
+export interface StrategyCoverageResponse {
+  coverage: StrategyCoverage[]
+  activeSymbols: string[]
 }
 
 // 策略回测的逐单明细：在 SimulateTrade 的字段基础上,多带入场/出场那根 K 线的
@@ -448,18 +511,32 @@ export interface StrategyBacktestOpenPosition {
   entryTime: number
 }
 
+// 响应不再有 bars 与 params / barsAvailable：蜡烛图数据改由既有的 chartApi
+// 拉取，barsUsed + coverage 取代 barsAvailable。insufficientData 为 true 时
+// 后端只回 barsUsed / requestedDays / coverage / cached 四项，其余字段缺席，
+// 消费方必须先判这一项再读 summary。
+// No more bars / params / barsAvailable: candles come from the existing chartApi,
+// and barsUsed + coverage replace barsAvailable. When insufficientData is true
+// the backend returns only barsUsed / requestedDays / coverage / cached, so
+// consumers must check that flag before reading summary.
 export interface StrategyBacktestResult {
-  params: Record<string, unknown>
   summary: StrategyBacktestSummary
   points: Array<{ t: string | null; equity: number }>
   trades: StrategyBacktestTrade[]
   openPositions: StrategyBacktestOpenPosition[]
+  inSample: StrategySampleSection
+  outOfSample: StrategySampleSection
+  overfitRisk: StrategyOverfitRisk
+  // 本次回测扣除的总成本，以及不含成本的对照结果——并列展示才能让成本可见。
+  // Total cost deducted, plus the cost-free comparison: showing both is what
+  // makes the cost visible.
+  totalCost: number
+  withoutCosts: { summary: StrategyBacktestSummary; trades: StrategyBacktestTrade[] }
+  barsUsed: number
+  requestedDays: number
+  coverage: StrategyCoverage
   insufficientData: boolean
-  barsAvailable: number
-  // 回测用到的那段 K 线,原样带回来画蜡烛图,不用再单独拉一次历史。
-  // The candles used for the backtest, returned as-is so the frontend can
-  // render a candlestick chart without a second history round-trip.
-  bars: Candle[]
+  cached: boolean
 }
 
 // 策略触发的个人信号：只有策略主人自己能看到 / a strategy-fired personal
@@ -468,11 +545,37 @@ export interface StrategySignal {
   id: string
   strategyId: string
   symbol: string
+  interval: string | null
   side: 'BUY' | 'SELL'
   entry: number
   stopLoss: number
   takeProfit: number
+  // PENDING / HIT_TP / HIT_SL / TIMEOUT / STALE。TIMEOUT 是真实出场（计入绩效），
+  // STALE 是数据源中断的兜底（不计入）。
+  // PENDING / HIT_TP / HIT_SL / TIMEOUT / STALE. TIMEOUT is a real exit (counts
+  // toward performance); STALE is the feed-outage fallback (does not).
+  result: 'PENDING' | 'HIT_TP' | 'HIT_SL' | 'TIMEOUT' | 'STALE'
+  barsHeld: number
+  resolvedAt: string | null
   createdAt: string
+}
+
+// 实盘绩效。insufficientSample 为 true 时 winRate / avgRr 为 null，界面显示
+// "样本不足"——不足 10 笔的百分比会误导。
+// Live performance. With insufficientSample true, winRate/avgRr are null and the
+// UI shows "insufficient sample": a percentage over fewer than 10 trades misleads.
+export interface StrategyPerformance {
+  strategyId: string
+  resolved: number
+  wins: number
+  losses: number
+  timeouts: number
+  pending: number
+  winRate: number | null
+  avgRr: number | null
+  maxLossStreak: number
+  insufficientSample: boolean
+  sampleThreshold: number
 }
 
 // 单周期趋势方向：多 / 空 / 震荡(或无数据) / per-timeframe trend direction

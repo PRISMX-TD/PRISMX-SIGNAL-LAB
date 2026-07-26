@@ -1,5 +1,6 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyTemplateSchemas, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyTemplateSchemas, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter } from './types'
+import type { RuleEnvelope } from '../components/strategies/ruleTypes'
 
 const TOKEN_KEY = 'prismx_token'
 
@@ -224,53 +225,82 @@ export const orderApi = {
     request<DisciplineScore>(`/orders/discipline${login ? `?login=${encodeURIComponent(login)}` : ''}`),
 }
 
-// 自定义策略：模板选好参数 → 回测 → 启用 → 触发个人信号 → 一键下单
-// Custom strategies: pick a template, tune it, backtest, enable, get
-// personal signals on trigger, one-click order
+// 自定义策略：搭规则树 → 查数据覆盖 → 回测 → 启用 → 触发个人信号 → 一键下单
+// Custom strategies: build a rule tree, check data coverage, backtest, enable,
+// get personal signals on trigger, one-click order
 export const strategyApi = {
   templates: () => request<{ templates: StrategyTemplateSchemas }>('/strategies/templates'),
   list: () => request<{ strategies: UserStrategy[] }>('/strategies'),
+  // 不传参即查"当前有报价的全部品种 × 六档周期"。回测之前调用，用来显示实际
+  // 可用范围并把未接入品种置灰。
+  // With no arguments this covers every currently quoted symbol across all six
+  // intervals. Called before a backtest to show the actual available range and
+  // grey out unfed symbols.
+  coverage: (symbols?: string[], intervals?: string[]) => {
+    const qs = new URLSearchParams()
+    if (symbols?.length) qs.set('symbols', symbols.join(','))
+    if (intervals?.length) qs.set('intervals', intervals.join(','))
+    const suffix = qs.toString()
+    return request<StrategyCoverageResponse>(`/strategies/coverage${suffix ? `?${suffix}` : ''}`)
+  },
   create: (payload: {
-    template: StrategyTemplateKey
+    template?: StrategyTemplateKey | null
     name?: string | null
-    symbol: string
-    interval: string
-    params: Record<string, string | number>
+    rules?: RuleEnvelope
+    symbols: string[]
+    intervals: string[]
     stopLossMethod: StopLossMethod
     stopLossValue: number
     takeProfitMethod: TakeProfitMethod
     takeProfitValue: number
     oneTradeAtATime: boolean
+    exitTimeoutBars?: number | null
+    sessionFilter?: StrategySessionFilter | null
+    dailySignalCap?: number | null
+    cooldownMinutes?: number | null
   }) => request<UserStrategy>('/strategies', { method: 'POST', body: JSON.stringify(payload) }),
   update: (
     id: string,
     payload: Partial<{
       name: string | null
-      params: Record<string, string | number>
+      rules: RuleEnvelope
+      symbols: string[]
+      intervals: string[]
       stopLossMethod: StopLossMethod
       stopLossValue: number
       takeProfitMethod: TakeProfitMethod
       takeProfitValue: number
       oneTradeAtATime: boolean
+      exitTimeoutBars: number | null
+      sessionFilter: StrategySessionFilter | null
+      dailySignalCap: number | null
+      cooldownMinutes: number | null
       enabled: boolean
     }>
   ) => request<UserStrategy>(`/strategies/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   remove: (id: string) => request<{ ok: boolean }>(`/strategies/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // 回测一次只跑一个 (品种, 周期)：多组合的净值无法叠成一条曲线。要比多个组合
+  // 就分别调用。
+  // One (symbol, interval) per backtest: equity across pairs can't be summed into
+  // one curve. Call once per pair to compare.
   backtest: (payload: {
-    template: StrategyTemplateKey
+    template?: StrategyTemplateKey | null
+    rules?: RuleEnvelope
     symbol: string
     interval: string
-    params: Record<string, string | number>
     stopLossMethod: StopLossMethod
     stopLossValue: number
     takeProfitMethod: TakeProfitMethod
     takeProfitValue: number
     oneTradeAtATime: boolean
+    exitTimeoutBars?: number | null
     days: number
     riskPct: number
     capital: number
     mode: 'compound' | 'flat'
   }) => request<StrategyBacktestResult>('/strategies/backtest', { method: 'POST', body: JSON.stringify(payload) }),
+  performance: (id: string) =>
+    request<StrategyPerformance>(`/strategies/${encodeURIComponent(id)}/performance`),
   signals: (limit = 50) => request<{ signals: StrategySignal[] }>(`/strategies/signals?limit=${limit}`),
   clearSignals: () => request<{ ok: boolean }>('/strategies/signals', { method: 'DELETE' }),
 }
