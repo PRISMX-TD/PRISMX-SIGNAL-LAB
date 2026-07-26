@@ -229,7 +229,15 @@ export const orderApi = {
 // Custom strategies: build a rule tree, check data coverage, backtest, enable,
 // get personal signals on trigger, one-click order
 export const strategyApi = {
-  templates: () => request<{ templates: StrategyTemplateSchemas }>('/strategies/templates'),
+  // presets 是「从预设起步」唯一需要的部分：模板参数定义（templates）已被规则
+  // 构建器取代，前端不再渲染参数表单。两者同一个响应，类型上都留着。
+  // `presets` is the only part "start from a preset" needs: the param schemas
+  // (`templates`) were replaced by the rule builder and no longer render a form.
+  // Both come in one response and both stay in the type.
+  templates: () =>
+    request<{ templates: StrategyTemplateSchemas; presets: Record<StrategyTemplateKey, RuleEnvelope> }>(
+      '/strategies/templates',
+    ),
   list: () => request<{ strategies: UserStrategy[] }>('/strategies'),
   // 不传参即查"当前有报价的全部品种 × 六档周期"。回测之前调用，用来显示实际
   // 可用范围并把未接入品种置灰。

@@ -1037,3 +1037,72 @@ def test_performance_only_counts_this_strategys_signals(client, db, auth_headers
     _seed_signals(db, user, other, ["HIT_SL"] * 5)
     body = client.get(f"/api/strategies/{mine}/performance", headers=auth_headers).json()
     assert (body["wins"], body["losses"]) == (1, 1)
+
+
+# ---------- 预设 AST 暴露与时段过滤清空 / preset exposure & clearing the session filter ----------
+
+def test_templates_endpoint_exposes_preset_asts(client, auth_headers):
+    """前端「从预设起步」要的是预设 AST，不是参数定义——参数表单已被规则构建器
+    取代。两者同响应返回，键集合必须与 TEMPLATE_KEYS 一致。
+    The frontend's "start from a preset" needs the preset ASTs, not the param
+    schemas (the param form is gone, replaced by the rule builder). Both come in
+    the same response, and the key set must match TEMPLATE_KEYS."""
+    res = client.get("/api/strategies/templates", headers=auth_headers)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert set(body["presets"]) == set(presets.TEMPLATE_KEYS)
+    assert body["presets"]["ma_cross"] == presets.PRESET_RULES["ma_cross"]
+    # 每个预设都是合法信封，前端载入后可直接交给构建器编辑。
+    # Every preset is a valid envelope, editable by the builder as-is.
+    for key in presets.TEMPLATE_KEYS:
+        presets.validate_strategy_rules(body["presets"][key])
+
+
+def test_update_can_clear_session_filter(client, db, auth_headers, user, monkeypatch):
+    """显式传 sessionFilter: null 必须真的清掉——「不限制」是前端的一个正常状态，
+    用 `is not None` 判断写入会让它永远清不回去。
+    An explicit sessionFilter: null must actually clear the column: "no
+    restriction" is a normal state in the UI, and an `is not None` write guard
+    would make it unreachable once set."""
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    sid = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={
+            "rules": _AST,
+            "symbols": ["XAUUSD"],
+            "intervals": ["15"],
+            "sessionFilter": {"startHour": 22, "endHour": 2},
+        },
+    ).json()["id"]
+    row = db.query(UserStrategy).filter(UserStrategy.id == sid).first()
+    assert json.loads(row.session_filter) == {"startHour": 22, "endHour": 2}
+
+    res = client.patch(f"/api/strategies/{sid}", headers=auth_headers, json={"sessionFilter": None})
+    assert res.status_code == 200, res.text
+    assert res.json()["sessionFilter"] is None
+    db.expire_all()
+    assert db.query(UserStrategy).filter(UserStrategy.id == sid).first().session_filter is None
+
+
+def test_update_without_session_filter_key_keeps_it(client, db, auth_headers, user, monkeypatch):
+    """不传该字段时保持原值——清空必须是显式动作，改个名字不该顺手抹掉时段。
+    Omitting the field keeps the stored value: clearing has to be explicit, and
+    renaming a strategy must not wipe its session."""
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    sid = client.post(
+        "/api/strategies",
+        headers=auth_headers,
+        json={
+            "rules": _AST,
+            "symbols": ["XAUUSD"],
+            "intervals": ["15"],
+            "sessionFilter": {"startHour": 9, "endHour": 17},
+        },
+    ).json()["id"]
+    client.patch(f"/api/strategies/{sid}", headers=auth_headers, json={"name": "改个名"})
+    db.expire_all()
+    row = db.query(UserStrategy).filter(UserStrategy.id == sid).first()
+    assert json.loads(row.session_filter) == {"startHour": 9, "endHour": 17}

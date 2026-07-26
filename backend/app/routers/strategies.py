@@ -202,10 +202,19 @@ def _to_out(s: UserStrategy) -> StrategyOut:
 
 @router.get("/templates", response_model=dict)
 def list_templates(_user: User = Depends(get_current_user)):
-    """列出可用的策略模板与其参数定义,前端据此动态渲染调参表单,不写死。
-    Lists available strategy templates and their parameter schemas; the
-    frontend renders the tuning form from this, nothing hardcoded."""
-    return {"templates": TEMPLATE_SCHEMAS}
+    """列出模板的参数定义与预设 AST。
+
+    前端要的是 presets：模板参数表单已被规则构建器取代，「从预设起步」载入的是
+    这一份预设信封，载入后完全可改。templates（参数定义）保留给后台与旧客户端，
+    删掉它是一处无谓的破坏性改动。
+
+    Lists each template's param schema plus its preset AST. The frontend wants
+    `presets`: the param form is gone (replaced by the rule builder), and
+    "start from a preset" loads these envelopes, freely editable afterwards.
+    `templates` (the param schemas) stays for the admin side and older clients —
+    removing it would be a pointless breaking change.
+    """
+    return {"templates": TEMPLATE_SCHEMAS, "presets": PRESET_RULES}
 
 
 @router.get("/coverage", response_model=dict)
@@ -350,8 +359,26 @@ def update_strategy(
         row.one_trade_at_a_time = body.oneTradeAtATime
     if body.exitTimeoutBars is not None:
         row.exit_timeout_bars = body.exitTimeoutBars
-    if body.sessionFilter is not None:
-        row.session_filter = json.dumps(body.sessionFilter.model_dump())
+    # 用 model_fields_set 而不是 `is not None`：显式传 null（清空时段）与压根不传
+    # （保持原值）在 Pydantic 里都是 None，只有「这个键出现过吗」能区分两者。
+    # 前端的「不限制」就是显式 null，用 is not None 判断会让它永远清不掉。
+    # 已知缺陷：同一写法也让 exitTimeoutBars / dailySignalCap / cooldownMinutes
+    # 三个可空字段无法被 PATCH 清回 null（编辑器里它们填 0 表示不启用，前端把 0
+    # 转成 null 发出，同样清不掉）。改动它们会牵动编辑器语义与既有测试，此处只修
+    # sessionFilter，另三项明确记录在案而不静默带过。
+    # Keyed off model_fields_set rather than `is not None`: an explicit null
+    # (clear the session) and an omitted field both arrive as None in Pydantic,
+    # and only "was this key present" separates them. The UI's "no restriction"
+    # sends an explicit null, which an `is not None` guard would never apply.
+    # Known defect: the same pattern keeps exitTimeoutBars / dailySignalCap /
+    # cooldownMinutes from being cleared back to null by PATCH (the editor sends
+    # 0 as null for "off", which likewise never applies). Changing those would
+    # touch the editor's semantics and existing tests, so only sessionFilter is
+    # fixed here and the rest is recorded rather than passed over silently.
+    if "sessionFilter" in body.model_fields_set:
+        row.session_filter = (
+            json.dumps(body.sessionFilter.model_dump()) if body.sessionFilter else None
+        )
     if body.dailySignalCap is not None:
         row.daily_signal_cap = body.dailySignalCap
     if body.cooldownMinutes is not None:

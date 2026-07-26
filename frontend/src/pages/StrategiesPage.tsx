@@ -30,6 +30,7 @@ import type {
   StopLossMethod,
   StrategyBacktestResult,
   StrategyPerformance,
+  StrategySessionFilter,
   StrategySignal,
   StrategyTemplateKey,
   TakeProfitMethod,
@@ -39,6 +40,8 @@ import ChartOrderModal from '../components/ChartOrderModal'
 import ConfirmModal from '../components/ConfirmModal'
 import BacktestPanel from '../components/strategies/BacktestPanel'
 import RuleGroupEditor from '../components/strategies/RuleGroup'
+import PresetPicker from '../components/strategies/PresetPicker'
+import SessionFilterField from '../components/strategies/SessionFilterField'
 import StrategyCard from '../components/strategies/StrategyCard'
 import StrategySignalList from '../components/strategies/StrategySignalList'
 import { NumberField } from '../components/strategies/OperandPicker'
@@ -94,6 +97,7 @@ interface Draft {
   exitTimeoutBars: number | null
   dailySignalCap: number | null
   cooldownMinutes: number | null
+  sessionFilter: StrategySessionFilter | null
 }
 
 function emptyDraft(symbol: string): Draft {
@@ -111,6 +115,7 @@ function emptyDraft(symbol: string): Draft {
     exitTimeoutBars: null,
     dailySignalCap: null,
     cooldownMinutes: null,
+    sessionFilter: null,
   }
 }
 
@@ -130,8 +135,21 @@ function draftFromStrategy(s: UserStrategy): Draft {
     exitTimeoutBars: s.exitTimeoutBars,
     dailySignalCap: s.dailySignalCap,
     cooldownMinutes: s.cooldownMinutes,
+    sessionFilter: s.sessionFilter,
   }
 }
+
+// 预设规则树必须深拷贝再进 Draft：`templates()` 的响应被缓存在页面 state 里，
+// 直接把同一个对象引用塞进 Draft，用户编辑规则时会就地改掉这份缓存——下次再
+// 从同一个预设起步就不是原始预设了。
+// Deep-copy a preset tree before it enters a Draft: the templates() response is
+// cached in page state, so handing the same object reference to the Draft would
+// let rule edits mutate that cache in place — starting from the same preset a
+// second time would no longer give the original.
+function cloneEnvelope(env: RuleEnvelope): RuleEnvelope {
+  return JSON.parse(JSON.stringify(env)) as RuleEnvelope
+}
+
 interface StrategyEditorProps {
   draft: Draft
   // 有报价在推的品种。未接入的品种在下拉里置灰并标注原因（spec 验收标准第 4 条）。
@@ -205,6 +223,11 @@ function StrategyEditor({
         exitTimeoutBars: draft.exitTimeoutBars,
         dailySignalCap: draft.dailySignalCap,
         cooldownMinutes: draft.cooldownMinutes,
+        // 恒定传出（含 null）：后端 update_strategy 用 model_fields_set 判断，
+        // 显式 null 才能把已设的时段过滤清回不限制。
+        // Always sent (null included): the backend's update_strategy keys off
+        // model_fields_set, so an explicit null is what clears a set session.
+        sessionFilter: draft.sessionFilter,
       }
       let saved: UserStrategy
       if (draft.id) {
@@ -247,6 +270,12 @@ function StrategyEditor({
             onChange={(e) => onChange({ ...draft, name: e.target.value })}
           />
         </label>
+        {/* 从预设起步的新草稿：说清规则已经载入且完全可改，预设不是黑盒。
+            A new draft started from a preset: state that the rules are loaded and
+            fully editable — a preset isn't an opaque box. */}
+        {!draft.id && draft.template && (
+          <p className="mt-1.5 text-xs text-prism-200/80">{t('strategy.presetLoaded')}</p>
+        )}
 
         <div className="mt-4 flex flex-col gap-1.5">
           <span className="text-[11px] uppercase tracking-wide text-slate-500">
@@ -489,6 +518,16 @@ function StrategyEditor({
           />
         </div>
         <p className="mt-1.5 text-xs leading-relaxed text-slate-500">{t('strategy.optionalZeroHint')}</p>
+
+        {/* 交易时段过滤：与每日上限、冷却同属"什么时候允许入场"这一组约束。
+            Session filter: same "when may we enter" group as the daily cap and
+            cooldown. */}
+        <div className="mt-4">
+          <SessionFilterField
+            value={draft.sessionFilter}
+            onChange={(sessionFilter) => onChange({ ...draft, sessionFilter })}
+          />
+        </div>
       </div>
 
       {/* 回测 / backtest */}
@@ -562,6 +601,10 @@ export default function StrategiesPage() {
   const [allSymbols, setAllSymbols] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [draft, setDraft] = useState<Draft | null>(null)
+  const [presets, setPresets] = useState<Record<StrategyTemplateKey, RuleEnvelope> | null>(null)
+  const [presetError, setPresetError] = useState<string | null>(null)
+  // 打开「新建」时先进预设选择，选完才进编辑器 / show the preset picker first
+  const [picking, setPicking] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<UserStrategy | null>(null)
   const [orderTarget, setOrderTarget] = useState<StrategySignal | null>(null)
   const [clearingSignals, setClearingSignals] = useState(false)
@@ -571,6 +614,7 @@ export default function StrategiesPage() {
   const [now, setNow] = useState(() => Date.now())
 
   useBackToClose(draft != null, () => setDraft(null))
+  useBackToClose(picking, () => setPicking(false))
   useBackToClose(deleteTarget != null, () => setDeleteTarget(null))
   useBackToClose(orderTarget != null, () => setOrderTarget(null))
   useBackToClose(confirmClearSignals, () => setConfirmClearSignals(false))
@@ -584,11 +628,23 @@ export default function StrategiesPage() {
       // 三个请求互不依赖，并行发出。
       // coverage with no args returns every currently quoted symbol, so unfed ones
       // can still be listed (greyed out). The three requests are independent.
-      const [sRes, sigRes, covRes] = await Promise.all([
+      // templates() 单独 catch：预设拿不到不该让整页加载失败——策略列表、信号、
+      // 覆盖度都与它无关。
+      // templates() catches on its own: failing to fetch presets must not fail
+      // the whole page — the list, signals and coverage don't depend on them.
+      const [tRes, sRes, sigRes, covRes] = await Promise.all([
+        strategyApi.templates().catch((e) => {
+          setPresetError(e instanceof Error ? localizeApiError(e.message) : 'Unknown error')
+          return null
+        }),
         strategyApi.list(),
         strategyApi.signals(20),
         strategyApi.coverage(),
       ])
+      if (tRes) {
+        setPresets(tRes.presets)
+        setPresetError(null)
+      }
       setStrategies(sRes.strategies)
       setSignals(sigRes.signals)
       const syms = Array.from(new Set(covRes.coverage.map((c) => c.symbol)))
@@ -642,7 +698,24 @@ export default function StrategiesPage() {
     }
   }, [])
 
-  const openNewDraft = () => setDraft(emptyDraft(activeSymbols[0] ?? allSymbols[0] ?? 'XAUUSD'))
+  const openNewDraft = () => {
+    setPresetError(null)
+    setPicking(true)
+  }
+
+  // template 为 null 表示从空白开始；否则载入该预设的规则树（深拷贝）。
+  // A null template means start blank; otherwise load that preset's tree (deep-copied).
+  const startFromPreset = (template: StrategyTemplateKey | null) => {
+    const base = emptyDraft(activeSymbols[0] ?? allSymbols[0] ?? 'XAUUSD')
+    const preset = template != null ? presets?.[template] : null
+    setDraft(
+      preset != null
+        ? { ...base, template, rules: cloneEnvelope(preset) }
+        : base,
+    )
+    setPicking(false)
+  }
+
   const openEditDraft = (s: UserStrategy) => setDraft(draftFromStrategy(s))
 
   const onSaved = (s: UserStrategy) => {
@@ -757,6 +830,23 @@ export default function StrategiesPage() {
           </div>
         )}
       </section>
+
+      {picking && (
+        <PresetPicker
+          options={
+            presets
+              ? (Object.keys(presets) as StrategyTemplateKey[]).map((key) => ({
+                  key,
+                  label: t(TEMPLATE_LABEL_KEYS[key]),
+                }))
+              : []
+          }
+          loading={presets == null && presetError == null}
+          error={presetError}
+          onStart={startFromPreset}
+          onCancel={() => setPicking(false)}
+        />
+      )}
 
       {draft && (
         <StrategyEditor
