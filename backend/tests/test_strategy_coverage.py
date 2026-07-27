@@ -303,3 +303,33 @@ def test_matrix_evaluates_active_symbols_once(db, monkeypatch):
     # 判定结果本身仍要正确：只有 XAUUSD 在推。
     # The verdict itself must still be right: only XAUUSD is fed.
     assert all(r["feedActive"] is (r["symbol"] == "XAUUSD") for r in rows)
+
+
+# ---------- 品种名单（候选集）/ symbol candidates ----------
+
+def test_symbols_with_history_lists_distinct_symbols(db):
+    cv.invalidate_symbols_cache()
+    _seed(db, symbol="XAUUSD", interval="15", count=3)
+    _seed(db, symbol="XAUUSD", interval="60", count=3, step=3600)
+    _seed(db, symbol="EURUSD", interval="15", count=3)
+    assert cv.symbols_with_history(db) == ["EURUSD", "XAUUSD"]
+
+
+def test_symbols_with_history_empty_table(db):
+    cv.invalidate_symbols_cache()
+    assert cv.symbols_with_history(db) == []
+
+
+def test_symbols_with_history_is_cached_within_ttl(db):
+    """TTL 内不重复查库：这个端点在每次进入策略页时都会被调用。
+    No repeat query within the TTL: this is hit on every visit to the page."""
+    cv.invalidate_symbols_cache()
+    _seed(db, symbol="XAUUSD", interval="15", count=3)
+    assert cv.symbols_with_history(db) == ["XAUUSD"]
+    # 缓存生效期间新写入的品种不应出现——正是"命中了缓存"的证据。
+    # A symbol written while the cache is warm must not appear — that is the
+    # evidence the cache was used.
+    _seed(db, symbol="EURUSD", interval="15", count=3)
+    assert cv.symbols_with_history(db) == ["XAUUSD"]
+    cv.invalidate_symbols_cache()
+    assert cv.symbols_with_history(db) == ["EURUSD", "XAUUSD"]

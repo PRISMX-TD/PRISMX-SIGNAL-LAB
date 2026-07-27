@@ -13,6 +13,9 @@ user asking to "backtest 365 days" against 47 days of stored history previously
 had no way to tell — precise-looking numbers built on a history of unknown
 length.
 """
+import threading
+import time
+
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
@@ -163,3 +166,57 @@ def coverage_matrix(db: Session, symbols: list[str], intervals: list[str]) -> li
         for s in symbols
         for i in intervals
     ]
+
+
+# 候选品种名单的缓存有效期。这份名单变化极慢（只有 EA 首次推送一个新品种时才
+# 会多一项），而端点每次进入策略页都会被调用，5 分钟足够把重复查询压掉又不会
+# 让新接入的品种迟迟不出现。
+# TTL for the candidate-symbol list. It changes very rarely (only when the EA
+# first pushes a brand-new symbol), yet the endpoint is hit on every visit to
+# the strategies page; five minutes collapses the repeats without making a
+# newly fed symbol wait long to show up.
+SYMBOLS_CACHE_TTL_SECONDS = 300
+
+_symbols_lock = threading.Lock()
+_symbols_cache: tuple[float, list[str]] | None = None
+
+
+def invalidate_symbols_cache() -> None:
+    """清空候选品种缓存（测试用，也可供将来的管理操作调用）。
+    Clear the candidate-symbol cache (for tests, and any future admin action)."""
+    global _symbols_cache
+    with _symbols_lock:
+        _symbols_cache = None
+
+
+def symbols_with_history(db: Session) -> list[str]:
+    """库里存过 K 线的品种，排序去重。
+
+    这是策略编辑器的"候选品种"来源，语义是"有历史数据、能回测"，刻意比
+    active_symbols()（此刻正在推报价）更宽：一个 EA 断线的品种仍然可选中查看，
+    只是会被置灰——这正是置灰要表达的意思。用 active_symbols() 当候选集会让
+    候选集与活跃集永远相等，置灰因此永不生效。
+
+    只扫 idx_candle_symbol_interval_t 的首列，返回几个字符串，与历史行数无关。
+
+    Symbols that have candles stored, sorted and deduplicated. This is the
+    strategy editor's candidate list, meaning "has history, can be backtested",
+    deliberately wider than active_symbols() (quoting right now): a symbol whose
+    EA dropped stays visible but greyed out, which is exactly what greying means.
+    Using active_symbols() as the candidate set makes candidates and actives
+    identical, so nothing ever greys out.
+
+    Touches only the leading column of idx_candle_symbol_interval_t and returns
+    a handful of strings, independent of how many rows exist.
+    """
+    global _symbols_cache
+    with _symbols_lock:
+        if _symbols_cache is not None:
+            stored_at, value = _symbols_cache
+            if time.time() - stored_at < SYMBOLS_CACHE_TTL_SECONDS:
+                return value
+    rows = db.query(Candle.symbol).distinct().all()
+    symbols = sorted({row[0] for row in rows})
+    with _symbols_lock:
+        _symbols_cache = (time.time(), symbols)
+    return symbols

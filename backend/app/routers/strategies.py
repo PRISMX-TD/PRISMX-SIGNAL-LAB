@@ -65,6 +65,7 @@ from app.services.strategy.coverage import (
     active_symbols,
     coverage_for,
     coverage_matrix,
+    symbols_with_history,
 )
 from app.services.strategy.conditions import (
     ALLOWED_INTERVALS,
@@ -317,6 +318,36 @@ def get_coverage(
         _assert_interval(itv)
     return {
         "coverage": coverage_matrix(db, sym_list, itv_list),
+        "activeSymbols": active_symbols(),
+    }
+
+
+@router.get("/symbols", response_model=dict)
+async def list_candidate_symbols(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """策略编辑器的候选品种，以及其中哪些当前正在推报价。
+
+    symbols 的语义是"有历史数据、能回测"；activeSymbols 是其中此刻在推的子集，
+    两者的差集就是前端要置灰的品种。
+
+    本端点的存在是为了让首屏不必再调 /strategies/coverage：后者不传参时会对每个
+    (品种, 周期) 组合各算一行，而首屏要的只是品种名。统计数字由回测面板按当前
+    选中的那一对单独拉取。
+
+    The strategy editor's candidate symbols plus which of them are being quoted.
+    `symbols` means "has history, can be backtested"; `activeSymbols` is the
+    subset quoting right now, and the frontend greys out the difference.
+
+    This exists so the first paint no longer needs /strategies/coverage, which
+    without arguments computes a row per (symbol, interval) pair when all the
+    page wants is the names. The statistics are fetched by the backtest panel for
+    the one pair it's showing.
+    """
+    _check_access(db, user)
+    return {
+        "symbols": symbols_with_history(db),
         "activeSymbols": active_symbols(),
     }
 
