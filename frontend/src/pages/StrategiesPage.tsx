@@ -847,7 +847,19 @@ export default function StrategiesPage() {
   // deserves a fresh run.
   const [backtestWinRates, setBacktestWinRates] = useState<Record<string, number | null>>({})
   const [allSymbols, setAllSymbols] = useState<string[]>([])
-  const [loading, setLoading] = useState(true)
+  // 分区加载态而非全页一个开关。此前是 Promise.all 全部落地才渲染，任何一个请求
+  // 慢下来整页就是白屏加转圈——策略列表明明已经到手也不上屏。
+  // 「已加载」与「数据为空」必须是两个独立状态：合成一个的话，新用户会先闪一次
+  // 「还没有创建任何策略」，老用户会看到自己的策略凭空出现。
+  // Per-section loading rather than one page-wide switch. It used to wait for all
+  // of Promise.all before rendering, so one slow request meant a blank page with
+  // a spinner even though the strategy list had already arrived.
+  // "Loaded" and "empty" must stay separate: conflated, a new user sees a flash
+  // of "no strategies yet" and an existing one watches their strategies pop in.
+  const [strategiesLoaded, setStrategiesLoaded] = useState(false)
+  const [signalsLoaded, setSignalsLoaded] = useState(false)
+  const [listError, setListError] = useState<string | null>(null)
+  const [signalsError, setSignalsError] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [presets, setPresets] = useState<StrategyPresets | null>(null)
   const [presetError, setPresetError] = useState<string | null>(null)
@@ -882,47 +894,85 @@ export default function StrategiesPage() {
   const isPro = user?.plan === 'PRO'
 
   const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      // coverage 不传参：拿"当前有报价的全部品种"，用于把未接入品种也列出来并置灰。
-      // 这几个请求互不依赖，并行发出。
-      // coverage with no args returns every currently quoted symbol, so unfed ones
-      // can still be listed (greyed out). These requests are all independent.
-      // templates() 单独 catch：预设拿不到不该让整页加载失败——策略列表、信号、
-      // 覆盖度都与它无关。
-      // templates() catches on its own: failing to fetch presets must not fail
-      // the whole page — the list, signals and coverage don't depend on them.
-      // usages() 也单独 catch：目录拿不到只该挡住编辑器，策略列表与信号照样能看。
-      // usages() catches on its own too: a missing catalogue should only hold the
-      // editor back, leaving the list and signals readable.
-      const [tRes, uRes, sRes, sigRes, covRes] = await Promise.all([
-        strategyApi.templates().catch((e) => {
-          setPresetError(e instanceof Error ? localizeApiError(e.message) : 'Unknown error')
-          return null
-        }),
-        strategyApi.usages().catch((e) => {
-          setCatalogError(e instanceof Error ? localizeApiError(e.message) : 'Unknown error')
-          return null
-        }),
-        strategyApi.list(),
-        strategyApi.signals(20),
-        strategyApi.coverage(),
-      ])
-      if (tRes) {
-        setPresets(tRes.presets)
+    // 每个请求自己落地、自己报错、自己结束加载态。不用 Promise.all 的返回值：
+    // 那样又会退回"等最慢的那个"。此前 list/signals/coverage 三个共用失败路径，
+    // 任一失败即整页空白且没有任何提示。
+    // Each request lands, reports and clears its own loading state. The
+    // Promise.all result isn't used, since that would go back to waiting for the
+    // slowest. list/signals/coverage used to share a failure path, so any one of
+    // them failing left the whole page blank with nothing explaining why.
+    const list = strategyApi
+      .list()
+      .then((r) => {
+        setStrategies(r.strategies)
+        setListError(null)
+      })
+      .catch((e) => {
+        setListError(e instanceof Error ? localizeApiError(e.message) : 'Unknown error')
+      })
+      .finally(() => setStrategiesLoaded(true))
+
+    const signals = strategyApi
+      .signals(20)
+      .then((r) => {
+        setSignals(r.signals)
+        setSignalsError(null)
+      })
+      .catch((e) => {
+        setSignalsError(e instanceof Error ? localizeApiError(e.message) : 'Unknown error')
+      })
+      .finally(() => setSignalsLoaded(true))
+
+    // 品种名单走专用端点：coverage 不传参会对每个 (品种, 周期) 组合各算一行
+    // （42 个），而这里只需要品种名。统计数字由回测面板按当前选中的那一对单独拉取。
+    // The symbol list comes from a dedicated endpoint: an argument-less coverage
+    // computes a row per (symbol, interval) pair (42 of them) when all that's
+    // needed here are the names. The statistics are fetched by the backtest panel
+    // for the one pair it's showing.
+    const symbols = strategyApi
+      .symbolsWithHistory()
+      .then((r) => {
+        // 候选集取并集：刚接入、还没落下第一根收盘 K 线的品种在推但表里没有，
+        // 不能因此从候选里消失；反之断线品种表里有、不在推，正是要被置灰的那些。
+        // Union of both: a freshly fed symbol with no closed bar yet is pushing
+        // but absent from the table and must not vanish from the candidates; a
+        // disconnected one is in the table but not pushing, which is exactly
+        // what gets greyed out.
+        setAllSymbols(Array.from(new Set([...r.symbols, ...r.activeSymbols])))
+      })
+      // 名单拿不到只影响编辑器里的品种按钮，页面其余部分照常。编辑器那边有
+      // activeSymbols 兜底（见渲染处的 allSymbols.length > 0 判断）。
+      // A missing list only affects the editor's symbol buttons; the rest of the
+      // page carries on. The editor falls back to activeSymbols (see the
+      // allSymbols.length > 0 check at the render site).
+      .catch(() => {})
+
+    // 预设与目录各自 catch，语义与此前一致：预设拿不到不该让整页失败，目录拿不到
+    // 只该挡住编辑器。
+    // Presets and the catalogue each catch on their own, as before: missing
+    // presets must not fail the page, and a missing catalogue should only hold
+    // the editor back.
+    const templates = strategyApi
+      .templates()
+      .then((r) => {
+        setPresets(r.presets)
         setPresetError(null)
-      }
-      if (uRes) {
-        setCatalog(uRes)
+      })
+      .catch((e) => {
+        setPresetError(e instanceof Error ? localizeApiError(e.message) : 'Unknown error')
+      })
+
+    const usages = strategyApi
+      .usages()
+      .then((r) => {
+        setCatalog(r)
         setCatalogError(null)
-      }
-      setStrategies(sRes.strategies)
-      setSignals(sigRes.signals)
-      const syms = Array.from(new Set(covRes.coverage.map((c) => c.symbol)))
-      setAllSymbols(syms.length > 0 ? syms : covRes.activeSymbols)
-    } finally {
-      setLoading(false)
-    }
+      })
+      .catch((e) => {
+        setCatalogError(e instanceof Error ? localizeApiError(e.message) : 'Unknown error')
+      })
+
+    await Promise.all([list, signals, symbols, templates, usages])
   }, [])
 
   useEffect(() => { document.title = t('strategy.title') }, [t])
@@ -1069,14 +1119,6 @@ export default function StrategiesPage() {
     await placeManualOrder(orderTarget.symbol, orderTarget.side, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />
-      </div>
-    )
-  }
-
   return (
     <div>
       <div className="mb-5">
@@ -1154,7 +1196,22 @@ export default function StrategiesPage() {
           )}
         </div>
 
-        {strategies.length === 0 ? (
+        {/* 四态而非两态：未加载显示骨架，失败说明原因，加载完为空才说"还没有策略"。
+            把"未加载"与"空"合并会让新用户先看到一次误报的空状态。
+            Four states, not two: a skeleton while loading, the reason on failure,
+            and "no strategies" only once loaded and actually empty. Merging
+            "loading" with "empty" flashes a false empty state at new users. */}
+        {!strategiesLoaded ? (
+          <div className="mt-4 flex flex-col gap-2" aria-busy="true">
+            {[0, 1].map((i) => (
+              <div key={i} className="h-16 animate-pulse rounded-lg border border-white/5 bg-white/[0.03]" />
+            ))}
+          </div>
+        ) : listError ? (
+          <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-200">
+            {t('strategy.listUnavailable')} {listError}
+          </div>
+        ) : strategies.length === 0 ? (
           <div className="mt-4 py-6 text-center text-sm text-slate-500">{t('strategy.noStrategies')}</div>
         ) : (
           <div className="mt-4 flex flex-col gap-2">
@@ -1229,7 +1286,15 @@ export default function StrategiesPage() {
             </button>
           )}
         </div>
-        <StrategySignalList signals={signals} now={now} onOrder={setOrderTarget} />
+        {!signalsLoaded ? (
+          <div className="mt-4 h-16 animate-pulse rounded-lg border border-white/5 bg-white/[0.03]" aria-busy="true" />
+        ) : signalsError ? (
+          <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-200">
+            {t('strategy.signalsUnavailable')} {signalsError}
+          </div>
+        ) : (
+          <StrategySignalList signals={signals} now={now} onOrder={setOrderTarget} />
+        )}
       </section>
 
       <p className="text-xs leading-relaxed text-slate-500">{t('strategy.disclaimer')}</p>

@@ -1106,6 +1106,8 @@
     "myStrategies": "My Strategies",
     "myStrategyBadge": "My Strategy",
     "noStrategies": "No strategies created yet",
+    "listUnavailable": "Couldn't load your strategies:",
+    "signalsUnavailable": "Couldn't load signals:",
     "newStrategy": "+ New Strategy",
     "name": "Strategy Name (optional)",
     "editStrategy": "Edit Strategy",

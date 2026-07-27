@@ -281,6 +281,15 @@ export const strategyApi = {
     const suffix = qs.toString()
     return request<StrategyCoverageResponse>(`/strategies/coverage${suffix ? `?${suffix}` : ''}`)
   },
+  // 策略编辑器的候选品种。与 coverage() 分开是因为首屏只要名单：coverage 不传参
+  // 会对每个 (品种, 周期) 组合各算一行，代价随历史累积增长，而它返回的统计字段
+  // 首屏一个都不读。
+  // Candidate symbols for the strategy editor. Separate from coverage() because
+  // the first paint only needs names: an argument-less coverage computes a row
+  // per (symbol, interval) pair, growing as history accrues, and the first paint
+  // reads none of the statistics it returns.
+  symbolsWithHistory: () =>
+    request<{ symbols: string[]; activeSymbols: string[] }>('/strategies/symbols'),
   // rules 与 template 二选一：给了 rules 就按它建，只给 template 则后端填该预设的
   // 条件。rules 里的 symbol / interval 必须与顶层的一致，否则 400。
   // Either rules or template: with rules it's built from them, with only a
