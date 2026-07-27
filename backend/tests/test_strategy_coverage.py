@@ -280,3 +280,26 @@ def test_parity_all_intervals(db):
     for itv, secs in INTERVAL_SECONDS.items():
         _seed(db, symbol="EURUSD", interval=itv, count=30, step=secs, skip=(4, 9, 10))
         _assert_parity(db, symbol="EURUSD", interval=itv)
+
+
+def test_matrix_evaluates_active_symbols_once(db, monkeypatch):
+    """一次矩阵调用只问一次"哪些品种在推"。
+
+    此前每个 (品种, 周期) 组合各问一次（7 品种 × 6 周期 = 42 次）。省开销是次要的，
+    要紧的是一致性：同一份响应里的 42 行必须对"这个品种是否在推"给出同一个答案，
+    否则 30 秒判定窗口正好在遍历中途翻转时，响应内部会自相矛盾。
+
+    One matrix call asks "which symbols are fed" exactly once. It used to ask per
+    (symbol, interval) pair — 42 times for 7 symbols by 6 intervals. Saving the
+    work is secondary to consistency: all 42 rows in one response must agree on
+    whether a symbol is fed, or a 30-second window flipping mid-iteration would
+    make the response contradict itself.
+    """
+    calls = []
+    monkeypatch.setattr(cv, "active_symbols", lambda: calls.append(1) or ["XAUUSD"])
+    rows = cv.coverage_matrix(db, ["XAUUSD", "EURUSD"], ["15", "60"])
+    assert len(rows) == 4
+    assert len(calls) == 1
+    # 判定结果本身仍要正确：只有 XAUUSD 在推。
+    # The verdict itself must still be right: only XAUUSD is fed.
+    assert all(r["feedActive"] is (r["symbol"] == "XAUUSD") for r in rows)

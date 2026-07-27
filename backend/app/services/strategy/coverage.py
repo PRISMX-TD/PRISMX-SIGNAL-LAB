@@ -148,5 +148,18 @@ def coverage_for(db: Session, symbol: str, interval: str, *, feed_active: bool |
 
 def coverage_matrix(db: Session, symbols: list[str], intervals: list[str]) -> list[dict]:
     """对每个 (品种, 周期) 组合各算一行。
-    One row per (symbol, interval) combination."""
-    return [coverage_for(db, s, i) for s in symbols for i in intervals]
+
+    "哪些品种在推"在这里求值一次后传给每一行：同一份响应里的所有行必须给出
+    一致的答案，逐行去问会让 30 秒判定窗口在遍历中途翻转，响应自相矛盾。
+
+    One row per (symbol, interval) combination. "Which symbols are fed" is
+    evaluated once here and passed down: every row in a response must agree, and
+    asking per row lets the 30-second window flip mid-iteration and contradict
+    itself.
+    """
+    fed = set(active_symbols())
+    return [
+        coverage_for(db, s, i, feed_active=s in fed)
+        for s in symbols
+        for i in intervals
+    ]
