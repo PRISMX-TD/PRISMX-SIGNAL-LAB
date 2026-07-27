@@ -47,6 +47,34 @@ import { useEffect, useRef } from 'react'
 const openStack: number[] = []
 let nextId = 1
 
+// 清理阶段主动发起、但还没落地的 history.back() 次数。
+//
+// history.back() 是异步的：调用后 popstate 要等到下一个任务才到达。而 React 在
+// 一次提交里是「先跑所有 cleanup，再跑所有 effect」——策略页点「从空白开始」时，
+// 预设面板的 cleanup 先 back()，紧接着编辑器的 effect 同步 push 了自己的记录，
+// 等那次 back 的 popstate 真正落地时，被撤销的已经是编辑器刚压的那条，编辑器于是
+// 把它读作「关闭我」，刚打开就自己关掉——表现为点击毫无反应且无报错。
+//
+// 靠实例 id 或栈顶比对都拦不住：cleanup 发起 back() 的那一刻，比对全是通过的，
+// 冲突发生在此后的异步窗口里。所以只能显式记账——凡是自己发起的 back，其 popstate
+// 一律不当作用户的返回操作。
+//
+// How many cleanup-initiated history.back() calls are still in flight.
+//
+// history.back() is async: its popstate lands on a later task. React, meanwhile,
+// runs *all* cleanups before *any* effect within one commit — so on the
+// strategies page's "start blank", the picker's cleanup calls back(), the
+// editor's effect then synchronously pushes its own entry, and by the time that
+// back()'s popstate lands the entry being undone is the editor's. The editor
+// reads it as "close me" and dies the instant it opened — a dead click with no
+// error.
+//
+// Neither instance ids nor stack-top checks can catch this: at the moment
+// cleanup calls back(), every check passes; the conflict happens in the async
+// window afterwards. Explicit bookkeeping is the only way — a popstate caused by
+// our own back() must never count as the user navigating back.
+let selfInitiatedBacks = 0
+
 export function isAnyModalOpen(): boolean {
   return openStack.length > 0
 }
@@ -73,6 +101,16 @@ export function useBackToClose(isOpen: boolean, onClose: () => void) {
     openStack.push(id)
 
     const onPopState = () => {
+      // 这次 popstate 来自某个实例清理时自己发起的 back()，不是用户的返回操作，
+      // 谁都不该因此关闭。计数不在这里递减：同一次事件会通知所有仍在监听的实例，
+      // 谁先跑是不确定的，就地递减会让排在后面的实例看到 0 而误判。递减交给发起方
+      // 在事件落地后统一做。
+      // This popstate came from a cleanup's own back(), not the user navigating
+      // back, so nobody should close. The count is not decremented here: one event
+      // notifies every still-listening instance in an unspecified order, so
+      // decrementing in place would let later instances see 0 and misjudge. The
+      // initiator decrements once the event has landed.
+      if (selfInitiatedBacks > 0) return
       // 不是当前最上层：这次返回消费的是更上面某个实例的记录，跟我无关，
       // 忽略——我的记录还原封不动地留在栈里，继续挂着。
       // Not currently the topmost: this back navigation consumed some other,
@@ -111,20 +149,32 @@ export function useBackToClose(isOpen: boolean, onClose: () => void) {
       // lets clicks through to a nav link), the top of history is no longer
       // ours, and blindly calling back() would undo the navigation the user
       // just made. Leaving a harmless dead entry behind is the safer choice.
-      // 必须比对实例 id，不能只看 __modalBack 标记：一次渲染里可能一个弹窗关闭、
-      // 另一个同时打开（策略页点「从空白开始」正是如此——预设面板关闭、编辑器打开），
-      // 此时 history 顶端那条是新打开的那个实例刚压的。只认布尔标记会让即将关闭的
-      // 实例把别人的记录 back() 掉，随之而来的 popstate 又被新实例认作「关闭我」，
-      // 结果新打开的弹窗当场被关掉——表现为点击毫无反应。
-      // Compare the instance id, not just the __modalBack flag: one modal can close
-      // while another opens in the same render (exactly what "start blank" does on
-      // the strategies page — picker closes, editor opens), leaving the top history
-      // entry owned by the newly opened instance. Matching only the boolean would
-      // make the closing instance back() out someone else's entry, and the
-      // resulting popstate would be read by the new instance as "close me" — the
-      // just-opened modal dies instantly, which looks like a dead click.
-      const top = window.history.state as { __modalBack?: boolean; __modalId?: number } | null
-      if (!top?.__modalBack || top.__modalId !== id) return
+      // 只认 __modalBack 标记，不比对实例 id。
+      //
+      // 曾经这里比对过 id，用意是拦住「一个弹窗关闭、另一个同时打开」时误撤销对方
+      // 记录。但那个判断解决不了问题：React 一次提交里先跑完所有 cleanup 才跑
+      // effect，所以走到这里时新弹窗还没 push，顶端本就是自己的记录，比对必然通过。
+      // 冲突发生在 back() 异步落地之后，靠这里的同步比对拦不住，真正的防护是
+      // selfInitiatedBacks（见文件顶部）。
+      // 而比对 id 还有害：嵌套弹窗里内层先关时顶端是内层自己的记录，比对通过；但
+      // 若顺序反过来（外层先卸载），外层就会因为顶端不是自己而直接 return，白留一条
+      // 永久死记录，用户之后每次返回都要多空转一次。
+      //
+      // Match only the __modalBack flag, not the instance id.
+      //
+      // This used to compare ids, meant to stop one modal from undoing another's
+      // entry when one closes as another opens. That check can't work: React runs
+      // every cleanup before any effect in a commit, so the new modal hasn't
+      // pushed yet and the top entry is always still our own — the comparison
+      // always passes. The conflict happens after back() lands asynchronously,
+      // which no synchronous check here can catch; selfInitiatedBacks (see top of
+      // file) is the actual guard.
+      // Comparing ids is also harmful: with nested modals the inner one closing
+      // first finds its own entry on top and passes, but in the reverse order the
+      // outer instance would see an entry that isn't its own and return early,
+      // leaving a permanent dead entry that burns one step on every later back.
+      const top = window.history.state as { __modalBack?: boolean } | null
+      if (!top?.__modalBack) return
 
       // 关键点：这里主动调用的 history.back() 会异步触发一次 popstate——
       // PwaBackGuard 的监听器（挂载得比这里早，同一事件里总是先跑）此时也会
@@ -146,8 +196,31 @@ export function useBackToClose(isOpen: boolean, onClose: () => void) {
       // ourselves back onto the stack until this self-triggered popstate
       // actually lands, then remove for good.
       openStack.push(id)
+      // 先记账再 back()：这次 back 的 popstate 落地前，可能已经有新弹窗压入了自己的
+      // 记录（同一次提交里 effect 跑在所有 cleanup 之后），计数就是让那个新实例认出
+      // 「这次 popstate 不是用户按的返回」的唯一依据。递减放在监听器里，等事件真正
+      // 落地、所有实例都判断完之后再做。
+      // Book-keep before back(): by the time this back()'s popstate lands, a newly
+      // opened modal may already have pushed its own entry (effects run after all
+      // cleanups in the same commit), and this count is the only way that new
+      // instance can tell "this popstate wasn't a user-initiated back". The
+      // decrement happens in the listener, after the event has actually landed and
+      // every instance has made its decision.
+      selfInitiatedBacks++
       const onSelfTriggeredPop = () => {
         window.removeEventListener('popstate', onSelfTriggeredPop)
+        // 递减必须晚于本次事件的所有监听器。新弹窗的 onPopState 注册得比这里更晚
+        // （它的 effect 跑在本次 cleanup 之后），因而会在本监听器之后被调用；就地
+        // 递减会让它看到 0 并把这次 popstate 误当成用户返回，正是要防的那个 bug。
+        // 用 setTimeout 排到事件派发完成之后。
+        // The decrement must outlive every listener for this event. A newly opened
+        // modal registers its onPopState later than this one (its effect runs after
+        // this cleanup), so it is invoked after us; decrementing in place would let
+        // it see 0 and mistake this popstate for a user-initiated back — precisely
+        // the bug being guarded against. setTimeout defers past dispatch.
+        setTimeout(() => {
+          selfInitiatedBacks--
+        }, 0)
         const i = openStack.lastIndexOf(id)
         if (i !== -1) openStack.splice(i, 1)
       }
