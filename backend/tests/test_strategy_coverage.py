@@ -163,3 +163,120 @@ def test_coverage_endpoint_still_caps_an_explicit_symbol_list(client, db, auth_h
     res = client.get(f"/api/strategies/coverage?symbols={too_many}", headers=auth_headers)
     assert res.status_code == 400
     assert str(cv.MAX_COVERAGE_SYMBOLS) in res.json()["detail"]
+
+
+# ---------- 新旧实现对照（迁移期临时测试，验证通过后删除）----------
+# Old-vs-new parity (temporary, delete once verified).
+
+def _coverage_for_python(db, symbol: str, interval: str) -> dict:
+    """迁移前的 Python 实现，原样保留作为精度参照。
+    The pre-migration Python implementation, kept verbatim as the accuracy
+    reference."""
+    from app.models import Candle
+    from app.services.candle_store import INTERVAL_SECONDS
+
+    seconds = INTERVAL_SECONDS[interval]
+    times = [
+        row[0]
+        for row in db.query(Candle.t)
+        .filter(Candle.symbol == symbol, Candle.interval == interval)
+        .order_by(Candle.t.asc())
+        .all()
+    ]
+    if not times:
+        return {"bars": 0, "earliestT": None, "latestT": None,
+                "spanDays": 0.0, "gapCount": 0, "missingSeconds": 0}
+    threshold = seconds * cv.GAP_TOLERANCE_MULTIPLIER
+    gap_count = 0
+    missing_seconds = 0
+    for prev, cur in zip(times, times[1:]):
+        step = cur - prev
+        if step > threshold:
+            gap_count += 1
+            missing_seconds += (step // seconds - 1) * seconds
+    return {
+        "bars": len(times), "earliestT": times[0], "latestT": times[-1],
+        "spanDays": (times[-1] - times[0]) / 86_400,
+        "gapCount": gap_count, "missingSeconds": int(missing_seconds),
+    }
+
+
+COMPARED_FIELDS = ("bars", "earliestT", "latestT", "spanDays", "gapCount", "missingSeconds")
+
+
+def _assert_parity(db, symbol="XAUUSD", interval="15"):
+    new = cv.coverage_for(db, symbol, interval)
+    old = _coverage_for_python(db, symbol, interval)
+    for field in COMPARED_FIELDS:
+        assert new[field] == old[field], f"{field}: SQL={new[field]!r} Python={old[field]!r}"
+
+
+def test_parity_contiguous(db):
+    _seed(db, count=50)
+    _assert_parity(db)
+
+
+def test_parity_single_missing_bar(db):
+    _seed(db, count=50, skip=(7,))
+    _assert_parity(db)
+
+
+def test_parity_many_scattered_gaps(db):
+    _seed(db, count=200, skip=(3, 4, 5, 40, 41, 99, 150, 151, 152, 153))
+    _assert_parity(db)
+
+
+def test_parity_weekend_sized_gap(db):
+    _seed(db, count=20, start_t=0)
+    _seed(db, count=20, start_t=20 * 900 + 2 * 86_400)
+    _assert_parity(db)
+
+
+def test_parity_empty_series(db):
+    _assert_parity(db, symbol="NOSUCHSYM")
+
+
+def test_parity_single_bar(db):
+    """只有一根：没有相邻对，缺口必须为 0，span 为 0.0。
+    A single bar: no adjacent pair, so zero gaps and a 0.0 span."""
+    _seed(db, count=1)
+    _assert_parity(db)
+
+
+def test_parity_exactly_at_tolerance_boundary(db):
+    """步长恰好等于 1.5 个周期：严格大于的判定下不算缺口。这是整个迁移最容易
+    写错的一处，单独立测。
+    A step of exactly 1.5 intervals: not a gap under strict greater-than. The
+    single easiest thing to get wrong in this migration, so it gets its own test.
+    """
+    db.add_all([
+        Candle(symbol="XAUUSD", interval="15", t=0, o=1.0, h=1.0, l=1.0, c=1.0, v=1.0),
+        Candle(symbol="XAUUSD", interval="15", t=1350, o=1.0, h=1.0, l=1.0, c=1.0, v=1.0),
+    ])
+    db.commit()
+    assert cv.coverage_for(db, "XAUUSD", "15")["gapCount"] == 0
+    _assert_parity(db)
+
+
+def test_parity_just_past_tolerance_boundary(db):
+    """步长比 1.5 个周期多 1 秒：算一个缺口。与上一条共同钉住边界。
+    One second past 1.5 intervals: one gap. Pins the boundary with the test
+    above."""
+    db.add_all([
+        Candle(symbol="XAUUSD", interval="15", t=0, o=1.0, h=1.0, l=1.0, c=1.0, v=1.0),
+        Candle(symbol="XAUUSD", interval="15", t=1351, o=1.0, h=1.0, l=1.0, c=1.0, v=1.0),
+    ])
+    db.commit()
+    assert cv.coverage_for(db, "XAUUSD", "15")["gapCount"] == 1
+    _assert_parity(db)
+
+
+def test_parity_all_intervals(db):
+    """六档周期各跑一遍：周期秒数进了 SQL 的算式，逐档验证。
+    All six intervals: the interval's second count enters the SQL arithmetic, so
+    verify each one."""
+    from app.services.candle_store import INTERVAL_SECONDS
+
+    for itv, secs in INTERVAL_SECONDS.items():
+        _seed(db, symbol="EURUSD", interval=itv, count=30, step=secs, skip=(4, 9, 10))
+        _assert_parity(db, symbol="EURUSD", interval=itv)

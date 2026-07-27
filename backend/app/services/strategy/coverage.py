@@ -13,6 +13,7 @@ user asking to "backtest 365 days" against 47 days of stored history previously
 had no way to tell — precise-looking numbers built on a history of unknown
 length.
 """
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.models import Candle
@@ -48,58 +49,98 @@ def active_symbols() -> list[str]:
     return quotes_store.get_active_symbols()
 
 
-def coverage_for(db: Session, symbol: str, interval: str) -> dict:
+def coverage_for(db: Session, symbol: str, interval: str, *, feed_active: bool | None = None) -> dict:
     """某 (品种, 周期) 的实际根数、最早/最晚 bar 时间与断档情况。
 
     断档按周期秒数检测：相邻两根间隔超过 1.5 个周期即记一个缺口，缺失时长按
     整数根累加。周末休市同样会被报为缺口——本函数报的是"数据有多完整"这一
     事实，不替用户判断哪些缺失属于正常，交易时段的差异由前端呈现。
 
+    统计全部在数据库内完成（LAG 窗口函数取前一根的时间戳），不把逐行时间戳
+    载入内存：一个 (品种, 周期) 的历史会长到几十万行，而 5 分钟以上周期没有
+    保留期清理，只增不减。
+
+    feed_active 传入时直接采用，供 coverage_matrix 在一次请求内只求值一次；
+    省的不只是开销——同一次请求里所有组合对"这个品种是否在推"必须给出一致
+    的答案。
+
     Actual bar count, earliest/latest bar time and gap stats for one (symbol,
     interval). Gaps are detected against the interval's second count: a step
     over 1.5 intervals is one gap, and missing time accumulates in whole bars.
     Weekends show up as gaps too — this reports how complete the data is rather
     than deciding which absences are normal; the frontend presents the nuance.
+
+    Everything is computed inside the database (LAG gives the previous bar's
+    timestamp); no per-row timestamps are loaded. One (symbol, interval) series
+    can reach hundreds of thousands of rows, and intervals above 1m are never
+    swept by retention, so it only ever grows.
+
+    A caller-supplied feed_active is used as-is so coverage_matrix can evaluate
+    it once per request — not merely to save work, but because every pair in one
+    response must agree on whether a symbol is being fed.
     """
     seconds = INTERVAL_SECONDS.get(interval)
     if seconds is None:
         raise ValueError(f"不支持的周期 {interval}，可选 {sorted(INTERVAL_SECONDS)} / unsupported interval")
 
-    # 只取时间列：覆盖度统计不需要 OHLC，一个 (品种, 周期) 可能有上万行。
-    # Times only: coverage needs no OHLC and one series can run to tens of
-    # thousands of rows.
-    times = [
-        row[0]
-        for row in db.query(Candle.t)
-        .filter(Candle.symbol == symbol, Candle.interval == interval)
-        .order_by(Candle.t.asc())
-        .all()
-    ]
-    feed_active = symbol in set(active_symbols())
-    if not times:
+    if feed_active is None:
+        feed_active = symbol in set(active_symbols())
+
+    # 子查询：每根 bar 带上前一根的时间戳。窗口函数在 SQLite 3.25+ 与 Postgres
+    # 上语义一致，不需要按方言分支。
+    # Subquery: each bar carries the previous bar's timestamp. Window-function
+    # semantics match on SQLite 3.25+ and Postgres, so no dialect branching.
+    prev_t = func.lag(Candle.t).over(order_by=Candle.t.asc()).label("prev_t")
+    stepped = (
+        select(Candle.t.label("t"), prev_t)
+        .where(Candle.symbol == symbol, Candle.interval == interval)
+        .subquery()
+    )
+    step = stepped.c.t - stepped.c.prev_t
+
+    # 缺口判定必须是严格大于，且阈值用整数比较避免浮点误差：
+    # step > seconds * 1.5  等价于  step * 2 > seconds * 3
+    # 1.5 这个容差是为了容忍 EA 时间戳的秒级抖动，不能去掉。
+    # The gap test must be strictly greater-than, compared in integers to keep
+    # floats out of it: step > seconds * 1.5 is step * 2 > seconds * 3. The 1.5
+    # tolerance absorbs the EA's second-level timestamp jitter; it stays.
+    is_gap = step * 2 > seconds * 3
+    # 缺失时长按整数根累加，与 Python 的 (step // seconds - 1) * seconds 一致。
+    # 用 // 而非 /：SQLAlchemy 2.0 的 / 是真除法（会 CAST 成 NUMERIC 得到小数），
+    # // 才渲染成向下取整的整数除法；t 是恒非负的 Integer 列，两者逐位相同。
+    # Missing time accumulates in whole bars, matching Python's
+    # (step // seconds - 1) * seconds. Use // not /: SQLAlchemy 2.0's / is true
+    # division (it casts to NUMERIC and yields fractions), while // renders
+    # floored integer division. t is a non-negative Integer column, so the two
+    # agree bit for bit.
+    missing = (step // seconds - 1) * seconds
+
+    row = db.execute(
+        select(
+            func.count(stepped.c.t),
+            func.min(stepped.c.t),
+            func.max(stepped.c.t),
+            func.coalesce(func.sum(case((is_gap, 1), else_=0)), 0),
+            func.coalesce(func.sum(case((is_gap, missing), else_=0)), 0),
+        ).select_from(stepped)
+    ).one()
+    bars, earliest, latest, gap_count, missing_seconds = row
+
+    if not bars:
         return {
             "symbol": symbol, "interval": interval, "bars": 0,
             "earliestT": None, "latestT": None, "spanDays": 0.0,
             "gapCount": 0, "missingSeconds": 0, "feedActive": feed_active,
         }
 
-    threshold = seconds * GAP_TOLERANCE_MULTIPLIER
-    gap_count = 0
-    missing_seconds = 0
-    for prev, cur in zip(times, times[1:]):
-        step = cur - prev
-        if step > threshold:
-            gap_count += 1
-            missing_seconds += (step // seconds - 1) * seconds
-
     return {
         "symbol": symbol,
         "interval": interval,
-        "bars": len(times),
-        "earliestT": times[0],
-        "latestT": times[-1],
-        "spanDays": (times[-1] - times[0]) / 86_400,
-        "gapCount": gap_count,
+        "bars": int(bars),
+        "earliestT": int(earliest),
+        "latestT": int(latest),
+        "spanDays": (int(latest) - int(earliest)) / 86_400,
+        "gapCount": int(gap_count),
         "missingSeconds": int(missing_seconds),
         "feedActive": feed_active,
     }
