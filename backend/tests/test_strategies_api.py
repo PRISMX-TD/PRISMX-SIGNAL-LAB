@@ -1213,6 +1213,121 @@ def test_performance_only_counts_this_strategys_signals(client, db, auth_headers
     assert (body["wins"], body["losses"]) == (1, 1)
 
 
+def _seed_signals_at(db, user, strategy_id, pairs):
+    """按 (bar_t 序号, 结果) 显式落库：插入顺序与 bar_t 顺序可以故意不一致，
+    用来验证统计是按 bar_t 而不是按 created_at 排序的。
+    Insert with an explicit (bar_t index, result) pair so insertion order can
+    deliberately differ from bar_t order — that's what pins the ordering key."""
+    base = int(datetime.now(timezone.utc).timestamp())
+    for idx, r in pairs:
+        db.add(StrategySignal(
+            strategy_id=strategy_id, user_id=user.id, symbol="XAUUSD", interval="15",
+            side="BUY", entry=2000.0, stop_loss=1990.0, take_profit=2020.0,
+            bar_t=base + idx * 900, result=r,
+            resolved_at=None if r == "PENDING" else datetime.now(timezone.utc),
+        ))
+    db.commit()
+
+
+def test_performance_streak_follows_bar_t_not_insertion_order(client, db, auth_headers, user, monkeypatch):
+    """连亏按 bar_t 的时间顺序算，不按写库顺序。批量写入时 created_at 会拿到
+    相同时间戳，用它排序等于用插入顺序——本例四笔亏损连着插入但在时间上是隔开的，
+    按 created_at 排会算出 4，按 bar_t 排才是 1。
+    The loss streak follows bar_t, not insertion order. Bulk inserts share a
+    created_at timestamp, so ordering by it is really ordering by insertion: here
+    the four losses are inserted together but interleaved in time, which reads as
+    4 by created_at and 1 by bar_t."""
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    sid = _new_strategy(client, auth_headers)
+    _seed_signals_at(db, user, sid, [(i, "HIT_SL") for i in (0, 2, 4, 6)] + [(i, "HIT_TP") for i in (1, 3, 5, 7)])
+    body = client.get(f"/api/strategies/{sid}/performance", headers=auth_headers).json()
+    assert (body["wins"], body["losses"]) == (4, 4)
+    assert body["maxLossStreak"] == 1
+
+
+def test_performance_streak_only_scans_recent_window(client, db, auth_headers, user, monkeypatch):
+    """连亏只扫最近 STREAK_WINDOW 笔已判定信号：窗口之外那段更长的连亏不计入。
+    这是明确的口径变更（响应里的 streakWindow 就是为了告知），换来的是绩效查询
+    不再随策略历史无界增长。
+    The streak scans only the most recent STREAK_WINDOW resolved signals, so an
+    older, longer streak outside the window is not counted. That's a deliberate
+    change of definition (hence streakWindow in the response) which keeps the
+    query from growing without bound as history accumulates."""
+    from app.routers.strategies import STREAK_WINDOW
+
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    sid = _new_strategy(client, auth_headers)
+    # 最老 6 笔连亏在窗口之外；窗口内 STREAK_WINDOW 笔的最长连亏是 2。
+    # The oldest 6 losses sit outside the window; inside it the longest run is 2.
+    old = [(i, "HIT_SL") for i in range(6)]
+    recent = [(6 + i, ["HIT_SL", "HIT_SL", "HIT_TP"][i % 3]) for i in range(STREAK_WINDOW)]
+    _seed_signals_at(db, user, sid, old + recent)
+    body = client.get(f"/api/strategies/{sid}/performance", headers=auth_headers).json()
+    assert body["resolved"] == STREAK_WINDOW + 6
+    assert body["maxLossStreak"] == 2
+    assert body["streakWindow"] == STREAK_WINDOW
+
+
+def test_performance_exposes_streak_window(client, db, auth_headers, user, monkeypatch):
+    """streakWindow 必须出现在响应里：连亏的统计范围有限，不告知等于让前端把
+    一个有窗口的数字读成全历史。
+    streakWindow must be in the response: the streak is windowed, and hiding that
+    lets the frontend read a bounded number as an all-history one."""
+    from app.routers.strategies import STREAK_WINDOW
+
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    sid = _new_strategy(client, auth_headers)
+    _seed_signals(db, user, sid, ["HIT_SL", "HIT_SL"])
+    body = client.get(f"/api/strategies/{sid}/performance", headers=auth_headers).json()
+    assert body["streakWindow"] == STREAK_WINDOW
+    assert body["maxLossStreak"] == 2
+
+
+def test_bulk_performance_returns_every_strategy_of_mine(client, db, auth_headers, user, monkeypatch):
+    """批量端点一次返回当前用户的全部策略，口径与单策略端点一致。
+    The bulk endpoint returns all of the caller's strategies in one response,
+    with the same numbers as the per-strategy endpoint."""
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    a = _new_strategy(client, auth_headers)
+    b = _new_strategy(client, auth_headers)
+    _seed_signals(db, user, a, ["HIT_TP", "HIT_SL", "TIMEOUT", "STALE", "PENDING"])
+    _seed_signals(db, user, b, ["HIT_SL"] * 3)
+    res = client.get("/api/strategies/performance", headers=auth_headers)
+    assert res.status_code == 200, res.text
+    items = {p["strategyId"]: p for p in res.json()["performance"]}
+    assert set(items) == {a, b}
+    assert (items[a]["wins"], items[a]["losses"], items[a]["timeouts"]) == (1, 1, 1)
+    assert (items[a]["resolved"], items[a]["pending"]) == (3, 1)
+    assert (items[b]["losses"], items[b]["maxLossStreak"]) == (3, 3)
+    assert items[b]["streakWindow"] == 200
+    single = client.get(f"/api/strategies/{a}/performance", headers=auth_headers).json()
+    for k in ("resolved", "wins", "losses", "timeouts", "pending", "winRate", "avgRr", "maxLossStreak"):
+        assert items[a][k] == single[k]
+
+
+def test_bulk_performance_excludes_other_users_strategies(client, db, auth_headers, user, monkeypatch):
+    """批量端点不能带出别人的策略——一个漏掉 user_id 过滤的聚合会把全站绩效
+    发给任何一个登录用户。
+    The bulk endpoint must not leak other users' strategies: an aggregate missing
+    the user_id filter would hand site-wide performance to any logged-in user."""
+    _make_pro(db, user)
+    _feed(monkeypatch)
+    mine = _new_strategy(client, auth_headers)
+    other = UserStrategy(user_id="someone-else", symbol="XAUUSD", interval="15",
+                         template="ma_trend", rules=json.dumps(_rules()), params="{}")
+    db.add(other)
+    db.commit()
+    db.refresh(other)
+    _seed_signals(db, user, mine, ["HIT_TP"])
+    _seed_signals(db, user, other.id, ["HIT_SL"] * 4)
+    body = client.get("/api/strategies/performance", headers=auth_headers).json()
+    assert [p["strategyId"] for p in body["performance"]] == [mine]
+
+
 # ---------- 预设 AST 暴露与时段过滤清空 / preset exposure & clearing the session filter ----------
 
 def test_templates_endpoint_exposes_preset_conditions(client, auth_headers):

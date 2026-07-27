@@ -389,6 +389,14 @@ class StrategyPerformanceOut(BaseModel):
     winRate: float | None = None
     avgRr: float | None = None
     maxLossStreak: int
+    # maxLossStreak 只统计最近 streakWindow 笔已判定信号。顺序相关指标无法聚合，
+    # 全量回看会随信号历史无界增长，所以窗口是硬上限；把窗口一起返回，前端才不会
+    # 把一个有范围的数字当成全历史最长连亏来读。
+    # maxLossStreak covers only the most recent streakWindow resolved signals: an
+    # order-dependent metric can't be aggregated, and scanning all of history
+    # grows without bound, so the window is a hard cap. It's returned alongside so
+    # the frontend doesn't read a bounded number as an all-time streak.
+    streakWindow: int
     insufficientSample: bool
     sampleThreshold: int
     backtest: dict | None = None

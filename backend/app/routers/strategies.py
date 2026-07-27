@@ -34,6 +34,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -98,6 +99,26 @@ MAX_BACKTEST_BARS = 60000
 # Cap on equity points returned: dense enough to plot, without serializing every
 # one of them.
 MAX_EQUITY_POINTS = 500
+# 最长连亏的回看窗口，单位是"已判定信号笔数"。
+# 其余绩效字段都能在 SQL 里聚合出来，只有连亏是顺序相关的，必须把行取回 Python
+# 逐笔走一遍。而 strategy_signals 没有任何保留期清理（只增不减），全量回看意味着
+# 一个跑了一年的策略每次打开卡片都要载入它的全部历史；前端还是每个策略各发一个
+# 请求，两个维度相乘。
+# 200 的取法：连亏是用来判断"现在是不是该停手"的近况指标，看到半年前的连亏对这个
+# 判断没有帮助；按 15 分钟线的触发频率，200 笔已判定信号覆盖的时间跨度远超用户
+# 会关心的范围。窗口值随响应一起返回（streakWindow），口径变化对前端是显式的。
+# Look-back window for the longest losing streak, counted in resolved signals.
+# Every other field can be aggregated in SQL; the streak is order-dependent, so
+# rows have to come back to Python and be walked in sequence. Since
+# strategy_signals has no retention sweep (append-only), an unbounded look-back
+# means a year-old strategy loads its entire history every time its card opens —
+# and the frontend still issues one request per strategy, so the two multiply.
+# Why 200: the streak answers "should I stop trading this right now", a
+# recent-form question that a losing run from six months ago does not inform. At
+# 15-minute trigger rates, 200 resolved signals already span far more time than
+# anyone reads it over. The window is returned in the response (streakWindow) so
+# the narrower definition is explicit to the frontend.
+STREAK_WINDOW = 200
 
 
 def _check_access(db: Session, user: User) -> None:
@@ -349,6 +370,56 @@ async def list_candidate_symbols(
     return {
         "symbols": symbols_with_history(db),
         "activeSymbols": active_symbols(),
+    }
+
+
+@router.get("/performance", response_model=dict)
+def list_all_performance(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """当前用户全部策略的实盘绩效，一个请求解决。
+
+    存在的理由：策略页原先对每个策略各发一次 /{strategy_id}/performance，请求数
+    随策略数线性增长，而每次都是同一张表的同一类聚合。这里用一条带
+    GROUP BY strategy_id, result 的语句覆盖该用户全部策略，避免把 HTTP 层的 N+1
+    原样搬到 SQL 层。
+
+    连亏是例外：它顺序相关、无法聚合，仍然每策略一次限窗口查询。取舍是明知的——
+    每次查询有 STREAK_WINDOW 的硬上限、只取 result 一列，且策略数本身受每用户上限
+    约束，所以总成本有界。合并成一条要靠窗口函数做分组编号来识别连续段，那段 SQL
+    比它省下的几次单列小查询更难读也更难验证，这里选择不换。
+
+    路由必须注册在任何 /{strategy_id} 之前，否则 "performance" 会被当成一个
+    strategy_id 匹配掉。
+
+    Live performance for every strategy the caller owns, in one request. The
+    strategies page used to issue one /{strategy_id}/performance per strategy —
+    request count growing linearly while every one of them ran the same
+    aggregate over the same table. A single GROUP BY strategy_id, result covers
+    them all, so the HTTP-layer N+1 isn't just moved down into SQL.
+
+    The streak is the exception: order-dependent, not aggregatable, so it stays
+    one windowed query per strategy. That's a deliberate trade — each is capped
+    at STREAK_WINDOW rows of a single column, and the per-user strategy limit
+    bounds how many run, so total cost is bounded. Folding them into the one
+    statement would take window-function gap-and-island SQL that is harder to read
+    and verify than the handful of small single-column queries it saves.
+
+    Must be registered ahead of any /{strategy_id} route, or "performance" gets
+    matched as a strategy_id.
+    """
+    _check_access(db, user)
+    ids = [
+        r[0]
+        for r in db.query(UserStrategy.id)
+        .filter(UserStrategy.user_id == user.id)
+        .order_by(UserStrategy.created_at.asc())
+        .all()
+    ]
+    groups = _perf_groups(db, ids)
+    return {
+        "performance": [
+            _perf_payload(sid, groups.get(sid, {}), _max_loss_streak(db, sid))
+            for sid in ids
+        ]
     }
 
 
@@ -734,6 +805,119 @@ def list_my_signals(limit: int = 50, db: Session = Depends(get_db), user: User =
     }
 
 
+def _perf_groups(db: Session, strategy_ids: list[str]) -> dict[str, dict[str, tuple[int, float]]]:
+    """按 (策略, result) 聚合出笔数与 R 值之和，一条 SQL 覆盖传入的全部策略。
+
+    为什么把 R 值也放进 SQL：avgRr 要按每条信号自己的 TP/SL 距离算，看着像必须
+    逐行处理，但"求和"这一步 SQL 自己就能做——CASE 里算 reward/risk 再 SUM，
+    结果与逐行累加完全一致，却不必把信号行送进 Python。这是本次改动的关键：
+    strategy_signals 只增不减，全量载入的成本会随策略寿命线性上涨。
+
+    risk 为 0（entry 与 stop_loss 相同，理论上不该出现但库里没有约束挡着）时记 0.0，
+    与原逐行实现的分支一致——除零会让整个聚合报错，而不是只坏掉一行。
+
+    Aggregate count and summed R per (strategy, result) with one statement for
+    every strategy passed in. avgRr uses each signal's own TP/SL distance, which
+    looks row-bound, but the summation itself is something SQL does: compute
+    reward/risk inside a CASE and SUM it, which matches the row-by-row total
+    exactly without shipping signal rows to Python. That matters because
+    strategy_signals is append-only, so a full load costs more the longer a
+    strategy lives. A zero risk (entry == stop_loss — shouldn't happen, but no
+    constraint forbids it) contributes 0.0, mirroring the original branch: a
+    division by zero would fail the whole aggregate rather than one row.
+    """
+    if not strategy_ids:
+        return {}
+    risk = func.abs(StrategySignal.entry - StrategySignal.stop_loss)
+    reward = func.abs(StrategySignal.take_profit - StrategySignal.entry)
+    rr = case(
+        (StrategySignal.result == "HIT_TP", case((risk > 0, reward / risk), else_=0.0)),
+        (StrategySignal.result == "HIT_SL", -1.0),
+        else_=0.0,
+    )
+    rows = (
+        db.query(
+            StrategySignal.strategy_id,
+            StrategySignal.result,
+            func.count(StrategySignal.id),
+            func.coalesce(func.sum(rr), 0.0),
+        )
+        .filter(StrategySignal.strategy_id.in_(strategy_ids))
+        .group_by(StrategySignal.strategy_id, StrategySignal.result)
+        .all()
+    )
+    out: dict[str, dict[str, tuple[int, float]]] = {}
+    for sid, result, n, rr_sum in rows:
+        out.setdefault(sid, {})[result] = (int(n), float(rr_sum or 0.0))
+    return out
+
+
+def _max_loss_streak(db: Session, strategy_id: str) -> int:
+    """最近 STREAK_WINDOW 笔已判定信号里的最长连亏。
+
+    排序键是 bar_t 而不是 created_at：created_at 是 `default=_now`，同一批写入的
+    多行会拿到相同或几乎相同的时间戳，用它排序实际上是在依赖数据库返回插入顺序。
+    bar_t 是触发那根 K 线的 epoch 秒，在同一策略内严格递增，是这里唯一可靠的顺序。
+
+    TIMEOUT 会打断连亏（它是一次真实出场），STALE/PENDING 不参与所以直接过滤掉，
+    否则它们会占掉窗口名额，让实际回看的已判定笔数少于 STREAK_WINDOW。
+
+    Longest losing run within the most recent STREAK_WINDOW resolved signals.
+    Ordered by bar_t, not created_at: created_at is `default=_now`, so rows
+    written together share a timestamp and ordering by it really means trusting
+    the database to hand back insertion order. bar_t is the triggering bar's
+    epoch second, strictly increasing within a strategy, and the only dependable
+    sequence here. TIMEOUT breaks a run (it's a real exit); STALE/PENDING are
+    filtered out rather than skipped in Python, or they would consume window
+    slots and leave fewer than STREAK_WINDOW resolved signals actually examined.
+    """
+    rows = (
+        db.query(StrategySignal.result)
+        .filter(
+            StrategySignal.strategy_id == strategy_id,
+            StrategySignal.result.in_(("HIT_TP", "HIT_SL", "TIMEOUT")),
+        )
+        .order_by(StrategySignal.bar_t.desc())
+        .limit(STREAK_WINDOW)
+        .all()
+    )
+    streak = max_streak = 0
+    for (result,) in reversed(rows):  # 取回是倒序，连亏必须正序数 / restore ascending order
+        if result == "HIT_SL":
+            streak += 1
+            max_streak = max(max_streak, streak)
+        else:
+            streak = 0
+    return max_streak
+
+
+def _perf_payload(strategy_id: str, groups: dict[str, tuple[int, float]], max_streak: int) -> dict:
+    """把一个策略的分组聚合结果拼成响应体。口径见 live_performance 的说明。
+    Assemble one strategy's response body from its grouped aggregate; see
+    live_performance for the definitions."""
+    wins, win_rr = groups.get("HIT_TP", (0, 0.0))
+    losses, loss_rr = groups.get("HIT_SL", (0, 0.0))
+    timeouts = groups.get("TIMEOUT", (0, 0.0))[0]
+    pending = groups.get("PENDING", (0, 0.0))[0]
+    resolved = wins + losses + timeouts
+    enough = resolved >= MIN_PERF_SAMPLE
+    decided = wins + losses
+    return {
+        "strategyId": strategy_id,
+        "resolved": resolved,
+        "wins": wins,
+        "losses": losses,
+        "timeouts": timeouts,
+        "pending": pending,
+        "winRate": (wins / decided) if enough and decided > 0 else None,
+        "avgRr": ((win_rr + loss_rr) / decided) if enough and decided > 0 else None,
+        "maxLossStreak": max_streak,
+        "streakWindow": STREAK_WINDOW,
+        "insufficientSample": not enough,
+        "sampleThreshold": MIN_PERF_SAMPLE,
+    }
+
+
 def live_performance(db: Session, strategy_id: str) -> dict:
     """一个策略的实盘绩效。口径与回测的 summary 对齐，使两者可以并排比较：
 
@@ -756,53 +940,16 @@ def live_performance(db: Session, strategy_id: str) -> dict:
     mislead someone into sizing up. Average R is computed from each signal's own
     TP/SL distance ratio rather than a single global R, because after the AST
     change every signal can carry different distances.
+
+    maxLossStreak 只覆盖最近 STREAK_WINDOW 笔已判定信号（响应里的 streakWindow
+    就是这个值）；其余字段是全历史，且都在一条 GROUP BY 里算完，不再把信号行载入
+    Python。
+    maxLossStreak covers only the most recent STREAK_WINDOW resolved signals
+    (reported as streakWindow); the other fields span all history and are computed
+    by a single GROUP BY instead of loading signal rows into Python.
     """
-    rows = (
-        db.query(StrategySignal)
-        .filter(StrategySignal.strategy_id == strategy_id)
-        .order_by(StrategySignal.created_at.asc())
-        .all()
-    )
-    wins = losses = timeouts = pending = 0
-    rr_sum = 0.0
-    streak = max_streak = 0
-    for r in rows:
-        if r.result == "PENDING":
-            pending += 1
-            continue
-        if r.result == "STALE":
-            continue
-        if r.result == "TIMEOUT":
-            timeouts += 1
-            streak = 0
-            continue
-        risk = abs(r.entry - r.stop_loss)
-        reward = abs(r.take_profit - r.entry)
-        if r.result == "HIT_TP":
-            wins += 1
-            rr_sum += (reward / risk) if risk > 0 else 0.0
-            streak = 0
-        elif r.result == "HIT_SL":
-            losses += 1
-            rr_sum -= 1.0
-            streak += 1
-            max_streak = max(max_streak, streak)
-    resolved = wins + losses + timeouts
-    enough = resolved >= MIN_PERF_SAMPLE
-    decided = wins + losses
-    return {
-        "strategyId": strategy_id,
-        "resolved": resolved,
-        "wins": wins,
-        "losses": losses,
-        "timeouts": timeouts,
-        "pending": pending,
-        "winRate": (wins / decided) if enough and decided > 0 else None,
-        "avgRr": (rr_sum / decided) if enough and decided > 0 else None,
-        "maxLossStreak": max_streak,
-        "insufficientSample": not enough,
-        "sampleThreshold": MIN_PERF_SAMPLE,
-    }
+    groups = _perf_groups(db, [strategy_id]).get(strategy_id, {})
+    return _perf_payload(strategy_id, groups, _max_loss_streak(db, strategy_id))
 
 
 @router.get("/{strategy_id}/performance", response_model=StrategyPerformanceOut)
