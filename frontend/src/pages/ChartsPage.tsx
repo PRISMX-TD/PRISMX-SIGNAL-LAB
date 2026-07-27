@@ -47,6 +47,7 @@ import AccountSummary from '../components/charts/AccountSummary'
 import OrderTicket from '../components/charts/OrderTicket'
 import PositionsDock from '../components/charts/PositionsDock'
 import PositionOverlay from '../components/charts/PositionOverlay'
+import { markChartDisposed } from '../components/charts/chartLifecycle'
 import { useGlobalQuotes, usePositions } from '../store/live'
 
 // 图表价格轴的小数位数：贵金属/原油 2~3 位，外汇对按经纪商常见的 5 位报价
@@ -1260,6 +1261,12 @@ export default function ChartsPage() {
       ro.disconnect()
       chart.unsubscribeCrosshairMove(onCrosshairMove)
       chart.remove()
+      // 登记销毁：子组件的 cleanup 在本函数之后才跑（React 按父 → 子清理），
+      // 它们要靠这个标记跳过 detachPrimitive，见 chartLifecycle.ts。
+      // Mark it disposed: child cleanups run after this one (React cleans up
+      // parent-first) and rely on this flag to skip detachPrimitive. See
+      // chartLifecycle.ts.
+      markChartDisposed(chart)
       chartRef.current = null
       seriesRef.current = null
       maSeriesRef.current = []

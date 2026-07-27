@@ -24,6 +24,7 @@ import type {
 import type { Position } from '../../api/types'
 import { orderApi } from '../../api/client'
 import { baseSymbol, clientOrderId, localizeApiError } from '../../api/utils'
+import { isChartAlive } from './chartLifecycle'
 
 // 触摸屏放宽命中容差（手指没有像素级精度）/ looser hit tolerance on touch screens
 const isTouchDevice = typeof window !== 'undefined'
@@ -315,9 +316,15 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
     series.attachPrimitive(prim as never)
     return () => {
       primRef.current = null
-      try { series.detachPrimitive(prim as never) } catch { /* 可能已随 series 销毁 / series may be gone */ }
+      // chart 已销毁时直接跳过：父组件的 cleanup 先跑 chart.remove()，此时 detach
+      // 只会排出一帧在 disposed 对象上重绘的动作，见 isChartAlive()。
+      // Skip entirely once the chart is gone: the parent's cleanup already ran
+      // chart.remove(), so detaching would only schedule a repaint on a disposed
+      // object. See isChartAlive().
+      if (!isChartAlive(chart)) return
+      try { series.detachPrimitive(prim as never) } catch { /* 已 detach / already detached */ }
     }
-  }, [series, visible])
+  }, [chart, series, visible])
 
   useEffect(() => {
     primRef.current?.requestUpdate()
