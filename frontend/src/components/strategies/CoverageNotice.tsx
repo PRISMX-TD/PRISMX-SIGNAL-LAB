@@ -1,5 +1,17 @@
 // 数据覆盖度提示：在回测执行之前就把「你选了 365 天，库里实际只有 47 天」说清楚。
 //
+// 只显示可用天数、日期区间与根数。断档数与累计缺失时长曾经也在这里显示，后来撤掉了：
+// 那两个数字绝大部分由周末与节假日休市构成（后端的 coverage_for() 无从区分正常休市
+// 与喂价中断，数据上两者完全一样），于是稳定显示着「179 处断档、缺失 2038 小时」这种
+// 看着像故障、实际全属正常的数字，反而盖住了真正要传达的「可用范围有多长」。
+//
+// Only the available span, date range and bar count are shown. Gap count and
+// total missing hours used to appear here and were removed: they consist almost
+// entirely of weekend and holiday closures (the backend's coverage_for() can't
+// tell a normal closure from a feed outage — they look identical in the data), so
+// they persistently displayed alarming-looking figures like "179 gaps, 2038h
+// missing" that were entirely normal, drowning out the point of this notice.
+//
 // 存在的理由是 spec 里那条已核实的现状缺陷：K 线唯一写入路径是 EA 推送，每次只
 // 回补最新 500 根，历史深度靠 EA 长期在线累积，断线期间形成永久空洞。此前用户
 // 完全看不出实际范围，回测数字看着精确，实际建立在一段自己都不知道多长的历史上。
@@ -66,22 +78,16 @@ export default function CoverageNotice({ coverage, requestedDays, loading }: Cov
           available,
         })}
       </div>
-      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] opacity-90">
-        <span>{t('strategy.coverageBars', { n: coverage.bars })}</span>
-        {coverage.earliestT != null && (
-          <span>{t('strategy.coverageEarliest', { date: fmtDate(new Date(coverage.earliestT * 1000).toISOString()) })}</span>
-        )}
-        {coverage.gapCount > 0 && (
-          <span>
-            {t('strategy.coverageGaps', {
-              n: coverage.gapCount,
-              hours: Math.round(coverage.missingSeconds / 3600),
-            })}
-          </span>
-        )}
-      </div>
+      {coverage.earliestT != null && coverage.latestT != null && (
+        <div className="mt-1.5 font-mono text-[11px] opacity-90">
+          {t('strategy.coverageRange', {
+            from: fmtDate(new Date(coverage.earliestT * 1000).toISOString()),
+            to: fmtDate(new Date(coverage.latestT * 1000).toISOString()),
+            n: coverage.bars,
+          })}
+        </div>
+      )}
       {!coverage.feedActive && <div className="mt-1.5">{t('strategy.coverageFeedInactive')}</div>}
-      {coverage.gapCount > 0 && <div className="mt-1.5 opacity-80">{t('strategy.coverageGapsHint')}</div>}
     </div>
   )
 }
