@@ -58,6 +58,18 @@ const DOWN_COLOR = '#ef4444'
 const PENDING_COLOR = '#fbbf24'
 const TRADE_PAGE_SIZE = 20
 
+// 图上交易连线的数量上限。关闭「一次一单」时交易数无上限，而每条连线是一个独立的
+// lightweight-charts series（重量级对象），几千条同步创建会锁死主线程、整页卡死。
+// 超过此数只画最近 CHART_TRADE_CAP 笔的连线与标记；统计与逐单明细表仍用全量数据，
+// 不受影响——上限只作用于「画在图上」这一步。
+// Cap on trade lines drawn on the chart. With one-trade-at-a-time off the trade
+// count is unbounded, and each line is a separate lightweight-charts series (a
+// heavyweight object); creating thousands synchronously locks the main thread and
+// freezes the whole page. Past this count only the most recent CHART_TRADE_CAP
+// trades get lines and markers; the summary and the paginated trade table still
+// use the full set — the cap applies only to what is drawn on the chart.
+const CHART_TRADE_CAP = 500
+
 function fmtMoney(v: number): string {
   return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
@@ -221,6 +233,13 @@ function BacktestChart({ bars, trades, openPositions, overlays, colorOf }: Backt
       }
     }
 
+    // 交易数超上限时只画最近 CHART_TRADE_CAP 笔（trades 已按出场先后排序，取末尾即
+    // 最近）。连线与标记共用这一份，保证图上"连线"与"箭头/圆点"始终对应同一批交易。
+    // When trades exceed the cap, draw only the most recent CHART_TRADE_CAP (trades
+    // are ordered by exit, so the tail is the newest). Lines and markers share this
+    // slice so the chart's lines and arrows/dots always cover the same trades.
+    const drawnTrades = trades.length > CHART_TRADE_CAP ? trades.slice(-CHART_TRADE_CAP) : trades
+
     // 每笔已出结果的交易两个标记：入场箭头（方向色）+ 出场圆点（赢绿输红）。
     // TIMEOUT 走"非 HIT_TP 即视觉上的非盈利"这一档——超时平仓没有出场价方向信息
     // （见 Task 8 的说明），不假装知道它是赚还是亏。
@@ -228,7 +247,7 @@ function BacktestChart({ bars, trades, openPositions, overlays, colorOf }: Backt
     // exit dot (green win / red loss). TIMEOUT falls into the "not HIT_TP" visual
     // bucket — a timeout exit carries no P&L direction (see Task 8), and this
     // doesn't pretend to know whether it made money.
-    const markers = trades.flatMap((tr) => {
+    const markers = drawnTrades.flatMap((tr) => {
       const win = tr.result === 'HIT_TP'
       return [
         {
@@ -258,7 +277,7 @@ function BacktestChart({ bars, trades, openPositions, overlays, colorOf }: Backt
 
     // 每笔交易一条两点连线，标出"从哪进、到哪出"
     // One 2-point line series per trade, tracing "entered here, exited there"
-    const tradeLines = trades.map((tr) => {
+    const tradeLines = drawnTrades.map((tr) => {
       const line = chart.addSeries(LineSeries, {
         color: tr.result === 'HIT_TP' ? 'rgba(34, 197, 94, 0.55)' : 'rgba(239, 68, 68, 0.55)',
         lineWidth: 1,
@@ -718,7 +737,11 @@ export default function BacktestPanel({
           {bars.length > 0 && (
             <div className="mt-5 border-t border-white/10 pt-4">
               <h4 className="text-sm font-semibold text-slate-200">{t('strategy.chartTitle')}</h4>
-              <p className="mt-1 text-xs text-slate-500">{t('strategy.chartHint', { n: result.trades.length })}</p>
+              <p className="mt-1 text-xs text-slate-500">
+                {result.trades.length > CHART_TRADE_CAP
+                  ? t('strategy.chartHintCapped', { n: result.trades.length, shown: CHART_TRADE_CAP })
+                  : t('strategy.chartHint', { n: result.trades.length })}
+              </p>
 
               {/* 指标开关：只列这条策略的条件用到的指标，参数取自条件本身。默认全关
                   ——图先干净，想核对触发依据再逐个打开。
