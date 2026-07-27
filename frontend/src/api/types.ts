@@ -589,6 +589,14 @@ export interface StrategyPerformance {
   winRate: number | null
   avgRr: number | null
   maxLossStreak: number
+  // maxLossStreak 的回看范围（笔已判定信号）。连亏是顺序相关指标，无法聚合，
+  // 不限窗口就得扫该策略的全部历史。UI 必须把这个范围标出来，否则用户会把
+  // 一个有范围的数字读成"全历史最长连亏"。
+  // The look-back for maxLossStreak, in resolved signals. A losing run is
+  // order-dependent and can't be aggregated, so without a window it would scan
+  // the strategy's entire history. The UI must state the range, or users will
+  // read a bounded number as an all-time figure.
+  streakWindow: number
   insufficientSample: boolean
   sampleThreshold: number
 }

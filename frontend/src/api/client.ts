@@ -364,8 +364,18 @@ export const strategyApi = {
     request<{ symbol: string; interval: string; days: number; bars: Candle[] }>(
       `/strategies/backtest/bars?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&days=${days}`
     ),
+  // 单个策略的绩效。回测面板用它与刚跑完的回测并排对比，那里只关心当前这一条。
+  // One strategy's performance. The backtest panel uses this to sit beside the
+  // run it just made, where only the current strategy matters.
   performance: (id: string) =>
     request<StrategyPerformance>(`/strategies/${encodeURIComponent(id)}/performance`),
+  // 全部策略的绩效，一次取回。策略列表要的是"每张卡片都有绩效"，逐个调
+  // performance(id) 会让请求数随策略数线性增长。
+  // Every strategy's performance in one call. The list needs a figure on each
+  // card, and calling performance(id) per strategy grows the request count
+  // linearly with the number of strategies.
+  allPerformance: () =>
+    request<{ performance: StrategyPerformance[] }>('/strategies/performance'),
   signals: (limit = 50) => request<{ signals: StrategySignal[] }>(`/strategies/signals?limit=${limit}`),
   clearSignals: () => request<{ ok: boolean }>('/strategies/signals', { method: 'DELETE' }),
 }

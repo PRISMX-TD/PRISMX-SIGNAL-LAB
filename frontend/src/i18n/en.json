@@ -1108,6 +1108,7 @@
     "noStrategies": "No strategies created yet",
     "listUnavailable": "Couldn't load your strategies:",
     "signalsUnavailable": "Couldn't load signals:",
+    "maxLossStreakWindowed": "Longest losing streak in last {{count}}",
     "newStrategy": "+ New Strategy",
     "name": "Strategy Name (optional)",
     "editStrategy": "Edit Strategy",

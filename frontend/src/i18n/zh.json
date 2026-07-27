@@ -1108,6 +1108,7 @@
     "noStrategies": "还没有创建任何策略",
     "listUnavailable": "策略列表加载失败：",
     "signalsUnavailable": "信号加载失败：",
+    "maxLossStreakWindowed": "近 {{count}} 笔最长连亏",
     "newStrategy": "+ 新建策略",
     "name": "策略名称（可选）",
     "editStrategy": "编辑策略",

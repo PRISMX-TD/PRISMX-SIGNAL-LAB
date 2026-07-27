@@ -111,8 +111,16 @@ export default function StrategyCard({
             </span>
           )}
           {performance.maxLossStreak > 0 && (
+            // 用带窗口的文案而非 simulator.maxLossStreak：卡片的连亏只回看最近
+            // streakWindow 笔已判定信号，不是全历史。回测面板与模拟器的同名数字
+            // 是全量的，所以那两处仍用原文案。
+            // Windowed label, not simulator.maxLossStreak: the card's streak looks
+            // back only streakWindow resolved signals, not all history. The
+            // backtest panel and simulator show a full-history figure, so they
+            // keep the original label.
             <span className="text-slate-500">
-              {t('simulator.maxLossStreak')} <span className="font-mono text-slate-200">{performance.maxLossStreak}</span>
+              {t('strategy.maxLossStreakWindowed', { count: performance.streakWindow })}{' '}
+              <span className="font-mono text-slate-200">{performance.maxLossStreak}</span>
             </span>
           )}
         </div>

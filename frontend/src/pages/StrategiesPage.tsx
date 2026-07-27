@@ -989,16 +989,25 @@ export default function StrategiesPage() {
   useEffect(() => {
     if (strategies.length === 0) return
     let cancelled = false
-    Promise.all(
-      strategies.map((s) => strategyApi.performance(s.id).then((p) => p).catch(() => null)),
-    ).then((rows) => {
-      if (cancelled) return
-      const next: Record<string, StrategyPerformance> = {}
-      rows.forEach((p) => { if (p) next[p.strategyId] = p })
-      setPerformance(next)
-    })
+    strategyApi
+      .allPerformance()
+      .then((r) => {
+        if (cancelled) return
+        const next: Record<string, StrategyPerformance> = {}
+        r.performance.forEach((p) => { next[p.strategyId] = p })
+        setPerformance(next)
+      })
+      // 绩效拿不到只让卡片少一行数字，策略本身照常可看可编辑。
+      // Missing performance only costs the cards a line of numbers; the
+      // strategies stay readable and editable.
+      .catch(() => {})
     return () => { cancelled = true }
-  }, [strategies])
+    // 依赖策略数量而非 strategies 本身：这个数组每次 load() 都是新引用，
+    // 依赖它会让每轮 45 秒轮询都重拉一次绩效。数量变了才需要重拉。
+    // Keyed on the count rather than `strategies`: that array is a fresh
+    // reference after every load(), so depending on it would refetch on each
+    // 45s poll. Only a change in count needs a refetch.
+  }, [strategies.length])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
