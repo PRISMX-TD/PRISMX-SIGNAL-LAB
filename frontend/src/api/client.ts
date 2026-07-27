@@ -337,6 +337,18 @@ export const strategyApi = {
     capital: number
     mode: 'compound' | 'flat'
   }) => request<StrategyBacktestResult>('/strategies/backtest', { method: 'POST', body: JSON.stringify(payload) }),
+  // 回测图的 K 线。必须用这条而不是 chartApi.history：后者读的是内存缓存（最近
+  // 500 根），与回测按 days 窗口从 Candle 表取的那一段范围不同，交易标记会大量
+  // 落在蜡烛范围之外——这条与回测在后端共用同一个取数函数。
+  // Candles for the backtest chart. Must be this and not chartApi.history: that
+  // one reads the in-memory cache (newest 500 bars), a different range than the
+  // `days` window the backtest pulls from the Candle table, leaving most trade
+  // markers outside the charted candles. This shares the backend's single
+  // bar-loading function with the backtest itself.
+  backtestBars: (symbol: string, interval: string, days: number) =>
+    request<{ symbol: string; interval: string; days: number; bars: Candle[] }>(
+      `/strategies/backtest/bars?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&days=${days}`
+    ),
   performance: (id: string) =>
     request<StrategyPerformance>(`/strategies/${encodeURIComponent(id)}/performance`),
   signals: (limit = 50) => request<{ signals: StrategySignal[] }>(`/strategies/signals?limit=${limit}`),

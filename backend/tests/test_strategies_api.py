@@ -277,6 +277,76 @@ def test_backtest_returns_most_recent_bars_when_history_exceeds_cap(client, db, 
     assert returned_times == sorted(returned_times)
 
 
+def test_backtest_bars_endpoint_returns_same_window_as_backtest(client, db, auth_headers, user, monkeypatch):
+    """回归测试：回测图的 K 线接口必须与回测引擎吃到的是同一段。
+
+    此前图走 GET /chart/history,读的是内存缓存(chart_store,硬上限 500 根、
+    只保留最近的),而回测读 Candle 表按 days 窗口取。两者时间范围不同,回测
+    算出的入场/出场时间戳大量落在图上的蜡烛范围之外,表现为标记被挤到边缘、
+    成交连线在空白处悬着——也就是用户报的"进出场标记线不准确"。
+
+    Regression test: the backtest chart's candle endpoint must serve the exact
+    slice the engine consumed. The chart used to call GET /chart/history, which
+    reads the in-memory cache (chart_store: hard cap of 500, newest only), while
+    the backtest reads the Candle table over the `days` window. Different ranges
+    meant most computed entry/exit timestamps fell outside the charted candles —
+    markers pinned to the edge, trade lines floating over blank space. That was
+    the reported "entry/exit markers are inaccurate".
+    """
+    _make_admin_pro(db, user)
+    _feed(monkeypatch)
+    now = datetime.now(timezone.utc)
+    all_times = [int((now - timedelta(minutes=15 * (120 - i))).timestamp()) for i in range(120)]
+    for t in all_times:
+        db.add(Candle(symbol="XAUUSD", interval="15", t=t, o=100, h=101, l=99, c=100, v=1))
+    db.commit()
+
+    from app.services.strategy import backtest as bt
+
+    seen = {}
+    real = bt.run_backtest
+
+    def _capturing(bars, *a, **kw):
+        seen["times"] = [b["t"] for b in bars]
+        return real(bars, *a, **kw)
+
+    monkeypatch.setattr(strategies_router, "run_backtest", _capturing)
+
+    run = client.post(
+        "/api/strategies/backtest", headers=auth_headers,
+        json={"template": "ma_trend", "symbol": "XAUUSD", "interval": "15", "days": 90},
+    )
+    assert run.status_code == 200
+
+    res = client.get(
+        "/api/strategies/backtest/bars",
+        headers=auth_headers,
+        params={"symbol": "XAUUSD", "interval": "15", "days": 90},
+    )
+    assert res.status_code == 200
+    charted = [b["t"] for b in res.json()["bars"]]
+    # 逐个时间戳相同,不只是"数量差不多"——错位一根就是一次画错的标记。
+    # Timestamp-for-timestamp identical, not merely a similar count: one bar of
+    # drift is one mis-drawn marker.
+    assert charted == seen["times"]
+
+
+def test_backtest_bars_endpoint_rejects_out_of_range_days(client, db, auth_headers, user, monkeypatch):
+    """days 的边界必须与 StrategyBacktestRequest.days（7-730）一致：两边不同
+    就又会出现"图能取到的区间"与"回测算过的区间"分叉。
+    The `days` bounds must match StrategyBacktestRequest.days (7-730); differing
+    bounds would re-introduce a charted window that diverges from the computed one."""
+    _make_admin_pro(db, user)
+    _feed(monkeypatch)
+    for bad in (1, 731):
+        res = client.get(
+            "/api/strategies/backtest/bars",
+            headers=auth_headers,
+            params={"symbol": "XAUUSD", "interval": "15", "days": bad},
+        )
+        assert res.status_code == 400
+
+
 def test_list_my_signals_only_returns_current_user_rows(client, db, auth_headers, user):
     _make_admin(db, user)
     strat = UserStrategy(user_id=user.id, template="ma_trend", symbol="XAUUSD", interval="15",

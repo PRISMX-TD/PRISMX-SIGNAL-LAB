@@ -128,6 +128,37 @@ export function macd(values: number[], fast = 12, slow = 26, signalPeriod = 9): 
   return { macd: macdLine, signal, hist }
 }
 
+// 唐奇安通道上轨：每个位置取该 bar 之前（不含当根）最近 period 根的最高价。
+// 排除当根与后端 indicators.py 的 donchian_high 一致，必须一致——回测的突破条件
+// 判断的是"当根价格是否超过之前的极值"，把当根算进去突破永远不成立，画出来的线
+// 就会比判定所用的那条高，看上去像"标记打在没突破的地方"。
+// Donchian upper band: for each position, the highest high of the `period` bars
+// strictly before it. Excluding the current bar matches the backend's
+// donchian_high and has to: the breakout condition asks whether the current price
+// exceeds the prior extreme, and including the current bar makes a breakout
+// impossible — the drawn line would sit above the one actually used for the
+// verdict, making markers look like they fired without a breakout.
+export function donchianHigh(highs: number[], period: number): (number | null)[] {
+  const out: (number | null)[] = new Array(highs.length).fill(null)
+  for (let i = period; i < highs.length; i++) {
+    let hi = -Infinity
+    for (let j = i - period; j < i; j++) if (highs[j] > hi) hi = highs[j]
+    out[i] = hi
+  }
+  return out
+}
+
+// 唐奇安通道下轨，见 donchianHigh / Donchian lower band; see donchianHigh
+export function donchianLow(lows: number[], period: number): (number | null)[] {
+  const out: (number | null)[] = new Array(lows.length).fill(null)
+  for (let i = period; i < lows.length; i++) {
+    let lo = Infinity
+    for (let j = i - period; j < i; j++) if (lows[j] < lo) lo = lows[j]
+    out[i] = lo
+  }
+  return out
+}
+
 // 从完整 K 线数组里取收盘价，供上面几个函数直接使用 / pull closes out of full
 // candles for the functions above to consume directly
 export function closes(bars: Candle[]): number[] {

@@ -1338,6 +1338,8 @@
     "openPositionNotice": "The strategy has {{count}} signal(s) still \"open\" — none of them have hit their stop-loss or take-profit yet, so they aren't counted in the stats below. That doesn't mean the strategy stopped firing; these just haven't resolved yet (with \"one trade at a time\" off, several can be independently open at once — each one is listed below). Re-run the backtest once more history has built up and you'll typically see completed trades.",
     "resultsTitle": "Backtest Results",
     "chartTitle": "Price Action & Trade Markers",
+    "overlayTitle": "Indicator overlays",
+    "overlayHint": "Only the indicators this strategy's conditions use, with the same parameters you set on them. Switch one on to see what it read at each marker.",
     "chartHint": "{{n}} trades, marked on the chart below (green arrow = buy entry, red arrow = sell entry, dot = exit; amber arrow = fired but hasn't hit SL/TP yet, not counted in the stats)",
     "saveAndEnable": "Save & Enable",
     "saveOnly": "Save Only (don't enable)",

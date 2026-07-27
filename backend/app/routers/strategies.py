@@ -465,6 +465,49 @@ def delete_strategy(strategy_id: str, db: Session = Depends(get_db), user: User 
     return {"ok": True}
 
 
+def _load_backtest_bars(db: Session, symbol: str, interval: str, days: int) -> list[dict]:
+    """回测这一段 K 线的唯一取法。回测本身与画图都必须走这里。
+
+    此前画图用的是 GET /chart/history,那条读的是内存缓存(chart_store,硬上限
+    500 根、只留最近的),而回测读的是 Candle 表按 days 窗口取的最多
+    MAX_BACKTEST_BARS 根。两份数据的时间范围根本不同,于是回测算出的入场/出场
+    时间戳大量落在图上那 500 根蜡烛之外——标记被挤到边缘、成交连线在没有蜡烛
+    的空白区悬着,看起来就是"标记线不准"。抽成一个函数是为了让"回测用哪段数据"
+    只有一个答案。
+
+    The single way to load the backtest's bar window; both the backtest and its
+    chart must go through here.
+
+    The chart used to fetch GET /chart/history, which reads the in-memory cache
+    (chart_store: hard cap of 500 bars, newest only), while the backtest reads
+    up to MAX_BACKTEST_BARS rows from the Candle table over the `days` window.
+    Two different time ranges, so most of the computed entry/exit timestamps
+    fell outside the 500 charted candles — markers squashed against the edge,
+    trade lines floating over blank space. That is the "markers are inaccurate"
+    report. One function so "which bars does the backtest use" has one answer.
+
+    取法本身与 evaluate_new_candle() 一致:按时间倒序取最新的 MAX_BACKTEST_BARS
+    根再翻回正序。不能直接正序 limit——days 窗口里的行数完全可能超过上限(比如
+    1 分钟线),正序 limit 会永远只拿到窗口里最早的那些,新到的数据再多也追不上,
+    回测看起来就像卡在某个固定日期。
+    Same fetch pattern as evaluate_new_candle(): newest MAX_BACKTEST_BARS rows
+    descending, then reversed. An ascending limit would forever return only the
+    earliest rows in the window (a `days` window can hold more than the cap,
+    e.g. 1-minute candles), leaving the backtest apparently stuck on a fixed
+    date no matter how much new data arrives.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).timestamp()
+    rows = (
+        db.query(Candle)
+        .filter(Candle.symbol == symbol, Candle.interval == interval, Candle.t >= cutoff)
+        .order_by(Candle.t.desc())
+        .limit(MAX_BACKTEST_BARS)
+        .all()
+    )
+    rows.reverse()
+    return [{"t": r.t, "o": r.o, "h": r.h, "l": r.l, "c": r.c, "v": r.v} for r in rows]
+
+
 def _thin(points: list[dict], cap: int = MAX_EQUITY_POINTS) -> list[dict]:
     """等距抽稀净值点。首尾必须保留：净值曲线的起点与终点是用户唯一会去读具体
     数值的两个点。
@@ -523,31 +566,7 @@ def backtest_strategy(
     if hit is not None:
         return {**hit, "cached": True}
 
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=body.days)).timestamp()
-    # 按时间倒序取最新的 MAX_BACKTEST_BARS 根,再翻回正序——不能直接正序 limit。
-    # `days` 窗口里的实际行数完全可能超过 5000(比如 1 分钟线,K 线历史入库
-    # 才上线没几天,单一品种几天内就能攒够);正序 limit 会永远只拿到窗口里
-    # 最早的那 5000 根,新增的数据无论多久之后都追不上,回测就会像卡住在
-    # 某个固定日期不再往前一样——这正是 evaluate_new_candle() 已经在用的
-    # 同一种取法,这里此前没跟上。
-    # Fetch the newest MAX_BACKTEST_BARS rows in descending order, then
-    # reverse back to ascending — can't limit on ascending order directly.
-    # The `days` window can easily hold more than 5000 rows (e.g. 1-minute
-    # candles: candle-history ingestion only just launched, and a single
-    # symbol can accumulate that many within days); an ascending limit would
-    # forever return only the earliest 5000 rows in the window, with no
-    # amount of newly-arrived data ever catching up — the backtest would look
-    # permanently stuck on some fixed date. Same fetch pattern
-    # evaluate_new_candle() already uses; this call site just hadn't matched it.
-    rows = (
-        db.query(Candle)
-        .filter(Candle.symbol == symbol, Candle.interval == body.interval, Candle.t >= cutoff)
-        .order_by(Candle.t.desc())
-        .limit(MAX_BACKTEST_BARS)
-        .all()
-    )
-    rows.reverse()
-    bars = [{"t": r.t, "o": r.o, "h": r.h, "l": r.l, "c": r.c, "v": r.v} for r in rows]
+    bars = _load_backtest_bars(db, symbol, body.interval, body.days)
 
     try:
         assert_within_cost_cap(len(bars), len(rules.get("conditions") or []))
@@ -587,11 +606,15 @@ def backtest_strategy(
         # 400 with an explanation rather than half a result.
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    # 响应不带 bars：前端画蜡烛图另走 GET /chart/candles，这里只回净值点、交易点
-    # 与汇总指标（5000 根 bars 序列化一次就是几百 KB）。
-    # No bars in the response: the frontend charts candles via GET /chart/candles,
-    # and this only returns equity points, trades and summaries (serializing 5000
-    # bars is hundreds of KB).
+    # 响应不带 bars：5000 根序列化一次就是几百 KB。前端画蜡烛图走
+    # GET /strategies/backtest/bars，那条与这里共用 _load_backtest_bars，取的是
+    # 同一段数据（此前它走 /chart/history，只有最近 500 根内存缓存，于是标记
+    # 与蜡烛对不上）。
+    # No bars in the response: serializing 5000 is hundreds of KB. The chart
+    # fetches GET /strategies/backtest/bars, which shares _load_backtest_bars
+    # with this handler and therefore returns the same window (it used to call
+    # /chart/history — the newest 500 cached bars only — which is why the markers
+    # didn't line up with the candles).
     payload = {
         **result,
         "points": _thin(result["points"]),
@@ -602,6 +625,44 @@ def backtest_strategy(
     }
     cache_put(key, payload)
     return payload
+
+
+@router.get("/backtest/bars", response_model=dict)
+def get_backtest_bars(
+    symbol: str,
+    interval: str,
+    days: int = 90,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """回测图用的 K 线：与 POST /strategies/backtest 完全同一段数据。
+
+    只读、无副作用,不跑回测、不进回测并发闸门,所以刷新图不会撞上"你已有一个
+    回测在跑"。days 的取值范围与 StrategyBacktestRequest.days 一致(7-730):
+    两边必须相同,否则图能取到的区间与回测算过的区间又会分叉,正是这次要修的
+    那个问题。
+
+    Candles for the backtest chart: the exact same window as POST
+    /strategies/backtest. Read-only with no side effects — it neither runs a
+    backtest nor enters the backtest concurrency gate, so refreshing the chart
+    can't trip "a backtest of yours is already running". The `days` bounds match
+    StrategyBacktestRequest.days (7-730) and have to: a different range here
+    would let the charted window diverge from the computed one all over again,
+    which is the exact bug being fixed.
+
+    注册在 GET /{strategy_id}/performance 之前不是必须的(路径段数不同,不会
+    互相匹配),但与 /signals 的处理保持一致:具体路径先于参数路径。
+    Registering before GET /{strategy_id}/performance isn't strictly required
+    (different segment counts, so no collision), but it matches how /signals is
+    handled: literal paths ahead of parameterized ones.
+    """
+    _check_access(db, user)
+    _assert_interval(interval)
+    sym = symbol.strip().upper()
+    if not 7 <= days <= 730:
+        raise HTTPException(status_code=400, detail="days 需在 7-730 之间 / days must be 7-730")
+    bars = _load_backtest_bars(db, sym, interval, days)
+    return {"symbol": sym, "interval": interval, "days": days, "bars": bars}
 
 
 @router.get("/signals", response_model=dict)

@@ -4,8 +4,9 @@
 // 成本双套并列是 spec 的验收标准之一：只给一个含成本的数字，用户无从判断成本
 // 到底吃掉了多少，也就无从判断"回测是否可信"这个原始诉求。
 //
-// 不再按模板画指标线：入场条件是用户自选的一串条件，没有"这个模板用哪几条线"
-// 这个映射了。图上保留蜡烛、入场/出场标记与连线——这几样与条件形态无关。
+// 指标线按策略自己的条件推导（见 conditionOverlays.ts）：条件里写 EMA20 就画
+// EMA20，不给一套与触发无关的通用指标面板。之前这里完全不画指标，用户看到一堆
+// 标记却没有任何可对照的依据。
 //
 // The backtest panel: params → coverage notice → run → with/without-cost result
 // pairs → in/out-of-sample sections → overfit warning → trade table → candles
@@ -15,14 +16,26 @@
 // criteria: a single cost-inclusive number leaves the user unable to see how much
 // cost ate, which is the original "can I trust the backtest" complaint.
 //
-// No per-template indicator lines any more: entry conditions are a user-picked
-// list and the "which lines does this template use" mapping no longer exists.
-// Candles, entry/exit markers and their connecting lines stay — none of those
-// depend on the condition shape.
-import { useCallback, useEffect, useRef, useState } from 'react'
+// Indicator lines are derived from the strategy's own conditions (see
+// conditionOverlays.ts): a condition on EMA20 draws EMA20, rather than offering a
+// general indicator panel unrelated to the triggers. This chart previously drew no
+// indicators at all, leaving the user with markers and nothing to check them
+// against.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { createChart, ColorType, CandlestickSeries, LineSeries, createSeriesMarkers, type UTCTimestamp } from 'lightweight-charts'
-import { chartApi, strategyApi } from '../../api/client'
+import {
+  createChart,
+  ColorType,
+  CandlestickSeries,
+  HistogramSeries,
+  LineSeries,
+  createSeriesMarkers,
+  type ISeriesApi,
+  type UTCTimestamp,
+} from 'lightweight-charts'
+import { strategyApi } from '../../api/client'
+import { bollinger, closes, donchianHigh, donchianLow, ema, macd, rsi, sma } from '../../utils/indicators'
+import { deriveOverlays, overlayColor, type DerivedOverlay } from './conditionOverlays'
 import { fmtDate, localizeApiError } from '../../api/utils'
 import CoverageNotice from './CoverageNotice'
 import EquityCurve from './EquityCurve'
@@ -66,18 +79,45 @@ function fmtChartTime(time: UTCTimestamp): string {
   }).format(new Date(time * 1000))
 }
 
+// 把含 null（预热期）的指标序列转成折线点，丢掉 null 而不是补 0——补 0 会在图上
+// 画一条假的归零线。与 ChartsPage 的 toLinePoints 同一处理。
+// Turn an indicator series containing nulls (warm-up) into line points, dropping
+// the nulls rather than substituting 0, which would draw a false line down to
+// zero. Same handling as ChartsPage's toLinePoints.
+function toLinePoints(times: UTCTimestamp[], values: (number | null)[]) {
+  const out: { time: UTCTimestamp; value: number }[] = []
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i]
+    if (v != null) out.push({ time: times[i], value: v })
+  }
+  return out
+}
+
 interface BacktestChartProps {
   bars: Candle[]
   trades: StrategyBacktestTrade[]
   openPositions: StrategyBacktestOpenPosition[]
+  // 已勾选要画的指标叠加层，由策略条件推导而来（见 conditionOverlays.ts）。
+  // The checked overlays to draw, derived from the strategy conditions.
+  overlays: DerivedOverlay[]
+  // 每个叠加层在完整列表里的下标 → 颜色，保证勾选状态变化时同一根线不换色。
+  // Overlay id → color, keyed off its index in the full list so a line keeps its
+  // color as other checkboxes toggle.
+  colorOf: (id: string) => string
 }
 
-// 回测 K 线图：真实蜡烛 + 每笔交易的入场/出场标记 + 一条连接两点的细线。K 线
-// 不再由回测响应带回（Task 12 起响应不含 bars），改由既有的 chartApi.history 拉。
-// Backtest candlestick chart: real candles + entry/exit markers per trade + a
-// thin line joining them. Candles no longer ride along in the backtest response
-// (it dropped `bars` in Task 12) and come from the existing chartApi.history.
-function BacktestChart({ bars, trades, openPositions }: BacktestChartProps) {
+// 回测 K 线图：真实蜡烛 + 条件推导出的指标线 + 每笔交易的入场/出场标记与连线。
+// K 线由 strategyApi.backtestBars 拉取，与回测在后端共用同一个取数函数，所以标记
+// 的时间戳必然落在蜡烛范围内。此前用的是 chartApi.history（最近 500 根内存缓存），
+// 与回测的 days 窗口不是同一段数据，标记因此对不上蜡烛。
+// Backtest candlestick chart: real candles + condition-derived indicator lines +
+// entry/exit markers and a joining line per trade. Candles come from
+// strategyApi.backtestBars, which shares the backend's single bar-loading function
+// with the backtest, so marker timestamps are guaranteed to fall inside the
+// charted range. It used to use chartApi.history (the newest 500 cached bars), a
+// different slice than the backtest's `days` window — which is why the markers
+// didn't line up.
+function BacktestChart({ bars, trades, openPositions, overlays, colorOf }: BacktestChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -110,6 +150,76 @@ function BacktestChart({ bars, trades, openPositions }: BacktestChartProps) {
       upColor: UP_COLOR, downColor: DOWN_COLOR, wickUpColor: UP_COLOR, wickDownColor: DOWN_COLOR, borderVisible: false,
     })
     series.setData(bars.map((b) => ({ time: b.t as UTCTimestamp, open: b.o, high: b.h, low: b.l, close: b.c })))
+
+    // 指标叠加：主图类（均线/布林/唐奇安）与价格同刻度直接画在蜡烛上；副图类
+    // （RSI/MACD）各占一个 pane——它们的取值范围与价格无关，混进主图会把价格轴
+    // 压成一条线。pane 下标用 chart.panes().length 追加，与 ChartsPage 同一做法。
+    // Indicator overlays: the price-scale kinds (MAs, Bollinger, Donchian) draw
+    // straight onto the candles; the sub-pane kinds (RSI, MACD) each take a pane,
+    // since their ranges have nothing to do with price and mixing them in would
+    // squash the price axis into a line. Pane indices append via
+    // chart.panes().length, the same approach as ChartsPage.
+    const times = bars.map((b) => b.t as UTCTimestamp)
+    const closeVals = closes(bars)
+    const highs = bars.map((b) => b.h)
+    const lows = bars.map((b) => b.l)
+    const extraSeries: ISeriesApi<'Line' | 'Histogram'>[] = []
+
+    const addLine = (values: (number | null)[], color: string, paneIndex?: number, width: 1 | 2 = 1) => {
+      const s = chart.addSeries(
+        LineSeries,
+        { color, lineWidth: width, priceLineVisible: false, lastValueVisible: false },
+        paneIndex
+      )
+      s.setData(toLinePoints(times, values))
+      extraSeries.push(s as ISeriesApi<'Line'>)
+      return s
+    }
+
+    for (const ov of overlays) {
+      const color = colorOf(ov.id)
+      if (ov.kind === 'ma') {
+        addLine(ov.maType === 'SMA' ? sma(closeVals, ov.period) : ema(closeVals, ov.period), color)
+      } else if (ov.kind === 'boll') {
+        const b = bollinger(closeVals, ov.period, ov.mult ?? 2)
+        // 中轨实线、上下轨同色：三条线是一个整体，各给一个颜色反而读不出是一组。
+        // Mid solid with the bands in the same color: the three lines are one
+        // object, and three different colors would stop reading as a set.
+        addLine(b.mid, color)
+        addLine(b.upper, color)
+        addLine(b.lower, color)
+      } else if (ov.kind === 'donchian') {
+        addLine(donchianHigh(highs, ov.period), color)
+        addLine(donchianLow(lows, ov.period), color)
+      } else if (ov.kind === 'rsi') {
+        const paneIndex = chart.panes().length
+        addLine(rsi(closeVals, ov.period), color, paneIndex, 2)
+        // 超买/超卖两条水平参考线：RSI 的读数只有对着阈值才有意义。
+        // The overbought/oversold reference lines: an RSI reading only means
+        // something against its thresholds.
+        const flat = (level: number) => times.map(() => level)
+        addLine(flat(ov.overbought ?? 70), 'rgba(148, 163, 184, 0.35)', paneIndex)
+        addLine(flat(ov.oversold ?? 30), 'rgba(148, 163, 184, 0.35)', paneIndex)
+      } else if (ov.kind === 'macd') {
+        const paneIndex = chart.panes().length
+        const m = macd(closeVals, ov.fast ?? 12, ov.slow ?? 26, ov.signal ?? 9)
+        const hist = chart.addSeries(
+          HistogramSeries,
+          { priceLineVisible: false, lastValueVisible: false },
+          paneIndex
+        )
+        hist.setData(
+          times.flatMap((time, i) =>
+            m.hist[i] == null
+              ? []
+              : [{ time, value: m.hist[i] as number, color: (m.hist[i] as number) >= 0 ? 'rgba(34,197,94,0.5)' : 'rgba(239,68,68,0.5)' }]
+          )
+        )
+        extraSeries.push(hist as ISeriesApi<'Histogram'>)
+        addLine(m.macd, color, paneIndex, 2)
+        addLine(m.signal, '#fb7185', paneIndex)
+      }
+    }
 
     // 每笔已出结果的交易两个标记：入场箭头（方向色）+ 出场圆点（赢绿输红）。
     // TIMEOUT 走"非 HIT_TP 即视觉上的非盈利"这一档——超时平仓没有出场价方向信息
@@ -198,11 +308,18 @@ function BacktestChart({ bars, trades, openPositions }: BacktestChartProps) {
       window.removeEventListener('resize', onWindowResize)
       ro.disconnect()
       tradeLines.forEach((l) => chart.removeSeries(l))
+      extraSeries.forEach((s) => chart.removeSeries(s))
       chart.remove()
     }
-  }, [bars, trades, openPositions])
+  }, [bars, trades, openPositions, overlays, colorOf])
 
-  return <div ref={containerRef} className="h-[320px] w-full" />
+  // 副图每多一个就加高一截：RSI 与 MACD 各占一格，固定 320px 会把三格挤到每格
+  // 一百来像素，指标线糊成一团反而不如不画。
+  // Grow the height per sub-pane: RSI and MACD each take one, and a fixed 320px
+  // would squeeze three panes into ~100px each, where the lines blur into
+  // uselessness.
+  const subPanes = overlays.filter((o) => o.kind === 'rsi' || o.kind === 'macd').length
+  return <div ref={containerRef} style={{ height: 320 + subPanes * 110 }} className="w-full" />
 }
 
 interface SummaryGridProps {
@@ -356,6 +473,39 @@ export default function BacktestPanel({
   const [coverage, setCoverage] = useState<StrategyCoverage | null>(null)
   const [coverageLoading, setCoverageLoading] = useState(false)
   const [bars, setBars] = useState<Candle[]>([])
+  // 可画的指标叠加层，从条件列表推导；勾选状态按 id 存。默认全不勾——图上先只有
+  // 蜡烛与标记，需要核对触发依据时再打开对应指标。
+  // The drawable overlays, derived from the condition list, with checked state by
+  // id. Nothing is checked by default: candles and markers first, switch an
+  // indicator on when you want to check what a trigger was reading.
+  const availableOverlays = useMemo(() => deriveOverlays(rules.conditions), [rules.conditions])
+  const [shownOverlayIds, setShownOverlayIds] = useState<string[]>([])
+
+  // 颜色按"在完整列表里的位置"分配，不按已勾选的顺序：否则取消勾选一个，其余的
+  // 线全部换色，用户会以为画的是另外几条指标。
+  // Colors are assigned by position in the full list, not by checked order:
+  // otherwise un-checking one would recolor the rest, reading as if different
+  // indicators were now being drawn.
+  const overlayColorOf = useCallback(
+    (id: string) => overlayColor(Math.max(0, availableOverlays.findIndex((o) => o.id === id))),
+    [availableOverlays]
+  )
+  const shownOverlays = useMemo(
+    () => availableOverlays.filter((o) => shownOverlayIds.includes(o.id)),
+    [availableOverlays, shownOverlayIds]
+  )
+  const toggleOverlay = useCallback((id: string) => {
+    setShownOverlayIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }, [])
+
+  // 条件改了就清空勾选：留着旧 id 会让"策略已经不含这个指标了，图上还画着"这种
+  // 状态存在。availableOverlays 变化即意味着条件变了。
+  // Clear the selection when the conditions change: keeping stale ids would allow
+  // "the strategy no longer uses this indicator, yet it's still drawn". A change
+  // in availableOverlays means the conditions changed.
+  useEffect(() => {
+    setShownOverlayIds((prev) => prev.filter((id) => availableOverlays.some((o) => o.id === id)))
+  }, [availableOverlays])
 
   // 覆盖度在回测之前就拉：这是 spec 验收标准第 4 条「回测前端在执行前显示实际可用
   // 数据范围」。目标组合一变就重拉，用户切品种立刻看到新的可用范围。
@@ -386,14 +536,21 @@ export default function BacktestPanel({
       setResult(res)
       setTradePage(0)
       onResult?.(res)
-      // 蜡烛图另拉一次：Task 12 起回测响应不再原样回传 bars（5000 根序列化回前端
-      // 是那条已核实的性能问题之一）。失败不影响指标展示，只是图空着。
-      // Candles are fetched separately: since Task 12 the backtest response no
-      // longer echoes bars back (serializing 5000 of them was one of the verified
-      // performance problems). A failure here leaves the chart empty but doesn't
-      // affect the metrics.
+      // 蜡烛图另拉一次：回测响应不回传 bars（5000 根序列化回前端是已核实的性能
+      // 问题之一）。必须传同一个 days 并走 backtestBars——它与回测在后端共用取数
+      // 函数，取的是同一段。用 chartApi.history 会拿到最近 500 根内存缓存，与回测
+      // 窗口不同段，交易标记就会落在蜡烛范围之外（"标记线不准"的根因）。
+      // 失败不影响指标展示，只是图空着。
+      // Candles are fetched separately: the backtest response doesn't echo bars
+      // (serializing 5000 was a verified performance problem). It must pass the
+      // same `days` and go through backtestBars, which shares the backend's
+      // bar-loading function with the backtest and therefore returns the same
+      // slice. chartApi.history would return the newest 500 cached bars — a
+      // different window, leaving trade markers outside the charted range (the
+      // root cause of "the markers are off"). A failure leaves the chart empty
+      // without affecting the metrics.
       if (!res.insufficientData) {
-        chartApi.history(symbol, interval, 500).then((h) => setBars(h.bars)).catch(() => setBars([]))
+        strategyApi.backtestBars(symbol, interval, days).then((h) => setBars(h.bars)).catch(() => setBars([]))
       }
     } catch (e) {
       setError(e instanceof Error ? localizeApiError(e.message) : 'Unknown error')
@@ -562,8 +719,53 @@ export default function BacktestPanel({
             <div className="mt-5 border-t border-white/10 pt-4">
               <h4 className="text-sm font-semibold text-slate-200">{t('strategy.chartTitle')}</h4>
               <p className="mt-1 text-xs text-slate-500">{t('strategy.chartHint', { n: result.trades.length })}</p>
+
+              {/* 指标开关：只列这条策略的条件用到的指标，参数取自条件本身。默认全关
+                  ——图先干净，想核对触发依据再逐个打开。
+                  Indicator toggles: only the indicators this strategy's conditions
+                  reference, with parameters taken from the conditions themselves.
+                  All off by default: a clean chart first, switch them on when you
+                  want to check what the triggers were reading. */}
+              {availableOverlays.length > 0 && (
+                <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.overlayTitle')}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {availableOverlays.map((ov) => {
+                      const on = shownOverlayIds.includes(ov.id)
+                      return (
+                        <button
+                          key={ov.id}
+                          type="button"
+                          onClick={() => toggleOverlay(ov.id)}
+                          aria-pressed={on}
+                          className={`flex items-center gap-1.5 rounded-pill border px-2.5 py-1 text-xs transition ${
+                            on
+                              ? 'border-white/20 bg-white/10 text-slate-100'
+                              : 'border-white/10 bg-white/[0.02] text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          <span
+                            aria-hidden
+                            className="h-2 w-2 rounded-full"
+                            style={{ backgroundColor: on ? overlayColorOf(ov.id) : 'rgba(148,163,184,0.35)' }}
+                          />
+                          {ov.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('strategy.overlayHint')}</p>
+                </div>
+              )}
+
               <div className="mt-3">
-                <BacktestChart bars={bars} trades={result.trades} openPositions={result.openPositions} />
+                <BacktestChart
+                  bars={bars}
+                  trades={result.trades}
+                  openPositions={result.openPositions}
+                  overlays={shownOverlays}
+                  colorOf={overlayColorOf}
+                />
               </div>
             </div>
           )}
