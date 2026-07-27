@@ -30,6 +30,14 @@ export function triggerUnauthorized() {
   onUnauthorized?.()
 }
 
+// 限流（429）的兜底文案。写成后端惯用的「中文 / English」双语格式，
+// localizeApiError 会按界面语言取对应那半，不必单独走 i18n。
+// Fallback message for rate limiting (429). Written in the backend's usual
+// "中文 / English" bilingual shape so localizeApiError picks the right half by UI
+// language, with no separate i18n plumbing needed.
+const RATE_LIMITED =
+  '操作过于频繁，已被限流，请稍等一分钟再试 / Too many requests, you have been rate limited — wait a minute and try again'
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -56,6 +64,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     let detail = `HTTP ${res.status}`
     try {
       const body = await res.json()
+      // slowapi 的限流响应把说明放在 error 字段、没有 detail，落到下面的分支就只剩
+      // "HTTP 429" 这种对用户毫无意义的字符串。这里给 429 一个兜底标记，交给
+      // localizeApiError 换成能看懂的说明；后端自己抛的 429（比如「已有回测在跑」）
+      // 带 detail，仍走下面的分支、保留原文案。
+      // slowapi's rate-limit response puts its message in `error` with no
+      // `detail`, so the branches below would leave the useless string "HTTP 429".
+      // Tag such responses so localizeApiError can turn them into something
+      // readable; backend-raised 429s (e.g. "a backtest is already running") do
+      // carry `detail` and keep their own wording via the branches below.
+      if (res.status === 429 && !body.detail) detail = RATE_LIMITED
       // FastAPI 的字段校验错误（422）里 detail 是一个对象数组（{loc,msg,type}...），
       // 直接当字符串抛会显示成 "[object Object]"。这里把它拍平成可读的 msg 文本；
       // 普通业务错误的 detail 本就是字符串，原样使用。
@@ -74,7 +92,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
         detail = body.detail
       }
     } catch {
-      /* ignore */
+      // 响应体不是 JSON（网关直接挡掉的限流常是纯文本或空体）。429 在这里也要给出
+      // 说明，否则又退回 "HTTP 429"。
+      // Body wasn't JSON (rate limiting blocked at the gateway often returns plain
+      // text or nothing). 429 still needs its message here, or we fall back to the
+      // bare "HTTP 429" again.
+      if (res.status === 429) detail = RATE_LIMITED
     }
     throw new Error(detail)
   }
