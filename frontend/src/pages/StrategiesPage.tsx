@@ -215,10 +215,13 @@ interface StrategyEditorProps {
   // Symbols with a live feed. Unfed ones grey out in the dropdown with the reason
   // stated (spec acceptance criterion 4).
   activeSymbols: string[]
-  // 全部候选品种（含未接入的）：来自 coverage 端点，让用户看到"这个品种存在但没
-  // 接入"，而不是干脆看不到它。
-  // Every candidate symbol including unfed ones, from the coverage endpoint, so the
+  // 全部候选品种（含未接入的）：来自 /strategies/symbols，语义是"有历史数据、能
+  // 回测"，刻意比 activeSymbols 更宽，让用户看到"这个品种存在但没接入"，而不是
+  // 干脆看不到它。两者同源的话置灰永不生效。
+  // Every candidate symbol including unfed ones, from /strategies/symbols, meaning
+  // "has history, can be backtested" — deliberately wider than activeSymbols so the
   // user sees "this symbol exists but isn't fed" rather than not seeing it at all.
+  // Were the two the same source, nothing would ever grey out.
   allSymbols: string[]
   // 指标与用法目录：可选周期、条件数上限、指标清单全部来自它，前端不带副本。
   // The indicator/usage catalogue: selectable intervals, the condition cap and the
