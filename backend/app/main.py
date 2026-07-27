@@ -1,5 +1,7 @@
 """PRISMX Signal Lab 后端入口 / Backend entrypoint."""
 import asyncio
+import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -29,7 +31,19 @@ from app.services.strategy.resolution import stale_strategy_signal_sweep_loop
 async def lifespan(app: FastAPI):
     # 启动：建表 + 信号引擎 + 离线检测 + 超时订单清理
     # startup: tables + signal engine + offline monitor + stale-order sweep
+    #
+    # init_db() 是同步阻塞的,跑完之前 uvicorn 不 bind 端口,nginx 只能回 502。
+    # 生产实测 startup 全程 85~91 秒。这里外层计时是为了先判定这段时间是否真的
+    # 花在 init_db 上——内层打点若没输出,就说明卡点在别处。
+    # init_db() blocks synchronously; uvicorn won't bind the port until it returns
+    # and nginx can only answer 502. Startup measures 85-91s in production. This
+    # outer timing decides whether that time is actually spent in init_db: if the
+    # inner probes print nothing, the stall is elsewhere.
+    _t_init = time.perf_counter()
     init_db()
+    logging.getLogger("prismx.migration").warning(
+        "启动打点/startup probe: init_db() 合计/total %.1fs", time.perf_counter() - _t_init
+    )
     task = (
         asyncio.create_task(signal_loop())
         if settings.ENABLE_MOCK_SIGNAL_ENGINE

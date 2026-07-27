@@ -25,7 +25,12 @@ if not _is_sqlite:
         pool_pre_ping=True,
     )
 
-logger = logging.getLogger(__name__)
+# 用 prismx.* 前缀与项目其余模块保持一致:uvicorn 只给自己的 logger 配 handler,
+# 项目统一在 prismx 命名空间下输出,用 __name__ 会让日志被丢弃。
+# Use the prismx.* prefix like the rest of the project: uvicorn only configures its
+# own loggers, the project logs under the prismx namespace, and __name__ would get
+# the records dropped.
+logger = logging.getLogger("prismx.migration")
 
 engine = create_engine(settings.DATABASE_URL, **_engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -62,7 +67,7 @@ def init_db() -> None:
     t2 = time.perf_counter()
     _hash_legacy_api_tokens()
     t3 = time.perf_counter()
-    logger.info(
+    logger.warning(
         "init_db 耗时/timing: create_all %.1fs, _migrate_columns %.1fs, "
         "_hash_legacy_api_tokens %.1fs, 合计/total %.1fs",
         t1 - t0, t2 - t1, t3 - t2, t3 - t0,
@@ -107,7 +112,7 @@ def _migrate_columns() -> None:
     _t_inspect = time.perf_counter()
     _table_names = inspector.get_table_names()
     _t_tables = time.perf_counter()
-    logger.info(
+    logger.warning(
         "_migrate_columns 打点/probe: inspect(engine) %.1fs, get_table_names %.1fs "
         "(%d 张表/tables)",
         _t_inspect - _t_start, _t_tables - _t_inspect, len(_table_names),
@@ -367,8 +372,16 @@ def _migrate_columns() -> None:
         # Python-side logic, so they get their own idempotent functions (only
         # touching invalid rows / inserting missing rows) in their own
         # transactions.
+        _t_a = time.perf_counter()
         _disable_legacy_strategies()
+        _t_b = time.perf_counter()
         _backfill_strategy_watch()
+        _t_c = time.perf_counter()
+        logger.warning(
+            "启动打点/startup probe: _disable_legacy_strategies %.1fs, "
+            "_backfill_strategy_watch %.1fs",
+            _t_b - _t_a, _t_c - _t_b,
+        )
 
         # 放开历史遗留列的 NOT NULL 约束。止损止盈从 stop_loss_pct / take_profit_pct
         # / take_profit_r（旧结构）改成 method + value 后，这些旧列已不在模型里、
