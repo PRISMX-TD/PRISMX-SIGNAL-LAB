@@ -12,6 +12,8 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import func
+
 from app.core.database import SessionLocal
 from app.models import Candle
 from app.services.page_stats import prune_visitor_days, purge_admin_visitors
@@ -32,6 +34,62 @@ INTERVAL_SECONDS: dict[str, int] = {
 
 # 每天扫一次即可,K 线不是分秒必争的时效数据 / once a day is plenty; candles aren't latency-sensitive
 RETENTION_SWEEP_INTERVAL_SECONDS = 24 * 60 * 60
+
+
+def _has_no_market_activity(bar: dict) -> bool:
+    """判断一根 bar 是不是"市场根本没在动"的空转 bar(休市/节假日冻结报价)。
+
+    EA 在周末与节假日仍然连着 MT5、仍然按周期推 bar,此时报价冻结在上一个交易
+    日的收盘价,推出来的就是 o == h == l == c 且成交量为 0 的一批 bar。它们在
+    时间上确实"已经走完",所以能通过收盘判定,但它们不是行情,落库之后会造成:
+      ① 回测图上休市段被一长串完全平坦的蜡烛填满,真实的周末跳空被抹平——
+         看起来像是图表在"拉时间",实际是数据库里真有这些行;
+      ② 更严重的是指标被污染:BOLL 这类基于标准差的指标在这段里标准差趋近 0,
+         上下轨收缩贴到中轨上,一到开盘必然触发穿越,凭空造出入场信号,胜率和
+         信号数因此失真。
+    所以这类 bar 不该进库。
+
+    判定不去维护"交易时段表"(各品种时段不同、夏令时、节假日年年变、broker
+    之间还有差异,长期维护成本高且容易出错),而是直接描述"市场没在动"这个
+    事实本身,天然覆盖周末、节假日和临时休市。
+
+    两个条件必须同时成立才丢弃:只看 v == 0 会误伤某些不报 tick volume 的
+    broker 的正常 bar;只看 o == h == l == c 会误伤流动性极低时段里真实但确实
+    没有波动的 1 分钟 bar。
+
+    Detects a bar with no market activity at all (a frozen quote during a
+    market close/holiday).
+
+    Over weekends and holidays the EA stays connected to MT5 and keeps pushing
+    bars on schedule, but the quote is frozen at the previous session's close,
+    so what arrives is a run of bars with o == h == l == c and zero volume.
+    They genuinely have "finished" in time terms, so they pass the closed
+    check, but they aren't market data, and persisting them causes:
+      ① the backtest chart fills the closed session with a long run of
+         perfectly flat candles, flattening away the real weekend gap — it
+         looks like the chart is "stretching time" when in fact those rows
+         really are in the database;
+      ② worse, indicators get corrupted: standard-deviation-based ones like
+         Bollinger see stddev approach 0 here, the bands collapse onto the
+         mid line, and the next open is then guaranteed to cross them,
+         fabricating entry signals and skewing win rate and signal counts.
+    So these bars must not be stored.
+
+    The check deliberately avoids maintaining a trading-session calendar
+    (per-symbol sessions, DST, yearly-changing holidays and broker-to-broker
+    differences make that expensive to maintain and easy to get wrong) and
+    instead describes the "market isn't moving" fact directly, which covers
+    weekends, holidays and unscheduled halts alike.
+
+    Both conditions must hold to discard: `v == 0` alone would wrongly drop
+    normal bars from brokers that don't report tick volume, and
+    `o == h == l == c` alone would wrongly drop genuine but truly flat
+    1-minute bars in very thin liquidity.
+    """
+    return (
+        bar["o"] == bar["h"] == bar["l"] == bar["c"]
+        and not bar.get("v", 0)
+    )
 
 
 def persist_closed_bars(db, symbol: str, interval: str, bars: list[dict]) -> int:
@@ -76,6 +134,7 @@ def persist_closed_bars(db, symbol: str, interval: str, bars: list[dict]) -> int
     # either side's absolute clock, so it's immune to this class of skew.
     latest_t = max(b["t"] for b in bars)
     closed = [b for b in bars if b["t"] + seconds <= now or b["t"] < latest_t]
+
     if not closed:
         # 有了②(相对判定)之后,这条分支只在批次里连"更晚的邻居"都找不到时才
         # 会走到——也就是这批实际上只有一根独一无二的时间戳,且它本身还没到
@@ -98,6 +157,50 @@ def persist_closed_bars(db, symbol: str, interval: str, bars: list[dict]) -> int
             "clock is running fast — check the EA/feeder's time source if this recurs)",
             symbol, interval, len(bars), latest_gap_hours,
         )
+        return 0
+
+    # 已收盘但"市场没在动"的空转 bar(休市/节假日的冻结报价)在这里丢掉,理由见
+    # _has_no_market_activity()。
+    #
+    # 放在上面那条 WARNING 之后而不是之前:两个判断诊断的是两件不同的事。"一根都
+    # 没收盘"指向喂价端时钟异常,而"收盘了但都是空转"是周末的正常现象;若先过滤
+    # 再判空,每个周末批次都会打出那条 clock-skew WARNING,把一条本该罕见的告警变
+    # 成噪音,真出时钟问题时反而看不见了。
+    #
+    # 丢弃要留痕:正常交易时段本不该出现这类 bar,一旦成批出现说明喂价端有问题
+    # (比如断线后重放缓存报价),静默丢弃会让这种故障无声无息——上面那条 WARNING
+    # 就是为同一类"安静地出错"而存在的(那次真实事故静默持续了三天)。常态量记在
+    # debug,整批都是空转时才升到 info,避免周末稳态运行刷屏。
+    #
+    # Drop closed-but-inactive bars (frozen quotes during a market close); see
+    # _has_no_market_activity() for why.
+    #
+    # Placed after the WARNING above rather than before it: the two checks
+    # diagnose different things. "nothing closed" points at a feed clock
+    # problem, whereas "closed but all inactive" is simply what a weekend looks
+    # like. Filtering first would fire that clock-skew WARNING on every weekend
+    # batch, turning a should-be-rare alert into noise that hides the real
+    # thing when it happens.
+    #
+    # Dropping is logged on purpose: these shouldn't occur during a live
+    # session, so a sudden run of them means something is wrong upstream (e.g.
+    # the feed replaying a stale quote after a disconnect), and silent dropping
+    # would hide that — the WARNING above exists for the same class of "fails
+    # quietly" bug (that real incident went unnoticed for three days).
+    # Steady-state counts go to debug, escalating to info only when the whole
+    # batch is inactive, so weekends don't flood the logs.
+    active = [b for b in closed if not _has_no_market_activity(b)]
+    inactive_count = len(closed) - len(active)
+    if inactive_count:
+        logger.log(
+            logging.INFO if not active else logging.DEBUG,
+            "persist_closed_bars: %s/%s skipped %d closed bar(s) with no market "
+            "activity (o==h==l==c and zero volume — expected during a weekend/"
+            "holiday close; if this appears during a live session, check the feed)",
+            symbol, interval, inactive_count,
+        )
+    closed = active
+    if not closed:
         return 0
 
     existing = {
@@ -126,6 +229,46 @@ def persist_closed_bars(db, symbol: str, interval: str, bars: list[dict]) -> int
     return new_count
 
 
+def cleanup_inactive_bars(db) -> int:
+    """删掉存量的空转 bar(休市冻结报价:o==h==l==c 且量为 0)。返回删除行数。
+
+    写入侧的过滤只能挡住新数据,这条负责清掉过滤上线之前已经落库的那些——否则
+    回测图上历史休市段的平线会一直留着,指标也继续被污染。判定条件与
+    _has_no_market_activity() 完全一致,两边必须同步改。
+
+    跟着每天的保留期清扫跑,不做成一次性脚本:清扫本身是幂等的(写入侧修好之后
+    不再产生新的空转 bar,这条从第二天起就查不到东西可删),而一次性脚本得手动上
+    机器执行,容易漏做或在下次重建环境时被忘记。
+
+    Delete stored inactive bars (frozen quotes over a market close: o==h==l==c
+    with zero volume). Returns the number of rows deleted.
+
+    The write-path filter only stops new data; this clears what was already
+    persisted before that filter existed — otherwise the flat stretches over
+    historical closed sessions stay on the backtest chart and keep corrupting
+    indicators. The predicate must stay in sync with _has_no_market_activity().
+
+    Runs as part of the daily retention sweep rather than as a one-off script:
+    the sweep is idempotent (with the write path fixed, no new inactive bars
+    appear, so from the next day on it finds nothing to delete), whereas a
+    one-off script has to be run by hand on the machine and is easy to skip or
+    forget when the environment is next rebuilt.
+    """
+    deleted = (
+        db.query(Candle)
+        .filter(
+            Candle.o == Candle.h,
+            Candle.h == Candle.l,
+            Candle.l == Candle.c,
+            func.coalesce(Candle.v, 0) == 0,
+        )
+        .delete(synchronize_session=False)
+    )
+    if deleted:
+        db.commit()
+    return deleted
+
+
 def cleanup_old_m1(db, retention_days: int) -> int:
     """删掉超过保留天数的 1 分钟线,其余周期不动。返回删除行数。
     Delete 1-minute candles past the retention window; other intervals are
@@ -152,6 +295,16 @@ async def candle_retention_sweep_loop() -> None:
                 deleted = cleanup_old_m1(db, int(cfg["m1_retention_days"]))
                 if deleted:
                     logger.info("candle_retention_sweep_loop: deleted %d expired 1m candle(s)", deleted)
+                # 清掉写入侧过滤上线之前落库的休市空转 bar,见 cleanup_inactive_bars()。
+                # Clear inactive bars persisted before the write-path filter existed;
+                # see cleanup_inactive_bars().
+                inactive = cleanup_inactive_bars(db)
+                if inactive:
+                    logger.info(
+                        "candle_retention_sweep_loop: deleted %d stored bar(s) with no "
+                        "market activity (pre-existing weekend/holiday frozen quotes)",
+                        inactive,
+                    )
                 # 顺带清页面统计的去重标记：同样是每天一次的保留期清理，
                 # 为一张小表另开一个后台任务不值得（VPS 是 2 核单进程）。
                 # Also prune page-stat dedup markers: same daily retention job,

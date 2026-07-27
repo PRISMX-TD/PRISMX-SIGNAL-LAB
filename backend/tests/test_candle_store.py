@@ -6,7 +6,11 @@ duplicate writes are skipped, and expired rows are pruned per-interval.
 from datetime import datetime, timedelta, timezone
 
 from app.models import Candle
-from app.services.candle_store import cleanup_old_m1, persist_closed_bars
+from app.services.candle_store import (
+    cleanup_inactive_bars,
+    cleanup_old_m1,
+    persist_closed_bars,
+)
 
 
 def _epoch(minutes_ago: float) -> int:
@@ -108,6 +112,89 @@ def test_no_warning_when_at_least_one_bar_is_closed(db, caplog):
     with caplog.at_level("WARNING"):
         persist_closed_bars(db, "XAUUSD", "1", bars)
     assert not any("none are closed yet" in r.message for r in caplog.records)
+
+
+def test_inactive_bars_during_market_close_are_not_persisted(db):
+    """休市期间喂价端仍在推 bar,报价冻结在收盘价(o==h==l==c、量为 0),这些不是
+    行情,不该进库——否则回测图上休市段会被一长串完全平坦的蜡烛填满、真实跳空被
+    抹平,而且 BOLL 这类指标的标准差在这段里趋近 0,一到开盘必然触发穿越,凭空造
+    出入场信号。
+
+    Over a market close the feed keeps pushing bars with the quote frozen at the
+    session close (o==h==l==c, zero volume). Those aren't market data and must
+    not be stored — otherwise the backtest chart fills the closed session with
+    perfectly flat candles, flattening the real gap, and stddev-based indicators
+    like Bollinger collapse there, fabricating a cross on the next open."""
+    real = {"t": _epoch(30), "o": 1, "h": 2, "l": 0.5, "c": 1.5, "v": 10}
+    frozen = [
+        {"t": _epoch(m), "o": 1.5, "h": 1.5, "l": 1.5, "c": 1.5, "v": 0}
+        for m in (25, 20, 15)
+    ]
+    n = persist_closed_bars(db, "XAUUSD", "1", [real, *frozen])
+    assert n == 1
+    rows = db.query(Candle).filter(Candle.symbol == "XAUUSD", Candle.interval == "1").all()
+    assert [r.t for r in rows] == [real["t"]]
+
+
+def test_flat_bar_with_volume_is_kept(db):
+    """只有 o==h==l==c 但有成交量的 bar 是真实行情(流动性极低的时段确实会出现),
+    必须保留——判定要两个条件同时成立才丢弃。
+
+    A flat bar that still reports volume is genuine market data (it does happen
+    in very thin liquidity) and must be kept — both conditions are required
+    before discarding."""
+    bars = [
+        {"t": _epoch(20), "o": 1.5, "h": 1.5, "l": 1.5, "c": 1.5, "v": 4},
+        {"t": _epoch(15), "o": 1.5, "h": 1.6, "l": 1.4, "c": 1.55, "v": 7},
+    ]
+    n = persist_closed_bars(db, "XAUUSD", "1", bars)
+    assert n == 2
+
+
+def test_fully_inactive_batch_does_not_warn_about_clock_skew(db, caplog):
+    """整批都是休市空转 bar 时,不该误报那条"一根都没收盘"的时钟告警——那条告警
+    诊断的是喂价端时钟异常,而这里是周末的正常现象。混在一起会让本该罕见的告警
+    每个周末都刷,真出时钟问题时反而被埋掉。
+
+    A batch that is entirely inactive must not trigger the "nothing closed"
+    clock-skew WARNING — that alert diagnoses a feed clock problem, while this
+    is just what a weekend looks like. Conflating them would fire the alert
+    every weekend and bury the real thing."""
+    frozen = [
+        {"t": _epoch(m), "o": 1.5, "h": 1.5, "l": 1.5, "c": 1.5, "v": 0}
+        for m in (20, 15)
+    ]
+    with caplog.at_level("DEBUG"):
+        n = persist_closed_bars(db, "XAUUSD", "1", frozen)
+    assert n == 0
+    assert db.query(Candle).count() == 0
+    assert not any("none are closed yet" in r.message for r in caplog.records)
+    assert any("no market activity" in r.message for r in caplog.records)
+
+
+def test_cleanup_removes_stored_inactive_bars_only(db):
+    """清掉过滤上线之前已落库的空转 bar,真实行情与"平坦但有量"的 bar 都不能动。
+    判定必须与写入侧一致,否则两边会对同一根 bar 给出不同答案。
+
+    Clears inactive bars persisted before the filter existed, leaving real bars
+    and flat-but-with-volume bars untouched. The predicate must match the write
+    path, or the two would disagree about the same bar."""
+    real = _epoch(60)
+    flat_with_v = _epoch(50)
+    frozen = [_epoch(40), _epoch(35)]
+    db.add(Candle(symbol="XAUUSD", interval="15", t=real, o=1, h=2, l=0.5, c=1.5, v=9))
+    db.add(Candle(symbol="XAUUSD", interval="15", t=flat_with_v, o=1.5, h=1.5, l=1.5, c=1.5, v=3))
+    for t in frozen:
+        db.add(Candle(symbol="XAUUSD", interval="15", t=t, o=1.5, h=1.5, l=1.5, c=1.5, v=0))
+    db.commit()
+
+    deleted = cleanup_inactive_bars(db)
+    assert deleted == 2
+    remaining = sorted(r.t for r in db.query(Candle).all())
+    assert remaining == sorted([real, flat_with_v])
+    # 幂等：写入侧修好之后再跑一次应该无事可做。
+    # Idempotent: with the write path fixed, a second run has nothing to do.
+    assert cleanup_inactive_bars(db) == 0
 
 
 def test_cleanup_only_deletes_expired_m1(db):
