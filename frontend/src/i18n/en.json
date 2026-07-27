@@ -578,7 +578,11 @@
     },
     "posmark": {
       "show": "Show position markers",
-      "hide": "Hide position markers"
+      "hide": "Hide position markers",
+      "confirmModifyTitle": "Confirm modify",
+      "confirmModifyMsg": "Change {{symbol}} {{side}} #{{ticket}} {{kind}} from {{from}} to {{to}}",
+      "confirm": "Confirm",
+      "cancel": "Cancel"
     },
     "fullscreen": {
       "enter": "Fullscreen",

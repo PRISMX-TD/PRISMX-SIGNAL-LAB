@@ -578,7 +578,11 @@
     },
     "posmark": {
       "show": "显示持仓标记",
-      "hide": "隐藏持仓标记"
+      "hide": "隐藏持仓标记",
+      "confirmModifyTitle": "确认改单",
+      "confirmModifyMsg": "{{symbol}} {{side}} #{{ticket}} 的{{kind}}从 {{from}} 改至 {{to}}",
+      "confirm": "确认",
+      "cancel": "取消"
     },
     "fullscreen": {
       "enter": "全屏",

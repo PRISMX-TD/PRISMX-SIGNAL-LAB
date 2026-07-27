@@ -10,6 +10,10 @@
 // 拖拽用一层默认 pointer-events:none 的透明覆盖层，只有真的悬停到某条止损/
 // 止盈线上时才抢指针事件——否则它常驻盖在图表上，原生的拖动平移与滚轮缩放
 // 永远传不到底下的图表 canvas（DrawLayer 踩过这个坑，见其同名注释）。
+//
+// 拖拽松手会弹出确认框，用户确认后才真正发 MODIFY 指令——避免误触或拖错。
+// Dragging a line and releasing shows a confirm dialog; the MODIFY is only
+// sent after the user explicitly confirms — prevents accidental modifications.
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { CanvasRenderingTarget2D } from 'fancy-canvas'
@@ -222,6 +226,18 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
   const [hovered, setHovered] = useState<string | null>(null)
   const [pending, setPending] = useState<Record<string, { price: number; at: number }>>({})
 
+  // 拖拽松手后待确认的改单信息；确认框显示期间线停在拖到的位置，取消则弹回。
+  // Pending confirm state after a drag is released; the line stays at the
+  // dragged position while the dialog is open, reverting on cancel.
+  type ConfirmState = {
+    key: string
+    ticket: number
+    kind: LineKind
+    newPrice: number
+    marker: Marker
+  }
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null)
+
   // 品种匹配去掉券商后缀再比：持仓上报的可能是 XAUUSD.m 之类，而图表用的是基础
   // 品种名，直接全等会一条标记都匹配不上。改单请求仍然回传持仓自己的原始
   // p.symbol，绝不能把规整后的名字发给 MT5。
@@ -234,16 +250,19 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
     return positions.filter((p) => baseSymbol(p.symbol) === base && p.ticket != null && p.entryPrice != null)
   }, [positions, symbol])
 
-  // 标记列表：真实持仓叠加"已提交待回执"的乐观值 + 正在拖动的实时值。
-  // Markers: real positions overlaid with in-flight optimistic values and the
-  // live value of whatever line is currently being dragged.
+  // 标记列表：真实持仓叠加"已提交待回执"的乐观值 + 正在拖动的实时值 + 待确认的拖拽值。
+  // Markers: real positions overlaid with in-flight optimistic values, the
+  // live value of the line being dragged, and pending-confirm dragged values.
   const markers = useMemo<Marker[]>(() => {
     const now = Date.now()
     return symPositions.map((p) => {
       const ticket = p.ticket as number
       const pick = (kind: LineKind, real: number | undefined): number | null => {
         const k = keyOf(ticket, kind)
+        // 正在拖动中 / being dragged
         if (dragKey === k && dragPrice != null) return dragPrice
+        // 松手后等待确认 / released, awaiting confirmation
+        if (confirmState && confirmState.key === k) return confirmState.newPrice
         const opt = pending[k]
         if (opt && now - opt.at < OVERRIDE_TTL_MS) return opt.price > 0 ? opt.price : null
         return real && real > 0 ? real : null
@@ -256,7 +275,7 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
         tp: pick('tp', p.takeProfit),
       }
     })
-  }, [symPositions, dragKey, dragPrice, pending])
+  }, [symPositions, dragKey, dragPrice, pending, confirmState])
 
   // 桥接把新值报回来后清掉对应的乐观值（真实值已经追上，不再需要覆盖）。
   // Drop an optimistic value once the bridge reports a matching real one.
@@ -467,33 +486,110 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
       }
     }
 
-    const sl = drag.kind === 'sl' ? next : (m.sl ?? 0)
-    const tp = drag.kind === 'tp' ? next : (m.tp ?? 0)
-    setPending((prev) => ({ ...prev, [drag.key]: { price: next, at: Date.now() } }))
-    void submitModify(m, sl, tp).then((ok) => {
-      // 失败就撤掉乐观值，线立刻弹回真实价位 / on failure drop the optimistic
-      // value so the line snaps back to the reported truth right away
-      if (!ok) {
-        setPending((prev) => {
-          const next2 = { ...prev }
-          delete next2[drag.key]
-          return next2
-        })
-      }
-    })
-  }, [chart, digits, onToast, submitModify, t])
+    // 弹出确认框而非直接发送 —— 避免误拖 / show confirm dialog instead of sending immediately
+    setConfirmState({ key: drag.key, ticket: drag.ticket, kind: drag.kind, newPrice: next, marker: m })
+  }, [chart, digits, onToast, t])
+
+  // 用户确认改单 / user confirms the modify
+  const handleConfirm = useCallback(async () => {
+    const cs = confirmState
+    if (!cs) return
+    const m = cs.marker
+    const sl = cs.kind === 'sl' ? cs.newPrice : (m.sl ?? 0)
+    const tp = cs.kind === 'tp' ? cs.newPrice : (m.tp ?? 0)
+    setPending((prev) => ({ ...prev, [cs.key]: { price: cs.newPrice, at: Date.now() } }))
+    setConfirmState(null)
+    const ok = await submitModify(m, sl, tp)
+    if (!ok) {
+      setPending((prev) => {
+        const next2 = { ...prev }
+        delete next2[cs.key]
+        return next2
+      })
+    }
+  }, [confirmState, submitModify])
+
+  // 用户取消改单 —— 线弹回真实价位（confirmState 一清，markers 就走回真实值）
+  // User cancels — line snaps back to the truth (clearing confirmState lets
+  // markers fall back to the real value).
+  const handleCancelConfirm = useCallback(() => {
+    setConfirmState(null)
+  }, [])
+
+  // 确认框显示期间按 Escape 等同于取消 / Escape cancels the confirm dialog
+  useEffect(() => {
+    if (!confirmState) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setConfirmState(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [confirmState])
 
   if (!visible) return null
 
+  // 确认框里用的品种名：去后缀 / symbol name for the confirm dialog, suffix stripped
+  const displaySymbol = useMemo(() => {
+    if (!confirmState) return ''
+    return baseSymbol(confirmState.marker.pos.symbol)
+  }, [confirmState])
+  const oldPrice = confirmState
+    ? (confirmState.kind === 'sl' ? confirmState.marker.sl : confirmState.marker.tp)
+    : null
+
   return (
-    <div
-      ref={overlayRef}
-      className="pointer-events-none absolute inset-0 z-10 touch-none"
-      style={{ cursor: hovered || dragKey ? 'ns-resize' : 'default' }}
-      onPointerDown={onDown}
-      onPointerMove={onMove}
-      onPointerUp={onUp}
-      onPointerCancel={onUp}
-    />
+    <>
+      <div
+        ref={overlayRef}
+        className="pointer-events-none absolute inset-0 z-10 touch-none"
+        style={{ cursor: hovered || dragKey || confirmState ? 'ns-resize' : 'default' }}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={onUp}
+      />
+
+      {/* 拖拽松手后的确认弹窗 / confirmation dialog after releasing a dragged line */}
+      {confirmState && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-transparent">
+          {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+          <div
+            className="pointer-events-auto rounded-xl border border-white/10 bg-ink-900/95 p-4 shadow-prism backdrop-blur-md"
+            style={{ minWidth: 280 }}
+            onKeyDown={(e) => { if (e.key === 'Escape') handleCancelConfirm() }}
+          >
+            <p className="mb-1 text-xs font-medium text-slate-300">
+              {String(t('charts.posmark.confirmModifyTitle'))}
+            </p>
+            <p className="mb-3 text-sm text-slate-200">
+              {String(t('charts.posmark.confirmModifyMsg', {
+                symbol: displaySymbol,
+                side: confirmState.marker.pos.side === 'BUY' ? String(t('charts.dock.buy')) : String(t('charts.dock.sell')),
+                ticket: String(confirmState.ticket),
+                kind: confirmState.kind === 'sl' ? String(t('charts.ticket.sl')) : String(t('charts.ticket.tp')),
+                from: oldPrice != null ? oldPrice.toFixed(digits) : '—',
+                to: confirmState.newPrice.toFixed(digits),
+              }))}
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleCancelConfirm}
+                className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-400 transition hover:border-white/20 hover:text-slate-100"
+              >
+                {String(t('charts.posmark.cancel'))}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirm}
+                className="rounded-lg bg-prism-600/60 px-3 py-1.5 text-xs font-medium text-prism-100 transition hover:bg-prism-500/60"
+              >
+                {String(t('charts.posmark.confirm'))}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
