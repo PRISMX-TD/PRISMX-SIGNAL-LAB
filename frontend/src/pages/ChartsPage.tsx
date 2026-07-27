@@ -333,11 +333,29 @@ const SYMBOL_KEY = 'prismx.charts.symbol'
 const POLL_MS = 2000
 // 超过这么久没收到喂价更新，视为数据延迟 / no feed update for this long => stale
 const STALE_MS = 30_000
-// 客户端保留的最大 K 线根数，与后端 chart_store.MAX_BARS 对齐，避免图表页
-// 开着很久时 candlesRef 无限增长。/ max bars kept client-side, matching the
-// backend's chart_store.MAX_BARS so candlesRef doesn't grow unbounded over a
-// long-lived page session.
-const MAX_CLIENT_BARS = 500
+// 客户端保留的最大 K 线根数。以前是 500（对齐后端内存缓存的硬上限），现在
+// /chart/history 直接读数据库、可以用 before 游标一直往左翻，这个数决定的是
+// "往左能拉多远"——超出就会把最早的裁掉、再往左拉又得重新请求。
+// 取 20000：约等于两年的 1 小时线或半年的 15 分钟线，够深；同时每根 bar 在
+// 内存里只是几个 number，两万根的量级对浏览器无压力，指标重算也仍在毫秒级。
+// max bars kept client-side. This used to be 500 (matching the backend's
+// in-memory cache cap); now that /chart/history reads the database and can page
+// backwards via the `before` cursor, this number decides how far left the user
+// can scroll before the earliest bars get trimmed and have to be re-fetched.
+// 20000 ≈ two years of hourly or six months of 15-minute bars — deep enough,
+// while each bar is just a few numbers in memory, so this size is no strain on
+// the browser and indicator recomputation stays in the millisecond range.
+const MAX_CLIENT_BARS = 20000
+
+// 每页请求多少根，以及还剩多少根就触发下一页。
+// 触发阈值取 200：用户拖到距离最左边还有 200 根时就开始预取，等他拖到边缘时
+// 数据通常已经到位，不会看到空白。
+// Bars per page, and how many remaining bars trigger the next page.
+// The 200-bar threshold prefetches while the user is still 200 bars away from
+// the left edge, so data is usually in place by the time they reach it and no
+// blank gap shows.
+const HISTORY_PAGE_SIZE = 1000
+const HISTORY_PREFETCH_BARS = 200
 
 // 涨跌配色（与 SignalView 的 FOCUS_DOT 一致，K 线本身固定用这套，不做客制化）
 // up/down colors (match SignalView's FOCUS_DOT; the candles themselves stay
@@ -498,6 +516,15 @@ export default function ChartsPage() {
   // an x coordinate across intervals (drawings are saved per symbol).
   const barTimesRef = useRef<number[]>([])
   const getBarTimes = useCallback(() => barTimesRef.current, [])
+  // 往左翻页的状态。用 ref 而非 state：可视范围回调触发得非常频繁（拖动期间每帧
+  // 都可能触发），用 state 会让每次滚动都重渲染整个图表页；这两个值也只在回调
+  // 内部读写，不参与渲染。
+  // Paging state. Refs rather than state: the visible-range callback fires very
+  // frequently (potentially every frame while dragging) and using state would
+  // re-render the whole chart page on every scroll; these values are also only
+  // read and written inside the callback and never rendered.
+  const loadingOlderRef = useRef(false)
+  const hasMoreHistoryRef = useRef(true)
 
   // 当前品种/周期的完整 OHLCV 历史（升序），指标计算的唯一数据来源。与主
   // K 线 series 分开维护，因为指标要用到全部历史做窗口计算，而主 series 的
@@ -1442,6 +1469,8 @@ export default function ChartsPage() {
     lastTimeRef.current = 0
     barTimesRef.current = []
     candlesRef.current = []
+    loadingOlderRef.current = false
+    hasMoreHistoryRef.current = true
 
     // 把一根 bar 应用到图表：只在其时间 >= 已应用的最新时间时更新，避免
     // lightweight-charts 对更早时间抛错而中断实时刷新。
@@ -1479,7 +1508,7 @@ export default function ChartsPage() {
       priceFormat: { type: 'price', precision: decimals, minMove: Math.pow(10, -decimals) },
     })
 
-    chartApi.history(symbol, interval).then((r) => {
+    chartApi.history(symbol, interval, HISTORY_PAGE_SIZE).then((r) => {
       if (!alive) return
       if (r.bars.length > 0) {
         series.setData(r.bars.map(toLwPoint))
@@ -1487,16 +1516,66 @@ export default function ChartsPage() {
         setLastPrice(r.bars[r.bars.length - 1].c)
         barTimesRef.current = r.bars.map((b) => b.t)
         candlesRef.current = r.bars.slice(-MAX_CLIENT_BARS)
+        hasMoreHistoryRef.current = r.hasMore
         recomputeIndicators()
         setDayStats(computeDayStats(candlesRef.current))
         chartRef.current?.timeScale().fitContent()
         setHasData(true)
       } else {
+        hasMoreHistoryRef.current = false
         setHasData(false)
       }
     }).catch(() => {
       if (alive) setHasData(false)
     })
+
+    // 往左拖到接近最早一根时，用 before 游标向数据库要更早的一页。
+    // 必须 setData 整段重设而不是 update()：lightweight-charts 的 update() 只接受
+    // 时间 >= 当前最后一根的点，往前插入历史会抛错。
+    // 重设后要恢复原来的可视范围，否则图表会跳回默认位置，用户拖动的手感会断。
+    // When the user scrolls near the earliest bar, ask the database for an older
+    // page via the `before` cursor. This must use setData to replace the whole
+    // series rather than update(): lightweight-charts' update() only accepts
+    // times >= the last applied one and throws when prepending history.
+    // The visible range is restored afterwards, otherwise the chart jumps back to
+    // its default position and the scroll gesture feels broken.
+    const loadOlder = () => {
+      if (!alive || loadingOlderRef.current || !hasMoreHistoryRef.current) return
+      const arr = candlesRef.current
+      if (arr.length === 0) return
+      loadingOlderRef.current = true
+      const before = arr[0].t
+      chartApi.history(symbol, interval, HISTORY_PAGE_SIZE, before).then((r) => {
+        if (!alive) return
+        hasMoreHistoryRef.current = r.hasMore
+        if (r.bars.length === 0) return
+        const range = chartRef.current?.timeScale().getVisibleLogicalRange()
+        const merged = [...r.bars, ...candlesRef.current].slice(-MAX_CLIENT_BARS)
+        candlesRef.current = merged
+        barTimesRef.current = merged.map((b) => b.t)
+        series.setData(merged.map(toLwPoint))
+        recomputeIndicators()
+        // 往左插了 r.bars.length 根，原来的逻辑下标整体右移同样的量。
+        // Inserting r.bars.length bars on the left shifts every logical index right.
+        if (range) {
+          chartRef.current?.timeScale().setVisibleLogicalRange({
+            from: range.from + r.bars.length,
+            to: range.to + r.bars.length,
+          })
+        }
+      }).catch(() => {
+        // 失败不置 hasMore=false：网络抖动不代表没有更早数据，下次拖动会再试。
+        // Don't clear hasMore on failure: a network blip doesn't mean there's no
+        // older data, and the next scroll will retry.
+      }).finally(() => {
+        if (alive) loadingOlderRef.current = false
+      })
+    }
+
+    const onRangeChange = (range: { from: number; to: number } | null) => {
+      if (range && range.from < HISTORY_PREFETCH_BARS) loadOlder()
+    }
+    chartRef.current?.timeScale().subscribeVisibleLogicalRangeChange(onRangeChange)
 
     const timer = window.setInterval(() => {
       chartApi.latest(symbol, interval).then((r) => {
@@ -1522,6 +1601,7 @@ export default function ChartsPage() {
     return () => {
       alive = false
       window.clearInterval(timer)
+      chartRef.current?.timeScale().unsubscribeVisibleLogicalRangeChange(onRangeChange)
     }
   }, [symbol, interval, recomputeIndicators])
 

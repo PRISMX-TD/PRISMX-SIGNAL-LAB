@@ -166,9 +166,15 @@ export const symbolApi = {
 // 行情 K 线（自建中央 MT5 喂价源，取代 TradingView Widget）
 // Chart candles from the self-hosted central MT5 feed (replaces the TradingView widget)
 export const chartApi = {
-  history: (symbol: string, interval: string, limit = 500) =>
-    request<{ symbol: string; interval: string; bars: Candle[] }>(
-      `/chart/history?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${limit}`
+  // before 是往更早翻页的游标：传当前最早那根的 t，拿到它之前的一页。
+  // hasMore 为 false 表示数据库里没有更早的了，前端可以停止继续请求。
+  // `before` is the cursor for paging backwards: pass the earliest bar's `t` to
+  // get the page before it. hasMore=false means the database holds nothing
+  // earlier, so the client can stop asking.
+  history: (symbol: string, interval: string, limit = 1000, before?: number) =>
+    request<{ symbol: string; interval: string; bars: Candle[]; hasMore: boolean }>(
+      `/chart/history?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${limit}` +
+        (before !== undefined ? `&before=${before}` : '')
     ),
   latest: (symbol: string, interval: string) =>
     request<{ bars: Candle[]; updatedAt: number | null }>(

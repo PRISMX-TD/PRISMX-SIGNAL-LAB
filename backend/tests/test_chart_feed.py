@@ -47,12 +47,15 @@ M1_SECONDS = 60
 
 @pytest.fixture(autouse=True)
 def _reset_skew_cache():
-    """`_skew_cache` 是模块级全局状态,不清空会在测试用例之间互相污染。
-    `_skew_cache` is module-level global state; must be cleared between tests
-    or they'll contaminate each other."""
+    """`_skew_cache` 与 chart_store 的内存缓存都是模块级全局状态,不清空会在测试
+    用例之间互相污染。
+    `_skew_cache` and chart_store's in-memory cache are both module-level global
+    state; must be cleared between tests or they'll contaminate each other."""
     chart_module._skew_cache.clear()
+    chart_module.chart_store._candles.clear()
     yield
     chart_module._skew_cache.clear()
+    chart_module.chart_store._candles.clear()
 
 
 def _now() -> float:
@@ -328,3 +331,259 @@ def test_repeated_tick_requests_for_same_forming_bar_do_not_spam_new_rows(client
     # inserted, and only once (de-duplicated); the still-forming one must
     # never land in the database.
     assert len(rows) == 1
+
+
+# ---------- mode=history:一次性历史回填 / one-off history seeding ----------
+def _history_bars(count: int, end_t: int, step: int = 900) -> list[dict]:
+    """生成 count 根真实感的 bar,时间升序,结束于 end_t。
+
+    每根的 OHLC 都不同——candle_store 会把"整根 OHLCV 与近期某根完全相同"的
+    bar 判定为休市重放并丢弃,全用同一个价格会让这些 bar 根本插不进去。
+    Generate `count` realistic ascending bars ending at end_t. Each has distinct
+    OHLC values: candle_store drops any bar whose entire OHLCV matches a recent
+    one as a market-closed replay, so reusing one price would prevent insertion.
+    """
+    return [
+        {
+            "t": end_t - (count - 1 - i) * step,
+            "o": 100.0 + i,
+            "h": 101.0 + i,
+            "l": 99.0 + i,
+            "c": 100.5 + i,
+            "v": 10 + i,
+        }
+        for i in range(count)
+    ]
+
+
+def test_history_mode_persists_bars_without_touching_the_live_cache(client, db, monkeypatch):
+    """mode=history 只落库,不写内存缓存。
+
+    历史批次推的是很久以前的一段,如果走 replace_series 整段替换内存缓存,实时
+    图表会突然显示两年前的蜡烛,直到下一次日常 backfill 才恢复。
+    mode=history persists only, never writing the in-memory cache: a history batch
+    carries a stretch from long ago, and replacing the cache with it would make
+    the live chart display two-year-old candles until the next routine backfill.
+    """
+    monkeypatch.setattr(settings, "EA_TOKEN", "test-ea-token")
+    chart_module.chart_store.replace_series("XAUUSD", "15", [{"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1}])
+
+    end_t = int(_now()) - 30 * 86400  # 一个月前,确保全部已收盘 / a month ago, all closed
+    bars = _history_bars(50, end_t)
+    res = client.post(
+        "/api/feed/candles",
+        headers={"X-EA-Token": "test-ea-token"},
+        json={"mode": "history", "series": [{"symbol": "XAUUSD", "interval": "15", "bars": bars}]},
+    )
+    assert res.status_code == 200
+
+    rows = db.query(Candle).filter(Candle.symbol == "XAUUSD", Candle.interval == "15").all()
+    assert len(rows) == 50
+
+    # 内存缓存必须还是原来那一根,没有被历史批次覆盖。
+    # The cache must still hold the original single bar, untouched by the batch.
+    cached = chart_module.chart_store.get_history("XAUUSD", "15", 500)
+    assert len(cached) == 1
+    assert cached[0]["t"] == 1
+
+
+def test_history_mode_does_not_evaluate_strategies(client, db, monkeypatch):
+    """mode=history 不触发策略求值。
+
+    策略求值的语义是"刚有一根新 K 线收盘",会写信号、推送通知、并推进去重游标。
+    历史回填时每一批都被当成"刚收盘"就会凭空产生成千上万条历史信号并给用户
+    发推送,游标也会被推到历史某个点、让真实的新 K 线被误判为已处理。
+    mode=history must not trigger strategy evaluation: it means "a bar just
+    closed" and writes signals, sends pushes and advances the dedup cursor.
+    Treating each seeded batch as just-closed would fabricate thousands of
+    historical signals, push them to users, and drag the cursor into the past so
+    genuinely new bars get judged already-handled.
+    """
+    monkeypatch.setattr(settings, "EA_TOKEN", "test-ea-token")
+    calls: list[tuple[str, str]] = []
+
+    async def _spy(symbol: str, interval: str):
+        calls.append((symbol, interval))
+
+    monkeypatch.setattr(chart_module.strategy_live, "evaluate_new_candle", _spy)
+
+    end_t = int(_now()) - 30 * 86400
+    payload = {"mode": "history", "series": [{"symbol": "XAUUSD", "interval": "15", "bars": _history_bars(20, end_t)}]}
+    assert client.post("/api/feed/candles", headers={"X-EA-Token": "test-ea-token"}, json=payload).status_code == 200
+    assert calls == []
+
+    # 对照:同样的数据走 backfill 就应该求值,证明上面的空结果不是因为数据本身
+    # 没插进去。/ Control: the same data via backfill must evaluate, proving the
+    # empty result above isn't just "nothing got inserted".
+    payload["mode"] = "backfill"
+    payload["series"][0]["interval"] = "60"
+    assert client.post("/api/feed/candles", headers={"X-EA-Token": "test-ea-token"}, json=payload).status_code == 200
+    assert calls == [("XAUUSD", "60")]
+
+
+def test_history_mode_is_idempotent_across_reruns(client, db, monkeypatch):
+    """重复回填同一段不产生重复行——EA 重启会从头再跑一遍回填,靠的就是这个。
+    Re-seeding the same stretch creates no duplicate rows; the EA restarting and
+    re-running the whole seed relies on this."""
+    monkeypatch.setattr(settings, "EA_TOKEN", "test-ea-token")
+    end_t = int(_now()) - 30 * 86400
+    payload = {"mode": "history", "series": [{"symbol": "XAGUSD", "interval": "15", "bars": _history_bars(30, end_t)}]}
+
+    for _ in range(3):
+        assert client.post("/api/feed/candles", headers={"X-EA-Token": "test-ea-token"}, json=payload).status_code == 200
+
+    rows = db.query(Candle).filter(Candle.symbol == "XAGUSD", Candle.interval == "15").all()
+    assert len(rows) == 30
+
+
+def test_history_batch_does_not_wipe_the_live_skew_cache(client, db, monkeypatch):
+    """回归测试：历史批次不能擦掉实时链路已经收敛出来的纠偏量。
+
+    _correct_future_skew 用"这一批最新一根 vs 服务器当前时间"探测偏差,而历史
+    批次最新的一根本来就在很久以前,算出来必然为负,那个函数会把缓存整条 pop
+    掉。若历史回填走那条路,每灌一批就会把实时链路的纠偏量清零,下一批实时
+    bar 得从头重新起算——时钟跑偏的喂价端会因此反复出现错位蜡烛。
+    Regression test: a history batch must not wipe the skew the live path
+    converged on. _correct_future_skew detects the offset from "this batch's
+    newest bar vs now", and a history batch's newest bar is old by definition, so
+    the computed skew is negative and the function pops the cache entry. Routing
+    seeding through it would zero the live correction on every batch, forcing a
+    re-anchor each time — producing recurring misaligned candles for a
+    clock-skewed feed."""
+    monkeypatch.setattr(settings, "EA_TOKEN", "test-ea-token")
+    key = ("XAUUSD", "15")
+    chart_module._skew_cache[key] = 11 * 3600
+
+    end_t = int(_now()) - 30 * 86400
+    res = client.post(
+        "/api/feed/candles",
+        headers={"X-EA-Token": "test-ea-token"},
+        json={"mode": "history", "series": [{"symbol": "XAUUSD", "interval": "15", "bars": _history_bars(10, end_t)}]},
+    )
+    assert res.status_code == 200
+    assert chart_module._skew_cache.get(key) == 11 * 3600
+
+    # 而且纠偏要真的被应用到历史 bar 上,否则它们会和实时链路存进去的 bar
+    # 在时间轴上错开一截。/ And the correction must actually be applied, or these
+    # bars would sit offset from the ones the live path stored.
+    rows = db.query(Candle).filter(Candle.symbol == "XAUUSD", Candle.interval == "15").order_by(Candle.t).all()
+    assert len(rows) == 10
+    assert rows[-1].t == end_t - 11 * 3600
+
+
+# ---------- GET /api/chart/history:读库 + before 游标分页 ----------
+# ---------- Reads the database, paginated with the `before` cursor ----------
+def _seed_candles(db, symbol: str, interval: str, count: int, end_t: int, step: int = 900) -> None:
+    for b in _history_bars(count, end_t, step):
+        db.add(Candle(symbol=symbol, interval=interval, **b))
+    db.commit()
+
+
+def test_chart_history_reads_the_database_not_the_memory_cache(client, db, auth_headers):
+    """图表历史必须来自数据库,与策略回测同源。
+
+    以前读的是 chart_store 内存缓存:硬上限 500 根、进程重启即空,而回测一直读
+    Candle 表。两边时间范围不同,用户在图上看到的和策略据以计算的可能不是同一批
+    数据——这正是回测图标记错位那次事故的同类问题。
+    Chart history must come from the database, the same source as the backtest.
+    It used to read the chart_store cache (capped at 500 bars, emptied on
+    restart) while the backtest always read the Candle table; different ranges
+    meant what the user saw and what strategies computed on could differ — the
+    same class of bug as the misaligned backtest-chart markers.
+    """
+    end_t = int(_now()) - 86400
+    _seed_candles(db, "XAUUSD", "15", 20, end_t)
+    # 内存缓存里放一根完全不同的 bar:如果接口还在读缓存,断言会抓到它。
+    # Put a distinct bar in the cache: if the endpoint still reads it, this catches it.
+    chart_module.chart_store.replace_series("XAUUSD", "15", [{"t": 999, "o": 9, "h": 9, "l": 9, "c": 9, "v": 9}])
+
+    res = client.get("/api/chart/history?symbol=XAUUSD&interval=15", headers=auth_headers)
+    assert res.status_code == 200
+    bars = res.json()["bars"]
+    assert len(bars) == 20
+    assert [b["t"] for b in bars] == sorted(b["t"] for b in bars)  # 升序返回 / ascending
+    assert all(b["t"] != 999 for b in bars)
+
+
+def test_chart_history_returns_the_newest_page_when_more_exist_than_the_limit(client, db, auth_headers):
+    """超过 limit 时返回的必须是"最新"那一页,而不是最早那一页。
+
+    正序 limit 会永远返回库里最早的那些,新数据再多也追不上,图表看起来卡在某个
+    历史日期(与 _load_backtest_bars 记录的是同一个坑)。
+    When more rows exist than `limit`, the newest page must come back, not the
+    oldest: an ascending limit would forever return the earliest rows no matter
+    how much new data arrives, leaving the chart stuck at some past date (the
+    same trap documented in _load_backtest_bars).
+    """
+    end_t = int(_now()) - 86400
+    _seed_candles(db, "XAUUSD", "15", 50, end_t)
+
+    res = client.get("/api/chart/history?symbol=XAUUSD&interval=15&limit=10", headers=auth_headers)
+    bars = res.json()["bars"]
+    assert len(bars) == 10
+    assert bars[-1]["t"] == end_t  # 最新那根在页尾 / newest bar ends the page
+    assert res.json()["hasMore"] is True
+
+
+def test_chart_history_before_cursor_pages_backwards_without_gaps_or_overlap(client, db, auth_headers):
+    """用 before 游标连续往左翻,必须严格衔接:不重复、不跳过。
+    Paging left with the `before` cursor must join up exactly: no duplicates, no
+    skipped bars."""
+    end_t = int(_now()) - 86400
+    _seed_candles(db, "XAUUSD", "15", 30, end_t)
+
+    first = client.get("/api/chart/history?symbol=XAUUSD&interval=15&limit=10", headers=auth_headers).json()
+    second = client.get(
+        f"/api/chart/history?symbol=XAUUSD&interval=15&limit=10&before={first['bars'][0]['t']}",
+        headers=auth_headers,
+    ).json()
+
+    assert len(second["bars"]) == 10
+    # 第二页整体早于第一页,且两页拼起来正好是连续的 20 根。
+    # The second page is entirely older, and the two join into 20 contiguous bars.
+    assert second["bars"][-1]["t"] < first["bars"][0]["t"]
+    joined = [b["t"] for b in second["bars"] + first["bars"]]
+    assert joined == sorted(joined)
+    assert len(set(joined)) == 20
+    assert all(joined[i + 1] - joined[i] == 900 for i in range(len(joined) - 1))
+
+
+def test_chart_history_reports_no_more_pages_at_the_oldest_bar(client, db, auth_headers):
+    """翻到最早一根之后 hasMore 必须为 false,否则前端会无限往左请求空页。
+    Past the oldest bar hasMore must be false, or the client would keep
+    requesting empty pages forever."""
+    end_t = int(_now()) - 86400
+    _seed_candles(db, "XAUUSD", "15", 5, end_t)
+
+    full = client.get("/api/chart/history?symbol=XAUUSD&interval=15&limit=10", headers=auth_headers).json()
+    assert len(full["bars"]) == 5
+    assert full["hasMore"] is False
+
+    beyond = client.get(
+        f"/api/chart/history?symbol=XAUUSD&interval=15&limit=10&before={full['bars'][0]['t']}",
+        headers=auth_headers,
+    ).json()
+    assert beyond["bars"] == []
+    assert beyond["hasMore"] is False
+
+
+def test_chart_history_limit_can_exceed_the_old_500_bar_cap(client, db, auth_headers):
+    """回归测试：单次请求不再被旧的 500 根内存缓存上限卡住。
+
+    500 这个数原本是 chart_store.MAX_BARS,接口把它当成 limit 的上界,于是即便
+    库里存着两年历史也只能取到 500 根。
+    Regression test: a single request is no longer capped by the old 500-bar
+    in-memory limit. That number was chart_store.MAX_BARS, used as the `limit`
+    ceiling, so only 500 bars were reachable even with two years stored.
+    """
+    end_t = int(_now()) - 86400
+    _seed_candles(db, "XAUUSD", "15", 600, end_t)
+
+    res = client.get("/api/chart/history?symbol=XAUUSD&interval=15&limit=600", headers=auth_headers)
+    assert res.status_code == 200
+    assert len(res.json()["bars"]) == 600
+
+
+def test_chart_history_rejects_an_unknown_interval(client, auth_headers):
+    res = client.get("/api/chart/history?symbol=XAUUSD&interval=30", headers=auth_headers)
+    assert res.status_code == 400

@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.models import User
+from app.models import Candle, User
 from app.services import candle_store, chart_store, quotes_store
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user
@@ -34,6 +34,16 @@ router = APIRouter(tags=["chart"])
 # 前端 ChartsPage 的周期 code 集合，须与 EA 推送的周期保持一致。
 # Frontend ChartsPage's interval codes; must match what the EA pushes.
 ALLOWED_INTERVALS = {"1", "5", "15", "60", "240", "D"}
+
+# 单次 /chart/history 请求最多返回多少根。不是"总共能看多少"的上限——前端靠
+# `before` 游标一页页往左取,总深度只受数据库里实际存了多少限制。设这个上限是为了
+# 挡住单次请求把几万根一次性序列化(那会同时打爆后端内存和浏览器)。
+# Max bars a single /chart/history request returns. This is not a cap on how much
+# history is viewable — the client pages backwards with the `before` cursor, so
+# total depth is bounded only by what's actually stored. The cap exists to stop a
+# single request from serializing tens of thousands of bars at once, which would
+# blow up both the backend's memory and the browser.
+CHART_HISTORY_MAX_LIMIT = 5000
 
 # 喂价端(EA/其运行机器)的时钟如果比服务器明显跑快,会把 K 线时间戳打进
 # "未来"——超过这个阈值(5 分钟,远大于正常网络延迟/处理耗时)才当作真的时钟
@@ -68,7 +78,9 @@ class FeedSeries(BaseModel):
 
 
 class FeedRequest(BaseModel):
-    mode: str  # "backfill" | "tick"
+    # "backfill" 整段替换内存缓存 | "tick" 合并最新几根 | "history" 只落库
+    # "backfill" replaces the cache | "tick" merges latest | "history" stores only
+    mode: str
     series: list[FeedSeries] = []
 
 
@@ -189,15 +201,78 @@ def _correct_future_skew(
     return [{**b, "t": b["t"] - shift} for b in bars], cached, is_new_regime
 
 
+def _apply_cached_skew(bars: list[dict], cache_key: tuple[str, str], interval_seconds: int) -> list[dict]:
+    """按当前已探测到的纠偏量纠正一批历史 bar,但不读写迟滞缓存。
+
+    历史回填批次不能走 _correct_future_skew():那个函数用"这一批最新一根 vs 服务器
+    当前时间"来探测偏差,而历史批次最新的一根本来就在很久以前,算出来的差值必然为
+    负,于是它会把该(品种,周期)的缓存整条 pop 掉——等于用历史数据擦掉了实时链路
+    好不容易收敛出来的纠偏量,下一批实时 bar 得从头重新起算。
+
+    但纠偏本身仍要做:如果 EA 那台机器时钟偏了,它推来的历史时间戳同样是偏的,不
+    纠正就会和实时链路存进去的 bar 在时间轴上错开一截。所以这里复用实时链路已经
+    探测好的那个值,只应用、不更新。缓存为空(时钟本来就是对的)时原样返回。
+
+    Correct a batch of history bars using the already-detected skew, without
+    reading or writing the hysteresis cache.
+
+    History batches must not go through _correct_future_skew(): it detects the
+    offset from "this batch's newest bar vs the server's current time", and a
+    history batch's newest bar is old by definition, so the computed skew is
+    negative and the function pops that (symbol, interval)'s cache entry —
+    history data would wipe out the correction the live path worked to converge
+    on, forcing it to start over on the next live batch.
+
+    The correction itself is still needed: if the EA's host clock is off, the
+    history timestamps it pushes are off by the same amount, and leaving them
+    uncorrected would offset them from the bars the live path stored. So this
+    applies the value the live path already detected without updating it. With
+    an empty cache (the clock was fine all along) the bars pass through.
+    """
+    cached = _skew_cache.get(cache_key)
+    if not cached:
+        return bars
+    shift = round(cached / interval_seconds) * interval_seconds
+    return [{**b, "t": b["t"] - shift} for b in bars]
+
+
 @router.post("/feed/candles")
 async def feed_candles(
     req: FeedRequest,
     x_ea_token: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ):
-    """EA 上报 K 线：mode=backfill 整段替换，mode=tick 合并最新几根。
+    """EA 上报 K 线：mode=backfill 整段替换，mode=tick 合并最新几根，
+    mode=history 只落库（一次性历史回填）。
     EA reports candles: mode=backfill replaces the full series, mode=tick
-    merges the latest few bars.
+    merges the latest few bars, mode=history only persists (one-off backfill).
+
+    mode=history 是 EA 首次上线时一次性灌入历史的通道，与日常的 backfill/tick
+    刻意分开处理，两点差异都是必须的：
+
+    ① 不碰 chart_store。内存缓存服务的是"最新一屏"，replace_series 会整段替换
+       成这一批。历史批次推的是很久以前的一段，替换进去会让实时图表突然显示
+       两年前的蜡烛，而且下一次日常 backfill 才会恢复。
+    ② 不触发 evaluate_new_candle。策略求值的语义是"刚有一根新 K 线收盘"，会
+       写信号、推送通知、并推进去重游标 last_signal_bar_t。历史数据灌进来时
+       每一批都会被当成"刚收盘"，凭空产生成千上万条两年前的历史信号并给用户
+       发推送；游标被推到历史某个点之后，真实的新 K 线反而可能被判为已处理。
+
+    mode=history is the one-off channel for seeding history when the EA is first
+    deployed, deliberately handled apart from the routine backfill/tick paths.
+    Both differences are necessary:
+
+    ① It doesn't touch chart_store. The in-memory cache serves "the latest
+       screenful", and replace_series swaps the whole series for this batch. A
+       history batch carries a stretch from long ago, so writing it there makes
+       the live chart suddenly display two-year-old candles until the next
+       routine backfill repairs it.
+    ② It doesn't trigger evaluate_new_candle. Strategy evaluation means "a new
+       bar just closed": it writes signals, sends push notifications and
+       advances the last_signal_bar_t dedup cursor. Seeding history would treat
+       every batch as just-closed, fabricating thousands of two-year-old signals
+       and pushing them to users; and once the cursor is dragged to some point
+       in the past, genuinely new bars can be judged already-handled.
 
     顺手把已经走完的 K 线写进数据库长期保存（供策略回测/更长回看用），并对
     这个品种/周期下所有已启用的用户策略求值——两者都只在真的有一根新
@@ -218,6 +293,19 @@ async def feed_candles(
         symbol = s.symbol.upper()
         bars = [b.model_dump() for b in s.bars]
         interval_seconds = candle_store.INTERVAL_SECONDS.get(s.interval, 60)
+        # history 批次只落库,不碰内存缓存也不求值策略,理由见本函数 docstring;
+        # 纠偏也走只读那条,不能让历史批次擦掉实时链路的迟滞缓存(见 _apply_cached_skew)。
+        # history batches only persist; see this function's docstring. Skew
+        # correction goes through the read-only path so a history batch can't wipe
+        # the live hysteresis cache (see _apply_cached_skew).
+        if req.mode == "history":
+            bars = _apply_cached_skew(bars, (symbol, s.interval), interval_seconds)
+            new_count = candle_store.persist_closed_bars(db, symbol, s.interval, bars)
+            logger.info(
+                "feed_candles: %s/%s history batch stored %d/%d bar(s)",
+                symbol, s.interval, new_count, len(bars),
+            )
+            continue
         bars, skew, is_new_regime = _correct_future_skew(bars, now, (symbol, s.interval), interval_seconds)
         if is_new_regime:
             logger.warning(
@@ -307,15 +395,62 @@ async def list_active_symbols(user: User = Depends(get_current_user)):
 async def chart_history(
     symbol: str = Query(max_length=32),
     interval: str = Query(),
-    limit: int = Query(default=500, ge=1, le=chart_store.MAX_BARS),
+    limit: int = Query(default=1000, ge=1, le=CHART_HISTORY_MAX_LIMIT),
+    before: int | None = Query(default=None, description="只返回 t < before 的 bar / only bars with t < before"),
+    db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """图表历史 K 线：读数据库,支持用 `before` 时间游标往更早翻页。
+
+    改为读库(以前读 chart_store 内存缓存)的原因有三:
+      ① 与策略回测同源。回测一直读的是 Candle 表,而图表读内存缓存那 500 根,
+         两边时间范围不同——同一个品种在行情图上看到的和策略据以计算的可能不是
+         同一批数据(回测图曾经就因为这个分裂而标记错位,见 _load_backtest_bars)。
+      ② 内存缓存进程重启即空,得等 EA 下一轮 backfill 才有数据;数据库不会。
+      ③ 内存缓存硬上限 500 根,库里存着两年历史却看不到。
+
+    仍在形成中的那根不在这里返回——数据库只存已收盘的 bar。前端用
+    GET /chart/latest(读 chart_store)拿最右侧那根跳动的,两路拼接。
+
+    `before` 是往更早翻页的游标(取前端当前最早那根的 t),配合 limit 实现左拖
+    加载。取法固定为"倒序取 limit 根再翻回正序":正序 limit 会永远返回最早的
+    那些,新数据再多也追不上(与 _load_backtest_bars 同一个坑)。
+
+    Chart history bars: read from the database, paginated backwards via the
+    `before` cursor.
+
+    Reading the database (it used to read the chart_store in-memory cache) for
+    three reasons: ① same source as the strategy backtest, which always read the
+    Candle table while the chart read 500 cached bars — different time ranges, so
+    what a user saw on the chart and what a strategy computed on could be
+    different data (exactly the split that misaligned the backtest chart's
+    markers, see _load_backtest_bars); ② the cache empties on restart and stays
+    empty until the EA's next backfill, the database doesn't; ③ the cache is
+    capped at 500 bars, so two years of stored history was invisible.
+
+    The still-forming bar is not returned here — the database only stores closed
+    bars. The frontend gets the live rightmost bar from GET /chart/latest (which
+    reads chart_store) and joins the two.
+
+    `before` is the cursor for paging backwards (pass the earliest `t` the client
+    currently holds). The fetch is always "newest `limit` rows descending, then
+    reversed": an ascending limit would forever return the oldest rows no matter
+    how much new data arrives (the same trap documented in _load_backtest_bars).
+    """
     if interval not in ALLOWED_INTERVALS:
         raise HTTPException(status_code=400, detail="bad interval")
+    q = db.query(Candle).filter(Candle.symbol == symbol.upper(), Candle.interval == interval)
+    if before is not None:
+        q = q.filter(Candle.t < before)
+    rows = q.order_by(Candle.t.desc()).limit(limit).all()
+    rows.reverse()
     return {
         "symbol": symbol.upper(),
         "interval": interval,
-        "bars": chart_store.get_history(symbol.upper(), interval, limit),
+        "bars": [{"t": r.t, "o": r.o, "h": r.h, "l": r.l, "c": r.c, "v": r.v} for r in rows],
+        # 前端据此判断"还能不能继续往左拉":拿满一整页就假定还有更早的。
+        # Tells the client whether to keep paging left: a full page implies more.
+        "hasMore": len(rows) == limit,
     }
 
 

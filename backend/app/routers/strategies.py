@@ -78,10 +78,24 @@ from app.services.strategy.presets import PRESET_CONDITIONS, PRESET_LOGIC, TEMPL
 
 router = APIRouter(prefix="/strategies", tags=["strategies"])
 
-MAX_BACKTEST_BARS = 5000
-# 回测响应回传的净值点上限：绘图密度够用，避免把 5000 点全序列化。
-# Cap on equity points returned: dense enough to plot, without serializing all
-# 5000 of them.
+# 回测单次最多读多少根。730 天(days 的上限)的 15 分钟线约 4.9 万根、1 小时线约
+# 1.2 万根,取 60000 让这两者都能被完整回测,不会因为撞上限而悄悄只回测了最近一段。
+# 1 分钟线 730 天约 75 万根会被截断,但它有 30 天保留期(m1_retention_days),库里本
+# 来就只有约 3 万根,同样装得下。
+# 上限不能去掉:回测是同步的纯 Python 循环,单次读进来的 bar 数直接决定内存占用和
+# 耗时(生产 2 核单进程),无界读取会让一次请求拖住整个事件循环。
+# Max bars a single backtest reads. Over the 730-day `days` ceiling, 15-minute
+# bars come to ~49k and hourly to ~12k, so 60000 lets both backtest in full
+# instead of silently testing only the most recent stretch after hitting the cap.
+# 730 days of 1-minute bars (~750k) would still be truncated, but that interval
+# has a 30-day retention (m1_retention_days) so only ~30k exist to begin with.
+# The cap can't be dropped: the backtest is a synchronous pure-Python loop, and
+# the bars read in one go drive both memory and runtime (2 cores, single process
+# in production) — an unbounded read would stall the whole event loop.
+MAX_BACKTEST_BARS = 60000
+# 回测响应回传的净值点上限：绘图密度够用，避免把全部点位序列化。
+# Cap on equity points returned: dense enough to plot, without serializing every
+# one of them.
 MAX_EQUITY_POINTS = 500
 
 
