@@ -70,6 +70,22 @@ const TEMPLATE_LABEL_KEYS: Record<StrategyTemplateKey, string> = {
   macd_rsi_combo: 'strategy.templateMacdRsiCombo',
 }
 
+// 每个预设的一句话说明。这些文案 i18n 里一直有（templateXxxDesc），但自从模板
+// 参数表单被条件编辑器取代后就没有出口了——预设选择器只显示名字，"MACD 金叉死叉"
+// 对新手不构成信息。推荐卡片把它们放回界面上。
+// One-line description per preset. These strings have always existed in i18n
+// (templateXxxDesc) but lost their surface when the template param form gave way
+// to the condition editor: the picker showed names only, and "MACD Cross" tells a
+// beginner nothing. The recommendation cards put them back on screen.
+const TEMPLATE_DESC_KEYS: Record<StrategyTemplateKey, string> = {
+  ma_trend: 'strategy.templateMaTrendDesc',
+  macd_cross: 'strategy.templateMacdCrossDesc',
+  rsi_reversal: 'strategy.templateRsiReversalDesc',
+  bollinger_breakout: 'strategy.templateBollingerBreakoutDesc',
+  donchian_breakout: 'strategy.templateDonchianBreakoutDesc',
+  macd_rsi_combo: 'strategy.templateMacdRsiComboDesc',
+}
+
 // 未保存草稿的回测结果归属键。用一个不可能与 UUID 冲突的字面量。
 // Key under which an unsaved draft's backtest result is stored; a literal that
 // can't collide with a UUID.
@@ -220,6 +236,27 @@ function StrategyEditor({
   const { t } = useTranslation()
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  // 分步向导：4 步只切换显示，草稿始终是同一份对象——每一步的改动立刻写进 draft，
+  // 不做"分步暂存、最后合并"，否则往回退一步就会丢掉刚填的东西。
+  // A 4-step wizard that only switches what's visible: the draft stays one
+  // object and every edit lands in it immediately. No per-step staging with a
+  // merge at the end — that loses what you just typed the moment you step back.
+  const [step, setStep] = useState(0)
+  // 「下一步」被条件为空挡住时的说明。不显示原因的禁用按钮就是个坏掉的按钮。
+  // Why "next" refused. A disabled button with no reason is a broken button.
+  const [stepError, setStepError] = useState<string | null>(null)
+  // 超时平仓 / 每日上限 / 冷却 / 交易时段四项默认收起：它们都可以留空，摊开会让
+  // 风险这一步看起来有八个必填项。
+  // Timeout / daily cap / cooldown / session start collapsed: all four are
+  // optional, and unfolded they make the risk step look like eight required
+  // fields.
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  // 编辑已有策略时四步全部解锁：这份配置早就是完整的，逼着人从第 1 步点到第 4 步
+  // 只为了改一个止损数字，是把新手引导变成所有人的过路费。
+  // Editing an existing strategy unlocks all four steps: that config is already
+  // complete, and walking from step 1 to step 4 just to change one stop-loss value
+  // would turn beginner guidance into a toll everyone pays.
+  const editing = draft.id != null
 
   const canSave = draft.rules.conditions.length > 0 && draft.symbol !== '' && draft.interval !== ''
 
@@ -283,12 +320,96 @@ function StrategyEditor({
           : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-100'
     }`
 
+  const steps = [
+    { key: 'stepBasics', hint: 'stepBasicsHint' },
+    { key: 'stepConditions', hint: 'stepConditionsHint' },
+    { key: 'stepRisk', hint: 'stepRiskHint' },
+    { key: 'stepReview', hint: 'stepReviewHint' },
+  ] as const
+
+  // 只有「条件为空」会挡住前进：品种与周期在新草稿里就有值（emptyDraft 给的），
+  // 挡不住也没必要挡；条件是唯一能被用户删空、且删空必然导致保存 400 的一项。
+  // Only an empty condition list blocks progress: the symbol and interval always
+  // arrive filled from emptyDraft, while conditions are the one thing a user can
+  // empty — and emptying them guarantees a 400 on save.
+  const goNext = () => {
+    if (step === 1 && draft.rules.conditions.length === 0) {
+      setStepError(t('strategy.stepNeedConditions'))
+      return
+    }
+    setStepError(null)
+    setStep((s) => Math.min(steps.length - 1, s + 1))
+  }
+
+  const riskSummary = `${
+    draft.stopLossMethod === 'percent'
+      ? `${draft.stopLossValue}%`
+      : draft.stopLossMethod === 'steps'
+        ? `${draft.stopLossValue}p`
+        : `${draft.stopLossValue}×ATR`
+  } / ${
+    draft.takeProfitMethod === 'rr'
+      ? `${draft.takeProfitValue}R`
+      : draft.takeProfitMethod === 'percent'
+        ? `${draft.takeProfitValue}%`
+        : draft.takeProfitMethod === 'steps'
+          ? `${draft.takeProfitValue}p`
+          : `${draft.takeProfitValue}×ATR`
+  }`
+
   return (
     <section className="glass mb-5 p-5">
-      {/* 基本信息：命名 + 品种（单选）+ 周期（单选）
-          Basics: name, symbol (single), interval (single) */}
-      <div>
-        <h4 className="mb-3 text-sm font-semibold text-slate-300">{t('strategy.sectionBasics')}</h4>
+      {/* 步骤条：既是进度，也是导航——已经走过的步骤可以点回去改，没走到的不能跳，
+          否则会跳过那一步的说明文字（新手唯一的解释来源）。
+          The stepper is progress and navigation both: visited steps are clickable
+          for edits, unvisited ones aren't, since jumping ahead skips that step's
+          explanatory copy — a beginner's only source of it. */}
+      <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-2">
+        {steps.map((s, i) => {
+          const done = i < step
+          const current = i === step
+          const reachable = editing || i <= step
+          return (
+            <li key={s.key} className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => { if (reachable) { setStepError(null); setStep(i) } }}
+                disabled={!reachable}
+                aria-current={current ? 'step' : undefined}
+                className={`flex items-center gap-2 rounded-pill border px-3 py-1.5 text-xs transition ${
+                  current
+                    ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'
+                    : reachable
+                      ? 'border-white/10 bg-white/5 text-slate-300 hover:border-prism-400/40'
+                      : 'cursor-default border-white/5 bg-white/[0.02] text-slate-600'
+                }`}
+              >
+                <span
+                  className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-semibold ${
+                    current ? 'bg-prism-500 text-white' : done ? 'bg-up/20 text-up' : 'bg-white/5 text-slate-500'
+                  }`}
+                >
+                  {done ? '✓' : i + 1}
+                </span>
+                {t(`strategy.${s.key}`)}
+              </button>
+              {i < steps.length - 1 && <span aria-hidden className="text-slate-700">·</span>}
+            </li>
+          )
+        })}
+      </ol>
+
+      <div className="mt-4">
+        <p className="text-[11px] uppercase tracking-wide text-slate-500">
+          {t('strategy.stepOf', { n: step + 1, total: steps.length })}
+        </p>
+        <h4 className="mt-1 font-display text-base font-semibold text-slate-100">{t(`strategy.${steps[step].key}`)}</h4>
+        <p className="mt-1.5 max-w-2xl text-xs leading-relaxed text-slate-400">{t(`strategy.${steps[step].hint}`)}</p>
+      </div>
+
+      {/* 第 1 步 · 选市场：命名 + 品种（单选）+ 周期（单选）
+          Step 1 · market: name, symbol (single), interval (single) */}
+      <div className={step === 0 ? 'mt-5' : 'hidden'}>
         <label className="flex flex-col gap-1.5">
           <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.name')}</span>
           <input
@@ -375,13 +496,21 @@ function StrategyEditor({
         </div>
       </div>
 
-      {/* 入场条件：只编辑做多方向的一列条件。做空侧由后端按每个用法登记的镜像
-          用法推出，这里没有对应的编辑区，所以必须明说，否则用户会以为漏了一半。
-          Entry conditions: only the long direction's list is edited here. The short
-          side is derived from each usage's registered mirror, and since there's no
-          editor for it, that has to be stated or users assume half is missing. */}
-      <div className="mt-5 border-t border-white/10 pt-4">
-        <h4 className="text-sm font-semibold text-slate-300">{t('strategy.sectionConditions')}</h4>
+      {/* 第 2 步 · 设条件：只编辑做多方向的一列条件。做空侧由后端按每个用法登记的
+          镜像用法推出，这里没有对应的编辑区，所以必须明说，否则用户会以为漏了一半。
+          Step 2 · conditions: only the long direction's list is edited here. The
+          short side is derived from each usage's registered mirror, and since
+          there's no editor for it, that has to be stated or users assume half is
+          missing. */}
+      <div className={step === 1 ? 'mt-5' : 'hidden'}>
+        {/* 当前盯的市场回显：条件这一步看不到第 1 步的选择，而「上穿均线」在
+            XAUUSD 5 分钟和 EURUSD 日线上是完全不同的两回事。
+            Echo the market being watched: step 2 hides step 1's choice, and "cross
+            above the MA" means two different things on XAUUSD 5m and EURUSD 1d. */}
+        <p className="text-xs text-slate-500">
+          {t('strategy.reviewMarket')}:{' '}
+          <span className="text-slate-300">{displaySymbol(draft.symbol)} · {intervalLabel(draft.interval)}</span>
+        </p>
         {/* 旧结构策略的条件已被换成初始值，不说清楚的话用户会以为自己原来的条件
             还在，保存后才发现被替换了。
             A legacy strategy's conditions were replaced with a starting value;
@@ -404,10 +533,10 @@ function StrategyEditor({
         <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('strategy.condShortHint')}</p>
       </div>
 
-      {/* 风险管理：止损 / 止盈各一张卡，方式与数值紧挨着
-          Risk management: one card each for SL and TP, method next to its value */}
-      <div className="mt-5 border-t border-white/10 pt-4">
-        <h4 className="mb-3 text-sm font-semibold text-slate-300">{t('strategy.sectionRisk')}</h4>
+      {/* 第 3 步 · 管风险：止损 / 止盈各一张卡，方式与数值紧挨着，各带一句人话解释
+          Step 3 · risk: one card each for SL and TP, method next to its value,
+          each with a plain-language line under it */}
+      <div className={step === 2 ? 'mt-5' : 'hidden'}>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
             <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.stopLossMethod')}</span>
@@ -440,6 +569,7 @@ function StrategyEditor({
                 onChange={(v) => onChange({ ...draft, stopLossValue: v })}
               />
             </div>
+            <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('strategy.stopLossHint')}</p>
           </div>
           <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
             <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.takeProfitMethod')}</span>
@@ -482,6 +612,7 @@ function StrategyEditor({
                 onChange={(v) => onChange({ ...draft, takeProfitValue: v })}
               />
             </div>
+            <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('strategy.takeProfitHint')}</p>
           </div>
         </div>
 
@@ -508,79 +639,177 @@ function StrategyEditor({
           <p className="text-xs leading-relaxed text-slate-500">
             {draft.oneTradeAtATime ? t('strategy.oneTradeAtATimeOnHint') : t('strategy.oneTradeAtATimeOffHint')}
           </p>
+          <p className="text-xs leading-relaxed text-prism-200/70">{t('strategy.oneTradeHint')}</p>
         </div>
 
-        {/* 超时平仓 / 每日上限 / 冷却：三个可空设定，0 视为不启用（写 null）
-            Timeout exit / daily cap / cooldown: three nullable settings, where 0
-            means "off" and is sent as null */}
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <NumberField
-            label={t('strategy.exitTimeoutBars')}
-            value={draft.exitTimeoutBars ?? 0}
-            min={0}
-            max={1000}
-            isFloat={false}
-            onChange={(v) => onChange({ ...draft, exitTimeoutBars: v > 0 ? v : null })}
-          />
-          <NumberField
-            label={t('strategy.dailySignalCap')}
-            value={draft.dailySignalCap ?? 0}
-            min={0}
-            max={100}
-            isFloat={false}
-            onChange={(v) => onChange({ ...draft, dailySignalCap: v > 0 ? v : null })}
-          />
-          <NumberField
-            label={t('strategy.cooldownMinutes')}
-            value={draft.cooldownMinutes ?? 0}
-            min={0}
-            max={1440}
-            isFloat={false}
-            onChange={(v) => onChange({ ...draft, cooldownMinutes: v > 0 ? v : null })}
-          />
-        </div>
-        <p className="mt-1.5 text-xs leading-relaxed text-slate-500">{t('strategy.optionalZeroHint')}</p>
+        {/* 高级设置默认收起：超时平仓 / 每日上限 / 冷却 / 交易时段这四项全部可空，
+            但摊在必填项旁边会被当成"还有四个要填的"。折叠不改变提交内容——收起时
+            照样按当前值提交，只是不占视觉预算。
+            The advanced group is collapsed by default: timeout / daily cap /
+            cooldown / session are all nullable, yet sitting beside required fields
+            they read as four more things to fill in. Collapsing changes nothing
+            about what is submitted; it only stops them spending visual budget. */}
+        <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.02]">
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((v) => !v)}
+            aria-expanded={showAdvanced}
+            className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+          >
+            <span>
+              <span className="text-sm text-slate-200">{t('strategy.advancedToggle')}</span>
+              {!showAdvanced && (
+                <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">{t('strategy.advancedHint')}</span>
+              )}
+            </span>
+            <span aria-hidden className={`shrink-0 text-xs text-slate-400 transition ${showAdvanced ? 'rotate-180' : ''}`}>▾</span>
+          </button>
 
-        {/* 交易时段过滤：与每日上限、冷却同属"什么时候允许入场"这一组约束。
-            Session filter: same "when may we enter" group as the daily cap and
-            cooldown. */}
-        <div className="mt-4">
-          <SessionFilterField
-            value={draft.sessionFilter}
-            onChange={(sessionFilter) => onChange({ ...draft, sessionFilter })}
+          <div className={showAdvanced ? 'border-t border-white/10 p-3' : 'hidden'}>
+            {/* 超时平仓 / 每日上限 / 冷却：三个可空设定，0 视为不启用（写 null）
+                Timeout exit / daily cap / cooldown: three nullable settings, where
+                0 means "off" and is sent as null */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <NumberField
+                label={t('strategy.exitTimeoutBars')}
+                value={draft.exitTimeoutBars ?? 0}
+                min={0}
+                max={1000}
+                isFloat={false}
+                onChange={(v) => onChange({ ...draft, exitTimeoutBars: v > 0 ? v : null })}
+              />
+              <NumberField
+                label={t('strategy.dailySignalCap')}
+                value={draft.dailySignalCap ?? 0}
+                min={0}
+                max={100}
+                isFloat={false}
+                onChange={(v) => onChange({ ...draft, dailySignalCap: v > 0 ? v : null })}
+              />
+              <NumberField
+                label={t('strategy.cooldownMinutes')}
+                value={draft.cooldownMinutes ?? 0}
+                min={0}
+                max={1440}
+                isFloat={false}
+                onChange={(v) => onChange({ ...draft, cooldownMinutes: v > 0 ? v : null })}
+              />
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('strategy.optionalZeroHint')}</p>
+
+            {/* 交易时段过滤：与每日上限、冷却同属"什么时候允许入场"这一组约束。
+                Session filter: same "when may we enter" group as the daily cap and
+                cooldown. */}
+            <div className="mt-4 border-t border-white/10 pt-4">
+              <SessionFilterField
+                value={draft.sessionFilter}
+                onChange={(sessionFilter) => onChange({ ...draft, sessionFilter })}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 第 4 步 · 回测并启用：先把前三步的选择摊成一句可核对的摘要，再是回测面板。
+          回测跑的是这份摘要，摘要对不上就没必要跑。
+          Step 4 · backtest and enable: the first three steps' choices condensed
+          into one checkable summary, then the backtest panel. The run uses exactly
+          this summary, so a wrong summary means there's nothing worth running. */}
+      <div className={step === 3 ? 'mt-5' : 'hidden'}>
+        <div className="rounded-lg border border-prism-500/20 bg-prism-600/5 p-3.5">
+          <p className="text-sm font-medium text-slate-200">{t('strategy.reviewTitle')}</p>
+          <dl className="mt-2.5 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+            <div>
+              <dt className="text-slate-500">{t('strategy.reviewMarket')}</dt>
+              <dd className="mt-0.5 font-mono text-slate-100">
+                {displaySymbol(draft.symbol)} · {intervalLabel(draft.interval)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">{t('strategy.reviewConditions')}</dt>
+              <dd className="mt-0.5 text-slate-100">
+                {t('strategy.reviewConditionsValue', {
+                  count: draft.rules.conditions.length,
+                  logic: draft.rules.logic === 'OR' ? t('strategy.condLogicOr') : t('strategy.condLogicAnd'),
+                })}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">{t('strategy.reviewRisk')}</dt>
+              <dd className="mt-0.5 font-mono text-slate-100">{riskSummary}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div className="mt-5">
+          <BacktestPanel
+            rules={draft.rules}
+            symbol={draft.symbol}
+            interval={draft.interval}
+            stopLossMethod={draft.stopLossMethod}
+            stopLossValue={draft.stopLossValue}
+            takeProfitMethod={draft.takeProfitMethod}
+            takeProfitValue={draft.takeProfitValue}
+            oneTradeAtATime={draft.oneTradeAtATime}
+            exitTimeoutBars={draft.exitTimeoutBars}
+            onResult={(res) => onBacktestResult(draft.id ?? null, res)}
           />
         </div>
       </div>
 
-      {/* 回测 / backtest */}
-      <div className="mt-5 border-t border-white/10 pt-4">
-        <BacktestPanel
-          rules={draft.rules}
-          symbol={draft.symbol}
-          interval={draft.interval}
-          stopLossMethod={draft.stopLossMethod}
-          stopLossValue={draft.stopLossValue}
-          takeProfitMethod={draft.takeProfitMethod}
-          takeProfitValue={draft.takeProfitValue}
-          oneTradeAtATime={draft.oneTradeAtATime}
-          exitTimeoutBars={draft.exitTimeoutBars}
-          onResult={(res) => onBacktestResult(draft.id ?? null, res)}
-        />
-      </div>
-
+      {stepError && <p className="mt-3 text-sm text-amber-200" role="alert">{stepError}</p>}
       {saveError && <p className="mt-3 text-sm text-down" role="alert">{saveError}</p>}
-      <div className="mt-5 flex flex-wrap gap-3 border-t border-white/10 pt-4">
-        <button type="button" onClick={() => save(true)} disabled={saving || !canSave} className="btn-primary px-5 py-2 text-sm disabled:opacity-40">
-          {t('strategy.saveAndEnable')}
-        </button>
-        <button
-          type="button"
-          onClick={() => save(false)}
-          disabled={saving || !canSave}
-          className="rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-slate-300 transition hover:text-white disabled:opacity-40"
-        >
-          {t('strategy.saveOnly')}
-        </button>
+
+      {/* 导航条：前三步只有"下一步"，保存按钮只在最后一步出现——中途就能保存会让
+          "先回测再启用"这条主张失去约束力。取消始终在最右，位置不随步骤移动。
+          The nav bar: the first three steps only offer "next", and the save buttons
+          appear only on the last one — a mid-flow save would strip all force from
+          "backtest before you enable". Cancel stays far right at every step. */}
+      <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-white/10 pt-4">
+        {step > 0 && (
+          <button
+            type="button"
+            onClick={() => { setStepError(null); setStep((s) => s - 1) }}
+            disabled={saving}
+            className="rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-slate-300 transition hover:text-white disabled:opacity-40"
+          >
+            {t('strategy.stepPrev')}
+          </button>
+        )}
+        {step < steps.length - 1 && (
+          <button
+            type="button"
+            onClick={goNext}
+            className={
+              editing
+                ? 'rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-slate-300 transition hover:text-white'
+                : 'btn-primary px-5 py-2 text-sm'
+            }
+          >
+            {t('strategy.stepNext')}
+          </button>
+        )}
+        {/* 保存按钮：新建时只在最后一步出现（先回测再启用），编辑时每一步都在
+            ——改一个数字就得走到第 4 步才能存，是在惩罚会用的人。
+            The save buttons appear only on the last step when creating (backtest
+            before you enable), but on every step when editing: making someone walk
+            to step 4 to save one changed number punishes the users who know how
+            this works. */}
+        {(editing || step === steps.length - 1) && (
+          <>
+            <button type="button" onClick={() => save(true)} disabled={saving || !canSave} className="btn-primary px-5 py-2 text-sm disabled:opacity-40">
+              {t('strategy.saveAndEnable')}
+            </button>
+            <button
+              type="button"
+              onClick={() => save(false)}
+              disabled={saving || !canSave}
+              className="rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-slate-300 transition hover:text-white disabled:opacity-40"
+            >
+              {t('strategy.saveOnly')}
+            </button>
+          </>
+        )}
         <button
           type="button"
           onClick={onCancel}
@@ -862,6 +1091,37 @@ export default function StrategiesPage() {
         </div>
       )}
 
+      {/* 三步流程说明：这一页的核心误解是"建好就等着赚钱"，而实际流程是挑条件 →
+          回测验证 → 才启用。所以说明只在还没有任何策略、或者正在新建时出现——已经
+          有在跑的策略的用户不需要每次进来都被讲一遍。
+          The three-step explainer: the standing misconception on this page is
+          "build it and wait for money", when the real flow is pick → backtest →
+          only then enable. It shows only when no strategy exists yet or one is
+          being created; a user with running strategies doesn't need the lecture on
+          every visit. */}
+      {isPro && (strategies.length === 0 || draft != null || picking) && (
+        <section className="glass mb-5 p-5">
+          <h3 className="font-display text-base font-semibold text-slate-100">{t('strategy.flowTitle')}</h3>
+          <ol className="mt-3.5 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-3">
+            {([
+              ['flowStep1', 'flowStep1Desc'],
+              ['flowStep2', 'flowStep2Desc'],
+              ['flowStep3', 'flowStep3Desc'],
+            ] as const).map(([label, desc], i) => (
+              <li key={label} className="flex gap-3">
+                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-prism-500/40 bg-prism-600/15 font-mono text-xs font-semibold text-prism-200">
+                  {i + 1}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-slate-100">{t(`strategy.${label}`)}</span>
+                  <span className="mt-1 block text-xs leading-relaxed text-slate-400">{t(`strategy.${desc}`)}</span>
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
       {/* 目录拉不到时新建与编辑都开不了，必须把原因摆在页面上。此前是静默失败，
           用户看到的是「按钮点了没反应」，无从判断是自己点错还是服务出问题。
           Without the catalogue neither creating nor editing can open, so the reason
@@ -921,6 +1181,7 @@ export default function StrategiesPage() {
               ? (Object.keys(presets) as StrategyTemplateKey[]).map((key) => ({
                   key,
                   label: t(TEMPLATE_LABEL_KEYS[key]),
+                  desc: t(TEMPLATE_DESC_KEYS[key]),
                 }))
               : []
           }
