@@ -13,6 +13,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
+from sqlalchemy.orm import aliased
 
 from app.core.database import SessionLocal
 from app.models import Candle
@@ -36,60 +37,120 @@ INTERVAL_SECONDS: dict[str, int] = {
 RETENTION_SWEEP_INTERVAL_SECONDS = 24 * 60 * 60
 
 
-def _has_no_market_activity(bar: dict) -> bool:
-    """判断一根 bar 是不是"市场根本没在动"的空转 bar(休市/节假日冻结报价)。
+# 判定"重放副本"时,拿新 bar 与最近这么多根已存 bar 比对。休市期间喂价端会在
+# 少数几个模板之间来回重放(实测是收盘前最后两根轮流出现),取 8 根足以覆盖,同时
+# 不会大到让正常行情里的偶然重合有机会被误判。
+# When detecting replayed duplicates, compare each new bar against this many
+# recent stored bars. During a close the feed cycles through a handful of
+# templates (observed: the last two real bars alternating), so 8 is ample cover
+# while staying small enough that coincidental matches in live data stay
+# implausible.
+REPLAY_LOOKBACK_BARS = 8
 
-    EA 在周末与节假日仍然连着 MT5、仍然按周期推 bar,此时报价冻结在上一个交易
-    日的收盘价,推出来的就是 o == h == l == c 且成交量为 0 的一批 bar。它们在
-    时间上确实"已经走完",所以能通过收盘判定,但它们不是行情,落库之后会造成:
-      ① 回测图上休市段被一长串完全平坦的蜡烛填满,真实的周末跳空被抹平——
-         看起来像是图表在"拉时间",实际是数据库里真有这些行;
-      ② 更严重的是指标被污染:BOLL 这类基于标准差的指标在这段里标准差趋近 0,
-         上下轨收缩贴到中轨上,一到开盘必然触发穿越,凭空造出入场信号,胜率和
-         信号数因此失真。
-    所以这类 bar 不该进库。
+# 清理存量副本时,只把时间相距在这个天数以内的两根 bar 当作"同一次重放"。休市最长
+# 也就是周末加节假日连休,3 天足够覆盖;超出这个跨度还五字段全同的两根 bar 更可能
+# 是罕见巧合,而删除不可逆,宁可漏删。
+# When cleaning up stored replays, only treat two bars within this many days of
+# each other as part of the same replay. The longest close is a weekend plus
+# adjoining holidays, which 3 days covers; two bars matching on all five fields
+# further apart than that are more likely a rare coincidence, and since deletion
+# is irreversible, under-deleting is the safer error.
+REPLAY_MATCH_WINDOW_DAYS = 3
 
-    判定不去维护"交易时段表"(各品种时段不同、夏令时、节假日年年变、broker
-    之间还有差异,长期维护成本高且容易出错),而是直接描述"市场没在动"这个
-    事实本身,天然覆盖周末、节假日和临时休市。
+# OHLC 比较用的容差。价格是 Float 列,经过 JSON 与 float 往返后同一个报价可能有
+# 末位误差,精确相等会漏判;黄金报两位小数,1e-6 远小于最小价位变动,不会把两个
+# 真正不同的价格看成同一个。
+# Tolerance for OHLC comparison. Prices are Float columns and a JSON/float round
+# trip can leave last-bit error, so exact equality would miss matches; gold
+# quotes to two decimals, and 1e-6 is far below the minimum tick, so two
+# genuinely different prices can never compare equal.
+_PRICE_EPSILON = 1e-6
 
-    两个条件必须同时成立才丢弃:只看 v == 0 会误伤某些不报 tick volume 的
-    broker 的正常 bar;只看 o == h == l == c 会误伤流动性极低时段里真实但确实
-    没有波动的 1 分钟 bar。
 
-    Detects a bar with no market activity at all (a frozen quote during a
-    market close/holiday).
+def _is_replayed_duplicate(bar: dict, recent: list[dict]) -> bool:
+    """判断一根 bar 是不是喂价端重放的旧 bar 副本(休市期间的伪造 K 线)。
 
-    Over weekends and holidays the EA stays connected to MT5 and keeps pushing
-    bars on schedule, but the quote is frozen at the previous session's close,
-    so what arrives is a run of bars with o == h == l == c and zero volume.
-    They genuinely have "finished" in time terms, so they pass the closed
-    check, but they aren't market data, and persisting them causes:
+    休市之后 EA 仍然连着 MT5、仍然按周期推 bar,但推的不是冻结报价,而是把收盘前
+    最后几根真实 bar 的 **o/h/l/c/v 五个字段整根复制**,只换上新的时间戳,在两三
+    个模板之间来回交替。实测(XAUUSD/15,2026-07-24 周五收盘后):
+
+        20:30 o=4053.36 h=4055.70 l=4051.30 c=4055.12 v=1002   ← 真实
+        20:45 o=4055.12 h=4055.77 l=4051.82 c=4052.66 v=795    ← 真实
+        21:00 o=4055.12 h=4055.77 l=4051.82 c=4052.66 v=795    ← 20:45 的副本
+        22:45 o=4053.36 h=4055.70 l=4051.30 c=4055.12 v=1002   ← 20:30 的副本
+        (一直交替到周一开盘)
+
+    这些 bar 时间上确实"已收盘",能通过收盘判定,但它们不是行情。落库后:
+      ① 回测图上休市段被一长串来回重复的蜡烛填满(两个模板一涨一跌,于是呈现为
+         红绿相间的平带),真实的周末跳空被抹平;
+      ② 更要紧的是回测被污染:同一段价格被反复喂给指标,BOLL 这类基于标准差的
+         指标在这里收缩、均线被拉平,一到周一开盘必然触发穿越,凭空造出入场
+         信号,胜率与信号数因此失真。
+
+    判定用"整根 OHLCV 与近期某根完全相同",不去猜交易时段:时段表要处理各品种
+    时段、夏令时、逐年变化的节假日和 broker 差异,维护成本高且猜错窗口会删掉真
+    实 bar(不可逆)。而五个字段(两位小数的价格 + 上千的成交量)同时逐一相同,在
+    真实行情里实际上不会发生,是个可直接验证的特征。
+
+    注意不能只比价格:真实行情里相邻 bar 的 OHLC 偶然接近是可能的,但连 volume
+    都一模一样才是"整根复制"的铁证,所以 volume 必须参与比较。
+
+    Detects a bar that is a replayed copy of an older one (a fabricated bar
+    pushed while the market is closed).
+
+    After the close the EA stays connected to MT5 and keeps pushing bars on
+    schedule — but not frozen quotes. It copies **all five o/h/l/c/v fields**
+    of the last few real bars verbatim, stamps them with new timestamps, and
+    cycles between two or three templates. Observed on XAUUSD/15 after the
+    2026-07-24 Friday close (see the table above).
+
+    These bars have genuinely "closed" in time terms and pass the closed check,
+    but they aren't market data. Once stored:
       ① the backtest chart fills the closed session with a long run of
-         perfectly flat candles, flattening away the real weekend gap — it
-         looks like the chart is "stretching time" when in fact those rows
-         really are in the database;
-      ② worse, indicators get corrupted: standard-deviation-based ones like
-         Bollinger see stddev approach 0 here, the bands collapse onto the
-         mid line, and the next open is then guaranteed to cross them,
-         fabricating entry signals and skewing win rate and signal counts.
-    So these bars must not be stored.
+         repeating candles (the two templates being one up and one down, which
+         renders as the red/green flat band), erasing the real weekend gap;
+      ② more importantly the backtest is corrupted: the same stretch of price
+         is fed to the indicators over and over, so stddev-based ones like
+         Bollinger contract and moving averages flatten, making a cross at the
+         Monday open inevitable — fabricated entry signals that skew win rate
+         and signal counts.
 
-    The check deliberately avoids maintaining a trading-session calendar
-    (per-symbol sessions, DST, yearly-changing holidays and broker-to-broker
-    differences make that expensive to maintain and easy to get wrong) and
-    instead describes the "market isn't moving" fact directly, which covers
-    weekends, holidays and unscheduled halts alike.
+    The predicate is "the whole OHLCV matches a recent bar" rather than a
+    guess at trading sessions: a session calendar has to handle per-symbol
+    hours, DST, yearly-changing holidays and broker differences, and guessing
+    the window wrong deletes real bars (irreversible). Five fields matching
+    exactly (two-decimal prices plus four-digit volume) effectively cannot
+    happen in live data, which makes it a directly verifiable signal.
 
-    Both conditions must hold to discard: `v == 0` alone would wrongly drop
-    normal bars from brokers that don't report tick volume, and
-    `o == h == l == c` alone would wrongly drop genuine but truly flat
-    1-minute bars in very thin liquidity.
+    Volume must take part in the comparison: neighbouring real bars can happen
+    to have similar OHLC, but an identical volume as well is what proves the
+    bar is a verbatim copy.
+
+    完全平坦的 bar(h == l,即整根没有任何高低差)不参与判定,直接放行。这种 bar 没
+    有"可被复制的内部结构",连续出现只说明该周期内价格确实没动过(极低流动性、或
+    合成/测试数据),不是重放的证据;把它们也当副本删掉会误伤真实的平盘行情。生产
+    上观察到的重放副本都带着真实的高低差(rng 3~8 美元),不受这条豁免影响。
+
+    Perfectly flat bars (h == l, i.e. no intrabar range at all) are exempt and
+    always pass. Such a bar has no internal structure that could be copied, so a
+    run of them only means the price genuinely didn't move in that period (very
+    thin liquidity, or synthetic/test data) — that isn't evidence of replay, and
+    dropping them would discard real flat markets. The replays observed in
+    production all carry a real high/low range (3–8 dollars), so this exemption
+    doesn't weaken the fix.
     """
-    return (
-        bar["o"] == bar["h"] == bar["l"] == bar["c"]
-        and not bar.get("v", 0)
-    )
+    if bar["h"] == bar["l"]:
+        return False
+    for prev in recent:
+        if (
+            abs(bar["o"] - prev["o"]) < _PRICE_EPSILON
+            and abs(bar["h"] - prev["h"]) < _PRICE_EPSILON
+            and abs(bar["l"] - prev["l"]) < _PRICE_EPSILON
+            and abs(bar["c"] - prev["c"]) < _PRICE_EPSILON
+            and bar.get("v", 0) == prev.get("v", 0)
+        ):
+            return True
+    return False
 
 
 def persist_closed_bars(db, symbol: str, interval: str, bars: list[dict]) -> int:
@@ -159,47 +220,73 @@ def persist_closed_bars(db, symbol: str, interval: str, bars: list[dict]) -> int
         )
         return 0
 
-    # 已收盘但"市场没在动"的空转 bar(休市/节假日的冻结报价)在这里丢掉,理由见
-    # _has_no_market_activity()。
+    # 休市期间喂价端重放的旧 bar 副本在这里丢掉,理由见 _is_replayed_duplicate()。
     #
     # 放在上面那条 WARNING 之后而不是之前:两个判断诊断的是两件不同的事。"一根都
-    # 没收盘"指向喂价端时钟异常,而"收盘了但都是空转"是周末的正常现象;若先过滤
-    # 再判空,每个周末批次都会打出那条 clock-skew WARNING,把一条本该罕见的告警变
-    # 成噪音,真出时钟问题时反而看不见了。
+    # 没收盘"指向喂价端时钟异常,而"收盘了但全是重放副本"是周末的正常现象;若先
+    # 过滤再判空,每个周末批次都会打出那条 clock-skew WARNING,把一条本该罕见的
+    # 告警变成噪音,真出时钟问题时反而看不见了。
+    #
+    # 比对基准取库里已存的最近若干根:休市第一根副本要跟收盘前的真实 bar 比才能
+    # 认出来,而那根真实 bar 只在库里。基准里再把本批已接受的 bar 追加进去,让同
+    # 一批内部也能连锁判定——backfill 一次可能送来整个周末,若只跟库里比,批内互
+    # 为副本的那些会全部漏掉。
     #
     # 丢弃要留痕:正常交易时段本不该出现这类 bar,一旦成批出现说明喂价端有问题
-    # (比如断线后重放缓存报价),静默丢弃会让这种故障无声无息——上面那条 WARNING
-    # 就是为同一类"安静地出错"而存在的(那次真实事故静默持续了三天)。常态量记在
-    # debug,整批都是空转时才升到 info,避免周末稳态运行刷屏。
+    # (比如断线后重放缓存),静默丢弃会让这种故障无声无息——上面那条 WARNING 就是
+    # 为同一类"安静地出错"而存在的(那次真实事故静默持续了三天)。常态量记在
+    # debug,整批都是副本时才升到 info,避免周末稳态运行刷屏。
     #
-    # Drop closed-but-inactive bars (frozen quotes during a market close); see
-    # _has_no_market_activity() for why.
+    # Drop bars the feed replayed while the market was closed; see
+    # _is_replayed_duplicate() for why.
     #
     # Placed after the WARNING above rather than before it: the two checks
     # diagnose different things. "nothing closed" points at a feed clock
-    # problem, whereas "closed but all inactive" is simply what a weekend looks
+    # problem, whereas "closed but all replays" is simply what a weekend looks
     # like. Filtering first would fire that clock-skew WARNING on every weekend
-    # batch, turning a should-be-rare alert into noise that hides the real
-    # thing when it happens.
+    # batch, turning a should-be-rare alert into noise that hides the real thing
+    # when it happens.
+    #
+    # The comparison baseline is the most recent stored bars: recognising the
+    # first replay of a close requires comparing it against the last real bar,
+    # which only exists in the database. Accepted bars from this batch are
+    # appended to that baseline so matches can chain within the batch too — a
+    # backfill can deliver a whole weekend at once, and comparing only against
+    # stored rows would miss every bar that is a copy of another bar in the same
+    # batch.
     #
     # Dropping is logged on purpose: these shouldn't occur during a live
     # session, so a sudden run of them means something is wrong upstream (e.g.
-    # the feed replaying a stale quote after a disconnect), and silent dropping
+    # the feed replaying its cache after a disconnect), and silent dropping
     # would hide that — the WARNING above exists for the same class of "fails
     # quietly" bug (that real incident went unnoticed for three days).
     # Steady-state counts go to debug, escalating to info only when the whole
-    # batch is inactive, so weekends don't flood the logs.
-    active = [b for b in closed if not _has_no_market_activity(b)]
-    inactive_count = len(closed) - len(active)
-    if inactive_count:
+    # batch is a replay, so weekends don't flood the logs.
+    baseline = [
+        {"o": r[0], "h": r[1], "l": r[2], "c": r[3], "v": r[4]}
+        for r in db.query(Candle.o, Candle.h, Candle.l, Candle.c, Candle.v)
+        .filter(Candle.symbol == symbol, Candle.interval == interval)
+        .order_by(Candle.t.desc())
+        .limit(REPLAY_LOOKBACK_BARS)
+        .all()
+    ]
+    accepted: list[dict] = []
+    replay_count = 0
+    for b in closed:
+        if _is_replayed_duplicate(b, baseline):
+            replay_count += 1
+            continue
+        accepted.append(b)
+        baseline = [b, *baseline][:REPLAY_LOOKBACK_BARS]
+    if replay_count:
         logger.log(
-            logging.INFO if not active else logging.DEBUG,
-            "persist_closed_bars: %s/%s skipped %d closed bar(s) with no market "
-            "activity (o==h==l==c and zero volume — expected during a weekend/"
-            "holiday close; if this appears during a live session, check the feed)",
-            symbol, interval, inactive_count,
+            logging.INFO if not accepted else logging.DEBUG,
+            "persist_closed_bars: %s/%s skipped %d replayed bar(s) (OHLCV identical "
+            "to a recent bar — expected while the market is closed; if this appears "
+            "during a live session, check the feed)",
+            symbol, interval, replay_count,
         )
-    closed = active
+    closed = accepted
     if not closed:
         return 0
 
@@ -229,39 +316,72 @@ def persist_closed_bars(db, symbol: str, interval: str, bars: list[dict]) -> int
     return new_count
 
 
-def cleanup_inactive_bars(db) -> int:
-    """删掉存量的空转 bar(休市冻结报价:o==h==l==c 且量为 0)。返回删除行数。
+def cleanup_replayed_bars(db) -> int:
+    """删掉存量的重放副本 bar(休市期间被伪造出来的那些)。返回删除行数。
 
     写入侧的过滤只能挡住新数据,这条负责清掉过滤上线之前已经落库的那些——否则
-    回测图上历史休市段的平线会一直留着,指标也继续被污染。判定条件与
-    _has_no_market_activity() 完全一致,两边必须同步改。
+    回测图上历史休市段那条来回重复的平带会一直留着,回测也继续被污染。
 
-    跟着每天的保留期清扫跑,不做成一次性脚本:清扫本身是幂等的(写入侧修好之后
-    不再产生新的空转 bar,这条从第二天起就查不到东西可删),而一次性脚本得手动上
-    机器执行,容易漏做或在下次重建环境时被忘记。
+    只删"同 symbol/interval 下,存在一根时间更早、且 OHLCV 五个字段全部相同的
+    bar"的行,也就是每组重复里只保留最早那一根——最早那根正是收盘前的真实 bar,
+    后面全是它的副本。判定与 _is_replayed_duplicate() 一致,两边必须同步改。
 
-    Delete stored inactive bars (frozen quotes over a market close: o==h==l==c
-    with zero volume). Returns the number of rows deleted.
+    额外加了 REPLAY_MATCH_WINDOW_DAYS 的时间邻近限制:相隔很久的两根真实 bar 恰好
+    五个字段全同虽然近乎不可能,但删除不可逆,加一道窗口把这种理论可能性也挡掉,
+    代价只是极端情况下漏删一点(下次清扫仍会处理)。
+
+    跟着每天的保留期清扫跑,不做成一次性脚本:清扫是幂等的(写入侧修好后不再产生
+    新副本,这条从第二天起就查不到东西可删),而一次性脚本得手动上机器执行,容易
+    漏做或在下次重建环境时被忘记。
+
+    Delete stored replayed bars (the ones fabricated during a market close).
+    Returns the number of rows deleted.
 
     The write-path filter only stops new data; this clears what was already
-    persisted before that filter existed — otherwise the flat stretches over
-    historical closed sessions stay on the backtest chart and keep corrupting
-    indicators. The predicate must stay in sync with _has_no_market_activity().
+    persisted before that filter existed — otherwise the repeating flat band
+    over historical closed sessions stays on the backtest chart and keeps
+    corrupting backtests.
+
+    Only rows that have an earlier bar with identical o/h/l/c/v in the same
+    symbol/interval are removed, i.e. each group of duplicates keeps its
+    earliest row — and that earliest row is precisely the real pre-close bar
+    every later one was copied from. Must stay in sync with
+    _is_replayed_duplicate().
+
+    A REPLAY_MATCH_WINDOW_DAYS proximity limit is applied on top: two genuine
+    bars matching on all five fields far apart in time is next to impossible,
+    but deletion is irreversible, so the window rules out even that theoretical
+    case. The cost is under-deleting in extreme situations, which the next sweep
+    picks up anyway.
 
     Runs as part of the daily retention sweep rather than as a one-off script:
-    the sweep is idempotent (with the write path fixed, no new inactive bars
-    appear, so from the next day on it finds nothing to delete), whereas a
-    one-off script has to be run by hand on the machine and is easy to skip or
-    forget when the environment is next rebuilt.
+    the sweep is idempotent (with the write path fixed, no new replays appear,
+    so from the next day on it finds nothing to delete), whereas a one-off
+    script has to be run by hand and is easy to skip or forget when the
+    environment is next rebuilt.
     """
+    earlier = aliased(Candle)
+    duplicate_of_earlier = (
+        db.query(earlier.id)
+        .filter(
+            # 完全平坦的 bar 豁免,与 _is_replayed_duplicate() 保持一致。
+            # Flat bars are exempt, matching _is_replayed_duplicate().
+            Candle.h != Candle.l,
+            earlier.symbol == Candle.symbol,
+            earlier.interval == Candle.interval,
+            earlier.t < Candle.t,
+            earlier.t >= Candle.t - REPLAY_MATCH_WINDOW_DAYS * 86400,
+            func.abs(earlier.o - Candle.o) < _PRICE_EPSILON,
+            func.abs(earlier.h - Candle.h) < _PRICE_EPSILON,
+            func.abs(earlier.l - Candle.l) < _PRICE_EPSILON,
+            func.abs(earlier.c - Candle.c) < _PRICE_EPSILON,
+            func.coalesce(earlier.v, 0) == func.coalesce(Candle.v, 0),
+        )
+        .exists()
+    )
     deleted = (
         db.query(Candle)
-        .filter(
-            Candle.o == Candle.h,
-            Candle.h == Candle.l,
-            Candle.l == Candle.c,
-            func.coalesce(Candle.v, 0) == 0,
-        )
+        .filter(duplicate_of_earlier)
         .delete(synchronize_session=False)
     )
     if deleted:
@@ -295,15 +415,15 @@ async def candle_retention_sweep_loop() -> None:
                 deleted = cleanup_old_m1(db, int(cfg["m1_retention_days"]))
                 if deleted:
                     logger.info("candle_retention_sweep_loop: deleted %d expired 1m candle(s)", deleted)
-                # 清掉写入侧过滤上线之前落库的休市空转 bar,见 cleanup_inactive_bars()。
-                # Clear inactive bars persisted before the write-path filter existed;
-                # see cleanup_inactive_bars().
-                inactive = cleanup_inactive_bars(db)
-                if inactive:
+                # 清掉写入侧过滤上线之前落库的休市重放副本,见 cleanup_replayed_bars()。
+                # Clear replayed bars persisted before the write-path filter existed;
+                # see cleanup_replayed_bars().
+                replays = cleanup_replayed_bars(db)
+                if replays:
                     logger.info(
-                        "candle_retention_sweep_loop: deleted %d stored bar(s) with no "
-                        "market activity (pre-existing weekend/holiday frozen quotes)",
-                        inactive,
+                        "candle_retention_sweep_loop: deleted %d replayed candle(s) "
+                        "(pre-existing market-closed duplicates)",
+                        replays,
                     )
                 # 顺带清页面统计的去重标记：同样是每天一次的保留期清理，
                 # 为一张小表另开一个后台任务不值得（VPS 是 2 核单进程）。

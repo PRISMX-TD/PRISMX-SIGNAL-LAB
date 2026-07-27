@@ -7,8 +7,8 @@ from datetime import datetime, timedelta, timezone
 
 from app.models import Candle
 from app.services.candle_store import (
-    cleanup_inactive_bars,
     cleanup_old_m1,
+    cleanup_replayed_bars,
     persist_closed_bars,
 )
 
@@ -114,87 +114,161 @@ def test_no_warning_when_at_least_one_bar_is_closed(db, caplog):
     assert not any("none are closed yet" in r.message for r in caplog.records)
 
 
-def test_inactive_bars_during_market_close_are_not_persisted(db):
-    """休市期间喂价端仍在推 bar,报价冻结在收盘价(o==h==l==c、量为 0),这些不是
-    行情,不该进库——否则回测图上休市段会被一长串完全平坦的蜡烛填满、真实跳空被
-    抹平,而且 BOLL 这类指标的标准差在这段里趋近 0,一到开盘必然触发穿越,凭空造
-    出入场信号。
+# 生产实测的重放形态(XAUUSD/15,2026-07-24 周五收盘后):收盘前最后两根真实 bar
+# 的 OHLCV 被整根复制、只换时间戳,两个模板来回交替直到周一开盘。一涨一跌交替,
+# 所以图上呈现为红绿相间的平带,而不是一条纯色平线。
+# The replay shape observed in production (XAUUSD/15 after the 2026-07-24 Friday
+# close): the OHLCV of the last two real bars copied verbatim with only new
+# timestamps, the two templates alternating until the Monday open. One is up and
+# one is down, which is why the chart shows a red/green band rather than a
+# single-colour flat line.
+_TEMPLATE_A = {"o": 4053.36, "h": 4055.70, "l": 4051.30, "c": 4055.12, "v": 1002}
+_TEMPLATE_B = {"o": 4055.12, "h": 4055.77, "l": 4051.82, "c": 4052.66, "v": 795}
 
-    Over a market close the feed keeps pushing bars with the quote frozen at the
-    session close (o==h==l==c, zero volume). Those aren't market data and must
-    not be stored — otherwise the backtest chart fills the closed session with
-    perfectly flat candles, flattening the real gap, and stddev-based indicators
-    like Bollinger collapse there, fabricating a cross on the next open."""
-    real = {"t": _epoch(30), "o": 1, "h": 2, "l": 0.5, "c": 1.5, "v": 10}
-    frozen = [
-        {"t": _epoch(m), "o": 1.5, "h": 1.5, "l": 1.5, "c": 1.5, "v": 0}
-        for m in (25, 20, 15)
+
+def test_replayed_bars_during_market_close_are_not_persisted(db):
+    """休市后喂价端把收盘前的真实 bar 整根复制、只换时间戳来回重放。这些不是行情,
+    不该进库——否则回测图上休市段被这条来回重复的平带填满、真实跳空被抹平,而且
+    同一段价格被反复喂给指标,一到开盘必然触发穿越,凭空造出入场信号。
+
+    注意这些 bar 有真实的高低差(h != l)也有成交量,所以"o==h==l==c 且量为 0"那
+    类冻结报价判定完全抓不到它们——这是生产上实测出来的形态。
+
+    After a close the feed replays the last real bars verbatim with only new
+    timestamps. They aren't market data and must not be stored — otherwise the
+    backtest chart fills the closed session with that repeating band, erasing
+    the real gap, and feeding the same stretch of price to the indicators makes
+    a cross at the open inevitable, fabricating entries.
+
+    Note these bars have a real high/low spread (h != l) and non-zero volume, so
+    a "o==h==l==c with zero volume" frozen-quote predicate cannot see them at
+    all — this is the shape actually observed in production."""
+    real_a = {"t": _epoch(60), **_TEMPLATE_A}
+    real_b = {"t": _epoch(45), **_TEMPLATE_B}
+    replays = [
+        {"t": _epoch(m), **(_TEMPLATE_B if i % 2 == 0 else _TEMPLATE_A)}
+        for i, m in enumerate((30, 25, 20, 15))
     ]
-    n = persist_closed_bars(db, "XAUUSD", "1", [real, *frozen])
-    assert n == 1
-    rows = db.query(Candle).filter(Candle.symbol == "XAUUSD", Candle.interval == "1").all()
-    assert [r.t for r in rows] == [real["t"]]
-
-
-def test_flat_bar_with_volume_is_kept(db):
-    """只有 o==h==l==c 但有成交量的 bar 是真实行情(流动性极低的时段确实会出现),
-    必须保留——判定要两个条件同时成立才丢弃。
-
-    A flat bar that still reports volume is genuine market data (it does happen
-    in very thin liquidity) and must be kept — both conditions are required
-    before discarding."""
-    bars = [
-        {"t": _epoch(20), "o": 1.5, "h": 1.5, "l": 1.5, "c": 1.5, "v": 4},
-        {"t": _epoch(15), "o": 1.5, "h": 1.6, "l": 1.4, "c": 1.55, "v": 7},
-    ]
-    n = persist_closed_bars(db, "XAUUSD", "1", bars)
+    n = persist_closed_bars(db, "XAUUSD", "15", [real_a, real_b, *replays])
     assert n == 2
+    rows = db.query(Candle).filter(Candle.symbol == "XAUUSD", Candle.interval == "15").all()
+    assert sorted(r.t for r in rows) == sorted([real_a["t"], real_b["t"]])
 
 
-def test_fully_inactive_batch_does_not_warn_about_clock_skew(db, caplog):
-    """整批都是休市空转 bar 时,不该误报那条"一根都没收盘"的时钟告警——那条告警
-    诊断的是喂价端时钟异常,而这里是周末的正常现象。混在一起会让本该罕见的告警
-    每个周末都刷,真出时钟问题时反而被埋掉。
+def test_replay_is_detected_against_already_stored_bars(db):
+    """休市后的第一根副本要跟库里收盘前那根真实 bar 比才能认出来——分批推送时,
+    真实 bar 已经入库、不在当前这一批里,所以比对基准必须查库。
 
-    A batch that is entirely inactive must not trigger the "nothing closed"
-    clock-skew WARNING — that alert diagnoses a feed clock problem, while this
-    is just what a weekend looks like. Conflating them would fire the alert
-    every weekend and bury the real thing."""
-    frozen = [
-        {"t": _epoch(m), "o": 1.5, "h": 1.5, "l": 1.5, "c": 1.5, "v": 0}
-        for m in (20, 15)
+    The first replay after a close is only recognisable against the real
+    pre-close bar already in the database, which is not part of the current
+    batch when the feed pushes incrementally — so the baseline must be queried
+    from storage."""
+    assert persist_closed_bars(db, "XAUUSD", "15", [
+        {"t": _epoch(60), **_TEMPLATE_A},
+        {"t": _epoch(45), **_TEMPLATE_B},
+    ]) == 2
+    # 后一批全是副本,基准只存在于库里。
+    # The later batch is all replays; the baseline exists only in storage.
+    assert persist_closed_bars(db, "XAUUSD", "15", [
+        {"t": _epoch(30), **_TEMPLATE_A},
+        {"t": _epoch(15), **_TEMPLATE_B},
+    ]) == 0
+    assert db.query(Candle).count() == 2
+
+
+def test_genuine_bars_with_similar_prices_are_kept(db):
+    """价格接近但不完全相同的 bar 是真实行情,必须保留。只有五个字段全部逐一相同
+    才算副本——真实行情里几乎不可能出现,所以不会误伤。
+
+    Bars with close but not identical prices are genuine and must be kept. Only
+    all five fields matching exactly counts as a replay, which effectively
+    cannot happen in live data, so nothing real gets dropped."""
+    bars = [
+        {"t": _epoch(45), **_TEMPLATE_A},
+        # 只差一分钱 / off by one cent
+        {"t": _epoch(30), **{**_TEMPLATE_A, "c": _TEMPLATE_A["c"] + 0.01}},
+        # OHLC 全同但成交量不同：真实行情,不是整根复制
+        # Same OHLC, different volume: genuine, not a verbatim copy
+        {"t": _epoch(15), **{**_TEMPLATE_A, "v": _TEMPLATE_A["v"] + 1}},
     ]
+    assert persist_closed_bars(db, "XAUUSD", "15", bars) == 3
+
+
+def test_repeated_perfectly_flat_bars_are_kept(db):
+    """完全平坦的 bar(h == l)重复出现不算重放:这种 bar 没有可被复制的内部结构,
+    连续出现只说明价格确实没动(极低流动性或合成数据)。把它们当副本丢掉会切断策略
+    需要的历史长度——真实行情里也确实存在平盘。
+
+    Repeated perfectly flat bars (h == l) are not replays: such a bar has no
+    internal structure to copy, so a run of them only means the price genuinely
+    didn't move (thin liquidity or synthetic data). Discarding them would cut the
+    history a strategy needs, and flat markets do occur for real."""
+    now = _epoch(0)
+    bars = [
+        {"t": now - (12 - i) * 60, "o": 100.0, "h": 100.0, "l": 100.0, "c": 100.0, "v": 1}
+        for i in range(11)
+    ]
+    assert persist_closed_bars(db, "XAUUSD", "1", bars) == len(bars)
+    assert cleanup_replayed_bars(db) == 0
+
+
+def test_fully_replayed_batch_does_not_warn_about_clock_skew(db, caplog):
+    """整批都是副本时,不该误报那条"一根都没收盘"的时钟告警——那条诊断的是喂价端
+    时钟异常,而这里是周末的正常现象。混在一起会让本该罕见的告警每个周末都刷,真
+    出时钟问题时反而被埋掉。
+
+    A batch that is entirely replays must not trigger the "nothing closed"
+    clock-skew WARNING — that alert diagnoses a feed clock problem, while this is
+    just what a weekend looks like. Conflating them would fire the alert every
+    weekend and bury the real thing."""
+    assert persist_closed_bars(db, "XAUUSD", "15", [{"t": _epoch(60), **_TEMPLATE_A}]) == 1
     with caplog.at_level("DEBUG"):
-        n = persist_closed_bars(db, "XAUUSD", "1", frozen)
+        n = persist_closed_bars(db, "XAUUSD", "15", [{"t": _epoch(30), **_TEMPLATE_A}])
     assert n == 0
-    assert db.query(Candle).count() == 0
     assert not any("none are closed yet" in r.message for r in caplog.records)
-    assert any("no market activity" in r.message for r in caplog.records)
+    assert any("replayed bar" in r.message for r in caplog.records)
 
 
-def test_cleanup_removes_stored_inactive_bars_only(db):
-    """清掉过滤上线之前已落库的空转 bar,真实行情与"平坦但有量"的 bar 都不能动。
-    判定必须与写入侧一致,否则两边会对同一根 bar 给出不同答案。
+def test_cleanup_removes_stored_replays_keeping_the_original(db):
+    """清掉过滤上线之前已落库的副本,每组只保留最早那一根——最早那根正是收盘前的
+    真实 bar。价格相近但不全同的真实 bar 不能动。
 
-    Clears inactive bars persisted before the filter existed, leaving real bars
-    and flat-but-with-volume bars untouched. The predicate must match the write
-    path, or the two would disagree about the same bar."""
-    real = _epoch(60)
-    flat_with_v = _epoch(50)
-    frozen = [_epoch(40), _epoch(35)]
-    db.add(Candle(symbol="XAUUSD", interval="15", t=real, o=1, h=2, l=0.5, c=1.5, v=9))
-    db.add(Candle(symbol="XAUUSD", interval="15", t=flat_with_v, o=1.5, h=1.5, l=1.5, c=1.5, v=3))
-    for t in frozen:
-        db.add(Candle(symbol="XAUUSD", interval="15", t=t, o=1.5, h=1.5, l=1.5, c=1.5, v=0))
+    Clears replays persisted before the filter existed, keeping the earliest row
+    of each group — that row is the real pre-close bar. Genuine bars with similar
+    but not identical prices must survive."""
+    real_a, real_b = _epoch(120), _epoch(105)
+    replays = [_epoch(90), _epoch(75), _epoch(60)]
+    other = _epoch(45)
+    db.add(Candle(symbol="XAUUSD", interval="15", t=real_a, **_TEMPLATE_A))
+    db.add(Candle(symbol="XAUUSD", interval="15", t=real_b, **_TEMPLATE_B))
+    for i, t in enumerate(replays):
+        db.add(Candle(symbol="XAUUSD", interval="15", t=t,
+                      **(_TEMPLATE_A if i % 2 == 0 else _TEMPLATE_B)))
+    db.add(Candle(symbol="XAUUSD", interval="15", t=other,
+                  **{**_TEMPLATE_A, "c": _TEMPLATE_A["c"] + 0.01}))
     db.commit()
 
-    deleted = cleanup_inactive_bars(db)
-    assert deleted == 2
+    deleted = cleanup_replayed_bars(db)
+    assert deleted == len(replays)
     remaining = sorted(r.t for r in db.query(Candle).all())
-    assert remaining == sorted([real, flat_with_v])
+    assert remaining == sorted([real_a, real_b, other])
     # 幂等：写入侧修好之后再跑一次应该无事可做。
     # Idempotent: with the write path fixed, a second run has nothing to do.
-    assert cleanup_inactive_bars(db) == 0
+    assert cleanup_replayed_bars(db) == 0
+
+
+def test_cleanup_does_not_cross_symbol_or_interval(db):
+    """不同品种或不同周期下出现相同 OHLCV 是各自独立的数据,不能互相当成副本。
+    Identical OHLCV under a different symbol or interval is independent data and
+    must not be treated as a replay of the other."""
+    t0, t1 = _epoch(60), _epoch(45)
+    db.add(Candle(symbol="XAUUSD", interval="15", t=t0, **_TEMPLATE_A))
+    db.add(Candle(symbol="EURUSD", interval="15", t=t1, **_TEMPLATE_A))
+    db.add(Candle(symbol="XAUUSD", interval="60", t=t1, **_TEMPLATE_A))
+    db.commit()
+
+    assert cleanup_replayed_bars(db) == 0
+    assert db.query(Candle).count() == 3
 
 
 def test_cleanup_only_deletes_expired_m1(db):
