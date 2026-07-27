@@ -1,4 +1,7 @@
 """数据库连接与会话管理 / Database engine and session management."""
+import logging
+import time
+
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -22,6 +25,8 @@ if not _is_sqlite:
         pool_pre_ping=True,
     )
 
+logger = logging.getLogger(__name__)
+
 engine = create_engine(settings.DATABASE_URL, **_engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -37,13 +42,31 @@ def get_db():
 
 
 def init_db() -> None:
-    """创建所有数据表 / Create all tables."""
+    """创建所有数据表 / Create all tables.
+
+    分段计时打点:这个函数在 lifespan 里是同步阻塞的,跑完之前 uvicorn 不会 bind
+    端口,nginx 只能回 502。生产实测整段要 88 秒,即每次重启都有一分半的完全不可用
+    窗口。日志用于定位是哪一段慢,不要删。
+    Timed per stage: this runs synchronously inside the lifespan, so uvicorn won't
+    bind the port until it finishes and nginx can only return 502. Measured at 88s
+    in production — a 90-second full outage on every restart. These logs locate the
+    slow stage; keep them.
+    """
     # 导入模型以注册到 Base / import models so they register on Base
     from app import models  # noqa: F401
 
+    t0 = time.perf_counter()
     Base.metadata.create_all(bind=engine)
+    t1 = time.perf_counter()
     _migrate_columns()
+    t2 = time.perf_counter()
     _hash_legacy_api_tokens()
+    t3 = time.perf_counter()
+    logger.info(
+        "init_db 耗时/timing: create_all %.1fs, _migrate_columns %.1fs, "
+        "_hash_legacy_api_tokens %.1fs, 合计/total %.1fs",
+        t1 - t0, t2 - t1, t3 - t2, t3 - t0,
+    )
 
 
 def _hash_legacy_api_tokens() -> None:
@@ -79,7 +102,16 @@ def _migrate_columns() -> None:
     is_postgres = settings.DATABASE_URL.startswith("postgres")
     datetime_type = "TIMESTAMP" if is_postgres else "DATETIME"
 
+    _t_start = time.perf_counter()
     inspector = inspect(engine)
+    _t_inspect = time.perf_counter()
+    _table_names = inspector.get_table_names()
+    _t_tables = time.perf_counter()
+    logger.info(
+        "_migrate_columns 打点/probe: inspect(engine) %.1fs, get_table_names %.1fs "
+        "(%d 张表/tables)",
+        _t_inspect - _t_start, _t_tables - _t_inspect, len(_table_names),
+    )
 
     # 旧 ea_bindings 表已随 EA 接入方式停用：不再迁移、不再读写（生产库保留不删）。
     # The legacy ea_bindings table is retired with the EA integrations: no longer
