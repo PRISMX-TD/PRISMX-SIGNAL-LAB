@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
 from sqlalchemy.orm import aliased
+from starlette.concurrency import run_in_threadpool
 
 from app.core.database import SessionLocal
 from app.models import Candle
@@ -35,6 +36,13 @@ INTERVAL_SECONDS: dict[str, int] = {
 
 # 每天扫一次即可,K 线不是分秒必争的时效数据 / once a day is plenty; candles aren't latency-sensitive
 RETENTION_SWEEP_INTERVAL_SECONDS = 24 * 60 * 60
+
+# 首轮清扫延后一点再开始,让 uvicorn 先 bind 端口。清扫单轮要一分多钟,顶在启动
+# 路径上会让 nginx 全程 502;延后多久不重要,清掉的都是过期数据,不差这几秒。
+# Delay the first sweep so uvicorn binds the port first. A pass takes over a
+# minute, and sitting on the startup path makes nginx serve 502s the whole time;
+# the exact delay doesn't matter since only stale data is being removed.
+RETENTION_SWEEP_STARTUP_DELAY_SECONDS = 30
 
 
 # 判定"重放副本"时,拿新 bar 与最近这么多根已存 bar 比对。休市期间喂价端会在
@@ -404,39 +412,65 @@ def cleanup_old_m1(db, retention_days: int) -> int:
     return deleted
 
 
-async def candle_retention_sweep_loop() -> None:
-    """每天清理一次过期的 1 分钟线(启动即先跑一次)。
-    Daily sweep that trims expired 1-minute candles (runs once on startup, then loops)."""
+def _run_retention_sweep() -> None:
+    """执行一轮保留期清扫(同步,由 candle_retention_sweep_loop 放到线程池里跑)。
+    Run one retention sweep (synchronous; the loop dispatches it to a thread)."""
+    db = SessionLocal()
+    try:
+        cfg = get_candle_settings(db)
+        deleted = cleanup_old_m1(db, int(cfg["m1_retention_days"]))
+        if deleted:
+            logger.info("candle_retention_sweep_loop: deleted %d expired 1m candle(s)", deleted)
+        # 清掉写入侧过滤上线之前落库的休市重放副本,见 cleanup_replayed_bars()。
+        # Clear replayed bars persisted before the write-path filter existed;
+        # see cleanup_replayed_bars().
+        replays = cleanup_replayed_bars(db)
+        if replays:
+            logger.info(
+                "candle_retention_sweep_loop: deleted %d replayed candle(s) "
+                "(pre-existing market-closed duplicates)",
+                replays,
+            )
+        # 顺带清页面统计的去重标记：同样是每天一次的保留期清理，
+        # 为一张小表另开一个后台任务不值得（VPS 是 2 核单进程）。
+        # Also prune page-stat dedup markers: same daily retention job,
+        # not worth a separate background task for one small table.
+        pruned = prune_visitor_days(db)
+        if pruned:
+            logger.info("candle_retention_sweep_loop: pruned %d expired visitor marker(s)", pruned)
+        purged = purge_admin_visitors(db)
+        if purged:
+            logger.info("candle_retention_sweep_loop: purged %d admin visitor marker(s)", purged)
+    finally:
+        db.close()
+
+
+async def candle_retention_sweep_loop(
+    startup_delay: float = RETENTION_SWEEP_STARTUP_DELAY_SECONDS,
+) -> None:
+    """每天清理一次过期的 1 分钟线。
+    Daily sweep that trims expired 1-minute candles.
+
+    清扫走线程池,不占事件循环:其中 cleanup_replayed_bars() 是相关子查询自连接,
+    价格比较用 abs() 走不了索引,生产实测单轮 83.7 秒。原先直接同步跑在事件循环上,
+    首轮把 uvicorn 的 startup 一起堵住(端口未 bind,nginx 全程 502),之后每天再堵
+    一次同样时长。首轮另外延迟一小段:清扫都不紧急,让端口先起来,服务立即可用。
+    The sweep runs in a thread instead of on the event loop: cleanup_replayed_bars()
+    is a correlated self-join whose abs() price comparisons can't use an index —
+    measured at 83.7s per pass in production. Running it synchronously on the loop
+    made the first pass block uvicorn's startup entirely (port unbound, nginx
+    serving 502s throughout) and then froze every request for the same duration
+    once a day. The first pass is also delayed briefly: none of this is urgent, so
+    the port binds first and the service is immediately available.
+
+    startup_delay 可覆盖,便于测试里立即跑首轮。
+    startup_delay is overridable so tests can run the first pass immediately.
+    """
+    if startup_delay:
+        await asyncio.sleep(startup_delay)
     while True:
         try:
-            db = SessionLocal()
-            try:
-                cfg = get_candle_settings(db)
-                deleted = cleanup_old_m1(db, int(cfg["m1_retention_days"]))
-                if deleted:
-                    logger.info("candle_retention_sweep_loop: deleted %d expired 1m candle(s)", deleted)
-                # 清掉写入侧过滤上线之前落库的休市重放副本,见 cleanup_replayed_bars()。
-                # Clear replayed bars persisted before the write-path filter existed;
-                # see cleanup_replayed_bars().
-                replays = cleanup_replayed_bars(db)
-                if replays:
-                    logger.info(
-                        "candle_retention_sweep_loop: deleted %d replayed candle(s) "
-                        "(pre-existing market-closed duplicates)",
-                        replays,
-                    )
-                # 顺带清页面统计的去重标记：同样是每天一次的保留期清理，
-                # 为一张小表另开一个后台任务不值得（VPS 是 2 核单进程）。
-                # Also prune page-stat dedup markers: same daily retention job,
-                # not worth a separate background task for one small table.
-                pruned = prune_visitor_days(db)
-                if pruned:
-                    logger.info("candle_retention_sweep_loop: pruned %d expired visitor marker(s)", pruned)
-                purged = purge_admin_visitors(db)
-                if purged:
-                    logger.info("candle_retention_sweep_loop: purged %d admin visitor marker(s)", purged)
-            finally:
-                db.close()
+            await run_in_threadpool(_run_retention_sweep)
         except Exception:
             logger.exception("candle_retention_sweep_loop error")
         await asyncio.sleep(RETENTION_SWEEP_INTERVAL_SECONDS)

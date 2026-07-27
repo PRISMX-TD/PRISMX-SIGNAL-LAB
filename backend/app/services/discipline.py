@@ -65,6 +65,10 @@ _VOLUME_BASELINE_SAMPLE = 20
 # 后台快照循环的运行间隔（秒）
 SNAPSHOT_INTERVAL_SECONDS = 6 * 60 * 60
 
+# 首轮快照延后再跑,别挡住 uvicorn bind 端口 / delay the first snapshot pass so it
+# doesn't hold up uvicorn binding the port
+SNAPSHOT_STARTUP_DELAY_SECONDS = 20
+
 
 def _aware(dt: datetime | None) -> datetime | None:
     if dt is None:
@@ -297,13 +301,28 @@ def compute_discipline(
     }
 
 
-async def discipline_snapshot_loop() -> None:
+async def discipline_snapshot_loop(
+    startup_delay: float = SNAPSHOT_STARTUP_DELAY_SECONDS,
+) -> None:
     """定时给每个近期有信号单成交的用户计算并落库当日纪律分快照
     （启动即先跑一次，再按 SNAPSHOT_INTERVAL_SECONDS 循环）。
 
     Periodically compute and persist each active user's discipline-score
     snapshot for today (runs once on startup, then loops at the fixed interval).
+
+    首轮延后一点:这里整段是同步 DB 操作,直接跑在事件循环上,生产实测首轮阻塞
+    1.3 秒,顶在 uvicorn bind 端口之前。快照不紧急,让端口先起来。
+    (只推迟首轮时机,不动计算逻辑——本轮只处理启动阻塞。)
+    The first pass is delayed: this body is all synchronous DB work running on the
+    event loop, measured blocking 1.3s before uvicorn binds the port. Snapshots
+    aren't urgent, so let the port come up first. (Timing only; the computation is
+    untouched, since this change is scoped to the startup stall.)
+
+    startup_delay 可覆盖,便于测试里立即跑首轮。
+    startup_delay is overridable so tests can run the first pass immediately.
     """
+    if startup_delay:
+        await asyncio.sleep(startup_delay)
     while True:
         try:
             db = SessionLocal()

@@ -342,7 +342,10 @@ def test_snapshot_upsert_idempotent(db, user):
     import asyncio
 
     async def run_once():
-        task = asyncio.create_task(discipline_snapshot_loop())
+        # startup_delay=0：生产上首轮要延后以免挡住 uvicorn bind 端口，测试里要它立刻跑。
+        # startup_delay=0: production delays the first pass so it doesn't hold up
+        # uvicorn's port bind; the test needs it to run right away.
+        task = asyncio.create_task(discipline_snapshot_loop(startup_delay=0))
         await asyncio.sleep(0.2)
         task.cancel()
         try:
