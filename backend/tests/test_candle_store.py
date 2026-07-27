@@ -8,7 +8,6 @@ from datetime import datetime, timedelta, timezone
 from app.models import Candle
 from app.services.candle_store import (
     cleanup_old_m1,
-    cleanup_replayed_bars,
     persist_closed_bars,
 )
 
@@ -203,13 +202,18 @@ def test_repeated_perfectly_flat_bars_are_kept(db):
     internal structure to copy, so a run of them only means the price genuinely
     didn't move (thin liquidity or synthetic data). Discarding them would cut the
     history a strategy needs, and flat markets do occur for real."""
-    now = _epoch(0)
-    bars = [
-        {"t": now - (12 - i) * 60, "o": 100.0, "h": 100.0, "l": 100.0, "c": 100.0, "v": 1}
-        for i in range(11)
-    ]
+    flat = {"o": 100.0, "h": 100.0, "l": 100.0, "c": 100.0, "v": 1}
+    # 时间戳全部取过去：未收盘的 bar 会被另一条规则挡掉，会掩盖这里要验的行为。
+    # All timestamps are in the past: unclosed bars are rejected by a different
+    # rule, which would mask the behaviour under test here.
+    bars = [{"t": _epoch(30 - i), **flat} for i in range(11)]
     assert persist_closed_bars(db, "XAUUSD", "1", bars) == len(bars)
-    assert cleanup_replayed_bars(db) == 0
+    # 再喂一批同样平坦、时间更晚的 bar：仍应全部落库，不被当成副本丢掉。
+    # Another batch of equally flat, later bars must still all persist rather than
+    # being dropped as replays.
+    more = [{"t": _epoch(18 - i), **flat} for i in range(3)]
+    assert persist_closed_bars(db, "XAUUSD", "1", more) == len(more)
+    assert db.query(Candle).count() == len(bars) + len(more)
 
 
 def test_fully_replayed_batch_does_not_warn_about_clock_skew(db, caplog):
@@ -227,48 +231,6 @@ def test_fully_replayed_batch_does_not_warn_about_clock_skew(db, caplog):
     assert n == 0
     assert not any("none are closed yet" in r.message for r in caplog.records)
     assert any("replayed bar" in r.message for r in caplog.records)
-
-
-def test_cleanup_removes_stored_replays_keeping_the_original(db):
-    """清掉过滤上线之前已落库的副本,每组只保留最早那一根——最早那根正是收盘前的
-    真实 bar。价格相近但不全同的真实 bar 不能动。
-
-    Clears replays persisted before the filter existed, keeping the earliest row
-    of each group — that row is the real pre-close bar. Genuine bars with similar
-    but not identical prices must survive."""
-    real_a, real_b = _epoch(120), _epoch(105)
-    replays = [_epoch(90), _epoch(75), _epoch(60)]
-    other = _epoch(45)
-    db.add(Candle(symbol="XAUUSD", interval="15", t=real_a, **_TEMPLATE_A))
-    db.add(Candle(symbol="XAUUSD", interval="15", t=real_b, **_TEMPLATE_B))
-    for i, t in enumerate(replays):
-        db.add(Candle(symbol="XAUUSD", interval="15", t=t,
-                      **(_TEMPLATE_A if i % 2 == 0 else _TEMPLATE_B)))
-    db.add(Candle(symbol="XAUUSD", interval="15", t=other,
-                  **{**_TEMPLATE_A, "c": _TEMPLATE_A["c"] + 0.01}))
-    db.commit()
-
-    deleted = cleanup_replayed_bars(db)
-    assert deleted == len(replays)
-    remaining = sorted(r.t for r in db.query(Candle).all())
-    assert remaining == sorted([real_a, real_b, other])
-    # 幂等：写入侧修好之后再跑一次应该无事可做。
-    # Idempotent: with the write path fixed, a second run has nothing to do.
-    assert cleanup_replayed_bars(db) == 0
-
-
-def test_cleanup_does_not_cross_symbol_or_interval(db):
-    """不同品种或不同周期下出现相同 OHLCV 是各自独立的数据,不能互相当成副本。
-    Identical OHLCV under a different symbol or interval is independent data and
-    must not be treated as a replay of the other."""
-    t0, t1 = _epoch(60), _epoch(45)
-    db.add(Candle(symbol="XAUUSD", interval="15", t=t0, **_TEMPLATE_A))
-    db.add(Candle(symbol="EURUSD", interval="15", t=t1, **_TEMPLATE_A))
-    db.add(Candle(symbol="XAUUSD", interval="60", t=t1, **_TEMPLATE_A))
-    db.commit()
-
-    assert cleanup_replayed_bars(db) == 0
-    assert db.query(Candle).count() == 3
 
 
 def test_cleanup_only_deletes_expired_m1(db):

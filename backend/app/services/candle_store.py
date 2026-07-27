@@ -12,8 +12,6 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func
-from sqlalchemy.orm import aliased
 from starlette.concurrency import run_in_threadpool
 
 from app.core.database import SessionLocal
@@ -54,16 +52,6 @@ RETENTION_SWEEP_STARTUP_DELAY_SECONDS = 30
 # while staying small enough that coincidental matches in live data stay
 # implausible.
 REPLAY_LOOKBACK_BARS = 8
-
-# 清理存量副本时,只把时间相距在这个天数以内的两根 bar 当作"同一次重放"。休市最长
-# 也就是周末加节假日连休,3 天足够覆盖;超出这个跨度还五字段全同的两根 bar 更可能
-# 是罕见巧合,而删除不可逆,宁可漏删。
-# When cleaning up stored replays, only treat two bars within this many days of
-# each other as part of the same replay. The longest close is a weekend plus
-# adjoining holidays, which 3 days covers; two bars matching on all five fields
-# further apart than that are more likely a rare coincidence, and since deletion
-# is irreversible, under-deleting is the safer error.
-REPLAY_MATCH_WINDOW_DAYS = 3
 
 # OHLC 比较用的容差。价格是 Float 列,经过 JSON 与 float 往返后同一个报价可能有
 # 末位误差,精确相等会漏判;黄金报两位小数,1e-6 远小于最小价位变动,不会把两个
@@ -324,79 +312,6 @@ def persist_closed_bars(db, symbol: str, interval: str, bars: list[dict]) -> int
     return new_count
 
 
-def cleanup_replayed_bars(db) -> int:
-    """删掉存量的重放副本 bar(休市期间被伪造出来的那些)。返回删除行数。
-
-    写入侧的过滤只能挡住新数据,这条负责清掉过滤上线之前已经落库的那些——否则
-    回测图上历史休市段那条来回重复的平带会一直留着,回测也继续被污染。
-
-    只删"同 symbol/interval 下,存在一根时间更早、且 OHLCV 五个字段全部相同的
-    bar"的行,也就是每组重复里只保留最早那一根——最早那根正是收盘前的真实 bar,
-    后面全是它的副本。判定与 _is_replayed_duplicate() 一致,两边必须同步改。
-
-    额外加了 REPLAY_MATCH_WINDOW_DAYS 的时间邻近限制:相隔很久的两根真实 bar 恰好
-    五个字段全同虽然近乎不可能,但删除不可逆,加一道窗口把这种理论可能性也挡掉,
-    代价只是极端情况下漏删一点(下次清扫仍会处理)。
-
-    跟着每天的保留期清扫跑,不做成一次性脚本:清扫是幂等的(写入侧修好后不再产生
-    新副本,这条从第二天起就查不到东西可删),而一次性脚本得手动上机器执行,容易
-    漏做或在下次重建环境时被忘记。
-
-    Delete stored replayed bars (the ones fabricated during a market close).
-    Returns the number of rows deleted.
-
-    The write-path filter only stops new data; this clears what was already
-    persisted before that filter existed — otherwise the repeating flat band
-    over historical closed sessions stays on the backtest chart and keeps
-    corrupting backtests.
-
-    Only rows that have an earlier bar with identical o/h/l/c/v in the same
-    symbol/interval are removed, i.e. each group of duplicates keeps its
-    earliest row — and that earliest row is precisely the real pre-close bar
-    every later one was copied from. Must stay in sync with
-    _is_replayed_duplicate().
-
-    A REPLAY_MATCH_WINDOW_DAYS proximity limit is applied on top: two genuine
-    bars matching on all five fields far apart in time is next to impossible,
-    but deletion is irreversible, so the window rules out even that theoretical
-    case. The cost is under-deleting in extreme situations, which the next sweep
-    picks up anyway.
-
-    Runs as part of the daily retention sweep rather than as a one-off script:
-    the sweep is idempotent (with the write path fixed, no new replays appear,
-    so from the next day on it finds nothing to delete), whereas a one-off
-    script has to be run by hand and is easy to skip or forget when the
-    environment is next rebuilt.
-    """
-    earlier = aliased(Candle)
-    duplicate_of_earlier = (
-        db.query(earlier.id)
-        .filter(
-            # 完全平坦的 bar 豁免,与 _is_replayed_duplicate() 保持一致。
-            # Flat bars are exempt, matching _is_replayed_duplicate().
-            Candle.h != Candle.l,
-            earlier.symbol == Candle.symbol,
-            earlier.interval == Candle.interval,
-            earlier.t < Candle.t,
-            earlier.t >= Candle.t - REPLAY_MATCH_WINDOW_DAYS * 86400,
-            func.abs(earlier.o - Candle.o) < _PRICE_EPSILON,
-            func.abs(earlier.h - Candle.h) < _PRICE_EPSILON,
-            func.abs(earlier.l - Candle.l) < _PRICE_EPSILON,
-            func.abs(earlier.c - Candle.c) < _PRICE_EPSILON,
-            func.coalesce(earlier.v, 0) == func.coalesce(Candle.v, 0),
-        )
-        .exists()
-    )
-    deleted = (
-        db.query(Candle)
-        .filter(duplicate_of_earlier)
-        .delete(synchronize_session=False)
-    )
-    if deleted:
-        db.commit()
-    return deleted
-
-
 def cleanup_old_m1(db, retention_days: int) -> int:
     """删掉超过保留天数的 1 分钟线,其余周期不动。返回删除行数。
     Delete 1-minute candles past the retention window; other intervals are
@@ -421,16 +336,6 @@ def _run_retention_sweep() -> None:
         deleted = cleanup_old_m1(db, int(cfg["m1_retention_days"]))
         if deleted:
             logger.info("candle_retention_sweep_loop: deleted %d expired 1m candle(s)", deleted)
-        # 清掉写入侧过滤上线之前落库的休市重放副本,见 cleanup_replayed_bars()。
-        # Clear replayed bars persisted before the write-path filter existed;
-        # see cleanup_replayed_bars().
-        replays = cleanup_replayed_bars(db)
-        if replays:
-            logger.info(
-                "candle_retention_sweep_loop: deleted %d replayed candle(s) "
-                "(pre-existing market-closed duplicates)",
-                replays,
-            )
         # 顺带清页面统计的去重标记：同样是每天一次的保留期清理，
         # 为一张小表另开一个后台任务不值得（VPS 是 2 核单进程）。
         # Also prune page-stat dedup markers: same daily retention job,
@@ -451,17 +356,16 @@ async def candle_retention_sweep_loop(
     """每天清理一次过期的 1 分钟线。
     Daily sweep that trims expired 1-minute candles.
 
-    清扫走线程池,不占事件循环:其中 cleanup_replayed_bars() 是相关子查询自连接,
-    价格比较用 abs() 走不了索引,生产实测单轮 83.7 秒。原先直接同步跑在事件循环上,
-    首轮把 uvicorn 的 startup 一起堵住(端口未 bind,nginx 全程 502),之后每天再堵
-    一次同样时长。首轮另外延迟一小段:清扫都不紧急,让端口先起来,服务立即可用。
-    The sweep runs in a thread instead of on the event loop: cleanup_replayed_bars()
-    is a correlated self-join whose abs() price comparisons can't use an index —
-    measured at 83.7s per pass in production. Running it synchronously on the loop
-    made the first pass block uvicorn's startup entirely (port unbound, nginx
-    serving 502s throughout) and then froze every request for the same duration
-    once a day. The first pass is also delayed briefly: none of this is urgent, so
-    the port binds first and the service is immediately available.
+    清扫走线程池并延后首轮,不挡启动:这里全是同步 DB 调用,生产库还是远端
+    Supabase,每条都带网络往返。曾经同步跑在事件循环上,首轮把 uvicorn 的 bind
+    端口一起堵住 83.7 秒(nginx 全程 502),之后每天再冻住所有请求一次。清扫都不
+    紧急,让端口先起来。
+    The sweep runs in a thread and delays its first pass so it never blocks
+    startup: the body is all synchronous DB calls, and production talks to a
+    remote Supabase instance, so each one carries a network round trip. Running it
+    on the event loop once held up uvicorn's port bind for 83.7s (nginx serving
+    502s throughout) and then froze every request once a day. None of this is
+    urgent, so the port comes up first.
 
     startup_delay 可覆盖,便于测试里立即跑首轮。
     startup_delay is overridable so tests can run the first pass immediately.
