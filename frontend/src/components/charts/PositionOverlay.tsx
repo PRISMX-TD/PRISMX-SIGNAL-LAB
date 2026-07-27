@@ -469,8 +469,17 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
     // the toast in agreement.
     const factor = Math.pow(10, digits)
     const next = Math.round(drag.price * factor) / factor
-    const cur = drag.kind === 'sl' ? m.sl : m.tp
-    if (next <= 0 || (cur != null && Math.abs(next - cur) < 1 / factor / 2)) return
+    // 对比原始持仓的止损/止盈（而非标记覆盖后的值——拖拽过程中 pick() 已经把
+    // 标记值换成了拖拽位置，拿 m.sl/m.tp 比 next 永远是同一个价，会被当成
+    // "没有实质性变动"而静默跳过，于是线弹回去、确认框不弹）。
+    // Compare against the position's raw SL/TP (NOT the marker value — during a
+    // drag, pick() overrides the marker with the dragged price, so comparing
+    // m.sl/m.tp against next always sees the same price and silently skips the
+    // confirm dialog as "no meaningful change", snapping the line back).
+    const rawSl = m.pos.stopLoss
+    const rawTp = m.pos.takeProfit
+    const orig = drag.kind === 'sl' ? (rawSl && rawSl > 0 ? rawSl : null) : (rawTp && rawTp > 0 ? rawTp : null)
+    if (next <= 0 || (orig != null && Math.abs(next - orig) < 1 / factor / 2)) return
 
     // 方向校验：与底部持仓面板同一套规则（买单止损须低于现价、止盈须高于现价）。
     // Direction check: same rule as the positions dock.
