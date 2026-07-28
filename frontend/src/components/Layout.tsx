@@ -386,7 +386,7 @@ export default function Layout() {
     // Re-check subscription health when the page returns to the foreground:
     // iOS/Android may kill the SW or clear push permission during inactivity;
     // self-heal on re-activation rather than waiting for a full page reload.
-    let lastPerm = Notification.permission
+    let lastPerm: NotificationPermission = Notification.permission
     const onVisible = () => {
       if (!document.hidden) {
         // 权限在后台被系统撤销（iOS 更新后偶发）

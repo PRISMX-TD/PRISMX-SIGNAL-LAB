@@ -24,12 +24,6 @@ let onUnauthorized: (() => void) | null = null
 export function setUnauthorizedHandler(fn: (() => void) | null) {
   onUnauthorized = fn
 }
-// 主动触发未授权处理（如 WebSocket 鉴权失败时）/ trigger the unauthorized flow manually.
-export function triggerUnauthorized() {
-  clearToken()
-  onUnauthorized?.()
-}
-
 // 限流（429）的兜底文案。写成后端惯用的「中文 / English」双语格式，
 // localizeApiError 会按界面语言取对应那半，不必单独走 i18n。
 // Fallback message for rate limiting (429). Written in the backend's usual
