@@ -211,6 +211,52 @@ def test_backtest_runs_against_seeded_candle_history(client, db, auth_headers, u
     assert "summary" in body and "points" in body and "trades" in body
 
 
+def test_backtest_engine_error_becomes_400_not_500(client, db, auth_headers, user, monkeypatch):
+    """回归测试：回测引擎抛出求值期错误时必须是 400 + 原因，不能是 500。
+
+    这条测试存在的原因是一个真实 bug：异常处理写的是 `except RuleError`，而
+    RuleError 这个名字随 rules.py 改名成 conditions.py 一起消失了。except 子句
+    只在真的有异常经过时才求值，所以所有走正常路径的测试都碰不到它——直到线上
+    某次回测真的抛错，Python 求值那个不存在的名字抛出 NameError，用户拿到 500。
+    500 还会绕过 CORS 中间件、响应不带跨域头，浏览器把它报成 CORS 错误，排查方向
+    整个被带偏（同踩坑记录 #27）。
+
+    所以这里刻意从引擎侧注入一个异常，断言 HTTP 层把它翻译成 400 并带上原文。
+
+    Regression test: an evaluation-time error from the backtest engine must
+    surface as a 400 with its reason, never a 500.
+
+    This exists because of a real bug: the handler said `except RuleError`, a name
+    that vanished when rules.py became conditions.py. An except clause is only
+    evaluated when an exception actually passes through it, so every happy-path
+    test sailed past — until a backtest genuinely raised in production, evaluating
+    the missing name raised NameError, and the user got a 500. A 500 also bypasses
+    the CORS middleware and returns no CORS headers, so the browser reports it as a
+    CORS error and sends anyone debugging it in entirely the wrong direction (see
+    deployment-log pitfall #27). Hence: inject a failure at the engine and assert
+    the HTTP layer translates it.
+    """
+    _make_admin_pro(db, user)
+    _feed(monkeypatch)
+    now = datetime.now(timezone.utc)
+    for i in range(60):
+        t = int((now - timedelta(minutes=15 * (60 - i))).timestamp())
+        db.add(Candle(symbol="XAUUSD", interval="15", t=t, o=100, h=101, l=99, c=100 + (i % 5), v=1))
+    db.commit()
+
+    def _boom(*_a, **_k):
+        raise ValueError("ATR 方式需要可用的 ATR 值 / the atr method needs an ATR value")
+
+    monkeypatch.setattr(strategies_router, "run_backtest", _boom)
+
+    res = client.post(
+        "/api/strategies/backtest", headers=auth_headers,
+        json={"template": "ma_trend", "symbol": "XAUUSD", "interval": "15"},
+    )
+    assert res.status_code == 400, f"expected 400, got {res.status_code}"
+    assert "ATR" in res.json()["detail"]
+
+
 def test_backtest_returns_most_recent_bars_when_history_exceeds_cap(client, db, auth_headers, user, monkeypatch):
     """回归测试：`days` 窗口内的实际行数超过 MAX_BACKTEST_BARS 时,必须拿最新
     的一段,不能拿最早的一段——否则窗口里不管之后再插入多少新数据,回测永远

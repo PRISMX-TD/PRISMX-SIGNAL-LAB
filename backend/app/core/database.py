@@ -176,6 +176,17 @@ def _migrate_columns() -> None:
             "CREATE INDEX IF NOT EXISTS idx_strategy_watch_symbol_interval "
             "ON strategy_watch(symbol, interval)"
         ))
+        # 离线检测每 2 秒按 last_heartbeat 过滤一次在线账号（见 bridge.py 的
+        # offline_monitor_loop）。没有这条索引，那个查询就是每 2 秒一次全表扫描，
+        # 扫描量随注册用户数增长——而其中绝大多数账号并不在线。
+        # The offline monitor filters live accounts by last_heartbeat every two
+        # seconds (see offline_monitor_loop in bridge.py). Without this index that
+        # query is a full table scan 30 times a minute, growing with the registered
+        # user count — while almost none of those accounts are actually online.
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_mt5_accounts_heartbeat "
+            "ON mt5_accounts(last_heartbeat)"
+        ))
 
     # users 表：password_hash 改可空（Google 登录用户无密码）。
     # 旧表建表时为 NOT NULL，需放开约束，否则插入无密码用户会被拒。

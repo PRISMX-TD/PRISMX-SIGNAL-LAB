@@ -136,37 +136,77 @@ def _resolved_positions(
     return resolved
 
 
-def _user_modify_close(db, user_id: str, login: str | None, ticket: int, action: str):
-    """该仓位下所有**用户发起**（非 auto_ 前缀）的 MODIFY/CLOSE 指令，按时间升序。
+def _user_modify_close_map(
+    db, user_id: str, action: str, keys: set[tuple]
+) -> dict[tuple, list]:
+    """一次取回这一批仓位下所有**用户发起**（非 auto_ 前缀）的 MODIFY 或 CLOSE
+    指令，按 (账号, 仓位编号) 分组、组内按时间升序。
 
-    login 用 `==` 精确匹配（含 None，SQLAlchemy 把 `Column == None` 自动改写成
-    IS NULL）——不能省略这个过滤条件：ticket 编号只在单个账号内唯一，若 login
-    为 None 就不加过滤，会把另一账号里恰好同编号的 MODIFY/CLOSE 也匹配进来。
+    原来是每个仓位各查一次（`_user_modify_close`），配合 D1 和 D3 就是 2N 条查询，
+    再加 D2 的手数历史一共 3N 条。生产库是远端 Supabase，每条都带一次网络往返，
+    N 是这个用户窗口内的仓位数——一个活跃用户打开一次订单页就是几百次往返。
+    改成按 ticket 集合一次拉回、在内存里分组，查询数从 3N 降到 3。
 
-    User-initiated (non-auto_) MODIFY/CLOSE commands for this position, oldest
-    first. `login` is matched with `==` (including None, which SQLAlchemy
-    rewrites to IS NULL) — this filter can't be skipped: ticket numbers are
-    only unique within one account, so omitting it when login is None would
-    also match MODIFY/CLOSE rows from a different account that happens to
-    share the same ticket number.
+    分组键仍然是 (账号, 仓位编号) 而不是只用编号：ticket 只在单个账号内唯一，
+    同一用户绑多个账号时会撞车，只按编号分组会把 A 账号的改单算进 B 账号的仓位
+    （这正是原实现里那句「login 用 == 精确匹配、这个过滤条件不能省」在防的事，
+    这里靠分组键把同一条约束延续下来）。
+
+    Fetch every user-initiated (non-auto_) MODIFY or CLOSE command for a batch of
+    positions in one query, grouped by (login, ticket) with each group oldest-first.
+
+    This used to be one query per position (`_user_modify_close`), which with D1
+    and D3 meant 2N queries, plus D2's volume history for 3N in total. Production
+    talks to a remote Supabase, so every one of those carries a network round
+    trip, and N is the user's position count in the window — opening the orders
+    page as an active user meant hundreds of round trips. Fetching by ticket set
+    once and grouping in memory takes it from 3N to 3.
+
+    The grouping key stays (login, ticket) rather than ticket alone: tickets are
+    only unique within an account, so a user with several accounts can collide,
+    and grouping by ticket would credit account A's modifications to account B's
+    position. (That is exactly what the original's "login is matched with == and
+    this filter can't be skipped" was guarding; the grouping key carries the same
+    constraint forward.)
     """
-    return (
+    if not keys:
+        return {}
+    tickets = {ticket for _login, ticket in keys}
+    rows = (
         db.query(Order)
         .filter(
             Order.user_id == user_id,
             Order.action == action,
             Order.status == "FILLED",
-            Order.ticket == ticket,
-            Order.mt5_login == login,
+            Order.ticket.in_(tickets),
             ~Order.client_order_id.like(f"{AUTO_PREFIX}%"),
         )
         .order_by(Order.created_at.asc())
         .all()
     )
+    out: dict[tuple, list] = {}
+    for r in rows:
+        key = (r.mt5_login, r.ticket)
+        # 只保留调用方真正在问的那些 (账号, 编号)：ticket 集合过滤是宽的，可能带回
+        # 同编号但属于另一个账号的行。
+        # Keep only the (login, ticket) pairs the caller actually asked about: the
+        # ticket-set filter is broad and can return same-numbered rows belonging to
+        # a different account.
+        if key in keys:
+            out.setdefault(key, []).append(r)
+    return out
 
 
-def _score_stop_loss(db, user_id: str, login: str | None, ticket: int, order: Order, tolerance_pct: float) -> float | None:
-    """D1：止损纪律。逐条用户发起的 MODIFY 比对，任何一次明显恶化即判违规。"""
+def _score_stop_loss(
+    db, order: Order, modifies: list, entry_by_signal: dict[str, float | None], tolerance_pct: float
+) -> float | None:
+    """D1：止损纪律。逐条用户发起的 MODIFY 比对，任何一次明显恶化即判违规。
+
+    modifies 由调用方批量取好后传入（见 _user_modify_close_map），
+    entry_by_signal 同理——原来这两处各自在循环里发查询。
+    Both `modifies` and `entry_by_signal` are prefetched in bulk by the caller
+    (see _user_modify_close_map); each used to issue its own query inside the loop.
+    """
     ref_sl = order.sl
     if ref_sl in (None, 0):
         # 信号单必然带止损；开仓时就没有止损本身就是最大的违纪
@@ -174,12 +214,10 @@ def _score_stop_loss(db, user_id: str, login: str | None, ticket: int, order: Or
     side = order.side
     price_ref = order.filled_price
     if price_ref is None:
-        sig = db.query(Signal).filter(Signal.id == order.signal_id).first()
-        price_ref = sig.entry if sig else None
+        price_ref = entry_by_signal.get(order.signal_id)
     if price_ref is None:
         return None  # 无法算距离容差，宁缺勿错
 
-    modifies = _user_modify_close(db, user_id, login, ticket, "MODIFY")
     for m in modifies:
         new_sl = m.sl
         if new_sl in (None, 0):
@@ -193,25 +231,65 @@ def _score_stop_loss(db, user_id: str, login: str | None, ticket: int, order: Or
     return 100.0
 
 
-def _score_volume(db, user_id: str, login: str | None, order: Order, multiple: float, history_min: int) -> float | None:
-    """D2：仓位纪律。跟该账号下本仓位开仓前最近 N 笔信号单的手数中位数比较。
-    login 用 `==` 精确匹配（含 None→IS NULL），同 _user_modify_close 的理由：
-    不按账号切分会把另一账号的手数历史错误地混进基准里。"""
-    history = [
-        v
-        for (v,) in db.query(Order.volume)
-        .filter(
-            Order.user_id == user_id,
-            Order.signal_id.isnot(None),
-            Order.action == "ORDER",
-            Order.status == "FILLED",
-            Order.mt5_login == login,
-            Order.created_at < order.created_at,
+def _volume_history_map(db, user_id: str, logins: set[str | None]) -> dict:
+    """按账号取回手数基准所需的信号单历史，一次查完这一批账号。
+
+    原来是每个仓位各查一次「本仓位开仓前最近 N 笔」。改成按账号一次性拉回该账号
+    的信号单 (created_at, volume) 列表（按时间降序），再由调用方对每个仓位在内存
+    里切出「开仓前最近 N 笔」——同一个账号下的多个仓位共用同一份历史，不必反复
+    向数据库要几乎相同的数据。
+
+    每个账号最多取 _VOLUME_BASELINE_SAMPLE + 窗口内仓位数 行：基准只要 N 笔，
+    但每个仓位的截止时间点不同，所以要留出足够的余量让最早那个仓位也能凑够 N 笔。
+
+    Per-account signal-order history for the volume baseline, fetched once for the
+    whole batch of accounts.
+
+    This used to be one query per position ("the N most recent before this one
+    opened"). Now each account's (created_at, volume) list is pulled once in
+    descending time order and the caller slices "the N most recent before this
+    position" in memory — several positions on the same account share one history
+    instead of asking the database for near-identical data over and over.
+
+    Each account fetches at most _VOLUME_BASELINE_SAMPLE + the number of positions
+    in the window: the baseline needs N rows, but every position has a different
+    cut-off, so there has to be enough slack for the earliest one to still find N.
+    """
+    out: dict = {}
+    for lg in logins:
+        rows = (
+            db.query(Order.created_at, Order.volume)
+            .filter(
+                Order.user_id == user_id,
+                Order.signal_id.isnot(None),
+                Order.action == "ORDER",
+                Order.status == "FILLED",
+                Order.mt5_login == lg,
+            )
+            .order_by(Order.created_at.desc())
+            .limit(_VOLUME_BASELINE_SAMPLE * 4)
+            .all()
         )
-        .order_by(Order.created_at.desc())
-        .limit(_VOLUME_BASELINE_SAMPLE)
-        .all()
-    ]
+        out[lg] = rows
+    return out
+
+
+def _score_volume(history_rows: list, order: Order, multiple: float, history_min: int) -> float | None:
+    """D2：仓位纪律。跟该账号下本仓位开仓前最近 N 笔信号单的手数中位数比较。
+
+    history_rows 是该账号按时间降序的 (created_at, volume) 列表（由
+    _volume_history_map 批量取回），这里只负责切出本仓位开仓之前的最近 N 笔。
+    按账号切分这一点没变——不切分会把另一账号的手数历史混进基准里。
+
+    history_rows is that account's (created_at, volume) list in descending time
+    order, prefetched by _volume_history_map; this only slices the N most recent
+    entries predating this position. Still scoped per account: mixing another
+    account's sizing into the baseline would corrupt it.
+    """
+    history = [
+        v for (created, v) in history_rows
+        if created is not None and order.created_at is not None and created < order.created_at
+    ][:_VOLUME_BASELINE_SAMPLE]
     if len(history) < history_min:
         return None
     baseline = statistics.median(history)
@@ -222,9 +300,10 @@ def _score_volume(db, user_id: str, login: str | None, order: Order, multiple: f
     return 100.0
 
 
-def _score_exit(db, user_id: str, login: str | None, ticket: int, legs: list[ClosedTrade]) -> float:
-    """D3：出场纪律。有用户发起的 CLOSE 指令、且该仓位最终亏损，判违规。"""
-    manual_closes = _user_modify_close(db, user_id, login, ticket, "CLOSE")
+def _score_exit(manual_closes: list, legs: list[ClosedTrade]) -> float:
+    """D3：出场纪律。有用户发起的 CLOSE 指令、且该仓位最终亏损，判违规。
+    manual_closes 由调用方批量取好后传入（见 _user_modify_close_map）。
+    manual_closes is prefetched in bulk by the caller (see _user_modify_close_map)."""
     if not manual_closes:
         return 100.0  # 出场交给 SL/TP（或 MT5 端手动平仓，检测不到，算合规）
     total_profit = sum(leg.profit for leg in legs)
@@ -255,23 +334,51 @@ def compute_discipline(
 
     positions = _resolved_positions(db, user_id, login, bound_logins, window_days)
 
+    # 三次批量预取，取代原先在循环里每个仓位各发 3 条查询（D1 的 MODIFY、
+    # D3 的 CLOSE、D2 的手数历史）。生产库是远端 Supabase，每条查询都带一次
+    # 网络往返，而仓位数随用户交易量增长——这是本函数唯一会随规模恶化的部分。
+    # 顺带把 D1 里那条「filled_price 为空时回查 Signal.entry」也一次取完。
+    # Three bulk prefetches replacing the three per-position queries the loop used
+    # to issue (D1's MODIFYs, D3's CLOSEs, D2's volume history). Production talks
+    # to a remote Supabase where every query is a network round trip, and the
+    # position count grows with how much the user trades — this was the only part
+    # of this function that degraded with scale. The "look up Signal.entry when
+    # filled_price is missing" fallback inside D1 is prefetched here too.
+    keys = set(positions.keys())
+    modifies_map = _user_modify_close_map(db, user_id, "MODIFY", keys)
+    closes_map = _user_modify_close_map(db, user_id, "CLOSE", keys)
+    volume_history = _volume_history_map(db, user_id, {lg for lg, _t in keys})
+
+    signal_ids = {
+        p["order"].signal_id
+        for p in positions.values()
+        if p["order"].filled_price is None and p["order"].signal_id
+    }
+    entry_by_signal: dict[str, float | None] = {}
+    if signal_ids:
+        entry_by_signal = {
+            sid: entry
+            for sid, entry in db.query(Signal.id, Signal.entry).filter(Signal.id.in_(signal_ids)).all()
+        }
+
     stop_scores: list[float] = []
     volume_scores: list[float] = []
     exit_scores: list[float] = []
 
-    for (pos_login, ticket), payload in positions.items():
+    for key, payload in positions.items():
+        pos_login = key[0]
         order = payload["order"]
         legs = payload["legs"]
 
-        s1 = _score_stop_loss(db, user_id, pos_login, ticket, order, tolerance_pct)
+        s1 = _score_stop_loss(db, order, modifies_map.get(key, []), entry_by_signal, tolerance_pct)
         if s1 is not None:
             stop_scores.append(s1)
 
-        s2 = _score_volume(db, user_id, pos_login, order, volume_multiple, volume_history_min)
+        s2 = _score_volume(volume_history.get(pos_login, []), order, volume_multiple, volume_history_min)
         if s2 is not None:
             volume_scores.append(s2)
 
-        exit_scores.append(_score_exit(db, user_id, pos_login, ticket, legs))
+        exit_scores.append(_score_exit(closes_map.get(key, []), legs))
 
     def _dim(scores: list[float]) -> dict:
         if not scores:

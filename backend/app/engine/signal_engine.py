@@ -5,14 +5,29 @@ Signal engine: generate trading signals from technical indicators.
 接入真实行情时只需替换 _get_price_series。
 Local stage uses synthetic price series to demo an MA-cross + RSI-filter strategy;
 swap _get_price_series to plug in real market data.
+
+numpy / pandas 刻意在函数内部导入，不放模块顶层：本模块的模拟引擎在生产
+**根本不允许运行**（ENV=production 且 ENABLE_MOCK_SIGNAL_ENGINE=true 时
+core/config.py 会直接 RuntimeError 拒绝启动），但 main.py 为了拿
+signal_expiry_loop 必须 import 本模块——于是生产每次启动都要为一段永远跑不到
+的代码加载 pandas（实测 0.42 秒，2 核 VPS 上约 1~1.5 秒），而 init_db 全程也
+才 0.7 秒。挪进函数体后，只有真的开着模拟引擎的本地开发才会付这个代价。
+signal_expiry_loop 本身不依赖它们。
+
+numpy / pandas are imported inside the functions rather than at module level on
+purpose. The mock engine in this module is **forbidden to run in production**
+(core/config.py raises RuntimeError at startup when ENV=production and
+ENABLE_MOCK_SIGNAL_ENGINE is on), yet main.py must import this module to get
+signal_expiry_loop — so every production boot paid to load pandas for code that
+can never execute (measured at 0.42s, roughly 1-1.5s on the 2-core VPS), against
+an init_db that takes 0.7s in total. Moved into the function bodies, only local
+development actually running the mock engine pays it. signal_expiry_loop itself
+needs neither library.
 """
 import asyncio
 import logging
 import random
 from datetime import datetime, timedelta, timezone
-
-import numpy as np
-import pandas as pd
 
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -50,7 +65,10 @@ def _next_price(symbol: str) -> float:
     return nxt
 
 
-def _rsi(series: pd.Series, period: int = 14) -> float:
+def _rsi(series, period: int = 14) -> float:
+    import numpy as np
+    import pandas as pd
+
     delta = series.diff()
     gain = delta.clip(lower=0).rolling(period).mean()
     loss = (-delta.clip(upper=0)).rolling(period).mean()
@@ -65,6 +83,8 @@ def _evaluate(symbol: str) -> dict | None:
     prices = _history[symbol]
     if len(prices) < 35:
         return None
+
+    import pandas as pd
 
     s = pd.Series(prices)
     fast = s.rolling(5).mean()

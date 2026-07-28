@@ -21,7 +21,7 @@ from app.routers.orders import is_stale_pending, order_update_payload, void_stal
 from app.schemas import LOGIN_PATTERN, SUFFIX_PATTERN, AccountSuffixRequest, MT5AccountOut
 from app.services.auto_manage import AUTO_PREFIX, evaluate_positions
 from app.services.connection_manager import manager
-from app.services.deps import get_current_user, is_account_online
+from app.services.deps import ONLINE_WINDOW, get_current_user, is_account_online
 from app.services.plans import max_mt5_accounts
 from app.services.push_dispatch import (
     EVENT_BRIDGE_OFFLINE,
@@ -778,13 +778,36 @@ async def offline_monitor_loop() -> None:
     from app.core.database import SessionLocal
 
     def _scan_online() -> dict[str, set[str]]:
-        """扫描所有账号的在线状态（同步 DB 操作）/ scan online logins (blocking DB work)."""
+        """扫描当前在线的账号（同步 DB 操作）/ scan online logins (blocking DB work).
+
+        只查心跳还新鲜的行，且只取两列。此前是 `db.query(MT5Account).all()`——
+        每 2 秒把全表所有用户的所有账号整行取回，再在 Python 里逐行判在线。这个
+        循环 24 小时不停，每分钟 30 次；生产库是远端 Supabase，每次都带一次网络
+        往返，取回的行数随注册用户数线性增长，而其中绝大多数账号根本不在线。
+        判定条件与 is_account_online 完全一致（同一个 ONLINE_WINDOW），只是把它
+        从 Python 挪进 WHERE，让数据库走索引直接过滤。
+
+        Query only rows whose heartbeat is still fresh, and only two columns. This
+        used to be `db.query(MT5Account).all()` — every 2 seconds it pulled whole
+        rows for every account of every user and evaluated liveness in Python. The
+        loop never stops, 30 times a minute; production talks to a remote Supabase
+        so each pass is a network round trip, the row count grows linearly with
+        registered users, and nearly all of those accounts aren't online anyway.
+        The predicate is identical to is_account_online (same ONLINE_WINDOW),
+        just moved from Python into the WHERE clause so the database can use an
+        index instead.
+        """
         db = SessionLocal()
         try:
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=ONLINE_WINDOW)
             current: dict[str, set[str]] = {}
-            for r in db.query(MT5Account).all():
-                if is_account_online(r):
-                    current.setdefault(r.user_id, set()).add(r.login)
+            rows = (
+                db.query(MT5Account.user_id, MT5Account.login)
+                .filter(MT5Account.last_heartbeat >= cutoff)
+                .all()
+            )
+            for user_id, login in rows:
+                current.setdefault(user_id, set()).add(login)
             return current
         finally:
             db.close()

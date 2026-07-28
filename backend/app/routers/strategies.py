@@ -31,6 +31,7 @@ endpoints as originally designed — a non-PRO user gets a clear 403 on enable,
 so no extra route-level gate is needed.
 """
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -77,6 +78,8 @@ from app.services.strategy.conditions import (
     validate_conditions,
 )
 from app.services.strategy.presets import PRESET_CONDITIONS, PRESET_LOGIC, TEMPLATE_KEYS, preset_payload
+
+logger = logging.getLogger("prismx.strategies")
 
 router = APIRouter(prefix="/strategies", tags=["strategies"])
 
@@ -716,10 +719,36 @@ def backtest_strategy(
             status_code=429,
             detail="你已有一个回测在跑，请等它结束 / a backtest of yours is already running",
         ) from e
-    except RuleError as e:
-        # 指标序列过短（数据含空洞）这类求值期错误：400 并说明，不返回半套结果。
-        # Evaluation-time errors such as too-short indicator series (data gaps):
-        # 400 with an explanation rather than half a result.
+    except ValueError as e:
+        # 指标序列过短（数据含空洞）、ATR 预热期取不到值这类求值期错误：400 并
+        # 说明，不返回半套结果。捕的是 ValueError 而不是某个专有异常：
+        # ConditionError 本身就是 ValueError 的子类，backtest.exit_prices 抛的也是
+        # 裸 ValueError，一条分支同时覆盖两者。
+        #
+        # 这里曾经写的是 `except RuleError`，而 RuleError 随 rules.py 改名成
+        # conditions.py 时一并消失了——except 子句只在真的有异常经过时才求值，所以
+        # 单测走的正常路径永远碰不到它。一旦 run_backtest 抛出任何非 BacktestBusy
+        # 的异常，Python 求值这个不存在的名字会抛 NameError，用户拿到的是 500 而
+        # 不是本该有的 400；更糟的是 500 会绕过 CORS 中间件、响应不带跨域头，浏览器
+        # 一律报成 CORS 错误（同《部署与上线进度》踩坑记录 #27 的现象），排查方向
+        # 会被直接带偏到 nginx 和 CORS_ORIGINS 上去。
+        #
+        # Evaluation-time errors — too-short indicator series (data gaps), no ATR
+        # value during warm-up — become a 400 with an explanation rather than half
+        # a result. This catches ValueError rather than a dedicated exception
+        # because ConditionError subclasses ValueError and backtest.exit_prices
+        # raises a bare ValueError; one clause covers both.
+        #
+        # This used to read `except RuleError`, a name that disappeared when
+        # rules.py became conditions.py. An except clause is only evaluated when an
+        # exception actually passes through, so the happy paths the tests exercise
+        # never touched it. The moment run_backtest raised anything other than
+        # BacktestBusy, evaluating that missing name raised NameError and the user
+        # got a 500 instead of the intended 400 — and a 500 bypasses the CORS
+        # middleware, so the browser reports it as a CORS error (the same symptom
+        # as deployment-log pitfall #27), sending anyone debugging it off toward
+        # nginx and CORS_ORIGINS instead.
+        logger.warning("backtest failed for user %s (%s/%s): %s", user.id, symbol, body.interval, e)
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     # 响应不带 bars：5000 根序列化一次就是几百 KB。前端画蜡烛图走

@@ -528,11 +528,19 @@ def put_pricing(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """保存订阅定价。Save subscription pricing."""
-    if body.proYearlyPrice > 0 and body.proMonthlyPrice > 0:
-        if body.proYearlyPrice >= body.proMonthlyPrice * 12:
-            pass  # 年付可以贵于月付×12（虽然不推荐），不拦截
+    """保存订阅定价。Save subscription pricing.
 
+    刻意不校验「年付是否便宜于月付×12」：定价是运营决策，年付贵于月付虽然反直觉，
+    但可能是有意为之（比如只想推月付），后端不该替运营拍板。此处原先留着一个
+    `if ...: pass` 的空判断表达这个意思，但空分支读起来像「这里少写了点什么」，
+    不如直接写成一句话。
+    Deliberately no "yearly must be cheaper than monthly x12" check: pricing is an
+    operational decision, and a yearly price above 12x monthly — counter-intuitive
+    as it looks — may well be intentional (e.g. steering everyone to monthly). The
+    backend shouldn't overrule that. This used to be expressed as an empty
+    `if ...: pass`, but an empty branch reads like something is missing; a sentence
+    says it better.
+    """
     data = {
         "pro_monthly_price": body.proMonthlyPrice,
         "pro_yearly_price": body.proYearlyPrice,

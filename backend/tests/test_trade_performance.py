@@ -7,7 +7,7 @@ positions whose close-legs were missed and would otherwise stick at "进行中")
 from datetime import datetime, timedelta, timezone
 
 from app.models import ClosedTrade, MT5Account, Order
-from app.services.trade_performance import compute_personal_winrate, mark_positions_seen
+from app.services.trade_performance import WINDOW_DAYS, compute_personal_winrate, mark_positions_seen
 
 
 def _now():
@@ -59,9 +59,42 @@ def _leg(db, user, ticket, login, profit, volume=1.0, deal=None):
 
 
 def test_no_orders_returns_empty(db, user):
+    # windowDays 随响应返回，让前端能把标题写成「近 N 天」而不是让一个有范围的
+    # 数字被读成全历史（口径见 trade_performance.WINDOW_DAYS）。
+    # windowDays travels with the response so the frontend can label it "last N
+    # days" instead of letting a bounded figure read as all-time (see
+    # trade_performance.WINDOW_DAYS).
     assert compute_personal_winrate(db, user.id) == {
-        "wins": 0, "losses": 0, "totalResolved": 0, "winRate": None, "openPositions": 0, "bySymbol": []
+        "wins": 0, "losses": 0, "totalResolved": 0, "winRate": None, "openPositions": 0,
+        "bySymbol": [], "windowDays": WINDOW_DAYS,
     }
+
+
+def test_orders_outside_window_are_excluded(db, user):
+    """回归测试：超出回看窗口的历史订单不再计入。
+
+    这个函数原本无条件 `.all()` 载入该用户全部历史订单，前端每 45 秒轮询一次，
+    成本随交易时长线性增长。加窗口是为了给成本封顶，但必须同时保证「窗口内的
+    单一笔都不少」——所以这里一笔在窗口内、一笔刚好在窗口外，断言只算到前者。
+
+    Regression test: orders older than the look-back window no longer count.
+    This function used to load every historical order unconditionally while the
+    frontend polls every 45s, so cost grew with how long someone had been
+    trading. The window caps that, but must not drop anything inside it — hence
+    one order just inside and one just outside, asserting only the first counts.
+    """
+    _order(db, user, ticket=200, login="10001")
+    _leg(db, user, ticket=200, login="10001", profit=5.0)
+
+    old = _order(db, user, ticket=201, login="10001")
+    old.created_at = _now() - timedelta(days=WINDOW_DAYS + 1)
+    db.commit()
+    _leg(db, user, ticket=201, login="10001", profit=-5.0)
+
+    res = compute_personal_winrate(db, user.id)
+    assert res["wins"] == 1
+    assert res["losses"] == 0, "窗口外的亏损单不应计入 / the out-of-window loss must not count"
+    assert res["totalResolved"] == 1
 
 
 def test_single_account_win_loss_open(db, user):

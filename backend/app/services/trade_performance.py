@@ -36,6 +36,34 @@ _VOLUME_EPS = 1e-6
 # positions also fall out of "进行中" and self-heal once reporting resumes.
 _OPEN_FRESHNESS = timedelta(minutes=20)
 
+# 统计回看窗口（天）。此前这个函数把该用户**全部**历史 FILLED 订单无条件
+# `.all()` 载入 Python 再逐笔聚合，没有任何时间上界——而订单表只增不减、前端
+# 每 45 秒轮询一次。一个交易一年的活跃用户，几千行订单每 45 秒全量载入一遍，
+# 成本随他用得越久越高。这正是策略绩效那轮（STREAK_WINDOW）修掉的同一类问题。
+#
+# 取 365 天而不是更短：这个数字是用户的「战绩」，砍到 30 天会让老用户觉得记录
+# 凭空消失；一年既够长到有意义，又给成本封了顶。
+#
+# 窗口值随响应一起返回（windowDays），**口径变化必须对用户显式可见**——与
+# strategies.py 的 streakWindow 同一条规矩，不能让一个有范围的数字被当成全历史。
+#
+# Look-back window in days. This function used to load ALL of a user's FILLED
+# orders with an unconditional `.all()` and aggregate them in Python, with no
+# upper bound — while the orders table only grows and the frontend polls every
+# 45 seconds. For someone trading for a year that's thousands of rows re-loaded
+# every 45s, getting more expensive the longer they stay. Same class of problem
+# as the one STREAK_WINDOW fixed for strategy performance.
+#
+# 365 days rather than something shorter: this number is the user's track
+# record, and cutting it to 30 days would make an established user's history
+# appear to vanish. A year is long enough to mean something and still caps the
+# cost.
+#
+# The window is returned in the response (windowDays): **a change in what a
+# number measures has to be visible to the user** — the same rule as
+# strategies.py's streakWindow, so a bounded figure is never read as all-time.
+WINDOW_DAYS = 365
+
 
 def compute_personal_winrate(
     db, user_id: str, bound_logins: list[str] | None = None, login: str | None = None
@@ -66,12 +94,26 @@ def compute_personal_winrate(
     tab); the legacy-null fallback above doesn't apply here — only orders with
     a confirmed matching login count.
     """
-    # 1) 该用户所有成功开仓、且已知 MT5 仓位编号的下单记录 / this user's filled opens with a known MT5 ticket
-    query = db.query(Order).filter(
+    # 1) 该用户在回看窗口内成功开仓、且已知 MT5 仓位编号的下单记录。
+    #    只取用得到的六列而不是整行 ORM 对象：下面全程只读这几个字段，取整行会
+    #    让 SQLAlchemy 额外构造几千个实例并把它们挂进 identity map。
+    #    this user's filled opens with a known MT5 ticket, within the look-back
+    #    window. Selects only the six columns actually used rather than whole ORM
+    #    rows: everything below reads just these fields, and fetching entities
+    #    would build thousands of instances and pin them in the identity map.
+    cutoff = datetime.now(timezone.utc) - timedelta(days=WINDOW_DAYS)
+    query = db.query(
+        Order.mt5_login,
+        Order.mt5_ticket,
+        Order.volume,
+        Order.symbol,
+        Order.position_last_seen_open,
+    ).filter(
         Order.user_id == user_id,
         Order.action == "ORDER",
         Order.status == "FILLED",
         Order.mt5_ticket.isnot(None),
+        Order.created_at >= cutoff,
     )
     if login is not None:
         query = query.filter(Order.mt5_login == login)
@@ -79,7 +121,10 @@ def compute_personal_winrate(
         query = query.filter(or_(Order.mt5_login.in_(bound_logins), Order.mt5_login.is_(None)))
     orders = query.all()
     if not orders:
-        return {"wins": 0, "losses": 0, "totalResolved": 0, "winRate": None, "openPositions": 0, "bySymbol": []}
+        return {
+            "wins": 0, "losses": 0, "totalResolved": 0, "winRate": None,
+            "openPositions": 0, "bySymbol": [], "windowDays": WINDOW_DAYS,
+        }
     # 一个"仓位"用 (MT5 账号, 仓位编号) 唯一标识：MT5 的仓位编号只在单个交易
     # 账号内递增，同一用户绑定多个账号时编号可能撞车。只按编号聚合会漏算仓位
     # （字典键相撞覆盖），还会把 A 账号的平仓明细错算进 B 账号的仓位——胜率和
@@ -92,17 +137,24 @@ def compute_personal_winrate(
     # idx_closed_trades_position (user, login, ticket) grouping.
     orders_by_pos = {(o.mt5_login, o.mt5_ticket): o for o in orders}
 
-    # 2) 这些仓位目前为止上报过的所有平仓明细（可能只是部分平仓）/ every reported close-leg for those tickets so far
+    # 2) 这些仓位目前为止上报过的所有平仓明细（可能只是部分平仓）。同样只取
+    #    下面真正读的四列。/ every reported close-leg for those tickets so far,
+    #    again narrowed to the four columns actually read below.
     legs = (
-        db.query(ClosedTrade)
+        db.query(
+            ClosedTrade.mt5_login,
+            ClosedTrade.position_ticket,
+            ClosedTrade.close_volume,
+            ClosedTrade.profit,
+        )
         .filter(
             ClosedTrade.user_id == user_id,
             ClosedTrade.position_ticket.in_(list({o.mt5_ticket for o in orders})),
         )
         .all()
     )
-    legs_by_pos: dict[tuple, list[ClosedTrade]] = {}
-    legs_by_ticket: dict[int, list[ClosedTrade]] = {}  # 兜底：账号未回填的历史订单 / fallback for legacy orders lacking a login
+    legs_by_pos: dict[tuple, list] = {}
+    legs_by_ticket: dict[int, list] = {}  # 兜底：账号未回填的历史订单 / fallback for legacy orders lacking a login
     for leg in legs:
         legs_by_pos.setdefault((leg.mt5_login, leg.position_ticket), []).append(leg)
         legs_by_ticket.setdefault(leg.position_ticket, []).append(leg)
@@ -151,10 +203,15 @@ def compute_personal_winrate(
         "winRate": wins / resolved if resolved > 0 else None,
         "openPositions": open_positions,
         "bySymbol": by_symbol,
+        # 口径随响应返回：前端据此把标题写成「近 N 天」，不让一个有范围的数字
+        # 被读成全历史。/ The measurement window travels with the response so the
+        # frontend can label it "last N days" instead of letting a bounded figure
+        # read as all-time.
+        "windowDays": WINDOW_DAYS,
     }
 
 
-def _is_live_open(order: Order, cutoff: datetime) -> bool:
+def _is_live_open(order, cutoff: datetime) -> bool:
     """该仓位是否在对账窗口内被 MT5 报为仍持仓。
     Whether the position was reported still-open within the reconciliation window."""
     ts = order.position_last_seen_open
