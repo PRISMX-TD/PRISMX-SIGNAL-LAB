@@ -1,6 +1,8 @@
 // 下载页：提供 PRISMX 桥接程序下载、使用教程与注意事项。
 // Download page: PRISMX Bridge download, usage guide and important notes.
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { bridgeVersionApi } from '../api/client'
 
 // 安装包直链与发布页（托管于 GitHub Releases）。
 // 在 GitHub 仓库创建 Release，并按下方文件名上传安装包资产，点击即可直接下载，无需改代码。
@@ -10,10 +12,48 @@ import { useTranslation } from 'react-i18next'
 const GITHUB_REPO = 'https://github.com/PRISMX-TD/PRISMX-SIGNAL-LAB'
 const BRIDGE_FILENAME = 'PRISMX-Bridge-Setup.exe'
 const DOWNLOAD_URL = `${GITHUB_REPO}/releases/latest/download/${BRIDGE_FILENAME}`
-const APP_VERSION = 'v1.3.17'
 
 export default function DownloadPage() {
   const { t } = useTranslation()
+
+  // 版本号从后端取（它抓的是 GitHub releases/latest 的 tag，带 10 分钟缓存，
+  // 见后端 services/bridge_version_check.py），不再在这里硬编码。
+  //
+  // 原因：运维手册里「发版时需手动同步两处版本号」这条本身就是个隐患——
+  // bridge_app.py 的 APP_VERSION 和这里的常量，漏改一处，下载页就会告诉用户
+  // 一个错误的版本号，而下载链接走的是 releases/latest、拿到的其实是新版。
+  // 用户看到的版本与实际下载到的版本对不上，排查「我到底装的哪个版本」时会
+  // 直接被带偏。事实上这两处此刻就已经漂移了（文档写 1.3.16，代码写 1.3.17）。
+  // 现在这里只剩一个「真实来源」：GitHub Release 的 tag。
+  //
+  // 拿不到时（GitHub 抓取失败 / 用户网络问题）不显示版本徽标，而不是显示一个
+  // 可能过期的写死值——没有信息好过错误信息。
+  //
+  // The version comes from the backend (which reads the GitHub releases/latest
+  // tag with a 10-minute cache, see services/bridge_version_check.py) instead of
+  // being hardcoded here.
+  //
+  // Why: the ops manual's "remember to update the version in two places on every
+  // release" was itself the hazard — bridge_app.py's APP_VERSION and this
+  // constant. Miss one and the download page states a version while the download
+  // link, which points at releases/latest, hands over a different one. A user
+  // whose displayed version doesn't match what they installed is sent straight
+  // down the wrong path when debugging "which build am I even on". The two had in
+  // fact already drifted (docs said 1.3.16, code said 1.3.17). Now there is one
+  // source of truth: the GitHub Release tag.
+  //
+  // When it can't be fetched (GitHub down, user's network), the badge is simply
+  // omitted rather than showing a possibly-stale hardcoded value — no information
+  // beats wrong information.
+  const [version, setVersion] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    bridgeVersionApi
+      .status()
+      .then((r) => { if (alive && r.latest) setVersion(r.latest) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
 
   const guide = [
     { title: t('download.g1Title'), desc: t('download.g1Desc') },
@@ -45,9 +85,11 @@ export default function DownloadPage() {
             </h2>
             <p className="mt-2 max-w-xl text-sm text-slate-400">{t('download.subtitle')}</p>
             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-              <span className="tag border border-prism-600/40 bg-prism-600/10 text-prism-300">
-                {t('download.version')} {APP_VERSION}
-              </span>
+              {version && (
+                <span className="tag border border-prism-600/40 bg-prism-600/10 text-prism-300">
+                  {t('download.version')} v{version}
+                </span>
+              )}
               <span>{t('download.platform')}</span>
             </div>
           </div>

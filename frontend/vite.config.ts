@@ -24,16 +24,17 @@ export default defineConfig({
         // three (the 3D landing scene) and lightweight-charts (the charts page)
         // are only pulled in by their own lazy routes, so isolating them keeps
         // them off the initial critical path.
+        // 注意：postprocessing / gsap 的分支已随依赖一起删除（它们在 src/ 里
+        // 从来没有被 import 过，是首页多轮改版留下的残留）。分包规则里留着
+        // 匹配不到任何模块的分支，只会让人以为项目还在用它们。
+        // Note: the postprocessing / gsap branches were removed along with those
+        // dependencies — nothing in src/ ever imported them; they were leftovers
+        // from several rounds of landing-page redesign. Keeping chunk rules that
+        // match nothing just implies the project still uses them.
         manualChunks(id: string) {
           if (!id.includes('node_modules')) return
-          if (
-            id.includes('three') ||
-            id.includes('@react-three') ||
-            id.includes('postprocessing')
-          )
-            return 'three'
+          if (id.includes('three') || id.includes('@react-three')) return 'three'
           if (id.includes('lightweight-charts')) return 'charts'
-          if (id.includes('gsap')) return 'gsap'
           if (
             id.includes('react') ||
             id.includes('scheduler') ||
