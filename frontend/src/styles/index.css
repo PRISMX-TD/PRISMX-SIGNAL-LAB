@@ -69,9 +69,22 @@
        listens to window scroll — the sticky CTA and the 3D scrollytelling both).
        clip only clips without creating a scroller, so the viewport scrolls again. */
     overflow-x: clip;
-    /* 锁死缩放：禁用双击放大与文字自动缩放，营造原生 App 体验 */
-    /* Lock zoom: disable double-tap zoom and text auto-resize for a native-app feel */
-    touch-action: manipulation;
+    /* pan-y：只允许纵向滚动，禁止双指缩放和左右拖动页面。PWA 桌面应用不该像网页
+       一样被左右拖来拖去；内部横向滚动组件（表格、K 线图工具栏）有各自独立的
+       overflow-x: auto，不受 body 级 touch-action 影响。
+       pan-y: vertical scrolling only — blocks pinch zoom and horizontal page drag.
+       The PWA should feel like a native app, not a page that slides sideways.
+       Inner horizontal-scroll containers (tables, chart toolbars) have their own
+       overflow-x: auto and are unaffected by the body-level touch-action. */
+    touch-action: pan-y;
+    /* none：关掉 iOS 拉到顶/底时那层橡皮筋回弹。PWA 在 standalone 模式下仍会有
+       一个视口级 bounce，不加这个从主屏图标打开后上下拉会露出白底。
+       Also locks zoom to prevent users from accidentally pinching; feels native.
+       Zoom is re-enabled on the browser (non-PWA) path via JS in main.tsx so
+       accessibility is preserved outside standalone mode.
+       none: disable iOS rubber-band at scroll edges. Standalone PWA still has
+       viewport-level bounce without this — pulling past the top reveals white. */
+    overscroll-behavior: none;
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;

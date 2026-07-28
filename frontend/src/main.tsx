@@ -4,35 +4,16 @@ import './styles/index.css'
 import './i18n'
 import App from './App'
 
-// 这里原本有一段「锁死缩放」的代码：拦掉 iOS 的 gesturestart/change/end，再用
-// touchend 的 300ms 判定干掉双击缩放。它存在的理由是「iOS Safari 会忽略 viewport
-// 里的 user-scalable=no」——那句话没错，但结论反了：iOS 忽略它，恰恰说明这个平台
-// 认为页面无权剥夺用户放大的能力。
+// 这里原本有一段「锁死缩放」的代码。已随 index.html 的 viewport 一起移除，
+// 浏览器模式下保留 WCAG 1.4.4 要求的缩放能力。PWA standalone（主屏图标启动）
+// 在下方的 isStandalone 分支中重新启用缩放锁定——用户从主屏打开时才期待 App
+// 行为，浏览器打开时保持网页应有的无障碍标准。
 //
-// 已随 index.html 的 viewport 一起移除。本站在手机上要看的全是密集小号数字（K 线、
-// 持仓盈亏、已平仓明细、纪律分进度条，全局最小字号 11px），放大看清一个价格是刚需，
-// 禁用缩放是 WCAG 1.4.4 的明确违反项。删掉 viewport 里的 user-scalable=no 却留着
-// 这段 JS，等于只修了安卓、iOS 依旧锁着——两处必须一起改，否则改了个寂寞。
-//
-// 顺带说明为什么不必担心「输入框聚焦时自动放大」：那是 iOS 独有的行为，触发条件是
-// 输入框字号 < 16px，正解是把字号提到 16px，而不是禁掉整页缩放。
-//
-// This used to hold a "lock zoom" block: swallow iOS's gesturestart/change/end and
-// kill double-tap zoom via a 300ms touchend check. Its stated reason was "iOS
-// Safari ignores user-scalable=no in the viewport" — true, but the conclusion was
-// backwards: iOS ignores it precisely because the platform holds that a page has
-// no business taking zoom away from the user.
-//
-// Removed alongside the viewport change in index.html. This app is dense numeric UI
-// on mobile (candles, position P&L, closed-trade tables, discipline bars; global
-// minimum font size 11px), zooming in to read a price is a real need, and disabling
-// zoom is a clear WCAG 1.4.4 violation. Dropping user-scalable=no from the viewport
-// while leaving this JS in place would have fixed Android only and left iOS locked —
-// both had to go together or neither mattered.
-//
-// On the "inputs auto-zoom on focus" worry: that's iOS-only and triggered by an
-// input font size below 16px. The fix for that is a 16px font size, not disabling
-// zoom for the whole page.
+// This used to hold a "lock zoom" block. Removed alongside the viewport change
+// in index.html; browser mode keeps zoom as required by WCAG 1.4.4. PWA
+// standalone (launched from the Home Screen) re-enables the zoom lock in the
+// isStandalone block below — users only expect app behaviour from the Home
+// Screen icon, not from a browser tab.
 
 // Service Worker 注册。此前只有「用户开启推送」这一条路径会注册它（见
 // utils/push.ts 的 getSWReg），所以从不开推送的用户身上，这个 SW 根本不存在。
@@ -54,6 +35,30 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {})
   })
+}
+
+// PWA standalone 模式下锁死缩放与横向拖动，营造原生 App 手感。
+// 浏览器模式保留缩放→无障碍（WCAG 1.4.4），仅在从主屏幕图标启动的
+// 独立窗口里禁用——那才是用户期望的"App 行为"。
+// Lock zoom and horizontal drag in PWA standalone mode for a native-app feel.
+// Browser access keeps zoom → accessibility (WCAG 1.4.4); zoom is only locked
+// when launched standalone from the Home Screen, where users expect app behaviour.
+const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+if (isStandalone) {
+  // 改写 viewport meta：加上 user-scalable=no / maximum-scale=1。
+  // Android Chrome 会遵守；iOS Safari 从 10 起忽略，但下面用 gesturestart 补防。
+  const vp = document.querySelector('meta[name="viewport"]')
+  if (vp) vp.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover')
+
+  // iOS Safari standalone PWA 特有：CSS touch-action: pan-y 对它不生效，
+  // 双指缩放必须通过 gesture 事件拦截。
+  document.addEventListener('gesturestart', e => e.preventDefault())
+  document.addEventListener('gesturechange', e => e.preventDefault())
+
+  // Android / 其他平台：多指触摸直接阻止（单指滚动不受影响）。
+  document.addEventListener('touchmove', e => {
+    if (e.touches.length > 1) e.preventDefault()
+  }, { passive: false })
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
