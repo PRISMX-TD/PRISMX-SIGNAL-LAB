@@ -9,6 +9,7 @@ from threading import Lock
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -93,13 +94,15 @@ def get_bridge_user(
 # 桥接每秒发多个请求，每个请求都要查库做 Token 鉴权，是最重复的一笔 DB 开销。
 # 这里按 token 哈希缓存已鉴权用户一小段时间（TTL 秒级），命中即跳过查库。
 # 代价：用户等级变更 / Token 撤销最多延迟 TTL 秒生效——对高频轮询完全可接受。
-# 只读取 user.id / user.plan 这类已加载的标量列，detached 实例访问是安全的。
+# 缓存的是 ORM 实例，跨请求复用有个硬性前提：它必须已脱离会话且所有列都已加载
+# （见 _authenticate_cached 里的 expunge 与 _cached_user_usable）。
 # The bridge fires several requests per second and each re-queries the DB just
 # to authenticate its token — the single most repeated DB cost. Cache the
 # authenticated user per token-hash for a few seconds; on a hit we skip the DB
 # query. Cost: a plan change / token revocation takes at most TTL seconds to
-# apply — fine for high-frequency polling. We only read already-loaded scalar
-# columns (user.id / user.plan), which is safe on a detached instance.
+# apply — fine for high-frequency polling. Reusing an ORM instance across
+# requests has one hard requirement: it must be detached with every column
+# loaded (see the expunge in _authenticate_cached and _cached_user_usable).
 _AUTH_CACHE_TTL = 10.0  # 秒 / seconds
 _auth_cache: dict[str, tuple[float, User]] = {}
 _auth_cache_lock = Lock()
@@ -122,16 +125,65 @@ def invalidate_auth_cache_for_hash(token_hash: str | None) -> None:
         _auth_cache.pop(token_hash, None)
 
 
+def _cached_user_usable(user: User) -> bool:
+    """缓存实例是否还能安全读属性：必须是"游离且未过期"。
+    Whether a cached instance is still safe to read: detached AND not expired.
+
+    过期实例读任意一列都会触发一次刷新，而它已经没有会话可用，直接抛
+    DetachedInstanceError。仍绑在某个会话上的实例同样不安全——那个会话属于
+    另一个请求，随时可能提交（进而过期它）或被关闭。两种情况都当缓存未命中
+    处理，回落到查库重新鉴权，代价只是一次 SELECT。
+    Reading any column of an expired instance triggers a refresh, and with no
+    session left that raises DetachedInstanceError. An instance still bound to a
+    session is equally unsafe — that session belongs to another request and may
+    commit (expiring it) or close at any moment. Both cases are treated as a
+    cache miss and fall back to a DB lookup, costing just one SELECT.
+    """
+    state = sa_inspect(user)
+    return state.session is None and not state.expired
+
+
 def _authenticate_cached(db: Session, x_api_token: str | None) -> User | None:
     if not x_api_token:
         return None
     key = hash_api_token(x_api_token)
     now = time.monotonic()
     hit = _auth_cache.get(key)
-    if hit is not None and hit[0] > now:
+    if hit is not None and hit[0] > now and _cached_user_usable(hit[1]):
         return hit[1]
     user = authenticate_api_token(db, x_api_token)
     if user is not None:
+        # 缓存前先把实例摘出会话。SQLAlchemy 的 expire_on_commit 默认为 True，
+        # 只要本请求后续任何一次 db.commit()，留在会话里的实例就会被整体标记为
+        # 过期；请求结束会话一关，它就同时是 detached 又是 expired，下一个命中
+        # 缓存的请求读任意一列即抛 DetachedInstanceError，端点 500。
+        #
+        # 这正是生产上桥接持续 500 的原因：/bridge/positions 每 1.5 秒上报一次，
+        # mark_positions_seen() 和自动仓管评估都会 commit，而该端点在 commit 之后
+        # 再没读过 user 的任何属性，于是把"已过期"的实例留在了缓存里；下一拍
+        # /bridge/poll 命中缓存读 user.plan 就崩。/bridge/poll 自己不炸只是因为
+        # 它在 commit 之后还访问了一次 user.id，顺手把实例刷活了——纯属巧合。
+        #
+        # expunge 之后，实例的所有列值都已加载且不再属于任何会话，任何人的
+        # commit 都不会再让它过期，游离读取是安全的（也正是原注释设想的状态）。
+        #
+        # Expunge before caching. With SQLAlchemy's default expire_on_commit=True,
+        # any later db.commit() in this request expires every instance still in
+        # the session; once the request ends and the session closes, the instance
+        # is both detached and expired, so the next request that hits the cache
+        # raises DetachedInstanceError on the first column read and 500s.
+        #
+        # That is exactly the production outage: /bridge/positions reports every
+        # 1.5s, mark_positions_seen() and the auto-manage pass both commit, and
+        # that endpoint never touches user afterwards — leaving an expired
+        # instance in the cache for the next /bridge/poll to trip over.
+        # /bridge/poll survives its own commits only because it happens to read
+        # user.id afterwards, incidentally refreshing the instance.
+        #
+        # After expunge, every column is loaded and the instance belongs to no
+        # session, so nobody's commit can expire it and detached reads are safe —
+        # the state the original comment assumed it already had.
+        db.expunge(user)
         with _auth_cache_lock:
             _auth_cache[key] = (now + _AUTH_CACHE_TTL, user)
             # 简单容量兜底：条目过多时清掉已过期项 / prune expired entries when large
