@@ -63,6 +63,40 @@ _ELIGIBLE_TTL_SECONDS = 30
 _eligible_cache: dict[str, tuple[bool, float]] = {}
 _cache_lock = threading.Lock()
 
+# per-user 评估锁：防止两次并发的 bridge_positions 请求为同一个用户同时
+# 评估、同时看到空的 pending_auto_tickets、同时写入重复的 MODIFY/CLOSE 指令。
+# 排查过生产日志中同一仓位被双重修改的案例；线程池里的并发是不可预期的。
+# Per-user evaluation lock: prevents two concurrent bridge_positions calls for
+# the same user from both seeing an empty pending_auto_tickets and both writing
+# duplicate MODIFY/CLOSE commands. Confirmed by production logs showing the
+# same position being modified twice; thread-pool concurrency is unpredictable.
+_eval_locks: dict[str, threading.Lock] = {}
+
+# 锁字典最大容量：超限时清理掉长期无争用的条目，防止无限膨胀。
+# Cap on the lock dict: prune entries that haven't been contended in a while
+# so the dict doesn't grow without bound.
+_MAX_LOCKS = 5000
+
+
+def _get_eval_lock(user_id: str) -> threading.Lock:
+    """取 per-user 评估锁；按需创建，超限时清理。"""
+    lock = _eval_locks.get(user_id)
+    if lock is not None:
+        return lock
+    with _cache_lock:
+        # 双检：刚才在 _cache_lock 外读到 None 时另一线程可能已插入
+        lock = _eval_locks.get(user_id)
+        if lock is not None:
+            return lock
+        if len(_eval_locks) > _MAX_LOCKS:
+            # 只清理无争用的锁（当前没被 acquire），避免影响正在评估中的请求
+            stale = [uid for uid, lk in _eval_locks.items() if not lk.locked()]
+            for uid in stale:
+                _eval_locks.pop(uid, None)
+        lock = threading.Lock()
+        _eval_locks[user_id] = lock
+        return lock
+
 
 def invalidate_eligibility(user_id: str) -> None:
     """设置变更后调用，让该用户的评估资格立即重算。
@@ -100,7 +134,22 @@ def evaluate_positions(db: Session, user_id: str, positions: list) -> int:
     Run one rule pass over a position report; returns how many commands were
     enqueued. 异常由调用方兜底记录——本函数抛错不能影响持仓上报主流程。
     The caller catches exceptions — a failure here must never break the
-    position-report flow itself."""
+    position-report flow itself.
+
+    同一用户串行评估：持有 per-user 锁，杜绝线程池并发的重复指令竞态。
+    Serialized per user: holds a per-user lock to prevent duplicate-command
+    races caused by concurrent thread-pool evaluations of the same user.
+    """
+    lock = _get_eval_lock(user_id)
+    lock.acquire()
+    try:
+        return _evaluate_positions_locked(db, user_id, positions)
+    finally:
+        lock.release()
+
+
+def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> int:
+    """实际评估逻辑（调用方已持有 per-user 锁）。"""
     eligible, cfg = _is_eligible(db, user_id)
     if not eligible or cfg is None or not positions:
         return 0

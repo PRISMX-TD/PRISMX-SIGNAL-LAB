@@ -468,7 +468,22 @@ class BridgeEngine:
             self.on_status([], msg)
             return
 
-        # 2) 上报账号 + 拉取待执行指令 / report accounts + fetch commands
+        # 2) 先上报持仓（触发自动仓位管理评估，命令立即入队），
+        #    再拉指令（同一拍即可拿到刚入队的命令），比先 poll 再 positions
+        #    节省整整一轮 1.5s 轮询间隔。快市里这 1.5 秒可能就是止损是否滑出
+        #    目标区间的那一段。
+        # Report positions first (triggers auto-manage evaluation → commands
+        # are enqueued immediately), then poll (fetches those same commands in
+        # the very same tick), saving a full 1.5s polling round. In a fast
+        # market that 1.5s may be the gap between the trailing stop catching
+        # the price or missing it.
+        # 3) 上报持仓 / report positions
+        try:
+            _post_json(f"{self.backend}/api/bridge/positions", {"data": positions}, self.token)
+        except Exception:
+            pass
+
+        # 4) 上报账号 + 拉取待执行指令 / report accounts + fetch commands
         commands = []
         warning = None
         try:
@@ -523,13 +538,7 @@ class BridgeEngine:
             self.on_status(accounts, self.last_error)
             return
 
-        # 3) 上报持仓 / report positions
-        try:
-            _post_json(f"{self.backend}/api/bridge/positions", {"data": positions}, self.token)
-        except Exception:
-            pass
-
-        # 3b) 上报报价：仅上报相对上一轮变化的 (账号, 品种) 以省流量。
+        # 5) 上报报价：仅上报相对上一轮变化的 (账号, 品种) 以省流量。
         # Report quotes: only (account, symbol) entries changed since last tick.
         try:
             changed: list = []
@@ -544,7 +553,7 @@ class BridgeEngine:
         except Exception:
             pass
 
-        # 3c) 上报新检测到的真实平仓明细（个人胜率）；失败则入队下一轮重试。
+        # 6) 上报新检测到的真实平仓明细（个人胜率）；失败则入队下一轮重试。
         # 这一步之前完全不写日志，无论成功失败都看不出"到底有没有尝试上报"，
         # 排查漏报问题时只能靠猜——现在两种结果都记一行，成交编号写进去，
         # 方便日后对着后端日志核对是否真的到账。
@@ -563,11 +572,11 @@ class BridgeEngine:
                 self._pending_trades.extend(closed_trades)
                 _save_pending_trades(self._pending_trades)
 
-        # 4) 先重试上一轮未成功回报的结果 / retry results & trades not yet acked last tick
+        # 7) 先重试上一轮未成功回报的结果 / retry results & trades not yet acked last tick
         self._flush_reports()
         self._flush_trades()
 
-        # 5) 按 login 分组指令执行；已执行过的只重报缓存结果，不重复下单。
+        # 8) 按 login 分组指令执行；已执行过的只重报缓存结果，不重复下单。
         #    Group commands by login & execute; for already-executed ones just
         #    re-report the cached result instead of placing the order again.
         if commands:

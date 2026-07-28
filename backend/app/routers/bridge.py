@@ -315,6 +315,18 @@ def _poll_db_work(
     #    the bridge dedupes by clientOrderId).
     now = datetime.now(timezone.utc)
     ack_deadline = now - timedelta(seconds=settings.ORDER_ACK_TIMEOUT_SECONDS)
+    # 自动仓管指令单独的超时窗口（30 秒）：追踪止损/保本的 MODIFY 和分批止盈的
+    # CLOSE 是价格敏感的——桥接断线 3 分钟后重连，当初的止损价/止盈价已过时，
+    # 再发出去是危险的。30 秒对桥接短暂的抖动（网络闪断、MT5 崩溃重启）足够宽容，
+    # 对真正的长时间离线则直接作废。
+    # Auto-manage commands get their own shorter timeout (30s): MODIFY for
+    # trailing-stop/break-even and CLOSE for partial take-profit are price-
+    # sensitive — if the bridge was gone for 3 minutes and reconnects, the
+    # original SL/TP price is dangerously stale. 30s is forgiving enough for
+    # transient blips (network flap, MT5 crash-restart) but voids commands that
+    # are genuinely too old.
+    AUTO_TTL_SECONDS = 30
+    auto_deadline = now - timedelta(seconds=AUTO_TTL_SECONDS)
     pending = (
         db.query(Order)
         .filter(Order.user_id == user.id, Order.status == "PENDING")
@@ -328,6 +340,21 @@ def _poll_db_work(
         # Stale command past the pending timeout: void instead of dispatching,
         # so it can't fill at an outdated price.
         if is_stale_pending(o, now):
+            void_stale_order(o)
+            voided.append(o)
+            continue
+        # 自动仓管指令的超时窗口比通用指令短得多（30s vs 5min）：追踪止损/分批
+        # 止盈是价格敏感的，旧指令的执行价已不可靠。已下发过一次且未回执、且超过
+        # auto_deadline 的自动指令直接作废——下一轮持仓评估会按最新价格重新判断。
+        # Auto-manage commands have a much shorter timeout (30s vs 5min):
+        # trailing-stop/partial-take-profit are price-sensitive and an old
+        # command's price is no longer trustworthy. Void any auto command that
+        # was delivered at least once, is still unacked, and is past the
+        # auto_deadline — the next evaluation pass will re-assess at current price.
+        if (
+            o.client_order_id and o.client_order_id.startswith(AUTO_PREFIX)
+            and o.created_at is not None and o.created_at < auto_deadline
+        ):
             void_stale_order(o)
             voided.append(o)
             continue

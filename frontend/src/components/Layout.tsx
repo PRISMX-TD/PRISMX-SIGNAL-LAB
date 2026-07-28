@@ -355,7 +355,7 @@ export default function Layout() {
   useEffect(() => {
     if (!pushSupported() || Notification.permission !== 'granted') return
     let cancelled = false
-    void (async () => {
+    const report = async () => {
       try {
         const prefs = await notificationApi.getPrefs()
         if (cancelled || !prefs.enabled) return
@@ -366,8 +366,47 @@ export default function Layout() {
       } catch {
         // 静默失败：这里只是自愈，不该打扰正常使用 / silent — self-healing only
       }
-    })()
-    return () => { cancelled = true }
+    }
+    void report()
+
+    // 监听 SW 的 postMessage：当 pushsubscriptionchange 触发重新订阅后，
+    // SW 会广播新 endpoint，前端立即上报后端——不用等下次打开站点。
+    // Listen for the SW's postMessage: after pushsubscriptionchange re-
+    // subscribes, the SW broadcasts the new endpoint and the frontend
+    // immediately reports it without waiting for the next app visit.
+    const onSwMsg = (ev: MessageEvent) => {
+      if (ev.data?.type === "PUSH_SUB_RENEWED" && ev.data?.endpoint && ev.data?.keys) {
+        void pushApi.subscribe(ev.data.endpoint, ev.data.keys).catch(() => {})
+      }
+    }
+    navigator.serviceWorker.addEventListener("message", onSwMsg)
+
+    // 页面切回前台时重新检查订阅有效性：iOS/Android 可能在不活跃期间
+    // 杀死 SW 或清除 push 权限；后台存放一阵子再切回来时补一次自愈。
+    // Re-check subscription health when the page returns to the foreground:
+    // iOS/Android may kill the SW or clear push permission during inactivity;
+    // self-heal on re-activation rather than waiting for a full page reload.
+    let lastPerm = Notification.permission
+    const onVisible = () => {
+      if (!document.hidden) {
+        // 权限在后台被系统撤销（iOS 更新后偶发）
+        // Permission was revoked while backgrounded (seen after iOS updates)
+        if (Notification.permission !== lastPerm) {
+          lastPerm = Notification.permission
+          if (!cancelled && Notification.permission === "granted") void report()
+        }
+        // 静默重报订阅：修复端点过期或 SW 被浏览器轮换的漏网情况
+        // Silently re-report the subscription: catches endpoint expiry / SW
+        // rotation edge cases the message listener may have missed
+        if (!cancelled && Notification.permission === "granted") void report()
+      }
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    return () => {
+      cancelled = true
+      navigator.serviceWorker.removeEventListener("message", onSwMsg)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
   }, [])
 
   return (

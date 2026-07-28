@@ -1,6 +1,7 @@
 // PRISMX Signal Lab · Service Worker
 // ① Web Push：接收推送事件，弹系统通知，点击后打开或聚焦 /app。
 // ② 离线壳：断网时导航请求回落到一张自带样式的离线页，而不是浏览器的报错页。
+// ③ 推送心跳：记录最后一次收到推送的时间戳，供前端切回前台时评估 SW 存活状态。
 
 // ---------- 离线壳 / offline shell ----------
 //
@@ -66,6 +67,14 @@ self.addEventListener("activate", (event) => {
       .keys()
       .then((names) => Promise.all(names.filter((n) => n !== CACHE).map((n) => caches.delete(n))))
       .then(() => self.clients.claim())
+      .then(() => {
+        // best-effort periodic sync — helps Chrome on Android keep the SW alive
+        try {
+          if ("periodicSync" in self.registration) {
+            return (self.registration as any).periodicSync.register("heartbeat", { minInterval: 12 * 60 * 60 * 1000 }).catch(() => {})
+          }
+        } catch { /* not supported */ }
+      })
   )
 })
 
@@ -84,7 +93,11 @@ self.addEventListener("fetch", (event) => {
 })
 
 // ---------- Web Push ----------
+// 最后一次收到推送的时间戳（毫秒），供前端评估 SW 存活。
+// Timestamp (ms) of the last received push; used by the frontend to check SW liveness.
+let _lastPushAt = 0
 self.addEventListener("push", (event) => {
+  _lastPushAt = Date.now()
   let data = { title: "PRISMX Signal", body: "新信号" }
   if (event.data) {
     try {
@@ -110,14 +123,16 @@ self.addEventListener("push", (event) => {
 
 // 浏览器可能主动轮换/作废推送订阅（Chrome 尤其常见）。不处理这个事件的话，
 // 旧 endpoint 推送时 410、被后端清理，这台设备就静默"失聪"了，直到用户手动
-// 重开开关。这里用旧订阅同一把公钥立即重订阅；新订阅会在用户下次打开站点时
-// 由 Layout 的 ensure 逻辑上报给后端（SW 里拿不到 JWT，没法直接上报）。
+// 重开开关。这里用旧订阅同一把公钥立即重订阅；新 endpoint 的 JSON 通过
+// postMessage 广播给所有打开的前端页面，由它们立即上报后端——此前只重新订阅，
+// 新 endpoint 不上报，要等用户下次打开站点 Layout 的 ensure 逻辑才补，
+// Chrome 轮换后可能几天收不到通知。
 // Browsers can rotate/expire a push subscription on their own (Chrome
-// especially). Unhandled, the old endpoint 410s, the backend prunes it, and
-// this device silently goes deaf until the user manually re-toggles. Re-
-// subscribe immediately with the same key; the new subscription gets reported
-// to the backend on the next site visit by Layout's ensure logic (no JWT is
-// available inside the SW to report directly).
+// especially). Re-subscribe immediately with the same key; broadcast the new
+// endpoint JSON to every open client so they can report it to the backend
+// immediately — previously the new endpoint was never reported, and the user
+// had to wait until the next site visit for Layout's ensure logic to catch
+// up, potentially losing notifications for days after a Chrome rotation.
 self.addEventListener("pushsubscriptionchange", (event) => {
   const key = event.oldSubscription?.options?.applicationServerKey
   if (!key) return
@@ -125,6 +140,14 @@ self.addEventListener("pushsubscriptionchange", (event) => {
     self.registration.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: key,
+    }).then((sub) => {
+      const raw = sub.toJSON() as { endpoint: string; keys: { p256dh: string; auth: string } }
+      // broadcast to open clients so they immediately report the new subscription
+      return self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+        for (const client of clients) {
+          client.postMessage({ type: "PUSH_SUB_RENEWED", endpoint: raw.endpoint, keys: raw.keys })
+        }
+      })
     })
   )
 })
@@ -145,3 +168,18 @@ self.addEventListener("notificationclick", (event) => {
       })
   )
 })
+
+// 响应前端的 SW 存活查询：返回最后一次收到推送的时间。
+// 前端切回前台时发消息请求这个值，若间隔过大说明 SW 可能被 OS 杀死后重建过。
+// Respond to the frontend's SW-liveness query: returns the most recent push
+// timestamp. When the gap is too large after returning to foreground, the SW
+// was likely killed by the OS and re-spawned — the frontend uses this to
+// decide whether to silently re-subscribe.
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "PING_PUSH_HEARTBEAT") {
+    const p = event.ports?.[0]
+    if (p) p.postMessage({ lastPushAt: _lastPushAt })
+  }
+})
+
+
