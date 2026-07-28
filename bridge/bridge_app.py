@@ -530,7 +530,18 @@ class BridgeEngine:
             if parts:
                 warning = "；".join(parts) + "，详见网页「连接 MT5」页 / see the web Bind page for details"
         except error.HTTPError as e:
-            self.last_error = f"后端拒绝 HTTP {e.code}: {e.reason}（检查 Token）"
+            # 只有 401/403 才是 Token 的问题。此前所有 HTTP 错误都提示"检查 Token"，
+            # 后端 500 时用户只会反复核对一个本来就正确的 Token，永远查不到方向。
+            # Only 401/403 are token problems. This used to say "check your token"
+            # for every HTTP error, so a backend 500 sent the user off re-checking
+            # a token that was correct all along.
+            if e.code in (401, 403):
+                self.last_error = f"后端拒绝 HTTP {e.code}: {e.reason}（检查 Token）"
+            else:
+                self.last_error = (
+                    f"后端异常 HTTP {e.code}: {e.reason}"
+                    f"（与 Token 无关，服务端故障，正在自动重试）"
+                )
             self.on_status(accounts, self.last_error)
             return
         except Exception as e:

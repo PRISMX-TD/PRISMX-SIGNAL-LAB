@@ -351,9 +351,23 @@ def _poll_db_work(
         # command's price is no longer trustworthy. Void any auto command that
         # was delivered at least once, is still unacked, and is past the
         # auto_deadline — the next evaluation pass will re-assess at current price.
+        # created_at 落库为不带时区的列（Postgres TIMESTAMP / SQLite DATETIME），
+        # 读回来是 naive；auto_deadline 是 aware。直接比较会抛
+        # TypeError（can't compare offset-naive and offset-aware datetimes），
+        # 整个 /bridge/poll 变 500——而这条自动指令永远作废不掉，桥接就会一直
+        # 500 下去。与下面 delivered_at 的处理保持一致：先补上 UTC 时区。
+        # created_at is stored in a timezone-naive column (Postgres TIMESTAMP /
+        # SQLite DATETIME) and reads back naive, while auto_deadline is aware.
+        # Comparing them directly raises TypeError and turns the whole
+        # /bridge/poll into a 500 — and since the void never commits, the auto
+        # command stays PENDING and every later poll 500s too. Normalize to UTC
+        # first, same as delivered_at below.
+        created = o.created_at
+        if created is not None and created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
         if (
             o.client_order_id and o.client_order_id.startswith(AUTO_PREFIX)
-            and o.created_at is not None and o.created_at < auto_deadline
+            and created is not None and created < auto_deadline
         ):
             void_stale_order(o)
             voided.append(o)

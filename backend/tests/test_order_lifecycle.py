@@ -5,6 +5,7 @@ delivery & re-delivery, idempotent results, stale-pending voiding.
 from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings
+from app.models import Order
 from tests.conftest import BROKER_SERVER, get_order, make_account, make_signal
 
 
@@ -207,6 +208,57 @@ def test_stale_pending_voided_on_bridge_poll(client, auth_headers, bridge_header
     # 陈旧指令不下发，且被置为 FAILED / stale command not dispatched, voided to FAILED
     assert p.json()["commands"] == []
     assert get_order(db, r.json()["id"]).status == "FAILED"
+
+
+def _make_auto_order(db, user, age_seconds: float, coid="auto_tsl_1"):
+    """造一条自动仓管指令（auto_ 前缀），created_at 拨回指定秒数。
+    Insert an auto-manage command (auto_ prefix) aged by the given seconds."""
+    o = Order(
+        user_id=user.id,
+        client_order_id=coid,
+        symbol="XAUUSD",
+        side="BUY",
+        volume=0.1,
+        status="PENDING",
+        action="MODIFY",
+        mt5_login="10001",
+        ticket=555,
+        created_at=datetime.now(timezone.utc) - timedelta(seconds=age_seconds),
+    )
+    db.add(o)
+    db.commit()
+    return o.id
+
+
+def test_stale_auto_command_voided_without_error(client, bridge_headers, db, user):
+    """超过 30 秒的自动仓管指令被作废，且轮询本身不能报错。
+
+    回归：created_at 从库里读回来是 naive，而 30 秒判定用的 deadline 是 aware，
+    直接比较会抛 TypeError → /bridge/poll 变 500。因为作废没能提交，这条指令
+    永远留在 PENDING，桥接此后每 1.5 秒轮询一次、次次 500，用户侧表现为
+    "已连接 · N 个账号 · 后端拒绝 HTTP 500"，与 Token 无关。
+
+    Regression: created_at reads back naive from the DB while the 30s deadline
+    is aware, so comparing them raised TypeError and turned /bridge/poll into a
+    500. The void never committed, so the command stayed PENDING and every
+    subsequent 1.5s poll 500'd too.
+    """
+    make_account(db, user, login="10001")
+    order_id = _make_auto_order(db, user, age_seconds=45)
+
+    p = poll(client, bridge_headers)
+    assert p.status_code == 200, p.text
+    assert p.json()["commands"] == []
+    assert get_order(db, order_id).status == "FAILED"
+
+
+def test_fresh_auto_command_still_delivered(client, bridge_headers, db, user):
+    """30 秒窗口内的自动仓管指令照常下发 / a fresh auto command still dispatches."""
+    make_account(db, user, login="10001")
+    _make_auto_order(db, user, age_seconds=5, coid="auto_tsl_2")
+
+    p = poll(client, bridge_headers)
+    assert [c["clientOrderId"] for c in p.json()["commands"]] == ["auto_tsl_2"]
 
 
 def test_stale_pending_voided_on_list(client, auth_headers, db):
