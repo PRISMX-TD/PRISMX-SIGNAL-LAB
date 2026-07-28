@@ -2,9 +2,10 @@
 // Hero 采用可交互 WebGL 玻璃棱镜场景（PrismScene）；其余分区走极简暗黑 +
 // 克制的滚动显现，保留全部原有 i18n 文案键，不新增未翻译文案。
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { paymentApi } from '../api/client'
+import { SUPPORT_EMAIL } from '../config/site'
 import Logo from '../components/Logo'
 import LanguageToggle from '../components/LanguageToggle'
 import FaqSection from '../components/landing/FaqSection'
@@ -375,6 +376,60 @@ function Foot({ t }: { t: T }) {
             </a>
           ))}
         </nav>
+
+        {/* 条款与政策 + 客服入口。
+            用 <Link> 而不是 <a href>：这三页是同一个 SPA 内的路由，用 <a> 会触发
+            整页刷新，白屏一次再把整个 bundle 重新下一遍。
+            这一块是刚需而不是装饰：升级页的少付款兜底文案会让客户「联系客服」，
+            在此之前全站没有任何一个可点的联系方式；而 Google OAuth 的正式验证
+            也要求一个公开可达的隐私政策链接。
+            Terms & policies plus the support entry point. <Link>, not <a href>:
+            these are routes inside the same SPA, and an <a> would force a full
+            page reload — a white flash and a re-download of the whole bundle.
+            This block is a necessity, not decoration: the underpayment notice on
+            the upgrade page tells customers to "contact support" while, until
+            now, no clickable contact existed anywhere on the site — and Google
+            OAuth verification requires a publicly reachable privacy-policy link. */}
+        <div className="mt-8 flex flex-col items-center gap-4 border-t border-white/[0.05] pt-8 sm:flex-row sm:items-start sm:justify-center sm:gap-14">
+          <div className="text-center sm:text-left">
+            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-neutral-600">
+              {t('landing.footerLegal')}
+            </p>
+            <nav className="mt-3 flex flex-wrap justify-center gap-x-5 gap-y-2 sm:justify-start">
+              {(['terms', 'privacy', 'risk'] as const).map((d) => (
+                <Link
+                  key={d}
+                  to={`/${d}`}
+                  className="text-[13px] text-neutral-400 transition-colors hover:text-white"
+                >
+                  {t(`legal.${d}.title`)}
+                </Link>
+              ))}
+            </nav>
+          </div>
+
+          {/* 客服一栏由 SUPPORT_EMAIL 控制，留空则整栏不渲染（见 config/site.ts）。
+              外层是 flex + justify-center，少一栏时剩下的法务链接自然居中，不会
+              留下一块空位。
+              The support column is gated by SUPPORT_EMAIL; empty hides the whole
+              column (see config/site.ts). The wrapper is flex + justify-center, so
+              with one column gone the legal links simply centre themselves rather
+              than leaving a gap. */}
+          {SUPPORT_EMAIL && (
+            <div className="text-center sm:text-left">
+              <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-neutral-600">
+                {t('landing.footerSupport')}
+              </p>
+              <p className="mt-3 text-[13px] text-neutral-500">{t('landing.footerSupportBody')}</p>
+              <a
+                href={`mailto:${SUPPORT_EMAIL}`}
+                className="mt-1.5 inline-block font-mono text-[13px] text-violet-300 underline underline-offset-4 transition-colors hover:text-violet-200"
+              >
+                {SUPPORT_EMAIL}
+              </a>
+            </div>
+          )}
+        </div>
 
         {/* 版权 / copyright */}
         <p className="mt-8 text-[12px] text-neutral-600">© {new Date().getFullYear()} PRISMX · {t('landing.footerRights')}</p>

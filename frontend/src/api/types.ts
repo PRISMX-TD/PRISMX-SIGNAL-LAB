@@ -54,6 +54,17 @@ export interface User {
   // Whether the current PRO is a free trial; absent (unknown) on the
   // login/register response — only populated after refreshUser() (GET /auth/me).
   planIsTrial?: boolean
+  // PRO 到期时间（ISO 字符串）；null = 永不过期（管理员赠送/内测）。
+  // 与 planIsTrial 一样，登录/注册响应里没有，refreshUser() 之后才有值，
+  // 所以是可选的——undefined 表示「还不知道」，与 null 的「永不过期」是两回事，
+  // 到期横幅必须区分这两者，否则页面刚加载的一瞬间会把所有人都当成永久 PRO。
+  // PRO expiry as an ISO string; null = never expires (comp grant / beta).
+  // Like planIsTrial it's absent from the login/register response and only
+  // filled in by refreshUser(), hence optional — undefined means "not known
+  // yet", which is a different thing from null's "never expires". The expiry
+  // banner has to tell them apart or, for one render right after load, it would
+  // treat everyone as a permanent PRO.
+  planExpiresAt?: string | null
 }
 
 // 管理后台：用户列表条目 / admin: one row in the user list
@@ -233,6 +244,15 @@ export interface PersonalWinRate {
   winRate: number | null
   openPositions: number
   bySymbol: { symbol: string; count: number }[]
+  // 统计回看窗口（天）。这些数字只覆盖最近这么多天，不是全历史——后端给订单
+  // 查询加了时间上界，否则它会随用户交易时长无界增长（口径见后端
+  // trade_performance.WINDOW_DAYS）。必须展示出来：一个有范围的数字被当成全
+  // 历史战绩来读，就是在误导用户。
+  // Look-back window in days. These figures cover only the last N days, not all
+  // history — the backend bounds the order query, which would otherwise grow
+  // without limit as a user keeps trading (see trade_performance.WINDOW_DAYS).
+  // It has to be shown: a bounded number read as an all-time record misleads.
+  windowDays: number
 }
 
 // 纪律分单一维度的评分明细 / one scoring dimension of the discipline score

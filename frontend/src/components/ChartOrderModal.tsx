@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next'
 import type { MT5Account, Quote } from '../api/types'
 import { clientOrderId, contractSize, displaySymbol, localizeApiError, suggestVolumeByRisk, usdMarginBasis } from '../api/utils'
 import { useBackToClose } from '../utils/useBackToClose'
+import OrderConnectNotice from './OrderConnectNotice'
 
 interface Props {
   symbol: string
@@ -252,7 +253,6 @@ export default function ChartOrderModal({ symbol, side, accounts, quotesByAccoun
   const priceColor = isBuy ? 'var(--up)' : 'var(--down)'
 
   const hasAccounts = onlineAccounts.length > 0
-  const offlineMsg = accounts.length === 0 ? t('order.noBridge') : t('order.allOffline')
   const canSubmit = hasAccounts && !slInvalid && !tpInvalid
 
   const fmtMoney = (n?: number | null) => (n == null ? '-' : n.toLocaleString(undefined, { maximumFractionDigits: 2 }))
@@ -440,7 +440,7 @@ export default function ChartOrderModal({ symbol, side, accounts, quotesByAccoun
         <p className="px-1 -mt-2.5 mb-3 text-[11px] leading-relaxed text-slate-500">{t('order.timeoutNote')}</p>
 
         {!hasAccounts && (
-          <div className="mb-3 rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down">{offlineMsg}</div>
+          <OrderConnectNotice neverConnected={accounts.length === 0} />
         )}
         {error && (
           <div className="mb-3 rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down">{error}</div>

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>Signal Lab · 离线</title>
+    <!--
+      离线兜底页。刻意是一个不依赖任何构建产物的独立 HTML：样式内联、无脚本、
+      无外部字体——它要在「网络完全不可用」时渲染，任何一个外部请求都会让它自己
+      也白屏。文件名不带内容 hash，Service Worker 才能用一个固定路径缓存它。
+
+      两种语言同时显示而不是做 i18n：这里读不到 localStorage 里的语言偏好（页面
+      由 SW 直接返回，没有跑应用代码），与其猜错，不如两句都写上，反正只有两行。
+
+      Offline fallback page. Deliberately a standalone HTML with inlined styles, no
+      scripts and no external fonts — it renders when the network is entirely
+      unavailable, and any external request would leave it blank too. The filename
+      carries no content hash so the service worker can cache it at a fixed path.
+
+      Both languages are shown rather than translated: this page can't read the
+      language preference (the SW serves it directly, no app code runs), and
+      guessing wrong is worse than printing two short lines.
+    -->
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        min-height: 100%;
+        background: #06030f;
+        color: #f2f2f7;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", Roboto, sans-serif;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        min-height: 100vh;
+        min-height: 100svh;
+      }
+      .box { max-width: 380px; text-align: center; }
+      .glow {
+        width: 64px; height: 64px; margin: 0 auto 22px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(139, 92, 246, 0.55) 0%, rgba(139, 92, 246, 0) 70%);
+      }
+      h1 { margin: 0 0 10px; font-size: 19px; font-weight: 700; letter-spacing: 0.01em; }
+      p { margin: 0 0 6px; font-size: 13.5px; line-height: 1.65; color: #b8b4ca; }
+      p.en { color: #7b7598; font-size: 12.5px; }
+      button {
+        margin-top: 22px; padding: 10px 22px;
+        border: 1px solid rgba(139, 92, 246, 0.45);
+        border-radius: 10px;
+        background: rgba(139, 92, 246, 0.16);
+        color: #ddd6fe;
+        font-size: 13.5px; font-weight: 600;
+        font-family: inherit;
+        cursor: pointer;
+      }
+      button:active { background: rgba(139, 92, 246, 0.28); }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <div class="glow"></div>
+      <h1>当前处于离线状态</h1>
+      <p>网络连接断开了，暂时无法加载 Signal Lab。恢复网络后点下面的按钮重试。</p>
+      <p class="en">You're offline. Reconnect and try again.</p>
+      <button onclick="location.reload()">重新加载 · Reload</button>
+    </div>
+  </body>
+</html>

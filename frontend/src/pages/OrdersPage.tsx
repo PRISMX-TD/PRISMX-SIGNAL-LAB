@@ -11,6 +11,7 @@ import PersonalWinRateCard from '../components/PersonalWinRateCard'
 import DisciplineScoreCard from '../components/DisciplineScoreCard'
 import ClosedTradesList from '../components/ClosedTradesList'
 import AutoManageCard from '../components/AutoManageCard'
+import OnboardingCard from '../components/OnboardingCard'
 
 const statusStyle: Record<OrderStatus, string> = {
   PENDING: 'bg-amber-500/15 text-amber-400',
@@ -303,6 +304,15 @@ export default function OrdersPage() {
 
       {tab === 'positions' && (
         <>
+          {/* 一个账号都没绑时，这个 Tab 原本只剩「暂无持仓」和一张用不了的自动
+              仓管卡，账户横条因为 activeAccount 为 undefined 干脆不渲染——页面
+              等于什么都没说。引导卡补上「下一步做什么」。
+              With no account bound this tab was just "no open positions" plus an
+              auto-manage card they can't use, and the account bar didn't render at
+              all (activeAccount is undefined) — the page said nothing. The
+              onboarding card supplies the next step. */}
+          <OnboardingCard />
+
           {/* 账户状态紧凑横条：详细的账号管理在 /account 页，这里只回答"这个账号
               现在什么状态"。/ Compact account bar: detailed account management
               lives on /account; this only answers "how is this account doing". */}

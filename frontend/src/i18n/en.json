@@ -1,8 +1,4 @@
 {
-  "app": {
-    "name": "Signal Lab",
-    "subtitle": "by PRISMX"
-  },
   "bridgeUpdate": {
     "title": "Bridge update available",
     "body": "You're on v{{current}}, latest is v{{latest}} — update for the newest fixes.",
@@ -26,7 +22,8 @@
     "account": "Account",
     "more": "More",
     "admin": "Admin",
-    "strategies": "Custom Strategies"
+    "strategies": "Custom Strategies",
+    "support": "Contact support"
   },
   "common": {
     "loading": "Loading…",
@@ -43,9 +40,7 @@
     "online": "Online",
     "offline": "Offline",
     "buy": "BUY",
-    "sell": "SELL",
-    "yes": "Yes",
-    "no": "No"
+    "sell": "SELL"
   },
   "landing": {
     "navCompare": "Industry Exposed",
@@ -259,7 +254,10 @@
     "dc3Title": "Trailing Stop",
     "dc3": "As profit runs, stop trails the market automatically. You don't need to watch the screen — sleep is safe.",
     "footerRights": "All rights reserved",
-    "footerRisk": "Risk warning: trading forex, precious metals and crypto assets carries a high level of risk and may result in the loss of your capital. Past signal performance does not guarantee future results. PRISMX provides technical signals and execution tooling only and does not constitute investment advice; whether and how to trade remains entirely your decision."
+    "footerRisk": "Risk warning: trading forex, precious metals and crypto assets carries a high level of risk and may result in the loss of your capital. Past signal performance does not guarantee future results. PRISMX provides technical signals and execution tooling only and does not constitute investment advice; whether and how to trade remains entirely your decision.",
+    "footerLegal": "Terms & policies",
+    "footerSupport": "Need help?",
+    "footerSupportBody": "Account, payment or connection issues — just email us."
   },
   "auth": {
     "loginTitle": "Sign in",
@@ -268,8 +266,6 @@
     "password": "Password",
     "login": "Sign in",
     "register": "Register",
-    "toRegister": "No account? Register",
-    "toLogin": "Have an account? Sign in",
     "emailPlaceholder": "you@example.com",
     "passwordPlaceholder": "Enter password",
     "showPassword": "Show password",
@@ -284,57 +280,24 @@
     "title": "Live Trading Signals",
     "subtitle": "Powered by Signal Lab quant factors",
     "waitingForSignals": "Waiting for the signal engine or TradingView to push signals…",
-    "empty": "No signals yet, the engine is analyzing the market…",
-    "noMatch": "No signals match your filters",
     "entry": "Entry",
     "stopLoss": "Stop Loss",
     "takeProfit": "Take Profit",
-    "indicator": "Trigger",
-    "createdAt": "Created",
-    "expireAt": "Expires",
     "expired": "Expired",
-    "active": "Active",
-    "expiringSoon": "Expiring",
     "resultHitTp": "✓ Hit take-profit",
     "resultHitSl": "✗ Hit stop-loss",
     "resultStale": "Tracking interrupted, excluded from win rate",
     "resultPending": "Result pending",
     "proSawFirst": "PRO users saw this 10 min earlier",
     "trade": "Trade",
-    "rr": "R:R",
-    "pips": "pips",
-    "remaining": "Left",
-    "searchPlaceholder": "Search symbol…",
     "filterSide": "Side",
-    "filterStatus": "Status",
     "sortBy": "Sort",
     "all": "All",
-    "group": "Group",
-    "flat": "Flat",
-    "groupByLabel": "Group",
-    "groupBy": {
-      "none": "No grouping",
-      "status": "By status",
-      "indicator": "By indicator"
-    },
-    "stats": {
-      "active": "Active signals",
-      "bias": "Buy / Sell",
-      "expiring": "Expiring soon",
-      "avgRr": "Avg R:R"
-    },
-    "viewCard": "Cards",
-    "viewCompact": "Compact",
-    "viewTable": "Table",
-    "viewFocus": "Focus",
     "focus": {
       "backToDashboard": "Back to dashboard",
       "prev": "Previous signal",
       "next": "Next signal",
       "heading": "Multi-TF trend stance",
-      "watch": "Wait",
-      "long": "Long",
-      "short": "Short",
       "bull": "Bullish",
       "bear": "Bearish",
       "neutral": "Neutral",
@@ -342,25 +305,12 @@
       "adviceBear": "Multi-timeframe trend is aligned to the downside.",
       "adviceNeutral": "Timeframes disagree, trend is unclear for now.",
       "signalHeading": "Executable signal",
-      "adviceWatch": "AI suggests waiting for a clearer opportunity.",
-      "adviceLong": "Bullish momentum confirmed, consider going long.",
-      "adviceShort": "Bearish pressure building, consider going short.",
-      "waiting": "Waiting for a signal",
-      "marketSentiment": "Market sentiment",
       "communitySentiment": "Community sentiment",
-      "tfDistribution": "TF Distribution",
-      "noData": "No data",
-      "watching": "Watching",
-      "symbolsTotal": "{{n}} symbols",
       "noExecutable": "No executable signal · AI monitoring",
-      "viewDetail": "View signal detail",
       "remainingTtl": "Time left",
       "otherActive": "Other active signals",
       "rrLabel": "R:R",
-      "trendLabel": "Multi-TF trend",
-      "newSignal": "{{symbol}} triggered a {{state}} signal",
       "overview": "Market Overview",
-      "period7d": "7D",
       "signalTotal": "Total Signals",
       "signalVolume7d": "Signal Volume (7D)",
       "quotesHeading": "Live Quotes",
@@ -372,14 +322,9 @@
       "ask": "Buy"
     },
     "quotes": {
-      "title": "Live quotes",
       "bid": "Bid",
       "ask": "Ask",
-      "bidShort": "B",
-      "askShort": "A",
-      "spread": "spread",
-      "waiting": "Waiting for quotes…",
-      "notConnected": "Connect MT5 to see live quotes"
+      "spread": "spread"
     },
     "symbolNames": {
       "XAUUSD": "Gold",
@@ -394,36 +339,18 @@
     },
     "sort": {
       "latest": "Latest",
-      "expiry": "Expiry",
-      "rr": "R:R",
-      "symbol": "Symbol",
-      "indicator": "Trigger"
-    },
-    "groupTitle": {
-      "expiring": "Expiring soon",
-      "active": "Active",
-      "expired": "Expired"
+      "expiry": "Expiry"
     },
     "indicatorNone": "No indicator",
-    "colSymbol": "Symbol",
-    "colSide": "Side",
     "colEntry": "Entry",
     "colSl": "SL",
     "colTp": "TP",
-    "colRr": "R:R",
-    "colIndicator": "Trigger",
-    "colCountdown": "Countdown",
-    "colAction": "Action"
+    "colIndicator": "Trigger"
   },
   "order": {
-    "confirmTitle": "Confirm Order",
     "slideToConfirm": "Slide to confirm",
-    "symbol": "Symbol",
-    "side": "Side",
     "volume": "Volume (Lots)",
     "account": "Account",
-    "slPlaceholder": "Stop loss (blank = none)",
-    "tpPlaceholder": "Take profit (blank = none)",
     "estMargin": "Est. margin used",
     "currentPrice": "Live",
     "sizeMode": "Sizing",
@@ -438,15 +365,12 @@
     "signalExpiredInModal": "This signal just expired and can no longer be traded",
     "slTpInvalid": "Fix the stop loss / take profit before confirming",
     "riskNote": "Live prices may differ slightly from entry due to network latency. Execution is subject to your MT5 broker. Please double-check volume and side.",
-    "submit": "Confirm Order",
     "submitting": "Submitting…",
-    "successQueued": "Order command sent",
     "submitted": "Submitted, waiting for fill confirmation…",
     "filled": "Filled @ {{price}}",
     "rejected": "Order rejected: {{msg}}",
     "ackTimeout": "No receipt yet, check the Orders page for the latest status",
     "timeoutNote": "If the command is not executed within 5 minutes (e.g. the Bridge is offline), it is cancelled automatically and will never fill later at a stale price. This platform provides signal tooling only, not investment advice. Trade at your own risk.",
-    "eaOffline": "No MT5 connection online, cannot place order",
     "noBridge": "No MT5 connected yet. Open the PRISMX Bridge app, paste your token and start it, then place the order.",
     "allOffline": "All connected MT5 accounts are currently offline. Make sure the PRISMX Bridge app is running and MT5 is logged in, then retry."
   },
@@ -475,7 +399,6 @@
     "notifUpgradeRequired": "Push notifications aren't included in the free tier — upgrade to unlock",
     "notifNoCategories": "No indicator categories yet, run the signal engine first",
     "notifNoSymbols": "No symbols yet, run the signal engine first",
-    "notifCatsHeading": "Signal alerts",
     "notifFilterHint": "A signal only notifies when both dimensions match — e.g. ticking \"AIFT + Gold\" only notifies for AIFT signals on gold. Tick \"All\" to leave that dimension unrestricted, which also auto-covers symbols added later.",
     "notifStrategyLabel": "By strategy",
     "notifSymbolLabel": "By symbol",
@@ -509,9 +432,6 @@
     "notifDeviceHint": "Notifications are enabled for your account, but this device has not been authorized yet. Toggle the switch off and on once to authorize this device."
   },
   "charts": {
-    "title": "Charts",
-    "subtitle": "Live candlestick view; symbol follows your positions and signals",
-    "symbol": "Symbol",
     "footer": "UTC+8 · Data from platform feed, for reference only",
     "empty": "Chart data is loading or temporarily unavailable…",
     "stale": "Data delayed",
@@ -524,8 +444,6 @@
       "rsi": "RSI",
       "macd": "MACD",
       "settingsTitle": "Indicator Settings",
-      "periods": "Periods",
-      "colors": "Colors",
       "period": "Period",
       "multiplier": "Std dev",
       "color": "Color",
@@ -587,10 +505,6 @@
     "fullscreen": {
       "enter": "Fullscreen",
       "exit": "Exit fullscreen"
-    },
-    "order": {
-      "buy": "Buy",
-      "sell": "Sell"
     },
     "mtabs": {
       "chart": "Chart",
@@ -707,7 +621,8 @@
     "closedTradesTitle": "Closed Trade History",
     "closedTradesHint": "Every real fill — the raw records the win rate above is built from.",
     "closedTradesEmpty": "No closed trades yet",
-    "profit": "P&L"
+    "profit": "P&L",
+    "windowHint": "Covering the last {{days}} days."
   },
   "orders": {
     "title": "Orders & Receipts",
@@ -793,7 +708,6 @@
     "company": "Broker",
     "balance": "Balance",
     "equity": "Equity",
-    "server": "Server",
     "leverage": "Leverage",
     "status": "Status",
     "actions": "Actions",
@@ -818,7 +732,6 @@
     "suffixHint": "If your broker's symbols carry a suffix (e.g. the .sc in GBPUSD.sc), enter it here. It will be appended to the symbol when placing orders. Leave empty for none.",
     "suffixLabel": "Symbol Suffix",
     "suffixPlaceholder": "e.g. .sc or .s (leave empty if none)",
-    "saveSuffix": "Save Suffix",
     "saved": "Saved",
     "suffixNeedAccount": "The suffix is saved per account. Run the Bridge app so an account is reported first.",
     "suffixPerAccountHint": "Edit the suffix directly in each account's row above.",
@@ -833,8 +746,10 @@
   "connStatus": {
     "online": "Connected",
     "offline": "Disconnected",
-    "account": "Account",
-    "reconnecting": "Connection lost, reconnecting… quotes and positions may be stale"
+    "reconnecting": "Connection lost, reconnecting… quotes and positions may be stale",
+    "backendDown": "Can't reach the server",
+    "backendDownHint": "What you're seeing isn't “no data” — it's data we couldn't fetch.",
+    "retry": "Retry"
   },
   "upgrade": {
     "title": "Upgrade to PRO",
@@ -920,7 +835,6 @@
     "version": "Current version",
     "platform": "Works on Windows 10 / 11 (64-bit)",
     "downloadBtn": "Download for Windows",
-    "downloading": "Starting download…",
     "whatTitle": "What does the bridge do?",
     "whatDesc": "PRISMX Bridge is a small app that runs on your computer. It automatically scans the MT5 terminals you're logged into, securely connects to the backend with your API token, reports accounts and positions to the web app, and executes the orders you send from the signal panel. Every trade runs on your own MT5.",
     "guideTitle": "How to use",
@@ -1361,6 +1275,227 @@
     "oneClickOrder": "One-Click Order",
     "signalExpired": "Expired",
     "signalTriggeredAt": "Triggered at",
-    "disclaimer": "Strategy signals are generated only when your configured condition is met — a read-only check that never places an order automatically. Backtests likewise exclude spreads, slippage and swap costs, are not a promise of returns, and past performance does not indicate future results."
+    "disclaimer": "Strategy signals fire only when your conditions are met — a read-only judgement that never places an order by itself. Backtests do account for spread, slippage and commission as configured, but not for overnight swap, and they do not simulate rejections or execution latency. Nothing here is a promise of returns, and past performance does not predict future results."
+  },
+  "legal": {
+    "backHome": "Back to home",
+    "lastUpdated": "Last updated",
+    "contactTitle": "Contact us",
+    "contactBody": "If you have any question about this document, or want to exercise your right to access, correct or delete your personal data, email us. We'll reply as soon as we can.",
+    "terms": {
+      "title": "Terms of Service",
+      "intro": "These terms govern your use of Signal Lab (the \"Service\"). By registering an account or otherwise using the Service, you confirm that you have read and accept these terms. If you do not accept them, please do not register or use the Service.",
+      "sections": [
+        {
+          "h": "What the Service is, and what it isn't",
+          "p": [
+            "The Service is a trading-signal and execution toolkit: we show you signals produced by technical indicators, and provide a local bridge app that forwards your confirmed instructions to your own MT5 terminal.",
+            "The Service is not an advisory service and does not constitute investment advice, an offer, or a solicitation. We do not decide for you, do not trade on your behalf, and never touch or custody your funds — your money stays in your own broker account at all times.",
+            "Whether to trade, what to trade and at what size are entirely your decisions, and the consequences are entirely yours. The Service makes no promise or guarantee about any trading outcome."
+          ]
+        },
+        {
+          "h": "Accounts and credentials",
+          "p": [
+            "You register with a valid email address, or sign in with Google. An account is for one person and may not be transferred, rented out or shared.",
+            "You are responsible for safeguarding your password and your API token. The API token is equivalent to a password: anyone holding it can send trading instructions to your MT5 account. If you suspect it has leaked, reset it immediately on the Connect MT5 page.",
+            "Any action taken through your account or API token is treated as taken by you."
+          ]
+        },
+        {
+          "h": "Subscription, payment and refunds",
+          "p": [
+            "The Service has two tiers, FREE and PRO. FREE costs nothing; PRO is a monthly or yearly subscription at the prices shown on the upgrade page.",
+            "PRO is paid in cryptocurrency (USDT). Please note that a blockchain transfer is irreversible once confirmed — we cannot reverse a completed transfer for you. Refunds are therefore not offered as a rule; if the Service is unavailable for an extended period through our fault, contact us and we will handle it case by case.",
+            "Subscriptions do not auto-renew and nothing is auto-charged. On expiry your tier automatically returns to FREE, and real-time signals, push notifications and any MT5 connections beyond the FREE limit stop with it. To continue, renew manually before the expiry date.",
+            "A free trial, where offered, may be claimed once per account for life. If you convert to a paid subscription during a trial, the paid period starts from the moment of payment and does not stack on top of the remaining trial days."
+          ]
+        },
+        {
+          "h": "Acceptable use",
+          "p": [
+            "You may not resell, rebroadcast or otherwise distribute the signals provided by the Service to third parties; reverse-engineer, mass-scrape or load-test the Service; attempt to bypass tier limits, rate limits or billing; or upload malicious content or interfere with other users.",
+            "We may suspend or terminate an account on discovering such behaviour, and paid but unused subscription time is not refunded in that case."
+          ]
+        },
+        {
+          "h": "Third-party services",
+          "p": [
+            "The Service depends on several third parties: your MT5 broker (trade execution), TradingView (signal source), NOWPayments (payments), Google (optional sign-in), and browser vendors' push services.",
+            "Each has its own terms and policies, independent of these terms, and we are not responsible for their availability, execution quality or conduct. In particular, your final fill price, spread, slippage and any rejection are entirely determined by your broker."
+          ]
+        },
+        {
+          "h": "Service availability",
+          "p": [
+            "We make reasonable efforts to keep the Service available but do not promise 100% uptime. Maintenance, upgrades, upstream market-data outages, network failures and broker-side issues can all cause short periods of unavailability or delayed data.",
+            "The local bridge app requires your own computer to stay powered on, online and logged into MT5. No instruction can execute while the bridge is offline; any instruction not executed within 5 minutes is voided automatically so it can never fill later at a stale price."
+          ]
+        },
+        {
+          "h": "Limitation of liability",
+          "p": [
+            "To the maximum extent permitted by law, we are not liable for any trading loss, lost profit, lost opportunity or indirect loss arising from your use of, or inability to use, the Service.",
+            "Whatever the cause of action, our total aggregate liability to you is capped at the subscription fees you actually paid us in the twelve months preceding the event giving rise to the claim.",
+            "Nothing here excludes or limits liability that cannot be excluded by law."
+          ]
+        },
+        {
+          "h": "Changes and termination",
+          "p": [
+            "We may update these terms from time to time. Substantive changes will be reflected in the \"Last updated\" date on this page and, where reasonable, flagged in the app. Continuing to use the Service after a change means you accept the new terms.",
+            "You may stop using the Service at any time and may contact us to delete your account. We may also terminate your account for a serious breach of these terms.",
+            "The limitation-of-liability section survives termination."
+          ]
+        }
+      ]
+    },
+    "privacy": {
+      "title": "Privacy Policy",
+      "intro": "This policy explains what information Signal Lab collects, why, where it is stored, who it is shared with, and what rights you have over your own data. Our principle is simple: collect only what running the service genuinely requires, and store nothing we can avoid storing.",
+      "sections": [
+        {
+          "h": "What we collect",
+          "p": [
+            "Account data: your email address; when signing in with Google, also the account identifier and email-verification status Google returns. Passwords are stored as an irreversible hash — we cannot read your original password.",
+            "MT5 connection data: the login number, broker server name, account name, currency, balance, equity, leverage and symbol suffix reported by the bridge app, plus its online heartbeat time.",
+            "Trading records: the place / close / modify instructions you send through the platform and their receipts; and the real closing-deal records for platform-opened positions reported by the bridge (time, symbol, side, volume, fill price, P&L).",
+            "Usage statistics: page-view counts and dwell time (aggregated per page-and-hour, containing no user identity), plus a per-day dedup marker for \"this user opened this page on this day\" (day granularity only — no timestamp, no duration).",
+            "Technical data: your push subscription endpoint (when notifications are on), the bridge app's version, and request IP addresses (used only for rate limiting and failed-login lockout, never for profiling)."
+          ]
+        },
+        {
+          "h": "What we don't collect",
+          "p": [
+            "We never obtain — and technically cannot obtain — your MT5 trading account password. The bridge app reads terminals you have already logged into on your own computer.",
+            "We never touch or custody any of your funds.",
+            "We do not collect identity documents, bank card numbers or postal addresses. Crypto payments are handled by NOWPayments; we retain only the payment id, amount, currency and status.",
+            "We use no third-party advertising or cross-site tracking cookies. Your browser's local storage holds only your login token and interface preferences (language, chart settings, selected tab)."
+          ]
+        },
+        {
+          "h": "Why we collect it",
+          "p": [
+            "To run the Service: showing signals, routing instructions to the correct MT5 account, computing your personal win rate and discipline score.",
+            "Security and abuse prevention: rate limiting, blocking credential stuffing, spotting anomalous activity, enforcing tier permissions.",
+            "Billing: confirming subscription status and expiry.",
+            "Product improvement: understanding which pages get used and for how long. This data is deliberately split so that we can answer \"how many people opened the chart page on Tuesday\" but cannot answer \"when did this person look, and for how long\"."
+          ]
+        },
+        {
+          "h": "Where your data lives",
+          "p": [
+            "The database is hosted on Supabase (PostgreSQL, Singapore region). The backend runs on a cloud server; the frontend is hosted and delivered by Vercel.",
+            "All traffic between clients and servers is encrypted in transit over HTTPS/WSS.",
+            "Because the Service is distributed across the regions above, your data may be transferred outside your own country and stored and processed there. By using the Service you acknowledge and agree to this."
+          ]
+        },
+        {
+          "h": "Who we share it with",
+          "p": [
+            "We do not sell your personal data and do not trade it with anyone for marketing.",
+            "To operate, necessary data reaches these providers: Google (only if you use Google sign-in, to verify your identity), NOWPayments (payment processing), browser vendors' push services such as Google / Apple / Mozilla (only when notifications are on, to deliver them), and the cloud and database providers named above.",
+            "We may disclose information where legally required, or where necessary to protect the Service and its users' legitimate interests."
+          ]
+        },
+        {
+          "h": "How long we keep it",
+          "p": [
+            "Account and trading records are kept for as long as your account exists. Unbinding an MT5 account does not delete its historical fills — they simply stop counting toward your statistics, and re-binding restores the view.",
+            "Per-day page-visit dedup markers are pruned automatically after roughly 100 days.",
+            "1-minute candles are kept for 30 days by default; other timeframes are kept long-term (this is market data and contains no personal identity).",
+            "After you close your account we delete or anonymise your personal data within a reasonable period, except where the law requires retention."
+          ]
+        },
+        {
+          "h": "Your rights",
+          "p": [
+            "You have the right to ask what personal data we hold about you, to have inaccurate information corrected, and to have your account and associated data deleted.",
+            "At any time you can turn notifications off on the account page, reset your API token on the Connect MT5 page, and review every trading record on the orders page.",
+            "To exercise any of these rights, get in touch with us. To protect your account we may need to verify your identity first."
+          ]
+        },
+        {
+          "h": "Minors",
+          "p": [
+            "The Service is not intended for anyone under 18. If we learn that we have unknowingly collected a minor's information, we will delete it promptly."
+          ]
+        },
+        {
+          "h": "Changes to this policy",
+          "p": [
+            "When this policy is updated we change the \"Last updated\" date on this page. Updates that substantively change how data is used will also be flagged in the app."
+          ]
+        }
+      ]
+    },
+    "risk": {
+      "title": "Risk Disclosure",
+      "intro": "Please read this page carefully before using the Service. Trading forex, precious metals, oil and crypto assets is high risk and can cost you your entire capital — and under some leverage conditions, more than your capital. If you cannot afford that loss, do not trade.",
+      "sections": [
+        {
+          "h": "Leverage magnifies losses as well as gains",
+          "p": [
+            "MT5 margin trading uses leverage, meaning a small price move can affect your account far out of proportion to your capital. Leverage amplifies profits and amplifies losses equally.",
+            "In violent moves, gaps or thin liquidity, a stop-loss may not fill at the price you set, and your actual loss can exceed what you expected."
+          ]
+        },
+        {
+          "h": "The Service is not investment advice",
+          "p": [
+            "The signals shown are the automatic output of technical indicators applied to preset rules. They are not tailored to anyone's financial situation, investment objectives or risk tolerance, and therefore do not constitute — and must not be read as — investment advice or a recommendation.",
+            "We are not licensed investment advisers and offer no discretionary or managed-account service. Every trading decision is yours."
+          ]
+        },
+        {
+          "h": "Past performance does not predict future results",
+          "p": [
+            "Every win rate, risk-reward ratio, equity curve, maximum drawdown and losing streak shown in the app is a statistic computed over historical data. None of it is a forecast or a promise of future returns.",
+            "Any stretch of history can contain luck, the more so the smaller the sample. That is why we withhold percentages until enough trades have resolved — a \"100% win rate\" derived from two or three trades is misleading, not informative."
+          ]
+        },
+        {
+          "h": "How to read backtest results",
+          "p": [
+            "Custom-strategy backtests do account for trading costs: entry pays half a spread plus one slippage in the direction of the trade, hitting a stop pays one further slippage penalty, and commission is charged once per round trip. These parameters are configured per symbol by the platform and may differ from the conditions at your own broker, so it is worth checking them against your account.",
+            "Backtests do not account for overnight swap, and do not simulate requotes, rejections or execution latency, nor can they reconstruct the order-book depth of the time. Some divergence between live results and backtest results is therefore normal, and a backtest is best treated as a reference point rather than an expectation of live performance.",
+            "Backtests run on the candle history this platform has accumulated, whose depth grows over time. Where data is insufficient or has gaps, the page states the range actually available — it is worth noting that range before reading the result, as the number of days selected and the number of days available are not always the same."
+          ]
+        },
+        {
+          "h": "Risks inherent to the execution path",
+          "p": [
+            "An instruction sent from the web app has to be relayed to MT5 by the bridge app running on your own machine. If the bridge is offline, your computer is disconnected or powered off, or MT5 is not logged in or has algorithmic trading disabled, the instruction cannot execute.",
+            "Any instruction still unexecuted after 5 minutes is voided automatically, so a stale instruction can never fill later at an outdated price — but this also means an order you believe you placed may not have filled. Always treat the receipt on the orders page as the truth.",
+            "Quotes shown on this platform come from a market-data feed and may differ slightly from your broker's. The final fill price is whatever your broker executes."
+          ]
+        },
+        {
+          "h": "Your responsibilities",
+          "p": [
+            "Trade only with money you can afford to lose entirely. We recommend running the whole workflow on a demo account first.",
+            "Confirm for yourself whether this kind of trading is legal where you live and whether it must be declared for tax.",
+            "If you are unsure about the risk of a particular trade, consult an independent licensed professional."
+          ]
+        }
+      ]
+    }
+  },
+  "planExpiry": {
+    "soon": "PRO expires in {{days}} days",
+    "today": "PRO expires today",
+    "trialSoon": "Free trial ends in {{days}} days",
+    "trialToday": "Free trial ends today",
+    "body": "On expiry your tier returns to FREE: real-time signals, push notifications and any MT5 connection beyond the free limit all stop.",
+    "expired": "PRO has expired",
+    "trialExpired": "Your free trial has ended",
+    "expiredBody": "Real-time signals and push notifications have stopped, and MT5 accounts beyond the free limit are disconnected. Renewing restores them immediately.",
+    "renew": "Renew now",
+    "upgrade": "Upgrade again",
+    "dismiss": "Dismiss"
+  },
+  "onboarding": {
+    "title": "One step left before you can trade",
+    "subtitle": "No MT5 account is connected yet, so signals can't reach a terminal to execute."
   }
 }

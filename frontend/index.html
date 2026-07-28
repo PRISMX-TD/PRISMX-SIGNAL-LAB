@@ -4,8 +4,57 @@
     <meta charset="UTF-8" />
     <!-- 声明深色配色，让 Google 登录（GSI/FedCM）个性化按钮渲染为深色而非白底 / dark scheme so the GSI personalized button renders dark, not white -->
     <meta name="color-scheme" content="dark" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+    <!-- 不要加回 user-scalable=no / maximum-scale：那是 WCAG 1.4.4 的明确违反项，
+         而本站在手机上要看的全是密集小号数字（K 线、持仓盈亏、已平仓明细、纪律分
+         进度条，全局最小字号 11px），用户放大看清一个价格是刚需。
+         当初加它通常是为了防「点输入框自动放大」——但那个行为是 iOS 独有的，而 iOS
+         从 10 起就忽略 user-scalable=no，所以这个声明实际上只惩罚了安卓用户（Chrome
+         会老老实实照做），在 iPhone 上永远测不出来。防 iOS 聚焦缩放的正解是把输入框
+         字号设成 ≥16px，不是禁用整页缩放。
+         viewport-fit=cover 配合 CSS 里已有的 env(safe-area-inset-*)，吃掉刘海屏边距。
+         Never restore user-scalable=no / maximum-scale: it's a clear WCAG 1.4.4
+         violation, and this app is dense numeric UI on mobile (candles, position
+         P&L, closed-trade tables, discipline bars — global minimum font size is
+         11px), where zooming in to read a price is a real need. That directive is
+         usually added to stop iOS's zoom-on-input-focus, but that behaviour is
+         iOS-only and iOS has ignored user-scalable=no since iOS 10 — so it only
+         ever penalised Android users (Chrome honours it) and was invisible to
+         anyone testing on an iPhone. The correct fix for iOS focus-zoom is a
+         >=16px font size on inputs, not disabling page zoom.
+         viewport-fit=cover pairs with the env(safe-area-inset-*) already in the
+         CSS to handle notched screens. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="icon" type="image/png" href="/icons/favicon-48.png" />
+
+    <!-- SEO 与社交分享卡片。没有这些标签时，把 prismxsignallab.com 发到 WhatsApp /
+         Telegram / X / 小红书，对方看到的是一个没有标题、没有描述、没有配图的裸链接
+         ——而口碑传播与 KOL 分享正是营销手册里 Phase 1 的主要打法。
+         og:image 必须是绝对 URL（相对路径各家抓取器都不认），1200x630 是通用规格。
+         lang 属性由 i18n 在语言切换时改写（见 src/i18n/index.ts），这里只给初值。
+         SEO and social share cards. Without these, pasting prismxsignallab.com into
+         WhatsApp / Telegram / X renders a bare URL with no title, description or
+         image — while word-of-mouth and KOL sharing are the main Phase 1 channel in
+         the marketing plan. og:image must be an absolute URL (crawlers don't
+         resolve relative paths); 1200x630 is the universal size. The lang attribute
+         is rewritten on language switch by i18n (see src/i18n/index.ts); this is
+         only its initial value. -->
+    <meta name="description" content="每条信号只锁定三个数字——进场、止损、止盈，一键直达你自己的 MT5。资金始终在你自己的券商账户，判定规则公开。" />
+    <link rel="canonical" href="https://prismxsignallab.com/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Signal Lab" />
+    <meta property="og:url" content="https://prismxsignallab.com/" />
+    <meta property="og:title" content="Signal Lab · 情绪归零，只剩纪律" />
+    <meta property="og:description" content="每条信号只锁定三个数字——进场、止损、止盈，一键直达你自己的 MT5。资金始终在你自己的券商账户，判定规则公开。" />
+    <meta property="og:image" content="https://prismxsignallab.com/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Signal Lab 信号实验室 · 情绪归零，只剩纪律" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Signal Lab · 情绪归零，只剩纪律" />
+    <meta name="twitter:description" content="每条信号只锁定三个数字——进场、止损、止盈，一键直达你自己的 MT5。资金始终在你自己的券商账户，判定规则公开。" />
+    <meta name="twitter:image" content="https://prismxsignallab.com/og-image.png" />
     <!-- PWA manifest（display: standalone）。iOS 16.4+ 的 Web Push 只对"以独立
          模式从主屏幕启动"的 Web App 开放：没有这份 manifest 时，加到主屏幕的
          图标只是个 Safari 书签，打开后 Notification/PushManager 根本不存在，

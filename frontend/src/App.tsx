@@ -21,6 +21,7 @@ const AccountPage = lazy(() => import('./pages/AccountPage'))
 const AdminPage = lazy(() => import('./pages/AdminPage'))
 const SimulatorPage = lazy(() => import('./pages/SimulatorPage'))
 const StrategiesPage = lazy(() => import('./pages/StrategiesPage'))
+const LegalPage = lazy(() => import('./pages/LegalPage'))
 
 function Protected({ children }: { children: ReactNode }) {
   const { isAuthed } = useAuth()
@@ -63,6 +64,25 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/login" element={<LoginPage />} />
+            {/* 法务文本：必须放在 Protected 之外，公开可访问。
+                ① 访客要能在注册前读到条款，否则「注册即视为同意」不成立；
+                ② Google OAuth 正式验证要求提供公开可访问的隐私政策 URL，藏在
+                   登录墙后面会直接卡住验证；
+                ③ 搜索引擎与合规审查方都没有 token。
+                也刻意不套 Layout：Layout 会拉起 LiveProvider（WebSocket + 一堆
+                轮询），而这三页不需要任何实时数据，未登录时也根本连不上。
+                Legal text: deliberately outside Protected and publicly reachable.
+                1. visitors must be able to read the terms before registering, or
+                   "registering constitutes acceptance" means nothing;
+                2. Google OAuth verification requires a publicly accessible
+                   privacy-policy URL, and hiding it behind the login wall blocks it;
+                3. neither search engines nor compliance reviewers hold a token.
+                Also deliberately not wrapped in Layout: that mounts LiveProvider
+                (a WebSocket plus several pollers) which these pages never need and
+                which cannot connect when logged out anyway. */}
+            <Route path="/terms" element={<LegalPage doc="terms" />} />
+            <Route path="/privacy" element={<LegalPage doc="privacy" />} />
+            <Route path="/risk" element={<LegalPage doc="risk" />} />
             <Route
               element={
                 <Protected>

@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import { useGlobalQuotes, useLive, useQuotes } from '../store/live'
 import { useSentiment } from '../api/useSentiment'
 import NotifDeviceBanner from '../components/NotifDeviceBanner'
+import OnboardingCard from '../components/OnboardingCard'
 import SignalHero from '../components/signals/SignalHero'
 import SignalExec from '../components/signals/SignalExec'
 import SignalOthers from '../components/signals/SignalOthers'
@@ -93,6 +94,13 @@ export default function DashboardPage() {
   return (
     <div className="max-w-[1520px] mx-auto">
       <NotifDeviceBanner />
+      {/* 引导卡放在仪表盘最上面：这是登录后的落点，新用户第一眼就该看到「下一步
+          做什么」，而不是先滚过一屏空卡片。绑好账号后自动消失。
+          The onboarding card goes at the very top of the dashboard: this is where
+          login lands, so a new user should see "what to do next" first rather than
+          scrolling past a screen of empty cards. It disappears once an account is
+          bound. */}
+      <OnboardingCard />
       {!loaded ? (
         <div className="glass flat-card flex flex-col items-center justify-center py-20 text-center">
           <div className="mb-3 h-10 w-10 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />

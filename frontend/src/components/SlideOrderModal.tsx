@@ -7,6 +7,7 @@ import { calcCountdown, clientOrderId, contractSize, displaySymbol, localizeApiE
 import { SIGNAL_LIFESPAN_MS } from './signals/SignalView'
 import { useNow } from './signals/hooks'
 import { useBackToClose } from '../utils/useBackToClose'
+import OrderConnectNotice from './OrderConnectNotice'
 
 interface Props {
   signal: Signal
@@ -265,7 +266,6 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
   const priceColor = isBuy ? 'var(--up)' : 'var(--down)'
 
   const hasAccounts = onlineAccounts.length > 0
-  const offlineMsg = accounts.length === 0 ? t('order.noBridge') : t('order.allOffline')
   const canSubmit = hasAccounts && !expired && !slInvalid && !tpInvalid
 
   const fmtMoney = (n?: number | null) =>
@@ -484,7 +484,7 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
         </p>
 
         {!hasAccounts && (
-          <div className="mb-3 rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down">{offlineMsg}</div>
+          <OrderConnectNotice neverConnected={accounts.length === 0} />
         )}
         {hasAccounts && expired && (
           <div className="mb-3 rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down">{t('order.signalExpiredInModal')}</div>

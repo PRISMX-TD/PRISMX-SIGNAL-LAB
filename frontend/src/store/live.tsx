@@ -41,6 +41,23 @@ interface LiveContextValue {
   // Was connected at least once and then dropped — avoids a false-positive
   // banner during the brief instant right after first load.
   wsDisconnected: boolean
+  // 后端整体不可达。此前每个请求都各自 .catch() 成空数据、最后无条件
+  // setLoaded(true)，于是后端挂掉时页面渲染得完全正常、只是什么都没有——用户
+  // 读到的是「今天没信号」，不是「服务出问题了」。他会等，而你收不到任何报障。
+  // 判据刻意是「关键请求**全部**失败」而不是「任一失败」：单个接口 500 是局部
+  // 故障，把它报成整站不可用会制造更糟的误报（踩坑记录 #22 里 Promise.all 把
+  // 通知接口的故障扩散成整个账户页崩掉，是同一类错误的反面教材）。
+  // Whether the backend is unreachable as a whole. Every request used to
+  // .catch() into empty data with an unconditional setLoaded(true) at the end,
+  // so a backend outage rendered a perfectly normal page that simply had
+  // nothing in it — the user reads "no signals today", not "the service is
+  // down". They wait, and you never hear about it.
+  // The test is deliberately "ALL critical requests failed", not "any failed":
+  // one endpoint 500ing is a partial failure, and reporting that as a total
+  // outage would be a worse false positive (pitfall #22, where Promise.all
+  // spread a notifications failure across the whole account page, is the same
+  // mistake in the opposite direction).
+  backendUnreachable: boolean
 }
 
 const LiveContext = createContext<LiveContextValue | null>(null)
@@ -120,27 +137,60 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [accountLimit, setAccountLimit] = useState<number | null>(null)
   const [brokerLock, setBrokerLock] = useState<BrokerLock | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [backendUnreachable, setBackendUnreachable] = useState(false)
 
   const refreshAll = useCallback(async () => {
+    // 关键请求单独包一层，除了拿数据还要拿到「这条到底成没成」。其余请求
+    // （策略信号、趋势、报价、品种）继续静默吞掉：它们各自失败都属于局部
+    // 问题，不能作为「整个后端挂了」的证据。
+    // Wrap the critical calls so we learn whether each one actually succeeded,
+    // not just what it returned. The rest (strategy signals, trends, quotes,
+    // symbols) keep swallowing their errors: any of those failing is a local
+    // problem and must not count as evidence that the whole backend is down.
+    // 回落值与成功值允许是不同类型（如 brokerLock 成功时是 BrokerLock、失败时
+    // 是 null），所以两个类型参数、返回联合类型——写成同一个 T 会逼着回落值去
+    // 迁就成功值的类型，反而要在调用处硬转。
+    // The fallback may have a different type from the success value (brokerLock
+    // is a BrokerLock on success and null on failure), hence two type parameters
+    // and a union return — collapsing both into one T would force the fallback to
+    // match the success type and push a cast to every call site.
+    const settle = <T, F>(p: Promise<T>, fallback: F) =>
+      p
+        .then((value): { ok: boolean; value: T | F } => ({ ok: true, value }))
+        .catch((): { ok: boolean; value: T | F } => ({ ok: false, value: fallback }))
+
     const [sig, stratSig, ord, acc, trd, gq, sym] = await Promise.all([
-      signalApi.list().catch(() => ({ signals: [] })),
+      settle(signalApi.list(), { signals: [] as Signal[] }),
       // 目前仅管理员可用（功能内部试用中）；非管理员在此静默拿回空数组，
       // 不影响其它数据的加载。/ Admin-only for now (feature in internal
       // trial); non-admins silently get an empty array here, without
       // affecting the rest of the load.
       strategyApi.signals(20).catch(() => ({ signals: [] })),
       orderApi.list().catch(() => ({ orders: [], total: 0 })),
-      accountApi.list().catch(() => ({ accounts: [], accountLimit: null, brokerLock: null })),
+      settle(accountApi.list(), { accounts: [] as MT5Account[], accountLimit: null, brokerLock: null as BrokerLock | null }),
       trendApi.list().catch(() => ({ trends: [] })),
       quoteApi.list().catch(() => ({ quotes: [] })),
       symbolApi.list().catch(() => ({ symbols: [] })),
     ])
-    setSignals(capExpired(sig.signals))
+
+    // 两条关键请求都失败才判定后端不可达。选这两条是因为它们覆盖面最广：
+    // 一条读全站共享数据、一条读该用户私有数据，两条都打不通，几乎不可能是
+    // 单个端点的问题。凭证失效（401）不会走到这里——client.ts 收到 401 会清
+    // 登录态并跳登录页，根本不会停留在应用内。
+    // Only when both critical calls fail do we call the backend unreachable.
+    // These two are chosen for breadth: one reads shared site-wide data, the
+    // other this user's private data, and both failing at once is very unlikely
+    // to be a single endpoint's fault. An expired credential never reaches this
+    // path — a 401 makes client.ts clear the session and bounce to login, so we
+    // aren't sitting inside the app at all.
+    setBackendUnreachable(!sig.ok && !acc.ok)
+
+    setSignals(capExpired(sig.value.signals))
     setStrategySignals(stratSig.signals)
     setOrders(ord.orders)
-    setAccounts(acc.accounts)
-    setAccountLimit(acc.accountLimit)
-    setBrokerLock((prev) => keepIfEqual(prev, acc.brokerLock))
+    setAccounts(acc.value.accounts)
+    setAccountLimit(acc.value.accountLimit)
+    setBrokerLock((prev) => keepIfEqual(prev, acc.value.brokerLock))
     setTrends(Object.fromEntries((trd.trends || []).map((t) => [t.symbol, t])))
     setGlobalQuotes(Object.fromEntries((gq.quotes || []).map((q) => [q.symbol, q])))
     setActiveSymbols((prev) => keepIfEqual(prev, sym.symbols || []))
@@ -182,9 +232,32 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   // monitor. Skipped while the page is backgrounded (switched app, screen
   // locked) to avoid pointless battery drain; refetches immediately on
   // returning to the foreground instead of waiting up to 5s for the next tick.
+  // 会话中途后端挂掉时，refreshAll 不会再跑（它只在挂载与少数动作时触发），
+  // 所以那条判据覆盖不到。这个 5 秒轮询是全站最稳定的心跳，连续失败即可作为
+  // 第二条证据。要求连续 3 次（约 15 秒）而不是 1 次：偶发的网络抖动、部署时
+  // 的一两秒 502 都会失败一次，据此弹红条只会制造噪音，等用户学会忽略它，真
+  // 出事时也就没人看了。任一次成功立刻复位。
+  // A mid-session outage isn't covered by refreshAll's check (it only runs on
+  // mount and on a few actions). This 5s poll is the steadiest heartbeat in the
+  // app, so a run of failures is the second piece of evidence. Three in a row
+  // (~15s) rather than one: a transient network blip or a second of 502 during a
+  // deploy fails once, and flashing a red banner for that just trains users to
+  // ignore it — by the time something real happens, nobody is reading it. Any
+  // success resets it immediately.
+  const accountFailStreak = useRef(0)
   useEffect(() => {
     const poll = () => {
-      accountApi.list().then((r) => setAccounts((prev) => keepIfEqual(prev, r.accounts))).catch(() => {})
+      accountApi
+        .list()
+        .then((r) => {
+          accountFailStreak.current = 0
+          setBackendUnreachable(false)
+          setAccounts((prev) => keepIfEqual(prev, r.accounts))
+        })
+        .catch(() => {
+          accountFailStreak.current += 1
+          if (accountFailStreak.current >= 3) setBackendUnreachable(true)
+        })
     }
     const timer = window.setInterval(() => {
       if (!document.hidden) poll()
@@ -318,10 +391,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const value = useMemo<LiveContextValue>(
     () => ({
       signals, strategySignals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
-      anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected,
+      anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected, backendUnreachable,
     }),
     [signals, strategySignals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
-     anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected]
+     anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected, backendUnreachable]
   )
 
   return (

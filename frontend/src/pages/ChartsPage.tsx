@@ -1584,7 +1584,7 @@ export default function ChartsPage() {
     }
     chartRef.current?.timeScale().subscribeVisibleLogicalRangeChange(onRangeChange)
 
-    const timer = window.setInterval(() => {
+    const poll = () => {
       chartApi.latest(symbol, interval).then((r) => {
         if (!alive) return
         for (const b of r.bars) applyBar(b)
@@ -1603,11 +1603,38 @@ export default function ChartsPage() {
         const fresh = r.updatedAt != null && Date.now() / 1000 - r.updatedAt < STALE_MS / 1000
         setStale(r.updatedAt != null && !fresh)
       }).catch(() => {})
+    }
+
+    // 页面在后台时不轮询。这是全站频率最高的一个轮询（每 2 秒），而站内其它所有
+    // 轮询——个人胜率卡、纪律分卡、订单页已平仓明细、策略页信号、live.tsx 里的
+    // 账号状态与活跃品种——早就都带了这个判断，唯独这里漏了。
+    // 代价是实打实的：一个用户把图表页丢在后台标签里，就是 30 次/分钟的纯浪费；
+    // 按运维手册里「安全并发 150 人」的基线，其中三分之一挂着图表页就是约 25
+    // 请求/秒空转，全落在 2 核单进程的后端上，手机端还白耗电。
+    // 切回前台立刻补一次，不让用户盯着一根最长 2 秒的陈旧蜡烛等下一拍。
+    // Don't poll while the page is backgrounded. This is the highest-frequency
+    // poll in the app (every 2s), and every other one — the win-rate card, the
+    // discipline card, the orders page's closed trades, the strategies page's
+    // signals, and live.tsx's account-status and active-symbol polls — has had
+    // this guard all along; only this one was missed.
+    // The cost is real: one user leaving the charts page in a background tab is
+    // 30 wasted requests a minute, and at the ops manual's "150 concurrent users"
+    // baseline, a third of them idling here is ~25 req/s of pure waste against a
+    // 2-core single-process backend, plus needless battery drain on mobile.
+    // Refetch immediately on return so the user never stares at a candle up to
+    // 2 seconds stale waiting for the next tick.
+    const timer = window.setInterval(() => {
+      if (!document.hidden) poll()
     }, POLL_MS)
+    const onVisible = () => { if (!document.hidden) poll() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
 
     return () => {
       alive = false
       window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
       chartRef.current?.timeScale().unsubscribeVisibleLogicalRangeChange(onRangeChange)
     }
   }, [symbol, interval, recomputeIndicators])

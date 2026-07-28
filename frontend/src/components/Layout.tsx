@@ -6,8 +6,10 @@ import { useTranslation } from 'react-i18next'
 import { LiveProvider, useLive } from '../store/live'
 import { useAuth } from '../store/auth'
 import { notificationApi, pushApi } from '../api/client'
+import { SUPPORT_EMAIL } from '../config/site'
 import { ensurePushSubscription, pushSupported } from '../utils/push'
 import Logo from './Logo'
+import PlanExpiryBanner from './PlanExpiryBanner'
 import LanguageToggle from './LanguageToggle'
 import EAStatusBadge from './EAStatusBadge'
 import NotificationBell from './NotificationBell'
@@ -157,19 +159,75 @@ function TabItem({ to, icon, label }: { to: string; icon: string; label: string 
   )
 }
 
-// 断线提示条：网页自身的 WebSocket 掉线时提醒用户报价/持仓可能已过时
-// Disconnect banner: warns that quotes/positions may be stale while the
-// page's own WebSocket connection is down
-function WsDisconnectBanner() {
+// 连接状态提示条，三态：
+//   ① 正常                 —— 不渲染
+//   ② WebSocket 断线重连中  —— 琥珀色，数据可能过时
+//   ③ 后端整体不可达        —— 红色，并给一个「重试」按钮
+//
+// 加第三态的原因：此前后端挂掉时页面渲染得完全正常、只是空空如也，而重连横幅
+// 也不会出现——它要求 wsDisconnected，而那个标志需要「曾经连上过」，后端从一
+// 开始就没起来的话永远为假。用户看到的是一个「今天没信号」的仪表盘。
+//
+// 两态同时成立时优先显示后端不可达：那是根因，说「正在重连」只会让用户以为
+// 是自己网络的问题。
+//
+// Connection banner with three states: silent when healthy; amber while the
+// WebSocket is reconnecting (data may be stale); red when the backend is
+// unreachable as a whole, with a retry button.
+//
+// The third state exists because a backend outage used to render a perfectly
+// normal but empty page, and the reconnect banner wouldn't fire either — it
+// requires wsDisconnected, which requires having connected at least once, and
+// that is never true if the backend was down from the start. The user just saw
+// a dashboard with "no signals today".
+//
+// When both apply, the unreachable state wins: it's the root cause, and saying
+// "reconnecting" would let the user blame their own network.
+function ConnectionBanner() {
   const { t } = useTranslation()
-  const { wsDisconnected } = useLive()
-  if (!wsDisconnected) return null
-  return (
-    <div className="sticky top-[57px] z-20 flex items-center justify-center gap-2 border-b border-amber-400/30 bg-amber-400/10 px-3 py-1.5 text-xs font-medium text-amber-300 sm:top-[65px]">
-      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
-      {t('connStatus.reconnecting')}
-    </div>
-  )
+  const { wsDisconnected, backendUnreachable, refreshAll } = useLive()
+  const [retrying, setRetrying] = useState(false)
+
+  const retry = async () => {
+    setRetrying(true)
+    try {
+      await refreshAll()
+    } finally {
+      setRetrying(false)
+    }
+  }
+
+  const base =
+    'sticky top-[57px] z-20 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 border-b px-3 py-1.5 text-xs font-medium sm:top-[65px]'
+
+  if (backendUnreachable) {
+    return (
+      <div className={`${base} border-down/30 bg-down/10 text-down`} role="status">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-down" />
+        <span>{t('connStatus.backendDown')}</span>
+        <span className="opacity-75">{t('connStatus.backendDownHint')}</span>
+        <button
+          type="button"
+          onClick={retry}
+          disabled={retrying}
+          className="rounded-md bg-down/20 px-2 py-0.5 font-semibold transition hover:bg-down/30 disabled:opacity-50"
+        >
+          {retrying ? t('common.loading') : t('connStatus.retry')}
+        </button>
+      </div>
+    )
+  }
+
+  if (wsDisconnected) {
+    return (
+      <div className={`${base} border-amber-400/30 bg-amber-400/10 text-amber-300`} role="status">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+        {t('connStatus.reconnecting')}
+      </div>
+    )
+  }
+
+  return null
 }
 
 export default function Layout() {
@@ -384,7 +442,16 @@ export default function Layout() {
             </div>
           </div>
         </header>
-        <WsDisconnectBanner />
+        <ConnectionBanner />
+        {/* 到期提醒放在这里而不是某个页面里：到期影响的是整个产品（实时信号、
+            推送、多账号连接），不是某一页的功能，所以它得跟着用户走到每一页。
+            它自己判断该不该显示，不需要时不占任何布局空间。
+            The expiry notice lives here rather than inside a page: expiry affects
+            the whole product (real-time signals, push, multi-account connections),
+            not one page's feature, so it has to follow the user everywhere. It
+            decides for itself whether to render and takes up no layout space when
+            it shouldn't. */}
+        <PlanExpiryBanner />
 
         <main className="mx-auto w-full max-w-7xl flex-1 px-4 pb-24 pt-6 sm:px-6 sm:pb-6">
           {/* 懒加载页面切换时导航保持可见 / keep the nav visible while a lazy page loads */}
@@ -405,6 +472,38 @@ export default function Layout() {
             </div>
           </Suspense>
         </main>
+
+        {/* 登录后也要够得着条款/政策/客服。只有落地页有页脚是不够的——真正需要
+            它们的时刻（支付出问题、想删账号、想知道数据存在哪）都发生在登录之后，
+            而登录态下用户根本不会想到退出去看首页。
+            刻意做得极轻：一行小字，不与底部 Tab 抢注意力。
+            下方内边距要清掉手机端固定底栏（.lg-tabbar 是 lg:hidden，所以 lg 以下
+            都要留出空间），否则最后一行会被压在底栏底下点不到。
+            Terms / policy / support have to be reachable once logged in too. A
+            landing-page-only footer isn't enough: the moments people actually need
+            them (a payment goes wrong, they want their account deleted, they want
+            to know where their data lives) all happen after login, and nobody
+            thinks to log out and go read the homepage.
+            Deliberately featherweight — one line of small text that doesn't
+            compete with the bottom tab bar. The bottom padding clears the fixed
+            mobile tab bar (.lg-tabbar is lg:hidden, so every width below lg needs
+            the room) or the last row ends up trapped under it and untappable. */}
+        <footer className="mx-auto w-full max-w-7xl px-4 pb-24 sm:px-6 lg:pb-6">
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-t border-white/[0.06] pt-5 text-[11.5px] text-slate-600">
+            <span>© {new Date().getFullYear()} PRISMX</span>
+            {(['terms', 'privacy', 'risk'] as const).map((d) => (
+              <NavLink key={d} to={`/${d}`} className="transition hover:text-slate-300">
+                {t(`legal.${d}.title`)}
+              </NavLink>
+            ))}
+            {/* 同落地页页脚：SUPPORT_EMAIL 留空则不渲染这条，见 config/site.ts */}
+            {SUPPORT_EMAIL && (
+              <a href={`mailto:${SUPPORT_EMAIL}`} className="transition hover:text-slate-300">
+                {t('nav.support')}
+              </a>
+            )}
+          </div>
+        </footer>
 
         {/* 移动端底部液态玻璃导航栏 / mobile liquid-glass bottom nav */}
         <nav className="lg-tabbar lg:hidden">

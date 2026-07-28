@@ -62,19 +62,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }
 
+  // planExpiresAt 一并带回来：到期横幅（components/PlanExpiryBanner）要靠它算
+  // 还剩几天。此前它只存在于 AccountPage / UpgradePage 各自的一次性 userApi.me()
+  // 调用里，任何全局组件想用都得自己再发一次请求——放进登录态是唯一一处、
+  // 且随 refreshUser 自然保持新鲜。
+  // Also carry planExpiresAt back: the expiry banner
+  // (components/PlanExpiryBanner) needs it to compute days remaining. It used to
+  // live only inside AccountPage's and UpgradePage's own one-off userApi.me()
+  // calls, so any global component wanting it had to issue yet another request.
+  // Keeping it on the auth state gives it a single home that stays fresh with
+  // refreshUser.
   const refreshUser = async () => {
     if (!getToken()) return
     try {
       const me = await userApi.me()
       setUser((prev) => {
         if (!prev) return null
-        return { ...prev, plan: me.plan, planIsTrial: me.planIsTrial }
+        return { ...prev, plan: me.plan, planIsTrial: me.planIsTrial, planExpiresAt: me.planExpiresAt }
       })
       const stored = localStorage.getItem(USER_KEY)
       if (stored) {
         const parsed = JSON.parse(stored)
         parsed.plan = me.plan
         parsed.planIsTrial = me.planIsTrial
+        parsed.planExpiresAt = me.planExpiresAt
         localStorage.setItem(USER_KEY, JSON.stringify(parsed))
       }
     } catch {

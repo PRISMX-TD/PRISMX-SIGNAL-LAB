@@ -67,7 +67,20 @@ export default function PersonalWinRateCard({ variant = 'compact', login }: Prop
           </Link>
         )}
       </div>
-      <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{t('winrate.personalHint')}</p>
+      {/* 统计范围必须写在标题下面：后端给这份统计加了回看窗口（见后端
+          trade_performance.WINDOW_DAYS），数字只覆盖最近这么多天。不写出来，
+          用户会把它读成全历史战绩——这跟策略卡把「历史最长连亏」改成「近 200
+          笔最长连亏」是同一条规矩：口径变了就得让用户看见。
+          The scope belongs right under the title: the backend bounds this stat by
+          a look-back window (see trade_performance.WINDOW_DAYS), so the figures
+          cover only the last N days. Unstated, a user reads them as an all-time
+          record — the same rule that turned the strategy card's "longest losing
+          streak" into "longest in the last 200": if what a number measures
+          changes, say so. */}
+      <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+        {t('winrate.personalHint')}
+        {data && ` ${t('winrate.windowHint', { days: data.windowDays })}`}
+      </p>
 
       {pct == null ? (
         <div className="mt-3 py-3 text-center text-sm text-slate-500">{t('winrate.noData')}</div>
