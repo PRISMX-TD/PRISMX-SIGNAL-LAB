@@ -197,8 +197,17 @@ function ConnectionBanner() {
     }
   }
 
+  // 57px/65px 是 header 在移动端/桌面端的固有高度；header 现在额外吃掉一段
+  // env(safe-area-inset-top) 撑开顶部（见下方 header 的 pt-[env(...)]），这里
+  // 的吸顶偏移必须加回同一个值，否则在刘海屏/灵动岛设备上这条横幅会叠在
+  // header 文字上而不是紧贴其下方。
+  // 57px/65px is the header's intrinsic height on mobile/desktop; the header
+  // now also reserves env(safe-area-inset-top) at its top (see the header's
+  // pt-[env(...)] below), so this sticky offset must add the same amount back,
+  // or on notched/Dynamic-Island devices this banner overlaps the header text
+  // instead of sitting right below it.
   const base =
-    'sticky top-[57px] z-20 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 border-b px-3 py-1.5 text-xs font-medium sm:top-[65px]'
+    'sticky top-[calc(57px+env(safe-area-inset-top))] z-20 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 border-b px-3 py-1.5 text-xs font-medium sm:top-[calc(65px+env(safe-area-inset-top))]'
 
   if (backendUnreachable) {
     return (
@@ -413,7 +422,21 @@ export default function Layout() {
     <LiveProvider>
       <div className="relative flex min-h-screen flex-col">
         <AuroraBackground />
-        <header className="sticky top-0 z-30 border-b border-white/[0.08] bg-ink-950/60 backdrop-blur-xl">
+        {/* pt-[env(safe-area-inset-top)]：iOS 的 apple-mobile-web-app-status-bar-style
+            是 black-translucent（见 index.html），意味着状态栏是透明的，页面内容
+            天然延伸到刘海/灵动岛下面——不加这段内边距，logo/导航就会被系统状态栏
+            盖住甚至挡住点击（灵动岛区域系统会截获触摸）。header 背景本身贴着物理
+            顶部（sticky top-0），所以撑开的这段高度用同一层模糊背景盖住状态栏，
+            视觉上是连续的一整条，而不是露出一段黑边。
+            pt-[env(safe-area-inset-top)]: iOS's apple-mobile-web-app-status-bar-style
+            is black-translucent (see index.html), meaning the status bar is
+            transparent and page content naturally extends under the notch/Dynamic
+            Island — without this padding the logo/nav sit under the system status
+            bar and can even have taps swallowed by the Dynamic Island's touch
+            capture. The header background itself still hugs the physical top
+            (sticky top-0), so the added height is covered by the same blurred
+            background, reading as one continuous bar rather than a bare strip. */}
+        <header className="sticky top-0 z-30 border-b border-white/[0.08] bg-ink-950/60 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
           <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:gap-4 sm:px-6">
             <div className="flex items-center gap-2.5">
               <Logo size={40} />

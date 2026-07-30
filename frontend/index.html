@@ -4,26 +4,27 @@
     <meta charset="UTF-8" />
     <!-- 声明深色配色，让 Google 登录（GSI/FedCM）个性化按钮渲染为深色而非白底 / dark scheme so the GSI personalized button renders dark, not white -->
     <meta name="color-scheme" content="dark" />
-    <!-- 不要加回 user-scalable=no / maximum-scale：那是 WCAG 1.4.4 的明确违反项，
-         而本站在手机上要看的全是密集小号数字（K 线、持仓盈亏、已平仓明细、纪律分
-         进度条，全局最小字号 11px），用户放大看清一个价格是刚需。
-         当初加它通常是为了防「点输入框自动放大」——但那个行为是 iOS 独有的，而 iOS
-         从 10 起就忽略 user-scalable=no，所以这个声明实际上只惩罚了安卓用户（Chrome
-         会老老实实照做），在 iPhone 上永远测不出来。防 iOS 聚焦缩放的正解是把输入框
-         字号设成 ≥16px，不是禁用整页缩放。
+    <!-- 产品决定：全平台（安卓/iOS，浏览器标签页/主屏幕 PWA）禁止双指与双击缩放，
+         打开即按 width=device-width 自适应屏幕尺寸——原生 App 手感优先。
+         user-scalable=no 在 Android Chrome 上生效；iOS Safari 从 10 起忽略这条
+         viewport 声明本身，真正拦截靠 src/main.tsx 里的 gesturestart/touchend
+         事件监听，这条 meta 只是 Android 一侧 + 声明性兜底。
+         输入框字号需 ≥16px 以避免 iOS 聚焦时的自动放大跳变（缩放已被上面这条锁死，
+         但聚焦仍会触发一次性的视口跳动，字号够大就不会触发）。
          viewport-fit=cover 配合 CSS 里已有的 env(safe-area-inset-*)，吃掉刘海屏边距。
-         Never restore user-scalable=no / maximum-scale: it's a clear WCAG 1.4.4
-         violation, and this app is dense numeric UI on mobile (candles, position
-         P&L, closed-trade tables, discipline bars — global minimum font size is
-         11px), where zooming in to read a price is a real need. That directive is
-         usually added to stop iOS's zoom-on-input-focus, but that behaviour is
-         iOS-only and iOS has ignored user-scalable=no since iOS 10 — so it only
-         ever penalised Android users (Chrome honours it) and was invisible to
-         anyone testing on an iPhone. The correct fix for iOS focus-zoom is a
-         >=16px font size on inputs, not disabling page zoom.
+         Product decision: disable pinch and double-tap zoom on every platform
+         (Android/iOS, browser tab or Home-Screen PWA) — the page auto-fits the
+         screen via width=device-width on load, and native-app feel wins here.
+         user-scalable=no is honoured by Android Chrome; iOS Safari has ignored
+         this viewport directive since iOS 10, so the real interception lives in
+         the gesturestart/touchend listeners in src/main.tsx — this meta tag is
+         the Android-side enforcement plus a declarative fallback.
+         Inputs still need a >=16px font size to avoid iOS's focus-zoom jump
+         (zoom itself is locked above, but focus can still trigger a one-off
+         viewport jolt unless the font is large enough to not need it).
          viewport-fit=cover pairs with the env(safe-area-inset-*) already in the
          CSS to handle notched screens. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="icon" type="image/png" href="/icons/favicon-48.png" />
 
     <!-- SEO 与社交分享卡片。没有这些标签时，把 prismxsignallab.com 发到 WhatsApp /

@@ -59,12 +59,19 @@ export default function LoginPage() {
     <div className="relative min-h-screen overflow-hidden">
       <AuroraBackground />
 
-      <div className="absolute left-4 top-4 z-20">
+      {/* top-[calc(1rem+env(safe-area-inset-top))]：这个容器是 min-h-screen 从物理
+          屏幕顶部起算，固定 top-4 会被 iOS 刘海/灵动岛盖住、点击被系统截获
+          （用户反馈的"顶部按键按不了"就是这个）。
+          top-[calc(1rem+env(safe-area-inset-top))]: this container spans from the
+          physical screen top, so a bare top-4 sits under the iOS notch/Dynamic
+          Island and taps get swallowed by the system — this is the "top buttons
+          don't respond" report. */}
+      <div className="absolute left-4 top-[calc(1rem+env(safe-area-inset-top))] z-20">
         <Link to="/" className="chip transition hover:border-prism-500/50 hover:text-slate-100">
           <span aria-hidden>←</span> Signal Lab
         </Link>
       </div>
-      <div className="absolute right-4 top-4 z-20">
+      <div className="absolute right-4 top-[calc(1rem+env(safe-area-inset-top))] z-20">
         <LanguageToggle />
       </div>
 

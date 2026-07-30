@@ -4,16 +4,18 @@ import './styles/index.css'
 import './i18n'
 import App from './App'
 
-// 这里原本有一段「锁死缩放」的代码。已随 index.html 的 viewport 一起移除，
-// 浏览器模式下保留 WCAG 1.4.4 要求的缩放能力。PWA standalone（主屏图标启动）
-// 在下方的 isStandalone 分支中重新启用缩放锁定——用户从主屏打开时才期待 App
-// 行为，浏览器打开时保持网页应有的无障碍标准。
+// 产品决定：无论安卓还是 iOS，无论浏览器标签页还是主屏幕安装的 PWA，都不允许
+// 双指缩放/双击缩放——页面本身用 initial-scale=1.0 + width=device-width 做到了
+// "打开即自适应屏幕"，缩放只会破坏原生 App 的观感。这与早前版本"仅 standalone
+// 锁定、浏览器保留 WCAG 1.4.4 缩放能力"的方案不同：那一版在浏览器标签页里遗留
+// 了可缩放入口，与产品要的"全平台都不能缩放"冲突，故改为下方无条件生效。
 //
-// This used to hold a "lock zoom" block. Removed alongside the viewport change
-// in index.html; browser mode keeps zoom as required by WCAG 1.4.4. PWA
-// standalone (launched from the Home Screen) re-enables the zoom lock in the
-// isStandalone block below — users only expect app behaviour from the Home
-// Screen icon, not from a browser tab.
+// Product decision: disable pinch/double-tap zoom everywhere — Android or iOS,
+// browser tab or Home-Screen-installed PWA. initial-scale=1.0 + width=device-width
+// already makes the page auto-fit the screen on load; zoom only breaks the
+// native-app feel. This supersedes the earlier "standalone-only lock, browser
+// keeps WCAG 1.4.4 zoom" approach, which left zoom reachable from a plain
+// browser tab — the opposite of "no zoom on any platform."
 
 // Service Worker 注册。此前只有「用户开启推送」这一条路径会注册它（见
 // utils/push.ts 的 getSWReg），所以从不开推送的用户身上，这个 SW 根本不存在。
@@ -37,29 +39,40 @@ if ('serviceWorker' in navigator) {
   })
 }
 
-// PWA standalone 模式下锁死缩放与横向拖动，营造原生 App 手感。
-// 浏览器模式保留缩放→无障碍（WCAG 1.4.4），仅在从主屏幕图标启动的
-// 独立窗口里禁用——那才是用户期望的"App 行为"。
-// Lock zoom and horizontal drag in PWA standalone mode for a native-app feel.
-// Browser access keeps zoom → accessibility (WCAG 1.4.4); zoom is only locked
-// when launched standalone from the Home Screen, where users expect app behaviour.
-const isStandalone = window.matchMedia('(display-mode: standalone)').matches
-if (isStandalone) {
-  // 改写 viewport meta：加上 user-scalable=no / maximum-scale=1。
-  // Android Chrome 会遵守；iOS Safari 从 10 起忽略，但下面用 gesturestart 补防。
-  const vp = document.querySelector('meta[name="viewport"]')
-  if (vp) vp.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover')
+// viewport meta 里的 user-scalable=no（见 index.html）覆盖 Android Chrome；
+// iOS Safari 从 10 起忽略这条声明本身，下面用 gesturestart/touchend 在事件层面
+// 兜底拦截，两边合起来才是全平台锁死。
+// user-scalable=no in the viewport meta (see index.html) covers Android
+// Chrome; iOS Safari has ignored that directive since iOS 10, so the
+// gesturestart/touchend listeners below intercept it at the event level —
+// together they lock zoom on every platform.
 
-  // iOS Safari standalone PWA 特有：CSS touch-action: pan-y 对它不生效，
-  // 双指缩放必须通过 gesture 事件拦截。
-  document.addEventListener('gesturestart', e => e.preventDefault())
-  document.addEventListener('gesturechange', e => e.preventDefault())
+// iOS Safari（含浏览器标签页与 standalone PWA）：CSS touch-action: pan-y 对
+// 双指缩放不生效，缩放走的是 gesture 事件而不是 touch 事件，必须单独拦截。
+// iOS Safari (browser tab and standalone PWA alike): CSS touch-action: pan-y
+// does not stop pinch-zoom there — zoom runs through gesture events, not touch
+// events, so it needs its own interception.
+document.addEventListener('gesturestart', e => e.preventDefault())
+document.addEventListener('gesturechange', e => e.preventDefault())
 
-  // Android / 其他平台：多指触摸直接阻止（单指滚动不受影响）。
-  document.addEventListener('touchmove', e => {
-    if (e.touches.length > 1) e.preventDefault()
-  }, { passive: false })
-}
+// Android / 其他平台：多指触摸直接阻止（单指滚动不受影响）。
+// Android / everything else: block any multi-touch gesture outright (single-
+// finger scrolling is untouched).
+document.addEventListener('touchmove', e => {
+  if (e.touches.length > 1) e.preventDefault()
+}, { passive: false })
+
+// 双击缩放：iOS 用 300ms 内两次 touchend 判定双击，CSS touch-action 覆盖不到
+// 这个路径（pan-y 本该连双击缩放一起关掉，但 iOS 在部分版本上仍会漏放）。
+// Double-tap zoom: iOS detects a double-tap via two touchend events within
+// 300ms, a path CSS touch-action doesn't reliably cover on every iOS version
+// even though pan-y is supposed to disable it too.
+let lastTouchEnd = 0
+document.addEventListener('touchend', e => {
+  const now = Date.now()
+  if (now - lastTouchEnd <= 300) e.preventDefault()
+  lastTouchEnd = now
+}, { passive: false })
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

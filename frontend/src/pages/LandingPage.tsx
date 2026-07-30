@@ -72,7 +72,16 @@ function Navbar({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate
     { h: '#faq', k: 'navFaq' },
   ]
   return (
-    <header ref={ref} className="fixed inset-x-0 top-0 z-50 border-b border-transparent backdrop-blur-xl transition-colors duration-300">
+    // pt-[env(safe-area-inset-top)]：header 是 fixed 在物理屏幕顶部，iOS 状态栏
+    // 透明（apple-mobile-web-app-status-bar-style: black-translucent），不加这段
+    // 会让 logo/导航被刘海/灵动岛盖住、点击被系统截获。h-16 的内容区整体下移
+    // 同样的量，Hero 区的 pt 也一并加了这段偏移，见下方 Hero。
+    // pt-[env(safe-area-inset-top)]: the header is fixed to the physical screen
+    // top and iOS's status bar is transparent, so without this the logo/nav sit
+    // under the notch/Dynamic Island and taps get swallowed by the system. The
+    // h-16 content shifts down by the same amount; Hero's own padding below
+    // accounts for the same offset.
+    <header ref={ref} className="fixed inset-x-0 top-0 z-50 border-b border-transparent pt-[env(safe-area-inset-top)] backdrop-blur-xl transition-colors duration-300">
       <div className="mx-auto flex h-16 max-w-[1180px] items-center gap-6 px-5">
         <a href="#" className="flex items-center gap-2.5">
           <Logo size={36} />
@@ -110,7 +119,7 @@ function Hero({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate> 
       {/* 背景极光流体由页面根统一渲染，这里只在文字区做柔和径向压暗，且不在边缘形成硬边 */}
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_50%_at_50%_45%,rgba(5,3,12,0.5)_0%,transparent_75%)]" />
 
-      <div className="relative z-10 mx-auto w-full max-w-3xl px-5 pt-24 text-center">
+      <div className="relative z-10 mx-auto w-full max-w-3xl px-5 pt-[calc(6rem+env(safe-area-inset-top))] text-center">
         <div className="animate-fade-in-up mb-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-4 py-1.5 backdrop-blur">
           <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
           <span className="text-[11px] tracking-wide text-neutral-300">{t('landing.badge')}</span>
