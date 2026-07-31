@@ -6,6 +6,7 @@ import { userApi, notificationApi, setToken } from "../api/client"
 import { fmtTime, fmtDate, localizeApiError } from "../api/utils"
 import { getSWReg } from "../utils/push"
 import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
+import PushDiagnostics from "../components/PushDiagnostics"
 import {
   ALL_SENTINEL,
   EVENT_TYPES,
@@ -560,6 +561,7 @@ export default function AccountPage() {
                   {notifMsg.text}
                 </p>
               )}
+              <PushDiagnostics />
             </div>
           </section>
         </div>
