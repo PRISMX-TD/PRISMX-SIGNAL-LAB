@@ -660,3 +660,41 @@ export interface WSMessage {
   reason?: string
   userId?: string
 }
+
+// 工单系统 / ticket system
+export type TicketCategory = 'account' | 'payment' | 'technical' | 'feature'
+export type TicketPriority = 'low' | 'normal' | 'urgent'
+export type TicketStatus = 'open' | 'in_progress' | 'closed'
+
+export interface TicketReply {
+  id: string
+  authorId: string
+  authorEmail: string
+  authorRole: 'user' | 'admin'
+  body: string
+  createdAt: string
+}
+
+export interface Ticket {
+  id: string
+  userId: string
+  userEmail: string
+  title: string
+  category: TicketCategory
+  priority: TicketPriority
+  status: TicketStatus
+  createdAt: string
+  updatedAt: string
+  replies: TicketReply[]
+}
+
+export interface TicketListItem {
+  id: string
+  userEmail: string
+  title: string
+  category: TicketCategory
+  priority: TicketPriority
+  status: TicketStatus
+  updatedAt: string
+  latestReply: TicketReply | null
+}
