@@ -78,14 +78,22 @@ export function iosVersion(): { major: number; minor: number } | null {
 
 /**
  * 当前运行环境是否具备 Web Push 能力。真实能力探测，是功能开关的唯一依据。
+ * iOS 上只有"从主屏幕以独立模式启动的 Web App"（iOS 16.4+）才有 PushManager——
+ * 在 Safari 标签页里（包括没有 manifest 时加到主屏幕的书签式打开）这两个对象
+ * 根本不存在。这也是下面 detectPushEnv 需要 standalone 判定的原因。
+ *
  * Whether this environment can do Web Push. A real capability check — the only
- * thing that gates functionality.
+ * thing that gates functionality. On iOS only a web app launched standalone
+ * from the Home Screen (iOS 16.4+) gets PushManager — in a Safari tab
+ * (including bookmark-style home-screen launches when there's no manifest)
+ * these objects simply don't exist, which is why detectPushEnv below needs the
+ * standalone check.
  */
 export function pushSupported(): boolean {
   return (
+    typeof Notification !== "undefined" &&
     "serviceWorker" in navigator &&
-    "PushManager" in window &&
-    "Notification" in window
+    "PushManager" in window
   )
 }
 
