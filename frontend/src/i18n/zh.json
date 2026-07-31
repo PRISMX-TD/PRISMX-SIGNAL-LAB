@@ -1497,5 +1497,60 @@
   "onboarding": {
     "title": "还差一步就能开始",
     "subtitle": "你还没有连接任何 MT5 账户，信号无法下发到终端执行。"
+  },
+  "tickets": {
+    "title": "客服工单",
+    "newTicket": "提交工单",
+    "listTitle": "我的工单",
+    "empty": "暂无工单",
+    "form": {
+      "title": "标题",
+      "titlePlaceholder": "简要描述你的问题",
+      "category": "分类",
+      "priority": "优先级",
+      "content": "详细描述",
+      "contentPlaceholder": "请尽量详细描述你遇到的问题…",
+      "submit": "提交",
+      "submitting": "提交中…"
+    },
+    "category": {
+      "account": "账户问题",
+      "payment": "支付/账单",
+      "technical": "技术故障",
+      "feature": "功能建议"
+    },
+    "priority": {
+      "low": "低",
+      "normal": "普通",
+      "urgent": "紧急"
+    },
+    "status": {
+      "open": "待处理",
+      "in_progress": "处理中",
+      "closed": "已关闭"
+    },
+    "reply": "回复",
+    "replyPlaceholder": "输入回复内容…",
+    "reopen": "重开工单",
+    "closedWarning": "此工单已关闭。回复将自动重开工单。",
+    "backToList": "返回列表",
+    "admin": {
+      "title": "工单管理",
+      "filterStatus": "状态筛选",
+      "filterCategory": "分类筛选",
+      "all": "全部",
+      "colTitle": "标题",
+      "colUser": "提交者",
+      "colCategory": "分类",
+      "colPriority": "优先级",
+      "colStatus": "状态",
+      "colUpdated": "更新时间",
+      "replySent": "回复已发送",
+      "statusUpdated": "状态已更新"
+    },
+    "notification": {
+      "newReply": "有新回复",
+      "body": "{{email}} 回复了你的工单"
+    }
   }
 }

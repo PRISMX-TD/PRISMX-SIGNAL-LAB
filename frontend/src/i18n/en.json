@@ -1497,5 +1497,60 @@
   "onboarding": {
     "title": "One step left before you can trade",
     "subtitle": "No MT5 account is connected yet, so signals can't reach a terminal to execute."
+  },
+  "tickets": {
+    "title": "Support Tickets",
+    "newTicket": "Submit Ticket",
+    "listTitle": "My Tickets",
+    "empty": "No tickets yet",
+    "form": {
+      "title": "Title",
+      "titlePlaceholder": "Briefly describe your issue",
+      "category": "Category",
+      "priority": "Priority",
+      "content": "Description",
+      "contentPlaceholder": "Describe your issue in detail…",
+      "submit": "Submit",
+      "submitting": "Submitting…"
+    },
+    "category": {
+      "account": "Account",
+      "payment": "Billing / Payment",
+      "technical": "Technical Issue",
+      "feature": "Feature Request"
+    },
+    "priority": {
+      "low": "Low",
+      "normal": "Normal",
+      "urgent": "Urgent"
+    },
+    "status": {
+      "open": "Open",
+      "in_progress": "In Progress",
+      "closed": "Closed"
+    },
+    "reply": "Reply",
+    "replyPlaceholder": "Type your reply…",
+    "reopen": "Reopen Ticket",
+    "closedWarning": "This ticket is closed. Replying will reopen it.",
+    "backToList": "Back to list",
+    "admin": {
+      "title": "Ticket Management",
+      "filterStatus": "Filter by status",
+      "filterCategory": "Filter by category",
+      "all": "All",
+      "colTitle": "Title",
+      "colUser": "Submitter",
+      "colCategory": "Category",
+      "colPriority": "Priority",
+      "colStatus": "Status",
+      "colUpdated": "Updated",
+      "replySent": "Reply sent",
+      "statusUpdated": "Status updated"
+    },
+    "notification": {
+      "newReply": "New reply",
+      "body": "{{email}} replied to your ticket"
+    }
   }
 }
