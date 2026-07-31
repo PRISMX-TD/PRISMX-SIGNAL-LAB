@@ -686,4 +686,20 @@ export const pushApi = {
       method: 'POST',
       body: JSON.stringify({ endpoint, keys }),
     }),
+  // 诊断用：后端记录了几个订阅、其中是否包含本设备当前的 endpoint。
+  // "浏览器里有订阅"与"后端收到了订阅"是两件事，分开查才能定位上报环节的问题。
+  // Diagnostics: how many subscriptions the backend holds and whether this
+  // device's current endpoint is among them. "The browser has a subscription"
+  // and "the backend received it" are different things; querying them
+  // separately is what pinpoints a broken reporting step.
+  getStatus: (endpoint?: string) =>
+    request<{ count: number; current_endpoint_registered: boolean }>(
+      `/notifications/push/status${endpoint ? `?endpoint=${encodeURIComponent(endpoint)}` : ''}`,
+    ),
+  // 给本账号所有设备发一条测试通知，端到端验证链路。
+  // Send one test notification to every device on the account — end-to-end check.
+  sendTest: () =>
+    request<{ sent: number; failed: number; pruned: number }>('/notifications/push/test', {
+      method: 'POST',
+    }),
 }
