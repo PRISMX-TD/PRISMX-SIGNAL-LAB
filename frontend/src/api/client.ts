@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 
 const TOKEN_KEY = 'prismx_token'
@@ -499,6 +499,19 @@ export const notificationApi = {
   getSymbols: () => request<string[]>('/notifications/symbols'),
 }
 
+// 工单 / Tickets
+export const ticketApi = {
+  list: () => request<TicketListItem[]>('/tickets'),
+  get: (id: string) => request<Ticket>(`/tickets/${encodeURIComponent(id)}`),
+  create: (payload: { title: string; category: TicketCategory; priority: TicketPriority; body: string }) =>
+    request<Ticket>('/tickets', { method: 'POST', body: JSON.stringify(payload) }),
+  reply: (id: string, body: string, reopen = false) =>
+    request<Ticket>(`/tickets/${encodeURIComponent(id)}/reply`, {
+      method: 'POST',
+      body: JSON.stringify({ body, reopen }),
+    }),
+}
+
 // 管理后台 / Admin
 export const adminApi = {
   pageStats: (days = 7) => request<AdminPageStats>(`/admin/page-stats?days=${days}`),
@@ -564,6 +577,27 @@ export const adminApi = {
       request<AdminStrategySettings>('/admin/strategy-settings', {
         method: 'PUT',
         body: JSON.stringify(payload),
+      }),
+    // ---- 工单管理 / Ticket management ----
+    listTickets: (params: { status?: string; category?: string; limit?: number; offset?: number } = {}) => {
+      const qs = new URLSearchParams()
+      if (params.status) qs.set('status', params.status)
+      if (params.category) qs.set('category', params.category)
+      if (params.limit) qs.set('limit', String(params.limit))
+      if (params.offset) qs.set('offset', String(params.offset))
+      const suffix = qs.toString() ? `?${qs.toString()}` : ''
+      return request<TicketListItem[]>(`/admin/tickets${suffix}`)
+    },
+    getTicket: (id: string) => request<Ticket>(`/admin/tickets/${encodeURIComponent(id)}`),
+    replyTicket: (id: string, body: string, opts?: { status?: TicketStatus; priority?: TicketPriority }) =>
+      request<Ticket>(`/admin/tickets/${encodeURIComponent(id)}/reply`, {
+        method: 'POST',
+        body: JSON.stringify({ body, ...opts }),
+      }),
+    updateTicket: (id: string, patch: { status?: TicketStatus; priority?: TicketPriority }) =>
+      request<Ticket>(`/admin/tickets/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
       }),
   }
 
