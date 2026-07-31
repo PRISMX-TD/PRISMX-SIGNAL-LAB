@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "check:sw": "node --check public/sw.js",
+    "build": "npm run check:sw && tsc -b && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

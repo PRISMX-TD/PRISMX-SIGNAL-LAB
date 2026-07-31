@@ -67,14 +67,6 @@ self.addEventListener("activate", (event) => {
       .keys()
       .then((names) => Promise.all(names.filter((n) => n !== CACHE).map((n) => caches.delete(n))))
       .then(() => self.clients.claim())
-      .then(() => {
-        // best-effort periodic sync — helps Chrome on Android keep the SW alive
-        try {
-          if ("periodicSync" in self.registration) {
-            return (self.registration as any).periodicSync.register("heartbeat", { minInterval: 12 * 60 * 60 * 1000 }).catch(() => {})
-          }
-        } catch { /* not supported */ }
-      })
   )
 })
 
@@ -141,7 +133,7 @@ self.addEventListener("pushsubscriptionchange", (event) => {
       userVisibleOnly: true,
       applicationServerKey: key,
     }).then((sub) => {
-      const raw = sub.toJSON() as { endpoint: string; keys: { p256dh: string; auth: string } }
+      const raw = sub.toJSON()
       // broadcast to open clients so they immediately report the new subscription
       return self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
         for (const client of clients) {
