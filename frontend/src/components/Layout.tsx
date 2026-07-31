@@ -7,6 +7,7 @@ import { LiveProvider, useLive } from '../store/live'
 import { useAuth } from '../store/auth'
 import { notificationApi, pushApi } from '../api/client'
 import { ensurePushSubscription, pushSupported } from '../utils/push'
+import { recordDiag } from '../utils/pushDiag'
 import Logo from './Logo'
 import PlanExpiryBanner from './PlanExpiryBanner'
 import LanguageToggle from './LanguageToggle'
@@ -375,13 +376,17 @@ export default function Layout() {
     const report = async () => {
       try {
         const prefs = await notificationApi.getPrefs()
+        recordDiag('prefs')
         if (cancelled || !prefs.enabled) return
         await ensurePushSubscription(
           async () => (await pushApi.getVapidKey()).publicKey,
           (endpoint, keys) => pushApi.subscribe(endpoint, keys),
         )
-      } catch {
-        // 静默失败：这里只是自愈，不该打扰正常使用 / silent — self-healing only
+      } catch (err) {
+        // 仍然静默：这里只是自愈，不该打扰正常使用。原因记进诊断。
+        // Still silent — self-healing only, must not interrupt normal use.
+        // The reason goes into diagnostics.
+        recordDiag('prefs', err)
       }
     }
     void report()
@@ -393,7 +398,10 @@ export default function Layout() {
     // immediately reports it without waiting for the next app visit.
     const onSwMsg = (ev: MessageEvent) => {
       if (ev.data?.type === "PUSH_SUB_RENEWED" && ev.data?.endpoint && ev.data?.keys) {
-        void pushApi.subscribe(ev.data.endpoint, ev.data.keys).catch(() => {})
+        void pushApi
+          .subscribe(ev.data.endpoint, ev.data.keys)
+          .then(() => recordDiag('report'))
+          .catch((err) => recordDiag('report', err))
       }
     }
     navigator.serviceWorker.addEventListener("message", onSwMsg)
@@ -409,6 +417,20 @@ export default function Layout() {
         // 权限在后台被系统撤销（iOS 更新后偶发）
         // Permission was revoked while backgrounded (seen after iOS updates)
         if (Notification.permission !== lastPerm) {
+          // 记进诊断：iOS 系统更新后权限被悄悄撤销是最难复现的一类故障，
+          // 用户只会说"以前能收到现在收不到了"。留下这条记录，诊断面板上
+          // 就能直接看到权限变过。
+          // Recorded because a permission silently revoked by an iOS update is
+          // the hardest failure to reproduce — the user only reports "it used
+          // to work". This leaves a trace the panel can show.
+          if (Notification.permission === "granted") {
+            recordDiag("permission")
+          } else {
+            recordDiag(
+              "permission",
+              `权限由 ${lastPerm} 变为 ${Notification.permission} / permission changed from ${lastPerm} to ${Notification.permission}`,
+            )
+          }
           lastPerm = Notification.permission
           if (!cancelled && Notification.permission === "granted") void report()
         }

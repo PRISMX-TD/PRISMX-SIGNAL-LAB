@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import './styles/index.css'
 import './i18n'
 import App from './App'
+import { recordDiag } from './utils/pushDiag'
 
 // 产品决定：无论安卓还是 iOS，无论浏览器标签页还是主屏幕安装的 PWA，都不允许
 // 双指缩放/双击缩放——页面本身用 initial-scale=1.0 + width=device-width 做到了
@@ -35,7 +36,12 @@ import App from './App'
 // thread, while what it buys (an offline fallback) only matters afterwards.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {})
+    navigator.serviceWorker
+      .register('/sw.js', { scope: '/' })
+      .then(() => recordDiag('sw-register'))
+      // 失败仍然不影响启动，但原因记进诊断供面板读取。
+      // Still non-fatal to boot, but the reason is recorded for the panel.
+      .catch((err) => recordDiag('sw-register', err))
   })
 }
 

@@ -1,4 +1,19 @@
 // Web Push 订阅工具 / Web Push subscription helpers
+import { recordDiag } from "./pushDiag"
+import { pushSupported } from "./pushEnv"
+
+// pushSupported 的实现已移到 pushEnv.ts（连同新增的 PushEnv 细分状态），这里重导出，
+// 让现有那五个 import 点不必改动，同时避免两份实现并存漂移。
+// 其余环境探测函数（detectPushEnv / isStandalone / …）由组件直接从 pushEnv.ts 导入，
+// 不在这里转发——多一层转发只会让"某个符号到底住在哪"变得更难回答。
+//
+// pushSupported's implementation moved to pushEnv.ts (along with the new PushEnv
+// states); re-exported here so the five existing import sites stay untouched and
+// no second copy can drift. The other detectors (detectPushEnv / isStandalone /
+// …) are imported straight from pushEnv.ts by their consumers — an extra
+// forwarding layer would only make "where does this symbol live" harder to answer.
+export { pushSupported } from "./pushEnv"
+
 const SW_URL = "/sw.js"
 
 function urlBase64ToUint8Array(base64: string) {
@@ -17,9 +32,17 @@ export async function getSWReg(): Promise<ServiceWorkerRegistration | null> {
   if (_reg) return _reg
   try {
     _reg = await navigator.serviceWorker.register(SW_URL, { scope: "/" })
+    recordDiag("sw-register")
     // 等 SW 就绪 / wait until ready
     await navigator.serviceWorker.ready
-  } catch {
+    recordDiag("sw-ready")
+  } catch (err) {
+    // 仍然吞掉异常（注册不上不该影响应用启动），但原因记进诊断——此前这里的
+    // 静默 catch 让 sw.js 的语法错误藏了很久。
+    // Still swallowed (a failed registration must not break app boot), but the
+    // reason is recorded — the silent catch here hid a syntax error in sw.js
+    // for a long time.
+    recordDiag("sw-register", err)
     _reg = null
   }
   return _reg
@@ -41,21 +64,6 @@ export async function unsubscribePush() {
   if (!reg) return
   const sub = await reg.pushManager.getSubscription()
   if (sub) await sub.unsubscribe()
-}
-
-// 当前运行环境是否具备 Web Push 能力。iOS 上只有"从主屏幕以独立模式启动的
-// Web App"（iOS 16.4+）才有 PushManager——在 Safari 标签页里（包括没有
-// manifest 时加到主屏幕的书签式打开）这两个对象根本不存在。
-// Whether this environment supports Web Push at all. On iOS only a web app
-// launched standalone from the Home Screen (iOS 16.4+) gets PushManager — in
-// a Safari tab (including bookmark-style home-screen launches when there's no
-// manifest) these objects simply don't exist.
-export function pushSupported(): boolean {
-  return (
-    typeof Notification !== "undefined" &&
-    "serviceWorker" in navigator &&
-    "PushManager" in window
-  )
 }
 
 // 确保"这台设备"有一个有效的推送订阅并已上报后端。
@@ -80,13 +88,34 @@ export async function ensurePushSubscription(
   if (!reg) return false
   let sub = await reg.pushManager.getSubscription()
   if (!sub) {
-    const key = await getVapidKey()
-    sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(key),
-    })
+    let key: string
+    try {
+      key = await getVapidKey()
+      recordDiag("vapid-key")
+    } catch (err) {
+      recordDiag("vapid-key", err)
+      throw err
+    }
+    try {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(key),
+      })
+      recordDiag("subscribe")
+    } catch (err) {
+      recordDiag("subscribe", err)
+      throw err
+    }
+  } else {
+    recordDiag("subscribe")
   }
   const raw = sub.toJSON() as { endpoint: string; keys: { p256dh: string; auth: string } }
-  await report(raw.endpoint!, raw.keys!)
+  try {
+    await report(raw.endpoint!, raw.keys!)
+    recordDiag("report")
+  } catch (err) {
+    recordDiag("report", err)
+    throw err
+  }
   return true
 }

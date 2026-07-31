@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
 import { notificationApi } from "../api/client"
 import { pushSupported } from "../utils/push"
+import { recordDiag } from "../utils/pushDiag"
 
 const DISMISS_KEY = "prismx_notif_banner_dismissed"
 
@@ -22,9 +23,10 @@ export default function NotifDeviceBanner() {
     notificationApi
       .getPrefs()
       .then((p) => {
+        recordDiag("prefs")
         if (alive) setEnabled(p.enabled)
       })
-      .catch(() => {})
+      .catch((err) => recordDiag("prefs", err))
     return () => {
       alive = false
     }
