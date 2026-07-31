@@ -274,6 +274,14 @@ def admin_reply_to_ticket(
     db.add(reply)
     db.commit()
     db.refresh(ticket)
+
+    # 推送通知给工单提交者 / notify the ticket submitter
+    try:
+        from app.services.push_dispatch import dispatch_ticket_reply
+        dispatch_ticket_reply(ticket.id, ticket.user_id, admin.email)
+    except Exception:
+        pass  # 通知失败不影响回复成功 / don't fail reply on notification error
+
     replies = (
         db.query(TicketReply)
         .filter(TicketReply.ticket_id == ticket_id)

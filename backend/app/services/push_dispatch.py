@@ -290,3 +290,54 @@ async def dispatch_event_push_async(user_id: str, event_type: str, title: str, b
         await run_in_threadpool(dispatch_event_push, user_id, event_type, title, body)
     except Exception:
         logger.exception("dispatch_event_push_async error")
+
+
+# ---------- 工单回复通知（单用户）/ ticket reply notification (single user) ----------
+# 管理员回复工单时，向工单提交者推送一条 Web Push 通知，让他们知道
+# 工单有了新回复。与上面的事件推送使用相同的 VAPID / WebPush 通道。
+# When an admin replies to a ticket, push a web-push notification to the
+# ticket submitter so they know their ticket has a new reply. Uses the
+# same VAPID / WebPush channel as the event-push functions above.
+
+
+def dispatch_ticket_reply(ticket_id: str, recipient_id: str, replier_email: str) -> None:
+    """工单有新回复时推送通知给接收方。同步、阻塞网络 IO，
+    调用方须确保不在事件循环中直接调用。
+    Push a notification when a ticket gets a new reply. Synchronous,
+    blocking network IO — caller must not invoke directly on the event loop."""
+    pem = settings.vapid_private_key
+    if not pem or not settings.VAPID_PUBLIC_KEY:
+        return
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == recipient_id).first()
+        if not user:
+            return
+        subs = db.query(PushSubscription).filter(PushSubscription.user_id == recipient_id).all()
+        if not subs:
+            return
+        vapid_claims = {"sub": settings.VAPID_SUBJECT}
+        # 双语标题与正文 / bilingual title and body
+        title = "New ticket reply / 工单有新回复"
+        body = f"{replier_email} replied to your ticket / {replier_email} 回复了你的工单"
+        payload = json.dumps({
+            "title": title,
+            "body": body,
+            "icon": "/icons/icon-192.png",
+            "data": {"ticketId": ticket_id},
+        })
+        push_headers = {"Urgency": "high", "TTL": str(3600)}
+        failed_ids: list[str] = []
+        for sub in subs:
+            _ok, stale = _webpush_one(sub, payload, pem, vapid_claims, push_headers)
+            if stale:
+                failed_ids.append(sub.id)
+        if failed_ids:
+            db.query(PushSubscription).filter(
+                PushSubscription.id.in_(failed_ids)
+            ).delete(synchronize_session=False)
+            db.commit()
+    except Exception:
+        logger.exception("[push] dispatch_ticket_reply error (ticket=%s, user=%s)", ticket_id, recipient_id)
+    finally:
+        db.close()
