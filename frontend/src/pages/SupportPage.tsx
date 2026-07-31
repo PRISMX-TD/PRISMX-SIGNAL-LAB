@@ -20,11 +20,12 @@ const priorityClass: Record<string, string> = {
   urgent: 'bg-down/15 text-down',
 }
 
-function ReplyBubble({ authorEmail, authorRole, body, createdAt }: {
+function ReplyBubble({ authorEmail, authorRole, body, createdAt, t }: {
   authorEmail: string
   authorRole: string
   body: string
   createdAt: string
+  t: ReturnType<typeof useTranslation>['t']
 }) {
   const isAdmin = authorRole === 'admin'
   return (
@@ -34,7 +35,7 @@ function ReplyBubble({ authorEmail, authorRole, body, createdAt }: {
       }`}>
         <div className="mb-1 flex items-center gap-2 text-[11px] text-slate-500">
           <span className="font-medium text-slate-300">{authorEmail}</span>
-          {isAdmin && <span className="rounded bg-prism-600/20 px-1.5 py-0.5 text-[10px] text-prism-300">STAFF</span>}
+          {isAdmin && <span className="rounded bg-prism-600/20 px-1.5 py-0.5 text-[10px] text-prism-300">{t('admin.staff')}</span>}
           <span>{new Date(createdAt).toLocaleString()}</span>
         </div>
         <p className="whitespace-pre-wrap text-sm text-slate-200">{body}</p>
@@ -59,11 +60,14 @@ export default function SupportPage() {
   const [replying, setReplying] = useState(false)
   const [reopening, setReopening] = useState(false)
 
+  const [error, setError] = useState('')
+  const showError = (msg: string) => { setError(msg); setTimeout(() => setError(''), 4000) }
+
   const loadTickets = async () => {
     try {
       setTickets(await ticketApi.list())
     } catch {
-      // 静默失败
+      showError(t('common.error'))
     } finally {
       setLoading(false)
     }
@@ -85,6 +89,7 @@ export default function SupportPage() {
       setView({ ticket })
       loadTickets()
     } catch {
+      showError(t('common.error'))
     } finally {
       setSubmitting(false)
     }
@@ -98,6 +103,7 @@ export default function SupportPage() {
       setView({ ticket })
       setReplyText('')
     } catch {
+      showError(t('common.error'))
     } finally {
       setReplying(false)
     }
@@ -111,6 +117,7 @@ export default function SupportPage() {
       setView({ ticket })
       setReplyText('')
     } catch {
+      showError(t('common.error'))
     } finally {
       setReopening(false)
     }
@@ -120,6 +127,7 @@ export default function SupportPage() {
   if (view === 'form') {
     return (
       <div className="mx-auto max-w-lg">
+        {error && <div className="mb-4 rounded-lg border border-down/40 bg-down/15 px-4 py-2.5 text-sm text-down">{error}</div>}
         <button onClick={() => setView('list')} className="btn-ghost mb-4 px-3 py-1.5 text-sm">
           &larr; {t('tickets.backToList')}
         </button>
@@ -167,6 +175,7 @@ export default function SupportPage() {
     const ticket = view.ticket
     return (
       <div className="mx-auto max-w-2xl">
+        {error && <div className="mb-4 rounded-lg border border-down/40 bg-down/15 px-4 py-2.5 text-sm text-down">{error}</div>}
         <button onClick={() => { setView('list'); loadTickets() }} className="btn-ghost mb-4 px-3 py-1.5 text-sm">
           &larr; {t('tickets.backToList')}
         </button>
@@ -184,7 +193,7 @@ export default function SupportPage() {
 
         <div className="mb-4">
           {ticket.replies.map((r) => (
-            <ReplyBubble key={r.id} authorEmail={r.authorEmail} authorRole={r.authorRole} body={r.body} createdAt={r.createdAt} />
+            <ReplyBubble key={r.id} authorEmail={r.authorEmail} authorRole={r.authorRole} body={r.body} createdAt={r.createdAt} t={t} />
           ))}
         </div>
 
@@ -217,6 +226,7 @@ export default function SupportPage() {
   // List view (default)
   return (
     <div className="mx-auto max-w-2xl">
+      {error && <div className="mb-4 rounded-lg border border-down/40 bg-down/15 px-4 py-2.5 text-sm text-down">{error}</div>}
       <div className="mb-6 flex items-center justify-between">
         <h2 className="font-display text-2xl font-bold text-slate-100">
           <span className="neon-text">{t('tickets.title')}</span>
@@ -238,7 +248,7 @@ export default function SupportPage() {
             <button
               key={ticket.id}
               onClick={async () => {
-                try { setView({ ticket: await ticketApi.get(ticket.id) }) } catch {}
+                try { setView({ ticket: await ticketApi.get(ticket.id) }) } catch { showError(t('common.error')) }
               }}
               className="glass w-full p-4 text-left transition hover:bg-white/[0.03]"
             >

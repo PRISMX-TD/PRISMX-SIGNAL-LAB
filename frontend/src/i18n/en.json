@@ -41,7 +41,8 @@
     "offline": "Offline",
     "buy": "BUY",
     "sell": "SELL",
-    "noChange": "No change"
+    "noChange": "No change",
+    "error": "Operation failed, please try again"
   },
   "landing": {
     "navCompare": "Industry Exposed",

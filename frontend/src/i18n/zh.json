@@ -41,7 +41,8 @@
     "offline": "离线",
     "buy": "买入",
     "sell": "卖出",
-    "noChange": "不修改"
+    "noChange": "不修改",
+    "error": "操作失败，请重试"
   },
   "landing": {
     "navCompare": "行业解剖",
