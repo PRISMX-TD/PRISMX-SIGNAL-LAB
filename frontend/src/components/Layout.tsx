@@ -6,7 +6,6 @@ import { useTranslation } from 'react-i18next'
 import { LiveProvider, useLive } from '../store/live'
 import { useAuth } from '../store/auth'
 import { notificationApi, pushApi } from '../api/client'
-import { SUPPORT_EMAIL } from '../config/site'
 import { ensurePushSubscription, pushSupported } from '../utils/push'
 import Logo from './Logo'
 import PlanExpiryBanner from './PlanExpiryBanner'
@@ -558,12 +557,9 @@ export default function Layout() {
                 {t(`legal.${d}.title`)}
               </NavLink>
             ))}
-            {/* 同落地页页脚：SUPPORT_EMAIL 留空则不渲染这条，见 config/site.ts */}
-            {SUPPORT_EMAIL && (
-              <a href={`mailto:${SUPPORT_EMAIL}`} className="transition hover:text-slate-300">
-                {t('nav.support')}
-              </a>
-            )}
+            <NavLink to="/support" className="transition hover:text-slate-300">
+              {t('nav.support')}
+            </NavLink>
           </div>
         </footer>
 

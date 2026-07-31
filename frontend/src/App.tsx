@@ -22,6 +22,7 @@ const AdminPage = lazy(() => import('./pages/AdminPage'))
 const SimulatorPage = lazy(() => import('./pages/SimulatorPage'))
 const StrategiesPage = lazy(() => import('./pages/StrategiesPage'))
 const LegalPage = lazy(() => import('./pages/LegalPage'))
+const SupportPage = lazy(() => import('./pages/SupportPage'))
 
 function Protected({ children }: { children: ReactNode }) {
   const { isAuthed } = useAuth()
@@ -111,6 +112,7 @@ export default function App() {
               <Route path="/upgrade" element={<UpgradePage />} />
               <Route path="/account" element={<AccountPage />} />
               <Route path="/download" element={<DownloadPage />} />
+              <Route path="/support" element={<SupportPage />} />
               <Route
                 path="/admin"
                 element={
