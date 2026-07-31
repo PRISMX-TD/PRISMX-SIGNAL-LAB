@@ -40,7 +40,8 @@
     "online": "Online",
     "offline": "Offline",
     "buy": "BUY",
-    "sell": "SELL"
+    "sell": "SELL",
+    "noChange": "No change"
   },
   "landing": {
     "navCompare": "Industry Exposed",
@@ -868,8 +869,10 @@
       "data": "Dashboard",
       "users": "Users",
       "ops": "Operations",
-      "system": "System"
+      "system": "System",
+      "tickets": "Tickets"
     },
+    "staff": "Staff",
     "pageStats": {
       "title": "Page views (last {{days}} days)",
       "daysLabel": "Window",

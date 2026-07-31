@@ -40,7 +40,8 @@
     "online": "在线",
     "offline": "离线",
     "buy": "买入",
-    "sell": "卖出"
+    "sell": "卖出",
+    "noChange": "不修改"
   },
   "landing": {
     "navCompare": "行业解剖",
@@ -868,8 +869,10 @@
       "data": "数据看板",
       "users": "用户管理",
       "ops": "运营设置",
-      "system": "系统参数"
+      "system": "系统参数",
+      "tickets": "工单管理"
     },
+    "staff": "客服",
     "pageStats": {
       "title": "页面访问统计（近 {{days}} 天）",
       "daysLabel": "统计天数",

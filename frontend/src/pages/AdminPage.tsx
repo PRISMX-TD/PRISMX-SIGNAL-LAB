@@ -7,7 +7,7 @@ import { adminApi } from '../api/client'
 import { fmtTime, localizeApiError } from '../api/utils'
 import Select from '../components/Select'
 import PageStatsCard from '../components/admin/PageStatsCard'
-import type { AdminBrokerSettings, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole } from '../api/types'
+import type { AdminBrokerSettings, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
 const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
@@ -23,8 +23,8 @@ const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
 // by blast radius: ops changes commercial terms users see and pay, system
 // changes how the backend computes and stores. Lumping them together is what
 // made the original single page an unnavigable pile of seven config groups.
-type AdminTab = 'data' | 'users' | 'ops' | 'system'
-const ADMIN_TABS: AdminTab[] = ['data', 'users', 'ops', 'system']
+type AdminTab = 'data' | 'users' | 'ops' | 'system' | 'tickets'
+const ADMIN_TABS: AdminTab[] = ['data', 'users', 'ops', 'system', 'tickets']
 
 interface Draft {
   role: UserRole
@@ -51,6 +51,249 @@ function isDirty(u: AdminUser, d: Draft | undefined): boolean {
 const planChipClass: Record<UserPlan, string> = {
   FREE: 'bg-white/5 text-slate-400',
   PRO: 'bg-prism-600/20 text-prism-300',
+}
+
+// ---- 工单管理面板 / Ticket Management Panel ----
+
+function AdminTicketsPanel() {
+  const { t } = useTranslation()
+  const [tickets, setTickets] = useState<TicketListItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [statusFilter, setStatusFilter] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [detail, setDetail] = useState<Ticket | null>(null)
+  const [replyText, setReplyText] = useState('')
+  const [replyStatus, setReplyStatus] = useState<TicketStatus | ''>('')
+  const [replyPriority, setReplyPriority] = useState<TicketPriority | ''>('')
+  const [sending, setSending] = useState(false)
+  const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const toastTimer = useRef<number>(undefined)
+
+  const showToast = (kind: 'ok' | 'err', text: string) => {
+    if (toastTimer.current) window.clearTimeout(toastTimer.current)
+    setToast({ kind, text })
+    toastTimer.current = window.setTimeout(() => setToast(null), 4000)
+  }
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      setTickets(await adminApi.listTickets({
+        status: statusFilter || undefined,
+        category: categoryFilter || undefined,
+      }))
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Load failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [statusFilter, categoryFilter])
+
+  const openDetail = async (id: string) => {
+    try {
+      setDetail(await adminApi.getTicket(id))
+      setReplyText('')
+      setReplyStatus('')
+      setReplyPriority('')
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Load failed')
+    }
+  }
+
+  const sendReply = async () => {
+    if (!replyText.trim() || !detail) return
+    setSending(true)
+    try {
+      const updated = await adminApi.replyTicket(detail.id, replyText.trim(), {
+        ...(replyStatus ? { status: replyStatus as TicketStatus } : {}),
+        ...(replyPriority ? { priority: replyPriority as TicketPriority } : {}),
+      })
+      setDetail(updated)
+      setReplyText('')
+      setReplyStatus('')
+      setReplyPriority('')
+      showToast('ok', t('tickets.admin.replySent'))
+      load()
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Save failed')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const updateMeta = async (patch: { status?: TicketStatus; priority?: TicketPriority }) => {
+    if (!detail) return
+    try {
+      setDetail(await adminApi.updateTicket(detail.id, patch))
+      showToast('ok', t('tickets.admin.statusUpdated'))
+      load()
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Save failed')
+    }
+  }
+
+  const statusClass: Record<string, string> = {
+    open: 'bg-amber-400/15 text-amber-300',
+    in_progress: 'bg-blue-400/15 text-blue-300',
+    closed: 'bg-slate-500/15 text-slate-400',
+  }
+  const priorityClass: Record<string, string> = {
+    low: 'bg-slate-500/15 text-slate-400',
+    normal: 'bg-blue-400/15 text-blue-300',
+    urgent: 'bg-down/15 text-down',
+  }
+
+  return (
+    <div>
+      {toast && (
+        <div className={`mb-4 rounded-lg border px-4 py-2.5 text-sm ${
+          toast.kind === 'err' ? 'border-down/40 bg-down/15 text-down' : 'border-up/40 bg-up/15 text-up'
+        }`}>
+          {toast.text}
+        </div>
+      )}
+
+      {detail ? (
+        <div>
+          <button onClick={() => setDetail(null)} className="btn-ghost mb-4 px-3 py-1.5 text-sm">
+            &larr; {t('tickets.backToList')}
+          </button>
+          <div className="glass mb-4 p-5">
+            <h2 className="font-display text-lg font-bold text-slate-100 mb-3">{detail.title}</h2>
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <span className={`tag ${statusClass[detail.status]}`}>{t(`tickets.status.${detail.status}`)}</span>
+              <span className={`tag ${priorityClass[detail.priority]}`}>{t(`tickets.priority.${detail.priority}`)}</span>
+              <span className="tag bg-white/5 text-slate-400">{t(`tickets.category.${detail.category}`)}</span>
+              <span className="ml-auto text-xs text-slate-500">{detail.userEmail}</span>
+            </div>
+            <div className="flex gap-2 mt-3">
+              {(['open', 'in_progress', 'closed'] as TicketStatus[]).map((s) => (
+                <button key={s} onClick={() => updateMeta({ status: s })}
+                  className={`rounded-lg px-3 py-1 text-xs transition ${
+                    detail.status === s ? 'bg-prism-600/20 text-prism-200' : 'bg-white/5 text-slate-500 hover:bg-white/10'
+                  }`}>
+                  {t(`tickets.status.${s}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mb-4">
+            {detail.replies.map((r) => (
+              <div key={r.id} className={`flex ${r.authorRole === 'admin' ? 'justify-start' : 'justify-end'} mb-3`}>
+                <div className={`max-w-[80%] rounded-xl px-4 py-3 ${r.authorRole === 'admin' ? 'bg-prism-600/10' : 'bg-white/5'}`}>
+                  <div className="mb-1 flex items-center gap-2 text-[11px] text-slate-500">
+                    <span className="font-medium text-slate-300">{r.authorEmail}</span>
+                    {r.authorRole === 'admin' && <span className="rounded bg-prism-600/20 px-1.5 py-0.5 text-[10px] text-prism-300">{t('admin.staff')}</span>}
+                    <span>{new Date(r.createdAt).toLocaleString()}</span>
+                  </div>
+                  <p className="whitespace-pre-wrap text-sm text-slate-200">{r.body}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="glass p-4 space-y-3">
+            <div className="flex gap-3">
+              <select className="input w-auto py-1 text-xs" value={replyStatus}
+                onChange={(e) => setReplyStatus(e.target.value as TicketStatus | '')}>
+                <option value="">{t('common.noChange')}</option>
+                {(['open', 'in_progress', 'closed'] as TicketStatus[]).map((s) => (
+                  <option key={s} value={s}>{t(`tickets.status.${s}`)}</option>
+                ))}
+              </select>
+              <select className="input w-auto py-1 text-xs" value={replyPriority}
+                onChange={(e) => setReplyPriority(e.target.value as TicketPriority | '')}>
+                <option value="">{t('common.noChange')}</option>
+                {(['low', 'normal', 'urgent'] as TicketPriority[]).map((p) => (
+                  <option key={p} value={p}>{t(`tickets.priority.${p}`)}</option>
+                ))}
+              </select>
+            </div>
+            <textarea className="input min-h-[80px] w-full resize-y" value={replyText}
+              onChange={(e) => setReplyText(e.target.value)}
+              placeholder={t('tickets.replyPlaceholder')} maxLength={5000} />
+            <button onClick={sendReply}
+              className="btn-primary px-5 py-2 text-sm disabled:opacity-40" disabled={sending || !replyText.trim()}>
+              {sending ? '...' : t('tickets.reply')}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="glass mb-4 flex flex-wrap items-center gap-3 p-4">
+            <select className="input w-auto py-1 text-sm" value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="">{t('tickets.admin.all')}</option>
+              {(['open', 'in_progress', 'closed'] as TicketStatus[]).map((s) => (
+                <option key={s} value={s}>{t(`tickets.status.${s}`)}</option>
+              ))}
+            </select>
+            <select className="input w-auto py-1 text-sm" value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}>
+              <option value="">{t('tickets.admin.all')}</option>
+              {(['account', 'payment', 'technical', 'feature'] as TicketCategory[]).map((c) => (
+                <option key={c} value={c}>{t(`tickets.category.${c}`)}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="glass overflow-x-auto p-0">
+            {loading ? (
+              <div className="flex items-center justify-center py-16">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />
+              </div>
+            ) : tickets.length === 0 ? (
+              <div className="p-8 text-center text-sm text-slate-500">{t('tickets.empty')}</div>
+            ) : (
+              <table className="w-full min-w-[700px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-slate-500">
+                    <th className="px-4 py-3 font-medium">{t('tickets.admin.colTitle')}</th>
+                    <th className="px-4 py-3 font-medium">{t('tickets.admin.colUser')}</th>
+                    <th className="px-4 py-3 font-medium">{t('tickets.admin.colCategory')}</th>
+                    <th className="px-4 py-3 font-medium">{t('tickets.admin.colPriority')}</th>
+                    <th className="px-4 py-3 font-medium">{t('tickets.admin.colStatus')}</th>
+                    <th className="px-4 py-3 font-medium">{t('tickets.admin.colUpdated')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tickets.map((ticket) => (
+                    <tr key={ticket.id} onClick={() => openDetail(ticket.id)}
+                      className="cursor-pointer border-b border-white/5 transition hover:bg-white/[0.03]">
+                      <td className="px-4 py-3">
+                        <div className="max-w-[220px] truncate text-slate-200">{ticket.title}</div>
+                        {ticket.latestReply && (
+                          <div className="mt-0.5 max-w-[220px] truncate text-[11px] text-slate-500">
+                            {ticket.latestReply.authorEmail}: {ticket.latestReply.body}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-400">
+                        {ticket.userEmail || '-'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="tag bg-white/5 text-slate-400">{t(`tickets.category.${ticket.category}`)}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`tag ${priorityClass[ticket.priority]}`}>{t(`tickets.priority.${ticket.priority}`)}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`tag ${statusClass[ticket.status]}`}>{t(`tickets.status.${ticket.status}`)}</span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-500">{new Date(ticket.updatedAt).toLocaleDateString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
 }
 
 export default function AdminPage() {
@@ -788,6 +1031,8 @@ export default function AdminPage() {
 
         </>
       )}
+
+      {tab === 'tickets' && <AdminTicketsPanel />}
 
       {tab === 'users' && (
         <>
