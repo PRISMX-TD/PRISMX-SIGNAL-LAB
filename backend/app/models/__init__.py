@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import relationship
 
 from app.core.database import Base
 
@@ -861,6 +862,9 @@ class Ticket(Base):
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
+    user = relationship("User", backref="tickets")
+    replies = relationship("TicketReply", backref="ticket", order_by="TicketReply.created_at")
+
 
 class TicketReply(Base):
     """工单回复：一条工单下的一组对话，作者可以是提交者或管理员。
@@ -873,3 +877,5 @@ class TicketReply(Base):
     author_id = Column(String, ForeignKey("users.id"), nullable=False)
     body = Column(Text, nullable=False)
     created_at = Column(DateTime, default=_now)
+
+    author = relationship("User", backref="ticket_replies")
