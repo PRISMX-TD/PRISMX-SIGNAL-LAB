@@ -500,3 +500,68 @@ class OrderOut(BaseModel):
     message: str | None = None
     createdAt: datetime
     updatedAt: datetime
+
+
+# ---------- 工单系统 / Ticket System ----------
+
+class TicketCreate(BaseModel):
+    """用户提交新工单 / submit a new ticket."""
+    title: str = Field(min_length=1, max_length=200)
+    category: Literal["account", "payment", "technical", "feature"]
+    priority: Literal["low", "normal", "urgent"] = "normal"
+    body: str = Field(min_length=1, max_length=5000)
+
+
+class TicketReplyCreate(BaseModel):
+    """追加回复 / add a reply."""
+    body: str = Field(min_length=1, max_length=5000)
+    reopen: bool = False  # closed 工单重开 / reopen a closed ticket
+
+
+class TicketReplyOut(BaseModel):
+    """单条回复 / one reply."""
+    id: str
+    authorId: str
+    authorEmail: str
+    authorRole: str  # "user" | "admin"
+    body: str
+    createdAt: datetime
+
+
+class TicketOut(BaseModel):
+    """工单详情（含全部回复）/ ticket detail with all replies."""
+    id: str
+    userId: str
+    userEmail: str
+    title: str
+    category: str
+    priority: str
+    status: str
+    createdAt: datetime
+    updatedAt: datetime
+    replies: list[TicketReplyOut]
+
+
+class TicketListItem(BaseModel):
+    """工单列表项（含最新一条回复预览）/ ticket list row with latest-reply preview."""
+    id: str
+    userEmail: str = ""
+    title: str
+    category: str
+    priority: str
+    status: str
+    updatedAt: datetime
+    latestReply: TicketReplyOut | None = None
+
+
+class AdminTicketUpdate(BaseModel):
+    """管理员修改工单属性 / admin updates ticket properties."""
+    status: Literal["open", "in_progress", "closed"] | None = None
+    priority: Literal["low", "normal", "urgent"] | None = None
+
+
+class AdminTicketReplyCreate(TicketReplyCreate):
+    """管理员回复（可附带改 status/priority）/ admin reply, optionally
+    with status/priority changes."""
+    status: Literal["open", "in_progress", "closed"] | None = None
+    priority: Literal["low", "normal", "urgent"] | None = None
