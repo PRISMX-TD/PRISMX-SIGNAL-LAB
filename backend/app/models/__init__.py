@@ -842,3 +842,34 @@ class PageVisitorDay(Base):
     # No FK: leaving the row after a user is deleted is harmless (it is a dedup
     # marker holding no personal data) and avoids blocking user deletion.
     user_id = Column(String, nullable=False)
+
+
+class Ticket(Base):
+    """工单：用户提交的客服请求。按 category 分类、priority 设优先级，
+    状态 open → in_progress → closed（closed 后用户可重开）。
+    Support ticket: a user-submitted help request, categorized and
+    prioritised, flowing open → in_progress → closed (reopenable by user).
+    """
+    __tablename__ = "tickets"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String, nullable=False)
+    category = Column(String, nullable=False)  # account / payment / technical / feature
+    priority = Column(String, nullable=False, default="normal")  # low / normal / urgent
+    status = Column(String, nullable=False, default="open")  # open / in_progress / closed
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
+class TicketReply(Base):
+    """工单回复：一条工单下的一组对话，作者可以是提交者或管理员。
+    A reply in a ticket thread; author can be the submitter or an admin.
+    """
+    __tablename__ = "ticket_replies"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    ticket_id = Column(String, ForeignKey("tickets.id"), nullable=False, index=True)
+    author_id = Column(String, ForeignKey("users.id"), nullable=False)
+    body = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=_now)
