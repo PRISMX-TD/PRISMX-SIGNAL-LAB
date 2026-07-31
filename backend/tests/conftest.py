@@ -11,6 +11,13 @@ import sys
 os.environ["DATABASE_URL"] = "sqlite:///./test_prismx.db"
 os.environ["ENABLE_MOCK_SIGNAL_ENGINE"] = "false"
 os.environ["ENV"] = "development"
+# 推送测试需要非空的 VAPID 配置：密钥缺失时 dispatch_push 会在调用 webpush 之前
+# 就静默 return，mock 永远不会被触达。值本身不需要是真钥匙——webpush 全程被 mock。
+# Push tests need non-empty VAPID config: with keys missing, dispatch_push
+# returns before ever calling webpush, so the mock is never reached. The values
+# needn't be real keys — webpush is mocked throughout.
+os.environ["VAPID_PRIVATE_KEY_DER"] = "test-private-key-not-real"
+os.environ["VAPID_PUBLIC_KEY"] = "test-public-key-not-real"
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

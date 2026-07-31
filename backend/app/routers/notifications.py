@@ -2,17 +2,19 @@
 Notification router: prefs, indicator categories, push subscriptions, VAPID key."""
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.models import NotificationPref, PushSubscription, Signal, User
 from app.services import quotes_store
 from app.services.deps import get_current_user
 from app.services.plans import can_use_push
-from app.services.push_dispatch import EVENT_TYPES
+from app.services.push_dispatch import EVENT_TYPES, dispatch_test_push
 from app.utils.indicator import indicator_category
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -212,3 +214,69 @@ def vapid_public_key():
     if not settings.VAPID_PUBLIC_KEY:
         raise HTTPException(status_code=500, detail="VAPID public key not configured")
     return {"publicKey": settings.VAPID_PUBLIC_KEY}
+
+
+# ---- 推送诊断 / push diagnostics ----
+
+
+@router.get("/push/status")
+def push_status(
+    endpoint: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """本账号的订阅数，以及传入的 endpoint 是否已在库中。
+
+    供前端诊断面板判断"本设备的订阅是否已上报后端"——这与"本设备浏览器里存在
+    订阅"是两件事：浏览器有订阅但后端没有，说明上报环节断了；两者都有才说明链路
+    通畅。endpoint 省略时该字段返回 False。
+
+    Subscription count for this account plus whether the given endpoint is
+    already registered. Lets the diagnostics panel distinguish "this device's
+    subscription reached the backend" from "this device's browser has a
+    subscription": a browser-side subscription with nothing in the backend means
+    the reporting step broke. Absent endpoint → False.
+    """
+    count = db.query(PushSubscription).filter(PushSubscription.user_id == current_user.id).count()
+    registered = False
+    if endpoint:
+        registered = (
+            db.query(PushSubscription)
+            .filter(
+                PushSubscription.user_id == current_user.id,
+                PushSubscription.endpoint == endpoint,
+            )
+            .first()
+            is not None
+        )
+    return {"count": count, "current_endpoint_registered": registered}
+
+
+# 能触发真实推送，不限流会变成骚扰工具 / can trigger real pushes; unthrottled it becomes a nuisance tool
+@router.post("/push/test")
+@limiter.limit("5/minute")
+async def push_test(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """给本账号的所有设备各发一条测试通知，返回 sent/failed/pruned 计数。
+
+    绕过通知偏好与白名单（链路探针，不是业务通知），但保留订阅等级检查。
+    不因单个订阅失败返回 5xx：一个用户可能同时有桌面 Chrome 与 iPhone 两个订阅，
+    其中一个失效不该让整个诊断动作看起来像"接口挂了"。前端按 failed > 0 提示。
+
+    Send one test notification to every device on this account and return the
+    sent/failed/pruned counts. Bypasses prefs and whitelists (pipeline probe,
+    not a business notification) but keeps the plan check. A single failing
+    subscription does not produce a 5xx: a user may have desktop Chrome and an
+    iPhone, and one dead subscription shouldn't make the whole diagnostic look
+    like a broken endpoint. The frontend surfaces failed > 0.
+    """
+    if not can_use_push(current_user.plan):
+        raise HTTPException(status_code=403, detail="免费版不支持通知推送，请升级解锁 / Free tier doesn't include push notifications; upgrade to unlock")
+    try:
+        return await run_in_threadpool(dispatch_test_push, current_user.id)
+    except RuntimeError as e:
+        if str(e) == "vapid-not-configured":
+            raise HTTPException(status_code=503, detail="服务端未配置推送密钥 / server has no push keys configured")
+        raise

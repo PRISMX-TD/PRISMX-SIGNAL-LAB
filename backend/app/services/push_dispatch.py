@@ -341,3 +341,75 @@ def dispatch_ticket_reply(ticket_id: str, recipient_id: str, replier_email: str)
         logger.exception("[push] dispatch_ticket_reply error (ticket=%s, user=%s)", ticket_id, recipient_id)
     finally:
         db.close()
+
+
+# ---------- 诊断用测试推送 / diagnostic test push ----------
+
+
+def dispatch_test_push(user_id: str) -> dict:
+    """给指定用户的所有订阅各发一条固定内容的测试通知，返回计数。
+
+    与业务推送的区别：完全绕过通知偏好与白名单（enabled、类别、品种一概不看）。
+    这是链路探针——用户点"发送测试通知"就是要验证推送能不能到，不该被他自己的
+    筛选条件挡住。订阅等级检查由路由层负责，不在这里重复。
+
+    同步阻塞网络 IO，调用方必须放在线程池中执行。
+
+    Send one fixed test notification to each of the user's subscriptions and
+    return the counts. Unlike business pushes this bypasses prefs and
+    whitelists entirely (enabled, category, symbol are all ignored): it's a
+    pipeline probe — someone tapping "send test notification" wants to know
+    whether push works at all, not to be filtered out by their own settings.
+    The plan check lives in the route layer, not duplicated here.
+
+    Synchronous blocking network IO — the caller must run it in a thread pool.
+    """
+    pem = settings.vapid_private_key
+    if not pem or not settings.VAPID_PUBLIC_KEY:
+        # 与业务推送的静默 return 不同：这里必须让调用方能区分"服务端没配密钥"
+        # 与"本设备有问题"，两者的用户侧行动完全不同。
+        # Unlike the silent return in business dispatch, the caller must be able
+        # to tell "server has no keys" from "this device is broken" — the user
+        # action differs completely.
+        raise RuntimeError("vapid-not-configured")
+
+    db = SessionLocal()
+    try:
+        subs = db.query(PushSubscription).filter(PushSubscription.user_id == user_id).all()
+        if not subs:
+            return {"sent": 0, "failed": 0, "pruned": 0}
+
+        vapid_claims = {"sub": settings.VAPID_SUBJECT}
+        payload = json.dumps({
+            "title": "测试通知 / Test notification",
+            "body": "推送链路正常。/ Push delivery is working.",
+            "icon": "/icons/icon-192.png",
+            "data": {"url": "/account#notifications"},
+        })
+        push_headers = {"Urgency": "high", "TTL": "60"}
+
+        sent = 0
+        failed = 0
+        stale_ids: list[str] = []
+        for sub in subs:
+            # _webpush_one 内部对 vapid_claims 做 per-subscription 复制，
+            # 继承 aud 复用修复 / _webpush_one copies vapid_claims per
+            # subscription, inheriting the aud-reuse fix.
+            ok, stale = _webpush_one(sub, payload, pem, vapid_claims, push_headers)
+            if ok:
+                sent += 1
+            else:
+                failed += 1
+            if stale:
+                stale_ids.append(sub.id)
+
+        if stale_ids:
+            db.query(PushSubscription).filter(
+                PushSubscription.id.in_(stale_ids)
+            ).delete(synchronize_session=False)
+            db.commit()
+
+        logger.info("[push] test push user=%s sent=%d failed=%d pruned=%d", user_id, sent, failed, len(stale_ids))
+        return {"sent": sent, "failed": failed, "pruned": len(stale_ids)}
+    finally:
+        db.close()
