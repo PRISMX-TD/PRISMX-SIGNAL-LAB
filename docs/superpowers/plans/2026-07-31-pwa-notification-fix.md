@@ -1145,6 +1145,12 @@ GET /notifications/push/status 供前端区分「浏览器有订阅」与
 本任务给此前零覆盖的推送派发补上测试。最重要的是第一项——它钉住一个已在生产发生过的
 bug。
 
+本任务的测试直接调用派发函数、不经 HTTP，因此不涉及路由前缀。（更正：Task 5 原文里的
+接口路径漏了 `/api` 前缀——路由在 `main.py` 以 `prefix=settings.API_PREFIX` 挂载，
+`API_PREFIX = "/api"`，实际路径是 `/api/notifications/push/test` 与
+`/api/notifications/push/status`。Task 5 实施时已修正，前端 Task 7 的 `request()`
+封装自带前缀，无需改动。）
+
 - [ ] **Step 1: 追加 aud 复用回归测试**
 
 在 `backend/tests/test_push_dispatch.py` 末尾追加：
