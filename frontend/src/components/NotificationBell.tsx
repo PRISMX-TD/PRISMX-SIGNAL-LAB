@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
 import { notificationApi } from "../api/client"
-import { pushSupported } from "../utils/push"
+import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
 import { disableNotifications, enableNotifications, ENABLE_ERROR_KEYS, NotifEnableError } from "../utils/notifications"
 import { useBackToClose } from "../utils/useBackToClose"
 
@@ -54,9 +54,11 @@ export default function NotificationBell() {
     return () => document.removeEventListener("mousedown", onClick)
   }, [open])
 
-  const deviceOk =
-    pushSupported() && typeof Notification !== "undefined" && Notification.permission === "granted"
-  const status: Status = !enabled ? "off" : deviceOk ? "on" : "attention"
+  const env = detectPushEnv()
+  const hintKey = PUSH_ENV_HINT_KEYS[env]
+  // hintKey 为 null 即环境完全就绪（granted/ready），无需提示。
+  // A null hintKey means the environment is fully ready (granted/ready).
+  const status: Status = !enabled ? "off" : env === "granted" ? "on" : "attention"
 
   async function handleToggle(on: boolean) {
     setErr(null)
@@ -152,7 +154,7 @@ export default function NotificationBell() {
 
           {status === "attention" && (
             <p className="mt-2 text-xs leading-relaxed text-amber-400">
-              {pushSupported() ? t("account.notifDeviceHint") : t("account.notifUnsupported")}
+              {t(hintKey ?? "account.notifUnsupported")}
             </p>
           )}
           {err && <p className="mt-2 text-xs leading-relaxed text-down">{err}</p>}

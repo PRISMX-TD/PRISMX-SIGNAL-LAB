@@ -4,7 +4,8 @@ import { Link, useLocation } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { userApi, notificationApi, setToken } from "../api/client"
 import { fmtTime, fmtDate, localizeApiError } from "../api/utils"
-import { getSWReg, pushSupported } from "../utils/push"
+import { getSWReg } from "../utils/push"
+import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
 import {
   ALL_SENTINEL,
   EVENT_TYPES,
@@ -48,6 +49,7 @@ export default function AccountPage() {
   const [notifEvents, setNotifEvents] = useState<string[]>([])
   const [notifMsg, setNotifMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
   const [notifLoading, setNotifLoading] = useState(false)
+  const hintKey = PUSH_ENV_HINT_KEYS[detectPushEnv()]
   // 分类/品种/事件偏好防抖落库 / debounce saving category, symbol & event prefs
   const catSaveTimer = useRef<number | undefined>(undefined)
   const symbolSaveTimer = useRef<number | undefined>(undefined)
@@ -459,21 +461,8 @@ export default function AccountPage() {
                   </Link>
                 </p>
               )}
-              {/* 账号级开关已开、但"这台设备"还没法收推送时给出设备级提示——
-                  开关状态跨设备同步，很容易让人误以为手机也已生效。两种情形：
-                  ① 本环境没有 Push API（iOS 未从主屏幕独立打开）；② 有 API
-                  但本设备从未授权过通知权限。
-                  Device-level hint when the account toggle is ON but THIS
-                  device can't receive pushes yet — the toggle syncs across
-                  devices, which easily reads as "the phone works too". Two
-                  cases: ① no Push API here (iOS not launched standalone from
-                  the Home Screen); ② API exists but this device never granted
-                  notification permission. */}
-              {notifEnabled && !pushSupported() && (
-                <p className="text-xs text-amber-400">{t("account.notifUnsupported")}</p>
-              )}
-              {notifEnabled && pushSupported() && Notification.permission !== "granted" && (
-                <p className="text-xs text-amber-400">{t("account.notifDeviceHint")}</p>
+              {notifEnabled && hintKey && (
+                <p className="text-xs text-amber-400">{t(hintKey)}</p>
               )}
               {notifEnabled && (
                 <p className="text-xs leading-relaxed text-slate-500">{t("account.notifFilterHint")}</p>

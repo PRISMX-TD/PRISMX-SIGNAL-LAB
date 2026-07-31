@@ -8,7 +8,7 @@ import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
 import { notificationApi } from "../api/client"
-import { pushSupported } from "../utils/push"
+import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
 import { recordDiag } from "../utils/pushDiag"
 
 const DISMISS_KEY = "prismx_notif_banner_dismissed"
@@ -32,9 +32,20 @@ export default function NotifDeviceBanner() {
     }
   }, [])
 
-  const deviceOk =
-    pushSupported() && typeof Notification !== "undefined" && Notification.permission === "granted"
-  const shouldShow = enabled && !deviceOk
+  const env = detectPushEnv()
+  const hintKey = PUSH_ENV_HINT_KEYS[env]
+
+  // iOS 16.4+ 在 Safari 标签页里的用户根本开不了账号级开关（没有 PushManager，
+  // enableNotifications 会直接抛 unsupported），所以此前"enabled && !deviceOk"
+  // 的条件让最需要引导的这批人永远看不到提示。这一种状态下不看 enabled。
+  // 其余状态维持原条件，避免对从未打算用通知的人无谓打扰。
+  //
+  // Users on iOS 16.4+ in a Safari tab can't turn the account-level toggle on at
+  // all (no PushManager, so enableNotifications throws unsupported), which meant
+  // the previous "enabled && !deviceOk" condition hid the banner from exactly the
+  // people who needed it. That one state ignores `enabled`; the rest keep the
+  // original condition so anyone uninterested in notifications isn't nagged.
+  const shouldShow = env === "ios-needs-install" ? true : enabled && hintKey !== null
 
   if (!shouldShow || dismissed) return null
 
@@ -48,7 +59,7 @@ export default function NotifDeviceBanner() {
       <div className="flex min-w-0 items-center gap-2">
         <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber-400" />
         <span className="leading-relaxed">
-          {pushSupported() ? t("account.notifDeviceHint") : t("account.notifUnsupported")}
+          {t(hintKey ?? "account.notifUnsupported")}
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-2">
