@@ -1,12 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ticketApi } from '../api/client'
-import type { Ticket, TicketCategory, TicketListItem, TicketPriority } from '../api/types'
+import Select from '../components/Select'
+import type { Ticket, TicketCategory, TicketListItem } from '../api/types'
 
 type View = 'list' | 'form' | { ticket: Ticket }
 
 const CATEGORY_OPTIONS: TicketCategory[] = ['account', 'payment', 'technical', 'feature']
-const PRIORITY_OPTIONS: TicketPriority[] = ['low', 'normal', 'urgent']
 
 const statusClass: Record<string, string> = {
   open: 'bg-amber-400/15 text-amber-300',
@@ -52,7 +52,6 @@ export default function SupportPage() {
 
   const [title, setTitle] = useState('')
   const [category, setCategory] = useState<TicketCategory>('technical')
-  const [priority, setPriority] = useState<TicketPriority>('normal')
   const [body, setBody] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -83,7 +82,6 @@ export default function SupportPage() {
       const ticket = await ticketApi.create({
         title: title.trim(),
         category,
-        priority,
         body: body.trim(),
       })
       setView({ ticket })
@@ -138,23 +136,19 @@ export default function SupportPage() {
             <input className="input" value={title} onChange={(e) => setTitle(e.target.value)}
               placeholder={t('tickets.form.titlePlaceholder')} maxLength={200} required />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label">{t('tickets.form.category')}</label>
-              <select className="input" value={category} onChange={(e) => setCategory(e.target.value as TicketCategory)}>
-                {CATEGORY_OPTIONS.map((c) => (
-                  <option key={c} value={c}>{t(`tickets.category.${c}`)}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="label">{t('tickets.form.priority')}</label>
-              <select className="input" value={priority} onChange={(e) => setPriority(e.target.value as TicketPriority)}>
-                {PRIORITY_OPTIONS.map((p) => (
-                  <option key={p} value={p}>{t(`tickets.priority.${p}`)}</option>
-                ))}
-              </select>
-            </div>
+          {/* 分类用自定义下拉：原生 select 的选项列表在深色主题下是白底黑字，见 Select.tsx 的说明。
+              优先级不在此处提供——由管理员在后台按工单内容判定。
+              Category uses the custom dropdown — a native select's option list renders
+              white-on-black in the dark theme, see Select.tsx. Priority isn't offered
+              here; admins set it in the back office based on the ticket's content. */}
+          <div>
+            <label className="label">{t('tickets.form.category')}</label>
+            <Select
+              className="w-full select-lg"
+              value={category}
+              onChange={(v) => setCategory(v as TicketCategory)}
+              options={CATEGORY_OPTIONS.map((c) => ({ value: c, label: t(`tickets.category.${c}`) }))}
+            />
           </div>
           <div>
             <label className="label">{t('tickets.form.content')}</label>

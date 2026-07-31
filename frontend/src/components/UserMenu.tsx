@@ -71,6 +71,9 @@ export default function UserMenu({
           <Link to="/download" onClick={() => setOpen(false)} className={linkClass}>
             {t("nav.download")}
           </Link>
+          <Link to="/support" onClick={() => setOpen(false)} className={linkClass}>
+            {t("nav.support")}
+          </Link>
           {showUpgrade && (
             <Link to="/upgrade" onClick={() => setOpen(false)} className={`${linkClass} text-prism-300`}>
               {t("nav.upgrade")}

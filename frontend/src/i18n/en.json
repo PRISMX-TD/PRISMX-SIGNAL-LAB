@@ -1511,7 +1511,6 @@
       "title": "Title",
       "titlePlaceholder": "Briefly describe your issue",
       "category": "Category",
-      "priority": "Priority",
       "content": "Description",
       "contentPlaceholder": "Describe your issue in detail…",
       "submit": "Submit",

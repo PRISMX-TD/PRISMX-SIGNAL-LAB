@@ -97,6 +97,14 @@ function TabIcon({ name }: { name: string }) {
           <path d="M5 20a7 7 0 0 1 14 0" />
         </svg>
       )
+    case 'support':
+      return (
+        <svg className={c} viewBox="0 0 24 24" {...p}>
+          <path d="M21 12a9 9 0 1 0-3.6 7.2L21 21l-1.2-3.6" />
+          <path d="M9.5 9.2a2.6 2.6 0 1 1 3.6 2.4c-.7.3-1.1 1-1.1 1.7v.3" />
+          <path d="M12 17h.01" />
+        </svg>
+      )
     case 'strategies':
       return (
         <svg className={c} viewBox="0 0 24 24" {...p}>
@@ -275,6 +283,7 @@ export default function Layout() {
     { to: '/bind', icon: 'bind', label: t('nav.bind') },
     { to: '/account', icon: 'account', label: t('nav.account') },
     { to: '/download', icon: 'download', label: t('nav.download') },
+    { to: '/support', icon: 'support', label: t('nav.support') },
     ...(user?.plan !== 'PRO' ? [{ to: '/upgrade', icon: 'upgrade', label: t('nav.upgrade') }] : []),
     // 自定义策略：已对全体登录用户开放，见 App.tsx 路由处的说明；PRO 门槛在
     // 页面内/后端接口层生效，导航入口不再需要管理员身份。

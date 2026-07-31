@@ -503,7 +503,9 @@ export const notificationApi = {
 export const ticketApi = {
   list: () => request<TicketListItem[]>('/tickets'),
   get: (id: string) => request<Ticket>(`/tickets/${encodeURIComponent(id)}`),
-  create: (payload: { title: string; category: TicketCategory; priority: TicketPriority; body: string }) =>
+  // 用户不设优先级：后端默认 normal，之后由管理员在后台判定。
+  // Users don't set priority: the backend defaults to normal and admins triage it later.
+  create: (payload: { title: string; category: TicketCategory; body: string }) =>
     request<Ticket>('/tickets', { method: 'POST', body: JSON.stringify(payload) }),
   reply: (id: string, body: string, reopen = false) =>
     request<Ticket>(`/tickets/${encodeURIComponent(id)}/reply`, {

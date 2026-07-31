@@ -1511,7 +1511,6 @@
       "title": "标题",
       "titlePlaceholder": "简要描述你的问题",
       "category": "分类",
-      "priority": "优先级",
       "content": "详细描述",
       "contentPlaceholder": "请尽量详细描述你遇到的问题…",
       "submit": "提交",
