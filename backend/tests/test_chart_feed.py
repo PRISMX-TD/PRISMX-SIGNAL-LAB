@@ -41,6 +41,7 @@ from app.core.config import settings
 from app.models import Candle
 from app.routers import chart as chart_module
 from app.routers.chart import FUTURE_SKEW_CORRECTION_THRESHOLD_SECONDS, _correct_future_skew
+from tests.conftest import trading_session_epoch
 
 M1_SECONDS = 60
 
@@ -267,6 +268,11 @@ def test_large_interval_tolerates_its_own_full_bar_duration_of_drift():
 # ---------- /api/feed/candles 端到端:纠正后的时间戳才是落库的时间戳 ----------
 # ---------- End-to-end: the corrected timestamp is what actually lands in the DB ----------
 def test_future_skewed_bars_are_corrected_before_persisting(client, db, monkeypatch):
+    # 用 BTCUSD:纠偏后的时间戳落在"真实现在"附近,若在周末跑就会撞上
+    # candle_store 的周末闸门,被它拦掉而验不到纠偏本身。BTCUSD 7x24 豁免闸门。
+    # BTCUSD: the corrected timestamps land near the real "now", which on a weekend
+    # run collides with candle_store's weekend gate — the gate would reject them and
+    # the skew correction under test would never be observed. BTCUSD is exempt.
     monkeypatch.setattr(settings, "EA_TOKEN", "test-ea-token")
     now = _now()
     skew_seconds = 11 * 3600
@@ -277,11 +283,11 @@ def test_future_skewed_bars_are_corrected_before_persisting(client, db, monkeypa
     res = client.post(
         "/api/feed/candles",
         headers={"X-EA-Token": "test-ea-token"},
-        json={"mode": "tick", "series": [{"symbol": "XAUUSD", "interval": "1", "bars": bars}]},
+        json={"mode": "tick", "series": [{"symbol": "BTCUSD", "interval": "1", "bars": bars}]},
     )
     assert res.status_code == 200
 
-    rows = db.query(Candle).filter(Candle.symbol == "XAUUSD", Candle.interval == "1").all()
+    rows = db.query(Candle).filter(Candle.symbol == "BTCUSD", Candle.interval == "1").all()
     assert len(rows) == 1
     # 落库的那根是"较早"的一根(比另一根早 60 秒;那一根仍在形成中,还没收盘),
     # 它的 t 应该已经被纠正到贴近真实"现在减 60 秒",而不是原始的、超前 11
@@ -306,6 +312,9 @@ def test_repeated_tick_requests_for_same_forming_bar_do_not_spam_new_rows(client
     produce a different timestamp each time). Directly reproduces the real
     "chart spawns a new candle every second" scenario.
     """
+    # 同上,用 BTCUSD 隔开 candle_store 的周末闸门,让断言只考验纠偏的稳定性。
+    # As above, BTCUSD keeps candle_store's weekend gate out of the picture so the
+    # assertion only exercises the stability of the correction.
     monkeypatch.setattr(settings, "EA_TOKEN", "test-ea-token")
     skew_seconds = 11 * 3600
     base_now = _now()
@@ -320,11 +329,11 @@ def test_repeated_tick_requests_for_same_forming_bar_do_not_spam_new_rows(client
         res = client.post(
             "/api/feed/candles",
             headers={"X-EA-Token": "test-ea-token"},
-            json={"mode": "tick", "series": [{"symbol": "XAUUSD", "interval": "1", "bars": bars}]},
+            json={"mode": "tick", "series": [{"symbol": "BTCUSD", "interval": "1", "bars": bars}]},
         )
         assert res.status_code == 200
 
-    rows = db.query(Candle).filter(Candle.symbol == "XAUUSD", Candle.interval == "1").all()
+    rows = db.query(Candle).filter(Candle.symbol == "BTCUSD", Candle.interval == "1").all()
     # 5 次请求里,只有那根"已收盘"的 bar 该被插入,且只插入一次(去重);仍在
     # 形成中的那根全程不该落库。
     # Across the 5 requests, only the already-closed bar should ever be
@@ -587,3 +596,141 @@ def test_chart_history_limit_can_exceed_the_old_500_bar_cap(client, db, auth_hea
 def test_chart_history_rejects_an_unknown_interval(client, auth_headers):
     res = client.get("/api/chart/history?symbol=XAUUSD&interval=30", headers=auth_headers)
     assert res.status_code == 400
+
+
+# ---------- 休市闸门必须同时作用于数据库与内存缓存 ----------
+# ---------- The closure gates must cover the cache as well as the database ----------
+def test_stalled_bars_are_kept_out_of_the_memory_cache_too(client, db, monkeypatch):
+    """回归测试:被闸门拦掉的伪造 bar 不能出现在 /chart/latest。
+
+    这个漏洞真实存在过:入口处 chart_store.replace_series()/merge_bars() 拿的是**未过滤
+    的原始 bars**,而 persist_closed_bars() 拿的是过滤后的。结果休市期间的冻结 K 线被正确
+    地挡在数据库之外,却照样进了内存缓存,并通过 GET /chart/latest 显示成前端图表最右侧那
+    根"实时"蜡烛——库里干净、用户看到的还是假数据。
+
+    同一份数据经过两套判断就必然出现这种分裂,所以过滤统一收敛到
+    candle_store.filter_tradeable_bars(),两条出口共用它的结果。
+
+    Regression test: bars the gates reject must not surface via /chart/latest.
+
+    This hole was real: the ingest path passed the **raw, unfiltered** bars to
+    chart_store.replace_series()/merge_bars() while persist_closed_bars() received the
+    filtered ones. Frozen candles from a closure were correctly kept out of the database
+    yet still entered the cache and appeared as the live rightmost candle on the
+    frontend chart — clean database, fake data on screen.
+
+    One dataset judged by two code paths inevitably splits like this, so filtering is
+    centralised in candle_store.filter_tradeable_bars() and both outlets share its result.
+    """
+    monkeypatch.setattr(settings, "EA_TOKEN", "test-ea-token")
+    step = 300  # 5 分钟 / 5-minute bars
+    # 基准放在交易时段内,避免周末跑测试时被周末闸门(而不是被测的停滞闸门)拦掉,
+    # 那样测试会因为错误的原因通过。/ Anchor inside a session so a weekend run isn't
+    # rejected by the weekend gate instead of the stall gate under test — that would
+    # make the test pass for the wrong reason.
+    end_t = trading_session_epoch() - 86400
+    start_t = end_t - 20 * step
+
+    # 先送一段真实行情建立缓存基线(价格每根都在动)。
+    # First send genuine moving prices to establish the cache baseline.
+    real = [
+        {"t": start_t + i * step, "o": 100 + i, "h": 101 + i, "l": 99 + i, "c": 100 + i, "v": 10}
+        for i in range(10)
+    ]
+    assert client.post(
+        "/api/feed/candles",
+        headers={"X-EA-Token": "test-ea-token"},
+        json={"mode": "backfill", "series": [{"symbol": "XAUUSD", "interval": "5", "bars": real}]},
+    ).status_code == 200
+
+    cached = chart_module.chart_store.get_history("XAUUSD", "5", 100)
+    assert cached, "真实行情应当进入缓存 / genuine bars should populate the cache"
+    frozen_close = cached[-1]["c"]
+
+    # 再送一段冻结报价:收盘价完全不动,但每根的 h/l/v 都不同,所以重放判定认不出来,
+    # 只有停滞闸门能拦。/ Now send a frozen quote: the close never moves while h/l/v
+    # differ per bar, so the replay check can't spot it — only the stall gate can.
+    frozen_start = start_t + 10 * step
+    frozen = [
+        {
+            "t": frozen_start + i * step,
+            "o": frozen_close, "h": frozen_close + 0.5 + i * 0.01,
+            "l": frozen_close - 0.5 - i * 0.01, "c": frozen_close, "v": 5 + i,
+        }
+        for i in range(10)
+    ]
+    assert client.post(
+        "/api/feed/candles",
+        headers={"X-EA-Token": "test-ea-token"},
+        json={"mode": "tick", "series": [{"symbol": "XAUUSD", "interval": "5", "bars": frozen}]},
+    ).status_code == 200
+
+    stored_ts = {
+        r.t for r in db.query(Candle).filter(Candle.symbol == "XAUUSD", Candle.interval == "5").all()
+    }
+    cached_ts = {b["t"] for b in chart_module.chart_store.get_history("XAUUSD", "5", 500)}
+
+    # 阈值之内的前几根冻结 bar 会被放行(休市刚发生时与清淡行情无法区分),阈值之后的
+    # 必须两边都拦住。关键断言是"缓存不能比数据库更宽松"。
+    # The first few frozen bars within the threshold pass (indistinguishable from a thin
+    # session at the moment a closure starts); everything past it must be blocked in both
+    # places. The key assertion is that the cache is never more permissive than the DB.
+    blocked = {b["t"] for b in frozen if b["t"] not in stored_ts}
+    assert blocked, "停滞闸门应当拦下尾段 / the stall gate should reject the tail"
+    assert not (blocked & cached_ts), (
+        "被数据库拒收的 bar 仍然出现在内存缓存里,会经 /chart/latest 显示给用户 / "
+        "bars rejected by the database are still in the cache and would reach the user"
+    )
+
+
+def test_the_still_forming_bar_still_reaches_the_live_chart(client, db, monkeypatch):
+    """把闸门接到缓存上之后,仍在形成中的那根必须照样进缓存。
+
+    这是上面那个修复的反向约束:数据库只收已收盘的 bar,但图表最右侧那根跳动的蜡烛
+    正是未收盘的那根(GET /chart/latest 取的就是它)。如果缓存也套用"只收已收盘"的
+    规则,日线图上"今天"会整根消失、分钟图永远慢一个周期——用修一个 bug 的方式引入
+    另一个 bug。故 filter_tradeable_bars(include_forming=True) 只放宽收盘判定,休市
+    闸门照旧。
+
+    The reverse constraint on the fix above: the database takes only closed bars, but the
+    live rightmost candle *is* the unclosed one (served by GET /chart/latest). Applying
+    the closed-only rule to the cache too would make "today" vanish from a daily chart
+    and leave minute charts an interval behind — fixing one bug by introducing another.
+    Hence include_forming=True relaxes only the closed test, leaving the closure gates on.
+    """
+    monkeypatch.setattr(settings, "EA_TOKEN", "test-ea-token")
+    step = 300
+    # 必须用真实的"现在"才能造出一根真正仍在形成中的 bar,而真实现在在周末跑测试时
+    # 落在休市窗口内 —— 所以用 BTCUSD:它 7x24 交易,豁免周末闸门,于是这个用例无论
+    # 周几跑都在验"形成中的 bar 能进缓存"这一件事,不会被周末闸门干扰。
+    # A genuinely still-forming bar requires the real "now", which on a weekend run sits
+    # inside the closed window — so use BTCUSD: it trades 7x24 and is exempt from the
+    # weekend gate, keeping this case about the forming bar on any day of the week.
+    symbol = "BTCUSD"
+    now = int(_now())
+    aligned = now - (now % step)
+    bars = [
+        {"t": aligned - (4 - i) * step, "o": 100 + i, "h": 101 + i, "l": 99 + i, "c": 100 + i, "v": 10}
+        for i in range(5)
+    ]
+    forming_t = bars[-1]["t"]
+    assert forming_t + step > now, "最后一根必须确实未收盘 / the last bar must really be unclosed"
+
+    assert client.post(
+        "/api/feed/candles",
+        headers={"X-EA-Token": "test-ea-token"},
+        json={"mode": "backfill", "series": [{"symbol": symbol, "interval": "5", "bars": bars}]},
+    ).status_code == 200
+
+    cached_ts = {b["t"] for b in chart_module.chart_store.get_history(symbol, "5", 500)}
+    stored_ts = {
+        r.t for r in db.query(Candle).filter(Candle.symbol == symbol, Candle.interval == "5").all()
+    }
+    assert forming_t in cached_ts, (
+        "仍在形成中的那根没进缓存,图表最右侧的实时蜡烛会消失 / "
+        "the still-forming bar never reached the cache; the live candle would disappear"
+    )
+    assert forming_t not in stored_ts, (
+        "未收盘的 bar 不该落库,否则回测会把没走完的一根当成事实 / "
+        "an unclosed bar must not persist, or backtests treat a partial bar as fact"
+    )

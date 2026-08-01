@@ -21,6 +21,11 @@ from app.routers import strategies as strategies_router
 from app.services.strategy import live as strategy_live
 from app.services.strategy import presets
 from app.services.strategy.conditions import validate_conditions
+# 造 K 线的时间基准必须落在交易时段内,否则周末跑会被 candle_store 的周末闸门拦掉。
+# 理由见 conftest.trading_session_now()。
+# Candle timestamps must sit inside a trading session or candle_store's weekend
+# gate rejects them on weekend runs; see conftest.trading_session_now().
+from tests.conftest import trading_session_epoch
 
 
 @pytest.fixture(autouse=True)
@@ -479,8 +484,17 @@ def test_new_closed_candle_triggers_enabled_strategy_and_fires_personal_signal(c
     # holds on that final bar (a flat series has close equal to the MA, not
     # strictly above). Bars are 60s apart, and the last bar's close time is
     # exactly "now minus 60s" — just closed.
-    closes = [100.0] * 10 + [100.0, 170.0]
-    now = int(datetime.now(timezone.utc).timestamp())
+    # 前 11 根用 ±0.05 的微幅震荡而不是一条直线:完全同价会被"价格停滞即休市"闸门当成
+    # 休市数据丢掉(见 candle_store._stalled_tail_length()),库里剩不下足够的历史,最后
+    # 那根跳涨就无从求值。震荡幅度远小于跳涨,收盘价仍不会严格高于 SMA5,原来的意图不变。
+    #
+    # The first 11 closes oscillate by ±0.05 instead of being identical: an exactly flat
+    # run is dropped by the stall gate (see candle_store._stalled_tail_length()), leaving
+    # too little history for the final jump to be evaluated against. The oscillation is
+    # far smaller than the jump, so close still never sits strictly above the SMA5 and the
+    # original intent holds.
+    closes = [100.0 + (0.05 if i % 2 else -0.05) for i in range(11)] + [170.0]
+    now = trading_session_epoch()
     n = len(closes)
     bars = [{"t": now - (n - i) * 60, "o": c, "h": c, "l": c, "c": c, "v": 1} for i, c in enumerate(closes)]
 
@@ -531,7 +545,7 @@ def test_one_trade_at_a_time_blocks_new_signal_until_previous_resolves(client, d
     db.add(StrategyWatch(strategy_id=strat.id, symbol="XAUUSD", interval="1"))
     db.commit()
 
-    now = int(datetime.now(timezone.utc).timestamp())
+    now = trading_session_epoch()
 
     def _feed(t_offset, c, h=None, l=None):
         bar = {"t": now - t_offset, "o": c, "h": h if h is not None else c, "l": l if l is not None else c, "c": c, "v": 1}
@@ -549,6 +563,15 @@ def test_one_trade_at_a_time_blocks_new_signal_until_previous_resolves(client, d
     # ahead of bar1; this step uses the real (unstubbed) evaluation — a flat
     # series never puts close strictly above the MA, so it won't fire
     # unexpectedly.
+    #
+    # 这 5 根保持全平:根数刚好少于"价格停滞即休市"的阈值(见
+    # candle_store.STALLED_CLOSE_BARS),所以能全部入库;而走平又是这里不触发信号所依赖
+    # 的前提,不能改成上行。后面 _feed() 送的 bar 才需要让价格动起来。
+    #
+    # These 5 stay flat: the count is just under the stall threshold (see
+    # candle_store.STALLED_CLOSE_BARS) so they all persist, and flatness is what keeps
+    # this step from firing, so it can't become an ascending series. It's the bars fed
+    # via _feed() below that need the price to move.
     warmup = [{"t": now - 240 - (5 - i) * 60, "o": 100, "h": 100, "l": 100, "c": 100, "v": 1} for i in range(5)]
     res = client.post(
         "/api/feed/candles",
@@ -573,22 +596,31 @@ def test_one_trade_at_a_time_blocks_new_signal_until_previous_resolves(client, d
         lambda bars, rules, memo=None: [None] * (len(bars) - 1) + ["BUY"],
     )
 
-    # bar1: 没有正在跟踪的仓位,正常开仓 entry=100 → sl=99, tp=102
-    # bar1: nothing pending yet, fires normally — entry=100 → sl=99, tp=102
-    _feed(240, 100)
+    # bar1: 没有正在跟踪的仓位,正常开仓 entry=101 → sl=99.99, tp=103.02
+    # entry 取 101 而不是 100:垫的那 5 根都是 100,再来一根 100 就凑满了停滞阈值,bar1 会
+    # 被当成休市数据丢掉(见 candle_store._stalled_tail_length())。改成 101 让价格动起来,
+    # 后面的止损止盈价按 1%/RR=2 同比例平移。
+    # bar1: nothing pending yet, fires normally — entry=101 → sl=99.99, tp=103.02
+    # 101 rather than 100: the 5 warmup bars are all at 100, so one more would complete the
+    # stall threshold and bar1 would be dropped as closed-market data (see
+    # candle_store._stalled_tail_length()). 101 keeps the price moving; the SL/TP levels
+    # below shift with it at 1% / RR=2.
+    _feed(240, 101)
     db.expire_all()
     sigs = db.query(StrategySignal).filter(StrategySignal.user_id == user.id).all()
     assert len(sigs) == 1
     assert sigs[0].result == "PENDING"
 
-    # bar2: 价格仍在 [99, 102] 区间内,上一笔还没平仓 → 门槛拦下,不开新仓
-    # bar2: price still inside [99, 102], previous trade still open — gated, no new signal
-    _feed(180, 100)
+    # bar2: 价格仍在 [99.99, 103.02] 区间内,上一笔还没平仓 → 门槛拦下,不开新仓
+    # 与 bar1 取不同的价格,同样是为了不触发停滞判定。
+    # bar2: price still inside [99.99, 103.02], previous trade still open — gated, no new
+    # signal. A different price from bar1, again to avoid tripping the stall check.
+    _feed(180, 101.5)
     db.expire_all()
     assert db.query(StrategySignal).filter(StrategySignal.user_id == user.id).count() == 1
 
-    # bar3: 摸到止盈(104>=102) → 上一笔就地判定为 HIT_TP,但这一根本身不开新仓
-    # bar3: touches TP (104>=102) — resolves the previous trade as HIT_TP, but this bar itself still doesn't open a new one
+    # bar3: 摸到止盈(104>=103.02) → 上一笔就地判定为 HIT_TP,但这一根本身不开新仓
+    # bar3: touches TP (104>=103.02) — resolves the previous trade as HIT_TP, but this bar itself still doesn't open a new one
     _feed(120, 104, h=104, l=104)
     db.expire_all()
     sigs = db.query(StrategySignal).filter(StrategySignal.user_id == user.id).order_by(StrategySignal.created_at.asc()).all()
@@ -625,7 +657,17 @@ def test_one_trade_at_a_time_off_fires_every_bar(client, db, auth_headers, user,
     db.add(StrategyWatch(strategy_id=strat.id, symbol="XAUUSD", interval="1"))
     db.commit()
 
-    now = int(datetime.now(timezone.utc).timestamp())
+    now = trading_session_epoch()
+    # 垫的这 5 根保持全平:走平既保证这一步不会触发信号(收盘价不高于均线),根数又刚好
+    # 少于"价格停滞即休市"的阈值(见 candle_store.STALLED_CLOSE_BARS),所以能全部入库。
+    # 真正需要改的是后面那 3 根:它们原先也是同价,接在这 5 根后面会把停滞游程推过阈值,
+    # 于是一根都进不了库,断言就从"验一单一次"变成了"库里没数据"。
+    #
+    # These 5 warmup bars stay flat: flat keeps this step from firing (close is not above
+    # the MA) and 5 is just under the stall threshold (see candle_store.STALLED_CLOSE_BARS),
+    # so they all persist. The bars that needed changing are the 3 below: at the same price
+    # they extended the stalled run past the threshold, so none of them landed and the
+    # assertion stopped testing the one-trade rule and started testing an empty table.
     warmup = [{"t": now - 240 - (5 - i) * 60, "o": 100, "h": 100, "l": 100, "c": 100, "v": 1} for i in range(5)]
     res = client.post(
         "/api/feed/candles",
@@ -641,8 +683,10 @@ def test_one_trade_at_a_time_off_fires_every_bar(client, db, auth_headers, user,
         lambda bars, rules, memo=None: [None] * (len(bars) - 1) + ["BUY"],
     )
 
-    for offset in (180, 120, 60):
-        bar = {"t": now - offset, "o": 100, "h": 100, "l": 100, "c": 100, "v": 1}
+    for n, offset in enumerate((180, 120, 60)):
+        price = 102.0 + n * 0.7
+        bar = {"t": now - offset, "o": price, "h": price + 0.2, "l": price - 0.2,
+               "c": price, "v": 1}
         res = client.post(
             "/api/feed/candles",
             headers={"X-EA-Token": "test-ea-token"},
@@ -673,7 +717,7 @@ def test_disabled_strategy_never_fires(client, db, auth_headers, user, monkeypat
     db.commit()
 
     closes = [100.0] * 10 + [100.0, 170.0]
-    now = int(datetime.now(timezone.utc).timestamp())
+    now = trading_session_epoch()
     n = len(closes)
     bars = [{"t": now - (n - i) * 60, "o": c, "h": c, "l": c, "c": c, "v": 1} for i, c in enumerate(closes)]
 

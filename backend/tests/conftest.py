@@ -32,6 +32,52 @@ from app.main import app
 from app.models import MT5Account, Order, Signal, User
 
 
+def trading_session_now() -> datetime:
+    """返回一个落在外汇交易时段内的"现在",供需要造 K 线的测试用作时间基准。
+
+    candle_store.persist_closed_bars() 会拒收落在周末休市窗口(周五 21:00 UTC 至
+    周日 21:00 UTC)内的非加密品种 bar。任何用 datetime.now() 造 XAUUSD/EURUSD 等
+    K 线的测试,在周末跑就会因为数据根本没入库而失败,平时跑却是绿的——测试结果取决
+    于跑测试的那一天。更糟的是断言"不产生信号"那类测试会在周末因为错误的原因而通过
+    (数据被闸门拦掉,而不是被测逻辑判断为不该出信号),掩盖真实回归。
+
+    这里在周末把基准平移到最近的周五 12:00 UTC(伦敦/纽约重叠时段正中,离两侧边界
+    都有余量);工作日直接返回真实当前时间,保持与真实时钟一致。
+
+    A "now" that lands inside an FX trading session, for tests that build candles.
+
+    candle_store.persist_closed_bars() rejects non-crypto bars stamped inside the
+    weekend close (Friday 21:00 UTC to Sunday 21:00 UTC). Any test building
+    XAUUSD/EURUSD candles from datetime.now() fails on a weekend run — because the
+    data never persists — yet passes on weekdays, making the outcome depend on the
+    day it runs. Worse, tests asserting "no signal is produced" would pass on
+    weekends for the wrong reason (the gate dropped the data, rather than the logic
+    under test deciding against a signal), masking real regressions.
+
+    On weekends this shifts the anchor to the most recent Friday 12:00 UTC (mid
+    London/New York overlap, clear of both boundaries); on weekdays it returns the
+    real current time so it stays aligned with the actual clock.
+    """
+    now = datetime.now(timezone.utc)
+    weekday = now.weekday()
+    if weekday == 5:  # 周六 / Saturday
+        days_back = 1
+    elif weekday == 6:  # 周日 / Sunday
+        days_back = 2
+    elif weekday == 4 and now.hour >= 21:  # 周五收盘后 / Friday after the close
+        days_back = 0
+    else:
+        return now
+    return (now - timedelta(days=days_back)).replace(
+        hour=12, minute=0, second=0, microsecond=0
+    )
+
+
+def trading_session_epoch() -> int:
+    """trading_session_now() 的 epoch 秒版本 / epoch-seconds form of the above."""
+    return int(trading_session_now().timestamp())
+
+
 @pytest.fixture()
 def db():
     """每个测试用干净的表 / fresh tables per test."""

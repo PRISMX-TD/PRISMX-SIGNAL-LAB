@@ -314,11 +314,47 @@ async def feed_candles(
                 "host machine's clock if this persists)",
                 symbol, s.interval, skew / 3600, int(skew),
             )
+        # 内存缓存与数据库必须写同一份已过滤的数据。
+        #
+        # 这里以前直接写未过滤的 bars,于是休市期间的伪造 K 线被闸门正确地拦在数据库
+        # 之外,却照样进了内存缓存,并通过 GET /chart/latest 出现在前端图表最右侧那根
+        # 跳动的蜡烛上——同一份数据经过两套判断,库里干净、界面上还是假的。
+        #
+        # 缓存这条路要 include_forming=True 保留仍在形成中的那根:它正是图表最右侧那根
+        # 跳动的蜡烛(GET /chart/latest 取的就是它)。若跟着数据库一起把未收盘的过滤掉,
+        # 日线图上"今天"会整根消失、分钟图永远慢一个周期。休市闸门对这根照常生效,所以
+        # 保留它不会让伪造蜡烛漏出去。数据库那条路不能带它——库里只存已收盘的 bar。
+        #
+        # The cache and the database must be written from the same filtered data.
+        #
+        # This previously wrote the raw, unfiltered bars, so fabricated candles during
+        # a closure were correctly kept out of the database yet still entered the cache
+        # and surfaced via GET /chart/latest as the live rightmost candle — one dataset
+        # judged by two code paths, leaving the database clean and the UI still wrong.
+        #
+        # The cache path passes include_forming=True to keep the still-forming bar: it is
+        # the live rightmost candle (exactly what GET /chart/latest serves). Filtering it
+        # out alongside the database would make "today" vanish from a daily chart and
+        # leave minute charts an interval behind. The closure gates still apply to it, so
+        # keeping it leaks no fabricated candle. The database path must not include it —
+        # only closed bars belong in storage.
+        cacheable = candle_store.filter_tradeable_bars(
+            db, symbol, s.interval, bars, include_forming=True,
+        )
+        tradeable = candle_store.filter_tradeable_bars(db, symbol, s.interval, bars)
         if req.mode == "backfill":
-            chart_store.replace_series(symbol, s.interval, bars)
+            # backfill 是整段替换。过滤后为空时不能替换:那会把缓存里原有的真实历史
+            # 清空,前端图表直接空白。保留旧数据、等下一批有效数据再替换。
+            # backfill replaces the whole series. Don't replace when the filtered result
+            # is empty: that would wipe the genuine history already cached and blank the
+            # chart. Keep the old data and wait for the next valid batch.
+            if cacheable:
+                chart_store.replace_series(symbol, s.interval, cacheable)
         else:
-            chart_store.merge_bars(symbol, s.interval, bars)
-        new_count = candle_store.persist_closed_bars(db, symbol, s.interval, bars)
+            chart_store.merge_bars(symbol, s.interval, cacheable)
+        new_count = candle_store.persist_closed_bars(
+            db, symbol, s.interval, bars, prefiltered=tradeable,
+        )
         if new_count:
             # 策略评估是同步 SQLAlchemy + 纯 Python 指标循环：留在事件循环里会
             # 拖住 WebSocket 推送与桥接轮询（生产 2 核单进程）。推送部分本身是

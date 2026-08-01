@@ -32,6 +32,83 @@ INTERVAL_SECONDS: dict[str, int] = {
     "D": 24 * 60 * 60,
 }
 
+# 7x24 交易、周末照常有真实行情的品种,不受下面的周末闸门约束。
+# 判定用"是否以 BTC/ETH 等加密货币计价单位开头"会随新品种上线漏判,所以用显式集合:
+# 漏掉一个加密品种只是让它的周末数据被拦(可发现、可修),而错把外汇放进来会让伪造
+# 数据重新流进库里(难发现)。宁可保守。
+# Symbols that genuinely trade 7x24 and have real weekend data, exempt from the
+# weekend gate below. An explicit set rather than a "starts with BTC/ETH" rule,
+# which would silently miss newly listed pairs: omitting a crypto symbol merely
+# blocks its weekend data (visible and fixable), whereas wrongly admitting an FX
+# pair lets fabricated bars back in (hard to notice). Prefer the conservative side.
+WEEKEND_TRADING_SYMBOLS: frozenset[str] = frozenset({"BTCUSD", "ETHUSD"})
+
+# 周末休市窗口(UTC):周五 21:00 收盘,周日 21:00 开盘。
+#
+# 为什么用固定的 UTC 边界,而不是券商/MT5 的服务器时区:MT5 服务器时区本身是
+# GMT+2(冬令时)/GMT+3(夏令时),会随夏令时切换,把它硬编码进来会在换季那周判错。
+# 而"周末休市"这件事的物理边界是全球统一的——纽约周五收盘、悉尼周日开盘,对应
+# 21:00 UTC 前后,不随任何券商的时区设置改变。喂价端时钟偏差也不影响:时间戳在
+# routers/chart.py 的 _correct_future_skew() 里已经纠正成对齐服务器的标准 UTC 秒,
+# 到这一层拿到的就是可直接比较的 UTC。
+#
+# 边界各留一小时余量(收盘用 21:00、开盘用 21:00),覆盖不同券商 20:55–22:05 的
+# 细微差异和夏令时那一小时;代价是周五收盘前/周日开盘后最边缘的一小段真实 bar
+# 可能被拦掉。这个取舍是刻意的:少存几根边缘 bar 对回测无实质影响,而放进来一段
+# 伪造行情会污染指标、凭空造出信号。
+#
+# Weekend close window (UTC): Friday 21:00 to Sunday 21:00.
+#
+# Fixed UTC bounds rather than the broker's/MT5's server timezone: that timezone
+# is itself GMT+2 (winter) / GMT+3 (summer) and shifts with DST, so hardcoding it
+# would misjudge the changeover week. The physical boundary of "the weekend" is
+# globally fixed — New York closes Friday, Sydney opens Sunday, both around 21:00
+# UTC — independent of any broker's timezone setting. Feed clock skew doesn't
+# matter either: timestamps are already corrected to server-aligned UTC seconds by
+# _correct_future_skew() in routers/chart.py, so what arrives here is directly
+# comparable UTC.
+#
+# An hour of margin on each side absorbs the 20:55–22:05 spread across brokers and
+# the DST hour. The cost is that the most marginal real bars right before the
+# Friday close or right after the Sunday open may be dropped. That trade-off is
+# deliberate: a few missing edge bars don't meaningfully affect backtests, whereas
+# admitting a stretch of fabricated data corrupts indicators and fabricates signals.
+_FRIDAY = 4
+_SATURDAY = 5
+_SUNDAY = 6
+WEEKEND_CLOSE_HOUR_UTC = 21  # 周五这个钟点起休市 / market shut from this hour on Friday
+WEEKEND_OPEN_HOUR_UTC = 21   # 周日这个钟点起开盘 / market open from this hour on Sunday
+
+
+def _is_market_closed(t: float, symbol: str) -> bool:
+    """判断时间戳 t(标准 UTC 秒)是否落在该品种的休市窗口内。
+
+    只判周末,不判节假日:节假日表要按年、按品种、按券商维护,猜错会拦掉真实行情;
+    而周末边界是固定的、可验证的。节假日期间的重放由 _is_replayed_duplicate() 那
+    一层兜住——两层各管一段,互不依赖。
+
+    Whether timestamp t (standard UTC seconds) falls in this symbol's closed
+    window.
+
+    Weekends only, no holiday calendar: holidays would need per-year, per-symbol,
+    per-broker upkeep and a wrong guess drops real bars, whereas the weekend
+    boundary is fixed and verifiable. Replays during holidays are caught by the
+    _is_replayed_duplicate() layer instead — the two layers cover different ground
+    and don't depend on each other.
+    """
+    if symbol.upper() in WEEKEND_TRADING_SYMBOLS:
+        return False
+    moment = datetime.fromtimestamp(t, timezone.utc)
+    weekday = moment.weekday()
+    if weekday == _SATURDAY:
+        return True
+    if weekday == _FRIDAY:
+        return moment.hour >= WEEKEND_CLOSE_HOUR_UTC
+    if weekday == _SUNDAY:
+        return moment.hour < WEEKEND_OPEN_HOUR_UTC
+    return False
+
+
 # 每天扫一次即可,K 线不是分秒必争的时效数据 / once a day is plenty; candles aren't latency-sensitive
 RETENTION_SWEEP_INTERVAL_SECONDS = 24 * 60 * 60
 
@@ -43,38 +120,295 @@ RETENTION_SWEEP_INTERVAL_SECONDS = 24 * 60 * 60
 RETENTION_SWEEP_STARTUP_DELAY_SECONDS = 30
 
 
-# 判定"重放副本"时,拿新 bar 与最近这么多根已存 bar 比对。休市期间喂价端会在
-# 少数几个模板之间来回重放(实测是收盘前最后两根轮流出现),取 8 根足以覆盖,同时
-# 不会大到让正常行情里的偶然重合有机会被误判。
-# When detecting replayed duplicates, compare each new bar against this many
-# recent stored bars. During a close the feed cycles through a handful of
-# templates (observed: the last two real bars alternating), so 8 is ample cover
-# while staying small enough that coincidental matches in live data stay
-# implausible.
-REPLAY_LOOKBACK_BARS = 8
+# 判定"重放副本"时,拿新 bar 与最近这么长时间内的已存 bar 比对。
+#
+# 早先这里是"最近 8 根"的滑动窗口,已被生产数据证伪:休市期间喂价端不只在两三个
+# 模板之间交替,还会把**整段行情原样平移**——实测把 04:00–06:00 那 24 根 5 分钟线
+# 搬到 06:00–08:00,每一根的原件都在 24 根之前。滑动窗口每接受一根就把它推进基线、
+# 挤掉最老的一根,原件早被挤出去了,于是整段一根都拦不住。把窗口调大不是办法:已
+# 验证放宽到 32 根会开始误判 4 小时线上跨越数月的偶然重合。
+#
+# 改成按时间跨度取基线。选 26 小时的依据:重放的原件一定来自"收盘前的真实行情",
+# 而收盘时刻与当前时刻的距离在周末最长也就一天出头(周五收盘到周日重放的高峰),
+# 26 小时能覆盖到收盘前那一段,又不会长到把几天前的行情拉进来比。
+# 与"整段平移"正交:平移的偏移量是小时级(实测 2 小时),原件必然还在这个跨度内。
+#
+# Baseline for replay detection is now a time span, not a bar count.
+#
+# The previous "last 8 bars" sliding window was disproved by production data:
+# while the market is closed the feed doesn't only alternate between a couple of
+# templates, it also **replays whole stretches verbatim** — observed shifting the
+# 24 five-minute bars of 04:00–06:00 onto 06:00–08:00, putting every original 24
+# bars back. A sliding window pushes each accepted bar onto the baseline and
+# evicts the oldest, so the originals were long gone and not one of them was
+# caught. Enlarging the window isn't the fix: widening to 32 was verified to
+# start misjudging coincidental matches months apart on the 4-hour series.
+#
+# 26 hours is chosen because a replay's original always comes from the real
+# session before the close, and the distance from that close is at most a bit
+# over a day (Friday close through the peak of weekend replaying). It reaches
+# back past the close without dragging in days-old prices. This is orthogonal to
+# the whole-stretch shifting: those offsets are hours (2h observed), so the
+# original stays well inside the span.
+#
+# 26 小时只够覆盖普通周末。节假日连休(圣诞、元旦,或市场突然放假)会把休市拉长到
+# 两三天甚至更久,那时重放的原件落在 26 小时之外,判定会和当初的滑动窗口一样整段
+# 失效——已用 12 月场景实测确认:周三收盘、周五重放,间隔 48 小时,24 根副本里 23
+# 根被照单全收。
+#
+# 但不能简单把常量调到 100 小时:跨度越长,基线里塞进的历史行情越多,4 小时线上
+# 跨越数日的偶然重合就会开始被误判成副本(把窗口从 8 根放宽到 32 根时已经观察到
+# 这个失效模式)。所以按周期分档:短周期(1/5/15 分钟)一天就有几百根,靠"根数"就足
+# 以区分真伪,跨度可以给得很长而不担心误判;长周期(240 分钟、日线)本身根数稀少,
+# 跨度必须收紧,否则会拿几周前的行情来比。
+#
+# 26 hours only covers an ordinary weekend. Holiday closures (Christmas, New
+# Year, or a market that suddenly shuts) stretch the gap to two or three days or
+# more, putting the replay's original outside the span — at which point the check
+# fails wholesale exactly as the old sliding window did. Verified against a
+# December scenario: a Wednesday close replayed on Friday, 48 hours apart, had 23
+# of 24 copies accepted.
+#
+# Simply raising the constant to ~100 hours isn't safe either: a longer span pulls
+# more history into the baseline, and coincidental matches days apart on the
+# 4-hour series start being misjudged as copies (the same failure mode observed
+# when widening the window from 8 to 32 bars). So the span is tiered by interval:
+# short intervals (1/5/15m) have hundreds of bars per day, so sheer bar count
+# distinguishes real from fake and the span can be generous; long intervals (240m,
+# daily) are inherently sparse and need a tighter span or they'd be compared
+# against weeks-old prices.
+REPLAY_LOOKBACK_SECONDS = 26 * 60 * 60
 
-# OHLC 比较用的容差。价格是 Float 列,经过 JSON 与 float 往返后同一个报价可能有
-# 末位误差,精确相等会漏判;黄金报两位小数,1e-6 远小于最小价位变动,不会把两个
-# 真正不同的价格看成同一个。
-# Tolerance for OHLC comparison. Prices are Float columns and a JSON/float round
-# trip can leave last-bit error, so exact equality would miss matches; gold
-# quotes to two decimals, and 1e-6 is far below the minimum tick, so two
-# genuinely different prices can never compare equal.
-_PRICE_EPSILON = 1e-6
+# 按周期定制的基线跨度。未列出的周期回落到 REPLAY_LOOKBACK_SECONDS。
+#
+# 短周期给到 5 天:足以覆盖"周五收盘 → 下周三还在重放"这种极端长假,而 1 分钟线 5
+# 天也就 7200 根,量化到小数第六位的五字段全等在真实行情里几乎不可能碰巧发生。
+# 240 分钟线维持 26 小时不变:它一天只有 6 根,跨度放长最容易误伤——之前正是在这个
+# 周期上验证出跨月偶然重合的误判。日线同理保持最短。
+#
+# Per-interval baseline spans; intervals not listed fall back to the constant.
+#
+# Short intervals get 5 days: enough for "Friday close still being replayed the
+# following Wednesday", and 5 days of M1 is only ~7200 bars, where an exact
+# five-field match quantised to six decimals essentially cannot occur by chance in
+# real data. The 4-hour series stays at 26 hours: with only 6 bars a day it's the
+# most vulnerable to a long span — it's the very series on which months-apart
+# coincidental matches were observed. Daily stays tight for the same reason.
+REPLAY_LOOKBACK_SECONDS_BY_INTERVAL: dict[str, int] = {
+    "1": 5 * 24 * 60 * 60,
+    "5": 5 * 24 * 60 * 60,
+    "15": 5 * 24 * 60 * 60,
+    "60": 3 * 24 * 60 * 60,
+    "240": 26 * 60 * 60,
+    "D": 26 * 60 * 60,
+}
+
+# 基线的行数上限,纯粹是防御性的内存/查询开销上限,不参与判定语义。
+#
+# 这个上限必须大于最长跨度实际会取到的行数,否则它会**悄悄**变成真正的窗口:查询按
+# 时间倒序取,一旦被截断,跨度里最早的那些行(正是长假重放要比对的原件)会被丢掉,
+# 判定退化成"最近 N 根"——也就是最初那个已被生产证伪的失效模式,而且没有任何报错。
+# 1 分钟线 5 天 = 7200 根,给到 12000 留出余量。
+#
+# A defensive cap on baseline rows (memory/query cost only, no semantic role).
+#
+# It must exceed the row count the longest span actually reaches, or it silently
+# becomes the real window: the query orders by time descending, so truncation drops
+# the oldest rows in the span — precisely the originals a holiday replay needs to
+# be compared against — degenerating the check into "last N bars", the very failure
+# mode production already disproved, with no error to show for it. Five days of M1
+# is 7200 bars, so 12000 leaves headroom.
+REPLAY_BASELINE_MAX_ROWS = 12000
+
+# OHLC 比较的精度:价格量化到小数第几位算"同一个报价"。价格是 Float 列,经过 JSON
+# 与 float 往返后同一个报价可能有末位误差,精确相等会漏判;而外汇报五位小数,量化到
+# 第六位远细于最小价位变动,不会把两个真正不同的价格合并成一个。
+# 判定实现见 _replay_key():量化后进 set 做哈希查找,不再逐根比浮点差值。
+# Precision for OHLC matching: the decimal place at which two prices count as the
+# same quote. Prices are Float columns and a JSON/float round trip can leave
+# last-bit error, so exact equality would miss matches; FX quotes to five
+# decimals, and rounding at the sixth is far finer than the minimum tick, so two
+# genuinely different prices are never merged.
+# See _replay_key() for the implementation: quantised keys go into a set for hash
+# lookup rather than per-bar float-difference comparisons.
+_PRICE_DECIMALS = 6
 
 
-def _is_replayed_duplicate(bar: dict, recent: list[dict]) -> bool:
+def _replay_key(bar: dict) -> tuple:
+    """把一根 bar 的 OHLCV 压成可哈希的指纹,用于 O(1) 判重。
+
+    价格量化到 _PRICE_DECIMALS 位小数:黄金报两位小数、外汇五位,量化到第六位不会把
+    两个真正不同的报价合并,也能吸收 JSON/float 往返的末位误差。
+    原来逐根线性比对在基线只有 8 根时无所谓,改成按时间跨度取基线后可达上千根(短
+    周期放宽到 5 天后上限是 12000 根),一批又有几十根,再线性扫就是几十万次浮点比较;
+    指纹入 set 后判定与基线大小无关——这也是能把跨度放宽到覆盖长假的前提。
+
+    Collapses a bar's OHLCV into a hashable fingerprint for O(1) matching.
+
+    Prices are quantised to _PRICE_DECIMALS: gold quotes to 2 decimals and FX to
+    5, so rounding at the 6th never merges two genuinely different quotes, while
+    still absorbing JSON/float round-trip error. The previous per-bar linear scan
+    was fine against an 8-row baseline, but with a 26-hour span the baseline
+    reaches thousands of rows and a batch carries dozens — a linear scan would
+    mean tens of thousands of float comparisons. With fingerprints in a set the
+    check no longer depends on baseline size.
+    """
+    return (
+        round(bar["o"], _PRICE_DECIMALS),
+        round(bar["h"], _PRICE_DECIMALS),
+        round(bar["l"], _PRICE_DECIMALS),
+        round(bar["c"], _PRICE_DECIMALS),
+        bar.get("v", 0),
+    )
+
+
+# "价格停滞"判定:连续这么多根 bar 的收盘价完全不变,就认为该品种已经休市。
+#
+# 为什么需要这条:节假日、以及"突如其来"的临时休市(券商单方面停某个品种、突发事件
+# 导致市场关闭)都不在任何固定日历里,按日期判一定会漏。而所有休市场景有一个共同的、
+# 可直接观测的特征——真实成交停止后,报价不再变化。判这个特征不需要知道"今天是什么
+# 节日",也不需要按年维护任何表,新品种上线、券商换规则都自动适用。
+#
+# 阈值取 6 根的依据:真实行情里连续 6 根收盘价完全相同(量化到小数第六位)需要极低的
+# 流动性,在主要品种上不会发生;而只要 6 根就能在休市后很快收敛,不至于放进去太多。
+# 取太小(比如 2~3 根)会误伤亚洲时段的清淡盘,那时确实可能连续两三根几乎不动。
+#
+# 与另外两道闸门正交:周末闸门按固定日期判、重放判定要求与历史某根全等,而这条只看
+# "价格有没有在动",既不需要日历也不要求副本与历史重合——EA 若生成全新的、缓慢漂移
+# 的伪造数据,前两道都拦不住,这条能拦住其中最常见的一类(报价冻结)。
+#
+# Stall detection: this many consecutive bars with an unchanged close means the
+# symbol's market is treated as shut.
+#
+# Why this is needed: holidays and *sudden* closures (a broker unilaterally halting
+# a symbol, an event shutting the market) appear in no fixed calendar, so any
+# date-based rule will miss them. Every closure does share one directly observable
+# trait, though — once real trading stops, the quote stops changing. Detecting that
+# requires no knowledge of which holiday it is and no yearly upkeep, and it applies
+# automatically to newly listed symbols and changed broker rules.
+#
+# The threshold of 6 comes from real data needing extraordinarily thin liquidity to
+# print 6 consecutive identical closes (quantised to six decimals), which doesn't
+# happen on major symbols, while still converging quickly after a close. A smaller
+# value (2–3) would misfire during quiet Asian hours, where two or three nearly
+# static bars genuinely occur.
+#
+# Orthogonal to the other two gates: the weekend gate judges by fixed dates and the
+# replay check demands an exact match against history, whereas this one only asks
+# whether the price is moving — no calendar, no need for the copy to coincide with
+# history. If the EA produced wholly novel, slowly drifting fabrications the first
+# two would miss them; this catches the most common such class (a frozen quote).
+STALLED_CLOSE_BARS = 6
+
+
+def _stalled_tail_length(bars: list[dict], previous_closes: list[float]) -> int:
+    """返回这批 bar 末尾有多少根处于"价格停滞"状态,应当作休市数据丢弃。
+
+    丢的是**尾段**而不是头段:停滞一旦确认,从确认那根起往后全部是休市数据。头几根
+    (凑够阈值之前的那些)反而必须放行,原因见下面循环处的注释。
+
+    previous_closes 是库里已存的、紧邻这批之前的收盘价(时间升序)。必须带上它:休市
+    后的第一批 bar 自身可能只有两三根,单看批内凑不满阈值,要接上库里那段才能判出
+    "已经连续 N 根不动了"。
+
+    完全平坦的 bar(h == l)不豁免:这里判的正是"价格不动",而平坦恰恰是休市冻结报价
+    最典型的形态——_is_replayed_duplicate() 豁免平坦 bar 是因为它没有可被复制的内部
+    结构、无法作为"副本"的证据,与这里的判据无关,两者不冲突。
+
+    How many bars at the end of this batch are stalled and should be dropped as
+    closed-market data.
+
+    The **tail** is dropped, not the head: once a stall is confirmed, that bar and
+    everything after it is closed-market data. The leading bars (those before the
+    threshold is reached) must instead be let through; see the comment at the loop.
+
+    previous_closes are the stored closes immediately preceding this batch (ascending
+    order). They're required because the first batch after a close may itself hold
+    only two or three bars — too few to reach the threshold on their own — and needs
+    the stored tail to establish that the price has been static for N bars.
+
+    Perfectly flat bars (h == l) are not exempt here: a static price is exactly what
+    this checks, and flatness is the classic shape of a frozen quote.
+    _is_replayed_duplicate() exempts flat bars because they carry no copyable
+    internal structure and so can't evidence a *copy* — a different question, so the
+    two rules don't conflict.
+    """
+    if not bars:
+        return 0
+    # 用与重放判定相同的量化精度,避免 JSON/float 往返的末位误差被当成"价格在动"。
+    # Same quantisation as the replay check, so JSON/float round-trip error in the
+    # last bit isn't mistaken for the price moving.
+    prior = [round(c, _PRICE_DECIMALS) for c in previous_closes]
+    batch = [round(b["c"], _PRICE_DECIMALS) for b in bars]
+
+    # 把库里那段和本批接成一条连续序列,索引 offset 之后才是本批。这样"连续多少根不
+    # 动"就是一次普通的游程统计,不必区分"来自库里"还是"来自批内"。
+    # Splice the stored tail onto the batch as one continuous series, with the batch
+    # starting at index `offset`. The "how many consecutive static bars" question is
+    # then a plain run-length count, with no need to distinguish stored from batch.
+    series = prior + batch
+    offset = len(prior)
+
+    # 从批次第一根往后走,累计"当前价格已经连续多少根没变"。
+    #
+    # 达到阈值之后的每一根都判为休市数据。阈值之内的前几根**必须放行**:休市刚发生的
+    # 那一刻,"价格连续 3 根没动"与"亚洲时段清淡盘"在数据上无法区分,此时丢弃就会误伤
+    # 真实行情。代价是每次休市会漏进阈值-1 根冻结 bar,这是这个判据的固有下限——它换来
+    # 的是不需要任何日历、对突发休市同样有效。剩下那几根若与历史全等,还有重放判定兜。
+    #
+    # Walk forward from the batch's first bar, tracking how many consecutive bars the
+    # current price has held.
+    #
+    # Every bar past the threshold is judged closed-market data. The first few within
+    # the threshold **must be let through**: at the moment a closure begins, "the price
+    # hasn't moved for 3 bars" is indistinguishable from a thin Asian session, and
+    # dropping then would discard real data. The cost is that each closure admits
+    # threshold-1 frozen bars — the inherent floor of this approach, in exchange for
+    # needing no calendar and working on unscheduled closures. Any of those remaining
+    # bars that exactly match history are still caught by the replay check.
+    run = 1
+    for i in range(1, offset + len(batch)):
+        run = run + 1 if series[i] == series[i - 1] else 1
+        if i < offset:
+            continue
+        if run >= STALLED_CLOSE_BARS:
+            # 一旦确认停滞,这一根及其之后全部丢弃。不再检查是否"恢复波动":冻结价格之后
+            # 若又开始变动,那是喂价端在伪造行情,而不是市场重开——市场重开会先有真实成交,
+            # 表现为价格跳变,而跳变后的那批 bar 会以新批次进来,届时游程从 1 重新起算,
+            # 自然放行。
+            # Once a stall is confirmed, this bar and everything after it is dropped. No
+            # check for "movement resumed": a price that starts varying after a freeze is
+            # the feed fabricating data, not the market reopening — a genuine reopen
+            # begins with real trades, i.e. a price jump, and those bars arrive in a later
+            # batch where the run restarts at 1 and passes naturally.
+            return len(batch) - (i - offset)
+    return 0
+
+
+def _is_replayed_duplicate(bar: dict, recent: set[tuple]) -> bool:
     """判断一根 bar 是不是喂价端重放的旧 bar 副本(休市期间的伪造 K 线)。
 
     休市之后 EA 仍然连着 MT5、仍然按周期推 bar,但推的不是冻结报价,而是把收盘前
-    最后几根真实 bar 的 **o/h/l/c/v 五个字段整根复制**,只换上新的时间戳,在两三
-    个模板之间来回交替。实测(XAUUSD/15,2026-07-24 周五收盘后):
+    真实 bar 的 **o/h/l/c/v 五个字段整根复制**,只换上新的时间戳。实测有两种形态:
+
+    形态一,少数模板来回交替(XAUUSD/15,2026-07-24 周五收盘后):
 
         20:30 o=4053.36 h=4055.70 l=4051.30 c=4055.12 v=1002   ← 真实
         20:45 o=4055.12 h=4055.77 l=4051.82 c=4052.66 v=795    ← 真实
         21:00 o=4055.12 h=4055.77 l=4051.82 c=4052.66 v=795    ← 20:45 的副本
         22:45 o=4053.36 h=4055.70 l=4051.30 c=4055.12 v=1002   ← 20:30 的副本
         (一直交替到周一开盘)
+
+    形态二,整段行情原样平移(XAUUSD/5,2026-08-01 周六),偏移固定 2 小时:
+
+        06:00 = 04:00 的副本
+        06:05 = 04:05 的副本
+        ...   (连续 24 根,一根不差)
+        07:55 = 05:55 的副本
+
+    形态二是"最近 8 根"滑动窗口失效的原因——每根的原件都在 24 根之前,而窗口每
+    接受一根就挤掉最老的一根,原件早已不在基线里。所以基线按时间跨度取
+    (REPLAY_LOOKBACK_SECONDS),不按根数。
 
     这些 bar 时间上确实"已收盘",能通过收盘判定,但它们不是行情。落库后:
       ① 回测图上休市段被一长串来回重复的蜡烛填满(两个模板一涨一跌,于是呈现为
@@ -137,30 +471,57 @@ def _is_replayed_duplicate(bar: dict, recent: list[dict]) -> bool:
     """
     if bar["h"] == bar["l"]:
         return False
-    for prev in recent:
-        if (
-            abs(bar["o"] - prev["o"]) < _PRICE_EPSILON
-            and abs(bar["h"] - prev["h"]) < _PRICE_EPSILON
-            and abs(bar["l"] - prev["l"]) < _PRICE_EPSILON
-            and abs(bar["c"] - prev["c"]) < _PRICE_EPSILON
-            and bar.get("v", 0) == prev.get("v", 0)
-        ):
-            return True
-    return False
+    return _replay_key(bar) in recent
 
 
-def persist_closed_bars(db, symbol: str, interval: str, bars: list[dict]) -> int:
-    """把 `bars` 里已经走完的部分写入数据库,已存在的(symbol, interval, t)跳过。
+def filter_tradeable_bars(
+    db, symbol: str, interval: str, bars: list[dict],
+    include_forming: bool = False,
+) -> list[dict]:
+    """把 `bars` 过成"确实是真实交易时段产生的"那一部分,按时间升序返回。
 
-    Persist the closed subset of `bars`; rows already present for
-    (symbol, interval, t) are skipped.
+    三道休市闸门都在这里:周末窗口(按时间)、价格停滞(按行为)、重放副本(按内容)。
+    persist_closed_bars() 拿它的结果写库;routers/chart.py 拿它的结果更新内存缓存,
+    两条路径因此看到完全一致的过滤结果。
 
-    返回本次新写入的行数(纯观测用,调用方可忽略)。
-    Returns the number of newly-inserted rows (for observability; callers may ignore it).
+    **闸门必须集中在这一个函数里**,不能让调用方各自过滤。之前内存缓存那条路就是
+    直接用了未过滤的原始 bars,结果库里被正确拦掉的伪造 K 线照样出现在前端图表上
+    ——同一份数据经过两套不同的判断,是这类漏洞的根源。任何新增的数据出口都应该
+    调这个函数,而不是自己重写判断。
+
+    `include_forming=True` 时保留最后那根仍在形成中的 bar(其余闸门照常生效)。内存
+    缓存要用这个:图表最右侧那根跳动的蜡烛正是它,全过滤掉的话日线图上"今天"会整根
+    消失、分钟图的最新一根永远慢一个周期。数据库不能用——库里只存已收盘的 bar,存进
+    未收盘的会让回测把一根没走完的 bar 当成事实。
+    注意:休市判定仍然照常作用于这根,所以休市期间它依然会被拦掉,不会漏出伪造蜡烛。
+
+    Filter `bars` down to those genuinely produced by a live session, in ascending
+    time order.
+
+    With `include_forming=True` the final still-forming bar is kept (all other gates
+    still apply). The in-memory cache needs this: that bar *is* the live rightmost
+    candle, and dropping it would make "today" vanish from a daily chart and leave
+    minute charts permanently one interval behind. The database must not use it —
+    it stores only closed bars, and persisting an unfinished one would let backtests
+    treat a partial bar as fact.
+    Note the closure gates still apply to this bar, so during a closure it is still
+    rejected and no fabricated candle leaks through.
+
+    All three closure gates live here: the weekend window (by time), the stalled
+    price (by behaviour) and replayed copies (by content). persist_closed_bars()
+    writes the result to the database and routers/chart.py feeds the same result
+    into the in-memory cache, so both paths see identical filtering.
+
+    **The gates must stay centralised in this one function** rather than being
+    reapplied by each caller. The in-memory cache path previously used the raw,
+    unfiltered bars, so fabricated candles correctly rejected from the database
+    still reached the frontend chart — one dataset judged by two different code
+    paths is the root of that class of bug. Any new data outlet should call this
+    function instead of reimplementing the checks.
     """
     seconds = INTERVAL_SECONDS.get(interval)
     if seconds is None or not bars:
-        return 0
+        return []
     now = datetime.now(timezone.utc).timestamp()
     # 一根 bar 满足下面任一条件就算"已收盘"：
     # ① 绝对时钟判定——bar 的收盘时刻早于等于服务器当前时间(常规情况下这条
@@ -190,7 +551,13 @@ def persist_closed_bars(db, symbol: str, interval: str, bars: list[dict]) -> int
     # this. ① would stay permanently false in that case; ② doesn't depend on
     # either side's absolute clock, so it's immune to this class of skew.
     latest_t = max(b["t"] for b in bars)
-    closed = [b for b in bars if b["t"] + seconds <= now or b["t"] < latest_t]
+    # include_forming 只放宽"是否收盘"这一条,后面三道休市闸门对它一视同仁。
+    # include_forming relaxes only the closed-or-not test; the three closure gates
+    # below still apply to it exactly as they do to every other bar.
+    closed = [
+        b for b in bars
+        if include_forming or b["t"] + seconds <= now or b["t"] < latest_t
+    ]
 
     if not closed:
         # 有了②(相对判定)之后,这条分支只在批次里连"更晚的邻居"都找不到时才
@@ -209,12 +576,117 @@ def persist_closed_bars(db, symbol: str, interval: str, bars: list[dict]) -> int
         # days before anyone noticed; this WARNING surfaces it immediately.
         latest_gap_hours = (max(b["t"] for b in bars) - now) / 3600
         logger.warning(
-            "persist_closed_bars: %s/%s got %d bar(s) but none are closed yet "
+            "filter_tradeable_bars: %s/%s got %d bar(s) but none are closed yet "
             "(latest bar is %.1fh ahead of server time; positive means the feed's "
             "clock is running fast — check the EA/feeder's time source if this recurs)",
             symbol, interval, len(bars), latest_gap_hours,
         )
-        return 0
+        return []
+
+    # 第一道闸门:周末休市期间的 bar 一律不收(BTCUSD 等 7x24 品种豁免)。
+    #
+    # 这一层与下面的重放判定是**两道独立的闸门**,故意都保留:
+    #   · 周末闸门按时间判定,不看内容。哪怕 EA 推来的是全新的、不重复任何历史的
+    #     伪造数据,只要落在休市窗口内就拦住。这是"周末绝对不该有数据"这条业务
+    #     事实的直接表达,不依赖对伪造手法的任何假设。
+    #   · 重放判定按内容判定,不看时间。它覆盖周末之外的场景:节假日休市、EA 断线
+    #     重连后重放缓存、盘中喂价异常。
+    # 单靠重放判定不够——它的前提是"副本必须与某根真实 bar 完全相同",而这是关于
+    # 伪造手法的假设,生产上已经被推翻过一次(整段平移穿过了滑动窗口)。周末闸门不
+    # 做这种假设,所以放在前面。
+    #
+    # First gate: reject bars stamped inside the weekend close (7x24 symbols like
+    # BTCUSD are exempt).
+    #
+    # This and the replay check below are **two independent gates**, both kept on
+    # purpose:
+    #   · The weekend gate judges by time, ignoring content. Even wholly novel
+    #     fabricated data that duplicates nothing is rejected if it lands in the
+    #     closed window. It states the business fact "there is no weekend data"
+    #     directly, without assuming anything about how the fabrication looks.
+    #   · The replay check judges by content, ignoring time. It covers what the
+    #     weekend gate can't: holiday closures, a reconnecting EA flushing its
+    #     cache, mid-session feed glitches.
+    # The replay check alone isn't enough — it presumes a copy matches some real
+    # bar exactly, an assumption about the fabrication's shape that production has
+    # already falsified once (whole-stretch shifting slipped past the sliding
+    # window). The weekend gate makes no such assumption, so it goes first.
+    in_session = [b for b in closed if not _is_market_closed(b["t"], symbol)]
+    closed_market_count = len(closed) - len(in_session)
+    if closed_market_count:
+        # 周末拦下数据是预期行为,记 info 而非 warning:每个周末都会出现,升到
+        # warning 会让真正的异常被噪音埋掉(这个模块已经吃过一次这种亏)。
+        # Rejecting weekend bars is expected, so info rather than warning: it
+        # happens every weekend and escalating would bury genuine anomalies in
+        # noise (a lesson this module has already learned once).
+        logger.info(
+            "filter_tradeable_bars: %s/%s rejected %d bar(s) stamped inside the "
+            "weekend close (market shut; only 7x24 symbols may report then)",
+            symbol, interval, closed_market_count,
+        )
+    closed = in_session
+    if not closed:
+        return []
+
+    # 第二道闸门:价格停滞即视为休市,丢掉这批末尾连续不动的那一段。
+    #
+    # 这道专门补节假日和"突如其来"的临时休市——它们不在任何固定日历里,周末闸门按日期
+    # 判必然漏掉。判据是所有休市共有的、可直接观测的特征:报价不再变化。理由与阈值取
+    # 值见 _stalled_tail_length() 与 STALLED_CLOSE_BARS。
+    #
+    # 需要库里紧邻这批之前的收盘价:休市后第一批可能只有两三根,单看批内凑不满阈值。
+    # 多取几根(阈值的两倍)是因为游程可能跨过批次边界继续往前延伸。
+    #
+    # Second gate: a static price means the market is shut, so drop the stalled run at
+    # the tail of this batch.
+    #
+    # This covers holidays and *sudden* closures, which appear in no fixed calendar and
+    # which the date-based weekend gate necessarily misses. The signal is the one trait
+    # every closure shares and that can be observed directly: the quote stops moving.
+    # See _stalled_tail_length() and STALLED_CLOSE_BARS for the reasoning.
+    #
+    # The stored closes immediately preceding this batch are needed because the first
+    # batch after a close may hold only two or three bars, too few to reach the
+    # threshold alone. Twice the threshold is fetched since the run can extend back
+    # past the batch boundary.
+    #
+    # 必须显式按时间排序:停滞判定要沿时间轴数游程,丢弃的也是"末尾"那一段,两者都以升序
+    # 为前提。而这批 bar 的顺序完全取决于喂价端怎么发,上游没有任何地方排过序——顺序若乱,
+    # 判定不会报错,只会静静地算错,这正是这个模块反复吃过亏的那类失败。
+    #
+    # Sorting is explicit and required: the stall check counts a run along the time axis
+    # and drops the *tail*, both of which assume ascending order. The batch's order is
+    # whatever the feed sent, and nothing upstream sorts it — out-of-order input wouldn't
+    # raise, it would quietly compute the wrong answer, the very failure class this module
+    # has been bitten by repeatedly.
+    closed.sort(key=lambda b: b["t"])
+    earliest_t = min(b["t"] for b in closed)
+    previous_closes = [
+        r[0]
+        for r in db.query(Candle.c)
+        .filter(
+            Candle.symbol == symbol,
+            Candle.interval == interval,
+            Candle.t < earliest_t,
+        )
+        .order_by(Candle.t.desc())
+        .limit(STALLED_CLOSE_BARS * 2)
+        .all()
+    ][::-1]  # 查询是倒序,反转回时间升序 / query is descending; restore ascending order
+    stalled_count = _stalled_tail_length(closed, previous_closes)
+    if stalled_count:
+        # 与周末闸门同理记 info:节假日休市是预期行为,不是故障。
+        # info for the same reason as the weekend gate: a holiday closure is expected
+        # behaviour, not a fault.
+        logger.info(
+            "filter_tradeable_bars: %s/%s rejected %d bar(s) with a stalled price "
+            "(close unchanged for %d+ bars, indicating the market is shut — "
+            "holiday or unscheduled closure)",
+            symbol, interval, stalled_count, STALLED_CLOSE_BARS,
+        )
+        closed = closed[:-stalled_count]
+        if not closed:
+            return []
 
     # 休市期间喂价端重放的旧 bar 副本在这里丢掉,理由见 _is_replayed_duplicate()。
     #
@@ -258,14 +730,30 @@ def persist_closed_bars(db, symbol: str, interval: str, bars: list[dict]) -> int
     # quietly" bug (that real incident went unnoticed for three days).
     # Steady-state counts go to debug, escalating to info only when the whole
     # batch is a replay, so weekends don't flood the logs.
-    baseline = [
-        {"o": r[0], "h": r[1], "l": r[2], "c": r[3], "v": r[4]}
+    #
+    # 时间下界以"这批里最早那根"为锚往前推,而不是以服务器当前时间往前推:backfill
+    # 可能送来几天前的历史,按当前时间取基线的话那批 bar 的原件根本不在基线里,判定
+    # 会对整批失效。以批次自身的时间为锚,补历史和实时推送都成立。
+    #
+    # The lower bound is measured back from the earliest bar in this batch, not
+    # from the server's current time: a backfill can carry history from days ago,
+    # and anchoring on "now" would leave those bars' originals outside the
+    # baseline entirely, making the check useless for that batch. Anchoring on the
+    # batch's own time works for both backfill and live pushes.
+    lookback = REPLAY_LOOKBACK_SECONDS_BY_INTERVAL.get(interval, REPLAY_LOOKBACK_SECONDS)
+    baseline_floor = min(b["t"] for b in closed) - lookback
+    baseline = {
+        _replay_key({"o": r[0], "h": r[1], "l": r[2], "c": r[3], "v": r[4]})
         for r in db.query(Candle.o, Candle.h, Candle.l, Candle.c, Candle.v)
-        .filter(Candle.symbol == symbol, Candle.interval == interval)
+        .filter(
+            Candle.symbol == symbol,
+            Candle.interval == interval,
+            Candle.t >= baseline_floor,
+        )
         .order_by(Candle.t.desc())
-        .limit(REPLAY_LOOKBACK_BARS)
+        .limit(REPLAY_BASELINE_MAX_ROWS)
         .all()
-    ]
+    }
     accepted: list[dict] = []
     replay_count = 0
     for b in closed:
@@ -273,16 +761,48 @@ def persist_closed_bars(db, symbol: str, interval: str, bars: list[dict]) -> int
             replay_count += 1
             continue
         accepted.append(b)
-        baseline = [b, *baseline][:REPLAY_LOOKBACK_BARS]
+        # 平坦 bar(h == l)豁免判定,不该进基线,否则会把后续真实的平盘行情误判成副本。
+        # Flat bars (h == l) are exempt from the check and must stay out of the
+        # baseline, or later genuine flat bars would be misjudged as copies.
+        if b["h"] != b["l"]:
+            baseline.add(_replay_key(b))
     if replay_count:
         logger.log(
             logging.INFO if not accepted else logging.DEBUG,
-            "persist_closed_bars: %s/%s skipped %d replayed bar(s) (OHLCV identical "
+            "filter_tradeable_bars: %s/%s skipped %d replayed bar(s) (OHLCV identical "
             "to a recent bar — expected while the market is closed; if this appears "
             "during a live session, check the feed)",
             symbol, interval, replay_count,
         )
-    closed = accepted
+    return accepted
+
+
+def persist_closed_bars(
+    db, symbol: str, interval: str, bars: list[dict],
+    prefiltered: list[dict] | None = None,
+) -> int:
+    """把 `bars` 里通过休市闸门的部分写入数据库,已存在的(symbol, interval, t)跳过。
+
+    过滤逻辑全部在 filter_tradeable_bars() 里,这里只负责落库。
+    返回本次新写入的行数(纯观测用,调用方可忽略)。
+
+    `prefiltered` 给已经调过 filter_tradeable_bars() 的调用方复用结果用(routers/chart.py
+    要拿同一份结果去更新内存缓存)。过滤过程本身要查两次库(取前序收盘价、取重放基准),
+    重复过滤等于白查一遍,而且两次调用之间若有并发写入,两条路径还可能得出不同结果。
+    不传则内部自行过滤。
+
+    Persist the subset of `bars` that clears the closure gates; rows already
+    present for (symbol, interval, t) are skipped. All filtering lives in
+    filter_tradeable_bars(); this function only writes.
+    Returns the number of newly-inserted rows (for observability; callers may ignore it).
+
+    `prefiltered` lets a caller that already called filter_tradeable_bars() reuse the
+    result (routers/chart.py needs the same list to update the in-memory cache).
+    Filtering issues two queries of its own (preceding closes, replay baseline), so
+    redoing it is wasted work — and with a concurrent write between the two calls the
+    two paths could even disagree. Omit it to filter internally.
+    """
+    closed = prefiltered if prefiltered is not None else filter_tradeable_bars(db, symbol, interval, bars)
     if not closed:
         return 0
 
