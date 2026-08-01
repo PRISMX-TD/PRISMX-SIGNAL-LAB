@@ -12,6 +12,17 @@ dist/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
+
+# 测试代码：不纳入公开仓库
+# Tests: kept out of the public repo
+backend/tests/
+
+# 覆盖率报告 / coverage reports
+.coverage
+coverage/
+htmlcov/
+*.cover
 
 # 本地数据库 / local database
 *.db
@@ -24,6 +35,8 @@ dist/
 !.env.example
 *.pem
 *.key
+*.p12
+*.pfx
 
 # ===== Node / 前端 =====
 node_modules/
@@ -34,12 +47,18 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# 部署平台本地缓存（含项目 ID）/ deploy platform local state
+.vercel/
+.turbo/
+
 # ===== Bridge 打包产物 / build artifacts =====
 bridge/build/
 bridge/dist/
 bridge/*.spec
 bridge/build_log.txt
 bridge/*.log
+*.exe
+*.msi
 
 # ===== 文档 / Markdown（不纳入仓库；md 里常含密钥/内部信息）=====
 # Docs / Markdown — never committed; may contain keys or internal info.
@@ -47,19 +66,33 @@ bridge/*.log
 docs/
 .trae/
 
+# ===== 数据库运维脚本（含表结构与权限信息）=====
+# DB ops scripts: contain schema and privilege details
+supabase/
+
 # ===== EA：本地/MT5 机器专用，不纳入公开仓库 =====
 # EA: local/MT5-machine only, kept out of the public repo
 ea/
+*.ex5
+*.mqh
 
 # ===== 编辑器 / 系统文件 =====
 .vscode/
 .idea/
 *.swp
+*.swo
 .DS_Store
 Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# 崩溃转储 / crash dumps
+*.pdb
+*.dmp
 
 # ===== AI 工具辅助文件（不纳入仓库）=====
-.claude/
+**/.claude/
+.superpowers/
 
 # ===== 未被代码引用的本地素材（不纳入仓库）=====
 # Unused local-only assets, not referenced by any code, kept out of the repo
