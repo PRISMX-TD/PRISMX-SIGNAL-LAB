@@ -57,6 +57,23 @@ WEEKEND_TRADING_SYMBOLS: frozenset[str] = frozenset({"BTCUSD", "ETHUSD"})
 # 可能被拦掉。这个取舍是刻意的:少存几根边缘 bar 对回测无实质影响,而放进来一段
 # 伪造行情会污染指标、凭空造出信号。
 #
+# 前提:到这一层的时间戳必须是真 UTC。曾经不是——EA 用 TimeGMTOffset()(本地机器
+# 偏移)去换算券商服务器时间,时间戳整条平移了两小时,于是这个闸门按错位后的时间
+# 判断,拦掉的和放行的都不是原本该拦该放的那些。那是 EA 侧的 bug,不是边界取值的
+# 问题,修在 BrokerUtcOffset()。
+#
+# An hour of margin on each side absorbs the 20:55–22:05 spread across brokers and
+# the DST hour. The cost is that the most marginal real bars right before the
+# Friday close or right after the Sunday open may be dropped. That trade-off is
+# deliberate: a few missing edge bars don't meaningfully affect backtests, whereas
+# admitting a stretch of fabricated data corrupts indicators and fabricates signals.
+#
+# This assumes timestamps reaching this layer are true UTC. They weren't once: the
+# EA converted broker server time using TimeGMTOffset() (the local machine's
+# offset), shifting the whole axis by two hours, so this gate judged shifted times
+# and both admitted and rejected the wrong bars. That was an EA-side bug, not a
+# problem with these bounds — fixed in BrokerUtcOffset().
+#
 # Weekend close window (UTC): Friday 21:00 to Sunday 21:00.
 #
 # Fixed UTC bounds rather than the broker's/MT5's server timezone: that timezone
