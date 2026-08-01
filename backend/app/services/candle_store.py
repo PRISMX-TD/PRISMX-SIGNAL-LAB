@@ -551,12 +551,34 @@ def filter_tradeable_bars(
     # this. ① would stay permanently false in that case; ② doesn't depend on
     # either side's absolute clock, so it's immune to this class of skew.
     latest_t = max(b["t"] for b in bars)
+    # ②的门槛是"更晚的邻居至少跨过一个完整周期",不是单纯"存在更晚的邻居"。
+    #
+    # 原先只要 b["t"] < latest_t 就算收盘,而 tick 模式固定推最新 2 根:这 2 根里
+    # 较早的那根其实仍在形成中,却因为有个只晚一个周期、自己也没收盘的邻居就被
+    # 放行入库。配合 persist_closed_bars() 的"已存在就跳过",库里那根被永久定格
+    # 在形成初期的半成品上——实测 XAUUSD 20:55 那根 5 分钟线锁死在 C=4055.14,
+    # 而它后 4 分钟真实跌到 4043.82,存下来的收盘价比自己后来的真实最低价还高。
+    #
+    # 要求邻居跨过一个完整周期,才真正证明这一根已经走完。同时保留了②抗时钟偏移
+    # 的初衷:EA 时钟偏移 11 小时时,backfill 批次里每根都有远超一个周期的更晚邻
+    # 居,判定照旧成立。
+    #
+    # ② requires the later neighbour to be at least one full interval ahead, not
+    # merely later. The old `b["t"] < latest_t` admitted the earlier of the two
+    # bars that tick mode always sends, which is itself still forming; combined
+    # with persist_closed_bars() skipping timestamps that already exist, the row
+    # got frozen at that half-formed snapshot (observed: XAUUSD 20:55 M5 stuck at
+    # C=4055.14 while price went on to 4043.82 within the same bar, leaving a
+    # stored close above the bar's own later low). Demanding a full interval of
+    # separation proves the bar actually finished, while keeping ②'s clock-skew
+    # immunity: with an 11h-fast EA clock every backfill bar still has a
+    # neighbour far more than one interval ahead.
     # include_forming 只放宽"是否收盘"这一条,后面三道休市闸门对它一视同仁。
     # include_forming relaxes only the closed-or-not test; the three closure gates
     # below still apply to it exactly as they do to every other bar.
     closed = [
         b for b in bars
-        if include_forming or b["t"] + seconds <= now or b["t"] < latest_t
+        if include_forming or b["t"] + seconds <= now or b["t"] + seconds <= latest_t
     ]
 
     if not closed:

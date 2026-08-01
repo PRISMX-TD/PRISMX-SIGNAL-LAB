@@ -111,6 +111,64 @@ def test_earlier_bar_persists_even_when_feed_clock_runs_far_ahead(db):
     assert rows[0].t == older_t
 
 
+def test_forming_bar_with_sub_interval_neighbour_is_not_persisted(db):
+    """仍在形成中的 bar 不能因为有个"只晚一点、自己也没收盘"的邻居就入库。
+
+    真实事故:tick 模式固定推最新 2 根,这 2 根都还没收盘。原先的判定只要
+    b["t"] < latest_t 就放行,于是较早那根被当成已收盘写进库;而
+    persist_closed_bars() 对已存在的时间戳一律跳过,那根就被永久定格在形成
+    初期的半成品上。实测 XAUUSD 20:55 的 5 分钟线锁死在 C=4055.14,而它后
+    4 分钟真实跌到 4043.82——存下来的收盘价比这根 bar 自己后来的真实最低价
+    还高,指标和策略拿到的是一根不可能存在的 K 线。
+
+    A still-forming bar must not be admitted just because a slightly later
+    bar — itself also unfinished — shares the batch. Real incident: tick mode
+    always sends the latest 2 bars, neither closed. The old `b["t"] <
+    latest_t` test admitted the earlier one, and since persist_closed_bars()
+    skips timestamps that already exist, the row froze at that half-formed
+    snapshot (XAUUSD 20:55 M5 stuck at C=4055.14 while price went on to
+    4043.82 inside the same bar, storing a close above the bar's own later
+    low).
+    """
+    # BTCUSD 豁免周末闸门,确保拦下它的是收盘判定而不是休市窗口。
+    # BTCUSD is exempt from the weekend gate, so the closed-bar check is what
+    # rejects these bars rather than the closure window.
+    now = int(datetime.now(timezone.utc).timestamp())
+    seconds = 300  # 5 分钟线 / M5
+    forming_t = now - (now % seconds)          # 当前这根,尚未收盘 / current, unfinished
+    neighbour_t = forming_t + 60               # 只晚 60 秒,不足一个周期 / only 60s later
+    bars = [
+        {"t": forming_t, "o": 4055.81, "h": 4056.11, "l": 4053.95, "c": 4055.14, "v": 527},
+        {"t": neighbour_t, "o": 4055.14, "h": 4055.2, "l": 4043.8, "c": 4043.82, "v": 120},
+    ]
+    assert persist_closed_bars(db, "BTCUSD", "5", bars) == 0
+    assert db.query(Candle).filter(Candle.symbol == "BTCUSD", Candle.interval == "5").count() == 0
+
+
+def test_bar_persists_once_neighbour_is_a_full_interval_ahead(db):
+    """邻居跨过一个完整周期时,这一根确实已经走完,应当入库。
+
+    与上一个测试成对:证明修复收紧的只是"邻居不足一个周期"这一种情况,②本身
+    (不依赖绝对时钟的相对判定)照旧有效。
+
+    Pairs with the test above: the fix narrows only the sub-interval case; ②
+    (the clock-independent relative check) still works.
+    """
+    now = int(datetime.now(timezone.utc).timestamp())
+    seconds = 300
+    closed_t = now - (now % seconds)
+    neighbour_t = closed_t + seconds  # 整整一个周期后 / a full interval later
+    bars = [
+        {"t": closed_t, "o": 4055.81, "h": 4056.11, "l": 4043.8, "c": 4043.82, "v": 647},
+        {"t": neighbour_t, "o": 4043.82, "h": 4044.9, "l": 4043.5, "c": 4044.81, "v": 88},
+    ]
+    assert persist_closed_bars(db, "BTCUSD", "5", bars) == 1
+    rows = db.query(Candle).filter(Candle.symbol == "BTCUSD", Candle.interval == "5").all()
+    assert len(rows) == 1
+    assert rows[0].t == closed_t
+    assert rows[0].c == 4043.82
+
+
 def test_warns_when_entire_batch_is_not_yet_closed(db, caplog):
     """一批里一根都没被判定为"已收盘"要打 WARNING——有了②(相对判定)之后,
     只有批次里连"更晚的邻居"都没有(实际就一根独一无二的时间戳)且它本身还
