@@ -1,5 +1,99 @@
 """PRISMX Signal Lab - 应用配置 / Application configuration."""
+import base64
+import binascii
+import functools
+import logging
+
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger("prismx.config")
+
+
+def _b64_any(value: str) -> bytes:
+    """按标准与 urlsafe 两种字母表尝试 base64 解码，补齐 padding。
+    解不出返回空 bytes。/ Try both standard and urlsafe base64 alphabets,
+    restoring padding. Returns empty bytes when undecodable."""
+    padded = value + "=" * (-len(value) % 4)
+    for decoder in (base64.urlsafe_b64decode, base64.b64decode):
+        try:
+            return decoder(padded)
+        except (binascii.Error, ValueError):
+            continue
+    return b""
+
+
+@functools.lru_cache(maxsize=8)
+def _normalize_vapid_private_key(raw: str) -> str:
+    """把任意常见格式的 VAPID 私钥统一成 urlsafe-base64 的 PKCS8 DER。
+
+    支持的输入：PEM 文本（含 -----BEGIN 头，或被 base64 再包一层的 PEM）、
+    已经是 urlsafe-base64 DER 的值、以及 32 字节的 RAW 私钥。识别不出时原样
+    返回，交由 pywebpush 自己报错——配置层不该把一个"也许它认识"的值吞掉。
+
+    之所以需要这个函数：py_vapid 的 from_string 只试 RAW 与 DER，PEM 一定失败
+    （见 vapid_private_key 的说明）。生产与本地历史上配的是哪个字段、哪种格式
+    并不一致，把差异收敛在这里，任一种配法都能推送成功。
+
+    Normalize a VAPID private key in any common format to urlsafe-base64 PKCS8
+    DER. Accepts PEM text (with the -----BEGIN header, or a PEM wrapped in
+    another layer of base64), a value that is already urlsafe-base64 DER, and a
+    32-byte RAW private key. Anything unrecognized is returned unchanged so
+    pywebpush can raise on it — the config layer shouldn't swallow a value it
+    merely fails to recognize.
+
+    Why this exists: py_vapid's from_string only attempts RAW and DER, so PEM
+    always fails (see vapid_private_key). Which field and which format got
+    configured has differed between production and local over time; converging
+    that here means any of them delivers push successfully.
+    """
+    from cryptography.hazmat.primitives import serialization
+
+    def _to_urlsafe_der(key) -> str:
+        der = key.private_bytes(
+            serialization.Encoding.DER,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        return base64.urlsafe_b64encode(der).decode().rstrip("=")
+
+    decoded = _b64_any(raw)
+
+    # ① PEM 文本，或 base64 再包一层的 PEM（旧 VAPID_PRIVATE_KEY_B64 的形态）
+    # ① PEM text, or a PEM wrapped in another base64 layer (the legacy shape)
+    pem_text = ""
+    if "-----BEGIN" in raw:
+        pem_text = raw
+    elif decoded[:11] == b"-----BEGIN ":
+        pem_text = decoded.decode("utf-8", "ignore")
+    if pem_text:
+        try:
+            key = serialization.load_pem_private_key(pem_text.encode(), password=None)
+            return _to_urlsafe_der(key)
+        except Exception:
+            logger.warning("[vapid] PEM private key present but unparseable")
+            return raw
+
+    # ② 已经是 DER：直接确认能加载，顺带把 padding/字母表统一掉
+    # ② Already DER: confirm it loads, and normalize padding/alphabet en route
+    if decoded:
+        try:
+            key = serialization.load_der_private_key(decoded, password=None)
+            return _to_urlsafe_der(key)
+        except Exception:
+            pass
+
+        # ③ 32 字节 RAW 私钥（部分生成工具的输出）/ 32-byte RAW private key
+        if len(decoded) == 32:
+            try:
+                from cryptography.hazmat.primitives.asymmetric import ec
+
+                key = ec.derive_private_key(int.from_bytes(decoded, "big"), ec.SECP256R1())
+                return _to_urlsafe_der(key)
+            except Exception:
+                pass
+
+    logger.warning("[vapid] private key format not recognized; passing through unchanged")
+    return raw
 
 
 class Settings(BaseSettings):
@@ -14,14 +108,39 @@ class Settings(BaseSettings):
     # 安全 / Security
     JWT_SECRET: str = "prismx-dev-secret-change-in-production"
     JWT_ALGORITHM: str = "HS256"
-    # 2 小时；deps.get_current_user 在剩余不到一半时通过 X-Refreshed-Token
-    # 自动续期，只要用户仍在活跃操作就不会被登出——缩短这个值只是缩小一个
-    # 被窃取 token（如 XSS 偷取 localStorage）在用户不活跃时仍然可用的时间窗。
-    # 2 hours; deps.get_current_user auto-renews via X-Refreshed-Token once
-    # less than half the lifetime remains, so an active user is never logged
-    # out. Shortening this only shrinks the window a stolen token (e.g. via
-    # XSS reading localStorage) stays usable while the user is inactive.
-    JWT_EXPIRE_MINUTES: int = 120
+    # 30 天；deps.get_current_user 在剩余不到一半（15 天）时通过
+    # X-Refreshed-Token 自动续期，因此只要用户每 30 天内打开过一次就永不登出。
+    #
+    # 之所以是 30 天而不是更短：装成 PWA 的主屏应用会被手机系统冻结甚至杀掉
+    # 进程，滑动续期依附在业务请求上，进程不跑就没有请求可搭。取值为 2 小时
+    # 时，用户隔一晚再打开，回到前台的第一个请求（live.tsx 的账号轮询）必然
+    # 401，client.ts 随即清掉 token、路由守卫弹回登录页——这正是"PWA 老是被
+    # 登出"的来源。没有独立的 refresh token，能覆盖这段冻结期的只有访问
+    # token 本身的有效期。
+    #
+    # 代价：token 一旦泄露（如 XSS 读取 localStorage），可用窗口同样变成
+    # 30 天。目前唯一的撤销手段是改密码——见 security.create_access_token 的
+    # "tv" 声明，它会让改密码前签发的所有 token 立即失效。
+    #
+    # 30 days; deps.get_current_user auto-renews via X-Refreshed-Token once
+    # less than half the lifetime (15 days) remains, so a user who opens the
+    # app at least once every 30 days is never logged out.
+    #
+    # Why 30 days and not something shorter: an installed PWA gets frozen or
+    # outright killed by the phone's OS, and sliding renewal rides on business
+    # requests — no process, no request to ride. At 2 hours, coming back the
+    # next morning meant the first foreground request (live.tsx's account
+    # poll) was guaranteed to 401, after which client.ts cleared the token and
+    # the route guard bounced the user to the login page. That was the whole
+    # "the PWA keeps logging me out" complaint. With no separate refresh
+    # token, the access token's own lifetime is the only thing that can span
+    # that frozen period.
+    #
+    # The cost: a leaked token (e.g. XSS reading localStorage) stays usable
+    # for 30 days too. The only revocation path today is a password change —
+    # see the "tv" claim in security.create_access_token, which invalidates
+    # every token issued before it.
+    JWT_EXPIRE_MINUTES: int = 60 * 24 * 30
 
     # Google 登录 / Google Sign-In：在 Google Cloud Console 创建的 OAuth Web Client ID。
     # 留空则关闭 Google 登录端点。 / OAuth Web Client ID from Google Cloud Console;
@@ -223,12 +342,40 @@ class Settings(BaseSettings):
 
     @property
     def vapid_private_key(self) -> str:
-        """返回可直接传给 pywebpush 的私钥字符串：优先 urlsafe-DER；否则回退到
-        base64 PEM 解码后的 PEM 文本（旧配置）。/ Private key string for pywebpush:
-        prefer urlsafe-DER; fall back to decoded PEM text (legacy)."""
-        if self.VAPID_PRIVATE_KEY_DER:
-            return self.VAPID_PRIVATE_KEY_DER
-        return self.vapid_private_key_pem
+        """返回可直接传给 pywebpush 的私钥（urlsafe-base64 的 PKCS8 DER）。
+        两个配置字段任填其一都可用，格式不对也会被就地转换。
+
+        这里必须做归一化，而不是把配的值原样返回：pywebpush 内部走
+        py_vapid.Vapid.from_string，而它只尝试 RAW 与 DER 两种解析，从不尝试
+        PEM。于是只配了 VAPID_PRIVATE_KEY_B64（base64 包着的 PEM 文本，本项目
+        早期的格式）时，签名阶段就抛 ValueError："Could not deserialize key
+        data ... ASN.1 parsing error"。这个异常发生在 webpush() 之前，不是
+        WebPushException，push_dispatch 里按订阅的错误处理根本接不到它，只会被
+        最外层的 except Exception 兜住写一行日志——表现为安卓与 iOS 一条通知都
+        收不到，而接口全部返回成功、测试全绿（测试把 webpush 整个 mock 掉了，
+        真实签名路径从未被执行）。排查成本极高，所以在配置层一次性消化掉。
+
+        Return a private key pywebpush can actually use (urlsafe-base64 PKCS8
+        DER). Either config field works, and a wrong-format value is converted
+        in place.
+
+        Normalizing here rather than returning the configured value as-is is
+        required: pywebpush goes through py_vapid.Vapid.from_string, which only
+        ever attempts RAW and DER parsing and never PEM. So configuring only
+        VAPID_PRIVATE_KEY_B64 (base64-wrapped PEM text, this project's earlier
+        format) raises ValueError at signing time: "Could not deserialize key
+        data ... ASN.1 parsing error". That happens before webpush() and isn't
+        a WebPushException, so push_dispatch's per-subscription error handling
+        never sees it — only the outermost except Exception logs a line. The
+        symptom is zero notifications on both Android and iOS while every
+        endpoint reports success and the suite stays green (the tests mock
+        webpush wholesale, so the real signing path is never exercised). That
+        is expensive to diagnose, hence absorbing it once, here.
+        """
+        raw = (self.VAPID_PRIVATE_KEY_DER or self.VAPID_PRIVATE_KEY_B64 or "").strip()
+        if not raw:
+            return ""
+        return _normalize_vapid_private_key(raw)
 
     @property
     def vapid_private_key_pem(self) -> str:
