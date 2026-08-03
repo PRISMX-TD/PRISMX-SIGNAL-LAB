@@ -11,6 +11,7 @@ also holds the still-forming bar.
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+from math import gcd
 
 from starlette.concurrency import run_in_threadpool
 
@@ -249,6 +250,52 @@ REPLAY_BASELINE_MAX_ROWS = 12000
 # See _replay_key() for the implementation: quantised keys go into a set for hash
 # lookup rather than per-bar float-difference comparisons.
 _PRICE_DECIMALS = 6
+
+
+# 喂价端换算 UTC 时可能用到的最细时区粒度(秒)。现实中券商时区偏移只有整小时或
+# 半小时(GMT+5:30 这类),EA 侧的 BrokerUtcOffset() 也正是按这个粒度量化的。
+# The finest timezone granularity a feed may use when converting to UTC. Real
+# broker offsets are only ever whole or half hours (GMT+5:30 and friends), and the
+# EA's BrokerUtcOffset() quantises to exactly this granularity.
+_TIMEZONE_QUANTUM_SECONDS = 1800
+
+
+def _grid_seconds(interval_seconds: int) -> int:
+    """这个周期的时间戳必须对齐到的网格(秒)——不管喂价端在哪个时区都成立的那个。
+
+    不能直接用 interval_seconds 本身。分钟级周期(1/5/15 分钟)确实对齐到 UTC 整点
+    网格,因为它们的长度整除半小时:喂价端减掉一个整数倍的半小时偏移后,网格位置不
+    变。但 1 小时/4 小时/日线不是——它们对齐的是**券商当地的整点/午夜**,而券商可能
+    在半小时时区(GMT+5:30),此时一根真实的小时线换算成 UTC 后就落在 :30 上。按
+    interval_seconds 判会把这类券商的全部长周期 bar 误杀。
+
+    取 gcd(周期长度, 半小时)得到"任何时区偏移下都必然成立"的最细网格:
+      1 分钟 → 60、5 分钟 → 300、15 分钟 → 900、1 小时/4 小时/日线 → 1800。
+    这个粒度足以抓住本次要防的错位(整分钟级),又不会误判任何合法时区。
+    代价是 1 分钟线上的整分钟错位无法用网格判出来(60 秒的平移把网格映射回自身),
+    这是这个判据的固有盲区,不是取值保守——没有外部信息可以区分。
+
+    The grid (in seconds) this interval's timestamps must sit on, chosen so it
+    holds regardless of the feed's timezone.
+
+    interval_seconds itself won't do. Minute-level intervals (1/5/15m) genuinely
+    align to the UTC grid because their length divides the half hour: subtracting a
+    whole number of half-hour offsets leaves the grid position unchanged. H1/H4/D
+    do not — they align to the *broker's local* hour/midnight, and a broker in a
+    half-hour zone (GMT+5:30) produces a genuine hourly bar that lands on :30 once
+    converted to UTC. Testing against interval_seconds would reject every
+    long-interval bar from such a broker.
+
+    gcd(interval, half hour) gives the finest grid that must hold under any
+    timezone offset: 60 / 300 / 900 for 1/5/15m, 1800 for H1/H4/D. That's fine
+    enough to catch the whole-minute misalignment this gate targets without
+    misjudging any legitimate zone.
+    The cost is that a whole-minute shift on the 1-minute series can't be detected
+    this way (a 60s shift maps that grid onto itself). That's an inherent blind spot
+    of the predicate rather than a conservative choice — no external information
+    exists to distinguish the two.
+    """
+    return gcd(interval_seconds, _TIMEZONE_QUANTUM_SECONDS)
 
 
 def _replay_key(bar: dict) -> tuple:
@@ -497,7 +544,8 @@ def filter_tradeable_bars(
 ) -> list[dict]:
     """把 `bars` 过成"确实是真实交易时段产生的"那一部分,按时间升序返回。
 
-    三道休市闸门都在这里:周末窗口(按时间)、价格停滞(按行为)、重放副本(按内容)。
+    四道闸门都在这里:周期网格(按时间戳自身的合法性)、周末窗口(按时间)、价格停滞
+    (按行为)、重放副本(按内容)。网格那道必须最先跑,后面三道都以"时间戳可信"为前提。
     persist_closed_bars() 拿它的结果写库;routers/chart.py 拿它的结果更新内存缓存,
     两条路径因此看到完全一致的过滤结果。
 
@@ -524,10 +572,12 @@ def filter_tradeable_bars(
     Note the closure gates still apply to this bar, so during a closure it is still
     rejected and no fabricated candle leaks through.
 
-    All three closure gates live here: the weekend window (by time), the stalled
-    price (by behaviour) and replayed copies (by content). persist_closed_bars()
-    writes the result to the database and routers/chart.py feeds the same result
-    into the in-memory cache, so both paths see identical filtering.
+    All four gates live here: the interval grid (the timestamp's own validity), the
+    weekend window (by time), the stalled price (by behaviour) and replayed copies
+    (by content). The grid gate must run first — the other three all presume a
+    trustworthy timestamp. persist_closed_bars() writes the result to the database
+    and routers/chart.py feeds the same result into the in-memory cache, so both
+    paths see identical filtering.
 
     **The gates must stay centralised in this one function** rather than being
     reapplied by each caller. The in-memory cache path previously used the raw,
@@ -539,6 +589,74 @@ def filter_tradeable_bars(
     seconds = INTERVAL_SECONDS.get(interval)
     if seconds is None or not bars:
         return []
+
+    # 第零道闸门:时间戳必须落在这个周期的网格上,不在的直接拒收。
+    #
+    # 放在所有闸门最前面,因为后面每一道都以"时间戳可信"为前提:收盘判定要拿 t+周期
+    # 跟当前时间比、周末闸门要按 t 换算星期与钟点、停滞判定要沿时间轴数游程。喂错位
+    # 的时间戳喂给它们,它们不会报错,只会静静地算错——正是这个模块反复吃过亏的那类
+    # 失败。
+    #
+    # 拦的是这个:喂价端把整批 bar 的时间戳平移了非整周期的量(实测 EA 的
+    # BrokerUtcOffset() 曾因整数除法向下截断,在 tick 滞后 1 秒时把偏移少算 60 秒,
+    # 于是 10:30 那根 15 分钟线带着 10:31 的时间戳发过来)。这种 bar 落在网格之外,
+    # 内存缓存把它当成一根全新的 bar 追加、库里 (symbol,interval,t) 唯一约束也认为
+    # 它是新行,于是图表上多出一根 10:31 的蜡烛;更糟的是它还会顶掉之后那根正确的
+    # 10:30——两者 OHLCV 完全相同,正确的那根会被重放闸门当成副本丢弃,于是错位的
+    # 时间戳永久留在库里。
+    #
+    # 已经在 EA 侧修掉了根因(改用 TimeTradeServer + 四舍五入到半小时),这道闸门是
+    # 独立的兜底:喂价端是部署在用户机器上的、我们无法保证版本的组件,任何一个跑着
+    # 旧版 EA 的用户、或将来任何新喂价器的类似算错,都不该再污染库和图表。
+    #
+    # Gate zero: timestamps must sit on this interval's grid; off-grid bars are
+    # rejected outright.
+    #
+    # First of all the gates, because every later one presumes the timestamp is
+    # trustworthy: the closed check compares t+interval against now, the weekend gate
+    # derives a weekday and hour from t, and the stall check counts a run along the
+    # time axis. Fed a misaligned timestamp none of them raise — they quietly compute
+    # the wrong answer, the exact failure class this module has been bitten by
+    # repeatedly.
+    #
+    # What it catches: a feed shifting a whole batch by a non-interval amount. The
+    # EA's BrokerUtcOffset() did this via truncating integer division — with a tick
+    # lagging one second it subtracted 60 seconds too little, so the 10:30 bar of a
+    # 15-minute series arrived stamped 10:31. Such a bar lands off-grid, the
+    # in-memory cache appends it as a brand-new bar and the database's
+    # (symbol, interval, t) uniqueness accepts it as a new row, so the chart grows a
+    # stray 10:31 candle. Worse, it then displaces the correct 10:30 bar: the two
+    # share identical OHLCV, so the real one is discarded as a replay and the
+    # misaligned timestamp stays in the database permanently.
+    #
+    # The root cause is fixed EA-side (TimeTradeServer plus rounding to the half
+    # hour); this gate is the independent backstop. The feed runs on user machines at
+    # a version we can't guarantee, and neither a user still on an old EA build nor
+    # any future feeder making a similar arithmetic slip should be able to pollute
+    # the database and the chart again.
+    grid = _grid_seconds(seconds)
+    aligned = [b for b in bars if b["t"] % grid == 0]
+    misaligned_count = len(bars) - len(aligned)
+    if misaligned_count:
+        # 这个必须是 warning:与周末/停滞/重放不同,错位的时间戳**永远**意味着喂价端
+        # 算错了,没有任何正常场景会产生它。静默丢弃会让一个跑着旧版 EA 的部署始终少
+        # 数据而没人知道——这个模块上一次的静默故障持续了三天。
+        # Warning level, unlike the weekend/stall/replay gates: a misaligned timestamp
+        # *always* means the feed miscomputed, with no legitimate scenario producing
+        # one. Dropping it silently would leave a deployment on an old EA build quietly
+        # short of data — this module's last silent failure ran for three days.
+        example = next(b["t"] for b in bars if b["t"] % grid != 0)
+        logger.warning(
+            "filter_tradeable_bars: %s/%s rejected %d bar(s) whose timestamp is off "
+            "the %ds grid (e.g. t=%d, %+ds off; the feed converted its clock to UTC "
+            "with a non-whole-interval offset — check the EA's BrokerUtcOffset and "
+            "that it's running the current build)",
+            symbol, interval, misaligned_count, grid, example, example % grid,
+        )
+    if not aligned:
+        return []
+    bars = aligned
+
     now = datetime.now(timezone.utc).timestamp()
     # 一根 bar 满足下面任一条件就算"已收盘"：
     # ① 绝对时钟判定——bar 的收盘时刻早于等于服务器当前时间(常规情况下这条
@@ -622,7 +740,7 @@ def filter_tradeable_bars(
         )
         return []
 
-    # 第一道闸门:周末休市期间的 bar 一律不收(BTCUSD 等 7x24 品种豁免)。
+    # 第一道休市闸门:周末休市期间的 bar 一律不收(BTCUSD 等 7x24 品种豁免)。
     #
     # 这一层与下面的重放判定是**两道独立的闸门**,故意都保留:
     #   · 周末闸门按时间判定,不看内容。哪怕 EA 推来的是全新的、不重复任何历史的
@@ -667,7 +785,7 @@ def filter_tradeable_bars(
     if not closed:
         return []
 
-    # 第二道闸门:价格停滞即视为休市,丢掉这批末尾连续不动的那一段。
+    # 第二道休市闸门:价格停滞即视为休市,丢掉这批末尾连续不动的那一段。
     #
     # 这道专门补节假日和"突如其来"的临时休市——它们不在任何固定日历里,周末闸门按日期
     # 判必然漏掉。判据是所有休市共有的、可直接观测的特征:报价不再变化。理由与阈值取
