@@ -72,7 +72,7 @@ class BackendClient:
         Quote snapshot; each item is {symbol, bid, ask, digits, closed}."""
         if not quotes:
             return True
-        return self._post("/feed/quotes", {"data": quotes})
+        return self._post("/api/feed/quotes", {"data": quotes})
 
     def push_candles(self, mode: str, series: list[dict]) -> bool:
         """K 线。mode=backfill 整段替换 / tick 合并最新几根 / history 只落库。
@@ -84,7 +84,7 @@ class BackendClient:
         """
         if not series:
             return True
-        return self._post("/feed/candles", {"mode": mode, "series": series})
+        return self._post("/api/feed/candles", {"mode": mode, "series": series})
 
     def push_trend(self, symbol: str, trends: dict[str, str],
                    high: float | None = None, low: float | None = None) -> bool:
@@ -103,7 +103,7 @@ class BackendClient:
         if high is not None and low is not None:
             payload["high"] = high
             payload["low"] = low
-        return self._post("/webhook/trend", payload, use_header_auth=False)
+        return self._post("/api/webhook/trend", payload, use_header_auth=False)
 
     # ---------- 品种配置 / symbol configuration ----------
 
@@ -119,7 +119,7 @@ class BackendClient:
         keeps its current config running rather than clearing the symbol list — a
         backend restart or network blip shouldn't stop site-wide market data.
         """
-        url = f"{self.base}/feed/symbols-config"
+        url = f"{self.base}/api/feed/symbols-config"
         req = request.Request(url, method="GET")
         req.add_header("X-EA-Token", self.token)
         try:
@@ -173,7 +173,7 @@ class BackendClient:
         if not symbols:
             return True
         return self._post(
-            "/feed/broker-symbols",
+            "/api/feed/broker-symbols",
             {"symbols": symbols},
             timeout=SYMBOL_LIST_TIMEOUT,
         )
