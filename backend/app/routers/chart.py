@@ -350,19 +350,18 @@ async def feed_candles(
         # TEMPORARY diagnostic for the stale-chart investigation; remove once
         # located. One line separates "a gate dropped it" from "merge_bars
         # refused to append".
-        _existing = chart_store.get_latest(symbol, s.interval, 1)["bars"]
-        logger.warning(
-            "DIAG feed_candles %s/%s mode=%s in=%d(t=%s..%s) cacheable=%d(t=%s..%s) "
-            "tradeable=%d cache_last_t=%s skew=%s",
-            symbol, s.interval, req.mode,
-            len(bars), bars[0]["t"] if bars else None, bars[-1]["t"] if bars else None,
-            len(cacheable),
-            cacheable[0]["t"] if cacheable else None,
-            cacheable[-1]["t"] if cacheable else None,
-            len(tradeable),
-            _existing[0]["t"] if _existing else None,
-            int(skew),
-        )
+        if symbol == "XAUUSD" and s.interval == "5":
+            _existing = chart_store.get_latest(symbol, s.interval, 1)["bars"]
+            logger.warning(
+                "DIAG %s/%s mode=%s in=%d(t=%s..%s) -> cacheable=%d gates=%s "
+                "cache_last_t=%s skew=%s",
+                symbol, s.interval, req.mode,
+                len(bars), bars[0]["t"] if bars else None, bars[-1]["t"] if bars else None,
+                len(cacheable),
+                candle_store.explain_gates(db, symbol, s.interval, bars),
+                _existing[0]["t"] if _existing else None,
+                int(skew),
+            )
         if req.mode == "backfill":
             # backfill 是整段替换。过滤后为空时不能替换:那会把缓存里原有的真实历史
             # 清空,前端图表直接空白。保留旧数据、等下一批有效数据再替换。

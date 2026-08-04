@@ -934,6 +934,67 @@ def filter_tradeable_bars(
     return accepted
 
 
+def explain_gates(db, symbol: str, interval: str, bars: list[dict]) -> str:
+    """临时诊断:逐道闸门报出还剩几根,定位是哪一道在丢弃 bar。
+
+    复刻 filter_tradeable_bars(include_forming=True) 的闸门顺序,只统计不改数据。
+    定位完删除。
+
+    TEMPORARY diagnostic: report survivors after each gate to pinpoint which one
+    drops the bars. Mirrors filter_tradeable_bars(include_forming=True)'s gate
+    order, counting only. Remove once located.
+    """
+    seconds = INTERVAL_SECONDS.get(interval)
+    if seconds is None or not bars:
+        return "no-interval-or-empty"
+    grid = _grid_seconds(seconds)
+    aligned = [b for b in bars if b["t"] % grid == 0]
+    if not aligned:
+        return f"GRID killed all (grid={grid}, example t={bars[0]['t']}, mod={bars[0]['t'] % grid})"
+    closed = list(aligned)  # include_forming=True 放行全部 / passes everything
+    in_session = [b for b in closed if not _is_market_closed(b["t"], symbol)]
+    if not in_session:
+        return f"WEEKEND killed all (grid_ok={len(aligned)})"
+    ordered = sorted(in_session, key=lambda b: b["t"])
+    earliest_t = ordered[0]["t"]
+    previous_closes = [
+        r[0]
+        for r in db.query(Candle.c)
+        .filter(Candle.symbol == symbol, Candle.interval == interval, Candle.t < earliest_t)
+        .order_by(Candle.t.desc())
+        .limit(STALLED_CLOSE_BARS * 2)
+        .all()
+    ][::-1]
+    stalled = _stalled_tail_length(ordered, previous_closes)
+    after_stall = ordered[: len(ordered) - stalled] if stalled else ordered
+    if not after_stall:
+        return f"STALL killed all (session_ok={len(in_session)}, stalled={stalled})"
+    lookback = REPLAY_LOOKBACK_SECONDS_BY_INTERVAL.get(interval, REPLAY_LOOKBACK_SECONDS)
+    baseline = {
+        _replay_key({"o": r[0], "h": r[1], "l": r[2], "c": r[3], "v": r[4]})
+        for r in db.query(Candle.o, Candle.h, Candle.l, Candle.c, Candle.v)
+        .filter(
+            Candle.symbol == symbol,
+            Candle.interval == interval,
+            Candle.t >= min(b["t"] for b in after_stall) - lookback,
+        )
+        .order_by(Candle.t.desc())
+        .limit(REPLAY_BASELINE_MAX_ROWS)
+        .all()
+    }
+    replayed = 0
+    for b in after_stall:
+        if _is_replayed_duplicate(b, baseline):
+            replayed += 1
+        elif b["h"] != b["l"]:
+            baseline.add(_replay_key(b))
+    return (
+        f"in={len(bars)} grid_ok={len(aligned)} session_ok={len(in_session)} "
+        f"stalled_dropped={stalled} replay_dropped={replayed} "
+        f"final={len(after_stall) - replayed}"
+    )
+
+
 def persist_closed_bars(
     db, symbol: str, interval: str, bars: list[dict],
     prefiltered: list[dict] | None = None,
