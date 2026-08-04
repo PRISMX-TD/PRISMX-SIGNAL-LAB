@@ -1492,7 +1492,10 @@ export default function ChartsPage() {
     // time — otherwise lightweight-charts throws on an older time and the live
     // refresh stalls.
     const applyBar = (b: Candle) => {
-      if (b.t < lastTimeRef.current) return
+      if (b.t < lastTimeRef.current) {
+        console.log('[chart] SKIP bar t=', b.t, '< lastT=', lastTimeRef.current)
+        return
+      }
       const point = toLwPoint(b)
       if (lastTimeRef.current === 0) {
         console.log('[chart] setData first bar t=', b.t, 'o=', b.o, 'c=', b.c)
