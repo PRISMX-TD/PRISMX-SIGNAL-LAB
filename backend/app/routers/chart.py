@@ -344,24 +344,6 @@ async def feed_candles(
             db, symbol, s.interval, bars, include_forming=True,
         )
         tradeable = candle_store.filter_tradeable_bars(db, symbol, s.interval, bars)
-        # 临时诊断（图表不更新排查用，定位后删除）:比对"进来的 bar"与"过滤后
-        # 留下的"和"缓存里已有的末根",一行日志就能区分是闸门拦掉、还是
-        # merge_bars 的追加条件没满足。
-        # TEMPORARY diagnostic for the stale-chart investigation; remove once
-        # located. One line separates "a gate dropped it" from "merge_bars
-        # refused to append".
-        if symbol == "XAUUSD" and s.interval == "5":
-            _existing = chart_store.get_latest(symbol, s.interval, 1)["bars"]
-            logger.warning(
-                "DIAG %s/%s mode=%s in=%d(t=%s..%s) -> cacheable=%d gates=%s "
-                "cache_last_t=%s skew=%s",
-                symbol, s.interval, req.mode,
-                len(bars), bars[0]["t"] if bars else None, bars[-1]["t"] if bars else None,
-                len(cacheable),
-                candle_store.explain_gates(db, symbol, s.interval, bars),
-                _existing[0]["t"] if _existing else None,
-                int(skew),
-            )
         if req.mode == "backfill":
             # backfill 是整段替换。过滤后为空时不能替换:那会把缓存里原有的真实历史
             # 清空,前端图表直接空白。保留旧数据、等下一批有效数据再替换。
