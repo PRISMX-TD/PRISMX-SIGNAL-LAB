@@ -55,6 +55,7 @@ class ManagerClient:
         self._digits_cache: dict[str, int] = {}
         self._backoff = RECONNECT_BACKOFF_START
         self._last_attempt_at = 0.0
+        self._tz_offset: int | None = None  # auto-detected, cached
 
     @property
     def connected(self) -> bool:
@@ -234,3 +235,59 @@ class ManagerClient:
             }
             for b in bars
         ]
+
+    # ---------- 时区 / timezone ----------
+
+    def detect_timezone(self) -> int | None:
+        """自动侦测券商服务器时区偏移（秒），首次调用后缓存。
+
+        用 Manager API 的 TimeCurrent() 取服务器时间，与本地 UTC 对比算出偏移，
+        四舍五入到整小时。H4/D1 的 K 线边界必须对齐券商时区，夏令时切换时手动
+        改配置容易忘，自动侦测后无需关心。
+
+        无法侦测时返回 None，调用方应回退到配置文件里的 broker_gmt_offset。
+
+        Auto-detect the broker server's timezone offset in seconds; cached after
+        first call.
+
+        Uses the Manager API's TimeCurrent() to read server time and compares it
+        against local UTC, rounding to the nearest hour. H4/D1 bar boundaries must
+        match the broker timezone; auto-detection means DST transitions are handled
+        without manual config changes.
+
+        Returns None when detection is impossible; callers should fall back to the
+        config file's broker_gmt_offset.
+        """
+        if self._tz_offset is not None:
+            return self._tz_offset
+        if not self._connected or self._api is None:
+            return None
+        try:
+            server_now = self._api.TimeCurrent()
+        except Exception:
+            logger.debug("TimeCurrent 不可用，无法自动侦测时区 / unavailable", exc_info=True)
+            return None
+        if server_now is False or server_now is None:
+            logger.debug("TimeCurrent 返回空，无法自动侦测时区 / returned empty")
+            return None
+        try:
+            # TimeCurrent 可能返回 int（Unix 时间戳）或 datetime 对象
+            # May return an int (Unix timestamp) or a datetime object
+            if hasattr(server_now, "timestamp"):
+                server_ts = int(server_now.timestamp())
+            else:
+                server_ts = int(server_now)
+        except (TypeError, ValueError, OSError):
+            logger.debug("TimeCurrent 返回值解析失败 / can't parse", exc_info=True)
+            return None
+        offset = server_ts - int(time.time())
+        # 四舍五入到整小时，容忍服务器与本地有几秒差异
+        # Round to the nearest hour, tolerating a small server-local clock skew
+        rounded = round(offset / 3600) * 3600
+        self._tz_offset = rounded
+        logger.info(
+            "自动侦测券商时区偏移: %+d 小时 (%d 秒)"
+            " / auto-detected broker timezone offset: %+dh (%ds)",
+            rounded // 3600, rounded // 3600, rounded, rounded,
+        )
+        return rounded

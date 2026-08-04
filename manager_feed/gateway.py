@@ -149,6 +149,7 @@ class Gateway:
         self._last_tick_change: dict[str, float] = {}
         self._last_tick_value: dict[str, tuple[float, float]] = {}
         self._tz_sec = cfg.broker_gmt_offset * 3600
+        self._tz_detected = False
 
     # ---------- 生命周期 / lifecycle ----------
 
@@ -178,6 +179,12 @@ class Gateway:
 
         if not self._reported_symbol_list:
             self._report_symbol_list()
+
+        if not self._tz_detected:
+            detected = self.manager.detect_timezone()
+            if detected is not None:
+                self._tz_sec = detected
+            self._tz_detected = True
 
         now = time.time()
         if now >= self._next_config_poll:

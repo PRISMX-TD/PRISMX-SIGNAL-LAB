@@ -66,11 +66,23 @@ class Config:
 
     # 券商服务器所在时区相对 UTC 的偏移（小时）。H4/D1 各时区的 K 线边界不同，
     # 必须对齐券商时区，否则聚合出来的 bar 与 MT5 终端的 bar 不是同一段数据。
-    # 默认 +2（EET 夏令时，大多数外汇券商）。冬令时可能需要调成 +3。
+    #
+    # **自动侦测优先**：网关启动后会通过 Manager API 的 TimeCurrent() 自动算出
+    # 准确的偏移量，覆盖这个值。夏令时切换时无需手动修改。这里只是兜底——
+    # 当自动侦测失败（例如 Manager API 版本不支持）时才生效。
+    #
+    # 默认 +2（EET 夏令时），冬令时服务商会变成 +3，自动侦测会感知。
+    #
     # Broker timezone offset vs UTC in hours. H4/D1 bar boundaries differ across
     # timezones; the aggregation must match the broker's, or the bars differ from
-    # MT5 terminal bars. Default is +2 (EET DST, common for forex brokers).
-    # Winter adjustment may require +3.
+    # MT5 terminal bars.
+    #
+    # **Auto-detection takes priority**: after connecting, the gateway calls the
+    # Manager API's TimeCurrent() to derive the exact offset and overrides this
+    # value. No manual adjustment is needed for DST transitions. This is only a
+    # fallback for when auto-detection is unavailable (e.g. unsupported API build).
+    #
+    # Default +2 (EET DST); winter switches to +3 and auto-detection will notice.
     broker_gmt_offset: int = 2
 
     # --- 运行 / runtime ---
