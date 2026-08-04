@@ -890,7 +890,8 @@
       "users": "用户管理",
       "ops": "运营设置",
       "system": "系统参数",
-      "tickets": "工单管理"
+      "tickets": "工单管理",
+      "feed": "行情品种"
     },
     "staff": "客服",
     "pageStats": {
@@ -975,7 +976,24 @@
     "candleM1Retention": "1 分钟线保留天数",
     "strategyPlatformTitle": "自定义策略平台",
     "strategyMaxPerUser": "每用户策略数上限",
-    "strategyProOnly": "仅 PRO 可用"
+    "strategyProOnly": "仅 PRO 可用",
+    "feedTitle": "行情品种配置",
+    "feedSubtitle": "管理网关推送的品种列表，修改后约 1 分钟内生效，无需重启网关。",
+    "feedColDisplay": "显示名称",
+    "feedColBroker": "券商品种名",
+    "feedColEnabled": "启用",
+    "feedAddSymbol": "添加品种",
+    "feedRemove": "删除",
+    "feedSave": "保存配置",
+    "feedDisplayPlaceholder": "前端显示名",
+    "feedBrokerPlaceholder": "搜索券商品种…",
+    "feedDisplayRequired": "显示名不可为空",
+    "feedBrokerRequired": "品种名不可为空",
+    "feedNoBrokerSymbols": "暂无券商品种数据。请确保网关已启动并成功连接券商服务器。",
+    "feedBrokerCatalogueHint": "从券商清单中选择品种名会自动填入;也可手动输入。",
+    "feedSymbolAdded": "已添加",
+    "feedSaved": "品种配置已保存",
+    "feedSaveError": "保存失败"
   },
   "discipline": {
     "title": "纪律分",

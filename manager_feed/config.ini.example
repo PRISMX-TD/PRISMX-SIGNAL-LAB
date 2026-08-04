@@ -1,0 +1,54 @@
+; PRISMX Manager 行情网关配置 / market-feed gateway configuration
+;
+; 使用方法 / how to use:
+;   1. 把本文件复制为 config.ini / copy this file to config.ini
+;   2. 填好 [manager] 与 [backend] 两节 / fill in [manager] and [backend]
+;   3. 运行 启动网关.bat / run 启动网关.bat
+;
+; 也可以用环境变量代替本文件，环境变量优先级更高：
+; Environment variables can replace this file and take precedence:
+;   MT5_MANAGER_SERVER  MT5_MANAGER_LOGIN  MT5_MANAGER_PASSWORD
+;   BACKEND_URL  EA_TOKEN
+
+[manager]
+; MT5 Manager 服务器地址与管理员账号
+; MT5 Manager server address and administrator account
+server = 192.109.17.69:443
+login = 1034
+password =
+
+[backend]
+; 后端地址，末尾不要带斜杠 / backend URL, no trailing slash
+url = https://api.prismxsignallab.com
+; 必须与后端的 EA_TOKEN 一致，否则所有上报会被 401 拒绝
+; Must match the backend's EA_TOKEN or every push is rejected with 401
+ea_token =
+
+[feed]
+; 要推送的品种，格式：显示名=券商真名，逗号分隔。
+; 显示名是前端和数据库里用的名字，券商真名是向 Manager 查询用的（含后缀）。
+; 名字前加 - 表示暂时停用。留空则用内置默认值。
+;
+; Symbols to push, as display=broker, comma-separated. The display name is what the
+; frontend and database use; the broker name (with suffix) is what Manager is queried
+; with. Prefix with - to disable an entry. Leave empty for the built-in defaults.
+symbols = XAUUSD=XAUUSD.s, XAGUSD=XAGUSD.s, WTI=WTI.s, EURUSD=EURUSD.s, GBPUSD=GBPUSD.s, USDJPY=USDJPY.s, BTCUSD=BTCUSD.s
+
+; 各链路的推送间隔（秒），与原 EA 的参数一致，一般不需要改
+; Push intervals in seconds, matching the original EA; rarely need changing
+quote_interval = 2
+candle_tick_interval = 3
+trend_interval = 5
+; 多久从后端拉一次品种配置，让后台的改动生效
+; How often the symbol config is pulled so admin changes take effect
+config_poll_interval = 60
+; 报价停滞多少秒视为休市 / seconds without a tick before a quote counts as closed
+stale_quote_seconds = 300
+; 单个周期单次回补最多推多少根 / max bars per interval in one backfill
+max_backfill_bars = 500
+
+[runtime]
+; 日志级别：DEBUG / INFO / WARNING / ERROR
+log_level = INFO
+; true 表示只计算不上报，用于验证聚合结果 / true computes without pushing
+dry_run = false

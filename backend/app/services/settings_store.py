@@ -460,6 +460,160 @@ def save_strategy_costs(db, data: dict) -> None:
         row.value = encoded
 
 
+# ---------- 行情品种配置 / market-feed symbol configuration ----------
+#
+# 网关（manager_feed）按这份配置决定推哪些品种。与其他设置节不同，这里存的是一个
+# 列表而不是固定键的字典，所以不套用 *_DEFAULTS 的合并逻辑。
+#
+# display 是前端与数据库用的名字，broker 是向 MT5 Manager 查询用的真名（带券商后缀）。
+# 两者分开是因为券商后缀（.s）属于接入细节，不该出现在用户界面和历史数据里。
+#
+# The gateway (manager_feed) uses this to decide which symbols to push. Unlike the other
+# sections this stores a list rather than a fixed-key dict, so the *_DEFAULTS merge logic
+# doesn't apply.
+#
+# `display` is the name used by the frontend and database; `broker` is the real name
+# queried from MT5 Manager, including the broker suffix. They're separate because the
+# suffix (.s) is a connectivity detail that shouldn't leak into the UI or stored history.
+FEED_SYMBOL_DEFAULTS: list[dict] = [
+    {"display": "XAUUSD", "broker": "XAUUSD.s", "enabled": True},
+    {"display": "XAGUSD", "broker": "XAGUSD.s", "enabled": True},
+    {"display": "WTI", "broker": "WTI.s", "enabled": True},
+    {"display": "EURUSD", "broker": "EURUSD.s", "enabled": True},
+    {"display": "GBPUSD", "broker": "GBPUSD.s", "enabled": True},
+    {"display": "USDJPY", "broker": "USDJPY.s", "enabled": True},
+    {"display": "BTCUSD", "broker": "BTCUSD.s", "enabled": True},
+]
+
+_feed_symbols_cache: list | None = None
+_feed_symbols_cache_at: float = 0.0
+
+
+def invalidate_feed_symbols_cache() -> None:
+    global _feed_symbols_cache_at
+    with _lock:
+        _feed_symbols_cache_at = 0.0
+
+
+def _load_feed_symbols_from_db(db) -> list[dict]:
+    """从库里读品种配置，损坏或缺失时回落到默认值。
+    Load the symbol config, falling back to defaults when missing or corrupt."""
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "feed_symbols").first()
+    if row is None:
+        return [dict(x) for x in FEED_SYMBOL_DEFAULTS]
+    try:
+        stored = json.loads(row.value)
+    except (ValueError, TypeError):
+        logger.warning("platform_settings: invalid JSON for feed_symbols, using defaults")
+        return [dict(x) for x in FEED_SYMBOL_DEFAULTS]
+    if not isinstance(stored, list):
+        return [dict(x) for x in FEED_SYMBOL_DEFAULTS]
+
+    out: list[dict] = []
+    for item in stored:
+        if not isinstance(item, dict):
+            continue
+        display = str(item.get("display", "")).strip().upper()
+        broker = str(item.get("broker", "")).strip()
+        if not display or not broker:
+            continue
+        out.append({
+            "display": display,
+            "broker": broker,
+            "enabled": bool(item.get("enabled", True)),
+        })
+    # 存了一个空列表（或全是无效条目）时不回落默认值：管理员可能就是想全部停掉，
+    # 静默塞回 7 个默认品种会让"清空"这个操作看起来失效。
+    # An empty (or all-invalid) stored list is honoured rather than replaced: an admin
+    # may genuinely want everything off, and silently restoring the 7 defaults would
+    # make "clear all" look broken.
+    return out
+
+
+def get_feed_symbols(db) -> list[dict]:
+    """读取行情品种配置（独立缓存）。
+    Read the market-feed symbol config (its own cache)."""
+    global _feed_symbols_cache, _feed_symbols_cache_at
+    now = time.time()
+    with _lock:
+        if _feed_symbols_cache is not None and now - _feed_symbols_cache_at < _CACHE_TTL_SECONDS:
+            return [dict(x) for x in _feed_symbols_cache]
+    data = _load_feed_symbols_from_db(db)
+    with _lock:
+        _feed_symbols_cache = data
+        _feed_symbols_cache_at = now
+    return [dict(x) for x in data]
+
+
+def save_feed_symbols(db, items: list[dict]) -> None:
+    """整份替换品种配置。列表语义下没有"合并"可言，逐条覆盖才符合管理员的预期。
+    Replace the whole symbol config; with list semantics a merge has no meaning and
+    wholesale replacement is what an admin expects."""
+    cleaned: list[dict] = []
+    seen: set[str] = set()
+    for item in items:
+        display = str(item.get("display", "")).strip().upper()
+        broker = str(item.get("broker", "")).strip()
+        if not display or not broker or display in seen:
+            continue
+        seen.add(display)
+        cleaned.append({
+            "display": display,
+            "broker": broker,
+            "enabled": bool(item.get("enabled", True)),
+        })
+
+    encoded = json.dumps(cleaned, ensure_ascii=False)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "feed_symbols").first()
+    if row is None:
+        db.add(PlatformSetting(key="feed_symbols", value=encoded))
+    else:
+        row.value = encoded
+
+
+# ---------- 券商可见品种清单 / broker symbol catalogue ----------
+#
+# 由网关上报。后端跑在 Linux 上、装不了 MT5Manager，拿不到券商的品种列表，只能由
+# 运行在 Windows 上的网关提供，供后台配置页做下拉选择。
+#
+# Reported by the gateway. The backend runs on Linux where MT5Manager can't be installed,
+# so it can't enumerate the broker's symbols itself; the Windows-side gateway supplies
+# them for the admin page's dropdown.
+
+def save_broker_symbol_catalogue(db, symbols: list[dict]) -> None:
+    """保存券商品种清单（整份替换）。
+    Save the broker symbol catalogue, replacing it wholesale."""
+    encoded = json.dumps(symbols, ensure_ascii=False)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "broker_symbol_catalogue").first()
+    if row is None:
+        db.add(PlatformSetting(key="broker_symbol_catalogue", value=encoded))
+    else:
+        row.value = encoded
+
+
+def get_broker_symbol_catalogue(db) -> list[dict]:
+    """读取券商品种清单。网关还没上报过时返回空列表。
+
+    不缓存：只有后台配置页会读它，频率极低，加一层缓存反而会让刚上报的清单显示不出来。
+
+    Read the broker symbol catalogue; empty when the gateway hasn't reported yet.
+
+    Uncached: only the admin page reads it, very rarely, and a cache would just delay
+    a freshly reported catalogue from showing up.
+    """
+    row = db.query(PlatformSetting).filter(
+        PlatformSetting.key == "broker_symbol_catalogue"
+    ).first()
+    if row is None:
+        return []
+    try:
+        data = json.loads(row.value)
+    except (ValueError, TypeError):
+        logger.warning("platform_settings: invalid JSON for broker_symbol_catalogue")
+        return []
+    return data if isinstance(data, list) else []
+
+
 def set_setting(db, key: str, value) -> None:
     """写入单个设置项（不提交事务，调用方负责 commit 后再 invalidate）。
     Write one setting (no commit; caller commits, then invalidates the cache)."""

@@ -890,7 +890,8 @@
       "users": "Users",
       "ops": "Operations",
       "system": "System",
-      "tickets": "Tickets"
+      "tickets": "Tickets",
+      "feed": "Feed"
     },
     "staff": "Staff",
     "pageStats": {
@@ -975,7 +976,24 @@
     "candleM1Retention": "1-minute candle retention (days)",
     "strategyPlatformTitle": "Custom Strategy Platform",
     "strategyMaxPerUser": "Max strategies per user",
-    "strategyProOnly": "PRO-exclusive"
+    "strategyProOnly": "PRO-exclusive",
+    "feedTitle": "Feed Symbol Configuration",
+    "feedSubtitle": "Manage which symbols the gateway pushes. Changes take effect within ~1 minute without a gateway restart.",
+    "feedColDisplay": "Display name",
+    "feedColBroker": "Broker symbol",
+    "feedColEnabled": "Enabled",
+    "feedAddSymbol": "Add symbol",
+    "feedRemove": "Remove",
+    "feedSave": "Save configuration",
+    "feedDisplayPlaceholder": "Display name",
+    "feedBrokerPlaceholder": "Search broker symbols…",
+    "feedDisplayRequired": "Display name is required",
+    "feedBrokerRequired": "Broker symbol is required",
+    "feedNoBrokerSymbols": "No broker symbol data yet. Make sure the gateway is running and connected to the broker server.",
+    "feedBrokerCatalogueHint": "Select from the broker catalogue to auto-fill the broker name; you can also type it manually.",
+    "feedSymbolAdded": "Added",
+    "feedSaved": "Feed configuration saved",
+    "feedSaveError": "Failed to save"
   },
   "discipline": {
     "title": "Discipline Score",

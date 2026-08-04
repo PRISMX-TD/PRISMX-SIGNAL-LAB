@@ -378,6 +378,25 @@ export interface AdminStrategySettings {
   proOnly: boolean
 }
 
+// 管理后台：行情品种配置 / admin: market-feed symbol configuration
+export interface AdminFeedSymbolEntry {
+  display: string
+  broker: string
+  enabled: boolean
+}
+
+export interface AdminFeedSymbols {
+  symbols: AdminFeedSymbolEntry[]
+}
+
+// 管理后台：券商品种清单条目 / admin: a broker-symbol catalogue entry
+export interface BrokerSymbolEntry {
+  name: string
+  description: string
+  digits: number
+  path: string
+}
+
 // 六条新手预设，与后端 presets.TEMPLATE_KEYS 一致。载入后条件完全可改，引擎侧
 // 不认识 template，它只记录「这条策略当初从哪个预设起步」。
 // The six beginner presets, matching the backend's presets.TEMPLATE_KEYS. The

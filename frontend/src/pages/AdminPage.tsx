@@ -7,7 +7,7 @@ import { adminApi } from '../api/client'
 import { fmtTime, localizeApiError } from '../api/utils'
 import Select from '../components/Select'
 import PageStatsCard from '../components/admin/PageStatsCard'
-import type { AdminBrokerSettings, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
+import type { AdminBrokerSettings, AdminFeedSymbolEntry, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, BrokerSymbolEntry, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
 const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
@@ -23,8 +23,8 @@ const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
 // by blast radius: ops changes commercial terms users see and pay, system
 // changes how the backend computes and stores. Lumping them together is what
 // made the original single page an unnavigable pile of seven config groups.
-type AdminTab = 'data' | 'users' | 'ops' | 'system' | 'tickets'
-const ADMIN_TABS: AdminTab[] = ['data', 'users', 'ops', 'system', 'tickets']
+type AdminTab = 'data' | 'users' | 'ops' | 'system' | 'tickets' | 'feed'
+const ADMIN_TABS: AdminTab[] = ['data', 'users', 'ops', 'system', 'tickets', 'feed']
 
 interface Draft {
   role: UserRole
@@ -343,6 +343,15 @@ export default function AdminPage() {
   const [strategySettings, setStrategySettings] = useState<AdminStrategySettings | null>(null)
   const [savingStrategy, setSavingStrategy] = useState(false)
 
+  // 行情品种配置 / feed symbol configuration
+  const [feedSymbols, setFeedSymbols] = useState<AdminFeedSymbolEntry[]>([])
+  const [brokerCatalogue, setBrokerCatalogue] = useState<BrokerSymbolEntry[]>([])
+  const [savingFeed, setSavingFeed] = useState(false)
+  // 新增行的草稿：display + broker + 券商下拉是否展开
+  const [newDisplay, setNewDisplay] = useState('')
+  const [newBroker, setNewBroker] = useState('')
+  const [showBrokerDropdown, setShowBrokerDropdown] = useState(false)
+
   // 批量选择与批量修改：勾选后统一改角色/等级，空字符串代表"不修改该字段"
   // bulk selection & bulk edit: '' means "leave this field unchanged"
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -366,7 +375,7 @@ export default function AdminPage() {
   const load = async (opts: { q?: string; plan?: string } = {}) => {
     setLoading(true)
     try {
-      const [usersRes, metricsRes, pageStatsRes, settingsRes, pricingRes, trialRes, disciplineRes, candleRes, strategyRes] = await Promise.all([
+      const [usersRes, metricsRes, pageStatsRes, settingsRes, pricingRes, trialRes, disciplineRes, candleRes, strategyRes, feedRes, brokerRes] = await Promise.all([
         adminApi.listUsers({ q: (opts.q ?? query) || undefined, plan: (opts.plan ?? planFilter) || undefined, limit: 100 }),
         adminApi.metrics(),
         adminApi.pageStats(pageStatsDays),
@@ -376,6 +385,8 @@ export default function AdminPage() {
         adminApi.getDiscipline(),
         adminApi.getCandleHistory(),
         adminApi.getStrategySettings(),
+        adminApi.getFeedSymbols(),
+        adminApi.getBrokerSymbols(),
       ])
       setUsers(usersRes.users)
       setTotal(usersRes.total)
@@ -389,6 +400,8 @@ export default function AdminPage() {
       setDiscipline(disciplineRes)
       setCandleSettings(candleRes)
       setStrategySettings(strategyRes)
+      setFeedSymbols(feedRes.symbols)
+      setBrokerCatalogue(brokerRes.symbols)
     } catch (err) {
       showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.loadError'))
     } finally {
@@ -495,6 +508,19 @@ export default function AdminPage() {
       showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
     } finally {
       setSavingStrategy(false)
+    }
+  }
+
+  const saveFeedSymbols = async () => {
+    setSavingFeed(true)
+    try {
+      const updated = await adminApi.updateFeedSymbols({ symbols: feedSymbols })
+      setFeedSymbols(updated.symbols)
+      showToast('ok', t('admin.feedSaved'))
+    } catch (err) {
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.feedSaveError'))
+    } finally {
+      setSavingFeed(false)
     }
   }
 
@@ -1033,6 +1059,156 @@ export default function AdminPage() {
       )}
 
       {tab === 'tickets' && <AdminTicketsPanel />}
+
+      {tab === 'feed' && (
+        <div className="glass mb-5 p-5">
+          <div className="mb-4">
+            <h3 className="font-display text-lg font-semibold text-slate-100">{t('admin.feedTitle')}</h3>
+            <p className="mt-1 text-sm text-slate-400">{t('admin.feedSubtitle')}</p>
+          </div>
+
+          {/* 当前品种列表 / current symbol list */}
+          <div className="mb-4 overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-slate-500">
+                  <th className="px-3 py-2 font-medium">{t('admin.feedColDisplay')}</th>
+                  <th className="px-3 py-2 font-medium">{t('admin.feedColBroker')}</th>
+                  <th className="px-3 py-2 font-medium w-16">{t('admin.feedColEnabled')}</th>
+                  <th className="px-3 py-2 font-medium w-16"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {feedSymbols.map((s, i) => (
+                  <tr key={i} className="border-b border-white/5">
+                    <td className="px-3 py-2">
+                      <input
+                        className="input py-1 text-sm"
+                        value={s.display}
+                        onChange={(e) => {
+                          const next = [...feedSymbols]
+                          next[i] = { ...s, display: e.target.value.trimStart() }
+                          setFeedSymbols(next)
+                        }}
+                        placeholder={t('admin.feedDisplayPlaceholder')}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        className="input py-1 text-sm"
+                        value={s.broker}
+                        onChange={(e) => {
+                          const next = [...feedSymbols]
+                          next[i] = { ...s, broker: e.target.value.trimStart() }
+                          setFeedSymbols(next)
+                        }}
+                        placeholder={t('admin.feedBrokerPlaceholder')}
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={s.enabled}
+                        onChange={(e) => {
+                          const next = [...feedSymbols]
+                          next[i] = { ...s, enabled: e.target.checked }
+                          setFeedSymbols(next)
+                        }}
+                        className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <button
+                        className="btn-ghost px-2 py-1 text-xs text-down hover:text-down/80"
+                        onClick={() => setFeedSymbols(feedSymbols.filter((_, j) => j !== i))}
+                      >
+                        {t('admin.feedRemove')}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* 添加新品种行 / add new symbol row */}
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <input
+              className="input w-32 py-1.5 text-sm"
+              value={newDisplay}
+              onChange={(e) => setNewDisplay(e.target.value)}
+              placeholder={t('admin.feedDisplayPlaceholder')}
+              maxLength={20}
+            />
+            <div className="relative">
+              <input
+                className="input w-40 py-1.5 text-sm"
+                value={newBroker}
+                onChange={(e) => {
+                  setNewBroker(e.target.value)
+                  setShowBrokerDropdown(true)
+                }}
+                onFocus={() => setShowBrokerDropdown(true)}
+                onBlur={() => setTimeout(() => setShowBrokerDropdown(false), 200)}
+                placeholder={t('admin.feedBrokerPlaceholder')}
+                maxLength={20}
+              />
+              {showBrokerDropdown && brokerCatalogue.length > 0 && (
+                <div className="absolute left-0 top-full z-30 mt-1 max-h-48 w-60 overflow-y-auto rounded-lg border border-white/10 bg-slate-850 shadow-lg">
+                  {brokerCatalogue
+                    .filter((b) => !newBroker || b.name.toUpperCase().includes(newBroker.toUpperCase()))
+                    .slice(0, 50)
+                    .map((b) => (
+                      <button
+                        key={b.name}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-300 transition hover:bg-white/5"
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          setNewBroker(b.name)
+                          setShowBrokerDropdown(false)
+                        }}
+                      >
+                        <span className="font-mono text-xs text-prism-300">{b.name}</span>
+                        {b.description && <span className="truncate text-xs text-slate-500">{b.description}</span>}
+                      </button>
+                    ))}
+                  {brokerCatalogue.filter((b) => !newBroker || b.name.toUpperCase().includes(newBroker.toUpperCase())).length === 0 && (
+                    <div className="px-3 py-2 text-xs text-slate-500">—</div>
+                  )}
+                </div>
+              )}
+            </div>
+            <button
+              className="btn-primary px-4 py-1.5 text-sm disabled:opacity-40"
+              disabled={!newDisplay.trim() || !newBroker.trim()}
+              onClick={() => {
+                if (!newDisplay.trim() || !newBroker.trim()) return
+                setFeedSymbols([...feedSymbols, { display: newDisplay.trim().toUpperCase(), broker: newBroker.trim(), enabled: true }])
+                setNewDisplay('')
+                setNewBroker('')
+                showToast('ok', t('admin.feedSymbolAdded'))
+              }}
+            >
+              {t('admin.feedAddSymbol')}
+            </button>
+          </div>
+          <p className="mb-4 text-xs text-slate-500">{t('admin.feedBrokerCatalogueHint')}</p>
+
+          {brokerCatalogue.length === 0 && (
+            <div className="mb-4 rounded-lg border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-sm text-amber-300">
+              {t('admin.feedNoBrokerSymbols')}
+            </div>
+          )}
+
+          <button
+            className="btn-primary px-5 py-2 text-sm disabled:opacity-40"
+            disabled={savingFeed}
+            onClick={saveFeedSymbols}
+          >
+            {savingFeed ? t('common.loading') : t('admin.feedSave')}
+          </button>
+        </div>
+      )}
 
       {tab === 'users' && (
         <>
