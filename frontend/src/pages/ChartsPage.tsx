@@ -1599,6 +1599,19 @@ export default function ChartsPage() {
           setLastPrice(r.bars[r.bars.length - 1].c)
           recomputeIndicators()
           setDayStats(computeDayStats(candlesRef.current))
+          // 自动跟踪最新 bar：可视范围在最新 bar 附近时跟随滚动，避免新 bar
+          // 落在屏幕右侧之外。用户查看历史时（右边缘远离最新 bar）不打扰。
+          // Auto-follow the latest bar when the viewport is near it, so new
+          // bars don't land off-screen to the right. Don't disturb when the
+          // user is looking at history (right edge far from latest bar).
+          const timeScale = chartRef.current?.timeScale()
+          if (timeScale) {
+            const range = timeScale.getVisibleLogicalRange()
+            const latestT = r.bars[r.bars.length - 1].t
+            if (range && (range.to === null || latestT - (range.to as number) < 600)) {
+              timeScale.scrollToRealTime()
+            }
+          }
         }
         const fresh = r.updatedAt != null && Date.now() / 1000 - r.updatedAt < STALE_MS / 1000
         setStale(r.updatedAt != null && !fresh)
