@@ -526,6 +526,12 @@ export default function ChartsPage() {
   // read and written inside the callback and never rendered.
   const loadingOlderRef = useRef(false)
   const hasMoreHistoryRef = useRef(true)
+  // 用户当前是否在跟踪实时行情（可视范围右边缘在最新 bar 附近）。
+  // 初始为 true，用户手动左滑查看历史后变 false，滑回右侧恢复。
+  // Whether the user is following live data (right edge near the latest bar).
+  // Initially true; set false when the user scrolls left to history, restored
+  // when they scroll back to the right edge.
+  const isFollowingLiveRef = useRef(true)
 
   // 当前品种/周期的完整 OHLCV 历史（升序），指标计算的唯一数据来源。与主
   // K 线 series 分开维护，因为指标要用到全部历史做窗口计算，而主 series 的
@@ -1478,6 +1484,7 @@ export default function ChartsPage() {
     candlesRef.current = []
     loadingOlderRef.current = false
     hasMoreHistoryRef.current = true
+    isFollowingLiveRef.current = true
 
     // 把一根 bar 应用到图表：只在其时间 >= 已应用的最新时间时更新，避免
     // lightweight-charts 对更早时间抛错而中断实时刷新。
@@ -1486,7 +1493,17 @@ export default function ChartsPage() {
     // refresh stalls.
     const applyBar = (b: Candle) => {
       if (b.t < lastTimeRef.current) return
-      series.update(toLwPoint(b))
+      const point = toLwPoint(b)
+      // 第一根 bar 必须用 setData 初始化 series，否则 update 在空 series
+      // 上会失败。history 为空（数据库尚无该周期数据）时靠这里冷启动。
+      // The first bar must use setData to initialise the series; update on
+      // an empty series fails. This cold-starts the chart when history
+      // returns empty (no data for this interval in the DB yet).
+      if (lastTimeRef.current === 0) {
+        series.setData([point])
+      } else {
+        series.update(point)
+      }
       lastTimeRef.current = b.t
     }
 
@@ -1581,6 +1598,11 @@ export default function ChartsPage() {
 
     const onRangeChange = (range: { from: number; to: number } | null) => {
       if (range && range.from < HISTORY_PREFETCH_BARS) loadOlder()
+      // 跟踪用户是否在最新 bar 附近：右边缘距最新 bar 不到 5 分钟算"跟随实时"
+      // Track whether viewport is near the live edge (~5 min from latest bar)
+      if (range && range.to !== null && lastTimeRef.current > 0) {
+        isFollowingLiveRef.current = (lastTimeRef.current - range.to) < 300
+      }
     }
     chartRef.current?.timeScale().subscribeVisibleLogicalRangeChange(onRangeChange)
 
@@ -1599,18 +1621,10 @@ export default function ChartsPage() {
           setLastPrice(r.bars[r.bars.length - 1].c)
           recomputeIndicators()
           setDayStats(computeDayStats(candlesRef.current))
-          // 自动跟踪最新 bar：可视范围在最新 bar 附近时跟随滚动，避免新 bar
-          // 落在屏幕右侧之外。用户查看历史时（右边缘远离最新 bar）不打扰。
-          // Auto-follow the latest bar when the viewport is near it, so new
-          // bars don't land off-screen to the right. Don't disturb when the
-          // user is looking at history (right edge far from latest bar).
-          const timeScale = chartRef.current?.timeScale()
-          if (timeScale) {
-            const range = timeScale.getVisibleLogicalRange()
-            const latestT = r.bars[r.bars.length - 1].t
-            if (range && (range.to === null || latestT - (range.to as number) < 600)) {
-              timeScale.scrollToRealTime()
-            }
+          // 自动跟踪最新 bar：仅在用户未手动离开实时位置时跟随滚动
+          // Auto-follow the latest bar only when the user hasn't scrolled away
+          if (isFollowingLiveRef.current) {
+            chartRef.current?.timeScale().scrollToRealTime()
           }
         }
         const fresh = r.updatedAt != null && Date.now() / 1000 - r.updatedAt < STALE_MS / 1000
