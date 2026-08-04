@@ -46,6 +46,12 @@ config_poll_interval = 60
 stale_quote_seconds = 300
 ; 单个周期单次回补最多推多少根 / max bars per interval in one backfill
 max_backfill_bars = 500
+; 券商服务器所在时区相对 UTC 的偏移（小时）。H4/D1 的 K 线边界在不同时区不同，必须对齐
+; 券商时区才能算出正确的 K 线和趋势。默认 +2（EET 夏令时），冬令时改为 +3。
+; Broker timezone offset vs UTC in hours. H4/D1 boundaries differ across timezones,
+; must match the broker for correct bars and trends. Default +2 (EET DST), change to
+; +3 for winter.
+broker_gmt_offset = 2
 
 [runtime]
 ; 日志级别：DEBUG / INFO / WARNING / ERROR

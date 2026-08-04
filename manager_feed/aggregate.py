@@ -53,25 +53,26 @@ TREND_INTERVALS: tuple[str, ...] = ("M1", "M5", "M15", "M30", "H1", "H4")
 INTERVAL_SECONDS["M30"] = 30 * 60
 
 
-def bucket_start(t: int, interval: str) -> int:
-    """这个时间戳所属高周期 bar 的起始时刻（UTC 对齐）。
+def bucket_start(t: int, interval: str, tz_offset_seconds: int = 0) -> int:
+    """这个时间戳所属高周期 bar 的起始时刻（券商时区对齐）。
 
-    直接按 UTC 整点/午夜对齐，而不是券商当地时间。后端 _grid_seconds() 对 H1/H4/D1 只
-    要求落在 1800 秒网格上（为了兼容 GMT+5:30 这类半小时时区的券商），UTC 对齐天然满足
-    该约束，不会被网格闸门拦掉。
+    ``tz_offset_seconds`` 为券商服务器所在时区相对 UTC 的秒数偏移。默认 0 对
+    M1/M5/M15/M30/H1 这些整除 3600 的周期无影响（它们的边界与时区无关），但对
+    H4 和 D1 至关重要——不同时区下的 4 小时/日窗口覆盖的是不同段的数据，OHLC
+    完全不同，趋势方向自然对不上。
 
-    The start of the higher-interval bar this timestamp belongs to, UTC-aligned.
+    The start of the higher-interval bar, broker-timezone-aligned.
 
-    Aligning to UTC hours/midnight rather than broker-local time: the backend's
-    _grid_seconds() only requires H1/H4/D1 to sit on a 1800s grid (to accommodate
-    half-hour-offset brokers such as GMT+5:30), and UTC alignment satisfies that
-    by construction, so the grid gate won't reject these bars.
+    ``tz_offset_seconds`` is the broker timezone offset from UTC in seconds.
+    Default 0 has no effect on M1/M5/M15/M30/H1 (tz-agnostic boundaries), but
+    is essential for H4 and D1 — their windows cover different stretches across
+    timezones, yielding different OHLC and therefore different trend directions.
     """
     size = INTERVAL_SECONDS[interval]
-    return (t // size) * size
+    return ((t - tz_offset_seconds) // size) * size + tz_offset_seconds
 
 
-def aggregate(m1_bars: list[dict], interval: str) -> list[dict]:
+def aggregate(m1_bars: list[dict], interval: str, tz_offset_seconds: int = 0) -> list[dict]:
     """把 M1 聚合成指定周期，只返回完整且已收盘的 bar。
 
     m1_bars 必须按时间升序，每项形如
@@ -81,6 +82,8 @@ def aggregate(m1_bars: list[dict], interval: str) -> list[dict]:
     数据尚未同步完都会让某一桶缺 M1，此时生成出来的 bar 是残缺的（比如一根 H4 只用
     了 3 根 M1 算出来的 OHLC），推给后端就是垃圾数据。缺就不生成，等下一轮数据齐了
     自然会补上。
+
+    ``tz_offset_seconds`` 券商时区偏移（秒），传给 bucket_start 对齐 H4/D1 边界。
 
     Aggregate M1 into `interval`, returning only complete, closed bars.
 
@@ -92,6 +95,9 @@ def aggregate(m1_bars: list[dict], interval: str) -> list[dict]:
     bucket short, and a bar built from a partial bucket is malformed (an H4 whose
     OHLC came from 3 M1 bars, say) — junk once pushed. A short bucket is skipped;
     a later pass emits it once the data is there.
+
+    ``tz_offset_seconds`` broker timezone offset in seconds, forwarded to
+    bucket_start for correct H4/D1 boundary alignment.
     """
     if interval == "M1":
         return list(m1_bars)
@@ -103,7 +109,7 @@ def aggregate(m1_bars: list[dict], interval: str) -> list[dict]:
 
     buckets: dict[int, list[dict]] = {}
     for bar in m1_bars:
-        buckets.setdefault(bucket_start(bar["t"], interval), []).append(bar)
+        buckets.setdefault(bucket_start(bar["t"], interval, tz_offset_seconds), []).append(bar)
 
     out: list[dict] = []
     skipped_incomplete = 0
@@ -134,12 +140,15 @@ def aggregate(m1_bars: list[dict], interval: str) -> list[dict]:
     return out
 
 
-def drop_forming_bar(bars: list[dict], interval: str, now: int) -> list[dict]:
+def drop_forming_bar(bars: list[dict], interval: str, now: int,
+                     tz_offset_seconds: int = 0) -> list[dict]:
     """丢掉仍在形成中的最后一根。
 
     必须做这件事：后端 feed_candles 对每根新收盘的 bar 触发策略求值——写信号、发推送、
     推进 last_signal_bar_t 去重游标。把未收盘的 bar 当成已收盘推上去，会用一根还在变
     的价格产生信号，并且把游标提前推过去，导致这根真正收盘时反而被判为已处理。
+
+    ``tz_offset_seconds`` 券商时区偏移，传给 bucket_start 对齐 H4/D1 判定。
 
     Drop the still-forming final bar.
 
@@ -148,7 +157,10 @@ def drop_forming_bar(bars: list[dict], interval: str, now: int) -> list[dict]:
     cursor. Pushing an unfinished bar as closed produces a signal from a price that
     is still moving and advances the cursor past it, so the genuine close is later
     judged already-handled.
+
+    ``tz_offset_seconds`` broker timezone offset, forwarded to bucket_start for
+    correct H4/D1 forming-bar detection.
     """
     size = INTERVAL_SECONDS[interval]
-    current = (now // size) * size
+    current = ((now - tz_offset_seconds) // size) * size + tz_offset_seconds
     return [b for b in bars if b["t"] < current]

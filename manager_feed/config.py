@@ -64,6 +64,15 @@ class Config:
     trend_slow_len: int = 30   # InpTrendSlowLen
     trend_slope_len: int = 3   # InpTrendSlopeLen
 
+    # 券商服务器所在时区相对 UTC 的偏移（小时）。H4/D1 各时区的 K 线边界不同，
+    # 必须对齐券商时区，否则聚合出来的 bar 与 MT5 终端的 bar 不是同一段数据。
+    # 默认 +2（EET 夏令时，大多数外汇券商）。冬令时可能需要调成 +3。
+    # Broker timezone offset vs UTC in hours. H4/D1 bar boundaries differ across
+    # timezones; the aggregation must match the broker's, or the bars differ from
+    # MT5 terminal bars. Default is +2 (EET DST, common for forex brokers).
+    # Winter adjustment may require +3.
+    broker_gmt_offset: int = 2
+
     # --- 运行 / runtime ---
     log_level: str = "INFO"
     dry_run: bool = False  # 只算不推，用于验证聚合 / compute without pushing
@@ -152,6 +161,7 @@ def load_config(path: Path | None = None) -> Config:
             cfg.config_poll_interval = f.getint("config_poll_interval", cfg.config_poll_interval)
             cfg.stale_quote_seconds = f.getint("stale_quote_seconds", cfg.stale_quote_seconds)
             cfg.max_backfill_bars = f.getint("max_backfill_bars", cfg.max_backfill_bars)
+            cfg.broker_gmt_offset = f.getint("broker_gmt_offset", cfg.broker_gmt_offset)
             raw_symbols = f.get("symbols", "").strip()
             if raw_symbols:
                 parsed = _parse_symbols(raw_symbols)
@@ -175,6 +185,7 @@ def load_config(path: Path | None = None) -> Config:
         "BACKEND_URL": ("backend_url", str),
         "EA_TOKEN": ("ea_token", str),
         "FEED_LOG_LEVEL": ("log_level", str),
+        "BROKER_GMT_OFFSET": ("broker_gmt_offset", int),
     }
     for env_key, (attr, caster) in env_map.items():
         raw = os.environ.get(env_key)

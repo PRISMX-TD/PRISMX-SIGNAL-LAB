@@ -148,6 +148,7 @@ class Gateway:
         # When each symbol's tick last changed, to judge a stale (closed) quote.
         self._last_tick_change: dict[str, float] = {}
         self._last_tick_value: dict[str, tuple[float, float]] = {}
+        self._tz_sec = cfg.broker_gmt_offset * 3600
 
     # ---------- 生命周期 / lifecycle ----------
 
@@ -348,7 +349,7 @@ class Gateway:
                 continue
 
             for interval in CANDLE_INTERVALS:
-                bars = drop_forming_bar(aggregate(m1, interval), interval, now)
+                bars = drop_forming_bar(aggregate(m1, interval, self._tz_sec), interval, now, self._tz_sec)
                 if not bars:
                     continue
                 series.append({
@@ -389,7 +390,7 @@ class Gateway:
                 m1 = self._fetch_m1_span(broker, span)
                 if not m1:
                     continue
-                bars = drop_forming_bar(aggregate(m1, interval), interval, now_i)
+                bars = drop_forming_bar(aggregate(m1, interval, self._tz_sec), interval, now_i, self._tz_sec)
                 if not bars:
                     continue
                 if len(bars) > self.cfg.max_backfill_bars:
@@ -419,7 +420,7 @@ class Gateway:
             closes_by_interval: dict[str, list[float]] = {}
             m5_last_bar: dict | None = None
             for interval in TREND_INTERVALS:
-                bars = drop_forming_bar(aggregate(m1, interval), interval, now)
+                bars = drop_forming_bar(aggregate(m1, interval, self._tz_sec), interval, now, self._tz_sec)
                 if not bars:
                     continue
                 closes_by_interval[interval] = [b["c"] for b in bars]

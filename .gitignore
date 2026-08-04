@@ -94,6 +94,11 @@ $RECYCLE.BIN/
 **/.claude/
 .superpowers/
 
+# ===== 运行时产生目录（不纳入仓库）=====
+# Runtime directories, never committed
+logs/
+bases/
+
 # ===== 未被代码引用的本地素材（不纳入仓库）=====
 # Unused local-only assets, not referenced by any code, kept out of the repo
 logo/
