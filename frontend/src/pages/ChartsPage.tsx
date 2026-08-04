@@ -1494,14 +1494,11 @@ export default function ChartsPage() {
     const applyBar = (b: Candle) => {
       if (b.t < lastTimeRef.current) return
       const point = toLwPoint(b)
-      // 第一根 bar 必须用 setData 初始化 series，否则 update 在空 series
-      // 上会失败。history 为空（数据库尚无该周期数据）时靠这里冷启动。
-      // The first bar must use setData to initialise the series; update on
-      // an empty series fails. This cold-starts the chart when history
-      // returns empty (no data for this interval in the DB yet).
       if (lastTimeRef.current === 0) {
+        console.log('[chart] setData first bar t=', b.t, 'o=', b.o, 'c=', b.c)
         series.setData([point])
       } else {
+        console.log('[chart] update bar t=', b.t, 'lastT=', lastTimeRef.current, 'gap(s)=', b.t - lastTimeRef.current)
         series.update(point)
       }
       lastTimeRef.current = b.t
@@ -1609,6 +1606,9 @@ export default function ChartsPage() {
     const poll = () => {
       chartApi.latest(symbol, interval).then((r) => {
         if (!alive) return
+        if (r.bars.length > 0) {
+          console.log('[chart] poll got', r.bars.length, 'bars t=[', r.bars[0]?.t, '..', r.bars[r.bars.length - 1]?.t, '] followLive=', isFollowingLiveRef.current)
+        }
         for (const b of r.bars) applyBar(b)
         for (const b of r.bars) mergeCandle(b)
         // 追加新出现的 bar 时间，保持 barTimesRef 与图表同步 / keep bar times in sync
