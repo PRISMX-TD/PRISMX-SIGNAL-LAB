@@ -251,3 +251,103 @@ def unbind_gateway_account(
 
     logger.info("Gateway 解绑: user=%s login=%s", user.id, login)
     return {"ok": True}
+
+
+# ---------- 持仓轮询 ----------
+# Bridge 账号的持仓由桥接每 1.5 秒 POST /bridge/positions 上报，前端的持仓列表、
+# 图表标记、自动仓管都挂在那条链路上。Gateway 账号没有桥接，所以这里由后端主动
+# 轮询 gateway 补上同一条链路，推送的消息格式与 /bridge/positions 完全一致。
+#
+# Bridge accounts report positions via POST /bridge/positions every 1.5s, which
+# is what feeds the UI position list, chart markers and auto-manage. Gateway
+# accounts have no bridge, so the backend polls the gateway itself and emits the
+# exact same payload to keep those features working.
+GATEWAY_POSITIONS_INTERVAL = 2.0
+
+
+async def gateway_positions_loop() -> None:
+    """周期性拉取 gateway 账号持仓并推送给前端。"""
+    import asyncio
+
+    from starlette.concurrency import run_in_threadpool
+
+    from app.core.database import SessionLocal
+    from app.services.auto_manage import evaluate_positions
+    from app.services.connection_manager import manager
+    from app.services.trade_performance import mark_positions_seen
+
+    def _gateway_accounts() -> list[tuple[str, str]]:
+        """(user_id, login) 列表。只取有 WS 连接的用户，避免空转。"""
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(MT5Account.user_id, MT5Account.login)
+                .filter(MT5Account.source == "gateway")
+                .all()
+            )
+            return [(r[0], r[1]) for r in rows]
+        finally:
+            db.close()
+
+    while True:
+        try:
+            pairs = await run_in_threadpool(_gateway_accounts)
+
+            # 按用户聚合：一个用户可能绑了多个 gateway 账号，前端的 POSITIONS
+            # 消息是"该用户全部持仓"的快照，必须一次推完而不是每账号推一次。
+            by_user: dict[str, list[str]] = {}
+            for user_id, login in pairs:
+                by_user.setdefault(user_id, []).append(login)
+
+            # 没有前端连着的用户不必去打扰 gateway
+            connected = set(manager.connected_user_ids())
+
+            for user_id, logins in by_user.items():
+                if user_id not in connected:
+                    continue
+
+                data: list[dict] = []
+                for login in logins:
+                    positions, err = await gw_get_positions(int(login))
+                    if err:
+                        logger.warning("Gateway 持仓读取失败 login=%s: %s", login, err)
+                        continue
+                    for p in positions:
+                        data.append({
+                            "ticket": p.ticket,
+                            "symbol": p.symbol,
+                            "side": p.side,
+                            "volume": p.volume,
+                            "profit": p.profit,
+                            "entryPrice": p.price_open,
+                            "currentPrice": p.price_current,
+                            "stopLoss": p.stop_loss,
+                            "takeProfit": p.take_profit,
+                            "login": login,
+                            "comment": p.comment,
+                        })
+
+                manager.set_positions(user_id, data)
+                await manager.push_to_client(user_id, {"type": "POSITIONS", "data": data})
+
+                # 与 /bridge/positions 保持一致：驱动胜率对账与自动仓管。
+                # 任一步失败都不影响持仓推送本身。
+                db = SessionLocal()
+                try:
+                    try:
+                        await run_in_threadpool(mark_positions_seen, db, user_id, data)
+                    except Exception:
+                        logger.exception("gateway position reconciliation failed (user=%s)", user_id)
+                    try:
+                        await run_in_threadpool(evaluate_positions, db, user_id, data)
+                    except Exception:
+                        logger.exception("gateway auto_manage failed (user=%s)", user_id)
+                finally:
+                    db.close()
+
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("gateway_positions_loop 异常")
+
+        await asyncio.sleep(GATEWAY_POSITIONS_INTERVAL)

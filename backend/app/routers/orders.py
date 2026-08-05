@@ -224,7 +224,13 @@ def place_order(
         volume=req.volume,
         sl=stop_loss or None,
         tp=take_profit or None,
-        mt5_login=req.mt5Login,
+        # 没指定账号时回填上面解析出的唯一在线账号。桥接账号靠 bridge 的兜底
+        # 路由也能成，但 gateway 账号必须有明确 login 才能直接执行，否则指令会
+        # 一直悬在 PENDING（gateway 没有 bridge 来取）。
+        # Fall back to the single online account resolved above. The bridge can
+        # route without it, but gateway accounts need an explicit login to
+        # execute — otherwise the command sits PENDING with no bridge to poll it.
+        mt5_login=req.mt5Login or (target_acc.login if target_acc else None),
         status="PENDING",
     )
     result = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
@@ -359,6 +365,20 @@ def _commit_order_or_existing(db: Session, order: Order, user_id: str, client_or
         raise
     db.refresh(order)
     return _serialize(order)
+
+
+def _resolve_single_online_login(db: Session, user_id: str) -> str | None:
+    """恰好一个账号在线时返回它的 login，否则返回 None。
+
+    用于 CLOSE/MODIFY 未指定 mt5Login 的情况：bridge 账号本来就有兜底路由，
+    但 gateway 账号必须有明确 login 才能直接执行。
+    Returns the login when exactly one account is online, else None. Used when
+    CLOSE/MODIFY omit mt5Login: the bridge has its own fallback routing, but
+    gateway accounts need an explicit login to execute.
+    """
+    accounts = db.query(MT5Account).filter(MT5Account.user_id == user_id).all()
+    online = [a for a in accounts if is_account_online(a)]
+    return online[0].login if len(online) == 1 else None
 
 
 def _is_gateway_account(db: Session, mt5_login: str | None) -> bool:
@@ -628,7 +648,7 @@ def close_position(
         side=req.side,
         volume=req.volume or 0.0,
         ticket=req.ticket,
-        mt5_login=req.mt5Login,
+        mt5_login=req.mt5Login or _resolve_single_online_login(db, user.id),
         status="PENDING",
     )
     result = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
@@ -678,7 +698,7 @@ def modify_position(
         ticket=req.ticket,
         sl=req.stopLoss,
         tp=req.takeProfit,
-        mt5_login=req.mt5Login,
+        mt5_login=req.mt5Login or _resolve_single_online_login(db, user.id),
         status="PENDING",
     )
     result = _commit_order_or_existing(db, order, user.id, req.clientOrderId)

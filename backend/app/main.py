@@ -17,6 +17,7 @@ from app.services.deps import require_admin
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
 from app.routers import account, admin, auth, automation, bridge, chart, ea, gateway, notifications, orders, payments, sentiment, signals, strategies, telemetry, tickets, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
+from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
 from app.services.candle_store import candle_retention_sweep_loop
 from app.services.discipline import discipline_snapshot_loop
@@ -81,6 +82,11 @@ async def lifespan(app: FastAPI):
     # K 线历史保留策略：每天清理过期的 1 分钟线（见 services/candle_store.py）
     # Candle retention sweep: trims expired 1-minute candles daily
     candle_retention_task = asyncio.create_task(candle_retention_sweep_loop())
+    # Gateway 账号持仓轮询：gateway 账号没有桥接上报，持仓列表/图表标记/自动仓管
+    # 这条链路要靠后端主动拉（见 routers/gateway.py）。
+    # Gateway position polling: gateway accounts have no bridge report, so the
+    # backend pulls positions to feed the same UI/auto-manage path.
+    gateway_positions_task = asyncio.create_task(gateway_positions_loop())
     yield
     # 关闭：停止后台任务 / shutdown: stop background tasks
     if task is not None:
@@ -94,6 +100,7 @@ async def lifespan(app: FastAPI):
     plan_expiry_task.cancel()
     discipline_task.cancel()
     candle_retention_task.cancel()
+    gateway_positions_task.cancel()
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
