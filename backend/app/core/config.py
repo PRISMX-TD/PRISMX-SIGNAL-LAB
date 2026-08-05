@@ -231,14 +231,30 @@ class Settings(BaseSettings):
     DB_POOL_RECYCLE: int = 1800
 
     # MT5 Gateway（C# 程序，直接通过 Manager API 操作 MT5，不需要 bridge 轮询）。
-    # Make Capital 用户的订单会走这条通道。Gateway 默认只监听本机 127.0.0.1，
-    # 所以这里的 URL 指向同机（后端与 gateway 部署在同一服务器上）。
-    # MT5 Gateway (C# app, talks to MT5 via Manager API directly — no bridge needed).
-    # Make Capital users' orders are routed through this channel. The gateway
-    # listens on 127.0.0.1 by default, so the URL points to localhost (backend
-    # and gateway run on the same server).
+    # Make Capital 用户的订单会走这条通道。
+    #
+    # ⚠️ 生产环境 gateway 跑在**另一台 Windows VPS** 上，不是后端同机——
+    # GATEWAY_URL 必须填那台 Windows VPS 的地址，而不是券商 MT5 服务器的地址
+    # （这两个 IP 曾被搞混，排查了很久）。默认值只适用于本地开发。
+    #
+    # MT5 Gateway (C# app, talks to MT5 via Manager API directly — no bridge
+    # needed). Make Capital users' orders are routed through this channel.
+    # In production the gateway runs on a separate Windows VPS, so GATEWAY_URL
+    # must point at that VPS — not at the broker's MT5 server. The default only
+    # applies to local development.
     GATEWAY_URL: str = "http://127.0.0.1:8800"
     GATEWAY_TOKEN: str = ""
+
+    # Gateway 下单时写入 MT5 comment 的前缀，必须与 gateway.ini 的
+    # comment_prefix 一致。Manager API 的请求没有 magic 字段，只能靠 comment
+    # 识别"哪些仓位是本平台开的"——平仓明细入库时据此过滤（见
+    # routers/gateway.py 的 _save_closed_trades）。留空 = 不过滤（会把用户在
+    # MT5 客户端自己开的仓位也记进来）。
+    # Prefix written into the MT5 comment on gateway orders; must match
+    # gateway.ini's comment_prefix. Manager API requests have no magic field, so
+    # the comment is the only marker of platform-opened positions — used to
+    # filter closed-trade recording. Empty = no filtering.
+    GATEWAY_COMMENT_PREFIX: str = "PRISMX"
 
     # 反向代理信任列表：应用挂在同机 Nginx 反代后面，客户端真实 IP 在
     # X-Forwarded-For 头里。只有当直连对端（即 Nginx，本机 127.0.0.1）在此

@@ -4,6 +4,8 @@
 gateway HTTP 操作 MT5 Manager API。
 """
 import logging
+import time
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -13,11 +15,12 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter
-from app.models import MT5Account, User
+from app.models import ClosedTrade, MT5Account, User
 from app.schemas import SUFFIX_PATTERN
 from app.services.deps import get_current_user
 from app.services.gateway_client import (
     get_account as gw_get_account,
+    get_deals as gw_get_deals,
     get_positions as gw_get_positions,
     verify_account as gw_verify,
 )
@@ -258,15 +261,117 @@ def unbind_gateway_account(
 # 图表标记、自动仓管都挂在那条链路上。Gateway 账号没有桥接，所以这里由后端主动
 # 轮询 gateway 补上同一条链路，推送的消息格式与 /bridge/positions 完全一致。
 #
+# 同一个循环还顺带补了另外两条 Bridge 独有的链路（都是"Bridge 主动上报、
+# Gateway 没有对应实现"造成的功能缺口）：
+#   1. 账号资金刷新——Bridge 走 POST /bridge/poll 每轮 upsert balance/equity，
+#      Gateway 此前只在绑定时和手动 refresh 时写一次，账号卡片上的余额/净值
+#      永远是绑定那一刻的旧值。
+#   2. 平仓明细落库——Bridge 自己扫 MT5 历史后 POST /bridge/trade-history，
+#      Gateway 此前完全没有写入口，导致「已平仓交易明细」和交易表现永远为空。
+#
 # Bridge accounts report positions via POST /bridge/positions every 1.5s, which
 # is what feeds the UI position list, chart markers and auto-manage. Gateway
 # accounts have no bridge, so the backend polls the gateway itself and emits the
-# exact same payload to keep those features working.
+# exact same payload to keep those features working. The same loop also fills in
+# two other bridge-only pipelines: account balance/equity refresh and
+# closed-trade recording.
 GATEWAY_POSITIONS_INTERVAL = 2.0
+
+# 账号资金刷新间隔。资金变化不像持仓那样需要秒级跟随，而每次刷新都是一次
+# Manager API 往返，按每个账号独立计时，避免 2 秒一轮把 gateway 打满。
+# Account funds don't need sub-second freshness and each refresh is a Manager
+# API round-trip, so throttle per account instead of hitting it every 2s.
+GATEWAY_ACCOUNT_REFRESH_INTERVAL = 15.0
+
+# 平仓明细扫描间隔与回看窗口。
+#
+# 回看窗口的取值理由与 bridge/mt5_worker.py 的 _closed_trades_payload 一致：
+# 宁可反复查到同一笔成交（后端按 (user, deal_ticket) 唯一约束去重，重复上报
+# 无副作用），也不要因为窗口太窄漏掉一笔。但这里不需要 Bridge 那套服务器时区
+# 换算——Manager API 的 DealRequest 直接按 UTC 秒解读，传 Unix 时间戳即可。
+GATEWAY_DEALS_SCAN_INTERVAL = 10.0
+GATEWAY_DEALS_LOOKBACK_SECONDS = 15 * 60
+
+# MT5 成交类型/进出方向常量（对应 SDK 的 EnDealAction / EnDealEntry）
+_DEAL_ACTION_BUY = 0
+_DEAL_ACTION_SELL = 1
+_DEAL_ENTRY_OUT = 1
+_DEAL_ENTRY_INOUT = 2
+_DEAL_ENTRY_OUT_BY = 3
+
+
+def build_closed_trade_legs(deals: list, comment_prefix: str) -> list[dict]:
+    """从成交历史里挑出「本平台开的仓位的平仓腿」，算好净盈亏后返回待入库记录。
+
+    与 POST /bridge/trade-history 收到的载荷同构，只是数据源不同：Bridge 侧由
+    桥接程序在本地扫 MT5 历史并用魔术号码判断归属；Gateway 侧 Manager API 的
+    请求没有 magic 字段，只能靠 comment 前缀标记来源（见 gateway/Mt5Link.cs 的
+    BuildComment），所以这里用「该仓位的开仓腿 comment 是否带前缀」来判断。
+
+    手续费与隔夜利息按这笔平仓手数占该仓位总平仓手数的比例分摊，与
+    bridge/mt5_worker.py 的 fee_share 算法保持一致——否则同一笔交易在两条通道
+    下会算出不同的净盈亏。
+
+    纯函数，不碰数据库，便于单独验证。
+
+    Picks the closing legs of platform-opened positions out of a deal history
+    and computes each leg's net P&L. Mirrors the payload shape of
+    POST /bridge/trade-history; ownership is decided by the comment prefix
+    because Manager API requests carry no magic number. Pure function, no DB.
+    """
+    prefix = (comment_prefix or "").strip().upper()
+
+    # 先按仓位归组，才能判断归属并分摊费用
+    by_position: dict[int, list] = {}
+    for d in deals:
+        if d.position_id:
+            by_position.setdefault(int(d.position_id), []).append(d)
+
+    legs_out: list[dict] = []
+    for pos_id, legs in by_position.items():
+        # 归属判定：任一开仓腿的 comment 带前缀即认为是本平台开的仓位。
+        # 前缀为空 = 不过滤（会把用户自己在 MT5 客户端开的仓位也记进来）。
+        if prefix:
+            is_ours = any(
+                (d.comment or "").upper().startswith(prefix)
+                for d in legs
+                if d.entry not in (_DEAL_ENTRY_OUT, _DEAL_ENTRY_OUT_BY)
+            )
+            if not is_ours:
+                continue
+
+        out_legs = [
+            d for d in legs
+            if d.entry in (_DEAL_ENTRY_OUT, _DEAL_ENTRY_INOUT, _DEAL_ENTRY_OUT_BY)
+            and d.action in (_DEAL_ACTION_BUY, _DEAL_ACTION_SELL)
+            and d.volume > 0
+        ]
+        if not out_legs:
+            continue
+
+        total_fees = sum((d.commission or 0.0) + (d.storage or 0.0) for d in legs)
+        total_out_volume = sum(d.volume for d in out_legs)
+        if total_out_volume <= 0:
+            continue
+
+        for d in out_legs:
+            legs_out.append({
+                "symbol": d.symbol,
+                # 平仓成交方向与原仓位相反：SELL 平的是多单，BUY 平的是空单
+                "side": "BUY" if d.action == _DEAL_ACTION_SELL else "SELL",
+                "closeVolume": d.volume,
+                "closePrice": d.price,
+                "profit": (d.profit or 0.0) + total_fees * (d.volume / total_out_volume),
+                "positionTicket": pos_id,
+                "dealTicket": int(d.ticket),
+                "closedAt": datetime.fromtimestamp(d.time, tz=timezone.utc),
+            })
+
+    return legs_out
 
 
 async def gateway_positions_loop() -> None:
-    """周期性拉取 gateway 账号持仓并推送给前端。"""
+    """周期性拉取 gateway 账号持仓并推送给前端，同时刷新资金与平仓明细。"""
     import asyncio
 
     from starlette.concurrency import run_in_threadpool
@@ -289,6 +394,70 @@ async def gateway_positions_loop() -> None:
         finally:
             db.close()
 
+    def _save_account_funds(user_id: str, login: str, rsp) -> None:
+        """把 gateway 读回的资金写进 MT5Account，等价于 Bridge 的 /bridge/poll upsert。"""
+        db = SessionLocal()
+        try:
+            row = (
+                db.query(MT5Account)
+                .filter(
+                    MT5Account.user_id == user_id,
+                    MT5Account.login == login,
+                    MT5Account.source == "gateway",
+                )
+                .first()
+            )
+            if row is None:
+                return
+            row.balance = rsp.balance
+            row.equity = rsp.equity
+            row.leverage = rsp.leverage
+            if rsp.name:
+                row.account_name = rsp.name
+            db.commit()
+        finally:
+            db.close()
+
+    def _save_closed_trades(user_id: str, login: str, deals: list) -> int:
+        """把平仓成交写进 ClosedTrade，与 POST /bridge/trade-history 同一套语义。
+
+        归属判定与费用分摊在 build_closed_trade_legs 里；这里只负责落库去重。
+        回看窗口会反复查到同一笔成交，靠 (user_id, deal_ticket) 唯一约束挡掉。
+        """
+        legs = build_closed_trade_legs(deals, settings.GATEWAY_COMMENT_PREFIX)
+        if not legs:
+            return 0
+
+        inserted = 0
+        db = SessionLocal()
+        try:
+            for leg in legs:
+                db.add(ClosedTrade(
+                    user_id=user_id,
+                    mt5_login=login,
+                    symbol=leg["symbol"],
+                    side=leg["side"],
+                    close_volume=leg["closeVolume"],
+                    close_price=leg["closePrice"],
+                    profit=leg["profit"],
+                    position_ticket=leg["positionTicket"],
+                    deal_ticket=leg["dealTicket"],
+                    closed_at=leg["closedAt"],
+                ))
+                try:
+                    db.commit()
+                    inserted += 1
+                except IntegrityError:
+                    # 已上报过这笔成交（回看窗口重叠导致），跳过
+                    db.rollback()
+        finally:
+            db.close()
+        return inserted
+
+    # login -> 上次刷新/扫描的 monotonic 时间戳
+    last_account_refresh: dict[str, float] = {}
+    last_deals_scan: dict[str, float] = {}
+
     while True:
         try:
             pairs = await run_in_threadpool(_gateway_accounts)
@@ -306,8 +475,41 @@ async def gateway_positions_loop() -> None:
                 if user_id not in connected:
                     continue
 
+                now = time.monotonic()
                 data: list[dict] = []
                 for login in logins:
+                    # --- 账号资金刷新（低频）---
+                    if now - last_account_refresh.get(login, 0.0) >= GATEWAY_ACCOUNT_REFRESH_INTERVAL:
+                        last_account_refresh[login] = now
+                        try:
+                            acc_rsp = await gw_get_account(int(login))
+                            if acc_rsp is not None:
+                                await run_in_threadpool(_save_account_funds, user_id, login, acc_rsp)
+                            else:
+                                logger.warning("Gateway 账号资金读取失败 login=%s", login)
+                        except Exception:
+                            logger.exception("gateway account refresh failed (login=%s)", login)
+
+                    # --- 平仓明细扫描（低频）---
+                    if now - last_deals_scan.get(login, 0.0) >= GATEWAY_DEALS_SCAN_INTERVAL:
+                        last_deals_scan[login] = now
+                        try:
+                            to_unix = int(time.time())
+                            from_unix = to_unix - GATEWAY_DEALS_LOOKBACK_SECONDS
+                            deals, derr = await gw_get_deals(int(login), from_unix, to_unix)
+                            if derr:
+                                logger.warning("Gateway 成交历史读取失败 login=%s: %s", login, derr)
+                            elif deals:
+                                n = await run_in_threadpool(
+                                    _save_closed_trades, user_id, login, deals
+                                )
+                                if n:
+                                    logger.info(
+                                        "Gateway 平仓明细入库 login=%s 新增=%d", login, n
+                                    )
+                        except Exception:
+                            logger.exception("gateway closed-trade scan failed (login=%s)", login)
+
                     positions, err = await gw_get_positions(int(login))
                     if err:
                         logger.warning("Gateway 持仓读取失败 login=%s: %s", login, err)

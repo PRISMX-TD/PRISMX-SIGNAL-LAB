@@ -67,6 +67,24 @@ class PositionRsp:
     comment: str
 
 
+@dataclass
+class DealRsp:
+    """一笔成交（历史）。字段与 gateway 的 DealInfo 对应。"""
+
+    ticket: int
+    position_id: int
+    symbol: str
+    action: int  # 0=buy 1=sell，其余为非交易类（入金/手续费等）
+    entry: int  # 0=in 1=out 2=inout 3=out_by
+    volume: float
+    price: float
+    profit: float
+    commission: float
+    storage: float
+    time: int  # Unix 秒（UTC）
+    comment: str
+
+
 # ---------- 客户端 ----------
 
 
@@ -153,6 +171,34 @@ async def get_positions(login: int) -> tuple[list[PositionRsp], str]:
             comment=p.get("comment", ""),
         ))
     return positions, ""
+
+
+async def get_deals(login: int, from_unix: int, to_unix: int) -> tuple[list[DealRsp], str]:
+    """读取一段时间内的成交历史。返回 (列表, 错误信息)。
+
+    时间参数是 Unix 秒（UTC），Manager API 直接按 UTC 秒解读——不存在 Bridge
+    那侧用 MetaTrader5 Python 包时必须换算服务器本地时区的陷阱。
+    """
+    data = await _post("/deals", {"login": login, "from": from_unix, "to": to_unix})
+    if not data.get("ok"):
+        return [], data.get("error", "unknown")
+    deals = []
+    for d in data.get("deals", []):
+        deals.append(DealRsp(
+            ticket=d.get("ticket", 0),
+            position_id=d.get("positionId", 0),
+            symbol=d.get("symbol", ""),
+            action=d.get("action", 0),
+            entry=d.get("entry", 0),
+            volume=d.get("volume", 0.0),
+            price=d.get("price", 0.0),
+            profit=d.get("profit", 0.0),
+            commission=d.get("commission", 0.0),
+            storage=d.get("storage", 0.0),
+            time=d.get("time", 0),
+            comment=d.get("comment", ""),
+        ))
+    return deals, ""
 
 
 async def trade_open(
