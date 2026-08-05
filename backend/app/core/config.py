@@ -230,6 +230,16 @@ class Settings(BaseSettings):
     # dropped by the Supabase pooler.
     DB_POOL_RECYCLE: int = 1800
 
+    # MT5 Gateway（C# 程序，直接通过 Manager API 操作 MT5，不需要 bridge 轮询）。
+    # Make Capital 用户的订单会走这条通道。Gateway 默认只监听本机 127.0.0.1，
+    # 所以这里的 URL 指向同机（后端与 gateway 部署在同一服务器上）。
+    # MT5 Gateway (C# app, talks to MT5 via Manager API directly — no bridge needed).
+    # Make Capital users' orders are routed through this channel. The gateway
+    # listens on 127.0.0.1 by default, so the URL points to localhost (backend
+    # and gateway run on the same server).
+    GATEWAY_URL: str = "http://127.0.0.1:8800"
+    GATEWAY_TOKEN: str = ""
+
     # 反向代理信任列表：应用挂在同机 Nginx 反代后面，客户端真实 IP 在
     # X-Forwarded-For 头里。只有当直连对端（即 Nginx，本机 127.0.0.1）在此
     # 列表内时才采信该头，把 request.client.host 改写成真实客户端 IP——否则

@@ -1,12 +1,11 @@
 """下单路由：提交下单、查询订单 / Orders router: place & query orders.
 
 所有指令落库为 PENDING，由 PRISMX Bridge 轮询 /api/bridge/poll 拉取执行；
-超过 ORDER_PENDING_TIMEOUT_SECONDS 未执行的指令自动作废为 FAILED，
-防止桥接离线期间的陈旧指令在很久之后按过时价格成交。
+Gateway 来源的账号（Make Capital）不走桥接轮询，落库后由后端直接调 gateway HTTP
+实时执行。
 All commands are persisted as PENDING and fetched by the PRISMX Bridge via
-/api/bridge/poll. Commands not executed within ORDER_PENDING_TIMEOUT_SECONDS
-are voided to FAILED so a stale command can't fill at an outdated price after
-the bridge comes back online much later.
+/api/bridge/poll. Gateway-sourced accounts (Make Capital) skip the bridge
+polling path — the backend calls the gateway HTTP directly after persisting.
 """
 import asyncio
 import logging
@@ -29,6 +28,12 @@ from app.schemas import (
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user, is_account_online, validate_order, validate_sl_tp_direction
 from app.services.discipline import compute_discipline
+from app.services.gateway_client import (
+    TradeRsp,
+    trade_close as gw_close,
+    trade_modify as gw_modify,
+    trade_open as gw_open,
+)
 from app.services.plans import is_realtime_plan
 from app.services.trade_performance import compute_personal_winrate
 
@@ -222,7 +227,16 @@ def place_order(
         mt5_login=req.mt5Login,
         status="PENDING",
     )
-    return _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+    result = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+
+    # Gateway 账号实时执行，不走 bridge 轮询
+    gw_payload = _try_gateway_execute(db, order)
+    if gw_payload is not None:
+        asyncio.run(manager.push_to_client(user.id, gw_payload))
+        db.refresh(order)
+        return _serialize(order)
+
+    return result
 
 
 @router.get("", response_model=dict)
@@ -345,6 +359,83 @@ def _commit_order_or_existing(db: Session, order: Order, user_id: str, client_or
         raise
     db.refresh(order)
     return _serialize(order)
+
+
+def _is_gateway_account(db: Session, mt5_login: str | None) -> bool:
+    """检查目标 MT5 账号是否来自 Gateway（非 bridge）。"""
+    if not mt5_login:
+        return False
+    acc = db.query(MT5Account).filter(MT5Account.login == mt5_login).first()
+    return acc is not None and acc.source == "gateway"
+
+
+def _apply_trade_result(order: Order, rsp: TradeRsp) -> None:
+    """根据 gateway 回执更新订单状态。"""
+    if rsp.ok:
+        order.status = "FILLED"
+        order.mt5_ticket = rsp.order if rsp.order else rsp.deal
+        order.filled_price = rsp.price or None
+        order.message = ""
+    else:
+        order.status = "REJECTED"
+        order.message = rsp.retcode + (": " + rsp.message if rsp.message else "")
+
+
+def _try_gateway_execute(db: Session, order: Order) -> dict | None:
+    """如果是 gateway 来源账号，立即通过 gateway HTTP 执行订单。
+    返回 ORDER_UPDATE 推送载荷，或 None（非 gateway 账号）。
+
+    If the target account is gateway-sourced (Make Capital), execute the order
+    immediately via the gateway HTTP API. Returns an ORDER_UPDATE push payload,
+    or None for non-gateway accounts.
+    """
+    if not _is_gateway_account(db, order.mt5_login):
+        return None
+
+    login = int(order.mt5_login)
+
+    try:
+        if order.action == "ORDER":
+            rsp = asyncio.run(gw_open(
+                login, order.symbol,
+                order.side or "BUY", order.volume or 0.01,
+                order.sl or 0, order.tp or 0,
+                order.client_order_id or "",
+            ))
+        elif order.action == "CLOSE":
+            rsp = asyncio.run(gw_close(
+                login, order.ticket or 0, order.volume or 0,
+                order.client_order_id or "",
+            ))
+        elif order.action == "MODIFY":
+            rsp = asyncio.run(gw_modify(
+                login, order.ticket or 0, order.sl or 0, order.tp or 0,
+            ))
+        else:
+            order.status = "FAILED"
+            order.message = f"未知指令类型: {order.action}"
+            db.commit()
+            db.refresh(order)
+            return order_update_payload(order)
+
+        _apply_trade_result(order, rsp)
+        db.commit()
+        db.refresh(order)
+
+        logger.info(
+            "Gateway 执行完成: %s %s mt5=%s -> %s deal=%s order=%s",
+            order.action, order.client_order_id, order.mt5_login,
+            order.status, rsp.deal, rsp.order,
+        )
+        return order_update_payload(order)
+
+    except Exception as e:
+        logger.error("Gateway 执行异常: %s %s", order.client_order_id, e)
+        order.status = "FAILED"
+        order.message = f"Gateway 执行异常: {e}"
+        db.commit()
+        db.refresh(order)
+        return order_update_payload(order)
 
 
 def _bound_logins(db: Session, user_id: str) -> list[str]:
@@ -540,7 +631,15 @@ def close_position(
         mt5_login=req.mt5Login,
         status="PENDING",
     )
-    return _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+    result = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+
+    gw_payload = _try_gateway_execute(db, order)
+    if gw_payload is not None:
+        asyncio.run(manager.push_to_client(user.id, gw_payload))
+        db.refresh(order)
+        return _serialize(order)
+
+    return result
 
 
 @router.post("/modify", response_model=OrderOut)
@@ -582,7 +681,15 @@ def modify_position(
         mt5_login=req.mt5Login,
         status="PENDING",
     )
-    return _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+    result = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+
+    gw_payload = _try_gateway_execute(db, order)
+    if gw_payload is not None:
+        asyncio.run(manager.push_to_client(user.id, gw_payload))
+        db.refresh(order)
+        return _serialize(order)
+
+    return result
 
 
 # ---------- 超时订单后台清理 / stale-order background sweep ----------

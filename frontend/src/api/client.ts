@@ -408,6 +408,26 @@ export const eaApi = {
   resetToken: () => request<{ apiToken: string }>('/ea/token/reset', { method: 'POST' }),
 }
 
+// Gateway API（Make Capital 用户通过 Gateway 连接 MT5，无需本地 Bridge）
+// Gateway API for Make Capital users — no local Bridge required
+export const gatewayApi = {
+  verify: (login: number, password: string, investorOnly?: boolean) =>
+    request<{
+      ok: boolean; valid: boolean; retcode: string
+      login: number; name: string; group: string
+      leverage: number; balance: number; equity: number
+    }>('/gateway/verify', {
+      method: 'POST',
+      body: JSON.stringify({ login, password, investorOnly: investorOnly ?? false }),
+    }),
+  list: () =>
+    request<{ accounts: Array<{ login: string; source: string; accountName: string; balance: number; equity: number; leverage: number }> }>('/gateway/accounts'),
+  refresh: (login: string) =>
+    request<{ login: string; balance: number; equity: number }>(`/gateway/account/${login}/refresh`, { method: 'POST' }),
+  remove: (login: string) =>
+    request<{ ok: boolean }>(`/gateway/account/${login}`, { method: 'DELETE' }),
+}
+
 // 账户信息 / User account (profile, password)
 export const userApi = {
   me: () =>

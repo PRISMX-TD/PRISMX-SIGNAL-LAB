@@ -385,9 +385,21 @@ def _poll_db_work(
         .order_by(Order.created_at.asc())
         .all()
     )
+    # Gateway 账号的订单由 orders.py 实时执行，bridge 不轮询。
+    # 提前查出所有 gateway 来源的 login，循环里直接跳过对应订单。
+    # Gateway-sourced orders are executed directly by orders.py — skip them here.
+    gateway_logins = set(
+        row[0] for row in db.query(MT5Account.login).filter(
+            MT5Account.user_id == user.id,
+            MT5Account.source == "gateway",
+        ).all()
+    )
     commands = []
     voided: list[Order] = []
     for o in pending:
+        # 跳过 gateway 账号的订单（已由 orders.py 实时执行）
+        if o.mt5_login and o.mt5_login in gateway_logins:
+            continue
         # 超时未执行的陈旧指令：作废而非下发，防止按过时价格成交。
         # Stale command past the pending timeout: void instead of dispatching,
         # so it can't fill at an outdated price.

@@ -1,8 +1,8 @@
-// 连接 MT5 页：通过 PRISMX 桥接程序连接 MT5 账户。
-// Connect MT5 page: connect MT5 accounts via the PRISMX Bridge app.
+// 连接 MT5 页：通过 PRISMX 桥接程序连接 MT5 账户（支持 Gateway 直连模式）。
+// Connect MT5 page: connect MT5 accounts via the PRISMX Bridge app (or Gateway direct mode).
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { accountApi, eaApi } from '../api/client'
+import { accountApi, eaApi, gatewayApi } from '../api/client'
 import { useLive } from '../store/live'
 import { fmtTime, localizeApiError } from '../api/utils'
 import ConfirmModal from '../components/ConfirmModal'
@@ -42,6 +42,44 @@ export default function BindPage() {
   const [deleteTarget, setDeleteTarget] = useState<MT5Account | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+
+  // ---------- Gateway 绑定状态（Make Capital 用户无需本地 Bridge）----------
+  const [gwMode, setGwMode] = useState(false) // 是否显示 gateway 绑定表单
+  const [gwLogin, setGwLogin] = useState('')
+  const [gwPassword, setGwPassword] = useState('')
+  const [gwVerifying, setGwVerifying] = useState(false)
+  const [gwResult, setGwResult] = useState<{ valid: boolean; name: string; balance: number; retcode: string } | null>(null)
+  const [gwError, setGwError] = useState('')
+
+  const handleGatewayVerify = async () => {
+    const loginNum = parseInt(gwLogin, 10)
+    if (!loginNum || loginNum <= 0) {
+      setGwError('请输入有效的 MT5 账号')
+      return
+    }
+    if (!gwPassword) {
+      setGwError('请输入密码')
+      return
+    }
+    setGwVerifying(true)
+    setGwError('')
+    setGwResult(null)
+    try {
+      const res = await gatewayApi.verify(loginNum, gwPassword)
+      setGwResult({ valid: res.valid, name: res.name, balance: res.balance, retcode: res.retcode })
+      if (res.valid) {
+        setGwPassword('') // 验证通过后清空密码
+        refreshAll()
+      }
+    } catch (e) {
+      setGwError(e instanceof Error ? localizeApiError(e.message) : '验证失败')
+    } finally {
+      setGwVerifying(false)
+    }
+  }
+
+  // Gateway 绑定的账号（过滤 source === "gateway"）
+  const gatewayAccounts = accounts.filter((a) => a.source === 'gateway')
 
   // 这三个都是全屏弹窗，手机上划返回应该先关掉弹窗、而不是直接退出本页面
   // （见 useBackToClose 的说明）。/ All three are full-screen modals; on
@@ -148,6 +186,95 @@ export default function BindPage() {
         </div>
       )}
 
+      {/* Gateway 直连（Make Capital 用户） */}
+      <div className="mb-5">
+        <button
+          onClick={() => { setGwMode(!gwMode); setGwError(''); setGwResult(null) }}
+          className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition ${
+            gwMode ? 'border-prism-500/50 bg-prism-600/10' : 'border-white/10 bg-white/5 hover:border-white/20'
+          }`}
+        >
+          <div>
+            <h3 className="font-semibold text-slate-100">Gateway 直连 (Make Capital)</h3>
+            <p className="mt-0.5 text-xs text-slate-400">无需本地 Bridge / VPS，直接通过网关连接 MT5</p>
+          </div>
+          <span className="text-sm text-slate-500">{gwMode ? '收起 ▲' : '展开 ▼'}</span>
+        </button>
+
+        {gwMode && (
+          <div className="mt-3 rounded-xl border border-prism-500/30 bg-prism-600/5 p-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <input
+                className="input h-10 font-mono text-sm"
+                type="text"
+                inputMode="numeric"
+                placeholder="MT5 账号 (Login)"
+                value={gwLogin}
+                onChange={(e) => { setGwLogin(e.target.value); setGwError(''); setGwResult(null) }}
+              />
+              <input
+                className="input h-10 font-mono text-sm"
+                type="password"
+                placeholder="MT5 密码"
+                value={gwPassword}
+                onChange={(e) => { setGwPassword(e.target.value); setGwError(''); setGwResult(null) }}
+                onKeyDown={(e) => e.key === 'Enter' && handleGatewayVerify()}
+              />
+              <button
+                onClick={handleGatewayVerify}
+                disabled={gwVerifying || !gwLogin || !gwPassword}
+                className="btn-primary h-10 text-sm font-semibold disabled:opacity-50"
+              >
+                {gwVerifying ? '验证中...' : '验证并绑定'}
+              </button>
+            </div>
+
+            {gwError && (
+              <p className="mt-3 rounded-lg border border-down/30 bg-down/10 px-3 py-2 text-sm text-down">{gwError}</p>
+            )}
+
+            {gwResult && (
+              <div className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
+                gwResult.valid ? 'border-up/30 bg-up/10 text-up' : 'border-amber-400/30 bg-amber-400/10 text-amber-300'
+              }`}>
+                {gwResult.valid
+                  ? `验证通过: ${gwResult.name}, 余额 $${gwResult.balance.toFixed(2)}`
+                  : `验证失败: ${gwResult.retcode}`}
+              </div>
+            )}
+
+            {/* 已绑定的 Gateway 账号 */}
+            {gatewayAccounts.length > 0 && (
+              <div className="mt-4">
+                <p className="mb-2 text-xs font-medium text-slate-400">已绑定的 Gateway 账号:</p>
+                {gatewayAccounts.map((a) => (
+                  <div key={a.login} className="mb-2 flex items-center justify-between rounded-lg bg-white/5 px-3 py-2">
+                    <div>
+                      <span className="font-mono text-sm text-slate-200">{a.login}</span>
+                      <span className="ml-2 text-xs text-slate-500">{a.accountName || '—'}</span>
+                      <span className="ml-2 tag bg-prism-600/20 text-prism-300 text-[10px]">Gateway</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400">
+                        余额 ${(a.balance ?? 0).toFixed(2)}
+                      </span>
+                      <button
+                        onClick={async () => {
+                          try { await gatewayApi.remove(a.login); refreshAll() } catch {}
+                        }}
+                        className="rounded border border-down/30 bg-down/5 px-2 py-0.5 text-[11px] text-down hover:bg-down/15"
+                      >
+                        解绑
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {/* PLACEHOLDER_ACCOUNTS */}
         {accounts.length > 0 && (
@@ -183,7 +310,7 @@ export default function BindPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {accounts.map((a) => (
+                  {accounts.filter((a) => a.source !== 'gateway').map((a) => (
                     <tr key={a.login} className="border-t border-white/5">
                       <td className="px-3 py-2 font-mono text-slate-100">{a.login}</td>
                       <td className="px-3 py-2 text-slate-300">{a.accountName || '—'}</td>
