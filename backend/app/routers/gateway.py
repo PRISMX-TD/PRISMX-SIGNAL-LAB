@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter
-from app.models import ClosedTrade, MT5Account, User
+from app.models import ClosedTrade, MT5Account, Order, User
 from app.schemas import SUFFIX_PATTERN
 from app.services.deps import get_current_user
 from app.services.gateway_client import (
@@ -300,26 +300,49 @@ _DEAL_ENTRY_INOUT = 2
 _DEAL_ENTRY_OUT_BY = 3
 
 
-def build_closed_trade_legs(deals: list, comment_prefix: str) -> list[dict]:
+def build_closed_trade_legs(
+    deals: list,
+    comment_prefix: str,
+    known_position_tickets: set[int] | None = None,
+) -> list[dict]:
     """从成交历史里挑出「本平台开的仓位的平仓腿」，算好净盈亏后返回待入库记录。
 
-    与 POST /bridge/trade-history 收到的载荷同构，只是数据源不同：Bridge 侧由
-    桥接程序在本地扫 MT5 历史并用魔术号码判断归属；Gateway 侧 Manager API 的
-    请求没有 magic 字段，只能靠 comment 前缀标记来源（见 gateway/Mt5Link.cs 的
-    BuildComment），所以这里用「该仓位的开仓腿 comment 是否带前缀」来判断。
+    与 POST /bridge/trade-history 收到的载荷同构，只是判断归属的依据不同。
+    Bridge 侧靠魔术号码，且能对每个仓位单独调 history_deals_get(position=...)
+    拿到**完整**历史；Manager API 既没有 magic 字段、也没有「按仓位查成交」的
+    方法，只能拿回看窗口内的成交来判断。这就带来一个坑：
+
+        只要开仓时刻早于回看窗口起点（开仓和平仓间隔略长就会发生），窗口里就
+        只有平仓腿、没有开仓腿。若只看「开仓腿 comment 是否带前缀」，归属判定
+        必然失败，仓位被静默丢弃、明细永远是空的。
+
+    所以归属改成三个信号取并集，任一命中即认定为本平台的仓位：
+
+      1. 窗口内有带前缀的开仓腿；
+      2. 平仓腿自己的 comment 带前缀——`ClosePosition` 同样走 BuildComment，
+         所以由本平台发起的平仓自带这个标记；
+      3. `known_position_tickets` 命中——即 orders 表里有 mt5_ticket 等于该仓位
+         号的 FILLED 开仓记录。这条不受回看窗口影响，是最可靠的依据，也覆盖了
+         「本平台开仓、用户自己在 MT5 客户端手动平仓」这种 1 和 2 都判不出的情况。
 
     手续费与隔夜利息按这笔平仓手数占该仓位总平仓手数的比例分摊，与
     bridge/mt5_worker.py 的 fee_share 算法保持一致——否则同一笔交易在两条通道
-    下会算出不同的净盈亏。
+    下会算出不同的净盈亏。注意窗口里可能缺开仓腿，那笔手续费就分摊不到；宁可
+    少算费用，也不能因此丢掉整条平仓记录。
 
     纯函数，不碰数据库，便于单独验证。
 
     Picks the closing legs of platform-opened positions out of a deal history
-    and computes each leg's net P&L. Mirrors the payload shape of
-    POST /bridge/trade-history; ownership is decided by the comment prefix
-    because Manager API requests carry no magic number. Pure function, no DB.
+    and computes each leg's net P&L. Mirrors POST /bridge/trade-history's
+    payload. Ownership can't use the bridge's magic number (Manager API has no
+    magic field) nor a per-position history lookup (no such call), so it unions
+    three signals: a prefixed opening leg, a prefixed closing leg, and a match
+    against known platform-opened position tickets from the orders table. The
+    third is what makes this work when the opening deal predates the lookback
+    window. Pure function, no DB.
     """
     prefix = (comment_prefix or "").strip().upper()
+    known = known_position_tickets or set()
 
     # 先按仓位归组，才能判断归属并分摊费用
     by_position: dict[int, list] = {}
@@ -329,13 +352,13 @@ def build_closed_trade_legs(deals: list, comment_prefix: str) -> list[dict]:
 
     legs_out: list[dict] = []
     for pos_id, legs in by_position.items():
-        # 归属判定：任一开仓腿的 comment 带前缀即认为是本平台开的仓位。
-        # 前缀为空 = 不过滤（会把用户自己在 MT5 客户端开的仓位也记进来）。
-        if prefix:
-            is_ours = any(
+        # 归属判定。前缀为空且没有已知仓位号时不过滤（等同于 gateway.ini 没配
+        # comment_prefix），会把用户自己在 MT5 客户端开的仓位也记进来。
+        if prefix or known:
+            is_ours = pos_id in known or any(
                 (d.comment or "").upper().startswith(prefix)
                 for d in legs
-                if d.entry not in (_DEAL_ENTRY_OUT, _DEAL_ENTRY_OUT_BY)
+                if prefix
             )
             if not is_ours:
                 continue
@@ -421,10 +444,27 @@ async def gateway_positions_loop() -> None:
     def _save_closed_trades(user_id: str, login: str, deals: list) -> int:
         """把平仓成交写进 ClosedTrade，与 POST /bridge/trade-history 同一套语义。
 
-        归属判定与费用分摊在 build_closed_trade_legs 里；这里只负责落库去重。
-        回看窗口会反复查到同一笔成交，靠 (user_id, deal_ticket) 唯一约束挡掉。
+        归属判定与费用分摊在 build_closed_trade_legs 里；这里只负责查出本平台
+        开过的仓位号、落库、去重。回看窗口会反复查到同一笔成交，靠
+        (user_id, deal_ticket) 唯一约束挡掉。
         """
-        legs = build_closed_trade_legs(deals, settings.GATEWAY_COMMENT_PREFIX)
+        db = SessionLocal()
+        try:
+            # 本平台在该账号开过的仓位号。这是归属判定里唯一不受回看窗口影响的
+            # 依据——开仓腿早已滑出窗口时，只能靠它认出这笔平仓是我们的。
+            known = {
+                int(t) for (t,) in db.query(Order.mt5_ticket).filter(
+                    Order.user_id == user_id,
+                    Order.mt5_login == login,
+                    Order.action == "ORDER",
+                    Order.status == "FILLED",
+                    Order.mt5_ticket.isnot(None),
+                ).all()
+            }
+        finally:
+            db.close()
+
+        legs = build_closed_trade_legs(deals, settings.GATEWAY_COMMENT_PREFIX, known)
         if not legs:
             return 0
 
@@ -506,6 +546,15 @@ async def gateway_positions_loop() -> None:
                                 if n:
                                     logger.info(
                                         "Gateway 平仓明细入库 login=%s 新增=%d", login, n
+                                    )
+                                else:
+                                    # 窗口里有成交却一条都没入库，通常是归属判定
+                                    # 没认出来（comment 前缀与 gateway.ini 不一致，
+                                    # 或该仓位不是本平台开的）。debug 级别以免刷屏，
+                                    # 但排查时能一眼看出是"读到了但被过滤掉"。
+                                    logger.debug(
+                                        "Gateway 成交 %d 条但无新增平仓明细 login=%s"
+                                        "（已去重或归属不匹配）", len(deals), login,
                                     )
                         except Exception:
                             logger.exception("gateway closed-trade scan failed (login=%s)", login)
