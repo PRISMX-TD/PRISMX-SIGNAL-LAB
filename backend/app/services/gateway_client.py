@@ -232,3 +232,32 @@ async def health_check() -> dict:
             return resp.json()
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+# ---------- 在线状态缓存 ----------
+# Gateway 账号没有 bridge 心跳，在线与否取决于 gateway 服务本身是否可达。
+# 列账号是高频操作，每次都发 HTTP 探活不合理，这里做 TTL 缓存。
+# Gateway accounts have no bridge heartbeat; liveness depends on the gateway
+# service itself. Account listing is frequent, so cache the probe result.
+_HEALTH_TTL_SECONDS = 10
+_health_cache: dict = {"at": 0.0, "online": False}
+
+
+def is_gateway_online() -> bool:
+    """Gateway 是否可达（带 10 秒缓存）。同步接口，供 serializer 调用。"""
+    import asyncio
+    import time
+
+    now = time.monotonic()
+    if now - _health_cache["at"] < _HEALTH_TTL_SECONDS:
+        return _health_cache["online"]
+
+    try:
+        rsp = asyncio.run(health_check())
+        online = bool(rsp.get("ok")) and bool(rsp.get("mt5Connected"))
+    except Exception:
+        online = False
+
+    _health_cache["at"] = now
+    _health_cache["online"] = online
+    return online

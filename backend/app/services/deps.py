@@ -31,8 +31,17 @@ LAST_ACTIVE_THROTTLE_SECONDS = 300
 
 
 def is_account_online(row) -> bool:
-    """按最近心跳判断一个 MT5 账号是否在线 / whether an MT5 account is online
-    based on its last heartbeat (row is an MT5Account)."""
+    """判断一个 MT5 账号是否在线 / whether an MT5 account is online.
+
+    Bridge 账号看最近心跳；Gateway 账号没有心跳，看 gateway 服务是否可达。
+    Bridge accounts use the last heartbeat; gateway accounts have no heartbeat,
+    so their liveness follows the gateway service itself.
+    """
+    if getattr(row, "source", None) == "gateway":
+        from app.services.gateway_client import is_gateway_online
+
+        return is_gateway_online()
+
     if not row.last_heartbeat:
         return False
     last = row.last_heartbeat
