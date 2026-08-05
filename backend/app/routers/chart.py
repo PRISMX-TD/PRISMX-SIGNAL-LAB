@@ -25,9 +25,7 @@ from app.models import Candle, User
 from app.services import candle_store, chart_store, quotes_store
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user
-from app.services.settings_store import get_feed_symbols, save_broker_symbol_catalogue
 from app.services.strategy import live as strategy_live
-from app.schemas import BrokerSymbolReport
 
 logger = logging.getLogger("prismx.chart")
 
@@ -405,62 +403,6 @@ async def feed_quotes(req: FeedQuotesRequest, x_ea_token: str | None = Header(de
     if changed:
         await manager.broadcast_to_clients({"type": "GLOBAL_QUOTES", "data": changed})
     return {"ok": True}
-
-
-# ---------- 网关品种配置 / gateway symbol configuration ----------
-#
-# 这两个端点服务于 manager_feed 网关，用 X-EA-Token 鉴权而不是管理员登录态，所以放在
-# 这里而不是 admin.py——那个模块的约定是"所有端点都在 require_admin 之后"，塞一个
-# 令牌鉴权的进去会破坏这条可以一眼验证的规则。
-#
-# These two serve the manager_feed gateway and authenticate with X-EA-Token rather than
-# an admin session, so they live here rather than in admin.py: that module's contract is
-# that every endpoint sits behind require_admin, and slipping in a token-authenticated
-# one would break a rule that's otherwise verifiable at a glance.
-
-@router.get("/feed/symbols-config")
-async def feed_symbols_config(
-    x_ea_token: str | None = Header(default=None),
-    db: Session = Depends(get_db),
-):
-    """网关拉取要推送的品种配置。
-
-    返回的是"该推什么"，与 /symbols（前端读"正在推什么"）方向相反：这个是配置的下发，
-    那个是运行状态的反映。
-
-    The gateway pulls the symbol configuration to push.
-
-    This returns what *should* be pushed, the opposite direction from /symbols (which
-    tells the frontend what *is* being pushed): config going out versus runtime state
-    coming back.
-    """
-    if not _valid_ea_token(x_ea_token):
-        raise HTTPException(status_code=401, detail="invalid EA token")
-    return {"symbols": get_feed_symbols(db)}
-
-
-@router.post("/feed/broker-symbols")
-async def feed_broker_symbols(
-    req: BrokerSymbolReport,
-    x_ea_token: str | None = Header(default=None),
-    db: Session = Depends(get_db),
-):
-    """网关上报券商可见的全部品种，供后台配置页做下拉选择。
-
-    后端跑在 Linux 上装不了 MT5Manager，没法自己枚举券商品种，这份清单只能由运行在
-    Windows 上的网关提供。
-
-    The gateway reports every symbol the broker exposes, for the admin page's dropdown.
-
-    The backend runs on Linux where MT5Manager can't be installed, so it can't enumerate
-    broker symbols itself; only the Windows-side gateway can supply this.
-    """
-    if not _valid_ea_token(x_ea_token):
-        raise HTTPException(status_code=401, detail="invalid EA token")
-    save_broker_symbol_catalogue(db, [s.model_dump() for s in req.symbols])
-    db.commit()
-    logger.info("gateway reported %d broker symbols", len(req.symbols))
-    return {"ok": True, "count": len(req.symbols)}
 
 
 @router.get("/quotes")

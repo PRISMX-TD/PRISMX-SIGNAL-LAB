@@ -99,10 +99,6 @@ $RECYCLE.BIN/
 logs/
 bases/
 
-# ===== 行情推送网关（只在 Windows VPS 上跑，不纳入仓库）=====
-# Market-feed gateway, runs only on the Windows VPS — kept out of the repo
-manager_feed/
-
 # ===== 未被代码引用的本地素材（不纳入仓库）=====
 # Unused local-only assets, not referenced by any code, kept out of the repo
 logo/

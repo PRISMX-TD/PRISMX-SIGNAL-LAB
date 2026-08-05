@@ -218,51 +218,6 @@ class AdminStrategyCosts(BaseModel):
     perSymbol: list[AdminStrategyCostEntry] = Field(default_factory=list)
 
 
-class AdminFeedSymbolEntry(BaseModel):
-    """一个行情品种：显示名 + 券商真名 + 是否启用。
-
-    display 与 broker 分开：display 进数据库和前端，broker 只用于向 MT5 Manager 查询。
-    券商后缀（如 .s）属于接入细节，不该出现在历史数据里——否则换券商就得迁移全部数据。
-
-    One feed symbol: display name, broker name, enabled flag.
-
-    They're separate because `display` reaches the database and frontend while `broker`
-    is only used to query MT5 Manager. A suffix like .s is a connectivity detail that
-    shouldn't enter stored history, or switching brokers would mean migrating all of it.
-    """
-
-    display: str = Field(pattern=SYMBOL_PATTERN)
-    broker: str = Field(pattern=SYMBOL_PATTERN)
-    enabled: bool = Field(default=True)
-
-
-class AdminFeedSymbols(BaseModel):
-    """行情品种配置 / market-feed symbol configuration."""
-
-    symbols: list[AdminFeedSymbolEntry] = Field(default_factory=list, max_length=200)
-
-
-class BrokerSymbolEntry(BaseModel):
-    """券商清单里的一个品种 / one entry in the broker catalogue."""
-
-    name: str = Field(pattern=SYMBOL_PATTERN)
-    description: str = Field(default="", max_length=200)
-    digits: int = Field(default=0, ge=0, le=10)
-    path: str = Field(default="", max_length=200)
-
-
-class BrokerSymbolReport(BaseModel):
-    """网关上报的券商品种清单。
-
-    上限 5000：实测该券商可见 481 个品种，留足余量的同时挡住异常大的请求。
-
-    The broker catalogue as reported by the gateway.
-
-    Capped at 5000: the broker under test exposes 481 symbols, so this leaves ample room
-    while still rejecting absurdly large payloads.
-    """
-
-    symbols: list[BrokerSymbolEntry] = Field(max_length=5000)
 
 
 # ---------- 自定义策略 / User strategies ----------

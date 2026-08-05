@@ -20,21 +20,18 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminFeedSymbolEntry, AdminFeedSymbols, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminTrialSettings, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminTrialSettings, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut
 from app.services.deps import require_admin
 from app.services.settings_store import (
     get_broker_settings,
-    get_broker_symbol_catalogue,
     get_candle_settings,
     get_discipline_settings,
-    get_feed_symbols,
     get_pricing_settings,
     get_strategy_costs,
     get_strategy_settings,
     get_trial_settings,
     invalidate_candle_cache,
     invalidate_discipline_cache,
-    invalidate_feed_symbols_cache,
     invalidate_pricing_cache,
     invalidate_settings_cache,
     invalidate_strategy_costs_cache,
@@ -42,7 +39,6 @@ from app.services.settings_store import (
     invalidate_trial_cache,
     save_candle_settings,
     save_discipline_settings,
-    save_feed_symbols,
     save_pricing_settings,
     save_strategy_costs,
     save_strategy_settings,
@@ -760,53 +756,4 @@ def put_strategy_cost_settings(
     return get_strategy_cost_settings(db, admin)
 
 
-# ---------- 行情品种设置 / market-feed symbol settings ----------
 
-@router.get("/feed-symbols", response_model=AdminFeedSymbols)
-def get_feed_symbol_settings(
-    db: Session = Depends(get_db),
-    _admin: User = Depends(require_admin),
-):
-    """读取行情品种配置。Read the market-feed symbol configuration."""
-    return AdminFeedSymbols(
-        symbols=[AdminFeedSymbolEntry(**s) for s in get_feed_symbols(db)]
-    )
-
-
-@router.put("/feed-symbols", response_model=AdminFeedSymbols)
-def put_feed_symbol_settings(
-    body: AdminFeedSymbols,
-    db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
-):
-    """保存行情品种配置。网关最迟在一个轮询周期内跟上，不需要重启。
-
-    Save the market-feed symbol configuration; the gateway picks it up within one poll
-    interval, no restart needed.
-    """
-    items = [s.model_dump() for s in body.symbols]
-    save_feed_symbols(db, items)
-    _log_change(db, admin.id, admin.id, "setting:feed_symbols", None, json.dumps(items))
-    db.commit()
-    invalidate_feed_symbols_cache()
-    return get_feed_symbol_settings(db, admin)
-
-
-@router.get("/broker-symbols")
-def list_broker_symbols(
-    db: Session = Depends(get_db),
-    _admin: User = Depends(require_admin),
-):
-    """读取网关上报的券商品种清单，供配置页做下拉选择。
-
-    清单为空说明网关还没上报过——可能没启动，或者启动后上报失败。前端应当据此提示，
-    而不是显示一个空下拉框让人以为券商没有品种。
-
-    Read the gateway-reported broker catalogue for the config page's dropdown.
-
-    An empty list means the gateway hasn't reported yet — either it isn't running or the
-    report failed. The frontend should say so rather than showing an empty dropdown that
-    implies the broker has no symbols.
-    """
-    symbols = get_broker_symbol_catalogue(db)
-    return {"symbols": symbols, "reported": len(symbols) > 0}
