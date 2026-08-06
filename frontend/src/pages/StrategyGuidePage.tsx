@@ -127,7 +127,7 @@ export default function StrategyGuidePage() {
         <img
           src={strategy.imageUrl}
           alt={name}
-          className="mt-6 w-full rounded-2xl border border-white/10 object-cover"
+          className="mt-6 max-h-72 w-full rounded-2xl border border-white/10 object-contain"
         />
       )}
 

@@ -61,7 +61,7 @@ export function StrategyBlocks({ blocks, isZh }: { blocks: PlatformStrategyBlock
                   src={b.imageUrl}
                   alt={text}
                   loading="lazy"
-                  className="w-full rounded-xl border border-white/10"
+                  className="mx-auto max-h-96 w-auto max-w-full rounded-xl border border-white/10"
                 />
               )}
               {text && <figcaption className="mt-2 text-xs text-slate-500">{text}</figcaption>}
