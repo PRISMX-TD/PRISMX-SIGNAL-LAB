@@ -41,6 +41,15 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
+# httpx 在 INFO 级别会为每个请求打一行。持仓事件是 250 毫秒拉一次的，放着不管
+# 会以每秒四行的速度把 journald 冲满，真正要看的日志全被埋掉。降到 WARNING：
+# 请求失败仍然会记（那才是需要看见的），成功的就不必逐条汇报了。
+#
+# httpx logs a line per request at INFO. The position-event tick runs every
+# 250ms, which floods journald at four lines a second and buries everything
+# worth reading. WARNING still surfaces failures, which is the part that matters.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

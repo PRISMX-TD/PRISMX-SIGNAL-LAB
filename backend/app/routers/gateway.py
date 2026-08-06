@@ -806,6 +806,17 @@ async def gateway_positions_loop() -> None:
         """
         while True:
             try:
+                # 没有人在看就不必拉。事件会积在 gateway 的队列里（满了丢最老的），
+                # 但那不影响正确性：事件只是「去读一次持仓」的触发器，重新有人
+                # 连上时拉到积压事件，照样会推一次完整快照。
+                # Nobody watching means nothing to push. Events pile up in the
+                # gateway queue (oldest dropped when full), which is harmless:
+                # they're just triggers to re-read positions, and the snapshot
+                # pushed on reconnect is complete regardless.
+                if not manager.connected_user_ids():
+                    await asyncio.sleep(GATEWAY_EVENT_POLL_INTERVAL)
+                    continue
+
                 events, subscribed = await drain_position_events()
 
                 # 订阅状态翻转要处理：订阅刚掉线时，known_flat 里的信息不再可信
