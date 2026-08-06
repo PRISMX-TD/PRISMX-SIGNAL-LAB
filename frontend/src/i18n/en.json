@@ -298,7 +298,7 @@
       "notFound": "This strategy can't be found — it may have been unpublished.",
       "prev": "Previous",
       "next": "Next",
-      "disclaimer": "The above describes how each strategy is designed, not a return you should expect. Every signal's real outcome is adjudicated by price action and kept in the signal list, so you can check it yourself. Trading carries risk — only use money you can afford to lose."
+      "disclaimer": "The above describes how each strategy is designed, not a return you should expect."
     },
     "waitingForSignals": "Waiting for the signal engine or TradingView to push signals…",
     "entry": "Entry",
