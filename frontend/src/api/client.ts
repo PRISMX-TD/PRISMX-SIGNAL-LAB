@@ -37,6 +37,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
   }
+  // 文件上传（FormData）必须让浏览器自己写 Content-Type：multipart 的 boundary
+  // 由浏览器生成，手写 'multipart/form-data' 会缺 boundary，后端解析直接失败。
+  // For FormData uploads the browser must set Content-Type itself: it generates
+  // the multipart boundary, and a hand-written 'multipart/form-data' lacks it,
+  // which makes server-side parsing fail outright.
+  if (options.body instanceof FormData) delete headers['Content-Type']
   const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`
 
@@ -613,6 +619,16 @@ export const adminApi = {
         method: 'PUT',
         body: JSON.stringify({ items }),
       }),
+    // 上传策略配图，返回可直接用于 <img src> 的公开 URL。后端按文件头校验类型，
+    // 未配置存储时返回 503（管理员改用外链地址即可）。
+    // Upload a strategy illustration and get a public URL for <img src>. The
+    // backend validates the type by magic bytes and returns 503 when storage
+    // isn't configured (admins can paste an external URL instead).
+    uploadImage: (file: File) => {
+      const form = new FormData()
+      form.append('file', file)
+      return request<{ url: string }>('/admin/upload-image', { method: 'POST', body: form })
+    },
     // ---- 工单管理 / Ticket management ----
     listTickets: (params: { status?: string; category?: string; limit?: number; offset?: number } = {}) => {
       const qs = new URLSearchParams()

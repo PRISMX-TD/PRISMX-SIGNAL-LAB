@@ -228,6 +228,41 @@ class AdminStrategyCosts(BaseModel):
 # design characteristics only (market regime, holding time, R:R design, indicators).
 
 
+class PlatformStrategyBlock(BaseModel):
+    """详细说明的一个内容块。管理员逐块添加、排序，前端按顺序渲染。
+
+    为什么用结构化块而不是一段长文本：一整块纯文本在页面上会挤成一团，而支持
+    Markdown/HTML 又要引入解析器和随之而来的注入面。分块把排版表达力限制在四
+    种已知类型内，渲染时不需要解析任何标记语言。
+
+    text 字段的含义随 kind 而变：
+      heading   小标题，单行
+      paragraph 正文段落
+      list      要点列表，每行一条（前端按换行切分）
+      image     图注，可留空；图片本体在 imageUrl
+
+    One block of the long description. Admins add and order blocks; the client
+    renders them in sequence.
+
+    Why structured blocks instead of one long string: a single text blob reads as
+    an undifferentiated wall, while supporting Markdown/HTML would mean shipping
+    a parser and its injection surface. Blocks keep layout expressiveness inside
+    four known types, so rendering parses no markup at all.
+
+    The meaning of `text` depends on `kind`:
+      heading   a single-line subheading
+      paragraph a body paragraph
+      list      bullet points, one per line (the client splits on newlines)
+      image     an optional caption; the image itself is in imageUrl
+    """
+
+    kind: Literal["heading", "paragraph", "list", "image"] = "paragraph"
+    textZh: str = Field(default="", max_length=4_000)
+    textEn: str = Field(default="", max_length=4_000)
+    # 仅 kind == "image" 使用 / used only when kind == "image"
+    imageUrl: str = Field(default="", max_length=500)
+
+
 class PlatformStrategyOut(BaseModel):
     """单条平台策略介绍 / one platform strategy write-up."""
 
@@ -242,8 +277,17 @@ class PlatformStrategyOut(BaseModel):
     # 一句话简介 / one-line summary
     summaryZh: str = Field(default="", max_length=300)
     summaryEn: str = Field(default="", max_length=300)
-    # 详细说明，多段纯文本（前端按换行分段，不解析 HTML）
-    # Long description, plain text; the client splits on newlines and never parses HTML
+    # 详细说明：结构化内容块，按顺序渲染。
+    # detailZh/detailEn 是本功能第一版的单段纯文本字段，已被 blocks 取代。保留
+    # 它们是为了不丢已录入的内容——库里存的是 JSON，旧记录没有 blocks 键，读出来
+    # blocks 为空；详情页在 blocks 为空时回落渲染 detail 文本。新内容一律写 blocks。
+    # Long description: structured blocks, rendered in order.
+    # detailZh/detailEn were the first version's single-blob fields, now
+    # superseded by blocks. They stay so already-entered copy isn't lost: rows are
+    # stored as JSON, older ones have no blocks key and read back empty, and the
+    # detail page falls back to rendering the detail text when blocks is empty.
+    # New content always goes into blocks.
+    blocks: list[PlatformStrategyBlock] = Field(default_factory=list, max_length=60)
     detailZh: str = Field(default="", max_length=8_000)
     detailEn: str = Field(default="", max_length=8_000)
     # 适用品种，自由文本标签（如 XAUUSD、主要货币对）

@@ -34,6 +34,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
 import { localizeApiError } from '../../api/utils'
+import ImageField from './ImageField'
+import StrategyBlocksEditor from './StrategyBlocksEditor'
 import type { PlatformStrategy } from '../../api/types'
 
 // catch 里拿到的是 unknown；localizeApiError 只处理"中文 / English"双语串，
@@ -58,6 +60,7 @@ function emptyStrategy(order: number): PlatformStrategy {
     nameEn: '',
     summaryZh: '',
     summaryEn: '',
+    blocks: [],
     detailZh: '',
     detailEn: '',
     symbols: [],
@@ -305,30 +308,37 @@ export default function PlatformStrategiesPanel() {
                     />
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="block">
-                      <span className="mb-1 block text-xs text-slate-400">
-                        {t('admin.strategyGuide.detailZh')}
-                      </span>
-                      <textarea
-                        className="input min-h-[120px] w-full resize-y text-sm"
-                        value={s.detailZh}
-                        onChange={(e) => patch(s.id, { detailZh: e.target.value })}
-                        maxLength={8000}
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="mb-1 block text-xs text-slate-400">
-                        {t('admin.strategyGuide.detailEn')}
-                      </span>
-                      <textarea
-                        className="input min-h-[120px] w-full resize-y text-sm"
-                        value={s.detailEn}
-                        onChange={(e) => patch(s.id, { detailEn: e.target.value })}
-                        maxLength={8000}
-                      />
-                    </label>
-                  </div>
+                  <StrategyBlocksEditor
+                    blocks={s.blocks ?? []}
+                    onChange={(blocks) => patch(s.id, { blocks })}
+                  />
+
+                  {/* 旧的单段说明字段。只在还有内容时显示，让管理员能把它搬进
+                      内容块后清空；不再作为新内容的录入口。
+                      The legacy single-blob field. Shown only while it still has
+                      content, so an admin can move it into blocks and clear it;
+                      it is no longer an entry point for new content. */}
+                  {(s.detailZh || s.detailEn) && (
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                      <p className="mb-2 text-xs text-amber-200/80">
+                        {t('admin.strategyGuide.legacyDetailHint')}
+                      </p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <textarea
+                          className="input min-h-[80px] w-full resize-y text-sm"
+                          value={s.detailZh}
+                          onChange={(e) => patch(s.id, { detailZh: e.target.value })}
+                          maxLength={8000}
+                        />
+                        <textarea
+                          className="input min-h-[80px] w-full resize-y text-sm"
+                          value={s.detailEn}
+                          onChange={(e) => patch(s.id, { detailEn: e.target.value })}
+                          maxLength={8000}
+                        />
+                      </div>
+                    </div>
+                  )}
 
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field
@@ -364,12 +374,10 @@ export default function PlatformStrategiesPanel() {
                       placeholder="1:2"
                       maxLength={40}
                     />
-                    <Field
+                    <ImageField
                       label={t('admin.strategyGuide.imageUrl')}
                       value={s.imageUrl}
                       onChange={(v) => patch(s.id, { imageUrl: v })}
-                      placeholder="https://"
-                      maxLength={500}
                     />
                   </div>
 

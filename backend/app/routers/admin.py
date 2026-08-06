@@ -14,11 +14,12 @@ access there's a record to check against.
 import json
 from datetime import datetime, time, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
 from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
 from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminTrialSettings, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
@@ -757,6 +758,38 @@ def put_strategy_cost_settings(
     db.commit()
     invalidate_strategy_costs_cache()
     return get_strategy_cost_settings(db, admin)
+
+
+# ---------- 图片上传 / image upload ----------
+
+@router.post("/upload-image", response_model=dict)
+async def upload_admin_image(
+    file: UploadFile = File(...),
+    _admin: User = Depends(require_admin),
+):
+    """上传一张策略配图，返回公开 URL。仅管理员。
+
+    只读一次到内存并在读完后按上限判断：策略配图上限 4MB（见 UPLOAD_MAX_BYTES），
+    不值得为它引入流式落盘。注意不能信任 Content-Length——它由客户端提供，所以
+    实际拦截依据是读到的字节数。
+    Upload one strategy illustration and return its public URL. Admin only.
+
+    The file is read into memory once and checked against the cap afterwards:
+    illustrations are capped at 4MB (see UPLOAD_MAX_BYTES), which doesn't justify
+    streaming to disk. Content-Length is client-supplied and therefore not
+    trusted; the real check is on the bytes actually read.
+    """
+    if not is_upload_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="后台未配置图片存储，请改用外链图片地址 / Image storage isn't configured; use an external image URL instead",
+        )
+    data = await file.read()
+    try:
+        url = upload_image(data)
+    except UploadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"url": url}
 
 
 # ---------- 平台策略介绍 / platform strategy write-ups ----------

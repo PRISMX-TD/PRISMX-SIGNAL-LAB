@@ -23,20 +23,12 @@
 // regime, holding time, designed risk:reward, indicators used. Risk:reward is a
 // strategy parameter (the SL/TP ratio at order time), not a performance claim.
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { signalApi } from '../api/client'
 import { localizeApiError } from '../api/utils'
+import { pick } from './strategyGuide'
 import type { PlatformStrategy } from '../api/types'
-
-// 按当前界面语言取字段，缺失时回落到另一种语言——管理员可能只填了一种，
-// 空白比串语言更糟。/ Pick the field for the current UI language, falling back
-// to the other one: an admin may have filled in only one, and a blank reads
-// worse than the wrong language.
-function pick(zh: string, en: string, isZh: boolean): string {
-  const primary = isZh ? zh : en
-  const fallback = isZh ? en : zh
-  return (primary || '').trim() || (fallback || '').trim()
-}
 
 function TagRow({ label, values }: { label: string; values: string[] }) {
   if (values.length === 0) return null
@@ -68,10 +60,6 @@ export default function PlatformStrategiesGuide() {
   const [items, setItems] = useState<PlatformStrategy[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  // 详情默认折叠：简介一行就能扫完，全展开会把列表撑得没法比较。
-  // Details collapsed by default: the summaries scan in one line each, and
-  // expanding everything makes the list impossible to compare.
-  const [expanded, setExpanded] = useState<string | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -121,13 +109,21 @@ export default function PlatformStrategiesGuide() {
         {items.map((s) => {
           const name = pick(s.nameZh, s.nameEn, isZh)
           const summary = pick(s.summaryZh, s.summaryEn, isZh)
-          const detail = pick(s.detailZh, s.detailEn, isZh)
           const regime = pick(s.marketRegimeZh, s.marketRegimeEn, isZh)
           const holding = pick(s.holdingTimeZh, s.holdingTimeEn, isZh)
-          const isOpen = expanded === s.id
 
+          // 整卡是一个链接，而不是卡内再放一个「查看详情」按钮：整卡可点的命中
+          // 区域大得多，移动端尤其明显；而卡内嵌按钮又会让卡片本身该不该可点变
+          // 得含混。/ The whole card is one link rather than carrying a "view
+          // details" button: a full-card target is far easier to hit, especially
+          // on mobile, and a nested button muddies whether the card itself is
+          // clickable.
           return (
-            <div key={s.id} className="glass flat-card overflow-hidden p-0">
+            <Link
+              key={s.id}
+              to={`/app/strategy/${s.id}`}
+              className="glass flat-card group overflow-hidden p-0 transition-colors hover:bg-white/[0.04]"
+            >
               {s.imageUrl && (
                 <img
                   src={s.imageUrl}
@@ -154,30 +150,11 @@ export default function PlatformStrategiesGuide() {
                   <TagRow label={t('signals.guide.indicators')} values={s.indicators} />
                 </div>
 
-                {detail && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setExpanded(isOpen ? null : s.id)}
-                      aria-expanded={isOpen}
-                      className="mt-4 text-xs text-prism-300 transition-colors hover:text-prism-200"
-                    >
-                      {isOpen ? t('signals.guide.collapse') : t('signals.guide.readMore')}
-                    </button>
-                    {isOpen && (
-                      // 纯文本渲染：管理员输入不经过 HTML 解析，whitespace-pre-line
-                      // 保留换行分段即可，不引入富文本/Markdown 解析面。
-                      // Plain text only: admin input is never parsed as HTML;
-                      // whitespace-pre-line keeps the paragraph breaks without
-                      // opening a rich-text/Markdown parsing surface.
-                      <p className="mt-3 whitespace-pre-line border-t border-white/10 pt-3 text-sm leading-relaxed text-slate-300">
-                        {detail}
-                      </p>
-                    )}
-                  </>
-                )}
+                <span className="mt-4 inline-block text-xs text-prism-300 transition-colors group-hover:text-prism-200">
+                  {t('signals.guide.readMore')} →
+                </span>
               </div>
-            </div>
+            </Link>
           )
         })}
       </div>

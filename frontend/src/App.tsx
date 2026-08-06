@@ -24,6 +24,7 @@ const SimulatorPage = lazy(() => import('./pages/SimulatorPage'))
 const StrategiesPage = lazy(() => import('./pages/StrategiesPage'))
 const LegalPage = lazy(() => import('./pages/LegalPage'))
 const SupportPage = lazy(() => import('./pages/SupportPage'))
+const StrategyGuidePage = lazy(() => import('./pages/StrategyGuidePage'))
 
 function Protected({ children }: { children: ReactNode }) {
   const { isAuthed } = useAuth()
@@ -94,6 +95,16 @@ export default function App() {
             >
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/app" element={<SignalsPage />} />
+              {/* 平台策略详情：/app 的「平台策略」标签点进来的独立页面。做成带
+                  参路由而不是标签内展开，是为了让每条策略有自己的地址——可以直接
+                  发链接给用户、浏览器后退能回到列表。id 不存在时页面自己给提示，
+                  不在路由层挡。
+                  Platform strategy detail: the standalone page reached from the
+                  "Platform strategies" tab on /app. A parameterized route rather
+                  than in-tab expansion gives each write-up its own address, so it
+                  can be linked directly and Back returns to the list. An unknown
+                  id is handled by the page itself, not gated here. */}
+              <Route path="/app/strategy/:id" element={<StrategyGuidePage />} />
               <Route path="/charts" element={<ChartsPage />} />
               <Route path="/bind" element={<BindPage />} />
               <Route path="/bind/bridge" element={<BridgePage />} />

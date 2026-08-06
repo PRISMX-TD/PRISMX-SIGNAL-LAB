@@ -391,6 +391,24 @@ export interface AdminStrategySettings {
 // services/signal_resolution.py), and hand-entered numbers would contradict it.
 // This describes design characteristics only — market regime, holding time,
 // designed risk:reward, indicators used.
+// 详细说明的一个内容块。分块而不是一段长文本：长文本在页面上挤成一团，而支持
+// Markdown/HTML 又要引入解析器和注入面。四种已知类型让渲染不需要解析任何标记。
+// text 的含义随 kind 变化：heading 小标题、paragraph 正文段落、list 要点列表
+//（按换行切分每条）、image 图注（可空，图片本体在 imageUrl）。
+// One block of the long description. Blocks rather than one blob: a blob reads as
+// a wall of text, while Markdown/HTML would mean a parser and its injection
+// surface. Four known types mean rendering parses no markup.
+// `text` means: heading = subheading, paragraph = body, list = bullets (split on
+// newlines), image = optional caption (the image itself is in imageUrl).
+export type PlatformStrategyBlockKind = 'heading' | 'paragraph' | 'list' | 'image'
+
+export interface PlatformStrategyBlock {
+  kind: PlatformStrategyBlockKind
+  textZh: string
+  textEn: string
+  imageUrl: string
+}
+
 export interface PlatformStrategy {
   id: string
   order: number
@@ -399,6 +417,13 @@ export interface PlatformStrategy {
   nameEn: string
   summaryZh: string
   summaryEn: string
+  // 结构化内容块，按顺序渲染 / structured blocks, rendered in order
+  blocks: PlatformStrategyBlock[]
+  // 第一版的单段纯文本，已被 blocks 取代。保留以免丢已录入内容：blocks 为空时
+  // 详情页回落渲染它。新内容一律写 blocks。
+  // First version's single blob, superseded by blocks. Kept so entered copy isn't
+  // lost: the detail page falls back to it when blocks is empty. New content goes
+  // into blocks.
   detailZh: string
   detailEn: string
   symbols: string[]

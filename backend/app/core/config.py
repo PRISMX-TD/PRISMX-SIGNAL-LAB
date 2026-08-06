@@ -426,6 +426,29 @@ class Settings(BaseSettings):
     # price after the bridge comes back online much later.
     ORDER_PENDING_TIMEOUT_SECONDS: int = 300
 
+    # ---- 图片上传 / Image uploads（Supabase Storage）----
+    # 只用于管理员上传策略介绍配图，走后端代理：浏览器只把文件交给自家后端，
+    # service_role key 永不下发到前端。三项留空 = 上传功能关闭（端点返回 503），
+    # 管理员仍可手填外链图片 URL。
+    # Admin-only uploads for strategy illustrations, proxied through the backend:
+    # the browser hands the file to our own API and the service_role key never
+    # reaches the frontend. Leaving these empty disables uploading (the endpoint
+    # returns 503); admins can still paste an external image URL.
+    SUPABASE_URL: str = ""
+    # service_role key。必须只存在于后端 .env——它能绕过所有 RLS 策略。
+    # service_role key. Must live only in the backend .env: it bypasses every RLS policy.
+    SUPABASE_SERVICE_KEY: str = ""
+    # 存储桶名。需要在 Supabase 控制台建为 public 桶，否则返回的公开 URL 打不开。
+    # Bucket name. Create it as a public bucket in the Supabase dashboard, or the
+    # returned public URL won't load.
+    SUPABASE_STORAGE_BUCKET: str = "strategy-images"
+    # 单张图片大小上限（字节）。默认 4MB：策略配图是页面插图，不需要原图画质，
+    # 而后端要把整个文件读进内存再转发，上限过大会让并发上传吃掉内存。
+    # Per-image size cap in bytes. Default 4MB: these are page illustrations, not
+    # originals, and the backend buffers the whole file in memory before
+    # forwarding — a high cap would let concurrent uploads eat RAM.
+    UPLOAD_MAX_BYTES: int = 4 * 1024 * 1024
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
