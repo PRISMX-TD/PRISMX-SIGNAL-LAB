@@ -46,19 +46,116 @@ router = APIRouter(prefix="/bridge", tags=["bridge"])
 # by bridge_poll and offline_monitor_loop (accessed serially on one event loop).
 _last_pushed_online: dict[str, set[str]] = {}
 
+# user_id -> 上次推送的账号余额 {login: balance}。
+#
+# 余额只在出入金和平仓结算时变，属于低频事件，但变化必须尽快让前端知道：
+# 账户卡片的净值 = 余额 + 浮动盈亏，浮盈已经随持仓每 1.5 秒推送，余额若还要等
+# 前端 5 秒轮询，平仓瞬间净值就会用"新浮盈 + 旧余额"算，短时间显示一个错数。
+#
+# 这里只存余额不存净值：净值由前端自己用余额加浮盈算，本就不需要推。
+# user_id -> last pushed balances {login: balance}. Balance only moves on
+# deposits/withdrawals and close settlements, but the change must reach the
+# frontend promptly: the card's equity is balance + floating P/L, and since
+# floating P/L already streams every 1.5s, a stale balance would briefly render
+# "new floating P/L + old balance". Only balance is tracked; equity is derived
+# frontend-side.
+_last_pushed_balances: dict[str, dict[str, float]] = {}
 
-async def _push_accounts_status_if_changed(user_id: str, online: set[str]) -> None:
-    """仅在在线账号集合发生变化时推送 ACCOUNTS_STATUS；若从"有账号在线"变为
+
+def _forget_idle_users(online_users: set[str]) -> None:
+    """丢弃既无在线账号、又无 WS 连接的用户的推送去重状态。
+
+    Drop push de-duplication state for users with neither online accounts nor a
+    live WS connection.
+
+    这两个字典是模块级的，只增不减：用户来过一次就留下条目，长期运行会一直涨。
+    单条很小，但没有任何机制会把它删掉。
+
+    两个条件必须同时满足才丢：
+      · 无在线账号 —— 桥接已停，不会再有余额上报；
+      · 无 WS 连接 —— 没人在看，丢了也不会漏推。
+    只看其一都不安全：账号离线但页面还开着时，状态得留着，否则桥接一恢复就会
+    因为"没有上次记录"而重推一遍；反之页面关了但桥接还在跑，也同理。
+
+    重新出现的用户会被当作首次观测，照常收到一次完整推送，所以丢弃是安全的。
+
+    Both conditions must hold: no online accounts (the bridge stopped, so no
+    further balance reports) and no WS connection (nobody is watching, so
+    dropping can't miss a push). Either alone is unsafe — with the page still
+    open the state must persist, or the bridge coming back would re-push
+    everything as if never seen. Users that reappear are treated as a first
+    observation and get a full push, so dropping is safe.
+    """
+    connected = set(manager.connected_user_ids())
+    for uid in set(_last_pushed_online) | set(_last_pushed_balances):
+        if uid not in online_users and uid not in connected:
+            _last_pushed_online.pop(uid, None)
+            _last_pushed_balances.pop(uid, None)
+
+
+async def push_balances_if_changed(user_id: str, balances: dict[str, float]) -> None:
+    """只在余额变化时推送 ACCOUNTS_STATUS，不参与在线状态判定。
+
+    Push ACCOUNTS_STATUS on balance changes only, without touching liveness.
+
+    给 gateway 轮询用。gateway 账号没有心跳（在线与否取决于 gateway 服务本身），
+    绝不能让它写 _last_pushed_online：那份状态由 bridge_poll 和 offline_monitor_loop
+    按心跳维护，被 gateway 掺一脚会让 bridge 账号的在线状态每两秒抖动一次。
+    所以这里把在线集合原样带回，只比对余额。
+
+    Used by the gateway poller. Gateway accounts have no heartbeat, so this must
+    never write _last_pushed_online — that state is maintained from heartbeats by
+    bridge_poll and offline_monitor_loop, and letting the gateway interfere would
+    make bridge accounts flap every two seconds. The online set is echoed back
+    unchanged; only balances are compared.
+    """
+    previous = _last_pushed_balances.get(user_id)
+    # 合并而非替换：一个用户可能同时有 bridge 和 gateway 账号，各自只知道自己
+    # 那部分余额，直接覆盖会把对方的抹掉。
+    # Merge rather than replace: a user may have both bridge and gateway accounts,
+    # and each side only knows its own balances.
+    merged = {**(previous or {}), **balances}
+    if previous == merged:
+        return
+    _last_pushed_balances[user_id] = merged
+    await manager.push_to_client(
+        user_id,
+        {
+            "type": "ACCOUNTS_STATUS",
+            "data": {
+                "onlineLogins": sorted(_last_pushed_online.get(user_id, set())),
+                "balances": merged,
+            },
+        },
+    )
+
+
+async def _push_accounts_status_if_changed(
+    user_id: str, online: set[str], balances: dict[str, float] | None = None
+) -> None:
+    """在线账号集合或余额发生变化时推送 ACCOUNTS_STATUS；若从"有账号在线"变为
     "全部离线"，额外触发一次 bridge_offline 事件通知（若用户已开启）。
 
-    Push ACCOUNTS_STATUS only when the online-login set actually changed; if
+    Push ACCOUNTS_STATUS when the online-login set or any balance changed; if
     the transition is from "some accounts online" to "all offline", also fire
     a bridge_offline event notification (if the user has it enabled).
     """
     previous = _last_pushed_online.get(user_id)
-    if previous == online:
+    # 余额单独比对：在线集合往往一整天不变，只看它会把出入金和平仓结算的
+    # 余额变化整个漏掉。
+    # Compare balances separately: the online set often stays unchanged all day,
+    # so keying only on it would miss every balance change.
+    # 合并而非替换：同一用户的 gateway 账号余额由 push_balances_if_changed 写入，
+    # 直接覆盖会把它们抹掉，前端那些账号的余额就会跳回旧值。
+    # Merge rather than replace: this user's gateway balances are written by
+    # push_balances_if_changed, and overwriting would wipe them.
+    previous_balances = _last_pushed_balances.get(user_id)
+    balances = {**(previous_balances or {}), **(balances or {})}
+    balance_changed = previous_balances != balances
+    if previous == online and not balance_changed:
         return
     _last_pushed_online[user_id] = online
+    _last_pushed_balances[user_id] = balances
     # 只有"以前确实在线过、现在变空"才算真正的断线；previous 为 None 只是
     # 第一次观测到这个用户（比如刚启动服务、或用户从未连接过），不是真的
     # 从在线掉线，不该触发"离线"提醒。
@@ -73,9 +170,14 @@ async def _push_accounts_status_if_changed(user_id: str, online: set[str]) -> No
             "PRISMX Bridge 已离线",
             "检测到你的 MT5 桥接程序已断开连接，新信号将无法自动下单执行。",
         )
+    # 带上余额，前端就能直接就地更新，不必再为此拉一次 /bridge/accounts。
+    # Ship balances so the frontend can update in place instead of refetching.
     await manager.push_to_client(
         user_id,
-        {"type": "ACCOUNTS_STATUS", "data": {"onlineLogins": sorted(online)}},
+        {
+            "type": "ACCOUNTS_STATUS",
+            "data": {"onlineLogins": sorted(online), "balances": balances},
+        },
     )
 
 
@@ -265,15 +367,15 @@ def _upsert_account(
 
 def _poll_db_work(
     db: Session, user: User, req: BridgePollRequest
-) -> tuple[list[dict], list[dict], set[str], list[str], list[str]]:
+) -> tuple[list[dict], list[dict], set[str], dict[str, float], list[str], list[str]]:
     """bridge_poll 的全部同步数据库工作（在线程池中执行）。
     All blocking DB work of bridge_poll (runs in a thread pool).
 
-    返回 (待下发指令, 被作废订单的推送载荷, 在线账号集合, 超额被拒的 login 列表,
-    非合作券商被拒的 login 列表)。
+    返回 (待下发指令, 被作废订单的推送载荷, 在线账号集合, 账号余额 {login: balance},
+    超额被拒的 login 列表, 非合作券商被拒的 login 列表)。
     Returns (commands to deliver, voided-order push payloads, online logins,
-    logins rejected for exceeding the plan's account limit, logins rejected
-    for not matching the partner broker).
+    balances keyed by login, logins rejected for exceeding the plan's account
+    limit, logins rejected for not matching the partner broker).
     """
     # 1) upsert 本次上报的账号。两道闸门，先券商后配额：
     #    ① 合作券商锁开启时，MT5 服务器名不含任一关键字的账号一律拒绝——
@@ -323,6 +425,7 @@ def _poll_db_work(
     )
     suffix_by_login: dict[str, str] = {}
     online_logins: set[str] = set()
+    balances: dict[str, float] = {}
     rejected_logins: list[str] = []
     broker_rejected: list[str] = []
     for acc in req.accounts:
@@ -345,6 +448,12 @@ def _poll_db_work(
             existing_count += 1
         suffix_by_login[acc.login] = (row.symbol_suffix or "").strip()
         online_logins.add(acc.login)
+        # 取 row 而非 acc 的余额：被接受的账号才在这里，且 row 上的值已经过
+        # _upsert_account 的"None 不覆盖"处理，与 /bridge/accounts 返回的完全一致。
+        # Read balance off row, not acc: only accepted accounts reach here, and
+        # row already went through _upsert_account's "don't overwrite with None"
+        # handling, so it matches what /bridge/accounts returns.
+        balances[acc.login] = float(row.balance or 0.0)
     # 记录这个用户最近上报的 Bridge 版本，供网页端"有新版本可更新"提示使用。
     # 注意：这里的 `user` 可能来自 get_bridge_user 的鉴权缓存（脱离本 db 会话的
     # detached 实例），直接改它的属性不会被 db.commit() 落库。必须按 id 显式
@@ -483,7 +592,10 @@ def _poll_db_work(
     # payloads for voided orders (the actual push happens back on the event loop)
     voided_payloads = [order_update_payload(o) for o in voided]
 
-    return commands, voided_payloads, online_logins, rejected_logins, broker_rejected
+    return (
+        commands, voided_payloads, online_logins, balances,
+        rejected_logins, broker_rejected,
+    )
 
 
 @router.post("/poll")
@@ -500,7 +612,10 @@ async def bridge_poll(
     Blocking DB work runs in a thread pool so it can't stall the event loop
     (shared with the WS pushes); pushes happen back on the loop afterwards.
     """
-    commands, voided_payloads, online_logins, rejected_logins, broker_rejected = await run_in_threadpool(
+    (
+        commands, voided_payloads, online_logins, balances,
+        rejected_logins, broker_rejected,
+    ) = await run_in_threadpool(
         _poll_db_work, db, user, req
     )
 
@@ -509,7 +624,7 @@ async def bridge_poll(
         await manager.push_to_client(user.id, payload)
 
     # 账号在线状态：仅变化时推送 / account status: push only on change
-    await _push_accounts_status_if_changed(user.id, online_logins)
+    await _push_accounts_status_if_changed(user.id, online_logins, balances)
 
     # accountLimitExceeded：超出当前订阅等级账户上限、未被接受的 login 列表。
     # brokerRejected：MT5 服务器名不匹配合作券商、未被接受的 login 列表。
@@ -623,8 +738,13 @@ async def bridge_positions(
     any required MODIFY/CLOSE commands are enqueued for the bridge's next
     poll. An evaluation failure never breaks the report itself.
     """
-    manager.set_positions(user.id, req.data)
-    await manager.push_to_client(user.id, {"type": "POSITIONS", "data": req.data})
+    # push_positions 内部会缓存快照、附带按 login 汇总的浮动盈亏，并跳过与上一拍
+    # 完全相同的推送。账户卡片因此和持仓表同源同拍，不再等 /bridge/accounts 那条
+    # 5 秒轮询。
+    # push_positions caches the snapshot, attaches per-login floating P/L, and
+    # skips ticks identical to the previous one. The account card now shares the
+    # positions table's data instead of waiting on the 5s /bridge/accounts poll.
+    await manager.push_positions(user.id, req.data)
     # 拿实时持仓给个人胜率对账：给仍持仓的本平台仓位盖时间戳，让平仓明细漏报的
     # 仓位最终退出"进行中"。对账失败绝不影响持仓上报本身。
     # Reconcile personal win-rate against live positions: stamp still-open
@@ -939,7 +1059,14 @@ async def offline_monitor_loop() -> None:
             # Include users seen before so an all-offline transition is caught;
             # shares _last_pushed_online with bridge_poll to avoid duplicate pushes.
             for uid in set(_last_pushed_online) | set(current):
+                # 不传余额：这个循环只负责在线状态。函数内部会与上次推送的
+                # 余额合并，所以已知余额不会丢，也不会被误判成变化。
+                # No balances here: this loop only tracks liveness. The function
+                # merges with the last pushed balances, so nothing is lost or
+                # misread as a change.
                 await _push_accounts_status_if_changed(uid, current.get(uid, set()))
+
+            _forget_idle_users(set(current))
         except Exception:
             # 后台任务不因单次异常退出，但必须留下日志便于排查。
             # Never let the loop die on a transient error, but do log it.

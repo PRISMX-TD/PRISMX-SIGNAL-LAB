@@ -654,9 +654,20 @@ export interface Position {
   login?: string | null
 }
 
+// 随 POSITIONS 一起下发的账号实时资金：按 login 汇总的持仓浮动盈亏。
+// 前端用它加上余额算实时净值，不必等 5 秒一次的账号列表轮询。
+// Live per-account funds shipped with POSITIONS: floating P/L summed per login.
+// The frontend adds balance to get live equity without waiting on the 5s poll.
+export interface AccountFunds {
+  login: string
+  profit: number
+}
+
 export interface WSMessage {
   type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'QUOTES' | 'GLOBAL_QUOTES' | 'TREND_UPDATE' | 'PREFS_UPDATE' | 'STRATEGY_SIGNAL' | 'CLOSED_TRADE_NEW'
   data?: unknown
+  // 仅 POSITIONS 携带 / only present on POSITIONS
+  funds?: AccountFunds[]
   reason?: string
   userId?: string
 }

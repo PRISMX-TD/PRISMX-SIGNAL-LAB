@@ -88,7 +88,15 @@ async def ws_client(websocket: WebSocket):
     # Re-push the latest positions snapshot on connect to avoid a blank gap after refresh.
     cached = manager.get_positions(user_id)
     if cached:
-        await websocket.send_json({"type": "POSITIONS", "data": cached})
+        # 带上 funds，否则刷新后账户卡片要等下一拍推送才能拿到实时浮盈，
+        # 中间那一两秒会退回"净值-余额"的旧口径，数字会跳一下。
+        # Include funds, otherwise the account card would fall back to the old
+        # equity-minus-balance figure until the next push and visibly jump.
+        await websocket.send_json({
+            "type": "POSITIONS",
+            "data": cached,
+            "funds": manager.account_funds_from_positions(cached),
+        })
     # 连接即补推最近一次报价快照（按交易商账户区分，下单确认页用）
     # re-push the latest per-account quotes snapshot on connect (order-confirm page)
     cached_quotes = manager.get_quotes(user_id)

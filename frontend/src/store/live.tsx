@@ -80,9 +80,40 @@ const QuotesContext = createContext<Record<string, Record<string, Quote>>>({})
 // Site-wide display quotes (EA-pushed, not account-scoped): symbol -> Quote.
 const GlobalQuotesContext = createContext<Record<string, Quote>>({})
 const PositionsContext = createContext<Position[]>([])
+// 账号实时浮动盈亏：login -> 该账号所有持仓的 profit 之和，随 POSITIONS 同拍下发。
+// 与账号列表分开放，因为它和持仓一样高频；放进 LiveContext 会让整树跟着抖。
+// 某 login 不在表里表示该账号当前没有持仓，浮盈按 0 处理（不是"未知"）。
+// Per-account live floating P/L: login -> sum of that account's position profits,
+// pushed on the same tick as POSITIONS. Kept out of LiveContext because it
+// updates as often as positions do. A missing login means no open positions, so
+// floating P/L is zero -- not unknown.
+const AccountFundsContext = createContext<Record<string, number>>({})
 
 // 失效信号最多保留的条数 / max number of expired signals to keep
 const MAX_EXPIRED = 30
+
+// 账号列表轮询间隔。曾经是 5 秒，因为账户卡片的余额只能靠它刷新。现在余额随
+// ACCOUNTS_STATUS 推送、浮盈随持仓推送，这条轮询只剩两个职责：
+//   ① 发现新绑定的账号（用户装好桥接后首次出现）；
+//   ② 作为"后端不可达"的第二条判据（见下方 accountFailStreak）。
+// 两者都不需要 5 秒粒度，而它每次要拉全量账号加订阅配置，所以放宽到 15 秒。
+//
+// Accounts poll interval. It used to be 5s because the account card's balance
+// could only refresh through it. Now that balances ride on ACCOUNTS_STATUS and
+// floating P/L rides on position pushes, this poll has just two jobs: spotting
+// newly bound accounts, and acting as the second signal for "backend
+// unreachable". Neither needs 5s granularity, and each request pulls the full
+// account list plus subscription config, so it's relaxed to 15s.
+const ACCOUNTS_POLL_MS = 15000
+
+// 连续多少次轮询失败才判定后端不可达。间隔从 5 秒放宽到 15 秒后，仍按 3 次会
+// 让红条推迟到 45 秒才出现，太迟；降到 2 次即约 30 秒。不降到 1 次是因为部署时
+// 的一两秒 502、偶发网络抖动都会失败一次，据此弹红条只会制造噪音。
+// How many consecutive failures mark the backend unreachable. With the interval
+// relaxed from 5s to 15s, keeping 3 would delay the banner to ~45s; 2 (~30s) is
+// the balance. Not 1, because a transient 502 during a deploy or a network blip
+// fails once, and a banner for that is just noise.
+const ACCOUNTS_FAIL_THRESHOLD = 2
 
 // 浅比较两个对象的自有字段（值均为原始类型时可靠）/ shallow-compare own fields
 function shallowEqual(a: unknown, b: unknown): boolean {
@@ -137,6 +168,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [strategySignals, setStrategySignals] = useState<StrategySignal[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [positions, setPositions] = useState<Position[]>([])
+  const [accountFunds, setAccountFunds] = useState<Record<string, number>>({})
   const [quotes, setQuotes] = useState<Record<string, Record<string, Quote>>>({})
   const [globalQuotes, setGlobalQuotes] = useState<Record<string, Quote>>({})
   const [trends, setTrends] = useState<Record<string, Trend>>({})
@@ -232,27 +264,24 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // 兜底轮询：每 5 秒刷新一次账号在线状态，防止 WebSocket 推送丢失导致状态卡住。
-  // 配合后端 ~7s 在线窗口与离线检测任务，断线可在数秒内置灰。
-  // 页面在后台（切到别的 App、手机息屏）时跳过，避免无意义耗电；切回前台
-  // 立即补一次，不用等最多 5 秒才刷新出最新状态。
-  // Fallback polling: refresh account online status every 5s in case a WS push
-  // is missed, so a disconnect greys out within seconds alongside the backend
-  // monitor. Skipped while the page is backgrounded (switched app, screen
-  // locked) to avoid pointless battery drain; refetches immediately on
-  // returning to the foreground instead of waiting up to 5s for the next tick.
-  // 会话中途后端挂掉时，refreshAll 不会再跑（它只在挂载与少数动作时触发），
-  // 所以那条判据覆盖不到。这个 5 秒轮询是全站最稳定的心跳，连续失败即可作为
-  // 第二条证据。要求连续 3 次（约 15 秒）而不是 1 次：偶发的网络抖动、部署时
-  // 的一两秒 502 都会失败一次，据此弹红条只会制造噪音，等用户学会忽略它，真
-  // 出事时也就没人看了。任一次成功立刻复位。
+  // 兜底轮询（间隔见 ACCOUNTS_POLL_MS）：发现新绑定的账号，并兜住偶发丢失的
+  // WS 推送。在线状态与余额的实时性由推送负责，不依赖这条轮询：账号掉线由后端
+  // ~7s 在线窗口加离线检测任务在数秒内置灰。
+  // 页面在后台（切到别的 App、手机息屏）时跳过，避免无意义耗电；切回前台立即
+  // 补一次，不用等下一拍。
+  // Fallback polling (interval: ACCOUNTS_POLL_MS): spots newly bound accounts and
+  // covers the occasional dropped WS push. Liveness and balances come from pushes
+  // rather than this poll — a disconnect greys out within seconds via the backend's
+  // ~7s online window and offline monitor. Skipped while backgrounded (switched
+  // app, screen locked) to avoid pointless battery drain; refetches immediately on
+  // returning to the foreground instead of waiting for the next tick.
+  // 会话中途后端挂掉时，refreshAll 不会再跑（它只在挂载与少数动作时触发），所以
+  // 那条判据覆盖不到。这条轮询是全站最稳定的心跳，连续失败即可作为第二条证据；
+  // 阈值见 ACCOUNTS_FAIL_THRESHOLD，任一次成功立刻复位。
   // A mid-session outage isn't covered by refreshAll's check (it only runs on
-  // mount and on a few actions). This 5s poll is the steadiest heartbeat in the
-  // app, so a run of failures is the second piece of evidence. Three in a row
-  // (~15s) rather than one: a transient network blip or a second of 502 during a
-  // deploy fails once, and flashing a red banner for that just trains users to
-  // ignore it — by the time something real happens, nobody is reading it. Any
-  // success resets it immediately.
+  // mount and on a few actions). This poll is the steadiest heartbeat in the app,
+  // so a run of failures is the second piece of evidence; the threshold is
+  // ACCOUNTS_FAIL_THRESHOLD, and any success resets it immediately.
   const accountFailStreak = useRef(0)
   useEffect(() => {
     const poll = () => {
@@ -265,12 +294,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         })
         .catch(() => {
           accountFailStreak.current += 1
-          if (accountFailStreak.current >= 3) setBackendUnreachable(true)
+          if (accountFailStreak.current >= ACCOUNTS_FAIL_THRESHOLD) setBackendUnreachable(true)
         })
     }
     const timer = window.setInterval(() => {
       if (!document.hidden) poll()
-    }, 5000)
+    }, ACCOUNTS_POLL_MS)
     const onVisible = () => { if (!document.hidden) poll() }
     document.addEventListener('visibilitychange', onVisible)
     return () => {
@@ -313,9 +342,23 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         })
         break
       }
-      case 'POSITIONS':
+      case 'POSITIONS': {
         setPositions((prev) => keepIfEqual(prev, (msg.data as Position[]) || []))
+        // funds 与 data 同拍，账户卡片因此能和持仓表用同一份浮盈。
+        // 整表替换而非合并：后端只下发"有持仓的账号"，合并会让已平完仓的账号
+        // 停在旧浮盈上。
+        // funds arrives on the same tick, so the account card shares the
+        // positions table's numbers. Replace rather than merge: the backend only
+        // sends accounts that have positions, so merging would leave a stale
+        // figure on an account whose last position just closed.
+        const nextFunds: Record<string, number> = {}
+        for (const f of msg.funds || []) {
+          if (!f?.login || typeof f.profit !== 'number') continue
+          nextFunds[f.login] = f.profit
+        }
+        setAccountFunds((prev) => keepIfEqual(prev, nextFunds))
         break
+      }
       case 'QUOTES': {
         // 按交易商账户区分的报价（下单确认页用），合并变化项到现有快照
         // Per-broker-account quotes (order-confirmation pages), merge changed
@@ -374,13 +417,28 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         setClosedTradeTick((n) => n + 1)
         break
       case 'ACCOUNTS_STATUS': {
-        // 桥接程序上报账号在线变化，拉取最新账号列表 / refresh accounts on status change
-        const data = msg.data as { onlineLogins?: string[] }
+        // 账号在线状态或余额发生变化。两者都直接就地更新：
+        // 余额随消息带过来，不必为了拿它再请求一次 /bridge/accounts。
+        // Account liveness or balance changed. Both are applied in place; the
+        // balance rides along, so no extra /bridge/accounts request is needed.
+        const data = msg.data as { onlineLogins?: string[]; balances?: Record<string, number> }
         const online = new Set(data?.onlineLogins || [])
+        const balances = data?.balances
         setAccounts((prev) =>
-          prev.map((a) => ({ ...a, online: online.has(a.login) }))
+          keepIfEqual(
+            prev,
+            prev.map((a) => {
+              const next = { ...a, online: online.has(a.login) }
+              // 只更新推送里出现的账号。未出现不代表余额归零，可能是该账号
+              // 当前离线、或来自 gateway 这条不走本推送的链路——一律保留原值。
+              // Only touch logins present in the push. Absence doesn't mean zero:
+              // the account may be offline, or come from the gateway path which
+              // doesn't use this message. Keep the existing value either way.
+              if (balances && a.login in balances) next.balance = balances[a.login]
+              return next
+            }),
+          ),
         )
-        accountApi.list().then((r) => setAccounts((prev) => keepIfEqual(prev, r.accounts))).catch(() => {})
         break
       }
     }
@@ -418,11 +476,13 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   return (
     <LiveContext.Provider value={value}>
       <PositionsContext.Provider value={positions}>
-        <QuotesContext.Provider value={quotes}>
-          <GlobalQuotesContext.Provider value={globalQuotes}>
-            {children}
-          </GlobalQuotesContext.Provider>
-        </QuotesContext.Provider>
+        <AccountFundsContext.Provider value={accountFunds}>
+          <QuotesContext.Provider value={quotes}>
+            <GlobalQuotesContext.Provider value={globalQuotes}>
+              {children}
+            </GlobalQuotesContext.Provider>
+          </QuotesContext.Provider>
+        </AccountFundsContext.Provider>
       </PositionsContext.Provider>
     </LiveContext.Provider>
   )
@@ -449,4 +509,12 @@ export function useGlobalQuotes() {
 // 只订阅持仓 / subscribe to positions only
 export function usePositions() {
   return useContext(PositionsContext)
+}
+
+// 只订阅账号实时浮动盈亏：login -> profit 之和。
+// 表里没有某 login 表示该账号当前无持仓，浮盈为 0。
+// Subscribe to per-account live floating P/L only: login -> summed profit.
+// A login absent from the map has no open positions, so its P/L is zero.
+export function useAccountFunds() {
+  return useContext(AccountFundsContext)
 }

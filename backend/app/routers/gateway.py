@@ -25,6 +25,13 @@ from app.services.gateway_client import (
     verify_account as gw_verify,
 )
 from app.services.plans import max_mt5_accounts
+# 余额推送与 bridge 共用同一份去重状态（_last_pushed_balances），所以直接复用
+# bridge 里的函数，而不是各自维护一套——两套状态会互相覆盖对方的余额。
+# bridge 不导入 gateway，这个方向不会形成循环导入。
+# Balance pushes share bridge's de-duplication state (_last_pushed_balances), so
+# reuse its helper instead of keeping a second copy that would clobber the other
+# side's balances. bridge doesn't import gateway, so this direction is safe.
+from app.routers.bridge import push_balances_if_changed
 
 logger = logging.getLogger("prismx.gateway.router")
 
@@ -283,6 +290,22 @@ GATEWAY_POSITIONS_INTERVAL = 2.0
 # API round-trip, so throttle per account instead of hitting it every 2s.
 GATEWAY_ACCOUNT_REFRESH_INTERVAL = 15.0
 
+# 一轮里同时处理的用户数上限。
+#
+# 每轮要为每个在线用户各做几次 Manager API 往返。串行时一轮耗时随用户数线性
+# 增长，用户一多就会超过轮询间隔，持仓延迟跟着一起涨。
+#
+# 但也不能无上限并发：gateway 那端是单条 Manager API 连接，几十个请求一起压过去
+# 只会让它排队甚至超时，比串行更糟。取 8 是个折中 —— 足以让一轮的耗时不随用户数
+# 明显增长，又不会把 gateway 打满。
+#
+# Max users processed concurrently per tick. Serial processing made a tick scale
+# linearly with user count, eventually exceeding the poll interval. Unbounded
+# concurrency is worse though: the gateway side is a single Manager API
+# connection, so flooding it just causes queueing and timeouts. 8 is the
+# compromise.
+GATEWAY_MAX_CONCURRENT_USERS = 8
+
 # 平仓明细扫描间隔与回看窗口。
 #
 # 回看窗口的取值理由与 bridge/mt5_worker.py 的 _closed_trades_payload 一致：
@@ -432,8 +455,13 @@ async def gateway_positions_loop() -> None:
         finally:
             db.close()
 
-    def _save_account_funds(user_id: str, login: str, rsp) -> None:
-        """把 gateway 读回的资金写进 MT5Account，等价于 Bridge 的 /bridge/poll upsert。"""
+    def _save_account_funds(user_id: str, login: str, rsp) -> float | None:
+        """把 gateway 读回的资金写进 MT5Account，等价于 Bridge 的 /bridge/poll upsert。
+
+        返回写入后的余额，供调用方决定是否推送；账号不存在时返回 None。
+        Returns the persisted balance so the caller can decide whether to push;
+        None when the account row doesn't exist.
+        """
         db = SessionLocal()
         try:
             row = (
@@ -446,13 +474,14 @@ async def gateway_positions_loop() -> None:
                 .first()
             )
             if row is None:
-                return
+                return None
             row.balance = rsp.balance
             row.equity = rsp.equity
             row.leverage = rsp.leverage
             if rsp.name:
                 row.account_name = rsp.name
             db.commit()
+            return float(row.balance or 0.0)
         finally:
             db.close()
 
@@ -517,8 +546,141 @@ async def gateway_positions_loop() -> None:
     # login -> 上次刷新/扫描的 monotonic 时间戳
     last_account_refresh: dict[str, float] = {}
     last_deals_scan: dict[str, float] = {}
+    # login -> 最近一次读到的余额。资金 15 秒才刷一次，而推送判断每拍都要做，
+    # 所以必须跨拍留着；只用本拍刷到的会让没轮到刷新的账号余额忽然消失。
+    # login -> last known balance. Funds refresh every 15s but the push check runs
+    # every tick, so balances must persist across ticks; using only this tick's
+    # refreshed values would make un-refreshed accounts drop out.
+    known_balances: dict[str, float] = {}
     # 本进程内已做过首次补扫的账号 / logins whose catch-up scan already ran
     scanned_once: set[str] = set()
+
+    # 一轮内限制同时在飞的用户数，避免把 gateway 的单连接打满。
+    # Cap in-flight users per tick so we don't saturate the gateway's single link.
+    sem = asyncio.Semaphore(GATEWAY_MAX_CONCURRENT_USERS)
+
+    async def _process_user(user_id: str, logins: list[str]) -> None:
+        """处理单个用户：刷资金、扫平仓、拉持仓、推送。
+
+        Handle one user: refresh funds, scan closes, fetch positions, push.
+
+        用户之间互不相关，所以这一层可以并发跑；但单个用户内部仍保持串行 ——
+        资金刷新和平仓扫描共用节流时间戳，并发会让节流失效。
+        Users are independent so this runs concurrently, but a single user's steps
+        stay serial: the funds refresh and close scan share throttle timestamps.
+        """
+        async with sem:
+            now = time.monotonic()
+            data: list[dict] = []
+            for login in logins:
+                # --- 账号资金刷新（低频）---
+                if now - last_account_refresh.get(login, 0.0) >= GATEWAY_ACCOUNT_REFRESH_INTERVAL:
+                    last_account_refresh[login] = now
+                    try:
+                        acc_rsp = await gw_get_account(int(login))
+                        if acc_rsp is not None:
+                            bal = await run_in_threadpool(
+                                _save_account_funds, user_id, login, acc_rsp
+                            )
+                            if bal is not None:
+                                known_balances[login] = bal
+                        else:
+                            logger.warning("Gateway 账号资金读取失败 login=%s", login)
+                    except Exception:
+                        logger.exception("gateway account refresh failed (login=%s)", login)
+
+                # --- 平仓明细扫描（低频）---
+                if now - last_deals_scan.get(login, 0.0) >= GATEWAY_DEALS_SCAN_INTERVAL:
+                    last_deals_scan[login] = now
+                    first_scan = login not in scanned_once
+                    scanned_once.add(login)
+                    try:
+                        # to 往后留一天余量：MT5 服务器时区常领先 UTC，按
+                        # 「现在」截断会把刚成交的记录切掉。
+                        # Pad `to` by a day: MT5 server time often runs ahead
+                        # of UTC, and cutting at "now" would drop fresh deals.
+                        to_unix = int(time.time()) + 86400
+                        from_unix = int(time.time()) - (
+                            GATEWAY_DEALS_CATCHUP_SECONDS if first_scan
+                            else GATEWAY_DEALS_LOOKBACK_SECONDS
+                        )
+                        deals, derr = await gw_get_deals(int(login), from_unix, to_unix)
+                        if derr:
+                            logger.warning("Gateway 成交历史读取失败 login=%s: %s", login, derr)
+                        elif deals:
+                            n = await run_in_threadpool(
+                                _save_closed_trades, user_id, login, deals
+                            )
+                            if n:
+                                logger.info(
+                                    "Gateway 平仓明细入库 login=%s 新增=%d", login, n
+                                )
+                                # 立刻通知前端重拉，别等它自己的 45 秒轮询
+                                await manager.push_to_client(
+                                    user_id, {"type": "CLOSED_TRADE_NEW"}
+                                )
+                            else:
+                                # 窗口里有成交却一条都没入库，通常是归属判定
+                                # 没认出来（comment 前缀与 gateway.ini 不一致，
+                                # 或该仓位不是本平台开的）。debug 级别以免刷屏，
+                                # 但排查时能一眼看出是"读到了但被过滤掉"。
+                                logger.debug(
+                                    "Gateway 成交 %d 条但无新增平仓明细 login=%s"
+                                    "（已去重或归属不匹配）", len(deals), login,
+                                )
+                    except Exception:
+                        logger.exception("gateway closed-trade scan failed (login=%s)", login)
+
+                positions, err = await gw_get_positions(int(login))
+                if err:
+                    logger.warning("Gateway 持仓读取失败 login=%s: %s", login, err)
+                    continue
+                for p in positions:
+                    data.append({
+                        "ticket": p.ticket,
+                        "symbol": p.symbol,
+                        "side": p.side,
+                        "volume": p.volume,
+                        "profit": p.profit,
+                        "entryPrice": p.price_open,
+                        "currentPrice": p.price_current,
+                        "stopLoss": p.stop_loss,
+                        "takeProfit": p.take_profit,
+                        "login": login,
+                        "comment": p.comment,
+                    })
+
+            # 与 /bridge/positions 走同一个方法：缓存快照 + 附带按 login 汇总的
+            # 浮动盈亏 + 跳过重复推送。gateway 的资金刷新是 15 秒一次，光靠它
+            # 账户卡片会明显滞后于持仓表。
+            # Same path as /bridge/positions: cache the snapshot, attach per-login
+            # floating P/L, skip unchanged ticks. The gateway funds refresh runs
+            # every 15s, which would leave the account card behind.
+            await manager.push_positions(user_id, data)
+
+            # 余额变化时推 ACCOUNTS_STATUS，让账户卡片不必等前端 5 秒轮询。
+            # 用只管余额的那个函数：gateway 账号没有心跳，不能参与在线状态判定。
+            # Push ACCOUNTS_STATUS on balance changes so the account card doesn't
+            # wait for the frontend's 5s poll. Uses the balance-only helper since
+            # gateway accounts have no heartbeat and must not affect liveness.
+            mine = {lg: known_balances[lg] for lg in logins if lg in known_balances}
+            if mine:
+                await push_balances_if_changed(user_id, mine)
+
+            # 与 /bridge/positions 保持一致：驱动胜率对账与自动仓管。
+            # 任一步失败都不影响持仓推送本身。
+            db = SessionLocal()
+            try:
+                try:
+                    await run_in_threadpool(mark_positions_seen, db, user_id, data)
+                except Exception:
+                    logger.exception("gateway position reconciliation failed (user=%s)", user_id)
+                try:
+                    await run_in_threadpool(evaluate_positions, db, user_id, data)
+                except Exception:
+                    logger.exception("gateway auto_manage failed (user=%s)", user_id)
+            finally:
+                db.close()
 
     while True:
         try:
@@ -532,104 +694,31 @@ async def gateway_positions_loop() -> None:
 
             # 没有前端连着的用户不必去打扰 gateway
             connected = set(manager.connected_user_ids())
+            targets = [(uid, lg) for uid, lg in by_user.items() if uid in connected]
 
-            for user_id, logins in by_user.items():
-                if user_id not in connected:
-                    continue
-
-                now = time.monotonic()
-                data: list[dict] = []
-                for login in logins:
-                    # --- 账号资金刷新（低频）---
-                    if now - last_account_refresh.get(login, 0.0) >= GATEWAY_ACCOUNT_REFRESH_INTERVAL:
-                        last_account_refresh[login] = now
-                        try:
-                            acc_rsp = await gw_get_account(int(login))
-                            if acc_rsp is not None:
-                                await run_in_threadpool(_save_account_funds, user_id, login, acc_rsp)
-                            else:
-                                logger.warning("Gateway 账号资金读取失败 login=%s", login)
-                        except Exception:
-                            logger.exception("gateway account refresh failed (login=%s)", login)
-
-                    # --- 平仓明细扫描（低频）---
-                    if now - last_deals_scan.get(login, 0.0) >= GATEWAY_DEALS_SCAN_INTERVAL:
-                        last_deals_scan[login] = now
-                        first_scan = login not in scanned_once
-                        scanned_once.add(login)
-                        try:
-                            # to 往后留一天余量：MT5 服务器时区常领先 UTC，按
-                            # 「现在」截断会把刚成交的记录切掉。
-                            # Pad `to` by a day: MT5 server time often runs ahead
-                            # of UTC, and cutting at "now" would drop fresh deals.
-                            to_unix = int(time.time()) + 86400
-                            from_unix = int(time.time()) - (
-                                GATEWAY_DEALS_CATCHUP_SECONDS if first_scan
-                                else GATEWAY_DEALS_LOOKBACK_SECONDS
-                            )
-                            deals, derr = await gw_get_deals(int(login), from_unix, to_unix)
-                            if derr:
-                                logger.warning("Gateway 成交历史读取失败 login=%s: %s", login, derr)
-                            elif deals:
-                                n = await run_in_threadpool(
-                                    _save_closed_trades, user_id, login, deals
-                                )
-                                if n:
-                                    logger.info(
-                                        "Gateway 平仓明细入库 login=%s 新增=%d", login, n
-                                    )
-                                    # 立刻通知前端重拉，别等它自己的 45 秒轮询
-                                    await manager.push_to_client(
-                                        user_id, {"type": "CLOSED_TRADE_NEW"}
-                                    )
-                                else:
-                                    # 窗口里有成交却一条都没入库，通常是归属判定
-                                    # 没认出来（comment 前缀与 gateway.ini 不一致，
-                                    # 或该仓位不是本平台开的）。debug 级别以免刷屏，
-                                    # 但排查时能一眼看出是"读到了但被过滤掉"。
-                                    logger.debug(
-                                        "Gateway 成交 %d 条但无新增平仓明细 login=%s"
-                                        "（已去重或归属不匹配）", len(deals), login,
-                                    )
-                        except Exception:
-                            logger.exception("gateway closed-trade scan failed (login=%s)", login)
-
-                    positions, err = await gw_get_positions(int(login))
-                    if err:
-                        logger.warning("Gateway 持仓读取失败 login=%s: %s", login, err)
-                        continue
-                    for p in positions:
-                        data.append({
-                            "ticket": p.ticket,
-                            "symbol": p.symbol,
-                            "side": p.side,
-                            "volume": p.volume,
-                            "profit": p.profit,
-                            "entryPrice": p.price_open,
-                            "currentPrice": p.price_current,
-                            "stopLoss": p.stop_loss,
-                            "takeProfit": p.take_profit,
-                            "login": login,
-                            "comment": p.comment,
-                        })
-
-                manager.set_positions(user_id, data)
-                await manager.push_to_client(user_id, {"type": "POSITIONS", "data": data})
-
-                # 与 /bridge/positions 保持一致：驱动胜率对账与自动仓管。
-                # 任一步失败都不影响持仓推送本身。
-                db = SessionLocal()
-                try:
-                    try:
-                        await run_in_threadpool(mark_positions_seen, db, user_id, data)
-                    except Exception:
-                        logger.exception("gateway position reconciliation failed (user=%s)", user_id)
-                    try:
-                        await run_in_threadpool(evaluate_positions, db, user_id, data)
-                    except Exception:
-                        logger.exception("gateway auto_manage failed (user=%s)", user_id)
-                finally:
-                    db.close()
+            if targets:
+                # 并发跑各用户，并发度由 sem 限制。
+                # return_exceptions=True 是关键：单个用户炸了不能让整轮中断，
+                # 否则一个坏账号会连带拖停所有人的持仓推送。
+                # return_exceptions=True matters: one user blowing up must not
+                # abort the tick, or a single bad account would stall everyone's
+                # position pushes.
+                results = await asyncio.gather(
+                    *(_process_user(uid, lg) for uid, lg in targets),
+                    return_exceptions=True,
+                )
+                for (uid, _), r in zip(targets, results):
+                    if isinstance(r, asyncio.CancelledError):
+                        # 关服时的正常取消，往上抛让循环退出
+                        raise r
+                    if isinstance(r, Exception):
+                        # 用 error + exc_info 而不是 exception()：这里不在 except
+                        # 块里，exception() 取不到当前异常，只能显式传。
+                        # error(exc_info=...) rather than exception(): we're not
+                        # inside an except block, so there's no "current" exception.
+                        logger.error(
+                            "gateway user tick failed (user=%s)", uid, exc_info=r
+                        )
 
         except asyncio.CancelledError:
             raise

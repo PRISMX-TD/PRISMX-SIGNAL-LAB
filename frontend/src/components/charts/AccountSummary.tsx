@@ -7,8 +7,15 @@
 // an online one, else the first. Used/free margin and margin level aren't
 // separately reported by the bridge yet, so we show what balance/equity give us
 // and mark the rest "—" — never fabricate numbers.
+//
+// 浮动盈亏与净值走 useAccountFunds()（随持仓同拍推送），不再用库里 5 秒轮询来的
+// equity 反推。原因见下方 floating 处的注释。
+// Floating P/L and equity come from useAccountFunds() (pushed on the same tick as
+// positions) rather than being derived from the 5s-polled equity column; see the
+// comment at `floating` below.
 import { useTranslation } from 'react-i18next'
 import type { MT5Account } from '../../api/types'
+import { useAccountFunds } from '../../store/live'
 
 interface Props {
   account: MT5Account | null
@@ -22,12 +29,44 @@ function money(v: number | null | undefined, ccy: string): string {
 
 export default function AccountSummary({ account, className = '' }: Props) {
   const { t } = useTranslation()
+  const funds = useAccountFunds()
   const ccy = account?.accountCurrency || 'USD'
   const balance = account?.balance ?? null
-  const equity = account?.equity ?? null
-  // 浮动盈亏 = 净值 − 余额（桥接未单独给，可由二者推出）。
-  // Floating P&L = equity − balance (derivable when the bridge doesn't give it directly).
-  const floating = balance != null && equity != null ? equity - balance : null
+
+  // 浮动盈亏优先用推送值：它是当前各持仓 profit 之和，与持仓表同源同拍。
+  //
+  // 旧做法是 equity − balance 反推，有两个问题：
+  //   1. equity 来自 mt5_accounts 表，前端 5 秒轮询 + 后端最长 15 秒刷新，
+  //      最坏落后 20 秒，而持仓表的 profit 只落后一两秒 —— 同屏两个数字对不上。
+  //   2. 即使时间对齐，equity − balance 也不严格等于"持仓浮盈之和"：未结算的
+  //      已实现盈亏、信用额度、佣金入账都会掉进这个差值里。
+  //
+  // 推送值缺席（login 不在表里）说明该账号当前没有持仓，浮盈就是 0。
+  // 只有连 login 都没有（account 为 null）时才回退到反推。
+  //
+  // Prefer the pushed figure: it's the sum of the current positions' profit, from
+  // the same snapshot the positions table renders.
+  //
+  // The old equity − balance derivation had two problems: equity comes from the
+  // DB (5s frontend poll on top of a refresh up to 15s old, so ~20s worst case)
+  // while position profit is 1-2s old, making the two disagree on screen; and
+  // even time-aligned, equity − balance isn't strictly the sum of open-position
+  // profit (unsettled realized P/L, credit, and commission all land in it).
+  //
+  // An absent login means the account has no open positions, so P/L is zero. We
+  // only fall back to the derivation when there's no login at all.
+  const pushedFloating = account ? funds[account.login] ?? 0 : null
+  const floating =
+    pushedFloating ??
+    (balance != null && account?.equity != null ? account.equity - balance : null)
+
+  // 净值 = 余额 + 浮动盈亏。余额只在出入金/平仓结算时变（低频，库里的值足够新），
+  // 实时性由浮盈提供，所以这样算出来的净值比直接读库的 equity 及时得多。
+  // Equity = balance + floating P/L. Balance only moves on deposits/withdrawals
+  // and closes (low-frequency, so the DB value is fresh enough); the liveness
+  // comes from the floating part, making this far timelier than the stored equity.
+  const equity =
+    balance != null && floating != null ? balance + floating : account?.equity ?? null
 
   return (
     <div className={`term-panel term-account ${className}`}>
