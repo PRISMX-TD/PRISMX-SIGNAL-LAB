@@ -462,6 +462,84 @@ def save_strategy_costs(db, data: dict) -> None:
 
 
 
+# 平台策略介绍：纯内容数据，由管理员在后台手工维护。
+#
+# 为什么不从代码枚举：生产环境的全站信号来自 TradingView Webhook
+# （routers/webhook.py），判定逻辑在平台外部，后端只拿到一个自由文本的
+# indicator 字段，无从知道"平台上共有哪些策略"。所以这份清单只能是人工声明的
+# 内容，与信号表没有外键关系。
+#
+# 刻意不含胜率/盈亏比等业绩数字：真实战绩由 signals 表的 result 字段判定
+# （services/signal_resolution.py），那才是唯一可验证的来源；在这里手填一组
+# 数字只会和它冲突。本结构只描述策略的设计特征。
+#
+# Platform strategy write-ups: pure content, maintained by admins by hand.
+#
+# Why not enumerated from code: in production every shared signal arrives via
+# the TradingView webhook (routers/webhook.py), the decision logic lives
+# outside the platform, and the backend only receives a free-text indicator
+# string — it cannot know "which strategies exist". So this list can only be a
+# human-authored document with no foreign key to the signals table.
+#
+# Deliberately carries no win-rate / profit-factor figures: real performance is
+# adjudicated by the signals table's result column
+# (services/signal_resolution.py), the only verifiable source; hand-entered
+# numbers here would merely contradict it. This structure describes design
+# characteristics only.
+PLATFORM_STRATEGY_DEFAULTS: dict = {
+    "items": [],
+}
+
+_platform_strategies_cache: dict = {}
+_platform_strategies_cache_at: float = 0.0
+
+
+def invalidate_platform_strategies_cache() -> None:
+    global _platform_strategies_cache_at
+    with _lock:
+        _platform_strategies_cache_at = 0.0
+
+
+def _load_platform_strategies_from_db(db) -> dict:
+    data = {"items": []}
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "platform_strategies").first()
+    if row:
+        try:
+            stored = json.loads(row.value)
+            if isinstance(stored, dict) and isinstance(stored.get("items"), list):
+                data["items"] = stored["items"]
+        except (ValueError, TypeError):
+            logger.warning("platform_settings: invalid JSON for platform_strategies, using defaults")
+    return data
+
+
+def get_platform_strategies(db) -> dict:
+    """读取平台策略介绍清单（独立缓存）。
+    Read the platform strategy write-ups (its own cache)."""
+    global _platform_strategies_cache, _platform_strategies_cache_at
+    now = time.time()
+    with _lock:
+        if _platform_strategies_cache and now - _platform_strategies_cache_at < _CACHE_TTL_SECONDS:
+            return {"items": list(_platform_strategies_cache["items"])}
+    data = _load_platform_strategies_from_db(db)
+    with _lock:
+        _platform_strategies_cache = data
+        _platform_strategies_cache_at = now
+    return {"items": list(data["items"])}
+
+
+def save_platform_strategies(db, items: list) -> None:
+    """整表覆盖保存：管理员编辑的是完整清单（含排序），逐项 merge 无意义。
+    Whole-list replace: the admin edits the complete ordered list, so merging
+    item by item would be meaningless."""
+    encoded = json.dumps({"items": items}, ensure_ascii=False)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "platform_strategies").first()
+    if row is None:
+        db.add(PlatformSetting(key="platform_strategies", value=encoded))
+    else:
+        row.value = encoded
+
+
 def set_setting(db, key: str, value) -> None:
     """写入单个设置项（不提交事务，调用方负责 commit 后再 invalidate）。
     Write one setting (no commit; caller commits, then invalidates the cache)."""

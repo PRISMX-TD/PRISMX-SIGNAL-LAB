@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 
 const TOKEN_KEY = 'prismx_token'
@@ -122,6 +122,10 @@ export const signalApi = {
   list: () => request<{ signals: Signal[] }>('/signals'),
   stats: () => request<{ daily: SignalDailyCount[]; total: number }>('/signals/stats'),
   winrate: () => request<SignalWinRate>('/signals/winrate'),
+  // 平台策略介绍（只读，只返回已发布条目）；编辑走 adminApi.updatePlatformStrategies
+  // Platform strategy write-ups (read-only, published entries only); editing
+  // goes through adminApi.updatePlatformStrategies
+  platformStrategies: () => request<{ items: PlatformStrategy[] }>('/signals/platform-strategies'),
 }
 
 // 历史信号回放（模拟器）：**当前仅管理员可调**（后端 require_admin），
@@ -599,6 +603,15 @@ export const adminApi = {
       request<AdminStrategySettings>('/admin/strategy-settings', {
         method: 'PUT',
         body: JSON.stringify(payload),
+      }),
+    // 平台策略介绍：含未发布草稿，整表覆盖保存（后端按 id 唯一性校验）
+    // Platform strategy write-ups: includes unpublished drafts; saved as a whole
+    // list (the backend rejects duplicate ids)
+    getPlatformStrategies: () => request<{ items: PlatformStrategy[] }>('/admin/platform-strategies'),
+    updatePlatformStrategies: (items: PlatformStrategy[]) =>
+      request<{ items: PlatformStrategy[] }>('/admin/platform-strategies', {
+        method: 'PUT',
+        body: JSON.stringify({ items }),
       }),
     // ---- 工单管理 / Ticket management ----
     listTickets: (params: { status?: string; category?: string; limit?: number; offset?: number } = {}) => {

@@ -20,18 +20,20 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminTrialSettings, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminTrialSettings, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
 from app.services.settings_store import (
     get_broker_settings,
     get_candle_settings,
     get_discipline_settings,
+    get_platform_strategies,
     get_pricing_settings,
     get_strategy_costs,
     get_strategy_settings,
     get_trial_settings,
     invalidate_candle_cache,
     invalidate_discipline_cache,
+    invalidate_platform_strategies_cache,
     invalidate_pricing_cache,
     invalidate_settings_cache,
     invalidate_strategy_costs_cache,
@@ -39,6 +41,7 @@ from app.services.settings_store import (
     invalidate_trial_cache,
     save_candle_settings,
     save_discipline_settings,
+    save_platform_strategies,
     save_pricing_settings,
     save_strategy_costs,
     save_strategy_settings,
@@ -754,6 +757,46 @@ def put_strategy_cost_settings(
     db.commit()
     invalidate_strategy_costs_cache()
     return get_strategy_cost_settings(db, admin)
+
+
+# ---------- 平台策略介绍 / platform strategy write-ups ----------
+# 内容型 CRUD，整表覆盖保存。与用户端 GET /signals/platform-strategies 的区别：
+# 这里连未发布（published=false）的草稿一起返回，用户端只给已发布的。
+# Content CRUD, saved as a whole list. Unlike the user-facing
+# GET /signals/platform-strategies, this returns unpublished drafts too.
+
+@router.get("/platform-strategies", response_model=PlatformStrategyListOut)
+def get_admin_platform_strategies(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """读取全部策略介绍（含未发布草稿），按 order 升序。
+    Read every write-up including unpublished drafts, ordered by `order`."""
+    items = [PlatformStrategyOut(**it) for it in get_platform_strategies(db)["items"]]
+    items.sort(key=lambda s: (s.order, s.nameEn or s.nameZh))
+    return PlatformStrategyListOut(items=items)
+
+
+@router.put("/platform-strategies", response_model=PlatformStrategyListOut)
+def put_admin_platform_strategies(
+    body: PlatformStrategyListOut,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """整表覆盖保存策略介绍。id 必须唯一——它是前端 key 与后续引用的锚点，
+    重复会让编辑器改错条目，所以在这里挡下而不是静默去重。
+    Whole-list replace. Ids must be unique: they anchor the client's keys and
+    any later references, and duplicates would make the editor mutate the wrong
+    entry — so this rejects rather than silently de-duplicating."""
+    ids = [it.id for it in body.items]
+    if len(ids) != len(set(ids)):
+        raise HTTPException(status_code=400, detail="策略 id 重复 / duplicate strategy id")
+    items = [it.model_dump() for it in body.items]
+    save_platform_strategies(db, items)
+    _log_change(db, admin.id, admin.id, "setting:platform_strategies", None, json.dumps({"count": len(items), "ids": ids}, ensure_ascii=False))
+    db.commit()
+    invalidate_platform_strategies_cache()
+    return get_admin_platform_strategies(db, admin)
 
 
 

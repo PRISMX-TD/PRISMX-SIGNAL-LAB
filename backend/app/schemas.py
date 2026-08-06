@@ -218,6 +218,62 @@ class AdminStrategyCosts(BaseModel):
     perSymbol: list[AdminStrategyCostEntry] = Field(default_factory=list)
 
 
+# ---------- 平台策略介绍 / Platform strategy write-ups ----------
+# 管理员手工维护的内容型数据，用户端只读。刻意不含胜率、盈亏比等业绩数字：
+# 真实战绩的唯一来源是 signals 表的 result 判定（services/signal_resolution.py），
+# 这里只描述策略的设计特征（适用行情、持仓时长、风险回报比设计、所用指标）。
+# Admin-authored content, read-only for users. Deliberately carries no win-rate
+# or profit-factor figures: the only source of real performance is the signals
+# table's result adjudication (services/signal_resolution.py). This describes
+# design characteristics only (market regime, holding time, R:R design, indicators).
+
+
+class PlatformStrategyOut(BaseModel):
+    """单条平台策略介绍 / one platform strategy write-up."""
+
+    id: str = Field(min_length=1, max_length=64)
+    # 展示顺序，用户端按升序排列 / display order, ascending on the client
+    order: int = Field(default=0, ge=0, le=9_999)
+    # 是否对用户可见：草稿状态下 admin 可先存后发
+    # Visible to users; lets admins save a draft before publishing
+    published: bool = Field(default=True)
+    nameZh: str = Field(default="", max_length=80)
+    nameEn: str = Field(default="", max_length=80)
+    # 一句话简介 / one-line summary
+    summaryZh: str = Field(default="", max_length=300)
+    summaryEn: str = Field(default="", max_length=300)
+    # 详细说明，多段纯文本（前端按换行分段，不解析 HTML）
+    # Long description, plain text; the client splits on newlines and never parses HTML
+    detailZh: str = Field(default="", max_length=8_000)
+    detailEn: str = Field(default="", max_length=8_000)
+    # 适用品种，自由文本标签（如 XAUUSD、主要货币对）
+    # Applicable symbols as free-text tags (e.g. XAUUSD, majors)
+    symbols: list[str] = Field(default_factory=list, max_length=20)
+    # 所用技术指标标签（如 EMA(50)、RSI(14)）/ indicator tags
+    indicators: list[str] = Field(default_factory=list, max_length=20)
+    # 适用周期（如 M15、H1）/ timeframes
+    timeframes: list[str] = Field(default_factory=list, max_length=10)
+    # ---- 策略特征（方案 B：描述设计，不承诺业绩）----
+    # ---- Design characteristics (describe the design, promise no performance) ----
+    # 适用行情，自由文本（如"趋势行情"/"区间震荡"）/ market regime
+    marketRegimeZh: str = Field(default="", max_length=120)
+    marketRegimeEn: str = Field(default="", max_length=120)
+    # 典型持仓时长（如"4–12 小时"）/ typical holding time
+    holdingTimeZh: str = Field(default="", max_length=120)
+    holdingTimeEn: str = Field(default="", max_length=120)
+    # 风险回报比设计值，是策略参数而非业绩承诺（如"1:2"）
+    # Designed risk:reward — a strategy parameter, not a performance claim
+    riskReward: str = Field(default="", max_length=40)
+    # 示意图 URL，空则不展示 / illustration URL; empty hides the image
+    imageUrl: str = Field(default="", max_length=500)
+
+
+class PlatformStrategyListOut(BaseModel):
+    """平台策略介绍清单 / the platform strategy list."""
+
+    items: list[PlatformStrategyOut] = Field(default_factory=list, max_length=50)
+
+
 
 
 # ---------- 自定义策略 / User strategies ----------

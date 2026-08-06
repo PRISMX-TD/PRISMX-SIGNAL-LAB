@@ -378,6 +378,40 @@ export interface AdminStrategySettings {
   proOnly: boolean
 }
 
+// 平台策略介绍：管理员手工维护的内容，用户端只读展示。
+//
+// 刻意不含胜率、盈亏比等业绩数字：真实战绩的唯一来源是信号表的 result 判定
+// （后端 services/signal_resolution.py），在这里手填数字会与之冲突。本结构只
+// 描述策略的设计特征——适用行情、持仓时长、风险回报比设计值、所用指标。
+//
+// Platform strategy write-ups: admin-authored content, read-only for users.
+//
+// Deliberately carries no win-rate or profit-factor figures: the only source of
+// real performance is the signals table's result adjudication (backend
+// services/signal_resolution.py), and hand-entered numbers would contradict it.
+// This describes design characteristics only — market regime, holding time,
+// designed risk:reward, indicators used.
+export interface PlatformStrategy {
+  id: string
+  order: number
+  published: boolean
+  nameZh: string
+  nameEn: string
+  summaryZh: string
+  summaryEn: string
+  detailZh: string
+  detailEn: string
+  symbols: string[]
+  indicators: string[]
+  timeframes: string[]
+  marketRegimeZh: string
+  marketRegimeEn: string
+  holdingTimeZh: string
+  holdingTimeEn: string
+  riskReward: string
+  imageUrl: string
+}
+
 // 六条新手预设，与后端 presets.TEMPLATE_KEYS 一致。载入后条件完全可改，引擎侧
 // 不认识 template，它只记录「这条策略当初从哪个预设起步」。
 // The six beginner presets, matching the backend's presets.TEMPLATE_KEYS. The

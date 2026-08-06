@@ -7,6 +7,7 @@ import { adminApi } from '../api/client'
 import { fmtTime, localizeApiError } from '../api/utils'
 import Select from '../components/Select'
 import PageStatsCard from '../components/admin/PageStatsCard'
+import PlatformStrategiesPanel from '../components/admin/PlatformStrategiesPanel'
 import type { AdminBrokerSettings, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
@@ -23,8 +24,15 @@ const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
 // by blast radius: ops changes commercial terms users see and pay, system
 // changes how the backend computes and stores. Lumping them together is what
 // made the original single page an unnavigable pile of seven config groups.
-type AdminTab = 'data' | 'users' | 'ops' | 'system' | 'tickets'
-const ADMIN_TABS: AdminTab[] = ['data', 'users', 'ops', 'system', 'tickets']
+// guide 归入 ops 一侧的判断：策略介绍是对外文案，改了直接影响用户看到什么，
+// 与 system 的"改后台怎么算"无关；但它是内容编辑而非配置项，表单形态差别太大，
+// 所以单开一个页签而不是塞进 ops。
+// Why `guide` is its own tab: strategy write-ups are user-facing copy, so by
+// blast radius they belong on the ops side, not system ("how the backend
+// computes"). But they are content editing rather than config, and the form
+// shape differs too much to fold into ops.
+type AdminTab = 'data' | 'users' | 'ops' | 'system' | 'guide' | 'tickets'
+const ADMIN_TABS: AdminTab[] = ['data', 'users', 'ops', 'system', 'guide', 'tickets']
 
 interface Draft {
   role: UserRole
@@ -1031,6 +1039,8 @@ export default function AdminPage() {
 
         </>
       )}
+
+      {tab === 'guide' && <PlatformStrategiesPanel />}
 
       {tab === 'tickets' && <AdminTicketsPanel />}
 

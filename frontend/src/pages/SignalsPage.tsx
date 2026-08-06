@@ -1,5 +1,5 @@
-// 信号面板页：信号网格 + 返回仪表盘
-// Signals page: signal grid + back to dashboard
+// 信号面板页：信号网格 + 返回仪表盘 + 平台策略介绍
+// Signals page: signal grid + back to dashboard + platform strategies guide
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
@@ -10,6 +10,7 @@ import SlideOrderModal from '../components/SlideOrderModal'
 import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import { strategySignalToDisplay, type DisplaySignal } from '../components/signals/SignalView'
 import { useBackToClose } from '../utils/useBackToClose'
+import PlatformStrategiesGuide from '../components/PlatformStrategiesGuide'
 
 export default function SignalsPage() {
   const { t } = useTranslation()
@@ -17,6 +18,7 @@ export default function SignalsPage() {
   const { user } = useAuth()
   const { signals, strategySignals, accounts, loaded } = useLive()
   const accountQuotes = useQuotes()
+  const [activeTab, setActiveTab] = useState<'signals' | 'strategies'>('signals')
   const [activeSignal, setActiveSignal] = useState<DisplaySignal | null>(null)
   // 下单弹窗是全屏的，手机上划返回应该先关掉弹窗、而不是直接退出信号面板页
   // （见 useBackToClose 的说明）。/ The order modal is full-screen; on
@@ -71,7 +73,38 @@ export default function SignalsPage() {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
             {t('signals.focus.backToDashboard', '返回仪表盘')}
           </button>
-          <SignalGrid signals={combinedSignals} onTrade={openTrade} userPlan={user?.plan} />
+
+          {/* 标签页切换 / Tab switcher */}
+          <div className="mb-5 flex gap-2 border-b border-white/10">
+            <button
+              type="button"
+              onClick={() => setActiveTab('signals')}
+              className={`pb-3 px-4 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                activeTab === 'signals'
+                  ? 'border-prism-500 text-prism-200'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {t('signals.tabs.realtime')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('strategies')}
+              className={`pb-3 px-4 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                activeTab === 'strategies'
+                  ? 'border-prism-500 text-prism-200'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {t('signals.tabs.platformStrategies')}
+            </button>
+          </div>
+
+          {activeTab === 'signals' ? (
+            <SignalGrid signals={combinedSignals} onTrade={openTrade} userPlan={user?.plan} />
+          ) : (
+            <PlatformStrategiesGuide />
+          )}
         </div>
       )}
       {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} quotesByAccount={accountQuotes} onCancel={() => setActiveSignal(null)} onConfirm={handleConfirm} />}

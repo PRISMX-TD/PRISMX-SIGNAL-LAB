@@ -8,9 +8,10 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import Signal, User
-from app.schemas import SignalOut
+from app.schemas import PlatformStrategyListOut, PlatformStrategyOut, SignalOut
 from app.services.deps import get_current_user, require_admin
 from app.services.plans import is_realtime_plan
+from app.services.settings_store import get_platform_strategies
 
 router = APIRouter(prefix="/signals", tags=["signals"])
 
@@ -74,6 +75,25 @@ def list_signals(
         for s in rows
     ]
     return {"signals": signals}
+
+
+@router.get("/platform-strategies", response_model=PlatformStrategyListOut)
+def list_platform_strategies(
+    _user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """平台策略介绍（用户端只读）。未发布的条目不返回，排序由 order 决定。
+    内容由管理员在后台维护（见 PUT /admin/platform-strategies）——生产环境的
+    信号来自 TradingView Webhook，后端无法从代码枚举策略清单。
+    Platform strategy write-ups, read-only. Unpublished entries are withheld;
+    ordering follows `order`. Content is admin-maintained (see
+    PUT /admin/platform-strategies) — production signals arrive via the
+    TradingView webhook, so the backend cannot enumerate strategies from code.
+    """
+    items = get_platform_strategies(db)["items"]
+    visible = [PlatformStrategyOut(**it) for it in items if it.get("published", True)]
+    visible.sort(key=lambda s: (s.order, s.nameEn or s.nameZh))
+    return PlatformStrategyListOut(items=visible)
 
 
 @router.get("/stats", response_model=dict)
