@@ -106,6 +106,90 @@ namespace Prismx.Mt5Gateway
         }
     }
 
+    /// <summary>
+    /// 持仓变化事件。用于立即推送开/平仓,无需等 2 秒轮询。
+    /// </summary>
+    internal sealed class PositionEvent
+    {
+        public ulong Login;
+        public ulong Ticket;
+        public string Action = "";  // "add" 或 "delete"
+    }
+
+    /// <summary>
+    /// 持仓订阅回调。探针已验证:回调在后台线程 tid=3,需要线程安全队列。
+    /// 只关心 ADD/DELETE(结构变化),UPDATE(浮盈变化)不推——探针显示券商不推 UPDATE。
+    /// </summary>
+    internal sealed class PositionSink : CIMTPositionSink
+    {
+        // 线程安全队列:后台线程写,HTTP 线程读
+        private readonly System.Collections.Concurrent.ConcurrentQueue<PositionEvent> _queue =
+            new System.Collections.Concurrent.ConcurrentQueue<PositionEvent>();
+
+        // 限流:避免队列无限增长(后端挂了或调用太慢时)
+        private const int MaxQueueSize = 10000;
+        private int _queueSize = 0;
+
+        public override void OnPositionAdd(CIMTPosition p)
+        {
+            if (p == null) return;
+            Enqueue(p.Login(), p.Position(), "add");
+        }
+
+        public override void OnPositionDelete(CIMTPosition p)
+        {
+            if (p == null) return;
+            Enqueue(p.Login(), p.Position(), "delete");
+        }
+
+        // UPDATE 不处理:探针显示券商不推浮盈变化,只推结构变化
+        public override void OnPositionUpdate(CIMTPosition p) { }
+
+        private void Enqueue(ulong login, ulong ticket, string action)
+        {
+            // 限流:队列满时丢弃最老的事件
+            int sz = System.Threading.Interlocked.Increment(ref _queueSize);
+            if (sz > MaxQueueSize)
+            {
+                PositionEvent dummy;
+                if (_queue.TryDequeue(out dummy))
+                    System.Threading.Interlocked.Decrement(ref _queueSize);
+            }
+
+            _queue.Enqueue(new PositionEvent
+            {
+                Login = login,
+                Ticket = ticket,
+                Action = action
+            });
+        }
+
+        /// <summary>
+        /// 原子性取走队列全部事件。HTTP 接口调用,每 2 秒一次。
+        /// </summary>
+        public PositionEvent[] DequeueAll()
+        {
+            var list = new System.Collections.Generic.List<PositionEvent>();
+            PositionEvent evt;
+
+            while (_queue.TryDequeue(out evt))
+            {
+                list.Add(evt);
+                System.Threading.Interlocked.Decrement(ref _queueSize);
+            }
+
+            return list.ToArray();
+        }
+
+        /// <summary>
+        /// 队列当前长度。用于监控,超过阈值说明后端调用太慢或挂了。
+        /// </summary>
+        public int QueueSize
+        {
+            get { return _queueSize; }
+        }
+    }
+
     /// <summary>下单/平仓/改单的统一返回。</summary>
     internal sealed class TradeResult
     {
@@ -144,6 +228,13 @@ namespace Prismx.Mt5Gateway
 
         private CIMTManagerAPI _manager;
         private ManagerSink _sink;
+
+        // 持仓订阅。开/平仓由服务器主动推,后端不必靠轮询才发现。
+        // 探针实测:PositionSubscribe 返回 MT_RET_OK,回调在后台线程,
+        // 且券商只推 ADD/DELETE 不推 UPDATE(浮盈仍需轮询)。
+        private PositionSink _posSink;
+        private volatile bool _posSubscribed;
+
         private volatile bool _connected;
         private volatile bool _stopping;
         private Thread _watchdog;
@@ -219,10 +310,82 @@ namespace Prismx.Mt5Gateway
 
             Log.Info("dealer 通道已启动");
 
+            SubscribePositions();
+
             _watchdog = new Thread(WatchdogLoop);
             _watchdog.IsBackground = true;
             _watchdog.Name = "mt5-watchdog";
             _watchdog.Start();
+        }
+
+        //+------------------------------------------------------------------+
+        //| 建立持仓订阅。失败不抛异常——订阅只是延迟优化,后端仍有轮询兜底, |
+        //| 不该因为券商不给权限就让整个 gateway 起不来。                    |
+        //+------------------------------------------------------------------+
+        private void SubscribePositions()
+        {
+            try
+            {
+                lock (_gate)
+                {
+                    // 托管 sink 内部持有原生指针,构造后必须先 RegisterSink,
+                    // 否则传进去的是空指针,订阅会返回 MT_RET_ERR_PARAMS。
+                    PositionSink sink = new PositionSink();
+                    MTRetCode reg = sink.RegisterSink();
+
+                    if (reg != MTRetCode.MT_RET_OK)
+                    {
+                        Log.Warn("PositionSink.RegisterSink 失败:{0},持仓改由轮询兜底", reg);
+                        return;
+                    }
+
+                    MTRetCode sub = _manager.PositionSubscribe(sink);
+                    if (sub != MTRetCode.MT_RET_OK)
+                    {
+                        Log.Warn("PositionSubscribe 失败:{0},持仓改由轮询兜底", sub);
+                        return;
+                    }
+
+                    _posSink = sink;
+                    _posSubscribed = true;
+                    Log.Info("持仓订阅已建立:开平仓将即时推送");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("建立持仓订阅异常:{0}", ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 取走订阅积压的开/平仓事件。后端每轮调一次,拿到就立即推前端。
+        /// 订阅没建立时返回空数组,后端退回纯轮询,行为与改动前一致。
+        /// </summary>
+        public PositionEvent[] DrainPositionEvents()
+        {
+            PositionSink sink = _posSink;
+            if (sink == null)
+                return new PositionEvent[0];
+
+            // 不进 _gate:队列是 ConcurrentQueue,自己就是线程安全的,
+            // 而 _gate 上排着 MT5 调用,没必要为读队列去等锁。
+            return sink.DequeueAll();
+        }
+
+        /// <summary>订阅是否可用。/health 里暴露,便于确认延迟优化生效。</summary>
+        public bool PositionSubscribed
+        {
+            get { return _posSubscribed; }
+        }
+
+        /// <summary>积压事件数。持续不为 0 说明后端没在消费。</summary>
+        public int PositionEventBacklog
+        {
+            get
+            {
+                PositionSink sink = _posSink;
+                return sink == null ? 0 : sink.QueueSize;
+            }
         }
 
         //+------------------------------------------------------------------+
@@ -604,6 +767,10 @@ namespace Prismx.Mt5Gateway
                         _manager.DealerStart();
                         _selected.Clear();
                     }
+
+                    // 持仓订阅也要重建:断线时服务器已清掉我们的订阅状态
+                    _posSubscribed = false;
+                    SubscribePositions();
 
                     delaySec = 2;
                 }
@@ -1397,6 +1564,12 @@ namespace Prismx.Mt5Gateway
 
                     if (_sink != null)
                         _manager.Unsubscribe(_sink);
+
+                    if (_posSink != null)
+                    {
+                        try { _manager.PositionUnsubscribe(_posSink); }
+                        catch { }
+                    }
 
                     _manager.Disconnect();
                     _manager.Dispose();

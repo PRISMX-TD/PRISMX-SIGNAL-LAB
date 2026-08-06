@@ -90,6 +90,19 @@ class DealRsp:
     comment: str
 
 
+@dataclass
+class PositionEvent:
+    """持仓变化事件。来自 gateway 的持仓订阅（PositionSubscribe）。
+
+    券商只推 ADD/DELETE 不推 UPDATE（已用探针确认），因此开/平仓即时推送，
+    浮盈变化仍靠轮询。
+    """
+
+    login: int
+    ticket: int
+    action: str  # "add" 或 "delete"
+
+
 # ---------- 客户端 ----------
 
 
@@ -176,6 +189,50 @@ async def get_positions(login: int) -> tuple[list[PositionRsp], str]:
             comment=p.get("comment", ""),
         ))
     return positions, ""
+
+
+async def drain_position_events() -> tuple[list[PositionEvent], bool]:
+    """取走 gateway 订阅积压的开/平仓事件。返回 (事件列表, 订阅是否可用)。
+
+    这是「开平仓要等一整个轮询周期才被发现」的解法：MT5 服务器在仓位建立或
+    关闭的瞬间就回调 gateway，gateway 把事件排进队列，这里取到即可立刻推前端。
+
+    注意语义是「取走」：一次调用清空队列，同一个事件不会返回两次，所以整个
+    后端只能有一个消费者（gateway_positions_loop 那一个循环）。
+
+    券商只推 ADD/DELETE 不推 UPDATE（已用探针确认），因此浮盈仍靠轮询。
+    订阅不可用时返回 ([], False)，调用方退回纯轮询，行为与改动前一致。
+
+    超时取 5 秒而不是 _post 的 60 秒：这个调用在每轮的最前面，卡住会把整轮
+    持仓推送一起拖住。宁可这轮丢掉事件（轮询兜底会补上），也不要拖慢所有人。
+    """
+    url = settings.GATEWAY_URL.rstrip("/") + "/position-events"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5)) as client:
+            resp = await client.get(url, headers=_headers())
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:
+        # 降级为 debug：gateway 短暂不可达时轮询仍在工作，不该刷 error 日志
+        logger.debug("Gateway 持仓事件读取失败: %s", e)
+        return [], False
+
+    if not data.get("ok"):
+        return [], False
+
+    events = []
+    for e in data.get("events", []):
+        login = e.get("login", 0)
+        action = e.get("action", "")
+        if not login or action not in ("add", "delete"):
+            continue
+        events.append(PositionEvent(
+            login=int(login),
+            ticket=int(e.get("ticket", 0)),
+            action=action,
+        ))
+
+    return events, bool(data.get("subscribed"))
 
 
 async def get_deals(login: int, from_unix: int, to_unix: int) -> tuple[list[DealRsp], str]:

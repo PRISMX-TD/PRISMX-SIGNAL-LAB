@@ -104,6 +104,8 @@ namespace Prismx.Mt5Gateway
                 j.BeginObject()
                     .Field("ok", true)
                     .Field("mt5Connected", _link.IsConnected)
+                    .Field("positionSubscribed", _link.PositionSubscribed)
+                    .Field("positionEventBacklog", (uint)_link.PositionEventBacklog)
                     .Field("server", _cfg.Server)
                     .Field("managerLogin", _cfg.ManagerLogin)
                  .EndObject();
@@ -131,6 +133,9 @@ namespace Prismx.Mt5Gateway
                     return;
                 case "/positions":
                     RequirePost(ctx, method, HandlePositions);
+                    return;
+                case "/position-events":
+                    HandlePositionEvents(ctx, method);
                     return;
                 case "/orders":
                     RequirePost(ctx, method, HandleOrders);
@@ -315,6 +320,50 @@ namespace Prismx.Mt5Gateway
                     .Field("takeProfit", p.TakeProfit)
                     .Field("profit", p.Profit)
                     .Field("comment", p.Comment)
+                 .EndObject();
+            }
+
+            j.EndArray().EndObject();
+            WriteJson(ctx, 200, j.ToString());
+        }
+
+        //+------------------------------------------------------------------+
+        //| GET /position-events  取走订阅积压的开/平仓事件                  |
+        //|                                                                  |
+        //| 这是「开平仓要等 2 秒轮询才被发现」的解法:MT5 服务器在仓位建立/  |
+        //| 关闭的瞬间就回调过来,事件进队列,后端取到即推前端。              |
+        //|                                                                  |
+        //| 语义是「取走」而不是「查看」:一次调用把队列清空,同一个事件不会  |
+        //| 返回两次。所以只能有一个消费者(后端那一个循环),这与现状相符。  |
+        //|                                                                  |
+        //| 用 GET 而不是 POST:没有请求体,而且这个接口是幂等消费,GET 更直  |
+        //| 白。鉴权仍走 X-Gateway-Token,与其他接口一致。                    |
+        //|                                                                  |
+        //| 券商只推 ADD/DELETE,不推 UPDATE(已用探针确认),所以浮盈仍靠    |
+        //| 轮询。subscribed=false 时后端会退回纯轮询,行为与改动前一致。     |
+        //+------------------------------------------------------------------+
+        private void HandlePositionEvents(HttpListenerContext ctx, string method)
+        {
+            if (method != "GET")
+            {
+                WriteError(ctx, 405, "method_not_allowed", "只接受 GET");
+                return;
+            }
+
+            PositionEvent[] events = _link.DrainPositionEvents();
+
+            JsonWriter j = new JsonWriter();
+            j.BeginObject()
+                .Field("ok", true)
+                .Field("subscribed", _link.PositionSubscribed)
+                .BeginArray("events");
+
+            foreach (PositionEvent e in events)
+            {
+                j.BeginObject()
+                    .Field("login", e.Login)
+                    .Field("ticket", e.Ticket)
+                    .Field("action", e.Action)
                  .EndObject();
             }
 

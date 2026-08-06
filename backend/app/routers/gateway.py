@@ -284,6 +284,19 @@ def unbind_gateway_account(
 # closed-trade recording.
 GATEWAY_POSITIONS_INTERVAL = 2.0
 
+# 开/平仓事件的拉取间隔。
+#
+# 这一拍只做一件事：GET /position-events，把 gateway 订阅积压的开平仓事件取走。
+# 它不碰 MT5 —— gateway 那端只是从内存队列里取，所以这个调用的成本与用户数、
+# 账号数都无关，是个常数。正因为便宜，才敢用远小于持仓轮询的间隔。
+#
+# 取 0.25 秒：开平仓的端到端延迟 = 这个间隔 + 一次持仓读取，体感上是「按下就
+# 出现」。再压到 0.1 秒收益已经看不出来，只是白白多三倍请求。
+#
+# 券商不推 UPDATE（探针实测），所以浮盈变化拿不到事件，仍由上面那个 2 秒轮询
+# 负责。这里快的是「仓位出现/消失」，不是「浮盈跳动」。
+GATEWAY_EVENT_POLL_INTERVAL = 0.25
+
 # 账号资金刷新间隔。资金变化不像持仓那样需要秒级跟随，而每次刷新都是一次
 # Manager API 往返，按每个账号独立计时，避免 2 秒一轮把 gateway 打满。
 # Account funds don't need sub-second freshness and each refresh is a Manager
@@ -432,7 +445,17 @@ def build_closed_trade_legs(
 
 
 async def gateway_positions_loop() -> None:
-    """周期性拉取 gateway 账号持仓并推送给前端，同时刷新资金与平仓明细。"""
+    """周期性拉取 gateway 账号持仓并推送给前端，同时刷新资金与平仓明细。
+
+    分为两个拍子：
+      1. 快拍（0.25秒）：GET /position-events 取订阅事件，收到就立刻推。
+         开仓 ADD → 读该账号持仓 → 立刻推前端（< 500ms）
+         平仓 DELETE → 立刻推空列表 + 余额（< 300ms）
+      2. 慢拍（2秒）：轮询全部有持仓的账号，刷新浮盈。券商不推 UPDATE，
+         浮盈仍靠轮询，但已经不用为了「检测开平仓」去轮每个账号了。
+
+    订阅不可用时快拍返回空事件，这时慢拍负责全部逻辑，行为与改动前一致。
+    """
     import asyncio
 
     from starlette.concurrency import run_in_threadpool
@@ -441,6 +464,9 @@ async def gateway_positions_loop() -> None:
     from app.services.auto_manage import evaluate_positions
     from app.services.connection_manager import manager
     from app.services.trade_performance import mark_positions_seen
+    from app.services.gateway_client import drain_position_events
+
+    # ----- 共享状态与辅助函数 -----
 
     def _gateway_accounts() -> list[tuple[str, str]]:
         """(user_id, login) 列表。只取有 WS 连接的用户，避免空转。"""
@@ -555,9 +581,76 @@ async def gateway_positions_loop() -> None:
     # 本进程内已做过首次补扫的账号 / logins whose catch-up scan already ran
     scanned_once: set[str] = set()
 
+    # 已确认空仓的账号。只有真的轮询到空列表才会加进来，收到 ADD 事件就移除。
+    # 慢拍靠它跳过没有持仓的账号——大多数账号大多数时候都是空仓的，这能省掉
+    # 绝大部分无效的 MT5 往返。判断里还要求订阅活着，见 _process_user 里的注释。
+    # Logins confirmed flat. Only an actual empty poll adds one; an ADD event
+    # removes it. Lets the slow tick skip accounts with nothing to refresh.
+    known_flat: set[str] = set()
+
+    # 订阅是否活着。快拍每次调用都会更新它：
+    #   - True：可以信任事件，慢拍能安全跳过空仓账号
+    #   - False：gateway 重启/断线/券商收回权限，清空 known_flat 退回全量轮询
+    # 用列表包一层是因为闭包里要改它（Python 的 nonlocal 在嵌套函数里更啰嗦）。
+    subscription_state = {"alive": False}
+
     # 一轮内限制同时在飞的用户数，避免把 gateway 的单连接打满。
     # Cap in-flight users per tick so we don't saturate the gateway's single link.
     sem = asyncio.Semaphore(GATEWAY_MAX_CONCURRENT_USERS)
+
+    async def _read_positions(login: str) -> tuple[list[dict], bool]:
+        """读一个账号的持仓，转成前端格式。返回 (列表, 是否成功)。"""
+        positions, err = await gw_get_positions(int(login))
+        if err:
+            logger.warning("Gateway 持仓读取失败 login=%s: %s", login, err)
+            return [], False
+
+        return [
+            {
+                "ticket": p.ticket,
+                "symbol": p.symbol,
+                "side": p.side,
+                "volume": p.volume,
+                "profit": p.profit,
+                "entryPrice": p.price_open,
+                "currentPrice": p.price_current,
+                "stopLoss": p.stop_loss,
+                "takeProfit": p.take_profit,
+                "login": login,
+                "comment": p.comment,
+            }
+            for p in positions
+        ], True
+
+    async def _push_user_snapshot(user_id: str, logins: list[str]) -> None:
+        """读该用户全部 gateway 账号的持仓并推一次完整快照。
+
+        必须推「全部账号」而不是只推出事件的那个：POSITIONS 消息的语义是该用户
+        的完整持仓快照，只推一个账号会让前端把其他账号的持仓行清掉。
+        Must push all accounts, not just the one that fired: the POSITIONS message
+        is a whole-user snapshot, so a partial push would wipe the other accounts.
+        """
+        data: list[dict] = []
+        for lg in logins:
+            rows, ok = await _read_positions(lg)
+            if not ok:
+                # 某个账号读失败：放弃这次即时推送，交给慢拍。
+                # 硬推一个不完整的快照会让前端短暂丢行，比晚一点更糟。
+                return
+            if rows:
+                known_flat.discard(lg)
+            else:
+                known_flat.add(lg)
+            data.extend(rows)
+
+        await manager.push_positions(user_id, data)
+
+        # 平仓那一刻余额已经变了。这里顺手把已知余额再推一次，让账户卡片的
+        # 余额和持仓表的浮盈在同一条消息序列里更新，不会出现「新浮盈 + 旧余额」。
+        # 余额的真实刷新仍由慢拍的 15 秒节流负责，这里只是不让它落后于持仓。
+        mine = {lg: known_balances[lg] for lg in logins if lg in known_balances}
+        if mine:
+            await push_balances_if_changed(user_id, mine)
 
     async def _process_user(user_id: str, logins: list[str]) -> None:
         """处理单个用户：刷资金、扫平仓、拉持仓、推送。
@@ -631,24 +724,31 @@ async def gateway_positions_loop() -> None:
                     except Exception:
                         logger.exception("gateway closed-trade scan failed (login=%s)", login)
 
-                positions, err = await gw_get_positions(int(login))
-                if err:
-                    logger.warning("Gateway 持仓读取失败 login=%s: %s", login, err)
+                # 已确认空仓的账号跳过：没有持仓就没有浮盈要刷，这一次 MT5 往返
+                # 纯属浪费。安全性靠两点保证：
+                #   1. 只有真的轮询到空列表才会进这个集合（不是猜的）
+                #   2. 只在订阅活着时才敢跳过 —— 仓位再出现时会有 ADD 事件把它
+                #      移出集合。订阅挂了就把集合清空，退回全量轮询。
+                # 所以最坏情况是多轮询几次，不会漏掉持仓。
+                #
+                # Skip accounts known to be flat: no positions means no P/L to
+                # refresh. Safe because entries come only from an actual empty
+                # poll, and only while the subscription is alive to re-add them
+                # via ADD events. Worst case is redundant polling, never a miss.
+                if subscription_state["alive"] and login in known_flat:
                     continue
-                for p in positions:
-                    data.append({
-                        "ticket": p.ticket,
-                        "symbol": p.symbol,
-                        "side": p.side,
-                        "volume": p.volume,
-                        "profit": p.profit,
-                        "entryPrice": p.price_open,
-                        "currentPrice": p.price_current,
-                        "stopLoss": p.stop_loss,
-                        "takeProfit": p.take_profit,
-                        "login": login,
-                        "comment": p.comment,
-                    })
+
+                rows, ok = await _read_positions(login)
+                if not ok:
+                    continue
+
+                # 标记空仓：下轮慢拍可以跳过（前提是订阅活着）
+                if rows:
+                    known_flat.discard(login)
+                else:
+                    known_flat.add(login)
+
+                data.extend(rows)
 
             # 与 /bridge/positions 走同一个方法：缓存快照 + 附带按 login 汇总的
             # 浮动盈亏 + 跳过重复推送。gateway 的资金刷新是 15 秒一次，光靠它
@@ -682,47 +782,138 @@ async def gateway_positions_loop() -> None:
             finally:
                 db.close()
 
-    while True:
-        try:
-            pairs = await run_in_threadpool(_gateway_accounts)
+    def _accounts_by_user(pairs: list[tuple[str, str]]) -> dict[str, list[str]]:
+        """(user_id, login) 列表聚合成 user_id -> [login]。
 
-            # 按用户聚合：一个用户可能绑了多个 gateway 账号，前端的 POSITIONS
-            # 消息是"该用户全部持仓"的快照，必须一次推完而不是每账号推一次。
-            by_user: dict[str, list[str]] = {}
-            for user_id, login in pairs:
-                by_user.setdefault(user_id, []).append(login)
+        前端的 POSITIONS 消息是「该用户全部持仓」的快照，所以必须按用户聚合后
+        一次推完，不能每账号推一次。
+        """
+        out: dict[str, list[str]] = {}
+        for user_id, login in pairs:
+            out.setdefault(user_id, []).append(login)
+        return out
 
-            # 没有前端连着的用户不必去打扰 gateway
-            connected = set(manager.connected_user_ids())
-            targets = [(uid, lg) for uid, lg in by_user.items() if uid in connected]
+    async def _event_pump() -> None:
+        """快拍：把 gateway 订阅积压的开平仓事件取走并立即推送。
 
-            if targets:
-                # 并发跑各用户，并发度由 sem 限制。
-                # return_exceptions=True 是关键：单个用户炸了不能让整轮中断，
-                # 否则一个坏账号会连带拖停所有人的持仓推送。
-                # return_exceptions=True matters: one user blowing up must not
-                # abort the tick, or a single bad account would stall everyone's
-                # position pushes.
-                results = await asyncio.gather(
-                    *(_process_user(uid, lg) for uid, lg in targets),
-                    return_exceptions=True,
-                )
-                for (uid, _), r in zip(targets, results):
-                    if isinstance(r, asyncio.CancelledError):
-                        # 关服时的正常取消，往上抛让循环退出
-                        raise r
-                    if isinstance(r, Exception):
-                        # 用 error + exc_info 而不是 exception()：这里不在 except
-                        # 块里，exception() 取不到当前异常，只能显式传。
-                        # error(exc_info=...) rather than exception(): we're not
-                        # inside an except block, so there's no "current" exception.
-                        logger.error(
-                            "gateway user tick failed (user=%s)", uid, exc_info=r
+        这个循环与慢拍并行跑。它每 0.25 秒只发一个 HTTP 请求（GET
+        /position-events），成本与用户数无关 —— gateway 那端只是读内存队列。
+        只有真的收到事件时才会去读持仓，所以空闲时的开销就是一个空响应。
+
+        The fast tick, running alongside the slow one. One HTTP call every 250ms
+        regardless of user count: the gateway just drains an in-memory queue.
+        Positions are only read when an event actually arrives.
+        """
+        while True:
+            try:
+                events, subscribed = await drain_position_events()
+
+                # 订阅状态翻转要处理：订阅刚掉线时，known_flat 里的信息不再可信
+                # （仓位可能在断线期间开出来而没有事件），必须清空退回全量轮询。
+                if subscribed != subscription_state["alive"]:
+                    subscription_state["alive"] = subscribed
+                    if subscribed:
+                        logger.info("Gateway 持仓订阅可用：开平仓将即时推送")
+                    else:
+                        logger.warning("Gateway 持仓订阅不可用：退回轮询模式")
+                        known_flat.clear()
+
+                if events:
+                    # 事件里带的是 login，要反查它属于哪个用户才知道推给谁。
+                    pairs = await run_in_threadpool(_gateway_accounts)
+                    owner = {lg: uid for uid, lg in pairs}
+                    by_user = _accounts_by_user(pairs)
+                    connected = set(manager.connected_user_ids())
+
+                    # 一个用户可能在同一批事件里出现多次（同时开两笔、或开+平），
+                    # 但快照推一次就够了，按用户去重避免重复读持仓。
+                    # A user can appear several times in one batch, but one
+                    # snapshot suffices — dedupe to avoid re-reading positions.
+                    affected: set[str] = set()
+                    for e in events:
+                        login = str(e.login)
+                        uid = owner.get(login)
+                        if uid is None:
+                            # 不是本平台管理的账号（同一 MT5 服务器上的其他账号
+                            # 也会触发回调），忽略。
+                            continue
+                        # ADD 说明这个账号现在有仓，先把它从空仓集合里拿出来，
+                        # 免得慢拍在下一次读取前一直跳过它。
+                        if e.action == "add":
+                            known_flat.discard(login)
+                        if uid in connected:
+                            affected.add(uid)
+
+                    if affected:
+                        results = await asyncio.gather(
+                            *(
+                                _push_user_snapshot(uid, by_user.get(uid, []))
+                                for uid in affected
+                            ),
+                            return_exceptions=True,
                         )
+                        for uid, r in zip(affected, results):
+                            if isinstance(r, asyncio.CancelledError):
+                                raise r
+                            if isinstance(r, Exception):
+                                logger.error(
+                                    "gateway 事件推送失败 (user=%s)", uid, exc_info=r
+                                )
 
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("gateway_positions_loop 异常")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("gateway 事件快拍异常")
 
-        await asyncio.sleep(GATEWAY_POSITIONS_INTERVAL)
+            await asyncio.sleep(GATEWAY_EVENT_POLL_INTERVAL)
+
+    # 快拍与慢拍并行。快拍负责「仓位出现/消失」的即时性，慢拍负责浮盈刷新、
+    # 资金刷新、平仓明细落库这些周期性工作。
+    async def _positions_loop() -> None:
+        """慢拍：周期性刷新浮盈、资金、平仓明细。"""
+        while True:
+            try:
+                pairs = await run_in_threadpool(_gateway_accounts)
+                by_user = _accounts_by_user(pairs)
+
+                # 没有前端连着的用户不必去打扰 gateway
+                connected = set(manager.connected_user_ids())
+                targets = [(uid, lg) for uid, lg in by_user.items() if uid in connected]
+
+                if targets:
+                    # 并发跑各用户，并发度由 sem 限制。
+                    # return_exceptions=True 是关键：单个用户炸了不能让整轮中断，
+                    # 否则一个坏账号会连带拖停所有人的持仓推送。
+                    # return_exceptions=True matters: one user blowing up must not
+                    # abort the tick, or a single bad account would stall everyone's
+                    # position pushes.
+                    results = await asyncio.gather(
+                        *(_process_user(uid, lg) for uid, lg in targets),
+                        return_exceptions=True,
+                    )
+                    for (uid, _), r in zip(targets, results):
+                        if isinstance(r, asyncio.CancelledError):
+                            # 关服时的正常取消，往上抛让循环退出
+                            raise r
+                        if isinstance(r, Exception):
+                            # 用 error + exc_info 而不是 exception()：这里不在 except
+                            # 块里，exception() 取不到当前异常，只能显式传。
+                            # error(exc_info=...) rather than exception(): we're not
+                            # inside an except block, so there's no "current" exception.
+                            logger.error(
+                                "gateway user tick failed (user=%s)", uid, exc_info=r
+                            )
+
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("gateway_positions_loop 异常")
+
+            await asyncio.sleep(GATEWAY_POSITIONS_INTERVAL)
+
+    pump_task = asyncio.create_task(_event_pump())
+
+    try:
+        await _positions_loop()
+    finally:
+        pump_task.cancel()
