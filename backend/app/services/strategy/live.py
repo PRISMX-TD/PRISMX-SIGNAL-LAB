@@ -156,6 +156,18 @@ def _evaluate_sync(symbol: str, interval: str) -> list[tuple]:
     db = SessionLocal()
     pushes: list[tuple[str, dict, str, str]] = []
     try:
+        # 预检：如果既没有启用策略、又没有 PENDING 信号要判定，整个评估可以跳过，
+        # 避免从 Supabase 读 400 根 K 线的网络往返（生产库是远端 Postgres）。
+        # 候选策略这里就直接完整加载（它本来后面就要用），空集时只多花一次
+        # PENDING 计数查询；绝大多数 (品种, 周期) 组合下两者都空（只有 2 个月活
+        # 用户），因此常态下用两次廉价的元数据查询换掉一次 400 行的蜡烛读取。
+        # Pre-check: if there are neither enabled strategies nor PENDING signals
+        # to resolve, skip the whole evaluation, avoiding a network round trip to
+        # Supabase for 400 candle rows (production talks to a remote Postgres).
+        # Candidates are loaded in full here (they're needed below anyway); when
+        # empty we only pay one extra PENDING count. Most (symbol, interval)
+        # combos have nothing in either table (2 MAU), so the common path trades
+        # two cheap metadata queries for one 400-row candle read.
         candidates = (
             db.query(UserStrategy)
             .join(StrategyWatch, StrategyWatch.strategy_id == UserStrategy.id)
@@ -166,6 +178,21 @@ def _evaluate_sync(symbol: str, interval: str) -> list[tuple]:
             )
             .all()
         )
+        if not candidates:
+            has_pending = (
+                db.query(StrategySignal)
+                .filter(
+                    StrategySignal.symbol == symbol,
+                    StrategySignal.interval == interval,
+                    StrategySignal.result == "PENDING",
+                )
+                .limit(1)
+                .count()
+                > 0
+            )
+            if not has_pending:
+                return pushes
+
         bars = _load_bars(db, symbol, interval)
         if len(bars) < 5:
             return pushes

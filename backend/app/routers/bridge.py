@@ -1052,6 +1052,18 @@ async def offline_monitor_loop() -> None:
     while True:
         await asyncio.sleep(2)
         try:
+            # 没有活跃 WebSocket 连接时休眠 30 秒，避免无谓的数据库查询。
+            # 断线检测的意义只在于把状态推给「正在看」的前端；没有任何前端
+            # 连着时，扫库纯属浪费——生产库是远端 Supabase，每 2 秒一次网络往返
+            # 的出站流量常年累积得非常可观。有连接时立即恢复 2 秒的灵敏度。
+            # When no client is connected, sleep 30s to avoid needless DB queries:
+            # offline detection only matters for a frontend that's actively
+            # watching. With a remote Supabase, a round trip every 2s adds up.
+            # Sensitivity returns to 2s the moment a client connects.
+            if not manager.connected_user_ids():
+                await asyncio.sleep(30)
+                continue
+
             # DB 扫描放线程池，避免阻塞事件循环 / DB scan off the event loop
             current = await run_in_threadpool(_scan_online)
             # 合并历史里出现过的用户，确保「全部离线」也能被检测到；
