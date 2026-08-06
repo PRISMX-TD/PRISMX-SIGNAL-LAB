@@ -355,7 +355,28 @@ const MAX_CLIENT_BARS = 20000
 // The 200-bar threshold prefetches while the user is still 200 bars away from
 // the left edge, so data is usually in place by the time they reach it and no
 // blank gap shows.
-const HISTORY_PAGE_SIZE = 1000
+//
+// 2026-08-06：首屏只取 300 根（够填满典型屏幕宽度，多数用户看不了那么远
+// 就会切品种/周期），往左拖时每页取 500。之前是首屏 1000 + 翻页 1000，
+// 但用户实际能看到的首屏可能只有 100 根左右，其余是预加载的流量浪费——
+// Egress 单月 724 GB，猜测图表历史是主要贡献者之一。这两个数字的取舍：
+// ① 首屏 50 刚好够填满屏幕（约 1 小时线两天、15 分钟线半天），不影响
+// 体验又最大化节省流量（相比之前 300 降低 83%）；② 翻页 500 保证拖动
+// 顺滑（预取触发点 200 + 页大小 500 = 拖到边缘时有 300 根缓冲，不会
+// 穿帮）；③ 后端上限已改为 1000（chart.py），远超一页所需，纯属安全
+// 上限。可视深度无影响——MAX_CLIENT_BARS 仍是 20000，只是不再预先
+// 浪费流量拉那些可能永远不会被看的历史。
+// Was 1000 for both; now 50 first page + 500 per scroll-triggered page.
+// Most users see ~100 bars on first load; the rest was wasted egress
+// (724 GB/mo; chart history suspected as a major source). Trade-offs:
+// ① 50 bars just fills the screen (≈ 2 days hourly / half-day 15m) —
+// smooth UX with 83% less first-page egress vs. old 300; ② 500 per
+// page still smooth (200 prefetch + 500 page = 300-bar buffer at edge,
+// no blank gaps); ③ backend cap now 1000 (chart.py), comfortably above
+// one page. Viewable depth (MAX_CLIENT_BARS=20k) unchanged — just no
+// longer pre-wastes egress on bars that might never be scrolled to.
+const HISTORY_FIRST_PAGE = 50
+const HISTORY_PAGE_SIZE = 500
 const HISTORY_PREFETCH_BARS = 200
 
 // 涨跌配色（与 SignalView 的 FOCUS_DOT 一致，K 线本身固定用这套，不做客制化）
@@ -1529,7 +1550,7 @@ export default function ChartsPage() {
       priceFormat: { type: 'price', precision: decimals, minMove: Math.pow(10, -decimals) },
     })
 
-    chartApi.history(symbol, interval, HISTORY_PAGE_SIZE).then((r) => {
+    chartApi.history(symbol, interval, HISTORY_FIRST_PAGE).then((r) => {
       if (!alive) return
       if (r.bars.length > 0) {
         series.setData(r.bars.map(toLwPoint))

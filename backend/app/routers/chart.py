@@ -43,7 +43,16 @@ ALLOWED_INTERVALS = {"1", "5", "15", "60", "240", "D"}
 # total depth is bounded only by what's actually stored. The cap exists to stop a
 # single request from serializing tens of thousands of bars at once, which would
 # blow up both the backend's memory and the browser.
-CHART_HISTORY_MAX_LIMIT = 5000
+#
+# 2026-08-06:5000 → 1000。上限越大，单个客户端（或异常请求）一次能从远端
+# Supabase 拽走的行数就越多，是 Egress 的直接放大器。前端每页只取 300–500 根、
+# 靠 before 游标按需翻页，1000 已远超一页所需，纯属安全上限，不影响可视深度。
+# Was 5000; lowered to 1000. A larger cap lets a single client (or a stray
+# request) pull that many rows from remote Supabase in one shot — a direct
+# egress amplifier. The frontend pages 300–500 at a time via the `before`
+# cursor, so 1000 is comfortably above one page's need: a safety ceiling only,
+# viewable depth is unaffected.
+CHART_HISTORY_MAX_LIMIT = 1000
 
 # 喂价端(EA/其运行机器)的时钟如果比服务器明显跑快,会把 K 线时间戳打进
 # "未来"——超过这个阈值(5 分钟,远大于正常网络延迟/处理耗时)才当作真的时钟
