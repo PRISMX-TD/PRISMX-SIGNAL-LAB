@@ -58,6 +58,14 @@ interface LiveContextValue {
   // spread a notifications failure across the whole account page, is the same
   // mistake in the opposite direction).
   backendUnreachable: boolean
+  // 每有新平仓记录入库就自增。已平仓明细的接口不分页、也不走 WS 推送数据本身，
+  // 所以这里只当一个「该重拉了」的信号——订阅方把它放进 useEffect 依赖即可，
+  // 不必等各自的轮询间隔。
+  // Bumped whenever a new closed trade lands. The closed-trades endpoint isn't
+  // paginated and the records aren't pushed over WS, so this is purely a
+  // "refetch now" signal: subscribers put it in a useEffect dependency instead
+  // of waiting out their own poll interval.
+  closedTradeTick: number
 }
 
 const LiveContext = createContext<LiveContextValue | null>(null)
@@ -138,6 +146,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [brokerLock, setBrokerLock] = useState<BrokerLock | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [backendUnreachable, setBackendUnreachable] = useState(false)
+  const [closedTradeTick, setClosedTradeTick] = useState(0)
 
   const refreshAll = useCallback(async () => {
     // 关键请求单独包一层，除了拿数据还要拿到「这条到底成没成」。其余请求
@@ -357,6 +366,13 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         applyRemotePrefs((msg.data as Record<string, unknown>) || {})
         break
       }
+      case 'CLOSED_TRADE_NEW':
+        // 后端刚记下一笔新平仓（Bridge 上报或 Gateway 扫描）。消息不带数据，
+        // 只是催订阅方重拉，省得等 45 秒轮询。
+        // A new closed trade just landed (bridge report or gateway scan). The
+        // message carries no payload — it just nudges subscribers to refetch.
+        setClosedTradeTick((n) => n + 1)
+        break
       case 'ACCOUNTS_STATUS': {
         // 桥接程序上报账号在线变化，拉取最新账号列表 / refresh accounts on status change
         const data = msg.data as { onlineLogins?: string[] }
@@ -392,9 +408,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     () => ({
       signals, strategySignals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
       anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected, backendUnreachable,
+      closedTradeTick,
     }),
     [signals, strategySignals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
-     anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected, backendUnreachable]
+     anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected, backendUnreachable,
+     closedTradeTick]
   )
 
   return (

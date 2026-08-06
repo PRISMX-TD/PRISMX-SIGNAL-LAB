@@ -38,7 +38,7 @@ const TABS: OrdersTab[] = ['positions', 'performance', 'activity']
 export default function OrdersPage() {
   const { t } = useTranslation()
   const { user, refreshUser } = useAuth()
-  const { orders, accounts, refreshAll } = useLive()
+  const { orders, accounts, refreshAll, closedTradeTick } = useLive()
   const positions = usePositions()
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' | 'info' } | null>(null)
   const toastTimer = useRef<number | undefined>(undefined)
@@ -160,7 +160,12 @@ export default function OrdersPage() {
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
     }
-  }, [])
+    // closedTradeTick 变化 = 后端刚记下新平仓，立刻重拉而不是等 45 秒轮询。
+    // 轮询保留：WS 断线期间它是唯一的兜底。
+    // A bumped closedTradeTick means a new close just landed — refetch now
+    // instead of waiting out the 45s poll, which stays as the fallback for
+    // whenever the WS is down.
+  }, [closedTradeTick])
 
   const visibleTrades = useMemo(() => {
     if (!trades) return trades

@@ -705,7 +705,7 @@ class BridgeClosedTradesRequest(BaseModel):
 
 
 @router.post("/trade-history")
-def bridge_trade_history(
+async def bridge_trade_history(
     req: BridgeClosedTradesRequest,
     user: User = Depends(get_bridge_user),
     db: Session = Depends(get_db),
@@ -721,27 +721,39 @@ def bridge_trade_history(
     matched), any subsequent close (web or manual in the MT5 terminal) lands
     here.
     """
-    inserted = 0
-    for leg in req.data:
-        row = ClosedTrade(
-            user_id=user.id,
-            mt5_login=leg.login,
-            symbol=leg.symbol,
-            side=leg.side,
-            close_volume=leg.closeVolume,
-            close_price=leg.closePrice,
-            profit=leg.profit,
-            position_ticket=leg.positionTicket,
-            deal_ticket=leg.dealTicket,
-            closed_at=leg.closedAt,
-        )
-        db.add(row)
-        try:
-            db.commit()
-            inserted += 1
-        except IntegrityError:
-            # 唯一约束冲突：已经上报过这笔成交，跳过 / already reported this deal, skip
-            db.rollback()
+    def _save() -> int:
+        n = 0
+        for leg in req.data:
+            row = ClosedTrade(
+                user_id=user.id,
+                mt5_login=leg.login,
+                symbol=leg.symbol,
+                side=leg.side,
+                close_volume=leg.closeVolume,
+                close_price=leg.closePrice,
+                profit=leg.profit,
+                position_ticket=leg.positionTicket,
+                deal_ticket=leg.dealTicket,
+                closed_at=leg.closedAt,
+            )
+            db.add(row)
+            try:
+                db.commit()
+                n += 1
+            except IntegrityError:
+                # 唯一约束冲突：已经上报过这笔成交，跳过 / already reported, skip
+                db.rollback()
+        return n
+
+    inserted = await run_in_threadpool(_save)
+
+    # 有新平仓就立刻通知前端重拉，别等它自己的 45 秒轮询。
+    # 上报是幂等的（唯一约束去重），所以只在真有新增时推，避免每轮都发无用消息。
+    # Nudge the web app as soon as something new lands instead of waiting for
+    # its own 45s poll. Reports are idempotent, so only push on real inserts.
+    if inserted:
+        await manager.push_to_client(user.id, {"type": "CLOSED_TRADE_NEW"})
+
     return {"ok": True, "inserted": inserted}
 
 

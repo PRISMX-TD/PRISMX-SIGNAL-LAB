@@ -9,6 +9,7 @@ import { Link } from 'react-router-dom'
 import { orderApi } from '../api/client'
 import { displaySymbol } from '../api/utils'
 import type { PersonalWinRate } from '../api/types'
+import { useLive } from '../store/live'
 import RadialGauge from './RadialGauge'
 import { symbolMeta } from '../utils/symbolMeta'
 
@@ -21,17 +22,23 @@ interface Props {
 
 export default function PersonalWinRateCard({ variant = 'compact', login }: Props) {
   const { t } = useTranslation()
+  const { closedTradeTick } = useLive()
   const [data, setData] = useState<PersonalWinRate | null>(null)
+
+  // 切账号要先清空再拉（避免闪上一个账号的胜率），但因新平仓而重拉时不能清空
+  // ——否则每次平仓卡片都会闪一下空白。所以只在 login 变化时清。
+  // An account switch clears first (so the previous account's rate doesn't
+  // flash), but a refetch triggered by a new close must not — that would blank
+  // the card on every close. So only clear when login itself changes.
+  useEffect(() => {
+    setData(null)
+  }, [login])
 
   useEffect(() => {
     let mounted = true
     const load = () => {
       orderApi.winrate(login).then((r) => { if (mounted) setData(r) }).catch(() => {})
     }
-    // 切换账号标签时先清空旧数字再拉新的，避免短暂显示"上一个账号的胜率"。
-    // Clear the stale number before refetching on an account switch, so the
-    // previous account's win rate doesn't flash before the new one loads.
-    setData(null)
     load()
     // 定时刷新 + 回到页面时立即刷新，让战绩随平仓近实时更新，无需手动刷新整页。
     // 页面在后台时跳过轮询（rAF/定时器也会被浏览器节流），切回前台再补一次。
@@ -50,7 +57,10 @@ export default function PersonalWinRateCard({ variant = 'compact', login }: Prop
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
     }
-  }, [login])
+    // closedTradeTick：后端刚记下新平仓，立刻重拉，胜率不落后于下方的明细列表。
+    // closedTradeTick: a new close just landed — refetch now so the rate never
+    // lags the trade list beneath it.
+  }, [login, closedTradeTick])
 
   const pct = data?.winRate != null ? Math.round(data.winRate * 100) : null
   const detailed = variant === 'detailed'

@@ -289,7 +289,11 @@ GATEWAY_ACCOUNT_REFRESH_INTERVAL = 15.0
 # 宁可反复查到同一笔成交（后端按 (user, deal_ticket) 唯一约束去重，重复上报
 # 无副作用），也不要因为窗口太窄漏掉一笔。但这里不需要 Bridge 那套服务器时区
 # 换算——Manager API 的 DealRequest 直接按 UTC 秒解读，传 Unix 时间戳即可。
-GATEWAY_DEALS_SCAN_INTERVAL = 10.0
+#
+# 扫描间隔决定「平仓后多久能在明细里看到」：入库后会立刻推 CLOSED_TRADE_NEW，
+# 前端不必等自己的 45 秒轮询，所以端到端延迟基本就是这个间隔。取 3 秒而非更
+# 短，是因为每轮都是一次 Manager API 往返，且与持仓轮询共用同一条连接。
+GATEWAY_DEALS_SCAN_INTERVAL = 3.0
 GATEWAY_DEALS_LOOKBACK_SECONDS = 15 * 60
 
 # MT5 成交类型/进出方向常量（对应 SDK 的 EnDealAction / EnDealEntry）
@@ -546,6 +550,10 @@ async def gateway_positions_loop() -> None:
                                 if n:
                                     logger.info(
                                         "Gateway 平仓明细入库 login=%s 新增=%d", login, n
+                                    )
+                                    # 立刻通知前端重拉，别等它自己的 45 秒轮询
+                                    await manager.push_to_client(
+                                        user_id, {"type": "CLOSED_TRADE_NEW"}
                                     )
                                 else:
                                     # 窗口里有成交却一条都没入库，通常是归属判定
