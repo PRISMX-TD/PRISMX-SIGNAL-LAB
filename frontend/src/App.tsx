@@ -14,6 +14,7 @@ const SignalsPage = lazy(() => import('./pages/SignalsPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const ChartsPage = lazy(() => import('./pages/ChartsPage'))
 const BindPage = lazy(() => import('./pages/BindPage'))
+const BridgePage = lazy(() => import('./pages/BridgePage'))
 const OrdersPage = lazy(() => import('./pages/OrdersPage'))
 const UpgradePage = lazy(() => import('./pages/UpgradePage'))
 const DownloadPage = lazy(() => import('./pages/DownloadPage'))
@@ -95,6 +96,7 @@ export default function App() {
               <Route path="/app" element={<SignalsPage />} />
               <Route path="/charts" element={<ChartsPage />} />
               <Route path="/bind" element={<BindPage />} />
+              <Route path="/bind/bridge" element={<BridgePage />} />
               <Route path="/orders" element={<OrdersPage />} />
               {/* 自定义策略：已对全体登录用户开放（2026-07 起）。登录即可进入
                   页面，PRO 专属开关与每用户策略数上限在后端按端点校验（见
