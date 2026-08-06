@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../store/auth'
 import { useLive, useQuotes } from '../store/live'
 import SignalGrid from '../components/signals/SignalGrid'
+import { SkeletonPage } from '../components/Skeleton'
 import SlideOrderModal from '../components/SlideOrderModal'
 import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import { strategySignalToDisplay, type DisplaySignal } from '../components/signals/SignalView'
@@ -63,12 +64,9 @@ export default function SignalsPage() {
   return (
     <div className="max-w-[1520px] mx-auto">
       {!loaded ? (
-        <div className="glass flat-card flex flex-col items-center justify-center py-20 text-center">
-          <div className="mb-3 h-10 w-10 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />
-          <p className="text-sm text-slate-400">{t('common.loading')}</p>
-        </div>
+        <SkeletonPage cards={3} />
       ) : (
-        <div>
+        <div className="content-fade">
           <button onClick={() => navigate('/dashboard')} className="mb-4 flex items-center gap-1.5 text-sm text-slate-400 hover:text-white transition-colors">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
             {t('signals.focus.backToDashboard', '返回仪表盘')}

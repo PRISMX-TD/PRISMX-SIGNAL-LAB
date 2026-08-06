@@ -25,6 +25,7 @@ import { useTranslation } from 'react-i18next'
 import { signalApi } from '../api/client'
 import { localizeApiError } from '../api/utils'
 import { pick, StrategyDetail } from '../components/strategyGuide'
+import { SkeletonPage } from '../components/Skeleton'
 import type { PlatformStrategy } from '../api/types'
 
 function TagRow({ label, values }: { label: string; values: string[] }) {
@@ -88,8 +89,8 @@ export default function StrategyGuidePage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-24">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />
+      <div className="max-w-[900px] mx-auto">
+        <SkeletonPage cards={2} />
       </div>
     )
   }

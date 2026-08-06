@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { simulateApi } from '../api/client'
 import { displaySymbol, fmtTime, localizeApiError } from '../api/utils'
+import { SkeletonLine } from '../components/Skeleton'
 import type { SimulateResult } from '../api/types'
 
 const DAYS_OPTIONS = [30, 90, 180] as const
@@ -239,8 +240,11 @@ export default function SimulatorPage() {
       {error ? (
         <div className="glass mb-5 p-6 text-center text-sm text-down">{error}</div>
       ) : loading && !data ? (
-        <div className="flex items-center justify-center py-16">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />
+        <div className="flex flex-col gap-3 py-4">
+          <SkeletonLine width="60%" height={16} />
+          <SkeletonLine />
+          <SkeletonLine width="85%" />
+          <SkeletonLine width="70%" />
         </div>
       ) : summary && trades.length === 0 ? (
         <div className="glass mb-5 p-8 text-center text-sm text-slate-500">{t('simulator.noData')}</div>

@@ -7,6 +7,7 @@ import { useGlobalQuotes, useLive, useQuotes } from '../store/live'
 import { useSentiment } from '../api/useSentiment'
 import NotifDeviceBanner from '../components/NotifDeviceBanner'
 import OnboardingCard from '../components/OnboardingCard'
+import { SkeletonPage } from '../components/Skeleton'
 import SignalHero from '../components/signals/SignalHero'
 import SignalExec from '../components/signals/SignalExec'
 import SignalOthers from '../components/signals/SignalOthers'
@@ -102,12 +103,9 @@ export default function DashboardPage() {
           bound. */}
       <OnboardingCard />
       {!loaded ? (
-        <div className="glass flat-card flex flex-col items-center justify-center py-20 text-center">
-          <div className="mb-3 h-10 w-10 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />
-          <p className="text-sm text-slate-400">{t('common.loading')}</p>
-        </div>
+        <SkeletonPage cards={3} />
       ) : (
-        <div className="dash-grid">
+        <div className="dash-grid content-fade">
           {cur ? (
             <>
               <div className="dash-col-1">

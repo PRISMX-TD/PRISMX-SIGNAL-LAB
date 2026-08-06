@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './store/auth'
 import { PrefsProvider } from './store/prefs'
@@ -50,9 +50,18 @@ function Home() {
 
 // 懒加载页面切换时的占位（样式与页面 loading 一致）/ suspense fallback
 function PageFallback() {
+  const [show, setShow] = useState(false)
+  useEffect(() => {
+    // 延迟 200ms 出现：快速加载时不闪烁，慢速时给反馈
+    // Delay 200ms: no flicker on fast loads, feedback on slow ones
+    const t = setTimeout(() => setShow(true), 200)
+    return () => clearTimeout(t)
+  }, [])
   return (
     <div className="flex min-h-[50vh] items-center justify-center">
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />
+      {show && (
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />
+      )}
     </div>
   )
 }

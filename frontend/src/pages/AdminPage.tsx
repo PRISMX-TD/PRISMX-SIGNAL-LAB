@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom'
 import { adminApi } from '../api/client'
 import { fmtTime, localizeApiError } from '../api/utils'
 import Select from '../components/Select'
+import { SkeletonLine } from '../components/Skeleton'
 import PageStatsCard from '../components/admin/PageStatsCard'
 import PlatformStrategiesPanel from '../components/admin/PlatformStrategiesPanel'
 import type { AdminBrokerSettings, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
@@ -250,8 +251,10 @@ function AdminTicketsPanel() {
 
           <div className="glass overflow-x-auto p-0">
             {loading ? (
-              <div className="flex items-center justify-center py-16">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />
+              <div className="flex flex-col gap-3 p-5">
+                <SkeletonLine width="60%" height={14} />
+                <SkeletonLine />
+                <SkeletonLine width="75%" />
               </div>
             ) : tickets.length === 0 ? (
               <div className="p-8 text-center text-sm text-slate-500">{t('tickets.empty')}</div>
@@ -1114,8 +1117,10 @@ export default function AdminPage() {
       {/* 用户表 / user table */}
       <div className="glass overflow-x-auto p-0">
         {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />
+          <div className="flex flex-col gap-3 p-5">
+            <SkeletonLine width="55%" height={14} />
+            <SkeletonLine />
+            <SkeletonLine width="80%" />
           </div>
         ) : users.length === 0 ? (
           <div className="p-8 text-center text-sm text-slate-500">{t('admin.noUsers')}</div>

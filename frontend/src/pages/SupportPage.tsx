@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ticketApi } from '../api/client'
 import Select from '../components/Select'
+import { SkeletonLine } from '../components/Skeleton'
 import type { Ticket, TicketCategory, TicketListItem } from '../api/types'
 
 type View = 'list' | 'form' | { ticket: Ticket }
@@ -231,8 +232,10 @@ export default function SupportPage() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-16">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />
+        <div className="glass flex flex-col gap-3 p-5">
+          <SkeletonLine width="50%" height={16} />
+          <SkeletonLine />
+          <SkeletonLine width="80%" />
         </div>
       ) : tickets.length === 0 ? (
         <div className="glass p-8 text-center text-sm text-slate-500">{t('tickets.empty')}</div>

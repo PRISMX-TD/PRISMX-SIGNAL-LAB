@@ -7,6 +7,7 @@ import { fmtTime, fmtDate, localizeApiError } from "../api/utils"
 import { getSWReg } from "../utils/push"
 import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
 import PushDiagnostics from "../components/PushDiagnostics"
+import { SkeletonPage } from "../components/Skeleton"
 import {
   ALL_SENTINEL,
   EVENT_TYPES,
@@ -292,8 +293,8 @@ export default function AccountPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />
+      <div className="max-w-[900px] mx-auto">
+        <SkeletonPage cards={3} />
       </div>
     )
   }
