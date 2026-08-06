@@ -10,7 +10,7 @@ import { localizeApiError } from '../api/utils'
 
 export default function BindPage() {
   const { t } = useTranslation()
-  const { accounts, brokerLock, refreshAll } = useLive()
+  const { accounts, refreshAll } = useLive()
 
   // ---------- Gateway 绑定状态（Make Capital 用户无需本地 Bridge）----------
   const [gwLogin, setGwLogin] = useState('')
@@ -67,25 +67,6 @@ export default function BindPage() {
             <h3 className="font-display text-xl font-semibold text-slate-100">Make Capital MT5 直连</h3>
             <p className="mt-1 text-xs text-slate-400">无需本地 Bridge / VPS，直接通过网关连接 MT5</p>
           </div>
-
-          {/* 合作券商限制提示 */}
-          {brokerLock?.enabled && (
-            <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-prism-600/30 bg-prism-600/10 px-4 py-3">
-              <p className="text-sm text-prism-200">
-                {t('bind.brokerOnly', { name: brokerLock.displayName })}
-              </p>
-              {brokerLock.referralUrl && (
-                <a
-                  href={brokerLock.referralUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn-primary px-4 py-1.5 text-xs"
-                >
-                  {t('bind.brokerOpenAccount')}
-                </a>
-              )}
-            </div>
-          )}
 
           <div className="grid gap-3 sm:grid-cols-3">
             <input
