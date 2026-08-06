@@ -884,11 +884,22 @@ async def gateway_positions_loop() -> None:
         """慢拍：周期性刷新浮盈、资金、平仓明细。"""
         while True:
             try:
+                # 没有任何前端连着时，先跳过这一拍——连查一次 mt5_accounts 都省掉。
+                # 慢拍的产出（浮盈/资金/平仓明细）全部要推给正在看的前端；没人看
+                # 时这次查库（远端 Supabase 的一次网络往返）纯属浪费。有人连上会在
+                # 下一拍立即恢复，行为与之前完全一致。
+                # Skip the whole tick when no client is connected — even the
+                # mt5_accounts read is spared. Everything this tick produces is
+                # pushed to a watching frontend; with nobody watching, the query
+                # (a round trip to remote Supabase) is pure waste. A connecting
+                # client is picked up on the next tick, behavior unchanged.
+                connected = set(manager.connected_user_ids())
+                if not connected:
+                    await asyncio.sleep(GATEWAY_POSITIONS_INTERVAL)
+                    continue
+
                 pairs = await run_in_threadpool(_gateway_accounts)
                 by_user = _accounts_by_user(pairs)
-
-                # 没有前端连着的用户不必去打扰 gateway
-                connected = set(manager.connected_user_ids())
                 targets = [(uid, lg) for uid, lg in by_user.items() if uid in connected]
 
                 if targets:
