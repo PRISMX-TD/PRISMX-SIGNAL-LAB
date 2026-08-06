@@ -209,6 +209,10 @@ class Settings(BaseSettings):
     BACKTEST_CACHE_TTL_SECONDS: int = 300
     BACKTEST_CACHE_MAX_ENTRIES: int = 64
 
+    # 应用日志级别。排查后台循环时可临时设 DEBUG（会打出被过滤掉的成交诊断）。
+    # App log level. Set to DEBUG temporarily when diagnosing background loops.
+    LOG_LEVEL: str = "INFO"
+
     # 数据库 / Database（默认 SQLite，生产用环境变量 DATABASE_URL 覆盖为 Postgres）
     # Database (defaults to SQLite; override via DATABASE_URL env for Postgres in prod)
     DATABASE_URL: str = "sqlite:///./prismx.db"

@@ -228,6 +228,14 @@ class Order(Base):
     # 最近一次下发时间，用于超时重发判定 / last delivery time, for ack-timeout re-delivery
     delivered_at = Column(DateTime, nullable=True)
     mt5_ticket = Column(Integer, nullable=True)
+    # 成交后的真实仓位号。mt5_ticket 存的是订单号或成交号，与仓位号是不同的编号
+    # 体系，不能拿来匹配平仓成交。Gateway 开仓后反查填入；Bridge 侧为空（那边靠
+    # 魔术号码判归属，不需要这个）。
+    # The real position id after a fill. mt5_ticket holds an order or deal ticket,
+    # a different numbering space, so it can't be matched against closing deals.
+    # Filled in for gateway opens; stays null for bridge (which attributes by
+    # magic number and doesn't need it).
+    mt5_position = Column(Integer, nullable=True)
     filled_price = Column(Float, nullable=True)
     message = Column(String, nullable=True)
     # 桥接最近一次把该仓位报为"仍持仓"的时间；用于拿 MT5 实时持仓对账个人胜率

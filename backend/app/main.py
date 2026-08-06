@@ -1,5 +1,6 @@
 """PRISMX Signal Lab 后端入口 / Backend entrypoint."""
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
@@ -25,6 +26,20 @@ from app.services.plan_expiry import plan_expiry_sweep_loop
 from app.services.sentiment_store import sentiment_loop
 from app.services.signal_resolution import stale_signal_sweep_loop
 from app.services.strategy.resolution import stale_strategy_signal_sweep_loop
+
+
+# uvicorn 只配置自己的 logger，不动 root，所以应用代码里的 logger.info(...) 会
+# 落到未配置的 root logger 上——默认级别 WARNING，全部被丢掉。后台循环的诊断日志
+# 因此完全看不见，排查只能靠猜。这里显式配一次，让 INFO 能进 journald。
+#
+# uvicorn configures only its own loggers and leaves root untouched, so the app's
+# logger.info(...) calls hit an unconfigured root logger whose default level is
+# WARNING and get dropped — making the background loops undiagnosable. Configure
+# it explicitly so INFO reaches journald.
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 
 @asynccontextmanager

@@ -135,6 +135,9 @@ namespace Prismx.Mt5Gateway
                 case "/orders":
                     RequirePost(ctx, method, HandleOrders);
                     return;
+                case "/deals":
+                    RequirePost(ctx, method, HandleDeals);
+                    return;
                 case "/quote":
                     RequirePost(ctx, method, HandleQuote);
                     return;
@@ -362,6 +365,66 @@ namespace Prismx.Mt5Gateway
         }
 
         //+------------------------------------------------------------------+
+        //| POST /deals  读成交历史(后端补平仓明细用)                        |
+        //| { "login": 500123, "from": 1730000000, "to": 1730001000 }         |
+        //|                                                                  |
+        //| from/to 为 Unix 秒。Bridge 账号的平仓明细由桥接程序自己扫历史后   |
+        //| POST /api/bridge/trade-history 上报;Gateway 账号没有桥接,由后端 |
+        //| 轮询这个接口补齐同一条链路。                                     |
+        //+------------------------------------------------------------------+
+        private void HandleDeals(HttpListenerContext ctx, JsonObject body)
+        {
+            ulong login = body.GetUlong("login");
+            if (login == 0)
+            {
+                WriteError(ctx, 400, "bad_request", "login 必填");
+                return;
+            }
+
+            long from = (long)body.GetUlong("from");
+            long to = (long)body.GetUlong("to");
+
+            if (from <= 0 || to <= 0 || to < from)
+            {
+                WriteError(ctx, 400, "bad_request", "from/to 必填且 to 不得早于 from(Unix 秒)");
+                return;
+            }
+
+            MTRetCode res;
+            DealInfo[] list = _link.GetDeals(login, from, to, out res);
+
+            if (list == null)
+            {
+                WriteError(ctx, 502, res.ToString(), "读取成交历史失败");
+                return;
+            }
+
+            JsonWriter j = new JsonWriter();
+            j.BeginObject().Field("ok", true).BeginArray("deals");
+
+            foreach (DealInfo d in list)
+            {
+                j.BeginObject()
+                    .Field("ticket", d.Ticket)
+                    .Field("positionId", d.PositionId)
+                    .Field("symbol", d.Symbol)
+                    .Field("action", d.Action)
+                    .Field("entry", d.Entry)
+                    .Field("volume", d.Volume)
+                    .Field("price", d.Price)
+                    .Field("profit", d.Profit)
+                    .Field("commission", d.Commission)
+                    .Field("storage", d.Storage)
+                    .Field("time", (ulong)d.Time)
+                    .Field("comment", d.Comment)
+                 .EndObject();
+            }
+
+            j.EndArray().EndObject();
+            WriteJson(ctx, 200, j.ToString());
+        }
+
+        //+------------------------------------------------------------------+
         //| POST /quote  取当前买卖价                                        |
         //+------------------------------------------------------------------+
         private void HandleQuote(HttpListenerContext ctx, JsonObject body)
@@ -530,6 +593,11 @@ namespace Prismx.Mt5Gateway
                 .Field("message", r.Message)
                 .Field("deal", r.Deal)
                 .Field("order", r.Order)
+                // 仓位号:开仓时反查得到,平仓/改单为 0。后端存进 orders 表,
+                // 之后用它判断平仓明细的归属。
+                // Position id, resolved on open (0 for close/modify). The backend
+                // stores it and later uses it to attribute closed trades.
+                .Field("position", r.Position)
                 .Field("price", r.Price)
              .EndObject();
 

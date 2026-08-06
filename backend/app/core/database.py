@@ -103,6 +103,9 @@ def _migrate_columns() -> None:
             "sl": "FLOAT",
             "tp": "FLOAT",
             "position_last_seen_open": datetime_type,
+            # Gateway 成交后的真实仓位号，平仓明细靠它判归属
+            # real position id after a gateway fill; closed-trade attribution key
+            "mt5_position": "INTEGER",
         }
         with engine.begin() as conn:
             for name, col_type in order_new.items():

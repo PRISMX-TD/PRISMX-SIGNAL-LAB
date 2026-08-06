@@ -116,6 +116,15 @@ namespace Prismx.Mt5Gateway
         public ulong Order;
         public double Price;
 
+        // 仓位号。dealer 回执只给 Deal/Order,拿不到仓位号,所以开仓后要按成交号
+        // 反查一次成交记录才能填上。后端靠这个号判断某笔平仓是不是本平台开的
+        // 仓位——这是唯一不受回看窗口和 comment 被券商覆盖影响的依据。
+        // The dealer confirmation exposes only Deal/Order, so this is filled by
+        // looking the deal up afterwards. The backend needs it to tell whether a
+        // close belongs to a platform-opened position: the only signal that
+        // survives both the lookback window and brokers overwriting comments.
+        public ulong Position;
+
         public static TradeResult Fail(string retcode, string message)
         {
             return new TradeResult { Ok = false, Retcode = retcode, Message = message };
@@ -761,6 +770,107 @@ namespace Prismx.Mt5Gateway
             }
         }
 
+        /// <summary>
+        /// 读一段时间内的成交历史(Unix 秒,闭区间)。
+        ///
+        /// 时间参数由 MT5 服务器按 UTC 秒解读,直接传 Unix 时间戳即可 —— 不像
+        /// Bridge 那边用 MetaTrader5 Python 包时要先换算服务器本地时区(见
+        /// bridge/mt5_worker.py 的 _server_now 注释)。Manager API 走的是
+        /// int64 秒,不存在那个参照系陷阱。
+        /// </summary>
+        public DealInfo[] GetDeals(ulong login, long fromUnix, long toUnix, out MTRetCode res)
+        {
+            lock (_gate)
+            {
+                using (CIMTDealArray arr = _manager.DealCreateArray())
+                {
+                    res = _manager.DealRequest(login, fromUnix, toUnix, arr);
+
+                    // 区间内没有任何成交时返回 NOTFOUND,属正常状态
+                    if (res == MTRetCode.MT_RET_ERR_NOTFOUND)
+                    {
+                        res = MTRetCode.MT_RET_OK;
+                        return new DealInfo[0];
+                    }
+
+                    if (res != MTRetCode.MT_RET_OK)
+                        return null;
+
+                    uint total = arr.Total();
+                    DealInfo[] list = new DealInfo[total];
+                    int n = 0;
+
+                    for (uint i = 0; i < total; i++)
+                    {
+                        CIMTDeal d = arr.Next(i);
+                        if (d == null)
+                            continue;
+
+                        list[n++] = new DealInfo
+                        {
+                            Ticket = d.Deal(),
+                            PositionId = d.PositionID(),
+                            Symbol = d.Symbol(),
+                            Action = d.Action(),
+                            Entry = d.Entry(),
+                            Volume = SMTMath.VolumeToDouble(d.Volume()),
+                            Price = d.Price(),
+                            Profit = d.Profit(),
+                            Commission = d.Commission(),
+                            Storage = d.Storage(),
+                            Time = d.Time(),
+                            Comment = d.Comment()
+                        };
+                    }
+
+                    if (n != total)
+                        Array.Resize(ref list, n);
+
+                    return list;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 按成交号反查其所属仓位号,取不到返回 0。
+        ///
+        /// dealer 回执(CIMTRequest)只有 ResultDeal/ResultOrder,没有仓位号,而
+        /// 后端判断归属只能靠仓位号:开仓腿的 comment 虽然带前缀,但平仓腿的
+        /// comment 由服务器写(TP/SL 触发时会变成 "[tp 4177.62]" 之类),指望它
+        /// 带前缀是不可靠的。所以开仓成功后按成交号查一次,把仓位号带回去。
+        ///
+        /// 单笔查询,失败不影响已成交的仓位,调用方当作 0 处理即可。
+        ///
+        /// Resolves a deal ticket to its position id (0 if unavailable). The
+        /// dealer confirmation has no position id, and closing-leg comments are
+        /// written by the server (TP/SL fills look like "[tp 4177.62]"), so the
+        /// backend can't rely on the prefix to attribute a close. Looking the
+        /// deal up right after the open is what makes attribution reliable.
+        /// </summary>
+        public ulong GetDealPosition(ulong dealTicket)
+        {
+            if (dealTicket == 0)
+                return 0;
+
+            lock (_gate)
+            {
+                using (CIMTDealArray arr = _manager.DealCreateArray())
+                {
+                    if (arr == null)
+                        return 0;
+
+                    MTRetCode res = _manager.DealRequestByTickets(
+                        new ulong[] { dealTicket }, arr);
+
+                    if (res != MTRetCode.MT_RET_OK || arr.Total() == 0)
+                        return 0;
+
+                    CIMTDeal d = arr.Next(0);
+                    return d == null ? 0 : d.PositionID();
+                }
+            }
+        }
+
         //+------------------------------------------------------------------+
         //| 品种名自动后缀匹配                                              |
         //|                                                                  |
@@ -1004,6 +1114,13 @@ namespace Prismx.Mt5Gateway
                 req.PriceOrder(price);
                 req.Comment(BuildComment(tag));
             });
+
+            // 回执没有仓位号,按成交号反查补上。后端拿它作为归属判定的依据,
+            // 查不到也只是退化成旧行为(0),不影响这笔已成交的仓位。
+            // The confirmation carries no position id; resolve it from the deal.
+            // A failure just degrades to 0 and never affects the filled position.
+            if (r.Ok && r.Deal != 0)
+                r.Position = GetDealPosition(r.Deal);
 
             // 开仓成功且要求了 SL/TP,再补一次改单。
             // 改单失败不影响已成交的仓位,只在结果里带上提示。

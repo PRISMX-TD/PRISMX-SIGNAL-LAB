@@ -25,6 +25,11 @@ class TradeRsp:
     deal: int  # deal ticket
     order: int  # order ticket
     price: float
+    # 真实仓位号，开仓时由 gateway 反查后返回；平仓/改单为 0。
+    # 旧版 gateway 不返回这个字段，缺省 0 时退化成旧行为。
+    # Real position id, resolved by the gateway on open (0 for close/modify).
+    # Older gateways omit the field; defaulting to 0 keeps the old behaviour.
+    position: int = 0
 
 
 @dataclass
@@ -222,6 +227,7 @@ async def trade_open(
         deal=data.get("deal", 0),
         order=data.get("order", 0),
         price=data.get("price", 0.0),
+        position=data.get("position", 0) or 0,
     )
 
 

@@ -296,6 +296,16 @@ GATEWAY_ACCOUNT_REFRESH_INTERVAL = 15.0
 GATEWAY_DEALS_SCAN_INTERVAL = 3.0
 GATEWAY_DEALS_LOOKBACK_SECONDS = 15 * 60
 
+# 每个账号第一次扫描时用的宽窗口。这个循环只扫「当前有 WS 连接」的用户，所以
+# 后端重启、或用户关掉页面期间发生的平仓，都不在任何一次常规窗口里。首扫补一个
+# 长回看把这段空档捞回来，之后回到窄窗口。重复查到的成交由唯一约束去重。
+# Wider window for a login's first scan. This loop only covers users with a live
+# WS connection, so closes that happen during a backend restart — or while the
+# user has the page closed — fall outside every regular window. The first scan
+# after (re)connecting backfills that gap; later scans use the narrow window.
+# Re-reading the same deals is harmless: the unique constraint dedupes.
+GATEWAY_DEALS_CATCHUP_SECONDS = 7 * 24 * 60 * 60
+
 # MT5 成交类型/进出方向常量（对应 SDK 的 EnDealAction / EnDealEntry）
 _DEAL_ACTION_BUY = 0
 _DEAL_ACTION_SELL = 1
@@ -322,12 +332,13 @@ def build_closed_trade_legs(
 
     所以归属改成三个信号取并集，任一命中即认定为本平台的仓位：
 
-      1. 窗口内有带前缀的开仓腿；
-      2. 平仓腿自己的 comment 带前缀——`ClosePosition` 同样走 BuildComment，
-         所以由本平台发起的平仓自带这个标记；
-      3. `known_position_tickets` 命中——即 orders 表里有 mt5_ticket 等于该仓位
-         号的 FILLED 开仓记录。这条不受回看窗口影响，是最可靠的依据，也覆盖了
-         「本平台开仓、用户自己在 MT5 客户端手动平仓」这种 1 和 2 都判不出的情况。
+      1. `known_position_tickets` 命中——orders 表里有 mt5_position 等于该仓位号
+         的 FILLED 开仓记录。这是主依据：不受回看窗口影响，也不依赖 comment。
+      2. 窗口内有带前缀的开仓腿——只在仓位刚开不久时才可能命中，作为 1 的兜底
+         （例如 gateway 当时没返回仓位号）。
+      3. 平仓腿自己的 comment 带前缀——只有「本平台主动发起的平仓」才带，
+         **TP/SL 触发时不带**：那种平仓由服务器写 comment，实测会变成
+         `[tp 4177.62]` 或空串。所以这条只能作为补充信号，不能当主依据。
 
     手续费与隔夜利息按这笔平仓手数占该仓位总平仓手数的比例分摊，与
     bridge/mt5_worker.py 的 fee_share 算法保持一致——否则同一笔交易在两条通道
@@ -456,13 +467,18 @@ async def gateway_positions_loop() -> None:
         try:
             # 本平台在该账号开过的仓位号。这是归属判定里唯一不受回看窗口影响的
             # 依据——开仓腿早已滑出窗口时，只能靠它认出这笔平仓是我们的。
+            # 用 mt5_position（真实仓位号），不是 mt5_ticket——后者存的是订单号
+            # 或成交号，和平仓成交的 position_id 不是同一套编号，拿来比对永远不中。
+            # Match on mt5_position (the real position id). mt5_ticket holds an
+            # order or deal ticket — a different numbering space from a closing
+            # deal's position_id, so comparing against it never matches.
             known = {
-                int(t) for (t,) in db.query(Order.mt5_ticket).filter(
+                int(t) for (t,) in db.query(Order.mt5_position).filter(
                     Order.user_id == user_id,
                     Order.mt5_login == login,
                     Order.action == "ORDER",
                     Order.status == "FILLED",
-                    Order.mt5_ticket.isnot(None),
+                    Order.mt5_position.isnot(None),
                 ).all()
             }
         finally:
@@ -501,6 +517,8 @@ async def gateway_positions_loop() -> None:
     # login -> 上次刷新/扫描的 monotonic 时间戳
     last_account_refresh: dict[str, float] = {}
     last_deals_scan: dict[str, float] = {}
+    # 本进程内已做过首次补扫的账号 / logins whose catch-up scan already ran
+    scanned_once: set[str] = set()
 
     while True:
         try:
@@ -537,9 +555,18 @@ async def gateway_positions_loop() -> None:
                     # --- 平仓明细扫描（低频）---
                     if now - last_deals_scan.get(login, 0.0) >= GATEWAY_DEALS_SCAN_INTERVAL:
                         last_deals_scan[login] = now
+                        first_scan = login not in scanned_once
+                        scanned_once.add(login)
                         try:
-                            to_unix = int(time.time())
-                            from_unix = to_unix - GATEWAY_DEALS_LOOKBACK_SECONDS
+                            # to 往后留一天余量：MT5 服务器时区常领先 UTC，按
+                            # 「现在」截断会把刚成交的记录切掉。
+                            # Pad `to` by a day: MT5 server time often runs ahead
+                            # of UTC, and cutting at "now" would drop fresh deals.
+                            to_unix = int(time.time()) + 86400
+                            from_unix = int(time.time()) - (
+                                GATEWAY_DEALS_CATCHUP_SECONDS if first_scan
+                                else GATEWAY_DEALS_LOOKBACK_SECONDS
+                            )
                             deals, derr = await gw_get_deals(int(login), from_unix, to_unix)
                             if derr:
                                 logger.warning("Gateway 成交历史读取失败 login=%s: %s", login, derr)

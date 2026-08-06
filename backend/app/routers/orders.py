@@ -394,6 +394,13 @@ def _apply_trade_result(order: Order, rsp: TradeRsp) -> None:
     if rsp.ok:
         order.status = "FILLED"
         order.mt5_ticket = rsp.order if rsp.order else rsp.deal
+        # 仓位号单独存。mt5_ticket 是订单号/成交号，与仓位号不同源，平仓明细的
+        # 归属判定只能用这个。旧版 gateway 不返回时为 0，按空处理。
+        # Store the position id separately: mt5_ticket is an order/deal ticket
+        # from a different numbering space, and closed-trade attribution needs
+        # this one. Older gateways send 0, treated as absent.
+        if rsp.position:
+            order.mt5_position = rsp.position
         order.filled_price = rsp.price or None
         order.message = ""
     else:
