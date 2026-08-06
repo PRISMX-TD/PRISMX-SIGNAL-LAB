@@ -286,7 +286,6 @@
       "platformStrategies": "Platform Strategies"
     },
     "guide": {
-      "intro": "These are the strategies behind the platform's signals. Each one states the market it suits, roughly how long positions run, and the risk:reward it is designed around.",
       "empty": "Strategy write-ups are being prepared.",
       "marketRegime": "Market",
       "holdingTime": "Holding time",

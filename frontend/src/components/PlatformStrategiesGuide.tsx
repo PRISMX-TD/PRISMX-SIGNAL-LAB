@@ -103,8 +103,6 @@ export default function PlatformStrategiesGuide() {
 
   return (
     <div>
-      <p className="mb-4 text-sm text-slate-400">{t('signals.guide.intro')}</p>
-
       <div className="grid gap-4 lg:grid-cols-2">
         {items.map((s) => {
           const name = pick(s.nameZh, s.nameEn, isZh)

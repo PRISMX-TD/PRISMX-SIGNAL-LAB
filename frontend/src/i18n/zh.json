@@ -286,7 +286,6 @@
       "platformStrategies": "平台策略"
     },
     "guide": {
-      "intro": "以下是平台信号背后的策略。每条说明它适合什么行情、大致持仓多久、按什么风险回报比设计。",
       "empty": "策略介绍正在整理中。",
       "marketRegime": "适用行情",
       "holdingTime": "典型持仓",
