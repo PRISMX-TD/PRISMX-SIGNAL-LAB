@@ -642,7 +642,7 @@ async def gateway_positions_loop() -> None:
                 known_flat.add(lg)
             data.extend(rows)
 
-        await manager.push_positions(user_id, data)
+        await manager.push_positions(user_id, data, source="gateway")
 
         # 平仓那一刻余额已经变了。这里顺手把已知余额再推一次，让账户卡片的
         # 余额和持仓表的浮盈在同一条消息序列里更新，不会出现「新浮盈 + 旧余额」。
@@ -778,7 +778,7 @@ async def gateway_positions_loop() -> None:
             # Same path as /bridge/positions: cache the snapshot, attach per-login
             # floating P/L, skip unchanged ticks. The gateway funds refresh runs
             # every 15s, which would leave the account card behind.
-            await manager.push_positions(user_id, data)
+            await manager.push_positions(user_id, data, source="gateway")
 
             # 余额变化时推 ACCOUNTS_STATUS，让账户卡片不必等前端 5 秒轮询。
             # 用只管余额的那个函数：gateway 账号没有心跳，不能参与在线状态判定。

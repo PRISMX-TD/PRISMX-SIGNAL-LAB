@@ -744,7 +744,7 @@ async def bridge_positions(
     # push_positions caches the snapshot, attaches per-login floating P/L, and
     # skips ticks identical to the previous one. The account card now shares the
     # positions table's data instead of waiting on the 5s /bridge/accounts poll.
-    await manager.push_positions(user.id, req.data)
+    await manager.push_positions(user.id, req.data, source="bridge")
     # 拿实时持仓给个人胜率对账：给仍持仓的本平台仓位盖时间戳，让平仓明细漏报的
     # 仓位最终退出"进行中"。对账失败绝不影响持仓上报本身。
     # Reconcile personal win-rate against live positions: stamp still-open

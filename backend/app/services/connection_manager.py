@@ -13,8 +13,21 @@ class ConnectionManager:
     def __init__(self) -> None:
         # user_id -> 前端连接集合 / set of client connections per user
         self._clients: dict[str, set[WebSocket]] = {}
-        # user_id -> 最近一次持仓快照 / latest positions snapshot per user
-        self._positions: dict[str, list] = {}
+        # user_id -> source -> 最近一次持仓快照。
+        #
+        # 必须按来源分区：一个用户可以同时绑 bridge 账号和 gateway 账号，两条
+        # 上报路径各自只知道自己那批账号。若共用一个 list，bridge 上报会把
+        # gateway 的持仓覆盖掉，gateway 上报再覆盖回来，前端（整表替换语义）
+        # 就表现为持仓行来回闪烁。分区存、推送时合并，两路互不干扰。
+        #
+        # user_id -> source -> latest positions snapshot.
+        #
+        # Partitioning by source is required: a user can have both bridge- and
+        # gateway-managed accounts, and each reporting path only knows its own
+        # subset. Sharing one list makes the two paths overwrite each other, and
+        # since the frontend replaces the whole table, positions visibly flicker.
+        # Store per source and merge on push so the paths stay independent.
+        self._positions: dict[str, dict[str, list]] = {}
         # user_id -> login -> {symbol: {bid, ask, login, ...}}：按交易商账户区分的
         # 报价快照，供下单确认页按所选账户取对应报价。全站统一展示报价另见
         # quotes_store.py（EA 推送，不区分用户/账户）。
@@ -29,12 +42,16 @@ class ConnectionManager:
         self._lock = asyncio.Lock()
 
     # ---------- 持仓缓存 / Positions cache ----------
-    def set_positions(self, user_id: str, positions: list) -> None:
-        """缓存某用户最新持仓，供前端重连时补推 / cache latest positions for re-push."""
-        self._positions[user_id] = positions or []
-
     def get_positions(self, user_id: str) -> list:
-        return self._positions.get(user_id, [])
+        """某用户全部来源合并后的最新持仓，供前端重连时补推。
+        Merged latest positions across all sources, for re-push on reconnect."""
+        by_source = self._positions.get(user_id)
+        if not by_source:
+            return []
+        merged: list = []
+        for rows in by_source.values():
+            merged.extend(rows)
+        return merged
 
     # ---------- 账号浮动盈亏缓存 / Per-account floating P/L cache ----------
     #
@@ -184,8 +201,16 @@ class ConnectionManager:
             # lives in exactly one place.
             await self.unregister_client(user_id, ws)
 
-    async def push_positions(self, user_id: str, positions: list) -> None:
+    async def push_positions(
+        self, user_id: str, positions: list, source: str = "bridge"
+    ) -> None:
         """推送持仓快照（含资金），内容与上一拍相同则跳过。
+
+        `positions` 只是 `source` 这条上报路径看到的那部分持仓；本方法会与其他
+        来源的最新快照合并后再推，因为 POSITIONS 在前端是整表替换语义。
+        `positions` is only the slice seen by the `source` reporting path; it is
+        merged with the other sources' latest snapshots before pushing, since
+        POSITIONS replaces the whole table on the frontend.
 
         Push a positions snapshot (with funds), skipping unchanged ticks.
 
@@ -198,11 +223,12 @@ class ConnectionManager:
         re-rendering but can't avoid the transfer and JSON parse. Positions
         contain only primitives, so comparing serialized bytes is sound.
         """
-        self._positions[user_id] = positions or []
+        self._positions.setdefault(user_id, {})[source] = positions or []
+        merged = self.get_positions(user_id)
         message = {
             "type": "POSITIONS",
-            "data": positions or [],
-            "funds": self.account_funds_from_positions(positions),
+            "data": merged,
+            "funds": self.account_funds_from_positions(merged),
         }
         # sort_keys 让相同内容必定得到相同字节，不受 dict 插入顺序影响。
         # sort_keys makes identical content produce identical bytes regardless of
