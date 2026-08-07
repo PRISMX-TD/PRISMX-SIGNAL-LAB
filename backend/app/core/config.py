@@ -312,7 +312,38 @@ class Settings(BaseSettings):
     # stats). This purely guards against a TradingView/network outage leaving
     # signals unresolved forever — it is not a business rule capping how long a
     # signal is allowed to run.
-    SIGNAL_STALE_DAYS: int = 10
+    #
+    # 2026-08-07 从 10 天降到 5 天，动机是 Supabase Egress：这个值同时是
+    # resolve_signals_with_price 的判定窗口（cutoff 已下推进 WHERE），而库里
+    # 5327 条 PENDING 让那条查询成了最大的 Egress 单项（占 55%）。实测 7 天内
+    # 3362 条、5 天约 2401 条，降到 5 天可去掉约 55% 的行。
+    #
+    # 5 而不是更小：它要能盖住"周五收盘 → 周一开盘"这段没有任何行情更新的空窗
+    # （最长约 2.5 天），再留一倍余量给连休的长假。取 3 天会让"周五生成的信号在
+    # 下周一之前"这种正常情形擦着边界，一旦碰上周一是假日就会把还在正常追踪的
+    # 信号误判成 STALE。
+    #
+    # 注意这个常量同时被策略信号的清扫复用（strategy/resolution.py），改动会
+    # 一并缩短策略信号的 STALE 窗口；两者共用一个口径是刻意的（平台胜率与策略
+    # 胜率因此可直接对比），不要为了单独调一个而拆成两个值。
+    #
+    # Lowered from 10 to 5 days on 2026-08-07, driven by Supabase Egress: this
+    # value doubles as resolve_signals_with_price's resolution window (the
+    # cutoff is pushed into its WHERE clause), and the 5327 PENDING rows in the
+    # database made that query the single largest Egress item (55%). Measured:
+    # 3362 rows within 7 days, ~2401 within 5, so 5 days drops ~55% of them.
+    #
+    # 5 rather than lower: it has to span the Friday-close-to-Monday-open gap
+    # with no price updates at all (~2.5 days), plus roughly the same again as
+    # headroom for a long holiday weekend. At 3 days, a signal created Friday
+    # would sit right on the boundary before Monday, and a Monday holiday would
+    # flip still-tracking signals to STALE.
+    #
+    # Note this constant is also reused by the strategy-signal sweep
+    # (strategy/resolution.py), so changing it shortens that window too. The
+    # shared value is deliberate (it keeps platform and strategy win rates
+    # directly comparable) — don't split it into two just to tune one side.
+    SIGNAL_STALE_DAYS: int = 5
 
     # TradingView Webhook：警报推送时在 JSON body 内携带的密钥，服务器据此校验来源。
     # TradingView 的 webhook 不支持自定义请求头，故密钥放在 body 的 "secret" 字段。
