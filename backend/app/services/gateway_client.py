@@ -202,10 +202,23 @@ async def _post(path: str, body: dict, timeout: float | None = None) -> dict:
     started = time.perf_counter()
     try:
         if _client is not None:
-            resp = await _client.post(
-                url, json=body, headers=_headers(),
-                timeout=httpx.Timeout(timeout) if timeout else None,
-            )
+            # 不传 timeout 时必须**省略**这个参数，不能传 None：httpx 里显式传
+            # None 表示「永不超时」，而不是「用客户端的默认值」。传了 None 会让
+            # 持仓读取这类没指定超时的调用挂死，慢拍拿不到结果就推空列表，
+            # 前端持仓表随即被整表替换成空 —— 表现为每 2 秒闪一次。
+            #
+            # Omit the argument entirely when no timeout is given: in httpx an
+            # explicit None means "wait forever", not "fall back to the client
+            # default". Passing None let position reads hang, and a hung read
+            # makes the slow tick push an empty list, which the frontend applies
+            # as a full replacement.
+            if timeout is not None:
+                resp = await _client.post(
+                    url, json=body, headers=_headers(),
+                    timeout=httpx.Timeout(timeout),
+                )
+            else:
+                resp = await _client.post(url, json=body, headers=_headers())
         else:
             async with httpx.AsyncClient(timeout=httpx.Timeout(timeout or 60)) as client:
                 resp = await client.post(url, json=body, headers=_headers())

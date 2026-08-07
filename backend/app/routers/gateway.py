@@ -664,6 +664,7 @@ async def gateway_positions_loop() -> None:
         async with sem:
             now = time.monotonic()
             data: list[dict] = []
+            failed = False
             for login in logins:
                 # --- 账号资金刷新（低频）---
                 if now - last_account_refresh.get(login, 0.0) >= GATEWAY_ACCOUNT_REFRESH_INTERVAL:
@@ -739,7 +740,18 @@ async def gateway_positions_loop() -> None:
 
                 rows, ok = await _read_positions(login)
                 if not ok:
-                    continue
+                    # 读失败就放弃整轮推送，与快拍保持一致（见 _push_user_snapshot）。
+                    # 只 continue 会把该账号的持仓从 data 里漏掉，然后照样推出去，
+                    # 前端是整表替换 —— 单账号用户会直接看到持仓表清空，下一拍
+                    # 又恢复。晚 2 秒更新远好过让仓位凭空消失一下。
+                    #
+                    # Abandon the whole push when a read fails, matching the fast
+                    # tick. Skipping just this login would still push the rest as a
+                    # complete snapshot, and the frontend replaces wholesale — a
+                    # single-account user would watch their positions vanish and
+                    # come back. Being 2s stale beats flickering.
+                    failed = True
+                    break
 
                 # 标记空仓：下轮慢拍可以跳过（前提是订阅活着）
                 if rows:
@@ -748,6 +760,17 @@ async def gateway_positions_loop() -> None:
                     known_flat.add(login)
 
                 data.extend(rows)
+
+            # 本轮有账号读失败：data 不是完整快照，推它会让前端丢行。下游的
+            # mark_positions_seen 也吃这个 data 做胜率对账与自动仓管，喂残缺
+            # 数据可能被当成"仓位已消失"，所以整轮一起跳过，等下一拍。
+            #
+            # A failed read means `data` is not a full snapshot. Besides the
+            # flicker, mark_positions_seen consumes it for reconciliation and auto
+            # position management, where a missing row could read as "closed".
+            # Skip the whole round and let the next tick handle it.
+            if failed:
+                return
 
             # 与 /bridge/positions 走同一个方法：缓存快照 + 附带按 login 汇总的
             # 浮动盈亏 + 跳过重复推送。gateway 的资金刷新是 15 秒一次，光靠它
