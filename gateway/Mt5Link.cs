@@ -1422,6 +1422,8 @@ namespace Prismx.Mt5Gateway
             if (price <= 0)
                 return TradeResult.Fail("MT_RET_REQUEST_PRICE_OFF", "该品种当前无有效报价");
 
+            bool wantLevels = stopLoss > 0 || takeProfit > 0;
+
             TradeResult r = SendDealerRequest(req =>
             {
                 req.Login(login);
@@ -1434,7 +1436,7 @@ namespace Prismx.Mt5Gateway
 
                 // SL/TP 随开仓请求一起发。只设非 0 的那一侧,并对应置 CHANGED 标志:
                 // 没要求的一侧不该被当成「改成 0」。
-                if (stopLoss > 0 || takeProfit > 0)
+                if (wantLevels)
                 {
                     CIMTRequest.EnTradeActionFlags flags = 0;
 
@@ -1453,6 +1455,36 @@ namespace Prismx.Mt5Gateway
                     req.Flags(flags);
                 }
             });
+
+            // SL/TP 无效导致整单被拒时,去掉 SL/TP 重发,把开仓和设止损的成败解耦。
+            //
+            // 这是必须的:合并前这两件事是分开的两个请求,止损价违反品种最小距离
+            // (MT_RET_REQUEST_INVALID_STOPS)只会让改单失败,仓位照样开出来。
+            // 合并后同一个请求里带了无效止损会让**开仓本身**失败——用户本来能下的
+            // 单变成下不了。生产日志里这个返回码真实出现过,不是假想场景。
+            //
+            // 降级后仍会走下面的补救改单,失败时提示与旧实现一致。
+            //
+            // If invalid stops sink the whole request, retry without them so that
+            // opening and setting levels fail independently, as they did before the
+            // merge. Otherwise an order that used to fill (unprotected) would now be
+            // rejected outright — this retcode does occur in production logs.
+            if (wantLevels && !r.Ok && IsInvalidStops(r.Retcode))
+            {
+                Log.Warn("开仓请求带的 SL/TP 被拒({0}),去掉 SL/TP 重发:login={1} {2}",
+                    r.Retcode, login, symbol);
+
+                r = SendDealerRequest(req =>
+                {
+                    req.Login(login);
+                    req.Action(CIMTRequest.EnTradeActions.TA_DEALER_POS_EXECUTE);
+                    req.Type(isBuy ? CIMTOrder.EnOrderType.OP_BUY : CIMTOrder.EnOrderType.OP_SELL);
+                    req.Volume(SMTMath.VolumeToInt(lots));
+                    req.Symbol(symbol);
+                    req.PriceOrder(price);
+                    req.Comment(BuildComment(tag));
+                });
+            }
 
             // 回执没有仓位号,按成交号反查补上。后端拿它作为归属判定的依据,
             // 查不到也只是退化成旧行为(0),不影响这笔已成交的仓位。
@@ -1558,6 +1590,20 @@ namespace Prismx.Mt5Gateway
                 req.Flags(CIMTRequest.EnTradeActionFlags.TA_FLAG_CLOSE);
                 req.Comment(BuildComment(tag));
             });
+        }
+
+        /// <summary>
+        /// 判断返回码是否为「止损止盈价位无效」。
+        ///
+        /// 只认这一个返回码才降级重发:别的失败原因(余额不足、无交易权限、
+        /// 市场关闭)去掉 SL/TP 也一样会失败,重发只是白发一个请求。
+        ///
+        /// MT_RET_REQUEST_INVALID_STOPS = 10016,SDK 里只有这一个表示止损无效
+        /// (MT5APIConstants.h:150),没有其它同义返回码。
+        /// </summary>
+        private static bool IsInvalidStops(string retcode)
+        {
+            return retcode == MTRetCode.MT_RET_REQUEST_INVALID_STOPS.ToString();
         }
 
         /// <summary>
