@@ -67,6 +67,15 @@ async def lifespan(app: FastAPI):
     # first candle_retention_sweep_loop pass once stalled it 83.7s, making startup
     # take 85.6s. Keep this in mind when adding loops.
     init_db()
+    
+    # 捕获主事件循环，供 gateway_client 的 run_on_main_loop 使用。
+    # 必须在任何可能调用 gateway 客户端的代码之前设置。
+    # Capture the main event loop for gateway_client's run_on_main_loop.
+    # Must be set before any code that might call the gateway client.
+    from app.services.gateway_client import init_client, set_main_loop, close_client
+    set_main_loop(asyncio.get_running_loop())
+    init_client()
+    
     task = (
         asyncio.create_task(signal_loop())
         if settings.ENABLE_MOCK_SIGNAL_ENGINE
@@ -125,6 +134,9 @@ async def lifespan(app: FastAPI):
     discipline_task.cancel()
     candle_retention_task.cancel()
     gateway_positions_task.cancel()
+    
+    # 关闭 gateway 客户端连接池
+    await close_client()
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)

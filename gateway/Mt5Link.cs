@@ -247,6 +247,50 @@ namespace Prismx.Mt5Gateway
         private readonly Dictionary<ulong, string> _groupCache =
             new Dictionary<ulong, string>();
 
+        // 缓存:品种手数限制(volMin/volMax/volStep)。每次开仓都要校验手数,
+        // 原本每次都进 _gate 锁查一次 MT5。这些值几乎不变,缓存后既省一次
+        // 往返,更重要的是少占 _gate 锁——那把锁串行化所有 MT5 调用,
+        // 少占锁直接提升并发下单能力。断线重连时清空。
+        // Symbol volume limits cache. Every open validates lot size, which used
+        // to hit MT5 under _gate each time. These values rarely change; caching
+        // saves a round trip and — more importantly — reduces _gate contention,
+        // since that lock serialises every MT5 call. Cleared on reconnect.
+        private readonly Dictionary<string, SymbolLimits> _limitsCache =
+            new Dictionary<string, SymbolLimits>(StringComparer.OrdinalIgnoreCase);
+
+        // 缓存:交易前的账号校验结果(账号是否存在 + 组是否在白名单)。
+        //
+        // 与 _groupCache 不同,这里**必须带 TTL**:白名单校验是安全边界,
+        // 券商把账号移出允许交易的组之后,永久缓存会让它继续能下单直到
+        // gateway 重启。_groupCache 用在 ResolveSymbol 里没这个问题
+        // (猜错后缀只是下单失败),所以那边可以永久缓存。
+        //
+        // Tradability check cache (account exists + group allowed). Unlike
+        // _groupCache this MUST expire: the whitelist is a security boundary, so
+        // a permanent entry would keep letting an account trade after the broker
+        // moved it out of an allowed group, until the gateway restarts.
+        private readonly Dictionary<ulong, TradableEntry> _tradableCache =
+            new Dictionary<ulong, TradableEntry>();
+
+        private const int TradableCacheTtlMs = 60000;
+
+        /// <summary>品种手数限制。</summary>
+        internal struct SymbolLimits
+        {
+            public double VolMin;
+            public double VolMax;
+            public double VolStep;
+        }
+
+        /// <summary>账号可交易性的缓存条目。Group 留着供日志与错误信息用。</summary>
+        private struct TradableEntry
+        {
+            public bool Exists;
+            public string Group;
+            public MTRetCode Res;
+            public int AtTickCount;
+        }
+
         public Mt5Link(Config cfg)
         {
             _cfg = cfg;
@@ -762,10 +806,17 @@ namespace Prismx.Mt5Gateway
 
                     // 重连后 dealer 通道要重开,否则下单没有回执。
                     // Selected 列表是连接级状态,断线即失效,缓存要清掉重建。
+                    // 手数限制与账号可交易性缓存同样清空:断线期间券商可能改过
+                    // 品种配置或账号分组,拿旧值校验会放过本该拒绝的请求。
+                    // Also clear the limits and tradability caches: the broker may
+                    // have changed symbol config or account groups while we were
+                    // down, and stale values would pass checks that should fail.
                     lock (_gate)
                     {
                         _manager.DealerStart();
                         _selected.Clear();
+                        _limitsCache.Clear();
+                        _tradableCache.Clear();
                     }
 
                     // 持仓订阅也要重建:断线时服务器已清掉我们的订阅状态
@@ -830,6 +881,65 @@ namespace Prismx.Mt5Gateway
                 }
 
                 return info;
+            }
+        }
+
+        /// <summary>
+        /// 交易前的账号校验:账号是否存在 + 所在组。带 60 秒 TTL 缓存。
+        ///
+        /// 原本交易前调 GetAccount 做这件事,那会发**两次** MT5 请求
+        /// (UserRequest + UserAccountRequest),而校验只用得到 group——
+        /// 资金字段查了就丢。这里只发 UserRequest,并把结果缓存 60 秒。
+        ///
+        /// TTL 是刻意的:白名单是安全边界,不能像 _groupCache 那样永久缓存,
+        /// 否则券商把账号移出允许组之后它还能继续下单。60 秒窗口是可接受的
+        /// 有界损失。
+        ///
+        /// Pre-trade account check (existence + group), cached for 60s. The old
+        /// path called GetAccount, which issues two MT5 requests where only the
+        /// group is needed. The TTL is deliberate: the whitelist is a security
+        /// boundary and must not be cached forever the way _groupCache is.
+        /// </summary>
+        /// <param name="group">账号所在组。账号不存在时为空字符串。</param>
+        /// <returns>账号是否存在且可读。</returns>
+        public bool CheckAccountGroup(ulong login, out string group, out MTRetCode res)
+        {
+            int now = Environment.TickCount;
+
+            lock (_gate)
+            {
+                TradableEntry hit;
+                if (_tradableCache.TryGetValue(login, out hit))
+                {
+                    // TickCount 会在约 49.7 天后回绕,unchecked 相减仍得到正确
+                    // 的时间差(补码运算),不需要特殊处理。
+                    // TickCount wraps after ~49.7 days; the unchecked subtraction
+                    // still yields the correct delta via two's complement.
+                    int age = unchecked(now - hit.AtTickCount);
+                    if (age >= 0 && age < TradableCacheTtlMs)
+                    {
+                        group = hit.Group;
+                        res = hit.Res;
+                        return hit.Exists;
+                    }
+                }
+
+                bool exists;
+                using (CIMTUser user = _manager.UserCreate())
+                {
+                    res = _manager.UserRequest(login, user);
+                    exists = res == MTRetCode.MT_RET_OK;
+                    group = exists ? user.Group() : "";
+                }
+
+                TradableEntry entry;
+                entry.Exists = exists;
+                entry.Group = group;
+                entry.Res = res;
+                entry.AtTickCount = now;
+                _tradableCache[login] = entry;
+
+                return exists;
             }
         }
 
@@ -1214,16 +1324,31 @@ namespace Prismx.Mt5Gateway
             }
         }
 
-        /// <summary>取品种的手数限制,用于下单前校验。</summary>
+        /// <summary>
+        /// 取品种的手数限制,用于下单前校验。
+        ///
+        /// 带缓存:命中时不进 MT5,只读字典。手数限制属于品种配置,券商极少改动,
+        /// 断线重连时会连同 Selected 列表一起清空重建。
+        /// </summary>
         public bool GetSymbolLimits(string symbol, out double volMin, out double volMax,
             out double volStep, out MTRetCode res)
         {
             volMin = 0;
             volMax = 0;
             volStep = 0;
+            res = MTRetCode.MT_RET_OK;
 
             lock (_gate)
             {
+                SymbolLimits hit;
+                if (_limitsCache.TryGetValue(symbol, out hit))
+                {
+                    volMin = hit.VolMin;
+                    volMax = hit.VolMax;
+                    volStep = hit.VolStep;
+                    return true;
+                }
+
                 using (CIMTConSymbol sym = _manager.SymbolCreate())
                 {
                     res = _manager.SymbolGet(symbol, sym);
@@ -1233,6 +1358,13 @@ namespace Prismx.Mt5Gateway
                     volMin = SMTMath.VolumeToDouble(sym.VolumeMin());
                     volMax = SMTMath.VolumeToDouble(sym.VolumeMax());
                     volStep = SMTMath.VolumeToDouble(sym.VolumeStep());
+
+                    SymbolLimits entry;
+                    entry.VolMin = volMin;
+                    entry.VolMax = volMax;
+                    entry.VolStep = volStep;
+                    _limitsCache[symbol] = entry;
+
                     return true;
                 }
             }

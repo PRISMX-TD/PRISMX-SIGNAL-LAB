@@ -4,7 +4,9 @@ Gateway 跑在 MT5 服务器本地，只监听 127.0.0.1，通过 X-Gateway-Toke
 后端通过这个客户端直接操作 MT5 账号，不需要 bridge 轮询。
 """
 
+import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -13,6 +15,78 @@ import httpx
 from app.core.config import settings
 
 logger = logging.getLogger("prismx.gateway")
+
+# ---------- 主事件循环引用与跨线程提交 ----------
+
+_main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """在 lifespan 启动时捕获主事件循环。只调用一次。"""
+    global _main_loop
+    _main_loop = loop
+    logger.info("Gateway 客户端已捕获主事件循环")
+
+
+def run_on_main_loop(coro, timeout: float):
+    """从线程池线程把协程提交到主事件循环并等结果。
+    
+    用于从同步端点（orders.py 的 def 函数）调用异步 gateway 客户端。
+    替代 asyncio.run()，后者每次创建新循环且无法复用连接池。
+    
+    未捕获到主循环时（单测/脚本场景）退回 asyncio.run()。
+    
+    Args:
+        coro: 协程对象
+        timeout: 超时秒数，必须显式传入。协程排在主循环上，无超时会挂死线程。
+    
+    Returns:
+        协程的返回值
+    
+    Raises:
+        TimeoutError: 超时
+        Exception: 协程内部抛出的异常会原样传播
+    """
+    if _main_loop is None:
+        logger.warning("主事件循环未捕获，退回 asyncio.run()")
+        return asyncio.run(coro)
+    
+    future = asyncio.run_coroutine_threadsafe(coro, _main_loop)
+    try:
+        return future.result(timeout=timeout)
+    except TimeoutError:
+        logger.error("Gateway 调用超时 (%.1fs)：协程可能仍在主循环中排队", timeout)
+        raise
+
+
+# ---------- httpx 连接池单例 ----------
+
+_client: Optional[httpx.AsyncClient] = None
+
+
+def init_client() -> None:
+    """在 lifespan 启动时初始化连接池单例。只调用一次。"""
+    global _client
+    if _client is not None:
+        return
+    _client = httpx.AsyncClient(
+        timeout=httpx.Timeout(60.0),
+        limits=httpx.Limits(
+            max_keepalive_connections=10,
+            max_connections=20,
+            keepalive_expiry=30.0,
+        ),
+    )
+    logger.info("Gateway 客户端连接池已初始化")
+
+
+async def close_client() -> None:
+    """在 lifespan 关闭时清理连接池。"""
+    global _client
+    if _client is not None:
+        await _client.aclose()
+        _client = None
+        logger.info("Gateway 客户端连接池已关闭")
 
 # ---------- 数据结构 ----------
 
@@ -113,16 +187,36 @@ def _headers() -> dict:
     }
 
 
-async def _post(path: str, body: dict) -> dict:
-    """POST 到 gateway，返回 JSON dict。"""
+async def _post(path: str, body: dict, timeout: float | None = None) -> dict:
+    """POST 到 gateway，返回 JSON dict。
+
+    复用模块级连接池单例，省掉每次请求的 TCP 握手——后端与 gateway 跨公网
+    通信，握手开销是一整个 RTT。单例未初始化时（单测场景）临时建一个。
+
+    Reuses the module-level pooled client so each call skips the TCP handshake;
+    the backend talks to the gateway across the public internet, where that
+    handshake costs a full RTT. Falls back to a temporary client when the
+    singleton isn't initialised (unit tests).
+    """
     url = settings.GATEWAY_URL.rstrip("/") + path
+    started = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60)) as client:
-            resp = await client.post(url, json=body, headers=_headers())
-            resp.raise_for_status()
-            return resp.json()
+        if _client is not None:
+            resp = await _client.post(
+                url, json=body, headers=_headers(),
+                timeout=httpx.Timeout(timeout) if timeout else None,
+            )
+        else:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(timeout or 60)) as client:
+                resp = await client.post(url, json=body, headers=_headers())
+        resp.raise_for_status()
+        data = resp.json()
+        # 耗时日志：用于度量连接池与 gateway 侧缓存的收益。debug 级别，
+        # 平时不刷日志，排查性能时打开即可。
+        logger.debug("Gateway %s 耗时 %.1fms", path, (time.perf_counter() - started) * 1000)
+        return data
     except httpx.TimeoutException:
-        logger.error("Gateway 超时: %s", url)
+        logger.error("Gateway 超时 (%.1fms): %s", (time.perf_counter() - started) * 1000, url)
         return {"ok": False, "error": "timeout", "message": "Gateway 响应超时"}
     except httpx.HTTPStatusError as e:
         logger.error("Gateway HTTP %s: %s %s", e.response.status_code, url, e.response.text[:300])
@@ -208,10 +302,13 @@ async def drain_position_events() -> tuple[list[PositionEvent], bool]:
     """
     url = settings.GATEWAY_URL.rstrip("/") + "/position-events"
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(5)) as client:
-            resp = await client.get(url, headers=_headers())
-            resp.raise_for_status()
-            data = resp.json()
+        if _client is not None:
+            resp = await _client.get(url, headers=_headers(), timeout=httpx.Timeout(5))
+        else:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(5)) as client:
+                resp = await client.get(url, headers=_headers())
+        resp.raise_for_status()
+        data = resp.json()
     except Exception as e:
         # 降级为 debug：gateway 短暂不可达时轮询仍在工作，不该刷 error 日志
         logger.debug("Gateway 持仓事件读取失败: %s", e)
@@ -336,9 +433,12 @@ async def health_check() -> dict:
     """探活。"""
     try:
         url = settings.GATEWAY_URL.rstrip("/") + "/health"
-        async with httpx.AsyncClient(timeout=httpx.Timeout(5)) as client:
-            resp = await client.get(url)
-            return resp.json()
+        if _client is not None:
+            resp = await _client.get(url, timeout=httpx.Timeout(5))
+        else:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(5)) as client:
+                resp = await client.get(url)
+        return resp.json()
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -354,15 +454,12 @@ _health_cache: dict = {"at": 0.0, "online": False}
 
 def is_gateway_online() -> bool:
     """Gateway 是否可达（带 10 秒缓存）。同步接口，供 serializer 调用。"""
-    import asyncio
-    import time
-
     now = time.monotonic()
     if now - _health_cache["at"] < _HEALTH_TTL_SECONDS:
         return _health_cache["online"]
 
     try:
-        rsp = asyncio.run(health_check())
+        rsp = run_on_main_loop(health_check(), timeout=5.0)
         online = bool(rsp.get("ok")) and bool(rsp.get("mt5Connected"))
     except Exception:
         online = False

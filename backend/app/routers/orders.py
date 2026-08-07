@@ -30,6 +30,7 @@ from app.services.deps import get_current_user, is_account_online, validate_orde
 from app.services.discipline import compute_discipline
 from app.services.gateway_client import (
     TradeRsp,
+    run_on_main_loop,
     trade_close as gw_close,
     trade_modify as gw_modify,
     trade_open as gw_open,
@@ -238,7 +239,7 @@ def place_order(
     # Gateway 账号实时执行，不走 bridge 轮询
     gw_payload = _try_gateway_execute(db, order)
     if gw_payload is not None:
-        asyncio.run(manager.push_to_client(user.id, gw_payload))
+        run_on_main_loop(manager.push_to_client(user.id, gw_payload), timeout=5.0)
         db.refresh(order)
         return _serialize(order)
 
@@ -423,21 +424,21 @@ def _try_gateway_execute(db: Session, order: Order) -> dict | None:
 
     try:
         if order.action == "ORDER":
-            rsp = asyncio.run(gw_open(
+            rsp = run_on_main_loop(gw_open(
                 login, order.symbol,
                 order.side or "BUY", order.volume or 0.01,
                 order.sl or 0, order.tp or 0,
                 order.client_order_id or "",
-            ))
+            ), timeout=65.0)
         elif order.action == "CLOSE":
-            rsp = asyncio.run(gw_close(
+            rsp = run_on_main_loop(gw_close(
                 login, order.ticket or 0, order.volume or 0,
                 order.client_order_id or "",
-            ))
+            ), timeout=65.0)
         elif order.action == "MODIFY":
-            rsp = asyncio.run(gw_modify(
+            rsp = run_on_main_loop(gw_modify(
                 login, order.ticket or 0, order.sl or 0, order.tp or 0,
-            ))
+            ), timeout=65.0)
         else:
             order.status = "FAILED"
             order.message = f"未知指令类型: {order.action}"
@@ -662,7 +663,7 @@ def close_position(
 
     gw_payload = _try_gateway_execute(db, order)
     if gw_payload is not None:
-        asyncio.run(manager.push_to_client(user.id, gw_payload))
+        run_on_main_loop(manager.push_to_client(user.id, gw_payload), timeout=5.0)
         db.refresh(order)
         return _serialize(order)
 
@@ -712,7 +713,7 @@ def modify_position(
 
     gw_payload = _try_gateway_execute(db, order)
     if gw_payload is not None:
-        asyncio.run(manager.push_to_client(user.id, gw_payload))
+        run_on_main_loop(manager.push_to_client(user.id, gw_payload), timeout=5.0)
         db.refresh(order)
         return _serialize(order)
 

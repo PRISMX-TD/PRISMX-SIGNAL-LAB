@@ -610,21 +610,26 @@ namespace Prismx.Mt5Gateway
             WriteTradeResult(ctx, r);
         }
 
-        /// <summary>交易前确认账号存在且组在白名单内。</summary>
+        /// <summary>
+        /// 交易前确认账号存在且组在白名单内。
+        ///
+        /// 走 CheckAccountGroup 而不是 GetAccount:后者会多发一次资金查询
+        /// (UserAccountRequest),而这里只需要 group。结果带 60 秒 TTL 缓存。
+        /// </summary>
         private bool EnsureTradableAccount(HttpListenerContext ctx, ulong login)
         {
             MTRetCode res;
-            AccountInfo info = _link.GetAccount(login, out res);
+            string group;
 
-            if (info == null)
+            if (!_link.CheckAccountGroup(login, out group, out res))
             {
                 WriteError(ctx, 404, res.ToString(), "账号不存在或无法读取");
                 return false;
             }
 
-            if (!_cfg.IsGroupAllowed(info.Group))
+            if (!_cfg.IsGroupAllowed(group))
             {
-                Log.Warn("拒绝交易:账号 {0} 的组 {1} 不在白名单", login, info.Group);
+                Log.Warn("拒绝交易:账号 {0} 的组 {1} 不在白名单", login, group);
                 WriteError(ctx, 403, "group_not_allowed",
                     "该账号所属组不允许交易(检查 gateway.ini 的 allowed_groups)");
                 return false;

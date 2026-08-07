@@ -22,6 +22,7 @@ from app.services.gateway_client import (
     get_account as gw_get_account,
     get_deals as gw_get_deals,
     get_positions as gw_get_positions,
+    run_on_main_loop,
     verify_account as gw_verify,
 )
 from app.services.plans import max_mt5_accounts
@@ -89,10 +90,8 @@ def gateway_verify(
     Verify MT5 credentials via the gateway. On success the account is
     automatically bound to the current user (unlike bridge, no local app needed).
     """
-    import asyncio
-
     # 1) 调 gateway 验证
-    rsp = asyncio.run(gw_verify(req.login, req.password, req.investorOnly))
+    rsp = run_on_main_loop(gw_verify(req.login, req.password, req.investorOnly), timeout=65.0)
 
     if not rsp.ok:
         raise HTTPException(status_code=502, detail=f"Gateway 不可用: {rsp.retcode}")
@@ -213,7 +212,7 @@ def refresh_gateway_account(
     if row is None:
         raise HTTPException(status_code=404, detail="Gateway 账号不存在")
 
-    rsp = asyncio.run(gw_get_account(int(login)))
+    rsp = run_on_main_loop(gw_get_account(int(login)), timeout=65.0)
     if rsp is None:
         raise HTTPException(status_code=502, detail="Gateway 查询账号失败")
 
