@@ -83,16 +83,22 @@ namespace Prismx.SlTpProbe
     {
         private const double MaxLots = 0.01;
         private const string ConsentFlag = "--i-understand-this-places-a-real-order";
+        private const string NoSlTpFlag = "--no-sltp";
 
         private static int Main(string[] args)
         {
             if (args.Length < 3)
             {
-                Console.WriteLine("用法: SlTpProbe.exe <客户账号> <品种> " + ConsentFlag);
+                Console.WriteLine("用法: SlTpProbe.exe <客户账号> <品种> " + ConsentFlag
+                    + " [" + NoSlTpFlag + "]");
                 Console.WriteLine();
                 Console.WriteLine("这个探针会真实下一笔 " +
                     MaxLots.ToString(CultureInfo.InvariantCulture) + " 手的市价单,");
                 Console.WriteLine("验证完会尝试平掉。请只在 demo 账号上运行。");
+                Console.WriteLine();
+                Console.WriteLine(NoSlTpFlag + " 是对照组:走完全相同的路径但不设 SL/TP。");
+                Console.WriteLine("带 SL/TP 失败时,必须再跑一次对照组才能归因——");
+                Console.WriteLine("否则分不清是 SL/TP 的问题还是品种/权限/价格的问题。");
                 return 2;
             }
 
@@ -106,8 +112,12 @@ namespace Prismx.SlTpProbe
             string symbol = args[1];
 
             bool consented = false;
+            bool withSlTp = true;
             foreach (string a in args)
+            {
                 if (a == ConsentFlag) consented = true;
+                else if (a == NoSlTpFlag) withSlTp = false;
+            }
 
             if (!consented)
             {
@@ -200,7 +210,7 @@ namespace Prismx.SlTpProbe
                 }
                 Console.WriteLine();
 
-                return RunProbe(manager, clientLogin, symbol, dealerTimeoutMs);
+                return RunProbe(manager, clientLogin, symbol, dealerTimeoutMs, withSlTp);
             }
             catch (Exception ex)
             {
@@ -215,9 +225,76 @@ namespace Prismx.SlTpProbe
             }
         }
 
-        private static int RunProbe(CIMTManagerAPI manager, ulong login,
-            string symbol, int dealerTimeoutMs)
+        /// <summary>
+        /// 品种后缀解析(精简版,对应 Mt5Link.ResolveSymbol)。
+        ///
+        /// 不同组要用不同后缀的品种(例如 demo 组用 EURUSD.s)。裸名在该组不存在时
+        /// dealer 请求会直接被判无效,那和 SL/TP 无关——不做这一步会误判。
+        /// TickLast 能取到价不代表能交易:行情表与组的品种配置是两回事。
+        /// </summary>
+        private static string ResolveSymbol(CIMTManagerAPI manager, ulong login,
+            string baseSymbol)
         {
+            string group;
+            using (CIMTUser user = manager.UserCreate())
+            {
+                if (manager.UserRequest(login, user) != MTRetCode.MT_RET_OK)
+                {
+                    Console.WriteLine("读不到账号组,按原名试: " + baseSymbol);
+                    return baseSymbol;
+                }
+                group = user.Group();
+            }
+            Console.WriteLine("账号组: " + group);
+
+            // 原名在该组直接可用
+            using (CIMTConSymbol sym = manager.SymbolCreate())
+            {
+                if (manager.SymbolGet(baseSymbol, group, sym) == MTRetCode.MT_RET_OK)
+                {
+                    Console.WriteLine("品种解析: " + baseSymbol + " (原名可用)");
+                    return baseSymbol;
+                }
+            }
+
+            // 扫品种表找带后缀的
+            string upper = baseSymbol.ToUpperInvariant();
+            uint total = manager.SymbolTotal();
+            using (CIMTConSymbol scan = manager.SymbolCreate())
+            {
+                for (uint i = 0; i < total; i++)
+                {
+                    if (manager.SymbolNext(i, scan) != MTRetCode.MT_RET_OK)
+                        continue;
+
+                    string name = scan.Symbol();
+                    if (string.IsNullOrEmpty(name))
+                        continue;
+                    if (!name.ToUpperInvariant().StartsWith(upper))
+                        continue;
+
+                    using (CIMTConSymbol probe = manager.SymbolCreate())
+                    {
+                        if (manager.SymbolGet(name, group, probe) == MTRetCode.MT_RET_OK)
+                        {
+                            Console.WriteLine("品种解析: " + baseSymbol + " -> " + name);
+                            return name;
+                        }
+                    }
+                }
+            }
+
+            Console.WriteLine("品种解析: 找不到该组可用的 " + baseSymbol + ",按原名试");
+            return baseSymbol;
+        }
+
+        private static int RunProbe(CIMTManagerAPI manager, ulong login,
+            string requestedSymbol, int dealerTimeoutMs, bool withSlTp)
+        {
+            // ---- 先解析品种:裸名在该组可能不可交易 ----
+            string symbol = ResolveSymbol(manager, login, requestedSymbol);
+            Console.WriteLine();
+
             // ---- 取价:dealer 请求必须带明确成交价 ----
             manager.SelectedAdd(symbol);
             Thread.Sleep(800);
@@ -249,8 +326,10 @@ namespace Prismx.SlTpProbe
             Console.WriteLine("计划 TP = " + tp.ToString("0.00000", CultureInfo.InvariantCulture));
             Console.WriteLine();
 
-            // ---- 开仓:一次请求同时带 SL/TP ----
-            Console.WriteLine("--- 发送 POS_EXECUTE(携带 PriceSL/PriceTP) ---");
+            // ---- 开仓 ----
+            Console.WriteLine(withSlTp
+                ? "--- 发送 POS_EXECUTE(携带 PriceSL/PriceTP) ---"
+                : "--- 对照组:发送 POS_EXECUTE(不带 SL/TP) ---");
 
             CIMTRequest request = manager.RequestCreate();
             CIMTRequest result = manager.RequestCreate();
@@ -278,11 +357,14 @@ namespace Prismx.SlTpProbe
             request.PriceOrder(ask);
             request.Comment("PRISMX-SLTP-PROBE");
 
-            // ↓↓↓ 这三行就是本次要验证的东西 ↓↓↓
-            request.PriceSL(sl);
-            request.PriceTP(tp);
-            request.Flags(CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_SL |
-                          CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_TP);
+            // ↓↓↓ 这几行就是本次要验证的东西。对照组跳过,其余完全一致 ↓↓↓
+            if (withSlTp)
+            {
+                request.PriceSL(sl);
+                request.PriceTP(tp);
+                request.Flags(CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_SL |
+                              CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_TP);
+            }
 
             uint requestId;
             res = manager.DealerSend(request, sink, out requestId);
@@ -291,8 +373,18 @@ namespace Prismx.SlTpProbe
             if (res != MTRetCode.MT_RET_OK)
             {
                 Console.WriteLine();
-                Console.WriteLine(">>> 结论:DealerSend 直接被拒。");
-                Console.WriteLine(">>> POS_EXECUTE 不接受 SL/TP 字段,合并方案不可行。");
+                if (withSlTp)
+                {
+                    Console.WriteLine(">>> DealerSend 直接被拒。");
+                    Console.WriteLine(">>> 还不能归因,请跑对照组:");
+                    Console.WriteLine(">>>   .\\SlTpProbe.exe " + login + " " +
+                        requestedSymbol + " " + ConsentFlag + " " + NoSlTpFlag);
+                }
+                else
+                {
+                    Console.WriteLine(">>> 对照组也被拒 —— 问题与 SL/TP 无关。");
+                    Console.WriteLine(">>> 是品种/权限/价格的问题,先解决那个。");
+                }
                 Cleanup(manager, sink, request, result);
                 return 0;
             }
@@ -306,9 +398,26 @@ namespace Prismx.SlTpProbe
             if (!filled)
             {
                 Console.WriteLine();
-                Console.WriteLine(">>> 结论:请求没有成交(" + confirm + ")。");
-                Console.WriteLine(">>> 注意:这可能是行情/权限问题,不一定是 SL/TP 导致的。");
-                Console.WriteLine(">>> 建议去掉 PriceSL/PriceTP 再跑一次做对照。");
+                Console.WriteLine(">>> 请求没有成交(" + confirm + ")。");
+                if (withSlTp)
+                {
+                    Console.WriteLine();
+                    Console.WriteLine(">>> 这一步还不能归因:失败可能来自 SL/TP,也可能来自");
+                    Console.WriteLine(">>> 品种、权限或价格。必须跑对照组才能区分:");
+                    Console.WriteLine();
+                    Console.WriteLine(">>>   .\\SlTpProbe.exe " + login + " " +
+                        requestedSymbol + " " + ConsentFlag + " " + NoSlTpFlag);
+                    Console.WriteLine();
+                    Console.WriteLine(">>> 对照组成交 → 确实是 SL/TP 的问题,合并方案作废");
+                    Console.WriteLine(">>> 对照组也失败 → 与 SL/TP 无关,先修那个问题");
+                }
+                else
+                {
+                    Console.WriteLine();
+                    Console.WriteLine(">>> 对照组(不带 SL/TP)也没成交 —— 与 SL/TP 无关。");
+                    Console.WriteLine(">>> 检查方向:品种在该组是否可交易、账号是否有交易权限、");
+                    Console.WriteLine(">>> 当前是否在交易时段、报价是否有效。");
+                }
                 Cleanup(manager, sink, request, result);
                 return 0;
             }
@@ -371,6 +480,19 @@ namespace Prismx.SlTpProbe
             bool tpOk = Math.Abs(actualTp - tp) < digitsGuess * 20;
 
             Console.WriteLine("=== 结论 ===");
+            if (!withSlTp)
+            {
+                // 对照组:成交说明基础路径没问题,那么带 SL/TP 时的失败就归因于 SL/TP
+                Console.WriteLine(">>> 对照组成交了 —— 基础路径(品种/权限/价格)没问题。");
+                Console.WriteLine();
+                Console.WriteLine(">>> 若带 SL/TP 的那次失败了,现在可以归因:");
+                Console.WriteLine(">>> POS_EXECUTE 不接受 SL/TP,合并方案作废,");
+                Console.WriteLine(">>> 保留现在「开仓后补一次 POS_MODIFY」的写法。");
+                Console.WriteLine();
+                ClosePosition(manager, login, symbol, positionTicket, dealerTimeoutMs);
+                return 0;
+            }
+
             if (slOk && tpOk)
             {
                 Console.WriteLine(">>> 可行。POS_EXECUTE 携带的 SL/TP 已落到仓位上。");
