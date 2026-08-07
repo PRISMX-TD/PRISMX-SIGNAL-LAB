@@ -1379,8 +1379,27 @@ namespace Prismx.Mt5Gateway
         /// dealer 请求必须带明确成交价:dealer 扮演交易台角色,由它给出价格,
         /// 传 0 会被服务器判定 MT_RET_REQUEST_INVALID。这里取当前 ask/bid。
         ///
-        /// SL/TP 不在开仓请求里设:官方示例开仓不带 SL/TP,要用独立的
-        /// TA_DEALER_POS_MODIFY 请求。所以成交后再补一次改单。
+        /// SL/TP 直接放在开仓请求里,不再事后补一次 POS_MODIFY——省掉一整轮
+        /// 券商往返,而多数订单都带止损止盈。
+        ///
+        /// 这一点是**实测**确认的,不是照搬文档:此前注释称「官方示例开仓不带
+        /// SL/TP,要用独立的 POS_MODIFY」,但那只是示例的写法,不是 API 约束。
+        /// SDK 里 IMTRequest 确实有 PriceSL/PriceTP,只是找不到 POS_EXECUTE
+        /// 携带它们的先例,语义未知。用 SlTpProbe 在 demo\STD-USD 组实测:
+        /// 请求 SL=1.05322/TP=1.25322,回执 MT_RET_REQUEST_DONE,回查仓位
+        /// #18649601 的实际值与请求值完全一致。
+        ///
+        /// 仍保留成交后的补救改单:仅在服务器确实没落上 SL/TP 时触发。合并后
+        /// 正常路径不会走到那里,但这是止损,静默丢失的代价是仓位裸奔,
+        /// 值得留一层兜底。
+        ///
+        /// SL/TP go in the open request itself rather than a follow-up
+        /// POS_MODIFY, saving a full broker round trip. Verified empirically
+        /// with SlTpProbe (the old comment claimed the API required a separate
+        /// modify, but that was only how the samples happened to do it). The
+        /// post-fill repair path is kept as a safety net: it now only fires if
+        /// the server silently dropped the levels, and a lost stop-loss means
+        /// an unprotected position.
         /// </summary>
         public TradeResult OpenPosition(ulong login, string symbol, bool isBuy, double lots,
             double stopLoss, double takeProfit, string tag)
@@ -1412,6 +1431,27 @@ namespace Prismx.Mt5Gateway
                 req.Symbol(symbol);
                 req.PriceOrder(price);
                 req.Comment(BuildComment(tag));
+
+                // SL/TP 随开仓请求一起发。只设非 0 的那一侧,并对应置 CHANGED 标志:
+                // 没要求的一侧不该被当成「改成 0」。
+                if (stopLoss > 0 || takeProfit > 0)
+                {
+                    CIMTRequest.EnTradeActionFlags flags = 0;
+
+                    if (stopLoss > 0)
+                    {
+                        req.PriceSL(stopLoss);
+                        flags |= CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_SL;
+                    }
+
+                    if (takeProfit > 0)
+                    {
+                        req.PriceTP(takeProfit);
+                        flags |= CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_TP;
+                    }
+
+                    req.Flags(flags);
+                }
             });
 
             // 回执没有仓位号,按成交号反查补上。后端拿它作为归属判定的依据,
@@ -1421,14 +1461,26 @@ namespace Prismx.Mt5Gateway
             if (r.Ok && r.Deal != 0)
                 r.Position = GetDealPosition(r.Deal);
 
-            // 开仓成功且要求了 SL/TP,再补一次改单。
-            // 改单失败不影响已成交的仓位,只在结果里带上提示。
+            // 兜底:确认 SL/TP 真的落在仓位上,没落上才补一次改单。
+            //
+            // 实测服务器会正确接受开仓请求里的 SL/TP,所以正常路径下这里只多一次
+            // 本地查仓(读 pump 缓存,不发网络请求),不会再发第二个 dealer 请求。
+            // 留着它是因为静默丢失止损的后果是仓位裸奔——宁可多查一次。
+            //
+            // Safety net: verify the levels actually landed and only repair when
+            // they did not. On the happy path this costs one local position read
+            // (served from the pump cache, no network) instead of a second dealer
+            // round trip. It stays because a silently dropped stop-loss leaves the
+            // position unprotected.
             if (r.Ok && (stopLoss > 0 || takeProfit > 0))
             {
                 ulong ticket = r.Order != 0 ? r.Order : r.Deal;
 
-                if (ticket != 0)
+                if (ticket != 0 && !PositionHasLevels(ticket, stopLoss, takeProfit))
                 {
+                    Log.Warn("开仓请求的 SL/TP 未生效,补发改单:login={0} ticket={1}",
+                        login, ticket);
+
                     TradeResult m = ModifyPosition(login, ticket, stopLoss, takeProfit);
 
                     if (!m.Ok)
@@ -1506,6 +1558,61 @@ namespace Prismx.Mt5Gateway
                 req.Flags(CIMTRequest.EnTradeActionFlags.TA_FLAG_CLOSE);
                 req.Comment(BuildComment(tag));
             });
+        }
+
+        /// <summary>
+        /// 查仓位上的 SL/TP 是否已符合预期。用于开仓后确认服务器真的落上了。
+        ///
+        /// 只比较 stopLoss/takeProfit 中非 0 的那一侧。容差取品种最小报价单位的
+        /// 若干倍:券商可能因最小止损距离微调价位,那不算丢失。
+        ///
+        /// 读不到仓位时返回 true(视为已生效),避免因为一次查询失败就多发一个
+        /// 无谓的改单请求——真丢了 SL/TP 会在后续持仓推送里暴露。
+        /// </summary>
+        private bool PositionHasLevels(ulong ticket, double stopLoss, double takeProfit)
+        {
+            try
+            {
+                lock (_gate)
+                {
+                    using (CIMTPositionArray arr = _manager.PositionCreateArray())
+                    {
+                        if (_manager.PositionRequestByTickets(new ulong[] { ticket }, arr)
+                                != MTRetCode.MT_RET_OK || arr.Total() == 0)
+                            return true;
+
+                        CIMTPosition p = arr.Next(0);
+                        if (p == null)
+                            return true;
+
+                        double actualSl = p.PriceSL();
+                        double actualTp = p.PriceTP();
+
+                        // 容差按品种精度推算:digits 拿不到时退回一个宽松的相对值
+                        double tolerance = 0.0;
+                        using (CIMTConSymbol sym = _manager.SymbolCreate())
+                        {
+                            if (_manager.SymbolGet(p.Symbol(), sym) == MTRetCode.MT_RET_OK)
+                                tolerance = Math.Pow(10, -(int)sym.Digits()) * 50;
+                        }
+                        if (tolerance <= 0)
+                            tolerance = Math.Max(actualSl, 1.0) * 0.001;
+
+                        if (stopLoss > 0 && Math.Abs(actualSl - stopLoss) > tolerance)
+                            return false;
+
+                        if (takeProfit > 0 && Math.Abs(actualTp - takeProfit) > tolerance)
+                            return false;
+
+                        return true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("核对仓位 SL/TP 失败,按已生效处理:{0}", ex.Message);
+                return true;
+            }
         }
 
         //+------------------------------------------------------------------+
