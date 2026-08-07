@@ -17,7 +17,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.core.config import settings
 from app.models import Signal
@@ -82,13 +82,52 @@ def resolve_signals_with_price(db: Session, symbol: str, low: float, high: float
     # which rows to load and which fields to write.
     from app.services.strategy.resolution import apply_baseline
 
+    # 把 sweep_stale_signals 的 cutoff 也下推到这条查询：早于 cutoff 的 PENDING
+    # 行已经注定会被清扫成 STALE（不计入胜率），再拉出来判定既无意义又是本函数
+    # Egress 的主要来源（实测 9541 次 × 614 行 = 585 万行，占总量 36%）。此处不
+    # 能改成按 created_at 排序后 LIMIT：那会让最旧的 PENDING 永远排不进判定窗口、
+    # 把本该命中 TP/SL 的信号静默丢成 STALE，从而系统性偏移胜率。
+    #
+    # Push sweep_stale_signals' cutoff down into this query: PENDING rows older
+    # than the cutoff are already destined to be swept to STALE (excluded from
+    # win rate), so loading them to resolve is both pointless and this
+    # function's main Egress source (measured: 9541 calls × 614 rows = 5.85M
+    # rows, 36% of total). Deliberately not an ORDER BY created_at + LIMIT:
+    # that would starve the oldest PENDING rows out of the resolution window,
+    # silently turning real TP/SL hits into STALE and skewing the win rate.
+    now = datetime.now(timezone.utc)
+    # 列是不带时区的 DateTime，比较值转成 naive UTC，SQLite 与 Postgres 行为一致。
+    # The column is a naive DateTime; compare against naive UTC so SQLite and
+    # Postgres behave identically.
+    stale_cutoff = (now - timedelta(days=settings.SIGNAL_STALE_DAYS)).replace(tzinfo=None)
     pending = (
         db.query(Signal)
-        .filter(Signal.symbol == symbol, Signal.result == "PENDING")
+        .options(
+            # 只取判定真正用到的列（加主键共 8 列，原本 16 列全取），每行字节数
+            # 减半。唯一的调用方只用返回值判断要不要 commit，不读其他字段，因此
+            # 不会触发 deferred 列的懒加载补查。
+            # Load only the columns resolution actually touches (8 including the
+            # PK, vs. all 16), halving bytes per row. The sole caller only uses
+            # the return value to decide whether to commit and reads no other
+            # field, so no deferred-column lazy load is triggered.
+            load_only(
+                Signal.side,
+                Signal.stop_loss,
+                Signal.take_profit,
+                Signal.baseline_high,
+                Signal.baseline_low,
+                Signal.result,
+                Signal.resolved_at,
+            )
+        )
+        .filter(
+            Signal.symbol == symbol,
+            Signal.result == "PENDING",
+            Signal.created_at >= stale_cutoff,
+        )
         .all()
     )
     resolved: list[Signal] = []
-    now = datetime.now(timezone.utc)
     for sig in pending:
         outcome = apply_baseline(sig, low, high)
         if outcome is None:

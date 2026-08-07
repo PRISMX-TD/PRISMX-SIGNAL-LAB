@@ -826,6 +826,21 @@ def filter_tradeable_bars(
     # has been bitten by repeatedly.
     closed.sort(key=lambda b: b["t"])
     earliest_t = min(b["t"] for b in closed)
+
+    # 这条查询刻意不加缓存：它只取 1 个 float 列、单次 12 行,按 Postgres 线协议算
+    # 约 17 字节/行,28.4 万次合计仅约 0.1 GB——占 rows_read 的 21%,占字节数不到 6%。
+    # 而缓存它需要把键退化成 (symbol, interval)、丢掉 earliest_t,那样 prior 与本批之
+    # 间会出现时间空隙,series 不再连续,游程统计会静静地算错——正是本模块反复吃过亏
+    # 的那类失败。收益不足 6% 而风险落在一道会丢弃真实行情的闸门上,不值得。
+    #
+    # Deliberately not cached: this reads a single float column, 12 rows per call
+    # (~17 bytes/row on the Postgres wire), so 284k calls total only ~0.1 GB — 21% of
+    # rows_read but under 6% of bytes. Caching it would force the key to degrade to
+    # (symbol, interval), dropping earliest_t, which puts a time gap between `prior`
+    # and this batch: `series` is no longer contiguous and the run-length count
+    # quietly computes the wrong answer — the exact failure class this module has been
+    # bitten by. Under 6% upside is not worth that risk on a gate that discards real
+    # market data.
     previous_closes = [
         r[0]
         for r in db.query(Candle.c)
