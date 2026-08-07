@@ -10,6 +10,7 @@ also holds the still-forming bar.
 """
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from math import gcd
 
@@ -21,6 +22,13 @@ from app.services.page_stats import prune_visitor_days, purge_admin_visitors
 from app.services.settings_store import get_candle_settings
 
 logger = logging.getLogger("prismx.candle_store")
+
+# 重放基线查询的内存缓存：(symbol, interval) -> (baseline: set, cached_at: float)
+# 60 秒 TTL，避免 tick 模式每秒都查几千行。
+# Replay baseline cache: (symbol, interval) -> (baseline: set, cached_at: float)
+# 60s TTL to avoid querying thousands of rows every second in tick mode.
+_baseline_cache: dict[tuple[str, str], tuple[set, float]] = {}
+_BASELINE_CACHE_TTL = 60
 
 # 各周期的秒数,用于判断一根 K 线是否已经走完(t + 秒数 <= 当前时间)。
 # Seconds per interval, used to decide whether a bar has closed (t + seconds <= now).
@@ -927,19 +935,36 @@ def filter_tradeable_bars(
     # bar's own earlier version, not an original it copied. Genuine replays have
     # strictly older originals and are unaffected; copies within one batch are
     # still caught by appending accepted bars to the baseline in the loop below.
-    baseline = {
-        _replay_key({"o": r[0], "h": r[1], "l": r[2], "c": r[3], "v": r[4]})
-        for r in db.query(Candle.o, Candle.h, Candle.l, Candle.c, Candle.v)
-        .filter(
-            Candle.symbol == symbol,
-            Candle.interval == interval,
-            Candle.t >= baseline_floor,
-            Candle.t < batch_floor,
-        )
-        .order_by(Candle.t.desc())
-        .limit(REPLAY_BASELINE_MAX_ROWS)
-        .all()
-    }
+    # 基线查询走 60 秒 TTL 内存缓存：tick 模式每秒推一次，而这个查询要读几千行
+    # （1 分钟线 5 天 = 7200 行 × 5 列），每秒重查是 Egress 的主要来源之一。
+    # 60 秒内基线的变化不影响判定语义——重放副本的原件必然是更早的 bar，
+    # 新落库的那几根由下面循环里 baseline.add() 覆盖批内连锁判定。
+    #
+    # The baseline query goes through a 60s TTL cache: tick mode pushes every
+    # second while this query reads thousands of rows (5 days of M1 = 7200 rows
+    # × 5 columns), making it a top egress source. A 60s staleness window is
+    # semantically safe — a replay's original is always an older bar, and rows
+    # persisted within the window are covered by baseline.add() in the loop below.
+    cache_key = (symbol, interval)
+    now_mono = time.monotonic()
+    cached = _baseline_cache.get(cache_key)
+    if cached is not None and now_mono - cached[1] < _BASELINE_CACHE_TTL:
+        baseline = set(cached[0])  # 复制：下面会往里加本批 bar，不能污染缓存
+    else:
+        baseline = {
+            _replay_key({"o": r[0], "h": r[1], "l": r[2], "c": r[3], "v": r[4]})
+            for r in db.query(Candle.o, Candle.h, Candle.l, Candle.c, Candle.v)
+            .filter(
+                Candle.symbol == symbol,
+                Candle.interval == interval,
+                Candle.t >= baseline_floor,
+                Candle.t < batch_floor,
+            )
+            .order_by(Candle.t.desc())
+            .limit(REPLAY_BASELINE_MAX_ROWS)
+            .all()
+        }
+        _baseline_cache[cache_key] = (set(baseline), now_mono)
     accepted: list[dict] = []
     replay_count = 0
     for b in closed:
@@ -961,6 +986,54 @@ def filter_tradeable_bars(
             symbol, interval, replay_count,
         )
     return accepted
+
+
+def filter_tradeable_bars_both(
+    db, symbol: str, interval: str, bars: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """一次过滤同时产出「含形成中」与「仅已收盘」两份结果，返回 (cacheable, tradeable)。
+
+    routers/chart.py 两份都要：内存缓存要保留最右侧那根跳动的蜡烛
+    （include_forming=True），数据库只能存已收盘的。原先分两次调用
+    filter_tradeable_bars()，而闸门里那两次查库（前序收盘价、重放基线）与
+    include_forming 无关——等于每次喂价都白查一遍。tick 模式每秒推一次，
+    这一次白查是 Egress 的主要来源之一。
+
+    include_forming 只放宽"是否收盘"这一条判定，后面三道休市闸门对两份数据
+    完全一致。所以做法是：先按 include_forming=True 过一遍拿到 cacheable，
+    再从中筛掉仍在形成的那根得到 tradeable——闸门只跑一次，语义与分两次调用
+    完全等价。
+
+    Filter once, yield both the with-forming and closed-only lists as
+    (cacheable, tradeable). routers/chart.py needs both: the in-memory cache
+    keeps the live rightmost candle while the database stores closed bars only.
+    This used to be two filter_tradeable_bars() calls, but the two queries
+    inside the gates (preceding closes, replay baseline) don't depend on
+    include_forming — so one of them was pure waste on every single push, and
+    tick mode pushes every second, making it a top egress source.
+
+    include_forming relaxes only the closed-or-not test; all three closure gates
+    treat both lists identically. Hence: run the gates once with
+    include_forming=True to get cacheable, then drop the still-forming bar from
+    that result to get tradeable — semantically identical to two calls.
+    """
+    cacheable = filter_tradeable_bars(db, symbol, interval, bars, include_forming=True)
+    if not cacheable:
+        return [], []
+    seconds = INTERVAL_SECONDS.get(interval)
+    if seconds is None:
+        return cacheable, []
+    # 与 filter_tradeable_bars 里 include_forming=False 那条判定逐字一致：
+    # 绝对时钟收盘，或同批存在跨过一个完整周期的更晚邻居。
+    # Byte-for-byte the same test as include_forming=False upstream: absolute
+    # clock close, or a later neighbour in this batch a full interval ahead.
+    now = datetime.now(timezone.utc).timestamp()
+    latest_t = max(b["t"] for b in cacheable)
+    tradeable = [
+        b for b in cacheable
+        if b["t"] + seconds <= now or b["t"] + seconds <= latest_t
+    ]
+    return cacheable, tradeable
 
 
 def persist_closed_bars(

@@ -334,6 +334,11 @@ async def feed_candles(
         # 日线图上"今天"会整根消失、分钟图永远慢一个周期。休市闸门对这根照常生效,所以
         # 保留它不会让伪造蜡烛漏出去。数据库那条路不能带它——库里只存已收盘的 bar。
         #
+        # 以前调两次 filter_tradeable_bars（一次 include_forming=True 给缓存,一次
+        # False 给数据库）,而闸门里那两次查库（前序收盘价、重放基线）与 include_forming
+        # 无关——等于每次喂价都白查一遍。现在用 filter_tradeable_bars_both 一次过滤
+        # 同时产出两份,闸门只跑一次。tick 模式每秒推一次,这是 Egress 优化的关键点。
+        #
         # The cache and the database must be written from the same filtered data.
         #
         # This previously wrote the raw, unfiltered bars, so fabricated candles during
@@ -347,10 +352,13 @@ async def feed_candles(
         # leave minute charts an interval behind. The closure gates still apply to it, so
         # keeping it leaks no fabricated candle. The database path must not include it —
         # only closed bars belong in storage.
-        cacheable = candle_store.filter_tradeable_bars(
-            db, symbol, s.interval, bars, include_forming=True,
-        )
-        tradeable = candle_store.filter_tradeable_bars(db, symbol, s.interval, bars)
+        #
+        # This used to call filter_tradeable_bars twice (once include_forming=True for
+        # cache, once False for database), but the two queries inside the gates (preceding
+        # closes, replay baseline) don't depend on include_forming — one call was pure
+        # waste. Now filter_tradeable_bars_both yields both in one pass. Tick mode pushes
+        # every second, making this the critical egress optimization point.
+        cacheable, tradeable = candle_store.filter_tradeable_bars_both(db, symbol, s.interval, bars)
         if req.mode == "backfill":
             # backfill 是整段替换。过滤后为空时不能替换:那会把缓存里原有的真实历史
             # 清空,前端图表直接空白。保留旧数据、等下一批有效数据再替换。
