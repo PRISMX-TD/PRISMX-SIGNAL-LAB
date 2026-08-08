@@ -18,6 +18,55 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
     let ws: WebSocket | null = null
     let reconnectTimer: number | undefined
     let closed = false
+    // 连续重连次数，只用于计算退避间隔；鉴权成功后归零。
+    // Consecutive reconnect count, used only to compute the backoff delay;
+    // reset to zero once auth succeeds.
+    let attempt = 0
+
+    // 断线重连采用指数退避 + 抖动，而不是固定间隔。
+    //
+    // 固定 2 秒重试的问题不在单个页面，而在总量：后端故障时每个开着的标签页
+    // 都在每 2 秒撞一次门，后端刚要恢复就被自家前端的重连洪峰再打垮一次。
+    // 退避把这个洪峰摊平；抖动（±25%）则避免所有标签页卡在同一毫秒一起重试。
+    //
+    // 首次重试仍然约 2 秒——用户感知到的"断一下就回来"没有变慢，只有连续失败
+    // 才逐步退到 4/8/16/30 秒封顶。真正长时间断线时，下面的 online /
+    // visibilitychange 监听会在网络恢复或用户切回页面的瞬间立刻重连，不必等
+    // 退避计时器走完。
+    //
+    // Reconnect with exponential backoff + jitter instead of a fixed interval.
+    // The problem with a flat 2s retry isn't any single page, it's the total:
+    // during an outage every open tab knocks every 2 seconds, and the backend
+    // gets flattened by its own frontend's reconnect surge just as it comes
+    // back. Backoff spreads that surge out; the ±25% jitter keeps tabs from
+    // retrying on the same millisecond. The first retry is still ~2s, so a
+    // brief blip feels exactly as fast as before — only repeated failures back
+    // off to a 30s ceiling. For genuinely long outages, the online /
+    // visibilitychange listeners below reconnect the instant the network
+    // returns or the user comes back, without waiting out the timer.
+    const scheduleReconnect = () => {
+      if (closed) return
+      if (reconnectTimer) window.clearTimeout(reconnectTimer)
+      const base = Math.min(30000, 2000 * 2 ** attempt)
+      const delay = base * (0.75 + Math.random() * 0.5)
+      attempt += 1
+      reconnectTimer = window.setTimeout(connect, delay)
+    }
+
+    // 有"情况变了"的明确信号时立即重连：网络恢复、或用户把页面切回前台。
+    // 退避的目的只是别在后端躺平时空转重试，一旦有理由相信这次会成功，就该
+    // 马上试，并把退避计数清零。
+    // Reconnect immediately on a definite "something changed" signal: the
+    // network came back, or the user brought the tab to the foreground.
+    // Backoff exists to avoid spinning against a dead backend; when there's
+    // reason to believe this attempt will work, try at once and reset the count.
+    const reconnectNow = () => {
+      if (closed) return
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
+      if (reconnectTimer) window.clearTimeout(reconnectTimer)
+      attempt = 0
+      connect()
+    }
 
     const connect = () => {
       // 每次(重)连都重新读取 token，而不是在 effect 顶层读一次存进闭包。
@@ -73,7 +122,11 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
           }
           // 鉴权通过才算真正连上：onopen 只代表握手完成 / only AUTH_OK counts as connected;
           // onopen merely means the handshake finished
-          if (msg.type === 'AUTH_OK') setConnected(true)
+          if (msg.type === 'AUTH_OK') {
+            setConnected(true)
+            // 连上了才算这一轮重连成功，退避从头开始 / a successful round resets backoff
+            attempt = 0
+          }
           handlerRef.current(msg)
         } catch {
           /* ignore malformed */
@@ -82,18 +135,24 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
 
       ws.onclose = () => {
         setConnected(false)
-        if (!closed) {
-          // 断线自动重连 / auto reconnect
-          reconnectTimer = window.setTimeout(connect, 2000)
-        }
+        if (!closed) scheduleReconnect()
       }
     }
+
+    const handleOnline = () => reconnectNow()
+    const handleVisibility = () => {
+      if (!document.hidden) reconnectNow()
+    }
+    window.addEventListener('online', handleOnline)
+    document.addEventListener('visibilitychange', handleVisibility)
 
     connect()
 
     return () => {
       closed = true
       setConnected(false)
+      window.removeEventListener('online', handleOnline)
+      document.removeEventListener('visibilitychange', handleVisibility)
       if (reconnectTimer) window.clearTimeout(reconnectTimer)
       ws?.close()
     }
