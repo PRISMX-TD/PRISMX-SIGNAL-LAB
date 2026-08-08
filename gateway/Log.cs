@@ -8,10 +8,18 @@
 //| 单个文件超过 MaxFileBytes 后转写 .overflowN 文件。这台机器是       |
 //| Windows VPS,磁盘写满会让 gateway 连同 MT5 连接一起停摆,而日志     |
 //| 本身没有任何上限——异常刷屏一晚上就能把盘写爆。                    |
+//|                                                                  |
+//| 注意 logs\ 目录里有**两个**写入方,清理必须同时覆盖:              |
+//|   gateway-YYYYMMDD.log   本类写的,约 0.03 MB/天                  |
+//|   YYYYMMDD.log           MT5 Manager API 自己写的(见 Mt5Link.cs  |
+//|                          的 SMTManagerAPIFactory.Initialize),    |
+//|                          约 7-8 MB/天 —— **磁盘大头是这个**      |
+//| 第一版只清了前者,漏掉了 99% 的量,部署验证时才发现。              |
 //+------------------------------------------------------------------+
 using System;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Prismx.Mt5Gateway
 {
@@ -135,6 +143,15 @@ namespace Prismx.Mt5Gateway
             }
         }
 
+        // 认得的日志文件名。用白名单正则而不是宽松通配符:logs\ 目录里可能还有
+        // 别的东西(排查时手工放的记录、将来别的组件的输出),绝不能误删。
+        //   gateway-20260808.log / gateway-20260808.overflow1.log  本类写的
+        //   20260808.log                                           MT5 SDK 写的
+        private static readonly Regex OwnLogPattern =
+            new Regex(@"^gateway-\d{8}(\.overflow\d+)?\.log$", RegexOptions.IgnoreCase);
+        private static readonly Regex SdkLogPattern =
+            new Regex(@"^\d{8}\.log$", RegexOptions.IgnoreCase);
+
         // 删除超过保留期的日志。调用方必须已持有 Gate。
         // 整体吞掉异常:清不掉旧日志顶多是占盘,不该让 gateway 起不来或写不了日志。
         private static void CleanupOldLogs()
@@ -146,11 +163,14 @@ namespace Prismx.Mt5Gateway
             {
                 DateTime cutoff = DateTime.UtcNow.AddDays(-RetentionDays);
 
-                // 通配符同时覆盖 gateway-YYYYMMDD.log 与 gateway-YYYYMMDD.overflowN.log
-                foreach (string path in Directory.GetFiles(_dir, "gateway-*.log"))
+                foreach (string path in Directory.GetFiles(_dir, "*.log"))
                 {
                     try
                     {
+                        string name = Path.GetFileName(path);
+                        if (!OwnLogPattern.IsMatch(name) && !SdkLogPattern.IsMatch(name))
+                            continue;
+
                         // 按最后写入时间判断,而不是从文件名解析日期:文件名格式
                         // 万一以后变了,这里不会跟着悄悄失效。
                         if (File.GetLastWriteTimeUtc(path) < cutoff)
@@ -158,7 +178,8 @@ namespace Prismx.Mt5Gateway
                     }
                     catch
                     {
-                        // 单个文件删不掉(被占用等)就跳过,不影响其余文件
+                        // 单个文件删不掉(SDK 正占着当天那个、权限问题等)就跳过,
+                        // 不影响其余文件
                     }
                 }
             }
