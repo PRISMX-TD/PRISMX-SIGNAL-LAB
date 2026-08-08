@@ -239,6 +239,30 @@ namespace Prismx.Mt5Gateway
         private volatile bool _stopping;
         private Thread _watchdog;
 
+        // dealer 通道是否可用。代客下单必须先 DealerStart 成功,否则发出去的单
+        // 收不到成交回执。
+        //
+        // 这个标志刻意与 _connected 分开:重连之后 DealerStart 可能失败(券商临时
+        // 抽掉 RIGHT_TRADES_DEALER、或服务端一时不接受重入),而**连接本身是好的**。
+        // 若把这种情况当成"重连失败"整体回退,查持仓、查余额这些只读接口会跟着一起
+        // 不可用——为了下单不能用而让看盘也不能用,不划算。
+        //
+        // 所以这里的处理是:照常进入已连接状态,把 dealer 不可用记成 ERROR 日志并
+        // 通过 /health 的 dealerActive 暴露出去,同时由 watchdog 每 10 秒单独重试
+        // DealerStart。原本的故障形态是"下单静默失败直到人工重启",现在变成"看得见、
+        // 且会自己恢复"。
+        //
+        // Whether the dealer channel is usable. Deliberately separate from
+        // _connected: after a reconnect DealerStart can fail while the connection
+        // itself is fine, and treating that as a failed reconnect would take the
+        // read-only endpoints (positions, balance) down too — losing the ability to
+        // watch the market because you can't trade is a bad trade. Instead we enter
+        // the connected state as usual, log an ERROR, surface it via /health's
+        // dealerActive, and let the watchdog retry DealerStart every 10s. The old
+        // failure mode was "orders silently get no confirmation until someone
+        // restarts it"; now it's visible and self-healing.
+        private volatile bool _dealerActive;
+
         // 缓存: auto-resolve symbol suffix per (group, baseSymbol)
         private readonly Dictionary<string, string> _symbolCache =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -301,9 +325,51 @@ namespace Prismx.Mt5Gateway
             get { return _connected; }
         }
 
+        // 供 /health 暴露。false 表示连接正常但代客下单不可用——运维看到这个就该
+        // 去查 manager 账号的 RIGHT_TRADES_DEALER 权限,而不是盲目重启进程。
+        // Exposed via /health. False means the connection is fine but placing
+        // orders on behalf of clients is not available.
+        public bool IsDealerActive
+        {
+            get { return _dealerActive; }
+        }
+
         internal void MarkConnected(bool value)
         {
             _connected = value;
+        }
+
+        //+------------------------------------------------------------------+
+        //| 启动 dealer 通道,记录结果。返回是否成功。                        |
+        //|                                                                  |
+        //| 首次启动与重连后重试共用这一处,避免两边对返回码的处理长歪。      |
+        //| 只在状态发生翻转时打日志:watchdog 每 10 秒重试一次,权限被永久吊销 |
+        //| 时不能把日志刷满(那正是 #9 刚治过的病)。                          |
+        //+------------------------------------------------------------------+
+        private MTRetCode TryStartDealer(string reason)
+        {
+            MTRetCode res;
+            lock (_gate)
+            {
+                res = _manager.DealerStart();
+            }
+
+            bool ok = res == MTRetCode.MT_RET_OK;
+            if (ok)
+            {
+                if (!_dealerActive)
+                    Log.Info("dealer 通道已启动({0})", reason);
+            }
+            else if (_dealerActive)
+            {
+                // 由可用翻转为不可用:这一条必须显眼,它意味着此刻所有下单都拿不到回执。
+                Log.Error("DealerStart 失败:{0}({1})。代客下单将无法收到成交回执,"
+                    + "通常是 manager 账号缺 RIGHT_TRADES_DEALER 权限;watchdog 会每 10 秒重试。",
+                    res, reason);
+            }
+
+            _dealerActive = ok;
+            return res;
         }
 
         //+------------------------------------------------------------------+
@@ -342,17 +408,15 @@ namespace Prismx.Mt5Gateway
             if (cres != MTRetCode.MT_RET_OK)
                 throw new Exception("连接 MT5 失败:" + cres + " " + DescribeConnectError(cres));
 
-            // dealer 通道:代客下单必须先启动
-            lock (_gate)
-            {
-                res = _manager.DealerStart();
-            }
-
-            if (res != MTRetCode.MT_RET_OK)
-                throw new Exception("DealerStart 失败:" + res +
+            // dealer 通道:代客下单必须先启动。
+            // 首次启动仍然是硬失败——带着不能下单的通道把服务跑起来毫无意义,不如
+            // 当场退出让人看见。**重连之后**的处理不同,见 _dealerActive 的说明。
+            // First start still fails hard: booting a gateway that cannot place
+            // orders is pointless. Post-reconnect handling differs — see _dealerActive.
+            MTRetCode dres = TryStartDealer("首次启动");
+            if (dres != MTRetCode.MT_RET_OK)
+                throw new Exception("DealerStart 失败:" + dres +
                     "(通常是 manager 账号缺 RIGHT_TRADES_DEALER 权限)");
-
-            Log.Info("dealer 通道已启动");
 
             SubscribePositions();
 
@@ -782,6 +846,9 @@ namespace Prismx.Mt5Gateway
         private void WatchdogLoop()
         {
             int delaySec = 2;
+            // dealer 重试节流:连接正常但 dealer 掉了时,每 10 圈(约 10 秒)重试一次。
+            // 不用每秒重试——权限类问题重试再密也不会更快好,只会白敲券商接口。
+            int dealerRetryTick = 0;
 
             while (!_stopping)
             {
@@ -790,6 +857,27 @@ namespace Prismx.Mt5Gateway
                 if (_stopping || _connected)
                 {
                     delaySec = 2;
+
+                    // 连接还在、但 dealer 通道不可用:单独把它拉回来,不去动连接本身。
+                    // 这是本分支存在的全部意义——旧代码在这里直接 continue,于是
+                    // "连着但下不了单"这个状态一旦形成就只能靠人工重启解除。
+                    // Connection is up but the dealer channel isn't: recover it on its
+                    // own without touching the connection. The old code just continued
+                    // here, so "connected but can't trade" could only be cleared by a
+                    // manual restart.
+                    if (!_stopping && _connected && !_dealerActive)
+                    {
+                        dealerRetryTick++;
+                        if (dealerRetryTick >= 10)
+                        {
+                            dealerRetryTick = 0;
+                            TryStartDealer("重试");
+                        }
+                    }
+                    else
+                    {
+                        dealerRetryTick = 0;
+                    }
                     continue;
                 }
 
@@ -813,11 +901,19 @@ namespace Prismx.Mt5Gateway
                     // down, and stale values would pass checks that should fail.
                     lock (_gate)
                     {
-                        _manager.DealerStart();
                         _selected.Clear();
                         _limitsCache.Clear();
                         _tradableCache.Clear();
                     }
+
+                    // 重连后重开 dealer 通道。返回码此前被直接丢弃——它一旦失败,
+                    // 之后所有下单都收不到成交回执,而日志里一个字都没有,只能靠
+                    // 用户报"单子下不出去"才发现。现在失败会记 ERROR 并置
+                    // dealerActive=false,上面的分支每 10 秒重试直到恢复。
+                    // The return code used to be discarded here: if it failed, every
+                    // subsequent order silently got no confirmation with nothing in the
+                    // log. Now a failure is logged and retried until it recovers.
+                    TryStartDealer("重连后");
 
                     // 持仓订阅也要重建:断线时服务器已清掉我们的订阅状态
                     _posSubscribed = false;

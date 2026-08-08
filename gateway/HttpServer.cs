@@ -104,6 +104,12 @@ namespace Prismx.Mt5Gateway
                 j.BeginObject()
                     .Field("ok", true)
                     .Field("mt5Connected", _link.IsConnected)
+                    // false = 连接正常但代客下单拿不到成交回执。与 mt5Connected 分开
+                    // 报,是因为这两件事会独立失效:重连之后 DealerStart 可能失败而连接
+                    // 本身完好,此时查持仓/查余额照常可用、只有下单不行。
+                    // false = connected but orders get no confirmation. Reported apart
+                    // from mt5Connected because the two fail independently.
+                    .Field("dealerActive", _link.IsDealerActive)
                     .Field("positionSubscribed", _link.PositionSubscribed)
                     .Field("positionEventBacklog", (uint)_link.PositionEventBacklog)
                     .Field("server", _cfg.Server)
