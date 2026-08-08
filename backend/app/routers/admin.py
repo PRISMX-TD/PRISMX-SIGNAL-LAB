@@ -17,6 +17,7 @@ from datetime import datetime, time, timedelta, timezone
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
@@ -786,7 +787,27 @@ async def upload_admin_image(
         )
     data = await file.read()
     try:
-        url = upload_image(data)
+        # upload_image 内部是**同步** httpx.post 直连 Supabase Storage，而那个
+        # timeout=30.0 是 httpx 简写，展开后 connect/read/write/pool 各 30 秒
+        # ——不是整个请求 30 秒封顶。慢链路上光是把 4MB 请求体分块 write 出去就
+        # 可能自己跑满 30 秒，再叠加等响应的 30 秒。留在事件循环上意味着：管理员
+        # 传一张图，全站所有人的 WebSocket 推送、桥接轮询、gateway 持仓拍全都
+        # 停在那里等它——这是本项目单次影响最大的一处阻塞。
+        #
+        # 只把这一次网络调用挪进线程池，upload_image 自身一个字不改（它的校验、
+        # 嗅探、错误文案都保持原样）。UploadError 会原样穿过线程边界，仍由下面的
+        # except 捕获成 400，对外行为逐字节不变。
+        #
+        # upload_image does a **synchronous** httpx.post to Supabase Storage, and
+        # its timeout=30.0 shorthand means 30s each for connect/read/write/pool —
+        # not 30s overall. On a slow link, streaming a 4MB body can burn 30s by
+        # itself before the response wait even starts. Leaving that on the event
+        # loop stalls every WebSocket push, bridge poll and gateway position tick
+        # site-wide while one admin uploads one picture — the single largest
+        # blocking stall in this codebase. Only the call moves; upload_image is
+        # untouched, and UploadError still propagates across the thread boundary
+        # into the except below, so the response is byte-identical.
+        url = await run_in_threadpool(upload_image, data)
     except UploadError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"url": url}
