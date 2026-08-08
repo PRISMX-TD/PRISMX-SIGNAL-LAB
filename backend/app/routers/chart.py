@@ -10,12 +10,14 @@ via the X-EA-Token header (it's not a user, no JWT). Reads (/chart/history,
 /chart/latest, /quotes) reuse the site's normal login, consistent with
 ChartsPage's other endpoints.
 """
+import asyncio
 import logging
 import secrets
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from sqlalchemy.orm import Session
 
@@ -245,6 +247,82 @@ def _apply_cached_skew(bars: list[dict], cache_key: tuple[str, str], interval_se
     return [{**b, "t": b["t"] - shift} for b in bars]
 
 
+# 每个 (品种, 周期) 一把锁。
+#
+# 改造前这段"过滤 → 写内存缓存 → 落库"整体同步跑在事件循环上，中间一个 await
+# 都没有，因此对同一 key 天然是原子的：第二个请求只可能在第一个整段跑完之后
+# 才开始。把阻塞工作切进线程池后，361→374 之间出现了 await，同一 key 的两个
+# 请求会交错，这会带来两个真实故障：
+#
+#   ① 旧快照盖掉新快照。cacheable 的计算时刻与写入 chart_store 的时刻被拆开，
+#      A 先算出结果、让出循环，B 算出更新的结果并先写入，A 回来再把旧的写进去。
+#      merge_bars 对相同 t 是直接覆盖，backfill 的 replace_series 更是整段 500
+#      根覆盖——表现为最右侧那根蜡烛回退，或整条序列被旧数据顶掉。
+#   ② persist_closed_bars 是 check-then-insert（先 SELECT t IN(...) 再 add），
+#      两个请求同时判定"这根还没有"就会双双 INSERT，撞 UniqueConstraint
+#      (symbol, interval, t) 抛 IntegrityError。异常会中断整个 for s in
+#      req.series 循环，一批 42 个 series 里第 17 个炸掉意味着后面 25 个完全
+#      不被处理——现状下不存在这种整批半途夭折。
+#
+# 触发条件不是边缘情况：EA 每 3 秒发一个请求、单请求打包 42 个 series，而它的
+# 客户端超时是 5 秒。后端慢一点，EA 超时放弃后 3 秒又发下一批，上一批还在处理
+# —— 单台 EA 就能造出重叠请求，且专挑后端最慢的时候造。
+#
+# 这把锁只是把改造前就有的串行语义原样还原，不改变任何对外行为，也不新增任何
+# 查询（顺带消掉了并发下 _baseline_cache 缓存击穿多发的那条基线查询）。
+#
+# One lock per (symbol, interval). Before this change the "filter → write cache
+# → persist" block ran synchronously on the event loop with no await inside, so
+# it was atomic per key. Moving the blocking work into a thread pool introduces
+# awaits, letting two requests for the same key interleave — which would let an
+# older snapshot overwrite a newer one, and let two concurrent check-then-insert
+# passes collide on UniqueConstraint(symbol, interval, t), aborting the rest of
+# the batch. This lock merely restores the serialization that already existed.
+_feed_locks: dict[tuple[str, str], asyncio.Lock] = {}
+
+
+def _feed_lock(key: tuple[str, str]) -> asyncio.Lock:
+    """取（必要时新建）某 (品种, 周期) 的锁。
+
+    只在事件循环线程上被调用，所以 dict 的读改写本身不需要再加锁保护。
+    key 集合有界（品种数 × 周期数），不会无限增长，无需清理。
+
+    Fetched (and created on first use) from the event-loop thread only, so the
+    dict itself needs no extra guarding. The key space is bounded by symbols ×
+    intervals, so it never grows without limit and needs no eviction.
+    """
+    lock = _feed_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _feed_locks[key] = lock
+    return lock
+
+
+def _persist_history_sync(db: Session, symbol: str, interval: str, bars: list[dict]) -> int:
+    """history 批次落库：不带 prefiltered，闸门由 persist_closed_bars 内部自行跑。
+    整段是同步 SQLAlchemy（两次闸门查库 + 一次存在性查询 + 一次 commit）。
+    History batch persist; the gates run inside persist_closed_bars itself."""
+    return candle_store.persist_closed_bars(db, symbol, interval, bars)
+
+
+def _persist_live_sync(
+    db: Session, symbol: str, interval: str, bars: list[dict], tradeable: list[dict]
+) -> int:
+    """实时批次落库。**必须**带 prefiltered=tradeable。
+
+    不带的话 persist_closed_bars 会把休市/停滞/重放三道闸门重跑一遍，等于每次
+    喂价多两条查库——tick 每秒都在推，丢掉 prefiltered 就是直接的 egress 回归
+    （见本文件 feed_candles 内部那段关于 filter_tradeable_bars_both 的说明）。
+    抽成具名函数而不是直接把 kwargs 丢给 run_in_threadpool，就是为了把这个约束
+    钉在代码里，避免以后重构时被悄悄丢掉。
+
+    Live batch persist. Passing prefiltered is mandatory: without it the three
+    gates are re-run and every feed costs two extra queries. Named function
+    rather than an inline kwargs call so this constraint is hard to lose.
+    """
+    return candle_store.persist_closed_bars(db, symbol, interval, bars, prefiltered=tradeable)
+
+
 @router.post("/feed/candles")
 async def feed_candles(
     req: FeedRequest,
@@ -309,7 +387,10 @@ async def feed_candles(
         # the live hysteresis cache (see _apply_cached_skew).
         if req.mode == "history":
             bars = _apply_cached_skew(bars, (symbol, s.interval), interval_seconds)
-            new_count = candle_store.persist_closed_bars(db, symbol, s.interval, bars)
+            async with _feed_lock((symbol, s.interval)):
+                new_count = await run_in_threadpool(
+                    _persist_history_sync, db, symbol, s.interval, bars
+                )
             logger.info(
                 "feed_candles: %s/%s history batch stored %d/%d bar(s)",
                 symbol, s.interval, new_count, len(bars),
@@ -358,20 +439,39 @@ async def feed_candles(
         # closes, replay baseline) don't depend on include_forming — one call was pure
         # waste. Now filter_tradeable_bars_both yields both in one pass. Tick mode pushes
         # every second, making this the critical egress optimization point.
-        cacheable, tradeable = candle_store.filter_tradeable_bars_both(db, symbol, s.interval, bars)
-        if req.mode == "backfill":
-            # backfill 是整段替换。过滤后为空时不能替换:那会把缓存里原有的真实历史
-            # 清空,前端图表直接空白。保留旧数据、等下一批有效数据再替换。
-            # backfill replaces the whole series. Don't replace when the filtered result
-            # is empty: that would wipe the genuine history already cached and blank the
-            # chart. Keep the old data and wait for the next valid batch.
-            if cacheable:
-                chart_store.replace_series(symbol, s.interval, cacheable)
-        else:
-            chart_store.merge_bars(symbol, s.interval, cacheable)
-        new_count = candle_store.persist_closed_bars(
-            db, symbol, s.interval, bars, prefiltered=tradeable,
-        )
+        #
+        # 闸门整段是同步 SQLAlchemy，走线程池；但"过滤 → 写缓存 → 落库"这三步
+        # 必须整体在同一把 (品种,周期) 锁里完成，否则中间新出现的 await 会让同
+        # key 的请求交错（详见 _feed_locks 上方的说明）。锁只还原改造前就有的串
+        # 行语义，不改变任何对外行为。
+        #
+        # chart_store 的两次写入刻意留在事件循环上：它们是纯内存操作、不阻塞，
+        # 而 merge_bars 内部先建 index 再按索引写、稳态下每次追加都触发 500 根
+        # 截断，放进工作线程只会平添撕裂风险，没有任何收益。
+        #
+        # The gate work is blocking SQLAlchemy and moves to the thread pool, but
+        # filter → cache → persist must stay atomic under one per-key lock: the
+        # newly introduced awaits would otherwise let same-key requests interleave.
+        # The chart_store writes deliberately stay on the event loop — they are
+        # pure in-memory work, and merge_bars' index-then-write plus 500-bar
+        # truncation would only gain tearing risk from a worker thread.
+        async with _feed_lock((symbol, s.interval)):
+            cacheable, tradeable = await run_in_threadpool(
+                candle_store.filter_tradeable_bars_both, db, symbol, s.interval, bars
+            )
+            if req.mode == "backfill":
+                # backfill 是整段替换。过滤后为空时不能替换:那会把缓存里原有的真实历史
+                # 清空,前端图表直接空白。保留旧数据、等下一批有效数据再替换。
+                # backfill replaces the whole series. Don't replace when the filtered result
+                # is empty: that would wipe the genuine history already cached and blank the
+                # chart. Keep the old data and wait for the next valid batch.
+                if cacheable:
+                    chart_store.replace_series(symbol, s.interval, cacheable)
+            else:
+                chart_store.merge_bars(symbol, s.interval, cacheable)
+            new_count = await run_in_threadpool(
+                _persist_live_sync, db, symbol, s.interval, bars, tradeable
+            )
         if new_count:
             # 策略评估是同步 SQLAlchemy + 纯 Python 指标循环：留在事件循环里会
             # 拖住 WebSocket 推送与桥接轮询（生产 2 核单进程）。推送部分本身是
