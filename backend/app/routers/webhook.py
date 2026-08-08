@@ -243,6 +243,44 @@ class TrendSignal(BaseModel):
     id: str | None = Field(default=None, max_length=128)
 
 
+class TrendItem(BaseModel):
+    """批量推送里的单个品种条目。与 TrendSignal 相同，只是不带 secret
+    ——密钥在批量载荷的外层统一带一次。
+    One symbol inside a batch push: same as TrendSignal minus the secret, which
+    the batch envelope carries once for the whole request."""
+
+    symbol: str = Field(pattern=SYMBOL_PATTERN)
+    trends: dict[str, TrendDir]
+    high: float | None = Field(default=None, ge=0)
+    low: float | None = Field(default=None, ge=0)
+    id: str | None = Field(default=None, max_length=128)
+
+
+class TrendBatch(BaseModel):
+    """批量趋势推送载荷。
+
+    EA 原本每个品种发一个请求，7 个品种就是每 5 秒 7 个请求。更要命的是 EA 的
+    WebRequest 是同步的：后端慢的时候，7 × 5 秒超时 = 最坏 35 秒卡在 1 秒一次的
+    定时器回调里，连带把喂价和 K 线一起拖停。合并成一个请求后，最坏阻塞降到 5 秒。
+
+    与单条格式并存、按 items 键区分，**旧 EA 不受任何影响**——后端先上线时线上
+    跑的还是旧 EA，必须照常工作。
+
+    Batch trend payload. The EA used to send one request per symbol — 7 requests
+    every 5 seconds — and its WebRequest is synchronous, so a slow backend meant
+    up to 7 × 5s = 35s stuck inside a 1-second timer callback, stalling the candle
+    and quote feeds with it. One request caps that at 5s. Coexists with the single
+    format and is told apart by the `items` key, so an older EA keeps working
+    unchanged — which it must, since the backend ships first.
+    """
+
+    secret: str = Field(min_length=1, max_length=128)
+    # 上限与 EA 实际发送量（7 个品种）留足余量，同时防止畸形载荷撑爆单次请求。
+    # Capped well above the EA's real payload (7 symbols) while still refusing
+    # a malformed request that would blow up a single call.
+    items: list[TrendItem] = Field(min_length=1, max_length=64)
+
+
 def _trend_db_work(
     symbol: str,
     tf_map: dict,
@@ -311,6 +349,7 @@ async def tradingview_trend(request: Request):
     raw = await request.body()
     text = raw.decode("utf-8", errors="ignore").strip()
     payload = None
+    batch = None
     # 先尝试整体解析；失败则从文本中抠出第一个 {...} JSON 块再解析。
     # TradingView 有时会把警报说明文字和 alert() 的 JSON 拼在一起发送。
     # Try whole-body parse first; if it fails, extract the first {...} block.
@@ -319,22 +358,58 @@ async def tradingview_trend(request: Request):
         if not candidate:
             continue
         try:
-            payload = TrendSignal.model_validate(json.loads(candidate))
+            parsed = json.loads(candidate)
+        except (ValueError, TypeError):
+            continue
+        # 按 items 键区分批量与单条。批量是 EA 用的（一次带上全部品种），单条是
+        # TradingView 指标的历史契约，两者必须并存：后端先于 EA 上线，那段时间
+        # 线上跑的还是旧 EA，单条格式一天都不能断。
+        # The `items` key tells a batch from a single push. Batch is what the EA
+        # sends; the single form is TradingView's existing contract. Both must
+        # work: the backend ships before the EA, so the single form cannot break
+        # for even a moment.
+        try:
+            if isinstance(parsed, dict) and "items" in parsed:
+                batch = TrendBatch.model_validate(parsed)
+            else:
+                payload = TrendSignal.model_validate(parsed)
             break
         except (ValueError, TypeError):
             continue
-    if payload is None:
+    if payload is None and batch is None:
         raise HTTPException(status_code=422, detail="请求体未包含合法趋势 JSON / no valid trend JSON in body")
 
-    if not _valid_trend_secret(payload.secret):
+    secret = batch.secret if batch is not None else payload.secret
+    if not _valid_trend_secret(secret):
         raise HTTPException(status_code=401, detail="Webhook 密钥无效 / invalid webhook secret")
 
-    symbol = payload.symbol.upper()
-    tf_map = {str(k): str(v) for k, v in payload.trends.items()}
+    # 统一成条目列表处理，两条路径共用下面的循环——避免单条/批量各写一遍判定逻辑
+    # 而慢慢长歪（信号判定就挂在这条路径上，两份实现迟早会不一致）。
+    # Normalize both shapes into one list so a single loop serves them. Two copies
+    # of this logic would drift, and signal resolution rides on this path.
+    items = batch.items if batch is not None else [payload]
+
+    # now 对整批取同一个值：同一次上报里各品种的 updated_at 应当一致，否则前端
+    # 看到的"最后更新时间"会在同一批内相差几十毫秒，徒增困惑。
+    # One `now` for the whole batch: symbols reported together should share an
+    # updated_at rather than differing by tens of milliseconds within one push.
     now = datetime.now(timezone.utc)
 
-    data = await run_in_threadpool(_trend_db_work, symbol, tf_map, now, payload.low, payload.high)
+    results = []
+    for item in items:
+        symbol = item.symbol.upper()
+        tf_map = {str(k): str(v) for k, v in item.trends.items()}
+        data = await run_in_threadpool(_trend_db_work, symbol, tf_map, now, item.low, item.high)
+        results.append((symbol, data))
 
-    # 广播给所有在线前端 / broadcast to all online clients
-    await manager.broadcast_to_clients({"type": "TREND_UPDATE", "data": data})
-    return {"ok": True, "symbol": symbol}
+    # 广播维持每品种一帧：前端已按这个形状处理 TREND_UPDATE，改成一帧多品种就要
+    # 同时改前端，而本次改造的目的是减少 EA→后端的请求数，不是动前端契约。
+    # Still one frame per symbol: the frontend already handles TREND_UPDATE in this
+    # shape. Batching frames would require a frontend change, and the point here is
+    # to cut EA→backend requests, not to alter the frontend contract.
+    for _symbol, data in results:
+        await manager.broadcast_to_clients({"type": "TREND_UPDATE", "data": data})
+
+    if batch is not None:
+        return {"ok": True, "symbols": [s for s, _ in results]}
+    return {"ok": True, "symbol": results[0][0]}
