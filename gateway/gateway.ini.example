@@ -4,11 +4,11 @@
 # gateway.ini 含明文密码,已在 .gitignore 里排除,不要提交进版本库。
 
 [mt5]
-# MC 的 MT5 服务器地址
-server = 192.109.17.69:443
+# MT5 服务器地址(填券商提供的 Manager 接入地址)
+server = mt5server.example.com:443
 
 # Manager 账号
-manager_login = 1034
+manager_login = 12345
 manager_password = 请填真实密码
 
 [http]
