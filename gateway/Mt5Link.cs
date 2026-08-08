@@ -190,6 +190,93 @@ namespace Prismx.Mt5Gateway
         }
     }
 
+    internal sealed class DealEvent
+    {
+        public ulong Login;
+        public ulong Deal;      // 成交号 / deal ticket
+        public ulong Position;  // 所属仓位号,0 表示这笔成交不挂在仓位上(入金/出金等)
+    }
+
+    /// <summary>
+    /// 成交订阅回调。与 PositionSink 同构:回调在券商的后台线程上，所以队列必须线程安全。
+    ///
+    /// 这里的用途**不是**把成交明细直接喂给后端，而只是当一个"该去查了"的门铃：
+    /// 收到事件就立刻触发那个已有的平仓扫描（它自带 15 分钟回看窗与归因逻辑），
+    /// 而不是傻等下一次 3 秒轮询。所以只取 login 与仓位号，不搬运金额、手续费这些
+    /// ——那些字段的口径（部分平仓分摊、隔夜费归属）已经在后端那套扫描里定好了，
+    /// 在这里再实现一遍必然长歪。
+    ///
+    /// 只处理 OnDealAdd。OnDealUpdate/OnDealDelete 不管：成交是既成事实，
+    /// 券商极少改写，真被改写了也会由兜底扫描纠正。
+    ///
+    /// Deal subscription callback, mirroring PositionSink: callbacks arrive on the
+    /// broker's background thread, so the queue must be thread-safe.
+    ///
+    /// This is a doorbell, not a data channel. An event only means "go look now"
+    /// and triggers the existing closed-trade scan (which owns the 15-minute
+    /// lookback and the attribution rules) instead of waiting for the next 3s poll.
+    /// Hence only login and position id travel across — reimplementing the money
+    /// fields (partial-close allocation, swap attribution) here would inevitably
+    /// drift from the backend's version.
+    /// </summary>
+    internal sealed class DealSink : CIMTDealSink
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<DealEvent> _queue =
+            new System.Collections.Concurrent.ConcurrentQueue<DealEvent>();
+
+        private const int MaxQueueSize = 10000;
+        private int _queueSize = 0;
+
+        public override void OnDealAdd(CIMTDeal d)
+        {
+            if (d == null) return;
+            Enqueue(d.Login(), d.Deal(), d.PositionID());
+        }
+
+        // 成交是既成事实,改写/删除极少见,交给兜底扫描纠正即可。
+        // Deals are facts on the ground; rewrites are rare and the fallback scan covers them.
+        public override void OnDealUpdate(CIMTDeal d) { }
+        public override void OnDealDelete(CIMTDeal d) { }
+
+        private void Enqueue(ulong login, ulong deal, ulong position)
+        {
+            // 限流:队列满时丢弃最老的事件。丢事件只会退化成"等下一次兜底扫描",
+            // 不会丢数据——真正的平仓明细始终由后端那次扫描从券商拉取。
+            // Dropping the oldest event only degrades to "wait for the fallback scan";
+            // no data is lost, since the scan is what actually fetches the details.
+            int sz = System.Threading.Interlocked.Increment(ref _queueSize);
+            if (sz > MaxQueueSize)
+            {
+                DealEvent dummy;
+                if (_queue.TryDequeue(out dummy))
+                    System.Threading.Interlocked.Decrement(ref _queueSize);
+            }
+
+            _queue.Enqueue(new DealEvent { Login = login, Deal = deal, Position = position });
+        }
+
+        /// <summary>原子性取走队列全部事件。</summary>
+        public DealEvent[] DequeueAll()
+        {
+            var list = new System.Collections.Generic.List<DealEvent>();
+            DealEvent evt;
+
+            while (_queue.TryDequeue(out evt))
+            {
+                list.Add(evt);
+                System.Threading.Interlocked.Decrement(ref _queueSize);
+            }
+
+            return list.ToArray();
+        }
+
+        /// <summary>队列当前长度。超过阈值说明后端调用太慢或挂了。</summary>
+        public int QueueSize
+        {
+            get { return _queueSize; }
+        }
+    }
+
     /// <summary>下单/平仓/改单的统一返回。</summary>
     internal sealed class TradeResult
     {
@@ -234,6 +321,9 @@ namespace Prismx.Mt5Gateway
         // 且券商只推 ADD/DELETE 不推 UPDATE(浮盈仍需轮询)。
         private PositionSink _posSink;
         private volatile bool _posSubscribed;
+
+        private DealSink _dealSink;
+        private volatile bool _dealSubscribed;
 
         private volatile bool _connected;
         private volatile bool _stopping;
@@ -419,6 +509,7 @@ namespace Prismx.Mt5Gateway
                     "(通常是 manager 账号缺 RIGHT_TRADES_DEALER 权限)");
 
             SubscribePositions();
+            SubscribeDeals();
 
             _watchdog = new Thread(WatchdogLoop);
             _watchdog.IsBackground = true;
@@ -465,6 +556,52 @@ namespace Prismx.Mt5Gateway
             }
         }
 
+        //+------------------------------------------------------------------+
+        //| 建立成交订阅。与持仓订阅同样：失败不抛异常——订阅只是延迟优化,     |
+        //| 后端仍有 3 秒轮询兜底,不该因为券商不给权限就让整个 gateway 起不来。|
+        //|                                                                  |
+        //| Establish the deal subscription. Like positions, a failure is not |
+        //| fatal: this is a latency optimization and the backend still has   |
+        //| its 3-second fallback scan.                                       |
+        //+------------------------------------------------------------------+
+        private void SubscribeDeals()
+        {
+            try
+            {
+                lock (_gate)
+                {
+                    // 与 PositionSink 相同的陷阱:托管 sink 内部持有原生指针,构造后
+                    // 必须先 RegisterSink,否则传进去的是空指针,订阅会返回
+                    // MT_RET_ERR_PARAMS。
+                    // Same trap as PositionSink: the managed sink holds a native
+                    // pointer and must be registered before subscribing.
+                    DealSink sink = new DealSink();
+                    MTRetCode reg = sink.RegisterSink();
+
+                    if (reg != MTRetCode.MT_RET_OK)
+                    {
+                        Log.Warn("DealSink.RegisterSink 失败:{0},平仓明细改由轮询兜底", reg);
+                        return;
+                    }
+
+                    MTRetCode sub = _manager.DealSubscribe(sink);
+                    if (sub != MTRetCode.MT_RET_OK)
+                    {
+                        Log.Warn("DealSubscribe 失败:{0},平仓明细改由轮询兜底", sub);
+                        return;
+                    }
+
+                    _dealSink = sink;
+                    _dealSubscribed = true;
+                    Log.Info("成交订阅已建立:平仓将即时触发明细拉取");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("建立成交订阅异常:{0}", ex.Message);
+            }
+        }
+
         /// <summary>
         /// 取走订阅积压的开/平仓事件。后端每轮调一次,拿到就立即推前端。
         /// 订阅没建立时返回空数组,后端退回纯轮询,行为与改动前一致。
@@ -492,6 +629,36 @@ namespace Prismx.Mt5Gateway
             get
             {
                 PositionSink sink = _posSink;
+                return sink == null ? 0 : sink.QueueSize;
+            }
+        }
+
+        /// <summary>
+        /// 取走订阅积压的成交事件。语义与 DrainPositionEvents 一致：破坏性读取，
+        /// 订阅没建立时返回空数组，后端退回纯轮询。
+        /// Drain queued deal events; destructive read, empty when unsubscribed.
+        /// </summary>
+        public DealEvent[] DrainDealEvents()
+        {
+            DealSink sink = _dealSink;
+            if (sink == null)
+                return new DealEvent[0];
+
+            return sink.DequeueAll();
+        }
+
+        /// <summary>成交订阅是否可用。后端据此决定兜底扫描用 3 秒还是 15 秒。</summary>
+        public bool DealSubscribed
+        {
+            get { return _dealSubscribed; }
+        }
+
+        /// <summary>成交事件积压数。</summary>
+        public int DealEventBacklog
+        {
+            get
+            {
+                DealSink sink = _dealSink;
                 return sink == null ? 0 : sink.QueueSize;
             }
         }
@@ -915,9 +1082,12 @@ namespace Prismx.Mt5Gateway
                     // log. Now a failure is logged and retried until it recovers.
                     TryStartDealer("重连后");
 
-                    // 持仓订阅也要重建:断线时服务器已清掉我们的订阅状态
+                    // 持仓与成交订阅都要重建:断线时服务器已清掉我们的订阅状态
+                    // Both subscriptions must be rebuilt: the server dropped them on disconnect
                     _posSubscribed = false;
                     SubscribePositions();
+                    _dealSubscribed = false;
+                    SubscribeDeals();
 
                     delaySec = 2;
                 }
@@ -1949,6 +2119,12 @@ namespace Prismx.Mt5Gateway
                     if (_posSink != null)
                     {
                         try { _manager.PositionUnsubscribe(_posSink); }
+                        catch { }
+                    }
+
+                    if (_dealSink != null)
+                    {
+                        try { _manager.DealUnsubscribe(_dealSink); }
                         catch { }
                     }
 

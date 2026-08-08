@@ -331,6 +331,24 @@ GATEWAY_MAX_CONCURRENT_USERS = 8
 GATEWAY_DEALS_SCAN_INTERVAL = 3.0
 GATEWAY_DEALS_LOOKBACK_SECONDS = 15 * 60
 
+# 成交订阅可用时的兜底扫描间隔。
+#
+# 订阅建立后，平仓由 /deal-events 在 0.25 秒的快拍里即时触发扫描，这条定时扫描
+# 就从「发现平仓的主路径」降级成「兜底」——它存在的意义只剩下：事件因队列溢出
+# 被丢、或某次事件读取失败时，仍能在可接受的时间内补上。
+#
+# 所以这里必须放宽，否则这次改造就是「只加不减」：延迟降下来了，查询次数一次没少。
+# 15 秒是每 login 每分钟从 20 次 Manager API 往返降到 4 次。
+#
+# 订阅不可用时自动回落到 3 秒（见 _process_user 里的取值逻辑），行为与改造前一致。
+#
+# Fallback scan interval while the deal subscription is alive. With it, closes are
+# picked up by the 0.25s event pump, so this timer stops being the discovery path
+# and becomes a safety net for dropped or failed event reads. Relaxing it is the
+# whole point — otherwise this change would only add latency wins without removing
+# any queries. Falls back to 3s automatically when unsubscribed.
+GATEWAY_DEALS_SCAN_INTERVAL_SUBSCRIBED = 15.0
+
 # 每个账号第一次扫描时用的宽窗口。这个循环只扫「当前有 WS 连接」的用户，所以
 # 后端重启、或用户关掉页面期间发生的平仓，都不在任何一次常规窗口里。首扫补一个
 # 长回看把这段空档捞回来，之后回到窄窗口。重复查到的成交由唯一约束去重。
@@ -463,7 +481,7 @@ async def gateway_positions_loop() -> None:
     from app.services.auto_manage import evaluate_positions
     from app.services.connection_manager import manager
     from app.services.trade_performance import mark_positions_seen
-    from app.services.gateway_client import drain_position_events
+    from app.services.gateway_client import drain_deal_events, drain_position_events
 
     # ----- 共享状态与辅助函数 -----
 
@@ -593,6 +611,19 @@ async def gateway_positions_loop() -> None:
     # 用列表包一层是因为闭包里要改它（Python 的 nonlocal 在嵌套函数里更啰嗦）。
     subscription_state = {"alive": False}
 
+    # 成交订阅是否可用。与持仓订阅分开跟踪：券商可能只给其中一个的权限，
+    # 而且它决定的是另一件事——平仓兜底扫描用 15 秒还是 3 秒。
+    # Tracked separately from the position subscription: the broker may grant one
+    # and not the other, and this one decides the fallback scan interval.
+    deal_subscription_state = {"alive": False}
+
+    # 正在扫描平仓明细的 login。快拍 0.25 秒一拍、慢拍 2 秒一拍，收到成交事件时
+    # 两边可能同时想扫同一个账号；重复扫不会写坏数据（唯一约束去重），但会白白
+    # 多打一次 Manager API 往返。
+    # Logins with a closed-trade scan in flight, so the 0.25s pump and the 2s tick
+    # don't scan the same account twice.
+    deals_in_flight: set[str] = set()
+
     # 一轮内限制同时在飞的用户数，避免把 gateway 的单连接打满。
     # Cap in-flight users per tick so we don't saturate the gateway's single link.
     sem = asyncio.Semaphore(GATEWAY_MAX_CONCURRENT_USERS)
@@ -620,6 +651,70 @@ async def gateway_positions_loop() -> None:
             }
             for p in positions
         ], True
+
+    async def _scan_deals(user_id: str, login: str) -> None:
+        """拉取并入库一个账号的平仓明细。
+
+        快拍（收到成交事件，即时）与慢拍（定时兜底）共用这一份实现——两处各写一遍
+        必然长歪，而这段代码里藏着好几个来之不易的细节：`to` 要往后留一天余量、
+        首扫用 7 天宽窗补空档、归属不匹配时降到 debug 免得刷屏。
+
+        `deals_in_flight` 防止同一账号被并发扫两次：快拍 0.25 秒一拍，慢拍 2 秒
+        一拍，收到事件时两边可能撞在一起。重复扫描不会写坏数据（唯一约束会去重），
+        但会白白多打一次 Manager API 往返，而"减少往返"正是本次改造的目的之一。
+
+        Shared by the fast path (deal event just arrived) and the slow fallback
+        timer. One implementation, because this block carries several hard-won
+        details: the one-day pad on `to`, the 7-day first-scan window, the debug-level
+        log when attribution doesn't match. `deals_in_flight` stops the 0.25s pump and
+        the 2s tick from scanning the same login at once — harmless for data (the
+        unique constraint dedupes) but a wasted round trip, and cutting round trips
+        is half the point of this change.
+        """
+        if login in deals_in_flight:
+            return
+        deals_in_flight.add(login)
+        try:
+            last_deals_scan[login] = time.monotonic()
+            first_scan = login not in scanned_once
+            scanned_once.add(login)
+            # to 往后留一天余量：MT5 服务器时区常领先 UTC，按
+            # 「现在」截断会把刚成交的记录切掉。
+            # Pad `to` by a day: MT5 server time often runs ahead
+            # of UTC, and cutting at "now" would drop fresh deals.
+            to_unix = int(time.time()) + 86400
+            from_unix = int(time.time()) - (
+                GATEWAY_DEALS_CATCHUP_SECONDS if first_scan
+                else GATEWAY_DEALS_LOOKBACK_SECONDS
+            )
+            deals, derr = await gw_get_deals(int(login), from_unix, to_unix)
+            if derr:
+                logger.warning("Gateway 成交历史读取失败 login=%s: %s", login, derr)
+            elif deals:
+                n = await run_in_threadpool(
+                    _save_closed_trades, user_id, login, deals
+                )
+                if n:
+                    logger.info(
+                        "Gateway 平仓明细入库 login=%s 新增=%d", login, n
+                    )
+                    # 立刻通知前端重拉，别等它自己的 45 秒轮询
+                    await manager.push_to_client(
+                        user_id, {"type": "CLOSED_TRADE_NEW"}
+                    )
+                else:
+                    # 窗口里有成交却一条都没入库，通常是归属判定
+                    # 没认出来（comment 前缀与 gateway.ini 不一致，
+                    # 或该仓位不是本平台开的）。debug 级别以免刷屏，
+                    # 但排查时能一眼看出是"读到了但被过滤掉"。
+                    logger.debug(
+                        "Gateway 成交 %d 条但无新增平仓明细 login=%s"
+                        "（已去重或归属不匹配）", len(deals), login,
+                    )
+        except Exception:
+            logger.exception("gateway closed-trade scan failed (login=%s)", login)
+        finally:
+            deals_in_flight.discard(login)
 
     async def _push_user_snapshot(user_id: str, logins: list[str]) -> None:
         """读该用户全部 gateway 账号的持仓并推一次完整快照。
@@ -682,47 +777,20 @@ async def gateway_positions_loop() -> None:
                     except Exception:
                         logger.exception("gateway account refresh failed (login=%s)", login)
 
-                # --- 平仓明细扫描（低频）---
-                if now - last_deals_scan.get(login, 0.0) >= GATEWAY_DEALS_SCAN_INTERVAL:
-                    last_deals_scan[login] = now
-                    first_scan = login not in scanned_once
-                    scanned_once.add(login)
-                    try:
-                        # to 往后留一天余量：MT5 服务器时区常领先 UTC，按
-                        # 「现在」截断会把刚成交的记录切掉。
-                        # Pad `to` by a day: MT5 server time often runs ahead
-                        # of UTC, and cutting at "now" would drop fresh deals.
-                        to_unix = int(time.time()) + 86400
-                        from_unix = int(time.time()) - (
-                            GATEWAY_DEALS_CATCHUP_SECONDS if first_scan
-                            else GATEWAY_DEALS_LOOKBACK_SECONDS
-                        )
-                        deals, derr = await gw_get_deals(int(login), from_unix, to_unix)
-                        if derr:
-                            logger.warning("Gateway 成交历史读取失败 login=%s: %s", login, derr)
-                        elif deals:
-                            n = await run_in_threadpool(
-                                _save_closed_trades, user_id, login, deals
-                            )
-                            if n:
-                                logger.info(
-                                    "Gateway 平仓明细入库 login=%s 新增=%d", login, n
-                                )
-                                # 立刻通知前端重拉，别等它自己的 45 秒轮询
-                                await manager.push_to_client(
-                                    user_id, {"type": "CLOSED_TRADE_NEW"}
-                                )
-                            else:
-                                # 窗口里有成交却一条都没入库，通常是归属判定
-                                # 没认出来（comment 前缀与 gateway.ini 不一致，
-                                # 或该仓位不是本平台开的）。debug 级别以免刷屏，
-                                # 但排查时能一眼看出是"读到了但被过滤掉"。
-                                logger.debug(
-                                    "Gateway 成交 %d 条但无新增平仓明细 login=%s"
-                                    "（已去重或归属不匹配）", len(deals), login,
-                                )
-                    except Exception:
-                        logger.exception("gateway closed-trade scan failed (login=%s)", login)
+                # --- 平仓明细扫描（兜底节奏）---
+                # 成交订阅可用时放宽到 15 秒：此时发现平仓的主路径是快拍里的
+                # /deal-events 即时触发，这条定时扫描只负责兜底（事件丢了/读失败）。
+                # 订阅不可用则回落到 3 秒，与改造前完全一致。
+                # Relaxed to 15s while the deal subscription is alive: discovery then
+                # happens in the event pump and this timer is only a safety net.
+                # Falls back to 3s when unsubscribed, exactly as before.
+                scan_interval = (
+                    GATEWAY_DEALS_SCAN_INTERVAL_SUBSCRIBED
+                    if deal_subscription_state["alive"]
+                    else GATEWAY_DEALS_SCAN_INTERVAL
+                )
+                if now - last_deals_scan.get(login, 0.0) >= scan_interval:
+                    await _scan_deals(user_id, login)
 
                 # 已确认空仓的账号跳过：没有持仓就没有浮盈要刷，这一次 MT5 往返
                 # 纯属浪费。安全性靠两点保证：
@@ -840,6 +908,20 @@ async def gateway_positions_loop() -> None:
                     continue
 
                 events, subscribed = await drain_position_events()
+                deal_logins, deal_subscribed = await drain_deal_events()
+
+                if deal_subscribed != deal_subscription_state["alive"]:
+                    deal_subscription_state["alive"] = deal_subscribed
+                    if deal_subscribed:
+                        logger.info(
+                            "Gateway 成交订阅可用：平仓即时入库，兜底扫描放宽至 %.0f 秒",
+                            GATEWAY_DEALS_SCAN_INTERVAL_SUBSCRIBED,
+                        )
+                    else:
+                        logger.warning(
+                            "Gateway 成交订阅不可用：兜底扫描回落至 %.0f 秒",
+                            GATEWAY_DEALS_SCAN_INTERVAL,
+                        )
 
                 # 订阅状态翻转要处理：订阅刚掉线时，known_flat 里的信息不再可信
                 # （仓位可能在断线期间开出来而没有事件），必须清空退回全量轮询。
@@ -851,7 +933,7 @@ async def gateway_positions_loop() -> None:
                         logger.warning("Gateway 持仓订阅不可用：退回轮询模式")
                         known_flat.clear()
 
-                if events:
+                if events or deal_logins:
                     # 事件里带的是 login，要反查它属于哪个用户才知道推给谁。
                     pairs = await run_in_threadpool(_gateway_accounts)
                     owner = {lg: uid for uid, lg in pairs}
@@ -876,6 +958,40 @@ async def gateway_positions_loop() -> None:
                             known_flat.discard(login)
                         if uid in connected:
                             affected.add(uid)
+
+                    # 成交事件：立刻去拉这个账号的平仓明细，不等兜底扫描。
+                    # 这是本条改造的核心——平仓从「最多等 3 秒被扫到」变成
+                    # 「事件到达即拉」，端到端降到 1 秒以内。
+                    #
+                    # 与持仓事件一样要过滤非本平台账号：成交订阅是**服务器级**的，
+                    # 同一台 MT5 上其他券商客户的成交也会回调进来。
+                    #
+                    # 不管用户当前在不在线都扫：平仓明细是要落库的历史数据，
+                    # 用户回来时应该已经在列表里，而不是等他连上才补。这与持仓
+                    # 快照不同（那个只对在线用户有意义，推给没连接的人是浪费）。
+                    #
+                    # Deal events: fetch this account's closed trades right away
+                    # instead of waiting for the fallback timer — the core of this
+                    # change, taking close-to-visible from up to 3s down to under 1s.
+                    # Same filtering as positions (the subscription is server-wide).
+                    # Scanned regardless of whether the user is online: closed trades
+                    # are persisted history that should already be there when they
+                    # return, unlike a position snapshot which only matters live.
+                    deal_scans = []
+                    for lg in deal_logins:
+                        login = str(lg)
+                        uid = owner.get(login)
+                        if uid is None:
+                            continue
+                        deal_scans.append(_scan_deals(uid, login))
+
+                    if deal_scans:
+                        results = await asyncio.gather(*deal_scans, return_exceptions=True)
+                        for r in results:
+                            if isinstance(r, asyncio.CancelledError):
+                                raise r
+                            if isinstance(r, Exception):
+                                logger.error("gateway 成交事件扫描失败", exc_info=r)
 
                     if affected:
                         results = await asyncio.gather(

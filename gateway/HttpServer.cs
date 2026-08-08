@@ -112,6 +112,12 @@ namespace Prismx.Mt5Gateway
                     .Field("dealerActive", _link.IsDealerActive)
                     .Field("positionSubscribed", _link.PositionSubscribed)
                     .Field("positionEventBacklog", (uint)_link.PositionEventBacklog)
+                    // 成交订阅：后端据此决定平仓兜底扫描用 3 秒还是 15 秒。
+                    // false 不是故障，只是退回改造前的纯轮询节奏。
+                    // Deal subscription: the backend picks a 3s or 15s fallback scan
+                    // from this. False isn't a fault — it's the pre-change polling pace.
+                    .Field("dealSubscribed", _link.DealSubscribed)
+                    .Field("dealEventBacklog", (uint)_link.DealEventBacklog)
                     .Field("server", _cfg.Server)
                     .Field("managerLogin", _cfg.ManagerLogin)
                  .EndObject();
@@ -148,6 +154,9 @@ namespace Prismx.Mt5Gateway
                     return;
                 case "/deals":
                     RequirePost(ctx, method, HandleDeals);
+                    return;
+                case "/deal-events":
+                    HandleDealEvents(ctx, method);
                     return;
                 case "/quote":
                     RequirePost(ctx, method, HandleQuote);
@@ -370,6 +379,46 @@ namespace Prismx.Mt5Gateway
                     .Field("login", e.Login)
                     .Field("ticket", e.Ticket)
                     .Field("action", e.Action)
+                 .EndObject();
+            }
+
+            j.EndArray().EndObject();
+            WriteJson(ctx, 200, j.ToString());
+        }
+
+        //+------------------------------------------------------------------+
+        //| GET /deal-events  取走订阅积压的成交事件                          |
+        //|                                                                  |
+        //| 与 /position-events 同构:破坏性读取,取走即从队列移除。            |
+        //| 事件本身只是"该去查了"的门铃,后端拿到 login 后触发它自己那套平仓   |
+        //| 扫描(带 15 分钟回看窗与归因逻辑),明细不从这里走。                  |
+        //|                                                                  |
+        //| Mirrors /position-events: a destructive drain. The events are a   |
+        //| doorbell, not a data channel — the backend uses the login to fire |
+        //| its own closed-trade scan, which owns the lookback and attribution.|
+        //+------------------------------------------------------------------+
+        private void HandleDealEvents(HttpListenerContext ctx, string method)
+        {
+            if (method != "GET")
+            {
+                WriteError(ctx, 405, "method_not_allowed", "只接受 GET");
+                return;
+            }
+
+            DealEvent[] events = _link.DrainDealEvents();
+
+            JsonWriter j = new JsonWriter();
+            j.BeginObject()
+                .Field("ok", true)
+                .Field("subscribed", _link.DealSubscribed)
+                .BeginArray("events");
+
+            foreach (DealEvent e in events)
+            {
+                j.BeginObject()
+                    .Field("login", e.Login)
+                    .Field("deal", e.Deal)
+                    .Field("position", e.Position)
                  .EndObject();
             }
 

@@ -345,6 +345,54 @@ async def drain_position_events() -> tuple[list[PositionEvent], bool]:
     return events, bool(data.get("subscribed"))
 
 
+async def drain_deal_events() -> tuple[list[int], bool]:
+    """取走 gateway 订阅积压的成交事件。返回 (发生了成交的 login 列表, 订阅是否可用)。
+
+    与 drain_position_events 同构，但**只返回 login，不返回成交明细**。
+
+    事件在这里的角色是"门铃"而不是数据通道：收到就立刻去跑那套已有的平仓扫描
+    （它自带 15 分钟回看窗、按仓位号归因、部分平仓按手数分摊手续费与隔夜费）。
+    把金额字段从订阅这条路搬过来，等于把那套口径重新实现一遍，两份实现迟早不一致。
+
+    同一个 login 在一批里可能出现多次（一次平仓产生多笔成交），调用方按 login
+    去重后每个只触发一次扫描即可——扫描本身是按时间窗拉取的，不是按成交号。
+
+    语义同样是"取走"：一次调用清空队列，所以整个后端只能有一个消费者。
+
+    Mirrors drain_position_events but returns only logins, never deal details.
+    An event is a doorbell: it triggers the existing closed-trade scan, which owns
+    the 15-minute lookback, position-id attribution and the per-lot allocation of
+    commission and swap across partial closes. Carrying the money fields over this
+    channel would duplicate those rules and inevitably drift from them.
+    """
+    url = settings.GATEWAY_URL.rstrip("/") + "/deal-events"
+    try:
+        if _client is not None:
+            resp = await _client.get(url, headers=_headers(), timeout=httpx.Timeout(5))
+        else:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(5)) as client:
+                resp = await client.get(url, headers=_headers())
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        logger.debug("Gateway 成交事件读取失败: %s", e)
+        return [], False
+
+    if not data.get("ok"):
+        return [], False
+
+    logins: list[int] = []
+    seen: set[int] = set()
+    for e in data.get("events", []):
+        login = e.get("login", 0)
+        if not login or login in seen:
+            continue
+        seen.add(int(login))
+        logins.append(int(login))
+
+    return logins, bool(data.get("subscribed"))
+
+
 async def get_deals(login: int, from_unix: int, to_unix: int) -> tuple[list[DealRsp], str]:
     """读取一段时间内的成交历史。返回 (列表, 错误信息)。
 
