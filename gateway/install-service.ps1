@@ -16,7 +16,19 @@
     用法(必须用管理员身份打开 PowerShell):
         .\install-service.ps1              安装并启动
         .\install-service.ps1 -Status      只看状态,不改任何东西
+        .\install-service.ps1 -Stop        停下来(为了重新编译)
+        .\install-service.ps1 -Start       重新启动
         .\install-service.ps1 -Uninstall   卸载,回到手工前台运行
+
+    ** 改了 .cs 要重新编译时,必须走这个顺序: **
+        .\install-service.ps1 -Stop
+        .\build.ps1
+        .\install-service.ps1 -Start
+
+    原因:程序跑着的时候 mt5gateway.exe 被占用,csc 写不进去,编译会报
+    CS0016。而且光 Stop-ScheduledTask 不够——看门狗每 2 分钟会把它拉起来,
+    可能在编译中途重新锁住文件。所以 -Stop 是"禁用任务 + 停实例 + 杀进程"
+    三件事一起做,-Start 再把任务重新启用。
 
     安装后验证方式见脚本结尾的输出。
 #>
@@ -24,7 +36,9 @@
 [CmdletBinding()]
 param(
     [switch]$Uninstall,
-    [switch]$Status
+    [switch]$Status,
+    [switch]$Stop,
+    [switch]$Start
 )
 
 $ErrorActionPreference = "Stop"
@@ -85,6 +99,12 @@ if ($Status) {
         $info = Get-ScheduledTaskInfo -TaskName $TaskName
         Write-Note "计划任务      : 已安装,State=$($task.State) LastResult=$($info.LastTaskResult)"
         Write-Note "上次运行      : $($info.LastRunTime)"
+        # 任务被禁用是个静默陷阱:进程可能还跑着,看起来一切正常,但开机自启和
+        # 看门狗都已失效——多半是上次 -Stop 之后忘了 -Start。必须显式报出来。
+        if ($task.State -eq "Disabled") {
+            Write-Bad "任务处于【已禁用】状态:开机自启与看门狗当前都不生效!"
+            Write-Note "  多半是上次 -Stop 后忘了 -Start。执行:  .\install-service.ps1 -Start"
+        }
     } else {
         Write-Note "计划任务      : 未安装"
     }
@@ -105,6 +125,85 @@ if ($Status) {
 if (-not (Test-Admin)) {
     Write-Bad "需要管理员权限。请右键 PowerShell -> 以管理员身份运行,再执行本脚本。"
     exit 1
+}
+
+if ($Stop) {
+    Write-Step "停止(为重新编译做准备)"
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if (-not $task) {
+        Write-Note "计划任务未安装,只尝试停进程"
+    } else {
+        # 顺序很重要:先禁用再停。只 Stop 的话,看门狗触发器最快 2 分钟后就会
+        # 把它重新拉起来,可能正好卡在 csc 写 exe 的中间,编译再次失败。
+        Disable-ScheduledTask -TaskName $TaskName | Out-Null
+        Write-Ok "任务已禁用(看门狗不会再把它拉起来)"
+        Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    }
+
+    $proc = Get-Process -Name ($ExeName -replace '\.exe$','') -ErrorAction SilentlyContinue
+    if ($proc) {
+        $proc | Stop-Process -Force
+        Write-Ok "进程已停止 (PID $($proc.Id -join ','))"
+    } else {
+        Write-Note "没有正在运行的进程"
+    }
+
+    # 确认 exe 真的没被占用了,否则编译还是会报 CS0016
+    Start-Sleep -Seconds 2
+    $locked = $false
+    if (Test-Path $ExePath) {
+        try {
+            $fs = [System.IO.File]::Open($ExePath, 'Open', 'ReadWrite', 'None')
+            $fs.Close()
+        } catch {
+            $locked = $true
+        }
+    }
+    if ($locked) {
+        Write-Bad "$ExeName 仍被占用,现在编译会失败。等几秒再试,或看是谁占着:"
+        Write-Note "  Get-Process | Where-Object { `$_.Path -eq '$ExePath' }"
+        exit 1
+    }
+
+    Write-Host ""
+    Write-Ok "已停止且文件未被占用,现在可以编译"
+    Write-Host "  下一步:  .\build.ps1" -ForegroundColor Yellow
+    Write-Host "  编译完:  .\install-service.ps1 -Start" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Bad "注意:此刻 Gateway 通道处于离线状态,记得 -Start 回来。"
+    return
+}
+
+if ($Start) {
+    Write-Step "启动"
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if (-not $task) {
+        Write-Bad "计划任务不存在。请先执行不带参数的  .\install-service.ps1  完成安装。"
+        exit 1
+    }
+
+    Enable-ScheduledTask -TaskName $TaskName | Out-Null
+    Start-ScheduledTask -TaskName $TaskName
+
+    Write-Step "验证(最多等 30 秒)"
+    $health = $null
+    for ($i = 0; $i -lt 15; $i++) {
+        Start-Sleep -Seconds 2
+        $health = Test-Health $Port
+        if ($health) { break }
+    }
+
+    if ($health) {
+        Write-Ok "健康检查通过: $health"
+        if ($health -notmatch '"mt5Connected"\s*:\s*true') {
+            Write-Bad "注意:mt5Connected 不是 true,起来了但没连上券商。看 logs\ 下当天日志。"
+        }
+    } else {
+        Write-Bad "健康检查失败:$Port 端口无响应"
+        Write-Note "看日志:  Get-Content logs\gateway-$(Get-Date -Format yyyyMMdd).log -Tail 40"
+        exit 1
+    }
+    return
 }
 
 if ($Uninstall) {
@@ -251,7 +350,12 @@ Write-Host "  改造前这一步必然失败(进程随会话死),现在应该照
 Write-Host ""
 Write-Host "日常命令:"
 Write-Host "  查看状态:  .\install-service.ps1 -Status"
-Write-Host "  停止:      Stop-ScheduledTask -TaskName $TaskName"
-Write-Host "  启动:      Start-ScheduledTask -TaskName $TaskName"
 Write-Host "  卸载:      .\install-service.ps1 -Uninstall"
+Write-Host ""
+Write-Host "改了 .cs 要重新编译时,走这三步(顺序不能变):" -ForegroundColor Yellow
+Write-Host "  .\install-service.ps1 -Stop"
+Write-Host "  .\build.ps1"
+Write-Host "  .\install-service.ps1 -Start"
+Write-Host "  (程序跑着时 exe 被占用,直接编译会报 CS0016;"
+Write-Host "   而且只停不禁用的话,看门狗 2 分钟内会把它拉起来再次锁住文件)"
 Write-Host ""
