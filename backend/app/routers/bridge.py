@@ -657,6 +657,65 @@ class BridgeResultRequest(BaseModel):
     login: str | None = Field(default=None, pattern=LOGIN_PATTERN)
 
 
+def _result_db_work(db: Session, user_id: int, req: "BridgeResultRequest"):
+    """回执落库的同步段。返回 (order, duplicate)。
+
+    幂等判重下沉进 UPDATE 的 WHERE，用受影响行数判定，而不是"先读状态再无条件写"。
+
+    原来那套读-改-写靠单事件循环天然串行：整段没有 await，第二个并发回执只可能在
+    第一个 commit 之后才开始执行，必然读到 FILLED/REJECTED 而走 duplicate 分支。
+    搬进线程池后两个回执会在各自的工作线程里同时读到 PENDING、同时提交，于是同一笔
+    订单推两帧 ORDER_UPDATE、发两条 Web Push，第二个还会返回 {"ok": true} 而不是
+    {"ok": true, "duplicate": true}。既然事件循环不再仲裁，就得让数据库来仲裁。
+
+    SQL 条数与顺序不变：仍是 1 条 SELECT + 1 条 UPDATE + COMMIT + 1 条 refresh。
+
+    Idempotency moves into the UPDATE's WHERE clause and is decided by the affected
+    row count instead of "read the status, then write unconditionally". The old
+    read-modify-write was serialized by the single event loop — no await inside, so
+    a concurrent second result could only start after the first commit and would
+    always take the duplicate branch. In a thread pool both would observe PENDING
+    and both commit, emitting two ORDER_UPDATE frames and two web pushes. With the
+    event loop no longer arbitrating, the database has to. Same SQL count and order.
+    """
+    order = (
+        db.query(Order)
+        .filter(Order.user_id == user_id, Order.client_order_id == req.clientOrderId)
+        .first()
+    )
+    if not order:
+        return None, False
+
+    values = {
+        "status": "FILLED" if req.success else "REJECTED",
+        "mt5_ticket": req.mt5Ticket,
+        "filled_price": req.filledPrice,
+        "message": req.message,
+    }
+    # 兜底路由时补上实际执行账号，指定过目标账号的订单不覆盖已有值。
+    # Backfill the actual executing account for fallback-routed orders; never
+    # overwrite an order that already specified its target account.
+    if req.login and not order.mt5_login:
+        values["mt5_login"] = req.login
+
+    # 真实回执覆盖状态（包括迟到回执纠正已超时作废的 FAILED——实际执行结果为准），
+    # 但已是终态的不覆盖：这正是幂等判重，现在由 WHERE 条件表达。
+    # The genuine result wins, including a late result correcting a timed-out
+    # FAILED order — reality beats our assumption. Already-terminal rows are left
+    # alone: that's the idempotency check, now expressed by the WHERE clause.
+    claimed = (
+        db.query(Order)
+        .filter(Order.id == order.id, Order.status.notin_(("FILLED", "REJECTED")))
+        .update(values, synchronize_session=False)
+    )
+    db.commit()
+    if not claimed:
+        return order, True
+
+    db.refresh(order)
+    return order, False
+
+
 @router.post("/result")
 async def bridge_result(
     req: BridgeResultRequest,
@@ -664,34 +723,12 @@ async def bridge_result(
     db: Session = Depends(get_db),
 ):
     """桥接程序回报执行结果 / bridge reports execution result."""
-    order = (
-        db.query(Order)
-        .filter(Order.user_id == user.id, Order.client_order_id == req.clientOrderId)
-        .first()
-    )
-    if not order:
+    order, duplicate = await run_in_threadpool(_result_db_work, db, user.id, req)
+
+    if order is None:
         raise HTTPException(status_code=404, detail="订单不存在 / Order not found")
-
-    # 幂等：订单已处于终态则直接确认，不被迟到的重复回执覆盖。
-    # Idempotent: if already in a terminal state, just ack; don't let a late
-    # duplicate result overwrite it.
-    if order.status in ("FILLED", "REJECTED"):
+    if duplicate:
         return {"ok": True, "duplicate": True}
-
-    # 真实回执覆盖状态（包括迟到回执纠正已超时作废的 FAILED——实际执行结果为准）。
-    # The genuine result wins, including a late result correcting a timed-out
-    # FAILED order — reality beats our assumption.
-    order.status = "FILLED" if req.success else "REJECTED"
-    order.mt5_ticket = req.mt5Ticket
-    order.filled_price = req.filledPrice
-    order.message = req.message
-    # 兜底路由时补上实际执行账号，指定过目标账号的订单不覆盖已有值。
-    # Backfill the actual executing account for fallback-routed orders; never
-    # overwrite an order that already specified its target account.
-    if req.login and not order.mt5_login:
-        order.mt5_login = req.login
-    db.commit()
-    db.refresh(order)
 
     await manager.push_to_client(user.id, order_update_payload(order))
 

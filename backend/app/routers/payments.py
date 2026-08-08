@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.core.database import get_db
 from app.core.rate_limit import limiter
@@ -310,33 +311,30 @@ async def create_payment_order(
     }
 
 
-@router.get("/status/{payment_id}")
-async def get_payment_status_local(
-    payment_id: str,
-    _user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """查询支付状态（本地记录 + NOWPayments 做兜底同步）。
+def _load_own_payment(db: Session, payment_id: str, user_id: int):
+    """按 NOWPayments 支付号取本人的订单。同步查询，供线程池调用。
+    Load the caller's own payment by NOWPayments id; blocking, for the threadpool."""
+    return (
+        db.query(Payment)
+        .filter(
+            Payment.nowpayments_payment_id == payment_id,
+            Payment.user_id == user_id,
+        )
+        .first()
+    )
 
-    Get payment status from local DB, synced with NOWPayments as fallback.
+
+def _serialize_payment(record: Payment) -> dict:
+    """把订单序列化成响应体。**必须在线程池里调用。**
+
+    看着像纯内存操作，其实不是：_sync_payment_status 里的 db.commit() 会让
+    expire_on_commit 把这个实例的所有属性置为过期，下面每一次属性读取都可能
+    触发一条 refresh SELECT。放在事件循环上就是一条隐藏的阻塞查询。
+
+    Looks like pure attribute access but isn't: db.commit() inside
+    _sync_payment_status expires this instance, so each read below can trigger a
+    refresh SELECT. On the event loop that would be a hidden blocking query.
     """
-    record = db.query(Payment).filter(
-        Payment.nowpayments_payment_id == payment_id,
-        Payment.user_id == _user.id,
-    ).first()
-
-    if not record:
-        raise HTTPException(status_code=404, detail="Payment not found")
-
-    # 若本地不是终态，从 NOWPayments 拉最新状态同步 / sync from NP if not terminal
-    if record.status in ("PENDING", "NEW", "PROCESSING"):
-        try:
-            np_data = await np_status(payment_id)
-            np_status_val = np_data.get("payment_status", "").lower()
-            _sync_payment_status(db, record, np_status_val, np_data)
-        except Exception:
-            pass  # NP 不可用时返回本地缓存 / return local cache if NP is down
-
     return {
         "id": record.id,
         "payment_id": record.nowpayments_payment_id,
@@ -355,6 +353,49 @@ async def get_payment_status_local(
         "finished_at": record.finished_at.isoformat() if record.finished_at else None,
         "created_at": record.created_at.isoformat(),
     }
+
+
+@router.get("/status/{payment_id}")
+async def get_payment_status_local(
+    payment_id: str,
+    _user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """查询支付状态（本地记录 + NOWPayments 做兜底同步）。
+
+    Get payment status from local DB, synced with NOWPayments as fallback.
+
+    三段同步 DB 工作全部走线程池。这个端点在支付窗口打开期间由前端每 5 秒轮询
+    一次，每个在途用户都在轮，留在事件循环上会持续挤占所有人的实时推送。
+    中间那次 await np_status 是既有的外部网络调用，位置与拆分方式都保持原样，
+    并发窗口与改造前完全一致。
+
+    All three blocking DB steps go through the thread pool. The frontend polls
+    this every 5s per in-flight payment, so leaving it on the loop steals time
+    from everyone's realtime pushes. The await on np_status in the middle is the
+    pre-existing outbound call; its position is unchanged, so the concurrency
+    window is exactly what it was before.
+    """
+    record = await run_in_threadpool(_load_own_payment, db, payment_id, _user.id)
+
+    if not record:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    # 若本地不是终态，从 NOWPayments 拉最新状态同步 / sync from NP if not terminal
+    if record.status in ("PENDING", "NEW", "PROCESSING"):
+        try:
+            np_data = await np_status(payment_id)
+            np_status_val = np_data.get("payment_status", "").lower()
+            # 同步整段仍在一个 try 里：DB 抖动时照旧退回本地缓存返回 200，
+            # 而不是变成 500。这是既有对外行为，不能借着搬迁悄悄改掉。
+            # The sync stays inside the same try: a DB hiccup still falls back to
+            # the cached record with a 200 rather than becoming a 500. That's
+            # existing behaviour and must not change under cover of this move.
+            await run_in_threadpool(_sync_payment_status, db, record, np_status_val, np_data)
+        except Exception:
+            pass  # NP 不可用时返回本地缓存 / return local cache if NP is down
+
+    return await run_in_threadpool(_serialize_payment, record)
 
 
 @router.post("/webhook")
@@ -388,17 +429,56 @@ async def ipn_webhook(request: Request, db: Session = Depends(get_db)):
     if not np_payment_id:
         raise HTTPException(status_code=400, detail="Missing payment_id")
 
-    # 查本地订单
-    record = db.query(Payment).filter(
-        Payment.nowpayments_payment_id == np_payment_id
-    ).first()
-
-    if not record:
+    found = await run_in_threadpool(
+        _webhook_sync_work, db, np_payment_id, payment_status, data
+    )
+    if not found:
         # 可能是 Sandbox 测试手动触发的、没有对应本地记录；静默返回 ok
         return {"ok": True, "note": "no local record for this payment_id"}
+    return {"ok": True}
+
+
+def _webhook_sync_work(
+    db: Session, np_payment_id: str, payment_status: str, data: dict
+) -> bool:
+    """查订单 + 同步状态。返回是否找到了本地记录。
+
+    **查询与同步必须在同一次线程池跳转里完成，不能拆成两次。**
+
+    _sync_payment_status 的两道防线都建立在"手里这个 record 的状态是刚读出来的"
+    之上：FINISHED 抢占靠条件 UPDATE（status != 'FINISHED'），防回退靠 `record.status
+    != "FINISHED"` 这个内存判断。拆成两次跳转会在中间插入一个事件循环让出点，另一
+    个并发请求（前端每 5 秒一次的 /status 轮询）可以在此期间把这笔支付推成 FINISHED
+    并给用户加时长；本请求回来后手里仍是那份陈旧快照，防回退判断会误以为它还不是
+    终态，于是把 FINISHED 覆写成 EXPIRED 之类——下一拍轮询再看到 finished，条件
+    UPDATE 又能抢占成功，**同一笔支付给用户续期两次**。
+
+    今天这段 load→sync 之间一个 await 都没有，对其它请求是原子的；合并成一次跳转
+    就是把这份原子性原样搬进线程池，而不是在钱路径上新开一个竞态窗口。
+
+    Look up the payment and sync its status. Returns whether a local record existed.
+
+    **The lookup and the sync must happen in ONE thread-pool hop.** Both safeguards
+    in _sync_payment_status assume the record's status was just read: the FINISHED
+    transition is claimed by a conditional UPDATE, and the anti-regression check is
+    an in-memory comparison. Splitting this into two hops inserts an event-loop
+    yield point where a concurrent /status poll can flip the payment to FINISHED and
+    credit the user; this request would then resume holding a stale snapshot, decide
+    the payment is not terminal, and overwrite FINISHED with e.g. EXPIRED — after
+    which the next poll's conditional UPDATE claims it again and **credits the same
+    payment twice**. Today there is no await between load and sync, so it is atomic
+    with respect to other requests; one hop preserves exactly that.
+    """
+    record = (
+        db.query(Payment)
+        .filter(Payment.nowpayments_payment_id == np_payment_id)
+        .first()
+    )
+    if not record:
+        return False
 
     _sync_payment_status(db, record, payment_status, data)
-    return {"ok": True}
+    return True
 
 
 def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_data: dict):

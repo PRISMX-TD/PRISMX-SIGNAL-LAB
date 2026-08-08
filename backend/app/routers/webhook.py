@@ -8,6 +8,7 @@ TradingView can only POST a URL + JSON body without custom headers, so source
 authentication relies on the "secret" field compared (constant-time) to WEBHOOK_SECRET.
 """
 import secrets
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
@@ -15,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -63,27 +65,59 @@ def _serialize(sig: Signal) -> dict:
     ).model_dump(mode="json")
 
 
-@router.post("/tradingview", response_model=dict)
-@limiter.limit("60/minute")
-async def tradingview_webhook(request: Request, payload: TradingViewSignal):
-    """接收 TradingView 信号：校验密钥 -> 去重 -> 存库 -> 广播。
-    Receive a TradingView signal: verify secret -> dedup -> persist -> broadcast.
-    """
-    # 1) 来源校验：常量时间比较，密钥未配置则一律拒绝 / verify source, reject if unset
-    # 按 UTF-8 字节比较，避免非 ASCII 密钥触发 compare_digest 的 TypeError（应返回 401 而非 500）。
-    # Compare as UTF-8 bytes so a non-ASCII secret returns 401 instead of crashing compare_digest.
-    if not settings.WEBHOOK_SECRET or not secrets.compare_digest(
-        payload.secret.encode("utf-8"), settings.WEBHOOK_SECRET.encode("utf-8")
-    ):
-        raise HTTPException(status_code=401, detail="Webhook 密钥无效 / invalid webhook secret")
+# 每个品种一把锁，/trend 用。
+#
+# 改造前 224-256 那段整体同步跑在事件循环上、中间没有 await，所以同品种的两次
+# 上报天然串行。搬进线程池后会交错，带来两个真实后果：
+#   ① Trend 行与 TREND_UPDATE 广播回退到较旧数据——先到的那个可能后提交，而
+#      前端 live.tsx 按 symbol 无条件覆盖、不比较 updatedAt。
+#   ② resolve_signals_with_price 的 PENDING 扫描被重复执行：两个线程各扫一遍、
+#      互相看不见对方刚写下的终态，重叠部分的行被重复传输。该查询自己的注释写明
+#      它占总 egress 的 36%，所以这条直接踩红线一。
+#
+# 用 threading.Lock 而不是 asyncio.Lock：临界区整体在工作线程里执行，锁必须能被
+# 工作线程持有。锁本身在事件循环上取、在线程内加解，语义清晰。
+#
+# One lock per symbol for /trend. Before this change the whole block ran on the
+# event loop with no await inside, so same-symbol reports were naturally
+# serialized. Interleaving would let an older snapshot win the Trend upsert (the
+# frontend overwrites by symbol without comparing updatedAt) and would run the
+# PENDING scan twice with neither pass seeing the other's writes — and that query
+# accounts for ~36% of total egress, so it breaks the "no new queries" rule.
+# threading.Lock rather than asyncio.Lock because the critical section runs
+# inside the worker thread and the lock must be held there.
+_trend_locks: dict[str, threading.Lock] = {}
+_trend_locks_guard = threading.Lock()
 
+
+def _trend_lock(symbol: str) -> threading.Lock:
+    """取（必要时新建）某品种的锁。品种集合有界，无需清理。
+    Fetch (creating on first use) the lock for a symbol. Bounded key space."""
+    with _trend_locks_guard:
+        lock = _trend_locks.get(symbol)
+        if lock is None:
+            lock = threading.Lock()
+            _trend_locks[symbol] = lock
+        return lock
+
+
+def _persist_signal_sync(payload: TradingViewSignal):
+    """信号落库的同步段。返回 (去重命中的既有 id, 序列化数据, ORM 实例)。
+
+    now 刻意留在这个函数内、且仍在去重查询之后计算——保持与改造前逐行相同的位置，
+    否则 created_at/expire_at 会被提前到去重查询之前，语义就变了。
+
+    Blocking half of signal persistence. `now` deliberately stays inside this
+    function and still after the dedup query, matching the original line order —
+    hoisting it would shift created_at/expire_at before the dedup lookup.
+    """
     db: Session = SessionLocal()
     try:
         # 2) 去重：带 external_id 且已存在则直接返回，不重复入库 / dedup by external_id
         if payload.id:
             existing = db.query(Signal).filter(Signal.external_id == payload.id).first()
             if existing is not None:
-                return {"ok": True, "deduped": True, "id": existing.id}
+                return existing.id, None, None
 
         now = datetime.now(timezone.utc)
         sig = Signal(
@@ -108,12 +142,36 @@ async def tradingview_webhook(request: Request, payload: TradingViewSignal):
             db.rollback()
             existing = db.query(Signal).filter(Signal.external_id == payload.id).first()
             if existing is not None:
-                return {"ok": True, "deduped": True, "id": existing.id}
+                return existing.id, None, None
             raise
         db.refresh(sig)
-        data = _serialize(sig)
+        return None, _serialize(sig), sig
     finally:
         db.close()
+
+
+@router.post("/tradingview", response_model=dict)
+@limiter.limit("60/minute")
+async def tradingview_webhook(request: Request, payload: TradingViewSignal):
+    """接收 TradingView 信号：校验密钥 -> 去重 -> 存库 -> 广播。
+    Receive a TradingView signal: verify secret -> dedup -> persist -> broadcast.
+    """
+    # 1) 来源校验：常量时间比较，密钥未配置则一律拒绝 / verify source, reject if unset
+    # 按 UTF-8 字节比较，避免非 ASCII 密钥触发 compare_digest 的 TypeError（应返回 401 而非 500）。
+    # Compare as UTF-8 bytes so a non-ASCII secret returns 401 instead of crashing compare_digest.
+    if not settings.WEBHOOK_SECRET or not secrets.compare_digest(
+        payload.secret.encode("utf-8"), settings.WEBHOOK_SECRET.encode("utf-8")
+    ):
+        raise HTTPException(status_code=401, detail="Webhook 密钥无效 / invalid webhook secret")
+
+    # 落库整段是同步 SQLAlchemy，走线程池。去重的并发竞态由 external_id 的唯一
+    # 约束 + IntegrityError 回退兜底，与改造前一致，不需要额外加锁。
+    # The persistence half is blocking SQLAlchemy and moves to the thread pool.
+    # The dedup race is still handled by the external_id unique constraint plus
+    # the IntegrityError fallback, exactly as before — no extra lock needed.
+    deduped_id, data, sig = await run_in_threadpool(_persist_signal_sync, payload)
+    if deduped_id is not None:
+        return {"ok": True, "deduped": True, "id": deduped_id}
 
     # 3) 推送：只给实时等级的在线用户；FREE 等级要等信号过期后才第一次看到
     # push: real-time-tier clients only; FREE tier sees it once it expires
@@ -185,6 +243,60 @@ class TrendSignal(BaseModel):
     id: str | None = Field(default=None, max_length=128)
 
 
+def _trend_db_work(
+    symbol: str,
+    tf_map: dict,
+    now: datetime,
+    low: float | None,
+    high: float | None,
+) -> dict:
+    """趋势 upsert + 顺带的信号判定。整段在同品种锁内执行。
+
+    now 由调用方在事件循环上算好传进来：它在改造前就是在 SessionLocal() 之前
+    计算的，保持原位置，Trend.updated_at 与响应里的 updatedAt 才仍是同一个值。
+
+    Trend upsert plus the opportunistic signal resolution, all inside the
+    per-symbol lock. `now` is computed by the caller on the event loop because it
+    was computed before SessionLocal() originally; keeping it there preserves the
+    identity between Trend.updated_at and the broadcast's updatedAt.
+    """
+    with _trend_lock(symbol):
+        db: Session = SessionLocal()
+        try:
+            # 每个品种一条，后来的覆盖前面的 / one row per symbol, upsert
+            row = db.query(Trend).filter(Trend.symbol == symbol).first()
+            if row is None:
+                row = Trend(symbol=symbol, timeframes=json.dumps(tf_map), updated_at=now)
+                db.add(row)
+            else:
+                row.timeframes = json.dumps(tf_map)
+                row.updated_at = now
+            try:
+                db.commit()
+            except IntegrityError:
+                # symbol 唯一约束并发冲突：回滚后重取再写 / unique-constraint race
+                db.rollback()
+                row = db.query(Trend).filter(Trend.symbol == symbol).first()
+                if row is not None:
+                    row.timeframes = json.dumps(tf_map)
+                    row.updated_at = now
+                    db.commit()
+            data = {"symbol": symbol, "timeframes": tf_map, "updatedAt": now.isoformat()}
+
+            # 顺带用这根 K 线的高低点判定该品种下所有未分胜负信号是否命中 TP/SL。
+            # 与趋势更新共用同一次 webhook 调用，不需要额外的行情通道。
+            # Opportunistically resolve pending signals on this symbol against this
+            # bar's high/low, riding on the same webhook call as the trend update —
+            # no separate price channel needed.
+            if low is not None and high is not None:
+                resolved = resolve_signals_with_price(db, symbol, low, high)
+                if resolved:
+                    db.commit()
+            return data
+        finally:
+            db.close()
+
+
 @router.post("/trend", response_model=dict)
 @limiter.limit("120/minute")
 async def tradingview_trend(request: Request):
@@ -221,39 +333,7 @@ async def tradingview_trend(request: Request):
     tf_map = {str(k): str(v) for k, v in payload.trends.items()}
     now = datetime.now(timezone.utc)
 
-    db: Session = SessionLocal()
-    try:
-        # 每个品种一条，后来的覆盖前面的 / one row per symbol, upsert
-        row = db.query(Trend).filter(Trend.symbol == symbol).first()
-        if row is None:
-            row = Trend(symbol=symbol, timeframes=json.dumps(tf_map), updated_at=now)
-            db.add(row)
-        else:
-            row.timeframes = json.dumps(tf_map)
-            row.updated_at = now
-        try:
-            db.commit()
-        except IntegrityError:
-            # symbol 唯一约束并发冲突：回滚后重取再写 / unique-constraint race
-            db.rollback()
-            row = db.query(Trend).filter(Trend.symbol == symbol).first()
-            if row is not None:
-                row.timeframes = json.dumps(tf_map)
-                row.updated_at = now
-                db.commit()
-        data = {"symbol": symbol, "timeframes": tf_map, "updatedAt": now.isoformat()}
-
-        # 顺带用这根 K 线的高低点判定该品种下所有未分胜负信号是否命中 TP/SL。
-        # 与趋势更新共用同一次 webhook 调用，不需要额外的行情通道。
-        # Opportunistically resolve pending signals on this symbol against this
-        # bar's high/low, riding on the same webhook call as the trend update —
-        # no separate price channel needed.
-        if payload.high is not None and payload.low is not None:
-            resolved = resolve_signals_with_price(db, symbol, payload.low, payload.high)
-            if resolved:
-                db.commit()
-    finally:
-        db.close()
+    data = await run_in_threadpool(_trend_db_work, symbol, tf_map, now, payload.low, payload.high)
 
     # 广播给所有在线前端 / broadcast to all online clients
     await manager.broadcast_to_clients({"type": "TREND_UPDATE", "data": data})
