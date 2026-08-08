@@ -53,6 +53,28 @@ function Write-Ok($msg)    { Write-Host "   [OK] $msg" -ForegroundColor Green }
 function Write-Bad($msg)   { Write-Host "   [!!] $msg" -ForegroundColor Red }
 function Write-Note($msg)  { Write-Host "   $msg" -ForegroundColor DarkGray }
 
+# 把任务计划程序的结果码翻译成人话。
+#
+# 最容易吓人的是 0x800710E0:看门狗每 2 分钟触发一次,发现实例还跑着就按
+# MultipleInstances=IgnoreNew 拒绝启动新的——这是**设计如此、说明看门狗正常
+# 工作**,但界面上只显示一个 8 位数字,太容易被当成故障。
+# 刻意按**十六进制字符串**比较,不要写成 `switch ([uint32]$code) { 0x800710E0 {...} }`。
+# PowerShell 把最高位为 1 的十六进制字面量解析成负的 Int32(经典坑:0xFFFFFFFF 等于 -1),
+# 于是 0x800710E0 变成 -2147020576,永远匹配不上 [uint32] 的 2147946720 —— 这个分支会
+# 静默失效、落进 default。字符串比较没有符号问题。
+function Format-TaskResult($code) {
+    $hex = "0x{0:X}" -f [uint32]$code
+    switch ($hex) {
+        "0x0"        { return "$hex (上次运行成功)" }
+        "0x41300"    { return "$hex (任务尚未运行过)" }
+        "0x41301"    { return "$hex (正在运行)" }
+        "0x41302"    { return "$hex (任务已禁用)" }
+        "0x41303"    { return "$hex (还没有触发过)" }
+        "0x800710E0" { return "$hex (看门狗触发时实例已在跑,按 IgnoreNew 拒绝新实例 —— 这是正常的,说明看门狗在工作)" }
+        default      { return "$hex (未知,可查 Task Scheduler 文档)" }
+    }
+}
+
 function Test-Admin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
     return ([Security.Principal.WindowsPrincipal]$id).IsInRole(
@@ -97,7 +119,8 @@ if ($Status) {
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($task) {
         $info = Get-ScheduledTaskInfo -TaskName $TaskName
-        Write-Note "计划任务      : 已安装,State=$($task.State) LastResult=$($info.LastTaskResult)"
+        Write-Note "计划任务      : 已安装,State=$($task.State)"
+        Write-Note "上次结果      : $(Format-TaskResult $info.LastTaskResult)"
         Write-Note "上次运行      : $($info.LastRunTime)"
         # 任务被禁用是个静默陷阱:进程可能还跑着,看起来一切正常,但开机自启和
         # 看门狗都已失效——多半是上次 -Stop 之后忘了 -Start。必须显式报出来。
