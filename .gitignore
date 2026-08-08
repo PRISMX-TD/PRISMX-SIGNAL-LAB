@@ -48,6 +48,26 @@ gateway/gateway.ini
 gateway/*.dll
 mt5probe/*.dll
 
+# MT5 Manager API SDK 本体（约 110 MB，MetaQuotes 官方分发，不入库）
+#
+# ⚠️ 它不是可有可无的参考资料：build.ps1 从 MetaTrader5SDK/Libs 引用并复制 5 个
+# DLL，没有它编译不出 mt5gateway.exe。（Docs/Examples/Include 三个子目录才是纯
+# 参考，占了其中约 52 MB。）
+#
+# 既然不入库，就意味着**全新克隆的仓库无法直接编译 gateway**，必须另行获取该 SDK
+# ——它由券商提供或从 MetaQuotes 获取。这一点写在《运维手册》第八节。
+#
+# 加这条规则的直接原因：该目录此前既没被忽略、也没被 add，一个 `git add .` 就会
+# 把 110 MB 提交进历史，而 git 历史里的大文件事后删不干净。
+#
+# The MT5 Manager API SDK itself (~110 MB, distributed by MetaQuotes). Not optional
+# reference material: build.ps1 references and copies 5 DLLs out of Libs/, so the
+# gateway cannot be built without it. A fresh clone therefore cannot build the
+# gateway until the SDK is obtained separately. Ignored because it was previously
+# neither ignored nor added — one `git add .` would have committed 110 MB into
+# history, where large files cannot be cleanly removed afterwards.
+MetaTrader5SDK/
+
 # ===== Node / 前端 =====
 node_modules/
 frontend/dist/
