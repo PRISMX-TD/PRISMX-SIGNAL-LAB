@@ -1,9 +1,10 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './store/auth'
 import { PrefsProvider } from './store/prefs'
 import Layout from './components/Layout'
 import PwaBackGuard from './components/PwaBackGuard'
+import ErrorBoundary from './components/ErrorBoundary'
 
 // 路由级代码分割：首屏只加载当前页面的代码，其余按需加载（如图表页）。
 // Route-level code splitting: only the current page's code loads up front;
@@ -66,12 +67,23 @@ function PageFallback() {
   )
 }
 
+// 把当前路径喂给 ErrorBoundary 当重置信号：从崩掉的页面导航走即自动恢复。
+// 必须在 BrowserRouter 内部才能用 useLocation，所以单独包一层。
+// Feeds the current path to ErrorBoundary as its reset signal, so navigating
+// away from a broken page recovers automatically. Needs to sit inside
+// BrowserRouter to use useLocation, hence the extra component.
+function RouteErrorBoundary({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation()
+  return <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <PrefsProvider>
         <BrowserRouter>
           <PwaBackGuard>
+          <RouteErrorBoundary>
           <Suspense fallback={<PageFallback />}>
           <Routes>
             <Route path="/" element={<Home />} />
@@ -162,6 +174,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           </Suspense>
+          </RouteErrorBoundary>
           </PwaBackGuard>
         </BrowserRouter>
       </PrefsProvider>

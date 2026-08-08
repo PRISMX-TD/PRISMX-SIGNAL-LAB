@@ -42,7 +42,12 @@
     "buy": "买入",
     "sell": "卖出",
     "noChange": "不修改",
-    "error": "操作失败，请重试"
+    "error": "操作失败，请重试",
+    "errorBoundary": {
+      "title": "这个页面出了点问题",
+      "desc": "页面渲染时遇到错误。你的账户和持仓不受影响，重新加载即可继续。",
+      "reload": "重新加载"
+    }
   },
   "landing": {
     "navCompare": "行业解剖",

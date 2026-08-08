@@ -42,7 +42,12 @@
     "buy": "BUY",
     "sell": "SELL",
     "noChange": "No change",
-    "error": "Operation failed, please try again"
+    "error": "Operation failed, please try again",
+    "errorBoundary": {
+      "title": "Something went wrong on this page",
+      "desc": "The page hit an error while rendering. Your account and positions are unaffected — reload to continue.",
+      "reload": "Reload"
+    }
   },
   "landing": {
     "navCompare": "Industry Exposed",
