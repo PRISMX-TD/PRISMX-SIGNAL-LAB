@@ -846,6 +846,7 @@
     "sendAmount": "Send exactly",
     "sendTo": "To address",
     "copied": "Address copied",
+    "copyFailed": "Copy failed — select the address manually",
     "pollingHint": "Waiting for confirmation… keep this page open, upgrade is automatic",
     "paymentExpired": "Payment expired or failed. Please try again.",
     "successTitle": "Upgrade complete!",

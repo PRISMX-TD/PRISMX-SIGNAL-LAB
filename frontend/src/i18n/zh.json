@@ -846,6 +846,7 @@
     "sendAmount": "应付金额",
     "sendTo": "支付地址",
     "copied": "地址已复制",
+    "copyFailed": "复制失败，请手动选中地址",
     "pollingHint": "支付确认中…到账后自动升级，页面保持打开",
     "paymentExpired": "支付已过期或失败，请重试",
     "successTitle": "升级成功！",

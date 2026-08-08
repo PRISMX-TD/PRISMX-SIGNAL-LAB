@@ -103,7 +103,14 @@ export default function UpgradePage() {
   const [chosenCoin, setChosenCoin] = useState<string>("usdttrc20");
   const [state, setState] = useState<PaymentState>({ step: "select" });
   const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
+  // 三态而不是布尔：复制失败必须让用户知道。这里复制的是收款地址——如果
+  // 写剪贴板失败了却照样显示"已复制"，用户会把剪贴板里的旧内容当成地址粘
+  // 到钱包里，那是真金白银打错地方。
+  // Tri-state rather than a boolean: a failed copy has to be visible. This
+  // copies the payment address — showing "copied" when the clipboard write
+  // actually failed leads the user to paste whatever was there before into
+  // their wallet, i.e. real funds to the wrong address.
+  const [copyState, setCopyState] = useState<"idle" | "ok" | "fail">("idle");
   const [remaining, setRemaining] = useState<number | null>(null);
   // 支付窗口仍开着时，NOWPayments 已确认收到的部分金额（低于应付金额即为
   // 少转）；null = 还没有数据。用于在倒计时期间就提示"钱到了一部分"。
@@ -304,10 +311,20 @@ export default function UpgradePage() {
     setState({ step: "select" });
   };
 
-  const copyAddress = (addr: string) => {
-    navigator.clipboard.writeText(addr).catch(() => {});
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const copyAddress = async (addr: string) => {
+    try {
+      // navigator.clipboard 在非 HTTPS 环境下整体不存在，那是同步抛 TypeError
+      // 而不是返回被拒绝的 promise，所以整段都要包在 try 里。
+      // navigator.clipboard is absent entirely outside secure contexts, and
+      // that throws synchronously rather than rejecting — hence the whole
+      // thing sits inside the try.
+      await navigator.clipboard.writeText(addr);
+      setCopyState("ok");
+      setTimeout(() => setCopyState("idle"), 2000);
+    } catch {
+      setCopyState("fail");
+      setTimeout(() => setCopyState("idle"), 4000);
+    }
   };
 
   const fmtCountdown = (secs: number) => {
@@ -663,8 +680,15 @@ export default function UpgradePage() {
               <div className="mt-3 break-all rounded-inner border border-line bg-black/20 p-3.5 font-mono text-sm leading-relaxed text-slate-200">
                 {state.payAddress}
               </div>
-              <button onClick={() => copyAddress(state.payAddress)} className="btn-ghost mt-3.5 w-full py-2.5">
-                {copied ? t("upgrade.copied") : t("common.copy")}
+              <button
+                onClick={() => copyAddress(state.payAddress)}
+                className={`btn-ghost mt-3.5 w-full py-2.5 ${copyState === "fail" ? "text-down" : ""}`}
+              >
+                {copyState === "ok"
+                  ? t("upgrade.copied")
+                  : copyState === "fail"
+                    ? t("upgrade.copyFailed")
+                    : t("common.copy")}
               </button>
             </div>
 
