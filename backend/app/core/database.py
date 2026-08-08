@@ -1,8 +1,14 @@
 """数据库连接与会话管理 / Database engine and session management."""
+import json
+import logging
+import uuid
+
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.core.config import settings
+
+logger = logging.getLogger("prismx.database")
 
 # SQLite 需要 check_same_thread=False 以支持多线程 / SQLite needs this for multithreading
 _is_sqlite = settings.DATABASE_URL.startswith("sqlite")
@@ -78,10 +84,99 @@ def _hash_legacy_api_tokens() -> None:
         db.close()
 
 
+# 迁移版本号。**每次给 _migrate_columns 增加新的迁移步骤时 +1。**
+#
+# 不加的后果不是报错，而是新迁移在已跑过的库上被静默跳过——建表能力由
+# create_all 兜底，但补列、回填、建索引这些全都不会执行，问题会在很久以后
+# 以"某列全是 NULL"的形式暴露出来。改这个函数就顺手改这里。
+#
+# Bump this whenever a new step is added to _migrate_columns. Forgetting doesn't
+# raise — the new step is silently skipped on databases that already ran an older
+# revision, and the damage surfaces much later as an unexpectedly NULL column.
+CURRENT_SCHEMA_REV = 1
+
+_SCHEMA_REV_KEY = "schema_rev"
+
+
+def _read_schema_rev() -> int | None:
+    """读已应用的迁移版本号。表不存在或没有该行时返回 None（当成"没跑过"）。
+    Read the applied migration revision; None means "never run" (or unreadable)."""
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT value FROM platform_settings WHERE key = :k"),
+                {"k": _SCHEMA_REV_KEY},
+            ).fetchone()
+    except Exception:
+        # 首次部署时 platform_settings 可能还不存在；当成没跑过，走完整迁移。
+        # On a first deploy the table may not exist yet; treat as never-run.
+        return None
+    if not row or row[0] is None:
+        return None
+    try:
+        return int(json.loads(row[0]))
+    except (TypeError, ValueError):
+        return None
+
+
+def _write_schema_rev(rev: int) -> None:
+    """记下已应用的版本号。写失败不致命——最多下次启动再全量跑一遍。
+    Record the applied revision. A failure just means a full re-run next boot."""
+    try:
+        with engine.begin() as conn:
+            updated = conn.execute(
+                text("UPDATE platform_settings SET value = :v WHERE key = :k"),
+                {"v": json.dumps(rev), "k": _SCHEMA_REV_KEY},
+            ).rowcount
+            if not updated:
+                # id 是 String 主键、由 ORM 的 default=_uuid 生成；这里走裸 SQL
+                # 绕过了 ORM，必须自己给值，否则 NOT NULL 约束会拒绝插入。
+                # The id column is a String PK filled by the ORM's default; raw SQL
+                # bypasses that, so supply one or the NOT NULL constraint rejects it.
+                conn.execute(
+                    text(
+                        "INSERT INTO platform_settings (id, key, value) "
+                        "VALUES (:id, :k, :v)"
+                    ),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "k": _SCHEMA_REV_KEY,
+                        "v": json.dumps(rev),
+                    },
+                )
+    except Exception:
+        logger.warning("写入 schema_rev 失败，下次启动会重跑一遍迁移", exc_info=True)
+
+
 def _migrate_columns() -> None:
     """轻量迁移：为已存在的旧表补充新列（SQLite 不会自动加列）。
     Lightweight migration: add new columns to existing tables (SQLite won't).
+
+    版本号快速通道：库里记的版本与 CURRENT_SCHEMA_REV 相同就直接返回。
+
+    这段整体跑在 uvicorn bind 端口**之前**，每多花一秒就是多一秒 502。而它本身
+    是一长串 inspect + ALTER + 回填 UPDATE，其中几条是无条件全表 UPDATE（历史
+    档位重映射、bars_held 回填），在已经迁移完的库上每次重启都白跑一遍——命中的
+    行早就是 0，但查询照发不误。
+
+    所以日常重启走快速通道，只有真正改了 schema（手工把 CURRENT_SCHEMA_REV +1）
+    才跑完整迁移。慢通道本身完全没动，全部语句仍然是幂等的，随时可以靠把库里的
+    版本号调小来强制重跑。
+
+    Fast path on a revision marker: return immediately when the database already
+    records CURRENT_SCHEMA_REV. This whole function runs before uvicorn binds the
+    port, so every second here is a second of 502s — and it is a long chain of
+    inspect + ALTER + backfill UPDATEs, a few of which are unconditional
+    full-table writes that match zero rows on an already-migrated database yet
+    still get sent on every restart. The slow path is untouched and every
+    statement in it remains idempotent, so lowering the stored revision forces a
+    full re-run at any time.
     """
+    applied = _read_schema_rev()
+    if applied == CURRENT_SCHEMA_REV:
+        logger.info("schema_rev=%d 已是最新，跳过列迁移", applied)
+        return
+
     # 跨数据库的列类型映射 / cross-DB column type mapping
     is_postgres = settings.DATABASE_URL.startswith("postgres")
     datetime_type = "TIMESTAMP" if is_postgres else "DATETIME"
@@ -458,6 +553,12 @@ def _migrate_columns() -> None:
         if "actually_paid" not in payment_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE payments ADD COLUMN actually_paid FLOAT"))
+
+    # 全部步骤跑完才记版本号：中途抛异常就不写，下次启动会重跑（所有步骤幂等）。
+    # Only recorded after every step succeeded: an exception midway leaves the marker
+    # untouched so the next boot retries (every step is idempotent).
+    _write_schema_rev(CURRENT_SCHEMA_REV)
+    logger.info("列迁移完成，schema_rev=%d", CURRENT_SCHEMA_REV)
 
 
 def _disable_legacy_strategies() -> None:
