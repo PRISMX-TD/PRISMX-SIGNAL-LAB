@@ -22,11 +22,11 @@ export default function BindPage() {
   const handleGatewayVerify = async () => {
     const loginNum = parseInt(gwLogin, 10)
     if (!loginNum || loginNum <= 0) {
-      setGwError('请输入有效的 MT5 账号')
+      setGwError(t('bind.gw.errLogin'))
       return
     }
     if (!gwPassword) {
-      setGwError('请输入密码')
+      setGwError(t('bind.gw.errPassword'))
       return
     }
     setGwVerifying(true)
@@ -40,9 +40,26 @@ export default function BindPage() {
         refreshAll()
       }
     } catch (e) {
-      setGwError(e instanceof Error ? localizeApiError(e.message) : '验证失败')
+      setGwError(e instanceof Error ? localizeApiError(e.message) : t('bind.gw.errFailed'))
     } finally {
       setGwVerifying(false)
+    }
+  }
+
+  // 解绑失败必须说话。此前这里是 `catch {}`：后端拒绝或网络断了，按钮点下去
+  // 界面纹丝不动，用户只能反复点，以为是自己没点到。复用上面那条错误横幅，
+  // 不额外造一套提示。
+  // A failed disconnect has to say so. This used to be `catch {}`: if the
+  // backend refused or the network dropped, the button did visibly nothing and
+  // the user just kept clicking, assuming they'd missed it. Reuses the error
+  // banner above rather than introducing a second notification mechanism.
+  const handleGatewayRemove = async (login: string) => {
+    setGwError('')
+    try {
+      await gatewayApi.remove(login)
+      refreshAll()
+    } catch (e) {
+      setGwError(e instanceof Error ? localizeApiError(e.message) : t('bind.gw.unbindFailed'))
     }
   }
 
@@ -55,17 +72,15 @@ export default function BindPage() {
         <h2 className="font-display text-2xl font-bold text-slate-100">
           <span className="neon-text">{t('bind.title')}</span>
         </h2>
-        <p className="mt-1 text-sm text-slate-400">
-          填入你的 Make Capital MT5 账号与密码，即可直接连接，无需安装任何程序
-        </p>
+        <p className="mt-1 text-sm text-slate-400">{t('bind.gw.pageSubtitle')}</p>
       </div>
 
       <div className="grid gap-5 lg:grid-cols-2">
         {/* Make Capital MT5 直连 */}
         <div className="glass p-6 lg:col-span-2">
           <div className="mb-5">
-            <h3 className="font-display text-xl font-semibold text-slate-100">Make Capital MT5 直连</h3>
-            <p className="mt-1 text-xs text-slate-400">无需本地 Bridge / VPS，直接通过网关连接 MT5</p>
+            <h3 className="font-display text-xl font-semibold text-slate-100">{t('bind.gw.title')}</h3>
+            <p className="mt-1 text-xs text-slate-400">{t('bind.gw.hint')}</p>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-3">
@@ -73,14 +88,14 @@ export default function BindPage() {
               className="input h-11 font-mono text-sm"
               type="text"
               inputMode="numeric"
-              placeholder="MT5 账号 (Login)"
+              placeholder={t('bind.gw.loginPlaceholder')}
               value={gwLogin}
               onChange={(e) => { setGwLogin(e.target.value); setGwError(''); setGwResult(null) }}
             />
             <input
               className="input h-11 font-mono text-sm"
               type="password"
-              placeholder="MT5 密码"
+              placeholder={t('bind.gw.passwordPlaceholder')}
               value={gwPassword}
               onChange={(e) => { setGwPassword(e.target.value); setGwError(''); setGwResult(null) }}
               onKeyDown={(e) => e.key === 'Enter' && handleGatewayVerify()}
@@ -90,7 +105,7 @@ export default function BindPage() {
               disabled={gwVerifying || !gwLogin || !gwPassword}
               className="btn-primary h-11 text-sm font-semibold disabled:opacity-50"
             >
-              {gwVerifying ? '验证中...' : '验证并绑定'}
+              {gwVerifying ? t('bind.gw.verifying') : t('bind.gw.verify')}
             </button>
           </div>
 
@@ -103,15 +118,15 @@ export default function BindPage() {
               gwResult.valid ? 'border-up/30 bg-up/10 text-up' : 'border-amber-400/30 bg-amber-400/10 text-amber-300'
             }`}>
               {gwResult.valid
-                ? `验证通过: ${gwResult.name}, 余额 $${gwResult.balance.toFixed(2)}`
-                : `验证失败: ${gwResult.retcode}`}
+                ? t('bind.gw.verified', { name: gwResult.name, balance: gwResult.balance.toFixed(2) })
+                : t('bind.gw.verifyFailed', { code: gwResult.retcode })}
             </div>
           )}
 
           {/* 已绑定的直连账号 */}
           {gatewayAccounts.length > 0 && (
             <div className="mt-5 pt-5 border-t border-white/10">
-              <p className="mb-3 text-sm font-medium text-slate-300">已绑定账号</p>
+              <p className="mb-3 text-sm font-medium text-slate-300">{t('bind.gw.boundTitle')}</p>
               <div className="space-y-2">
                 {gatewayAccounts.map((a) => (
                   <div key={a.login} className="flex items-center justify-between rounded-lg bg-white/5 px-4 py-3 transition hover:bg-white/[0.07]">
@@ -120,21 +135,19 @@ export default function BindPage() {
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="font-mono text-sm font-medium text-slate-100">{a.login}</span>
-                          <span className="tag bg-prism-600/20 text-prism-300 text-[10px]">直连</span>
+                          <span className="tag bg-prism-600/20 text-prism-300 text-[10px]">{t('bind.gw.tag')}</span>
                         </div>
                         <div className="mt-0.5 flex items-center gap-3 text-xs text-slate-400">
                           <span>{a.accountName || '—'}</span>
-                          {a.balance != null && <span>余额 ${a.balance.toFixed(2)}</span>}
+                          {a.balance != null && <span>{t('bind.gw.balance', { amount: a.balance.toFixed(2) })}</span>}
                         </div>
                       </div>
                     </div>
                     <button
-                      onClick={async () => {
-                        try { await gatewayApi.remove(a.login); refreshAll() } catch {}
-                      }}
+                      onClick={() => handleGatewayRemove(a.login)}
                       className="rounded-lg border border-down/30 bg-down/5 px-3 py-1.5 text-xs font-medium text-down transition hover:bg-down/15"
                     >
-                      解绑
+                      {t('bind.gw.unbind')}
                     </button>
                   </div>
                 ))}
@@ -151,16 +164,14 @@ export default function BindPage() {
           <div className="flex items-start justify-between">
             <div>
               <h3 className="font-display text-lg font-semibold text-slate-100 transition group-hover:text-prism-300">
-                使用 PRISMX 桥接程序连接
+                {t('bind.bridgeEntry.title')}
               </h3>
-              <p className="mt-1 text-sm text-slate-400">
-                适用于非 Make Capital 账户，需要下载并运行本地桥接程序
-              </p>
+              <p className="mt-1 text-sm text-slate-400">{t('bind.bridgeEntry.desc')}</p>
               <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
-                <span className="rounded bg-white/5 px-2 py-1">API Token 管理</span>
-                <span className="rounded bg-white/5 px-2 py-1">桥接账户管理</span>
-                <span className="rounded bg-white/5 px-2 py-1">品种后缀配置</span>
-                <span className="rounded bg-white/5 px-2 py-1">接入步骤</span>
+                <span className="rounded bg-white/5 px-2 py-1">{t('bind.bridgeEntry.f1')}</span>
+                <span className="rounded bg-white/5 px-2 py-1">{t('bind.bridgeEntry.f2')}</span>
+                <span className="rounded bg-white/5 px-2 py-1">{t('bind.bridgeEntry.f3')}</span>
+                <span className="rounded bg-white/5 px-2 py-1">{t('bind.bridgeEntry.f4')}</span>
               </div>
             </div>
             <span className="text-2xl text-slate-600 transition group-hover:translate-x-1 group-hover:text-prism-400">→</span>
