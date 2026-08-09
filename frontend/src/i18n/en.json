@@ -974,8 +974,6 @@
         "list": "Bullet list",
         "image": "Image"
       },
-      "moveUp": "Move up",
-      "moveDown": "Move down",
       "upload": "Upload image",
       "uploading": "Uploading…",
       "imageUrlOrUpload": "Image URL, or upload on the left",
@@ -1498,7 +1496,7 @@
             "We never obtain — and technically cannot obtain — your MT5 trading account password. The bridge app reads terminals you have already logged into on your own computer.",
             "We never touch or custody any of your funds.",
             "We do not collect identity documents, bank card numbers or postal addresses. Crypto payments are handled by NOWPayments; we retain only the payment id, amount, currency and status.",
-            "We use no third-party advertising or cross-site tracking cookies. Your browser's local storage holds only your login token and interface preferences (language, chart settings, selected tab)."
+            "We do not sell your personal data, nor trade it for any third party's marketing resources. Your browser's local storage holds only your login token and interface preferences (language, chart settings, selected tab)."
           ]
         },
         {
@@ -1523,6 +1521,7 @@
           "p": [
             "We do not sell your personal data and do not trade it with anyone for marketing.",
             "To operate, necessary data reaches these providers: Google (only if you use Google sign-in, to verify your identity), NOWPayments (payment processing), browser vendors' push services such as Google / Apple / Mozilla (only when notifications are on, to deliver them), and the cloud and database providers named above.",
+            "Advertising measurement: this site loads the Meta Pixel (Facebook advertising pixel). It stores cookies such as `_fbp` in your browser and reports which pages of this site you visited back to Meta, so we can measure ad performance and show retargeted ads. It cannot read your MT5 account, positions, trade history or payment details. You can limit this tracking through your browser's cookie settings, an ad blocker, or the Ad Preferences section of your Meta account.",
             "We may disclose information where legally required, or where necessary to protect the Service and its users' legitimate interests."
           ]
         },
