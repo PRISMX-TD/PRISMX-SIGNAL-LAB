@@ -24,6 +24,20 @@ const read = (rel) => {
 const expect = (rel, html, needle, label) => {
   if (html && !html.includes(needle)) fail(`${rel} 缺少${label}：${needle}`)
 }
+const expectInH1 = (rel, html, needle, label) => {
+  if (!html) return
+  const h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/)
+  if (!h1Match || !h1Match[1].includes(needle)) {
+    fail(`${rel} 的 <h1> 中缺少${label}：${needle}`)
+  }
+}
+const expectInTitle = (rel, html, needle, label) => {
+  if (!html) return
+  const titleMatch = html.match(/<title>([\s\S]*?)<\/title>/)
+  if (!titleMatch || !titleMatch[1].includes(needle)) {
+    fail(`${rel} 的 <title> 中缺少${label}：${needle}`)
+  }
+}
 
 // [文件, canonical 路径, html lang, 正文标志文案, title 标志文案]
 const PAGES = [
@@ -43,9 +57,9 @@ for (const [file, path, htmlLang, bodyText, titleText] of PAGES) {
   const html = read(file)
   if (!html) continue
   expect(file, html, '<h1', '<h1> 标签')
-  expect(file, html, bodyText, '正文标志文案')
+  expectInH1(file, html, bodyText, '正文标志文案')
   expect(file, html, `<title>`, 'title 标签')
-  expect(file, html, titleText, 'title 标志文案')
+  expectInTitle(file, html, titleText, 'title 标志文案')
   expect(file, html, `<html lang="${htmlLang}"`, 'lang 声明')
   expect(file, html, `<link rel="canonical" href="${ORIGIN}${path}" />`, 'canonical')
   expect(file, html, 'hreflang="zh-CN"', 'hreflang zh-CN')
