@@ -457,13 +457,21 @@ function Foot({ t }: { t: T }) {
 export default function LandingPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  // mounted 守卫：预渲染（Node 里 renderToString）绝不能触发 PrismScene 的
+  // 动态 import——three/WebGL 只在浏览器有意义，Node 侧 import 它纯属风险。
+  // effect 不在服务端执行，所以服务端渲染的是空背景容器；客户端挂载后第一帧
+  // 置 true，场景照常懒加载淡入，用户感知与改动前一致（此前也是 lazy 异步出现）。
+  const [sceneReady, setSceneReady] = useState(false)
+  useEffect(() => setSceneReady(true), [])
   return (
     <div className="relative min-h-screen bg-[#05030c] text-white">
       {/* 整页固定极光流体背景 / page-wide fixed aurora backdrop */}
       <div className="pointer-events-none fixed inset-0 z-0">
-        <Suspense fallback={null}>
-          <PrismScene />
-        </Suspense>
+        {sceneReady && (
+          <Suspense fallback={null}>
+            <PrismScene />
+          </Suspense>
+        )}
         {/* 整体压暗，保证下方各分区文字可读 / global dim for legibility */}
         <div className="absolute inset-0 bg-[#05030c]/45" />
       </div>
