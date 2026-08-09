@@ -7,9 +7,11 @@ import { useTranslation } from 'react-i18next'
 import { paymentApi } from '../api/client'
 import { SUPPORT_EMAIL } from '../config/site'
 import Logo from '../components/Logo'
-import LanguageToggle from '../components/LanguageToggle'
+import PublicLanguageToggle from '../components/PublicLanguageToggle'
 import FaqSection from '../components/landing/FaqSection'
 import MobileStickyCta from '../components/landing/MobileStickyCta'
+import { usePublicLang } from '../seo/PublicShell'
+import { localePath } from '../seo/meta'
 
 // 3D 场景按需加载，避免拖慢首屏 TTI / lazy-load the 3D canvas
 const PrismScene = lazy(() => import('../components/landing/PrismScene'))
@@ -96,7 +98,7 @@ function Navbar({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate
           ))}
         </nav>
         <div className="ml-auto flex items-center gap-2">
-          <LanguageToggle />
+          <PublicLanguageToggle />
           <a href="/login" className="hidden rounded-lg px-3 py-2 text-[13px] text-neutral-400 transition-colors hover:text-white sm:block">
             {t('landing.signIn')}
           </a>
@@ -361,6 +363,7 @@ function FinalCta({ t, navigate }: { t: T; navigate: ReturnType<typeof useNaviga
 
 /* ═══════════════ Footer ═══════════════ */
 function Foot({ t }: { t: T }) {
+  const lang = usePublicLang()
   const links = [
     { h: '#showcase', k: 'navShowcase' },
     { h: '#guard', k: 'navWinrate' },
@@ -408,7 +411,7 @@ function Foot({ t }: { t: T }) {
               {(['terms', 'privacy', 'risk'] as const).map((d) => (
                 <Link
                   key={d}
-                  to={`/${d}`}
+                  to={localePath(lang, `/${d}`)}
                   className="text-[13px] text-neutral-400 transition-colors hover:text-white"
                 >
                   {t(`legal.${d}.title`)}

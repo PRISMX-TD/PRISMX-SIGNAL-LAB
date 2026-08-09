@@ -22,13 +22,14 @@
 //   2. Google OAuth's verification process requires a publicly accessible
 //      privacy-policy URL, and hiding it behind the login wall blocks it;
 //   3. neither search engines nor compliance reviewers have a token.
-import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import AuroraBackground from '../components/AuroraBackground'
-import LanguageToggle from '../components/LanguageToggle'
+import PublicLanguageToggle from '../components/PublicLanguageToggle'
 import Logo from '../components/Logo'
 import { LEGAL_UPDATED, SUPPORT_EMAIL } from '../config/site'
+import { usePublicLang } from '../seo/PublicShell'
+import { localePath } from '../seo/meta'
 
 export type LegalDoc = 'terms' | 'privacy' | 'risk'
 
@@ -39,11 +40,9 @@ interface Section {
 
 export default function LegalPage({ doc }: { doc: LegalDoc }) {
   const { t } = useTranslation()
+  const lang = usePublicLang()
 
   const title = t(`legal.${doc}.title`)
-  useEffect(() => {
-    document.title = `${title} · Signal Lab`
-  }, [title])
 
   // returnObjects 让一个 key 直接返回结构化数组，省掉「sectionCount + 循环拼
   // key」这类需要两处同步的写法——加一节只改 json，不动这个文件。
@@ -59,14 +58,14 @@ export default function LegalPage({ doc }: { doc: LegalDoc }) {
 
       <header className="relative z-10 border-b border-white/[0.06]">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-5 py-4">
-          <Link to="/" className="flex items-center gap-2.5">
+          <Link to={localePath(lang, '/')} className="flex items-center gap-2.5">
             <Logo size={32} />
             <span className="text-sm font-semibold tracking-tight text-slate-100">Signal Lab</span>
           </Link>
           <div className="ml-auto flex items-center gap-3">
-            <LanguageToggle />
+            <PublicLanguageToggle />
             <Link
-              to="/"
+              to={localePath(lang, '/')}
               className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:border-prism-400/40 hover:text-prism-200"
             >
               {t('legal.backHome')}
@@ -134,7 +133,7 @@ export default function LegalPage({ doc }: { doc: LegalDoc }) {
             .map((d) => (
               <Link
                 key={d}
-                to={`/${d}`}
+                to={localePath(lang, `/${d}`)}
                 className="text-slate-400 transition hover:text-prism-300"
               >
                 {t(`legal.${d}.title`)}

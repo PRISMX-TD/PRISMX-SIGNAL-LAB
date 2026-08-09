@@ -6,6 +6,7 @@ import Layout from './components/Layout'
 import PwaBackGuard from './components/PwaBackGuard'
 import ErrorBoundary from './components/ErrorBoundary'
 import MetaPixel from './components/MetaPixel'
+import PublicShell from './seo/PublicShell'
 
 // 路由级代码分割：首屏只加载当前页面的代码，其余按需加载（如图表页）。
 // Route-level code splitting: only the current page's code loads up front;
@@ -94,7 +95,8 @@ export default function App() {
           <RouteErrorBoundary>
           <Suspense fallback={<PageFallback />}>
           <Routes>
-            <Route path="/" element={<Home />} />
+            <Route path="/" element={<PublicShell lang="zh" page="home"><Home /></PublicShell>} />
+            <Route path="/en" element={<PublicShell lang="en" page="home"><Home /></PublicShell>} />
             <Route path="/login" element={<LoginPage />} />
             {/* 法务文本：必须放在 Protected 之外，公开可访问。
                 ① 访客要能在注册前读到条款，否则「注册即视为同意」不成立；
@@ -112,9 +114,12 @@ export default function App() {
                 Also deliberately not wrapped in Layout: that mounts LiveProvider
                 (a WebSocket plus several pollers) which these pages never need and
                 which cannot connect when logged out anyway. */}
-            <Route path="/terms" element={<LegalPage doc="terms" />} />
-            <Route path="/privacy" element={<LegalPage doc="privacy" />} />
-            <Route path="/risk" element={<LegalPage doc="risk" />} />
+            <Route path="/terms" element={<PublicShell lang="zh" page="terms"><LegalPage doc="terms" /></PublicShell>} />
+            <Route path="/privacy" element={<PublicShell lang="zh" page="privacy"><LegalPage doc="privacy" /></PublicShell>} />
+            <Route path="/risk" element={<PublicShell lang="zh" page="risk"><LegalPage doc="risk" /></PublicShell>} />
+            <Route path="/en/terms" element={<PublicShell lang="en" page="terms"><LegalPage doc="terms" /></PublicShell>} />
+            <Route path="/en/privacy" element={<PublicShell lang="en" page="privacy"><LegalPage doc="privacy" /></PublicShell>} />
+            <Route path="/en/risk" element={<PublicShell lang="en" page="risk"><LegalPage doc="risk" /></PublicShell>} />
             <Route
               element={
                 <Protected>
