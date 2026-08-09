@@ -1,11 +1,15 @@
 // 常见问题：原生 <details>/<summary> 手风琴，无需 JS 状态
 // FAQ accordion built on native <details>/<summary>, no JS state needed
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router-dom'
+import { usePublicLang } from '../../seo/PublicShell'
+import { localePath } from '../../seo/meta'
 
 const FAQ_IDS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const
 
 export default function FaqSection() {
   const { t } = useTranslation()
+  const lang = usePublicLang()
 
   return (
     <section id="faq" className="mx-auto max-w-7xl scroll-mt-24 px-4 pb-14 pt-6 sm:px-6 sm:pb-20 sm:pt-8">
@@ -19,6 +23,15 @@ export default function FaqSection() {
             <p className="px-6 pb-5 text-sm leading-relaxed text-slate-400">{t(`landing.faq${n}a`)}</p>
           </details>
         ))}
+
+        <div className="mt-6 text-center">
+          <Link
+            to={localePath(lang, '/faq')}
+            className="text-sm text-prism-300 underline underline-offset-4 transition hover:text-prism-200"
+          >
+            {t('landing.faqViewAll')} →
+          </Link>
+        </div>
       </div>
     </section>
   )

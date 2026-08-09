@@ -26,6 +26,7 @@ const AdminPage = lazy(() => import('./pages/AdminPage'))
 const SimulatorPage = lazy(() => import('./pages/SimulatorPage'))
 const StrategiesPage = lazy(() => import('./pages/StrategiesPage'))
 const LegalPage = lazy(() => import('./pages/LegalPage'))
+const FaqPage = lazy(() => import('./pages/FaqPage'))
 const SupportPage = lazy(() => import('./pages/SupportPage'))
 const StrategyGuidePage = lazy(() => import('./pages/StrategyGuidePage'))
 
@@ -120,6 +121,8 @@ export default function App() {
             <Route path="/en/terms" element={<PublicShell lang="en" page="terms"><LegalPage doc="terms" /></PublicShell>} />
             <Route path="/en/privacy" element={<PublicShell lang="en" page="privacy"><LegalPage doc="privacy" /></PublicShell>} />
             <Route path="/en/risk" element={<PublicShell lang="en" page="risk"><LegalPage doc="risk" /></PublicShell>} />
+            <Route path="/faq" element={<PublicShell lang="zh" page="faq"><FaqPage /></PublicShell>} />
+            <Route path="/en/faq" element={<PublicShell lang="en" page="faq"><FaqPage /></PublicShell>} />
             <Route
               element={
                 <Protected>

@@ -198,6 +198,7 @@
     "faq8a": "Nobody can promise that, and anyone who does is lying to you. Trading always carries risk and past win rates never guarantee future results. What PRISMX provides is discipline and transparency: complete plans, locked-in stops, honest records. The decisions, and the risk, stay yours.",
     "faq9q": "What's actually different between FREE and PRO?",
     "faq9a": "One word: timing. FREE shows signals only after they expire (about a 10-minute delay), which makes it perfect for auditing the record and learning the plan structure, but structurally impossible to trade on. PRO is real-time delivery plus one-click execution, auto position management and your personal real win rate. FREE exists so you can audit us for free; upgrade only once the record has earned it.",
+    "faqViewAll": "View all questions",
     "ctaTitle": "Enter your next trade with a plan",
     "ctaSubtitle": "Registration is free and a demo account covers the full flow. Audit our record on FREE first; upgrade only if we've earned it.",
     "ctaButton": "Get started free",
@@ -1402,6 +1403,18 @@
     "signalExpired": "Expired",
     "signalTriggeredAt": "Triggered at",
     "disclaimer": "Strategy signals fire only when your conditions are met — a read-only judgement that never places an order by itself. Backtests do account for spread, slippage and commission as configured, but not for overnight swap, and they do not simulate rejections or execution latency. Nothing here is a promise of returns, and past performance does not predict future results."
+  },
+  "faqPage": {
+    "title": "Frequently Asked Questions",
+    "intro": "Everything about fund safety, requirements, signal scoring and subscriptions. The first 9 match the homepage FAQ; the rest go deeper.",
+    "q10": "Is it MT5 only? Can I use MT4?",
+    "a10": "MT5 only for now. One-tap execution and automatic position management rely on MT5's integration capabilities, which MT4 cannot match — and accounts at the partner broker are MT5 by default.",
+    "q11": "My PC can't stay on all day. Can I use a VPS?",
+    "a11": "Yes. Any Windows environment that runs MT5 can play the execution role, including a cloud Windows VPS. A common setup is exactly that: MT5 on a VPS stays online while your phone watches signals and sends orders.",
+    "q12": "What happens when PRO expires or I stop paying?",
+    "a12": "You simply drop back to FREE. Your account, history and personal win rate are all kept — nothing is deleted, and you can upgrade again anytime. USDT payments have no auto-renewal: the panel reminds you before expiry, and not paying just means not being charged.",
+    "q13": "Why do I have to use the partner broker's MT5 account?",
+    "a13": "Because the win-rate scoring must reconcile with your actual fills. Signals are scored, priced and executed against one quote source; a different broker's spread and pricing quirks would open a gap of \"the record won but my account didn't\". Locking one quote source is what makes the public record auditable."
   },
   "legal": {
     "backHome": "Back to home",
