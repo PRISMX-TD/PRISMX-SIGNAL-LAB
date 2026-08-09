@@ -5,6 +5,7 @@ import { PrefsProvider } from './store/prefs'
 import Layout from './components/Layout'
 import PwaBackGuard from './components/PwaBackGuard'
 import ErrorBoundary from './components/ErrorBoundary'
+import MetaPixel from './components/MetaPixel'
 
 // 路由级代码分割：首屏只加载当前页面的代码，其余按需加载（如图表页）。
 // Route-level code splitting: only the current page's code loads up front;
@@ -82,6 +83,13 @@ export default function App() {
     <AuthProvider>
       <PrefsProvider>
         <BrowserRouter>
+          {/* SPA 路由切换时补发 Meta Pixel 的 PageView。必须在 BrowserRouter 内
+              （要用 useLocation）、Routes 外（要覆盖全部路由，含 Layout 之外的
+              落地页/登录页/法务页）。见 components/MetaPixel.tsx 的说明。
+              Re-sends Meta Pixel PageView on client-side navigation; inside
+              BrowserRouter (needs useLocation), outside Routes (must cover every
+              route, including the ones outside Layout). */}
+          <MetaPixel />
           <PwaBackGuard>
           <RouteErrorBoundary>
           <Suspense fallback={<PageFallback />}>

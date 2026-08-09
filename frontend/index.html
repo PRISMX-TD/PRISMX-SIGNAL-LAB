@@ -25,6 +25,45 @@
          viewport-fit=cover pairs with the env(safe-area-inset-*) already in the
          CSS to handle notched screens. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+
+    <!-- Meta Pixel（Facebook 广告像素）。按 Meta 官方要求尽量靠 <head> 顶部放置：
+         越早执行，越能在用户跳走之前完成上报，匹配率越高。放在 SEO/字体标签之前
+         是刻意的——那些标签不影响渲染时序，而这段是异步注入外部脚本，早一点更好。
+
+         ⚠️ 这段只负责首屏那一次 PageView。本站是 SPA（react-router 前端路由），
+         点击导航不会重新加载页面，fbq 不会自动再发 PageView——路由切换的补发在
+         src/components/MetaPixel.tsx 里，两者缺一不可。
+
+         Meta Pixel base code, placed as high in <head> as practical per Meta's
+         docs: the earlier it runs, the more events land before users navigate
+         away. This fires PageView once on initial load only. This site is an SPA,
+         so client-side route changes need a manual PageView — see
+         src/components/MetaPixel.tsx. -->
+    <!-- Meta Pixel Code -->
+    <script>
+      !function(f,b,e,v,n,t,s)
+      {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+      n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+      if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+      n.queue=[];t=b.createElement(e);t.async=!0;
+      t.src=v;s=b.getElementsByTagName(e)[0];
+      s.parentNode.insertBefore(t,s)}(window, document,'script',
+      'https://connect.facebook.net/en_US/fbevents.js');
+      fbq('init', '1386130166986351');
+      fbq('track', 'PageView');
+    </script>
+    <!-- End Meta Pixel Code -->
+    <!-- 配套的 noscript 兜底像素放在 body 开头，不在这里——HTML 规范规定
+         head 内的 noscript 只能包含 link/style/meta，放 img 会被
+         严格解析器判为 disallowed-content-in-noscript-in-head 而构建失败
+         （Vite 用 parse5，实测会直接报错）。Meta 官方片段默认整段贴进 head，
+         这一点不合规，放 body 才是规范写法，功能完全一致。
+         The companion noscript pixel lives at the top of body: per spec a
+         a noscript in head may only contain link/style/meta, and an img
+         there makes strict parsers (Vite uses parse5) fail the build. Meta's
+         snippet assumes the whole block goes in head; splitting it is the
+         spec-correct form and behaves identically. -->
+
     <link rel="icon" type="image/png" href="/icons/favicon-48.png" />
 
     <!-- SEO 与社交分享卡片。没有这些标签时，把 prismxsignallab.com 发到 WhatsApp /
@@ -86,6 +125,19 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
+    <!-- Meta Pixel 的无脚本兜底：JS 被禁用时靠这个 1x1 图片上报一次 PageView。
+         必须放在 body（理由见 head 里那段说明）。
+         Meta Pixel noscript fallback — reports one PageView when JS is disabled.
+         Must live in body; see the note in <head> for why. -->
+    <noscript>
+      <img
+        height="1"
+        width="1"
+        style="display: none"
+        alt=""
+        src="https://www.facebook.com/tr?id=1386130166986351&ev=PageView&noscript=1"
+      />
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
