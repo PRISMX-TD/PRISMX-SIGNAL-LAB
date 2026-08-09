@@ -71,6 +71,7 @@ MetaTrader5SDK/
 # ===== Node / 前端 =====
 node_modules/
 frontend/dist/
+frontend/dist-ssr/
 *.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*

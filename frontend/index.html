@@ -77,7 +77,11 @@
          the marketing plan. og:image must be an absolute URL (crawlers don't
          resolve relative paths); 1200x630 is the universal size. The lang attribute
          is rewritten on language switch by i18n (see src/i18n/index.ts); this is
-         only its initial value. -->
+         only its initial value.
+         SEO:BEGIN/END 之间的整块由预渲染脚本按「路由×语言」替换
+         （scripts/prerender.mjs）；这里的内容是开发环境与模板的默认值（中文首页）。 -->
+    <!-- SEO:BEGIN -->
+    <title>Signal Lab · 信号实验室 · by PRISMX</title>
     <meta name="description" content="每条信号只锁定三个数字——进场、止损、止盈，一键直达你自己的 MT5。资金始终在你自己的券商账户，判定规则公开。" />
     <link rel="canonical" href="https://prismxsignallab.com/" />
     <meta property="og:type" content="website" />
@@ -95,6 +99,7 @@
     <meta name="twitter:title" content="Signal Lab · 情绪归零，只剩纪律" />
     <meta name="twitter:description" content="每条信号只锁定三个数字——进场、止损、止盈，一键直达你自己的 MT5。资金始终在你自己的券商账户，判定规则公开。" />
     <meta name="twitter:image" content="https://prismxsignallab.com/og-image.png" />
+    <!-- SEO:END -->
     <!-- PWA manifest（display: standalone）。iOS 16.4+ 的 Web Push 只对"以独立
          模式从主屏幕启动"的 Web App 开放：没有这份 manifest 时，加到主屏幕的
          图标只是个 Safari 书签，打开后 Notification/PushManager 根本不存在，
@@ -114,7 +119,6 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Signal Lab" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <title>Signal Lab · 信号实验室 · by PRISMX</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

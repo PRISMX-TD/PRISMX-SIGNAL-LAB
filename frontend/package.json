@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "check:sw": "node --check public/sw.js",
-    "build": "npm run check:sw && tsc -b && vite build",
+    "build": "npm run check:sw && tsc -b && vite build && npm run prerender",
+    "prerender": "vite build --ssr src/seo/entry-server.tsx --outDir dist-ssr && node scripts/prerender.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
