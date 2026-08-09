@@ -4,6 +4,7 @@ import { QRCodeSVG } from "qrcode.react";
 import AuroraBackground from "../components/AuroraBackground";
 import { useAuth } from "../store/auth";
 import { paymentApi, userApi } from "../api/client";
+import { useDocumentTitle } from "../utils/useDocumentTitle";
 import { localizeApiError, fmtDate } from "../api/utils";
 import type { TrialStatus } from "../api/types";
 
@@ -96,6 +97,8 @@ export default function UpgradePage() {
   const { t } = useTranslation();
   const { user, refreshUser } = useAuth();
 
+  useDocumentTitle(t("upgrade.title"));
+
   const [plans, setPlans] = useState<Plan[]>([]);
   const [sale, setSale] = useState<SaleInfo>(null);
   const [currencies, setCurrencies] = useState<string[]>([]);
@@ -141,7 +144,6 @@ export default function UpgradePage() {
   const [planExpiresAt, setPlanExpiresAt] = useState<string | null>(null);
 
   useEffect(() => {
-    document.title = t("upgrade.title");
     paymentApi.getPlans().then((r) => {
       setPlans(r.plans);
       setSale(r.sale ?? null);

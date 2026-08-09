@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { simulateApi } from '../api/client'
 import { displaySymbol, fmtTime, localizeApiError } from '../api/utils'
 import { SkeletonLine } from '../components/Skeleton'
+import { useDocumentTitle } from '../utils/useDocumentTitle'
 import type { SimulateResult } from '../api/types'
 
 const DAYS_OPTIONS = [30, 90, 180] as const
@@ -137,7 +138,7 @@ export default function SimulatorPage() {
   const [page, setPage] = useState(0)
   const reqIdRef = useRef(0)
 
-  useEffect(() => { document.title = t('simulator.title') }, [t])
+  useDocumentTitle(t('simulator.title'))
 
   const run = useCallback(async () => {
     const id = ++reqIdRef.current

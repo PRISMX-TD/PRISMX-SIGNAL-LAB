@@ -54,6 +54,7 @@ import {
 } from '../components/strategies/conditionTypes'
 import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import { useBackToClose } from '../utils/useBackToClose'
+import { useDocumentTitle } from '../utils/useDocumentTitle'
 
 // 模板名称仍需要：从预设起步的策略 template 非 null，未命名时用模板名作显示名。
 // 模板的参数表单已被条件编辑器取代，所以这里只留标签映射。
@@ -978,7 +979,7 @@ export default function StrategiesPage() {
     await Promise.all([list, signals, symbols, templates, usages])
   }, [])
 
-  useEffect(() => { document.title = t('strategy.title') }, [t])
+  useDocumentTitle(t('strategy.title'))
   useEffect(() => { load() }, [load])
 
   // 绩效逐个策略拉取（端点是 /{id}/performance，没有批量形态）。失败的那个静默跳过，
