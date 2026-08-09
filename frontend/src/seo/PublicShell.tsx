@@ -15,10 +15,15 @@ export default function PublicShell({ lang, page, children }: { lang: PublicLang
   const { isAuthed } = useAuth()
 
   useEffect(() => {
-    // 首页对已登录用户只是个跳板（Home 立刻重定向去 /dashboard），此时不能
-    // 同步语言——否则英文偏好的用户输入根域名，会被「中文首页」的声明悄悄
-    // 切回中文界面。法务页与 FAQ 页登录后也能看，URL 语言照常生效。
-    if (page === 'home' && isAuthed) return
+    // 首页对已登录用户只是个跳板（Home 立刻重定向去 /dashboard）。但 i18n 在
+    // 模块初始化时已按 URL 把 '/' 判成中文（见 i18n/index.ts 的 urlLang 优先），
+    // 光跳过同步不够——要把语言还原成用户存储的偏好，别让「中文首页」的 URL
+    // 声明污染登录后的界面语言。localStorage 在这里安全：PublicShell 只在
+    // 客户端渲染（见下方 useAuth 注释）。
+    if (page === 'home' && isAuthed) {
+      syncLanguage(localStorage.getItem('prismx_lang') === 'en' ? 'en' : 'zh')
+      return
+    }
     syncLanguage(lang)
   }, [lang, page, isAuthed])
 

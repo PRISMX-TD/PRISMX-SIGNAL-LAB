@@ -75,6 +75,17 @@ if (home) {
 }
 const faq = read('faq/index.html')
 if (faq) expect('faq/index.html', faq, '"@type":"FAQPage"', 'FAQPage JSON-LD')
+const enFaq = read('en/faq/index.html')
+if (enFaq) expect('en/faq/index.html', enFaq, '"@type":"FAQPage"', 'FAQPage JSON-LD')
+
+// i18next 缺 key 时返回 key 字面量——正文与 JSON-LD 会同步"合法"地退化成
+// 「faqPage.q1」这种文本，上面的断言完全看不出来。这里直接抓字面量泄漏。
+// When an i18n key is missing, i18next returns the raw key literal — body
+// text and JSON-LD would degrade identically and "pass" the assertions
+// above. Catch the raw key literal directly here.
+const leakPattern = /(?:faqPage\.(?:q|a)|landing\.faq)\d/
+if (faq && leakPattern.test(faq)) fail('faq/index.html 含未翻译的 i18n 键字面量——文案键被改名或缺失')
+if (enFaq && leakPattern.test(enFaq)) fail('en/faq/index.html 含未翻译的 i18n 键字面量——文案键被改名或缺失')
 
 const shell = read('app.html')
 if (shell) {

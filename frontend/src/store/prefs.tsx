@@ -6,6 +6,7 @@ import { createContext, useContext, useEffect, useState, useCallback, useRef, ty
 import { useAuth } from './auth'
 import { userApi } from '../api/client'
 import i18n from '../i18n'
+import { langFromPath } from '../seo/meta'
 
 const PREFS_CACHE_KEY = 'prismx_prefs'
 
@@ -70,9 +71,13 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
         lastSavedByNs.current = nextLastSaved
         localStorage.setItem(PREFS_CACHE_KEY, JSON.stringify(data))
         // 同步云端语言偏好 / sync cloud language preference
+        // 公开页（含 /en 前缀）语言由 URL 决定，云端偏好不得在这里反向覆盖，
+        // 否则已登录用户打开 /en/faq 会在偏好加载完成的瞬间被切回中文。
+        // Public pages are URL-driven; cloud prefs must not override them here.
         const cloudLang = (data as Record<string, unknown>)?.lang as Record<string, unknown> | undefined
         const lang = cloudLang?.lang as string | undefined
-        if (lang && (lang === 'zh' || lang === 'en') && lang !== i18n.language) {
+        const onPublicPage = langFromPath(window.location.pathname) !== null
+        if (!onPublicPage && lang && (lang === 'zh' || lang === 'en') && lang !== i18n.language) {
           i18n.changeLanguage(lang)
           localStorage.setItem('prismx_lang', lang)
         }
