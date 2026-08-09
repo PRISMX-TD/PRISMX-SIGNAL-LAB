@@ -288,7 +288,7 @@
     "subtitle": "Powered by Signal Lab quant factors",
     "tabs": {
       "realtime": "Live Signals",
-      "platformStrategies": "Platform Strategies"
+      "platformStrategies": "Strategy Guide"
     },
     "guide": {
       "empty": "Strategy write-ups are being prepared.",
