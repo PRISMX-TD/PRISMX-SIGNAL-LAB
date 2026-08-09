@@ -21,6 +21,9 @@ if (!SEO_BLOCK.test(template)) {
 if (!template.includes('<div id="root"></div>')) {
   throw new Error('dist/index.html 找不到空的 <div id="root"></div> 挂载点')
 }
+if (!/<html lang="[^"]*"/.test(template)) {
+  throw new Error('dist/index.html 的 <html lang="..."> 属性形态变了——预渲染无法注入每页语言')
+}
 
 // ① SPA 壳 app.html：登录后路由的 rewrite 兜底。noindex 一举两得——这些路由
 //    本就不该进搜索结果，也防止 Google 收录一堆空壳 URL。
