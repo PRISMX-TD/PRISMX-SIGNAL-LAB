@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const dist = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist')
-const ORIGIN = 'https://prismxsignallab.com'
+const ORIGIN = 'https://www.prismxsignallab.com'
 let failures = 0
 const fail = (msg) => {
   failures++

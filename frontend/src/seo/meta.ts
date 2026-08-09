@@ -1,7 +1,10 @@
 // 公开页「路由 × 语言」的单一事实来源：URL 矩阵 + 每页 SEO 文案。
 // 预渲染脚本（scripts/prerender.mjs 经 entry-server）与浏览器端
 // （PublicShell 的 head 同步、i18n 的 URL 语言判定）共用这一份数据。
-export const ORIGIN = 'https://prismxsignallab.com'
+// 带 www：Vercel 以 www.prismxsignallab.com 为主域名，裸域名 308 跳转过来。
+// canonical 必须指向真正返回 200 的那个地址，否则等于告诉搜索引擎「正版地址
+// 是一个会把你弹走的 URL」。
+export const ORIGIN = 'https://www.prismxsignallab.com'
 
 export type PublicLang = 'zh' | 'en'
 export type PageId = 'home' | 'terms' | 'privacy' | 'risk' | 'faq'
