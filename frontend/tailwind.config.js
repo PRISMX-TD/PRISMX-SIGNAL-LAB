@@ -39,8 +39,10 @@ export default {
         line: 'rgba(255,255,255,0.09)',
       },
       fontFamily: {
-        display: ['"Space Grotesk"', 'Orbitron', 'sans-serif'],
-        sans: ['"Space Grotesk"', 'Sora', 'system-ui', 'sans-serif'],
+        // Orbitron / Sora 已从 Google Fonts 请求中移除：二者只是 Space Grotesk
+        // 之后的后备位，SG 加载成功时永远轮不到，留在下载列表里纯属浪费带宽。
+        display: ['"Space Grotesk"', 'sans-serif'],
+        sans: ['"Space Grotesk"', 'system-ui', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
       },
       // 统一圆角规范 / unified radius tokens: card 18 / inner 12 / pill 10
