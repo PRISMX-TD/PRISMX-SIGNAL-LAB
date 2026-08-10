@@ -398,8 +398,8 @@
     "rejected": "Order rejected: {{msg}}",
     "ackTimeout": "No receipt yet, check the Orders page for the latest status",
     "timeoutNote": "If the command is not executed within 5 minutes (e.g. the Bridge is offline), it is cancelled automatically and will never fill later at a stale price. This platform provides signal tooling only, not investment advice. Trade at your own risk.",
-    "noBridge": "No MT5 connected yet. Open the PRISMX Bridge app, paste your token and start it, then place the order.",
-    "allOffline": "All connected MT5 accounts are currently offline. Make sure the PRISMX Bridge app is running and MT5 is logged in, then retry."
+    "noBridge": "No MT5 connected yet. Head to Connect MT5 and enter your login and password — there is nothing to install.",
+    "allOffline": "All connected MT5 accounts are currently offline. Check their status on the Connect MT5 page, then retry."
   },
   "account": {
     "title": "Account",
@@ -782,8 +782,8 @@
     "suffixNeedAccount": "The suffix is saved per account. Run the Bridge app so an account is reported first.",
     "suffixPerAccountHint": "Edit the suffix directly in each account's row above.",
     "gw": {
-      "pageSubtitle": "Enter your Make Capital MT5 login and password to connect directly — no software to install",
-      "title": "Make Capital MT5 Direct Connect",
+      "pageSubtitle": "Enter your {{name}} MT5 login and password to connect directly — no software to install",
+      "title": "{{name}} MT5 Direct Connect",
       "hint": "Connects to MT5 through our gateway — no local Bridge or VPS required",
       "loginPlaceholder": "MT5 Login",
       "passwordPlaceholder": "MT5 Password",
@@ -802,11 +802,14 @@
     },
     "bridgeEntry": {
       "title": "Connect with the PRISMX Bridge app",
-      "desc": "For accounts outside Make Capital — requires downloading and running the local Bridge app",
+      "desc": "For accounts outside {{name}} — requires downloading and running the local Bridge app on your own PC.",
       "f1": "API token management",
       "f2": "Bridge account management",
       "f3": "Symbol suffix settings",
-      "f4": "Setup steps"
+      "f4": "Setup steps",
+      "collapsedTitle": "Using a different broker? Expand the Bridge option",
+      "collapsedHint": "Advanced · the Bridge app has to keep running on a PC you leave switched on",
+      "openCta": "Open Bridge setup"
     },
     "steps": {
       "title": "Setup Steps",
@@ -823,6 +826,25 @@
     "backendDown": "Can't reach the server",
     "backendDownHint": "What you're seeing isn't “no data” — it's data we couldn't fetch.",
     "retry": "Retry"
+  },
+  "partner": {
+    "defaultName": "our partner broker",
+    "badge": "Account bonus",
+    "title": "Open a {{name}} account, get 1 month of PRO free",
+    "desc": "Sign up for a {{name}} trading account through the link below. Meet the opening conditions and a free month of PRO is yours. After that there is nothing to install — enter your login and password on the Connect MT5 page and trade straight away.",
+    "b1Title": "No software to install",
+    "b1Desc": "No bridge app, no VPS to rent. Signals still execute server-side while your own computer is switched off.",
+    "b2Title": "1 month of PRO",
+    "b2Desc": "Real-time signals, one-click orders, automatic position management and unlimited MT5 accounts — every PRO feature unlocked.",
+    "b3Title": "Live or demo",
+    "b3Desc": "Learn the whole flow on a demo account and switch to live when you're ready. It works exactly the same either way.",
+    "cta": "Open an account",
+    "ctaNote": "Opens {{name}}'s official signup page in a new tab",
+    "haveAccount": "Already have one — connect it",
+    "compactTitle": "No {{name}} account yet?",
+    "compactDesc": "Open one through our link and, once you meet the conditions, get a free month of PRO. Come back to this page and your login connects you directly.",
+    "claimNote": "Once your account is open, send your MT5 login to support. We verify it and switch on your PRO month. Exact conditions and timing are confirmed by support.",
+    "claimCta": "Contact support"
   },
   "upgrade": {
     "title": "Upgrade to PRO",
@@ -1053,6 +1075,7 @@
     "brokerPatternsHint": "An MT5 account passes if its server name contains any keyword (case-insensitive; live and demo alike). E.g. \"MakeCapital\" matches both MakeCapital-Live and MakeCapital-Demo.",
     "brokerDisplayName": "Public display name",
     "brokerReferralUrl": "Referral URL (empty hides the button)",
+    "brokerReferralUrlHint": "Once set, the signup offer (a free month of PRO) appears on Connect MT5, the new-user card and the Upgrade PRO page. Leave empty to hide it entirely. http/https links only.",
     "pricingTitle": "Subscription Pricing",
     "saleEnabled": "Enable sale",
     "proMonthlyPrice": "Monthly price (USD)",
@@ -1636,7 +1659,15 @@
   },
   "onboarding": {
     "title": "One step left before you can trade",
-    "subtitle": "No MT5 account is connected yet, so signals can't reach a terminal to execute."
+    "subtitle": "No MT5 account is connected yet, so signals can't reach a terminal to execute.",
+    "s1Title": "Open a {{name}} account",
+    "s1Desc": "Skip this if you already have one. If not, open one through our link — meet the conditions and a free month of PRO comes with it.",
+    "s2Title": "Enter your login to connect",
+    "s2Desc": "Type your MT5 login and password on the Connect MT5 page. Once it verifies you're connected — no bridge app, no VPS.",
+    "s3Title": "Trade from the signal panel",
+    "s3Desc": "Once the account shows online, one-click orders from the signal panel execute straight on your MT5.",
+    "bridgeNote": "Trading with a broker other than {{name}}? You'll need to keep the PRISMX Bridge app running on your own PC.",
+    "bridgeCta": "See the Bridge setup"
   },
   "tickets": {
     "title": "Support Tickets",

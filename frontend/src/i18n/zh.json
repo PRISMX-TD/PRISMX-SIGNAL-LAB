@@ -398,8 +398,8 @@
     "rejected": "下单被拒绝：{{msg}}",
     "ackTimeout": "暂未收到回执，请在订单页查看最新状态",
     "timeoutNote": "指令若在 5 分钟内未被执行（如桥接程序离线），将自动取消，不会在之后按过时价格成交。本平台仅提供信号工具，不构成投资建议，交易风险自负。",
-    "noBridge": "尚未连接 MT5。请打开 PRISMX 桥接程序，填入 Token 并启动后再下单。",
-    "allOffline": "已连接的 MT5 账户当前都已离线。请确认 PRISMX 桥接程序在运行、MT5 已登录后重试。"
+    "noBridge": "尚未连接 MT5。前往「连接 MT5」填入账号和密码即可直接连接，无需安装任何程序。",
+    "allOffline": "已连接的 MT5 账户当前都已离线。请前往「连接 MT5」查看连接状态后重试。"
   },
   "account": {
     "title": "账户详情",
@@ -782,8 +782,8 @@
     "suffixNeedAccount": "后缀按账号保存。请先运行桥接程序上报账号后再设置。",
     "suffixPerAccountHint": "可直接在上方每个账号所在行编辑后缀。",
     "gw": {
-      "pageSubtitle": "填入你的 Make Capital MT5 账号与密码，即可直接连接，无需安装任何程序",
-      "title": "Make Capital MT5 直连",
+      "pageSubtitle": "填入你的 {{name}} MT5 账号和密码即可直接连接，无需安装任何程序",
+      "title": "{{name}} MT5 直连",
       "hint": "无需本地 Bridge / VPS，直接通过网关连接 MT5",
       "loginPlaceholder": "MT5 账号 (Login)",
       "passwordPlaceholder": "MT5 密码",
@@ -802,11 +802,14 @@
     },
     "bridgeEntry": {
       "title": "使用 PRISMX 桥接程序连接",
-      "desc": "适用于非 Make Capital 账户，需要下载并运行本地桥接程序",
+      "desc": "适用于 {{name}} 以外的账户，需要下载并在本机常驻运行桥接程序。",
       "f1": "API Token 管理",
       "f2": "桥接账户管理",
       "f3": "品种后缀配置",
-      "f4": "接入步骤"
+      "f4": "接入步骤",
+      "collapsedTitle": "用的是其他券商？展开桥接程序方案",
+      "collapsedHint": "高级选项 · 需要在一台不关机的电脑上常驻运行桥接程序",
+      "openCta": "打开桥接设置"
     },
     "steps": {
       "title": "接入步骤",
@@ -823,6 +826,25 @@
     "backendDown": "无法连接到服务器",
     "backendDownHint": "当前显示的不是「没有数据」，而是取不到数据。",
     "retry": "重试"
+  },
+  "partner": {
+    "defaultName": "合作券商",
+    "badge": "开户福利",
+    "title": "通过 {{name}} 开户，免费拿 1 个月 PRO",
+    "desc": "用下方专属链接注册 {{name}} 交易账户，满足开户条件即可获赠 1 个月 PRO 会员。开好之后无需安装任何程序，在「连接 MT5」填入账号和密码就能直接下单。",
+    "b1Title": "免安装直连",
+    "b1Desc": "不用下载桥接程序，也不用租 VPS。你的电脑关机时，信号照样在服务器端执行。",
+    "b2Title": "1 个月 PRO",
+    "b2Desc": "实时信号、一键下单、自动仓位管理、不限 MT5 账户数量——PRO 权益全部解锁。",
+    "b3Title": "实盘 / 模拟都支持",
+    "b3Desc": "先用模拟账户熟悉整套流程，想清楚了再切实盘，操作方式完全一样。",
+    "cta": "立即开户",
+    "ctaNote": "将在新标签页打开 {{name}} 官方开户页面",
+    "haveAccount": "已有账户，直接连接",
+    "compactTitle": "还没有 {{name}} 账户？",
+    "compactDesc": "用我们的专属链接开户，满足条件即可免费获得 1 个月 PRO，开好后回到本页填入账号密码就能直连。",
+    "claimNote": "开户完成后，把你的 MT5 账号发给客服核对，核对通过我们就为你开通 PRO。具体开户条件与到账时间以客服确认为准。",
+    "claimCta": "联系客服"
   },
   "upgrade": {
     "title": "升级到 PRO",
@@ -1053,6 +1075,7 @@
     "brokerPatternsHint": "MT5 服务器名包含任一关键字即放行（不分大小写、实盘模拟一视同仁）。如「MakeCapital」同时匹配 MakeCapital-Live 与 MakeCapital-Demo。",
     "brokerDisplayName": "对外显示名称",
     "brokerReferralUrl": "开户链接（留空则不显示按钮）",
+    "brokerReferralUrlHint": "填入后，「连接 MT5」、新用户引导卡与「升级 PRO」页会自动出现开户福利入口（送 1 个月 PRO）；留空则完全不显示。仅接受 http/https 链接。",
     "pricingTitle": "订阅定价",
     "saleEnabled": "开启促销",
     "proMonthlyPrice": "月付价格（美元）",
@@ -1636,7 +1659,15 @@
   },
   "onboarding": {
     "title": "还差一步就能开始",
-    "subtitle": "你还没有连接任何 MT5 账户，信号无法下发到终端执行。"
+    "subtitle": "你还没有连接任何 MT5 账户，信号无法下发到终端执行。",
+    "s1Title": "开好 {{name}} 账户",
+    "s1Desc": "已有账户可以跳过。还没有的话，用我们的专属链接开户，满足条件还能免费拿 1 个月 PRO。",
+    "s2Title": "填账号密码，直接连接",
+    "s2Desc": "在「连接 MT5」页面输入 MT5 账号和密码，验证通过即完成连接——不用装桥接，也不用租 VPS。",
+    "s3Title": "回信号面板下单",
+    "s3Desc": "账户状态变为在线后，信号面板的一键下单会直接打到你的 MT5 执行。",
+    "bridgeNote": "用的是 {{name}} 以外的券商？那就需要在自己的电脑上常驻运行 PRISMX 桥接程序。",
+    "bridgeCta": "查看桥接方案"
   },
   "tickets": {
     "title": "客服工单",

@@ -1,16 +1,29 @@
-// 连接 MT5 页：Make Capital MT5 直连（无需本地 Bridge）。需要桥接程序的部分见 /bind/bridge。
-// Connect MT5 page: Make Capital MT5 direct connect (no local Bridge needed).
+// 连接 MT5 页：合作券商 MT5 直连（无需本地 Bridge）。需要桥接程序的部分见 /bind/bridge。
+//
+// 页面顺序刻意是「开户福利 → 直连表单 → （折叠）桥接程序」：直连是绝大多数
+// 用户唯一需要走的路，桥接是给非合作券商准备的兜底，从并列的入口卡降级成
+// 默认收起的 <details>，免得新用户以为自己非装个程序不可。
+//
+// Connect MT5 page: partner-broker MT5 direct connect (no local Bridge needed).
 // Everything requiring the Bridge app lives on /bind/bridge.
+//
+// The order — bonus offer, then the direct-connect form, then a collapsed bridge
+// section — is deliberate: direct connect is the only path most users need, and
+// the bridge is the fallback for non-partner brokers. It drops from a co-equal
+// entry card to a closed-by-default <details> so new users don't conclude they
+// must install something.
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { gatewayApi } from '../api/client'
 import { useLive } from '../store/live'
 import { localizeApiError } from '../api/utils'
+import PartnerBrokerCard, { usePartnerBroker } from '../components/PartnerBrokerCard'
 
 export default function BindPage() {
   const { t } = useTranslation()
   const { accounts, refreshAll } = useLive()
+  const { name: brokerName } = usePartnerBroker()
 
   // ---------- Gateway 绑定状态（Make Capital 用户无需本地 Bridge）----------
   const [gwLogin, setGwLogin] = useState('')
@@ -72,14 +85,23 @@ export default function BindPage() {
         <h2 className="font-display text-2xl font-bold text-slate-100">
           <span className="neon-text">{t('bind.title')}</span>
         </h2>
-        <p className="mt-1 text-sm text-slate-400">{t('bind.gw.pageSubtitle')}</p>
+        <p className="mt-1 text-sm text-slate-400">{t('bind.gw.pageSubtitle', { name: brokerName })}</p>
       </div>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        {/* Make Capital MT5 直连 */}
+        {/* 开户福利：只在还没有直连账号时出现。已经连上的人不需要再被劝一次开户，
+            那时这张卡只是占地方。
+            Bonus offer, shown only while no direct-connect account exists. Someone
+            already connected doesn't need to be pitched an account again — the
+            card would just take up space. */}
+        {gatewayAccounts.length === 0 && (
+          <PartnerBrokerCard variant="compact" className="lg:col-span-2" />
+        )}
+
+        {/* 合作券商 MT5 直连 */}
         <div className="glass p-6 lg:col-span-2">
           <div className="mb-5">
-            <h3 className="font-display text-xl font-semibold text-slate-100">{t('bind.gw.title')}</h3>
+            <h3 className="font-display text-xl font-semibold text-slate-100">{t('bind.gw.title', { name: brokerName })}</h3>
             <p className="mt-1 text-xs text-slate-400">{t('bind.gw.hint')}</p>
           </div>
 
@@ -156,27 +178,45 @@ export default function BindPage() {
           )}
         </div>
 
-        {/* 桥接程序入口 */}
-        <Link
-          to="/bind/bridge"
-          className="glass group p-6 transition hover:border-prism-500/30 lg:col-span-2"
-        >
-          <div className="flex items-start justify-between">
-            <div>
-              <h3 className="font-display text-lg font-semibold text-slate-100 transition group-hover:text-prism-300">
-                {t('bind.bridgeEntry.title')}
-              </h3>
-              <p className="mt-1 text-sm text-slate-400">{t('bind.bridgeEntry.desc')}</p>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
-                <span className="rounded bg-white/5 px-2 py-1">{t('bind.bridgeEntry.f1')}</span>
-                <span className="rounded bg-white/5 px-2 py-1">{t('bind.bridgeEntry.f2')}</span>
-                <span className="rounded bg-white/5 px-2 py-1">{t('bind.bridgeEntry.f3')}</span>
-                <span className="rounded bg-white/5 px-2 py-1">{t('bind.bridgeEntry.f4')}</span>
-              </div>
+        {/* 桥接程序入口（默认折叠）。用原生 <details> 而不是 useState：不需要
+            额外状态，键盘可达性和「点标题展开」的语义浏览器已经给全了。
+            Bridge entry, collapsed by default. Native <details> rather than
+            useState: no extra state needed, and the browser already provides the
+            keyboard affordance and click-the-heading-to-expand semantics. */}
+        <details className="glass group overflow-hidden lg:col-span-2">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-4 transition hover:bg-white/[0.03] [&::-webkit-details-marker]:hidden">
+            <div className="min-w-0">
+              <span className="block text-sm font-medium text-slate-300 transition group-open:text-slate-100">
+                {t('bind.bridgeEntry.collapsedTitle')}
+              </span>
+              <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">
+                {t('bind.bridgeEntry.collapsedHint')}
+              </span>
             </div>
-            <span className="text-2xl text-slate-600 transition group-hover:translate-x-1 group-hover:text-prism-400">→</span>
+            <span className="shrink-0 text-slate-600 transition group-open:rotate-180 group-open:text-prism-400">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </span>
+          </summary>
+
+          <div className="border-t border-white/10 px-6 pb-6 pt-5">
+            <h3 className="font-display text-base font-semibold text-slate-100">{t('bind.bridgeEntry.title')}</h3>
+            <p className="mt-1 text-sm leading-relaxed text-slate-400">{t('bind.bridgeEntry.desc', { name: brokerName })}</p>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
+              <span className="rounded bg-white/5 px-2 py-1">{t('bind.bridgeEntry.f1')}</span>
+              <span className="rounded bg-white/5 px-2 py-1">{t('bind.bridgeEntry.f2')}</span>
+              <span className="rounded bg-white/5 px-2 py-1">{t('bind.bridgeEntry.f3')}</span>
+              <span className="rounded bg-white/5 px-2 py-1">{t('bind.bridgeEntry.f4')}</span>
+            </div>
+            <Link
+              to="/bind/bridge"
+              className="btn btn-ghost mt-4 h-10 px-5 text-sm"
+            >
+              {t('bind.bridgeEntry.openCta')} →
+            </Link>
           </div>
-        </Link>
+        </details>
       </div>
     </div>
   )

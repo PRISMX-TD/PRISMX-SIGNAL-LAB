@@ -731,6 +731,11 @@ export default function AdminPage() {
                 onChange={(e) => setBrokerSettings({ ...brokerSettings, brokerReferralUrl: e.target.value })}
                 placeholder="https://…"
               />
+              {/* 这个字段以前填了没有任何效果（前端没人渲染它）。现在它同时决定
+                  三处推广位是否出现，所以把作用范围写在旁边。
+                  This field used to have no effect at all (nothing rendered it).
+                  It now gates three promo placements, so say so next to it. */}
+              <p className="mt-1.5 text-xs text-slate-500">{t('admin.brokerReferralUrlHint')}</p>
             </div>
           </div>
           <button

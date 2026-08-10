@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { QRCodeSVG } from "qrcode.react";
 import AuroraBackground from "../components/AuroraBackground";
+import PartnerBrokerCard from "../components/PartnerBrokerCard";
 import { useAuth } from "../store/auth";
 import { paymentApi, userApi } from "../api/client";
 import { useDocumentTitle } from "../utils/useDocumentTitle";
@@ -437,6 +438,17 @@ export default function UpgradePage() {
             {t("upgrade.trialStarted", { date: fmtDate(trialClaimedUntil) })}
           </div>
         )}
+
+        {/* 合作券商开户福利：白拿一个月 PRO 的路径，摆在付费卡之前。
+            对已付费的 PRO 隐藏——送他们一个月「PRO」没有意义，只会让人以为
+            自己刚才那笔钱花亏了。试用中的用户仍然看得到（他们正是该转化的人，
+            而开户是比掏钱更低的门槛）。
+            Partner-broker bonus: the path to a free month of PRO, placed ahead of
+            the paid cards. Hidden from paid PRO users — offering them a month of
+            what they just bought only makes the purchase look like a mistake.
+            Trialing users still see it: they're the conversion target, and opening
+            an account is a lower bar than paying. */}
+        {!isPaidPro && <PartnerBrokerCard className="mx-auto mt-8 max-w-4xl" />}
 
         {/* 双卡定价并排 / two pricing cards */}
         <div className="mx-auto mt-8 grid max-w-4xl grid-cols-1 gap-5 md:grid-cols-2">

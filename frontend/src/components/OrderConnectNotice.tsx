@@ -66,8 +66,16 @@ export default function OrderConnectNotice({
 }) {
   const { t } = useTranslation()
 
-  const to = neverConnected ? '/download' : '/bind'
-  const cta = neverConnected ? t('nav.download') : t('nav.bind')
+  // 两种情况都指向 /bind。以前「从没连过」会被送去 /download（下载桥接），
+  // 但直连才是默认路径：连接页上就能填账号密码，还带着开户入口；真需要桥接
+  // 的人在那页的折叠区里能找到。
+  // Both cases point at /bind. "Never connected" used to go to /download (get
+  // the bridge app), but direct connect is the default path now: the connect
+  // page takes a login and password inline and carries the signup entry, while
+  // anyone who genuinely needs the bridge finds it in that page's collapsed
+  // section.
+  const to = '/bind'
+  const cta = t('nav.bind')
 
   return (
     <div className="mb-3 rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down">
