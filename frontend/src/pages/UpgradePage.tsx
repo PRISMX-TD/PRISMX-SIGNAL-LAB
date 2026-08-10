@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { QRCodeSVG } from "qrcode.react";
-import AuroraBackground from "../components/AuroraBackground";
 import PartnerBrokerCard from "../components/PartnerBrokerCard";
 import { useAuth } from "../store/auth";
 import { paymentApi, userApi } from "../api/client";
@@ -336,9 +335,23 @@ export default function UpgradePage() {
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
+  // 这里刻意不渲染 AuroraBackground：Layout 已经为所有登录后的页面铺了一层，
+  // 再铺一层不只是白做功，而是会画出一道可见的接缝——Layout 的 .page-enter 用
+  // `animation: … both` 播一段带 transform 的入场动画，填充状态永久保留，于是
+  // 该元素成了 position:fixed 子元素的包含块。本页自己的 `fixed inset-0` 背景
+  // 因此被关进 <main> 那一列里：列内两层极光（网格透明度翻倍、光球叠加）、列
+  // 外一层，边界正好是主内容列的四边。
+  //
+  // Deliberately no AuroraBackground here: Layout already lays one down for every
+  // authed page. A second one isn't just wasted work — it draws a visible seam.
+  // Layout's .page-enter runs a transform keyframe with `animation: … both`, so
+  // it stays permanently in the animation's fill state, which makes it the
+  // containing block for position:fixed descendants. This page's own
+  // `fixed inset-0` background was therefore confined to the <main> column: two
+  // aurora layers inside it (doubled grid opacity, doubled orbs) against one
+  // outside, with the seam tracing the content column's edges.
   return (
-    <div className="relative min-h-screen overflow-x-hidden">
-      <AuroraBackground />
+    <div className="relative overflow-x-hidden">
       <div className="relative mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
         {state.step === "select" && renderSelect()}
         {state.step === "pay" && renderPay()}
