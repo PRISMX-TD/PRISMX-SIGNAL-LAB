@@ -151,20 +151,13 @@ export default function ChartOrderModal({ symbol, side, accounts, quotesByAccoun
     return () => window.removeEventListener('keydown', onKey)
   }, [submitting])
 
-  // 手机端返回手势：关闭弹窗而非切换页面 / mobile back gesture closes the modal
-  useEffect(() => {
-    let poppedByBack = false
-    window.history.pushState({ __chartOrderModal: true }, '')
-    const onPop = () => {
-      poppedByBack = true
-      onCancelRef.current()
-    }
-    window.addEventListener('popstate', onPop)
-    return () => {
-      window.removeEventListener('popstate', onPop)
-      if (!poppedByBack && window.history.state?.__chartOrderModal) window.history.back()
-    }
-  }, [])
+  // 同 SlideOrderModal：这里原本也有一段自己接管返回手势的裸 popstate 监听，
+  // 它收到任何 popstate 都关整个弹窗，导致收起账户菜单时把下单弹窗一起带走。
+  // ChartsPage 已经用 useBackToClose(orderSide != null, ...) 做了同一件事。
+  // 详细说明见 SlideOrderModal.tsx 同处注释。
+  // Same as SlideOrderModal: a hand-rolled popstate listener here closed the whole
+  // modal on any popstate, taking the order dialog down with the account menu.
+  // ChartsPage already handles this via useBackToClose. See SlideOrderModal's note.
 
   const paint = (pct: number) => {
     pctRef.current = pct

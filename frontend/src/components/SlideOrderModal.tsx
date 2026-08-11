@@ -154,20 +154,26 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submitting])
 
-  // 手机端返回手势/按钮：关闭本弹窗而非切换页面
-  // Mobile back gesture/button: close this modal instead of navigating pages
-  useEffect(() => {
-    let poppedByBack = false
-    window.history.pushState({ __orderModal: true }, '')
-    const onPop = () => { poppedByBack = true; onCancelRef.current() }
-    window.addEventListener('popstate', onPop)
-    return () => {
-      window.removeEventListener('popstate', onPop)
-      // 若通过点 X / 确认关闭（非返回触发），回收压入的历史条目
-      // If closed via X / confirm (not back), pop the history entry we pushed
-      if (!poppedByBack && window.history.state?.__orderModal) window.history.back()
-    }
-  }, [])
+  // 这里曾经有一段自己接管返回手势的 useEffect：pushState 一条记录，再挂一个
+  // popstate 监听无条件调 onCancel。它已被删除，因为渲染本弹窗的三个页面
+  // （SignalsPage / DashboardPage / ChartsPage）都已经用 useBackToClose 做了同一件
+  // 事，而那个裸监听器有一个致命缺陷——**收到任何 popstate 都关整个弹窗**。
+  //
+  // 后果是账户切换器彻底不可用：收起账户菜单时，菜单自己那层 useBackToClose 会调
+  // history.back() 回收它压入的记录，这个裸监听器收到那次 popstate 就把整个下单弹窗
+  // 关掉了。用户看到的是「一选另一个账号，弹窗就没了」，多账号用户根本换不了账号。
+  //
+  // useBackToClose 里的 selfInitiatedBacks / openStack 正是为这种嵌套场景写的：
+  // 自己发起的 back 不算用户返回，非栈顶的实例不响应。裸监听器绕过了全部这些判断。
+  //
+  // This used to be a hand-rolled back-gesture handler: pushState an entry, listen
+  // for popstate, unconditionally call onCancel. Deleted — all three pages that
+  // render this modal already do it via useBackToClose, and the raw listener closed
+  // the whole modal on *any* popstate. That made the account switcher unusable:
+  // closing the account menu makes its own useBackToClose call history.back() to
+  // reclaim its entry, and this listener read that as "close the order modal".
+  // useBackToClose's selfInitiatedBacks/openStack bookkeeping exists precisely for
+  // this nesting case; the raw listener bypassed all of it.
 
   // 拖动时直接操作 DOM，避免频繁 setState 触发整卡重渲染导致卡顿
   // Drive the DOM directly while dragging so we never re-render the whole card (kills jank)
