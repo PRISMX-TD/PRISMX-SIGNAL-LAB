@@ -287,6 +287,16 @@ export default function Layout() {
 
   const isAdmin = user?.role === 'admin'
 
+  // 行情终端是全站唯一一个「满屏、不滚动、不要页脚」的页面。这个判断放在 Layout
+  // 而不是让 ChartsPage 自己用负 margin 破框：破框的写法在有滚动条时会算错宽度，
+  // 而且把布局职责埋进一个 2200 行的页面组件里，下次谁都找不到。
+  // The terminal is the one page in the app that is full-bleed, non-scrolling and
+  // footer-less. The check lives in Layout rather than having ChartsPage break out
+  // with negative margins: the break-out trick miscalculates width whenever a
+  // scrollbar is present, and it would bury a layout decision inside a 2,200-line
+  // page component where nobody would find it again.
+  const isTerminal = location.pathname === '/charts'
+
   // 手机底部 4 个主入口，其余收进「其他」/ 4 primary mobile tabs, the rest go under "More"
   const mobileTabs = [
     { to: '/app', icon: 'signals', label: t('nav.signals') },
@@ -574,7 +584,32 @@ export default function Layout() {
             it shouldn't. */}
         <PlanExpiryBanner />
 
-        <main className="mx-auto w-full max-w-7xl flex-1 px-4 pb-24 pt-6 sm:px-6 sm:pb-6">
+        {/* 行情终端走满屏容器，其余页面走内容栅栏。
+            交易终端和内容页对宽度的诉求是相反的：内容页需要 max-w-7xl 把行长控制在
+            可读范围内（超过约 75 个字符，眼睛回行就会串行）；终端里最宽的东西是 K 线，
+            而 K 线的价值直接正比于能看到多少根——把它压在 1280px 里，1614px 的屏幕上
+            有 382px 被白白扔掉，图表只占屏幕宽度的 44%。
+            同时终端页不渲染页脚：它的高度是按「正好一屏」算的（见 .term-shell 的
+            calc），底下再挂一段页脚就会把一个不该滚动的页面顶出滚动条。条款/客服
+            入口在其余每一页都够得着，不差这一页。
+            The terminal gets a full-bleed container; every other page keeps the
+            content grid. Their width requirements are opposites: content pages need
+            max-w-7xl to hold the measure inside a readable range (past ~75 characters
+            the eye starts losing its place on the return sweep), while the widest
+            thing in the terminal is the chart, whose value scales directly with how
+            many candles fit — boxed at 1280px on a 1614px screen, 382px is discarded
+            and the chart gets 44% of the display.
+            The terminal page also drops the footer: its height is computed to fill
+            exactly one viewport (see the calc in .term-shell), and appending a footer
+            below forces a scrollbar onto a page that should not scroll. The terms and
+            support links remain reachable from every other page. */}
+        <main
+          className={`w-full flex-1 ${
+            isTerminal
+              ? 'px-2 pb-24 pt-2 sm:px-3 sm:pb-3 lg:px-4'
+              : 'mx-auto max-w-7xl px-4 pb-24 pt-6 sm:px-6 sm:pb-6'
+          }`}
+        >
           {/* 懒加载页面切换时导航保持可见 / keep the nav visible while a lazy page loads */}
           <Suspense
             fallback={
@@ -621,6 +656,7 @@ export default function Layout() {
             compete with the bottom tab bar. The bottom padding clears the fixed
             mobile tab bar (.lg-tabbar is lg:hidden, so every width below lg needs
             the room) or the last row ends up trapped under it and untappable. */}
+        {!isTerminal && (
         <footer className="mx-auto w-full max-w-7xl px-4 pb-24 sm:px-6 lg:pb-6">
           {/* slate → neutral：slate 是带蓝调的灰，与本设计系统的中性 zinc 灰不同族，
               两者同屏时冷暖不一致。全站统一到 neutral。
@@ -639,6 +675,7 @@ export default function Layout() {
             </NavLink>
           </div>
         </footer>
+        )}
 
         {/* 移动端底部导航栏 / mobile bottom nav */}
         <nav className="lg-tabbar lg:hidden">

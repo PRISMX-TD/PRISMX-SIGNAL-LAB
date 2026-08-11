@@ -2384,6 +2384,108 @@
   .glass-card:hover { transform: none; }
 }
 
+/* ══════════════════════════════════════════════
+   交易终端 / trading terminal (charts page)
+   终端级信息密度：收紧留白、等宽数字、高对比、发丝线分隔。
+   Terminal-grade density: tight gutters, tabular figures, high contrast,
+   hairline dividers.
+   ══════════════════════════════════════════════ */
+
+/* 隐藏滚动条但保留滚动（终端里溢出兜底区不该露出滚动条）。
+   Hide the scrollbar but keep scrolling (overflow gutters in the terminal). */
+.no-sb { scrollbar-width: none; }
+.no-sb::-webkit-scrollbar { display: none; }
+
+/* 三栏骨架：左自选 ▏中图表 ▏右下单/账户。桌面填满视口高度，窄屏退回单列。
+   Three columns: watchlist ▏chart ▏ticket/account. Fills the viewport height on
+   desktop; collapses to a single column on narrow screens. */
+.term-shell {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+@media (min-width: 1024px) {
+  /* 桌面：整块无缝终端——一层外框 + 内部发丝线分隔，不是「各自带圆角边框、
+     中间留缝」的浮动卡片。
+     背景从半透明白渐变改成实色抬升面：渐变在这里唯一的作用是模拟玻璃，而终端
+     里每一栏都有自己的内容底色，叠一层白渐变只会让三栏的实际亮度各不相同。
+     Desktop: one seamless terminal — a single outer frame with internal hairline
+     dividers, not floating rounded cards separated by gaps.
+     The background changed from a translucent white gradient to an opaque raised
+     surface: the gradient's only job was simulating glass, and since each column
+     has its own content backdrop, overlaying it made the three columns render at
+     visibly different brightnesses. */
+  .term-shell {
+    /* 侧栏用固定像素、中栏 minmax(0, 1fr) 吃掉剩余全部宽度：自选列表和下单面板
+       的内容宽度是确定的（品种代码 + 价格 / 表单控件），给它们百分比只会在宽屏上
+       把已经排好的内容拉散；而图表的价值直接正比于能看到多少根 K 线，所有多出来
+       的像素都应该归它。1614px 屏上中栏从 706px 变成约 1090px。
+       Fixed pixel side columns with minmax(0, 1fr) in the middle: the watchlist and
+       the order ticket have determinate content widths (symbol code plus price, form
+       controls), so giving them percentages only stretches already-resolved content
+       on wide displays — while the chart's value scales directly with how many
+       candles fit, so every surplus pixel belongs to it. On a 1614px display the
+       centre column goes from 706px to roughly 1090px. */
+    grid-template-columns: 236px minmax(0, 1fr) 288px;
+    gap: 0;
+    /* 高度按「视口 - 顶栏 - 容器上下内边距」精确算，不留富余：终端页不滚动，
+       多算一像素就出现滚动条，少算一像素就白丢一像素的图表高度。
+       65px 顶栏 + 8px 上内边距 + 12px 下内边距 = 85px。
+       用 dvh 而不是 vh —— 移动浏览器地址栏收起时 vh 不更新，会让终端底部被裁掉。
+       Height is computed exactly as viewport minus header minus container padding,
+       with no slack: this page does not scroll, so one pixel too many produces a
+       scrollbar and one too few wastes a pixel of chart. 65px header + 8px top pad
+       + 12px bottom pad = 85px. dvh rather than vh because vh does not update when
+       a mobile browser collapses its address bar, which clips the terminal's base. */
+    height: calc(100dvh - 85px);
+    border: 1px solid var(--line-hi);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .term-col-left { border-right: 1px solid var(--line); }
+  .term-col-right { border-left: 1px solid var(--line); }
+}
+
+/* 面板在无缝框里不再各自带边框/圆角/背景，避免「浮动卡片 + 裂缝」观感；
+   区块之间的分隔改用发丝线（见各自的 border-bottom/top）。
+   Inside the seamless frame, panels drop their own border/radius/background so
+   they don't read as floating cards; sections are separated by hairlines. */
+.term-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* 栏目标题条。字距从 0.13em 收到 0.1em——全大写 + 宽字距在 11px 下已经够费力，
+   0.13em 会让中文标签（「自选」「持仓」）的字距大到像是漏排。
+   Pane header. Tracking tightened from 0.13em to 0.1em: all-caps plus wide
+   tracking is already hard work at 11px, and 0.13em spaced the Chinese labels
+   (自选 / 持仓) far enough apart to read as a typesetting error. */
+.term-pane-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.term-pane-head-r {
+  margin-left: auto;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-3);
+}
+
 /* ── 中栏 / center column ── */
 .term-center {
   display: flex;
