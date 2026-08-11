@@ -16,20 +16,47 @@ from app.core.security import (
     verify_password,
 )
 from app.models import User
-from app.schemas import AuthRequest, AuthResponse, GoogleAuthRequest, UserOut
+from app.schemas import AuthRequest, AuthResponse, GoogleAuthRequest, RegisterRequest, UserOut
+from app.services.phone import compose_phone
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _user_out(user: User) -> UserOut:
-    return UserOut(id=user.id, email=user.email, role=user.role, plan=user.plan)
+    return UserOut(
+        id=user.id,
+        email=user.email,
+        role=user.role,
+        plan=user.plan,
+        phone=user.phone,
+        # 必填标记为真、且还没填 —— 两个条件都要，否则已经填过的用户
+        # 每次登录都会被再拦一次。
+        # Both conditions: required *and* still missing, or users who
+        # already filled it in would be gated again on every login.
+        needsPhone=bool(user.phone_required) and not user.phone,
+    )
 
 
 @router.post("/register", response_model=AuthResponse)
 @limiter.limit(settings.RATE_LIMIT_REGISTER)
-def register(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
+def register(request: Request, req: RegisterRequest, db: Session = Depends(get_db)):
     """注册新用户 / Register a new user."""
     email = req.email.lower()
+
+    # 先校验手机号再查邮箱：号码不合法是用户当场能改的输入错误，应该明确
+    # 告诉他哪里不对。放在邮箱重复检查之后的话，一个手机号填错的新用户会
+    # 先撞上那句为防邮箱枚举而刻意含糊的「无法完成注册」，完全无从下手。
+    # Validate the phone first: a malformed number is a fixable input error and
+    # deserves a specific message. Checked after the email-exists branch, a user
+    # with a typo'd number would instead hit the deliberately vague
+    # "unable to register" (worded that way to prevent email enumeration) and
+    # have no idea what to correct.
+    phone = compose_phone(req.phoneCountry, req.phone)
+    if not phone:
+        raise HTTPException(
+            status_code=422,
+            detail="手机号格式不正确，请检查区号与号码 / Invalid phone number — check the dial code and number",
+        )
     existing = db.query(User).filter(User.email == email).first()
     if existing:
         # 统一非区分性错误，避免邮箱枚举 / generic error to avoid email enumeration
@@ -37,6 +64,7 @@ def register(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
 
     user = User(
         email=email,
+        phone=phone,
         password_hash=hash_password(req.password),
         # 只存哈希；用户首次连接 MT5 时在绑定页生成可见 token / store the hash
         # only; the user generates a visible token on the Bind page

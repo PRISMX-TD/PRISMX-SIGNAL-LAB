@@ -29,10 +29,19 @@ const LegalPage = lazy(() => import('./pages/LegalPage'))
 const FaqPage = lazy(() => import('./pages/FaqPage'))
 const SupportPage = lazy(() => import('./pages/SupportPage'))
 const StrategyGuidePage = lazy(() => import('./pages/StrategyGuidePage'))
+const CompleteProfilePage = lazy(() => import('./pages/CompleteProfilePage'))
 
 function Protected({ children }: { children: ReactNode }) {
-  const { isAuthed } = useAuth()
-  return isAuthed ? <>{children}</> : <Navigate to="/login" replace />
+  const { isAuthed, user } = useAuth()
+  if (!isAuthed) return <Navigate to="/login" replace />
+  // 还欠手机号的账号一律先去补录（目前只有 Google 注册的新用户会命中）。
+  // 放在这一层而不是各页面自己判断：漏一个页面就等于开了个后门，而这里是
+  // 所有登录后页面的唯一入口。
+  // Accounts still owing a phone are routed to the completion page first. Gated
+  // here rather than per-page: this is the single entry point to every
+  // logged-in page, so nothing can slip past it.
+  if (user?.needsPhone) return <Navigate to="/complete-profile" replace />
+  return <>{children}</>
 }
 
 // 管理员专属路由：登录态之外还要求 role === 'admin'，否则送回仪表盘。
@@ -99,6 +108,7 @@ export default function App() {
             <Route path="/" element={<PublicShell lang="zh" page="home"><Home /></PublicShell>} />
             <Route path="/en" element={<PublicShell lang="en" page="home"><Home /></PublicShell>} />
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/complete-profile" element={<CompleteProfilePage />} />
             {/* 法务文本：必须放在 Protected 之外，公开可访问。
                 ① 访客要能在注册前读到条款，否则「注册即视为同意」不成立；
                 ② Google OAuth 正式验证要求提供公开可访问的隐私政策 URL，藏在

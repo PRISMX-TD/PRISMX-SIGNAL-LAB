@@ -93,7 +93,8 @@ def _hash_legacy_api_tokens() -> None:
 # Bump this whenever a new step is added to _migrate_columns. Forgetting doesn't
 # raise — the new step is silently skipped on databases that already ran an older
 # revision, and the damage surfaces much later as an unexpectedly NULL column.
-CURRENT_SCHEMA_REV = 1
+# rev 2: users.phone / users.phone_required（注册强制记录手机号）
+CURRENT_SCHEMA_REV = 2
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -312,6 +313,8 @@ def _migrate_columns() -> None:
             "plan_is_trial": "BOOLEAN",
             "token_version": "INTEGER",
             "google_linked_at": datetime_type,
+            "phone": "VARCHAR",
+            "phone_required": "BOOLEAN",
         }
         with engine.begin() as conn:
             for name, col_type in user_new.items():
@@ -344,6 +347,25 @@ def _migrate_columns() -> None:
                     "UPDATE users SET google_linked_at = created_at "
                     "WHERE password_hash IS NOT NULL AND google_linked_at IS NULL"
                 ))
+            # phone_required 回填：与上面 google_linked_at 完全同一种取舍——
+            # 强制填手机号这条新规则只管本次上线之后新建的账号，此刻库里已有的
+            # 用户一律豁免（产品决定）。把现存行全部置 False 就是在这一刻给
+            # 「存量」划线；之后 SQLAlchemy 插入的新行走模型默认值 True。
+            #
+            # 必须放在 if 里只跑一次：如果每次启动都无条件 UPDATE，那些上线后
+            # 新注册、还没补录手机号的用户会被反复豁免掉，强制补录直接失效。
+            #
+            # phone_required backfill: same tradeoff as google_linked_at above —
+            # the mandatory-phone rule governs only accounts created after this
+            # ships; everyone already in the table is grandfathered. Setting all
+            # existing rows to False is what draws that line, at this instant;
+            # rows inserted later take the model default of True.
+            #
+            # Guarded so it runs exactly once: an unconditional UPDATE on every
+            # boot would keep re-exempting users who registered after launch and
+            # haven't filled their phone in yet, silently disabling the whole rule.
+            if "phone_required" not in user_cols:
+                conn.execute(text("UPDATE users SET phone_required = FALSE"))
             # 旧行补默认值：新列刚加时为 NULL，但 role/plan 声明为 NOT NULL。
             # Backfill existing rows: a freshly added column is NULL, but
             # role/plan are declared NOT NULL.

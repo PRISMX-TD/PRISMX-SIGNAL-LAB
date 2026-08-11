@@ -106,10 +106,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 // 认证 / Auth
 export const authApi = {
-  register: (email: string, password: string) =>
+  register: (email: string, password: string, phoneCountry: string, phone: string) =>
     request<{ token: string; user: User }>('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, phoneCountry, phone }),
+    }),
+  // 补录手机号（Google 注册的用户首次登录后走这条）/ fill in a missing phone
+  setPhone: (phoneCountry: string, phone: string) =>
+    request<User>('/auth/phone', {
+      method: 'POST',
+      body: JSON.stringify({ phoneCountry, phone }),
     }),
   login: (email: string, password: string) =>
     request<{ token: string; user: User }>('/auth/login', {

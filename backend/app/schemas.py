@@ -31,6 +31,28 @@ class AuthRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
 
 
+class RegisterRequest(AuthRequest):
+    """注册请求：比登录多一个必填手机号。
+
+    单独一个类而不是给 AuthRequest 加可选字段——登录不需要手机号，共用一个类
+    就只能把它设成可选，那"必填"就退化成了运行时的 if 判断，接口文档上也看不出来。
+
+    区号与号码分两个字段传，不是让前端自己拼好一个 E.164：拼接要处理国内号码的
+    前导 0，而那一步必须知道区号在哪断开（见 services/phone.py 的说明）。让知道
+    这件事的一方（这里是"两段分别传"）负责，比让前端拼、后端再猜要可靠。
+    """
+
+    phoneCountry: str = Field(min_length=1, max_length=6, description="国际区号，如 60 或 +60")
+    phone: str = Field(min_length=3, max_length=24, description="国内号码部分")
+
+
+class PhoneRequest(BaseModel):
+    """补录手机号（Google 注册的用户首次登录后走这条）。字段含义同 RegisterRequest。"""
+
+    phoneCountry: str = Field(min_length=1, max_length=6)
+    phone: str = Field(min_length=3, max_length=24)
+
+
 class GoogleAuthRequest(BaseModel):
     # 前端 Google Identity Services 返回的 ID Token / ID token from Google Identity Services
     credential: str = Field(min_length=1, max_length=4096)
@@ -41,6 +63,14 @@ class UserOut(BaseModel):
     email: str
     role: str = "user"
     plan: str = "FREE"
+    phone: str | None = None
+    # 前端据此决定要不要把用户拦在"补录手机号"页。由后端算好而不是让前端
+    # 用 `!phone` 判断——存量用户的 phone 也是空，但他们豁免，这个区别只有
+    # 后端知道（见 User.phone_required）。
+    # The frontend gates on this rather than on `!phone`: grandfathered users
+    # also have an empty phone but are exempt, a distinction only the backend
+    # can make (see User.phone_required).
+    needsPhone: bool = False
 
 
 class AuthResponse(BaseModel):

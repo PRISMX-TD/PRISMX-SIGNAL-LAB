@@ -1404,6 +1404,20 @@
     color: var(--text-3);
   }
 
+  /* 手机号区号下拉：固定宽度，剩下的空间全给号码输入框。
+     国名 + 区号在窄屏会很长，用 nowrap + 省略号收住，别把布局撑破。
+     Dial-code select: fixed width so the number input gets the rest; country
+     names are long on narrow screens, so clamp rather than let it stretch. */
+  .phone-dial-select {
+    width: 132px;
+    flex-shrink: 0;
+  }
+  .phone-dial-select .select-trigger {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   /* ── 通用自定义下拉（替代原生 select）/ generic custom dropdown ── */
   .select-picker {
     position: relative;

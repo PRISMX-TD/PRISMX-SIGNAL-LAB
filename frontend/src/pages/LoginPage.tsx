@@ -8,6 +8,8 @@ import Logo from '../components/Logo'
 import LanguageToggle from '../components/LanguageToggle'
 import AuroraBackground from '../components/AuroraBackground'
 import GoogleLoginButton from '../components/GoogleLoginButton'
+import PhoneField, { dialCodeOf, type PhoneValue } from '../components/PhoneField'
+import { DEFAULT_DIAL_ISO } from '../data/dialCodes'
 
 export default function LoginPage() {
   const { t } = useTranslation()
@@ -21,6 +23,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [phone, setPhone] = useState<PhoneValue>({ iso: DEFAULT_DIAL_ISO, national: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -33,7 +36,7 @@ export default function LoginPage() {
     setLoading(true)
     try {
       if (mode === 'login') await login(email, password)
-      else await register(email, password)
+      else await register(email, password, dialCodeOf(phone.iso), phone.national)
       navigate('/dashboard', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? localizeApiError(err.message) : t('auth.errorFailed'))
@@ -161,6 +164,14 @@ export default function LoginPage() {
                   </button>
                 </div>
               </div>
+
+              {/* 手机号：仅注册时出现且必填。放在密码之后——注册表单的字段顺序
+                  应该跟用户的心理预期一致（先账号密码，再联系方式）。
+                  Phone: register-only and required, placed after the password so
+                  the field order matches what a signup form is expected to ask. */}
+              {mode === 'register' && (
+                <PhoneField value={phone} onChange={setPhone} />
+              )}
 
               {error && (
                 <div className="rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down">

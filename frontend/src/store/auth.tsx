@@ -7,7 +7,10 @@ interface AuthContextValue {
   user: User | null
   isAuthed: boolean
   login: (email: string, password: string) => Promise<void>
-  register: (email: string, password: string) => Promise<void>
+  register: (email: string, password: string, phoneCountry: string, phone: string) => Promise<void>
+  // 补录手机号成功后就地更新登录态，让路由守卫立刻放行（不必重新登录）
+  // Updates auth state in place so the route guard releases immediately
+  submitPhone: (phoneCountry: string, phone: string) => Promise<void>
   loginWithGoogle: (credential: string) => Promise<void>
   logout: () => void
   refreshUser: () => Promise<void>
@@ -46,9 +49,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     persist(res.user, res.token)
   }
 
-  const register = async (email: string, password: string) => {
-    const res = await authApi.register(email, password)
+  const register = async (email: string, password: string, phoneCountry: string, phone: string) => {
+    const res = await authApi.register(email, password, phoneCountry, phone)
     persist(res.user, res.token)
+  }
+
+  const submitPhone = async (phoneCountry: string, phone: string) => {
+    const updated = await authApi.setPhone(phoneCountry, phone)
+    // 只换 user，token 不动：这个接口不签发新 token，沿用当前的。
+    // Swap the user only; this endpoint issues no new token.
+    setUser(updated)
+    localStorage.setItem(USER_KEY, JSON.stringify(updated))
   }
 
   const loginWithGoogle = async (credential: string) => {
@@ -94,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, isAuthed: !!user, login, register, loginWithGoogle, logout, refreshUser }}>
+    <AuthContext.Provider value={{ user, isAuthed: !!user, login, register, submitPhone, loginWithGoogle, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   )

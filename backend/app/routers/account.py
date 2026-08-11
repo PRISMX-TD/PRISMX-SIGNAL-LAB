@@ -11,6 +11,8 @@ from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models import MT5Account, User, UserPref
+from app.schemas import PhoneRequest, UserOut
+from app.services.phone import compose_phone
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user
 
@@ -65,6 +67,52 @@ def get_account(
             }
             for b in bindings
         ],
+    )
+
+
+@router.post("/phone", response_model=UserOut)
+@limiter.limit(settings.RATE_LIMIT_PASSWORD)
+def set_phone(
+    request: Request,
+    req: PhoneRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """补录手机号。Google 注册的用户首次登录后被拦在这一步。
+
+    只允许「从无到有」，不允许改号：改号是另一件事（要防账号被接管后悄悄换掉
+    联系方式），需要验证旧号码或密码，不该混在这个为了走完注册流程而存在的
+    接口里。已经有号码的用户调这里直接拒。
+
+    Fill in a missing phone. Google-created users are gated here on first login.
+    Only ever fills a blank — changing an existing number is a different operation
+    (an attacker who took over an account must not be able to quietly swap the
+    contact details) and needs its own verified flow.
+    """
+    if current_user.phone:
+        raise HTTPException(
+            status_code=409,
+            detail="手机号已存在，如需修改请联系客服 / Phone already set; contact support to change it",
+        )
+
+    phone = compose_phone(req.phoneCountry, req.phone)
+    if not phone:
+        raise HTTPException(
+            status_code=422,
+            detail="手机号格式不正确，请检查区号与号码 / Invalid phone number — check the dial code and number",
+        )
+
+    current_user.phone = phone
+    db.commit()
+    db.refresh(current_user)
+
+    return UserOut(
+        id=current_user.id,
+        email=current_user.email,
+        role=current_user.role,
+        plan=current_user.plan,
+        phone=current_user.phone,
+        needsPhone=False,
     )
 
 

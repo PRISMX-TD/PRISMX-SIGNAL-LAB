@@ -282,7 +282,14 @@
     "errorFailed": "Failed. Please check email and password",
     "or": "or",
     "googleContinue": "Continue with Google",
-    "googleError": "Google sign-in failed. Please try again"
+    "googleError": "Google sign-in failed. Please try again",
+    "phone": "Phone number",
+    "phonePlaceholder": "Phone number (without dial code)",
+    "phoneHint": "Select your region and enter your phone number — used for account security and important notices",
+    "completeTitle": "Complete your profile",
+    "completeSubtitle": "One more step: enter your phone number to get started",
+    "completeSubmit": "Submit and continue",
+    "completeSignOut": "Sign out and use another account"
   },
   "signals": {
     "title": "Live Trading Signals",

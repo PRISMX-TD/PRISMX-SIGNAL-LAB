@@ -49,6 +49,11 @@ export interface User {
   email: string
   role: UserRole
   plan: UserPlan
+  phone?: string | null
+  // 是否还欠一个手机号。由后端算（存量用户 phone 也为空但豁免，前端分不出来）。
+  // Whether a phone is still owed; computed server-side because grandfathered
+  // users also have an empty phone but are exempt.
+  needsPhone?: boolean
   // 当前 PRO 是否为免费试用；登录/注册响应不带这个字段（未知），
   // 只有 refreshUser()（调 GET /auth/me）之后才会补上。
   // Whether the current PRO is a free trial; absent (unknown) on the

@@ -282,7 +282,14 @@
     "errorFailed": "操作失败，请检查邮箱与密码",
     "or": "或",
     "googleContinue": "使用 Google 账户继续",
-    "googleError": "Google 登录失败，请重试"
+    "googleError": "Google 登录失败，请重试",
+    "phone": "手机号码",
+    "phonePlaceholder": "手机号码（不含区号）",
+    "phoneHint": "请选择所在地区并填写手机号码，用于账户安全与重要通知",
+    "completeTitle": "完善资料",
+    "completeSubtitle": "还差一步：请填写手机号码，之后即可开始使用",
+    "completeSubmit": "提交并继续",
+    "completeSignOut": "退出登录，换个账号"
   },
   "signals": {
     "title": "实时交易信号",

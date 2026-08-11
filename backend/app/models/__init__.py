@@ -29,6 +29,34 @@ class User(Base):
     api_token = Column(String, unique=True, nullable=False, index=True)
     created_at = Column(DateTime, default=_now)
 
+    # 手机号，统一存 E.164（区号+号码，如 +60123456789）。
+    # 不拆成「区号」「号码」两列：拆开之后每个消费方都要自己拼，迟早有人拼错
+    # （漏加号、区号带前导 0）。前端用两个输入框只是录入方式，落库前合成一个值。
+    # 只做格式校验，不做短信验证——号码是「记录」不是「已验证」，别把它当成
+    # 可信的身份凭据用（比如拿来做找回密码）。
+    # Phone in E.164 (dial code + number). Deliberately one column, not a split
+    # dial-code/number pair: every consumer would otherwise re-assemble it and
+    # someone eventually gets it wrong. Format-checked only, never SMS-verified —
+    # treat it as recorded, not proven, and don't build account recovery on it.
+    phone = Column(String, nullable=True)
+    # 是否必须提供手机号才能使用。
+    #
+    # 存在的唯一理由是分清「存量用户」和「新用户」：这次上线要求新注册强制填写，
+    # 但已有用户豁免（产品决定）。迁移时把当时库里所有行回填为 False，之后新建的
+    # 用户走模型默认值 True。这比「注册时间早于某个日期」可靠——不依赖部署时刻的
+    # 时钟，也不会因为补跑迁移而误判。
+    #
+    # 与 google_linked_at 是同一种取舍（见 core/database.py 那段回填注释）：
+    # 新规则只管这次上线之后出现的账号，老用户一个都不被追溯要求。
+    #
+    # Whether this account must supply a phone before using the app. Exists solely
+    # to separate pre-existing users (grandfathered) from new ones: the migration
+    # backfills every row present at that moment to False, and rows created later
+    # take the model default of True. More reliable than comparing created_at to a
+    # launch date — no dependence on deploy-time clocks, and re-running the
+    # migration can't misclassify anyone. Same tradeoff as google_linked_at.
+    phone_required = Column(Boolean, default=True, nullable=True)
+
     # 权力轴：user（默认）/ admin。与订阅等级（plan）完全独立——管理员权限
     # 不代表任何信号等级，订阅等级也不授予任何后台管理权限。
     # Power axis: user (default) / admin. Fully independent of `plan` — admin
