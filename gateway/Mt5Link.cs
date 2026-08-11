@@ -1756,8 +1756,21 @@ namespace Prismx.Mt5Gateway
             // 查不到也只是退化成旧行为(0),不影响这笔已成交的仓位。
             // The confirmation carries no position id; resolve it from the deal.
             // A failure just degrades to 0 and never affects the filled position.
-            if (r.Ok && r.Deal != 0)
-                r.Position = GetDealPosition(r.Deal);
+            if (r.Ok)
+            {
+                if (r.Deal != 0)
+                    r.Position = GetDealPosition(r.Deal);
+
+                // PLACED 的回执里成交号可能还是 0(成交在订单建立之后才产生),这时退回
+                // 用订单号:MT5 的仓位号就是开仓订单的 ticket,两者在同一个编号空间。
+                // 这只是拿不到成交号时的兜底——填错的代价与填 0 相同(归属退化成靠
+                // comment 前缀判断),不会影响这笔已成交的仓位本身。
+                // On a PLACED confirmation the deal ticket can still be 0, since the
+                // deal is created after the order. Fall back to the order ticket: in
+                // MT5 a position id is the ticket of the order that opened it.
+                if (r.Position == 0 && r.Order != 0)
+                    r.Position = r.Order;
+            }
 
             // 兜底:确认 SL/TP 真的落在仓位上,没落上才补一次改单。
             //
@@ -2026,8 +2039,29 @@ namespace Prismx.Mt5Gateway
                     Log.Warn("dealer 请求 {0} 被退回队列({1}),未成交", requestId, res);
                 }
 
+                // MT_RET_REQUEST_PLACED 也是成功。
+                //
+                // 这个返回码的意思是"请求已被系统接受、订单已建立",不同券商的执行
+                // 模式决定回哪一个:即时执行通常回 DONE,市价执行(Market Execution)
+                // 会先回 PLACED,成交紧随其后。以前只认 DONE/DONE_PARTIAL,于是真仓
+                // 首单出现了最糟的一种失败形态——**仓位已经开出来了,前端却报"下单被
+                // 拒绝"**。用户看到失败会去重下,结果是重复开仓;后端那边这笔又被记成
+                // REJECTED,orders 表里没有 FILLED 记录,平仓明细的仓位号归属也跟着丢。
+                //
+                // 这条路径只发 OP_BUY/OP_SELL 市价单(TA_DEALER_POS_EXECUTE),不会产生
+                // 挂单,所以 PLACED 在这里没有"已挂单但未成交"的歧义。
+                //
+                // MT_RET_REQUEST_PLACED means the request was accepted and the order
+                // created. Instant-execution servers answer DONE; market-execution
+                // ones answer PLACED first and fill right after. Accepting only DONE
+                // produced the worst failure shape on the first live order: the
+                // position was open while the UI said "rejected", inviting a duplicate
+                // submit and leaving the backend with a REJECTED row for a filled
+                // trade. This path only ever sends market orders, so PLACED carries no
+                // "pending, unfilled" ambiguity here.
                 if (res == MTRetCode.MT_RET_REQUEST_DONE ||
-                    res == MTRetCode.MT_RET_REQUEST_DONE_PARTIAL)
+                    res == MTRetCode.MT_RET_REQUEST_DONE_PARTIAL ||
+                    res == MTRetCode.MT_RET_REQUEST_PLACED)
                 {
                     lock (_gate)
                     {
