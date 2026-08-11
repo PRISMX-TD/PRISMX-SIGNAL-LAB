@@ -3295,19 +3295,26 @@ body {
   position: absolute;
   inset: 0;
   border-radius: 11.5% / 5.4%;
-  background: #101014;
-  /* 中间层不描边：每层 1px 边框在旋转时会叠出一圈圈「年轮」，侧壁反而假。
-     只靠层与层的色阶差表达厚度。/ No border on the middle slabs: a 1px border
-     per layer stacks into visible growth rings when rotated. Depth comes from
-     the value steps between layers alone. */
+  /* 横向金属渐变：两端亮、中间暗。旋转时露出的层边是被光打亮的铝轨。
+     中间层不描边（1px 边框旋转时会叠出「年轮」）。
+     Horizontal metal gradient, bright at both ends: the exposed layer edges
+     read as lit aluminium rails. No borders on middle slabs (they stack into
+     growth rings when rotated). */
+  background: linear-gradient(90deg, #4a4a55 0%, #1c1c22 3%, #101014 50%, #1c1c22 97%, #4a4a55 100%);
 }
-.dev-slab:nth-child(1) { transform: translateZ(-14px); background: #0a0a0d; }
-.dev-slab:nth-child(2) { transform: translateZ(-12px); }
-.dev-slab:nth-child(3) { transform: translateZ(-10px); }
-.dev-slab:nth-child(4) { transform: translateZ(-8px); }
-.dev-slab:nth-child(5) { transform: translateZ(-6px); }
-.dev-slab:nth-child(6) { transform: translateZ(-4px); background: #16161b; }
-.dev-slab:nth-child(7) { transform: translateZ(-2px); background: #1a1a20; }
+.dev-slab:nth-child(1) {
+  transform: translateZ(-25.2px);
+  background: #08080b;
+  border: 1px solid #1c1c22;
+}
+.dev-slab:nth-child(2) { transform: translateZ(-22.4px); }
+.dev-slab:nth-child(3) { transform: translateZ(-19.6px); }
+.dev-slab:nth-child(4) { transform: translateZ(-16.8px); }
+.dev-slab:nth-child(5) { transform: translateZ(-14px); }
+.dev-slab:nth-child(6) { transform: translateZ(-11.2px); }
+.dev-slab:nth-child(7) { transform: translateZ(-8.4px); }
+.dev-slab:nth-child(8) { transform: translateZ(-5.6px); }
+.dev-slab:nth-child(9) { transform: translateZ(-2.8px); }
 /* 正面：金属包边 / front face: the metallic rim
    真实感来自三层：① 沿光源方向的明暗渐变（左上受光）；② 左右两条 1px 镜面
    棱线（铝边被环境光勾出的亮边，::before/::after）；③ 包边与屏幕之间的一圈
@@ -3342,6 +3349,25 @@ body {
   right: 0.5px;
   background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.22) 30%, transparent 80%);
 }
+.dev-facelight {
+  position: absolute;
+  inset: 0;
+  border-radius: 11.5% / 5.4%;
+  overflow: hidden;
+  transform: translateZ(0.6px);
+  pointer-events: none;
+}
+.dev-facelight i {
+  position: absolute;
+  top: -10%;
+  bottom: -10%;
+  left: -30%;
+  width: 160%;
+  background: linear-gradient(100deg, transparent 38%, rgba(255, 255, 255, 0.07) 50%, transparent 62%);
+  /* steps 模式的静态落位；scrub 模式由 GSAP 内联覆盖。
+     Static resting position for steps mode; GSAP overrides inline in scrub. */
+  transform: translateX(-8%);
+}
 
 /* 侧键：右缘电源键、左缘两枚音量键。挂在机身中层深度（translateZ 负半程），
    机身左右转动时从边缘探出——这是「一眼看出是真手机」性价比最高的细节。
@@ -3350,10 +3376,10 @@ body {
    highest-value realism detail per line of CSS. */
 .dev-key {
   position: absolute;
-  width: 1.6%;
+  width: 1.9%;
   border-radius: 2px;
-  background: linear-gradient(90deg, #2e2e36, #17171c);
-  transform: translateZ(-7px);
+  background: linear-gradient(180deg, #3c3c46, #1a1a21 55%, #2a2a33);
+  transform: translateZ(-12px);
 }
 .dev-key.power { right: -1.2%; top: 26%; height: 9%; }
 .dev-key.vol-a { left: -1.2%; top: 20%; height: 6%; }
@@ -3372,10 +3398,12 @@ body {
   transform: translateZ(1px);
   container-type: inline-size;
   /* bezel：包边与发光面板之间的纯黑圈。真机上这一圈永远存在，缺了它屏幕
-     会显得「贴」在机身上而不是嵌进去。
-     The bezel: the pure-black ring between rim and lit panel. Real phones
-     always have it; without it the screen reads as pasted on, not seated in. */
+     会显得「贴」在机身上而不是嵌进去。内圈再补一线 1px 微光：发光面板与
+     bezel 的交界在真机上永远有一线亮。
+     The bezel: the pure-black ring between rim and lit panel; plus a 1px inner
+     rim of light where the lit panel meets it, always visible on real hardware. */
   border: 2px solid #000;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.045);
 }
 .dev-island {
   position: absolute;
@@ -3386,8 +3414,19 @@ body {
   height: 2.4%;
   border-radius: 999px;
   background: #000;
-  border: 1px solid #1c1c22;
+  border: 1px solid #17171c;
   z-index: 40;
+}
+.dev-island::after {
+  content: '';
+  position: absolute;
+  right: 8%;
+  top: 50%;
+  width: 22%;
+  aspect-ratio: 1;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 32%, #3d4368 0%, #14162a 38%, #05050a 72%);
 }
 /* 反光层：这是反射不是发光——白色渐变盖在屏幕上方，转场时 GSAP 把透明度
    抬一下再放下，模拟机身转动时扫过的环境光。
@@ -3416,7 +3455,7 @@ body {
   bottom: -8.5%;
   width: 96%;
   height: 5.5%;
-  transform: translateX(-50%) translateZ(-16px);
+  transform: translateX(-50%) translateZ(-27px);
   border-radius: 50%;
   background:
     radial-gradient(32% 46% at 50% 50%, rgba(0, 0, 0, 0.72), transparent 72%),

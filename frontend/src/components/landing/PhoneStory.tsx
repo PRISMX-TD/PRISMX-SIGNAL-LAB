@@ -125,6 +125,9 @@ export default function PhoneStory() {
         gsap.set('.js-fill', { scaleX: 0 })
         gsap.set('.js-be', { autoAlpha: 0 })
         gsap.set('.js-rec', { autoAlpha: 0, y: 12 })
+        /* 面光初始落位：与 hero 姿态（rotY -22°）相称，光带偏左。
+           Face light resting position matching the hero pose (rotY -22°). */
+        gsap.set('.js-facelight', { xPercent: -26 })
 
         /* 反光脉冲：转场时环境光扫过屏幕。这是反射，不是发光。
            Sheen pulse: ambient light sweeping the screen at a transition.
@@ -181,6 +184,13 @@ export default function PhoneStory() {
         /* 10–16 转场①：右→左，屏幕亮出完整计划 / hero → plan, phone crosses right→left */
         panelOut(tl, 'hero', 10)
         tl.to(pose, { x: '-19vw', rotateY: 12, rotateX: 4, duration: 6, ease: 'power2.inOut' }, 10)
+        /* 面光与 rotateY 同窗口反向横扫：光源固定在房间里，机身转动时高光
+           划过包边——这是「静态渐变」与「被灯照着的物体」的分界线。
+           The face light sweeps in the same window as rotateY: the lamp stays
+           fixed in the room while the body turns, so the highlight travels
+           across the rim. This is the line between a printed gradient and an
+           object under a light. */
+        tl.to('.js-facelight', { xPercent: 14, duration: 6, ease: 'power2.inOut' }, 10)
         sheenPulse(tl, 11)
         swapScreen(tl, 0, 1, 11)
         panelIn(tl, '1', 14)
@@ -188,10 +198,12 @@ export default function PhoneStory() {
         /* 16–28 幕1 停留：机身缓慢回正 3°，给静止的画面留一口呼吸。
            Scene 1 hold: the body eases back 3° so the still frame keeps breathing. */
         tl.to(pose, { rotateY: 9, duration: 12, ease: 'none' }, 16)
+        tl.to('.js-facelight', { xPercent: 11, duration: 12, ease: 'none' }, 16)
 
         /* 28–34 转场② / plan → order */
         panelOut(tl, '1', 28)
         tl.to(pose, { rotateY: 17, scale: 1.04, duration: 5, ease: 'power2.inOut' }, 29)
+        tl.to('.js-facelight', { xPercent: 20, duration: 5, ease: 'power2.inOut' }, 29)
         sheenPulse(tl, 30)
         swapScreen(tl, 1, 2, 29)
         panelIn(tl, '2', 32)
@@ -220,6 +232,7 @@ export default function PhoneStory() {
         /* 46–52 转场③：左→右，拉近看图表 / order → guard, phone crosses back, zooms in */
         panelOut(tl, '2', 46)
         tl.to(pose, { x: '19vw', rotateY: -10, rotateX: 3, scale: 1.1, duration: 6, ease: 'power2.inOut' }, 46)
+        tl.to('.js-facelight', { xPercent: -12, duration: 6, ease: 'power2.inOut' }, 46)
         sheenPulse(tl, 47)
         swapScreen(tl, 2, 3, 47)
         panelIn(tl, '3', 50)
@@ -235,6 +248,7 @@ export default function PhoneStory() {
         /* 64–70 转场④ / guard → record */
         panelOut(tl, '3', 64)
         tl.to(pose, { rotateY: 7, scale: 1.02, duration: 5, ease: 'power2.inOut' }, 64)
+        tl.to('.js-facelight', { xPercent: 8, duration: 5, ease: 'power2.inOut' }, 64)
         sheenPulse(tl, 65)
         swapScreen(tl, 3, 4, 65)
         panelIn(tl, '4', 68)
@@ -247,6 +261,7 @@ export default function PhoneStory() {
            content below. */
         panelOut(tl, '4', 85)
         tl.to(pose, { x: 0, rotateY: 0, rotateX: 0, scale: 0.92, duration: 11, ease: 'power2.inOut' }, 86)
+        tl.to('.js-facelight', { xPercent: 0, duration: 11, ease: 'power2.inOut' }, 86)
 
         /* ── 鼠标跟随倾斜 / pointer tilt ──
            quickTo 直接写合成器属性，不触碰 React。挂在内层 .js-tilt 上，
@@ -256,14 +271,22 @@ export default function PhoneStory() {
            outer .js-pose for the same values. */
         const rx = gsap.quickTo(tilt, 'rotationX', { duration: 0.6, ease: 'power3.out' })
         const ry = gsap.quickTo(tilt, 'rotationY', { duration: 0.6, ease: 'power3.out' })
+        /* 玻璃反光跟随光标微转：机身倾斜时屏幕玻璃上的反光角度跟着变——
+           挂在 .js-sheen 的 rotation 上（合成器属性），与时间线驱动的 opacity
+           不同轴，互不抢值。/ The glass reflection turns slightly with the
+           cursor: tied to .js-sheen's rotation (compositor prop), a different
+           axis from the timeline-driven opacity, so the two never fight. */
+        const rs = gsap.quickTo('.js-sheen', 'rotation', { duration: 0.8, ease: 'power3.out' })
         const onMove = (e: MouseEvent) => {
           const r = stage.getBoundingClientRect()
           rx((0.5 - (e.clientY - r.top) / r.height) * 6)
           ry(((e.clientX - r.left) / r.width - 0.5) * 8)
+          rs(((e.clientX - r.left) / r.width - 0.5) * -5)
         }
         const onLeave = () => {
           rx(0)
           ry(0)
+          rs(0)
         }
         stage.addEventListener('mousemove', onMove)
         stage.addEventListener('mouseleave', onLeave)
@@ -306,11 +329,19 @@ export default function PhoneStory() {
               <div className="js-tilt dev-tilt">
                 <div className="dev-body">
                   <div className="dev-ground" aria-hidden />
-                  {/* 8 层堆叠机身 / eight stacked slabs */}
-                  {Array.from({ length: 7 }, (_, i) => (
+                  {/* 9 层堆叠机身：~25px 厚度。此前 14px 换算过来只有一张信用卡
+                      厚，「太薄」是显假的第一原因。/ Nine stacked slabs, ~25px
+                      deep. The previous 14px scaled to a credit card, and "too
+                      thin" is the first thing that reads as fake. */}
+                  {Array.from({ length: 9 }, (_, i) => (
                     <div key={i} className="dev-slab" aria-hidden />
                   ))}
                   <div className="dev-face" aria-hidden />
+                  {/* 动态面光：随姿态横扫的柔光带（时间线驱动）。
+                      The travelling face light, driven by the timeline. */}
+                  <div className="dev-facelight" aria-hidden>
+                    <i className="js-facelight" />
+                  </div>
                   <div className="dev-screen">
                     <ScreenSignals t={t as T} on={active === 0} />
                     <ScreenPlan t={t as T} on={active === 1} />
