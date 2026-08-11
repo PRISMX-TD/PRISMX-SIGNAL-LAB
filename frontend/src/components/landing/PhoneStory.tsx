@@ -35,11 +35,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ScreenSignals, ScreenPlan, ScreenOrder, ScreenGuard, ScreenRecord } from './PhoneScreens'
+import { PhoneChrome, ScreenSignals, ScreenPlan, ScreenOrder, ScreenGuard, ScreenRecord } from './PhoneScreens'
 
 type T = (k: string) => string
 
 const SCENES = 5
+
+// 各幕对应的底部 Tab：信号三幕（列表/计划/下单弹层都发生在信号面板）、守夜幕
+// 亮仪表盘、留痕幕亮订单回执。激活 Tab 的移动本身就是「App 在被使用」的叙事。
+// Active bottom tab per scene: the first three happen inside the signal panel
+// (the order sheet overlays it), guarding lights the dashboard, the record
+// lights order receipts. The moving highlight narrates an app in use.
+const TAB_BY_SCENE = ['signals', 'signals', 'signals', 'dashboard', 'orders'] as const
 
 export default function PhoneStory() {
   const { t } = useTranslation()
@@ -115,6 +122,7 @@ export default function PhoneStory() {
         gsap.set(pan('hero'), { autoAlpha: 1, y: 0 })
         ;['1', '2', '3', '4'].forEach((id) => gsap.set(pan(id), { autoAlpha: 0, y: 24 }))
         gsap.set('.js-filled', { autoAlpha: 0 })
+        gsap.set('.js-fill', { scaleX: 0 })
         gsap.set('.js-be', { autoAlpha: 0 })
         gsap.set('.js-rec', { autoAlpha: 0, y: 12 })
 
@@ -204,6 +212,9 @@ export default function PhoneStory() {
           },
           35
         )
+        /* 紫色填充层与滑块同步推进（同 SlideOrderModal 的 .slide-track-fill）。
+           The violet fill advances in step with the knob, as .slide-track-fill. */
+        tl.fromTo('.js-fill', { scaleX: 0 }, { scaleX: 1, duration: 9, ease: 'none' }, 35)
         tl.to('.js-filled', { autoAlpha: 1, duration: 2 }, 44)
 
         /* 46–52 转场③：左→右，拉近看图表 / order → guard, phone crosses back, zooms in */
@@ -306,8 +317,17 @@ export default function PhoneStory() {
                     <ScreenOrder t={t as T} on={active === 2} />
                     <ScreenGuard t={t as T} on={active === 3} />
                     <ScreenRecord t={t as T} on={active === 4} />
+                    {/* App 骨架常驻：品牌条与 Tab 栏不随幕淡出，正如真实 App 的
+                        导航不随页面内容消失。/ The chrome persists: brand strip
+                        and tab bar never fade with a scene, exactly as real app
+                        navigation never disappears with page content. */}
+                    <PhoneChrome t={t as T} activeTab={TAB_BY_SCENE[active]} />
                     <div className="dev-sheen js-sheen" aria-hidden />
                   </div>
+                  {/* 侧键 / side keys */}
+                  <div className="dev-key power" aria-hidden />
+                  <div className="dev-key vol-a" aria-hidden />
+                  <div className="dev-key vol-b" aria-hidden />
                   <div className="dev-island" aria-hidden />
                 </div>
               </div>

@@ -1,85 +1,262 @@
 // 手机屏幕内容（五幕）/ the five phone screens for the scrolltelling landing
 //
-// 这些不是 div 画的假截图：它们用产品自己的组件语汇（.chip / .num / 语义涨跌色 /
-// 发丝线）搭出真实比例的迷你界面，文案全部来自既有 i18n 的 landing.scr* 示例键，
-// 手机下方固定标注「示例界面 · 非实时数据」（landing.shCaption，见 PhoneStory）。
-// 改 design token 时这些屏幕跟着变；切英文时它们跟着切——这正是 CSS 3D 方案里
-// 「屏幕是真实 DOM」的全部意义。
+// 仿真度原则：屏幕里的每一幕都**镜像登录后产品的真实排版**，不是「像一个交易
+// App」而是「就是这个 App」——
+//   · 信号卡 = SignalGrid 的真实结构：品种 + 方向 chip，右上角大号盈亏比，
+//     三格 tile（入场中性 / 止损红染 / 止盈绿染，同 .tile-sl/.tile-tp 的染色
+//     规则），底部紫色 TTL 进度条（同 .sig-ttl-bar）。
+//   · 下单幕 = SlideOrderModal 的真实结构：滑轨 + 紫色填充层 + 方圆角滑块 +
+//     轨道中央「滑动确认下单」（order.slideToConfirm，产品同一个 i18n 键），
+//     完成态转绿（同 .slide-track.done）。
+//   · 屏幕骨架 = Layout 的真实骨架：顶部品牌条（真 logo.png）+ 底部五格
+//     Tab 栏（图标路径逐条取自 Layout.tsx 的 TabIcon），激活 Tab 随幕切换。
+// 文案全部来自既有 i18n 键；手机下方固定「示例界面 · 非实时数据」声明。
 //
-// 尺寸单位是 cqw（.dev-screen 开了 container-type: inline-size）：同一份组件在
-// 桌面 330px 宽的手机和移动端 180px 宽的手机里按比例缩放，不需要两套断点。
+// Fidelity principle: every scene mirrors the real logged-in product's layout.
+// Signal cards use SignalGrid's actual structure (symbol + side chip, large RR
+// top-right, three tiles with the .tile-sl/.tile-tp tint rules, violet TTL bar
+// as in .sig-ttl-bar); the order scene reproduces SlideOrderModal (track +
+// violet fill + squared knob + the same order.slideToConfirm label, turning
+// green on completion like .slide-track.done); and the screen skeleton is
+// Layout's skeleton (brand strip with the real logo.png, five-tab bottom bar
+// whose icon paths are lifted from Layout.tsx's TabIcon, active tab following
+// the scene). All strings come from existing i18n keys, with the sample-data
+// disclaimer fixed under the phone.
 //
-// These are not div-drawn fake screenshots: they are miniature interfaces built
-// from the product's own vocabulary (.chip / .num / semantic up-down colours /
-// hairlines), with every string coming from the existing landing.scr* sample
-// keys in i18n, and a fixed "sample interface, not live data" caption under the
-// phone (landing.shCaption, rendered in PhoneStory). Change a design token and
-// these screens follow; switch to English and they switch. That is the entire
-// point of the CSS-3D route where the screen is real DOM.
-//
-// Sizing is in cqw (.dev-screen sets container-type: inline-size): one set of
-// components scales proportionally between the 330px desktop phone and the
-// 180px mobile phone with no second breakpoint system.
+// 尺寸单位是 cqw（.dev-screen 开了 container-type: inline-size）：桌面 330px
+// 与移动端 150px 的手机共用同一份组件。/ Sizing is cqw so the desktop and
+// mobile phones share one component set.
 import { useEffect, useState } from 'react'
 
 type T = (k: string) => string
 
-/* 屏幕顶部状态行：时间 + 信号计数。刻意不做电池/信号格图标——那是「假手机
-   截图」的装饰细节，这里只保留与产品有关的信息。
-   Screen status row: time + signal count. Deliberately no battery/signal-bar
-   icons: those are fake-screenshot decoration; only product-relevant info stays. */
-function ScreenHead({ title, aux }: { title: string; aux?: string }) {
+// 按剩余百分比推一个 mm:ss 展示值（信号满时长 8:45，同 scrTtl 示例）。
+// Derive a display mm:ss from the remaining percentage (full lifespan 8:45,
+// matching the scrTtl sample).
+function ttlText(pct: number) {
+  const total = 8 * 60 + 45
+  const left = Math.round((total * pct) / 100)
+  return `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`
+}
+
+/* ═════ App 骨架 / app chrome ═════ */
+
+// Tab 图标：路径逐条取自 Layout.tsx 的 TabIcon（产品自己的图标，不是新画的）。
+// Tab icons: paths copied from Layout.tsx's TabIcon — the product's own
+// glyphs, not newly drawn ones.
+function TabGlyph({ name }: { name: string }) {
+  const p = {
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+  }
+  switch (name) {
+    case 'signals':
+      return (
+        <svg viewBox="0 0 24 24" {...p}>
+          <path d="M3 17l5-6 4 4 5-7 4 5" />
+        </svg>
+      )
+    case 'charts':
+      return (
+        <svg viewBox="0 0 24 24" {...p}>
+          <path d="M3 3v18h18" />
+          <rect x="7" y="10" width="3" height="7" rx="0.5" />
+          <rect x="13" y="6" width="3" height="11" rx="0.5" />
+          <path d="M8.5 10V7.5M8.5 17v2M14.5 6V4M14.5 17v2" />
+        </svg>
+      )
+    case 'dashboard':
+      return (
+        <svg viewBox="0 0 24 24" {...p}>
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
+        </svg>
+      )
+    case 'orders':
+      return (
+        <svg viewBox="0 0 24 24" {...p}>
+          <path d="M5 3v18l2-1 2 1 2-1 2 1 2-1 2 1V3l-2 1-2-1-2 1-2-1-2 1-2-1z" />
+          <path d="M9 8h6M9 12h6" />
+        </svg>
+      )
+    default:
+      return (
+        <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+          <circle cx="5" cy="12" r="1.7" />
+          <circle cx="12" cy="12" r="1.7" />
+          <circle cx="19" cy="12" r="1.7" />
+        </svg>
+      )
+  }
+}
+
+/* 顶部品牌条 + 底部 Tab 栏。activeTab 随幕切换：信号两幕亮「信号面板」，
+   守夜幕亮「仪表盘」，留痕幕亮「订单回执」——Tab 的移动本身就是「App 在被
+   使用」的叙事。/ Brand strip + bottom tabs. The active tab follows the story:
+   the moving highlight itself narrates an app in use. */
+export function PhoneChrome({ t, activeTab }: { t: T; activeTab: string }) {
+  const tabs = [
+    { id: 'signals', k: 'nav.signals' },
+    { id: 'charts', k: 'nav.charts' },
+    { id: 'dashboard', k: 'nav.dashboard' },
+    { id: 'orders', k: 'nav.orders' },
+    { id: 'more', k: 'nav.more' },
+  ]
   return (
-    <div className="mb-[5cqw] flex items-baseline justify-between border-b border-white/[0.08] pb-[3.5cqw]">
-      <span className="text-[4.8cqw] font-bold text-white">{title}</span>
-      {aux && <span className="num text-[3.4cqw] text-neutral-500">{aux}</span>}
+    <>
+      <div className="pc-head">
+        <img src="/logo.png" alt="" draggable={false} />
+        <b>Signal Lab</b>
+        {/* 在线点：EAStatusBadge 的语义（已连接），不是装饰。
+            The dot carries EAStatusBadge's semantics (connected), not decoration. */}
+        <span className="dot" />
+      </div>
+      <div className="pc-tabs">
+        {tabs.map((x) => (
+          <span key={x.id} className={`pc-tab ${activeTab === x.id ? 'on' : ''}`}>
+            <TabGlyph name={x.id} />
+            <span>{t(x.k)}</span>
+          </span>
+        ))}
+      </div>
+    </>
+  )
+}
+
+/* ═════ 复用的真实信号卡 / the real signal card, reused ═════
+   结构与 SignalGrid 的卡片逐项对应：头行（品种 + chip｜RR 大数字），三格
+   tile，TTL 行 + 紫条。/ Mirrors SignalGrid's card item by item: header row
+   (symbol + chip | large RR), three tiles, TTL row + violet bar. */
+function MiniSignalCard({
+  t,
+  sym,
+  side,
+  entry,
+  sl,
+  tp,
+  rr,
+  ttlPct,
+  fresh,
+  compact,
+}: {
+  t: T
+  sym: string
+  side: 'buy' | 'sell'
+  entry: string
+  sl: string
+  tp: string
+  rr: string
+  ttlPct: number
+  fresh?: boolean
+  compact?: boolean
+}) {
+  return (
+    <div className="rounded-[3.4cqw] border border-white/[0.09] bg-white/[0.035] p-[3.8cqw]">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-[2cqw]">
+          <b className="text-[4.6cqw] font-bold text-white">{sym}</b>
+          <span
+            className={`rounded-[1.6cqw] border px-[2cqw] py-[0.7cqw] text-[2.8cqw] font-bold ${
+              side === 'buy' ? 'border-up/35 bg-up/10 text-up' : 'border-down/35 bg-down/10 text-down'
+            }`}
+          >
+            {t(side === 'buy' ? 'landing.scrBuy' : 'landing.scrSell')}
+          </span>
+          {fresh && (
+            <span className="rounded-[1.6cqw] bg-prism-600 px-[1.8cqw] py-[0.7cqw] text-[2.6cqw] font-bold text-white">
+              {t('landing.scrNew')}
+            </span>
+          )}
+        </div>
+        <div className="text-right">
+          <div className="num text-[4.4cqw] font-bold leading-none text-up">{rr}</div>
+          <div className="mt-[0.8cqw] text-[2.4cqw] uppercase text-neutral-500">{t('landing.scrRr')}</div>
+        </div>
+      </div>
+
+      {/* 三格 tile：中性入场 / 红染止损 / 绿染止盈（同 .tile-sl/.tile-tp）
+          Three tiles: neutral entry, red-tinted SL, green-tinted TP. */}
+      <div className="mt-[3cqw] grid grid-cols-3 gap-[1.8cqw]">
+        <div className="rounded-[2.6cqw] border border-white/[0.09] bg-white/[0.03] px-[1cqw] py-[2cqw] text-center">
+          <div className="text-[2.6cqw] text-neutral-500">{t('landing.scrEntry')}</div>
+          <div className="num mt-[0.8cqw] text-[3.4cqw] font-bold text-white">{entry}</div>
+        </div>
+        <div className="rounded-[2.6cqw] border border-down/40 bg-down/[0.07] px-[1cqw] py-[2cqw] text-center">
+          <div className="text-[2.6cqw] text-neutral-500">{t('landing.scrSl')}</div>
+          <div className="num mt-[0.8cqw] text-[3.4cqw] font-bold text-down">{sl}</div>
+        </div>
+        <div className="rounded-[2.6cqw] border border-up/40 bg-up/[0.07] px-[1cqw] py-[2cqw] text-center">
+          <div className="text-[2.6cqw] text-neutral-500">{t('landing.scrTp')}</div>
+          <div className="num mt-[0.8cqw] text-[3.4cqw] font-bold text-up">{tp}</div>
+        </div>
+      </div>
+
+      {!compact && (
+        <div className="mt-[2.6cqw]">
+          <div className="flex items-baseline justify-between text-[2.7cqw]">
+            <span className="text-neutral-500">{t('landing.scrTtl').replace(/\s*\d{1,2}:\d{2}\s*/, '')}</span>
+            <span className="num text-prism-300">{ttlText(ttlPct)}</span>
+          </div>
+          {/* TTL 紫条：同 .sig-ttl-bar / the violet TTL bar, as .sig-ttl-bar */}
+          <div className="mt-[1.2cqw] h-[1.3cqw] overflow-hidden rounded-full bg-white/[0.09]">
+            <div className="h-full rounded-full bg-prism-600" style={{ width: `${ttlPct}%` }} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-/* ═════ 幕 0（Hero）：今日信号列表 / scene 0: today's signal list ═════ */
+/* ═════ 幕 0（Hero）：信号面板 / scene 0: the signal panel ═════ */
 export function ScreenSignals({ t, on }: { t: T; on: boolean }) {
-  const rows = [
-    { sym: 'XAUUSD', name: t('landing.scrGold'), side: 'buy' as const, px: '3 412.80', fresh: true },
-    { sym: 'EURUSD', name: 'EUR', side: 'sell' as const, px: '1.084 20', fresh: false },
-    { sym: 'GBPJPY', name: 'GBP', side: 'buy' as const, px: '196.420', fresh: false },
-  ]
   return (
-    <div className={`scr ${on ? "on" : ""}`} data-scr="0">
-      <ScreenHead title={t('landing.scrSignals')} aux="3" />
+    <div className={`scr ${on ? 'on' : ''}`} data-scr="0">
+      <div className="mb-[3.4cqw] flex items-center gap-[2cqw]">
+        <b className="text-[5cqw] font-bold text-white">{t('landing.scrSignals')}</b>
+        {/* 计数徽章：同 .count-badge / count badge, as .count-badge */}
+        <span className="grid min-w-[4.6cqw] place-items-center rounded-[1.6cqw] bg-prism-600 px-[1.4cqw] py-[0.5cqw] text-[2.8cqw] font-bold text-white">
+          2
+        </span>
+      </div>
       <div className="flex flex-col gap-[3cqw]">
-        {rows.map((r) => (
-          <div key={r.sym} className="rounded-[3cqw] border border-white/[0.08] bg-white/[0.03] p-[4cqw]">
-            <div className="flex items-center justify-between">
-              <div className="flex items-baseline gap-[2cqw]">
-                <span className="text-[4.4cqw] font-bold text-white">{r.sym}</span>
-                {r.fresh && (
-                  <span className="rounded-[1.5cqw] bg-prism-600 px-[2cqw] py-[0.6cqw] text-[2.8cqw] font-bold text-white">
-                    {t('landing.scrNew')}
-                  </span>
-                )}
-              </div>
-              <span className={`text-[3.2cqw] font-bold ${r.side === 'buy' ? 'text-up' : 'text-down'}`}>
-                {t(r.side === 'buy' ? 'landing.scrBuy' : 'landing.scrSell')}
-              </span>
-            </div>
-            <div className="num mt-[2cqw] text-[4.6cqw] font-semibold text-neutral-200">{r.px}</div>
-          </div>
-        ))}
+        <MiniSignalCard
+          t={t}
+          sym="XAUUSD"
+          side="buy"
+          entry="3412.80"
+          sl="3398.20"
+          tp="3445.60"
+          rr="1:2.26"
+          ttlPct={78}
+          fresh
+        />
+        <MiniSignalCard
+          t={t}
+          sym="EURUSD"
+          side="sell"
+          entry="1.08420"
+          sl="1.08760"
+          tp="1.07850"
+          rr="1:1.68"
+          ttlPct={41}
+        />
       </div>
     </div>
   )
 }
 
-/* ═════ 幕 1：完整交易计划（倒计时是活的）/ scene 1: the full plan, live countdown ═════ */
+/* ═════ 幕 1：完整计划（倒计时是活的）/ scene 1: the full plan, live countdown ═════ */
 export function ScreenPlan({ t, on }: { t: T; on: boolean }) {
-  // 倒计时从 i18n 字符串里解析初始值（scrTtl 形如「有效期 08:45」），每秒递减。
+  // 倒计时从 i18n 字符串解析初始值（scrTtl 形如「有效期 08:45」），每秒递减。
   // 这是「屏幕是真实 DOM」的展示位：烤成 WebGL 纹理的截图永远不会走字。
-  // reduced-motion 下不启动定时器，保持静态。
-  // The countdown parses its start from the i18n string (scrTtl reads like
-  // "Valid 08:45") and ticks down every second. This is the showcase for
-  // real-DOM screens: a texture-baked screenshot never ticks. Under
-  // reduced-motion the timer never starts.
+  // reduced-motion 下不启动定时器。/ Countdown parsed from the i18n string and
+  // ticking every second — the showcase for real-DOM screens; a texture never
+  // ticks. No timer under reduced-motion.
   const raw = t('landing.scrTtl')
   const m = raw.match(/(\d{1,2}):(\d{2})/)
   const init = m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : 8 * 60 + 45
@@ -90,46 +267,46 @@ export function ScreenPlan({ t, on }: { t: T; on: boolean }) {
     return () => clearInterval(id)
   }, [init])
   const mmss = `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`
-  const ttl = m ? raw.replace(/(\d{1,2}):(\d{2})/, mmss) : `${raw} ${mmss}`
 
-  const tiles = [
-    { k: 'scrEntry', v: '3 412.80', tone: 'text-white' },
-    { k: 'scrSl', v: '3 398.20', tone: 'text-down' },
-    { k: 'scrTp', v: '3 445.60', tone: 'text-up' },
-  ]
   return (
-    <div className={`scr ${on ? "on" : ""}`} data-scr="1">
-      <div className="flex items-center justify-between">
-        <div className="flex items-baseline gap-[2.4cqw]">
-          <span className="text-[6cqw] font-bold text-white">XAUUSD</span>
-          <span className="text-[3.4cqw] text-neutral-500">{t('landing.scrGold')}</span>
+    <div className={`scr ${on ? 'on' : ''}`} data-scr="1">
+      <div className="mb-[3cqw] flex items-baseline justify-between">
+        <div className="flex items-baseline gap-[2cqw]">
+          <b className="text-[6cqw] font-bold text-white">XAUUSD</b>
+          <span className="text-[3.2cqw] text-neutral-500">{t('landing.scrGold')}</span>
         </div>
-        <span className="rounded-[1.8cqw] border border-up/40 bg-up/10 px-[2.6cqw] py-[1cqw] text-[3.4cqw] font-bold text-up">
+        <span className="rounded-[1.8cqw] border border-up/40 bg-up/10 px-[2.4cqw] py-[1cqw] text-[3.4cqw] font-bold text-up">
           {t('landing.scrBuy')}
         </span>
       </div>
 
-      <div className="mt-[5cqw] grid grid-cols-3 gap-px overflow-hidden rounded-[3cqw] border border-white/[0.08] bg-white/[0.08]">
-        {tiles.map((x) => (
-          <div key={x.k} className="bg-ink-850 p-[3.4cqw]">
-            <div className="text-[2.9cqw] uppercase tracking-[0.08em] text-neutral-500">{t(`landing.${x.k}`)}</div>
-            <div className={`num mt-[1.6cqw] text-[4.4cqw] font-semibold ${x.tone}`}>{x.v}</div>
-          </div>
-        ))}
-      </div>
+      <MiniSignalCard
+        t={t}
+        sym="XAUUSD"
+        side="buy"
+        entry="3412.80"
+        sl="3398.20"
+        tp="3445.60"
+        rr="1:2.26"
+        ttlPct={100}
+        compact
+      />
 
-      <div className="mt-[4.5cqw] flex items-baseline justify-between border-t border-white/[0.08] pt-[4cqw]">
-        <span className="text-[3.4cqw] text-neutral-500">{t('landing.scrRr')}</span>
-        <span className="num text-[4.6cqw] font-semibold text-white">1 : 2.26</span>
-      </div>
-      {/* 倒计时条：剩余时间同时用数字和长度表达 / countdown as number + bar */}
+      {/* 活倒计时 + 紫条，放大版 / the live countdown with the violet bar, enlarged */}
       <div className="mt-auto">
-        <div className="num text-[3.6cqw] text-neutral-400">{ttl}</div>
-        <div className="mt-[2cqw] h-[1.2cqw] overflow-hidden rounded-full bg-white/[0.08]">
+        <div className="flex items-baseline justify-between text-[3.2cqw]">
+          <span className="text-neutral-500">{raw.replace(/\s*\d{1,2}:\d{2}\s*/, '')}</span>
+          <span className="num font-semibold text-prism-300">{mmss}</span>
+        </div>
+        <div className="mt-[1.6cqw] h-[1.6cqw] overflow-hidden rounded-full bg-white/[0.09]">
           <div
-            className="h-full bg-prism-500"
+            className="h-full rounded-full bg-prism-600"
             style={{ width: `${Math.round((left / init) * 100)}%`, transition: 'width 1s linear' }}
           />
+        </div>
+        {/* 下单入口：产品里这张卡的落点 / the card's real call in the product */}
+        <div className="mt-[3.5cqw] grid place-items-center rounded-[3cqw] bg-prism-600 py-[3.2cqw] text-[3.6cqw] font-bold text-white">
+          {t('landing.scrOrderTitle')}
         </div>
       </div>
     </div>
@@ -137,66 +314,71 @@ export function ScreenPlan({ t, on }: { t: T; on: boolean }) {
 }
 
 /* ═════ 幕 2：滑动下单 / scene 2: slide-to-confirm ═════
-   滑块（.js-knob）由外部驱动：scrub 模式里 GSAP 把它和滚动进度绑在一起——
-   用户往下滚，滑块往右走，滚到位的瞬间「已成交」亮起。滚动行为与产品行为
-   在这一刻同构，这是全页最重要的一个动效。steps 模式里由 CSS 过渡代驾。
-   The knob (.js-knob) is driven externally: in scrub mode GSAP ties it to
-   scroll progress, so scrolling down pushes the knob right and "filled" lights
-   up exactly when it lands. The scroll gesture and the product gesture become
-   the same motion, which makes this the page's single most important effect.
-   In steps mode the CSS transition takes over. */
+   滑轨结构逐项对应 SlideOrderModal：轨道（.slide-track）+ 紫色填充层
+   （.slide-track-fill，随滑块推进）+ 轨道中央提示（order.slideToConfirm，与
+   产品同一个 i18n 键）+ 方圆角紫色滑块（.slide-knob）。
+   滑块由外部驱动：scrub 模式里 GSAP 把它和滚动进度绑在一起——用户往下滚，
+   滑块往右推，滚到位的瞬间「已成交」亮起。滚动手势与产品手势在这一刻是
+   同一个动作，这是全页最重要的动效。
+   The track mirrors SlideOrderModal element for element: track, violet fill
+   following the knob, the centred order.slideToConfirm label (the product's own
+   i18n key), and the squared violet knob. Externally driven: in scrub mode the
+   knob IS the scroll, and the receipt lights exactly when it lands. */
 export function ScreenOrder({ t, on }: { t: T; on: boolean }) {
   const rows = [
-    { k: 'scrDir', v: t('landing.scrBuy'), tone: 'text-up' },
-    { k: 'scrLots', v: '0.24', tone: 'text-white num' },
-    { k: 'scrMaxLoss', v: '-$118.40', tone: 'text-down num' },
+    { k: 'scrDir', v: t('landing.scrBuy'), cls: 'text-up font-bold' },
+    { k: 'scrLots', v: '0.24', cls: 'num text-white font-semibold' },
+    { k: 'scrMaxLoss', v: '-$118.40', cls: 'num text-down font-semibold' },
   ]
   return (
-    <div className={`scr ${on ? "on" : ""}`} data-scr="2">
-      <ScreenHead title={t('landing.scrOrderTitle')} />
+    <div className={`scr ${on ? 'on' : ''}`} data-scr="2">
+      <div className="mb-[3.4cqw] border-b border-white/[0.08] pb-[3cqw]">
+        <b className="text-[4.6cqw] font-bold text-white">{t('landing.scrOrderTitle')}</b>
+      </div>
       <div className="flex flex-col">
         {rows.map((r) => (
-          <div key={r.k} className="flex items-baseline justify-between border-b border-white/[0.06] py-[3.6cqw] last:border-0">
-            <span className="text-[3.6cqw] text-neutral-400">{t(`landing.${r.k}`)}</span>
-            <span className={`text-[4.2cqw] font-semibold ${r.tone}`}>{r.v}</span>
+          <div key={r.k} className="flex items-baseline justify-between border-b border-white/[0.06] py-[3.2cqw] last:border-0">
+            <span className="text-[3.4cqw] text-neutral-400">{t(`landing.${r.k}`)}</span>
+            <span className={`text-[4cqw] ${r.cls}`}>{r.v}</span>
           </div>
         ))}
       </div>
 
-      {/* 滑动确认条 / the slide track */}
       <div className="mt-auto">
-        <div className="js-track relative h-[13cqw] overflow-hidden rounded-full border border-white/[0.1] bg-white/[0.04]">
-          <div className="js-knob absolute left-[1.2cqw] top-1/2 grid h-[10.5cqw] w-[10.5cqw] -translate-y-1/2 place-items-center rounded-full bg-prism-600 text-[4.5cqw] font-bold text-white">
-            <span aria-hidden>›</span>
+        {/* 滑轨 / the track */}
+        <div className="js-track relative h-[14cqw] overflow-hidden rounded-[3.5cqw] border border-white/[0.1] bg-white/[0.05]">
+          {/* 紫色填充层：transform-origin 左缘，scaleX 跟着滑块走。
+              The violet fill, scaling from the left edge in step with the knob. */}
+          <div className="js-fill absolute inset-0 origin-left scale-x-0 bg-prism-600/30" />
+          <div className="absolute inset-0 grid place-items-center text-[3.2cqw] font-semibold text-neutral-300">
+            {t('order.slideToConfirm')}
+          </div>
+          <div className="js-knob absolute left-[1.4cqw] top-1/2 grid h-[11cqw] w-[11cqw] -translate-y-1/2 place-items-center rounded-[3cqw] bg-prism-600 text-[4.6cqw] font-bold text-white">
+            <span aria-hidden>››</span>
           </div>
         </div>
-        {/* 成交回执：透明度由动画层（GSAP 或 steps 模式的 CSS 过渡）驱动。
-            Fill receipt; opacity driven by the animation layer (GSAP, or the
-            steps-mode CSS transition). */}
-        <div className="js-filled mt-[3.5cqw] flex items-center justify-between rounded-[3cqw] border border-up/35 bg-up/10 px-[4cqw] py-[3cqw]">
-          <span className="text-[3.6cqw] font-semibold text-up">{t('landing.scrFilled')}</span>
-          <span className="num text-[3.6cqw] text-neutral-300">3 412.86</span>
+        {/* 成交回执 / the fill receipt */}
+        <div className="js-filled mt-[3.2cqw] flex items-center justify-between rounded-[3cqw] border border-up/35 bg-up/10 px-[3.6cqw] py-[3cqw]">
+          <span className="text-[3.4cqw] font-bold text-up">{t('landing.scrFilled')}</span>
+          <span className="num text-[3.4cqw] text-neutral-200">3412.86</span>
         </div>
       </div>
     </div>
   )
 }
 
-/* ═════ 幕 3：自动守夜 / scene 3: automatic position management ═════
-   迷你价格路径 + 一条向上爬的止损线（.js-sl）。价格路径是产品语汇里的
-   sparkline（产品内本来就有真实图表），不是装饰性插画；线的爬升由外部驱动：
-   先跳到保本位（.js-be 亮起），再随行情推进。
-   A mini price path plus a stop-loss line (.js-sl) that climbs. The path is a
-   sparkline from the product's own vocabulary (the product ships real charts),
-   not decorative illustration; the climb is externally driven — first to
-   breakeven (.js-be lights up), then trailing the move. */
+/* ═════ 幕 3：自动守夜 / scene 3: automatic position management ═════ */
 export function ScreenGuard({ t, on }: { t: T; on: boolean }) {
   return (
-    <div className={`scr ${on ? "on" : ""}`} data-scr="3">
-      <ScreenHead title={t('landing.scrAutoTitle')} />
-      <div className="relative overflow-hidden rounded-[3cqw] border border-white/[0.08] bg-white/[0.02]">
+    <div className={`scr ${on ? 'on' : ''}`} data-scr="3">
+      <div className="mb-[3.4cqw] flex items-center justify-between border-b border-white/[0.08] pb-[3cqw]">
+        <b className="text-[4.6cqw] font-bold text-white">{t('landing.scrAutoTitle')}</b>
+        {/* 呼吸点：真实「运行中」语义（同 EAStatusBadge）
+            Breathing dot: genuine running-state semantics, as EAStatusBadge. */}
+        <span className="h-[1.8cqw] w-[1.8cqw] animate-breathe rounded-full bg-up" />
+      </div>
+      <div className="relative overflow-hidden rounded-[3.4cqw] border border-white/[0.09] bg-white/[0.03]">
         <svg viewBox="0 0 100 62" className="block w-full" aria-hidden>
-          {/* 价格路径：整体向上、带回撤的示例行情 / sample path: up with pullbacks */}
           <polyline
             points="2,52 12,48 18,50 26,42 33,44 42,34 49,37 58,27 64,30 73,20 81,23 90,13 98,15"
             fill="none"
@@ -205,10 +387,7 @@ export function ScreenGuard({ t, on }: { t: T; on: boolean }) {
             strokeLinejoin="round"
             strokeLinecap="round"
           />
-          {/* 入场价：中性虚线 / entry: neutral dashed */}
           <line x1="0" y1="46" x2="100" y2="46" stroke="#71717A" strokeWidth="0.7" strokeDasharray="2.4 2.4" />
-          {/* 止损线组：从入场下方起步，由外部动画向上平移。
-              The SL group starts below entry and is translated upward externally. */}
           <g className="js-sl">
             <line x1="0" y1="56" x2="100" y2="56" stroke="#8B6CFF" strokeWidth="1.1" />
             <rect x="2" y="50.6" width="14" height="8" rx="1.6" fill="#5A22EE" />
@@ -217,46 +396,53 @@ export function ScreenGuard({ t, on }: { t: T; on: boolean }) {
             </text>
           </g>
         </svg>
-        {/* 保本徽章：止损爬过入场价的那一刻亮起 / lights up as SL crosses entry */}
-        <div className="js-be absolute left-[4cqw] top-[4cqw] rounded-[2cqw] border border-prism-400/40 bg-prism-600/20 px-[2.8cqw] py-[1.4cqw] text-[3cqw] font-semibold text-prism-200">
+        <div className="js-be absolute left-[3.4cqw] top-[3.4cqw] rounded-[2cqw] border border-prism-400/40 bg-prism-600/25 px-[2.6cqw] py-[1.3cqw] text-[2.9cqw] font-semibold text-prism-200">
           {t('landing.scrBeMoved')}
         </div>
       </div>
-      <p className="mt-[4cqw] text-[3.4cqw] leading-relaxed text-neutral-400">{t('landing.scrTrailOn')}</p>
+      <p className="mt-[3.6cqw] text-[3.2cqw] leading-relaxed text-neutral-400">{t('landing.scrTrailOn')}</p>
     </div>
   )
 }
 
 /* ═════ 幕 4：全量留痕 / scene 4: the full record ═════
-   赢单和亏单同字号、同排版——亏损不缩小、不变灰。这一行视觉决定就是产品
-   的核心主张（「记录里连删除按钮都没做」），字面上兑现它。
-   Wins and losses at identical size and identical layout. That single visual
-   decision IS the product's core claim (the record has no delete button), so
-   the screen honours it literally. */
+   赢单与亏单同字号同排版：亏损不缩小不变灰——这个视觉决定就是产品的核心主张。
+   Wins and losses identical in size and layout: that decision IS the claim. */
 export function ScreenRecord({ t, on }: { t: T; on: boolean }) {
   const rows = [
-    { sym: 'XAUUSD', win: true, pnl: '+186.40' },
-    { sym: 'EURUSD', win: false, pnl: '-92.15' },
-    { sym: 'GBPUSD', win: true, pnl: '+214.77' },
-    { sym: 'AUDUSD', win: true, pnl: '+158.03' },
+    { sym: 'XAUUSD', side: 'sell' as const, win: true, pnl: '+186.40' },
+    { sym: 'EURUSD', side: 'buy' as const, win: false, pnl: '-92.15' },
+    { sym: 'GBPUSD', side: 'buy' as const, win: true, pnl: '+214.77' },
+    { sym: 'AUDUSD', side: 'sell' as const, win: true, pnl: '+158.03' },
   ]
   return (
-    <div className={`scr ${on ? "on" : ""}`} data-scr="4">
-      <ScreenHead title={t('landing.scrRecordTitle')} />
+    <div className={`scr ${on ? 'on' : ''}`} data-scr="4">
+      <div className="mb-[3cqw] border-b border-white/[0.08] pb-[3cqw]">
+        <b className="text-[4.6cqw] font-bold text-white">{t('landing.scrRecordTitle')}</b>
+      </div>
       <div className="flex flex-col">
         {rows.map((r) => (
-          <div key={r.sym} className="js-rec flex items-center justify-between border-b border-white/[0.06] py-[3.4cqw] last:border-0">
-            <div className="flex flex-col gap-[1cqw]">
-              <span className="text-[3.9cqw] font-bold text-white">{r.sym}</span>
-              <span className={`text-[2.9cqw] ${r.win ? 'text-up' : 'text-down'}`}>
-                {t(r.win ? 'landing.scrWin' : 'landing.scrLoss')}
+          <div key={r.sym} className="js-rec flex items-center justify-between border-b border-white/[0.06] py-[3cqw] last:border-0">
+            <div className="flex items-center gap-[2cqw]">
+              <b className="text-[3.8cqw] font-bold text-white">{r.sym}</b>
+              <span
+                className={`rounded-[1.5cqw] border px-[1.6cqw] py-[0.6cqw] text-[2.5cqw] font-bold ${
+                  r.side === 'buy' ? 'border-up/35 bg-up/10 text-up' : 'border-down/35 bg-down/10 text-down'
+                }`}
+              >
+                {t(r.side === 'buy' ? 'landing.scrBuy' : 'landing.scrSell')}
               </span>
             </div>
-            <span className={`num text-[4.4cqw] font-semibold ${r.win ? 'text-up' : 'text-down'}`}>{r.pnl}</span>
+            <div className="text-right">
+              <div className={`num text-[4cqw] font-bold leading-none ${r.win ? 'text-up' : 'text-down'}`}>{r.pnl}</div>
+              <div className={`mt-[0.8cqw] text-[2.5cqw] ${r.win ? 'text-up/70' : 'text-down/70'}`}>
+                {t(r.win ? 'landing.scrWin' : 'landing.scrLoss')}
+              </div>
+            </div>
           </div>
         ))}
       </div>
-      <p className="mt-auto border-t border-white/[0.08] pt-[3.5cqw] text-[3cqw] text-neutral-500">
+      <p className="mt-auto border-t border-white/[0.08] pt-[3cqw] text-[2.8cqw] text-neutral-500">
         {t('landing.scrRecordFoot')}
       </p>
     </div>
