@@ -8,6 +8,7 @@ import { SIGNAL_LIFESPAN_MS } from './signals/SignalView'
 import { useNow } from './signals/hooks'
 import { useBackToClose } from '../utils/useBackToClose'
 import { useStickyOnlineAccounts } from '../utils/useStickyOnlineAccounts'
+import { useLastAccount, pickDefaultAccount } from '../utils/useLastAccount'
 import OrderConnectNotice from './OrderConnectNotice'
 
 interface Props {
@@ -41,7 +42,8 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
   // Not a plain online filter — a flickering flag would unmount the switcher
   // mid-click. See useStickyOnlineAccounts.
   const availableAccounts = useStickyOnlineAccounts(accounts)
-  const [login, setLogin] = useState<string>(() => availableAccounts[0]?.login ?? '')
+  const { lastLogin, rememberAccount } = useLastAccount()
+  const [login, setLogin] = useState<string>(() => pickDefaultAccount(availableAccounts, lastLogin))
   const selected = availableAccounts.find((a) => a.login === login) || null
   const [acctMenuOpen, setAcctMenuOpen] = useState(false)
   // 账户切换菜单套在这个（已全屏的）弹窗内部：划返回应该先收起菜单，
@@ -97,9 +99,13 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
   const orderIdRef = useRef<string>('')
   if (!orderIdRef.current) orderIdRef.current = clientOrderId()
 
+  // 兜底：还没选中任何账户时补一个默认值。这条路径**不写记忆**——它是代码在纠正
+  // 状态，不是用户的选择（见 useLastAccount 的说明）。
+  // Fallback when nothing is selected yet. Deliberately does not record the
+  // choice: this is the code correcting state, not the user picking.
   useEffect(() => {
-    if (!login && availableAccounts[0]) setLogin(availableAccounts[0].login)
-  }, [availableAccounts, login])
+    if (!login && availableAccounts[0]) setLogin(pickDefaultAccount(availableAccounts, lastLogin))
+  }, [availableAccounts, login, lastLogin])
 
   useEffect(() => {
     setVolume(suggestVolume(selected?.equity))
@@ -367,7 +373,7 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
                           type="button"
                           key={a.login}
                           className={`slide-acct-opt ${a.login === login ? 'active' : ''}`}
-                          onClick={() => { setLogin(a.login); setAcctMenuOpen(false) }}
+                          onClick={() => { setLogin(a.login); rememberAccount(a.login); setAcctMenuOpen(false) }}
                         >
                           <span className="opt-login">
                             {/* 列表会保留本次弹窗里掉线的账号（见 useStickyOnlineAccounts），

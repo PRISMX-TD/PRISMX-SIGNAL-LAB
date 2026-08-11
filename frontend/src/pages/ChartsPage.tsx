@@ -33,6 +33,7 @@ import { useLive, useQuotes } from '../store/live'
 import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import { sma, ema, bollinger, rsi, macd, closes } from '../utils/indicators'
 import { useBackToClose } from '../utils/useBackToClose'
+import { useLastAccount } from '../utils/useLastAccount'
 import {
   DEFAULT_INDICATOR_SETTINGS,
   mergeIndicatorSettings,
@@ -853,7 +854,15 @@ export default function ChartsPage() {
   // positions/orders dock all follow the selection instead of being stuck on the
   // first account. Empty string means no manual pick yet — falls back to primary.
   const [selectedLogin, setSelectedLogin] = useState<string>('')
-  const activeAccount = accounts.find((a) => a.login === selectedLogin) ?? primaryAccount
+  // 上次下单用过的账户。它不只喂给下单栏——右侧账户摘要、底部持仓/挂单都跟着
+  // selectedLogin 走，所以要在这一层就认，否则会出现「下单栏显示记住的账户、
+  // 账户面板还显示兜底账户」这种自相矛盾的画面。
+  // The remembered account is applied at this level, not just inside the ticket:
+  // the account summary and positions/orders dock all follow selectedLogin, so
+  // resolving it lower down would leave the panels disagreeing with the ticket.
+  const { lastLogin } = useLastAccount()
+  const effectiveLogin = selectedLogin || (accounts.some((a) => a.login === lastLogin) ? lastLogin : '')
+  const activeAccount = accounts.find((a) => a.login === effectiveLogin) ?? primaryAccount
 
   // 选中账户不存在（账户列表变化）时，把选择重置回兜底账户。
   // Reset the pick to the fallback when the selected account disappears.
@@ -2146,7 +2155,7 @@ export default function ChartsPage() {
             globalQuote={activeQuote}
             refPrice={lastPrice}
             digits={decimals}
-            selectedLogin={selectedLogin}
+            selectedLogin={effectiveLogin}
             onSelectLogin={setSelectedLogin}
             onPlace={(side, volume, mt5Login, stopLoss, takeProfit, coid) =>
               placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid)
@@ -2197,7 +2206,7 @@ export default function ChartsPage() {
           globalQuote={activeQuote}
           refPrice={lastPrice}
           digits={decimals}
-          selectedLogin={selectedLogin}
+          selectedLogin={effectiveLogin}
           onSelectLogin={setSelectedLogin}
           onPlace={(side, volume, mt5Login, stopLoss, takeProfit, coid) =>
             placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid)

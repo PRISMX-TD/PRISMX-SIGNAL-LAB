@@ -14,6 +14,7 @@ import type { MT5Account, Quote } from '../api/types'
 import { clientOrderId, contractSize, displaySymbol, localizeApiError, suggestVolumeByRisk, usdMarginBasis } from '../api/utils'
 import { useBackToClose } from '../utils/useBackToClose'
 import { useStickyOnlineAccounts } from '../utils/useStickyOnlineAccounts'
+import { useLastAccount, pickDefaultAccount } from '../utils/useLastAccount'
 import OrderConnectNotice from './OrderConnectNotice'
 
 interface Props {
@@ -56,7 +57,8 @@ export default function ChartOrderModal({ symbol, side, accounts, quotesByAccoun
   // Same as SlideOrderModal: a flickering online flag must not unmount the
   // account switcher mid-interaction.
   const availableAccounts = useStickyOnlineAccounts(accounts)
-  const [login, setLogin] = useState<string>(() => availableAccounts[0]?.login ?? '')
+  const { lastLogin, rememberAccount } = useLastAccount()
+  const [login, setLogin] = useState<string>(() => pickDefaultAccount(availableAccounts, lastLogin))
   const selected = availableAccounts.find((a) => a.login === login) || null
   const [acctMenuOpen, setAcctMenuOpen] = useState(false)
   // 账户切换菜单套在这个（已全屏的）弹窗内部：划返回应该先收起菜单，
@@ -96,9 +98,11 @@ export default function ChartOrderModal({ symbol, side, accounts, quotesByAccoun
   const orderIdRef = useRef<string>('')
   if (!orderIdRef.current) orderIdRef.current = clientOrderId()
 
+  // 兜底补默认值，不写记忆——这是代码纠正状态，不是用户的选择。
+  // Fallback default; deliberately not recorded (code correcting state, not a user pick).
   useEffect(() => {
-    if (!login && availableAccounts[0]) setLogin(availableAccounts[0].login)
-  }, [availableAccounts, login])
+    if (!login && availableAccounts[0]) setLogin(pickDefaultAccount(availableAccounts, lastLogin))
+  }, [availableAccounts, login, lastLogin])
 
   useEffect(() => {
     setVolume(suggestVolume(selected?.equity))
@@ -313,7 +317,7 @@ export default function ChartOrderModal({ symbol, side, accounts, quotesByAccoun
                           type="button"
                           key={a.login}
                           className={`slide-acct-opt ${a.login === login ? 'active' : ''}`}
-                          onClick={() => { setLogin(a.login); setAcctMenuOpen(false) }}
+                          onClick={() => { setLogin(a.login); rememberAccount(a.login); setAcctMenuOpen(false) }}
                         >
                           <span className="opt-login">
                             {/* 见 SlideOrderModal 同处注释 / see SlideOrderModal's matching note */}

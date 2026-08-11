@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Select from '../Select'
+import { useLastAccount, pickDefaultAccount } from '../../utils/useLastAccount'
 import type { MT5Account, Quote } from '../../api/types'
 import {
   clientOrderId,
@@ -65,9 +66,15 @@ export default function OrderTicket({ symbol, accounts, quotesByAccount, globalQ
   // 账户选择受控优先：父级传了 selectedLogin 就用它，否则回落到内部默认（第一个在线账户）。
   // 通过 setLogin 统一出口，既更新本地兜底、也通知父级。/ Controlled selection takes
   // priority; setLogin updates the local fallback and notifies the parent.
-  const [localLogin, setLocalLogin] = useState<string>(() => onlineAccounts[0]?.login ?? '')
+  const { lastLogin, rememberAccount } = useLastAccount()
+  const [localLogin, setLocalLogin] = useState<string>(() => pickDefaultAccount(onlineAccounts, lastLogin))
   const login = selectedLogin || localLogin
   const setLogin = (v: string) => { setLocalLogin(v); onSelectLogin?.(v) }
+  // 用户从下拉里主动选择时才记忆。下面那个「选中账户掉线就拉回第一个」的兜底走
+  // setLogin，不能走这里——否则偏好的账户掉线一次，记忆就被兜底值冲掉，等它恢复
+  // 也不会再被默认选中。/ Only an explicit pick is remembered; the offline-snap
+  // fallback below uses setLogin, so one dropout can't erase the preference.
+  const chooseLogin = (v: string) => { setLogin(v); rememberAccount(v) }
   const [volume, setVolume] = useState(() => suggestVolume(onlineAccounts[0]?.equity))
   const [sl, setSl] = useState('')
   const [tp, setTp] = useState('')
@@ -82,9 +89,9 @@ export default function OrderTicket({ symbol, accounts, quotesByAccount, globalQ
   // 选中账户没在线时把 login 拉回第一个在线账户 / snap login to the first online account
   useEffect(() => {
     if ((!login || !onlineAccounts.some((a) => a.login === login)) && onlineAccounts[0]) {
-      setLogin(onlineAccounts[0].login)
+      setLogin(pickDefaultAccount(onlineAccounts, lastLogin))
     }
-  }, [onlineAccounts, login])
+  }, [onlineAccounts, login, lastLogin])
 
   // 报价：优先选中账户的交易商报价，否则全站统一报价 / prefer the account's broker quote, else the site-wide one
   const quote = (selected && quotesByAccount[selected.login]?.[symbol]) || globalQuote
@@ -214,7 +221,7 @@ export default function OrderTicket({ symbol, accounts, quotesByAccount, globalQ
             <Select
               className="term-acct-select"
               value={login}
-              onChange={setLogin}
+              onChange={chooseLogin}
               options={onlineAccounts.map((a) => ({
                 value: a.login,
                 label: `${a.login}${a.accountName ? ` · ${a.accountName}` : ''}`,
