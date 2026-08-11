@@ -23,20 +23,19 @@ export default defineConfig({
         // lightweight-charts is only pulled in by its own lazy route, so isolating
         // it keeps it off the initial critical path.
         //
-        // 注意：postprocessing / gsap 的分支此前已随依赖一起删除；这一轮 three /
-        // @react-three 也一并删掉——落地页的 WebGL 棱镜场景在这次改版中移除后，
-        // src/ 里再没有任何模块 import 它们。分包规则里留着匹配不到任何模块的
-        // 分支，只会让人以为项目还在用它们。
-        // 依赖本身仍在 package.json 里，需要单独一次 npm uninstall 才能真正瘦身
-        // （见交付说明）。
-        // Note: the postprocessing / gsap branches were removed earlier along with
-        // those dependencies; this pass removes three / @react-three too — nothing
-        // in src/ imports them since the landing page's WebGL prism scene was cut.
-        // Chunk rules matching nothing just imply the project still uses them.
-        // The packages themselves are still in package.json and need a separate
-        // npm uninstall to actually shrink the install (see the handover notes).
+        // three 的分支曾在删除落地页 3D 棱镜场景时一并移除，现在又回来了：落地页
+        // 的手机机身改用 WebGL 物理材质渲染（见 components/landing/PhoneGL.ts），
+        // 但它是 PhoneStory 里的动态 import，只在桌面 scrub 模式下加载。独立成块
+        // 因此是必要的——否则 three 会被并进首屏包，抵消掉懒加载的全部意义。
+        // three's branch was removed when the landing page's 3D prism scene was
+        // cut; it is back because the phone body is now rendered with WebGL
+        // physical materials (see components/landing/PhoneGL.ts). It is a dynamic
+        // import inside PhoneStory and only loads in desktop scrub mode, so its
+        // own chunk is required - otherwise three would be folded into the
+        // initial bundle and negate the lazy loading entirely.
         manualChunks(id: string) {
           if (!id.includes('node_modules')) return
+          if (id.includes('three')) return 'three'
           if (id.includes('lightweight-charts')) return 'charts'
           if (
             id.includes('react') ||

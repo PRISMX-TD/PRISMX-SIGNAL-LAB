@@ -3674,3 +3674,39 @@ body {
     background: linear-gradient(180deg, transparent 0%, rgba(9, 9, 11, 0.94) 26%, rgba(9, 9, 11, 0.97) 100%);
   }
 }
+
+/* ── WebGL 接管态 / WebGL-active state ──
+   .gl-on 由 PhoneStory 在 createPhoneGL 成功后加到叙事区根节点。此时 CSS 机身
+   整个退场（机身改由 three 绘制），而屏幕节点已被 CSS3DRenderer 搬进它自己的
+   容器，因此不受 .dev-scene 隐藏的影响——它需要的是一套固定像素尺寸，好让
+   CSS3DObject 按 世界单位/像素 的比例精确缩放。
+   .gl-on is added to the story root by PhoneStory once createPhoneGL succeeds.
+   The CSS body leaves entirely (three draws it now), while the screen node has
+   already been moved into CSS3DRenderer's own container and so is unaffected by
+   hiding .dev-scene - what it needs instead is a fixed pixel size, so the
+   CSS3DObject can scale it by an exact world-units-per-pixel ratio. */
+.gl-on .dev-scene {
+  display: none;
+}
+/* 示例声明改为舞台底部居中：手机的位置现在由相机决定，标注跟不动它，
+   索性给它一个稳定的落点。/ The disclaimer moves to the bottom of the stage:
+   the phone's position is the camera's business now, so the caption gets its
+   own stable anchor instead of trying to track it. */
+.gl-on .story-phone {
+  top: auto;
+  bottom: 2.5vh;
+  transform: translateX(-50%);
+}
+/* 屏幕节点在 CSS3D 容器里：定位与变换归 CSS3DRenderer，这里只负责它自己的
+   外观。圆角 40px = 世界坐标 7mm ÷ 0.175 的像素等价值，与机身开孔对齐。
+   Inside the CSS3D container the node's position and transform belong to
+   CSS3DRenderer; this rule only governs its own appearance. The 40px radius is
+   the pixel equivalent of 7mm at the 0.175 scale, matching the body aperture. */
+.gl-on .dev-screen {
+  inset: auto;
+  border: 0;
+  border-radius: 40px;
+  box-shadow: none;
+  background: #06060a;
+}
+

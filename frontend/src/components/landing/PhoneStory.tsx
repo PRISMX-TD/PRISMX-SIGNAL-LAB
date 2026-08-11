@@ -36,6 +36,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { PhoneChrome, ScreenSignals, ScreenPlan, ScreenOrder, ScreenGuard, ScreenRecord } from './PhoneScreens'
+import { createPhoneGL, type PhoneGLHandle } from './PhoneGL'
 
 type T = (k: string) => string
 
@@ -110,13 +111,58 @@ export default function PhoneStory() {
       const stage = q('.story-stage')
       if (!pose || !tilt || !stage) return
 
+      /* ── WebGL 机身：能起就起，起不来就沿用 CSS 手机 ──
+         两条路径共用下面这一条时间线：时间线只改姿态代理对象 PZ 的数值，由每帧
+         的 applyPose 决定把它写进 three 的相机空间还是写成 CSS transform。这样
+         剧本、节奏、所有屏幕内动效都只有一份，不存在两套需要同步的实现。
+         WebGL body when it can start, CSS phone when it cannot. Both paths share
+         the single timeline below: the timeline only mutates the pose proxy PZ,
+         and the per-frame applyPose decides whether that lands in three's camera
+         space or as a CSS transform. One script, one set of beats, one
+         implementation of every in-screen effect - nothing to keep in sync. */
+      const screenHost = q('.dev-screen')
+      let gl: PhoneGLHandle | null = null
+      if (screenHost) {
+        try {
+          gl = await createPhoneGL({ container: stage, screenEl: screenHost })
+        } catch {
+          gl = null
+        }
+      }
+      if (disposed) {
+        gl?.dispose()
+        return
+      }
+      if (gl) el.classList.add('gl-on')
+
+      /* 姿态代理：时间线动的是这些纯数值，不是 DOM。
+         The pose proxy: the timeline animates these plain numbers, not the DOM. */
+      const PZ = { xvw: 19, rotY: -22, rotX: 6, scale: 1 }
+      const TZ = { rx: 0, ry: 0 }
+      const applyPose = () => {
+        if (gl) {
+          gl.setPose({
+            xPx: (PZ.xvw / 100) * stage.clientWidth,
+            rotYdeg: PZ.rotY + TZ.ry,
+            rotXdeg: PZ.rotX + TZ.rx,
+            scale: PZ.scale,
+          })
+        } else {
+          pose.style.transform = `translateX(${PZ.xvw}vw) rotateY(${PZ.rotY}deg) rotateX(${PZ.rotX}deg) scale(${PZ.scale})`
+          tilt.style.transform = `rotateX(${TZ.rx}deg) rotateY(${TZ.ry}deg)`
+        }
+      }
+      gsap.ticker.add(applyPose)
+
+      const onResize = () => gl?.resize()
+      window.addEventListener('resize', onResize)
+
       const ctx = gsap.context(() => {
         const scr = (n: number) => `[data-scr="${n}"]`
         const pan = (id: string) => `[data-panel="${id}"]`
 
         /* 初始状态：GSAP 从这一刻起拥有全部值（覆盖 .on 类规则）。
            Initial state: from here GSAP owns every value, overriding .on rules. */
-        gsap.set(pose, { x: '19vw', rotateY: -22, rotateX: 6, scale: 1 })
         gsap.set(scr(0), { autoAlpha: 1, y: 0 })
         ;[1, 2, 3, 4].forEach((n) => gsap.set(scr(n), { autoAlpha: 0, y: 18 }))
         gsap.set(pan('hero'), { autoAlpha: 1, y: 0 })
@@ -183,7 +229,7 @@ export default function PhoneStory() {
 
         /* 10–16 转场①：右→左，屏幕亮出完整计划 / hero → plan, phone crosses right→left */
         panelOut(tl, 'hero', 10)
-        tl.to(pose, { x: '-19vw', rotateY: 12, rotateX: 4, duration: 6, ease: 'power2.inOut' }, 10)
+        tl.to(PZ, { xvw: -19, rotY: 12, rotX: 4, duration: 6, ease: 'power2.inOut' }, 10)
         /* 面光与 rotateY 同窗口反向横扫：光源固定在房间里，机身转动时高光
            划过包边——这是「静态渐变」与「被灯照着的物体」的分界线。
            The face light sweeps in the same window as rotateY: the lamp stays
@@ -197,12 +243,12 @@ export default function PhoneStory() {
 
         /* 16–28 幕1 停留：机身缓慢回正 3°，给静止的画面留一口呼吸。
            Scene 1 hold: the body eases back 3° so the still frame keeps breathing. */
-        tl.to(pose, { rotateY: 9, duration: 12, ease: 'none' }, 16)
+        tl.to(PZ, { rotY: 9, duration: 12, ease: 'none' }, 16)
         tl.to('.js-facelight', { xPercent: 11, duration: 12, ease: 'none' }, 16)
 
         /* 28–34 转场② / plan → order */
         panelOut(tl, '1', 28)
-        tl.to(pose, { rotateY: 17, scale: 1.04, duration: 5, ease: 'power2.inOut' }, 29)
+        tl.to(PZ, { rotY: 17, scale: 1.04, duration: 5, ease: 'power2.inOut' }, 29)
         tl.to('.js-facelight', { xPercent: 20, duration: 5, ease: 'power2.inOut' }, 29)
         sheenPulse(tl, 30)
         swapScreen(tl, 1, 2, 29)
@@ -231,7 +277,7 @@ export default function PhoneStory() {
 
         /* 46–52 转场③：左→右，拉近看图表 / order → guard, phone crosses back, zooms in */
         panelOut(tl, '2', 46)
-        tl.to(pose, { x: '19vw', rotateY: -10, rotateX: 3, scale: 1.1, duration: 6, ease: 'power2.inOut' }, 46)
+        tl.to(PZ, { xvw: 19, rotY: -10, rotX: 3, scale: 1.1, duration: 6, ease: 'power2.inOut' }, 46)
         tl.to('.js-facelight', { xPercent: -12, duration: 6, ease: 'power2.inOut' }, 46)
         sheenPulse(tl, 47)
         swapScreen(tl, 2, 3, 47)
@@ -247,7 +293,7 @@ export default function PhoneStory() {
 
         /* 64–70 转场④ / guard → record */
         panelOut(tl, '3', 64)
-        tl.to(pose, { rotateY: 7, scale: 1.02, duration: 5, ease: 'power2.inOut' }, 64)
+        tl.to(PZ, { rotY: 7, scale: 1.02, duration: 5, ease: 'power2.inOut' }, 64)
         tl.to('.js-facelight', { xPercent: 8, duration: 5, ease: 'power2.inOut' }, 64)
         sheenPulse(tl, 65)
         swapScreen(tl, 3, 4, 65)
@@ -260,7 +306,7 @@ export default function PhoneStory() {
            Ending: the phone squares up, centres and shrinks, yielding to the
            content below. */
         panelOut(tl, '4', 85)
-        tl.to(pose, { x: 0, rotateY: 0, rotateX: 0, scale: 0.92, duration: 11, ease: 'power2.inOut' }, 86)
+        tl.to(PZ, { xvw: 0, rotY: 0, rotX: 0, scale: 0.92, duration: 11, ease: 'power2.inOut' }, 86)
         tl.to('.js-facelight', { xPercent: 0, duration: 11, ease: 'power2.inOut' }, 86)
 
         /* ── 鼠标跟随倾斜 / pointer tilt ──
@@ -269,8 +315,8 @@ export default function PhoneStory() {
            quickTo writes compositor props directly, never touching React. It
            lives on the inner .js-tilt so it can't fight the timeline-driven
            outer .js-pose for the same values. */
-        const rx = gsap.quickTo(tilt, 'rotationX', { duration: 0.6, ease: 'power3.out' })
-        const ry = gsap.quickTo(tilt, 'rotationY', { duration: 0.6, ease: 'power3.out' })
+        const rx = gsap.quickTo(TZ, 'rx', { duration: 0.6, ease: 'power3.out' })
+        const ry = gsap.quickTo(TZ, 'ry', { duration: 0.6, ease: 'power3.out' })
         /* 玻璃反光跟随光标微转：机身倾斜时屏幕玻璃上的反光角度跟着变——
            挂在 .js-sheen 的 rotation 上（合成器属性），与时间线驱动的 opacity
            不同轴，互不抢值。/ The glass reflection turns slightly with the
@@ -296,7 +342,16 @@ export default function PhoneStory() {
         }
       }, el)
 
-      cleanup = () => ctx.revert()
+      cleanup = () => {
+        window.removeEventListener('resize', onResize)
+        gsap.ticker.remove(applyPose)
+        ctx.revert()
+        // 先卸 GL（它会把屏幕节点放回 React 记得的位置），再摘类名。
+        // Dispose GL first (it restores the screen node to where React remembers
+        // it), then drop the class.
+        gl?.dispose()
+        el.classList.remove('gl-on')
+      }
     })()
 
     return () => {
