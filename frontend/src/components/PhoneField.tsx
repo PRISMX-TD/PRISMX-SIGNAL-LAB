@@ -46,6 +46,12 @@ export default function PhoneField({
   const options = DIAL_CODES.map((d) => ({
     value: d.iso,
     label: `${flagOf(d.iso)} ${zh ? d.zh : d.en} +${d.code}`,
+    // 收起来时只留国旗和区号：国名在那个窄框里必然被省略号截断，而截断后的
+    // 半个国名比不显示更糟。展开的菜单里仍然是全名，选的时候不会认错。
+    // Collapsed to flag + dial code: a country name would be ellipsis-truncated
+    // in that narrow trigger, and half a country name is worse than none. The
+    // open menu still spells it out, which is where it matters for choosing.
+    short: `${flagOf(d.iso)} +${d.code}`,
   }))
 
   return (

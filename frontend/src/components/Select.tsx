@@ -18,6 +18,15 @@ import { createPortal } from 'react-dom'
 export interface SelectOption {
   value: string
   label: string
+  // 触发器上的简短写法，省略时用 label。
+  // 用在「菜单里要说清楚、收起来只需认得出」的场景：手机号区号选择器的菜单是
+  // "🇲🇾 马来西亚 +60"，触发器只要 "🇲🇾 +60" —— 全名塞进那个窄框只会变成省略号，
+  // 而省略号既占地方又没信息。
+  // Short form for the trigger; falls back to label. For cases where the menu
+  // should spell things out but the collapsed trigger only needs to be
+  // recognisable — a full country name in a narrow trigger just becomes an
+  // ellipsis, which costs space and carries no information.
+  short?: string
 }
 
 export default function Select({
@@ -81,7 +90,7 @@ export default function Select({
   return (
     <div ref={rootRef} className={`select-picker ${className}`}>
       <button ref={triggerRef} type="button" className="select-trigger" onClick={() => setOpen((v) => !v)} title={current?.label ?? value}>
-        <span>{current?.label ?? value}</span>
+        <span>{current?.short ?? current?.label ?? value}</span>
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ transform: open ? 'rotate(180deg)' : undefined }}>
           <path d="M6 9l6 6 6-6" />
         </svg>

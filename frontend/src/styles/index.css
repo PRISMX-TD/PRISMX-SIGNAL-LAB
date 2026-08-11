@@ -1404,18 +1404,24 @@
     color: var(--text-3);
   }
 
-  /* 手机号区号下拉：固定宽度，剩下的空间全给号码输入框。
-     国名 + 区号在窄屏会很长，用 nowrap + 省略号收住，别把布局撑破。
-     Dial-code select: fixed width so the number input gets the rest; country
-     names are long on narrow screens, so clamp rather than let it stretch. */
+  /* 手机号区号下拉。
+     Select 原本是给图表页那些紧凑面板做的（30.8px 高、8px 圆角、12.5px 字），
+     直接放进认证表单会比旁边的 .input（43px 高、12px 圆角、14px 字）矮一大截，
+     两个框并排时一眼就能看出没对齐。这里把它对齐到 .input 的度量。
+     触发器只显示国旗 + 区号（见 PhoneField 的 short 字段），所以宽度不用留给国名。
+     Select is sized for the charts page's compact panels; next to an auth-form
+     .input it sits visibly short. These rules align it to .input's metrics. The
+     trigger shows only flag + dial code, so no width is reserved for a name. */
   .phone-dial-select {
-    width: 132px;
+    width: 104px;
     flex-shrink: 0;
   }
   .phone-dial-select .select-trigger {
+    height: 43px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    font-size: 14px;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   /* ── 通用自定义下拉（替代原生 select）/ generic custom dropdown ── */
