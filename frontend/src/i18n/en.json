@@ -1054,7 +1054,7 @@
         "/simulator": "Simulator"
       }
     },
-    "searchPlaceholder": "Search by email…",
+    "searchPlaceholder": "Search by email or phone…",
     "search": "Search",
     "totalCount": "{{n}} users total",
     "noUsers": "No users found",
@@ -1109,7 +1109,8 @@
     "candleM1Retention": "1-minute candle retention (days)",
     "strategyPlatformTitle": "Custom Strategy Platform",
     "strategyMaxPerUser": "Max strategies per user",
-    "strategyProOnly": "PRO-exclusive"
+    "strategyProOnly": "PRO-exclusive",
+    "colPhone": "Phone"
   },
   "discipline": {
     "title": "Discipline Score",

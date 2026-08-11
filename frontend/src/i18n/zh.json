@@ -1054,7 +1054,7 @@
         "/simulator": "模拟器"
       }
     },
-    "searchPlaceholder": "按邮箱搜索…",
+    "searchPlaceholder": "按邮箱或手机号搜索…",
     "search": "搜索",
     "totalCount": "共 {{n}} 位用户",
     "noUsers": "没有找到用户",
@@ -1109,7 +1109,8 @@
     "candleM1Retention": "1 分钟线保留天数",
     "strategyPlatformTitle": "自定义策略平台",
     "strategyMaxPerUser": "每用户策略数上限",
-    "strategyProOnly": "仅 PRO 可用"
+    "strategyProOnly": "仅 PRO 可用",
+    "colPhone": "手机号"
   },
   "discipline": {
     "title": "纪律分",

@@ -76,6 +76,9 @@ export interface User {
 export interface AdminUser {
   id: string
   email: string
+  // 存量用户为空（强制记录上线前注册的一律豁免），不是数据缺失
+  // Empty for accounts grandfathered before the mandatory-phone rule shipped
+  phone?: string | null
   role: UserRole
   plan: UserPlan
   planExpiresAt: string | null

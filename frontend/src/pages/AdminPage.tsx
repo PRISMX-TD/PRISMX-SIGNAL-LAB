@@ -1144,6 +1144,7 @@ export default function AdminPage() {
                   />
                 </th>
                 <th className="px-4 py-3 font-medium">{t('admin.colEmail')}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.colPhone')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.colRole')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.colPlan')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.colExpiresAt')}</th>
@@ -1171,6 +1172,14 @@ export default function AdminPage() {
                     <td className="px-4 py-3">
                       <div className="max-w-[220px] truncate font-mono text-xs text-slate-200">{u.email}</div>
                       <div className="mt-1 text-[11px] text-slate-500">{fmtTime(u.createdAt)}</div>
+                    </td>
+                    {/* 手机号：存量用户为空。用「—」而不是留白，否则看起来像渲染坏了。
+                        Empty for grandfathered users; an em dash rather than blank
+                        space, which would read as a rendering bug. */}
+                    <td className="px-4 py-3">
+                      <div className="whitespace-nowrap font-mono text-xs text-slate-300">
+                        {u.phone || <span className="text-slate-600">—</span>}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <Select

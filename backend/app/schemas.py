@@ -82,6 +82,9 @@ class AuthResponse(BaseModel):
 class AdminUserOut(BaseModel):
     id: str
     email: str
+    # 存量用户为空（上线前注册的一律豁免），不是数据缺失
+    # Empty for grandfathered accounts registered before this shipped — not missing data
+    phone: str | None = None
     role: str
     plan: str
     planExpiresAt: datetime | None = None

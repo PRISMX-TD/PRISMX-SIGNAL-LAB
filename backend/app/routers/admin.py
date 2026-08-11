@@ -15,7 +15,7 @@ import json
 from datetime import datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
@@ -65,7 +65,7 @@ def _aware(dt: datetime | None) -> datetime | None:
 
 @router.get("/users", response_model=dict)
 def list_users(
-    q: str | None = Query(default=None, max_length=128, description="按邮箱模糊搜索 / fuzzy search by email"),
+    q: str | None = Query(default=None, max_length=128, description="按邮箱或手机号模糊搜索 / fuzzy search by email or phone"),
     plan: str | None = Query(default=None),
     role: str | None = Query(default=None),
     limit: int = Query(default=PAGE_SIZE_DEFAULT, ge=1, le=PAGE_SIZE_MAX),
@@ -77,7 +77,21 @@ def list_users(
     User list: fuzzy email search, plan/role filters, paginated."""
     query = db.query(User)
     if q:
-        query = query.filter(User.email.ilike(f"%{q}%"))
+        # 邮箱与手机号一起搜：客服拿到的往往只有一个手机号，让他还得先换算成
+        # 邮箱才能查，等于这个字段存了也用不上。
+        # 号码存的是 E.164（+60...），而人工输入常常不带 +、或者带着本地前导 0，
+        # 所以对纯数字的查询词额外补一次「按后缀匹配」——用后几位去撞，能同时
+        # 命中 "123456789"、"0123456789"、"+60123456789" 这几种写法。
+        # Search phone alongside email: support usually has only a number, and
+        # forcing them to resolve it to an email first would make the column
+        # useless. Numbers are stored E.164 but typed without the +, or with a
+        # local trunk zero, so a digits-only query also matches by suffix.
+        like = f"%{q}%"
+        conds = [User.email.ilike(like), User.phone.ilike(like)]
+        digits = "".join(ch for ch in q if ch.isdigit())
+        if digits:
+            conds.append(User.phone.ilike(f"%{digits.lstrip('0')}"))
+        query = query.filter(or_(*conds))
     if plan:
         query = query.filter(User.plan == plan)
     if role:
@@ -102,6 +116,7 @@ def list_users(
         AdminUserOut(
             id=u.id,
             email=u.email,
+            phone=u.phone,
             role=u.role,
             plan=u.plan,
             planExpiresAt=u.plan_expires_at,
