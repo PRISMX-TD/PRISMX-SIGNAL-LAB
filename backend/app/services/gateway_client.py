@@ -117,6 +117,14 @@ class VerifyRsp:
     leverage: int = 0
     balance: float = 0.0
     equity: float = 0.0
+    # ok=False 时的失败原因。error 是 gateway 的错误码（group_not_allowed、
+    # MTRetCode 名、timeout…），status 是它的 HTTP 状态码（0 表示压根没连上）。
+    # 调用方靠这两个字段区分「网关真的挂了」和「网关明确拒绝了这个账号」。
+    # Failure detail when ok=False: the gateway's error code and HTTP status
+    # (0 = never reached it). Lets callers tell an outage from a refusal.
+    error: str = ""
+    message: str = ""
+    status: int = 0
 
 
 @dataclass
@@ -230,13 +238,37 @@ async def _post(path: str, body: dict, timeout: float | None = None) -> dict:
         return data
     except httpx.TimeoutException:
         logger.error("Gateway 超时 (%.1fms): %s", (time.perf_counter() - started) * 1000, url)
-        return {"ok": False, "error": "timeout", "message": "Gateway 响应超时"}
+        return {"ok": False, "error": "timeout", "message": "Gateway 响应超时", "status": 0}
     except httpx.HTTPStatusError as e:
         logger.error("Gateway HTTP %s: %s %s", e.response.status_code, url, e.response.text[:300])
-        return {"ok": False, "error": "http_error", "message": str(e)}
+        # gateway 的 4xx 不是「网关坏了」，是有结构的业务拒绝：组不在白名单
+        # (403 group_not_allowed)、账号不存在(404 + MTRetCode)、token 不对
+        # (401)。把响应体原样带回给调用方，否则这些全部退化成同一句
+        # 「Gateway 不可用」，用户看到的和真正断线时一模一样，排查只能靠翻日志。
+        #
+        # A 4xx from the gateway is a structured refusal, not an outage: group not
+        # whitelisted, account missing, bad token. Carry the body through — folding
+        # them all into one "gateway unavailable" makes a policy refusal
+        # indistinguishable from a real outage at the UI.
+        out = {
+            "ok": False,
+            "error": "http_error",
+            "message": str(e),
+            "status": e.response.status_code,
+        }
+        try:
+            body = e.response.json()
+            if isinstance(body, dict):
+                out.update(body)
+                # 网关体里的 ok 必定是 false，但状态码只有这里知道，别被 update 覆盖
+                out["ok"] = False
+                out["status"] = e.response.status_code
+        except Exception:
+            pass
+        return out
     except Exception as e:
         logger.error("Gateway 请求失败: %s %s", url, e)
-        return {"ok": False, "error": "request_failed", "message": str(e)}
+        return {"ok": False, "error": "request_failed", "message": str(e), "status": 0}
 
 
 # ---------- 业务接口 ----------
@@ -255,6 +287,9 @@ async def verify_account(login: int, password: str, investor_only: bool = False)
         leverage=data.get("leverage", 0),
         balance=data.get("balance", 0.0),
         equity=data.get("equity", 0.0),
+        error=str(data.get("error", "")),
+        message=str(data.get("message", "")),
+        status=int(data.get("status", 0) or 0),
     )
 
 
@@ -510,21 +545,62 @@ async def health_check() -> dict:
 # Gateway accounts have no bridge heartbeat; liveness depends on the gateway
 # service itself. Account listing is frequent, so cache the probe result.
 _HEALTH_TTL_SECONDS = 10
-_health_cache: dict = {"at": 0.0, "online": False}
+
+# 探活失败后的宽限期。
+#
+# Bridge 账号的在线判定（deps.py 的 ONLINE_WINDOW）刻意留了约 3 个心跳周期的
+# 容错，理由写在那儿：偶发丢包不该判成离线。Gateway 账号这边此前**一次容错都
+# 没有**——一次探活失败就直接置离线，而这条探活要跨公网到 Windows VPS，还要
+# 经由 run_on_main_loop 排进主事件循环（那条循环同时在跑 2 秒持仓轮询和 0.25 秒
+# 事件快拍，忙起来光排队就可能吃掉 5 秒超时）。结果是顶部状态徽标会无缘无故
+# 闪成「未连接」，刷新一下又好了——因为一次失败会被 TTL 缓存钉住 10 秒。
+#
+# 30 秒配合 10 秒 TTL，意味着要连续两次探活都失败才真的判离线，与 bridge 那侧
+# 「容忍 3 个周期」的取舍一致。代价是网关真的挂掉时，界面最多晚 30 秒变灰；
+# 而这段时间里用户若去下单，会拿到明确的下单失败提示，不会被误导太久。
+#
+# Grace period after a failed probe. Bridge liveness deliberately tolerates ~3
+# missed heartbeats (see ONLINE_WINDOW); gateway liveness tolerated nothing — a
+# single failed probe flipped the badge to "disconnected" and the TTL then
+# pinned that for 10s. The probe crosses the public internet and queues on the
+# main event loop (busy with the 2s position tick and 0.25s event pump), so
+# transient failures are expected. 30s means two consecutive failures are needed
+# before reporting offline. Cost: a genuinely dead gateway takes up to 30s to
+# show as offline, during which an order attempt fails with a clear error.
+_HEALTH_GRACE_SECONDS = 30
+
+# ok_at 是最近一次**成功**探活的时刻，与 at（最近一次探活的时刻，不论成败）分开。
+# ok_at is the last *successful* probe; `at` is the last probe of any outcome.
+_health_cache: dict = {"at": 0.0, "online": False, "ok_at": 0.0}
 
 
 def is_gateway_online() -> bool:
-    """Gateway 是否可达（带 10 秒缓存）。同步接口，供 serializer 调用。"""
+    """Gateway 是否可达（10 秒缓存 + 30 秒失败宽限）。同步接口，供 serializer 调用。"""
     now = time.monotonic()
     if now - _health_cache["at"] < _HEALTH_TTL_SECONDS:
         return _health_cache["online"]
 
     try:
         rsp = run_on_main_loop(health_check(), timeout=5.0)
-        online = bool(rsp.get("ok")) and bool(rsp.get("mt5Connected"))
+        ok = bool(rsp.get("ok")) and bool(rsp.get("mt5Connected"))
     except Exception:
-        online = False
+        ok = False
 
     _health_cache["at"] = now
-    _health_cache["online"] = online
-    return online
+
+    if ok:
+        _health_cache["ok_at"] = now
+        _health_cache["online"] = True
+    else:
+        # 宽限期内沿用上一次的成功结果。ok_at > 0 的判断不能省：进程刚起来时
+        # ok_at 还是 0，而 monotonic() 的起点因平台而异，可能恰好小于宽限期，
+        # 那样会在从未成功探活过的情况下报「在线」。
+        # The ok_at > 0 check matters: at startup ok_at is 0 and monotonic()'s
+        # origin is platform-dependent, so without it a never-probed process
+        # could report online.
+        _health_cache["online"] = (
+            _health_cache["ok_at"] > 0.0
+            and now - _health_cache["ok_at"] < _HEALTH_GRACE_SECONDS
+        )
+
+    return _health_cache["online"]

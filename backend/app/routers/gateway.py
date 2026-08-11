@@ -73,6 +73,58 @@ class GatewayAccountOut(BaseModel):
     symbolSuffix: str = ""
 
 
+def _verify_failure(rsp) -> HTTPException:
+    """把 gateway 的失败响应翻译成对用户有意义的 HTTP 错误。
+
+    以前这里一律是 502「Gateway 不可用」，于是三件完全不同的事看起来一模一样：
+    网关真的断了、账号所属组不在 gateway.ini 的 allowed_groups 白名单里、
+    账号号码填错了。第二种尤其误导——券商刚开通真仓权限、白名单还停在
+    `demo` 时，用户填真仓账号得到的提示是「网关不可用」，会让人去查一台其实
+    好端端的服务器。
+
+    Translate a gateway failure into something the user can act on. This used to
+    be a blanket 502 "gateway unavailable", which made three unrelated things
+    look identical: a real outage, an account whose group isn't in the gateway's
+    allowed_groups whitelist, and a mistyped login. The middle one is the
+    misleading one — right after the broker enables live accounts but before the
+    whitelist is updated, a live login reports "gateway unavailable" and sends
+    everyone hunting a server that is perfectly healthy.
+    """
+    if rsp.error == "group_not_allowed":
+        return HTTPException(
+            status_code=403,
+            detail=(
+                "该 MT5 账号所属的组尚未开放接入，请联系客服 / "
+                "This MT5 account's group is not enabled for linking yet — please contact support"
+            ),
+        )
+
+    if rsp.status == 404:
+        return HTTPException(
+            status_code=404,
+            detail=(
+                f"MT5 账号不存在或无法读取（{rsp.error}） / "
+                f"MT5 account not found or unreadable ({rsp.error})"
+            ),
+        )
+
+    if rsp.error == "timeout":
+        return HTTPException(
+            status_code=504,
+            detail="Gateway 响应超时，请稍后重试 / Gateway timed out, please try again",
+        )
+
+    # 剩下的才是真正的「网关不可用」：连不上、401（token 不一致）、500。
+    # 把错误码带上，运维一眼能分辨是哪一种。
+    # What's left really is an unavailable gateway: unreachable, 401 (token
+    # mismatch), 500. Carry the code so ops can tell which.
+    reason = rsp.error or rsp.retcode or "unknown"
+    return HTTPException(
+        status_code=502,
+        detail=f"Gateway 不可用（{reason}） / Gateway unavailable ({reason})",
+    )
+
+
 # ---------- 端点 ----------
 
 
@@ -94,7 +146,11 @@ def gateway_verify(
     rsp = run_on_main_loop(gw_verify(req.login, req.password, req.investorOnly), timeout=65.0)
 
     if not rsp.ok:
-        raise HTTPException(status_code=502, detail=f"Gateway 不可用: {rsp.retcode}")
+        logger.warning(
+            "Gateway 验证被拒: user=%s login=%s status=%s error=%s message=%s",
+            user.id, req.login, rsp.status, rsp.error, rsp.message[:200],
+        )
+        raise _verify_failure(rsp)
 
     # 2) 检查账户数上限
     account_limit = max_mt5_accounts(user.plan)
