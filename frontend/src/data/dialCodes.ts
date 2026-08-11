@@ -1,9 +1,12 @@
 // 国际区号表。
 //
 // 顺序不是字母序，是「命中概率序」：平台的合作券商在马来西亚，用户以马来西亚、
-// 新加坡、中国大陆、港台为主，这些放最前面，其余按地区聚拢。下拉里滚动找号码是
+// 新加坡、中国、港澳台为主，这些放最前面，其余按地区聚拢。下拉里滚动找号码是
 // 注册流程里最容易让人烦躁的一步，把 90% 的用户要选的那几项放在一眼能看到的地方，
 // 比排得整齐重要。
+//
+// 名称一律用直接的地区名（香港、台湾、澳门），不加前缀。选区号是个功能性动作，
+// 用户扫的是「哪个是我」，名字越短越快认出来。
 //
 // 不追求收录全球每一个国家：漏掉的用户会去联系客服，而一个几百项的下拉会让所有人
 // 都变慢。真有需要再往下加。
@@ -26,10 +29,10 @@ export interface DialCode {
 export const DIAL_CODES: DialCode[] = [
   { iso: 'MY', code: '60', zh: '马来西亚', en: 'Malaysia' },
   { iso: 'SG', code: '65', zh: '新加坡', en: 'Singapore' },
-  { iso: 'CN', code: '86', zh: '中国大陆', en: 'China' },
-  { iso: 'HK', code: '852', zh: '中国香港', en: 'Hong Kong' },
-  { iso: 'TW', code: '886', zh: '中国台湾', en: 'Taiwan' },
-  { iso: 'MO', code: '853', zh: '中国澳门', en: 'Macau' },
+  { iso: 'CN', code: '86', zh: '中国', en: 'China' },
+  { iso: 'HK', code: '852', zh: '香港', en: 'Hong Kong' },
+  { iso: 'TW', code: '886', zh: '台湾', en: 'Taiwan' },
+  { iso: 'MO', code: '853', zh: '澳门', en: 'Macau' },
   { iso: 'ID', code: '62', zh: '印度尼西亚', en: 'Indonesia' },
   { iso: 'TH', code: '66', zh: '泰国', en: 'Thailand' },
   { iso: 'VN', code: '84', zh: '越南', en: 'Vietnam' },
