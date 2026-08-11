@@ -49,7 +49,7 @@ export default function ImageField({
 
   return (
     <div className="block">
-      {label && <span className="mb-1 block text-xs text-slate-400">{label}</span>}
+      {label && <span className="mb-1 block text-xs text-neutral-400">{label}</span>}
       <div className="flex flex-wrap items-center gap-2">
         <input
           ref={inputRef}

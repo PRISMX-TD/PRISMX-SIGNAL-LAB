@@ -44,7 +44,7 @@ export default function UserMenu({
   const initial = email?.trim()?.[0]?.toUpperCase() || "?"
 
   const linkClass =
-    "block rounded-lg px-3 py-2 text-sm text-slate-300 transition hover:bg-white/5 hover:text-slate-100"
+    "block rounded-lg px-3 py-2 text-sm text-neutral-300 transition hover:bg-white/5 hover:text-neutral-100"
 
   return (
     <div ref={rootRef} className="relative">
@@ -60,7 +60,7 @@ export default function UserMenu({
       {open && (
         <div className="absolute right-0 z-40 mt-2 w-64 rounded-xl border border-white/10 bg-ink-900/95 p-2 shadow-prism backdrop-blur-xl">
           {email && (
-            <div className="truncate px-3 py-2 text-xs text-slate-500">{email}</div>
+            <div className="truncate px-3 py-2 text-xs text-neutral-500">{email}</div>
           )}
           <Link to="/account" onClick={() => setOpen(false)} className={linkClass}>
             {t("nav.account")}

@@ -186,7 +186,7 @@ export default function PushDiagnostics() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center justify-between text-xs font-semibold text-slate-300 hover:text-white"
+        className="flex w-full items-center justify-between text-xs font-semibold text-neutral-300 hover:text-white"
       >
         <span>{t("account.notifDiagTitle")}</span>
         <span aria-hidden="true">{open ? "−" : "+"}</span>
@@ -196,11 +196,11 @@ export default function PushDiagnostics() {
         <div className="mt-3 space-y-1.5">
           {probes.map((p, i) => (
             <div key={`${p.label}-${i}`} className="flex items-start justify-between gap-3 text-xs">
-              <span className="text-slate-400">{p.label}</span>
+              <span className="text-neutral-400">{p.label}</span>
               <span
                 className={
                   p.ok === null
-                    ? "text-slate-300"
+                    ? "text-neutral-300"
                     : p.ok
                       ? "text-emerald-400"
                       : "text-amber-400"
@@ -212,8 +212,8 @@ export default function PushDiagnostics() {
           ))}
 
           <div className="flex items-start justify-between gap-3 text-xs">
-            <span className="text-slate-400">{t("account.notifDiagLastPush")}</span>
-            <span className="text-slate-300">{lastPush || "…"}</span>
+            <span className="text-neutral-400">{t("account.notifDiagLastPush")}</span>
+            <span className="text-neutral-300">{lastPush || "…"}</span>
           </div>
 
           <button
@@ -224,7 +224,7 @@ export default function PushDiagnostics() {
           >
             {t("account.notifDiagSendTest")}
           </button>
-          {testMsg && <p className="mt-2 text-xs leading-relaxed text-slate-300">{testMsg}</p>}
+          {testMsg && <p className="mt-2 text-xs leading-relaxed text-neutral-300">{testMsg}</p>}
         </div>
       )}
     </div>

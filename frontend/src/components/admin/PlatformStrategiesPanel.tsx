@@ -101,7 +101,7 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs text-slate-400">{label}</span>
+      <span className="mb-1 block text-xs text-neutral-400">{label}</span>
       <input
         className="input w-full py-1.5 text-sm"
         value={value}
@@ -205,8 +205,8 @@ export default function PlatformStrategiesPanel() {
       )}
 
       <div className="glass mb-4 p-4">
-        <p className="text-sm text-slate-400">{t('admin.strategyGuide.hint')}</p>
-        <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('admin.strategyGuide.noPerfHint')}</p>
+        <p className="text-sm text-neutral-400">{t('admin.strategyGuide.hint')}</p>
+        <p className="mt-2 text-xs leading-relaxed text-neutral-500">{t('admin.strategyGuide.noPerfHint')}</p>
       </div>
 
       <div className="mb-4 flex items-center gap-3">
@@ -225,7 +225,7 @@ export default function PlatformStrategiesPanel() {
       </div>
 
       {items.length === 0 ? (
-        <div className="glass py-12 text-center text-sm text-slate-500">{t('admin.strategyGuide.empty')}</div>
+        <div className="glass py-12 text-center text-sm text-neutral-500">{t('admin.strategyGuide.empty')}</div>
       ) : (
         <div className="space-y-3">
           {items.map((s, i) => (
@@ -234,12 +234,12 @@ export default function PlatformStrategiesPanel() {
                 <button
                   type="button"
                   onClick={() => setOpenId(openId === s.id ? null : s.id)}
-                  className="flex-1 text-left text-sm font-medium text-slate-100"
+                  className="flex-1 text-left text-sm font-medium text-neutral-100"
                 >
                   {s.nameZh || s.nameEn || t('admin.strategyGuide.untitled')}
                 </button>
                 <span
-                  className={`tag ${s.published ? 'bg-up/15 text-up' : 'bg-white/5 text-slate-400'}`}
+                  className={`tag ${s.published ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-400'}`}
                 >
                   {s.published ? t('admin.strategyGuide.published') : t('admin.strategyGuide.draft')}
                 </span>
@@ -248,7 +248,7 @@ export default function PlatformStrategiesPanel() {
                   onClick={() => move(i, -1)}
                   disabled={i === 0}
                   aria-label={t('admin.strategyGuide.moveUp')}
-                  className="rounded px-2 py-1 text-xs text-slate-400 hover:bg-white/10 disabled:opacity-30"
+                  className="rounded px-2 py-1 text-xs text-neutral-400 hover:bg-white/10 disabled:opacity-30"
                 >
                   ↑
                 </button>
@@ -257,7 +257,7 @@ export default function PlatformStrategiesPanel() {
                   onClick={() => move(i, 1)}
                   disabled={i === items.length - 1}
                   aria-label={t('admin.strategyGuide.moveDown')}
-                  className="rounded px-2 py-1 text-xs text-slate-400 hover:bg-white/10 disabled:opacity-30"
+                  className="rounded px-2 py-1 text-xs text-neutral-400 hover:bg-white/10 disabled:opacity-30"
                 >
                   ↓
                 </button>
@@ -272,7 +272,7 @@ export default function PlatformStrategiesPanel() {
 
               {openId === s.id && (
                 <div className="mt-4 space-y-3 border-t border-white/10 pt-4">
-                  <label className="flex items-center gap-2 text-sm text-slate-300">
+                  <label className="flex items-center gap-2 text-sm text-neutral-300">
                     <input
                       type="checkbox"
                       checked={s.published}

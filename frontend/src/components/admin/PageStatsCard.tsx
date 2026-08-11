@@ -146,7 +146,7 @@ export default function PageStatsCard({
       <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-white">{t('admin.pageStats.title', { days })}</h2>
         {hasData && (
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-neutral-400">
             {t('admin.pageStats.summary', {
               visitors: stats.totalVisitors,
               views: stats.totalViews,
@@ -155,7 +155,7 @@ export default function PageStatsCard({
           </span>
         )}
       </div>
-      <p className="mb-3 text-xs text-slate-500">{t('admin.pageStats.privacyHint')}</p>
+      <p className="mb-3 text-xs text-neutral-500">{t('admin.pageStats.privacyHint')}</p>
 
       {/* 天数选择放在空数据判断之外：窗口没数据时更需要能换个范围试试，
           按钮跟着一起藏起来就没法操作了。
@@ -171,8 +171,8 @@ export default function PageStatsCard({
             onClick={() => onDaysChange(opt)}
             className={`rounded-full px-3 py-1 text-xs transition ${
               days === opt
-                ? 'bg-white/10 text-slate-100 ring-1 ring-white/20'
-                : 'text-slate-500 hover:text-slate-300'
+                ? 'bg-white/10 text-neutral-100 ring-1 ring-white/20'
+                : 'text-neutral-500 hover:text-neutral-300'
             }`}
           >
             {t('admin.pageStats.daysOption', { days: opt })}
@@ -181,7 +181,7 @@ export default function PageStatsCard({
       </div>
 
       {!hasData ? (
-        <p className="py-3 text-sm text-slate-500">{t('admin.pageStats.empty')}</p>
+        <p className="py-3 text-sm text-neutral-500">{t('admin.pageStats.empty')}</p>
       ) : (
         <>
           <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label={t('admin.pageStats.metricLabel')}>
@@ -195,7 +195,7 @@ export default function PageStatsCard({
                 className={`rounded-full px-3 py-1 text-xs transition ${
                   metric === key
                     ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40'
-                    : 'text-slate-400 hover:text-slate-200'
+                    : 'text-neutral-400 hover:text-neutral-200'
                 }`}
               >
                 {t(`admin.pageStats.metric.${key}`)}
@@ -297,15 +297,15 @@ export default function PageStatsCard({
                     : { left: `${hoverRatio * 100}%`, marginLeft: 8 }
                 }
               >
-                <p className="mb-1.5 text-[10px] text-slate-400">{stats.dates[hover]}</p>
+                <p className="mb-1.5 text-[10px] text-neutral-400">{stats.dates[hover]}</p>
                 {charted.map((page, i) => (
                   <p key={page.path} className="flex items-center gap-2 text-[11px] leading-5">
                     <i
                       className="h-2 w-2 shrink-0 rounded-full"
                       style={{ backgroundColor: LINE_COLORS[i % LINE_COLORS.length] }}
                     />
-                    <span className="flex-1 truncate text-slate-300">{pageName(page.path)}</span>
-                    <span className="tabular-nums text-slate-100">
+                    <span className="flex-1 truncate text-neutral-300">{pageName(page.path)}</span>
+                    <span className="tabular-nums text-neutral-100">
                       {fmtMetric(metric, page.daily[hover][metric])}
                     </span>
                   </p>
@@ -313,7 +313,7 @@ export default function PageStatsCard({
               </div>
             )}
 
-            <div className="mt-1 flex justify-between text-[10px] text-slate-500">
+            <div className="mt-1 flex justify-between text-[10px] text-neutral-500">
               <span>{stats.dates[0]}</span>
               <span className="tabular-nums">
                 {t('admin.pageStats.peak', { value: fmtMetric(metric, yMax) })}
@@ -324,7 +324,7 @@ export default function PageStatsCard({
 
           <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
             {lines.map((line) => (
-              <span key={line.path} className="flex items-center gap-1.5 text-[11px] text-slate-400">
+              <span key={line.path} className="flex items-center gap-1.5 text-[11px] text-neutral-400">
                 <i className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: line.color }} />
                 {pageName(line.path)}
               </span>
@@ -334,7 +334,7 @@ export default function PageStatsCard({
           <div className="mt-5 overflow-x-auto">
             <table className="w-full min-w-[420px] text-xs">
               <thead>
-                <tr className="text-left text-slate-500">
+                <tr className="text-left text-neutral-500">
                   <th className="pb-2 font-medium">{t('admin.pageStats.colPage')}</th>
                   <th className="pb-2 text-right font-medium">{t('admin.pageStats.metric.visitors')}</th>
                   <th className="pb-2 text-right font-medium">{t('admin.pageStats.metric.views')}</th>
@@ -349,12 +349,12 @@ export default function PageStatsCard({
                         Name first, path as a hint: showing only the name would send you
                         back to the code to work out which route a row is. */}
                     <td className="py-1.5">
-                      <span className="text-slate-200">{pageName(p.path)}</span>
-                      <code className="ml-2 text-[10px] text-slate-500">{p.path}</code>
+                      <span className="text-neutral-200">{pageName(p.path)}</span>
+                      <code className="ml-2 text-[10px] text-neutral-500">{p.path}</code>
                     </td>
-                    <td className="py-1.5 text-right tabular-nums text-slate-200">{p.visitors}</td>
-                    <td className="py-1.5 text-right tabular-nums text-slate-200">{p.views}</td>
-                    <td className="py-1.5 text-right tabular-nums text-slate-400">{fmtDwell(p.avgSeconds)}</td>
+                    <td className="py-1.5 text-right tabular-nums text-neutral-200">{p.visitors}</td>
+                    <td className="py-1.5 text-right tabular-nums text-neutral-200">{p.views}</td>
+                    <td className="py-1.5 text-right tabular-nums text-neutral-400">{fmtDwell(p.avgSeconds)}</td>
                   </tr>
                 ))}
               </tbody>

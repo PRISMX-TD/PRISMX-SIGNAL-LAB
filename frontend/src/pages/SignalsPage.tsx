@@ -67,7 +67,7 @@ export default function SignalsPage() {
         <SkeletonPage cards={3} />
       ) : (
         <div className="content-fade">
-          <button onClick={() => navigate('/dashboard')} className="mb-4 flex items-center gap-1.5 text-sm text-slate-400 hover:text-white transition-colors">
+          <button onClick={() => navigate('/dashboard')} className="mb-4 flex items-center gap-1.5 text-sm text-neutral-400 hover:text-white transition-colors">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
             {t('signals.focus.backToDashboard', '返回仪表盘')}
           </button>
@@ -80,7 +80,7 @@ export default function SignalsPage() {
               className={`pb-3 px-4 text-sm font-medium transition-colors border-b-2 -mb-px ${
                 activeTab === 'signals'
                   ? 'border-prism-500 text-prism-200'
-                  : 'border-transparent text-slate-400 hover:text-slate-200'
+                  : 'border-transparent text-neutral-400 hover:text-neutral-200'
               }`}
             >
               {t('signals.tabs.realtime')}
@@ -91,7 +91,7 @@ export default function SignalsPage() {
               className={`pb-3 px-4 text-sm font-medium transition-colors border-b-2 -mb-px ${
                 activeTab === 'strategies'
                   ? 'border-prism-500 text-prism-200'
-                  : 'border-transparent text-slate-400 hover:text-slate-200'
+                  : 'border-transparent text-neutral-400 hover:text-neutral-200'
               }`}
             >
               {t('signals.tabs.platformStrategies')}

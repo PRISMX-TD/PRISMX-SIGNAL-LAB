@@ -25,7 +25,7 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
   const indicatorLabel = signal ? signal.indicator ?? t('signals.indicatorNone') : t('signals.focus.noExecutable')
 
   // 倒计时颜色：剩余不足2分钟变红 / countdown turns red when < 2 min
-  const cdTone = cd && cd.remainMs < 2 * 60 * 1000 ? 'text-down' : 'text-slate-300'
+  const cdTone = cd && cd.remainMs < 2 * 60 * 1000 ? 'text-down' : 'text-neutral-300'
 
   return (
     <>
@@ -53,7 +53,7 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
             {signal ? symName || displaySymbol(signal.symbol) : '-'}
           </span>
           {symName && (
-            <span className="text-[11px] text-slate-400 font-mono">{displaySymbol(signal!.symbol)}</span>
+            <span className="text-[11px] text-neutral-400 font-mono">{displaySymbol(signal!.symbol)}</span>
           )}
           {signal && <span className={`chip ${isBuy ? 'chip-buy' : 'chip-sell'}`}>{sideTag}</span>}
         </div>
@@ -122,14 +122,14 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
               {signal && <span className={`chip ${isBuy ? 'chip-buy' : 'chip-sell'}`}>{sideTag}</span>}
             </div>
             {symName && (
-              <div className="text-[11px] text-slate-400 mt-0.5">{indicatorLabel}</div>
+              <div className="text-[11px] text-neutral-400 mt-0.5">{indicatorLabel}</div>
             )}
           </div>
           <div className="text-right">
             <div className={`text-xl font-bold ${rrTone(rr?.rr ?? null)}`}>
               {rr?.rr != null ? `1:${rr.rr.toFixed(2)}` : '-'}
             </div>
-            <div className="text-[10px] uppercase text-slate-500">{t('signals.focus.rrLabel')}</div>
+            <div className="text-[10px] uppercase text-neutral-500">{t('signals.focus.rrLabel')}</div>
           </div>
         </div>
 
@@ -150,7 +150,7 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
 
         <div className="mt-3">
           <div className="flex justify-between text-[11px] mb-1">
-            <span className="text-slate-500">{t('signals.focus.remainingTtl')}</span>
+            <span className="text-neutral-500">{t('signals.focus.remainingTtl')}</span>
             <span className={`num ${cdTone}`}>{cd?.text ?? '-'}</span>
           </div>
           <div className="sig-ttl-bar">
@@ -160,8 +160,8 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
 
         <div className="flex items-center justify-between mt-3">
           <div className="min-w-0 flex-1">
-            <div className="text-sm text-slate-300 truncate">{indicatorLabel}</div>
-            <div className="text-[10px] text-slate-600 mt-0.5">{signal ? fmtTime(signal.createdAt) : ''}</div>
+            <div className="text-sm text-neutral-300 truncate">{indicatorLabel}</div>
+            <div className="text-[10px] text-neutral-500 mt-0.5">{signal ? fmtTime(signal.createdAt) : ''}</div>
           </div>
           <button
             onClick={() => signal && onTrade(signal)}

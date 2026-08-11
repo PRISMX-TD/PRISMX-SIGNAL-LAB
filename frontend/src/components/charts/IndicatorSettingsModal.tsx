@@ -93,7 +93,7 @@ function NumberField({
 
   return (
     <label className="flex flex-col gap-1">
-      <span className="text-[10px] uppercase tracking-wide text-slate-500">{label}</span>
+      <span className="text-[10px] uppercase tracking-wide text-neutral-500">{label}</span>
       <input
         type="number"
         className="input w-16 px-1.5 py-1 text-center text-xs"
@@ -134,7 +134,7 @@ function ColorPicker({ label, value, onChange }: { label?: string; value: string
 
   return (
     <div className="relative flex flex-col gap-1" ref={rootRef}>
-      {label && <span className="text-[10px] uppercase tracking-wide text-slate-500">{label}</span>}
+      {label && <span className="text-[10px] uppercase tracking-wide text-neutral-500">{label}</span>}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -206,7 +206,7 @@ function LineList({ cfg, onChange }: { cfg: LinesConfig; onChange: (next: LinesC
             type="button"
             onClick={() => onChange(removeLine(cfg, i))}
             disabled={cfg.periods.length <= MIN_LINES}
-            className="mb-0.5 flex h-6 w-6 items-center justify-center rounded-md text-slate-500 transition hover:text-down disabled:cursor-not-allowed disabled:opacity-30"
+            className="mb-0.5 flex h-6 w-6 items-center justify-center rounded-md text-neutral-500 transition hover:text-down disabled:cursor-not-allowed disabled:opacity-30"
             aria-label={t('charts.indicators.removeLine')}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
@@ -217,7 +217,7 @@ function LineList({ cfg, onChange }: { cfg: LinesConfig; onChange: (next: LinesC
         type="button"
         onClick={() => onChange(addLine(cfg))}
         disabled={cfg.periods.length >= MAX_LINES}
-        className="flex w-fit items-center gap-1 rounded-md border border-dashed border-white/20 px-2 py-1 text-[11px] text-slate-400 transition hover:border-prism-500/50 hover:text-prism-200 disabled:cursor-not-allowed disabled:opacity-30"
+        className="flex w-fit items-center gap-1 rounded-md border border-dashed border-white/20 px-2 py-1 text-[11px] text-neutral-400 transition hover:border-prism-500/50 hover:text-prism-200 disabled:cursor-not-allowed disabled:opacity-30"
       >
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
         {t('charts.indicators.addLine')}
@@ -246,7 +246,7 @@ function Card({
     <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
       <label className="flex cursor-pointer items-center gap-2">
         <input type="checkbox" checked={checked} onChange={onToggle} className="h-4 w-4 accent-prism-500" />
-        <span className="text-sm font-semibold text-slate-100">{title}</span>
+        <span className="text-sm font-semibold text-neutral-100">{title}</span>
       </label>
       <div className={`mt-2.5 pl-6 transition-opacity ${checked ? '' : 'opacity-40'}`}>{children}</div>
     </div>
@@ -278,7 +278,7 @@ export default function IndicatorSettingsModal({ indicators, onToggle, settings,
       <div className="slide-sheet sm:w-[480px]" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-white">{t('charts.indicators.settingsTitle')}</h3>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white" aria-label={t('common.close')}>
+          <button type="button" onClick={onClose} className="text-neutral-400 hover:text-white" aria-label={t('common.close')}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
           </button>
         </div>

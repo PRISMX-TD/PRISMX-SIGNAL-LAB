@@ -42,7 +42,7 @@ export default function PresetPicker({ options, loading, error, onStart, onCance
 
   return (
     <section className="glass mb-5 p-5">
-      <h3 className="font-display text-lg font-semibold text-slate-100">{t('strategy.presetStartTitle')}</h3>
+      <h3 className="font-display text-lg font-semibold text-neutral-100">{t('strategy.presetStartTitle')}</h3>
 
       {/* 推荐预设在前、空白在后：新手的默认路径是"挑一个看得懂的改"，而"从空白
           开始"要求先知道自己想用哪些指标。此前两者的视觉权重正好相反——空白是
@@ -53,14 +53,14 @@ export default function PresetPicker({ options, loading, error, onStart, onCance
           inverted — blank was the one filled purple button, the presets a row of
           small grey ones. */}
       <div className="mt-4">
-        <h4 className="text-sm font-semibold text-slate-200">{t('strategy.presetPickTitle')}</h4>
-        <p className="mt-1.5 max-w-2xl text-xs leading-relaxed text-slate-400">{t('strategy.presetPickHint')}</p>
+        <h4 className="text-sm font-semibold text-neutral-200">{t('strategy.presetPickTitle')}</h4>
+        <p className="mt-1.5 max-w-2xl text-xs leading-relaxed text-neutral-400">{t('strategy.presetPickHint')}</p>
         {loading ? (
-          <p className="mt-3 text-xs text-slate-500">{t('strategy.presetLoading')}</p>
+          <p className="mt-3 text-xs text-neutral-500">{t('strategy.presetLoading')}</p>
         ) : error ? (
           <p className="mt-3 text-xs text-amber-200">{error}</p>
         ) : options.length === 0 ? (
-          <p className="mt-3 text-xs text-slate-500">{t('strategy.presetNone')}</p>
+          <p className="mt-3 text-xs text-neutral-500">{t('strategy.presetNone')}</p>
         ) : (
           <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
             {options.map((o) => (
@@ -71,12 +71,12 @@ export default function PresetPicker({ options, loading, error, onStart, onCance
                 className="group flex flex-col gap-1.5 rounded-inner border border-white/10 bg-white/[0.03] p-3.5 text-left transition hover:border-prism-400/50 hover:bg-prism-600/10"
               >
                 <span className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-semibold text-slate-100">{o.label}</span>
-                  <span className="shrink-0 text-[11px] text-slate-500 transition group-hover:text-prism-200">
+                  <span className="text-sm font-semibold text-neutral-100">{o.label}</span>
+                  <span className="shrink-0 text-[11px] text-neutral-500 transition group-hover:text-prism-200">
                     {t('strategy.presetUse')} →
                   </span>
                 </span>
-                <span className="text-xs leading-relaxed text-slate-400">{o.desc}</span>
+                <span className="text-xs leading-relaxed text-neutral-400">{o.desc}</span>
               </button>
             ))}
           </div>
@@ -85,13 +85,13 @@ export default function PresetPicker({ options, loading, error, onStart, onCance
 
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-slate-200">{t('strategy.presetBlankTitle')}</p>
-          <p className="mt-0.5 text-xs leading-relaxed text-slate-500">{t('strategy.presetBlankHint')}</p>
+          <p className="text-sm font-medium text-neutral-200">{t('strategy.presetBlankTitle')}</p>
+          <p className="mt-0.5 text-xs leading-relaxed text-neutral-500">{t('strategy.presetBlankHint')}</p>
         </div>
         <button
           type="button"
           onClick={() => onStart(null)}
-          className="rounded-pill border border-white/10 bg-white/5 px-4 py-2 text-xs text-slate-300 transition hover:border-prism-400/50 hover:text-prism-200"
+          className="rounded-pill border border-white/10 bg-white/5 px-4 py-2 text-xs text-neutral-300 transition hover:border-prism-400/50 hover:text-prism-200"
         >
           {t('strategy.presetStartBlank')}
         </button>
@@ -100,7 +100,7 @@ export default function PresetPicker({ options, loading, error, onStart, onCance
       <button
         type="button"
         onClick={onCancel}
-        className="mt-4 text-xs text-slate-500 underline decoration-white/20 underline-offset-4 transition hover:text-slate-300"
+        className="mt-4 text-xs text-neutral-500 underline decoration-white/20 underline-offset-4 transition hover:text-neutral-300"
       >
         {t('common.cancel')}
       </button>

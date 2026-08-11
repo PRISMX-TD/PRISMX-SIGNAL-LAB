@@ -46,13 +46,13 @@ const DIMENSION_I18N: Record<(typeof DIMENSION_KEYS)[number], string> = {
 
 function scoreColorClass(score: number): string {
   if (score >= 80) return 'text-up'
-  if (score >= 50) return 'text-slate-300'
+  if (score >= 50) return 'text-neutral-300'
   return 'text-down'
 }
 
 function scoreBarClass(score: number): string {
   if (score >= 80) return 'bg-up'
-  if (score >= 50) return 'bg-slate-400'
+  if (score >= 50) return 'bg-neutral-400'
   return 'bg-down'
 }
 
@@ -165,23 +165,23 @@ function DisciplineHelpModal({ onClose }: { onClose: () => void }) {
       <div className="slide-sheet sm:w-[480px]" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-white">{t('discipline.helpTitle')}</h3>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white" aria-label={t('common.close')}>
+          <button type="button" onClick={onClose} className="text-neutral-400 hover:text-white" aria-label={t('common.close')}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
           </button>
         </div>
 
-        <p className="mt-3 text-sm leading-relaxed text-slate-300">{t('discipline.helpIntro')}</p>
+        <p className="mt-3 text-sm leading-relaxed text-neutral-300">{t('discipline.helpIntro')}</p>
 
         <div className="mt-4 flex flex-col gap-3">
           {sections.map((s) => (
             <div key={s.titleKey} className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-              <h4 className="text-sm font-semibold text-slate-100">{t(s.titleKey)}</h4>
-              <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{t(s.bodyKey)}</p>
+              <h4 className="text-sm font-semibold text-neutral-100">{t(s.titleKey)}</h4>
+              <p className="mt-1.5 text-xs leading-relaxed text-neutral-400">{t(s.bodyKey)}</p>
             </div>
           ))}
         </div>
 
-        <p className="mt-4 text-xs leading-relaxed text-slate-500">{t('discipline.helpNote')}</p>
+        <p className="mt-4 text-xs leading-relaxed text-neutral-500">{t('discipline.helpNote')}</p>
 
         <button onClick={onClose} className="btn-primary mt-5 w-full py-2.5 text-sm">
           {t('discipline.helpGotIt')}
@@ -237,17 +237,17 @@ export default function DisciplineScoreCard({ login, isPro }: Props) {
           <button
             type="button"
             onClick={() => setHelpOpen(true)}
-            className="flex h-[18px] w-[18px] items-center justify-center rounded-full border border-white/20 text-[10px] font-bold text-slate-400 transition hover:border-prism-400/60 hover:text-prism-300"
+            className="flex h-[18px] w-[18px] items-center justify-center rounded-full border border-white/20 text-[10px] font-bold text-neutral-400 transition hover:border-prism-400/60 hover:text-prism-300"
             aria-label={t('discipline.helpButton')}
           >
             ?
           </button>
         </div>
-        <span className="text-[11px] text-slate-500">{t('discipline.windowHint', { n: data?.windowDays ?? 90 })}</span>
+        <span className="text-[11px] text-neutral-500">{t('discipline.windowHint', { n: data?.windowDays ?? 90 })}</span>
       </div>
 
       {data == null || data.total == null ? (
-        <div className="mt-3 py-3 text-center text-sm text-slate-500">{t('discipline.noData')}</div>
+        <div className="mt-3 py-3 text-center text-sm text-neutral-500">{t('discipline.noData')}</div>
       ) : (
         <>
           <div className="mt-4 flex items-center gap-4">
@@ -259,7 +259,7 @@ export default function DisciplineScoreCard({ login, isPro }: Props) {
             </RadialGauge>
             {trendPoints && (
               <div className="flex-1">
-                <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('discipline.trendLabel')}</span>
+                <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('discipline.trendLabel')}</span>
                 <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="mt-1.5 w-full text-prism-300" preserveAspectRatio="none">
                   <polyline
                     fill="none" stroke="currentColor" strokeWidth="2"
@@ -278,11 +278,11 @@ export default function DisciplineScoreCard({ login, isPro }: Props) {
                 return (
                   <div key={key}>
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-slate-300">{t(DIMENSION_I18N[key])}</span>
+                      <span className="text-neutral-300">{t(DIMENSION_I18N[key])}</span>
                       {dim.score == null ? (
-                        <span className="text-slate-600">{t('discipline.insufficient')}</span>
+                        <span className="text-neutral-500">{t('discipline.insufficient')}</span>
                       ) : (
-                        <span className="text-slate-500">{t('discipline.violations', { v: dim.violations, n: dim.samples })}</span>
+                        <span className="text-neutral-500">{t('discipline.violations', { v: dim.violations, n: dim.samples })}</span>
                       )}
                     </div>
                     <div className="mt-1.5 h-1.5 rounded-full bg-white/[0.06]">
@@ -295,7 +295,7 @@ export default function DisciplineScoreCard({ login, isPro }: Props) {
               })}
             </div>
           ) : !isPro ? (
-            <div className="mt-3 rounded-lg border border-prism-500/20 bg-prism-600/5 p-3 text-center text-xs text-slate-400">
+            <div className="mt-3 rounded-lg border border-prism-500/20 bg-prism-600/5 p-3 text-center text-xs text-neutral-400">
               {t('discipline.upgradeHint')}{' '}
               <Link to="/upgrade" className="text-prism-300 underline hover:text-prism-200">
                 {t('winrate.viewDetail')}
@@ -304,7 +304,7 @@ export default function DisciplineScoreCard({ login, isPro }: Props) {
           ) : null}
         </>
       )}
-      <p className="mt-3 text-[10px] text-slate-600">{t('discipline.disclaimer')}</p>
+      <p className="mt-3 text-[10px] text-neutral-500">{t('discipline.disclaimer')}</p>
     </section>
   )
 

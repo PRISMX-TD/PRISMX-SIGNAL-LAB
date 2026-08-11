@@ -99,7 +99,7 @@ export default function NotificationBell() {
   const dotClass =
     status === "attention" ? "bg-amber-400" : status === "on" ? "bg-prism-400" : "bg-transparent"
   const iconClass =
-    status === "attention" ? "text-amber-400" : status === "on" ? "text-prism-300" : "text-slate-400"
+    status === "attention" ? "text-amber-400" : status === "on" ? "text-prism-300" : "text-neutral-400"
 
   return (
     <div ref={rootRef} className="relative">
@@ -107,7 +107,7 @@ export default function NotificationBell() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label={t("notifPanel.title")}
-        className={`relative rounded-lg border border-white/10 bg-white/[0.04] p-2 transition hover:text-slate-100 ${iconClass}`}
+        className={`relative rounded-lg border border-white/10 bg-white/[0.04] p-2 transition hover:text-neutral-100 ${iconClass}`}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
           <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -149,7 +149,7 @@ export default function NotificationBell() {
                 {busy && <span className="h-3 w-3 animate-spin rounded-full border-2 border-prism-500/40 border-t-prism-600" />}
               </div>
             </label>
-            <span className="text-sm text-slate-100">{t("account.notifEnable")}</span>
+            <span className="text-sm text-neutral-100">{t("account.notifEnable")}</span>
           </div>
 
           {status === "attention" && (

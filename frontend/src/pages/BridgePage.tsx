@@ -114,29 +114,29 @@ export default function BridgePage() {
   return (
     <div>
       <div className="mb-6">
-        <Link to="/bind" className="text-xs text-slate-400 transition hover:text-prism-300">
+        <Link to="/bind" className="text-xs text-neutral-400 transition hover:text-prism-300">
           ← 返回 MT5 连接
         </Link>
-        <h2 className="mt-2 font-display text-2xl font-bold text-slate-100">
+        <h2 className="mt-2 font-display text-2xl font-bold text-neutral-100">
           <span className="neon-text">桥接程序连接</span>
         </h2>
-        <p className="mt-1 text-sm text-slate-400">{t('bind.subtitle')}</p>
+        <p className="mt-1 text-sm text-neutral-400">{t('bind.subtitle')}</p>
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {bridgeAccounts.length > 0 && (
           <div className="glass p-5 lg:col-span-2">
             <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="font-display text-lg font-semibold text-slate-100">
+              <h3 className="font-display text-lg font-semibold text-neutral-100">
                 {t('bind.accountsTitle')}
               </h3>
-              <span className={`tag text-xs ${atAccountLimit ? 'bg-amber-500/15 text-amber-400' : 'bg-white/5 text-slate-400'}`}>
+              <span className={`tag text-xs ${atAccountLimit ? 'bg-amber-500/15 text-amber-400' : 'bg-white/5 text-neutral-400'}`}>
                 {accountLimit == null
                   ? t('bind.accountQuotaUnlimited', { n: accounts.length })
                   : t('bind.accountQuota', { n: accounts.length, max: accountLimit })}
               </span>
             </div>
-            <p className="mb-4 text-xs text-slate-500">{t('bind.accountsHint')}</p>
+            <p className="mb-4 text-xs text-neutral-500">{t('bind.accountsHint')}</p>
             {atAccountLimit && (
               <p className="mb-4 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-300">
                 {t('bind.accountQuotaReached')}
@@ -145,7 +145,7 @@ export default function BridgePage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-xs uppercase tracking-wider text-slate-500">
+                  <tr className="text-left text-xs uppercase tracking-wider text-neutral-500">
                     <th className="px-3 py-2">Login</th>
                     <th className="px-3 py-2">{t('bind.accountName')}</th>
                     <th className="px-3 py-2">{t('bind.company')}</th>
@@ -159,17 +159,17 @@ export default function BridgePage() {
                 <tbody>
                   {bridgeAccounts.map((a) => (
                     <tr key={a.login} className="border-t border-white/5">
-                      <td className="px-3 py-2 font-mono text-slate-100">{a.login}</td>
-                      <td className="px-3 py-2 text-slate-300">{a.accountName || '—'}</td>
-                      <td className="px-3 py-2 text-slate-400">{a.company || '—'}</td>
-                      <td className="px-3 py-2 text-right font-mono text-slate-200">
+                      <td className="px-3 py-2 font-mono text-neutral-100">{a.login}</td>
+                      <td className="px-3 py-2 text-neutral-300">{a.accountName || '—'}</td>
+                      <td className="px-3 py-2 text-neutral-400">{a.company || '—'}</td>
+                      <td className="px-3 py-2 text-right font-mono text-neutral-200">
                         {a.balance != null ? a.balance.toFixed(2) : '—'}
                       </td>
-                      <td className="px-3 py-2 text-right font-mono text-slate-200">
+                      <td className="px-3 py-2 text-right font-mono text-neutral-200">
                         {a.equity != null ? a.equity.toFixed(2) : '—'}
                       </td>
                       <td className="px-3 py-2 text-center">
-                        <span className={`tag ${a.online ? 'bg-up/15 text-up' : 'bg-white/5 text-slate-500'}`}>
+                        <span className={`tag ${a.online ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-500'}`}>
                           {a.online ? t('common.online') : t('common.offline')}
                         </span>
                       </td>
@@ -211,15 +211,15 @@ export default function BridgePage() {
         )}
 
         <div className="glass p-5">
-          <h3 className="mb-1 font-display text-lg font-semibold text-slate-100">
+          <h3 className="mb-1 font-display text-lg font-semibold text-neutral-100">
             {t('bind.tokenTitle')}
           </h3>
-          <p className="mb-4 text-xs text-slate-500">{t('bind.tokenHint')}</p>
+          <p className="mb-4 text-xs text-neutral-500">{t('bind.tokenHint')}</p>
           <div className="mb-3 flex items-center gap-2 rounded-xl border border-prism-600/30 bg-prism-600/5 p-3">
             {apiToken ? (
               <code className="flex-1 break-all font-mono text-sm text-prism-300">{apiToken}</code>
             ) : (
-              <span className="flex-1 text-xs leading-relaxed text-slate-400">
+              <span className="flex-1 text-xs leading-relaxed text-neutral-400">
                 {neverConnected ? t('bind.tokenNeverGenerated') : t('bind.tokenHidden')}
               </span>
             )}
@@ -252,7 +252,7 @@ export default function BridgePage() {
         </div>
 
         <div className="glass p-5">
-          <h3 className="mb-4 font-display text-lg font-semibold text-slate-100">
+          <h3 className="mb-4 font-display text-lg font-semibold text-neutral-100">
             {t('bind.steps.title')}
           </h3>
           <ol className="space-y-3">
@@ -261,21 +261,21 @@ export default function BridgePage() {
                 <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neon-gradient font-mono text-xs font-bold text-white shadow-prism">
                   {i + 1}
                 </span>
-                <span className="text-sm text-slate-300">{t(`bind.steps.${s}`)}</span>
+                <span className="text-sm text-neutral-300">{t(`bind.steps.${s}`)}</span>
               </li>
             ))}
           </ol>
         </div>
 
         <div className="glass p-5 lg:col-span-2">
-          <h3 className="mb-1 font-display text-lg font-semibold text-slate-100">
+          <h3 className="mb-1 font-display text-lg font-semibold text-neutral-100">
             {t('bind.suffixTitle')}
           </h3>
-          <p className="text-xs leading-relaxed text-slate-500">{t('bind.suffixHint')}</p>
+          <p className="text-xs leading-relaxed text-neutral-500">{t('bind.suffixHint')}</p>
           {bridgeAccounts.length === 0 ? (
-            <p className="mt-3 text-xs text-slate-500">{t('bind.suffixNeedAccount')}</p>
+            <p className="mt-3 text-xs text-neutral-500">{t('bind.suffixNeedAccount')}</p>
           ) : (
-            <p className="mt-3 text-xs text-slate-500">{t('bind.suffixPerAccountHint')}</p>
+            <p className="mt-3 text-xs text-neutral-500">{t('bind.suffixPerAccountHint')}</p>
           )}
         </div>
       </div>

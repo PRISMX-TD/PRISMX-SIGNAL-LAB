@@ -35,8 +35,8 @@ const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => 
       <div className="hidden sm:flex items-center justify-between mb-3">
         <h3 className="text-[15px] font-bold text-white">{t('signals.focus.quotesHeading', '实时行情报价')}</h3>
         <div className="flex items-center gap-2 text-xs">
-          <span className={`inline-block w-[7px] h-[7px] rounded-full ${mt5Online ? 'bg-up shadow-[0_0_10px_rgba(46,224,126,0.9)] animate-breathe' : 'bg-slate-500'}`} />
-          <span className={`font-semibold ${mt5Online ? 'text-up' : 'text-slate-500'}`}>
+          <span className={`inline-block w-[7px] h-[7px] rounded-full ${mt5Online ? 'bg-up animate-breathe' : 'bg-neutral-500'}`} />
+          <span className={`font-semibold ${mt5Online ? 'text-up' : 'text-neutral-500'}`}>
             {mt5Online ? t('signals.focus.live', 'MT5 在线') : t('signals.focus.offline', 'MT5 离线')}
           </span>
         </div>
@@ -46,20 +46,20 @@ const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => 
       <div className="qt-mobile-row sm:hidden">
         <div className="flex items-center gap-2">
           <b className="text-sm font-bold text-white">{focusMeta ? displaySymbol(focusMeta.sym) : '-'}</b>
-          {focusQ?.closed && <span className="tag bg-white/5 text-slate-400 text-[10px]">{t('signals.focus.marketClosed', '休市')}</span>}
-          <span className={`inline-block w-[7px] h-[7px] rounded-full ${mt5Online ? 'bg-up shadow-[0_0_10px_rgba(46,224,126,0.9)] animate-breathe' : 'bg-slate-500'}`} />
+          {focusQ?.closed && <span className="tag bg-white/5 text-neutral-400 text-[10px]">{t('signals.focus.marketClosed', '休市')}</span>}
+          <span className={`inline-block w-[7px] h-[7px] rounded-full ${mt5Online ? 'bg-up animate-breathe' : 'bg-neutral-500'}`} />
         </div>
         <div className="flex items-center gap-5 ml-auto">
           <div className="text-center">
-            <div className="text-[10px] text-slate-500 mb-0.5">{t('signals.quotes.bid', '买价')}</div>
+            <div className="text-[10px] text-neutral-500 mb-0.5">{t('signals.quotes.bid', '买价')}</div>
             <span className="num font-bold text-sm" style={{ color: '#2ee07e' }}>{focusAsk}</span>
           </div>
           <div className="text-center">
-            <div className="text-[10px] text-slate-500 mb-0.5">{t('signals.quotes.spread', '点差')}</div>
-            <span className="num text-xs text-slate-400">{spread}</span>
+            <div className="text-[10px] text-neutral-500 mb-0.5">{t('signals.quotes.spread', '点差')}</div>
+            <span className="num text-xs text-neutral-400">{spread}</span>
           </div>
           <div className="text-center">
-            <div className="text-[10px] text-slate-500 mb-0.5">{t('signals.quotes.ask', '卖价')}</div>
+            <div className="text-[10px] text-neutral-500 mb-0.5">{t('signals.quotes.ask', '卖价')}</div>
             <span className="num font-bold text-sm" style={{ color: '#ff4d67' }}>{focusBid}</span>
           </div>
         </div>
@@ -77,7 +77,7 @@ const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => 
           </thead>
           <tbody>
             {symbols.length === 0 ? (
-              <tr><td colSpan={3} className="text-center text-sm text-slate-500 py-4">{t('common.loading')}</td></tr>
+              <tr><td colSpan={3} className="text-center text-sm text-neutral-500 py-4">{t('common.loading')}</td></tr>
             ) : (
               symbols.map((sym) => {
                 const { letter, color } = symbolMeta(sym)
@@ -93,7 +93,7 @@ const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => 
                         <div className="nm">
                           <b className="flex items-center gap-1.5">
                             {displaySymbol(sym)}
-                            {q?.closed && <span className="tag bg-white/5 text-slate-400 text-[10px]">{t('signals.focus.marketClosed', '休市')}</span>}
+                            {q?.closed && <span className="tag bg-white/5 text-neutral-400 text-[10px]">{t('signals.focus.marketClosed', '休市')}</span>}
                           </b>
                           <span>{t(`signals.symbolNames.${sym}`, { defaultValue: '' })}</span>
                         </div>

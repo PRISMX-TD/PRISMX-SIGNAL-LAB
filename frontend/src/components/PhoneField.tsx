@@ -80,7 +80,7 @@ export default function PhoneField({
           autoComplete="tel-national"
         />
       </div>
-      <p className="mt-1.5 text-xs text-slate-500">{t('auth.phoneHint')}</p>
+      <p className="mt-1.5 text-xs text-neutral-500">{t('auth.phoneHint')}</p>
     </div>
   )
 }

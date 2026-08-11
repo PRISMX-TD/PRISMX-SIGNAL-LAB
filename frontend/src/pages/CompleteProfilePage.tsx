@@ -52,25 +52,25 @@ export default function CompleteProfilePage() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
+    <div className="relative min-h-[100dvh] overflow-hidden">
       <AuroraBackground />
       <div className="absolute right-4 top-4 z-10">
         <LanguageToggle />
       </div>
 
-      <div className="relative z-10 flex min-h-screen items-center justify-center px-4 py-12">
+      <div className="relative z-10 flex min-h-[100dvh] items-center justify-center px-4 py-12">
         <div className="w-full max-w-md">
           <div className="mb-8 flex flex-col items-center">
             <Logo size={72} />
             <h1 className="mt-4 font-display text-3xl font-bold">
               <span className="neon-text">{t('auth.completeTitle')}</span>
             </h1>
-            <p className="mt-2 text-center text-sm text-slate-400">{t('auth.completeSubtitle')}</p>
+            <p className="mt-2 text-center text-sm text-neutral-400">{t('auth.completeSubtitle')}</p>
           </div>
 
           <div className="card p-6">
             <form onSubmit={onSubmit} className="space-y-4">
-              <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-300">
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-neutral-300">
                 {user.email}
               </div>
 
@@ -94,7 +94,7 @@ export default function CompleteProfilePage() {
             <button
               type="button"
               onClick={() => { logout(); navigate('/login', { replace: true }) }}
-              className="mt-4 w-full text-center text-xs text-slate-500 transition hover:text-slate-300"
+              className="mt-4 w-full text-center text-xs text-neutral-500 transition hover:text-neutral-300"
             >
               {t('auth.completeSignOut')}
             </button>

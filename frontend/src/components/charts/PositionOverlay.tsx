@@ -574,10 +574,10 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
             style={{ minWidth: 280 }}
             onKeyDown={(e) => { if (e.key === 'Escape') handleCancelConfirm() }}
           >
-            <p className="mb-1 text-xs font-medium text-slate-300">
+            <p className="mb-1 text-xs font-medium text-neutral-300">
               {String(t('charts.posmark.confirmModifyTitle'))}
             </p>
-            <p className="mb-3 text-sm text-slate-200">
+            <p className="mb-3 text-sm text-neutral-200">
               {String(t('charts.posmark.confirmModifyMsg', {
                 symbol: displaySymbol,
                 side: confirmState.marker.pos.side === 'BUY' ? String(t('charts.dock.buy')) : String(t('charts.dock.sell')),
@@ -591,7 +591,7 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
               <button
                 type="button"
                 onClick={handleCancelConfirm}
-                className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-400 transition hover:border-white/20 hover:text-slate-100"
+                className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-neutral-400 transition hover:border-white/20 hover:text-neutral-100"
               >
                 {String(t('charts.posmark.cancel'))}
               </button>

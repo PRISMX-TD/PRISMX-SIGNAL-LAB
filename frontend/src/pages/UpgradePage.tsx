@@ -385,16 +385,29 @@ export default function UpgradePage() {
         : null;
     return (
       <div className="animate-fade-in-up">
-        {/* 标题 / hero header */}
-        <div className="mx-auto max-w-2xl text-center">
-          <span className="chip mx-auto animate-glow-pulse">
-            <span className="h-1.5 w-1.5 rounded-full bg-prism-400 animate-breathe" />
-            PRO
-          </span>
-          <h1 className="mt-6 font-display text-4xl font-black leading-tight tracking-tight text-slate-50 sm:text-5xl">
+        {/* 标题 / page header
+            改动两处：
+            1. 删掉标题上方那枚「发光脉冲徽章 + 呼吸小圆点 + PRO」。呼吸的小圆点在
+               这套系统里被限定为真实状态语义（在线/推流中），这里它不表示任何状态，
+               只是在标题上方吸引注意；外层的 glow-pulse 更是纯装饰的无限循环。
+               而且下面整页都在讲 PRO，标题上再顶一枚写着 PRO 的药丸是重复的。
+            2. 居中改左对齐。居中标题 + 居中副标 + 下方左对齐的定价卡，视觉轴线在
+               同一屏里换了两次；左对齐后标题与卡片共用同一条左基线。
+            Two changes:
+            1. The glowing pulsing "PRO" badge above the headline is gone. A breathing
+               dot is reserved for genuine live-state semantics in this system
+               (online / streaming); here it indicated no state at all and merely
+               drew the eye, while the surrounding glow-pulse was a purely decorative
+               infinite loop. The whole page is about PRO anyway, so a pill reading
+               PRO above the headline was redundant.
+            2. Centred became left-aligned. A centred headline and subtitle above
+               left-aligned pricing cards switched the visual axis twice within one
+               screen; left-aligned, the headline shares a baseline with the cards. */}
+        <div className="max-w-2xl">
+          <h1 className="font-display-xl text-[clamp(1.9rem,4vw,2.75rem)] text-white">
             {t("upgrade.title")}
           </h1>
-          <p className="mx-auto mt-4 max-w-lg text-base leading-relaxed text-slate-400">
+          <p className="mt-4 max-w-lg text-[15px] leading-relaxed text-neutral-400">
             {t("upgrade.subtitle")}
           </p>
         </div>
@@ -403,7 +416,7 @@ export default function UpgradePage() {
         {sale?.badge && (
           <div className="glass mx-auto mt-8 max-w-md px-5 py-3 text-center">
             <span className="font-display text-lg font-bold text-prism-300">{sale.badge} · {sale.percent}% OFF</span>
-            {sale.end_at && <div className="mt-0.5 text-xs text-slate-500">{t("upgrade.saleEnds")}: {sale.end_at.slice(0, 10)}</div>}
+            {sale.end_at && <div className="mt-0.5 text-xs text-neutral-500">{t("upgrade.saleEnds")}: {sale.end_at.slice(0, 10)}</div>}
           </div>
         )}
 
@@ -427,7 +440,7 @@ export default function UpgradePage() {
         {trialStatus?.eligible && !trialClaimedUntil && (
           <div className="glass mx-auto mt-8 max-w-md p-6 text-center">
             <h3 className="font-display text-lg font-bold text-prism-200">{t("upgrade.trialTitle")}</h3>
-            <p className="mt-2 text-sm leading-relaxed text-slate-400">
+            <p className="mt-2 text-sm leading-relaxed text-neutral-400">
               {t("upgrade.trialDesc", { n: trialStatus.days })}
             </p>
             {trialClaimError && (
@@ -468,66 +481,82 @@ export default function UpgradePage() {
           {/* FREE 卡 */}
           <div className="glass flex flex-col p-7">
             <div className="flex items-center justify-between">
-              <span className="font-display text-lg font-bold text-slate-200">{t("upgrade.planFree")}</span>
-              {!isPro && <span className="tag bg-white/5 text-slate-400 ring-1 ring-white/10">{t("upgrade.currentPlan")}</span>}
+              <span className="font-display text-lg font-bold text-neutral-200">{t("upgrade.planFree")}</span>
+              {!isPro && <span className="tag bg-white/5 text-neutral-400 ring-1 ring-white/10">{t("upgrade.currentPlan")}</span>}
             </div>
             <div className="mt-4 h-[70px]">
               <div className="flex items-baseline gap-1">
-                <span className="font-display text-5xl font-black text-slate-100">$0</span>
+                <span className="font-display text-5xl font-black text-neutral-100">$0</span>
               </div>
-              <p className="mt-1.5 text-sm text-slate-500">{t("upgrade.freeTagline")}</p>
+              <p className="mt-1.5 text-sm text-neutral-500">{t("upgrade.freeTagline")}</p>
             </div>
             <div className="my-5 h-px bg-white/10" />
             <ul className="flex flex-col gap-3">
               {FEATURES.map((f) => (
                 <li key={f.key} className="flex items-start gap-3 text-sm">
-                  <span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-white/5 text-slate-600">
+                  <span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-white/5 text-neutral-500">
                     <span className="text-xs">·</span>
                   </span>
-                  <span className="text-slate-400">
-                    <span className="text-slate-300">{t(`upgrade.${f.key}`)}</span>
-                    <span className="text-slate-500"> — {t(`upgrade.${f.free}`)}</span>
+                  <span className="text-neutral-400">
+                    <span className="text-neutral-300">{t(`upgrade.${f.key}`)}</span>
+                    <span className="text-neutral-500"> — {t(`upgrade.${f.free}`)}</span>
                   </span>
                 </li>
               ))}
             </ul>
           </div>
 
-          {/* PRO 卡（高亮）*/}
-          <div className="glass-neon relative flex flex-col p-7 ring-1 ring-prism-500/40"
-               style={{ boxShadow: "0 24px 60px rgba(0,0,0,0.55), 0 0 40px rgba(139,92,246,0.18)" }}>
-            {/* 光晕 / glow orb */}
-            <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-prism-600/25 blur-[90px]" />
+          {/* PRO 卡：实色紫面，与落地页定价区同一种材质。
+              此前是「玻璃卡 + 紫色描边 + 内联 40px 紫色外发光」三层叠加来表示推荐。
+              三种手段说同一件事，而其中的外发光正是这次重做要清掉的语言。实色面
+              一次就说清了，且它与落地页的 PRO 面完全一致——用户从落地页走到这里
+              看到的是同一个东西。
+              PRO card: a solid violet plane, the same material as the landing page's
+              pricing section. It used to stack three devices to say "recommended" —
+              a glass card, a violet ring, and an inline 40px violet outer glow — one
+              of which is exactly the vocabulary being removed. A flat fill says it
+              once, and it matches the landing page's PRO plane exactly, so a user
+              arriving from there sees the same object. */}
+          <div className="relative flex flex-col rounded-card bg-prism-600 p-7">
             <div className="relative flex items-center justify-between">
-              <span className="font-display text-lg font-bold text-prism-200">{t("upgrade.planPro")}</span>
-              <span className="tag bg-prism-600/20 text-prism-200 ring-1 ring-prism-500/40">
+              <span className="font-display text-lg font-bold text-white">{t("upgrade.planPro")}</span>
+              <span className="tag bg-white/15 text-white">
                 {isPro ? t("upgrade.currentPlan") : t("upgrade.mostPopular")}
               </span>
             </div>
+            {/* 卡片底色变成实色紫之后，卡内所有文字必须整体反相：原来的 neutral-400 /
+                prism-300 是为深灰底调的，压在 #5A22EE 上对比度只有 1.5:1 左右，基本
+                读不出来。这里全部换成白色的不同透明度档位——白 100% 主信息、白 75%
+                次要、白 25% 分隔线，全部过 AA。
+                Once the card fill became solid violet, every string inside had to be
+                inverted: the previous neutral-400 / prism-300 tones were tuned for a
+                dark grey fill and score roughly 1.5:1 on #5A22EE, i.e. unreadable.
+                They are now steps of white — 100% for primary, 75% for secondary,
+                25% for rules — all of which pass AA on this fill. */}
             <div className="relative mt-4 h-[70px]">
               <div className="flex items-baseline gap-2">
-                <span className="font-display text-5xl font-black text-white">${selectedPlan?.price_usd ?? monthly?.price_usd ?? "—"}</span>
+                <span className="num text-[2.5rem] font-semibold leading-none text-white">${selectedPlan?.price_usd ?? monthly?.price_usd ?? "—"}</span>
                 {selectedPlan?.original_price_usd != null && selectedPlan.original_price_usd !== selectedPlan.price_usd && (
-                  <span className="font-display text-xl text-slate-500 line-through">${selectedPlan.original_price_usd}</span>
+                  <span className="num text-lg text-white/75 line-through">${selectedPlan.original_price_usd}</span>
                 )}
-                <span className="text-sm text-slate-400">/ {chosenPlan === "pro_yearly" ? t("upgrade.yearly") : t("upgrade.monthly")}</span>
+                <span className="text-sm text-white/85">/ {chosenPlan === "pro_yearly" ? t("upgrade.yearly") : t("upgrade.monthly")}</span>
               </div>
-              <p className="mt-1.5 text-sm text-prism-300">
+              <p className="mt-2 text-sm text-white/85">
                 {chosenPlan === "pro_yearly" && yearly
                   ? t("upgrade.perMonth", { price: (yearly.price_usd / 12).toFixed(0) })
                   : t("upgrade.proTagline")}
               </p>
             </div>
-            <div className="relative my-5 h-px bg-prism-500/20" />
+            <div className="relative my-5 h-px bg-white/25" />
             <ul className="relative flex flex-col gap-3">
               {FEATURES.map((f) => (
                 <li key={f.key} className="flex items-start gap-3 text-sm">
-                  <span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-prism-600/25 text-prism-300 ring-1 ring-prism-500/40">
+                  <span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-white/20 text-white">
                     <CheckIcon />
                   </span>
                   <span>
-                    <span className="font-medium text-slate-100">{t(`upgrade.${f.key}`)}</span>
-                    <span className="text-slate-400"> — {t(`upgrade.${f.pro}`)}</span>
+                    <span className="font-medium text-white">{t(`upgrade.${f.key}`)}</span>
+                    <span className="text-white/85"> · {t(`upgrade.${f.pro}`)}</span>
                   </span>
                 </li>
               ))}
@@ -541,9 +570,7 @@ export default function UpgradePage() {
             {t("upgrade.alreadyPro")}
           </div>
         ) : (
-          <div className="glass-neon relative mx-auto mt-12 max-w-2xl overflow-hidden p-7 sm:p-8"
-               style={{ boxShadow: "0 24px 60px rgba(0,0,0,0.5)" }}>
-            <div className="pointer-events-none absolute -left-20 -bottom-20 h-52 w-52 rounded-full bg-prism-600/15 blur-[90px]" />
+          <div className="glass relative mx-auto mt-12 max-w-2xl overflow-hidden p-7 sm:p-8">
 
             {/* 试用中提示：订阅后付费时长从付款日起算，不叠加试用剩余天数
                 (与后端 _sync_payment_status 的规则一致) / trial-active notice:
@@ -558,7 +585,7 @@ export default function UpgradePage() {
             {/* 步骤标题 / step label */}
             <div className="relative flex items-center gap-2.5">
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-prism-600/25 text-xs font-bold text-prism-200 ring-1 ring-prism-500/40">1</span>
-              <h3 className="text-sm font-bold text-slate-200">{t("upgrade.chooseCoin")}</h3>
+              <h3 className="text-sm font-bold text-neutral-200">{t("upgrade.chooseCoin")}</h3>
             </div>
 
             {/* 币种网格 / coin grid */}
@@ -583,10 +610,10 @@ export default function UpgradePage() {
                       </span>
                     )}
                     <div className="flex items-center gap-1.5">
-                      <span className="font-display text-sm font-bold text-slate-100">USDT</span>
-                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-prism-600/30 text-prism-200" : "bg-white/5 text-slate-400"}`}>{meta.label}</span>
+                      <span className="font-display text-sm font-bold text-neutral-100">USDT</span>
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-prism-600/30 text-prism-200" : "bg-white/5 text-neutral-400"}`}>{meta.label}</span>
                     </div>
-                    <span className={`mt-1 text-[11px] ${isTrc ? "text-prism-300" : "text-slate-500"}`}>{isTrc ? t("upgrade.recommended") : meta.note}</span>
+                    <span className={`mt-1 text-[11px] ${isTrc ? "text-prism-300" : "text-neutral-500"}`}>{isTrc ? t("upgrade.recommended") : meta.note}</span>
                   </button>
                 );
               })}
@@ -598,14 +625,14 @@ export default function UpgradePage() {
             {/* 总价行 / total row */}
             <div className="relative flex items-end justify-between">
               <div>
-                <div className="text-xs font-medium uppercase tracking-wider text-slate-500">{t("upgrade.totalDue")}</div>
-                <div className="mt-1 text-xs text-slate-500">
+                <div className="text-xs font-medium uppercase tracking-wider text-neutral-500">{t("upgrade.totalDue")}</div>
+                <div className="mt-1 text-xs text-neutral-500">
                   {chosenPlan === "pro_yearly" ? t("upgrade.yearly") : t("upgrade.monthly")} · USDT {USDT_META[chosenCoin]?.label ?? ""}
                 </div>
               </div>
               <div className="text-right">
                 <span className="font-display text-3xl font-black text-white">${selectedPlan?.price_usd ?? "—"}</span>
-                <span className="ml-1 text-sm text-slate-400">USDT</span>
+                <span className="ml-1 text-sm text-neutral-400">USDT</span>
               </div>
             </div>
 
@@ -621,7 +648,7 @@ export default function UpgradePage() {
                 t("upgrade.payButton", { price: selectedPlan ? `$${selectedPlan.price_usd}` : "" })
               )}
             </button>
-            <p className="relative mt-4 flex items-center justify-center gap-1.5 text-center text-xs leading-relaxed text-slate-500">
+            <p className="relative mt-4 flex items-center justify-center gap-1.5 text-center text-xs leading-relaxed text-neutral-500">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5 flex-none"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
               {t("upgrade.secureNote")}
             </p>
@@ -639,15 +666,15 @@ export default function UpgradePage() {
       <div className="mx-auto max-w-lg animate-fade-in-up">
         {/* 标题 / header */}
         <div className="text-center">
-          <h1 className="font-display text-3xl font-black tracking-tight text-slate-50">{t("upgrade.payTitle")}</h1>
-          <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-slate-400">{t("upgrade.payHint")}</p>
+          <h1 className="font-display text-3xl font-black tracking-tight text-neutral-50">{t("upgrade.payTitle")}</h1>
+          <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-neutral-400">{t("upgrade.payHint")}</p>
         </div>
 
         {/* 倒计时 / countdown */}
         {remaining !== null && (
           <div className="mt-6 flex justify-center">
             <div className={`inline-flex items-center gap-2.5 rounded-pill px-4 py-2 ring-1 ${expired ? "bg-down/10 ring-down/40" : "bg-amber-400/10 ring-amber-400/30"}`}>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{t("upgrade.timeLeft")}</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">{t("upgrade.timeLeft")}</span>
               <span className={`font-mono text-lg font-bold ${expired ? "text-down" : "text-amber-300"}`}>
                 {expired ? "0:00" : fmtCountdown(remaining)}
               </span>
@@ -657,30 +684,29 @@ export default function UpgradePage() {
 
         {expired ? (
           <div className="glass mt-6 p-8 text-center">
-            <p className="text-sm leading-relaxed text-slate-400">{t("upgrade.expiredRetry")}</p>
+            <p className="text-sm leading-relaxed text-neutral-400">{t("upgrade.expiredRetry")}</p>
             <button onClick={handleRetry} className="btn-primary mt-5 px-7 py-2.5">{t("upgrade.retry")}</button>
           </div>
         ) : (
           <>
             {/* 二维码卡 / QR card */}
             <div className="glass relative mt-6 overflow-hidden p-7 text-center">
-              <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-prism-600/20 blur-[80px]" />
               <div className="relative mx-auto flex h-52 w-52 items-center justify-center rounded-card bg-white p-4 shadow-glass-lg">
                 <QRCodeSVG value={state.payAddress} size={176} level="M" />
               </div>
-              <div className="relative mt-5 font-medium text-slate-100">{t("upgrade.scanToPay")}</div>
-              <div className="relative mt-1 text-xs text-slate-500">{t("upgrade.orCopyManually")}</div>
+              <div className="relative mt-5 font-medium text-neutral-100">{t("upgrade.scanToPay")}</div>
+              <div className="relative mt-1 text-xs text-neutral-500">{t("upgrade.orCopyManually")}</div>
             </div>
 
             {/* 金额卡 / amount card */}
             <div className="glass mt-4 p-6 text-center">
-              <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">{t("upgrade.sendAmount")}</div>
+              <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-neutral-500">{t("upgrade.sendAmount")}</div>
               <div className="mt-2 break-all font-display text-3xl font-black text-white">{state.payAmount}</div>
               <div className="mt-3 inline-flex items-center gap-1.5 rounded-pill bg-prism-600/15 px-3 py-1 ring-1 ring-prism-500/30">
-                <span className="text-sm font-bold text-slate-100">USDT</span>
+                <span className="text-sm font-bold text-neutral-100">USDT</span>
                 <span className="text-xs font-bold text-prism-300">{meta.label}</span>
               </div>
-              <div className="mt-3 text-xs text-slate-500">≈ ${state.amountUsd} USD</div>
+              <div className="mt-3 text-xs text-neutral-500">≈ ${state.amountUsd} USD</div>
               <div className="mt-2.5 text-xs leading-relaxed text-amber-300/90">{t("upgrade.amountExact")}</div>
             </div>
 
@@ -701,10 +727,10 @@ export default function UpgradePage() {
 
             {/* 地址卡 / address card */}
             <div className="glass mt-4 p-6">
-              <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">
+              <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-neutral-500">
                 {t("upgrade.sendTo")} · <span className="text-prism-300">{meta.label}</span>
               </div>
-              <div className="mt-3 break-all rounded-inner border border-line bg-black/20 p-3.5 font-mono text-sm leading-relaxed text-slate-200">
+              <div className="mt-3 break-all rounded-inner border border-line bg-black/20 p-3.5 font-mono text-sm leading-relaxed text-neutral-200">
                 {state.payAddress}
               </div>
               <button
@@ -722,12 +748,12 @@ export default function UpgradePage() {
             {/* 截图提示 / screenshot tip */}
             <div className="mt-4 flex items-start gap-2.5 rounded-inner border border-sky-400/20 bg-sky-400/5 p-3.5">
               <span className="text-base leading-tight">📸</span>
-              <span className="text-xs leading-relaxed text-slate-400">{t("upgrade.screenshotTip")}</span>
+              <span className="text-xs leading-relaxed text-neutral-400">{t("upgrade.screenshotTip")}</span>
             </div>
 
             {/* 轮询提示 / polling hint */}
-            <div className="mt-6 flex items-center justify-center gap-2.5 text-sm text-slate-400">
-              <span className="h-2 w-2 rounded-full bg-amber-400 shadow-[0_0_8px_theme(colors.amber.400)] animate-breathe" />
+            <div className="mt-6 flex items-center justify-center gap-2.5 text-sm text-neutral-400">
+              <span className="h-2 w-2 rounded-full bg-amber-400 animate-breathe" />
               {t("upgrade.pollingHint")}
             </div>
 
@@ -748,8 +774,8 @@ export default function UpgradePage() {
             <path d="M20 6L9 17l-5-5" />
           </svg>
         </div>
-        <h1 className="mt-6 font-display text-2xl font-black text-slate-50">{t("upgrade.successTitle")}</h1>
-        <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-slate-400">{t("upgrade.successDesc")}</p>
+        <h1 className="mt-6 font-display text-2xl font-black text-neutral-50">{t("upgrade.successTitle")}</h1>
+        <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-neutral-400">{t("upgrade.successDesc")}</p>
         <button onClick={() => { window.location.href = "/dashboard"; }} className="btn-primary mt-7 px-8 py-3">
           {t("upgrade.goDashboard")}
         </button>
@@ -770,8 +796,8 @@ export default function UpgradePage() {
         <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-down/10 text-down ring-1 ring-down/40">
           <span className="font-display text-4xl">!</span>
         </div>
-        <h1 className="mt-6 font-display text-2xl font-black text-slate-50">{t("upgrade.errorTitle")}</h1>
-        <p className="mx-auto mt-3 max-w-sm break-words text-sm leading-relaxed text-slate-400">{state.msg}</p>
+        <h1 className="mt-6 font-display text-2xl font-black text-neutral-50">{t("upgrade.errorTitle")}</h1>
+        <p className="mx-auto mt-3 max-w-sm break-words text-sm leading-relaxed text-neutral-400">{state.msg}</p>
         {hasPartial && (
           <div className="glass mx-auto mt-5 max-w-sm border border-amber-400/30 bg-amber-400/5 p-4 text-left">
             <p className="text-sm leading-relaxed text-amber-200">

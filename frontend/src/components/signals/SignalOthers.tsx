@@ -38,7 +38,7 @@ const SignalOthers: FC<Props> = ({ entries, now, onTrade, onFocus, onViewAll }) 
       {/* Signal mini cards */}
       <div className="others-list">
         {visible.length === 0 && (
-          <div className="card glass sig-mini-card text-center text-sm text-slate-400">
+          <div className="card glass sig-mini-card text-center text-sm text-neutral-400">
             {t('signals.focus.noExecutable')}
           </div>
         )}
@@ -58,7 +58,7 @@ const SignalOthers: FC<Props> = ({ entries, now, onTrade, onFocus, onViewAll }) 
               <div className="sig-mini-top">
                 <div>
                   <b className="text-base text-white">{displaySymbol(symbol)}</b>
-                  <div className="text-[11px] text-slate-400 mt-0.5">{sig.indicator || '-'}</div>
+                  <div className="text-[11px] text-neutral-400 mt-0.5">{sig.indicator || '-'}</div>
                 </div>
                 <span className={`chip shrink-0 ${isBuy ? 'chip-buy' : 'chip-sell'}`}>{sideTag}</span>
                 <div className="rr ml-auto">
@@ -85,7 +85,7 @@ const SignalOthers: FC<Props> = ({ entries, now, onTrade, onFocus, onViewAll }) 
 
               {/* TTL bar */}
               <div className="mt-2.5">
-                <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                <div className="flex justify-between text-[11px] text-neutral-400 mb-1">
                   <span>{t('signals.focus.remainingTtl')}</span>
                   <span className="num text-prism-300">{cd?.text ?? '-'}</span>
                 </div>
@@ -97,8 +97,8 @@ const SignalOthers: FC<Props> = ({ entries, now, onTrade, onFocus, onViewAll }) 
               {/* Footer: indicator + trade btn */}
               <div className="flex items-center gap-2 mt-2.5">
                 <div className="min-w-0 flex-1">
-                  <div className="text-xs text-slate-300 truncate">{sig.indicator || '-'}</div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">{fmtTime(sig.createdAt)}</div>
+                  <div className="text-xs text-neutral-300 truncate">{sig.indicator || '-'}</div>
+                  <div className="text-[10px] text-neutral-500 mt-0.5">{fmtTime(sig.createdAt)}</div>
                 </div>
                 <button
                   onClick={(e) => { e.stopPropagation(); onTrade(sig) }}

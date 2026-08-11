@@ -18,7 +18,7 @@ const statusStyle: Record<OrderStatus, string> = {
   FILLED: 'bg-up/15 text-up',
   REJECTED: 'bg-down/15 text-down',
   FAILED: 'bg-down/15 text-down',
-  CANCELLED: 'bg-white/10 text-slate-400',
+  CANCELLED: 'bg-white/10 text-neutral-400',
 }
 
 type StatusFilter = 'ALL' | OrderStatus
@@ -264,10 +264,10 @@ export default function OrdersPage() {
       {/* 页头：标题 + 全页统一账号切换器 / page head: title + page-wide account switcher */}
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="font-display text-2xl font-bold text-slate-100">
+          <h2 className="font-display text-2xl font-bold text-neutral-100">
             <span className="neon-text">{t('orders.title')}</span>
           </h2>
-          <p className="mt-1 text-sm text-slate-400">{t('orders.subtitle')}</p>
+          <p className="mt-1 text-sm text-neutral-400">{t('orders.subtitle')}</p>
         </div>
         {accounts.length > 1 && (
           <div className="flex flex-wrap gap-2">
@@ -278,7 +278,7 @@ export default function OrdersPage() {
                 className={`rounded-lg border px-3 py-1.5 font-mono text-xs transition ${
                   a.login === selectedLogin
                     ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'
-                    : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-100'
+                    : 'border-white/10 bg-white/5 text-neutral-400 hover:text-neutral-100'
                 }`}
               >
                 {a.login}
@@ -299,7 +299,7 @@ export default function OrdersPage() {
             className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
               tab === key
                 ? 'border-prism-500 text-prism-200'
-                : 'border-transparent text-slate-500 hover:text-slate-300'
+                : 'border-transparent text-neutral-500 hover:text-neutral-300'
             }`}
           >
             {t(`orders.tab.${key}`)}
@@ -323,24 +323,24 @@ export default function OrdersPage() {
               lives on /account; this only answers "how is this account doing". */}
           {activeAccount && (
             <div className="glass mb-5 flex flex-wrap items-center gap-x-6 gap-y-2 px-5 py-3 text-xs">
-              <span className="font-mono text-sm text-slate-100">
+              <span className="font-mono text-sm text-neutral-100">
                 {activeAccount.login}
                 {activeAccount.server ? ` @${activeAccount.server}` : ''}
               </span>
-              <span className={`tag text-xs ${activeAccount.online ? 'bg-up/15 text-up' : 'bg-white/5 text-slate-500'}`}>
+              <span className={`tag text-xs ${activeAccount.online ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-500'}`}>
                 {activeAccount.online ? t('common.online') : t('common.offline')}
               </span>
-              <span className="text-slate-500">
+              <span className="text-neutral-500">
                 {t('account.balance')}{' '}
-                <b className="font-mono text-sm font-medium text-slate-100">{activeAccount.balance?.toFixed(2) ?? '-'}</b>
+                <b className="font-mono text-sm font-medium text-neutral-100">{activeAccount.balance?.toFixed(2) ?? '-'}</b>
               </span>
-              <span className="text-slate-500">
+              <span className="text-neutral-500">
                 {t('account.equity')}{' '}
-                <b className="font-mono text-sm font-medium text-slate-100">{activeAccount.equity?.toFixed(2) ?? '-'}</b>
+                <b className="font-mono text-sm font-medium text-neutral-100">{activeAccount.equity?.toFixed(2) ?? '-'}</b>
               </span>
-              <span className="text-slate-500">
+              <span className="text-neutral-500">
                 {t('account.leverage')}{' '}
-                <b className="font-mono text-sm font-medium text-slate-100">
+                <b className="font-mono text-sm font-medium text-neutral-100">
                   {activeAccount.leverage ? `1:${activeAccount.leverage}` : '-'}
                 </b>
               </span>
@@ -350,21 +350,21 @@ export default function OrdersPage() {
           {/* 持仓概览 / positions overview */}
           <div className="glass p-5">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-              <h3 className="font-display text-lg font-semibold text-slate-100">
+              <h3 className="font-display text-lg font-semibold text-neutral-100">
                 {t('orders.positions')}
               </h3>
               {visiblePositions.length > 0 && (
                 <div className="flex flex-wrap items-center gap-4 text-xs">
-                  <span className="text-slate-400">
+                  <span className="text-neutral-400">
                     {t('orders.summary.positions')}{' '}
-                    <b className="font-mono text-sm text-slate-100">{posSummary.total}</b>
+                    <b className="font-mono text-sm text-neutral-100">{posSummary.total}</b>
                   </span>
-                  <span className="text-slate-400">
+                  <span className="text-neutral-400">
                     {t('common.buy')} <b className="font-mono text-sm text-up">{posSummary.buy}</b>
                     {' '}/{' '}
                     {t('common.sell')} <b className="font-mono text-sm text-down">{posSummary.sell}</b>
                   </span>
-                  <span className="text-slate-400">
+                  <span className="text-neutral-400">
                     {t('orders.summary.totalPnl')}{' '}
                     <b className={`font-mono text-sm ${posSummary.pnl >= 0 ? 'text-up' : 'text-down'}`}>
                       {posSummary.pnl >= 0 ? '+' : ''}
@@ -374,9 +374,9 @@ export default function OrdersPage() {
                 </div>
               )}
             </div>
-            <p className="mb-3 text-xs text-slate-500">{t('orders.positionsScopeHint')}</p>
+            <p className="mb-3 text-xs text-neutral-500">{t('orders.positionsScopeHint')}</p>
             {visiblePositions.length === 0 ? (
-              <p className="py-4 text-center text-sm text-slate-500">{t('orders.noPositions')}</p>
+              <p className="py-4 text-center text-sm text-neutral-500">{t('orders.noPositions')}</p>
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {visiblePositions.map((p, i) => (
@@ -401,7 +401,7 @@ export default function OrdersPage() {
               values and reasonably concludes it leaked across accounts or
               failed to save. Hence the divider plus an explicit scope note. */}
           <div className="mt-6 border-t border-white/10 pt-6">
-            <p className="mb-3 text-xs text-slate-500">{t('orders.autoManageScopeHint')}</p>
+            <p className="mb-3 text-xs text-neutral-500">{t('orders.autoManageScopeHint')}</p>
             <AutoManageCard isPro={isPro} />
           </div>
         </>
@@ -430,16 +430,16 @@ export default function OrdersPage() {
       <>
       {/* Tab 名已经写着"操作记录"，这里不再重复标题，只留一行说明 /
           the tab is already labelled "Activity Log", so no repeated heading */}
-      <p className="mb-3 text-xs text-slate-500">{t('orders.historyHint')}</p>
+      <p className="mb-3 text-xs text-neutral-500">{t('orders.historyHint')}</p>
 
       {/* 筛选条 / filter bar */}
       <div className="glass mb-3 flex flex-wrap items-center gap-3 p-3">
         <label className="flex items-center gap-2 text-xs">
-          <span className="text-slate-500">{t('orders.filterStatus')}</span>
+          <span className="text-neutral-500">{t('orders.filterStatus')}</span>
           <select
             value={statusF}
             onChange={(e) => setStatusF(e.target.value as StatusFilter)}
-            className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-slate-100 outline-none transition focus:border-prism-500"
+            className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-neutral-100 outline-none transition focus:border-prism-500"
           >
             <option value="ALL">{t('signals.all')}</option>
             <option value="PENDING">{t('orders.status.PENDING')}</option>
@@ -450,11 +450,11 @@ export default function OrdersPage() {
           </select>
         </label>
         <label className="flex items-center gap-2 text-xs">
-          <span className="text-slate-500">{t('orders.filterSide')}</span>
+          <span className="text-neutral-500">{t('orders.filterSide')}</span>
           <select
             value={sideF}
             onChange={(e) => setSideF(e.target.value as SideFilter)}
-            className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-slate-100 outline-none transition focus:border-prism-500"
+            className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-neutral-100 outline-none transition focus:border-prism-500"
           >
             <option value="ALL">{t('signals.all')}</option>
             <option value="BUY">{t('common.buy')}</option>
@@ -462,38 +462,38 @@ export default function OrdersPage() {
           </select>
         </label>
         <label className="flex items-center gap-2 text-xs">
-          <span className="text-slate-500">{t('orders.filterSymbol')}</span>
+          <span className="text-neutral-500">{t('orders.filterSymbol')}</span>
           <input
             value={symbolF}
             onChange={(e) => setSymbolF(e.target.value)}
             placeholder={t('orders.symbolPlaceholder')}
-            className="w-28 rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-slate-100 outline-none transition focus:border-prism-500"
+            className="w-28 rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-neutral-100 outline-none transition focus:border-prism-500"
           />
         </label>
         <label className="flex items-center gap-2 text-xs">
-          <span className="text-slate-500">{t('orders.filterFrom')}</span>
+          <span className="text-neutral-500">{t('orders.filterFrom')}</span>
           <input
             type="date"
             value={sinceF}
             max={untilF || undefined}
             onChange={(e) => { setSinceF(e.target.value); setPage(0) }}
-            className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-slate-100 outline-none transition focus:border-prism-500"
+            className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-neutral-100 outline-none transition focus:border-prism-500"
           />
         </label>
         <label className="flex items-center gap-2 text-xs">
-          <span className="text-slate-500">{t('orders.filterTo')}</span>
+          <span className="text-neutral-500">{t('orders.filterTo')}</span>
           <input
             type="date"
             value={untilF}
             min={sinceF || undefined}
             onChange={(e) => { setUntilF(e.target.value); setPage(0) }}
-            className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-slate-100 outline-none transition focus:border-prism-500"
+            className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-neutral-100 outline-none transition focus:border-prism-500"
           />
         </label>
         {dateFilterActive && (
           <button
             onClick={() => { setSinceF(''); setUntilF(''); setPage(0) }}
-            className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-400 transition hover:text-slate-100"
+            className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-neutral-400 transition hover:text-neutral-100"
           >
             {t('orders.clearDateFilter')}
           </button>
@@ -503,14 +503,14 @@ export default function OrdersPage() {
       {/* 订单表 / orders table */}
       <div className="glass overflow-hidden">
         {visibleOrders.length === 0 ? (
-          <p className="py-16 text-center text-sm text-slate-500">{t('orders.empty')}</p>
+          <p className="py-16 text-center text-sm text-neutral-500">{t('orders.empty')}</p>
         ) : (
           <>
             {/* 桌面端表格 / desktop table */}
             <div className="hidden overflow-x-auto md:block">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-slate-500">
+                <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-neutral-500">
                   <th className="px-4 py-3 font-medium">{t('orders.colTime')}</th>
                   <th className="px-4 py-3 font-medium">{t('orders.colType')}</th>
                   <th className="px-4 py-3 font-medium">{t('orders.colSymbol')}</th>
@@ -529,15 +529,15 @@ export default function OrdersPage() {
                     key={o.id}
                     className="border-b border-white/5 transition hover:bg-prism-600/10"
                   >
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-400">
+                    <td className="whitespace-nowrap px-4 py-3 text-neutral-400">
                       {fmtTime(o.createdAt)}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="tag border border-white/10 bg-white/[0.05] text-slate-300">
+                      <span className="tag border border-white/10 bg-white/[0.05] text-neutral-300">
                         {t(`orders.action.${o.action ?? 'ORDER'}`)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 font-mono text-slate-100">{displaySymbol(o.symbol)}</td>
+                    <td className="px-4 py-3 font-mono text-neutral-100">{displaySymbol(o.symbol)}</td>
                     <td className="px-4 py-3">
                       <span
                         className={`tag ${
@@ -547,15 +547,15 @@ export default function OrdersPage() {
                         {o.side === 'BUY' ? t('common.buy') : t('common.sell')}
                       </span>
                     </td>
-                    <td className="px-4 py-3 font-mono text-slate-200">{o.volume}</td>
+                    <td className="px-4 py-3 font-mono text-neutral-200">{o.volume}</td>
                     <td className="px-4 py-3">
                       <span className={`tag ${statusStyle[o.status]}`}>
                         {t(`orders.status.${o.status}`)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 font-mono text-slate-400">{o.mt5Ticket ?? '-'}</td>
-                    <td className="px-4 py-3 font-mono text-slate-200">{o.filledPrice ?? '-'}</td>
-                    <td className="max-w-[200px] truncate px-4 py-3 text-slate-400">
+                    <td className="px-4 py-3 font-mono text-neutral-400">{o.mt5Ticket ?? '-'}</td>
+                    <td className="px-4 py-3 font-mono text-neutral-200">{o.filledPrice ?? '-'}</td>
+                    <td className="max-w-[200px] truncate px-4 py-3 text-neutral-400">
                       {o.message ? localizeApiError(o.message) : '-'}
                     </td>
                     <td className="px-4 py-3">
@@ -581,7 +581,7 @@ export default function OrdersPage() {
                 <div key={o.id} className="p-4">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-base font-bold text-slate-100">{displaySymbol(o.symbol)}</span>
+                      <span className="font-mono text-base font-bold text-neutral-100">{displaySymbol(o.symbol)}</span>
                       <span
                         className={`tag ${
                           o.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'
@@ -597,29 +597,29 @@ export default function OrdersPage() {
 
                   <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                     <div className="flex justify-between gap-2">
-                      <span className="text-slate-500">{t('orders.colType')}</span>
-                      <span className="text-slate-300">{t(`orders.action.${o.action ?? 'ORDER'}`)}</span>
+                      <span className="text-neutral-500">{t('orders.colType')}</span>
+                      <span className="text-neutral-300">{t(`orders.action.${o.action ?? 'ORDER'}`)}</span>
                     </div>
                     <div className="flex justify-between gap-2">
-                      <span className="text-slate-500">{t('orders.colVolume')}</span>
-                      <span className="font-mono text-slate-200">{o.volume}</span>
+                      <span className="text-neutral-500">{t('orders.colVolume')}</span>
+                      <span className="font-mono text-neutral-200">{o.volume}</span>
                     </div>
                     <div className="flex justify-between gap-2">
-                      <span className="text-slate-500">{t('orders.colPrice')}</span>
-                      <span className="font-mono text-slate-200">{o.filledPrice ?? '-'}</span>
+                      <span className="text-neutral-500">{t('orders.colPrice')}</span>
+                      <span className="font-mono text-neutral-200">{o.filledPrice ?? '-'}</span>
                     </div>
                     <div className="flex justify-between gap-2">
-                      <span className="text-slate-500">{t('orders.colTicket')}</span>
-                      <span className="font-mono text-slate-400">{o.mt5Ticket ?? '-'}</span>
+                      <span className="text-neutral-500">{t('orders.colTicket')}</span>
+                      <span className="font-mono text-neutral-400">{o.mt5Ticket ?? '-'}</span>
                     </div>
                     <div className="flex justify-between gap-2">
-                      <span className="text-slate-500">{t('orders.colTime')}</span>
-                      <span className="text-slate-400">{fmtTime(o.createdAt)}</span>
+                      <span className="text-neutral-500">{t('orders.colTime')}</span>
+                      <span className="text-neutral-400">{fmtTime(o.createdAt)}</span>
                     </div>
                   </div>
 
                   {o.message && (
-                    <p className="mt-2 break-words text-xs text-slate-500">{localizeApiError(o.message)}</p>
+                    <p className="mt-2 break-words text-xs text-neutral-500">{localizeApiError(o.message)}</p>
                   )}
 
                   {o.status === 'PENDING' && (
@@ -644,7 +644,7 @@ export default function OrdersPage() {
           locally (new orders show instantly); with a date filter, page via the
           backend, reaching history beyond the live 100. */}
       {(visibleOrders.length > 0 || dateFilterActive) && (
-        <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
+        <div className="mt-3 flex items-center justify-between text-xs text-neutral-400">
           <span>
             {pageLoading
               ? t('common.loading')
@@ -654,14 +654,14 @@ export default function OrdersPage() {
             <button
               onClick={() => setPage(Math.max(0, safePage - 1))}
               disabled={safePage === 0 || pageLoading}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t('common.prevPage')}
             </button>
             <button
               onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))}
               disabled={pageLoading || safePage + 1 >= totalPages}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t('common.nextPage')}
             </button>

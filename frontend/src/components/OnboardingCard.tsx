@@ -72,10 +72,10 @@ export default function OnboardingCard() {
   return (
     <section className="glass mb-5 border-prism-500/20 bg-prism-600/[0.06] p-5">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h3 className="font-display text-base font-semibold text-slate-100">
+        <h3 className="font-display text-base font-semibold text-neutral-100">
           {t('onboarding.title')}
         </h3>
-        <p className="text-xs text-slate-400">{t('onboarding.subtitle')}</p>
+        <p className="text-xs text-neutral-400">{t('onboarding.subtitle')}</p>
       </div>
 
       <ol className="mt-4 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-3">
@@ -85,8 +85,8 @@ export default function OnboardingCard() {
               {i + 1}
             </span>
             <div className="min-w-0">
-              <span className="block text-sm font-medium text-slate-100">{s.title}</span>
-              <span className="mt-1 block text-xs leading-relaxed text-slate-400">{s.desc}</span>
+              <span className="block text-sm font-medium text-neutral-100">{s.title}</span>
+              <span className="mt-1 block text-xs leading-relaxed text-neutral-400">{s.desc}</span>
               {s.href && (
                 <a href={s.href} target="_blank" rel="noopener noreferrer nofollow sponsored" className={ctaClass}>
                   {s.cta} →
@@ -105,7 +105,7 @@ export default function OnboardingCard() {
       {/* 桥接程序：留一行给非合作券商的用户，但不再占据一个步骤位。
           The bridge keeps one line for non-partner-broker users, but no longer
           occupies a numbered step. */}
-      <p className="mt-4 border-t border-white/10 pt-3 text-xs leading-relaxed text-slate-500">
+      <p className="mt-4 border-t border-white/10 pt-3 text-xs leading-relaxed text-neutral-500">
         {t('onboarding.bridgeNote', { name: brokerName })}{' '}
         <Link to="/download" className="text-prism-300 underline-offset-2 transition hover:underline">
           {t('onboarding.bridgeCta')} →

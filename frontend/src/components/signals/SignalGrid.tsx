@@ -24,7 +24,7 @@ const Countdown: FC<{ expireAt: string | null; label: string }> = memo(({ expire
   return (
     <>
       <div className="flex justify-between text-[11px] mb-1">
-        <span className="text-slate-500">{label}</span>
+        <span className="text-neutral-500">{label}</span>
         <span className="num text-prism-300">{cd?.text ?? '-'}</span>
       </div>
       <div className="sig-ttl-bar">
@@ -92,7 +92,7 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
 
       {/* FREE 用户提醒：升级看实时信号 / FREE tier notice: upgrade for live signals */}
       {isFree && (
-        <div className="mb-4 rounded-xl border border-prism-400/30 bg-prism-500/10 px-4 py-3 text-sm text-slate-300">
+        <div className="mb-4 rounded-xl border border-prism-400/30 bg-prism-500/10 px-4 py-3 text-sm text-neutral-300">
           {t('upgrade.freeBanner')}{" "}
           <Link to="/upgrade" className="font-semibold text-prism-400 underline hover:text-prism-300">
             {t('nav.upgrade')}
@@ -171,7 +171,7 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
                   <div className={`text-xl font-bold ${rrTone(oRr?.rr ?? null)}`}>
                     {oRr?.rr != null ? `1:${oRr.rr.toFixed(2)}` : '-'}
                   </div>
-                  <div className="text-[10px] uppercase text-slate-500">{t('signals.focus.rrLabel')}</div>
+                  <div className="text-[10px] uppercase text-neutral-500">{t('signals.focus.rrLabel')}</div>
                 </div>
               </div>
 
@@ -203,7 +203,7 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
                   <span className={`text-xs font-bold ${resultTone(sig.result)}`}>
                     {resultLabel(sig.result, t)}
                   </span>
-                  <span className="text-[10px] text-slate-500">{t('signals.proSawFirst')}</span>
+                  <span className="text-[10px] text-neutral-500">{t('signals.proSawFirst')}</span>
                 </div>
               ) : (
                 <div className="mt-3">
@@ -213,15 +213,15 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
 
               <div className="flex items-center justify-between mt-3">
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm text-slate-300 truncate">{sig.indicator || '-'}</div>
-                  <div className="text-[10px] text-slate-600 mt-0.5">{fmtTime(sig.createdAt)}</div>
+                  <div className="text-sm text-neutral-300 truncate">{sig.indicator || '-'}</div>
+                  <div className="text-[10px] text-neutral-500 mt-0.5">{fmtTime(sig.createdAt)}</div>
                 </div>
                 <button
                   onClick={() => !isExpired && onTrade(sig)}
                   disabled={isExpired}
                   className={`btn rounded-xl px-6 py-2 text-[13px] font-semibold shrink-0 ml-3 ${
                     isExpired
-                      ? 'cursor-not-allowed border border-white/10 bg-white/5 text-slate-500'
+                      ? 'cursor-not-allowed border border-white/10 bg-white/5 text-neutral-500'
                       : 'btn-primary'
                   }`}
                 >

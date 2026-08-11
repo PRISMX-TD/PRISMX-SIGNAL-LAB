@@ -59,10 +59,10 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
+    <div className="relative min-h-[100dvh] overflow-hidden">
       <AuroraBackground />
 
-      {/* top-[calc(1rem+env(safe-area-inset-top))]：这个容器是 min-h-screen 从物理
+      {/* top-[calc(1rem+env(safe-area-inset-top))]：这个容器是 min-h-[100dvh] 从物理
           屏幕顶部起算，固定 top-4 会被 iOS 刘海/灵动岛盖住、点击被系统截获
           （用户反馈的"顶部按键按不了"就是这个）。
           top-[calc(1rem+env(safe-area-inset-top))]: this container spans from the
@@ -70,7 +70,7 @@ export default function LoginPage() {
           Island and taps get swallowed by the system — this is the "top buttons
           don't respond" report. */}
       <div className="absolute left-4 top-[calc(1rem+env(safe-area-inset-top))] z-20">
-        <Link to="/" className="chip transition hover:border-prism-500/50 hover:text-slate-100">
+        <Link to="/" className="chip transition hover:border-prism-500/50 hover:text-neutral-100">
           <span aria-hidden>←</span> Signal Lab
         </Link>
       </div>
@@ -78,38 +78,45 @@ export default function LoginPage() {
         <LanguageToggle />
       </div>
 
-      <div className="relative z-10 flex min-h-screen items-center justify-center px-4">
+      <div className="relative z-10 flex min-h-[100dvh] items-center justify-center px-4">
         <div className="w-full max-w-md">
-          <div className="mb-8 flex flex-col items-center text-center">
-            <div className="mb-4 [filter:drop-shadow(0_0_16px_rgba(139,92,246,0.55))]">
-              <Logo size={72} />
-            </div>
-            <h1 className="font-display text-3xl font-black tracking-wider text-slate-100">
-              <span className="neon-text animate-gradient-x">Signal Lab</span>
-            </h1>
-            <p className="mt-1 text-xs font-medium uppercase tracking-[0.15em] text-slate-600">by PRISMX</p>
-            <p className="mt-3 max-w-xs text-sm text-slate-400">{t('auth.tagline')}</p>
+          {/* 品牌区改为左对齐。登录页此前是「居中 logo + 居中渐变标题 + 居中副标 +
+              居中卡片」的四层同轴堆叠——这正是被反复点名的居中英雄模板。左对齐之后
+              标题与下方表单的 label 共用同一条左基线，眼睛从品牌读到第一个输入框
+              是一条直线，而不是先回到中轴再折返。
+              Logo 上原本挂着一层 16px 紫色 drop-shadow 光晕，与全站去发光的方向直接
+              冲突，已移除。
+              The brand block is now left-aligned. This page used to stack a centred
+              logo, a centred gradient headline, a centred subtitle and a centred card
+              on one axis — the centred-hero template. Left-aligned, the headline
+              shares a left baseline with the form labels below it, so the eye travels
+              from brand to first input in a straight line instead of returning to the
+              centre axis and back out.
+              The 16px violet drop-shadow halo on the logo contradicted the system-wide
+              removal of glow and is gone. */}
+          <div className="mb-8">
+            <Logo size={44} />
+            <h1 className="mt-5 font-display-xl text-[2rem] text-white">Signal Lab</h1>
+            <p className="mt-1.5 text-[11px] font-medium uppercase tracking-[0.16em] text-neutral-500">by PRISMX</p>
+            <p className="mt-4 max-w-xs text-[13.5px] leading-relaxed text-neutral-400">{t('auth.tagline')}</p>
           </div>
 
-          <div className="glass animate-fade-in-up p-6 shadow-glass-lg">
-            <div className="mb-5 flex gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-1">
+          <div className="glass animate-fade-in-up p-6">
+            {/* 登录/注册切换沿用全站分段控制器的形状与尺寸（.seg），不再是这一页
+                独有的一套写法。选中态是实色紫、无外发光阴影。
+                The login/register switch now uses the app-wide segmented control's
+                shape and metrics (.seg) instead of a one-off implementation on this
+                page. The selected state is flat violet with no glow shadow. */}
+            <div className="seg mb-5 w-full">
               <button
                 onClick={() => setMode('login')}
-                className={`flex-1 rounded-lg py-2 text-sm font-medium transition ${
-                  mode === 'login'
-                    ? 'bg-prism-600 text-white shadow-prism'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
+                className={`flex-1 ${mode === 'login' ? 'on' : ''}`}
               >
                 {t('auth.loginTitle')}
               </button>
               <button
                 onClick={() => setMode('register')}
-                className={`flex-1 rounded-lg py-2 text-sm font-medium transition ${
-                  mode === 'register'
-                    ? 'bg-prism-600 text-white shadow-prism'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
+                className={`flex-1 ${mode === 'register' ? 'on' : ''}`}
               >
                 {t('auth.registerTitle')}
               </button>
@@ -147,7 +154,7 @@ export default function LoginPage() {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-200 transition"
                     title={showPassword ? t('auth.hidePassword') : t('auth.showPassword')}
                     aria-label={showPassword ? t('auth.hidePassword') : t('auth.showPassword')}
                   >
@@ -179,14 +186,14 @@ export default function LoginPage() {
                 </div>
               )}
 
-              <button type="submit" disabled={loading} className="btn-primary w-full py-2.5">
+              <button type="submit" disabled={loading} className="btn btn-primary w-full">
                 {loading ? t('common.loading') : mode === 'login' ? t('auth.login') : t('auth.register')}
               </button>
             </form>
 
             <div className="my-5 flex items-center gap-3">
               <span className="h-px flex-1 bg-white/10" />
-              <span className="text-xs uppercase tracking-widest text-slate-500">{t('auth.or')}</span>
+              <span className="text-xs uppercase tracking-widest text-neutral-500">{t('auth.or')}</span>
               <span className="h-px flex-1 bg-white/10" />
             </div>
 

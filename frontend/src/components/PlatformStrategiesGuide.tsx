@@ -34,9 +34,9 @@ function TagRow({ label, values }: { label: string; values: string[] }) {
   if (values.length === 0) return null
   return (
     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1.5">
-      <span className="text-xs text-slate-500">{label}</span>
+      <span className="text-xs text-neutral-500">{label}</span>
       {values.map((v) => (
-        <span key={v} className="rounded-md bg-white/5 px-2 py-0.5 text-xs text-slate-300">
+        <span key={v} className="rounded-md bg-white/5 px-2 py-0.5 text-xs text-neutral-300">
           {v}
         </span>
       ))}
@@ -48,8 +48,8 @@ function FactRow({ label, value }: { label: string; value: string }) {
   if (!value) return null
   return (
     <div className="flex items-baseline gap-2">
-      <span className="shrink-0 text-xs text-slate-500">{label}</span>
-      <span className="text-xs text-slate-300">{value}</span>
+      <span className="shrink-0 text-xs text-neutral-500">{label}</span>
+      <span className="text-xs text-neutral-300">{value}</span>
     </div>
   )
 }
@@ -95,7 +95,7 @@ export default function PlatformStrategiesGuide() {
 
   if (items.length === 0) {
     return (
-      <div className="glass flat-card py-12 text-center text-sm text-slate-500">
+      <div className="glass flat-card py-12 text-center text-sm text-neutral-500">
         {t('signals.guide.empty')}
       </div>
     )
@@ -131,8 +131,8 @@ export default function PlatformStrategiesGuide() {
                 />
               )}
               <div className="p-5">
-                <h3 className="font-display text-base font-bold text-slate-100">{name}</h3>
-                {summary && <p className="mt-1.5 text-sm text-slate-400">{summary}</p>}
+                <h3 className="font-display text-base font-bold text-neutral-100">{name}</h3>
+                {summary && <p className="mt-1.5 text-sm text-neutral-400">{summary}</p>}
 
                 <div className="mt-4 space-y-1.5">
                   <FactRow label={t('signals.guide.marketRegime')} value={regime} />
@@ -157,7 +157,7 @@ export default function PlatformStrategiesGuide() {
         })}
       </div>
 
-      <p className="mt-5 text-xs leading-relaxed text-slate-500">{t('signals.guide.disclaimer')}</p>
+      <p className="mt-5 text-xs leading-relaxed text-neutral-500">{t('signals.guide.disclaimer')}</p>
     </div>
   )
 }

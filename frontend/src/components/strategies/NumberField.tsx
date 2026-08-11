@@ -29,7 +29,7 @@ export function NumberField({ label, value, min, max, isFloat, onChange }: Numbe
 
   return (
     <label className="flex flex-col gap-1">
-      <span className="text-[10px] uppercase tracking-wide text-slate-500">{label}</span>
+      <span className="text-[10px] uppercase tracking-wide text-neutral-500">{label}</span>
       <input
         type="number"
         className="input py-1 text-xs"

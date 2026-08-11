@@ -308,11 +308,11 @@ export default function AccountPage() {
     // visibly narrower than the rest. Readable line length now comes from the
     // two-column grid below instead of squeezing the whole page.
     <div className="space-y-6">
-      <h2 className="font-display text-2xl font-bold text-slate-100">
+      <h2 className="font-display text-2xl font-bold text-neutral-100">
         <span className="neon-text">{t("account.title")}</span>
       </h2>
       {!info ? (
-        <div className="glass p-6 text-center text-sm text-slate-400">{t("account.loadError")}</div>
+        <div className="glass p-6 text-center text-sm text-neutral-400">{t("account.loadError")}</div>
       ) : (
         // 宽屏两栏：左栏放账户信息与密码，右栏单独留给最长的通知设置，避免一栏
         // 到底时右侧大片空白。items-start 让两栏各自按内容高度收边。
@@ -325,7 +325,7 @@ export default function AccountPage() {
           {/* 平台账户 / Platform account */}
           <section className="glass-neon p-5">
             <div className="flex items-center justify-between">
-              <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-slate-300">
+              <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-neutral-300">
                 {t("account.platform")}
               </h3>
               <span className="tag bg-prism-600/20 text-prism-300">
@@ -334,17 +334,17 @@ export default function AccountPage() {
             </div>
             <div className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
               <div className="min-w-0">
-                <span className="text-slate-500">{t("account.email")}</span>
-                <div className="break-all font-mono text-slate-100">{info.email}</div>
+                <span className="text-neutral-500">{t("account.email")}</span>
+                <div className="break-all font-mono text-neutral-100">{info.email}</div>
               </div>
               <div className="min-w-0">
-                <span className="text-slate-500">{t("account.registeredAt")}</span>
-                <div className="font-mono text-slate-100">{fmtTime(info.createdAt)}</div>
+                <span className="text-neutral-500">{t("account.registeredAt")}</span>
+                <div className="font-mono text-neutral-100">{fmtTime(info.createdAt)}</div>
               </div>
               {info.plan === "PRO" && (
                 <div className="min-w-0">
-                  <span className="text-slate-500">{t("account.expiresAt")}</span>
-                  <div className="font-mono text-slate-100">
+                  <span className="text-neutral-500">{t("account.expiresAt")}</span>
+                  <div className="font-mono text-neutral-100">
                     {info.planExpiresAt ? fmtDate(info.planExpiresAt) : t("account.neverExpires")}
                   </div>
                 </div>
@@ -355,35 +355,35 @@ export default function AccountPage() {
           {/* MT5 账号概览 / MT5 accounts */}
           {info.mt5Accounts.length > 0 && (
             <section className="glass-neon p-5">
-              <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-slate-300">
+              <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-neutral-300">
                 {t("account.mt5Accounts")}
               </h3>
               <div className="mt-3 space-y-3">
                 {info.mt5Accounts.map((a, i) => (
                   <div key={i} className="rounded-lg border border-white/5 bg-white/[0.03] p-3">
                     <div className="flex items-center justify-between">
-                      <span className="font-mono text-sm text-slate-100">
+                      <span className="font-mono text-sm text-neutral-100">
                         {a.login}
                         {a.server ? ` @${a.server}` : ""}
                       </span>
                       <span
-                        className={`tag text-xs ${a.online ? "bg-up/15 text-up" : "bg-white/5 text-slate-500"}`}
+                        className={`tag text-xs ${a.online ? "bg-up/15 text-up" : "bg-white/5 text-neutral-500"}`}
                       >
                         {a.online ? t("common.online") : t("common.offline")}
                       </span>
                     </div>
                     <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
                       <div>
-                        <span className="text-slate-500">{t("account.balance")}</span>
-                        <div className="font-mono text-slate-100">{a.balance?.toFixed(2) ?? "-"}</div>
+                        <span className="text-neutral-500">{t("account.balance")}</span>
+                        <div className="font-mono text-neutral-100">{a.balance?.toFixed(2) ?? "-"}</div>
                       </div>
                       <div>
-                        <span className="text-slate-500">{t("account.equity")}</span>
-                        <div className="font-mono text-slate-100">{a.equity?.toFixed(2) ?? "-"}</div>
+                        <span className="text-neutral-500">{t("account.equity")}</span>
+                        <div className="font-mono text-neutral-100">{a.equity?.toFixed(2) ?? "-"}</div>
                       </div>
                       <div>
-                        <span className="text-slate-500">{t("account.leverage")}</span>
-                        <div className="font-mono text-slate-100">{a.leverage ? `1:${a.leverage}` : "-"}</div>
+                        <span className="text-neutral-500">{t("account.leverage")}</span>
+                        <div className="font-mono text-neutral-100">{a.leverage ? `1:${a.leverage}` : "-"}</div>
                       </div>
                     </div>
                   </div>
@@ -394,7 +394,7 @@ export default function AccountPage() {
 
           {/* 密码管理 / Password */}
           <section className="glass-neon p-5">
-            <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-slate-300">
+            <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-neutral-300">
               {info.hasPassword ? t("account.changePassword") : t("account.setPassword")}
             </h3>
             <div className="mt-3 space-y-3">
@@ -430,7 +430,7 @@ export default function AccountPage() {
 
           {/* 通知设置 / Notifications */}
           <section id="notifications" ref={notifSectionRef} className="glass-neon scroll-mt-20 p-5">
-            <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-slate-300">
+            <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-neutral-300">
               {t("account.notifications")}
             </h3>
             <div className="mt-3 space-y-4">
@@ -450,13 +450,13 @@ export default function AccountPage() {
                     )}
                   </div>
                 </label>
-                <span className="text-sm text-slate-100">{t("account.notifEnable")}</span>
+                <span className="text-sm text-neutral-100">{t("account.notifEnable")}</span>
                 {notifLoading && (
-                  <span className="text-xs text-slate-500">{t("account.notifProcessing")}</span>
+                  <span className="text-xs text-neutral-500">{t("account.notifProcessing")}</span>
                 )}
               </div>
               {info.plan === "FREE" && (
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-neutral-500">
                   {t("account.notifUpgradeRequired")}{" "}
                   <Link to="/upgrade" className="text-prism-400 underline hover:text-prism-300">
                     {t("nav.upgrade")}
@@ -467,15 +467,15 @@ export default function AccountPage() {
                 <p className="text-xs text-amber-400">{t(hintKey)}</p>
               )}
               {notifEnabled && (
-                <p className="text-xs leading-relaxed text-slate-500">{t("account.notifFilterHint")}</p>
+                <p className="text-xs leading-relaxed text-neutral-500">{t("account.notifFilterHint")}</p>
               )}
               {notifEnabled && (
                 <div className="space-y-2 pl-1">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
                     {t("account.notifStrategyLabel")}
                   </p>
                   {allCats.length === 0 ? (
-                    <p className="text-xs text-slate-500">{t("account.notifNoCategories")}</p>
+                    <p className="text-xs text-neutral-500">{t("account.notifNoCategories")}</p>
                   ) : (
                     <>
                       <label className="flex items-center gap-2 text-sm">
@@ -485,7 +485,7 @@ export default function AccountPage() {
                           onChange={(e) => handleNotifCatToggle(ALL_SENTINEL, e.target.checked)}
                           className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500"
                         />
-                        <span className="font-medium text-slate-200">{t("account.notifAll")}</span>
+                        <span className="font-medium text-neutral-200">{t("account.notifAll")}</span>
                       </label>
                       {allCats.map((cat) => (
                         <label key={cat} className="flex items-center gap-2 text-sm">
@@ -496,7 +496,7 @@ export default function AccountPage() {
                             onChange={(e) => handleNotifCatToggle(cat, e.target.checked)}
                             className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500 disabled:opacity-50"
                           />
-                          <span className="text-slate-300">{cat}</span>
+                          <span className="text-neutral-300">{cat}</span>
                         </label>
                       ))}
                     </>
@@ -505,11 +505,11 @@ export default function AccountPage() {
               )}
               {notifEnabled && (
                 <div className="space-y-2 border-t border-white/5 pt-4 pl-1">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
                     {t("account.notifSymbolLabel")}
                   </p>
                   {allSymbols.length === 0 ? (
-                    <p className="text-xs text-slate-500">{t("account.notifNoSymbols")}</p>
+                    <p className="text-xs text-neutral-500">{t("account.notifNoSymbols")}</p>
                   ) : (
                     <>
                       <label className="flex items-center gap-2 text-sm">
@@ -519,7 +519,7 @@ export default function AccountPage() {
                           onChange={(e) => handleNotifSymbolToggle(ALL_SENTINEL, e.target.checked)}
                           className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500"
                         />
-                        <span className="font-medium text-slate-200">{t("account.notifAll")}</span>
+                        <span className="font-medium text-neutral-200">{t("account.notifAll")}</span>
                       </label>
                       {allSymbols.map((sym) => (
                         <label key={sym} className="flex items-center gap-2 text-sm">
@@ -530,7 +530,7 @@ export default function AccountPage() {
                             onChange={(e) => handleNotifSymbolToggle(sym, e.target.checked)}
                             className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500 disabled:opacity-50"
                           />
-                          <span className="text-slate-300">
+                          <span className="text-neutral-300">
                             {t(`signals.symbolNames.${sym}`, { defaultValue: "" }) || sym}
                           </span>
                         </label>
@@ -541,7 +541,7 @@ export default function AccountPage() {
               )}
               {notifEnabled && (
                 <div className="space-y-2 border-t border-white/5 pt-4 pl-1">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
                     {t("account.notifEventsHeading")}
                   </p>
                   {EVENT_TYPES.map((ev) => (
@@ -552,7 +552,7 @@ export default function AccountPage() {
                         onChange={(e) => handleNotifEventToggle(ev, e.target.checked)}
                         className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500"
                       />
-                      <span className="text-slate-300">{t(`account.notifEvent.${ev}`)}</span>
+                      <span className="text-neutral-300">{t(`account.notifEvent.${ev}`)}</span>
                     </label>
                   ))}
                 </div>

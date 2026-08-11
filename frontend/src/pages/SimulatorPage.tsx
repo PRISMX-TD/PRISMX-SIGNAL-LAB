@@ -61,7 +61,7 @@ function CapitalField({ value, onChange }: { value: number; onChange: (v: number
 
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('simulator.capital')}</span>
+      <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('simulator.capital')}</span>
       <input
         type="number"
         className="input"
@@ -109,7 +109,7 @@ function EquityCurve({ points, capital }: { points: Array<{ equity: number }>; c
         <line
           x1="0" y1={baselineY} x2={CURVE_W} y2={baselineY}
           stroke="currentColor" strokeOpacity="0.25" strokeWidth="1" strokeDasharray="4 4"
-          className="text-slate-400"
+          className="text-neutral-400"
         />
         <polyline
           fill="none" stroke="currentColor" strokeWidth="2"
@@ -117,7 +117,7 @@ function EquityCurve({ points, capital }: { points: Array<{ equity: number }>; c
           vectorEffect="non-scaling-stroke"
         />
       </svg>
-      <div className="mt-1 text-right text-[11px] text-slate-500">
+      <div className="mt-1 text-right text-[11px] text-neutral-500">
         {t('simulator.baseline')}: ${fmtMoney(capital)}
       </div>
     </div>
@@ -177,7 +177,7 @@ export default function SimulatorPage() {
     `rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
       active
         ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'
-        : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-100'
+        : 'border-white/10 bg-white/5 text-neutral-400 hover:text-neutral-100'
     }`
 
   return (
@@ -185,12 +185,12 @@ export default function SimulatorPage() {
       {/* 标题 / header */}
       <div className="mb-5">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="font-display text-2xl font-bold text-slate-50">{t('simulator.title')}</h2>
+          <h2 className="font-display text-2xl font-bold text-neutral-50">{t('simulator.title')}</h2>
           <span className="tag bg-amber-400/15 text-amber-300 ring-1 ring-amber-400/30">
             {t('simulator.adminOnly')}
           </span>
         </div>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-400">{t('simulator.subtitle')}</p>
+        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-neutral-400">{t('simulator.subtitle')}</p>
       </div>
 
       {/* 参数 / parameters */}
@@ -199,7 +199,7 @@ export default function SimulatorPage() {
           <CapitalField value={capital} onChange={setCapital} />
 
           <label className="flex flex-col gap-1.5">
-            <span className="text-[11px] uppercase tracking-wide text-slate-500">
+            <span className="text-[11px] uppercase tracking-wide text-neutral-500">
               {t('simulator.risk')} · <b className="num text-prism-300">{risk.toFixed(1)}%</b>
             </span>
             <input
@@ -214,7 +214,7 @@ export default function SimulatorPage() {
           </label>
 
           <div className="flex flex-col gap-1.5">
-            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('simulator.range')}</span>
+            <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('simulator.range')}</span>
             <div className="flex flex-wrap gap-2">
               {DAYS_OPTIONS.map((d) => (
                 <button key={d} onClick={() => setDays(d)} className={segBtn(days === d)}>
@@ -225,7 +225,7 @@ export default function SimulatorPage() {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('simulator.mode')}</span>
+            <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('simulator.mode')}</span>
             <div className="flex flex-wrap gap-2">
               <button onClick={() => setMode('compound')} className={segBtn(mode === 'compound')}>
                 {t('simulator.modeCompound')}
@@ -248,7 +248,7 @@ export default function SimulatorPage() {
           <SkeletonLine width="70%" />
         </div>
       ) : summary && trades.length === 0 ? (
-        <div className="glass mb-5 p-8 text-center text-sm text-slate-500">{t('simulator.noData')}</div>
+        <div className="glass mb-5 p-8 text-center text-sm text-neutral-500">{t('simulator.noData')}</div>
       ) : summary ? (
         <>
           {/* 净值归零横幅 / wipeout banner */}
@@ -262,11 +262,11 @@ export default function SimulatorPage() {
           <section className={`glass mb-5 p-5 transition-opacity ${loading ? 'opacity-60' : ''}`}>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
               <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-slate-500">{t('simulator.finalEquity')}</div>
-                <div className="num mt-1 text-xl font-bold text-slate-100">${fmtMoney(summary.finalEquity)}</div>
+                <div className="text-[11px] text-neutral-500">{t('simulator.finalEquity')}</div>
+                <div className="num mt-1 text-xl font-bold text-neutral-100">${fmtMoney(summary.finalEquity)}</div>
               </div>
               <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-slate-500">{t('simulator.returnPct')}</div>
+                <div className="text-[11px] text-neutral-500">{t('simulator.returnPct')}</div>
                 <div className={`num mt-1 text-xl font-bold ${summary.returnPct >= 0 ? 'text-up' : 'text-down'}`}>
                   {summary.returnPct >= 0 ? '+' : ''}{summary.returnPct.toFixed(2)}%
                 </div>
@@ -277,48 +277,48 @@ export default function SimulatorPage() {
                   prominent as the return — showing them at equal weight is the
                   entire point of this page. Never de-emphasize them. */}
               <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-slate-500">{t('simulator.maxDrawdown')}</div>
+                <div className="text-[11px] text-neutral-500">{t('simulator.maxDrawdown')}</div>
                 <div className="num mt-1 text-xl font-bold text-down">-{summary.maxDrawdownPct.toFixed(2)}%</div>
               </div>
               <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-slate-500">{t('simulator.maxLossStreak')}</div>
+                <div className="text-[11px] text-neutral-500">{t('simulator.maxLossStreak')}</div>
                 <div className="num mt-1 text-xl font-bold text-down">{summary.maxLossStreak}</div>
               </div>
               <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-slate-500">{t('simulator.winRate')}</div>
-                <div className="num mt-1 text-xl font-bold text-slate-100">
+                <div className="text-[11px] text-neutral-500">{t('simulator.winRate')}</div>
+                <div className="num mt-1 text-xl font-bold text-neutral-100">
                   {summary.winRate == null ? '-' : `${Math.round(summary.winRate * 100)}%`}
-                  <span className="ml-1.5 text-xs font-normal text-slate-500">
+                  <span className="ml-1.5 text-xs font-normal text-neutral-500">
                     {summary.wins}/{summary.wins + summary.losses}
                   </span>
                 </div>
               </div>
               <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-slate-500">{t('simulator.avgRr')}</div>
-                <div className="num mt-1 text-xl font-bold text-slate-100">
+                <div className="text-[11px] text-neutral-500">{t('simulator.avgRr')}</div>
+                <div className="num mt-1 text-xl font-bold text-neutral-100">
                   {summary.avgRr == null ? '-' : `${summary.avgRr.toFixed(2)}R`}
                 </div>
               </div>
             </div>
             {summary.skipped > 0 && (
-              <p className="mt-3 text-[11px] text-slate-500">{t('simulator.skipped', { n: summary.skipped })}</p>
+              <p className="mt-3 text-[11px] text-neutral-500">{t('simulator.skipped', { n: summary.skipped })}</p>
             )}
           </section>
 
           {/* 净值曲线 / equity curve */}
           <section className={`glass mb-5 p-5 transition-opacity ${loading ? 'opacity-60' : ''}`}>
-            <h3 className="mb-3 font-display text-lg font-semibold text-slate-100">{t('simulator.equityCurve')}</h3>
+            <h3 className="mb-3 font-display text-lg font-semibold text-neutral-100">{t('simulator.equityCurve')}</h3>
             <EquityCurve points={data!.points} capital={capital} />
           </section>
 
           {/* 逐单明细 / trade-by-trade detail */}
           <section className={`glass mb-5 p-5 transition-opacity ${loading ? 'opacity-60' : ''}`}>
-            <h3 className="font-display text-lg font-semibold text-slate-100">{t('simulator.trades')}</h3>
+            <h3 className="font-display text-lg font-semibold text-neutral-100">{t('simulator.trades')}</h3>
 
             <div className="mt-3 overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-slate-500">
+                  <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-neutral-500">
                     <th className="px-3 py-2 font-medium">{t('orders.colTime')}</th>
                     <th className="px-3 py-2 font-medium">{t('orders.colSymbol')}</th>
                     <th className="px-3 py-2 font-medium">{t('orders.colSide')}</th>
@@ -331,8 +331,8 @@ export default function SimulatorPage() {
                 <tbody>
                   {pageTrades.map((tr) => (
                     <tr key={tr.id} className="border-b border-white/5">
-                      <td className="whitespace-nowrap px-3 py-2 text-slate-400">{fmtTime(tr.createdAt)}</td>
-                      <td className="px-3 py-2 font-mono text-slate-100">{displaySymbol(tr.symbol)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-neutral-400">{fmtTime(tr.createdAt)}</td>
+                      <td className="px-3 py-2 font-mono text-neutral-100">{displaySymbol(tr.symbol)}</td>
                       <td className="px-3 py-2">
                         <span className={`tag ${tr.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
                           {tr.side === 'BUY' ? t('common.buy') : t('common.sell')}
@@ -343,11 +343,11 @@ export default function SimulatorPage() {
                           {t(`winrate.${tr.result === 'HIT_TP' ? 'hitTp' : 'hitSl'}`)}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-right font-mono text-slate-300">{tr.rr.toFixed(2)}R</td>
+                      <td className="px-3 py-2 text-right font-mono text-neutral-300">{tr.rr.toFixed(2)}R</td>
                       <td className={`px-3 py-2 text-right font-mono font-semibold ${tr.pnlPct >= 0 ? 'text-up' : 'text-down'}`}>
                         {tr.pnlPct >= 0 ? '+' : ''}{tr.pnlPct.toFixed(2)}%
                       </td>
-                      <td className="px-3 py-2 text-right font-mono text-slate-200">${fmtMoney(tr.equityAfter)}</td>
+                      <td className="px-3 py-2 text-right font-mono text-neutral-200">${fmtMoney(tr.equityAfter)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -355,20 +355,20 @@ export default function SimulatorPage() {
             </div>
 
             {totalPages > 1 && (
-              <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
+              <div className="mt-3 flex items-center justify-between text-xs text-neutral-400">
                 <span>{t('orders.pageInfo', { page: safePage + 1, totalPages, total: trades.length })}</span>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setPage((p) => Math.max(0, p - 1))}
                     disabled={safePage === 0}
-                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {t('common.prevPage')}
                   </button>
                   <button
                     onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
                     disabled={safePage + 1 >= totalPages}
-                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {t('common.nextPage')}
                   </button>
@@ -381,7 +381,7 @@ export default function SimulatorPage() {
 
       {/* 合规免责：这条不适用"小字免责"惯例，必须清晰可读。
           Compliance disclaimer: exempt from the fine-print habit — must stay legible. */}
-      <p className="text-xs leading-relaxed text-slate-500">{t('simulator.disclaimer')}</p>
+      <p className="text-xs leading-relaxed text-neutral-500">{t('simulator.disclaimer')}</p>
     </div>
   )
 }

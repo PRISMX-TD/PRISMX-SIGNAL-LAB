@@ -124,17 +124,16 @@ export default function PartnerBrokerCard({
   if (variant === 'compact') {
     return (
       <section className={`glass relative overflow-hidden p-5 ring-1 ring-amber-400/25 ${className}`}>
-        <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-amber-400/15 blur-[70px]" />
         <div className="relative flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-[16rem] flex-1">
             <span className="chip bg-amber-400/15 text-amber-200 ring-1 ring-amber-400/30">
               <span className="h-1.5 w-1.5 rounded-full bg-amber-300 animate-breathe" />
               {t('partner.badge')}
             </span>
-            <h3 className="mt-3 font-display text-lg font-bold text-slate-50">
+            <h3 className="mt-3 font-display text-lg font-bold text-neutral-50">
               {t('partner.compactTitle', { name })}
             </h3>
-            <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-slate-400">
+            <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-neutral-400">
               {t('partner.compactDesc')}
             </p>
           </div>
@@ -148,7 +147,7 @@ export default function PartnerBrokerCard({
             <span className="transition group-hover:translate-x-0.5"><ExternalIcon /></span>
           </a>
         </div>
-        <p className="relative mt-3 text-xs leading-relaxed text-slate-500">
+        <p className="relative mt-3 text-xs leading-relaxed text-neutral-500">
           {t('partner.claimNote')}{' '}
           <Link to="/support" className="text-prism-300 underline-offset-2 transition hover:underline">
             {t('partner.claimCta')} →
@@ -163,18 +162,17 @@ export default function PartnerBrokerCard({
       {/* 双色光晕：金色点「福利」，紫色把这张卡拉回品牌色系，免得像块广告贴片。
           Two-tone glow: gold reads as "bonus", purple ties the card back to the
           brand palette so it doesn't look like a pasted-in ad. */}
-      <div className="pointer-events-none absolute -right-20 -top-24 h-56 w-56 rounded-full bg-amber-400/15 blur-[90px]" />
-      <div className="pointer-events-none absolute -bottom-24 -left-20 h-56 w-56 rounded-full bg-prism-600/20 blur-[90px]" />
+
 
       <div className="relative text-center sm:text-left">
         <span className="chip bg-amber-400/15 text-amber-200 ring-1 ring-amber-400/30">
           <span className="h-1.5 w-1.5 rounded-full bg-amber-300 animate-breathe" />
           {t('partner.badge')}
         </span>
-        <h3 className="mt-4 font-display text-2xl font-black leading-tight tracking-tight text-slate-50 sm:text-[28px]">
+        <h3 className="mt-4 font-display text-2xl font-black leading-tight tracking-tight text-neutral-50 sm:text-[28px]">
           {t('partner.title', { name })}
         </h3>
-        <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-slate-400 sm:mx-0">
+        <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-neutral-400 sm:mx-0">
           {t('partner.desc', { name })}
         </p>
       </div>
@@ -184,9 +182,9 @@ export default function PartnerBrokerCard({
           <li key={key} className="rounded-xl border border-white/10 bg-white/[0.04] p-4 transition hover:border-amber-400/25">
             <div className="flex items-center gap-2 text-amber-200">
               <Icon />
-              <span className="font-display text-sm font-semibold text-slate-100">{t(`partner.${key}Title`)}</span>
+              <span className="font-display text-sm font-semibold text-neutral-100">{t(`partner.${key}Title`)}</span>
             </div>
-            <p className="mt-2 text-xs leading-relaxed text-slate-400">{t(`partner.${key}Desc`)}</p>
+            <p className="mt-2 text-xs leading-relaxed text-neutral-400">{t(`partner.${key}Desc`)}</p>
           </li>
         ))}
       </ul>
@@ -204,10 +202,10 @@ export default function PartnerBrokerCard({
         <Link to="/bind" className="btn btn-ghost h-12 flex-1 px-6 text-sm sm:flex-none">
           {t('partner.haveAccount')}
         </Link>
-        <span className="text-xs leading-relaxed text-slate-500 sm:ml-1">{t('partner.ctaNote', { name })}</span>
+        <span className="text-xs leading-relaxed text-neutral-500 sm:ml-1">{t('partner.ctaNote', { name })}</span>
       </div>
 
-      <p className="relative mt-5 border-t border-white/10 pt-4 text-xs leading-relaxed text-slate-500">
+      <p className="relative mt-5 border-t border-white/10 pt-4 text-xs leading-relaxed text-neutral-500">
         {t('partner.claimNote')}{' '}
         <Link to="/support" className="text-prism-300 underline-offset-2 transition hover:underline">
           {t('partner.claimCta')} →

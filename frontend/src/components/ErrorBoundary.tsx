@@ -79,10 +79,10 @@ function ErrorFallback() {
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-down/10 text-2xl text-down">
           !
         </div>
-        <h2 className="font-display text-lg font-semibold text-slate-100">
+        <h2 className="font-display text-lg font-semibold text-neutral-100">
           {t('common.errorBoundary.title')}
         </h2>
-        <p className="mt-2 text-sm text-slate-400">{t('common.errorBoundary.desc')}</p>
+        <p className="mt-2 text-sm text-neutral-400">{t('common.errorBoundary.desc')}</p>
         <button
           onClick={() => location.reload()}
           className="btn-primary mt-6 h-11 w-full text-sm font-semibold"

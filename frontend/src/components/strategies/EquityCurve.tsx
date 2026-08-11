@@ -50,10 +50,10 @@ export default function EquityCurve({ points, capital }: EquityCurveProps) {
         role="img"
         aria-label={t('simulator.equityCurve')}
       >
-        <line x1="0" y1={baselineY} x2={CURVE_W} y2={baselineY} stroke="currentColor" strokeOpacity="0.25" strokeWidth="1" strokeDasharray="4 4" className="text-slate-400" />
+        <line x1="0" y1={baselineY} x2={CURVE_W} y2={baselineY} stroke="currentColor" strokeOpacity="0.25" strokeWidth="1" strokeDasharray="4 4" className="text-neutral-400" />
         <polyline fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" points={line} vectorEffect="non-scaling-stroke" />
       </svg>
-      <p className="mt-1 text-[11px] text-slate-500">
+      <p className="mt-1 text-[11px] text-neutral-500">
         {t('simulator.baseline')} {capital.toLocaleString('en-US')} · {t('simulator.finalEquity')}{' '}
         {last.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
       </p>

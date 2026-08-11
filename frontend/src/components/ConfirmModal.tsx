@@ -59,7 +59,7 @@ export default function ConfirmModal({
     <div className={overlayClass} onClick={onCancel}>
       <div className={sheetClass} onClick={(e) => e.stopPropagation()}>
         <h3 className="text-lg font-bold text-white">{title}</h3>
-        <p className="mt-3 text-sm leading-relaxed text-slate-300">{message}</p>
+        <p className="mt-3 text-sm leading-relaxed text-neutral-300">{message}</p>
         <div className="mt-5 flex gap-3">
           <button onClick={onCancel} disabled={busy} className="btn-ghost flex-1 py-2 text-sm">
             {cancelLabel ?? t('common.cancel')}

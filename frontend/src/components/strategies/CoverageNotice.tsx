@@ -43,7 +43,7 @@ export default function CoverageNotice({ coverage, requestedDays, loading }: Cov
   const { t } = useTranslation()
 
   if (loading) {
-    return <p className="rounded-lg border border-white/10 bg-white/[0.02] p-3 text-xs text-slate-500">{t('strategy.coverageLoading')}</p>
+    return <p className="rounded-lg border border-white/10 bg-white/[0.02] p-3 text-xs text-neutral-500">{t('strategy.coverageLoading')}</p>
   }
   if (!coverage) return null
 
@@ -60,7 +60,7 @@ export default function CoverageNotice({ coverage, requestedDays, loading }: Cov
     ? 'border-down/30 bg-down/5 text-down'
     : short
       ? 'border-amber-400/20 bg-amber-400/5 text-amber-200'
-      : 'border-white/10 bg-white/[0.02] text-slate-400'
+      : 'border-white/10 bg-white/[0.02] text-neutral-400'
 
   return (
     // 严重程度不只靠颜色：坏消息用 role="alert" 让读屏主动播报，其余用 status。

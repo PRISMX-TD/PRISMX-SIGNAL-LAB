@@ -77,7 +77,7 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
   const now = useNow(1000)
   const cd = calcCountdown(signal.expireAt, SIGNAL_LIFESPAN_MS, now)
   const expired = cd?.expired ?? false
-  const cdTone = cd && cd.remainMs < 2 * 60 * 1000 ? 'text-down' : 'text-slate-300'
+  const cdTone = cd && cd.remainMs < 2 * 60 * 1000 ? 'text-down' : 'text-neutral-300'
 
   const trackRef = useRef<HTMLDivElement>(null)
   const knobRef = useRef<HTMLDivElement>(null)
@@ -334,7 +334,7 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
           <h3 className="text-lg mt-2.5 text-white font-bold">
             {isBuy ? t('common.buy') : t('common.sell')} {displaySymbol(signal.symbol)}
           </h3>
-          <p className="text-xs text-slate-300 mt-1">
+          <p className="text-xs text-neutral-300 mt-1">
             {t('order.currentPrice')} <span className="num" style={{ color: priceColor }}>
               {quote ? (isBuy ? (quote.ask?.toFixed(quote.digits ?? 5) ?? signal.entry) : (quote.bid?.toFixed(quote.digits ?? 5) ?? signal.entry)) : signal.entry ?? '-'}
             </span>
@@ -406,14 +406,14 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
               <button
                 type="button"
                 onClick={() => setSizeMode('quick')}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium border ${sizeMode === 'quick' ? 'border-prism-500/60 bg-prism-600/20 text-prism-200' : 'border-white/10 bg-white/5 text-slate-400'}`}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium border ${sizeMode === 'quick' ? 'border-prism-500/60 bg-prism-600/20 text-prism-200' : 'border-white/10 bg-white/5 text-neutral-400'}`}
               >
                 {t('order.sizeModeLots')}
               </button>
               <button
                 type="button"
                 onClick={() => setSizeMode('risk')}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium border ${sizeMode === 'risk' ? 'border-prism-500/60 bg-prism-600/20 text-prism-200' : 'border-white/10 bg-white/5 text-slate-400'}`}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium border ${sizeMode === 'risk' ? 'border-prism-500/60 bg-prism-600/20 text-prism-200' : 'border-white/10 bg-white/5 text-neutral-400'}`}
               >
                 {t('order.sizeModeRisk')}
               </button>
@@ -441,7 +441,7 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
               <span className="k" />
               <div className="flex gap-1.5">
                 {QUICK_LOTS.map((q) => (
-                  <button key={q} onClick={() => setVolume(q.toFixed(2))} className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-xs text-slate-300 hover:border-prism-500/50 hover:text-prism-300 font-mono">
+                  <button key={q} onClick={() => setVolume(q.toFixed(2))} className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-xs text-neutral-300 hover:border-prism-500/50 hover:text-prism-300 font-mono">
                     {q.toFixed(2)}
                   </button>
                 ))}
@@ -455,7 +455,7 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
                   <button
                     key={p}
                     onClick={() => setRiskPct(String(p))}
-                    className={`px-2 py-0.5 rounded-md border text-xs font-mono ${riskPct === String(p) ? 'border-prism-500/60 bg-prism-600/20 text-prism-200' : 'border-white/10 bg-white/5 text-slate-300'}`}
+                    className={`px-2 py-0.5 rounded-md border text-xs font-mono ${riskPct === String(p) ? 'border-prism-500/60 bg-prism-600/20 text-prism-200' : 'border-white/10 bg-white/5 text-neutral-300'}`}
                   >
                     {p}%
                   </button>
@@ -479,7 +479,7 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
             <span className="k">{t('signals.colSl')} / {t('signals.colTp')}</span>
             <div className="flex items-center gap-2">
               <input className={`h-8 w-[90px] rounded-lg bg-white/5 border px-2 text-sm num text-down text-right ${slInvalid ? 'border-down' : 'border-down/40'}`} value={sl} onChange={(e) => setSl(e.target.value)} placeholder={signal.stopLoss != null ? String(signal.stopLoss) : 'SL'} />
-              <i className="text-slate-500">/</i>
+              <i className="text-neutral-500">/</i>
               <input className={`h-8 w-[90px] rounded-lg bg-white/5 border px-2 text-sm num text-up text-right ${tpInvalid ? 'border-down' : 'border-up/40'}`} value={tp} onChange={(e) => setTp(e.target.value)} placeholder={signal.takeProfit != null ? String(signal.takeProfit) : 'TP'} />
             </div>
           </div>
@@ -503,7 +503,7 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
           <span>{t('order.riskNote')}</span>
         </div>
-        <p className="px-1 -mt-2.5 mb-3 text-[11px] leading-relaxed text-slate-500">
+        <p className="px-1 -mt-2.5 mb-3 text-[11px] leading-relaxed text-neutral-500">
           {t('order.timeoutNote')}
         </p>
 

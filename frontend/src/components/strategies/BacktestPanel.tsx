@@ -362,43 +362,43 @@ interface SummaryGridProps {
 function SummaryGrid({ summary, compare, compareLabel }: SummaryGridProps) {
   const { t } = useTranslation()
   const sub = (text: string) =>
-    compare ? <div className="mt-0.5 text-[10px] text-slate-500">{compareLabel} {text}</div> : null
+    compare ? <div className="mt-0.5 text-[10px] text-neutral-500">{compareLabel} {text}</div> : null
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
       <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-        <div className="text-[11px] text-slate-500">{t('simulator.finalEquity')}</div>
-        <div className="num mt-1 text-lg font-bold text-slate-100">${fmtMoney(summary.finalEquity)}</div>
+        <div className="text-[11px] text-neutral-500">{t('simulator.finalEquity')}</div>
+        <div className="num mt-1 text-lg font-bold text-neutral-100">${fmtMoney(summary.finalEquity)}</div>
         {compare && sub(`$${fmtMoney(compare.finalEquity)}`)}
       </div>
       <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-        <div className="text-[11px] text-slate-500">{t('simulator.returnPct')}</div>
+        <div className="text-[11px] text-neutral-500">{t('simulator.returnPct')}</div>
         <div className={`num mt-1 text-lg font-bold ${summary.returnPct >= 0 ? 'text-up' : 'text-down'}`}>
           {summary.returnPct >= 0 ? '+' : ''}{summary.returnPct.toFixed(2)}%
         </div>
         {compare && sub(`${compare.returnPct >= 0 ? '+' : ''}${compare.returnPct.toFixed(2)}%`)}
       </div>
       <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-        <div className="text-[11px] text-slate-500">{t('simulator.maxDrawdown')}</div>
+        <div className="text-[11px] text-neutral-500">{t('simulator.maxDrawdown')}</div>
         <div className="num mt-1 text-lg font-bold text-down">-{summary.maxDrawdownPct.toFixed(2)}%</div>
         {compare && sub(`-${compare.maxDrawdownPct.toFixed(2)}%`)}
       </div>
       <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-        <div className="text-[11px] text-slate-500">{t('simulator.maxLossStreak')}</div>
+        <div className="text-[11px] text-neutral-500">{t('simulator.maxLossStreak')}</div>
         <div className="num mt-1 text-lg font-bold text-down">{summary.maxLossStreak}</div>
         {compare && sub(String(compare.maxLossStreak))}
       </div>
       <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-        <div className="text-[11px] text-slate-500">{t('simulator.winRate')}</div>
-        <div className="num mt-1 text-lg font-bold text-slate-100">
+        <div className="text-[11px] text-neutral-500">{t('simulator.winRate')}</div>
+        <div className="num mt-1 text-lg font-bold text-neutral-100">
           {summary.winRate == null ? '-' : `${Math.round(summary.winRate * 100)}%`}
-          <span className="ml-1.5 text-xs font-normal text-slate-500">{summary.wins}/{summary.wins + summary.losses}</span>
+          <span className="ml-1.5 text-xs font-normal text-neutral-500">{summary.wins}/{summary.wins + summary.losses}</span>
         </div>
         {compare && sub(compare.winRate == null ? '-' : `${Math.round(compare.winRate * 100)}%`)}
       </div>
       <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-        <div className="text-[11px] text-slate-500">{t('simulator.avgRr')}</div>
-        <div className="num mt-1 text-lg font-bold text-slate-100">{summary.avgRr == null ? '-' : `${summary.avgRr.toFixed(2)}R`}</div>
+        <div className="text-[11px] text-neutral-500">{t('simulator.avgRr')}</div>
+        <div className="num mt-1 text-lg font-bold text-neutral-100">{summary.avgRr == null ? '-' : `${summary.avgRr.toFixed(2)}R`}</div>
         {compare && sub(compare.avgRr == null ? '-' : `${compare.avgRr.toFixed(2)}R`)}
       </div>
     </div>
@@ -421,25 +421,25 @@ function SampleSectionView({ title, section }: SampleSectionViewProps) {
   return (
     <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
       <div className="flex flex-wrap items-baseline gap-2">
-        <h5 className="text-xs font-semibold text-slate-200">{title}</h5>
-        <span className="text-[11px] text-slate-500">
+        <h5 className="text-xs font-semibold text-neutral-200">{title}</h5>
+        <span className="text-[11px] text-neutral-500">
           {t('strategy.btSampleMeta', { bars: section.barsUsed, trades: resolved })}
         </span>
       </div>
       <div className="mt-2 grid grid-cols-3 gap-2 font-mono text-[11px]">
         <div>
-          <div className="text-slate-500">{t('simulator.winRate')}</div>
-          <div className="mt-0.5 text-slate-100">{section.summary.winRate == null ? '-' : `${Math.round(section.summary.winRate * 100)}%`}</div>
+          <div className="text-neutral-500">{t('simulator.winRate')}</div>
+          <div className="mt-0.5 text-neutral-100">{section.summary.winRate == null ? '-' : `${Math.round(section.summary.winRate * 100)}%`}</div>
         </div>
         <div>
-          <div className="text-slate-500">{t('simulator.returnPct')}</div>
+          <div className="text-neutral-500">{t('simulator.returnPct')}</div>
           <div className={`mt-0.5 ${section.summary.returnPct >= 0 ? 'text-up' : 'text-down'}`}>
             {section.summary.returnPct >= 0 ? '+' : ''}{section.summary.returnPct.toFixed(2)}%
           </div>
         </div>
         <div>
-          <div className="text-slate-500">{t('simulator.avgRr')}</div>
-          <div className="mt-0.5 text-slate-100">{section.summary.avgRr == null ? '-' : `${section.summary.avgRr.toFixed(2)}R`}</div>
+          <div className="text-neutral-500">{t('simulator.avgRr')}</div>
+          <div className="mt-0.5 text-neutral-100">{section.summary.avgRr == null ? '-' : `${section.summary.avgRr.toFixed(2)}R`}</div>
         </div>
       </div>
     </div>
@@ -597,12 +597,12 @@ export default function BacktestPanel({
   const totalPages = Math.max(1, Math.ceil(tradesDesc.length / TRADE_PAGE_SIZE))
   const segBtn = (active: boolean) =>
     `rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-      active ? 'border-prism-500/50 bg-prism-600/20 text-prism-200' : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-100'
+      active ? 'border-prism-500/50 bg-prism-600/20 text-prism-200' : 'border-white/10 bg-white/5 text-neutral-400 hover:text-neutral-100'
     }`
 
   return (
     <div>
-      <h4 className="mb-3 text-sm font-semibold text-slate-300">{t('strategy.sectionBacktest')}</h4>
+      <h4 className="mb-3 text-sm font-semibold text-neutral-300">{t('strategy.sectionBacktest')}</h4>
 
       {/* 覆盖度提示在按钮之上、执行之前——先看清有多少数据，再决定跑不跑。
           它的标题句里已经带上品种与周期，所以这里不再另设一行目标回显。
@@ -615,7 +615,7 @@ export default function BacktestPanel({
 
       <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-slate-500" id="bt-range-label">{t('simulator.range')}</span>
+          <span className="text-[11px] uppercase tracking-wide text-neutral-500" id="bt-range-label">{t('simulator.range')}</span>
           <div className="flex flex-wrap gap-2" role="radiogroup" aria-labelledby="bt-range-label">
             {DAY_CHOICES.map((d) => (
               <button key={d} type="button" role="radio" aria-checked={days === d} onClick={() => setDays(d)} className={segBtn(days === d)}>{d}</button>
@@ -623,12 +623,12 @@ export default function BacktestPanel({
           </div>
         </div>
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('simulator.risk')} · {riskPct.toFixed(1)}%</span>
+          <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('simulator.risk')} · {riskPct.toFixed(1)}%</span>
           <input type="range" min={0.1} max={3} step={0.1} value={riskPct} onChange={(e) => setRiskPct(parseFloat(e.target.value))} className="w-full accent-prism-500" />
         </label>
         <NumberField label={t('simulator.capital')} value={capital} min={1} max={1e9} isFloat={false} onChange={setCapital} />
         <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-slate-500" id="bt-mode-label">{t('simulator.mode')}</span>
+          <span className="text-[11px] uppercase tracking-wide text-neutral-500" id="bt-mode-label">{t('simulator.mode')}</span>
           <div className="flex gap-2" role="radiogroup" aria-labelledby="bt-mode-label">
             <button type="button" role="radio" aria-checked={mode === 'compound'} onClick={() => setMode('compound')} className={segBtn(mode === 'compound')}>{t('simulator.modeCompound')}</button>
             <button type="button" role="radio" aria-checked={mode === 'flat'} onClick={() => setMode('flat')} className={segBtn(mode === 'flat')}>{t('simulator.modeFlat')}</button>
@@ -656,8 +656,8 @@ export default function BacktestPanel({
       {result && !result.insufficientData && (
         <div className="mt-5 border-t border-white/10 pt-4">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h4 className="text-sm font-semibold text-slate-200">{t('strategy.resultsTitle')}</h4>
-            <span className="text-[11px] text-slate-500">
+            <h4 className="text-sm font-semibold text-neutral-200">{t('strategy.resultsTitle')}</h4>
+            <span className="text-[11px] text-neutral-500">
               {t('strategy.btScope', { bars: result.barsUsed, requested: result.requestedDays })}
               {result.cached && ` · ${t('strategy.btCached')}`}
             </span>
@@ -668,8 +668,8 @@ export default function BacktestPanel({
               without. Side by side is what makes the cost visible. */}
           <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs text-slate-300">{t('strategy.btTotalCost', { cost: fmtMoney(result.totalCost) })}</span>
-              <label className="flex items-center gap-2 text-xs text-slate-400">
+              <span className="text-xs text-neutral-300">{t('strategy.btTotalCost', { cost: fmtMoney(result.totalCost) })}</span>
+              <label className="flex items-center gap-2 text-xs text-neutral-400">
                 <input
                   type="checkbox"
                   checked={showWithoutCosts}
@@ -679,7 +679,7 @@ export default function BacktestPanel({
                 {t('strategy.btShowWithoutCosts')}
               </label>
             </div>
-            <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">{t('strategy.btCostHint')}</p>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-neutral-500">{t('strategy.btCostHint')}</p>
           </div>
 
           <div className="mt-3">
@@ -693,8 +693,8 @@ export default function BacktestPanel({
           {/* 样本内 / 样本外：切分固定 70/30，两段各一套指标
               In/out-of-sample: fixed 70/30 split, a full metric set each */}
           <div className="mt-5 border-t border-white/10 pt-4">
-            <h4 className="text-sm font-semibold text-slate-200">{t('strategy.btSampleTitle')}</h4>
-            <p className="mt-1 text-xs leading-relaxed text-slate-500">{t('strategy.btSampleHint')}</p>
+            <h4 className="text-sm font-semibold text-neutral-200">{t('strategy.btSampleTitle')}</h4>
+            <p className="mt-1 text-xs leading-relaxed text-neutral-500">{t('strategy.btSampleHint')}</p>
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <SampleSectionView title={t('strategy.btInSample')} section={result.inSample} />
               <SampleSectionView title={t('strategy.btOutOfSample')} section={result.outOfSample} />
@@ -709,9 +709,9 @@ export default function BacktestPanel({
                 {result.overfitRisk.reason === 'winRateDrop' ? t('strategy.overfitWinRateDrop') : t('strategy.overfitReturnFlip')}
               </p>
             ) : result.overfitRisk.insufficientSample ? (
-              <p className="mt-3 text-xs text-slate-500">{t('strategy.overfitNotEvaluated')}</p>
+              <p className="mt-3 text-xs text-neutral-500">{t('strategy.overfitNotEvaluated')}</p>
             ) : (
-              <p className="mt-3 text-xs text-slate-500">{t('strategy.overfitClear')}</p>
+              <p className="mt-3 text-xs text-neutral-500">{t('strategy.overfitClear')}</p>
             )}
           </div>
 
@@ -736,8 +736,8 @@ export default function BacktestPanel({
 
           {bars.length > 0 && (
             <div className="mt-5 border-t border-white/10 pt-4">
-              <h4 className="text-sm font-semibold text-slate-200">{t('strategy.chartTitle')}</h4>
-              <p className="mt-1 text-xs text-slate-500">
+              <h4 className="text-sm font-semibold text-neutral-200">{t('strategy.chartTitle')}</h4>
+              <p className="mt-1 text-xs text-neutral-500">
                 {result.trades.length > CHART_TRADE_CAP
                   ? t('strategy.chartHintCapped', { n: result.trades.length, shown: CHART_TRADE_CAP })
                   : t('strategy.chartHint', { n: result.trades.length })}
@@ -751,7 +751,7 @@ export default function BacktestPanel({
                   want to check what the triggers were reading. */}
               {availableOverlays.length > 0 && (
                 <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] p-3">
-                  <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.overlayTitle')}</p>
+                  <p className="text-[11px] uppercase tracking-wide text-neutral-500">{t('strategy.overlayTitle')}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {availableOverlays.map((ov) => {
                       const on = shownOverlayIds.includes(ov.id)
@@ -763,8 +763,8 @@ export default function BacktestPanel({
                           aria-pressed={on}
                           className={`flex items-center gap-1.5 rounded-pill border px-2.5 py-1 text-xs transition ${
                             on
-                              ? 'border-white/20 bg-white/10 text-slate-100'
-                              : 'border-white/10 bg-white/[0.02] text-slate-400 hover:text-slate-200'
+                              ? 'border-white/20 bg-white/10 text-neutral-100'
+                              : 'border-white/10 bg-white/[0.02] text-neutral-400 hover:text-neutral-200'
                           }`}
                         >
                           <span
@@ -777,7 +777,7 @@ export default function BacktestPanel({
                       )
                     })}
                   </div>
-                  <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('strategy.overlayHint')}</p>
+                  <p className="mt-2 text-xs leading-relaxed text-neutral-500">{t('strategy.overlayHint')}</p>
                 </div>
               )}
 
@@ -794,7 +794,7 @@ export default function BacktestPanel({
           )}
 
           <div className="mt-5 border-t border-white/10 pt-4">
-            <h4 className="text-sm font-semibold text-slate-200">{t('simulator.equityCurve')}</h4>
+            <h4 className="text-sm font-semibold text-neutral-200">{t('simulator.equityCurve')}</h4>
             <div className="mt-3">
               <EquityCurve points={result.points} capital={capital} />
             </div>
@@ -802,11 +802,11 @@ export default function BacktestPanel({
 
           {result.trades.length > 0 && (
             <div className="mt-5 border-t border-white/10 pt-4">
-              <h4 className="text-sm font-semibold text-slate-200">{t('simulator.trades')}</h4>
+              <h4 className="text-sm font-semibold text-neutral-200">{t('simulator.trades')}</h4>
               <div className="mt-3 overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-slate-500">
+                    <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-neutral-500">
                       <th scope="col" className="px-3 py-2 font-medium">{t('orders.colTime')}</th>
                       <th scope="col" className="px-3 py-2 font-medium">{t('orders.colSide')}</th>
                       <th scope="col" className="px-3 py-2 font-medium">{t('simulator.result')}</th>
@@ -820,7 +820,7 @@ export default function BacktestPanel({
                         Newest first, consistent with the orders page */}
                     {tradesDesc.slice(tradePage * TRADE_PAGE_SIZE, tradePage * TRADE_PAGE_SIZE + TRADE_PAGE_SIZE).map((tr) => (
                       <tr key={tr.id} className="border-b border-white/5">
-                        <td className="whitespace-nowrap px-3 py-2 text-slate-400">{fmtDate(tr.createdAt)}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-neutral-400">{fmtDate(tr.createdAt)}</td>
                         <td className="px-3 py-2">
                           <span className={`tag ${tr.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
                             {tr.side === 'BUY' ? t('common.buy') : t('common.sell')}
@@ -837,7 +837,7 @@ export default function BacktestPanel({
                               tr.result === 'HIT_TP'
                                 ? 'bg-up/15 text-up'
                                 : tr.result === 'TIMEOUT'
-                                  ? 'bg-white/5 text-slate-400'
+                                  ? 'bg-white/5 text-neutral-400'
                                   : 'bg-down/15 text-down'
                             }`}
                           >
@@ -848,25 +848,25 @@ export default function BacktestPanel({
                                 : t('winrate.hitSl')}
                           </span>
                         </td>
-                        <td className="px-3 py-2 text-right font-mono text-slate-300">{tr.rr.toFixed(2)}R</td>
+                        <td className="px-3 py-2 text-right font-mono text-neutral-300">{tr.rr.toFixed(2)}R</td>
                         <td className={`px-3 py-2 text-right font-mono font-semibold ${tr.pnlPct >= 0 ? 'text-up' : 'text-down'}`}>
                           {tr.pnlPct >= 0 ? '+' : ''}{tr.pnlPct.toFixed(2)}%
                         </td>
-                        <td className="px-3 py-2 text-right font-mono text-slate-200">${fmtMoney(tr.equityAfter)}</td>
+                        <td className="px-3 py-2 text-right font-mono text-neutral-200">${fmtMoney(tr.equityAfter)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
               {result.trades.length > TRADE_PAGE_SIZE && (
-                <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
+                <div className="mt-3 flex items-center justify-between text-xs text-neutral-400">
                   <span>{t('orders.pageInfo', { page: tradePage + 1, totalPages, total: result.trades.length })}</span>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => setTradePage((p) => Math.max(0, p - 1))}
                       disabled={tradePage === 0}
-                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {t('common.prevPage')}
                     </button>
@@ -874,7 +874,7 @@ export default function BacktestPanel({
                       type="button"
                       onClick={() => setTradePage((p) => Math.min(totalPages - 1, p + 1))}
                       disabled={tradePage + 1 >= totalPages}
-                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {t('common.nextPage')}
                     </button>

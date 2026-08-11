@@ -110,7 +110,7 @@
          Notification/PushManager don't exist at all. It also makes the app a
          real installable PWA on Android. -->
     <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#06030f" />
+    <meta name="theme-color" content="#09090B" />
     <!-- iOS 主屏幕 Web App 声明与图标（iOS 不读 manifest 的 icons，只认
          apple-touch-icon）/ iOS home-screen web-app declaration & icon (iOS
          ignores manifest icons; only apple-touch-icon is honored) -->
@@ -121,8 +121,32 @@
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- 字体栈说明 / font stack rationale
+         Archivo（可变，带宽度轴 wdth 62–125）取代 Space Grotesk：
+         · 一支字体覆盖两种语气——标题用扩展字宽 + 800 字重拿到海报式编辑感，
+           界面用标准字宽保持中性，不需要再多下载一支「显示字体」。
+         · Space Grotesk 没有汉字字形。本站默认语言是中文，此前所有中文实际
+           渲染成系统 PingFang/微软雅黑，与旁边的拉丁字母字重、字面大小、
+           基线都对不上——中英混排一眼就散。现在显式配 Noto Sans SC，中英
+           两侧字重轴对齐（400/500/700 一一对应）。
+         · 只请求实际用到的字重区间，wdth 轴范围收窄到 87..125（界面 100、
+           标题 112–125），避免把整条 62–125 轴的数据都拉下来。
+         JetBrains Mono 保留：等宽数字是交易界面的刚需，且它不是 AI 签名字体。
+
+         Archivo (variable, width axis wdth 62–125) replaces Space Grotesk:
+         · One family covers both registers — expanded width at weight 800 for
+           headlines gives an editorial/poster voice, normal width stays neutral
+           for UI, so no separate display face needs downloading.
+         · Space Grotesk has no CJK glyphs. This site defaults to Chinese, so all
+           Chinese text was actually rendering in the system PingFang/YaHei and
+           mismatched the adjacent Latin in weight, apparent size and baseline —
+           mixed-script lines visibly fell apart. Noto Sans SC is now declared
+           explicitly, with its weight axis aligned to Archivo's (400/500/700).
+         · Only the weight ranges in use are requested, and the width axis is
+           narrowed to 87..125 (UI at 100, headlines at 112–125) rather than
+           pulling the whole 62–125 range. -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@87..125,400..800&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <!-- Google Identity Services / Google 登录 SDK -->

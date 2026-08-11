@@ -58,7 +58,7 @@ function isDirty(u: AdminUser, d: Draft | undefined): boolean {
 }
 
 const planChipClass: Record<UserPlan, string> = {
-  FREE: 'bg-white/5 text-slate-400',
+  FREE: 'bg-white/5 text-neutral-400',
   PRO: 'bg-prism-600/20 text-prism-300',
 }
 
@@ -146,10 +146,10 @@ function AdminTicketsPanel() {
   const statusClass: Record<string, string> = {
     open: 'bg-amber-400/15 text-amber-300',
     in_progress: 'bg-blue-400/15 text-blue-300',
-    closed: 'bg-slate-500/15 text-slate-400',
+    closed: 'bg-neutral-500/15 text-neutral-400',
   }
   const priorityClass: Record<string, string> = {
-    low: 'bg-slate-500/15 text-slate-400',
+    low: 'bg-neutral-500/15 text-neutral-400',
     normal: 'bg-blue-400/15 text-blue-300',
     urgent: 'bg-down/15 text-down',
   }
@@ -170,18 +170,18 @@ function AdminTicketsPanel() {
             &larr; {t('tickets.backToList')}
           </button>
           <div className="glass mb-4 p-5">
-            <h2 className="font-display text-lg font-bold text-slate-100 mb-3">{detail.title}</h2>
+            <h2 className="font-display text-lg font-bold text-neutral-100 mb-3">{detail.title}</h2>
             <div className="flex flex-wrap items-center gap-2 mb-3">
               <span className={`tag ${statusClass[detail.status]}`}>{t(`tickets.status.${detail.status}`)}</span>
               <span className={`tag ${priorityClass[detail.priority]}`}>{t(`tickets.priority.${detail.priority}`)}</span>
-              <span className="tag bg-white/5 text-slate-400">{t(`tickets.category.${detail.category}`)}</span>
-              <span className="ml-auto text-xs text-slate-500">{detail.userEmail}</span>
+              <span className="tag bg-white/5 text-neutral-400">{t(`tickets.category.${detail.category}`)}</span>
+              <span className="ml-auto text-xs text-neutral-500">{detail.userEmail}</span>
             </div>
             <div className="flex gap-2 mt-3">
               {(['open', 'in_progress', 'closed'] as TicketStatus[]).map((s) => (
                 <button key={s} onClick={() => updateMeta({ status: s })}
                   className={`rounded-lg px-3 py-1 text-xs transition ${
-                    detail.status === s ? 'bg-prism-600/20 text-prism-200' : 'bg-white/5 text-slate-500 hover:bg-white/10'
+                    detail.status === s ? 'bg-prism-600/20 text-prism-200' : 'bg-white/5 text-neutral-500 hover:bg-white/10'
                   }`}>
                   {t(`tickets.status.${s}`)}
                 </button>
@@ -193,12 +193,12 @@ function AdminTicketsPanel() {
             {detail.replies.map((r) => (
               <div key={r.id} className={`flex ${r.authorRole === 'admin' ? 'justify-start' : 'justify-end'} mb-3`}>
                 <div className={`max-w-[80%] rounded-xl px-4 py-3 ${r.authorRole === 'admin' ? 'bg-prism-600/10' : 'bg-white/5'}`}>
-                  <div className="mb-1 flex items-center gap-2 text-[11px] text-slate-500">
-                    <span className="font-medium text-slate-300">{r.authorEmail}</span>
+                  <div className="mb-1 flex items-center gap-2 text-[11px] text-neutral-500">
+                    <span className="font-medium text-neutral-300">{r.authorEmail}</span>
                     {r.authorRole === 'admin' && <span className="rounded bg-prism-600/20 px-1.5 py-0.5 text-[10px] text-prism-300">{t('admin.staff')}</span>}
                     <span>{new Date(r.createdAt).toLocaleString()}</span>
                   </div>
-                  <p className="whitespace-pre-wrap text-sm text-slate-200">{r.body}</p>
+                  <p className="whitespace-pre-wrap text-sm text-neutral-200">{r.body}</p>
                 </div>
               </div>
             ))}
@@ -257,11 +257,11 @@ function AdminTicketsPanel() {
                 <SkeletonLine width="75%" />
               </div>
             ) : tickets.length === 0 ? (
-              <div className="p-8 text-center text-sm text-slate-500">{t('tickets.empty')}</div>
+              <div className="p-8 text-center text-sm text-neutral-500">{t('tickets.empty')}</div>
             ) : (
               <table className="w-full min-w-[700px] text-left text-sm">
                 <thead>
-                  <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-slate-500">
+                  <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-neutral-500">
                     <th className="px-4 py-3 font-medium">{t('tickets.admin.colTitle')}</th>
                     <th className="px-4 py-3 font-medium">{t('tickets.admin.colUser')}</th>
                     <th className="px-4 py-3 font-medium">{t('tickets.admin.colCategory')}</th>
@@ -275,18 +275,18 @@ function AdminTicketsPanel() {
                     <tr key={ticket.id} onClick={() => openDetail(ticket.id)}
                       className="cursor-pointer border-b border-white/5 transition hover:bg-white/[0.03]">
                       <td className="px-4 py-3">
-                        <div className="max-w-[220px] truncate text-slate-200">{ticket.title}</div>
+                        <div className="max-w-[220px] truncate text-neutral-200">{ticket.title}</div>
                         {ticket.latestReply && (
-                          <div className="mt-0.5 max-w-[220px] truncate text-[11px] text-slate-500">
+                          <div className="mt-0.5 max-w-[220px] truncate text-[11px] text-neutral-500">
                             {ticket.latestReply.authorEmail}: {ticket.latestReply.body}
                           </div>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-xs text-slate-400">
+                      <td className="px-4 py-3 text-xs text-neutral-400">
                         {ticket.userEmail || '-'}
                       </td>
                       <td className="px-4 py-3">
-                        <span className="tag bg-white/5 text-slate-400">{t(`tickets.category.${ticket.category}`)}</span>
+                        <span className="tag bg-white/5 text-neutral-400">{t(`tickets.category.${ticket.category}`)}</span>
                       </td>
                       <td className="px-4 py-3">
                         <span className={`tag ${priorityClass[ticket.priority]}`}>{t(`tickets.priority.${ticket.priority}`)}</span>
@@ -294,7 +294,7 @@ function AdminTicketsPanel() {
                       <td className="px-4 py-3">
                         <span className={`tag ${statusClass[ticket.status]}`}>{t(`tickets.status.${ticket.status}`)}</span>
                       </td>
-                      <td className="px-4 py-3 text-xs text-slate-500">{new Date(ticket.updatedAt).toLocaleDateString()}</td>
+                      <td className="px-4 py-3 text-xs text-neutral-500">{new Date(ticket.updatedAt).toLocaleDateString()}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -607,10 +607,10 @@ export default function AdminPage() {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="font-display text-2xl font-bold text-slate-100">
+        <h2 className="font-display text-2xl font-bold text-neutral-100">
           <span className="neon-text">{t('admin.title')}</span>
         </h2>
-        <p className="mt-1 text-sm text-slate-400">{t('admin.subtitle')}</p>
+        <p className="mt-1 text-sm text-neutral-400">{t('admin.subtitle')}</p>
       </div>
 
       {toast && (
@@ -634,7 +634,7 @@ export default function AdminPage() {
             className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
               tab === key
                 ? 'bg-prism-600/20 text-prism-200'
-                : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                : 'text-neutral-400 hover:bg-white/5 hover:text-neutral-200'
             }`}
           >
             {t(`admin.tab.${key}`)}
@@ -647,20 +647,20 @@ export default function AdminPage() {
       {/* 运营指标 / operating metrics */}
       <div className="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div className="glass px-4 py-4">
-          <div className="text-xs text-slate-400">{t('admin.totalUsers')}</div>
-          <div className="num mt-1 font-display text-2xl font-bold text-slate-50">{metrics?.totalUsers ?? '-'}</div>
+          <div className="text-xs text-neutral-400">{t('admin.totalUsers')}</div>
+          <div className="num mt-1 font-display text-2xl font-bold text-neutral-50">{metrics?.totalUsers ?? '-'}</div>
         </div>
         <div className="glass px-4 py-4">
-          <div className="text-xs text-slate-400">{t('admin.dau')}</div>
+          <div className="text-xs text-neutral-400">{t('admin.dau')}</div>
           <div className="num mt-1 font-display text-2xl font-bold text-up">{metrics?.dau ?? '-'}</div>
         </div>
         <div className="glass px-4 py-4">
-          <div className="text-xs text-slate-400">{t('admin.wau')}</div>
+          <div className="text-xs text-neutral-400">{t('admin.wau')}</div>
           <div className="num mt-1 font-display text-2xl font-bold text-prism-300">{metrics?.wau ?? '-'}</div>
         </div>
         <div className="glass px-4 py-4">
-          <div className="text-xs text-slate-400">{t('admin.signupsLast7d')}</div>
-          <div className="num mt-1 font-display text-2xl font-bold text-slate-50">
+          <div className="text-xs text-neutral-400">{t('admin.signupsLast7d')}</div>
+          <div className="num mt-1 font-display text-2xl font-bold text-neutral-50">
             {metrics?.signupsLast7d.reduce((s, d) => s + d.count, 0) ?? '-'}
           </div>
         </div>
@@ -668,7 +668,7 @@ export default function AdminPage() {
 
       {/* 各等级人数 / plan breakdown */}
       <div className="glass mb-5 flex flex-wrap items-center gap-2 p-4">
-        <span className="text-xs text-slate-400">{t('admin.planBreakdown')}</span>
+        <span className="text-xs text-neutral-400">{t('admin.planBreakdown')}</span>
         {PLAN_OPTIONS.map((p) => (
           <span key={p} className={`tag ${planChipClass[p]}`}>
             {p} · {planCounts[p] ?? 0}
@@ -692,8 +692,8 @@ export default function AdminPage() {
       {brokerSettings && (
         <div className="glass mb-5 p-5">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h3 className="font-display text-lg font-semibold text-slate-100">{t('admin.brokerTitle')}</h3>
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+            <h3 className="font-display text-lg font-semibold text-neutral-100">{t('admin.brokerTitle')}</h3>
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
               <input
                 type="checkbox"
                 checked={brokerSettings.brokerLockEnabled}
@@ -712,7 +712,7 @@ export default function AdminPage() {
                 onChange={(e) => setBrokerPatternsText(e.target.value)}
                 placeholder="MakeCapital"
               />
-              <p className="mt-1.5 text-xs text-slate-500">{t('admin.brokerPatternsHint')}</p>
+              <p className="mt-1.5 text-xs text-neutral-500">{t('admin.brokerPatternsHint')}</p>
             </div>
             <div>
               <label className="label">{t('admin.brokerDisplayName')}</label>
@@ -735,7 +735,7 @@ export default function AdminPage() {
                   三处推广位是否出现，所以把作用范围写在旁边。
                   This field used to have no effect at all (nothing rendered it).
                   It now gates three promo placements, so say so next to it. */}
-              <p className="mt-1.5 text-xs text-slate-500">{t('admin.brokerReferralUrlHint')}</p>
+              <p className="mt-1.5 text-xs text-neutral-500">{t('admin.brokerReferralUrlHint')}</p>
             </div>
           </div>
           <button
@@ -752,8 +752,8 @@ export default function AdminPage() {
       {pricing && (
         <div className="glass mb-5 p-5">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h3 className="font-display text-lg font-semibold text-slate-100">{t('admin.pricingTitle')}</h3>
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+            <h3 className="font-display text-lg font-semibold text-neutral-100">{t('admin.pricingTitle')}</h3>
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
               <input
                 type="checkbox"
                 checked={pricing.saleEnabled}
@@ -767,7 +767,7 @@ export default function AdminPage() {
             <div>
               <label className="label">{t('admin.proMonthlyPrice')}</label>
               <div className="flex items-center gap-1">
-                <span className="text-slate-400">$</span>
+                <span className="text-neutral-400">$</span>
                 <input
                   type="number"
                   className="input"
@@ -777,12 +777,12 @@ export default function AdminPage() {
                   onChange={(e) => setPricing({ ...pricing, proMonthlyPrice: parseFloat(e.target.value) || 0 })}
                 />
               </div>
-              <p className="mt-1 text-[11px] text-slate-500">{t('admin.proMonthlyPriceHint')}</p>
+              <p className="mt-1 text-[11px] text-neutral-500">{t('admin.proMonthlyPriceHint')}</p>
             </div>
             <div>
               <label className="label">{t('admin.proYearlyPrice')}</label>
               <div className="flex items-center gap-1">
-                <span className="text-slate-400">$</span>
+                <span className="text-neutral-400">$</span>
                 <input
                   type="number"
                   className="input"
@@ -792,7 +792,7 @@ export default function AdminPage() {
                   onChange={(e) => setPricing({ ...pricing, proYearlyPrice: parseFloat(e.target.value) || 0 })}
                 />
               </div>
-              <p className="mt-1 text-[11px] text-slate-500">{t('admin.proYearlyPriceHint')}</p>
+              <p className="mt-1 text-[11px] text-neutral-500">{t('admin.proYearlyPriceHint')}</p>
             </div>
             <div>
               <label className="label">{t('admin.salePercent')}</label>
@@ -806,9 +806,9 @@ export default function AdminPage() {
                   onChange={(e) => setPricing({ ...pricing, salePercent: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) })}
                   disabled={!pricing.saleEnabled}
                 />
-                <span className="text-slate-400">%</span>
+                <span className="text-neutral-400">%</span>
               </div>
-              <p className="mt-1 text-[11px] text-slate-500">{t('admin.salePercentHint')}</p>
+              <p className="mt-1 text-[11px] text-neutral-500">{t('admin.salePercentHint')}</p>
             </div>
             <div>
               <label className="label">{t('admin.saleBadge')}</label>
@@ -820,7 +820,7 @@ export default function AdminPage() {
                 placeholder="SUMMER"
                 maxLength={32}
               />
-              <p className="mt-1 text-[11px] text-slate-500">{t('admin.saleBadgeHint')}</p>
+              <p className="mt-1 text-[11px] text-neutral-500">{t('admin.saleBadgeHint')}</p>
             </div>
           </div>
           {pricing.saleEnabled && (
@@ -845,8 +845,8 @@ export default function AdminPage() {
       {trial && (
         <div className="glass mb-5 p-5">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h3 className="font-display text-lg font-semibold text-slate-100">{t('admin.trialTitle')}</h3>
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+            <h3 className="font-display text-lg font-semibold text-neutral-100">{t('admin.trialTitle')}</h3>
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
               <input
                 type="checkbox"
                 checked={trial.trialEnabled}
@@ -888,7 +888,7 @@ export default function AdminPage() {
       {/* 纪律分参数设置 / discipline-score parameter settings */}
       {discipline && (
         <div className="glass mb-5 p-5">
-          <h3 className="mb-4 font-display text-lg font-semibold text-slate-100">{t('admin.disciplineTitle')}</h3>
+          <h3 className="mb-4 font-display text-lg font-semibold text-neutral-100">{t('admin.disciplineTitle')}</h3>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <div>
               <label className="label">{t('admin.dscWindowDays')}</label>
@@ -983,7 +983,7 @@ export default function AdminPage() {
       {/* K 线历史保留策略设置 / candle-history retention settings */}
       {candleSettings && (
         <div className="glass mb-5 p-5">
-          <h3 className="mb-4 font-display text-lg font-semibold text-slate-100">{t('admin.candleHistoryTitle')}</h3>
+          <h3 className="mb-4 font-display text-lg font-semibold text-neutral-100">{t('admin.candleHistoryTitle')}</h3>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <div>
               <label className="label">{t('admin.candleM1Retention')}</label>
@@ -1010,7 +1010,7 @@ export default function AdminPage() {
       {/* 自定义策略平台设置 / custom-strategy platform settings */}
       {strategySettings && (
         <div className="glass mb-5 p-5">
-          <h3 className="mb-4 font-display text-lg font-semibold text-slate-100">{t('admin.strategyPlatformTitle')}</h3>
+          <h3 className="mb-4 font-display text-lg font-semibold text-neutral-100">{t('admin.strategyPlatformTitle')}</h3>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <div>
               <label className="label">{t('admin.strategyMaxPerUser')}</label>
@@ -1024,7 +1024,7 @@ export default function AdminPage() {
               />
             </div>
             <div className="flex items-end pb-2">
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
                 <input
                   type="checkbox"
                   checked={strategySettings.proOnly}
@@ -1068,28 +1068,28 @@ export default function AdminPage() {
           options={[{ value: '', label: t('signals.all') }, ...PLAN_OPTIONS.map((p) => ({ value: p, label: p }))]}
         />
         <button type="submit" className="btn-primary px-5 py-2 text-sm">{t('admin.search')}</button>
-        <span className="ml-auto text-xs text-slate-500">{t('admin.totalCount', { n: total })}</span>
+        <span className="ml-auto text-xs text-neutral-500">{t('admin.totalCount', { n: total })}</span>
       </form>
 
       {/* 批量操作条：勾选至少一位用户后出现 / bulk action bar, shown once ≥1 user is selected */}
       {selectedIds.size > 0 && (
         <div className="glass mb-4 flex flex-wrap items-center gap-3 border-prism-600/40 p-4">
           <span className="text-sm font-medium text-prism-200">{t('admin.bulkSelected', { n: selectedIds.size })}</span>
-          <span className="text-xs text-slate-500">{t('admin.colRole')}</span>
+          <span className="text-xs text-neutral-500">{t('admin.colRole')}</span>
           <Select
             value={bulkRole}
             onChange={setBulkRole}
             openUpward
             options={[{ value: '', label: t('admin.bulkNoChange') }, ...ROLE_OPTIONS.map((r) => ({ value: r, label: r }))]}
           />
-          <span className="text-xs text-slate-500">{t('admin.colPlan')}</span>
+          <span className="text-xs text-neutral-500">{t('admin.colPlan')}</span>
           <Select
             value={bulkPlan}
             onChange={setBulkPlan}
             openUpward
             options={[{ value: '', label: t('admin.bulkNoChange') }, ...PLAN_OPTIONS.map((p) => ({ value: p, label: p }))]}
           />
-          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-500">
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-neutral-500">
             <input
               type="checkbox"
               checked={bulkSetExpiry}
@@ -1128,11 +1128,11 @@ export default function AdminPage() {
             <SkeletonLine width="80%" />
           </div>
         ) : users.length === 0 ? (
-          <div className="p-8 text-center text-sm text-slate-500">{t('admin.noUsers')}</div>
+          <div className="p-8 text-center text-sm text-neutral-500">{t('admin.noUsers')}</div>
         ) : (
           <table className="w-full min-w-[900px] text-left text-sm">
             <thead>
-              <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-slate-500">
+              <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-neutral-500">
                 <th className="px-4 py-3">
                   <input
                     ref={headerCheckboxRef}
@@ -1170,15 +1170,15 @@ export default function AdminPage() {
                       />
                     </td>
                     <td className="px-4 py-3">
-                      <div className="max-w-[220px] truncate font-mono text-xs text-slate-200">{u.email}</div>
-                      <div className="mt-1 text-[11px] text-slate-500">{fmtTime(u.createdAt)}</div>
+                      <div className="max-w-[220px] truncate font-mono text-xs text-neutral-200">{u.email}</div>
+                      <div className="mt-1 text-[11px] text-neutral-500">{fmtTime(u.createdAt)}</div>
                     </td>
                     {/* 手机号：存量用户为空。用「—」而不是留白，否则看起来像渲染坏了。
                         Empty for grandfathered users; an em dash rather than blank
                         space, which would read as a rendering bug. */}
                     <td className="px-4 py-3">
-                      <div className="whitespace-nowrap font-mono text-xs text-slate-300">
-                        {u.phone || <span className="text-slate-600">—</span>}
+                      <div className="whitespace-nowrap font-mono text-xs text-neutral-300">
+                        {u.phone || <span className="text-neutral-500">—</span>}
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -1212,8 +1212,8 @@ export default function AdminPage() {
                         onChange={(e) => updateDraft(u.id, { planNote: e.target.value })}
                       />
                     </td>
-                    <td className="px-4 py-3 text-center font-mono text-xs text-slate-300">{u.mt5AccountCount}</td>
-                    <td className="px-4 py-3 text-xs text-slate-400">{fmtTime(u.lastActiveAt)}</td>
+                    <td className="px-4 py-3 text-center font-mono text-xs text-neutral-300">{u.mt5AccountCount}</td>
+                    <td className="px-4 py-3 text-xs text-neutral-400">{fmtTime(u.lastActiveAt)}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
                         <button
@@ -1248,7 +1248,7 @@ export default function AdminPage() {
           point is this quiet link at the bottom of the admin page. The real
           boundary is still the backend's require_admin. */}
       <div className="mt-8 border-t border-white/5 pt-4 text-right">
-        <Link to="/simulator" className="text-xs text-slate-600 hover:text-slate-400">
+        <Link to="/simulator" className="text-xs text-neutral-500 hover:text-neutral-400">
           {t('simulator.entry')}
         </Link>
       </div>

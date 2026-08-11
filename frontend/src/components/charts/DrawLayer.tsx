@@ -1093,7 +1093,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, hideTool
   // ──── 工具栏 UI helpers ────
   const toolBtn = (id: Tool, icon: JSX.Element, label: string) => (
     <button type="button" title={label} aria-label={label} onClick={() => { setTool(id); if (id !== 'cursor' && id !== 'cross') setSelectedId(null) }}
-      className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${tool === id ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`}
+      className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${tool === id ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100'}`}
     >{icon}</button>
   )
 
@@ -1123,11 +1123,11 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, hideTool
           <div className="flex flex-col gap-1 -mx-0.5 px-0.5 pb-1 border-b border-white/10 mb-1">
             <button type="button" title={t('charts.draw.stayInDraw')} aria-label={t('charts.draw.stayInDraw')}
               onClick={() => setStayInDraw(!stayInDraw)}
-              className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${stayInDraw ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`}
+              className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${stayInDraw ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100'}`}
             ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3l4 4-4 4" /><path d="M3 17l4 4-4 4" /><line x1="21" y1="7" x2="7" y2="21" /><line x1="7" y1="3" x2="21" y2="17" /></svg></button>
             <button type="button" title={visible ? t('charts.draw.hideAll') : t('charts.draw.showAll')} aria-label={visible ? t('charts.draw.hideAll') : t('charts.draw.showAll')}
               onClick={() => setVisible(!visible)}
-              className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${!visible ? 'border-amber-400/60 bg-amber-400/15 text-amber-300' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`}
+              className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${!visible ? 'border-amber-400/60 bg-amber-400/15 text-amber-300' : 'border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100'}`}
             ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{visible ? <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></> : <><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></>}</svg></button>
           </div>
 
@@ -1139,7 +1139,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, hideTool
                 {isCollapsed ? (
                   <button type="button" onClick={() => toggleCollapse(group.key)}
                     title={String(t(`charts.draw.${group.key}`))} aria-label={String(t(`charts.draw.${group.key}`))}
-                    className="flex h-8 w-8 items-center justify-between rounded-md border border-white/10 bg-ink-800/60 px-1.5 text-slate-400 transition hover:text-slate-100"
+                    className="flex h-8 w-8 items-center justify-between rounded-md border border-white/10 bg-ink-800/60 px-1.5 text-neutral-400 transition hover:text-neutral-100"
                   >
                     <span className="scale-75">{group.tools[0].svg}</span>
                     <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="opacity-40"><polyline points="6 9 12 15 18 9" /></svg>
@@ -1148,7 +1148,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, hideTool
                   <>
                     <div className="flex items-center gap-1 mb-1">
                       <div className="h-px flex-1 bg-white/10" />
-                      <button type="button" onClick={() => toggleCollapse(group.key)} className="text-[9px] text-slate-500 hover:text-slate-300 px-1">{t(`charts.draw.${group.key}`)} <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="inline -mt-px"><polyline points="18 15 12 9 6 15" /></svg></button>
+                      <button type="button" onClick={() => toggleCollapse(group.key)} className="text-[9px] text-neutral-500 hover:text-neutral-300 px-1">{t(`charts.draw.${group.key}`)} <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="inline -mt-px"><polyline points="18 15 12 9 6 15" /></svg></button>
                       <div className="h-px flex-1 bg-white/10" />
                     </div>
                     <div className="flex flex-col gap-1">
@@ -1176,31 +1176,31 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, hideTool
           {/* 锁定 / lock */}
           <button type="button" title={selectedId && drawings.find((d) => d.id === selectedId)?.locked ? t('charts.draw.unlock') : t('charts.draw.lock')} aria-label={t('charts.draw.lock')}
             onClick={toggleLock} disabled={!selectedId}
-            className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${selectedId && drawings.find((d) => d.id === selectedId)?.locked ? 'border-amber-400/60 bg-amber-400/15 text-amber-300' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'} disabled:opacity-30`}
+            className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${selectedId && drawings.find((d) => d.id === selectedId)?.locked ? 'border-amber-400/60 bg-amber-400/15 text-amber-300' : 'border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100'} disabled:opacity-30`}
           ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg></button>
           <button type="button" title={t('charts.draw.lockAll')} aria-label={t('charts.draw.lockAll')} onClick={lockAll} disabled={drawCount === 0}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 hover:text-amber-300 disabled:opacity-30"
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-neutral-400 hover:text-amber-300 disabled:opacity-30"
           ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" /><line x1="12" y1="15" x2="12" y2="18" /></svg></button>
           <button type="button" title={t('charts.draw.unlockAll')} aria-label={t('charts.draw.unlockAll')} onClick={unlockAll} disabled={lockedCount === 0}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100 disabled:opacity-30"
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100 disabled:opacity-30"
           ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 019.9-1" /><line x1="12" y1="15" x2="12" y2="18" /></svg></button>
           <div className="my-0.5 h-px w-full bg-white/10" />
 
           {/* 撤销/重做 */}
           <button type="button" title={t('charts.draw.undo')} aria-label={t('charts.draw.undo')} onClick={undo} disabled={!canUndo}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100 disabled:opacity-30"
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100 disabled:opacity-30"
           ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 102.13-9.36L1 10" /></svg></button>
           <button type="button" title={t('charts.draw.redo')} aria-label={t('charts.draw.redo')} onClick={redo} disabled={!canRedo}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100 disabled:opacity-30"
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100 disabled:opacity-30"
           ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" /></svg></button>
           <div className="my-0.5 h-px w-full bg-white/10" />
 
           {/* 删除 */}
           <button type="button" title={t('charts.draw.delete')} aria-label={t('charts.draw.delete')} onClick={deleteSelected} disabled={!selectedId}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 hover:text-down disabled:opacity-30"
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-neutral-400 hover:text-down disabled:opacity-30"
           ><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg></button>
           <button type="button" title={t('charts.draw.clear')} aria-label={t('charts.draw.clear')} onClick={clearAll} disabled={drawCount === 0}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 hover:text-down disabled:opacity-30"
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-neutral-400 hover:text-down disabled:opacity-30"
           ><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 5L5 19M5 5l14 14" /></svg></button>
         </div>
       )}
@@ -1217,19 +1217,19 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, hideTool
           <span className="w-px h-5 sm:h-6 bg-white/10" />
           {(['solid', 'dashed', 'dotted'] as const).map((s) => (
             <button key={s} type="button" title={String(t(`charts.draw.${s}`))} onClick={() => applyLineStyle(s)}
-              className={`flex items-center justify-center rounded border transition ${(d.lineStyle || 'solid') === s ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 text-slate-500 hover:text-slate-300'}`}
+              className={`flex items-center justify-center rounded border transition ${(d.lineStyle || 'solid') === s ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 text-neutral-500 hover:text-neutral-300'}`}
               style={{ height: isTouchDevice ? 20 : 26, width: isTouchDevice ? 28 : 36, fontSize: isTouchDevice ? 9 : 12 }}
             >{s === 'solid' ? '━━' : s === 'dashed' ? '┅┅' : '┅'}</button>
           ))}
           <span className="w-px h-5 sm:h-6 bg-white/10" />
           <button type="button" onClick={toggleLock}
-            className={`rounded border px-1.5 transition sm:px-2 ${d.locked ? 'border-amber-400/60 text-amber-300' : 'border-white/10 text-slate-400 hover:text-slate-100'}`}
+            className={`rounded border px-1.5 transition sm:px-2 ${d.locked ? 'border-amber-400/60 text-amber-300' : 'border-white/10 text-neutral-400 hover:text-neutral-100'}`}
             style={{ height: isTouchDevice ? 20 : 26, fontSize: isTouchDevice ? 10 : 12 }}
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0110 0v4" />{d.locked && <line x1="12" y1="15" x2="12" y2="17" />}</svg>
           </button>
           <button type="button" onClick={deleteSelected}
-            className="rounded border border-white/10 px-1.5 text-slate-400 hover:text-down sm:px-2"
+            className="rounded border border-white/10 px-1.5 text-neutral-400 hover:text-down sm:px-2"
             style={{ height: isTouchDevice ? 20 : 26, fontSize: isTouchDevice ? 10 : 12 }}
           ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg></button>
         </div>
@@ -1239,9 +1239,9 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, hideTool
       {ctxMenu && (
         <div className="fixed z-50 min-w-[140px] rounded-lg border border-white/10 bg-ink-900/95 p-1 shadow-xl backdrop-blur" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
           <button onClick={() => { const d = drawings.find((dw) => dw.id === ctxMenu.drawingId); if (d) commit(drawings.map((dw) => dw.id === ctxMenu.drawingId ? { ...dw, locked: !dw.locked } : dw)); setCtxMenu(null) }}
-            className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10"
+            className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs text-neutral-300 hover:bg-white/10"
           ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg> {drawings.find((d) => d.id === ctxMenu.drawingId)?.locked ? t('charts.draw.unlock') : t('charts.draw.lock')}</button>
-          <button onClick={ctxOpenSettings} className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></svg> {t('charts.draw.settings')}</button>
+          <button onClick={ctxOpenSettings} className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs text-neutral-300 hover:bg-white/10"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></svg> {t('charts.draw.settings')}</button>
           <button onClick={ctxDeleteDrawing} className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs text-down hover:bg-white/10"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg> {t('charts.draw.delete')}</button>
         </div>
       )}

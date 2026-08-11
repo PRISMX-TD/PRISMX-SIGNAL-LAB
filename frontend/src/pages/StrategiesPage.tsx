@@ -318,10 +318,10 @@ function StrategyEditor({
   const segBtn = (active: boolean, disabled = false) =>
     `rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
       disabled
-        ? 'cursor-not-allowed border-white/5 bg-white/[0.02] text-slate-600'
+        ? 'cursor-not-allowed border-white/5 bg-white/[0.02] text-neutral-500'
         : active
           ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'
-          : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-100'
+          : 'border-white/10 bg-white/5 text-neutral-400 hover:text-neutral-100'
     }`
 
   const steps = [
@@ -384,38 +384,38 @@ function StrategyEditor({
                   current
                     ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'
                     : reachable
-                      ? 'border-white/10 bg-white/5 text-slate-300 hover:border-prism-400/40'
-                      : 'cursor-default border-white/5 bg-white/[0.02] text-slate-600'
+                      ? 'border-white/10 bg-white/5 text-neutral-300 hover:border-prism-400/40'
+                      : 'cursor-default border-white/5 bg-white/[0.02] text-neutral-500'
                 }`}
               >
                 <span
                   className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-semibold ${
-                    current ? 'bg-prism-500 text-white' : done ? 'bg-up/20 text-up' : 'bg-white/5 text-slate-500'
+                    current ? 'bg-prism-500 text-white' : done ? 'bg-up/20 text-up' : 'bg-white/5 text-neutral-500'
                   }`}
                 >
                   {done ? '✓' : i + 1}
                 </span>
                 {t(`strategy.${s.key}`)}
               </button>
-              {i < steps.length - 1 && <span aria-hidden className="text-slate-700">·</span>}
+              {i < steps.length - 1 && <span aria-hidden className="text-neutral-700">·</span>}
             </li>
           )
         })}
       </ol>
 
       <div className="mt-4">
-        <p className="text-[11px] uppercase tracking-wide text-slate-500">
+        <p className="text-[11px] uppercase tracking-wide text-neutral-500">
           {t('strategy.stepOf', { n: step + 1, total: steps.length })}
         </p>
-        <h4 className="mt-1 font-display text-base font-semibold text-slate-100">{t(`strategy.${steps[step].key}`)}</h4>
-        <p className="mt-1.5 max-w-2xl text-xs leading-relaxed text-slate-400">{t(`strategy.${steps[step].hint}`)}</p>
+        <h4 className="mt-1 font-display text-base font-semibold text-neutral-100">{t(`strategy.${steps[step].key}`)}</h4>
+        <p className="mt-1.5 max-w-2xl text-xs leading-relaxed text-neutral-400">{t(`strategy.${steps[step].hint}`)}</p>
       </div>
 
       {/* 第 1 步 · 选市场：命名 + 品种（单选）+ 周期（单选）
           Step 1 · market: name, symbol (single), interval (single) */}
       <div className={step === 0 ? 'mt-5' : 'hidden'}>
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.name')}</span>
+          <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('strategy.name')}</span>
           <input
             type="text"
             className="input"
@@ -437,10 +437,10 @@ function StrategyEditor({
             One strategy watches one pair, so both pickers are single-select. Saying
             so is what tells the user that covering more pairs means creating more
             strategies rather than multi-selecting here. */}
-        <p className="mt-3 text-xs leading-relaxed text-slate-500">{t('strategy.singlePairHint')}</p>
+        <p className="mt-3 text-xs leading-relaxed text-neutral-500">{t('strategy.singlePairHint')}</p>
 
         <div className="mt-4 flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-slate-500" id="draft-symbol-label">
+          <span className="text-[11px] uppercase tracking-wide text-neutral-500" id="draft-symbol-label">
             {t('strategy.symbolLabel')}
           </span>
           {/* 一组互斥选项用 radiogroup 语义，读屏能播报"n 项中的第 m 项"以及当前选中
@@ -477,7 +477,7 @@ function StrategyEditor({
         </div>
 
         <div className="mt-4 flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-slate-500" id="draft-interval-label">
+          <span className="text-[11px] uppercase tracking-wide text-neutral-500" id="draft-interval-label">
             {t('strategy.intervalLabel')}
           </span>
           {/* 可选周期来自 usages 目录，不是前端常量：后端加减一档周期时这里跟着变。
@@ -511,9 +511,9 @@ function StrategyEditor({
             XAUUSD 5 分钟和 EURUSD 日线上是完全不同的两回事。
             Echo the market being watched: step 2 hides step 1's choice, and "cross
             above the MA" means two different things on XAUUSD 5m and EURUSD 1d. */}
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-neutral-500">
           {t('strategy.reviewMarket')}:{' '}
-          <span className="text-slate-300">{displaySymbol(draft.symbol)} · {intervalLabel(draft.interval)}</span>
+          <span className="text-neutral-300">{displaySymbol(draft.symbol)} · {intervalLabel(draft.interval)}</span>
         </p>
         {/* 旧结构策略的条件已被换成初始值，不说清楚的话用户会以为自己原来的条件
             还在，保存后才发现被替换了。
@@ -534,7 +534,7 @@ function StrategyEditor({
             onChange={({ logic, conditions }) => onChange({ ...draft, rules: { ...draft.rules, logic, conditions } })}
           />
         </div>
-        <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('strategy.condShortHint')}</p>
+        <p className="mt-2 text-xs leading-relaxed text-neutral-500">{t('strategy.condShortHint')}</p>
       </div>
 
       {/* 第 3 步 · 管风险：止损 / 止盈各一张卡，方式与数值紧挨着，各带一句人话解释
@@ -543,7 +543,7 @@ function StrategyEditor({
       <div className={step === 2 ? 'mt-5' : 'hidden'}>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.stopLossMethod')}</span>
+            <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('strategy.stopLossMethod')}</span>
             <div className="mt-1.5 flex flex-wrap gap-2">
               {(['percent', 'steps', 'atr'] as const).map((m) => (
                 <button
@@ -573,10 +573,10 @@ function StrategyEditor({
                 onChange={(v) => onChange({ ...draft, stopLossValue: v })}
               />
             </div>
-            <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('strategy.stopLossHint')}</p>
+            <p className="mt-2 text-xs leading-relaxed text-neutral-500">{t('strategy.stopLossHint')}</p>
           </div>
           <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-            <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.takeProfitMethod')}</span>
+            <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('strategy.takeProfitMethod')}</span>
             <div className="mt-1.5 flex flex-wrap gap-2">
               {(['rr', 'percent', 'steps', 'atr'] as const).map((m) => (
                 <button
@@ -616,12 +616,12 @@ function StrategyEditor({
                 onChange={(v) => onChange({ ...draft, takeProfitValue: v })}
               />
             </div>
-            <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('strategy.takeProfitHint')}</p>
+            <p className="mt-2 text-xs leading-relaxed text-neutral-500">{t('strategy.takeProfitHint')}</p>
           </div>
         </div>
 
         <div className="mt-4 flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('strategy.oneTradeAtATime')}</span>
+          <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('strategy.oneTradeAtATime')}</span>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -640,7 +640,7 @@ function StrategyEditor({
               {t('strategy.oneTradeAtATimeOff')}
             </button>
           </div>
-          <p className="text-xs leading-relaxed text-slate-500">
+          <p className="text-xs leading-relaxed text-neutral-500">
             {draft.oneTradeAtATime ? t('strategy.oneTradeAtATimeOnHint') : t('strategy.oneTradeAtATimeOffHint')}
           </p>
           <p className="text-xs leading-relaxed text-prism-200/70">{t('strategy.oneTradeHint')}</p>
@@ -661,12 +661,12 @@ function StrategyEditor({
             className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
           >
             <span>
-              <span className="text-sm text-slate-200">{t('strategy.advancedToggle')}</span>
+              <span className="text-sm text-neutral-200">{t('strategy.advancedToggle')}</span>
               {!showAdvanced && (
-                <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">{t('strategy.advancedHint')}</span>
+                <span className="mt-0.5 block text-xs leading-relaxed text-neutral-500">{t('strategy.advancedHint')}</span>
               )}
             </span>
-            <span aria-hidden className={`shrink-0 text-xs text-slate-400 transition ${showAdvanced ? 'rotate-180' : ''}`}>▾</span>
+            <span aria-hidden className={`shrink-0 text-xs text-neutral-400 transition ${showAdvanced ? 'rotate-180' : ''}`}>▾</span>
           </button>
 
           <div className={showAdvanced ? 'border-t border-white/10 p-3' : 'hidden'}>
@@ -699,7 +699,7 @@ function StrategyEditor({
                 onChange={(v) => onChange({ ...draft, cooldownMinutes: v > 0 ? v : null })}
               />
             </div>
-            <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('strategy.optionalZeroHint')}</p>
+            <p className="mt-2 text-xs leading-relaxed text-neutral-500">{t('strategy.optionalZeroHint')}</p>
 
             {/* 交易时段过滤：与每日上限、冷却同属"什么时候允许入场"这一组约束。
                 Session filter: same "when may we enter" group as the daily cap and
@@ -721,17 +721,17 @@ function StrategyEditor({
           this summary, so a wrong summary means there's nothing worth running. */}
       <div className={step === 3 ? 'mt-5' : 'hidden'}>
         <div className="rounded-lg border border-prism-500/20 bg-prism-600/5 p-3.5">
-          <p className="text-sm font-medium text-slate-200">{t('strategy.reviewTitle')}</p>
+          <p className="text-sm font-medium text-neutral-200">{t('strategy.reviewTitle')}</p>
           <dl className="mt-2.5 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
             <div>
-              <dt className="text-slate-500">{t('strategy.reviewMarket')}</dt>
-              <dd className="mt-0.5 font-mono text-slate-100">
+              <dt className="text-neutral-500">{t('strategy.reviewMarket')}</dt>
+              <dd className="mt-0.5 font-mono text-neutral-100">
                 {displaySymbol(draft.symbol)} · {intervalLabel(draft.interval)}
               </dd>
             </div>
             <div>
-              <dt className="text-slate-500">{t('strategy.reviewConditions')}</dt>
-              <dd className="mt-0.5 text-slate-100">
+              <dt className="text-neutral-500">{t('strategy.reviewConditions')}</dt>
+              <dd className="mt-0.5 text-neutral-100">
                 {t('strategy.reviewConditionsValue', {
                   count: draft.rules.conditions.length,
                   logic: draft.rules.logic === 'OR' ? t('strategy.condLogicOr') : t('strategy.condLogicAnd'),
@@ -739,8 +739,8 @@ function StrategyEditor({
               </dd>
             </div>
             <div>
-              <dt className="text-slate-500">{t('strategy.reviewRisk')}</dt>
-              <dd className="mt-0.5 font-mono text-slate-100">{riskSummary}</dd>
+              <dt className="text-neutral-500">{t('strategy.reviewRisk')}</dt>
+              <dd className="mt-0.5 font-mono text-neutral-100">{riskSummary}</dd>
             </div>
           </dl>
         </div>
@@ -775,7 +775,7 @@ function StrategyEditor({
             type="button"
             onClick={() => { setStepError(null); setStep((s) => s - 1) }}
             disabled={saving}
-            className="rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-slate-300 transition hover:text-white disabled:opacity-40"
+            className="rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-neutral-300 transition hover:text-white disabled:opacity-40"
           >
             {t('strategy.stepPrev')}
           </button>
@@ -786,7 +786,7 @@ function StrategyEditor({
             onClick={goNext}
             className={
               editing
-                ? 'rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-slate-300 transition hover:text-white'
+                ? 'rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-neutral-300 transition hover:text-white'
                 : 'btn-primary px-5 py-2 text-sm'
             }
           >
@@ -808,7 +808,7 @@ function StrategyEditor({
               type="button"
               onClick={() => save(false)}
               disabled={saving || !canSave}
-              className="rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-slate-300 transition hover:text-white disabled:opacity-40"
+              className="rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-neutral-300 transition hover:text-white disabled:opacity-40"
             >
               {t('strategy.saveOnly')}
             </button>
@@ -818,7 +818,7 @@ function StrategyEditor({
           type="button"
           onClick={onCancel}
           disabled={saving}
-          className="ml-auto rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-slate-400 transition hover:text-white"
+          className="ml-auto rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-neutral-400 transition hover:text-white"
         >
           {t('common.cancel')}
         </button>
@@ -1135,12 +1135,12 @@ export default function StrategiesPage() {
   return (
     <div>
       <div className="mb-5">
-        <h2 className="font-display text-2xl font-bold text-slate-50">{t('strategy.title')}</h2>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-400">{t('strategy.subtitle')}</p>
+        <h2 className="font-display text-2xl font-bold text-neutral-50">{t('strategy.title')}</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-neutral-400">{t('strategy.subtitle')}</p>
       </div>
 
       {!isPro && (
-        <div className="glass mb-5 border-prism-500/20 bg-prism-600/5 p-4 text-center text-sm text-slate-300">
+        <div className="glass mb-5 border-prism-500/20 bg-prism-600/5 p-4 text-center text-sm text-neutral-300">
           {t('strategy.proOnlyHint')}{' '}
           <Link to="/upgrade" className="text-prism-300 underline hover:text-prism-200">{t('winrate.viewDetail')}</Link>
         </div>
@@ -1156,7 +1156,7 @@ export default function StrategiesPage() {
           every visit. */}
       {isPro && (strategies.length === 0 || draft != null || picking) && (
         <section className="glass mb-5 p-5">
-          <h3 className="font-display text-base font-semibold text-slate-100">{t('strategy.flowTitle')}</h3>
+          <h3 className="font-display text-base font-semibold text-neutral-100">{t('strategy.flowTitle')}</h3>
           <ol className="mt-3.5 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-3">
             {([
               ['flowStep1', 'flowStep1Desc'],
@@ -1168,8 +1168,8 @@ export default function StrategiesPage() {
                   {i + 1}
                 </span>
                 <span className="min-w-0">
-                  <span className="block text-sm font-medium text-slate-100">{t(`strategy.${label}`)}</span>
-                  <span className="mt-1 block text-xs leading-relaxed text-slate-400">{t(`strategy.${desc}`)}</span>
+                  <span className="block text-sm font-medium text-neutral-100">{t(`strategy.${label}`)}</span>
+                  <span className="mt-1 block text-xs leading-relaxed text-neutral-400">{t(`strategy.${desc}`)}</span>
                 </span>
               </li>
             ))}
@@ -1191,7 +1191,7 @@ export default function StrategiesPage() {
       {/* 我的策略列表 / my strategies */}
       <section className="glass mb-5 p-5">
         <div className="flex items-center justify-between">
-          <h3 className="font-display text-lg font-semibold text-slate-100">{t('strategy.myStrategies')}</h3>
+          <h3 className="font-display text-lg font-semibold text-neutral-100">{t('strategy.myStrategies')}</h3>
           {/* 目录拿不到时禁用新建：新草稿的第一条条件必须由目录给出，放进去只会
               得到一个编不出合法条件的空编辑器。
               New drafts are disabled without the catalogue: a new draft's first
@@ -1202,7 +1202,7 @@ export default function StrategiesPage() {
               type="button"
               onClick={openNewDraft}
               disabled={!catalog}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:border-prism-400/50 hover:text-prism-200 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:border-prism-400/50 hover:text-prism-200 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t('strategy.newStrategy')}
             </button>
@@ -1225,7 +1225,7 @@ export default function StrategiesPage() {
             {t('strategy.listUnavailable')} {listError}
           </div>
         ) : strategies.length === 0 ? (
-          <div className="mt-4 py-6 text-center text-sm text-slate-500">{t('strategy.noStrategies')}</div>
+          <div className="mt-4 py-6 text-center text-sm text-neutral-500">{t('strategy.noStrategies')}</div>
         ) : (
           <div className="mt-4 flex flex-col gap-2">
             {strategies.map((s) => (
@@ -1269,7 +1269,7 @@ export default function StrategiesPage() {
           them the only thing editable is a payload the backend will reject. Show a
           loading state rather than an empty editor. */}
       {draft && !catalog && (
-        <section className="glass mb-5 p-5 text-center text-sm text-slate-500">{t('common.loading')}</section>
+        <section className="glass mb-5 p-5 text-center text-sm text-neutral-500">{t('common.loading')}</section>
       )}
 
       {draft && catalog && (
@@ -1288,12 +1288,12 @@ export default function StrategiesPage() {
       {/* 我的策略信号 / my strategy signals */}
       <section className="glass mb-5 p-5">
         <div className="flex items-center justify-between">
-          <h3 className="font-display text-lg font-semibold text-slate-100">{t('strategy.mySignals')}</h3>
+          <h3 className="font-display text-lg font-semibold text-neutral-100">{t('strategy.mySignals')}</h3>
           {signals.length > 0 && (
             <button
               type="button"
               onClick={() => setConfirmClearSignals(true)}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-400 transition hover:border-down/30 hover:text-down"
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-400 transition hover:border-down/30 hover:text-down"
             >
               {t('strategy.clearSignals')}
             </button>
@@ -1310,7 +1310,7 @@ export default function StrategiesPage() {
         )}
       </section>
 
-      <p className="text-xs leading-relaxed text-slate-500">{t('strategy.disclaimer')}</p>
+      <p className="text-xs leading-relaxed text-neutral-500">{t('strategy.disclaimer')}</p>
 
       {confirmClearSignals && (
         <ConfirmModal

@@ -58,16 +58,16 @@ export default function AutoManageCard({ isPro }: { isPro: boolean }) {
   return (
     <div className={`glass p-5 ${!isPro ? 'opacity-60' : ''}`}>
       <div className="flex items-center justify-between">
-        <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-slate-300">
+        <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-neutral-300">
           {t('account.autoTitle')}
         </h3>
-        {!isPro && <span className="tag bg-white/10 text-slate-500">{t('orders.proExclusive')}</span>}
+        {!isPro && <span className="tag bg-white/10 text-neutral-500">{t('orders.proExclusive')}</span>}
         {isPro && <span className="tag bg-prism-600/20 text-prism-300">PRO</span>}
       </div>
-      <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('account.autoHint')}</p>
+      <p className="mt-2 text-xs leading-relaxed text-neutral-500">{t('account.autoHint')}</p>
 
       {!isPro ? (
-        <p className="mt-3 text-xs text-slate-500">
+        <p className="mt-3 text-xs text-neutral-500">
           {t('account.autoUpgradeRequired')}{' '}
           <Link to="/upgrade" className="text-prism-400 underline hover:text-prism-300">
             {t('nav.upgrade')}
@@ -75,7 +75,7 @@ export default function AutoManageCard({ isPro }: { isPro: boolean }) {
         </p>
       ) : (
         <div className="mt-4 space-y-4">
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-100">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-100">
             <input
               type="checkbox"
               checked={autoCfg.enabled}
@@ -89,7 +89,7 @@ export default function AutoManageCard({ isPro }: { isPro: boolean }) {
             <div className="space-y-4 rounded-lg border border-white/5 bg-white/[0.03] p-4">
               {/* 保本 / break-even */}
               <div className="flex flex-wrap items-center gap-3">
-                <label className="flex w-40 cursor-pointer items-center gap-2 text-sm text-slate-200">
+                <label className="flex w-40 cursor-pointer items-center gap-2 text-sm text-neutral-200">
                   <input
                     type="checkbox"
                     checked={autoCfg.beEnabled}
@@ -98,19 +98,19 @@ export default function AutoManageCard({ isPro }: { isPro: boolean }) {
                   />
                   {t('account.autoBe')}
                 </label>
-                <span className="text-xs text-slate-500">{t('account.autoTriggerAt')}</span>
+                <span className="text-xs text-neutral-500">{t('account.autoTriggerAt')}</span>
                 <input
                   type="number" step={0.1} min={0.1} max={10}
                   className="input h-8 w-20 text-xs"
                   value={autoCfg.beTriggerR}
                   onChange={(e) => setAutoCfg({ ...autoCfg, beTriggerR: Number(e.target.value) })}
                 />
-                <span className="text-xs text-slate-500">R</span>
+                <span className="text-xs text-neutral-500">R</span>
               </div>
 
               {/* 追踪止损 / trailing stop */}
               <div className="flex flex-wrap items-center gap-3">
-                <label className="flex w-40 cursor-pointer items-center gap-2 text-sm text-slate-200">
+                <label className="flex w-40 cursor-pointer items-center gap-2 text-sm text-neutral-200">
                   <input
                     type="checkbox"
                     checked={autoCfg.trailEnabled}
@@ -119,26 +119,26 @@ export default function AutoManageCard({ isPro }: { isPro: boolean }) {
                   />
                   {t('account.autoTrail')}
                 </label>
-                <span className="text-xs text-slate-500">{t('account.autoTriggerAt')}</span>
+                <span className="text-xs text-neutral-500">{t('account.autoTriggerAt')}</span>
                 <input
                   type="number" step={0.1} min={0.1} max={10}
                   className="input h-8 w-20 text-xs"
                   value={autoCfg.trailTriggerR}
                   onChange={(e) => setAutoCfg({ ...autoCfg, trailTriggerR: Number(e.target.value) })}
                 />
-                <span className="text-xs text-slate-500">R · {t('account.autoTrailDistance')}</span>
+                <span className="text-xs text-neutral-500">R · {t('account.autoTrailDistance')}</span>
                 <input
                   type="number" step={0.1} min={0.1} max={10}
                   className="input h-8 w-20 text-xs"
                   value={autoCfg.trailDistanceR}
                   onChange={(e) => setAutoCfg({ ...autoCfg, trailDistanceR: Number(e.target.value) })}
                 />
-                <span className="text-xs text-slate-500">R</span>
+                <span className="text-xs text-neutral-500">R</span>
               </div>
 
               {/* 分批止盈 / partial take-profit */}
               <div className="flex flex-wrap items-center gap-3">
-                <label className="flex w-40 cursor-pointer items-center gap-2 text-sm text-slate-200">
+                <label className="flex w-40 cursor-pointer items-center gap-2 text-sm text-neutral-200">
                   <input
                     type="checkbox"
                     checked={autoCfg.ptpEnabled}
@@ -147,24 +147,24 @@ export default function AutoManageCard({ isPro }: { isPro: boolean }) {
                   />
                   {t('account.autoPtp')}
                 </label>
-                <span className="text-xs text-slate-500">{t('account.autoTriggerAt')}</span>
+                <span className="text-xs text-neutral-500">{t('account.autoTriggerAt')}</span>
                 <input
                   type="number" step={0.1} min={0.1} max={10}
                   className="input h-8 w-20 text-xs"
                   value={autoCfg.ptpTriggerR}
                   onChange={(e) => setAutoCfg({ ...autoCfg, ptpTriggerR: Number(e.target.value) })}
                 />
-                <span className="text-xs text-slate-500">R · {t('account.autoPtpFraction')}</span>
+                <span className="text-xs text-neutral-500">R · {t('account.autoPtpFraction')}</span>
                 <input
                   type="number" step={5} min={10} max={90}
                   className="input h-8 w-20 text-xs"
                   value={Math.round(autoCfg.ptpFraction * 100)}
                   onChange={(e) => setAutoCfg({ ...autoCfg, ptpFraction: Number(e.target.value) / 100 })}
                 />
-                <span className="text-xs text-slate-500">%</span>
+                <span className="text-xs text-neutral-500">%</span>
               </div>
 
-              <p className="text-[11px] leading-relaxed text-slate-600">{t('account.autoScopeNote')}</p>
+              <p className="text-[11px] leading-relaxed text-neutral-500">{t('account.autoScopeNote')}</p>
             </div>
           )}
 

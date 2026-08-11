@@ -32,9 +32,9 @@ function TagRow({ label, values }: { label: string; values: string[] }) {
   if (!values || values.length === 0) return null
   return (
     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1.5">
-      <span className="text-xs text-slate-500">{label}</span>
+      <span className="text-xs text-neutral-500">{label}</span>
       {values.map((v) => (
-        <span key={v} className="rounded-md bg-white/5 px-2 py-0.5 text-xs text-slate-300">
+        <span key={v} className="rounded-md bg-white/5 px-2 py-0.5 text-xs text-neutral-300">
           {v}
         </span>
       ))}
@@ -46,8 +46,8 @@ function Fact({ label, value }: { label: string; value: string }) {
   if (!value) return null
   return (
     <div>
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className="mt-0.5 text-sm text-slate-200">{value}</div>
+      <div className="text-xs text-neutral-500">{label}</div>
+      <div className="mt-0.5 text-sm text-neutral-200">{value}</div>
     </div>
   )
 }
@@ -102,7 +102,7 @@ export default function StrategyGuidePage() {
   if (error || !strategy) {
     return (
       <div className="mx-auto max-w-2xl py-16 text-center">
-        <p className="text-sm text-slate-400">{error || t('signals.guide.notFound')}</p>
+        <p className="text-sm text-neutral-400">{error || t('signals.guide.notFound')}</p>
         <Link to="/app" className="btn-ghost mt-5 inline-block px-4 py-2 text-sm">
           {t('signals.guide.backToList')}
         </Link>
@@ -117,12 +117,12 @@ export default function StrategyGuidePage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <Link to="/app" className="text-xs text-slate-400 transition-colors hover:text-slate-200">
+      <Link to="/app" className="text-xs text-neutral-400 transition-colors hover:text-neutral-200">
         ← {t('signals.guide.backToList')}
       </Link>
 
-      <h1 className="mt-4 font-display text-2xl font-bold text-slate-100 sm:text-3xl">{name}</h1>
-      {summary && <p className="mt-2 text-sm leading-relaxed text-slate-400">{summary}</p>}
+      <h1 className="mt-4 font-display text-2xl font-bold text-neutral-100 sm:text-3xl">{name}</h1>
+      {summary && <p className="mt-2 text-sm leading-relaxed text-neutral-400">{summary}</p>}
 
       {strategy.imageUrl && (
         <img
@@ -151,7 +151,7 @@ export default function StrategyGuidePage() {
         <StrategyDetail strategy={strategy} isZh={isZh} />
       </article>
 
-      <p className="mt-10 border-t border-white/10 pt-5 text-xs leading-relaxed text-slate-500">
+      <p className="mt-10 border-t border-white/10 pt-5 text-xs leading-relaxed text-neutral-500">
         {t('signals.guide.disclaimer')}
       </p>
 
@@ -162,8 +162,8 @@ export default function StrategyGuidePage() {
               to={`/app/strategy/${prev.id}`}
               className="glass flex-1 p-4 text-left transition-colors hover:bg-white/5"
             >
-              <div className="text-xs text-slate-500">{t('signals.guide.prev')}</div>
-              <div className="mt-1 text-sm text-slate-200">{pick(prev.nameZh, prev.nameEn, isZh)}</div>
+              <div className="text-xs text-neutral-500">{t('signals.guide.prev')}</div>
+              <div className="mt-1 text-sm text-neutral-200">{pick(prev.nameZh, prev.nameEn, isZh)}</div>
             </Link>
           ) : (
             <div className="flex-1" />
@@ -173,8 +173,8 @@ export default function StrategyGuidePage() {
               to={`/app/strategy/${next.id}`}
               className="glass flex-1 p-4 text-right transition-colors hover:bg-white/5"
             >
-              <div className="text-xs text-slate-500">{t('signals.guide.next')}</div>
-              <div className="mt-1 text-sm text-slate-200">{pick(next.nameZh, next.nameEn, isZh)}</div>
+              <div className="text-xs text-neutral-500">{t('signals.guide.next')}</div>
+              <div className="mt-1 text-sm text-neutral-200">{pick(next.nameZh, next.nameEn, isZh)}</div>
             </Link>
           ) : (
             <div className="flex-1" />

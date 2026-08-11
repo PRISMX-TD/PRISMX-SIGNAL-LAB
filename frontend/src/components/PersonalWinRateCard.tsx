@@ -87,41 +87,41 @@ export default function PersonalWinRateCard({ variant = 'compact', login }: Prop
           record — the same rule that turned the strategy card's "longest losing
           streak" into "longest in the last 200": if what a number measures
           changes, say so. */}
-      <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+      <p className="mt-1 text-[11px] leading-relaxed text-neutral-500">
         {t('winrate.personalHint')}
         {data && ` ${t('winrate.windowHint', { days: data.windowDays })}`}
       </p>
 
       {pct == null ? (
-        <div className="mt-3 py-3 text-center text-sm text-slate-500">{t('winrate.noData')}</div>
+        <div className="mt-3 py-3 text-center text-sm text-neutral-500">{t('winrate.noData')}</div>
       ) : (
         <>
           <div className="mt-4 flex items-center gap-4">
             <RadialGauge value={pct} color="var(--up)" size={detailed ? 116 : 88} strokeWidth={detailed ? 10 : 8}>
               <b className={`num font-bold text-up ${detailed ? 'text-3xl' : 'text-2xl'}`}>{pct}%</b>
-              <span className="mt-0.5 text-center text-[10px] leading-tight text-slate-500">
+              <span className="mt-0.5 text-center text-[10px] leading-tight text-neutral-500">
                 {t('winrate.resolvedCount', { n: data!.totalResolved })}
               </span>
             </RadialGauge>
             <div className="grid flex-1 grid-cols-1 gap-1.5 text-xs">
               <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
-                <span className="text-slate-500">{t('winrate.wins')}</span>
+                <span className="text-neutral-500">{t('winrate.wins')}</span>
                 <span className="num font-bold text-up">{data!.wins}</span>
               </div>
               <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
-                <span className="text-slate-500">{t('winrate.losses')}</span>
+                <span className="text-neutral-500">{t('winrate.losses')}</span>
                 <span className="num font-bold text-down">{data!.losses}</span>
               </div>
               <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
-                <span className="text-slate-500">{t('winrate.openPositions')}</span>
-                <span className="num font-bold text-slate-300">{data!.openPositions}</span>
+                <span className="text-neutral-500">{t('winrate.openPositions')}</span>
+                <span className="num font-bold text-neutral-300">{data!.openPositions}</span>
               </div>
             </div>
           </div>
 
           {detailed && data!.bySymbol.length > 0 && (
             <div className="mt-4 border-t border-white/10 pt-3">
-              <span className="text-[11px] uppercase tracking-wide text-slate-500">{t('winrate.bySymbol')}</span>
+              <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('winrate.bySymbol')}</span>
               <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-white/[0.06]">
                 {data!.bySymbol.map((row) => (
                   <div
@@ -134,8 +134,8 @@ export default function PersonalWinRateCard({ variant = 'compact', login }: Prop
                 {data!.bySymbol.map((row) => (
                   <div key={row.symbol} className="flex items-center gap-1.5 text-[11px]">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: symbolMeta(row.symbol).color }} />
-                    <span className="text-slate-300">{displaySymbol(row.symbol)}</span>
-                    <span className="text-slate-500">{Math.round((row.count / data!.totalResolved) * 100)}%</span>
+                    <span className="text-neutral-300">{displaySymbol(row.symbol)}</span>
+                    <span className="text-neutral-500">{Math.round((row.count / data!.totalResolved) * 100)}%</span>
                   </div>
                 ))}
               </div>
@@ -143,7 +143,7 @@ export default function PersonalWinRateCard({ variant = 'compact', login }: Prop
           )}
         </>
       )}
-      {detailed && <p className="mt-3 text-[10px] text-slate-600">{t('winrate.disclaimer')}</p>}
+      {detailed && <p className="mt-3 text-[10px] text-neutral-500">{t('winrate.disclaimer')}</p>}
     </section>
   )
 }

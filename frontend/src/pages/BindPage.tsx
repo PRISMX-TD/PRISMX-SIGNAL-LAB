@@ -82,10 +82,10 @@ export default function BindPage() {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="font-display text-2xl font-bold text-slate-100">
+        <h2 className="font-display text-2xl font-bold text-neutral-100">
           <span className="neon-text">{t('bind.title')}</span>
         </h2>
-        <p className="mt-1 text-sm text-slate-400">{t('bind.gw.pageSubtitle', { name: brokerName })}</p>
+        <p className="mt-1 text-sm text-neutral-400">{t('bind.gw.pageSubtitle', { name: brokerName })}</p>
       </div>
 
       <div className="grid gap-5 lg:grid-cols-2">
@@ -101,8 +101,8 @@ export default function BindPage() {
         {/* 合作券商 MT5 直连 */}
         <div className="glass p-6 lg:col-span-2">
           <div className="mb-5">
-            <h3 className="font-display text-xl font-semibold text-slate-100">{t('bind.gw.title', { name: brokerName })}</h3>
-            <p className="mt-1 text-xs text-slate-400">{t('bind.gw.hint')}</p>
+            <h3 className="font-display text-xl font-semibold text-neutral-100">{t('bind.gw.title', { name: brokerName })}</h3>
+            <p className="mt-1 text-xs text-neutral-400">{t('bind.gw.hint')}</p>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-3">
@@ -148,18 +148,18 @@ export default function BindPage() {
           {/* 已绑定的直连账号 */}
           {gatewayAccounts.length > 0 && (
             <div className="mt-5 pt-5 border-t border-white/10">
-              <p className="mb-3 text-sm font-medium text-slate-300">{t('bind.gw.boundTitle')}</p>
+              <p className="mb-3 text-sm font-medium text-neutral-300">{t('bind.gw.boundTitle')}</p>
               <div className="space-y-2">
                 {gatewayAccounts.map((a) => (
                   <div key={a.login} className="flex items-center justify-between rounded-lg bg-white/5 px-4 py-3 transition hover:bg-white/[0.07]">
                     <div className="flex items-center gap-3">
-                      <div className={`h-2 w-2 rounded-full ${a.online ? 'bg-up animate-breathe' : 'bg-slate-500'}`} />
+                      <div className={`h-2 w-2 rounded-full ${a.online ? 'bg-up animate-breathe' : 'bg-neutral-500'}`} />
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="font-mono text-sm font-medium text-slate-100">{a.login}</span>
+                          <span className="font-mono text-sm font-medium text-neutral-100">{a.login}</span>
                           <span className="tag bg-prism-600/20 text-prism-300 text-[10px]">{t('bind.gw.tag')}</span>
                         </div>
-                        <div className="mt-0.5 flex items-center gap-3 text-xs text-slate-400">
+                        <div className="mt-0.5 flex items-center gap-3 text-xs text-neutral-400">
                           <span>{a.accountName || '—'}</span>
                           {a.balance != null && <span>{t('bind.gw.balance', { amount: a.balance.toFixed(2) })}</span>}
                         </div>
@@ -186,14 +186,14 @@ export default function BindPage() {
         <details className="glass group overflow-hidden lg:col-span-2">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-4 transition hover:bg-white/[0.03] [&::-webkit-details-marker]:hidden">
             <div className="min-w-0">
-              <span className="block text-sm font-medium text-slate-300 transition group-open:text-slate-100">
+              <span className="block text-sm font-medium text-neutral-300 transition group-open:text-neutral-100">
                 {t('bind.bridgeEntry.collapsedTitle')}
               </span>
-              <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">
+              <span className="mt-0.5 block text-xs leading-relaxed text-neutral-500">
                 {t('bind.bridgeEntry.collapsedHint')}
               </span>
             </div>
-            <span className="shrink-0 text-slate-600 transition group-open:rotate-180 group-open:text-prism-400">
+            <span className="shrink-0 text-neutral-500 transition group-open:rotate-180 group-open:text-prism-400">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
                 <path d="m6 9 6 6 6-6" />
               </svg>
@@ -201,9 +201,9 @@ export default function BindPage() {
           </summary>
 
           <div className="border-t border-white/10 px-6 pb-6 pt-5">
-            <h3 className="font-display text-base font-semibold text-slate-100">{t('bind.bridgeEntry.title')}</h3>
-            <p className="mt-1 text-sm leading-relaxed text-slate-400">{t('bind.bridgeEntry.desc', { name: brokerName })}</p>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
+            <h3 className="font-display text-base font-semibold text-neutral-100">{t('bind.bridgeEntry.title')}</h3>
+            <p className="mt-1 text-sm leading-relaxed text-neutral-400">{t('bind.bridgeEntry.desc', { name: brokerName })}</p>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs text-neutral-500">
               <span className="rounded bg-white/5 px-2 py-1">{t('bind.bridgeEntry.f1')}</span>
               <span className="rounded bg-white/5 px-2 py-1">{t('bind.bridgeEntry.f2')}</span>
               <span className="rounded bg-white/5 px-2 py-1">{t('bind.bridgeEntry.f3')}</span>

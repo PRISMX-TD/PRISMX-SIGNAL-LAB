@@ -122,12 +122,12 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <span className="font-mono text-base font-semibold text-slate-100">{displaySymbol(p.symbol)}</span>
+            <span className="font-mono text-base font-semibold text-neutral-100">{displaySymbol(p.symbol)}</span>
             <span className={`tag ${isBuy ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
               {isBuy ? t('common.buy') : t('common.sell')}
             </span>
           </div>
-          <div className="mt-1 font-mono text-xs text-slate-500">
+          <div className="mt-1 font-mono text-xs text-neutral-500">
             {p.volume} {t('positions.lots')}
             {p.ticket ? ` · #${p.ticket}` : ''}
           </div>
@@ -149,19 +149,19 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
       {/* 价格明细 / price details */}
       <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
         <div className="flex justify-between">
-          <span className="text-slate-500">{t('positions.entry')}</span>
-          <span className="font-mono text-slate-300">{fmt(p.entryPrice)}</span>
+          <span className="text-neutral-500">{t('positions.entry')}</span>
+          <span className="font-mono text-neutral-300">{fmt(p.entryPrice)}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-slate-500">{t('positions.current')}</span>
-          <span className="font-mono text-slate-300">{fmt(p.currentPrice)}</span>
+          <span className="text-neutral-500">{t('positions.current')}</span>
+          <span className="font-mono text-neutral-300">{fmt(p.currentPrice)}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-slate-500">{t('positions.sl')}</span>
+          <span className="text-neutral-500">{t('positions.sl')}</span>
           <span className="font-mono text-down">{p.stopLoss ? fmt(p.stopLoss) : '—'}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-slate-500">{t('positions.tp')}</span>
+          <span className="text-neutral-500">{t('positions.tp')}</span>
           <span className="font-mono text-up">{p.takeProfit ? fmt(p.takeProfit) : '—'}</span>
         </div>
       </div>
@@ -179,7 +179,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
           <button
             onClick={() => setMode('close')}
             disabled={busy}
-            className="flex-1 rounded-lg border border-white/10 bg-white/[0.04] py-1.5 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08] disabled:opacity-50"
+            className="flex-1 rounded-lg border border-white/10 bg-white/[0.04] py-1.5 text-xs font-medium text-neutral-300 transition hover:bg-white/[0.08] disabled:opacity-50"
           >
             {t('positions.partialClose')}
           </button>
@@ -195,7 +195,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
 
       {canAct && mode === 'close' && (
         <div className="mt-3 space-y-2 rounded-lg border border-white/10 bg-ink-950/40 p-3">
-          <label className="text-xs text-slate-400">
+          <label className="text-xs text-neutral-400">
             {t('positions.closeVolume')} (max {p.volume})
           </label>
           <input

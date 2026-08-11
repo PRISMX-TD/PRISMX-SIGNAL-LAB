@@ -130,7 +130,7 @@ export default function GoogleLoginButton({ onCredential, onError }: Props) {
       {/* 可见的深色按钮（视觉层，不接收点击）/ visible dark button (decorative) */}
       <div
         aria-hidden
-        className="flex h-11 w-full items-center justify-center gap-2.5 rounded-full border border-white/15 bg-white/[0.06] px-4 text-sm font-medium text-slate-100 transition hover:border-white/25 hover:bg-white/[0.1]"
+        className="flex h-11 w-full items-center justify-center gap-2.5 rounded-full border border-white/15 bg-white/[0.06] px-4 text-sm font-medium text-neutral-100 transition hover:border-white/25 hover:bg-white/[0.1]"
       >
         <GoogleIcon />
         <span>{t('auth.googleContinue')}</span>

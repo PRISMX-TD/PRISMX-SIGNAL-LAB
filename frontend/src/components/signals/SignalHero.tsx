@@ -106,7 +106,7 @@ const SignalHero: FC<Props> = ({
       {/* Symbol + side chip */}
       <div className="mt-4 flex items-center gap-2.5 relative z-10">
         <b className="text-[27px] tracking-[0.02em] text-white">{displaySymbol(symbol)}</b>
-        {cnName && <span className="text-sm text-slate-300">{cnName}</span>}
+        {cnName && <span className="text-sm text-neutral-300">{cnName}</span>}
         <span className={`chip ${stance === 'BULL' ? 'chip-buy' : stance === 'BEAR' ? 'chip-sell' : 'chip-dim'}`}>
           {stanceLabel}
         </span>
@@ -130,7 +130,7 @@ const SignalHero: FC<Props> = ({
       </div>
 
       {/* Stance note */}
-      <div className="mt-2 text-[13px] leading-relaxed text-slate-300 relative z-10">{stanceNote}</div>
+      <div className="mt-2 text-[13px] leading-relaxed text-neutral-300 relative z-10">{stanceNote}</div>
 
       {/* Multi-TF tags */}
       <div className="mt-3.5 flex gap-2 flex-wrap relative z-10">
@@ -149,7 +149,7 @@ const SignalHero: FC<Props> = ({
       {/* 社区多空情绪条 —— BTC 无数据来源，显示灰色占位 / community sentiment bar — no data source for BTC, shows grey */}
       <div className="mt-5 relative z-10">
         <div className="flex items-center justify-between text-xs mb-2">
-          <span className="text-slate-400">{t('signals.focus.communitySentiment')}</span>
+          <span className="text-neutral-400">{t('signals.focus.communitySentiment')}</span>
         </div>
         {sentiment ? (
           <div className="senti-bar">

@@ -315,7 +315,7 @@ function PositionMarkerToggle({
       aria-pressed={on}
       onClick={onToggle}
       className={compact
-        ? `flex h-6 w-6 items-center justify-center rounded-md border transition ${on ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`
+        ? `flex h-6 w-6 items-center justify-center rounded-md border transition ${on ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100'}`
         : `term-tool-btn ${on ? 'on' : ''}`}
     >
       <svg width={compact ? 11 : 13} height={compact ? 11 : 13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1896,7 +1896,7 @@ export default function ChartsPage() {
           onClick={isFullscreen ? exitFullscreen : enterFullscreen}
           aria-label={isFullscreen ? t('charts.fullscreen.exit') : t('charts.fullscreen.enter')}
           title={isFullscreen ? t('charts.fullscreen.exit') : t('charts.fullscreen.enter')}
-          className="lg:hidden absolute top-2 left-2 z-30 flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-ink-900/70 text-slate-300 backdrop-blur-sm transition hover:text-white hover:border-white/20 active:scale-90"
+          className="lg:hidden absolute top-2 left-2 z-30 flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-ink-900/70 text-neutral-300 backdrop-blur-sm transition hover:text-white hover:border-white/20 active:scale-90"
         >
           {isFullscreen ? (
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1925,7 +1925,7 @@ export default function ChartsPage() {
                 className={`rounded-md px-2 py-1 text-[11px] font-medium transition ${
                   interval === iv.code
                     ? 'bg-prism-600/40 text-prism-200'
-                    : 'text-slate-400 hover:text-slate-100'
+                    : 'text-neutral-400 hover:text-neutral-100'
                 }`}
               >
                 {iv.label}
@@ -1967,7 +1967,7 @@ export default function ChartsPage() {
           />
         )}
         {!hasData && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-500">
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-neutral-500">
             {t('charts.empty')}
           </div>
         )}
@@ -1999,7 +1999,7 @@ export default function ChartsPage() {
         {/* Sub-pane legends: positioned at the top of their own pane; offsets computed by applyPaneHeights */}
         {indicators.volume && paneOffsets.volume != null && (
           <div
-            className="pointer-events-none absolute left-3 z-20 rounded-md bg-ink-900/40 px-2 py-0.5 font-mono text-[11px] text-slate-300 backdrop-blur-sm"
+            className="pointer-events-none absolute left-3 z-20 rounded-md bg-ink-900/40 px-2 py-0.5 font-mono text-[11px] text-neutral-300 backdrop-blur-sm"
             style={{ top: paneOffsets.volume + 6 }}
           >
             {t('charts.indicators.volume')} {legend.volume != null ? Math.round(legend.volume).toLocaleString() : '—'}
@@ -2062,7 +2062,7 @@ export default function ChartsPage() {
                   className={`flex h-6 w-6 items-center justify-center rounded-md border transition ${
                     drawLayerRef.current?.tool === toolName
                       ? 'border-prism-500/60 bg-prism-600/25 text-prism-200'
-                      : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'
+                      : 'border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100'
                   }`}
                 >
                   <DrawToolIcon tool={toolName} />
@@ -2084,26 +2084,26 @@ export default function ChartsPage() {
               ))}
               <span className="mx-0.5 h-5 w-px bg-white/10" />
               <button type="button" title={t('charts.draw.lock')} aria-label={t('charts.draw.lock')} onClick={() => { drawLayerRef.current?.toggleLock(); bumpDraw() }} disabled={!drawLayerRef.current?.selectedId}
-                className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-slate-100 disabled:opacity-30"
+                className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-neutral-400 transition hover:text-neutral-100 disabled:opacity-30"
               ><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg></button>
               <button type="button" title={t('charts.draw.undo')} aria-label={t('charts.draw.undo')} onClick={() => { drawLayerRef.current?.undo(); bumpDraw() }}
-                className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-slate-100"
+                className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-neutral-400 transition hover:text-neutral-100"
               ><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 102.13-9.36L1 10" /></svg></button>
               <button type="button" title={t('charts.draw.redo')} aria-label={t('charts.draw.redo')} onClick={() => { drawLayerRef.current?.redo(); bumpDraw() }}
-                className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-slate-100"
+                className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-neutral-400 transition hover:text-neutral-100"
               ><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" /></svg></button>
               <span className="mx-0.5 h-5 w-px bg-white/10" />
               <button type="button" title={t('charts.draw.delete')} aria-label={t('charts.draw.delete')}
                 onClick={() => { drawLayerRef.current?.deleteSelected(); bumpDraw() }} disabled={!drawLayerRef.current?.selectedId}
-                className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-down disabled:opacity-30 disabled:hover:text-slate-400"
+                className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-neutral-400 transition hover:text-down disabled:opacity-30 disabled:hover:text-neutral-400"
               ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg></button>
               <button type="button" title={t('charts.draw.clear')} aria-label={t('charts.draw.clear')}
                 onClick={() => { drawLayerRef.current?.clearAll(); bumpDraw() }} disabled={(drawLayerRef.current?.drawCount ?? 0) === 0}
-                className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-slate-400 transition hover:text-down disabled:opacity-30 disabled:hover:text-slate-400"
+                className="flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-neutral-400 transition hover:text-down disabled:opacity-30 disabled:hover:text-neutral-400"
               ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 5L5 19M5 5l14 14" /></svg></button>
               <span className="mx-0.5 h-5 w-px bg-white/10" />
               <button type="button" title={t('charts.draw.stayInDraw')} aria-label={t('charts.draw.stayInDraw')} onClick={() => { drawLayerRef.current?.setStayInDraw(!drawLayerRef.current?.stayInDraw); bumpDraw() }}
-                className={`flex h-6 w-6 items-center justify-center rounded-md border transition ${drawLayerRef.current?.stayInDraw ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-slate-400 hover:text-slate-100'}`}
+                className={`flex h-6 w-6 items-center justify-center rounded-md border transition ${drawLayerRef.current?.stayInDraw ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100'}`}
               ><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3l4 4-4 4" /><path d="M3 17l4 4-4 4" /><line x1="21" y1="7" x2="7" y2="21" /><line x1="7" y1="3" x2="21" y2="17" /></svg></button>
               <PositionMarkerToggle on={showPositions} onToggle={() => setShowPositions((v) => !v)} t={t} compact />
             </div>
@@ -2185,7 +2185,7 @@ export default function ChartsPage() {
 
       {/* 免责声明：仅手机端图表视图显示 / disclaimer: mobile chart view only */}
       {!isFullscreen && mobileView === 'chart' && (
-        <p className="mt-2 text-center text-[11px] text-slate-500 lg:hidden">
+        <p className="mt-2 text-center text-[11px] text-neutral-500 lg:hidden">
           {t('charts.footer')}
         </p>
       )}

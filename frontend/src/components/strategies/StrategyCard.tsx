@@ -43,7 +43,7 @@ export default function StrategyCard({
   strategy, performance, backtestWinRate, fallbackName, onEdit, onToggle, onDelete,
 }: StrategyCardProps) {
   const { t } = useTranslation()
-  const btnClass = 'rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white'
+  const btnClass = 'rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:text-white'
   const named = strategy.name?.trim()
 
   // 实盘胜率的三态：足够样本给百分比 / 不足样本给"样本不足 (n/阈值)" / 还没判定过
@@ -63,11 +63,11 @@ export default function StrategyCard({
     <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-semibold text-slate-100">{named || fallbackName}</span>
-          {named && <span className="text-xs text-slate-500">{fallbackName}</span>}
-          <span className="tag bg-white/5 text-slate-400">{displaySymbol(strategy.symbol)}</span>
-          <span className="tag bg-white/5 text-slate-400">{intervalLabel(strategy.interval)}</span>
-          <span className={`tag ${strategy.enabled ? 'bg-up/15 text-up' : 'bg-white/5 text-slate-500'}`}>
+          <span className="text-sm font-semibold text-neutral-100">{named || fallbackName}</span>
+          {named && <span className="text-xs text-neutral-500">{fallbackName}</span>}
+          <span className="tag bg-white/5 text-neutral-400">{displaySymbol(strategy.symbol)}</span>
+          <span className="tag bg-white/5 text-neutral-400">{intervalLabel(strategy.interval)}</span>
+          <span className={`tag ${strategy.enabled ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-500'}`}>
             {strategy.enabled ? t('strategy.enabled') : t('strategy.disabled')}
           </span>
         </div>
@@ -88,16 +88,16 @@ export default function StrategyCard({
 
       {performance && (
         <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-1.5 border-t border-white/5 pt-2.5 text-[11px]">
-          <span className="text-slate-500">
-            {t('strategy.perfLiveWinRate')} <span className="font-mono text-slate-200">{liveText}</span>
+          <span className="text-neutral-500">
+            {t('strategy.perfLiveWinRate')} <span className="font-mono text-neutral-200">{liveText}</span>
           </span>
-          <span className="text-slate-500">
+          <span className="text-neutral-500">
             {t('strategy.perfBacktestWinRate')}{' '}
-            <span className="font-mono text-slate-200">
+            <span className="font-mono text-neutral-200">
               {backtestWinRate == null ? t('strategy.perfNoBacktest') : `${Math.round(backtestWinRate * 100)}%`}
             </span>
           </span>
-          <span className="font-mono text-slate-500">
+          <span className="font-mono text-neutral-500">
             {t('strategy.perfBreakdown', {
               wins: performance.wins,
               losses: performance.losses,
@@ -106,8 +106,8 @@ export default function StrategyCard({
             })}
           </span>
           {performance.avgRr != null && (
-            <span className="text-slate-500">
-              {t('simulator.avgRr')} <span className="font-mono text-slate-200">{performance.avgRr.toFixed(2)}R</span>
+            <span className="text-neutral-500">
+              {t('simulator.avgRr')} <span className="font-mono text-neutral-200">{performance.avgRr.toFixed(2)}R</span>
             </span>
           )}
           {performance.maxLossStreak > 0 && (
@@ -118,9 +118,9 @@ export default function StrategyCard({
             // back only streakWindow resolved signals, not all history. The
             // backtest panel and simulator show a full-history figure, so they
             // keep the original label.
-            <span className="text-slate-500">
+            <span className="text-neutral-500">
               {t('strategy.maxLossStreakWindowed', { count: performance.streakWindow })}{' '}
-              <span className="font-mono text-slate-200">{performance.maxLossStreak}</span>
+              <span className="font-mono text-neutral-200">{performance.maxLossStreak}</span>
             </span>
           )}
         </div>

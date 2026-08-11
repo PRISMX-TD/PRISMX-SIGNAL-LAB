@@ -20,14 +20,26 @@ import BridgeUpdateNotice from './BridgeUpdateNotice'
 import { useBackToClose } from '../utils/useBackToClose'
 import { reportPageView } from '../utils/pageTracking'
 
+// 桌面主导航项。选中态此前是一条「紫 → 青」的渐变下划线：那条青色是全站唯一
+// 出现青的地方，一个孤立的第二品牌色，而两点渐变在 2px 高、几十像素宽的横条上
+// 根本看不出来，只是白付一层绘制。
+// 现在用光谱线（全站签名图形）作为选中指示：同样是一条细线，但它由三条微偏移的
+// 色带组成，是「棱镜色散」的平面化表达——品牌语言在这里承担了功能，而不是装饰。
+// Desktop primary nav item. The active state used to be a violet-to-cyan gradient
+// underline: that cyan was the only cyan anywhere in the product, an orphan second
+// brand colour, and a two-stop gradient is invisible across a 2px-tall, few-dozen-
+// pixel-wide bar anyway — an extra paint for nothing.
+// The active indicator is now the spectral rule, the system's signature graphic:
+// still a thin line, but composed of three micro-offset bands expressing prism
+// dispersion. Here the brand language does a job instead of decorating.
 function NavItem({ to, label }: { to: string; label: string }) {
   return (
     <NavLink
       to={to}
       end={to === '/app'}
       className={({ isActive }) =>
-        `relative whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition ${
-          isActive ? 'text-prism-200' : 'text-slate-400 hover:text-slate-100'
+        `relative whitespace-nowrap px-3 py-2 text-sm font-medium transition-colors ${
+          isActive ? 'text-white' : 'text-neutral-400 hover:text-neutral-100'
         }`
       }
     >
@@ -35,7 +47,9 @@ function NavItem({ to, label }: { to: string; label: string }) {
         <>
           {label}
           {isActive && (
-            <span className="absolute -bottom-px left-3 right-3 h-0.5 rounded-full bg-gradient-to-r from-prism-500 to-[#22d3ee]" />
+            <span className="rule-spectral absolute -bottom-[9px] left-3 right-3">
+              <i />
+            </span>
           )}
         </>
       )}
@@ -151,7 +165,7 @@ function TabIcon({ name }: { name: string }) {
   }
 }
 
-// 液态玻璃底部 Tab 项 / liquid-glass bottom tab item
+// 底部 Tab 项 / bottom tab item
 function TabItem({ to, icon, label }: { to: string; icon: string; label: string }) {
   return (
     <NavLink
@@ -450,7 +464,7 @@ export default function Layout() {
 
   return (
     <LiveProvider>
-      <div className="relative flex min-h-screen flex-col">
+      <div className="relative flex min-h-[100dvh] flex-col">
         <AuroraBackground />
         {/* pt-[env(safe-area-inset-top)]：iOS 的 apple-mobile-web-app-status-bar-style
             是 black-translucent（见 index.html），意味着状态栏是透明的，页面内容
@@ -466,15 +480,30 @@ export default function Layout() {
             capture. The header background itself still hugs the physical top
             (sticky top-0), so the added height is covered by the same blurred
             background, reading as one continuous bar rather than a bare strip. */}
-        <header className="sticky top-0 z-30 border-b border-white/[0.08] bg-ink-950/60 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
+        {/* 顶栏是固定悬浮层，底下真的有内容滚过，所以它保留背景模糊——这是全站
+            仅存的三处 backdrop-filter 之一。不透明度从 0.60 提到 0.88：0.60 太透，
+            滚动时下方的报价数字会从导航文字后面穿过去，两层数字互相干扰。
+            The header is a fixed overlay with real content scrolling beneath it, so
+            it keeps its backdrop blur — one of only three surviving backdrop-filter
+            uses in the app. Opacity raised from 0.60 to 0.88: at 0.60 the live
+            quotes underneath bled through the nav labels while scrolling and the
+            two layers of figures interfered. */}
+        <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-ink-950/90 pt-[env(safe-area-inset-top)] backdrop-blur-lg">
           <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:gap-4 sm:px-6">
             <div className="flex items-center gap-2.5">
               <Logo size={40} />
               <div className="leading-tight">
-                <div className="font-display text-[17px] font-bold tracking-[0.06em] text-white">
+                {/* 字距从 +0.06em 改为负值：Archivo 在 17px 加粗时字面已经足够开，
+                    正字距会把「Signal Lab」两个词拆散成一串独立字母，读起来像
+                    logotype 而不是产品名。
+                    Tracking flipped from +0.06em to negative: Archivo at 17px bold is
+                    already open enough, and positive tracking scattered "Signal Lab"
+                    into loose individual letters that read as a logotype rather than
+                    a product name. */}
+                <div className="font-display text-[17px] font-bold tracking-[-0.015em] text-white">
                   Signal Lab
                 </div>
-                <div className="text-[9px] font-medium uppercase tracking-[0.18em] text-neutral-500">
+                <div className="text-[9px] font-medium uppercase tracking-[0.16em] text-neutral-500">
                   by PRISMX
                 </div>
               </div>
@@ -550,7 +579,19 @@ export default function Layout() {
           <Suspense
             fallback={
               <div className="flex min-h-[40vh] items-center justify-center">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />
+                {/* 懒加载路由的占位。转圈是通用无信息的，但这一层等待的是「下一个
+                    页面的 JS 包」，它的形状在加载完成前无从得知——骨架屏需要预先知道
+                    最终布局才成立。这里改成一条低调的进度条：同样不假装知道内容，
+                    但至少表达了「正在传输」而不是「正在思考」。
+                    Lazy-route placeholder. A spinner is generic and information-free,
+                    but what this waits on is the next page's JS bundle, whose shape is
+                    unknowable before it arrives — a skeleton only works when the final
+                    layout is known in advance. It is now a quiet progress bar: still
+                    not pretending to know the content, but at least saying
+                    "transferring" rather than "thinking". */}
+                <div className="h-px w-40 overflow-hidden bg-white/10">
+                  <div className="h-full w-1/3 animate-shimmer bg-prism-400" />
+                </div>
               </div>
             }
           >
@@ -581,20 +622,25 @@ export default function Layout() {
             mobile tab bar (.lg-tabbar is lg:hidden, so every width below lg needs
             the room) or the last row ends up trapped under it and untappable. */}
         <footer className="mx-auto w-full max-w-7xl px-4 pb-24 sm:px-6 lg:pb-6">
-          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-t border-white/[0.06] pt-5 text-[11.5px] text-slate-600">
+          {/* slate → neutral：slate 是带蓝调的灰，与本设计系统的中性 zinc 灰不同族，
+              两者同屏时冷暖不一致。全站统一到 neutral。
+              slate → neutral: slate is a blue-tinted grey from a different family than
+              this system's neutral zinc greys, and the two read as mismatched
+              temperatures side by side. Unified on neutral throughout. */}
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-t border-white/[0.06] pt-5 text-[11.5px] text-neutral-500">
             <span>© {new Date().getFullYear()} PRISMX</span>
             {(['terms', 'privacy', 'risk'] as const).map((d) => (
-              <NavLink key={d} to={`/${d}`} className="transition hover:text-slate-300">
+              <NavLink key={d} to={`/${d}`} className="transition-colors hover:text-neutral-300">
                 {t(`legal.${d}.title`)}
               </NavLink>
             ))}
-            <NavLink to="/support" className="transition hover:text-slate-300">
+            <NavLink to="/support" className="transition-colors hover:text-neutral-300">
               {t('nav.support')}
             </NavLink>
           </div>
         </footer>
 
-        {/* 移动端底部液态玻璃导航栏 / mobile liquid-glass bottom nav */}
+        {/* 移动端底部导航栏 / mobile bottom nav */}
         <nav className="lg-tabbar lg:hidden">
           <div className="lg-tabbar-inner">
             {mobileTabs.map((tab) => (
@@ -614,7 +660,7 @@ export default function Layout() {
           </div>
         </nav>
 
-        {/* 「其他」液态玻璃弹出面板 / "More" liquid-glass sheet */}
+        {/* 「其他」弹出面板 / "More" bottom sheet */}
         {moreOpen && (
           <div className="lg-sheet-overlay lg:hidden" onClick={() => setMoreOpen(false)}>
             <div className="lg-sheet" onClick={(e) => e.stopPropagation()}>

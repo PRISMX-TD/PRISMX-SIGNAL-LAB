@@ -30,7 +30,7 @@ export default function StrategySignalList({ signals, now, onOrder }: StrategySi
   const { t } = useTranslation()
 
   if (signals.length === 0) {
-    return <div className="mt-4 py-6 text-center text-sm text-slate-500">{t('strategy.noSignals')}</div>
+    return <div className="mt-4 py-6 text-center text-sm text-neutral-500">{t('strategy.noSignals')}</div>
   }
 
   return (
@@ -53,21 +53,21 @@ export default function StrategySignalList({ signals, now, onOrder }: StrategySi
               <span className={`tag ${sig.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
                 {sig.side === 'BUY' ? t('common.buy') : t('common.sell')}
               </span>
-              <span className="font-mono text-sm text-slate-100">{displaySymbol(sig.symbol)}</span>
+              <span className="font-mono text-sm text-neutral-100">{displaySymbol(sig.symbol)}</span>
               {sig.interval && (
-                <span className="tag bg-white/5 text-slate-400">
+                <span className="tag bg-white/5 text-neutral-400">
                   {intervalLabel(sig.interval)}
                 </span>
               )}
-              <span className="text-xs text-slate-500">{t('strategy.signalTriggeredAt')} {fmtTime(sig.createdAt)}</span>
-              {resolved && <span className="tag bg-white/5 text-slate-400">{t(`strategy.signalResult_${sig.result}`)}</span>}
+              <span className="text-xs text-neutral-500">{t('strategy.signalTriggeredAt')} {fmtTime(sig.createdAt)}</span>
+              {resolved && <span className="tag bg-white/5 text-neutral-400">{t(`strategy.signalResult_${sig.result}`)}</span>}
             </div>
             {actionable ? (
               <button type="button" onClick={() => onOrder(sig)} className="btn-primary px-4 py-1.5 text-xs">
                 {t('strategy.oneClickOrder')}
               </button>
             ) : (
-              <span className="rounded-lg border border-white/10 bg-white/5 px-4 py-1.5 text-xs text-slate-500">
+              <span className="rounded-lg border border-white/10 bg-white/5 px-4 py-1.5 text-xs text-neutral-500">
                 {expired ? t('strategy.signalExpired') : t(`strategy.signalResult_${sig.result}`)}
               </span>
             )}

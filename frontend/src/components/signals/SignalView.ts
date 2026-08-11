@@ -89,7 +89,7 @@ export function effectiveStatus(signal: Signal, now: number): EffStatus {
 
 // 风险回报比颜色 / risk-reward color
 export function rrTone(rr: number | null): string {
-  if (rr == null) return 'text-slate-400'
+  if (rr == null) return 'text-neutral-400'
   if (rr >= 2) return 'text-up'
   if (rr >= 1) return 'text-prism-300'
   return 'text-down'
@@ -103,7 +103,7 @@ export function rrTone(rr: number | null): string {
 export function resultTone(result: SignalResult): string {
   if (result === 'HIT_TP') return 'text-up'
   if (result === 'HIT_SL') return 'text-down'
-  return 'text-slate-400'
+  return 'text-neutral-400'
 }
 
 export function resultLabel(result: SignalResult, t: (key: string) => string): string {
@@ -121,7 +121,7 @@ export function resultLabel(result: SignalResult, t: (key: string) => string): s
 
 // focus 状态的视觉映射 / visual mapping for each focus state
 export const FOCUS_TONE: Record<FocusState, { color: string; chipBg: string; glow: string }> = {
-  WATCH: { color: 'text-slate-400', chipBg: 'bg-white/5 text-slate-400', glow: 'rgba(148,163,184,.18)' },
+  WATCH: { color: 'text-neutral-400', chipBg: 'bg-white/5 text-neutral-400', glow: 'rgba(148,163,184,.18)' },
   LONG: { color: 'text-up', chipBg: 'bg-up/15 text-up', glow: 'rgba(47,230,160,.28)' },
   SHORT: { color: 'text-down', chipBg: 'bg-down/15 text-down', glow: 'rgba(255,77,109,.28)' },
 }
@@ -167,5 +167,5 @@ export function trendStance(trend?: Trend): TrendStance {
 export const STANCE_TONE: Record<TrendStance, { color: string; glow: string; dot: string }> = {
   BULL: { color: 'text-up', glow: 'rgba(46,224,126,.28)', dot: '#2ee07e' },
   BEAR: { color: 'text-down', glow: 'rgba(255,77,103,.28)', dot: '#ff4d67' },
-  NEUTRAL: { color: 'text-slate-400', glow: 'rgba(148,163,184,.22)', dot: '#94a3b8' },
+  NEUTRAL: { color: 'text-neutral-400', glow: 'rgba(148,163,184,.22)', dot: '#94a3b8' },
 }

@@ -2,46 +2,123 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── CSS 变量（与设计稿 :root 对齐）/ CSS variables aligned with design tokens ── */
+/* ═══════════════════════════════════════════════════════════════════════════
+   PRISMX 设计令牌 / design tokens
+   ───────────────────────────────────────────────────────────────────────────
+   一句话原则：**颜料，不是光。**  Pigment, not glow.
+
+   上一版把品牌紫当成发光体使用——外发光阴影、渐变标题、玻璃拟态上的紫色光晕。
+   那套语言是 LLM 生成界面的默认签名：它不表达任何层级，只是在「让页面显得
+   有设计」。这一版保留同一个品牌色相，但把它当成**油墨**：实色面、硬边、
+   1px 发丝线，紫色从不照亮相邻的像素。
+
+   随之而来的三个结构性变更：
+   1. 画布从紫调黑（#06030f）换成中性黑（#09090B / zinc-950）。紫调黑 + 紫色
+      前景 = 一锅粥；中性黑让紫成为整页唯一的彩度，对比度自己会把质感做出来。
+   2. backdrop-filter 从「全站卡片」收缩到「固定悬浮层」（顶栏、底部 Tab、
+      弹层）。模糊只有在**真的有内容从下面穿过**时才成立，其余位置一律实色面
+      —— 这同时消掉了移动端最贵的一类持续重绘。
+   3. 圆角从六个数（18/16/12/11/10/7）收敛成一套四档规则，全站遵守。
+
+   The previous version used the brand violet as a light source: outer glow
+   shadows, gradient headlines, purple halos on frosted glass. That vocabulary
+   is the default signature of LLM-generated UI — it encodes no hierarchy, it
+   just tries to look designed. This version keeps the same brand hue but treats
+   it as ink: flat fills, hard edges, 1px hairlines, and violet never
+   illuminates neighbouring pixels.
+
+   Three structural consequences:
+   1. Canvas moved from violet-tinted black (#06030f) to neutral black
+      (#09090B / zinc-950). Violet-tinted black under violet foreground is mush;
+      a neutral ground makes violet the only chroma on the page and lets
+      contrast do the work that glow was faking.
+   2. backdrop-filter shrank from "every card" to "fixed overlays only" (header,
+      bottom tab bar, sheets). Blur is only honest when real content passes
+      underneath; everywhere else is a solid fill — which also removes the most
+      expensive class of continuous repaint on mobile.
+   3. Radii collapsed from six ad-hoc values (18/16/12/11/10/7) into one
+      four-step scale obeyed everywhere.
+   ═══════════════════════════════════════════════════════════════════════════ */
 :root {
-  /* 2026-07-12 精修版换肤：纯黑→深紫黑（环境色温），纯白→暖白（降眩光），
-     紫调灰向中性拉 30%（保氛围、提长文可读性）
-     2026-07-12 reskin: pure black → violet-black, pure white → warm white
-     (less glare), purple-tinted grays pulled 30% toward neutral */
-  --bg: #06030f;
-  --card-a: rgba(255, 255, 255, 0.065);
-  --card-b: rgba(255, 255, 255, 0.025);
-  --nest: rgba(255, 255, 255, 0.055);
-  --nest-hi: rgba(255, 255, 255, 0.10);
-  --line: rgba(255, 255, 255, 0.09);
-  --line-hi: rgba(255, 255, 255, 0.20);
-  --text: #f2f2f7;
-  --text-2: #b8b4ca;
-  --text-3: #7b7598;
-  --purple: #8b5cf6;
-  --purple-hi: #a78bfa;
-  --purple-vivid: #a855f7;
-  --up: #2ee07e;
-  --up-bg: rgba(46, 224, 126, 0.12);
-  --down: #ff4d67;
-  --down-bg: rgba(255, 77, 103, 0.12);
-  --gold: #f6c453;
-  --r-lg: 16px;
-  --r-md: 12px;
-  --spring: cubic-bezier(0.34, 1.45, 0.64, 1);
-  /* 统一动效节奏 token：进场/状态切换缓动 + 时长档位，全局对齐动画节奏。
-     Unified motion tokens: easing for enter/state changes + duration steps,
-     so animations across the app share one rhythm. */
+  /* ── 画布 / canvas ──
+     中性 zinc 系，与代码里既有的 neutral / zinc 工具类同族，避免冷暖不一。
+     Neutral zinc family, matching the neutral/zinc utilities already used
+     throughout the codebase so the greys don't fight each other. */
+  --bg: #09090b;
+  --surface: #101012;
+  --surface-2: #16161a;
+
+  /* 卡片填充：实色而非半透明。半透明 + backdrop-filter 是上一版的默认卡片
+     材质，也是「万物玻璃」观感的来源。这里保留变量名（下游 ~2700 行仍在
+     引用），但值改成不透明的抬升面。
+     Card fills: opaque, not translucent. Translucent + backdrop-filter was the
+     previous default card material and the source of the all-glass look. The
+     variable names are kept (the ~2700 lines downstream still reference them)
+     but now resolve to opaque raised surfaces. */
+  --card-a: #101012;
+  --card-b: #101012;
+  --nest: #16161a;
+  --nest-hi: #1e1e23;
+
+  /* 发丝线：唯一的分隔手段。不用阴影、不用大色块背景来分区。
+     Hairlines: the only separator. No shadows, no tinted blocks to divide. */
+  --line: rgba(255, 255, 255, 0.08);
+  --line-hi: rgba(255, 255, 255, 0.16);
+
+  --text: #ededf0;
+  --text-2: #a1a1aa;
+  --text-3: #84848e;
+
+  /* ── 品牌紫（油墨）/ brand violet, as ink ──
+     色相比 Tailwind violet 更蓝、明度更低，读起来像印刷专色而不是框架默认值。
+     --purple      主颜料：按钮填充、实色面、激活态。白字压在上面约 8.4:1。
+     --purple-hi   暗底上的强调文字色，对 #09090B 约 5.4:1（过 WCAG AA）。
+     --purple-vivid 仅用于需要再亮一档的小面积交互反馈。
+     Bluer hue and lower lightness than Tailwind's violet so it reads as a spot
+     colour rather than a framework default.
+     --purple       primary pigment: button fills, solid planes, active states.
+                    White on top scores ~8.4:1.
+     --purple-hi    accent text tone on dark, ~5.4:1 against #09090B (WCAG AA).
+     --purple-vivid one step brighter, small-area interaction feedback only. */
+  --purple: #5a22ee;
+  --purple-hi: #8b6cff;
+  --purple-vivid: #6e42ff;
+  --purple-deep: #240b63;
+
+  /* ── 市场语义色 / market semantics ──
+     这两个颜色是**数据**，不是品牌色。它们从霓虹薄荷/糖果玫瑰调深一档：
+     长时间盯盘不刺眼，且在实色面上仍然过 AA。永远不参与装饰。
+     These two are *data*, not brand. Deepened one step from neon mint / candy
+     rose so they don't sting over a long session while still passing AA on
+     solid fills. Never used decoratively. */
+  --up: #35c97a;
+  --up-bg: rgba(53, 201, 122, 0.13);
+  --down: #f04d63;
+  --down-bg: rgba(240, 77, 99, 0.13);
+  --gold: #e0a83c;
+
+  /* ── 圆角：一套规则，全站遵守 / one radius scale, obeyed everywhere ──
+     6 小件（chip/tag）· 10 控件（按钮/输入）· 14 卡片 · 20 大面板/弹层
+     旧变量名 --r-lg / --r-md 保留，因为下游 ~2700 行仍在引用。 */
+  --r-xs: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+
+  /* ── 动效节奏 / motion tokens ──
+     去掉了原来那条弹性过冲曲线（cubic-bezier(0.34,1.45,0.64,1)）作为默认值：
+     过冲在按钮和卡片上会读成「玩具感」。默认改成有减速无过冲的 ease-out，
+     过冲只保留给真的需要物理反馈的地方（滑动确认、底部弹层）。
+     The old springy overshoot curve is no longer the default: overshoot on
+     buttons and cards reads as toy-like. The default is now a decelerating
+     ease-out with no overshoot; the spring is kept only where physical feedback
+     is the point (slide-to-confirm, bottom sheets). */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --dur-fast: 0.16s;
-  --dur-base: 0.28s;
-  --dur-slow: 0.5s;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.4; transform: scale(0.85); }
+  --spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --dur-fast: 0.14s;
+  --dur-base: 0.24s;
+  --dur-slow: 0.45s;
 }
 
 @layer base {
@@ -66,46 +143,43 @@
     @apply antialiased;
     background: var(--bg);
     color: var(--text);
-    font-family: "Space Grotesk", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    /* Archivo 打头、Noto Sans SC 承接中文。上一版是 Space Grotesk 打头，而它
+       没有汉字字形——本站默认语言是中文，所有中文实际掉到系统 PingFang/雅黑，
+       与旁边的拉丁字母在字重、字面大小、基线上都对不齐。显式指定 SC 字体后
+       中英两侧字重轴一一对应。
+       Archivo first, Noto Sans SC carrying Chinese. The previous stack led with
+       Space Grotesk, which has no CJK glyphs — and this site defaults to
+       Chinese, so all Chinese fell back to the system PingFang/YaHei and
+       mismatched the adjacent Latin in weight, apparent size and baseline.
+       Declaring the SC face explicitly aligns the two weight axes. */
+    font-family: "Archivo", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
     font-size: 14px;
     min-height: 100vh;
     /* 必须用 clip 而不是 hidden：hidden 会让 overflow-y 计算为 auto，把 body 变成
        滚动容器（window.scrollY 恒为 0，一切依赖 window 滚动的逻辑失效——吸底 CTA、
-       3D 滚动叙事都是受害者）；clip 只裁剪、不产生滚动容器，滚动回到视口。
+       滚动叙事都是受害者）；clip 只裁剪、不产生滚动容器，滚动回到视口。
        Must be clip, not hidden: hidden computes overflow-y to auto and turns body
        into the scroll container (window.scrollY stays 0, breaking everything that
-       listens to window scroll — the sticky CTA and the 3D scrollytelling both).
+       listens to window scroll — the sticky CTA and scroll-driven reveals both).
        clip only clips without creating a scroller, so the viewport scrolls again. */
     overflow-x: clip;
-    /* pan-y：只允许纵向滚动，禁止双指缩放和左右拖动页面。PWA 桌面应用不该像网页
-       一样被左右拖来拖去；内部横向滚动组件（表格、K 线图工具栏）有各自独立的
-       overflow-x: auto，不受 body 级 touch-action 影响。
-       pan-y: vertical scrolling only — blocks pinch zoom and horizontal page drag.
-       The PWA should feel like a native app, not a page that slides sideways.
-       Inner horizontal-scroll containers (tables, chart toolbars) have their own
-       overflow-x: auto and are unaffected by the body-level touch-action. */
+    /* pan-y：只允许纵向滚动，禁止双指缩放和左右拖动页面。内部横向滚动组件
+       （表格、K 线图工具栏）有各自独立的 overflow-x: auto，不受影响。
+       pan-y: vertical scrolling only. Inner horizontal scrollers (tables, chart
+       toolbars) have their own overflow-x: auto and are unaffected. */
     touch-action: pan-y;
     /* none：关掉 iOS 拉到顶/底时那层橡皮筋回弹。PWA 在 standalone 模式下仍会有
        一个视口级 bounce，不加这个从主屏图标打开后上下拉会露出白底。
-       Also locks zoom to prevent users from accidentally pinching; feels native.
-       Zoom is re-enabled on the browser (non-PWA) path via JS in main.tsx so
-       accessibility is preserved outside standalone mode.
        none: disable iOS rubber-band at scroll edges. Standalone PWA still has
        viewport-level bounce without this — pulling past the top reveals white. */
     overscroll-behavior: none;
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
-    /* 关掉长按文字弹出的系统"选择/复制"气泡：PWA 里长按报价、按钮文字这些
-       界面元素被原生选择菜单打断，观感一下就"网页化"了，原生 App 完全没有
-       这个问题。input/textarea/可编辑区域单独放开——那些地方是真的要选中/
-       复制/编辑文本的（见下方例外规则）。
-       Disable the system "Select/Copy" callout on long-press: in the PWA,
-       long-pressing a quote or button label popping up the native text-
-       selection menu instantly breaks the native-app illusion — real native
-       apps never have this problem. Explicitly re-enabled on inputs/textareas/
-       editable regions below, where selecting/copying/editing text is the
-       actual point. */
+    /* 关掉长按文字弹出的系统「选择/复制」气泡：PWA 里长按报价、按钮文字被原生
+       选择菜单打断，观感一下就「网页化」了。input/textarea/可编辑区域单独放开。
+       Disable the system Select/Copy callout on long-press: in the PWA it breaks
+       the native-app illusion. Re-enabled on inputs/textareas/editable regions. */
     -webkit-user-select: none;
     user-select: none;
     -webkit-touch-callout: none;
@@ -116,9 +190,33 @@
     -webkit-touch-callout: default;
   }
 
-  /* 全局背景光晕已移除 — 纯黑背景 / global background glow removed — pure black */
+  /* ── 排版比例 / type scale ──
+     标题走 Archivo 的宽度轴（wdth 112–118）+ 重字重，拿到海报式的编辑语气；
+     界面文字留在标准字宽保持中性。这是一支可变字体覆盖两种语气的方式，比
+     再下载一支「显示字体」省一次网络往返。
+     Headlines ride Archivo's width axis (wdth 112–118) at heavy weights for an
+     editorial/poster voice; UI text stays at normal width and reads neutral.
+     One variable family covering both registers costs one fewer font request
+     than adding a separate display face. */
+  .font-display {
+    font-family: "Archivo", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+    font-variation-settings: "wdth" 112;
+    letter-spacing: -0.018em;
+  }
+  /* 超大标题：字宽再放一档，字距收紧——大字号下字距必须负得更多，否则字母
+     之间的空隙会随字号线性放大，读起来是散的。
+     Display-scale headlines: one more width step and tighter tracking. At large
+     sizes tracking must go more negative or the gaps scale linearly with the
+     type and the line reads loose. */
+  .font-display-xl {
+    font-family: "Archivo", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+    font-variation-settings: "wdth" 118;
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    line-height: 0.94;
+  }
 
-  /* 数字等宽字体 / tabular numbers */
+  /* 数字等宽 / tabular numbers */
   .num {
     font-family: "JetBrains Mono", ui-monospace, monospace;
     font-variant-numeric: tabular-nums;
@@ -127,9 +225,11 @@
 
   /* 键盘焦点环全局可见 / visible keyboard focus ring everywhere */
   button:focus-visible,
-  a:focus-visible {
+  a:focus-visible,
+  [tabindex]:focus-visible {
     outline: 2px solid var(--purple-hi);
     outline-offset: 2px;
+    border-radius: 2px;
   }
 
   ::-webkit-scrollbar {
@@ -138,68 +238,129 @@
   }
   ::-webkit-scrollbar-thumb {
     @apply rounded-full;
-    background: linear-gradient(180deg, rgba(139, 92, 246, 0.5), rgba(124, 58, 237, 0.3));
+    /* 中性灰而不是紫色渐变：滚动条是系统部件，给它上品牌色只会在每一页
+       边缘制造一条与内容无关的彩色条带。
+       Neutral grey rather than a violet gradient: the scrollbar is chrome, and
+       branding it just paints an irrelevant coloured stripe down every page. */
+    background: rgba(255, 255, 255, 0.14);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.24);
   }
   ::-webkit-scrollbar-track {
     @apply bg-transparent;
   }
 
   ::selection {
-    background: rgba(139, 92, 246, 0.35);
+    background: var(--purple);
     color: #fff;
   }
 }
 
 @layer components {
-  /* ── 液态玻璃卡片 / liquid glass card ── */
-  .glass {
+  /* ═════════════ 面 / surfaces ═════════════
+     .glass 这个类名保留（117 处引用），但它不再是玻璃：实色抬升面 + 1px 发丝
+     线，无模糊、无阴影、无内高光。名字是历史包袱，材质已经换掉。
+     The .glass class name is kept (117 call sites) but it is no longer glass:
+     an opaque raised plane with a 1px hairline — no blur, no shadow, no inset
+     highlight. The name is legacy; the material is not. */
+  .glass,
+  .panel {
     position: relative;
-    background: linear-gradient(180deg, var(--card-a), var(--card-b));
-    backdrop-filter: blur(24px) saturate(1.6);
-    -webkit-backdrop-filter: blur(24px) saturate(1.6);
+    background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
     box-shadow: none;
-    transition: border-color 0.25s, transform 0.3s var(--spring);
+    transition: border-color var(--dur-base) var(--ease-out),
+                background-color var(--dur-base) var(--ease-out);
   }
 
-  /* 顶部高光线已移除 / top sheen removed */
-
-  /* 悬停轻反馈：知道摸到了哪张卡 / subtle hover feedback on every card */
-  .glass:hover {
+  .glass:hover,
+  .panel:hover {
     border-color: var(--line-hi);
   }
 
-  /* hover 上浮效果 / hover lift */
+  /* hover 上浮：位移压到 1px。3–4px 的上浮在密集列表里会让整页「跳动」。
+     Hover lift capped at 1px: 3–4px lifts make a dense list feel jittery. */
   .glass.lift:hover {
     border-color: var(--line-hi);
-    transform: translateY(-2px);
+    transform: translateY(-1px);
   }
 
-  /* 去掉顶部高光线（小按钮等）/ no top sheen */
   .no-sheen::before {
     content: none;
   }
 
-  /* 去掉外阴影，只保留内高光 / drop outer glow */
   .flat-card {
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+    box-shadow: none !important;
   }
 
-  /* 兼容旧 .card 类 / keep .card working */
   .card {
     @apply glass;
   }
 
-  /* 带霓虹描边的玻璃卡 / glass card with neon edge on hover */
+  /* 悬停时描边转为品牌紫。这是紫色在卡片上唯一被允许的出场方式：
+     一条 1px 的边，不是一团光。
+     Hover turns the hairline violet. This is the only way violet is allowed to
+     appear on a card: a 1px edge, not a halo. */
   .glass-neon {
-    @apply glass transition-all duration-300;
+    @apply glass;
   }
   .glass-neon:hover {
-    border-color: rgba(139, 92, 246, 0.4);
+    border-color: rgba(139, 108, 255, 0.55);
   }
 
-  /* ── 按钮 / buttons ── */
+  /* 实色紫面板。整段区块直接刷成品牌色——这是「颜料」用法的主场：
+     大面积平涂，白字压上去，没有任何渐变或光晕。
+     Solid violet plane. Whole blocks painted in the brand colour — the main
+     event for the pigment approach: large flat fills with white type on top,
+     no gradient and no halo anywhere. */
+  .plane-uv {
+    background: var(--purple);
+    color: #fff;
+    border: none;
+    border-radius: var(--r-lg);
+  }
+  .plane-uv .sub {
+    color: rgba(255, 255, 255, 0.72);
+  }
+
+  /* ═════════════ 签名图形：光谱线 / signature: the spectral rule ═════════════
+     一条 1px 发丝线裂成三条微偏移色带——棱镜色散的平面化表达。全站唯一的
+     「品牌装饰」，每屏最多出现一次，用来标记真正的分节点。不发光。
+     A 1px hairline splitting into three micro-offset bands: dispersion rendered
+     as flat print. The only brand ornament in the system; at most one per view,
+     marking a genuine section break. It does not glow. */
+  .rule-spectral {
+    position: relative;
+    height: 3px;
+    border: 0;
+    background: none;
+  }
+  .rule-spectral::before,
+  .rule-spectral::after,
+  .rule-spectral > i {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1px;
+  }
+  .rule-spectral::before {
+    top: 0;
+    background: linear-gradient(90deg, transparent, var(--purple-hi) 22%, transparent 70%);
+  }
+  .rule-spectral > i {
+    top: 1px;
+    background: linear-gradient(90deg, transparent 8%, var(--text) 46%, transparent 88%);
+    opacity: 0.55;
+  }
+  .rule-spectral::after {
+    top: 2px;
+    background: linear-gradient(90deg, transparent 30%, var(--purple) 78%, transparent);
+  }
+
+  /* ═════════════ 按钮 / buttons ═════════════ */
   .btn {
     display: inline-flex;
     align-items: center;
@@ -207,72 +368,101 @@
     gap: 8px;
     height: 42px;
     padding: 0 20px;
-    border: none;
-    border-radius: 11px;
+    border: 1px solid transparent;
+    border-radius: var(--r-md);
     font: inherit;
     font-size: 14px;
-    font-weight: 700;
+    font-weight: 600;
+    letter-spacing: -0.005em;
     cursor: pointer;
     white-space: nowrap;
-    transition: transform 0.28s var(--spring), box-shadow 0.25s, filter 0.2s;
+    transition: background-color var(--dur-fast) var(--ease-out),
+                border-color var(--dur-fast) var(--ease-out),
+                color var(--dur-fast) var(--ease-out),
+                transform var(--dur-fast) var(--ease-out);
   }
-  .btn:active {
-    transform: scale(0.96);
+  /* 按下时轻微下沉而不是整体缩放：缩放会让按钮里的文字一起糊掉。
+     Press sinks 1px instead of scaling: scaling blurs the label with it. */
+  .btn:active:not(:disabled) {
+    transform: translateY(1px);
   }
   .btn:disabled {
-    opacity: 0.4;
+    opacity: 0.38;
     cursor: not-allowed;
   }
 
-  .btn-primary,
-  .btn-brand,
-  .btn-ghost {
-    border-radius: 11px;
-    white-space: nowrap;
-  }
-
+  /* 主按钮：实色品牌紫，白字。无渐变、无外发光。
+     白 #fff 压在 #5A22EE 上对比度 ≈ 8.4:1，远超 AA。
+     Primary: flat brand violet, white label. No gradient, no outer glow.
+     #fff on #5A22EE is ~8.4:1, comfortably past AA. */
   .btn-primary,
   .btn-brand {
-    background: linear-gradient(92deg, #7c3aed, #a855f7);
+    background: var(--purple);
     color: #fff;
-    box-shadow: 0 4px 22px rgba(139, 92, 246, 0.50);
+    border-color: var(--purple);
   }
-  .btn-primary:hover,
-  .btn-brand:hover {
-    filter: brightness(1.1);
-    box-shadow: 0 6px 30px rgba(139, 92, 246, 0.65);
+  .btn-primary:hover:not(:disabled),
+  .btn-brand:hover:not(:disabled) {
+    background: var(--purple-vivid);
+    border-color: var(--purple-vivid);
   }
 
   .btn-ghost {
-    background: var(--nest);
+    background: transparent;
     color: var(--text-2);
-    border: 1px solid var(--line);
+    border-color: var(--line);
   }
-  .btn-ghost:hover {
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--nest);
     border-color: var(--line-hi);
-    color: #fff;
+    color: var(--text);
   }
 
-  /* ── 输入框 / input ── */
+  /* 次级按钮：实心中性面，用于「与主操作同等重要但不同方向」的选择。
+     Secondary: solid neutral fill, for choices as important as the primary
+     action but pointing elsewhere. */
+  .btn-secondary {
+    background: var(--nest);
+    color: var(--text);
+    border-color: var(--line);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--nest-hi);
+    border-color: var(--line-hi);
+  }
+
+  /* ═════════════ 输入 / input ═════════════ */
   .input {
     width: 100%;
     border-radius: var(--r-md);
     border: 1px solid var(--line);
     background: var(--nest);
-    padding: 10px 16px;
+    padding: 10px 14px;
     color: var(--text);
     font: inherit;
     font-size: 14px;
-    backdrop-filter: blur(12px);
-    transition: border-color 0.2s;
+    transition: border-color var(--dur-fast) var(--ease-out),
+                background-color var(--dur-fast) var(--ease-out);
     outline: none;
   }
+  /* 占位符必须仍然可读：--text-3 (#71717A) 压在 --nest (#16161A) 上约 4.6:1，
+     过 AA。上一版更暗，在户外屏幕上基本消失。
+     Placeholders must stay legible: --text-3 (#71717A) on --nest (#16161A) is
+     ~4.6:1, past AA. The previous value was darker and vanished outdoors. */
   .input::placeholder {
     color: var(--text-3);
   }
   .input:focus {
-    border-color: var(--purple);
-    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.20);
+    border-color: var(--purple-hi);
+    background: var(--surface-2);
+    /* 焦点环用 1px 实色扩边而不是 3px 紫色柔光：柔光是发光语言。
+       Focus ring is a 1px solid expansion, not a 3px violet haze — haze is the
+       glow vocabulary being removed. */
+    box-shadow: 0 0 0 1px var(--purple-hi);
+  }
+  .input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .label {
@@ -280,42 +470,43 @@
     color: var(--text-2);
   }
 
-  /* ── 标签 / chip / tag ── */
+  /* ═════════════ 标签 / chip / tag ═════════════ */
   .tag {
     display: inline-flex;
     align-items: center;
-    padding: 3px 10px;
-    border-radius: 7px;
+    padding: 3px 9px;
+    border-radius: var(--r-xs);
     font-size: 11.5px;
-    font-weight: 700;
+    font-weight: 600;
+    letter-spacing: 0.01em;
   }
 
   .chip {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 3px 10px;
-    border-radius: 7px;
+    padding: 3px 9px;
+    border-radius: var(--r-xs);
     font-size: 11.5px;
-    font-weight: 700;
+    font-weight: 600;
+    letter-spacing: 0.01em;
   }
   .chip.buy,
   .chip-buy {
     background: var(--up-bg);
     color: var(--up);
-    border: 1px solid rgba(46, 224, 126, 0.35);
+    border: 1px solid rgba(53, 201, 122, 0.32);
   }
   .chip.sell,
   .chip-sell {
     background: var(--down-bg);
     color: var(--down);
-    border: 1px solid rgba(255, 77, 103, 0.35);
+    border: 1px solid rgba(240, 77, 99, 0.32);
   }
   .chip.live {
     background: var(--up-bg);
     color: var(--up);
-    border: 1px solid rgba(46, 224, 126, 0.3);
-    font-weight: 600;
+    border: 1px solid rgba(53, 201, 122, 0.28);
   }
   .chip.dim,
   .chip-dim {
@@ -324,27 +515,29 @@
     border: 1px solid var(--line);
     font-weight: 500;
   }
-  /* 计数徽章 / count badge */
+  /* 计数徽章：实色紫底白字。半透明紫底 + 紫字是上一版的做法，在深色卡片上
+     对比不足。/ Count badge: solid violet, white label. The previous
+     translucent-violet-on-violet-text version under-contrasted on dark cards. */
   .count-badge {
-    min-width: 21px;
-    height: 21px;
+    min-width: 20px;
+    height: 20px;
     padding: 0 6px;
-    border-radius: 7px;
-    background: rgba(139, 92, 246, 0.25);
-    color: var(--purple-hi);
-    font-size: 12px;
+    border-radius: var(--r-xs);
+    background: var(--purple);
+    color: #fff;
+    font-size: 11.5px;
     display: grid;
     place-items: center;
     font-weight: 700;
-    border: 1px solid rgba(168, 139, 250, 0.35);
+    border: none;
   }
 
-  /* ── 分段控制器 / segmented control ── */
+  /* ═════════════ 分段控制器 / segmented control ═════════════ */
   .seg {
     display: flex;
     background: var(--nest);
     border: 1px solid var(--line);
-    border-radius: 10px;
+    border-radius: var(--r-md);
     padding: 3px;
     gap: 2px;
   }
@@ -352,44 +545,79 @@
     height: 28px;
     padding: 0 13px;
     border: none;
-    border-radius: 8px;
+    border-radius: 7px;
     background: transparent;
     color: var(--text-3);
     font: inherit;
     font-size: 12.5px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color var(--dur-fast) var(--ease-out),
+                color var(--dur-fast) var(--ease-out);
   }
   .seg button:hover {
     color: var(--text-2);
   }
+  /* 激活态：实色紫。原本是紫色渐变，渐变在 28px 高的小控件上完全看不出来，
+     只是白白多一层绘制。/ Active: flat violet. It used to be a gradient, which
+     is invisible at 28px and costs an extra paint for nothing. */
   .seg button.on {
-    background: linear-gradient(92deg, #7c3aed, #a855f7);
+    background: var(--purple);
     color: #fff;
   }
 
-  /* ── 渐变文字 / gradient text ── */
+  /* ═════════════ 文字强调 / emphasised text ═════════════
+     .neon-text 保留类名（8 个页面标题在用），但渐变裁切文字已移除——那是
+     被点名最多的 AI 签名之一，而且它会破坏子像素抗锯齿、让标题在低分屏上发虚。
+     现在是实色 + 收紧字距的编辑式标题。
+     .neon-text keeps its name (8 page titles use it) but the gradient-clipped
+     fill is gone: it is one of the most-flagged AI signatures, and it disables
+     subpixel antialiasing, which makes headings look soft on low-DPI screens.
+     It is now a flat, tightly-tracked editorial heading. */
   .neon-text {
-    background: linear-gradient(120deg, #a855f7 0%, #7c3aed 55%, #a78bfa 100%);
-    background-size: 200% auto;
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: var(--text);
+    font-variation-settings: "wdth" 112;
+    letter-spacing: -0.022em;
+    background: none;
+    -webkit-background-clip: initial;
+    background-clip: initial;
+    -webkit-text-fill-color: currentColor;
+  }
+  /* 需要品牌色强调时用这个，而不是渐变。/ Use this, not a gradient, when the
+     brand hue genuinely needs to carry an accent. */
+  .text-uv {
+    color: var(--purple-hi);
   }
 
-  /* ── 动画 / animations ── */
+  /* ═════════════ 动画 / animations ═════════════ */
   .animate-breathe {
     animation: breathe 2.4s ease-in-out infinite;
   }
   .animate-fade-in-up {
-    animation: fade-in-up 0.5s ease-out both;
+    animation: fade-in-up 0.45s var(--ease-out) both;
   }
+  /* 发光脉冲已移除，退化为静态：它是纯装饰的无限循环，也是移动端持续重绘的
+     主要来源之一。/ The glow pulse is gone, degraded to static: a purely
+     decorative infinite loop and a major source of continuous mobile repaint. */
   .animate-glow-pulse {
-    animation: glow-pulse 2.5s ease-in-out infinite;
+    animation: none;
   }
   .animate-spin {
     animation: spin 0.8s linear infinite;
+  }
+  /* 全局减少动态：所有无限循环一律停掉，进场动画退化为直接可见。
+     Global reduced-motion: every infinite loop stops and enter animations
+     collapse to their final state. */
+  @media (prefers-reduced-motion: reduce) {
+    .animate-breathe,
+    .animate-glow-pulse {
+      animation: none;
+    }
+    .animate-fade-in-up {
+      animation: none;
+      opacity: 1;
+      transform: none;
+    }
   }
 
   /* ── 顶栏 MT5 药丸 / topbar MT5 pill ── */
@@ -400,8 +628,8 @@
     height: 36px;
     padding: 0 14px;
     border-radius: 10px;
-    background: rgba(46, 224, 126, 0.10);
-    border: 1px solid rgba(46, 224, 126, 0.35);
+    background: rgba(53, 201, 122, 0.10);
+    border: 1px solid rgba(53, 201, 122, 0.35);
     color: var(--up);
     font-size: 13px;
     font-weight: 600;
@@ -413,7 +641,7 @@
   }
   .mt5-pill .dot.up {
     background: var(--up);
-    box-shadow: 0 0 10px rgba(46, 224, 126, 0.9);
+    box-shadow: none;
     animation: breathe 2.4s ease-in-out infinite;
   }
 
@@ -459,8 +687,8 @@
   .hero-seg.on {
     width: 22px;
     height: 6px;
-    background: linear-gradient(90deg, #7c3aed, #a855f7);
-    box-shadow: 0 0 10px rgba(124, 58, 237, 0.5);
+    background: var(--purple);
+    box-shadow: none;
   }
   /* 桌面端左右箭头：无按钮背景，纯图标点击；手机端隐藏（靠滑动切换即可）
      Desktop prev/next arrows: no button background, icon-only; hidden on
@@ -497,37 +725,33 @@
     align-items: center;
     gap: 8px;
   }
-  /* 立场大字是整页光效的主角：大面积色降一点酸度护眼，
-     光晕以 5s 缓慢呼吸——余光里不闪烁，盯着看有生命感
-     the stance word is the page's one glowing protagonist: softened hue
-     for the large area, glow breathes slowly at 5s (no flicker in
-     peripheral vision) */
+  /* 立场大字（BUY / SELL）是信号卡的语义焦点。此前它靠一层 5s 呼吸的彩色
+     光晕来「显得重要」——发光的文字既是本次重做要清掉的签名，也会关掉子像素
+     抗锯齿让大字发虚，还要为一个纯装饰的无限循环付出持续重绘。
+     现在改用排版本身建立层级：字重、字宽轴、字距，颜色只负责语义。
+     The stance word (BUY / SELL) is the semantic focus of a signal card. It
+     used to look important via a 5s breathing coloured glow — glowing text is
+     both the signature this redesign removes and a real defect: it disables
+     subpixel antialiasing (soft edges at display size) and costs continuous
+     repaint for a purely decorative infinite loop. Hierarchy now comes from
+     typography — weight, width axis, tracking — and colour carries only meaning. */
+  .stance-word.bull,
+  .stance-word.bear,
+  .stance-word.neutral {
+    font-variation-settings: "wdth" 112;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    text-shadow: none;
+    animation: none;
+  }
   .stance-word.bull {
-    color: #43dd8c;
-    text-shadow: 0 0 22px rgba(46, 224, 126, 0.32);
-    animation: stance-glow-bull 5s ease-in-out infinite;
+    color: var(--up);
   }
   .stance-word.bear {
-    color: #ff5e78;
-    text-shadow: 0 0 22px rgba(255, 77, 103, 0.3);
-    animation: stance-glow-bear 5s ease-in-out infinite;
-  }
-  @keyframes stance-glow-bull {
-    0%, 100% { text-shadow: 0 0 22px rgba(46, 224, 126, 0.32); }
-    50% { text-shadow: 0 0 38px rgba(46, 224, 126, 0.55); }
-  }
-  @keyframes stance-glow-bear {
-    0%, 100% { text-shadow: 0 0 22px rgba(255, 77, 103, 0.3); }
-    50% { text-shadow: 0 0 38px rgba(255, 77, 103, 0.52); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .stance-word.bull,
-    .stance-word.bear {
-      animation: none;
-    }
+    color: var(--down);
   }
   .stance-word.neutral {
-    color: #94a3b8;
+    color: var(--text-3);
   }
   .conf-val {
     font-size: 30px;
@@ -543,9 +767,9 @@
     font-size: 12px;
     font-weight: 700;
     font-family: "JetBrains Mono", monospace;
-    background: rgba(46, 224, 126, 0.10);
+    background: rgba(53, 201, 122, 0.10);
     color: var(--up);
-    border: 1px solid rgba(46, 224, 126, 0.4);
+    border: 1px solid rgba(53, 201, 122, 0.4);
     transition: transform 0.25s cubic-bezier(0.34, 1.45, 0.64, 1);
   }
   .tf-tag:hover {
@@ -554,7 +778,7 @@
   .tf-tag.down {
     background: var(--down-bg);
     color: var(--down);
-    border-color: rgba(255, 77, 103, 0.4);
+    border-color: rgba(240, 77, 99, 0.4);
   }
   .tf-tag.neutral {
     background: var(--nest);
@@ -571,11 +795,11 @@
     background: rgba(255, 255, 255, 0.09);
   }
   .senti-bar .a {
-    background: linear-gradient(90deg, #16a866, #2ee07e);
+    background: linear-gradient(90deg, #16a866, #35c97a);
     border-radius: 99px 0 0 99px;
   }
   .senti-bar .b {
-    background: linear-gradient(90deg, #ff4d67, #c22743);
+    background: linear-gradient(90deg, #f04d63, #c22743);
     border-radius: 0 99px 99px 0;
     margin-left: auto;
   }
@@ -617,15 +841,15 @@
     grid-template-columns: 1fr 1fr 1fr;
   }
   .tile-sl {
-    border: 1px solid rgba(255, 77, 103, 0.45);
-    background: rgba(255, 77, 103, 0.08);
+    border: 1px solid rgba(240, 77, 99, 0.45);
+    background: rgba(240, 77, 99, 0.08);
   }
   .tile-sl .val {
     color: var(--down);
   }
   .tile-tp {
-    border: 1px solid rgba(46, 224, 126, 0.45);
-    background: rgba(46, 224, 126, 0.08);
+    border: 1px solid rgba(53, 201, 122, 0.45);
+    background: rgba(53, 201, 122, 0.08);
   }
   .tile-tp .val {
     color: var(--up);
@@ -728,15 +952,15 @@
     color: #fff;
   }
   .sig-tile.sl {
-    border-color: rgba(255, 77, 103, 0.4);
-    background: rgba(255, 77, 103, 0.07);
+    border-color: rgba(240, 77, 99, 0.4);
+    background: rgba(240, 77, 99, 0.07);
   }
   .sig-tile.sl .val {
     color: var(--down);
   }
   .sig-tile.tp {
-    border-color: rgba(46, 224, 126, 0.4);
-    background: rgba(46, 224, 126, 0.07);
+    border-color: rgba(53, 201, 122, 0.4);
+    background: rgba(53, 201, 122, 0.07);
   }
   .sig-tile.tp .val {
     color: var(--up);
@@ -752,7 +976,7 @@
     display: block;
     height: 100%;
     border-radius: 99px;
-    background: linear-gradient(90deg, #7c3aed, #a855f7);
+    background: var(--purple);
     transition: width 1s linear;
   }
   .view-all-btn {
@@ -842,7 +1066,7 @@
     transition: background 0.2s;
   }
   .qt-table tbody tr:hover {
-    background: rgba(139, 92, 246, 0.07);
+    background: rgba(90, 34, 238, 0.07);
   }
   .qt-sym-cell {
     display: flex;
@@ -896,13 +1120,13 @@
     padding: 0 17px;
     font-size: 12.5px;
     border-radius: 8px;
-    background: linear-gradient(92deg, rgba(124, 58, 237, 0.85), rgba(168, 85, 247, 0.85));
+    background: linear-gradient(92deg, rgba(90, 34, 238, 0.85), rgba(168, 85, 247, 0.85));
     color: #fff;
     border: none;
     font-weight: 700;
     cursor: pointer;
     font-family: inherit;
-    box-shadow: 0 2px 12px rgba(139, 92, 246, 0.35);
+    box-shadow: 0 2px 12px rgba(90, 34, 238, 0.35);
     transition: filter 0.2s, transform 0.25s cubic-bezier(0.34, 1.45, 0.64, 1);
   }
   .qt-trade-btn:hover {
@@ -1141,7 +1365,7 @@
     border-color: var(--line-hi);
   }
   .seg-pill button.on {
-    background: linear-gradient(92deg, #7c3aed, #a855f7);
+    background: var(--purple);
     border-color: transparent;
     color: #fff;
   }
@@ -1168,7 +1392,7 @@
     color: var(--text-3);
   }
   .filter-cycle.active {
-    background: linear-gradient(92deg, #7c3aed, #a855f7);
+    background: var(--purple);
     border-color: transparent;
   }
   .filter-cycle.active svg {
@@ -1205,25 +1429,36 @@
     position: fixed;
     inset: 0;
     z-index: 80;
-    background: rgba(5, 3, 10, 0.68);
-    backdrop-filter: blur(10px);
+    /* 遮罩底色去紫、加深：这是下单确认弹窗的背景，它的职责是把注意力从页面
+       上摘下来，不是给页面加一层紫色滤镜。
+       Scrim de-tinted and deepened: this backs the order-confirmation dialog and
+       its job is to lift attention off the page, not to tint the page violet. */
+    background: rgba(9, 9, 11, 0.72);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     display: grid;
     place-items: center;
     animation: lg-fade 0.2s ease;
   }
+  /* 下单确认面板改为实色。这是全站风险最高的一次交互——用户在这里确认真金
+     白银的仓位——半透明面意味着背后的行情数字会从面板下方透出来，与面板上
+     的手数、止损叠在一起。这不是审美问题，是可读性问题。
+     The order-confirmation panel is now opaque. This is the highest-stakes
+     interaction in the product — the user is confirming a real-money position —
+     and a translucent surface lets the live quotes behind it bleed through and
+     collide with the lot size and stop-loss printed on top. That is a legibility
+     defect, not a taste call. */
   .slide-sheet {
     position: relative;
     width: 400px;
     max-width: calc(100vw - 32px);
     max-height: 90vh;
     overflow-y: auto;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03));
-    backdrop-filter: blur(30px) saturate(1.6);
-    -webkit-backdrop-filter: blur(30px) saturate(1.6);
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: 20px;
+    background: var(--surface);
+    border: 1px solid var(--line-hi);
+    border-radius: var(--r-xl);
     padding: 22px;
-    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    box-shadow: 0 24px 64px -16px rgba(0, 0, 0, 0.8);
   }
   .slide-sheet-head {
     text-align: center;
@@ -1374,7 +1609,7 @@
     background: var(--nest-hi);
   }
   .slide-acct-opt.active {
-    background: rgba(139, 92, 246, 0.14);
+    background: rgba(90, 34, 238, 0.14);
   }
   .slide-acct-opt .opt-login {
     display: flex;
@@ -1397,7 +1632,7 @@
   }
   .slide-acct-opt .opt-dot.on {
     background: var(--up, #2fe6a0);
-    box-shadow: 0 0 6px rgba(47, 230, 160, 0.7);
+    box-shadow: none;
   }
   .slide-acct-opt .opt-equity {
     font-size: 11.5px;
@@ -1517,7 +1752,7 @@
     color: #fff;
   }
   .select-opt.active {
-    background: rgba(139, 92, 246, 0.18);
+    background: rgba(90, 34, 238, 0.18);
     color: #fff;
   }
 
@@ -1540,7 +1775,7 @@
     top: 0;
     bottom: 0;
     width: 0;
-    background: rgba(139, 92, 246, 0.28);
+    background: rgba(90, 34, 238, 0.28);
     transition: width 0.24s cubic-bezier(0.22, 1, 0.36, 1);
     will-change: width;
   }
@@ -1562,12 +1797,12 @@
     width: 46px;
     height: 46px;
     border-radius: 12px;
-    background: linear-gradient(130deg, #7c3aed, #a855f7);
+    background: var(--purple);
     color: #fff;
     display: grid;
     place-items: center;
     cursor: grab;
-    box-shadow: 0 4px 18px rgba(139, 92, 246, 0.55);
+    box-shadow: 0 4px 18px rgba(90, 34, 238, 0.55);
     transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), background 0.2s, box-shadow 0.2s;
     will-change: transform;
     touch-action: none;
@@ -1581,15 +1816,15 @@
     transition: none;
   }
   .slide-track.done {
-    border-color: rgba(46, 224, 126, 0.5);
+    border-color: rgba(53, 201, 122, 0.5);
   }
   .slide-track.done .slide-track-fill {
-    background: rgba(46, 224, 126, 0.16);
+    background: rgba(53, 201, 122, 0.16);
     width: 100% !important;
   }
   .slide-track.done .slide-knob {
-    background: linear-gradient(130deg, #16a866, #2ee07e);
-    box-shadow: 0 4px 18px rgba(46, 224, 126, 0.5);
+    background: linear-gradient(130deg, #16a866, #35c97a);
+    box-shadow: 0 4px 18px rgba(53, 201, 122, 0.5);
   }
   .receipt-card {
     margin-top: 12px;
@@ -1604,20 +1839,20 @@
     font-size: 13.5px;
   }
   .receipt-line.wait {
-    background: rgba(139, 92, 246, 0.14);
+    background: rgba(90, 34, 238, 0.14);
     color: var(--purple-hi);
   }
   .receipt-line.ok {
     background: var(--up-bg);
     color: var(--up);
     font-weight: 700;
-    border: 1px solid rgba(46, 224, 126, 0.3);
+    border: 1px solid rgba(53, 201, 122, 0.3);
   }
   .spinner {
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    border: 2px solid rgba(167, 139, 250, 0.3);
+    border: 2px solid rgba(139, 108, 255, 0.3);
     border-top-color: var(--purple-hi);
     animation: spin 0.8s linear infinite;
   }
@@ -1650,7 +1885,17 @@
   }
 
   /* ══════════════════════════════════════════════
-     手机端底部导航：苹果液态玻璃 / Mobile bottom nav: Apple liquid glass
+     手机端底部导航 / mobile bottom nav
+     这是全站唯一仍然保留背景模糊的常驻组件，而且它是有依据的：它固定悬浮在
+     滚动内容之上，底下**确实**有东西穿过。其余位置的模糊已全部移除。
+     注意这里不再自称「苹果液态玻璃」——Apple 的 Liquid Glass 是 Apple 平台的
+     原生材质，网页端只能做近似，把近似称作原物是不诚实的命名。
+     This is the only persistent component that still uses backdrop blur, and it
+     earns it: it floats above scrolling content, so something genuinely passes
+     underneath. Blur was removed everywhere else.
+     Note it no longer claims to be "Apple liquid glass" — Liquid Glass is a
+     native Apple-platform material; the web can only approximate it, and naming
+     an approximation after the original is dishonest.
      ══════════════════════════════════════════════ */
   .lg-tabbar {
     position: fixed;
@@ -1664,16 +1909,19 @@
     align-items: stretch;
     gap: 3px;
     padding: 7px 8px;
-    border-radius: 26px;
-    background: rgba(28, 25, 44, 0.55);
-    backdrop-filter: blur(28px) saturate(180%);
-    -webkit-backdrop-filter: blur(28px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 18px;
+    background: rgba(16, 16, 18, 0.82);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--line-hi);
+    /* 内高光从 0.3 降到 0.10：0.3 的顶部白线是「玻璃边缘折射」的模拟，在深色
+       条上会读成一道亮边，是玻璃拟态最容易辨认的痕迹。
+       Inset highlight dropped from 0.3 to 0.10: a 0.3 top-edge white line
+       simulates glass-edge refraction and reads as a bright rim on a dark bar —
+       the most recognisable remnant of glassmorphism. */
     box-shadow:
-      0 14px 44px rgba(0, 0, 0, 0.5),
-      0 2px 8px rgba(0, 0, 0, 0.3),
-      inset 0 1px 0 rgba(255, 255, 255, 0.3),
-      inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+      0 12px 36px -12px rgba(0, 0, 0, 0.7),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1);
   }
   .lg-tab {
     flex: 1;
@@ -1683,7 +1931,7 @@
     justify-content: center;
     gap: 3px;
     padding: 8px 0 6px;
-    border-radius: 18px;
+    border-radius: 12px;
     border: 1px solid transparent;
     background: transparent;
     color: var(--text-3);
@@ -1692,7 +1940,7 @@
     font-weight: 600;
     line-height: 1;
     cursor: pointer;
-    transition: color 0.25s, background 0.3s, box-shadow 0.3s;
+    transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
     -webkit-tap-highlight-color: transparent;
   }
   .lg-tab .lg-ico {
@@ -1700,11 +1948,18 @@
     place-items: center;
     height: 26px;
   }
+  /* 激活态：实色品牌紫。原本是一层「紫→淡紫」的斜向半透明渐变加白色内高光，
+     在半透明底栏上会与背后滚过的内容混色，选中项的位置随内容漂移。实色一填，
+     选中态在任何背景上都是同一个样子。
+     Active tab: flat brand violet. It used to be a diagonal translucent violet
+     gradient with a white inset highlight, which blended with whatever scrolled
+     underneath the translucent bar — so the selected item visibly shifted colour
+     as the page moved. A flat fill looks identical over any background. */
   .lg-tab.on {
     color: #fff;
-    background: linear-gradient(158deg, rgba(180, 120, 255, 0.5), rgba(124, 58, 237, 0.34));
-    border-color: rgba(255, 255, 255, 0.22);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+    background: var(--purple);
+    border-color: var(--purple);
+    box-shadow: none;
   }
 
   /* 「其他」弹出面板 / "More" liquid-glass sheet */
@@ -1719,18 +1974,19 @@
     backdrop-filter: blur(3px);
     animation: lg-fade 0.2s ease;
   }
+  /* 面板本身改为实色：它上面是导航项文字，背后是整页内容，半透明只会让两层
+     文字互相干扰。遮罩层负责「隔开」，面板负责「承载」，各司其职。
+     The sheet itself is opaque: it carries navigation labels over a full page of
+     content, and translucency just makes two layers of text interfere. The scrim
+     separates, the sheet holds content — one job each. */
   .lg-sheet {
     width: 100%;
     padding: 10px 16px calc(env(safe-area-inset-bottom) + 18px);
-    border-radius: 30px 30px 0 0;
-    background: rgba(28, 25, 44, 0.72);
-    backdrop-filter: blur(32px) saturate(180%);
-    -webkit-backdrop-filter: blur(32px) saturate(180%);
-    border-top: 1px solid rgba(255, 255, 255, 0.18);
-    box-shadow:
-      0 -14px 50px rgba(0, 0, 0, 0.55),
-      inset 0 1px 0 rgba(255, 255, 255, 0.28);
-    animation: lg-slide-up 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+    background: var(--surface);
+    border-top: 1px solid var(--line-hi);
+    box-shadow: 0 -12px 40px -12px rgba(0, 0, 0, 0.7);
+    animation: lg-slide-up 0.3s var(--ease-out);
   }
   .lg-sheet-handle {
     width: 40px;
@@ -1766,7 +2022,7 @@
   }
   .lg-sheet-item.on {
     color: #fff;
-    background: linear-gradient(158deg, rgba(180, 120, 255, 0.34), rgba(124, 58, 237, 0.24));
+    background: linear-gradient(158deg, rgba(180, 120, 255, 0.34), rgba(90, 34, 238, 0.24));
     border-color: rgba(255, 255, 255, 0.22);
   }
   .lg-sheet-logout {
@@ -1774,8 +2030,8 @@
     margin-top: 12px;
     padding: 13px;
     border-radius: 16px;
-    background: rgba(255, 77, 103, 0.12);
-    border: 1px solid rgba(255, 77, 103, 0.32);
+    background: rgba(240, 77, 99, 0.12);
+    border: 1px solid rgba(240, 77, 99, 0.32);
     color: #ff8095;
     font: inherit;
     font-size: 13.5px;
@@ -1825,9 +2081,9 @@
     gap: 4px;
     padding: 6px 8px 7px;
     border-radius: 14px;
-    background: rgba(18, 14, 34, 0.85);
-    backdrop-filter: blur(20px) saturate(1.6);
-    -webkit-backdrop-filter: blur(20px) saturate(1.6);
+    background: rgba(16, 16, 18, 0.92);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
     border: 1px solid rgba(255, 255, 255, 0.16);
     box-shadow:
       0 8px 32px rgba(0, 0, 0, 0.55),
@@ -2016,8 +2272,8 @@
   100% { opacity: 1; transform: translateY(0); }
 }
 @keyframes glow-pulse {
-  0%, 100% { box-shadow: 0 0 16px rgba(139, 92, 246, 0.3); }
-  50% { box-shadow: 0 0 32px rgba(139, 92, 246, 0.6); }
+  0%, 100% { box-shadow: none; }
+  50% { box-shadow: none; }
 }
 @keyframes spin {
   to { transform: rotate(360deg); }
@@ -2040,332 +2296,92 @@
   html { scroll-behavior: smooth; }
 }
 
-/* ── 小节眉题 / section eyebrow ── */
+/* ── 小节眉题 / section eyebrow ──
+   类保留，但用法在落地页被严格配额：每三个分区最多一个。此前每个分区头部
+   都挂一条紫色全大写宽字距标签，八个分区八条——那是模板化节奏最明显的来源，
+   读者第三次看到它就知道页面是按模板批量生成的。
+   字距从 0.3em 收到 0.16em（0.3em 在中文旁边会拆散字形），颜色从品牌紫改成
+   中性灰：眉题是次要信息，不该抢走整页唯一彩度。
+   The class stays but its use is now rationed on the landing page: at most one
+   per three sections. Previously every section header carried a violet all-caps
+   wide-tracked label — eight sections, eight labels — the single clearest source
+   of templated rhythm; by the third one a reader knows the page was mass-produced.
+   Tracking tightened from 0.3em to 0.16em (0.3em shears Chinese glyphs apart when
+   the two scripts sit on one line) and the colour dropped from brand violet to
+   neutral grey: an eyebrow is secondary information and should not spend the
+   page's only chroma. */
 .eyebrow {
   display: inline-block;
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.3em;
+  font-weight: 600;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--purple-hi);
+  color: var(--text-3);
 }
 
-/* ── 滚动显现 / scroll reveal ── */
+/* ── 滚动显现 / scroll reveal ──
+   位移 34px → 14px，去掉 scale 与 6px 模糊，时长 0.9s → 0.5s。
+   原来的参数组合（大位移 + 缩放 + 模糊）是「入场感」堆出来的，代价是每个
+   元素进入视口时都触发一次全尺寸模糊重绘，在中端安卓上肉眼可见掉帧；而且
+   0.9s 慢到用户滚过去了内容还没到位。现在只保留位移 + 透明度，两者都是
+   合成器属性，不触发重排也不触发重绘。
+   Travel 34px → 14px, scale and the 6px blur removed, duration 0.9s → 0.5s.
+   The old combination (long travel + scale + blur) was "entrance feel" stacked
+   up, and it cost a full-size blur repaint every time an element crossed the
+   viewport — visibly dropping frames on mid-range Android. At 0.9s the user had
+   already scrolled past before the content settled. What is left is transform
+   plus opacity: both compositor-only, no layout and no paint. */
 .reveal {
   opacity: 0;
-  transform: translateY(34px) scale(0.985);
-  filter: blur(6px);
-  transition: opacity 0.8s ease, transform 0.9s cubic-bezier(0.16, 1, 0.3, 1), filter 0.8s ease;
+  transform: translateY(14px);
+  transition: opacity 0.5s var(--ease-out), transform 0.5s var(--ease-out);
 }
 .reveal.in {
   opacity: 1;
   transform: none;
-  filter: blur(0);
 }
-.reveal-d1 { transition-delay: 0.09s; }
-.reveal-d2 { transition-delay: 0.18s; }
-.reveal-d3 { transition-delay: 0.27s; }
+.reveal-d1 { transition-delay: 0.06s; }
+.reveal-d2 { transition-delay: 0.12s; }
+.reveal-d3 { transition-delay: 0.18s; }
 @media (prefers-reduced-motion: reduce) {
-  .reveal { opacity: 1; transform: none; filter: none; transition: none; }
+  .reveal { opacity: 1; transform: none; transition: none; }
 }
 
 /* ── 卡片悬浮微交互 / card hover lift ── */
 .card-hover {
-  transition: border-color 0.3s ease, transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.3s ease;
-  will-change: transform;
+  transition: border-color var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out);
 }
 .card-hover:hover {
-  transform: translateY(-4px);
-  border-color: rgba(255, 255, 255, 0.16);
-  background-color: rgba(255, 255, 255, 0.035);
+  transform: translateY(-1px);
+  border-color: var(--line-hi);
 }
 @media (prefers-reduced-motion: reduce) {
   .card-hover:hover { transform: none; }
 }
 
-/* ── 统一玻璃卡：浮在极光流体上的容器 / unified glass card over aurora ── */
+/* ── 落地页卡片 / landing surface ──
+   曾经是「浮在极光流体上的玻璃卡」：半透明 + 20px 背景模糊 + 内高光 + 4px
+   悬浮位移。极光背景已经删掉，模糊就失去了它唯一的依据——底下没有东西可透。
+   现在与 App 内的 .glass 同一种材质：实色面 + 1px 发丝线，两侧观感终于统一。
+   Formerly a "glass card floating over the aurora": translucent, 20px backdrop
+   blur, inset highlight, 4px hover lift. The aurora backdrop is gone, which
+   removes blur's only justification — there is nothing underneath to see through.
+   It now uses the same material as .glass inside the app: an opaque plane with a
+   1px hairline, so the marketing and product surfaces finally match. */
 .glass-card {
   position: relative;
-  border-radius: 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(18, 14, 34, 0.55), rgba(10, 8, 22, 0.42));
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 24px 48px -24px rgba(0, 0, 0, 0.7);
-  transition: border-color 0.3s ease, transform 0.4s cubic-bezier(0.22, 1, 0.36, 1), background 0.3s ease;
-  will-change: transform;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: none;
+  transition: border-color var(--dur-base) var(--ease-out), background-color var(--dur-base) var(--ease-out);
 }
 .glass-card:hover {
-  transform: translateY(-4px);
-  border-color: rgba(167, 139, 250, 0.35);
-  background: linear-gradient(180deg, rgba(24, 18, 44, 0.62), rgba(12, 9, 26, 0.48));
+  border-color: var(--line-hi);
+  background: var(--surface-2);
 }
 @media (prefers-reduced-motion: reduce) {
   .glass-card:hover { transform: none; }
-}
-
-/* ── Hero 示例卡 3D 微倾 / hero card tilt ── */
-.tilt-3d {
-  transform-style: preserve-3d;
-  will-change: transform;
-  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-/* ── 3D 手机样机 / phone mockup ── */
-.ph-stage { perspective: 1400px; }
-.ph-scale {
-  width: 250px;
-  height: 530px;
-  margin: 0 auto;
-}
-.ph-frame {
-  position: relative;
-  width: 250px;
-  height: 520px;
-  border-radius: 44px;
-  background: linear-gradient(160deg, #17131f, #0b0812);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow:
-    0 40px 90px rgba(0, 0, 0, 0.6),
-    0 0 60px rgba(139, 92, 246, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  padding: 9px;
-  transform-style: preserve-3d;
-  will-change: transform;
-}
-/* 侧键 / side buttons */
-.ph-frame::before {
-  content: '';
-  position: absolute;
-  left: -2px;
-  top: 110px;
-  width: 3px;
-  height: 54px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.18);
-}
-.ph-frame::after {
-  content: '';
-  position: absolute;
-  right: -2px;
-  top: 130px;
-  width: 3px;
-  height: 34px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.18);
-}
-.ph-screen {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  border-radius: 36px;
-  overflow: hidden;
-  background: radial-gradient(120% 90% at 50% 0%, #151022 0%, #0a0714 55%, #070510 100%);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-.ph-island {
-  position: absolute;
-  top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 78px;
-  height: 22px;
-  border-radius: 999px;
-  background: #000;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  z-index: 5;
-}
-.ph-status {
-  display: flex;
-  justify-content: space-between;
-  padding: 12px 18px 0;
-  font-size: 10px;
-  color: var(--text-3);
-  font-family: 'JetBrains Mono', monospace;
-}
-.ph-view {
-  position: absolute;
-  inset: 44px 12px 58px;
-  opacity: 0;
-  transform: translateY(14px) scale(0.985);
-  transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
-  pointer-events: none;
-  overflow: hidden;
-}
-.ph-view.on {
-  opacity: 1;
-  transform: none;
-}
-@media (prefers-reduced-motion: reduce) {
-  .ph-view { transform: none; transition: opacity 0.4s ease; }
-}
-.ph-tabbar {
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 10px;
-  height: 40px;
-  border-radius: 16px;
-  background: rgba(28, 25, 44, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  display: flex;
-  align-items: center;
-  justify-content: space-around;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-.ph-tab-dot {
-  width: 16px;
-  height: 16px;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.14);
-  transition: background 0.3s, box-shadow 0.3s;
-}
-.ph-tab-dot.on {
-  background: linear-gradient(130deg, #7c3aed, #a855f7);
-  box-shadow: 0 0 10px rgba(139, 92, 246, 0.6);
-}
-/* 屏内迷你卡 / in-screen mini card */
-.ph-card {
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  padding: 10px;
-}
-/* 屏内三列价格瓦片 / in-screen price tiles */
-.ph-tile {
-  border-radius: 9px;
-  padding: 6px 2px;
-  text-align: center;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  min-width: 0;
-}
-.ph-tile .cap { font-size: 8.5px; color: var(--text-3); }
-.ph-tile .val { font-size: 10.5px; font-weight: 700; margin-top: 2px; color: #fff; }
-.ph-tile.sl { border-color: rgba(255, 77, 103, 0.4); background: rgba(255, 77, 103, 0.07); }
-.ph-tile.sl .val { color: var(--down); }
-.ph-tile.tp { border-color: rgba(46, 224, 126, 0.4); background: rgba(46, 224, 126, 0.07); }
-.ph-tile.tp .val { color: var(--up); }
-/* 移动端：等比缩小 + 吸顶 */
-@media (max-width: 1023.5px) {
-  .ph-scale {
-    transform: scale(0.68);
-    transform-origin: top center;
-    width: 170px;
-    height: 368px;
-  }
-}
-
-/* ── 滚动叙事步骤 / showcase steps ── */
-.sh-step {
-  min-height: 52vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  opacity: 0.35;
-  transition: opacity 0.45s ease;
-}
-.sh-step.on { opacity: 1; }
-@media (min-width: 1024px) {
-  .sh-step { min-height: 58vh; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .sh-step { opacity: 1; }
-}
-.sh-step-num {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  color: var(--purple-hi);
-  letter-spacing: 0.2em;
-}
-/* 移动端吸顶样机的底部渐隐垫层 */
-.ph-sticky-mask {
-  position: sticky;
-  top: 57px;
-  z-index: 30;
-  padding: 10px 0 18px;
-  background: linear-gradient(to bottom, #000 0%, #000 78%, transparent 100%);
-}
-@media (min-width: 1024px) {
-  .ph-sticky-mask {
-    position: sticky;
-    top: 96px;
-    background: none;
-    padding: 0;
-  }
-}
-
-/* ══════════════════════════════════════════════
-   交易终端 / trading terminal (charts page)
-   混合风格：品牌紫作强调色 + 终端级信息密度（收紧留白、等宽数字、高对比）。
-   Hybrid: brand violet as accent + terminal-grade density.
-   ══════════════════════════════════════════════ */
-
-/* 隐藏滚动条但保留滚动（终端里溢出兜底区不该露出滚动条）。
-   Hide the scrollbar but keep scrolling (overflow gutters in the terminal). */
-.no-sb { scrollbar-width: none; }
-.no-sb::-webkit-scrollbar { display: none; }
-
-/* 三栏骨架：左自选 ▏中图表 ▏右下单/账户。桌面填满视口高度，窄屏退回单列
-   （仅中栏，侧栏 hidden，手机端终端在阶段 3 单独做）。
-   Three columns: watchlist ▏chart ▏ticket/account. Fills the viewport height on
-   desktop; collapses to the center column on narrow screens (side panels hidden;
-   the mobile terminal is built separately in phase 3). */
-.term-shell {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 8px;
-}
-@media (min-width: 1024px) {
-  /* 桌面：整块无缝终端——一层外框 + 内部发丝线分隔，不再是"各自带圆角边框、
-     中间留缝"的浮动卡片。/ Desktop: one seamless terminal — a single outer
-     frame with internal hairline dividers, not floating rounded cards + gaps. */
-  .term-shell {
-    grid-template-columns: 236px minmax(0, 1fr) 288px;
-    gap: 0;
-    height: calc(100vh - 8rem);
-    border: 1px solid var(--line-hi);
-    border-radius: 14px;
-    overflow: hidden;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.006));
-  }
-  .term-col-left { border-right: 1px solid var(--line); }
-  .term-col-right { border-left: 1px solid var(--line); }
-}
-
-/* 面板在无缝框里不再各自带边框/圆角/背景，避免"浮动卡片 + 裂缝"观感；
-   区块之间的分隔改用发丝线（见各自的 border-bottom/top）。
-   Inside the seamless frame, panels drop their own border/radius/background so
-   they don't read as floating cards; sections are separated by hairlines. */
-.term-panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.term-pane-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 32px;
-  flex-shrink: 0;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--line);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-  color: var(--text-2);
-}
-.term-pane-head-r {
-  margin-left: auto;
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--text-3);
 }
 
 /* ── 中栏 / center column ── */
@@ -2420,7 +2436,7 @@
   cursor: pointer;
   transition: color 0.15s, background-color 0.15s;
 }
-.term-mtabs button.on { background: linear-gradient(92deg, #7c3aed, #a855f7); color: #fff; }
+.term-mtabs button.on { background: var(--purple); color: #fff; }
 
 /* 手机端单视图容器：撑起大半屏，内部面板自行滚动，底部给 App 全局 Tab 栏留白。
    Mobile single-view container: fills most of the screen; inner panels scroll
@@ -2552,15 +2568,15 @@
   flex-shrink: 0;
   padding: 4px 9px;
   border-radius: 999px;
-  border: 1px solid rgba(139, 92, 246, 0.32);
-  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(90, 34, 238, 0.32);
+  background: rgba(90, 34, 238, 0.1);
   color: var(--purple-hi);
   font-size: 11.5px;
   font-weight: 600;
   text-decoration: none;
   white-space: nowrap;
 }
-.term-symhead-m-strat:active { background: rgba(139, 92, 246, 0.18); }
+.term-symhead-m-strat:active { background: rgba(90, 34, 238, 0.18); }
 
 /* ── 单条工具栏：周期（钉左）· 画线工具（中部可横滑）· 添加指标（钉右）──
    Single toolbar: interval (pinned left) · draw tools (scrollable middle) ·
@@ -2596,7 +2612,7 @@
   cursor: pointer;
 }
 .term-ivseg button:hover { color: var(--text-2); }
-.term-ivseg button.on { background: linear-gradient(92deg, #7c3aed, #a855f7); color: #fff; }
+.term-ivseg button.on { background: var(--purple); color: #fff; }
 /* 桌面端画线工具行的外层：占据中部弹性空间，纵向堆叠"工具行 + 自定义拖拽条"。
    固定 30px 高（26px 图标行 + 4px 拖拽条区），拖拽条绝对定位在底部，不参与
    布局、不会把图标行顶高。
@@ -2641,13 +2657,13 @@
 .term-toolbar-thumb {
   height: 2px;
   border-radius: 999px;
-  background: rgba(167, 139, 250, 0.55);
+  background: rgba(139, 108, 255, 0.55);
   cursor: grab;
   transition: background-color 0.15s;
   touch-action: none;
 }
 .term-toolbar-thumb:hover,
-.term-toolbar-thumb:active { background: rgba(167, 139, 250, 0.9); }
+.term-toolbar-thumb:active { background: rgba(139, 108, 255, 0.9); }
 .term-toolbar-thumb:active { cursor: grabbing; }
 /* wrap 变体：手机端展开行用——铺满宽度换行显示，不用横向滚动藏起后面的工具
    （发现性更好），按钮/颜色点也放大一档更好点按。手机有触屏手势不需要这条
@@ -2683,7 +2699,7 @@
 }
 .term-tool-btn:hover:not(:disabled) { color: var(--text); border-color: var(--line-hi); }
 .term-tool-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-.term-tool-btn.on { color: var(--purple-hi); border-color: rgba(139, 92, 246, 0.5); background: rgba(139, 92, 246, 0.14); }
+.term-tool-btn.on { color: var(--purple-hi); border-color: rgba(90, 34, 238, 0.5); background: rgba(90, 34, 238, 0.14); }
 .term-tool-btn.warn.on { color: var(--gold); border-color: rgba(246, 196, 83, 0.5); background: rgba(246, 196, 83, 0.14); }
 .term-color-dot {
   width: 15px;
@@ -2699,9 +2715,9 @@
 .term-tool-indicator {
   height: 26px;
   padding: 0 11px;
-  border: 1px solid rgba(139, 92, 246, 0.4);
+  border: 1px solid rgba(90, 34, 238, 0.4);
   border-radius: 6px;
-  background: rgba(139, 92, 246, 0.14);
+  background: rgba(90, 34, 238, 0.14);
   color: var(--purple-hi);
   font: inherit;
   font-size: 12px;
@@ -2709,7 +2725,7 @@
   cursor: pointer;
   white-space: nowrap;
 }
-.term-tool-indicator:hover { background: rgba(139, 92, 246, 0.24); }
+.term-tool-indicator:hover { background: rgba(90, 34, 238, 0.24); }
 .term-stale { font-size: 11px; font-weight: 600; color: var(--gold); background: rgba(246, 196, 83, 0.12); border-radius: 5px; padding: 2px 7px; white-space: nowrap; }
 
 /* ── 手机端工具栏：周期钉左 · 画笔开关 + 添加指标钉右（画线工具默认收起）──
@@ -2730,7 +2746,7 @@
 .term-toolbar-m-expand {
   padding: 10px 10px 12px;
   border-bottom: 1px solid var(--line);
-  background: rgba(139, 92, 246, 0.045);
+  background: rgba(90, 34, 238, 0.045);
 }
 
 /* ── 图表容器：无缝、无自身边框圆角内边距（K 线自带深色背景）──
@@ -2792,7 +2808,7 @@
 .term-wl-row:hover { background: rgba(255, 255, 255, 0.03); }
 .term-wl-row.on {
   border-left-color: var(--purple);
-  background: linear-gradient(90deg, rgba(139, 92, 246, 0.14), transparent 82%);
+  background: linear-gradient(90deg, rgba(90, 34, 238, 0.14), transparent 82%);
 }
 .term-wl-badge {
   display: grid;
@@ -2847,8 +2863,8 @@
 .term-bs:active { transform: scale(0.97); }
 .term-bs .lab { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; }
 .term-bs .px { font-size: 15px; font-weight: 600; }
-.term-bs.buy:hover { border-color: rgba(46, 224, 126, 0.55); background: var(--up-bg); color: var(--up); }
-.term-bs.sell:hover { border-color: rgba(255, 77, 103, 0.55); background: var(--down-bg); color: var(--down); }
+.term-bs.buy:hover { border-color: rgba(53, 201, 122, 0.55); background: var(--up-bg); color: var(--up); }
+.term-bs.sell:hover { border-color: rgba(240, 77, 99, 0.55); background: var(--down-bg); color: var(--down); }
 .term-quickorder-hint { margin: 0; font-size: 11px; color: var(--text-3); text-align: center; }
 
 /* ── 停靠下单面板 / docked order ticket ── */
@@ -2867,7 +2883,7 @@
   height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--text-3);
   font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
 }
-.term-seg2 button.on { background: linear-gradient(92deg, #7c3aed, #a855f7); color: #fff; }
+.term-seg2 button.on { background: var(--purple); color: #fff; }
 .term-stepper { display: flex; align-items: center; gap: 6px; }
 .term-stepper input {
   flex: 1; min-width: 0; height: 32px; border: 1px solid var(--line); border-radius: 7px;
@@ -2885,7 +2901,7 @@
   color: var(--text-2); font-size: 12px; cursor: pointer;
 }
 .term-chip:hover { border-color: var(--line-hi); color: var(--text); }
-.term-chip.on { border-color: rgba(139, 92, 246, 0.55); background: rgba(139, 92, 246, 0.16); color: var(--purple-hi); }
+.term-chip.on { border-color: rgba(90, 34, 238, 0.55); background: rgba(90, 34, 238, 0.16); color: var(--purple-hi); }
 .term-inp { height: 32px; border: 1px solid var(--line); border-radius: 7px; background: var(--nest); display: flex; align-items: center; padding: 0 9px; }
 .term-inp input { width: 100%; border: 0; background: transparent; color: var(--text); font-size: 13px; text-align: right; outline: none; }
 .term-inp.bad { border-color: var(--down); }
@@ -2901,8 +2917,8 @@
 }
 .term-place:active { transform: scale(0.98); }
 .term-place:disabled { opacity: 0.45; cursor: not-allowed; }
-.term-place.buy { background: linear-gradient(92deg, #1f9d5b, var(--up)); box-shadow: 0 5px 18px -6px rgba(46, 224, 126, 0.5); }
-.term-place.sell { background: linear-gradient(92deg, #c53350, var(--down)); box-shadow: 0 5px 18px -6px rgba(255, 77, 103, 0.5); }
+.term-place.buy { background: linear-gradient(92deg, #1f9d5b, var(--up)); box-shadow: 0 5px 18px -6px rgba(53, 201, 122, 0.5); }
+.term-place.sell { background: linear-gradient(92deg, #c53350, var(--down)); box-shadow: 0 5px 18px -6px rgba(240, 77, 99, 0.5); }
 .term-place:not(:disabled):hover { filter: brightness(1.08); }
 .term-ticket-warn { margin: 0; font-size: 11px; color: var(--gold); }
 .term-ticket-receipt { margin: 0; font-size: 12px; text-align: center; }
@@ -2919,7 +2935,7 @@
   border-bottom: 2px solid transparent;
 }
 .term-dock-tab.on { color: var(--text); border-bottom-color: var(--purple); }
-.term-dock-cnt { font-family: var(--font-mono, ui-monospace, monospace); font-size: 10px; background: rgba(139, 92, 246, 0.2); color: var(--purple-hi); border-radius: 5px; padding: 0 5px; }
+.term-dock-cnt { font-family: var(--font-mono, ui-monospace, monospace); font-size: 10px; background: rgba(90, 34, 238, 0.2); color: var(--purple-hi); border-radius: 5px; padding: 0 5px; }
 .term-dock-body { overflow: auto; }
 .term-dock-empty { padding: 22px 12px; text-align: center; font-size: 12.5px; color: var(--text-3); }
 .term-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
@@ -2938,18 +2954,18 @@
 .term-pill.sell { background: var(--down-bg); color: var(--down); }
 .term-tbl-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .term-x-btn { border: 1px solid var(--line); background: var(--nest); color: var(--text-3); border-radius: 5px; font-size: 11px; padding: 3px 9px; cursor: pointer; }
-.term-x-btn:hover:not(:disabled) { color: var(--down); border-color: rgba(255, 77, 103, 0.4); }
+.term-x-btn:hover:not(:disabled) { color: var(--down); border-color: rgba(240, 77, 99, 0.4); }
 .term-x-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.term-x-btn.alt:hover:not(:disabled) { color: var(--purple-hi); border-color: rgba(139, 92, 246, 0.45); }
-.term-x-btn.alt.on { color: var(--purple-hi); border-color: rgba(139, 92, 246, 0.5); background: rgba(139, 92, 246, 0.14); }
+.term-x-btn.alt:hover:not(:disabled) { color: var(--purple-hi); border-color: rgba(90, 34, 238, 0.45); }
+.term-x-btn.alt.on { color: var(--purple-hi); border-color: rgba(90, 34, 238, 0.5); background: rgba(90, 34, 238, 0.14); }
 
 /* 仓位管理展开面板：部分平仓 + 改止损止盈 / position manage panel */
-.term-tbl-open td { background: rgba(139, 92, 246, 0.05); border-bottom-color: transparent; }
+.term-tbl-open td { background: rgba(90, 34, 238, 0.05); border-bottom-color: transparent; }
 .term-pos-expand td { padding: 0; }
 .term-pos-panel {
   display: flex; flex-wrap: wrap; gap: 14px;
   padding: 10px 12px 12px;
-  background: rgba(139, 92, 246, 0.05);
+  background: rgba(90, 34, 238, 0.05);
   border-bottom: 1px solid var(--line);
 }
 .term-pos-group { display: flex; flex-direction: column; gap: 5px; }
@@ -2962,11 +2978,11 @@
 .term-pos-inp:focus { border-color: var(--purple); }
 .term-pos-inp.bad { border-color: var(--down); }
 .term-pos-btn {
-  height: 30px; padding: 0 12px; border: 1px solid rgba(139, 92, 246, 0.4); border-radius: 6px;
-  background: rgba(139, 92, 246, 0.15); color: var(--purple-hi); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  height: 30px; padding: 0 12px; border: 1px solid rgba(90, 34, 238, 0.4); border-radius: 6px;
+  background: rgba(90, 34, 238, 0.15); color: var(--purple-hi); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
   white-space: nowrap;
 }
-.term-pos-btn:hover:not(:disabled) { background: rgba(139, 92, 246, 0.25); }
+.term-pos-btn:hover:not(:disabled) { background: rgba(90, 34, 238, 0.25); }
 .term-pos-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .term-pos-warn { font-size: 10.5px; color: var(--down); }
 

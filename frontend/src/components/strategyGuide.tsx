@@ -30,7 +30,7 @@ export function StrategyBlocks({ blocks, isZh }: { blocks: PlatformStrategyBlock
 
         if (b.kind === 'heading') {
           return (
-            <h2 key={i} className="mt-7 font-display text-lg font-bold text-slate-100 first:mt-0">
+            <h2 key={i} className="mt-7 font-display text-lg font-bold text-neutral-100 first:mt-0">
               {text}
             </h2>
           )
@@ -44,7 +44,7 @@ export function StrategyBlocks({ blocks, isZh }: { blocks: PlatformStrategyBlock
           return (
             <ul key={i} className="mt-3 space-y-1.5">
               {rows.map((r, j) => (
-                <li key={j} className="flex gap-2.5 text-sm leading-relaxed text-slate-300">
+                <li key={j} className="flex gap-2.5 text-sm leading-relaxed text-neutral-300">
                   <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-prism-400" />
                   <span>{r}</span>
                 </li>
@@ -64,13 +64,13 @@ export function StrategyBlocks({ blocks, isZh }: { blocks: PlatformStrategyBlock
                   className="mx-auto max-h-96 w-auto max-w-full rounded-xl border border-white/10"
                 />
               )}
-              {text && <figcaption className="mt-2 text-xs text-slate-500">{text}</figcaption>}
+              {text && <figcaption className="mt-2 text-xs text-neutral-500">{text}</figcaption>}
             </figure>
           )
         }
 
         return (
-          <p key={i} className="mt-3 text-sm leading-relaxed text-slate-300">
+          <p key={i} className="mt-3 text-sm leading-relaxed text-neutral-300">
             {text}
           </p>
         )
@@ -90,6 +90,6 @@ export function StrategyDetail({ strategy, isZh }: { strategy: PlatformStrategy;
   const legacy = pick(strategy.detailZh, strategy.detailEn, isZh)
   if (!legacy) return null
   return (
-    <p className="whitespace-pre-line text-sm leading-relaxed text-slate-300">{legacy}</p>
+    <p className="whitespace-pre-line text-sm leading-relaxed text-neutral-300">{legacy}</p>
   )
 }

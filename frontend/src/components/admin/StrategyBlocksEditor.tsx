@@ -61,12 +61,12 @@ export default function StrategyBlocksEditor({
   return (
     <div>
       <div className="mb-2 flex items-baseline justify-between gap-3">
-        <span className="text-xs text-slate-400">{t('admin.strategyGuide.blocks')}</span>
-        <span className="text-xs text-slate-500">{t('admin.strategyGuide.blocksHint')}</span>
+        <span className="text-xs text-neutral-400">{t('admin.strategyGuide.blocks')}</span>
+        <span className="text-xs text-neutral-500">{t('admin.strategyGuide.blocksHint')}</span>
       </div>
 
       {blocks.length === 0 && (
-        <p className="mb-2 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-4 text-center text-xs text-slate-500">
+        <p className="mb-2 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-4 text-center text-xs text-neutral-500">
           {t('admin.strategyGuide.blocksEmpty')}
         </p>
       )}
@@ -98,7 +98,7 @@ export default function StrategyBlocksEditor({
                 onClick={() => move(i, -1)}
                 disabled={i === 0}
                 aria-label={t('admin.strategyGuide.moveUp')}
-                className="rounded px-2 py-1 text-xs text-slate-400 hover:bg-white/10 disabled:opacity-30"
+                className="rounded px-2 py-1 text-xs text-neutral-400 hover:bg-white/10 disabled:opacity-30"
               >
                 ↑
               </button>
@@ -107,7 +107,7 @@ export default function StrategyBlocksEditor({
                 onClick={() => move(i, 1)}
                 disabled={i === blocks.length - 1}
                 aria-label={t('admin.strategyGuide.moveDown')}
-                className="rounded px-2 py-1 text-xs text-slate-400 hover:bg-white/10 disabled:opacity-30"
+                className="rounded px-2 py-1 text-xs text-neutral-400 hover:bg-white/10 disabled:opacity-30"
               >
                 ↓
               </button>

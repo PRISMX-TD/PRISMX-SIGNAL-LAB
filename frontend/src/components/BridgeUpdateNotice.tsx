@@ -62,7 +62,7 @@ export default function BridgeUpdateNotice() {
         </svg>
         <div className="min-w-0 flex-1">
           <div className="text-sm font-bold text-white">{t('bridgeUpdate.title')}</div>
-          <p className="mt-1 text-xs leading-relaxed text-slate-400">
+          <p className="mt-1 text-xs leading-relaxed text-neutral-400">
             {t('bridgeUpdate.body', { current, latest })}
           </p>
           <div className="mt-3 flex gap-2">
@@ -75,7 +75,7 @@ export default function BridgeUpdateNotice() {
             <button
               type="button"
               onClick={onDismiss}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:text-slate-200"
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-neutral-400 transition hover:text-neutral-200"
             >
               {t('bridgeUpdate.dismiss')}
             </button>
@@ -85,7 +85,7 @@ export default function BridgeUpdateNotice() {
           type="button"
           onClick={onDismiss}
           aria-label={t('bridgeUpdate.dismiss')}
-          className="shrink-0 text-slate-500 hover:text-slate-300"
+          className="shrink-0 text-neutral-500 hover:text-neutral-300"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>

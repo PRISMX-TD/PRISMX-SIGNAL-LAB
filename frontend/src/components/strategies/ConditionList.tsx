@@ -67,7 +67,7 @@ export default function ConditionList({
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.01] p-2.5">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[10px] uppercase tracking-wide text-slate-500">{t('strategy.condLogic')}</span>
+        <span className="text-[10px] uppercase tracking-wide text-neutral-500">{t('strategy.condLogic')}</span>
         <Select
           className="w-32"
           value={logic}
@@ -77,7 +77,7 @@ export default function ConditionList({
           ]}
           onChange={(v) => onChange({ logic: v === 'OR' ? 'OR' : 'AND', conditions })}
         />
-        <span className="text-[11px] text-slate-500">
+        <span className="text-[11px] text-neutral-500">
           {t('strategy.condCount', { used: conditions.length, max: maxConditions })}
         </span>
       </div>
@@ -99,7 +99,7 @@ export default function ConditionList({
           type="button"
           onClick={addCondition}
           disabled={atCap}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition hover:border-prism-400/50 hover:text-prism-200 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs text-neutral-300 transition hover:border-prism-400/50 hover:text-prism-200 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {t('strategy.condAdd')}
         </button>

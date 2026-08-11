@@ -12,11 +12,11 @@ const CATEGORY_OPTIONS: TicketCategory[] = ['account', 'payment', 'technical', '
 const statusClass: Record<string, string> = {
   open: 'bg-amber-400/15 text-amber-300',
   in_progress: 'bg-blue-400/15 text-blue-300',
-  closed: 'bg-slate-500/15 text-slate-400',
+  closed: 'bg-neutral-500/15 text-neutral-400',
 }
 
 const priorityClass: Record<string, string> = {
-  low: 'bg-slate-500/15 text-slate-400',
+  low: 'bg-neutral-500/15 text-neutral-400',
   normal: 'bg-blue-400/15 text-blue-300',
   urgent: 'bg-down/15 text-down',
 }
@@ -34,12 +34,12 @@ function ReplyBubble({ authorEmail, authorRole, body, createdAt, t }: {
       <div className={`max-w-[80%] rounded-xl px-4 py-3 ${
         isAdmin ? 'bg-white/5' : 'bg-prism-600/15'
       }`}>
-        <div className="mb-1 flex items-center gap-2 text-[11px] text-slate-500">
-          <span className="font-medium text-slate-300">{authorEmail}</span>
+        <div className="mb-1 flex items-center gap-2 text-[11px] text-neutral-500">
+          <span className="font-medium text-neutral-300">{authorEmail}</span>
           {isAdmin && <span className="rounded bg-prism-600/20 px-1.5 py-0.5 text-[10px] text-prism-300">{t('admin.staff')}</span>}
           <span>{new Date(createdAt).toLocaleString()}</span>
         </div>
-        <p className="whitespace-pre-wrap text-sm text-slate-200">{body}</p>
+        <p className="whitespace-pre-wrap text-sm text-neutral-200">{body}</p>
       </div>
     </div>
   )
@@ -130,7 +130,7 @@ export default function SupportPage() {
         <button onClick={() => setView('list')} className="btn-ghost mb-4 px-3 py-1.5 text-sm">
           &larr; {t('tickets.backToList')}
         </button>
-        <h2 className="mb-6 font-display text-xl font-bold text-slate-100">{t('tickets.newTicket')}</h2>
+        <h2 className="mb-6 font-display text-xl font-bold text-neutral-100">{t('tickets.newTicket')}</h2>
         <form onSubmit={handleSubmit} className="glass p-5 space-y-4">
           <div>
             <label className="label">{t('tickets.form.title')}</label>
@@ -175,13 +175,13 @@ export default function SupportPage() {
           &larr; {t('tickets.backToList')}
         </button>
         <div className="glass p-5 mb-4">
-          <h2 className="font-display text-lg font-bold text-slate-100 mb-3">{ticket.title}</h2>
+          <h2 className="font-display text-lg font-bold text-neutral-100 mb-3">{ticket.title}</h2>
           <div className="flex flex-wrap items-center gap-2 mb-1">
             <span className={`tag ${statusClass[ticket.status]}`}>{t(`tickets.status.${ticket.status}`)}</span>
             <span className={`tag ${priorityClass[ticket.priority]}`}>{t(`tickets.priority.${ticket.priority}`)}</span>
-            <span className="tag bg-white/5 text-slate-400">{t(`tickets.category.${ticket.category}`)}</span>
+            <span className="tag bg-white/5 text-neutral-400">{t(`tickets.category.${ticket.category}`)}</span>
           </div>
-          <p className="text-xs text-slate-500 mt-2">
+          <p className="text-xs text-neutral-500 mt-2">
             {ticket.userEmail} &middot; {new Date(ticket.createdAt).toLocaleString()}
           </p>
         </div>
@@ -194,7 +194,7 @@ export default function SupportPage() {
 
         {ticket.status === 'closed' ? (
           <div className="glass p-4">
-            <p className="mb-3 text-sm text-slate-400">{t('tickets.closedWarning')}</p>
+            <p className="mb-3 text-sm text-neutral-400">{t('tickets.closedWarning')}</p>
             <textarea className="input mb-3 min-h-[80px] w-full resize-y" value={replyText}
               onChange={(e) => setReplyText(e.target.value)}
               placeholder={t('tickets.replyPlaceholder')} maxLength={5000} />
@@ -223,7 +223,7 @@ export default function SupportPage() {
     <div className="mx-auto max-w-2xl">
       {error && <div className="mb-4 rounded-lg border border-down/40 bg-down/15 px-4 py-2.5 text-sm text-down">{error}</div>}
       <div className="mb-6 flex items-center justify-between">
-        <h2 className="font-display text-2xl font-bold text-slate-100">
+        <h2 className="font-display text-2xl font-bold text-neutral-100">
           <span className="neon-text">{t('tickets.title')}</span>
         </h2>
         <button onClick={() => setView('form')} className="btn-primary px-4 py-2 text-sm">
@@ -238,7 +238,7 @@ export default function SupportPage() {
           <SkeletonLine width="80%" />
         </div>
       ) : tickets.length === 0 ? (
-        <div className="glass p-8 text-center text-sm text-slate-500">{t('tickets.empty')}</div>
+        <div className="glass p-8 text-center text-sm text-neutral-500">{t('tickets.empty')}</div>
       ) : (
         <div className="space-y-3">
           {tickets.map((ticket) => (
@@ -254,16 +254,16 @@ export default function SupportPage() {
                   <div className="flex items-center gap-2 mb-1">
                     <span className={`tag text-[10px] ${statusClass[ticket.status]}`}>{t(`tickets.status.${ticket.status}`)}</span>
                     <span className={`tag text-[10px] ${priorityClass[ticket.priority]}`}>{t(`tickets.priority.${ticket.priority}`)}</span>
-                    <span className="text-[10px] text-slate-500">{t(`tickets.category.${ticket.category}`)}</span>
+                    <span className="text-[10px] text-neutral-500">{t(`tickets.category.${ticket.category}`)}</span>
                   </div>
-                  <h3 className="truncate text-sm font-medium text-slate-200">{ticket.title}</h3>
+                  <h3 className="truncate text-sm font-medium text-neutral-200">{ticket.title}</h3>
                   {ticket.latestReply && (
-                    <p className="mt-1.5 truncate text-xs text-slate-500">
+                    <p className="mt-1.5 truncate text-xs text-neutral-500">
                       {ticket.latestReply.authorEmail}: {ticket.latestReply.body}
                     </p>
                   )}
                 </div>
-                <span className="shrink-0 text-[11px] text-slate-600">
+                <span className="shrink-0 text-[11px] text-neutral-500">
                   {new Date(ticket.updatedAt).toLocaleDateString()}
                 </span>
               </div>
