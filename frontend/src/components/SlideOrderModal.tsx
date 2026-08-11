@@ -7,6 +7,7 @@ import { calcCountdown, clientOrderId, contractSize, displaySymbol, localizeApiE
 import { SIGNAL_LIFESPAN_MS } from './signals/SignalView'
 import { useNow } from './signals/hooks'
 import { useBackToClose } from '../utils/useBackToClose'
+import { useStickyOnlineAccounts } from '../utils/useStickyOnlineAccounts'
 import OrderConnectNotice from './OrderConnectNotice'
 
 interface Props {
@@ -35,9 +36,13 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
   const [receipt, setReceipt] = useState<'waiting' | 'ok' | 'error' | null>(null)
   const [error, setError] = useState('')
 
-  const onlineAccounts = accounts.filter((a) => a.online)
-  const [login, setLogin] = useState<string>(() => onlineAccounts[0]?.login ?? '')
-  const selected = onlineAccounts.find((a) => a.login === login) || null
+  // 不用 accounts.filter(a => a.online)：在线标志抖一下就会把切换器整个卸载，
+  // 表现为"一点切换账号，弹窗就没了"。见 useStickyOnlineAccounts 的说明。
+  // Not a plain online filter — a flickering flag would unmount the switcher
+  // mid-click. See useStickyOnlineAccounts.
+  const availableAccounts = useStickyOnlineAccounts(accounts)
+  const [login, setLogin] = useState<string>(() => availableAccounts[0]?.login ?? '')
+  const selected = availableAccounts.find((a) => a.login === login) || null
   const [acctMenuOpen, setAcctMenuOpen] = useState(false)
   // 账户切换菜单套在这个（已全屏的）弹窗内部：划返回应该先收起菜单，
   // 再收起外层弹窗，而不是一划就把两层都带走。
@@ -55,7 +60,7 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
     const v = Math.max(0.01, Math.min(eq / 200, 1))
     return (Math.floor(v * 100) / 100).toFixed(2)
   }
-  const [volume, setVolume] = useState(() => suggestVolume(onlineAccounts[0]?.equity))
+  const [volume, setVolume] = useState(() => suggestVolume(availableAccounts[0]?.equity))
   const [sl, setSl] = useState(signal.stopLoss != null ? String(signal.stopLoss) : '')
   const [tp, setTp] = useState(signal.takeProfit != null ? String(signal.takeProfit) : '')
 
@@ -93,8 +98,8 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
   if (!orderIdRef.current) orderIdRef.current = clientOrderId()
 
   useEffect(() => {
-    if (!login && onlineAccounts[0]) setLogin(onlineAccounts[0].login)
-  }, [onlineAccounts, login])
+    if (!login && availableAccounts[0]) setLogin(availableAccounts[0].login)
+  }, [availableAccounts, login])
 
   useEffect(() => {
     setVolume(suggestVolume(selected?.equity))
@@ -265,7 +270,7 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
   const avaColor = isBuy ? 'var(--up)' : 'var(--down)'
   const priceColor = isBuy ? 'var(--up)' : 'var(--down)'
 
-  const hasAccounts = onlineAccounts.length > 0
+  const hasAccounts = availableAccounts.length > 0
   const canSubmit = hasAccounts && !expired && !slInvalid && !tpInvalid
 
   const fmtMoney = (n?: number | null) =>
@@ -335,7 +340,7 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
         </div>
 
         <div className="slide-sheet-rows">
-          {onlineAccounts.length > 1 && (
+          {availableAccounts.length > 1 && (
             <div className="slide-row slide-row-acct">
               <span className="k">{t('order.account')}</span>
               <div className="slide-acct-picker">
@@ -351,14 +356,21 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
                   <>
                     <div className="slide-acct-backdrop" onClick={() => setAcctMenuOpen(false)} />
                     <div className="slide-acct-menu">
-                      {onlineAccounts.map((a) => (
+                      {availableAccounts.map((a) => (
                         <button
                           type="button"
                           key={a.login}
                           className={`slide-acct-opt ${a.login === login ? 'active' : ''}`}
                           onClick={() => { setLogin(a.login); setAcctMenuOpen(false) }}
                         >
-                          <span className="opt-login">{a.login}{a.accountName ? ` · ${a.accountName}` : ''}</span>
+                          <span className="opt-login">
+                            {/* 列表会保留本次弹窗里掉线的账号（见 useStickyOnlineAccounts），
+                                所以状态必须标出来，不能让用户以为它一定可用。
+                                The list keeps accounts that went offline mid-modal, so their
+                                state has to show — silence would imply they're all usable. */}
+                            <i className={`opt-dot ${a.online ? 'on' : ''}`} />
+                            {a.login}{a.accountName ? ` · ${a.accountName}` : ''}
+                          </span>
                           <span className="opt-equity num">{fmtMoney(a.equity)} {a.accountCurrency ?? ''}</span>
                         </button>
                       ))}

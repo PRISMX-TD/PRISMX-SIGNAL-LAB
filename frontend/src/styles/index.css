@@ -1377,9 +1377,27 @@
     background: rgba(139, 92, 246, 0.14);
   }
   .slide-acct-opt .opt-login {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-size: 12.5px;
     font-weight: 600;
     color: #fff;
+  }
+  /* 账号在线状态点。列表会保留本次弹窗期间掉线的账号（见 useStickyOnlineAccounts），
+     靠这个点区分，而不是把它从列表里抽走——抽走会让下拉在用户手指底下重排。
+     Online dot: the list keeps accounts that dropped offline during the modal, and
+     this marks them instead of yanking the row out from under the cursor. */
+  .slide-acct-opt .opt-dot {
+    flex-shrink: 0;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-3);
+  }
+  .slide-acct-opt .opt-dot.on {
+    background: var(--up, #2fe6a0);
+    box-shadow: 0 0 6px rgba(47, 230, 160, 0.7);
   }
   .slide-acct-opt .opt-equity {
     font-size: 11.5px;
