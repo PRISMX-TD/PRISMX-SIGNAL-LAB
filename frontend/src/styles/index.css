@@ -3203,3 +3203,295 @@ body {
   .card-hover:active,
   .tap-press:active { transform: none; }
 }
+
+/* ══════════════════════════════════════════════
+   3D 手机滚动叙事 / phone scrolltelling (landing)
+   ──────────────────────────────────────────────
+   技术路线是 CSS 3D（preserve-3d + 分层机身），不是 WebGL：
+   屏幕里渲染的是真实 DOM 组件——文字像素级锐利、i18n 免费、倒计时等动画
+   是活的。分幕脚本里没有任何一幕需要看到手机背面，为用不到的视角引入
+   three.js（约 600KB，上一轮刚移除）是负收益。
+   The implementation is CSS 3D (preserve-3d + stacked slabs), not WebGL: the
+   screen renders real DOM components, so text stays crisp, i18n is free and
+   the countdown actually ticks. No scene in the storyboard ever shows the
+   phone's back, and re-adding three.js (~600KB, removed last round) for an
+   unused viewing angle would be a net loss.
+
+   两种运行模式，同一份 DOM：
+   · scrub（桌面 ≥1024px 且未开减少动态）：根节点带 .is-scrub，GSAP 接管一切
+     内联样式，本文件里的过渡全部关闭。
+   · steps（移动端 / reduced-motion）：IntersectionObserver 给当前幕加 .on，
+     由下面这些 CSS 过渡完成交叉淡入——没有 pin、没有 scrub、没有倾斜。
+   Two runtime modes over one DOM tree:
+   · scrub (desktop >=1024px, no reduced-motion): root carries .is-scrub, GSAP
+     owns every value inline and the transitions below are disabled.
+   · steps (mobile / reduced-motion): IntersectionObserver toggles .on per
+     scene and these CSS transitions do the crossfades. No pin, no scrub,
+     no tilt.
+   ══════════════════════════════════════════════ */
+.story-section {
+  position: relative;
+  /* 5 幕 × 约一屏多一点的滚动行程。520vh 是节奏参数：每幕拿到约 104vh，
+     短于 90vh 会赶，长于 130vh 会拖。
+     Five scenes at just over one viewport of travel each. 520vh is a pacing
+     constant: each scene gets ~104vh of scroll; under 90vh feels rushed,
+     over 130vh drags. */
+  height: 520vh;
+}
+.story-stage {
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  overflow: hidden;
+}
+/* IO 哨兵：五段各占叙事区 20% 高度的隐形柱，中线穿越即切幕。
+   IO sentinels: five invisible 20%-tall strips; crossing the midline switches
+   the scene. */
+.story-step {
+  position: absolute;
+  left: 0;
+  width: 1px;
+  height: 20%;
+  pointer-events: none;
+}
+
+/* ── 手机定位与姿态 / phone placement & pose ── */
+.story-phone {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -52%);
+  z-index: 10;
+}
+.dev-scene {
+  perspective: 1500px;
+}
+.dev-pose,
+.dev-tilt,
+.dev-body {
+  transform-style: preserve-3d;
+}
+.dev-pose {
+  will-change: transform;
+}
+/* steps 模式的静态姿态：一个可信的 3/4 侧身，不做任何 scrub。
+   Static pose for steps mode: one believable three-quarter stance, no scrub. */
+.story-root:not(.is-scrub) .dev-pose {
+  transform: rotateY(-16deg) rotateX(5deg);
+}
+
+/* ── 机身：8 层堆叠剪影伪造厚度 / body: 8 stacked silhouettes fake depth ──
+   每层同轮廓、逐层后移 2px、色阶递暗：旋转 ±40° 内侧壁连续可信。这是
+   「不引入 WebGL 的立体感」的全部成本——8 个空 div。
+   Same silhouette per layer, each 2px further back and one step darker: the
+   side wall reads continuous within ±40°. This is the entire cost of depth
+   without WebGL: eight empty divs. */
+.dev-body {
+  position: relative;
+  width: var(--dev-w, clamp(240px, 23vw, 330px));
+  aspect-ratio: 9 / 19.4;
+}
+.dev-slab {
+  position: absolute;
+  inset: 0;
+  border-radius: 11.5% / 5.4%;
+  background: #101014;
+  border: 1px solid #23232b;
+}
+.dev-slab:nth-child(1) { transform: translateZ(-14px); background: #0a0a0d; }
+.dev-slab:nth-child(2) { transform: translateZ(-12px); }
+.dev-slab:nth-child(3) { transform: translateZ(-10px); }
+.dev-slab:nth-child(4) { transform: translateZ(-8px); }
+.dev-slab:nth-child(5) { transform: translateZ(-6px); }
+.dev-slab:nth-child(6) { transform: translateZ(-4px); background: #16161b; }
+.dev-slab:nth-child(7) { transform: translateZ(-2px); background: #1a1a20; }
+/* 正面：金属渐变边框面 / front face: metallic gradient bezel */
+.dev-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 11.5% / 5.4%;
+  transform: translateZ(0.5px);
+  background: linear-gradient(155deg, #2c2c34 0%, #121217 40%, #1d1d24 100%);
+  border: 1px solid #3c3c46;
+}
+/* 屏幕：真实 DOM 的容器。container-type 让屏幕内文字随机身宽度缩放
+   （cqw 单位），移动端的小手机与桌面大手机共用一份屏幕组件。
+   The screen hosts real DOM. container-type lets in-screen type scale with
+   the body width (cqw units), so the small mobile phone and the large desktop
+   phone share one set of screen components. */
+.dev-screen {
+  position: absolute;
+  inset: 1.8% 3.2%;
+  border-radius: 9.5% / 4.7%;
+  background: #060608;
+  overflow: hidden;
+  transform: translateZ(1px);
+  container-type: inline-size;
+}
+.dev-island {
+  position: absolute;
+  top: 2%;
+  left: 50%;
+  transform: translateX(-50%) translateZ(2px);
+  width: 25%;
+  height: 2.4%;
+  border-radius: 999px;
+  background: #000;
+  border: 1px solid #1c1c22;
+  z-index: 40;
+}
+/* 反光层：这是反射不是发光——白色渐变盖在屏幕上方，转场时 GSAP 把透明度
+   抬一下再放下，模拟机身转动时扫过的环境光。
+   The sheen is a reflection, not an emission: a white gradient over the
+   screen whose opacity GSAP lifts and drops at transitions, reading as
+   ambient light sweeping across a turning body. */
+.dev-sheen {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  border-radius: 9.5% / 4.7%;
+  background: linear-gradient(115deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.04) 32%, transparent 55%);
+  opacity: 0.1;
+  transform: translateZ(1.5px);
+}
+/* 地影：中性黑椭圆，表达高度。/ ground shadow: neutral, elevation only. */
+.dev-ground {
+  position: absolute;
+  left: 50%;
+  bottom: -8%;
+  width: 76%;
+  height: 4.5%;
+  transform: translateX(-50%) translateZ(-16px);
+  border-radius: 50%;
+  background: radial-gradient(50% 50% at 50% 50%, rgba(0, 0, 0, 0.6), transparent 70%);
+  filter: blur(7px);
+}
+
+/* ── 屏幕内容（五幕）/ screens ── */
+.scr {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 13cqw 7cqw 7cqw;
+  opacity: 0;
+  visibility: hidden;
+}
+.story-root:not(.is-scrub) .scr {
+  transform: translateY(10px);
+  transition:
+    opacity 0.5s var(--ease-out),
+    transform 0.5s var(--ease-out),
+    visibility 0s linear 0.5s;
+}
+/* 可见态是无条件规则：scrub 能力的浏览器在 GSAP 加载完成之前也必须能看到
+   首幕（预渲染 HTML 与 LCP 都依赖它）；GSAP 建成后以内联样式覆盖类规则。
+   The .on visible state is unconditional: scrub-capable browsers must show
+   scene 0 before GSAP finishes loading (prerendered HTML and LCP both depend
+   on it); once built, GSAP overrides the class rule with inline styles. */
+.scr.on {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition-delay: 0s;
+}
+
+/* steps 模式下，滑块与止损线在该幕激活时用 CSS 过渡走到终点——scrub 模式里
+   这两个值由时间线逐帧驱动。
+   In steps mode the order knob and the SL line transition to their end state
+   when the scene activates; in scrub mode the timeline drives them per frame. */
+.story-root:not(.is-scrub) .js-knob {
+  transition: transform 1.1s var(--ease-in-out) 0.35s;
+}
+.story-root:not(.is-scrub) .scr.on .js-knob {
+  transform: translateX(var(--knob-travel, 150px));
+}
+.story-root:not(.is-scrub) .js-filled {
+  transition: opacity 0.4s var(--ease-out) 1.5s;
+  opacity: 0;
+}
+.story-root:not(.is-scrub) .scr.on .js-filled {
+  opacity: 1;
+}
+.story-root:not(.is-scrub) .js-sl {
+  transition: transform 1.6s var(--ease-in-out) 0.4s;
+}
+.story-root:not(.is-scrub) .scr.on .js-sl {
+  transform: translateY(-26px);
+}
+.story-root:not(.is-scrub) .js-be {
+  transition: opacity 0.4s var(--ease-out) 1.2s;
+  opacity: 0;
+}
+.story-root:not(.is-scrub) .scr.on .js-be {
+  opacity: 1;
+}
+
+/* ── 文字面板 / text panels ── */
+.story-panel {
+  position: absolute;
+  z-index: 20;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+/* 只有含按钮的面板需要接住点击；visibility 参与淡入淡出，隐藏时不拦截。
+   Only panels with buttons take pointer events; visibility being part of the
+   fade means hidden panels cannot intercept clicks. */
+.story-panel.pe {
+  pointer-events: auto;
+}
+.story-root:not(.is-scrub) .story-panel {
+  transform: translateY(14px);
+  transition:
+    opacity 0.5s var(--ease-out),
+    transform 0.5s var(--ease-out),
+    visibility 0s linear 0.5s;
+}
+.story-panel.on {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition-delay: 0s;
+}
+/* scrub 模式：GSAP 拥有一切，CSS 过渡必须让路，否则两套系统抢同一属性。
+   Scrub mode: GSAP owns everything; CSS transitions must yield or the two
+   systems fight over the same properties. */
+.is-scrub .scr,
+.is-scrub .story-panel,
+.is-scrub .js-knob,
+.is-scrub .js-filled,
+.is-scrub .js-sl,
+.is-scrub .js-be {
+  transition: none;
+}
+
+@media (min-width: 1024px) {
+  .panel-l { left: 7vw; top: 50%; max-width: 26rem; }
+  .panel-r { right: 7vw; top: 50%; max-width: 26rem; }
+  .panel-l > .panel-inner,
+  .panel-r > .panel-inner { transform: translateY(-50%); }
+}
+@media (max-width: 1023px) {
+  /* 移动端：手机顶部、文字底部横幅。面板 bottom 需清开吸底 CTA（约 68px）
+     与安全区。/ Mobile: phone at the top, text as a bottom banner clearing
+     the sticky CTA (~68px) plus the safe area. */
+  .story-phone {
+    top: calc(64px + env(safe-area-inset-top) + 2vh);
+    transform: translateX(-50%);
+  }
+  .dev-body { --dev-w: clamp(150px, 40vw, 208px); }
+  /* 面板压一层向下渐深的底幕：窄而高的屏幕上手机底缘可能探进面板区，
+     渐变保证文字始终压在可读的深底上，同时不产生一条硬边。
+     The panel sits on a downward-deepening scrim: on narrow, tall screens the
+     phone's lower edge can reach into the panel zone, and the gradient keeps
+     text on a readable dark ground without introducing a hard edge. */
+  .story-panel {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 9vh 5vw calc(env(safe-area-inset-bottom) + 88px);
+    background: linear-gradient(180deg, transparent 0%, rgba(9, 9, 11, 0.94) 26%, rgba(9, 9, 11, 0.97) 100%);
+  }
+}
