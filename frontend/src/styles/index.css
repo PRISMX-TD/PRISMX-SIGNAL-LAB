@@ -3473,9 +3473,16 @@ body {
    .lg-tabbar), so the phone reproduces that exact skeleton. */
 .pc-head {
   position: absolute;
-  top: 6.5cqw;
-  left: 7cqw;
-  right: 7cqw;
+  /* 13.5cqw 是「让开灵动岛」的下界：岛高 3.8% 屏高、顶边距上沿 1.3%，换算到
+     以屏宽为基准的 cqw 后，岛的下沿落在约 11cqw。此前这里是 6.5cqw，正好被岛
+     压住品牌名（截图里「Signal Lab」被切一半）。
+     13.5cqw is the clearance floor for the Dynamic Island: at 3.8% of screen
+     height starting 1.3% down, its lower edge converts to roughly 11cqw against
+     the width-based cqw unit. This was 6.5cqw, which put the brand name directly
+     under the island (the screenshot shows "Signal Lab" sliced). */
+  top: 13.5cqw;
+  left: 5cqw;
+  right: 5cqw;
   z-index: 10;
   display: flex;
   align-items: center;
@@ -3543,9 +3550,14 @@ body {
   inset: 0;
   display: flex;
   flex-direction: column;
-  /* 上让品牌条（6.5 + 内容 ~8），下让 Tab 栏（~17）/ clear the brand strip
-     above and the tab bar below */
-  padding: 17cqw 7cqw 20cqw;
+  /* 上让品牌条（13.5 起 + 高约 9.5 = 23，留 3 的呼吸），下让 Tab 栏（~17）。
+     左右由 7cqw 收到 5cqw：380px 的屏幕 DOM 上 7cqw ≈ 27pt，比 iOS 常规的
+     16-20pt 边距宽出一截，屏幕本来就窄，这几 pt 很值钱。
+     Top clears the brand strip (starts at 13.5, about 9.5 tall, plus 3 of
+     breathing room); bottom clears the tab bar. Horizontal padding drops from
+     7cqw to 5cqw: on the 380px screen DOM 7cqw is about 27pt against iOS's usual
+     16-20pt, and on a screen this narrow those points are worth reclaiming. */
+  padding: 26cqw 5cqw 20cqw;
   opacity: 0;
   visibility: hidden;
 }
@@ -3705,7 +3717,12 @@ body {
 .gl-on .dev-screen {
   inset: auto;
   border: 0;
-  border-radius: 40px;
+  /* 48px 对应机身开孔的圆角（世界坐标 10.2mm ÷ 0.1774 ≈ 57 DOM px）并留有
+     余量：屏幕 DOM 的圆角必须**小于等于**开孔圆角，否则四角会露出页面背景。
+     48px matches the body's aperture radius (10.2mm world / 0.1774 is about 57
+     DOM px) with margin to spare: the screen DOM's radius must stay at or below
+     the aperture's, or the page background shows through at the corners. */
+  border-radius: 48px;
   box-shadow: none;
   background: #06060a;
 }

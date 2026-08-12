@@ -61,8 +61,20 @@ const BODY_H = 149.6
 const BODY_D = 8.25
 const BODY_R = 11.5 // 圆角半径 / corner radius
 
-const GLASS_INSET = 1.6 // 金属边框宽度 / metal rim width
-const SCREEN_INSET = 4.3 // 金属边 + 黑色 bezel / metal rim + black bezel
+/* 边框厚度。此前金属边 1.6 + 黑色 bezel 合计单边 4.3mm，那是十年前手机的比例，
+   显示区被吃掉一大圈。当代旗舰的边框是**单边约 2mm 且四边等宽**，屏幕几乎顶到
+   机身轮廓——这正是「看起来是新机器」的关键比例之一。
+   收到 0.9 + 1.2 = 2.1mm 后，屏幕宽度 63.0 → 67.4mm，上下留边也自动落到 1.9mm，
+   四边基本等宽。
+   Border thickness. It was previously a 1.6mm metal rim plus black bezel totalling
+   4.3mm per side, which is a decade-old proportion that eats a visible ring out of
+   the display. A current flagship runs about 2mm per side, uniform on all four
+   edges, with the panel reaching almost to the body outline - one of the key
+   ratios that makes hardware read as recent. At 0.9 + 1.2 = 2.1mm the screen goes
+   from 63.0 to 67.4mm wide and the top/bottom margins land at 1.9mm on their own,
+   so all four edges come out near-equal. */
+const GLASS_INSET = 0.9 // 金属边框宽度 / metal rim width
+const SCREEN_INSET = 2.1 // 金属边 + 黑色 bezel / metal rim + black bezel
 
 const SCREEN_W = BODY_W - SCREEN_INSET * 2
 
@@ -320,7 +332,7 @@ export async function createPhoneGL(opts: {
      roughness for a mirror-black surface. It is what makes the unlit bezel read
      as glossy black rather than dead black. */
   const glassGeo = new THREE.ShapeGeometry(
-    roundedRect(BODY_W - GLASS_INSET * 2, BODY_H - GLASS_INSET * 2, BODY_R - GLASS_INSET * 0.55),
+    roundedRect(BODY_W - GLASS_INSET * 2, BODY_H - GLASS_INSET * 2, BODY_R - GLASS_INSET),
     32
   )
   const glassMat = new THREE.MeshPhysicalMaterial({
@@ -339,7 +351,12 @@ export async function createPhoneGL(opts: {
      机身正面在该区域深度测试失败而被丢弃，画布保持透明。
      The aperture mask: depth-only, no colour. renderOrder -1 draws it before the
      body so the face fails the depth test there and the canvas stays clear. */
-  const maskGeo = new THREE.ShapeGeometry(roundedRect(SCREEN_W, SCREEN_H, BODY_R - SCREEN_INSET * 0.62), 32)
+    /* 同心圆角：内圆角 = 外圆角 − 边框厚度。此前用的是经验系数 0.62，角部的
+     边框会比直边处更窄，边框粗细沿轮廓不均。
+     Concentric radii: the inner radius is the outer radius minus the inset. This
+     previously used an empirical 0.62 factor, which left the border narrower at
+     the corners than along the straight edges. */
+  const maskGeo = new THREE.ShapeGeometry(roundedRect(SCREEN_W, SCREEN_H, BODY_R - SCREEN_INSET), 32)
   const mask = new THREE.Mesh(maskGeo, new THREE.MeshBasicMaterial({ colorWrite: false }))
   mask.position.z = BODY_D / 2 + 0.06
   mask.renderOrder = -1
@@ -371,16 +388,31 @@ export async function createPhoneGL(opts: {
      是「盖在」显示区之上的。
      The island and its lens sit above both the cover glass and the mask, so they
      always occlude screen content, exactly as they physically do on hardware. */
+  /* 岛的尺寸与位置按真机比例校准：此前中心距屏幕上沿 7.6mm、高 7.4mm，实际
+     压在了应用顶部的品牌条上（截图里「Signal Lab」被切掉一半）。真机的岛占屏
+     宽约 32%、高约屏高的 3.8%，且**紧贴屏幕上沿**——顶边距上沿仅约 1.3%。
+     现在：宽 22（32.6%）、高 5.6（3.8%）、顶边距上沿 1.9mm，岛的下沿落在
+     屏幕顶部 11cqw 处，下面的 .pc-head 从 13.5cqw 开始，正好让开。
+     Island geometry calibrated to real proportions: it previously sat 7.6mm below
+     the screen top at 7.4mm tall, which put it right on top of the app's brand
+     strip (the screenshot shows "Signal Lab" sliced in half). On real hardware the
+     island is about 32% of screen width and 3.8% of screen height, and it hugs the
+     top edge - roughly 1.3% down. Now 22 wide (32.6%), 5.6 tall (3.8%), 1.9mm from
+     the top, so its lower edge lands at 11cqw and .pc-head starting at 13.5cqw
+     clears it. */
+  const ISLAND_TOP = 1.9
+  const ISLAND_H = 5.6
+  const islandY = SCREEN_H / 2 - ISLAND_TOP - ISLAND_H / 2
   const island = new THREE.Mesh(
-    new THREE.ShapeGeometry(roundedRect(24, 7.4, 3.7), 24),
+    new THREE.ShapeGeometry(roundedRect(22, ISLAND_H, ISLAND_H / 2), 24),
     new THREE.MeshBasicMaterial({ color: 0x000000 })
   )
-  island.position.set(0, SCREEN_H / 2 - 7.6, BODY_D / 2 + 0.1)
+  island.position.set(0, islandY, BODY_D / 2 + 0.1)
   island.renderOrder = 3
   phone.add(island)
 
   const lens = new THREE.Mesh(
-    new THREE.CircleGeometry(2.35, 32),
+    new THREE.CircleGeometry(1.85, 32),
     new THREE.MeshPhysicalMaterial({
       color: 0x121628,
       metalness: 0.35,
@@ -389,7 +421,7 @@ export async function createPhoneGL(opts: {
       envMapIntensity: 1.8,
     })
   )
-  lens.position.set(7.4, SCREEN_H / 2 - 7.6, BODY_D / 2 + 0.14)
+  lens.position.set(6.6, islandY, BODY_D / 2 + 0.14)
   lens.renderOrder = 4
   phone.add(lens)
 
