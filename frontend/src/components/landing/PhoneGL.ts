@@ -185,7 +185,15 @@ export async function createPhoneGL(opts: {
     envScene.add(m)
   }
   panel(420, 320, [3.4, 3.5, 3.9], -300, 220, 120, Math.PI / 3.4) // 主光板 / key
-  panel(70, 620, [7.2, 7.2, 7.6], 340, 40, 60, -Math.PI / 2.6) // 窄灯带 / edge strip
+  /* 窄灯带：强度从 7.2 降到 3.2。它负责机身侧缘那道最锐的镜面高光，原值下
+     峰值亮度冲到 248——虽然只占 0.1% 的像素，但一条近白的细线压在亮度 0-60 的
+     机身上，对比过强，在暗色页面里读成「太反光」。问题从来不是面积，是峰值。
+     Edge strip, dropped from 7.2 to 3.2. It produces the sharpest specular along
+     the body's side, and at the old value the peak hit 248: only 0.1% of pixels,
+     but a near-white hairline against a body sitting at 0-60 is too much
+     contrast and reads as over-shiny on a dark page. The problem was never the
+     area, it was the peak. */
+  panel(70, 620, [3.2, 3.2, 3.5], 340, 40, 60, -Math.PI / 2.6)
   /* 底部品牌紫补光。实测下半部边框亮度掉到 0，在本站近黑的页面上机身下缘会
      整个融进背景、轮廓断掉。提亮这块板既补住下缘，又让品牌紫以**金属反射**的
      形式出现在机身上——它是被反射的光，不是元素自己在发光，因此与设计系统
@@ -234,7 +242,10 @@ export async function createPhoneGL(opts: {
   })
 
   // 一盏定向光只负责那道锐利的镜面条 / one directional light purely for the crisp streak
-  const key = new THREE.DirectionalLight(0xffffff, 1.25)
+  // 强度 1.25 → 0.75：与窄灯带一起构成侧缘那道高光，两者叠加才是峰值 248 的来源。
+  // 1.25 -> 0.75: this light and the edge strip stack to form the side specular,
+  // and it was their sum that produced the 248 peak.
+  const key = new THREE.DirectionalLight(0xffffff, 0.75)
   key.position.set(-120, 180, 260)
   scene.add(key)
 
@@ -320,9 +331,17 @@ export async function createPhoneGL(opts: {
     // 清漆层：阳极氧化铝表面那层极薄的透明膜，让高光多一次更锐的反射。
     // Clearcoat: the very thin transparent film over anodised aluminium, adding
     // a second, sharper specular bounce.
-    clearcoat: 0.6,
-    clearcoatRoughness: 0.18,
-    envMapIntensity: 1.5,
+    /* 清漆层粗糙度 0.18 → 0.3：清漆越光滑，它那次额外的反射就越集中成一条
+       细白线；调粗之后同样的能量摊开成一片较宽的柔光，峰值降下来而金属感不丢。
+       这比单纯调暗更对——暗下来只是「反光变弱」，摊开才是「换了一种表面」。
+       Clearcoat roughness 0.18 -> 0.3: the smoother the coat, the more its extra
+       bounce concentrates into a thin white line; roughening it spreads the same
+       energy into a broader, softer band, lowering the peak without losing the
+       metal. This is more correct than simply dimming - dimming only makes the
+       reflection weaker, while spreading it changes what the surface is. */
+    clearcoat: 0.5,
+    clearcoatRoughness: 0.3,
+    envMapIntensity: 1.35,
   })
   phone.add(new THREE.Mesh(bodyGeo, bodyMat))
 
@@ -383,11 +402,10 @@ export async function createPhoneGL(opts: {
   addKey(-BODY_W / 2 - 0.4, 38, 15)
   addKey(-BODY_W / 2 - 0.4, 19, 15)
 
-  /* 灵动岛 + 镜头：岛是玻璃面上的黑色药丸，镜头是嵌在里面的深蓝紫玻璃。
-     两者都在玻璃盖板与遮罩之上，所以永远压在屏幕内容前面——真机上它们确实
-     是「盖在」显示区之上的。
-     The island and its lens sit above both the cover glass and the mask, so they
-     always occlude screen content, exactly as they physically do on hardware. */
+  /* 灵动岛：玻璃面上的纯黑药丸，位于玻璃盖板与遮罩之上，所以永远压在屏幕内容
+     前面——真机上它确实是「盖在」显示区之上的。
+     The island: a plain black pill above both the cover glass and the mask, so it
+     always occludes screen content, exactly as it physically does on hardware. */
   /* 岛的尺寸与位置按真机比例校准：此前中心距屏幕上沿 7.6mm、高 7.4mm，实际
      压在了应用顶部的品牌条上（截图里「Signal Lab」被切掉一半）。真机的岛占屏
      宽约 32%、高约屏高的 3.8%，且**紧贴屏幕上沿**——顶边距上沿仅约 1.3%。
@@ -411,19 +429,14 @@ export async function createPhoneGL(opts: {
   island.renderOrder = 3
   phone.add(island)
 
-  const lens = new THREE.Mesh(
-    new THREE.CircleGeometry(1.85, 32),
-    new THREE.MeshPhysicalMaterial({
-      color: 0x121628,
-      metalness: 0.35,
-      roughness: 0.08,
-      clearcoat: 1,
-      envMapIntensity: 1.8,
-    })
-  )
-  lens.position.set(6.6, islandY, BODY_D / 2 + 0.14)
-  lens.renderOrder = 4
-  phone.add(lens)
+  /* 镜头已移除。它本是为了「有镜头的岛才是岛」，但那颗高反射的圆片在这个尺寸下
+     只会变成岛内一个抢眼的亮点：屏幕内容本身才是这一屏要看的东西，机身上任何
+     一个多余的高光都在跟它抢注意力。灵动岛保留纯黑药丸形态即可。
+     The lens is gone. It existed on the reasoning that an island needs a lens to
+     read as one, but at this size that highly reflective disc just became a
+     conspicuous bright spot inside the island - and the screen content is what
+     this scene is for, so any surplus highlight on the hardware competes with it.
+     The island stays as a plain black pill. */
 
   /* ── CSS3D 屏幕 ──
      节点被搬进 CSS3D 容器，缩放到与世界坐标里的屏幕等大。z 略低于遮罩，
