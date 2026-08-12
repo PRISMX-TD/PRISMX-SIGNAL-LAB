@@ -36,17 +36,23 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import type * as TH from 'three'
-import { createBackdropAir, type AirVariant, type AirHandle } from './BackdropAir'
+import { createBackdropAir, type AirHandle } from './BackdropAir'
+import { createBackdropShards, type ShardsHandle } from './BackdropShards'
 
-export type Backdrop = 'none' | 'sweep' | 'horizon' | 'veil'
+/* 背景模式：碎片与烟雾各自可开可关，四种组合。
+   烟雾单独存在时读成发光体（它背后什么都没有），碎片给了它可遮挡的东西——
+   这就是「碎片 + 烟雾」是主推组合的原因。
+   Backdrop modes: shards and smoke each toggle independently. Smoke alone reads as
+   an emitter because nothing sits behind it; the shards give it something to
+   occlude, which is why shards-plus-smoke is the intended combination. */
+export type BackdropMode = 'none' | 'shards' | 'shardsSmoke' | 'smoke'
 
 export interface SpaceHandle {
   resize(): void
   dispose(): void
   /** 实时切换背景处理 / switch the backdrop treatment live */
-  setBackdrop(b: Backdrop): void
   /** 切换背景实体 / switch the dimensional backdrop solid */
-  setSolid(v: AirVariant): void
+  setSolid(v: BackdropMode): void
   /** 实例序号 / instance number */
   instId: number
   /** DEV 专用探针，由挂载层决定要不要装到 window 上 / DEV-only probe; the mount
@@ -56,8 +62,6 @@ export interface SpaceHandle {
 
 let instanceSeq = 0
 const IE_BG = 0x09090b // --ink-950，同时也是雾色 / also the fog colour
-const C_GRID = 0xffffff
-const FLOOR_Y = -260
 
 export async function createLandingSpace(opts: {
   container: HTMLElement
@@ -93,130 +97,6 @@ export async function createLandingSpace(opts: {
 
   const camera = new THREE.PerspectiveCamera(34, 1, 8, 6500)
 
-  /* ══ 背景：四种处理，可实时切换 ══
-     hero 下方那片区域连续被否了两版（线阵网格 → 摄影棚扫光）。问题不在参数：
-     我看不见页面，探针能量到「有没有、多亮、在哪」，量不到「好不好看」，
-     于是只能串行盲猜，一轮一个。所以这里改成把四种**性质不同**的处理同时
-     建出来，由页面上的切换器实时翻看——把串行盲猜换成并行比较。
-     Four backdrop treatments built at once and switched live. The region under
-     the hero was rejected twice (line grid, then studio sweep) and the problem
-     was never a parameter: probes can verify presence, brightness and position
-     but never whether it looks good, which forced serial guessing at one idea
-     per round. Building all four and letting the picker compare them turns that
-     into a parallel choice.
-
-       none    什么都没有。纯页面底色，手机只靠自己的接触阴影立住。最克制。
-       sweep   地面扫光：一团被拉长的柔光落在地上，随距离衰减（上一版）。
-       horizon 远方地平线：没有地面，只有一条横贯画面的大气光带。
-       veil    舞台光幕：光从上方洒下的垂直渐变，越往下越暗。
-
-     四者共用同一套程序化贴图管线，全部是实色 + 平滑衰减，零图案零线条。
-     All four share one procedural texture pipeline: solid fills with smooth
-     falloff, no pattern and no lines anywhere. */
-  /* 程序化贴图。低透明度的平滑渐变在 8 位显示器上必然出现色带，所以逐像素掺入
-     ±2/255 的确定性抖动——用固定哈希而不是 Math.random，画面才可复现、才谈得上
-     逐帧核对。/ A procedural texture. Smooth low-alpha gradients band visibly on
-     8-bit displays, so each pixel gets about two levels of deterministic dither
-     from a fixed hash rather than Math.random, keeping frames reproducible and
-     therefore verifiable. */
-  const makeTex = (alphaAt: (u: number, v: number) => number): TH.Texture | null => {
-    const S = 256
-    const c = document.createElement('canvas')
-    c.width = S
-    c.height = S
-    const g2 = c.getContext('2d')
-    if (!g2) return null
-    const img = g2.createImageData(S, S)
-    for (let y = 0; y < S; y++) {
-      for (let x = 0; x < S; x++) {
-        const h = ((x * 73856093) ^ (y * 19349663)) >>> 0
-        const a = alphaAt((x + 0.5) / S, (y + 0.5) / S) + ((h % 5) - 2) / 255
-        const i = (y * S + x) * 4
-        img.data[i] = 255
-        img.data[i + 1] = 255
-        img.data[i + 2] = 255
-        img.data[i + 3] = Math.max(0, Math.min(255, Math.round(a * 255)))
-      }
-    }
-    g2.putImageData(img, 0, 0)
-    const t = new THREE.CanvasTexture(c)
-    t.colorSpace = THREE.SRGBColorSpace
-    return t
-  }
-  const smoothstep = (f: number) => f * f * (3 - 2 * f)
-
-  const mkPlane = (w: number, h: number, tex: TH.Texture | null) => {
-    const m = new THREE.MeshBasicMaterial({
-      map: tex,
-      color: C_GRID,
-      transparent: true,
-      opacity: 1,
-      depthWrite: false,
-    })
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), m)
-    mesh.visible = false
-    scene.add(mesh)
-    return { mesh, m }
-  }
-
-  /* sweep：地面上一团圆形光斑。平面沿 z 拉长，圆贴图被拉成长椭圆，掠角下的
-     透视压缩就是纵深线索。/ A circular pool on an elongated ground plane, so
-     perspective compression at a grazing angle carries the depth. */
-  const sweep = mkPlane(
-    9000,
-    13000,
-    makeTex((u, v) => {
-      const d = Math.hypot((u - 0.5) / 0.5, (v - 0.52) / 0.5)
-      return smoothstep(Math.max(0, 1 - d)) * 0.55
-    })
-  )
-  sweep.mesh.rotation.x = -Math.PI / 2
-
-  /* horizon：一面竖直的光幕挂在远处，中段一条高斯光带 = 地平线附近的大气。
-     没有地面、没有表面，只有「远处有东西」。
-     A vertical veil far ahead carrying one Gaussian band: the atmosphere near a
-     horizon. No ground, no surface, just "there is something out there". */
-  const horizon = mkPlane(
-    9000,
-    3600,
-    makeTex((u, v) => {
-      const band = Math.exp(-(((v - 0.52) / 0.11) ** 2))
-      const sides = smoothstep(Math.max(0, 1 - Math.abs(u - 0.5) / 0.5))
-      return band * sides * 0.62
-    })
-  )
-
-  /* veil：同一面光幕，改成自上而下的舞台光——上亮下暗，像顶光洒在背景幕上。
-     The same veil relit from above: a stage wash, bright at the top and falling
-     away downward. */
-  const stage = mkPlane(
-    9000,
-    3600,
-    makeTex((u, v) => {
-      /* 两次都调偏了，记下来：第一版峰值 0.5 且亮部起点在 v=0.18，实测整帧
-         峰值只有 17/255——亮区整个落在画面上缘之外；第二版把亮区一路铺到顶，
-         结果覆盖率 100%、峰值 109，整帧被洗白，文字无处安放。
-         正解是一条**有上下衰减的高斯光带**而不是一个半边全亮的斜坡：峰值落在
-         v=0.433（换算到世界坐标约 y=400，即画面上三分之一），上下各自衰减。
-         Mis-tuned twice, recorded here: the first pass peaked at 0.5 starting at
-         v=0.18 and measured a frame peak of 17 because the lit region sat above
-         the top of frame; the second ran the lit region all the way to the top
-         and measured 100% coverage at peak 109, washing out the whole frame with
-         nowhere to put type. The answer is a Gaussian band that falls off in
-         BOTH directions rather than a half-bright ramp, peaking at v=0.433
-         (about y=400 in world terms, the upper third of frame). */
-      const band = Math.exp(-(((v - 0.433) / 0.2) ** 2))
-      const sides = smoothstep(Math.max(0, 1 - Math.abs(u - 0.5) / 0.5))
-      return band * sides * 0.5
-    })
-  )
-
-  const setBackdrop = (b: Backdrop) => {
-    sweep.mesh.visible = b === 'sweep'
-    horizon.mesh.visible = b === 'horizon'
-    stage.mesh.visible = b === 'veil'
-  }
-  setBackdrop('sweep')
 
 
   /* 实体层：体积感全部来自这里的实算环境反射，与手机同族材质。
@@ -230,6 +110,7 @@ export async function createLandingSpace(opts: {
      lighting, so the three lights the previous version added to illuminate metal
      solids go with them: nothing in the scene needs lighting any more. */
   const air: AirHandle = createBackdropAir(THREE, scene, camera)
+  const shards: ShardsHandle = createBackdropShards(THREE, renderer, scene)
 
   /* ══ 相机路径 ══
      不再有俯冲和飞行：从头到尾是一次缓慢的低空前推。变化要慢到观众说不出
@@ -289,17 +170,6 @@ export async function createLandingSpace(opts: {
        The backdrop follows the camera. Pinned in world space it got left behind
        once the camera pushed past the verdict act - measured, coverage hit zero
        after route 1.5 and the page's lower half went back to flat black. */
-    sweep.mesh.position.set(_p.x, FLOOR_Y, _p.z - 700)
-    horizon.mesh.position.set(_p.x, FLOOR_Y + 300, _p.z - 2600)
-    stage.mesh.position.set(_p.x, FLOOR_Y + 420, _p.z - 2400)
-    /* 判定幕期间背景退到三成：判定终端是唯一主体，环境降为余光里的存在。
-       Under the verdict terminal the backdrop drops to 30%: the terminal is the
-       only subject and the surroundings become peripheral. */
-    const wallK = smooth(clamp01((r - 1.0) / 0.14)) * (1 - smooth(clamp01((r - 2.02) / 0.22)))
-    const bk = 1 - 0.7 * wallK
-    sweep.m.opacity = bk
-    horizon.m.opacity = bk
-    stage.m.opacity = bk
     const haze = smooth(clamp01((r - 2.02) / 0.6))
     if (scene.fog) (scene.fog as TH.FogExp2).density = 0.00034 + haze * 0.00046
 
@@ -382,6 +252,7 @@ export async function createLandingSpace(opts: {
        only a drift too slow to time. The previous per-frame integration and scroll
        boost existed for travelling objects and go with them. */
     air.update(t, _p.z)
+    shards.update(t)
     draw()
   }
   const pump = () => {
@@ -419,6 +290,7 @@ export async function createLandingSpace(opts: {
          simulation has to be advanceable explicitly before sampling. */
       step(seconds: number) {
         air.update(seconds, _p.z)
+        shards.update(seconds)
         draw()
       },
       /* 把当前可见实体的包围盒投到屏幕百分比。3D 里「东西落在画面哪儿」是我
@@ -468,7 +340,6 @@ export async function createLandingSpace(opts: {
          mounts twice, so window.__space and the React-held handle can belong to
          different instances and the probe would be reading a torn-down scene.
          instId lets the two be reconciled. */
-      setBackdrop,
       /* 离屏抓帧：渲染到 RenderTarget 再读回。默认帧缓冲呈现后即清空，直接
          drawImage 读到的是透明。/ Offscreen capture via render target read-back;
          the default framebuffer is cleared once presented. */
@@ -519,8 +390,10 @@ export async function createLandingSpace(opts: {
 
   return {
     resize,
-    setBackdrop,
-    setSolid: (v: AirVariant) => air.setVariant(v),
+    setSolid: (v: BackdropMode) => {
+      air.setVariant(v === 'shardsSmoke' || v === 'smoke' ? 'masses' : 'none')
+      shards.setVisible(v === 'shards' || v === 'shardsSmoke')
+    },
     instId: INST,
     debug: devApi,
     dispose() {
@@ -529,6 +402,7 @@ export async function createLandingSpace(opts: {
       window.removeEventListener('resize', resize)
       if (onPointer) window.removeEventListener('pointermove', onPointer)
       air.dispose()
+      shards.dispose()
       renderer.domElement.remove()
       renderer.dispose()
       scene.traverse((o) => {

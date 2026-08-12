@@ -46,6 +46,8 @@ export type AirVariant = 'none' | 'masses' | 'strata'
 
 export interface AirHandle {
   setVariant(v: AirVariant): void
+  /** 整体压暗，与碎片同步 / global dim, in step with the shards */
+  setDim(k: number): void
   /** 每帧调用 / per frame */
   update(t: number, camZ: number): void
   dispose(): void
@@ -421,8 +423,17 @@ export function createBackdropAir(
     }
   }
 
+  const allMats: { m: TH.MeshBasicMaterial; base: number }[] = []
+  Object.values(puffs).forEach((arr) =>
+    arr.forEach((p) => {
+      const m = p.m.material as TH.MeshBasicMaterial
+      allMats.push({ m, base: m.opacity })
+    })
+  )
+
   return {
     setVariant,
+    setDim: (k: number) => allMats.forEach(({ m, base }) => (m.opacity = base * k)),
     update,
     dispose() {
       texes.forEach((t) => t?.dispose())

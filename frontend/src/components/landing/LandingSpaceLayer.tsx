@@ -26,7 +26,7 @@
 // does. The expensive phone body still loads on desktop only.
 import { useEffect, useRef, useState } from 'react'
 import { createLandingSpace, type SpaceHandle } from './LandingSpace'
-import type { AirVariant } from './BackdropAir'
+import type { BackdropMode } from './LandingSpace'
 
 /* 背景变体切换器（临时评审工具）。
    前一版这里放的四个选项全是**光的分布**（网格/扫光/地平线/光幕），换的只是
@@ -41,16 +41,17 @@ import type { AirVariant } from './BackdropAir'
    objects at all was the wrong level: what is wanted is the space itself. The
    options are now atmospheres (see BackdropAir.ts). Appears only with ?bg in the
    URL, remembers the choice, and is deleted once a direction is picked. */
-const OPTIONS: { id: AirVariant; label: string; hint: string }[] = [
+const OPTIONS: { id: BackdropMode; label: string; hint: string }[] = [
   { id: 'none', label: '无', hint: '纯底色，什么都不放' },
-  { id: 'masses', label: '雾体', hint: '浓淡不匀的空气，近团大而清、远团小而淡，互相遮挡' },
-  { id: 'strata', label: '雾层', hint: '一层比一层高、一层比一层淡；风景画传达纵深的老办法' },
+  { id: 'shards', label: '棱镜碎片', hint: '极暗的面 + 发丝亮边，缓慢翻转；亮的是棱，不是面' },
+  { id: 'shardsSmoke', label: '碎片 + 烟雾', hint: '烟从碎片前后穿行——遮挡与被遮挡，两者互相成全' },
+  { id: 'smoke', label: '只有烟雾', hint: '对照组：背后没有东西时，烟只能读成发光' },
 ]
 
 export default function LandingSpaceLayer() {
   const host = useRef<HTMLDivElement>(null)
   const handleRef = useRef<SpaceHandle | null>(null)
-  const [variant, setVariant] = useState<AirVariant>('masses')
+  const [variant, setVariant] = useState<BackdropMode>('shardsSmoke')
   /* 挂载 effect 的依赖是空数组，它闭包里的 variant 永远是初值。异步创建完成
      得比「从 localStorage 恢复选择」晚，直接用闭包值会把恢复的选择覆盖回初值。
      所以当前值另存一份 ref。
@@ -58,7 +59,7 @@ export default function LandingSpaceLayer() {
      is forever the initial one. Creation finishes after the stored choice is
      restored, and using the closure value would overwrite that choice with the
      initial one - hence a ref holding the current value. */
-  const variantRef = useRef<AirVariant>('masses')
+  const variantRef = useRef<BackdropMode>('shardsSmoke')
   const [picker, setPicker] = useState(false)
 
   /* 初值在 effect 里读而不是在 useState 初始化器里读：初始化器在客户端首次
@@ -68,7 +69,7 @@ export default function LandingSpaceLayer() {
      output, which trips a hydration warning. */
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has('bg')) setPicker(true)
-    const saved = localStorage.getItem('slBg') as AirVariant | null
+    const saved = localStorage.getItem('slBg') as BackdropMode | null
     if (saved && OPTIONS.some((o) => o.id === saved)) setVariant(saved)
   }, [])
 
@@ -118,9 +119,6 @@ export default function LandingSpaceLayer() {
            The probe is installed only here, the moment this instance is known to
            be the adopted one. */
         if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__space = handle.debug
-        /* 照明一律关：元素底下不再垫光。
-           Lighting stays off: the motifs are not bedded on a wash. */
-        handle.setBackdrop('none')
         handle.setSolid(variantRef.current)
         document.documentElement.classList.add('space-on')
       }
