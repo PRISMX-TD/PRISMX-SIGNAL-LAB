@@ -441,7 +441,7 @@ export default function PhoneStory() {
         {/* ── Hero 面板（含 CTA，唯一可点面板）/ hero panel, the only interactive one ── */}
         <div className={`story-panel panel-l pe ${active === 0 ? 'on' : ''}`} data-panel="hero">
           <div className="panel-inner">
-            <h1 className="font-display-xl text-[clamp(2.1rem,5vw,3.6rem)]">
+            <h1 className="font-display-xl text-[clamp(2.5rem,8.5vw,3.6rem)]">
               <span className="block text-white">{t('landing.heroTitle1')}</span>
               <span className="mt-1 block text-prism-400">{t('landing.heroTitle2')}</span>
             </h1>
@@ -474,7 +474,7 @@ export default function PhoneStory() {
           >
             <div className="panel-inner">
               <p className="text-[13px] leading-relaxed text-neutral-500">{t(`landing.${p.pain}`)}</p>
-              <h2 className="mt-3 font-display-xl text-[clamp(1.4rem,2.6vw,2.1rem)] text-white">
+              <h2 className="mt-3 font-display-xl text-[clamp(1.75rem,4.6vw,2.1rem)] text-white">
                 {t(`landing.${p.title}`)}
               </h2>
               <p className="mt-3 max-w-[46ch] text-[13.5px] leading-relaxed text-neutral-400 sm:text-[14px]">
@@ -484,16 +484,22 @@ export default function PhoneStory() {
           </div>
         ))}
 
-        {/* 幕计数：右缘一列 5 个刻度，当前幕为紫。这不是装饰圆点——它表达的是
-            真实的播放进度状态。/ Scene counter: five ticks on the right edge,
-            the current one violet. Not decorative dots: it reports real
-            playhead state. */}
-        <div className="absolute right-4 top-1/2 z-20 hidden -translate-y-1/2 flex-col gap-2.5 lg:flex" aria-hidden>
+        {/* 幕计数。这不是装饰圆点——它表达的是真实的播放进度状态。
+            桌面是右缘的一列竖刻度；真机上改成横跨全宽的分段进度条（见 index.css
+            的 .story-ticks），既补上「这是一段五幕的旅程」的交代，也把品牌紫带进
+            以往几乎全灰的移动端版面。
+            Scene counter, reporting real playhead state rather than decorating.
+            On desktop it is a column of ticks at the right edge; on real devices
+            it becomes a full-width segmented progress bar (see .story-ticks in
+            index.css), which both states that this is a five-part journey and
+            brings the brand violet into an otherwise almost entirely grey mobile
+            composition. */}
+        <div className="story-ticks" aria-hidden>
           {Array.from({ length: SCENES }, (_, i) => (
             <span
               key={i}
-              className={`js-tick h-5 w-[3px] rounded-full transition-colors duration-300 ${
-                active === i ? 'bg-prism-400' : 'bg-white/15'
+              className={`js-tick transition-colors duration-300 ${
+                active === i ? 'bg-prism-500' : 'bg-white/15'
               }`}
             />
           ))}

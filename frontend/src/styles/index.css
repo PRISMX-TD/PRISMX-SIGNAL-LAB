@@ -3707,6 +3707,29 @@ body {
   .panel-l > .panel-inner,
   .panel-r > .panel-inner { transform: translateY(-50%); }
 }
+
+/* ── 幕计数刻度 / scene ticks ── */
+.story-ticks {
+  position: absolute;
+  right: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 20;
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+}
+@media (min-width: 1024px) {
+  .story-ticks {
+    display: flex;
+  }
+}
+.js-tick {
+  height: 20px;
+  width: 3px;
+  border-radius: 999px;
+}
+
 /* ══════════════════════════════════════════════
    真机（< 1024px）：去掉手机外壳，屏幕直接当卡片用
    ──────────────────────────────────────────────
@@ -3763,12 +3786,17 @@ body {
   .story-stage {
     display: grid;
     grid-template-columns: 100%;
-    grid-template-rows: minmax(0, 1fr) auto;
-    row-gap: 2.4vh;
+    grid-template-rows: minmax(0, 1fr) auto auto;
+    row-gap: 1.8vh;
     /* 上留导航（64px）与刘海，下留吸底 CTA（约 68px）与安全区。
-       Top clears the nav and the notch; bottom clears the sticky CTA and the
-       safe area. */
-    padding: calc(64px + env(safe-area-inset-top) + 1.6vh) 4vw calc(env(safe-area-inset-bottom) + 82px);
+       左右不再留白：画面改为全出血，横向留白下放给刻度条与文字面板各自承担，
+       让 App 界面从边到边铺满——移动端的「沉浸感」几乎全部来自这一点。
+       Top clears the nav and the notch; bottom clears the sticky CTA and the safe
+       area. No horizontal padding any more: the visual goes full-bleed and the
+       side margins move down into the ticks and the text panel individually, so
+       the app interface runs edge to edge - which is where nearly all of the
+       immersion on mobile comes from. */
+    padding: calc(64px + env(safe-area-inset-top) + 1.6vh) 0 calc(env(safe-area-inset-bottom) + 76px);
   }
 
   .story-phone {
@@ -3828,31 +3856,103 @@ body {
      relative rather than static: the five scenes inside are absolutely inset to
      0 and need this to stay their containing block, which also keeps overflow
      and the radius clipping content to the card. */
+  /* 全出血：只保留上下两条发丝线界定范围，左右到边、圆角归零。
+     带边框的圆角卡片读起来是「一张贴在页面上的截图」；铺到边之后读起来是
+     「你正在用的界面」。
+     Full bleed: only a hairline top and bottom delimits it, sides run to the
+     edge and the radius goes to zero. A bordered rounded card reads as a
+     screenshot pasted onto the page; edge to edge reads as the interface you are
+     using. */
   .dev-screen {
     position: relative;
     inset: auto;
     flex: 1 1 auto;
     min-width: 0;
-    border: 1px solid var(--line);
-    border-radius: 22px;
+    border: 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
     box-shadow: none;
   }
-  /* 没有灵动岛要让，头部回到正常的顶部留白 / no island to clear, so the header
-     returns to a normal top margin */
-  .pc-head {
-    top: 5cqw;
+  /* 声明与刻度条要各自补回横向留白（画面已经没有了）
+     The caption and ticks restore their own side margins now the visual has none */
+  .story-phone > p {
+    margin-top: 8px;
+    padding: 0 5vw;
+  }
+  /* 屏内的 App 骨架（品牌条 + 底部 Tab 栏）在真机上全部去掉。
+     它们本来是为「这是一台手机里的 App」服务的，而手机外壳已经不存在了：
+     页面顶部已有一条真实的站点导航（Signal Lab / 语言 / 免费注册），卡片里
+     再放一条应用头部就是两层重复的头；底部 Tab 栏更是直接压住内容——实测它
+     连同上下让位一共吃掉 147px，而卡片内容区总共才 280px，两张信号卡根本装不下。
+     去掉之后内容区从 280px 涨到约 400px，信号卡终于完整可见。
+     The in-screen app chrome (brand strip and bottom tab bar) is removed entirely
+     on real devices. Both existed to say "this is an app inside a phone", and the
+     phone is gone: the page already carries a real site header above (Signal Lab,
+     language, register), so a second header inside the card is simply two stacked
+     headers, and the tab bar actively covered content - measured, it and its
+     clearance consumed 147px out of a 280px content area, which is why the second
+     signal card did not fit. Without them the content area grows to about 400px
+     and the cards are finally whole. */
+  .pc-head,
+  .pc-tabs {
+    display: none;
   }
   .scr {
-    padding: 17cqw 5cqw 24cqw;
+    padding: 4.5cqw 5cqw 4.5cqw;
+  }
+
+  /* 首幕是「今日信号」列表，两张卡的总高本就超过画面区（实测需 453px、可用
+     395px）。与其把内边距调到刚好卡在某一种屏高上——iPhone SE 的 667px 与
+     Pro Max 的 932px 差 40%，任何定死的数值都只在一种机型上成立——不如让裁切
+     本身成为有意的设计：底部加一道渐隐，读起来就是真实 App 里「列表还有下文」
+     的折线，而不是「内容被切了」。这个做法在任何屏高上都成立。
+     只作用于首幕：其余四幕的内容都装得下，给它们加渐隐反而会压暗合法的收尾
+     文字。
+     Scene 0 is the signal list, and two cards inherently exceed the visual area
+     (453px needed against 395px available). Rather than tuning padding to fit one
+     particular viewport height - an iPhone SE's 667px and a Pro Max's 932px differ
+     by 40%, so any fixed number holds on exactly one device - the crop itself
+     becomes deliberate: a fade at the bottom reads as the fold of a real app list
+     with more below, not as content being severed. That holds at any height.
+     Scoped to scene 0 only: the other four fit, and a fade there would merely dim
+     their legitimate closing lines. */
+  [data-scr='0']::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 15%;
+    z-index: 5;
+    pointer-events: none;
+    background: linear-gradient(180deg, transparent, #06060a 88%);
+  }
+
+  /* 幕计数：横跨全宽的分段进度条，占栅格第二行。
+     Scene ticks: a full-width segmented progress bar occupying the second row. */
+  .story-ticks {
+    position: static;
+    grid-area: 2 / 1;
+    display: flex;
+    flex-direction: row;
+    gap: 4px;
+    transform: none;
+    padding: 0 5vw;
+  }
+  .js-tick {
+    height: 3px;
+    width: auto;
+    flex: 1 1 0;
   }
 
   .story-panel {
     position: static;
-    grid-area: 2 / 1;
+    grid-area: 3 / 1;
     left: auto;
     right: auto;
     bottom: auto;
-    padding: 0;
+    padding: 0 5vw;
     background: none;
   }
 }
