@@ -32,74 +32,47 @@
 // The composition is coordinate math inside a viewBox, verifiable line by line;
 // the type stays real DOM (free i18n, prerendered, crawlable). Runtime modes
 // mirror the story section: desktop scrub via GSAP, steps elsewhere.
+//
+// 桌面端若空间层起来了（html.space-on），这面 SVG 墙让位给 LandingSpace 里的
+// 3D 判决碑——同一份数据立成一块有厚度、站在网格大地上的碑，本文件的墙退为
+// WebGL 不可用 / 减少动态 / 真机时的后备。文字面板与节奏两层共用，不变。
+// On desktop, once the space layer is up (html.space-on) this SVG wall yields to
+// the 3D verdict stone in LandingSpace: the same data raised as a slab with real
+// thickness standing on the grid floor. The wall remains the fallback for
+// no-WebGL, reduced-motion and real devices. Text panels and pacing are shared.
 // ════════════════════════════════════════════════════════════════════════════
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
+import {
+  CASE_BOTH,
+  CASE_LOSS,
+  CASE_VOID,
+  CASE_WIN,
+  EN_Y,
+  SL_Y,
+  TP_Y,
+  VOID_END_Y,
+  X0,
+  XT,
+  type Pt,
+} from './verdictData'
 
 const BEATS = 5
 
 /* ── 墙面坐标系 / the wall's coordinate system ──
-   viewBox 1600×900。三条线的高度让底部留出 29% 给文字（桌面文字面板压在左下，
-   移动端文字在画面之外的第三行）。路径起点 x=340：桌面 slice 裁切在最方的
-   常见屏（5:4）下也只裁到 x≈237，起点与「信号发出」标记永远可见。
-   A 1600 by 900 viewBox. The lines leave the bottom 29% for type (the desktop
-   panel sits lower left, mobile type lives outside the drawing entirely). The
-   path starts at x=340: even the squarest common screen (5:4) crops slice mode
-   to about x=237, so the start and its "signal fired" marker always survive. */
-const TP_Y = 200
-const EN_Y = 420
-const SL_Y = 640
-const X0 = 340
-const XT = 1300
-
-/* 确定性伪随机：这讲的是固定的四个判例，不是每次刷新换一份行情；而且只有
-   可复现的画面才能逐项核对。/ Deterministic PRNG: these are four fixed case
-   studies, not a fresh market per refresh, and only a reproducible frame can be
-   verified item by item. */
-function lcg(seed: number) {
-  let s = seed >>> 0
-  return () => {
-    s = (s * 1664525 + 1013904223) >>> 0
-    return s / 4294967296
-  }
-}
-
-/* 一段行情：随机游走 + 均值回归，后半程被拉向判定价位，最后一点强制触线。
-   One price path: a mean-reverting walk pulled toward the verdict level over
-   the back half, with the final point forced onto the line. */
-function walk(seed: number, n: number, endY: number | null, endX = XT): [number, number][] {
-  const rnd = lcg(seed)
-  const pts: [number, number][] = [[X0, EN_Y]]
-  let y = EN_Y
-  for (let i = 1; i <= n; i++) {
-    const x = X0 + (endX - X0) * (i / n)
-    const k = i / n
-    y += (rnd() - 0.5) * 150 - (y - EN_Y) * 0.12
-    if (endY != null) y += (endY - y) * Math.max(0, (k - 0.55) / 0.45) ** 1.6 * 0.5
-    y = Math.min(SL_Y - 30, Math.max(TP_Y + 30, y))
-    pts.push([x, y])
-  }
-  if (endY != null) pts[pts.length - 1] = [endX, endY]
-  return pts
-}
-const toD = (p: [number, number][]) => 'M' + p.map(([x, y]) => `${Math.round(x)} ${Math.round(y)}`).join(' L ')
-
-const D_WIN = toD(walk(4021, 34, TP_Y))
-const D_LOSS = toD(walk(7919, 34, SL_Y))
-/* 规则三：一根行情里两头都碰。基础游走后接一个锐利的 V 形尖刺——先刺穿止损、
-   立刻反手刺穿止盈，然后回到中性收尾。两个触点都有记号，判决章是灰的：保守
-   记为输。/ Rule 3, both sides touched: the walk ends in a sharp V spike that
-   pierces stop-loss then take-profit back to back before settling. Both touch
-   points are marked; the verdict stamp is grey, conservatively a loss. */
-const BOTH_BASE = walk(5477, 22, null, 1140)
-const D_BOTH = toD([...BOTH_BASE, [1170, 540], [1198, SL_Y], [1232, TP_Y], [1268, 380], [1300, 430]])
-/* 规则四：数据中断。路径画到 x=780 戛然而止，后面是一条虚线幽灵——不是赢也
-   不是输，不计入。/ Rule 4, the outage: the path stops dead at x=780 and a
-   dashed ghost carries on. Neither a win nor a loss; excluded. */
-const VOID_PTS = walk(9203, 15, null, 780)
-const D_VOID = toD(VOID_PTS)
-const VOID_END_Y = Math.round(VOID_PTS[VOID_PTS.length - 1][1])
+   四个判例的路径数据在 verdictData.ts，与 3D 判决碑共用同一份（见该文件头注）。
+   这里只负责把点列转成 SVG path。viewBox 1600×900：三条线的高度让底部留出
+   29% 给文字；路径起点 x=340 在最方的常见屏（5:4 slice 裁到 x≈237）下也可见。
+   The four cases live in verdictData.ts, shared with the 3D verdict stone (see
+   that file's header). This file only turns point lists into SVG paths. In the
+   1600 by 900 viewBox the lines leave the bottom 29% for type, and the path
+   start at x=340 survives even a 5:4 slice crop (which reaches x=237). */
+const toD = (p: Pt[]) => 'M' + p.map(([x, y]) => `${Math.round(x)} ${Math.round(y)}`).join(' L ')
+const D_WIN = toD(CASE_WIN)
+const D_LOSS = toD(CASE_LOSS)
+const D_BOTH = toD(CASE_BOTH)
+const D_VOID = toD(CASE_VOID)
 
 const V_TP = '#8B6CFF' // prism-400：#5A22EE 的亮度只有 66/255，作为落点太弱
 const V_SL = '#A1A1AA'

@@ -4175,14 +4175,23 @@ body {
      three price lines live in the upper 71% of the frame and the text panel
      sits lower left, so sinking the bottom strip back to the page colour keeps
      every level line and verdict flash fully visible above it. */
+  /* 左下角袋形遮罩，不再是整条底带。判决碑的止损线与判决章落在画面底部
+     72-88% 的右侧——整条底带会把「先碰止损记输」那一拍的全部戏剧压进黑里
+     （投影核对：SL 线在 84% 高度）。改成罩住文字面板的左下椭圆之后，右下的
+     判决区完全放开。实测右下角 (100%,100%) 与章位 (88%,84%) 都落在透明区。
+     A lower-left pocket, no longer a full-width band. The stone's stop-loss
+     line and verdict stamps land on the right at 72-88% of frame height, and a
+     full band would sink beat two's whole drama into black (projection check:
+     the SL line sits at 84%). An ellipse over the text panel frees the lower
+     right verdict zone entirely - both the corner and the stamp position fall
+     in the transparent region. */
   .mkt-stage::before {
     content: '';
     position: absolute;
-    inset: auto 0 0 0;
-    height: 52%;
+    inset: 0;
     z-index: -1;
     pointer-events: none;
-    background: linear-gradient(0deg, #09090b 18%, rgba(9, 9, 11, 0.85) 42%, transparent);
+    background: radial-gradient(95% 105% at 10% 100%, #09090b 30%, rgba(9, 9, 11, 0.78) 55%, transparent 78%);
   }
 }
 
@@ -4324,6 +4333,23 @@ body {
     transform: none;
   }
   .sc-label {
+    display: none;
+  }
+}
+
+/* 判决碑接管态 / the verdict stone takeover
+   空间层起来后（html.space-on），桌面端的 SVG 判决墙让位给 LandingSpace 里的
+   3D 判决碑——同一份数据（verdictData.ts）立成实体。窄屏永远用 SVG 墙：碑宽
+   1160 世界单位，竖屏的水平视场装不下，而墙的 meet 模式按设计装得下。
+   WebGL 起不来 / 减少动态时 space-on 不存在，墙自动留任——降级链无需 JS 参与。
+   Once the space layer is up (html.space-on) the desktop SVG wall yields to the
+   3D verdict stone in LandingSpace, the same data raised as a solid. Narrow
+   viewports always keep the SVG wall: the stone is 1160 world units wide and a
+   portrait field of view cannot hold it, while the wall's meet mode fits by
+   design. With no WebGL or reduced motion, space-on never appears and the wall
+   simply stays - the fallback chain needs no JS. */
+@media (min-width: 1024px) {
+  .space-on .mkt-wall {
     display: none;
   }
 }
