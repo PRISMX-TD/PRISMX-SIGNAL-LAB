@@ -36,7 +36,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import type * as TH from 'three'
-import { createBackdropSolids, type SolidVariant, type SolidsHandle } from './BackdropSolids'
+import { createBackdropAir, type AirVariant, type AirHandle } from './BackdropAir'
 
 export type Backdrop = 'none' | 'sweep' | 'horizon' | 'veil'
 
@@ -46,7 +46,7 @@ export interface SpaceHandle {
   /** 实时切换背景处理 / switch the backdrop treatment live */
   setBackdrop(b: Backdrop): void
   /** 切换背景实体 / switch the dimensional backdrop solid */
-  setSolid(v: SolidVariant): void
+  setSolid(v: AirVariant): void
   /** 实例序号 / instance number */
   instId: number
   /** DEV 专用探针，由挂载层决定要不要装到 window 上 / DEV-only probe; the mount
@@ -224,9 +224,12 @@ export async function createLandingSpace(opts: {
      The solids layer, whose volume comes entirely from computed environment
      reflection in the same material family as the phone. Low-power devices drop
      the glass transmission pass while keeping the form and its speculars. */
-  const solids: SolidsHandle = createBackdropSolids(THREE, renderer, scene, camera, {
-    lowPower: window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 1024,
-  })
+  /* 大气层。全部是 MeshBasicMaterial 的柔斑，不吃光照，所以这一版把上一版为了
+     照亮金属实体而加的三盏灯一起去掉了——场景里已经没有需要被照的东西。
+     The atmosphere layer. Everything in it is a MeshBasic soft mass that ignores
+     lighting, so the three lights the previous version added to illuminate metal
+     solids go with them: nothing in the scene needs lighting any more. */
+  const air: AirHandle = createBackdropAir(THREE, scene, camera)
 
   /* ══ 相机路径 ══
      不再有俯冲和飞行：从头到尾是一次缓慢的低空前推。变化要慢到观众说不出
@@ -356,7 +359,6 @@ export async function createLandingSpace(opts: {
   draw()
 
   let raf = 0
-  let lastT = performance.now() / 1000
   const frame = () => {
     raf = requestAnimationFrame(frame)
     const target = computeRoute()
@@ -372,18 +374,14 @@ export async function createLandingSpace(opts: {
        frame stays a place, not a picture. Offsets land on the camera position
        with the look target held, so near grid moves more than far. */
     applyRoute(cur, Math.sin(t * 0.19) * 11 + ptr.x * 30, Math.cos(t * 0.133) * 6 + ptr.y * 18)
-    /* dt 用真实帧间隔而不是固定值：掉帧时固定步长会让流速跟着掉，读起来是
-       「卡了」而不是「慢了」。上限 0.05s，标签页切回来时不至于瞬移一大段。
-       boost 取滚动增量：往下滚时流速加快，滚动因此变成推进的油门。
-       dt uses the real frame interval rather than a constant: with a fixed step a
-       dropped frame slows the flow, which reads as a stutter rather than as
-       slowing down. Capped at 0.05s so returning to a backgrounded tab does not
-       teleport the field. boost comes from the scroll delta, making scrolling the
-       throttle on the forward motion. */
-    const dt = Math.min(0.05, (t - lastT) || 0.016)
-    lastT = t
-    const boost = Math.min(3, Math.abs(target - cur) * 260)
-    solids.update(dt, _p.z, boost)
+    /* 大气不需要 dt 与滚动油门：它没有自己的流速，纵深由相机前推带出来，横向
+       只有一层慢到数不出速度的漂移。上一版那套「按帧间隔积分 + 滚动加速」是为
+       流动的物件写的，物件去掉之后一并去掉。
+       The atmosphere needs neither dt nor a scroll throttle: it has no flow speed
+       of its own, its depth comes from the camera's advance, and laterally there is
+       only a drift too slow to time. The previous per-frame integration and scroll
+       boost existed for travelling objects and go with them. */
+    air.update(t, _p.z)
     draw()
   }
   const pump = () => {
@@ -420,7 +418,7 @@ export async function createLandingSpace(opts: {
          is actually flowing cannot be checked by waiting two frames. The
          simulation has to be advanceable explicitly before sampling. */
       step(seconds: number) {
-        solids.update(seconds, _p.z, 0)
+        air.update(seconds, _p.z)
         draw()
       },
       /* 把当前可见实体的包围盒投到屏幕百分比。3D 里「东西落在画面哪儿」是我
@@ -478,6 +476,19 @@ export async function createLandingSpace(opts: {
         ;(devApi as { set(x: number): void }).set(r)
         const h = Math.round((outW * container.clientHeight) / container.clientWidth)
         const rt = new THREE.WebGLRenderTarget(outW, h)
+        /* 渲染目标必须显式标成 sRGB，否则读回来的是**线性**值。
+           这是一个贯穿整个会话的测量错误：画布有 outputColorSpace 做 sRGB 编码，
+           而渲染目标默认没有，于是 readRenderTargetPixels 拿到的是线性空间的数。
+           暗部的差距是数量级的——线性 5/255 编码成 sRGB 约等于 39/255，我据此
+           判过好几次「几乎不可见」，其实屏幕上是看得见的。
+           The render target has to be tagged sRGB or the read-back is LINEAR. This
+           was a measurement error running through the whole session: the canvas
+           carries outputColorSpace and applies sRGB encoding while a render target
+           by default does not, so readRenderTargetPixels returned linear numbers.
+           In the shadows the gap is an order of magnitude - linear 5 of 255 encodes
+           to about 39 of 255 - and several "effectively invisible" verdicts were
+           called on those numbers when the screen was showing something. */
+        rt.texture.colorSpace = THREE.SRGBColorSpace
         renderer.setRenderTarget(rt)
         renderer.render(scene, camera)
         const buf = new Uint8Array(outW * h * 4)
@@ -509,7 +520,7 @@ export async function createLandingSpace(opts: {
   return {
     resize,
     setBackdrop,
-    setSolid: (v: SolidVariant) => solids.setVariant(v),
+    setSolid: (v: AirVariant) => air.setVariant(v),
     instId: INST,
     debug: devApi,
     dispose() {
@@ -517,7 +528,7 @@ export async function createLandingSpace(opts: {
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('resize', resize)
       if (onPointer) window.removeEventListener('pointermove', onPointer)
-      solids.dispose()
+      air.dispose()
       renderer.domElement.remove()
       renderer.dispose()
       scene.traverse((o) => {

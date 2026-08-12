@@ -26,7 +26,7 @@
 // does. The expensive phone body still loads on desktop only.
 import { useEffect, useRef, useState } from 'react'
 import { createLandingSpace, type SpaceHandle } from './LandingSpace'
-import type { SolidVariant } from './BackdropSolids'
+import type { AirVariant } from './BackdropAir'
 
 /* 背景变体切换器（临时评审工具）。
    前一版这里放的四个选项全是**光的分布**（网格/扫光/地平线/光幕），换的只是
@@ -37,22 +37,20 @@ import type { SolidVariant } from './BackdropSolids'
    A temporary review tool. Its previous four options were all distributions of
    light (grid, sweep, horizon, wash) differing only in where the brightness fell,
    and all four were rejected together - what was wanted was never a prettier
-   emptiness but something actually being there. They are replaced by four real
-   motifs (see BackdropArt.tsx) with the WebGL lighting switched off throughout:
-   if light is not wanted, do not bed the motifs on a layer of it. Appears only
-   with ?bg in the URL, remembers the choice, and is deleted once a direction is
-   picked. */
-const OPTIONS: { id: SolidVariant; label: string; hint: string }[] = [
+   emptiness but something actually being there - and after that, that placing
+   objects at all was the wrong level: what is wanted is the space itself. The
+   options are now atmospheres (see BackdropAir.ts). Appears only with ?bg in the
+   URL, remembers the choice, and is deleted once a direction is picked. */
+const OPTIONS: { id: AirVariant; label: string; hint: string }[] = [
   { id: 'none', label: '无', hint: '纯底色，什么都不放' },
-  { id: 'bars', label: '掠过的立柱', hint: '细长立柱从深处涌来掠过两侧，速度感最强' },
-  { id: 'panels', label: '掠过的板片', hint: '宽而薄的板迎面而来，像穿过幕墙，比立柱安静' },
-  { id: 'frames', label: '掠过的方框', hint: '一个个方框从旁边推过，最有「一段一段前进」的节奏' },
+  { id: 'masses', label: '雾体', hint: '浓淡不匀的空气，近团大而清、远团小而淡，互相遮挡' },
+  { id: 'strata', label: '雾层', hint: '一层比一层高、一层比一层淡；风景画传达纵深的老办法' },
 ]
 
 export default function LandingSpaceLayer() {
   const host = useRef<HTMLDivElement>(null)
   const handleRef = useRef<SpaceHandle | null>(null)
-  const [variant, setVariant] = useState<SolidVariant>('bars')
+  const [variant, setVariant] = useState<AirVariant>('masses')
   /* 挂载 effect 的依赖是空数组，它闭包里的 variant 永远是初值。异步创建完成
      得比「从 localStorage 恢复选择」晚，直接用闭包值会把恢复的选择覆盖回初值。
      所以当前值另存一份 ref。
@@ -60,7 +58,7 @@ export default function LandingSpaceLayer() {
      is forever the initial one. Creation finishes after the stored choice is
      restored, and using the closure value would overwrite that choice with the
      initial one - hence a ref holding the current value. */
-  const variantRef = useRef<SolidVariant>('bars')
+  const variantRef = useRef<AirVariant>('masses')
   const [picker, setPicker] = useState(false)
 
   /* 初值在 effect 里读而不是在 useState 初始化器里读：初始化器在客户端首次
@@ -70,7 +68,7 @@ export default function LandingSpaceLayer() {
      output, which trips a hydration warning. */
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has('bg')) setPicker(true)
-    const saved = localStorage.getItem('slBg') as SolidVariant | null
+    const saved = localStorage.getItem('slBg') as AirVariant | null
     if (saved && OPTIONS.some((o) => o.id === saved)) setVariant(saved)
   }, [])
 
