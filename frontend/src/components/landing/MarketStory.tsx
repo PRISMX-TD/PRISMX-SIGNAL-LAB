@@ -1,46 +1,142 @@
-// 第二幕：判定走廊 / act II, the verdict corridor
+// 第二幕：判决墙 / act II, the verdict wall
 //
-// 这一幕的 3D 不在本文件里——它属于 LandingSpace.ts 那个贯穿全页的世界，本文件
-// 只负责两件事：给那台相机一段可滚动的行程，以及在行程上按拍子放出四条规则的
-// 文字。分工的理由是可退化性：WebGL 起不来、用户开了减少动态、或者搜索引擎抓
-// 原始 HTML 时，这四条规则依然是四段完整可读的正文，一个字不少。3D 是它们的
-// 背景，不是它们的载体。
+// ════════════════════════════════════════════════════════════════════════════
+// 为什么从「飞行」改成「墙」
 //
-// 文案全部复用既有的 wr* 键（上一版被砍掉的「判定规则」分区留下的），因此这一
-// 幕没有引入任何一句未翻译的新文案，反而把当时丢掉的一段实质内容接了回来。
+// 上一版把四条判定规则做成一条 3D 走廊，相机以第一人称飞进去。用户的截图给出
+// 了裁决：画面读成「几个灰盒子从奇怪的角度掠过」。根因不是参数，是概念——
+// 「穿过价格通道」要求观众边滚动边解码隐喻，解码失败就只剩混乱；而且飞行镜头
+// 的自由度多到无法在无头环境里核对。
 //
-// The 3D for this act does not live here - it belongs to the page-wide world in
-// LandingSpace.ts. This file only supplies a scrollable run for that camera and
-// beats out the four rules along it. The split is about graceful degradation: if
-// WebGL fails, if reduced-motion is on, or if a crawler reads the raw HTML, the
-// four rules are still four complete paragraphs. The 3D is their backdrop, never
-// their carrier.
+// 判决墙把同一个论点换成一次可以正面观看的展示：一面全出血的行情图，三条
+// 水平线贯穿整个视口——止盈、入场、止损。滚动驱动的不是相机，是**时间**：
+// 每一拍画出一段真实形状的价格线，价格碰到哪条线，那条线整条闪成实色，判决
+// 印章盖在触点上。四拍 = 四条规则，每一拍都是同一句话的演示：输赢由行情判定，
+// 谁都改不了。这正是这一幕要卖的东西——可验证，所以才值得注册。
 //
-// Every string reuses the existing wr* keys left behind by the verdict section
-// that the previous revision cut, so this act adds no untranslated copy and in
-// fact restores substantive content that had been lost.
+// 构图全部是 viewBox 里的坐标数学，每个元素的位置在代码里就能核对；文字仍然
+// 是真实 DOM（i18n 免费、预渲染直出、爬虫可读）。滚动行为与叙事区同构：桌面
+// scrub（GSAP 时间线），移动端 / 减少动态 steps（IO 判拍 + CSS 过渡）。
+//
+// Act II changed from a flight to a wall. The corridor flythrough failed by
+// concept, not by parameter: it demanded the viewer decode a metaphor while
+// scrolling, and its camera had too many degrees of freedom to verify blind.
+// The wall states the same argument as something you face: a full-bleed chart,
+// three horizontal lines across the whole viewport - take-profit, entry,
+// stop-loss. Scroll drives TIME, not a camera: each beat draws one price path,
+// and whichever line the price touches flashes solid across the full width
+// while a verdict stamp lands on the touch point. Four beats, four rules, each
+// demonstrating the same sentence: the market does the scoring and nobody can
+// edit it. Which is exactly what makes registering worth it.
+//
+// The composition is coordinate math inside a viewBox, verifiable line by line;
+// the type stays real DOM (free i18n, prerendered, crawlable). Runtime modes
+// mirror the story section: desktop scrub via GSAP, steps elsewhere.
+// ════════════════════════════════════════════════════════════════════════════
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 
 const BEATS = 5
 
+/* ── 墙面坐标系 / the wall's coordinate system ──
+   viewBox 1600×900。三条线的高度让底部留出 29% 给文字（桌面文字面板压在左下，
+   移动端文字在画面之外的第三行）。路径起点 x=340：桌面 slice 裁切在最方的
+   常见屏（5:4）下也只裁到 x≈237，起点与「信号发出」标记永远可见。
+   A 1600 by 900 viewBox. The lines leave the bottom 29% for type (the desktop
+   panel sits lower left, mobile type lives outside the drawing entirely). The
+   path starts at x=340: even the squarest common screen (5:4) crops slice mode
+   to about x=237, so the start and its "signal fired" marker always survive. */
+const TP_Y = 200
+const EN_Y = 420
+const SL_Y = 640
+const X0 = 340
+const XT = 1300
+
+/* 确定性伪随机：这讲的是固定的四个判例，不是每次刷新换一份行情；而且只有
+   可复现的画面才能逐项核对。/ Deterministic PRNG: these are four fixed case
+   studies, not a fresh market per refresh, and only a reproducible frame can be
+   verified item by item. */
+function lcg(seed: number) {
+  let s = seed >>> 0
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0
+    return s / 4294967296
+  }
+}
+
+/* 一段行情：随机游走 + 均值回归，后半程被拉向判定价位，最后一点强制触线。
+   One price path: a mean-reverting walk pulled toward the verdict level over
+   the back half, with the final point forced onto the line. */
+function walk(seed: number, n: number, endY: number | null, endX = XT): [number, number][] {
+  const rnd = lcg(seed)
+  const pts: [number, number][] = [[X0, EN_Y]]
+  let y = EN_Y
+  for (let i = 1; i <= n; i++) {
+    const x = X0 + (endX - X0) * (i / n)
+    const k = i / n
+    y += (rnd() - 0.5) * 150 - (y - EN_Y) * 0.12
+    if (endY != null) y += (endY - y) * Math.max(0, (k - 0.55) / 0.45) ** 1.6 * 0.5
+    y = Math.min(SL_Y - 30, Math.max(TP_Y + 30, y))
+    pts.push([x, y])
+  }
+  if (endY != null) pts[pts.length - 1] = [endX, endY]
+  return pts
+}
+const toD = (p: [number, number][]) => 'M' + p.map(([x, y]) => `${Math.round(x)} ${Math.round(y)}`).join(' L ')
+
+const D_WIN = toD(walk(4021, 34, TP_Y))
+const D_LOSS = toD(walk(7919, 34, SL_Y))
+/* 规则三：一根行情里两头都碰。基础游走后接一个锐利的 V 形尖刺——先刺穿止损、
+   立刻反手刺穿止盈，然后回到中性收尾。两个触点都有记号，判决章是灰的：保守
+   记为输。/ Rule 3, both sides touched: the walk ends in a sharp V spike that
+   pierces stop-loss then take-profit back to back before settling. Both touch
+   points are marked; the verdict stamp is grey, conservatively a loss. */
+const BOTH_BASE = walk(5477, 22, null, 1140)
+const D_BOTH = toD([...BOTH_BASE, [1170, 540], [1198, SL_Y], [1232, TP_Y], [1268, 380], [1300, 430]])
+/* 规则四：数据中断。路径画到 x=780 戛然而止，后面是一条虚线幽灵——不是赢也
+   不是输，不计入。/ Rule 4, the outage: the path stops dead at x=780 and a
+   dashed ghost carries on. Neither a win nor a loss; excluded. */
+const VOID_PTS = walk(9203, 15, null, 780)
+const D_VOID = toD(VOID_PTS)
+const VOID_END_Y = Math.round(VOID_PTS[VOID_PTS.length - 1][1])
+
+const V_TP = '#8B6CFF' // prism-400：#5A22EE 的亮度只有 66/255，作为落点太弱
+const V_SL = '#A1A1AA'
+const V_INK = '#EDEDF0'
+const V_DIM = '#71717A'
+
 export default function MarketStory() {
   const { t } = useTranslation()
   const root = useRef<HTMLElement>(null)
+  const [mode, setMode] = useState<'steps' | 'scrub'>('steps')
   const [active, setActive] = useState(0)
+  /* 窄屏用 meet（完整可见、加非缩放描边保持线宽），宽屏用 slice（全出血）。
+     preserveAspectRatio 不是 CSS 属性，只能由 React 切换。
+     Narrow viewports use meet (fully visible, non-scaling strokes keep their
+     width); wide ones use slice (full bleed). preserveAspectRatio is not a CSS
+     property, so React has to switch it. */
+  const [narrow, setNarrow] = useState(false)
 
-  /* 判幕与叙事区的 steps 模式同构：视口中线附近一条窄带，任一时刻恰好一个哨兵
-     命中。这里不需要第二套机制——本幕没有 GSAP，相机由 LandingSpace 自己按滚动
-     位置算，文字由 CSS 过渡完成，两者各自独立、不用同步。
-     Scene detection mirrors the story's steps mode: a thin band at the viewport
-     midline where exactly one sentinel matches. No second mechanism is needed -
-     this act has no GSAP at all, the camera derives its own position from scroll
-     inside LandingSpace and the type is handled by CSS transitions, so there is
-     nothing to keep in sync. */
   useEffect(() => {
-    const el = root.current
-    if (!el) return
+    const desk = window.matchMedia('(min-width: 1024px)')
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const apply = () => {
+      setMode(desk.matches && !reduce.matches ? 'scrub' : 'steps')
+      setNarrow(!desk.matches)
+    }
+    apply()
+    desk.addEventListener('change', apply)
+    reduce.addEventListener('change', apply)
+    return () => {
+      desk.removeEventListener('change', apply)
+      reduce.removeEventListener('change', apply)
+    }
+  }, [])
+
+  /* ── steps 模式：IO 判拍，CSS 过渡画线 / steps: IO picks the beat ── */
+  useEffect(() => {
+    if (mode !== 'steps' || !root.current) return
     const io = new IntersectionObserver(
       (entries) => {
         entries.forEach((e) => {
@@ -49,23 +145,168 @@ export default function MarketStory() {
       },
       { rootMargin: '-46% 0px -46% 0px', threshold: 0 }
     )
-    el.querySelectorAll('.story-step').forEach((s) => io.observe(s))
+    root.current.querySelectorAll('.story-step').forEach((s) => io.observe(s))
     return () => io.disconnect()
-  }, [])
+  }, [mode])
+
+  /* ── scrub 模式：GSAP 时间线 / scrub: the GSAP timeline ── */
+  useEffect(() => {
+    if (mode !== 'scrub' || !root.current) return
+    let disposed = false
+    let cleanup: (() => void) | undefined
+
+    ;(async () => {
+      const [{ gsap }, { ScrollTrigger }] = await Promise.all([import('gsap'), import('gsap/ScrollTrigger')])
+      if (disposed || !root.current) return
+      gsap.registerPlugin(ScrollTrigger)
+      const el = root.current
+
+      const ctx = gsap.context(() => {
+        const scene = (n: number) => `[data-scene="${n}"]`
+        const pan = (id: string) => `[data-panel="${id}"]`
+
+        gsap.set(pan('mkt0'), { autoAlpha: 1, y: 0 })
+        ;[1, 2, 3, 4].forEach((n) => {
+          gsap.set(pan(`mkt${n}`), { autoAlpha: 0, y: 24 })
+          gsap.set(scene(n), { autoAlpha: 0 })
+          gsap.set(`${scene(n)} .sc-path`, { strokeDashoffset: 1 })
+          gsap.set(`${scene(n)} .sc-band`, { autoAlpha: 0 })
+          gsap.set(`${scene(n)} .sc-stamp`, { autoAlpha: 0, scale: 0.5, transformOrigin: 'center' })
+        })
+
+        let lastScene = -1
+        const tl = gsap.timeline({
+          defaults: { ease: 'power2.out' },
+          scrollTrigger: {
+            trigger: el,
+            start: 'top top',
+            end: 'bottom bottom',
+            scrub: 0.6,
+            invalidateOnRefresh: true,
+            onUpdate: (st) => {
+              const p = st.progress * 100
+              const sc = p < 10 ? 0 : p < 28 ? 1 : p < 46 ? 2 : p < 64 ? 3 : 4
+              if (sc !== lastScene) {
+                lastScene = sc
+                setActive(sc)
+              }
+            },
+          },
+        })
+
+        /* 0-6 标题停留；整个行程里墙极缓慢地转正——唯一的姿态动作。
+           Title hold, then the wall very slowly squares up: its only pose move. */
+        tl.to({}, { duration: 6 })
+        tl.to(pan('mkt0'), { autoAlpha: 0, y: -20, duration: 3 }, 6)
+        tl.fromTo('.mkt-wall', { rotateY: -7, scale: 1.05 }, { rotateY: -2, scale: 1, ease: 'none', duration: 94 }, 6)
+
+        /* 每拍 18 单位：进场 2、画线 8、判决 2、停留 3、退场 3。判决那一下是
+           这一幕的全部戏剧：线走到头，整条价位线闪成实色，章落下。
+           Eighteen units per beat: enter 2, draw 8, verdict 2, hold 3, exit 3.
+           The verdict IS the drama: the path arrives, the whole level flashes
+           solid, the stamp lands. */
+        const beat = (n: number, at: number) => {
+          tl.to(scene(n), { autoAlpha: 1, duration: 2 }, at)
+          tl.fromTo(pan(`mkt${n}`), { autoAlpha: 0, y: 24 }, { autoAlpha: 1, y: 0, duration: 3 }, at + 1)
+          tl.to(`${scene(n)} .sc-path`, { strokeDashoffset: 0, ease: 'none', duration: 8 }, at + 1)
+          tl.to(`${scene(n)} .sc-band`, { autoAlpha: 1, duration: 1.2 }, at + 9.2)
+          tl.to(`${scene(n)} .sc-stamp`, { autoAlpha: 1, scale: 1, duration: 1.5 }, at + 9.4)
+          if (n < 4) {
+            tl.to(scene(n), { autoAlpha: 0, duration: 2.5 }, at + 15.5)
+            tl.to(pan(`mkt${n}`), { autoAlpha: 0, y: -20, duration: 2.5 }, at + 15.5)
+          }
+        }
+        beat(1, 10)
+        beat(2, 28)
+        beat(3, 46)
+        beat(4, 64)
+        /* 最后一拍不退场：出画面时墙上留着「不计入」的判例，接住下面的
+           wrNote + CTA。/ The last beat stays on the wall, handing off to the
+           outro's note and CTA below. */
+        tl.to({}, { duration: 100 - 79 })
+      }, el)
+
+      cleanup = () => ctx.revert()
+    })()
+
+    return () => {
+      disposed = true
+      cleanup?.()
+    }
+  }, [mode])
 
   const rules = [1, 2, 3, 4] as const
 
   return (
-    <section ref={root} id="verdict" className="story-root mkt-section">
+    <section
+      ref={root}
+      id="verdict"
+      className={`story-root mkt-section ${mode === 'scrub' ? 'is-scrub' : ''}`}
+    >
       <div className="mkt-stage">
-        {/* 拍 0：标题。「我们的胜率是行情判的」这句话与身后那条走廊是同一个
-            论点的两种说法——一句是主张，一条是证据。
-            Beat 0. "The market scores our win rate" and the corridor behind it are
-            the same argument stated twice: once as a claim, once as evidence. */}
+        {/* ── 判决墙 / the wall ── */}
+        <div className="mkt-wall" aria-hidden>
+          <svg
+            viewBox="0 0 1600 900"
+            preserveAspectRatio={narrow ? 'xMidYMid meet' : 'xMidYMid slice'}
+          >
+            {/* 常驻层：三条价位线 + 信号起点。这是「法庭」本身，四个判例轮流
+                上庭。/ The permanent layer: three levels and the signal origin.
+                This is the courtroom; the four cases take turns on the stand. */}
+            <g className="mkt-base">
+              <line x1="0" y1={TP_Y} x2="1600" y2={TP_Y} stroke={V_TP} strokeOpacity="0.6" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+              <line x1="0" y1={EN_Y} x2="1600" y2={EN_Y} stroke="#3F3F46" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+              <line x1="0" y1={SL_Y} x2="1600" y2={SL_Y} stroke={V_DIM} strokeOpacity="0.55" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+              <text className="sc-label" x="1584" y={TP_Y - 14} textAnchor="end" fill={V_TP}>{t('landing.scrTp')}</text>
+              <text className="sc-label" x="1584" y={EN_Y - 14} textAnchor="end" fill="#84848E">{t('landing.scrEntry')}</text>
+              <text className="sc-label" x="1584" y={SL_Y - 14} textAnchor="end" fill={V_DIM}>{t('landing.scrSl')}</text>
+              <line x1={X0} y1={TP_Y} x2={X0} y2={SL_Y} stroke="#2A2A31" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+              <rect x={X0 - 6} y={EN_Y - 6} width="12" height="12" fill={V_TP} />
+              <text className="sc-label" x={X0 + 18} y={EN_Y + 40} fill="#84848E">{t('landing.wrSignalFired')}</text>
+            </g>
+
+            {/* 判例一：先碰止盈，记为赢 / case 1: take-profit first, a win */}
+            <g data-scene="1" className={`mkt-scene ${active === 1 ? 'sc-on' : ''}`}>
+              <rect className="sc-band" x="0" y={TP_Y - 6} width="1600" height="12" fill={V_TP} />
+              <path className="sc-path" d={D_WIN} pathLength={1} stroke={V_INK} vectorEffect="non-scaling-stroke" />
+              <rect className="sc-stamp" x={XT - 16} y={TP_Y - 16} width="32" height="32" fill={V_TP} />
+            </g>
+
+            {/* 判例二：先碰止损，记为输 / case 2: stop-loss first, a loss */}
+            <g data-scene="2" className={`mkt-scene ${active === 2 ? 'sc-on' : ''}`}>
+              <rect className="sc-band" x="0" y={SL_Y - 6} width="1600" height="12" fill={V_DIM} />
+              <path className="sc-path" d={D_LOSS} pathLength={1} stroke={V_INK} vectorEffect="non-scaling-stroke" />
+              <rect className="sc-stamp" x={XT - 16} y={SL_Y - 16} width="32" height="32" fill={V_SL} />
+            </g>
+
+            {/* 判例三：两头都碰，保守记为输 / case 3: both touched, scored a loss */}
+            <g data-scene="3" className={`mkt-scene ${active === 3 ? 'sc-on' : ''}`}>
+              <rect className="sc-band" x="0" y={TP_Y - 6} width="1600" height="12" fill={V_TP} />
+              <rect className="sc-band" x="0" y={SL_Y - 6} width="1600" height="12" fill={V_DIM} />
+              <path className="sc-path" d={D_BOTH} pathLength={1} stroke={V_INK} vectorEffect="non-scaling-stroke" />
+              <circle className="sc-stamp" cx="1198" cy={SL_Y} r="8" fill={V_INK} />
+              <circle className="sc-stamp" cx="1232" cy={TP_Y} r="8" fill={V_INK} />
+              <rect className="sc-stamp" x={XT - 16} y={430 - 16} width="32" height="32" fill={V_SL} />
+            </g>
+
+            {/* 判例四：数据中断，不计入 / case 4: the outage, excluded */}
+            <g data-scene="4" className={`mkt-scene ${active === 4 ? 'sc-on' : ''}`}>
+              <path className="sc-path" d={D_VOID} pathLength={1} stroke={V_INK} vectorEffect="non-scaling-stroke" />
+              <line className="sc-ghost" x1="780" y1={VOID_END_Y} x2={XT} y2={VOID_END_Y} stroke={V_DIM} strokeDasharray="10 14" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+              <rect className="sc-stamp sc-stamp-void" x={780 - 15} y={VOID_END_Y - 15} width="30" height="30" fill="none" stroke={V_DIM} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+            </g>
+          </svg>
+        </div>
+
+        {/* ── 文字：拍 0 立论，拍 1-4 一拍一条规则 ──
+            规则本身就是标题，尺寸提到整幕最大——墙演示，字宣判。
+            Beat 0 states the claim; beats 1-4 take one rule each. The rule IS
+            the headline at the act's largest size: the wall demonstrates, the
+            type pronounces. */}
         <div className={`story-panel panel-l ${active === 0 ? 'on' : ''}`} data-panel="mkt0">
           <div className="panel-inner">
             <p className="text-[11.5px] uppercase tracking-[0.16em] text-prism-400">{t('landing.wrEyebrow')}</p>
-            <h2 className="mt-4 font-display-xl text-[clamp(1.9rem,4.8vw,2.9rem)] text-white">
+            <h2 className="mt-4 max-w-[16ch] font-display-xl text-[clamp(1.9rem,4.8vw,3.1rem)] text-white">
               {t('landing.wrTitle')}
             </h2>
             <p className="mt-4 max-w-[46ch] text-[13.5px] leading-relaxed text-neutral-400 sm:text-[14.5px]">
@@ -73,10 +314,6 @@ export default function MarketStory() {
             </p>
           </div>
         </div>
-
-        {/* 拍 1-4：四条规则。序号用等宽体，与走廊里第几段一一对应。
-            Beats 1-4, one rule each. The numeral is monospaced and matches the
-            corridor segment you are flying through. */}
         {rules.map((n, i) => (
           <div
             key={n}
@@ -84,13 +321,10 @@ export default function MarketStory() {
             data-panel={`mkt${n}`}
           >
             <div className="panel-inner">
-              <p className="num text-[12px] tracking-[0.2em] text-neutral-500">
-                {String(n).padStart(2, '0')} / 04
-              </p>
-              <h3 className="mt-4 max-w-[20ch] font-display-xl text-[clamp(1.45rem,3.4vw,2.05rem)] leading-tight text-white">
+              <h3 className="max-w-[16ch] font-display-xl text-[clamp(1.7rem,3.6vw,2.9rem)] leading-[1.12] text-white">
                 {t(`landing.wrRule${n}`)}
               </h3>
-              <p className="mt-4 max-w-[42ch] text-[13.5px] leading-relaxed text-neutral-400 sm:text-[14px]">
+              <p className="mt-4 max-w-[44ch] text-[13.5px] leading-relaxed text-neutral-400 sm:text-[14.5px]">
                 {t(`landing.wrRule${n}Note`)}
               </p>
             </div>
@@ -114,27 +348,29 @@ export default function MarketStory() {
   )
 }
 
-/* 出走廊后的落点：相机在这里拔升脱离，页面同时交回一段安静的常规排版。
-   一路飞完四条规则之后需要一个「停」，而不是直接接上定价。
-   Where the flight lands: the camera pulls up and out here while the page hands
-   back to ordinary, quiet typography. Four rules at speed need a stop before
-   pricing, not a cut. */
+/* 出庭后的落点：判决看完，正好是「进去看实时胜率」的时刻——wrNote 把话挑明
+   （注册能看到两套互不粉饰的数据），CTA 直接接住。这一段是整页转化诉求最强
+   的位置，字号也按这个权重给。
+   Where you land after the verdicts: exactly the moment for "see the live win
+   rate". wrNote says it plainly (register and see two unpolished ledgers) and
+   the CTA catches it. This is the page's strongest conversion moment and the
+   type is sized to that weight. */
 export function MarketOutro() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   return (
     <section className="mx-auto w-full max-w-[1240px] px-5 pb-4 pt-16 sm:px-8 sm:pt-24">
-      <div className="rule-spectral mb-10">
+      <div className="rule-spectral mb-12">
         <i />
       </div>
-      <div className="grid grid-cols-1 items-end gap-8 lg:grid-cols-12">
-        <p className="max-w-[62ch] text-[14px] leading-relaxed text-neutral-400 lg:col-span-7">
+      <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-12">
+        <p className="max-w-[38ch] text-[clamp(1.25rem,2.4vw,1.85rem)] font-medium leading-snug text-neutral-200 lg:col-span-7">
           {t('landing.wrNote')}
         </p>
         <div className="lg:col-span-4 lg:col-start-9">
           <button
             onClick={() => navigate('/login?mode=register')}
-            className="btn btn-ghost h-11 w-full text-[14px]"
+            className="btn btn-primary h-14 w-full px-8 text-[15px]"
           >
             {t('landing.wrCta')}
           </button>

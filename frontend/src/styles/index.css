@@ -4168,22 +4168,21 @@ body {
    its edge. Not a patch for illegibility: the ordinary compositing matte that puts
    a subject where it belongs. */
 @media (min-width: 1024px) {
+  /* 判决墙的桌面遮罩：底部横带，不再是左侧竖列。墙的三条价位线都在画面上
+     部 71% 以内，文字面板压在左下角——把最下面一段压回底色，价位线与判决
+     闪带完整保留在上方。
+     The wall's desktop scrim is a bottom band, no longer a left column. All
+     three price lines live in the upper 71% of the frame and the text panel
+     sits lower left, so sinking the bottom strip back to the page colour keeps
+     every level line and verdict flash fully visible above it. */
   .mkt-stage::before {
     content: '';
     position: absolute;
-    inset: 0 auto 0 0;
-    /* 宽度与断点按面板的实际占位定：面板从 7vw 起、宽 26rem，在 1440 上是
-       101-517px，即视口的 7%-36%。遮罩取 62% 宽、46% 处才开始衰减（=893px 的
-       411px），保证整段正文都落在纯底色上，衰减尾巴留给走廊。
-       Width and stops are set from where the panel actually lands: starting at 7vw
-       and 26rem wide, it spans 101-517px on a 1440 viewport, or 7% to 36%. The
-       scrim runs 62% wide and holds full opacity to 46% of that (411px of 893), so
-       the whole body column sits on flat colour and the falloff belongs to the
-       corridor. */
-    width: 62%;
+    inset: auto 0 0 0;
+    height: 52%;
     z-index: -1;
     pointer-events: none;
-    background: linear-gradient(90deg, #09090b 46%, rgba(9, 9, 11, 0.9) 66%, transparent);
+    background: linear-gradient(0deg, #09090b 18%, rgba(9, 9, 11, 0.85) 42%, transparent);
   }
 }
 
@@ -4213,4 +4212,118 @@ body {
   z-index: -1;
   pointer-events: none;
   background: linear-gradient(0deg, #09090b 26%, rgba(9, 9, 11, 0.62) 64%, transparent);
+}
+
+/* ══════════════════════════════════════════════
+   判决墙 / the verdict wall (act II)
+   ──────────────────────────────────────────────
+   一面全出血的 SVG 行情图。滚动驱动时间：每拍画一条价格线，触线的瞬间整条
+   价位线闪成实色、判决章落在触点上。桌面 scrub 由 GSAP 拥有一切（.is-scrub
+   下这些过渡全部让路）；steps 模式（真机 / 减少动态）由下面的过渡完成同一套
+   编排：画线 1.5s，判决延迟 1.5s 落下。
+   A full-bleed SVG chart. Scroll drives time: each beat draws one price path,
+   and at the touch the whole level flashes solid while the stamp lands. Under
+   scrub GSAP owns everything (these transitions yield via .is-scrub); in steps
+   mode the same choreography runs on the transitions below - the path draws
+   over 1.5s and the verdict lands 1.5s in.
+   ══════════════════════════════════════════════ */
+.mkt-wall {
+  position: absolute;
+  inset: 0;
+  /* 静态微倾角：墙立在空间里而不是贴在页面上。scrub 模式下由 GSAP 接管并
+     缓慢转正。/ A slight static tilt so the wall stands in the space rather
+     than sitting on the page; under scrub GSAP takes over and squares it up. */
+  transform: perspective(1400px) rotateY(-3deg);
+  transform-origin: 62% 50%;
+}
+.mkt-wall svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.sc-label {
+  font-size: 19px;
+  letter-spacing: 0.08em;
+}
+.mkt-scene {
+  opacity: 0;
+  transition: opacity 0.45s var(--ease-out);
+}
+.mkt-scene.sc-on {
+  opacity: 1;
+}
+.sc-path {
+  fill: none;
+  stroke-width: 2.5;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 1.5s var(--ease-out);
+}
+.mkt-scene.sc-on .sc-path {
+  stroke-dashoffset: 0;
+  transition-delay: 0.25s;
+}
+.sc-band {
+  opacity: 0;
+  transition: opacity 0.35s var(--ease-out);
+}
+.mkt-scene.sc-on .sc-band {
+  opacity: 1;
+  transition-delay: 1.5s;
+}
+.sc-stamp {
+  opacity: 0;
+  transform: scale(0.5);
+  transform-origin: center;
+  transform-box: fill-box;
+  transition:
+    opacity 0.3s var(--ease-out),
+    transform 0.3s var(--ease-out);
+}
+.mkt-scene.sc-on .sc-stamp {
+  opacity: 1;
+  transform: scale(1);
+  transition-delay: 1.55s;
+}
+/* scrub：GSAP 拥有一切 / scrub: GSAP owns every value */
+.is-scrub .mkt-scene,
+.is-scrub .sc-path,
+.is-scrub .sc-band,
+.is-scrub .sc-stamp {
+  transition: none;
+}
+
+/* 桌面：文字面板压到左下角。基础规则把 .panel-l 垂直居中（top:50% + 内层
+   -50% 位移），判决墙的构图是「上 71% 画面、左下角宣判」，居中会压在价位
+   线上。/ Desktop: the panel moves to the lower left. The base rule centres
+   .panel-l vertically, but this act composes as "chart in the upper 71%,
+   pronouncement lower left" - centring would sit on the level lines. */
+@media (min-width: 1024px) {
+  .mkt-section .panel-l {
+    top: auto;
+    bottom: 8vh;
+    max-width: 38rem;
+  }
+  .mkt-section .panel-l > .panel-inner {
+    transform: none;
+  }
+}
+
+@media (max-width: 1023px) {
+  /* 真机：墙占栅格第一行（画面 / 刻度 / 文字三行制，与叙事区同构）。meet
+     模式整图完整可见；非缩放描边保证线宽不随缩小变虚。价位线文字标签在此
+     尺度下只有几像素，直接隐藏。
+     Real devices: the wall takes the grid's first row (visual, ticks, text -
+     the same three rows as the story). meet keeps the whole drawing visible
+     and non-scaling strokes keep line weight; the level labels would be a few
+     pixels tall here, so they hide. */
+  .mkt-wall {
+    position: static;
+    grid-area: 1 / 1;
+    min-height: 0;
+    transform: none;
+  }
+  .sc-label {
+    display: none;
+  }
 }
