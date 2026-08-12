@@ -276,7 +276,9 @@ export default function PhoneStory() {
             x: () => {
               const track = q('.js-track')
               const knob = q('.js-knob')
-              return track && knob ? track.clientWidth - knob.offsetWidth - track.clientWidth * 0.024 : 150
+              // 左右留白相等，故行程 = 轨道宽 − 滑块宽 − 2×左留白
+              // Equal margins, so travel = track width - knob width - twice the left inset
+              return track && knob ? track.clientWidth - knob.offsetWidth - knob.offsetLeft * 2 : 150
             },
             duration: 9,
             ease: 'none',

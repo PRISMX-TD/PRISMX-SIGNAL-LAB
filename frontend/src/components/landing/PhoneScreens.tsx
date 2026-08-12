@@ -353,7 +353,22 @@ export function ScreenOrder({ t, on }: { t: T; on: boolean }) {
           <div className="absolute inset-0 grid place-items-center text-[3.2cqw] font-semibold text-neutral-300">
             {t('order.slideToConfirm')}
           </div>
-          <div className="js-knob absolute left-[1.4cqw] top-1/2 grid h-[11cqw] w-[11cqw] -translate-y-1/2 place-items-center rounded-[3cqw] bg-prism-600 text-[4.6cqw] font-bold text-white">
+          {/* 垂直居中用 top 定位而不是 -translate-y-1/2：transform 是单一属性，
+              而滑块的横向动画要写 transform: translateX(...)，会把用于居中的那半个
+              transform 整个覆盖掉——滑块因此从轨道里掉出去（steps 模式实测）。
+              用 top:50% 配负 margin（滑块高的一半）而不是固定的上下内缩：top 的百分比是相对
+              内边距框算的，而轨道有 1px 边框，固定内缩会让上下间隙差 2px（实测 7/5）。
+              负 margin 与边框无关，永远精确对称。
+              Centred with top rather than -translate-y-1/2: transform is a single
+              property, and the knob's horizontal animation writes
+              transform: translateX(...), which wipes out the half of the transform
+              doing the centring - measured in steps mode, the knob fell out of the
+              track. Using top:50% with a negative margin of half the knob height rather than a
+              fixed inset: percentage top resolves against the padding box, and the
+              track has a 1px border, so a fixed inset left the gaps 2px apart
+              (measured 7 against 5). A negative margin is border-agnostic and always
+              exactly symmetric. */}
+          <div className="js-knob absolute left-[1.5cqw] top-1/2 -mt-[5.5cqw] grid h-[11cqw] w-[11cqw] place-items-center rounded-[3cqw] bg-prism-600 text-[4.6cqw] font-bold text-white">
             <span aria-hidden>››</span>
           </div>
         </div>

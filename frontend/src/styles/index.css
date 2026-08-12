@@ -3630,8 +3630,25 @@ body {
 .story-root:not(.is-scrub) .js-knob {
   transition: transform 1.1s var(--ease-in-out) 0.35s;
 }
+/* 行程用 cqw 而不是写死的 150px。轨道宽 = 100cqw 减去 .scr 左右各 5cqw 的内边距
+   = 90cqw；滑块宽 11cqw、左右各留 1.5cqw，故行程 = 90 − 11 − 3 = 76cqw。
+   此前 --knob-travel 从未被定义，一直在吃 150px 的兜底值——桌面上轨道约 250px
+   时勉强合适，全出血后轨道有 351px，滑块只滑到一半就停了。用 cqw 之后它随容器
+   自动缩放，两端都不需要再调。
+   Travel in cqw rather than a hardcoded 150px. The track is 100cqw minus .scr's
+   5cqw of padding per side = 90cqw; the knob is 11cqw with 1.5cqw of margin each
+   side, so the travel is 90 - 11 - 3 = 76cqw. --knob-travel was never actually
+   defined, so the 150px fallback was always in play - passable on a ~250px desktop
+   track, but the full-bleed mobile track is 351px and the knob stopped halfway.
+   In cqw it scales with the container and needs no per-breakpoint tuning. */
 .story-root:not(.is-scrub) .scr.on .js-knob {
-  transform: translateX(var(--knob-travel, 150px));
+  /* 减 2px 是轨道左右两条 1px 边框：cqw 按外宽算，而滑块的 left 是相对内边距框
+     定位的，不扣掉边框会让终点的右间隙比起点的左间隙少 2px（实测 4.85 vs 6.85）。
+     The 2px subtracts the track's two 1px borders: cqw resolves against the outer
+     width while the knob's left is positioned against the padding box, so without
+     it the right gap at the end lands 2px short of the left gap at the start
+     (measured 4.85 against 6.85). */
+  transform: translateX(calc(var(--knob-travel, 76cqw) - 2px));
 }
 /* 填充层与滑块同步推进 / the fill advances in step with the knob */
 .story-root:not(.is-scrub) .js-fill {
