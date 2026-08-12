@@ -4044,7 +4044,15 @@ body {
 .landing-space-gl {
   inset: 0;
 }
+/* 基线层同样不用格子：一道自下而上的柔光地平，与 3D 版的扫光地面同一种
+   视觉语言。降级应该看起来更简单，而不是换一套语言。
+   The baseline carries no grid either, just a soft bottom-up horizon wash in the
+   same visual language as the 3D sweep. Degrading should look simpler, not
+   different. */
 .landing-space-grid {
+  background:
+    radial-gradient(120% 62% at 50% 104%, rgba(255, 255, 255, 0.07), transparent 70%),
+    radial-gradient(80% 40% at 50% 100%, rgba(255, 255, 255, 0.05), transparent 72%);
   transition: opacity 0.9s var(--ease-out);
 }
 .landing-space-gl {

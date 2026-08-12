@@ -71,9 +71,12 @@ export default function LandingSpaceLayer() {
 
   return (
     <div className="landing-space" aria-hidden>
-      {/* 基线网格：无 JS / 无 WebGL / 减少动态时的版面
-          Baseline grid: the layout with no JS, no WebGL, or reduced motion */}
-      <div className="landing-space-grid bg-prism-grid bg-[size:46px_46px]" />
+      {/* 基线层：无 JS / 无 WebGL / 减少动态时的版面。与 3D 版同样不用格子，
+          只留一道柔光地平——降级不该换一种视觉语言。
+          The baseline layout for no JS, no WebGL or reduced motion. Like the 3D
+          version it carries no grid, just a soft horizon wash: degrading should
+          not switch visual languages. */}
+      <div className="landing-space-grid" />
       <div ref={host} className="landing-space-gl" />
       {/* 上下渐隐：导航与页脚下方的线条必须让位，否则文字压在网格上。
           Top and bottom fades so lines yield under the nav and the footer rather
