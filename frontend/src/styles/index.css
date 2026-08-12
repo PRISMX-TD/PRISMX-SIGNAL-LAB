@@ -4469,3 +4469,25 @@ body {
   line-height: 1.35;
   color: #84848e;
 }
+
+/* 背景创意元素层 / the creative backdrop motif layer
+   固定全屏，压在 3D 画布之上、页面内容之下。纯装饰，不接指针事件。
+   Fixed full-screen, above the 3D canvas and below page content. Purely
+   decorative, takes no pointer events. */
+.backdrop-art {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.backdrop-art svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.backdrop-art text {
+  font-family: inherit;
+}
+.backdrop-art .tnum,
+.backdrop-art .tnum text {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}

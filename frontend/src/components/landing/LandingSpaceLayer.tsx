@@ -25,31 +25,35 @@
 // after merging, pixel ratio capped at 1.5, and the clock stops when scrolling
 // does. The expensive phone body still loads on desktop only.
 import { useEffect, useRef, useState } from 'react'
-import { createLandingSpace, type Backdrop, type SpaceHandle } from './LandingSpace'
+import { createLandingSpace, type SpaceHandle } from './LandingSpace'
+import BackdropArt, { type ArtVariant } from './BackdropArt'
 
 /* 背景变体切换器（临时评审工具）。
-   hero 下方那块区域连续被否了两版，根因是我看不见页面：探针能量到「有没有、
-   多亮、在哪」，量不到「好不好看」，只能一轮猜一个。四种处理同时建出来、
-   在页面上实时翻看，把串行盲猜换成并行比较。
-   只在 URL 带 ?bg 时出现，选择存在 localStorage，定稿后整块删除。
-   A temporary review tool. The region under the hero was rejected twice because
-   probes can verify presence, brightness and position but never whether
-   something looks good, forcing one guess per round. Building all four and
-   flipping between them live makes it a parallel choice. It only appears with
-   ?bg in the URL, remembers the choice in localStorage, and gets deleted once a
-   direction is picked. */
-const OPTIONS: { id: Backdrop; label: string; hint: string }[] = [
-  { id: 'none', label: '无', hint: '纯底色，只剩手机自己的接触阴影' },
-  { id: 'sweep', label: '地面扫光', hint: '一团柔光落在地上，随距离衰减' },
-  { id: 'horizon', label: '远方地平线', hint: '没有地面，一条横贯画面的大气光带' },
-  { id: 'veil', label: '舞台光幕', hint: '光从上方洒下，越往下越暗' },
+   前一版这里放的四个选项全是**光的分布**（网格/扫光/地平线/光幕），换的只是
+   亮度落在哪里——四个一起被否，因为要的从来不是「空得好看一点」，是那里应该
+   有**东西**。现在换成四个真正的元素（见 BackdropArt.tsx），WebGL 照明一律
+   关掉：既然不要光，就别在元素底下再垫一层光。
+   只在 URL 带 ?bg 时出现，选择存 localStorage，定稿后整块删除。
+   A temporary review tool. Its previous four options were all distributions of
+   light (grid, sweep, horizon, wash) differing only in where the brightness fell,
+   and all four were rejected together - what was wanted was never a prettier
+   emptiness but something actually being there. They are replaced by four real
+   motifs (see BackdropArt.tsx) with the WebGL lighting switched off throughout:
+   if light is not wanted, do not bed the motifs on a layer of it. Appears only
+   with ?bg in the URL, remembers the choice, and is deleted once a direction is
+   picked. */
+const OPTIONS: { id: ArtVariant; label: string; hint: string }[] = [
+  { id: 'none', label: '无', hint: '纯底色，什么都不放' },
+  { id: 'prism', label: '棱镜折射', hint: '一道光射入棱镜，裂成三条紫色谱带横穿画面' },
+  { id: 'scale', label: '价格标尺', hint: '左缘竖轴 + 真实刻度，止盈/入场/止损三条贯穿线' },
+  { id: 'numerals', label: '巨型价格', hint: '三个真实价位，巨大的描边数字从左缘出血' },
+  { id: 'candles', label: 'K 线天际线', hint: '底缘一排蜡烛剪影，产品自己的语言当风景' },
 ]
 
 export default function LandingSpaceLayer() {
   const host = useRef<HTMLDivElement>(null)
   const handleRef = useRef<SpaceHandle | null>(null)
-  const variantRef = useRef<Backdrop>('sweep')
-  const [variant, setVariant] = useState<Backdrop>('sweep')
+  const [variant, setVariant] = useState<ArtVariant>('prism')
   const [picker, setPicker] = useState(false)
 
   /* 初值在 effect 里读而不是在 useState 初始化器里读：初始化器在客户端首次
@@ -59,16 +63,11 @@ export default function LandingSpaceLayer() {
      output, which trips a hydration warning. */
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has('bg')) setPicker(true)
-    const saved = localStorage.getItem('slBg') as Backdrop | null
-    if (saved && OPTIONS.some((o) => o.id === saved)) {
-      variantRef.current = saved
-      setVariant(saved)
-    }
+    const saved = localStorage.getItem('slBg') as ArtVariant | null
+    if (saved && OPTIONS.some((o) => o.id === saved)) setVariant(saved)
   }, [])
 
   useEffect(() => {
-    variantRef.current = variant
-    handleRef.current?.setBackdrop(variant)
     try {
       localStorage.setItem('slBg', variant)
     } catch {
@@ -112,7 +111,9 @@ export default function LandingSpaceLayer() {
            The probe is installed only here, the moment this instance is known to
            be the adopted one. */
         if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__space = handle.debug
-        handle.setBackdrop(variantRef.current)
+        /* 照明一律关：元素底下不再垫光。
+           Lighting stays off: the motifs are not bedded on a wash. */
+        handle.setBackdrop('none')
         document.documentElement.classList.add('space-on')
       }
     })()
@@ -141,6 +142,7 @@ export default function LandingSpaceLayer() {
       {/* 上下渐隐：导航与页脚下方的线条必须让位，否则文字压在网格上。
           Top and bottom fades so lines yield under the nav and the footer rather
           than sitting behind type. */}
+      <BackdropArt variant={variant} />
       <div className="landing-space-fade t" />
       <div className="landing-space-fade b" />
     </div>
