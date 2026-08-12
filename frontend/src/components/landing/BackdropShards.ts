@@ -145,12 +145,57 @@ export function createBackdropShards(
   const CAM_Z0 = 1250 // 第一幕机位，文案可见的那一幕 / act I camera, where the copy lives
   const TAN_H = 0.489 // fov 34 竖直、16:9 换算的水平半角 / horizontal half-angle
   const clearCopy = (x: number, z: number, r: number) => {
+    /* 留边要用**实际最远顶点**而不是标称半径：顶点半径是 r0 × (0.5 + rnd×0.75)，
+       最远能到 r0 × 1.25。拿 r0 当留边，最外那圈顶点就有 25% 的余量没算进去——
+       实测文案区因此仍有 34 的亮度渗入。
+       The margin has to use the actual furthest vertex rather than the nominal
+       radius: vertex radii are r0 times 0.5 plus up to 0.75, reaching r0 x 1.25.
+       Using r0 leaves a quarter of the outermost ring unaccounted for, which
+       measured as 34 of luminance still reaching the copy column. */
+    r *= 1.3
     const halfW = Math.max(1, (CAM_Z0 - z) * TAN_H)
     const lo = -0.89 * halfW - r
     const hi = -0.3 * halfW + r
     if (x > lo && x < hi) return x - lo < hi - x ? lo : hi
     return x
   }
+
+  /* ══ 按屏幕分带放置 ══
+     截图里中间整块是空的，而且是**构造上**就空：原来的放置只有「左 / 右」两支，
+     右支从 x=+380 起，在正机位下半幅约 738，那已经是屏幕 75%——落在手机后面。
+     屏幕 35%-58% 这条带从来没被分配过。
+     改成按屏幕横向分带取样，再按深度换算回世界坐标（x = (2f−1) × halfW）：
+       mid   0.38-0.56   文案列右缘到手机左缘之间，就是空的那一块
+       right 0.80-1.05   手机之后到画面外
+       left  -0.05-0.06  左缘外沿
+     中间带的碎片必须小：半幅 738 时一片 r=600 的碎片放在 38% 处会一路盖回文案列，
+     被 clearCopy 推出去，等于白放。
+     Placed by screen band. The middle of the frame was empty BY CONSTRUCTION: the
+     old placement had only a left and a right branch, and the right one started at
+     x=+380, which against a half-width of about 738 is already 75% of the screen -
+     behind the phone. The 35-58% band was never assigned to anything. Sampling is
+     now done in screen fractions and converted back per depth via x = (2f-1) *
+     halfW. Shards in the middle band have to be small: at a half-width of 738 a
+     600-radius shard placed at 38% reaches back across the copy column and gets
+     pushed out by clearCopy, which wastes it. */
+  /* 中间带的起点由几何反推，不是猜的：一片半径 r 的碎片不越过文案列右缘
+     （−0.30×halfW），中心至少要在 −0.30×halfW + r。近处 halfW≈807、r≈200 时
+     换算成屏幕 f ≥ 0.474。上一版把起点放在 0.38，于是整条带的碎片全部被
+     clearCopy 推回同一个位置——中间看着有东西，其实全挤在一条线上，而且实测
+     仍有 34 的亮度渗进文案列。深处 halfW 变大，同一个约束自动放宽。
+     The middle band's left limit is derived rather than guessed: for a shard of
+     radius r to clear the copy column's right edge at -0.30 x halfW its centre must
+     sit at or beyond -0.30 x halfW + r, which for a near half-width of about 807
+     and r about 200 works out to a screen fraction of 0.474. The previous 0.38
+     start meant clearCopy pushed the whole band back to one position - the middle
+     looked occupied while everything was stacked on a single line, and 34 of
+     luminance still bled into the copy column. At depth the half-width grows and
+     the same constraint relaxes on its own. */
+  const BANDS: { fx: [number, number]; r: [number, number] }[] = [
+    { fx: [0.47, 0.62], r: [90, 150] },
+    { fx: [0.8, 1.05], r: [150, 280] },
+    { fx: [-0.05, 0.06], r: [150, 260] },
+  ]
 
   const rnd = lcg(31337)
   /* 十九片，铺在 -260 到 -3000 的纵深里。横向偏右与外围：hero 文案列实测占视口
@@ -166,7 +211,10 @@ export function createBackdropShards(
        angle jittered. A regular polygon reads as fake instantly; a shard is
        convincing precisely because no two are alike. */
     const n = 5 + Math.floor(rnd() * 3)
-    const r0 = 120 + rnd() * 260 + t * 220
+    /* 分带轮转，中间带占比最高（0,1,2,0,1,0 的循环里 mid 出现两次）
+       Round-robin across the bands with the middle weighted highest. */
+    const band = BANDS[[0, 1, 2, 0, 1, 0][i % 6]]
+    const r0 = band.r[0] + rnd() * (band.r[1] - band.r[0]) + t * 180
     const shape = new THREE.Shape()
     for (let k = 0; k < n; k++) {
       const a = (k / n) * Math.PI * 2 + (rnd() - 0.5) * 0.75
@@ -182,11 +230,18 @@ export function createBackdropShards(
        Thickness is what creates arrises. It is very thin at 8 to 22 units, but that
        narrow band of side faces is what catches the environment and forms the lit
        edge that reads as glass. */
+    /* 厚度 8-22 收到 3-8，倒角同步收细。原来的厚度让侧面那一圈在屏幕上有明显
+       宽度，正面轮廓与背面轮廓分成两条线，读起来是「有厚度的框」而不是「一片
+       薄玻璃」。收薄之后两条轮廓叠成一条，才是碎玻璃的样子。
+       Thickness drops from 8-22 to 3-8 with the bevel narrowing to match. The old
+       depth gave the side band visible width on screen, splitting the front and
+       back outlines into two separate lines that read as a thick frame rather than
+       a thin shard. Thin enough, the two outlines collapse into one. */
     const geo = new THREE.ExtrudeGeometry(shape, {
-      depth: 8 + rnd() * 14,
+      depth: 3 + rnd() * 5,
       bevelEnabled: true,
-      bevelThickness: 1.6,
-      bevelSize: 1.6,
+      bevelThickness: 0.7,
+      bevelSize: 0.7,
       bevelSegments: 1,
     })
     geo.center()
@@ -197,18 +252,32 @@ export function createBackdropShards(
        一片碎片会糊成一团线。/ A hairline edge, with EdgesGeometry thresholded at 18
        degrees: below that even the bevel's transition edges get drawn and a shard
        turns into a tangle of lines. */
+    /* 边线：不透明度从 0.34-0.64 砍到 0.14-0.30，EdgesGeometry 阈值从 18° 提到
+       42°。阈值决定哪些棱会被画出来——18° 会把倒角的过渡边也算进去，于是每条
+       轮廓其实是三四条挨着的线，看上去就粗。42° 只留真正的折角。
+       Edges: opacity cut from 0.34-0.64 down to 0.14-0.30 and the EdgesGeometry
+       threshold raised from 18 to 42 degrees. That threshold decides which arrises
+       get drawn, and at 18 the bevel's transition edges qualify too, so every
+       outline was really three or four adjacent lines and read as heavy. At 42 only
+       genuine creases survive. */
     const edgeMat = new THREE.LineBasicMaterial({
       color: rnd() > 0.68 ? 0xb9a6ff : 0x8b6cff,
       transparent: true,
-      opacity: 0.34 + (1 - t) * 0.3,
+      opacity: 0.14 + (1 - t) * 0.16,
     })
-    o.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo, 18), edgeMat))
+    o.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo, 42), edgeMat))
 
-    const side = rnd() > 0.34 ? 1 : -1
-    const spread = 700 + t * 1900
-    const x = side > 0 ? 380 + rnd() * spread : -880 - rnd() * spread * 0.7
-    const y = -520 + rnd() * 1200 - t * 140
     const z = -260 - t * 2740
+    const halfW = Math.max(1, (CAM_Z0 - z) * TAN_H)
+    const f = band.fx[0] + rnd() * (band.fx[1] - band.fx[0])
+    const x = (f * 2 - 1) * halfW
+    /* 纵向也按屏幕铺：空的那块从画面 20% 一直到 82%，只靠固定的世界坐标范围
+       在深处会全部挤到中线附近。/ Vertical placement is also in screen terms: the
+       empty region runs from 20% to 82% of the frame, and a fixed world-space range
+       would bunch everything near the centre line at depth. */
+    const halfH = Math.max(1, (CAM_Z0 - z) * 0.3057)
+    const fy = 0.2 + rnd() * 0.62
+    const y = 60 + (0.5 - fy) * 2 * halfH
     o.position.set(clearCopy(x, z, r0), y, z)
     o.rotation.set(rnd() * 3.14, rnd() * 3.14, rnd() * 3.14)
     group.add(o)
