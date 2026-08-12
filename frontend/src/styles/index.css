@@ -4043,23 +4043,27 @@ body {
   /* 幕计数：横跨全宽的分段进度条，占栅格第二行。
      Scene ticks: a full-width segmented progress bar occupying the second row. */
   .story-ticks {
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: auto;
-    bottom: var(--m-bot);
+    position: static;
+    grid-area: 2 / 1;
     display: flex;
     flex-direction: row;
     gap: 4px;
     transform: none;
     padding: 0 5vw;
+  }
+  .story-stage .story-ticks {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: var(--m-bot);
     z-index: 3;
     transition: opacity 0.35s var(--ease-out);
   }
   /* 第一幕不显示进度：访客还不知道这里有一段五幕的叙事，先给刻度是没有指涉的。
      Hidden on the first scene: nothing has progressed yet, and a progress bar
      before the visitor knows a sequence exists refers to nothing. */
-  .story-root[data-active='0'] .story-ticks {
+  .story-root[data-active='0'] .story-stage .story-ticks {
     opacity: 0;
   }
   .js-tick {
@@ -4068,18 +4072,43 @@ body {
     flex: 1 1 0;
   }
 
+  /* .story-panel 与 .story-ticks 是叙事区与判定幕**共用**的类。上一版把它们直接
+     改成绝对定位 + bottom: calc(var(--m-bot) + …)，而 --m-bot 只声明在
+     .story-stage 上——判定幕里那个变量不存在，整条 bottom 声明因此失效，面板
+     跌回 top: 0，标题直接顶到固定导航下面被挡住（实测面板矩形只比舞台顶低
+     14px，而舞台的 padding-top 是 77.9px，说明 padding 也被绕开了：栅格容器的
+     绝对定位子元素以 padding box 为包含块，top: 0 就是贴着容器顶）。
+     所以通用规则恢复成栅格布局（判定幕原样），绝对定位只收进 .story-stage。
+     .story-panel and .story-ticks are SHARED by the story section and the verdict
+     act. The previous pass switched them straight to absolute with a bottom of
+     calc(var(--m-bot) + …), but --m-bot is declared only on .story-stage, so inside
+     the verdict act the variable does not exist, the whole bottom declaration is
+     invalid, and the panel falls back to top: 0 with its headline hidden under the
+     fixed nav. Measured, the panel's rect sat just 14px below the stage top against
+     a padding-top of 77.9px, confirming the padding was bypassed too: an absolutely
+     positioned child of a grid container resolves against the padding box, so top:
+     0 means flush with the container. The shared rules are restored to the grid
+     layout the verdict act still needs, and the absolute positioning is scoped to
+     .story-stage. */
   .story-panel {
+    position: static;
+    grid-area: 3 / 1;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    padding: 0 5vw;
+    background: none;
+  }
+  .story-stage .story-panel {
     position: absolute;
     left: 0;
     right: auto;
     top: auto;
     bottom: calc(var(--m-bot) + 58px);
     width: 100%;
-    padding: 0 5vw;
-    background: none;
     z-index: 3;
   }
-  .story-panel > .panel-inner {
+  .story-stage .story-panel > .panel-inner {
     transform: none;
   }
   /* 合规声明：紧贴刻度之上的一行小字。它标注的是上方那块界面，留在这里最合理。
@@ -4660,7 +4689,7 @@ body {
    HEIGHT rather than width: width sets the type size through cqw, height sets the
    breathing room. */
 @media (max-width: 1023px) and (max-height: 730px) {
-  .story-panel {
+  .story-stage .story-panel {
     bottom: calc(var(--m-bot) + 40px);
   }
   [data-scr='0'] {
