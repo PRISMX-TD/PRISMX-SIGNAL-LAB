@@ -3517,7 +3517,33 @@ body {
   display: flex;
   gap: 1cqw;
   padding: 1.6cqw;
-  border-radius: 5cqw;
+  /* 下方两角与屏幕圆角**同心**：内圆角 = 屏幕圆角 − 内缩距离。
+     此前四角统一 5cqw，而屏幕底部圆角远大于此，于是 Tab 栏与屏幕边缘之间的
+     间距在直边处窄、到拐角处骤然张开——那道忽宽忽窄的缝就是「看着别扭」的
+     来源。取同心值后两条弧线共圆心，缝隙处处等宽。
+     上方两角收到 3cqw 不只是造型：CSS 规范规定同一条边上的两个圆角之和超过
+     边长时，浏览器会把**所有**圆角按比例缩小。Tab 栏高约 14.5cqw，若上角仍取
+     5cqw，则 5 + 11 = 16 > 14.5，下角会被连带缩水，同心关系就破了。
+     The two bottom corners are concentric with the screen's: inner radius equals
+     the screen radius minus the inset. All four were previously 5cqw while the
+     screen's bottom corners are far larger, so the gap between the bar and the
+     screen edge stayed narrow along the straight edges and flared open at the
+     corners - that varying gap is exactly what reads as uncomfortable. Concentric
+     radii put both arcs on one centre and hold the gap constant.
+     Pulling the top corners to 3cqw is not styling: per CSS spec, when two radii
+     on the same side exceed that side's length the browser scales down ALL radii
+     proportionally. The bar is about 14.5cqw tall, so leaving the top at 5cqw
+     would give 5 + 11 = 16 > 14.5 and shrink the bottom corners too, breaking the
+     concentricity. */
+  border-radius: 3cqw 3cqw 7cqw 7cqw;
+  /* 裁掉溢出的子元素：激活态的紫色 Tab 距边框仅 1.6cqw，在 7-11cqw 的圆角处
+     会探到弧线外面。交给 overflow 裁剪，紫块的转角自动贴合外框曲线，不必再为
+     每个 Tab 单独算一遍同心圆角。
+     Clip overflowing children: the active violet tab sits only 1.6cqw from the
+     edge and would poke outside a 7-11cqw corner arc. Letting overflow clip it
+     makes the violet block follow the outer curve automatically, with no need to
+     compute concentric radii again for each tab. */
+  overflow: hidden;
   background: rgba(16, 16, 18, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
@@ -3725,5 +3751,14 @@ body {
   border-radius: 48px;
   box-shadow: none;
   background: #06060a;
+}
+/* GL 模式的屏幕圆角由机身开孔决定（世界坐标 9.4mm ÷ 0.17737 ≈ 53 DOM px
+   ≈ 14cqw），比 CSS 回退模式的约 10cqw 更大，Tab 栏的同心值随之从 7cqw 提到
+   11cqw。/ In GL mode the screen's corner radius comes from the body aperture
+   (9.4mm world / 0.17737 is about 53 DOM px, roughly 14cqw), larger than the
+   CSS fallback's ~10cqw, so the bar's concentric radius rises from 7cqw to
+   11cqw to match. */
+.gl-on .pc-tabs {
+  border-radius: 3cqw 3cqw 11cqw 11cqw;
 }
 
