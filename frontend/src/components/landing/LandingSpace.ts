@@ -120,12 +120,6 @@ const SEG_LEN = 880
 const Z0 = -1500
 const CAND_DZ = 66
 const CAND_PER_SEG = 11
-/* 肋架间距：每两根蜡烛一道贯通上下的矩形框。扁平的上下两片网格读不出「隧道」，
-   而一道道从身边掠过的框读得出——速度感和体量感几乎全部来自这个。
-   Rib spacing: a full rectangular frame bridging floor and ceiling every two
-   candles. Two flat grids above and below do not read as a tunnel; frames sweeping
-   past you do, and nearly all of the sense of speed and scale comes from them. */
-const RIB_DZ = 132
 /* 蜡烛从 9 加宽到 16、影线 1.6 加到 3：飞行中它们大多在 400-900 单位外，9 单位
    宽在 256px 的取样里连一个像素都占不满。/ Candles widened from 9 to 16 and wicks
    from 1.6 to 3: in flight they mostly sit 400-900 units out, where 9 units did not
@@ -288,6 +282,18 @@ export async function createLandingSpace(opts: {
      里」的全部依据就是这张地面的透视收敛。
      A plane plus a set of hairlines. Not decoration: throughout act I this grid's
      perspective convergence is the entire basis for reading the scene as a place. */
+  /* 全场材质登记表。第一幕只该有地面与手机，判定幕只该有走廊——同屏出现两套
+     大型网格就是截图里那片眼花的直接来源。所以两者按 route 互相让位：不是靠
+     距离和雾去「碰巧看不见」（那正是第一张截图里走廊变成一个悬空线框盒子的
+     原因），而是明确地开关。
+     A material registry. Act I should hold only the ground and the phone, and the
+     verdict act only the corridor: two large grids sharing a frame is the direct
+     source of the clutter in the screenshot. So they yield to each other by route -
+     explicitly, rather than relying on distance and fog to happen to hide one, which
+     is exactly how the corridor became a wireframe box floating beside the phone in
+     the first screenshot. */
+  const gridMats: TH.LineBasicMaterial[] = []
+  const corridorMats: { m: TH.Material; o: number }[] = []
   const gridGroup = new THREE.Group()
   {
     const pts: number[] = []
@@ -305,9 +311,9 @@ export async function createLandingSpace(opts: {
     for (let z = ZA; z >= ZB; z -= 150) pts.push(-X, FLOOR_Y, z, X, FLOOR_Y, z)
     const g = new THREE.BufferGeometry()
     g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
-    gridGroup.add(
-      new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: C_GRID, transparent: true, opacity: 0.6 }))
-    )
+    const gm = new THREE.LineBasicMaterial({ color: C_GRID, transparent: true, opacity: 0.6 })
+    gridMats.push(gm)
+    gridGroup.add(new THREE.LineSegments(g, gm))
   }
   scene.add(gridGroup)
 
@@ -344,24 +350,42 @@ export async function createLandingSpace(opts: {
      the frame and the enclosure works - this is the single variable that decides
      whether the corridor metaphor holds. The candles stay 16 wide, so the image is
      flying between two vast grids with one thin thread down the middle. */
+  /* ══ 减线 ══
+     上一版每个平面有 7 条纵轨、每 66 单位一根横档，再加每 132 一道肋架，两个
+     平面叠起来是五套互相冲突的线阵——截图里读到的是「眼花」，不是「震撼」。
+     震撼来自一个巨大而简单的形，加上周围的空；复杂只会稀释它。
+     现在每个平面只剩**两条纵轨**（像夜路的两条边线，两条平行线在透视里就已经
+     是一个平面），横档拉稀到 220，肋架整个退化成「每段一道门」。整条走廊的
+     线数降到约四分之一，蜡烛因此从背景噪声里浮出来成为唯一的纹理。
+     The previous version gave each plane seven longitudinal rails plus a rung every
+     66 units, with a rib every 132 on top - two planes' worth stacking into five
+     competing line fields. The screenshot reads as clutter, not awe. Awe comes from
+     one enormous simple form surrounded by emptiness; complexity only dilutes it.
+     Each plane now keeps just TWO rails - like the edge lines of a night road, two
+     parallel lines already being a plane once perspective has them - rungs thin out
+     to every 220, and the ribs collapse into one gate per segment. Line count drops
+     to roughly a quarter, which lets the candles surface as the only texture. */
   const railHalf = 320
-  const RAIL_X = [-320, -170, -80, 0, 80, 170, 320]
+  const RAIL_X = [-320, 320]
   const pushPlane = (into: number[], y: number, zA: number, zB: number) => {
     for (const x of RAIL_X) into.push(x, y, zA, x, y, zB)
-    for (let z = zA; z >= zB; z -= 66) into.push(-railHalf, y, z, railHalf, y, z)
+    for (let z = zA - 110; z >= zB; z -= 220) into.push(-railHalf, y, z, railHalf, y, z)
   }
   /* 肋架：每 RIB_DZ 一道贯通上下的矩形框，把「上下两片网格」变成「一条隧道」。
      它同时承担速度感——飞行中真正从身边掠过、能被数出来的就是这些框。
      A rib every RIB_DZ: a rectangle bridging ceiling and floor that turns two flat
      grids into a tunnel, and carries the sense of speed, since these are the things
      that actually sweep past and can be counted. */
-  const pushRibs = (into: number[], tpY: number, slY: number, zA: number, zB: number) => {
-    for (let z = zA; z >= zB; z -= RIB_DZ) {
-      into.push(-railHalf, slY, z, -railHalf, tpY, z)
-      into.push(railHalf, slY, z, railHalf, tpY, z)
-      into.push(-railHalf, tpY, z, railHalf, tpY, z)
-      into.push(-railHalf, slY, z, railHalf, slY, z)
-    }
+  /* 门：每段开头一道完整矩形。四段 = 四道门，穿过一道就是一个新信号开始——
+     数量少到可以被数出来，所以它是事件；每 132 一道的时候它只是纹理。
+     A gate: one complete rectangle at each segment's start. Four segments, four
+     gates, and passing one means a new signal begins - few enough to be counted, so
+     each is an event. At one every 132 units they were merely texture. */
+  const pushGate = (into: number[], tpY: number, slY: number, z: number) => {
+    into.push(-railHalf, slY, z, -railHalf, tpY, z)
+    into.push(railHalf, slY, z, railHalf, tpY, z)
+    into.push(-railHalf, tpY, z, railHalf, tpY, z)
+    into.push(-railHalf, slY, z, railHalf, slY, z)
   }
 
   SEGMENTS.forEach((seg, si) => {
@@ -377,11 +401,11 @@ export async function createLandingSpace(opts: {
          with a hole where the candles should be. */
       pushPlane(voidPts, tpY, zA + 14, zB)
       pushPlane(voidPts, slY, zA + 14, zB)
-      pushRibs(voidRibPts, tpY, slY, zA + 14, zB)
+      pushGate(voidRibPts, tpY, slY, zA + 14)
     } else {
       pushPlane(tpPts, tpY, zA + 14, zB)
       pushPlane(slPts, slY, zA + 14, zB)
-      pushRibs(ribPts, tpY, slY, zA + 14, zB)
+      pushGate(ribPts, tpY, slY, zA + 14)
     }
     entryPts.push(0, seg.base, zA + 14, 0, seg.base, zB)
     // 段首一道竖档：新信号从这里开始 / a vertical marker where each signal starts
@@ -433,14 +457,19 @@ export async function createLandingSpace(opts: {
     const zB = zA - 1500
     pushPlane(tpPts, last.base + last.tp, zA, zB)
     pushPlane(slPts, last.base + last.sl, zA, zB)
-    pushRibs(ribPts, last.base + last.tp, last.base + last.sl, zA, zB)
     entryPts.push(0, last.base, zA, 0, last.base, zB)
   }
 
-  const flat = (color: number, opacity = 1) =>
-    new THREE.MeshBasicMaterial({ color, transparent: opacity < 1, opacity })
-  const line = (color: number, opacity: number) =>
-    new THREE.LineBasicMaterial({ color, transparent: true, opacity })
+  const flat = (color: number, opacity = 1) => {
+    const m = new THREE.MeshBasicMaterial({ color, transparent: true, opacity })
+    corridorMats.push({ m, o: opacity })
+    return m
+  }
+  const line = (color: number, opacity: number) => {
+    const m = new THREE.LineBasicMaterial({ color, transparent: true, opacity })
+    corridorMats.push({ m, o: opacity })
+    return m
+  }
 
   const addMerged = (geos: TH.BufferGeometry[], mat: TH.Material, edge?: number) => {
     if (!geos.length) return
@@ -468,8 +497,15 @@ export async function createLandingSpace(opts: {
   addLines(tpPts, line(C_TP, 1))
   addLines(slPts, line(C_SL, 0.92))
   addLines(ribPts, line(C_ENTRY, 0.72))
-  addLines(voidPts, line(C_SL, 0.3))
-  addLines(voidRibPts, line(C_SL, 0.2))
+  /* 中断段的轨从 0.3 提到 0.52。减线之后实测这一拍覆盖率从 27.2% 塌到 6.8%，
+     成了一个洞——而这条规则说的是「不计入统计」，不是「不存在」。通道照旧
+     划出，只是比别的段暗、且中间缺一段蜡烛。
+     The outage segment's rails go from 0.3 to 0.52. After the line cut this beat
+     measured a collapse from 27.2% coverage to 6.8%, turning into a hole - but the
+     rule says excluded from the statistics, not absent. The channel is still drawn,
+     merely dimmer than its neighbours and missing a run of candles. */
+  addLines(voidPts, line(C_SL, 0.52))
+  addLines(voidRibPts, line(C_SL, 0.42))
   addLines(entryPts, line(C_ENTRY, 0.85))
   addLines(railPts, line(C_ENTRY, 0.7))
   corridor.position.y = CORRIDOR_Y
@@ -516,17 +552,37 @@ export async function createLandingSpace(opts: {
        behind it: 40.9% coverage inside the panel box against 16% for the rest of
        the frame, a 2:1 left/right pixel split. Mirrored, the corridor moves right
        and the left is left for type. Not a compositional preference, legibility. */
-    { r: 1.12, p: [-52, 452, -1400], l: [44, 424, -2010], fov: 50 },
+    /* 偏航从 9.1° 收到 5°，fov 从 52 收到 46。
+       正对着看的隧道最有纪念碑感，偏得越多越像「从旁边路过一个结构」；而宽
+       视场只是把更多东西塞进同一帧，与「要震撼不要复杂」正好相反。左侧文字
+       靠那道近乎实色的遮罩护住就够了，不必再靠把主体推开来让位。
+       Yaw drops from 9.1 to 5 degrees and the FOV from 52 to 46. A tunnel viewed
+       head-on is the monumental one; the more it is yawed the more it reads as
+       passing alongside a structure. And a wide lens only crams more into the same
+       frame, which is the opposite of wanting awe rather than complexity. The
+       near-opaque scrim is enough to protect the type on the left without also
+       shoving the subject aside. */
+    { r: 1.12, p: [-30, 452, -1400], l: [30, 424, -2010], fov: 48 },
     /* 四段各对应一条规则，相机高度跟着该段的基准价升降（段基准 0 / -95 / +80
        / -25，加上 CORRIDOR_Y 的 420）。走廊在飞行中阶梯升降，正是「一个接一个
        的信号，各有各的止盈止损」。
        One segment per rule, the camera tracking each segment's base price (0, -95,
        +80, -25, plus the 420 lift). The corridor stepping up and down as you fly IS
        "one signal after another, each with its own levels". */
-    { r: 1.34, p: [-52, 424, -1880], l: [44, 404, -2480], fov: 52 },
-    { r: 1.56, p: [-52, 330, -2700], l: [44, 318, -3300], fov: 52 },
-    { r: 1.78, p: [-52, 502, -3560], l: [44, 500, -4160], fov: 52 },
-    { r: 1.95, p: [-52, 396, -4440], l: [44, 388, -5040], fov: 50 },
+    { r: 1.34, p: [-30, 424, -1880], l: [30, 404, -2480], fov: 46 },
+    { r: 1.56, p: [-30, 330, -2700], l: [30, 318, -3300], fov: 46 },
+    { r: 1.78, p: [-30, 502, -3560], l: [30, 500, -4160], fov: 46 },
+    /* 第四拍的机位往回挪 160。中断段的蜡烛缺口落在 -4470 到 -4668，原来相机
+       正好停在缺口里往缺口看，实测这一拍覆盖率只有 6.8%（前一拍 27.7%）——
+       整幕的最后一眼是一片空。挪到缺口之前，读法就对了：身边是这个信号的前
+       几根 K 线，正前方是那段空白，再往前尾声通道继续收敛。
+       The fourth beat's camera moves back 160. The outage segment's candle gap spans
+       -4470 to -4668 and the camera had been parked inside it looking into it, which
+       measured 6.8% coverage against the previous beat's 27.7% - the act's last look
+       was at nothing. Moved ahead of the gap it reads correctly: this signal's first
+       candles alongside, the blank stretch straight ahead, and the epilogue channel
+       converging past it. */
+    { r: 1.95, p: [-30, 396, -4280], l: [30, 388, -4900], fov: 46 },
     // 拔升脱离，落进一片安静的开阔地 / pulling up and out into open ground
     /* 出走廊不是平移出去，是**拔升**：相机从通道里升到 950，尾声那段轨从画面
        下缘滑过。同一段滚动里 fov 从 50 收到 42，两者叠起来读成「爬升脱离」，
@@ -585,6 +641,32 @@ export async function createLandingSpace(opts: {
        bright as they should be: it reads as haze rolling in, not as someone turning
        the lights down. It is also exactly what act IV was always meant to do -
        deliberately step out of the 3D and hand the last screens back to legibility. */
+    /* 一次只有一个主体。走廊在 0.92 之前完全不存在（第一幕只有地面与手机），
+       地面在进走廊后压到几乎为零（判定幕只有走廊悬在黑里），出走廊后两者对调
+       回来。这比调雾、调距离都干脆——截图里那两个毛病本质上是同一个：同屏
+       出现了两个主体。
+       One subject at a time. The corridor does not exist at all before 0.92, so act
+       I holds only the ground and the phone; the ground drops to near zero once
+       inside, so the verdict act holds only the corridor hanging in black; and the
+       two swap back on the way out. Cleaner than tuning fog or distance - both
+       faults in the screenshots were the same fault, two subjects in one frame. */
+    /* 两条淡入淡出**错开**，中间留一拍近乎全黑：地面先退（0.86-0.98），走廊后
+       进（1.00-1.16）。同时交叉会在 route 1.0 附近出现两者各一半的一帧——实测
+       那一帧覆盖率 16.8%、均值只有 20，既不是地面也不是走廊，正是要避免的
+       「两个主体」。先切黑再亮起，是这一幕最省力也最有效的一次强调。
+       The two fades are OFFSET with a near-black beat between them: the ground
+       leaves over 0.86-0.98 and the corridor arrives over 1.00-1.16. Cross-fading
+       them produced a frame around route 1.0 that was half of each - measured at
+       16.8% coverage and a mean of 20, neither ground nor corridor, exactly the two
+       subjects problem. Cutting to black before the reveal is the cheapest and
+       strongest emphasis this act has. */
+    const inCorridor = smooth(Math.max(0, Math.min(1, (r - 1.0) / 0.16)))
+    const outCorridor = smooth(Math.max(0, Math.min(1, (r - 2.04) / 0.24)))
+    const corridorK = inCorridor * (1 - outCorridor)
+    const groundK = 1 - smooth(Math.max(0, Math.min(1, (r - 0.86) / 0.12))) * (1 - outCorridor * 0.94)
+    for (const cm of corridorMats) (cm.m as TH.Material & { opacity: number }).opacity = cm.o * corridorK
+    for (const gm of gridMats) gm.opacity = 0.6 * groundK
+
     const haze = smooth(Math.max(0, Math.min(1, (r - 1.98) / 0.62)))
     if (scene.fog) (scene.fog as TH.FogExp2).density = 0.00034 + haze * 0.00056
     const fov = a.fov + (b.fov - a.fov) * k
