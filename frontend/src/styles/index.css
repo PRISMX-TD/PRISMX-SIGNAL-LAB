@@ -4409,3 +4409,63 @@ body {
 .is-scrub .sc-candle {
   transition: none;
 }
+
+/* 背景变体切换器（临时评审工具，定稿后连同组件里的那段一起删）
+   只在 URL 带 ?bg 时渲染。刻意做得像调试面板而不是产品 UI：等宽小字、
+   发丝描边、无圆角修饰，避免它被误当成页面的一部分。
+   The backdrop variant picker, a temporary review tool removed together with its
+   component block once a direction is chosen. It renders only with ?bg in the
+   URL and deliberately looks like a debug panel rather than product UI - small
+   mono type, hairline borders, no decorative rounding - so it cannot be mistaken
+   for part of the page. */
+.bg-picker {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 224px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  background: rgba(9, 9, 11, 0.94);
+}
+.bg-picker-h {
+  margin-bottom: 6px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: #84848e;
+}
+.bg-picker button {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s var(--ease-out);
+}
+.bg-picker button:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.bg-picker button.on {
+  border-color: rgba(110, 66, 255, 0.55);
+  background: rgba(110, 66, 255, 0.14);
+}
+.bg-picker button b {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #ededf0;
+}
+.bg-picker button span {
+  display: block;
+  margin-top: 1px;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: #84848e;
+}
