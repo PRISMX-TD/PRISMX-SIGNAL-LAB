@@ -156,10 +156,10 @@ function MiniSignalCard({
   compact?: boolean
 }) {
   return (
-    <div className="rounded-[3.4cqw] border border-white/[0.09] bg-white/[0.035] p-[3.8cqw]">
+    <div className="sig-card rounded-[3.4cqw] border border-white/[0.09] bg-white/[0.035] p-[3.8cqw]">
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-[2cqw]">
-          <b className="text-[4.6cqw] font-bold text-white">{sym}</b>
+          <b className="sig-sym text-[4.6cqw] font-bold text-white">{sym}</b>
           <span
             className={`rounded-[1.6cqw] border px-[2cqw] py-[0.7cqw] text-[2.8cqw] font-bold ${
               side === 'buy' ? 'border-up/35 bg-up/10 text-up' : 'border-down/35 bg-down/10 text-down'
@@ -174,25 +174,25 @@ function MiniSignalCard({
           )}
         </div>
         <div className="text-right">
-          <div className="num text-[4.4cqw] font-bold leading-none text-up">{rr}</div>
+          <div className="sig-rr num text-[4.4cqw] font-bold leading-none text-up">{rr}</div>
           <div className="mt-[0.8cqw] text-[2.9cqw] uppercase text-neutral-500">{t('landing.scrRr')}</div>
         </div>
       </div>
 
       {/* 三格 tile：中性入场 / 红染止损 / 绿染止盈（同 .tile-sl/.tile-tp）
           Three tiles: neutral entry, red-tinted SL, green-tinted TP. */}
-      <div className="mt-[3cqw] grid grid-cols-3 gap-[1.8cqw]">
+      <div className="sig-tiles mt-[3cqw] grid grid-cols-3 gap-[1.8cqw]">
         <div className="rounded-[2.6cqw] border border-white/[0.09] bg-white/[0.03] px-[1cqw] py-[2cqw] text-center">
-          <div className="text-[3.1cqw] text-neutral-500">{t('landing.scrEntry')}</div>
-          <div className="num mt-[0.8cqw] text-[3.4cqw] font-bold text-white">{entry}</div>
+          <div className="sig-key text-[3.1cqw] text-neutral-500">{t('landing.scrEntry')}</div>
+          <div className="sig-val num mt-[0.8cqw] text-[3.4cqw] font-bold text-white">{entry}</div>
         </div>
         <div className="rounded-[2.6cqw] border border-down/40 bg-down/[0.07] px-[1cqw] py-[2cqw] text-center">
-          <div className="text-[3.1cqw] text-neutral-500">{t('landing.scrSl')}</div>
-          <div className="num mt-[0.8cqw] text-[3.4cqw] font-bold text-down">{sl}</div>
+          <div className="sig-key text-[3.1cqw] text-neutral-500">{t('landing.scrSl')}</div>
+          <div className="sig-val num mt-[0.8cqw] text-[3.4cqw] font-bold text-down">{sl}</div>
         </div>
         <div className="rounded-[2.6cqw] border border-up/40 bg-up/[0.07] px-[1cqw] py-[2cqw] text-center">
-          <div className="text-[3.1cqw] text-neutral-500">{t('landing.scrTp')}</div>
-          <div className="num mt-[0.8cqw] text-[3.4cqw] font-bold text-up">{tp}</div>
+          <div className="sig-key text-[3.1cqw] text-neutral-500">{t('landing.scrTp')}</div>
+          <div className="sig-val num mt-[0.8cqw] text-[3.4cqw] font-bold text-up">{tp}</div>
         </div>
       </div>
 
@@ -223,7 +223,7 @@ export function ScreenSignals({ t, on }: { t: T; on: boolean }) {
           2
         </span>
       </div>
-      <div className="flex flex-col gap-[3cqw]">
+      <div className="sig-list flex flex-col gap-[3cqw]">
         <MiniSignalCard
           t={t}
           sym="XAUUSD"

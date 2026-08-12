@@ -3699,7 +3699,21 @@ body {
     transform 0.5s var(--ease-out),
     visibility 0s linear 0.5s;
 }
-.story-panel.on {
+/* 选择器必须与基础规则同权重，否则这条 transform: none 永远不生效。
+   基础规则是 .story-root:not(.is-scrub) .story-panel —— :not() 的权重取其参数，
+   所以它是三个类，而 .story-panel.on 只有两个，一直输。实测结果是移动端的文案
+   面板始终停在 translateY(14px)：进场动画从来没有跑完过，只是位移小到没人发现。
+   这一版把面板改成绝对定位压在遮罩上之后，那 14px 直接把它推到合规声明上，才
+   暴露出来。
+   The selector has to match the base rule's specificity or this transform: none
+   never applies. The base is .story-root:not(.is-scrub) .story-panel, and :not()
+   contributes its argument's specificity, making it three classes against this
+   rule's two, so it always lost. Measured, the mobile copy panel sat permanently at
+   translateY(14px): the enter animation never completed, and the offset was small
+   enough that nobody noticed. It surfaced only once this pass made the panel
+   absolute over the scrim, where those 14px pushed it onto the disclaimer. */
+.story-panel.on,
+.story-root:not(.is-scrub) .story-panel.on {
   opacity: 1;
   visibility: visible;
   transform: none;
@@ -3800,11 +3814,26 @@ body {
   .story-section {
     height: 440vh;
   }
+  /* ══ 移动端首屏：产品先行 ══
+     原来是三行栅格（画面 / 刻度 / 文字），画面只占上面一格，于是首屏从上到下是
+     导航 → 截图 → 声明 → 刻度 → 标题，标题落在 871px 屏幕的 68% 位置。访客
+     落地看到的第一样东西是一张**没有任何铺垫的产品截图**：他还不知道这是什么，
+     就先看到了 XAUUSD 和一串价格。桌面端不存在这个问题，因为手机和标题是并排的，
+     一眼同时收到；竖排之后变成先后关系，而先出现的是错的那个。
+     现在画面铺满整个舞台，文字绝对定位压在下方的实色遮罩上。层序固定：
+     画面 z1 → 遮罩 z2 → 文字 z3，五幕共用同一套布局，滚动中不会发生重排。
+     Mobile opening, product first. The stage used to be a three-row grid with the
+     visual confined to the top cell, so the first screen read nav, screenshot,
+     disclaimer, ticks, headline, putting the headline 68% of the way down an
+     871px screen. The first thing a visitor saw was an unframed product
+     screenshot: XAUUSD and a row of prices before they knew what this was. Desktop
+     never had the problem because the phone and the headline sit side by side and
+     arrive together; stacking them makes it sequential, and the wrong one came
+     first. The visual now fills the stage with the type absolutely positioned over
+     a scrim at the bottom. The layer order is fixed at visual, scrim, type, and all
+     five scenes share one layout so nothing reflows mid-scroll. */
   .story-stage {
-    display: grid;
-    grid-template-columns: 100%;
-    grid-template-rows: minmax(0, 1fr) auto auto;
-    row-gap: 1.8vh;
+    display: block;
     /* 上留导航（64px）与刘海，下留吸底 CTA（约 68px）与安全区。
        左右不再留白：画面改为全出血，横向留白下放给刻度条与文字面板各自承担，
        让 App 界面从边到边铺满——移动端的「沉浸感」几乎全部来自这一点。
@@ -3813,16 +3842,21 @@ body {
        side margins move down into the ticks and the text panel individually, so
        the app interface runs edge to edge - which is where nearly all of the
        immersion on mobile comes from. */
-    padding: calc(64px + env(safe-area-inset-top) + 1.6vh) 0 calc(env(safe-area-inset-bottom) + 76px);
+    padding: 0;
   }
 
+  /* 吸底 CTA 与安全区的净空，下面几层共用 / clearance shared by the layers below */
+  .story-stage {
+    --m-bot: calc(env(safe-area-inset-bottom) + 76px);
+  }
   .story-phone {
-    position: static;
-    grid-area: 1 / 1;
+    position: absolute;
+    inset: calc(64px + env(safe-area-inset-top)) 0 var(--m-bot) 0;
     transform: none;
     display: flex;
     flex-direction: column;
     min-height: 0;
+    z-index: 1;
   }
   /* 高度靠 flex 拉伸逐层传递，不用 height: 100%。
      百分比高度要求父级有"确定的"高度，而 .dev-scene 是个没有显式高度的 flex
@@ -3934,28 +3968,99 @@ body {
      with more below, not as content being severed. That holds at any height.
      Scoped to scene 0 only: the other four fit, and a fade there would merely dim
      their legitimate closing lines. */
+  /* ══ 第一幕：一张卡，放大 ══
+     原来两张卡加一个列表头，尺寸接近、明度接近，谁也不是主角——「单调」的直接
+     来源。现在只留一张：三个数字（入场/止损/止盈）正是产品的全部主张，放大到
+     它们成为整屏的焦点。
+     其余四幕不动：它们是演示，本来就该是完整界面。
+     One card, enlarged. Two cards plus a list header meant three similar blocks at
+     similar value with nothing dominating, which is where the flatness came from.
+     Only one remains, and the three numbers that are the product's entire claim
+     are enlarged until they are the focal point of the screen. The other four
+     scenes are untouched: they are demonstrations and should stay whole. */
+  /* 其余四幕约束回上半区。画面从 464px 拉到 729px 之后，那些贴容器底对齐的
+     元素（「确认下单」「已成交」「判定规则公开」）跟着掉了下去，实测落在遮罩
+     以下 335-349px，被文字整块盖住。约束成 50% 之后它们回到 y=428，刚好在
+     遮罩顶（436）之上。
+     边框由 .dev-screen 承担、不随之变化，所以卡片的外框在五幕之间是稳定的，
+     只有内容的可用高度变了。
+     The other four scenes are constrained back to the upper half. When the visual
+     grew from 464px to 729px, the elements anchored to the container's bottom
+     (the order confirmation, the fill notice, the rules line) fell with it and
+     measured 335 to 349px below the scrim, fully covered by the type. Held to 50%
+     they return to y=428, just above the scrim top at 436. The border belongs to
+     .dev-screen and does not move, so the card's frame stays fixed across all five
+     scenes and only the content's available height changes. */
+  .scr:not([data-scr='0']) {
+    bottom: 50%;
+  }
+
+  [data-scr='0'] .sig-list > *:nth-child(2) {
+    display: none;
+  }
+  [data-scr='0'] {
+    display: flex;
+    flex-direction: column;
+    /* 顶部对齐而不是居中：居中要靠一个巨大的底部内边距去把卡片顶上来，那个
+       数值随屏高变化，实测卡片下沿仍探进遮罩 100px（遮罩顶 383、卡片底 483），
+       下缘被压掉约五成不透明度，读起来像被裁。顶部对齐后落点只由一个内边距
+       决定，任何屏高都成立。
+       Top-aligned rather than centred: centring needs a huge bottom padding to lift
+       the card, and that value shifts with viewport height. Measured, the card's
+       lower edge still reached 100px into the scrim (scrim top 383 against a card
+       bottom of 483) and lost about half its opacity there, reading as cropped.
+       Aligned to the top, the position depends on one padding and holds at any
+       height. */
+    padding: 16cqw 5cqw 0;
+  }
+  [data-scr='0'] .sig-card {
+    padding: 5.4cqw;
+    border-radius: 4.4cqw;
+  }
+  [data-scr='0'] .sig-sym {
+    font-size: 6.4cqw;
+  }
+  [data-scr='0'] .sig-rr {
+    font-size: 6.4cqw;
+  }
+  [data-scr='0'] .sig-tiles {
+    margin-top: 4.4cqw;
+    gap: 2.4cqw;
+  }
+  [data-scr='0'] .sig-key {
+    font-size: 3.4cqw;
+  }
+  [data-scr='0'] .sig-val {
+    font-size: 5.4cqw;
+  }
+  /* 只剩一张卡就装得下了，「列表还有下文」的渐隐失去依据，留着只会读成截断。
+     With a single card everything fits, so the fade that stood for "more below"
+     no longer refers to anything and would only read as truncation. */
   [data-scr='0']::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 15%;
-    z-index: 5;
-    pointer-events: none;
-    background: linear-gradient(180deg, transparent, #06060a 88%);
+    display: none;
   }
 
   /* 幕计数：横跨全宽的分段进度条，占栅格第二行。
      Scene ticks: a full-width segmented progress bar occupying the second row. */
   .story-ticks {
-    position: static;
-    grid-area: 2 / 1;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: var(--m-bot);
     display: flex;
     flex-direction: row;
     gap: 4px;
     transform: none;
     padding: 0 5vw;
+    z-index: 3;
+    transition: opacity 0.35s var(--ease-out);
+  }
+  /* 第一幕不显示进度：访客还不知道这里有一段五幕的叙事，先给刻度是没有指涉的。
+     Hidden on the first scene: nothing has progressed yet, and a progress bar
+     before the visitor knows a sequence exists refers to nothing. */
+  .story-root[data-active='0'] .story-ticks {
+    opacity: 0;
   }
   .js-tick {
     height: 3px;
@@ -3964,13 +4069,38 @@ body {
   }
 
   .story-panel {
-    position: static;
-    grid-area: 3 / 1;
-    left: auto;
+    position: absolute;
+    left: 0;
     right: auto;
-    bottom: auto;
+    top: auto;
+    bottom: calc(var(--m-bot) + 58px);
+    width: 100%;
     padding: 0 5vw;
     background: none;
+    z-index: 3;
+  }
+  .story-panel > .panel-inner {
+    transform: none;
+  }
+  /* 合规声明：紧贴刻度之上的一行小字。它标注的是上方那块界面，留在这里最合理。
+     The disclaimer sits just above the ticks: it labels the interface above it,
+     which is where it belongs. */
+  /* 自下而上：吸底 CTA（外部）→ 刻度 → 声明 → 文案面板。
+     上一版把声明的 bottom 设成 -22px，等于推到 .story-phone 之外、压在吸底 CTA
+     上（实测落在 y 802-817，而 CTA 从 795 开始）。
+     Bottom up: the sticky CTA (external), the ticks, the disclaimer, then the copy
+     panel. The previous -22px pushed the disclaimer outside .story-phone and onto
+     the sticky CTA, measured at y 802-817 against a CTA starting at 795. */
+  .story-phone > p {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 14px;
+    margin: 0;
+    padding: 0 5vw;
+    font-size: 10px;
+    text-align: left;
+    z-index: 3;
   }
 }
 
@@ -4490,4 +4620,63 @@ body {
 .backdrop-art .tnum,
 .backdrop-art .tnum text {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* 移动端遮罩层序 / mobile scrim stacking
+   必须写在 .story-stage::after 基础规则之后：两条选择器权重相同，靠源码顺序
+   决胜。写在 @media 块里但位置靠前时实测完全不生效（z-index 仍是 -1，遮罩压在
+   画面之下等于没画），正文于是直接落在 App 界面上。
+   桌面端遮罩在画面之下（它压的是地面扫光），移动端必须反过来：
+   画面 z1 → 遮罩 z2 → 文字 z3。
+   This has to sit after the base .story-stage::after rule: same specificity, so
+   source order decides. Placed earlier inside the media block it measured as having
+   no effect at all - z-index stayed -1, putting the scrim behind the visual - and
+   the copy landed straight on the app interface. Desktop keeps the scrim behind the
+   visual, where it damps the floor sweep; mobile inverts to visual, scrim, type. */
+@media (max-width: 1023px) {
+  .story-stage::after {
+    z-index: 2;
+    /* 56% → 50%：遮罩顶从 y=383 降到 436，卡片下沿（432）这才完全脱离渐变。
+       56% 时卡片最后 49px 被压掉最多两成半，读起来是被裁而不是被淡出。
+       56 to 50 percent moves the scrim top from y=383 to 436, finally clearing the
+       card whose lower edge sits at 432. At 56 the card lost up to a quarter of its
+       opacity across its last 49px, which reads as cropped rather than faded. */
+    height: 50%;
+    background: linear-gradient(0deg, #09090b 36%, rgba(9, 9, 11, 0.86) 66%, transparent);
+  }
+}
+
+/* 矮屏收一档 / short viewports step down
+   ──────────────────────────────────────────────
+   667px 高的机上实测撞车：卡片下沿 382，标题顶 328，重叠 54px。原因是竖向预算
+   本来就紧——导航 64 + 列表头 50 + 卡片 206 + 文案面板 219 + 声明 15 + 刻度 3
+   + 吸底 CTA 76 = 633，只剩 34px 给所有间隙。871px 的机上同一套数值有 238px
+   富余，所以按高度分档而不是按宽度：宽度决定字号（cqw），高度决定留白。
+   Measured collision on a 667-tall device: the card's lower edge at 382 against a
+   headline top of 328, overlapping by 54px. The vertical budget is simply tight -
+   nav 64 plus list header 50 plus card 206 plus copy panel 219 plus disclaimer 15
+   plus ticks 3 plus sticky CTA 76 comes to 633, leaving 34px for every gap. The
+   same numbers have 238px of slack on an 871-tall device, so the step is keyed to
+   HEIGHT rather than width: width sets the type size through cqw, height sets the
+   breathing room. */
+@media (max-width: 1023px) and (max-height: 730px) {
+  .story-panel {
+    bottom: calc(var(--m-bot) + 40px);
+  }
+  [data-scr='0'] {
+    padding-top: 2vh;
+  }
+  [data-scr='0'] .sig-card {
+    padding: 4.4cqw;
+  }
+  [data-scr='0'] .sig-sym,
+  [data-scr='0'] .sig-rr {
+    font-size: 5.4cqw;
+  }
+  [data-scr='0'] .sig-val {
+    font-size: 4.6cqw;
+  }
+  [data-scr='0'] .sig-tiles {
+    margin-top: 3.4cqw;
+  }
 }

@@ -399,6 +399,11 @@ export default function PhoneStory() {
       ref={root}
       id="showcase"
       className={`story-section story-root ${mode === 'scrub' ? 'is-scrub' : ''}`}
+      /* 幕序号交给 CSS：移动端第一幕要隐藏进度刻度，而那是纯样式判断，不值得
+         再拉一个 state。/ The scene index is handed to CSS so mobile can hide the
+         progress ticks on the first scene, a purely presentational call that does
+         not warrant another piece of state. */
+      data-active={active}
     >
       <div className="story-stage">
         {/* ── 手机 / the phone ── */}
@@ -452,7 +457,13 @@ export default function PhoneStory() {
         {/* ── Hero 面板（含 CTA，唯一可点面板）/ hero panel, the only interactive one ── */}
         <div className={`story-panel panel-l pe ${active === 0 ? 'on' : ''}`} data-panel="hero">
           <div className="panel-inner">
-            <h1 className="font-display-xl text-[clamp(2.5rem,8.5vw,3.6rem)]">
+            {/* 8.5vw → 11vw：437px 的机上从 40px 提到 48px。首屏改成产品先行之后
+                标题压在遮罩上，它必须是整屏唯一的落点，字号要压得住那张放大的
+                信号卡。/ 8.5vw to 11vw, taking a 437px device from 40px to 48px.
+                With the opening now product-first the headline sits over the scrim
+                and has to be the screen's single anchor, heavy enough to hold its
+                own against the enlarged signal card. */}
+            <h1 className="font-display-xl text-[clamp(2.5rem,11vw,3.6rem)]">
               <span className="block text-white">{t('landing.heroTitle1')}</span>
               <span className="mt-1 block text-prism-400">{t('landing.heroTitle2')}</span>
             </h1>
