@@ -4337,19 +4337,68 @@ body {
   }
 }
 
-/* 判决碑接管态 / the verdict stone takeover
-   空间层起来后（html.space-on），桌面端的 SVG 判决墙让位给 LandingSpace 里的
-   3D 判决碑——同一份数据（verdictData.ts）立成实体。窄屏永远用 SVG 墙：碑宽
-   1160 世界单位，竖屏的水平视场装不下，而墙的 meet 模式按设计装得下。
-   WebGL 起不来 / 减少动态时 space-on 不存在，墙自动留任——降级链无需 JS 参与。
-   Once the space layer is up (html.space-on) the desktop SVG wall yields to the
-   3D verdict stone in LandingSpace, the same data raised as a solid. Narrow
-   viewports always keep the SVG wall: the stone is 1160 world units wide and a
-   portrait field of view cannot hold it, while the wall's meet mode fits by
-   design. With no WebGL or reduced motion, space-on never appears and the wall
-   simply stays - the fallback chain needs no JS. */
-@media (min-width: 1024px) {
-  .space-on .mkt-wall {
-    display: none;
-  }
+/* ══════════════════════════════════════════════
+   判定终端 / the verdict terminal (act II, take four)
+   ──────────────────────────────────────────────
+   一块真实的行情终端面板，重演第一幕手机里那条 XAUUSD 信号在四种结局下如何
+   被判定。配色直接用产品令牌（--up/--down），与手机屏内的信号卡一致——这一
+   幕的说服力来自「这就是产品本身」。蜡烛按 --ci 逐根级联出现（steps 模式），
+   scrub 模式由 GSAP 接管同一套编排。
+   A real terminal panel replaying act I's XAUUSD signal under its four endings,
+   in the product's own tokens (--up/--down), identical to the phone's signal
+   card - this act persuades by being the product itself. Candles cascade in by
+   --ci under steps; GSAP owns the same choreography under scrub.
+   ══════════════════════════════════════════════ */
+.term-bg {
+  fill: #0b0b0f;
+  fill-opacity: 0.9;
+  stroke: #ffffff;
+  stroke-opacity: 0.09;
+  stroke-width: 1;
+}
+.mkt-wall text {
+  font-family: inherit;
+}
+.mkt-wall .tnum {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.cnd-up { fill: var(--up); }
+.cnd-dn { fill: var(--down); }
+.cnd-up-s { stroke: var(--up); }
+.cnd-dn-s { stroke: var(--down); }
+.lvl-up { stroke: var(--up); stroke-opacity: 0.7; }
+.lvl-dn { stroke: var(--down); stroke-opacity: 0.7; }
+.bnd-up { fill: var(--up); }
+.bnd-dn { fill: var(--down); }
+.chip-up { fill: var(--up-bg); stroke: rgba(53, 201, 122, 0.4); stroke-width: 1; }
+.chip-dn { fill: var(--down-bg); stroke: rgba(240, 77, 99, 0.4); stroke-width: 1; }
+.chip-en { fill: rgba(255, 255, 255, 0.04); stroke: rgba(255, 255, 255, 0.12); stroke-width: 1; }
+.chip-t-up { fill: var(--up); }
+.chip-t-dn { fill: var(--down); }
+.chip-t-en { fill: #ededf0; }
+/* 判决章：描边橡皮章，不发光 / verdict stamps: outlined rubber stamps, no glow */
+.st-win { fill: rgba(9, 9, 11, 0.78); stroke: var(--up); stroke-width: 3.5; }
+.st-win-t { fill: var(--up); }
+.st-loss { fill: rgba(9, 9, 11, 0.78); stroke: #a1a1aa; stroke-width: 3.5; }
+.st-loss-t { fill: #c4c4cc; }
+/* 蜡烛级联：steps 模式按 --ci 逐根出现，画完 ~1.3s 后判决落下（沿用
+   .sc-band/.sc-stamp 既有的 1.5s 延迟规则）。
+   Candle cascade under steps: one per --ci step, with the verdict landing about
+   1.3s after the march (the existing .sc-band/.sc-stamp delay rules). */
+.sc-candle {
+  opacity: 0;
+  transform: scaleY(0.25);
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    opacity 0.3s var(--ease-out),
+    transform 0.4s var(--ease-out);
+  transition-delay: calc(var(--ci) * 55ms + 0.25s);
+}
+.mkt-scene.sc-on .sc-candle {
+  opacity: 1;
+  transform: scaleY(1);
+}
+.is-scrub .sc-candle {
+  transition: none;
 }
