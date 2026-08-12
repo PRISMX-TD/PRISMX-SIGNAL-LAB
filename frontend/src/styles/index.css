@@ -4014,3 +4014,175 @@ body {
   background: #06060a;
 }
 
+
+/* ══════════════════════════════════════════════
+   全页 3D 空间 / the page-wide 3D space
+   ──────────────────────────────────────────────
+   三层叠在同一个 fixed 容器里，顺序即降级顺序：
+     1. .landing-space-grid  静态网格，SSR 就有，永远存在
+     2. .landing-space-gl    WebGL 世界，起来了才淡入（<html>.space-on）
+     3. .landing-space-fade  上下渐隐，保证导航与页脚下方没有线条压着文字
+   静态网格不是「被替换」而是「被盖住」：3D 起不来时它就是最终版面，不留空白。
+   Three layers in one fixed container, stacked in degradation order: the static
+   grid that SSR already emits and that always exists; the WebGL world which fades
+   in only once it is actually running (html.space-on); and the top/bottom fades
+   that keep lines from sitting under the nav and the footer. The grid is covered,
+   never replaced, so a failed 3D start simply leaves the previous layout intact.
+   ══════════════════════════════════════════════ */
+.landing-space {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.landing-space-grid,
+.landing-space-gl,
+.landing-space-fade {
+  position: absolute;
+}
+.landing-space-grid,
+.landing-space-gl {
+  inset: 0;
+}
+.landing-space-grid {
+  transition: opacity 0.9s var(--ease-out);
+}
+.landing-space-gl {
+  opacity: 0;
+  transition: opacity 1.1s var(--ease-out);
+}
+.space-on .landing-space-grid {
+  opacity: 0;
+}
+.space-on .landing-space-gl {
+  opacity: 1;
+}
+.landing-space-fade {
+  left: 0;
+  right: 0;
+  height: 8rem;
+}
+.landing-space-fade.t {
+  top: 0;
+  background: linear-gradient(180deg, #09090b, transparent);
+}
+.landing-space-fade.b {
+  bottom: 0;
+  background: linear-gradient(0deg, #09090b, transparent);
+}
+
+/* ══════════════════════════════════════════════
+   第二幕：判定走廊 / act II, the verdict corridor
+   ──────────────────────────────────────────────
+   本幕的舞台是空的——3D 全部由固定在页面底层的空间层绘制，这里只有文字。
+   所以它不需要 GSAP、不需要 WebGL、也不需要知道空间层是否存在：IntersectionObserver
+   判拍，CSS 过渡交叉淡入，与叙事区的 steps 模式完全同构。走廊起不来时，这一幕
+   退化成一段排版讲究的规则说明，四条规则一字不少。
+   The stage for this act is empty: all of its 3D is drawn by the fixed space layer
+   behind the page, and only type lives here. So it needs no GSAP, no WebGL and no
+   knowledge of whether the space came up - an IntersectionObserver picks the beat
+   and CSS transitions cross-fade, exactly as the story's steps mode does. Without
+   the corridor it degrades into a well-set statement of the rules, complete.
+   ══════════════════════════════════════════════ */
+.mkt-section {
+  position: relative;
+  /* 5 拍 × 80vh。比叙事区的 104vh/幕 紧：这里每一拍只有一条规则加一句注解，
+     阅读量约为叙事区的一半，同样的行程会拖。
+     Five beats at 80vh each, tighter than the story's 104vh per scene: a beat here
+     carries one rule and one note, about half the reading of a story scene, and the
+     longer run would drag. */
+  height: 400vh;
+}
+.mkt-stage {
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+@media (max-width: 1023px) {
+  .mkt-section {
+    height: 340vh;
+  }
+  /* 与叙事区同一套三行栅格：上面留给走廊，中间是拍计数，下面是文字。
+     文字靠底而不是居中——走廊的灭点在画面中上部，压在它上面会同时毁掉两者。
+     The same three-row grid as the story: corridor above, beat counter, type below.
+     The type sits at the bottom rather than centred, because the corridor's
+     vanishing point is in the upper middle and overlapping the two ruins both. */
+  .mkt-stage {
+    display: grid;
+    grid-template-columns: 100%;
+    grid-template-rows: minmax(0, 1fr) auto auto;
+    row-gap: 2.2vh;
+    padding: calc(64px + env(safe-area-inset-top) + 1.6vh) 0 calc(env(safe-area-inset-bottom) + 82px);
+  }
+  /* 文字区垫底：走廊的地板线会一直延伸到画面底部，正文压在细线上读起来发毛。
+     一道到底色的渐变把下三分之一压回纯底色，线条自然消失在文字后面。
+     A scrim under the type: the corridor's floor lines run to the bottom edge and
+     body text over hairlines reads fuzzy. A gradient back to the page colour sinks
+     the lower third to flat, and the lines simply end behind the words. */
+  /* z-index: -1 而不是给所有子元素加 position: relative 把它们抬上来。
+     .mkt-stage 是 sticky，本身就是层叠上下文，-1 只会把遮罩压到该上下文内所有
+     在流内容之下，不会掉到页面背景之后。抬子元素的做法实测有副作用：
+     .story-ticks 的基础规则带着 right: 1rem，从 static 变成 relative 之后那
+     1rem 就变成了「向左推 16px」，刻度条量出来 x=-16、宽 375，整条溢出屏幕。
+     Using z-index -1 rather than lifting every child with position: relative.
+     .mkt-stage is sticky and therefore already a stacking context, so -1 只 drops
+     the scrim below all in-flow content inside it without falling behind the page
+     backdrop. Lifting the children had a measured side effect: .story-ticks
+     carries right: 1rem from its base rule, and switching it from static to
+     relative turned that into a 16px leftward shove - the bar measured x=-16 at
+     375 wide, hanging off the screen. */
+  .mkt-stage::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    /* 高度与断点按文字实际落位定：文字行占屏幕底部 234px（面板 152 + 吸底
+       CTA 让位 82），812 高的机上是 28.8%。遮罩取 60% 高、46% 处转实色，
+       实色区从底部往上 263px，整段正文都落在纯底色上。
+       Height and stop set from where the type actually lands: the text occupies the
+       bottom 234px of the screen (a 152px panel plus 82px of sticky-CTA clearance),
+       which is 28.8% on an 812-tall device. The scrim runs 60% tall and turns solid
+       at 46% of that, giving 263px of flat colour from the bottom up, so the whole
+       body column clears the corridor's floor lines. */
+    height: 60%;
+    z-index: -1;
+    pointer-events: none;
+    background: linear-gradient(180deg, transparent, #09090b 46%);
+  }
+}
+
+/* 桌面端左侧压暗：文字面板固定在 left: 7vw、宽 26rem 的一列里，而走廊是一片
+   覆盖大半个画面的网格。把相机偏航镜像过来之后，面板区域的线条覆盖率已经从
+   40.9% 降到 6.6-23.2%（画面其余部分 6.5-19%），但入场那两拍仍有两成线条落在
+   正文后面。一道到底色的横向渐变把左列压回纯底，走廊从渐变外缘开始——这不是
+   给读不清打补丁，是合成里一直在用的遮罩：让主体出现在它该出现的地方。
+   A scrim down the left on desktop. The text panel occupies a fixed column at 7vw
+   with a 26rem width while the corridor is a grid covering most of the frame.
+   Mirroring the camera yaw already cut line coverage inside that column from 40.9%
+   to between 6.6% and 23.2% (against 6.5-19% for the rest of the frame), but the
+   two entry beats still leave a fifth of it behind body copy. A horizontal gradient
+   back to the page colour flattens the left column and lets the corridor begin past
+   its edge. Not a patch for illegibility: the ordinary compositing matte that puts
+   a subject where it belongs. */
+@media (min-width: 1024px) {
+  .mkt-stage::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    /* 宽度与断点按面板的实际占位定：面板从 7vw 起、宽 26rem，在 1440 上是
+       101-517px，即视口的 7%-36%。遮罩取 62% 宽、46% 处才开始衰减（=893px 的
+       411px），保证整段正文都落在纯底色上，衰减尾巴留给走廊。
+       Width and stops are set from where the panel actually lands: starting at 7vw
+       and 26rem wide, it spans 101-517px on a 1440 viewport, or 7% to 36%. The
+       scrim runs 62% wide and holds full opacity to 46% of that (411px of 893), so
+       the whole body column sits on flat colour and the falloff belongs to the
+       corridor. */
+    width: 62%;
+    z-index: -1;
+    pointer-events: none;
+    background: linear-gradient(90deg, #09090b 46%, rgba(9, 9, 11, 0.9) 66%, transparent);
+  }
+}

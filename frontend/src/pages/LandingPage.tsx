@@ -35,6 +35,8 @@ import PublicLanguageToggle from '../components/PublicLanguageToggle'
 import FaqSection from '../components/landing/FaqSection'
 import MobileStickyCta from '../components/landing/MobileStickyCta'
 import PhoneStory from '../components/landing/PhoneStory'
+import MarketStory, { MarketOutro } from '../components/landing/MarketStory'
+import LandingSpaceLayer from '../components/landing/LandingSpaceLayer'
 import { usePublicLang } from '../seo/PublicShell'
 import { localePath } from '../seo/meta'
 
@@ -96,6 +98,7 @@ function Navbar({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate
   // sections merged into the story scenes, so their anchors retire with them.
   const links = [
     { h: '#showcase', k: 'navShowcase' },
+    { h: '#verdict', k: 'wrEyebrow' },
     { h: '#pricing', k: 'navPricing' },
     { h: '#faq', k: 'navFaq' },
   ]
@@ -267,6 +270,7 @@ function Foot({ t }: { t: T }) {
   const lang = usePublicLang()
   const links = [
     { h: '#showcase', k: 'navShowcase' },
+    { h: '#verdict', k: 'wrEyebrow' },
     { h: '#pricing', k: 'navPricing' },
     { h: '#faq', k: 'navFaq' },
   ]
@@ -344,19 +348,16 @@ export default function LandingPage() {
 
   return (
     <div id="top" className="relative min-h-[100dvh] bg-ink-950 text-white">
-      {/* 静态结构层：极低对比网格 + 上下渐隐。零动画、零模糊、零重绘——
-          背景绝不与手机抢戏。/ Static structural layer: faint grid with top and
-          bottom fades. No animation, no blur, no repaint; the backdrop never
-          competes with the phone. */}
-      <div className="pointer-events-none fixed inset-0 z-0" aria-hidden>
-        <div className="absolute inset-0 bg-prism-grid bg-[size:46px_46px]" />
-        <div className="absolute inset-x-0 top-0 h-48 bg-gradient-to-b from-ink-950 to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-ink-950 to-transparent" />
-      </div>
+      {/* 结构层：一个贯穿全页的 3D 空间，静态网格退居为它的基线。
+          Structural layer: a 3D space spanning the whole page, with the static
+          grid demoted to its baseline. */}
+      <LandingSpaceLayer />
 
       <div className="relative z-10">
         <Navbar t={t} navigate={navigate} />
         <PhoneStory />
+        <MarketStory />
+        <MarketOutro />
         <Pricing t={t} navigate={navigate} />
         <FaqSection />
         <ClosingCta t={t} navigate={navigate} />

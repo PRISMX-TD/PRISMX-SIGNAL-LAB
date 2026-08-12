@@ -317,11 +317,20 @@ export default function PhoneStory() {
         /* 70–84 幕4：记录逐行入场，赢亏同权重 / record rows stagger in, wins and losses equal */
         tl.to('.js-rec', { autoAlpha: 1, y: 0, duration: 2, stagger: 1.6 }, 71)
 
-        /* 84–100 收尾：手机归正居中、微缩，让位给下方内容。
-           Ending: the phone squares up, centres and shrinks, yielding to the
-           content below. */
+        /* 84–100 收尾：手机归正居中并**退远**，把画面交给身后那个空间。
+           这一段原本只缩到 0.92，接下来判定区的走廊就硬切进来。现在退到 0.7：
+           同一段滚动里，空间层的相机正好在逼近走廊入口（见 LandingSpace 的
+           route 0.86→1.0 关键帧），一近一远同时发生，读起来是「器物落下、天地
+           打开」的交接，而不是两幕之间的剪辑点。
+           Ending: the phone squares up, centres and RECEDES, handing the frame to
+           the space behind it. It previously only shrank to 0.92 and the corridor
+           then cut in. Pulling back to 0.7 makes the handoff continuous: over the
+           same stretch of scroll the space camera is closing on the corridor mouth
+           (LandingSpace keyframes 0.86 to 1.0), so one thing withdraws while the
+           other opens, instead of one shot being spliced to the next. */
         panelOut(tl, '4', 85)
-        tl.to(PZ, { xvw: 0, rotY: 0, rotX: 0, scale: 0.92, duration: 11, ease: 'power2.inOut' }, 86)
+        tl.to(PZ, { xvw: 0, rotY: 0, rotX: 0, scale: 0.92, duration: 8, ease: 'power2.inOut' }, 86)
+        tl.to(PZ, { scale: 0.7, duration: 6, ease: 'power2.in' }, 94)
         tl.to('.js-facelight', { xPercent: 0, duration: 11, ease: 'power2.inOut' }, 86)
 
         /* ── 鼠标跟随倾斜 / pointer tilt ──
