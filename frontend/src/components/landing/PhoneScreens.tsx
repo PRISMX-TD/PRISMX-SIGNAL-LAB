@@ -175,7 +175,7 @@ function MiniSignalCard({
         </div>
         <div className="text-right">
           <div className="num text-[4.4cqw] font-bold leading-none text-up">{rr}</div>
-          <div className="mt-[0.8cqw] text-[2.4cqw] uppercase text-neutral-500">{t('landing.scrRr')}</div>
+          <div className="mt-[0.8cqw] text-[2.9cqw] uppercase text-neutral-500">{t('landing.scrRr')}</div>
         </div>
       </div>
 
@@ -183,15 +183,15 @@ function MiniSignalCard({
           Three tiles: neutral entry, red-tinted SL, green-tinted TP. */}
       <div className="mt-[3cqw] grid grid-cols-3 gap-[1.8cqw]">
         <div className="rounded-[2.6cqw] border border-white/[0.09] bg-white/[0.03] px-[1cqw] py-[2cqw] text-center">
-          <div className="text-[2.6cqw] text-neutral-500">{t('landing.scrEntry')}</div>
+          <div className="text-[3.1cqw] text-neutral-500">{t('landing.scrEntry')}</div>
           <div className="num mt-[0.8cqw] text-[3.4cqw] font-bold text-white">{entry}</div>
         </div>
         <div className="rounded-[2.6cqw] border border-down/40 bg-down/[0.07] px-[1cqw] py-[2cqw] text-center">
-          <div className="text-[2.6cqw] text-neutral-500">{t('landing.scrSl')}</div>
+          <div className="text-[3.1cqw] text-neutral-500">{t('landing.scrSl')}</div>
           <div className="num mt-[0.8cqw] text-[3.4cqw] font-bold text-down">{sl}</div>
         </div>
         <div className="rounded-[2.6cqw] border border-up/40 bg-up/[0.07] px-[1cqw] py-[2cqw] text-center">
-          <div className="text-[2.6cqw] text-neutral-500">{t('landing.scrTp')}</div>
+          <div className="text-[3.1cqw] text-neutral-500">{t('landing.scrTp')}</div>
           <div className="num mt-[0.8cqw] text-[3.4cqw] font-bold text-up">{tp}</div>
         </div>
       </div>

@@ -135,7 +135,7 @@ function Navbar({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate
             >
               {t('landing.signIn')}
             </a>
-            <button onClick={() => navigate('/login?mode=register')} className="btn btn-primary h-9 px-4 text-[13.5px]">
+            <button onClick={() => navigate('/login?mode=register')} className="btn btn-primary h-10 px-4 text-[13.5px] lg:h-9">
               {t('landing.getStarted')}
             </button>
           </div>
@@ -282,10 +282,10 @@ function Foot({ t }: { t: T }) {
         </div>
 
         <nav className="md:col-span-3">
-          <ul className="space-y-2.5">
+          <ul className="space-y-0.5">
             {links.map((l) => (
               <li key={l.h}>
-                <a href={l.h} className="text-[13px] text-neutral-400 transition-colors hover:text-white">
+                <a href={l.h} className="block py-2.5 text-[13px] text-neutral-400 transition-colors hover:text-white">
                   {t(`landing.${l.k}`)}
                 </a>
               </li>
@@ -297,12 +297,12 @@ function Foot({ t }: { t: T }) {
             Terms via <Link>, not <a href>: same-SPA routes, no full reload. */}
         <div className="md:col-span-2">
           <p className="text-[11.5px] uppercase tracking-[0.14em] text-neutral-500">{t('landing.footerLegal')}</p>
-          <ul className="mt-4 space-y-2.5">
+          <ul className="mt-2.5 space-y-0.5">
             {(['terms', 'privacy', 'risk'] as const).map((d) => (
               <li key={d}>
                 <Link
                   to={localePath(lang, `/${d}`)}
-                  className="text-[13px] text-neutral-400 transition-colors hover:text-white"
+                  className="block py-2.5 text-[13px] text-neutral-400 transition-colors hover:text-white"
                 >
                   {t(`legal.${d}.title`)}
                 </Link>
@@ -319,7 +319,7 @@ function Foot({ t }: { t: T }) {
             <p className="mt-4 text-[13px] leading-relaxed text-neutral-500">{t('landing.footerSupportBody')}</p>
             <a
               href={`mailto:${SUPPORT_EMAIL}`}
-              className="mt-2 inline-block text-[13px] text-prism-400 underline underline-offset-4 transition-colors hover:text-prism-300"
+              className="mt-1 inline-block py-2 text-[13px] text-prism-400 underline underline-offset-4 transition-colors hover:text-prism-300"
             >
               {SUPPORT_EMAIL}
             </a>

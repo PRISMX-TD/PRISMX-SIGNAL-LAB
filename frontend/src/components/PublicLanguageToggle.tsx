@@ -29,7 +29,7 @@ export default function PublicLanguageToggle() {
     <button
       onClick={handleToggle}
       aria-label={`Switch to ${next === 'zh' ? '中文' : 'English'}`}
-      className="rounded-inner border border-white/10 px-2.5 py-1.5 text-sm font-medium text-neutral-300 transition-colors hover:border-white/20 hover:text-neutral-100"
+      className="rounded-inner border border-white/10 px-3 py-2.5 text-sm font-medium text-neutral-300 transition-colors hover:border-white/20 hover:text-neutral-100 lg:py-1.5"
     >
       {lang === 'zh' ? '中' : 'EN'}
     </button>

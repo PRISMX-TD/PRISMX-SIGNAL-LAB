@@ -457,7 +457,7 @@ export default function PhoneStory() {
               </button>
               <a
                 href="#pricing"
-                className="text-[13.5px] text-neutral-400 underline decoration-white/20 underline-offset-[6px] transition-colors hover:text-white hover:decoration-white/60"
+                className="inline-block py-2 text-[13.5px] text-neutral-400 underline decoration-white/20 underline-offset-[6px] transition-colors hover:text-white hover:decoration-white/60"
               >
                 {t('landing.ctaSecondary')}
               </a>

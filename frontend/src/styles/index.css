@@ -3573,7 +3573,7 @@ body {
   padding: 4cqw 0 3.6cqw;
   border-radius: 999px;
   color: var(--text-3);
-  font-size: 2.7cqw;
+  font-size: 2.9cqw;
   font-weight: 600;
   line-height: 1;
   transition: background-color 0.35s var(--ease-out), color 0.35s var(--ease-out);
@@ -3707,26 +3707,153 @@ body {
   .panel-l > .panel-inner,
   .panel-r > .panel-inner { transform: translateY(-50%); }
 }
+/* ══════════════════════════════════════════════
+   真机（< 1024px）：去掉手机外壳，屏幕直接当卡片用
+   ──────────────────────────────────────────────
+   用户手里拿着的就是一台手机，画面里再画一台是冗余的——而代价极其具体：
+   外壳把 62% 的宽度让给了机身边框与左右留白，屏幕只剩 38.2% 屏宽（390px 机上
+   实测 149px）。屏内文字用 cqw 定尺（按 380px 宽的屏幕标定），容器缩到 149px
+   后实际渲染成：卡片标题 7.1px、品种代码 6.6px、入场价 6.3px、Tab 标签 3.9px、
+   tile 小标 3.4px。iOS 人机界面指南的正文下限是 11pt——这些数字全线不可读，
+   「展示产品真实界面」的前提在真机上直接失效。
+
+   而且这不是「把手机放大」能解决的：外壳高宽比 2.16，要让文字可读需要约 92vw
+   宽，高度就到 750px，占满 89% 屏高，文字区一点不剩。外壳必须去掉。
+
+   去掉之后屏幕铺到 92vw（约 359px），与 cqw 的 380px 标定基准只差 6%，屏内字号
+   自动回到接近真实 App 的大小（卡片标题 16px、入场价 12px）。
+
+   同时布局从「绝对定位互相避让」改成两行栅格：第一行是画面、第二行是文字。
+   绝对定位在不同机型的屏高下会算错避让距离（iPhone SE 的 667px 与 Pro Max 的
+   932px 差了 40%），栅格让浏览器自己分配，任何屏高都不会重叠。五个文字面板全部
+   落在第二行同一格里，天然叠放，交叉淡入的逻辑不变。
+
+   Real devices (< 1024px): drop the phone shell and use the screen as a card.
+   The user is already holding a phone, so drawing another one is redundant - and
+   the cost is concrete: the shell gave 62% of the width to body, bezel and
+   margins, leaving the screen at 38.2% of viewport width (measured 149px on a
+   390px device). In-screen type is sized in cqw calibrated against a 380px-wide
+   screen, so at 149px it rendered at 7.1px for card titles, 6.6px for symbols,
+   6.3px for prices, 3.9px for tab labels and 3.4px for tile captions. Apple's HIG
+   puts the floor at 11pt; every one of those is unreadable, which voids the whole
+   premise of showing the real product UI.
+
+   Enlarging the phone cannot fix it: at an aspect of 2.16, a legible width of
+   about 92vw makes it 750px tall, filling 89% of the viewport with nothing left
+   for text. The shell has to go.
+
+   Without it the screen spans 92vw (about 359px), within 6% of the 380px cqw
+   basis, so in-screen sizes land back near the real app (16px card titles, 12px
+   prices).
+
+   The layout also moves from absolute positioning to a two-row grid: image on
+   top, text below. Absolute offsets mis-compute the clearance across device
+   heights (an iPhone SE's 667px and a Pro Max's 932px differ by 40%), while the
+   grid lets the browser allocate and nothing can overlap at any height. All five
+   text panels share the second row's single cell, so they still stack and
+   cross-fade exactly as before.
+   ══════════════════════════════════════════════ */
 @media (max-width: 1023px) {
-  /* 移动端：手机顶部、文字底部横幅。面板 bottom 需清开吸底 CTA（约 68px）
-     与安全区。/ Mobile: phone at the top, text as a bottom banner clearing
-     the sticky CTA (~68px) plus the safe area. */
-  .story-phone {
-    top: calc(64px + env(safe-area-inset-top) + 2vh);
-    transform: translateX(-50%);
+  /* 滚动行程 520vh → 440vh：手机上每一屏的滚动手感比桌面「重」，同样的幕数
+     缩短行程读起来更紧凑。/ 520vh -> 440vh: a screenful of scrolling feels
+     heavier on a phone, so the same five scenes read tighter over less travel. */
+  .story-section {
+    height: 440vh;
   }
-  .dev-body { --dev-w: clamp(150px, 40vw, 208px); }
-  /* 面板压一层向下渐深的底幕：窄而高的屏幕上手机底缘可能探进面板区，
-     渐变保证文字始终压在可读的深底上，同时不产生一条硬边。
-     The panel sits on a downward-deepening scrim: on narrow, tall screens the
-     phone's lower edge can reach into the panel zone, and the gradient keeps
-     text on a readable dark ground without introducing a hard edge. */
+  .story-stage {
+    display: grid;
+    grid-template-columns: 100%;
+    grid-template-rows: minmax(0, 1fr) auto;
+    row-gap: 2.4vh;
+    /* 上留导航（64px）与刘海，下留吸底 CTA（约 68px）与安全区。
+       Top clears the nav and the notch; bottom clears the sticky CTA and the
+       safe area. */
+    padding: calc(64px + env(safe-area-inset-top) + 1.6vh) 4vw calc(env(safe-area-inset-bottom) + 82px);
+  }
+
+  .story-phone {
+    position: static;
+    grid-area: 1 / 1;
+    transform: none;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  /* 高度靠 flex 拉伸逐层传递，不用 height: 100%。
+     百分比高度要求父级有"确定的"高度，而 .dev-scene 是个没有显式高度的 flex
+     item，百分比无法解析、退化成 auto——实测屏幕因此溢出父容器 114px，压在了
+     下方的示例声明上。改成每层都是 flex 容器后，子元素靠 align-items: stretch
+     自动撑满交叉轴，链条不会断。
+     Heights propagate by flex stretch instead of height: 100%. A percentage
+     height needs a definite height on the parent, and .dev-scene is a flex item
+     with no explicit height, so the percentage failed to resolve and fell back to
+     auto - measured, the screen overflowed its parent by 114px and covered the
+     sample-data caption below it. Making every level a flex container lets
+     align-items: stretch fill the cross axis so the chain cannot break. */
+  .dev-scene {
+    flex: 1 1 auto;
+    min-height: 0;
+    perspective: none;
+    display: flex;
+  }
+  .dev-pose,
+  .dev-tilt,
+  .dev-body {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+  }
+  /* 卡片是平的，不再做 3/4 侧身——特意与基础层同样的选择器权重，靠后来居上
+     覆盖。/ The card is flat, no three-quarter stance; the selector deliberately
+     matches the base rule's specificity and wins by source order. */
+  .story-root:not(.is-scrub) .dev-pose {
+    transform: none;
+  }
+  .dev-body {
+    width: auto;
+    aspect-ratio: auto;
+  }
+  .dev-slab,
+  .dev-face,
+  .dev-facelight,
+  .dev-key,
+  .dev-island,
+  .dev-ground,
+  .dev-sheen {
+    display: none;
+  }
+  /* relative 而不是 static：屏内五幕是 position: absolute; inset: 0，需要它
+     继续充当定位祖先，同时 overflow 与圆角才能把内容裁在卡片里。
+     relative rather than static: the five scenes inside are absolutely inset to
+     0 and need this to stay their containing block, which also keeps overflow
+     and the radius clipping content to the card. */
+  .dev-screen {
+    position: relative;
+    inset: auto;
+    flex: 1 1 auto;
+    min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    box-shadow: none;
+  }
+  /* 没有灵动岛要让，头部回到正常的顶部留白 / no island to clear, so the header
+     returns to a normal top margin */
+  .pc-head {
+    top: 5cqw;
+  }
+  .scr {
+    padding: 17cqw 5cqw 24cqw;
+  }
+
   .story-panel {
-    left: 0;
-    right: 0;
-    bottom: 0;
-    padding: 9vh 5vw calc(env(safe-area-inset-bottom) + 88px);
-    background: linear-gradient(180deg, transparent 0%, rgba(9, 9, 11, 0.94) 26%, rgba(9, 9, 11, 0.97) 100%);
+    position: static;
+    grid-area: 2 / 1;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    padding: 0;
+    background: none;
   }
 }
 

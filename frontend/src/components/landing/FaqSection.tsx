@@ -53,7 +53,7 @@ export default function FaqSection() {
 
           <Link
             to={localePath(lang, '/faq')}
-            className="mt-7 inline-block text-[13.5px] text-prism-400 underline underline-offset-4 transition-colors hover:text-prism-300"
+            className="mt-5 inline-block py-2.5 text-[13.5px] text-prism-400 underline underline-offset-4 transition-colors hover:text-prism-300"
           >
             {t('landing.faqViewAll')}
           </Link>
