@@ -3294,7 +3294,7 @@ body {
 .dev-slab {
   position: absolute;
   inset: 0;
-  border-radius: 11.5% / 5.4%;
+  border-radius: 16.1% / 7.47%;
   /* 横向金属渐变：两端亮、中间暗。旋转时露出的层边是被光打亮的铝轨。
      中间层不描边（1px 边框旋转时会叠出「年轮」）。
      Horizontal metal gradient, bright at both ends: the exposed layer edges
@@ -3326,7 +3326,7 @@ body {
 .dev-face {
   position: absolute;
   inset: 0;
-  border-radius: 11.5% / 5.4%;
+  border-radius: 16.1% / 7.47%;
   transform: translateZ(0.5px);
   background:
     linear-gradient(155deg, #3a3a44 0%, #17171c 34%, #101013 62%, #23232b 100%);
@@ -3352,7 +3352,7 @@ body {
 .dev-facelight {
   position: absolute;
   inset: 0;
-  border-radius: 11.5% / 5.4%;
+  border-radius: 16.1% / 7.47%;
   overflow: hidden;
   transform: translateZ(0.6px);
   pointer-events: none;
@@ -3392,7 +3392,7 @@ body {
 .dev-screen {
   position: absolute;
   inset: 1.6% 3%;
-  border-radius: 9.5% / 4.7%;
+  border-radius: 13.9% / 6.28%;
   background: #060608;
   overflow: hidden;
   transform: translateZ(1px);
@@ -3438,7 +3438,7 @@ body {
   inset: 0;
   z-index: 30;
   pointer-events: none;
-  border-radius: 9.5% / 4.7%;
+  border-radius: 13.9% / 6.28%;
   background: linear-gradient(115deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.04) 32%, transparent 55%);
   opacity: 0.1;
   transform: translateZ(1.5px);
@@ -3508,6 +3508,43 @@ body {
   border-radius: 999px;
   background: var(--up);
 }
+/* 底部 Tab 栏：胶囊形。
+   这里绕了一圈才找到对的形状，值得记下来。先是四角统一 5cqw，与屏幕底部圆角
+   不共圆心，缝隙在直边处窄、拐角处张开；改成「下角取同心值、上角受 CSS 规范
+   限制只能很小」之后，外框成了躺倒的「D」，内部紫块更是四个角里只有一个特别
+   圆——几何上正确，视觉上是歪的。
+
+   根因是同心公式在**矮元素**上会退化：同心只约束单个角的半径，不保证四角彼此
+   协调，元素越矮，那个被放大的角占高度的比例越离谱。
+
+   胶囊一次性解决全部矛盾：
+   · 半径 = 高 / 2，四角天然对称，不存在「一个角特别圆」；
+   · 内层胶囊的高 = 外层高 − 2 × 内边距，于是内半径 = 外半径 − 内边距，
+     **同心关系自动成立**，不必再为首尾 Tab 单独写角半径；
+   · 把栏高定到 84px，则 84 / 2 = 42px 恰好等于「屏幕圆角 53 − 内缩 11」，
+     与屏幕拐角也共圆心。
+   84px 在 822px 的屏幕上占 10.2%，与真机底栏（约 10%）一致，不是为了凑数。
+
+   The bottom tab bar as a capsule. This took a couple of wrong turns worth
+   recording. Four uniform 5cqw corners were not concentric with the screen, so
+   the gap stayed narrow along the straight edges and flared at the corners.
+   Switching to a concentric bottom radius (with the top forced small by the CSS
+   radius-scaling rule) turned the bar into a sideways "D", and left the inner
+   violet block with one corner far rounder than its other three - geometrically
+   right, visually lopsided.
+
+   The root cause: the concentric formula constrains one corner at a time and
+   says nothing about the four agreeing with each other. The shorter the element,
+   the more absurd the enlarged corner's share of its height becomes.
+
+   A capsule dissolves every one of these at once: radius = height / 2 makes all
+   four corners equal by construction; an inner capsule's height is the outer
+   height minus twice the padding, so inner radius = outer radius - padding and
+   concentricity holds automatically with no per-corner rules for the first and
+   last tabs; and fixing the bar at 84px tall makes 84 / 2 = 42px exactly equal
+   to the screen radius (53) minus the inset (11), so it is concentric with the
+   screen corner too. 84px is 10.2% of the 822px screen, matching a real tab bar
+   at roughly 10% - the number was not chosen to make the maths work. */
 .pc-tabs {
   position: absolute;
   left: 3cqw;
@@ -3516,89 +3553,39 @@ body {
   z-index: 10;
   display: flex;
   gap: 1cqw;
-  /* 内边距 1.6 → 2.4cqw：这个值同时是「外框圆角」与「内部激活块圆角」之间的
-     差值，下面每一处同心计算都以它为准。
-     Padding 1.6 -> 2.4cqw: this value is also the difference between the bar's
-     radii and the active block's, and every concentric figure below derives
-     from it. */
   padding: 2.4cqw;
-  /* 下方两角与屏幕圆角**同心**：内圆角 = 屏幕圆角 − 内缩距离。
-     此前四角统一 5cqw，而屏幕底部圆角远大于此，于是 Tab 栏与屏幕边缘之间的
-     间距在直边处窄、到拐角处骤然张开——那道忽宽忽窄的缝就是「看着别扭」的
-     来源。取同心值后两条弧线共圆心，缝隙处处等宽。
-     上方两角收到 3cqw 不只是造型：CSS 规范规定同一条边上的两个圆角之和超过
-     边长时，浏览器会把**所有**圆角按比例缩小。Tab 栏高约 14.5cqw，若上角仍取
-     5cqw，则 5 + 11 = 16 > 14.5，下角会被连带缩水，同心关系就破了。
-     The two bottom corners are concentric with the screen's: inner radius equals
-     the screen radius minus the inset. All four were previously 5cqw while the
-     screen's bottom corners are far larger, so the gap between the bar and the
-     screen edge stayed narrow along the straight edges and flared open at the
-     corners - that varying gap is exactly what reads as uncomfortable. Concentric
-     radii put both arcs on one centre and hold the gap constant.
-     Pulling the top corners to 3cqw is not styling: per CSS spec, when two radii
-     on the same side exceed that side's length the browser scales down ALL radii
-     proportionally. The bar is about 14.5cqw tall, so leaving the top at 5cqw
-     would give 5 + 11 = 16 > 14.5 and shrink the bottom corners too, breaking the
-     concentricity. */
-  /* 上角 3 → 6cqw。此前上下相差 3.7 倍（11px vs 42px），整体读成半个「D」。
-     之所以以前只能给 3cqw，是因为 CSS 规范会在「同边两圆角之和 > 边长」时把
-     所有圆角按比例缩小，而当时栏高只有 57px，42 + 19 已经越界。下面把栏加高到
-     约 67px 就腾出了空间：22.8 + 41.8 = 64.6 < 67，规范不再介入。
-     Top corners 3 -> 6cqw. They previously differed from the bottom by 3.7x
-     (11px against 42px), which read as half a "D". The 3cqw ceiling existed
-     because CSS scales every radius down proportionally once two radii on one
-     side exceed that side's length, and at the old 57px height 42 + 19 already
-     overflowed. Raising the bar to about 67px below makes room: 22.8 + 41.8 =
-     64.6 < 67, so the spec no longer intervenes. */
-  border-radius: 6cqw 6cqw 7cqw 7cqw;
-  /* 裁掉溢出的子元素：激活态的紫色 Tab 距边框仅 1.6cqw，在 7-11cqw 的圆角处
-     会探到弧线外面。交给 overflow 裁剪，紫块的转角自动贴合外框曲线，不必再为
-     每个 Tab 单独算一遍同心圆角。
-     Clip overflowing children: the active violet tab sits only 1.6cqw from the
-     edge and would poke outside a 7-11cqw corner arc. Letting overflow clip it
-     makes the violet block follow the outer curve automatically, with no need to
-     compute concentric radii again for each tab. */
+  border-radius: 999px;
   overflow: hidden;
   background: rgba(16, 16, 18, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
+/* 单个 Tab 也是胶囊。加高到约 64px 是为了让外框落到 84px（见上），
+   同时图标与字号一并放大，避免「高度撑大了但内容还是原来那么小」的空洞感。
+   Each tab is a capsule too. The height rises to about 64px so the bar lands at
+   84px (see above), with the icon and label scaled up alongside it so the extra
+   height does not read as hollow padding around unchanged content. */
 .pc-tab {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.9cqw;
-  /* 加高：栏高从约 55px 提到约 67px，既给上角腾出圆角空间，也更接近真机比例
-     （真机底栏约占屏高 10%，此前只有 7%）。
-     Taller: the bar goes from about 55px to about 67px, which both frees up room
-     for the top radius and lands closer to real hardware (a real tab bar is
-     about 10% of screen height; this was 7%). */
-  padding: 2.6cqw 0 2.3cqw;
-  /* 同心：外框上角 6cqw − 内边距 2.4cqw = 3.6cqw，紫块与外框上沿的缝隙等宽。
-     Concentric: the bar's 6cqw top minus the 2.4cqw padding gives 3.6cqw, so the
-     gap between the violet block and the bar's top edge stays constant. */
-  border-radius: 3.6cqw;
+  gap: 1.1cqw;
+  padding: 4cqw 0 3.6cqw;
+  border-radius: 999px;
   color: var(--text-3);
-  font-size: 2.5cqw;
+  font-size: 2.7cqw;
   font-weight: 600;
   line-height: 1;
   transition: background-color 0.35s var(--ease-out), color 0.35s var(--ease-out);
 }
 .pc-tab svg {
-  width: 4.6cqw;
-  height: 4.6cqw;
+  width: 5.4cqw;
+  height: 5.4cqw;
 }
 .pc-tab.on {
   color: #fff;
   background: var(--purple);
 }
-/* CSS 回退模式的同心值：外框下角 7cqw − 内边距 2.4cqw = 4.6cqw。
-   GL 模式的对应规则在下方 .gl-on 段里覆盖（屏幕圆角更大）。
-   Concentric figures for the CSS fallback: the bar's 7cqw bottom minus 2.4cqw of
-   padding gives 4.6cqw. GL mode overrides this further down, where the screen's
-   corner radius is larger. */
-.pc-tab:first-child { border-bottom-left-radius: 4.6cqw; }
-.pc-tab:last-child { border-bottom-right-radius: 4.6cqw; }
 
 /* ── 屏幕内容（五幕）/ screens ── */
 .scr {
@@ -3613,7 +3600,7 @@ body {
      breathing room); bottom clears the tab bar. Horizontal padding drops from
      7cqw to 5cqw: on the 380px screen DOM 7cqw is about 27pt against iOS's usual
      16-20pt, and on a screen this narrow those points are worth reclaiming. */
-  padding: 26cqw 5cqw 24cqw;
+  padding: 26cqw 5cqw 28cqw;
   opacity: 0;
   visibility: hidden;
 }
@@ -3782,26 +3769,4 @@ body {
   box-shadow: none;
   background: #06060a;
 }
-/* GL 模式的屏幕圆角由机身开孔决定（世界坐标 9.4mm ÷ 0.17737 ≈ 53 DOM px
-   ≈ 14cqw），比 CSS 回退模式的约 10cqw 更大，Tab 栏的同心值随之从 7cqw 提到
-   11cqw。/ In GL mode the screen's corner radius comes from the body aperture
-   (9.4mm world / 0.17737 is about 53 DOM px, roughly 14cqw), larger than the
-   CSS fallback's ~10cqw, so the bar's concentric radius rises from 7cqw to
-   11cqw to match. */
-.gl-on .pc-tabs {
-  border-radius: 6cqw 6cqw 11cqw 11cqw;
-}
-/* 激活块的下方外角同样同心：外框下角 11cqw − 内边距 2.4cqw = 8.6cqw。
-   注意这里**不能**靠 overflow 裁剪代替：裁剪会让紫块在拐角处紧贴外框、缝隙
-   归零，而直边处仍有 2.4cqw 的缝，那道「直边有缝、拐角没缝」的不一致正是上一
-   轮遗留的问题。只有显式给同心圆角，缝隙才处处等宽。
-   The active block's outer bottom corners are concentric too: the bar's 11cqw
-   minus the 2.4cqw padding gives 8.6cqw. Overflow clipping cannot substitute
-   here: clipping pulls the violet block flush against the bar at the corner,
-   leaving zero gap there while the straight edges keep their 2.4cqw - and that
-   "gap on the straights, none at the corner" mismatch is exactly what was left
-   over from the previous pass. Only an explicit concentric radius holds the gap
-   constant. */
-.gl-on .pc-tab:first-child { border-bottom-left-radius: 8.6cqw; }
-.gl-on .pc-tab:last-child { border-bottom-right-radius: 8.6cqw; }
 
