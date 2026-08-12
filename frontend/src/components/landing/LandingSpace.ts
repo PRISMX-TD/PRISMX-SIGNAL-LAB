@@ -36,6 +36,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import type * as TH from 'three'
+import { createBackdropSolids, type SolidVariant, type SolidsHandle } from './BackdropSolids'
 
 export type Backdrop = 'none' | 'sweep' | 'horizon' | 'veil'
 
@@ -44,6 +45,8 @@ export interface SpaceHandle {
   dispose(): void
   /** 实时切换背景处理 / switch the backdrop treatment live */
   setBackdrop(b: Backdrop): void
+  /** 切换背景实体 / switch the dimensional backdrop solid */
+  setSolid(v: SolidVariant): void
   /** 实例序号 / instance number */
   instId: number
   /** DEV 专用探针，由挂载层决定要不要装到 window 上 / DEV-only probe; the mount
@@ -216,6 +219,15 @@ export async function createLandingSpace(opts: {
   setBackdrop('sweep')
 
 
+  /* 实体层：体积感全部来自这里的实算环境反射，与手机同族材质。
+     低功耗设备关掉玻璃的 transmission（每帧额外一张背景缓冲），形状与反光保留。
+     The solids layer, whose volume comes entirely from computed environment
+     reflection in the same material family as the phone. Low-power devices drop
+     the glass transmission pass while keeping the form and its speculars. */
+  const solids: SolidsHandle = createBackdropSolids(THREE, renderer, scene, {
+    lowPower: window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 1024,
+  })
+
   /* ══ 相机路径 ══
      不再有俯冲和飞行：从头到尾是一次缓慢的低空前推。变化要慢到观众说不出
      「刚才动了」，只觉得世界一直是活的。所有关键帧都略微俯视——上一版的教训：
@@ -359,6 +371,7 @@ export async function createLandingSpace(opts: {
        frame stays a place, not a picture. Offsets land on the camera position
        with the look target held, so near grid moves more than far. */
     applyRoute(cur, Math.sin(t * 0.19) * 11 + ptr.x * 30, Math.cos(t * 0.133) * 6 + ptr.y * 18)
+    solids.update(t, cur)
     draw()
   }
   const pump = () => {
@@ -389,6 +402,46 @@ export async function createLandingSpace(opts: {
       },
       resume: () => pump(),
       get: () => cur,
+      /* 把当前可见实体的包围盒投到屏幕百分比。3D 里「东西落在画面哪儿」是我
+         在无头环境下唯一能核对的方式——平面 SVG 那一版靠 getBBox，这里靠投影。
+         Projects the visible solids' bounding box to viewport percentages. Where
+         things land in a 3D frame is the one thing that can be checked headlessly,
+         by projection here as getBBox did for the flat SVG pass. */
+      solidBox(r: number) {
+        ;(devApi as { set(x: number): void }).set(r)
+        const box = new THREE.Box3()
+        let any = false
+        scene.traverse((o) => {
+          const m = o as TH.Mesh
+          if (!m.isMesh || !m.visible) return
+          let par: TH.Object3D | null = m.parent
+          let shown = true
+          while (par) {
+            if (!par.visible) shown = false
+            par = par.parent
+          }
+          if (!shown || !m.geometry?.boundingBox) {
+            m.geometry?.computeBoundingBox?.()
+          }
+          if (!shown || !m.geometry?.boundingBox) return
+          if (m.geometry.boundingBox.max.x - m.geometry.boundingBox.min.x > 5000) return
+          const b = m.geometry.boundingBox.clone().applyMatrix4(m.matrixWorld)
+          box.union(b)
+          any = true
+        })
+        if (!any) return { empty: true }
+        const v = new THREE.Vector3()
+        let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9
+        for (const bx of [box.min.x, box.max.x])
+          for (const by of [box.min.y, box.max.y])
+            for (const bz of [box.min.z, box.max.z]) {
+              v.set(bx, by, bz).project(camera)
+              x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x)
+              y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y)
+            }
+        const pc = (n: number) => Math.round((n * 0.5 + 0.5) * 1000) / 10
+        return { l: pc(x0), r: pc(x1), t: 100 - pc(y1), b: 100 - pc(y0) }
+      },
       /* 探针也要能切背景，而且必须切的是**同一个实例**：React StrictMode 会
          挂载两次，window.__space 与 React 持有的句柄可能来自不同实例，那样量
          到的就是一个已经卸载的场景。instId 让两边可以对账。
@@ -435,6 +488,7 @@ export async function createLandingSpace(opts: {
   return {
     resize,
     setBackdrop,
+    setSolid: (v: SolidVariant) => solids.setVariant(v),
     instId: INST,
     debug: devApi,
     dispose() {
@@ -442,6 +496,7 @@ export async function createLandingSpace(opts: {
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('resize', resize)
       if (onPointer) window.removeEventListener('pointermove', onPointer)
+      solids.dispose()
       renderer.domElement.remove()
       renderer.dispose()
       scene.traverse((o) => {

@@ -26,7 +26,7 @@
 // does. The expensive phone body still loads on desktop only.
 import { useEffect, useRef, useState } from 'react'
 import { createLandingSpace, type SpaceHandle } from './LandingSpace'
-import BackdropArt, { type ArtVariant } from './BackdropArt'
+import type { SolidVariant } from './BackdropSolids'
 
 /* 背景变体切换器（临时评审工具）。
    前一版这里放的四个选项全是**光的分布**（网格/扫光/地平线/光幕），换的只是
@@ -42,18 +42,25 @@ import BackdropArt, { type ArtVariant } from './BackdropArt'
    if light is not wanted, do not bed the motifs on a layer of it. Appears only
    with ?bg in the URL, remembers the choice, and is deleted once a direction is
    picked. */
-const OPTIONS: { id: ArtVariant; label: string; hint: string }[] = [
+const OPTIONS: { id: SolidVariant; label: string; hint: string }[] = [
   { id: 'none', label: '无', hint: '纯底色，什么都不放' },
-  { id: 'prism', label: '棱镜折射', hint: '一道光射入棱镜，裂成三条紫色谱带横穿画面' },
-  { id: 'scale', label: '价格标尺', hint: '左缘竖轴 + 真实刻度，止盈/入场/止损三条贯穿线' },
-  { id: 'numerals', label: '巨型价格', hint: '三个真实价位，巨大的描边数字从左缘出血' },
-  { id: 'candles', label: 'K 线天际线', hint: '底缘一排蜡烛剪影，产品自己的语言当风景' },
+  { id: 'prism', label: '玻璃棱镜', hint: '真折射的实体棱镜，极慢自转；PRISMX 的字面形态' },
+  { id: 'slabs', label: '悬浮金属板', hint: '几块拉丝金属板悬在不同深度，与手机同族材质' },
+  { id: 'terraces', label: '阶梯台地', hint: '三级实体台阶，高度对应止盈/入场/止损' },
 ]
 
 export default function LandingSpaceLayer() {
   const host = useRef<HTMLDivElement>(null)
   const handleRef = useRef<SpaceHandle | null>(null)
-  const [variant, setVariant] = useState<ArtVariant>('prism')
+  const [variant, setVariant] = useState<SolidVariant>('prism')
+  /* 挂载 effect 的依赖是空数组，它闭包里的 variant 永远是初值。异步创建完成
+     得比「从 localStorage 恢复选择」晚，直接用闭包值会把恢复的选择覆盖回初值。
+     所以当前值另存一份 ref。
+     The mount effect has an empty dependency array, so the variant in its closure
+     is forever the initial one. Creation finishes after the stored choice is
+     restored, and using the closure value would overwrite that choice with the
+     initial one - hence a ref holding the current value. */
+  const variantRef = useRef<SolidVariant>('prism')
   const [picker, setPicker] = useState(false)
 
   /* 初值在 effect 里读而不是在 useState 初始化器里读：初始化器在客户端首次
@@ -63,11 +70,13 @@ export default function LandingSpaceLayer() {
      output, which trips a hydration warning. */
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has('bg')) setPicker(true)
-    const saved = localStorage.getItem('slBg') as ArtVariant | null
+    const saved = localStorage.getItem('slBg') as SolidVariant | null
     if (saved && OPTIONS.some((o) => o.id === saved)) setVariant(saved)
   }, [])
 
   useEffect(() => {
+    variantRef.current = variant
+    handleRef.current?.setSolid(variant)
     try {
       localStorage.setItem('slBg', variant)
     } catch {
@@ -114,6 +123,7 @@ export default function LandingSpaceLayer() {
         /* 照明一律关：元素底下不再垫光。
            Lighting stays off: the motifs are not bedded on a wash. */
         handle.setBackdrop('none')
+        handle.setSolid(variantRef.current)
         document.documentElement.classList.add('space-on')
       }
     })()
@@ -142,7 +152,6 @@ export default function LandingSpaceLayer() {
       {/* 上下渐隐：导航与页脚下方的线条必须让位，否则文字压在网格上。
           Top and bottom fades so lines yield under the nav and the footer rather
           than sitting behind type. */}
-      <BackdropArt variant={variant} />
       <div className="landing-space-fade t" />
       <div className="landing-space-fade b" />
     </div>
