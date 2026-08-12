@@ -3440,7 +3440,7 @@ body {
   pointer-events: none;
   border-radius: 13.9% / 6.28%;
   background: linear-gradient(115deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.04) 32%, transparent 55%);
-  opacity: 0.1;
+  opacity: 0.06;
   transform: translateZ(1.5px);
 }
 /* 地影：中性黑椭圆，表达高度。/ ground shadow: neutral, elevation only. */

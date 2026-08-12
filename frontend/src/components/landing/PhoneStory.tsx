@@ -178,9 +178,22 @@ export default function PhoneStory() {
         /* 反光脉冲：转场时环境光扫过屏幕。这是反射，不是发光。
            Sheen pulse: ambient light sweeping the screen at a transition.
            A reflection, not an emission. */
+        /* 峰值从 0.4 收到 0.16、基线从 0.1 收到 0.06。0.4 的白色渐变盖在屏幕内容
+           上是 4 倍的亮度跃变，肉眼读到的不是「环境光扫过」而是「屏幕闪了一下」，
+           而它恰好只在转场时发生，与「有时候会闪烁」的描述完全吻合。
+           机身现在已由 WebGL 按环境贴图实算反射，屏幕上这层手绘反光的职责只剩
+           「玻璃盖板本身也该有一点点反射」，该收到几乎察觉不到的强度。
+           Peak pulled from 0.4 to 0.16 and the resting value from 0.1 to 0.06. A
+           white gradient at 0.4 over the screen content is a fourfold brightness
+           jump that reads as the screen blinking rather than as ambient light
+           passing over it - and it fires only at transitions, which matches the
+           report of occasional flicker exactly. Now that the body's reflections
+           are computed from a real environment map in WebGL, this hand-drawn
+           sheen only has to say "the cover glass reflects a little too", which
+           belongs at a barely perceptible level. */
         const sheenPulse = (tl: gsap.core.Timeline, at: number) => {
-          tl.to('.js-sheen', { opacity: 0.4, duration: 2, ease: 'power1.in' }, at)
-          tl.to('.js-sheen', { opacity: 0.1, duration: 2.5, ease: 'power1.out' }, at + 2)
+          tl.to('.js-sheen', { opacity: 0.16, duration: 2, ease: 'power1.in' }, at)
+          tl.to('.js-sheen', { opacity: 0.06, duration: 2.5, ease: 'power1.out' }, at + 2)
         }
         /* 屏幕交叉淡化 / screen crossfade */
         const swapScreen = (tl: gsap.core.Timeline, from: number, to: number, at: number) => {

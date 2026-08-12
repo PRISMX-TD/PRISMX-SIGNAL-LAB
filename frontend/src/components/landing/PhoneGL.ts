@@ -146,7 +146,29 @@ export async function createPhoneGL(opts: {
   container.appendChild(renderer.domElement)
 
   const scene = new THREE.Scene()
-  const camera = new THREE.PerspectiveCamera(CAM_FOV, 1, 1, 4000)
+  /* 近/远裁剪面必须紧贴物体，否则会闪。
+     深度缓冲的精度沿 z 极不均匀，绝大部分量化级都堆在近裁剪面附近。此前
+     near=1 / far=4000，而物体全在 z≈500 处，于是那里的深度分辨率只有
+       Δz ≈ z² × (1/near − 1/far) / 2²⁴ ≈ 0.015 世界单位
+     而玻璃盖板与屏幕遮罩之间只隔 0.04 单位 —— 仅 2.7 个量化级。机身一旋转，
+     插值出的深度值就在相邻量化级之间来回跳，深度测试的胜负随之翻转，肉眼看到
+     的就是「有时候闪一下」。
+     相机在 z=500，物体（含旋转 22° 后的最大 z 跨度与 1.1 倍缩放）落在 481-519，
+     阴影面最远到 514。取 near=300 / far=800 既有充裕余量，又把该处精度提到
+     0.000031 单位 —— 约 480 倍，两个面之间变成六千个量化级，彻底脱离 z-fighting。
+     Near and far must hug the subject or it flickers. Depth precision is wildly
+     non-uniform along z, with most quantisation levels packed near the near
+     plane. At near=1 / far=4000 with everything sitting around z=500, the depth
+     resolution there was only about 0.015 world units, while the cover glass and
+     the screen mask are just 0.04 apart - 2.7 levels. Rotating the body makes the
+     interpolated depth hop between adjacent levels, the depth test flips, and the
+     eye sees an occasional flicker.
+     The camera is at z=500 and the subject (including the largest z extent at 22°
+     of rotation and 1.1x scale) spans 481-519, with the shadow plane reaching
+     514. near=300 / far=800 leaves generous margin while raising precision there
+     to 0.000031 units - roughly 480x better, turning that 0.04 gap into about six
+     thousand levels and putting z-fighting well out of reach. */
+  const camera = new THREE.PerspectiveCamera(CAM_FOV, 1, 300, 800)
   camera.position.set(0, 0, CAM_Z)
 
   /* ══ 环境光照：暗调产品摄影棚 ══
@@ -363,7 +385,7 @@ export async function createPhoneGL(opts: {
     envMapIntensity: 1.3,
   })
   const glass = new THREE.Mesh(glassGeo, glassMat)
-  glass.position.z = BODY_D / 2 + 0.02
+  glass.position.z = BODY_D / 2 + 0.15
   phone.add(glass)
 
   /* 屏幕开孔遮罩：只写深度不写颜色。renderOrder = -1 保证它先于机身绘制，
@@ -377,7 +399,7 @@ export async function createPhoneGL(opts: {
      the corners than along the straight edges. */
   const maskGeo = new THREE.ShapeGeometry(roundedRect(SCREEN_W, SCREEN_H, BODY_R - SCREEN_INSET), 32)
   const mask = new THREE.Mesh(maskGeo, new THREE.MeshBasicMaterial({ colorWrite: false }))
-  mask.position.z = BODY_D / 2 + 0.06
+  mask.position.z = BODY_D / 2 + 0.35
   mask.renderOrder = -1
   phone.add(mask)
 
@@ -425,7 +447,7 @@ export async function createPhoneGL(opts: {
     new THREE.ShapeGeometry(roundedRect(22, ISLAND_H, ISLAND_H / 2), 24),
     new THREE.MeshBasicMaterial({ color: 0x000000 })
   )
-  island.position.set(0, islandY, BODY_D / 2 + 0.1)
+  island.position.set(0, islandY, BODY_D / 2 + 0.6)
   island.renderOrder = 3
   phone.add(island)
 
@@ -448,7 +470,7 @@ export async function createPhoneGL(opts: {
   screenEl.style.height = `${SCREEN_DOM_H}px`
   const screenObj = new CSS3DObject(screenEl)
   screenObj.scale.setScalar(SCREEN_SCALE)
-  screenObj.position.z = BODY_D / 2 + 0.04
+  screenObj.position.z = BODY_D / 2 + 0.22
   phone.add(screenObj)
 
   /* ── 尺寸与投影 ──
