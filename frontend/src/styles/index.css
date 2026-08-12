@@ -3516,7 +3516,12 @@ body {
   z-index: 10;
   display: flex;
   gap: 1cqw;
-  padding: 1.6cqw;
+  /* 内边距 1.6 → 2.4cqw：这个值同时是「外框圆角」与「内部激活块圆角」之间的
+     差值，下面每一处同心计算都以它为准。
+     Padding 1.6 -> 2.4cqw: this value is also the difference between the bar's
+     radii and the active block's, and every concentric figure below derives
+     from it. */
+  padding: 2.4cqw;
   /* 下方两角与屏幕圆角**同心**：内圆角 = 屏幕圆角 − 内缩距离。
      此前四角统一 5cqw，而屏幕底部圆角远大于此，于是 Tab 栏与屏幕边缘之间的
      间距在直边处窄、到拐角处骤然张开——那道忽宽忽窄的缝就是「看着别扭」的
@@ -3535,7 +3540,17 @@ body {
      proportionally. The bar is about 14.5cqw tall, so leaving the top at 5cqw
      would give 5 + 11 = 16 > 14.5 and shrink the bottom corners too, breaking the
      concentricity. */
-  border-radius: 3cqw 3cqw 7cqw 7cqw;
+  /* 上角 3 → 6cqw。此前上下相差 3.7 倍（11px vs 42px），整体读成半个「D」。
+     之所以以前只能给 3cqw，是因为 CSS 规范会在「同边两圆角之和 > 边长」时把
+     所有圆角按比例缩小，而当时栏高只有 57px，42 + 19 已经越界。下面把栏加高到
+     约 67px 就腾出了空间：22.8 + 41.8 = 64.6 < 67，规范不再介入。
+     Top corners 3 -> 6cqw. They previously differed from the bottom by 3.7x
+     (11px against 42px), which read as half a "D". The 3cqw ceiling existed
+     because CSS scales every radius down proportionally once two radii on one
+     side exceed that side's length, and at the old 57px height 42 + 19 already
+     overflowed. Raising the bar to about 67px below makes room: 22.8 + 41.8 =
+     64.6 < 67, so the spec no longer intervenes. */
+  border-radius: 6cqw 6cqw 7cqw 7cqw;
   /* 裁掉溢出的子元素：激活态的紫色 Tab 距边框仅 1.6cqw，在 7-11cqw 的圆角处
      会探到弧线外面。交给 overflow 裁剪，紫块的转角自动贴合外框曲线，不必再为
      每个 Tab 单独算一遍同心圆角。
@@ -3553,8 +3568,16 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 0.9cqw;
-  padding: 1.8cqw 0 1.5cqw;
-  border-radius: 3.4cqw;
+  /* 加高：栏高从约 55px 提到约 67px，既给上角腾出圆角空间，也更接近真机比例
+     （真机底栏约占屏高 10%，此前只有 7%）。
+     Taller: the bar goes from about 55px to about 67px, which both frees up room
+     for the top radius and lands closer to real hardware (a real tab bar is
+     about 10% of screen height; this was 7%). */
+  padding: 2.6cqw 0 2.3cqw;
+  /* 同心：外框上角 6cqw − 内边距 2.4cqw = 3.6cqw，紫块与外框上沿的缝隙等宽。
+     Concentric: the bar's 6cqw top minus the 2.4cqw padding gives 3.6cqw, so the
+     gap between the violet block and the bar's top edge stays constant. */
+  border-radius: 3.6cqw;
   color: var(--text-3);
   font-size: 2.5cqw;
   font-weight: 600;
@@ -3569,6 +3592,13 @@ body {
   color: #fff;
   background: var(--purple);
 }
+/* CSS 回退模式的同心值：外框下角 7cqw − 内边距 2.4cqw = 4.6cqw。
+   GL 模式的对应规则在下方 .gl-on 段里覆盖（屏幕圆角更大）。
+   Concentric figures for the CSS fallback: the bar's 7cqw bottom minus 2.4cqw of
+   padding gives 4.6cqw. GL mode overrides this further down, where the screen's
+   corner radius is larger. */
+.pc-tab:first-child { border-bottom-left-radius: 4.6cqw; }
+.pc-tab:last-child { border-bottom-right-radius: 4.6cqw; }
 
 /* ── 屏幕内容（五幕）/ screens ── */
 .scr {
@@ -3583,7 +3613,7 @@ body {
      breathing room); bottom clears the tab bar. Horizontal padding drops from
      7cqw to 5cqw: on the 380px screen DOM 7cqw is about 27pt against iOS's usual
      16-20pt, and on a screen this narrow those points are worth reclaiming. */
-  padding: 26cqw 5cqw 20cqw;
+  padding: 26cqw 5cqw 24cqw;
   opacity: 0;
   visibility: hidden;
 }
@@ -3759,6 +3789,19 @@ body {
    CSS fallback's ~10cqw, so the bar's concentric radius rises from 7cqw to
    11cqw to match. */
 .gl-on .pc-tabs {
-  border-radius: 3cqw 3cqw 11cqw 11cqw;
+  border-radius: 6cqw 6cqw 11cqw 11cqw;
 }
+/* 激活块的下方外角同样同心：外框下角 11cqw − 内边距 2.4cqw = 8.6cqw。
+   注意这里**不能**靠 overflow 裁剪代替：裁剪会让紫块在拐角处紧贴外框、缝隙
+   归零，而直边处仍有 2.4cqw 的缝，那道「直边有缝、拐角没缝」的不一致正是上一
+   轮遗留的问题。只有显式给同心圆角，缝隙才处处等宽。
+   The active block's outer bottom corners are concentric too: the bar's 11cqw
+   minus the 2.4cqw padding gives 8.6cqw. Overflow clipping cannot substitute
+   here: clipping pulls the violet block flush against the bar at the corner,
+   leaving zero gap there while the straight edges keep their 2.4cqw - and that
+   "gap on the straights, none at the corner" mismatch is exactly what was left
+   over from the previous pass. Only an explicit concentric radius holds the gap
+   constant. */
+.gl-on .pc-tab:first-child { border-bottom-left-radius: 8.6cqw; }
+.gl-on .pc-tab:last-child { border-bottom-right-radius: 8.6cqw; }
 
