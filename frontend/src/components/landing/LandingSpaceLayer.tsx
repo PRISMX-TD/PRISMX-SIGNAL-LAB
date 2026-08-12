@@ -44,15 +44,15 @@ import type { SolidVariant } from './BackdropSolids'
    picked. */
 const OPTIONS: { id: SolidVariant; label: string; hint: string }[] = [
   { id: 'none', label: '无', hint: '纯底色，什么都不放' },
-  { id: 'prism', label: '玻璃棱镜', hint: '真折射的实体棱镜，极慢自转；PRISMX 的字面形态' },
-  { id: 'slabs', label: '悬浮金属板', hint: '几块拉丝金属板悬在不同深度，与手机同族材质' },
-  { id: 'terraces', label: '阶梯台地', hint: '三级实体台阶，高度对应止盈/入场/止损' },
+  { id: 'bars', label: '掠过的立柱', hint: '细长立柱从深处涌来掠过两侧，速度感最强' },
+  { id: 'panels', label: '掠过的板片', hint: '宽而薄的板迎面而来，像穿过幕墙，比立柱安静' },
+  { id: 'frames', label: '掠过的方框', hint: '一个个方框从旁边推过，最有「一段一段前进」的节奏' },
 ]
 
 export default function LandingSpaceLayer() {
   const host = useRef<HTMLDivElement>(null)
   const handleRef = useRef<SpaceHandle | null>(null)
-  const [variant, setVariant] = useState<SolidVariant>('prism')
+  const [variant, setVariant] = useState<SolidVariant>('bars')
   /* 挂载 effect 的依赖是空数组，它闭包里的 variant 永远是初值。异步创建完成
      得比「从 localStorage 恢复选择」晚，直接用闭包值会把恢复的选择覆盖回初值。
      所以当前值另存一份 ref。
@@ -60,7 +60,7 @@ export default function LandingSpaceLayer() {
      is forever the initial one. Creation finishes after the stored choice is
      restored, and using the closure value would overwrite that choice with the
      initial one - hence a ref holding the current value. */
-  const variantRef = useRef<SolidVariant>('prism')
+  const variantRef = useRef<SolidVariant>('bars')
   const [picker, setPicker] = useState(false)
 
   /* 初值在 effect 里读而不是在 useState 初始化器里读：初始化器在客户端首次

@@ -224,7 +224,7 @@ export async function createLandingSpace(opts: {
      The solids layer, whose volume comes entirely from computed environment
      reflection in the same material family as the phone. Low-power devices drop
      the glass transmission pass while keeping the form and its speculars. */
-  const solids: SolidsHandle = createBackdropSolids(THREE, renderer, scene, {
+  const solids: SolidsHandle = createBackdropSolids(THREE, renderer, scene, camera, {
     lowPower: window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 1024,
   })
 
@@ -356,6 +356,7 @@ export async function createLandingSpace(opts: {
   draw()
 
   let raf = 0
+  let lastT = performance.now() / 1000
   const frame = () => {
     raf = requestAnimationFrame(frame)
     const target = computeRoute()
@@ -371,7 +372,18 @@ export async function createLandingSpace(opts: {
        frame stays a place, not a picture. Offsets land on the camera position
        with the look target held, so near grid moves more than far. */
     applyRoute(cur, Math.sin(t * 0.19) * 11 + ptr.x * 30, Math.cos(t * 0.133) * 6 + ptr.y * 18)
-    solids.update(t, cur)
+    /* dt 用真实帧间隔而不是固定值：掉帧时固定步长会让流速跟着掉，读起来是
+       「卡了」而不是「慢了」。上限 0.05s，标签页切回来时不至于瞬移一大段。
+       boost 取滚动增量：往下滚时流速加快，滚动因此变成推进的油门。
+       dt uses the real frame interval rather than a constant: with a fixed step a
+       dropped frame slows the flow, which reads as a stutter rather than as
+       slowing down. Capped at 0.05s so returning to a backgrounded tab does not
+       teleport the field. boost comes from the scroll delta, making scrolling the
+       throttle on the forward motion. */
+    const dt = Math.min(0.05, (t - lastT) || 0.016)
+    lastT = t
+    const boost = Math.min(3, Math.abs(target - cur) * 260)
+    solids.update(dt, _p.z, boost)
     draw()
   }
   const pump = () => {
@@ -402,6 +414,15 @@ export async function createLandingSpace(opts: {
       },
       resume: () => pump(),
       get: () => cur,
+      /* 手动步进：无头面板的 rAF 是冻结的，「东西有没有在往前流」在这里无法靠
+         等待两帧去验证——必须能显式推进模拟再取画面。
+         Manual stepping: rAF is frozen in the headless pane, so whether the field
+         is actually flowing cannot be checked by waiting two frames. The
+         simulation has to be advanceable explicitly before sampling. */
+      step(seconds: number) {
+        solids.update(seconds, _p.z, 0)
+        draw()
+      },
       /* 把当前可见实体的包围盒投到屏幕百分比。3D 里「东西落在画面哪儿」是我
          在无头环境下唯一能核对的方式——平面 SVG 那一版靠 getBBox，这里靠投影。
          Projects the visible solids' bounding box to viewport percentages. Where
