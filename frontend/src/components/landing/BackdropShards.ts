@@ -191,11 +191,43 @@ export function createBackdropShards(
      looked occupied while everything was stacked on a single line, and 34 of
      luminance still bled into the copy column. At depth the half-width grows and
      the same constraint relaxes on its own. */
-  const BANDS: { fx: [number, number]; r: [number, number] }[] = [
-    { fx: [0.47, 0.62], r: [90, 150] },
-    { fx: [0.8, 1.05], r: [150, 280] },
-    { fx: [-0.05, 0.06], r: [150, 260] },
+  /* ══ 手排布局 ══
+     随机分带出来的排布被指出「太多、位置很奇怪」，两个原因：
+     一、中间带取 0.47-0.62，而手机在屏幕 0.59-0.76——两者重叠，新加的碎片全挤在
+         手机左缘那一小块，成了主体旁边的一团噪点。
+     二、随机取样本身就会结块：同一带里连着几片落在相近位置、尺寸又相近，读起来
+         就是「一堆」而不是「几片」。
+     改成写死的布局表。十九片减到十一片，每片的屏幕位置、深度、大小都由这张表
+     决定，可以逐行复审，也不会因为换个随机种子就重排。
+     禁区两处：文案列（屏幕 5.5-35%）和手机（约 57-78%）。手机只对**近景**碎片
+     设禁——深处的碎片又小又淡，而且手机本体是不透明的，本来就会把它们挡住，
+     那正是纵深该有的样子。
+     Hand-authored layout. The random band placement was called out as too many
+     shards in strange positions, for two reasons: the middle band ran 0.47 to 0.62
+     while the phone occupies 0.59 to 0.76, so everything added there piled up
+     against the phone's left edge as noise beside the subject; and random sampling
+     clumps by nature, dropping several similar sizes at similar positions so it
+     reads as a heap rather than as a few shards. This table fixes each shard's
+     screen position, depth and size, reviewable line by line and stable across
+     seeds. Two exclusions: the copy column at 5.5-35% and the phone at roughly
+     57-78%, the latter only for NEAR shards - distant ones are small and faint, and
+     the phone's opaque body occludes them anyway, which is exactly what depth
+     should look like. */
+  const LAYOUT: [number, number, number, number][] = [
+    // 屏幕 x, 屏幕 y, 深度 t(0近-1远), 尺寸系数
+    [0.44, 0.26, 0.1, 0.5], // 中景空档，偏上
+    [0.5, 0.66, 0.34, 0.62], // 中景空档，偏下
+    [0.4, 0.84, 0.66, 0.8], // 中远，低位
+    [0.89, 0.2, 0.08, 0.7], // 右上，近
+    [0.98, 0.58, 0.3, 0.9], // 右中
+    [0.85, 0.86, 0.55, 0.75], // 右下
+    [0.02, 0.32, 0.18, 0.8], // 左缘，上
+    [-0.04, 0.74, 0.46, 0.85], // 左缘，下
+    [0.66, 0.1, 0.82, 0.55], // 远，手机上方
+    [0.74, 0.93, 0.88, 0.65], // 远，手机下方
+    [0.28, 0.08, 0.95, 0.6], // 远，左上（深处半幅大，不压文案）
   ]
+  const PHONE = { l: 0.57, r: 0.78 }
 
   const rnd = lcg(31337)
   /* 十九片，铺在 -260 到 -3000 的纵深里。横向偏右与外围：hero 文案列实测占视口
@@ -203,8 +235,8 @@ export function createBackdropShards(
      Nineteen shards through a depth of -260 to -3000, biased right and outward: the
      hero copy column measures 5.5-35% of the viewport and hard-edged solids sitting
      on type hurt more than haze does. */
-  for (let i = 0; i < 19; i++) {
-    const t = i / 18
+  for (let i = 0; i < LAYOUT.length; i++) {
+    const [fx0, fy0, t, rk] = LAYOUT[i]
     /* 不规则凸多边形：五到七个顶点，半径与角度都抖动。规则多边形一眼假，
        碎片的说服力全在「没有两片一样」。
        An irregular convex polygon of five to seven vertices with both radius and
@@ -213,8 +245,7 @@ export function createBackdropShards(
     const n = 5 + Math.floor(rnd() * 3)
     /* 分带轮转，中间带占比最高（0,1,2,0,1,0 的循环里 mid 出现两次）
        Round-robin across the bands with the middle weighted highest. */
-    const band = BANDS[[0, 1, 2, 0, 1, 0][i % 6]]
-    const r0 = band.r[0] + rnd() * (band.r[1] - band.r[0]) + t * 180
+    const r0 = (110 + rnd() * 90 + t * 200) * rk
     const shape = new THREE.Shape()
     for (let k = 0; k < n; k++) {
       const a = (k / n) * Math.PI * 2 + (rnd() - 0.5) * 0.75
@@ -269,15 +300,20 @@ export function createBackdropShards(
 
     const z = -260 - t * 2740
     const halfW = Math.max(1, (CAM_Z0 - z) * TAN_H)
-    const f = band.fx[0] + rnd() * (band.fx[1] - band.fx[0])
+    /* 近景碎片让开手机：把落在手机列里的推到最近的一侧之外。远景（t>0.6）不推——
+       手机会挡住它们，那是纵深，不是噪点。
+       Near shards clear the phone, pushed to whichever side is closer. Distant ones
+       (t above 0.6) are left alone: the phone occludes them, which reads as depth
+       rather than as clutter. */
+    let f = fx0
+    if (t < 0.6 && f > PHONE.l && f < PHONE.r) f = f - PHONE.l < PHONE.r - f ? PHONE.l : PHONE.r
     const x = (f * 2 - 1) * halfW
     /* 纵向也按屏幕铺：空的那块从画面 20% 一直到 82%，只靠固定的世界坐标范围
        在深处会全部挤到中线附近。/ Vertical placement is also in screen terms: the
        empty region runs from 20% to 82% of the frame, and a fixed world-space range
        would bunch everything near the centre line at depth. */
     const halfH = Math.max(1, (CAM_Z0 - z) * 0.3057)
-    const fy = 0.2 + rnd() * 0.62
-    const y = 60 + (0.5 - fy) * 2 * halfH
+    const y = 60 + (0.5 - fy0) * 2 * halfH
     o.position.set(clearCopy(x, z, r0), y, z)
     o.rotation.set(rnd() * 3.14, rnd() * 3.14, rnd() * 3.14)
     group.add(o)
