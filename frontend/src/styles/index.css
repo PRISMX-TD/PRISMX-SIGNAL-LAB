@@ -4385,19 +4385,18 @@ body {
    .sc-band/.sc-stamp 既有的 1.5s 延迟规则）。
    Candle cascade under steps: one per --ci step, with the verdict landing about
    1.3s after the march (the existing .sc-band/.sc-stamp delay rules). */
+/* 只动透明度：蜡烛的位置由标注坐标唯一决定，任何变换都有把它挪走的前科
+   （GSAP 的 viewBox 原点 × CSS fill-box 原点打架，实测整组蜡烛飘出绘图区）。
+   Opacity only: a candle's position belongs to its authored coordinates alone.
+   Transforms have a record here - GSAP's viewBox origin fought CSS's fill-box
+   origin and the whole series drifted out of the plot. */
 .sc-candle {
   opacity: 0;
-  transform: scaleY(0.25);
-  transform-box: fill-box;
-  transform-origin: center;
-  transition:
-    opacity 0.3s var(--ease-out),
-    transform 0.4s var(--ease-out);
+  transition: opacity 0.35s var(--ease-out);
   transition-delay: calc(var(--ci) * 55ms + 0.25s);
 }
 .mkt-scene.sc-on .sc-candle {
   opacity: 1;
-  transform: scaleY(1);
 }
 .is-scrub .sc-candle {
   transition: none;

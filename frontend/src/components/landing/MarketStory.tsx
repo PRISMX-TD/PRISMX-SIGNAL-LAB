@@ -154,7 +154,18 @@ export default function MarketStory() {
         ;[1, 2, 3, 4].forEach((n) => {
           gsap.set(pan(`mkt${n}`), { autoAlpha: 0, y: 24 })
           gsap.set(scene(n), { autoAlpha: 0 })
-          gsap.set(`${scene(n)} .sc-candle`, { autoAlpha: 0, scaleY: 0.25, transformOrigin: '50% 50%' })
+          /* 蜡烛只做透明度，绝不加变换。GSAP 对 SVG 子元素按 viewBox 坐标烘焙
+             变换原点补偿，而 CSS 的 transform-box: fill-box 让浏览器按元素自身
+             包围盒解释同一个原点——两套坐标系打架，每根蜡烛被平移了不同距离，
+             实测整组蜡烛飘出绘图区、压在表头上。位置必须由标注坐标唯一决定。
+             Candles animate opacity ONLY, never transforms. GSAP bakes SVG
+             transform-origin compensation in viewBox coordinates while CSS
+             transform-box: fill-box makes the browser resolve that origin
+             against each element's own bounds - two coordinate systems fighting,
+             every candle translated by a different amount. Measured: the whole
+             series drifted out of the plot onto the header. Authored coordinates
+             must be the single source of position. */
+          gsap.set(`${scene(n)} .sc-candle`, { autoAlpha: 0 })
           gsap.set(`${scene(n)} .sc-band`, { autoAlpha: 0 })
           gsap.set(`${scene(n)} .sc-stamp`, { autoAlpha: 0, scale: 0.6, transformOrigin: '50% 50%' })
         })
@@ -195,8 +206,8 @@ export default function MarketStory() {
           tl.fromTo(pan(`mkt${n}`), { autoAlpha: 0, y: 24 }, { autoAlpha: 1, y: 0, duration: 3 }, at + 1)
           tl.fromTo(
             `${scene(n)} .sc-candle`,
-            { autoAlpha: 0, scaleY: 0.25 },
-            { autoAlpha: 1, scaleY: 1, duration: 1.1, stagger: 7 / 24, ease: 'power2.out' },
+            { autoAlpha: 0 },
+            { autoAlpha: 1, duration: 0.9, stagger: 7 / 24, ease: 'power1.out' },
             at + 1
           )
           tl.to(`${scene(n)} .sc-band`, { autoAlpha: 1, duration: 1.1 }, at + 9.3)
