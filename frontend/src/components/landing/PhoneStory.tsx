@@ -484,6 +484,24 @@ export default function PhoneStory() {
                 {t('landing.ctaSecondary')}
               </a>
             </div>
+
+            {/* 下滑提示。首屏之后是一段五幕的纵向叙事，但站在第一屏时没有任何
+                东西说明「下面还有」——CTA 之下就是空白，读起来像页面到此为止。
+                只在第一幕出现（切幕后叙事本身已经在说话，再留着就是噪音），
+                只在移动端出现（桌面有滚动条兜底）。
+                箭头轻微上下浮动：静止的箭头只是图标，动起来才是邀请；
+                prefers-reduced-motion 下停在原位，语义不丢。
+                Nothing on the first screen says the page continues — below the
+                CTA is just empty space, which reads as the end. Shown on scene 0
+                only (afterwards the story speaks for itself) and on mobile only
+                (desktop has a scrollbar). The nudge animates because a static
+                arrow is an icon, while a moving one is an invitation. */}
+            <div className="scroll-cue" aria-hidden>
+              <span>{t('landing.scrollCue')}</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 5v14M19 12l-7 7-7-7" />
+              </svg>
+            </div>
           </div>
         </div>
 

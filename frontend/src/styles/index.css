@@ -4397,21 +4397,31 @@ body {
 
   /* 幕计数：横跨全宽的分段进度条，占栅格第二行。
      Scene ticks: a full-width segmented progress bar occupying the second row. */
+  /* 刻度在移动端也保持**竖排**（与桌面一致），只是挪到右缘。
+     上一版把它改成横跨全宽的分段进度条——而「一排分段 + 当前段高亮」正是
+     轮播 / 左右翻页的通用语汇，放在一个纵向滚动的叙事里，等于在告诉用户
+     「向右滑」。方向读错，比没有指示更糟。
+     竖排 + 贴右缘则是纵向进度的常规写法，和实际的交互方向对得上。
+     Kept vertical on mobile too. A full-width row of segments with one
+     highlighted is the vocabulary of a horizontal pager, so in a vertically
+     scrolled story it actively points the wrong way — worse than no indicator.
+     A vertical stack at the right edge matches the real interaction. */
   .story-ticks {
     position: static;
     grid-area: 2 / 1;
     display: flex;
-    flex-direction: row;
-    gap: 4px;
+    flex-direction: column;
+    gap: 6px;
     transform: none;
-    padding: 0 5vw;
+    padding: 0;
   }
   .story-stage .story-ticks {
     position: absolute;
-    left: 0;
-    right: 0;
-    top: auto;
-    bottom: var(--m-bot);
+    left: auto;
+    right: 10px;
+    top: 50%;
+    bottom: auto;
+    transform: translateY(-50%);
     z-index: 3;
     transition: opacity 0.35s var(--ease-out);
   }
@@ -4421,10 +4431,11 @@ body {
   .story-root[data-active='0'] .story-stage .story-ticks {
     opacity: 0;
   }
-  .js-tick {
-    height: 3px;
-    width: auto;
-    flex: 1 1 0;
+  .story-stage .js-tick {
+    height: 16px;
+    width: 3px;
+    flex: none;
+    border-radius: 999px;
   }
 
   /* .story-panel 与 .story-ticks 是叙事区与判定幕**共用**的类。上一版把它们直接
@@ -5291,5 +5302,48 @@ body {
   .tf-tag {
     padding: 4px 6px;
     font-size: 10px;
+  }
+}
+
+
+/* ═════════════ 下滑提示 / scroll cue ═════════════
+   只在移动端的第一幕出现。桌面有滚动条，用户天然知道页面还有下文；手机上
+   首屏 CTA 之下就是空白，没有任何东西说明「下面还有一段五幕的叙事」。
+   切到第二幕就淡出——那之后叙事本身已经在说话，再留着就是噪音。
+   Mobile, first scene only: desktop has a scrollbar to imply continuation,
+   while on a phone the space below the CTA reads as the end of the page. */
+.scroll-cue {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity 0.4s var(--ease-out);
+  pointer-events: none;
+}
+.scroll-cue svg {
+  stroke-width: 1.8;
+  animation: cue-nudge 1.8s var(--ease-in-out) infinite;
+}
+@keyframes cue-nudge {
+  0%, 100% { transform: translateY(0); opacity: 0.55; }
+  50% { transform: translateY(4px); opacity: 1; }
+}
+@media (max-width: 1023px) {
+  .story-root[data-active='0'] .scroll-cue {
+    display: flex;
+    opacity: 1;
+  }
+}
+/* 箭头是邀请不是装饰，但静止的用户不该被强迫看动画。
+   The nudge is an invitation, not decoration — it stops when motion is reduced. */
+@media (prefers-reduced-motion: reduce) {
+  .scroll-cue svg {
+    animation: none;
+    opacity: 0.8;
   }
 }
