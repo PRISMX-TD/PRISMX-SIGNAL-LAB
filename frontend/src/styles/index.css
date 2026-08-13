@@ -3574,7 +3574,21 @@ body {
 .story-stage {
   position: sticky;
   top: 0;
+  /* 高度用 svh 而不是 dvh。
+     dvh 会随移动浏览器地址栏的收起/展开**连续变化**——而这是个 sticky 满屏
+     舞台，里面的手机层、遮罩、文案面板全是相对它绝对定位的。地址栏一收，
+     舞台高度在滚动途中逐帧改变，三层内容跟着逐帧重排，滚动就是一顿一顿的。
+     svh 取的是「地址栏展开时」的高度，是个**在滚动期间不变**的值，代价是
+     地址栏收起后底部多出约 60px 背景——两边都是近黑，看不出来，比卡顿划算。
+     （dvh 留作回退：不认识 svh 的浏览器仍拿到可用值。）
+     svh, not dvh: dvh changes continuously as the mobile URL bar collapses, and
+     this is a sticky full-screen stage whose phone layer, scrim and copy panel
+     are all positioned against it — so every frame of the bar's collapse
+     reflows three layers mid-scroll. svh is fixed during scroll; the cost is a
+     ~60px strip of background once the bar hides, invisible on a near-black
+     page. dvh stays as the fallback. */
   height: 100dvh;
+  height: 100svh;
   overflow: hidden;
 }
 /* IO 哨兵：五段各占叙事区 20% 高度的隐形柱，中线穿越即切幕。
@@ -4596,7 +4610,10 @@ body {
 .mkt-stage {
   position: sticky;
   top: 0;
+  /* 同 .story-stage：svh 在滚动期间不变，dvh 会随地址栏逐帧改高。
+     Same as .story-stage — svh is stable during scroll. */
   height: 100dvh;
+  height: 100svh;
   overflow: hidden;
 }
 
