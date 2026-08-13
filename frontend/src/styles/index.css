@@ -997,18 +997,32 @@
   .tf-tag + .tf-tag {
     box-shadow: inset 1px 0 0 var(--line);
   }
-  .tf-tag:hover {
-    transform: translateY(-2px);
+  /* 轨道里的格子一律透明，颜色只落在**箭头**上——周期名（M5/H1）保持中性。
+     原来是整格染色（红底/绿底 + 彩色描边），六格并排就是六块彩色面积，
+     轨道读起来像「一排彩色药丸装在盒子里」而不是一条连续的读数带；
+     而且三种方向各有一套底色，页面上凭空多出两片彩度。
+     Cells stay transparent and only the arrow carries colour; the timeframe
+     label stays neutral. Tinting whole cells made the track read as six
+     separate pills in a box rather than one continuous readout. */
+  .tf-tag {
+    color: var(--text-2);
   }
-  .tf-tag.down {
-    background: var(--down-bg);
+  .tf-tag .d {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+  }
+  .tf-tag.up .d {
+    color: var(--up);
+  }
+  .tf-tag.down .d {
     color: var(--down);
-    border-color: rgba(240, 77, 99, 0.4);
   }
-  .tf-tag.neutral {
-    background: var(--nest);
+  .tf-tag.neutral .d {
     color: var(--text-3);
-    border-color: var(--line);
+  }
+  /* 单格不再上浮：它是一条轨道里的一段，不是独立按钮。
+     No per-cell lift — a segment of a track is not a standalone button. */
+  .tf-tag:hover {
+    transform: none;
   }
 
   /* 情绪条 / sentiment bar */
@@ -1065,16 +1079,23 @@
   .sl-tp-grid.three {
     grid-template-columns: 1fr 1fr 1fr;
   }
-  .tile-sl {
-    border: 1px solid rgba(240, 77, 99, 0.45);
-    background: rgba(240, 77, 99, 0.08);
+  /* 止损 / 止盈格子：中性底 + 只给**数字**着色。
+     原来整块格子都染成红/绿（8% 底 + 45% 彩色描边），三格并排时页面上出现
+     两大片彩色面积，把语义色从「标注一个数」升级成「一整块区域」——而红绿在
+     这个产品里是**数据**，不是装饰。数字本身已经是红/绿，块面再染一遍是重复
+     编码，代价是整屏的彩度预算被这两个格子吃掉。
+     底改成与「入场」格一致的中性面，描边回到通用发丝线，颜色只留在数值上。
+     Neutral fill, coloured numerals only: tinting the whole tile promoted the
+     semantic colour from "marks a number" to "owns a region", and red/green
+     here are data, not decoration. The value is already coloured — the block
+     was encoding it twice. */
+  .tile-sl,
+  .tile-tp {
+    border: 1px solid var(--line);
+    background: var(--nest);
   }
   .tile-sl .val {
     color: var(--down);
-  }
-  .tile-tp {
-    border: 1px solid rgba(53, 201, 122, 0.45);
-    background: rgba(53, 201, 122, 0.08);
   }
   .tile-tp .val {
     color: var(--up);
@@ -1199,16 +1220,9 @@
     margin-top: 4px;
     color: #fff;
   }
-  .sig-tile.sl {
-    border-color: rgba(240, 77, 99, 0.4);
-    background: rgba(240, 77, 99, 0.07);
-  }
+  /* 同上：信号卡里的三格也一样，中性底、只有数字着色。 */
   .sig-tile.sl .val {
     color: var(--down);
-  }
-  .sig-tile.tp {
-    border-color: rgba(53, 201, 122, 0.4);
-    background: rgba(53, 201, 122, 0.07);
   }
   .sig-tile.tp .val {
     color: var(--up);

@@ -142,10 +142,16 @@ const SignalHero: FC<Props> = ({
         {TREND_TFS.map((tf) => {
           const dir: TrendDir = trend?.timeframes?.[tf] ?? 'FLAT'
           const vis = TREND_VIS[dir]
-          const cls = dir === 'UP' ? 'tf-tag' : dir === 'DOWN' ? 'tf-tag down' : 'tf-tag neutral'
+          // 三个方向都带显式修饰类：原来 UP 走的是裸 `tf-tag`，于是「向上」
+          // 是靠缺省态表达的——只要基础样式一动它就跟着变，而且 CSS 里没法
+          // 单独选中它。三个方向对称命名之后，颜色规则各自独立。
+          // All three directions carry an explicit modifier: UP used to be the
+          // bare default, so "up" was expressed by absence and couldn't be
+          // targeted on its own.
+          const cls = dir === 'UP' ? 'tf-tag up' : dir === 'DOWN' ? 'tf-tag down' : 'tf-tag neutral'
           return (
             <span key={tf} className={cls}>
-              {tf} {vis.arrow}
+              {tf} <span className="d">{vis.arrow}</span>
             </span>
           )
         })}
