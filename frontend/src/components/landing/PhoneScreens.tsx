@@ -392,21 +392,37 @@ export function ScreenGuard({ t, on }: { t: T; on: boolean }) {
             Breathing dot: genuine running-state semantics, as EAStatusBadge. */}
         <span className="h-[1.8cqw] w-[1.8cqw] animate-breathe rounded-full bg-up" />
       </div>
-      <div className="relative overflow-hidden rounded-[3.4cqw] border border-white/[0.09] bg-white/[0.03]">
-        <svg viewBox="0 0 100 62" className="block w-full" aria-hidden>
+      {/* viewBox 从 100×62 压到 100×50，全部 y 坐标与线宽按 50/62 等比重映射。
+          原因：这个盒子是 .scr 这条 flex 列里的可压缩项（flex: 0 1 auto），而 SVG
+          只有 viewBox 没有 height，浏览器按比例从宽度算自然高——实测 322 宽 →
+          200 高，可竖向预算只给到 167，多出的 33px 被 overflow:hidden 切掉，
+          SL 那条线和徽章几乎整条看不见。
+
+          试过给 SVG 加 max-h-full 让它按 meet 等比缩进盒内，不裁了，但内容被缩到
+          中间、两侧各留 29px 空白——SL 线和入场虚线是**价格水平线**，贯穿整幅才
+          读得对，留白等于把它们变成了两段悬空的线段。所以正解是让这幅画本身matches
+          格子的比例（100:50 ≈ 可用的 322:167），而不是缩小它。
+          max-h-full 保留作为兜底：万一某个机型更矮，宁可等比缩也不裁。
+
+          The drawing was simply too tall for its slot. Scaling it to fit (meet)
+          stopped the clipping but inset the SL and entry lines by 29px a side —
+          and those are price levels, which have to span the full width to read
+          correctly. So the artwork's own ratio changes to match the slot. */}
+      <div className="relative min-h-0 overflow-hidden rounded-[3.4cqw] border border-white/[0.09] bg-white/[0.03]">
+        <svg viewBox="0 0 100 50" className="block max-h-full w-full" aria-hidden>
           <polyline
-            points="2,52 12,48 18,50 26,42 33,44 42,34 49,37 58,27 64,30 73,20 81,23 90,13 98,15"
+            points="2,41.9 12,38.7 18,40.3 26,33.9 33,35.5 42,27.4 49,29.8 58,21.8 64,24.2 73,16.1 81,18.5 90,10.5 98,12.1"
             fill="none"
             stroke="var(--up)"
-            strokeWidth="1.6"
+            strokeWidth="1.3"
             strokeLinejoin="round"
             strokeLinecap="round"
           />
-          <line x1="0" y1="46" x2="100" y2="46" stroke="#71717A" strokeWidth="0.7" strokeDasharray="2.4 2.4" />
+          <line x1="0" y1="37.1" x2="100" y2="37.1" stroke="#71717A" strokeWidth="0.56" strokeDasharray="1.9 1.9" />
           <g className="js-sl">
-            <line x1="0" y1="56" x2="100" y2="56" stroke="#8B6CFF" strokeWidth="1.1" />
-            <rect x="2" y="50.6" width="14" height="8" rx="1.6" fill="#5A22EE" />
-            <text x="9" y="56.4" textAnchor="middle" fontSize="4.6" fontWeight="700" fill="#FFFFFF" fontFamily="inherit">
+            <line x1="0" y1="45.2" x2="100" y2="45.2" stroke="#8B6CFF" strokeWidth="0.9" />
+            <rect x="2" y="40.8" width="11.3" height="6.5" rx="1.3" fill="#5A22EE" />
+            <text x="7.65" y="45.5" textAnchor="middle" fontSize="3.7" fontWeight="700" fill="#FFFFFF" fontFamily="inherit">
               SL
             </text>
           </g>
