@@ -135,6 +135,32 @@ export default function PhoneStory() {
       }
       if (gl) el.classList.add('gl-on')
 
+      /* 桌面首屏基准倍率。
+         实测 1456 宽的屏上构图是：左留白 102 / 文案栏 378 / **空隙 380** /
+         手机 270 / 右留白 326——空隙比文案栏本身还宽，是整屏最大的单一区块，
+         这就是中间读起来像个洞的原因；手机只占视口宽的 18.5%，而它是这一屏
+         唯一的产品证据，卡片里的价格在这个尺寸下只有 8–9px。
+         把手机放大 25%（配合文案栏放宽）后空隙收到约 250px。
+
+         为什么是乘一个基准、而不是直接把 PZ.scale 从 1 改成 1.25：时间线后面
+         用的是**绝对值**（1.04 / 1.1 / 1.02 / 0.92 / 0.7），直接改初值会让第二幕
+         起全部变成「缩小」，整段编排的相对关系就毁了。乘一个基准则原样保留。
+         A base multiplier rather than a new initial value: the timeline sets
+         absolute scales later on, so raising the initial one would turn every
+         subsequent keyframe into a shrink. Multiplying preserves the choreography. */
+      /* 倍率跟着视口宽走，而不是一个常数。
+         1456 上放大 25% 之后空隙从 380 收到约 236，构图成立；但文案栏同时被放宽
+         到 480，窄桌面上两者会挤到一起——1024×768 上推算文案右缘 552、机身左缘
+         520，重叠 32px。那台我量不到真值（见下），所以宁可不放大。
+         A constant would collide at the narrow end: the copy column widened to
+         480 at the same time, and at 1024 the two overlap. Scale with width. */
+      let baseScale = 1
+      const computeBase = () => {
+        const w = window.innerWidth
+        baseScale = w >= 1440 ? 1.25 : w >= 1280 ? 1.15 : 1
+      }
+      computeBase()
+
       /* 姿态代理：时间线动的是这些纯数值，不是 DOM。
          The pose proxy: the timeline animates these plain numbers, not the DOM. */
       const PZ = { xvw: 19, rotY: -22, rotX: 6, scale: 1 }
@@ -142,19 +168,22 @@ export default function PhoneStory() {
       const applyPose = () => {
         if (gl) {
           gl.setPose({
-            xPx: (PZ.xvw / 100) * stage.clientWidth,
+            // 与 .panel-l 同一个 1440 内容框：超宽屏上偏移不再继续增长，
+            // 否则 19vw 在 1920 上是 +365px，把手机推到右边缘、空隙涨到 29%。
+            // Same 1440 frame as .panel-l — otherwise 19vw keeps growing.
+            xPx: (PZ.xvw / 100) * Math.min(stage.clientWidth, 1440),
             rotYdeg: PZ.rotY + TZ.ry,
             rotXdeg: PZ.rotX + TZ.rx,
-            scale: PZ.scale,
+            scale: PZ.scale * baseScale,
           })
         } else {
-          pose.style.transform = `translateX(${PZ.xvw}vw) rotateY(${PZ.rotY}deg) rotateX(${PZ.rotX}deg) scale(${PZ.scale})`
+          pose.style.transform = `translateX(${PZ.xvw}vw) rotateY(${PZ.rotY}deg) rotateX(${PZ.rotX}deg) scale(${PZ.scale * baseScale})`
           tilt.style.transform = `rotateX(${TZ.rx}deg) rotateY(${TZ.ry}deg)`
         }
       }
       gsap.ticker.add(applyPose)
 
-      const onResize = () => gl?.resize()
+      const onResize = () => { computeBase(); gl?.resize() }
       window.addEventListener('resize', onResize)
 
       const ctx = gsap.context(() => {
@@ -467,7 +496,7 @@ export default function PhoneStory() {
               <span className="block text-white">{t('landing.heroTitle1')}</span>
               <span className="mt-1 block text-prism-400">{t('landing.heroTitle2')}</span>
             </h1>
-            <p className="mt-5 max-w-[44ch] text-[13px] leading-relaxed text-neutral-400 sm:text-[15px]">
+            <p className="mt-5 max-w-[44ch] text-[13px] leading-relaxed text-neutral-400 sm:max-w-[58ch] sm:text-[15px]">
               {t('landing.heroSubtitle')}
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-3">

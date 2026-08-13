@@ -4080,8 +4080,21 @@ body {
 }
 
 @media (min-width: 1024px) {
-  .panel-l { left: 7vw; top: 50%; max-width: 26rem; }
+  /* 内容框上限 1440：超宽屏不再把两栏越推越开。
+     7vw 这类纯百分比在 1920 上会把手机推到 +365px（19vw），而文案栏封顶 480
+     不动，空隙实测涨到 557px / 29%——比原来的问题还大。改成先取一个不超过
+     1440 的内容框，再在框内按比例排，于是 ≥1440 的屏一律按 1440 的构图渲染。
+     手机那一侧的同款上限在 PhoneStory 里（xPx 用 min(stageWidth, 1440)）。
+     A 1440 content frame: pure viewport percentages push the two columns further
+     apart the wider the screen gets — measured 557px of void at 1920. Above 1440
+     everything composes as if the viewport were 1440. */
+  .panel-l {
+    left: calc((100vw - min(100vw, 1440px)) / 2 + 0.07 * min(100vw, 1440px));
+    top: 50%;
+    max-width: 26rem;
+  }
   .panel-r { right: 7vw; top: 50%; max-width: 26rem; }
+
   .panel-l > .panel-inner,
   .panel-r > .panel-inner { transform: translateY(-50%); }
 }
@@ -5359,5 +5372,23 @@ body {
   .scroll-cue svg {
     animation: none;
     opacity: 0.8;
+  }
+}
+
+
+/* ── 首屏文案栏放宽 / wider hero copy column ──
+   栏宽由「面板 max-width」与「正文的 ch 上限」双重决定，抬一个会被另一个卡住，
+   所以两处一起改（正文见 PhoneStory 的 sm:max-w-[58ch]）。
+
+   两条边界都是有理由的：
+   · 只放宽首屏——后面四幕的面板与手机是排过位置的，一起放宽会撞上机身。
+   · 只在 ≥1280 生效——1024 上文案右缘会推到 552，而手机机身左缘约 558，
+     只剩 6px；那个宽度本来就没有空隙问题（实测空隙 9.9% 已经偏紧）。
+   Both bounds are deliberate: hero only, because the later scenes' panels are
+   choreographed against the phone; and ≥1280 only, because at 1024 the widened
+   column leaves 6px to the phone body — and that width never had a gap problem. */
+@media (min-width: 1280px) {
+  .panel-l[data-panel='hero'] {
+    max-width: 30rem;
   }
 }
