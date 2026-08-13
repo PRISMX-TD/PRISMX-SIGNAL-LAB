@@ -73,26 +73,18 @@ export default function SignalsPage() {
           </button>
 
           {/* 标签页切换 / Tab switcher */}
-          <div className="mb-5 flex gap-2 border-b border-white/10">
+          <div className="seg-tabs mb-5">
             <button
               type="button"
               onClick={() => setActiveTab('signals')}
-              className={`pb-3 px-4 text-sm font-medium transition-colors border-b-2 -mb-px ${
-                activeTab === 'signals'
-                  ? 'border-prism-500 text-prism-200'
-                  : 'border-transparent text-neutral-400 hover:text-neutral-200'
-              }`}
+              className={activeTab === 'signals' ? 'on' : ''}
             >
               {t('signals.tabs.realtime')}
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('strategies')}
-              className={`pb-3 px-4 text-sm font-medium transition-colors border-b-2 -mb-px ${
-                activeTab === 'strategies'
-                  ? 'border-prism-500 text-prism-200'
-                  : 'border-transparent text-neutral-400 hover:text-neutral-200'
-              }`}
+              className={activeTab === 'strategies' ? 'on' : ''}
             >
               {t('signals.tabs.platformStrategies')}
             </button>

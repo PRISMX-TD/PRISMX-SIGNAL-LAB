@@ -290,18 +290,14 @@ export default function OrdersPage() {
       </div>
 
       {/* Tab 导航 / tab navigation */}
-      <div className="mb-5 flex gap-1 border-b border-white/10" role="tablist">
+      <div className="seg-tabs mb-5" role="tablist">
         {TABS.map((key) => (
           <button
             key={key}
             role="tab"
             aria-selected={tab === key}
             onClick={() => setTab(key)}
-            className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
-              tab === key
-                ? 'border-prism-500 text-prism-200'
-                : 'border-transparent text-neutral-500 hover:text-neutral-300'
-            }`}
+            className={tab === key ? 'on' : ''}
           >
             {t(`orders.tab.${key}`)}
           </button>

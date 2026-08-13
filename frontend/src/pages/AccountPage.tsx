@@ -325,7 +325,7 @@ export default function AccountPage() {
           {/* 平台账户 / Platform account */}
           <section className="glass-neon p-5">
             <div className="flex items-center justify-between">
-              <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-neutral-300">
+              <h3 className="sec-h-title">
                 {t("account.platform")}
               </h3>
               <span className="tag bg-prism-600/20 text-prism-300">
@@ -355,7 +355,7 @@ export default function AccountPage() {
           {/* MT5 账号概览 / MT5 accounts */}
           {info.mt5Accounts.length > 0 && (
             <section className="glass-neon p-5">
-              <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-neutral-300">
+              <h3 className="sec-h-title">
                 {t("account.mt5Accounts")}
               </h3>
               <div className="mt-3 space-y-3">
@@ -394,7 +394,7 @@ export default function AccountPage() {
 
           {/* 密码管理 / Password */}
           <section className="glass-neon p-5">
-            <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-neutral-300">
+            <h3 className="sec-h-title">
               {info.hasPassword ? t("account.changePassword") : t("account.setPassword")}
             </h3>
             <div className="mt-3 space-y-3">
@@ -430,7 +430,7 @@ export default function AccountPage() {
 
           {/* 通知设置 / Notifications */}
           <section id="notifications" ref={notifSectionRef} className="glass-neon scroll-mt-20 p-5">
-            <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-neutral-300">
+            <h3 className="sec-h-title">
               {t("account.notifications")}
             </h3>
             <div className="mt-3 space-y-4">

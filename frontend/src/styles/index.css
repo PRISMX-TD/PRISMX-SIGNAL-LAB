@@ -842,27 +842,55 @@
   .hero-segs {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
   }
+  /* 焦点指示条：可见形状与可点范围拆开。
+     原来整个按钮就是那颗 6×6 的点——6px 的热区实际点不中（WCAG 2.2 AA 的
+     门槛是 24×24）。改成 24×26 的透明按钮，可见的那道细条由 ::before 画，
+     再叠一层 44px 的纵向热区。同一份 DOM，只是「看得见的形状」不再等于
+     「可点的范围」。
+     The visible mark and the tap target are separated: the button is a
+     transparent 24×26 box with the bar drawn by ::before, plus a 44px band. */
   .hero-seg {
-    width: 6px;
-    height: 6px;
+    position: relative;
+    width: 24px;
+    height: 26px;
     border: none;
     padding: 0;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.22);
+    border-radius: 0;
+    background: transparent;
+    display: grid;
+    place-items: center;
     cursor: pointer;
-    transition: width 0.32s cubic-bezier(0.34, 1.4, 0.64, 1), background 0.28s ease;
+    transition: width 0.32s cubic-bezier(0.34, 1.4, 0.64, 1);
     -webkit-tap-highlight-color: transparent;
   }
-  .hero-seg:hover {
+  .hero-seg::before {
+    content: "";
+    width: 16px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.22);
+    transition: width 0.32s cubic-bezier(0.34, 1.4, 0.64, 1), background 0.28s ease;
+  }
+  .hero-seg::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 44px;
+    transform: translateY(-50%);
+  }
+  .hero-seg:hover::before {
     background: rgba(255, 255, 255, 0.36);
   }
   .hero-seg.on {
-    width: 22px;
-    height: 6px;
-    background: var(--purple);
-    box-shadow: none;
+    width: 34px;
+  }
+  .hero-seg.on::before {
+    width: 26px;
+    background: var(--purple-hi);
   }
   /* 桌面端左右箭头：无按钮背景，纯图标点击；手机端隐藏（靠滑动切换即可）
      Desktop prev/next arrows: no button background, icon-only; hidden on
@@ -1490,7 +1518,12 @@
        从而「可执行信号」有无内容时卡片尺寸一致、整体不偏移。
        minmax(0, …fr) sizes columns purely by ratio (never by content),
        so the exec card keeps the same width with or without a signal. */
-    grid-template-columns: minmax(0, 1.62fr) minmax(0, 1fr) minmax(0, 0.94fr);
+    /* 原来是 1.62 / 1 / 0.94 —— 中栏与右栏实测 400 vs 376，差 6%：既不相等
+       也不明显不同，读起来像没对齐而不像有意的比例。改成「一宽 + 两等宽」，
+       这是一个看得出来的决定。
+       The middle and right columns used to differ by 6% — neither equal nor
+       clearly different. One wide plus two equal reads as a decision. */
+    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr);
     align-items: start;
     gap: 16px;
   }
@@ -4964,5 +4997,80 @@ body {
   }
   [data-scr='0'] .sig-tiles {
     margin-top: 3.4cqw;
+  }
+}
+
+
+/* ═════════════ 页内 Tab：下划线 → 分段药丸轨道 ═════════════
+   信号页与订单页的 Tab 原本是「底部 2px 下划线」。产品里 .seg-pill 这套
+   药丸语汇**已经存在**（信号页的筛选器就在用），下划线 Tab 是它之外的第二
+   种做法——同一层级的切换在同一个产品里有两套语言，统一掉。
+   In-page tabs move from a 2px underline to the segmented pill track that
+   already exists elsewhere in the product (the signals filter bar uses it),
+   so one level of navigation stops having two visual languages. */
+.seg-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  width: fit-content;
+  max-width: 100%;
+  background: var(--nest);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.seg-tabs::-webkit-scrollbar { display: none; }
+.seg-tabs button {
+  height: 32px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              transform 0.09s var(--ease-out);
+}
+.seg-tabs button:hover { color: var(--text-2); }
+.seg-tabs button.on {
+  background: var(--purple);
+  color: #fff;
+}
+.seg-tabs button:active { transform: scale(0.96); }
+@media (prefers-reduced-motion: reduce) {
+  .seg-tabs button:active { transform: none; }
+}
+
+
+/* ═════════════ 分区标题 / section headings ═════════════
+   账户页的分区标题原本是 13px 大写 + 中等字距的半粗灰字，和说明性小字
+   （caption）是两套不同的小字处理。收进同一套语汇：更小、更宽的字距、
+   更轻的字重，再补一条发丝线把标题和内容分开。
+   Section headings and captions were two different treatments of small type;
+   they now share one. */
+.sec-h-title {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  font-weight: 500;
+  color: var(--text-3);
+  text-transform: uppercase;
+}
+
+/* 报价表限宽：606px 的容器里内容只占约 420px，品种名钉在最左、价格甩到
+   最右，中间一大片空。限宽之后留白落在表格右侧，读成「余量」而不是
+   「被扯开的两端」。
+   （彻底的解法是把报价表挪出这一栏，那是版面改动，不在换皮范围内。）
+   The quotes table was pinned to both edges of a container ~180px wider than
+   its content, leaving a void in the middle. */
+@media (min-width: 1024px) {
+  .dash-quotes .qt-table {
+    max-width: 500px;
   }
 }
