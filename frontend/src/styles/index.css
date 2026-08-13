@@ -4155,11 +4155,19 @@ body {
    cross-fade exactly as before.
    ══════════════════════════════════════════════ */
 @media (max-width: 1023px) {
-  /* 滚动行程 520vh → 440vh：手机上每一屏的滚动手感比桌面「重」，同样的幕数
-     缩短行程读起来更紧凑。/ 520vh -> 440vh: a screenful of scrolling feels
-     heavier on a phone, so the same five scenes read tighter over less travel. */
+  /* 滚动行程 520vh → 320vh。
+     440vh 分给 5 幕是每幕 88vh——也就是**每换一幕要划将近一整屏**，而每一幕
+     真正要读的只有一句标题加两行正文。滚动到一半时画面已经切完、手指还在划，
+     那段空转就是「怪」的来源：行程与内容量不匹配，不是动画本身的问题。
+     320vh → 每幕 64vh，约三分之二屏换一幕，跟读完那点文字的时间对得上。
+     桌面保持 520vh：鼠标滚轮一格的位移比手指小得多，同样的 vh 手感更轻。
+     440vh over five scenes means nearly a full screen of dragging per scene,
+     while each scene only carries a headline and two lines. The scene has
+     already changed while the finger is still moving — that idle stretch is
+     what reads as "off". 320vh puts a scene change at about two thirds of a
+     screen, matching how long the copy takes to read. */
   .story-section {
-    height: 440vh;
+    height: 320vh;
   }
   /* ══ 移动端首屏：产品先行 ══
      原来是三行栅格（画面 / 刻度 / 文字），画面只占上面一格，于是首屏从上到下是
@@ -5020,21 +5028,37 @@ body {
        56 to 50 percent moves the scrim top from y=383 to 436, finally clearing the
        card whose lower edge sits at 432. At 56 the card lost up to a quarter of its
        opacity across its last 49px, which reads as cropped rather than faded. */
-    /* 50% → 62%，且不透明区从 36% 提到 76%。
-       原值是在 375×812 上调的：那台机上卡片下沿 410、标题顶 462，有 52px
-       余量，遮罩只需盖住最后一点。但屏幕里的卡片是用 cqw（按容器宽度）定尺寸
-       的，而遮罩和文案面板按视口百分比定位——**屏幕越宽越矮，卡片就越长过
-       文字**。412×792 实测：卡片下沿 725、标题顶 435，重叠 290px，而标题正好
-       落在渐变 90% 处（几乎全透明），于是界面直接从字后面透出来。
+    height: 50%;
+    background: linear-gradient(0deg, #09090b 36%, rgba(9, 9, 11, 0.86) 66%, transparent);
+  }
 
-       改成按「不透明区必须够到标题顶」来定：标题顶大约在视口 45–48% 处，
-       实心区取 80%：三个常见尺寸实测标题分别落在 69.6% / 72.8% / 75.7%，
-       最紧的 360×740 也留了 4.3 个百分点余量（76% 时只剩 0.3，太险）。
-       The card is sized in cqw but the scrim is sized in viewport percent, so a
-       wider-and-shorter screen grows the card past the copy. The opaque band now
-       reaches the headline on both aspect ratios. */
+  /* ── 遮罩按幕分档 ──
+     上一轮把遮罩整体调强（62% / 实心到 80%）是为了救首屏：scene 0 是「产品
+     先行」，标题**直接压在卡片上**，遮罩必须够到标题顶才不透字。但那个值套到
+     后面四幕就过头了——那四幕的界面内容位置完全不同（确认下单按钮、滑动确认
+     条、追踪止损说明都落在视口 50% 附近），实心区提到 49.6% 正好把它们压掉。
+
+     两种幕的需求本来就相反，用一个值必然顾此失彼。改成按 data-active 分档：
+     只有 scene 0 用强遮罩，其余四幕回到原来的轻遮罩。
+     Scene 0 puts the headline directly on top of the card and needs the opaque
+     band to reach it; scenes 1–4 have UI content sitting around the 50% mark
+     that the same band would swallow. One value can't serve both, so the strong
+     scrim is scoped to scene 0. */
+  .story-root[data-active='0'] .story-stage::after {
+    /* 实心区 78%。这一档是**没有完美解**的：卡片内容底与标题顶只差约 14px
+       （412×792 实测 421 vs 435），要让标题完全压在实心上、又完全不碰卡片，
+       需要的窗口比 14px 还窄，换个机型就翻车。
+       78% 的取舍是：标题在三个常见尺寸上都完全落在实心区（余量 11–26px），
+       代价是卡片最底下那行说明（「判定规则公开 · 不可删改」）被渐变吃掉约
+       12px——那本来就是模拟界面的页脚小字，淡出反而符合「卡片溶进标题」的
+       意图；真正的数据（价格、盈亏比、有效期）都在实心区之上。
+       No perfect value exists here: the card's last line and the headline sit
+       14px apart, narrower than the window either constraint needs. 78% keeps
+       the headline fully backed on every tested size and lets only the mock's
+       footer caption fade — which reads as the card dissolving into the
+       headline rather than as clipping. */
     height: 62%;
-    background: linear-gradient(0deg, #09090b 0 80%, rgba(9, 9, 11, 0.8) 92%, transparent);
+    background: linear-gradient(0deg, #09090b 0 78%, rgba(9, 9, 11, 0.8) 92%, transparent);
   }
 }
 
