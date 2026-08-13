@@ -163,7 +163,23 @@ export default function PhoneStory() {
       let baseScale = 1
       const computeBase = () => {
         const w = window.innerWidth
-        baseScale = w >= 1440 ? 1.25 : w >= 1280 ? 1.15 : 1
+        const tier = w >= 1440 ? 1.25 : w >= 1280 ? 1.15 : 1
+        /* 高度约束——宽度分档漏掉的那一半，实机截图里机身顶部直接顶进了
+           64px 的固定导航。几何是确定的：
+             机身表观高 S = BODY_H(149.6) × pxPerUnit = 0.648 × 舞台高 × 总倍率
+             总倍率峰值 = base × 1.1（时间线在第二幕变焦到 1.1）
+             机身有 2% 的上移（对应 CSS 版 translate(-50%,-52%)）
+           要求最高峰时顶部仍让出导航 64px + 8px 余量：
+             (H − S)/2 − 0.02·S ≥ 72  ⇒  S ≤ (H − 144)/1.04
+           代回得 base ≤ (H − 144)/(1.04 × 1.1 × 0.648 × H)。
+           945 高的屏上这个上限是 1.14——1.25 在任何常见笔记本高度上都装不下，
+           宽度档只是「愿望值」，能不能到由高度说了算。下限钳在 1：原设计在
+           所有高度上都以 1 工作过。
+           The width tier is only an aspiration; height decides. Solving the
+           nav-clearance inequality for the peak-zoom frame gives the cap. */
+        const h = stage.clientHeight || window.innerHeight
+        const fit = (h - 144) / (1.04 * 1.1 * 0.648 * h)
+        baseScale = Math.max(1, Math.min(tier, fit))
       }
       computeBase()
 
