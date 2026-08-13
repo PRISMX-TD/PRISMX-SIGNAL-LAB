@@ -80,7 +80,7 @@ const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => 
               <tr><td colSpan={3} className="text-center text-sm text-neutral-500 py-4">{t('common.loading')}</td></tr>
             ) : (
               symbols.map((sym) => {
-                const { letter, color } = symbolMeta(sym)
+                const { letter, color, ink } = symbolMeta(sym)
                 const q = quotes[sym]
                 const digits = q?.digits ?? 5
                 const bid = q?.bid != null ? q.bid.toFixed(digits) : null
@@ -89,7 +89,7 @@ const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => 
                   <tr key={sym}>
                     <td>
                       <div className="qt-sym-cell">
-                        <div className="qt-sym-ava" style={{ background: color + '22', color }}>{letter}</div>
+                        <div className="qt-sym-ava" style={{ background: color + '33', color: ink }}>{letter}</div>
                         <div className="nm">
                           <b className="flex items-center gap-1.5">
                             {displaySymbol(sym)}

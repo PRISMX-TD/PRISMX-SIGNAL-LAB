@@ -167,7 +167,7 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
                       Identity chip; the data was always there. */}
                   <span
                     className="sym-ava"
-                    style={{ background: symbolMeta(sig.symbol).color + '22', color: symbolMeta(sig.symbol).color }}
+                    style={{ background: symbolMeta(sig.symbol).color + '33', color: symbolMeta(sig.symbol).ink }}
                   >
                     {symbolMeta(sig.symbol).letter}
                   </span>

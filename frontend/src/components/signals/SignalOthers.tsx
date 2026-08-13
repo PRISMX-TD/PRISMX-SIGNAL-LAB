@@ -59,7 +59,7 @@ const SignalOthers: FC<Props> = ({ entries, now, onTrade, onFocus, onViewAll }) 
               <div className="sig-mini-top">
                 <span
                   className="sym-ava"
-                  style={{ background: symbolMeta(symbol).color + '22', color: symbolMeta(symbol).color }}
+                  style={{ background: symbolMeta(symbol).color + '33', color: symbolMeta(symbol).ink }}
                 >
                   {symbolMeta(symbol).letter}
                 </span>

@@ -5074,3 +5074,96 @@ body {
     max-width: 500px;
   }
 }
+
+
+/* ═════════════ 与设计样本对齐的剩余几条 ═════════════ */
+
+/* 样本 68：入场 / 止损 / 止盈三格右对齐。
+   这三个数存在的意义就是互相比较。等宽字体 + 右对齐 = 小数点自动成列，
+   位数不同也不会错位（1.07418 与 1.07602 这种才是真正会露馅的场景）。
+   Three prices that exist to be compared: right-aligned monospace puts the
+   decimal points on a common axis even when digit counts differ. */
+.exec-tile,
+.sig-tile {
+  text-align: right;
+}
+
+/* 样本 24：报价表整行可悬停——列表从「表格」变成「可点的行」。 */
+.qt-table tbody tr {
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.qt-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+/* 样本 80–84：按下反馈。
+   全站 42 条 :hover、16 条 :active——手机上 hover 根本不触发，:active 是
+   用户唯一能得到的反馈，而最常按的那几个控件一条都没有。
+   Touch has no hover; :active is the only feedback a phone user gets. */
+.seg-pill button,
+.filter-cycle,
+.seg-tabs button,
+.view-all-btn,
+.lg-tab,
+.hero-arrow-btn {
+  transition: transform 0.09s var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.seg-pill button:active,
+.filter-cycle:active,
+.seg-tabs button:active,
+.view-all-btn:active,
+.lg-tab:active,
+.hero-arrow-btn:active {
+  transform: scale(0.96);
+}
+@media (prefers-reduced-motion: reduce) {
+  .seg-pill button:active,
+  .filter-cycle:active,
+  .seg-tabs button:active,
+  .view-all-btn:active,
+  .lg-tab:active,
+  .hero-arrow-btn:active {
+    transform: none;
+  }
+}
+
+/* 样本 70–72：触摸热区扩张（视觉上完全不可见）。
+   实测手机视口下几乎每个可点元素都偏小：跟单按钮 60×34、筛选 67×30、
+   页内 Tab 84×32。WCAG 2.2 AA（2.5.8）的门槛是 24×24，这些过得去，但
+   低于所有移动端 HIG 的 44px。
+   做法是盖一层 44px 高的透明伪元素，只扩热区、不改布局也不改 DOM，
+   而且**只在纵向扩**——这些控件都是横向排列的，纵向扩不会吃掉邻居的点击。
+   A transparent 44px band expands the tap target without touching layout. */
+@media (max-width: 1023px) {
+  .seg-pill button,
+  .filter-cycle,
+  .seg-tabs button,
+  .view-all-btn,
+  .qt-trade-btn {
+    position: relative;
+  }
+  .seg-pill button::after,
+  .filter-cycle::after,
+  .seg-tabs button::after,
+  .view-all-btn::after,
+  .qt-trade-btn::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 44px;
+    transform: translateY(-50%);
+  }
+  /* 筛选栏是 overflow-x:auto（窄屏横滑），而 auto 会建立裁剪上下文——
+     伪元素超出容器盒的部分会被直接裁掉，热区扩张在这里会完全失效。
+     给容器补上下内边距，把 44px 的带子装进裁剪盒里。
+     overflow-x:auto clips the pseudo-element; padding makes room for it. */
+  .sig-filters,
+  .seg-tabs {
+    padding-block: 8px;
+  }
+}

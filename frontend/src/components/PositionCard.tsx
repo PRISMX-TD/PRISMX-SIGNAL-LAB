@@ -125,7 +125,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
           <div className="flex items-center gap-2">
             <span
               className="sym-ava"
-              style={{ background: symbolMeta(p.symbol).color + '22', color: symbolMeta(p.symbol).color }}
+              style={{ background: symbolMeta(p.symbol).color + '33', color: symbolMeta(p.symbol).ink }}
             >
               {symbolMeta(p.symbol).letter}
             </span>

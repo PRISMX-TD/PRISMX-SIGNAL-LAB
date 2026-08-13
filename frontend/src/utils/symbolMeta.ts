@@ -35,19 +35,29 @@
 // were told apart by colour alone). Identity hues are separated from semantic
 // ones by *saturation* (identity ≤60%, semantic ≥70%) rather than by hue, and FX
 // pairs get no colour at all — they have no culturally fixed one.
-export const SYMBOL_META: Record<string, { letter: string; color: string }> = {
-  XAUUSD: { letter: 'XAU', color: '#b8a351' }, // 金  H48  S42
-  XAGUSD: { letter: 'XAG', color: '#91a0ac' }, // 银  H205 S14
-  WTI: { letter: 'WTI', color: '#b36c56' },    // 油  H14  S38
-  BTCUSD: { letter: 'BTC', color: '#ce8546' }, // 币  H28  S58
-  EURUSD: { letter: 'EUR', color: '#a5a5b0' }, // 外汇对：中性
-  GBPUSD: { letter: 'GBP', color: '#a5a5b0' },
-  USDJPY: { letter: 'JPY', color: '#a5a5b0' },
+//
+// 每个品种有两个色：`color` 是芯片**底色**的来源（会被调用点降到 20% 不透明度
+// 压在卡面上），`ink` 是压在那层底上的**文字色**。
+// 分成两个而不是一个的原因很实际：底色要低饱和、暗，才不跟语义色打架；而同
+// 一个值当文字色压在自己的 20% 底上只有 4.1–4.3，过不了 AA。所以文字取同色相
+// 的提亮版——色相不变，识别性不变，对比度回到 5 以上。
+// Two values per symbol: `color` seeds the chip fill (used at 20% opacity) and
+// `ink` is the text on top. One value can't do both — the fill needs to be dark
+// and low-chroma, but that same value as text on its own 20% tint scores ~4.2,
+// under AA. The ink is the same hue, lifted.
+export const SYMBOL_META: Record<string, { letter: string; color: string; ink: string }> = {
+  XAUUSD: { letter: 'XAU', color: '#b8a351', ink: '#d6be6e' }, // 金  H48  S42
+  XAGUSD: { letter: 'XAG', color: '#91a0ac', ink: '#afbcc8' }, // 银  H205 S14
+  WTI: { letter: 'WTI', color: '#b36c56', ink: '#d08a72' },    // 油  H14  S38
+  BTCUSD: { letter: 'BTC', color: '#ce8546', ink: '#e5a163' }, // 币  H28  S58
+  EURUSD: { letter: 'EUR', color: '#a5a5b0', ink: '#c2c2cc' }, // 外汇对：中性
+  GBPUSD: { letter: 'GBP', color: '#a5a5b0', ink: '#c2c2cc' },
+  USDJPY: { letter: 'JPY', color: '#a5a5b0', ink: '#c2c2cc' },
 }
-export const DEFAULT_SYMBOL_META = { color: '#a5a5b0' }
+export const DEFAULT_SYMBOL_META = { color: '#a5a5b0', ink: '#c2c2cc' }
 
-export function symbolMeta(sym: string): { letter: string; color: string } {
+export function symbolMeta(sym: string): { letter: string; color: string; ink: string } {
   // 兜底同样给三个字符：未知品种取代码前三位，与已知品种同构。
   // Unknown symbols also get three characters, matching the known ones.
-  return SYMBOL_META[sym] ?? { letter: (sym.slice(0, 3) || '?').toUpperCase(), color: DEFAULT_SYMBOL_META.color }
+  return SYMBOL_META[sym] ?? { letter: (sym.slice(0, 3) || '?').toUpperCase(), ...DEFAULT_SYMBOL_META }
 }

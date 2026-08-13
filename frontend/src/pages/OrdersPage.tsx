@@ -538,7 +538,7 @@ export default function OrdersPage() {
                       <div className="flex items-center gap-2">
                         <span
                           className="sym-ava"
-                          style={{ background: symbolMeta(o.symbol).color + '22', color: symbolMeta(o.symbol).color }}
+                          style={{ background: symbolMeta(o.symbol).color + '33', color: symbolMeta(o.symbol).ink }}
                         >
                           {symbolMeta(o.symbol).letter}
                         </span>
@@ -590,7 +590,7 @@ export default function OrdersPage() {
                     <div className="flex items-center gap-2">
                       <span
                         className="sym-ava"
-                        style={{ background: symbolMeta(o.symbol).color + '22', color: symbolMeta(o.symbol).color }}
+                        style={{ background: symbolMeta(o.symbol).color + '33', color: symbolMeta(o.symbol).ink }}
                       >
                         {symbolMeta(o.symbol).letter}
                       </span>
