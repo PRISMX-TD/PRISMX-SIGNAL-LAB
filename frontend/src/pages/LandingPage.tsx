@@ -40,7 +40,7 @@ import LandingSpaceLayer from '../components/landing/LandingSpaceLayer'
 import { usePublicLang } from '../seo/PublicShell'
 import { localePath } from '../seo/meta'
 
-type T = (k: string) => string
+type T = (k: string, opts?: Record<string, unknown>) => string
 
 const SHELL = 'mx-auto w-full max-w-[1240px] px-5 sm:px-8'
 
@@ -162,12 +162,20 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
   // Price comes from the public endpoint shared with /upgrade so the landing
   // page never carries a second, drifting copy of the number.
   const [monthlyPrice, setMonthlyPrice] = useState<number | null>(null)
+  // 免费试用是后台开关（/admin/trial），开着时定价区必须替它说话——这是整页
+  // 最强的转化钩子，藏在登录后的升级页里等于没开。数据搭 plans 的顺风车，
+  // 不多打一个请求；接口挂了就当没开（catch 静默），页面照常。
+  // The free trial is an admin switch; when it's on, the pricing section must
+  // say so — it is the strongest conversion hook on the page. The fact rides
+  // on the plans call we already make.
+  const [trial, setTrial] = useState<{ enabled: boolean; days: number } | null>(null)
   useEffect(() => {
     paymentApi
       .getPlans()
       .then((r) => {
         const monthly = r.plans.find((p) => p.days === 30)
         if (monthly) setMonthlyPrice(monthly.price_usd)
+        if (r.trial?.enabled) setTrial(r.trial)
       })
       .catch(() => {})
   }, [])
@@ -214,6 +222,20 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
             <span className="text-[13px] text-white/85">/{t('landing.prPerMonth')}</span>
           </div>
 
+          {/* 试用徽章：白底紫字——紫面上对比度最高的一层（同下方 CTA 的理由），
+              实色药丸，不发光。只在管理后台开关打开时出现。
+              Trial badge: white fill, violet text — the highest-contrast plane
+              available on the violet card, solid pigment, no glow. Rendered
+              only while the admin switch is on. */}
+          {trial && (
+            <div className="mt-4 inline-flex items-center gap-2 self-start rounded-pill bg-white px-4 py-2 text-[13px] font-bold text-prism-700">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" />
+              </svg>
+              {t('landing.prTrialBadge', { days: trial.days })}
+            </div>
+          )}
+
           <ul className="mt-8 grid gap-3.5 border-t border-white/25 pt-7 sm:grid-cols-2 sm:gap-x-8">
             {proFeatures.map((k) => (
               <li key={k} className="text-[13px] leading-relaxed text-white/85">
@@ -228,7 +250,7 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
             onClick={() => navigate('/login?mode=register')}
             className="btn mt-8 h-11 w-full bg-white text-[13px] font-semibold text-prism-700 hover:bg-white/90"
           >
-            {t('landing.prCta')}
+            {trial ? t('landing.prTrialCta', { days: trial.days }) : t('landing.prCta')}
           </button>
         </div>
       </div>

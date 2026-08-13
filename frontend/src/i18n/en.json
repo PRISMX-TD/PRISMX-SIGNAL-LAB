@@ -166,6 +166,8 @@
     "prProF5": "Your personal real win rate: see how you actually trade",
     "prProF6": "Unlimited MT5 accounts",
     "prProF7": "Real-time browser push notifications",
+    "prTrialBadge": "Limited: {{days}}-day free PRO trial",
+    "prTrialCta": "Sign up free — claim your {{days}}-day trial",
     "prCta": "Register free, upgrade inside",
     "prNote": "Both tiers exist permanently: upgrade or downgrade anytime. Upgrading happens on the in-app Upgrade page (USDT supported).",
     "prSponsor": "Or let the partner broker cover it: open a MakeCapital account and keep it active, and PRO is sponsored. Details coming soon.",

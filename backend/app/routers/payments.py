@@ -101,7 +101,19 @@ def get_plans(db: Session = Depends(get_db)):
             "tag": "save_20" if not sale else None,
         },
     ]
-    return {"plans": plans, "sale": sale}
+    # 公开试用信息：只有「开关 + 天数」两个营销事实，不含任何用户数据。
+    # 落地页（未登录）靠它决定要不要亮出试用标识；资格判定（是否用过、当前
+    # 等级）仍归上面需要登录的 /trial 与 /trial/claim。不新开端点：落地页的
+    # 定价区本来就在调这个接口取价格。
+    # Public trial facts: just the switch and the day count, no user data. The
+    # logged-out landing page uses this to decide whether to show the trial
+    # highlight; eligibility stays with the authenticated /trial endpoints.
+    trial = get_trial_settings(db)
+    return {
+        "plans": plans,
+        "sale": sale,
+        "trial": {"enabled": bool(trial["trial_enabled"]), "days": int(trial["trial_days"])},
+    }
 
 
 @router.get("/currencies")

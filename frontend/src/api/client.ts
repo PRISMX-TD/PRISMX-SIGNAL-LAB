@@ -684,6 +684,8 @@ export const paymentApi = {
     request<{
       plans: Array<{ id: string; name: string; price_usd: number; original_price_usd?: number | null; days: number; tag?: string }>
       sale?: { percent: number; badge: string; end_at: string; monthly: number; yearly: number } | null
+      // 公开试用事实（见后端 get_plans 的注释）/ public trial facts
+      trial?: { enabled: boolean; days: number }
     }>('/payments/plans'),
   getCurrencies: () => request<{ currencies: string[] }>('/payments/currencies'),
   create: (plan: string, payCurrency: string) =>
