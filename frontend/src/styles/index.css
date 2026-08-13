@@ -4093,7 +4093,11 @@ body {
     top: 50%;
     max-width: 26rem;
   }
-  .panel-r { right: 7vw; top: 50%; max-width: 26rem; }
+  .panel-r {
+    right: calc((100vw - min(100vw, 1440px)) / 2 + 0.07 * min(100vw, 1440px));
+    top: 50%;
+    max-width: 26rem;
+  }
 
   .panel-l > .panel-inner,
   .panel-r > .panel-inner { transform: translateY(-50%); }
@@ -5387,6 +5391,21 @@ body {
 @media (min-width: 1280px) {
   .panel-l[data-panel='hero'] {
     max-width: 30rem;
+  }
+  /* 叙事区的文字向中间靠：左右面板同步从内容框的 7% 收到 12%。
+     必须两侧一起动——五幕的面板左右交替（hero/3/4 在左、1/2 在右，手机在
+     对侧），只动一侧会让左右幕的留白节奏不一致。同为 panel-l 的三幕一起移，
+     切幕时文字块的左基线不跳。
+     只从 1280 起：更窄的桌面上空隙本来就只剩 ~90px，再收会贴到机身。
+     判定幕（.mkt-section 也用 panel-l）不在此列——它的文字是压在判定墙上
+     排的，另有自己的对位。
+     Both sides move together (scenes alternate sides with the phone opposite),
+     story section only — the verdict act composes its copy against the wall. */
+  .story-section .panel-l {
+    left: calc((100vw - min(100vw, 1440px)) / 2 + 0.12 * min(100vw, 1440px));
+  }
+  .story-section .panel-r {
+    right: calc((100vw - min(100vw, 1440px)) / 2 + 0.12 * min(100vw, 1440px));
   }
 }
 

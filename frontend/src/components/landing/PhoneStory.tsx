@@ -523,23 +523,23 @@ export default function PhoneStory() {
                 With the opening now product-first the headline sits over the scrim
                 and has to be the screen's single anchor, heavy enough to hold its
                 own against the enlarged signal card. */}
-            <h1 className="font-display-xl text-[clamp(2.5rem,11vw,3.6rem)]">
+            <h1 className="font-display-xl text-[clamp(2.5rem,11vw,4.25rem)]">
               <span className="block text-white">{t('landing.heroTitle1')}</span>
               <span className="mt-1 block text-prism-400">{t('landing.heroTitle2')}</span>
             </h1>
-            <p className="mt-5 max-w-[44ch] text-[13px] leading-relaxed text-neutral-400 sm:max-w-[58ch] sm:text-[15px]">
+            <p className="mt-5 max-w-[44ch] text-[13px] leading-relaxed text-neutral-400 sm:max-w-[58ch] sm:text-[15px] lg:text-[17px]">
               {t('landing.heroSubtitle')}
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-3">
               <button
                 onClick={() => navigate('/login?mode=register')}
-                className="btn btn-primary h-11 px-6 text-[13px] sm:h-12 sm:px-7 sm:text-[15px]"
+                className="btn btn-primary h-11 px-6 text-[13px] sm:h-12 sm:px-7 sm:text-[15px] lg:h-[52px] lg:px-8 lg:text-[17px]"
               >
                 {t('landing.ctaPrimary')}
               </button>
               <a
                 href="#pricing"
-                className="inline-block py-2 text-[13px] text-neutral-400 underline decoration-white/20 underline-offset-[6px] transition-colors hover:text-white hover:decoration-white/60"
+                className="inline-block py-2 text-[13px] lg:text-[15px] text-neutral-400 underline decoration-white/20 underline-offset-[6px] transition-colors hover:text-white hover:decoration-white/60"
               >
                 {t('landing.ctaSecondary')}
               </a>
