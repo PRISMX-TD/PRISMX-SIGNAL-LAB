@@ -517,6 +517,47 @@ def build_closed_trade_legs(
     return legs_out
 
 
+async def _read_positions(login: str) -> tuple[list[dict], bool]:
+    """读一个账号的持仓，转成前端/自动仓管使用的格式。返回 (列表, 是否成功)。
+
+    这里产出的字典是 gateway 通道唯一的持仓数据来源，同时喂给三个消费方：
+    前端的 POSITIONS 推送、胜率对账（mark_positions_seen）、自动仓位管理
+    （auto_manage.evaluate_positions）。键名必须与 bridge 上报的载荷一致，
+    否则消费方会静默读到 None —— 比如 side 若不是大写的 "BUY"/"SELL"，
+    auto_manage 会把每个仓位都跳过，且不报任何错。
+
+    模块级函数而非循环内的闭包，就是为了让这层映射能被单独测到（见
+    tests/test_auto_manage_gateway.py 里的 gateway 数据链路用例）。
+
+    The only source of position data on the gateway channel, consumed by the
+    frontend push, win-rate reconciliation and auto-management alike. Key names
+    must match the bridge's payload or consumers silently read None — e.g. a
+    lowercase side would make auto_manage skip every position without an error.
+    Kept at module level rather than nested in the loop so it can be tested.
+    """
+    positions, err = await gw_get_positions(int(login))
+    if err:
+        logger.warning("Gateway 持仓读取失败 login=%s: %s", login, err)
+        return [], False
+
+    return [
+        {
+            "ticket": p.ticket,
+            "symbol": p.symbol,
+            "side": p.side,
+            "volume": p.volume,
+            "profit": p.profit,
+            "entryPrice": p.price_open,
+            "currentPrice": p.price_current,
+            "stopLoss": p.stop_loss,
+            "takeProfit": p.take_profit,
+            "login": login,
+            "comment": p.comment,
+        }
+        for p in positions
+    ], True
+
+
 async def gateway_positions_loop() -> None:
     """周期性拉取 gateway 账号持仓并推送给前端，同时刷新资金与平仓明细。
 
@@ -683,30 +724,6 @@ async def gateway_positions_loop() -> None:
     # 一轮内限制同时在飞的用户数，避免把 gateway 的单连接打满。
     # Cap in-flight users per tick so we don't saturate the gateway's single link.
     sem = asyncio.Semaphore(GATEWAY_MAX_CONCURRENT_USERS)
-
-    async def _read_positions(login: str) -> tuple[list[dict], bool]:
-        """读一个账号的持仓，转成前端格式。返回 (列表, 是否成功)。"""
-        positions, err = await gw_get_positions(int(login))
-        if err:
-            logger.warning("Gateway 持仓读取失败 login=%s: %s", login, err)
-            return [], False
-
-        return [
-            {
-                "ticket": p.ticket,
-                "symbol": p.symbol,
-                "side": p.side,
-                "volume": p.volume,
-                "profit": p.profit,
-                "entryPrice": p.price_open,
-                "currentPrice": p.price_current,
-                "stopLoss": p.stop_loss,
-                "takeProfit": p.take_profit,
-                "login": login,
-                "comment": p.comment,
-            }
-            for p in positions
-        ], True
 
     async def _scan_deals(user_id: str, login: str) -> None:
         """拉取并入库一个账号的平仓明细。

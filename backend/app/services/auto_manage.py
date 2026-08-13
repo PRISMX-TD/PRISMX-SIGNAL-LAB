@@ -1,9 +1,15 @@
 """自动仓位管理（PRO 专属）：保本、追踪止损、分批止盈。
 
-由桥接程序每 ~1.5 秒一次的持仓上报驱动（见 bridge.bridge_positions），
-不另起轮询任务。每次上报对该用户的持仓做一轮规则评估，需要动作时以
-MODIFY / CLOSE 指令写入现有订单队列——由桥接正常拉取执行、正常回执，
-订单页全程可见，与手动操作走完全相同的链路，透明可审计。
+由持仓上报驱动，不另起轮询任务。两条通道都会驱动它，各自的节奏不同：
+- Bridge：桥接程序每 ~1.5 秒 POST /bridge/positions（见 bridge.bridge_positions）
+- Gateway：后端每 2 秒主动轮询（见 gateway.gateway_positions_loop）
+
+每次上报对该用户的持仓做一轮规则评估，需要动作时以 MODIFY / CLOSE 指令写入
+现有订单队列，订单页全程可见，与手动操作走完全相同的链路，透明可审计。
+指令的执行者按通道分流，这一步不能想当然（漏掉就等于自动仓管静默失效）：
+- Bridge 账号：桥接下一拍轮询 /bridge/poll 拉走执行、回执
+- Gateway 账号：没有桥接，/bridge/poll 还会主动跳过它们，所以由本模块的
+  _execute_gateway_orders 在落库后立刻调 gateway HTTP 执行
 
 范围与安全边界 / scope & safety:
 - 只管理通过 PRISMX 下单开出的仓位（按 Order.mt5_ticket 匹配），
@@ -32,9 +38,10 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.models import AutoManagedPosition, AutoManageSettings, Order, User
+from app.models import AutoManagedPosition, AutoManageSettings, MT5Account, Order, User
 from app.services.plans import can_auto_manage
 from app.services.push_dispatch import EVENT_AUTO_MANAGE, dispatch_event_push
 
@@ -155,18 +162,42 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
         return 0
 
     # 只管理本平台开的仓位 / only manage positions opened through PRISMX
+    #
+    # 仓位号可能落在两个不同的列上，取决于账号是哪条通道接进来的：
+    #   - Bridge：mt5_ticket 存的是 order_send 回执的 result.order，而 MT5 里
+    #     仓位号就等于开仓订单的 ticket，所以它本身就是仓位号。
+    #   - Gateway：mt5_ticket 存的是订单号**或成交号**（见 orders.py 的
+    #     _apply_trade_result），成交号与仓位号不是同一套编号，拿来比对配不上；
+    #     真正的仓位号由 gateway 开仓后反查填进 mt5_position。
+    # 只查 mt5_ticket 会让 gateway 账号的 platform_tickets 恒为空，自动仓位管理
+    # 静默失效——规则一次都不会被评估。两列取并集，各自通道走各自的那一列。
+    #
+    # A position id lands in one of two columns depending on the channel. Bridge
+    # stores result.order in mt5_ticket, which in MT5 *is* the position id. The
+    # gateway stores an order or deal ticket there — a deal ticket lives in a
+    # different numbering space and never matches — and puts the real position id
+    # in mt5_position. Matching only mt5_ticket left platform_tickets permanently
+    # empty for gateway accounts, silently disabling auto-management.
     tickets = [int(p.get("ticket") or 0) for p in positions if p.get("ticket")]
     if not tickets:
         return 0
+    reported = set(tickets)
     platform_tickets = {
-        t for (t,) in db.query(Order.mt5_ticket)
+        t
+        for row in db.query(Order.mt5_ticket, Order.mt5_position)
         .filter(
             Order.user_id == user_id,
             Order.action == "ORDER",
             Order.status == "FILLED",
-            Order.mt5_ticket.in_(tickets),
+            or_(Order.mt5_ticket.in_(tickets), Order.mt5_position.in_(tickets)),
         )
         .all()
+        for t in row
+        # 一行里两列都要过一遍 `reported`：命中的可能是其中任一列，另一列的值
+        # （bridge 的 NULL、或 gateway 的成交号）不属于本次上报，不能带进来。
+        # Both columns are filtered against `reported`: only one of them matched,
+        # and the other holds a value that isn't one of the reported positions.
+        if t is not None and t in reported
     }
     if not platform_tickets:
         return 0
@@ -198,7 +229,11 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
     }
 
     now = datetime.now(timezone.utc)
-    created = 0
+    # 本轮新建的指令。除了计数，提交后还要把其中落在 gateway 账号上的立刻执行掉
+    # （gateway 没有桥接来取，见 _execute_gateway_orders）。
+    # This pass's new commands. Counted, and after the commit the ones targeting
+    # gateway accounts are executed right here (see _execute_gateway_orders).
+    created_orders: list[Order] = []
     # 通知延迟到函数末尾 db.commit() 成功之后才真正发送，避免"规则决定要
     # 改单但最终提交失败/回滚"时用户却收到了一条其实没发生的通知。
     # Notifications are deferred until after the final db.commit() succeeds,
@@ -280,7 +315,7 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
             else:
                 should_move = True  # 有 R 但当前无 SL（被手动清掉）：补上 / SL was cleared manually; restore it
             if should_move:
-                db.add(Order(
+                cmd = Order(
                     user_id=user_id,
                     client_order_id=_client_order_id("sl", ticket),
                     action="MODIFY",
@@ -292,8 +327,9 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
                     tp=current_tp,  # 保留现有止盈，0 会被桥接理解为清除 / keep TP; 0 would clear it
                     mt5_login=login,
                     status="PENDING",
-                ))
-                created += 1
+                )
+                db.add(cmd)
+                created_orders.append(cmd)
                 pending_auto_tickets.add(ticket)
                 kind = "保本" if desired == entry else "追踪止损"
                 pending_pushes.append((
@@ -313,7 +349,7 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
             # 拆不开的小仓不动（平掉部分和剩余部分都得 ≥ 0.01 手）
             # skip positions too small to split (both legs must be ≥ 0.01 lots)
             if close_vol >= 0.01 and volume - close_vol >= 0.01:
-                db.add(Order(
+                cmd = Order(
                     user_id=user_id,
                     client_order_id=_client_order_id("tp", ticket),
                     action="CLOSE",
@@ -323,12 +359,13 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
                     ticket=ticket,
                     mt5_login=login,
                     status="PENDING",
-                ))
+                )
+                db.add(cmd)
                 # 入队即标记：宁可失败后不重试，也不能失败后反复重发导致重复平仓。
                 # Marked on enqueue: better to not retry a failed close than to
                 # re-fire repeatedly and over-close the position.
                 state.partial_done = True
-                created += 1
+                created_orders.append(cmd)
                 pending_auto_tickets.add(ticket)
                 pending_pushes.append((
                     f"自动仓位管理：{symbol}",
@@ -343,8 +380,13 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
     ).delete(synchronize_session=False)
 
     db.commit()
-    if created:
-        logger.info("auto_manage: user=%s enqueued %d command(s)", user_id, created)
+    if created_orders:
+        logger.info(
+            "auto_manage: user=%s enqueued %d command(s)", user_id, len(created_orders)
+        )
+        # Gateway 账号没有桥接来取这些指令，提交后由本函数直接执行。
+        # Gateway accounts have no bridge to fetch these; execute them here.
+        _execute_gateway_orders(db, user_id, created_orders)
         # 提交成功后才真正发送通知（见 pending_pushes 声明处的说明）；单条
         # 推送失败不影响其它推送或本函数的返回值。
         # Only send notifications after the commit actually succeeds (see the
@@ -355,4 +397,79 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
                 dispatch_event_push(user_id, EVENT_AUTO_MANAGE, title, body)
             except Exception:
                 logger.exception("auto_manage: push failed (user=%s)", user_id)
-    return created
+    return len(created_orders)
+
+
+def _execute_gateway_orders(db: Session, user_id: str, orders: list[Order]) -> None:
+    """把落在 gateway 账号上的自动指令立刻执行掉。
+
+    Bridge 账号的指令由桥接轮询 /bridge/poll 取走执行；gateway 账号没有桥接，
+    而且 /bridge/poll 还会主动跳过它们（见 routers/bridge.py 的 gateway_logins）。
+    所以这里不执行的话，自动仓管的 MODIFY / CLOSE 会一直挂在 PENDING，直到 5
+    分钟后被 stale_order_monitor_loop 作废，并附上一句"如已开启桥接请重新下单"
+    ——对一个从来不需要桥接的 gateway 用户来说毫无意义。表现就是：设置页开关
+    开着，指令一条都不生效。
+
+    复用 orders 路由那份执行实现，而不是在这里另写一遍：retcode 到
+    FILLED/REJECTED 的映射、成交价回退、仓位号回填都在那边，两份实现迟早会
+    不一致。函数内导入是为了避免 services 与 routers 在模块加载期循环依赖。
+
+    单条指令失败只影响它自己：_try_gateway_execute 内部已把异常落成 FAILED，
+    这里再兜一层，确保一条炸掉不会拖累同批的其它指令，更不会把异常抛回持仓
+    上报的主流程。
+
+    Execute auto-management commands that target gateway accounts. Bridge
+    accounts get theirs via /bridge/poll, which deliberately skips gateway
+    logins — so without this they would sit PENDING until the 5-minute stale
+    sweep voided them, i.e. auto-management would silently do nothing while the
+    settings page showed it enabled. Reuses the orders router's implementation
+    rather than duplicating the retcode-to-status mapping; imported inside the
+    function to avoid a services/routers import cycle.
+    """
+    gateway_logins = {
+        row[0] for row in db.query(MT5Account.login).filter(
+            MT5Account.user_id == user_id,
+            MT5Account.source == "gateway",
+        ).all()
+    }
+    targets = [o for o in orders if o.mt5_login and o.mt5_login in gateway_logins]
+    if not targets:
+        return
+
+    from app.routers.orders import _try_gateway_execute
+    from app.services.connection_manager import manager
+    from app.services.gateway_client import run_on_main_loop
+
+    for order in targets:
+        try:
+            payload = _try_gateway_execute(db, order)
+            logger.info(
+                "auto_manage: gateway executed %s %s -> %s",
+                order.action, order.client_order_id, order.status,
+            )
+        except Exception:
+            logger.exception(
+                "auto_manage: gateway execution failed (user=%s, cmd=%s)",
+                user_id, order.client_order_id,
+            )
+            continue
+
+        # 与 bridge 回执一致地推一帧 ORDER_UPDATE，让订单页立刻看到 FILLED/
+        # REJECTED，而不是等下一次轮询。不再另发 Web Push：自动仓管在规则触发
+        # 那一刻已经推过一次，bridge 侧同样按 AUTO_PREFIX 跳过（见
+        # routers/bridge.py 的 bridge_result），两条通道保持同一套通知口径。
+        # 推送失败不算指令失败——指令已经在 MT5 上执行完了。
+        # Push one ORDER_UPDATE frame just like the bridge ack does, so the
+        # orders page reflects the result immediately. No second web push: the
+        # rule already sent one when it fired, and the bridge side skips
+        # AUTO_PREFIX commands for the same reason. A failed push is not a
+        # failed command — it already executed on MT5.
+        if payload is None:
+            continue
+        try:
+            run_on_main_loop(manager.push_to_client(user_id, payload), timeout=5.0)
+        except Exception:
+            logger.warning(
+                "auto_manage: gateway ORDER_UPDATE push failed (cmd=%s)",
+                order.client_order_id,
+            )
