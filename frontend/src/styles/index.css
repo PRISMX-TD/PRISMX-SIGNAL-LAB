@@ -2201,14 +2201,37 @@
     /* 圆角对齐卡片的 24：底栏是全站唯一还停在旧值（18）的容器。
        内边距同时抹平横竖差，同心圆角才成立（26 − 8 = 18，见 .lg-tab）。 */
     border-radius: var(--r-lg);
-    /* 模糊与内高光一起去掉。那条 inset 白线是「玻璃边缘折射」的模拟，是整套
-       系统里最后一处玻璃拟态残留——而设计系统写着不用玻璃。改成实色面之后，
-       底栏在任何背景上都是同一个样子，选中项也不再随背后滚过的内容混色。
-       The blur and inset highlight are gone: that white top edge simulated
-       glass refraction and was the system's last piece of glassmorphism. */
-    background: var(--surface);
-    border: 1px solid transparent;
-    box-shadow: 0 12px 36px -12px rgba(0, 0, 0, 0.7);
+    /* ── 液态玻璃（按要求恢复，并做到位）──
+       这里先前被改成实色面，理由是「设计系统不用玻璃」。现在按要求改回玻璃，
+       但只在**这一个元素**上破例：它是全站唯一悬浮在滚动内容之上的持久层，
+       玻璃在这里是有功能的——它让你知道下面还有内容在动。其余地方仍然实色。
+
+       诚实说明：Apple 的 Liquid Glass 只为自家平台定义，网页上**没有官方实现**，
+       下面是用 CSS 逼近，不是移植。三层：
+         ① backdrop-filter 的 blur + saturate——只 blur 会发灰，饱和度补回来
+            才有「透过玻璃看颜色」的感觉；
+         ② 顶缘一道 1px 内高光 + 底缘一道暗边，模拟玻璃厚度的两个折射面；
+         ③ 一层极淡的白色叠底，让玻璃在纯黑背景上也有实体感（否则纯 blur 在
+            没有内容经过时等于透明）。
+       不支持 backdrop-filter 时回落到实色面，观感退化但不破。
+
+       Apple documents Liquid Glass for its own platforms only; there is no
+       official web implementation. This is a CSS approximation: blur+saturate,
+       a bright top edge and dark bottom edge for glass thickness, and a faint
+       white wash so the panel still reads as a solid object over pure black. */
+    background: rgba(27, 27, 33, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow:
+      0 12px 36px -12px rgba(0, 0, 0, 0.7),
+      inset 0 1px 0 rgba(255, 255, 255, 0.16),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+  }
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .lg-tabbar-inner {
+      background: rgba(27, 27, 33, 0.52);
+      backdrop-filter: blur(24px) saturate(180%);
+      -webkit-backdrop-filter: blur(24px) saturate(180%);
+    }
   }
   .lg-tab {
     flex: 1;
@@ -2304,13 +2327,19 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
   }
+  /* 又是「药丸半径开在近方形盒子上」——这些格子约 100×84，999px 的半径会把
+     它压成椭圆疙瘩，跟同屏所有直角圆角的东西都不搭。药丸只在宽而扁的形状上
+     才读作药丸。
+     按同心式取值：面板圆角 24 − 面板内边距 16 = 8。
+     Pill radius on a near-square box yields a lozenge, not a pill. Concentric
+     instead: sheet radius 24 minus its 16px padding = 8. */
   .lg-sheet-item {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 8px;
     padding: 16px 8px;
-    border-radius: 999px;
+    border-radius: 8px;
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
@@ -4974,8 +5003,21 @@ body {
        56 to 50 percent moves the scrim top from y=383 to 436, finally clearing the
        card whose lower edge sits at 432. At 56 the card lost up to a quarter of its
        opacity across its last 49px, which reads as cropped rather than faded. */
-    height: 50%;
-    background: linear-gradient(0deg, #09090b 36%, rgba(9, 9, 11, 0.86) 66%, transparent);
+    /* 50% → 62%，且不透明区从 36% 提到 76%。
+       原值是在 375×812 上调的：那台机上卡片下沿 410、标题顶 462，有 52px
+       余量，遮罩只需盖住最后一点。但屏幕里的卡片是用 cqw（按容器宽度）定尺寸
+       的，而遮罩和文案面板按视口百分比定位——**屏幕越宽越矮，卡片就越长过
+       文字**。412×792 实测：卡片下沿 725、标题顶 435，重叠 290px，而标题正好
+       落在渐变 90% 处（几乎全透明），于是界面直接从字后面透出来。
+
+       改成按「不透明区必须够到标题顶」来定：标题顶大约在视口 45–48% 处，
+       实心区取 80%：三个常见尺寸实测标题分别落在 69.6% / 72.8% / 75.7%，
+       最紧的 360×740 也留了 4.3 个百分点余量（76% 时只剩 0.3，太险）。
+       The card is sized in cqw but the scrim is sized in viewport percent, so a
+       wider-and-shorter screen grows the card past the copy. The opaque band now
+       reaches the headline on both aspect ratios. */
+    height: 62%;
+    background: linear-gradient(0deg, #09090b 0 80%, rgba(9, 9, 11, 0.8) 92%, transparent);
   }
 }
 
@@ -5179,5 +5221,34 @@ body {
   .sig-filters,
   .seg-tabs {
     padding-block: 8px;
+  }
+}
+
+
+/* ═════════════ 多周期轨道：窄屏收紧 ═════════════
+   六个周期在 360–412px 的机上装不下：每格「M15 ↓」按 12px 等宽字约 36px 宽，
+   加左右 12px 内边距是 60px，六格 360px 再加轨道内边距，已经超出可用宽度，
+   最后一格被切掉。轨道虽然能横滑，但一条**读数带**被裁掉一截就失去意义
+   ——它要表达的正是「几个周期站在同一边」，看不全就数不出来。
+   所以窄屏收紧格子而不是靠滑动：字号 12→11、左右内边距 12→8，
+   六格约 294px，360px 的机上也能整条读完。
+   Six cells don't fit on a 360–412px screen, and a readout band that gets cut
+   off loses its whole point — you're meant to count how many periods agree.
+   Tighten the cells on narrow screens rather than relying on horizontal scroll. */
+@media (max-width: 480px) {
+  .tf-row {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .tf-tag {
+    padding: 4px 8px;
+    font-size: 11px;
+    gap: 2px;
+  }
+}
+@media (max-width: 360px) {
+  .tf-tag {
+    padding: 4px 6px;
+    font-size: 10px;
   }
 }
