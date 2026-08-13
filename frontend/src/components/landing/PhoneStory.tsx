@@ -164,21 +164,21 @@ export default function PhoneStory() {
       const computeBase = () => {
         const w = window.innerWidth
         const tier = w >= 1440 ? 1.25 : w >= 1280 ? 1.15 : 1
-        /* 高度约束——宽度分档漏掉的那一半，实机截图里机身顶部直接顶进了
-           64px 的固定导航。几何是确定的：
-             机身表观高 S = BODY_H(149.6) × pxPerUnit = 0.648 × 舞台高 × 总倍率
-             总倍率峰值 = base × 1.1（时间线在第二幕变焦到 1.1）
-             机身有 2% 的上移（对应 CSS 版 translate(-50%,-52%)）
-           要求最高峰时顶部仍让出导航 64px + 8px 余量：
-             (H − S)/2 − 0.02·S ≥ 72  ⇒  S ≤ (H − 144)/1.04
-           代回得 base ≤ (H − 144)/(1.04 × 1.1 × 0.648 × H)。
-           945 高的屏上这个上限是 1.14——1.25 在任何常见笔记本高度上都装不下，
-           宽度档只是「愿望值」，能不能到由高度说了算。下限钳在 1：原设计在
-           所有高度上都以 1 工作过。
-           The width tier is only an aspiration; height decides. Solving the
-           nav-clearance inequality for the peak-zoom frame gives the cap. */
+        /* 高度约束——宽度分档漏掉的那一半。几何是确定的：
+             机身表观高（零旋转）= BODY_H(149.6) × pxPerUnit = 0.648 × 舞台高
+             旋转的透视增益：rotY 22° + rotX 6° 时近端角 z 前移约 21 世界单位，
+             投影放大 500/479 ≈ 1.045 —— 上一版漏了这 4.5%，72px 的余量被
+             正好吃穿，机身仍蹭到导航。K 取 0.68 = 0.648 × 1.045。
+             幕间变焦已拉平（见时间线注释），总倍率峰值就是 base 本身；
+             机身另有 2% 上移。要求任何时刻顶部让出导航 64px + 8px 余量：
+               (H − S)/2 − 0.02·S ≥ 72  ⇒  base ≤ (H − 144)/(1.04 × 0.68 × H)
+           零旋转下的 0.648 与像素扫描的机身宽 0.31H 此前都被实测印证过；
+           旋转项是解析值，最坏姿态（幕 0 的 -22°）取满。
+           K folds in the worst-case rotation's perspective gain (+4.5%), which
+           the previous cap missed - exactly the margin that kept getting eaten.
+           With per-scene zooms flattened the peak multiplier is base itself. */
         const h = stage.clientHeight || window.innerHeight
-        const fit = (h - 144) / (1.04 * 1.1 * 0.648 * h)
+        const fit = (h - 144) / (1.04 * 0.68 * h)
         baseScale = Math.max(1, Math.min(tier, fit))
       }
       computeBase()
@@ -312,7 +312,16 @@ export default function PhoneStory() {
 
         /* 28–34 转场② / plan → order */
         panelOut(tl, '1', 28)
-        tl.to(PZ, { rotY: 17, scale: 1.04, duration: 5, ease: 'power2.inOut' }, 29)
+        /* 幕间变焦已拉平：原来各幕分别缩放到 1.04 / 1.1 / 1.02 / 0.92，看起来
+           就是「每一页的手机大小不一致」；姿态（旋转 / 位移）仍逐幕变化——
+           朝向变、大小不变。片尾 94 拍的 0.7 退场保留：那是整段叙事的收束，
+           不属于任何一幕的尺寸。拉平还有个直接收益：原本要给 1.1 变焦峰值
+           预留的竖向空间省下来了，基准倍率可以更大（见 computeBase）。
+           Per-scene zooms flattened - orientation still changes per scene,
+           size does not. The closing recede at beat 94 stays: it ends the
+           story rather than sizing a scene. Bonus: the headroom once reserved
+           for the 1.1 zoom peak now goes into a larger base scale. */
+        tl.to(PZ, { rotY: 17, duration: 5, ease: 'power2.inOut' }, 29)
         tl.to('.js-facelight', { xPercent: 20, duration: 5, ease: 'power2.inOut' }, 29)
         sheenPulse(tl, 30)
         swapScreen(tl, 1, 2, 29)
@@ -343,7 +352,7 @@ export default function PhoneStory() {
 
         /* 46–52 转场③：左→右，拉近看图表 / order → guard, phone crosses back, zooms in */
         panelOut(tl, '2', 46)
-        tl.to(PZ, { xvw: 19, rotY: -10, rotX: 3, scale: 1.1, duration: 6, ease: 'power2.inOut' }, 46)
+        tl.to(PZ, { xvw: 19, rotY: -10, rotX: 3, duration: 6, ease: 'power2.inOut' }, 46)
         tl.to('.js-facelight', { xPercent: -12, duration: 6, ease: 'power2.inOut' }, 46)
         sheenPulse(tl, 47)
         swapScreen(tl, 2, 3, 47)
@@ -359,7 +368,7 @@ export default function PhoneStory() {
 
         /* 64–70 转场④ / guard → record */
         panelOut(tl, '3', 64)
-        tl.to(PZ, { rotY: 7, scale: 1.02, duration: 5, ease: 'power2.inOut' }, 64)
+        tl.to(PZ, { rotY: 7, duration: 5, ease: 'power2.inOut' }, 64)
         tl.to('.js-facelight', { xPercent: 8, duration: 5, ease: 'power2.inOut' }, 64)
         sheenPulse(tl, 65)
         swapScreen(tl, 3, 4, 65)
@@ -380,7 +389,7 @@ export default function PhoneStory() {
            (LandingSpace keyframes 0.86 to 1.0), so one thing withdraws while the
            other opens, instead of one shot being spliced to the next. */
         panelOut(tl, '4', 85)
-        tl.to(PZ, { xvw: 0, rotY: 0, rotX: 0, scale: 0.92, duration: 8, ease: 'power2.inOut' }, 86)
+        tl.to(PZ, { xvw: 0, rotY: 0, rotX: 0, duration: 8, ease: 'power2.inOut' }, 86)
         tl.to(PZ, { scale: 0.7, duration: 6, ease: 'power2.in' }, 94)
         tl.to('.js-facelight', { xPercent: 0, duration: 11, ease: 'power2.inOut' }, 86)
 
