@@ -38,6 +38,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { CASES, P_ENTRY, P_SL, P_TP, type Candle } from './verdictData'
+import { useSectionProgress } from './useSectionProgress'
 
 const BEATS = 5
 
@@ -102,6 +103,10 @@ export default function MarketStory() {
      composition is never cropped - this act's credibility lives in every
      element being exactly where it belongs. */
   const [narrow, setNarrow] = useState(false)
+
+  /* 与叙事区同款的连续进度（--sec-p → 刻度填充），理由见 useSectionProgress。
+     Same continuous progress as the story section. */
+  useSectionProgress(root, mode === 'steps')
 
   useEffect(() => {
     const desk = window.matchMedia('(min-width: 1024px)')

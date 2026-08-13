@@ -4179,9 +4179,8 @@ body {
      already changed while the finger is still moving — that idle stretch is
      what reads as "off". 320vh puts a scene change at about two thirds of a
      screen, matching how long the copy takes to read. */
-  .story-section {
-    height: 320vh;
-  }
+  /* 行程高度移到文件末尾的「移动端叙事」块统一管理（320svh，与判定幕同拍）。
+     Travel height now lives in the end-of-file mobile narrative block. */
   /* ══ 移动端首屏：产品先行 ══
      原来是三行栅格（画面 / 刻度 / 文字），画面只占上面一格，于是首屏从上到下是
      导航 → 截图 → 声明 → 刻度 → 标题，标题落在 871px 屏幕的 68% 位置。访客
@@ -4664,9 +4663,7 @@ body {
 }
 
 @media (max-width: 1023px) {
-  .mkt-section {
-    height: 340vh;
-  }
+  /* 同上：行程高度统一在文件末尾管理。/ Same - managed at end of file. */
   /* 与叙事区同一套三行栅格：上面留给走廊，中间是拍计数，下面是文字。
      文字靠底而不是居中——走廊的灭点在画面中上部，压在它上面会同时毁掉两者。
      The same three-row grid as the story: corridor above, beat counter, type below.
@@ -5390,5 +5387,102 @@ body {
 @media (min-width: 1280px) {
   .panel-l[data-panel='hero'] {
     max-width: 30rem;
+  }
+}
+
+
+/* ═════════════ 移动端叙事：自适应行程 + 连续反馈 + 更快的切幕 ═════════════
+   针对的体感问题：「推了很久都没有反应」。它有三个来源，各修一处。 */
+@media (max-width: 1023px) {
+  /* ① 行程改用 svh，并把两段叙事对齐到同一节奏（64svh/幕）。
+     「跟着机型自适应」的正确单位就是视口本身：每幕 64svh = 每换一幕划过
+     自己屏幕的 64%，SE 和 Pro Max 上手感一致——绝对像素反而不自适应。
+     svh 取「地址栏展开时」的高度：vh 在移动端等于地址栏收起后的大视口，
+     比 svh 高约 8%，等于每幕都被偷偷加长了一截，且滚动中途地址栏一收，
+     行程与 sticky 舞台（100svh）的换算就对不上。
+     判定幕 340vh → 320svh，顺带与叙事区完全同拍（原来差 6%）。
+     Travel in svh: 64svh per scene means the same fraction of the user's own
+     screen on every device — that IS the adaptive unit. vh equals the large
+     viewport on mobile (~8% taller), silently stretching every scene and
+     drifting against the 100svh sticky stage when the URL bar collapses. */
+  .story-section {
+    height: 320vh;
+    height: 320svh;
+  }
+  .mkt-section {
+    height: 320vh;
+    height: 320svh;
+  }
+
+  /* ② 右缘刻度从「第几幕」升级成滚动温度计。
+     steps 模式只在幕边界切一次幕，边界之间滚多少都纹丝不动——那段死区就是
+     「没反应」的主体。刻度改成连续填充（--sec-p 由 useSectionProgress 每帧
+     写入）后，手指动一毫米刻度就动一毫米：结构没变，感知从「离散跳变」变成
+     「每帧有回应」。
+     轨道底色固定中性（覆盖掉 React 侧的按幕换色——那套仍服务桌面），
+     填充走品牌紫。scaleY 是合成器属性，逐帧变化不触发布局。
+     The ticks become a continuously filling gauge driven by --sec-p. The dead
+     air between sentinel boundaries is exactly what "nothing responds" meant;
+     now every millimetre of scroll moves something. scaleY composites. */
+  .story-stage .js-tick,
+  .mkt-stage .js-tick {
+    position: relative;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.15);
+  }
+  .story-stage .js-tick::after,
+  .mkt-stage .js-tick::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--purple-hi);
+    transform-origin: top;
+    transform: scaleY(var(--tick-f, 0));
+  }
+  /* 五段均分：第 i 段在总进度 [i/5, (i+1)/5] 内从 0 填到 1。
+     Five equal segments, each filling across its fifth of the total travel. */
+  :is(.story-stage, .mkt-stage) .js-tick:nth-child(1)::after { --tick-f: clamp(0, calc(var(--sec-p, 0) * 5 - 0), 1); }
+  :is(.story-stage, .mkt-stage) .js-tick:nth-child(2)::after { --tick-f: clamp(0, calc(var(--sec-p, 0) * 5 - 1), 1); }
+  :is(.story-stage, .mkt-stage) .js-tick:nth-child(3)::after { --tick-f: clamp(0, calc(var(--sec-p, 0) * 5 - 2), 1); }
+  :is(.story-stage, .mkt-stage) .js-tick:nth-child(4)::after { --tick-f: clamp(0, calc(var(--sec-p, 0) * 5 - 3), 1); }
+  :is(.story-stage, .mkt-stage) .js-tick:nth-child(5)::after { --tick-f: clamp(0, calc(var(--sec-p, 0) * 5 - 4), 1); }
+
+  /* ③ 切幕过渡 0.5s → 0.28s，位移 14px → 10px。
+     0.5s 是桌面 scrub 前的取值：手机上一次快划 200ms 就能跨过幕边界，切幕
+     动画比手势本身慢一倍多，读起来就是「滞后」。0.28s 贴着手势的尾巴走。
+     visibility 的退场延迟同步缩短；.on 的零延迟必须在此**重新声明**——
+     这两条 shorthand 写在文件末尾，会在层叠里赢过前面 .on 规则的
+     transition-delay: 0s，不补回去的话入场的 visibility 会等 0.28s 才翻转，
+     面板直接从透明「弹」到全亮。
+     0.5s transitions lag behind a 200ms flick. The .on zero-delay must be
+     re-asserted after these late-in-file shorthands or enter-visibility waits
+     out the delay and the panel pops instead of fading. */
+  .story-root:not(.is-scrub) .story-panel {
+    transform: translateY(10px);
+    transition:
+      opacity 0.28s var(--ease-out),
+      transform 0.28s var(--ease-out),
+      visibility 0s linear 0.28s;
+  }
+  /* .scr 的过渡真身挂在 .story-root:not(.is-scrub) .scr（3 类权重）上，
+     覆盖必须同权重。顺带修一个由此挖出的潜伏 bug：.scr.on 的
+     transition-delay: 0s 只有 2 类权重，против那条 3 类的 shorthand **一直输**
+     ——也就是说 steps 模式的入场从来没有真正淡入过：visibility 等满 0.5s 才
+     翻转，屏幕是在渐变结束的瞬间「硬切」进来的，只有退场在淡。下面用 4 类
+     权重的 .on 规则把零延迟真正落地，入场淡入这才第一次生效。
+     The real .scr transition lives on a 3-class selector, and the 2-class
+     .scr.on zero-delay has been losing to it all along - meaning steps-mode
+     screens never actually faded IN (visibility flipped only after the full
+     delay, a hard cut). The 4-class rule below lands the zero delay for real. */
+  .story-root:not(.is-scrub) .scr {
+    transition:
+      opacity 0.28s var(--ease-out),
+      transform 0.28s var(--ease-out),
+      visibility 0s linear 0.28s;
+  }
+  .story-panel.on,
+  .story-root:not(.is-scrub) .story-panel.on,
+  .story-root:not(.is-scrub) .scr.on {
+    transition-delay: 0s;
   }
 }

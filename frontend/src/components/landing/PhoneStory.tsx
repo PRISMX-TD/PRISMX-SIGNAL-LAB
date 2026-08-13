@@ -37,6 +37,7 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { PhoneChrome, ScreenSignals, ScreenPlan, ScreenOrder, ScreenGuard, ScreenRecord } from './PhoneScreens'
 import { createPhoneGL, type PhoneGLHandle } from './PhoneGL'
+import { useSectionProgress } from './useSectionProgress'
 
 type T = (k: string) => string
 
@@ -73,6 +74,11 @@ export default function PhoneStory() {
       reduce.removeEventListener('change', apply)
     }
   }, [])
+
+  /* steps 模式的连续进度：把滚动进度写进 --sec-p，右缘刻度据此连续填充，
+     消掉幕与幕之间「推了很久没反应」的死区（见 useSectionProgress 的说明）。
+     Continuous progress for steps mode - kills the dead air between scenes. */
+  useSectionProgress(root, mode === 'steps')
 
   /* ── steps 模式：IO 判幕 / steps mode: IO picks the scene ── */
   useEffect(() => {
