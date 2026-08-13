@@ -166,6 +166,8 @@
     "prProF5": "个人真实跟单胜率：看清自己的真实表现",
     "prProF6": "不限 MT5 账户数量",
     "prProF7": "浏览器实时推送通知",
+    "prTrialFirstDays": "首 {{days}} 天",
+    "prTrialThen": "之后 ${{price}}/月",
     "prTrialBadge": "限时开放 · 免费试用 {{days}} 天 PRO",
     "prTrialCta": "免费注册，领 {{days}} 天 PRO 试用",
     "prCta": "先免费注册，进去再升级",

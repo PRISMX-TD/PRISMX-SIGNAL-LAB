@@ -211,28 +211,49 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
 
         {/* PRO：实色紫面 / solid pigment plane */}
         <div className="reveal reveal-d1 flex flex-col rounded-card bg-prism-600 p-7 lg:col-span-7">
+          {/* 试用横幅：贯穿卡顶的实色金条。第一版是价格下方的白药丸，反馈是
+              「不明显」——它和卡内其它元素同宽同层级，扫视时不占任何优先级。
+              横幅解决的正是这个：它改变卡片的**轮廓**（顶部多出一条色带），
+              轮廓变化在滚动扫视里先于一切内文被看到。
+              金色是全页唯一一处（既有 token --gold，语义就是限时/例外），
+              近黑文字压上去 9.2:1；实色平涂，不发光。
+              A solid gold band across the card top. The first attempt (a white
+              pill below the price) failed because it lived at the same level as
+              everything else; the band changes the card's silhouette, which is
+              what scanning eyes pick up first. Gold is used nowhere else on the
+              page. */}
+          {trial && (
+            <div className="-mx-7 -mt-7 mb-6 flex items-center justify-center gap-2 rounded-t-card bg-[#E0A83C] px-7 py-3 text-[14px] font-bold text-ink-950">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" />
+              </svg>
+              {t('landing.prTrialBadge', { days: trial.days })}
+            </div>
+          )}
           <div className="flex items-baseline justify-between gap-3">
             <span className="font-display text-[20px] font-bold text-white">{t('landing.prProName')}</span>
             <span className="text-[12px] text-white/85">{t('landing.prProTag')}</span>
           </div>
-          <div className="mt-5 flex items-baseline gap-2">
-            <span className="num text-[2.5rem] font-semibold leading-none text-white">
-              {monthlyPrice != null ? `$${monthlyPrice}` : '—'}
-            </span>
-            <span className="text-[13px] text-white/85">/{t('landing.prPerMonth')}</span>
-          </div>
-
-          {/* 试用徽章：白底紫字——紫面上对比度最高的一层（同下方 CTA 的理由），
-              实色药丸，不发光。只在管理后台开关打开时出现。
-              Trial badge: white fill, violet text — the highest-contrast plane
-              available on the violet card, solid pigment, no glow. Rendered
-              only while the admin switch is on. */}
-          {trial && (
-            <div className="mt-4 inline-flex items-center gap-2 self-start rounded-pill bg-white px-4 py-2 text-[13px] font-bold text-prism-700">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" />
-              </svg>
-              {t('landing.prTrialBadge', { days: trial.days })}
+          {/* 价格位是定价卡上眼睛落点的第一站——试用开着时它必须说 $0，
+              而不是让 $49 继续当主角、旁边贴个补丁。原价降级成一行
+              「之后 $N/月」：既诚实（试用后要付费）又把层级让出来。
+              The price slot is where eyes land first on a pricing card; with
+              the trial on it must read $0, with the real price demoted to a
+              "then $N/mo" line — honest and hierarchically correct. */}
+          {trial ? (
+            <div className="mt-5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="num text-[2.5rem] font-semibold leading-none text-white">$0</span>
+              <span className="text-[15px] font-bold text-white">{t('landing.prTrialFirstDays', { days: trial.days })}</span>
+              {monthlyPrice != null && (
+                <span className="text-[13px] text-white/70">{t('landing.prTrialThen', { price: monthlyPrice })}</span>
+              )}
+            </div>
+          ) : (
+            <div className="mt-5 flex items-baseline gap-2">
+              <span className="num text-[2.5rem] font-semibold leading-none text-white">
+                {monthlyPrice != null ? `$${monthlyPrice}` : '—'}
+              </span>
+              <span className="text-[13px] text-white/85">/{t('landing.prPerMonth')}</span>
             </div>
           )}
 

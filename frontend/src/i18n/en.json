@@ -166,6 +166,8 @@
     "prProF5": "Your personal real win rate: see how you actually trade",
     "prProF6": "Unlimited MT5 accounts",
     "prProF7": "Real-time browser push notifications",
+    "prTrialFirstDays": "first {{days}} days",
+    "prTrialThen": "then ${{price}}/mo",
     "prTrialBadge": "Limited: {{days}}-day free PRO trial",
     "prTrialCta": "Sign up free — claim your {{days}}-day trial",
     "prCta": "Register free, upgrade inside",
