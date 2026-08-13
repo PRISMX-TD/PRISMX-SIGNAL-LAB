@@ -4406,6 +4406,15 @@ body {
      highlighted is the vocabulary of a horizontal pager, so in a vertically
      scrolled story it actively points the wrong way — worse than no indicator.
      A vertical stack at the right edge matches the real interaction. */
+  /* ⚠ .story-ticks 是叙事区（.story-stage）与判定幕（.mkt-stage）**共用**的类。
+     上一版只给 .story-stage 写了右缘绝对定位，判定幕于是拿到下面这条基础规则
+     ——静态、栅格第二行、竖排——结果刻度贴死在屏幕最左边还被裁掉。
+     这个坑文件里早有一条注释警告过（见下方「共用类」那段），我又踩了一次。
+     所以两个舞台一起写，样式只有一份。
+     .story-ticks is SHARED by the story section and the verdict act; scoping the
+     new positioning to .story-stage alone left the verdict act on the base rule
+     and pinned its ticks to the far left edge. Both stages are handled together
+     so there is only one source of truth. */
   .story-ticks {
     position: static;
     grid-area: 2 / 1;
@@ -4415,10 +4424,14 @@ body {
     transform: none;
     padding: 0;
   }
-  .story-stage .story-ticks {
+  .story-stage .story-ticks,
+  .mkt-stage .story-ticks {
     position: absolute;
     left: auto;
-    right: 10px;
+    /* 12px 而不是 10：刻度压在全出血的界面上，贴太近会读成「被裁了一半」。
+       12px rather than 10 — the ticks sit over a full-bleed screen, and closer
+       than that reads as clipped rather than as an edge indicator. */
+    right: 12px;
     top: 50%;
     bottom: auto;
     transform: translateY(-50%);
@@ -4431,7 +4444,8 @@ body {
   .story-root[data-active='0'] .story-stage .story-ticks {
     opacity: 0;
   }
-  .story-stage .js-tick {
+  .story-stage .js-tick,
+  .mkt-stage .js-tick {
     height: 16px;
     width: 3px;
     flex: none;
