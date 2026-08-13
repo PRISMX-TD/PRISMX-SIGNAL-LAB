@@ -154,6 +154,6 @@ export function deriveOverlays(conditions: StrategyCondition[]): DerivedOverlay[
 // Overlay colors, deliberately clear of the candles' green/red and the trade
 // markers' green/red/amber: an indicator line in those colors reads as P&L
 // information.
-export const OVERLAY_COLORS = ['#38bdf8', '#a78bfa', '#22d3ee', '#f472b6', '#facc15', '#94a3b8']
+export const OVERLAY_COLORS = ['#38bdf8', 'var(--purple-hi)', '#22d3ee', '#f472b6', '#facc15', '#94a3b8']
 
 export const overlayColor = (index: number) => OVERLAY_COLORS[index % OVERLAY_COLORS.length]

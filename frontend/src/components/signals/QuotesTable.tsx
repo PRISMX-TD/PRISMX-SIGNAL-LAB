@@ -52,7 +52,7 @@ const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => 
         <div className="flex items-center gap-5 ml-auto">
           <div className="text-center">
             <div className="text-[10px] text-neutral-500 mb-0.5">{t('signals.quotes.bid', '买价')}</div>
-            <span className="num font-bold text-sm" style={{ color: '#2ee07e' }}>{focusAsk}</span>
+            <span className="num font-bold text-sm" style={{ color: 'var(--up)' }}>{focusAsk}</span>
           </div>
           <div className="text-center">
             <div className="text-[10px] text-neutral-500 mb-0.5">{t('signals.quotes.spread', '点差')}</div>
@@ -60,7 +60,7 @@ const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => 
           </div>
           <div className="text-center">
             <div className="text-[10px] text-neutral-500 mb-0.5">{t('signals.quotes.ask', '卖价')}</div>
-            <span className="num font-bold text-sm" style={{ color: '#ff4d67' }}>{focusBid}</span>
+            <span className="num font-bold text-sm" style={{ color: 'var(--down)' }}>{focusBid}</span>
           </div>
         </div>
       </div>
@@ -99,8 +99,8 @@ const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => 
                         </div>
                       </div>
                     </td>
-                    <td><span className="qt-price num" style={{ color: '#ff4d67' }}>{bid ?? '-'}</span></td>
-                    <td><span className="qt-price num" style={{ color: '#2ee07e' }}>{ask ?? '-'}</span></td>
+                    <td><span className="qt-price num" style={{ color: 'var(--down)' }}>{bid ?? '-'}</span></td>
+                    <td><span className="qt-price num" style={{ color: 'var(--up)' }}>{ask ?? '-'}</span></td>
                   </tr>
                 )
               })

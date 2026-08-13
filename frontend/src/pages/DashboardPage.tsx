@@ -125,7 +125,7 @@ export default function DashboardPage() {
             <>
               <div className="dash-col-1">
                 <section className="card glass dash-hero p-8 flex flex-col items-center justify-center text-center gap-3">
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" className="opacity-50"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg>
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--purple-hi)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" className="opacity-50"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg>
                   <h2 className="text-lg font-bold text-white">{t('signals.title')}</h2>
                   <p className="text-sm text-neutral-400 max-w-xs">{t('signals.waitingForSignals', '等待信号引擎或 TradingView 推送信号……')}</p>
                 </section>

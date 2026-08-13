@@ -397,7 +397,7 @@ export function ScreenGuard({ t, on }: { t: T; on: boolean }) {
           <polyline
             points="2,52 12,48 18,50 26,42 33,44 42,34 49,37 58,27 64,30 73,20 81,23 90,13 98,15"
             fill="none"
-            stroke="#35C97A"
+            stroke="var(--up)"
             strokeWidth="1.6"
             strokeLinejoin="round"
             strokeLinecap="round"

@@ -20,8 +20,8 @@ interface Props {
 }
 
 const TREND_VIS: Record<TrendDir, { arrow: string; color: string }> = {
-  UP: { arrow: '↑', color: '#2ee07e' },
-  DOWN: { arrow: '↓', color: '#ff4d67' },
+  UP: { arrow: '↑', color: 'var(--up)' },
+  DOWN: { arrow: '↓', color: 'var(--down)' },
   FLAT: { arrow: '→', color: '#64748b' },
 }
 
@@ -133,7 +133,12 @@ const SignalHero: FC<Props> = ({
       <div className="mt-2 text-[13px] leading-relaxed text-neutral-300 relative z-10">{stanceNote}</div>
 
       {/* Multi-TF tags */}
-      <div className="mt-3.5 flex gap-2 flex-wrap relative z-10">
+      {/* .tf-row 是分段轨道的容器（见 index.css）：这一排是同一个品种在多个
+          周期上的方向，是一组同类读数而不是若干独立标签，所以排成一条轨道而
+          不是散开的药丸。原来这里只有 Tailwind 的 flex+gap，没有容器类。
+          The row is one reading across periods, so it renders as a single
+          segmented track rather than separate pills. */}
+      <div className="tf-row mt-4 relative z-10">
         {TREND_TFS.map((tf) => {
           const dir: TrendDir = trend?.timeframes?.[tf] ?? 'FLAT'
           const vis = TREND_VIS[dir]

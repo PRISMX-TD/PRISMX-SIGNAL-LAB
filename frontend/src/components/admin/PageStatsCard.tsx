@@ -27,7 +27,7 @@ const METRICS: Metric[] = ['visitors', 'views', 'avgSeconds']
 // Line colours for the top 6 pages; the rest are omitted from the chart (the
 // legend would overflow, and low-traffic pages hug the baseline anyway). The
 // detail table still lists every page.
-const LINE_COLORS = ['#a78bfa', '#38bdf8', '#34d399', '#fbbf24', '#fb7185', '#c084fc']
+const LINE_COLORS = ['var(--purple-hi)', '#38bdf8', '#34d399', '#fbbf24', '#fb7185', '#c084fc']
 const MAX_LINES = 6
 
 const SVG_W = 720

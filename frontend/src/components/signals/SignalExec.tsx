@@ -34,7 +34,7 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
         {/* 标题行：可执行信号 + 倒计时 / title + countdown */}
         <div className="exec-title-row">
           <div className="flex items-center gap-2">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--purple-hi)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" />
             </svg>
             <h3 className="text-[15px] font-bold leading-none">{t('signals.focus.signalHeading')}</h3>

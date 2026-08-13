@@ -97,7 +97,7 @@ export default function PersonalWinRateCard({ variant = 'compact', login }: Prop
       ) : (
         <>
           <div className="mt-4 flex items-center gap-4">
-            <RadialGauge value={pct} color="var(--up)" size={detailed ? 116 : 88} strokeWidth={detailed ? 10 : 8}>
+            <RadialGauge value={pct} color="var(--up)" size={detailed ? 116 : 88} strokeWidth={detailed ? 13 : 10}>
               <b className={`num font-bold text-up ${detailed ? 'text-3xl' : 'text-2xl'}`}>{pct}%</b>
               <span className="mt-0.5 text-center text-[10px] leading-tight text-neutral-500">
                 {t('winrate.resolvedCount', { n: data!.totalResolved })}

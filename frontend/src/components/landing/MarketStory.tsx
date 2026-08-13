@@ -301,7 +301,7 @@ export default function MarketStory() {
               {CASES[0].candles.map((c, i) => (
                 <CandleG key={i} c={c} i={i} />
               ))}
-              <circle className="sc-stamp" cx={xTouch} cy={py(P_TP + 0.7)} r="8" fill="#35c97a" />
+              <circle className="sc-stamp" cx={xTouch} cy={py(P_TP + 0.7)} r="8" fill="var(--up)" />
               <g transform="rotate(-8 1060 390)">
                 <g className="sc-stamp">
                   <rect x="880" y="340" width="360" height="100" rx="14" className="st-win" />
@@ -318,7 +318,7 @@ export default function MarketStory() {
               {CASES[1].candles.map((c, i) => (
                 <CandleG key={i} c={c} i={i} />
               ))}
-              <circle className="sc-stamp" cx={xTouch} cy={py(P_SL - 0.6)} r="8" fill="#f04d63" />
+              <circle className="sc-stamp" cx={xTouch} cy={py(P_SL - 0.6)} r="8" fill="var(--down)" />
               <g transform="rotate(-8 1010 540)">
                 <g className="sc-stamp">
                   <rect x="740" y="490" width="540" height="100" rx="14" className="st-loss" />
@@ -337,8 +337,8 @@ export default function MarketStory() {
               {CASES[2].candles.map((c, i) => (
                 <CandleG key={i} c={c} i={i} />
               ))}
-              <circle className="sc-stamp" cx={xTouch} cy={py(P_TP + 0.8)} r="8" fill="#35c97a" />
-              <circle className="sc-stamp" cx={xTouch} cy={py(P_SL - 0.9)} r="8" fill="#f04d63" />
+              <circle className="sc-stamp" cx={xTouch} cy={py(P_TP + 0.8)} r="8" fill="var(--up)" />
+              <circle className="sc-stamp" cx={xTouch} cy={py(P_SL - 0.9)} r="8" fill="var(--down)" />
               <g transform="rotate(-8 1010 540)">
                 <g className="sc-stamp">
                   <rect x="740" y="490" width="540" height="100" rx="14" className="st-loss" />

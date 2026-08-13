@@ -80,8 +80,8 @@ const MarketOverview: FC<Props> = ({ signals }) => {
         <div className="donut">
           <svg className="w-full h-full" viewBox="0 0 116 116">
             <circle cx="58" cy="58" r="47" fill="none" stroke="#26262e" strokeWidth="13" />
-            <circle cx="58" cy="58" r="47" fill="none" stroke="#2ee07e" strokeWidth="13" strokeLinecap="round" strokeDasharray={seg1Dash} />
-            <circle cx="58" cy="58" r="47" fill="none" stroke="#ff4d67" strokeWidth="13" strokeLinecap="round" strokeDasharray={seg2Dash} strokeDashoffset={seg2Offset} />
+            <circle cx="58" cy="58" r="47" fill="none" stroke="var(--up)" strokeWidth="13" strokeLinecap="round" strokeDasharray={seg1Dash} />
+            <circle cx="58" cy="58" r="47" fill="none" stroke="var(--down)" strokeWidth="13" strokeLinecap="round" strokeDasharray={seg2Dash} strokeDashoffset={seg2Offset} />
           </svg>
           <div className="donut-center">
             <div>
@@ -94,12 +94,12 @@ const MarketOverview: FC<Props> = ({ signals }) => {
 
         <div className="ov-legend">
           <div className="row">
-            <span className="sw" style={{ background: '#2ee07e' }} />
+            <span className="sw" style={{ background: 'var(--up)' }} />
             <span className="k">{t('signals.focus.bull')}</span>
             <span className="v num">{Math.round(longFrac * 100)}% <i>({dist.long})</i></span>
           </div>
           <div className="row">
-            <span className="sw" style={{ background: '#ff4d67' }} />
+            <span className="sw" style={{ background: 'var(--down)' }} />
             <span className="k">{t('signals.focus.bear')}</span>
             <span className="v num">{Math.round(shortFrac * 100)}% <i>({dist.short})</i></span>
           </div>
@@ -114,19 +114,17 @@ const MarketOverview: FC<Props> = ({ signals }) => {
         <svg className="acc-spark" viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} preserveAspectRatio="none">
           {sparkPoints && (
             <>
-              <polyline fill="none" stroke="url(#sparkLineGrad)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+              {/* 单色紫描边 + 一层低透明度平涂，取代原来的「紫→青」渐变。
+                  两个理由：那抹青是整套系统里唯一漏进来的第二强调色（全站再无
+                  第二处青）；而渐变本身就是「光」的语法，与「颜料，不是光」
+                  直接冲突。同一条折线，只是不再自带一套配色。
+                  A flat violet stroke replaces the violet→cyan gradient: that
+                  cyan was the only cyan in the system, and a gradient is the
+                  vocabulary of light, not pigment. */}
+              <polyline fill="none" stroke="var(--purple-hi)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
                 points={sparkPoints}
               />
-              {/* 折线紫→青：极光谱系的色彩故事 / violet→cyan line, the aurora spectrum */}
-              <linearGradient id="sparkLineGrad" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0" stopColor="#a78bfa" />
-                <stop offset="1" stopColor="#22d3ee" />
-              </linearGradient>
-              <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0" stopColor="#a855f7" stopOpacity="0.25" />
-                <stop offset="1" stopColor="#a855f7" stopOpacity="0" />
-              </linearGradient>
-              <polygon fill="url(#sparkGrad)" points={areaPoints} />
+              <polygon fill="rgba(146,132,255,0.16)" points={areaPoints} />
             </>
           )}
         </svg>

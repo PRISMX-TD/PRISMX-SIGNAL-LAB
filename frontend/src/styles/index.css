@@ -935,16 +935,39 @@
   }
 
   /* 多周期标签 / multi-TF tags */
+  /* 多周期标签从「一排各自独立的小药丸」改成一条**分段轨道**。
+     它是一组同类读数（同一个品种在 6 个周期上的方向），不是 6 个不相干的
+     标签——排版要说出这件事。轨道本身是一个面，格子之间用发丝线分开，
+     方向仍由颜色承担。
+     The multi-timeframe row is one reading across six periods, not six
+     unrelated tags: it becomes a single segmented track. */
+  .tf-row {
+    display: flex;
+    gap: 0;
+    width: fit-content;
+    padding: 3px;
+    background: var(--nest);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  .tf-row::-webkit-scrollbar { display: none; }
   .tf-tag {
     padding: 4px 12px;
     border-radius: 999px;
     font-size: 12px;
     font-weight: 700;
     font-family: "JetBrains Mono", monospace;
-    background: rgba(53, 201, 122, 0.10);
+    background: transparent;
     color: var(--up);
-    border: 1px solid rgba(53, 201, 122, 0.4);
-    transition: transform 0.25s cubic-bezier(0.34, 1.45, 0.64, 1);
+    border: 0;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .tf-tag + .tf-tag {
+    box-shadow: inset 1px 0 0 var(--line);
   }
   .tf-tag:hover {
     transform: translateY(-2px);
@@ -1033,6 +1056,16 @@
     padding: 12px 8px;
     text-align: center;
   }
+  /* 说明性小字加字距、压字重：让标签与旁边 700 字重的数值靠「轻/重」分开，
+     而不是两行同样灰的小字。字距对汉字是有效的排印手段（大写不是——实测
+     这套界面 60 个 caption 里 59 个是纯中文，text-transform 几乎不做事）。
+     Tracking, not uppercase: 59 of 60 captions here are Chinese, where
+     text-transform does nothing. */
+  .exec-tile .cap,
+  .sig-tile .cap {
+    letter-spacing: 0.08em;
+    font-weight: 500;
+  }
   .exec-tile .cap {
     font-size: 12px;
     color: var(--text-2);
@@ -1075,13 +1108,26 @@
   }
 
   /* ── 信号卡（其他活跃）─ */
+  /* 其他活跃信号：原来是 3 张各自独立的 .card，嵌在页面里就是「卡中卡中卡」
+     三层边框，边框噪音盖过内容。合并成一张卡 + 分隔线的行——参考图里的
+     流水/持仓一律是这个形态。每一行的元素一个没少。
+     Three standalone cards become one card with divider rows; the nested
+     borders were louder than the content. */
   .others-list {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 0;
+    background: var(--surface);
+    border-radius: var(--r-lg);
+    overflow: hidden;
   }
   .sig-mini-card {
-    padding: 16px 16px;
+    padding: 16px;
+    background: transparent;
+    border-radius: 0;
+  }
+  .sig-mini-card + .sig-mini-card {
+    border-top: 1px solid var(--line);
   }
   .sig-mini-top {
     display: flex;
