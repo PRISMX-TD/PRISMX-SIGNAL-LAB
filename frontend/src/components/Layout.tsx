@@ -46,8 +46,14 @@ function NavItem({ to, label }: { to: string; label: string }) {
       {({ isActive }) => (
         <>
           {label}
+          {/* 指示线的偏移：-9px 让文字底到线顶足足 14px，那不像下划线、像一条
+              独立的横杠。链接 padding 8px、线高 3px，所以「间距 = 5 − bottom」
+              ——取 -1px 得到 6px：贴住文字，又给英文 locale 的 g/y/p 留出下伸
+              空间。
+              At -9px the gap under the text was 14px, which reads as a detached
+              bar rather than an underline; -1px gives 6px. */}
           {isActive && (
-            <span className="rule-spectral absolute -bottom-[9px] left-3 right-3">
+            <span className="rule-spectral absolute -bottom-px left-3 right-3">
               <i />
             </span>
           )}
@@ -513,7 +519,7 @@ export default function Layout() {
                 <div className="font-display text-[17px] font-bold tracking-[-0.015em] text-white">
                   Signal Lab
                 </div>
-                <div className="text-[9px] font-medium uppercase tracking-[0.16em] text-neutral-500">
+                <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-neutral-500">
                   by PRISMX
                 </div>
               </div>
@@ -663,7 +669,7 @@ export default function Layout() {
               slate → neutral: slate is a blue-tinted grey from a different family than
               this system's neutral zinc greys, and the two read as mismatched
               temperatures side by side. Unified on neutral throughout. */}
-          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-t border-white/[0.06] pt-5 text-[11.5px] text-neutral-500">
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-t border-white/[0.06] pt-5 text-[12px] text-neutral-500">
             <span>© {new Date().getFullYear()} PRISMX</span>
             {(['terms', 'privacy', 'risk'] as const).map((d) => (
               <NavLink key={d} to={`/${d}`} className="transition-colors hover:text-neutral-300">

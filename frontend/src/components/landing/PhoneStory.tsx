@@ -467,19 +467,19 @@ export default function PhoneStory() {
               <span className="block text-white">{t('landing.heroTitle1')}</span>
               <span className="mt-1 block text-prism-400">{t('landing.heroTitle2')}</span>
             </h1>
-            <p className="mt-5 max-w-[44ch] text-[14px] leading-relaxed text-neutral-400 sm:text-[15px]">
+            <p className="mt-5 max-w-[44ch] text-[13px] leading-relaxed text-neutral-400 sm:text-[15px]">
               {t('landing.heroSubtitle')}
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-3">
               <button
                 onClick={() => navigate('/login?mode=register')}
-                className="btn btn-primary h-11 px-6 text-[14px] sm:h-12 sm:px-7 sm:text-[15px]"
+                className="btn btn-primary h-11 px-6 text-[13px] sm:h-12 sm:px-7 sm:text-[15px]"
               >
                 {t('landing.ctaPrimary')}
               </button>
               <a
                 href="#pricing"
-                className="inline-block py-2 text-[13.5px] text-neutral-400 underline decoration-white/20 underline-offset-[6px] transition-colors hover:text-white hover:decoration-white/60"
+                className="inline-block py-2 text-[13px] text-neutral-400 underline decoration-white/20 underline-offset-[6px] transition-colors hover:text-white hover:decoration-white/60"
               >
                 {t('landing.ctaSecondary')}
               </a>
@@ -499,7 +499,7 @@ export default function PhoneStory() {
               <h2 className="mt-3 font-display-xl text-[clamp(1.75rem,4.6vw,2.1rem)] text-white">
                 {t(`landing.${p.title}`)}
               </h2>
-              <p className="mt-3 max-w-[46ch] text-[13.5px] leading-relaxed text-neutral-400 sm:text-[14px]">
+              <p className="mt-3 max-w-[46ch] text-[13px] leading-relaxed text-neutral-400 sm:text-[13px]">
                 {t(`landing.${p.desc}`)}
               </p>
             </div>

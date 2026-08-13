@@ -26,25 +26,25 @@ export default function FaqSection() {
     <section id="faq" className="mx-auto w-full max-w-[1240px] scroll-mt-24 px-5 py-20 sm:px-8 sm:py-28">
       <div className="grid grid-cols-1 gap-12 lg:grid-cols-12 lg:gap-8">
         <div className="lg:col-span-4">
-          <h2 className="font-display-xl text-[clamp(1.75rem,3.6vw,2.75rem)] text-white">{t('landing.faqTitle')}</h2>
+          <h2 className="font-display-xl text-[clamp(1.75rem,3.6vw,2.5rem)] text-white">{t('landing.faqTitle')}</h2>
         </div>
 
         <div className="lg:col-span-7 lg:col-start-6">
           <div className="border-t border-white/[0.07]">
             {FAQ_IDS.map((n) => (
               <details key={n} className="group border-b border-white/[0.07]">
-                <summary className="flex cursor-pointer list-none items-start justify-between gap-6 py-5 text-[14.5px] font-medium leading-snug text-neutral-200 transition-colors marker:content-none hover:text-white [&::-webkit-details-marker]:hidden">
+                <summary className="flex cursor-pointer list-none items-start justify-between gap-6 py-5 text-[15px] font-medium leading-snug text-neutral-200 transition-colors marker:content-none hover:text-white [&::-webkit-details-marker]:hidden">
                   <span>{t(`landing.faq${n}q`)}</span>
                   {/* 加号旋转 45° 变叉：一个字符承担开合两种状态，比换图标少一次
                       重排，也比箭头旋转更明确地表达「关闭」。
                       A plus rotating 45° into a cross: one glyph covering both
                       states costs less layout than swapping icons and reads as
                       "close" more explicitly than a rotating chevron. */}
-                  <span className="mt-0.5 shrink-0 text-[18px] leading-none text-neutral-500 transition-transform duration-200 group-open:rotate-45">
+                  <span className="mt-0.5 shrink-0 text-[17px] leading-none text-neutral-500 transition-transform duration-200 group-open:rotate-45">
                     +
                   </span>
                 </summary>
-                <p className="max-w-[62ch] pb-6 pr-10 text-[13.5px] leading-relaxed text-neutral-400">
+                <p className="max-w-[62ch] pb-6 pr-10 text-[13px] leading-relaxed text-neutral-400">
                   {t(`landing.faq${n}a`)}
                 </p>
               </details>
@@ -53,7 +53,7 @@ export default function FaqSection() {
 
           <Link
             to={localePath(lang, '/faq')}
-            className="mt-5 inline-block py-2.5 text-[13.5px] text-prism-400 underline underline-offset-4 transition-colors hover:text-prism-300"
+            className="mt-5 inline-block py-2.5 text-[13px] text-prism-400 underline underline-offset-4 transition-colors hover:text-prism-300"
           >
             {t('landing.faqViewAll')}
           </Link>

@@ -61,7 +61,7 @@ const SignalHero: FC<Props> = ({
     >
       {/* Header row：多周期趋势立场（手机端隐藏标题文字，用故事式分段指示器切换）*/}
       <div className="flex items-center gap-3 relative z-10 hero-header-row">
-        <h2 className="text-[19px] font-bold text-white hero-heading">{t('signals.focus.heading')}</h2>
+        <h2 className="text-[20px] font-bold text-white hero-heading">{t('signals.focus.heading')}</h2>
         {/* 故事式分段指示器：一排细条，当前项高亮，点按任意段直接跳转。
             视觉干净、跨端统一，替代原先的圆点 + "1/6" 计数器 + 左右箭头组合。
             Story-style segmented indicator: a row of thin bars, current one
@@ -105,7 +105,7 @@ const SignalHero: FC<Props> = ({
 
       {/* Symbol + side chip */}
       <div className="mt-4 flex items-center gap-2.5 relative z-10">
-        <b className="text-[27px] tracking-[0.02em] text-white">{displaySymbol(symbol)}</b>
+        <b className="text-[26px] tracking-[0.02em] text-white">{displaySymbol(symbol)}</b>
         {cnName && <span className="text-sm text-neutral-300">{cnName}</span>}
         <span className={`chip ${stance === 'BULL' ? 'chip-buy' : stance === 'BEAR' ? 'chip-sell' : 'chip-dim'}`}>
           {stanceLabel}

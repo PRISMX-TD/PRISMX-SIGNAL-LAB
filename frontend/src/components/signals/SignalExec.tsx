@@ -86,7 +86,7 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
           </div>
           <div>
             <div className="k">{t('signals.colIndicator')}</div>
-            <div className="v" style={{ fontSize: '14px', fontWeight: 600, color: '#c4b5fd', marginTop: 4 }}>
+            <div className="v" style={{ fontSize: '13px', fontWeight: 500, color: '#c4b5fd', marginTop: 4 }}>
               {indicatorLabel}
             </div>
           </div>

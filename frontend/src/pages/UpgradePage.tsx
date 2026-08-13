@@ -404,7 +404,7 @@ export default function UpgradePage() {
                left-aligned pricing cards switched the visual axis twice within one
                screen; left-aligned, the headline shares a baseline with the cards. */}
         <div className="max-w-2xl">
-          <h1 className="font-display-xl text-[clamp(1.9rem,4vw,2.75rem)] text-white">
+          <h1 className="font-display-xl text-[clamp(1.9rem,4vw,2.5rem)] text-white">
             {t("upgrade.title")}
           </h1>
           <p className="mt-4 max-w-lg text-[15px] leading-relaxed text-neutral-400">

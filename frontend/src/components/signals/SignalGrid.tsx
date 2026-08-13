@@ -8,6 +8,7 @@ import type { Signal, UserPlan } from '../../api/types'
 import { calcRiskReward, calcCountdown, displaySymbol, fmtTime, parseTime } from '../../api/utils'
 import { SIGNAL_LIFESPAN_MS, effectiveStatus, resultLabel, resultTone, rrTone } from './SignalView'
 import { useClock } from './hooks'
+import { symbolMeta } from '../../utils/symbolMeta'
 
 interface Props {
   signals: Signal[]
@@ -162,6 +163,14 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
             >
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-2">
+                  {/* 身份芯片：数据早就在 symbolMeta() 里，此前只有报价表用它。
+                      Identity chip; the data was always there. */}
+                  <span
+                    className="sym-ava"
+                    style={{ background: symbolMeta(sig.symbol).color + '22', color: symbolMeta(sig.symbol).color }}
+                  >
+                    {symbolMeta(sig.symbol).letter}
+                  </span>
                   <b className="text-lg font-bold text-white">{displaySymbol(sig.symbol)}</b>
                   <span className={`chip ${isBuy ? 'chip-buy' : 'chip-sell'}`}>
                     {isBuy ? t('common.buy') : t('common.sell')}

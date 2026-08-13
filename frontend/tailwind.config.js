@@ -32,25 +32,19 @@ export default {
         // existing neutral-*/zinc-* utilities rather than fighting them.
         white: '#EDEDF0',
 
-        // neutral-500 上调一档（Tailwind 原值 #737373）。
-        // 这是全站「三级文字」（元信息、脚注、时间戳）的颜色，原值压在 #09090B 上
-        // 只有 4.20:1（在抬升面 #101012 上更低到 4.01），卡在 WCAG AA 的 4.5 门槛下面——
-        // 在室外屏幕或低亮度手机上就是读不清。#84848E 在画布 / 抬升面 / 嵌套面三层背景上
-        // 分别是 5.37 / 5.13 / 4.87，全部过线，与 neutral-400（7.9:1，二级文字）之间仍有清晰的明度差。
-        // 覆盖标准色阶是刻意的，与本文件里 white 的覆盖同一个理由：这两个值是全站
-        // 文字对比度的地板，不能听凭框架默认值决定。
-        // neutral-500 lifted one step (Tailwind ships #737373).
-        // This is the tertiary text colour across the app (metadata, footnotes,
-        // timestamps), and the stock value scores only 4.20:1 on #09090B — just under
-        // the WCAG AA threshold of 4.5, which means genuinely unreadable on an outdoor
-        // screen or a dimmed phone. #84848E scores 5.37 / 5.13 / 4.87 against the canvas,
-        // raised and nested surfaces respectively, and still sits far enough below
-        // neutral-400 (7.9:1, secondary text) that the hierarchy holds.
-        // Overriding a stock scale step is deliberate, for the same reason as the
-        // white override above: these two values are the floor for text contrast
-        // everywhere, and that floor should not be left to a framework default.
+        // neutral-400 / 500 跟着卡面一起抬。
+        // 这两个键是全站二级 / 三级文字的地板。卡面从 #101012 抬到 #1B1B21
+        // 之后，原值 #84848E 在新面上掉到 4.32、stock 的 neutral-400 (#A3A3A3)
+        // 压在 .tag 的 5% 白底上只有 4.07——都跌破 AA。
+        // 与 index.css 的 --text-3 / --text-2 保持同值，避免「同一档灰有两个
+        // 来源」这种事再发生（原来 --text-2 是 #A1A1AA，而代码里实际用的是
+        // Tailwind 的 neutral-300 #D4D4D8，两者差了一整档）。
+        // Both keys are the floor for secondary/tertiary text. They move up with
+        // the surface, and now match --text-2 / --text-3 exactly.
         neutral: {
-          500: '#84848E',
+          300: '#D4D4D8',
+          400: '#B4B4BC',
+          500: '#9C9CA6',
         },
 
         // 画布：中性近黑，无紫调。/ canvas: neutral near-black, zero violet tint.
@@ -131,16 +125,95 @@ export default {
         mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
       },
 
-      // 圆角只有一套，全站遵守：6 小件 / 10 控件 / 14 卡片 / 20 大面板。
-      // 上一版是 18/16/12/11/10/7px 六个数混用，没有规则，观感上就是「拼的」。
-      // One radius scale, obeyed everywhere: 6 small parts / 10 controls /
-      // 14 cards / 20 large panels. The previous version mixed six different
-      // values with no rule, which is what makes a layout read as assembled.
+      // ── 字号阶梯：九档 / nine steps ──
+      // 实测登录后界面在用 20 种字号，其中五对只差 4–5%：11/11.5、12/12.5、
+      // 13/13.5、19/20、26/27。4% 的差**低于可感知的层级阈值，却高于零**——
+      // 看不出「更重要」，只看得出「没对齐」。它们是历史遗留，不是设计决定。
+      //
+      // 在这里覆盖 Tailwind 的默认阶梯，880 处命名类（text-sm 263 次、text-xs
+      // 316 次……）一次对齐，不用改任何 TSX。行高一并定死：1.35 单行 UI
+      // （汉字比拉丁需要更松，1.2 会顶到边）、1.1 展示级数字。
+      //
+      // Overriding the stock scale aligns ~880 named-class call sites at once.
+      // The app was using 20 distinct sizes, five pairs of which differed by
+      // only 4–5% — below the threshold where size reads as hierarchy, above
+      // the threshold where it reads as misalignment.
+      // 映射原则是**就近对齐**，不是整体压缩：每个命名类落到阶梯上离它原值
+      // 最近的一档（sm 14→13、base 16→15、lg 18→17、2xl 24→26），
+      // 这样 880 处调用点的观感几乎不动，动的只是「有多少种字号」。
+      // 若整体下移一档（sm→12、xs→11），全站正文会小一号——那不是这次要做的事。
+      // Named steps snap to the *nearest* rung, not one rung down: the point is
+      // to reduce how many sizes exist, not to shrink the whole UI.
+      fontSize: {
+        '2xs': ['10px', '1.35'],
+        xs: ['12px', '1.35'],
+        sm: ['13px', '1.4'],
+        base: ['15px', '1.45'],
+        lg: ['17px', '1.35'],
+        xl: ['20px', '1.25'],
+        '2xl': ['26px', '1.15'],
+        '3xl': ['26px', '1.15'],
+        '4xl': ['40px', '1.1'],
+        '5xl': ['40px', '1.1'],
+      },
+
+      // ── 间距：一律落在 4px 网格 / everything on a 4px grid ──
+      // 实测一屏之内出现 gap 5/6/8/9/10/16 和五种 padding 组合，没有可辨识的
+      // 阶梯。间距是分组的**主要**手段——值一多，眼睛就分不出「这两个是一组」。
+      //
+      // Tailwind 的整数档（4/8/12/16/20/24…）本来就在 4px 网格上，真正的乱源是
+      // 分数档：0.5=2px、1.5=6px、2.5=10px、3.5=14px，它们落在 2px 网格上。
+      // 全站共约 450 处在用（py-1.5 61 次、p-5 43 次、gap-1.5 39 次……）。
+      // 把这四个键重定义到最近的 4px 档，450 处一次对齐，零 TSX 改动。
+      //
+      // 只动分数档、不把 20px 强推到 24px：那会改变密度，而 20 本来就合规。
+      // Only the fractional steps are off-grid; snapping those four keys fixes
+      // ~450 call sites without touching a single component.
+      spacing: {
+        0.5: '4px',
+        1.5: '8px',
+        2.5: '12px',
+        3.5: '16px',
+      },
+
+      // ── 字重：三档 / three steps ──
+      // 实测在用 400/500/600/700/800 五档，其中 500/600/700/800 是四档
+      // 「半粗到粗」，600（81 次）与 700（284 次）在多数位置可以互换。
+      // 收敛成 400 正文 / 500 标签与控件 / 700 数值与标题。
+      // 选 400-500-700 而不是 400-600-700：后者两档挨太近，收敛了等于没收敛。
+      //
+      // 在这里重定义 semibold 与 extrabold，所有 font-semibold / font-extrabold
+      // 调用点一起走，不用改 TSX。
+      // Redefining semibold/extrabold collapses every call site at once.
+      fontWeight: {
+        normal: '400',
+        medium: '500',
+        semibold: '500',
+        bold: '700',
+        extrabold: '700',
+        black: '700',
+      },
+
+      // 圆角：四档 / four steps — 8 内嵌格 · 14 小浮层 · 24 卡片 · 999 控件。
+      // 上一版是 6/10/14/20 四档但语义不同（小件/控件/卡片/大面板）：小件和
+      // 控件都改成药丸之后合并成一档，腾出来的位置给「小浮层」（下拉菜单）——
+      // 那是落到生产代码时才发现的一档，样本里没有这类元素。
+      // 与 index.css 的 --r-tile / --r-panel / --r-lg / --r-xs 保持同值。
       borderRadius: {
-        pill: '6px',
-        inner: '10px',
-        card: '14px',
-        panel: '20px',
+        pill: '999px',
+        inner: '8px',
+        card: '24px',
+        panel: '24px',
+        float: '14px',
+        // Tailwind 自带的三档也拉到同一套上：代码里 rounded-md 用了 39 次
+        // （6px）、rounded-xl 29 次（12px）、rounded-2xl 2 次（16px），全都
+        // 落在四档之外。rounded-lg 本身就是 8px，正好等于内嵌格档，不用动；
+        // rounded-full 是 9999px，等同药丸。
+        // The stock steps join the same scale; rounded-lg already equals the
+        // tile step and rounded-full already equals the pill.
+        md: '8px',
+        xl: '14px',
+        '2xl': '24px',
       },
 
       // 阴影表达**高度**，不表达发光。全部中性、无彩色扩散半径。

@@ -73,7 +73,7 @@ function useReveal<T extends HTMLElement = HTMLDivElement>() {
 function Heading({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div className="reveal max-w-3xl">
-      <h2 className="font-display-xl text-[clamp(1.75rem,3.6vw,2.75rem)] text-white">{title}</h2>
+      <h2 className="font-display-xl text-[clamp(1.75rem,3.6vw,2.5rem)] text-white">{title}</h2>
       {subtitle && <p className="mt-4 max-w-[52ch] text-[15px] leading-relaxed text-neutral-400">{subtitle}</p>}
     </div>
   )
@@ -124,7 +124,7 @@ function Navbar({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate
 
           <nav className="hidden items-center gap-7 lg:flex">
             {links.map((l) => (
-              <a key={l.h} href={l.h} className="text-[13.5px] text-neutral-400 transition-colors hover:text-white">
+              <a key={l.h} href={l.h} className="text-[13px] text-neutral-400 transition-colors hover:text-white">
                 {t(`landing.${l.k}`)}
               </a>
             ))}
@@ -134,11 +134,11 @@ function Navbar({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate
             <PublicLanguageToggle />
             <a
               href="/login"
-              className="hidden text-[13.5px] text-neutral-400 transition-colors hover:text-white sm:block"
+              className="hidden text-[13px] text-neutral-400 transition-colors hover:text-white sm:block"
             >
               {t('landing.signIn')}
             </a>
-            <button onClick={() => navigate('/login?mode=register')} className="btn btn-primary h-10 px-4 text-[13.5px] lg:h-9">
+            <button onClick={() => navigate('/login?mode=register')} className="btn btn-primary h-10 px-4 text-[13px] lg:h-9">
               {t('landing.getStarted')}
             </button>
           </div>
@@ -187,7 +187,7 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
 
           <ul className="mt-8 space-y-3.5 border-t border-white/[0.07] pt-7">
             {freeFeatures.map((k) => (
-              <li key={k} className="text-[13.5px] leading-relaxed text-neutral-400">
+              <li key={k} className="text-[13px] leading-relaxed text-neutral-400">
                 {t(`landing.${k}`)}
               </li>
             ))}
@@ -195,7 +195,7 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
 
           <button
             onClick={() => navigate('/login?mode=register')}
-            className="btn btn-ghost mt-auto h-11 w-full text-[14px]"
+            className="btn btn-ghost mt-auto h-11 w-full text-[13px]"
           >
             {t('landing.getStarted')}
           </button>
@@ -211,12 +211,12 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
             <span className="num text-[2.5rem] font-semibold leading-none text-white">
               {monthlyPrice != null ? `$${monthlyPrice}` : '—'}
             </span>
-            <span className="text-[14px] text-white/85">/{t('landing.prPerMonth')}</span>
+            <span className="text-[13px] text-white/85">/{t('landing.prPerMonth')}</span>
           </div>
 
           <ul className="mt-8 grid gap-3.5 border-t border-white/25 pt-7 sm:grid-cols-2 sm:gap-x-8">
             {proFeatures.map((k) => (
-              <li key={k} className="text-[13.5px] leading-relaxed text-white/85">
+              <li key={k} className="text-[13px] leading-relaxed text-white/85">
                 {t(`landing.${k}`)}
               </li>
             ))}
@@ -226,14 +226,14 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
               label: the highest contrast available on this plane. */}
           <button
             onClick={() => navigate('/login?mode=register')}
-            className="btn mt-8 h-11 w-full bg-white text-[14px] font-semibold text-prism-700 hover:bg-white/90"
+            className="btn mt-8 h-11 w-full bg-white text-[13px] font-semibold text-prism-700 hover:bg-white/90"
           >
             {t('landing.prCta')}
           </button>
         </div>
       </div>
 
-      <p className="reveal mt-6 text-[12.5px] leading-relaxed text-neutral-500">{t('landing.prNote')}</p>
+      <p className="reveal mt-6 text-[12px] leading-relaxed text-neutral-500">{t('landing.prNote')}</p>
     </section>
   )
 }
@@ -282,7 +282,7 @@ function Foot({ t }: { t: T }) {
             <Logo size={28} />
             <span className="font-display text-[15px] font-bold tracking-tight text-white">Signal Lab</span>
           </div>
-          <p className="mt-3 text-[11.5px] uppercase tracking-[0.14em] text-neutral-500">by PRISMX</p>
+          <p className="mt-3 text-[12px] uppercase tracking-[0.14em] text-neutral-500">by PRISMX</p>
         </div>
 
         <nav className="md:col-span-3">
@@ -300,7 +300,7 @@ function Foot({ t }: { t: T }) {
         {/* 条款与政策：<Link> 而不是 <a href>，SPA 内路由不触发整页刷新。
             Terms via <Link>, not <a href>: same-SPA routes, no full reload. */}
         <div className="md:col-span-2">
-          <p className="text-[11.5px] uppercase tracking-[0.14em] text-neutral-500">{t('landing.footerLegal')}</p>
+          <p className="text-[12px] uppercase tracking-[0.14em] text-neutral-500">{t('landing.footerLegal')}</p>
           <ul className="mt-2.5 space-y-0.5">
             {(['terms', 'privacy', 'risk'] as const).map((d) => (
               <li key={d}>
@@ -319,7 +319,7 @@ function Foot({ t }: { t: T }) {
             Gated by SUPPORT_EMAIL; empty hides the column (see config/site.ts). */}
         {SUPPORT_EMAIL && (
           <div className="col-span-2 md:col-span-3">
-            <p className="text-[11.5px] uppercase tracking-[0.14em] text-neutral-500">{t('landing.footerSupport')}</p>
+            <p className="text-[12px] uppercase tracking-[0.14em] text-neutral-500">{t('landing.footerSupport')}</p>
             <p className="mt-4 text-[13px] leading-relaxed text-neutral-500">{t('landing.footerSupportBody')}</p>
             <a
               href={`mailto:${SUPPORT_EMAIL}`}
@@ -332,8 +332,8 @@ function Foot({ t }: { t: T }) {
       </div>
 
       <div className={`${SHELL} border-t border-white/[0.07] py-8`}>
-        <p className="max-w-[92ch] text-[11.5px] leading-relaxed text-neutral-500">{t('landing.footerRisk')}</p>
-        <p className="mt-5 text-[11.5px] text-neutral-500">
+        <p className="max-w-[92ch] text-[12px] leading-relaxed text-neutral-500">{t('landing.footerRisk')}</p>
+        <p className="mt-5 text-[12px] text-neutral-500">
           © {new Date().getFullYear()} PRISMX · {t('landing.footerRights')}
         </p>
       </div>

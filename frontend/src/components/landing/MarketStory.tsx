@@ -366,11 +366,11 @@ export default function MarketStory() {
             beats 1-4 take one rule each ── */}
         <div className={`story-panel panel-l ${active === 0 ? 'on' : ''}`} data-panel="mkt0">
           <div className="panel-inner">
-            <p className="text-[11.5px] uppercase tracking-[0.16em] text-prism-400">{t('landing.wrEyebrow')}</p>
+            <p className="text-[12px] uppercase tracking-[0.16em] text-prism-400">{t('landing.wrEyebrow')}</p>
             <h2 className="mt-4 max-w-[16ch] font-display-xl text-[clamp(1.9rem,4.8vw,3.1rem)] text-white">
               {t('landing.wrTitle')}
             </h2>
-            <p className="mt-4 max-w-[46ch] text-[13.5px] leading-relaxed text-neutral-400 sm:text-[14.5px]">
+            <p className="mt-4 max-w-[46ch] text-[13px] leading-relaxed text-neutral-400 sm:text-[15px]">
               {t('landing.wrSubtitle')}
             </p>
           </div>
@@ -385,7 +385,7 @@ export default function MarketStory() {
               <h3 className="max-w-[16ch] font-display-xl text-[clamp(1.7rem,3.6vw,2.9rem)] leading-[1.12] text-white">
                 {t(`landing.wrRule${n}`)}
               </h3>
-              <p className="mt-4 max-w-[44ch] text-[13.5px] leading-relaxed text-neutral-400 sm:text-[14.5px]">
+              <p className="mt-4 max-w-[44ch] text-[13px] leading-relaxed text-neutral-400 sm:text-[15px]">
                 {t(`landing.wrRule${n}Note`)}
               </p>
             </div>

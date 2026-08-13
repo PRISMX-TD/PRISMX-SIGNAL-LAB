@@ -7,6 +7,7 @@ import { clientOrderId, displaySymbol, localizeApiError } from '../api/utils'
 import type { Position } from '../api/types'
 import ConfirmModal from './ConfirmModal'
 import { useBackToClose } from '../utils/useBackToClose'
+import { symbolMeta } from '../utils/symbolMeta'
 
 interface Props {
   position: Position
@@ -117,11 +118,17 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
   }
 
   return (
-    <div className="glass-neon p-4">
+    <div className="glass-neon pos-card p-4">
       {/* 头部：品种 + 方向 + 盈亏 / header: symbol + side + P&L */}
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2">
+            <span
+              className="sym-ava"
+              style={{ background: symbolMeta(p.symbol).color + '22', color: symbolMeta(p.symbol).color }}
+            >
+              {symbolMeta(p.symbol).letter}
+            </span>
             <span className="font-mono text-base font-semibold text-neutral-100">{displaySymbol(p.symbol)}</span>
             <span className={`tag ${isBuy ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
               {isBuy ? t('common.buy') : t('common.sell')}

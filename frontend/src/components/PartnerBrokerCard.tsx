@@ -169,7 +169,7 @@ export default function PartnerBrokerCard({
           <span className="h-1.5 w-1.5 rounded-full bg-amber-300 animate-breathe" />
           {t('partner.badge')}
         </span>
-        <h3 className="mt-4 font-display text-2xl font-black leading-tight tracking-tight text-neutral-50 sm:text-[28px]">
+        <h3 className="mt-4 font-display text-2xl font-black leading-tight tracking-tight text-neutral-50 sm:text-[26px]">
           {t('partner.title', { name })}
         </h3>
         <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-neutral-400 sm:mx-0">

@@ -12,6 +12,7 @@ import DisciplineScoreCard from '../components/DisciplineScoreCard'
 import ClosedTradesList from '../components/ClosedTradesList'
 import AutoManageCard from '../components/AutoManageCard'
 import OnboardingCard from '../components/OnboardingCard'
+import { symbolMeta } from '../utils/symbolMeta'
 
 const statusStyle: Record<OrderStatus, string> = {
   PENDING: 'bg-amber-500/15 text-amber-400',
@@ -537,7 +538,17 @@ export default function OrdersPage() {
                         {t(`orders.action.${o.action ?? 'ORDER'}`)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 font-mono text-neutral-100">{displaySymbol(o.symbol)}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="sym-ava"
+                          style={{ background: symbolMeta(o.symbol).color + '22', color: symbolMeta(o.symbol).color }}
+                        >
+                          {symbolMeta(o.symbol).letter}
+                        </span>
+                        <span className="font-mono text-neutral-100">{displaySymbol(o.symbol)}</span>
+                      </div>
+                    </td>
                     <td className="px-4 py-3">
                       <span
                         className={`tag ${
@@ -581,6 +592,12 @@ export default function OrdersPage() {
                 <div key={o.id} className="p-4">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2">
+                      <span
+                        className="sym-ava"
+                        style={{ background: symbolMeta(o.symbol).color + '22', color: symbolMeta(o.symbol).color }}
+                      >
+                        {symbolMeta(o.symbol).letter}
+                      </span>
                       <span className="font-mono text-base font-bold text-neutral-100">{displaySymbol(o.symbol)}</span>
                       <span
                         className={`tag ${

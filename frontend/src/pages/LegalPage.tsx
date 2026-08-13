@@ -93,7 +93,7 @@ export default function LegalPage({ doc }: { doc: LegalDoc }) {
               </h2>
               <div className="mt-3 space-y-3">
                 {s.p.map((para, j) => (
-                  <p key={j} className="text-[14.5px] leading-relaxed text-neutral-400">
+                  <p key={j} className="text-[15px] leading-relaxed text-neutral-400">
                     {para}
                   </p>
                 ))}

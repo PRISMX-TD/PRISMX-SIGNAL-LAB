@@ -49,7 +49,7 @@ export default function MobileStickyCta() {
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.09] bg-ink-950/95 p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur-md sm:hidden">
           <button
             onClick={() => navigate('/login?mode=register')}
-            className="btn btn-primary h-11 w-full text-[14px]"
+            className="btn btn-primary h-11 w-full text-[13px]"
           >
             {t('landing.ctaButton')}
           </button>

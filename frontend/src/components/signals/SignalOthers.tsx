@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import type { Signal } from '../../api/types'
 import { calcRiskReward, calcCountdown, displaySymbol, fmtTime } from '../../api/utils'
 import { SIGNAL_LIFESPAN_MS, type FocusState } from './SignalView'
+import { symbolMeta } from '../../utils/symbolMeta'
 
 interface OtherEntry {
   symbol: string
@@ -56,6 +57,12 @@ const SignalOthers: FC<Props> = ({ entries, now, onTrade, onFocus, onViewAll }) 
             >
               {/* Top row: symbol + RR */}
               <div className="sig-mini-top">
+                <span
+                  className="sym-ava"
+                  style={{ background: symbolMeta(symbol).color + '22', color: symbolMeta(symbol).color }}
+                >
+                  {symbolMeta(symbol).letter}
+                </span>
                 <div>
                   <b className="text-base text-white">{displaySymbol(symbol)}</b>
                   <div className="text-[11px] text-neutral-400 mt-0.5">{sig.indicator || '-'}</div>

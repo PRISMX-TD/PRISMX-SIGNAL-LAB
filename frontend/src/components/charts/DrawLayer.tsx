@@ -1148,7 +1148,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, hideTool
                   <>
                     <div className="flex items-center gap-1 mb-1">
                       <div className="h-px flex-1 bg-white/10" />
-                      <button type="button" onClick={() => toggleCollapse(group.key)} className="text-[9px] text-neutral-500 hover:text-neutral-300 px-1">{t(`charts.draw.${group.key}`)} <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="inline -mt-px"><polyline points="18 15 12 9 6 15" /></svg></button>
+                      <button type="button" onClick={() => toggleCollapse(group.key)} className="text-[10px] text-neutral-500 hover:text-neutral-300 px-1">{t(`charts.draw.${group.key}`)} <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="inline -mt-px"><polyline points="18 15 12 9 6 15" /></svg></button>
                       <div className="h-px flex-1 bg-white/10" />
                     </div>
                     <div className="flex flex-col gap-1">

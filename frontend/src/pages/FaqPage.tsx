@@ -49,7 +49,7 @@ export default function FaqPage() {
                 <span className="mr-2 font-mono text-sm text-prism-400">{i + 1}.</span>
                 {t(k.q)}
               </h2>
-              <p className="mt-3 text-[14.5px] leading-relaxed text-neutral-400">{t(k.a)}</p>
+              <p className="mt-3 text-[15px] leading-relaxed text-neutral-400">{t(k.a)}</p>
             </section>
           ))}
         </div>

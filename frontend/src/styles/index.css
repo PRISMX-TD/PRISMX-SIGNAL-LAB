@@ -45,8 +45,15 @@
      Neutral zinc family, matching the neutral/zinc utilities already used
      throughout the codebase so the greys don't fight each other. */
   --bg: #09090b;
-  --surface: #101012;
-  --surface-2: #16161a;
+  /* 卡面对底色的亮度台阶从 ΔL* 2.2 抬到 7.5。原值几乎完全靠那条 8% 的发丝线
+     撑住卡片边界；去掉外轮廓之后（见 .glass）边界必须由面本身承担。
+     实测：#15151A ΔL* 4.5 太弱 / #1B1B21 ΔL* 7.5 可用 / #1E1E25 ΔL* 9 更稳但
+     在整片黑底上开始读成灰。取 7.5 这一档，并把卡间距放宽到 24 让负空间补位。
+     Card surface lifted from ΔL* 2.2 to 7.5 above the canvas. The old value
+     leaned entirely on the 8% hairline to hold the card edge; with the outline
+     gone that job falls to the surface itself. */
+  --surface: #1b1b21;
+  --surface-2: #232329;
 
   /* 卡片填充：实色而非半透明。半透明 + backdrop-filter 是上一版的默认卡片
      材质，也是「万物玻璃」观感的来源。这里保留变量名（下游 ~2700 行仍在
@@ -55,19 +62,34 @@
      previous default card material and the source of the all-glass look. The
      variable names are kept (the ~2700 lines downstream still reference them)
      but now resolve to opaque raised surfaces. */
-  --card-a: #101012;
-  --card-b: #101012;
-  --nest: #16161a;
-  --nest-hi: #1e1e23;
+  --card-a: #1b1b21;
+  --card-b: #1b1b21;
+  /* 内嵌格跟着面走，保持对卡面约 6 的 ΔL*——对一个有填充的小方块足够。
+     Nested tiles track the surface, keeping ~6 ΔL* above it. */
+  --nest: #272730;
+  --nest-hi: #32323c;
 
-  /* 发丝线：唯一的分隔手段。不用阴影、不用大色块背景来分区。
-     Hairlines: the only separator. No shadows, no tinted blocks to divide. */
-  --line: rgba(255, 255, 255, 0.08);
-  --line-hi: rgba(255, 255, 255, 0.16);
+  /* 发丝线：只用于**卡片内部**的分组（表格行线、分区线、控件描边）。
+     卡片的外轮廓已经取消——暗底上那圈线读成白边，卡片挨得近时会连成网格纸。
+     分层改由「面」承担，见 --surface 的说明。
+     Hairlines now only group things *inside* a card (row rules, section
+     dividers, control strokes). The card outline itself is gone: on a dark
+     ground that ring reads as a white edge, and adjacent cards knit into graph
+     paper. Layering is carried by surfaces instead. */
+  --line: rgba(255, 255, 255, 0.07);
+  --line-hi: rgba(255, 255, 255, 0.14);
 
+  /* ── 文字灰阶：四档，每档都有职责 / four tiers, each with a job ──
+     #FFF 强调（标题、主数值）· --text 正文 · --text-2 次级 · --text-3 说明。
+     --text-2 从 #A1A1AA 归位到 #D4D4D8：实测全站 #D4D4D8 被硬编码用了 48 次
+     （事实上的次级正文），而 --text-2 本身只用了 8 次，几乎是死变量。
+     --text-3 提亮是因为面抬高了——面每动一次，压在面上的灰就得跟着走。
+     --text-2 moves to the value the codebase actually uses (#D4D4D8 appears 48
+     times hardcoded; the token itself only 8). --text-3 is lifted because the
+     surface was. */
   --text: #ededf0;
-  --text-2: #a1a1aa;
-  --text-3: #84848e;
+  --text-2: #d4d4d8;
+  --text-3: #9c9ca6;
 
   /* ── 品牌紫（油墨）/ brand violet, as ink ──
      色相比 Tailwind violet 更蓝、明度更低，读起来像印刷专色而不是框架默认值。
@@ -81,7 +103,11 @@
      --purple-hi    accent text tone on dark, ~5.4:1 against #09090B (WCAG AA).
      --purple-vivid one step brighter, small-area interaction feedback only. */
   --purple: #5a22ee;
-  --purple-hi: #8b6cff;
+  /* 面抬高之后，压在面上和压在半透明色块上的强调色会整片掉出 AA。
+     修法不是逐个补丁，而是把 token 本身推上去，让所有引用点一起走。
+     实测 #8B6CFF 在新面上 4.49（不过 AA），#9284FF 为 5.5；紫色芯片底上 4.9。
+     Accent tones move up with the surface — a token change, not per-site patches. */
+  --purple-hi: #9284ff;
   --purple-vivid: #6e42ff;
   --purple-deep: #240b63;
 
@@ -91,19 +117,40 @@
      These two are *data*, not brand. Deepened one step from neon mint / candy
      rose so they don't sting over a long session while still passing AA on
      solid fills. Never used decoratively. */
-  --up: #35c97a;
-  --up-bg: rgba(53, 201, 122, 0.13);
-  --down: #f04d63;
-  --down-bg: rgba(240, 77, 99, 0.13);
+  --up: #3ad584;
+  --up-bg: rgba(58, 213, 132, 0.13);
+  /* 跌色同样跟着面抬一档：#F04D63 在新面上的芯片底（14% 红）上只有 4.1。
+     Down tone lifted with the surface for the same reason as --purple-hi. */
+  --down: #ff6478;
+  --down-bg: rgba(255, 100, 120, 0.13);
   --gold: #e0a83c;
 
-  /* ── 圆角：一套规则，全站遵守 / one radius scale, obeyed everywhere ──
-     6 小件（chip/tag）· 10 控件（按钮/输入）· 14 卡片 · 20 大面板/弹层
-     旧变量名 --r-lg / --r-md 保留，因为下游 ~2700 行仍在引用。 */
-  --r-xs: 6px;
-  --r-md: 10px;
-  --r-lg: 14px;
-  --r-xl: 20px;
+  /* ── 圆角：三档，全站遵守 / three radii, obeyed everywhere ──
+     999 小件与控件（chip/tag/按钮/输入）· 8 内嵌格 · 14 小浮层 · 24 卡片
+
+     从四档（6/10/14/20）收到三档。药丸让「可点的东西」和「只是块面」在形状上
+     就分得开——这是三张参考图共享的控件语汇。卡片取 24 是为了同心圆角成立：
+     内半径 = 外半径 − 内边距，24 − 16 = 8，而旧值 14 − 16 会得到负数，所以
+     以前的内嵌格（10px）永远比容器还圆，读成「贴上去的贴纸」。
+     旧变量名保留，下游 ~2700 行仍在引用。
+
+     Down from four steps to three. Pills separate "clickable" from "just a
+     plane" by shape alone. Cards move to 26 so concentric radii work out:
+     inner = outer - padding, and 24 - 16 = 8. */
+  --r-xs: 999px;
+  --r-md: 999px;
+  --r-lg: 24px;
+  --r-xl: 24px;
+  /* 内嵌格专用（原来没有这一档，内嵌格借用 --r-md）。
+     Nested tiles get their own step; they used to borrow --r-md. */
+  --r-tile: 8px;
+  /* 小浮层（下拉菜单、账号选择器）。样本里没有这类元素，是落到生产代码时才
+     发现的第四档：一个 180px 宽的下拉套 26px 圆角会读成胶囊，套 8px 又不像
+     浮层。与其硬塞进三档，不如承认它是独立的一档。
+     A fourth step discovered only when porting to production: the sample had no
+     dropdowns. 26px on a 180px menu reads as a capsule; 8px doesn't read as a
+     floating layer. */
+  --r-panel: 14px;
 
   /* ── 动效节奏 / motion tokens ──
      去掉了原来那条弹性过冲曲线（cubic-bezier(0.34,1.45,0.64,1)）作为默认值：
@@ -153,7 +200,7 @@
        mismatched the adjacent Latin in weight, apparent size and baseline.
        Declaring the SC face explicitly aligns the two weight axes. */
     font-family: "Archivo", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-    font-size: 14px;
+    font-size: 13px;
     min-height: 100vh;
     /* 必须用 clip 而不是 hidden：hidden 会让 overflow-y 计算为 auto，把 body 变成
        滚动容器（window.scrollY 恒为 0，一切依赖 window 滚动的逻辑失效——吸底 CTA、
@@ -211,7 +258,7 @@
   .font-display-xl {
     font-family: "Archivo", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
     font-variation-settings: "wdth" 118;
-    font-weight: 800;
+    font-weight: 700;
     letter-spacing: -0.035em;
     line-height: 0.94;
   }
@@ -223,13 +270,99 @@
     letter-spacing: -0.01em;
   }
 
-  /* 键盘焦点环全局可见 / visible keyboard focus ring everywhere */
+  /* 键盘焦点环全局可见 / visible keyboard focus ring everywhere
+     input / select / textarea 补进来：原来只覆盖 button / a / [tabindex]，
+     而订单页的筛选器用的是裸 <select> 和 <input type=date>，拿不到系统的
+     紫色焦点环，只能吃浏览器默认样式。
+     Form controls added: the Orders filter bar uses bare <select> and
+     <input type="date">, which fell through to the UA default ring. */
   button:focus-visible,
   a:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
   [tabindex]:focus-visible {
     outline: 2px solid var(--purple-hi);
     outline-offset: 2px;
     border-radius: 2px;
+  }
+
+  /* ═════════════ 图标描边 / icon stroke ═════════════
+     实测全站图标用了四种描边：1.4 / 2 / 2.2 / 2.6。12–20px 的图标上，1.4 与
+     2.6 的视觉重量差近一倍——同一排图标里有的发虚有的发实。统一成 1.8。
+
+     只作用在 <svg> 元素上：环形图、仪表盘、迷你折线这些图表的
+     <circle>/<polyline> 各自带 stroke-width 属性，而「直接指定」永远压过
+     「继承」，所以图表描边不受影响，不用写例外。
+     Icons had four stroke weights; unified to 1.8. Applied to <svg> only, so
+     chart primitives with their own stroke-width attribute are untouched. */
+  svg {
+    stroke-width: 1.8;
+  }
+
+  /* ═════════════ 触摸目标 / touch targets ═════════════
+     实测手机视口下几乎每个可点元素都偏小：跟单按钮 60×34、持仓操作 90×30、
+     账号药丸 72×28、页内 Tab 84×32、筛选 67×30、开关 40×23。
+     WCAG 2.2 AA（2.5.8）的门槛是 24×24，这些多数过得去，但全都低于移动端
+     HIG 的 44px。
+
+     做法是盖一层 44px 高的透明伪元素，只扩热区、不改布局也不改 DOM，
+     且**只在纵向扩**——这些控件都是横向排列的，纵向扩不会吃掉邻居的点击。
+     Invisible 44px-tall hit areas, expanded vertically only so neighbours in a
+     row keep their own taps. */
+  @media (hover: none) and (pointer: coarse) {
+    .btn,
+    .chip,
+    .tag,
+    .seg button,
+    .seg-pill button,
+    .filter-cycle,
+    .qt-trade-btn,
+    .mt5-pill,
+    .view-all-btn {
+      position: relative;
+    }
+    .btn::after,
+    .chip::after,
+    .tag::after,
+    .seg button::after,
+    .seg-pill button::after,
+    .filter-cycle::after,
+    .qt-trade-btn::after,
+    .mt5-pill::after,
+    .view-all-btn::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 50%;
+      height: 44px;
+      transform: translateY(-50%);
+      border-radius: inherit;
+    }
+  }
+
+  /* ═════════════ 按下反馈 / press feedback ═════════════
+     全站 42 条 :hover 只配了 16 条 :active。手机上 hover 根本不触发，
+     :active 是用户唯一能拿到的反馈，而最常按的那几个控件一条都没有。
+     On touch hover never fires, so :active is the only feedback there is. */
+  .seg button:active,
+  .seg-pill button:active,
+  .filter-cycle:active,
+  .qt-trade-btn:active,
+  .mt5-pill:active,
+  .view-all-btn:active {
+    transform: scale(0.96);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .seg button:active,
+    .seg-pill button:active,
+    .filter-cycle:active,
+    .qt-trade-btn:active,
+    .mt5-pill:active,
+    .view-all-btn:active {
+      transform: none;
+    }
   }
 
   ::-webkit-scrollbar {
@@ -268,22 +401,28 @@
   .panel {
     position: relative;
     background: var(--surface);
-    border: 1px solid var(--line);
+    /* 边框留在盒模型里、只把颜色改透明：几何完全不变，不会因为少了 1px
+       而整页位移。分层改由面承担（见 --surface / --line 的说明）。
+       The border stays in the box model with a transparent colour so geometry
+       is untouched; layering is carried by the surface. */
+    border: 1px solid transparent;
     border-radius: var(--r-lg);
     box-shadow: none;
     transition: border-color var(--dur-base) var(--ease-out),
                 background-color var(--dur-base) var(--ease-out);
   }
 
+  /* hover 不再靠描边——描边已经透明了。改成面提亮一档。
+     Hover lifts the surface instead of the (now transparent) stroke. */
   .glass:hover,
   .panel:hover {
-    border-color: var(--line-hi);
+    background: var(--surface-2);
   }
 
   /* hover 上浮：位移压到 1px。3–4px 的上浮在密集列表里会让整页「跳动」。
      Hover lift capped at 1px: 3–4px lifts make a dense list feel jittery. */
   .glass.lift:hover {
-    border-color: var(--line-hi);
+    background: var(--surface-2);
     transform: translateY(-1px);
   }
 
@@ -306,9 +445,44 @@
   .glass-neon {
     @apply glass;
   }
+  /* 卡片外轮廓已取消，紫色描边无处可挂——hover 改成面提亮，与 .glass 一致。
+     With the card outline gone there is no stroke to tint; hover lifts the
+     surface instead, matching .glass. */
   .glass-neon:hover {
-    border-color: rgba(139, 108, 255, 0.55);
+    background: var(--surface-2);
   }
+
+  /* ── 持仓卡：嵌在卡里的卡，需要自己的面 ──
+     去掉外轮廓之后，全站只有这一处真的丢了边界：它是「当前持仓」那张卡里面
+     的卡，父子背景都是 --surface，边框一去三张卡就和父卡连成一片。
+     （其他嵌套没这个问题：内嵌格用 --nest 有自己的面；信号卡直接坐在页面底色
+     上，有 ΔL* 7.5 的台阶。）
+
+     先试过加一条去饱和紫的边，看起来突兀——整套皮的分层原则是「靠面不靠线」，
+     唯独这里破例加线，必然显得是外挂上去的。所以给它一个自己的面：+8.3 的
+     ΔL*，色相跟着现有灰阶（冷调偏移 +8，与 --nest 的 +9 同族）。
+     Nested cards need their own surface, not a stroke: adding one line where the
+     whole system layers by surface reads as bolted on. */
+  .pos-card {
+    background: #2c2c34;
+  }
+  /* 面抬高之后，压在**半透明色块**上的东西会掉出 AA（卖出芯片 4.13、
+     品种芯片 4.13）——芯片自己那层 14% 红底才是主要贡献者，把面调暗救不回来。
+     自定义属性会继承，所以这张卡就是一个「局部面」上下文：它自己的语义色跟着
+     它自己的面走，卡外的一切不受影响。
+     Custom properties inherit, so the card is its own surface context. */
+  .pos-card {
+    --down: #ff8090;
+    --text-3: #b0b0ba;
+  }
+  /* 卡内按钮改成**下沉**（比面暗），不是上浮：容器的面亮了，控件凹进去才对，
+     上浮是给深底容器用的。顺带把「平仓」从 4.28 提到 6.3——往亮的方向补只会
+     更糟（8% 白底反而掉到 4.20）。
+     Controls recess inside a lighter panel rather than floating above it. */
+  .pos-card button:not(.btn) {
+    background: rgba(0, 0, 0, 0.22);
+  }
+
 
   /* 实色紫面板。整段区块直接刷成品牌色——这是「颜料」用法的主场：
      大面积平涂，白字压上去，没有任何渐变或光晕。
@@ -371,8 +545,8 @@
     border: 1px solid transparent;
     border-radius: var(--r-md);
     font: inherit;
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
     letter-spacing: -0.005em;
     cursor: pointer;
     white-space: nowrap;
@@ -437,10 +611,10 @@
     border-radius: var(--r-md);
     border: 1px solid var(--line);
     background: var(--nest);
-    padding: 10px 14px;
+    padding: 8px 16px;
     color: var(--text);
     font: inherit;
-    font-size: 14px;
+    font-size: 13px;
     transition: border-color var(--dur-fast) var(--ease-out),
                 background-color var(--dur-fast) var(--ease-out);
     outline: none;
@@ -474,21 +648,21 @@
   .tag {
     display: inline-flex;
     align-items: center;
-    padding: 3px 9px;
+    padding: 4px 8px;
     border-radius: var(--r-xs);
-    font-size: 11.5px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 500;
     letter-spacing: 0.01em;
   }
 
   .chip {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 3px 9px;
+    gap: 4px;
+    padding: 4px 8px;
     border-radius: var(--r-xs);
-    font-size: 11.5px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 500;
     letter-spacing: 0.01em;
   }
   .chip.buy,
@@ -521,11 +695,11 @@
   .count-badge {
     min-width: 20px;
     height: 20px;
-    padding: 0 6px;
+    padding: 0 8px;
     border-radius: var(--r-xs);
     background: var(--purple);
     color: #fff;
-    font-size: 11.5px;
+    font-size: 12px;
     display: grid;
     place-items: center;
     font-weight: 700;
@@ -538,19 +712,19 @@
     background: var(--nest);
     border: 1px solid var(--line);
     border-radius: var(--r-md);
-    padding: 3px;
-    gap: 2px;
+    padding: 4px;
+    gap: 4px;
   }
   .seg button {
     height: 28px;
-    padding: 0 13px;
+    padding: 0 12px;
     border: none;
-    border-radius: 7px;
+    border-radius: 999px;
     background: transparent;
     color: var(--text-3);
     font: inherit;
-    font-size: 12.5px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
     transition: background-color var(--dur-fast) var(--ease-out),
                 color var(--dur-fast) var(--ease-out);
@@ -626,13 +800,13 @@
     align-items: center;
     gap: 8px;
     height: 36px;
-    padding: 0 14px;
-    border-radius: 10px;
+    padding: 0 16px;
+    border-radius: 999px;
     background: rgba(53, 201, 122, 0.10);
     border: 1px solid rgba(53, 201, 122, 0.35);
     color: var(--up);
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 500;
   }
   .mt5-pill .dot {
     width: 7px;
@@ -697,7 +871,7 @@
     display: none;
     align-items: center;
     justify-content: center;
-    padding: 2px;
+    padding: 4px;
     background: none;
     border: none;
     color: var(--text-3);
@@ -717,7 +891,7 @@
     }
   }
   .stance-word {
-    font-size: 56px;
+    font-size: 40px;
     font-weight: 700;
     line-height: 1.05;
     letter-spacing: 0.03em;
@@ -739,7 +913,7 @@
   .stance-word.bear,
   .stance-word.neutral {
     font-variation-settings: "wdth" 112;
-    font-weight: 800;
+    font-weight: 700;
     letter-spacing: -0.03em;
     text-shadow: none;
     animation: none;
@@ -754,16 +928,16 @@
     color: var(--text-3);
   }
   .conf-val {
-    font-size: 30px;
+    font-size: 26px;
     font-weight: 700;
     color: #fff;
-    margin-top: 1px;
+    margin-top: 4px;
   }
 
   /* 多周期标签 / multi-TF tags */
   .tf-tag {
     padding: 4px 12px;
-    border-radius: 8px;
+    border-radius: 999px;
     font-size: 12px;
     font-weight: 700;
     font-family: "JetBrains Mono", monospace;
@@ -814,11 +988,11 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-top: 10px;
+    margin-top: 8px;
   }
   .entry-block {
     text-align: center;
-    margin: 18px 0 2px;
+    margin: 16px 0 4px;
   }
   .entry-block .cap {
     font-size: 12px;
@@ -826,7 +1000,7 @@
     letter-spacing: 0.1em;
   }
   .entry-block .val {
-    font-size: 36px;
+    font-size: 40px;
     font-weight: 700;
     margin-top: 4px;
     color: #fff;
@@ -834,7 +1008,7 @@
   .sl-tp-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 10px;
+    gap: 8px;
   }
   /* 三列变体用于信号卡片 / 3-col variant for signal cards */
   .sl-tp-grid.three {
@@ -855,18 +1029,18 @@
     color: var(--up);
   }
   .exec-tile {
-    border-radius: var(--r-md);
-    padding: 11px 8px;
+    border-radius: var(--r-tile);
+    padding: 12px 8px;
     text-align: center;
   }
   .exec-tile .cap {
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--text-2);
   }
   .exec-tile .val {
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 700;
-    margin-top: 3px;
+    margin-top: 4px;
   }
   .exec-stats-row {
     display: flex;
@@ -879,10 +1053,10 @@
     color: var(--text-3);
   }
   .exec-stats-row .v {
-    font-size: 21px;
+    font-size: 20px;
     font-weight: 700;
     color: #fff;
-    margin-top: 2px;
+    margin-top: 4px;
   }
   .exec-stats-row > div:last-child {
     text-align: right;
@@ -891,13 +1065,13 @@
     width: 100%;
     height: 46px;
     font-size: 15px;
-    margin-top: 17px;
+    margin-top: 16px;
   }
   .exec-expiry {
     text-align: center;
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--text-3);
-    margin-top: 11px;
+    margin-top: 12px;
   }
 
   /* ── 信号卡（其他活跃）─ */
@@ -907,7 +1081,7 @@
     gap: 12px;
   }
   .sig-mini-card {
-    padding: 14px 16px;
+    padding: 16px 16px;
   }
   .sig-mini-top {
     display: flex;
@@ -919,7 +1093,7 @@
     text-align: right;
   }
   .sig-mini-top .rr .v {
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 700;
     color: var(--up);
   }
@@ -930,12 +1104,12 @@
   .sig-mini-tiles {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
-    gap: 7px;
-    margin-top: 11px;
+    gap: 8px;
+    margin-top: 12px;
   }
   .sig-tile {
-    border-radius: 10px;
-    padding: 8px 3px;
+    border-radius: var(--r-tile);
+    padding: 8px 4px;
     text-align: center;
     background: var(--nest);
     border: 1px solid var(--line);
@@ -948,7 +1122,7 @@
   .sig-tile .val {
     font-size: 13px;
     font-weight: 700;
-    margin-top: 2px;
+    margin-top: 4px;
     color: #fff;
   }
   .sig-tile.sl {
@@ -970,7 +1144,7 @@
     border-radius: 99px;
     background: rgba(255, 255, 255, 0.09);
     overflow: hidden;
-    margin-top: 5px;
+    margin-top: 4px;
   }
   .sig-ttl-bar i {
     display: block;
@@ -981,18 +1155,18 @@
   }
   .view-all-btn {
     height: 42px;
-    border-radius: 12px;
+    border-radius: 999px;
     border: 1px solid var(--line);
     background: var(--nest);
     color: var(--text-2);
     font: inherit;
-    font-size: 13.5px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 7px;
+    gap: 8px;
     transition: border-color 0.2s, color 0.2s;
   }
   .view-all-btn:hover {
@@ -1004,8 +1178,8 @@
   .card-head {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 4px 2px 12px;
+    gap: 8px;
+    padding: 4px 4px 12px;
   }
   .card-head h3 {
     font-size: 15px;
@@ -1024,8 +1198,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
-    padding: 2px 0;
+    gap: 8px;
+    padding: 4px 0;
   }
   .qt-mobile-row .qt-sym-cell {
     flex: 1;
@@ -1044,10 +1218,10 @@
   }
   .qt-table th {
     text-align: right;
-    font-size: 11.5px;
+    font-size: 12px;
     font-weight: 500;
     color: var(--text-3);
-    padding: 0 0 10px;
+    padding: 0 0 8px;
     letter-spacing: 0.04em;
     white-space: nowrap;
   }
@@ -1071,8 +1245,11 @@
   .qt-sym-cell {
     display: flex;
     align-items: center;
-    gap: 11px;
+    gap: 12px;
   }
+  /* 身份芯片。标识从首字母换成三字母（见 symbolMeta.ts），所以字号要能装下
+     三个字符：34px 的圆里 10px 等宽约占 18px，放得下且不挤。
+     Identity chip: three characters now, so the type is sized to fit them. */
   .qt-sym-ava {
     width: 34px;
     height: 34px;
@@ -1080,12 +1257,31 @@
     flex-shrink: 0;
     display: grid;
     place-items: center;
-    font-size: 13.5px;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: -0.02em;
     font-weight: 700;
   }
+  /* 身份芯片的小号变体：信号卡、持仓卡、订单表里跟在品种名前面。
+     34px 的报价表版本在这些密度下太大，26px 是能装下三个字符的下限。
+     A smaller variant of the identity chip for signal/position/order rows,
+     where the 34px quotes-table version is too large. */
+  .sym-ava {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+
   .qt-sym-cell .nm b {
     display: block;
-    font-size: 14px;
+    font-size: 13px;
     color: #fff;
   }
   .qt-sym-cell .nm span {
@@ -1094,7 +1290,7 @@
     white-space: nowrap;
   }
   .qt-price {
-    font-size: 14.5px;
+    font-size: 15px;
     font-weight: 700;
     color: #fff;
     transition: color 0.15s;
@@ -1102,8 +1298,8 @@
   .qt-chg-chip {
     display: inline-block;
     min-width: 64px;
-    padding: 3px 9px;
-    border-radius: 7px;
+    padding: 4px 8px;
+    border-radius: 999px;
     font-size: 12px;
     font-weight: 700;
   }
@@ -1117,9 +1313,9 @@
   }
   .qt-trade-btn {
     height: 31px;
-    padding: 0 17px;
-    font-size: 12.5px;
-    border-radius: 8px;
+    padding: 0 16px;
+    font-size: 13px;
+    border-radius: 999px;
     background: linear-gradient(92deg, rgba(90, 34, 238, 0.85), rgba(168, 85, 247, 0.85));
     color: #fff;
     border: none;
@@ -1140,7 +1336,7 @@
   .donut-wrap {
     display: flex;
     align-items: center;
-    gap: 18px;
+    gap: 16px;
     margin-top: 12px;
   }
   .donut {
@@ -1160,7 +1356,7 @@
     text-align: center;
   }
   .donut-center b {
-    font-size: 24px;
+    font-size: 26px;
     display: block;
     line-height: 1.1;
     color: #fff;
@@ -1172,19 +1368,19 @@
   .ov-legend {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
     font-size: 13px;
     flex: 1;
   }
   .ov-legend .row {
     display: flex;
     align-items: center;
-    gap: 9px;
+    gap: 8px;
   }
   .ov-legend .sw {
     width: 10px;
     height: 10px;
-    border-radius: 3px;
+    border-radius: 999px;
   }
   .ov-legend .k {
     color: var(--text-2);
@@ -1202,7 +1398,7 @@
     font-weight: 400;
   }
   .acc-section {
-    margin-top: 13px;
+    margin-top: 12px;
     border-top: 1px solid rgba(255, 255, 255, 0.07);
     padding-top: 12px;
   }
@@ -1212,11 +1408,11 @@
     gap: 8px;
   }
   .acc-row .k {
-    font-size: 12.5px;
+    font-size: 13px;
     color: var(--text-3);
   }
   .acc-row .v {
-    font-size: 24px;
+    font-size: 26px;
     font-weight: 700;
     color: #c4b5fd;
     margin-left: auto;
@@ -1230,10 +1426,10 @@
   .acc-x-labels {
     display: flex;
     justify-content: space-between;
-    font-size: 10.5px;
+    font-size: 11px;
     color: var(--text-3);
-    margin-top: 3px;
-    padding: 0 2px;
+    margin-top: 4px;
+    padding: 0 4px;
     font-family: "JetBrains Mono", monospace;
   }
 
@@ -1285,29 +1481,29 @@
   .sig-page-head {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     margin-bottom: 14px;
   }
   .sig-page-head h2 {
-    font-size: 21px;
+    font-size: 20px;
     font-weight: 700;
     color: #fff;
   }
   .sig-page-head p {
-    font-size: 12.5px;
+    font-size: 13px;
     color: var(--text-3);
-    margin-left: 2px;
+    margin-left: 4px;
   }
   /* 单排筛选栏：可横向滚动，避免窄屏换行错位 / single-row filter bar, horizontally scrollable */
   .sig-filters {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     flex-wrap: nowrap;
     overflow-x: auto;
     overflow-y: hidden;
     margin-bottom: 16px;
-    padding-bottom: 2px;
+    padding-bottom: 4px;
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
@@ -1325,11 +1521,11 @@
   .sig-filters .fgroup {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     flex-shrink: 0;
   }
   .sig-filters .fk {
-    font-size: 12.5px;
+    font-size: 13px;
     color: var(--text-3);
     white-space: nowrap;
   }
@@ -1342,19 +1538,19 @@
   /* 药丸形筛选按钮 / pill-shaped filter buttons */
   .seg-pill {
     display: flex;
-    gap: 6px;
+    gap: 8px;
     flex-shrink: 0;
   }
   .seg-pill button {
     height: 30px;
-    padding: 0 15px;
+    padding: 0 16px;
     border: 1px solid var(--line);
     border-radius: 999px;
     background: var(--nest);
     color: var(--text-3);
     font: inherit;
-    font-size: 12.5px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
@@ -1373,7 +1569,7 @@
   .filter-cycle {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     height: 30px;
     padding: 0 12px;
     border: 1px solid var(--line);
@@ -1381,8 +1577,8 @@
     background: var(--nest);
     color: #fff;
     font: inherit;
-    font-size: 12.5px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
@@ -1401,7 +1597,7 @@
   .sig-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
-    gap: 14px;
+    gap: 16px;
   }
   /* 防止卡片内不可压缩内容撑破网格列 / stop rigid card content from blowing out the grid column */
   .sig-grid > * {
@@ -1410,9 +1606,9 @@
   .sig-empty {
     grid-column: 1 / -1;
     text-align: center;
-    padding: 46px 0;
+    padding: 48px 0;
     color: var(--text-3);
-    font-size: 13.5px;
+    font-size: 13px;
     border: 1px dashed var(--line);
     border-radius: var(--r-lg);
   }
@@ -1457,7 +1653,7 @@
     background: var(--surface);
     border: 1px solid var(--line-hi);
     border-radius: var(--r-xl);
-    padding: 22px;
+    padding: 24px;
     box-shadow: 0 24px 64px -16px rgba(0, 0, 0, 0.8);
   }
   .slide-sheet-head {
@@ -1475,16 +1671,16 @@
   }
   .slide-sheet-rows {
     margin-top: 16px;
-    border-radius: 14px;
+    border-radius: var(--r-tile);
     background: var(--nest);
     border: 1px solid var(--line);
-    padding: 2px 15px;
+    padding: 4px 16px;
   }
   .slide-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 11.5px 0;
+    padding: 12px 0;
     font-size: 13px;
   }
   .slide-row + .slide-row {
@@ -1505,7 +1701,7 @@
   .stepper {
     display: flex;
     align-items: center;
-    gap: 13px;
+    gap: 12px;
   }
   .stepper button {
     width: 28px;
@@ -1554,13 +1750,13 @@
   .slide-acct-trigger {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     background: var(--nest-hi);
     border: 1px solid var(--line-hi);
-    border-radius: 8px;
-    padding: 5px 8px;
-    font-size: 12.5px;
-    font-weight: 600;
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 13px;
+    font-weight: 500;
     color: #fff;
     cursor: pointer;
     max-width: 190px;
@@ -1588,7 +1784,7 @@
     overflow-y: auto;
     background: #17171d;
     border: 1px solid var(--line-hi);
-    border-radius: 10px;
+    border-radius: var(--r-panel);
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
     padding: 4px;
   }
@@ -1596,10 +1792,10 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
+    gap: 8px;
     width: 100%;
-    padding: 8px 10px;
-    border-radius: 7px;
+    padding: 8px 8px;
+    border-radius: var(--r-tile);
     background: transparent;
     border: none;
     cursor: pointer;
@@ -1614,9 +1810,9 @@
   .slide-acct-opt .opt-login {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 12.5px;
-    font-weight: 600;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 500;
     color: #fff;
   }
   /* 账号在线状态点。列表会保留本次弹窗期间掉线的账号（见 useStickyOnlineAccounts），
@@ -1635,7 +1831,7 @@
     box-shadow: none;
   }
   .slide-acct-opt .opt-equity {
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--text-3);
   }
 
@@ -1654,7 +1850,7 @@
   .phone-dial-select .select-trigger {
     height: 43px;
     padding: 10px 12px;
-    border-radius: 12px;
+    border-radius: 999px;
     font-size: 14px;
     white-space: nowrap;
   }
@@ -1668,15 +1864,15 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 6px;
+    gap: 8px;
     width: 100%;
     min-width: 84px;
     background: var(--nest);
     border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 5px 8px;
+    border-radius: 999px;
+    padding: 4px 8px;
     font: inherit;
-    font-size: 12.5px;
+    font-size: 13px;
     color: var(--text);
     cursor: pointer;
     transition: border-color 0.15s;
@@ -1689,8 +1885,8 @@
      same field set as the inputs/textareas around it. */
   .select-lg .select-trigger {
     border-radius: var(--r-md);
-    padding: 10px 16px;
-    font-size: 14px;
+    padding: 8px 16px;
+    font-size: 13px;
   }
   .select-trigger svg {
     flex-shrink: 0;
@@ -1729,20 +1925,20 @@
     overflow-y: auto;
     background: #17171d;
     border: 1px solid var(--line-hi);
-    border-radius: 10px;
+    border-radius: var(--r-panel);
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
     padding: 4px;
   }
   .select-opt {
     display: block;
     width: 100%;
-    padding: 7px 10px;
-    border-radius: 7px;
+    padding: 8px 8px;
+    border-radius: var(--r-tile);
     background: transparent;
     border: none;
     color: var(--text-2);
-    font-size: 12.5px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
     text-align: left;
     white-space: nowrap;
@@ -1759,7 +1955,7 @@
   .slide-track {
     position: relative;
     height: 56px;
-    border-radius: 14px;
+    border-radius: 999px;
     background: var(--nest);
     border: 1px solid var(--line);
     display: flex;
@@ -1767,7 +1963,7 @@
     overflow: hidden;
     user-select: none;
     touch-action: none;
-    margin-top: 15px;
+    margin-top: 16px;
   }
   .slide-track-fill {
     position: absolute;
@@ -1784,9 +1980,9 @@
     inset: 0;
     display: grid;
     place-items: center;
-    font-size: 13.5px;
+    font-size: 13px;
     color: var(--text-2);
-    font-weight: 600;
+    font-weight: 500;
   }
   .slide-knob {
     position: absolute;
@@ -1796,7 +1992,7 @@
     transform: translateY(-50%);
     width: 46px;
     height: 46px;
-    border-radius: 12px;
+    border-radius: 999px;
     background: var(--purple);
     color: #fff;
     display: grid;
@@ -1833,10 +2029,10 @@
   .receipt-line {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 13px 15px;
-    border-radius: 12px;
-    font-size: 13.5px;
+    gap: 8px;
+    padding: 12px 16px;
+    border-radius: var(--r-tile);
+    font-size: 13px;
   }
   .receipt-line.wait {
     background: rgba(90, 34, 238, 0.14);
@@ -1872,16 +2068,16 @@
   }
   .slide-note {
     display: flex;
-    gap: 7px;
+    gap: 8px;
     align-items: flex-start;
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--text-3);
-    margin: 13px 4px 15px;
+    margin: 12px 4px 16px;
     line-height: 1.6;
   }
   .slide-close-btn {
     width: 100%;
-    margin-top: 13px;
+    margin-top: 12px;
   }
 
   /* ══════════════════════════════════════════════
@@ -1907,21 +2103,19 @@
   .lg-tabbar-inner {
     display: flex;
     align-items: stretch;
-    gap: 3px;
-    padding: 7px 8px;
-    border-radius: 18px;
-    background: rgba(16, 16, 18, 0.82);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid var(--line-hi);
-    /* 内高光从 0.3 降到 0.10：0.3 的顶部白线是「玻璃边缘折射」的模拟，在深色
-       条上会读成一道亮边，是玻璃拟态最容易辨认的痕迹。
-       Inset highlight dropped from 0.3 to 0.10: a 0.3 top-edge white line
-       simulates glass-edge refraction and reads as a bright rim on a dark bar —
-       the most recognisable remnant of glassmorphism. */
-    box-shadow:
-      0 12px 36px -12px rgba(0, 0, 0, 0.7),
-      inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    gap: 4px;
+    padding: 8px;
+    /* 圆角对齐卡片的 24：底栏是全站唯一还停在旧值（18）的容器。
+       内边距同时抹平横竖差，同心圆角才成立（26 − 8 = 18，见 .lg-tab）。 */
+    border-radius: var(--r-lg);
+    /* 模糊与内高光一起去掉。那条 inset 白线是「玻璃边缘折射」的模拟，是整套
+       系统里最后一处玻璃拟态残留——而设计系统写着不用玻璃。改成实色面之后，
+       底栏在任何背景上都是同一个样子，选中项也不再随背后滚过的内容混色。
+       The blur and inset highlight are gone: that white top edge simulated
+       glass refraction and was the system's last piece of glassmorphism. */
+    background: var(--surface);
+    border: 1px solid transparent;
+    box-shadow: 0 12px 36px -12px rgba(0, 0, 0, 0.7);
   }
   .lg-tab {
     flex: 1;
@@ -1929,19 +2123,36 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 3px;
-    padding: 8px 0 6px;
-    border-radius: 12px;
+    gap: 4px;
+    padding: 8px 0 8px;
+    /* 同心圆角：底栏 24 − 内边距 8 = 16。
+       这里**不能**用药丸：Tab 的盒子是 67×54（长宽比 1.22），999px 已经超过
+       短边的一半，整块会被压成椭圆疙瘩，跟同屏所有卡片的形状语言都不搭。
+       药丸只在「宽而扁」的形状上才读作药丸。
+       Not a pill: at 67×54 a 999px radius exceeds half the short side and the
+       box collapses into an ellipse. Pills only read as pills on wide, short
+       shapes. Concentric instead: 24 - 8 = 16. */
+    border-radius: 16px;
     border: 1px solid transparent;
     background: transparent;
     color: var(--text-3);
     font: inherit;
-    font-size: 10.5px;
-    font-weight: 600;
+    font-size: 11px;
+    font-weight: 500;
     line-height: 1;
     cursor: pointer;
-    transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+    transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out),
+                transform 0.09s var(--ease-out);
     -webkit-tap-highlight-color: transparent;
+  }
+  /* 手机上 hover 永不触发，:active 是用户唯一能拿到的反馈。全站 42 条 :hover
+     只配了 16 条 :active，而底栏这种最常按的控件一条都没有。
+     On touch, hover never fires and :active is the only feedback there is. */
+  .lg-tab:active {
+    transform: scale(0.96);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .lg-tab:active { transform: none; }
   }
   .lg-tab .lg-ico {
     display: grid;
@@ -1981,7 +2192,7 @@
      separates, the sheet holds content — one job each. */
   .lg-sheet {
     width: 100%;
-    padding: 10px 16px calc(env(safe-area-inset-bottom) + 18px);
+    padding: 8px 16px calc(env(safe-area-inset-bottom) + 16px);
     border-radius: var(--r-xl) var(--r-xl) 0 0;
     background: var(--surface);
     border-top: 1px solid var(--line-hi);
@@ -1998,21 +2209,21 @@
   .lg-sheet-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
+    gap: 8px;
   }
   .lg-sheet-item {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 8px;
-    padding: 17px 8px;
-    border-radius: 18px;
+    padding: 16px 8px;
+    border-radius: 999px;
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
     color: var(--text-2);
     font-size: 12px;
-    font-weight: 600;
+    font-weight: 500;
     text-align: center;
     transition: background 0.25s, color 0.25s, border-color 0.25s;
   }
@@ -2028,13 +2239,13 @@
   .lg-sheet-logout {
     width: 100%;
     margin-top: 12px;
-    padding: 13px;
-    border-radius: 16px;
+    padding: 12px;
+    border-radius: 999px;
     background: rgba(240, 77, 99, 0.12);
     border: 1px solid rgba(240, 77, 99, 0.32);
     color: #ff8095;
     font: inherit;
-    font-size: 13.5px;
+    font-size: 13px;
     font-weight: 700;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
@@ -2079,7 +2290,7 @@
     flex-direction: column;
     align-items: stretch;
     gap: 4px;
-    padding: 6px 8px 7px;
+    padding: 8px 8px 8px;
     border-radius: 14px;
     background: rgba(16, 16, 18, 0.92);
     backdrop-filter: blur(18px);
@@ -2098,7 +2309,7 @@
     justify-content: center;
     align-items: center;
     min-height: 22px;
-    margin: -2px -4px 2px;
+    margin: -4px -4px 4px;
     padding: 4px 0;
     border-radius: 8px;
     color: #fff;
@@ -2165,33 +2376,33 @@
     }
     .hero-card {
       margin-top: -24px !important;
-      padding-top: 14px !important;
+      padding-top: 16px !important;
     }
     /* 指示器行的下一个兄弟（品种块）：上间距与卡片顶 padding 相等 */
     .hero-header-row + div {
-      margin-top: 14px !important;
+      margin-top: 16px !important;
     }
     .hero-nebula {
       width: 46%;
       opacity: 0.55;
     }
     .stance-word {
-      font-size: 34px;
+      font-size: 26px;
     }
     .conf-val {
-      font-size: 22px;
+      font-size: 20px;
     }
 
     /* ── 执行卡手机版：套用普通信号卡结构，无需特殊规则 ── */
     /* 信号卡瓦片手机端内边距收紧（含可执行信号卡）*/
     .exec-tile {
-      padding: 8px 6px;
+      padding: 8px 8px;
     }
     .exec-tile .val {
       font-size: 13px;
     }
     .exec-tile .cap {
-      font-size: 10.5px;
+      font-size: 11px;
     }
 
     /* ── 下单弹窗：底部全屏上滑 / bottom sheet ── */
@@ -2201,9 +2412,9 @@
     .slide-sheet {
       width: 100%;
       max-width: 100%;
-      border-radius: 20px 20px 0 0;
+      border-radius: var(--r-lg) var(--r-lg) 0 0;
       max-height: 92vh;
-      padding: 20px 18px calc(18px + env(safe-area-inset-bottom));
+      padding: 20px 16px calc(16px + env(safe-area-inset-bottom));
       /* 只在真正贴底成为 bottom sheet 的手机端才叠加上滑动效——桌面居中弹窗
          用位移动画会显得突兀，desktop 那份只保留上面 overlay 的淡入。
          Only layer the slide-up here, where it's actually a bottom sheet — a
@@ -2221,7 +2432,7 @@
 
     /* ── 其他信号列表 / others list compact ── */
     .sig-mini-tiles {
-      gap: 5px;
+      gap: 4px;
     }
 
     /* ── 行情表 / quotes table compact ── */
@@ -2231,7 +2442,7 @@
     .qt-sym-ava {
       width: 28px;
       height: 28px;
-      font-size: 11px;
+      font-size: 10px;
     }
 
     /* ── 环形图缩小 / donut smaller ── */
@@ -2243,7 +2454,7 @@
       height: 90px;
     }
     .donut-center b {
-      font-size: 18px;
+      font-size: 17px;
     }
 
     /* ── 按钮全宽 / full-width btn ── */
@@ -2313,7 +2524,7 @@
 .eyebrow {
   display: inline-block;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--text-3);
@@ -3154,7 +3365,7 @@ body {
   position: relative;
   overflow: hidden;
   background: var(--nest);
-  border-radius: var(--r-md);
+  border-radius: var(--r-tile);
 }
 .skeleton::after {
   content: '';
@@ -3172,7 +3383,7 @@ body {
 @keyframes skeleton-sweep {
   100% { transform: translateX(100%); }
 }
-.skeleton-line { height: 12px; border-radius: 6px; }
+.skeleton-line { height: 12px; border-radius: var(--r-tile); }
 .skeleton-card {
   border: 1px solid var(--line);
   background: var(--card-a);
@@ -4418,7 +4629,7 @@ body {
   height: 100%;
 }
 .sc-label {
-  font-size: 19px;
+  font-size: 20px;
   letter-spacing: 0.08em;
 }
 .mkt-scene {
