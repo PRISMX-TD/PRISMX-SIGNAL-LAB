@@ -80,6 +80,14 @@ class User(Base):
     # conversion, expiry downgrade, or any admin plan change).
     trial_used_at = Column(DateTime, nullable=True)
     plan_is_trial = Column(Boolean, default=False, nullable=False)
+    # 注册来源归因：经邀请链接注册时写入该链接的 code，此后永不改动。注册人数
+    # 统计按它分组——与 plan_note 里的标记名快照解耦，管理员手改备注不影响统计
+    # （见 routers/invite.py 的 apply_invite 与 admin 列表的 GROUP BY）。
+    # Signup attribution: the invite link's code, written once at registration
+    # and never changed. Registration counts group by this column — decoupled
+    # from the label snapshot in plan_note, so admins editing notes can't skew
+    # the stats (see apply_invite in routers/invite.py).
+    invite_code = Column(String, nullable=True)
     # 最近一次带凭证请求的时间，用于计算 DAU；在 get_current_user 里限流更新
     # （同一用户 5 分钟内只写一次库），避免每个请求都触发一次 UPDATE。
     # Last authenticated request time, used to compute DAU; throttled in
@@ -915,3 +923,27 @@ class TicketReply(Base):
     created_at = Column(DateTime, default=_now)
 
     author = relationship("User", backref="ticket_replies")
+
+
+class InviteLink(Base):
+    """邀请链接：管理员生成的带标记推广链接。code 进 URL（?ref=code），label 是
+    管理员起的标记名；用户经链接注册时 label 快照进 users.plan_note、code 写进
+    users.invite_code 做永久归因。行永不删除——删除会释放唯一 code，将来重新生成
+    同码会把老用户错误归因；下线合作用 is_active 停用。
+    Admin-generated promo link. `code` goes into the URL (?ref=code); at
+    registration the label is snapshotted into users.plan_note and the code
+    into users.invite_code for permanent attribution. Rows are never deleted —
+    that would free the unique code for regeneration and misattribute old
+    users; retire a link by flipping is_active instead.
+    """
+    __tablename__ = "invite_links"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    code = Column(String, unique=True, nullable=False, index=True)
+    label = Column(String, nullable=False)
+    # 点击计数：软指标（限流兜底但防不了刷量，跨设备点击也不计）；注册数才是硬数。
+    # Soft metric — rate-limited but not abuse-proof, and cross-device clicks
+    # are invisible; registrations are the hard number.
+    clicks = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=_now)

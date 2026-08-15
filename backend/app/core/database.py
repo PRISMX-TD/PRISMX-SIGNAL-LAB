@@ -94,7 +94,8 @@ def _hash_legacy_api_tokens() -> None:
 # raise — the new step is silently skipped on databases that already ran an older
 # revision, and the damage surfaces much later as an unexpectedly NULL column.
 # rev 2: users.phone / users.phone_required（注册强制记录手机号）
-CURRENT_SCHEMA_REV = 2
+# rev 3: users.invite_code（邀请链接注册归因）+ idx_users_invite_code
+CURRENT_SCHEMA_REV = 3
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -286,6 +287,13 @@ def _migrate_columns() -> None:
             "CREATE INDEX IF NOT EXISTS idx_mt5_accounts_heartbeat "
             "ON mt5_accounts(last_heartbeat)"
         ))
+        # 邀请链接注册人数按 invite_code 分组统计（admin 列表每次刷新都查）；
+        # users 是既存表，create_all 不会补索引，必须在这里建。
+        # Registration counts group users by invite_code on every admin list
+        # load; users pre-exists, so create_all won't add this index — do it here.
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_users_invite_code ON users(invite_code)"
+        ))
 
     # users 表：password_hash 改可空（Google 登录用户无密码）。
     # 旧表建表时为 NOT NULL，需放开约束，否则插入无密码用户会被拒。
@@ -315,6 +323,7 @@ def _migrate_columns() -> None:
             "google_linked_at": datetime_type,
             "phone": "VARCHAR",
             "phone_required": "BOOLEAN",
+            "invite_code": "VARCHAR",
         }
         with engine.begin() as conn:
             for name, col_type in user_new.items():
