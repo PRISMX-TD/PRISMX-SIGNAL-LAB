@@ -287,13 +287,13 @@ def _migrate_columns() -> None:
             "CREATE INDEX IF NOT EXISTS idx_mt5_accounts_heartbeat "
             "ON mt5_accounts(last_heartbeat)"
         ))
-        # 邀请链接注册人数按 invite_code 分组统计（admin 列表每次刷新都查）；
-        # users 是既存表，create_all 不会补索引，必须在这里建。
-        # Registration counts group users by invite_code on every admin list
-        # load; users pre-exists, so create_all won't add this index — do it here.
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_users_invite_code ON users(invite_code)"
-        ))
+        # 注意：这一块跑在下面「users 表补列」之前，所以**只能**放那些所依赖的
+        # 列在旧库里一定已经存在的索引。要给本函数新补的列建索引，请放到补列
+        # 语句之后（例：users.invite_code 的索引在下面 users 块尾部）。
+        # NOTE: this block runs *before* the users column-add block below, so it
+        # may only contain indexes whose columns already exist on old databases.
+        # An index on a column this function itself adds must go after that ADD
+        # COLUMN (see users.invite_code at the end of the users block below).
 
     # users 表：password_hash 改可空（Google 登录用户无密码）。
     # 旧表建表时为 NOT NULL，需放开约束，否则插入无密码用户会被拒。
@@ -397,6 +397,28 @@ def _migrate_columns() -> None:
             # as version 0 at auth time, matching the backfill here.
             if "token_version" not in user_cols:
                 conn.execute(text("UPDATE users SET token_version = 0 WHERE token_version IS NULL"))
+            # 邀请链接注册人数按 invite_code 分组统计（admin 列表每次刷新都查）；
+            # users 是既存表，create_all 不会给它补索引，必须在这里建。
+            #
+            # **必须留在上面那个 ADD COLUMN 循环之后**：invite_code 正是由那个
+            # 循环补上的列，放到前面那个通用 CREATE INDEX 块里，旧库上就会以
+            # "no such column: invite_code" 直接把迁移打断——而迁移跑在 uvicorn
+            # bind 端口之前，等于服务器起不来。IF NOT EXISTS 在 SQLite 与
+            # Postgres 上都支持，重复启动无害。
+            #
+            # Registration counts group users by invite_code on every admin list
+            # load; users pre-exists, so create_all won't add this index for it.
+            #
+            # This MUST stay after the ADD COLUMN loop above: invite_code is one
+            # of the columns that loop adds, so creating the index in the shared
+            # CREATE INDEX block earlier in this function aborts the migration on
+            # any pre-existing database with "no such column: invite_code" — and
+            # since the migration runs before uvicorn binds its port, that means
+            # the server never starts. IF NOT EXISTS is supported on both SQLite
+            # and Postgres, so re-running on every boot is harmless.
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_users_invite_code ON users(invite_code)"
+            ))
 
     # user_strategies 表：止损止盈从"百分比距离 + R 倍数"一种固定组合改成
     # 两个方式独立可选，外加策略命名。已启用的策略要按原逻辑等价换算成新
