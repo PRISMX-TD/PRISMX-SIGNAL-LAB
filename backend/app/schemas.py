@@ -700,3 +700,33 @@ class AdminTicketReplyCreate(TicketReplyCreate):
     with status/priority changes."""
     status: Literal["open", "in_progress", "closed"] | None = None
     priority: Literal["low", "normal", "urgent"] | None = None
+
+
+# ---------- 邀请链接 / Invite links ----------
+class InviteClickRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=32)
+
+
+class InviteLinkCreate(BaseModel):
+    label: str = Field(min_length=1, max_length=64)
+
+
+class InviteLinkUpdate(BaseModel):
+    # 仅传要改的字段（exclude_unset 语义，同 AdminUserUpdate）。
+    # Only send fields to change (exclude_unset semantics, like AdminUserUpdate).
+    label: str | None = Field(default=None, min_length=1, max_length=64)
+    isActive: bool | None = None
+
+
+class InviteLinkOut(BaseModel):
+    id: str
+    code: str
+    label: str
+    clicks: int
+    # 经此链接注册的用户数：按 users.invite_code 分组统计，与备注文本解耦，
+    # 管理员手改备注不影响这个数字。
+    # Signups attributed to this link, grouped by users.invite_code — decoupled
+    # from the note text, so hand-edited notes never skew it.
+    registrations: int = 0
+    isActive: bool
+    createdAt: datetime | None = None

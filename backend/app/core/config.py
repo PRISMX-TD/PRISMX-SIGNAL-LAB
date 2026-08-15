@@ -152,6 +152,12 @@ class Settings(BaseSettings):
     RATE_LIMIT_LOGIN: str = "10/minute"
     RATE_LIMIT_REGISTER: str = "5/minute"
     RATE_LIMIT_GOOGLE: str = "10/minute"
+    # 邀请链接点击打点限流：公开无鉴权端点，只挡病态刷量。点击数本就是参考值
+    # （见 routers/invite.py 模型注释），真实指标是注册数。按客户端 IP 计。
+    # Invite-click counter limit: public unauthenticated endpoint; only stops
+    # pathological hammering. Clicks are indicative anyway — registrations are
+    # the real number. Keyed by client IP.
+    RATE_LIMIT_INVITE_CLICK: str = "30/minute"
     # 交易端点限流（下单/平仓/改单/撤单）。刻意设得很宽——每秒 2 笔，远超任何
     # 正常手动交易节奏，只拦住病态刷接口的行为，不影响真实用户。按客户端 IP 计。
     # Rate limit for trading endpoints (place/close/modify/cancel). Deliberately
