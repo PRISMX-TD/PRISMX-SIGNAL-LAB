@@ -975,10 +975,31 @@
     "tab": {
       "data": "Dashboard",
       "users": "Users",
+      "invites": "Invite Links",
       "ops": "Operations",
       "system": "System",
       "guide": "Strategy Guide",
       "tickets": "Tickets"
+    },
+    "invite": {
+      "hint": "Create labeled promo links (?ref=code). Users who register through a link get its label written into the Note column of the user list automatically. Clicks are indicative only — not abuse-proof, and cross-device clicks are invisible; registrations reflect real accounts. Links cannot be deleted; deactivate them when a campaign ends.",
+      "labelPlaceholder": "Label, e.g. KOL-Jamie",
+      "create": "Create link",
+      "colLabel": "Label",
+      "colLink": "Link",
+      "colClicks": "Clicks",
+      "colRegistrations": "Signups",
+      "colStatus": "Status",
+      "colCreated": "Created",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyFailed": "Copy failed — select and copy manually",
+      "save": "Save",
+      "active": "Active",
+      "inactive": "Disabled",
+      "enable": "Enable",
+      "disable": "Disable",
+      "empty": "No invite links yet — create one above"
     },
     "strategyGuide": {
       "hint": "Maintain the platform strategy write-ups here. Users read them under the Platform Strategies tab on the signals page. Fill in both languages; if only one is filled, the other locale falls back to it.",
