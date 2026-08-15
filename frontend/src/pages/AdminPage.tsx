@@ -9,6 +9,7 @@ import Select from '../components/Select'
 import { SkeletonLine } from '../components/Skeleton'
 import PageStatsCard from '../components/admin/PageStatsCard'
 import PlatformStrategiesPanel from '../components/admin/PlatformStrategiesPanel'
+import InviteLinksPanel from '../components/admin/InviteLinksPanel'
 import type { AdminBrokerSettings, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
@@ -32,8 +33,8 @@ const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
 // blast radius they belong on the ops side, not system ("how the backend
 // computes"). But they are content editing rather than config, and the form
 // shape differs too much to fold into ops.
-type AdminTab = 'data' | 'users' | 'ops' | 'system' | 'guide' | 'tickets'
-const ADMIN_TABS: AdminTab[] = ['data', 'users', 'ops', 'system', 'guide', 'tickets']
+type AdminTab = 'data' | 'users' | 'invites' | 'ops' | 'system' | 'guide' | 'tickets'
+const ADMIN_TABS: AdminTab[] = ['data', 'users', 'invites', 'ops', 'system', 'guide', 'tickets']
 
 interface Draft {
   role: UserRole
@@ -1049,6 +1050,8 @@ export default function AdminPage() {
       )}
 
       {tab === 'guide' && <PlatformStrategiesPanel />}
+
+      {tab === 'invites' && <InviteLinksPanel />}
 
       {tab === 'tickets' && <AdminTicketsPanel />}
 
