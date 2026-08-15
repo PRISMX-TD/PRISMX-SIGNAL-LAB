@@ -8,7 +8,7 @@
 // registration (renames don't backfill); counts group by the hidden
 // attribution code. Links are built from ORIGIN, not window.location.origin —
 // copied URLs must stay canonical even when the admin works on a preview host.
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
 import { fmtTime, localizeApiError } from '../../api/utils'
@@ -23,6 +23,7 @@ export default function InviteLinksPanel() {
   const [links, setLinks] = useState<InviteLink[]>([])
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const toastTimer = useRef<number>(undefined)
   const [newLabel, setNewLabel] = useState('')
   // 'create' 或正在保存的链接 id；同一时刻只放行一个写操作，避免连点。
   // 'create' or the id being saved; one in-flight write at a time.
@@ -30,11 +31,21 @@ export default function InviteLinksPanel() {
   const [labelDrafts, setLabelDrafts] = useState<Record<string, string>>({})
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
+  // 先清掉上一个定时器再设新 toast，4 秒后自动消失——照 PlatformStrategiesPanel
+  // 的写法。没有这一步，一条过期的失败提示会赖着不走：管理员重试并成功后，
+  // 屏幕上还挂着"失败"的红条，误导人以为操作仍未成功。
+  // Clear any pending timer before setting a new toast, auto-dismiss after 4s —
+  // following PlatformStrategiesPanel's pattern. Without this, a stale failure
+  // banner lingers: after a retry succeeds, the red "failed" toast is still on
+  // screen, wrongly implying the operation is still broken.
+  const showToast = (kind: 'ok' | 'err', text: string) => {
+    if (toastTimer.current) window.clearTimeout(toastTimer.current)
+    setToast({ kind, text })
+    toastTimer.current = window.setTimeout(() => setToast(null), 4000)
+  }
+
   const showErr = (err: unknown, fallbackKey: string) =>
-    setToast({
-      kind: 'err',
-      text: err instanceof Error ? localizeApiError(err.message) : t(fallbackKey),
-    })
+    showToast('err', err instanceof Error ? localizeApiError(err.message) : t(fallbackKey))
 
   useEffect(() => {
     adminApi
@@ -53,6 +64,7 @@ export default function InviteLinksPanel() {
       const link = await adminApi.createInviteLink(label)
       setLinks((prev) => [link, ...prev])
       setNewLabel('')
+      showToast('ok', t('admin.saved'))
     } catch (err) {
       showErr(err, 'admin.saveError')
     } finally {
@@ -72,6 +84,7 @@ export default function InviteLinksPanel() {
         delete next[l.id]
         return next
       })
+      showToast('ok', t('admin.saved'))
     } catch (err) {
       showErr(err, 'admin.saveError')
     } finally {
@@ -85,6 +98,7 @@ export default function InviteLinksPanel() {
     try {
       const updated = await adminApi.updateInviteLink(l.id, { isActive: !l.isActive })
       setLinks((prev) => prev.map((x) => (x.id === l.id ? updated : x)))
+      showToast('ok', t('admin.saved'))
     } catch (err) {
       showErr(err, 'admin.saveError')
     } finally {
@@ -102,7 +116,7 @@ export default function InviteLinksPanel() {
       setCopiedId(l.id)
       setTimeout(() => setCopiedId(null), 2000)
     } catch {
-      setToast({ kind: 'err', text: t('admin.invite.copyFailed') })
+      showToast('err', t('admin.invite.copyFailed'))
     }
   }
 
@@ -144,8 +158,14 @@ export default function InviteLinksPanel() {
       <div className="glass overflow-x-auto p-0">
         {loading ? (
           <div className="space-y-2 p-4">
-            <SkeletonLine className="h-4 w-full" />
-            <SkeletonLine className="h-4 w-2/3" />
+            {/* SkeletonLine 用 width/height props 定尺寸，不是 className——组件把
+                宽高当内联样式写，className 里的 h-4/w-2/3 会被内联样式盖掉，
+                照用户表（AdminPage.tsx）的调用方式改。
+                SkeletonLine sizes via width/height props, not className — the
+                component applies width/height as inline styles, which silently
+                win over Tailwind classes. Follows the users-table call convention. */}
+            <SkeletonLine height={16} />
+            <SkeletonLine width="66%" height={16} />
           </div>
         ) : links.length === 0 ? (
           <div className="p-8 text-center text-sm text-neutral-500">
