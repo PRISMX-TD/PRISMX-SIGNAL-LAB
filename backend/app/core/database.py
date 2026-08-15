@@ -287,13 +287,31 @@ def _migrate_columns() -> None:
             "CREATE INDEX IF NOT EXISTS idx_mt5_accounts_heartbeat "
             "ON mt5_accounts(last_heartbeat)"
         ))
-        # 注意：这一块跑在下面「users 表补列」之前，所以**只能**放那些所依赖的
-        # 列在旧库里一定已经存在的索引。要给本函数新补的列建索引，请放到补列
-        # 语句之后（例：users.invite_code 的索引在下面 users 块尾部）。
-        # NOTE: this block runs *before* the users column-add block below, so it
-        # may only contain indexes whose columns already exist on old databases.
-        # An index on a column this function itself adds must go after that ADD
-        # COLUMN (see users.invite_code at the end of the users block below).
+        # 规则：这一块跑在下面所有「补列」之前，所以**只能**放那些所依赖的列在
+        # 旧库里一定已经存在的索引。要给本函数新补的列建索引，请放到对应的补列
+        # 语句之后（例：users.invite_code 的索引在下面 users 块尾部）。违反这条
+        # 规则的后果是启动即崩（no such column），而这段跑在 uvicorn bind 端口
+        # 之前，线上等价于服务器起不来——commit e4bc076 修的就是这个。
+        #
+        # 已知例外，别照抄：上面 idx_strategy_signals_strategy_result 依赖的
+        # strategy_signals.result 正是本函数在下面补的列，它违反了这条规则。这是
+        # 早于本规则存在的遗留项，另行跟踪修复，不作为先例——新加的索引一律按
+        # 规则来，不要"参考隔壁那条"。
+        #
+        # RULE: this block runs *before* every column-add below, so it may only
+        # contain indexes whose columns are guaranteed to exist on old
+        # databases. An index on a column this function itself adds must go
+        # after that ADD COLUMN (see users.invite_code at the end of the users
+        # block below). Breaking the rule crashes at startup with "no such
+        # column", and this runs before uvicorn binds its port — in production
+        # that is a server that never comes up. Commit e4bc076 fixed exactly
+        # that.
+        #
+        # KNOWN EXCEPTION — DO NOT COPY: idx_strategy_signals_strategy_result
+        # above depends on strategy_signals.result, which this same function
+        # adds further down; it violates the rule. It predates the rule, is
+        # tracked separately, and is not a precedent — new indexes follow the
+        # rule rather than the neighbour.
 
     # users 表：password_hash 改可空（Google 登录用户无密码）。
     # 旧表建表时为 NOT NULL，需放开约束，否则插入无密码用户会被拒。

@@ -137,6 +137,17 @@ export default function InviteLinksPanel() {
       <p className="mb-4 text-sm text-neutral-400">{t('admin.invite.hint')}</p>
 
       {/* 创建行 / create row */}
+      {/* 下面所有写操作按钮一律按 busyId !== null 禁用，而不是只禁用"自己那一行"
+          （busyId === l.id）：create / saveLabel / toggle 三个处理函数都是只要
+          busyId 有值就直接 return。只禁自己那行的话，A 行保存期间点 B 行的保存或
+          停用、或点创建，按钮看着能按、点下去却什么都不发生，也没有任何提示，
+          管理员只会以为后台坏了。禁用状态必须如实反映处理函数的行为。
+          Every write button is disabled on busyId !== null, not just on its own
+          row (busyId === l.id): create / saveLabel / toggle all bail out when
+          busyId is truthy. Disabling per-row only means that while row A saves,
+          Save or Disable on row B — or Create — looks clickable but does
+          nothing at all, with no feedback, which reads as a broken admin panel.
+          The disabled state must reflect what the handlers actually do. */}
       <form onSubmit={create} className="glass mb-4 flex flex-wrap items-center gap-3 p-4">
         <input
           className="input flex-1 sm:max-w-xs"
@@ -148,7 +159,7 @@ export default function InviteLinksPanel() {
         <button
           type="submit"
           className="btn-primary px-3 py-1.5 text-xs disabled:opacity-40"
-          disabled={!newLabel.trim() || busyId === 'create'}
+          disabled={!newLabel.trim() || busyId !== null}
         >
           {t('admin.invite.create')}
         </button>
@@ -228,7 +239,7 @@ export default function InviteLinksPanel() {
                         {dirty && (
                           <button
                             className="btn-primary px-3 py-1.5 text-xs disabled:opacity-40"
-                            disabled={busyId === l.id}
+                            disabled={busyId !== null}
                             onClick={() => void saveLabel(l)}
                           >
                             {t('admin.invite.save')}
@@ -236,7 +247,7 @@ export default function InviteLinksPanel() {
                         )}
                         <button
                           className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-40"
-                          disabled={busyId === l.id}
+                          disabled={busyId !== null}
                           onClick={() => void toggle(l)}
                         >
                           {l.isActive ? t('admin.invite.disable') : t('admin.invite.enable')}
