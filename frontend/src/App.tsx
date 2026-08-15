@@ -6,6 +6,7 @@ import Layout from './components/Layout'
 import PwaBackGuard from './components/PwaBackGuard'
 import ErrorBoundary from './components/ErrorBoundary'
 import MetaPixel from './components/MetaPixel'
+import RefCapture from './components/RefCapture'
 import PublicShell from './seo/PublicShell'
 
 // 路由级代码分割：首屏只加载当前页面的代码，其余按需加载（如图表页）。
@@ -101,6 +102,11 @@ export default function App() {
               BrowserRouter (needs useLocation), outside Routes (must cover every
               route, including the ones outside Layout). */}
           <MetaPixel />
+          {/* 邀请链接归因：捕获任意入口 URL 的 ?ref= 并打点。挂载位置与 MetaPixel
+              同理——必须覆盖全部路由。见 components/RefCapture.tsx 的说明。
+              Invite-link attribution: captures ?ref= on any entry URL. Same
+              placement rationale as MetaPixel — must cover every route. */}
+          <RefCapture />
           <PwaBackGuard>
           <RouteErrorBoundary>
           <Suspense fallback={<PageFallback />}>

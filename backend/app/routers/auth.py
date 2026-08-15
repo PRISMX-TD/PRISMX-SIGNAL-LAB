@@ -16,6 +16,7 @@ from app.core.security import (
     verify_password,
 )
 from app.models import User
+from app.routers.invite import apply_invite
 from app.schemas import AuthRequest, AuthResponse, GoogleAuthRequest, RegisterRequest, UserOut
 from app.services.phone import compose_phone
 
@@ -70,6 +71,9 @@ def register(request: Request, req: RegisterRequest, db: Session = Depends(get_d
         # only; the user generates a visible token on the Bind page
         api_token=hash_api_token(generate_api_token()),
     )
+    # 邀请链接归因：只对新建用户生效，乱填/停用的 ref 静默忽略。
+    # Invite attribution: new users only; bad/disabled refs are ignored.
+    apply_invite(db, user, req.ref)
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -109,6 +113,12 @@ def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends
             api_token=hash_api_token(generate_api_token()),
             google_linked_at=datetime.now(timezone.utc),
         )
+        # 邀请链接归因：仅创建分支。对已存在用户应用会覆盖管理员手写备注、
+        # 伪造注册来源——老用户带着 localStorage 里的 ref 来登录是常态。
+        # Invite attribution on the create branch ONLY. Applying it to an
+        # existing user would clobber the admin's note and fabricate
+        # attribution — returning users often still carry a stored ref.
+        apply_invite(db, user, req.ref)
         db.add(user)
         db.commit()
         db.refresh(user)

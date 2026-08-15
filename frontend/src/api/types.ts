@@ -88,6 +88,18 @@ export interface AdminUser {
   mt5AccountCount: number
 }
 
+// 邀请链接（管理后台）。registrations 按隐藏归因码统计，与备注文本解耦。
+// Admin invite link; registrations count by the hidden attribution code.
+export interface InviteLink {
+  id: string
+  code: string
+  label: string
+  clicks: number
+  registrations: number
+  isActive: boolean
+  createdAt: string | null
+}
+
 // 管理后台：基础运营指标 / admin: basic operating metrics
 export interface AdminMetrics {
   totalUsers: number

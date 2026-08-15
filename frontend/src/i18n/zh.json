@@ -975,10 +975,31 @@
     "tab": {
       "data": "数据看板",
       "users": "用户管理",
+      "invites": "邀请链接",
       "ops": "运营设置",
       "system": "系统参数",
       "guide": "策略介绍",
       "tickets": "工单管理"
+    },
+    "invite": {
+      "hint": "生成带标记名的推广链接（?ref=码）。通过链接注册的用户，用户列表的「备注」栏会自动写入该链接的标记名。点击数为参考值——无法防刷、跨设备点击不计；注册数以实际创建的账号为准。链接不可删除，合作结束请停用。",
+      "labelPlaceholder": "标记名，如：KOL-小王",
+      "create": "生成链接",
+      "colLabel": "标记名",
+      "colLink": "链接",
+      "colClicks": "点击",
+      "colRegistrations": "注册",
+      "colStatus": "状态",
+      "colCreated": "创建时间",
+      "copy": "复制",
+      "copied": "已复制",
+      "copyFailed": "复制失败，请手动选中复制",
+      "save": "保存",
+      "active": "启用中",
+      "inactive": "已停用",
+      "enable": "启用",
+      "disable": "停用",
+      "empty": "还没有邀请链接，先在上方生成一条"
     },
     "strategyGuide": {
       "hint": "这里维护策略介绍内容，用户在信号面板页的「策略介绍」标签下只读查看。中英文都填写；只填一种时，另一种语言的界面会回落显示已填的那一份。",

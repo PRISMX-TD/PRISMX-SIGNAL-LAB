@@ -16,7 +16,7 @@ from app.core.rate_limit import limiter
 from app.core.strategy_limits import user_limiter
 from app.services.deps import require_admin
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
-from app.routers import account, admin, auth, automation, bridge, chart, ea, gateway, notifications, orders, payments, sentiment, signals, strategies, telemetry, tickets, trends, webhook, ws
+from app.routers import account, admin, auth, automation, bridge, chart, ea, gateway, invite, notifications, orders, payments, sentiment, signals, strategies, telemetry, tickets, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
@@ -201,6 +201,8 @@ app.include_router(strategies.router, prefix=settings.API_PREFIX)
 app.include_router(telemetry.router, prefix=settings.API_PREFIX)
 app.include_router(tickets.router, prefix=settings.API_PREFIX)
 app.include_router(tickets.admin_router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
+app.include_router(invite.router, prefix=settings.API_PREFIX)
+app.include_router(invite.admin_router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
 # WebSocket 路由 / WebSocket routers
 app.include_router(ws.router)
 
