@@ -45,6 +45,12 @@ class RegisterRequest(AuthRequest):
     phoneCountry: str = Field(min_length=1, max_length=6, description="国际区号，如 60 或 +60")
     phone: str = Field(min_length=3, max_length=24, description="国内号码部分")
 
+    # 邀请链接归因码（落地页 ?ref= 捕获）。可选；乱填或已停用一律静默忽略，
+    # 绝不影响注册本身（见 routers/invite.py 的 apply_invite）。
+    # Optional invite-link code captured from ?ref=; unknown or disabled codes
+    # are silently ignored and never block registration (see apply_invite).
+    ref: str | None = Field(default=None, max_length=32)
+
 
 class PhoneRequest(BaseModel):
     """补录手机号（Google 注册的用户首次登录后走这条）。字段含义同 RegisterRequest。"""
@@ -56,6 +62,12 @@ class PhoneRequest(BaseModel):
 class GoogleAuthRequest(BaseModel):
     # 前端 Google Identity Services 返回的 ID Token / ID token from Google Identity Services
     credential: str = Field(min_length=1, max_length=4096)
+
+    # 同 RegisterRequest.ref；该端点是查找或创建二合一，此字段仅在本次调用
+    # 实际创建了新用户时才被应用（见 auth.google_login 的创建分支）。
+    # Same as RegisterRequest.ref; this endpoint is find-or-create, and the
+    # field is applied only when this call actually creates the user.
+    ref: str | None = Field(default=None, max_length=32)
 
 
 class UserOut(BaseModel):
