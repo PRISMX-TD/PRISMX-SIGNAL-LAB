@@ -18,6 +18,37 @@ export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
 }
 
+// ---- 邀请链接归因 / invite-link attribution ----
+// RefCapture 在任意入口页捕获 ?ref= 后写入；注册请求读取携带，成功后清除。
+// 30 天有效、后点覆盖先点。老用户带着残留 ref 登录不会被污染——后端只在
+// 新建用户时应用（见 backend routers/invite.py 的 apply_invite）。
+// Written by RefCapture on any entry URL; read and attached by the register
+// calls, cleared on success. 30-day TTL, last click wins. Returning users
+// carrying a stale ref are safe: the backend applies it to new users only.
+const REF_KEY = 'prismx.ref'
+const REF_TTL_MS = 30 * 24 * 60 * 60 * 1000
+
+export function storeRef(code: string) {
+  localStorage.setItem(REF_KEY, JSON.stringify({ code, ts: Date.now() }))
+}
+
+export function readRef(): string | null {
+  try {
+    const raw = localStorage.getItem(REF_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { code?: unknown; ts?: unknown }
+    if (typeof parsed.code !== 'string' || typeof parsed.ts !== 'number') return null
+    if (Date.now() - parsed.ts > REF_TTL_MS) return null
+    return parsed.code
+  } catch {
+    return null
+  }
+}
+
+export function clearRef() {
+  localStorage.removeItem(REF_KEY)
+}
+
 // 未授权（401）回调：登录态过期时由 AuthProvider 注册，用于清状态并跳登录页。
 // Unauthorized (401) callback: registered by AuthProvider to clear state and redirect.
 let onUnauthorized: (() => void) | null = null
@@ -109,7 +140,10 @@ export const authApi = {
   register: (email: string, password: string, phoneCountry: string, phone: string) =>
     request<{ token: string; user: User }>('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password, phoneCountry, phone }),
+      body: JSON.stringify({ email, password, phoneCountry, phone, ref: readRef() ?? undefined }),
+    }).then((res) => {
+      clearRef()
+      return res
     }),
   // 补录手机号（Google 注册的用户首次登录后走这条）/ fill in a missing phone
   setPhone: (phoneCountry: string, phone: string) =>
@@ -125,7 +159,13 @@ export const authApi = {
   google: (credential: string) =>
     request<{ token: string; user: User }>('/auth/google', {
       method: 'POST',
-      body: JSON.stringify({ credential }),
+      body: JSON.stringify({ credential, ref: readRef() ?? undefined }),
+    }).then((res) => {
+      // 登录也清：ref 已被消费或不再相关（是否真的归因由后端创建分支决定）。
+      // Cleared on login too: consumed or no longer relevant; whether it was
+      // actually applied is decided by the backend's create branch.
+      clearRef()
+      return res
     }),
 }
 
