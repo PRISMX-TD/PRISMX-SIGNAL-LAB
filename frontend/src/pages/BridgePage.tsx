@@ -142,8 +142,13 @@ export default function BridgePage() {
                 {t('bind.accountQuotaReached')}
               </p>
             )}
+            {/* whitespace-nowrap：窄屏下保持列宽由内容决定、外层横向滚动，
+                表头不被挤成竖排（与 /bind 的直连账号表同一处理）。
+                whitespace-nowrap: on narrow screens columns keep their content
+                width and the wrapper scrolls, headers never squeeze into
+                vertical stacks (same treatment as the /bind table). */}
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full whitespace-nowrap text-sm">
                 <thead>
                   <tr className="text-left text-xs uppercase tracking-wider text-neutral-500">
                     <th className="px-3 py-2">Login</th>

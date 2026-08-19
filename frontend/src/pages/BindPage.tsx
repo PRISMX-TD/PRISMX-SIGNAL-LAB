@@ -88,7 +88,15 @@ export default function BindPage() {
         <p className="mt-1 text-sm text-neutral-400">{t('bind.gw.pageSubtitle', { name: brokerName })}</p>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      {/* grid-cols-1 不能省：Tailwind 的 grid-cols-* 展开成 minmax(0,1fr)，列才
+          允许收缩到视口宽度以内，账号表在窄屏才会落进自己的横向滚动容器；没有
+          它，隐式列按内容宽度撑开，整页跟着表格一起横向溢出。
+          grid-cols-1 is load-bearing: Tailwind's grid-cols-* expands to
+          minmax(0,1fr), which lets the column shrink to the viewport so the
+          accounts table scrolls inside its own wrapper on phones. Without it
+          the implicit column sizes to the content and the whole page overflows
+          sideways with the table. */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {/* 开户福利：只在还没有直连账号时出现。已经连上的人不需要再被劝一次开户，
             那时这张卡只是占地方。
             Bonus offer, shown only while no direct-connect account exists. Someone
@@ -154,8 +162,14 @@ export default function BindPage() {
           {gatewayAccounts.length > 0 && (
             <div className="mt-5 pt-5 border-t border-white/10">
               <p className="mb-3 text-sm font-medium text-neutral-300">{t('bind.gw.boundTitle')}</p>
+              {/* whitespace-nowrap 会继承到所有表头/单元格：窄屏下表格保持
+                  内容宽度、由外层容器横向滚动，而不是把「账户名」这类表头
+                  挤成竖排。/ whitespace-nowrap inherits into every th/td: on
+                  narrow screens the table keeps its content width and the
+                  wrapper scrolls horizontally, instead of squeezing headers
+                  like 账户名 into vertical stacks. */}
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full whitespace-nowrap text-sm">
                   <thead>
                     <tr className="text-left text-xs uppercase tracking-wider text-neutral-500">
                       <th className="px-3 py-2">Login</th>

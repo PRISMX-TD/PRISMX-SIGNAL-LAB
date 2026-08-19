@@ -12,6 +12,7 @@ import DisciplineScoreCard from '../components/DisciplineScoreCard'
 import ClosedTradesList from '../components/ClosedTradesList'
 import AutoManageCard from '../components/AutoManageCard'
 import OnboardingCard from '../components/OnboardingCard'
+import { usePartnerBroker } from '../components/PartnerBrokerCard'
 import { symbolMeta } from '../utils/symbolMeta'
 
 const statusStyle: Record<OrderStatus, string> = {
@@ -40,6 +41,10 @@ export default function OrdersPage() {
   const { t } = useTranslation()
   const { user, refreshUser } = useAuth()
   const { orders, accounts, refreshAll, closedTradeTick } = useLive()
+  // gateway 账号不落库券商名，账户横条的券商列回落到合作券商名（与绑定页一致）
+  // Gateway rows don't store a company; the account bar's broker falls back to
+  // the partner broker name, matching the bind page.
+  const { name: brokerName } = usePartnerBroker()
   const positions = usePositions()
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' | 'info' } | null>(null)
   const toastTimer = useRef<number | undefined>(undefined)
@@ -318,14 +323,29 @@ export default function OrdersPage() {
           {/* 账户状态紧凑横条：详细的账号管理在 /account 页，这里只回答"这个账号
               现在什么状态"。/ Compact account bar: detailed account management
               lives on /account; this only answers "how is this account doing". */}
+          {/* 两种连接方式展示同一组信息：登录号、状态、账户名、券商、余额、净值、
+              杠杆。此前 bridge 账号多带一个 "@server" 而 gateway 没有——券商列
+              已经承担了"这是哪家"的信息，server 后缀去掉，两边完全一致。
+              Both connection types show one identical info set: login, status,
+              account name, broker, balance, equity, leverage. Bridge rows used
+              to carry an extra "@server" that gateway never had — the broker
+              field already answers "which broker", so the suffix is gone and
+              the two render identically. */}
           {activeAccount && (
             <div className="glass mb-5 flex flex-wrap items-center gap-x-6 gap-y-2 px-5 py-3 text-xs">
-              <span className="font-mono text-sm text-neutral-100">
-                {activeAccount.login}
-                {activeAccount.server ? ` @${activeAccount.server}` : ''}
-              </span>
+              <span className="font-mono text-sm text-neutral-100">{activeAccount.login}</span>
               <span className={`tag text-xs ${activeAccount.online ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-500'}`}>
                 {activeAccount.online ? t('common.online') : t('common.offline')}
+              </span>
+              <span className="text-neutral-500">
+                {t('bind.accountName')}{' '}
+                <b className="text-sm font-medium text-neutral-100">{activeAccount.accountName || '—'}</b>
+              </span>
+              <span className="text-neutral-500">
+                {t('bind.company')}{' '}
+                <b className="text-sm font-medium text-neutral-100">
+                  {activeAccount.company || (activeAccount.source === 'gateway' ? brokerName : '—')}
+                </b>
               </span>
               <span className="text-neutral-500">
                 {t('account.balance')}{' '}
