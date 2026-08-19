@@ -9,6 +9,9 @@ the event loop.
 """
 import json
 import logging
+import re
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from starlette.concurrency import run_in_threadpool
 from pywebpush import WebPushException, webpush
@@ -55,6 +58,65 @@ def _list_matches(selected: list, value: str) -> bool:
     return ALL_SENTINEL in selected or value in selected
 
 
+def _parse_event_types(raw: str | None) -> set[str]:
+    """解析偏好行的事件白名单。NULL = 用户从未配置过 → 默认全部事件开启
+    （产品语义，见 models.NotificationPref）；"[]" = 明确全关；解析失败按
+    全关处理（脏数据不该反而放大推送面）。
+    Parse a pref row's event whitelist. NULL = never configured → all events
+    on by default (product semantics, see models.NotificationPref); "[]" =
+    explicitly all off; unparseable data counts as all off (bad data must not
+    widen the push surface)."""
+    if raw is None:
+        return set(EVENT_TYPES)
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return set()
+    if not isinstance(parsed, list):
+        return set()
+    return {e for e in parsed if e in EVENT_TYPES}
+
+
+_HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def _within_push_window(pref: NotificationPref, now: datetime | None = None) -> bool:
+    """当前时刻是否落在该用户设置的推送时段内。
+    起止都为空 = 不限制；只设了一头或格式不合法 = 视为不限制（宁可多推也不能
+    因脏数据静默吞掉所有通知）；start == end 同样视为不限制——时间选择器里把
+    两头拖成一样多半是误操作，按"全天禁推"理解会让用户困惑为什么一条都收不到。
+    start > end 表示跨零点的隔夜时段（如 22:00–07:00）。时区用用户设备上报的
+    IANA 名称换算本地时间，缺失或无效回退 UTC。
+
+    Whether "now" falls inside the user's push window. Both bounds empty = no
+    restriction; only one bound set, or malformed values = treated as
+    unrestricted (over-pushing beats silently swallowing everything on bad
+    data); start == end is also unrestricted — dragging both pickers to the
+    same value is almost always a slip, and reading it as "never push" would
+    leave the user wondering why nothing arrives. start > end wraps overnight
+    (e.g. 22:00–07:00). Local time comes from the device-reported IANA
+    timezone, falling back to UTC when missing/invalid."""
+    start_s, end_s = pref.push_window_start, pref.push_window_end
+    if not start_s or not end_s:
+        return True
+    if not _HHMM_RE.match(start_s) or not _HHMM_RE.match(end_s):
+        return True
+    if start_s == end_s:
+        return True
+    try:
+        tz = ZoneInfo(pref.push_window_tz) if pref.push_window_tz else timezone.utc
+    except Exception:
+        tz = timezone.utc
+    local = (now or datetime.now(timezone.utc)).astimezone(tz)
+    minutes = local.hour * 60 + local.minute
+    start = int(start_s[:2]) * 60 + int(start_s[3:])
+    end = int(end_s[:2]) * 60 + int(end_s[3:])
+    if start < end:
+        return start <= minutes < end
+    # 跨零点 / overnight wrap
+    return minutes >= start or minutes < end
+
+
 async def dispatch_push_async(signal: Signal) -> None:
     """在线程池中执行推送派发，避免阻塞事件循环。
     Run push dispatching in a thread pool to keep the event loop responsive."""
@@ -93,6 +155,11 @@ def _matched_user_ids(db, cat: str, symbol: str) -> set[str]:
     user_ids: set[str] = set()
     prefs = db.query(NotificationPref).filter(NotificationPref.enabled == True).all()  # noqa: E712
     for p in prefs:
+        # 推送时段外直接跳过（信号不补发：过了时段它多半已经过期）。
+        # Outside the user's push window, skip — signals aren't re-sent later
+        # (by then they've usually expired anyway).
+        if not _within_push_window(p):
+            continue
         try:
             cats = json.loads(p.selected_categories or "[]")
             syms = json.loads(p.selected_symbols or "[]")
@@ -227,17 +294,19 @@ def dispatch_push(signal: Signal) -> None:
 
 
 def _event_prefs_allow(db, user_id: str, event_type: str) -> bool:
-    """该用户是否开启了通知总开关、这个事件类型在其白名单里、且订阅等级允许推送。
-    Whether the user has notifications on, this event type whitelisted, and
-    their plan allows push at all."""
+    """该用户是否开启了通知总开关、这个事件类型在其白名单里、当前时刻落在其
+    推送时段内、且订阅等级允许推送。事件白名单为 NULL 表示从未配置，按全部
+    事件默认开启处理（见 _parse_event_types）。
+    Whether the user has notifications on, this event type whitelisted, "now"
+    inside their push window, and their plan allows push at all. A NULL event
+    whitelist means never-configured and counts as all events on by default
+    (see _parse_event_types)."""
     pref = db.query(NotificationPref).filter(NotificationPref.user_id == user_id).first()
     if not pref or not pref.enabled:
         return False
-    try:
-        event_types = json.loads(pref.event_types or "[]")
-    except (json.JSONDecodeError, TypeError):
+    if event_type not in _parse_event_types(pref.event_types):
         return False
-    if not isinstance(event_types, list) or event_type not in event_types:
+    if not _within_push_window(pref):
         return False
     plan = db.query(User.plan).filter(User.id == user_id).scalar()
     return can_use_push(plan)
@@ -312,6 +381,16 @@ def dispatch_ticket_reply(ticket_id: str, recipient_id: str, replier_email: str)
     try:
         user = db.query(User).filter(User.id == recipient_id).first()
         if not user:
+            return
+        # 工单回复不看通知开关/白名单（历史行为），但推送时段照样遵守——时段
+        # 的意义就是"这段时间外别吵我"，工单回复也不例外。没有偏好行 = 没设过
+        # 时段，照常推。
+        # Ticket replies ignore the master switch/whitelists (historical
+        # behavior) but do honor the push window — its whole point is "don't
+        # buzz me outside these hours", tickets included. No pref row = no
+        # window configured, push as before.
+        pref = db.query(NotificationPref).filter(NotificationPref.user_id == recipient_id).first()
+        if pref is not None and not _within_push_window(pref):
             return
         subs = db.query(PushSubscription).filter(PushSubscription.user_id == recipient_id).all()
         if not subs:

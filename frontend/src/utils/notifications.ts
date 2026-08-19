@@ -14,7 +14,17 @@ import { subscribePush, unsubscribePush, getSWReg, pushSupported } from "./push"
 // don't exist yet). Kept in sync with the backend's ALL_SENTINEL.
 export const ALL_SENTINEL = "__ALL__"
 
-export const EVENT_TYPES = ["order_filled", "order_rejected", "auto_manage", "bridge_offline", "strategy_signal"] as const
+// 账户/交易层面的四个事件，渲染在「交易与账户提醒」分组；strategy_signal
+// 虽同属事件白名单（单用户推送路径），但在 UI 上归到「按策略」分组——它对
+// 用户而言就是"我自己策略的信号"，跟平台策略类别站在一起更好找。
+// The four account/trading-layer events, rendered under the "trading & account
+// alerts" group; strategy_signal shares the event-whitelist data model (the
+// single-user push path) but lives in the "by strategy" group in the UI — to
+// the user it reads as "signals from my own strategies", which belongs next to
+// the platform strategy categories.
+export const ACCOUNT_EVENT_TYPES = ["order_filled", "order_rejected", "auto_manage", "bridge_offline"] as const
+export const EVENT_STRATEGY_SIGNAL = "strategy_signal"
+export const EVENT_TYPES = [...ACCOUNT_EVENT_TYPES, EVENT_STRATEGY_SIGNAL] as const
 
 export type NotifPrefs = {
   enabled: boolean

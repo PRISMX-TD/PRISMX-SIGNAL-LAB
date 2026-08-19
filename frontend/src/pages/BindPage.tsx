@@ -145,34 +145,62 @@ export default function BindPage() {
             </div>
           )}
 
-          {/* 已绑定的直连账号 */}
+          {/* 已绑定的直连账号：与桥接页的账户表展示同一组信息（账户名/券商/余额/
+              净值/状态）。gateway 不落库 company，券商列回落到合作券商名。
+              Bound direct-connect accounts: same info set as the bridge page's
+              account table (name / company / balance / equity / status). Gateway
+              rows don't store company, so that column falls back to the partner
+              broker name. */}
           {gatewayAccounts.length > 0 && (
             <div className="mt-5 pt-5 border-t border-white/10">
               <p className="mb-3 text-sm font-medium text-neutral-300">{t('bind.gw.boundTitle')}</p>
-              <div className="space-y-2">
-                {gatewayAccounts.map((a) => (
-                  <div key={a.login} className="flex items-center justify-between rounded-lg bg-white/5 px-4 py-3 transition hover:bg-white/[0.07]">
-                    <div className="flex items-center gap-3">
-                      <div className={`h-2 w-2 rounded-full ${a.online ? 'bg-up animate-breathe' : 'bg-neutral-500'}`} />
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-sm font-medium text-neutral-100">{a.login}</span>
-                          <span className="tag bg-prism-600/20 text-prism-300 text-[10px]">{t('bind.gw.tag')}</span>
-                        </div>
-                        <div className="mt-0.5 flex items-center gap-3 text-xs text-neutral-400">
-                          <span>{a.accountName || '—'}</span>
-                          {a.balance != null && <span>{t('bind.gw.balance', { amount: a.balance.toFixed(2) })}</span>}
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleGatewayRemove(a.login)}
-                      className="rounded-lg border border-down/30 bg-down/5 px-3 py-1.5 text-xs font-medium text-down transition hover:bg-down/15"
-                    >
-                      {t('bind.gw.unbind')}
-                    </button>
-                  </div>
-                ))}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-wider text-neutral-500">
+                      <th className="px-3 py-2">Login</th>
+                      <th className="px-3 py-2">{t('bind.accountName')}</th>
+                      <th className="px-3 py-2">{t('bind.company')}</th>
+                      <th className="px-3 py-2 text-right">{t('bind.balance')}</th>
+                      <th className="px-3 py-2 text-right">{t('bind.equity')}</th>
+                      <th className="px-3 py-2 text-center">{t('bind.status')}</th>
+                      <th className="px-3 py-2 text-center">{t('bind.actions')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gatewayAccounts.map((a) => (
+                      <tr key={a.login} className="border-t border-white/5">
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-neutral-100">{a.login}</span>
+                            <span className="tag bg-prism-600/20 text-prism-300 text-[10px]">{t('bind.gw.tag')}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-neutral-300">{a.accountName || '—'}</td>
+                        <td className="px-3 py-2 text-neutral-400">{a.company || brokerName}</td>
+                        <td className="px-3 py-2 text-right font-mono text-neutral-200">
+                          {a.balance != null ? a.balance.toFixed(2) : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-neutral-200">
+                          {a.equity != null ? a.equity.toFixed(2) : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <span className={`tag ${a.online ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-500'}`}>
+                            {a.online ? t('common.online') : t('common.offline')}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <button
+                            onClick={() => handleGatewayRemove(a.login)}
+                            className="rounded-lg border border-down/30 bg-down/5 px-3 py-1.5 text-xs font-medium text-down transition hover:bg-down/15"
+                          >
+                            {t('bind.gw.unbind')}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}

@@ -95,7 +95,8 @@ def _hash_legacy_api_tokens() -> None:
 # revision, and the damage surfaces much later as an unexpectedly NULL column.
 # rev 2: users.phone / users.phone_required（注册强制记录手机号）
 # rev 3: users.invite_code（邀请链接注册归因）+ idx_users_invite_code
-CURRENT_SCHEMA_REV = 3
+# rev 4: notification_prefs.push_window_start/end/tz（推送时段限制）
+CURRENT_SCHEMA_REV = 4
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -256,6 +257,15 @@ def _migrate_columns() -> None:
                 conn.execute(text(
                     'UPDATE notification_prefs SET selected_symbols = \'["__ALL__"]\' WHERE selected_symbols IS NULL'
                 ))
+        # 推送时段限制（用户本地 "HH:MM" 起止 + IANA 时区）。NULL = 不限制，
+        # 无需回填——语义上老行本来就是全天可推。
+        # Push time-window (user-local "HH:MM" bounds + IANA timezone). NULL
+        # means unrestricted, so no backfill: old rows already meant
+        # "push all day".
+        with engine.begin() as conn:
+            for name in ("push_window_start", "push_window_end", "push_window_tz"):
+                if name not in notif_cols:
+                    conn.execute(text(f"ALTER TABLE notification_prefs ADD COLUMN {name} VARCHAR"))
 
     # 后台清扫/过期扫描用的索引：create_all 不会为已存在的表补索引，这里补。
     # Indexes for the background sweeps: create_all won't add indexes to

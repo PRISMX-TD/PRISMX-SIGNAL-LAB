@@ -536,39 +536,53 @@ export const userApi = {
 }
 
 // 通知 / Notifications
+export interface NotifPrefsPayload {
+  enabled: boolean
+  selected_categories: string[]
+  selected_symbols: string[]
+  event_types: string[]
+  // 推送时段（用户本地 "HH:MM"），两者都设置才生效；null = 不限制。
+  // Push window (user-local "HH:MM"); active only when both set, null = no limit.
+  push_window_start: string | null
+  push_window_end: string | null
+  push_window_tz: string | null
+}
+
 export const notificationApi = {
-  getPrefs: () =>
-    request<{
-      enabled: boolean
-      selected_categories: string[]
-      selected_symbols: string[]
-      event_types: string[]
-    }>('/notifications/prefs'),
-  // eventTypes：账户/交易事件白名单（订单成交/拒绝、自动仓管触发、Bridge 掉线），
-  // 与 selectedCategories/selectedSymbols（信号策略类别·品种白名单）是独立设置——
-  // 后两者按"与"关系联合过滤同一条信号推送。
+  getPrefs: () => request<NotifPrefsPayload>('/notifications/prefs'),
+  // eventTypes：账户/交易事件白名单（订单成交/拒绝、自动仓管触发、Bridge 掉线、
+  // 我的策略信号），与 selectedCategories/selectedSymbols（信号策略类别·品种
+  // 白名单）是独立设置——后两者按"与"关系联合过滤同一条信号推送。
+  // window：推送时段。不传 = 后端保留已存的时段（铃铛快捷开关等调用方不用管它）；
+  // 传 { start: null, end: null } = 显式清除限制。
   // eventTypes: account/trading event whitelist (order fill/reject, auto-manage
-  // trigger, bridge offline) — independent from selectedCategories/selectedSymbols
-  // (the signal strategy-category & symbol whitelists, ANDed together to gate the
-  // same signal push).
+  // trigger, bridge offline, my strategy signals) — independent from
+  // selectedCategories/selectedSymbols (the signal strategy-category & symbol
+  // whitelists, ANDed together to gate the same signal push).
+  // window: push time-range. Omitted = the backend keeps whatever is stored
+  // (quick-toggle callers never think about it); { start: null, end: null } =
+  // explicitly clear the restriction.
   putPrefs: (
     enabled: boolean,
     selectedCategories: string[],
     eventTypes: string[] = [],
     selectedSymbols: string[] = [],
+    window?: { start: string | null; end: string | null; tz: string | null },
   ) =>
-    request<{
-      enabled: boolean
-      selected_categories: string[]
-      selected_symbols: string[]
-      event_types: string[]
-    }>('/notifications/prefs', {
+    request<NotifPrefsPayload>('/notifications/prefs', {
       method: 'PUT',
       body: JSON.stringify({
         enabled,
         selected_categories: selectedCategories,
         selected_symbols: selectedSymbols,
         event_types: eventTypes,
+        ...(window !== undefined
+          ? {
+              push_window_start: window.start,
+              push_window_end: window.end,
+              push_window_tz: window.tz,
+            }
+          : {}),
       }),
     }),
   getIndicators: () => request<string[]>('/notifications/indicators'),

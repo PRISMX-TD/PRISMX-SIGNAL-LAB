@@ -1,6 +1,8 @@
 """通知路由：偏好、指标类别列表、推送订阅、VAPID 公钥。
 Notification router: prefs, indicator categories, push subscriptions, VAPID key."""
 import json
+import re
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -14,8 +16,12 @@ from app.models import NotificationPref, PushSubscription, Signal, User
 from app.services import quotes_store
 from app.services.deps import get_current_user
 from app.services.plans import can_use_push
-from app.services.push_dispatch import EVENT_TYPES, dispatch_test_push
 from app.utils.indicator import indicator_category
+from app.services.push_dispatch import (
+    EVENT_TYPES,
+    _parse_event_types,
+    dispatch_test_push,
+)
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -27,9 +33,16 @@ class NotificationPrefsOut(BaseModel):
     selected_categories: list[str]  # 信号指标类别白名单 / signal indicator-category whitelist
     # 品种白名单，与 selected_categories 按"与"关系联合过滤 / symbol whitelist, ANDed with selected_categories
     selected_symbols: list[str] = Field(default_factory=list)
-    # 事件类通知白名单：order_filled / order_rejected / auto_manage / bridge_offline
-    # Event-notification whitelist
+    # 事件类通知白名单：order_filled / order_rejected / auto_manage /
+    # bridge_offline / strategy_signal。库里为 NULL（从未配置）时返回全集——
+    # 这些提醒默认开启。/ Event-notification whitelist; a NULL column (never
+    # configured) returns the full set — these alerts default to on.
     event_types: list[str] = Field(default_factory=list)
+    # 推送时段（用户本地 "HH:MM"），两者都设置才生效；null = 不限制。
+    # Push window (user-local "HH:MM"); active only when both set, null = no limit.
+    push_window_start: str | None = None
+    push_window_end: str | None = None
+    push_window_tz: str | None = None
 
 
 class NotificationPrefsIn(BaseModel):
@@ -37,6 +50,36 @@ class NotificationPrefsIn(BaseModel):
     selected_categories: list[str] = Field(default_factory=list)
     selected_symbols: list[str] = Field(default_factory=list)
     event_types: list[str] = Field(default_factory=list)
+    # 时段三项是可选字段：请求里不带 = 不改动（老版本前端/快捷开关不会把已存
+    # 的时段清掉），显式传 null = 清除限制。
+    # The window fields are optional: absent from the request = leave stored
+    # values untouched (an older frontend or the quick toggle won't wipe a
+    # saved window), explicit null = clear the restriction.
+    push_window_start: str | None = None
+    push_window_end: str | None = None
+    push_window_tz: str | None = None
+
+
+_HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def _validate_push_window(body: "NotificationPrefsIn") -> None:
+    """校验时段字段：时间必须是 "HH:MM"，时区必须是合法 IANA 名称。只校验
+    请求里实际出现的字段。/ Validate window fields — times must be "HH:MM",
+    the timezone a valid IANA name. Only fields present in the request are
+    checked."""
+    for field in ("push_window_start", "push_window_end"):
+        if field in body.model_fields_set:
+            v = getattr(body, field)
+            if v is not None and not _HHMM_RE.match(v):
+                raise HTTPException(status_code=400, detail="推送时段格式应为 HH:MM / push window must be HH:MM")
+    if "push_window_tz" in body.model_fields_set and body.push_window_tz is not None:
+        if len(body.push_window_tz) > 64:
+            raise HTTPException(status_code=400, detail="时区名称无效 / invalid timezone")
+        try:
+            ZoneInfo(body.push_window_tz)
+        except Exception:
+            raise HTTPException(status_code=400, detail="时区名称无效 / invalid timezone")
 
 
 def _get_or_create_pref(db: Session, user_id: str) -> NotificationPref:
@@ -64,13 +107,18 @@ def get_prefs(
         syms = json.loads(pref.selected_symbols or "[]")
     except (json.JSONDecodeError, TypeError):
         syms = []
-    events = []
-    try:
-        events = json.loads(pref.event_types or "[]")
-    except (json.JSONDecodeError, TypeError):
-        events = []
+    # NULL（从未配置）→ 默认全部事件开启；派发侧 _parse_event_types 同一套语义。
+    # NULL (never configured) → all events on by default; the dispatch side
+    # shares this exact semantics via _parse_event_types.
+    events = sorted(_parse_event_types(pref.event_types))
     return NotificationPrefsOut(
-        enabled=pref.enabled, selected_categories=cats, selected_symbols=syms, event_types=events
+        enabled=pref.enabled,
+        selected_categories=cats,
+        selected_symbols=syms,
+        event_types=events,
+        push_window_start=pref.push_window_start,
+        push_window_end=pref.push_window_end,
+        push_window_tz=pref.push_window_tz,
     )
 
 
@@ -85,6 +133,7 @@ def put_prefs(
     # allowed so a downgraded user isn't stuck unable to switch it off.
     if body.enabled and not can_use_push(current_user.plan):
         raise HTTPException(status_code=403, detail="免费版不支持通知推送，请升级解锁 / Free tier doesn't include push notifications; upgrade to unlock")
+    _validate_push_window(body)
     # 过滤掉未知事件类型，防止前端传了旧值/脏数据 / drop unknown event types (stale/bad client data)
     events = [e for e in body.event_types if e in EVENT_TYPES]
     pref = _get_or_create_pref(db, current_user.id)
@@ -92,12 +141,23 @@ def put_prefs(
     pref.selected_categories = json.dumps(body.selected_categories, ensure_ascii=False)
     pref.selected_symbols = json.dumps(body.selected_symbols, ensure_ascii=False)
     pref.event_types = json.dumps(events, ensure_ascii=False)
+    # 时段字段：只在请求里出现时才写入（含显式 null = 清除），否则保留原值——
+    # PUT 对其余字段是整体覆盖，但时段还有铃铛快捷开关这类不带它的调用方。
+    # Window fields: written only when present in the request (explicit null =
+    # clear), otherwise kept — the PUT overwrites everything else wholesale,
+    # but callers like the bell quick-toggle don't carry the window.
+    for field in ("push_window_start", "push_window_end", "push_window_tz"):
+        if field in body.model_fields_set:
+            setattr(pref, field, getattr(body, field))
     db.commit()
     return NotificationPrefsOut(
         enabled=pref.enabled,
         selected_categories=body.selected_categories,
         selected_symbols=body.selected_symbols,
         event_types=events,
+        push_window_start=pref.push_window_start,
+        push_window_end=pref.push_window_end,
+        push_window_tz=pref.push_window_tz,
     )
 
 

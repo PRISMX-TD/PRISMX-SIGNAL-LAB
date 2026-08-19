@@ -308,13 +308,32 @@ class NotificationPref(Base):
     # later) or specific symbol codes.
     selected_symbols = Column(Text, default="[]")
     # 事件类通知白名单（JSON array）：order_filled / order_rejected /
-    # auto_manage / bridge_offline。与上面的指标类别是两套独立的白名单——
-    # 指标类别只管"新信号推送该不该发"，这个字段管"账户/交易事件该不该推"。
+    # auto_manage / bridge_offline / strategy_signal。与上面的指标类别是两套
+    # 独立的白名单——指标类别只管"新信号推送该不该发"，这个字段管"账户/交易
+    # 事件该不该推"。
+    # 语义约定：NULL = 用户从未配置过（读取方按"全部事件默认开启"处理），
+    # "[]" = 用户明确全部取消。因此新行默认 NULL 而不是 "[]"——产品要求这些
+    # 提醒对新用户默认开启，同时保留老用户明确关掉的选择。
     # Event-notification whitelist (JSON array): order_filled / order_rejected
-    # / auto_manage / bridge_offline. A separate whitelist from the indicator
-    # categories above — those gate "should a new-signal push fire", this
-    # gates "should an account/trading-event push fire".
-    event_types = Column(Text, default="[]")
+    # / auto_manage / bridge_offline / strategy_signal. A separate whitelist
+    # from the indicator categories above — those gate "should a new-signal
+    # push fire", this gates "should an account/trading-event push fire".
+    # Semantics: NULL = never configured (readers treat it as "all events on
+    # by default"), "[]" = explicitly opted out of everything. New rows
+    # therefore default to NULL rather than "[]" — the product wants these
+    # alerts on by default while preserving an explicit opt-out.
+    event_types = Column(Text, default=None)
+    # 推送时段限制（用户本地时间的 "HH:MM"）。两者都非空才生效；支持跨零点
+    # （start > end 视为隔夜时段，如 22:00–07:00）。时区存 IANA 名称（如
+    # "Asia/Shanghai"），由前端设备时区上报；缺失/无效时按 UTC 兜底。
+    # NULL = 不限制，全天可推。
+    # Push time-window (user-local "HH:MM"). Active only when both are set;
+    # start > end wraps overnight (e.g. 22:00–07:00). Timezone is an IANA name
+    # reported from the device; missing/invalid falls back to UTC. NULL = no
+    # restriction, push all day.
+    push_window_start = Column(String, nullable=True)
+    push_window_end = Column(String, nullable=True)
+    push_window_tz = Column(String, nullable=True)
 
 
 class PushSubscription(Base):

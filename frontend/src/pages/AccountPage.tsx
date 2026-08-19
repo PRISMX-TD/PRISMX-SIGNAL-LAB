@@ -1,4 +1,7 @@
-// 账户详情页 / Account page: profile, MT5 accounts, password, notifications
+// 账户详情页 / Account page: profile, password, notifications
+// MT5 账户资金概览不在这里展示——连接与账户信息统一放在 /bind 页维护。
+// MT5 account balances are deliberately not shown here — connection and
+// account info live on the /bind page.
 import { useEffect, useRef, useState } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { useTranslation } from "react-i18next"
@@ -10,7 +13,8 @@ import PushDiagnostics from "../components/PushDiagnostics"
 import { SkeletonPage } from "../components/Skeleton"
 import {
   ALL_SENTINEL,
-  EVENT_TYPES,
+  ACCOUNT_EVENT_TYPES,
+  EVENT_STRATEGY_SIGNAL,
   ENABLE_ERROR_KEYS,
   disableNotifications,
   enableNotifications,
@@ -49,13 +53,22 @@ export default function AccountPage() {
   // account-level events were all silent. Independent from notifCats/notifSymbols
   // (the signal strategy/symbol whitelists), saved and rendered independently.
   const [notifEvents, setNotifEvents] = useState<string[]>([])
+  // 推送时段：开关独立于起止时间保存，取消勾选后重新勾选能回到上次填的时段。
+  // 起止默认 08:00–22:00，是"白天推、夜里别吵"的直觉预设。
+  // Push window: the on/off flag is tracked apart from the two times so
+  // unticking and re-ticking restores the last-entered range. Defaults to
+  // 08:00–22:00 — the intuitive "push by day, quiet at night" preset.
+  const [notifWinOn, setNotifWinOn] = useState(false)
+  const [notifWinStart, setNotifWinStart] = useState("08:00")
+  const [notifWinEnd, setNotifWinEnd] = useState("22:00")
   const [notifMsg, setNotifMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
   const [notifLoading, setNotifLoading] = useState(false)
   const hintKey = PUSH_ENV_HINT_KEYS[detectPushEnv()]
-  // 分类/品种/事件偏好防抖落库 / debounce saving category, symbol & event prefs
+  // 分类/品种/事件/时段偏好防抖落库 / debounce saving category, symbol, event & window prefs
   const catSaveTimer = useRef<number | undefined>(undefined)
   const symbolSaveTimer = useRef<number | undefined>(undefined)
   const eventSaveTimer = useRef<number | undefined>(undefined)
+  const winSaveTimer = useRef<number | undefined>(undefined)
   const notifSectionRef = useRef<HTMLElement | null>(null)
 
   // 三个防抖计时器各自的回调都要把"当前完整偏好"整份 PUT 给后端（后端是
@@ -96,6 +109,7 @@ export default function AccountPage() {
       if (catSaveTimer.current) window.clearTimeout(catSaveTimer.current)
       if (symbolSaveTimer.current) window.clearTimeout(symbolSaveTimer.current)
       if (eventSaveTimer.current) window.clearTimeout(eventSaveTimer.current)
+      if (winSaveTimer.current) window.clearTimeout(winSaveTimer.current)
     }
   }, [])
 
@@ -111,13 +125,13 @@ export default function AccountPage() {
     setLoading(true)
     // 账户信息是这个页面能否渲染的前提，单独取、失败就整页报错。通知相关的
     // 三个接口分开取——任何一个失败（如后端刚上线新端点还没部署到位）只让
-    // 通知区块退化为空列表，不该把密码/MT5 账户等其余板块也一起拖挂掉。
+    // 通知区块退化为空列表，不该把密码等其余板块也一起拖挂掉。
     // Account info is the precondition for rendering this page at all — fetch
     // it alone; on failure, show the page-level error. The three
     // notification-related calls are fetched separately: if any one fails
     // (e.g. a new endpoint the backend hasn't finished deploying yet), only
     // the notifications section degrades to empty lists — it shouldn't take
-    // down the password/MT5-accounts sections too.
+    // down the password section too.
     try {
       setInfo(await userApi.me())
     } catch (err: unknown) {
@@ -135,6 +149,14 @@ export default function AccountPage() {
       setNotifCats(prefsRes.selected_categories)
       setNotifSymbols(prefsRes.selected_symbols ?? [])
       setNotifEvents(prefsRes.event_types ?? [])
+      // 时段两头都有值才算开启；`?? null` 兜底旧后端响应里没有这些键的情况。
+      // The window counts as on only with both bounds present; `?? null`
+      // guards against responses from a backend without these keys yet.
+      const winStart = prefsRes.push_window_start ?? null
+      const winEnd = prefsRes.push_window_end ?? null
+      setNotifWinOn(!!(winStart && winEnd))
+      if (winStart) setNotifWinStart(winStart)
+      if (winEnd) setNotifWinEnd(winEnd)
       setAllCats(catsRes)
       setAllSymbols(symsRes)
     } catch (err: unknown) {
@@ -291,6 +313,49 @@ export default function AccountPage() {
     })
   }
 
+  // 推送时段落库：其余维度的防抖保存不携带时段（后端对未出现的时段字段保持
+  // 原值），所以时段只由这里写；三项其余偏好照旧从 ref 取"此刻最新值"。
+  // Persist the push window. The other dimensions' debounced saves don't carry
+  // the window (the backend keeps absent window fields untouched), so it's only
+  // ever written here; the other three prefs still come from the refs.
+  function scheduleWindowSave(on: boolean, start: string, end: string, rollback: () => void) {
+    if (winSaveTimer.current) window.clearTimeout(winSaveTimer.current)
+    // 起止没填完整就先不落库（time 输入编辑中可能短暂为空）
+    // Don't persist a half-filled range (a time input can be briefly empty mid-edit)
+    if (on && (!start || !end)) return
+    winSaveTimer.current = window.setTimeout(() => {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || null
+      const win = on ? { start, end, tz } : { start: null, end: null, tz: null }
+      notificationApi
+        .putPrefs(enabledRef.current, catsRef.current, eventsRef.current, symbolsRef.current, win)
+        .catch(() => {
+          rollback()
+          setNotifMsg({ kind: "err", text: t("account.notifError") })
+        })
+    }, 400)
+  }
+
+  function handleWinToggle(on: boolean) {
+    setNotifMsg(null)
+    const prev = notifWinOn
+    setNotifWinOn(on)
+    scheduleWindowSave(on, notifWinStart, notifWinEnd, () => setNotifWinOn(prev))
+  }
+
+  function handleWinTime(field: "start" | "end", value: string) {
+    setNotifMsg(null)
+    const prevStart = notifWinStart
+    const prevEnd = notifWinEnd
+    const start = field === "start" ? value : notifWinStart
+    const end = field === "end" ? value : notifWinEnd
+    setNotifWinStart(start)
+    setNotifWinEnd(end)
+    scheduleWindowSave(notifWinOn, start, end, () => {
+      setNotifWinStart(prevStart)
+      setNotifWinEnd(prevEnd)
+    })
+  }
+
   if (loading) {
     return (
       <div className="max-w-[900px] mx-auto">
@@ -351,46 +416,6 @@ export default function AccountPage() {
               )}
             </div>
           </section>
-
-          {/* MT5 账号概览 / MT5 accounts */}
-          {info.mt5Accounts.length > 0 && (
-            <section className="glass-neon p-5">
-              <h3 className="sec-h-title">
-                {t("account.mt5Accounts")}
-              </h3>
-              <div className="mt-3 space-y-3">
-                {info.mt5Accounts.map((a, i) => (
-                  <div key={i} className="rounded-lg border border-white/5 bg-white/[0.03] p-3">
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-sm text-neutral-100">
-                        {a.login}
-                        {a.server ? ` @${a.server}` : ""}
-                      </span>
-                      <span
-                        className={`tag text-xs ${a.online ? "bg-up/15 text-up" : "bg-white/5 text-neutral-500"}`}
-                      >
-                        {a.online ? t("common.online") : t("common.offline")}
-                      </span>
-                    </div>
-                    <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-                      <div>
-                        <span className="text-neutral-500">{t("account.balance")}</span>
-                        <div className="font-mono text-neutral-100">{a.balance?.toFixed(2) ?? "-"}</div>
-                      </div>
-                      <div>
-                        <span className="text-neutral-500">{t("account.equity")}</span>
-                        <div className="font-mono text-neutral-100">{a.equity?.toFixed(2) ?? "-"}</div>
-                      </div>
-                      <div>
-                        <span className="text-neutral-500">{t("account.leverage")}</span>
-                        <div className="font-mono text-neutral-100">{a.leverage ? `1:${a.leverage}` : "-"}</div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
 
           {/* 密码管理 / Password */}
           <section className="glass-neon p-5">
@@ -501,6 +526,23 @@ export default function AccountPage() {
                       ))}
                     </>
                   )}
+                  {/* 我的策略信号：数据上是事件白名单（单用户推送路径），UI 上归入
+                      按策略——对用户而言它就是"我自己策略发出的信号"。不受上面
+                      「全部」哨兵影响（那是平台策略类别的维度）。
+                      My strategy signals: event-whitelist data (the single-user
+                      push path) presented under "by strategy" — to the user it's
+                      simply "signals from my own strategies". Unaffected by the
+                      "全部" sentinel above (that's the platform-category
+                      dimension). */}
+                  <label className="mt-1 flex items-center gap-2 border-t border-white/5 pt-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={notifEvents.includes(EVENT_STRATEGY_SIGNAL)}
+                      onChange={(e) => handleNotifEventToggle(EVENT_STRATEGY_SIGNAL, e.target.checked)}
+                      className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500"
+                    />
+                    <span className="text-neutral-300">{t("account.notifEvent.strategy_signal")}</span>
+                  </label>
                 </div>
               )}
               {notifEnabled && (
@@ -544,7 +586,7 @@ export default function AccountPage() {
                   <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
                     {t("account.notifEventsHeading")}
                   </p>
-                  {EVENT_TYPES.map((ev) => (
+                  {ACCOUNT_EVENT_TYPES.map((ev) => (
                     <label key={ev} className="flex items-center gap-2 text-sm">
                       <input
                         type="checkbox"
@@ -555,6 +597,47 @@ export default function AccountPage() {
                       <span className="text-neutral-300">{t(`account.notifEvent.${ev}`)}</span>
                     </label>
                   ))}
+                </div>
+              )}
+              {/* 推送时段 / push window */}
+              {notifEnabled && (
+                <div className="space-y-2 border-t border-white/5 pt-4 pl-1">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+                    {t("account.notifWindowHeading")}
+                  </p>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={notifWinOn}
+                      onChange={(e) => handleWinToggle(e.target.checked)}
+                      className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500"
+                    />
+                    <span className="text-neutral-300">{t("account.notifWindowEnable")}</span>
+                  </label>
+                  {notifWinOn && (
+                    <>
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <input
+                          type="time"
+                          value={notifWinStart}
+                          onChange={(e) => handleWinTime("start", e.target.value)}
+                          className="input h-9 w-28 font-mono text-sm"
+                        />
+                        <span className="text-neutral-500">{t("account.notifWindowTo")}</span>
+                        <input
+                          type="time"
+                          value={notifWinEnd}
+                          onChange={(e) => handleWinTime("end", e.target.value)}
+                          className="input h-9 w-28 font-mono text-sm"
+                        />
+                      </div>
+                      <p className="text-xs leading-relaxed text-neutral-500">
+                        {t("account.notifWindowHint", {
+                          tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+                        })}
+                      </p>
+                    </>
+                  )}
                 </div>
               )}
               {notifMsg && (

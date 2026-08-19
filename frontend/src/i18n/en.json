@@ -422,7 +422,6 @@
     "expiresAt": "PRO Expires",
     "neverExpires": "No expiry",
     "planTrialTag": "PRO (Trial)",
-    "mt5Accounts": "MT5 Accounts",
     "balance": "Balance",
     "equity": "Equity",
     "leverage": "Leverage",
@@ -450,6 +449,10 @@
       "bridge_offline": "PRISMX Bridge went offline",
       "strategy_signal": "My strategy signals"
     },
+    "notifWindowHeading": "Push hours",
+    "notifWindowEnable": "Only push during these hours",
+    "notifWindowTo": "to",
+    "notifWindowHint": "A range crossing midnight (e.g. 22:00 to 07:00) wraps overnight; notifications outside the window are skipped, not re-sent. Timezone from this device: {{tz}}",
     "notifPermissionDenied": "Notification permission denied; enable in browser settings",
     "notifBlocked": "Notifications blocked by browser; enable in browser settings",
     "notifError": "Failed to update notification settings",
@@ -808,7 +811,6 @@
       "verifyFailed": "Verification failed: {{code}}",
       "boundTitle": "Connected accounts",
       "tag": "Direct",
-      "balance": "Balance ${{amount}}",
       "unbind": "Disconnect",
       "unbindFailed": "Could not disconnect, please try again"
     },

@@ -422,7 +422,6 @@
     "expiresAt": "PRO 到期",
     "neverExpires": "永不过期",
     "planTrialTag": "PRO（试用）",
-    "mt5Accounts": "MT5 账户",
     "balance": "余额",
     "equity": "净值",
     "leverage": "杠杆",
@@ -450,6 +449,10 @@
       "bridge_offline": "PRISMX Bridge 掉线",
       "strategy_signal": "我的策略信号"
     },
+    "notifWindowHeading": "推送时段",
+    "notifWindowEnable": "仅在指定时段推送",
+    "notifWindowTo": "至",
+    "notifWindowHint": "跨零点的时段（如 22:00 至 07:00）按隔夜处理；时段外产生的通知不会补发。时区取自本设备：{{tz}}",
     "notifPermissionDenied": "通知权限被拒绝，请在浏览器设置中开启",
     "notifBlocked": "通知已被浏览器阻止，请在浏览器设置中开启",
     "notifError": "通知设置失败",
@@ -808,7 +811,6 @@
       "verifyFailed": "验证失败：{{code}}",
       "boundTitle": "已绑定账号",
       "tag": "直连",
-      "balance": "余额 ${{amount}}",
       "unbind": "解绑",
       "unbindFailed": "解绑失败，请稍后重试"
     },
