@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
+import { fmtTime } from '../../api/utils'
 import { SkeletonLine } from '../Skeleton'
 import type { AdminStrategyWinRate, SessionWindow, StrategyWinRate, WinRateBucket } from '../../api/types'
 
@@ -76,15 +77,36 @@ function localWindow(session: SessionWindow, now: Date): { start: string; end: s
 
 function Cell({ bucket }: { bucket: WinRateBucket }) {
   const { t } = useTranslation()
+  // 完整的四态明细统一挂在 title 上：表格里放不下，但排查时第一个想看的就是它。
+  // The full four-state breakdown always goes on the title: there's no room for
+  // it in the table, yet it's the first thing anyone debugging wants to see.
+  const hint = t('admin.winrate.cellHint', {
+    tp: bucket.hitTp, sl: bucket.hitSl, pending: bucket.pending, stale: bucket.stale,
+  })
   if (bucket.samples === 0) {
     return <span className="text-neutral-600">—</span>
   }
+  // 一条都没判定出来：显示待判定/追踪中断的条数，而不是"0 笔"。
+  // "0 笔" 是这个面板上线后第一个真实故障现场给出的读数，而它把两种完全不同的
+  // 情况（这个格子没信号 / 有一批信号但判定链路根本没跑）显示成了同一个样子——
+  // 判定只在 POST /webhook/trend 带 high/low 时触发，链路一断就是满屏 0 笔。
+  // Nothing resolved: show how many are pending or stale instead of "0 trades".
+  // "0" was the readout from this panel's first real incident, and it rendered
+  // two entirely different situations identically (no signals in this cell vs. a
+  // pile of signals the resolver never touched). Resolution only fires on POST
+  // /webhook/trend with high/low, so a broken feed means a screen full of zeros.
+  if (bucket.resolved === 0) {
+    return (
+      <span className="text-amber-400/80" title={hint}>
+        {bucket.pending > 0
+          ? t('admin.winrate.pendingOnly', { count: bucket.pending })
+          : t('admin.winrate.staleOnly', { count: bucket.stale })}
+      </span>
+    )
+  }
   if (bucket.winRate === null || bucket.resolved < MIN_SAMPLES) {
     return (
-      <span
-        className="text-neutral-500"
-        title={t('admin.winrate.thinSampleHint', { resolved: bucket.resolved, samples: bucket.samples })}
-      >
+      <span className="text-neutral-500" title={hint}>
         {/* count 而不是 resolved：i18next 靠这个参数名选单复数形式（英文 1 笔 / N 笔）。
             count, not resolved: i18next keys plural selection off this exact name. */}
         {t('admin.winrate.thinSample', { count: bucket.resolved })}
@@ -92,7 +114,7 @@ function Cell({ bucket }: { bucket: WinRateBucket }) {
     )
   }
   return (
-    <span title={t('admin.winrate.cellHint', { tp: bucket.hitTp, sl: bucket.hitSl, pending: bucket.pending, stale: bucket.stale })}>
+    <span title={hint}>
       <span className={`font-medium tabular-nums ${winRateClass(bucket.winRate)}`}>{fmtPct(bucket.winRate)}</span>
       <span className="ml-1.5 text-[10px] tabular-nums text-neutral-500">
         {bucket.hitTp}/{bucket.resolved}
@@ -194,6 +216,43 @@ export default function StrategyWinratePanel() {
         <p className="py-3 text-sm text-neutral-500">{t('admin.winrate.empty')}</p>
       ) : data ? (
         <>
+          {/* 判定链路健康条。窗口内有信号却一条都没判定，几乎一定是链路断了而不是
+              "行情还没走到"——判定只在 POST /webhook/trend 带 high/low 时触发，
+              正常运行下一周里不可能一条都判不出来。所以这种情况直接报警并给出
+              该查什么，而不是让人对着满屏 0 笔猜。
+              Resolution-pipeline health bar. Signals in the window with none
+              resolved is almost always a broken pipeline rather than "price
+              hasn't got there yet": resolution fires on POST /webhook/trend with
+              high/low, and a whole week resolving nothing doesn't happen when
+              it's working. So say so and name what to check, instead of leaving
+              someone to guess at a screen of zeros. */}
+          {data.overall.total.samples > 0 && (
+            <div
+              className={`mb-4 rounded-lg border px-3 py-2 text-[11px] leading-5 ${
+                data.overall.total.resolved === 0
+                  ? 'border-amber-400/40 bg-amber-400/10 text-amber-200'
+                  : 'border-white/10 bg-white/[0.03] text-neutral-400'
+              }`}
+            >
+              <span className="tabular-nums">
+                {t('admin.winrate.health', {
+                  samples: data.overall.total.samples,
+                  resolved: data.overall.total.resolved,
+                  pending: data.overall.total.pending,
+                  stale: data.overall.total.stale,
+                })}
+              </span>
+              <span className="ml-2 tabular-nums">
+                {t('admin.winrate.lastResolved', {
+                  when: data.lastResolvedAt ? fmtTime(data.lastResolvedAt) : t('admin.winrate.never'),
+                })}
+              </span>
+              {data.overall.total.resolved === 0 && (
+                <div className="mt-1 text-amber-200/80">{t('admin.winrate.stalledHint')}</div>
+              )}
+            </div>
+          )}
+
           <div className="overflow-x-auto">
             <table className="w-full min-w-[560px] text-xs">
               <thead>

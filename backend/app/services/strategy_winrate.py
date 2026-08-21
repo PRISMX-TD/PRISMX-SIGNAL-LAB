@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import Signal
@@ -189,6 +190,28 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
         .all()
     )
 
+    # 判定链路的健康读数：全表最近一次成功判定的时间，**刻意不受窗口限制**。
+    # 判定只在 POST /webhook/trend 带着 high/low 进来时发生（见 routers/webhook.py），
+    # 一旦那条链路断了——趋势推送停了、payload 少了 high/low、或 symbol 串对不上——
+    # 表格会满屏"0 笔"，而窗口内的任何数字都无法区分"最近没走出结果"和"判定
+    # 功能已经坏了几周"。这个时间戳能：null = 从来没判定成功过，几周前 = 断了。
+    # Health reading for the resolution pipeline: when a signal was last
+    # successfully resolved, deliberately NOT limited to the window. Resolution
+    # only happens when POST /webhook/trend arrives carrying high/low (see
+    # routers/webhook.py); if that path breaks — pushes stop, the payload drops
+    # high/low, or the symbol strings stop matching — the table fills with
+    # zeros, and nothing inside the window distinguishes "nothing has resolved
+    # lately" from "resolution has been dead for weeks". This timestamp does:
+    # null means it never worked, a date weeks back means it stopped.
+    last_resolved = (
+        db.query(func.max(Signal.resolved_at))
+        .filter(
+            Signal.source == "tradingview",
+            Signal.result.in_(("HIT_TP", "HIT_SL")),
+        )
+        .scalar()
+    )
+
     all_keys = [s.key for s in SESSIONS] + [OUTSIDE_KEY]
     # {策略名: {时段键或 "total": 桶}} / {strategy: {session key or "total": bucket}}
     per_strategy: dict[str, dict[str, dict[str, int]]] = {}
@@ -234,6 +257,7 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
         "days": days,
         "windowStart": cutoff,
         "windowEnd": now,
+        "lastResolvedAt": last_resolved,
         "sessions": [
             {"key": s.key, "tz": s.tz, "startHour": s.start_hour, "endHour": s.end_hour}
             for s in SESSIONS

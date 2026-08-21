@@ -230,6 +230,13 @@ class AdminStrategyWinRateOut(BaseModel):
     days: int
     windowStart: datetime
     windowEnd: datetime
+    # 最近一次成功判定胜负的时间，不受统计窗口限制。null = 从来没判定成功过。
+    # 判定只在 POST /webhook/trend 带 high/low 时发生，这个时间戳是那条链路是否
+    # 还活着的唯一直接读数。
+    # When a signal was last resolved, independent of the stats window; null means
+    # it never has. Resolution only runs when POST /webhook/trend carries
+    # high/low, and this is the only direct readout of whether that path is alive.
+    lastResolvedAt: datetime | None
     sessions: list[SessionWindowOut]
     overall: StrategyWinRateOut  # strategy 为空串，代表全部策略汇总 / all strategies combined
     strategies: list[StrategyWinRateOut]  # 已判定样本数降序 / by resolved samples desc

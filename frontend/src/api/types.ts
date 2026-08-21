@@ -172,6 +172,11 @@ export interface AdminStrategyWinRate {
   days: number
   windowStart: string
   windowEnd: string
+  // 最近一次成功判定的时间，不受窗口限制；null = 从未判定成功。
+  // 判定只在 /webhook/trend 带 high/low 时发生，这是那条链路是否还活着的读数。
+  // Last successful resolution, window-independent; null means it never happened.
+  // Resolution only runs on /webhook/trend with high/low — this is that path's pulse.
+  lastResolvedAt: string | null
   sessions: SessionWindow[]
   overall: StrategyWinRate
   strategies: StrategyWinRate[] // 已判定样本数降序 / by resolved samples desc
