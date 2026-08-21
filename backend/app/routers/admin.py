@@ -22,8 +22,9 @@ from starlette.concurrency import run_in_threadpool
 from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
 from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminTrialSettings, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
+from app.services.strategy_winrate import compute_strategy_session_winrate
 from app.services.settings_store import (
     get_broker_settings,
     get_candle_settings,
@@ -521,6 +522,37 @@ def page_stats(
         dates=day_keys,
         pages=pages,
     )
+
+
+# ---------- 策略分时段胜率 / per-strategy, per-session win rate ----------
+
+@router.get("/strategy-winrate", response_model=AdminStrategyWinRateOut)
+def strategy_winrate(
+    days: int = Query(7, ge=1, le=90),
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """每个策略在亚洲盘/欧洲盘/纽约盘的近 `days` 天胜率。
+
+    默认 7 天。上限 90 天不是随手定的：时段归属要按 IANA 时区逐条换算本地小时，
+    窗口越长扫的行越多，而这个端点只有管理员会点，没必要为更长的窗口加缓存或
+    预聚合表。
+
+    定义成同步 def（与本文件其余端点一致）而不是 async：分桶是纯 CPU 的逐行循环
+    （每条信号 × 3 个时区换算），FastAPI 会把同步端点丢进线程池，事件循环仍能
+    继续服务行情推送的 WebSocket。
+
+    Per-strategy win rate for the Asian / European / New York sessions over the
+    last `days` days, defaulting to 7. The 90-day ceiling is deliberate: session
+    assignment converts each row's timestamp into three local hours, so a longer
+    window means more rows scanned — and only admins hit this endpoint, so
+    caching or a pre-aggregated table isn't worth it.
+
+    Declared sync (like every other endpoint here) rather than async: the
+    bucketing is a pure-CPU per-row loop, and FastAPI runs sync endpoints in a
+    thread pool, leaving the event loop free for the live-quote WebSockets.
+    """
+    return compute_strategy_session_winrate(db, days)
 
 
 # ---------- 订阅定价设置 / subscription pricing settings ----------

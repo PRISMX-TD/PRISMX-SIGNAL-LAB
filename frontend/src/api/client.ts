@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 
 const TOKEN_KEY = 'prismx_token'
@@ -607,6 +607,12 @@ export const ticketApi = {
 // 管理后台 / Admin
 export const adminApi = {
   pageStats: (days = 7) => request<AdminPageStats>(`/admin/page-stats?days=${days}`),
+  // 策略 × 交易时段胜率（默认近 7 天）。时段窗口由后端随数据一起返回，前端不
+  // 复制一份小时区间——夏令时的正确性只能在后端保证。
+  // Per-strategy, per-session win rate (last 7 days by default). The session
+  // windows ship with the payload rather than being duplicated here: only the
+  // backend can get DST right.
+  strategyWinrate: (days = 7) => request<AdminStrategyWinRate>(`/admin/strategy-winrate?days=${days}`),
   listUsers: (params: { q?: string; plan?: string; role?: string; limit?: number; offset?: number } = {}) => {
     const qs = new URLSearchParams()
     if (params.q) qs.set('q', params.q)

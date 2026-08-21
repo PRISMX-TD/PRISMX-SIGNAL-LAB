@@ -976,12 +976,36 @@
     "planBreakdown": "等级分布",
     "tab": {
       "data": "数据看板",
+      "winrate": "策略胜率",
       "users": "用户管理",
       "invites": "邀请链接",
       "ops": "运营设置",
       "system": "系统参数",
       "guide": "策略介绍",
       "tickets": "工单管理"
+    },
+    "winrate": {
+      "title": "策略分时段胜率",
+      "hint": "只统计 TradingView 推送的平台信号，按信号「发出时刻」归入时段。胜率 = 止盈数 ÷ (止盈数 + 止损数)；尚未走出结果（PENDING）和行情追踪中断（STALE）的信号不进分母。时段用各金融中心的本地时间定义，夏令时切换自动跟随。欧洲盘与纽约盘每天重叠约四小时，重叠时段的信号同时计入两边，因此各时段样本数之和会大于总数。",
+      "daysLabel": "统计窗口",
+      "daysOption": "近 {{days}} 天",
+      "empty": "该窗口内没有 TradingView 信号。",
+      "colStrategy": "策略",
+      "colTotal": "总计",
+      "allStrategies": "全部策略",
+      "unnamed": "未命名策略",
+      "yourTime": "你的时间 {{start}}–{{end}}",
+      "outsideNote": "三个时段之外",
+      "thinSample_other": "{{count}} 笔",
+      "thinSampleHint": "已判定 {{resolved}} 笔，共 {{samples}} 条信号——样本太少，不显示百分比。",
+      "cellHint": "止盈 {{tp}} · 止损 {{sl}} · 待判定 {{pending}} · 追踪中断 {{stale}}",
+      "footnote": "已判定样本少于 {{min}} 笔的格子只显示笔数：把三五笔的结果写成百分比，看着像结论，其实和抛硬币没区别。",
+      "session": {
+        "asia": "亚洲盘",
+        "europe": "欧洲盘",
+        "newyork": "纽约盘",
+        "outside": "其他时段"
+      }
     },
     "invite": {
       "hint": "生成带标记名的推广链接（?ref=码）。通过链接注册的用户，用户列表的「备注」栏会自动写入该链接的标记名。点击数为参考值——无法防刷、跨设备点击不计；注册数以实际创建的账号为准。链接不可删除，合作结束请停用。",

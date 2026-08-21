@@ -137,6 +137,46 @@ export interface AdminPageStats {
   pages: AdminPageStat[]
 }
 
+// 管理后台：策略 × 交易时段胜率
+// admin: per-strategy, per-session win rate
+export interface SessionWindow {
+  key: string // asia / europe / newyork
+  tz: string // IANA 时区名，夏令时由它承担 / IANA zone; DST comes from it
+  startHour: number
+  endHour: number // 左闭右开 / half-open
+}
+
+export interface WinRateBucket {
+  hitTp: number
+  hitSl: number
+  pending: number // 尚未走出结果，不进分母 / no outcome yet, out of the denominator
+  stale: number // 行情追踪中断，不进分母 / tracking broke, out of the denominator
+  resolved: number // hitTp + hitSl
+  samples: number
+  // 分母为 0 时为 null——与真实的 0% 胜率不是一回事
+  // null on an empty denominator — not the same thing as a real 0%
+  winRate: number | null
+}
+
+export interface StrategyWinRate {
+  strategy: string // 空串 = 信号没带策略名 / empty = the signal carried no strategy name
+  total: WinRateBucket
+  // 键：asia / europe / newyork / outside。时段之间有重叠，各时段 samples 之和
+  // 会大于 total.samples。
+  // Keyed asia / europe / newyork / outside. Sessions overlap, so the per-session
+  // samples sum to more than total.samples.
+  sessions: Record<string, WinRateBucket>
+}
+
+export interface AdminStrategyWinRate {
+  days: number
+  windowStart: string
+  windowEnd: string
+  sessions: SessionWindow[]
+  overall: StrategyWinRate
+  strategies: StrategyWinRate[] // 已判定样本数降序 / by resolved samples desc
+}
+
 // 管理后台：订阅定价设置 / admin: subscription pricing settings
 export interface AdminPricingSettings {
   proMonthlyPrice: number

@@ -976,12 +976,37 @@
     "planBreakdown": "Plan breakdown",
     "tab": {
       "data": "Dashboard",
+      "winrate": "Win Rate",
       "users": "Users",
       "invites": "Invite Links",
       "ops": "Operations",
       "system": "System",
       "guide": "Strategy Guide",
       "tickets": "Tickets"
+    },
+    "winrate": {
+      "title": "Win Rate by Session",
+      "hint": "Covers TradingView platform signals only, filed by the session they fired in. Win rate = take-profits / (take-profits + stop-losses); signals with no outcome yet (PENDING) or with broken price tracking (STALE) stay out of the denominator. Sessions are defined in each centre's local time, so DST changeovers are followed automatically. The European and New York sessions overlap by about four hours daily and signals in the overlap count toward both, so the per-session samples add up to more than the total.",
+      "daysLabel": "Window",
+      "daysOption": "Last {{days}}d",
+      "empty": "No TradingView signals in this window.",
+      "colStrategy": "Strategy",
+      "colTotal": "Overall",
+      "allStrategies": "All strategies",
+      "unnamed": "Unnamed",
+      "yourTime": "your time {{start}}–{{end}}",
+      "outsideNote": "outside all three",
+      "thinSample_one": "{{count}} trade",
+      "thinSample_other": "{{count}} trades",
+      "thinSampleHint": "{{resolved}} resolved out of {{samples}} signals — too few for a percentage.",
+      "cellHint": "TP {{tp}} · SL {{sl}} · pending {{pending}} · stale {{stale}}",
+      "footnote": "Cells with fewer than {{min}} resolved trades show the count instead of a percentage: turning three or four results into a percentage looks like a conclusion but is indistinguishable from a coin flip.",
+      "session": {
+        "asia": "Asian",
+        "europe": "European",
+        "newyork": "New York",
+        "outside": "Other hours"
+      }
     },
     "invite": {
       "hint": "Create labeled promo links (?ref=code). Users who register through a link get its label written into the Note column of the user list automatically. Clicks are indicative only — not abuse-proof, and cross-device clicks are invisible; registrations reflect real accounts. Links cannot be deleted; deactivate them when a campaign ends.",

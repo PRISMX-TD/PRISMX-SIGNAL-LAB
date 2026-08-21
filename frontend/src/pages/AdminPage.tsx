@@ -10,6 +10,7 @@ import { SkeletonLine } from '../components/Skeleton'
 import PageStatsCard from '../components/admin/PageStatsCard'
 import PlatformStrategiesPanel from '../components/admin/PlatformStrategiesPanel'
 import InviteLinksPanel from '../components/admin/InviteLinksPanel'
+import StrategyWinratePanel from '../components/admin/StrategyWinratePanel'
 import type { AdminBrokerSettings, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
@@ -33,8 +34,13 @@ const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
 // blast radius they belong on the ops side, not system ("how the backend
 // computes"). But they are content editing rather than config, and the form
 // shape differs too much to fold into ops.
-type AdminTab = 'data' | 'users' | 'invites' | 'ops' | 'system' | 'guide' | 'tickets'
-const ADMIN_TABS: AdminTab[] = ['data', 'users', 'invites', 'ops', 'system', 'guide', 'tickets']
+// winrate 紧跟 data：两者都是"看数据"，但分策略 × 分时段的胜率矩阵有自己的
+// 窗口选择和一整张宽表，塞进 data 页会把运营指标和页面访问统计挤到看不见。
+// winrate sits right after data: both are "look at numbers", but the
+// strategy x session matrix has its own range picker and a wide table, and
+// folding it into data would bury the operating metrics and page stats.
+type AdminTab = 'data' | 'winrate' | 'users' | 'invites' | 'ops' | 'system' | 'guide' | 'tickets'
+const ADMIN_TABS: AdminTab[] = ['data', 'winrate', 'users', 'invites', 'ops', 'system', 'guide', 'tickets']
 
 interface Draft {
   role: UserRole
@@ -1048,6 +1054,8 @@ export default function AdminPage() {
 
         </>
       )}
+
+      {tab === 'winrate' && <StrategyWinratePanel />}
 
       {tab === 'guide' && <PlatformStrategiesPanel />}
 

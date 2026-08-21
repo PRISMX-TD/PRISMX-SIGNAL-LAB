@@ -187,6 +187,54 @@ class AdminPageStatsOut(BaseModel):
     pages: list[PageStatOut]  # 按访问次数降序 / sorted by views desc
 
 
+class SessionWindowOut(BaseModel):
+    """交易时段定义。前端拿它拼「东京 09:00–18:00 (Asia/Tokyo)」这样的表头，
+    时段区间因此只在后端定义一处，改了不用同步改前端。
+    A trading session's definition; the UI builds its column header from this, so
+    the windows live in exactly one place."""
+
+    key: str  # asia / europe / newyork
+    tz: str  # IANA 时区名，夏令时由它承担 / IANA zone; DST comes from it
+    startHour: int
+    endHour: int  # 左闭右开 / half-open
+
+
+class WinRateBucketOut(BaseModel):
+    """一个（策略, 时段）格子的胜负分布。
+    Win/loss distribution for one (strategy, session) cell."""
+
+    hitTp: int
+    hitSl: int
+    pending: int  # 尚未走出结果，不进分母 / no outcome yet; excluded from the denominator
+    stale: int  # 行情追踪中断，不进分母 / tracking broke; excluded
+    resolved: int  # hitTp + hitSl，即胜率的分母 / the win-rate denominator
+    samples: int  # 窗口内该格子的全部信号数 / every signal in the cell
+    # 分母为 0 时为 null，与「0% 胜率」区分开 / null on an empty denominator, distinct from a real 0%
+    winRate: float | None
+
+
+class StrategyWinRateOut(BaseModel):
+    # 空串表示 TradingView 警报没带 strategy 字段，前端显示成「未命名策略」
+    # An empty string means the alert carried no strategy field; shown as "Unnamed"
+    strategy: str
+    total: WinRateBucketOut
+    # 键为 asia / europe / newyork / outside。三个时段**允许重叠**（伦欧与纽约
+    # 每天重叠约四小时），所以各时段 samples 之和 ≥ total.samples，不是笔误。
+    # Keyed by asia / europe / newyork / outside. The sessions overlap by design
+    # (London and New York share ~4h daily), so the per-session samples sum to
+    # at least total.samples — not a bug.
+    sessions: dict[str, WinRateBucketOut]
+
+
+class AdminStrategyWinRateOut(BaseModel):
+    days: int
+    windowStart: datetime
+    windowEnd: datetime
+    sessions: list[SessionWindowOut]
+    overall: StrategyWinRateOut  # strategy 为空串，代表全部策略汇总 / all strategies combined
+    strategies: list[StrategyWinRateOut]  # 已判定样本数降序 / by resolved samples desc
+
+
 class AdminBrokerSettings(BaseModel):
     """合作券商锁设置（管理后台读写用同一形状）。
     Partner-broker lock settings (same shape for admin read & write)."""
