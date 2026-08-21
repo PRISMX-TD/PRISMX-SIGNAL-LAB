@@ -327,8 +327,38 @@ def _trend_db_work(
             # bar's high/low, riding on the same webhook call as the trend update —
             # no separate price channel needed.
             if low is not None and high is not None:
-                resolved = resolve_signals_with_price(db, symbol, low, high)
-                if resolved:
+                resolve_signals_with_price(db, symbol, low, high)
+                # 无论本轮有没有判出结果都要提交：resolve_signals_with_price 给
+                # **扫到的每一条** PENDING 信号写价格基线，而返回值里只有真正判出
+                # 结果的那几条。原来写的是 `if resolved: db.commit()`，于是没判出
+                # 结果的那些轮次（绝大多数），基线写入会随 finally 里的 db.close()
+                # 一起被丢掉。而基线是判定的前提——首次观测只记基线、不判定——
+                # 就形成了互锁：基线要提交才存活，提交却要等有结果，结果又要等基线。
+                # 每次推送都退化成"首次观测"，任何信号都永远判不出胜负。
+                # 线上因此 19703 条 TradingView 信号 baseline_high 全为 NULL、
+                # 64% 被 5 天后的保险丝清扫成 STALE。
+                #
+                # 用 db.dirty 而不是无条件提交：该品种一条 PENDING 信号都没有时
+                # 什么都没改，不必为每 5 秒一次的推送白发一个 COMMIT。
+                #
+                # Commit whether or not anything resolved this round:
+                # resolve_signals_with_price writes a price baseline to EVERY
+                # pending signal it scans, while the return value holds only those
+                # that actually resolved. The old `if resolved: db.commit()` threw
+                # away the baseline writes on every round that resolved nothing —
+                # nearly all of them — via the db.close() in `finally`. Since a
+                # baseline is the precondition for resolving (the first observation
+                # only records it), that deadlocked: baselines need a commit to
+                # survive, the commit waited on a result, and the result waited on
+                # a baseline. Every push degraded to a "first observation" and
+                # nothing could ever resolve. In production that left all 19703
+                # TradingView signals with a NULL baseline_high and swept 64% of
+                # them to STALE after the 5-day cutoff.
+                #
+                # db.dirty rather than an unconditional commit: when the symbol has
+                # no pending signals at all nothing was modified, and a push every
+                # 5 seconds shouldn't emit a COMMIT for nothing.
+                if db.dirty:
                     db.commit()
             return data
         finally:
