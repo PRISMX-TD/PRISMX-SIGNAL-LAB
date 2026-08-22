@@ -127,6 +127,28 @@ function Card({ row, sessionKey, rank, onSelect }: {
   return (
     <div role="button" tabIndex={0} onClick={() => onSelect(row.strategy)}
          onKeyDown={(e) => {
+           // 只处理"这个 div 自己"收到的按键，不处理从内部可聚焦子元素（Link、
+           // DailyBars 的柱子）冒泡上来的按键（code review 复审：新回归）。少了
+           // 这道守卫时，键盘用户 Tab 到「追踪中 →」按 Enter，浏览器对聚焦 <a>
+           // 的默认行为（模拟点击、触发导航）会被这里的 e.preventDefault() 吞掉
+           // ——因为 preventDefault 作用于整个事件，不区分是谁调用的——变成
+           // 导航不发生、反而选中了整张卡；Tab 到柱子按 Enter/Space 同理会误选卡片。
+           // e.target !== e.currentTarget 就是在说"这个按键不是发生在 div 本身
+           // 上，是从后代冒泡上来的"，直接放行，不拦截也不代为处理。
+           // Only handle a key that landed on this div itself, not one bubbling
+           // up from an inner focusable descendant (the Link, or a DailyBars
+           // bar) (code review re-review: a regression introduced by the
+           // previous fix). Without this guard, a keyboard user tabbing to
+           // "tracking N →" and pressing Enter gets the browser's default
+           // Enter-on-a-focused-<a> behaviour (simulate a click, navigate)
+           // swallowed by this handler's e.preventDefault() — preventDefault
+           // applies to the whole event, it doesn't know which listener called
+           // it — so navigation never happens and the card gets selected
+           // instead; Enter/Space on a bar misselects the card the same way.
+           // e.target !== e.currentTarget means "this keypress didn't happen on
+           // the div itself, it bubbled from a descendant" — let it through
+           // untouched.
+           if (e.target !== e.currentTarget) return
            if (e.key === 'Enter' || e.key === ' ') {
              e.preventDefault()
              onSelect(row.strategy)
