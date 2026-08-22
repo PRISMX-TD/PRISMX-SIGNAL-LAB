@@ -5505,3 +5505,21 @@ body {
     transition-delay: 0s;
   }
 }
+
+/* ═════════════ 胜率页：拔河条进场 / win-rate page: tug-bar grow-in ═════════════
+   只动 transform（scaleX），不动 width；进场一次、不循环；时长与缓动走全站令牌
+   （--dur-slow / --ease-out）。减弱动效时直接静止。
+   transform only (scaleX), never width; plays once, no loop; duration and easing
+   come from the site tokens (--dur-slow / --ease-out). Static under
+   prefers-reduced-motion. */
+@keyframes grow-x {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+.grow-x {
+  transform-origin: left center;
+  animation: grow-x var(--dur-slow, 0.45s) var(--ease-out, ease-out) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .grow-x { animation: none; }
+}

@@ -1,159 +1,250 @@
-// 策略详情区：策略选择器 →「全部」/各品种子页签 → 四张独立图表。
+// 单个策略的细节：四个问题，每个问题一块。
+//   哪个时段更准？ / 做多还是做空更准？ / 星期几更准？ / 一般多久出结果？
+// 标题直接是问句——新手不需要知道"分时段胜率"这种术语，只需要找到自己想问
+// 的那个问题。每一行都是同一套读法：名字、百分比、判定芯片、拔河条。
+// 星期格后端只给止盈/止损笔数，这里用同一条 Wilson 公式补出区间，再走同一个
+// verdictOf——整页一条规则，不给星期格开特例。
 //
-// 逐笔信号明细已移除：那是"给我看原始数据"的需求，而这一页要回答的是
-// "该盯什么"——四个聚合图各自答一个问题，比一张 50 行的流水表更快得出结论。
-// 「追踪中 N 笔」也一并撤掉：未判定数是判定链路的运维读数，不是策略表现，
-// 混在业绩图里只会让人把"还没走出结果"误读成一种成绩。
-//
-// Strategy drill-down: selector -> "all" / per-symbol tabs -> four charts.
-//
-// The per-signal list is gone: that answers "show me the raw rows", while this
-// page answers "what should I watch" — four aggregate charts each answer one
-// question faster than a 50-row ledger. The "N tracking" counts went with it:
-// unresolved counts are an ops readout for the resolution pipeline, not strategy
-// performance, and mixing them into performance charts invites reading "no
-// outcome yet" as a kind of result.
-import { useEffect, useState } from 'react'
+// One strategy in depth: four questions, one block each — which session, long
+// or short, which weekday, how long to an outcome. Titles are literal questions
+// so a newcomer finds the one they are asking instead of decoding a term. Every
+// row reads the same way: name, percentage, verdict chip, tug bar. Weekday cells
+// get their interval from the same Wilson formula and the same verdictOf — one
+// rule for the page, no weekday exception.
+import { Fragment, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { AdminStrategyWinRate, StrategyWinRate, SymbolWinRate } from '../../../api/types'
-import MatrixTable from './MatrixTable'
+import type { SessionWindow, StrategyWinRate, SymbolWinRate, WeekdayOutcome, WinRateBucket } from '../../../api/types'
+import TugBar from './TugBar'
+import { VerdictChip, VerdictGlyph } from './Verdict'
 import {
-  WeekdayOutcomeChart,
-  HoldingTimeChart,
-  SessionWinRateChart,
-  SideWinRateChart,
-} from './StrategyCharts'
+  SESSION_COLORS, SIDE_COLORS, VERDICT_BG, VERDICT_COLOR,
+  fmtDurationText, fmtInt, fmtPct, isRated, rateFromCounts, verdictOf, type VerdictKind,
+} from './shared'
 
-/** 四张图的栅格。窄屏一列、宽屏两列——每张图内部都是横向条，两列时仍读得清。
- *  The four-chart grid: one column on narrow screens, two when there's room. */
-function ChartGrid({ row, sessions, weekday }: {
-  row: StrategyWinRate | SymbolWinRate
-  sessions: { key: string }[]
-  weekday: import('../../../api/types').WeekdayOutcome[] | null
-}) {
+function Block({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div className="grid gap-3 lg:grid-cols-2">
-      <SessionWinRateChart sessions={sessions} buckets={row.sessions} />
-      <SideWinRateChart sides={row.sides} />
-      {/* 星期图只在策略层有数据：品种层再按星期几切一刀样本太薄，后端不下发。
-          The weekday chart only has data at the strategy layer — the symbol
-          layer would be too thin once sliced by weekday, so the backend omits it. */}
-      {weekday && <WeekdayOutcomeChart weekday={weekday} />}
-      <HoldingTimeChart sessions={sessions} buckets={row.sessions} total={row.total} />
+    <section className="rounded-lg p-4" style={{ background: 'var(--nest)' }}>
+      <h4 className="text-sm font-semibold text-neutral-100">{title}</h4>
+      {/* 提示用 12px 而不是 10px：这几行带着该块最重要的口径说明，手机上 10px
+          中文会是整页最难读的字。/ 12px, not 10px: these lines carry the block's
+          key caveats and 10px Chinese is the least legible text on a phone. */}
+      {hint && <p className="mt-0.5 text-xs leading-5 text-neutral-500">{hint}</p>}
+      <div className="mt-3">{children}</div>
+    </section>
+  )
+}
+
+function RateRow({ label, dotColor, bucket, tag }: {
+  label: string; dotColor: string; bucket: WinRateBucket; tag?: string
+}) {
+  const { t } = useTranslation()
+  const kind = verdictOf(bucket)
+  const hasRate = isRated(kind) && bucket.winRate !== null
+  const aria = t('admin.winrate.aria.tug', {
+    label, tp: bucket.hitTp, sl: bucket.hitSl, rate: hasRate ? fmtPct(bucket.winRate!) : '—',
+  })
+  return (
+    <div className="border-t border-white/5 py-2.5 first:border-t-0 first:pt-0">
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex min-w-0 items-center gap-2 text-sm text-neutral-200">
+          <i className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: dotColor }} />
+          <span className="truncate">{label}</span>
+          {tag && (
+            <span className="shrink-0 rounded-full px-1.5 py-px text-2xs font-medium"
+                  style={{ color: dotColor, background: 'rgba(255,255,255,0.06)' }}>{tag}</span>
+          )}
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          {hasRate && (
+            <span className="text-sm font-semibold tabular-nums" style={{ color: VERDICT_COLOR[kind] }}>
+              {fmtPct(bucket.winRate!)}
+            </span>
+          )}
+          <VerdictChip kind={kind} bucket={bucket} size="sm" />
+        </span>
+      </div>
+      {bucket.resolved > 0 && (
+        <>
+          <TugBar className="mt-2" size="sm" hitTp={bucket.hitTp} hitSl={bucket.hitSl} label={aria} />
+          <p className="mt-1 text-2xs tabular-nums text-neutral-500">
+            {t('admin.winrate.strategies.winsLosses', { tp: fmtInt(bucket.hitTp), sl: fmtInt(bucket.hitSl) })}
+            {bucket.pending > 0 && ` · ${t('admin.winrate.strategies.pending', { count: bucket.pending })}`}
+          </p>
+        </>
+      )}
     </div>
   )
 }
 
-export default function StrategyDetail({ data, activeKeys, selected, onSelect, now }: {
-  data: AdminStrategyWinRate; activeKeys: string[]
-  selected: string | null; onSelect: (name: string | null) => void
-  // 只为透传给 MatrixTable 的表头时区换算——详情区自己不读时钟。面板持有唯一
-  // 的每分钟计时器，组件一律接收 now，不自己 new Date()。
-  // Only forwarded to MatrixTable for its header zone conversion — this area
-  // doesn't read the clock itself. The panel owns the single per-minute timer;
-  // components take `now` rather than calling new Date() themselves.
-  now: Date
+const WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+
+function WeekdayGrid({ weekday }: { weekday: WeekdayOutcome[] }) {
+  const { t } = useTranslation()
+  const cell = (tp: number, sl: number) => {
+    const rate = rateFromCounts(tp, sl)
+    const kind = verdictOf(rate)
+    if (kind === 'none') {
+      return <span className="block rounded-md py-2 text-center text-neutral-700">—</span>
+    }
+    const hint = t('admin.winrate.detail.cellHint', { tp, sl })
+    if (kind === 'thin') {
+      return (
+        <span className="block rounded-md py-2 text-center text-xs tabular-nums text-neutral-500"
+              style={{ background: VERDICT_BG[kind] }} title={hint}>
+          {t('admin.winrate.verdict.thin', { count: tp + sl })}
+        </span>
+      )
+    }
+    // 格子里放不下整枚芯片，但判定图形（↑ ↓ = ?）必须在：灰色的「差不多」和
+    // 「看不出」只靠颜色分不开，色弱读者连红绿都分不开。
+    // No room for a whole chip, but the glyph must be there: the two greys
+    // ("even" vs "unsure") are indistinguishable by colour alone, and a
+    // colour-blind reader can't separate red from green either.
+    return (
+      <span className="flex items-center justify-center gap-1.5 rounded-md py-1.5"
+            style={{ background: VERDICT_BG[kind], color: VERDICT_COLOR[kind] }} title={hint}>
+        <VerdictGlyph kind={kind} />
+        {/* 读屏器念出判定词：图形和底色对它都不存在 / spoken verdict for AT,
+            which sees neither the glyph nor the tint */}
+        <span className="sr-only">{t(`admin.winrate.verdict.${kind}`)}</span>
+        <span className="text-sm font-semibold tabular-nums">{fmtPct(rate.winRate!, 0)}</span>
+        <span className="text-2xs tabular-nums text-neutral-500">
+          {t('admin.winrate.detail.trades', { count: tp + sl, n: fmtInt(tp + sl) })}
+        </span>
+      </span>
+    )
+  }
+  const legend: VerdictKind[] = ['strong', 'weak', 'even', 'unsure']
+  return (
+    <div>
+      {/* 图例贴着格子放：首屏的「怎么读」离这里有一屏远。
+          Legend right above the grid: the page-level guide is a screen away. */}
+      <div className="mb-3 flex flex-wrap gap-1.5" aria-hidden>
+        {legend.map((k) => <VerdictChip key={k} kind={k} size="sm" />)}
+      </div>
+    <div className="grid grid-cols-[2.5rem_1fr_1fr] gap-x-2 gap-y-1">
+      <span />
+      {(['BUY', 'SELL'] as const).map((side) => (
+        <span key={side} className="flex items-center justify-center gap-1.5 pb-1 text-xs text-neutral-400">
+          <i className="h-2 w-2 rounded-full" style={{ backgroundColor: SIDE_COLORS[side] }} />
+          {t(`admin.winrate.side.${side}`)}
+        </span>
+      ))}
+      {weekday.map((d, i) => (
+        <Fragment key={i}>
+          <span className="flex items-center text-xs text-neutral-400">{t(`admin.winrate.weekday.${WEEKDAYS[i]}`)}</span>
+          {cell(d.buyTp, d.buySl)}
+          {cell(d.sellTp, d.sellSl)}
+        </Fragment>
+      ))}
+    </div>
+    </div>
+  )
+}
+
+export default function StrategyDetail({ row, sessions, activeKeys }: {
+  row: StrategyWinRate
+  sessions: SessionWindow[]
+  activeKeys: string[]
 }) {
   const { t } = useTranslation()
   const [symbolTab, setSymbolTab] = useState<string>('all')
-  const row: StrategyWinRate | undefined = data.strategies.find((r) => r.strategy === selected)
-  // 切换策略时回到「全部」页签 / reset the symbol tab when the strategy changes
-  useEffect(() => { setSymbolTab('all') }, [selected])
-  // 上面这个 effect 在 commit 之后才跑；selected 变化引发的那一次 render 是同步的，
-  // 此时 symbolTab 还是切换前的旧值。旧值指向的品种若不在新 row.symbols 里（换策略，
-  // 或换 days 导致同一策略当前窗口的品种集合缩水），下面 .find()! 会返回 undefined
-  // 交给 SessionRows，其函数体第一行 row.sessions[key] 立刻抛 TypeError，把整页炸给
-  // RouteErrorBoundary（Task 10 code review Critical，两条复现路径：切策略/切天数）。
-  // 用派生值兜底：每次 render 都重新核实 symbolTab 是否仍在当前 row.symbols 里，不是
-  // 就退回 'all'——不依赖 effect 时序，同一 tick 内就自愈。effect 本身保留：它负责
-  // "换策略就该回到全部页签"这条产品要求本身（哪怕新策略恰好也有同名品种，也不该
-  // 停留在旧页签上），派生值只管兜底 effect 还没来得及跑的那一次 render。
-  // The effect above only runs after commit; the render triggered by a 'selected'
-  // change is synchronous, so symbolTab is still the pre-switch value at that
-  // point. If that value no longer names a symbol in the new row.symbols (a
-  // strategy switch, or a 'days' change that shrinks the current strategy's
-  // symbol set), the .find()! below returns undefined into SessionRows, whose
-  // first line (row.sessions[key]) throws a TypeError and the whole page gets
-  // swapped for RouteErrorBoundary (Task 10 code review Critical; two repro
-  // paths: strategy switch, days switch). Derive a safe value instead: every
-  // render re-checks whether symbolTab still names a symbol in the current
-  // row.symbols, falling back to 'all' when it doesn't — no dependency on effect
-  // timing, self-heals within the same tick. The effect stays: it owns the
-  // product requirement that switching strategies always returns to the "all"
-  // tab (even when the new strategy happens to share a symbol name), while the
-  // derived value only backstops the one render before the effect has run.
-  const effectiveSymbolTab = row && row.symbols.some((s) => s.symbol === symbolTab) ? symbolTab : 'all'
-  // 与 effectiveSymbolTab 同一类问题、上一层：`selected` 指向的策略可能在当前
-  // data.strategies 里根本不存在（复现：days=30 时选中一只只在 30 天窗口里有信号
-  // 的策略，再切回 7 天）。此时 row 是 undefined，下面已经会静默回落到矩阵——但
-  // 选择器仍然逐个拿 `selected` 去比，「全部策略」比不中、每个策略也比不中，整行
-  // aria-selected="true" 的数量变成 0：role="tablist" 里一个选中项都没有是非法的
-  // ARIA 状态，用户看到的则是"点了没反应，也没人告诉我为什么"。
-  // 派生值让"选中态"与"实际渲染的内容"由同一个事实（row 在不在）决定：策略没了
-  // 就等价于回到「全部策略」，高亮跟着回到那一枚。父级 state 不动——它是受控
-  // 的，纠正 state 是父组件的事；这里只保证同一次 render 内界面自洽。
-  // Same class of bug as effectiveSymbolTab, one level up: `selected` can name a
-  // strategy that no longer exists in data.strategies (repro: at days=30 select a
-  // strategy whose signals only fall in the 30-day window, then switch back to
-  // 7). `row` is then undefined and the body below already falls back to the
-  // matrix — but the selector still compares raw `selected` against every option,
-  // matching neither "all strategies" nor any strategy, so the count of
-  // aria-selected="true" in the row drops to 0. A role="tablist" with nothing
-  // selected is an invalid ARIA state, and what the user sees is "I clicked, it
-  // did nothing, and nobody said why".
-  // The derived value makes the selected state and the rendered content follow
-  // one fact (does `row` exist): a vanished strategy is equivalent to being back
-  // on "all strategies", and the highlight goes back there too. The parent's
-  // state is left alone — it's controlled, so correcting it is the parent's call;
-  // this only keeps the UI self-consistent within the render.
-  const effectiveSelected = row ? selected : null
+  useEffect(() => { setSymbolTab('all') }, [row.strategy])
+  // 派生值兜底：页签指向的品种若不在当前 row 里，同一次 render 内退回「全部」。
+  // Derived fallback: a tab naming a symbol absent from this row snaps to "all"
+  // within the same render.
+  const effectiveTab = row.symbols.some((s) => s.symbol === symbolTab) ? symbolTab : 'all'
+  const target: StrategyWinRate | SymbolWinRate =
+    effectiveTab === 'all' ? row : row.symbols.find((s) => s.symbol === effectiveTab)!
+  // 星期图只在策略层有数据：品种层再切一刀样本太薄，后端不下发。
+  // Weekday data exists only at the strategy layer.
+  const weekday = effectiveTab === 'all' ? row.total.weekday : null
+  const sessionKeys = [...sessions.map((s) => s.key), 'outside']
+  const holdingRows = sessionKeys.filter((k) => target.sessions[k]?.avgResolveSeconds != null)
+
+  const pill = (active: boolean) =>
+    `rounded-full px-3 py-1 text-xs transition active:scale-[0.97] ${
+      active ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40' : 'text-neutral-400 hover:bg-white/5 hover:text-neutral-200'
+    }`
 
   return (
-    <div className="glass p-5">
-      {/* 策略选择器 / strategy selector */}
-      <div className="mb-4 flex flex-wrap gap-1.5" role="tablist">
-        <button type="button" role="tab" aria-selected={effectiveSelected === null} onClick={() => onSelect(null)}
-                className={`rounded-full px-3 py-1 text-xs transition ${effectiveSelected === null ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40' : 'text-neutral-400 hover:text-neutral-200'}`}>
-          {t('admin.winrate.allStrategiesTab')}
-        </button>
-        {data.strategies.map((r) => (
-          <button key={r.strategy} type="button" role="tab" aria-selected={effectiveSelected === r.strategy}
-                  onClick={() => onSelect(r.strategy)}
-                  className={`rounded-full px-3 py-1 text-xs transition ${effectiveSelected === r.strategy ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40' : 'text-neutral-400 hover:text-neutral-200'}`}>
-            {r.strategy || t('admin.winrate.unnamed')}
-          </button>
-        ))}
-      </div>
-
-      {effectiveSelected === null || !row ? (
-        <MatrixTable data={data} activeKeys={activeKeys} now={now} onSelectStrategy={(name) => onSelect(name)} />
-      ) : (
-        <>
-          {/* 品种子页签：只列有信号的品种 / symbol tabs, resolved-desc, signal-bearing only */}
-          <div className="mb-3 flex flex-wrap gap-1.5 border-b border-white/5 pb-3" role="tablist">
-            <button type="button" role="tab" aria-selected={effectiveSymbolTab === 'all'} onClick={() => setSymbolTab('all')}
-                    className={`rounded-lg px-2.5 py-1 text-xs ${effectiveSymbolTab === 'all' ? 'bg-white/10 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}>
-              {t('admin.winrate.allSymbols')}
+    <div className="border-t border-white/5 px-5 pb-6 pt-5 md:px-6">
+      <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <span className="text-xs text-neutral-500">{t('admin.winrate.detail.intro')}</span>
+        {row.symbols.length > 0 && (
+          <div className="flex flex-wrap gap-1.5" role="tablist">
+            <button type="button" role="tab" aria-selected={effectiveTab === 'all'}
+                    onClick={() => setSymbolTab('all')} className={pill(effectiveTab === 'all')}>
+              {t('admin.winrate.detail.allSymbols')}
             </button>
             {row.symbols.map((s) => (
-              <button key={s.symbol} type="button" role="tab" aria-selected={effectiveSymbolTab === s.symbol}
-                      onClick={() => setSymbolTab(s.symbol)}
-                      className={`rounded-lg px-2.5 py-1 text-xs tabular-nums ${effectiveSymbolTab === s.symbol ? 'bg-white/10 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}>
+              <button key={s.symbol} type="button" role="tab" aria-selected={effectiveTab === s.symbol}
+                      onClick={() => setSymbolTab(s.symbol)} className={`${pill(effectiveTab === s.symbol)} tabular-nums`}>
                 {s.symbol}
               </button>
             ))}
           </div>
-          {effectiveSymbolTab === 'all' ? (
-            <ChartGrid row={row} sessions={data.sessions} weekday={row.total.weekday} />
+        )}
+      </div>
+
+      {/* 两列各自堆叠（时段+方向 / 星期+时长），左右高度大致相当；窄屏按
+          DOM 顺序单列。Two stacked columns (session+side / weekday+holding)
+          so the heights roughly match; a single column in DOM order on narrow screens. */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-4">
+          <Block title={t('admin.winrate.detail.bySession')} hint={t('admin.winrate.detail.bySessionHint')}>
+            {sessionKeys.map((k) => target.sessions[k] && (
+              <RateRow key={k} label={t(`admin.winrate.session.${k}`)} dotColor={SESSION_COLORS[k] ?? SESSION_COLORS.outside}
+                       bucket={target.sessions[k]}
+                       tag={activeKeys.includes(k) ? t('admin.winrate.timeline.openNow') : undefined} />
+            ))}
+          </Block>
+
+          <Block title={t('admin.winrate.detail.bySide')} hint={t('admin.winrate.detail.bySideHint')}>
+            {(['BUY', 'SELL'] as const).map((k) => target.sides[k] && (
+              <RateRow key={k} label={t(`admin.winrate.side.${k}`)} dotColor={SIDE_COLORS[k]} bucket={target.sides[k]} />
+            ))}
+          </Block>
+        </div>
+
+        <div className="space-y-4">
+        {weekday && (
+          <Block title={t('admin.winrate.detail.byWeekday')} hint={t('admin.winrate.detail.byWeekdayHint')}>
+            <WeekdayGrid weekday={weekday} />
+          </Block>
+        )}
+
+        <Block title={t('admin.winrate.detail.holding')} hint={t('admin.winrate.detail.holdingHint')}>
+          {target.total.avgResolveSeconds === null ? (
+            <p className="text-xs text-neutral-500">{t('admin.winrate.detail.holdingEmpty')}</p>
           ) : (
-            // 品种层的 total.weekday 恒为 null（后端不下发），ChartGrid 据此跳过星期图
-            // The symbol layer's total.weekday is always null; ChartGrid skips
-            // the weekday chart accordingly
-            <ChartGrid row={row.symbols.find((x) => x.symbol === effectiveSymbolTab)!}
-                       sessions={data.sessions} weekday={null} />
+            <>
+              <div className="flex items-baseline gap-2">
+                <span className="font-display text-2xl font-bold leading-none tabular-nums text-neutral-50">
+                  {fmtDurationText(t, target.total.avgResolveSeconds)}
+                </span>
+                <span className="text-xs text-neutral-500">{t('admin.winrate.detail.holdingOverall')}</span>
+              </div>
+              {holdingRows.length > 0 && (
+                <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+                  {holdingRows.map((k) => (
+                    <div key={k}>
+                      <span className="flex items-center gap-1.5 text-2xs text-neutral-500">
+                        <i className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: SESSION_COLORS[k] ?? SESSION_COLORS.outside }} />
+                        {t(`admin.winrate.session.${k}`)}
+                      </span>
+                      <span className="mt-0.5 block text-sm font-medium tabular-nums text-neutral-200">
+                        {fmtDurationText(t, target.sessions[k].avgResolveSeconds!)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
-        </>
-      )}
+        </Block>
+        </div>
+      </div>
     </div>
   )
 }

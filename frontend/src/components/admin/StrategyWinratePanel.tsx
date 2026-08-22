@@ -1,68 +1,98 @@
-// 管理后台「策略胜率」子页：时段轴 → 总览层 → 单策略详情，三段两层。
+// 管理后台「策略胜率」子页——为新手重排的一版。
 //
-// 总览层不分策略，回答"这 7 天平台整体发生了什么"；详情层选一个策略深入看，
-// 回答"这一个该怎么调"。原来那个按胜率排名的「现在该盯什么」推荐区已删除：
-// 策略还在调整期，排名是会一直变的动态目标，把它放在最显眼处只会引导人去追
-// 当期名次；而且胜率排名与赚不赚钱并不同向（盈亏比从 1.0 到 3.0 差三倍时，
-// 胜率最低的策略反而可能期望最高）。
+// 页面只回答三个问题，按读者会问的顺序排：
+//   1. 平台信号准不准？        → 首屏一个大数字 + 人话判定 + 赢/输拔河条
+//   2. 哪个策略、准在哪？      → 每个策略一张卡，点开看"哪个时段 / 做多做空 /
+//                                 星期几 / 多久出结果"四个问题
+//   3. 哪些品种在跑、跑得怎样？→ 每个品种一行
+// 统计口径（Wilson 区间、时段重叠、判定门槛）不再作为图形摆在读者面前：判定
+// 规则在 shared.ts 里只有一条，每个数字旁边都用一个词告诉读者"这个能不能信"，
+// 计算细节收进页尾的折叠项。
 //
-// Session timeline, then an overview layer, then a per-strategy detail layer.
-// The overview is strategy-agnostic ("what happened on the platform"), the
-// detail layer is one strategy in depth ("how should I adjust this one"). The
-// old win-rate-ranked "what to watch now" area is gone: the strategies are still
-// being tuned so a ranking is a moving target, and win-rate order does not track
-// profitability anyway (with reward:risk spanning 1.0 to 3.0, the lowest
-// win-rate strategy can carry the highest expectancy).
+// 不排名：策略还在调整期，按胜率排名是个会一直变的动态目标，而且胜率与赚不赚钱
+// 并不同向。列表顺序是后端的"已判定笔数降序"，标题下直接写明。
 //
-// 判定链路健康条（窗口内四态计数 + 最近一次判定时间）已按产品要求移除。
-// 后端仍返回 lastResolvedAt，判定停摆时的诊断改由这条 SQL 主动查：
-//   SELECT count(*) FILTER (WHERE baseline_high IS NOT NULL),
-//          max(resolved_at) FILTER (WHERE result IN ('HIT_TP','HIT_SL'))
-//   FROM signals WHERE source = 'tradingview';
-// 页面本身不再提示链路故障——这是明确的取舍，不是遗漏。
-// The resolution-health bar was removed at the product owner's request. The
-// backend still returns lastResolvedAt; diagnosing a stalled pipeline is now a
-// manual SQL check (above) rather than something the page surfaces. The page no
-// longer warns about a broken pipeline — a deliberate trade-off, not an
-// oversight.
+// 时段窗口（小时区间 + IANA 时区）随接口一起下发，前端不复制一份：夏令时的正确
+// 性只在后端保证一次，这里只负责把它翻译成看的人所在时区的钟点。
 //
-// 时段窗口（小时区间 + IANA 时区）随接口一起下发，前端**不**复制一份：夏令时
-// 的正确性只在后端保证一次，这里只负责把它翻译成看的人所在时区的钟点。
-// The session windows (hour range + IANA zone) ship with the payload and are
-// deliberately NOT duplicated here — DST correctness is settled once in the
-// backend; this file only restates the window in the viewer's own clock.
+// The admin "strategy win rate" tab, re-laid-out for newcomers. It answers three
+// questions in the order a reader asks them: are the signals any good (hero:
+// one big number, a plain-words verdict, a wins-vs-losses tug bar); which
+// strategy, and where is it good (one card each, expanding into four question
+// blocks); which symbols are running and how (one row each). The statistics —
+// Wilson intervals, session overlap, the sample floor — no longer face the reader
+// as glyphs: shared.ts holds the single verdict rule, every number carries a
+// word saying whether it can be trusted, and the maths folds into the footer.
+// No ranking: the strategies are still being tuned, a win-rate order is a moving
+// target, and win rate does not track profitability. Session windows ship with
+// the payload; only the backend gets DST right.
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
-import { SkeletonLine } from '../Skeleton'
+import { SkeletonBlock, SkeletonLine } from '../Skeleton'
 import type { AdminStrategyWinRate } from '../../api/types'
 import { MIN_SAMPLES, sessionStatus } from './winrate/shared'
-import SessionTimeline from './winrate/SessionTimeline'
-import OverviewPanel from './winrate/OverviewPanel'
-import StrategyDetail from './winrate/StrategyDetail'
+import HeroSummary from './winrate/HeroSummary'
+import ReadingGuide from './winrate/ReadingGuide'
+import StrategyList from './winrate/StrategyList'
+import SymbolBoard from './winrate/SymbolBoard'
 
-// 全站固定 7 天，不给切换器。
-//
-// 7 天不是随手定的：滚动 168 小时窗口 = 7×24，**每个星期几正好各分到整 24 小时**，
-// 所以「星期 × 方向」矩阵的格子之间可以直接比。换成 14/30 天就不成立了——30 天
-// 是 4.28 周，除不尽，有的星期几会多摊到一整天，格子里的数字就把"那天多出 24
-// 小时"也编码了进去，读的人会当成真实差异。
-//
-// 顺带消掉了原来"推荐区固定 7 天、矩阵跟随切换器"的双窗口复杂度：两份数据、
-// 两次请求、以及 days state 与 data 可能错位那一类问题，一并没有了。
-//
-// The whole page is pinned to 7 days; no range picker.
-//
-// Not an arbitrary 7: a rolling 168-hour window is exactly 7x24, so **every
-// weekday draws exactly 24 hours**, which is what makes the weekday x direction
-// matrix's cells comparable. At 14 or 30 days it breaks down — 30 days is 4.28
-// weeks, so some weekdays get a whole extra day and the numbers would encode
-// that alongside any real difference.
-//
-// It also removes the old two-window complexity (recommendations pinned to 7
-// days while the matrix followed a picker): two payloads, two requests, and the
-// class of bug where the `days` state and `data` drift apart — all gone.
+// 全站固定 7 天，不给切换器。滚动 168 小时 = 7×24，每个星期几正好各分到整
+// 24 小时，「星期几更准」那一格才能直接比；14/30 天除不尽，格子会把"那天多出
+// 24 小时"也编码进去。
+// Pinned to 7 days, no picker: a rolling 168h window gives every weekday exactly
+// 24 hours, which is what makes the weekday cells comparable. 14 or 30 days
+// don't divide evenly and would encode the extra day as a real difference.
 const WINDOW_DAYS = 7
+
+function LoadingSkeleton() {
+  return (
+    <div className="space-y-6" aria-busy="true">
+      <div className="glass p-6 md:p-8">
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+          <div className="space-y-4">
+            <SkeletonLine width="60%" />
+            <SkeletonBlock width={220} height={56} radius={8} />
+            <SkeletonLine width="45%" />
+            <SkeletonBlock height={12} radius={999} />
+            <div className="grid grid-cols-3 gap-6 pt-2">
+              <SkeletonLine height={28} /><SkeletonLine height={28} /><SkeletonLine height={28} />
+            </div>
+          </div>
+          <div className="space-y-3">
+            <SkeletonLine width="40%" /><SkeletonLine /><SkeletonLine /><SkeletonLine />
+            <SkeletonBlock height={30} radius={6} />
+          </div>
+        </div>
+      </div>
+      <div className="space-y-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="glass p-5 md:p-6">
+            <div className="grid items-center gap-6 md:grid-cols-[1.1fr_1.7fr_0.8fr]">
+              <SkeletonLine width="70%" height={16} />
+              <SkeletonBlock height={8} radius={999} />
+              <SkeletonBlock height={32} radius={4} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function EmptyState() {
+  const { t } = useTranslation()
+  return (
+    <div className="glass animate-fade-in-up p-8 text-center md:p-12">
+      <svg width="120" height="28" viewBox="0 0 120 28" className="mx-auto block" aria-hidden>
+        <rect x="0" y="10" width="120" height="8" rx="4" fill="rgba(255,255,255,0.06)" />
+        <line x1="60" y1="6" x2="60" y2="22" stroke="rgba(255,255,255,0.35)" strokeWidth="1" strokeDasharray="2 2" />
+      </svg>
+      <h3 className="mt-4 text-base font-semibold text-neutral-100">{t('admin.winrate.empty.title', { days: WINDOW_DAYS })}</h3>
+      <p className="mx-auto mt-2 max-w-[46ch] text-sm leading-relaxed text-neutral-500">{t('admin.winrate.empty.body')}</p>
+    </div>
+  )
+}
 
 export default function StrategyWinratePanel() {
   const { t } = useTranslation()
@@ -71,13 +101,10 @@ export default function StrategyWinratePanel() {
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [now, setNow] = useState(() => new Date())
+  const [attempt, setAttempt] = useState(0)
 
-  // 每分钟刷新一次时钟；时段轴与推荐区共用这一个 now（两个组件自己都不带计时
-  // 器，就是为了在这里对齐——各转各的会在整分钟边界短暂不一致）。
-  // Refresh the clock once a minute; the timeline and the recommendations
-  // share this single `now` (neither component carries its own timer,
-  // precisely so they stay aligned here instead of drifting apart at a
-  // minute boundary).
+  // 每分钟刷新一次时钟；时段状态与"进行中"标记共用这一个 now，各子组件都不
+  // 自带计时器。/ One clock per minute, shared by every child; none keeps its own.
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 60_000)
     return () => window.clearInterval(id)
@@ -85,6 +112,7 @@ export default function StrategyWinratePanel() {
 
   useEffect(() => {
     let cancelled = false
+    setLoading(true)
     adminApi
       .strategyWinrate(WINDOW_DAYS)
       .then((res) => {
@@ -102,63 +130,62 @@ export default function StrategyWinratePanel() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [attempt])
 
-  // 当前活跃时段 key 列表，喂给 StrategyDetail 做高亮。优先用 recoData（固定
-  // 7 天，和推荐区判"活跃"用的是同一份 sessions）兜底 data——两者的 sessions
-  // 字段本就是同一套后端配置，谁先到手都行；`?? []` 只在两者都还没回来时生效。
-  // Active-session keys fed to StrategyDetail for highlighting. Prefers
-  // recoData (the fixed 7-day range RecommendationCards itself judges
-  // "active" against) with data as a fallback — both carry the same backend
-  // session config in `sessions`, so whichever arrives first is fine; the
-  // `?? []` only matters before either has landed.
   const activeKeys =
     data?.sessions.filter((s) => sessionStatus(s, now).state === 'active').map((s) => s.key) ?? []
-
+  const empty = data !== null && data.overall.total.samples === 0
 
   return (
-    <div className="space-y-4">
-      <div className="glass p-5">
-        <h3 className="mb-1 font-display text-lg font-semibold text-neutral-100">{t('admin.winrate.title')}</h3>
-        {/* 口径说明收进折叠项：第一次看有用，第一百次看是噪音，而它原本占了整个
-            卡片、把决策页的顶部变成一段文档。默认收起，需要时展开。
-            The methodology note is collapsed: useful the first time, noise the
-            hundredth, and it previously filled the whole card — turning the top
-            of a decision page into documentation. Collapsed by default. */}
-        <details className="mb-4 group">
-          <summary className="cursor-pointer list-none text-[11px] text-neutral-500 transition hover:text-neutral-300">
-            {t('admin.winrate.hintToggle')}
-            <span className="ml-1 inline-block transition group-open:rotate-90">›</span>
-          </summary>
-          <p className="mt-2 text-xs leading-5 text-neutral-500">{t('admin.winrate.hint')}</p>
-        </details>
+    <div className="space-y-6">
+      <header className="px-1">
+        <h2 className="font-display text-xl font-semibold text-neutral-100">{t('admin.winrate.title')}</h2>
+        <p className="mt-1 text-sm text-neutral-500">{t('admin.winrate.subtitle', { days: WINDOW_DAYS })}</p>
+      </header>
 
-        {error && <p className="py-3 text-sm text-down">{error}</p>}
-
-        {loading && !data ? (
-          <div className="space-y-2">
-            <SkeletonLine width="100%" />
-            <SkeletonLine width="85%" />
-            <SkeletonLine width="65%" />
-          </div>
-        ) : data && data.overall.total.samples === 0 ? (
-          <p className="py-3 text-sm text-neutral-500">{t('admin.winrate.empty')}</p>
-        ) : null}
-      </div>
-
-      {data && data.overall.total.samples > 0 && (
-        <>
-          <SessionTimeline sessions={data.sessions} now={now} />
-          <OverviewPanel data={data} />
-          <div>
-            <StrategyDetail data={data} activeKeys={activeKeys} selected={selected}
-                            onSelect={setSelected} now={now} />
-          </div>
-          <p className="px-1 text-[11px] leading-5 text-neutral-600">
-            {t('admin.winrate.footnote', { min: MIN_SAMPLES })}
-          </p>
-        </>
+      {error && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm"
+             style={{ background: 'var(--down-bg)', color: 'var(--down)' }} role="alert">
+          <span>{t('admin.winrate.error', { message: error })}</span>
+          <button type="button" onClick={() => setAttempt((n) => n + 1)}
+                  className="rounded-full border border-current px-3 py-1 text-xs transition active:scale-[0.97]">
+            {t('admin.winrate.retry')}
+          </button>
+        </div>
       )}
+
+      {loading && !data ? (
+        <LoadingSkeleton />
+      ) : empty ? (
+        <EmptyState />
+      ) : data ? (
+        <>
+          <HeroSummary data={data} now={now} />
+          <ReadingGuide />
+
+          <section>
+            <header className="mb-3 px-1">
+              <h2 className="text-lg font-semibold text-neutral-100">{t('admin.winrate.strategies.title')}</h2>
+              <p className="mt-1 text-xs text-neutral-500">{t('admin.winrate.strategies.caption')}</p>
+            </header>
+            <StrategyList data={data} selected={selected} onSelect={setSelected} activeKeys={activeKeys} />
+          </section>
+
+          <SymbolBoard data={data} />
+
+          {/* 口径说明收进折叠项：第一次看有用，第一百次看是噪音。
+              The methodology folds away: useful once, noise the hundredth time. */}
+          <details className="group px-1">
+            <summary className="cursor-pointer list-none text-xs text-neutral-500 transition hover:text-neutral-300">
+              {t('admin.winrate.method.toggle')}
+              <span className="ml-1 inline-block transition group-open:rotate-90">›</span>
+            </summary>
+            <p className="mt-2 max-w-[72ch] text-xs leading-5 text-neutral-500">
+              {t('admin.winrate.method.body', { min: MIN_SAMPLES })}
+            </p>
+          </details>
+        </>
+      ) : null}
     </div>
   )
 }

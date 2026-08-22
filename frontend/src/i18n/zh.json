@@ -985,25 +985,101 @@
       "tickets": "工单管理"
     },
     "winrate": {
-      "title": "策略分时段胜率",
-      "hint": "只统计 TradingView 推送的平台信号，固定统计近 7 天。按信号「发出时刻」归入时段。胜率 = 止盈数 ÷ (止盈数 + 止损数)；尚未走出结果和行情追踪中断的信号不进分母。时段用各金融中心的本地时间定义，夏令时切换自动跟随。欧洲盘与纽约盘每天重叠约四小时，重叠时段的信号同时计入两边，因此各时段样本数之和会大于总数。",
-      "empty": "该窗口内没有 TradingView 信号。",
-      "colStrategy": "策略",
-      "colTotal": "总计",
-      "unnamed": "未命名策略",
-      "yourTime": "你的时间 {{start}}–{{end}}",
-      "outsideNote": "三个时段之外",
-      "thinSample_other": "{{count}} 笔",
-      "thinSampleHint": "已判定 {{resolved}} 笔，共 {{samples}} 条信号——样本太少，不显示百分比。",
-      "cellHint": "止盈 {{tp}} · 止损 {{sl}} · 待判定 {{pending}} · 追踪中断 {{stale}}",
-      "footnote": "已判定样本少于 {{min}} 笔的格子只显示笔数：把三五笔的结果写成百分比，看着像结论，其实和抛硬币没区别。",
-      "wilsonTick": "排序依据：胜率置信下限",
-      "timelineLabel": "24 小时时段轴",
-      "sessionWindowTitle": "{{name}} {{start}}–{{end}}",
-      "activeLeft": "进行中 · 剩 {{time}}",
-      "startsIn": "{{time}} 后开始",
-      "allStrategiesTab": "全部策略",
-      "allSymbols": "全部",
+      "title": "策略胜率",
+      "subtitle": "近 {{days}} 天 · 只统计 TradingView 推送的平台信号",
+      "empty": {
+        "title": "近 {{days}} 天还没有 TradingView 信号",
+        "body": "信号通过 TradingView Webhook 进来、并走出止盈或止损之后，这里就会有数字。"
+      },
+      "error": "加载失败：{{message}}",
+      "retry": "重试",
+      "hero": {
+        "all": "全部信号",
+        "lead": "近 {{days}} 天，平台信号已分出胜负 {{resolved}} 笔，整体胜率",
+        "leadThin": "近 {{days}} 天只有 {{count}} 笔分出胜负，还算不出可靠的胜率。",
+        "leadWaiting": "近 {{days}} 天有 {{n}} 条信号，但还没有一笔分出胜负。",
+        "range": "考虑到笔数，真实水平大约在 {{low}}–{{high}} 之间",
+        "wins": "赢 {{n}} 笔",
+        "losses": "输 {{n}} 笔",
+        "half": "一半",
+        "holding": "平均多久出结果",
+        "pending": "还在等结果",
+        "pendingValue": "{{n}} 笔",
+        "stale": "另有 {{n}} 笔追踪中断，不计入",
+        "coverage": "覆盖范围",
+        "coverageStrategies_other": "{{count}} 个策略",
+        "coverageSymbols_other": "{{count}} 个品种",
+        "nowTitle": "现在是什么盘"
+      },
+      "guide": {
+        "lead": "怎么读：离一半越远、笔数越多，越容易下结论——每个判定都已经把这两点算进去了。",
+        "strong": "可以当结论",
+        "weak": "也是结论，只是往坏的方向",
+        "even": "看不出优势",
+        "unsure": "胜率在一半附近，现有笔数还分不出高低——等笔数多了再看",
+        "thin": "少于 {{min}} 笔不显示百分比"
+      },
+      "verdict": {
+        "strong": "明显高于一半",
+        "weak": "明显低于一半",
+        "even": "和一半差不多",
+        "unsure": "还看不出高低",
+        "thin_other": "只有 {{count}} 笔",
+        "waiting_other": "{{count}} 笔还在等结果",
+        "broken_other": "{{count}} 笔追踪中断，没算进来",
+        "none": "没有信号"
+      },
+      "strategies": {
+        "title": "每个策略",
+        "caption": "按信号数量排序，不是按胜率排名——胜率高不等于更赚钱。点一张卡看细节。",
+        "unnamed": "未命名策略",
+        "holding": "平均 {{time}} 出结果",
+        "pending_other": "{{count}} 笔等结果",
+        "stale_other": "{{count}} 笔追踪中断",
+        "winsLosses": "赢 {{tp}} · 输 {{sl}}",
+        "activity": "近 7 天每天信号量",
+        "activityTotal": "共 {{n}} 条",
+        "activityAria": "近 7 天每天信号量，共 {{count}} 条",
+        "dayTitle": "第 {{day}} 天：{{count}} 条信号",
+        "expand": "看细节",
+        "collapse": "收起"
+      },
+      "detail": {
+        "intro": "这个策略在不同条件下准不准：",
+        "allSymbols": "全部品种",
+        "bySession": "哪个时段更准？",
+        "bySessionHint": "按信号发出的时刻算。欧洲盘和纽约盘每天重叠约 4 小时，重叠时段的信号两边都算，所以各时段笔数加起来会大于总数。",
+        "bySide": "做多还是做空更准？",
+        "bySideHint": "方向认不出的老信号不计入任何一侧。",
+        "byWeekday": "星期几更准？",
+        "byWeekdayHint": "近 7 天每个星期几各占整 24 小时；星期几按国际标准时间（UTC）算，可能和你本地的日期差几小时。只含已分出胜负的信号。",
+        "holding": "一般多久出结果？",
+        "holdingHint": "从信号发出到碰到止盈或止损的平均时长；只算已分出胜负的信号。",
+        "holdingOverall": "总体",
+        "holdingEmpty": "还没有分出胜负的信号。",
+        "cellHint": "赢 {{tp}} · 输 {{sl}}",
+        "trades_other": "{{n}} 笔"
+      },
+      "symbols": {
+        "title": "每个品种",
+        "caption": "把所有策略的信号合在一起看——同一个品种可能有多个策略在发信号。"
+      },
+      "method": {
+        "toggle": "这些数字是怎么算的",
+        "body": "只统计 TradingView 推送的平台信号，固定近 7 天。胜率 = 止盈数 ÷（止盈数 + 止损数）；尚未走出结果和行情追踪中断的信号不进分母。「明显高于 / 低于一半」的判定依据是胜率的 95% 置信区间是否整体落在 50% 一侧，笔数越多区间越窄；已分出胜负少于 {{min}} 笔的格子只显示笔数。时段用各金融中心的本地时间定义，夏令时切换自动跟随。"
+      },
+      "timeline": {
+        "label": "24 小时时段轴",
+        "window": "{{name}} {{start}}–{{end}}",
+        "yourTime": "你的时间 {{start}}–{{end}}",
+        "activeLeft": "进行中 · 剩 {{time}}",
+        "startsIn": "{{time}} 后开始",
+        "openNow": "进行中",
+        "now": "现在"
+      },
+      "aria": {
+        "tug": "{{label}}：赢 {{tp}} 笔，输 {{sl}} 笔，胜率 {{rate}}"
+      },
       "unit": {
         "min": "分钟",
         "h": "小时",
@@ -1022,42 +1098,12 @@
         "sat": "周六",
         "sun": "周日"
       },
-      "chart": {
-        "sessions": "分时段胜率",
-        "sessionsHint": "按信号发出时刻归入时段。欧洲盘与纽约盘每天重叠约四小时，重叠区信号两边都计入。",
-        "sides": "做多 / 做空胜率",
-        "sidesHint": "方向认不出的历史信号不计入任何一侧，因此两侧笔数之和可能小于总数。",
-        "holding": "平均持仓时间",
-        "holdingHint": "从信号发出到分出胜负的平均时长；只算已判定的信号。",
-        "holdingOverall": "总体",
-        "holdingEmpty": "还没有已判定的信号。",
-        "weekday": "星期 × 方向",
-        "weekdayHint": "固定近 7 天，每个星期几各占整 24 小时。颜色深浅 = 偏离 50% 的程度，绿高红低；格子里第二个数字是笔数。只含已判定信号，不足 5 笔只显示笔数。星期几按 UTC。",
-        "cellHint": "止盈 {{tp}} · 止损 {{sl}}",
-        "heatLegend": "颜色以 50% 为中点发散：越绿越高于抛硬币，越红越低。样本不足的格子不上色。",
-        "intervalAria": "{{label}} 胜率 {{rate}}，95% 置信区间 {{low}} 到 {{high}}，{{tp}}/{{n}} 笔",
-        "intervalLegend": "横杠是 95% 置信区间，宽度即样本厚薄——5 笔的 50% 横跨大半根轴，上千笔的收成一点。区间完全在虚线（50%）一侧才上绿/红：跨过 50% 说明与抛硬币还分不出来，显示为灰。"
-      },
       "session": {
         "asia": "亚洲盘",
         "europe": "欧洲盘",
         "newyork": "纽约盘",
         "outside": "其他时段"
-      },
-      "hintToggle": "统计口径说明",
-      "overview": {
-        "title": "总览 · 近 7 天",
-        "resolved": "已判定",
-        "rate": "整体胜率",
-        "holding": "平均持仓",
-        "coverage": "品种",
-        "strategies": "{{count}} 个策略",
-        "bySymbol": "分品种表现",
-        "bySymbolHint": "跨全部策略合并计算——同一品种可能有多个策略在发信号，逐策略看只能看到碎片。横杠是 95% 置信区间，跨过 50% 虚线显灰。"
-      },
-      "allStrategies": "全部策略",
-      "pendingOnly_other": "{{count}} 待判",
-      "staleOnly_other": "{{count}} 中断"
+      }
     },
     "invite": {
       "hint": "生成带标记名的推广链接（?ref=码）。通过链接注册的用户，用户列表的「备注」栏会自动写入该链接的标记名。点击数为参考值——无法防刷、跨设备点击不计；注册数以实际创建的账号为准。链接不可删除，合作结束请停用。",
