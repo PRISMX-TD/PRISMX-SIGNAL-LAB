@@ -29,6 +29,7 @@ routers/webhook.py).
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -139,6 +140,27 @@ def _empty_bucket() -> dict[str, int]:
 # into pending: an unrecognized state must never be counted as a win, and must
 # not silently vanish from the totals either.
 _RESULT_KEYS = {"HIT_TP": "hitTp", "HIT_SL": "hitSl", "STALE": "stale"}
+
+
+def wilson_lower_bound(hit: int, n: int, z: float = 1.96) -> float | None:
+    """胜率的 Wilson 95% 置信区间下限，推荐榜的排序键。
+
+    用下限而不是原始胜率排序：样本少的高胜率（80% × 5 笔）区间宽、下限被压低，
+    样本多的稳定胜率（55% × 40 笔）区间窄、下限反而更高——薄样本自动沉底，
+    不需要另设门槛或合成分。n = 已判定笔数（hitTp + hitSl）。
+
+    The Wilson 95% lower bound, used as the recommendation ranking key. Ranking
+    by the bound rather than the raw rate makes thin samples sink on their own:
+    80% of 5 has a wide interval and a low bound, 55% of 40 a narrow one and a
+    higher bound. n is the resolved count.
+    """
+    if n <= 0:
+        return None
+    p = hit / n
+    denom = 1.0 + z * z / n
+    centre = p + z * z / (2.0 * n)
+    margin = z * math.sqrt(p * (1.0 - p) / n + z * z / (4.0 * n * n))
+    return max(0.0, (centre - margin) / denom)
 
 
 def _finalize(bucket: dict[str, int]) -> dict:
