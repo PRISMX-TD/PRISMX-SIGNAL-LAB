@@ -990,14 +990,11 @@
       "empty": "该窗口内没有 TradingView 信号。",
       "colStrategy": "策略",
       "colTotal": "总计",
-      "allStrategies": "全部策略",
       "unnamed": "未命名策略",
       "yourTime": "你的时间 {{start}}–{{end}}",
       "outsideNote": "三个时段之外",
       "thinSample_other": "{{count}} 笔",
       "thinSampleHint": "已判定 {{resolved}} 笔，共 {{samples}} 条信号——样本太少，不显示百分比。",
-      "pendingOnly_other": "{{count}} 待判",
-      "staleOnly_other": "{{count}} 中断",
       "cellHint": "止盈 {{tp}} · 止损 {{sl}} · 待判定 {{pending}} · 追踪中断 {{stale}}",
       "footnote": "已判定样本少于 {{min}} 笔的格子只显示笔数：把三五笔的结果写成百分比，看着像结论，其实和抛硬币没区别。",
       "wilsonTick": "排序依据：胜率置信下限",
@@ -1005,15 +1002,6 @@
       "sessionWindowTitle": "{{name}} {{start}}–{{end}}",
       "activeLeft": "进行中 · 剩 {{time}}",
       "startsIn": "{{time}} 后开始",
-      "recoActive": "{{session}} 进行中 · 该盯什么",
-      "recoNext": "下一时段：{{session}} {{time}} 后 · 提前看什么",
-      "recoEmpty": "数据自 2026-08-21 起积累，已判定 {{resolved}} 笔；某组合满 {{min}} 笔后会出现在这里。",
-      "recoStalled": "判定链路停摆中（见顶部健康条），推荐暂停——判定断了还照常推荐是拿旧数据说假话。",
-      "weekly": "周约 {{count}} 笔",
-      "avgResolve": "平均 {{time}} 分出胜负",
-      "accumulating_other": "样本积累中（{{count}} 个组合）",
-      "dailyBarsLabel": "近 {{days}} 日信号数：{{counts}}",
-      "dailyBarHint_other": "{{count}} 条",
       "allStrategiesTab": "全部策略",
       "allSymbols": "全部",
       "unit": {
@@ -1056,7 +1044,20 @@
         "newyork": "纽约盘",
         "outside": "其他时段"
       },
-      "hintToggle": "统计口径说明"
+      "hintToggle": "统计口径说明",
+      "overview": {
+        "title": "总览 · 近 7 天",
+        "resolved": "已判定",
+        "rate": "整体胜率",
+        "holding": "平均持仓",
+        "coverage": "品种",
+        "strategies": "{{count}} 个策略",
+        "bySymbol": "分品种表现",
+        "bySymbolHint": "跨全部策略合并计算——同一品种可能有多个策略在发信号，逐策略看只能看到碎片。横杠是 95% 置信区间，跨过 50% 虚线显灰。"
+      },
+      "allStrategies": "全部策略",
+      "pendingOnly_other": "{{count}} 待判",
+      "staleOnly_other": "{{count}} 中断"
     },
     "invite": {
       "hint": "生成带标记名的推广链接（?ref=码）。通过链接注册的用户，用户列表的「备注」栏会自动写入该链接的标记名。点击数为参考值——无法防刷、跨设备点击不计；注册数以实际创建的账号为准。链接不可删除，合作结束请停用。",

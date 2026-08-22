@@ -421,6 +421,17 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
     overall: dict[str, dict] = {k: _empty_bucket(days) for k in [*all_keys, "total", *SIDE_KEYS]}
     # {策略名: {品种: {时段键或 "total": 桶}}} / {strategy: {symbol: {session key or "total": bucket}}}
     per_strategy_symbols: dict[str, dict[str, dict[str, dict]]] = {}
+    # 全平台的品种分布（不分策略），喂总览层的「分品种表现」。
+    # "哪些品种在跑、哪些在赢"是跨策略的问题：同一个品种可能有三个策略在发信号，
+    # 逐策略看只能看到碎片。这份聚合不能由前端把各策略的 symbols 加起来求得——
+    # 胜率不是可加量，必须在这里按原始行重新累加。
+    # Platform-wide per-symbol distribution (across all strategies), feeding the
+    # overview layer. "Which symbols are active and which are winning" is a
+    # cross-strategy question: one symbol may carry three strategies' signals, and
+    # looking strategy by strategy only ever shows fragments. The UI cannot derive
+    # this by summing each strategy's symbols — a win rate is not additive, so it
+    # has to be accumulated here from the raw rows.
+    overall_symbols: dict[str, dict[str, dict]] = {}
 
     for indicator, symbol, side, created_at, result, resolved_at in rows:
         if created_at is None:
@@ -504,6 +515,16 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
             }
         _accumulate(sym_map[symbol], bucket_keys, key, day_idx, weekday, side_key, resolve_seconds, False)
 
+        # 同一条信号再记进全平台的品种桶。同样先判空再赋值，不用 setdefault。
+        # The same signal also lands in the platform-wide symbol bucket.
+        if symbol not in overall_symbols:
+            overall_symbols[symbol] = {
+                k: _empty_bucket(days, with_daily=False)
+                for k in [*all_keys, "total", *SIDE_KEYS]
+            }
+        _accumulate(overall_symbols[symbol], bucket_keys, key, day_idx, weekday, side_key,
+                    resolve_seconds, False)
+
     def _shape(buckets: dict[str, dict]) -> dict:
         return {
             "total": _finalize(buckets["total"], days, True),
@@ -564,6 +585,14 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
         # explicitly [] here (not left to the schema's default) — this dict is
         # itself the tested contract, and callers won't necessarily go through
         # Pydantic.
-        "overall": {"strategy": "", **_shape(overall), "symbols": []},
+        # overall 与每个策略行同形状（strategy 为空串），前端可以用同一个渲染
+        # 函数画总览层和单策略层。symbols 这里是**全平台**的品种分布，不再是空
+        # 列表——总览层要靠它回答"哪些品种在跑、哪些在赢"。
+        # Same shape as a strategy row (empty strategy), so one renderer serves
+        # both the overview and the per-strategy layer. `symbols` here is the
+        # platform-wide distribution rather than an empty list: the overview
+        # layer needs it to answer "which symbols are active and winning".
+        "overall": {"strategy": "", **_shape(overall),
+                    "symbols": _shape_symbols(overall_symbols)},
         "strategies": strategies,
     }

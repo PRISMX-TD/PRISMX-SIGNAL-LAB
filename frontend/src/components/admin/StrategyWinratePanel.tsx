@@ -1,8 +1,18 @@
-// 管理后台「策略胜率」子页：24 小时时段轴、「现在该盯什么」推荐区、策略详情
-// 三层拼成一页盯盘决策页。
-// Admin "Strategy Win Rate" sub-tab: the 24h session timeline, the "what to
-// watch now" recommendations, and the strategy detail — one page for live
-// monitoring.
+// 管理后台「策略胜率」子页：时段轴 → 总览层 → 单策略详情，三段两层。
+//
+// 总览层不分策略，回答"这 7 天平台整体发生了什么"；详情层选一个策略深入看，
+// 回答"这一个该怎么调"。原来那个按胜率排名的「现在该盯什么」推荐区已删除：
+// 策略还在调整期，排名是会一直变的动态目标，把它放在最显眼处只会引导人去追
+// 当期名次；而且胜率排名与赚不赚钱并不同向（盈亏比从 1.0 到 3.0 差三倍时，
+// 胜率最低的策略反而可能期望最高）。
+//
+// Session timeline, then an overview layer, then a per-strategy detail layer.
+// The overview is strategy-agnostic ("what happened on the platform"), the
+// detail layer is one strategy in depth ("how should I adjust this one"). The
+// old win-rate-ranked "what to watch now" area is gone: the strategies are still
+// being tuned so a ranking is a moving target, and win-rate order does not track
+// profitability anyway (with reward:risk spanning 1.0 to 3.0, the lowest
+// win-rate strategy can carry the highest expectancy).
 //
 // 判定链路健康条（窗口内四态计数 + 最近一次判定时间）已按产品要求移除。
 // 后端仍返回 lastResolvedAt，判定停摆时的诊断改由这条 SQL 主动查：
@@ -21,14 +31,14 @@
 // The session windows (hour range + IANA zone) ship with the payload and are
 // deliberately NOT duplicated here — DST correctness is settled once in the
 // backend; this file only restates the window in the viewer's own clock.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
 import { SkeletonLine } from '../Skeleton'
 import type { AdminStrategyWinRate } from '../../api/types'
 import { MIN_SAMPLES, sessionStatus } from './winrate/shared'
 import SessionTimeline from './winrate/SessionTimeline'
-import RecommendationCards from './winrate/RecommendationCards'
+import OverviewPanel from './winrate/OverviewPanel'
 import StrategyDetail from './winrate/StrategyDetail'
 
 // 全站固定 7 天，不给切换器。
@@ -61,12 +71,6 @@ export default function StrategyWinratePanel() {
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [now, setNow] = useState(() => new Date())
-  // 推荐卡点击后滚动到这里——详情区不管在渲染"全部策略"矩阵还是具体策略的
-  // 品种页签，都是这同一个容器，点击不需要等它重新挂载。
-  // Recommendation-card clicks scroll here — the detail area is this same
-  // container whether it's showing the all-strategies matrix or a single
-  // strategy's symbol tabs, so the click never has to wait on a remount.
-  const detailRef = useRef<HTMLDivElement>(null)
 
   // 每分钟刷新一次时钟；时段轴与推荐区共用这一个 now（两个组件自己都不带计时
   // 器，就是为了在这里对齐——各转各的会在整分钟边界短暂不一致）。
@@ -111,10 +115,6 @@ export default function StrategyWinratePanel() {
   const activeKeys =
     data?.sessions.filter((s) => sessionStatus(s, now).state === 'active').map((s) => s.key) ?? []
 
-  const handleSelectFromReco = (name: string) => {
-    setSelected(name)
-    detailRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
 
   return (
     <div className="space-y-4">
@@ -149,8 +149,8 @@ export default function StrategyWinratePanel() {
       {data && data.overall.total.samples > 0 && (
         <>
           <SessionTimeline sessions={data.sessions} now={now} />
-          {<RecommendationCards data={data} now={now} onSelectStrategy={handleSelectFromReco} />}
-          <div ref={detailRef}>
+          <OverviewPanel data={data} />
+          <div>
             <StrategyDetail data={data} activeKeys={activeKeys} selected={selected}
                             onSelect={setSelected} now={now} />
           </div>
