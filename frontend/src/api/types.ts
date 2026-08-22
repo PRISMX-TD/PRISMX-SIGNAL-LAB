@@ -163,15 +163,31 @@ export interface WinRateBucket {
   avgResolveSeconds: number | null
   // samples ÷ days × 7 / normalized weekly count
   weeklySignals: number
-  // 自窗口起点每 24h 一桶，旧→新，长度=days；品种层为 null
-  // per-24h counts, oldest→newest; null at symbol level
-  dailySamples: number[] | null
+  // 自窗口起点每 24h 一桶，旧→新，长度=days；品种层与方向桶为 null
+  // per-24h buckets, oldest→newest; null at the symbol layer and on side buckets
+  daily: DailyOutcome[] | null
+}
+
+// 某一天的信号数与胜负拆分。前端画胜/负堆叠柱而非每日胜率百分比——
+// 单个策略一天只有三五笔已判定，百分比会在 100/0/50 之间跳，那是假精确。
+// One day's volume and win/loss split. The UI stacks wins and losses rather
+// than plotting a daily win-rate percentage: a strategy resolves only a handful
+// of trades a day, so a rate would swing wildly.
+export interface DailyOutcome {
+  samples: number // 含未判定 / includes unresolved
+  tp: number
+  sl: number
 }
 
 export interface SymbolWinRate {
   symbol: string
   total: WinRateBucket
   sessions: Record<string, WinRateBucket>
+  // 键为 BUY / SELL。方向认不出的历史行不进任何一侧，故两者之和可能小于
+  // total.samples——刻意如此，不是漏计。
+  // Keyed BUY / SELL. Legacy rows with an unrecognized side join neither, so the
+  // two may sum to less than total.samples — deliberate, not a miscount.
+  sides: Record<string, WinRateBucket>
 }
 
 export interface StrategyWinRate {
@@ -182,6 +198,11 @@ export interface StrategyWinRate {
   // Keyed asia / europe / newyork / outside. Sessions overlap, so the per-session
   // samples sum to more than total.samples.
   sessions: Record<string, WinRateBucket>
+  // 键为 BUY / SELL。方向认不出的历史行不进任何一侧，故两者之和可能小于
+  // total.samples——刻意如此，不是漏计。
+  // Keyed BUY / SELL. Legacy rows with an unrecognized side join neither, so the
+  // two may sum to less than total.samples — deliberate, not a miscount.
+  sides: Record<string, WinRateBucket>
   // 品种子分层，已判定笔数降序；overall 行恒为 [] / per-symbol layer, [] on overall
   symbols: SymbolWinRate[]
 }
@@ -198,25 +219,6 @@ export interface AdminStrategyWinRate {
   sessions: SessionWindow[]
   overall: StrategyWinRate
   strategies: StrategyWinRate[] // 已判定样本数降序 / by resolved samples desc
-}
-
-export interface StrategySignalDetail {
-  side: 'BUY' | 'SELL'
-  entry: number | null
-  stopLoss: number | null
-  takeProfit: number | null
-  createdAt: string
-  sessionKeys: string[]
-  result: SignalResult
-  resolveSeconds: number | null
-}
-
-export interface AdminStrategySignalList {
-  strategy: string
-  symbol: string
-  days: number
-  total: number // 窗口内总条数，列表上限 50 / real count; list capped at 50
-  signals: StrategySignalDetail[]
 }
 
 // 管理后台：订阅定价设置 / admin: subscription pricing settings

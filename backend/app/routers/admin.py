@@ -22,9 +22,9 @@ from starlette.concurrency import run_in_threadpool
 from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
 from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, Signal, User
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminStrategySignalListOut, AdminStrategyWinRateOut, AdminTrialSettings, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
-from app.services.strategy_winrate import compute_strategy_session_winrate, session_keys_for
+from app.services.strategy_winrate import compute_strategy_session_winrate
 from app.services.settings_store import (
     get_broker_settings,
     get_candle_settings,
@@ -553,115 +553,6 @@ def strategy_winrate(
     thread pool, leaving the event loop free for the live-quote WebSockets.
     """
     return compute_strategy_session_winrate(db, days)
-
-
-def _strategy_winrate_signals_impl(db: Session, strategy: str, symbol: str, days: int) -> dict:
-    """明细查询实体。策略名匹配故意放在 Python 里做（不用 SQL TRIM 模拟），
-    详见下方长注释；其余过滤（source/symbol/窗口）仍下推给 SQL。
-    Strategy-name matching is deliberately done in Python, not via SQL TRIM —
-    see the long comment below; the other filters (source/symbol/window) still
-    go to SQL.
-
-    早期版本这里写的是 `func.trim(func.coalesce(Signal.indicator, "")) ==
-    strategy.strip()`，本意是"与聚合侧同口径"，但没有做到：SQL 标准 TRIM()
-    （SQLite、PostgreSQL 都一样）不带参数时**只剥离半角空格**，不认 tab、
-    换行等其它空白字符；而聚合侧 `strategy_winrate.py` 用的是 Python
-    `str.strip()`，会剥掉所有空白类字符。于是一个被 "\tAlpha\n" 这种非空格
-    空白垫过的策略名，聚合侧按 "Alpha" 分组、明细侧的 SQL TRIM 却查不到它——
-    正是"矩阵里算得进、点开明细却看不见"的那种静默不一致，而且是 brief 原文
-    那行 SQL 自己就达不到它自己声明的不变量，不是 Python 侧的问题。
-
-    改法：让两侧结构性地共用同一行代码 `(x or "").strip()`，而不是让 SQL 去
-    模仿 Python 的空白语义——语义永远不会再第二次漂移。代价是要把该
-    (symbol, window) 组合下的整批行拉到 Python 里再过滤/计数，SQL 侧无法再
-    用 count()/LIMIT 直接给出真实总数。这里认为代价可接受：这是管理员专用、
-    单品种、窗口 ≤90 天的低频端点（只在点开品种页签时才请求），聚合端点本来
-    就要在同一次请求里扫整个窗口下全部品种的信号，这里至多是同一批行再多做
-    一次 strip 比较。
-
-    Earlier this line read `func.trim(func.coalesce(Signal.indicator, "")) ==
-    strategy.strip()`, meant to match the aggregation side's grouping — but it
-    didn't: the SQL-standard TRIM() (identical in SQLite and PostgreSQL) with
-    no argument strips ASCII spaces only, not tabs, newlines, or other
-    whitespace, while the aggregation side (strategy_winrate.py) uses Python's
-    str.strip(), which strips every whitespace class. A strategy name padded
-    with "\tAlpha\n" therefore groups under "Alpha" on the aggregation side but
-    the SQL TRIM() here fails to find it — the exact "counted into the matrix
-    cell, invisible in the drill-down" failure, and the brief's own SQL line
-    couldn't satisfy the invariant it was written to satisfy.
-
-    Fix: make both sides structurally share the same line of code,
-    `(x or "").strip()`, instead of asking SQL to imitate Python's whitespace
-    semantics — the two definitions can never drift apart again. The cost is
-    pulling the whole (symbol, window) row set into Python before
-    filtering/counting, so SQL can no longer hand back a true total via
-    count()/LIMIT directly. Accepted here: this is an admin-only,
-    single-symbol, <=90-day endpoint fetched only when a symbol tab is opened,
-    and the aggregation endpoint already scans every symbol in the window on
-    one request — this only adds one more strip() comparison over the same
-    rows.
-    """
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
-    # 只取实际用到的 8 列，不拉整行 ORM 实体。signals 表有 16 列，其余（symbol/
-    # source/status/expire_at/external_id/id/baseline_*）这里一个都不读——全行
-    # SELECT 在 Supabase 上是纯浪费的 Egress，隔壁 strategy_winrate.py 的聚合端点
-    # 早就为同一张表论证并采用了这条约定，同一个页面上的两个端点不该反着写。
-    # indicator 也在列内：策略名匹配是在 Python 侧做的（见上面长注释），少取这一列
-    # 就没法过滤了。
-    # Only the 8 columns actually used, not whole ORM entities. The signals table
-    # has 16 columns and none of the rest (symbol/source/status/expire_at/
-    # external_id/id/baseline_*) is read here — a full-row SELECT is pure wasted
-    # Egress on Supabase, a convention the aggregation endpoint next door
-    # (strategy_winrate.py) already argued for and adopted on this very table;
-    # two endpoints on one page shouldn't disagree about it. `indicator` is in the
-    # list because the strategy-name match happens in Python (see the long
-    # comment above) and without that column there is nothing to filter on.
-    rows = (
-        db.query(
-            Signal.side, Signal.entry, Signal.stop_loss, Signal.take_profit,
-            Signal.created_at, Signal.result, Signal.resolved_at, Signal.indicator,
-        )
-        .filter(
-            Signal.source == "tradingview",
-            Signal.symbol == symbol,
-            Signal.created_at >= cutoff,
-        )
-        .order_by(Signal.created_at.desc())
-        .all()
-    )
-    target = strategy.strip()
-    # 与 compute_strategy_session_winrate 的分组键同一行代码：(indicator or "").strip()。
-    # Same line of code as compute_strategy_session_winrate's grouping key.
-    matched = [s for s in rows if (s.indicator or "").strip() == target]
-    total = len(matched)  # 真实总数，必须在 Python 过滤之后算 / true count, taken after the Python filter
-    signals = []
-    for s in matched[:50]:
-        resolve_seconds = None
-        if s.result in ("HIT_TP", "HIT_SL") and s.resolved_at and s.created_at:
-            resolve_seconds = (s.resolved_at - s.created_at).total_seconds()
-        signals.append({
-            "side": s.side, "entry": s.entry, "stopLoss": s.stop_loss,
-            "takeProfit": s.take_profit, "createdAt": s.created_at,
-            "sessionKeys": session_keys_for(s.created_at) if s.created_at else [],
-            "result": s.result or "PENDING",
-            "resolveSeconds": resolve_seconds,
-        })
-    return {"strategy": strategy, "symbol": symbol, "days": days,
-            "total": total, "signals": signals}
-
-
-@router.get("/strategy-winrate/signals", response_model=AdminStrategySignalListOut)
-def strategy_winrate_signals(
-    strategy: str = Query(..., max_length=128),
-    symbol: str = Query(..., max_length=20),
-    days: int = Query(7, ge=1, le=90),
-    db: Session = Depends(get_db),
-    _admin: User = Depends(require_admin),
-):
-    """某（策略, 品种）组合窗口内的信号明细，最多 50 条、时间倒序。
-    只在管理员点开品种页签时请求，不塞进主响应。
-    Drill-down detail for one (strategy, symbol) combo; fetched on demand."""
-    return _strategy_winrate_signals_impl(db, strategy, symbol, days)
 
 
 # ---------- 订阅定价设置 / subscription pricing settings ----------

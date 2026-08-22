@@ -84,6 +84,23 @@ SESSIONS: tuple[TradingSession, ...] = (
 # the total and read as missing data.
 OUTSIDE_KEY = "outside"
 
+# 做多/做空两个方向桶。与时段桶并排住在同一个 dict 里（`_accumulate` 的 keys
+# 元组一次带上），而不是另起一套累加结构——一条信号只遍历一次就同时记进
+# 总计、它命中的各时段、以及它自己的方向。
+# 方向值域来自 webhook 摄入侧的 `payload.side.upper()`（Literal 已限定 BUY/SELL，
+# 见 routers/webhook.py），但历史行仍可能是别的写法：**认不出的方向不进任何
+# 方向桶**，宁可让 BUY+SELL 加起来小于总数，也不把一条方向不明的信号硬塞进
+# 某一侧——那会让"做多更赚还是做空更赚"这个结论建立在猜测上。
+# Long/short buckets, living in the same dict as the session buckets (carried in
+# the same `_accumulate` keys tuple) rather than a second accumulator: one pass
+# per signal records it into the total, each session it hits, and its own side.
+# The value domain comes from `payload.side.upper()` at ingest (a Literal
+# restricted to BUY/SELL, see routers/webhook.py), but legacy rows may hold
+# anything: an unrecognized side joins NO side bucket. Better that BUY+SELL sum
+# to less than the total than to shove a direction-unknown signal onto one side
+# and build "does long or short do better" on a guess.
+SIDE_KEYS: tuple[str, ...] = ("BUY", "SELL")
+
 # 时段之间**故意允许重叠**：伦敦 08:00–17:00 与纽约 08:00–17:00 在夏令时下有
 # 四小时重叠（伦敦 13:00–17:00），那正是外汇日内波动最大的一段。落在重叠区的
 # 信号同时计入两个时段，因此各时段样本数之和 > 总样本数——这是正确的（问的是
@@ -150,7 +167,21 @@ def _empty_bucket(days: int, with_daily: bool = True) -> dict:
     return {
         "hitTp": 0, "hitSl": 0, "pending": 0, "stale": 0,
         # 内部累加器，_finalize 时弹出 / internal accumulators, popped by _finalize
-        "_resolveSum": 0.0, "_resolveN": 0, "_daily": [0] * days if with_daily else [],
+        # 每日三条并行数组：总数 / 止盈 / 止损。前端的每日图画的是胜负堆叠柱，
+        # 而不是每日胜率百分比——7 天窗口下单个策略一天只有三五笔已判定，
+        # 画成百分比就是 100%/0%/50% 跳，正是 MIN_SAMPLES 那条纪律要防的假精确。
+        # 堆叠柱同时表达"那天多活跃"和"赢多还是输多"，不拿三两笔冒充百分比。
+        # Three parallel per-day arrays: total / take-profit / stop-loss. The UI
+        # draws stacked win-loss bars rather than a daily win-rate percentage —
+        # a single strategy resolves only three to five trades a day in a 7-day
+        # window, so a percentage would swing 100/0/50 — exactly the false
+        # precision the MIN_SAMPLES rule exists to prevent. Stacked bars carry
+        # both "how busy was that day" and "did it win or lose" without passing
+        # two or three trades off as a rate.
+        "_resolveSum": 0.0, "_resolveN": 0,
+        "_daily": [0] * days if with_daily else [],
+        "_dailyTp": [0] * days if with_daily else [],
+        "_dailySl": [0] * days if with_daily else [],
     }
 
 
@@ -187,6 +218,10 @@ def _accumulate(
         b[result_key] += 1
         if with_daily:
             b["_daily"][day_idx] += 1
+            if result_key == "hitTp":
+                b["_dailyTp"][day_idx] += 1
+            elif result_key == "hitSl":
+                b["_dailySl"][day_idx] += 1
         if resolve_seconds is not None:
             b["_resolveSum"] += resolve_seconds
             b["_resolveN"] += 1
@@ -239,7 +274,13 @@ def _finalize(bucket: dict, days: int, include_daily: bool) -> dict:
         "avgResolveSeconds": (bucket["_resolveSum"] / resolve_n) if resolve_n else None,
         "weeklySignals": round(samples / days * 7, 1),
         # 品种层不下发每日分布：样本太薄，柱图全是零 / omitted at symbol level
-        "dailySamples": list(bucket["_daily"]) if include_daily else None,
+        # 每格 {samples, tp, sl}：samples 含未判定，tp+sl 才是那天的已判定数。
+        # Per entry {samples, tp, sl}: samples includes unresolved rows; only
+        # tp+sl is that day's resolved count.
+        "daily": [
+            {"samples": n, "tp": t, "sl": l}
+            for n, t, l in zip(bucket["_daily"], bucket["_dailyTp"], bucket["_dailySl"])
+        ] if include_daily else None,
     }
 
 
@@ -273,7 +314,7 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
     # breakdown (Task 3).
     cutoff_naive = cutoff.replace(tzinfo=None)
     rows = (
-        db.query(Signal.indicator, Signal.symbol, Signal.created_at,
+        db.query(Signal.indicator, Signal.symbol, Signal.side, Signal.created_at,
                  Signal.result, Signal.resolved_at)
         .filter(
             Signal.source == "tradingview",
@@ -307,11 +348,11 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
     all_keys = [s.key for s in SESSIONS] + [OUTSIDE_KEY]
     # {策略名: {时段键或 "total": 桶}} / {strategy: {session key or "total": bucket}}
     per_strategy: dict[str, dict[str, dict]] = {}
-    overall: dict[str, dict] = {k: _empty_bucket(days) for k in [*all_keys, "total"]}
+    overall: dict[str, dict] = {k: _empty_bucket(days) for k in [*all_keys, "total", *SIDE_KEYS]}
     # {策略名: {品种: {时段键或 "total": 桶}}} / {strategy: {symbol: {session key or "total": bucket}}}
     per_strategy_symbols: dict[str, dict[str, dict[str, dict]]] = {}
 
-    for indicator, symbol, created_at, result, resolved_at in rows:
+    for indicator, symbol, side, created_at, result, resolved_at in rows:
         if created_at is None:
             continue
         # 策略名缺失的信号归到一个显式的空串键，前端展示成「未命名策略」。
@@ -348,12 +389,20 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
         # The per-symbol breakdown (Task 3) adds another lookup just like this
         # one, so fix the pattern here before it gets copied three times.
         if name not in per_strategy:
-            per_strategy[name] = {k: _empty_bucket(days) for k in [*all_keys, "total"]}
+            per_strategy[name] = {k: _empty_bucket(days) for k in [*all_keys, "total", *SIDE_KEYS]}
         # 这条信号要记进哪几个桶：总计 + 它命中的每个时段（时段之间会重叠，所以
         # 可能不止一个）。三层累加共用同一份 keys。
         # Which buckets this signal lands in: the total plus every session it hit
         # (sessions overlap, so possibly more than one). All three layers share it.
+        # 方向认不出就不进方向桶（见 SIDE_KEYS 的说明），此时该信号仍正常
+        # 计入总计与时段——只是不参与做多/做空对比。
+        # An unrecognized side joins no side bucket (see SIDE_KEYS); the signal
+        # still counts toward the total and its sessions, just not the long/short
+        # comparison.
+        side_key = (side or "").strip().upper()
         bucket_keys = ("total", *session_keys)
+        if side_key in SIDE_KEYS:
+            bucket_keys = (*bucket_keys, side_key)
         _accumulate(per_strategy[name], bucket_keys, key, day_idx, resolve_seconds, True)
         _accumulate(overall, bucket_keys, key, day_idx, resolve_seconds, True)
 
@@ -373,7 +422,8 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
         sym_map = per_strategy_symbols[name]
         if symbol not in sym_map:
             sym_map[symbol] = {
-                k: _empty_bucket(days, with_daily=False) for k in [*all_keys, "total"]
+                k: _empty_bucket(days, with_daily=False)
+                for k in [*all_keys, "total", *SIDE_KEYS]
             }
         _accumulate(sym_map[symbol], bucket_keys, key, day_idx, resolve_seconds, False)
 
@@ -381,6 +431,12 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
         return {
             "total": _finalize(buckets["total"], days, True),
             "sessions": {k: _finalize(buckets[k], days, True) for k in all_keys},
+            # 方向桶不下发每日分布：再按天切一刀样本就更薄了，而"做多还是做空更好"
+            # 是个跨整个窗口的问题，不需要按天看。
+            # Side buckets ship no per-day distribution: slicing by day on top of
+            # by direction thins the sample further, and "does long or short do
+            # better" is a whole-window question anyway.
+            "sides": {k: _finalize(buckets[k], days, False) for k in SIDE_KEYS},
         }
 
     def _shape_symbols(sym_map: dict[str, dict]) -> list[dict]:
@@ -389,6 +445,7 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
                 "symbol": sym,
                 "total": _finalize(b["total"], days, False),
                 "sessions": {k: _finalize(b[k], days, False) for k in all_keys},
+                "sides": {k: _finalize(b[k], days, False) for k in SIDE_KEYS},
             }
             for sym, b in sym_map.items()
         ]

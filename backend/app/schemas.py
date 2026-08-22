@@ -199,6 +199,24 @@ class SessionWindowOut(BaseModel):
     endHour: int  # 左闭右开 / half-open
 
 
+class DailyOutcomeOut(BaseModel):
+    """某一天（自窗口起点起的第 N 个 24 小时桶）的信号数与胜负拆分。
+
+    前端画成胜/负堆叠柱而不是每日胜率百分比：单个策略一天只有三五笔已判定，
+    百分比会在 100/0/50 之间跳，那是假精确——堆叠柱同时表达"多活跃"与
+    "赢多还是输多"，且不需要为薄样本设门槛。
+
+    One 24h bucket's signal count and win/loss split. The UI renders stacked
+    win-loss bars rather than a daily win-rate percentage: a strategy resolves
+    only a handful of trades a day, so a rate would swing wildly. Stacked bars
+    convey both activity and outcome without needing a thin-sample gate.
+    """
+
+    samples: int  # 含未判定 / includes unresolved
+    tp: int
+    sl: int
+
+
 class WinRateBucketOut(BaseModel):
     """一个（策略, 时段）格子的胜负分布。
     Win/loss distribution for one (strategy, session) cell."""
@@ -217,9 +235,12 @@ class WinRateBucketOut(BaseModel):
     avgResolveSeconds: float | None
     # samples ÷ days × 7，一位小数 / normalized weekly signal count
     weeklySignals: float
-    # 自窗口起点每 24h 一桶的信号数，长度=days，旧→新；品种层为 null（样本太薄不下发）
-    # per-24h signal counts from the window start, oldest→newest; null at symbol level
-    dailySamples: list[int] | None = None
+    # 自窗口起点每 24h 一桶，长度=days，旧→新；品种层与方向桶为 null（样本太薄不下发）
+    # samples 含未判定，tp+sl 才是那天的已判定数
+    # Per-24h buckets from the window start, oldest→newest; null at the symbol
+    # layer and on side buckets. samples includes unresolved rows; tp+sl is the
+    # day's resolved count.
+    daily: list[DailyOutcomeOut] | None = None
 
 
 class SymbolWinRateOut(BaseModel):
@@ -231,6 +252,11 @@ class SymbolWinRateOut(BaseModel):
     symbol: str
     total: WinRateBucketOut
     sessions: dict[str, WinRateBucketOut]
+    # 键为 BUY / SELL。方向认不出的历史行不进任何一侧，因此两者之和可能小于
+    # total.samples——刻意如此，见 services/strategy_winrate.py 的 SIDE_KEYS。
+    # Keyed BUY / SELL. Legacy rows with an unrecognized side join neither, so
+    # the two may sum to less than total.samples — deliberate, see SIDE_KEYS.
+    sides: dict[str, WinRateBucketOut] = Field(default_factory=dict)
 
 
 class StrategyWinRateOut(BaseModel):
@@ -246,6 +272,11 @@ class StrategyWinRateOut(BaseModel):
     sessions: dict[str, WinRateBucketOut]
     # 品种子分层，按已判定笔数降序；overall 行恒为空列表
     # per-symbol sub-layer, resolved desc; always [] on the overall row
+    # 键为 BUY / SELL。方向认不出的历史行不进任何一侧，因此两者之和可能小于
+    # total.samples——刻意如此，见 services/strategy_winrate.py 的 SIDE_KEYS。
+    # Keyed BUY / SELL. Legacy rows with an unrecognized side join neither, so
+    # the two may sum to less than total.samples — deliberate, see SIDE_KEYS.
+    sides: dict[str, WinRateBucketOut] = Field(default_factory=dict)
     symbols: list[SymbolWinRateOut] = Field(default_factory=list)
 
 
@@ -263,31 +294,6 @@ class AdminStrategyWinRateOut(BaseModel):
     sessions: list[SessionWindowOut]
     overall: StrategyWinRateOut  # strategy 为空串，代表全部策略汇总 / all strategies combined
     strategies: list[StrategyWinRateOut]  # 已判定样本数降序 / by resolved samples desc
-
-
-class StrategySignalDetailOut(BaseModel):
-    """明细列表的一行：下钻到（策略, 品种）后"这 60% 是哪几笔"的答案。
-    One drill-down row — the receipts behind a percentage."""
-
-    side: str
-    entry: float | None
-    stopLoss: float | None
-    takeProfit: float | None
-    createdAt: datetime
-    # 该信号发出时刻落在哪些时段（后端用 session_keys_for 算，前端不重算）
-    # sessions the signal fired in; computed server-side, never re-derived
-    sessionKeys: list[str]
-    result: str
-    # HIT_TP/HIT_SL 的判定秒数，其余为 null / seconds to resolution, else null
-    resolveSeconds: float | None
-
-
-class AdminStrategySignalListOut(BaseModel):
-    strategy: str
-    symbol: str
-    days: int
-    total: int  # 窗口内总条数，可能大于返回条数（上限 50） / real count, list capped at 50
-    signals: list[StrategySignalDetailOut]
 
 
 class AdminBrokerSettings(BaseModel):

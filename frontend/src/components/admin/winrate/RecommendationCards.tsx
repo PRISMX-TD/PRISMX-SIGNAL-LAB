@@ -10,7 +10,6 @@
 // warning instead of cards: recommending on a broken resolver is lying with
 // stale data.
 import { useTranslation } from 'react-i18next'
-import { Link } from 'react-router-dom'
 import type { AdminStrategyWinRate, StrategyWinRate } from '../../../api/types'
 import WinRateBar from './WinRateBar'
 import { MIN_SAMPLES, SESSION_COLORS, fmtDurationHm, fmtDurationText, sessionStatus } from './shared'
@@ -179,18 +178,14 @@ function Card({ row, sessionKey, rank, onSelect }: {
       </div>
       <WinRateBar bucket={bucket} />
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-neutral-400">
-        {bucket.dailySamples && <DailyBars daily={bucket.dailySamples} />}
+        {bucket.daily && <DailyBars daily={bucket.daily.map((d) => d.samples)} />}
         <span className="tabular-nums">{t('admin.winrate.weekly', { count: bucket.weeklySignals })}</span>
         {bucket.avgResolveSeconds !== null && (
           <span className="tabular-nums">
             {t('admin.winrate.avgResolve', { time: fmtDurationText(t, bucket.avgResolveSeconds) })}
           </span>
         )}
-        {bucket.pending > 0 && (
-          <Link to="/app" onClick={(e) => e.stopPropagation()} className="text-prism-300 hover:text-prism-200 tabular-nums">
-            {t('admin.winrate.tracking', { count: bucket.pending })} →
-          </Link>
-        )}
+        
       </div>
       {topSymbols.length > 0 && (
         <div className="mt-2 grid grid-cols-3 gap-2">

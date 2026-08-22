@@ -1,144 +1,51 @@
-// 策略详情区：策略选择器 →「全部」/各品种子页签。「全部」看该策略在哪个时段
-// 能打；品种页签看到组合的分时段表现 + 逐笔明细（信任链闭环）。
-// Strategy drill-down: selector → "all" / per-symbol tabs, ending at receipts.
+// 策略详情区：策略选择器 →「全部」/各品种子页签 → 四张独立图表。
+//
+// 逐笔信号明细已移除：那是"给我看原始数据"的需求，而这一页要回答的是
+// "该盯什么"——四个聚合图各自答一个问题，比一张 50 行的流水表更快得出结论。
+// 「追踪中 N 笔」也一并撤掉：未判定数是判定链路的运维读数，不是策略表现，
+// 混在业绩图里只会让人把"还没走出结果"误读成一种成绩。
+//
+// Strategy drill-down: selector -> "all" / per-symbol tabs -> four charts.
+//
+// The per-signal list is gone: that answers "show me the raw rows", while this
+// page answers "what should I watch" — four aggregate charts each answer one
+// question faster than a 50-row ledger. The "N tracking" counts went with it:
+// unresolved counts are an ops readout for the resolution pipeline, not strategy
+// performance, and mixing them into performance charts invites reading "no
+// outcome yet" as a kind of result.
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { adminApi } from '../../../api/client'
-import { fmtTime } from '../../../api/utils'
-import type {
-  AdminStrategyWinRate,
-  AdminStrategySignalList,
-  StrategyWinRate,
-  WinRateBucket,
-} from '../../../api/types'
+import type { AdminStrategyWinRate, StrategyWinRate, SymbolWinRate } from '../../../api/types'
 import MatrixTable from './MatrixTable'
-import WinRateBar from './WinRateBar'
-import { DailyBars } from './RecommendationCards'
-import { SESSION_COLORS, fmtDurationText } from './shared'
+import {
+  DailyOutcomeChart,
+  HoldingTimeChart,
+  SessionWinRateChart,
+  SideWinRateChart,
+} from './StrategyCharts'
 
-const RESULT_CLASS: Record<string, string> = {
-  HIT_TP: 'text-up', HIT_SL: 'text-down', PENDING: 'text-amber-400/80', STALE: 'text-neutral-500',
-}
-
-function SessionRows({ row, sessionKeys, activeKeys, withDaily }: {
-  row: { sessions: Record<string, WinRateBucket> }
-  sessionKeys: string[]; activeKeys: string[]; withDaily: boolean
+/** 四张图的栅格。窄屏一列、宽屏两列——每张图内部都是横向条，两列时仍读得清。
+ *  The four-chart grid: one column on narrow screens, two when there's room. */
+function ChartGrid({ row, sessions, daily }: {
+  row: StrategyWinRate | SymbolWinRate
+  sessions: { key: string }[]
+  daily: import('../../../api/types').DailyOutcome[] | null
 }) {
-  const { t } = useTranslation()
   return (
-    <div className="space-y-2">
-      {sessionKeys.map((key) => {
-        const b = row.sessions[key]
-        if (!b || b.samples === 0) return null
-        const active = activeKeys.includes(key)
-        return (
-          <div key={key}
-               className={`flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg px-3 py-2 ${active ? 'bg-white/[0.05] ring-1 ring-white/15' : 'bg-white/[0.02]'}`}>
-            <span className="flex w-24 items-center gap-1.5 text-[12px] text-neutral-300">
-              <i className="h-2 w-2 rounded-full" style={{ backgroundColor: SESSION_COLORS[key] ?? '#666' }} />
-              {t(`admin.winrate.session.${key}`)}
-            </span>
-            <WinRateBar bucket={b} />
-            {withDaily && b.dailySamples && <DailyBars daily={b.dailySamples} />}
-            <span className="text-[11px] tabular-nums text-neutral-500">{t('admin.winrate.weekly', { count: b.weeklySignals })}</span>
-            {b.avgResolveSeconds !== null && (
-              <span className="text-[11px] tabular-nums text-neutral-500">
-                {t('admin.winrate.avgResolve', { time: fmtDurationText(t, b.avgResolveSeconds) })}
-              </span>
-            )}
-            {b.pending > 0 && (
-              <span className="text-[11px] tabular-nums text-amber-400/80">{t('admin.winrate.tracking', { count: b.pending })}</span>
-            )}
-          </div>
-        )
-      })}
+    <div className="grid gap-3 lg:grid-cols-2">
+      <SessionWinRateChart sessions={sessions} buckets={row.sessions} />
+      <SideWinRateChart sides={row.sides} />
+      {/* 每日图只在策略层有数据：品种层按天再切一刀样本太薄，后端不下发。
+          The daily chart only has data at the strategy layer — the symbol layer
+          would be too thin once sliced by day, so the backend omits it. */}
+      {daily && <DailyOutcomeChart daily={daily} />}
+      <HoldingTimeChart sessions={sessions} buckets={row.sessions} total={row.total} />
     </div>
   )
 }
 
-function SignalList({ strategy, symbol, days }: { strategy: string; symbol: string; days: number }) {
-  const { t } = useTranslation()
-  const [list, setList] = useState<AdminStrategySignalList | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  useEffect(() => {
-    // 组合一变就先清空旧列表/旧错误，再发新请求；cancelled 挡住晚到的旧响应
-    // ——不然快速切两个品种页签时，先发后至的响应会把新数据盖回旧的。
-    // Clear the previous list/error before firing the new request; `cancelled`
-    // blocks a late-arriving stale response — otherwise flicking between two
-    // symbol tabs quickly lets an out-of-order response overwrite fresh data.
-    let cancelled = false
-    setList(null)
-    setError(null)
-    adminApi.strategyWinrateSignals(strategy, symbol, days)
-      .then((r) => { if (!cancelled) setList(r) })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : 'Load failed') })
-    return () => { cancelled = true }
-  }, [strategy, symbol, days])
-
-  if (error) return <p className="py-2 text-sm text-down">{error}</p>
-  if (!list) return <p className="py-2 text-sm text-neutral-500">…</p>
-  return (
-    <div className="mt-3 overflow-x-auto">
-      <p className="mb-1 text-[11px] text-neutral-500">
-        {t('admin.winrate.signalCount', { shown: list.signals.length, total: list.total })}
-      </p>
-      <table className="w-full min-w-[520px] text-xs">
-        <thead>
-          <tr className="text-left text-neutral-500">
-            <th className="pb-1.5 pr-3 font-medium">{t('admin.winrate.colTime')}</th>
-            <th className="pb-1.5 pr-3 font-medium">{t('admin.winrate.colSide')}</th>
-            <th className="pb-1.5 pr-3 text-right font-medium">{t('admin.winrate.colEntry')}</th>
-            <th className="pb-1.5 pr-3 text-right font-medium">SL / TP</th>
-            <th className="pb-1.5 pr-3 font-medium">{t('admin.winrate.colSessions')}</th>
-            <th className="pb-1.5 pr-3 text-right font-medium">{t('admin.winrate.colResult')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {list.signals.length === 0 ? (
-            <tr>
-              <td colSpan={6} className="py-3 text-center text-neutral-500">{t('admin.winrate.empty')}</td>
-            </tr>
-          ) : list.signals.map((s, i) => (
-            <tr key={i} className="border-t border-white/5">
-              <td className="py-1.5 pr-3 tabular-nums text-neutral-400">{fmtTime(s.createdAt)}</td>
-              <td className={`py-1.5 pr-3 font-medium ${s.side === 'BUY' ? 'text-up' : 'text-down'}`}>{s.side}</td>
-              <td className="py-1.5 pr-3 text-right tabular-nums text-neutral-300">{s.entry ?? '—'}</td>
-              <td className="py-1.5 pr-3 text-right tabular-nums text-neutral-500">{s.stopLoss ?? '—'} / {s.takeProfit ?? '—'}</td>
-              <td className="py-1.5 pr-3">
-                {s.sessionKeys.map((k) => {
-                  const label = t(`admin.winrate.session.${k}`)
-                  // 键盘等价路径：这个点唯一表达"这条信号命中了哪个时段"，只靠
-                  // title 的话鼠标 hover 才读得到。同 SessionTimeline / DailyBars
-                  // 的既有修法——tabIndex + role="img" + aria-label（与 title 同文案）
-                  // ——补上键盘 Tab 也能读到同等信息（dataviz interaction.md：
-                  // "keyboard focus 与 hover 等价"）。
-                  // Keyboard-equivalent path: this dot is the only place that says
-                  // which session a signal fired in, and a bare title only surfaces
-                  // on mouse hover. Same fix already used by SessionTimeline /
-                  // DailyBars — tabIndex + role="img" + aria-label (same text as
-                  // the title) — so keyboard Tab reaches the same info a hover
-                  // would (dataviz interaction.md: keyboard focus must match hover).
-                  return (
-                    <i key={k} tabIndex={0} role="img" aria-label={label}
-                       className="mr-1 inline-block h-2 w-2 rounded-full outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-white/80"
-                       style={{ backgroundColor: SESSION_COLORS[k] ?? '#555' }}
-                       title={label} />
-                  )
-                })}
-              </td>
-              <td className={`py-1.5 pr-3 text-right tabular-nums ${RESULT_CLASS[s.result] ?? 'text-neutral-400'}`}>
-                {s.result}{s.resolveSeconds !== null && <span className="ml-1 text-[10px] text-neutral-500">{fmtDurationText(t, s.resolveSeconds)}</span>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-export default function StrategyDetail({ data, days, activeKeys, selected, onSelect, now }: {
-  data: AdminStrategyWinRate; days: number; activeKeys: string[]
+export default function StrategyDetail({ data, activeKeys, selected, onSelect, now }: {
+  data: AdminStrategyWinRate; activeKeys: string[]
   selected: string | null; onSelect: (name: string | null) => void
   // 只为透传给 MatrixTable 的表头时区换算——详情区自己不读时钟。面板持有唯一
   // 的每分钟计时器，组件一律接收 now，不自己 new Date()。
@@ -149,7 +56,6 @@ export default function StrategyDetail({ data, days, activeKeys, selected, onSel
 }) {
   const { t } = useTranslation()
   const [symbolTab, setSymbolTab] = useState<string>('all')
-  const sessionKeys = [...data.sessions.map((s) => s.key), 'outside']
   const row: StrategyWinRate | undefined = data.strategies.find((r) => r.strategy === selected)
   // 切换策略时回到「全部」页签 / reset the symbol tab when the strategy changes
   useEffect(() => { setSymbolTab('all') }, [selected])
@@ -238,13 +144,13 @@ export default function StrategyDetail({ data, days, activeKeys, selected, onSel
             ))}
           </div>
           {effectiveSymbolTab === 'all' ? (
-            <SessionRows row={row} sessionKeys={sessionKeys} activeKeys={activeKeys} withDaily />
+            <ChartGrid row={row} sessions={data.sessions} daily={row.total.daily} />
           ) : (
-            <>
-              <SessionRows row={row.symbols.find((s) => s.symbol === effectiveSymbolTab)!}
-                           sessionKeys={sessionKeys} activeKeys={activeKeys} withDaily={false} />
-              <SignalList strategy={row.strategy} symbol={effectiveSymbolTab} days={days} />
-            </>
+            // 品种层的 total.daily 恒为 null（后端不下发），ChartGrid 会据此跳过每日图
+            // The symbol layer's total.daily is always null; ChartGrid skips the
+            // daily chart accordingly
+            <ChartGrid row={row.symbols.find((x) => x.symbol === effectiveSymbolTab)!}
+                       sessions={data.sessions} daily={null} />
           )}
         </>
       )}

@@ -1,8 +1,20 @@
-// 管理后台「策略胜率」子页：把判定链路健康条、24 小时时段轴、「现在该盯什么」
-// 推荐区、策略详情矩阵四层拼成一页盯盘决策页。
-// Admin "Strategy Win Rate" sub-tab: the resolution health bar, the 24h
-// session timeline, the "what to watch now" recommendations, and the
-// strategy/matrix detail — assembled into one page for live monitoring.
+// 管理后台「策略胜率」子页：24 小时时段轴、「现在该盯什么」推荐区、策略详情
+// 三层拼成一页盯盘决策页。
+// Admin "Strategy Win Rate" sub-tab: the 24h session timeline, the "what to
+// watch now" recommendations, and the strategy detail — one page for live
+// monitoring.
+//
+// 判定链路健康条（窗口内四态计数 + 最近一次判定时间）已按产品要求移除。
+// 后端仍返回 lastResolvedAt，判定停摆时的诊断改由这条 SQL 主动查：
+//   SELECT count(*) FILTER (WHERE baseline_high IS NOT NULL),
+//          max(resolved_at) FILTER (WHERE result IN ('HIT_TP','HIT_SL'))
+//   FROM signals WHERE source = 'tradingview';
+// 页面本身不再提示链路故障——这是明确的取舍，不是遗漏。
+// The resolution-health bar was removed at the product owner's request. The
+// backend still returns lastResolvedAt; diagnosing a stalled pipeline is now a
+// manual SQL check (above) rather than something the page surfaces. The page no
+// longer warns about a broken pipeline — a deliberate trade-off, not an
+// oversight.
 //
 // 时段窗口（小时区间 + IANA 时区）随接口一起下发，前端**不**复制一份：夏令时
 // 的正确性只在后端保证一次，这里只负责把它翻译成看的人所在时区的钟点。
@@ -12,7 +24,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
-import { fmtTime } from '../../api/utils'
 import { SkeletonLine } from '../Skeleton'
 import type { AdminStrategyWinRate } from '../../api/types'
 import { MIN_SAMPLES, sessionStatus } from './winrate/shared'
@@ -127,41 +138,6 @@ export default function StrategyWinratePanel() {
           </div>
         ) : data && data.overall.total.samples === 0 ? (
           <p className="py-3 text-sm text-neutral-500">{t('admin.winrate.empty')}</p>
-        ) : data ? (
-          /* 判定链路健康条。窗口内有信号却一条都没判定，几乎一定是链路断了而不是
-             "行情还没走到"——判定只在 POST /webhook/trend 带 high/low 时触发，
-             正常运行下一周里不可能一条都判不出来。所以这种情况直接报警并给出
-             该查什么，而不是让人对着满屏 0 笔猜。
-             Resolution-pipeline health bar. Signals in the window with none
-             resolved is almost always a broken pipeline rather than "price
-             hasn't got there yet": resolution fires on POST /webhook/trend with
-             high/low, and a whole week resolving nothing doesn't happen when
-             it's working. So say so and name what to check, instead of leaving
-             someone to guess at a screen of zeros. */
-          <div
-            className={`rounded-lg border px-3 py-2 text-[11px] leading-5 ${
-              data.overall.total.resolved === 0
-                ? 'border-amber-400/40 bg-amber-400/10 text-amber-200'
-                : 'border-white/10 bg-white/[0.03] text-neutral-400'
-            }`}
-          >
-            <span className="tabular-nums">
-              {t('admin.winrate.health', {
-                samples: data.overall.total.samples,
-                resolved: data.overall.total.resolved,
-                pending: data.overall.total.pending,
-                stale: data.overall.total.stale,
-              })}
-            </span>
-            <span className="ml-2 tabular-nums">
-              {t('admin.winrate.lastResolved', {
-                when: data.lastResolvedAt ? fmtTime(data.lastResolvedAt) : t('admin.winrate.never'),
-              })}
-            </span>
-            {data.overall.total.resolved === 0 && (
-              <div className="mt-1 text-amber-200/80">{t('admin.winrate.stalledHint')}</div>
-            )}
-          </div>
         ) : null}
       </div>
 
@@ -197,14 +173,13 @@ export default function StrategyWinratePanel() {
                 </button>
               ))}
             </div>
-            {/* days={data.days}，不是 days={days}：切换器点下去 `days` state 立刻更新，
+            {/*，不是 days={days}：切换器点下去 `days` state 立刻更新，
                 但新窗口请求若失败，`data` 仍停在旧窗口——这时 `days` 与 `data` 已经
                 错位。`StrategyDetail` 会把 days 原样转给 `SignalList` 发起独立请求
                 （聚合和明细是两个端点，一个失败不代表另一个也失败），用错位的
                 `days` 请求会把"旧窗口的汇总"和"新窗口的明细"同时摆上屏幕，除顶部
                 一行 error 外没有任何提示。`data.days` 是后端按实际生效的请求参数
-                回填的字段，天然与 `data` 本身同源，用它就不会有这个错位窗口。
-                days={data.days}, not days={days}: clicking the switcher updates the
+                回填的字段，天然与 `data` 本身同源，用它就不会有这个错位窗口。, not days={days}: clicking the switcher updates the
                 `days` state immediately, but if the new-window request fails, `data`
                 stays on the old window — `days` and `data` are then out of sync.
                 StrategyDetail forwards `days` verbatim to SignalList, which fires an
@@ -214,7 +189,7 @@ export default function StrategyWinratePanel() {
                 on screen together with nothing but one error line at the top to
                 explain it. `data.days` is the backend's echo of the parameter that
                 actually produced `data`, so it can never drift from it. */}
-            <StrategyDetail data={data} days={data.days} activeKeys={activeKeys} selected={selected}
+            <StrategyDetail data={data} activeKeys={activeKeys} selected={selected}
                             onSelect={setSelected} now={now} />
           </div>
           <p className="px-1 text-[11px] leading-5 text-neutral-600">
