@@ -556,21 +556,69 @@ def strategy_winrate(
 
 
 def _strategy_winrate_signals_impl(db: Session, strategy: str, symbol: str, days: int) -> dict:
-    """明细查询实体。策略名匹配用 trim(coalesce(indicator, ''))：聚合侧按
-    strip 后的名字分组（见 strategy_winrate.py），明细侧必须同口径，否则带
-    空白的行在矩阵里算得进、点开却看不见；空串同时命中 NULL 与 ''。
-    Matching mirrors the aggregation's strip semantics; '' hits NULL and ''."""
+    """明细查询实体。策略名匹配故意放在 Python 里做（不用 SQL TRIM 模拟），
+    详见下方长注释；其余过滤（source/symbol/窗口）仍下推给 SQL。
+    Strategy-name matching is deliberately done in Python, not via SQL TRIM —
+    see the long comment below; the other filters (source/symbol/window) still
+    go to SQL.
+
+    早期版本这里写的是 `func.trim(func.coalesce(Signal.indicator, "")) ==
+    strategy.strip()`，本意是"与聚合侧同口径"，但没有做到：SQL 标准 TRIM()
+    （SQLite、PostgreSQL 都一样）不带参数时**只剥离半角空格**，不认 tab、
+    换行等其它空白字符；而聚合侧 `strategy_winrate.py` 用的是 Python
+    `str.strip()`，会剥掉所有空白类字符。于是一个被 "\tAlpha\n" 这种非空格
+    空白垫过的策略名，聚合侧按 "Alpha" 分组、明细侧的 SQL TRIM 却查不到它——
+    正是"矩阵里算得进、点开明细却看不见"的那种静默不一致，而且是 brief 原文
+    那行 SQL 自己就达不到它自己声明的不变量，不是 Python 侧的问题。
+
+    改法：让两侧结构性地共用同一行代码 `(x or "").strip()`，而不是让 SQL 去
+    模仿 Python 的空白语义——语义永远不会再第二次漂移。代价是要把该
+    (symbol, window) 组合下的整批行拉到 Python 里再过滤/计数，SQL 侧无法再
+    用 count()/LIMIT 直接给出真实总数。这里认为代价可接受：这是管理员专用、
+    单品种、窗口 ≤90 天的低频端点（只在点开品种页签时才请求），聚合端点本来
+    就要在同一次请求里扫整个窗口下全部品种的信号，这里至多是同一批行再多做
+    一次 strip 比较。
+
+    Earlier this line read `func.trim(func.coalesce(Signal.indicator, "")) ==
+    strategy.strip()`, meant to match the aggregation side's grouping — but it
+    didn't: the SQL-standard TRIM() (identical in SQLite and PostgreSQL) with
+    no argument strips ASCII spaces only, not tabs, newlines, or other
+    whitespace, while the aggregation side (strategy_winrate.py) uses Python's
+    str.strip(), which strips every whitespace class. A strategy name padded
+    with "\tAlpha\n" therefore groups under "Alpha" on the aggregation side but
+    the SQL TRIM() here fails to find it — the exact "counted into the matrix
+    cell, invisible in the drill-down" failure, and the brief's own SQL line
+    couldn't satisfy the invariant it was written to satisfy.
+
+    Fix: make both sides structurally share the same line of code,
+    `(x or "").strip()`, instead of asking SQL to imitate Python's whitespace
+    semantics — the two definitions can never drift apart again. The cost is
+    pulling the whole (symbol, window) row set into Python before
+    filtering/counting, so SQL can no longer hand back a true total via
+    count()/LIMIT directly. Accepted here: this is an admin-only,
+    single-symbol, <=90-day endpoint fetched only when a symbol tab is opened,
+    and the aggregation endpoint already scans every symbol in the window on
+    one request — this only adds one more strip() comparison over the same
+    rows.
+    """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
-    base = db.query(Signal).filter(
-        Signal.source == "tradingview",
-        Signal.symbol == symbol,
-        func.trim(func.coalesce(Signal.indicator, "")) == strategy.strip(),
-        Signal.created_at >= cutoff,
+    rows = (
+        db.query(Signal)
+        .filter(
+            Signal.source == "tradingview",
+            Signal.symbol == symbol,
+            Signal.created_at >= cutoff,
+        )
+        .order_by(Signal.created_at.desc())
+        .all()
     )
-    total = base.count()
-    rows = base.order_by(Signal.created_at.desc()).limit(50).all()
+    target = strategy.strip()
+    # 与 compute_strategy_session_winrate 的分组键同一行代码：(indicator or "").strip()。
+    # Same line of code as compute_strategy_session_winrate's grouping key.
+    matched = [s for s in rows if (s.indicator or "").strip() == target]
+    total = len(matched)  # 真实总数，必须在 Python 过滤之后算 / true count, taken after the Python filter
     signals = []
-    for s in rows:
+    for s in matched[:50]:
         resolve_seconds = None
         if s.result in ("HIT_TP", "HIT_SL") and s.resolved_at and s.created_at:
             resolve_seconds = (s.resolved_at - s.created_at).total_seconds()
