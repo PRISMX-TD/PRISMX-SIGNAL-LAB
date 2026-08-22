@@ -145,14 +145,30 @@ function Row({
 export default function MatrixTable({
   data,
   activeKeys,
+  now,
   onSelectStrategy,
 }: {
   data: AdminStrategyWinRate
   activeKeys: string[]
+  // 时钟从 props 进来，组件不自己 new Date()：`now` 只喂表头的"你的时间
+  // HH:MM–HH:MM"换算，而 activeKeys（同一行表头的高亮）是 StrategyWinratePanel
+  // 用它那个每分钟计时器的 now 算出来的。自己取一次 new Date() 就是第二个时钟，
+  // 两者在整分钟边界会短暂不一致：一列被判成活跃并高亮，旁边的窗口文字却还按
+  // 上一分钟的偏移渲染。面板的注释已经把"两个组件都不带自己的计时器就是为了
+  // 对齐同一个 now"写成约定，这里遵守它。
+  // The clock arrives as a prop; this component never calls new Date(). `now`
+  // feeds only the header's "your time HH:MM–HH:MM" conversion, while
+  // activeKeys — the highlight on that same header row — is computed by
+  // StrategyWinratePanel from its own per-minute timer's `now`. A local
+  // new Date() would be a second clock, and the two disagree briefly at every
+  // minute boundary: a column highlighted as active beside a window label still
+  // rendered at the previous minute's offset. The panel's comments already state
+  // the convention — no component carries its own timer, precisely so they all
+  // share one `now`.
+  now: Date
   onSelectStrategy: (name: string) => void
 }) {
   const { t } = useTranslation()
-  const now = new Date()
   // outside 桶固定排在三个时段之后：它不是一个"盘"，是三个盘之间的空档。
   // The outside bucket always sorts after the three real sessions — it isn't a
   // session, it's the gaps between them.

@@ -4,11 +4,43 @@
 // A 24h axis in the viewer's clock; session bands + a "now" cursor.
 import { useTranslation } from 'react-i18next'
 import type { SessionWindow } from '../../../api/types'
-import { SESSION_COLORS, fmtClock, localWindow, sessionStatus, zoneOffsetMinutes } from './shared'
+import { SESSION_COLORS, fmtClock, fmtDurationHm, localWindow, sessionStatus, zoneOffsetMinutes } from './shared'
 
 const W = 1440 // 1 分钟 = 1 单位 / one unit per minute
 const H = 46
 const BAND_Y: Record<string, number> = { asia: 8, europe: 18, newyork: 28 } // 三条带错行叠放
+
+// 色带不透明度。原值 0.45 来自设计文档"重叠区颜色自然叠加"那句，但 BAND_Y 把
+// 三条带放在互不重叠的三行上——叠加从来没发生过，那 0.45 就只剩代价没有收益：
+// 合成到 --surface #1b1b21 之后三条带变成 #1E6E7D / #654A84 / #806522，跑 dataviz
+// 的 validate_palette.js（--mode dark --surface #1b1b21）四项全 FAIL——三个颜色的
+// OKLCH chroma 都掉到 0.10 的地板以下（读成三条灰带）、青紫两条的常规视觉 ΔE 只
+// 有 12.9（硬 FAIL 线 15：全色觉的人都分不出）、deutan ΔE 4.6（远低于 6–8 底线）。
+// 改成 0.70：合成色 #209cb1 / #8e65ba / #b88e23，同一条命令 ALL CHECKS PASS
+// （亮度带、chroma、常规视觉 ΔE 18.1、对比度全 PASS；CVD deutan ΔE 6.9 落在 6–8
+// 的 WARN 带里，按 dataviz 的规矩需要二次编码兜底——本组件恰好三重具备：三条带
+// 各占一行=位置编码、下方状态芯片给每个时段直接标了名字、每条带还有 aria-label）。
+// 不直接用 1.0：那会把三个色相顶出 dark 模式的亮度带（L 0.797/0.722/0.837 vs
+// 上限 0.67），色带比轴上的白色游标还抢眼，游标就找不着了。
+// Band opacity. The original 0.45 came from the design doc's "overlaps blend
+// naturally" line — but BAND_Y puts the three bands on three non-overlapping
+// rows, so that blend never happens and 0.45 was paying a cost for nothing:
+// composited over --surface #1b1b21 the bands land on #1E6E7D / #654A84 /
+// #806522, which fails all four measurable checks in dataviz's
+// validate_palette.js (--mode dark --surface #1b1b21) — every hue's OKLCH chroma
+// drops under the 0.10 floor (three grey bands), the cyan/purple pair separates
+// by only ΔE 12.9 under normal vision (hard-fail line 15: full-colour readers
+// can't tell them apart) and ΔE 4.6 under deutan (the floor is 6-8).
+// 0.70 composites to #209cb1 / #8e65ba / #b88e23 and the same command reports
+// ALL CHECKS PASS (lightness band, chroma, normal-vision ΔE 18.1 and contrast
+// all PASS; deutan ΔE 6.9 sits in the 6-8 WARN band, which dataviz allows only
+// with secondary encoding — this component has three: each band owns its own row
+// (position), the status chips below name every session directly, and each band
+// carries an aria-label).
+// Not 1.0: that pushes all three hues past the dark-mode lightness band
+// (L 0.797/0.722/0.837 against a 0.67 ceiling) and the bands then out-shout the
+// white now-cursor drawn over them.
+const BAND_OPACITY = 0.7
 
 export default function SessionTimeline({ sessions, now }: { sessions: SessionWindow[]; now: Date }) {
   const { t } = useTranslation()
@@ -58,7 +90,7 @@ export default function SessionTimeline({ sessions, now }: { sessions: SessionWi
             // info as a mouse hover would.
             return segs.map(([a, b]) => (
               <rect key={`${s.key}-${a}`} x={a} y={y} width={b - a} height={8} rx={2}
-                    fill={color} opacity={0.45} tabIndex={0} role="img" aria-label={title}
+                    fill={color} opacity={BAND_OPACITY} tabIndex={0} role="img" aria-label={title}
                     className="outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-white/80">
                 <title>{title}</title>
               </rect>
@@ -83,13 +115,22 @@ export default function SessionTimeline({ sessions, now }: { sessions: SessionWi
             <span key={s.key} className="flex items-center gap-1.5">
               <i className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
               <span className="text-neutral-300">{t(`admin.winrate.session.${s.key}`)}</span>
+              {/* 倒计时用 fmtDurationHm 而不是 fmtClock：这两个数字在本文件里只隔
+                  二十行——上面轴底的 06:00 是"几点"，这里的是"还有多久"。同一个
+                  `02:14` 两种意思，读者没有任何线索区分；`2h14m` 一眼就是时长，
+                  也正是设计文档 §5.1 写的格式。
+                  The countdown uses fmtDurationHm, not fmtClock: the two numbers
+                  sit twenty lines apart in this file — the 06:00 under the axis
+                  is a time of day, this one is time remaining. One `02:14`
+                  meaning both leaves the reader no way to tell; `2h14m` reads as
+                  a duration on sight, and is what design doc §5.1 specifies. */}
               {st.state === 'active' ? (
                 <span className="text-up tabular-nums">
-                  {t('admin.winrate.activeLeft', { time: fmtClock(st.minutesToEnd) })}
+                  {t('admin.winrate.activeLeft', { time: fmtDurationHm(st.minutesToEnd) })}
                 </span>
               ) : (
                 <span className="text-neutral-500 tabular-nums">
-                  {t('admin.winrate.startsIn', { time: fmtClock(st.minutesToStart) })}
+                  {t('admin.winrate.startsIn', { time: fmtDurationHm(st.minutesToStart) })}
                 </span>
               )}
             </span>

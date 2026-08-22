@@ -3,7 +3,6 @@
 // Strategy drill-down: selector → "all" / per-symbol tabs, ending at receipts.
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { TFunction } from 'i18next'
 import { adminApi } from '../../../api/client'
 import { fmtTime } from '../../../api/utils'
 import type {
@@ -15,23 +14,10 @@ import type {
 import MatrixTable from './MatrixTable'
 import WinRateBar from './WinRateBar'
 import { DailyBars } from './RecommendationCards'
-import { SESSION_COLORS, fmtDuration } from './shared'
+import { SESSION_COLORS, fmtDurationText } from './shared'
 
 const RESULT_CLASS: Record<string, string> = {
   HIT_TP: 'text-up', HIT_SL: 'text-down', PENDING: 'text-amber-400/80', STALE: 'text-neutral-500',
-}
-
-// 秒数 → 拼好单位的人话文本。fmtDuration 只吐 {value, unit}（shared.ts 的约定，
-// 单位词特意留给调用方过 i18n），这里和 RecommendationCards.tsx 里的同名私有
-// 函数做一样的事——那个函数没有 export，本文件需要同样的拼接就只能自己再写
-// 一份，不是遗漏了导入。
-// Seconds → a humanized string. fmtDuration only returns {value, unit} (shared.ts
-// deliberately leaves the unit word to the caller's i18n pass); this mirrors the
-// same-named private helper in RecommendationCards.tsx — that one isn't exported,
-// so needing the same formatting here means re-declaring it, not a missed import.
-function fmtDurationText(t: TFunction, seconds: number): string {
-  const { value, unit } = fmtDuration(seconds)
-  return `${value} ${t(`admin.winrate.unit.${unit}`)}`
 }
 
 function SessionRows({ row, sessionKeys, activeKeys, withDaily }: {
@@ -151,9 +137,15 @@ function SignalList({ strategy, symbol, days }: { strategy: string; symbol: stri
   )
 }
 
-export default function StrategyDetail({ data, days, activeKeys, selected, onSelect }: {
+export default function StrategyDetail({ data, days, activeKeys, selected, onSelect, now }: {
   data: AdminStrategyWinRate; days: number; activeKeys: string[]
   selected: string | null; onSelect: (name: string | null) => void
+  // 只为透传给 MatrixTable 的表头时区换算——详情区自己不读时钟。面板持有唯一
+  // 的每分钟计时器，组件一律接收 now，不自己 new Date()。
+  // Only forwarded to MatrixTable for its header zone conversion — this area
+  // doesn't read the clock itself. The panel owns the single per-minute timer;
+  // components take `now` rather than calling new Date() themselves.
+  now: Date
 }) {
   const { t } = useTranslation()
   const [symbolTab, setSymbolTab] = useState<string>('all')
@@ -185,26 +177,50 @@ export default function StrategyDetail({ data, days, activeKeys, selected, onSel
   // tab (even when the new strategy happens to share a symbol name), while the
   // derived value only backstops the one render before the effect has run.
   const effectiveSymbolTab = row && row.symbols.some((s) => s.symbol === symbolTab) ? symbolTab : 'all'
+  // 与 effectiveSymbolTab 同一类问题、上一层：`selected` 指向的策略可能在当前
+  // data.strategies 里根本不存在（复现：days=30 时选中一只只在 30 天窗口里有信号
+  // 的策略，再切回 7 天）。此时 row 是 undefined，下面已经会静默回落到矩阵——但
+  // 选择器仍然逐个拿 `selected` 去比，「全部策略」比不中、每个策略也比不中，整行
+  // aria-selected="true" 的数量变成 0：role="tablist" 里一个选中项都没有是非法的
+  // ARIA 状态，用户看到的则是"点了没反应，也没人告诉我为什么"。
+  // 派生值让"选中态"与"实际渲染的内容"由同一个事实（row 在不在）决定：策略没了
+  // 就等价于回到「全部策略」，高亮跟着回到那一枚。父级 state 不动——它是受控
+  // 的，纠正 state 是父组件的事；这里只保证同一次 render 内界面自洽。
+  // Same class of bug as effectiveSymbolTab, one level up: `selected` can name a
+  // strategy that no longer exists in data.strategies (repro: at days=30 select a
+  // strategy whose signals only fall in the 30-day window, then switch back to
+  // 7). `row` is then undefined and the body below already falls back to the
+  // matrix — but the selector still compares raw `selected` against every option,
+  // matching neither "all strategies" nor any strategy, so the count of
+  // aria-selected="true" in the row drops to 0. A role="tablist" with nothing
+  // selected is an invalid ARIA state, and what the user sees is "I clicked, it
+  // did nothing, and nobody said why".
+  // The derived value makes the selected state and the rendered content follow
+  // one fact (does `row` exist): a vanished strategy is equivalent to being back
+  // on "all strategies", and the highlight goes back there too. The parent's
+  // state is left alone — it's controlled, so correcting it is the parent's call;
+  // this only keeps the UI self-consistent within the render.
+  const effectiveSelected = row ? selected : null
 
   return (
     <div className="glass p-5">
       {/* 策略选择器 / strategy selector */}
       <div className="mb-4 flex flex-wrap gap-1.5" role="tablist">
-        <button type="button" role="tab" aria-selected={selected === null} onClick={() => onSelect(null)}
-                className={`rounded-full px-3 py-1 text-xs transition ${selected === null ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40' : 'text-neutral-400 hover:text-neutral-200'}`}>
+        <button type="button" role="tab" aria-selected={effectiveSelected === null} onClick={() => onSelect(null)}
+                className={`rounded-full px-3 py-1 text-xs transition ${effectiveSelected === null ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40' : 'text-neutral-400 hover:text-neutral-200'}`}>
           {t('admin.winrate.allStrategiesTab')}
         </button>
         {data.strategies.map((r) => (
-          <button key={r.strategy} type="button" role="tab" aria-selected={selected === r.strategy}
+          <button key={r.strategy} type="button" role="tab" aria-selected={effectiveSelected === r.strategy}
                   onClick={() => onSelect(r.strategy)}
-                  className={`rounded-full px-3 py-1 text-xs transition ${selected === r.strategy ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40' : 'text-neutral-400 hover:text-neutral-200'}`}>
+                  className={`rounded-full px-3 py-1 text-xs transition ${effectiveSelected === r.strategy ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40' : 'text-neutral-400 hover:text-neutral-200'}`}>
             {r.strategy || t('admin.winrate.unnamed')}
           </button>
         ))}
       </div>
 
-      {selected === null || !row ? (
-        <MatrixTable data={data} activeKeys={activeKeys} onSelectStrategy={(name) => onSelect(name)} />
+      {effectiveSelected === null || !row ? (
+        <MatrixTable data={data} activeKeys={activeKeys} now={now} onSelectStrategy={(name) => onSelect(name)} />
       ) : (
         <>
           {/* 品种子页签：只列有信号的品种 / symbol tabs, resolved-desc, signal-bearing only */}

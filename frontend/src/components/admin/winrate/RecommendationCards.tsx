@@ -10,37 +10,27 @@
 // warning instead of cards: recommending on a broken resolver is lying with
 // stale data.
 import { useTranslation } from 'react-i18next'
-import type { TFunction } from 'i18next'
 import { Link } from 'react-router-dom'
 import type { AdminStrategyWinRate, StrategyWinRate } from '../../../api/types'
 import WinRateBar from './WinRateBar'
-import { MIN_SAMPLES, SESSION_COLORS, fmtClock, fmtDuration, sessionStatus } from './shared'
+import { MIN_SAMPLES, SESSION_COLORS, fmtDurationHm, fmtDurationText, sessionStatus } from './shared'
 
 // 金/银/铜三档徽章色；#4 起退回中性色——前三名才值得用颜色抢注意力。
 // Gold/silver/bronze for the top three; #4+ falls back to neutral — only the
 // podium earns a colour pull on attention.
 const RANK_BADGES = ['bg-amber-400/20 text-amber-200', 'bg-neutral-300/20 text-neutral-200', 'bg-orange-700/25 text-orange-300']
 
-// 秒数 → 拼好单位的人话文本。fmtDuration 刻意只吐 {value, unit}，单位词交给
-// 调用方过 i18n（否则中文界面会混进英文分钟）；这里统一拼成"12 分钟"/"12 min"，
-// 数字与单位之间留空格，和本文件其余"{{days}} 天"式写法保持一致。
-// Seconds → a humanized string. fmtDuration deliberately returns only
-// {value, unit} so the unit word goes through i18n (a bare English word would
-// leak into the Chinese UI); this glues them as "12 分钟" / "12 min", with a
-// space between number and unit to match this codebase's "{{days}} 天" style.
-function fmtDurationText(t: TFunction, seconds: number): string {
-  const { value, unit } = fmtDuration(seconds)
-  return `${value} ${t(`admin.winrate.unit.${unit}`)}`
-}
-
-// 每日信号数迷你柱图：7 根柱子，当天（最后一根）用强调色，其余用弱化白。
+// 每日信号数迷你柱图：一根柱子一天（推荐区恒 7 根，详情区跟随天数切换器可到
+// 14/30 根），当天（最后一根）用强调色，其余用弱化白。
 // 呼应 dataviz 对 stat-tile trend sparkline 的规范——"弱化色画历史，强调色画
 // 当前一格"，让人不用看数字就知道"这几天热不热、今天算不算爆量"。
 // 只约束宽度、不给固定高度：SVG 用 preserveAspectRatio="none" 按容器拉伸，
 // 固定高度会和它打架变形。相邻柱之间留 2 个 viewBox 单位的底色间隙（同
 // WinRateBar 的 GAP 换算），不是描边分隔——反模式清单明确禁止靠描边分段。
 // 品种层 dailySamples 恒为 null，调用方在渲染前已经判过，这里只处理非空输入。
-// A tiny per-day signal-count bar chart: 7 bars, the last (today) in the
+// A tiny per-day signal-count bar chart: one bar per day (always 7 in the
+// recommendation area; 14 or 30 in the detail area, which follows the range
+// picker), the last (today) in the
 // accent hue, the rest de-emphasized — the stat-tile trend sparkline pattern
 // from dataviz, so a glance says "busy lately / spiking today" without
 // reading numbers. Width-only, no fixed height: preserveAspectRatio="none"
@@ -50,63 +40,62 @@ function fmtDurationText(t: TFunction, seconds: number): string {
 // out. Symbol-level dailySamples is always null; callers already gate on that
 // before rendering, so this only handles a non-empty array.
 //
-// 悬浮读数同时给键盘一条等价路径（code review Important 1）：原生 <title> 只在
-// 鼠标 hover 时出现，键盘用户 Tab 不到、也读不到。每根柱子加 tabIndex+aria-label
-// （内容与 title 一致），外层 svg 的 role 从 "img" 改成 "group"——role="img" 会
-// 让 ARIA 把子元素整体拍平成一张图，孩子上的 aria-label 对屏幕阅读器形同虚设；
-// "group" 才会把每根柱子当独立可达节点暴露出去。调用方注意：这样每根柱子都会
-// 占一个 Tab 停靠点，不能再把 DailyBars 塞进 <button> 之类不允许交互后代的容器
-// 里（Card 组件已经为此把外壳从 button 换成了 div[role=button]，见下文）。
-// The hover readout also needs a keyboard-equivalent path (code review
-// Important 1): a native <title> only fires on mouse hover — a keyboard user
-// can't tab to it or read it. Each bar gets tabIndex + aria-label (same text
-// as the title); the outer svg's role moves from "img" to "group" — role="img"
-// flattens descendants into one picture for ARIA, so aria-label on a child
-// would be invisible to a screen reader; "group" exposes each bar as its own
-// reachable node. Caller note: this means every bar claims a tab stop, so
-// DailyBars can no longer be nested inside a <button> or anything else whose
-// content model forbids interactive descendants (Card's own wrapper was
-// switched from button to div[role=button] for exactly this reason, below).
+// 悬浮读数要有键盘等价路径（code review Important 1）：原生 <title> 只在鼠标
+// hover 时出现，键盘用户 Tab 不到也读不到。等价路径挂在 **svg 一层**，不是每根
+// 柱子一个：dataviz 的 interaction.md 只要求"键盘焦点与 hover 等价"，没要求逐
+// 元素可聚焦，而 WCAG 明确不建议把不可激活的内容放进 Tab 序——柱子点了没反应，
+// 它不是控件。逐柱 tabIndex 的写法让三张推荐卡一共塞进 27 个 Tab 停靠点（3 × (1
+// 卡 + 7 柱 + 1 链接)）挡在下方策略选择器前面；改成 svg 自己 tabIndex={0} +
+// role="img" + 一句读出整条序列的 aria-label（"近 7 天信号数：1,2,3…"），信息量
+// 一样，1 个停靠点替掉 7 个。role 也随之从 "group" 回到 "img"：现在子节点没有
+// 自己的标签要暴露，这张图就是一张图。柱子保留 <title> 供鼠标逐根读数。
+// 顺带删掉了原来为逐柱焦点打的 onKeyDown Space 补丁——柱子不再进 Tab 序，那个
+// "焦点落在柱子上按 Space 会滚屏"的场景不存在了。
+// The hover readout needs a keyboard-equivalent path (code review Important 1):
+// a native <title> only fires on mouse hover, unreachable and unreadable by
+// keyboard. That path belongs on the **svg**, not on every bar: dataviz's
+// interaction.md asks for "keyboard focus equivalent to hover", not for
+// per-element focusability, and WCAG advises against putting non-activatable
+// content in the tab order — a bar does nothing when activated; it isn't a
+// control. Per-bar tabIndex put 27 tab stops (3 x (1 card + 7 bars + 1 link))
+// in front of the strategy selector below. Now the svg itself takes
+// tabIndex={0} + role="img" + one aria-label that reads the whole series
+// ("Signals, last 7 days: 1,2,3…"): same information, 1 stop instead of 7. The
+// role goes back from "group" to "img" too — no child has its own label to
+// expose any more, so this really is one picture. Bars keep their <title> for
+// per-bar mouse readout. This also removes the onKeyDown Space patch that
+// per-bar focus needed: with bars out of the tab order, "focus sits on a bar,
+// Space scrolls the page" can no longer happen.
 export function DailyBars({ daily }: { daily: number[] }) {
   const { t } = useTranslation()
   const max = Math.max(...daily, 1)
   const w = 100 / daily.length
+  // 天数取自数组长度而不是写死 7：这个组件在「全部」页签里吃的是跟随天数切换器
+  // 的那份 payload，days=30 时 dailySamples 就有 30 个格子。
+  // The day count comes from the array, not a hardcoded 7: in the "all" tab this
+  // component renders the payload that follows the range picker, so at days=30
+  // dailySamples carries 30 buckets.
+  const seriesLabel = t('admin.winrate.dailyBarsLabel', {
+    days: daily.length, counts: daily.join(', '),
+  })
   return (
-    <svg viewBox="0 0 100 16" className="h-4 w-24" preserveAspectRatio="none" role="group"
-         aria-label={t('admin.winrate.dailyBarsLabel')}>
-      {daily.map((v, i) => {
-        const hint = t('admin.winrate.dailyBarHint', { count: v })
-        return (
-          <rect key={i} x={i * w + 1} y={16 - (v / max) * 14 - 1} width={w - 2}
-                height={(v / max) * 14 + 1} rx={1} tabIndex={0} role="img" aria-label={hint}
-                // 柱子有 tabIndex 却没有自己的 onKeyDown：Task 10 code review 发现，
-                // 父级卡片的 keydown 守卫一加上 e.target !== e.currentTarget 就 return，
-                // 焦点在柱子上按 Space 就再没有任何处理函数调它的 preventDefault()，
-                // 浏览器默认动作（整页向下滚一屏）照常发生。这里只吞掉 Space 的默认
-                // 滚动，不做任何其他动作——柱子本来就不是"可激活"的东西，Enter 也
-                // 不需要特殊处理。
-                // The bar had tabIndex but no onKeyDown of its own: Task 10's review
-                // found that once the parent card's keydown guard added
-                // e.target !== e.currentTarget and returned, nothing called
-                // preventDefault() for a Space press while focus sat on a bar, so the
-                // browser's default action (scroll the page down a screen) actually
-                // fired. This only swallows Space's default scroll — nothing else,
-                // since a bar isn't "activatable" and Enter needs no special handling.
-                onKeyDown={(e) => { if (e.key === ' ') e.preventDefault() }}
-                className="outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-white/80"
-                fill={i === daily.length - 1 ? 'var(--purple-hi, #c084fc)' : 'rgba(255,255,255,0.25)'}>
-            {/* 原生 title 悬浮提示，与 SessionTimeline 的时段色带同一手法——这个项目
-                没有自建 tooltip 组件，轻量原生方案就是既有约定。键盘等价路径见上方
-                tabIndex/aria-label 与函数顶部注释。
-                Native title hover, same technique as SessionTimeline's session
-                bands — this codebase has no custom tooltip component, so the
-                light-weight native one is the established convention. The
-                keyboard-equivalent path is the tabIndex/aria-label above; see
-                the function-level comment for why. */}
-            <title>{hint}</title>
-          </rect>
-        )
-      })}
+    <svg viewBox="0 0 100 16" className="h-4 w-24 outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/80"
+         preserveAspectRatio="none" tabIndex={0} role="img" aria-label={seriesLabel}>
+      {daily.map((v, i) => (
+        <rect key={i} x={i * w + 1} y={16 - (v / max) * 14 - 1} width={w - 2}
+              height={(v / max) * 14 + 1} rx={1}
+              fill={i === daily.length - 1 ? 'var(--purple-hi, #c084fc)' : 'rgba(255,255,255,0.25)'}>
+          {/* 原生 title 悬浮提示，与 SessionTimeline 的时段色带同一手法——这个项目
+              没有自建 tooltip 组件，轻量原生方案就是既有约定。键盘等价路径是 svg
+              一层的 aria-label，见函数顶部注释。
+              Native title hover, same technique as SessionTimeline's session
+              bands — this codebase has no custom tooltip component, so the
+              light-weight native one is the established convention. The
+              keyboard-equivalent path is the svg-level aria-label; see the
+              function-level comment for why. */}
+          <title>{t('admin.winrate.dailyBarHint', { count: v })}</title>
+        </rect>
+      ))}
     </svg>
   )
 }
@@ -125,40 +114,40 @@ function Card({ row, sessionKey, rank, onSelect }: {
     .filter((s) => s.sessions[sessionKey] && s.sessions[sessionKey].resolved >= MIN_SAMPLES)
     .sort((a, b) => (b.sessions[sessionKey].wilsonLow ?? 0) - (a.sessions[sessionKey].wilsonLow ?? 0))
     .slice(0, 3)
-  // 整卡可点选策略，但卡片里还嵌了一个真的 <Link>（追踪中笔数跳转 /app）和
-  // DailyBars 的逐柱 tabIndex 焦点（code review Important 2）。HTML5 的 <button>
+  // 整卡可点选策略，但卡片里还嵌了一个真的 <Link>（追踪中笔数跳转 /app），以及
+  // DailyBars 那个可聚焦的 svg（code review Important 2）。HTML5 的 <button>
   // content model 不允许交互后代——<a> 嵌 <button> 是"非法但多数浏览器会渲染"，
   // Tab 顺序和读屏语义因浏览器而异；外壳换成 div[role=button] + tabIndex + 手动
   // 处理 Enter/Space，语义仍是按钮，但不再限制后代不能交互。
   // The whole card selects a strategy on click, but it also nests a real <Link>
-  // (jump to /app for pending trades) and DailyBars' per-bar tabIndex focus
-  // (code review Important 2). A <button>'s content model forbids interactive
-  // descendants — <a> inside <button> is invalid HTML that most browsers
-  // render anyway, with tab order and AT semantics varying by browser. The
-  // wrapper becomes a div[role=button] + tabIndex + manual Enter/Space
-  // handling instead: same button semantics, but descendants may be
-  // interactive.
+  // (jump to /app for pending trades) plus DailyBars' focusable svg (code review
+  // Important 2). A <button>'s content model forbids interactive descendants —
+  // <a> inside <button> is invalid HTML that most browsers render anyway, with
+  // tab order and AT semantics varying by browser. The wrapper becomes a
+  // div[role=button] + tabIndex + manual Enter/Space handling instead: same
+  // button semantics, but descendants may be interactive.
   return (
     <div role="button" tabIndex={0} onClick={() => onSelect(row.strategy)}
          onKeyDown={(e) => {
            // 只处理"这个 div 自己"收到的按键，不处理从内部可聚焦子元素（Link、
-           // DailyBars 的柱子）冒泡上来的按键（code review 复审：新回归）。少了
+           // DailyBars 的 svg）冒泡上来的按键（code review 复审：新回归）。少了
            // 这道守卫时，键盘用户 Tab 到「追踪中 →」按 Enter，浏览器对聚焦 <a>
            // 的默认行为（模拟点击、触发导航）会被这里的 e.preventDefault() 吞掉
            // ——因为 preventDefault 作用于整个事件，不区分是谁调用的——变成
-           // 导航不发生、反而选中了整张卡；Tab 到柱子按 Enter/Space 同理会误选卡片。
+           // 导航不发生、反而选中了整张卡；焦点停在柱图上按 Enter/Space 同理会
+           // 误选卡片。
            // e.target !== e.currentTarget 就是在说"这个按键不是发生在 div 本身
            // 上，是从后代冒泡上来的"，直接放行，不拦截也不代为处理。
            // Only handle a key that landed on this div itself, not one bubbling
-           // up from an inner focusable descendant (the Link, or a DailyBars
-           // bar) (code review re-review: a regression introduced by the
-           // previous fix). Without this guard, a keyboard user tabbing to
-           // "tracking N →" and pressing Enter gets the browser's default
-           // Enter-on-a-focused-<a> behaviour (simulate a click, navigate)
-           // swallowed by this handler's e.preventDefault() — preventDefault
-           // applies to the whole event, it doesn't know which listener called
-           // it — so navigation never happens and the card gets selected
-           // instead; Enter/Space on a bar misselects the card the same way.
+           // up from an inner focusable descendant (the Link, or DailyBars' svg)
+           // (code review re-review: a regression introduced by the previous
+           // fix). Without this guard, a keyboard user tabbing to "tracking N →"
+           // and pressing Enter gets the browser's default Enter-on-a-focused-<a>
+           // behaviour (simulate a click, navigate) swallowed by this handler's
+           // e.preventDefault() — preventDefault applies to the whole event, it
+           // doesn't know which listener called it — so navigation never happens
+           // and the card gets selected instead; Enter/Space with focus on the
+           // bar chart misselects the card the same way.
            // e.target !== e.currentTarget means "this keypress didn't happen on
            // the div itself, it bubbled from a descendant" — let it through
            // untouched.
@@ -268,13 +257,42 @@ export default function RecommendationCards({ data, now, onSelectStrategy }: {
               {st.state === 'active'
                 ? t('admin.winrate.recoActive', { session: t(`admin.winrate.session.${s.key}`) })
                 : t('admin.winrate.recoNext', {
+                    // 「2h14m 后」而不是「02:14 后」：这是时长不是钟点，见
+                    // shared.ts 里 fmtDurationHm 与 fmtClock 各自的注释。
+                    // "in 2h14m", not "in 02:14": this is a duration, not a clock
+                    // reading — see fmtDurationHm / fmtClock in shared.ts.
+                    time: fmtDurationHm(st.state === 'upcoming' ? st.minutesToStart : 0),
                     session: t(`admin.winrate.session.${s.key}`),
-                    time: fmtClock(st.state === 'upcoming' ? st.minutesToStart : 0),
                   })}
             </h4>
             {ranked.length === 0 ? (
               <p className="text-[12px] leading-5 text-neutral-500">
-                {t('admin.winrate.recoEmpty', { resolved: data.overall.total.resolved, min: MIN_SAMPLES })}
+                {/* 冷启动文案的 resolved 必须是**这个时段内**的已判定数，不是
+                    data.overall.total.resolved（全平台所有时段合计）。这句话渲染在
+                    「亚洲盘 · 该盯什么」标题正下方，回答的问题是"亚洲盘还差多少笔
+                    才会出卡"；填全平台数字就是答非所问，而且必然偏大——按设计文档
+                    的数据现实，头两三周推荐区大概率是空的，这句话是管理员上线后
+                    看得最多的一句。
+                    data.overall.sessions[key] 是后端已经算好的"该时段全策略合计"桶，
+                    与"逐策略 sessions[key].resolved 求和"逐条等价（同一批信号的两种
+                    分组），直接用现成的。
+                    The cold-start line's `resolved` must be this session's resolved
+                    count, not data.overall.total.resolved (every session on the
+                    platform combined). It renders directly under "Asian session ·
+                    what to watch" and answers "how far is the Asian session from
+                    producing a card" — a platform-wide figure answers a different
+                    question, and always overstates. Per the design doc's data
+                    reality the recommendation area is likely empty for the first
+                    two or three weeks, which makes this the single line an admin
+                    reads most after launch.
+                    data.overall.sessions[key] is the backend's precomputed
+                    all-strategies bucket for that session — identical to summing
+                    sessions[key].resolved across strategies (same signals, two
+                    groupings) — so use the one that already exists. */}
+                {t('admin.winrate.recoEmpty', {
+                  resolved: data.overall.sessions[s.key]?.resolved ?? 0,
+                  min: MIN_SAMPLES,
+                })}
               </p>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

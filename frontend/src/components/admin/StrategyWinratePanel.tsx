@@ -214,7 +214,8 @@ export default function StrategyWinratePanel() {
                 on screen together with nothing but one error line at the top to
                 explain it. `data.days` is the backend's echo of the parameter that
                 actually produced `data`, so it can never drift from it. */}
-            <StrategyDetail data={data} days={data.days} activeKeys={activeKeys} selected={selected} onSelect={setSelected} />
+            <StrategyDetail data={data} days={data.days} activeKeys={activeKeys} selected={selected}
+                            onSelect={setSelected} now={now} />
           </div>
           <p className="px-1 text-[11px] leading-5 text-neutral-600">
             {t('admin.winrate.footnote', { min: MIN_SAMPLES })}
