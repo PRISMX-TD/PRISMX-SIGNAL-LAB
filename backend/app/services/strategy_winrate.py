@@ -284,17 +284,37 @@ def wilson_lower_bound(hit: int, n: int, z: float = 1.96) -> float | None:
     80% of 5 has a wide interval and a low bound, 55% of 40 a narrow one and a
     higher bound. n is the resolved count.
     """
+    bounds = wilson_bounds(hit, n, z)
+    return None if bounds is None else bounds[0]
+
+
+def wilson_bounds(hit: int, n: int, z: float = 1.96) -> tuple[float, float] | None:
+    """胜率的 Wilson 95% 置信区间（下限, 上限）。分母为 0 时返回 None。
+
+    前端把这个区间画成点图上的横杠：**区间宽窄就是样本厚薄的可视化**。
+    5 笔的 50% 与 1296 笔的 50% 在只画一个百分比时长得一模一样，画成区间后
+    前者横跨大半个轴、后者收成一个点，读的人不用去看小字笔数就知道该信谁。
+
+    The Wilson 95% interval (low, high); None on an empty denominator.
+
+    The UI renders this as the whisker on a dot plot: **the interval's width is
+    the visualization of sample size**. A 50% from 5 trades and a 50% from 1296
+    look identical when drawn as a bare percentage; as intervals the first spans
+    half the axis and the second collapses to a point, so the reader knows which
+    to trust without hunting for the sample count in small print.
+    """
     if n <= 0:
         return None
     p = hit / n
     denom = 1.0 + z * z / n
     centre = p + z * z / (2.0 * n)
     margin = z * math.sqrt(p * (1.0 - p) / n + z * z / (4.0 * n * n))
-    return max(0.0, (centre - margin) / denom)
+    return (max(0.0, (centre - margin) / denom), min(1.0, (centre + margin) / denom))
 
 
 def _finalize(bucket: dict, days: int, include_daily: bool) -> dict:
     resolved = bucket["hitTp"] + bucket["hitSl"]
+    _bounds = wilson_bounds(bucket["hitTp"], resolved)
     samples = resolved + bucket["pending"] + bucket["stale"]
     resolve_n = bucket["_resolveN"]
     return {
@@ -307,7 +327,8 @@ def _finalize(bucket: dict, days: int, include_daily: bool) -> dict:
         # None rather than 0 on an empty denominator so the UI can tell "0% win
         # rate here" apart from "no resolved samples here yet".
         "winRate": (bucket["hitTp"] / resolved) if resolved > 0 else None,
-        "wilsonLow": wilson_lower_bound(bucket["hitTp"], resolved),
+        "wilsonLow": _bounds[0] if _bounds else None,
+        "wilsonHigh": _bounds[1] if _bounds else None,
         "avgResolveSeconds": (bucket["_resolveSum"] / resolve_n) if resolve_n else None,
         "weeklySignals": round(samples / days * 7, 1),
         # 品种层与方向桶不下发这两条序列：样本太薄，图全是零 / omitted there

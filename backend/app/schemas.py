@@ -241,6 +241,11 @@ class WinRateBucketOut(BaseModel):
     winRate: float | None
     # Wilson 95% 置信下限，推荐榜排序键；分母为 0 时 null / ranking key; null when unresolved
     wilsonLow: float | None
+    # Wilson 区间上限。前端把 [low, high] 画成点图上的横杠——区间宽窄就是样本
+    # 厚薄的可视化，5 笔的 50% 与 1296 笔的 50% 因此一眼可分。
+    # The Wilson interval's upper bound; the UI draws [low, high] as a whisker,
+    # making sample thickness visible rather than something to read in fine print.
+    wilsonHigh: float | None
     # 窗口内已判定信号的平均判定秒数；无已判定时 null / mean seconds to resolution
     avgResolveSeconds: float | None
     # samples ÷ days × 7，一位小数 / normalized weekly signal count

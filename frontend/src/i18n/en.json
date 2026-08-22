@@ -1049,17 +1049,19 @@
         "holdingOverall": "Overall",
         "holdingEmpty": "Nothing resolved yet.",
         "weekday": "Weekday x direction",
-        "weekdayHint": "Pinned to the last 7 days: a rolling 168 hours is exactly 7x24, so every weekday draws exactly 24 hours and the cells are directly comparable. Read across to compare weekdays, down to compare directions. Resolved signals only — anything without an outcome is excluded; each cell gates on its own 5-trade minimum and shows the raw count below it. Weekdays are UTC.",
-        "weekdayAria": "Wins and losses by weekday: {{detail}}",
-        "weekdayAriaDay": "{{day}}: {{tp}} wins, {{sl}} losses",
-        "cellHint": "{{tp}} wins · {{sl}} losses"
+        "weekdayHint": "Pinned to the last 7 days, each weekday drawing exactly 24 hours. Colour intensity is the distance from 50%, green above and red below; the second number in each cell is the sample count. Resolved signals only; below 5 trades the cell shows the count alone. Weekdays are UTC.",
+        "cellHint": "{{tp}} wins · {{sl}} losses",
+        "heatLegend": "Colour diverges from 50%: greener beats a coin flip, redder loses to it. Cells below the sample floor stay uncoloured.",
+        "intervalAria": "{{label}} win rate {{rate}}, 95% confidence interval {{low}} to {{high}}, {{tp}} of {{n}} trades",
+        "intervalLegend": "The bar is the 95% confidence interval; its width is the sample size — a 50% from 5 trades spans half the axis, a 50% from a thousand collapses to a point. Green or red only when the whole interval clears the dashed 50% line; straddling it means not yet distinguishable from a coin flip, shown grey."
       },
       "session": {
         "asia": "Asian",
         "europe": "European",
         "newyork": "New York",
         "outside": "Other hours"
-      }
+      },
+      "hintToggle": "How these numbers are computed"
     },
     "invite": {
       "hint": "Create labeled promo links (?ref=code). Users who register through a link get its label written into the Note column of the user list automatically. Clicks are indicative only — not abuse-proof, and cross-device clicks are invisible; registrations reflect real accounts. Links cannot be deleted; deactivate them when a campaign ends.",

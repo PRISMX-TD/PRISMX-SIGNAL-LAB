@@ -159,6 +159,11 @@ export interface WinRateBucket {
   // Wilson 95% 置信下限，推荐榜排序键；分母为 0 时 null（后端算，前端只排序）
   // ranking key computed server-side; null when unresolved
   wilsonLow: number | null
+  // Wilson 区间上限。[wilsonLow, wilsonHigh] 在点图上画成横杠——区间宽窄就是
+  // 样本厚薄的可视化，5 笔的 50% 与上千笔的 50% 因此一眼可分。
+  // The interval's upper bound; [low, high] is drawn as a whisker so sample
+  // thickness is visible rather than something to read in fine print.
+  wilsonHigh: number | null
   // 平均判定秒数；无已判定时 null / mean seconds to resolution
   avgResolveSeconds: number | null
   // samples ÷ days × 7 / normalized weekly count

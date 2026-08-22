@@ -120,7 +120,18 @@ export default function StrategyWinratePanel() {
     <div className="space-y-4">
       <div className="glass p-5">
         <h3 className="mb-1 font-display text-lg font-semibold text-neutral-100">{t('admin.winrate.title')}</h3>
-        <p className="mb-4 text-xs leading-5 text-neutral-500">{t('admin.winrate.hint')}</p>
+        {/* 口径说明收进折叠项：第一次看有用，第一百次看是噪音，而它原本占了整个
+            卡片、把决策页的顶部变成一段文档。默认收起，需要时展开。
+            The methodology note is collapsed: useful the first time, noise the
+            hundredth, and it previously filled the whole card — turning the top
+            of a decision page into documentation. Collapsed by default. */}
+        <details className="mb-4 group">
+          <summary className="cursor-pointer list-none text-[11px] text-neutral-500 transition hover:text-neutral-300">
+            {t('admin.winrate.hintToggle')}
+            <span className="ml-1 inline-block transition group-open:rotate-90">›</span>
+          </summary>
+          <p className="mt-2 text-xs leading-5 text-neutral-500">{t('admin.winrate.hint')}</p>
+        </details>
 
         {error && <p className="py-3 text-sm text-down">{error}</p>}
 
