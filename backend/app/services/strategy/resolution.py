@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models import StrategySignal, UserStrategy
+from app.services.symbol_aliases import symbol_match_set
 
 logger = logging.getLogger("prismx.strategy_resolution")
 
@@ -97,7 +98,15 @@ def resolve_strategy_signals(db: Session, symbol: str, interval: str, bar: dict)
     pending = (
         db.query(StrategySignal)
         .filter(
-            StrategySignal.symbol == symbol,
+            # 与平台信号判定同一条别名规则：个人策略信号的品种名同样来自用户
+            # 配置，与行情侧的写法未必一致。两处必须同口径，否则同一个品种在
+            # "平台胜率"里判得出、在"策略胜率"里判不出。
+            # The same alias rule as platform-signal resolution: a personal
+            # strategy's symbol also comes from user configuration and need not
+            # match the price side's spelling. Both paths must agree, or one
+            # symbol would resolve for the platform win rate but not the
+            # strategy win rate.
+            StrategySignal.symbol.in_(symbol_match_set(symbol)),
             StrategySignal.interval == interval,
             StrategySignal.result == "PENDING",
         )

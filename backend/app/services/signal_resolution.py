@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session, load_only
 
 from app.core.config import settings
 from app.models import Signal
+from app.services.symbol_aliases import symbol_match_set
 
 logger = logging.getLogger("prismx.signal_resolution")
 
@@ -121,7 +122,17 @@ def resolve_signals_with_price(db: Session, symbol: str, low: float, high: float
             )
         )
         .filter(
-            Signal.symbol == symbol,
+            # 按别名集合匹配而不是精确相等：同一个品种在行情侧与信号侧可能各用
+            # 一个名字（BTCUSD / BTCUSDT），精确匹配会让整个品种一条也判不出来
+            # 且不报错——线上正是这样静默丢了 38 天、4081 条比特币信号。
+            # 详见 services/symbol_aliases.py 的模块注释。
+            # Match the alias set rather than exact equality: one instrument can
+            # carry a different name on the price side than on the signal side
+            # (BTCUSD / BTCUSDT), and exact matching then resolves nothing for
+            # that symbol while raising no error — which is how 4081 Bitcoin
+            # signals were silently lost for 38 days in production. See the
+            # module docstring of services/symbol_aliases.py.
+            Signal.symbol.in_(symbol_match_set(symbol)),
             Signal.result == "PENDING",
             Signal.created_at >= stale_cutoff,
         )
