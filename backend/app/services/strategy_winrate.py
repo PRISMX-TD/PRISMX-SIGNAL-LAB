@@ -281,8 +281,19 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
         if result in ("HIT_TP", "HIT_SL") and resolved_at is not None:
             resolve_seconds = (resolved_at - created_at).total_seconds()
 
-        buckets = per_strategy.setdefault(
-            name, {k: _empty_bucket(days) for k in [*all_keys, "total"]})
+        # 不用 setdefault(name, {...}) ：它的第二个参数无论 key 在不在都会先求值，
+        # 相当于给已经存在的策略也重新构造一整套桶（现在每个桶还带一个最长 90
+        # 的 _daily 列表）再当场丢弃，按信号数 × days 线性放大浪费。品种子分层
+        # （Task 3）还要加一层同款查找，这里先改掉，免得被复制三份。
+        # Not setdefault(name, {...}): its second argument is evaluated whether
+        # or not the key exists, so every already-seen strategy still builds a
+        # full fresh set of buckets (each now carrying a _daily list up to 90
+        # long) just to discard it — waste that scales with signal count x days.
+        # The per-symbol breakdown (Task 3) adds another lookup just like this
+        # one, so fix the pattern here before it gets copied three times.
+        if name not in per_strategy:
+            per_strategy[name] = {k: _empty_bucket(days) for k in [*all_keys, "total"]}
+        buckets = per_strategy[name]
         for target in (buckets, overall):
             for bkey in ("total", *session_keys):
                 b = target[bkey]
