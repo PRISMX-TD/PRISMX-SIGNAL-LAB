@@ -174,14 +174,28 @@ export default function MatrixTable({
               // and brighter text. "outside" isn't a real session (no colour in
               // SESSION_COLORS, never in activeKeys), so this highlight logic stays
               // scoped to this map and doesn't extend to the outside header below.
+              //
+              // 文字变亮必须加在时段名那个 <div> 上，不能只加在 <th> 上：三行文字都
+              // 各自包着显式 text-* 类的 <div>，子元素一旦自己声明了 color，祖先的
+              // color 类无论优先级多高都不会覆盖它——加在 <th> 上是永远不可见的死
+              // class（这是代码审查抓到的问题，这里已按审查建议改成子元素响应）。
+              // The brighter text has to live on the session-name <div>, not the
+              // <th>: all three lines are wrapped in <div>s with their own explicit
+              // text-* class, and once a descendant declares its own color, no
+              // ancestor color class can override it regardless of specificity —
+              // putting it on the <th> was dead, invisible CSS (caught in code
+              // review; fixed here per the reviewer's suggestion of making the
+              // child respond instead).
               const active = activeKeys.includes(s.key)
               return (
                 <th
                   key={s.key}
-                  className={`pb-2 pr-3 text-right font-medium${active ? ' text-neutral-100' : ''}`}
+                  className="pb-2 pr-3 text-right font-medium"
                   style={active ? { boxShadow: `inset 0 -2px 0 ${SESSION_COLORS[s.key]}` } : undefined}
                 >
-                  <div className="text-neutral-300">{t(`admin.winrate.session.${s.key}`)}</div>
+                  <div className={active ? 'text-neutral-100' : 'text-neutral-300'}>
+                    {t(`admin.winrate.session.${s.key}`)}
+                  </div>
                   {/* 两行：上面是该金融中心的本地时间（口径本身），下面是换算到
                       管理员本地时区的钟点（实际几点看盘）。只给其中一个都会让人
                       在夏令时前后怀疑数据错了。
