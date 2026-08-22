@@ -167,21 +167,35 @@ def _empty_bucket(days: int, with_daily: bool = True) -> dict:
     return {
         "hitTp": 0, "hitSl": 0, "pending": 0, "stale": 0,
         # 内部累加器，_finalize 时弹出 / internal accumulators, popped by _finalize
-        # 每日三条并行数组：总数 / 止盈 / 止损。前端的每日图画的是胜负堆叠柱，
-        # 而不是每日胜率百分比——7 天窗口下单个策略一天只有三五笔已判定，
-        # 画成百分比就是 100%/0%/50% 跳，正是 MIN_SAMPLES 那条纪律要防的假精确。
-        # 堆叠柱同时表达"那天多活跃"和"赢多还是输多"，不拿三两笔冒充百分比。
-        # Three parallel per-day arrays: total / take-profit / stop-loss. The UI
-        # draws stacked win-loss bars rather than a daily win-rate percentage —
-        # a single strategy resolves only three to five trades a day in a 7-day
-        # window, so a percentage would swing 100/0/50 — exactly the false
-        # precision the MIN_SAMPLES rule exists to prevent. Stacked bars carry
-        # both "how busy was that day" and "did it win or lose" without passing
-        # two or three trades off as a rate.
+        # _daily：自窗口起点每 24h 一格的信号总数，喂推荐卡的迷你活跃度柱图，
+        # 回答的是"最近这几天忙不忙"。
+        # _wdTp / _wdSl：按**星期几**（UTC，周一=0）累计的止盈/止损笔数，长度恒为 7，
+        # 喂详情区的"星期胜负"图，回答的是"这个策略周几表现好"。
+        # 两条序列刻意分开：一条按滚动天、一条按星期几，问的是两个不同的问题，
+        # 合并成一条就得让某一侧将就另一侧的分桶方式。
+        #
+        # 星期几取 UTC：外汇周本来就以 UTC 为参照（周五纽约盘尾在 UTC 仍是周五，
+        # 换成任一观察者的本地时区就可能滑到周六），而这一页的时段各按自己金融
+        # 中心的本地时间定义、并不存在统一的"本地"。前端在图注里写明是 UTC。
+        #
+        # _daily: signal counts per 24h from the window start, feeding the
+        # recommendation card's activity sparkline — "how busy have the last few
+        # days been". _wdTp / _wdSl: take-profit and stop-loss counts by weekday
+        # (UTC, Monday=0), always length 7, feeding the detail area's weekday
+        # chart — "which weekday does this strategy do well on". Deliberately two
+        # series: one bucketed by rolling day, one by weekday, answering two
+        # different questions; merging them would force one to adopt the other's
+        # bucketing.
+        #
+        # Weekday is taken in UTC: the FX week is conventionally referenced to it
+        # (a Friday New York close is still Friday in UTC but can slip to
+        # Saturday in an observer's local zone), and this page's sessions are each
+        # defined in their own centre's local time, so there is no single "local".
+        # The UI says UTC in the caption.
         "_resolveSum": 0.0, "_resolveN": 0,
         "_daily": [0] * days if with_daily else [],
-        "_dailyTp": [0] * days if with_daily else [],
-        "_dailySl": [0] * days if with_daily else [],
+        "_wdTp": [0] * 7 if with_daily else [],
+        "_wdSl": [0] * 7 if with_daily else [],
     }
 
 
@@ -190,6 +204,7 @@ def _accumulate(
     keys: tuple[str, ...],
     result_key: str,
     day_idx: int,
+    weekday: int,
     resolve_seconds: float | None,
     with_daily: bool,
 ) -> None:
@@ -218,10 +233,15 @@ def _accumulate(
         b[result_key] += 1
         if with_daily:
             b["_daily"][day_idx] += 1
+            # 星期几只累计已判出胜负的：未判定的信号在星期图上不出现（产品要求），
+            # 等它真走出结果那天再计进来。
+            # The weekday series counts only resolved signals: unresolved ones do
+            # not appear on that chart (a product decision) and join it on the day
+            # they actually reach an outcome.
             if result_key == "hitTp":
-                b["_dailyTp"][day_idx] += 1
+                b["_wdTp"][weekday] += 1
             elif result_key == "hitSl":
-                b["_dailySl"][day_idx] += 1
+                b["_wdSl"][weekday] += 1
         if resolve_seconds is not None:
             b["_resolveSum"] += resolve_seconds
             b["_resolveN"] += 1
@@ -273,13 +293,17 @@ def _finalize(bucket: dict, days: int, include_daily: bool) -> dict:
         "wilsonLow": wilson_lower_bound(bucket["hitTp"], resolved),
         "avgResolveSeconds": (bucket["_resolveSum"] / resolve_n) if resolve_n else None,
         "weeklySignals": round(samples / days * 7, 1),
-        # 品种层不下发每日分布：样本太薄，柱图全是零 / omitted at symbol level
-        # 每格 {samples, tp, sl}：samples 含未判定，tp+sl 才是那天的已判定数。
-        # Per entry {samples, tp, sl}: samples includes unresolved rows; only
-        # tp+sl is that day's resolved count.
-        "daily": [
-            {"samples": n, "tp": t, "sl": l}
-            for n, t, l in zip(bucket["_daily"], bucket["_dailyTp"], bucket["_dailySl"])
+        # 品种层与方向桶不下发这两条序列：样本太薄，图全是零 / omitted there
+        # daily：自窗口起点每 24h 一格的信号总数（含未判定），推荐卡的活跃度柱图用
+        # daily: signal totals per 24h from the window start (unresolved included),
+        # for the recommendation card's activity sparkline
+        "daily": list(bucket["_daily"]) if include_daily else None,
+        # weekday：按星期几（UTC，周一=0，长度恒 7）的止盈/止损笔数，只含已判定
+        # weekday: take-profit / stop-loss counts by weekday (UTC, Monday=0,
+        # always length 7); resolved signals only
+        "weekday": [
+            {"tp": t, "sl": l}
+            for t, l in zip(bucket["_wdTp"], bucket["_wdSl"])
         ] if include_daily else None,
     }
 
@@ -374,6 +398,11 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
         # floating-point edge cases.
         day_idx = min(days - 1, max(0, int(
             (created_at - cutoff_naive).total_seconds() // 86400)))
+        # 星期几按 UTC 取。created_at 列存的是 naive UTC（见 models 的 _now），
+        # 直接 .weekday() 即为 UTC 星期几，周一=0。
+        # Weekday in UTC: created_at stores naive UTC (see _now in models), so
+        # .weekday() is already the UTC weekday, Monday=0.
+        weekday = created_at.weekday()
         resolve_seconds = None
         if result in ("HIT_TP", "HIT_SL") and resolved_at is not None:
             resolve_seconds = (resolved_at - created_at).total_seconds()
@@ -403,8 +432,8 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
         bucket_keys = ("total", *session_keys)
         if side_key in SIDE_KEYS:
             bucket_keys = (*bucket_keys, side_key)
-        _accumulate(per_strategy[name], bucket_keys, key, day_idx, resolve_seconds, True)
-        _accumulate(overall, bucket_keys, key, day_idx, resolve_seconds, True)
+        _accumulate(per_strategy[name], bucket_keys, key, day_idx, weekday, resolve_seconds, True)
+        _accumulate(overall, bucket_keys, key, day_idx, weekday, resolve_seconds, True)
 
         # 品种子分层：同样避免 setdefault(key, {昂贵默认值}) ——两层查找都先判空
         # 再赋值，理由与上面 per_strategy 完全一致。
@@ -425,7 +454,7 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
                 k: _empty_bucket(days, with_daily=False)
                 for k in [*all_keys, "total", *SIDE_KEYS]
             }
-        _accumulate(sym_map[symbol], bucket_keys, key, day_idx, resolve_seconds, False)
+        _accumulate(sym_map[symbol], bucket_keys, key, day_idx, weekday, resolve_seconds, False)
 
     def _shape(buckets: dict[str, dict]) -> dict:
         return {

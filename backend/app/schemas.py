@@ -199,20 +199,21 @@ class SessionWindowOut(BaseModel):
     endHour: int  # 左闭右开 / half-open
 
 
-class DailyOutcomeOut(BaseModel):
-    """某一天（自窗口起点起的第 N 个 24 小时桶）的信号数与胜负拆分。
+class WeekdayOutcomeOut(BaseModel):
+    """某个星期几（UTC，周一=0）在整个窗口内累计的止盈/止损笔数。
 
-    前端画成胜/负堆叠柱而不是每日胜率百分比：单个策略一天只有三五笔已判定，
-    百分比会在 100/0/50 之间跳，那是假精确——堆叠柱同时表达"多活跃"与
-    "赢多还是输多"，且不需要为薄样本设门槛。
+    **只含已判定的信号**：未判定的不出现在这张图上，等它真走出结果那天再计进来。
+    也不给每个星期几算胜率百分比——窗口短时一格只有三五笔，百分比会在
+    100/0/50 之间跳，那是假精确。堆叠柱直接展示胜负笔数，不需要为薄样本设门槛。
 
-    One 24h bucket's signal count and win/loss split. The UI renders stacked
-    win-loss bars rather than a daily win-rate percentage: a strategy resolves
-    only a handful of trades a day, so a rate would swing wildly. Stacked bars
-    convey both activity and outcome without needing a thin-sample gate.
+    Take-profit / stop-loss counts for one weekday (UTC, Monday=0), accumulated
+    across the whole window. **Resolved signals only**: unresolved ones are
+    absent from this chart and join it on the day they actually reach an outcome.
+    No per-weekday percentage either — with a short window a slot holds only a
+    handful of trades and a rate would swing between 100/0/50. Stacked counts
+    need no thin-sample gate.
     """
 
-    samples: int  # 含未判定 / includes unresolved
     tp: int
     sl: int
 
@@ -235,12 +236,18 @@ class WinRateBucketOut(BaseModel):
     avgResolveSeconds: float | None
     # samples ÷ days × 7，一位小数 / normalized weekly signal count
     weeklySignals: float
-    # 自窗口起点每 24h 一桶，长度=days，旧→新；品种层与方向桶为 null（样本太薄不下发）
-    # samples 含未判定，tp+sl 才是那天的已判定数
-    # Per-24h buckets from the window start, oldest→newest; null at the symbol
-    # layer and on side buckets. samples includes unresolved rows; tp+sl is the
-    # day's resolved count.
-    daily: list[DailyOutcomeOut] | None = None
+    # 自窗口起点每 24h 一格的信号总数（含未判定），旧→新，长度=days。
+    # 推荐卡的活跃度柱图用，回答"最近这几天忙不忙"。
+    # 品种层与方向桶为 null（样本太薄不下发）。
+    # Signal totals per 24h from the window start (unresolved included),
+    # oldest→newest, length = days. Feeds the recommendation card's activity
+    # sparkline. Null at the symbol layer and on side buckets.
+    daily: list[int] | None = None
+    # 按星期几（UTC，周一=0）累计的止盈/止损，长度恒为 7，**只含已判定**。
+    # 详情区的「星期胜负」图用，回答"这个策略周几表现好"。
+    # By weekday (UTC, Monday=0), always length 7, **resolved signals only**.
+    # Feeds the detail area's weekday chart.
+    weekday: list[WeekdayOutcomeOut] | None = None
 
 
 class SymbolWinRateOut(BaseModel):

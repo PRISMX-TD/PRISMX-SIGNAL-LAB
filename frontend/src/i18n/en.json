@@ -1029,21 +1029,25 @@
         "d": "d"
       },
       "side": { "BUY": "Long", "SELL": "Short" },
+      "weekday": {
+        "mon": "Mon", "tue": "Tue", "wed": "Wed", "thu": "Thu",
+        "fri": "Fri", "sat": "Sat", "sun": "Sun"
+      },
       "chart": {
         "sessions": "Win rate by session",
         "sessionsHint": "Filed by the session a signal fired in. The European and New York sessions overlap ~4h daily and signals in the overlap count toward both.",
-        "daily": "Daily wins and losses",
-        "dailyHint": "One bar per 24h from the window start. Green = take-profit, red = stop-loss, grey = no outcome yet. No daily percentage — a rate from three or four trades swings between 100/0/50, which is false precision.",
-        "dailyAria": "Daily wins and losses over {{days}} days: {{detail}}",
-        "dailyAriaDay": "day {{n}}: {{tp}} wins, {{sl}} losses",
-        "oldest": "oldest",
-        "latest": "last 24h",
         "sides": "Long vs short",
         "sidesHint": "Legacy signals with an unrecognized direction count toward neither side, so the two may sum to less than the total.",
         "holding": "Time to resolution",
         "holdingHint": "Average time from a signal firing to reaching take-profit or stop-loss; resolved signals only.",
         "holdingOverall": "Overall",
-        "holdingEmpty": "Nothing resolved yet."
+        "holdingEmpty": "Nothing resolved yet.",
+        "weekday": "Wins and losses by weekday",
+        "weekdayHint": "Resolved signals accumulated by weekday (UTC): green = take-profit, red = stop-loss. Unresolved signals are excluded and join on the day they actually reach an outcome. No per-weekday percentage — with a short window a slot holds only a handful of trades and a rate would swing between 100/0/50. At 7 days each slot is a single day; switch to 14 or 30 to see a pattern.",
+        "weekdayAria": "Wins and losses by weekday: {{detail}}",
+        "weekdayAriaDay": "{{day}}: {{tp}} wins, {{sl}} losses",
+        "legendTp": "wins",
+        "legendSl": "losses"
       },
       "session": {
         "asia": "Asian",

@@ -163,18 +163,25 @@ export interface WinRateBucket {
   avgResolveSeconds: number | null
   // samples ÷ days × 7 / normalized weekly count
   weeklySignals: number
-  // 自窗口起点每 24h 一桶，旧→新，长度=days；品种层与方向桶为 null
-  // per-24h buckets, oldest→newest; null at the symbol layer and on side buckets
-  daily: DailyOutcome[] | null
+  // 自窗口起点每 24h 一格的信号总数（含未判定），旧→新，长度=days。
+  // 推荐卡的活跃度柱图用。品种层与方向桶为 null。
+  // Signal totals per 24h from the window start (unresolved included),
+  // oldest→newest, length = days; feeds the recommendation sparkline.
+  // Null at the symbol layer and on side buckets.
+  daily: number[] | null
+  // 按星期几（UTC，周一=0）累计的止盈/止损，长度恒 7，**只含已判定**。
+  // By weekday (UTC, Monday=0), always length 7, **resolved signals only**.
+  weekday: WeekdayOutcome[] | null
 }
 
-// 某一天的信号数与胜负拆分。前端画胜/负堆叠柱而非每日胜率百分比——
-// 单个策略一天只有三五笔已判定，百分比会在 100/0/50 之间跳，那是假精确。
-// One day's volume and win/loss split. The UI stacks wins and losses rather
-// than plotting a daily win-rate percentage: a strategy resolves only a handful
-// of trades a day, so a rate would swing wildly.
-export interface DailyOutcome {
-  samples: number // 含未判定 / includes unresolved
+// 某个星期几在整个窗口内累计的止盈/止损笔数。只含已判定的信号——未判定的
+// 不出现在这张图上，等它真走出结果那天再计进来。也不给每个星期几算百分比：
+// 窗口短时一格只有三五笔，百分比会在 100/0/50 之间跳。
+// Take-profit / stop-loss counts for one weekday across the window. Resolved
+// signals only — unresolved ones are absent and join on the day they reach an
+// outcome. No per-weekday percentage either: with a short window a slot holds a
+// handful of trades and a rate would swing wildly.
+export interface WeekdayOutcome {
   tp: number
   sl: number
 }

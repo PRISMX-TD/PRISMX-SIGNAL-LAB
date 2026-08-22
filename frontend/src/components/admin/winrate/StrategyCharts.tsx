@@ -8,7 +8,7 @@
 // into a single figure makes every dimension harder to read, and the admin
 // arrives with four separate questions anyway.
 import { useTranslation } from 'react-i18next'
-import type { DailyOutcome, WinRateBucket } from '../../../api/types'
+import type { WeekdayOutcome, WinRateBucket } from '../../../api/types'
 import { MIN_SAMPLES, SESSION_COLORS, fmtDuration } from './shared'
 
 // 胜/负两色。与 WinRateBar 同源，整页只有这一套胜负语义色。
@@ -115,47 +115,58 @@ export function SessionWinRateChart({ sessions, buckets }: {
   )
 }
 
-/** ② 每日胜负堆叠柱 */
-export function DailyOutcomeChart({ daily }: { daily: DailyOutcome[] }) {
+/** ② 星期胜负堆叠柱：按星期几（UTC）累计的止盈/止损。
+ *  只画已判定的——未判定的信号不出现在这张图上，等它真走出结果那天再进来。
+ *  也不给每个星期几算百分比：窗口短时一格只有三五笔，百分比会在 100/0/50
+ *  之间跳。堆叠笔数既表达"周几出手多"，也表达"周几赢得多"。
+ *  Stacked wins and losses by weekday (UTC), resolved signals only: unresolved
+ *  ones are absent and join on the day they reach an outcome. No per-weekday
+ *  percentage — a slot holds a handful of trades in a short window. Stacked
+ *  counts carry both "which weekday it trades" and "which weekday it wins". */
+export function WeekdayOutcomeChart({ weekday }: { weekday: WeekdayOutcome[] }) {
   const { t } = useTranslation()
-  const max = Math.max(...daily.map((d) => Math.max(d.samples, d.tp + d.sl)), 1)
-  const totalTp = daily.reduce((s, d) => s + d.tp, 0)
-  const totalSl = daily.reduce((s, d) => s + d.sl, 0)
+  // 周一=0，与后端 Python 的 weekday() 一致 / Monday=0, matching Python's weekday()
+  const labels = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+  const max = Math.max(...weekday.map((d) => d.tp + d.sl), 1)
+  const totalTp = weekday.reduce((s, d) => s + d.tp, 0)
+  const totalSl = weekday.reduce((s, d) => s + d.sl, 0)
   const H = 64
-  const slot = 100 / daily.length
+  const slot = 100 / 7
 
   return (
-    <ChartCard title={t('admin.winrate.chart.daily')} caption={t('admin.winrate.chart.dailyHint')}>
-      {/* 整图一个 Tab 停位 + 完整数值序列的 aria-label：逐柱 tabIndex 会让 7 天
-          图占掉 7 个停位，而柱子本身不可激活。键盘读到的信息与 hover 等同。
+    <ChartCard title={t('admin.winrate.chart.weekday')} caption={t('admin.winrate.chart.weekdayHint')}>
+      {/* 整图一个 Tab 停位 + 完整数值序列的 aria-label：逐柱 tabIndex 会占掉七个
+          停位，而柱子本身不可激活。键盘读到的信息与 hover 等同。
           One tab stop for the whole chart with the full series in aria-label:
-          per-bar tabIndex would eat seven stops for non-activatable marks. What
-          the keyboard reads equals what hover shows. */}
+          per-bar tabIndex would eat seven stops for non-activatable marks. */}
       <svg viewBox={`0 0 100 ${H}`} className="w-full" preserveAspectRatio="none"
            tabIndex={0} role="img"
-           aria-label={t('admin.winrate.chart.dailyAria', {
-             days: daily.length,
-             detail: daily.map((d, i) =>
-               t('admin.winrate.chart.dailyAriaDay', { n: i + 1, tp: d.tp, sl: d.sl })).join('; '),
+           aria-label={t('admin.winrate.chart.weekdayAria', {
+             detail: weekday.map((d, i) =>
+               t('admin.winrate.chart.weekdayAriaDay', {
+                 day: t(`admin.winrate.weekday.${labels[i]}`), tp: d.tp, sl: d.sl,
+               })).join('; '),
            })}>
-        {daily.map((d, i) => {
-          const resolved = d.tp + d.sl
+        {weekday.map((d, i) => {
           const tpH = (d.tp / max) * (H - 2)
           const slH = (d.sl / max) * (H - 2)
-          const unresolvedH = ((d.samples - resolved) / max) * (H - 2)
-          const x = i * slot + slot * 0.2
-          const w = slot * 0.6
+          const x = i * slot + slot * 0.22
+          const w = slot * 0.56
+          // 自下而上：止损在下、止盈在上，两段之间留 1 单位间隙（dataviz 要求
+          // 堆叠分段用底色间隙分隔，不能靠描边）。
+          // Bottom-up: losses below, wins above, with a 1-unit surface gap
+          // between segments (dataviz requires a gap, not a stroke).
           let y = H - 1
           const parts: React.ReactNode[] = []
-          // 自下而上堆：止损 → 止盈 → 未判定（灰、最上），每段之间留 1 单位间隙
-          // Stacked bottom-up: losses, wins, then unresolved in grey on top,
-          // with a 1-unit gap between segments
-          if (slH > 0) { y -= slH; parts.push(<rect key="sl" x={x} y={y} width={w} height={slH} fill={SL_COLOR} opacity={0.75} />) }
-          if (tpH > 0) { y -= tpH + (slH > 0 ? 1 : 0); parts.push(<rect key="tp" x={x} y={y} width={w} height={tpH} fill={TP_COLOR} opacity={0.85} />) }
-          if (unresolvedH > 0.5) { y -= unresolvedH + 1; parts.push(<rect key="u" x={x} y={y} width={w} height={unresolvedH} fill="rgba(255,255,255,0.12)" />) }
+          if (slH > 0) { y -= slH; parts.push(<rect key="sl" x={x} y={y} width={w} height={slH} rx={1} fill={SL_COLOR} opacity={0.75} />) }
+          if (tpH > 0) { y -= tpH + (slH > 0 ? 1 : 0); parts.push(<rect key="tp" x={x} y={y} width={w} height={tpH} rx={1} fill={TP_COLOR} opacity={0.85} />) }
           return (
             <g key={i}>
-              <title>{t('admin.winrate.chart.dailyAriaDay', { n: i + 1, tp: d.tp, sl: d.sl })}</title>
+              <title>
+                {t('admin.winrate.chart.weekdayAriaDay', {
+                  day: t(`admin.winrate.weekday.${labels[i]}`), tp: d.tp, sl: d.sl,
+                })}
+              </title>
               {parts}
             </g>
           )
@@ -163,19 +174,22 @@ export function DailyOutcomeChart({ daily }: { daily: DailyOutcome[] }) {
         <line x1={0} y1={H - 0.5} x2={100} y2={H - 0.5} stroke="rgba(255,255,255,0.08)"
               strokeWidth="1" vectorEffect="non-scaling-stroke" />
       </svg>
-      <div className="mt-1.5 flex items-center justify-between text-[10px] text-neutral-500">
-        <span>{t('admin.winrate.chart.oldest')}</span>
-        <span className="flex items-center gap-3">
-          <span className="flex items-center gap-1">
-            <i className="h-2 w-2 rounded-sm" style={{ backgroundColor: TP_COLOR }} />
-            <span className="tabular-nums">{totalTp}</span>
-          </span>
-          <span className="flex items-center gap-1">
-            <i className="h-2 w-2 rounded-sm" style={{ backgroundColor: SL_COLOR }} />
-            <span className="tabular-nums">{totalSl}</span>
-          </span>
+      {/* 星期标签直接排在柱子下方，与柱子同一套七等分槽位对齐。
+          Weekday labels sit under the bars on the same seven-slot grid. */}
+      <div className="mt-1 grid grid-cols-7 text-center text-[10px] text-neutral-500">
+        {labels.map((l) => <span key={l}>{t(`admin.winrate.weekday.${l}`)}</span>)}
+      </div>
+      <div className="mt-1.5 flex items-center justify-center gap-4 text-[10px] text-neutral-500">
+        <span className="flex items-center gap-1">
+          <i className="h-2 w-2 rounded-sm" style={{ backgroundColor: TP_COLOR }} />
+          {t('admin.winrate.chart.legendTp')}
+          <span className="tabular-nums text-neutral-300">{totalTp}</span>
         </span>
-        <span>{t('admin.winrate.chart.latest')}</span>
+        <span className="flex items-center gap-1">
+          <i className="h-2 w-2 rounded-sm" style={{ backgroundColor: SL_COLOR }} />
+          {t('admin.winrate.chart.legendSl')}
+          <span className="tabular-nums text-neutral-300">{totalSl}</span>
+        </span>
       </div>
     </ChartCard>
   )

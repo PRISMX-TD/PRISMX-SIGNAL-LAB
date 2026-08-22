@@ -18,7 +18,7 @@ import { useTranslation } from 'react-i18next'
 import type { AdminStrategyWinRate, StrategyWinRate, SymbolWinRate } from '../../../api/types'
 import MatrixTable from './MatrixTable'
 import {
-  DailyOutcomeChart,
+  WeekdayOutcomeChart,
   HoldingTimeChart,
   SessionWinRateChart,
   SideWinRateChart,
@@ -26,19 +26,19 @@ import {
 
 /** 四张图的栅格。窄屏一列、宽屏两列——每张图内部都是横向条，两列时仍读得清。
  *  The four-chart grid: one column on narrow screens, two when there's room. */
-function ChartGrid({ row, sessions, daily }: {
+function ChartGrid({ row, sessions, weekday }: {
   row: StrategyWinRate | SymbolWinRate
   sessions: { key: string }[]
-  daily: import('../../../api/types').DailyOutcome[] | null
+  weekday: import('../../../api/types').WeekdayOutcome[] | null
 }) {
   return (
     <div className="grid gap-3 lg:grid-cols-2">
       <SessionWinRateChart sessions={sessions} buckets={row.sessions} />
       <SideWinRateChart sides={row.sides} />
-      {/* 每日图只在策略层有数据：品种层按天再切一刀样本太薄，后端不下发。
-          The daily chart only has data at the strategy layer — the symbol layer
-          would be too thin once sliced by day, so the backend omits it. */}
-      {daily && <DailyOutcomeChart daily={daily} />}
+      {/* 星期图只在策略层有数据：品种层再按星期几切一刀样本太薄，后端不下发。
+          The weekday chart only has data at the strategy layer — the symbol
+          layer would be too thin once sliced by weekday, so the backend omits it. */}
+      {weekday && <WeekdayOutcomeChart weekday={weekday} />}
       <HoldingTimeChart sessions={sessions} buckets={row.sessions} total={row.total} />
     </div>
   )
@@ -144,13 +144,13 @@ export default function StrategyDetail({ data, activeKeys, selected, onSelect, n
             ))}
           </div>
           {effectiveSymbolTab === 'all' ? (
-            <ChartGrid row={row} sessions={data.sessions} daily={row.total.daily} />
+            <ChartGrid row={row} sessions={data.sessions} weekday={row.total.weekday} />
           ) : (
-            // 品种层的 total.daily 恒为 null（后端不下发），ChartGrid 会据此跳过每日图
-            // The symbol layer's total.daily is always null; ChartGrid skips the
-            // daily chart accordingly
+            // 品种层的 total.weekday 恒为 null（后端不下发），ChartGrid 据此跳过星期图
+            // The symbol layer's total.weekday is always null; ChartGrid skips
+            // the weekday chart accordingly
             <ChartGrid row={row.symbols.find((x) => x.symbol === effectiveSymbolTab)!}
-                       sessions={data.sessions} daily={null} />
+                       sessions={data.sessions} weekday={null} />
           )}
         </>
       )}
