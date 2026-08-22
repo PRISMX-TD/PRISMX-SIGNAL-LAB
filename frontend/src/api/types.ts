@@ -156,6 +156,22 @@ export interface WinRateBucket {
   // 分母为 0 时为 null——与真实的 0% 胜率不是一回事
   // null on an empty denominator — not the same thing as a real 0%
   winRate: number | null
+  // Wilson 95% 置信下限，推荐榜排序键；分母为 0 时 null（后端算，前端只排序）
+  // ranking key computed server-side; null when unresolved
+  wilsonLow: number | null
+  // 平均判定秒数；无已判定时 null / mean seconds to resolution
+  avgResolveSeconds: number | null
+  // samples ÷ days × 7 / normalized weekly count
+  weeklySignals: number
+  // 自窗口起点每 24h 一桶，旧→新，长度=days；品种层为 null
+  // per-24h counts, oldest→newest; null at symbol level
+  dailySamples: number[] | null
+}
+
+export interface SymbolWinRate {
+  symbol: string
+  total: WinRateBucket
+  sessions: Record<string, WinRateBucket>
 }
 
 export interface StrategyWinRate {
@@ -166,6 +182,8 @@ export interface StrategyWinRate {
   // Keyed asia / europe / newyork / outside. Sessions overlap, so the per-session
   // samples sum to more than total.samples.
   sessions: Record<string, WinRateBucket>
+  // 品种子分层，已判定笔数降序；overall 行恒为 [] / per-symbol layer, [] on overall
+  symbols: SymbolWinRate[]
 }
 
 export interface AdminStrategyWinRate {
@@ -180,6 +198,25 @@ export interface AdminStrategyWinRate {
   sessions: SessionWindow[]
   overall: StrategyWinRate
   strategies: StrategyWinRate[] // 已判定样本数降序 / by resolved samples desc
+}
+
+export interface StrategySignalDetail {
+  side: 'BUY' | 'SELL'
+  entry: number | null
+  stopLoss: number | null
+  takeProfit: number | null
+  createdAt: string
+  sessionKeys: string[]
+  result: SignalResult
+  resolveSeconds: number | null
+}
+
+export interface AdminStrategySignalList {
+  strategy: string
+  symbol: string
+  days: number
+  total: number // 窗口内总条数，列表上限 50 / real count; list capped at 50
+  signals: StrategySignalDetail[]
 }
 
 // 管理后台：订阅定价设置 / admin: subscription pricing settings
