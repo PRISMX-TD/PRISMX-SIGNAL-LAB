@@ -1009,6 +1009,12 @@
       "stalledHint": "Signals exist but not one has a win/loss verdict. Resolution only runs when TradingView or the EA calls POST /webhook/trend with BOTH high and low in the payload (either missing skips the whole step), and the trend push's symbol must match the signal's symbol exactly. Check in order: are trend pushes still arriving, does the payload carry high/low, and do the symbol strings match on both sides (e.g. XAUUSD vs XAUUSD.s).",
       "cellHint": "TP {{tp}} · SL {{sl}} · pending {{pending}} · stale {{stale}}",
       "footnote": "Cells with fewer than {{min}} resolved trades show the count instead of a percentage: turning three or four results into a percentage looks like a conclusion but is indistinguishable from a coin flip.",
+      "wilsonTick": "Ranking key: win-rate confidence floor",
+      "unit": {
+        "min": "min",
+        "h": "h",
+        "d": "d"
+      },
       "session": {
         "asia": "Asian",
         "europe": "European",

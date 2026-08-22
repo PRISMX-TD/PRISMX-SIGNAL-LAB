@@ -12,20 +12,10 @@ import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
 import { fmtTime } from '../../api/utils'
 import { SkeletonLine } from '../Skeleton'
-import type { AdminStrategyWinRate, SessionWindow, StrategyWinRate, WinRateBucket } from '../../api/types'
+import type { AdminStrategyWinRate, StrategyWinRate, WinRateBucket } from '../../api/types'
+import { MIN_SAMPLES, localWindow } from './winrate/shared'
 
 const DAY_OPTIONS = [7, 14, 30]
-
-// 已判定样本少于这个数的格子按"样本不足"处理：只显示样本数、不显示百分比。
-// 7 天再切成三个时段之后，一个格子里常常只有两三笔——"66.7% 胜率(3 笔里赢 2)"
-// 是个会被当真的数字，而它和抛硬币没有区别。宁可显示"样本不足"也不给一个
-// 看起来很确定的百分比。
-// Cells with fewer resolved samples than this show the count instead of a
-// percentage. Seven days split three ways often leaves two or three trades per
-// cell, and "66.7% (2 of 3)" is a figure people act on despite being
-// indistinguishable from a coin flip. Better to say "too few" than to print a
-// confident-looking percentage.
-const MIN_SAMPLES = 5
 
 function fmtPct(value: number): string {
   return `${(value * 100).toFixed(1)}%`
@@ -40,39 +30,6 @@ function winRateClass(rate: number): string {
   if (rate >= 0.6) return 'text-up'
   if (rate <= 0.4) return 'text-down'
   return 'text-neutral-100'
-}
-
-/** 某个 IANA 时区在给定时刻的 UTC 偏移（分钟）。夏令时体现在这里：同一个时区
- *  一月和七月返回的值不同。
- *  A zone's UTC offset in minutes at a given instant; DST shows up here, with
- *  January and July returning different values for the same zone. */
-function zoneOffsetMinutes(tz: string, at: Date): number {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset' }).formatToParts(at)
-  const name = parts.find((p) => p.type === 'timeZoneName')?.value ?? 'GMT+0'
-  const m = /GMT([+-])(\d{1,2})(?::(\d{2}))?/.exec(name)
-  if (!m) return 0
-  return (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3] ?? 0))
-}
-
-function fmtClock(totalMinutes: number): string {
-  // 取模到一天内：时段换算到本地时区后可能跨零点（东京盘对欧洲用户就是凌晨）。
-  // Wrap into a day: converted to the viewer's zone a session can cross midnight
-  // (the Tokyo session is the small hours for a European admin).
-  const m = ((totalMinutes % 1440) + 1440) % 1440
-  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
-}
-
-/** 把时段窗口翻译成看的人本地时区的钟点，例如「16:00–01:00」。
- *  按"此刻"的偏移换算，所以夏令时切换后这行字自己就变了。
- *  Restate the window in the viewer's local clock, e.g. "16:00–01:00", using the
- *  offsets in effect right now — so it shifts by itself across a DST changeover. */
-function localWindow(session: SessionWindow, now: Date): { start: string; end: string } {
-  const viewerOffset = -now.getTimezoneOffset()
-  const delta = viewerOffset - zoneOffsetMinutes(session.tz, now)
-  return {
-    start: fmtClock(session.startHour * 60 + delta),
-    end: fmtClock(session.endHour * 60 + delta),
-  }
 }
 
 function Cell({ bucket }: { bucket: WinRateBucket }) {

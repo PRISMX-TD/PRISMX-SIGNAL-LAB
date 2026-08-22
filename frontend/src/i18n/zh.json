@@ -1006,6 +1006,12 @@
       "stalledHint": "有信号但一条都没判出胜负。胜负判定只在 TradingView/EA 调用 POST /webhook/trend 且载荷同时带 high 与 low 时触发（缺一个就整段跳过），另外趋势推送里的 symbol 必须与信号的 symbol 完全一致。请依次确认：趋势推送是否还在跑、载荷是否带 high/low、两侧 symbol 写法是否相同（如 XAUUSD 与 XAUUSD.s）。",
       "cellHint": "止盈 {{tp}} · 止损 {{sl}} · 待判定 {{pending}} · 追踪中断 {{stale}}",
       "footnote": "已判定样本少于 {{min}} 笔的格子只显示笔数：把三五笔的结果写成百分比，看着像结论，其实和抛硬币没区别。",
+      "wilsonTick": "排序依据：胜率置信下限",
+      "unit": {
+        "min": "分钟",
+        "h": "小时",
+        "d": "天"
+      },
       "session": {
         "asia": "亚洲盘",
         "europe": "欧洲盘",
