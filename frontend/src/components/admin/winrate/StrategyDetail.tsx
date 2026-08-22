@@ -161,6 +161,30 @@ export default function StrategyDetail({ data, days, activeKeys, selected, onSel
   const row: StrategyWinRate | undefined = data.strategies.find((r) => r.strategy === selected)
   // 切换策略时回到「全部」页签 / reset the symbol tab when the strategy changes
   useEffect(() => { setSymbolTab('all') }, [selected])
+  // 上面这个 effect 在 commit 之后才跑；selected 变化引发的那一次 render 是同步的，
+  // 此时 symbolTab 还是切换前的旧值。旧值指向的品种若不在新 row.symbols 里（换策略，
+  // 或换 days 导致同一策略当前窗口的品种集合缩水），下面 .find()! 会返回 undefined
+  // 交给 SessionRows，其函数体第一行 row.sessions[key] 立刻抛 TypeError，把整页炸给
+  // RouteErrorBoundary（Task 10 code review Critical，两条复现路径：切策略/切天数）。
+  // 用派生值兜底：每次 render 都重新核实 symbolTab 是否仍在当前 row.symbols 里，不是
+  // 就退回 'all'——不依赖 effect 时序，同一 tick 内就自愈。effect 本身保留：它负责
+  // "换策略就该回到全部页签"这条产品要求本身（哪怕新策略恰好也有同名品种，也不该
+  // 停留在旧页签上），派生值只管兜底 effect 还没来得及跑的那一次 render。
+  // The effect above only runs after commit; the render triggered by a 'selected'
+  // change is synchronous, so symbolTab is still the pre-switch value at that
+  // point. If that value no longer names a symbol in the new row.symbols (a
+  // strategy switch, or a 'days' change that shrinks the current strategy's
+  // symbol set), the .find()! below returns undefined into SessionRows, whose
+  // first line (row.sessions[key]) throws a TypeError and the whole page gets
+  // swapped for RouteErrorBoundary (Task 10 code review Critical; two repro
+  // paths: strategy switch, days switch). Derive a safe value instead: every
+  // render re-checks whether symbolTab still names a symbol in the current
+  // row.symbols, falling back to 'all' when it doesn't — no dependency on effect
+  // timing, self-heals within the same tick. The effect stays: it owns the
+  // product requirement that switching strategies always returns to the "all"
+  // tab (even when the new strategy happens to share a symbol name), while the
+  // derived value only backstops the one render before the effect has run.
+  const effectiveSymbolTab = row && row.symbols.some((s) => s.symbol === symbolTab) ? symbolTab : 'all'
 
   return (
     <div className="glass p-5">
@@ -185,25 +209,25 @@ export default function StrategyDetail({ data, days, activeKeys, selected, onSel
         <>
           {/* 品种子页签：只列有信号的品种 / symbol tabs, resolved-desc, signal-bearing only */}
           <div className="mb-3 flex flex-wrap gap-1.5 border-b border-white/5 pb-3" role="tablist">
-            <button type="button" role="tab" aria-selected={symbolTab === 'all'} onClick={() => setSymbolTab('all')}
-                    className={`rounded-lg px-2.5 py-1 text-xs ${symbolTab === 'all' ? 'bg-white/10 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}>
+            <button type="button" role="tab" aria-selected={effectiveSymbolTab === 'all'} onClick={() => setSymbolTab('all')}
+                    className={`rounded-lg px-2.5 py-1 text-xs ${effectiveSymbolTab === 'all' ? 'bg-white/10 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}>
               {t('admin.winrate.allSymbols')}
             </button>
             {row.symbols.map((s) => (
-              <button key={s.symbol} type="button" role="tab" aria-selected={symbolTab === s.symbol}
+              <button key={s.symbol} type="button" role="tab" aria-selected={effectiveSymbolTab === s.symbol}
                       onClick={() => setSymbolTab(s.symbol)}
-                      className={`rounded-lg px-2.5 py-1 text-xs tabular-nums ${symbolTab === s.symbol ? 'bg-white/10 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}>
+                      className={`rounded-lg px-2.5 py-1 text-xs tabular-nums ${effectiveSymbolTab === s.symbol ? 'bg-white/10 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}>
                 {s.symbol}
               </button>
             ))}
           </div>
-          {symbolTab === 'all' ? (
+          {effectiveSymbolTab === 'all' ? (
             <SessionRows row={row} sessionKeys={sessionKeys} activeKeys={activeKeys} withDaily />
           ) : (
             <>
-              <SessionRows row={row.symbols.find((s) => s.symbol === symbolTab)!}
+              <SessionRows row={row.symbols.find((s) => s.symbol === effectiveSymbolTab)!}
                            sessionKeys={sessionKeys} activeKeys={activeKeys} withDaily={false} />
-              <SignalList strategy={row.strategy} symbol={symbolTab} days={days} />
+              <SignalList strategy={row.strategy} symbol={effectiveSymbolTab} days={days} />
             </>
           )}
         </>
