@@ -130,8 +130,12 @@ def session_keys_for(ts: datetime) -> list[str]:
     return keys or [OUTSIDE_KEY]
 
 
-def _empty_bucket() -> dict[str, int]:
-    return {"hitTp": 0, "hitSl": 0, "pending": 0, "stale": 0}
+def _empty_bucket(days: int) -> dict:
+    return {
+        "hitTp": 0, "hitSl": 0, "pending": 0, "stale": 0,
+        # 内部累加器，_finalize 时弹出 / internal accumulators, popped by _finalize
+        "_resolveSum": 0.0, "_resolveN": 0, "_daily": [0] * days,
+    }
 
 
 # result 列到桶键的映射。未知值（历史遗留的 WIN/LOSS 等）一律并入 pending：
@@ -163,17 +167,25 @@ def wilson_lower_bound(hit: int, n: int, z: float = 1.96) -> float | None:
     return max(0.0, (centre - margin) / denom)
 
 
-def _finalize(bucket: dict[str, int]) -> dict:
+def _finalize(bucket: dict, days: int, include_daily: bool) -> dict:
     resolved = bucket["hitTp"] + bucket["hitSl"]
+    samples = resolved + bucket["pending"] + bucket["stale"]
+    resolve_n = bucket["_resolveN"]
     return {
-        **bucket,
+        "hitTp": bucket["hitTp"], "hitSl": bucket["hitSl"],
+        "pending": bucket["pending"], "stale": bucket["stale"],
         "resolved": resolved,
-        "samples": resolved + bucket["pending"] + bucket["stale"],
+        "samples": samples,
         # 分母为 0 时给 None 而不是 0：前端要能区分"这个时段 0% 胜率"和"这个
         # 时段还没有已判定的样本"。
         # None rather than 0 on an empty denominator so the UI can tell "0% win
         # rate here" apart from "no resolved samples here yet".
         "winRate": (bucket["hitTp"] / resolved) if resolved > 0 else None,
+        "wilsonLow": wilson_lower_bound(bucket["hitTp"], resolved),
+        "avgResolveSeconds": (bucket["_resolveSum"] / resolve_n) if resolve_n else None,
+        "weeklySignals": round(samples / days * 7, 1),
+        # 品种层不下发每日分布：样本太薄，柱图全是零 / omitted at symbol level
+        "dailySamples": list(bucket["_daily"]) if include_daily else None,
     }
 
 
@@ -198,16 +210,20 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)
 
-    # 只取三列。信号表最宽的几列（entry/sl/tp/baseline_*）这里一个都用不上，
+    # 只取需要的列。信号表最宽的几列（entry/sl/tp/baseline_*）这里一个都用不上，
     # 全行 SELECT 在 Supabase 上是纯浪费的 Egress——同 signal_resolution.py 的做法。
-    # Three columns only: none of the wide columns (entry/sl/tp/baseline_*) are
-    # used here, and a full-row SELECT is pure wasted Egress on Supabase — same
-    # reasoning as signal_resolution.py.
+    # symbol 这里还没用上，是给品种子分层（Task 3）预留的。
+    # Only the needed columns: none of the wide columns (entry/sl/tp/baseline_*)
+    # are used here, and a full-row SELECT is pure wasted Egress on Supabase —
+    # same reasoning as signal_resolution.py. symbol is unused here, reserved
+    # for the per-symbol breakdown (Task 3).
+    cutoff_naive = cutoff.replace(tzinfo=None)
     rows = (
-        db.query(Signal.indicator, Signal.created_at, Signal.result)
+        db.query(Signal.indicator, Signal.symbol, Signal.created_at,
+                 Signal.result, Signal.resolved_at)
         .filter(
             Signal.source == "tradingview",
-            Signal.created_at >= cutoff.replace(tzinfo=None),
+            Signal.created_at >= cutoff_naive,
         )
         .all()
     )
@@ -236,10 +252,10 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
 
     all_keys = [s.key for s in SESSIONS] + [OUTSIDE_KEY]
     # {策略名: {时段键或 "total": 桶}} / {strategy: {session key or "total": bucket}}
-    per_strategy: dict[str, dict[str, dict[str, int]]] = {}
-    overall: dict[str, dict[str, int]] = {k: _empty_bucket() for k in [*all_keys, "total"]}
+    per_strategy: dict[str, dict[str, dict]] = {}
+    overall: dict[str, dict] = {k: _empty_bucket(days) for k in [*all_keys, "total"]}
 
-    for indicator, created_at, result in rows:
+    for indicator, symbol, created_at, result, resolved_at in rows:
         if created_at is None:
             continue
         # 策略名缺失的信号归到一个显式的空串键，前端展示成「未命名策略」。
@@ -248,20 +264,38 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
         # shown as "Unnamed" by the UI. Dropping them would make the groups fail
         # to add up to /signals/winrate's totals.
         name = (indicator or "").strip()
-        buckets = per_strategy.setdefault(
-            name, {k: _empty_bucket() for k in [*all_keys, "total"]}
-        )
         key = _RESULT_KEYS.get(result or "", "pending")
         session_keys = session_keys_for(created_at)
-        for target in (buckets, overall):
-            target["total"][key] += 1
-            for sess_key in session_keys:
-                target[sess_key][key] += 1
+        # 24h 桶下标：自窗口起点起算，floor。spec 原文是"按 UTC 日"，但滚动窗口
+        # 起点不在午夜，按日历日会得到 days+1 个桶且首尾残缺；改为 24h 桶后长度
+        # 恒等于 days，最后一桶即"最近 24 小时"。clamp 只防御浮点边缘。
+        # 24h-bucket index counted from the window start, floored. The spec text
+        # says "by UTC calendar day", but the rolling window doesn't start at
+        # midnight, so calendar-day slicing yields days+1 buckets with ragged
+        # ends; switching to 24h buckets keeps the length always == days, with
+        # the last bucket meaning "the last 24 hours". The clamp only guards
+        # floating-point edge cases.
+        day_idx = min(days - 1, max(0, int(
+            (created_at - cutoff_naive).total_seconds() // 86400)))
+        resolve_seconds = None
+        if result in ("HIT_TP", "HIT_SL") and resolved_at is not None:
+            resolve_seconds = (resolved_at - created_at).total_seconds()
 
-    def _shape(buckets: dict[str, dict[str, int]]) -> dict:
+        buckets = per_strategy.setdefault(
+            name, {k: _empty_bucket(days) for k in [*all_keys, "total"]})
+        for target in (buckets, overall):
+            for bkey in ("total", *session_keys):
+                b = target[bkey]
+                b[key] += 1
+                b["_daily"][day_idx] += 1
+                if resolve_seconds is not None:
+                    b["_resolveSum"] += resolve_seconds
+                    b["_resolveN"] += 1
+
+    def _shape(buckets: dict[str, dict]) -> dict:
         return {
-            "total": _finalize(buckets["total"]),
-            "sessions": {k: _finalize(buckets[k]) for k in all_keys},
+            "total": _finalize(buckets["total"], days, True),
+            "sessions": {k: _finalize(buckets[k], days, True) for k in all_keys},
         }
 
     strategies = [

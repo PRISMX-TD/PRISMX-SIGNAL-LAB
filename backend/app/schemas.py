@@ -211,6 +211,15 @@ class WinRateBucketOut(BaseModel):
     samples: int  # 窗口内该格子的全部信号数 / every signal in the cell
     # 分母为 0 时为 null，与「0% 胜率」区分开 / null on an empty denominator, distinct from a real 0%
     winRate: float | None
+    # Wilson 95% 置信下限，推荐榜排序键；分母为 0 时 null / ranking key; null when unresolved
+    wilsonLow: float | None
+    # 窗口内已判定信号的平均判定秒数；无已判定时 null / mean seconds to resolution
+    avgResolveSeconds: float | None
+    # samples ÷ days × 7，一位小数 / normalized weekly signal count
+    weeklySignals: float
+    # 自窗口起点每 24h 一桶的信号数，长度=days，旧→新；品种层为 null（样本太薄不下发）
+    # per-24h signal counts from the window start, oldest→newest; null at symbol level
+    dailySamples: list[int] | None = None
 
 
 class StrategyWinRateOut(BaseModel):
