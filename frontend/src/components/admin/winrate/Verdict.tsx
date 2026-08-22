@@ -1,14 +1,16 @@
 // 判定芯片：把 verdictOf 的结论渲染成一句人话 + 一个小图形。
 // 图形（↑ / ↓ / = / ?）与颜色是双重编码——色弱读者靠形状也能分出好坏。
+// 不带笔数：整页都不显示"用了多少笔"，"能不能信"由判定词本身承担。
 // The verdict chip: renders verdictOf's conclusion as a phrase plus a small
 // glyph. Glyph and colour double-encode the verdict so colour-blind readers can
-// still tell them apart by shape.
+// still tell them apart by shape. No trade counts: the page shows none, and
+// "can this be trusted" is carried by the verdict word itself.
 import { useTranslation } from 'react-i18next'
-import { VERDICT_BG, VERDICT_COLOR, type RateLike, type VerdictKind } from './shared'
+import { VERDICT_BG, VERDICT_COLOR, type VerdictKind } from './shared'
 
-/** 判定图形，单独导出给星期格用——那里放不下整枚芯片，但形状编码不能丢。
- *  The verdict glyph on its own, for the weekday cells: no room for a whole
- *  chip there, but the shape encoding must not be dropped. */
+/** 判定图形，单独导出给星期格与品种芯片用——那里放不下整枚芯片，但形状编码不能丢。
+ *  The verdict glyph on its own, for weekday cells and symbol chips: no room for
+ *  a whole chip there, but the shape encoding must not be dropped. */
 export function VerdictGlyph({ kind }: { kind: VerdictKind }) {
   const common = {
     width: 10, height: 10, viewBox: '0 0 10 10', fill: 'none',
@@ -30,18 +32,8 @@ export function VerdictGlyph({ kind }: { kind: VerdictKind }) {
   }
 }
 
-export function VerdictChip({ kind, bucket, size = 'md' }: {
-  kind: VerdictKind
-  // thin / waiting / broken 三态要报笔数，各取各的：已判定 / 等结果 / 中断。
-  // thin / waiting / broken report a count each — resolved / pending / stale.
-  bucket?: Pick<RateLike, 'resolved' | 'pending' | 'stale'>
-  size?: 'sm' | 'md'
-}) {
+export function VerdictChip({ kind, size = 'md' }: { kind: VerdictKind; size?: 'sm' | 'md' }) {
   const { t } = useTranslation()
-  const count = kind === 'waiting' ? bucket?.pending ?? 0 : kind === 'broken' ? bucket?.stale ?? 0 : bucket?.resolved ?? 0
-  const text = kind === 'thin' || kind === 'waiting' || kind === 'broken'
-    ? t(`admin.winrate.verdict.${kind}`, { count })
-    : t(`admin.winrate.verdict.${kind}`)
   return (
     <span
       className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full font-medium ${
@@ -50,7 +42,7 @@ export function VerdictChip({ kind, bucket, size = 'md' }: {
       style={{ color: VERDICT_COLOR[kind], background: VERDICT_BG[kind] }}
     >
       <VerdictGlyph kind={kind} />
-      {text}
+      {t(`admin.winrate.verdict.${kind}`)}
     </span>
   )
 }

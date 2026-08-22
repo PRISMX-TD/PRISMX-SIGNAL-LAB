@@ -995,44 +995,19 @@
       "retry": "Retry",
       "hero": {
         "all": "All signals",
-        "lead": "In the last {{days}} days, {{resolved}} platform signals reached an outcome. Overall win rate",
-        "leadThin_one": "Only {{count}} signal reached an outcome in the last {{days}} days — not enough for a reliable win rate.",
-        "leadThin_other": "Only {{count}} signals reached an outcome in the last {{days}} days — not enough for a reliable win rate.",
-        "leadWaiting_one": "{{n}} signal in the last {{days}} days, but it has not reached an outcome yet.",
-        "leadWaiting_other": "{{n}} signals in the last {{days}} days, but none has reached an outcome yet.",
-        "range": "Given the sample size, the true rate is probably between {{low}} and {{high}}",
-        "wins_one": "{{n}} win",
-        "wins_other": "{{n}} wins",
-        "losses_one": "{{n}} loss",
-        "losses_other": "{{n}} losses",
+        "lead": "Overall win rate of platform signals, last {{days}} days",
+        "leadThin": "Too few signals reached an outcome in the last {{days}} days for a reliable win rate.",
+        "leadWaiting": "No signal has reached an outcome in the last {{days}} days yet.",
+        "range": "The true rate is probably between {{low}} and {{high}}",
+        "wins": "Wins",
+        "losses": "Losses",
         "half": "half",
         "holding": "Avg time to outcome",
-        "pending": "Still waiting",
-        "pendingValue_one": "{{n}} signal",
-        "pendingValue_other": "{{n}} signals",
-        "stale_one": "plus {{n}} with broken tracking, not counted",
-        "stale_other": "plus {{n}} with broken tracking, not counted",
         "coverage": "Coverage",
         "coverageStrategies_one": "{{count}} strategy",
         "coverageStrategies_other": "{{count}} strategies",
         "coverageSymbols_one": "{{count}} symbol",
         "coverageSymbols_other": "{{count}} symbols"
-      },
-      "watch": {
-        "title": "What to watch now",
-        "nowActive": "Now: {{name}}",
-        "nowLeft": "open · {{time}} left",
-        "nowOutside": "Outside the three sessions right now",
-        "sessionRate": "{{name}} win rate, last {{days}} days",
-        "symbolsGood": "Symbols with a higher win rate in this session",
-        "symbolsBad": "Careful",
-        "symbolsNone": "No symbol has a clearly higher win rate in this session over the last {{days}} days — that is normal, do not force it.",
-        "next": "Next: {{name}} opens in {{time}}",
-        "timelineTitle": "Sessions · your time"
-      },
-      "details": {
-        "show": "Show details: overall, each strategy, each symbol",
-        "hide": "Hide details"
       },
       "guide": {
         "lead": "How to read this: the further from half and the more trades, the firmer the conclusion — every verdict already accounts for both.",
@@ -1040,19 +1015,16 @@
         "weak": "also a conclusion, just a bad one",
         "even": "no visible edge",
         "unsure": "near half, and the trades so far can't separate it — check back after more",
-        "thin": "fewer than {{min}} trades: count only, no percentage"
+        "thin": "too few trades: no percentage shown"
       },
       "verdict": {
         "strong": "Clearly above half",
         "weak": "Clearly below half",
         "even": "About even",
         "unsure": "Could go either way",
-        "thin_one": "Only {{count}} trade",
-        "thin_other": "Only {{count}} trades",
-        "waiting_one": "{{count}} still waiting for an outcome",
-        "waiting_other": "{{count}} still waiting for an outcome",
-        "broken_one": "{{count}} with broken tracking, not counted",
-        "broken_other": "{{count}} with broken tracking, not counted",
+        "thin": "Too few trades",
+        "waiting": "Still waiting for an outcome",
+        "broken": "Tracking broke, not counted",
         "none": "No signals"
       },
       "strategies": {
@@ -1060,17 +1032,9 @@
         "caption": "Ordered by signal count, not ranked by win rate — a higher win rate does not mean more profit. Click a card for details.",
         "unnamed": "Unnamed strategy",
         "holding": "outcome in {{time}} on average",
-        "pending_one": "{{count}} waiting for an outcome",
-        "pending_other": "{{count}} waiting for an outcome",
-        "stale_one": "{{count}} with broken tracking",
-        "stale_other": "{{count}} with broken tracking",
-        "winsLosses": "{{tp}} wins · {{sl}} losses",
         "activity": "Signals per day, last {{days}} days",
-        "activityTotal": "{{n}} total",
         "activityAria_one": "Signals per day over the last {{days}} days, {{count}} in total",
         "activityAria_other": "Signals per day over the last {{days}} days, {{count}} in total",
-        "dayTitle_one": "Day {{day}}: {{count}} signal",
-        "dayTitle_other": "Day {{day}}: {{count}} signals",
         "expand": "Details",
         "collapse": "Collapse"
       },
@@ -1078,7 +1042,7 @@
         "intro": "How this strategy does under different conditions:",
         "allSymbols": "All symbols",
         "bySession": "Which session works best?",
-        "bySessionHint": "Filed by the time a signal fired. The European and New York sessions overlap by about 4 hours a day and signals in the overlap count toward both, so the session counts add up to more than the total.",
+        "bySessionHint": "Filed by the time a signal fired. The European and New York sessions overlap by about 4 hours a day and signals in the overlap count toward both.",
         "bySide": "Long or short?",
         "bySideHint": "Older signals with an unrecognized direction count toward neither side.",
         "byWeekday": "Which weekday works best?",
@@ -1086,10 +1050,7 @@
         "holding": "How long until an outcome?",
         "holdingHint": "Average time from a signal firing to hitting take-profit or stop-loss; resolved signals only.",
         "holdingOverall": "overall",
-        "holdingEmpty": "Nothing has reached an outcome yet.",
-        "cellHint": "{{tp}} wins · {{sl}} losses",
-        "trades_one": "{{n}} trade",
-        "trades_other": "{{n}} trades"
+        "holdingEmpty": "Nothing has reached an outcome yet."
       },
       "symbols": {
         "title": "Each symbol",
@@ -1097,7 +1058,7 @@
       },
       "method": {
         "toggle": "How these numbers are computed",
-        "body": "TradingView platform signals only, pinned to the last {{days}} days. Win rate = take-profits ÷ (take-profits + stop-losses); signals with no outcome yet or with broken price tracking stay out of the denominator. \"Clearly above / below half\" means the 95% confidence interval of the win rate sits entirely on one side of 50% — more trades, narrower interval. Cells with fewer than {{min}} resolved trades show the count alone. Sessions are defined in each centre's local time and follow DST automatically."
+        "body": "TradingView platform signals only, pinned to the last {{days}} days. Win rate = take-profits ÷ (take-profits + stop-losses); signals with no outcome yet or with broken price tracking stay out of the denominator. \"Clearly above / below half\" means the 95% confidence interval of the win rate sits entirely on one side of 50% — more trades, narrower interval. Cells with fewer than {{min}} resolved trades show no percentage. Sessions are defined in each centre's local time and follow DST automatically."
       },
       "timeline": {
         "label": "24-hour session timeline",
@@ -1105,6 +1066,22 @@
         "yourTime": "your time {{start}}–{{end}}",
         "openNow": "open now",
         "now": "now"
+      },
+      "watch": {
+        "title": "What to watch now",
+        "nowActive": "Now: {{name}}",
+        "nowLeft": "open · {{time}} left",
+        "nowOutside": "Outside the three sessions right now",
+        "sessionRate": "{{name}} win rate, last {{days}} days",
+        "symbolsGood": "Worth a look",
+        "symbolsHint": "symbols doing better in this session over the last {{days}} days",
+        "symbolsNone": "No symbol has done well in this session over the last {{days}} days.",
+        "next": "Next: {{name}} opens in {{time}}",
+        "timelineTitle": "Sessions · your time"
+      },
+      "details": {
+        "show": "Show details: overall, each strategy, each symbol",
+        "hide": "Hide details"
       },
       "aria": {
         "tug": "{{label}}: {{tp}} wins, {{sl}} losses, win rate {{rate}}"

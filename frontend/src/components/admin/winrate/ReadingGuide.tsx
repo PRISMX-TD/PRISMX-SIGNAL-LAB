@@ -4,7 +4,7 @@
 // placed between the hero and the strategy list so the reader meets the
 // explanation before the chips.
 import { useTranslation } from 'react-i18next'
-import { MIN_SAMPLES, type VerdictKind } from './shared'
+import type { VerdictKind } from './shared'
 import { VerdictChip } from './Verdict'
 
 const KINDS: VerdictKind[] = ['strong', 'weak', 'even', 'unsure']
@@ -21,7 +21,7 @@ export default function ReadingGuide() {
             <span>{t(`admin.winrate.guide.${k}`)}</span>
           </li>
         ))}
-        <li className="text-neutral-500">{t('admin.winrate.guide.thin', { min: MIN_SAMPLES })}</li>
+        <li className="text-neutral-500">{t('admin.winrate.guide.thin')}</li>
       </ul>
     </div>
   )

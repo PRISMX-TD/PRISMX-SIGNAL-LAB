@@ -18,7 +18,7 @@ import TugBar from './TugBar'
 import { VerdictChip, VerdictGlyph } from './Verdict'
 import {
   SESSION_COLORS, SIDE_COLORS, VERDICT_BG, VERDICT_COLOR,
-  fmtDurationText, fmtInt, fmtPct, isRated, rateFromCounts, verdictOf, type VerdictKind,
+  fmtDurationText, fmtPct, isRated, rateFromCounts, verdictOf, type VerdictKind,
 } from './shared'
 
 function Block({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
@@ -60,17 +60,11 @@ function RateRow({ label, dotColor, bucket, tag }: {
               {fmtPct(bucket.winRate!)}
             </span>
           )}
-          <VerdictChip kind={kind} bucket={bucket} size="sm" />
+          <VerdictChip kind={kind} size="sm" />
         </span>
       </div>
       {bucket.resolved > 0 && (
-        <>
-          <TugBar className="mt-2" size="sm" hitTp={bucket.hitTp} hitSl={bucket.hitSl} label={aria} />
-          <p className="mt-1 text-2xs tabular-nums text-neutral-500">
-            {t('admin.winrate.strategies.winsLosses', { tp: fmtInt(bucket.hitTp), sl: fmtInt(bucket.hitSl) })}
-            {bucket.pending > 0 && ` · ${t('admin.winrate.strategies.pending', { count: bucket.pending })}`}
-          </p>
-        </>
+        <TugBar className="mt-2" size="sm" hitTp={bucket.hitTp} hitSl={bucket.hitSl} label={aria} />
       )}
     </div>
   )
@@ -86,12 +80,11 @@ function WeekdayGrid({ weekday }: { weekday: WeekdayOutcome[] }) {
     if (kind === 'none') {
       return <span className="block rounded-md py-2 text-center text-neutral-700">—</span>
     }
-    const hint = t('admin.winrate.detail.cellHint', { tp, sl })
     if (kind === 'thin') {
       return (
-        <span className="block rounded-md py-2 text-center text-xs tabular-nums text-neutral-500"
-              style={{ background: VERDICT_BG[kind] }} title={hint}>
-          {t('admin.winrate.verdict.thin', { count: tp + sl })}
+        <span className="block rounded-md py-2 text-center text-xs text-neutral-500"
+              style={{ background: VERDICT_BG[kind] }}>
+          {t('admin.winrate.verdict.thin')}
         </span>
       )
     }
@@ -102,15 +95,12 @@ function WeekdayGrid({ weekday }: { weekday: WeekdayOutcome[] }) {
     // colour-blind reader can't separate red from green either.
     return (
       <span className="flex items-center justify-center gap-1.5 rounded-md py-1.5"
-            style={{ background: VERDICT_BG[kind], color: VERDICT_COLOR[kind] }} title={hint}>
+            style={{ background: VERDICT_BG[kind], color: VERDICT_COLOR[kind] }}>
         <VerdictGlyph kind={kind} />
         {/* 读屏器念出判定词：图形和底色对它都不存在 / spoken verdict for AT,
             which sees neither the glyph nor the tint */}
         <span className="sr-only">{t(`admin.winrate.verdict.${kind}`)}</span>
         <span className="text-sm font-semibold tabular-nums">{fmtPct(rate.winRate!, 0)}</span>
-        <span className="text-2xs tabular-nums text-neutral-500">
-          {t('admin.winrate.detail.trades', { count: tp + sl, n: fmtInt(tp + sl) })}
-        </span>
       </span>
     )
   }

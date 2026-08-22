@@ -21,7 +21,7 @@ import type { AdminStrategyWinRate, StrategyWinRate } from '../../../api/types'
 import StrategyDetail from './StrategyDetail'
 import TugBar from './TugBar'
 import { VerdictChip } from './Verdict'
-import { VERDICT_COLOR, fmtDurationText, fmtInt, fmtPct, isRated, verdictOf } from './shared'
+import { VERDICT_COLOR, fmtDurationText, fmtPct, isRated, verdictOf } from './shared'
 
 // 全部用 <span>：它住在卡片的 <button> 里，按钮内只允许短语内容。
 // Spans only: this lives inside the card's <button>, which allows phrasing content only.
@@ -38,12 +38,11 @@ function ActivityBars({ daily }: { daily: number[] }) {
             key={i}
             className={`flex-1 rounded-sm ${i === daily.length - 1 ? 'bg-prism-400/70' : 'bg-neutral-500/35'}`}
             style={{ height: `${Math.max(8, (v / max) * 100)}%` }}
-            title={t('admin.winrate.strategies.dayTitle', { day: i + 1, count: v })}
           />
         ))}
       </span>
       <span className="mt-1 block text-2xs tabular-nums text-neutral-500">
-        {t('admin.winrate.strategies.activity', { days: daily.length })} · {t('admin.winrate.strategies.activityTotal', { count: total, n: fmtInt(total) })}
+        {t('admin.winrate.strategies.activity', { days: daily.length })}
       </span>
     </span>
   )
@@ -70,8 +69,6 @@ function StrategyCard({ row, index, open, onToggle, data, activeKeys }: {
   const name = row.strategy || t('admin.winrate.strategies.unnamed')
   const facts: string[] = []
   if (total.avgResolveSeconds !== null) facts.push(t('admin.winrate.strategies.holding', { time: fmtDurationText(t, total.avgResolveSeconds) }))
-  if (total.pending > 0) facts.push(t('admin.winrate.strategies.pending', { count: total.pending }))
-  if (total.stale > 0) facts.push(t('admin.winrate.strategies.stale', { count: total.stale }))
   const tugLabel = t('admin.winrate.aria.tug', {
     label: name, tp: total.hitTp, sl: total.hitSl, rate: hasRate ? fmtPct(total.winRate!) : '—',
   })
@@ -111,12 +108,9 @@ function StrategyCard({ row, index, open, onToggle, data, activeKeys }: {
                   style={{ color: VERDICT_COLOR[kind] }}>
               {hasRate ? fmtPct(total.winRate!) : '—'}
             </span>
-            <VerdictChip kind={kind} bucket={total} size="sm" />
+            <VerdictChip kind={kind} size="sm" />
           </span>
           <TugBar className="mt-2.5" size="md" hitTp={total.hitTp} hitSl={total.hitSl} label={tugLabel} />
-          <span className="mt-1.5 block text-2xs tabular-nums text-neutral-500">
-            {t('admin.winrate.strategies.winsLosses', { tp: fmtInt(total.hitTp), sl: fmtInt(total.hitSl) })}
-          </span>
         </span>
 
         <span className="hidden md:block">{total.daily && <ActivityBars daily={total.daily} />}</span>

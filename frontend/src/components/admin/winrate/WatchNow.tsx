@@ -1,90 +1,78 @@
 // 「现在该盯什么」：整页的第一层，三句话。
-//   现在是哪个盘、还剩多久 → 这个盘近 N 天准不准 → 这个盘里哪些品种更准 / 要小心
-//   → 下一个盘几点开、准不准。
+//   现在是哪个盘、还剩多久 → 这个盘近 N 天胜率 → 这个盘里可以留意的品种
+//   → 下一个盘几点开、胜率如何。
 //
 // 以"现在"为锚：时段 × 当前时刻 = 一句结论（"现在值得盯 / 现在不是好时候，3h 后
-// 欧洲盘开始"），不让读者自己去表里找。品种只列**在当前时段里**明显更准的前三个
-// （数据来自 overall.symbols[].sessions，跨全部策略合并），要小心的最多两个；没有
-// 明显更准的就直说"没有"，不硬凑。欧洲盘与纽约盘重叠的四小时里两个盘都在进行，
-// 就各给一块；不在任何盘内时用「其他时段」那一桶。
+// 欧洲盘开始"），不让读者自己去表里找。「可以留意」列**在当前时段里**近 N 天表现
+// 较好的品种前三个（胜率不低于一半、样本够判定），不要求"统计上明显更高"——产品
+// 要的是"最近表现较好的"，判定图形（↑ = ?）会告诉读者每一个有多稳；不列表现差
+// 的。没有表现较好的就直说"没有"，不硬凑。欧洲盘与纽约盘重叠的四小时里两个盘都
+// 在进行，就各给一块；不在任何盘内时用「其他时段」那一桶。
 //
-// 排序键是 Wilson 下限（后端推荐榜同一规则），不是原始胜率：5 笔 80% 会沉到
-// 300 笔 61% 后面。这里只排品种，不排策略——策略维度整层不出现，点「看细节」才有。
+// 选哪几个按 Wilson 下限（把薄样本沉下去），选出来之后按胜率排。这里只排品种，
+// 不排策略——策略维度整层不出现，点「看细节」才有。整页不显示笔数：判定词和
+// 图形已经把"这个数能不能信"说了。
 //
 // "What to watch now": the page's first layer, three sentences — which session
-// is open and how long is left → how that session did over the last N days →
-// which symbols do better / need care in that session → when the next session
-// opens and how it does. Anchored on "now": session × current time collapses to
-// one conclusion instead of a table to scan. Symbols are the top three clearly
-// better *within the current session* (overall.symbols[].sessions, pooled
-// across strategies) plus at most two clearly worse; when nothing is clearly
-// better it says so rather than padding. During the London/New York overlap
-// both sessions get a block; outside all three, the "outside" bucket is used.
-// Ordering is by Wilson lower bound (the backend's own ranking key), so 80% of
-// 5 sinks below 61% of 300. Only symbols are ordered — strategies never appear
-// in this layer at all.
+// is open and how long is left → its win rate over the last N days → symbols
+// worth a look in that session → when the next session opens and how it does.
+// Anchored on "now". "Worth a look" lists the top three symbols that did better
+// *within the current session* (rate at least half, enough trades for a
+// verdict) — not required to be "clearly better": the product wants "recently
+// doing well", and the verdict glyph (↑ = ?) says how firm each one is. No
+// "careful" list. During the London/New York overlap both sessions get a block;
+// outside all three, the "outside" bucket is used. Selection is by Wilson lower
+// bound (thin samples sink), display is by rate. No trade counts anywhere: the
+// verdict word and glyph already say whether a number can be trusted.
 import { useTranslation } from 'react-i18next'
 import type { AdminStrategyWinRate, WinRateBucket } from '../../../api/types'
 import SessionTimeline from './SessionTimeline'
 import { VerdictChip, VerdictGlyph } from './Verdict'
 import {
   SESSION_COLORS, VERDICT_BG, VERDICT_COLOR,
-  fmtDurationHm, fmtInt, fmtPct, isRated, sessionStatus, verdictOf,
+  fmtDurationHm, fmtPct, isRated, sessionStatus, verdictOf, type VerdictKind,
 } from './shared'
 
-const TOP_GOOD = 3
-const TOP_BAD = 2
+const TOP_WATCH = 3
 
-type Pick = { symbol: string; bucket: WinRateBucket }
+type Pick = { symbol: string; bucket: WinRateBucket; kind: VerdictKind }
 
-function pickSymbols(data: AdminStrategyWinRate, sessionKey: string): { good: Pick[]; bad: Pick[] } {
-  const good: Pick[] = []
-  const bad: Pick[] = []
+function pickSymbols(data: AdminStrategyWinRate, sessionKey: string): Pick[] {
+  const candidates: Pick[] = []
   for (const s of data.overall.symbols) {
     const bucket = s.sessions[sessionKey]
     if (!bucket) continue
     const kind = verdictOf(bucket)
-    if (kind === 'strong') good.push({ symbol: s.symbol, bucket })
-    else if (kind === 'weak') bad.push({ symbol: s.symbol, bucket })
+    if (!isRated(kind) || bucket.winRate === null || bucket.winRate < 0.5) continue
+    candidates.push({ symbol: s.symbol, bucket, kind })
   }
-  // 选哪几个按 Wilson 下限（把薄样本沉下去），选出来之后按原始胜率排——入选的都
-  // 已经是"明显更准"，读者看到 62.7% 排在 59.7% 后面只会困惑，不会多学到什么。
-  // Select by Wilson lower bound (thin samples sink), then display by raw rate —
-  // everything selected is already "clearly better", and 62.7% listed after
-  // 59.7% only confuses without teaching anything.
-  good.sort((a, b) => (b.bucket.wilsonLow ?? 0) - (a.bucket.wilsonLow ?? 0))
-  bad.sort((a, b) => (a.bucket.wilsonHigh ?? 1) - (b.bucket.wilsonHigh ?? 1))
-  const byRateDesc = (a: Pick, b: Pick) => (b.bucket.winRate ?? 0) - (a.bucket.winRate ?? 0)
-  return {
-    good: good.slice(0, TOP_GOOD).sort(byRateDesc),
-    bad: bad.slice(0, TOP_BAD).sort((a, b) => -byRateDesc(a, b)),
-  }
+  candidates.sort((a, b) => (b.bucket.wilsonLow ?? 0) - (a.bucket.wilsonLow ?? 0))
+  return candidates
+    .slice(0, TOP_WATCH)
+    .sort((a, b) => (b.bucket.winRate ?? 0) - (a.bucket.winRate ?? 0))
 }
 
-function SymbolChip({ symbol, bucket, kind }: { symbol: string; bucket: WinRateBucket; kind: 'strong' | 'weak' }) {
+function SymbolChip({ symbol, bucket, kind }: Pick) {
   const { t } = useTranslation()
-  const title = t('admin.winrate.aria.tug', {
+  const aria = t('admin.winrate.aria.tug', {
     label: symbol, tp: bucket.hitTp, sl: bucket.hitSl, rate: fmtPct(bucket.winRate!),
   })
   return (
     <span
       className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm"
       style={{ background: VERDICT_BG[kind], color: VERDICT_COLOR[kind] }}
-      title={title}
+      aria-label={aria}
     >
-      {/* ↑/↓ 图形：好坏不能只靠颜色分 / the glyph: strong vs weak must not rest on colour alone */}
+      {/* ↑ = ? 图形：这一个有多稳，不只靠颜色 / the glyph says how firm, not colour alone */}
       <VerdictGlyph kind={kind} />
       <span className="font-semibold text-neutral-100">{symbol}</span>
       <span className="font-semibold tabular-nums">{fmtPct(bucket.winRate!)}</span>
-      <span className="text-2xs tabular-nums text-neutral-500">
-        {t('admin.winrate.detail.trades', { count: bucket.resolved, n: fmtInt(bucket.resolved) })}
-      </span>
     </span>
   )
 }
 
-/** 一个时段的"该不该盯"块：名字 + 剩余时间 → 这个时段的判定 → 品种。
- *  One session's "worth watching?" block: name + time left → verdict → symbols. */
+/** 一个时段的"该不该盯"块：名字 + 剩余时间 → 这个时段的胜率与判定 → 可以留意的品种。
+ *  One session's "worth watching?" block: name + time left → rate and verdict → symbols worth a look. */
 function SessionBlock({ data, sessionKey, title, sessionName, minutesLeft }: {
   data: AdminStrategyWinRate
   sessionKey: string
@@ -102,7 +90,7 @@ function SessionBlock({ data, sessionKey, title, sessionName, minutesLeft }: {
   const bucket = data.overall.sessions[sessionKey]
   const kind = bucket ? verdictOf(bucket) : 'none'
   const hasRate = !!bucket && isRated(kind) && bucket.winRate !== null
-  const { good, bad } = pickSymbols(data, sessionKey)
+  const picks = pickSymbols(data, sessionKey)
   const color = SESSION_COLORS[sessionKey] ?? SESSION_COLORS.outside
 
   return (
@@ -125,32 +113,26 @@ function SessionBlock({ data, sessionKey, title, sessionName, minutesLeft }: {
       <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-neutral-400">
         <span>{t('admin.winrate.watch.sessionRate', { days: data.days, name: sessionName })}</span>
         {hasRate && (
-          <>
-            <span className="font-display text-xl font-bold leading-none tabular-nums" style={{ color: VERDICT_COLOR[kind] }}>
-              {fmtPct(bucket!.winRate!)}
-            </span>
-            <span className="text-2xs tabular-nums text-neutral-500">
-              {t('admin.winrate.detail.trades', { count: bucket!.resolved, n: fmtInt(bucket!.resolved) })}
-            </span>
-          </>
+          <span className="font-display text-xl font-bold leading-none tabular-nums" style={{ color: VERDICT_COLOR[kind] }}>
+            {fmtPct(bucket!.winRate!)}
+          </span>
         )}
-        <VerdictChip kind={kind} bucket={bucket} size="sm" />
+        <VerdictChip kind={kind} size="sm" />
       </p>
 
       <div className="mt-4">
-        <p className="text-2xs uppercase tracking-wider text-neutral-500">{t('admin.winrate.watch.symbolsGood')}</p>
-        {good.length > 0 ? (
+        <p className="text-2xs uppercase tracking-wider text-neutral-500">
+          {t('admin.winrate.watch.symbolsGood')}
+          <span className="ml-2 normal-case tracking-normal text-neutral-600">
+            {t('admin.winrate.watch.symbolsHint', { days: data.days })}
+          </span>
+        </p>
+        {picks.length > 0 ? (
           <div className="mt-2 flex flex-wrap gap-2">
-            {good.map((p) => <SymbolChip key={p.symbol} symbol={p.symbol} bucket={p.bucket} kind="strong" />)}
+            {picks.map((p) => <SymbolChip key={p.symbol} {...p} />)}
           </div>
         ) : (
           <p className="mt-1.5 text-sm text-neutral-500">{t('admin.winrate.watch.symbolsNone', { days: data.days })}</p>
-        )}
-        {bad.length > 0 && (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="text-2xs uppercase tracking-wider text-neutral-500">{t('admin.winrate.watch.symbolsBad')}</span>
-            {bad.map((p) => <SymbolChip key={p.symbol} symbol={p.symbol} bucket={p.bucket} kind="weak" />)}
-          </div>
         )}
       </div>
     </div>
@@ -203,7 +185,7 @@ export default function WatchNow({ data, now }: { data: AdminStrategyWinRate; no
                   {fmtPct(nextBucket!.winRate!)}
                 </span>
               )}
-              <VerdictChip kind={nextKind} bucket={nextBucket} size="sm" />
+              <VerdictChip kind={nextKind} size="sm" />
             </p>
           )}
         </div>

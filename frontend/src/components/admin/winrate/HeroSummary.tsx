@@ -15,7 +15,7 @@ import { useTranslation } from 'react-i18next'
 import type { AdminStrategyWinRate } from '../../../api/types'
 import TugBar from './TugBar'
 import { VerdictChip } from './Verdict'
-import { VERDICT_COLOR, fmtDurationText, fmtInt, fmtPct, isRated, verdictOf } from './shared'
+import { VERDICT_COLOR, fmtDurationText, fmtPct, isRated, verdictOf } from './shared'
 
 function Fact({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -46,10 +46,10 @@ export default function HeroSummary({ data }: { data: AdminStrategyWinRate }) {
         <div className="min-w-0">
           <p className="text-sm text-neutral-400">
             {hasRate
-              ? t('admin.winrate.hero.lead', { days: data.days, resolved: fmtInt(total.resolved) })
+              ? t('admin.winrate.hero.lead', { days: data.days })
               : total.resolved === 0
-                ? t('admin.winrate.hero.leadWaiting', { days: data.days, count: total.samples, n: fmtInt(total.samples) })
-                : t('admin.winrate.hero.leadThin', { days: data.days, count: total.resolved })}
+                ? t('admin.winrate.hero.leadWaiting', { days: data.days })
+                : t('admin.winrate.hero.leadThin', { days: data.days })}
           </p>
 
           {hasRate && (
@@ -62,7 +62,7 @@ export default function HeroSummary({ data }: { data: AdminStrategyWinRate }) {
                   {fmtPct(total.winRate!)}
                 </span>
                 <span className="pb-1.5">
-                  <VerdictChip kind={kind} bucket={total} />
+                  <VerdictChip kind={kind} />
                 </span>
               </div>
               {total.wilsonLow !== null && total.wilsonHigh !== null && (
@@ -76,26 +76,17 @@ export default function HeroSummary({ data }: { data: AdminStrategyWinRate }) {
           {/* 拔河条：赢在左、输在右、中线是一半 / wins left, losses right, the tick is half */}
           <div className="mt-6">
             <div className="relative mb-2 flex items-baseline justify-between text-xs">
-              <span className="font-medium" style={{ color: 'var(--up)' }}>
-                {t('admin.winrate.hero.wins', { count: total.hitTp, n: fmtInt(total.hitTp) })}
-              </span>
+              <span className="font-medium" style={{ color: 'var(--up)' }}>{t('admin.winrate.hero.wins')}</span>
               <span className="absolute left-1/2 -translate-x-1/2 text-neutral-500">{t('admin.winrate.hero.half')}</span>
-              <span className="font-medium" style={{ color: 'var(--down)' }}>
-                {t('admin.winrate.hero.losses', { count: total.hitSl, n: fmtInt(total.hitSl) })}
-              </span>
+              <span className="font-medium" style={{ color: 'var(--down)' }}>{t('admin.winrate.hero.losses')}</span>
             </div>
             <TugBar hitTp={total.hitTp} hitSl={total.hitSl} size="lg" label={tugLabel} />
           </div>
 
-          <dl className="mt-6 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-white/5 pt-5 sm:grid-cols-3">
+          <dl className="mt-6 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-white/5 pt-5">
             <Fact
               label={t('admin.winrate.hero.holding')}
               value={total.avgResolveSeconds === null ? '—' : fmtDurationText(t, total.avgResolveSeconds)}
-            />
-            <Fact
-              label={t('admin.winrate.hero.pending')}
-              value={t('admin.winrate.hero.pendingValue', { count: total.pending, n: fmtInt(total.pending) })}
-              sub={total.stale > 0 ? t('admin.winrate.hero.stale', { count: total.stale, n: fmtInt(total.stale) }) : undefined}
             />
             <Fact
               label={t('admin.winrate.hero.coverage')}
