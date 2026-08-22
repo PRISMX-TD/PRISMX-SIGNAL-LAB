@@ -49,8 +49,12 @@ const RANK_BADGES = ['bg-amber-400/20 text-amber-200', 'bg-neutral-300/20 text-n
 // role="img" + 一句读出整条序列的 aria-label（"近 7 天信号数：1,2,3…"），信息量
 // 一样，1 个停靠点替掉 7 个。role 也随之从 "group" 回到 "img"：现在子节点没有
 // 自己的标签要暴露，这张图就是一张图。柱子保留 <title> 供鼠标逐根读数。
-// 顺带删掉了原来为逐柱焦点打的 onKeyDown Space 补丁——柱子不再进 Tab 序，那个
-// "焦点落在柱子上按 Space 会滚屏"的场景不存在了。
+// 顺带删掉了原来为逐柱焦点打的 onKeyDown Space 补丁。注意它删掉的**不是**那个
+// 场景：svg 自己带 tabIndex={0}，焦点仍然能停在柱图上，而 Card 的 keydown 守卫
+// （if (e.target !== e.currentTarget) return）对冒泡上来的事件照样放行，所以按
+// Space 依然会触发浏览器默认的翻页滚动——只是从每卡 7 个可触发元素收敛成了 1 个。
+// 这是浏览器对"聚焦了一个不可激活元素"的原生语义，刻意不再拦截：柱图不是控件，
+// 用户按 Space 想要的本来就是滚屏，吞掉它反而是在制造一个静默失灵的按键。
 // The hover readout needs a keyboard-equivalent path (code review Important 1):
 // a native <title> only fires on mouse hover, unreachable and unreadable by
 // keyboard. That path belongs on the **svg**, not on every bar: dataviz's
@@ -63,9 +67,16 @@ const RANK_BADGES = ['bg-amber-400/20 text-amber-200', 'bg-neutral-300/20 text-n
 // ("Signals, last 7 days: 1,2,3…"): same information, 1 stop instead of 7. The
 // role goes back from "group" to "img" too — no child has its own label to
 // expose any more, so this really is one picture. Bars keep their <title> for
-// per-bar mouse readout. This also removes the onKeyDown Space patch that
-// per-bar focus needed: with bars out of the tab order, "focus sits on a bar,
-// Space scrolls the page" can no longer happen.
+// per-bar mouse readout.
+// This also removes the onKeyDown Space patch that per-bar focus needed. Note
+// what it does NOT remove: the svg carries tabIndex={0}, so focus can still rest
+// on the chart, and Card's keydown guard (if (e.target !== e.currentTarget)
+// return) lets a bubbled event through — so Space still triggers the browser's
+// default page scroll, just from 1 element per card instead of 7. That is the
+// browser's native semantics for "a non-activatable element has focus", and it
+// is deliberately left alone: the chart isn't a control, scrolling is exactly
+// what a user pressing Space wants there, and swallowing it would manufacture a
+// silently dead key instead.
 export function DailyBars({ daily }: { daily: number[] }) {
   const { t } = useTranslation()
   const max = Math.max(...daily, 1)
