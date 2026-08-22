@@ -49,24 +49,47 @@ function fmtDurationText(t: TFunction, seconds: number): string {
 // as WinRateBar's GAP) — never a stroke; the anti-patterns list rules that
 // out. Symbol-level dailySamples is always null; callers already gate on that
 // before rendering, so this only handles a non-empty array.
+//
+// 悬浮读数同时给键盘一条等价路径（code review Important 1）：原生 <title> 只在
+// 鼠标 hover 时出现，键盘用户 Tab 不到、也读不到。每根柱子加 tabIndex+aria-label
+// （内容与 title 一致），外层 svg 的 role 从 "img" 改成 "group"——role="img" 会
+// 让 ARIA 把子元素整体拍平成一张图，孩子上的 aria-label 对屏幕阅读器形同虚设；
+// "group" 才会把每根柱子当独立可达节点暴露出去。调用方注意：这样每根柱子都会
+// 占一个 Tab 停靠点，不能再把 DailyBars 塞进 <button> 之类不允许交互后代的容器
+// 里（Card 组件已经为此把外壳从 button 换成了 div[role=button]，见下文）。
+// The hover readout also needs a keyboard-equivalent path (code review
+// Important 1): a native <title> only fires on mouse hover — a keyboard user
+// can't tab to it or read it. Each bar gets tabIndex + aria-label (same text
+// as the title); the outer svg's role moves from "img" to "group" — role="img"
+// flattens descendants into one picture for ARIA, so aria-label on a child
+// would be invisible to a screen reader; "group" exposes each bar as its own
+// reachable node. Caller note: this means every bar claims a tab stop, so
+// DailyBars can no longer be nested inside a <button> or anything else whose
+// content model forbids interactive descendants (Card's own wrapper was
+// switched from button to div[role=button] for exactly this reason, below).
 export function DailyBars({ daily }: { daily: number[] }) {
   const { t } = useTranslation()
   const max = Math.max(...daily, 1)
   const w = 100 / daily.length
   return (
-    <svg viewBox="0 0 100 16" className="h-4 w-24" preserveAspectRatio="none" role="img"
+    <svg viewBox="0 0 100 16" className="h-4 w-24" preserveAspectRatio="none" role="group"
          aria-label={t('admin.winrate.dailyBarsLabel')}>
       {daily.map((v, i) => {
+        const hint = t('admin.winrate.dailyBarHint', { count: v })
         return (
           <rect key={i} x={i * w + 1} y={16 - (v / max) * 14 - 1} width={w - 2}
-                height={(v / max) * 14 + 1} rx={1}
+                height={(v / max) * 14 + 1} rx={1} tabIndex={0} role="img" aria-label={hint}
+                className="outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-white/80"
                 fill={i === daily.length - 1 ? 'var(--purple-hi, #c084fc)' : 'rgba(255,255,255,0.25)'}>
             {/* 原生 title 悬浮提示，与 SessionTimeline 的时段色带同一手法——这个项目
-                没有自建 tooltip 组件，轻量原生方案就是既有约定。
+                没有自建 tooltip 组件，轻量原生方案就是既有约定。键盘等价路径见上方
+                tabIndex/aria-label 与函数顶部注释。
                 Native title hover, same technique as SessionTimeline's session
                 bands — this codebase has no custom tooltip component, so the
-                light-weight native one is the established convention. */}
-            <title>{t('admin.winrate.dailyBarHint', { count: v })}</title>
+                light-weight native one is the established convention. The
+                keyboard-equivalent path is the tabIndex/aria-label above; see
+                the function-level comment for why. */}
+            <title>{hint}</title>
           </rect>
         )
       })}
@@ -88,9 +111,28 @@ function Card({ row, sessionKey, rank, onSelect }: {
     .filter((s) => s.sessions[sessionKey] && s.sessions[sessionKey].resolved >= MIN_SAMPLES)
     .sort((a, b) => (b.sessions[sessionKey].wilsonLow ?? 0) - (a.sessions[sessionKey].wilsonLow ?? 0))
     .slice(0, 3)
+  // 整卡可点选策略，但卡片里还嵌了一个真的 <Link>（追踪中笔数跳转 /app）和
+  // DailyBars 的逐柱 tabIndex 焦点（code review Important 2）。HTML5 的 <button>
+  // content model 不允许交互后代——<a> 嵌 <button> 是"非法但多数浏览器会渲染"，
+  // Tab 顺序和读屏语义因浏览器而异；外壳换成 div[role=button] + tabIndex + 手动
+  // 处理 Enter/Space，语义仍是按钮，但不再限制后代不能交互。
+  // The whole card selects a strategy on click, but it also nests a real <Link>
+  // (jump to /app for pending trades) and DailyBars' per-bar tabIndex focus
+  // (code review Important 2). A <button>'s content model forbids interactive
+  // descendants — <a> inside <button> is invalid HTML that most browsers
+  // render anyway, with tab order and AT semantics varying by browser. The
+  // wrapper becomes a div[role=button] + tabIndex + manual Enter/Space
+  // handling instead: same button semantics, but descendants may be
+  // interactive.
   return (
-    <button type="button" onClick={() => onSelect(row.strategy)}
-            className="glass w-full p-4 text-left transition hover:bg-white/[0.06]">
+    <div role="button" tabIndex={0} onClick={() => onSelect(row.strategy)}
+         onKeyDown={(e) => {
+           if (e.key === 'Enter' || e.key === ' ') {
+             e.preventDefault()
+             onSelect(row.strategy)
+           }
+         }}
+         className="glass w-full cursor-pointer p-4 text-left transition hover:bg-white/[0.06] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/80">
       <div className="mb-2 flex items-center gap-2">
         <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${RANK_BADGES[rank] ?? 'bg-white/10 text-neutral-400'}`}>
           #{rank + 1}
@@ -124,7 +166,7 @@ function Card({ row, sessionKey, rank, onSelect }: {
           ))}
         </div>
       )}
-    </button>
+    </div>
   )
 }
 

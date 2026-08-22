@@ -18,8 +18,17 @@ export default function SessionTimeline({ sessions, now }: { sessions: SessionWi
   return (
     <div className="glass p-4">
       <div className="overflow-x-auto">
+        {/* svg 级 role 用 "group" 不用 "img"（code review Important 1，两个组件统一
+            改法）：role="img" 会把子节点拍平成一张图，子节点自己的 aria-label 对
+            屏幕阅读器不可见；"group" 才会把下面每条色带当独立可达节点暴露出去，
+            配合色带上的 tabIndex 才有意义。
+            svg-level role is "group", not "img" (code review Important 1, same fix
+            applied to both components): role="img" flattens children into one
+            picture, so a child's own aria-label is invisible to a screen reader;
+            "group" exposes each band below as its own reachable node, which is
+            what makes the bands' tabIndex meaningful. */}
         <svg viewBox={`0 0 ${W} ${H}`} className="min-w-[560px] w-full" style={{ height: H }}
-             preserveAspectRatio="none" role="img" aria-label={t('admin.winrate.timelineLabel')}>
+             preserveAspectRatio="none" role="group" aria-label={t('admin.winrate.timelineLabel')}>
           {/* 小时刻度线（每 3 小时）/ hour ticks every 3h */}
           {Array.from({ length: 9 }, (_, i) => i * 180).map((x) => (
             <line key={x} x1={x} y1={0} x2={x} y2={H - 8} stroke="rgba(255,255,255,0.06)"
@@ -40,9 +49,17 @@ export default function SessionTimeline({ sessions, now }: { sessions: SessionWi
             const title = t('admin.winrate.sessionWindowTitle', {
               name: t(`admin.winrate.session.${s.key}`), start: win.start, end: win.end,
             })
+            // 键盘等价路径（code review Important 1）：title 只在鼠标 hover 时出现，
+            // 这里给每条色带加 tabIndex+aria-label（与 title 同文案），键盘 Tab
+            // 能读到和鼠标 hover 一样的窗口信息。
+            // Keyboard-equivalent path (code review Important 1): title only
+            // fires on mouse hover; each band also gets tabIndex + aria-label
+            // (same text as the title) so keyboard Tab reaches the same window
+            // info as a mouse hover would.
             return segs.map(([a, b]) => (
               <rect key={`${s.key}-${a}`} x={a} y={y} width={b - a} height={8} rx={2}
-                    fill={color} opacity={0.45}>
+                    fill={color} opacity={0.45} tabIndex={0} role="img" aria-label={title}
+                    className="outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-white/80">
                 <title>{title}</title>
               </rect>
             ))
