@@ -1016,8 +1016,23 @@
         "coverageStrategies_one": "{{count}} strategy",
         "coverageStrategies_other": "{{count}} strategies",
         "coverageSymbols_one": "{{count}} symbol",
-        "coverageSymbols_other": "{{count}} symbols",
-        "nowTitle": "Which session is open"
+        "coverageSymbols_other": "{{count}} symbols"
+      },
+      "watch": {
+        "title": "What to watch now",
+        "nowActive": "Now: {{name}}",
+        "nowLeft": "open · {{time}} left",
+        "nowOutside": "Outside the three sessions right now",
+        "sessionRate": "{{name}} win rate, last {{days}} days",
+        "symbolsGood": "Symbols with a higher win rate in this session",
+        "symbolsBad": "Careful",
+        "symbolsNone": "No symbol has a clearly higher win rate in this session over the last {{days}} days — that is normal, do not force it.",
+        "next": "Next: {{name}} opens in {{time}}",
+        "timelineTitle": "Sessions · your time"
+      },
+      "details": {
+        "show": "Show details: overall, each strategy, each symbol",
+        "hide": "Hide details"
       },
       "guide": {
         "lead": "How to read this: the further from half and the more trades, the firmer the conclusion — every verdict already accounts for both.",
@@ -1050,10 +1065,10 @@
         "stale_one": "{{count}} with broken tracking",
         "stale_other": "{{count}} with broken tracking",
         "winsLosses": "{{tp}} wins · {{sl}} losses",
-        "activity": "Signals per day, last 7 days",
+        "activity": "Signals per day, last {{days}} days",
         "activityTotal": "{{n}} total",
-        "activityAria_one": "Signals per day over the last 7 days, {{count}} in total",
-        "activityAria_other": "Signals per day over the last 7 days, {{count}} in total",
+        "activityAria_one": "Signals per day over the last {{days}} days, {{count}} in total",
+        "activityAria_other": "Signals per day over the last {{days}} days, {{count}} in total",
         "dayTitle_one": "Day {{day}}: {{count}} signal",
         "dayTitle_other": "Day {{day}}: {{count}} signals",
         "expand": "Details",
@@ -1067,7 +1082,7 @@
         "bySide": "Long or short?",
         "bySideHint": "Older signals with an unrecognized direction count toward neither side.",
         "byWeekday": "Which weekday works best?",
-        "byWeekdayHint": "Each weekday covers exactly 24 hours of the last 7 days. Weekdays use UTC, which can differ from your local date by a few hours. Resolved signals only.",
+        "byWeekdayHint": "The last {{days}} days grouped by weekday. Weekdays use UTC, which can differ from your local date by a few hours. Resolved signals only.",
         "holding": "How long until an outcome?",
         "holdingHint": "Average time from a signal firing to hitting take-profit or stop-loss; resolved signals only.",
         "holdingOverall": "overall",
@@ -1082,14 +1097,12 @@
       },
       "method": {
         "toggle": "How these numbers are computed",
-        "body": "TradingView platform signals only, pinned to the last 7 days. Win rate = take-profits ÷ (take-profits + stop-losses); signals with no outcome yet or with broken price tracking stay out of the denominator. \"Clearly above / below half\" means the 95% confidence interval of the win rate sits entirely on one side of 50% — more trades, narrower interval. Cells with fewer than {{min}} resolved trades show the count alone. Sessions are defined in each centre's local time and follow DST automatically."
+        "body": "TradingView platform signals only, pinned to the last {{days}} days. Win rate = take-profits ÷ (take-profits + stop-losses); signals with no outcome yet or with broken price tracking stay out of the denominator. \"Clearly above / below half\" means the 95% confidence interval of the win rate sits entirely on one side of 50% — more trades, narrower interval. Cells with fewer than {{min}} resolved trades show the count alone. Sessions are defined in each centre's local time and follow DST automatically."
       },
       "timeline": {
         "label": "24-hour session timeline",
         "window": "{{name}} {{start}}–{{end}}",
         "yourTime": "your time {{start}}–{{end}}",
-        "activeLeft": "open · {{time}} left",
-        "startsIn": "opens in {{time}}",
         "openNow": "open now",
         "now": "now"
       },

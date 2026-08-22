@@ -2,19 +2,17 @@
 //
 // 新手打开这页只想知道一件事——"平台信号到底准不准"。所以首屏是一个大数字、
 // 一枚人话判定芯片、一条"赢 vs 输"的拔河条，再加三个补充数字；统计口径、
-// 置信区间这些全部退到文字里或页尾。右侧是"现在是什么盘"——它不是胜率，但
-// 盯盘的人每次打开都要看一眼，所以放在首屏而不是单独一张卡。
+// 置信区间这些全部退到文字里或页尾。"现在是什么盘"不在这里——它住在最上层
+// 的 WatchNow，这一块是「看细节」里的第一张。
 //
 // The hero: one answer. A newcomer opens this page to learn one thing — are the
 // platform's signals any good — so the hero is one big number, one plain-words
 // verdict chip, one wins-vs-losses tug bar and three supporting facts; the
-// methodology and the interval retreat into prose or the footer. The right
-// column is "which session is open now": not a win rate, but the thing anyone
-// watching the market checks first, so it shares the hero instead of getting
-// its own card.
+// methodology and the interval retreat into prose or the footer. "Which
+// session is open" is not here — it lives in WatchNow, the top layer; this
+// block is the first card inside "details".
 import { useTranslation } from 'react-i18next'
 import type { AdminStrategyWinRate } from '../../../api/types'
-import SessionTimeline from './SessionTimeline'
 import TugBar from './TugBar'
 import { VerdictChip } from './Verdict'
 import { VERDICT_COLOR, fmtDurationText, fmtInt, fmtPct, isRated, verdictOf } from './shared'
@@ -29,7 +27,7 @@ function Fact({ label, value, sub }: { label: string; value: string; sub?: strin
   )
 }
 
-export default function HeroSummary({ data, now }: { data: AdminStrategyWinRate; now: Date }) {
+export default function HeroSummary({ data }: { data: AdminStrategyWinRate }) {
   const { t } = useTranslation()
   const total = data.overall.total
   const kind = verdictOf(total)
@@ -44,7 +42,7 @@ export default function HeroSummary({ data, now }: { data: AdminStrategyWinRate;
 
   return (
     <section className="glass animate-fade-in-up p-6 md:p-8">
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      <div className="max-w-3xl">
         <div className="min-w-0">
           <p className="text-sm text-neutral-400">
             {hasRate
@@ -105,11 +103,6 @@ export default function HeroSummary({ data, now }: { data: AdminStrategyWinRate;
             />
           </dl>
         </div>
-
-        <aside className="min-w-0 lg:border-l lg:border-white/5 lg:pl-8">
-          <h3 className="mb-3 text-2xs uppercase tracking-wider text-neutral-500">{t('admin.winrate.hero.nowTitle')}</h3>
-          <SessionTimeline sessions={data.sessions} now={now} />
-        </aside>
       </div>
     </section>
   )

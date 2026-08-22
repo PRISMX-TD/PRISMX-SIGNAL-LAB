@@ -4,7 +4,7 @@
 // 是个会一直变的动态目标，而且胜率高不等于更赚钱（盈亏比差三倍时，胜率最低
 // 的策略可能期望最高）。列表标题下面直接把这句话写给读者。
 //
-// 卡片首行只放三样东西：名字、大数字 + 判定、拔河条；右侧是近 7 天每天的信号
+// 卡片首行只放三样东西：名字、大数字 + 判定、拔河条；右侧是窗口内每天的信号
 // 量柱——"这策略最近活不活跃"是新手除了准不准之外第二想知道的事。
 //
 // One card per strategy; clicking expands the detail in place (accordion, one
@@ -13,7 +13,7 @@
 // and a higher win rate does not mean more money (with reward:risk spanning 3x,
 // the lowest win rate can carry the highest expectancy). The list caption says
 // so directly. The card's first row carries only the name, the big number with
-// its verdict, and the tug bar; on the right, the last 7 days of signal volume —
+// its verdict, and the tug bar; on the right, the window's daily signal volume —
 // "is this strategy active lately" is the second thing a newcomer asks.
 import { useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -31,8 +31,8 @@ function ActivityBars({ daily }: { daily: number[] }) {
   const total = daily.reduce((a, b) => a + b, 0)
   return (
     <span className="block">
-      <span className="flex h-8 items-end gap-[3px]" role="img"
-            aria-label={t('admin.winrate.strategies.activityAria', { count: total })}>
+      <span className="flex h-8 items-end gap-[2px]" role="img"
+            aria-label={t('admin.winrate.strategies.activityAria', { count: total, days: daily.length })}>
         {daily.map((v, i) => (
           <span
             key={i}
@@ -43,7 +43,7 @@ function ActivityBars({ daily }: { daily: number[] }) {
         ))}
       </span>
       <span className="mt-1 block text-2xs tabular-nums text-neutral-500">
-        {t('admin.winrate.strategies.activity')} · {t('admin.winrate.strategies.activityTotal', { count: total, n: fmtInt(total) })}
+        {t('admin.winrate.strategies.activity', { days: daily.length })} · {t('admin.winrate.strategies.activityTotal', { count: total, n: fmtInt(total) })}
       </span>
     </span>
   )
@@ -147,7 +147,7 @@ function StrategyCard({ row, index, open, onToggle, data, activeKeys }: {
           className="min-h-0 overflow-hidden"
           style={{ visibility: open ? 'visible' : 'hidden', transition: `visibility 0s linear ${open ? 0 : 450}ms` }}
         >
-          {mounted && <StrategyDetail row={row} sessions={data.sessions} activeKeys={activeKeys} />}
+          {mounted && <StrategyDetail row={row} sessions={data.sessions} activeKeys={activeKeys} days={data.days} />}
         </div>
       </div>
     </article>

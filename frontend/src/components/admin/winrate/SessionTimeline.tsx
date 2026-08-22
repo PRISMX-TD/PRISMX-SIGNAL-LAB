@@ -1,14 +1,16 @@
-// 「现在是什么盘」：三行文字状态 + 一条 24 小时色带轴（按浏览者本地时区）。
-// 新手先读字（"欧洲盘 进行中 · 剩 1h22m"），色带只是给个空间感；色带位置按
-// 当刻时区偏移换算，DST 切换日会整体跳一小时——那是正确行为。
-// 钟点标签放在 HTML 里而不是 svg 里：svg 用 preserveAspectRatio="none" 拉伸，
-// 文字会跟着变形。
-// "Which session is open now": three text rows plus a 24h band strip in the
-// viewer's clock. Newcomers read the words first; the strip only adds a sense
-// of position. Clock labels live in HTML, not inside the stretched svg.
+// 时段一览：每个盘一行（名字 + 换算到浏览者时区的钟点）+ 一条 24 小时色带轴。
+// "现在是哪个盘、还剩多久"这句结论由 WatchNow 说，这里不重复——行里只放钟点，
+// 位置关系交给色带和游标。色带位置按当刻时区偏移换算，DST 切换日会整体跳一小时，
+// 那是正确行为。钟点标签放在 HTML 里而不是 svg 里：svg 用 preserveAspectRatio="none"
+// 拉伸，文字会跟着变形。
+// Session overview: one row per session (name + window in the viewer's clock)
+// plus a 24h band strip. "Which session is open and how long is left" is
+// WatchNow's sentence, not repeated here — rows carry only the clock, the strip
+// and cursor carry position. Clock labels live in HTML, not inside the
+// stretched svg.
 import { useTranslation } from 'react-i18next'
 import type { SessionWindow } from '../../../api/types'
-import { SESSION_COLORS, fmtClock, fmtDurationHm, localWindow, sessionStatus, zoneOffsetMinutes } from './shared'
+import { SESSION_COLORS, fmtClock, localWindow, sessionStatus, zoneOffsetMinutes } from './shared'
 
 const W = 1440 // 1 分钟 = 1 单位 / one unit per minute
 const H = 30
@@ -24,29 +26,20 @@ export default function SessionTimeline({ sessions, now }: { sessions: SessionWi
 
   return (
     <div>
-      <ul className="space-y-2.5">
+      <ul className="space-y-2">
         {sessions.map((s) => {
-          const st = sessionStatus(s, now)
           const win = localWindow(s, now)
           const color = SESSION_COLORS[s.key] ?? SESSION_COLORS.outside
-          const active = st.state === 'active'
+          const active = sessionStatus(s, now).state === 'active'
           return (
-            <li key={s.key} className="flex items-center justify-between gap-3">
-              <span className="flex items-center gap-2 text-sm text-neutral-200">
+            <li key={s.key} className="flex items-center justify-between gap-3 text-sm">
+              <span className={`flex items-center gap-2 ${active ? 'text-neutral-100' : 'text-neutral-400'}`}>
                 <i className={`h-2 w-2 shrink-0 rounded-full ${active ? 'animate-breathe' : ''}`}
                    style={{ backgroundColor: color }} />
                 {t(`admin.winrate.session.${s.key}`)}
               </span>
-              <span className="text-right">
-                <span className={`block text-sm tabular-nums ${active ? 'font-medium' : 'text-neutral-400'}`}
-                      style={active ? { color: 'var(--up)' } : undefined}>
-                  {active
-                    ? t('admin.winrate.timeline.activeLeft', { time: fmtDurationHm(st.minutesToEnd) })
-                    : t('admin.winrate.timeline.startsIn', { time: fmtDurationHm(st.minutesToStart) })}
-                </span>
-                <span className="block text-2xs tabular-nums text-neutral-500">
-                  {t('admin.winrate.timeline.yourTime', { start: win.start, end: win.end })}
-                </span>
+              <span className="tabular-nums text-neutral-500">
+                {t('admin.winrate.timeline.yourTime', { start: win.start, end: win.end })}
               </span>
             </li>
           )

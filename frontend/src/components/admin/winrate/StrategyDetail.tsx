@@ -142,10 +142,11 @@ function WeekdayGrid({ weekday }: { weekday: WeekdayOutcome[] }) {
   )
 }
 
-export default function StrategyDetail({ row, sessions, activeKeys }: {
+export default function StrategyDetail({ row, sessions, activeKeys, days }: {
   row: StrategyWinRate
   sessions: SessionWindow[]
   activeKeys: string[]
+  days: number
 }) {
   const { t } = useTranslation()
   const [symbolTab, setSymbolTab] = useState<string>('all')
@@ -209,7 +210,7 @@ export default function StrategyDetail({ row, sessions, activeKeys }: {
 
         <div className="space-y-4">
         {weekday && (
-          <Block title={t('admin.winrate.detail.byWeekday')} hint={t('admin.winrate.detail.byWeekdayHint')}>
+          <Block title={t('admin.winrate.detail.byWeekday')} hint={t('admin.winrate.detail.byWeekdayHint', { days })}>
             <WeekdayGrid weekday={weekday} />
           </Block>
         )}

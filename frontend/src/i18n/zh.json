@@ -1008,8 +1008,23 @@
         "stale": "另有 {{n}} 笔追踪中断，不计入",
         "coverage": "覆盖范围",
         "coverageStrategies_other": "{{count}} 个策略",
-        "coverageSymbols_other": "{{count}} 个品种",
-        "nowTitle": "现在是什么盘"
+        "coverageSymbols_other": "{{count}} 个品种"
+      },
+      "watch": {
+        "title": "现在该盯什么",
+        "nowActive": "现在：{{name}}",
+        "nowLeft": "进行中 · 还剩 {{time}}",
+        "nowOutside": "现在不在三大时段内",
+        "sessionRate": "{{name}}近 {{days}} 天胜率",
+        "symbolsGood": "这个时段里胜率更高的品种",
+        "symbolsBad": "要小心",
+        "symbolsNone": "近 {{days}} 天这个时段没有胜率明显更高的品种——正常现象，别硬找。",
+        "next": "下一个：{{name}} {{time}} 后开始",
+        "timelineTitle": "各时段 · 你的时间"
+      },
+      "details": {
+        "show": "看细节：整体、各策略、各品种",
+        "hide": "收起细节"
       },
       "guide": {
         "lead": "怎么读：离一半越远、笔数越多，越容易下结论——每个判定都已经把这两点算进去了。",
@@ -1037,9 +1052,9 @@
         "pending_other": "{{count}} 笔等结果",
         "stale_other": "{{count}} 笔追踪中断",
         "winsLosses": "赢 {{tp}} · 输 {{sl}}",
-        "activity": "近 7 天每天信号量",
+        "activity": "近 {{days}} 天每天信号量",
         "activityTotal": "共 {{n}} 条",
-        "activityAria": "近 7 天每天信号量，共 {{count}} 条",
+        "activityAria": "近 {{days}} 天每天信号量，共 {{count}} 条",
         "dayTitle": "第 {{day}} 天：{{count}} 条信号",
         "expand": "看细节",
         "collapse": "收起"
@@ -1052,7 +1067,7 @@
         "bySide": "做多还是做空更准？",
         "bySideHint": "方向认不出的老信号不计入任何一侧。",
         "byWeekday": "星期几更准？",
-        "byWeekdayHint": "近 7 天每个星期几各占整 24 小时；星期几按国际标准时间（UTC）算，可能和你本地的日期差几小时。只含已分出胜负的信号。",
+        "byWeekdayHint": "把近 {{days}} 天按星期几汇总；星期几按国际标准时间（UTC）算，可能和你本地的日期差几小时。只含已分出胜负的信号。",
         "holding": "一般多久出结果？",
         "holdingHint": "从信号发出到碰到止盈或止损的平均时长；只算已分出胜负的信号。",
         "holdingOverall": "总体",
@@ -1066,14 +1081,12 @@
       },
       "method": {
         "toggle": "这些数字是怎么算的",
-        "body": "只统计 TradingView 推送的平台信号，固定近 7 天。胜率 = 止盈数 ÷（止盈数 + 止损数）；尚未走出结果和行情追踪中断的信号不进分母。「明显高于 / 低于一半」的判定依据是胜率的 95% 置信区间是否整体落在 50% 一侧，笔数越多区间越窄；已分出胜负少于 {{min}} 笔的格子只显示笔数。时段用各金融中心的本地时间定义，夏令时切换自动跟随。"
+        "body": "只统计 TradingView 推送的平台信号，固定近 {{days}} 天。胜率 = 止盈数 ÷（止盈数 + 止损数）；尚未走出结果和行情追踪中断的信号不进分母。「明显高于 / 低于一半」的判定依据是胜率的 95% 置信区间是否整体落在 50% 一侧，笔数越多区间越窄；已分出胜负少于 {{min}} 笔的格子只显示笔数。时段用各金融中心的本地时间定义，夏令时切换自动跟随。"
       },
       "timeline": {
         "label": "24 小时时段轴",
         "window": "{{name}} {{start}}–{{end}}",
         "yourTime": "你的时间 {{start}}–{{end}}",
-        "activeLeft": "进行中 · 剩 {{time}}",
-        "startsIn": "{{time}} 后开始",
         "openNow": "进行中",
         "now": "现在"
       },

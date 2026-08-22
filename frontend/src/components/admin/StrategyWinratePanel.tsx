@@ -1,7 +1,10 @@
-// 管理后台「策略胜率」子页——为新手重排的一版。
+// 管理后台「策略胜率」子页——为新手重排的一版，两层。
 //
-// 页面只回答三个问题，按读者会问的顺序排：
-//   1. 平台信号准不准？        → 首屏一个大数字 + 人话判定 + 赢/输拔河条
+// 第一层（默认只有这一层）：「现在该盯什么」——现在是哪个盘、这个盘近 N 天准不准、
+// 这个盘里哪些品种更准 / 要小心、下一个盘几点开。这是产品的本意：一眼看出
+// "什么时候值得注意、注意哪些品种"，先在管理页内测，之后再决定是否开放给用户。
+// 第二层（点「看细节」才展开）按读者会问的顺序排：
+//   1. 平台信号准不准？        → 一个大数字 + 人话判定 + 赢/输拔河条
 //   2. 哪个策略、准在哪？      → 每个策略一张卡，点开看"哪个时段 / 做多做空 /
 //                                 星期几 / 多久出结果"四个问题
 //   3. 哪些品种在跑、跑得怎样？→ 每个品种一行
@@ -15,8 +18,13 @@
 // 时段窗口（小时区间 + IANA 时区）随接口一起下发，前端不复制一份：夏令时的正确
 // 性只在后端保证一次，这里只负责把它翻译成看的人所在时区的钟点。
 //
-// The admin "strategy win rate" tab, re-laid-out for newcomers. It answers three
-// questions in the order a reader asks them: are the signals any good (hero:
+// The admin "strategy win rate" tab, re-laid-out for newcomers, in two layers.
+// Layer one (all that shows by default) is "what to watch now": which session
+// is open, how it did over the last N days, which symbols do better / need care
+// in it, and when the next session opens — the product's actual intent, piloted
+// on the admin page before deciding whether to expose it to users. Layer two
+// (behind "details") answers three questions in the order a reader asks them:
+// are the signals any good (hero:
 // one big number, a plain-words verdict, a wins-vs-losses tug bar); which
 // strategy, and where is it good (one card each, expanding into four question
 // blocks); which symbols are running and how (one row each). The statistics —
@@ -32,18 +40,24 @@ import { adminApi } from '../../api/client'
 import { SkeletonBlock, SkeletonLine } from '../Skeleton'
 import type { AdminStrategyWinRate } from '../../api/types'
 import { MIN_SAMPLES, sessionStatus } from './winrate/shared'
+import WatchNow from './winrate/WatchNow'
 import HeroSummary from './winrate/HeroSummary'
 import ReadingGuide from './winrate/ReadingGuide'
 import StrategyList from './winrate/StrategyList'
 import SymbolBoard from './winrate/SymbolBoard'
 
-// 全站固定 7 天，不给切换器。滚动 168 小时 = 7×24，每个星期几正好各分到整
-// 24 小时，「星期几更准」那一格才能直接比；14/30 天除不尽，格子会把"那天多出
-// 24 小时"也编码进去。
-// Pinned to 7 days, no picker: a rolling 168h window gives every weekday exactly
-// 24 hours, which is what makes the weekday cells comparable. 14 or 30 days
-// don't divide evenly and would encode the extra day as a real difference.
-const WINDOW_DAYS = 7
+// 固定 30 天，不给切换器。第一层要在「时段 × 品种」这一格上给出"明显更准"，
+// 7 天切到这个粒度后大多数格子都是"还看不出"，第一层会经常空着；30 天才有足够
+// 笔数。原来钉在 7 天是为了星期格可比（168 小时 = 每个星期几整 24 小时），但那
+// 个顾虑针对的是**笔数**——现在星期格显示的是胜率，某个星期几多摊到一天只是
+// 样本多一点，比率本身不受影响，所以放开。
+// Pinned to 30 days, no picker. Layer one has to call a session × symbol cell
+// "clearly better"; at 7 days most such cells read "can't tell" and the layer
+// sits empty, 30 days gives them enough trades. The old 7-day pin existed for
+// weekday comparability (168h = exactly 24h per weekday), but that concern was
+// about **counts** — the weekday cells now show rates, and a weekday drawing one
+// extra day only means a slightly larger sample, not a biased rate.
+const WINDOW_DAYS = 30
 
 function LoadingSkeleton() {
   return (
@@ -102,6 +116,9 @@ export default function StrategyWinratePanel() {
   const [selected, setSelected] = useState<string | null>(null)
   const [now, setNow] = useState(() => new Date())
   const [attempt, setAttempt] = useState(0)
+  // 细节层默认收起：产品本意是"一眼看出该盯什么，要看细节再展开"。
+  // Details fold by default: the intent is "see what to watch at a glance, expand for more".
+  const [showDetails, setShowDetails] = useState(false)
 
   // 每分钟刷新一次时钟；时段状态与"进行中"标记共用这一个 now，各子组件都不
   // 自带计时器。/ One clock per minute, shared by every child; none keeps its own.
@@ -160,8 +177,26 @@ export default function StrategyWinratePanel() {
         <EmptyState />
       ) : data ? (
         <>
-          <HeroSummary data={data} now={now} />
+          <WatchNow data={data} now={now} />
+          {/* 图例留在顶层：芯片第一次出现就在上面那张卡里，解释不能藏在细节里。
+              Legend stays in the top layer: the chips first appear in the card
+              above, so their explanation can't hide inside details. */}
           <ReadingGuide />
+
+          <div className="px-1">
+            <button type="button" aria-expanded={showDetails} onClick={() => setShowDetails((v) => !v)}
+                    className="btn-ghost inline-flex items-center gap-2 px-5 py-2 text-sm">
+              {showDetails ? t('admin.winrate.details.hide') : t('admin.winrate.details.show')}
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6"
+                   strokeLinecap="round" strokeLinejoin="round" aria-hidden
+                   className={`transition-transform duration-300 ${showDetails ? 'rotate-180' : ''}`}>
+                <path d="m4 6 4 4 4-4" />
+              </svg>
+            </button>
+          </div>
+
+          {showDetails && (<>
+          <HeroSummary data={data} />
 
           <section>
             <header className="mb-3 px-1">
@@ -181,9 +216,10 @@ export default function StrategyWinratePanel() {
               <span className="ml-1 inline-block transition group-open:rotate-90">›</span>
             </summary>
             <p className="mt-2 max-w-[72ch] text-xs leading-5 text-neutral-500">
-              {t('admin.winrate.method.body', { min: MIN_SAMPLES })}
+              {t('admin.winrate.method.body', { min: MIN_SAMPLES, days: WINDOW_DAYS })}
             </p>
           </details>
+          </>)}
         </>
       ) : null}
     </div>
