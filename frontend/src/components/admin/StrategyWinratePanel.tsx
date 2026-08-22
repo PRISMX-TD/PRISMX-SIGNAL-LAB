@@ -197,7 +197,24 @@ export default function StrategyWinratePanel() {
                 </button>
               ))}
             </div>
-            <StrategyDetail data={data} days={days} activeKeys={activeKeys} selected={selected} onSelect={setSelected} />
+            {/* days={data.days}，不是 days={days}：切换器点下去 `days` state 立刻更新，
+                但新窗口请求若失败，`data` 仍停在旧窗口——这时 `days` 与 `data` 已经
+                错位。`StrategyDetail` 会把 days 原样转给 `SignalList` 发起独立请求
+                （聚合和明细是两个端点，一个失败不代表另一个也失败），用错位的
+                `days` 请求会把"旧窗口的汇总"和"新窗口的明细"同时摆上屏幕，除顶部
+                一行 error 外没有任何提示。`data.days` 是后端按实际生效的请求参数
+                回填的字段，天然与 `data` 本身同源，用它就不会有这个错位窗口。
+                days={data.days}, not days={days}: clicking the switcher updates the
+                `days` state immediately, but if the new-window request fails, `data`
+                stays on the old window — `days` and `data` are then out of sync.
+                StrategyDetail forwards `days` verbatim to SignalList, which fires an
+                independent request off it (the aggregate and detail endpoints are
+                separate, so one failing doesn't mean the other does) — a mismatched
+                `days` would put "old window's aggregate" and "new window's detail"
+                on screen together with nothing but one error line at the top to
+                explain it. `data.days` is the backend's echo of the parameter that
+                actually produced `data`, so it can never drift from it. */}
+            <StrategyDetail data={data} days={data.days} activeKeys={activeKeys} selected={selected} onSelect={setSelected} />
           </div>
           <p className="px-1 text-[11px] leading-5 text-neutral-600">
             {t('admin.winrate.footnote', { min: MIN_SAMPLES })}
