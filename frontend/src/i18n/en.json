@@ -986,7 +986,7 @@
     },
     "winrate": {
       "title": "Win Rate by Session",
-      "hint": "Covers TradingView platform signals only, filed by the session they fired in. Win rate = take-profits / (take-profits + stop-losses); signals with no outcome yet (PENDING) or with broken price tracking (STALE) stay out of the denominator. Sessions are defined in each centre's local time, so DST changeovers are followed automatically. The European and New York sessions overlap by about four hours daily and signals in the overlap count toward both, so the per-session samples add up to more than the total.",
+      "hint": "Covers TradingView platform signals only, filed by the session they fired in. Win rate = take-profits / (take-profits + stop-losses); signals with no outcome yet (PENDING) or with broken price tracking (STALE) stay out of the denominator. Sessions are defined in each centre's local time, so DST changeovers are followed automatically. The European and New York sessions overlap by about four hours daily and signals in the overlap count toward both, so the per-session samples add up to more than the total. Recommendations always use the last 7 days; the matrix and details below follow the range picker.",
       "daysLabel": "Window",
       "daysOption": "Last {{days}}d",
       "empty": "No TradingView signals in this window.",
