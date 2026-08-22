@@ -222,6 +222,17 @@ class WinRateBucketOut(BaseModel):
     dailySamples: list[int] | None = None
 
 
+class SymbolWinRateOut(BaseModel):
+    """一个（策略, 品种）组合的分时段胜率。桶结构与上层完全同构，
+    前端用同一个渲染函数画所有层级。
+    Per-(strategy, symbol) session breakdown; same bucket shape as the
+    parent so the UI renders every level through one function."""
+
+    symbol: str
+    total: WinRateBucketOut
+    sessions: dict[str, WinRateBucketOut]
+
+
 class StrategyWinRateOut(BaseModel):
     # 空串表示 TradingView 警报没带 strategy 字段，前端显示成「未命名策略」
     # An empty string means the alert carried no strategy field; shown as "Unnamed"
@@ -233,6 +244,9 @@ class StrategyWinRateOut(BaseModel):
     # (London and New York share ~4h daily), so the per-session samples sum to
     # at least total.samples — not a bug.
     sessions: dict[str, WinRateBucketOut]
+    # 品种子分层，按已判定笔数降序；overall 行恒为空列表
+    # per-symbol sub-layer, resolved desc; always [] on the overall row
+    symbols: list[SymbolWinRateOut] = Field(default_factory=list)
 
 
 class AdminStrategyWinRateOut(BaseModel):

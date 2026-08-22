@@ -212,11 +212,11 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
 
     # 只取需要的列。信号表最宽的几列（entry/sl/tp/baseline_*）这里一个都用不上，
     # 全行 SELECT 在 Supabase 上是纯浪费的 Egress——同 signal_resolution.py 的做法。
-    # symbol 这里还没用上，是给品种子分层（Task 3）预留的。
+    # symbol 用于品种子分层（Task 3）。
     # Only the needed columns: none of the wide columns (entry/sl/tp/baseline_*)
     # are used here, and a full-row SELECT is pure wasted Egress on Supabase —
-    # same reasoning as signal_resolution.py. symbol is unused here, reserved
-    # for the per-symbol breakdown (Task 3).
+    # same reasoning as signal_resolution.py. symbol feeds the per-symbol
+    # breakdown (Task 3).
     cutoff_naive = cutoff.replace(tzinfo=None)
     rows = (
         db.query(Signal.indicator, Signal.symbol, Signal.created_at,
@@ -254,6 +254,8 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
     # {策略名: {时段键或 "total": 桶}} / {strategy: {session key or "total": bucket}}
     per_strategy: dict[str, dict[str, dict]] = {}
     overall: dict[str, dict] = {k: _empty_bucket(days) for k in [*all_keys, "total"]}
+    # {策略名: {品种: {时段键或 "total": 桶}}} / {strategy: {symbol: {session key or "total": bucket}}}
+    per_strategy_symbols: dict[str, dict[str, dict[str, dict]]] = {}
 
     for indicator, symbol, created_at, result, resolved_at in rows:
         if created_at is None:
@@ -303,14 +305,52 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
                     b["_resolveSum"] += resolve_seconds
                     b["_resolveN"] += 1
 
+        # 品种子分层：同样避免 setdefault(key, {昂贵默认值}) ——两层查找都先判空
+        # 再赋值，理由与上面 per_strategy 完全一致。
+        # Per-symbol sub-layer: same "check then assign" pattern as per_strategy
+        # above, for the identical reason — setdefault's default arg is built
+        # whether or not the key already exists.
+        if name not in per_strategy_symbols:
+            per_strategy_symbols[name] = {}
+        sym_map = per_strategy_symbols[name]
+        if symbol not in sym_map:
+            sym_map[symbol] = {k: _empty_bucket(days) for k in [*all_keys, "total"]}
+        sym_buckets = sym_map[symbol]
+        for bkey in ("total", *session_keys):
+            b = sym_buckets[bkey]
+            b[key] += 1
+            b["_daily"][day_idx] += 1          # 累加但不下发（include_daily=False）
+            if resolve_seconds is not None:
+                b["_resolveSum"] += resolve_seconds
+                b["_resolveN"] += 1
+
     def _shape(buckets: dict[str, dict]) -> dict:
         return {
             "total": _finalize(buckets["total"], days, True),
             "sessions": {k: _finalize(buckets[k], days, True) for k in all_keys},
         }
 
+    def _shape_symbols(sym_map: dict[str, dict]) -> list[dict]:
+        rows = [
+            {
+                "symbol": sym,
+                "total": _finalize(b["total"], days, False),
+                "sessions": {k: _finalize(b[k], days, False) for k in all_keys},
+            }
+            for sym, b in sym_map.items()
+        ]
+        # 已判定笔数降序，与外层策略行的排序键一致，再按品种名兜底稳定顺序。
+        # Resolved count desc, same tiebreak convention as the strategy rows,
+        # then the symbol name for a stable order.
+        rows.sort(key=lambda r: (-r["total"]["resolved"], -r["total"]["samples"], r["symbol"]))
+        return rows
+
     strategies = [
-        {"strategy": name, **_shape(buckets)} for name, buckets in per_strategy.items()
+        {
+            "strategy": name, **_shape(buckets),
+            "symbols": _shape_symbols(per_strategy_symbols.get(name, {})),
+        }
+        for name, buckets in per_strategy.items()
     ]
     # 已判定样本多的排前面，再按总样本数，最后按名字——保证顺序稳定，否则每次
     # 刷新表格行都在跳。
@@ -330,9 +370,13 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
             for s in SESSIONS
         ],
         # overall 与每个策略行同形状（strategy 为空串），前端可以用同一个渲染
-        # 函数画汇总行和明细行。
+        # 函数画汇总行和明细行。symbols 显式给 []（而不是靠 schema 默认值兜底）：
+        # 这个函数的返回值本身就是被测的契约，调用方不一定会经过 Pydantic。
         # Same shape as a strategy row (with an empty strategy), so the UI renders
-        # the summary row and the detail rows through one function.
-        "overall": {"strategy": "", **_shape(overall)},
+        # the summary row and the detail rows through one function. symbols is
+        # explicitly [] here (not left to the schema's default) — this dict is
+        # itself the tested contract, and callers won't necessarily go through
+        # Pydantic.
+        "overall": {"strategy": "", **_shape(overall), "symbols": []},
         "strategies": strategies,
     }
