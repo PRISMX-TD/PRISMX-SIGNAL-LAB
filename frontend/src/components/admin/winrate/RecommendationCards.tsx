@@ -79,6 +79,20 @@ export function DailyBars({ daily }: { daily: number[] }) {
         return (
           <rect key={i} x={i * w + 1} y={16 - (v / max) * 14 - 1} width={w - 2}
                 height={(v / max) * 14 + 1} rx={1} tabIndex={0} role="img" aria-label={hint}
+                // 柱子有 tabIndex 却没有自己的 onKeyDown：Task 10 code review 发现，
+                // 父级卡片的 keydown 守卫一加上 e.target !== e.currentTarget 就 return，
+                // 焦点在柱子上按 Space 就再没有任何处理函数调它的 preventDefault()，
+                // 浏览器默认动作（整页向下滚一屏）照常发生。这里只吞掉 Space 的默认
+                // 滚动，不做任何其他动作——柱子本来就不是"可激活"的东西，Enter 也
+                // 不需要特殊处理。
+                // The bar had tabIndex but no onKeyDown of its own: Task 10's review
+                // found that once the parent card's keydown guard added
+                // e.target !== e.currentTarget and returned, nothing called
+                // preventDefault() for a Space press while focus sat on a bar, so the
+                // browser's default action (scroll the page down a screen) actually
+                // fired. This only swallows Space's default scroll — nothing else,
+                // since a bar isn't "activatable" and Enter needs no special handling.
+                onKeyDown={(e) => { if (e.key === ' ') e.preventDefault() }}
                 className="outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-white/80"
                 fill={i === daily.length - 1 ? 'var(--purple-hi, #c084fc)' : 'rgba(255,255,255,0.25)'}>
             {/* 原生 title 悬浮提示，与 SessionTimeline 的时段色带同一手法——这个项目
