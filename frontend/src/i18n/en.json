@@ -1011,6 +1011,7 @@
       "footnote": "Cells with fewer than {{min}} resolved trades show the count instead of a percentage: turning three or four results into a percentage looks like a conclusion but is indistinguishable from a coin flip.",
       "wilsonTick": "Ranking key: win-rate confidence floor",
       "timelineLabel": "24-hour session timeline",
+      "sessionWindowTitle": "{{name}} {{start}}–{{end}}",
       "activeLeft": "open · {{time}} left",
       "startsIn": "starts in {{time}}",
       "unit": {

@@ -1008,6 +1008,7 @@
       "footnote": "已判定样本少于 {{min}} 笔的格子只显示笔数：把三五笔的结果写成百分比，看着像结论，其实和抛硬币没区别。",
       "wilsonTick": "排序依据：胜率置信下限",
       "timelineLabel": "24 小时时段轴",
+      "sessionWindowTitle": "{{name}} {{start}}–{{end}}",
       "activeLeft": "进行中 · 剩 {{time}}",
       "startsIn": "{{time}} 后开始",
       "unit": {
