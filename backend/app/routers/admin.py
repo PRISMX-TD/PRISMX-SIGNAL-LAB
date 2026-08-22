@@ -21,10 +21,10 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
-from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
+from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, Signal, User
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminStrategySignalListOut, AdminStrategyWinRateOut, AdminTrialSettings, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
-from app.services.strategy_winrate import compute_strategy_session_winrate
+from app.services.strategy_winrate import compute_strategy_session_winrate, session_keys_for
 from app.services.settings_store import (
     get_broker_settings,
     get_candle_settings,
@@ -553,6 +553,50 @@ def strategy_winrate(
     thread pool, leaving the event loop free for the live-quote WebSockets.
     """
     return compute_strategy_session_winrate(db, days)
+
+
+def _strategy_winrate_signals_impl(db: Session, strategy: str, symbol: str, days: int) -> dict:
+    """明细查询实体。策略名匹配用 trim(coalesce(indicator, ''))：聚合侧按
+    strip 后的名字分组（见 strategy_winrate.py），明细侧必须同口径，否则带
+    空白的行在矩阵里算得进、点开却看不见；空串同时命中 NULL 与 ''。
+    Matching mirrors the aggregation's strip semantics; '' hits NULL and ''."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
+    base = db.query(Signal).filter(
+        Signal.source == "tradingview",
+        Signal.symbol == symbol,
+        func.trim(func.coalesce(Signal.indicator, "")) == strategy.strip(),
+        Signal.created_at >= cutoff,
+    )
+    total = base.count()
+    rows = base.order_by(Signal.created_at.desc()).limit(50).all()
+    signals = []
+    for s in rows:
+        resolve_seconds = None
+        if s.result in ("HIT_TP", "HIT_SL") and s.resolved_at and s.created_at:
+            resolve_seconds = (s.resolved_at - s.created_at).total_seconds()
+        signals.append({
+            "side": s.side, "entry": s.entry, "stopLoss": s.stop_loss,
+            "takeProfit": s.take_profit, "createdAt": s.created_at,
+            "sessionKeys": session_keys_for(s.created_at) if s.created_at else [],
+            "result": s.result or "PENDING",
+            "resolveSeconds": resolve_seconds,
+        })
+    return {"strategy": strategy, "symbol": symbol, "days": days,
+            "total": total, "signals": signals}
+
+
+@router.get("/strategy-winrate/signals", response_model=AdminStrategySignalListOut)
+def strategy_winrate_signals(
+    strategy: str = Query(..., max_length=128),
+    symbol: str = Query(..., max_length=20),
+    days: int = Query(7, ge=1, le=90),
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """某（策略, 品种）组合窗口内的信号明细，最多 50 条、时间倒序。
+    只在管理员点开品种页签时请求，不塞进主响应。
+    Drill-down detail for one (strategy, symbol) combo; fetched on demand."""
+    return _strategy_winrate_signals_impl(db, strategy, symbol, days)
 
 
 # ---------- 订阅定价设置 / subscription pricing settings ----------

@@ -265,6 +265,31 @@ class AdminStrategyWinRateOut(BaseModel):
     strategies: list[StrategyWinRateOut]  # 已判定样本数降序 / by resolved samples desc
 
 
+class StrategySignalDetailOut(BaseModel):
+    """明细列表的一行：下钻到（策略, 品种）后"这 60% 是哪几笔"的答案。
+    One drill-down row — the receipts behind a percentage."""
+
+    side: str
+    entry: float | None
+    stopLoss: float | None
+    takeProfit: float | None
+    createdAt: datetime
+    # 该信号发出时刻落在哪些时段（后端用 session_keys_for 算，前端不重算）
+    # sessions the signal fired in; computed server-side, never re-derived
+    sessionKeys: list[str]
+    result: str
+    # HIT_TP/HIT_SL 的判定秒数，其余为 null / seconds to resolution, else null
+    resolveSeconds: float | None
+
+
+class AdminStrategySignalListOut(BaseModel):
+    strategy: str
+    symbol: str
+    days: int
+    total: int  # 窗口内总条数，可能大于返回条数（上限 50） / real count, list capped at 50
+    signals: list[StrategySignalDetailOut]
+
+
 class AdminBrokerSettings(BaseModel):
     """合作券商锁设置（管理后台读写用同一形状）。
     Partner-broker lock settings (same shape for admin read & write)."""
