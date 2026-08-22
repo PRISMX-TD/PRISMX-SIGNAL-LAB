@@ -602,8 +602,25 @@ def _strategy_winrate_signals_impl(db: Session, strategy: str, symbol: str, days
     rows.
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
+    # 只取实际用到的 8 列，不拉整行 ORM 实体。signals 表有 16 列，其余（symbol/
+    # source/status/expire_at/external_id/id/baseline_*）这里一个都不读——全行
+    # SELECT 在 Supabase 上是纯浪费的 Egress，隔壁 strategy_winrate.py 的聚合端点
+    # 早就为同一张表论证并采用了这条约定，同一个页面上的两个端点不该反着写。
+    # indicator 也在列内：策略名匹配是在 Python 侧做的（见上面长注释），少取这一列
+    # 就没法过滤了。
+    # Only the 8 columns actually used, not whole ORM entities. The signals table
+    # has 16 columns and none of the rest (symbol/source/status/expire_at/
+    # external_id/id/baseline_*) is read here — a full-row SELECT is pure wasted
+    # Egress on Supabase, a convention the aggregation endpoint next door
+    # (strategy_winrate.py) already argued for and adopted on this very table;
+    # two endpoints on one page shouldn't disagree about it. `indicator` is in the
+    # list because the strategy-name match happens in Python (see the long
+    # comment above) and without that column there is nothing to filter on.
     rows = (
-        db.query(Signal)
+        db.query(
+            Signal.side, Signal.entry, Signal.stop_loss, Signal.take_profit,
+            Signal.created_at, Signal.result, Signal.resolved_at, Signal.indicator,
+        )
         .filter(
             Signal.source == "tradingview",
             Signal.symbol == symbol,

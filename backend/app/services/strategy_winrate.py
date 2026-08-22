@@ -130,12 +130,66 @@ def session_keys_for(ts: datetime) -> list[str]:
     return keys or [OUTSIDE_KEY]
 
 
-def _empty_bucket(days: int) -> dict:
+def _empty_bucket(days: int, with_daily: bool = True) -> dict:
+    """一个空桶。`with_daily=False` 时不分配那条长度 = days 的每日计数列表。
+
+    品种层从不下发 dailySamples（`_shape_symbols` 恒传 include_daily=False），
+    而桶的数量是 策略 × 品种 × (时段 + total)，days=90 时每桶白分配一个 90 长的
+    列表纯属浪费。`with_daily` 必须与 `_accumulate` 的同名参数成对传：这里给了
+    `[]`，那边就绝不能再去 `_daily[day_idx] += 1`。
+
+    An empty bucket. With `with_daily=False` it skips the per-day counter list of
+    length `days`.
+
+    The symbol layer never ships dailySamples (`_shape_symbols` always passes
+    include_daily=False), and buckets are counted strategy x symbol x (session +
+    total), so a 90-long list per bucket at days=90 is pure waste. `with_daily`
+    must be passed in step with `_accumulate`'s parameter of the same name: given
+    `[]` here, that side must never touch `_daily[day_idx]`.
+    """
     return {
         "hitTp": 0, "hitSl": 0, "pending": 0, "stale": 0,
         # 内部累加器，_finalize 时弹出 / internal accumulators, popped by _finalize
-        "_resolveSum": 0.0, "_resolveN": 0, "_daily": [0] * days,
+        "_resolveSum": 0.0, "_resolveN": 0, "_daily": [0] * days if with_daily else [],
     }
+
+
+def _accumulate(
+    buckets: dict[str, dict],
+    keys: tuple[str, ...],
+    result_key: str,
+    day_idx: int,
+    resolve_seconds: float | None,
+    with_daily: bool,
+) -> None:
+    """把一条信号记进 `buckets` 里 `keys` 指定的那几个桶。
+
+    主循环里策略层/总计层/品种层三处要做的累加逐字相同，抽在这里一处实现：
+    三份副本的时候，"判定用时只在真判出胜负时才进均值"这类规则要同时改三个
+    地方才不出错，而漏改一处的症状是数字静静地偏掉，不会报错。
+
+    `with_daily=False` 跳过每日计数——品种层的 `_daily` 是空列表（见
+    `_empty_bucket`），本来也不下发。
+
+    Record one signal into the `keys` buckets of `buckets`.
+
+    The strategy, overall and symbol layers of the main loop all did this
+    verbatim; one implementation instead. With three copies, a rule like "the
+    mean time-to-resolution only counts actually resolved signals" had to be
+    changed in three places at once, and the symptom of missing one is a number
+    quietly drifting rather than an error.
+
+    `with_daily=False` skips the per-day counter — the symbol layer's `_daily`
+    is an empty list (see `_empty_bucket`) and is never shipped anyway.
+    """
+    for bkey in keys:
+        b = buckets[bkey]
+        b[result_key] += 1
+        if with_daily:
+            b["_daily"][day_idx] += 1
+        if resolve_seconds is not None:
+            b["_resolveSum"] += resolve_seconds
+            b["_resolveN"] += 1
 
 
 # result 列到桶键的映射。未知值（历史遗留的 WIN/LOSS 等）一律并入 pending：
@@ -295,34 +349,33 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
         # one, so fix the pattern here before it gets copied three times.
         if name not in per_strategy:
             per_strategy[name] = {k: _empty_bucket(days) for k in [*all_keys, "total"]}
-        buckets = per_strategy[name]
-        for target in (buckets, overall):
-            for bkey in ("total", *session_keys):
-                b = target[bkey]
-                b[key] += 1
-                b["_daily"][day_idx] += 1
-                if resolve_seconds is not None:
-                    b["_resolveSum"] += resolve_seconds
-                    b["_resolveN"] += 1
+        # 这条信号要记进哪几个桶：总计 + 它命中的每个时段（时段之间会重叠，所以
+        # 可能不止一个）。三层累加共用同一份 keys。
+        # Which buckets this signal lands in: the total plus every session it hit
+        # (sessions overlap, so possibly more than one). All three layers share it.
+        bucket_keys = ("total", *session_keys)
+        _accumulate(per_strategy[name], bucket_keys, key, day_idx, resolve_seconds, True)
+        _accumulate(overall, bucket_keys, key, day_idx, resolve_seconds, True)
 
         # 品种子分层：同样避免 setdefault(key, {昂贵默认值}) ——两层查找都先判空
         # 再赋值，理由与上面 per_strategy 完全一致。
+        # with_daily=False 一路贯穿到底：品种层的每日分布既不分配也不累加，
+        # `_shape_symbols` 本来就恒传 include_daily=False，此前那次累加是纯死计算。
         # Per-symbol sub-layer: same "check then assign" pattern as per_strategy
         # above, for the identical reason — setdefault's default arg is built
         # whether or not the key already exists.
+        # with_daily=False runs all the way through: the symbol layer neither
+        # allocates nor accumulates a per-day distribution. `_shape_symbols`
+        # already always passes include_daily=False, which made the old
+        # accumulation dead work.
         if name not in per_strategy_symbols:
             per_strategy_symbols[name] = {}
         sym_map = per_strategy_symbols[name]
         if symbol not in sym_map:
-            sym_map[symbol] = {k: _empty_bucket(days) for k in [*all_keys, "total"]}
-        sym_buckets = sym_map[symbol]
-        for bkey in ("total", *session_keys):
-            b = sym_buckets[bkey]
-            b[key] += 1
-            b["_daily"][day_idx] += 1          # 累加但不下发（include_daily=False）
-            if resolve_seconds is not None:
-                b["_resolveSum"] += resolve_seconds
-                b["_resolveN"] += 1
+            sym_map[symbol] = {
+                k: _empty_bucket(days, with_daily=False) for k in [*all_keys, "total"]
+            }
+        _accumulate(sym_map[symbol], bucket_keys, key, day_idx, resolve_seconds, False)
 
     def _shape(buckets: dict[str, dict]) -> dict:
         return {
