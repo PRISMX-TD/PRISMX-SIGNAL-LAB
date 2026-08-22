@@ -31,13 +31,32 @@ import SessionTimeline from './winrate/SessionTimeline'
 import RecommendationCards from './winrate/RecommendationCards'
 import StrategyDetail from './winrate/StrategyDetail'
 
-const DAY_OPTIONS = [7, 14, 30]
+// 全站固定 7 天，不给切换器。
+//
+// 7 天不是随手定的：滚动 168 小时窗口 = 7×24，**每个星期几正好各分到整 24 小时**，
+// 所以「星期 × 方向」矩阵的格子之间可以直接比。换成 14/30 天就不成立了——30 天
+// 是 4.28 周，除不尽，有的星期几会多摊到一整天，格子里的数字就把"那天多出 24
+// 小时"也编码了进去，读的人会当成真实差异。
+//
+// 顺带消掉了原来"推荐区固定 7 天、矩阵跟随切换器"的双窗口复杂度：两份数据、
+// 两次请求、以及 days state 与 data 可能错位那一类问题，一并没有了。
+//
+// The whole page is pinned to 7 days; no range picker.
+//
+// Not an arbitrary 7: a rolling 168-hour window is exactly 7x24, so **every
+// weekday draws exactly 24 hours**, which is what makes the weekday x direction
+// matrix's cells comparable. At 14 or 30 days it breaks down — 30 days is 4.28
+// weeks, so some weekdays get a whole extra day and the numbers would encode
+// that alongside any real difference.
+//
+// It also removes the old two-window complexity (recommendations pinned to 7
+// days while the matrix followed a picker): two payloads, two requests, and the
+// class of bug where the `days` state and `data` drift apart — all gone.
+const WINDOW_DAYS = 7
 
 export default function StrategyWinratePanel() {
   const { t } = useTranslation()
-  const [days, setDays] = useState(7)
-  const [data, setData] = useState<AdminStrategyWinRate | null>(null) // 跟随 days / follows the range picker
-  const [recoData, setRecoData] = useState<AdminStrategyWinRate | null>(null) // 恒为 7 天 / always the last 7 days
+  const [data, setData] = useState<AdminStrategyWinRate | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
@@ -62,49 +81,24 @@ export default function StrategyWinratePanel() {
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    const applyError = (err: unknown) => {
-      if (!cancelled) setError(err instanceof Error ? err.message : 'Load failed')
-    }
-    const applyDone = () => {
-      if (!cancelled) setLoading(false)
-    }
-    if (days === 7) {
-      // 两份数据在这个窗口下同源：一次请求同时喂 data 与 recoData，不发第二个
-      // 一模一样的请求。
-      // The two datasets are the identical payload at this range: one request
-      // feeds both data and recoData instead of firing a duplicate.
-      adminApi
-        .strategyWinrate(7)
-        .then((res) => {
-          // 慢请求返回时天数可能已经被改过——晚到的旧响应不能盖掉新的。
-          // A slow response can land after the range changed; a stale reply
-          // must not overwrite the current one.
-          if (cancelled) return
+    adminApi
+      .strategyWinrate(WINDOW_DAYS)
+      .then((res) => {
+        if (!cancelled) {
           setData(res)
-          setRecoData(res)
           setError(null)
-        })
-        .catch(applyError)
-        .finally(applyDone)
-    } else {
-      // 推荐区固定 7 天窗口（产品决策），跟这里的 `days` 不同源，各拉各的。
-      // Recommendations pin to a fixed 7-day window (a product decision) that
-      // differs from `days` here, so each range fetches on its own.
-      Promise.all([adminApi.strategyWinrate(days), adminApi.strategyWinrate(7)])
-        .then(([primary, reco]) => {
-          if (cancelled) return
-          setData(primary)
-          setRecoData(reco)
-          setError(null)
-        })
-        .catch(applyError)
-        .finally(applyDone)
-    }
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Load failed')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
     return () => {
       cancelled = true
     }
-  }, [days])
+  }, [])
 
   // 当前活跃时段 key 列表，喂给 StrategyDetail 做高亮。优先用 recoData（固定
   // 7 天，和推荐区判"活跃"用的是同一份 sessions）兜底 data——两者的 sessions
@@ -115,7 +109,7 @@ export default function StrategyWinratePanel() {
   // session config in `sessions`, so whichever arrives first is fine; the
   // `?? []` only matters before either has landed.
   const activeKeys =
-    (recoData ?? data)?.sessions.filter((s) => sessionStatus(s, now).state === 'active').map((s) => s.key) ?? []
+    data?.sessions.filter((s) => sessionStatus(s, now).state === 'active').map((s) => s.key) ?? []
 
   const handleSelectFromReco = (name: string) => {
     setSelected(name)
@@ -144,51 +138,8 @@ export default function StrategyWinratePanel() {
       {data && data.overall.total.samples > 0 && (
         <>
           <SessionTimeline sessions={data.sessions} now={now} />
-          {recoData && <RecommendationCards data={recoData} now={now} onSelectStrategy={handleSelectFromReco} />}
+          {<RecommendationCards data={data} now={now} onSelectStrategy={handleSelectFromReco} />}
           <div ref={detailRef}>
-            {/* 天数切换器移到这里——紧挨着它实际影响的矩阵/详情，作用域即所见；
-                推荐区固定 7 天不受它影响，已经在上方 hint 里说明过。
-                The day-range switcher lives here — right beside the matrix/detail
-                it actually scopes, so the scope is visible at a glance;
-                recommendations stay pinned to 7 days regardless, already called
-                out in the hint above. */}
-            <div
-              className="mb-2 flex flex-wrap justify-end gap-1.5"
-              role="group"
-              aria-label={t('admin.winrate.daysLabel')}
-            >
-              {DAY_OPTIONS.map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  aria-pressed={days === opt}
-                  onClick={() => setDays(opt)}
-                  className={`rounded-full px-3 py-1 text-xs transition ${
-                    days === opt
-                      ? 'bg-white/10 text-neutral-100 ring-1 ring-white/20'
-                      : 'text-neutral-500 hover:text-neutral-300'
-                  }`}
-                >
-                  {t('admin.winrate.daysOption', { days: opt })}
-                </button>
-              ))}
-            </div>
-            {/*，不是 days={days}：切换器点下去 `days` state 立刻更新，
-                但新窗口请求若失败，`data` 仍停在旧窗口——这时 `days` 与 `data` 已经
-                错位。`StrategyDetail` 会把 days 原样转给 `SignalList` 发起独立请求
-                （聚合和明细是两个端点，一个失败不代表另一个也失败），用错位的
-                `days` 请求会把"旧窗口的汇总"和"新窗口的明细"同时摆上屏幕，除顶部
-                一行 error 外没有任何提示。`data.days` 是后端按实际生效的请求参数
-                回填的字段，天然与 `data` 本身同源，用它就不会有这个错位窗口。, not days={days}: clicking the switcher updates the
-                `days` state immediately, but if the new-window request fails, `data`
-                stays on the old window — `days` and `data` are then out of sync.
-                StrategyDetail forwards `days` verbatim to SignalList, which fires an
-                independent request off it (the aggregate and detail endpoints are
-                separate, so one failing doesn't mean the other does) — a mismatched
-                `days` would put "old window's aggregate" and "new window's detail"
-                on screen together with nothing but one error line at the top to
-                explain it. `data.days` is the backend's echo of the parameter that
-                actually produced `data`, so it can never drift from it. */}
             <StrategyDetail data={data} activeKeys={activeKeys} selected={selected}
                             onSelect={setSelected} now={now} />
           </div>

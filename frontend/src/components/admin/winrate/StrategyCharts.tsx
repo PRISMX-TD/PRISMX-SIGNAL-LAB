@@ -115,82 +115,101 @@ export function SessionWinRateChart({ sessions, buckets }: {
   )
 }
 
-/** ② 星期胜负堆叠柱：按星期几（UTC）累计的止盈/止损。
- *  只画已判定的——未判定的信号不出现在这张图上，等它真走出结果那天再进来。
- *  也不给每个星期几算百分比：窗口短时一格只有三五笔，百分比会在 100/0/50
- *  之间跳。堆叠笔数既表达"周几出手多"，也表达"周几赢得多"。
- *  Stacked wins and losses by weekday (UTC), resolved signals only: unresolved
- *  ones are absent and join on the day they reach an outcome. No per-weekday
- *  percentage — a slot holds a handful of trades in a short window. Stacked
- *  counts carry both "which weekday it trades" and "which weekday it wins". */
+/** ② 星期 × 方向矩阵：7 行（周一…周日）× 2 列（做多/做空），每格一个胜率。
+ *
+ *  做成矩阵而不是堆叠柱，是因为要回答的问题本身是交叉的——"周一该做多还是
+ *  做空"不能由"周一整体胜率"和"整体做多胜率"推出来。横着读比周几，竖着读
+ *  比方向。
+ *
+ *  固定 7 天窗口下每个星期几正好各占整 24 小时（168h = 7×24），所以格子之间
+ *  可以直接比；14/30 天就不行了（30 天 = 4.28 周除不尽，有的星期几会多摊到
+ *  一天，柱子高低会把这个也编码进去）。
+ *
+ *  只含已判定的信号；每格独立守 5 笔门槛，不够就只显示笔数。
+ *
+ *  A weekday x direction matrix: seven rows (Mon..Sun) by two columns (long,
+ *  short), one win rate per cell. A matrix rather than stacked bars because the
+ *  question is itself crossed — "should I go long or short on Monday" cannot be
+ *  derived from "Monday overall" plus "long overall". Read across to compare
+ *  weekdays, down to compare directions.
+ *
+ *  At the pinned 7-day window every weekday gets exactly 24 hours (168h = 7x24),
+ *  so cells are directly comparable; at 14 or 30 days they would not be (30 days
+ *  is 4.28 weeks, so some weekdays draw an extra day and that would be encoded
+ *  in the numbers). Resolved signals only; each cell gates on its own sample. */
 export function WeekdayOutcomeChart({ weekday }: { weekday: WeekdayOutcome[] }) {
   const { t } = useTranslation()
   // 周一=0，与后端 Python 的 weekday() 一致 / Monday=0, matching Python's weekday()
   const labels = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
-  const max = Math.max(...weekday.map((d) => d.tp + d.sl), 1)
-  const totalTp = weekday.reduce((s, d) => s + d.tp, 0)
-  const totalSl = weekday.reduce((s, d) => s + d.sl, 0)
-  const H = 64
-  const slot = 100 / 7
+
+  /** 一个格子：够样本画迷你胜率条 + 百分比，不够只给笔数，没有则留白。
+   *  One cell: a mini bar plus the percentage when the sample allows, the raw
+   *  count when it doesn't, blank when there's nothing. */
+  const Cell = ({ tp, sl, label }: { tp: number; sl: number; label: string }) => {
+    const resolved = tp + sl
+    if (resolved === 0) return <span className="text-neutral-700">—</span>
+    if (resolved < MIN_SAMPLES) {
+      return (
+        <span className="text-[11px] tabular-nums text-neutral-500"
+              title={t('admin.winrate.chart.cellHint', { tp, sl })}>
+          {t('admin.winrate.thinSample', { count: resolved })}
+        </span>
+      )
+    }
+    const rate = tp / resolved
+    return (
+      <span className="inline-flex w-full items-center gap-1.5"
+            title={t('admin.winrate.chart.cellHint', { tp, sl })}>
+        <svg viewBox="0 0 100 6" className="h-1.5 min-w-[28px] flex-1" preserveAspectRatio="none"
+             role="img" aria-label={`${label} ${(rate * 100).toFixed(1)}% (${tp}/${resolved})`}>
+          <rect x={0} y={0} width={Math.max(0, rate * 100 - 1)} height={6} rx={1} fill={TP_COLOR} opacity={0.85} />
+          <rect x={Math.min(100, rate * 100 + 1)} y={0} width={Math.max(0, 100 - (rate * 100 + 1))}
+                height={6} rx={1} fill={SL_COLOR} opacity={0.6} />
+        </svg>
+        <span className="whitespace-nowrap text-[11px] font-medium tabular-nums text-neutral-100">
+          {(rate * 100).toFixed(0)}%
+        </span>
+        <span className="whitespace-nowrap text-[10px] tabular-nums text-neutral-500">{tp}/{resolved}</span>
+      </span>
+    )
+  }
 
   return (
     <ChartCard title={t('admin.winrate.chart.weekday')} caption={t('admin.winrate.chart.weekdayHint')}>
-      {/* 整图一个 Tab 停位 + 完整数值序列的 aria-label：逐柱 tabIndex 会占掉七个
-          停位，而柱子本身不可激活。键盘读到的信息与 hover 等同。
-          One tab stop for the whole chart with the full series in aria-label:
-          per-bar tabIndex would eat seven stops for non-activatable marks. */}
-      <svg viewBox={`0 0 100 ${H}`} className="w-full" preserveAspectRatio="none"
-           tabIndex={0} role="img"
-           aria-label={t('admin.winrate.chart.weekdayAria', {
-             detail: weekday.map((d, i) =>
-               t('admin.winrate.chart.weekdayAriaDay', {
-                 day: t(`admin.winrate.weekday.${labels[i]}`), tp: d.tp, sl: d.sl,
-               })).join('; '),
-           })}>
-        {weekday.map((d, i) => {
-          const tpH = (d.tp / max) * (H - 2)
-          const slH = (d.sl / max) * (H - 2)
-          const x = i * slot + slot * 0.22
-          const w = slot * 0.56
-          // 自下而上：止损在下、止盈在上，两段之间留 1 单位间隙（dataviz 要求
-          // 堆叠分段用底色间隙分隔，不能靠描边）。
-          // Bottom-up: losses below, wins above, with a 1-unit surface gap
-          // between segments (dataviz requires a gap, not a stroke).
-          let y = H - 1
-          const parts: React.ReactNode[] = []
-          if (slH > 0) { y -= slH; parts.push(<rect key="sl" x={x} y={y} width={w} height={slH} rx={1} fill={SL_COLOR} opacity={0.75} />) }
-          if (tpH > 0) { y -= tpH + (slH > 0 ? 1 : 0); parts.push(<rect key="tp" x={x} y={y} width={w} height={tpH} rx={1} fill={TP_COLOR} opacity={0.85} />) }
-          return (
-            <g key={i}>
-              <title>
-                {t('admin.winrate.chart.weekdayAriaDay', {
-                  day: t(`admin.winrate.weekday.${labels[i]}`), tp: d.tp, sl: d.sl,
-                })}
-              </title>
-              {parts}
-            </g>
-          )
-        })}
-        <line x1={0} y1={H - 0.5} x2={100} y2={H - 0.5} stroke="rgba(255,255,255,0.08)"
-              strokeWidth="1" vectorEffect="non-scaling-stroke" />
-      </svg>
-      {/* 星期标签直接排在柱子下方，与柱子同一套七等分槽位对齐。
-          Weekday labels sit under the bars on the same seven-slot grid. */}
-      <div className="mt-1 grid grid-cols-7 text-center text-[10px] text-neutral-500">
-        {labels.map((l) => <span key={l}>{t(`admin.winrate.weekday.${l}`)}</span>)}
-      </div>
-      <div className="mt-1.5 flex items-center justify-center gap-4 text-[10px] text-neutral-500">
-        <span className="flex items-center gap-1">
-          <i className="h-2 w-2 rounded-sm" style={{ backgroundColor: TP_COLOR }} />
-          {t('admin.winrate.chart.legendTp')}
-          <span className="tabular-nums text-neutral-300">{totalTp}</span>
-        </span>
-        <span className="flex items-center gap-1">
-          <i className="h-2 w-2 rounded-sm" style={{ backgroundColor: SL_COLOR }} />
-          {t('admin.winrate.chart.legendSl')}
-          <span className="tabular-nums text-neutral-300">{totalSl}</span>
-        </span>
-      </div>
+      <table className="w-full text-[11px]">
+        <thead>
+          <tr className="text-neutral-500">
+            <th className="w-12 pb-1.5 text-left font-medium" />
+            <th className="pb-1.5 text-left font-medium">
+              <span className="flex items-center gap-1.5">
+                <i className="h-2 w-2 rounded-full" style={{ backgroundColor: SIDE_COLORS.BUY }} />
+                {t('admin.winrate.side.BUY')}
+              </span>
+            </th>
+            <th className="pb-1.5 text-left font-medium">
+              <span className="flex items-center gap-1.5">
+                <i className="h-2 w-2 rounded-full" style={{ backgroundColor: SIDE_COLORS.SELL }} />
+                {t('admin.winrate.side.SELL')}
+              </span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {weekday.map((d, i) => (
+            <tr key={i} className="border-t border-white/5">
+              <td className="py-1.5 pr-2 text-neutral-400">{t(`admin.winrate.weekday.${labels[i]}`)}</td>
+              <td className="py-1.5 pr-3">
+                <Cell tp={d.buyTp} sl={d.buySl}
+                      label={`${t(`admin.winrate.weekday.${labels[i]}`)} ${t('admin.winrate.side.BUY')}`} />
+              </td>
+              <td className="py-1.5">
+                <Cell tp={d.sellTp} sl={d.sellSl}
+                      label={`${t(`admin.winrate.weekday.${labels[i]}`)} ${t('admin.winrate.side.SELL')}`} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </ChartCard>
   )
 }

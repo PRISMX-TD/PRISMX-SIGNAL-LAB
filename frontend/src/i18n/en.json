@@ -986,9 +986,7 @@
     },
     "winrate": {
       "title": "Win Rate by Session",
-      "hint": "Covers TradingView platform signals only, filed by the session they fired in. Win rate = take-profits / (take-profits + stop-losses); signals with no outcome yet (PENDING) or with broken price tracking (STALE) stay out of the denominator. Sessions are defined in each centre's local time, so DST changeovers are followed automatically. The European and New York sessions overlap by about four hours daily and signals in the overlap count toward both, so the per-session samples add up to more than the total. Recommendations always use the last 7 days; the matrix and details below follow the range picker.",
-      "daysLabel": "Window",
-      "daysOption": "Last {{days}}d",
+      "hint": "Covers TradingView platform signals only, pinned to the last 7 days, filed by the session they fired in. Win rate = take-profits / (take-profits + stop-losses); signals with no outcome yet or with broken price tracking stay out of the denominator. Sessions are defined in each centre's local time, so DST changeovers are followed automatically. The European and New York sessions overlap by about four hours daily and signals in the overlap count toward both, so the per-session samples add up to more than the total.",
       "empty": "No TradingView signals in this window.",
       "colStrategy": "Strategy",
       "colTotal": "Overall",
@@ -1028,10 +1026,18 @@
         "h": "h",
         "d": "d"
       },
-      "side": { "BUY": "Long", "SELL": "Short" },
+      "side": {
+        "BUY": "Long",
+        "SELL": "Short"
+      },
       "weekday": {
-        "mon": "Mon", "tue": "Tue", "wed": "Wed", "thu": "Thu",
-        "fri": "Fri", "sat": "Sat", "sun": "Sun"
+        "mon": "Mon",
+        "tue": "Tue",
+        "wed": "Wed",
+        "thu": "Thu",
+        "fri": "Fri",
+        "sat": "Sat",
+        "sun": "Sun"
       },
       "chart": {
         "sessions": "Win rate by session",
@@ -1042,12 +1048,11 @@
         "holdingHint": "Average time from a signal firing to reaching take-profit or stop-loss; resolved signals only.",
         "holdingOverall": "Overall",
         "holdingEmpty": "Nothing resolved yet.",
-        "weekday": "Wins and losses by weekday",
-        "weekdayHint": "Resolved signals accumulated by weekday (UTC): green = take-profit, red = stop-loss. Unresolved signals are excluded and join on the day they actually reach an outcome. No per-weekday percentage — with a short window a slot holds only a handful of trades and a rate would swing between 100/0/50. At 7 days each slot is a single day; switch to 14 or 30 to see a pattern.",
+        "weekday": "Weekday x direction",
+        "weekdayHint": "Pinned to the last 7 days: a rolling 168 hours is exactly 7x24, so every weekday draws exactly 24 hours and the cells are directly comparable. Read across to compare weekdays, down to compare directions. Resolved signals only — anything without an outcome is excluded; each cell gates on its own 5-trade minimum and shows the raw count below it. Weekdays are UTC.",
         "weekdayAria": "Wins and losses by weekday: {{detail}}",
         "weekdayAriaDay": "{{day}}: {{tp}} wins, {{sl}} losses",
-        "legendTp": "wins",
-        "legendSl": "losses"
+        "cellHint": "{{tp}} wins · {{sl}} losses"
       },
       "session": {
         "asia": "Asian",

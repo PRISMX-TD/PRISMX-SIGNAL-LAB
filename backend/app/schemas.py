@@ -216,6 +216,15 @@ class WeekdayOutcomeOut(BaseModel):
 
     tp: int
     sl: int
+    # 同一个星期几里按方向再拆一层。做多+做空可能小于 tp+sl：方向认不出的
+    # 历史行只进上面那对总数，不硬塞进某一侧（同 SIDE_KEYS 的规则）。
+    # The same weekday split by direction. Long + short may sum to less than
+    # tp + sl: rows with an unrecognized side join only the totals above rather
+    # than being guessed onto one side (same rule as SIDE_KEYS).
+    buyTp: int
+    buySl: int
+    sellTp: int
+    sellSl: int
 
 
 class WinRateBucketOut(BaseModel):

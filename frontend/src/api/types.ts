@@ -184,6 +184,14 @@ export interface WinRateBucket {
 export interface WeekdayOutcome {
   tp: number
   sl: number
+  // 同一个星期几里按方向再拆一层。做多+做空可能小于 tp+sl：方向认不出的历史行
+  // 只进上面那对总数，不硬塞进某一侧。
+  // The same weekday split by direction; long + short may sum to less than
+  // tp + sl because rows with an unrecognized side join only the totals.
+  buyTp: number
+  buySl: number
+  sellTp: number
+  sellSl: number
 }
 
 export interface SymbolWinRate {

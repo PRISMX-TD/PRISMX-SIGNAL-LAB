@@ -194,8 +194,17 @@ def _empty_bucket(days: int, with_daily: bool = True) -> dict:
         # The UI says UTC in the caption.
         "_resolveSum": 0.0, "_resolveN": 0,
         "_daily": [0] * days if with_daily else [],
-        "_wdTp": [0] * 7 if with_daily else [],
-        "_wdSl": [0] * 7 if with_daily else [],
+        # 星期几 × 方向的交叉格子：7 格，每格三组胜负（全部 / 做多 / 做空）。
+        # 交叉而不是两条独立序列，是因为要回答的问题本身是交叉的——"周一做多
+        # 的胜率"不能由"周一整体胜率"和"整体做多胜率"推出来。
+        # Weekday x direction cells: seven slots, each holding three win/loss
+        # pairs (all / long / short). Crossed rather than two separate series
+        # because the question itself is crossed: "Monday's long win rate" cannot
+        # be derived from "Monday overall" plus "long overall".
+        "_wd": [
+            {"tp": 0, "sl": 0, "buyTp": 0, "buySl": 0, "sellTp": 0, "sellSl": 0}
+            for _ in range(7)
+        ] if with_daily else [],
     }
 
 
@@ -205,6 +214,7 @@ def _accumulate(
     result_key: str,
     day_idx: int,
     weekday: int,
+    side_key: str | None,
     resolve_seconds: float | None,
     with_daily: bool,
 ) -> None:
@@ -234,14 +244,21 @@ def _accumulate(
         if with_daily:
             b["_daily"][day_idx] += 1
             # 星期几只累计已判出胜负的：未判定的信号在星期图上不出现（产品要求），
-            # 等它真走出结果那天再计进来。
-            # The weekday series counts only resolved signals: unresolved ones do
+            # 等它真走出结果那天再计进来。方向认不出的行只进"全部"那一组，不进
+            # 做多/做空——与 SIDE_KEYS 的处理一致，不猜方向。
+            # The weekday cells count only resolved signals: unresolved ones do
             # not appear on that chart (a product decision) and join it on the day
-            # they actually reach an outcome.
-            if result_key == "hitTp":
-                b["_wdTp"][weekday] += 1
-            elif result_key == "hitSl":
-                b["_wdSl"][weekday] += 1
+            # they actually reach an outcome. A row whose side is unrecognized
+            # lands in the "all" pair only, never long or short — same rule as
+            # SIDE_KEYS: never guess a direction.
+            if result_key in ("hitTp", "hitSl"):
+                cell = b["_wd"][weekday]
+                short = "tp" if result_key == "hitTp" else "sl"
+                cell[short] += 1
+                if side_key == "BUY":
+                    cell["buy" + short.capitalize()] += 1
+                elif side_key == "SELL":
+                    cell["sell" + short.capitalize()] += 1
         if resolve_seconds is not None:
             b["_resolveSum"] += resolve_seconds
             b["_resolveN"] += 1
@@ -298,12 +315,20 @@ def _finalize(bucket: dict, days: int, include_daily: bool) -> dict:
         # daily: signal totals per 24h from the window start (unresolved included),
         # for the recommendation card's activity sparkline
         "daily": list(bucket["_daily"]) if include_daily else None,
-        # weekday：按星期几（UTC，周一=0，长度恒 7）的止盈/止损笔数，只含已判定
-        # weekday: take-profit / stop-loss counts by weekday (UTC, Monday=0,
-        # always length 7); resolved signals only
+        # weekday：星期几（UTC，周一=0，长度恒 7）× 方向的交叉格，只含已判定。
+        # 每格给 全部/做多/做空 三组 tp+sl，前端据此算三个胜率并各自守 5 笔门槛。
+        # 做多+做空可能小于全部：方向认不出的行只进"全部"。
+        # weekday: weekday (UTC, Monday=0, length 7) x direction cells, resolved
+        # only. Each slot carries tp/sl for all, long and short, from which the UI
+        # derives three win rates each gated on its own sample size. Long + short
+        # may fall short of "all": rows with an unrecognized side join only "all".
         "weekday": [
-            {"tp": t, "sl": l}
-            for t, l in zip(bucket["_wdTp"], bucket["_wdSl"])
+            {
+                "tp": c["tp"], "sl": c["sl"],
+                "buyTp": c["buyTp"], "buySl": c["buySl"],
+                "sellTp": c["sellTp"], "sellSl": c["sellSl"],
+            }
+            for c in bucket["_wd"]
         ] if include_daily else None,
     }
 
@@ -429,11 +454,13 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
         # still counts toward the total and its sessions, just not the long/short
         # comparison.
         side_key = (side or "").strip().upper()
+        if side_key not in SIDE_KEYS:
+            side_key = None
         bucket_keys = ("total", *session_keys)
-        if side_key in SIDE_KEYS:
+        if side_key is not None:
             bucket_keys = (*bucket_keys, side_key)
-        _accumulate(per_strategy[name], bucket_keys, key, day_idx, weekday, resolve_seconds, True)
-        _accumulate(overall, bucket_keys, key, day_idx, weekday, resolve_seconds, True)
+        _accumulate(per_strategy[name], bucket_keys, key, day_idx, weekday, side_key, resolve_seconds, True)
+        _accumulate(overall, bucket_keys, key, day_idx, weekday, side_key, resolve_seconds, True)
 
         # 品种子分层：同样避免 setdefault(key, {昂贵默认值}) ——两层查找都先判空
         # 再赋值，理由与上面 per_strategy 完全一致。
@@ -454,7 +481,7 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
                 k: _empty_bucket(days, with_daily=False)
                 for k in [*all_keys, "total", *SIDE_KEYS]
             }
-        _accumulate(sym_map[symbol], bucket_keys, key, day_idx, weekday, resolve_seconds, False)
+        _accumulate(sym_map[symbol], bucket_keys, key, day_idx, weekday, side_key, resolve_seconds, False)
 
     def _shape(buckets: dict[str, dict]) -> dict:
         return {
