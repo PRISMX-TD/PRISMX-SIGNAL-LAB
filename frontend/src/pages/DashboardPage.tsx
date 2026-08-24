@@ -117,7 +117,7 @@ export default function DashboardPage() {
                 <SessionWinrateCard />
                 {/* 信号客观胜率卡暂时隐藏，暂不使用 / hidden for now */}
                 {/* <StrategyWinRateCard /> */}
-                <PersonalWinRateCard />
+                <PersonalWinRateCard className="dash-personal" />
               </div>
               <SignalOthers entries={otherEntries} now={now} onTrade={openTrade} onFocus={setFocusIdx} onViewAll={goSignals} />
             </>
@@ -136,7 +136,7 @@ export default function DashboardPage() {
                 <SessionWinrateCard />
                 {/* 信号客观胜率卡暂时隐藏，暂不使用 / hidden for now */}
                 {/* <StrategyWinRateCard /> */}
-                <PersonalWinRateCard />
+                <PersonalWinRateCard className="dash-personal" />
               </div>
               <section className="card glass dash-others p-4 flex items-center justify-center text-sm text-neutral-500">{t('signals.focus.noExecutable')}</section>
             </>

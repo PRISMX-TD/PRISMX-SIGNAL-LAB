@@ -2471,12 +2471,20 @@
       grid-column: 1 !important;
       grid-row: auto !important;
     }
-    /* 手机端：把「市场概览」放到「其他活跃信号」之后（两者对调）
-       mobile: place Market Overview after Other Active Signals (swap the two) */
+    /* display:contents 把第二列摊平，它的三张卡直接变成单列网格的成员，
+       于是能各自排序。/ display:contents flattens the second column so its
+       three cards become items of the single-column grid and can be ordered. */
     .dash-col-2 {
       display: contents;
     }
-    .dash-overview {
+    /* 手机端只有一列，位置就是优先级。「我的交易表现」是自己的历史成绩、
+       看不看都不影响这一刻的决定，沉到最底下；「当前时段胜率」留在 DOM 原位，
+       也就是紧跟「可执行信号」，正好落在交易表现之上。
+       On mobile there is one column, so position is priority. "My performance"
+       is one's own past record — it changes nothing about the decision at hand —
+       so it sinks to the bottom, while the session win rate keeps its DOM slot
+       right after the executable signal, which puts it above that record. */
+    .dash-personal {
       order: 1;
     }
 

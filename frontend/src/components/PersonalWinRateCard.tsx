@@ -14,13 +14,16 @@ import RadialGauge from './RadialGauge'
 import { symbolMeta } from '../utils/symbolMeta'
 
 interface Props {
+  /** 外层挂的类名，目前只用于仪表盘的手机端排序（见 .dash-personal）。
+   *  A class from the caller; currently only the dashboard's mobile ordering hook. */
+  className?: string
   variant?: 'compact' | 'detailed'
   // 只看这一个账号（订单页的账号标签驱动）；不传则是当前绑定的全部账号。
   // Narrow to one account (driven by the Orders page's account tab); omitted covers all currently-bound accounts.
   login?: string
 }
 
-export default function PersonalWinRateCard({ variant = 'compact', login }: Props) {
+export default function PersonalWinRateCard({ variant = 'compact', login, className = '' }: Props) {
   const { t } = useTranslation()
   const { closedTradeTick } = useLive()
   const [data, setData] = useState<PersonalWinRate | null>(null)
@@ -66,7 +69,7 @@ export default function PersonalWinRateCard({ variant = 'compact', login }: Prop
   const detailed = variant === 'detailed'
 
   return (
-    <section className={`card glass ${detailed ? 'p-5' : 'p-[18px]'}`}>
+    <section className={`card glass ${detailed ? 'p-5' : 'p-[18px]'}${className ? ` ${className}` : ''}`}>
       <div className="flex items-center justify-between">
         <h3 className={`font-bold text-white ${detailed ? 'text-lg' : 'text-[15px]'}`}>
           {t('winrate.personalTitle')}
