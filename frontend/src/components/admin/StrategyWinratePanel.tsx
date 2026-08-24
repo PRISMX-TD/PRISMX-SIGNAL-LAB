@@ -13,9 +13,9 @@
 // 统计口径（Wilson 区间、时段重叠、判定门槛）不再作为图形摆在读者面前：判定
 // 规则在 shared.ts 里只有一条，每个数字旁边都用一个词告诉读者"这个能不能信"，
 // 计算细节收进页尾的折叠项。
-// 那条逐枚解释判定芯片的「怎么读」图例行也已按产品要求删除：芯片上的词本身
-// 就是人话（「明显高于一半」「还看不出高低」），再给一行解释是解释解释。星期格
-// 内部那份小图例保留——那里只有色块和图形，没有词。
+// 那条逐枚解释判定芯片的「怎么读」图例行、以及所有写着判定的芯片本身，都已按
+// 产品要求删除：判定现在只由胜率数字的颜色承担（绿=明显高于一半、红=明显低于
+// 一半、灰=看不出），↑↓=? 图形只留在颜色不够用的钟点格和品种芯片里。
 //
 // 不排名：策略还在调整期，按胜率排名是个会一直变的动态目标，而且胜率与赚不赚钱
 // 并不同向。列表顺序是后端的"已判定笔数降序"，标题下直接写明。
@@ -39,10 +39,11 @@
 // Wilson intervals, session overlap, the sample floor — no longer face the reader
 // as glyphs: shared.ts holds the single verdict rule, every number carries a
 // word saying whether it can be trusted, and the maths folds into the footer.
-// The legend row that explained each verdict chip was dropped at the product
-// owner's request: the chip's own wording is already plain language, so a row
-// explaining it explains the explanation. The small legend inside the weekday
-// grid stays — there the cells carry only colour and a glyph, no words.
+// The legend row that explained each verdict chip, and every worded verdict
+// chip itself, were dropped at the product owner's request: the verdict is now
+// carried by the colour of the percentage (green above half, red below, grey
+// undecided), with the arrow glyphs kept only where colour alone is not enough
+// — the hour cells and the symbol chips.
 // No ranking: the strategies are still being tuned, a win-rate order is a moving
 // target, and win rate does not track profitability. Session windows ship with
 // the payload; only the backend gets DST right.
@@ -56,17 +57,19 @@ import WatchNow from './winrate/WatchNow'
 import StrategyList from './winrate/StrategyList'
 import SymbolBoard from './winrate/SymbolBoard'
 
-// 固定 30 天，不给切换器。第一层要在「时段 × 品种」这一格上给出"明显更准"，
-// 7 天切到这个粒度后大多数格子都是"还看不出"，第一层会经常空着；30 天才有足够
-// 笔数。原来钉在 7 天是为了星期格可比（168 小时 = 每个星期几整 24 小时），但那
-// 个顾虑针对的是**笔数**——现在星期格显示的是胜率，某个星期几多摊到一天只是
-// 样本多一点，比率本身不受影响，所以放开。
-// Pinned to 30 days, no picker. Layer one has to call a session × symbol cell
-// "clearly better"; at 7 days most such cells read "can't tell" and the layer
-// sits empty, 30 days gives them enough trades. The old 7-day pin existed for
-// weekday comparability (168h = exactly 24h per weekday), but that concern was
-// about **counts** — the weekday cells now show rates, and a weekday drawing one
-// extra day only means a slightly larger sample, not a biased rate.
+// 固定 30 天，不给切换器。窗口要同时喂两处最细的切分：第一层的「时段 × 品种」，
+// 以及详情里的 24 个钟点格。7 天切到这个粒度后大多数格子都是"还看不出"——一天
+// 只贡献一条样本，24 格里每格才 7 条；30 天把每格抬到 30 条上下，才谈得上比较。
+// 原来钉在 7 天是为了星期格可比（168 小时 = 每个星期几整 24 小时），星期格已经
+// 换成钟点格，而钟点在任何长度的窗口里都均匀分布，那个约束自然消失。
+// Pinned to 30 days, no picker. The window feeds the two finest slices on the
+// page: layer one's session × symbol cells and the detail's 24 hour cells. At 7
+// days most of those read "can't tell" — a day contributes one sample per hour
+// slot, so 24 slots hold 7 trades each; 30 days lifts them to roughly 30, which
+// is where comparison starts to mean something. The old 7-day pin existed for
+// weekday comparability (168h = exactly 24h per weekday); the weekday grid is
+// now an hour grid, and clock hours spread evenly over a window of any length,
+// so that constraint is simply gone.
 const WINDOW_DAYS = 30
 
 function LoadingSkeleton() {
@@ -213,7 +216,7 @@ export default function StrategyWinratePanel() {
               <h2 className="text-lg font-semibold text-neutral-100">{t('admin.winrate.strategies.title')}</h2>
               <p className="mt-1 text-xs text-neutral-500">{t('admin.winrate.strategies.caption')}</p>
             </header>
-            <StrategyList data={data} selected={selected} onSelect={setSelected} activeKeys={activeKeys} />
+            <StrategyList data={data} selected={selected} onSelect={setSelected} activeKeys={activeKeys} now={now} />
           </section>
 
           <SymbolBoard data={data} />

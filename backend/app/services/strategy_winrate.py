@@ -169,42 +169,38 @@ def _empty_bucket(days: int, with_daily: bool = True) -> dict:
         # 内部累加器，_finalize 时弹出 / internal accumulators, popped by _finalize
         # _daily：自窗口起点每 24h 一格的信号总数，喂推荐卡的迷你活跃度柱图，
         # 回答的是"最近这几天忙不忙"。
-        # _wdTp / _wdSl：按**星期几**（UTC，周一=0）累计的止盈/止损笔数，长度恒为 7，
-        # 喂详情区的"星期胜负"图，回答的是"这个策略周几表现好"。
-        # 两条序列刻意分开：一条按滚动天、一条按星期几，问的是两个不同的问题，
+        # _hr：按**一天中的第几个小时**（UTC，0–23）累计的止盈/止损笔数，长度恒 24，
+        # 喂详情区的"哪个小时更准"图。它取代了原来的星期几序列：产品要回答的是
+        # "一天里什么时候该盯"，星期几回答不了这个问题。
+        # 两条序列刻意分开：一条按滚动天、一条按钟点，问的是两个不同的问题，
         # 合并成一条就得让某一侧将就另一侧的分桶方式。
         #
-        # 星期几取 UTC：外汇周本来就以 UTC 为参照（周五纽约盘尾在 UTC 仍是周五，
-        # 换成任一观察者的本地时区就可能滑到周六），而这一页的时段各按自己金融
-        # 中心的本地时间定义、并不存在统一的"本地"。前端在图注里写明是 UTC。
+        # 小时取 UTC，前端再旋转成浏览者本地钟点。后端不可能知道看的人在哪个时区，
+        # 而 24 个格子是一个完整的循环，旋转是无损的；夏令时切换会让窗口里跨切换点
+        # 的那部分数据糊一个小时，前端在图注里写明。
         #
         # _daily: signal counts per 24h from the window start, feeding the
-        # recommendation card's activity sparkline — "how busy have the last few
-        # days been". _wdTp / _wdSl: take-profit and stop-loss counts by weekday
-        # (UTC, Monday=0), always length 7, feeding the detail area's weekday
-        # chart — "which weekday does this strategy do well on". Deliberately two
-        # series: one bucketed by rolling day, one by weekday, answering two
+        # activity sparkline — "how busy have the last few days been". _hr:
+        # take-profit and stop-loss counts by hour of day (UTC, 0-23), always
+        # length 24, feeding the detail area's "which hour is better" chart. It
+        # replaces the old weekday series: the product question is "when in the
+        # day should I watch", which a weekday cannot answer. Deliberately two
+        # series: one bucketed by rolling day, one by clock hour, answering two
         # different questions; merging them would force one to adopt the other's
         # bucketing.
         #
-        # Weekday is taken in UTC: the FX week is conventionally referenced to it
-        # (a Friday New York close is still Friday in UTC but can slip to
-        # Saturday in an observer's local zone), and this page's sessions are each
-        # defined in their own centre's local time, so there is no single "local".
-        # The UI says UTC in the caption.
+        # Hours are bucketed in UTC and rotated into the viewer's local clock by
+        # the frontend: the backend cannot know the reader's zone, and 24 slots
+        # are a full cycle so the rotation is lossless. A DST changeover inside
+        # the window smears the affected part by an hour; the UI says so.
         "_resolveSum": 0.0, "_resolveN": 0,
         "_daily": [0] * days if with_daily else [],
-        # 星期几 × 方向的交叉格子：7 格，每格三组胜负（全部 / 做多 / 做空）。
-        # 交叉而不是两条独立序列，是因为要回答的问题本身是交叉的——"周一做多
-        # 的胜率"不能由"周一整体胜率"和"整体做多胜率"推出来。
-        # Weekday x direction cells: seven slots, each holding three win/loss
-        # pairs (all / long / short). Crossed rather than two separate series
-        # because the question itself is crossed: "Monday's long win rate" cannot
-        # be derived from "Monday overall" plus "long overall".
-        "_wd": [
-            {"tp": 0, "sl": 0, "buyTp": 0, "buySl": 0, "sellTp": 0, "sellSl": 0}
-            for _ in range(7)
-        ] if with_daily else [],
+        # 每个钟点一格，只记胜负两个数——不再按方向拆。24 × 2 个格子读不过来，
+        # 而"做多还是做空更准"在详情区本来就有自己一块。
+        # One slot per clock hour holding just a win/loss pair — no direction
+        # split. 24 x 2 cells is more than anyone reads, and "long or short"
+        # already has its own block in the detail area.
+        "_hr": [{"tp": 0, "sl": 0} for _ in range(24)] if with_daily else [],
     }
 
 
@@ -213,7 +209,7 @@ def _accumulate(
     keys: tuple[str, ...],
     result_key: str,
     day_idx: int,
-    weekday: int,
+    hour: int,
     side_key: str | None,
     resolve_seconds: float | None,
     with_daily: bool,
@@ -243,22 +239,13 @@ def _accumulate(
         b[result_key] += 1
         if with_daily:
             b["_daily"][day_idx] += 1
-            # 星期几只累计已判出胜负的：未判定的信号在星期图上不出现（产品要求），
-            # 等它真走出结果那天再计进来。方向认不出的行只进"全部"那一组，不进
-            # 做多/做空——与 SIDE_KEYS 的处理一致，不猜方向。
-            # The weekday cells count only resolved signals: unresolved ones do
-            # not appear on that chart (a product decision) and join it on the day
-            # they actually reach an outcome. A row whose side is unrecognized
-            # lands in the "all" pair only, never long or short — same rule as
-            # SIDE_KEYS: never guess a direction.
+            # 钟点格只累计已判出胜负的：未判定的信号不出现在这张图上（产品要求），
+            # 等它真走出结果那天再计进来。
+            # The hour cells count only resolved signals: unresolved ones do not
+            # appear on that chart (a product decision) and join it on the day
+            # they actually reach an outcome.
             if result_key in ("hitTp", "hitSl"):
-                cell = b["_wd"][weekday]
-                short = "tp" if result_key == "hitTp" else "sl"
-                cell[short] += 1
-                if side_key == "BUY":
-                    cell["buy" + short.capitalize()] += 1
-                elif side_key == "SELL":
-                    cell["sell" + short.capitalize()] += 1
+                b["_hr"][hour]["tp" if result_key == "hitTp" else "sl"] += 1
         if resolve_seconds is not None:
             b["_resolveSum"] += resolve_seconds
             b["_resolveN"] += 1
@@ -336,21 +323,13 @@ def _finalize(bucket: dict, days: int, include_daily: bool) -> dict:
         # daily: signal totals per 24h from the window start (unresolved included),
         # for the recommendation card's activity sparkline
         "daily": list(bucket["_daily"]) if include_daily else None,
-        # weekday：星期几（UTC，周一=0，长度恒 7）× 方向的交叉格，只含已判定。
-        # 每格给 全部/做多/做空 三组 tp+sl，前端据此算三个胜率并各自守 5 笔门槛。
-        # 做多+做空可能小于全部：方向认不出的行只进"全部"。
-        # weekday: weekday (UTC, Monday=0, length 7) x direction cells, resolved
-        # only. Each slot carries tp/sl for all, long and short, from which the UI
-        # derives three win rates each gated on its own sample size. Long + short
-        # may fall short of "all": rows with an unrecognized side join only "all".
-        "weekday": [
-            {
-                "tp": c["tp"], "sl": c["sl"],
-                "buyTp": c["buyTp"], "buySl": c["buySl"],
-                "sellTp": c["sellTp"], "sellSl": c["sellSl"],
-            }
-            for c in bucket["_wd"]
-        ] if include_daily else None,
+        # hourly：一天中每个钟点（UTC，0–23，长度恒 24）的止盈/止损笔数，只含已判定。
+        # 前端按浏览者时区旋转成本地钟点，并各自守 5 笔门槛后才显示百分比。
+        # hourly: take-profit / stop-loss counts per hour of day (UTC, 0-23,
+        # always length 24), resolved only. The UI rotates them into the viewer's
+        # local clock and gates each slot on its own sample size.
+        "hourly": [{"tp": c["tp"], "sl": c["sl"]} for c in bucket["_hr"]]
+        if include_daily else None,
     }
 
 
@@ -455,11 +434,11 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
         # floating-point edge cases.
         day_idx = min(days - 1, max(0, int(
             (created_at - cutoff_naive).total_seconds() // 86400)))
-        # 星期几按 UTC 取。created_at 列存的是 naive UTC（见 models 的 _now），
-        # 直接 .weekday() 即为 UTC 星期几，周一=0。
-        # Weekday in UTC: created_at stores naive UTC (see _now in models), so
-        # .weekday() is already the UTC weekday, Monday=0.
-        weekday = created_at.weekday()
+        # 钟点按 UTC 取。created_at 列存的是 naive UTC（见 models 的 _now），
+        # 直接 .hour 即为 UTC 的第几个小时，0–23。
+        # Hour in UTC: created_at stores naive UTC (see _now in models), so
+        # .hour is already the UTC hour of day, 0-23.
+        hour = created_at.hour
         resolve_seconds = None
         if result in ("HIT_TP", "HIT_SL") and resolved_at is not None:
             resolve_seconds = (resolved_at - created_at).total_seconds()
@@ -491,8 +470,8 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
         bucket_keys = ("total", *session_keys)
         if side_key is not None:
             bucket_keys = (*bucket_keys, side_key)
-        _accumulate(per_strategy[name], bucket_keys, key, day_idx, weekday, side_key, resolve_seconds, True)
-        _accumulate(overall, bucket_keys, key, day_idx, weekday, side_key, resolve_seconds, True)
+        _accumulate(per_strategy[name], bucket_keys, key, day_idx, hour, side_key, resolve_seconds, True)
+        _accumulate(overall, bucket_keys, key, day_idx, hour, side_key, resolve_seconds, True)
 
         # 品种子分层：同样避免 setdefault(key, {昂贵默认值}) ——两层查找都先判空
         # 再赋值，理由与上面 per_strategy 完全一致。
@@ -513,7 +492,7 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
                 k: _empty_bucket(days, with_daily=False)
                 for k in [*all_keys, "total", *SIDE_KEYS]
             }
-        _accumulate(sym_map[symbol], bucket_keys, key, day_idx, weekday, side_key, resolve_seconds, False)
+        _accumulate(sym_map[symbol], bucket_keys, key, day_idx, hour, side_key, resolve_seconds, False)
 
         # 同一条信号再记进全平台的品种桶。同样先判空再赋值，不用 setdefault。
         # The same signal also lands in the platform-wide symbol bucket.
@@ -522,7 +501,7 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
                 k: _empty_bucket(days, with_daily=False)
                 for k in [*all_keys, "total", *SIDE_KEYS]
             }
-        _accumulate(overall_symbols[symbol], bucket_keys, key, day_idx, weekday, side_key,
+        _accumulate(overall_symbols[symbol], bucket_keys, key, day_idx, hour, side_key,
                     resolve_seconds, False)
 
     def _shape(buckets: dict[str, dict]) -> dict:

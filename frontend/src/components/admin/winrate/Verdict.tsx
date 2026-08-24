@@ -1,16 +1,19 @@
-// 判定芯片：把 verdictOf 的结论渲染成一句人话 + 一个小图形。
-// 图形（↑ / ↓ / = / ?）与颜色是双重编码——色弱读者靠形状也能分出好坏。
-// 不带笔数：整页都不显示"用了多少笔"，"能不能信"由判定词本身承担。
-// The verdict chip: renders verdictOf's conclusion as a phrase plus a small
-// glyph. Glyph and colour double-encode the verdict so colour-blind readers can
-// still tell them apart by shape. No trade counts: the page shows none, and
-// "can this be trusted" is carried by the verdict word itself.
-import { useTranslation } from 'react-i18next'
-import { VERDICT_BG, VERDICT_COLOR, type VerdictKind } from './shared'
+// 判定图形：↑ 明显高于一半 / ↓ 明显低于一半 / = 差不多 / ? 看不出。
+//
+// 写着判定的芯片曾经也住在这里，已按产品要求从整页删除——判定现在只由胜率数字
+// 的颜色承担。图形留下来是因为有两处颜色不够用：钟点格（格子里只有一个百分比，
+// 两种灰分不开）和「可以留意」的品种芯片（要区分"确实更高"与"只是看着高"）。
+// 它同时也是色弱读者唯一能分辨好坏的编码。
+//
+// The verdict glyph: ↑ clearly above half, ↓ clearly below, = about even,
+// ? undecided. The worded chip used to live here too and was removed page-wide
+// at the product owner's request — the verdict is now carried by the colour of
+// the percentage. The glyph stays because two places need more than colour: the
+// hour cells (a bare percentage, where the two greys are indistinguishable)
+// and the "worth a look" symbol chips. It is also the only encoding a
+// colour-blind reader can use.
+import type { VerdictKind } from './shared'
 
-/** 判定图形，单独导出给星期格与品种芯片用——那里放不下整枚芯片，但形状编码不能丢。
- *  The verdict glyph on its own, for weekday cells and symbol chips: no room for
- *  a whole chip there, but the shape encoding must not be dropped. */
 export function VerdictGlyph({ kind }: { kind: VerdictKind }) {
   const common = {
     width: 10, height: 10, viewBox: '0 0 10 10', fill: 'none',
@@ -30,19 +33,4 @@ export function VerdictGlyph({ kind }: { kind: VerdictKind }) {
     default:
       return <svg {...common}><circle cx="5" cy="5" r="1.6" fill="currentColor" stroke="none" /></svg>
   }
-}
-
-export function VerdictChip({ kind, size = 'md' }: { kind: VerdictKind; size?: 'sm' | 'md' }) {
-  const { t } = useTranslation()
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full font-medium ${
-        size === 'sm' ? 'px-2 py-0.5 text-2xs' : 'px-2.5 py-1 text-xs'
-      }`}
-      style={{ color: VERDICT_COLOR[kind], background: VERDICT_BG[kind] }}
-    >
-      <VerdictGlyph kind={kind} />
-      {t(`admin.winrate.verdict.${kind}`)}
-    </span>
-  )
 }

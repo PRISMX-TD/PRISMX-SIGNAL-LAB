@@ -986,7 +986,7 @@
     },
     "winrate": {
       "title": "Strategy win rate",
-      "subtitle": "Last {{days}} days · TradingView platform signals only",
+      "subtitle": "Last {{days}} days",
       "empty": {
         "title": "No TradingView signals in the last {{days}} days",
         "body": "Numbers appear here once signals arrive through the TradingView webhook and reach take-profit or stop-loss."
@@ -1021,12 +1021,8 @@
         "bySessionHint": "Filed by the time a signal fired. The European and New York sessions overlap by about 4 hours a day and signals in the overlap count toward both.",
         "bySide": "Long or short?",
         "bySideHint": "Older signals with an unrecognized direction count toward neither side.",
-        "byWeekday": "Which weekday works best?",
-        "byWeekdayHint": "The last {{days}} days grouped by weekday. Weekdays use UTC, which can differ from your local date by a few hours. Resolved signals only.",
-        "holding": "How long until an outcome?",
-        "holdingHint": "Average time from a signal firing to hitting take-profit or stop-loss; resolved signals only.",
-        "holdingOverall": "overall",
-        "holdingEmpty": "Nothing has reached an outcome yet."
+        "byHour": "Which hour of the day works best?",
+        "byHourHint": "The last {{days}} days grouped by hour of day, shown in your local time. Days around a DST changeover are off by an hour. Resolved signals only."
       },
       "symbols": {
         "title": "Each symbol",
@@ -1070,15 +1066,6 @@
       "side": {
         "BUY": "Long",
         "SELL": "Short"
-      },
-      "weekday": {
-        "mon": "Mon",
-        "tue": "Tue",
-        "wed": "Wed",
-        "thu": "Thu",
-        "fri": "Fri",
-        "sat": "Sat",
-        "sun": "Sun"
       },
       "session": {
         "asia": "Asian",

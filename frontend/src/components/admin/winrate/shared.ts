@@ -1,7 +1,7 @@
 // 胜率页共享：判定规则、配色、时间换算。
 //
 // 这一版页面的核心是把统计学翻译成人话：页面上**只有一条**"能不能当结论"的
-// 规则（verdictOf），所有层级——总览、策略卡、时段行、星期格、品种行——都从
+// 规则（verdictOf），所有层级——总览、策略卡、时段行、钟点格、品种行——都从
 // 这里拿判定，再把它渲染成「明显高于一半 / 和一半差不多 / 笔数还少」这类新手
 // 一眼能懂的词。置信区间仍是判定依据，但不再作为图形让读者自己去解读。
 //
@@ -11,7 +11,7 @@
 // Shared helpers for the win-rate page: the verdict rule, colours, time maths.
 // The page's whole point is to translate statistics into plain words, so there
 // is exactly ONE "can this be a conclusion" rule (verdictOf); every layer —
-// hero, strategy card, session row, weekday cell, symbol row — gets its verdict
+// hero, strategy card, session row, hour cell, symbol row — gets its verdict
 // here and renders it as a phrase a newcomer understands. The confidence
 // interval is still the evidence; it just stops being a glyph the reader has to
 // decode. Session definitions ship from the backend; this file only restates
@@ -86,11 +86,11 @@ export function verdictOf(b: RateLike): VerdictKind {
   return 'even'
 }
 
-/** Wilson 95% 区间，与后端 strategy_winrate.wilson_bounds 同一公式。只有星期格
- *  需要在前端算——后端对星期几只给止盈/止损笔数，不给区间。
+/** Wilson 95% 区间，与后端 strategy_winrate.wilson_bounds 同一公式。只有钟点格
+ *  需要在前端算——后端对每个钟点只给止盈/止损笔数，不给区间。
  *  Wilson 95% interval, the same formula as the backend's wilson_bounds. Only
- *  the weekday cells need it client-side: the backend ships raw TP/SL counts
- *  per weekday without bounds. */
+ *  the hour cells need it client-side: the backend ships raw TP/SL counts
+ *  per hour without bounds. */
 export function wilsonBounds(hit: number, n: number, z = 1.96): [number, number] | null {
   if (n <= 0) return null
   const p = hit / n

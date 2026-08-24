@@ -986,7 +986,7 @@
     },
     "winrate": {
       "title": "策略胜率",
-      "subtitle": "近 {{days}} 天 · 只统计 TradingView 推送的平台信号",
+      "subtitle": "近 {{days}} 天",
       "empty": {
         "title": "近 {{days}} 天还没有 TradingView 信号",
         "body": "信号通过 TradingView Webhook 进来、并走出止盈或止损之后，这里就会有数字。"
@@ -1020,12 +1020,8 @@
         "bySessionHint": "按信号发出的时刻算。欧洲盘和纽约盘每天重叠约 4 小时，重叠时段的信号两边都算。",
         "bySide": "做多还是做空更准？",
         "bySideHint": "方向认不出的老信号不计入任何一侧。",
-        "byWeekday": "星期几更准？",
-        "byWeekdayHint": "把近 {{days}} 天按星期几汇总；星期几按国际标准时间（UTC）算，可能和你本地的日期差几小时。只含已分出胜负的信号。",
-        "holding": "一般多久出结果？",
-        "holdingHint": "从信号发出到碰到止盈或止损的平均时长；只算已分出胜负的信号。",
-        "holdingOverall": "总体",
-        "holdingEmpty": "还没有分出胜负的信号。"
+        "byHour": "一天里哪个小时更准？",
+        "byHourHint": "把近 {{days}} 天按一天中的钟点汇总，时间是你本地的。夏令时切换那几天会有一小时的误差。只含已分出胜负的信号。"
       },
       "symbols": {
         "title": "每个品种",
@@ -1069,15 +1065,6 @@
       "side": {
         "BUY": "做多",
         "SELL": "做空"
-      },
-      "weekday": {
-        "mon": "周一",
-        "tue": "周二",
-        "wed": "周三",
-        "thu": "周四",
-        "fri": "周五",
-        "sat": "周六",
-        "sun": "周日"
       },
       "session": {
         "asia": "亚洲盘",

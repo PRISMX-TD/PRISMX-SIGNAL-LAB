@@ -174,29 +174,28 @@ export interface WinRateBucket {
   // oldest→newest, length = days; feeds the recommendation sparkline.
   // Null at the symbol layer and on side buckets.
   daily: number[] | null
-  // 按星期几（UTC，周一=0）累计的止盈/止损，长度恒 7，**只含已判定**。
-  // By weekday (UTC, Monday=0), always length 7, **resolved signals only**.
-  weekday: WeekdayOutcome[] | null
+  // 按钟点（UTC，0–23）累计的止盈/止损，长度恒 24，**只含已判定**。
+  // By hour of day (UTC, 0-23), always length 24, **resolved signals only**.
+  hourly: HourOutcome[] | null
 }
 
-// 某个星期几在整个窗口内累计的止盈/止损笔数。只含已判定的信号——未判定的
-// 不出现在这张图上，等它真走出结果那天再计进来。也不给每个星期几算百分比：
-// 窗口短时一格只有三五笔，百分比会在 100/0/50 之间跳。
-// Take-profit / stop-loss counts for one weekday across the window. Resolved
+// 一天中某个钟点在整个窗口内累计的止盈/止损笔数。只含已判定的信号——未判定的
+// 不出现在这张图上，等它真走出结果那天再计进来。后端不算百分比：一个钟点在薄
+// 窗口里只有三五笔时百分比会在 100/0/50 之间跳，是否显示由前端按样本门槛决定。
+//
+// **索引是 UTC 钟点，不是本地钟点**：后端不可能知道看的人在哪个时区。前端负责
+// 旋转成浏览者本地钟点（24 格是一个完整循环，旋转无损）。
+//
+// Take-profit / stop-loss counts for one hour of day across the window. Resolved
 // signals only — unresolved ones are absent and join on the day they reach an
-// outcome. No per-weekday percentage either: with a short window a slot holds a
-// handful of trades and a rate would swing wildly.
-export interface WeekdayOutcome {
+// outcome. No percentage server-side: with a handful of trades an hour's rate
+// swings between 100/0/50, so showing one is the UI's call against its sample
+// floor. **The index is the UTC hour, not a local one** — the backend cannot
+// know the reader's zone; the frontend rotates these into the viewer's clock
+// (24 slots are a full cycle, so the rotation is lossless).
+export interface HourOutcome {
   tp: number
   sl: number
-  // 同一个星期几里按方向再拆一层。做多+做空可能小于 tp+sl：方向认不出的历史行
-  // 只进上面那对总数，不硬塞进某一侧。
-  // The same weekday split by direction; long + short may sum to less than
-  // tp + sl because rows with an unrecognized side join only the totals.
-  buyTp: number
-  buySl: number
-  sellTp: number
-  sellSl: number
 }
 
 export interface SymbolWinRate {

@@ -5,13 +5,14 @@
 // 以"现在"为锚：时段 × 当前时刻 = 一句结论（"现在值得盯 / 现在不是好时候，3h 后
 // 欧洲盘开始"），不让读者自己去表里找。「可以留意」列**在当前时段里**近 N 天表现
 // 较好的品种前三个（胜率不低于一半、样本够判定），不要求"统计上明显更高"——产品
-// 要的是"最近表现较好的"，判定图形（↑ = ?）会告诉读者每一个有多稳；不列表现差
-// 的。没有表现较好的就直说"没有"，不硬凑。欧洲盘与纽约盘重叠的四小时里两个盘都
+// 要的是"最近表现较好的"，芯片前的图形（↑ = ?）会告诉读者每一个有多稳；不列表现
+// 差的。没有表现较好的就直说"没有"，不硬凑。欧洲盘与纽约盘重叠的四小时里两个盘都
 // 在进行，就各给一块；不在任何盘内时用「其他时段」那一桶。
 //
 // 选哪几个按 Wilson 下限（把薄样本沉下去），选出来之后按胜率排。这里只排品种，
-// 不排策略——策略维度整层不出现，点「看细节」才有。整页不显示笔数：判定词和
-// 图形已经把"这个数能不能信"说了。
+// 不排策略——策略维度整层不出现，点「看细节」才有。整页不显示笔数，也不显示写着
+// 判定的芯片（产品要求）：胜率数字的颜色本身就是判定，绿=明显高于一半、红=明显
+// 低于一半、灰=看不出。
 //
 // "What to watch now": the page's first layer, three sentences — which session
 // is open and how long is left → its win rate over the last N days → symbols
@@ -22,12 +23,13 @@
 // doing well", and the verdict glyph (↑ = ?) says how firm each one is. No
 // "careful" list. During the London/New York overlap both sessions get a block;
 // outside all three, the "outside" bucket is used. Selection is by Wilson lower
-// bound (thin samples sink), display is by rate. No trade counts anywhere: the
-// verdict word and glyph already say whether a number can be trusted.
+// bound (thin samples sink), display is by rate. Neither trade counts nor worded
+// verdict chips appear anywhere (product decision): the colour of the percentage
+// is the verdict — green above half, red below, grey undecided.
 import { useTranslation } from 'react-i18next'
 import type { AdminStrategyWinRate, WinRateBucket } from '../../../api/types'
 import SessionTimeline from './SessionTimeline'
-import { VerdictChip, VerdictGlyph } from './Verdict'
+import { VerdictGlyph } from './Verdict'
 import {
   SESSION_COLORS, VERDICT_BG, VERDICT_COLOR,
   fmtDurationHm, fmtPct, isRated, sessionStatus, verdictOf, type VerdictKind,
@@ -71,8 +73,8 @@ function SymbolChip({ symbol, bucket, kind }: Pick) {
   )
 }
 
-/** 一个时段的"该不该盯"块：名字 + 剩余时间 → 这个时段的胜率与判定 → 可以留意的品种。
- *  One session's "worth watching?" block: name + time left → rate and verdict → symbols worth a look. */
+/** 一个时段的"该不该盯"块：名字 + 剩余时间 → 这个时段的胜率 → 可以留意的品种。
+ *  One session's "worth watching?" block: name + time left → rate → symbols worth a look. */
 function SessionBlock({ data, sessionKey, title, sessionName, minutesLeft }: {
   data: AdminStrategyWinRate
   sessionKey: string
@@ -112,12 +114,13 @@ function SessionBlock({ data, sessionKey, title, sessionName, minutesLeft }: {
 
       <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-neutral-400">
         <span>{t('admin.winrate.watch.sessionRate', { days: data.days, name: sessionName })}</span>
-        {hasRate && (
-          <span className="font-display text-xl font-bold leading-none tabular-nums" style={{ color: VERDICT_COLOR[kind] }}>
-            {fmtPct(bucket!.winRate!)}
-          </span>
-        )}
-        <VerdictChip kind={kind} size="sm" />
+        {/* 判定只剩颜色：绿=明显高于一半、红=明显低于一半、灰=看不出。
+            那枚写着判定的芯片已按产品要求删除，全页一处不留。
+            The verdict is carried by colour alone now — the worded chip was
+            dropped at the product owner's request, everywhere on the page. */}
+        <span className="font-display text-xl font-bold leading-none tabular-nums" style={{ color: VERDICT_COLOR[kind] }}>
+          {hasRate ? fmtPct(bucket!.winRate!) : '—'}
+        </span>
       </p>
 
       <div className="mt-4">
@@ -180,12 +183,9 @@ export default function WatchNow({ data, now }: { data: AdminStrategyWinRate; no
               </span>
               <span>·</span>
               <span>{t('admin.winrate.watch.sessionRate', { days: data.days, name: t(`admin.winrate.session.${next.s.key}`) })}</span>
-              {nextHasRate && (
-                <span className="font-semibold tabular-nums" style={{ color: VERDICT_COLOR[nextKind] }}>
-                  {fmtPct(nextBucket!.winRate!)}
-                </span>
-              )}
-              <VerdictChip kind={nextKind} size="sm" />
+              <span className="font-semibold tabular-nums" style={{ color: VERDICT_COLOR[nextKind] }}>
+                {nextHasRate ? fmtPct(nextBucket!.winRate!) : '—'}
+              </span>
             </p>
           )}
         </div>

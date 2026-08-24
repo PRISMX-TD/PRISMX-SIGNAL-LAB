@@ -8,7 +8,6 @@
 import { useTranslation } from 'react-i18next'
 import type { AdminStrategyWinRate, WinRateBucket } from '../../../api/types'
 import TugBar from './TugBar'
-import { VerdictChip } from './Verdict'
 import { VERDICT_COLOR, fmtPct, isRated, verdictOf } from './shared'
 
 function SymbolRow({ symbol, bucket }: { symbol: string; bucket: WinRateBucket }) {
@@ -22,13 +21,8 @@ function SymbolRow({ symbol, bucket }: { symbol: string; bucket: WinRateBucket }
     <div className="border-b border-white/5 py-3 last:border-b-0">
       <div className="flex items-center justify-between gap-3">
         <span className="truncate text-sm font-medium text-neutral-200">{symbol}</span>
-        <span className="flex shrink-0 items-center gap-2">
-          {hasRate && (
-            <span className="text-sm font-semibold tabular-nums" style={{ color: VERDICT_COLOR[kind] }}>
-              {fmtPct(bucket.winRate!)}
-            </span>
-          )}
-          <VerdictChip kind={kind} size="sm" />
+        <span className="shrink-0 text-sm font-semibold tabular-nums" style={{ color: VERDICT_COLOR[kind] }}>
+          {hasRate ? fmtPct(bucket.winRate!) : '—'}
         </span>
       </div>
       <TugBar className="mt-2" size="sm" hitTp={bucket.hitTp} hitSl={bucket.hitSl} label={aria} />

@@ -199,32 +199,37 @@ class SessionWindowOut(BaseModel):
     endHour: int  # 左闭右开 / half-open
 
 
-class WeekdayOutcomeOut(BaseModel):
-    """某个星期几（UTC，周一=0）在整个窗口内累计的止盈/止损笔数。
+class HourOutcomeOut(BaseModel):
+    """一天中某个钟点（UTC，0–23）在整个窗口内累计的止盈/止损笔数。
 
     **只含已判定的信号**：未判定的不出现在这张图上，等它真走出结果那天再计进来。
-    也不给每个星期几算胜率百分比——窗口短时一格只有三五笔，百分比会在
-    100/0/50 之间跳，那是假精确。堆叠柱直接展示胜负笔数，不需要为薄样本设门槛。
+    后端不算百分比——一个钟点在薄窗口里只有三五笔时，百分比会在 100/0/50 之间
+    跳，是否显示由前端按自己的样本门槛决定。
 
-    Take-profit / stop-loss counts for one weekday (UTC, Monday=0), accumulated
+    钟点存 UTC，前端再旋转成浏览者本地钟点：后端不可能知道看的人在哪个时区，而
+    24 个格子是一个完整的循环，旋转是无损的。
+
+    这个模型取代了原来的 WeekdayOutcomeOut：产品要回答的是"一天里什么时候该盯"，
+    星期几回答不了；方向也不再交叉拆分（24 × 2 个格子读不过来，而"做多还是做空
+    更准"在详情区本来就有自己一块）。
+
+    Take-profit / stop-loss counts for one hour of day (UTC, 0-23), accumulated
     across the whole window. **Resolved signals only**: unresolved ones are
-    absent from this chart and join it on the day they actually reach an outcome.
-    No per-weekday percentage either — with a short window a slot holds only a
-    handful of trades and a rate would swing between 100/0/50. Stacked counts
-    need no thin-sample gate.
+    absent and join on the day they actually reach an outcome. No percentage is
+    computed here — with a handful of trades in an hour a rate swings between
+    100/0/50, so whether to show one is the UI's call against its own sample
+    floor. Hours are stored in UTC and rotated into the viewer's local clock by
+    the frontend: the backend cannot know the reader's zone, and 24 slots are a
+    full cycle, so the rotation is lossless.
+
+    This replaces WeekdayOutcomeOut: the product question is "when in the day
+    should I watch", which a weekday cannot answer. There is no direction split
+    either — 24 x 2 cells is more than anyone reads, and "long or short" already
+    has its own block in the detail area.
     """
 
     tp: int
     sl: int
-    # 同一个星期几里按方向再拆一层。做多+做空可能小于 tp+sl：方向认不出的
-    # 历史行只进上面那对总数，不硬塞进某一侧（同 SIDE_KEYS 的规则）。
-    # The same weekday split by direction. Long + short may sum to less than
-    # tp + sl: rows with an unrecognized side join only the totals above rather
-    # than being guessed onto one side (same rule as SIDE_KEYS).
-    buyTp: int
-    buySl: int
-    sellTp: int
-    sellSl: int
 
 
 class WinRateBucketOut(BaseModel):
@@ -257,11 +262,11 @@ class WinRateBucketOut(BaseModel):
     # oldest→newest, length = days. Feeds the recommendation card's activity
     # sparkline. Null at the symbol layer and on side buckets.
     daily: list[int] | None = None
-    # 按星期几（UTC，周一=0）累计的止盈/止损，长度恒为 7，**只含已判定**。
-    # 详情区的「星期胜负」图用，回答"这个策略周几表现好"。
-    # By weekday (UTC, Monday=0), always length 7, **resolved signals only**.
-    # Feeds the detail area's weekday chart.
-    weekday: list[WeekdayOutcomeOut] | None = None
+    # 按钟点（UTC，0–23）累计的止盈/止损，长度恒为 24，**只含已判定**。
+    # 详情区的「哪个小时更准」图用，回答"一天里什么时候该盯"。
+    # By hour of day (UTC, 0-23), always length 24, **resolved signals only**.
+    # Feeds the detail area's "which hour is better" chart.
+    hourly: list[HourOutcomeOut] | None = None
 
 
 class SymbolWinRateOut(BaseModel):

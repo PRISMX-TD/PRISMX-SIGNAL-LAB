@@ -4,7 +4,7 @@
 // 是个会一直变的动态目标，而且胜率高不等于更赚钱（盈亏比差三倍时，胜率最低
 // 的策略可能期望最高）。列表标题下面直接把这句话写给读者。
 //
-// 卡片首行只放三样东西：名字、大数字 + 判定、拔河条；右侧是窗口内每天的信号
+// 卡片首行只放三样东西：名字、大数字（颜色即判定）、拔河条；右侧是窗口内每天的信号
 // 量柱——"这策略最近活不活跃"是新手除了准不准之外第二想知道的事。
 //
 // One card per strategy; clicking expands the detail in place (accordion, one
@@ -12,15 +12,14 @@
 // ranking: the strategies are still being tuned, a ranking is a moving target,
 // and a higher win rate does not mean more money (with reward:risk spanning 3x,
 // the lowest win rate can carry the highest expectancy). The list caption says
-// so directly. The card's first row carries only the name, the big number with
-// its verdict, and the tug bar; on the right, the window's daily signal volume —
+// so directly. The card's first row carries only the name, the big number (its
+// colour is the verdict), and the tug bar; then the window's daily signal volume —
 // "is this strategy active lately" is the second thing a newcomer asks.
 import { useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AdminStrategyWinRate, StrategyWinRate } from '../../../api/types'
 import StrategyDetail from './StrategyDetail'
 import TugBar from './TugBar'
-import { VerdictChip } from './Verdict'
 import { VERDICT_COLOR, fmtDurationText, fmtPct, isRated, verdictOf } from './shared'
 
 // 全部用 <span>：它住在卡片的 <button> 里，按钮内只允许短语内容。
@@ -48,13 +47,15 @@ function ActivityBars({ daily }: { daily: number[] }) {
   )
 }
 
-function StrategyCard({ row, index, open, onToggle, data, activeKeys }: {
+function StrategyCard({ row, index, open, onToggle, data, activeKeys, now }: {
   row: StrategyWinRate
   index: number
   open: boolean
   onToggle: () => void
   data: AdminStrategyWinRate
   activeKeys: string[]
+  // 透传给钟点格做本地时区换算 / forwarded to the hour cells for zone conversion
+  now: Date
 }) {
   const { t } = useTranslation()
   const id = useId()
@@ -103,12 +104,13 @@ function StrategyCard({ row, index, open, onToggle, data, activeKeys }: {
         </span>
 
         <span className="block min-w-0">
-          <span className="flex items-baseline justify-between gap-3">
+          {/* 判定只剩颜色。写着判定的芯片全页删除（产品要求）。
+              Verdict by colour only; the worded chip is gone page-wide. */}
+          <span className="flex items-baseline gap-3">
             <span className="font-display text-2xl font-bold leading-none tabular-nums"
                   style={{ color: VERDICT_COLOR[kind] }}>
               {hasRate ? fmtPct(total.winRate!) : '—'}
             </span>
-            <VerdictChip kind={kind} size="sm" />
           </span>
           <TugBar className="mt-2.5" size="md" hitTp={total.hitTp} hitSl={total.hitSl} label={tugLabel} />
         </span>
@@ -141,18 +143,20 @@ function StrategyCard({ row, index, open, onToggle, data, activeKeys }: {
           className="min-h-0 overflow-hidden"
           style={{ visibility: open ? 'visible' : 'hidden', transition: `visibility 0s linear ${open ? 0 : 450}ms` }}
         >
-          {mounted && <StrategyDetail row={row} sessions={data.sessions} activeKeys={activeKeys} days={data.days} />}
+          {mounted && <StrategyDetail row={row} sessions={data.sessions} activeKeys={activeKeys}
+                                      days={data.days} now={now} />}
         </div>
       </div>
     </article>
   )
 }
 
-export default function StrategyList({ data, selected, onSelect, activeKeys }: {
+export default function StrategyList({ data, selected, onSelect, activeKeys, now }: {
   data: AdminStrategyWinRate
   selected: string | null
   onSelect: (name: string | null) => void
   activeKeys: string[]
+  now: Date
 }) {
   return (
     <div className="space-y-3">
@@ -165,6 +169,7 @@ export default function StrategyList({ data, selected, onSelect, activeKeys }: {
           onToggle={() => onSelect(selected === row.strategy ? null : row.strategy)}
           data={data}
           activeKeys={activeKeys}
+          now={now}
         />
       ))}
     </div>
