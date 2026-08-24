@@ -993,30 +993,6 @@
       },
       "error": "Failed to load: {{message}}",
       "retry": "Retry",
-      "hero": {
-        "all": "All signals",
-        "lead": "Overall win rate of platform signals, last {{days}} days",
-        "leadThin": "Too few signals reached an outcome in the last {{days}} days for a reliable win rate.",
-        "leadWaiting": "No signal has reached an outcome in the last {{days}} days yet.",
-        "range": "The true rate is probably between {{low}} and {{high}}",
-        "wins": "Wins",
-        "losses": "Losses",
-        "half": "half",
-        "holding": "Avg time to outcome",
-        "coverage": "Coverage",
-        "coverageStrategies_one": "{{count}} strategy",
-        "coverageStrategies_other": "{{count}} strategies",
-        "coverageSymbols_one": "{{count}} symbol",
-        "coverageSymbols_other": "{{count}} symbols"
-      },
-      "guide": {
-        "lead": "How to read this: the further from half and the more trades, the firmer the conclusion — every verdict already accounts for both.",
-        "strong": "safe to treat as a conclusion",
-        "weak": "also a conclusion, just a bad one",
-        "even": "no visible edge",
-        "unsure": "near half, and the trades so far can't separate it — check back after more",
-        "thin": "too few trades: no percentage shown"
-      },
       "verdict": {
         "strong": "Clearly above half",
         "weak": "Clearly below half",

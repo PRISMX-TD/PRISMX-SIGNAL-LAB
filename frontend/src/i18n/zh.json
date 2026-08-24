@@ -993,28 +993,6 @@
       },
       "error": "加载失败：{{message}}",
       "retry": "重试",
-      "hero": {
-        "all": "全部信号",
-        "lead": "近 {{days}} 天，平台信号整体胜率",
-        "leadThin": "近 {{days}} 天分出胜负的信号太少，还算不出可靠的胜率。",
-        "leadWaiting": "近 {{days}} 天还没有信号分出胜负。",
-        "range": "真实水平大约在 {{low}}–{{high}} 之间",
-        "wins": "赢",
-        "losses": "输",
-        "half": "一半",
-        "holding": "平均多久出结果",
-        "coverage": "覆盖范围",
-        "coverageStrategies_other": "{{count}} 个策略",
-        "coverageSymbols_other": "{{count}} 个品种"
-      },
-      "guide": {
-        "lead": "怎么读：离一半越远、笔数越多，越容易下结论——每个判定都已经把这两点算进去了。",
-        "strong": "可以当结论",
-        "weak": "也是结论，只是往坏的方向",
-        "even": "看不出优势",
-        "unsure": "胜率在一半附近，现有笔数还分不出高低——等笔数多了再看",
-        "thin": "笔数太少的不显示百分比"
-      },
       "verdict": {
         "strong": "明显高于一半",
         "weak": "明显低于一半",

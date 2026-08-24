@@ -1,16 +1,21 @@
 // 管理后台「策略胜率」子页——为新手重排的一版，两层。
 //
 // 第一层（默认只有这一层）：「现在该盯什么」——现在是哪个盘、这个盘近 N 天准不准、
-// 这个盘里哪些品种更准 / 要小心、下一个盘几点开。这是产品的本意：一眼看出
+// 这个盘里哪些品种可以留意、下一个盘几点开。这是产品的本意：一眼看出
 // "什么时候值得注意、注意哪些品种"，先在管理页内测，之后再决定是否开放给用户。
 // 第二层（点「看细节」才展开）按读者会问的顺序排：
-//   1. 平台信号准不准？        → 一个大数字 + 人话判定 + 赢/输拔河条
-//   2. 哪个策略、准在哪？      → 每个策略一张卡，点开看"哪个时段 / 做多做空 /
+//   1. 哪个策略、准在哪？      → 每个策略一张卡，点开看"哪个时段 / 做多做空 /
 //                                 星期几 / 多久出结果"四个问题
-//   3. 哪些品种在跑、跑得怎样？→ 每个品种一行
+//   2. 哪些品种在跑、跑得怎样？→ 每个品种一行
+// 「平台整体胜率」那张卡已按产品要求整张删除：一个把所有策略、所有品种、所有
+// 时段混在一起的平均数不指导任何决定——它既不告诉你该盯什么，也不代表任何一个
+// 你实际会跟的策略。要看得分策略、分品种地看，那正是下面两层在做的事。
 // 统计口径（Wilson 区间、时段重叠、判定门槛）不再作为图形摆在读者面前：判定
 // 规则在 shared.ts 里只有一条，每个数字旁边都用一个词告诉读者"这个能不能信"，
 // 计算细节收进页尾的折叠项。
+// 那条逐枚解释判定芯片的「怎么读」图例行也已按产品要求删除：芯片上的词本身
+// 就是人话（「明显高于一半」「还看不出高低」），再给一行解释是解释解释。星期格
+// 内部那份小图例保留——那里只有色块和图形，没有词。
 //
 // 不排名：策略还在调整期，按胜率排名是个会一直变的动态目标，而且胜率与赚不赚钱
 // 并不同向。列表顺序是后端的"已判定笔数降序"，标题下直接写明。
@@ -20,17 +25,24 @@
 //
 // The admin "strategy win rate" tab, re-laid-out for newcomers, in two layers.
 // Layer one (all that shows by default) is "what to watch now": which session
-// is open, how it did over the last N days, which symbols do better / need care
-// in it, and when the next session opens — the product's actual intent, piloted
+// is open, how it did over the last N days, which symbols in it are worth a
+// look, and when the next session opens — the product's actual intent, piloted
 // on the admin page before deciding whether to expose it to users. Layer two
-// (behind "details") answers three questions in the order a reader asks them:
-// are the signals any good (hero:
-// one big number, a plain-words verdict, a wins-vs-losses tug bar); which
-// strategy, and where is it good (one card each, expanding into four question
-// blocks); which symbols are running and how (one row each). The statistics —
+// (behind "details") answers two questions in the order a reader asks them:
+// which strategy, and where is it good (one card each, expanding into four
+// question blocks); which symbols are running and how (one row each). The
+// platform-wide "overall win rate" card was deleted outright at the product
+// owner's request: an average over every strategy, symbol and session guides no
+// decision — it neither says what to watch nor describes any strategy anyone
+// actually follows. The two layers below answer it per strategy and per symbol,
+// which is the only form of the question worth asking. The statistics —
 // Wilson intervals, session overlap, the sample floor — no longer face the reader
 // as glyphs: shared.ts holds the single verdict rule, every number carries a
 // word saying whether it can be trusted, and the maths folds into the footer.
+// The legend row that explained each verdict chip was dropped at the product
+// owner's request: the chip's own wording is already plain language, so a row
+// explaining it explains the explanation. The small legend inside the weekday
+// grid stays — there the cells carry only colour and a glyph, no words.
 // No ranking: the strategies are still being tuned, a win-rate order is a moving
 // target, and win rate does not track profitability. Session windows ship with
 // the payload; only the backend gets DST right.
@@ -41,8 +53,6 @@ import { SkeletonBlock, SkeletonLine } from '../Skeleton'
 import type { AdminStrategyWinRate } from '../../api/types'
 import { MIN_SAMPLES, sessionStatus } from './winrate/shared'
 import WatchNow from './winrate/WatchNow'
-import HeroSummary from './winrate/HeroSummary'
-import ReadingGuide from './winrate/ReadingGuide'
 import StrategyList from './winrate/StrategyList'
 import SymbolBoard from './winrate/SymbolBoard'
 
@@ -62,19 +72,25 @@ const WINDOW_DAYS = 30
 function LoadingSkeleton() {
   return (
     <div className="space-y-6" aria-busy="true">
+      {/* 形状照着 WatchNow 排：骨架屏骗人比没有骨架屏更糟——加载完内容跳一下，
+          读者会以为页面出错了。/ Shaped after WatchNow: a skeleton that lies about
+          the layout is worse than none, since the content visibly jumps on arrival. */}
       <div className="glass p-6 md:p-8">
         <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
           <div className="space-y-4">
+            <SkeletonLine width="30%" height={10} />
+            <SkeletonLine width="45%" height={22} />
             <SkeletonLine width="60%" />
-            <SkeletonBlock width={220} height={56} radius={8} />
-            <SkeletonLine width="45%" />
-            <SkeletonBlock height={12} radius={999} />
-            <div className="grid grid-cols-3 gap-6 pt-2">
-              <SkeletonLine height={28} /><SkeletonLine height={28} /><SkeletonLine height={28} />
+            <div className="flex gap-2 pt-1">
+              <SkeletonBlock width={150} height={32} radius={999} />
+              <SkeletonBlock width={150} height={32} radius={999} />
+              <SkeletonBlock width={150} height={32} radius={999} />
             </div>
+            <SkeletonLine width="70%" />
           </div>
           <div className="space-y-3">
-            <SkeletonLine width="40%" /><SkeletonLine /><SkeletonLine /><SkeletonLine />
+            <SkeletonLine width="40%" height={10} />
+            <SkeletonLine /><SkeletonLine /><SkeletonLine />
             <SkeletonBlock height={30} radius={6} />
           </div>
         </div>
@@ -178,10 +194,6 @@ export default function StrategyWinratePanel() {
       ) : data ? (
         <>
           <WatchNow data={data} now={now} />
-          {/* 图例留在顶层：芯片第一次出现就在上面那张卡里，解释不能藏在细节里。
-              Legend stays in the top layer: the chips first appear in the card
-              above, so their explanation can't hide inside details. */}
-          <ReadingGuide />
 
           <div className="px-1">
             <button type="button" aria-expanded={showDetails} onClick={() => setShowDetails((v) => !v)}
@@ -196,8 +208,6 @@ export default function StrategyWinratePanel() {
           </div>
 
           {showDetails && (<>
-          <HeroSummary data={data} />
-
           <section>
             <header className="mb-3 px-1">
               <h2 className="text-lg font-semibold text-neutral-100">{t('admin.winrate.strategies.title')}</h2>
