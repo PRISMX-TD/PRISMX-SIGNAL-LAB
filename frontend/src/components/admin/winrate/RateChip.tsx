@@ -1,0 +1,36 @@
+// 全页唯一的「名字 + 胜率」芯片：顶层的「胜率最高的时间」「可以留意」用它，
+// 策略卡上的「胜率最高的时间 / 品种」也用它。
+//
+// 判定不写字、不画符号，只由底色和字色承担：过半绿、没过半红、正好一半灰
+// （见 shared.ts 的 verdictOf）。
+//
+// 全部用 <span>：策略卡把这些芯片放在一个 <button> 里，按钮内只允许短语内容。
+//
+// The page's one "name + rate" chip, used by the top layer's best-hours and
+// worth-a-look lists and by the strategy card's best hours / symbols. The verdict
+// carries no word and no glyph — only the tint and text colour (green above half,
+// red below, grey on an exact tie; see verdictOf in shared.ts). Spans throughout:
+// the strategy card renders these inside a <button>, which allows phrasing
+// content only.
+import { VERDICT_BG, VERDICT_COLOR, fmtPct, type VerdictKind } from './shared'
+
+export default function RateChip({ kind, name, rate, size = 'md', aria }: {
+  kind: VerdictKind
+  name: string
+  rate: number
+  size?: 'sm' | 'md'
+  aria?: string
+}) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full ${
+        size === 'sm' ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm'
+      }`}
+      style={{ background: VERDICT_BG[kind], color: VERDICT_COLOR[kind] }}
+      aria-label={aria}
+    >
+      <span className="font-semibold tabular-nums text-neutral-100">{name}</span>
+      <span className="font-semibold tabular-nums">{fmtPct(rate)}</span>
+    </span>
+  )
+}

@@ -15,7 +15,7 @@
 // rule's only outlet. Session definitions ship from the backend; this file only
 // restates them in the viewer's clock.
 import type { TFunction } from 'i18next'
-import type { SessionWindow } from '../../../api/types'
+import type { HourOutcome, SessionWindow, WinRateBucket } from '../../../api/types'
 
 // 已判定样本少于这个数的格子不显示百分比——只挡住 1–2 笔那种「100%」，
 // 那个连数字都不该给。3 笔起就照常显示。
@@ -109,6 +109,71 @@ export function wilsonBounds(hit: number, n: number, z = 1.96): [number, number]
   const centre = p + (z * z) / (2 * n)
   const margin = z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))
   return [Math.max(0, (centre - margin) / denom), Math.min(1, (centre + margin) / denom)]
+}
+
+// ── 排名：选前几名用 Wilson 下限，显示顺序用胜率 ──────────────────────────
+//
+// 两步是刻意的。**选**谁进榜用 Wilson 下限，薄样本自然沉底：3 笔全赢（下限
+// 0.439）排在 300 笔 62%（下限约 0.56）后面，不会因为"100%"就顶上来。**排**好
+// 之后按胜率显示，因为入榜的都已经过筛，读者看到 62% 排在 58% 前面才不困惑。
+//
+// Ranking in two steps, deliberately. Selection goes by the Wilson lower bound so
+// thin samples sink on their own: 3 straight wins (bound 0.439) sorts below 62%
+// of 300 (bound ≈0.56) rather than jumping the queue on the strength of "100%".
+// Display then goes by the raw rate, because everything shown has already passed
+// selection and a reader seeing 58% above 62% would just be confused.
+
+export type HourPick = { localMinutes: number; rate: number; kind: VerdictKind }
+export type NamedPick = { name: string; bucket: WinRateBucket; kind: VerdictKind }
+
+/** 钟点排名。`keep` 用来只保留某个时段内的钟点，`minRate` 用来只保留过半的。
+ *  标签换算成浏览者本地钟点——后端按 UTC 分桶，24 格是完整循环，旋转无损。
+ *  Rank hours; `keep` restricts to one session's hours, `minRate` to those at or
+ *  above a floor. Labels are in the viewer's clock: the backend buckets in UTC
+ *  and 24 slots are a full cycle, so the rotation is lossless. */
+export function rankHours(
+  hourly: HourOutcome[] | null,
+  now: Date,
+  opts: { limit: number; minRate?: number; keep?: (utcHour: number) => boolean },
+): HourPick[] {
+  if (!hourly) return []
+  const viewerOffset = -now.getTimezoneOffset()
+  const candidates: (HourPick & { low: number })[] = []
+  hourly.forEach((h, utcHour) => {
+    if (opts.keep && !opts.keep(utcHour)) return
+    const rate = rateFromCounts(h.tp, h.sl)
+    const kind = verdictOf(rate)
+    if (!isRated(kind) || rate.winRate === null) return
+    if (opts.minRate !== undefined && rate.winRate < opts.minRate) return
+    candidates.push({
+      localMinutes: (((utcHour * 60 + viewerOffset) % 1440) + 1440) % 1440,
+      rate: rate.winRate,
+      kind,
+      low: rate.wilsonLow ?? 0,
+    })
+  })
+  candidates.sort((a, b) => b.low - a.low)
+  return candidates.slice(0, opts.limit).sort((a, b) => b.rate - a.rate)
+}
+
+/** 具名桶（品种）排名，规则与 rankHours 一致。
+ *  Rank named buckets (symbols) by the same rule as rankHours. */
+export function rankBuckets(
+  items: Array<{ name: string; bucket: WinRateBucket | undefined }>,
+  opts: { limit: number; minRate?: number },
+): NamedPick[] {
+  const candidates: NamedPick[] = []
+  for (const { name, bucket } of items) {
+    if (!bucket) continue
+    const kind = verdictOf(bucket)
+    if (!isRated(kind) || bucket.winRate === null) continue
+    if (opts.minRate !== undefined && bucket.winRate < opts.minRate) continue
+    candidates.push({ name, bucket, kind })
+  }
+  candidates.sort((a, b) => (b.bucket.wilsonLow ?? 0) - (a.bucket.wilsonLow ?? 0))
+  return candidates
+    .slice(0, opts.limit)
+    .sort((a, b) => (b.bucket.winRate ?? 0) - (a.bucket.winRate ?? 0))
 }
 
 export function rateFromCounts(tp: number, sl: number): RateLike {

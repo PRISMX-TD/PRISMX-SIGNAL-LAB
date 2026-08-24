@@ -4,45 +4,43 @@
 // 是个会一直变的动态目标，而且胜率高不等于更赚钱（盈亏比差三倍时，胜率最低
 // 的策略可能期望最高）。列表标题下面直接把这句话写给读者。
 //
-// 卡片首行只放三样东西：名字、大数字（颜色即判定）、拔河条；右侧是窗口内每天的信号
-// 量柱——"这策略最近活不活跃"是新手除了准不准之外第二想知道的事。
+// 卡片首行不再放整体胜率、拔河条和信号量柱（产品要求），改为直接回答两个问题：
+// **这个策略在一天里的哪几个钟点胜率最高、在哪几个品种上胜率最高**。一个混合了
+// 所有钟点和所有品种的平均数不指导任何操作，而这两组芯片就是操作本身。
 //
 // One card per strategy; clicking expands the detail in place (accordion, one
 // open at a time). Order is the backend's resolved-count-desc — NOT a win-rate
 // ranking: the strategies are still being tuned, a ranking is a moving target,
 // and a higher win rate does not mean more money (with reward:risk spanning 3x,
 // the lowest win rate can carry the highest expectancy). The list caption says
-// so directly. The card's first row carries only the name, the big number (its
-// colour is the verdict), and the tug bar; then the window's daily signal volume —
-// "is this strategy active lately" is the second thing a newcomer asks.
+// so directly. The card's first row no longer carries the aggregate rate, the tug
+// bar or the volume sparkline (product decision); it answers two questions
+// instead: **which hours of the day this strategy is most accurate in, and which
+// symbols it is most accurate on**. An average blended across every hour and every
+// symbol guides no action; those two chip groups are the action.
 import { useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AdminStrategyWinRate, StrategyWinRate } from '../../../api/types'
+import RateChip from './RateChip'
 import StrategyDetail from './StrategyDetail'
-import TugBar from './TugBar'
-import { VERDICT_COLOR, fmtDurationText, fmtPct, isRated, verdictOf } from './shared'
+import { fmtClock, fmtDurationText, fmtPct, rankBuckets, rankHours } from './shared'
+
+const TOP_PER_CARD = 3
 
 // 全部用 <span>：它住在卡片的 <button> 里，按钮内只允许短语内容。
 // Spans only: this lives inside the card's <button>, which allows phrasing content only.
-function ActivityBars({ daily }: { daily: number[] }) {
+function ChipGroup({ label, chips, empty }: {
+  label: string; chips: React.ReactNode; empty: boolean
+}) {
   const { t } = useTranslation()
-  const max = Math.max(1, ...daily)
-  const total = daily.reduce((a, b) => a + b, 0)
   return (
-    <span className="block">
-      <span className="flex h-8 items-end gap-[2px]" role="img"
-            aria-label={t('admin.winrate.strategies.activityAria', { count: total, days: daily.length })}>
-        {daily.map((v, i) => (
-          <span
-            key={i}
-            className={`flex-1 rounded-sm ${i === daily.length - 1 ? 'bg-prism-400/70' : 'bg-neutral-500/35'}`}
-            style={{ height: `${Math.max(8, (v / max) * 100)}%` }}
-          />
-        ))}
-      </span>
-      <span className="mt-1 block text-2xs tabular-nums text-neutral-500">
-        {t('admin.winrate.strategies.activity', { days: daily.length })}
-      </span>
+    <span className="block min-w-0">
+      <span className="block text-2xs uppercase tracking-wider text-neutral-500">{label}</span>
+      {empty ? (
+        <span className="mt-1.5 block text-sm text-neutral-600">{t('admin.winrate.strategies.tooThin')}</span>
+      ) : (
+        <span className="mt-1.5 flex flex-wrap gap-1.5">{chips}</span>
+      )}
     </span>
   )
 }
@@ -65,14 +63,24 @@ function StrategyCard({ row, index, open, onToggle, data, activeKeys, now }: {
   useEffect(() => { if (open) setMounted(true) }, [open])
 
   const total = row.total
-  const kind = verdictOf(total)
-  const hasRate = isRated(kind) && total.winRate !== null
   const name = row.strategy || t('admin.winrate.strategies.unnamed')
   const facts: string[] = []
   if (total.avgResolveSeconds !== null) facts.push(t('admin.winrate.strategies.holding', { time: fmtDurationText(t, total.avgResolveSeconds) }))
-  const tugLabel = t('admin.winrate.aria.tug', {
-    label: name, tp: total.hitTp, sl: total.hitSl, rate: hasRate ? fmtPct(total.winRate!) : '—',
-  })
+
+  // 卡片上不给整体胜率、拔河条和信号量柱（产品要求），换成这个策略近 N 天最好的
+  // 几个钟点和品种——"这个策略什么时候、在什么品种上准"比一个混合平均数有用。
+  // **这里不设 0.5 下限**（顶层的「可以留意」有）：标题是"胜率最高的"，在描述这个
+  // 策略本身，最好的一个只有 45% 也是实情，红色会如实说出来。
+  // The card drops the aggregate rate, tug bar and volume sparkline (product
+  // decision) for this strategy's best hours and symbols — "when and on what is
+  // this strategy accurate" beats one blended average. **No 0.5 floor here** (the
+  // top layer's "worth a look" has one): these headings describe the strategy, so
+  // if its best is 45% that is the fact, and red says so.
+  const bestHours = rankHours(row.total.hourly, now, { limit: TOP_PER_CARD })
+  const bestSymbols = rankBuckets(
+    row.symbols.map((s) => ({ name: s.symbol, bucket: s.total })),
+    { limit: TOP_PER_CARD },
+  )
 
   return (
     <article
@@ -94,7 +102,7 @@ function StrategyCard({ row, index, open, onToggle, data, activeKeys, now }: {
         // offset, but this button fills the card and an outside ring is clipped
         // by the article's overflow-hidden. Inset 3px and follow the card radius
         // so the corners survive too.
-        className="grid w-full items-center gap-x-6 gap-y-4 p-5 text-left transition active:scale-[0.995] focus-visible:rounded-[22px] focus-visible:outline-offset-[-3px] md:grid-cols-[minmax(0,1.1fr)_minmax(0,1.7fr)_minmax(0,0.8fr)_auto] md:p-6"
+        className="grid w-full items-center gap-x-6 gap-y-4 p-5 text-left transition active:scale-[0.995] focus-visible:rounded-[22px] focus-visible:outline-offset-[-3px] md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1.3fr)_auto] md:p-6"
       >
         <span className="block min-w-0">
           <span className="block truncate text-base font-semibold text-neutral-100">{name}</span>
@@ -103,19 +111,26 @@ function StrategyCard({ row, index, open, onToggle, data, activeKeys, now }: {
           )}
         </span>
 
-        <span className="block min-w-0">
-          {/* 判定只剩颜色。写着判定的芯片全页删除（产品要求）。
-              Verdict by colour only; the worded chip is gone page-wide. */}
-          <span className="flex items-baseline gap-3">
-            <span className="font-display text-2xl font-bold leading-none tabular-nums"
-                  style={{ color: VERDICT_COLOR[kind] }}>
-              {hasRate ? fmtPct(total.winRate!) : '—'}
-            </span>
-          </span>
-          <TugBar className="mt-2.5" size="md" hitTp={total.hitTp} hitSl={total.hitSl} label={tugLabel} />
-        </span>
+        <ChipGroup
+          label={t('admin.winrate.strategies.bestHours')}
+          empty={bestHours.length === 0}
+          chips={bestHours.map((h) => (
+            <RateChip key={h.localMinutes} size="sm" kind={h.kind}
+                      name={fmtClock(h.localMinutes)} rate={h.rate} />
+          ))}
+        />
 
-        <span className="hidden md:block">{total.daily && <ActivityBars daily={total.daily} />}</span>
+        <ChipGroup
+          label={t('admin.winrate.strategies.bestSymbols')}
+          empty={bestSymbols.length === 0}
+          chips={bestSymbols.map((s) => (
+            <RateChip key={s.name} size="sm" kind={s.kind} name={s.name} rate={s.bucket.winRate!}
+                      aria={t('admin.winrate.aria.tug', {
+                        label: s.name, tp: s.bucket.hitTp, sl: s.bucket.hitSl,
+                        rate: fmtPct(s.bucket.winRate!),
+                      })} />
+          ))}
+        />
 
         <span className="flex items-center gap-1.5 text-xs text-neutral-500 md:justify-self-end">
           <span className="md:hidden">{open ? t('admin.winrate.strategies.collapse') : t('admin.winrate.strategies.expand')}</span>

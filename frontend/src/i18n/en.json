@@ -1007,11 +1007,11 @@
         "caption": "Ordered by signal count, not ranked by win rate — a higher win rate does not mean more profit. Click a card for details.",
         "unnamed": "Unnamed strategy",
         "holding": "outcome in {{time}} on average",
-        "activity": "Signals per day, last {{days}} days",
-        "activityAria_one": "Signals per day over the last {{days}} days, {{count}} in total",
-        "activityAria_other": "Signals per day over the last {{days}} days, {{count}} in total",
         "expand": "Details",
-        "collapse": "Collapse"
+        "collapse": "Collapse",
+        "bestHours": "Best hours",
+        "bestSymbols": "Best symbols",
+        "tooThin": "not enough trades yet"
       },
       "detail": {
         "intro": "How this strategy does under different conditions:",

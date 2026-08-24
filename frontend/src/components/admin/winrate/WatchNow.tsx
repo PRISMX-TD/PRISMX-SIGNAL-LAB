@@ -49,18 +49,15 @@
 // Neither trade counts nor worded verdict chips appear: the colour of the
 // percentage is the verdict — green above half, red below, grey undecided.
 import { useTranslation } from 'react-i18next'
-import type { AdminStrategyWinRate, SessionWindow, WinRateBucket } from '../../../api/types'
+import type { AdminStrategyWinRate, SessionWindow } from '../../../api/types'
+import RateChip from './RateChip'
 import SessionTimeline from './SessionTimeline'
 import {
-  SESSION_COLORS, VERDICT_BG, VERDICT_COLOR,
-  fmtClock, fmtDurationHm, fmtPct, isRated, rateFromCounts, sessionStatus, verdictOf,
-  zoneOffsetMinutes, type VerdictKind,
+  SESSION_COLORS, fmtClock, fmtDurationHm, fmtPct, rankBuckets, rankHours,
+  sessionStatus, zoneOffsetMinutes,
 } from './shared'
 
 const TOP_WATCH = 3
-
-type SymbolPick = { symbol: string; bucket: WinRateBucket; kind: VerdictKind }
-type HourPick = { localMinutes: number; rate: number; kind: VerdictKind }
 
 /** 某个 UTC 钟点落在哪些时段内。与后端 session_keys_for 同一条判断（时段按该金融
  *  中心的本地钟点定义），只是这里一次判一个钟点而不是一条信号。
@@ -75,66 +72,31 @@ function sessionsForUtcHour(hour: number, sessions: SessionWindow[], now: Date):
   return hit.length > 0 ? hit.map((s) => s.key) : ['outside']
 }
 
-/** 这个盘里胜率最高的几个钟点，标签是浏览者本地钟点。
- *  只取胜率过半且样本够判定的：把一个 45% 的钟点写成"最高的时间"是在推荐亏损。
- *  The best hours inside a session, labelled in the viewer's clock. Only hours at
- *  or above half with enough trades qualify: billing a 45% hour as "the best
- *  time" would be recommending a loss. */
-function pickHours(data: AdminStrategyWinRate, sessionKey: string, now: Date): HourPick[] {
-  const hourly = data.overall.total.hourly
-  if (!hourly) return []
-  const viewerOffset = -now.getTimezoneOffset()
-  const candidates: (HourPick & { low: number })[] = []
-  hourly.forEach((h, utcHour) => {
-    if (!sessionsForUtcHour(utcHour, data.sessions, now).includes(sessionKey)) return
-    const rate = rateFromCounts(h.tp, h.sl)
-    const kind = verdictOf(rate)
-    if (!isRated(kind) || rate.winRate === null || rate.winRate < 0.5) return
-    candidates.push({
-      localMinutes: (((utcHour * 60 + viewerOffset) % 1440) + 1440) % 1440,
-      rate: rate.winRate,
-      kind,
-      low: rate.wilsonLow ?? 0,
-    })
+/** 这个盘里胜率最高的几个钟点 / 品种。
+ *
+ *  **这两处加了 0.5 的下限**，策略卡上的同名榜单没有——差别在语气：这里的标题是
+ *  「可以留意」，是在给建议，把一个 45% 的钟点写进去等于推荐亏损；策略卡那两个
+ *  标题是「这个策略胜率最高的时间 / 品种」，是在描述这个策略本身，哪怕最好的一个
+ *  也只有 45%，那也是这个策略的实情，藏起来反而是隐瞒。
+ *
+ *  The best hours / symbols inside a session. **Both apply a 0.5 floor**, which
+ *  the identically-named lists on the strategy card do not — the difference is
+ *  register: this heading is "worth a look", a recommendation, and a 45% hour in
+ *  it would be recommending a loss; the card's headings are "this strategy's best
+ *  hours / symbols", a description, and if even its best is 45% that is the truth
+ *  about the strategy and hiding it would be the dishonest choice. */
+const pickHours = (data: AdminStrategyWinRate, sessionKey: string, now: Date) =>
+  rankHours(data.overall.total.hourly, now, {
+    limit: TOP_WATCH,
+    minRate: 0.5,
+    keep: (utcHour) => sessionsForUtcHour(utcHour, data.sessions, now).includes(sessionKey),
   })
-  candidates.sort((a, b) => b.low - a.low)
-  return candidates.slice(0, TOP_WATCH).sort((a, b) => b.rate - a.rate)
-}
 
-function pickSymbols(data: AdminStrategyWinRate, sessionKey: string): SymbolPick[] {
-  const candidates: SymbolPick[] = []
-  for (const s of data.overall.symbols) {
-    const bucket = s.sessions[sessionKey]
-    if (!bucket) continue
-    const kind = verdictOf(bucket)
-    if (!isRated(kind) || bucket.winRate === null || bucket.winRate < 0.5) continue
-    candidates.push({ symbol: s.symbol, bucket, kind })
-  }
-  candidates.sort((a, b) => (b.bucket.wilsonLow ?? 0) - (a.bucket.wilsonLow ?? 0))
-  return candidates
-    .slice(0, TOP_WATCH)
-    .sort((a, b) => (b.bucket.winRate ?? 0) - (a.bucket.winRate ?? 0))
-}
-
-/** 钟点与品种共用一种芯片：名字 + 胜率，颜色即判定。
- *  Hours and symbols share one chip shape: name, rate, colour as verdict. */
-function Chip({ kind, name, rate, aria }: {
-  kind: VerdictKind; name: string; rate: number; aria?: string
-}) {
-  return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm"
-      style={{ background: VERDICT_BG[kind], color: VERDICT_COLOR[kind] }}
-      aria-label={aria}
-    >
-      {/* 判定图形已按产品要求去掉，芯片只剩名字和百分比；判定由颜色承担。
-          The verdict glyph was removed at the product owner's request — a chip is
-          just a name and a percentage now, with colour carrying the verdict. */}
-      <span className="font-semibold tabular-nums text-neutral-100">{name}</span>
-      <span className="font-semibold tabular-nums">{fmtPct(rate)}</span>
-    </span>
+const pickSymbols = (data: AdminStrategyWinRate, sessionKey: string) =>
+  rankBuckets(
+    data.overall.symbols.map((s) => ({ name: s.symbol, bucket: s.sessions[sessionKey] })),
+    { limit: TOP_WATCH, minRate: 0.5 },
   )
-}
 
 function Group({ label, hint, children }: { label: string; hint: string; children: React.ReactNode }) {
   return (
@@ -185,7 +147,7 @@ function SessionBlock({ data, sessionKey, title, minutesLeft, now }: {
           {hours.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {hours.map((h) => (
-                <Chip key={h.localMinutes} kind={h.kind} name={fmtClock(h.localMinutes)} rate={h.rate} />
+                <RateChip key={h.localMinutes} kind={h.kind} name={fmtClock(h.localMinutes)} rate={h.rate} />
               ))}
             </div>
           ) : (
@@ -197,11 +159,11 @@ function SessionBlock({ data, sessionKey, title, minutesLeft, now }: {
           {picks.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {picks.map((p) => (
-                <Chip key={p.symbol} kind={p.kind} name={p.symbol} rate={p.bucket.winRate!}
-                      aria={t('admin.winrate.aria.tug', {
-                        label: p.symbol, tp: p.bucket.hitTp, sl: p.bucket.hitSl,
-                        rate: fmtPct(p.bucket.winRate!),
-                      })} />
+                <RateChip key={p.name} kind={p.kind} name={p.name} rate={p.bucket.winRate!}
+                          aria={t('admin.winrate.aria.tug', {
+                            label: p.name, tp: p.bucket.hitTp, sl: p.bucket.hitSl,
+                            rate: fmtPct(p.bucket.winRate!),
+                          })} />
               ))}
             </div>
           ) : (

@@ -1007,10 +1007,11 @@
         "caption": "按信号数量排序，不是按胜率排名——胜率高不等于更赚钱。点一张卡看细节。",
         "unnamed": "未命名策略",
         "holding": "平均 {{time}} 出结果",
-        "activity": "近 {{days}} 天每天信号量",
-        "activityAria": "近 {{days}} 天每天信号量，共 {{count}} 条",
         "expand": "看细节",
-        "collapse": "收起"
+        "collapse": "收起",
+        "bestHours": "胜率最高的时间",
+        "bestSymbols": "胜率最高的品种",
+        "tooThin": "笔数还不够"
       },
       "detail": {
         "intro": "这个策略在不同条件下准不准：",
