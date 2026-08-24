@@ -19,11 +19,32 @@
 import type { TFunction } from 'i18next'
 import type { SessionWindow } from '../../../api/types'
 
-// 已判定样本少于这个数的格子不显示百分比：「66.7%（3 笔里赢 2）」看着像结论，
-// 其实和抛硬币没区别。
-// Below this many resolved trades no percentage is shown: "66.7% (2 of 3)"
-// looks like a conclusion and is indistinguishable from a coin flip.
-export const MIN_SAMPLES = 5
+// 已判定样本少于这个数的格子不显示百分比。
+//
+// 从 5 降到 3（产品要求）：细到 24 个钟点之后，真实数据里几乎每一格都不到 5 笔，
+// 整张图一片空白，等于这个维度白做。
+//
+// 降到 3 是安全的，因为**真正把关的是下面的 Wilson 区间，不是这个门槛**：3 笔
+// 无论全赢还是全输，区间都跨过 50%（3/3 的下限只有 0.439），一律判成"还看不出
+// 高低"、显示成灰色。也就是说 3 笔的格子只会露出一个数字，绝不会被涂成绿色或
+// 红色、被读成结论。要拿到颜色至少得 4 笔全赢或全输（4/4 的下限 0.510）。
+// 门槛留在 3 而不是干脆去掉，是为了挡住 1–2 笔那种"100%"——那个连数字都不该给。
+//
+// Below this many resolved trades no percentage is shown.
+//
+// Lowered from 5 to 3 (product decision): sliced 24 ways, real data leaves
+// almost every hour cell under 5, so the whole grid came out blank and the
+// dimension was wasted.
+//
+// Three is safe because **the Wilson interval below is what actually gates the
+// verdict, not this floor**: at 3 trades the interval straddles 50% whether they
+// all won or all lost (3/3 has a lower bound of just 0.439), so such a cell is
+// always "can't tell yet" and always grey. A 3-trade cell can therefore show a
+// number but can never be painted green or red and read as a conclusion —
+// colour needs at least 4 straight wins or losses (4/4 bounds at 0.510). The
+// floor stays at 3 rather than going away entirely to suppress the 1-2 trade
+// "100%", which should not show a number at all.
+export const MIN_SAMPLES = 3
 
 // 区间跨过 50% 时再分两种情况：区间比这还宽（±10 个百分点以上）说「笔数还少，
 // 先别下结论」，比这窄才说「和一半差不多」——前者是证据不够，后者是证据说没差。
