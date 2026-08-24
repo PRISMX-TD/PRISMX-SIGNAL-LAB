@@ -1043,12 +1043,14 @@
         "nowActive": "现在：{{name}}",
         "nowLeft": "进行中 · 还剩 {{time}}",
         "nowOutside": "现在不在三大时段内",
-        "sessionRate": "{{name}}近 {{days}} 天胜率",
         "symbolsGood": "可以留意",
         "symbolsHint": "这个时段里近 {{days}} 天表现较好的品种",
         "symbolsNone": "近 {{days}} 天这个时段没有表现较好的品种。",
         "next": "下一个：{{name}} {{time}} 后开始",
-        "timelineTitle": "各时段 · 你的时间"
+        "timelineTitle": "各时段 · 你的时间",
+        "hoursGood": "这个盘里胜率最高的时间",
+        "hoursHint": "近 {{days}} 天，时间是你本地的",
+        "hoursNone": "近 {{days}} 天这个盘里没有胜率过半的时间。"
       },
       "details": {
         "show": "看细节：整体、各策略、各品种",

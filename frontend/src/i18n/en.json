@@ -1044,12 +1044,14 @@
         "nowActive": "Now: {{name}}",
         "nowLeft": "open · {{time}} left",
         "nowOutside": "Outside the three sessions right now",
-        "sessionRate": "{{name}} win rate, last {{days}} days",
         "symbolsGood": "Worth a look",
         "symbolsHint": "symbols doing better in this session over the last {{days}} days",
         "symbolsNone": "No symbol has done well in this session over the last {{days}} days.",
         "next": "Next: {{name}} opens in {{time}}",
-        "timelineTitle": "Sessions · your time"
+        "timelineTitle": "Sessions · your time",
+        "hoursGood": "Best hours in this session",
+        "hoursHint": "last {{days}} days, in your local time",
+        "hoursNone": "No hour in this session is above half over the last {{days}} days."
       },
       "details": {
         "show": "Show details: overall, each strategy, each symbol",
