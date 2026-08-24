@@ -1027,10 +1027,6 @@
         "title": "Each symbol",
         "caption": "Pooled across every strategy — one symbol may carry signals from several strategies."
       },
-      "method": {
-        "toggle": "How these numbers are computed",
-        "body": "TradingView platform signals only, pinned to the last {{days}} days. Win rate = take-profits ÷ (take-profits + stop-losses); signals with no outcome yet or with broken price tracking stay out of the denominator. Above half is green, below is red, an exact tie is grey — **this reads direction only, not sample size**: 2 of 3 and 200 of 300 are the same green, so colours flicker while counts are low and settle as they accumulate. Cells with fewer than {{min}} resolved trades show no percentage. Sessions are defined in each centre’s local time and follow DST automatically."
-      },
       "timeline": {
         "label": "24-hour session timeline",
         "window": "{{name}} {{start}}–{{end}}",
@@ -1051,10 +1047,6 @@
         "hoursGood": "Best hours in this session",
         "hoursHint": "last {{days}} days, in your local time",
         "hoursNone": "No hour in this session is above half over the last {{days}} days."
-      },
-      "details": {
-        "show": "Show details: overall, each strategy, each symbol",
-        "hide": "Hide details"
       },
       "aria": {
         "tug": "{{label}}: {{tp}} wins, {{sl}} losses, win rate {{rate}}"

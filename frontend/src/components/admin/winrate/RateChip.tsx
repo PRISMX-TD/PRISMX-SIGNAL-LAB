@@ -12,6 +12,7 @@
 // red below, grey on an exact tie; see verdictOf in shared.ts). Spans throughout:
 // the strategy card renders these inside a <button>, which allows phrasing
 // content only.
+import { useTranslation } from 'react-i18next'
 import { VERDICT_BG, VERDICT_COLOR, fmtPct, type VerdictKind } from './shared'
 
 export default function RateChip({ kind, name, rate, size = 'md', aria }: {
@@ -21,13 +22,22 @@ export default function RateChip({ kind, name, rate, size = 'md', aria }: {
   size?: 'sm' | 'md'
   aria?: string
 }) {
+  const { t } = useTranslation()
+  // 判定词并进无障碍名。芯片上判定**只剩颜色**，而颜色对读屏器根本不存在——
+  // 不并进来，用读屏器的人只会听到"22:00 67.7%"，拿不到"高于一半"这一维。
+  // 视觉上零成本：aria-label 不渲染。
+  // The verdict word joins the accessible name. On a chip the verdict is carried
+  // by colour alone, and colour does not exist for a screen reader — without this
+  // such a reader hears "22:00 67.7%" and never learns it is above half. Costs
+  // nothing visually: aria-label is not rendered.
+  const label = `${aria ?? `${name} ${fmtPct(rate)}`} · ${t(`admin.winrate.verdict.${kind}`)}`
   return (
     <span
       className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full ${
         size === 'sm' ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm'
       }`}
       style={{ background: VERDICT_BG[kind], color: VERDICT_COLOR[kind] }}
-      aria-label={aria}
+      aria-label={label}
     >
       <span className="font-semibold tabular-nums text-neutral-100">{name}</span>
       <span className="font-semibold tabular-nums">{fmtPct(rate)}</span>
