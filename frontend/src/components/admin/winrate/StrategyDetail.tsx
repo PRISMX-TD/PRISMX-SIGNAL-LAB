@@ -20,7 +20,6 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { HourOutcome, SessionWindow, StrategyWinRate, SymbolWinRate, WinRateBucket } from '../../../api/types'
 import TugBar from './TugBar'
-import { VerdictGlyph } from './Verdict'
 import {
   SESSION_COLORS, SIDE_COLORS, VERDICT_BG, VERDICT_COLOR,
   fmtClock, fmtPct, isRated, rateFromCounts, verdictOf,
@@ -108,18 +107,18 @@ function HourGrid({ hourly, now }: { hourly: HourOutcome[]; now: Date }) {
           <span key={s.localMinutes} className="rounded-md px-2 py-1.5 text-center"
                 style={{ background: VERDICT_BG[kind], color: VERDICT_COLOR[kind] }}>
             <span className="block text-2xs tabular-nums text-neutral-500">{label}</span>
-            <span className="flex items-center justify-center gap-1">
-              {/* 判定图形：一个裸百分比只靠颜色分不出「差不多」和「看不出」两种灰，
-                  色弱读者连红绿也分不开。
-                  The glyph: on a bare percentage the two greys ("even" vs
-                  "unsure") are indistinguishable by colour, and a colour-blind
-                  reader cannot separate red from green either. */}
-              <VerdictGlyph kind={kind} />
-              {/* 读屏器念出判定词：图形和底色对它都不存在 / spoken verdict for AT,
-                  which sees neither the glyph nor the tint */}
-              <span className="sr-only">{t(`admin.winrate.verdict.${kind}`)}</span>
-              <span className="text-sm font-semibold tabular-nums">{fmtPct(rate.winRate!, 0)}</span>
-            </span>
+            {/* 判定图形（↑↓=?）已按产品要求去掉，格子只剩钟点和百分比，判定由颜色
+                承担。代价是这里变成纯颜色编码：色弱读者分不出绿和红，「差不多」和
+                「还看不出」两种灰更是分不开。下面这行 sr-only 因此保留——它是读屏器
+                唯一能拿到判定的地方。
+                The verdict glyph was removed at the product owner's request: a cell
+                is now just an hour and a percentage, with colour carrying the
+                verdict. The cost is colour-only encoding — a colour-blind reader
+                cannot separate green from red, and the two greys ("about even" vs
+                "can't tell") not at all. The sr-only line below therefore stays: it
+                is the only place a screen reader can get the verdict. */}
+            <span className="sr-only">{t(`admin.winrate.verdict.${kind}`)}</span>
+            <span className="block text-sm font-semibold tabular-nums">{fmtPct(rate.winRate!, 0)}</span>
           </span>
         )
       })}

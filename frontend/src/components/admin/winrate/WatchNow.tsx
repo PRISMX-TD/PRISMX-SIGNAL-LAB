@@ -15,9 +15,9 @@
 // 与钟点标签本身的误差同源。
 //
 // 「可以留意」列**在当前时段里**近 N 天表现较好的品种前三个（胜率不低于一半、样本
-// 够判定），不要求"统计上明显更高"——产品要的是"最近表现较好的"，芯片前的图形
-// （↑ = ?）会告诉读者每一个有多稳；不列表现差的。欧洲盘与纽约盘重叠的四小时里两个
-// 盘都在进行，就各给一块；不在任何盘内时用「其他时段」那一桶。
+// 够判定），不要求"统计上明显更高"——产品要的是"最近表现较好的"；不列表现差的。
+// 欧洲盘与纽约盘重叠的四小时里两个盘都在进行，就各给一块；不在任何盘内时用
+// 「其他时段」那一桶。
 //
 // 选哪几个按 Wilson 下限（把薄样本沉下去），选出来之后按胜率排。这里只排钟点和
 // 品种，不排策略——策略维度整层不出现，点「看细节」才有。整页不显示笔数，也不显示
@@ -42,8 +42,8 @@
 //
 // "Worth a look" lists the top three symbols doing better *within the current
 // session* (rate at least half, enough trades for a verdict) — not required to
-// be "clearly better": the product wants "recently doing well", and the glyph
-// (↑ = ?) says how firm each one is. During the London/New York overlap both
+// be "clearly better": the product wants "recently doing well". During the
+// London/New York overlap both
 // sessions get a block; outside all three, the "outside" bucket is used.
 // Selection is by Wilson lower bound (thin samples sink), display by rate.
 // Neither trade counts nor worded verdict chips appear: the colour of the
@@ -51,7 +51,6 @@
 import { useTranslation } from 'react-i18next'
 import type { AdminStrategyWinRate, SessionWindow, WinRateBucket } from '../../../api/types'
 import SessionTimeline from './SessionTimeline'
-import { VerdictGlyph } from './Verdict'
 import {
   SESSION_COLORS, VERDICT_BG, VERDICT_COLOR,
   fmtClock, fmtDurationHm, fmtPct, isRated, rateFromCounts, sessionStatus, verdictOf,
@@ -117,8 +116,8 @@ function pickSymbols(data: AdminStrategyWinRate, sessionKey: string): SymbolPick
     .sort((a, b) => (b.bucket.winRate ?? 0) - (a.bucket.winRate ?? 0))
 }
 
-/** 钟点与品种共用一种芯片：左边一个 ↑ = ? 图形，中间名字，右边胜率。
- *  Hours and symbols share one chip shape: glyph, name, rate. */
+/** 钟点与品种共用一种芯片：名字 + 胜率，颜色即判定。
+ *  Hours and symbols share one chip shape: name, rate, colour as verdict. */
 function Chip({ kind, name, rate, aria }: {
   kind: VerdictKind; name: string; rate: number; aria?: string
 }) {
@@ -128,8 +127,9 @@ function Chip({ kind, name, rate, aria }: {
       style={{ background: VERDICT_BG[kind], color: VERDICT_COLOR[kind] }}
       aria-label={aria}
     >
-      {/* ↑ = ? 图形：这一个有多稳，不只靠颜色 / the glyph says how firm, not colour alone */}
-      <VerdictGlyph kind={kind} />
+      {/* 判定图形已按产品要求去掉，芯片只剩名字和百分比；判定由颜色承担。
+          The verdict glyph was removed at the product owner's request — a chip is
+          just a name and a percentage now, with colour carrying the verdict. */}
       <span className="font-semibold tabular-nums text-neutral-100">{name}</span>
       <span className="font-semibold tabular-nums">{fmtPct(rate)}</span>
     </span>

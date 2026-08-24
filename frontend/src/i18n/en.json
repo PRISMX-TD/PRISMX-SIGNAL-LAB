@@ -994,10 +994,9 @@
       "error": "Failed to load: {{message}}",
       "retry": "Retry",
       "verdict": {
-        "strong": "Clearly above half",
-        "weak": "Clearly below half",
-        "even": "About even",
-        "unsure": "Could go either way",
+        "strong": "Above half",
+        "weak": "Below half",
+        "even": "Exactly half",
         "thin": "Too few trades",
         "waiting": "Still waiting for an outcome",
         "broken": "Tracking broke, not counted",
@@ -1030,7 +1029,7 @@
       },
       "method": {
         "toggle": "How these numbers are computed",
-        "body": "TradingView platform signals only, pinned to the last {{days}} days. Win rate = take-profits ÷ (take-profits + stop-losses); signals with no outcome yet or with broken price tracking stay out of the denominator. \"Clearly above / below half\" means the 95% confidence interval of the win rate sits entirely on one side of 50% — more trades, narrower interval. Cells with fewer than {{min}} resolved trades show no percentage. Sessions are defined in each centre's local time and follow DST automatically."
+        "body": "TradingView platform signals only, pinned to the last {{days}} days. Win rate = take-profits ÷ (take-profits + stop-losses); signals with no outcome yet or with broken price tracking stay out of the denominator. Above half is green, below is red, an exact tie is grey — **this reads direction only, not sample size**: 2 of 3 and 200 of 300 are the same green, so colours flicker while counts are low and settle as they accumulate. Cells with fewer than {{min}} resolved trades show no percentage. Sessions are defined in each centre’s local time and follow DST automatically."
       },
       "timeline": {
         "label": "24-hour session timeline",

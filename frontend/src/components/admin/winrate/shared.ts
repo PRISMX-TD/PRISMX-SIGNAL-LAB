@@ -1,59 +1,28 @@
 // 胜率页共享：判定规则、配色、时间换算。
 //
-// 这一版页面的核心是把统计学翻译成人话：页面上**只有一条**"能不能当结论"的
-// 规则（verdictOf），所有层级——总览、策略卡、时段行、钟点格、品种行——都从
-// 这里拿判定，再把它渲染成「明显高于一半 / 和一半差不多 / 笔数还少」这类新手
-// 一眼能懂的词。置信区间仍是判定依据，但不再作为图形让读者自己去解读。
+// 页面上**只有一条**判定规则（verdictOf），所有层级——策略卡、时段行、钟点格、
+// 品种行、顶层芯片——都从这里拿判定，再渲染成颜色：过半绿、没过半红。
+// 判定词本身已从界面上全部撤掉（只留给读屏器），所以这条规则的唯一出口就是颜色。
 //
 // 时段的小时窗口与 IANA 时区由后端下发（sessions 字段），这里只做"翻译成浏览者
 // 钟点"，绝不复制一份时段定义。
 //
 // Shared helpers for the win-rate page: the verdict rule, colours, time maths.
-// The page's whole point is to translate statistics into plain words, so there
-// is exactly ONE "can this be a conclusion" rule (verdictOf); every layer —
-// hero, strategy card, session row, hour cell, symbol row — gets its verdict
-// here and renders it as a phrase a newcomer understands. The confidence
-// interval is still the evidence; it just stops being a glyph the reader has to
-// decode. Session definitions ship from the backend; this file only restates
-// them in the viewer's clock.
+// There is exactly ONE verdict rule (verdictOf); every layer — strategy card,
+// session row, hour cell, symbol row, top-layer chip — takes its verdict here
+// and renders it as colour: green above half, red below. The worded verdicts are
+// gone from the interface (screen readers still get them), so colour is this
+// rule's only outlet. Session definitions ship from the backend; this file only
+// restates them in the viewer's clock.
 import type { TFunction } from 'i18next'
 import type { SessionWindow } from '../../../api/types'
 
-// 已判定样本少于这个数的格子不显示百分比。
-//
-// 从 5 降到 3（产品要求）：细到 24 个钟点之后，真实数据里几乎每一格都不到 5 笔，
-// 整张图一片空白，等于这个维度白做。
-//
-// 降到 3 是安全的，因为**真正把关的是下面的 Wilson 区间，不是这个门槛**：3 笔
-// 无论全赢还是全输，区间都跨过 50%（3/3 的下限只有 0.439），一律判成"还看不出
-// 高低"、显示成灰色。也就是说 3 笔的格子只会露出一个数字，绝不会被涂成绿色或
-// 红色、被读成结论。要拿到颜色至少得 4 笔全赢或全输（4/4 的下限 0.510）。
-// 门槛留在 3 而不是干脆去掉，是为了挡住 1–2 笔那种"100%"——那个连数字都不该给。
-//
-// Below this many resolved trades no percentage is shown.
-//
-// Lowered from 5 to 3 (product decision): sliced 24 ways, real data leaves
-// almost every hour cell under 5, so the whole grid came out blank and the
-// dimension was wasted.
-//
-// Three is safe because **the Wilson interval below is what actually gates the
-// verdict, not this floor**: at 3 trades the interval straddles 50% whether they
-// all won or all lost (3/3 has a lower bound of just 0.439), so such a cell is
-// always "can't tell yet" and always grey. A 3-trade cell can therefore show a
-// number but can never be painted green or red and read as a conclusion —
-// colour needs at least 4 straight wins or losses (4/4 bounds at 0.510). The
-// floor stays at 3 rather than going away entirely to suppress the 1-2 trade
-// "100%", which should not show a number at all.
+// 已判定样本少于这个数的格子不显示百分比——只挡住 1–2 笔那种「100%」，
+// 那个连数字都不该给。3 笔起就照常显示。
+// Below this many resolved trades no percentage is shown. It only suppresses the
+// 1-2 trade "100%", which should not show a number at all; from 3 up, a cell
+// renders normally.
 export const MIN_SAMPLES = 3
-
-// 区间跨过 50% 时再分两种情况：区间比这还宽（±10 个百分点以上）说「笔数还少，
-// 先别下结论」，比这窄才说「和一半差不多」——前者是证据不够，后者是证据说没差。
-// 在 50% 附近，宽 0.20 大约对应 90 多笔。
-// When the interval straddles 50%, split two cases: wider than this (more than
-// ±10 points) reads "too few to tell", narrower reads "about even" — the first
-// is a lack of evidence, the second is evidence of no edge. Near 50%, a width
-// of 0.20 corresponds to roughly 90 trades.
-export const UNSURE_WIDTH = 0.2
 
 // 时段配色：亚洲青 / 欧洲紫 / 纽约金，「其他时段」用说明文字灰。只用在小圆点与
 // 时段色带上，是身份色不是好坏色。
@@ -76,7 +45,7 @@ export const SIDE_COLORS: Record<string, string> = { BUY: '#60a5fa', SELL: '#f0a
 // waiting / broken: signals exist but none has resolved yet — all still open, or
 // all with broken tracking. Not "only 0 trades", which would conflate "no
 // outcome yet" with "too small a sample".
-export type VerdictKind = 'strong' | 'weak' | 'even' | 'unsure' | 'thin' | 'waiting' | 'broken' | 'none'
+export type VerdictKind = 'strong' | 'weak' | 'even' | 'thin' | 'waiting' | 'broken' | 'none'
 
 export interface RateLike {
   samples: number
@@ -88,22 +57,43 @@ export interface RateLike {
   stale?: number
 }
 
-/** 四种"有百分比可看"的判定 / the four verdicts that come with a percentage */
+/** 三种"有百分比可看"的判定 / the three verdicts that come with a percentage */
 export const isRated = (k: VerdictKind): boolean =>
-  k === 'strong' || k === 'weak' || k === 'even' || k === 'unsure'
+  k === 'strong' || k === 'weak' || k === 'even'
 
-/** 全页唯一的判定规则。区间完全落在 50% 一侧才算"明显"；跨过 50% 按宽度分
- *  "说不准"与"差不多"；笔数不够只报笔数。
- *  The page's single verdict rule: only an interval entirely on one side of 50%
- *  counts as "clearly"; straddling splits by width into "unsure" vs "even";
- *  too few trades reports the count only. */
+/** 全页唯一的判定规则：**过半就绿，没过半就红**，正好一半才灰。
+ *
+ *  这里刻意不再用 Wilson 区间把关（产品要求）。之前的规则是"区间整体落在 50%
+ *  一侧才上色，否则显示成灰色的'还看不出高低'"——统计上更严谨，但切到 24 个钟点
+ *  之后每格只有三五笔，区间必然跨过 50%，于是整张图全是灰的，等于什么都没说。
+ *  产品的判断是：先看方向，笔数会随时间自己攒起来。
+ *
+ *  **代价要清楚**：绿色不再等于"统计上站得住"，只等于"到目前为止过半"。3 笔
+ *  里赢 2 笔（67%）和 300 笔里赢 200 笔（67%）现在是同一个绿。排序仍然用
+ *  Wilson 下限（见 WatchNow 的 pickHours / pickSymbols），所以顶层榜单里薄样本
+ *  还是会沉底——把关只是从"显示"退到了"排序"。
+ *
+ *  The page's single verdict rule: **above half is green, below is red**, and
+ *  only an exact tie is grey.
+ *
+ *  The Wilson interval deliberately no longer gates this (product decision). The
+ *  old rule painted a cell only when the whole interval sat on one side of 50%
+ *  and showed grey "can't tell yet" otherwise — statistically stricter, but
+ *  sliced 24 ways each cell holds a handful of trades, the interval always
+ *  straddles 50%, and the entire grid came out grey, saying nothing. The product
+ *  call is to show direction now and let the counts accumulate over time.
+ *
+ *  **The cost is explicit**: green no longer means "statistically established",
+ *  only "above half so far". 2 of 3 (67%) and 200 of 300 (67%) are now the same
+ *  green. Ranking still uses the Wilson lower bound (see pickHours /
+ *  pickSymbols in WatchNow), so thin candidates still sink in the top-3 lists —
+ *  the gate moved from display to ordering, it did not disappear. */
 export function verdictOf(b: RateLike): VerdictKind {
   if (b.samples === 0) return 'none'
   if (b.resolved === 0) return (b.pending ?? 0) > 0 ? 'waiting' : 'broken'
-  if (b.winRate === null || b.wilsonLow === null || b.wilsonHigh === null || b.resolved < MIN_SAMPLES) return 'thin'
-  if (b.wilsonLow > 0.5) return 'strong'
-  if (b.wilsonHigh < 0.5) return 'weak'
-  if (b.wilsonHigh - b.wilsonLow > UNSURE_WIDTH) return 'unsure'
+  if (b.winRate === null || b.resolved < MIN_SAMPLES) return 'thin'
+  if (b.winRate > 0.5) return 'strong'
+  if (b.winRate < 0.5) return 'weak'
   return 'even'
 }
 
@@ -135,18 +125,17 @@ export function rateFromCounts(tp: number, sl: number): RateLike {
   }
 }
 
-// 判定配色：绿/红是市场语义色（设计令牌里的 --up / --down），只在"能当结论"时
-// 出现；其余一律中性灰，而且引用 index.css 的文字灰令牌而不是抄数值——令牌
-// 抬一次，这里跟着动。
-// Verdict colours: green/red are the market tokens (--up / --down) and appear
-// only when something is a conclusion; everything else is neutral and refers
-// to the text-grey tokens in index.css rather than copying their values, so a
-// token lift moves this page with it.
+// 判定配色：绿/红是市场语义色（设计令牌里的 --up / --down），过半绿、没过半红；
+// 正好一半与"还没数可看"的几种状态一律中性灰，而且引用 index.css 的文字灰令牌
+// 而不是抄数值——令牌抬一次，这里跟着动。
+// Verdict colours: green/red are the market tokens (--up / --down) for above and
+// below half; an exact tie and the several "nothing to show yet" states are
+// neutral, referring to the text-grey tokens in index.css rather than copying
+// their values, so a token lift moves this page with it.
 export const VERDICT_COLOR: Record<VerdictKind, string> = {
   strong: 'var(--up)',
   weak: 'var(--down)',
   even: 'var(--text-2)',
-  unsure: 'var(--text-3)',
   thin: 'var(--text-3)',
   waiting: 'var(--text-3)',
   broken: 'var(--text-3)',
@@ -157,7 +146,6 @@ export const VERDICT_BG: Record<VerdictKind, string> = {
   strong: 'var(--up-bg)',
   weak: 'var(--down-bg)',
   even: 'rgba(255,255,255,0.07)',
-  unsure: 'rgba(255,255,255,0.05)',
   thin: 'rgba(255,255,255,0.04)',
   waiting: 'rgba(255,255,255,0.04)',
   broken: 'rgba(255,255,255,0.04)',
