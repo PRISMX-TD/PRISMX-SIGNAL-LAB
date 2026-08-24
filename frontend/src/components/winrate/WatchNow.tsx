@@ -49,7 +49,7 @@
 // Neither trade counts nor worded verdict chips appear: the colour of the
 // percentage is the verdict — green above half, red below, grey undecided.
 import { useTranslation } from 'react-i18next'
-import type { AdminStrategyWinRate, SessionWindow } from '../../../api/types'
+import type { AdminStrategyWinRate, SessionWindow } from '../../api/types'
 import RateChip from './RateChip'
 import SessionTimeline from './SessionTimeline'
 import {

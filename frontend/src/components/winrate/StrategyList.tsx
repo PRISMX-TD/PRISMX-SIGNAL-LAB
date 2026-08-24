@@ -20,7 +20,7 @@
 // symbol guides no action; those two chip groups are the action.
 import { useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { AdminStrategyWinRate, StrategyWinRate } from '../../../api/types'
+import type { AdminStrategyWinRate, StrategyWinRate } from '../../api/types'
 import RateChip from './RateChip'
 import StrategyDetail from './StrategyDetail'
 import { fmtClock, fmtDurationText, fmtPct, rankBuckets, rankHours } from './shared'

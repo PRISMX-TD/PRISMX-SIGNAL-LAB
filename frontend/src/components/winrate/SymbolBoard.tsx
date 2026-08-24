@@ -6,7 +6,7 @@
 // read exactly like strategy cards and session rows: name, percentage, verdict
 // chip, tug bar.
 import { useTranslation } from 'react-i18next'
-import type { AdminStrategyWinRate, WinRateBucket } from '../../../api/types'
+import type { AdminStrategyWinRate, WinRateBucket } from '../../api/types'
 import TugBar from './TugBar'
 import { VERDICT_COLOR, fmtPct, isRated, verdictOf } from './shared'
 

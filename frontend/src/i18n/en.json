@@ -301,7 +301,8 @@
     "subtitle": "Powered by Signal Lab quant factors",
     "tabs": {
       "realtime": "Live Signals",
-      "platformStrategies": "Strategy Guide"
+      "platformStrategies": "Strategy Guide",
+      "analysis": "Analysis"
     },
     "guide": {
       "empty": "Strategy write-ups are being prepared.",
@@ -349,7 +350,6 @@
       "remainingTtl": "Time left",
       "otherActive": "Other active signals",
       "rrLabel": "R:R",
-      "overview": "Market Overview",
       "signalTotal": "Total Signals",
       "signalVolume7d": "Signal Volume (7D)",
       "quotesHeading": "Live Quotes",
@@ -384,7 +384,17 @@
     "colEntry": "Entry",
     "colSl": "SL",
     "colTp": "TP",
-    "colIndicator": "Trigger"
+    "colIndicator": "Trigger",
+    "analysis": {
+      "title": "Strategy analysis",
+      "subtitle": "Last {{days}} days · objective win rate of published strategies",
+      "error": "Failed to load: {{message}}",
+      "retry": "Retry",
+      "empty": {
+        "title": "No published strategy data yet",
+        "body": "The platform is still accumulating resolved outcomes per strategy. Once published, you will see here when and on which symbols they do better."
+      }
+    }
   },
   "order": {
     "slideToConfirm": "Slide to confirm",
@@ -976,7 +986,7 @@
     "planBreakdown": "Plan breakdown",
     "tab": {
       "data": "Dashboard",
-      "winrate": "Win Rate",
+      "winrate": "Publication",
       "users": "Users",
       "invites": "Invite Links",
       "ops": "Operations",
@@ -985,14 +995,6 @@
       "tickets": "Tickets"
     },
     "winrate": {
-      "title": "Strategy win rate",
-      "subtitle": "Last {{days}} days",
-      "empty": {
-        "title": "No TradingView signals in the last {{days}} days",
-        "body": "Numbers appear here once signals arrive through the TradingView webhook and reach take-profit or stop-loss."
-      },
-      "error": "Failed to load: {{message}}",
-      "retry": "Retry",
       "verdict": {
         "strong": "Above half",
         "weak": "Below half",
@@ -1046,7 +1048,8 @@
         "timelineTitle": "Sessions · your time",
         "hoursGood": "Best hours in this session",
         "hoursHint": "last {{days}} days, in your local time",
-        "hoursNone": "No hour in this session is above half over the last {{days}} days."
+        "hoursNone": "No hour in this session is above half over the last {{days}} days.",
+        "sessionRate": "{{name}} win rate, last {{days}} days"
       },
       "aria": {
         "tug": "{{label}}: {{tp}} wins, {{sl}} losses, win rate {{rate}}"
@@ -1222,7 +1225,19 @@
     "strategyPlatformTitle": "Custom Strategy Platform",
     "strategyMaxPerUser": "Max strategies per user",
     "strategyProOnly": "PRO-exclusive",
-    "colPhone": "Phone"
+    "colPhone": "Phone",
+    "winratePublish": {
+      "title": "Strategy publication",
+      "hint": "Tick which strategies' win rates are visible to users, on the signals page's \"Analysis\" tab — FREE and PRO alike, with no delay — and on the dashboard's session win-rate card. Ticking a box moves the denominator, not just a list: the session and symbol win rates users see are computed from published strategies alone. The rates below use the same {{days}}-day window users get.",
+      "publicLabel": "Public",
+      "resolved_one": "{{count}} resolved in the last 30 days",
+      "resolved_other": "{{count}} resolved in the last 30 days",
+      "noSignals": "no signals in the last {{days}} days",
+      "noStrategies": "No strategy has produced a signal in the last {{days}} days.",
+      "nonePublic": "Nothing published; users see an empty state.",
+      "countPublic_one": "{{count}} strategy published.",
+      "countPublic_other": "{{count}} strategies published."
+    }
   },
   "discipline": {
     "title": "Discipline Score",
@@ -1841,6 +1856,13 @@
     "notification": {
       "newReply": "New reply",
       "body": "{{email}} replied to your ticket"
+    }
+  },
+  "dashboard": {
+    "sessionWinrate": {
+      "title": "Session win rate",
+      "empty": "No published strategy data yet; this will show the current session's performance once published.",
+      "noneYet": "nothing stands out in this session yet"
     }
   }
 }

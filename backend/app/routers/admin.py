@@ -22,7 +22,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
 from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, Signal, User
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
 from app.services.strategy_winrate import compute_strategy_session_winrate
 from app.services.settings_store import (
@@ -34,6 +34,7 @@ from app.services.settings_store import (
     get_strategy_costs,
     get_strategy_settings,
     get_trial_settings,
+    get_winrate_settings,
     invalidate_candle_cache,
     invalidate_discipline_cache,
     invalidate_platform_strategies_cache,
@@ -42,6 +43,7 @@ from app.services.settings_store import (
     invalidate_strategy_costs_cache,
     invalidate_strategy_settings_cache,
     invalidate_trial_cache,
+    invalidate_winrate_settings_cache,
     save_candle_settings,
     save_discipline_settings,
     save_platform_strategies,
@@ -49,6 +51,7 @@ from app.services.settings_store import (
     save_strategy_costs,
     save_strategy_settings,
     save_trial_settings,
+    save_winrate_settings,
     set_setting,
 )
 
@@ -553,6 +556,76 @@ def strategy_winrate(
     thread pool, leaving the event loop free for the live-quote WebSockets.
     """
     return compute_strategy_session_winrate(db, days)
+
+
+# ---------- 胜率对外公开设置 / win-rate publication settings ----------
+
+# 设置页的统计窗口。与用户端「策略分析」页固定的 30 天保持一致——管理员按这里的
+# 数字决定公不公开，用户看到的必须是同一个窗口算出来的，否则勾选依据和展示结果
+# 对不上。
+# The settings page's window, matching the 30 days the user-facing analysis page
+# is pinned to: an admin decides based on these numbers, so users must be seeing
+# the same window or the basis for ticking a box and the published result diverge.
+WINRATE_PUBLIC_DAYS = 30
+
+
+@router.get("/winrate-settings", response_model=AdminWinrateSettings)
+def get_winrate_publication_settings(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """列出全部策略、各自近 30 天胜率、以及是否已对用户公开。
+
+    **这里不过滤白名单**：管理员要看着全部策略的胜率才能决定公开谁，只显示已公开
+    的等于让人闭着眼睛勾。白名单里存在、但窗口内没有信号的策略也补进列表（胜率
+    null），否则管理员会以为自己没勾过。
+
+    Lists every strategy with its 30-day win rate and whether it is published.
+    **No whitelist filtering here**: an admin decides by comparing all strategies,
+    and showing only the published ones would mean ticking boxes blind. Names in
+    the whitelist with no signals in the window are appended (null win rate) or
+    the admin would think the box was never ticked.
+    """
+    public = set(get_winrate_settings(db)["public_strategies"])
+    data = compute_strategy_session_winrate(db, WINRATE_PUBLIC_DAYS)
+    rows = [
+        AdminWinrateStrategyOut(
+            strategy=row["strategy"],
+            resolved=row["total"]["resolved"],
+            winRate=row["total"]["winRate"],
+            public=row["strategy"] in public,
+        )
+        for row in data["strategies"]
+    ]
+    seen = {r.strategy for r in rows}
+    rows.extend(
+        AdminWinrateStrategyOut(strategy=name, resolved=0, winRate=None, public=True)
+        for name in sorted(public - seen)
+    )
+    return AdminWinrateSettings(days=WINRATE_PUBLIC_DAYS, strategies=rows)
+
+
+@router.put("/winrate-settings", response_model=AdminWinrateSettings)
+def put_winrate_publication_settings(
+    body: AdminWinrateSettingsIn,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """保存公开名单。名单直接决定用户端「策略分析」与仪表盘卡片统计哪些信号。
+    Save the whitelist; it decides which signals the user-facing analysis page and
+    the dashboard card are computed from."""
+    # 去重并保持稳定顺序；空串（信号没带策略名的那一桶）不允许进名单——它在界面上
+    # 显示成「未命名策略」，公开一个没有名字的策略对用户没有意义。
+    # De-duplicate with a stable order. The empty string (the bucket for signals
+    # that carried no strategy name) is never publishable: it renders as "unnamed
+    # strategy", and publishing a nameless one means nothing to a user.
+    names = sorted({n.strip() for n in body.publicStrategies if n.strip()})
+    save_winrate_settings(db, {"public_strategies": names})
+    _log_change(db, admin.id, admin.id, "setting:winrate", None,
+                json.dumps({"public_strategies": names}, ensure_ascii=False))
+    db.commit()
+    invalidate_winrate_settings_cache()
+    return get_winrate_publication_settings(db, admin)
 
 
 # ---------- 订阅定价设置 / subscription pricing settings ----------

@@ -333,7 +333,57 @@ def _finalize(bucket: dict, days: int, include_daily: bool) -> dict:
     }
 
 
-def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
+def _shape(buckets: dict[str, dict], days: int, all_keys: list[str]) -> dict:
+    """一组桶 → 下发形状。模块级而不是闭包：`_empty_payload` 也要用它，两处形状
+    必须一模一样，复制一份迟早会漂移。
+    Buckets → wire shape. Module-level rather than a closure because
+    `_empty_payload` needs it too and the two shapes must stay identical; a copy
+    would drift.
+    """
+    return {
+        "total": _finalize(buckets["total"], days, True),
+        "sessions": {k: _finalize(buckets[k], days, True) for k in all_keys},
+        # 方向桶不下发每日分布：再按天切一刀样本就更薄了，而"做多还是做空更好"
+        # 是个跨整个窗口的问题，不需要按天看。
+        # Side buckets ship no per-day distribution: slicing by day on top of
+        # by direction thins the sample further, and "does long or short do
+        # better" is a whole-window question anyway.
+        "sides": {k: _finalize(buckets[k], days, False) for k in SIDE_KEYS},
+    }
+
+
+def _empty_payload(days: int, now: datetime) -> dict:
+    """空名单时的零结果，形状与正常返回**完全一致**。
+
+    直接 return 而不是让空查询自然跑完，是为了省掉一次必然为空的全表扫描；
+    但形状必须一字不差，否则前端会在"公开名单为空"这条路径上撞到 undefined，
+    而那恰恰是这个设置上线后的**默认状态**——最常走的路径最不能出错。
+
+    A zero result for an empty whitelist, shaped **identically** to a normal
+    return. Returning early skips a scan that is guaranteed to match nothing, but
+    the shape has to match exactly or the frontend hits undefined on the
+    empty-whitelist path — which is this setting's **default state** after ship,
+    i.e. the most-travelled path of all.
+    """
+    all_keys = [s.key for s in SESSIONS] + [OUTSIDE_KEY]
+    buckets = {k: _empty_bucket(days) for k in [*all_keys, "total", *SIDE_KEYS]}
+    return {
+        "days": days,
+        "windowStart": now - timedelta(days=days),
+        "windowEnd": now,
+        "lastResolvedAt": None,
+        "sessions": [
+            {"key": s.key, "tz": s.tz, "startHour": s.start_hour, "endHour": s.end_hour}
+            for s in SESSIONS
+        ],
+        "overall": {"strategy": "", **_shape(buckets, days, all_keys), "symbols": []},
+        "strategies": [],
+    }
+
+
+def compute_strategy_session_winrate(
+    db: Session, days: int = 7, only_strategies: list[str] | None = None
+) -> dict:
     """近 `days` 天（滚动窗口，按信号创建时间）每个策略在各时段的胜率。
 
     按 created_at 而不是 resolved_at 归档与分桶：问的是"这个策略在欧洲盘发出的
@@ -362,15 +412,40 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
     # same reasoning as signal_resolution.py. symbol feeds the per-symbol
     # breakdown (Task 3).
     cutoff_naive = cutoff.replace(tzinfo=None)
-    rows = (
-        db.query(Signal.indicator, Signal.symbol, Signal.side, Signal.created_at,
-                 Signal.result, Signal.resolved_at)
-        .filter(
-            Signal.source == "tradingview",
-            Signal.created_at >= cutoff_naive,
-        )
-        .all()
+    query = db.query(
+        Signal.indicator, Signal.symbol, Signal.side, Signal.created_at,
+        Signal.result, Signal.resolved_at,
+    ).filter(
+        Signal.source == "tradingview",
+        Signal.created_at >= cutoff_naive,
     )
+    # 白名单过滤在**取数这一层**，不是在结果里删几行：用户端的时段胜率、品种胜率
+    # 都要只用白名单内策略的信号算，分母跟着变。只公开 AIFT 时，"欧洲盘 56%"
+    # 必须是 AIFT 在欧洲盘的胜率，而不是全平台的 56% 配一份只剩 AIFT 的策略列表——
+    # 后者会让两个数字互相矛盾，且没有任何地方说明为什么。
+    #
+    # `only_strategies == []`（空名单，也就是默认的"一个都不公开"）与 None 必须
+    # 区分开：None = 不过滤（管理页），[] = 过滤掉一切（用户端未配置时）。用
+    # `is not None` 判断，不要写成 `if only_strategies:`——那会把空名单当成不过滤，
+    # 一行代码把"默认不公开"变成"默认全公开"。
+    #
+    # The whitelist filters **at the fetch**, not by dropping rows from the
+    # result: the user-facing page's session and symbol win rates must be computed
+    # from whitelisted strategies alone, denominator included. With only AIFT
+    # published, "European 56%" has to be AIFT's European win rate, not the
+    # platform's 56% next to a list containing only AIFT — those two numbers would
+    # contradict each other with nothing on the page explaining why.
+    #
+    # `only_strategies == []` (the default "publish nothing") must stay distinct
+    # from None: None means no filtering (admin), [] means filter everything out.
+    # Hence `is not None` — writing `if only_strategies:` would treat the empty
+    # list as "no filter" and turn "publish nothing by default" into "publish
+    # everything" in one line.
+    if only_strategies is not None:
+        if not only_strategies:
+            return _empty_payload(days, now)
+        query = query.filter(Signal.indicator.in_(only_strategies))
+    rows = query.all()
 
     # 判定链路的健康读数：全表最近一次成功判定的时间，**刻意不受窗口限制**。
     # 判定只在 POST /webhook/trend 带着 high/low 进来时发生（见 routers/webhook.py），
@@ -504,18 +579,6 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
         _accumulate(overall_symbols[symbol], bucket_keys, key, day_idx, hour, side_key,
                     resolve_seconds, False)
 
-    def _shape(buckets: dict[str, dict]) -> dict:
-        return {
-            "total": _finalize(buckets["total"], days, True),
-            "sessions": {k: _finalize(buckets[k], days, True) for k in all_keys},
-            # 方向桶不下发每日分布：再按天切一刀样本就更薄了，而"做多还是做空更好"
-            # 是个跨整个窗口的问题，不需要按天看。
-            # Side buckets ship no per-day distribution: slicing by day on top of
-            # by direction thins the sample further, and "does long or short do
-            # better" is a whole-window question anyway.
-            "sides": {k: _finalize(buckets[k], days, False) for k in SIDE_KEYS},
-        }
-
     def _shape_symbols(sym_map: dict[str, dict]) -> list[dict]:
         rows = [
             {
@@ -534,7 +597,7 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
 
     strategies = [
         {
-            "strategy": name, **_shape(buckets),
+            "strategy": name, **_shape(buckets, days, all_keys),
             "symbols": _shape_symbols(per_strategy_symbols.get(name, {})),
         }
         for name, buckets in per_strategy.items()
@@ -571,7 +634,7 @@ def compute_strategy_session_winrate(db: Session, days: int = 7) -> dict:
         # both the overview and the per-strategy layer. `symbols` here is the
         # platform-wide distribution rather than an empty list: the overview
         # layer needs it to answer "which symbols are active and winning".
-        "overall": {"strategy": "", **_shape(overall),
+        "overall": {"strategy": "", **_shape(overall, days, all_keys),
                     "symbols": _shape_symbols(overall_symbols)},
         "strategies": strategies,
     }

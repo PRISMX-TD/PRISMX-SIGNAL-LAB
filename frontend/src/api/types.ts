@@ -226,6 +226,26 @@ export interface StrategyWinRate {
   symbols: SymbolWinRate[]
 }
 
+// 胜率公开设置：管理页那张表的一行。
+// `resolved == 0` 且 `winRate == null` = 这个策略近 N 天没有已判定信号（新上线，
+// 或早已停用）。这种行照样返回并显示"近 N 天没有信号"，不静默丢弃——丢掉会让
+// 管理员以为自己没勾过它。
+// One row of the win-rate publication settings table. `resolved == 0` with a null
+// winRate means no resolved signals in the window (new, or long retired). Such
+// rows are still shown, labelled as such, rather than dropped silently — which
+// would read as "I never ticked that".
+export interface AdminWinrateStrategy {
+  strategy: string
+  resolved: number
+  winRate: number | null
+  public: boolean
+}
+
+export interface AdminWinrateSettings {
+  days: number
+  strategies: AdminWinrateStrategy[]
+}
+
 export interface AdminStrategyWinRate {
   days: number
   windowStart: string

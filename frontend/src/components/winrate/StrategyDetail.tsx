@@ -18,7 +18,7 @@
 // weekday cannot answer; the time-to-resolution block is gone entirely.
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { HourOutcome, SessionWindow, StrategyWinRate, SymbolWinRate, WinRateBucket } from '../../../api/types'
+import type { HourOutcome, SessionWindow, StrategyWinRate, SymbolWinRate, WinRateBucket } from '../../api/types'
 import TugBar from './TugBar'
 import {
   SESSION_COLORS, SIDE_COLORS, VERDICT_BG, VERDICT_COLOR,

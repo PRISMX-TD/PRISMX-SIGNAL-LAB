@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 
 const TOKEN_KEY = 'prismx_token'
@@ -178,6 +178,14 @@ export const signalApi = {
   // Platform strategy write-ups (read-only, published entries only); editing
   // goes through adminApi.updatePlatformStrategies
   platformStrategies: () => request<{ items: PlatformStrategy[] }>('/signals/platform-strategies'),
+  // 已公开策略的分时段/分品种/分钟点胜率。窗口固定 30 天（后端 ANALYSIS_DAYS），
+  // 只统计管理员公开名单里的策略；名单为空时返回零结果。响应形状与
+  // adminApi.strategyWinrate 完全一致——两端共用同一个计算函数。
+  // Session / symbol / hour win rates for published strategies. Window pinned
+  // to 30 days server-side; whitelisted strategies only, zero result when the
+  // whitelist is empty. Same shape as adminApi.strategyWinrate — one shared
+  // computation behind both.
+  strategyAnalysis: () => request<AdminStrategyWinRate>('/signals/strategy-analysis'),
 }
 
 // 历史信号回放（模拟器）：**当前仅管理员可调**（后端 require_admin），
@@ -681,6 +689,15 @@ export const adminApi = {
       request<AdminCandleSettings>('/admin/candle-history', {
         method: 'PUT',
         body: JSON.stringify(payload),
+      }),
+    // 胜率公开名单：读接口带上每个策略的胜率供管理员判断，写接口只收名单。
+    // Win-rate whitelist: the read carries each strategy's rate so the admin can
+    // decide; the write takes only the list.
+    getWinrateSettings: () => request<AdminWinrateSettings>('/admin/winrate-settings'),
+    updateWinrateSettings: (publicStrategies: string[]) =>
+      request<AdminWinrateSettings>('/admin/winrate-settings', {
+        method: 'PUT',
+        body: JSON.stringify({ publicStrategies }),
       }),
     getStrategySettings: () => request<AdminStrategySettings>('/admin/strategy-settings'),
     updateStrategySettings: (payload: AdminStrategySettings) =>

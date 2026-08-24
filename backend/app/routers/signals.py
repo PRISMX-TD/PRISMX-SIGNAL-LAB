@@ -8,10 +8,11 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import Signal, User
-from app.schemas import PlatformStrategyListOut, PlatformStrategyOut, SignalOut
+from app.schemas import AdminStrategyWinRateOut, PlatformStrategyListOut, PlatformStrategyOut, SignalOut
 from app.services.deps import get_current_user, require_admin
 from app.services.plans import is_realtime_plan
-from app.services.settings_store import get_platform_strategies
+from app.services.settings_store import get_platform_strategies, get_winrate_settings
+from app.services.strategy_winrate import compute_strategy_session_winrate
 
 router = APIRouter(prefix="/signals", tags=["signals"])
 
@@ -75,6 +76,46 @@ def list_signals(
         for s in rows
     ]
     return {"signals": signals}
+
+
+# 用户端「策略分析」的窗口，与管理端设置页的 WINRATE_PUBLIC_DAYS 同值。
+# 两处必须一致：管理员按设置页上的胜率决定公不公开，用户看到的得是同一个窗口
+# 算出来的，否则勾选依据与展示结果对不上。
+# The user-facing analysis window, equal to the admin settings page's
+# WINRATE_PUBLIC_DAYS. They must match: an admin publishes based on the number on
+# that page, so users have to be seeing the same window.
+ANALYSIS_DAYS = 30
+
+
+@router.get("/strategy-analysis", response_model=AdminStrategyWinRateOut)
+def strategy_analysis(
+    _user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """已公开策略的分时段/分品种/分钟点胜率（FREE 与 PRO 同样可见，不延迟）。
+
+    **只统计管理员公开名单里的策略**，且过滤发生在取数层——时段胜率、品种胜率的
+    分母跟着变，不是把全平台的数字配一份删减过的策略列表（见
+    compute_strategy_session_winrate 的 only_strategies）。名单为空（默认状态）时
+    返回零结果，前端显示空态。
+
+    与 `/admin/strategy-winrate` 共用同一个计算函数和同一个响应模型：口径只有一
+    处实现，管理页与用户端不可能给出互相矛盾的数字。权限差别只在依赖上——这里是
+    `get_current_user`（任何登录用户），那里是 `require_admin`。
+
+    Session / symbol / hour win rates for published strategies, visible to FREE
+    and PRO alike with no delay. **Only whitelisted strategies are counted**, and
+    the filter applies at the fetch, so denominators move with it rather than
+    pairing platform-wide figures with a trimmed list. An empty whitelist (the
+    default) returns a zero result and the UI shows its empty state.
+
+    Shares the computation and the response model with
+    `/admin/strategy-winrate`: one implementation of the definition means the
+    admin page and the user page cannot contradict each other. The only
+    difference is the dependency — `get_current_user` here, `require_admin` there.
+    """
+    public = get_winrate_settings(db)["public_strategies"]
+    return compute_strategy_session_winrate(db, ANALYSIS_DAYS, only_strategies=public)
 
 
 @router.get("/platform-strategies", response_model=PlatformStrategyListOut)

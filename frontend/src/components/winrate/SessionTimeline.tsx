@@ -9,7 +9,7 @@
 // and cursor carry position. Clock labels live in HTML, not inside the
 // stretched svg.
 import { useTranslation } from 'react-i18next'
-import type { SessionWindow } from '../../../api/types'
+import type { SessionWindow } from '../../api/types'
 import { SESSION_COLORS, fmtClock, localWindow, sessionStatus, zoneOffsetMinutes } from './shared'
 
 const W = 1440 // 1 分钟 = 1 单位 / one unit per minute

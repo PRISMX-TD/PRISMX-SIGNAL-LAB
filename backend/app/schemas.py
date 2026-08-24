@@ -322,6 +322,41 @@ class AdminStrategyWinRateOut(BaseModel):
     strategies: list[StrategyWinRateOut]  # 已判定样本数降序 / by resolved samples desc
 
 
+class AdminWinrateStrategyOut(BaseModel):
+    """胜率公开设置页里的一行：一个策略、它的胜率、以及是否已公开。
+
+    `resolved == 0` 表示这个策略近 N 天没有已判定的信号——可能是刚上线，也可能
+    早已停用。这种行**照样返回**（`winRate` 为 null），设置页如实显示"近 N 天没有
+    信号"：静默丢弃会让管理员以为自己没勾过它。
+
+    One row on the win-rate publication settings page: a strategy, its win rate,
+    and whether it is published. `resolved == 0` means no resolved signals in the
+    window — newly added, or long retired. Such rows are still returned (with a
+    null winRate) and the page says so explicitly; dropping them silently would
+    read to an admin as "I never ticked that".
+    """
+
+    strategy: str
+    resolved: int
+    winRate: float | None
+    public: bool
+
+
+class AdminWinrateSettings(BaseModel):
+    """胜率对外公开设置。读接口带上每个策略的胜率供管理员判断，写接口只收名单。
+    Win-rate publication settings. The read side carries each strategy's win rate
+    so the admin can decide; the write side takes only the list."""
+
+    days: int
+    strategies: list[AdminWinrateStrategyOut]
+
+
+class AdminWinrateSettingsIn(BaseModel):
+    # 公开名单，元素是 signals.indicator 里的原始策略名。空列表 = 一个都不公开。
+    # The whitelist, holding raw signals.indicator names. Empty = publish nothing.
+    publicStrategies: list[str] = Field(default_factory=list, max_length=200)
+
+
 class AdminBrokerSettings(BaseModel):
     """合作券商锁设置（管理后台读写用同一形状）。
     Partner-broker lock settings (same shape for admin read & write)."""

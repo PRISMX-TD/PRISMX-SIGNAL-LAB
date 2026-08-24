@@ -1,5 +1,5 @@
-// 仪表盘页：英雄卡 + 执行卡 + 其他信号 + 行情表 + 市场概览
-// Dashboard page: hero + exec + others + quotes + overview
+// 仪表盘页：英雄卡 + 执行卡 + 其他信号 + 行情表 + 当前时段胜率
+// Dashboard page: hero + exec + others + quotes + current-session win rate
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
@@ -12,7 +12,7 @@ import SignalHero from '../components/signals/SignalHero'
 import SignalExec from '../components/signals/SignalExec'
 import SignalOthers from '../components/signals/SignalOthers'
 import QuotesTable from '../components/signals/QuotesTable'
-import MarketOverview from '../components/signals/MarketOverview'
+import SessionWinrateCard from '../components/winrate/SessionWinrateCard'
 // 信号客观胜率卡暂时隐藏，暂不使用 / hidden for now
 // import StrategyWinRateCard from '../components/signals/StrategyWinRateCard'
 import PersonalWinRateCard from '../components/PersonalWinRateCard'
@@ -114,7 +114,7 @@ export default function DashboardPage() {
               </div>
               <div className="dash-col-2">
                 <SignalExec signal={cur.signal} now={now} onTrade={openTrade} />
-                <MarketOverview signals={signals} />
+                <SessionWinrateCard />
                 {/* 信号客观胜率卡暂时隐藏，暂不使用 / hidden for now */}
                 {/* <StrategyWinRateCard /> */}
                 <PersonalWinRateCard />
@@ -133,7 +133,7 @@ export default function DashboardPage() {
               </div>
               <div className="dash-col-2">
                 <SignalExec signal={null} now={now} onTrade={openTrade} />
-                <MarketOverview signals={signals} />
+                <SessionWinrateCard />
                 {/* 信号客观胜率卡暂时隐藏，暂不使用 / hidden for now */}
                 {/* <StrategyWinRateCard /> */}
                 <PersonalWinRateCard />

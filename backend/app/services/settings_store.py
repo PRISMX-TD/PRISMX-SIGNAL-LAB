@@ -333,6 +333,99 @@ def save_candle_settings(db, data: dict) -> None:
         row.value = encoded
 
 
+# 胜率对外公开设置。`public_strategies` 是**白名单**，存的是 signals.indicator 里的
+# 原始策略名。
+#
+# 默认空列表 = 一个都不公开，用户端「策略分析」显示空态。这是刻意的：默认全公开会
+# 让这个设置一上线就把所有策略（包括胜率 46% 的）推到所有用户面前，而公开与否是
+# 有对外承诺含义的决定，必须由人主动做一次。
+#
+# 白名单**不只过滤列表，还改变分母**：用户端的时段胜率、品种胜率都只用白名单内策略
+# 的信号计算（见 compute_strategy_session_winrate 的 only_strategies）。
+#
+# 名单里可能留着已停用、近 30 天没有信号的策略名——无害，设置页会如实显示"近 30 天
+# 没有信号"，不静默丢弃：静默丢弃会让管理员以为自己没勾过。
+#
+# Win-rate publication settings. `public_strategies` is a **whitelist** of raw
+# strategy names as they appear in signals.indicator.
+#
+# The default is an empty list — nothing published, and the user-facing page shows
+# its empty state. Deliberate: defaulting to "publish everything" would push every
+# strategy (including the 46% ones) at every user the moment this ships, and
+# publishing win rates carries a promise to users, so a human has to opt in once.
+#
+# The whitelist does not merely filter a list — **it changes the denominator**:
+# session and symbol win rates on the user-facing page are computed from
+# whitelisted strategies only (see only_strategies in
+# compute_strategy_session_winrate).
+#
+# The list may retain names of retired strategies with no recent signals. That is
+# harmless and the settings page says so explicitly rather than dropping them
+# silently, which would read to an admin as "I never ticked that".
+WINRATE_DEFAULTS: dict = {
+    "public_strategies": [],
+}
+
+_winrate_settings_cache: dict = {}
+_winrate_settings_cache_at: float = 0.0
+
+
+def invalidate_winrate_settings_cache() -> None:
+    global _winrate_settings_cache_at
+    with _lock:
+        _winrate_settings_cache_at = 0.0
+
+
+def _load_winrate_settings_from_db(db) -> dict:
+    data = dict(WINRATE_DEFAULTS)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "winrate").first()
+    if row:
+        try:
+            stored = json.loads(row.value)
+            if isinstance(stored, dict):
+                for k in WINRATE_DEFAULTS:
+                    if k in stored:
+                        data[k] = stored[k]
+        except (ValueError, TypeError):
+            logger.warning("platform_settings: invalid JSON for winrate, using defaults")
+    # 存坏了也不能让公开名单变成"全部"：类型不对一律退回空名单（不公开），
+    # 宁可少给也不多给。
+    # A corrupt value must never widen the whitelist: anything but a list of
+    # strings falls back to publishing nothing.
+    names = data.get("public_strategies")
+    if not isinstance(names, list):
+        data["public_strategies"] = []
+    else:
+        data["public_strategies"] = [n for n in names if isinstance(n, str)]
+    return data
+
+
+def get_winrate_settings(db) -> dict:
+    """读取胜率对外公开设置（独立缓存）。
+    Read the win-rate publication settings (its own cache)."""
+    global _winrate_settings_cache, _winrate_settings_cache_at
+    now = time.time()
+    with _lock:
+        if _winrate_settings_cache and now - _winrate_settings_cache_at < _CACHE_TTL_SECONDS:
+            return {"public_strategies": list(_winrate_settings_cache["public_strategies"])}
+    data = _load_winrate_settings_from_db(db)
+    with _lock:
+        _winrate_settings_cache = data
+        _winrate_settings_cache_at = now
+    return {"public_strategies": list(data["public_strategies"])}
+
+
+def save_winrate_settings(db, data: dict) -> None:
+    merged = _load_winrate_settings_from_db(db)
+    merged.update(data)
+    encoded = json.dumps(merged, ensure_ascii=False)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "winrate").first()
+    if row is None:
+        db.add(PlatformSetting(key="winrate", value=encoded))
+    else:
+        row.value = encoded
+
+
 STRATEGY_DEFAULTS: dict = {
     "max_strategies_per_user": 3,
     "pro_only": True,

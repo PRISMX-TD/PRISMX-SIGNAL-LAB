@@ -15,7 +15,7 @@
 // rule's only outlet. Session definitions ship from the backend; this file only
 // restates them in the viewer's clock.
 import type { TFunction } from 'i18next'
-import type { HourOutcome, SessionWindow, WinRateBucket } from '../../../api/types'
+import type { HourOutcome, SessionWindow, WinRateBucket } from '../../api/types'
 
 // 已判定样本少于这个数的格子不显示百分比——只挡住 1–2 笔那种「100%」，
 // 那个连数字都不该给。3 笔起就照常显示。

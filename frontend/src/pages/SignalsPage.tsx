@@ -12,6 +12,7 @@ import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import { strategySignalToDisplay, type DisplaySignal } from '../components/signals/SignalView'
 import { useBackToClose } from '../utils/useBackToClose'
 import PlatformStrategiesGuide from '../components/PlatformStrategiesGuide'
+import StrategyAnalysis from '../components/winrate/StrategyAnalysis'
 
 export default function SignalsPage() {
   const { t } = useTranslation()
@@ -19,7 +20,7 @@ export default function SignalsPage() {
   const { user } = useAuth()
   const { signals, strategySignals, accounts, loaded } = useLive()
   const accountQuotes = useQuotes()
-  const [activeTab, setActiveTab] = useState<'signals' | 'strategies'>('signals')
+  const [activeTab, setActiveTab] = useState<'signals' | 'strategies' | 'analysis'>('signals')
   const [activeSignal, setActiveSignal] = useState<DisplaySignal | null>(null)
   // 下单弹窗是全屏的，手机上划返回应该先关掉弹窗、而不是直接退出信号面板页
   // （见 useBackToClose 的说明）。/ The order modal is full-screen; on
@@ -88,12 +89,25 @@ export default function SignalsPage() {
             >
               {t('signals.tabs.platformStrategies')}
             </button>
+            {/* 策略分析：FREE 与 PRO 同样可见、不延迟。只显示管理员公开名单里的
+                策略（后端过滤，见 GET /signals/strategy-analysis）。
+                Strategy analysis: FREE and PRO alike, no delay; only whitelisted
+                strategies, filtered server-side. */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('analysis')}
+              className={activeTab === 'analysis' ? 'on' : ''}
+            >
+              {t('signals.tabs.analysis')}
+            </button>
           </div>
 
           {activeTab === 'signals' ? (
             <SignalGrid signals={combinedSignals} onTrade={openTrade} userPlan={user?.plan} />
-          ) : (
+          ) : activeTab === 'strategies' ? (
             <PlatformStrategiesGuide />
+          ) : (
+            <StrategyAnalysis />
           )}
         </div>
       )}
