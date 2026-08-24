@@ -31,6 +31,7 @@
 // whole card shows its empty state.
 import { useEffect, useState, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router-dom'
 import { signalApi } from '../../api/client'
 import type { AdminStrategyWinRate, SessionWindow } from '../../api/types'
 import RateChip from './RateChip'
@@ -123,9 +124,31 @@ const SessionWinrateCard: FC = () => {
       : t('admin.winrate.watch.nowActive', { name: t(`admin.winrate.session.${picked.key}`) })
     : ''
 
-  return (
-    <section className="card glass dash-overview p-[18px]">
-      <h3 className="text-sm font-bold text-white">{t('dashboard.sessionWinrate.title')}</h3>
+  // 有数据时整张卡可点，跳到「策略分析」页签看全部时段、策略与品种。
+  // 空态不给链接：名单没公开时那一页也是空的，点过去是条死路。
+  // The whole card links to the analysis tab when there is data. The empty state
+  // gets no link — that tab is empty too, so the click would be a dead end.
+  const linked = !loading && !empty
+
+  // 整张卡就是那个链接——内边距挂在 Link 上、不挂在 section 上，连四周那圈
+  // 留白都可点，不会出现"看着像能点、点边上没反应"。卡里没有别的可点元素，
+  // 包起来不会遮住谁。用真链接而不是给 section 挂 onClick：键盘可聚焦、右键
+  // 能新标签页打开、读屏软件会念成链接。
+  // The whole card is the link: the padding lives on the Link, not the section,
+  // so even the margin is clickable and there is no "looks clickable, isn't at
+  // the edge". Nothing else in the card is interactive, so wrapping covers
+  // nothing. A real link, not an onClick on the section: keyboard-focusable,
+  // openable in a new tab, announced as a link.
+  const Body = (
+    <>
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-bold text-white">{t('dashboard.sessionWinrate.title')}</h3>
+        {linked && (
+          <span className="shrink-0 text-xs text-prism-300 transition-colors group-hover/card:text-prism-200">
+            {t('winrate.viewDetail')} ›
+          </span>
+        )}
+      </div>
 
       {loading ? (
         <p className="mt-4 text-sm text-neutral-500">{t('common.loading')}</p>
@@ -197,6 +220,18 @@ const SessionWinrateCard: FC = () => {
             </div>
           </div>
         </>
+      )}
+    </>
+  )
+
+  return (
+    <section className="card glass dash-overview group/card">
+      {linked ? (
+        <Link to="/app?tab=analysis" className="block p-[18px]" aria-label={t('dashboard.sessionWinrate.title')}>
+          {Body}
+        </Link>
+      ) : (
+        <div className="p-[18px]">{Body}</div>
       )}
     </section>
   )

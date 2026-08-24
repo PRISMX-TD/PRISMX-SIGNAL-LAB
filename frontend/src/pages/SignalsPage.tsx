@@ -2,7 +2,7 @@
 // Signals page: signal grid + back to dashboard + platform strategies guide
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../store/auth'
 import { useLive, useQuotes } from '../store/live'
 import SignalGrid from '../components/signals/SignalGrid'
@@ -14,13 +14,36 @@ import { useBackToClose } from '../utils/useBackToClose'
 import PlatformStrategiesGuide from '../components/PlatformStrategiesGuide'
 import StrategyAnalysis from '../components/winrate/StrategyAnalysis'
 
+type SignalsTab = 'signals' | 'strategies' | 'analysis'
+
 export default function SignalsPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { user } = useAuth()
   const { signals, strategySignals, accounts, loaded } = useLive()
   const accountQuotes = useQuotes()
-  const [activeTab, setActiveTab] = useState<'signals' | 'strategies' | 'analysis'>('signals')
+  // 页签放在 URL 的 ?tab= 上，不放 useState：仪表盘的「当前时段胜率」卡要能直接
+  // 跳到「策略分析」（/app?tab=analysis），页签只活在组件里就跳不过来。顺带这一
+  // 页也变得可分享、可收藏。用 replace 换页签——切页签不该在浏览器历史里堆一层，
+  // 从分析页按返回应该回仪表盘，而不是回上一个页签。
+  // The tab lives in ?tab= rather than in useState so the dashboard's session
+  // win-rate card can deep-link to the analysis tab (/app?tab=analysis); a tab
+  // kept in component state has no address to link to. Switching replaces rather
+  // than pushes: back from the analysis tab should return to wherever the user
+  // came from, not step through the tabs they clicked.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tabParam = searchParams.get('tab')
+  const activeTab: SignalsTab = tabParam === 'strategies' || tabParam === 'analysis' ? tabParam : 'signals'
+  const setActiveTab = useCallback((tab: SignalsTab) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      // 默认页签不写进 URL，/app 保持干净；其余 query 参数原样带着走。
+      // The default tab stays out of the URL; any other params are preserved.
+      if (tab === 'signals') next.delete('tab')
+      else next.set('tab', tab)
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
   const [activeSignal, setActiveSignal] = useState<DisplaySignal | null>(null)
   // 下单弹窗是全屏的，手机上划返回应该先关掉弹窗、而不是直接退出信号面板页
   // （见 useBackToClose 的说明）。/ The order modal is full-screen; on
