@@ -1025,10 +1025,6 @@
         "byHour": "Which hour of the day works best?",
         "byHourHint": "The last {{days}} days grouped by hour of day, shown in your local time. Days around a DST changeover are off by an hour. Resolved signals only."
       },
-      "symbols": {
-        "title": "Each symbol",
-        "caption": "Pooled across every strategy — one symbol may carry signals from several strategies."
-      },
       "timeline": {
         "label": "24-hour session timeline",
         "window": "{{name}} {{start}}–{{end}}",

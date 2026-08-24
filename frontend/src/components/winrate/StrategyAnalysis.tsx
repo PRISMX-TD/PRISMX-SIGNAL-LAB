@@ -1,11 +1,15 @@
 // 「策略分析」：信号面板的第三个页签，FREE 与 PRO 同样可见、不延迟。
 //
-// 三段，自上而下，全部默认展开：
+// 两段，自上而下，全部默认展开：
 //   ①「现在该盯什么」——现在是哪个盘、还剩多久、这个盘里胜率最高的几个钟点、
 //      可以留意的品种、下一个盘还有多久开
 //   ②「每个策略」——一张卡给出该策略胜率最高的钟点与品种；点开看
 //      时段 / 做多做空 / 一天里哪个小时
-//   ③「每个品种」——跨全部策略合并
+//
+// 原来第三段「每个品种」（跨策略合并的品种榜）已按产品要求删掉：品种信息在上面
+// 两段里都已经给过——顶层有「可以留意」，每张策略卡有「胜率最高的品种」——再来
+// 一份跨策略合并的全量榜是第三次说同一件事，而且它是全页唯一不带策略上下文的
+// 数字，读者容易拿它当「这个品种就是好」。
 //
 // **只显示管理员公开名单里的策略**，且过滤发生在后端取数层：时段胜率、品种胜率
 // 的分母都跟着变（见 signals.py 的 strategy_analysis）。名单默认为空，所以这个
@@ -15,8 +19,12 @@
 // 全页只有那一条规则）。绿色不等于"统计上站得住"，只等于"到目前为止 51% 以上"。
 //
 // The "strategy analysis" tab on the signals page, visible to FREE and PRO alike
-// with no delay. Three sections, all expanded: what to watch now, each strategy,
-// each symbol. **Only whitelisted strategies appear**, filtered server-side at
+// with no delay. Two sections, all expanded: what to watch now, and each
+// strategy. A third "every symbol" board was removed at the product owner's
+// request: symbols already appear twice above (the watch-now chips and each
+// strategy card's best symbols), and being the only figures on the page without
+// strategy context, they invited reading as "this symbol is simply good".
+// **Only whitelisted strategies appear**, filtered server-side at
 // the fetch so denominators move with the whitelist. That list defaults to empty,
 // which makes the empty state this tab's **default** rather than an edge case.
 // The verdict is carried by colour alone (verdictOf in shared.ts).
@@ -28,7 +36,6 @@ import type { AdminStrategyWinRate } from '../../api/types'
 import { sessionStatus } from './shared'
 import WatchNow from './WatchNow'
 import StrategyList from './StrategyList'
-import SymbolBoard from './SymbolBoard'
 
 function LoadingSkeleton() {
   return (
@@ -180,8 +187,6 @@ export default function StrategyAnalysis() {
             <StrategyList data={data} selected={selected} onSelect={setSelected}
                           activeKeys={activeKeys} now={now} />
           </section>
-
-          <SymbolBoard data={data} />
         </>
       ) : null}
     </div>
