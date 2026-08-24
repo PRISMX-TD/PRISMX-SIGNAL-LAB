@@ -996,9 +996,9 @@
     },
     "winrate": {
       "verdict": {
-        "strong": "Above half",
-        "weak": "Below half",
-        "even": "Exactly half",
+        "strong": "Win rate 51% and above",
+        "mid": "Win rate 40-50%, near even",
+        "weak": "Win rate below 40%",
         "thin": "Too few trades",
         "waiting": "Still waiting for an outcome",
         "broken": "Tracking broke, not counted",

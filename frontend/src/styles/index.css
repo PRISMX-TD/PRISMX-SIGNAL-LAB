@@ -123,6 +123,17 @@
      Down tone lifted with the surface for the same reason as --purple-hi. */
   --down: #ff6478;
   --down-bg: rgba(255, 100, 120, 0.13);
+  /* 中间档：胜率不上不下（40–50%）。也是**数据**，和涨跌同一等级，所以放在
+     这里而不是复用 --gold（那是终端里的告警/过期色，语义不同）。亮度按 --up
+     配平：卡面上 8.98、自己 13% 底上 6.96，与绿的 9.00 / 7.02 基本同权，
+     免得橙色读起来比绿色"轻一档"。
+     The middle band: a rate that is neither (40–50%). Also *data*, same rank as
+     up/down, so it lives here rather than reusing --gold (a terminal warn/stale
+     tone with a different meaning). Tuned to match --up's weight — 8.98 on the
+     card surface and 6.96 on its own 13% tint, against green's 9.00 / 7.02 — so
+     the amber does not read a step lighter than the green. */
+  --mid: #ffa85c;
+  --mid-bg: rgba(255, 168, 92, 0.13);
   --gold: #e0a83c;
 
   /* ── 圆角：三档，全站遵守 / three radii, obeyed everywhere ──

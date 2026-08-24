@@ -47,14 +47,14 @@
 // sessions get a block; outside all three, the "outside" bucket is used.
 // Selection is by Wilson lower bound (thin samples sink), display by rate.
 // Neither trade counts nor worded verdict chips appear: the colour of the
-// percentage is the verdict — green above half, red below, grey undecided.
+// percentage is the verdict — green from 51%, amber 40-50%, red below 40%.
 import { useTranslation } from 'react-i18next'
 import type { AdminStrategyWinRate, SessionWindow } from '../../api/types'
 import RateChip from './RateChip'
 import SessionTimeline from './SessionTimeline'
 import {
-  SESSION_COLORS, fmtClock, fmtDurationHm, fmtPct, rankBuckets, rankHours,
-  sessionStatus, zoneOffsetMinutes,
+  SESSION_COLORS, fmtClock, fmtDurationHm, fmtPct, rankBuckets,
+  rankHours, sessionStatus, zoneOffsetMinutes,
 } from './shared'
 
 const TOP_WATCH = 3
@@ -88,14 +88,14 @@ function sessionsForUtcHour(hour: number, sessions: SessionWindow[], now: Date):
 const pickHours = (data: AdminStrategyWinRate, sessionKey: string, now: Date) =>
   rankHours(data.overall.total.hourly, now, {
     limit: TOP_WATCH,
-    minRate: 0.5,
+    greenOnly: true,
     keep: (utcHour) => sessionsForUtcHour(utcHour, data.sessions, now).includes(sessionKey),
   })
 
 const pickSymbols = (data: AdminStrategyWinRate, sessionKey: string) =>
   rankBuckets(
     data.overall.symbols.map((s) => ({ name: s.symbol, bucket: s.sessions[sessionKey] })),
-    { limit: TOP_WATCH, minRate: 0.5 },
+    { limit: TOP_WATCH, greenOnly: true },
   )
 
 function Group({ label, hint, children }: { label: string; hint: string; children: React.ReactNode }) {

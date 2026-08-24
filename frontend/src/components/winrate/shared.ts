@@ -1,7 +1,7 @@
 // 胜率页共享：判定规则、配色、时间换算。
 //
 // 页面上**只有一条**判定规则（verdictOf），所有层级——策略卡、时段行、钟点格、
-// 品种行、顶层芯片——都从这里拿判定，再渲染成颜色：过半绿、没过半红。
+// 品种行、顶层芯片——都从这里拿判定，再渲染成颜色：51% 起绿、40–50% 橙、40% 以下红。
 // 判定词本身已从界面上全部撤掉（只留给读屏器），所以这条规则的唯一出口就是颜色。
 //
 // 时段的小时窗口与 IANA 时区由后端下发（sessions 字段），这里只做"翻译成浏览者
@@ -10,7 +10,7 @@
 // Shared helpers for the win-rate page: the verdict rule, colours, time maths.
 // There is exactly ONE verdict rule (verdictOf); every layer — strategy card,
 // session row, hour cell, symbol row, top-layer chip — takes its verdict here
-// and renders it as colour: green above half, red below. The worded verdicts are
+// and renders it as colour: green from 51%, amber 40-50%, red below. The worded verdicts are
 // gone from the interface (screen readers still get them), so colour is this
 // rule's only outlet. Session definitions ship from the backend; this file only
 // restates them in the viewer's clock.
@@ -23,6 +23,19 @@ import type { HourOutcome, SessionWindow, WinRateBucket } from '../../api/types'
 // 1-2 trade "100%", which should not show a number at all; from 3 up, a cell
 // renders normally.
 export const MIN_SAMPLES = 3
+
+// 三档的两条分界线，单位是**百分点**，因为判定按显示出来的那个数字切（见
+// verdictOf）。用原始小数切会在边界上自相矛盾：0.3999 显示成 40.0% 却落进红档。
+// The two cuts, in percentage points, because the verdict is decided on the
+// number as displayed (see verdictOf). Cutting on the raw fraction contradicts
+// itself at the boundary: 0.3999 renders as 40.0% yet lands in the red band.
+export const AMBER_FROM_PCT = 40
+export const GREEN_FROM_PCT = 51
+
+// 百分比一律一位小数。判定和显示必须用同一个精度，否则边界上会打架。
+// One decimal everywhere. The verdict and the display must share a precision or
+// they disagree at the cuts.
+export const PCT_DIGITS = 1
 
 // 时段配色：亚洲青 / 欧洲紫 / 纽约金，「其他时段」用说明文字灰。只用在小圆点与
 // 时段色带上，是身份色不是好坏色。
@@ -45,7 +58,7 @@ export const SIDE_COLORS: Record<string, string> = { BUY: '#60a5fa', SELL: '#f0a
 // waiting / broken: signals exist but none has resolved yet — all still open, or
 // all with broken tracking. Not "only 0 trades", which would conflate "no
 // outcome yet" with "too small a sample".
-export type VerdictKind = 'strong' | 'weak' | 'even' | 'thin' | 'waiting' | 'broken' | 'none'
+export type VerdictKind = 'strong' | 'mid' | 'weak' | 'thin' | 'waiting' | 'broken' | 'none'
 
 export interface RateLike {
   samples: number
@@ -59,42 +72,65 @@ export interface RateLike {
 
 /** 三种"有百分比可看"的判定 / the three verdicts that come with a percentage */
 export const isRated = (k: VerdictKind): boolean =>
-  k === 'strong' || k === 'weak' || k === 'even'
+  k === 'strong' || k === 'mid' || k === 'weak'
 
-/** 全页唯一的判定规则：**过半就绿，没过半就红**，正好一半才灰。
+/** 全页唯一的判定规则，三档：**51% 及以上绿、40–50% 橙、40% 以下红**。
  *
- *  这里刻意不再用 Wilson 区间把关（产品要求）。之前的规则是"区间整体落在 50%
- *  一侧才上色，否则显示成灰色的'还看不出高低'"——统计上更严谨，但切到 24 个钟点
- *  之后每格只有三五笔，区间必然跨过 50%，于是整张图全是灰的，等于什么都没说。
- *  产品的判断是：先看方向，笔数会随时间自己攒起来。
+ *  档位按显示出来的百分比切，所以颜色和读者眼里的数字永远对得上：39.9% 是红、
+ *  40.0% 到 50.9% 是橙、51.0% 起是绿，不会出现"看着 50 点几却是绿的"。
  *
- *  **代价要清楚**：绿色不再等于"统计上站得住"，只等于"到目前为止过半"。3 笔
- *  里赢 2 笔（67%）和 300 笔里赢 200 笔（67%）现在是同一个绿。排序仍然用
- *  Wilson 下限（见 WatchNow 的 pickHours / pickSymbols），所以顶层榜单里薄样本
- *  还是会沉底——把关只是从"显示"退到了"排序"。
+ *  `digits` 要和该处 fmtPct 用的精度一致。全站默认一位小数，只有 24 小时格用
+ *  整数（格子太窄），那里必须传 0——否则 50.5% 会显示成「51%」却判成橙。
  *
- *  The page's single verdict rule: **above half is green, below is red**, and
- *  only an exact tie is grey.
+ *  中间那档是后加的（产品要求）。原来只有绿红两档、以 50% 一刀切，结果 49.8%
+ *  和 12% 同样是红、50.2% 和 88% 同样是绿——一刀两侧的差别其实全在噪声里，
+ *  颜色却给得一样重。橙色把"贴着五五开"单独拎出来，读者一眼能分出"真的偏好"
+ *  和"其实没什么区别"。
  *
- *  The Wilson interval deliberately no longer gates this (product decision). The
- *  old rule painted a cell only when the whole interval sat on one side of 50%
- *  and showed grey "can't tell yet" otherwise — statistically stricter, but
- *  sliced 24 ways each cell holds a handful of trades, the interval always
- *  straddles 50%, and the entire grid came out grey, saying nothing. The product
- *  call is to show direction now and let the counts accumulate over time.
+ *  这里刻意不用 Wilson 区间把关（更早的产品决定）。之前的规则是"区间整体落在
+ *  50% 一侧才上色，否则显示成灰色的'还看不出高低'"——统计上更严谨，但切到 24
+ *  个钟点之后每格只有三五笔，区间必然跨过 50%，于是整张图全是灰的，等于什么都
+ *  没说。产品的判断是：先看方向，笔数会随时间自己攒起来。
  *
- *  **The cost is explicit**: green no longer means "statistically established",
- *  only "above half so far". 2 of 3 (67%) and 200 of 300 (67%) are now the same
- *  green. Ranking still uses the Wilson lower bound (see pickHours /
- *  pickSymbols in WatchNow), so thin candidates still sink in the top-3 lists —
- *  the gate moved from display to ordering, it did not disappear. */
-export function verdictOf(b: RateLike): VerdictKind {
+ *  **代价要清楚**：绿色不等于"统计上站得住"，只等于"到目前为止 51% 以上"。
+ *  3 笔里赢 2 笔（67%）和 300 笔里赢 200 笔（67%）是同一个绿。排序仍然用
+ *  Wilson 下限（见 rankHours / rankBuckets），所以顶层榜单里薄样本还是会沉底
+ *  ——把关只是从"显示"退到了"排序"。
+ *
+ *  The page's single verdict rule, in three bands: **green at 51% and above,
+ *  amber from 40% to 50%, red below 40%**.
+ *
+ *  The cuts match the displayed percentage, so the colour never contradicts the
+ *  number a reader sees: 39.9% is red, 40.0%-50.9% amber, 51.0% and up green.
+ *  `digits` must equal the precision fmtPct is called with at that spot: one
+ *  decimal everywhere except the 24-hour cells, which are too narrow and use
+ *  integers — pass 0 there, or 50.5% renders as "51%" yet judges amber.
+ *
+ *  The middle band was added later (product decision). With only green and red
+ *  split at 50%, 49.8% looked as red as 12% and 50.2% as green as 88% — the
+ *  difference across that cut is noise, yet the colour weighed it the same.
+ *  Amber pulls "basically a coin flip" out on its own.
+ *
+ *  The Wilson interval deliberately does not gate this (an earlier product
+ *  call): sliced 24 ways each cell holds a handful of trades, the interval
+ *  always straddles 50%, and the whole grid came out grey, saying nothing.
+ *
+ *  **The cost is explicit**: green means "above 51% so far", not
+ *  "statistically established". 2 of 3 and 200 of 300 are the same green.
+ *  Ranking still uses the Wilson lower bound (rankHours / rankBuckets), so thin
+ *  candidates still sink in the top lists — the gate moved from display to
+ *  ordering, it did not disappear. */
+export function verdictOf(b: RateLike, digits = PCT_DIGITS): VerdictKind {
   if (b.samples === 0) return 'none'
   if (b.resolved === 0) return (b.pending ?? 0) > 0 ? 'waiting' : 'broken'
   if (b.winRate === null || b.resolved < MIN_SAMPLES) return 'thin'
-  if (b.winRate > 0.5) return 'strong'
-  if (b.winRate < 0.5) return 'weak'
-  return 'even'
+  // 先四舍五入到显示精度再比，读者看到几就按几判——颜色永远说得通。
+  // Round to the displayed precision first, so the colour always matches the
+  // number the reader is looking at.
+  const shown = Number((b.winRate * 100).toFixed(digits))
+  if (shown >= GREEN_FROM_PCT) return 'strong'
+  if (shown >= AMBER_FROM_PCT) return 'mid'
+  return 'weak'
 }
 
 /** Wilson 95% 区间，与后端 strategy_winrate.wilson_bounds 同一公式。只有钟点格
@@ -126,15 +162,23 @@ export function wilsonBounds(hit: number, n: number, z = 1.96): [number, number]
 export type HourPick = { localMinutes: number; rate: number; kind: VerdictKind }
 export type NamedPick = { name: string; bucket: WinRateBucket; kind: VerdictKind }
 
-/** 钟点排名。`keep` 用来只保留某个时段内的钟点，`minRate` 用来只保留过半的。
+/** 钟点排名。`keep` 只保留某个时段内的钟点，`greenOnly` 只留绿档的。
+ *
+ *  门槛写成「只留绿的」而不是一个数字，是因为这两个榜的措辞是推荐（「可以留意」
+ *  「胜率最高的时间」），推荐一条橙色的 50.x% 会自相矛盾；写成判定本身，档位
+ *  以后再调也不会和配色走散。
+ *
  *  标签换算成浏览者本地钟点——后端按 UTC 分桶，24 格是完整循环，旋转无损。
- *  Rank hours; `keep` restricts to one session's hours, `minRate` to those at or
- *  above a floor. Labels are in the viewer's clock: the backend buckets in UTC
- *  and 24 slots are a full cycle, so the rotation is lossless. */
+ *  Rank hours; `keep` restricts to one session's hours, `greenOnly` to the green
+ *  band. The floor is the verdict itself rather than a number: both lists are
+ *  worded as recommendations, so an amber 50-something has no business in them,
+ *  and tying the two together means moving a cut can never desync the colour.
+ *  Labels are in the viewer's clock: the backend buckets in UTC and 24 slots are
+ *  a full cycle, so the rotation is lossless. */
 export function rankHours(
   hourly: HourOutcome[] | null,
   now: Date,
-  opts: { limit: number; minRate?: number; keep?: (utcHour: number) => boolean },
+  opts: { limit: number; greenOnly?: boolean; keep?: (utcHour: number) => boolean },
 ): HourPick[] {
   if (!hourly) return []
   const viewerOffset = -now.getTimezoneOffset()
@@ -144,7 +188,7 @@ export function rankHours(
     const rate = rateFromCounts(h.tp, h.sl)
     const kind = verdictOf(rate)
     if (!isRated(kind) || rate.winRate === null) return
-    if (opts.minRate !== undefined && rate.winRate < opts.minRate) return
+    if (opts.greenOnly && kind !== 'strong') return
     candidates.push({
       localMinutes: (((utcHour * 60 + viewerOffset) % 1440) + 1440) % 1440,
       rate: rate.winRate,
@@ -160,14 +204,14 @@ export function rankHours(
  *  Rank named buckets (symbols) by the same rule as rankHours. */
 export function rankBuckets(
   items: Array<{ name: string; bucket: WinRateBucket | undefined }>,
-  opts: { limit: number; minRate?: number },
+  opts: { limit: number; greenOnly?: boolean },
 ): NamedPick[] {
   const candidates: NamedPick[] = []
   for (const { name, bucket } of items) {
     if (!bucket) continue
     const kind = verdictOf(bucket)
     if (!isRated(kind) || bucket.winRate === null) continue
-    if (opts.minRate !== undefined && bucket.winRate < opts.minRate) continue
+    if (opts.greenOnly && kind !== 'strong') continue
     candidates.push({ name, bucket, kind })
   }
   candidates.sort((a, b) => (b.bucket.wilsonLow ?? 0) - (a.bucket.wilsonLow ?? 0))
@@ -190,17 +234,15 @@ export function rateFromCounts(tp: number, sl: number): RateLike {
   }
 }
 
-// 判定配色：绿/红是市场语义色（设计令牌里的 --up / --down），过半绿、没过半红；
-// 正好一半与"还没数可看"的几种状态一律中性灰，而且引用 index.css 的文字灰令牌
-// 而不是抄数值——令牌抬一次，这里跟着动。
-// Verdict colours: green/red are the market tokens (--up / --down) for above and
-// below half; an exact tie and the several "nothing to show yet" states are
-// neutral, referring to the text-grey tokens in index.css rather than copying
-// their values, so a token lift moves this page with it.
+// 判定配色三档全部走设计令牌（--up / --mid / --down），「还没数可看」的几种状态
+// 一律中性灰。这里引用 index.css 的令牌而不是抄数值——令牌抬一次，这页跟着动。
+// All three verdict colours come from the market tokens (--up / --mid / --down);
+// the several "nothing to show yet" states stay neutral. Referring to the tokens
+// rather than copying their values means a token lift moves this page with it.
 export const VERDICT_COLOR: Record<VerdictKind, string> = {
   strong: 'var(--up)',
+  mid: 'var(--mid)',
   weak: 'var(--down)',
-  even: 'var(--text-2)',
   thin: 'var(--text-3)',
   waiting: 'var(--text-3)',
   broken: 'var(--text-3)',
@@ -209,15 +251,15 @@ export const VERDICT_COLOR: Record<VerdictKind, string> = {
 
 export const VERDICT_BG: Record<VerdictKind, string> = {
   strong: 'var(--up-bg)',
+  mid: 'var(--mid-bg)',
   weak: 'var(--down-bg)',
-  even: 'rgba(255,255,255,0.07)',
   thin: 'rgba(255,255,255,0.04)',
   waiting: 'rgba(255,255,255,0.04)',
   broken: 'rgba(255,255,255,0.04)',
   none: 'transparent',
 }
 
-export const fmtPct = (v: number, digits = 1): string => `${(v * 100).toFixed(digits)}%`
+export const fmtPct = (v: number, digits = PCT_DIGITS): string => `${(v * 100).toFixed(digits)}%`
 export const fmtInt = (n: number): string => n.toLocaleString('en-US')
 
 /** 某个 IANA 时区在给定时刻的 UTC 偏移（分钟）。夏令时体现在这里。

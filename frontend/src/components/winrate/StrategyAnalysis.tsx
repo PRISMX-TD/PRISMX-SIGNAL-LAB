@@ -11,8 +11,8 @@
 // 的分母都跟着变（见 signals.py 的 strategy_analysis）。名单默认为空，所以这个
 // 页签上线后的**默认状态就是空态**——空态因此不是边角情况，是最常见的一屏。
 //
-// 判定只由颜色承担：胜率过半绿、没过半红、正好一半灰（shared.ts 的 verdictOf，
-// 全页只有那一条规则）。绿色不等于"统计上站得住"，只等于"到目前为止过半"。
+// 判定只由颜色承担：51% 起绿、40–50% 橙、40% 以下红（shared.ts 的 verdictOf，
+// 全页只有那一条规则）。绿色不等于"统计上站得住"，只等于"到目前为止 51% 以上"。
 //
 // The "strategy analysis" tab on the signals page, visible to FREE and PRO alike
 // with no delay. Three sections, all expanded: what to watch now, each strategy,

@@ -92,7 +92,11 @@ function HourGrid({ hourly, now }: { hourly: HourOutcome[]; now: Date }) {
     <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
       {slots.map((s) => {
         const rate = rateFromCounts(s.tp, s.sl)
-        const kind = verdictOf(rate)
+        // 格子窄，百分比取整（下面的 fmtPct(..., 0)）——判定也要按整数切，
+        // 否则 50.5% 会显示成「51%」却上橙色，和读者看到的数字对不上。
+        // The cells are narrow so the percentage is rounded to an integer below;
+        // the verdict must round the same way, or 50.5% shows as "51%" in amber.
+        const kind = verdictOf(rate, 0)
         const label = fmtClock(s.localMinutes)
         if (!isRated(kind)) {
           return (

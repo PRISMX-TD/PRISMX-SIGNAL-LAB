@@ -36,8 +36,8 @@ import { signalApi } from '../../api/client'
 import type { AdminStrategyWinRate, SessionWindow } from '../../api/types'
 import RateChip from './RateChip'
 import {
-  SESSION_COLORS, VERDICT_COLOR, fmtClock, fmtDurationHm, fmtPct, isRated,
-  rankBuckets, rankHours, sessionStatus, verdictOf, zoneOffsetMinutes,
+  SESSION_COLORS, VERDICT_COLOR, fmtClock, fmtDurationHm, fmtPct,
+  isRated, rankBuckets, rankHours, sessionStatus, verdictOf, zoneOffsetMinutes,
 } from './shared'
 
 const TOP_ON_CARD = 2
@@ -107,14 +107,14 @@ const SessionWinrateCard: FC = () => {
   const hours = data && picked
     ? rankHours(data.overall.total.hourly, now, {
         limit: TOP_ON_CARD,
-        minRate: 0.5,
+        greenOnly: true,
         keep: (utcHour) => sessionsForUtcHour(utcHour, data.sessions, now).includes(picked.key),
       })
     : []
   const symbols = data && picked
     ? rankBuckets(
         data.overall.symbols.map((s) => ({ name: s.symbol, bucket: s.sessions[picked.key] })),
-        { limit: TOP_ON_CARD, minRate: 0.5 },
+        { limit: TOP_ON_CARD, greenOnly: true },
       )
     : []
 
