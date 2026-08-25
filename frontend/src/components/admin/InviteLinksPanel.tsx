@@ -18,7 +18,7 @@ import type { InviteLink } from '../../api/types'
 
 const linkUrl = (code: string) => `${ORIGIN}/?ref=${code}`
 
-export default function InviteLinksPanel() {
+export default function InviteLinksPanel({ globalTrialEnabled = false }: { globalTrialEnabled?: boolean }) {
   const { t } = useTranslation()
   const [links, setLinks] = useState<InviteLink[]>([])
   const [loading, setLoading] = useState(true)
@@ -106,6 +106,20 @@ export default function InviteLinksPanel() {
     }
   }
 
+  const toggleGrantsTrial = async (l: InviteLink) => {
+    if (busyId) return
+    setBusyId(l.id)
+    try {
+      const updated = await adminApi.updateInviteLink(l.id, { grantsTrial: !l.grantsTrial })
+      setLinks((prev) => prev.map((x) => (x.id === l.id ? updated : x)))
+      showToast('ok', t('admin.saved'))
+    } catch (err) {
+      showErr(err, 'admin.saveError')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   const copy = async (l: InviteLink) => {
     try {
       // navigator.clipboard 在非安全上下文整体不存在（同步抛 TypeError 而不是
@@ -183,7 +197,7 @@ export default function InviteLinksPanel() {
             {t('admin.invite.empty')}
           </div>
         ) : (
-          <table className="w-full min-w-[900px] text-left text-sm">
+          <table className="w-full min-w-[1020px] text-left text-sm">
             <thead>
               <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-neutral-500">
                 <th className="px-4 py-3 font-medium">{t('admin.invite.colLabel')}</th>
@@ -191,6 +205,7 @@ export default function InviteLinksPanel() {
                 <th className="px-4 py-3 font-medium">{t('admin.invite.colClicks')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.invite.colRegistrations')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.invite.colStatus')}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.invite.colGrantsTrial')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.invite.colCreated')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.colAction')}</th>
               </tr>
@@ -229,6 +244,34 @@ export default function InviteLinksPanel() {
                       >
                         {l.isActive ? t('admin.invite.active') : t('admin.invite.inactive')}
                       </span>
+                    </td>
+                    {/* 全局免费试用关闭时整列置灰并给出原因。没有这句提示，
+                        管理员打开了开关却一个试用都没发出去，而页面上没有任何
+                        线索指向真正的原因（运营设置里的那个总闸），只能怀疑
+                        后台坏了。开关本身仍可点——记录意图是有意义的，全局一开
+                        它立刻生效。
+                        The whole column greys out with a reason when the global
+                        trial is off. Without the hint an admin flips this on,
+                        sees zero trials granted, and has nothing pointing at the
+                        actual cause (the master gate in operations settings).
+                        The toggle still works — recording intent is useful, and
+                        it takes effect the moment the global switch opens. */}
+                    <td className="px-4 py-3">
+                      <button
+                        className={`rounded-full px-2 py-0.5 text-xs disabled:opacity-40 ${
+                          l.grantsTrial ? 'bg-prism-500/20 text-prism-200' : 'bg-white/5 text-neutral-400'
+                        } ${globalTrialEnabled ? '' : 'opacity-50'}`}
+                        disabled={busyId !== null}
+                        title={globalTrialEnabled ? undefined : t('admin.invite.grantsTrialBlocked')}
+                        onClick={() => void toggleGrantsTrial(l)}
+                      >
+                        {l.grantsTrial ? t('admin.invite.grantsTrialOn') : t('admin.invite.grantsTrialOff')}
+                      </button>
+                      {l.grantsTrial && !globalTrialEnabled && (
+                        <p className="mt-1 max-w-[14rem] text-[11px] leading-snug text-neutral-500">
+                          {t('admin.invite.grantsTrialBlocked')}
+                        </p>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-xs text-neutral-400">{fmtTime(l.createdAt)}</td>
                     <td className="px-4 py-3">

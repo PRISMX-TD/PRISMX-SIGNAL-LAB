@@ -1059,7 +1059,7 @@ export default function AdminPage() {
 
       {tab === 'guide' && <PlatformStrategiesPanel />}
 
-      {tab === 'invites' && <InviteLinksPanel />}
+      {tab === 'invites' && <InviteLinksPanel globalTrialEnabled={trial?.trialEnabled ?? false} />}
 
       {tab === 'tickets' && <AdminTicketsPanel />}
 

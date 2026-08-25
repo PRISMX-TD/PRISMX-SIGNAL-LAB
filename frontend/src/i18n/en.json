@@ -1066,7 +1066,7 @@
       }
     },
     "invite": {
-      "hint": "Create labeled promo links (?ref=code). Users who register through a link get its label written into the Note column of the user list automatically. Clicks are indicative only — not abuse-proof, and cross-device clicks are invisible; registrations reflect real accounts. Links cannot be deleted; deactivate them when a campaign ends.",
+      "hint": "Create labeled promo links (?ref=code). Users who register through a link get its label written into the Note column of the user list automatically. Clicks are indicative only — not abuse-proof, and cross-device clicks are invisible; registrations reflect real accounts. Links cannot be deleted; deactivate them when a campaign ends. Turning on \"Trial\" auto-grants a PRO trial the moment a user registers through that link (days come from the global setting in operations settings); it has no effect while the global free trial is off.",
       "labelPlaceholder": "Label, e.g. KOL-Jamie",
       "create": "Create link",
       "colLabel": "Label",
@@ -1074,6 +1074,10 @@
       "colClicks": "Clicks",
       "colRegistrations": "Signups",
       "colStatus": "Status",
+      "colGrantsTrial": "Trial",
+      "grantsTrialOn": "On",
+      "grantsTrialOff": "Off",
+      "grantsTrialBlocked": "The global free trial is off — this switch has no effect right now",
       "colCreated": "Created",
       "copy": "Copy",
       "copied": "Copied",
