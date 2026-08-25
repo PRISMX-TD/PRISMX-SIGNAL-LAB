@@ -143,6 +143,16 @@ def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends
         granted_days = apply_invite(db, user, req.ref)
         db.add(user)
         if granted_days:
+            # 这个 flush 不是多余的：道理和上面 register() 里那段完整注释一样——
+            # User.id 要 flush 才生成，AdminAuditLog.target_user_id 是 NOT NULL
+            # 外键，提前拿会写出 null 外键，Postgres 上违约、整个注册 500。别看
+            # 它紧挨着下面的 commit() 就当成重复删掉。
+            # This flush is load-bearing for the same reason as the full comment
+            # in register() above: User.id is only generated at flush, and
+            # target_user_id is a NOT NULL FK — taken early it is null and
+            # violates the constraint on Postgres, 500ing the whole registration.
+            # Don't read it as redundant with the commit() two lines down and
+            # delete it.
             db.flush()
             db.add(AdminAuditLog(
                 admin_user_id=user.id,

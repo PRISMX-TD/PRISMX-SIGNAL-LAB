@@ -348,6 +348,19 @@ export default function AdminPage() {
   // 免费试用设置 / free-trial settings
   const [trial, setTrial] = useState<AdminTrialSettings | null>(null)
   const [savingTrial, setSavingTrial] = useState(false)
+  // trial 是表单草稿：ops 分页勾选框每点一下就改它，只在 load()/saveTrial()
+  // 时才跟服务器对齐。邀请分页的送试用列要判断"全局试用现在到底是不是开着"，
+  // 读草稿会在草稿被改过、还没保存时给出错误答案（勾了没存 → 列会显示送
+  // 试用可用，实际发不出去；反之亦然）。所以单独存一份已保存值，只在
+  // load()/saveTrial() 里更新，传给 InviteLinksPanel 的必须是这个。
+  // `trial` is a form draft: the ops-tab checkbox mutates it on every click and
+  // it only reconciles with the server in load()/saveTrial(). The invites tab
+  // needs "is the global trial actually on right now", and reading the draft
+  // gives the wrong answer whenever it has been edited but not saved yet
+  // (ticked-not-saved makes the trial column look live when it isn't, and vice
+  // versa). Keep the persisted value separate, updated only in load() and
+  // saveTrial(), and pass THAT to InviteLinksPanel.
+  const [savedTrialEnabled, setSavedTrialEnabled] = useState(false)
 
   // 纪律分参数设置 / discipline-score parameter settings
   const [discipline, setDiscipline] = useState<AdminDisciplineSettings | null>(null)
@@ -404,6 +417,7 @@ export default function AdminPage() {
       setBrokerPatternsText(settingsRes.brokerPatterns.join(', '))
       setPricing(pricingRes)
       setTrial(trialRes)
+      setSavedTrialEnabled(trialRes.trialEnabled)
       setDiscipline(disciplineRes)
       setCandleSettings(candleRes)
       setStrategySettings(strategyRes)
@@ -466,6 +480,7 @@ export default function AdminPage() {
     try {
       const updated = await adminApi.updateTrial(trial)
       setTrial(updated)
+      setSavedTrialEnabled(updated.trialEnabled)
       showToast('ok', t('admin.saved'))
     } catch (err) {
       showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
@@ -1059,7 +1074,10 @@ export default function AdminPage() {
 
       {tab === 'guide' && <PlatformStrategiesPanel />}
 
-      {tab === 'invites' && <InviteLinksPanel globalTrialEnabled={trial?.trialEnabled ?? false} />}
+      {/* 传已保存值、不传 trial 表单草稿：见上面 savedTrialEnabled 的定义与注释。
+          Pass the persisted value, not the trial form draft — see
+          savedTrialEnabled's definition and comment above. */}
+      {tab === 'invites' && <InviteLinksPanel globalTrialEnabled={savedTrialEnabled} />}
 
       {tab === 'tickets' && <AdminTicketsPanel />}
 

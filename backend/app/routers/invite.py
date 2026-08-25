@@ -103,6 +103,27 @@ def record_click(db: Session, code: str) -> None:
     db.commit()
 
 
+def _active_link(db: Session, code: str) -> InviteLink | None:
+    """按码查一条活跃链接；不存在或已停用返回 None。
+
+    apply_invite 与 offer_days 共用本函数，保证两边看到的"这个码是否可用"
+    永远是同一次查询逻辑，不会因为以后加过期时间、点击上限之类的条件时
+    只改了一边而分叉。record_click 不用它——它是条件原子 UPDATE，不是读，
+    这是故意的（见 record_click 自己的注释）。
+
+    Shared active-link lookup for apply_invite and offer_days, so both sides
+    agree on what "usable" means and can't silently diverge if a future
+    condition (expiry, click cap) lands on only one of them. record_click does
+    NOT use this — it is a conditional atomic UPDATE, not a read, deliberately
+    (see record_click's own comment).
+    """
+    return (
+        db.query(InviteLink)
+        .filter(InviteLink.code == _normalize_code(code), InviteLink.is_active.is_(True))
+        .first()
+    )
+
+
 def offer_days(db: Session, code: str) -> int | None:
     """这个 ref 码此刻能带来几天试用；不带返回 None。
 
@@ -115,11 +136,7 @@ def offer_days(db: Session, code: str) -> int | None:
     demands a genuine Request, and this repo's tests are service-level with no
     TestClient — the same reason record_click exists alongside click.
     """
-    link = (
-        db.query(InviteLink)
-        .filter(InviteLink.code == _normalize_code(code), InviteLink.is_active.is_(True))
-        .first()
-    )
+    link = _active_link(db, code)
     return _trial_grant_days(db, link) if link is not None else None
 
 
@@ -144,7 +161,25 @@ def _trial_grant_days(db: Session, link: InviteLink) -> int | None:
     trial = get_trial_settings(db)
     if not trial["trial_enabled"]:
         return None
-    return int(trial["trial_days"])
+    days = int(trial["trial_days"])
+    # 天数非正时当成"不发"处理：管理端 schema 把 trial_days 下限设成 ge=1，
+    # 正常途径永远到不了这里，但 platform_settings 是能被手改的。真让 0（或负数）
+    # 流出去，apply_invite 会把 plan_expires_at 设成"现在"、燃掉用户唯一一次
+    # 试用机会却不留审计行（auth.py 判的是 if granted_days，0 是假值），前端两处
+    # `if (r.trialDays)` 也会把它当没有活动——三个消费方全都不认 0，只有这里认，
+    # 干脆在唯一的判定点堵死。
+    #
+    # A non-positive day count is treated as "no grant": the admin schema
+    # bounds trial_days at ge=1 so this is unreachable through normal channels,
+    # but platform_settings can be hand-edited. Letting 0 (or negative) through
+    # would make apply_invite set plan_expires_at to "now", burn the user's
+    # one-time trial with no audit row (auth.py checks `if granted_days`, and 0
+    # is falsy), while both frontends' `if (r.trialDays)` treat it as no offer
+    # too. None of the three consumers accept 0 — only this function did, so
+    # the guard belongs at this single decision point.
+    if days <= 0:
+        return None
+    return days
 
 
 def apply_invite(db: Session, user: User, ref: str | None) -> int | None:
@@ -173,11 +208,7 @@ def apply_invite(db: Session, user: User, ref: str | None) -> int | None:
         return None
     if user.invite_code is not None:
         return None
-    link = (
-        db.query(InviteLink)
-        .filter(InviteLink.code == _normalize_code(ref), InviteLink.is_active.is_(True))
-        .first()
-    )
+    link = _active_link(db, ref)
     if link is None:
         return None  # 乱填/停用的 code 静默忽略，注册照常 / bad codes never block signup
     user.plan_note = link.label

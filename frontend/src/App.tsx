@@ -106,6 +106,19 @@ export default function App() {
               同理——必须覆盖全部路由。见 components/RefCapture.tsx 的说明。
               Invite-link attribution: captures ?ref= on any entry URL. Same
               placement rationale as MetaPixel — must cover every route. */}
+          {/* 必须排在 <Routes> 之前：首次访问时 localStorage 还是空的，
+              LandingPage/LoginPage 里读 readRef() 的那个 effect 全靠这里的
+              storeRef effect 在同一次渲染里先跑完才拿得到值。挪到 Routes
+              内部、或包一层更晚才 resolve 的边界，首访落地页的邀请文案会
+              悄悄消失，而这恰好是最难在手工测试里发现的情形——测试者的第
+              二次浏览都还能正常工作。
+              Must precede <Routes>: on a first-ever visit localStorage is
+              empty, and the readRef() effects in LandingPage/LoginPage only
+              see a value because this component's storeRef effect flushes
+              first in the same render pass. Moving it inside Routes, or
+              behind a boundary that resolves later, silently breaks the
+              invite copy on first-visit landings only — exactly the case a
+              manual second-visit test would miss. */}
           <RefCapture />
           <PwaBackGuard>
           <RouteErrorBoundary>
