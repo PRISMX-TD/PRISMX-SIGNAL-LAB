@@ -15,7 +15,7 @@ from app.core.security import (
     verify_google_id_token,
     verify_password,
 )
-from app.models import User
+from app.models import AdminAuditLog, User
 from app.routers.invite import apply_invite
 from app.schemas import AuthRequest, AuthResponse, GoogleAuthRequest, RegisterRequest, UserOut
 from app.services.phone import compose_phone
@@ -71,10 +71,32 @@ def register(request: Request, req: RegisterRequest, db: Session = Depends(get_d
         # only; the user generates a visible token on the Bind page
         api_token=hash_api_token(generate_api_token()),
     )
-    # 邀请链接归因：只对新建用户生效，乱填/停用的 ref 静默忽略。
-    # Invite attribution: new users only; bad/disabled refs are ignored.
-    apply_invite(db, user, req.ref)
+    # 邀请链接归因：只对新建用户生效，乱填/停用的 ref 静默忽略。链接开了「送
+    # 试用」且全局试用总闸也开着时，apply_invite 会顺手把 PRO 试用发掉并返回
+    # 天数（见 invite.py 的 _trial_grant_days）。
+    # Invite attribution: new users only; bad/disabled refs are ignored. When
+    # the link grants a trial and the global gate is open, apply_invite also
+    # grants PRO and returns the day count.
+    granted_days = apply_invite(db, user, req.ref)
     db.add(user)
+    if granted_days:
+        # 必须先 flush：User.id 是 flush 时才生成的 Python 侧默认值，而
+        # AdminAuditLog.target_user_id 是指向 users.id 的 NOT NULL 外键——在
+        # flush 之前拿 user.id 会写出一条 null 外键，Postgres 上直接违约、注册
+        # 请求 500。flush 不结束事务，下面仍是同一次 commit。
+        # Flush first: User.id is a Python-side default generated at flush, and
+        # target_user_id is a NOT NULL FK to users.id — taken any earlier it is
+        # null, which violates the constraint on Postgres and 500s the whole
+        # registration. flush does not end the transaction; the commit below is
+        # still the same one.
+        db.flush()
+        db.add(AdminAuditLog(
+            admin_user_id=user.id,
+            target_user_id=user.id,
+            field="plan:invite_trial",
+            old_value="FREE",
+            new_value=f"PRO({granted_days}d)",
+        ))
     db.commit()
     db.refresh(user)
 
@@ -118,8 +140,17 @@ def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends
         # Invite attribution on the create branch ONLY. Applying it to an
         # existing user would clobber the admin's note and fabricate
         # attribution — returning users often still carry a stored ref.
-        apply_invite(db, user, req.ref)
+        granted_days = apply_invite(db, user, req.ref)
         db.add(user)
+        if granted_days:
+            db.flush()
+            db.add(AdminAuditLog(
+                admin_user_id=user.id,
+                target_user_id=user.id,
+                field="plan:invite_trial",
+                old_value="FREE",
+                new_value=f"PRO({granted_days}d)",
+            ))
         db.commit()
         db.refresh(user)
     elif user.password_hash is not None and user.google_linked_at is None:
