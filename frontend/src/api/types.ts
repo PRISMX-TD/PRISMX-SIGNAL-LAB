@@ -97,6 +97,12 @@ export interface InviteLink {
   clicks: number
   registrations: number
   isActive: boolean
+  // 经此链接注册是否自动开通 PRO 试用。是否真的会发还要看全局试用开关，
+  // 管理页在全局关闭时把这一列置灰（后端 _trial_grant_days 是唯一判定处）。
+  // Whether signups through this link auto-receive the PRO trial; the global
+  // trial switch still gates it, so the admin panel greys the column out when
+  // that switch is off.
+  grantsTrial: boolean
   createdAt: string | null
 }
 

@@ -654,7 +654,7 @@ export const adminApi = {
       method: 'POST',
       body: JSON.stringify({ label }),
     }),
-  updateInviteLink: (id: string, payload: Partial<{ label: string; isActive: boolean }>) =>
+  updateInviteLink: (id: string, payload: Partial<{ label: string; isActive: boolean; grantsTrial: boolean }>) =>
     request<InviteLink>(`/admin/invite-links/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
@@ -817,6 +817,17 @@ export const paymentApi = {
     request<{ ok: boolean; planExpiresAt: string; days: number }>('/payments/trial/claim', {
       method: 'POST',
     }),
+}
+
+// 邀请链接的公开查询。只有 offer 一个方法——点击打点在 RefCapture 里用裸
+// fetch 直发（那个端点一律 204 空体，request() 会去 JSON 解析而抛错）；本端点
+// 有 JSON 响应体，所以照常走 request()。
+// Public invite lookups. Only `offer` lives here: the click ping stays a raw
+// fetch inside RefCapture because that endpoint answers 204 with an empty body,
+// which request() would try to JSON-parse. This one returns JSON.
+export const inviteApi = {
+  getOffer: (code: string) =>
+    request<{ trialDays: number | null }>(`/invite/offer?code=${encodeURIComponent(code)}`),
 }
 
 // 推送订阅 / Push subscriptions
