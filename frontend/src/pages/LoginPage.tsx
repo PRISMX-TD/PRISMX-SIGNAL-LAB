@@ -1,9 +1,10 @@
 // 登录/注册页 / Login & register page
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Navigate, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../store/auth'
 import { localizeApiError } from '../api/utils'
+import { inviteApi, readRef } from '../api/client'
 import Logo from '../components/Logo'
 import LanguageToggle from '../components/LanguageToggle'
 import AuroraBackground from '../components/AuroraBackground'
@@ -26,6 +27,32 @@ export default function LoginPage() {
   const [phone, setPhone] = useState<PhoneValue>({ iso: DEFAULT_DIAL_ISO, national: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  // 邀请链接送的试用天数；null = 没有或查不到，一律不显示横幅。
+  // 只在注册页签查：登录页签展示"注册送礼"是噪音，且多打一个请求。
+  // 失败静默的理由同 RefCapture：这条横幅恰好只作用于带 ref 的那批流量，其中
+  // 社交 App 内置浏览器占比更高，弄坏注册页的代价远大于少一条横幅。
+  // Trial days offered by the stored invite link; null means no offer or lookup
+  // failed, and the banner simply doesn't render. Only fetched on the register
+  // tab. Failures are silent for the same reason as RefCapture: this banner
+  // targets exactly the ?ref= traffic, skewed toward in-app browsers, and
+  // breaking the signup form costs far more than a missing banner.
+  const [inviteTrialDays, setInviteTrialDays] = useState<number | null>(null)
+  useEffect(() => {
+    if (mode !== 'register') return
+    const code = readRef()
+    if (!code) return
+    let alive = true
+    inviteApi
+      .getOffer(code)
+      .then((r) => {
+        if (alive && r.trialDays) setInviteTrialDays(r.trialDays)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [mode])
 
   // 已登录直接重定向；渲染期间调用 navigate 是反模式 / declarative redirect
   if (isAuthed) return <Navigate to="/dashboard" replace />
@@ -121,6 +148,15 @@ export default function LoginPage() {
                 {t('auth.registerTitle')}
               </button>
             </div>
+
+            {mode === 'register' && inviteTrialDays !== null && (
+              <div className="mb-4 flex items-center gap-2 rounded-lg border border-[#E0A83C]/40 bg-[#E0A83C]/10 px-3 py-2.5 text-[13px] font-semibold text-[#E0A83C]">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" />
+                </svg>
+                {t('auth.inviteTrialBanner', { days: inviteTrialDays })}
+              </div>
+            )}
 
             <form onSubmit={onSubmit} className="space-y-4">
               <div>

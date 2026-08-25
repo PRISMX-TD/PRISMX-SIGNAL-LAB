@@ -294,7 +294,8 @@
     "completeTitle": "完善资料",
     "completeSubtitle": "还差一步：请填写手机号码，之后即可开始使用",
     "completeSubmit": "提交并继续",
-    "completeSignOut": "退出登录，换个账号"
+    "completeSignOut": "退出登录，换个账号",
+    "inviteTrialBanner": "通过此链接注册，立得 {{days}} 天 PRO 会员"
   },
   "signals": {
     "title": "实时交易信号",

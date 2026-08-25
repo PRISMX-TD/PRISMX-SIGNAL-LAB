@@ -294,7 +294,8 @@
     "completeTitle": "Complete your profile",
     "completeSubtitle": "One more step: enter your phone number to get started",
     "completeSubmit": "Submit and continue",
-    "completeSignOut": "Sign out and use another account"
+    "completeSignOut": "Sign out and use another account",
+    "inviteTrialBanner": "Sign up through this link and get {{days}} days of PRO"
   },
   "signals": {
     "title": "Live Trading Signals",
