@@ -20,7 +20,7 @@ import json
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -101,6 +101,26 @@ def record_click(db: Session, code: str) -> None:
         InviteLink.code == _normalize_code(code), InviteLink.is_active.is_(True)
     ).update({InviteLink.clicks: InviteLink.clicks + 1}, synchronize_session=False)
     db.commit()
+
+
+def offer_days(db: Session, code: str) -> int | None:
+    """这个 ref 码此刻能带来几天试用；不带返回 None。
+
+    与 record_click 同层的纯服务函数，路由 offer 只是它的薄壳。拆开是为了可测：
+    路由挂着限流装饰器，slowapi 要求 request 是真的 Request 实例，而本仓库的测试
+    是 service 级的、没有 TestClient（既有用例同样只测 record_click、不测 click）。
+
+    Service-layer twin of record_click; the offer route is a thin wrapper over
+    it. Split out for testability: the route carries the rate limiter, which
+    demands a genuine Request, and this repo's tests are service-level with no
+    TestClient — the same reason record_click exists alongside click.
+    """
+    link = (
+        db.query(InviteLink)
+        .filter(InviteLink.code == _normalize_code(code), InviteLink.is_active.is_(True))
+        .first()
+    )
+    return _trial_grant_days(db, link) if link is not None else None
 
 
 def _trial_grant_days(db: Session, link: InviteLink) -> int | None:
@@ -214,6 +234,43 @@ def click(request: Request, req: InviteClickRequest, db: Session = Depends(get_d
     """公开打点：一律 204，不区分 code 是否存在（防枚举探测）。"""
     record_click(db, req.code)
     return Response(status_code=204)
+
+
+@router.get("/offer")
+@limiter.limit(settings.RATE_LIMIT_INVITE_CLICK)
+def offer(
+    request: Request,
+    code: str = Query(min_length=1, max_length=32),
+    db: Session = Depends(get_db),
+):
+    """公开查询：这个 ref 码此刻能带来几天 PRO 试用；不带则 trialDays 为 null。
+
+    为什么它存在：注册前就告诉访客有这份权益，是这条链路上最强的转化钩子；藏
+    到注册之后等于没有。落地页与注册页据此选择文案。
+
+    **这是对 /invite/click「一律 204、不给任何 code 存活信号」那条防枚举原则的
+    一次有意放宽**，不是漏写。别把它改回不可区分——那会让上面两个页面无法在
+    注册前说任何话，功能就没了。放宽的边界收得很窄，请一并保持：
+
+    ① 「码不存在」「码已停用」「码没开送试用」返回**完全相同**的 null，因此现有
+       那些不发试用的合作链接仍然完全不可探测；能被探出来的只有正在对外宣传送
+       礼的那批码，而那本来就是主动广而告之的东西。
+    ② 不返回 label，不返回 is_active——合作方名字与链接状态都不出网。
+    ③ 天数并非新增泄露：/payments/public 本就公开返回「当前有无试用活动 + 几
+       天」。本端点新增的信息量只有「这一个 code 送不送」。
+    ④ 判定走 _trial_grant_days，与实际发放同源，前台承诺不可能与后端分叉。
+
+    Public lookup: how many PRO trial days this ref code currently carries, or
+    null. Exists because telling visitors before they sign up is the strongest
+    conversion hook on this path. This is a *deliberate* relaxation of click's
+    always-204 no-oracle rule, not an oversight — do not "fix" it back. The
+    relaxation is deliberately narrow; keep it that way: unknown, disabled and
+    non-granting codes all answer identically, so existing non-granting partner
+    links stay unprobeable; no label or active flag ever leaves the server; the
+    day count is already public via /payments/public; and the decision reuses
+    _trial_grant_days so the promise can never diverge from the grant.
+    """
+    return {"trialDays": offer_days(db, code)}
 
 
 @admin_router.get("", response_model=dict)
