@@ -220,12 +220,20 @@ def _link_out(link: InviteLink, registrations: int) -> InviteLinkOut:
         clicks=link.clicks,
         registrations=registrations,
         isActive=link.is_active,
+        grantsTrial=bool(link.grants_trial),
         createdAt=link.created_at,
     )
 
 
 def _audit_value(link: InviteLink) -> str:
-    return json.dumps({"label": link.label, "isActive": link.is_active}, ensure_ascii=False)
+    return json.dumps(
+        {
+            "label": link.label,
+            "isActive": link.is_active,
+            "grantsTrial": bool(link.grants_trial),
+        },
+        ensure_ascii=False,
+    )
 
 
 @router.post("/click", status_code=204)
@@ -305,18 +313,19 @@ def create_invite_link(
         raise HTTPException(
             status_code=422, detail="标记名不能为空 / Label must not be empty"
         )
-    # is_active 显式传 True，不吃模型上的 Column(default=True)：那是**写库时**才
-    # 应用的 Python 侧默认值，而 SessionLocal 是 autoflush=False，下一行
-    # _audit_value(link) 读到的还是 None——审计行会记成 {"isActive": null}，
-    # 把新建的链接记成状态不明。显式赋值比在这里插一次 db.flush() 好：不提前
-    # 把 INSERT 发出去（校验失败时事务里干干净净），也不依赖 flush 的时机。
-    # is_active is passed explicitly rather than relying on the model's
-    # Column(default=True): that default is applied at flush time, and
-    # SessionLocal is autoflush=False, so _audit_value(link) on the next line
-    # would still read None and record {"isActive": null} — a freshly created
-    # link logged as being in an unknown state. Preferred over a db.flush()
-    # here: it doesn't emit the INSERT early and doesn't depend on flush timing.
-    link = InviteLink(code=new_unique_code(db), label=label, is_active=True)
+    # is_active 与 grants_trial 都显式传，不吃模型上的 Column(default=...) ：
+    # 那是**写库时**才应用的 Python 侧默认值，而 SessionLocal 是 autoflush=False，
+    # 下一行 _audit_value(link) 读到的还是 None——审计行会记成 {"isActive": null,
+    # "grantsTrial": null}，把新建的链接记成状态不明。显式赋值比在这里插一次
+    # db.flush() 好：不提前把 INSERT 发出去（校验失败时事务里干干净净），也不依赖
+    # flush 的时机。
+    # is_active and grants_trial are passed explicitly rather than relying on the
+    # model's Column defaults: those are applied at flush time, and SessionLocal is
+    # autoflush=False, so _audit_value(link) on the next line would still read None
+    # and record null fields — a freshly created link logged in an unknown state.
+    # Preferred over a db.flush() here: it doesn't emit the INSERT early and
+    # doesn't depend on flush timing.
+    link = InviteLink(code=new_unique_code(db), label=label, is_active=True, grants_trial=False)
     db.add(link)
     _log_change(db, admin.id, admin.id, f"invite:{link.code}", None, _audit_value(link))
     db.commit()
@@ -345,6 +354,8 @@ def update_invite_link(
         link.label = label
     if data.get("isActive") is not None:
         link.is_active = data["isActive"]
+    if data.get("grantsTrial") is not None:
+        link.grants_trial = data["grantsTrial"]
     _log_change(db, admin.id, admin.id, f"invite:{link.code}", old, _audit_value(link))
     db.commit()
     db.refresh(link)

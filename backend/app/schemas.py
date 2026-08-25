@@ -898,6 +898,7 @@ class InviteLinkUpdate(BaseModel):
     # Only send fields to change (exclude_unset semantics, like AdminUserUpdate).
     label: str | None = Field(default=None, min_length=1, max_length=64)
     isActive: bool | None = None
+    grantsTrial: bool | None = None
 
 
 class InviteLinkOut(BaseModel):
@@ -911,4 +912,10 @@ class InviteLinkOut(BaseModel):
     # from the note text, so hand-edited notes never skew it.
     registrations: int = 0
     isActive: bool
+    # 经此链接注册是否自动开通 PRO 试用。是否**真的**会发还要看全局试用总闸
+    # （见 invite.py 的 _trial_grant_days），管理页据此在总闸关闭时把这一列置灰。
+    # Whether signups through this link auto-receive the PRO trial. Whether it
+    # actually fires also depends on the global trial gate; the admin panel
+    # greys the column out when that gate is closed.
+    grantsTrial: bool = False
     createdAt: datetime | None = None
