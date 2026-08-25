@@ -170,6 +170,8 @@
     "prTrialThen": "之后 ${{price}}/月",
     "prTrialBadge": "限时开放 · 免费试用 {{days}} 天 PRO",
     "prTrialCta": "免费注册，领 {{days}} 天 PRO 试用",
+    "prTrialBadgeInvite": "通过此链接注册 · 直接开通 {{days}} 天 PRO",
+    "prTrialCtaInvite": "免费注册，直接开通 {{days}} 天 PRO",
     "prCta": "先免费注册，进去再升级",
     "prNote": "两档永久并存，随时可升可降。升级在登录后的「升级」页完成，支持 USDT 支付。",
     "prSponsor": "也可以让合作券商替你付：在 MakeCapital 开户并保持活跃账户，PRO 由券商赞助——细则即将公布。",

@@ -28,7 +28,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { paymentApi } from '../api/client'
+import { paymentApi, inviteApi, readRef } from '../api/client'
 import { SUPPORT_EMAIL } from '../config/site'
 import Logo from '../components/Logo'
 import PublicLanguageToggle from '../components/PublicLanguageToggle'
@@ -180,6 +180,35 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
       .catch(() => {})
   }, [])
 
+  // 带 ref 进站且该链接开了送试用时，金条与 CTA 换成"直接开通"的说法。
+  //
+  // 只影响**文案选择**，绝不影响任何元素的出现或消失：金条出不出仍然只由全局
+  // trial.enabled 决定。这样一来这个异步值无论何时返回、返回不返回，都不会造成
+  // 布局跳动——落地页是预渲染静态页，一条会撑开卡片的迟到横幅在滚动中非常刺眼。
+  //
+  // 与 plans 那个请求并行，互不等待；任何一个挂了另一个照常。
+  //
+  // Switches the gold band and CTA to the "activated on signup" wording when
+  // the stored ref grants a trial. Affects *copy only* — whether the band
+  // renders at all still depends solely on the global trial switch, so this
+  // async value can never cause layout shift no matter when (or whether) it
+  // lands. Runs in parallel with the plans call; either can fail alone.
+  const [inviteDays, setInviteDays] = useState<number | null>(null)
+  useEffect(() => {
+    const code = readRef()
+    if (!code) return
+    let alive = true
+    inviteApi
+      .getOffer(code)
+      .then((r) => {
+        if (alive && r.trialDays) setInviteDays(r.trialDays)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
+
   return (
     <section ref={ref} id="pricing" className={`${SHELL} scroll-mt-24 py-20 sm:py-28`}>
       <Heading title={t('landing.prTitle')} subtitle={t('landing.prSubtitle')} />
@@ -227,7 +256,9 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" />
               </svg>
-              {t('landing.prTrialBadge', { days: trial.days })}
+              {inviteDays
+                ? t('landing.prTrialBadgeInvite', { days: inviteDays })
+                : t('landing.prTrialBadge', { days: trial.days })}
             </div>
           )}
           <div className="flex items-baseline justify-between gap-3">
@@ -271,7 +302,11 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
             onClick={() => navigate('/login?mode=register')}
             className="btn mt-8 h-11 w-full bg-white text-[13px] font-semibold text-prism-700 hover:bg-white/90"
           >
-            {trial ? t('landing.prTrialCta', { days: trial.days }) : t('landing.prCta')}
+            {trial
+              ? inviteDays
+                ? t('landing.prTrialCtaInvite', { days: inviteDays })
+                : t('landing.prTrialCta', { days: trial.days })
+              : t('landing.prCta')}
           </button>
         </div>
       </div>

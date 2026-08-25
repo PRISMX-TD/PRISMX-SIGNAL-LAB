@@ -170,6 +170,8 @@
     "prTrialThen": "then ${{price}}/mo",
     "prTrialBadge": "Limited: {{days}}-day free PRO trial",
     "prTrialCta": "Sign up free — claim your {{days}}-day trial",
+    "prTrialBadgeInvite": "Via this link: {{days}} days of PRO, activated on signup",
+    "prTrialCtaInvite": "Sign up free — {{days}} days of PRO, activated instantly",
     "prCta": "Register free, upgrade inside",
     "prNote": "Both tiers exist permanently: upgrade or downgrade anytime. Upgrading happens on the in-app Upgrade page (USDT supported).",
     "prSponsor": "Or let the partner broker cover it: open a MakeCapital account and keep it active, and PRO is sponsored. Details coming soon.",
