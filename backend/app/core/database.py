@@ -96,7 +96,8 @@ def _hash_legacy_api_tokens() -> None:
 # rev 2: users.phone / users.phone_required（注册强制记录手机号）
 # rev 3: users.invite_code（邀请链接注册归因）+ idx_users_invite_code
 # rev 4: notification_prefs.push_window_start/end/tz（推送时段限制）
-CURRENT_SCHEMA_REV = 4
+# rev 5: invite_links.grants_trial（邀请链接注册自动开通试用）
+CURRENT_SCHEMA_REV = 5
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -634,6 +635,24 @@ def _migrate_columns() -> None:
         if "actually_paid" not in payment_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE payments ADD COLUMN actually_paid FLOAT"))
+
+    # invite_links：新增「经此链接注册自动开通试用」开关。这张表在此之前从未
+    # 改过列，所以本块是它的第一段迁移。回填成 FALSE 而不是留 NULL：NULL 在
+    # Python 侧同样是 falsy，行为不会错，但管理页的开关会渲染成未定态、审计
+    # 快照会记成 null，把一个状态明确的链接记成状态不明。
+    # invite_links: add the "auto-grant trial on signup" switch. First migration
+    # this table has ever needed. Backfilled to FALSE rather than left NULL —
+    # NULL is falsy so behaviour would be correct, but the admin toggle renders
+    # indeterminate and audit snapshots record null for a link whose state is
+    # in fact perfectly definite.
+    if "invite_links" in inspector.get_table_names():
+        invite_cols = {c["name"] for c in inspector.get_columns("invite_links")}
+        if "grants_trial" not in invite_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE invite_links ADD COLUMN grants_trial BOOLEAN"))
+                conn.execute(text(
+                    "UPDATE invite_links SET grants_trial = FALSE WHERE grants_trial IS NULL"
+                ))
 
     # 全部步骤跑完才记版本号：中途抛异常就不写，下次启动会重跑（所有步骤幂等）。
     # Only recorded after every step succeeded: an exception midway leaves the marker

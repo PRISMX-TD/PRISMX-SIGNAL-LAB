@@ -965,4 +965,19 @@ class InviteLink(Base):
     # are invisible; registrations are the hard number.
     clicks = Column(Integer, nullable=False, default=0)
     is_active = Column(Boolean, nullable=False, default=True)
+    # 经此链接注册是否自动开通 PRO 免费试用。默认关——上线当天不能让存量合作
+    # 链接突然开始发放会员。天数取全局 trial_days，不做每条链接单独配置；全局
+    # trial_enabled 是总闸，它关着时本开关一律不生效（见 invite.py 的
+    # _trial_grant_days，那是唯一的判定处）。
+    # nullable=True 是为存量行留的：补列后它们是 NULL，声明 NOT NULL 会与库里
+    # 的实际状态不符（同 User.phone_required 的取舍）。迁移会把它们回填成
+    # False，读取处再一律 bool() 兜底。
+    # Whether registering through this link auto-grants the PRO free trial.
+    # Defaults off. Duration always comes from the global trial_days; the global
+    # trial_enabled switch is the master gate (see _trial_grant_days in
+    # invite.py, the single place that decides). nullable=True mirrors
+    # User.phone_required: pre-existing rows are NULL after the column is added,
+    # so NOT NULL would contradict the actual database state. The migration
+    # backfills them to False and every read wraps in bool().
+    grants_trial = Column(Boolean, default=False, nullable=True)
     created_at = Column(DateTime, default=_now)
