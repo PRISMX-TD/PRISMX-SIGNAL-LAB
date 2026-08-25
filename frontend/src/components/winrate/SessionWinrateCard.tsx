@@ -2,7 +2,6 @@
 //
 // 回答的是「现在这个盘值不值得盯、盯什么」——「策略分析」页首屏那一段的浓缩版：
 //   现在：纽约盘 · 还剩 3h07m
-//   纽约盘近 30 天胜率 56.2%
 //   这个盘里胜率最高的时间   [22:00 67.7%] [23:00 65.5%]
 //   可以留意                 [ETHUSDT 68.6%] [BTCUSDT 64.3%]
 //
@@ -36,8 +35,8 @@ import { signalApi } from '../../api/client'
 import type { AdminStrategyWinRate, SessionWindow } from '../../api/types'
 import RateChip from './RateChip'
 import {
-  SESSION_COLORS, VERDICT_COLOR, fmtClock, fmtDurationHm, fmtPct,
-  isRated, rankBuckets, rankHours, sessionStatus, verdictOf, zoneOffsetMinutes,
+  SESSION_COLORS, fmtClock, fmtDurationHm, rankBuckets, rankHours, sessionStatus,
+  zoneOffsetMinutes,
 } from './shared'
 
 const TOP_ON_CARD = 2
@@ -100,9 +99,6 @@ const SessionWinrateCard: FC = () => {
 
   const empty = !data || data.overall.total.samples === 0
   const picked = data ? pickSession(data.sessions, now) : null
-  const bucket = data && picked ? data.overall.sessions[picked.key] : undefined
-  const kind = bucket ? verdictOf(bucket) : 'none'
-  const hasRate = !!bucket && isRated(kind) && bucket.winRate !== null
 
   const hours = data && picked
     ? rankHours(data.overall.total.hourly, now, {
@@ -169,21 +165,6 @@ const SessionWinrateCard: FC = () => {
                 {t('admin.winrate.watch.nowLeft', { time: fmtDurationHm(picked!.minutesLeft) })}
               </span>
             )}
-          </p>
-
-          <p className="mt-2 flex flex-wrap items-center gap-x-2 text-xs text-neutral-400">
-            <span>
-              {t('admin.winrate.watch.sessionRate', {
-                days: data!.days,
-                name: picked!.key === 'outside'
-                  ? t('admin.winrate.session.outside')
-                  : t(`admin.winrate.session.${picked!.key}`),
-              })}
-            </span>
-            <span className="font-display text-lg font-bold leading-none tabular-nums"
-                  style={{ color: VERDICT_COLOR[kind] }}>
-              {hasRate ? fmtPct(bucket!.winRate!) : '—'}
-            </span>
           </p>
 
           <div className="mt-4 space-y-3">

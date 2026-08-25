@@ -1044,8 +1044,7 @@
         "timelineTitle": "各时段 · 你的时间",
         "hoursGood": "这个盘里胜率最高的时间",
         "hoursHint": "近 {{days}} 天，时间是你本地的",
-        "hoursNone": "近 {{days}} 天这个盘里没有胜率过半的时间。",
-        "sessionRate": "{{name}}近 {{days}} 天胜率"
+        "hoursNone": "近 {{days}} 天这个盘里没有胜率过半的时间。"
       },
       "aria": {
         "tug": "{{label}}：赢 {{tp}} 笔，输 {{sl}} 笔，胜率 {{rate}}"

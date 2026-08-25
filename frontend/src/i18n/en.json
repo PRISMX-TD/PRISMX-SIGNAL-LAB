@@ -1044,8 +1044,7 @@
         "timelineTitle": "Sessions · your time",
         "hoursGood": "Best hours in this session",
         "hoursHint": "last {{days}} days, in your local time",
-        "hoursNone": "No hour in this session is above half over the last {{days}} days.",
-        "sessionRate": "{{name}} win rate, last {{days}} days"
+        "hoursNone": "No hour in this session is above half over the last {{days}} days."
       },
       "aria": {
         "tug": "{{label}}: {{tp}} wins, {{sl}} losses, win rate {{rate}}"
