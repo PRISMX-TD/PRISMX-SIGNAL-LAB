@@ -18,6 +18,7 @@ the acting admin stands in and the "invite:" field prefix disambiguates.
 """
 import json
 import secrets
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import func
@@ -30,6 +31,7 @@ from app.models import InviteLink, User
 from app.routers.admin import _log_change
 from app.schemas import InviteClickRequest, InviteLinkCreate, InviteLinkOut, InviteLinkUpdate
 from app.services.deps import require_admin
+from app.services.settings_store import get_trial_settings
 
 router = APIRouter(prefix="/invite", tags=["invite"])
 # require_admin 是**两处都挂**，不是二选一：main.py 挂载时的 router 级依赖是兜底
@@ -101,12 +103,46 @@ def record_click(db: Session, code: str) -> None:
     db.commit()
 
 
-def apply_invite(db: Session, user: User, ref: str | None) -> None:
-    """注册归因：ref 命中活跃链接时写入备注快照与归因码。
+def _trial_grant_days(db: Session, link: InviteLink) -> int | None:
+    """这条链接此刻能发几天试用；不发返回 None。
+
+    两个开关在这一处、也只在这一处合流：链接自己的 grants_trial，和全局的
+    trial_enabled 总闸。发放路径（apply_invite）与公开查询端点（offer）共用本
+    函数，因此落地页/注册页承诺的与后端实际发放的不可能分叉——这正是把判定
+    抽出来而不是两边各写一遍的理由，别把它内联回去。
+
+    天数取全局 trial_days：链接不单独配置天数（YAGNI，见设计文档第 8 节）。
+
+    How many trial days this link grants right now, or None. The per-link
+    switch and the global master gate meet here and nowhere else. The granting
+    path and the public offer endpoint share this function, so what the landing
+    and signup pages promise can never diverge from what the backend actually
+    grants — that is the whole reason it is factored out; do not inline it.
+    """
+    if not bool(link.grants_trial):
+        return None
+    trial = get_trial_settings(db)
+    if not trial["trial_enabled"]:
+        return None
+    return int(trial["trial_days"])
+
+
+def apply_invite(db: Session, user: User, ref: str | None) -> int | None:
+    """注册归因与自动试用发放：ref 命中开了送试用的活跃链接时，注册即开通
+    PRO 试用；否则仅写入备注快照与归因码。
+
+    返回实际发放的试用天数，未发放为 None。Task 3 的 auth.py 靠这个返回值
+    决定是否写审计行。
 
     只应在**新建用户**的路径上调用（auth.register / google 的创建分支）。
     Google 端点是查找或创建二合一，对已存在的用户应用 ref 会覆盖管理员手写
     的备注、伪造注册来源；invite_code 已有值时也不覆盖，同一用户只归因一次。
+
+    Registration attribution and auto-trial grant: if ref matches an active link
+    with the per-link switch on, the registration grants PRO trial immediately;
+    otherwise, just write the note and code. Returns the number of trial days
+    actually granted, or None. Task 3's auth.py branches on this return value
+    to decide whether to write an audit row.
 
     Call only on user-creation paths (register / google's create branch): the
     Google endpoint is find-or-create, and applying ref to an existing user
@@ -114,18 +150,46 @@ def apply_invite(db: Session, user: User, ref: str | None) -> None:
     An already-set invite_code is never overwritten either.
     """
     if not ref:
-        return
+        return None
     if user.invite_code is not None:
-        return
+        return None
     link = (
         db.query(InviteLink)
         .filter(InviteLink.code == _normalize_code(ref), InviteLink.is_active.is_(True))
         .first()
     )
     if link is None:
-        return  # 乱填/停用的 code 静默忽略，注册照常 / bad codes never block signup
+        return None  # 乱填/停用的 code 静默忽略，注册照常 / bad codes never block signup
     user.plan_note = link.label
     user.invite_code = link.code
+
+    days = _trial_grant_days(db, link)
+    if days is None:
+        return None
+
+    # 注册即开通：直接写在**尚未 INSERT** 的 user 对象上。
+    #
+    # 这里刻意**不用** payments.claim_trial 那套条件原子 UPDATE。那套防的是同
+    # 一个已存在用户并发点两次领取；而此刻这一行在库里还不存在，没有并发对手，
+    # 原子性由注册那一次 commit 提供。别"补"一个 UPDATE 上来——它不会更安全，
+    # 只会对着一行不存在的记录空转。
+    #
+    # 字段与 claim_trial 完全一致（同一份权益）：到期后由
+    # services/plan_expiry.py 的既有机制自动降回 FREE，本功能不新增到期逻辑。
+    #
+    # Granted by writing straight onto the not-yet-INSERTed user object. The
+    # conditional atomic UPDATE used by payments.claim_trial is deliberately
+    # absent: it guards against one existing user double-clicking, but this row
+    # does not exist yet, so there is no competitor and atomicity comes from the
+    # registration commit. Adding one would not be safer — it would update zero
+    # rows. Fields match claim_trial exactly (same entitlement); expiry is
+    # handled by the existing plan_expiry mechanism, unchanged.
+    now = datetime.now(timezone.utc)
+    user.plan = "PRO"
+    user.plan_expires_at = now + timedelta(days=days)
+    user.trial_used_at = now
+    user.plan_is_trial = True
+    return days
 
 
 def _link_out(link: InviteLink, registrations: int) -> InviteLinkOut:
