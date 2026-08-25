@@ -34,6 +34,7 @@ import { Link } from 'react-router-dom'
 import { signalApi } from '../../api/client'
 import type { AdminStrategyWinRate, SessionWindow } from '../../api/types'
 import RateChip from './RateChip'
+import SessionTimeline from './SessionTimeline'
 import {
   SESSION_COLORS, fmtClock, fmtDurationHm, rankBuckets, rankHours, sessionStatus,
   zoneOffsetMinutes,
@@ -166,6 +167,17 @@ const SessionWinrateCard: FC = () => {
               </span>
             )}
           </p>
+
+          {/* 简化版时段色带：紧跟在「现在：亚洲盘」那句下面，因为它就是那句话的
+              图形版——三条带子按浏览者本地钟点摆开，白游标是此刻。上面那句给结论，
+              这里给上下文：下一段什么时候开、现在离收盘还有多远，一眼看得到。
+              The compact band strip sits directly under the "now: Asia" line
+              because it is that sentence drawn: three bands laid out in the
+              viewer's local clock with a white cursor at this moment. The line
+              states the conclusion; the strip supplies the context around it. */}
+          <div className="mt-3">
+            <SessionTimeline sessions={data!.sessions} now={now} variant="compact" />
+          </div>
 
           <div className="mt-4 space-y-3">
             <div>
