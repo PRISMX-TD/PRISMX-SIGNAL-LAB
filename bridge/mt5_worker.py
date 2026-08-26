@@ -204,6 +204,12 @@ def _account_payload(suffix: str) -> dict | None:
         "leverage": int(info.leverage),
         "company": info.company,
         "detectedSuffix": suffix,
+        # 账户类型：0=模拟 1=竞赛 2=实盘。MT5 自己给的值，用户在终端里改不了；
+        # 但它毕竟经由本机程序上报，服务端把它当作可信度较低的一路来源
+        # （另一路是 gateway 直接向券商取组名）。取不到时报 None，服务端不覆盖。
+        # Account type from MT5 (ACCOUNT_TRADE_MODE). Reported as None when the
+        # attribute is unavailable, in which case the server keeps its existing value.
+        "tradeMode": int(getattr(info, "trade_mode", None)) if getattr(info, "trade_mode", None) is not None else None,
     }
 
 

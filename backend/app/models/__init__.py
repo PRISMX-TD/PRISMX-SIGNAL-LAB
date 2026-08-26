@@ -173,6 +173,28 @@ class MT5Account(Base):
     company = Column(String, nullable=True)
     # 该账号的品种后缀（如 ".sc"）/ symbol suffix for this account
     symbol_suffix = Column(String, nullable=True, default="")
+    # 券商侧的组名（如 "real\\forex\\standard"）。列名刻意不叫 group：那是
+    # PostgreSQL 的保留字，而本项目的迁移走裸 SQL 的 ALTER TABLE，撞上就得处处加引号。
+    # 存原始值而不是只存判定结果，有两个用处：① 运维能核对"这个账号到底在哪个组"，
+    # ② 前缀规则改了之后可以重新判定，不必等券商那边有任何变化。
+    # 目前只有 gateway 通道会写（组名由券商 Manager API 给出）；bridge 通道拿不到组名。
+    # The broker-side group name. Deliberately not named `group` — that's a
+    # PostgreSQL reserved word and this project's migrations use raw ALTER TABLE.
+    # The raw value is kept (not just the verdict) so ops can audit it and so a
+    # changed prefix rule can re-classify without waiting on the broker.
+    mt5_group = Column(String, nullable=True)
+    # 账户类型：0=模拟 1=竞赛 2=实盘，NULL=未知。取值与 MT5 的 ACCOUNT_TRADE_MODE
+    # 一致，好让两条通道共用这一列——gateway 侧由组名判定（见 services/account_type.py），
+    # bridge 侧由客户端上报 account_info().trade_mode。
+    #
+    # ⚠ 两条来源的可信度**不对等**：gateway 的组名来自券商、经本平台服务端取得，用户
+    # 碰不到；bridge 的值来自用户自己电脑上的程序，理论上可伪造或故意缺省。凡是"对外
+    # 代表用户成绩"的统计都应当知道这个差别。
+    # Account type (0=demo, 1=contest, 2=real, NULL=unknown), same values as
+    # MT5's ACCOUNT_TRADE_MODE so both channels share the column. Gateway derives
+    # it from the broker's group name; bridge self-reports it. The two are NOT
+    # equally trustworthy — see the note above.
+    trade_mode = Column(Integer, nullable=True)
     online = Column(Boolean, default=False)
     last_heartbeat = Column(DateTime, nullable=True)
 

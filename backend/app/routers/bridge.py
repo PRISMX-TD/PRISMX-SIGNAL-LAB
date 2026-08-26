@@ -307,6 +307,14 @@ class BridgeAccount(BaseModel):
     leverage: int | None = Field(default=None, ge=0, le=100000)
     company: str | None = Field(default=None, max_length=128)
     detectedSuffix: str | None = Field(default=None, pattern=SUFFIX_PATTERN)
+    # 账户类型：0=模拟 1=竞赛 2=实盘（MT5 的 account_info().trade_mode 原值）。
+    # 可空：旧版桥接不带这个字段，服务端按 None 处理、不覆盖已有值。
+    # ⚠ 这是**用户侧程序自报**的值，理论上可伪造或故意缺省，可信度低于 gateway
+    # 通道按券商组名判定的结果——见 models.MT5Account.trade_mode 的说明。
+    # Account type as reported by the client (MT5's ACCOUNT_TRADE_MODE). Optional
+    # so older bridges keep working. Self-reported, hence less trustworthy than
+    # the gateway channel's broker-derived value.
+    tradeMode: int | None = Field(default=None, ge=0, le=2)
 
 
 class BridgePollRequest(BaseModel):
@@ -360,6 +368,11 @@ def _upsert_account(
     # 探测后缀仅作兜底（用户未手动设置时）/ detected suffix is fallback only
     if acc.detectedSuffix is not None and not (row.symbol_suffix or "").strip():
         row.symbol_suffix = acc.detectedSuffix
+    # 只在上报了才写：旧版桥接不带该字段，不能让 None 把已有值抹掉。
+    # Only written when reported: an older bridge omits it, and None must not
+    # wipe a value that's already there.
+    if acc.tradeMode is not None:
+        row.trade_mode = acc.tradeMode
     row.online = True
     row.last_heartbeat = datetime.now(timezone.utc)
     return row, created

@@ -17,6 +17,7 @@ from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.models import ClosedTrade, MT5Account, Order, User
 from app.schemas import SUFFIX_PATTERN
+from app.services.account_type import classify_group
 from app.services.deps import get_current_user
 from app.services.gateway_client import (
     get_account as gw_get_account,
@@ -26,6 +27,7 @@ from app.services.gateway_client import (
     verify_account as gw_verify,
 )
 from app.services.plans import max_mt5_accounts
+from app.services.settings_store import get_account_type_settings
 # 余额推送与 bridge 共用同一份去重状态（_last_pushed_balances），所以直接复用
 # bridge 里的函数，而不是各自维护一套——两套状态会互相覆盖对方的余额。
 # bridge 不导入 gateway，这个方向不会形成循环导入。
@@ -193,6 +195,11 @@ def gateway_verify(
         existing.leverage = rsp.leverage
         existing.balance = rsp.balance
         existing.equity = rsp.equity
+        # 组名与由它判出的账户类型。gateway 是唯一拿得到券商侧组名的通道，
+        # 也是唯一"用户碰不到"的实盘依据（见 services/account_type.py）。
+        # 每次刷新都重写，规则改了下一轮自动纠正。
+        existing.mt5_group = rsp.group or None
+        existing.trade_mode = classify_group(rsp.group, get_account_type_settings(db))
 
         try:
             db.commit()
@@ -200,7 +207,20 @@ def gateway_verify(
             db.rollback()
             raise HTTPException(status_code=409, detail="该账号已绑定")
 
-        logger.info("Gateway 绑定成功: user=%s login=%s group=%s", user.id, login_str, rsp.group)
+        logger.info(
+            "Gateway 绑定成功: user=%s login=%s group=%s trade_mode=%s",
+            user.id, login_str, rsp.group, existing.trade_mode,
+        )
+        if existing.trade_mode is None and rsp.group:
+            # 组名判不出类型：该账号会被排除在所有实盘统计之外。留一条可检索的
+            # 日志，运维照它把前缀补进 account_type 设置即可。
+            # Unclassifiable group: the account is excluded from every real-account
+            # statistic. Logged so ops can add the prefix to the account_type setting.
+            logger.warning(
+                "账户类型判不出：login=%s group=%s —— 该账号暂不计入实盘统计，"
+                "请把该组前缀补进平台设置 account_type",
+                login_str, rsp.group,
+            )
     else:
         logger.info("Gateway 验证失败: user=%s login=%s retcode=%s", user.id, req.login, rsp.retcode)
 
@@ -620,6 +640,13 @@ async def gateway_positions_loop() -> None:
             row.leverage = rsp.leverage
             if rsp.name:
                 row.account_name = rsp.name
+            # 组名与账户类型每轮重写：券商把账号挪组、或运维改了前缀规则，
+            # 都在下一次资金刷新时自动跟上，不需要用户重新绑定。
+            # Rewritten every round so a regrouped account or a changed prefix
+            # rule self-corrects without the user re-binding.
+            if rsp.group:
+                row.mt5_group = rsp.group
+                row.trade_mode = classify_group(rsp.group, get_account_type_settings(db))
             db.commit()
             return float(row.balance or 0.0)
         finally:

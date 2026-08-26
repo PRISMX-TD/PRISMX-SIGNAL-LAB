@@ -653,3 +653,73 @@ def server_matches_broker(server: str | None, patterns: list) -> bool:
     if not s:
         return False
     return any(p.strip() and p.strip().lower() in s for p in (patterns or []))
+
+
+# 账户类型判定：把 MT5 组名映射成实盘/竞赛/模拟。默认值按 MT5 的通行命名惯例
+# 给出，覆盖常规情况；券商命名不守惯例时，运维改这一行设置即可，不用改代码、
+# 也不用动 Windows 上的 C# 网关（组名本来就已经传到后端了）。
+#
+# 判定逻辑与"为什么只能靠组名"见 services/account_type.py。**匹配不上的一律
+# 判未知（NULL），不猜**——猜错的方向是把模拟盘记成实盘，代价远大于漏算一个
+# 账号；补进前缀后下一轮刷新会自动纠正。
+#
+# Group-name -> account type mapping, defaulted to MT5's usual naming
+# convention. Ops can adjust it without touching code or redeploying the
+# Windows gateway (the group name already reaches the backend). Anything that
+# matches nothing stays unknown rather than being guessed — see account_type.py.
+ACCOUNT_TYPE_DEFAULTS: dict = {
+    "real_group_prefixes": ["real"],
+    "contest_group_prefixes": ["contest"],
+    "demo_group_prefixes": ["demo", "preliminary"],
+}
+
+_account_type_cache: dict = {}
+_account_type_cache_at: float = 0.0
+
+
+def invalidate_account_type_cache() -> None:
+    global _account_type_cache_at
+    with _lock:
+        _account_type_cache_at = 0.0
+
+
+def _load_account_type_from_db(db) -> dict:
+    data = dict(ACCOUNT_TYPE_DEFAULTS)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "account_type").first()
+    if row:
+        try:
+            stored = json.loads(row.value)
+            if isinstance(stored, dict):
+                for k in ACCOUNT_TYPE_DEFAULTS:
+                    if isinstance(stored.get(k), list):
+                        data[k] = stored[k]
+        except (ValueError, TypeError):
+            logger.warning("platform_settings: invalid JSON for account_type, using defaults")
+    return data
+
+
+def get_account_type_settings(db) -> dict:
+    """读取组名 -> 账户类型的前缀映射（独立缓存）。
+    Read the group-prefix -> account-type mapping (its own cache)."""
+    global _account_type_cache, _account_type_cache_at
+    now = time.time()
+    with _lock:
+        if _account_type_cache and now - _account_type_cache_at < _CACHE_TTL_SECONDS:
+            return dict(_account_type_cache)
+    data = _load_account_type_from_db(db)
+    with _lock:
+        _account_type_cache = data
+        _account_type_cache_at = now
+    return dict(data)
+
+
+def save_account_type_settings(db, data: dict) -> None:
+    merged = _load_account_type_from_db(db)
+    merged.update(data)
+    encoded = json.dumps(merged, ensure_ascii=False)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "account_type").first()
+    if row is None:
+        db.add(PlatformSetting(key="account_type", value=encoded))
+    else:
+        row.value = encoded
+    invalidate_account_type_cache()

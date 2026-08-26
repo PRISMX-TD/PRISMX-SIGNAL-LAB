@@ -98,7 +98,8 @@ def _hash_legacy_api_tokens() -> None:
 # rev 4: notification_prefs.push_window_start/end/tz（推送时段限制）
 # rev 5: invite_links.grants_trial（邀请链接注册自动开通试用）
 # rev 6: closed_trades.verified（服务端归属核验）+ 去重键改为 (user_id, mt5_login, deal_ticket)
-CURRENT_SCHEMA_REV = 6
+# rev 7: mt5_accounts.mt5_group / trade_mode（账户实盘判定）
+CURRENT_SCHEMA_REV = 7
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -268,6 +269,20 @@ def _migrate_columns() -> None:
             for name in ("push_window_start", "push_window_end", "push_window_tz"):
                 if name not in notif_cols:
                     conn.execute(text(f"ALTER TABLE notification_prefs ADD COLUMN {name} VARCHAR"))
+
+    # mt5_accounts 表：补组名与账户类型（实盘/模拟判定，见 services/account_type.py）。
+    # 两列都可空、都没有回填：历史行的类型只能等下一次账号刷新时按组名判出来
+    # （gateway 每轮资金刷新都会重写这两列），猜一个默认值反而会把模拟盘记成实盘。
+    # mt5_accounts: add the broker group name and the derived account type. Both
+    # nullable with no backfill — existing rows get classified on the next account
+    # refresh; guessing a default here could mark demo accounts as real.
+    if "mt5_accounts" in inspector.get_table_names():
+        acc_cols = {c["name"] for c in inspector.get_columns("mt5_accounts")}
+        with engine.begin() as conn:
+            if "mt5_group" not in acc_cols:
+                conn.execute(text("ALTER TABLE mt5_accounts ADD COLUMN mt5_group VARCHAR"))
+            if "trade_mode" not in acc_cols:
+                conn.execute(text("ALTER TABLE mt5_accounts ADD COLUMN trade_mode INTEGER"))
 
     # closed_trades 表：① 补 verified 列（服务端归属核验结论，见 models 里的说明）；
     # ② 把去重唯一键从 (user_id, deal_ticket) 换成 (user_id, mt5_login, deal_ticket)。
