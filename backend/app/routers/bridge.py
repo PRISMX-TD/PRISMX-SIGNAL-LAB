@@ -861,48 +861,120 @@ class BridgeClosedTradesRequest(BaseModel):
     data: list[BridgeClosedTrade] = []
 
 
+def _known_position_ids(db: Session, user_id: str, logins: set[str]) -> set[tuple[str, int]]:
+    """本用户已成交开仓订单的 (账号, 仓位编号) 集合——归属核验的依据。
+
+    两条通道的仓位编号存在不同列：bridge 在 mt5_ticket，gateway 在 mt5_position
+    （见 services/trade_performance.position_id_of），两个都收。只查上报涉及的
+    账号，不扫全表。
+    """
+    if not logins:
+        return set()
+    rows = (
+        db.query(Order.mt5_login, Order.mt5_ticket, Order.mt5_position)
+        .filter(
+            Order.user_id == user_id,
+            Order.action == "ORDER",
+            Order.status == "FILLED",
+            Order.mt5_login.in_(list(logins)),
+        )
+        .all()
+    )
+    known: set[tuple[str, int]] = set()
+    for login, ticket, position in rows:
+        for pos_id in (ticket, position):
+            if pos_id:
+                known.add((str(login), int(pos_id)))
+    return known
+
+
+def _trade_history_db_work(
+    db: Session, user_id: str, legs: list["BridgeClosedTrade"]
+) -> tuple[int, int]:
+    """核验 + 落库，返回 (新插入条数, 未通过核验条数)。
+
+    与 `_result_db_work` 同样的理由抽成模块级函数：端点把它丢进线程池执行，
+    留在闭包里就没法单独测——而这里的判定逻辑正是最需要测的部分。
+    Module-level for the same reason as _result_db_work: the endpoint hands it
+    to a threadpool, and a closure can't be tested on its own.
+    """
+    known = _known_position_ids(db, user_id, {leg.login for leg in legs})
+    inserted = 0
+    unverified = 0
+    for leg in legs:
+        is_ours = (leg.login, leg.positionTicket) in known
+        if not is_ours:
+            unverified += 1
+        db.add(ClosedTrade(
+            user_id=user_id,
+            mt5_login=leg.login,
+            symbol=leg.symbol,
+            side=leg.side,
+            close_volume=leg.closeVolume,
+            close_price=leg.closePrice,
+            profit=leg.profit,
+            position_ticket=leg.positionTicket,
+            deal_ticket=leg.dealTicket,
+            closed_at=leg.closedAt,
+            verified=is_ours,
+        ))
+        try:
+            db.commit()
+            inserted += 1
+        except IntegrityError:
+            # 唯一约束冲突：已经上报过这笔成交，跳过 / already reported, skip
+            db.rollback()
+    return inserted, unverified
+
+
 @router.post("/trade-history")
 async def bridge_trade_history(
     req: BridgeClosedTradesRequest,
     user: User = Depends(get_bridge_user),
     db: Session = Depends(get_db),
 ):
-    """桥接程序上报真实平仓明细：按 (用户, MT5 成交编号) 去重后落库。
+    """桥接程序上报真实平仓明细：按 (用户, 账号, MT5 成交编号) 去重后落库。
 
-    与用户是否通过网页下单/平仓无关——只要仓位当初是本平台开的（魔术号码
-    匹配），后续不管是网页平仓还是在 MT5 客户端手动平仓，都会被上报到这里。
+    与用户是否通过网页下单/平仓无关——只要仓位当初是本平台开的，后续不管是
+    网页平仓还是在 MT5 客户端手动平仓，都会被上报到这里。
 
-    Bridge reports real closing deals; deduped by (user, MT5 deal ticket).
-    Independent of whether the close was triggered via the web app — as long
-    as the position was originally opened by this platform (magic-number
-    matched), any subsequent close (web or manual in the MT5 terminal) lands
-    here.
+    **服务端归属核验**：这个端点的数据来自用户自己电脑上的桥接程序，凭的是该
+    用户自己的 API Token。"只收本平台开的仓位"这条规则原本只跑在客户端（靠魔术
+    号码筛选），服务端收到什么写什么——任何人都能用自己的 token 直接 POST 一批
+    凭空捏造的盈利记录。这里补上与 gateway 通道同款的核对（见 routers/gateway.py
+    的 _save_closed_trades）：平仓腿的 (账号, 仓位编号) 必须对得上本用户一笔已成交
+    的开仓订单，对得上才 verified=True。
+
+    核不过的记录**照常入库**、只是标 False：回执丢失、历史遗留等正当原因都会让
+    订单侧缺号，因存疑就丢掉用户真实的交易记录代价更大。凡是"对外代表用户成绩"
+    的统计（未来的排行榜/比赛/等级考核）都只应认 True。
+
+    Bridge reports real closing deals, deduped by (user, login, deal ticket).
+    Adds the server-side attribution check the bridge channel never had (the
+    magic-number filter runs only on the user's own machine, so the endpoint
+    used to store whatever it was sent): a leg's (login, position id) must match
+    one of this user's filled opening orders. Unmatched legs are still stored,
+    flagged verified=False, since a lost fill callback is a legitimate cause —
+    but any statistic that represents the user's record to others must require
+    True.
     """
-    def _save() -> int:
-        n = 0
-        for leg in req.data:
-            row = ClosedTrade(
-                user_id=user.id,
-                mt5_login=leg.login,
-                symbol=leg.symbol,
-                side=leg.side,
-                close_volume=leg.closeVolume,
-                close_price=leg.closePrice,
-                profit=leg.profit,
-                position_ticket=leg.positionTicket,
-                deal_ticket=leg.dealTicket,
-                closed_at=leg.closedAt,
-            )
-            db.add(row)
-            try:
-                db.commit()
-                n += 1
-            except IntegrityError:
-                # 唯一约束冲突：已经上报过这笔成交，跳过 / already reported, skip
-                db.rollback()
-        return n
+    if not req.data:
+        return {"ok": True, "inserted": 0}
 
-    inserted = await run_in_threadpool(_save)
+    inserted, unverified = await run_in_threadpool(
+        _trade_history_db_work, db, user.id, req.data
+    )
+
+    # 核不过的记录留一条日志：正式启用"只认 verified"之前，先靠它观察真实世界里
+    # 有多少**正当**记录会被误判（回执丢失、历史遗留），避免日后一刀切误伤。
+    # Log unverified legs: before anything starts requiring verified=True, this
+    # is how we learn how many legitimate records would be caught by it.
+    if unverified:
+        logger.warning(
+            "平仓明细归属核验：用户 %s 本次 %d 条中有 %d 条对不上本平台订单 / "
+            "%d of %d reported legs matched no platform order",
+            user.id, len(req.data), unverified, unverified, len(req.data),
+        )
 
     # 有新平仓就立刻通知前端重拉，别等它自己的 45 秒轮询。
     # 上报是幂等的（唯一约束去重），所以只在真有新增时推，避免每轮都发无用消息。

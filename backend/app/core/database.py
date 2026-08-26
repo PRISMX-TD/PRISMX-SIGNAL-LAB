@@ -97,7 +97,8 @@ def _hash_legacy_api_tokens() -> None:
 # rev 3: users.invite_code（邀请链接注册归因）+ idx_users_invite_code
 # rev 4: notification_prefs.push_window_start/end/tz（推送时段限制）
 # rev 5: invite_links.grants_trial（邀请链接注册自动开通试用）
-CURRENT_SCHEMA_REV = 5
+# rev 6: closed_trades.verified（服务端归属核验）+ 去重键改为 (user_id, mt5_login, deal_ticket)
+CURRENT_SCHEMA_REV = 6
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -267,6 +268,72 @@ def _migrate_columns() -> None:
             for name in ("push_window_start", "push_window_end", "push_window_tz"):
                 if name not in notif_cols:
                     conn.execute(text(f"ALTER TABLE notification_prefs ADD COLUMN {name} VARCHAR"))
+
+    # closed_trades 表：① 补 verified 列（服务端归属核验结论，见 models 里的说明）；
+    # ② 把去重唯一键从 (user_id, deal_ticket) 换成 (user_id, mt5_login, deal_ticket)。
+    #
+    # ② 是修一个静默丢数据的 bug：MT5 成交编号只在单个交易服务器内唯一，同一用户
+    # 在两家券商各绑一个账号时可能撞号，旧键会把第二个账号那笔**真实**成交当成
+    # 重复上报丢掉。新键比旧键更宽松，既有数据必然满足，换键本身不会失败。
+    #
+    # closed_trades: add the `verified` column, and widen the dedup key to
+    # include mt5_login (deal tickets are only unique within one trade server,
+    # so a user with two brokers could have a genuine deal silently dropped as a
+    # duplicate). The new key is strictly looser, so existing rows always satisfy it.
+    if "closed_trades" in inspector.get_table_names():
+        ct_cols = {c["name"] for c in inspector.get_columns("closed_trades")}
+        if "verified" not in ct_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE closed_trades ADD COLUMN verified BOOLEAN"))
+            # 不回填：历史行无从判定归属（当时既没记录核验结论，也不保证订单仍在），
+            # NULL 就是"上线前写入、未知"这个语义本身。
+            # No backfill: NULL *is* the "written before this column existed" state.
+
+        if is_postgres:
+            # 命名约束可直接换。DROP 与 CREATE 分开跑：老库可能已经没有旧约束了。
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE closed_trades DROP CONSTRAINT IF EXISTS uq_user_deal_ticket"
+                ))
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_login_deal_ticket "
+                    "ON closed_trades (user_id, mt5_login, deal_ticket)"
+                ))
+        else:
+            # SQLite 把 CREATE TABLE 里的 UNIQUE 约束实现成匿名自动索引，没法单独
+            # DROP，只能整表重建。用模型自己的 DDL 建新表（不手抄一遍列定义，避免
+            # 和模型漂移），整段跑在一个事务里：中途失败会整体回滚，不会留下半张表。
+            # SQLite implements a table-level UNIQUE as an anonymous auto-index
+            # that can't be dropped, so the table has to be rebuilt. The new table
+            # is created from the model's own DDL (never a hand-copied column list)
+            # and the whole dance runs in one transaction.
+            # 检测必须走 get_unique_constraints：SQLite 把表级 UNIQUE 实现成
+            # sqlite_autoindex_*，而 SQLAlchemy 的 get_indexes 会把这类自动索引
+            # 过滤掉——用它检测会永远查不到旧约束，迁移静默不执行。
+            # Detection must use get_unique_constraints: a table-level UNIQUE
+            # becomes a sqlite_autoindex_*, which get_indexes filters out.
+            legacy_key = {"user_id", "deal_ticket"}
+            legacy_unique = any(
+                set(uc.get("column_names") or []) == legacy_key
+                for uc in inspector.get_unique_constraints("closed_trades")
+            ) or any(
+                idx.get("unique") and set(idx.get("column_names") or []) == legacy_key
+                for idx in inspector.get_indexes("closed_trades")
+            )
+            if legacy_unique:
+                from app.models import ClosedTrade  # 局部导入：本模块定义 Base，顶层导入会成环
+
+                carried = [c.name for c in ClosedTrade.__table__.columns if c.name in ct_cols]
+                cols_sql = ", ".join(carried)
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE closed_trades RENAME TO closed_trades_legacy"))
+                    ClosedTrade.__table__.create(bind=conn)
+                    conn.execute(text(
+                        f"INSERT INTO closed_trades ({cols_sql}) "
+                        f"SELECT {cols_sql} FROM closed_trades_legacy"
+                    ))
+                    conn.execute(text("DROP TABLE closed_trades_legacy"))
+                logger.info("closed_trades 已重建：去重键改为 (user_id, mt5_login, deal_ticket)")
 
     # 后台清扫/过期扫描用的索引：create_all 不会为已存在的表补索引，这里补。
     # Indexes for the background sweeps: create_all won't add indexes to

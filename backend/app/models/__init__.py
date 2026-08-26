@@ -401,7 +401,17 @@ class ClosedTrade(Base):
     __tablename__ = "closed_trades"
     __table_args__ = (
         # 去重：桥接程序可能因重试重复上报同一笔成交 / dedup: the bridge may retry-report the same deal
-        UniqueConstraint("user_id", "deal_ticket", name="uq_user_deal_ticket"),
+        #
+        # 键里必须带 mt5_login：MT5 的成交编号只在**单个交易服务器内**唯一，同一
+        # 用户在两家券商各绑一个账号时完全可能撞号。原先的 (user_id, deal_ticket)
+        # 会把第二个账号那笔真实成交当成"重复上报"静默丢弃，该仓位从此永远补不齐
+        # 平仓手数、永远算不出胜负。与 idx_closed_trades_position 的分组键一致。
+        # The key must include mt5_login: MT5 deal tickets are only unique within
+        # one trade server, so a user with accounts at two brokers can legitimately
+        # collide. The old (user_id, deal_ticket) silently dropped the second
+        # account's real deal as a duplicate, leaving that position permanently
+        # short of its closing volume and never resolvable.
+        UniqueConstraint("user_id", "mt5_login", "deal_ticket", name="uq_user_login_deal_ticket"),
         # 胜率聚合按 (user_id, mt5_login, position_ticket) 分组求和 / win-rate
         # aggregation groups by (user_id, mt5_login, position_ticket)
         Index("idx_closed_trades_position", "user_id", "mt5_login", "position_ticket"),
@@ -418,6 +428,34 @@ class ClosedTrade(Base):
     position_ticket = Column(Integer, nullable=False)  # 仓位编号，同一仓位的多次部分平仓共享 / shared across partial closes
     deal_ticket = Column(Integer, nullable=False)  # MT5 成交编号，用于去重 / MT5 deal ticket, for dedup
     closed_at = Column(DateTime, nullable=False)
+    # 服务端能否为这条记录背书：该平仓腿的 (账号, 仓位编号) 是否对得上本平台
+    # 一笔已成交的开仓订单。
+    #
+    # 存在的理由是信任边界：这张表的数据由用户自己电脑上的桥接程序上报，凭的是
+    # 该用户自己的 API Token。"只收本平台开的仓位"这条规则原本**只跑在客户端**
+    # （靠魔术号码筛选），服务端收到什么写什么——也就是说，任何人都能用自己的
+    # token 直接 POST 一批凭空捏造的盈利记录进来。gateway 通道一直是做这个核对的
+    # （见 routers/gateway.py 的 _save_closed_trades 用 orders.mt5_position 反查），
+    # 这一列把同一道核对补给了桥接通道。
+    #
+    # 核不过的记录**照常入库**（可能是回执丢失、历史数据等正当原因，不能因为
+    # 存疑就丢掉用户真实的交易记录），只是打上 False；任何"对外代表用户成绩"
+    # 的统计都应当只认 True。NULL = 本列上线前写入的历史行，无从判定。
+    #
+    # 局限，需如实认知：它能挡住"凭空捏造整个仓位"，但挡不住"给一个真实仓位报
+    # 一个假盈亏"——后者需要独立于用户的行情源才能验证，本平台没有。
+    #
+    # Whether the server can vouch for this leg: does its (login, position id)
+    # match a filled opening order this platform actually placed? The data
+    # arrives from the user's own machine authenticated by their own API token,
+    # and the "only platform-opened positions" rule used to run *client-side*
+    # only, so anyone could POST fabricated profits. Unverifiable rows are still
+    # stored (a lost fill callback is a legitimate cause) but flagged False; any
+    # statistic that represents a user's record to others must require True.
+    # NULL = written before this column existed. It stops fabricated positions,
+    # not a forged profit on a real one — that would need an independent price
+    # source this platform doesn't have.
+    verified = Column(Boolean, nullable=True)
     created_at = Column(DateTime, default=_now)
 
 

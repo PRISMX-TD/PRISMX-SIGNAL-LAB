@@ -672,6 +672,14 @@ async def gateway_positions_loop() -> None:
                     position_ticket=leg["positionTicket"],
                     deal_ticket=leg["dealTicket"],
                     closed_at=leg["closedAt"],
+                    # 这条通道天然可核验：成交历史是本服务端直接向券商 Manager API
+                    # 取的，不经用户机器；归属判定也已在 build_closed_trade_legs
+                    # 里做过（主依据就是上面这份 known 仓位号）。与桥接通道的
+                    # verified 是同一个语义，见 models.ClosedTrade.verified。
+                    # Inherently verifiable: this history comes from the broker's
+                    # Manager API through our own server, never via the user's
+                    # machine, and attribution already ran in build_closed_trade_legs.
+                    verified=True,
                 ))
                 try:
                     db.commit()
