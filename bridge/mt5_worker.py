@@ -293,8 +293,53 @@ def _positions_payload() -> list:
 # one account.
 _TRADE_SCAN_WINDOW = timedelta(minutes=15)
 
+# 断线补扫窗口：进程刚启动、或两次成功扫描之间出现了大于常规窗口的缺口时，
+# 这一轮改用这个更宽的窗口把缺口补回来。
+#
+# 为什么必须有：固定回看 15 分钟意味着**只要桥接离线超过 15 分钟，这期间的平仓
+# 就永久漏报**——后端那边"没有平仓记录、又不再被报为持仓"的仓位会被整笔剔除
+# （见 services/trade_performance.py），于是这笔交易的盈亏凭空消失。它还能被
+# 主动利用：关掉桥接、在 MT5 里手动平掉亏损单、过一会儿再打开，这笔亏损就再也
+# 不会进统计。补扫把"离线不丢数据"这个前提真正建立起来。
+#
+# 上报天然幂等（后端按 (用户, 账号, 成交编号) 去重），所以补扫是纯增量、重复
+# 上报无副作用。7 天足够覆盖一次长假或一台关机的电脑，又不至于让首轮扫描太重。
+#
+# Catch-up window used on process start, or whenever the gap since the last
+# successful scan exceeds the normal window. Without it, any outage longer than
+# 15 minutes permanently loses the closes that happened during it — and that is
+# exploitable: close the bridge, manually close a losing position in MT5, reopen
+# later, and the loss never reaches the platform. Reporting is idempotent, so the
+# catch-up is purely additive.
+_BACKFILL_WINDOW = timedelta(days=7)
 
-def _server_now() -> datetime | None:
+# login -> 上一次**成功**扫描时的服务器时间。用来发现缺口；扫描失败或本轮有仓位
+# 归属未定时不更新，让下一轮重扫同一段。
+# login -> server time of the last fully successful scan; left untouched on
+# failure so the next round rescans the same stretch.
+_last_scan_at: dict[str, datetime] = {}
+
+# 服务器时区偏移的观测值：(账号, UTC 日期) -> 当日观测到的最大偏移秒数。
+#
+# 必须按账号分开存：一个进程可以同时连多个终端，不同经纪商的服务器时区可以不同
+# （常见就是 EET 与 UTC 并存）。合在一起取最大值会把偏移大的那家的时区套到另一家
+# 头上，把本来正确的时间改错。
+# Keyed per account: one process can drive several terminals, and different
+# brokers can sit in different server timezones — a shared maximum would apply
+# one broker's offset to another's deals.
+_utc_offset_samples: dict[tuple[str, str], float] = {}
+
+# 每个账号保留的观测天数（够一次夏令时过渡，也不让字典无限增长）。
+_OFFSET_KEEP_DAYS = 2
+
+# 偏移的取整粒度与合理上界。经纪商服务器基本都是整点偏移（EET 是 +2/+3），
+# 取整到半小时既能滤掉抖动，也容纳少数半小时时区。
+# Offsets are rounded to the nearest half hour and must stay within ±14.5h.
+_OFFSET_ROUND_SECONDS = 1800
+_OFFSET_MAX_SECONDS = 14.5 * 3600
+
+
+def _server_now(login: str) -> datetime | None:
     """MT5/经纪商服务器当前时间：由某个品种最新报价的时间戳推算。
 
     `history_deals_get()`的时间参数是按 MT5 服务器时间解读的，不是本地
@@ -352,7 +397,77 @@ def _server_now() -> datetime | None:
         return None
     if tick is None or tick.time <= 0:
         return None
+    _observe_utc_offset(tick.time, login)
     return datetime.fromtimestamp(tick.time)
+
+
+def _observe_utc_offset(server_epoch: float, login: str) -> None:
+    """用一条报价的时间戳观测「服务器时间 − UTC」的偏移，按 UTC 日取最大值。
+
+    MT5 给出的时间戳（报价、成交）都是**按服务器本地墙钟算出来的 epoch**，直接
+    当 UTC 解读会整体偏出几小时——同一个参照系问题在查询窗口那边已经踩过一次
+    （见 _server_now），这里管的是**落库时间**那一侧。
+
+    为什么取"当日最大值"而不是最近一次：报价过期只会让 tick.time 偏**小**，所以
+    每个样本都是真实偏移的下界，最大值最接近真值；市场活跃时一条新鲜报价就能一次
+    到位，周末全是陈旧样本时又会因为超出 ±14.5 小时上界而被整体丢弃、不会污染。
+    按 UTC 日分桶则让夏令时切换能在一天内自然跟上。
+
+    Observe the server-vs-UTC offset from a quote timestamp, keeping the daily
+    maximum. A stale quote can only bias the estimate downward, so every sample
+    is a lower bound and the max converges on the truth as soon as one fresh
+    quote lands; day buckets let DST shifts settle within a day.
+    """
+    offset = server_epoch - datetime.now(timezone.utc).timestamp()
+    if abs(offset) > _OFFSET_MAX_SECONDS:
+        return  # 陈旧到不可能是时区偏移（周末/长时间停盘）/ too stale to be a timezone
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    key = (login, day)
+    if offset > _utc_offset_samples.get(key, float("-inf")):
+        _utc_offset_samples[key] = offset
+    # 该账号只留最近 _OFFSET_KEEP_DAYS 天：按日期排序后砍掉更早的（字典是插入序，
+    # 不能拿顺序当日期序）。/ Keep the most recent days per account, chosen by
+    # sorting the dates (dict order is insertion order, not chronological).
+    days = sorted({d for (lg, d) in _utc_offset_samples if lg == login}, reverse=True)
+    for stale in days[_OFFSET_KEEP_DAYS:]:
+        _utc_offset_samples.pop((login, stale), None)
+
+
+def _utc_offset_seconds(login: str) -> float:
+    """当前采用的偏移（秒），取整到半小时；没有有效观测时返回 0。
+
+    返回 0 即"沿用旧行为"（把服务器时间当 UTC 落库）——拿不准时不猜，宁可维持
+    既有语义，也不要用一个错误的偏移把时间改得更离谱。
+    Falls back to 0 (the previous behaviour) when nothing has been observed:
+    when in doubt, don't guess.
+    """
+    mine = [v for (lg, _day), v in _utc_offset_samples.items() if lg == login]
+    if not mine:
+        return 0.0
+    return round(max(mine) / _OFFSET_ROUND_SECONDS) * _OFFSET_ROUND_SECONDS
+
+
+def _server_epoch_to_utc(server_epoch: float, login: str) -> datetime:
+    """把该账号所在服务器的 MT5 时间戳换算成真正的 UTC 时刻。"""
+    return datetime.fromtimestamp(server_epoch - _utc_offset_seconds(login), tz=timezone.utc)
+
+
+def _scan_window(now: datetime, last: datetime | None) -> tuple[datetime, bool]:
+    """这一轮平仓检测该从什么时候扫起，以及是不是在补扫。
+
+    - 常规：固定回看 _TRADE_SCAN_WINDOW，不依赖游标精度（见 _closed_trades_payload
+      文档 ①）；
+    - 缺口：`last` 为空（进程刚起）或距上次成功扫描已超过常规窗口（中间断过），
+      就从上次扫到的点再往前留一个常规窗口的安全边距开始扫，最多回看
+      _BACKFILL_WINDOW。
+
+    纯函数，便于单独验证边界。返回 (起点, 是否补扫)。
+    Returns where this round's scan should start and whether it is a catch-up.
+    """
+    if last is None or now - last > _TRADE_SCAN_WINDOW:
+        gap_start = (last - _TRADE_SCAN_WINDOW) if last is not None else (now - _BACKFILL_WINDOW)
+        return max(gap_start, now - _BACKFILL_WINDOW), True
+    return now - _TRADE_SCAN_WINDOW, False
 
 
 def _closed_trades_payload(path: str) -> list:
@@ -406,14 +521,49 @@ def _closed_trades_payload(path: str) -> list:
         magnitude short). Now uses _server_now() (inferred from a fresh
         quote's timestamp) instead of datetime.now() for the query bounds,
         fixing the reference-frame mismatch at its root.
+    ③ 第三层：**离线缺口补扫**。①的固定窗口只解决"抖动"，不解决"停机"——桥接
+       离线超过 15 分钟，这期间的平仓就永久扫不到了，而后端会把"没有平仓记录、
+       又不再被报为持仓"的仓位整笔剔除，于是那笔盈亏凭空消失（还能被主动利用：
+       关掉桥接、手动平掉亏损单、过一会儿再开）。所以额外按账号记一个"上次成功
+       扫描的服务器时间"，只在发现缺口时把窗口临时放宽到 _BACKFILL_WINDOW。
+
+       注意这**不是**①里被否掉的那个增量游标：游标仍然不参与常规路径（每轮照旧
+       固定回看 15 分钟，不依赖游标的精度），它只用来回答"中间是不是断过"这一个
+       问题；判错的代价也只是多扫一段已经上报过的成交，而上报是幂等的。本轮若有
+       仓位归属未定则不推进游标，下一轮重扫同一段。
+    ④ 落库时间换算成真 UTC：`d.time` 与查询边界同属服务器时间参照系，②只修了
+       查询这一侧，写进平台的 closedAt 一直是"服务器时间冒充 UTC"，整体偏几小时。
+       见 _server_epoch_to_utc / _observe_utc_offset。
+
+    (3) Offline-gap catch-up: the fixed window absorbs jitter but not downtime,
+        so a per-account "last successful scan" marker widens the window to
+        _BACKFILL_WINDOW when a gap is detected. This is not the incremental
+        cursor rejected in (1) — the normal path still doesn't depend on it;
+        it only answers "were we offline?", and a wrong answer merely rescans
+        already-reported deals. (4) closedAt is converted to true UTC, since
+        d.time shares the server-time frame that (2) only fixed on the query side.
     """
+    # 账号要先拿到：扫描窗口按账号各自记游标（补扫判断见下）。
+    # The login comes first: the scan cursor is tracked per account.
+    login = _current_login()
+    if not login:
+        logger.warning("平仓检测：_current_login() 拿不到账号，本轮跳过 / no login, skipping this round")
+        return []
+
     # 必须用服务器时间，不能用本地电脑时间——见 _server_now() 的详细说明。
     # Must use server time, not the local machine's clock — see _server_now()'s comment.
-    now = _server_now()
+    now = _server_now(login)
     if now is None:
         logger.warning("平仓检测：拿不到服务器时间（没有持仓也探测不到品种报价），本轮跳过 / can't determine server time, skipping this round")
         return []
-    since = now - _TRADE_SCAN_WINDOW
+
+    last = _last_scan_at.get(login)
+    since, catching_up = _scan_window(now, last)
+    if catching_up:
+        logger.info(
+            "平仓检测：账号 %s 补扫 [%s, %s]（上次成功扫描：%s）/ catch-up scan",
+            login, since, now, last,
+        )
 
     try:
         deals = mt5.history_deals_get(since, now)
@@ -426,15 +576,15 @@ def _closed_trades_payload(path: str) -> list:
         logger.warning("平仓检测：history_deals_get(%s, %s) 返回 None，mt5.last_error()=%s", since, now, mt5.last_error())
         return []
 
-    login = _current_login()
-    if not login:
-        logger.warning("平仓检测：_current_login() 拿不到账号，本轮跳过 / no login, skipping this round")
-        return []
-
     if deals:
         logger.info("平仓检测：窗口 [%s, %s] 内查到 %d 条原始成交 / %d raw deal(s) in window", since, now, len(deals), len(deals))
 
     out = []
+    # 本轮是否有仓位因为查不到历史而没能判定归属。有的话就**不推进游标**，让下一轮
+    # 重扫同一段——否则在补扫模式下，窗口一旦向前滑走，这笔成交就再也扫不到了。
+    # Whether any position's ownership stayed undetermined this round; if so the
+    # cursor is not advanced so the next round rescans the same stretch.
+    deferred = False
     # 同一次轮询内，同一仓位是否是我们开的只查一次 / cache per-position lookups within one pass
     position_is_ours: dict[int, bool] = {}
     # 仓位总手续费+隔夜利息 与 全部平仓成交的总手数——用于按手数占比把费用分摊
@@ -470,6 +620,7 @@ def _closed_trades_payload(path: str) -> list:
                 # the last 15 minutes, the next poll (1.5s later) rescans the
                 # same deal and retries ownership resolution.
                 logger.warning("平仓检测：仓位 %s 的历史查不到（mt5.last_error()=%s），归属未知，本轮跳过，下一轮重试", pos_id, mt5.last_error())
+                deferred = True
                 continue
             position_is_ours[pos_id] = any(getattr(pd, "magic", 0) == PRISMX_MAGIC for pd in pos_deals)
             total_fees = sum(float(pd.commission) + float(pd.swap) for pd in pos_deals)
@@ -506,8 +657,23 @@ def _closed_trades_payload(path: str) -> list:
             "profit": float(d.profit) + fee_share,
             "positionTicket": pos_id,
             "dealTicket": int(d.ticket),
-            "closedAt": datetime.fromtimestamp(d.time, tz=timezone.utc).isoformat(),
+            # d.time 是**服务器时间**算出来的 epoch，直接当 UTC 落库会整体偏出
+            # 几小时（周/月边界、比赛起止都会因此错位）。换算见 _server_epoch_to_utc。
+            # d.time is an epoch computed from the *server's* wall clock; storing
+            # it as UTC shifts every close by the broker's offset.
+            "closedAt": _server_epoch_to_utc(d.time, login).isoformat(),
         })
+
+    # 推进游标。有仓位归属未定时**不能原地不动**：那样下一轮会判定成"还有缺口"
+    # 而再次整段补扫，一个永远查不到历史的仓位就会让 7 天窗口每 1.5 秒重扫一次。
+    # 退一步把游标放到"一个常规窗口之前"：下一轮走常规路径重试同一批成交，既保住
+    # 重试、又不会退化成反复全量补扫。
+    # Advance the cursor. When something stayed undetermined, don't leave it
+    # untouched — the next round would see a gap and re-run the whole catch-up,
+    # so a permanently unreadable position would rescan 7 days every 1.5s.
+    # Park it one normal window back instead: the retry still happens, via the
+    # normal path.
+    _last_scan_at[login] = (now - _TRADE_SCAN_WINDOW) if deferred else now
 
     if deals:
         logger.info("平仓检测：本轮产出 %d 条待上报记录 / this round produced %d entrie(s)", len(out), len(out))

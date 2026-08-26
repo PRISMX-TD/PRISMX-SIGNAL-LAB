@@ -40,7 +40,7 @@ except Exception:
     _TRAY_AVAILABLE = False
 
 # ---------- 版本 / Version ----------
-APP_VERSION = "1.3.18"
+APP_VERSION = "1.3.19"
 
 # ---------- 更新检测 / Update check ----------
 # 通过 GitHub Releases 检查是否有更新的安装包版本。
@@ -65,6 +65,11 @@ DEFAULT_BACKEND = "https://api.prismxsignallab.com"
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".prismx_bridge.json")
 LOG_PATH = os.path.join(os.path.expanduser("~"), ".prismx_bridge.log")
 POLL_INTERVAL = 1.5  # 后端轮询间隔（秒）/ backend poll interval (seconds)
+
+# 单次平仓明细上报的最大条数。重连补扫可能一次产出几百条，整包发容易超时，
+# 而超时的整包会原样退回重试队列反复重发。见 _post_trades。
+# Max closing legs per POST; a reconnect catch-up can produce hundreds at once.
+_TRADES_PER_POST = 100
 
 # 已执行指令结果的本地持久化：程序重启后缓存不丢，后端超时重发同一指令时
 # 只重报缓存结果、绝不重复下单（防止"已执行但回执丢失 + 重启"导致重复开仓）。
@@ -574,13 +579,9 @@ class BridgeEngine:
         # missing trade — now both outcomes are logged with the deal
         # ticket(s), so it can be cross-checked against the backend log.
         if closed_trades:
-            tickets = [t.get("dealTicket") for t in closed_trades]
-            try:
-                _post_json(f"{self.backend}/api/bridge/trade-history", {"data": closed_trades}, self.token)
-                logger.info("已上报平仓明细 / reported closed trades: dealTickets=%s", tickets)
-            except Exception as e:
-                logger.warning("平仓明细上报失败，已入队重试 / closed-trade report failed, queued for retry: dealTickets=%s err=%s", tickets, e)
-                self._pending_trades.extend(closed_trades)
+            failed = self._post_trades(closed_trades)
+            if failed:
+                self._pending_trades.extend(failed)
                 _save_pending_trades(self._pending_trades)
 
         # 7) 先重试上一轮未成功回报的结果 / retry results & trades not yet acked last tick
@@ -654,17 +655,45 @@ class BridgeEngine:
             _save_pending_reports(still_pending)
         self._pending_reports = still_pending
 
+    def _post_trades(self, legs: list) -> list:
+        """分批上报平仓明细，返回**没能上报成功**的那些。
+
+        分批的理由：桥接重连后会做一次数天的补扫（见 mt5_worker 的
+        _BACKFILL_WINDOW），一个活跃账号可能一次产出几百条。整包发出去一旦超时，
+        它会原样退回重试队列、下一轮再整包重发——同一个包永远失败，队列再也清不掉。
+        切成小批之后，慢的那批失败也只拖住自己，其余照常落库。
+        上报天然幂等（后端按 (用户, 账号, 成交编号) 去重），重叠重发无副作用。
+
+        Chunked because a reconnect triggers a multi-day catch-up scan that can
+        produce hundreds of legs at once: one oversized POST that times out would
+        be requeued and re-sent whole forever. Reporting is idempotent, so
+        overlapping re-sends are harmless.
+        """
+        failed: list = []
+        for i in range(0, len(legs), _TRADES_PER_POST):
+            chunk = legs[i:i + _TRADES_PER_POST]
+            tickets = [t.get("dealTicket") for t in chunk]
+            try:
+                _post_json(f"{self.backend}/api/bridge/trade-history", {"data": chunk}, self.token)
+                logger.info("已上报平仓明细 / reported closed trades: dealTickets=%s", tickets)
+            except Exception as e:
+                logger.warning(
+                    "平仓明细上报失败，已入队重试 / closed-trade report failed, queued for retry: "
+                    "dealTickets=%s err=%s", tickets, e,
+                )
+                failed.extend(chunk)
+        return failed
+
     def _flush_trades(self):
         """重试此前未成功上报的平仓明细 / retry previously failed closed-trade reports."""
         if not self._pending_trades:
             return
-        try:
-            _post_json(f"{self.backend}/api/bridge/trade-history", {"data": self._pending_trades}, self.token)
-            self._pending_trades = []
+        still_pending = self._post_trades(self._pending_trades)
+        if still_pending != self._pending_trades:
+            # 有批次成功了才落盘，避免每轮都无谓写文件
+            # Persist only when something actually got through.
+            self._pending_trades = still_pending
             _save_pending_trades(self._pending_trades)
-        except Exception:
-            # 留在队列里，下一轮再试；不清空、不落盘 / stays queued for the next tick
-            pass
 
 
 def _parse_version(v: str) -> tuple[int, ...]:
