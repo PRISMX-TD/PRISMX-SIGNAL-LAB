@@ -15,6 +15,12 @@ interface Props {
   signals: Signal[]
   onTrade: (s: Signal) => void
   userPlan?: UserPlan
+  // 全平台活跃品种（EA 正在推的那份，useLive().activeSymbols）。品种下拉列的是
+  // 它，而不是"这批信号里出现过的品种"——见 symbolOptions 的说明。
+  // The platform's active symbols (the list the EA is currently pushing,
+  // useLive().activeSymbols). The symbol dropdown lists these rather than "the
+  // symbols in this batch of signals" — see symbolOptions.
+  activeSymbols: string[]
 }
 
 // 倒计时叶子：订阅共享时钟自行每秒刷新，不牵动整张卡片/网格重渲染。
@@ -36,7 +42,7 @@ const Countdown: FC<{ expireAt: string | null; label: string }> = memo(({ expire
   )
 })
 
-const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
+const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) => {
   const { t } = useTranslation()
   const { getPref, setPref } = usePrefs()
 
@@ -73,30 +79,58 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
   // *before* the symbol filter runs — deriving it after would collapse the
   // options to the current pick, with no way back.
   //
-  // 按**展示名**去重，不是原始品种名。库里同一个标的可能有两种写法——线上
-  // signals 表里 `BTCUSD` 与 `BTCUSDT` 同时存在（1322 条 / 1 条，来自不同时期的
-  // 推送方），而 displaySymbol() 把两者都渲染成「BTCUSDT」。按原始名去重就会出现
-  // 两个长得一模一样的选项，用户分不出，选哪个都只筛到一半。
+  // 列**全平台的品种**，不是"这批信号里出现过的品种"。后者会让下拉随信号来去
+  // 忽长忽短：某个品种这一刻没有活跃信号，它就整个消失，用户看到的是一份每隔几
+  // 分钟就变一次的清单，也无从知道这个平台到底覆盖哪些品种。品种是平台的固定
+  // 属性，不该由此刻恰好有没有信号来决定。
   //
-  // ⚠ 这里拿展示名当筛选键，是**因为这个筛选完全发生在前端**：它只跟另一个展示名
-  // 比对，不会作为品种名进任何请求、字典查找或下单路径。PRD 6.15 那条「绝不把展示
-  // 名回传进任何逻辑路径」的界线在这里没有被越过。
+  // 取 `activeSymbols`（EA 正在推的那份动态列表，全站三处品种清单都已改读它）
+  // 与"信号里出现过的品种"的**并集**：前者是主来源，后者兜底——某个品种的行情
+  // 推送短暂断了会掉出 activeSymbols，但它的信号还在网格里，这时候它必须仍然
+  // 可选，否则用户看得见卡片却筛不出来。
   //
-  // Deduplicate by **display name**, not raw symbol. One instrument can carry two
-  // spellings in the table — production's signals hold both `BTCUSD` and
-  // `BTCUSDT` (1322 vs 1, from different eras of the push side) and
-  // displaySymbol() renders both as "BTCUSDT". Deduplicating by raw symbol
-  // therefore yields two visually identical options, and picking either filters
-  // to only half the rows.
+  // 代价：选中一个此刻没有信号的品种会得到一张空网格。这是诚实的——它就是没有
+  // 信号，而不是被藏起来了；空态那行字会说明。
   //
-  // ⚠ Using a display name as the filter key is safe **only because this filter
-  // is entirely client-side**: it is compared against another display name and
-  // never travels as a symbol into a request, a dictionary lookup, or the order
-  // path. The PRD 6.15 line — never feed a display name back into a logic path —
-  // is not crossed here.
+  // List **every symbol the platform covers**, not just those in this batch of
+  // signals. The latter makes the dropdown grow and shrink as signals come and
+  // go: a symbol with no live signal right now vanishes entirely, leaving the
+  // reader with a list that changes every few minutes and no way to know what
+  // the platform actually covers. The symbol set is a property of the platform,
+  // not of whichever signals happen to be live this minute.
+  //
+  // Takes the **union** of `activeSymbols` (the dynamic list the EA is pushing,
+  // already the source for all three other symbol lists in the app) and the
+  // symbols present in signals: the former is the primary source, the latter a
+  // backstop — a symbol whose price feed briefly drops falls out of
+  // activeSymbols while its signals are still on the grid, and it must stay
+  // selectable or the reader can see cards they cannot filter to.
+  //
+  // The cost: picking a symbol with no current signals yields an empty grid.
+  // That is honest — there are none, rather than them being hidden — and the
+  // empty-state line says so.
   const symbolOptions = useMemo(() => {
     const evalNow = Date.now()
+    // 按**展示名**去重，不是原始品种名。同一个标的可能有两种写法——线上 signals
+    // 表里 `BTCUSD` 与 `BTCUSDT` 同时存在（本地库 1322 条 / 1 条，来自不同时期的
+    // 推送方），而 displaySymbol() 把两者都渲染成「BTCUSDT」。按原始名去重会出现
+    // 两个长得一模一样的选项，用户分不出，选哪个都只筛到一半。
+    //
+    // ⚠ 拿展示名当筛选键是安全的，**因为这个筛选完全发生在前端**：它只跟另一个
+    // 展示名比对，不会作为品种名进任何请求、字典查找或下单路径。PRD 6.15 那条
+    // 「绝不把展示名回传进任何逻辑路径」的界线没有被越过。
+    //
+    // Deduplicate by **display name**, not raw symbol: one instrument can carry
+    // two spellings (`BTCUSD` and `BTCUSDT` both occur in signals) that
+    // displaySymbol() renders identically, so deduplicating by raw symbol yields
+    // two indistinguishable options, each filtering to half the rows.
+    //
+    // ⚠ A display name is safe as the filter key **only because this filter is
+    // entirely client-side**: it is compared against another display name and
+    // never travels as a symbol into a request, a dictionary lookup, or the
+    // order path. PRD 6.15's line is not crossed here.
     const seen = new Set<string>()
+    for (const sym of activeSymbols) seen.add(displaySymbol(sym))
     for (const sig of signals) {
       if (!isFree && effectiveStatus(sig, evalNow) === 'EXPIRED') continue
       seen.add(displaySymbol(sig.symbol))
@@ -108,7 +142,7 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
     // no way back to the full board. (The dashboard card deliberately omits "all"
     // because there you are choosing one line to analyse, not filtering a list.)
     return [{ value: 'ALL', label: t('signals.all') }, ...rows]
-  }, [signals, isFree, t])
+  }, [signals, activeSymbols, isFree, t])
 
   // 存下来的品种可能已经不在这批信号里了（那个品种最近没发信号，或者换了套餐后
   // 可见范围变了）。这时候退回「全部」——否则用户打开就是一张空网格，而下拉里
@@ -207,7 +241,16 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
       {/* Signal grid */}
       <div className="sig-grid">
         {filtered.length === 0 && (
-          <div className="sig-empty">{t('signals.focus.noExecutable')}</div>
+          // 选了具体品种却筛不出东西，和整个面板本来就空，是两回事：前者要说清楚
+          // 「这个品种现在没有信号」，不然读者会以为筛选器坏了。
+          // Filtering to a symbol with no hits is not the same as an empty panel:
+          // say which symbol has nothing right now, or the reader concludes the
+          // filter is broken.
+          <div className="sig-empty">
+            {effectiveSymbol === 'ALL'
+              ? t('signals.focus.noExecutable')
+              : t('signals.noneForSymbol', { symbol: effectiveSymbol })}
+          </div>
         )}
         {filtered.map((sig) => {
           const oRr = calcRiskReward(sig.symbol, sig.entry, sig.stopLoss, sig.takeProfit)

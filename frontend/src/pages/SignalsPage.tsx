@@ -20,7 +20,7 @@ export default function SignalsPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { user } = useAuth()
-  const { signals, strategySignals, accounts, loaded } = useLive()
+  const { signals, strategySignals, accounts, activeSymbols, loaded } = useLive()
   const accountQuotes = useQuotes()
   // 页签放在 URL 的 ?tab= 上，不放 useState：仪表盘的「当前时段胜率」卡要能直接
   // 跳到「策略分析」（/app?tab=analysis），页签只活在组件里就跳不过来。顺带这一
@@ -126,7 +126,8 @@ export default function SignalsPage() {
           </div>
 
           {activeTab === 'signals' ? (
-            <SignalGrid signals={combinedSignals} onTrade={openTrade} userPlan={user?.plan} />
+            <SignalGrid signals={combinedSignals} onTrade={openTrade} userPlan={user?.plan}
+                        activeSymbols={activeSymbols} />
           ) : activeTab === 'strategies' ? (
             <PlatformStrategiesGuide />
           ) : (

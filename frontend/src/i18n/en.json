@@ -397,7 +397,8 @@
         "title": "No published strategy data yet",
         "body": "The platform is still accumulating resolved outcomes per strategy. Once published, you will see here when and on which symbols they do better."
       }
-    }
+    },
+    "noneForSymbol": "No recent signals for {{symbol}}"
   },
   "order": {
     "slideToConfirm": "Slide to confirm",
