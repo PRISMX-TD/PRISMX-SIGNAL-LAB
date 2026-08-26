@@ -22,6 +22,40 @@ from app.models import ClosedTrade, Order
 # 手数浮点误差容忍度 / float tolerance when comparing cumulative volumes
 _VOLUME_EPS = 1e-6
 
+
+def position_id_of(order) -> int | None:
+    """这笔开仓订单对应的 **MT5 仓位编号**——平仓明细的归属只能按它匹配。
+
+    两条执行通道存的编号不是一回事：
+
+    - Bridge 通道只有 `mt5_ticket`，而 MT5 市价单成交后仓位编号与订单编号同值，
+      所以它一直能和平仓腿的 `position_ticket` 对上；
+    - Gateway（合作券商）通道的 `mt5_ticket` 存的是**订单号或成交号**，与仓位号
+      是两套独立编号，真实仓位号另存在 `mt5_position`（见 routers/orders.py 的
+      `_apply_trade_result` 与 routers/gateway.py 的入库注释：拿 `mt5_ticket` 去
+      比对平仓成交的 position_id「永远不中」）。
+
+    此前本模块与 discipline.py 都只按 `mt5_ticket` 匹配，于是 gateway 账号的仓位
+    永远匹配不到自己的平仓腿、永远"分不出胜负"——个人胜率与纪律分对这批用户
+    整体失灵。取 `mt5_position or mt5_ticket` 之后两条通道都成立：gateway 用真实
+    仓位号，bridge 的 `mt5_position` 为空则回落到原有行为，不改变既有统计。
+
+    定义放在这里、由 discipline.py 导入而不是各自复制：两边一旦对"什么是仓位
+    编号"产生分歧，就会重新长出上面这个 bug（与 _VOLUME_EPS 那种"改了也互不
+    影响"的容差常量不同）。
+
+    The MT5 **position id** for a filled opening order — the only key closing
+    legs can be attributed by. Bridge orders carry it in `mt5_ticket` (for a
+    market fill MT5 numbers the position the same as the order), while gateway
+    orders keep an order/deal ticket there and the real position id in
+    `mt5_position`. Matching on `mt5_ticket` alone therefore never resolved a
+    single gateway position, silently breaking personal win rate and the
+    discipline score for those accounts. Shared with discipline.py by import
+    rather than duplicated: if the two modules ever disagree on what a position
+    id is, this bug grows back.
+    """
+    return order.mt5_position or order.mt5_ticket
+
 # 实时持仓对账窗口：桥接约每 1.5 秒上报一次持仓，只要仓位还开着就会被不断刷新。
 # 超过这个时长没被报为"仍持仓"、又没有完整平仓记录的仓位，判定为已在别处平掉
 # （手动平仓/桥接离线时平掉，平仓明细没上报），不再计入"进行中"。窗口取得比上报
@@ -95,16 +129,19 @@ def compute_personal_winrate(
     a confirmed matching login count.
     """
     # 1) 该用户在回看窗口内成功开仓、且已知 MT5 仓位编号的下单记录。
-    #    只取用得到的六列而不是整行 ORM 对象：下面全程只读这几个字段，取整行会
+    #    只取用得到的七列而不是整行 ORM 对象：下面全程只读这几个字段，取整行会
     #    让 SQLAlchemy 额外构造几千个实例并把它们挂进 identity map。
+    #    mt5_position 是 gateway 通道的真实仓位号，与 mt5_ticket 一起交给
+    #    position_id_of() 得出该仓位的归属键（见该函数说明）。
     #    this user's filled opens with a known MT5 ticket, within the look-back
-    #    window. Selects only the six columns actually used rather than whole ORM
-    #    rows: everything below reads just these fields, and fetching entities
+    #    window. Selects only the seven columns actually used rather than whole
+    #    ORM rows: everything below reads just these fields, and fetching entities
     #    would build thousands of instances and pin them in the identity map.
     cutoff = datetime.now(timezone.utc) - timedelta(days=WINDOW_DAYS)
     query = db.query(
         Order.mt5_login,
         Order.mt5_ticket,
+        Order.mt5_position,
         Order.volume,
         Order.symbol,
         Order.position_last_seen_open,
@@ -135,7 +172,10 @@ def compute_personal_winrate(
     # mis-attributes one account's close-legs onto another's position, skewing
     # both the win rate and the volume-completion check. This matches the
     # idx_closed_trades_position (user, login, ticket) grouping.
-    orders_by_pos = {(o.mt5_login, o.mt5_ticket): o for o in orders}
+    # 编号取 position_id_of()（gateway 用 mt5_position、bridge 回落 mt5_ticket），
+    # 否则 gateway 账号的仓位永远匹配不到平仓腿。
+    # The id comes from position_id_of() so gateway positions match their legs.
+    orders_by_pos = {(o.mt5_login, position_id_of(o)): o for o in orders}
 
     # 2) 这些仓位目前为止上报过的所有平仓明细（可能只是部分平仓）。同样只取
     #    下面真正读的四列。/ every reported close-leg for those tickets so far,
@@ -149,7 +189,7 @@ def compute_personal_winrate(
         )
         .filter(
             ClosedTrade.user_id == user_id,
-            ClosedTrade.position_ticket.in_(list({o.mt5_ticket for o in orders})),
+            ClosedTrade.position_ticket.in_(list({position_id_of(o) for o in orders})),
         )
         .all()
     )
@@ -163,12 +203,12 @@ def compute_personal_winrate(
 
     wins = losses = open_positions = 0
     symbol_counts: dict[str, int] = {}
-    for (login, ticket), order in orders_by_pos.items():
-        # 正常情况按 (账号, 编号) 精确匹配；账号未知的历史订单退回只按编号匹配，
-        # 避免把它误判成一直未平仓 / exact (login, ticket) match normally; legacy
-        # orders with no backfilled login fall back to ticket-only matching so
-        # they aren't wrongly counted as never-closed
-        pos_legs = legs_by_pos.get((login, ticket)) if login is not None else legs_by_ticket.get(ticket)
+    for (login, pos_id), order in orders_by_pos.items():
+        # 正常情况按 (账号, 仓位编号) 精确匹配；账号未知的历史订单退回只按编号
+        # 匹配，避免把它误判成一直未平仓 / exact (login, position id) match
+        # normally; legacy orders with no backfilled login fall back to
+        # id-only matching so they aren't wrongly counted as never-closed
+        pos_legs = legs_by_pos.get((login, pos_id)) if login is not None else legs_by_ticket.get(pos_id)
         fully_closed = False
         if pos_legs:
             closed_volume = sum(leg.close_volume for leg in pos_legs)
@@ -240,6 +280,15 @@ def mark_positions_seen(db, user_id: str, positions: list) -> int:
     # 另一账号同号的已平仓位错误地续成"仍持仓"。/ match by (login, ticket): tickets
     # are only unique within an account, so ticket-only refresh would wrongly keep
     # a same-numbered, already-closed position on another account looking open.
+    #
+    # 上报里的 ticket 是**真实仓位号**，所以两条通道要分别对上不同的列：bridge
+    # 订单的仓位号落在 mt5_ticket，gateway 订单的落在 mt5_position（见
+    # position_id_of 的说明）。此前只比对 mt5_ticket，gateway 的持仓一条也刷不到，
+    # 时间戳永远为空——它们在 _OPEN_FRESHNESS 之后会整体退出"进行中"，和平仓腿
+    # 匹配不上是同一个编号错位的两个面。
+    # The reported ticket is the real position id, so each channel matches a
+    # different column: bridge keeps it in mt5_ticket, gateway in mt5_position.
+    # Matching mt5_ticket alone never stamped a single gateway position.
     pairs = {
         (str(p["login"]), int(p["ticket"]))
         for p in positions
@@ -247,13 +296,17 @@ def mark_positions_seen(db, user_id: str, positions: list) -> int:
     }
     if not pairs:
         return 0
+    pair_list = list(pairs)
     updated = (
         db.query(Order)
         .filter(
             Order.user_id == user_id,
             Order.action == "ORDER",
             Order.status == "FILLED",
-            tuple_(Order.mt5_login, Order.mt5_ticket).in_(list(pairs)),
+            or_(
+                tuple_(Order.mt5_login, Order.mt5_ticket).in_(pair_list),
+                tuple_(Order.mt5_login, Order.mt5_position).in_(pair_list),
+            ),
         )
         .update({Order.position_last_seen_open: datetime.now(timezone.utc)}, synchronize_session=False)
     )

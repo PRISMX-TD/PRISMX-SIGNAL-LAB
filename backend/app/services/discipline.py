@@ -46,6 +46,7 @@ from sqlalchemy import distinct, or_
 from app.core.database import SessionLocal
 from app.models import ClosedTrade, DisciplineSnapshot, MT5Account, Order, Signal
 from app.services.settings_store import get_discipline_settings
+from app.services.trade_performance import position_id_of
 
 logger = logging.getLogger("prismx.discipline")
 
@@ -114,7 +115,11 @@ def _resolved_positions(
     if not orders:
         return {}
 
-    tickets = list({o.mt5_ticket for o in orders})
+    # 仓位编号统一走 position_id_of()（gateway 用 mt5_position、bridge 回落
+    # mt5_ticket）——只按 mt5_ticket 匹配时 gateway 账号的仓位永远算不出胜负，
+    # 纪律分对这批用户整体为空。详见 trade_performance.position_id_of。
+    # Position ids go through position_id_of() so gateway positions resolve.
+    tickets = list({position_id_of(o) for o in orders})
     legs = (
         db.query(ClosedTrade)
         .filter(ClosedTrade.user_id == user_id, ClosedTrade.position_ticket.in_(tickets))
@@ -126,7 +131,7 @@ def _resolved_positions(
 
     resolved: dict[tuple, dict] = {}
     for order in orders:
-        key = (order.mt5_login, order.mt5_ticket)
+        key = (order.mt5_login, position_id_of(order))
         pos_legs = legs_by_pos.get(key)
         if not pos_legs:
             continue
