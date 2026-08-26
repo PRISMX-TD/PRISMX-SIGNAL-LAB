@@ -4,6 +4,7 @@ import { type FC, memo, useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../../store/prefs'
+import Select from '../Select'
 import type { Signal, UserPlan } from '../../api/types'
 import { calcRiskReward, calcCountdown, displaySymbol, fmtTime, parseTime } from '../../api/utils'
 import { SIGNAL_LIFESPAN_MS, effectiveStatus, resultLabel, resultTone, rrTone } from './SignalView'
@@ -39,23 +40,83 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
   const { t } = useTranslation()
   const { getPref, setPref } = usePrefs()
 
-  const [sideF, setSideF] = useState<'ALL' | 'BUY' | 'SELL'>(
-    () => (getPref<string>('signals', 'sideF', 'ALL')) as 'ALL' | 'BUY' | 'SELL'
+  // 品种筛选（2026-08-26 顶掉原来的方向筛选）。存进 usePrefs 的 signals 命名空间，
+  // 和 sortF 同一套：那是**云端按用户落库**的偏好，还会通过 WS 推到该用户的其它
+  // 设备——比 localStorage 强，localStorage 只认浏览器不认人。
+  // Symbol filter (replaced the direction filter on 2026-08-26). Stored in the
+  // same `signals` namespace of usePrefs as sortF: a cloud-persisted, per-user
+  // preference that is also pushed to that user's other devices over WS — unlike
+  // localStorage, which knows browsers rather than people.
+  const [symbolF, setSymbolF] = useState<string>(
+    () => getPref<string>('signals', 'symbolF', 'ALL')
   )
   const [sortF, setSortF] = useState<'latest' | 'expiry'>(
     () => (getPref<string>('signals', 'sortF', 'latest')) as 'latest' | 'expiry'
   )
 
-  useEffect(() => { setPref('signals', 'sideF', sideF) }, [sideF, setPref])
+  useEffect(() => { setPref('signals', 'symbolF', symbolF) }, [symbolF, setPref])
   useEffect(() => { setPref('signals', 'sortF', sortF) }, [sortF, setPref])
 
   // 手机端：点击循环切换筛选值，无需列出全部选项 / mobile: tap to cycle filter value
-  const cycleSide = () => setSideF(s => (s === 'ALL' ? 'BUY' : s === 'BUY' ? 'SELL' : 'ALL'))
   const cycleSort = () => setSortF(s => (s === 'latest' ? 'expiry' : 'latest'))
-  const sideLabel = sideF === 'ALL' ? t('signals.all') : sideF === 'BUY' ? t('common.buy') : t('common.sell')
   const sortLabel = sortF === 'latest' ? t('signals.sort.latest') : t('signals.sort.expiry')
 
   const isFree = userPlan === 'FREE'
+
+  // 这批信号里**实际出现过**的品种，而不是一份写死的清单：写死的话，某个品种
+  // 停发信号之后它还挂在下拉里，选中只会得到一张空网格。
+  // 注意必须从「套用品种筛选之前」的列表里取——从筛完的列表里取，选中一个品种后
+  // 选项就只剩它自己，再也换不回去。
+  // The symbols this batch of signals actually contains, not a hard-coded list:
+  // a hard-coded one would keep offering a symbol that stopped firing, and
+  // picking it would yield an empty grid. It must be derived from the list
+  // *before* the symbol filter runs — deriving it after would collapse the
+  // options to the current pick, with no way back.
+  //
+  // 按**展示名**去重，不是原始品种名。库里同一个标的可能有两种写法——线上
+  // signals 表里 `BTCUSD` 与 `BTCUSDT` 同时存在（1322 条 / 1 条，来自不同时期的
+  // 推送方），而 displaySymbol() 把两者都渲染成「BTCUSDT」。按原始名去重就会出现
+  // 两个长得一模一样的选项，用户分不出，选哪个都只筛到一半。
+  //
+  // ⚠ 这里拿展示名当筛选键，是**因为这个筛选完全发生在前端**：它只跟另一个展示名
+  // 比对，不会作为品种名进任何请求、字典查找或下单路径。PRD 6.15 那条「绝不把展示
+  // 名回传进任何逻辑路径」的界线在这里没有被越过。
+  //
+  // Deduplicate by **display name**, not raw symbol. One instrument can carry two
+  // spellings in the table — production's signals hold both `BTCUSD` and
+  // `BTCUSDT` (1322 vs 1, from different eras of the push side) and
+  // displaySymbol() renders both as "BTCUSDT". Deduplicating by raw symbol
+  // therefore yields two visually identical options, and picking either filters
+  // to only half the rows.
+  //
+  // ⚠ Using a display name as the filter key is safe **only because this filter
+  // is entirely client-side**: it is compared against another display name and
+  // never travels as a symbol into a request, a dictionary lookup, or the order
+  // path. The PRD 6.15 line — never feed a display name back into a logic path —
+  // is not crossed here.
+  const symbolOptions = useMemo(() => {
+    const evalNow = Date.now()
+    const seen = new Set<string>()
+    for (const sig of signals) {
+      if (!isFree && effectiveStatus(sig, evalNow) === 'EXPIRED') continue
+      seen.add(displaySymbol(sig.symbol))
+    }
+    const rows = [...seen].sort().map((name) => ({ value: name, label: name }))
+    // 「全部」留着，而且是默认值：这是个**筛选器**，没有全部就没法看回完整列表。
+    // （仪表盘那张卡刻意没有「全部」，因为那里是「选一路来分析」，不是筛选。）
+    // "All" stays, and is the default: this is a *filter*, and without it there is
+    // no way back to the full board. (The dashboard card deliberately omits "all"
+    // because there you are choosing one line to analyse, not filtering a list.)
+    return [{ value: 'ALL', label: t('signals.all') }, ...rows]
+  }, [signals, isFree, t])
+
+  // 存下来的品种可能已经不在这批信号里了（那个品种最近没发信号，或者换了套餐后
+  // 可见范围变了）。这时候退回「全部」——否则用户打开就是一张空网格，而下拉里
+  // 根本没有那个选项可以让他看出是怎么回事。
+  // The stored symbol may be absent from this batch (it stopped firing, or the
+  // visible set changed with the plan). Fall back to ALL — otherwise the user
+  // lands on an empty grid with no option in the dropdown explaining why.
+  const effectiveSymbol = symbolOptions.some((o) => o.value === symbolF) ? symbolF : 'ALL'
 
   const filtered = useMemo(() => {
     // 到期判定只在信号数组变化时求值（新信号 / WS 置为 EXPIRED 都会触发重算），
@@ -70,7 +131,12 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
         // PRO 用户隐藏已过期信号（他们已通过 WS 实时看过 ACTIVE 阶段）
         // FREE 用户保留 EXPIRED 信号（这是他们唯一能看到的信号）
         if (!isFree && eff === 'EXPIRED') return false
-        if (sideF !== 'ALL' && s.side !== sideF) return false
+        // 与 symbolOptions 同一把尺子：那边按展示名建选项，这边就必须按展示名比对，
+        // 否则选中的「BTCUSDT」匹配不上原始名为 BTCUSD 的那 1322 条。
+        // The same yardstick as symbolOptions: options are built from display
+        // names, so the comparison must use one too, or picking "BTCUSDT" would
+        // miss every row whose raw symbol is BTCUSD.
+        if (effectiveSymbol !== 'ALL' && displaySymbol(s.symbol) !== effectiveSymbol) return false
         return true
       })
     if (sortF === 'expiry') {
@@ -80,7 +146,7 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
       list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     }
     return list
-  }, [signals, sideF, sortF, isFree])
+  }, [signals, effectiveSymbol, sortF, isFree])
 
   return (
     <div>
@@ -101,38 +167,37 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan }) => {
         </div>
       )}
 
-      {/* Filters（桌面）：单排药丸按钮 / desktop: single-row pill filters */}
-      <div className="sig-filters hidden sm:flex">
+      {/* 筛选器。品种是下拉，桌面手机共用同一个控件——下拉在窄屏本来就好用，
+          不需要再单独做一套「点击循环」。排序仍是桌面药丸 / 手机循环两套：它只有
+          两个值，为两个值开一个下拉是多余的层级。
+          Filters. The symbol picker is one dropdown shared by both breakpoints — a
+          dropdown already works on narrow screens, so it needs no separate
+          tap-to-cycle variant. Sort keeps its pills/cycle split: with only two
+          values, a dropdown would be more chrome than choice. */}
+      <div className="sig-filters">
         <div className="fgroup">
-          <span className="fk">{t('signals.filterSide')}</span>
-          <div className="seg-pill">
-            <button className={sideF === 'ALL' ? 'on' : ''} onClick={() => setSideF('ALL')}>{t('signals.all')}</button>
-            <button className={sideF === 'BUY' ? 'on' : ''} onClick={() => setSideF('BUY')}>{t('common.buy')}</button>
-            <button className={sideF === 'SELL' ? 'on' : ''} onClick={() => setSideF('SELL')}>{t('common.sell')}</button>
-          </div>
+          <span className="fk">{t('signals.filterSymbol')}</span>
+          {/* 用共享的自定义 Select：原生 <select> 的弹出列表由浏览器/系统渲染，
+              深色主题下压不住样式，实测是一片白底黑字。
+              The shared custom Select: a native popup list is rendered by the
+              browser/OS and will not take dark-theme styling — a slab of white. */}
+          <Select
+            className={`sig-symbol-select${effectiveSymbol !== 'ALL' ? ' on' : ''}`}
+            ariaLabel={t('signals.filterSymbol')}
+            value={effectiveSymbol}
+            options={symbolOptions}
+            onChange={setSymbolF}
+          />
         </div>
-        <span className="fsep" />
+        <span className="fsep hidden sm:block" />
         <div className="fgroup">
           <span className="fk">{t('signals.sortBy')}</span>
-          <div className="seg-pill">
+          {/* 桌面：药丸；手机：点击循环 / desktop pills, mobile tap-to-cycle */}
+          <div className="seg-pill hidden sm:flex">
             <button className={sortF === 'latest' ? 'on' : ''} onClick={() => setSortF('latest')}>{t('signals.sort.latest')}</button>
             <button className={sortF === 'expiry' ? 'on' : ''} onClick={() => setSortF('expiry')}>{t('signals.sort.expiry')}</button>
           </div>
-        </div>
-      </div>
-
-      {/* Filters（手机）：点击循环切换，仅显示当前选项 / mobile: tap to cycle, shows current option only */}
-      <div className="sig-filters flex sm:hidden">
-        <div className="fgroup">
-          <span className="fk">{t('signals.filterSide')}</span>
-          <button className={`filter-cycle ${sideF !== 'ALL' ? 'active' : ''}`} onClick={cycleSide}>
-            <span>{sideLabel}</span>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
-          </button>
-        </div>
-        <div className="fgroup">
-          <span className="fk">{t('signals.sortBy')}</span>
-          <button className="filter-cycle" onClick={cycleSort}>
+          <button className="filter-cycle flex sm:hidden" onClick={cycleSort}>
             <span>{sortLabel}</span>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
           </button>

@@ -1639,6 +1639,32 @@
     background: var(--line);
     flex-shrink: 0;
   }
+
+  /* 筛选栏里的品种下拉：尺寸对齐旁边的药丸按钮（.seg-pill button / .filter-cycle
+     都是 30px 高、999px 圆角），否则这一排会一高一矮。选中非「全部」时套用与药丸
+     选中态同一套高亮，让「我筛过了」这件事在两种控件上长得一样。
+     The symbol dropdown in the filter bar, sized to the pills beside it (both
+     .seg-pill button and .filter-cycle are 30px tall with a 999px radius) so the
+     row does not step up and down. When something other than "all" is picked it
+     takes the same highlight as an active pill, so "I have filtered" reads the
+     same across both kinds of control. */
+  .sig-symbol-select {
+    flex-shrink: 0;
+  }
+  .sig-symbol-select .select-trigger {
+    height: 30px;
+    padding: 0 12px;
+    font-weight: 500;
+  }
+  .sig-symbol-select.on .select-trigger {
+    background: var(--purple);
+    border-color: transparent;
+    color: #fff;
+  }
+  .sig-symbol-select.on .select-trigger svg {
+    color: rgba(255, 255, 255, 0.85);
+  }
+
   /* 药丸形筛选按钮 / pill-shaped filter buttons */
   .seg-pill {
     display: flex;

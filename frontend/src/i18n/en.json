@@ -333,7 +333,7 @@
     "resultPending": "Result pending",
     "proSawFirst": "PRO users saw this 10 min earlier",
     "trade": "Trade",
-    "filterSide": "Side",
+    "filterSymbol": "Symbol",
     "sortBy": "Sort",
     "all": "All",
     "focus": {

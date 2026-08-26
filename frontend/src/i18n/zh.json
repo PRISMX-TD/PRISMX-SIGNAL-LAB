@@ -333,7 +333,7 @@
     "resultPending": "结果判定中",
     "proSawFirst": "PRO 用户已提前 10 分钟看到",
     "trade": "下单",
-    "filterSide": "方向",
+    "filterSymbol": "品种",
     "sortBy": "排序",
     "all": "全部",
     "focus": {
