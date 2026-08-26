@@ -14,9 +14,12 @@
 // 公开名单为空时——也就是这个功能的默认状态——整张卡显示空态。
 //
 // ⚠ **整张卡不再是一个链接**（2026-08-26）。原来 Link 包住了全部卡面，连四周留白
-// 都可点；加了两个 select 之后那样做不成立——表单控件嵌在 a 里，点开下拉的同时会
-// 触发导航。现在只有右上角「查看详情 ›」是链接。代价是可点区域从整张卡缩到一行字，
+// 都可点；加了两个下拉之后那样做不成立——可点控件嵌在 a 里，点开菜单的同时会触发
+// 导航。现在只有右上角「查看详情 ›」是链接。代价是可点区域从整张卡缩到一行字，
 // 换来的是两个选择器能真的用。
+//
+// 下拉用共享的 `components/Select`，不用原生 `<select>`：原生弹出列表由浏览器/
+// 系统渲染，深色主题下压不住样式，实测是一片白底黑字。
 //
 // The dashboard's "current session win rate" card, replacing the old market
 // overview. It answers "for the line I care about, when in this session should I
@@ -36,13 +39,18 @@
 //
 // ⚠ **The whole card is no longer one link** (2026-08-26). A Link used to wrap
 // the entire face so even the padding was clickable; that cannot survive two
-// select elements, since a form control nested in an anchor navigates as it
+// dropdowns, since a clickable control nested in an anchor navigates as it
 // opens. Only "view detail ›" is a link now. The hit area shrinks from the whole
 // card to one line of text, and in exchange the pickers actually work.
+//
+// The dropdowns are the shared `components/Select`, not native `<select>`: a
+// native popup list is rendered by the browser/OS and will not take dark-theme
+// styling — in practice a slab of white.
 import { useEffect, useState, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { signalApi } from '../../api/client'
+import Select from '../Select'
 import { useAuth } from '../../store/auth'
 import type { AdminStrategyWinRate, SessionWindow } from '../../api/types'
 import RateChip from './RateChip'
@@ -220,7 +228,17 @@ const SessionWinrateCard: FC = () => {
       : t('admin.winrate.watch.nowActive', { name: t(`admin.winrate.session.${picked.key}`) })
     : ''
 
-  const selectCls = 'input w-auto min-w-0 flex-1 py-1 text-xs'
+  // 用共享的自定义 Select，不用原生 <select>：原生的弹出列表由浏览器/系统渲染，
+  // 深色主题下几乎压不住样式（Windows Chrome 认 option 的 background，macOS
+  // Safari 直接无视），实测就是一片白底黑字。共享组件把菜单 portal 到 body 再
+  // 按触发器坐标 fixed 定位，样式全在自己手里，也不会被卡片的圆角裁掉。
+  // The shared custom Select rather than a native one: a native popup list is
+  // rendered by the browser/OS and barely takes styling in a dark theme (Windows
+  // Chrome honours option backgrounds, macOS Safari ignores them outright) — in
+  // practice a slab of white. The shared component portals its menu to <body> and
+  // positions it from the trigger's rect, so the styling is ours and the card's
+  // rounded corners cannot clip it.
+  const selectCls = 'select-picker min-w-0 flex-1'
 
   return (
     <section className="card glass dash-overview p-[18px]">
@@ -274,30 +292,31 @@ const SessionWinrateCard: FC = () => {
               every strategy and symbol points at no action anyone can take. The
               detail link is where the whole picture lives. */}
           <div className="mt-4 flex items-center gap-2">
-            <select className={selectCls} value={pick!.strategy}
-                    aria-label={t('dashboard.sessionWinrate.pickStrategy')}
-                    onChange={(e) => {
-                      // 换策略时走一遍 resolvePick：上次选的品种在新策略里可能不存在，
-                      // 直接沿用会指向一个空的品种行。
-                      // Re-resolve on a strategy switch: the previous symbol may not
-                      // exist under the new strategy, and carrying it over blindly
-                      // would point at an absent row.
-                      const next = resolvePick(data!, { strategy: e.target.value, symbol: pick!.symbol })
-                      if (next) choose(next)
-                    }}>
-              {data!.strategies.map((s) => (
-                <option key={s.strategy} value={s.strategy}>
-                  {s.strategy || t('admin.winrate.strategies.unnamed')}
-                </option>
-              ))}
-            </select>
-            <select className={`${selectCls} tabular-nums`} value={pick!.symbol}
-                    aria-label={t('dashboard.sessionWinrate.pickSymbol')}
-                    onChange={(e) => choose({ strategy: pick!.strategy, symbol: e.target.value })}>
-              {row!.symbols.map((s) => (
-                <option key={s.symbol} value={s.symbol}>{s.symbol}</option>
-              ))}
-            </select>
+            <Select
+              className={selectCls}
+              ariaLabel={t('dashboard.sessionWinrate.pickStrategy')}
+              value={pick!.strategy}
+              options={data!.strategies.map((s) => ({
+                value: s.strategy,
+                label: s.strategy || t('admin.winrate.strategies.unnamed'),
+              }))}
+              onChange={(v) => {
+                // 换策略时走一遍 resolvePick：上次选的品种在新策略里可能不存在，
+                // 直接沿用会指向一个空的品种行。
+                // Re-resolve on a strategy switch: the previous symbol may not
+                // exist under the new strategy, and carrying it over blindly
+                // would point at an absent row.
+                const next = resolvePick(data!, { strategy: v, symbol: pick!.symbol })
+                if (next) choose(next)
+              }}
+            />
+            <Select
+              className={`${selectCls} tabular-nums`}
+              ariaLabel={t('dashboard.sessionWinrate.pickSymbol')}
+              value={pick!.symbol}
+              options={row!.symbols.map((s) => ({ value: s.symbol, label: s.symbol }))}
+              onChange={(v) => choose({ strategy: pick!.strategy, symbol: v })}
+            />
           </div>
 
           <div className="mt-3">

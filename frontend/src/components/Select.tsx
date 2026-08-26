@@ -35,11 +35,21 @@ export default function Select({
   onChange,
   className = '',
   openUpward = false,
+  ariaLabel,
 }: {
   value: string
   options: SelectOption[]
   onChange: (value: string) => void
   className?: string
+  // 触发按钮的无障碍名。不给的话它的可访问名就只有当前选中值——读屏器会念出
+  // "AIFT 按钮"，听得到选的是什么，听不出这是在选什么。旁边有可见文字标签时
+  // 可以不传；像仪表盘那张卡那样两个下拉并排、没有可见标签时必须传。
+  // Accessible name for the trigger. Without it the button's only accessible
+  // name is the current value, so a screen reader announces "AIFT, button" —
+  // you hear what is selected but not what it selects. Optional when a visible
+  // label sits alongside; required when bare dropdowns stand side by side, as
+  // on the dashboard card.
+  ariaLabel?: string
   // 菜单是否向上弹出（用于紧贴在其他内容上方的触发器，避免向下弹出时盖住下方内容）
   // Open the menu upward (for triggers sitting right above other content, so
   // it doesn't cover what's below when it opens downward instead)
@@ -127,7 +137,8 @@ export default function Select({
 
   return (
     <div ref={rootRef} className={`select-picker ${className}`}>
-      <button ref={triggerRef} type="button" className="select-trigger" onClick={() => setOpen((v) => !v)} title={current?.label ?? value}>
+      <button ref={triggerRef} type="button" className="select-trigger" onClick={() => setOpen((v) => !v)}
+              title={current?.label ?? value} aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open}>
         <span>{current?.short ?? current?.label ?? value}</span>
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ transform: open ? 'rotate(180deg)' : undefined }}>
           <path d="M6 9l6 6 6-6" />
