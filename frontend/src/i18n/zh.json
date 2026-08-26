@@ -1862,7 +1862,9 @@
     "sessionWinrate": {
       "title": "当前时段胜率",
       "empty": "还没有公开的策略数据，公开后这里会显示当前时段的表现。",
-      "noneYet": "近 30 天这个时段还没有表现突出的"
+      "pickStrategy": "选择策略",
+      "pickSymbol": "选择品种",
+      "noneForPair": "这个组合近 30 天在本时段还没有足够的样本"
     }
   }
 }

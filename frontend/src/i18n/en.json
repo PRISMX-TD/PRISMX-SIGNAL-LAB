@@ -1864,7 +1864,9 @@
     "sessionWinrate": {
       "title": "Session win rate",
       "empty": "No published strategy data yet; this will show the current session's performance once published.",
-      "noneYet": "nothing stands out in this session yet"
+      "pickStrategy": "Choose a strategy",
+      "pickSymbol": "Choose a symbol",
+      "noneForPair": "Not enough data for this pair in this session over the last 30 days"
     }
   }
 }
