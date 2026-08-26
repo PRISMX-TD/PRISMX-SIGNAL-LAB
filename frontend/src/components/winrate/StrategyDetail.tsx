@@ -130,6 +130,29 @@ function HourGrid({ hourly, now }: { hourly: HourOutcome[]; now: Date }) {
   )
 }
 
+/** 展开一张策略卡时默认落在哪个品种上。
+ *
+ *  黄金是平台信号量最大、也是用户开口就问的品种，展开直接就是它，比每次都让人
+ *  多点一下强。该策略在窗口内没有黄金信号时退回「全部品种」——绝不能选一个不
+ *  存在的页签，那会让整块详情空掉。
+ *
+ *  这是纯展示层的默认值，不影响任何统计口径：换页签只是换读哪一份已经算好的数。
+ *
+ *  Which symbol a strategy card lands on when expanded.
+ *
+ *  Gold carries the most signals on the platform and is the symbol users ask
+ *  about first, so opening straight to it beats making them click every time.
+ *  Falls back to "all symbols" when the strategy traded no gold inside the
+ *  window — selecting a tab that does not exist would blank the whole detail
+ *  block.
+ *
+ *  A presentation default only; it changes nothing about how anything is
+ *  computed, just which already-computed slice is being read. */
+const DEFAULT_SYMBOL = 'XAUUSD'
+
+const preferredTab = (row: StrategyWinRate): string =>
+  row.symbols.some((s) => s.symbol === DEFAULT_SYMBOL) ? DEFAULT_SYMBOL : 'all'
+
 export default function StrategyDetail({ row, sessions, activeKeys, days, now }: {
   row: StrategyWinRate
   sessions: SessionWindow[]
@@ -143,18 +166,37 @@ export default function StrategyDetail({ row, sessions, activeKeys, days, now }:
   now: Date
 }) {
   const { t } = useTranslation()
-  const [symbolTab, setSymbolTab] = useState<string>('all')
-  useEffect(() => { setSymbolTab('all') }, [row.strategy])
+  const [symbolTab, setSymbolTab] = useState<string>(() => preferredTab(row))
+  // 只在策略换人时重置。列表用 key={row.strategy} 渲染，实例是稳定的，所以这个
+  // effect 实际上不会在挂载后再触发——留着是防御性的：哪天列表改成按序号 key，
+  // 复用的实例会带着上一个策略的品种页签，而那个页签指向的品种可能根本不在新
+  // 策略里。数据轮询刷新不该走这里（依赖只有 strategy 名），否则用户每 N 秒被
+  // 弹回默认品种一次。
+  // Reset only when the strategy itself changes. The list renders with
+  // key={row.strategy}, so instances are stable and this effect never fires
+  // after mount; it stays as defence for the day the list is keyed by index
+  // instead, when a reused instance would carry the previous strategy's symbol
+  // tab — possibly naming a symbol the new strategy never traded. A data poll
+  // must not trigger it (the dep is the name alone), or the user's chosen symbol
+  // would snap back to the default every few seconds.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setSymbolTab(preferredTab(row)) }, [row.strategy])
   // 派生值兜底：页签指向的品种若不在当前 row 里，同一次 render 内退回「全部」。
   // Derived fallback: a tab naming a symbol absent from this row snaps to "all"
   // within the same render.
   const effectiveTab = row.symbols.some((s) => s.symbol === symbolTab) ? symbolTab : 'all'
   const target: StrategyWinRate | SymbolWinRate =
     effectiveTab === 'all' ? row : row.symbols.find((s) => s.symbol === effectiveTab)!
-  // 钟点图只在策略层有数据：品种层再按小时切一刀样本太薄，后端不下发。
-  // Hourly data exists only at the strategy layer — sliced by hour on top of by
-  // symbol the sample is too thin, so the backend omits it.
-  const hourly = effectiveTab === 'all' ? row.total.hourly : null
+  // 钟点格跟着选中的品种走：后端从 2026-08-26 起在品种层的 total 上也下发 hourly，
+  // 所以「这个策略在这个品种上，一天里哪个小时更准」是能直接读出来的。
+  // 品种切片下每格样本会薄很多，不足门槛的格子照常显示「—」——这是 verdictOf
+  // 本来就管的事，不需要在这里另外设限。
+  // The hour grid follows the selected symbol: since 2026-08-26 the backend also
+  // ships `hourly` on each symbol's total, so "which hour is this strategy best
+  // at on this symbol" reads straight off the payload. A symbol slice thins each
+  // cell considerably and sub-threshold cells render as "—" as always, which is
+  // verdictOf's job and needs no extra gate here.
+  const hourly = target.total.hourly
   const sessionKeys = [...sessions.map((s) => s.key), 'outside']
 
   const pill = (active: boolean) =>

@@ -147,22 +147,24 @@ def session_keys_for(ts: datetime) -> list[str]:
     return keys or [OUTSIDE_KEY]
 
 
-def _empty_bucket(days: int, with_daily: bool = True) -> dict:
-    """一个空桶。`with_daily=False` 时不分配那条长度 = days 的每日计数列表。
+def _empty_bucket(days: int, *, with_daily: bool = True, with_hourly: bool = True) -> dict:
+    """一个空桶。两条可选序列各有一个开关，互不牵连。
 
-    品种层从不下发 dailySamples（`_shape_symbols` 恒传 include_daily=False），
-    而桶的数量是 策略 × 品种 × (时段 + total)，days=90 时每桶白分配一个 90 长的
-    列表纯属浪费。`with_daily` 必须与 `_accumulate` 的同名参数成对传：这里给了
-    `[]`，那边就绝不能再去 `_daily[day_idx] += 1`。
+    **分配即开关**：`_accumulate` 和 `_finalize` 都不再接收"要不要这条序列"的
+    标志，而是看桶里这条列表是不是空的——分配、累加、下发三件事从此由同一个
+    事实驱动。原来的写法要求调用方把同名标志"成对传"给两个函数，漏传一处的
+    症状是数字静静地偏掉或者下发一个空数组，两种都不报错；而现在要加第二条
+    序列（`_hr`），那种耦合会从两处变成四处。
 
-    An empty bucket. With `with_daily=False` it skips the per-day counter list of
-    length `days`.
+    An empty bucket, with an independent switch per optional series.
 
-    The symbol layer never ships dailySamples (`_shape_symbols` always passes
-    include_daily=False), and buckets are counted strategy x symbol x (session +
-    total), so a 90-long list per bucket at days=90 is pure waste. `with_daily`
-    must be passed in step with `_accumulate`'s parameter of the same name: given
-    `[]` here, that side must never touch `_daily[day_idx]`.
+    **Allocation is the switch**: neither `_accumulate` nor `_finalize` takes a
+    "should this series exist" flag any more — they look at whether the bucket's
+    list is empty, so allocating, accumulating and shipping are all driven by one
+    fact. The previous shape required callers to pass matching flags to two
+    functions in step; missing one silently skewed a number or shipped an empty
+    array, neither of which raises. Adding a second series (`_hr`) would have
+    turned that two-way coupling into a four-way one.
     """
     return {
         "hitTp": 0, "hitSl": 0, "pending": 0, "stale": 0,
@@ -200,7 +202,42 @@ def _empty_bucket(days: int, with_daily: bool = True) -> dict:
         # One slot per clock hour holding just a win/loss pair — no direction
         # split. 24 x 2 cells is more than anyone reads, and "long or short"
         # already has its own block in the detail area.
-        "_hr": [{"tp": 0, "sl": 0} for _ in range(24)] if with_daily else [],
+        "_hr": [{"tp": 0, "sl": 0} for _ in range(24)] if with_hourly else [],
+    }
+
+
+def _bucket_set(days: int, all_keys: list[str], *, per_symbol: bool = False) -> dict[str, dict]:
+    """建一整组桶（total + 各时段 + 做多/做空）。**哪个桶带哪条序列只在这里决定。**
+
+    - **方向桶两条都不带**：再按天或按钟点切一刀样本就太薄，而"做多还是做空更准"
+      本来就是个跨整个窗口的问题。（此前方向桶是照常分配、照常累加、就是不下发，
+      纯空转；现在不分配，`_accumulate` 自然跳过。）
+    - **品种层不带 `_daily`**：活跃度柱图只画策略层。
+    - **品种层带 `_hr`，且只在 total 上**：用户要看"这个策略在这个品种上，一天里
+      哪个小时更准"。时段桶和方向桶不带——页面读的是 `total.hourly`，给了也没人看，
+      而品种 × 时段 × 24 格的样本已经薄到没有意义。
+
+    Build one full set of buckets (total + each session + long/short). **Which
+    bucket carries which series is decided only here.**
+
+    Side buckets carry neither: slicing by day or by hour on top of by direction
+    leaves too thin a sample, and "long or short" is a whole-window question
+    anyway. (They used to allocate and accumulate both, then not ship them —
+    pure dead work.) The symbol layer skips `_daily` (the activity sparkline is
+    strategy-level only) but keeps `_hr` on `total`, because "which hour is this
+    strategy best at on this symbol" is exactly what the detail view asks; its
+    session and side buckets skip it, since the UI reads `total.hourly` and a
+    symbol x session x 24-cell sample is meaninglessly thin.
+    """
+    keys = [*all_keys, "total", *SIDE_KEYS]
+    if per_symbol:
+        return {
+            k: _empty_bucket(days, with_daily=False, with_hourly=(k == "total"))
+            for k in keys
+        }
+    return {
+        k: _empty_bucket(days, with_daily=k not in SIDE_KEYS, with_hourly=k not in SIDE_KEYS)
+        for k in keys
     }
 
 
@@ -212,7 +249,6 @@ def _accumulate(
     hour: int,
     side_key: str | None,
     resolve_seconds: float | None,
-    with_daily: bool,
 ) -> None:
     """把一条信号记进 `buckets` 里 `keys` 指定的那几个桶。
 
@@ -220,8 +256,9 @@ def _accumulate(
     三份副本的时候，"判定用时只在真判出胜负时才进均值"这类规则要同时改三个
     地方才不出错，而漏改一处的症状是数字静静地偏掉，不会报错。
 
-    `with_daily=False` 跳过每日计数——品种层的 `_daily` 是空列表（见
-    `_empty_bucket`），本来也不下发。
+    两条可选序列**各自按这个桶有没有分配来决定累不累加**（见 `_bucket_set`），
+    不再由调用方传标志：没分配的是空列表，跳过；分配了的就一定会被累加，也一定
+    会被下发。
 
     Record one signal into the `keys` buckets of `buckets`.
 
@@ -231,21 +268,23 @@ def _accumulate(
     changed in three places at once, and the symptom of missing one is a number
     quietly drifting rather than an error.
 
-    `with_daily=False` skips the per-day counter — the symbol layer's `_daily`
-    is an empty list (see `_empty_bucket`) and is never shipped anyway.
+    Each optional series accumulates **iff this bucket allocated it** (see
+    `_bucket_set`) rather than on a caller-passed flag: an unallocated series is
+    an empty list and is skipped, and an allocated one is always both
+    accumulated and shipped.
     """
     for bkey in keys:
         b = buckets[bkey]
         b[result_key] += 1
-        if with_daily:
+        if b["_daily"]:
             b["_daily"][day_idx] += 1
-            # 钟点格只累计已判出胜负的：未判定的信号不出现在这张图上（产品要求），
-            # 等它真走出结果那天再计进来。
-            # The hour cells count only resolved signals: unresolved ones do not
-            # appear on that chart (a product decision) and join it on the day
-            # they actually reach an outcome.
-            if result_key in ("hitTp", "hitSl"):
-                b["_hr"][hour]["tp" if result_key == "hitTp" else "sl"] += 1
+        # 钟点格只累计已判出胜负的：未判定的信号不出现在这张图上（产品要求），
+        # 等它真走出结果那天再计进来。
+        # The hour cells count only resolved signals: unresolved ones do not
+        # appear on that chart (a product decision) and join it on the day
+        # they actually reach an outcome.
+        if b["_hr"] and result_key in ("hitTp", "hitSl"):
+            b["_hr"][hour]["tp" if result_key == "hitTp" else "sl"] += 1
         if resolve_seconds is not None:
             b["_resolveSum"] += resolve_seconds
             b["_resolveN"] += 1
@@ -299,7 +338,7 @@ def wilson_bounds(hit: int, n: int, z: float = 1.96) -> tuple[float, float] | No
     return (max(0.0, (centre - margin) / denom), min(1.0, (centre + margin) / denom))
 
 
-def _finalize(bucket: dict, days: int, include_daily: bool) -> dict:
+def _finalize(bucket: dict, days: int) -> dict:
     resolved = bucket["hitTp"] + bucket["hitSl"]
     _bounds = wilson_bounds(bucket["hitTp"], resolved)
     samples = resolved + bucket["pending"] + bucket["stale"]
@@ -318,18 +357,24 @@ def _finalize(bucket: dict, days: int, include_daily: bool) -> dict:
         "wilsonHigh": _bounds[1] if _bounds else None,
         "avgResolveSeconds": (bucket["_resolveSum"] / resolve_n) if resolve_n else None,
         "weeklySignals": round(samples / days * 7, 1),
-        # 品种层与方向桶不下发这两条序列：样本太薄，图全是零 / omitted there
-        # daily：自窗口起点每 24h 一格的信号总数（含未判定），推荐卡的活跃度柱图用
-        # daily: signal totals per 24h from the window start (unresolved included),
-        # for the recommendation card's activity sparkline
-        "daily": list(bucket["_daily"]) if include_daily else None,
+        # 两条序列都是"分配了就下发，没分配就是 None"——哪些桶分配见 `_bucket_set`。
+        # 空列表判否是刻意的：`[0] * days` 这种全零列表非空、照常下发（"这几天一条
+        # 信号都没有"本身就是要给前端看的信息），只有压根没分配的 `[]` 才变 None。
+        # Both series ship iff allocated (see `_bucket_set`), otherwise None.
+        # Testing the list for emptiness is deliberate: an all-zero `[0] * days`
+        # is non-empty and still ships — "no signals on those days" is itself
+        # information the UI needs — and only an unallocated `[]` becomes None.
+        #
+        # daily：自窗口起点每 24h 一格的信号总数（含未判定），活跃度柱图用
+        # daily: signal totals per 24h from the window start (unresolved included)
+        "daily": list(bucket["_daily"]) if bucket["_daily"] else None,
         # hourly：一天中每个钟点（UTC，0–23，长度恒 24）的止盈/止损笔数，只含已判定。
-        # 前端按浏览者时区旋转成本地钟点，并各自守 5 笔门槛后才显示百分比。
+        # 前端按浏览者时区旋转成本地钟点，并各自守样本门槛后才显示百分比。
         # hourly: take-profit / stop-loss counts per hour of day (UTC, 0-23,
         # always length 24), resolved only. The UI rotates them into the viewer's
         # local clock and gates each slot on its own sample size.
         "hourly": [{"tp": c["tp"], "sl": c["sl"]} for c in bucket["_hr"]]
-        if include_daily else None,
+        if bucket["_hr"] else None,
     }
 
 
@@ -340,15 +385,15 @@ def _shape(buckets: dict[str, dict], days: int, all_keys: list[str]) -> dict:
     `_empty_payload` needs it too and the two shapes must stay identical; a copy
     would drift.
     """
+    # 三层一律 `_finalize(bucket, days)`：带不带 daily/hourly 由建桶时决定
+    # （`_bucket_set`），这里不再重复一遍规则——重复就会有一天两处说法不一致。
+    # All three layers call the same `_finalize(bucket, days)`: whether a bucket
+    # carries daily/hourly was settled at construction (`_bucket_set`), and not
+    # restating the rule here is what keeps the two places from disagreeing.
     return {
-        "total": _finalize(buckets["total"], days, True),
-        "sessions": {k: _finalize(buckets[k], days, True) for k in all_keys},
-        # 方向桶不下发每日分布：再按天切一刀样本就更薄了，而"做多还是做空更好"
-        # 是个跨整个窗口的问题，不需要按天看。
-        # Side buckets ship no per-day distribution: slicing by day on top of
-        # by direction thins the sample further, and "does long or short do
-        # better" is a whole-window question anyway.
-        "sides": {k: _finalize(buckets[k], days, False) for k in SIDE_KEYS},
+        "total": _finalize(buckets["total"], days),
+        "sessions": {k: _finalize(buckets[k], days) for k in all_keys},
+        "sides": {k: _finalize(buckets[k], days) for k in SIDE_KEYS},
     }
 
 
@@ -366,7 +411,7 @@ def _empty_payload(days: int, now: datetime) -> dict:
     i.e. the most-travelled path of all.
     """
     all_keys = [s.key for s in SESSIONS] + [OUTSIDE_KEY]
-    buckets = {k: _empty_bucket(days) for k in [*all_keys, "total", *SIDE_KEYS]}
+    buckets = _bucket_set(days, all_keys)
     return {
         "days": days,
         "windowStart": now - timedelta(days=days),
@@ -472,7 +517,7 @@ def compute_strategy_session_winrate(
     all_keys = [s.key for s in SESSIONS] + [OUTSIDE_KEY]
     # {策略名: {时段键或 "total": 桶}} / {strategy: {session key or "total": bucket}}
     per_strategy: dict[str, dict[str, dict]] = {}
-    overall: dict[str, dict] = {k: _empty_bucket(days) for k in [*all_keys, "total", *SIDE_KEYS]}
+    overall: dict[str, dict] = _bucket_set(days, all_keys)
     # {策略名: {品种: {时段键或 "total": 桶}}} / {strategy: {symbol: {session key or "total": bucket}}}
     per_strategy_symbols: dict[str, dict[str, dict[str, dict]]] = {}
     # 全平台的品种分布（不分策略），喂总览层的「分品种表现」。
@@ -529,7 +574,7 @@ def compute_strategy_session_winrate(
         # The per-symbol breakdown (Task 3) adds another lookup just like this
         # one, so fix the pattern here before it gets copied three times.
         if name not in per_strategy:
-            per_strategy[name] = {k: _empty_bucket(days) for k in [*all_keys, "total", *SIDE_KEYS]}
+            per_strategy[name] = _bucket_set(days, all_keys)
         # 这条信号要记进哪几个桶：总计 + 它命中的每个时段（时段之间会重叠，所以
         # 可能不止一个）。三层累加共用同一份 keys。
         # Which buckets this signal lands in: the total plus every session it hit
@@ -545,47 +590,39 @@ def compute_strategy_session_winrate(
         bucket_keys = ("total", *session_keys)
         if side_key is not None:
             bucket_keys = (*bucket_keys, side_key)
-        _accumulate(per_strategy[name], bucket_keys, key, day_idx, hour, side_key, resolve_seconds, True)
-        _accumulate(overall, bucket_keys, key, day_idx, hour, side_key, resolve_seconds, True)
+        _accumulate(per_strategy[name], bucket_keys, key, day_idx, hour, side_key, resolve_seconds)
+        _accumulate(overall, bucket_keys, key, day_idx, hour, side_key, resolve_seconds)
 
         # 品种子分层：同样避免 setdefault(key, {昂贵默认值}) ——两层查找都先判空
         # 再赋值，理由与上面 per_strategy 完全一致。
-        # with_daily=False 一路贯穿到底：品种层的每日分布既不分配也不累加，
-        # `_shape_symbols` 本来就恒传 include_daily=False，此前那次累加是纯死计算。
+        # 带哪条序列由 `_bucket_set(per_symbol=True)` 一处决定：不要 daily，
+        # total 上要 hourly（「这个策略在这个品种上，一天里哪个小时更准」）。
         # Per-symbol sub-layer: same "check then assign" pattern as per_strategy
         # above, for the identical reason — setdefault's default arg is built
-        # whether or not the key already exists.
-        # with_daily=False runs all the way through: the symbol layer neither
-        # allocates nor accumulates a per-day distribution. `_shape_symbols`
-        # already always passes include_daily=False, which made the old
-        # accumulation dead work.
+        # whether or not the key already exists. Which series each bucket carries
+        # is decided in one place by `_bucket_set(per_symbol=True)`: no daily,
+        # hourly on total.
         if name not in per_strategy_symbols:
             per_strategy_symbols[name] = {}
         sym_map = per_strategy_symbols[name]
         if symbol not in sym_map:
-            sym_map[symbol] = {
-                k: _empty_bucket(days, with_daily=False)
-                for k in [*all_keys, "total", *SIDE_KEYS]
-            }
-        _accumulate(sym_map[symbol], bucket_keys, key, day_idx, hour, side_key, resolve_seconds, False)
+            sym_map[symbol] = _bucket_set(days, all_keys, per_symbol=True)
+        _accumulate(sym_map[symbol], bucket_keys, key, day_idx, hour, side_key, resolve_seconds)
 
         # 同一条信号再记进全平台的品种桶。同样先判空再赋值，不用 setdefault。
         # The same signal also lands in the platform-wide symbol bucket.
         if symbol not in overall_symbols:
-            overall_symbols[symbol] = {
-                k: _empty_bucket(days, with_daily=False)
-                for k in [*all_keys, "total", *SIDE_KEYS]
-            }
+            overall_symbols[symbol] = _bucket_set(days, all_keys, per_symbol=True)
         _accumulate(overall_symbols[symbol], bucket_keys, key, day_idx, hour, side_key,
-                    resolve_seconds, False)
+                    resolve_seconds)
 
     def _shape_symbols(sym_map: dict[str, dict]) -> list[dict]:
         rows = [
             {
                 "symbol": sym,
-                "total": _finalize(b["total"], days, False),
-                "sessions": {k: _finalize(b[k], days, False) for k in all_keys},
-                "sides": {k: _finalize(b[k], days, False) for k in SIDE_KEYS},
+                "total": _finalize(b["total"], days),
+                "sessions": {k: _finalize(b[k], days) for k in all_keys},
+                "sides": {k: _finalize(b[k], days) for k in SIDE_KEYS},
             }
             for sym, b in sym_map.items()
         ]
