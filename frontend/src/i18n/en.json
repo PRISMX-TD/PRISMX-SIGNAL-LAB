@@ -1016,7 +1016,7 @@
         "expand": "Details",
         "collapse": "Collapse",
         "bestHours": "Best hours",
-        "bestSymbols": "Best symbols",
+        "symbolLabel": "Symbol",
         "tooThin": "not enough trades yet"
       },
       "detail": {

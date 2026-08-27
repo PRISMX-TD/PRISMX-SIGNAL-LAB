@@ -106,3 +106,44 @@ export function useWinratePick(data: AdminStrategyWinRate | null): WinratePickSt
 
   return { pick, row, symbolRow, chooseStrategy, chooseSymbol }
 }
+
+/** 「每个策略」列表里各张卡共用的品种选择。
+ *
+ *  **刻意与 `winrate.pick` 分开存**（`winrate.cardSymbol`），不复用 `pick.symbol`：
+ *  后者受 `pick.strategy` 约束——`resolveWinratePick` 会把"该策略没交易过的品种"退
+ *  回黄金。而这份列表里每张卡是不同的策略，用户在 A 策略的卡上选了个 B 策略没有
+ *  的品种，写进 `pick` 会被那条约束当场弹回去，卡片看起来"选不动"。分开存就没有
+ *  这个互相拉扯。
+ *
+ *  一份选择管全部卡片，不是每张卡各存各的：读者问的是"这个品种上，各个策略表现
+ *  如何"——八张卡各自记一个品种，等于要点八次才能对齐。
+ *
+ *  The symbol shared by every card in the "each strategy" list.
+ *
+ *  **Deliberately stored apart from `winrate.pick`** (as `winrate.cardSymbol`)
+ *  rather than reusing `pick.symbol`, which is constrained by `pick.strategy`:
+ *  `resolveWinratePick` bounces a symbol the chosen strategy never traded back to
+ *  gold. Each card here is a different strategy, so picking — on strategy A's card
+ *  — a symbol strategy B lacks would be rejected by that constraint and the card
+ *  would appear stuck. Separate keys, no tug of war.
+ *
+ *  One pick governs every card rather than one per card: the reader is asking
+ *  "on this symbol, how does each strategy do", and eight independently-remembered
+ *  symbols would take eight clicks to line up. */
+export function useCardSymbol(): { symbol: string; choose: (symbol: string) => void } {
+  const { getPref, setPref } = usePrefs()
+  const symbol = getPref<string>('winrate', 'cardSymbol', DEFAULT_SYMBOL)
+  const choose = useCallback((next: string) => setPref('winrate', 'cardSymbol', next), [setPref])
+  return { symbol, choose }
+}
+
+/** 把共用的品种落到某一个策略上：它没交易过这个品种就退回黄金，再退回第一个。
+ *  没有任何品种时返回 null（该策略窗口内一条信号都没有）。
+ *  Resolve the shared symbol against one strategy: fall back to gold, then to its
+ *  first symbol. null when it has none at all (no signals in the window). */
+export function resolveCardSymbol(row: StrategyWinRate, wanted: string): string | null {
+  return row.symbols.find((s) => s.symbol === wanted)?.symbol
+    ?? row.symbols.find((s) => s.symbol === DEFAULT_SYMBOL)?.symbol
+    ?? row.symbols[0]?.symbol
+    ?? null
+}

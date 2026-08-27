@@ -1016,7 +1016,7 @@
         "expand": "看细节",
         "collapse": "收起",
         "bestHours": "胜率最高的时间",
-        "bestSymbols": "胜率最高的品种",
+        "symbolLabel": "品种",
         "tooThin": "笔数还不够"
       },
       "detail": {

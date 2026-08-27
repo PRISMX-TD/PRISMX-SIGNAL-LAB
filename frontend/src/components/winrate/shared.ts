@@ -15,7 +15,7 @@
 // rule's only outlet. Session definitions ship from the backend; this file only
 // restates them in the viewer's clock.
 import type { TFunction } from 'i18next'
-import type { HourOutcome, SessionWindow, WinRateBucket } from '../../api/types'
+import type { HourOutcome, SessionWindow } from '../../api/types'
 
 // 已判定样本少于这个数的格子不显示百分比——只挡住 1–2 笔那种「100%」，
 // 那个连数字都不该给。3 笔起就照常显示。
@@ -94,7 +94,7 @@ export const isRated = (k: VerdictKind): boolean =>
  *
  *  **代价要清楚**：绿色不等于"统计上站得住"，只等于"到目前为止 51% 以上"。
  *  3 笔里赢 2 笔（67%）和 300 笔里赢 200 笔（67%）是同一个绿。排序仍然用
- *  Wilson 下限（见 rankHours / rankBuckets），所以顶层榜单里薄样本还是会沉底
+ *  Wilson 下限（见 rankHours），所以榜单里薄样本还是会沉底
  *  ——把关只是从"显示"退到了"排序"。
  *
  *  The page's single verdict rule, in three bands: **green at 51% and above,
@@ -117,7 +117,7 @@ export const isRated = (k: VerdictKind): boolean =>
  *
  *  **The cost is explicit**: green means "above 51% so far", not
  *  "statistically established". 2 of 3 and 200 of 300 are the same green.
- *  Ranking still uses the Wilson lower bound (rankHours / rankBuckets), so thin
+ *  Ranking still uses the Wilson lower bound (rankHours), so thin
  *  candidates still sink in the top lists — the gate moved from display to
  *  ordering, it did not disappear. */
 export function verdictOf(b: RateLike, digits = PCT_DIGITS): VerdictKind {
@@ -160,7 +160,6 @@ export function wilsonBounds(hit: number, n: number, z = 1.96): [number, number]
 // selection and a reader seeing 58% above 62% would just be confused.
 
 export type HourPick = { localMinutes: number; rate: number; kind: VerdictKind }
-export type NamedPick = { name: string; bucket: WinRateBucket; kind: VerdictKind }
 
 /** 钟点排名。`keep` 只保留某个时段内的钟点，`greenOnly` 只留绿档的。
  *
@@ -198,26 +197,6 @@ export function rankHours(
   })
   candidates.sort((a, b) => b.low - a.low)
   return candidates.slice(0, opts.limit).sort((a, b) => b.rate - a.rate)
-}
-
-/** 具名桶（品种）排名，规则与 rankHours 一致。
- *  Rank named buckets (symbols) by the same rule as rankHours. */
-export function rankBuckets(
-  items: Array<{ name: string; bucket: WinRateBucket | undefined }>,
-  opts: { limit: number; greenOnly?: boolean },
-): NamedPick[] {
-  const candidates: NamedPick[] = []
-  for (const { name, bucket } of items) {
-    if (!bucket) continue
-    const kind = verdictOf(bucket)
-    if (!isRated(kind) || bucket.winRate === null) continue
-    if (opts.greenOnly && kind !== 'strong') continue
-    candidates.push({ name, bucket, kind })
-  }
-  candidates.sort((a, b) => (b.bucket.wilsonLow ?? 0) - (a.bucket.wilsonLow ?? 0))
-  return candidates
-    .slice(0, opts.limit)
-    .sort((a, b) => (b.bucket.winRate ?? 0) - (a.bucket.winRate ?? 0))
 }
 
 export function rateFromCounts(tp: number, sl: number): RateLike {

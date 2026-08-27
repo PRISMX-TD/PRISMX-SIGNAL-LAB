@@ -158,11 +158,21 @@ function HourGrid({ hourly, now }: { hourly: HourOutcome[]; now: Date }) {
  *  computed, just which already-computed slice is being read. */
 const DEFAULT_SYMBOL = 'XAUUSD'
 
-const preferredTab = (row: StrategyWinRate): string =>
-  row.symbols.some((s) => s.symbol === DEFAULT_SYMBOL) ? DEFAULT_SYMBOL : 'all'
+/** `wanted` 是卡片收起时选中的那个品种：展开后默认停在同一个上，否则收起写着
+ *  WTI、点开却是黄金，同一张卡自相矛盾。它不在这个策略里（或没传）时退回黄金，
+ *  再退回「全部品种」。
+ *  `wanted` is the symbol picked on the collapsed card: the expanded view stays on
+ *  it, or one card would say WTI collapsed and gold expanded. Falls back to gold,
+ *  then to "all symbols", when absent or not given. */
+const preferredTab = (row: StrategyWinRate, wanted?: string): string =>
+  (wanted && row.symbols.some((s) => s.symbol === wanted) && wanted)
+  || (row.symbols.some((s) => s.symbol === DEFAULT_SYMBOL) ? DEFAULT_SYMBOL : 'all')
 
-export default function StrategyDetail({ row, sessions, activeKeys, days, now }: {
+export default function StrategyDetail({ row, sessions, activeKeys, days, now, defaultSymbol }: {
   row: StrategyWinRate
+  // 卡片收起时选中的品种，展开后默认停在它上面。
+  // The symbol picked on the collapsed card; the expanded view opens on it.
+  defaultSymbol?: string
   sessions: SessionWindow[]
   activeKeys: string[]
   days: number
@@ -174,7 +184,7 @@ export default function StrategyDetail({ row, sessions, activeKeys, days, now }:
   now: Date
 }) {
   const { t } = useTranslation()
-  const [symbolTab, setSymbolTab] = useState<string>(() => preferredTab(row))
+  const [symbolTab, setSymbolTab] = useState<string>(() => preferredTab(row, defaultSymbol))
   // 只在策略换人时重置。列表用 key={row.strategy} 渲染，实例是稳定的，所以这个
   // effect 实际上不会在挂载后再触发——留着是防御性的：哪天列表改成按序号 key，
   // 复用的实例会带着上一个策略的品种页签，而那个页签指向的品种可能根本不在新
@@ -188,7 +198,7 @@ export default function StrategyDetail({ row, sessions, activeKeys, days, now }:
   // must not trigger it (the dep is the name alone), or the user's chosen symbol
   // would snap back to the default every few seconds.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { setSymbolTab(preferredTab(row)) }, [row.strategy])
+  useEffect(() => { setSymbolTab(preferredTab(row, defaultSymbol)) }, [row.strategy, defaultSymbol])
   // 派生值兜底：页签指向的品种若不在当前 row 里，同一次 render 内退回「全部」。
   // Derived fallback: a tab naming a symbol absent from this row snaps to "all"
   // within the same render.
