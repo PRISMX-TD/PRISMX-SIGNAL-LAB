@@ -29,18 +29,15 @@
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { useLive } from '../store/live'
+import { safeHttpUrl } from '../utils/safeUrl'
 
-// 后台填的链接会原样进 href。只放行 http(s)：这个字段虽然只有管理员能写，
-// 但 `javascript:` 开头的值会变成一次真正的脚本执行，把一处配置失误升级成
-// XSS。协议不对就当没配，整张卡不渲染。
-// The admin-entered URL goes straight into an href. Allow http(s) only: the
-// field is admin-only, but a `javascript:` value would execute as script and
-// turn a configuration slip into XSS. A wrong scheme means "not configured" and
-// the whole card is skipped.
-function safeUrl(raw: string | undefined): string {
-  const url = (raw || '').trim()
-  return /^https?:\/\//i.test(url) ? url : ''
-}
+// 后台填的链接会原样进 href，协议不对就当没配、整张卡不渲染。判据与后台图片
+// 地址共用 utils/safeUrl 的那一份——同一条"只放行 http(s)"的规则散成两份写法，
+// 迟早会有一处被改松。
+// The admin-entered URL goes straight into an href; a wrong scheme counts as
+// "not configured" and the card is skipped. The check is shared with the
+// admin-entered image URLs via utils/safeUrl — one rule written twice is one
+// copy away from being loosened in only one place.
 
 // 合作券商展示信息。displayName 没配时回落到一个中性称呼，而不是硬编码
 // "Make Capital"——换券商时后台改一个字段就够了。
@@ -52,7 +49,7 @@ export function usePartnerBroker() {
   const { brokerLock } = useLive()
   return {
     name: (brokerLock?.displayName || '').trim() || t('partner.defaultName'),
-    url: safeUrl(brokerLock?.referralUrl),
+    url: safeHttpUrl(brokerLock?.referralUrl),
   }
 }
 

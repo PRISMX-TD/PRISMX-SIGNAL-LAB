@@ -29,6 +29,7 @@ import { signalApi } from '../api/client'
 import { localizeApiError } from '../api/utils'
 import { pick } from './strategyGuide'
 import type { PlatformStrategy } from '../api/types'
+import { safeHttpUrl } from '../utils/safeUrl'
 
 function TagRow({ label, values }: { label: string; values: string[] }) {
   if (values.length === 0) return null
@@ -122,9 +123,9 @@ export default function PlatformStrategiesGuide() {
               to={`/app/strategy/${s.id}`}
               className="glass flat-card group overflow-hidden p-0 transition-colors hover:bg-white/[0.04]"
             >
-              {s.imageUrl && (
+              {safeHttpUrl(s.imageUrl) && (
                 <img
-                  src={s.imageUrl}
+                  src={safeHttpUrl(s.imageUrl)}
                   alt={name}
                   loading="lazy"
                   className="h-36 w-full object-cover"

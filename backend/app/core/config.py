@@ -3,6 +3,8 @@ import base64
 import binascii
 import functools
 import logging
+import os
+import sys
 
 from pydantic_settings import BaseSettings
 
@@ -595,4 +597,93 @@ if settings.ENV.lower() == "production" and settings.NOWPAYMENTS_SANDBOX:
         "否则支付走的是沙盒测试环境。"
         " / NOWPAYMENTS_SANDBOX is on; set it to false in .env when ENV=production,"
         " or payments run against the sandbox test environment."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 多进程部署与进程内状态的冲突 / multi-process deployment vs in-process state
+# ---------------------------------------------------------------------------
+
+def detect_worker_count(argv: list[str], env: dict) -> int | None:
+    """从启动命令与环境变量里读出 worker 数；读不出来返回 None。
+
+    只认三种明确写法：uvicorn/gunicorn 的 `--workers N`、`--workers=N`、`-w N`，
+    以及 uvicorn 与 gunicorn 都认的 WEB_CONCURRENCY。刻意不去猜——例如靠
+    os.getppid() 判断"是不是子进程"，systemd 与 Docker 下同样成立，会把单 worker
+    的正常部署误判成多进程而拒绝启动。宁可返回 None（判不出来就不拦），也不能让
+    一个猜测把线上服务拦在门外。
+
+    Read the worker count from the launch command and environment; None when it
+    can't be told. Only three explicit forms are recognised: uvicorn/gunicorn's
+    `--workers N`, `--workers=N`, `-w N`, plus WEB_CONCURRENCY, which both honour.
+    Guessing is deliberately avoided — inferring "am I a child process" from
+    os.getppid() is equally true under systemd and Docker and would refuse to
+    start a perfectly normal single-worker deployment. Returning None (can't
+    tell, so don't block) is always preferable to a guess that locks the service
+    out.
+    """
+    for i, arg in enumerate(argv):
+        if arg.startswith("--workers="):
+            try:
+                return int(arg.split("=", 1)[1])
+            except ValueError:
+                continue
+        if arg in ("--workers", "-w") and i + 1 < len(argv):
+            try:
+                return int(argv[i + 1])
+            except ValueError:
+                continue
+    raw = (env.get("WEB_CONCURRENCY") or "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            return None
+    return None
+
+
+# 限流、登录锁定、MT5 验证锁定、回测并发闸门与回测缓存全部是进程内状态
+# （core/rate_limit.py 的 _failures、core/strategy_limits.py 的 _running 与
+# _cache，以及 slowapi 在 RATE_LIMIT_STORAGE_URI 为空时的内存计数）。多开一个
+# worker，这些防护就各自独立计数：配置成 8 次/5 分钟的登录失败锁定，在 4 个
+# worker 下实际要打满 32 次才锁——而且不会报错、不会有日志，防护静默减半到某个
+# 分数，没有任何人会发现。
+#
+# 所以在能明确读出「多 worker + 进程内计数」这个组合时直接拒绝启动。判不出来
+# （detect_worker_count 返回 None）一律放行：这条检查的意义是把静默降级换成当场
+# 说话，不是替不确定的情况做决定。
+#
+# Rate limits, the login lockout, the MT5-verify lockout, the backtest
+# concurrency gate and the backtest cache are all in-process state
+# (_failures in core/rate_limit.py, _running and _cache in
+# core/strategy_limits.py, and slowapi's in-memory counters when
+# RATE_LIMIT_STORAGE_URI is empty). Add a worker and each of these counts
+# independently: a lockout configured as 8 failures per 5 minutes really takes 32
+# across 4 workers — with no error and nothing logged, the protection silently
+# divides by the worker count and no one finds out.
+#
+# So startup is refused when "multiple workers + in-process counters" can be read
+# off positively. An indeterminate reading (detect_worker_count returns None)
+# always passes: the point of this check is to turn a silent degradation into a
+# loud one, not to decide on the ambiguous cases.
+_WORKER_COUNT = detect_worker_count(sys.argv, os.environ)
+
+if (
+    settings.ENV.lower() == "production"
+    and _WORKER_COUNT is not None
+    and _WORKER_COUNT > 1
+    and not settings.RATE_LIMIT_STORAGE_URI.strip()
+):
+    raise RuntimeError(
+        f"检测到 {_WORKER_COUNT} 个 worker，但 RATE_LIMIT_STORAGE_URI 为空——限流与登录锁定"
+        "是进程内计数，多进程下每个 worker 各算各的，防护会静默除以 worker 数。"
+        "请改回单 worker，或配置 RATE_LIMIT_STORAGE_URI 指向 Redis。"
+        "注意：即便配了 Redis，登录/MT5 验证的失败锁定与回测并发闸门仍是进程内状态"
+        "（见 core/rate_limit.py 与 core/strategy_limits.py），需要一并迁移才算真正支持多进程。"
+        f" / Detected {_WORKER_COUNT} workers with an empty RATE_LIMIT_STORAGE_URI: rate limits"
+        " and the login lockout are per-process counters, so each worker counts separately and"
+        " every protection silently divides by the worker count. Go back to a single worker, or"
+        " point RATE_LIMIT_STORAGE_URI at Redis. Note that even with Redis the login/MT5-verify"
+        " lockouts and the backtest gate remain in-process (see core/rate_limit.py and"
+        " core/strategy_limits.py) and must be migrated too before multi-process is truly supported."
     )

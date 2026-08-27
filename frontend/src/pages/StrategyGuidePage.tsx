@@ -22,6 +22,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { safeHttpUrl } from '../utils/safeUrl'
 import { signalApi } from '../api/client'
 import { localizeApiError } from '../api/utils'
 import { pick, StrategyDetail } from '../components/strategyGuide'
@@ -124,9 +125,9 @@ export default function StrategyGuidePage() {
       <h1 className="mt-4 font-display text-2xl font-bold text-neutral-100 sm:text-3xl">{name}</h1>
       {summary && <p className="mt-2 text-sm leading-relaxed text-neutral-400">{summary}</p>}
 
-      {strategy.imageUrl && (
+      {safeHttpUrl(strategy.imageUrl) && (
         <img
-          src={strategy.imageUrl}
+          src={safeHttpUrl(strategy.imageUrl)}
           alt={name}
           className="mt-6 max-h-72 w-full rounded-2xl border border-white/10 object-contain"
         />

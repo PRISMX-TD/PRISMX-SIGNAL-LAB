@@ -2,6 +2,7 @@
 // Shared rendering pieces for platform strategy write-ups, used by both the list
 // cards and the detail page.
 import type { PlatformStrategy, PlatformStrategyBlock } from '../api/types'
+import { safeHttpUrl } from '../utils/safeUrl'
 
 // 按当前界面语言取字段，缺失时回落到另一种语言——管理员可能只填了一种，
 // 空白比串语言更糟。/ Pick the field for the current UI language, falling back to
@@ -56,9 +57,9 @@ export function StrategyBlocks({ blocks, isZh }: { blocks: PlatformStrategyBlock
         if (b.kind === 'image') {
           return (
             <figure key={i} className="mt-5">
-              {b.imageUrl && (
+              {safeHttpUrl(b.imageUrl) && (
                 <img
-                  src={b.imageUrl}
+                  src={safeHttpUrl(b.imageUrl)}
                   alt={text}
                   loading="lazy"
                   className="mx-auto max-h-96 w-auto max-w-full rounded-xl border border-white/10"

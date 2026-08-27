@@ -10,7 +10,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-from app.core.config import settings
+from app.core.config import settings, _WORKER_COUNT
 from app.core.database import init_db
 from app.core.rate_limit import limiter
 from app.core.strategy_limits import user_limiter
@@ -50,6 +50,8 @@ logging.basicConfig(
 # worth reading. WARNING still surfaces failures, which is the part that matters.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
+logger = logging.getLogger("prismx.main")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -67,7 +69,29 @@ async def lifespan(app: FastAPI):
     # first candle_retention_sweep_loop pass once stalled it 83.7s, making startup
     # take 85.6s. Keep this in mind when adding loops.
     init_db()
-    
+
+    # 进程内状态的部署前提，在日志里说一次。config.py 已经在「明确读出多 worker
+    # + 进程内计数」时拒绝启动，这里补的是读不出 worker 数的那一半情况：容器、
+    # supervisor、反代托管都可能在命令行之外拉起多个进程，判不出来时不能拦，但
+    # 也不该一声不吭——真出事时，这一行是唯一能让人想起「限流是按进程算的」的线索。
+    # State the deployment premise of the in-process counters once, in the log.
+    # config.py already refuses to start when "multiple workers + in-process
+    # counters" can be read off positively; this covers the other half, where the
+    # worker count can't be determined — containers, supervisors and process
+    # managers can all fan out beyond the command line. An unreadable count must
+    # not block startup, but it shouldn't pass in silence either: when something
+    # does go wrong, this line is the only thing that will remind anyone that the
+    # limits are counted per process.
+    if not settings.RATE_LIMIT_STORAGE_URI.strip():
+        logger.warning(
+            "限流/登录锁定/回测闸门为进程内计数，本部署必须是单 worker；"
+            "多进程会让这些防护各算各的（检测到的 worker 数: %s）"
+            " / rate limits, login lockout and the backtest gate are per-process counters;"
+            " this deployment must run a single worker (detected worker count: %s)",
+            _WORKER_COUNT if _WORKER_COUNT is not None else "未知/unknown",
+            _WORKER_COUNT if _WORKER_COUNT is not None else "未知/unknown",
+        )
+
     # 捕获主事件循环，供 gateway_client 的 run_on_main_loop 使用。
     # 必须在任何可能调用 gateway 客户端的代码之前设置。
     # Capture the main event loop for gateway_client's run_on_main_loop.
