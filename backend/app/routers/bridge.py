@@ -32,6 +32,7 @@ from app.services.push_dispatch import (
 )
 from app.services import bridge_version_check
 from app.services.settings_store import get_broker_settings, server_matches_broker
+from app.services.symbol_aliases import broker_symbol
 from app.services.trade_performance import mark_positions_seen
 
 logger = logging.getLogger("prismx.bridge")
@@ -585,11 +586,24 @@ def _poll_db_work(
         if o.tp is not None:
             take_profit = o.tp
         suffix = suffix_by_login.get(target, "")
+        # 下发的是"券商基础名 + 该账号的组后缀"：o.symbol 存的是信号侧的写法
+        # （比特币是 TradingView 发来的 BTCUSDT），券商品种表里只有 BTCUSD.s
+        # 这种名字，直接拼后缀会得到不存在的 BTCUSDT.s。桥接侧还会再解析一次
+        # （见 mt5_worker._resolve_broker_symbol），那一层能兜住后缀探测出错和
+        # 更冷门的命名漂移；这里先收敛名字，让旧版桥接也能受益。
+        # Dispatch the broker base name plus this account's group suffix:
+        # o.symbol holds the signal-side spelling (Bitcoin arrives from
+        # TradingView as BTCUSDT) while the broker's table only has names like
+        # BTCUSD.s, so appending the suffix raw yields a non-existent
+        # BTCUSDT.s. The bridge resolves once more on its side (see
+        # mt5_worker._resolve_broker_symbol), which also covers a mis-detected
+        # suffix and rarer naming drift; collapsing the name here means older
+        # bridge builds get the fix too.
         commands.append({
             "clientOrderId": o.client_order_id,
             "action": o.action or "ORDER",
             "login": target,
-            "symbol": o.symbol + suffix,
+            "symbol": broker_symbol(o.symbol) + suffix,
             "side": o.side,
             "volume": o.volume,
             "ticket": o.ticket or 0,

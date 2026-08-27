@@ -36,6 +36,7 @@ from app.services.gateway_client import (
     trade_open as gw_open,
 )
 from app.services.plans import is_realtime_plan
+from app.services.symbol_aliases import broker_symbol
 from app.services.trade_performance import compute_personal_winrate
 
 logger = logging.getLogger("prismx.orders")
@@ -424,8 +425,18 @@ def _try_gateway_execute(db: Session, order: Order) -> dict | None:
 
     try:
         if order.action == "ORDER":
+            # 发给 gateway 的是券商基础名：order.symbol 存的是信号侧写法
+            # （比特币是 BTCUSDT），而 gateway 的 ResolveSymbol 只会按前缀去补
+            # 账号组后缀，BTCUSDT 在券商品种表里没有任何前缀匹配，于是原样发
+            # 出去、必然被拒。后缀仍由 gateway 按账号组解析，这里只收敛名字。
+            # Send the broker base name: order.symbol holds the signal-side
+            # spelling (Bitcoin is BTCUSDT), and the gateway's ResolveSymbol
+            # only appends a group suffix to a prefix match — BTCUSDT matches
+            # nothing in the broker's table, so it went out as-is and was
+            # always rejected. The suffix still comes from the gateway's own
+            # per-group resolution; only the name is collapsed here.
             rsp = run_on_main_loop(gw_open(
-                login, order.symbol,
+                login, broker_symbol(order.symbol),
                 order.side or "BUY", order.volume or 0.01,
                 order.sl or 0, order.tp or 0,
                 order.client_order_id or "",

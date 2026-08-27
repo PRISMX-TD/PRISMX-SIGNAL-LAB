@@ -13,6 +13,7 @@ across polls instead of initialize/shutdown on every tick; with multiple
 terminals we only reconnect when switching.
 """
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 
 # 复用 bridge_app.py 里已经配置好 handler 的同名 logger，直接写进
@@ -88,25 +89,288 @@ _SUFFIX_PROBE = ["EURUSD", "XAUUSD", "GBPUSD", "USDJPY", "BTCUSD"]
 # 网页报价区展示的品种（与前端关注列表对齐）/ symbols shown in the web quote panel
 QUOTE_SYMBOLS = ["XAUUSD", "EURUSD", "GBPUSD", "XAGUSD", "BTCUSD", "USDJPY", "EURGBP"]
 
+# 后缀最长按这个截；与后端 SUFFIX_PATTERN 的 10 位上限一致，免得把某个碰巧
+# 以探测名开头的长品种名当成"后缀"。
+# Max suffix length considered, matching the backend's SUFFIX_PATTERN cap, so a
+# long unrelated name can't masquerade as a suffix of a probe base.
+_MAX_SUFFIX_LEN = 10
 
-def _detect_suffix() -> str:
-    """探测券商品种后缀（如 .sc / .m）。
-    Detect the broker symbol suffix (e.g. .sc / .m).
-    """
+# 后缀分隔符：Make Capital 用 "."（BTCUSD.s / BTCUSD.p），别家也见过 "-" 和 "_"。
+# Suffix separators seen in the wild.
+_SUFFIX_SEPARATORS = "._-"
+
+# 同一品种在两侧的不同写法。与 EA 的 GetAliasCandidates、后端的
+# symbol_aliases 覆盖同一批品种，三处各自维护（职责不同，见后端那份的说明）。
+# Alternate spellings of one instrument. Same instruments as the EA's
+# GetAliasCandidates and the backend's symbol_aliases, maintained separately in
+# all three places (different jobs — see the note in the backend's copy).
+_ALIAS_GROUPS: tuple[frozenset[str], ...] = (
+    frozenset({"BTCUSD", "BTCUSDT"}),
+    frozenset({"WTI", "USOIL", "XTIUSD", "WTICOUSD", "CL"}),
+)
+_ALIAS_BY_NAME: dict[str, frozenset[str]] = {
+    name: group for group in _ALIAS_GROUPS for name in group
+}
+
+# 券商品种表缓存：(缓存键, 过期时刻, 名字列表)。品种表每轮询（1.5 秒）都要用，
+# 但一天也变不了一次，没必要每次都向终端要一遍。
+# Broker symbol-table cache: (key, expiry, names). The table is needed on every
+# 1.5s poll but changes at most once in a blue moon.
+_SYMBOLS_CACHE_TTL = 60.0
+_symbols_cache: tuple[str, float, list[str]] | None = None
+# 解析结果缓存（同一账号下"请求名+后缀 -> 券商真名"），随品种表一起失效。
+# Resolution cache, invalidated together with the symbol table.
+_resolved_cache: dict[tuple[str, str, str], str] = {}
+# 解析失败的负缓存：键 -> 在这个时刻之前不必再为它强刷品种表。报价那 7 个品种
+# 每 1.5 秒解析一次，只要券商少了其中一个（比如没有 XAGUSD），没有这层负缓存
+# 就会每轮都白白重取一遍整张品种表。
+# Negative cache for failed resolutions: key -> don't force another table fetch
+# before this moment. The seven quote-panel symbols resolve every 1.5s, so a
+# broker missing just one of them (no XAGUSD, say) would otherwise re-fetch the
+# entire symbol table on every single poll.
+_unresolved_until: dict[tuple[str, str, str], float] = {}
+
+
+def _cache_key() -> str:
+    """缓存按"终端路径 + 登录号"分桶：换账号可能换组，组不同后缀就不同。
+    Cache is per terminal path + login: a different account may sit in a
+    different group, and the group decides the suffix."""
+    return f"{_attached_path}|{_current_login()}"
+
+
+def _broker_symbol_names(force: bool = False) -> list[str]:
+    """当前账号可见的全部券商品种名（带缓存）。
+    Every broker symbol name visible to the current account (cached)."""
+    global _symbols_cache
+    key = _cache_key()
+    now = time.monotonic()
+    if not force and _symbols_cache is not None:
+        cached_key, expires, cached_names = _symbols_cache
+        if cached_key == key and expires > now:
+            return cached_names
     try:
         symbols = mt5.symbols_get()
     except Exception:
+        symbols = None
+    names = [s.name for s in symbols] if symbols else []
+    if names:
+        # 取到了才落缓存：空结果多半是终端一时不可用，缓存下来会把后续
+        # 每一次解析都饿死 60 秒。
+        # Only cache a non-empty result: an empty one usually means the terminal
+        # was momentarily unavailable, and caching it would starve resolution.
+        _symbols_cache = (key, now + _SYMBOLS_CACHE_TTL, names)
+        _resolved_cache.clear()
+        _unresolved_until.clear()
+    return names
+
+
+def detect_suffix(names, probes=None) -> str:
+    """从品种表里推断该账号的品种后缀（如 .s / .p / .sc）。
+
+    **按覆盖率选，不是撞见第一个就返回**——这是修掉的原始 bug。Make Capital 的
+    品种表里 `EURUSD` 与 `EURUSD.s` 同时存在（裸名对该组不可交易），而黄金、
+    加密只有 `.s` 一种写法。旧实现拿探测列表第一个 `EURUSD` 精确撞上裸名就
+    断定"无后缀"，于是 `XAUUSD`、`BTCUSD` 全查不到——报价空着，下单直接失败。
+
+    改成对每个候选后缀统计"探测列表里有多少个基础品种存在这个写法"：
+    ""=3（EURUSD/GBPUSD/USDJPY），".s"=5（全中），选 .s。并列时取更短的，
+    所以真的没有后缀的券商仍然稳稳返回 ""。
+
+    Infer this account's symbol suffix from the broker's table.
+
+    Chosen by coverage rather than first hit — that first-hit rule was the bug.
+    Make Capital lists both `EURUSD` and `EURUSD.s` (the bare name isn't
+    tradable for the group) while gold and crypto exist only as `.s`. The old
+    code hit the bare `EURUSD` first, concluded "no suffix", and then found
+    neither `XAUUSD` nor `BTCUSD` — blank quotes and failing orders.
+
+    Now each candidate suffix scores the number of probe bases that exist with
+    it: "" scores 3 (EURUSD/GBPUSD/USDJPY), ".s" scores 5, so .s wins. Ties go
+    to the shorter suffix, so a broker that genuinely has none still gets "".
+    """
+    probe_list = [p.upper() for p in (probes or _SUFFIX_PROBE)]
+    # 比较一律按大写，但返回的后缀保留券商原本的大小写：这个值会上报给服务端
+    # 存成账号后缀、再拼进下单指令，而 MT5 的品种名是区分大小写的。
+    # Compare upper-cased but return the broker's own casing: this value is
+    # reported to the server, stored as the account's suffix and concatenated
+    # into order commands, and MT5 symbol names are case-sensitive.
+    originals: dict[str, str] = {}
+    for name in names or []:
+        originals.setdefault(name.upper(), name)
+    if not originals:
         return ""
-    if not symbols:
-        return ""
-    names = [s.name for s in symbols]
-    for base in _SUFFIX_PROBE:
-        for name in names:
-            if name == base:
-                return ""  # 无后缀 / no suffix
-            if name.startswith(base) and len(name) > len(base):
-                return name[len(base):]  # 截取后缀部分 / take the suffix part
-    return ""
+    candidates: dict[str, str] = {"": ""}
+    for base in probe_list:
+        for upper, original in originals.items():
+            if upper.startswith(base) and 0 < len(upper) - len(base) <= _MAX_SUFFIX_LEN:
+                candidates.setdefault(upper[len(base):], original[len(base):])
+    scored = [
+        (sum(1 for base in probe_list if base + sfx in originals), sfx, original)
+        for sfx, original in candidates.items()
+    ]
+    # 覆盖多者优先，其次短者优先（""排最前），最后按字典序保证结果确定。
+    # Most coverage first, then shortest ("" first), then lexicographic so the
+    # result is deterministic.
+    count, _sfx, suffix = max(
+        scored, key=lambda it: (it[0], -len(it[1]), [-ord(c) for c in it[1]])
+    )
+    return suffix if count > 0 else ""
+
+
+def _detect_suffix() -> str:
+    """探测当前账号的券商品种后缀 / detect the current account's symbol suffix."""
+    return detect_suffix(_broker_symbol_names())
+
+
+def _alias_candidates(base: str) -> list[str]:
+    """一个基础名在券商那边可能叫的全部名字，原名排第一。
+
+    表外的加密品种走通用规则：TradingView 的加密警报一律以 USDT 计价
+    （BTCUSDT/ETHUSDT/XRPUSDT），券商的加密 CFD 一律是 …USD——去掉尾巴那个 T
+    就行，不必逐个币种登记。
+
+    Every name the broker might use for a base symbol, itself first. Crypto
+    outside the table falls back to a general rule: TradingView's crypto alerts
+    are USDT-quoted while broker CFDs are …USD, so dropping the trailing T
+    covers every coin without enumerating them.
+    """
+    base = base.upper()
+    out = [base]
+    for name in sorted(_ALIAS_BY_NAME.get(base, frozenset())):
+        if name not in out:
+            out.append(name)
+    if len(base) > 4 and base.endswith("USDT"):
+        alt = base[:-1]
+        if alt not in out:
+            out.append(alt)
+    return out
+
+
+def _split_suffix(name: str, suffix: str) -> tuple[str, str]:
+    """把"名字+后缀"拆成两截：先按已知后缀削，削不掉再按分隔符切。
+    Split a name into (base, suffix): strip the known suffix if it matches,
+    otherwise cut at the first separator."""
+    upper = (name or "").strip().upper()
+    known = (suffix or "").strip().upper()
+    if known and upper.endswith(known) and len(upper) > len(known):
+        return upper[: -len(known)], known
+    for i, ch in enumerate(upper):
+        if ch in _SUFFIX_SEPARATORS:
+            return upper[:i], upper[i:]
+    return upper, ""
+
+
+def broker_symbol_candidates(requested: str, suffix: str, names) -> list[str]:
+    """把指令里的品种名解析成该券商品种表里真实存在的名字，按优先级排序。
+
+    只返回品种表里真有的名字（大小写以券商为准），所以调用方拿到的每一项都
+    至少"存在"；能不能交易由调用方再看 trade_mode。顺序：别名候选 × 后缀候选
+    （本账号的组后缀 → 请求里自带的后缀 → 无后缀 → 品种表里该基础名实际出现
+    过的其它后缀，短的优先），最后才是原样请求的名字。
+
+    "原样"排最后而不是最前，是因为它可能是个**裸名**：Make Capital 的外汇主流
+    对裸名与 .s 名同时在表里，裸名对 STD 组只读（券商把它归在 *no trade* 组）。
+    带组后缀的那个才是该账号真正能交易的。
+
+    Resolve a commanded symbol against the broker's real table, best first.
+    Only names that actually exist are returned (in the broker's own casing);
+    whether they're tradable is the caller's next check. Order: alias candidates
+    crossed with suffix candidates (this account's group suffix, the one carried
+    in the request, none, then any other suffix this base is actually listed
+    with, shortest first), and the requested name as-is only at the end.
+
+    As-is comes last rather than first because it may be a *bare* name: Make
+    Capital lists the major FX pairs both bare and as .s, and the bare one is
+    read-only for the STD group (the broker files it under *no trade*). The
+    group-suffixed name is the one this account can actually trade.
+    """
+    by_upper: dict[str, str] = {}
+    for name in names or []:
+        by_upper.setdefault(name.upper(), name)
+    out: list[str] = []
+
+    def push(candidate: str) -> None:
+        real = by_upper.get(candidate.upper())
+        if real and real not in out:
+            out.append(real)
+
+    requested = (requested or "").strip()
+    if not requested:
+        return out
+    base, request_suffix = _split_suffix(requested, suffix)
+    for candidate in _alias_candidates(base):
+        listed = sorted(
+            {
+                name[len(candidate):]
+                for name in by_upper
+                if name.startswith(candidate)
+                and 0 < len(name) - len(candidate) <= _MAX_SUFFIX_LEN
+            },
+            key=lambda s: (len(s), s),
+        )
+        for sfx in [(suffix or "").strip(), request_suffix, ""] + listed:
+            push(candidate + sfx)
+    push(requested)
+    return out
+
+
+def _resolve_broker_symbol(requested: str, suffix: str = "") -> str | None:
+    """解析成该券商真实可交易的品种名；一个都不存在时返回 None。
+
+    比特币是这里的典型：信号侧是 `BTCUSDT`，Make Capital 的品种表里只有
+    `BTCUSD.s`（STD 组）/`BTCUSD.p`（PLUS 组），两侧对不上，此前每一单都被
+    "Symbol not available" 挡下。
+
+    可交易优先：品种在表里存在不等于该组能交易它（Make Capital 的裸 `EURUSD`
+    对 STD 组就是只读的），所以 trade_mode 被禁的候选只留作兜底，先继续往下找。
+
+    Resolve to a symbol this broker can actually trade, or None if no candidate
+    exists at all. Bitcoin is the canonical case: signals carry `BTCUSDT` while
+    the broker lists only `BTCUSD.s` (STD group) / `BTCUSD.p` (PLUS group), and
+    every order was rejected with "Symbol not available".
+
+    Tradable candidates win: existing in the table doesn't mean the group can
+    trade it (Make Capital's bare `EURUSD` is read-only for STD), so a
+    trade-disabled candidate is kept only as a last resort.
+    """
+    key = (_cache_key(), (requested or "").strip().upper(), (suffix or "").strip().upper())
+    cached = _resolved_cache.get(key)
+    if cached:
+        return cached
+    fallback = None
+    now = time.monotonic()
+    # 第二轮强制刷新品种表：券商刚上架的品种、或账号刚换组时，缓存里可能一个
+    # 候选都没有，不刷新就会被一份过期缓存永久挡死。刚刚为同一个名字白刷过的
+    # 话就跳过这一轮（负缓存），别让"券商没有这个品种"变成每轮一次全表重取。
+    # The second pass forces a table refresh: right after the broker lists a new
+    # symbol (or the account changes group) the cache may hold no candidate at
+    # all, and without the refresh a stale cache would block orders for good.
+    # Skipped when the same name came up empty moments ago (negative cache), so
+    # "this broker doesn't offer it" doesn't cost a full table fetch per poll.
+    passes = (False,) if _unresolved_until.get(key, 0.0) > now else (False, True)
+    for refresh in passes:
+        names = _broker_symbol_names(force=refresh)
+        candidates = broker_symbol_candidates(requested, suffix, names) or [requested]
+        for candidate in candidates:
+            if not mt5.symbol_select(candidate, True):
+                continue
+            info = mt5.symbol_info(candidate)
+            if info is None:
+                continue
+            disabled = getattr(mt5, "SYMBOL_TRADE_MODE_DISABLED", 0)
+            if getattr(info, "trade_mode", disabled) == disabled:
+                if fallback is None:
+                    fallback = candidate
+                continue
+            _resolved_cache[key] = candidate
+            if candidate.upper() != (requested or "").strip().upper():
+                logger.info("品种名解析 / symbol resolved: %s -> %s", requested, candidate)
+            return candidate
+        if fallback is not None:
+            break
+    if fallback is None:
+        _unresolved_until[key] = time.monotonic() + _SYMBOLS_CACHE_TTL
+    return fallback
 
 
 def _normalize_volume(symbol: str, volume: float) -> float:
@@ -216,13 +480,20 @@ def _account_payload(suffix: str) -> dict | None:
 def _quotes_payload(base_symbols: list[str], suffix: str = "") -> list:
     """采集品种的 bid/ask 报价 / collect bid/ask quotes for symbols.
 
-    用「基础品种+券商后缀」向 MT5 查询，但上报基础品种名，便于网页匹配。
-    Query MT5 with "base symbol + broker suffix" but report the base symbol so
-    the web app can match regardless of broker naming.
+    用券商真实品种名向 MT5 查询，但上报基础品种名，便于网页匹配。名字解析交给
+    _resolve_broker_symbol：直接拼后缀在 Make Capital 这类券商上会漏掉黄金和
+    加密（它们只有 .s/.p 写法，而后缀一旦探测成空就全查不到）。
+    Query MT5 with the broker's real symbol name but report the base symbol so
+    the web app can match regardless of broker naming. Resolution goes through
+    _resolve_broker_symbol: plain concatenation loses gold and crypto at brokers
+    like Make Capital, where those exist only in .s/.p form and an empty
+    detected suffix finds neither.
     """
     out = []
     for base in base_symbols or []:
-        broker_sym = base + suffix
+        broker_sym = _resolve_broker_symbol(base, suffix)
+        if not broker_sym:
+            continue
         if not mt5.symbol_select(broker_sym, True):
             continue
         tick = mt5.symbol_info_tick(broker_sym)
@@ -388,10 +659,19 @@ def _server_now(login: str) -> datetime | None:
     if positions:
         symbol = positions[0].symbol
     if symbol is None:
+        # 兜底品种也要按券商真名解析：裸 "XAUUSD" 在 Make Capital 这类券商上
+        # 根本不存在（只有 XAUUSD.s），裸 "EURUSD" 虽然在表里、却是该组不可
+        # 交易的只读品种，未必有报价。选错了这一轮的平仓检测就整轮跳过。
+        # The fallback symbol needs the same resolution: a bare "XAUUSD" simply
+        # doesn't exist at brokers like Make Capital (only XAUUSD.s), and the
+        # bare "EURUSD" that does exist is the group's read-only copy, which may
+        # carry no quotes. Picking wrong skips the whole closed-trade round.
+        suffix = _detect_suffix()
         for base in QUOTE_SYMBOLS:
             try:
-                if mt5.symbol_select(base, True):
-                    symbol = base
+                resolved = _resolve_broker_symbol(base, suffix)
+                if resolved and mt5.symbol_select(resolved, True):
+                    symbol = resolved
                     break
             except Exception:
                 continue
@@ -713,18 +993,26 @@ def _reject_reason(retcode: int) -> str:
     return reasons.get(retcode, f"下单被拒绝 / Order rejected (#{retcode})")
 
 
-def _execute_order(cmd: dict) -> dict:
+def _execute_order(cmd: dict, suffix: str = "") -> dict:
     """执行单条下单指令 / execute one order command."""
-    symbol = cmd["symbol"]
+    requested = cmd["symbol"]
     side = cmd["side"]
     client_order_id = cmd["clientOrderId"]
 
-    # 确保品种可交易 / make sure the symbol is selected
-    if not mt5.symbol_select(symbol, True):
+    # 指令里的名字未必就是券商的名字：比特币信号侧叫 BTCUSDT，券商只有
+    # BTCUSD.s / BTCUSD.p；后端拼的后缀也可能与本账号所在组对不上。这里按本
+    # 账号真实的品种表解析一次，解析不出来才报"没有这个品种"。
+    # The commanded name isn't necessarily the broker's: Bitcoin is BTCUSDT on
+    # the signal side while the broker lists only BTCUSD.s / BTCUSD.p, and the
+    # suffix the backend appended may not match this account's group. Resolve
+    # against this account's real symbol table, and only report the symbol as
+    # missing when nothing resolves.
+    symbol = _resolve_broker_symbol(requested, suffix)
+    if not symbol or not mt5.symbol_select(symbol, True):
         return {
             "clientOrderId": client_order_id,
             "success": False,
-            "message": f"Symbol not available: {symbol}",
+            "message": f"Symbol not available: {requested}",
         }
 
     volume = _normalize_volume(symbol, float(cmd.get("volume", 0.0)))
@@ -965,7 +1253,7 @@ def _validate_command(cmd: dict) -> tuple[bool, str]:
     return True, ""
 
 
-def _dispatch_command(cmd: dict) -> dict:
+def _dispatch_command(cmd: dict, suffix: str = "") -> dict:
     """按指令类型分发执行 / dispatch by command action.
 
     action: ORDER（默认下单）/ CLOSE（平仓）/ MODIFY（改 SL·TP）。
@@ -986,7 +1274,7 @@ def _dispatch_command(cmd: dict) -> dict:
             return _close_position(cmd)
         if action == "MODIFY":
             return _modify_position(cmd)
-        return _execute_order(cmd)
+        return _execute_order(cmd, suffix)
     except Exception as e:
         return {
             "clientOrderId": cmd.get("clientOrderId", ""),
@@ -1029,7 +1317,7 @@ def poll_terminal(path: str, orders: list[dict] | None = None) -> dict:
         out["positions"] = _positions_payload()
         out["quotes"] = _quotes_payload(QUOTE_SYMBOLS, suffix)
         for cmd in orders or []:
-            out["results"].append(_dispatch_command(cmd))
+            out["results"].append(_dispatch_command(cmd, suffix))
     except Exception as e:
         out["error"] = str(e)
 

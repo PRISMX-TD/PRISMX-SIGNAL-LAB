@@ -81,3 +81,64 @@ def symbol_match_set(symbol: str) -> tuple[str, ...]:
     """
     group = _BY_NAME.get(symbol.strip().upper())
     return tuple(sorted(group)) if group else (symbol,)
+
+
+# 券商侧的规范写法：别名组里 MT5 真正列出的那个名字。
+#
+# `symbol_match_set` 解决的是"判定时两侧可能各用哪个名字"（集合语义，方向无关）；
+# 这张表解决的是**下单方向**的问题——指令要发给券商，就必须收敛成券商认识的那
+# 一个名字，没有集合可言。比特币的例子：信号侧存的是 TradingView 发来的
+# `BTCUSDT`，而 Make Capital 的品种表里根本没有这个名字（只有 `BTCUSD` + 组后缀，
+# 如 `BTCUSD.s`）。下单路径此前把 `BTCUSDT` 原样拼上后缀发出去，得到
+# `BTCUSDT.s` 这个不存在的品种，于是该品种的每一单都失败。
+#
+# The broker-side spelling: the name MT5 actually lists an instrument under.
+#
+# `symbol_match_set` answers "which spelling might either side be using"
+# (set semantics, direction-free). This table answers the *order-placement*
+# question, which has a single answer: a command sent to the broker must
+# collapse to the one name the broker knows. Bitcoin is the case in point —
+# signals store TradingView's `BTCUSDT`, which does not exist in Make Capital's
+# symbol table at all (it lists `BTCUSD` plus a group suffix, e.g. `BTCUSD.s`).
+# Order routing used to append the suffix to the raw name, producing the
+# non-existent `BTCUSDT.s`, so every order on that symbol failed.
+_BROKER_NAME: dict[str, str] = {
+    "BTCUSDT": "BTCUSD",
+    "USOIL": "WTI",
+    "XTIUSD": "WTI",
+    "WTICOUSD": "WTI",
+}
+
+
+def broker_symbol(symbol: str) -> str:
+    """把平台/信号侧的品种名换成券商 MT5 侧的基础名（不含后缀）。
+
+    表里没列到的加密品种走通用规则：TradingView 的加密警报一律以 USDT 计价
+    （BTCUSDT / ETHUSDT / XRPUSDT），而 MT5 券商的加密 CFD 一律叫 …USD
+    （BTCUSD.s / ETHUSD.s / XRPUSD.s）——去掉尾巴那个 T 即可，无需逐个币种登记。
+
+    只有真的换了名字才返回新串，其余情况原样返回，对既有品种是纯粹的空操作。
+    后缀不在这里处理：它是**按账号组**定的（STD 是 `.s`、PLUS 是 `.p`），由各
+    执行端按账号拼接或探测。
+
+    Map a platform/signal-side symbol to the broker's MT5 base name (no suffix).
+
+    Crypto not listed above falls back to a general rule: TradingView's crypto
+    alerts are all USDT-quoted (BTCUSDT / ETHUSDT / XRPUSDT) while broker MT5
+    crypto CFDs are all …USD (BTCUSD.s / ETHUSD.s / XRPUSD.s) — dropping the
+    trailing T covers every coin without enumerating them.
+
+    Returns a new string only when a mapping actually applies, so it is a no-op
+    for every other symbol. Suffixes are deliberately out of scope: they are
+    per-account-group (`.s` for STD, `.p` for PLUS) and each executor appends or
+    detects its own.
+    """
+    s = symbol.strip().upper()
+    mapped = _BROKER_NAME.get(s)
+    if mapped:
+        return mapped
+    # …USDT -> …USD（长度下限挡掉 "USDT" 自身这种退化输入）
+    # …USDT -> …USD (the length floor rejects a bare "USDT")
+    if len(s) > 4 and s.endswith("USDT"):
+        return s[:-1]
+    return symbol
