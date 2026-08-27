@@ -4,7 +4,6 @@ Connection manager: maps user_id to client WebSocket connections.
 import asyncio
 import hashlib
 import json
-from datetime import datetime, timezone
 
 from fastapi import WebSocket
 
@@ -257,7 +256,3 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
-
-
-def utcnow() -> datetime:
-    return datetime.now(timezone.utc)

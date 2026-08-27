@@ -13,8 +13,6 @@ import SignalExec from '../components/signals/SignalExec'
 import SignalOthers from '../components/signals/SignalOthers'
 import QuotesTable from '../components/signals/QuotesTable'
 import SessionWinrateCard from '../components/winrate/SessionWinrateCard'
-// 信号客观胜率卡暂时隐藏，暂不使用 / hidden for now
-// import StrategyWinRateCard from '../components/signals/StrategyWinRateCard'
 import PersonalWinRateCard from '../components/PersonalWinRateCard'
 import SlideOrderModal from '../components/SlideOrderModal'
 import { useFocusEntries, useNow, useOrderPlacement, toastToneClass } from '../components/signals/hooks'
@@ -115,8 +113,6 @@ export default function DashboardPage() {
               <div className="dash-col-2">
                 <SignalExec signal={cur.signal} now={now} onTrade={openTrade} />
                 <SessionWinrateCard />
-                {/* 信号客观胜率卡暂时隐藏，暂不使用 / hidden for now */}
-                {/* <StrategyWinRateCard /> */}
                 <PersonalWinRateCard className="dash-personal" />
               </div>
               <SignalOthers entries={otherEntries} now={now} onTrade={openTrade} onFocus={setFocusIdx} onViewAll={goSignals} />
@@ -134,8 +130,6 @@ export default function DashboardPage() {
               <div className="dash-col-2">
                 <SignalExec signal={null} now={now} onTrade={openTrade} />
                 <SessionWinrateCard />
-                {/* 信号客观胜率卡暂时隐藏，暂不使用 / hidden for now */}
-                {/* <StrategyWinRateCard /> */}
                 <PersonalWinRateCard className="dash-personal" />
               </div>
               <section className="card glass dash-others p-4 flex items-center justify-center text-sm text-neutral-500">{t('signals.focus.noExecutable')}</section>

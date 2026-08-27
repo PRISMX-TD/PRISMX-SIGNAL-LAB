@@ -24,65 +24,26 @@
 // version. The layer itself is cheap - no CSS3D, no lighting, under ten draw calls
 // after merging, pixel ratio capped at 1.5, and the clock stops when scrolling
 // does. The expensive phone body still loads on desktop only.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { createLandingSpace, type SpaceHandle } from './LandingSpace'
 import type { BackdropMode } from './LandingSpace'
 
-/* 背景变体切换器（临时评审工具）。
-   前一版这里放的四个选项全是**光的分布**（网格/扫光/地平线/光幕），换的只是
-   亮度落在哪里——四个一起被否，因为要的从来不是「空得好看一点」，是那里应该
-   有**东西**。现在换成四个真正的元素（见 BackdropArt.tsx），WebGL 照明一律
-   关掉：既然不要光，就别在元素底下再垫一层光。
-   只在 URL 带 ?bg 时出现，选择存 localStorage，定稿后整块删除。
-   A temporary review tool. Its previous four options were all distributions of
-   light (grid, sweep, horizon, wash) differing only in where the brightness fell,
-   and all four were rejected together - what was wanted was never a prettier
-   emptiness but something actually being there - and after that, that placing
-   objects at all was the wrong level: what is wanted is the space itself. The
-   options are now atmospheres (see BackdropAir.ts). Appears only with ?bg in the
-   URL, remembers the choice, and is deleted once a direction is picked. */
-const OPTIONS: { id: BackdropMode; label: string; hint: string }[] = [
-  { id: 'none', label: '无', hint: '纯底色，什么都不放' },
-  { id: 'shards', label: '棱镜碎片', hint: '极暗的面 + 发丝亮边，缓慢翻转；亮的是棱，不是面' },
-  { id: 'shardsSmoke', label: '碎片 + 烟雾', hint: '烟从碎片前后穿行——遮挡与被遮挡，两者互相成全' },
-  { id: 'smoke', label: '只有烟雾', hint: '对照组：背后没有东西时，烟只能读成发光' },
-]
+/* 背景方向已定稿：碎片 + 烟雾。
+   评审期这里有一个 ?bg 切换器，四个变体任选并存进 localStorage，注释里写明
+   「定稿后整块删除」——现在兑现。它留在生产包里有两个实际问题：任何访客加一个
+   ?bg 就能打开内部评审 UI 并把自己的选择永久覆盖上去；以及它每次挂载都无条件
+   往访客的 localStorage 写一个 slBg 键。
+   The direction is settled: shards plus smoke. A ?bg picker lived here during
+   review, offering four variants and persisting the choice, with a comment saying
+   to delete the whole block once a direction was chosen - this is that deletion.
+   Shipping it had two real costs: any visitor appending ?bg could open the
+   internal review UI and permanently override the backdrop for themselves, and it
+   wrote an slBg key into every visitor's localStorage on mount. */
+const BACKDROP: BackdropMode = 'shardsSmoke'
 
 export default function LandingSpaceLayer() {
   const host = useRef<HTMLDivElement>(null)
   const handleRef = useRef<SpaceHandle | null>(null)
-  const [variant, setVariant] = useState<BackdropMode>('shardsSmoke')
-  /* 挂载 effect 的依赖是空数组，它闭包里的 variant 永远是初值。异步创建完成
-     得比「从 localStorage 恢复选择」晚，直接用闭包值会把恢复的选择覆盖回初值。
-     所以当前值另存一份 ref。
-     The mount effect has an empty dependency array, so the variant in its closure
-     is forever the initial one. Creation finishes after the stored choice is
-     restored, and using the closure value would overwrite that choice with the
-     initial one - hence a ref holding the current value. */
-  const variantRef = useRef<BackdropMode>('shardsSmoke')
-  const [picker, setPicker] = useState(false)
-
-  /* 初值在 effect 里读而不是在 useState 初始化器里读：初始化器在客户端首次
-     渲染时就会执行，SSR 输出与之不一致会触发 hydration 警告。
-     Read the stored value in an effect rather than a useState initialiser: the
-     initialiser runs during the first client render and would not match the SSR
-     output, which trips a hydration warning. */
-  useEffect(() => {
-    if (new URLSearchParams(window.location.search).has('bg')) setPicker(true)
-    const saved = localStorage.getItem('slBg') as BackdropMode | null
-    if (saved && OPTIONS.some((o) => o.id === saved)) setVariant(saved)
-  }, [])
-
-  useEffect(() => {
-    variantRef.current = variant
-    handleRef.current?.setSolid(variant)
-    try {
-      localStorage.setItem('slBg', variant)
-    } catch {
-      /* 隐私模式下 localStorage 会抛异常，选择不保存但切换照常工作。
-         localStorage throws in private mode; the choice is simply not persisted. */
-    }
-  }, [variant])
 
   useEffect(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
@@ -119,7 +80,7 @@ export default function LandingSpaceLayer() {
            The probe is installed only here, the moment this instance is known to
            be the adopted one. */
         if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__space = handle.debug
-        handle.setSolid(variantRef.current)
+        handle.setSolid(BACKDROP)
         document.documentElement.classList.add('space-on')
       }
     })()
@@ -153,25 +114,5 @@ export default function LandingSpaceLayer() {
     </div>
   )
 
-  return (
-    <>
-      {layer}
-      {picker && (
-        <div className="bg-picker">
-          <p className="bg-picker-h">背景变体 · 临时评审工具</p>
-          {OPTIONS.map((o) => (
-            <button
-              key={o.id}
-              type="button"
-              onClick={() => setVariant(o.id)}
-              className={variant === o.id ? 'on' : ''}
-            >
-              <b>{o.label}</b>
-              <span>{o.hint}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </>
-  )
+  return layer
 }

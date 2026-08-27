@@ -32,10 +32,13 @@ from datetime import datetime, timedelta, timezone
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models import Signal
-from app.schemas import SignalOut
 from app.services.connection_manager import manager
 from app.services.push_dispatch import dispatch_push_async
-from app.services.signal_broadcast import broadcast_signal_new_free_tier, broadcast_signal_new_realtime
+from app.services.signal_broadcast import (
+    broadcast_signal_new_free_tier,
+    broadcast_signal_new_realtime,
+    serialize_signal as _serialize,
+)
 
 logger = logging.getLogger("prismx.engine")
 
@@ -127,23 +130,6 @@ def _evaluate(symbol: str) -> dict | None:
         "take_profit": round(take_profit, digits),
         "indicator": indicator,
     }
-
-
-def _serialize(sig: Signal) -> dict:
-    return SignalOut(
-        id=sig.id,
-        symbol=sig.symbol,
-        side=sig.side,
-        entry=sig.entry,
-        stopLoss=sig.stop_loss,
-        takeProfit=sig.take_profit,
-        indicator=sig.indicator,
-        status=sig.status,
-        createdAt=sig.created_at,
-        expireAt=sig.expire_at,
-        result=sig.result or "PENDING",
-        resolvedAt=sig.resolved_at,
-    ).model_dump(mode="json")
 
 
 def _expire_stale_signals() -> list[dict]:

@@ -181,14 +181,6 @@ _symbols_lock = threading.Lock()
 _symbols_cache: tuple[float, list[str]] | None = None
 
 
-def invalidate_symbols_cache() -> None:
-    """清空候选品种缓存（测试用，也可供将来的管理操作调用）。
-    Clear the candidate-symbol cache (for tests, and any future admin action)."""
-    global _symbols_cache
-    with _symbols_lock:
-        _symbols_cache = None
-
-
 def symbols_with_history(db: Session) -> list[str]:
     """库里存过 K 线的品种，排序去重。
 

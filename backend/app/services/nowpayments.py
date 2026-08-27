@@ -74,18 +74,6 @@ async def get_payment_status(payment_id: str) -> dict:
         return r.json()
 
 
-async def get_payments(limit: int = 50, page: int = 1) -> dict:
-    """分页获取支付列表。GET /v1/payment"""
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(
-            f"{_NP_BASE}/v1/payment",
-            params={"limit": limit, "page": page},
-            headers=_headers(),
-        )
-        r.raise_for_status()
-        return r.json()
-
-
 async def get_currencies() -> list[str]:
     """获取可用币种列表。GET /v1/currencies"""
     async with httpx.AsyncClient(timeout=15) as client:
@@ -93,37 +81,6 @@ async def get_currencies() -> list[str]:
         r.raise_for_status()
         data = r.json()
         return data.get("currencies", [])
-
-
-async def get_estimate(amount: float, currency_from: str, currency_to: str) -> dict:
-    """估算法币 → 币的兑换金额。GET /v1/estimate"""
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(
-            f"{_NP_BASE}/v1/estimate",
-            params={
-                "amount": amount,
-                "currency_from": currency_from.lower(),
-                "currency_to": currency_to.lower(),
-            },
-            headers=_headers(),
-        )
-        r.raise_for_status()
-        return r.json()
-
-
-async def get_min_amount(currency_from: str, currency_to: str) -> dict:
-    """查最小支付金额。GET /v1/min-amount"""
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(
-            f"{_NP_BASE}/v1/min-amount",
-            params={
-                "currency_from": currency_from.lower(),
-                "currency_to": currency_to.lower(),
-            },
-            headers=_headers(),
-        )
-        r.raise_for_status()
-        return r.json()
 
 
 def verify_ipn_signature(body_json: str, signature: str) -> bool:

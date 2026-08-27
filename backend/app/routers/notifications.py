@@ -21,6 +21,7 @@ from app.services.push_dispatch import (
     EVENT_TYPES,
     _parse_event_types,
     dispatch_test_push,
+    is_allowed_push_endpoint,
 )
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -229,6 +230,18 @@ def push_subscribe(
     # far below this cap; reject anything longer to keep oversized strings out.
     if not isinstance(p256dh, str) or not isinstance(auth, str) or len(p256dh) > 256 or len(auth) > 256:
         raise HTTPException(status_code=400, detail="p256dh 或 auth 密钥格式无效 / invalid p256dh or auth key")
+    # endpoint 决定了服务端稍后会向哪个地址发起 HTTP 请求，必须限定在已知推送服务
+    # 上，否则这张订阅表就成了「让服务端替我访问任意 URL」的登记处（SSRF）。
+    # 详见 push_dispatch.is_allowed_push_endpoint 的说明。
+    # The endpoint decides where the server will later send an HTTP request, so it
+    # has to be confined to known push services — otherwise this table becomes a
+    # registry of "URLs I'd like the server to fetch for me" (SSRF). See
+    # push_dispatch.is_allowed_push_endpoint.
+    if not is_allowed_push_endpoint(body.endpoint):
+        raise HTTPException(
+            status_code=400,
+            detail="订阅地址不是已知的推送服务 / subscription endpoint is not a known push service",
+        )
 
     existing = (
         db.query(PushSubscription)

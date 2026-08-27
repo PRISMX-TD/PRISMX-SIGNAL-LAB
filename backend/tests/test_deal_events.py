@@ -5,8 +5,6 @@
 """
 import asyncio
 
-import pytest
-
 import app.services.gateway_client as gc
 from app.routers.gateway import (
     GATEWAY_DEALS_SCAN_INTERVAL,

@@ -153,8 +153,3 @@ def cache_put(key: str, value: dict) -> None:
         while len(_cache) >= settings.BACKTEST_CACHE_MAX_ENTRIES:
             _cache.pop(next(iter(_cache)), None)
         _cache[key] = (time.time(), value)
-
-
-def cache_clear() -> None:
-    with _cache_lock:
-        _cache.clear()

@@ -57,10 +57,6 @@ def merge_bars(symbol: str, interval: str, bars: list[dict]) -> None:
     _updated_at[key] = time.time()
 
 
-def get_history(symbol: str, interval: str, limit: int) -> list[dict]:
-    return _candles.get((symbol, interval), [])[-limit:]
-
-
 def get_latest(symbol: str, interval: str, n: int = 2) -> dict:
     key = (symbol, interval)
     return {"bars": _candles.get(key, [])[-n:], "updatedAt": _updated_at.get(key)}

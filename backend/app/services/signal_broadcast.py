@@ -14,9 +14,45 @@ together with its final state — effectively "delayed until it's unusable".
 from datetime import datetime, timezone
 
 from app.core.database import SessionLocal
-from app.models import User
+from app.models import Signal, User
+from app.schemas import SignalOut
 from app.services.connection_manager import manager
 from app.services.plans import is_plan_expired, is_realtime_plan
+
+
+def serialize_signal(sig: Signal) -> dict:
+    """把 Signal 行转成推送用的 JSON 载荷。
+
+    放在这里而不是各推送点各写一份：这个映射此前在 engine/signal_engine.py 与
+    routers/webhook.py 里各有一份逐字节相同的 `_serialize`，而两处推的是同一种
+    消息、被同一批前端代码消费。字段对不齐的后果不会报错，只会让某条通道推出去的
+    信号少一个字段——前端拿到 undefined，界面上表现为某个数字空着。信号载荷加字段
+    是常事，一份定义才不会漏掉其中一条通道。
+
+    Serialize a Signal row into the push payload.
+
+    Kept here rather than duplicated at each push site: a byte-identical
+    `_serialize` previously lived in both engine/signal_engine.py and
+    routers/webhook.py, feeding the same message type to the same frontend code.
+    A drift between them raises nothing — one channel simply pushes a signal
+    missing a field, the frontend reads undefined, and a number renders blank.
+    Fields get added to this payload routinely; one definition is what keeps a
+    channel from being forgotten.
+    """
+    return SignalOut(
+        id=sig.id,
+        symbol=sig.symbol,
+        side=sig.side,
+        entry=sig.entry,
+        stopLoss=sig.stop_loss,
+        takeProfit=sig.take_profit,
+        indicator=sig.indicator,
+        status=sig.status,
+        createdAt=sig.created_at,
+        expireAt=sig.expire_at,
+        result=sig.result or "PENDING",
+        resolvedAt=sig.resolved_at,
+    ).model_dump(mode="json")
 
 
 async def _broadcast_to_plan_group(message: dict, *, free_only: bool) -> None:

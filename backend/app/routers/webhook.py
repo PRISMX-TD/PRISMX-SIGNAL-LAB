@@ -22,10 +22,13 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.rate_limit import limiter
 from app.models import Signal, Trend
-from app.schemas import SYMBOL_PATTERN, SignalOut
+from app.schemas import SYMBOL_PATTERN
 from app.services.connection_manager import manager
 from app.services.push_dispatch import dispatch_push_async
-from app.services.signal_broadcast import broadcast_signal_new_realtime
+from app.services.signal_broadcast import (
+    broadcast_signal_new_realtime,
+    serialize_signal as _serialize,
+)
 from app.services.signal_resolution import resolve_signals_with_price
 
 import json
@@ -46,23 +49,6 @@ class TradingViewSignal(BaseModel):
     strategy: str | None = Field(default=None, max_length=128)
     # 外部唯一编号，用于去重；省略则不去重 / external unique id for dedup; optional
     id: str | None = Field(default=None, max_length=128)
-
-
-def _serialize(sig: Signal) -> dict:
-    return SignalOut(
-        id=sig.id,
-        symbol=sig.symbol,
-        side=sig.side,
-        entry=sig.entry,
-        stopLoss=sig.stop_loss,
-        takeProfit=sig.take_profit,
-        indicator=sig.indicator,
-        status=sig.status,
-        createdAt=sig.created_at,
-        expireAt=sig.expire_at,
-        result=sig.result or "PENDING",
-        resolvedAt=sig.resolved_at,
-    ).model_dump(mode="json")
 
 
 # 每个品种一把锁，/trend 用。

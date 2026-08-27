@@ -11,7 +11,7 @@ also holds the still-forming bar.
 import asyncio
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from math import gcd
 
 from starlette.concurrency import run_in_threadpool

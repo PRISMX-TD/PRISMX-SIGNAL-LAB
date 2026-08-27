@@ -4,6 +4,7 @@
 NOWPayments 的 IPN 回调也走这个路由（无需用户认证）。
 """
 
+import logging
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,8 @@ from app.services.nowpayments import (
 )
 from app.core.config import settings
 from app.services.settings_store import get_pricing_settings, get_trial_settings
+
+logger = logging.getLogger("prismx.payments")
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
@@ -126,8 +129,17 @@ async def get_payment_currencies(_user: User = Depends(get_current_user)):
         return {"currencies": _currency_cache[1]}
     try:
         currencies = await np_currencies()
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"NOWPayments error: {e}")
+    except Exception:
+        # 异常明细只进日志：第三方异常文本会带上请求 URL、密钥前缀、依赖版本一类
+        # 内部信息，回给客户端等于免费给出一份内部结构说明。
+        # Details go to the log only: third-party exception text carries request
+        # URLs, key prefixes and library versions — handing that to the client is
+        # a free description of our internals.
+        logger.exception("NOWPayments 币种列表获取失败 / failed to fetch currencies")
+        raise HTTPException(
+            status_code=502,
+            detail="支付服务暂时不可用，请稍后重试 / payment service temporarily unavailable",
+        )
     _currency_cache = (now, currencies)
     return {"currencies": currencies}
 
@@ -287,12 +299,22 @@ async def create_payment_order(
             is_fixed_rate=True,
             is_fee_paid_by_user=False,
         )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"NOWPayments create payment failed: {e}")
+    except Exception:
+        # 明细只进日志，不回客户端（理由同 /currencies）。
+        # Details to the log, not to the client (same reasoning as /currencies).
+        logger.exception("NOWPayments 创建订单失败: user=%s order=%s", _user.id, order_id)
+        raise HTTPException(
+            status_code=502,
+            detail="支付订单创建失败，请稍后重试 / could not create the payment, please try again",
+        )
 
     payment_id = np_result.get("payment_id")
     if not payment_id:
-        raise HTTPException(status_code=502, detail="NOWPayments did not return a payment_id")
+        logger.error("NOWPayments 未返回 payment_id: user=%s order=%s", _user.id, order_id)
+        raise HTTPException(
+            status_code=502,
+            detail="支付订单创建失败，请稍后重试 / could not create the payment, please try again",
+        )
 
     # 存入本地数据库 / persist to local DB
     record = Payment(
@@ -405,7 +427,16 @@ async def get_payment_status_local(
             # existing behaviour and must not change under cover of this move.
             await run_in_threadpool(_sync_payment_status, db, record, np_status_val, np_data)
         except Exception:
-            pass  # NP 不可用时返回本地缓存 / return local cache if NP is down
+            # 行为不变（照旧回落到本地缓存并返回 200），但不再静默：这是前端每 5 秒
+            # 轮询一次的路径，NOWPayments 长期不可用时用户看到的只是订单状态一直不
+            # 更新，服务端却一条记录都没有——没有日志就没人会发现。
+            # Behaviour unchanged (still falls back to the cached record with a
+            # 200) but no longer silent: the frontend polls this every 5s, so a
+            # prolonged NOWPayments outage merely looks like a payment that never
+            # updates, with nothing recorded server-side to notice it by.
+            logger.warning(
+                "NOWPayments 状态同步失败，回落本地缓存: payment=%s", payment_id, exc_info=True
+            )
 
     return await run_in_threadpool(_serialize_payment, record)
 

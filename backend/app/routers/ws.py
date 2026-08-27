@@ -6,6 +6,7 @@ MT5 侧执行统一走 PRISMX Bridge 的 HTTP 轮询（/api/bridge/*），
 MT5 execution goes exclusively through the PRISMX Bridge HTTP polling
 (/api/bridge/*); the legacy /ws/ea EA channel has been removed.
 """
+import asyncio
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -19,6 +20,17 @@ from app.services.connection_manager import manager
 logger = logging.getLogger("prismx.ws")
 
 router = APIRouter()
+
+# 等待鉴权首帧的上限（秒）。没有它，一个连上来就不说话的客户端会让服务端在
+# receive_json 上无限期挂着——每条这样的连接都占一个未鉴权的 WebSocket 与一个
+# 协程，开够了就是一次廉价的资源耗尽。真实前端在 onopen 里立刻就发首帧
+# （store/useClientSocket.ts），5 秒对任何正常网络都绰绰有余。
+# Cap on waiting for the auth frame. Without it a client that connects and stays
+# silent parks the server on receive_json indefinitely, each such connection
+# holding an unauthenticated socket and a coroutine — cheap resource exhaustion
+# at volume. The real frontend sends the frame from onopen
+# (store/useClientSocket.ts), so five seconds is ample on any real network.
+AUTH_FRAME_TIMEOUT_SECONDS = 5
 
 
 def _authenticate(token: str) -> str | None:
@@ -51,35 +63,68 @@ async def ws_client(websocket: WebSocket):
     Client WebSocket: authenticate by JWT, then receive signal/order pushes.
 
     鉴权方式：连接后由客户端发送首帧 {"type":"AUTH","token":"<jwt>"}。
-    避免把 JWT 放在 URL query（会被代理/网关访问日志记录）。为兼容旧客户端，
-    仍接受 query 参数 token 作为回退。只在建连这一刻校验会话版本——已经建立
-    的连接不会因为期间发生的密码修改被强制断开，会随该连接下次重连时自然
-    生效（前端重连时会带上刷新过的新 token）。
+    只在建连这一刻校验会话版本——已经建立的连接不会因为期间发生的密码修改被强制
+    断开，会随该连接下次重连时自然生效（前端重连时会带上刷新过的新 token）。
+
+    这里刻意不接受 `?token=<jwt>` 这种 query 参数写法。URL 会被反向代理、网关、
+    CDN 的访问日志原样记下来，而本站的 JWT 有效期长达 30 天（见 config 里
+    JWT_EXPIRE_MINUTES 的说明）——一份泄露的访问日志就等于一批可用一个月的凭证。
+    曾保留 query 回退是为兼容旧客户端，但前端从一开始就只走首帧（见
+    store/useClientSocket.ts），这条回退没有任何在用的调用方，只留下风险。
+
     Auth: client sends a first frame {"type":"AUTH","token":"<jwt>"} after connect.
-    Avoids putting the JWT in the URL query (logged by proxies/gateways). For
-    backward compatibility a query param token is still accepted as fallback.
     The session-version check only runs at connect time — an already-open
-    connection isn't force-dropped by a password change that happens while
-    it's live; it takes effect the next time that connection reconnects
-    (picking up the refreshed token the frontend stores by then).
+    connection isn't force-dropped by a password change that happens while it's
+    live; it takes effect the next time that connection reconnects (picking up
+    the refreshed token the frontend stores by then).
+
+    A `?token=<jwt>` query parameter is deliberately NOT accepted. URLs are
+    recorded verbatim by reverse-proxy, gateway and CDN access logs, and this
+    site's JWTs last 30 days (see JWT_EXPIRE_MINUTES) — one leaked access log
+    would be a batch of month-long credentials. The fallback existed for older
+    clients, but the frontend has only ever sent the AUTH frame (see
+    store/useClientSocket.ts), so it had no callers and only carried risk.
     """
     await websocket.accept()
 
-    # 优先使用首帧消息中的 token；回退到 query 参数 / prefer first-frame token, fall back to query
+    # 鉴权 token 只从首帧取，且限时 / the auth token comes from the first frame only, with a deadline
     token = ""
     try:
-        first = await websocket.receive_json()
+        first = await asyncio.wait_for(
+            websocket.receive_json(), timeout=AUTH_FRAME_TIMEOUT_SECONDS
+        )
         if isinstance(first, dict) and first.get("type") == "AUTH":
             token = str(first.get("token", "") or "")
+    except WebSocketDisconnect:
+        # 客户端在发出鉴权帧之前就断开了。连接已经不存在，没有对象可以通知，直接
+        # 收工。必须单独接住这一支：若和下面的通用分支一样往下走，就会对一个已经
+        # 关闭的连接调用 send_json，starlette 抛
+        # 「Unexpected ASGI message 'websocket.send', after ... close」，
+        # 在日志里留下一整段无人受害的 ASGI 报错。移动端切后台、刷新页面都会正常
+        # 产生这种"连上就断"，所以它不是异常情况，是日常流量。
+        # The client vanished before sending the auth frame. There is no
+        # connection left to inform, so simply stop. This needs its own branch:
+        # falling through would call send_json on a closed socket and make
+        # starlette raise "Unexpected ASGI message 'websocket.send', after ...
+        # close" — a full ASGI traceback in the log with no actual victim.
+        # Backgrounding a mobile browser or refreshing the page produces exactly
+        # this connect-then-drop, so it is routine traffic, not an anomaly.
+        return
     except Exception:
         token = ""
-    if not token:
-        token = websocket.query_params.get("token", "")
 
     user_id = _authenticate(token)
     if not user_id:
-        await websocket.send_json({"type": "AUTH_FAIL", "reason": "invalid token"})
-        await websocket.close()
+        # 告知失败原因后关闭。这里同样要防"对端已经走了"：超时分支走到这里时连接
+        # 通常还在（所以这条 AUTH_FAIL 有意义），但客户端完全可能恰好在这一刻断开。
+        # Tell the client why, then close. Guarded for the same reason: on the
+        # timeout path the peer is usually still there (which is what makes
+        # AUTH_FAIL worth sending), but it may drop at exactly this moment.
+        try:
+            await websocket.send_json({"type": "AUTH_FAIL", "reason": "invalid token"})
+            await websocket.close()
+        except (WebSocketDisconnect, RuntimeError):
+            pass
         return
 
     await manager.register_client(user_id, websocket)

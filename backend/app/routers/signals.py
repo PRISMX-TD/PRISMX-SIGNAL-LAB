@@ -13,19 +13,12 @@ from app.services.deps import get_current_user, require_admin
 from app.services.plans import is_realtime_plan
 from app.services.settings_store import get_platform_strategies, get_winrate_settings
 from app.services.strategy_winrate import compute_strategy_session_winrate
+from app.utils.timeutil import aware as _aware
 
 router = APIRouter(prefix="/signals", tags=["signals"])
 
 # 按天统计的天数窗口 / number of days covered by the daily stats window
 STATS_DAYS = 7
-
-
-def _aware(dt: datetime | None) -> datetime | None:
-    """库里存的是 naive UTC，比较/序列化前统一补上时区。
-    Stored naive as UTC; attach the tzinfo before comparing/serializing."""
-    if dt is None:
-        return None
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 @router.get("", response_model=dict)

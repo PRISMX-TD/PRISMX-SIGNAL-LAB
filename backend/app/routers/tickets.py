@@ -3,6 +3,7 @@
 Ticket router: users submit, view and reply to their own tickets; admins view,
 reply to and modify all tickets.
 """
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -20,6 +21,8 @@ from app.schemas import (
     TicketReplyOut,
 )
 from app.services.deps import get_current_user, require_admin
+
+logger = logging.getLogger("prismx.tickets")
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
@@ -280,7 +283,16 @@ def admin_reply_to_ticket(
         from app.services.push_dispatch import dispatch_ticket_reply
         dispatch_ticket_reply(ticket.id, ticket.user_id, admin.email)
     except Exception:
-        pass  # 通知失败不影响回复成功 / don't fail reply on notification error
+        # 行为不变（通知失败不影响回复成功），但要留痕：这个 except 连 import 失败
+        # 都一起吞，推送链路整体坏掉时表现为「用户再也收不到工单回复通知」，而服务端
+        # 完全没有迹象——静默失败的那种，只能靠用户来投诉才会发现。
+        # Behaviour unchanged (a failed notification must not fail the reply) but
+        # no longer traceless: this except swallows even an ImportError, so a
+        # broken push path shows up only as "users stopped getting ticket-reply
+        # notifications", with nothing server-side to notice it by.
+        logger.warning(
+            "工单回复推送失败: ticket=%s user=%s", ticket.id, ticket.user_id, exc_info=True
+        )
 
     replies = (
         db.query(TicketReply)

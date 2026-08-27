@@ -21,10 +21,11 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
-from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, Signal, User
+from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
 from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
 from app.services.strategy_winrate import compute_strategy_session_winrate
+from app.utils.timeutil import aware as _aware
 from app.services.settings_store import (
     get_broker_settings,
     get_candle_settings,
@@ -59,12 +60,6 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 PAGE_SIZE_DEFAULT = 50
 PAGE_SIZE_MAX = 200
-
-
-def _aware(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 @router.get("/users", response_model=dict)

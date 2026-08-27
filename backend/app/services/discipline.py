@@ -65,6 +65,7 @@ from app.core.database import SessionLocal
 from app.models import ClosedTrade, DisciplineSnapshot, MT5Account, Order, Signal
 from app.services.settings_store import get_discipline_settings
 from app.services.trade_performance import position_id_of
+from app.utils.timeutil import aware as _aware
 
 logger = logging.getLogger("prismx.discipline")
 
@@ -104,12 +105,6 @@ SNAPSHOT_INTERVAL_SECONDS = 6 * 60 * 60
 # 首轮快照延后再跑,别挡住 uvicorn bind 端口 / delay the first snapshot pass so it
 # doesn't hold up uvicorn binding the port
 SNAPSHOT_STARTUP_DELAY_SECONDS = 20
-
-
-def _aware(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 def _resolved_positions(

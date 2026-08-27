@@ -20,6 +20,62 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 
 const USER_KEY = 'prismx_user'
 
+// 登出时保留的 localStorage 键。除这些之外，所有 prismx 前缀的键在登出时一律清掉。
+//
+// 取"白名单保留 + 其余全清"而不是"列出要清的键"，是因为后者一定会漂移：新增一个
+// 缓存用户数据的键时，没人会记得回来更新登出逻辑，而漏掉的后果是共享设备上的下一
+// 个人看得到上一个人的东西。之前就漏了两个——prismx_prefs（含最后使用的 MT5 账号）
+// 与 prismx_pending_payment（含收款地址与金额）。反过来写，新键默认被清，只有确实
+// 该跨账号留存的才需要显式加进来，漏加的后果只是某个偏好被多清一次。
+//
+// 保留的三类：界面语言（设备偏好，清掉等于每次登出都把界面语言重置）；邀请来源
+// 归因（在登录之前就采集，登出后注册新账号仍要能归因到原推荐人）；桥接更新提示的
+// 忽略记录（说的是这台机器上装的桥接程序版本，与账号无关）。
+//
+// localStorage keys kept on logout; everything else prefixed `prismx` is cleared.
+//
+// An allowlist of what to keep, rather than a list of what to clear, because the
+// latter inevitably drifts: whoever adds a key that caches user data won't think
+// to update the logout path, and the cost of missing one is the next person on a
+// shared device seeing the previous user's data. Two were in fact missed —
+// prismx_prefs (last-used MT5 account) and prismx_pending_payment (payment
+// address and amount). Inverted, a new key is cleared by default and only
+// genuinely cross-account state needs adding here; forgetting to add one merely
+// resets a preference.
+//
+// The three kept: UI language (a device preference — clearing it would reset the
+// interface language on every logout); referral attribution (captured before
+// login, and must survive so a post-logout signup still credits the referrer);
+// and the bridge-update dismissal (about the bridge build installed on this
+// machine, not about the account).
+const LOGOUT_KEEP_KEYS = new Set([
+  'prismx_lang',
+  'prismx.ref',
+  'prismx.ref.clicked',
+  'prismx_bridge_update_dismissed_version',
+])
+
+function clearUserScopedStorage() {
+  try {
+    const doomed: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (!key || LOGOUT_KEEP_KEYS.has(key)) continue
+      if (key.startsWith('prismx_') || key.startsWith('prismx.')) doomed.push(key)
+    }
+    // 先收集再删除：边遍历边删会让 localStorage.key(i) 的索引错位，跳过一部分键。
+    // Collect first, then delete: removing during the walk shifts the indices of
+    // localStorage.key(i) and silently skips entries.
+    doomed.forEach((k) => localStorage.removeItem(k))
+  } catch {
+    // 隐私模式/禁用存储时 localStorage 会抛异常。登出本身（清 token 与内存态）
+    // 必须照常完成，不能因为清缓存失败就把用户留在登录态里。
+    // localStorage throws in private mode / when storage is blocked. Logout
+    // itself (dropping the token and in-memory state) must still complete —
+    // failing to clear a cache must never leave the user logged in.
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
     const raw = localStorage.getItem(USER_KEY)
@@ -69,7 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     clearToken()
-    localStorage.removeItem(USER_KEY)
+    clearUserScopedStorage()
     setUser(null)
   }
 

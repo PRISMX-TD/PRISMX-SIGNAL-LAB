@@ -144,16 +144,66 @@ self.addEventListener("pushsubscriptionchange", (event) => {
   )
 })
 
+// 推送载荷里的跳转地址只接受本站的相对路径。
+//
+// data.url 来自推送消息，而推送消息的可信度取决于后端与 VAPID 私钥——一旦其中任何
+// 一环失守，攻击者就能推一条通知，用户点一下便被带去任意外站（典型是一个仿本站的
+// 钓鱼登录页，而且它是"从通知点进来的"，比一条陌生链接更容易取信）。正常业务永远
+// 只跳站内页面，所以限制成相对路径不损失任何功能。
+//
+// 同时要挡住协议相对写法 `//evil.example`：它以 "/" 开头却是跨站绝对地址。
+//
+// Only same-origin relative paths from the push payload are honoured. data.url
+// arrives in the push message, whose trustworthiness rests on the backend and the
+// VAPID key; if either is compromised, a pushed notification becomes a one-click
+// trip to any external site — typically a lookalike login page, made more
+// convincing by arriving through a notification. Real notifications only ever
+// link to in-app pages, so this costs nothing. The `//evil.example` form is
+// rejected too: it starts with "/" yet is a cross-origin absolute URL.
+function safeNotificationUrl(raw) {
+  if (typeof raw !== "string" || !raw.startsWith("/") || raw.startsWith("//")) {
+    return "/app"
+  }
+  return raw
+}
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close()
-  const url = event.notification.data?.url || "/app"
+  const url = safeNotificationUrl(event.notification.data?.url)
+  const target = new URL(url, self.location.origin).href
   event.waitUntil(
     self.clients
       .matchAll({ type: "window", includeUncontrolled: true })
       .then((clients) => {
+        // 复用任意一个本站已开窗口，聚焦后再导航到目标页。
+        //
+        // 原来的判据是 client.url.includes(url)：命中就只 focus 不导航，于是停在
+        // /app/orders 的窗口收到指向 /app/signals 的通知时，因为 URL 里含 "/app"
+        // 而被判为"已经在目标页"，聚焦后仍停在订单页——点了通知却没去该去的地方。
+        // 不命中则新开一个窗口，同一个应用因此可能开出好几个。
+        //
+        // 改成"先找同源窗口，聚焦，再导航"两件事同时解决：不会重复开窗，落点也一
+        // 定正确。navigate 需要窗口受本 SW 控制，不可用时退回 openWindow。
+        //
+        // Reuse any existing window for this origin, focus it, then navigate.
+        // The old test was client.url.includes(url), which focused without
+        // navigating: a window sitting on /app/orders receiving a notification
+        // for /app/signals matched merely because the URL contains "/app", so it
+        // was focused and stayed on the orders page — the click went nowhere. A
+        // miss opened another window, so the app could end up with several.
+        // Focus-then-navigate fixes both: no duplicate windows, and the landing
+        // page is always right. navigate() needs a client this SW controls; fall
+        // back to openWindow when it isn't available.
         for (const client of clients) {
-          if (client.url.includes(url) && "focus" in client) {
-            return client.focus()
+          if (new URL(client.url).origin !== self.location.origin) continue
+          if ("focus" in client) {
+            const focused = client.focus()
+            if ("navigate" in client && client.url !== target) {
+              return Promise.resolve(focused)
+                .then(() => client.navigate(target))
+                .catch(() => self.clients.openWindow(url))
+            }
+            return focused
           }
         }
         return self.clients.openWindow(url)
