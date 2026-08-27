@@ -991,6 +991,18 @@ export default function AdminPage() {
                 onChange={(e) => setDiscipline({ ...discipline, volumeHistoryMin: Math.min(50, Math.max(1, parseInt(e.target.value) || 1)) })}
               />
             </div>
+            <div>
+              <label className="label">{t('admin.dscExitDistance')}</label>
+              <input
+                type="number"
+                className="input"
+                min="0"
+                max="1"
+                step="0.05"
+                value={discipline.exitSlDistancePct}
+                onChange={(e) => setDiscipline({ ...discipline, exitSlDistancePct: Math.min(1, Math.max(0, parseFloat(e.target.value) || 0)) })}
+              />
+            </div>
           </div>
           <button
             className="btn-primary mt-4 px-5 py-2 text-sm disabled:opacity-40"

@@ -4,12 +4,21 @@
 三个维度（默认权重 D1 40% / D2 30% / D3 30%，权重与阈值见 settings_store.py 的
 DISCIPLINE_DEFAULTS，管理后台可调）：
 - D1 止损纪律：跟信号下的单是否保留了原始止损，有没有把止损往亏损方向恶意移动。
-- D2 仓位纪律：手数是否在历史正常区间内，防的是报复性加仓的突然放大。
-- D3 出场纪律：有没有在没到止损止盈时手动恐慌平仓。
+- D2 仓位纪律：这一单的**风险敞口**是否在同品种历史的正常区间内，防的是报复性
+  加仓的突然放大。比的不是原始手数——同样是账户 1% 的风险，黄金算出来的手数
+  和货币对能差一个数量级，止损放宽一倍手数也要减半，只看手数会把"风险其实
+  一样"的正常下单判成违规。见 _score_volume。
+- D3 出场纪律：有没有在**离止损还很远**的时候手动砍仓。判据是离计划的距离，
+  不是这一单亏了多少钱。见 _score_exit。
 
 已知数据局限（V1 有意为之，不是 bug）：
 - 用户直接在 MT5 客户端手动平仓不产生本平台 CLOSE 指令，D3 检测不到——
   只检测经网页发起的平仓，没有 CLOSE 记录视为"交给 SL/TP 处理"，判合规。
+- 信号可以不带止损（webhook 的 stopLoss 是可选字段）。这种单子 D1 不评分——
+  没有"原始止损"可保留，判用户违纪是冤枉人；用户自己把信号的止损抹掉才算。
+- D2 的风险敞口用 `手数 × |入场价 − 止损价|` 代理真实货币风险。跨品种不可比
+  （每手合约规模不同，本平台没有券商合约规格数据），所以基准**按品种分桶**：
+  同一品种的合约规模是常数，桶内比风险敞口就等价于比真实货币风险，常数被约掉。
 - 信号单开仓时存的 orders.sl 是信号价刻度，Bridge 执行时按比例换算到券商
   真实价，后续 MODIFY 的 sl 是券商刻度——两者有小比例偏移，D1 因此设了容差，
   只惩罚明显的恶化移动。
@@ -22,14 +31,23 @@ Three dimensions (default weights D1 40% / D2 30% / D3 30%; weights & thresholds
 live in settings_store.DISCIPLINE_DEFAULTS, admin-tunable):
 - D1 stop-loss discipline: whether the signal's original stop was kept, or
   moved adversely.
-- D2 position-size discipline: whether volume stays within the historical
-  normal range, catching sudden revenge-sized positions.
-- D3 exit discipline: whether the user panic-closed before hitting SL/TP.
+- D2 position-size discipline: whether this trade's *risk exposure* stays within
+  the normal range for the same symbol, catching sudden revenge-sized positions.
+  Raw lot size is not comparable: the same 1%-of-account risk yields wildly
+  different lot sizes on gold vs a currency pair, and doubling the stop distance
+  halves the lots.
+- D3 exit discipline: whether the user bailed out while price was still far from
+  the stop. The test is distance from the plan, not how much the trade lost.
 
 Known data limitations (intentional in V1, not bugs):
 - A manual close done directly in the MT5 terminal produces no CLOSE command
   on this platform, so D3 can't see it — only web-initiated closes are
   detected; no CLOSE record is treated as "left to SL/TP", scored compliant.
+- D2 proxies money risk as `volume x |entry - stop|`. That is not comparable
+  across symbols (contract sizes differ and this platform has no broker contract
+  specs), so baselines are bucketed per symbol: contract size is constant within
+  a symbol, so comparing the proxy inside one bucket is equivalent to comparing
+  real money risk.
 - orders.sl at open is stored at signal-price scale; the bridge converts it
   to the broker's real price scale on execution, so later MODIFY sl values
   are broker-scale — a small proportional offset exists between the two. D1
@@ -60,8 +78,25 @@ _VOLUME_EPS = 1e-6
 # 系统替用户执行的操作不算用户行为，不参与纪律评分。
 AUTO_PREFIX = "auto_"
 
-# D2 仓位基准取样：本仓位开仓前最近 N 笔信号单的手数，算中位数
+# D2 仓位基准取样：本仓位开仓前、**同品种**最近 N 笔信号单，算中位数
 _VOLUME_BASELINE_SAMPLE = 20
+
+# D2 每个账号一次捞回多少行历史。基准按品种分桶后，同样凑够 N 笔就需要更多原始
+# 行——一个账号交易 K 个品种，最坏情况要 K 倍。取一个够宽又封了顶的常数：捞不
+# 够的品种，该仓位的 D2 直接不评分（返回 None），不会因为样本少就误判。
+# Rows fetched per account for D2. Bucketing per symbol means more raw rows are
+# needed to fill each bucket; this is a generous but bounded cap. A bucket that
+# still comes up short simply isn't scored, rather than being judged on thin data.
+_VOLUME_HISTORY_FETCH = _VOLUME_BASELINE_SAMPLE * 20
+
+# D3 把 CLOSE 指令匹配到平仓腿的时间窗：指令下发后桥接拉取并执行需要几秒到几十秒。
+# 窗口取得比正常执行时延宽，但不至于宽到把后来触发的止损腿也吞进来。
+# 另留一点时钟偏差容忍：指令时间来自服务端，成交时间来自 MT5 服务器。
+# Window for attributing a close leg to a CLOSE command (bridge pickup + fill),
+# wide enough for real latency but not so wide it swallows a later stop-out leg.
+# The skew allowance covers server-vs-MT5 clock differences.
+_CLOSE_MATCH_WINDOW = timedelta(minutes=10)
+_CLOSE_CLOCK_SKEW = timedelta(seconds=60)
 
 # 后台快照循环的运行间隔（秒）
 SNAPSHOT_INTERVAL_SECONDS = 6 * 60 * 60
@@ -142,10 +177,23 @@ def _resolved_positions(
 
 
 def _user_modify_close_map(
-    db, user_id: str, action: str, keys: set[tuple]
+    db, user_id: str, action: str, keys: set[tuple], include_auto: bool = False
 ) -> dict[tuple, list]:
     """一次取回这一批仓位下所有**用户发起**（非 auto_ 前缀）的 MODIFY 或 CLOSE
     指令，按 (账号, 仓位编号) 分组、组内按时间升序。
+
+    include_auto=True 时连同系统自动指令一起返回。MODIFY 就是这么取的：D1 只
+    该看用户自己的改单（由 _user_initiated 在内存里筛一次），而 D3 判断"平仓时
+    离止损多远"要的是**当时真正生效的止损**——自动保本、自动移动止损同样改变
+    了计划，用原始止损算距离会把已经被自动抬到平仓价附近的止损当成还很远，凭空
+    多判违规。两种口径共用这一次查询，不额外增加往返。
+
+    With include_auto=True the system's own commands are included. MODIFY is
+    fetched that way: D1 must only see the user's own edits (filtered in memory by
+    _user_initiated), while D3's "how far from the stop" needs the stop that was
+    *actually in force*, auto-breakeven and auto-trailing included — measuring
+    against the original stop would report a distance that no longer exists and
+    invent violations. One query serves both views.
 
     原来是每个仓位各查一次（`_user_modify_close`），配合 D1 和 D3 就是 2N 条查询，
     再加 D2 的手数历史一共 3N 条。生产库是远端 Supabase，每条都带一次网络往返，
@@ -184,7 +232,11 @@ def _user_modify_close_map(
             Order.action == action,
             Order.status == "FILLED",
             Order.ticket.in_(tickets),
-            ~Order.client_order_id.like(f"{AUTO_PREFIX}%"),
+            *(
+                []
+                if include_auto
+                else [~Order.client_order_id.like(f"{AUTO_PREFIX}%")]
+            ),
         )
         .order_by(Order.created_at.asc())
         .all()
@@ -202,50 +254,173 @@ def _user_modify_close_map(
     return out
 
 
-def _score_stop_loss(
-    db, order: Order, modifies: list, entry_by_signal: dict[str, float | None], tolerance_pct: float
-) -> float | None:
-    """D1：止损纪律。逐条用户发起的 MODIFY 比对，任何一次明显恶化即判违规。
+def _user_initiated(rows: list) -> list:
+    """从指令列表里筛掉系统自动下发的那些（auto_ 前缀）。
+    Drop the system's own commands (auto_ prefix) from a command list."""
+    return [r for r in rows if not (r.client_order_id or "").startswith(AUTO_PREFIX)]
 
-    modifies 由调用方批量取好后传入（见 _user_modify_close_map），
-    entry_by_signal 同理——原来这两处各自在循环里发查询。
-    Both `modifies` and `entry_by_signal` are prefetched in bulk by the caller
-    (see _user_modify_close_map); each used to issue its own query inside the loop.
+
+def _entry_of(order: Order, plan_by_signal: dict) -> float | None:
+    """这笔仓位的入场价：优先真实成交价，回落到信号给的入场价。
+    The position's entry price: the real fill, falling back to the signal's entry."""
+    if order.filled_price is not None:
+        return order.filled_price
+    plan = plan_by_signal.get(order.signal_id) if order.signal_id else None
+    return plan.entry if plan is not None else None
+
+
+def _risk_exposure(volume: float | None, entry: float | None, sl: float | None) -> float | None:
+    """风险敞口代理值 `手数 × |入场价 − 止损价|`，算不出来时返回 None。
+
+    这是"这一单打到止损会亏多少钱"去掉合约规模常数之后的部分。合约规模只跟品种
+    有关，所以**同品种内**比较这个值，与比较真实货币金额完全等价；跨品种则不可
+    比，调用方必须按品种分桶（见 _score_volume）。
+
+    Money risk with the per-symbol contract-size constant factored out. Comparable
+    within one symbol, never across symbols — callers must bucket by symbol.
     """
-    ref_sl = order.sl
-    if ref_sl in (None, 0):
-        # 信号单必然带止损；开仓时就没有止损本身就是最大的违纪
-        return 0.0
-    side = order.side
-    price_ref = order.filled_price
-    if price_ref is None:
-        price_ref = entry_by_signal.get(order.signal_id)
-    if price_ref is None:
-        return None  # 无法算距离容差，宁缺勿错
+    if not volume or volume <= 0:
+        return None
+    if entry is None or sl in (None, 0):
+        return None
+    span = abs(entry - sl)
+    if span <= 0:
+        return None
+    return volume * span
 
+
+def _effective_sl(order: Order, modifies: list, at: datetime | None) -> float | None:
+    """`at` 时刻真正生效的止损：开仓止损，被此前每一次改单依次覆盖。
+
+    modifies 需按时间升序且**包含**自动指令。某次改单把止损清空（0/None）则返回
+    None——此刻没有止损可作参照，调用方应放弃判定而不是硬算。
+
+    The stop actually in force at `at`: the opening stop, overwritten by each
+    earlier modification (auto ones included). A modification that clears the stop
+    yields None — there is no reference left, so the caller must abstain.
+    """
+    sl = order.sl if order.sl not in (None, 0) else None
+    for m in modifies:
+        m_at = _aware(m.created_at)
+        if m_at is None:
+            continue
+        if at is not None and m_at > at:
+            break  # 升序，之后的都发生在 at 之后 / ascending: the rest are later
+        sl = m.sl if m.sl not in (None, 0) else None
+    return sl
+
+
+def _manual_close_legs(manual_closes: list, legs: list[ClosedTrade]) -> list[ClosedTrade]:
+    """把每条用户发起的 CLOSE 指令匹配到它实际平掉的那一腿平仓成交。
+
+    存在的理由：一个仓位的平仓腿可能既有用户手动平的、也有后来止损打掉的。整仓
+    盈亏加总会把"止损那一腿的亏损"算到用户手动平仓头上——用户手动平的那半仓
+    明明是赚的，剩下的被止损打掉，结果判他违规。只有把腿归属清楚，D3 才是在评价
+    用户的那次操作本身。
+
+    匹配规则：按时间升序，每条指令认领它之后 _CLOSE_MATCH_WINDOW 内第一条尚未被
+    认领的平仓腿。认领不到就跳过（回执丢失、或该平仓其实是在 MT5 端完成的）。
+
+    Attribute each user-initiated CLOSE command to the closing deal it produced.
+    A position can mix user-closed legs with a later stop-out leg, and summing the
+    whole position's P&L would blame the user's (possibly profitable) manual close
+    for the stop-out's loss. Each command claims the first unclaimed leg filled
+    within _CLOSE_MATCH_WINDOW after it; unmatched commands are skipped.
+    """
+    ordered = sorted(
+        (leg for leg in legs if leg.closed_at is not None),
+        key=lambda leg: _aware(leg.closed_at),
+    )
+    claimed: set[int] = set()
+    out: list[ClosedTrade] = []
+    for cmd in manual_closes:
+        cmd_at = _aware(cmd.created_at)
+        if cmd_at is None:
+            continue
+        for idx, leg in enumerate(ordered):
+            if idx in claimed:
+                continue
+            leg_at = _aware(leg.closed_at)
+            if leg_at < cmd_at - _CLOSE_CLOCK_SKEW:
+                continue  # 指令之前就成交的，不可能是它平的 / filled before the command
+            if leg_at > cmd_at + _CLOSE_MATCH_WINDOW:
+                break  # 升序，再往后只会更晚 / ascending: everything after is later still
+            claimed.add(idx)
+            out.append(leg)
+            break
+    return out
+
+
+def _score_stop_loss(
+    order: Order,
+    modifies: list,
+    entry: float | None,
+    signal_sl: float | None,
+    tolerance_pct: float,
+) -> float | None:
+    """D1：止损纪律。把止损往亏损方向挪得明显超出容差，或者干脆删掉，判违规。
+
+    比较基准始终是**信号给的那个原始止损**，不是上一次改单后的值。基准跟着改单
+    滚动会漏掉一条真实的规避路径：先把止损拉到保本价（此时"入场价到止损"的距离
+    变成 0，容差也随之变成 0，那段代码只好用 `dist > 0` 跳过判定），再一路放宽，
+    全程不触发；而同一个终点一步到位反而判违规。以原始止损为准之后，"最终把风险
+    放到了计划之外"这件事无论分几步都成立，而在原始止损以内的来回收紧放松——
+    仍然是按计划执行——不会被误判。
+
+    modifies 只含**用户发起**的改单（调用方用 _user_initiated 筛过）：系统自动
+    保本/移动止损不是用户行为，不该记在他头上。entry 由调用方算好（见 _entry_of）。
+
+    D1: flag a stop moved adversely beyond tolerance, or removed outright.
+
+    The reference is always the *signal's original* stop, never the running value
+    after each edit. A rolling reference misses a real evasion path: move the stop
+    to breakeven first (entry-to-stop distance becomes 0, so the tolerance does
+    too and the check had to skip via `dist > 0`), then widen it freely — while
+    the same destination in one step is a violation. Anchored to the original,
+    "ended up with more risk than planned" holds however many steps it took, and
+    tightening/loosening within the original stop is still following the plan.
+    """
+    plan_sl = order.sl
+    if plan_sl in (None, 0):
+        # 开仓就没有止损——但要先分清是谁的责任。信号本身没给止损时（webhook 的
+        # stopLoss 是可选字段，Signal.stop_loss 可为空），用户根本没有"原始止损"
+        # 可保留，把这算成他违纪是冤枉人：不评分。信号给了、订单上却没有，才是
+        # 下单时被主动抹掉，那是实打实的违纪。
+        # No stop at entry — but whose doing? The webhook's stopLoss is optional,
+        # so a signal can legitimately arrive without one, and there is then no
+        # original stop for the user to have kept: abstain rather than blame them.
+        # A signal that did carry a stop, on an order that doesn't, means the user
+        # cleared it — that is a real violation.
+        if signal_sl in (None, 0):
+            return None
+        return 0.0
+    if entry is None:
+        return None  # 无法算距离容差，宁缺勿错 / no distance scale, so abstain
+
+    side = order.side
+    dist = abs(entry - plan_sl)
     for m in modifies:
         new_sl = m.sl
         if new_sl in (None, 0):
-            return 0.0  # 删除止损
-        if ref_sl not in (None, 0):
-            dist = abs(price_ref - ref_sl)
-            adverse = (new_sl < ref_sl) if side == "BUY" else (new_sl > ref_sl)
-            if adverse and dist > 0 and abs(new_sl - ref_sl) > dist * tolerance_pct:
-                return 0.0
-        ref_sl = new_sl
+            return 0.0  # 删除止损 / stop removed
+        adverse = (new_sl < plan_sl) if side == "BUY" else (new_sl > plan_sl)
+        if adverse and dist > 0 and abs(new_sl - plan_sl) > dist * tolerance_pct:
+            return 0.0
     return 100.0
 
 
 def _volume_history_map(db, user_id: str, logins: set[str | None]) -> dict:
-    """按账号取回手数基准所需的信号单历史，一次查完这一批账号。
+    """按 (账号, 品种) 取回仓位基准所需的信号单历史，一次查完这一批账号。
 
     原来是每个仓位各查一次「本仓位开仓前最近 N 笔」。改成按账号一次性拉回该账号
     的信号单 (created_at, volume) 列表（按时间降序），再由调用方对每个仓位在内存
     里切出「开仓前最近 N 笔」——同一个账号下的多个仓位共用同一份历史，不必反复
     向数据库要几乎相同的数据。
 
-    每个账号最多取 _VOLUME_BASELINE_SAMPLE + 窗口内仓位数 行：基准只要 N 笔，
-    但每个仓位的截止时间点不同，所以要留出足够的余量让最早那个仓位也能凑够 N 笔。
+    分桶键带上品种：基准要在同品种内比（见 _risk_exposure / _score_volume），
+    黄金的敞口和欧美的敞口混进同一个中位数就没有意义了。每个账号最多取
+    _VOLUME_HISTORY_FETCH 行——基准只要 N 笔，但每个仓位的截止时间点不同、且要
+    分摊到多个品种，所以留出足够余量让较早的仓位也能凑够 N 笔。
 
     Per-account signal-order history for the volume baseline, fetched once for the
     whole batch of accounts.
@@ -263,7 +438,7 @@ def _volume_history_map(db, user_id: str, logins: set[str | None]) -> dict:
     out: dict = {}
     for lg in logins:
         rows = (
-            db.query(Order.created_at, Order.volume)
+            db.query(Order.created_at, Order.volume, Order.symbol, Order.sl, Order.filled_price)
             .filter(
                 Order.user_id == user_id,
                 Order.signal_id.isnot(None),
@@ -272,47 +447,154 @@ def _volume_history_map(db, user_id: str, logins: set[str | None]) -> dict:
                 Order.mt5_login == lg,
             )
             .order_by(Order.created_at.desc())
-            .limit(_VOLUME_BASELINE_SAMPLE * 4)
+            .limit(_VOLUME_HISTORY_FETCH)
             .all()
         )
-        out[lg] = rows
+        for r in rows:
+            out.setdefault((lg, r.symbol), []).append(r)
     return out
 
 
-def _score_volume(history_rows: list, order: Order, multiple: float, history_min: int) -> float | None:
-    """D2：仓位纪律。跟该账号下本仓位开仓前最近 N 笔信号单的手数中位数比较。
+def _score_volume(
+    history_rows: list,
+    order: Order,
+    entry: float | None,
+    multiple: float,
+    history_min: int,
+) -> float | None:
+    """D2：仓位纪律。跟**同品种**历史仓位的**风险敞口**中位数比较，超过 N 倍判违规。
 
-    history_rows 是该账号按时间降序的 (created_at, volume) 列表（由
-    _volume_history_map 批量取回），这里只负责切出本仓位开仓之前的最近 N 笔。
-    按账号切分这一点没变——不切分会把另一账号的手数历史混进基准里。
+    为什么不比原始手数：手数是风险除以止损距离再除以合约规模的结果，不是风险本身。
+    同样按账户 1% 下单，黄金和货币对算出来的手数能差一个数量级；同一个品种里，
+    止损放宽一倍手数也要减半。拿手数当基准，等于把"风险其实完全一样"的正常下单
+    判成违规，而这恰恰是按固定风险比例下单的用户——纪律最好的那批人——最容易踩到的。
 
-    history_rows is that account's (created_at, volume) list in descending time
-    order, prefetched by _volume_history_map; this only slices the N most recent
-    entries predating this position. Still scoped per account: mixing another
-    account's sizing into the baseline would corrupt it.
+    改比 `手数 × |入场价 − 止损价|`（_risk_exposure）：合约规模这个常数只跟品种
+    有关，所以只要**桶内同品种**，比它就等价于比真实货币风险，常数被约掉。
+    history_rows 就是该 (账号, 品种) 桶按时间降序的历史（_volume_history_map 批量
+    取回），这里只负责切出本仓位开仓之前的最近 N 笔。
+
+    降级路径：本单或历史缺止损/入场价（算不出敞口）时，回落到同品种的原始手数
+    比较——同品种下合约规模相同，至少不会再有黄金对货币对那种量级错配。仍然
+    凑不够 N 笔样本就返回 None，不评分好过误判。
+
+    D2: compare this position's *risk exposure* against the median of the same
+    symbol's history, flagging anything beyond N times it.
+
+    Lot size is risk divided by stop distance and contract size, not risk itself:
+    the same 1%-of-account risk produces order-of-magnitude different lots on gold
+    vs a currency pair, and within one symbol a stop twice as wide halves the lots.
+    Judging raw lots therefore flags correctly-sized trades — precisely for the
+    users who size by a fixed risk fraction, i.e. the most disciplined ones.
+    `volume x |entry - stop|` factors out contract size, which is constant per
+    symbol, so comparing inside a symbol bucket equals comparing real money risk.
+    Falls back to same-symbol raw lots when a stop or entry is missing, and
+    abstains (None) rather than judging on fewer than `history_min` samples.
     """
-    history = [
-        v for (created, v) in history_rows
-        if created is not None and order.created_at is not None and created < order.created_at
+    prior = [
+        r for r in history_rows
+        if r.created_at is not None and order.created_at is not None and r.created_at < order.created_at
     ][:_VOLUME_BASELINE_SAMPLE]
+    if len(prior) < history_min:
+        return None
+
+    current = _risk_exposure(order.volume, entry, order.sl)
+    history = [
+        x for x in (_risk_exposure(r.volume, r.filled_price, r.sl) for r in prior) if x is not None
+    ]
+    if current is None or len(history) < history_min:
+        # 降级到同品种手数口径 / fall back to same-symbol raw lots
+        current = order.volume
+        history = [r.volume for r in prior if r.volume]
     if len(history) < history_min:
         return None
+
     baseline = statistics.median(history)
     if baseline <= 0:
         return None
-    if order.volume > baseline * multiple:
+    if current > baseline * multiple:
         return 0.0
     return 100.0
 
 
-def _score_exit(manual_closes: list, legs: list[ClosedTrade]) -> float:
-    """D3：出场纪律。有用户发起的 CLOSE 指令、且该仓位最终亏损，判违规。
-    manual_closes 由调用方批量取好后传入（见 _user_modify_close_map）。
-    manual_closes is prefetched in bulk by the caller (see _user_modify_close_map)."""
+def _score_exit(
+    order: Order,
+    manual_closes: list,
+    legs: list[ClosedTrade],
+    modifies: list,
+    entry: float | None,
+    distance_pct: float,
+) -> float | None:
+    """D3：出场纪律。用户在**离止损还很远**的时候手动砍掉亏损仓位，判违规。
+
+    判据是"离计划还有多远"，不是"亏了多少钱"。旧实现是 `整仓盈亏 < 0 即违规`，
+    副作用有三，都在真实使用里出现过：
+
+    1. 亏 0.01 和亏 500 同样一票否决，没有任何阈值；
+    2. 价格已经贴着止损、理性认输平掉 —— 判违规；反过来离止盈还很远就提前
+       落袋跑掉（同样是不按计划执行）—— 判合规。规则实际在奖励"早赚早跑"、
+       惩罚"认亏"；
+    3. 手动部分平仓明明是赚的、剩余仓位随后被止损打掉，整仓合计为负，这笔
+       手动操作照样被判违规（归因归错了腿）。
+
+    现在：只看归属到用户那几条 CLOSE 指令的平仓腿（_manual_close_legs），净亏才
+    继续判断；再看平仓时价格走到止损的百分之多少——还剩 distance_pct 以上的距离
+    才算"提前砍"。已经走到止损附近（乃至穿过）的，是在执行计划，判合规。
+
+    没有 CLOSE 指令 → 出场交给 SL/TP（或在 MT5 端手动平仓，本平台看不到），合规。
+    参照缺失（匹配不到平仓腿、没有入场价、当时没有生效止损）→ 返回 None 不评分，
+    与 D1/D2 一致：宁可样本少，不可误判。
+
+    两点口径说明：
+    - 从未改过止损时，距离用的是 orders.sl（信号价刻度）配 filled_price（券商价
+      刻度），两者有模块文档里说的那点比例偏移；这里算的是比值、偏移基本约掉，
+      而且改过止损之后两边都是券商刻度，更准。
+    - remaining > 1 表示平仓价还在入场价的盈利一侧却仍是净亏（点差/手续费吃掉了）
+      ——那也是一次离计划很远的提前离场，照判违规。
+
+    D3: flag a manual close only when the user bailed while price was still far
+    from the stop. The old rule was "position P&L < 0", which (1) treated a 0.01
+    loss like a 500 loss, (2) flagged a rational give-up right at the stop while
+    clearing an early profit-take that equally abandoned the plan — rewarding
+    running from winners and punishing accepting losses — and (3) blamed a
+    profitable partial close for a later stop-out on the remainder. Now only the
+    legs attributed to the user's own CLOSE commands count, and only if price had
+    at least `distance_pct` of the stop distance still to travel. Missing
+    references yield None (not scored) rather than a guess.
+    """
     if not manual_closes:
         return 100.0  # 出场交给 SL/TP（或 MT5 端手动平仓，检测不到，算合规）
-    total_profit = sum(leg.profit for leg in legs)
-    return 0.0 if total_profit < 0 else 100.0
+
+    claimed = _manual_close_legs(manual_closes, legs)
+    if not claimed:
+        return None  # 指令没有对应的成交回执，无从判定
+
+    if sum(leg.profit for leg in claimed) >= 0:
+        return 100.0  # 盈利落袋，不算违规（与用户端帮助文案一致）
+
+    if entry is None:
+        return None
+    last_at = max(_aware(leg.closed_at) for leg in claimed)
+    sl = _effective_sl(order, modifies, last_at)
+    if sl in (None, 0):
+        return None
+    span = abs(entry - sl)
+    if span <= 0:
+        return None
+
+    # 成交量加权的实际离场价：一条指令可能拆成几笔成交
+    # Volume-weighted exit price: one command can fill in several deals
+    total_volume = sum(leg.close_volume for leg in claimed)
+    if total_volume > 0:
+        exit_price = sum(leg.close_price * leg.close_volume for leg in claimed) / total_volume
+    else:
+        exit_price = claimed[-1].close_price
+
+    # 走完了止损距离的百分之多少（1.0 = 正好到止损，>1 = 已穿过）
+    # How far of the way to the stop price had actually been travelled
+    travelled = (entry - exit_price) if order.side == "BUY" else (exit_price - entry)
+    remaining = 1.0 - travelled / span
+    return 0.0 if remaining > distance_pct else 100.0
 
 
 def compute_discipline(
@@ -336,6 +618,7 @@ def compute_discipline(
     tolerance_pct = float(cfg["sl_tolerance_pct"])
     volume_multiple = float(cfg["volume_multiple"])
     volume_history_min = int(cfg["volume_history_min"])
+    exit_distance_pct = float(cfg["exit_sl_distance_pct"])
 
     positions = _resolved_positions(db, user_id, login, bound_logins, window_days)
 
@@ -350,20 +633,28 @@ def compute_discipline(
     # of this function that degraded with scale. The "look up Signal.entry when
     # filled_price is missing" fallback inside D1 is prefetched here too.
     keys = set(positions.keys())
-    modifies_map = _user_modify_close_map(db, user_id, "MODIFY", keys)
+    # MODIFY 连自动指令一起取：D1 只认用户自己的改单，D3 要的是当时真正生效的
+    # 止损（自动保本/移动止损也算数）。两种口径共用这一次查询。
+    # MODIFY is fetched with auto commands included: D1 looks at user edits only,
+    # D3 needs the stop actually in force. One query, two views.
+    modifies_map = _user_modify_close_map(db, user_id, "MODIFY", keys, include_auto=True)
     closes_map = _user_modify_close_map(db, user_id, "CLOSE", keys)
     volume_history = _volume_history_map(db, user_id, {lg for lg, _t in keys})
 
-    signal_ids = {
-        p["order"].signal_id
-        for p in positions.values()
-        if p["order"].filled_price is None and p["order"].signal_id
-    }
-    entry_by_signal: dict[str, float | None] = {}
+    # 信号的"原始计划"：入场价（filled_price 缺失时的回落）和原始止损（D1 用它
+    # 分辨"信号本来就没止损"与"用户把止损抹了"）。取全部仓位而不只是缺成交价的
+    # 那些——原始止损每一笔都要用到。仍然是一条查询。
+    # The signal's original plan: entry (fallback when filled_price is missing) and
+    # the original stop (D1 uses it to tell "the signal never had one" apart from
+    # "the user cleared it"). Fetched for every position, still in one query.
+    signal_ids = {p["order"].signal_id for p in positions.values() if p["order"].signal_id}
+    plan_by_signal: dict = {}
     if signal_ids:
-        entry_by_signal = {
-            sid: entry
-            for sid, entry in db.query(Signal.id, Signal.entry).filter(Signal.id.in_(signal_ids)).all()
+        plan_by_signal = {
+            row.id: row
+            for row in db.query(Signal.id, Signal.entry, Signal.stop_loss)
+            .filter(Signal.id.in_(signal_ids))
+            .all()
         }
 
     stop_scores: list[float] = []
@@ -374,16 +665,28 @@ def compute_discipline(
         pos_login = key[0]
         order = payload["order"]
         legs = payload["legs"]
+        entry = _entry_of(order, plan_by_signal)
+        modifies = modifies_map.get(key, [])
+        plan = plan_by_signal.get(order.signal_id) if order.signal_id else None
 
-        s1 = _score_stop_loss(db, order, modifies_map.get(key, []), entry_by_signal, tolerance_pct)
+        s1 = _score_stop_loss(
+            order, _user_initiated(modifies), entry,
+            plan.stop_loss if plan is not None else None,
+            tolerance_pct,
+        )
         if s1 is not None:
             stop_scores.append(s1)
 
-        s2 = _score_volume(volume_history.get(pos_login, []), order, volume_multiple, volume_history_min)
+        s2 = _score_volume(
+            volume_history.get((pos_login, order.symbol), []),
+            order, entry, volume_multiple, volume_history_min,
+        )
         if s2 is not None:
             volume_scores.append(s2)
 
-        exit_scores.append(_score_exit(closes_map.get(key, []), legs))
+        s3 = _score_exit(order, closes_map.get(key, []), legs, modifies, entry, exit_distance_pct)
+        if s3 is not None:
+            exit_scores.append(s3)
 
     def _dim(scores: list[float]) -> dict:
         if not scores:

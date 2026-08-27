@@ -222,6 +222,12 @@ DISCIPLINE_DEFAULTS: dict = {
     "sl_tolerance_pct": 0.10,
     "volume_multiple": 3.0,
     "volume_history_min": 5,
+    # D3 提前离场判定：手动平仓时价格离止损还剩多少比例才算"提前砍仓"。
+    # 0.20 = 还剩 20% 以上的止损距离就判违规；已经走到止损附近才平的不算。
+    # D3 early-exit threshold: how much of the stop distance must still be left
+    # for a manual close to count as bailing early. 0.20 = a violation only if
+    # 20%+ of the way to the stop remains; closing near the stop is compliant.
+    "exit_sl_distance_pct": 0.20,
 }
 
 _discipline_cache: dict = {}

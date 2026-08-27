@@ -731,6 +731,7 @@ def get_discipline(
         slTolerancePct=float(c["sl_tolerance_pct"]),
         volumeMultiple=float(c["volume_multiple"]),
         volumeHistoryMin=int(c["volume_history_min"]),
+        exitSlDistancePct=float(c["exit_sl_distance_pct"]),
     )
 
 
@@ -756,6 +757,7 @@ def put_discipline(
         "sl_tolerance_pct": body.slTolerancePct,
         "volume_multiple": body.volumeMultiple,
         "volume_history_min": body.volumeHistoryMin,
+        "exit_sl_distance_pct": body.exitSlDistancePct,
     }
     save_discipline_settings(db, data)
     _log_change(db, admin.id, admin.id, "setting:discipline", None, json.dumps(data))

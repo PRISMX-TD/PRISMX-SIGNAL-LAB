@@ -396,6 +396,7 @@ class AdminDisciplineSettings(BaseModel):
     slTolerancePct: float = Field(default=0.10, ge=0, le=1)
     volumeMultiple: float = Field(default=3.0, ge=1, le=20)
     volumeHistoryMin: int = Field(default=5, ge=1, le=50)
+    exitSlDistancePct: float = Field(default=0.20, ge=0, le=1)
 
 
 class AdminCandleSettings(BaseModel):

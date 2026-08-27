@@ -1218,8 +1218,8 @@
     "dscWeightVolume": "Volume weight",
     "dscWeightExit": "Exit weight",
     "dscSlTolerance": "SL tolerance (0–1)",
-    "dscVolumeMultiple": "Volume violation multiple",
-    "dscHistoryMin": "Min history for volume baseline",
+    "dscVolumeMultiple": "Risk-exposure violation multiple",
+    "dscHistoryMin": "Min history for risk baseline (same symbol)",
     "candleHistoryTitle": "Candle History Retention",
     "candleM1Retention": "1-minute candle retention (days)",
     "strategyPlatformTitle": "Custom Strategy Platform",
@@ -1237,7 +1237,8 @@
       "nonePublic": "Nothing published; users see an empty state.",
       "countPublic_one": "{{count}} strategy published.",
       "countPublic_other": "{{count}} strategies published."
-    }
+    },
+    "dscExitDistance": "Early-exit distance (0-1)"
   },
   "discipline": {
     "title": "Discipline Score",
@@ -1258,11 +1259,11 @@
     "helpTitle": "How is the discipline score calculated?",
     "helpIntro": "This score only looks at whether you followed the plan — it has nothing to do with whether the trade made money. The total is a weighted average of the three checks below (stop-loss 40%, position size 30%, exit 30%).",
     "helpStopTitle": "Stop-loss discipline",
-    "helpStopBody": "Checks whether you undid the signal's stop-loss — opening without a stop, moving the stop in the losing direction, or removing it entirely all count as a violation. The system's own automatic adjustments (break-even, trailing stop) don't count against you.",
+    "helpStopBody": "Checks whether you undid the signal's stop — clearing it when you placed the order, moving it in the losing direction beyond tolerance, or deleting it outright. The reference is always the signal's original stop, so moving to break-even first and then widening is judged the same as widening in one step; tightening and easing within the original stop is not a violation. Trades from a signal that carried no stop are not scored, and the system's own adjustments (break-even, trailing stop) never count against you.",
     "helpVolumeTitle": "Position-size discipline",
-    "helpVolumeBody": "Checks whether this trade's size is much bigger than what you normally place (over 3x). A sudden jump in size is often a \"revenge trade\" trying to win back a loss — flagged as a violation.",
+    "helpVolumeBody": "Checks whether this trade risked much more than you normally risk on the same symbol (over 3x by default). It compares risk, not lot size: the same 1%-of-account risk gives wildly different lot sizes on gold versus a currency pair, and widening your stop halves the lots anyway. So sizing by a fixed risk percentage never trips this — only a sudden jump in actual risk, the \"win it back\" kind of oversizing, does.",
     "helpExitTitle": "Exit discipline",
-    "helpExitBody": "Checks whether you manually closed a position before it hit its stop-loss or take-profit. Closing at a loss counts as a violation (likely a panic exit); closing at a profit doesn't.",
+    "helpExitBody": "Checks whether you cut a trade by hand while price was still far from your stop (by default, with 20%+ of the stop distance left to go). Closing near the stop is not a violation — that is following the plan, not panicking — and neither is taking a profit. Only the part you closed yourself counts; if the rest is stopped out later, that is not held against this action.",
     "helpNote": "Only counts orders placed against a signal, and only actions taken through the website — anything done directly in the MT5 terminal isn't visible to the system and is treated as compliant.",
     "helpGotIt": "Got it"
   },

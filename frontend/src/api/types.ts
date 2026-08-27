@@ -291,6 +291,7 @@ export interface AdminDisciplineSettings {
   slTolerancePct: number
   volumeMultiple: number
   volumeHistoryMin: number
+  exitSlDistancePct: number
 }
 
 // 免费试用当前状态（用户端）/ current free-trial status (user-facing)
