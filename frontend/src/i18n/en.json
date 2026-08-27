@@ -461,6 +461,7 @@
       "order_rejected": "Order rejected",
       "auto_manage": "Auto position management triggered",
       "bridge_offline": "PRISMX Bridge went offline",
+      "account_revoked": "Direct connection needs re-verification",
       "strategy_signal": "My strategy signals"
     },
     "notifWindowHeading": "Push hours",
@@ -826,6 +827,8 @@
       "boundTitle": "Connected accounts",
       "tag": "Direct",
       "unbind": "Disconnect",
+    "needsReverify": "Re-verify needed",
+    "revokedBanner": "The MT5 password for {{logins}} changed, so the direct connection was revoked and automated orders have stopped. Re-enter that account's main password above to restore it.",
       "unbindFailed": "Could not disconnect, please try again"
     },
     "bridgeEntry": {

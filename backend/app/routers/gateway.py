@@ -14,11 +14,16 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.rate_limit import limiter
+from app.core.rate_limit import (
+    clear_failed_mt5_verify,
+    is_mt5_verify_locked,
+    limiter,
+    record_failed_mt5_verify,
+)
 from app.models import ClosedTrade, MT5Account, Order, User
-from app.schemas import SUFFIX_PATTERN
 from app.services.account_type import classify_group
 from app.services.deps import get_current_user
+from app.services.gateway_binding import enforce, is_revoked
 from app.services.gateway_client import (
     get_account as gw_get_account,
     get_deals as gw_get_deals,
@@ -40,14 +45,42 @@ logger = logging.getLogger("prismx.gateway.router")
 
 router = APIRouter(prefix="/gateway", tags=["gateway"])
 
+# 绑定失效时对用户说的话。按站内惯例做成「中文 / English」，前端的
+# localizeApiError 直接可用。
+#
+# 措辞刻意只说"需要重新验证"，不说"因为你改了密码"：撤销的判据是券商记录的
+# 改密时间变了，那件事未必是用户自己干的（券商重置、账号转手），断言原因会在
+# 少数情况下把话说错。要查真实原因看服务端日志。
+#
+# What the user is told when a binding is revoked. Deliberately says
+# "re-verify" rather than "you changed your password": the trigger is the
+# broker's record changing, which the user did not necessarily do themselves.
+_REVOKED_DETAIL = (
+    "该 MT5 账号的密码已变更，连接已断开，请重新验证 / "
+    "This MT5 account's password changed; the connection was revoked, please verify again"
+)
+
 
 # ---------- 请求/响应模型 ----------
 
 
 class GatewayVerifyRequest(BaseModel):
+    """绑定请求。**只有主密码**——这里曾经有一个 `investorOnly` 布尔字段。
+
+    为什么删掉：投资者密码在券商侧是只读凭证，但 gateway 绑定成功后所有操作都
+    由 manager 代劳、不再校验任何密码，所以用投资者密码绑上来，等于把「只能看」
+    当场换成「能下单」。前端从来没传过 true，但这个字段在请求体里，任何登录用户
+    直接打接口就能用只读凭证拿到完整交易权限。
+
+    Main password only; this used to carry an `investorOnly` flag. The investor
+    password is read-only at the broker, yet nothing re-checks any password after
+    a successful bind — so binding with it silently upgraded read-only access to
+    order placement. The frontend never sent true, but the field was in the
+    request body, so any logged-in caller could.
+    """
+
     login: int = Field(..., gt=0, description="MT5 账号")
-    password: str = Field(..., min_length=1, description="MT5 密码（主密码或投资者密码）")
-    investorOnly: bool = Field(default=False, description="是否仅用投资者密码验证")
+    password: str = Field(..., min_length=1, description="MT5 主密码")
 
 
 class GatewayVerifyResponse(BaseModel):
@@ -73,6 +106,37 @@ class GatewayAccountOut(BaseModel):
     leverage: int = 0
     group: str = ""
     symbolSuffix: str = ""
+    # 绑定是否已失效、需要用户重新输一次主密码。
+    # Whether this binding was revoked and needs the main password re-entered.
+    needsReverify: bool = False
+    revokedReason: str = ""
+
+
+def _notify_revoked(user_id: str, login: str) -> None:
+    """绑定被撤销时给用户推一条通知。同步、阻塞网络 IO，只能在线程里调。
+
+    失败只记日志、不往上抛：撤销本身已经落库生效了，通知发不出去不该反过来
+    影响它。推送这条路本来就可能因为用户没订阅、等级不够、浏览器拒绝而到不了
+    ——界面上的「需重新验证」才是主要告知渠道，这里是尽力而为的补充。
+
+    Notify the user that a binding was revoked. Synchronous blocking IO, so
+    callers must already be off the event loop. Failures are logged and
+    swallowed: the revocation is already committed and must not be undone by a
+    push failure, and push is best-effort anyway (no subscription, plan gate,
+    denied permission) — the in-app "needs re-verification" state is the primary
+    channel.
+    """
+    from app.services.push_dispatch import EVENT_ACCOUNT_REVOKED, dispatch_event_push
+
+    try:
+        dispatch_event_push(
+            user_id,
+            EVENT_ACCOUNT_REVOKED,
+            "MT5 连接已断开",
+            f"账号 {login} 的密码已变更，自动交易已停止。请到「连接 MT5」重新验证。",
+        )
+    except Exception:
+        logger.exception("撤销通知推送失败: user=%s login=%s", user_id, login)
 
 
 def _verify_failure(rsp) -> HTTPException:
@@ -84,6 +148,12 @@ def _verify_failure(rsp) -> HTTPException:
     `demo` 时，用户填真仓账号得到的提示是「网关不可用」，会让人去查一台其实
     好端端的服务器。
 
+    但「账号不存在」这一类不再由本函数处理：它已被调用方合并进「账号或密码不
+    正确」的 valid=False 分支。理由是这个端点会把账号密码转发到券商去验，若
+    「不存在」与「密码错」可区分，任何登录用户都能拿它当探针枚举出券商真实存在
+    的账号号段——那是撞库的前置步骤。合并后仍与「网关故障」「组未开放」两类清晰
+    分开，上面那个 UX 教训依然成立：真正会让人去查健康服务器的是那两类。
+
     Translate a gateway failure into something the user can act on. This used to
     be a blanket 502 "gateway unavailable", which made three unrelated things
     look identical: a real outage, an account whose group isn't in the gateway's
@@ -91,6 +161,14 @@ def _verify_failure(rsp) -> HTTPException:
     misleading one — right after the broker enables live accounts but before the
     whitelist is updated, a live login reports "gateway unavailable" and sends
     everyone hunting a server that is perfectly healthy.
+
+    "Account not found" is no longer handled here: the caller folds it into the
+    same valid=False answer as a wrong password. This endpoint forwards
+    credentials to the broker for verification, so a distinguishable "no such
+    account" lets any logged-in user enumerate the broker's real login range —
+    step one of credential stuffing. Folding it in still leaves outages and
+    non-whitelisted groups clearly separate, which is where the UX lesson above
+    actually applies.
     """
     if rsp.error == "group_not_allowed":
         return HTTPException(
@@ -101,15 +179,6 @@ def _verify_failure(rsp) -> HTTPException:
             ),
         )
 
-    if rsp.status == 404:
-        return HTTPException(
-            status_code=404,
-            detail=(
-                f"MT5 账号不存在或无法读取（{rsp.error}） / "
-                f"MT5 account not found or unreadable ({rsp.error})"
-            ),
-        )
-
     if rsp.error == "timeout":
         return HTTPException(
             status_code=504,
@@ -117,13 +186,19 @@ def _verify_failure(rsp) -> HTTPException:
         )
 
     # 剩下的才是真正的「网关不可用」：连不上、401（token 不一致）、500。
-    # 把错误码带上，运维一眼能分辨是哪一种。
+    # 具体是哪一种只记日志，不回给客户端：rsp.error / rsp.retcode 是网关与 MT5 的
+    # 内部状态（含 MTRetCode 枚举名），对普通用户没有任何可操作性，却能让人推断出
+    # 后端拓扑与故障位置。调用方在抛出前已经打过一条含全部字段的 warning 日志，
+    # 运维要分辨是哪一种，看那条日志即可。
     # What's left really is an unavailable gateway: unreachable, 401 (token
-    # mismatch), 500. Carry the code so ops can tell which.
-    reason = rsp.error or rsp.retcode or "unknown"
+    # mismatch), 500. Which one goes to the log, not to the client: rsp.error and
+    # rsp.retcode are gateway/MT5 internal state (MTRetCode enum names included) —
+    # useless to a user, but enough to infer our topology and where it broke. The
+    # caller already logs a warning carrying every field, which is where ops
+    # should look.
     return HTTPException(
         status_code=502,
-        detail=f"Gateway 不可用（{reason}） / Gateway unavailable ({reason})",
+        detail="账号服务暂时不可用，请稍后重试 / account service temporarily unavailable",
     )
 
 
@@ -131,7 +206,7 @@ def _verify_failure(rsp) -> HTTPException:
 
 
 @router.post("/verify", response_model=GatewayVerifyResponse)
-@limiter.limit(settings.RATE_LIMIT_ORDER)
+@limiter.limit(settings.RATE_LIMIT_GATEWAY_VERIFY)
 def gateway_verify(
     request: Request,
     req: GatewayVerifyRequest,
@@ -144,44 +219,86 @@ def gateway_verify(
     Verify MT5 credentials via the gateway. On success the account is
     automatically bound to the current user (unlike bridge, no local app needed).
     """
+    # 0) 按 MT5 账号维度的失败锁定。端点自身的 IP 限流挡不住轮换出口 IP 对同一个
+    #    账号的持续试探，而这个端点每次调用都是一次真实的券商侧密码校验——两个
+    #    维度都堵住，才不至于让平台变成对券商撞库的代理。
+    #    Per-login lockout. The endpoint's IP limit does nothing against rotating
+    #    egress IPs hammering one account, and every call here is a real
+    #    credential check at the broker; both dimensions must be closed so the
+    #    platform can't serve as a brute-force proxy against it.
+    if is_mt5_verify_locked(req.login):
+        logger.warning("Gateway 验证已锁定: user=%s login=%s", user.id, req.login)
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "该 MT5 账号验证失败次数过多，请稍后再试 / "
+                "Too many failed verification attempts for this MT5 account, try again later"
+            ),
+        )
+
     # 1) 调 gateway 验证
-    rsp = run_on_main_loop(gw_verify(req.login, req.password, req.investorOnly), timeout=65.0)
+    rsp = run_on_main_loop(gw_verify(req.login, req.password), timeout=65.0)
 
     if not rsp.ok:
         logger.warning(
             "Gateway 验证被拒: user=%s login=%s status=%s error=%s message=%s",
             user.id, req.login, rsp.status, rsp.error, rsp.message[:200],
         )
+        # 账号不存在/读不出来，与密码错返回完全相同的结果（见 _verify_failure 的
+        # 说明）：对外只有「账号或密码不正确」这一个答案，问不出该账号在券商侧
+        # 是否存在。同样计入失败锁定——枚举正是靠反复问这个问题。
+        # An unreadable/nonexistent account answers exactly as a wrong password
+        # does (see _verify_failure): the only observable outcome is "login or
+        # password incorrect", which reveals nothing about whether the account
+        # exists at the broker. It counts toward the lockout too — enumeration is
+        # precisely the act of asking this repeatedly.
+        if rsp.status == 404:
+            record_failed_mt5_verify(req.login)
+            return GatewayVerifyResponse(ok=True, valid=False, login=req.login)
         raise _verify_failure(rsp)
 
-    # 2) 检查账户数上限
-    account_limit = max_mt5_accounts(user.plan)
-    existing_count = (
+    login_str = str(req.login)
+    existing = (
         db.query(MT5Account)
-        .filter(MT5Account.user_id == user.id)
-        .count()
-    )
-    if account_limit is not None and existing_count >= account_limit and not rsp.valid:
-        # 密码不对而且已达上限——但返回验证结果，不创建账号
-        pass
-    elif account_limit is not None and existing_count >= account_limit:
-        raise HTTPException(
-            status_code=403,
-            detail=f"已达到账户数上限（{account_limit}），请升级或删除旧账号",
+        .filter(
+            MT5Account.user_id == user.id,
+            MT5Account.login == login_str,
+            MT5Account.source == "gateway",
         )
+        .first()
+    )
+
+    # 2) 检查账户数上限。**只在真要新增一行时才查**：这个账号已经绑过的话，
+    #    这次调用不会让账号数增加，拿上限挡它没有任何道理。
+    #
+    #    以前是不分情况一律查的，于是 FREE（上限 1）用户重新验证自己那唯一一个
+    #    账号会得到「已达到账户数上限」。原本只是个别扭的边角，现在是硬伤：
+    #    重新验证是绑定被撤销后**唯一**的恢复路径，挡住它等于让 FREE 用户一旦
+    #    被撤销就再也连不上，除非先解绑——而解绑会把历史战绩的归属一起弄丢。
+    #
+    #    Only enforced when a new row would actually be created: re-verifying an
+    #    already-bound account doesn't increase the count. This used to be checked
+    #    unconditionally, so a FREE user (limit 1) re-verifying their only account
+    #    was told they'd hit the limit. That was merely odd before; it is now a
+    #    real defect, because re-verification is the only recovery path from a
+    #    revoked binding — blocking it would strand FREE users unless they unbind
+    #    first, which orphans their trading history.
+    account_limit = max_mt5_accounts(user.plan)
+    if existing is None and rsp.valid and account_limit is not None:
+        existing_count = (
+            db.query(MT5Account)
+            .filter(MT5Account.user_id == user.id)
+            .count()
+        )
+        if existing_count >= account_limit:
+            raise HTTPException(
+                status_code=403,
+                detail=f"已达到账户数上限（{account_limit}），请升级或删除旧账号",
+            )
 
     # 3) 验证通过则创建/更新 MT5Account
     if rsp.valid:
-        login_str = str(req.login)
-        existing = (
-            db.query(MT5Account)
-            .filter(
-                MT5Account.user_id == user.id,
-                MT5Account.login == login_str,
-                MT5Account.source == "gateway",
-            )
-            .first()
-        )
+        clear_failed_mt5_verify(req.login)
         if existing is None:
             existing = MT5Account(
                 user_id=user.id,
@@ -201,6 +318,26 @@ def gateway_verify(
         existing.mt5_group = rsp.group or None
         existing.trade_mode = classify_group(rsp.group, get_account_type_settings(db))
 
+        # 记下券商侧的「上次改密码时间」。这是本次授权的凭据：轮询每 15 秒拿
+        # 当前值来比，对不上就说明用户刚才输的那个密码已经不是账号现在的密码，
+        # 这次绑定的授权随之作废（判据见 services/gateway_binding.enforce）。
+        #
+        # 0 表示券商没给这个信号，落 None —— 校验逻辑会跳过该账号，而不是把 0
+        # 当成一个真实时间去比对（那会让每个账号一绑上就立刻被撤销）。
+        #
+        # Record the broker's last-password-change time as this authorisation's
+        # credential. 0 means the broker gave no signal and is stored as None so
+        # the checker skips the account instead of comparing against zero.
+        existing.pass_change_at = rsp.last_pass_change or None
+        # 重新验证即重新授权：把撤销标记清掉，账号立刻恢复。这也是被撤销的用户
+        # 唯一的恢复路径 —— 走的是和首次绑定完全相同的这段代码。
+        # Re-verifying re-authorises: clear the revocation so the account comes
+        # back. This is the only recovery path, and it is the same code as a
+        # first-time bind.
+        was_revoked = existing.revoked_at is not None
+        existing.revoked_at = None
+        existing.revoked_reason = None
+
         try:
             db.commit()
         except IntegrityError:
@@ -208,9 +345,23 @@ def gateway_verify(
             raise HTTPException(status_code=409, detail="该账号已绑定")
 
         logger.info(
-            "Gateway 绑定成功: user=%s login=%s group=%s trade_mode=%s",
+            "Gateway 绑定成功: user=%s login=%s group=%s trade_mode=%s%s",
             user.id, login_str, rsp.group, existing.trade_mode,
+            "（已从撤销状态恢复）" if was_revoked else "",
         )
+        if not rsp.last_pass_change:
+            # 券商没填 LastPassChange，或网关是加这个字段之前的版本。这台服务器
+            # 上「改密码即撤销绑定」这道闸不生效，绑定会一直有效到用户手动解绑。
+            # 记一条可检索的日志：这是安全能力的静默缺失，不该只在代码注释里存在。
+            # The broker doesn't fill LastPassChange (or the gateway predates the
+            # field): password-change revocation is inert for this account and the
+            # binding stays valid until manually removed. Logged because it is a
+            # silently missing security control.
+            logger.warning(
+                "Gateway 绑定缺少改密时间信号: login=%s —— 该账号改密码后不会自动撤销绑定，"
+                "请确认网关版本，并用 selftest 确认券商是否提供 LastPassChange",
+                login_str,
+            )
         if existing.trade_mode is None and rsp.group:
             # 组名判不出类型：该账号会被排除在所有实盘统计之外。留一条可检索的
             # 日志，运维照它把前缀补进 account_type 设置即可。
@@ -222,6 +373,7 @@ def gateway_verify(
                 login_str, rsp.group,
             )
     else:
+        record_failed_mt5_verify(req.login)
         logger.info("Gateway 验证失败: user=%s login=%s retcode=%s", user.id, req.login, rsp.retcode)
 
     return GatewayVerifyResponse(
@@ -260,6 +412,8 @@ def list_gateway_accounts(
             leverage=row.leverage or 0,
             group="",
             symbolSuffix=row.symbol_suffix or "",
+            needsReverify=is_revoked(row),
+            revokedReason=row.revoked_reason or "",
         )
         for row in rows
     ]
@@ -288,9 +442,25 @@ def refresh_gateway_account(
     if row is None:
         raise HTTPException(status_code=404, detail="Gateway 账号不存在")
 
+    # 已撤销的绑定不再代表用户去券商读任何东西，与轮询循环的口径一致。
+    # A revoked binding reads nothing on the user's behalf, matching the poller.
+    if is_revoked(row):
+        raise HTTPException(status_code=409, detail=_REVOKED_DETAIL)
+
     rsp = run_on_main_loop(gw_get_account(int(login)), timeout=65.0)
     if rsp is None:
         raise HTTPException(status_code=502, detail="Gateway 查询账号失败")
+
+    # 手动刷新走的是和轮询同一套判据：这个端点也拿得到 lastPassChange，漏掉
+    # 就等于给了一条「刷新能用、轮询会撤销」的不一致路径。
+    # Same rule as the poller: this endpoint also receives lastPassChange, and
+    # skipping it here would leave an inconsistent path.
+    if not enforce(
+        db, row,
+        getattr(rsp, "last_pass_change", 0),
+        on_revoke=lambda: _notify_revoked(user.id, login),
+    ):
+        raise HTTPException(status_code=409, detail=_REVOKED_DETAIL)
 
     row.balance = rsp.balance
     row.equity = rsp.equity
@@ -603,12 +773,24 @@ async def gateway_positions_loop() -> None:
     # ----- 共享状态与辅助函数 -----
 
     def _gateway_accounts() -> list[tuple[str, str]]:
-        """(user_id, login) 列表。只取有 WS 连接的用户，避免空转。"""
+        """(user_id, login) 列表。只取有 WS 连接的用户，避免空转。
+
+        已撤销的绑定整条排除：不读持仓、不刷资金、不扫平仓。撤销的含义是
+        「这次授权已经作废」，那就不该继续代表用户去券商那边读任何东西——
+        只挡下单、却仍然把持仓和余额拉回来推给前端，是自相矛盾的半吊子撤销。
+        Revoked bindings are excluded entirely: no positions, no funds, no close
+        scan. Revocation means the authorisation is void, so continuing to read
+        the account on the user's behalf — and only blocking orders — would be a
+        half-measure that contradicts itself.
+        """
         db = SessionLocal()
         try:
             rows = (
                 db.query(MT5Account.user_id, MT5Account.login)
-                .filter(MT5Account.source == "gateway")
+                .filter(
+                    MT5Account.source == "gateway",
+                    MT5Account.revoked_at.is_(None),
+                )
                 .all()
             )
             return [(r[0], r[1]) for r in rows]
@@ -622,6 +804,14 @@ async def gateway_positions_loop() -> None:
         Returns the persisted balance so the caller can decide whether to push;
         None when the account row doesn't exist.
         """
+        # 本轮是否发生了撤销。用可变容器而不是直接在回调里发通知：发通知是一次
+        # 阻塞的 Web Push 网络往返，在下面的 try 里发就意味着整段网络 IO 期间
+        # 都攥着一条数据库连接不放。挪到 finally 里、db.close() 之后再发。
+        # Whether this tick revoked. The notification is a blocking Web Push
+        # round-trip, so it is deferred to after db.close() rather than fired
+        # from inside the callback, which would hold a DB connection for the
+        # duration of that network IO.
+        revoked: list[int] = []
         db = SessionLocal()
         try:
             row = (
@@ -635,6 +825,24 @@ async def gateway_positions_loop() -> None:
             )
             if row is None:
                 return None
+
+            # 改密比对。放在这里而不是单开一个循环：这一拍本来就已经拿着券商
+            # 刚返回的账号记录，`lastPassChange` 随资金一起回来，比对是纯内存
+            # 运算，一次 Manager API 往返都不用多花。
+            #
+            # 撤销后直接 return：这一轮不再写余额，也不推送持仓。下一轮
+            # _gateway_accounts 就不会再选中这个账号了。
+            #
+            # Password-change check. It lives here because this tick already holds
+            # the broker's fresh account record — lastPassChange rides along with
+            # the funds, so the comparison costs no extra Manager API round-trip.
+            if not enforce(
+                db, row,
+                getattr(rsp, "last_pass_change", 0),
+                on_revoke=lambda: revoked.append(1),
+            ):
+                return None
+
             row.balance = rsp.balance
             row.equity = rsp.equity
             row.leverage = rsp.leverage
@@ -651,6 +859,16 @@ async def gateway_positions_loop() -> None:
             return float(row.balance or 0.0)
         finally:
             db.close()
+            if revoked:
+                # 撤销之后界面上这个账号会变成"需重新验证"，但用户不一定正开着
+                # 页面，而在他重新验证之前，所有自动下单都是静默失效的。推一条
+                # 通知是唯一能主动够到他的手段。本函数由 run_in_threadpool 调进
+                # 来，已经不在事件循环上，所以可以直接用同步版本。
+                # The UI will show "needs re-verification", but the user may not
+                # have the page open, and until they act every automated order
+                # silently fails. This runs in a thread pool, so the synchronous
+                # dispatcher is fine here.
+                _notify_revoked(user_id, login)
 
     def _save_closed_trades(user_id: str, login: str, deals: list) -> int:
         """把平仓成交写进 ClosedTrade，与 POST /bridge/trade-history 同一套语义。

@@ -23,6 +23,7 @@ from app.schemas import LOGIN_PATTERN, SUFFIX_PATTERN, AccountSuffixRequest, MT5
 from app.services.auto_manage import AUTO_PREFIX, evaluate_positions
 from app.services.connection_manager import manager
 from app.services.deps import ONLINE_WINDOW, get_current_user, is_account_online
+from app.services.gateway_binding import is_revoked
 from app.services.plans import max_mt5_accounts
 from app.services.push_dispatch import (
     EVENT_BRIDGE_OFFLINE,
@@ -1057,6 +1058,8 @@ def list_accounts(user: User = Depends(get_current_user), db: Session = Depends(
             symbolSuffix=r.symbol_suffix or "",
             online=is_account_online(r),
             lastHeartbeat=r.last_heartbeat,
+            needsReverify=is_revoked(r),
+            revokedReason=r.revoked_reason,
         )
         for r in rows
     ]

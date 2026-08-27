@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -195,6 +195,39 @@ class MT5Account(Base):
     # it from the broker's group name; bridge self-reports it. The two are NOT
     # equally trustworthy — see the note above.
     trade_mode = Column(Integer, nullable=True)
+    # 绑定当时券商记录的「上次改密码时间」（Unix 秒），只有 gateway 通道写。
+    #
+    # **为什么需要**：gateway 绑定只在验证那一刻校验一次主密码，之后读持仓、
+    # 下单全部由 manager 代劳，不再经过用户密码。也就是说这条链路上没有任何
+    # 可过期的凭证——用户改了密码、账号转手、密码被券商重置，旧绑定照样能代客
+    # 下单。这一列是补上撤销能力的唯一依据：每轮资金刷新拿券商侧的当前值来比，
+    # 对不上就说明绑定时的那次授权已经作废（见 routers/gateway.py）。
+    #
+    # NULL 表示**没有信号**，不是「时间为 0」：券商服务器不填这个字段、网关是旧
+    # 版本、或这一行是本列上线前就绑好的历史绑定。这三种都不撤销任何东西——
+    # 宁可这道闸在某家券商上不生效，也不能因为读不到值就把所有人踢下线。
+    #
+    # Unix seconds of the account's last password change as recorded by the
+    # broker at bind time; gateway channel only. A gateway bind checks the main
+    # password exactly once and everything afterwards runs through the manager,
+    # so the link holds no expirable credential — a changed password, a sold
+    # account or a broker-side reset all leave the old binding fully able to
+    # trade. This column is what makes revocation possible. NULL means "no
+    # signal" (server doesn't fill it, old gateway, or a pre-existing binding),
+    # never "time zero", and revokes nothing.
+    pass_change_at = Column(BigInteger, nullable=True)
+    # 绑定失效时刻与原因。非 NULL = 这次绑定已撤销：不下单、不轮询、界面上显示
+    # 「需重新验证」，用户重新输一次主密码即可恢复（verify 会清空这两列）。
+    #
+    # 不直接删行：订单与平仓明细都按 (user, login) 关联，删了会让历史战绩失去
+    # 归属；用户重新验证后也不必从头再来一次。
+    #
+    # When the binding was revoked and why. Non-NULL means: no orders, no
+    # polling, and the UI asks for re-verification (which clears both columns).
+    # The row is kept rather than deleted because orders and closed trades are
+    # keyed by (user, login) and dropping it would orphan the user's history.
+    revoked_at = Column(DateTime, nullable=True)
+    revoked_reason = Column(String, nullable=True)
     online = Column(Boolean, default=False)
     last_heartbeat = Column(DateTime, nullable=True)
 

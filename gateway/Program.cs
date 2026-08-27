@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //| PRISMX MT5 Gateway - 入口                                        |
 //|                                                                  |
 //| 两种运行模式:                                                    |
@@ -52,8 +52,6 @@ namespace Prismx.Mt5Gateway
             {
                 case "selftest":
                     return RunSelfTest(cfg, args);
-                case "diag":
-                    return RunDiag(cfg, args);
                 case "sym":
                     return RunSymSearch(cfg, args);
                 case "closeall":
@@ -140,6 +138,29 @@ namespace Prismx.Mt5Gateway
                 Console.WriteLine("  余额   : {0:F2}", info.Balance);
                 Console.WriteLine("  净值   : {0:F2}", info.Equity);
                 Console.WriteLine("  保证金 : {0:F2}(可用 {1:F2})", info.Margin, info.MarginFree);
+
+                // 改密时间。平台靠它发现"用户改了密码"并撤销旧绑定(见 Models.cs
+                // 的 LastPassChange 说明)。这里打出来是为了能**实测**两件事:
+                //   1. 券商服务器到底填不填这个字段(打出「未填写」就是不填,
+                //      撤销机制在这家券商上不生效,后端会保持不撤销)
+                //   2. 只改投资者密码时它动不动(动 = 用户改投资者密码也会被
+                //      要求重新验证一次)
+                // 测法:读一次记下 → 只改投资者密码 → 再读 → 改主密码 → 再读。
+                //
+                // Printed so the revocation signal can actually be measured
+                // against this broker: whether the server fills the field at all,
+                // and whether an investor-password change also bumps it.
+                if (info.LastPassChange > 0)
+                {
+                    DateTime when = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+                        .AddSeconds(info.LastPassChange);
+                    Console.WriteLine("  改密时间: {0} (UTC {1:yyyy-MM-dd HH:mm:ss})",
+                        info.LastPassChange, when);
+                }
+                else
+                {
+                    Console.WriteLine("  改密时间: 未填写(该服务器不提供,改密撤销绑定的机制将不生效)");
+                }
 
                 bool groupAllowed = cfg.IsGroupAllowed(info.Group);
                 Console.WriteLine("  组白名单: {0}", groupAllowed ? "通过" : "不通过(交易会被拒)");
@@ -388,286 +409,6 @@ namespace Prismx.Mt5Gateway
             }
 
             return 0;
-        }
-
-        //+------------------------------------------------------------------+
-        //| 诊断模式:排查 DealerSend 被拒的原因                               |
-        //|                                                                  |
-        //| 用法:mt5gateway.exe diag <客户账号> <品种>                       |
-        //|                                                                  |
-        //| 关键假设:官方 SimpleManager 从未调用 DealerStart 就直接下单,     |
-        //| 所以先测不带 DealerStart 的情况,再对比带 DealerStart 的差异。     |
-        //+------------------------------------------------------------------+
-        private static int RunDiag(Config cfg, string[] args)
-        {
-            ulong clientLogin = 0;
-            if (args.Length > 1)
-                ulong.TryParse(args[1], out clientLogin);
-
-            string symbol = args.Length > 2 ? args[2] : "EURUSD";
-
-            double lots = 0.01;
-            if (args.Length > 3)
-                double.TryParse(args[3], out lots);
-
-            if (clientLogin == 0)
-            {
-                Console.WriteLine("用法:mt5gateway.exe diag <客户账号> [品种] [手数]");
-                return 1;
-            }
-
-            Console.WriteLine();
-            Console.WriteLine("========== MT5 DealerSend 诊断 ==========");
-            Console.WriteLine("  客户账号: {0}", clientLogin);
-            Console.WriteLine("  品种    : {0}", symbol);
-            Console.WriteLine("  手数    : {0}", lots);
-            Console.WriteLine();
-
-            using (Mt5Link link = new Mt5Link(cfg))
-            {
-                // ===================== 步骤A:连接(不带 DealerStart) =====================
-                Console.WriteLine("--- [A] 连接 MT5(不启动 dealer 通道) ---");
-
-                try
-                {
-                    link.ConnectOnly();
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("[X] {0}", ex.Message);
-                    return 1;
-                }
-
-                Console.WriteLine("[OK] 已连接");
-                Console.WriteLine();
-
-                // ===================== 步骤B:Manager 权限 =====================
-                Console.WriteLine("--- [B] Manager 权限 ---");
-                Console.WriteLine("  {0}", link.DiagManagerRights());
-                Console.WriteLine();
-
-                // ===================== 步骤C:用户信息 =====================
-                Console.WriteLine("--- [C] 客户账号信息 ---");
-
-                MTRetCode res;
-                AccountInfo info = link.GetAccount(clientLogin, out res);
-
-                if (info == null)
-                {
-                    Console.WriteLine("[X] 读取失败:{0}", res);
-                    return 1;
-                }
-
-                Console.WriteLine("  姓名 : {0}", info.Name);
-                Console.WriteLine("  组别 : {0}", info.Group);
-                Console.WriteLine("  杠杆 : 1:{0}", info.Leverage);
-                Console.WriteLine("  余额 : {0:F2}", info.Balance);
-                Console.WriteLine("  权限 : {0}", link.DiagUserRights(clientLogin));
-                Console.WriteLine();
-
-                // ===================== 步骤D:组级别的交易设置 =====================
-                Console.WriteLine("--- [D] 组交易设置 ---");
-                Console.WriteLine("  {0}", link.DiagGroupTradeInfo(info.Group));
-                Console.WriteLine();
-
-                // ===================== 步骤E:品种属性(全局) =====================
-                Console.WriteLine("--- [E] 品种属性(全局) ---");
-                Console.WriteLine("  {0}: {1}", symbol, link.DiagSymbolInfo(symbol));
-                Console.WriteLine();
-
-                // ===================== 步骤F:品种属性(对该组) =====================
-                Console.WriteLine("--- [F] 品种属性(对组 {0}) ---", info.Group);
-                Console.WriteLine("  {0}", link.DiagSymbolGroupInfo(symbol, info.Group));
-                Console.WriteLine();
-
-                // ===================== 步骤G:报价 =====================
-                Console.WriteLine("--- [G] 当前报价 ---");
-                double bid, ask;
-
-                if (link.GetQuote(symbol, out bid, out ask, out res))
-                {
-                    Console.WriteLine("  bid={0} ask={1}", bid, ask);
-                }
-                else
-                {
-                    Console.WriteLine("[X] 取价失败:{0}", res);
-                    // 取不到价也继续:用假价格测 DealerSend 结构是否被接受
-                    Console.WriteLine("  取不到行情,用假价格继续测 DealerSend 流程");
-                    bid = 1.0;
-                    ask = 1.0;
-                }
-
-                Console.WriteLine();
-
-                // ===================== 步骤H0:DealerBalance 通道测试 =====================
-                Console.WriteLine("--- [H0] DealerBalance 通道测试(确认 dealer 权限是否真的生效) ---");
-                Console.WriteLine("  测试 +$0 入金(不影响余额)");
-                string balResult = link.DiagDealerBalance(clientLogin, 0, "diag-test");
-                Console.WriteLine("  -> {0}", balResult);
-                Console.WriteLine();
-
-                // ===================== 步骤H:DealerSend(不带 DealerStart!) =====================
-                Console.WriteLine("--- [H] DealerSend 测试 ---");
-                Console.WriteLine("  dealer 通道状态:未启动(和官方 SimpleManager 一致)");
-                Console.WriteLine();
-
-                // H1: 基准(无 comment, 和官方示例完全一致)
-                Console.WriteLine("  [H1] BUY {0} {1:F2} 手, price=ask({2}), 无comment", symbol, lots, ask);
-                string r1 = link.DiagDealerSend(clientLogin, symbol, true, lots, ask,
-                    null, null, null, null, null, null);
-                Console.WriteLine("  -> {0}", r1);
-                Console.WriteLine();
-
-                // H2: 带 comment "diag" (测 comment 是否导致 INVALID)
-                Console.WriteLine("  [H2] BUY {0} {1:F2} 手, price=ask({2}), comment=diag", symbol, lots, ask);
-                string r2 = link.DiagDealerSend(clientLogin, symbol, true, lots, ask,
-                    "diag", null, null, null, null, null);
-                Console.WriteLine("  -> {0}", r2);
-                Console.WriteLine();
-
-                // H3: Test TypeFill=FOK (Fill or Kill)
-                Console.WriteLine("  [H3] BUY {0} {1:F2} 手, TypeFill=FOK", symbol, lots);
-                string r3 = link.DiagDealerSend(clientLogin, symbol, true, lots, ask,
-                    null, CIMTOrder.EnOrderFilling.ORDER_FILL_FOK, null, null, null, null);
-                Console.WriteLine("  -> {0}", r3);
-                Console.WriteLine();
-
-                // H4: SELL, TypeFill=IOC
-                Console.WriteLine("  [H4] SELL {0} {1:F2} 手, price=bid({2}), TypeFill=IOC", symbol, lots, bid);
-                string r4 = link.DiagDealerSend(clientLogin, symbol, false, lots, bid,
-                    null, CIMTOrder.EnOrderFilling.ORDER_FILL_IOC, null, null, null, null);
-                Console.WriteLine("  -> {0}", r4);
-                Console.WriteLine();
-
-                // H5: PriceOrder=0 (server pricing)
-                Console.WriteLine("  [H5] BUY {0} {1:F2} 手, PriceOrder=0(让服务器定价)", symbol, lots);
-                string r5 = link.DiagDealerSend(clientLogin, symbol, true, lots, 0,
-                    null, null, null, null, null, null);
-                Console.WriteLine("  -> {0}", r5);
-                Console.WriteLine();
-
-                // H6: TA_MARKET action (instead of TA_DEALER_POS_EXECUTE)
-                Console.WriteLine("  [H6] BUY {0} {1:F2} 手, Action=TA_MARKET(不是TA_DEALER_POS_EXECUTE)", symbol, lots);
-                string r6 = link.DiagDealerSend(clientLogin, symbol, true, lots, ask,
-                    null, null, null, null, null, null,
-                    CIMTRequest.EnTradeActions.TA_MARKET);
-                Console.WriteLine("  -> {0}", r6);
-                Console.WriteLine();
-
-                // H7: TA_DEALER_BALANCE action with trade params
-                Console.WriteLine("  [H7] BUY {0} {1:F2} 手, Action=TA_DEALER_BALANCE(看是否通)", symbol, lots);
-                string r7 = link.DiagDealerSend(clientLogin, symbol, true, lots, ask,
-                    null, null, null, null, null, null,
-                    CIMTRequest.EnTradeActions.TA_DEALER_BALANCE);
-                Console.WriteLine("  -> {0}", r7);
-                Console.WriteLine();
-
-                // H8: Reason=DEAL_REASON_DEALER (2)
-                Console.WriteLine("  [H8] BUY {0} {1:F2} 手, Reason=DEAL_REASON_DEALER(2)", symbol, lots);
-                string r8 = link.DiagDealerSend(clientLogin, symbol, true, lots, ask,
-                    null, null, null, null, null, null,
-                    CIMTRequest.EnTradeActions.TA_DEALER_POS_EXECUTE,
-                    reason: 2, sourceLogin: null);
-                Console.WriteLine("  -> {0}", r8);
-                Console.WriteLine();
-
-                // H9: SourceLogin=Manager login
-                Console.WriteLine("  [H9] BUY {0} {1:F2} 手, SourceLogin={2}(Manager)", symbol, lots, cfg.ManagerLogin);
-                string r9 = link.DiagDealerSend(clientLogin, symbol, true, lots, ask,
-                    null, null, null, null, null, null,
-                    CIMTRequest.EnTradeActions.TA_DEALER_POS_EXECUTE,
-                    reason: 2, sourceLogin: cfg.ManagerLogin);
-                Console.WriteLine("  -> {0}", r9);
-                Console.WriteLine();
-
-                // H10: TA_FLAG_SKIP_MARGIN_CHECK (0x400)
-                Console.WriteLine("  [H10] BUY {0} {1:F2} 手, Flags=SKIP_MARGIN_CHECK", symbol, lots);
-                string r10 = link.DiagDealerSend(clientLogin, symbol, true, lots, ask,
-                    null, null, 0x400, null, null, null);
-                Console.WriteLine("  -> {0}", r10);
-                Console.WriteLine();
-
-                // ===================== 步骤I:启动 DealerStart 后重测 =====================
-                Console.WriteLine("--- [I] 启动 DealerStart 后重测 ---");
-
-                MTRetCode dsr = link.DealerStartDiag();
-                Console.WriteLine("  DealerStart 返回:{0}", dsr);
-
-                if (dsr == MTRetCode.MT_RET_OK)
-                {
-                    // 只重测最关键的几个
-                    Console.WriteLine();
-
-                    Console.WriteLine("  [I1] BUY {0} {1:F2} 手(DealerStart + 无comment)", symbol, lots);
-                    string i1 = link.DiagDealerSend(clientLogin, symbol, true, lots, ask,
-                        null, null, null, null, null, null);
-                    Console.WriteLine("  -> {0}", i1);
-
-                    Console.WriteLine("  [I2] BUY {0} {1:F2} 手(DealerStart + TypeFill=FOK)", symbol, lots);
-                    string i2 = link.DiagDealerSend(clientLogin, symbol, true, lots, ask,
-                        null, CIMTOrder.EnOrderFilling.ORDER_FILL_FOK, null, null, null, null);
-                    Console.WriteLine("  -> {0}", i2);
-                }
-                else
-                {
-                    Console.WriteLine("[X] DealerStart 失败,可能缺 RIGHT_TRADES_DEALER 权限");
-                }
-
-                Console.WriteLine();
-                Console.WriteLine("========== 诊断完成 ==========");
-
-                // 最后检查:有没有意外产生的持仓或成交?
-                Console.WriteLine();
-                Console.WriteLine("--- 最终检查:持仓和最近成交 ---");
-                PositionInfo[] positions = link.GetPositions(clientLogin, out res);
-                if (positions == null)
-                {
-                    Console.WriteLine("  读持仓失败:{0}", res);
-                }
-                else if (positions.Length == 0)
-                {
-                    Console.WriteLine("  无持仓 (所有 DealerSend 确实没成交)");
-                }
-                else
-                {
-                    Console.WriteLine("  *** 有 {0} 个持仓! 某个请求可能成交了:", positions.Length);
-                    foreach (PositionInfo p in positions)
-                        Console.WriteLine("    #{0} {1} {2} {3:F2}手 @ {4} [comment={5}]",
-                            p.Ticket, p.Symbol, p.Side, p.Volume, p.PriceOpen, p.Comment);
-                }
-
-                // 查最近挂单
-                 OrderInfo[] orders = link.GetOrders(clientLogin, out res);
-                 if (orders != null)
-                 {
-                     Console.WriteLine("  挂单数: {0}", orders.Length);
-                     foreach (OrderInfo o in orders)
-                         Console.WriteLine("    #{0} {1} type={2} {3:F2}手 @ {4} [{5}]",
-                             o.Ticket, o.Symbol, o.Type, o.Volume, o.PriceOrder, o.Comment);
-                 }
-
-                Console.WriteLine();
-
-                // 关键结论
-                Console.WriteLine();
-                Console.WriteLine("--- 关键结论 ---");
-                Console.WriteLine();
-
-                if (dsr != MTRetCode.MT_RET_OK)
-                {
-                    Console.WriteLine("  *** DealerStart 失败 -> Manager 账号缺 RIGHT_TRADES_DEALER 权限");
-                    Console.WriteLine("  *** 请在 MT5 Admin 中给 Manager 1034 加上该权限。");
-                }
-                else
-                {
-                    Console.WriteLine("  对比 [H] 和 [I] 的结果:");
-                    Console.WriteLine("  - 如果 [H] 失败而 [I] 成功 -> 说明 DealerStart 是必须的");
-                    Console.WriteLine("  - 如果 [H] 和 [I] 都失败 -> 问题不在 DealerStart,而是品种/组/权限");
-                    Console.WriteLine("  - 如果 [H] 成功 -> 说明和官方示例一致,之前 selftest 被拒另有原因");
-                }
-
-                return 0;
-            }
         }
 
         //+------------------------------------------------------------------+

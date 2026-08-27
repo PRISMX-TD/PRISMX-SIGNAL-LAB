@@ -36,10 +36,25 @@ def is_account_online(row) -> bool:
     Bridge 账号看最近心跳；Gateway 账号没有心跳，看 gateway 服务是否可达。
     Bridge accounts use the last heartbeat; gateway accounts have no heartbeat,
     so their liveness follows the gateway service itself.
+
+    已撤销的 gateway 绑定一律判离线。这是让撤销"到处生效"最省事的一处改动：
+    在线状态是全站唯一的账号可用性口径（持仓路由、CLOSE/MODIFY 的单账号兜底
+    路由、账户卡片、连接状态徽标都读它），从这里断掉，就不必去每个下游各补
+    一次判断——那种补法必然漏。下单路径另有独立的显式拒绝（见 orders.py），
+    两道是有意重复的：在线状态是给界面看的，那一道是给资金安全兜底的。
+    A revoked gateway binding always reads as offline. Liveness is the one
+    account-usability notion the whole app already consults (position routing,
+    the single-account fallback for CLOSE/MODIFY, account cards, the connection
+    badge), so cutting it here beats patching every consumer and missing some.
+    The order path additionally refuses explicitly — the duplication is
+    intentional: this one is for the UI, that one is the money-safety backstop.
     """
     if getattr(row, "source", None) == "gateway":
+        from app.services.gateway_binding import is_revoked
         from app.services.gateway_client import is_gateway_online
 
+        if is_revoked(row):
+            return False
         return is_gateway_online()
 
     if not row.last_heartbeat:

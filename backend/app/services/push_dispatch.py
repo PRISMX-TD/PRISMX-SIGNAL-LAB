@@ -11,6 +11,7 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from starlette.concurrency import run_in_threadpool
@@ -23,6 +24,47 @@ from app.services.plans import can_use_push
 from app.utils.indicator import indicator_category
 
 logger = logging.getLogger("push")
+
+# 推送服务域名白名单。订阅的 endpoint 完全由浏览器给出、再由前端原样上报，服务端
+# 拿到后会直接对它发起 HTTP 请求——这是一个由用户提供 URL、服务端去访问的经典
+# SSRF 面：不加限制的话，付费用户可以注册一个指向内网（169.254.169.254 之类云元
+# 数据服务、或内部管理端口）的"订阅"，借服务端去打内网。
+#
+# 真实的 Web Push 端点只可能来自浏览器厂商的少数几个域，按域名后缀匹配即可。写成
+# 配置项是因为厂商偶尔会启用新域名，那时不该需要改代码重新发版。
+#
+# Allowlist of push-service hosts. A subscription endpoint comes from the
+# browser, is relayed verbatim by the frontend, and the server then makes an HTTP
+# request to it — the textbook shape of an SSRF sink (user-supplied URL, fetched
+# server-side). Unrestricted, a paying user could register a "subscription"
+# pointing at the internal network (cloud metadata at 169.254.169.254, an
+# internal admin port) and have the server reach it for them.
+#
+# Real endpoints only ever come from a handful of browser-vendor domains, so a
+# host-suffix match suffices. It lives in config because vendors do occasionally
+# bring up new domains, and that shouldn't require a code change.
+_PUSH_HOST_SUFFIXES = tuple(
+    h.strip().lower()
+    for h in settings.PUSH_ENDPOINT_HOST_SUFFIXES.split(",")
+    if h.strip()
+)
+
+
+def is_allowed_push_endpoint(endpoint: str) -> bool:
+    """endpoint 是否是可信推送服务的 https 地址 / whether this is an https URL on a known push service."""
+    try:
+        parsed = urlparse(endpoint)
+    except ValueError:
+        return False
+    if parsed.scheme != "https":
+        return False
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    # 后缀匹配必须带点边界，否则 "evilfcm.googleapis.com.attacker.tld" 之类
+    # 也会被 endswith 放行。/ The dot boundary matters: a bare endswith would
+    # also accept "…googleapis.com.attacker.tld".
+    return any(host == s or host.endswith("." + s) for s in _PUSH_HOST_SUFFIXES)
 
 # 事件类通知的合法取值：订单成交/拒绝、自动仓管触发、Bridge 掉线。
 # 此前推送只有"新信号"一种，账户/交易层面发生的事都是静默的——包括自动仓管
@@ -43,7 +85,21 @@ EVENT_BRIDGE_OFFLINE = "bridge_offline"
 # user who owns it, so it goes through the single-user event-notification
 # path rather than the category fan-out.
 EVENT_STRATEGY_SIGNAL = "strategy_signal"
-EVENT_TYPES = {EVENT_ORDER_FILLED, EVENT_ORDER_REJECTED, EVENT_AUTO_MANAGE, EVENT_BRIDGE_OFFLINE, EVENT_STRATEGY_SIGNAL}
+# 直连账号的绑定被撤销（券商侧密码变了，见 services/gateway_binding.py）。
+#
+# 单独一类而不是复用 bridge_offline：两者要用户做的事完全不同。离线是"等等看
+# 或去检查桥接"，撤销是"你不去重新验证，它永远不会自己好"——而且在那之前所有
+# 自动下单都是静默失效的。合成一类会让这条最需要立刻动手的通知混在最常见的
+# 那类噪音里。
+#
+# A direct-connect binding was revoked (the broker-side password changed).
+# A separate kind rather than reusing bridge_offline: offline means wait, this
+# means act — until the user re-verifies, every automated order silently fails.
+EVENT_ACCOUNT_REVOKED = "account_revoked"
+EVENT_TYPES = {
+    EVENT_ORDER_FILLED, EVENT_ORDER_REJECTED, EVENT_AUTO_MANAGE,
+    EVENT_BRIDGE_OFFLINE, EVENT_ACCOUNT_REVOKED, EVENT_STRATEGY_SIGNAL,
+}
 
 # 白名单哨兵值："不限"，命中任意取值（含此刻还不存在、以后才出现的品种/类别）。
 # Whitelist sentinel meaning "unrestricted" — matches any value, including
@@ -184,6 +240,17 @@ def _webpush_one(
 ) -> tuple[bool, bool]:
     """向单个订阅推送一条消息。返回 (是否发送成功, 是否应清理该订阅)。
     Push one message to a single subscription. Returns (sent ok, should prune)."""
+    # 发出请求前再校验一次 endpoint。订阅入口已经挡了一道，这里是针对**库里存量
+    # 行**的兜底：白名单收紧、或早于该校验写入的订阅，都不该在这一刻被真的请求
+    # 出去。标记清理而非静默跳过——一个永远不合法的 endpoint 留在表里没有意义。
+    # Re-check the endpoint before making the request. The subscribe endpoint
+    # already rejects bad ones; this covers rows *already in the table* — written
+    # before the check existed, or legal under an older, looser allowlist. Marked
+    # for pruning rather than silently skipped: an endpoint that can never be
+    # dispatched has no reason to stay.
+    if not is_allowed_push_endpoint(sub.endpoint):
+        logger.warning("[push] 拒绝非白名单 endpoint sub=%s", sub.id)
+        return False, True
     try:
         webpush(
             subscription_info={

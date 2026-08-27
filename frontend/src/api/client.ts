@@ -475,17 +475,26 @@ export const eaApi = {
 // Gateway API（Make Capital 用户通过 Gateway 连接 MT5，无需本地 Bridge）
 // Gateway API for Make Capital users — no local Bridge required
 export const gatewayApi = {
-  verify: (login: number, password: string, investorOnly?: boolean) =>
+  // 只能用 MT5 **主密码**。这里曾经有个 investorOnly 参数（前端从不传 true，
+  // 但它在请求体里）：投资者密码是券商侧的只读凭证，而直连绑定成功后所有操作
+  // 都由平台的 manager 代劳、不再校验任何密码，用它绑定等于把"只能看"换成
+  // "能下单"。后端已经把这个字段整个删掉了。
+  // Main password only. This used to take an `investorOnly` flag that the UI
+  // never set to true but that sat in the request body: the investor password is
+  // read-only at the broker, yet nothing re-checks a password after a successful
+  // bind, so it silently upgraded read-only access to order placement. The
+  // backend no longer accepts the field.
+  verify: (login: number, password: string) =>
     request<{
       ok: boolean; valid: boolean; retcode: string
       login: number; name: string; group: string
       leverage: number; balance: number; equity: number
     }>('/gateway/verify', {
       method: 'POST',
-      body: JSON.stringify({ login, password, investorOnly: investorOnly ?? false }),
+      body: JSON.stringify({ login, password }),
     }),
   list: () =>
-    request<{ accounts: Array<{ login: string; source: string; accountName: string; balance: number; equity: number; leverage: number }> }>('/gateway/accounts'),
+    request<{ accounts: Array<{ login: string; source: string; accountName: string; balance: number; equity: number; leverage: number; needsReverify: boolean; revokedReason: string }> }>('/gateway/accounts'),
   refresh: (login: string) =>
     request<{ login: string; balance: number; equity: number }>(`/gateway/account/${login}/refresh`, { method: 'POST' }),
   remove: (login: string) =>

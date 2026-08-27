@@ -21,7 +21,7 @@ import { localizeApiError } from '../api/utils'
 import PartnerBrokerCard, { usePartnerBroker } from '../components/PartnerBrokerCard'
 
 export default function BindPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { accounts, refreshAll } = useLive()
   const { name: brokerName } = usePartnerBroker()
 
@@ -78,6 +78,19 @@ export default function BindPage() {
 
   // Gateway 绑定的账号（过滤 source === "gateway"）
   const gatewayAccounts = accounts.filter((a) => a.source === 'gateway')
+
+  // 密码变更后被撤销、等着用户重新验证的账号。撤销的判据在后端（券商记录的
+  // 改密时间与绑定时对不上），前端只负责把它说清楚：这件事不会自己恢复，
+  // 必须重新输一次主密码，而在那之前自动下单是静默失效的。
+  // Accounts revoked after a password change. The judgement is the backend's;
+  // this page's job is to say the part that matters — it will not fix itself,
+  // and until it is fixed automated orders silently fail.
+  const revokedAccounts = gatewayAccounts.filter((a) => a.needsReverify)
+  // 顿号只在中文里对；英文列表用逗号。写死一个会在另一种语言下明显别扭。
+  // The ideographic comma is only right in Chinese; English lists take ", ".
+  const revokedLogins = revokedAccounts
+    .map((a) => a.login)
+    .join(i18n.language?.startsWith('zh') ? '、' : ', ')
 
   return (
     <div>
@@ -143,6 +156,12 @@ export default function BindPage() {
             <p className="mt-3 rounded-lg border border-down/30 bg-down/10 px-3 py-2 text-sm text-down">{gwError}</p>
           )}
 
+          {revokedAccounts.length > 0 && (
+            <p className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm leading-relaxed text-amber-300">
+              {t('bind.gw.revokedBanner', { logins: revokedLogins })}
+            </p>
+          )}
+
           {gwResult && (
             <div className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
               gwResult.valid ? 'border-up/30 bg-up/10 text-up' : 'border-amber-400/30 bg-amber-400/10 text-amber-300'
@@ -199,9 +218,22 @@ export default function BindPage() {
                           {a.equity != null ? a.equity.toFixed(2) : '—'}
                         </td>
                         <td className="px-3 py-2 text-center">
-                          <span className={`tag ${a.online ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-500'}`}>
-                            {a.online ? t('common.online') : t('common.offline')}
-                          </span>
+                          {/* 需重新验证要盖过在线/离线：被撤销的账号在后端本来就
+                              判离线，只显示一个灰色「离线」会让用户以为等一会儿
+                              就好，而它永远不会自己好。
+                              "Needs re-verify" overrides online/offline: a revoked
+                              account already reads as offline, and a grey badge
+                              alone would read as "wait it out" for something that
+                              never recovers on its own. */}
+                          {a.needsReverify ? (
+                            <span className="tag bg-amber-400/15 text-amber-300">
+                              {t('bind.gw.needsReverify')}
+                            </span>
+                          ) : (
+                            <span className={`tag ${a.online ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-500'}`}>
+                              {a.online ? t('common.online') : t('common.offline')}
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-center">
                           <button

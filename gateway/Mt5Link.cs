@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //| PRISMX MT5 Gateway - MT5 连接层                                  |
 //|                                                                  |
 //| 职责:持有一条 Manager 长连接,断线自动重连,对外提供读账户/读持仓/ |
@@ -698,277 +698,6 @@ namespace Prismx.Mt5Gateway
             Log.Info("已连接(未启动 dealer 通道)");
         }
 
-        /// <summary>诊断用:手动启动 dealer 通道。</summary>
-        public MTRetCode DealerStartDiag()
-        {
-            lock (_gate)
-            {
-                return _manager.DealerStart();
-            }
-        }
-
-        /// <summary>诊断用:取 manager 的权限位。</summary>
-        public string DiagManagerRights()
-        {
-            // CIMTConManager.Rights() 在 C# wrapper 中的暴露名可能不同,
-            // 但 DealerStart 返回 OK 就说明有权限,这里简单跳过。
-            return "(DealerStart 已确认有 TRADES_DEALER 权限)";
-        }
-
-        /// <summary>诊断用:取品种的全局属性。</summary>
-        public string DiagSymbolInfo(string symbol)
-        {
-            lock (_gate)
-            {
-                using (CIMTConSymbol sym = _manager.SymbolCreate())
-                {
-                    MTRetCode r = _manager.SymbolGet(symbol, sym);
-                    if (r != MTRetCode.MT_RET_OK)
-                        return "SymbolGet(global) 失败:" + r;
-
-                    return FormatSymbolInfo(sym);
-                }
-            }
-        }
-
-        /// <summary>诊断用:取品种对特定组的属性。</summary>
-        public string DiagSymbolGroupInfo(string symbol, string group)
-        {
-            lock (_gate)
-            {
-                using (CIMTConSymbol sym = _manager.SymbolCreate())
-                {
-                    // Manager API 的 SymbolGet(symbol, group, out) 第二个参数是组名
-                    MTRetCode r = _manager.SymbolGet(symbol, group, sym);
-                    if (r != MTRetCode.MT_RET_OK)
-                        return string.Format("SymbolGet({0},{1}) 失败:{2}", symbol, group, r);
-
-                    return FormatSymbolInfo(sym);
-                }
-            }
-        }
-
-        /// <summary>诊断用:取组级别的交易设置。</summary>
-        public string DiagGroupTradeInfo(string group)
-        {
-            lock (_gate)
-            {
-                using (CIMTConGroup grp = _manager.GroupCreate())
-                {
-                    MTRetCode r = _manager.GroupGet(group, grp);
-                    if (r != MTRetCode.MT_RET_OK)
-                        return string.Format("GroupGet({0}) 失败:{1}", group, r);
-
-                    return string.Format("组 {0} 存在", group);
-                }
-            }
-        }
-
-        /// <summary>诊断用:取用户权限。</summary>
-        public string DiagUserRights(ulong login)
-        {
-            lock (_gate)
-            {
-                using (CIMTUser user = _manager.UserCreate())
-                {
-                    MTRetCode r = _manager.UserRequest(login, user);
-                    if (r != MTRetCode.MT_RET_OK)
-                        return "UserRequest 失败:" + r;
-
-                    ulong rights = (ulong)user.Rights();
-                    return string.Format("0x{0:X16}", rights);
-                }
-            }
-        }
-
-        /// <summary>诊断用:测试 DealerBalance(入金/出金)。</summary>
-        public string DiagDealerBalance(ulong login, double amount, string comment)
-        {
-            lock (_gate)
-            {
-                ulong dealId;
-                MTRetCode res = _manager.DealerBalance(
-                    login, amount,
-                    (uint)CIMTDeal.EnDealAction.DEAL_BALANCE,
-                    comment, out dealId);
-
-                if (res == MTRetCode.MT_RET_OK || res == MTRetCode.MT_RET_REQUEST_DONE)
-                    return string.Format("DealerBalance OK: +{0:F2} -> deal=#{1}", amount, dealId);
-
-                return string.Format("DealerBalance 失败:{0}", res);
-            }
-        }
-
-        private static string FormatSymbolInfo(CIMTConSymbol sym)
-        {
-            uint tradeMode = (uint)sym.TradeMode();
-            uint execMode = (uint)sym.ExecMode();
-            uint fillFlags = (uint)sym.FillFlags();
-            ulong tradeFlags = (ulong)sym.TradeFlags();
-
-            // TradeMode 枚举
-            string tradeModeStr;
-            switch (tradeMode)
-            {
-                case 0: tradeModeStr = "DISABLED"; break;
-                case 1: tradeModeStr = "LONGONLY"; break;
-                case 2: tradeModeStr = "SHORTONLY"; break;
-                case 3: tradeModeStr = "CLOSEONLY"; break;
-                case 4: tradeModeStr = "FULL"; break;
-                default: tradeModeStr = tradeMode.ToString(); break;
-            }
-
-            // ExecMode 枚举
-            string execModeStr;
-            switch (execMode)
-            {
-                case 0: execModeStr = "REQUEST"; break;
-                case 1: execModeStr = "INSTANT"; break;
-                case 2: execModeStr = "MARKET"; break;
-                case 3: execModeStr = "EXCHANGE"; break;
-                default: execModeStr = execMode.ToString(); break;
-            }
-
-            // FillFlags 枚举
-            var fills = new System.Text.StringBuilder();
-            if ((fillFlags & 0x01) != 0) fills.Append("FOK ");
-            if ((fillFlags & 0x02) != 0) fills.Append("IOC ");
-            if ((fillFlags & 0x04) != 0) fills.Append("RETURN ");
-            if ((fillFlags & 0x08) != 0) fills.Append("ORDER_FOK ");
-
-            // TradeFlags 枚举
-            var tflags = new System.Text.StringBuilder();
-            if ((tradeFlags & 0x01) != 0) tflags.Append("ALLOW_REAL ");
-            if ((tradeFlags & 0x02) != 0) tflags.Append("ALLOW_LIMIT ");
-            if ((tradeFlags & 0x04) != 0) tflags.Append("ALLOW_STOP ");
-            if ((tradeFlags & 0x08) != 0) tflags.Append("ALLOW_SL ");
-            if ((tradeFlags & 0x10) != 0) tflags.Append("ALLOW_TP ");
-            if ((tradeFlags & 0x20) != 0) tflags.Append("ALLOW_CLOSEBY ");
-
-            return string.Format(
-                "TradeMode={0} ExecMode={1} FillFlags=0x{2:X8}({3}) TradeFlags=0x{4:X16}({5})",
-                tradeModeStr, execModeStr, fillFlags,
-                fills.ToString().TrimEnd(),
-                tradeFlags, tflags.ToString().TrimEnd());
-        }
-
-        /// <summary>
-        /// 诊断用:原始 DealerSend。
-        /// 返回 DealerSend 返回值 + 回执详情。
-        /// </summary>
-        public string DiagDealerSend(ulong login, string symbol, bool isBuy,
-            double lots, double price, string comment, CIMTOrder.EnOrderFilling? typeFill,
-            uint? flags, ulong? position, double? sl, double? tp,
-            CIMTRequest.EnTradeActions action = CIMTRequest.EnTradeActions.TA_DEALER_POS_EXECUTE,
-            uint? reason = null, ulong? sourceLogin = null)
-        {
-            if (!_connected)
-                return "未连接";
-
-            CIMTRequest request = null;
-            CIMTRequest result = null;
-            DealerSink sink = null;
-
-            try
-            {
-                uint requestId;
-                MTRetCode res;
-
-                lock (_gate)
-                {
-                    request = _manager.RequestCreate();
-                    result = _manager.RequestCreate();
-                    if (request == null || result == null)
-                        return "创建 request 失败";
-
-                    request.Clear();
-                    request.Login(login);
-                    request.Action(action);
-                    request.Type(isBuy ? CIMTOrder.EnOrderType.OP_BUY : CIMTOrder.EnOrderType.OP_SELL);
-                    request.Volume(SMTMath.VolumeToInt(lots));
-                    request.Symbol(symbol);
-                    request.PriceOrder(price);
-
-                    if (!string.IsNullOrEmpty(comment))
-                        request.Comment(comment);
-
-                    if (typeFill.HasValue)
-                        request.TypeFill(typeFill.Value);
-
-                    if (flags.HasValue)
-                        request.Flags((CIMTRequest.EnTradeActionFlags)flags.Value);
-
-                    if (position.HasValue)
-                        request.Position(position.Value);
-
-                    if (sl.HasValue)
-                        request.PriceSL(sl.Value);
-
-                    if (tp.HasValue)
-                        request.PriceTP(tp.Value);
-
-                    if (reason.HasValue)
-                        request.Reason(reason.Value);
-
-                    if (sourceLogin.HasValue)
-                        request.SourceLogin(sourceLogin.Value);
-
-                    sink = new DealerSink(result);
-
-                    MTRetCode reg = sink.RegisterSink();
-                    if (reg != MTRetCode.MT_RET_OK)
-                        return "RegisterSink 失败:" + reg;
-
-                    res = _manager.DealerSend(request, sink, out requestId);
-                }
-
-                if (res != MTRetCode.MT_RET_OK)
-                    return string.Format("DealerSend 返回 {0}", res);
-
-                // 等回执
-                res = sink.Wait(_cfg.DealerTimeoutMs);
-
-                string extra = "";
-                lock (_gate)
-                {
-                    if (res == MTRetCode.MT_RET_REQUEST_DONE ||
-                        res == MTRetCode.MT_RET_REQUEST_DONE_PARTIAL)
-                    {
-                        extra = string.Format(" | Deal=#{0} Order=#{1} Price={2}",
-                            result.ResultDeal(), result.ResultOrder(), result.ResultPrice());
-                    }
-
-                    string resComment = result.ResultComment();
-                    if (!string.IsNullOrEmpty(resComment))
-                        extra += " | Comment=" + resComment;
-
-                    // 失败时也打印 retcode 详情
-                    if (res != MTRetCode.MT_RET_REQUEST_DONE &&
-                        res != MTRetCode.MT_RET_REQUEST_DONE_PARTIAL)
-                    {
-                        extra += string.Format(" | ResultRetcode={0}", result.ResultRetcode());
-                    }
-                }
-
-                return string.Format("DealerSend OK(id={0}) -> 回执={1}{2}",
-                    requestId, res, extra);
-            }
-            finally
-            {
-                lock (_gate)
-                {
-                    if (sink != null)
-                    {
-                        try { _manager.DealerUnsubscribe(sink); }
-                        catch { }
-                    }
-                    if (request != null) request.Dispose();
-                    if (result != null) result.Dispose();
-                }
-                GC.KeepAlive(sink);
-            }
-        }
-
         private MTRetCode ConnectOnce()
         {
             lock (_gate)
@@ -1100,16 +829,26 @@ namespace Prismx.Mt5Gateway
         }
 
         //+------------------------------------------------------------------+
-        //| 校验密码。用于用户在网页上绑定 MT5 账号。                        |
+        //| 校验主密码。用于用户在网页上绑定 MT5 账号。                      |
+        //|                                                                  |
+        //| **只认主密码**,投资者密码这条路径已被移除。理由:投资者密码在券商 |
+        //| 侧是只读凭证,而本网关绑定完成后所有操作都走 manager、不再校验任何 |
+        //| 密码——用投资者密码绑上来,等于把"只能看"当场换成"能下单",是一次 |
+        //| 权限提升。之前这里有个 investorOnly 参数,由 HTTP 请求体直接控制。 |
+        //|                                                                  |
+        //| Main password only; the investor-password path was removed. The   |
+        //| investor password is a read-only credential at the broker, but    |
+        //| everything after a successful bind here runs through the manager  |
+        //| with no further password check — binding with it would upgrade    |
+        //| read-only access to order placement. This used to be an           |
+        //| `investorOnly` flag taken straight from the HTTP request body.    |
         //+------------------------------------------------------------------+
-        public MTRetCode CheckPassword(ulong login, string password, bool investorOnly)
+        public MTRetCode CheckPassword(ulong login, string password)
         {
             lock (_gate)
             {
                 return _manager.UserPasswordCheck(
-                    investorOnly
-                        ? CIMTUser.EnUsersPasswords.USER_PASS_INVESTOR
-                        : CIMTUser.EnUsersPasswords.USER_PASS_MAIN,
+                    CIMTUser.EnUsersPasswords.USER_PASS_MAIN,
                     login,
                     password);
             }
@@ -1132,6 +871,7 @@ namespace Prismx.Mt5Gateway
                     info.Name = user.Name();
                     info.Group = user.Group();
                     info.Leverage = user.Leverage();
+                    info.LastPassChange = user.LastPassChange();
                 }
 
                 using (CIMTAccount account = _manager.UserCreateAccount())
@@ -1711,6 +1451,11 @@ namespace Prismx.Mt5Gateway
         /// 携带它们的先例,语义未知。用 SlTpProbe 在 demo\STD-USD 组实测:
         /// 请求 SL=1.05322/TP=1.25322,回执 MT_RET_REQUEST_DONE,回查仓位
         /// #18649601 的实际值与请求值完全一致。
+        /// (SlTpProbe 是一次性验证工具,会真实下单,验证完成后已从部署目录移除;
+        ///  需要重跑时从 git 历史取回 SlTpProbe.cs 与 build-sltp-probe.ps1。
+        ///  SlTpProbe was a one-shot verification tool that places a real order;
+        ///  it was removed from the deployment directory once this was confirmed.
+        ///  Recover it from git history if the experiment ever needs repeating.)
         ///
         /// 仍保留成交后的补救改单:仅在服务器确实没落上 SL/TP 时触发。合并后
         /// 正常路径不会走到那里,但这是止损,静默丢失的代价是仓位裸奔,

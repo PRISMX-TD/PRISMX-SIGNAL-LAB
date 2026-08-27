@@ -461,6 +461,7 @@
       "order_rejected": "订单被拒绝",
       "auto_manage": "自动仓位管理触发",
       "bridge_offline": "PRISMX Bridge 掉线",
+      "account_revoked": "直连账号需重新验证",
       "strategy_signal": "我的策略信号"
     },
     "notifWindowHeading": "推送时段",
@@ -826,6 +827,8 @@
       "boundTitle": "已绑定账号",
       "tag": "直连",
       "unbind": "解绑",
+    "needsReverify": "需重新验证",
+    "revokedBanner": "账号 {{logins}} 的 MT5 密码已变更，直连已断开，自动下单已停止。在上方重新输入该账号的主密码即可恢复。",
       "unbindFailed": "解绑失败，请稍后重试"
     },
     "bridgeEntry": {

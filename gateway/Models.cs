@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //| PRISMX MT5 Gateway - 数据结构                                    |
 //+------------------------------------------------------------------+
 namespace Prismx.Mt5Gateway
@@ -13,6 +13,24 @@ namespace Prismx.Mt5Gateway
         public double Equity;
         public double Margin;
         public double MarginFree;
+
+        // 该账号上次修改密码的时间(Unix 秒),由 MT5 服务器填写。
+        //
+        // 用途只有一个:让平台能发现"用户改了密码"。gateway 绑定之后所有操作都走
+        // manager,不再校验任何密码,所以密码改了平台本来是零感知的——旧绑定仍能
+        // 代客下单。后端在绑定时记下这个值,之后每轮资金刷新比对,对不上就撤销绑定。
+        //
+        // 0 表示服务器没填这个字段(或读不到)。后端把 0 当作"没有信号",不撤销任何
+        // 绑定——宁可这道闸不生效,也不能因为字段不可用就把所有人踢下线。
+        //
+        // Unix seconds of this account's last password change, filled by MT5.
+        // The only consumer is binding revocation: after a gateway bind every
+        // operation goes through the manager and no password is ever re-checked,
+        // so a password change was previously invisible and a stale binding kept
+        // full trading rights. The backend records this at bind time and compares
+        // it on each funds refresh. 0 means the server didn't fill it, which the
+        // backend treats as "no signal" rather than revoking everyone.
+        public long LastPassChange;
     }
 
     internal sealed class PositionInfo

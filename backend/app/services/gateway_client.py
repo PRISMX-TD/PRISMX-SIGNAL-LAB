@@ -8,7 +8,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 import httpx
 
@@ -117,6 +117,14 @@ class VerifyRsp:
     leverage: int = 0
     balance: float = 0.0
     equity: float = 0.0
+    # 券商记录的「上次改密码时间」（Unix 秒）。绑定时存下来，之后每轮资金刷新
+    # 比对，对不上说明密码变了、这次绑定的授权已经作废。
+    # 0 = 网关没给（旧版网关）或券商服务器没填这个字段——调用方必须把 0 当成
+    # 「没有信号」，绝不能当成「时间是 0」去比对，否则所有账号一上来就被撤销。
+    # Broker-recorded last-password-change time (unix seconds); 0 means no signal
+    # (old gateway, or the server doesn't fill the field) and must never be
+    # compared as a real value — see routers/gateway.py.
+    last_pass_change: int = 0
     # ok=False 时的失败原因。error 是 gateway 的错误码（group_not_allowed、
     # MTRetCode 名、timeout…），status 是它的 HTTP 状态码（0 表示压根没连上）。
     # 调用方靠这两个字段区分「网关真的挂了」和「网关明确拒绝了这个账号」。
@@ -138,6 +146,9 @@ class AccountRsp:
     equity: float
     margin: float
     margin_free: float
+    # 见 VerifyRsp.last_pass_change：0 表示「没有信号」，不是一个可比对的时间。
+    # See VerifyRsp.last_pass_change: 0 means "no signal", not a comparable time.
+    last_pass_change: int = 0
 
 
 @dataclass
@@ -274,9 +285,19 @@ async def _post(path: str, body: dict, timeout: float | None = None) -> dict:
 # ---------- 业务接口 ----------
 
 
-async def verify_account(login: int, password: str, investor_only: bool = False) -> VerifyRsp:
-    """验证 MT5 账号密码（用户绑定账号时用）。"""
-    data = await _post("/verify", {"login": login, "password": password, "investorOnly": investor_only})
+async def verify_account(login: int, password: str) -> VerifyRsp:
+    """验证 MT5 账号**主密码**（用户绑定账号时用）。
+
+    没有「用投资者密码验」这个选项，这是有意的：投资者密码在券商侧是只读凭证，
+    而 gateway 绑定成功后所有操作都走 manager、不再校验任何密码——用它绑定等于
+    把「只能看」当场换成「能下单」。这个开关以前存在，且由 HTTP 请求体直接控制。
+
+    Main password only, deliberately: the investor password is a read-only
+    credential at the broker, but nothing after a successful bind re-checks any
+    password, so binding with it would upgrade read-only access to order
+    placement. This used to be a request-body flag.
+    """
+    data = await _post("/verify", {"login": login, "password": password})
     return VerifyRsp(
         ok=data.get("ok", False),
         valid=data.get("valid", False),
@@ -287,6 +308,7 @@ async def verify_account(login: int, password: str, investor_only: bool = False)
         leverage=data.get("leverage", 0),
         balance=data.get("balance", 0.0),
         equity=data.get("equity", 0.0),
+        last_pass_change=int(data.get("lastPassChange", 0) or 0),
         error=str(data.get("error", "")),
         message=str(data.get("message", "")),
         status=int(data.get("status", 0) or 0),
@@ -308,6 +330,7 @@ async def get_account(login: int) -> AccountRsp | None:
         equity=data.get("equity", 0.0),
         margin=data.get("margin", 0.0),
         margin_free=data.get("marginFree", 0.0),
+        last_pass_change=int(data.get("lastPassChange", 0) or 0),
     )
 
 
@@ -515,14 +538,6 @@ async def trade_modify(login: int, ticket: int, sl: float = 0, tp: float = 0) ->
         order=data.get("order", 0),
         price=data.get("price", 0.0),
     )
-
-
-async def get_quote(symbol: str) -> tuple[float, float, str]:
-    """取报价。返回 (bid, ask, 错误信息)。"""
-    data = await _post("/quote", {"symbol": symbol})
-    if not data.get("ok"):
-        return 0, 0, data.get("error", "unknown")
-    return data.get("bid", 0), data.get("ask", 0), ""
 
 
 async def health_check() -> dict:

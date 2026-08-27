@@ -7,11 +7,32 @@ allowed_groups 还停在 demo，网关返回了 403 group_not_allowed —— 但
 
 这里钉住两件事：
   1. _post 把网关 4xx 的响应体（error/message）与状态码原样带回，不吞掉；
-  2. _verify_failure 按原因给出不同的状态码与文案，且真断线时仍是 502。
+  2. _verify_failure 按原因给出不同的状态码，且真断线时仍是 502。
 
-Pins the behaviour that a gateway refusal reaches the user intact: the HTTP
-client carries the gateway's 4xx body through instead of flattening it, and the
-router maps each cause to a distinct status and message.
+后来加的一层限制（安全审计）：对**用户**可见的区分只保留到"能不能自助解决"这个
+粒度，不再把内部细节一起端出去。具体两条：
+
+  · 「账号不存在」不再是独立状态码，由调用方合并进 valid=False，与密码错完全同形。
+    这个端点会把账号密码转发到券商验证，可区分的 404 等于给出一个"该账号在券商侧
+    是否存在"的查询接口，那是撞库的第一步。
+  · 「网关不可用」不再把 error/retcode 拼进 detail。那些是网关与 MT5 的内部状态，
+    用户拿它没有任何用，却能用来推断后端拓扑与故障位置；改为只写日志。
+
+上面那次误导排查的教训依然成立、也依然被本文件钉住：真正会让人去查一台健康服务器
+的是「组未开放」与「网关故障」这两类，它们之间的区分一个都没有丢。
+
+Pins that a gateway refusal reaches the user intact: the client carries the 4xx
+body through instead of flattening it, and the router maps each cause to a
+distinct status.
+
+A later security-audit constraint narrows what the *user* sees to "can I fix this
+myself?" granularity: "account not found" is folded into valid=False by the
+caller (a distinguishable 404 would be an existence oracle against the broker,
+step one of credential stuffing), and gateway outages no longer splice
+error/retcode into the detail (internal gateway/MT5 state, useful only for
+inferring our topology) — those go to the log. The original lesson still holds
+and is still pinned here: the group-vs-outage distinction, which is what
+misdirected the investigation, is fully intact.
 """
 import asyncio
 
@@ -103,7 +124,6 @@ def _fail(**kw):
 
 @pytest.mark.parametrize("rsp,expected", [
     (_fail(error="group_not_allowed", status=403), 403),
-    (_fail(error="MT_RET_ERR_NOTFOUND", status=404), 404),
     (_fail(error="timeout", status=0), 504),
     (_fail(error="request_failed", status=0), 502),
     (_fail(error="unauthorized", status=401), 502),
@@ -120,6 +140,27 @@ def test_group_refusal_never_says_gateway_unavailable():
     assert " / " in exc.detail  # 前端按界面语言取一半，必须是双语格式
 
 
-def test_real_outage_still_reports_the_code():
-    exc = _verify_failure(_fail(error="request_failed", status=0))
-    assert "request_failed" in exc.detail
+def test_outage_detail_carries_no_internal_code():
+    """网关故障对用户只是「稍后重试」，不该带上 error/retcode。
+
+    这些码（request_failed、unauthorized、MTRetCode 枚举名）描述的是网关与 MT5
+    的内部状态：用户既看不懂也无法据此行动，却足以让人分辨出后端是"连不上"还是
+    "token 不对"，从而推断拓扑。排查所需的全部字段由调用方写进 warning 日志。
+    """
+    for err in ("request_failed", "unauthorized", "MT_RET_ERR_NOT_CONNECTED"):
+        detail = _verify_failure(_fail(error=err, status=0)).detail
+        assert err not in detail
+    assert " / " in detail  # 仍是双语格式
+
+
+def test_missing_account_is_not_distinguishable_from_a_wrong_password():
+    """「账号不存在」不能是一个可区分的答案。
+
+    _verify_failure 不再认识 404——它由 gateway_verify 合并进 valid=False 分支，
+    与密码错返回同一个响应体。若哪天有人给 _verify_failure 补回一条 404 专属映射，
+    这条用例会失败，提醒他这不是遗漏而是刻意为之。
+    """
+    exc = _verify_failure(_fail(error="MT_RET_ERR_NOTFOUND", status=404))
+    # 落进兜底的 502「稍后重试」，而不是一个宣告"查无此号"的 404
+    assert exc.status_code != 404
+    assert "MT_RET_ERR_NOTFOUND" not in exc.detail

@@ -480,6 +480,12 @@ export interface MT5Account {
   symbolSuffix?: string | null
   online: boolean
   lastHeartbeat?: string | null
+  // 直连绑定已失效，需要用户重新输一次 MT5 主密码。与 online 分开：离线是
+  // "等一会儿"，失效是"你不动手它永远不会好"，显示成同一个灰徽标会让用户一直等。
+  // Revoked direct-connect binding needing the MT5 main password re-entered.
+  // Separate from `online`: offline means wait, this means act.
+  needsReverify?: boolean
+  revokedReason?: string | null
 }
 
 export interface Quote {

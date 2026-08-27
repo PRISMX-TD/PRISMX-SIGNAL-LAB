@@ -118,9 +118,15 @@ namespace Prismx.Mt5Gateway
                     // from this. False isn't a fault — it's the pre-change polling pace.
                     .Field("dealSubscribed", _link.DealSubscribed)
                     .Field("dealEventBacklog", (uint)_link.DealEventBacklog)
-                    .Field("server", _cfg.Server)
-                    .Field("managerLogin", _cfg.ManagerLogin)
                  .EndObject();
+                // 这里刻意不报 server 与 managerLogin。/health 是唯一不鉴权的接口,
+                // 而那两个字段恰好是攻击 manager 账号所需的两个前提(接入地址 + 登录号),
+                // 等于把侦察素材白送给任何能连到端口的人。运维要查这两项,看启动日志
+                // (Program.cs 的 selftest)或 gateway.ini 本身,不必走公开接口。
+                // Deliberately omits server and managerLogin: /health is the one
+                // unauthenticated endpoint, and those two fields are exactly the
+                // prerequisites for attacking the manager account (endpoint + login).
+                // Ops can read both from the startup log or gateway.ini instead.
 
                 WriteJson(ctx, 200, j.ToString());
                 return;
@@ -201,8 +207,9 @@ namespace Prismx.Mt5Gateway
         }
 
         //+------------------------------------------------------------------+
-        //| POST /verify  校验 MT5 账号密码(用户绑定账号时用)               |
-        //| { "login": 500123, "password": "...", "investorOnly": false }     |
+        //| POST /verify  校验 MT5 账号主密码(用户绑定账号时用)             |
+        //| { "login": 500123, "password": "..." }                            |
+        //| 成功时额外回 lastPassChange(改密时间,后端用它撤销失效绑定)。     |
         //+------------------------------------------------------------------+
         private void HandleVerify(HttpListenerContext ctx, JsonObject body)
         {
@@ -232,8 +239,19 @@ namespace Prismx.Mt5Gateway
                 return;
             }
 
-            MTRetCode check = _link.CheckPassword(login, password,
-                body.GetBool("investorOnly"));
+            // investorOnly 已废弃:只认主密码(理由见 Mt5Link.CheckPassword)。
+            // 后端不再发这个字段;仍然读一次,只为在有人直接打网关时留下痕迹。
+            // 不报错、静默降级成主密码校验——拿投资者密码来的调用方会得到
+            // valid:false,与密码填错完全一样,问不出"这个账号有没有投资者密码"。
+            // investorOnly is dead: main password only (see Mt5Link.CheckPassword).
+            // The backend no longer sends it; it's still read so a caller hitting
+            // the gateway directly leaves a trace. No error — it silently falls
+            // back to a main-password check, so such a caller sees the same
+            // valid:false as a wrong password and learns nothing.
+            if (body.GetBool("investorOnly"))
+                Log.Warn("忽略 investorOnly:账号 {0} 只用主密码校验", login);
+
+            MTRetCode check = _link.CheckPassword(login, password);
 
             bool ok = check == MTRetCode.MT_RET_OK;
 
@@ -252,7 +270,8 @@ namespace Prismx.Mt5Gateway
                  .Field("group", info.Group)
                  .Field("leverage", info.Leverage)
                  .Field("balance", info.Balance)
-                 .Field("equity", info.Equity);
+                 .Field("equity", info.Equity)
+                 .Field("lastPassChange", UnixSeconds(info.LastPassChange));
             }
 
             j.EndObject();
@@ -293,6 +312,7 @@ namespace Prismx.Mt5Gateway
                 .Field("equity", info.Equity)
                 .Field("margin", info.Margin)
                 .Field("marginFree", info.MarginFree)
+                .Field("lastPassChange", UnixSeconds(info.LastPassChange))
              .EndObject();
 
             WriteJson(ctx, 200, j.ToString());
@@ -734,6 +754,24 @@ namespace Prismx.Mt5Gateway
                 diff |= given[i] ^ _tokenBytes[i];
 
             return diff == 0;
+        }
+
+        /// <summary>
+        /// Unix 秒时间戳转成 JSON 能写的无符号数。负值与 0 一律归零。
+        ///
+        /// MT5 的时间字段是 int64,理论上可以是负数(1970 之前)或 0(没填)。
+        /// JsonWriter 只有 ulong 重载,直接强转会把负数变成天文数字,后端拿它当
+        /// "密码改过了"就会误撤销绑定。归零则落进后端的"没有信号"分支,不撤销。
+        ///
+        /// Unix seconds to a JSON-writable unsigned value; negatives and 0 both
+        /// become 0. MT5 time fields are int64 and may be 0 (unset). JsonWriter
+        /// only has a ulong overload, and casting a negative would produce an
+        /// astronomical number that the backend would read as "password changed"
+        /// and wrongly revoke the binding. 0 lands in its "no signal" branch.
+        /// </summary>
+        private static ulong UnixSeconds(long value)
+        {
+            return value > 0 ? (ulong)value : 0UL;
         }
 
         private static string ReadBody(HttpListenerContext ctx)

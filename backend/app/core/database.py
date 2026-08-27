@@ -102,7 +102,9 @@ def _hash_legacy_api_tokens() -> None:
 # rev 8: 修 closed_trades 重建：SQLite 索引撞名导致重建中途失败、数据滞留在
 #        closed_trades_legacy 里。必须 +1——中招的库在第二次启动时会因为"新表已经
 #        是新键"而跳过整段并写下 rev 7，此后一路走快速通道，数据永远搬不回来。
-CURRENT_SCHEMA_REV = 8
+# rev 9: mt5_accounts.pass_change_at / revoked_at / revoked_reason
+#        （gateway 绑定的撤销机制：券商侧改密码后作废旧绑定）
+CURRENT_SCHEMA_REV = 9
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -440,7 +442,8 @@ def _migrate_columns() -> None:
                 if name not in notif_cols:
                     conn.execute(text(f"ALTER TABLE notification_prefs ADD COLUMN {name} VARCHAR"))
 
-    # mt5_accounts 表：补组名与账户类型（实盘/模拟判定，见 services/account_type.py）。
+    # mt5_accounts 表：补组名与账户类型（实盘/模拟判定，见 services/account_type.py），
+    # 以及 gateway 绑定的撤销三列（见下方注释）。
     # 两列都可空、都没有回填：历史行的类型只能等下一次账号刷新时按组名判出来
     # （gateway 每轮资金刷新都会重写这两列），猜一个默认值反而会把模拟盘记成实盘。
     # mt5_accounts: add the broker group name and the derived account type. Both
@@ -453,6 +456,31 @@ def _migrate_columns() -> None:
                 conn.execute(text("ALTER TABLE mt5_accounts ADD COLUMN mt5_group VARCHAR"))
             if "trade_mode" not in acc_cols:
                 conn.execute(text("ALTER TABLE mt5_accounts ADD COLUMN trade_mode INTEGER"))
+            # gateway 绑定的撤销依据（见 models.MT5Account 的说明）。
+            #
+            # 三列全部可空、**一律不回填**。pass_change_at 尤其不能猜：回填一个
+            # 当前值等于宣布"历史绑定的密码从没变过"，而这些行恰恰是在没有任何
+            # 校验的年代绑上来的，它们的密码有没有被改过我们根本不知道。留 NULL
+            # 让校验逻辑走"没有信号"分支——首次读到券商侧的值时才记下来，此后
+            # 的改动才会被撤销。旧绑定因此得不到追溯保护，这是刻意的取舍：
+            # 追溯的唯一实现方式是把所有人一次性踢下线，代价大于收益。
+            #
+            # Revocation columns for gateway bindings. All nullable and never
+            # backfilled — least of all pass_change_at: seeding it with the
+            # current value would assert "this binding's password never changed",
+            # about rows created back when nothing was ever checked. NULL keeps
+            # them on the "no signal" path until the first reading is recorded,
+            # so only later changes revoke. Existing bindings get no retroactive
+            # protection, deliberately: the only way to have it would be to
+            # revoke everyone at once.
+            if "pass_change_at" not in acc_cols:
+                conn.execute(text("ALTER TABLE mt5_accounts ADD COLUMN pass_change_at BIGINT"))
+            if "revoked_at" not in acc_cols:
+                conn.execute(text(
+                    f"ALTER TABLE mt5_accounts ADD COLUMN revoked_at {datetime_type}"
+                ))
+            if "revoked_reason" not in acc_cols:
+                conn.execute(text("ALTER TABLE mt5_accounts ADD COLUMN revoked_reason VARCHAR"))
 
     # closed_trades 表：① 补 verified 列（服务端归属核验结论，见 models 里的说明）；
     # ② 把去重唯一键从 (user_id, deal_ticket) 换成 (user_id, mt5_login, deal_ticket)。
@@ -511,61 +539,9 @@ def _migrate_columns() -> None:
             if legacy_unique or leftover:
                 _rebuild_closed_trades_sqlite()
 
-    # 后台清扫/过期扫描用的索引：create_all 不会为已存在的表补索引，这里补。
-    # Indexes for the background sweeps: create_all won't add indexes to
-    # pre-existing tables, so do it here (IF NOT EXISTS on both dialects).
-    with engine.begin() as conn:
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)"))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_signals_status_expire ON signals(status, expire_at)"
-        ))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_signals_symbol_result ON signals(symbol, result)"
-        ))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_strategy_signals_strategy_result "
-            "ON strategy_signals(strategy_id, result)"
-        ))
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_strategy_watch_symbol_interval "
-            "ON strategy_watch(symbol, interval)"
-        ))
-        # 离线检测每 2 秒按 last_heartbeat 过滤一次在线账号（见 bridge.py 的
-        # offline_monitor_loop）。没有这条索引，那个查询就是每 2 秒一次全表扫描，
-        # 扫描量随注册用户数增长——而其中绝大多数账号并不在线。
-        # The offline monitor filters live accounts by last_heartbeat every two
-        # seconds (see offline_monitor_loop in bridge.py). Without this index that
-        # query is a full table scan 30 times a minute, growing with the registered
-        # user count — while almost none of those accounts are actually online.
-        conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_mt5_accounts_heartbeat "
-            "ON mt5_accounts(last_heartbeat)"
-        ))
-        # 规则：这一块跑在下面所有「补列」之前，所以**只能**放那些所依赖的列在
-        # 旧库里一定已经存在的索引。要给本函数新补的列建索引，请放到对应的补列
-        # 语句之后（例：users.invite_code 的索引在下面 users 块尾部）。违反这条
-        # 规则的后果是启动即崩（no such column），而这段跑在 uvicorn bind 端口
-        # 之前，线上等价于服务器起不来——commit e4bc076 修的就是这个。
-        #
-        # 已知例外，别照抄：上面 idx_strategy_signals_strategy_result 依赖的
-        # strategy_signals.result 正是本函数在下面补的列，它违反了这条规则。这是
-        # 早于本规则存在的遗留项，另行跟踪修复，不作为先例——新加的索引一律按
-        # 规则来，不要"参考隔壁那条"。
-        #
-        # RULE: this block runs *before* every column-add below, so it may only
-        # contain indexes whose columns are guaranteed to exist on old
-        # databases. An index on a column this function itself adds must go
-        # after that ADD COLUMN (see users.invite_code at the end of the users
-        # block below). Breaking the rule crashes at startup with "no such
-        # column", and this runs before uvicorn binds its port — in production
-        # that is a server that never comes up. Commit e4bc076 fixed exactly
-        # that.
-        #
-        # KNOWN EXCEPTION — DO NOT COPY: idx_strategy_signals_strategy_result
-        # above depends on strategy_signals.result, which this same function
-        # adds further down; it violates the rule. It predates the rule, is
-        # tracked separately, and is not a precedent — new indexes follow the
-        # rule rather than the neighbour.
+    # 建索引不在这里，统一放到本函数末尾的索引块（搜 "统一索引块"）。
+    # Index creation lives in the single block at the end of this function
+    # (search for "统一索引块"), not here.
 
     # users 表：password_hash 改可空（Google 登录用户无密码）。
     # 旧表建表时为 NOT NULL，需放开约束，否则插入无密码用户会被拒。
@@ -669,28 +645,6 @@ def _migrate_columns() -> None:
             # as version 0 at auth time, matching the backfill here.
             if "token_version" not in user_cols:
                 conn.execute(text("UPDATE users SET token_version = 0 WHERE token_version IS NULL"))
-            # 邀请链接注册人数按 invite_code 分组统计（admin 列表每次刷新都查）；
-            # users 是既存表，create_all 不会给它补索引，必须在这里建。
-            #
-            # **必须留在上面那个 ADD COLUMN 循环之后**：invite_code 正是由那个
-            # 循环补上的列，放到前面那个通用 CREATE INDEX 块里，旧库上就会以
-            # "no such column: invite_code" 直接把迁移打断——而迁移跑在 uvicorn
-            # bind 端口之前，等于服务器起不来。IF NOT EXISTS 在 SQLite 与
-            # Postgres 上都支持，重复启动无害。
-            #
-            # Registration counts group users by invite_code on every admin list
-            # load; users pre-exists, so create_all won't add this index for it.
-            #
-            # This MUST stay after the ADD COLUMN loop above: invite_code is one
-            # of the columns that loop adds, so creating the index in the shared
-            # CREATE INDEX block earlier in this function aborts the migration on
-            # any pre-existing database with "no such column: invite_code" — and
-            # since the migration runs before uvicorn binds its port, that means
-            # the server never starts. IF NOT EXISTS is supported on both SQLite
-            # and Postgres, so re-running on every boot is harmless.
-            conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS idx_users_invite_code ON users(invite_code)"
-            ))
 
     # user_strategies 表：止损止盈从"百分比距离 + R 倍数"一种固定组合改成
     # 两个方式独立可选，外加策略命名。已启用的策略要按原逻辑等价换算成新
@@ -896,6 +850,81 @@ def _migrate_columns() -> None:
                 conn.execute(text(
                     "UPDATE invite_links SET grants_trial = FALSE WHERE grants_trial IS NULL"
                 ))
+
+    # ── 统一索引块 ────────────────────────────────────────────────────────────
+    # create_all 只给**新建**的表建索引，已存在的表不会补，所以这些要手工建。
+    #
+    # 全部索引集中放在这里、排在上面所有补列之后，是一条结构性约束，不是排版偏好：
+    # 只要索引整体位于补列之后，任何一条索引都不可能引用到"还没补上的列"，这类
+    # bug 就写不出来了。反过来的代价是实打实的——建索引若跑在补列之前，旧库上会以
+    # "no such column" 直接打断整段迁移，而迁移是在 uvicorn bind 端口之前同步跑的，
+    # 线上等价于服务器起不来，且**只在还原旧备份/旧快照时才发作**（已迁移过的库走
+    # 版本号快速通道，根本不执行到这里），偏偏那是最不该出事的时刻。
+    #
+    # 这个坑踩过三次：users.invite_code（commit e4bc076）、signals.result 与
+    # strategy_signals.result（后两条一度被标为"已知例外、另行跟踪"，实际一直没修）。
+    # 靠注释提醒挡不住第四次，所以 tests/test_migration_index_order.py 里有一条
+    # 结构性断言直接对源码检查这个顺序——往上面任何位置塞 CREATE INDEX 都会让它失败。
+    #
+    # ── The single index block ───────────────────────────────────────────────
+    # create_all only builds indexes for tables it creates, so pre-existing
+    # tables need these by hand.
+    #
+    # Keeping every index here, after every ADD COLUMN above, is a structural
+    # constraint rather than a formatting preference: with index creation wholly
+    # after column addition, no index can reference a column that hasn't been
+    # added yet, and the bug class becomes unwritable. The cost of the inverse is
+    # concrete — an index created before its column aborts the entire migration
+    # on an old database with "no such column", and since the migration runs
+    # synchronously before uvicorn binds its port, that is a server that never
+    # comes up. It fires *only* when restoring an old backup or snapshot (already
+    # migrated databases take the schema_rev fast path and never reach here),
+    # which is precisely the worst moment for it.
+    #
+    # This has bitten three times: users.invite_code (commit e4bc076), plus
+    # signals.result and strategy_signals.result — the latter two were labelled a
+    # "known exception, tracked separately" and then simply never fixed. Comments
+    # did not prevent the third, so tests/test_migration_index_order.py asserts
+    # the ordering against the source directly: adding a CREATE INDEX anywhere
+    # above will fail it.
+    with engine.begin() as conn:
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_signals_status_expire ON signals(status, expire_at)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_strategy_watch_symbol_interval "
+            "ON strategy_watch(symbol, interval)"
+        ))
+        # 离线检测每 2 秒按 last_heartbeat 过滤一次在线账号（见 bridge.py 的
+        # offline_monitor_loop）。没有这条索引，那个查询就是每 2 秒一次全表扫描，
+        # 扫描量随注册用户数增长——而其中绝大多数账号并不在线。
+        # The offline monitor filters live accounts by last_heartbeat every two
+        # seconds (see offline_monitor_loop in bridge.py). Without this index that
+        # query is a full table scan 30 times a minute, growing with the registered
+        # user count — while almost none of those accounts are actually online.
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_mt5_accounts_heartbeat "
+            "ON mt5_accounts(last_heartbeat)"
+        ))
+        # 以下三条建在本函数补出来的列上，正是上面说的那类——必须留在这里。
+        # These three sit on columns this function adds; they are exactly the case
+        # described above and must stay in this block.
+        #
+        # 判定扫描按 (symbol, result) / (strategy_id, result) 找待判定信号；
+        # 邀请注册人数按 invite_code 分组（admin 列表每次刷新都查）。
+        # Resolution scans find pending signals by (symbol, result) and
+        # (strategy_id, result); the admin list groups signups by invite_code.
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_signals_symbol_result ON signals(symbol, result)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_strategy_signals_strategy_result "
+            "ON strategy_signals(strategy_id, result)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_users_invite_code ON users(invite_code)"
+        ))
 
     # 全部步骤跑完才记版本号：中途抛异常就不写，下次启动会重跑（所有步骤幂等）。
     # Only recorded after every step succeeded: an exception midway leaves the marker

@@ -149,6 +149,12 @@ class Settings(BaseSettings):
 
     # 限流 / Rate limiting（默认值，可用环境变量覆盖）。
     # Rate limits (defaults; overridable via env).
+    # 限流计数的存储后端。留空 = 进程内内存，单实例部署适用。多实例部署必须指向
+    # Redis（如 redis://127.0.0.1:6379/0），否则每个实例各算各的，限流被实例数
+    # 等比稀释。/ Storage backend for rate-limit counters. Empty = in-process
+    # memory (single instance only); multi-instance deployments must point this
+    # at Redis or the effective limit is multiplied by the instance count.
+    RATE_LIMIT_STORAGE_URI: str = ""
     RATE_LIMIT_LOGIN: str = "10/minute"
     RATE_LIMIT_REGISTER: str = "5/minute"
     RATE_LIMIT_GOOGLE: str = "10/minute"
@@ -164,6 +170,20 @@ class Settings(BaseSettings):
     # generous — 2/sec, well above any real manual pace — so it only stops
     # pathological hammering without touching real users. Keyed by client IP.
     RATE_LIMIT_ORDER: str = "120/minute"
+    # MT5 账号验证限流。这个端点与其它端点性质不同：它把用户提交的「账号+密码」
+    # 转发给券商 Manager API 去验证，任何登录用户都能借此把平台当成对券商撞库的
+    # 代理。此前它复用 RATE_LIMIT_ORDER 的 120/分钟——那是为下单节奏设的，用在这
+    # 里等于每分钟 120 次免费的账号密码试探。绑定账号是低频动作（正常用户一辈子
+    # 也就几次），所以设得很紧；配合 rate_limit 里按 login 的失败锁定，IP 与账号
+    # 两个维度都堵住。按客户端 IP 计。
+    # Rate limit for MT5 account verification. Unlike every other endpoint, this
+    # one forwards the submitted login+password to the broker's Manager API, so
+    # any logged-in user could use the platform as a brute-force proxy against
+    # the broker. It previously reused RATE_LIMIT_ORDER (120/min), a figure meant
+    # for trading pace — here that is 120 free credential guesses a minute.
+    # Binding an account is rare, so this is tight; combined with the per-login
+    # lockout in rate_limit.py it closes both the IP and the account dimension.
+    RATE_LIMIT_GATEWAY_VERIFY: str = "6/minute"
     # 改密码/设置密码限流：已有密码时每次都要校验旧密码，若 token 泄露，攻击者
     # 可借此暴力猜旧密码——限流把这条路堵上。按客户端 IP 计。
     # Rate limit for change/set-password: with an existing password every call
@@ -381,9 +401,13 @@ class Settings(BaseSettings):
     NOWPAYMENTS_SANDBOX: bool = True
     # 本站基础 URL（用于构造 IPN 回调地址）/ site base URL (used to build IPN callback URL)
     SITE_BASE_URL: str = "https://prismxsignallab.com"
-    # PRO 订阅价格（美元）/ PRO subscription pricing (USD)
-    PRO_MONTHLY_PRICE_USD: float = 49.0
-    PRO_YEARLY_PRICE_USD: float = 470.0
+    # PRO 订阅价格不在这里：定价已迁到数据库，由管理后台维护，读取入口是
+    # services/settings_store.get_pricing_settings()。此处曾有两个 PRO_*_PRICE_USD
+    # 默认值，迁移后再没有任何代码读过它们——留着只会让人以为改这里能改价。
+    # PRO pricing does not live here: it moved to the database and is edited from
+    # the admin panel, read via services/settings_store.get_pricing_settings().
+    # Two PRO_*_PRICE_USD defaults sat here after that migration with no reader
+    # left, which only invited someone to "change the price" in the wrong place.
 
     # 风控 / Risk control
     MAX_VOLUME_PER_ORDER: float = 10.0  # 单笔最大手数 / max lots per order
@@ -392,8 +416,15 @@ class Settings(BaseSettings):
     # Rough equity-based lot cap: required equity per lot (account currency).
     EQUITY_PER_LOT: float = 200.0
 
-    # EA 心跳 / EA heartbeat
-    EA_OFFLINE_TIMEOUT_SECONDS: int = 30
+    # 在线判定窗口不在这里：唯一生效的阈值是 services/deps.py 的 ONLINE_WINDOW，
+    # 它的取值直接绑着 bridge 1.5 秒的轮询周期（留 3 个周期容错），改这里改不动它。
+    # 此处曾有一个 EA_OFFLINE_TIMEOUT_SECONDS = 30 无人读取，数值还和真正生效的 7
+    # 对不上——两个数、一个假的，只会误导排障的人。
+    # The liveness threshold does not live here: the only one in effect is
+    # ONLINE_WINDOW in services/deps.py, whose value is tied to bridge's 1.5s
+    # poll (three missed cycles of slack). An unread EA_OFFLINE_TIMEOUT_SECONDS =
+    # 30 used to sit here, disagreeing with the 7 actually in force — two numbers,
+    # one of them fiction, is worse for whoever is debugging than none.
 
     # Web Push / VAPID：私钥以 urlsafe-base64 编码的 DER（PKCS8）存储，直接交给
     # pywebpush（py_vapid 的 from_string 走 urlsafe-base64 解码，不能用标准 PEM）。
@@ -402,6 +433,24 @@ class Settings(BaseSettings):
     # VAPID: private key stored as urlsafe-base64-encoded DER (PKCS8) and passed
     # straight to pywebpush (py_vapid.from_string decodes via urlsafe-base64, so a
     # standard PEM does not work). Public key and subject are used for push.
+    # 允许作为推送订阅 endpoint 的主机后缀（逗号分隔）。服务端会主动向订阅
+    # endpoint 发起 HTTP 请求，而该地址来自客户端上报——不限制就等于开放一个
+    # 服务端代发请求的入口（SSRF）。这里列的是各浏览器厂商的推送服务域：
+    # FCM（Chrome/Edge/Opera 等 Chromium 系）、Mozilla（Firefox）、
+    # Apple（Safari/iOS）、Windows 通知服务（旧版 Edge）。
+    # Host suffixes accepted as push-subscription endpoints (comma-separated).
+    # The server issues HTTP requests to the endpoint, and the endpoint comes
+    # from the client — unrestricted, that is an open server-side request relay
+    # (SSRF). These are the browser vendors' push services: FCM (Chromium-based
+    # browsers), Mozilla (Firefox), Apple (Safari/iOS), WNS (legacy Edge).
+    PUSH_ENDPOINT_HOST_SUFFIXES: str = (
+        "fcm.googleapis.com,"
+        "android.googleapis.com,"
+        "updates.push.services.mozilla.com,"
+        "web.push.apple.com,"
+        "notify.windows.com"
+    )
+
     VAPID_PRIVATE_KEY_DER: str = ""
     VAPID_PRIVATE_KEY_B64: str = ""
     VAPID_PUBLIC_KEY: str = ""

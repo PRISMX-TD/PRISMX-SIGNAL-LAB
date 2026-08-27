@@ -743,6 +743,16 @@ class MT5AccountOut(BaseModel):
     symbolSuffix: str | None = None
     online: bool = False
     lastHeartbeat: datetime | None = None
+    # gateway 绑定已失效、需要用户重新输一次主密码（见 services/gateway_binding.py）。
+    # 与 online 分开，是因为两者的用户动作完全不同：离线是"等一会儿或检查网关"，
+    # 失效是"你必须去重新验证，否则永远不会自己好"。前端把它们显示成同一个灰色
+    # 徽标，用户只会一直等下去。bridge 账号恒为 False。
+    # A revoked gateway binding needing the main password re-entered. Kept
+    # separate from `online` because the required user action differs: offline
+    # means wait, revoked means act — rendering both as one grey badge would
+    # leave the user waiting forever. Always False for bridge accounts.
+    needsReverify: bool = False
+    revokedReason: str | None = None
 
 
 class AccountSuffixRequest(BaseModel):

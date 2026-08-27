@@ -28,6 +28,7 @@ from app.schemas import (
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user, is_account_online, validate_order, validate_sl_tp_direction
 from app.services.discipline import compute_discipline
+from app.services.gateway_binding import is_revoked
 from app.services.gateway_client import (
     TradeRsp,
     run_on_main_loop,
@@ -383,12 +384,20 @@ def _resolve_single_online_login(db: Session, user_id: str) -> str | None:
     return online[0].login if len(online) == 1 else None
 
 
-def _is_gateway_account(db: Session, mt5_login: str | None) -> bool:
-    """检查目标 MT5 账号是否来自 Gateway（非 bridge）。"""
+def _gateway_account(db: Session, mt5_login: str | None) -> MT5Account | None:
+    """取目标 MT5 账号的 gateway 绑定行；不是 gateway 账号返回 None。
+
+    以前这里是个只回 bool 的 _is_gateway_account。改成返回整行，是因为调用方
+    现在还要看这条绑定有没有被撤销——只回 bool 就得再查一次同一行。
+    This used to be a bool-only _is_gateway_account; callers now also need to
+    know whether the binding was revoked, which a bool would cost a second query.
+    """
     if not mt5_login:
-        return False
+        return None
     acc = db.query(MT5Account).filter(MT5Account.login == mt5_login).first()
-    return acc is not None and acc.source == "gateway"
+    if acc is None or acc.source != "gateway":
+        return None
+    return acc
 
 
 def _apply_trade_result(order: Order, rsp: TradeRsp) -> None:
@@ -418,8 +427,37 @@ def _try_gateway_execute(db: Session, order: Order) -> dict | None:
     immediately via the gateway HTTP API. Returns an ORDER_UPDATE push payload,
     or None for non-gateway accounts.
     """
-    if not _is_gateway_account(db, order.mt5_login):
+    account = _gateway_account(db, order.mt5_login)
+    if account is None:
         return None
+
+    # 绑定已撤销：券商侧的密码变了，用户当初授权的那次验证已经作废。这里是
+    # 资金安全的最后一道闸，与 is_account_online 的"判离线"是两回事——离线只
+    # 影响界面与路由，而自动仓管、策略自动下单都可能带着明确的 mt5Login 直接
+    # 走到这里，必须在真正调 gateway 之前显式拒掉。
+    #
+    # 落成 REJECTED 而不是抛异常：调用方（含 auto_manage）本来就按订单状态
+    # 处理结果，抛异常会让自动仓管那一批里的其它指令一起受影响。
+    #
+    # The revoked binding is the money-safety backstop. Reading as offline only
+    # affects the UI and routing, while auto-management and strategy automation
+    # can reach here with an explicit mt5Login, so this must refuse before any
+    # gateway call. Recorded as REJECTED rather than raised: callers already
+    # branch on order status, and raising would disrupt sibling commands in the
+    # same auto-manage batch.
+    if is_revoked(account):
+        order.status = "REJECTED"
+        order.message = (
+            "账号连接已失效（密码已变更），请重新验证 / "
+            "account link revoked (password changed), please verify again"
+        )
+        db.commit()
+        db.refresh(order)
+        logger.warning(
+            "Gateway 下单被拒（绑定已撤销）: %s %s mt5=%s",
+            order.action, order.client_order_id, order.mt5_login,
+        )
+        return order_update_payload(order)
 
     login = int(order.mt5_login)
 
