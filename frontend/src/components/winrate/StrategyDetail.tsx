@@ -25,9 +25,17 @@ import {
   fmtClock, fmtPct, isRated, rateFromCounts, verdictOf,
 } from './shared'
 
-function Block({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+function Block({ title, hint, children, className = '' }: {
+  title: string; hint?: string; children: React.ReactNode
+  // 网格定位类。三块是同一个网格的直接子项，桌面端的两列布局靠调用方传
+  // col-start / row-start 摆出来（见下方网格处的说明）。
+  // Grid placement classes. The three blocks are direct children of one grid and
+  // the caller positions them into the desktop two-column layout with
+  // col-start / row-start — see the note at the grid below.
+  className?: string
+}) {
   return (
-    <section className="rounded-lg p-4" style={{ background: 'var(--nest)' }}>
+    <section className={`rounded-lg p-4 ${className}`} style={{ background: 'var(--nest)' }}>
       <h4 className="text-sm font-semibold text-neutral-100">{title}</h4>
       {/* 提示用 12px 而不是 10px：这几行带着该块最重要的口径说明，手机上 10px
           中文会是整页最难读的字。/ 12px, not 10px: these lines carry the block's
@@ -224,33 +232,50 @@ export default function StrategyDetail({ row, sessions, activeKeys, days, now }:
         )}
       </div>
 
-      {/* 左列两块（时段 + 方向），右列一块（钟点，24 格）；窄屏按 DOM 顺序单列。
-          「一般多久出结果」整块已按产品要求删除。
-          Two blocks on the left (session + side), one on the right (24 hour
-          cells); a single column in DOM order on narrow screens. The
-          time-to-resolution block was removed at the product owner's request. */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-4">
-          <Block title={t('admin.winrate.detail.bySession')} hint={t('admin.winrate.detail.bySessionHint')}>
-            {sessionKeys.map((k) => target.sessions[k] && (
-              <RateRow key={k} label={t(`admin.winrate.session.${k}`)} dotColor={SESSION_COLORS[k] ?? SESSION_COLORS.outside}
-                       bucket={target.sessions[k]}
-                       tag={activeKeys.includes(k) ? t('admin.winrate.timeline.openNow') : undefined} />
-            ))}
-          </Block>
+      {/* 三块平铺在同一个网格里，**DOM 顺序 = 手机端顺序**：时段 → 钟点 → 方向。
+          桌面端靠显式行列定位摆回原来的两列（左：时段 / 方向，右：钟点跨两行）。
 
-          <Block title={t('admin.winrate.detail.bySide')} hint={t('admin.winrate.detail.bySideHint')}>
-            {(['BUY', 'SELL'] as const).map((k) => target.sides[k] && (
-              <RateRow key={k} label={t(`admin.winrate.side.${k}`)} dotColor={SIDE_COLORS[k]} bucket={target.sides[k]} />
-            ))}
-          </Block>
-        </div>
+          原来是「左列一个 div 装两块 + 右列一块」，那种嵌套下手机端的顺序被写死成
+          时段 → 方向 → 钟点，而 CSS 的 order 只能在同一个 flex/grid 容器的直接子项
+          之间排序，跨不过那层 div。所以要调换手机端的顺序，只能先把嵌套拆平——
+          这也是为什么这里用 col-start / row-start 而不是更简单的 order：拆平之后
+          需要显式定位才能让桌面端保持原样。
+
+          Three blocks flattened into one grid, with **DOM order = the mobile
+          order**: session -> hours -> direction. Desktop restores the original two
+          columns via explicit placement (left: session / direction, right: hours
+          spanning both rows).
+
+          It used to be "a div holding two blocks in the left column, one block in
+          the right", which hard-wired the mobile order to session -> direction ->
+          hours: CSS `order` only sorts direct children of one flex/grid container
+          and cannot reach across that div. Swapping the mobile order therefore
+          required flattening first — which is also why this uses col-start /
+          row-start rather than a simpler `order`: once flat, explicit placement is
+          what keeps the desktop layout unchanged. */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Block className="lg:col-start-1 lg:row-start-1"
+               title={t('admin.winrate.detail.bySession')} hint={t('admin.winrate.detail.bySessionHint')}>
+          {sessionKeys.map((k) => target.sessions[k] && (
+            <RateRow key={k} label={t(`admin.winrate.session.${k}`)} dotColor={SESSION_COLORS[k] ?? SESSION_COLORS.outside}
+                     bucket={target.sessions[k]}
+                     tag={activeKeys.includes(k) ? t('admin.winrate.timeline.openNow') : undefined} />
+          ))}
+        </Block>
 
         {hourly && (
-          <Block title={t('admin.winrate.detail.byHour')} hint={t('admin.winrate.detail.byHourHint', { days })}>
+          <Block className="lg:col-start-2 lg:row-start-1 lg:row-span-2"
+                 title={t('admin.winrate.detail.byHour')} hint={t('admin.winrate.detail.byHourHint', { days })}>
             <HourGrid hourly={hourly} now={now} />
           </Block>
         )}
+
+        <Block className="lg:col-start-1 lg:row-start-2"
+               title={t('admin.winrate.detail.bySide')} hint={t('admin.winrate.detail.bySideHint')}>
+          {(['BUY', 'SELL'] as const).map((k) => target.sides[k] && (
+            <RateRow key={k} label={t(`admin.winrate.side.${k}`)} dotColor={SIDE_COLORS[k]} bucket={target.sides[k]} />
+          ))}
+        </Block>
       </div>
     </div>
   )
