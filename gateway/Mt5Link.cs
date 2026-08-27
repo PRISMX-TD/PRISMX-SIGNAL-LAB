@@ -1444,62 +1444,119 @@ namespace Prismx.Mt5Gateway
                 if (_symbolCache.TryGetValue(cacheKey, out cached))
                     return cached;
 
-                // --- 2. exact match first ---
-                using (CIMTConSymbol sym = _manager.SymbolCreate())
+                // 每个别名写法都走一遍"精确匹配 -> 前缀扫描"。只按传进来的名字
+                // 扫是不够的:比特币的信号名是 BTCUSDT,券商品种表里以它为前缀的
+                // 名字一个也没有,于是原样发出去、必然被拒。
+                // Try "exact match -> prefix scan" for each alias spelling. The
+                // name as given isn't enough: Bitcoin arrives as BTCUSDT and no
+                // broker symbol starts with that, so it used to go out unchanged
+                // and always got rejected.
+                foreach (string alias in AliasCandidates(baseSymbol))
                 {
-                    if (_manager.SymbolGet(baseSymbol, group, sym) == MTRetCode.MT_RET_OK)
+                    // --- 2. exact match first ---
+                    using (CIMTConSymbol sym = _manager.SymbolCreate())
                     {
-                        _symbolCache[cacheKey] = baseSymbol;
-                        return baseSymbol;
-                    }
-                }
-
-                // --- 3. scan symbol table for prefixed matches ---
-                string upper = baseSymbol.ToUpperInvariant();
-                List<string> candidates = new List<string>();
-                uint total = _manager.SymbolTotal();
-
-                using (CIMTConSymbol scanSym = _manager.SymbolCreate())
-                {
-                    for (uint i = 0; i < total; i++)
-                    {
-                        if (_manager.SymbolNext(i, scanSym) != MTRetCode.MT_RET_OK)
-                            continue;
-
-                        string name = scanSym.Symbol();
-                        if (string.IsNullOrEmpty(name))
-                            continue;
-
-                        if (!name.ToUpperInvariant().StartsWith(upper))
-                            continue;
-
-                        // Check group access
-                        using (CIMTConSymbol testSym = _manager.SymbolCreate())
+                        if (_manager.SymbolGet(alias, group, sym) == MTRetCode.MT_RET_OK)
                         {
-                            if (_manager.SymbolGet(name, group, testSym) == MTRetCode.MT_RET_OK)
-                                candidates.Add(name);
+                            _symbolCache[cacheKey] = alias;
+                            return alias;
                         }
                     }
-                }
 
-                // pick shortest suffix (closest to base name)
-                if (candidates.Count > 0)
-                {
-                    candidates.Sort((a, b) => a.Length.CompareTo(b.Length));
+                    // --- 3. scan symbol table for prefixed matches ---
+                    string upper = alias.ToUpperInvariant();
+                    List<string> candidates = new List<string>();
+                    uint total = _manager.SymbolTotal();
 
-                    string resolved = candidates[0];
+                    using (CIMTConSymbol scanSym = _manager.SymbolCreate())
+                    {
+                        for (uint i = 0; i < total; i++)
+                        {
+                            if (_manager.SymbolNext(i, scanSym) != MTRetCode.MT_RET_OK)
+                                continue;
 
-                    Log.Info("品种名自动匹配: {0} -> {1} (组={2})",
-                        baseSymbol, resolved, group);
+                            string name = scanSym.Symbol();
+                            if (string.IsNullOrEmpty(name))
+                                continue;
 
-                    _symbolCache[cacheKey] = resolved;
-                    return resolved;
+                            if (!name.ToUpperInvariant().StartsWith(upper))
+                                continue;
+
+                            // Check group access
+                            using (CIMTConSymbol testSym = _manager.SymbolCreate())
+                            {
+                                if (_manager.SymbolGet(name, group, testSym) == MTRetCode.MT_RET_OK)
+                                    candidates.Add(name);
+                            }
+                        }
+                    }
+
+                    // pick shortest suffix (closest to base name)
+                    if (candidates.Count > 0)
+                    {
+                        candidates.Sort((a, b) => a.Length.CompareTo(b.Length));
+
+                        string resolved = candidates[0];
+
+                        Log.Info("品种名自动匹配: {0} -> {1} (组={2})",
+                            baseSymbol, resolved, group);
+
+                        _symbolCache[cacheKey] = resolved;
+                        return resolved;
+                    }
                 }
 
                 // No match — return as-is, let caller handle the error
                 _symbolCache[cacheKey] = baseSymbol;
                 return baseSymbol;
             }
+        }
+
+        //+------------------------------------------------------------------+
+        //| 品种别名:同一个品种在信号侧与券商侧的不同写法                   |
+        //|                                                                  |
+        //| 传进来的名字排第一,其余别名依次兜底。桥接(mt5_worker)与后端     |
+        //| (symbol_aliases)各有一份同样的表,三处各自维护:这边解决的是      |
+        //| "券商把它叫什么",不要合并。                                      |
+        //|                                                                  |
+        //| 表外的加密品种走通用规则:TradingView 的加密警报一律以 USDT 计价  |
+        //| (BTCUSDT/ETHUSDT/XRPUSDT),券商的加密 CFD 一律是 …USD,去掉尾巴   |
+        //| 那个 T 即可,不必逐个币种登记。                                   |
+        //+------------------------------------------------------------------+
+        private static readonly string[][] AliasGroups = new string[][]
+        {
+            new string[] { "BTCUSD", "BTCUSDT" },
+            new string[] { "WTI", "USOIL", "XTIUSD", "WTICOUSD", "CL" },
+        };
+
+        internal static List<string> AliasCandidates(string baseSymbol)
+        {
+            List<string> list = new List<string>();
+            if (string.IsNullOrEmpty(baseSymbol))
+                return list;
+
+            list.Add(baseSymbol);
+            string upper = baseSymbol.ToUpperInvariant();
+
+            foreach (string[] alias_group in AliasGroups)
+            {
+                if (Array.IndexOf(alias_group, upper) < 0)
+                    continue;
+                foreach (string name in alias_group)
+                {
+                    if (!list.Contains(name))
+                        list.Add(name);
+                }
+            }
+
+            if (upper.Length > 4 && upper.EndsWith("USDT"))
+            {
+                string alt = upper.Substring(0, upper.Length - 1);
+                if (!list.Contains(alt))
+                    list.Add(alt);
+            }
+
+            return list;
         }
 
         /// <summary>
