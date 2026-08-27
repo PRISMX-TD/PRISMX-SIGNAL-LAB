@@ -99,7 +99,10 @@ def _hash_legacy_api_tokens() -> None:
 # rev 5: invite_links.grants_trial（邀请链接注册自动开通试用）
 # rev 6: closed_trades.verified（服务端归属核验）+ 去重键改为 (user_id, mt5_login, deal_ticket)
 # rev 7: mt5_accounts.mt5_group / trade_mode（账户实盘判定）
-CURRENT_SCHEMA_REV = 7
+# rev 8: 修 closed_trades 重建：SQLite 索引撞名导致重建中途失败、数据滞留在
+#        closed_trades_legacy 里。必须 +1——中招的库在第二次启动时会因为"新表已经
+#        是新键"而跳过整段并写下 rev 7，此后一路走快速通道，数据永远搬不回来。
+CURRENT_SCHEMA_REV = 8
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -152,6 +155,173 @@ def _write_schema_rev(rev: int) -> None:
                 )
     except Exception:
         logger.warning("写入 schema_rev 失败，下次启动会重跑一遍迁移", exc_info=True)
+
+
+def _rebuild_closed_trades_sqlite() -> None:
+    """把 SQLite 上的 closed_trades 重建成新的去重键。**可中断、可重入。**
+
+    为什么要重建：SQLite 把表级 UNIQUE 实现成匿名自动索引，没法单独 DROP。
+
+    ⚠ 这段**不能**写成"整段包在一个事务里，中途失败就整体回滚"。有两个 SQLite
+    特性联手让那种写法必然出事，2026-08-27 线上就是这么丢的数据：
+
+    ① **索引名在 SQLite 里是全库唯一的，而 `ALTER TABLE ... RENAME` 不重命名索引**
+       ——它们跟着改名后的表走，名字原样占着。紧接着用模型 DDL 建新表时，模型里
+       声明的具名索引（ix_closed_trades_user_id、idx_closed_trades_position）就
+       撞上了还挂在 legacy 表上的同名索引，直接抛
+       `index ix_closed_trades_user_id already exists`。
+
+    ② **pysqlite 只在 DML 之前隐式开事务，DDL 是直接自动提交的**。所以 RENAME 和
+       CREATE TABLE 在异常发生时早就落库了，`engine.begin()` 的回滚撤不掉它们。
+
+    两条叠起来的结果：第一次启动崩掉、服务起不来，closed_trades 变成空表、数据
+    全留在 closed_trades_legacy；**第二次启动反而"成功"**——新表已经是新键，
+    legacy_unique 判定为 False，整段被跳过，然后写下 schema_rev，此后一路走快速
+    通道，那批数据再也没被搬回来过。
+
+    所以这里改成：每一步都先看库里的当前状态再决定做不做，从任何一步中断后重入
+    都能继续；并且**只有逐行核对过条数才删 legacy**——宁可留着一张多余的表，
+    也不能再出现"表删了、数据没搬全"。
+
+    Rebuild closed_trades on SQLite onto the wider dedup key. **Resumable.**
+
+    This must NOT be written as "wrap it all in one transaction and let a failure
+    roll back". Two SQLite behaviours combine to break that, and did so in
+    production on 2026-08-27:
+
+    1. Index names are database-global and `ALTER TABLE ... RENAME` does not
+       rename a table's indexes — they follow the renamed table while keeping
+       their names, so creating the new table from the model's DDL collides with
+       the still-present originals.
+    2. pysqlite only opens a transaction implicitly before DML; DDL autocommits.
+       The RENAME and CREATE TABLE are therefore already durable when the error
+       is raised, and `engine.begin()`'s rollback cannot undo them.
+
+    The result was a failed first start with an empty closed_trades and every row
+    stranded in closed_trades_legacy — followed by a *successful* second start
+    that skipped the whole block (the new table already had the new key) and
+    recorded the revision, after which the fast path meant the rows were never
+    recovered.
+
+    Hence: every step checks the database's current state before acting, so an
+    interrupted run resumes cleanly, and **legacy is dropped only after the row
+    counts have been reconciled** — better a stray table than a repeat of
+    "dropped the table, didn't finish copying".
+    """
+    from app.models import ClosedTrade  # 局部导入：本模块定义 Base，顶层导入会成环
+
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        tables = set(insp.get_table_names())
+
+        # 步骤 1：把旧表挪到 legacy。上一次已经挪过就跳过。
+        # Step 1: move the old table aside, unless a previous run already did.
+        if "closed_trades_legacy" not in tables:
+            conn.execute(text("ALTER TABLE closed_trades RENAME TO closed_trades_legacy"))
+            tables.discard("closed_trades")
+            tables.add("closed_trades_legacy")
+
+        # 步骤 2：把跟着改名走过去的具名索引删掉，腾出名字。这一步就是原来炸掉的
+        # 地方。自动索引（sqlite_autoindex_*）不用管——get_indexes 本来就把它们
+        # 过滤掉了，而且它们会随 DROP TABLE 一起消失。
+        # Step 2: drop the named indexes that travelled with the rename, freeing
+        # their names. This is exactly where the original blew up. Auto-indexes
+        # need no handling: get_indexes filters them out and they die with the
+        # table.
+        for idx in insp.get_indexes("closed_trades_legacy"):
+            name = idx.get("name")
+            if name and not name.startswith("sqlite_autoindex"):
+                conn.execute(text(f'DROP INDEX IF EXISTS "{name}"'))
+
+        # 步骤 3：建新表。上一次已经建出来了就只补索引——那次失败正是卡在建索引，
+        # 表本身是建成了的。
+        # Step 3: create the new table, or if a previous run already created it
+        # (the failure was during index creation, after CREATE TABLE), just make
+        # sure its indexes are all there.
+        if "closed_trades" not in tables:
+            ClosedTrade.__table__.create(bind=conn)
+        else:
+            # 表已经在了，但**必须核实它带的是新去重键**。这整个迁移存在的理由就是
+            # 那个键（旧键太窄，会把第二个券商账号的真实成交当重复丢掉），一张没有
+            # 键的表会让同一个 bug 悄悄回来。真实的半途失败留下的表是模型 DDL 建的、
+            # 键是对的；但人工抢修出来的表未必，所以这里不假设。
+            # The table exists, but its dedup key must be verified: that key is the
+            # entire point of this migration (the old one was narrow enough to drop
+            # a second broker account's genuine fills as duplicates), and a table
+            # without it would quietly reintroduce the same bug. A table left by a
+            # genuine half-finished run was created from the model DDL and has the
+            # right key — one produced by a hand repair might not, so do not assume.
+            want = {c.name for c in ClosedTrade.__table__.columns
+                    if c.name in ("user_id", "mt5_login", "deal_ticket")}
+            has_key = any(
+                set(uc.get("column_names") or []) == want
+                for uc in insp.get_unique_constraints("closed_trades")
+            ) or any(
+                idx.get("unique") and set(idx.get("column_names") or []) == want
+                for idx in insp.get_indexes("closed_trades")
+            )
+            n_existing = conn.execute(text("SELECT COUNT(*) FROM closed_trades")).scalar_one()
+            if not has_key and n_existing == 0:
+                # 空表，重建成模型该有的样子最干净。
+                # Empty, so recreating it exactly as the model declares is cleanest.
+                conn.execute(text("DROP TABLE closed_trades"))
+                ClosedTrade.__table__.create(bind=conn)
+            elif not has_key:
+                # 非空又没键：不敢猜里面的行该怎么归并，留着 legacy 交给人。
+                # Non-empty and keyless: merging is a judgement call, so keep legacy
+                # and hand it to a person.
+                logger.error(
+                    "closed_trades 已有 %d 行但缺少去重键，已中止重建并保留 "
+                    "closed_trades_legacy，请人工核对后再处理", n_existing,
+                )
+                return
+            else:
+                for index in ClosedTrade.__table__.indexes:
+                    index.create(bind=conn, checkfirst=True)
+
+        # 步骤 4：搬数据。列取 legacy 表实际有的那些与模型的交集——重入时
+        # closed_trades 已是新表，从它取列会漏掉 legacy 里的历史列。
+        # 幂等靠**显式按主键排除已搬过的行**，不用 INSERT OR IGNORE：OR IGNORE 会把
+        # 所有约束冲突一并吞掉（NOT NULL、CHECK、外键都算），一旦哪天列对不上，
+        # 表现就是「一行没搬进来、也没有任何报错」——正是这次事故的那种失败方式。
+        # 写成 NOT IN 之后，重复行照样跳过，而真正的错误会当场抛出来。
+        # Step 4: copy. Columns come from what legacy actually has, intersected
+        # with the model — on a resume, closed_trades is the new table and reading
+        # columns from it would miss legacy's historical ones. Idempotency comes
+        # from explicitly excluding already-copied primary keys rather than from
+        # INSERT OR IGNORE, which swallows *every* constraint violation (NOT NULL,
+        # CHECK and foreign keys included): the day the columns stop lining up that
+        # would present as "nothing copied, nothing logged" — this incident's exact
+        # failure mode. With NOT IN, duplicates are still skipped while a genuine
+        # error raises on the spot.
+        legacy_cols = {c["name"] for c in insp.get_columns("closed_trades_legacy")}
+        carried = [c.name for c in ClosedTrade.__table__.columns if c.name in legacy_cols]
+        cols_sql = ", ".join(f'"{c}"' for c in carried)
+        conn.execute(text(
+            f"INSERT INTO closed_trades ({cols_sql}) "
+            f"SELECT {cols_sql} FROM closed_trades_legacy "
+            f"WHERE id NOT IN (SELECT id FROM closed_trades)"
+        ))
+
+        # 步骤 5：核对条数，够了才删 legacy。不够就把表留着并告警——那批行还在，
+        # 人工可以捞回来；删掉就真没了。
+        # Step 5: reconcile the counts, and only then drop legacy. If they do not
+        # match, keep the table and warn: the rows are still recoverable by hand,
+        # whereas dropping makes the loss permanent.
+        n_legacy = conn.execute(text("SELECT COUNT(*) FROM closed_trades_legacy")).scalar_one()
+        n_new = conn.execute(text("SELECT COUNT(*) FROM closed_trades")).scalar_one()
+        if n_new >= n_legacy:
+            conn.execute(text("DROP TABLE closed_trades_legacy"))
+            logger.info(
+                "closed_trades 已重建：去重键改为 (user_id, mt5_login, deal_ticket)，搬入 %d 行",
+                n_new,
+            )
+        else:
+            logger.error(
+                "closed_trades 重建未搬全（legacy %d 行 / 新表 %d 行），"
+                "已保留 closed_trades_legacy 供人工核对，请勿手工删除",
+                n_legacy, n_new,
+            )
 
 
 def _migrate_columns() -> None:
@@ -316,12 +486,7 @@ def _migrate_columns() -> None:
                 ))
         else:
             # SQLite 把 CREATE TABLE 里的 UNIQUE 约束实现成匿名自动索引，没法单独
-            # DROP，只能整表重建。用模型自己的 DDL 建新表（不手抄一遍列定义，避免
-            # 和模型漂移），整段跑在一个事务里：中途失败会整体回滚，不会留下半张表。
-            # SQLite implements a table-level UNIQUE as an anonymous auto-index
-            # that can't be dropped, so the table has to be rebuilt. The new table
-            # is created from the model's own DDL (never a hand-copied column list)
-            # and the whole dance runs in one transaction.
+            # DROP，只能整表重建。
             # 检测必须走 get_unique_constraints：SQLite 把表级 UNIQUE 实现成
             # sqlite_autoindex_*，而 SQLAlchemy 的 get_indexes 会把这类自动索引
             # 过滤掉——用它检测会永远查不到旧约束，迁移静默不执行。
@@ -335,20 +500,16 @@ def _migrate_columns() -> None:
                 idx.get("unique") and set(idx.get("column_names") or []) == legacy_key
                 for idx in inspector.get_indexes("closed_trades")
             )
-            if legacy_unique:
-                from app.models import ClosedTrade  # 局部导入：本模块定义 Base，顶层导入会成环
-
-                carried = [c.name for c in ClosedTrade.__table__.columns if c.name in ct_cols]
-                cols_sql = ", ".join(carried)
-                with engine.begin() as conn:
-                    conn.execute(text("ALTER TABLE closed_trades RENAME TO closed_trades_legacy"))
-                    ClosedTrade.__table__.create(bind=conn)
-                    conn.execute(text(
-                        f"INSERT INTO closed_trades ({cols_sql}) "
-                        f"SELECT {cols_sql} FROM closed_trades_legacy"
-                    ))
-                    conn.execute(text("DROP TABLE closed_trades_legacy"))
-                logger.info("closed_trades 已重建：去重键改为 (user_id, mt5_login, deal_ticket)")
+            # 上一次重建死在半路会留下 closed_trades_legacy：数据全在它里面，而
+            # closed_trades 是一张空的新表。**这时 legacy_unique 是 False**（新表
+            # 已经是新键了），只看它会以为"没什么要做的"，数据就永远留在 legacy 里。
+            # A half-finished rebuild leaves closed_trades_legacy holding the data
+            # while closed_trades is a new empty table. legacy_unique is then False
+            # — the new table already carries the new key — so keying only off it
+            # would conclude "nothing to do" and strand the rows forever.
+            leftover = "closed_trades_legacy" in inspector.get_table_names()
+            if legacy_unique or leftover:
+                _rebuild_closed_trades_sqlite()
 
     # 后台清扫/过期扫描用的索引：create_all 不会为已存在的表补索引，这里补。
     # Indexes for the background sweeps: create_all won't add indexes to
