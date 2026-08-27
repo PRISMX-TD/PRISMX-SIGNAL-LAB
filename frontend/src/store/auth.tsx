@@ -86,9 +86,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // token 缺失则清空用户 / clear user if token missing
     if (!getToken()) setUser(null)
     // 注册 401 回调：凭证失效时清空用户态，路由守卫会自动跳回登录页。
+    //
+    // 清理走与主动登出完全相同的那一条（clearUserScopedStorage），不是只删
+    // USER_KEY。会话过期与点登出在"这台设备上不该再留着上一个人的数据"这件事上
+    // 没有区别，而且过期是更常走的那条路——用户多半是关掉标签页走人，而不是先点
+    // 一下登出。两条路径各写各的，漏的一定是这条。
+    //
+    // Clearing goes through exactly the same path as an explicit logout
+    // (clearUserScopedStorage), not just USER_KEY. An expired session and a
+    // logout click are indistinguishable as far as "this device should stop
+    // holding the previous user's data" goes, and expiry is the better-travelled
+    // route — people close the tab rather than click logout. Give the two paths
+    // separate implementations and this is the one that gets forgotten.
+    //
     // Register 401 handler: clear user on expired token; the route guard redirects to login.
     setUnauthorizedHandler(() => {
-      localStorage.removeItem(USER_KEY)
+      clearUserScopedStorage()
       setUser(null)
     })
     return () => setUnauthorizedHandler(null)
