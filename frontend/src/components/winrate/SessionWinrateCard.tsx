@@ -21,6 +21,10 @@
 // 下拉用共享的 `components/Select`，不用原生 `<select>`：原生弹出列表由浏览器/
 // 系统渲染，深色主题下压不住样式，实测是一片白底黑字。
 //
+// 「选了哪个策略 × 哪个品种」与「策略分析」页首屏**共用同一份偏好**
+// （`useWinratePick`，存在云端、跨设备）——右上角「查看详情 ›」直接链到那一页，
+// 两处显示不同的选中值会让人以为点错了地方。
+//
 // The dashboard's "current session win rate" card, replacing the old market
 // overview. It answers "for the line I care about, when in this session should I
 // be watching": the open session, a strategy and symbol picker, and that pair's
@@ -46,77 +50,25 @@
 // The dropdowns are the shared `components/Select`, not native `<select>`: a
 // native popup list is rendered by the browser/OS and will not take dark-theme
 // styling — in practice a slab of white.
+//
+// The chosen strategy-and-symbol is **the same preference** the analysis page's
+// first screen uses (`useWinratePick`, cloud-stored and cross-device): "view
+// detail" links straight there, and two different selections would read as
+// having landed somewhere unintended.
 import { useEffect, useState, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { signalApi } from '../../api/client'
 import Select from '../Select'
-import { useAuth } from '../../store/auth'
 import type { AdminStrategyWinRate, SessionWindow } from '../../api/types'
 import RateChip from './RateChip'
 import SessionTimeline from './SessionTimeline'
 import {
   SESSION_COLORS, fmtClock, fmtDurationHm, rankHours, sessionStatus, zoneOffsetMinutes,
 } from './shared'
+import { useWinratePick } from './useWinratePick'
 
 const TOP_ON_CARD = 3
-const DEFAULT_SYMBOL = 'XAUUSD'
-
-type CardPick = { strategy: string; symbol: string }
-
-/** 每个用户各记各的选择，所以键里必须带用户 id。
- *
- *  localStorage 是按**浏览器**存的，不按用户：不带 id 的话，同一台电脑上换个账号
- *  登录，上一个人选的策略会原样出现在新用户的卡片上——那既是别人的偏好，也可能
- *  是一个该用户根本看不到的策略。
- *
- *  Each user remembers their own pick, so the key carries the user id.
- *  localStorage is per-browser, not per-user: without the id, signing in as
- *  someone else on the same machine would surface the previous person's chosen
- *  strategy — their preference, and possibly one this user cannot even see. */
-const pickKey = (userId: string) => `prismx.dash.winratePick.${userId}`
-
-function readPick(userId: string | undefined): CardPick | null {
-  if (!userId) return null
-  try {
-    const raw = localStorage.getItem(pickKey(userId))
-    if (!raw) return null
-    const v = JSON.parse(raw) as Partial<CardPick> | null
-    if (v && typeof v.strategy === 'string' && typeof v.symbol === 'string') {
-      return { strategy: v.strategy, symbol: v.symbol }
-    }
-  } catch {
-    // 存坏了当没存过。这里绝不能抛：localStorage 在隐私模式下会直接 throw，
-    // 而一个记不住的偏好不该让整张卡崩掉。
-    // A corrupt value counts as none. This must never throw: localStorage
-    // raises outright in private mode, and an unremembered preference is no
-    // reason to take the card down with it.
-  }
-  return null
-}
-
-/** 把（可能过时的）选择落到当前数据上，返回的组合一定存在。
- *
- *  存下来的选择随时会失效：策略被管理员取消公开、某个品种最近 30 天一条信号都没
- *  发。回退顺序是"存的 → 黄金 → 第一个"，每一级都在**当前策略的**品种里找——
- *  换策略时沿用上次选的品种是对的（同一个品种在另一个策略下照样有意义），但那个
- *  品种在新策略里不存在时必须让位。
- *
- *  Resolve a (possibly stale) pick against the current data; the result always
- *  exists. A stored pick goes stale easily: the admin un-publishes a strategy, or
- *  a symbol sees no signals for 30 days. The fallback runs saved -> gold ->
- *  first, each looked up **within the chosen strategy's** symbols — carrying the
- *  previous symbol across a strategy switch is right (the same symbol still means
- *  something under another strategy), but it has to yield when absent there. */
-function resolvePick(data: AdminStrategyWinRate, saved: CardPick | null): CardPick | null {
-  if (data.strategies.length === 0) return null
-  const row = data.strategies.find((s) => s.strategy === saved?.strategy) ?? data.strategies[0]
-  const symbol =
-    row.symbols.find((s) => s.symbol === saved?.symbol)?.symbol
-    ?? row.symbols.find((s) => s.symbol === DEFAULT_SYMBOL)?.symbol
-    ?? row.symbols[0]?.symbol
-  return symbol ? { strategy: row.strategy, symbol } : null
-}
 
 /** 挑出要显示的时段：进行中的里面**最后开盘**的那个；一个都没进行中就用
  *  「其他时段」那一桶。
@@ -155,24 +107,15 @@ function sessionsForUtcHour(hour: number, sessions: SessionWindow[], now: Date):
 
 const SessionWinrateCard: FC = () => {
   const { t } = useTranslation()
-  const { user } = useAuth()
-  const userId = user?.id
   const [data, setData] = useState<AdminStrategyWinRate | null>(null)
   const [loading, setLoading] = useState(true)
-  const [saved, setSaved] = useState<CardPick | null>(null)
   const [now, setNow] = useState(() => new Date())
+  const { pick, row, symbolRow, chooseStrategy, chooseSymbol } = useWinratePick(data)
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 60_000)
     return () => window.clearInterval(id)
   }, [])
-
-  // 用户就位（或换人）时再读偏好：登录态是异步恢复的，挂载那一刻 user 可能还是
-  // null，那时读到的永远是"没存过"。
-  // Read the preference once the user is known (or changes): auth restores
-  // asynchronously, so at mount `user` may still be null and the read would
-  // always come back empty.
-  useEffect(() => { setSaved(readPick(userId)) }, [userId])
 
   useEffect(() => {
     let mounted = true
@@ -184,21 +127,6 @@ const SessionWinrateCard: FC = () => {
     return () => { mounted = false }
   }, [])
 
-  const choose = (next: CardPick) => {
-    setSaved(next)
-    if (!userId) return
-    try {
-      localStorage.setItem(pickKey(userId), JSON.stringify(next))
-    } catch {
-      // 同 readPick：存不下就只在本次会话内生效，不该报错。
-      // As in readPick: if it cannot be stored the pick just lives for this
-      // session, which is no reason to raise.
-    }
-  }
-
-  const pick = data ? resolvePick(data, saved) : null
-  const row = data && pick ? data.strategies.find((s) => s.strategy === pick.strategy) : undefined
-  const symbolRow = row && pick ? row.symbols.find((s) => s.symbol === pick.symbol) : undefined
   const picked = data ? pickSession(data.sessions, now) : null
 
   // 没有可选组合时也算空态：卡面主体就是这两个选择器，选不出东西就没什么可显示的。
@@ -300,22 +228,14 @@ const SessionWinrateCard: FC = () => {
                 value: s.strategy,
                 label: s.strategy || t('admin.winrate.strategies.unnamed'),
               }))}
-              onChange={(v) => {
-                // 换策略时走一遍 resolvePick：上次选的品种在新策略里可能不存在，
-                // 直接沿用会指向一个空的品种行。
-                // Re-resolve on a strategy switch: the previous symbol may not
-                // exist under the new strategy, and carrying it over blindly
-                // would point at an absent row.
-                const next = resolvePick(data!, { strategy: v, symbol: pick!.symbol })
-                if (next) choose(next)
-              }}
+              onChange={chooseStrategy}
             />
             <Select
               className={`${selectCls} tabular-nums`}
               ariaLabel={t('dashboard.sessionWinrate.pickSymbol')}
               value={pick!.symbol}
               options={row!.symbols.map((s) => ({ value: s.symbol, label: s.symbol }))}
-              onChange={(v) => choose({ strategy: pick!.strategy, symbol: v })}
+              onChange={chooseSymbol}
             />
           </div>
 

@@ -1041,14 +1041,11 @@
         "nowActive": "Now: {{name}}",
         "nowLeft": "open · {{time}} left",
         "nowOutside": "Outside the three sessions right now",
-        "symbolsGood": "Worth a look",
-        "symbolsHint": "symbols doing better in this session over the last {{days}} days",
-        "symbolsNone": "No symbol has done well in this session over the last {{days}} days.",
         "next": "Next: {{name}} opens in {{time}}",
         "timelineTitle": "Sessions · your time",
         "hoursGood": "Best hours in this session",
         "hoursHint": "last {{days}} days, in your local time",
-        "hoursNone": "No hour in this session is above half over the last {{days}} days."
+        "hoursNone": "Not enough data for this pair in this session over the last {{days}} days."
       },
       "aria": {
         "tug": "{{label}}: {{tp}} wins, {{sl}} losses, win rate {{rate}}"
