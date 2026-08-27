@@ -668,8 +668,32 @@ def server_matches_broker(server: str | None, patterns: list) -> bool:
 # Windows gateway (the group name already reaches the backend). Anything that
 # matches nothing stays unknown rather than being guessed — see account_type.py.
 ACCOUNT_TYPE_DEFAULTS: dict = {
-    "real_group_prefixes": ["real"],
-    "contest_group_prefixes": ["contest"],
+    # 真仓组白名单。**是两个具体组，不是 MCSA 这个宽前缀**——合作券商
+    # (Make Capital) 专门为本平台开了这两个组，只有被加进这两个组的账号才
+    # 连得上 gateway；MCSA 下的其他子组不属于本平台的真仓接入。
+    #
+    # 写宽前缀 "MCSA" 会把将来券商在同一实体下新开的任何子组（包括他们自己的
+    # 测试组）一并判成实盘，方向正好是最危险的那个——把非真仓算成真仓会污染
+    # 整个战绩体系。宁可新开真仓组时改一次配置。
+    #
+    # Live-account whitelist: two specific groups the partner broker opened for
+    # this platform, not the broad "MCSA" prefix. Only accounts placed in these
+    # can link to the gateway. A broad prefix would sweep in any future sibling
+    # group (including the broker's own test groups) as live — the dangerous
+    # direction. Adding a group here on the day a new one opens is the cheaper
+    # trade.
+    "real_group_prefixes": [
+        r"MCSA\I-STD-SLAB-USD",
+        r"MCSA\I-PLUS-SLAB-USD",
+    ],
+    "contest_group_prefixes": [],
+    # 已知的模拟组命名。**没列到的组不会被当成实盘**（判为未知、排除在实盘统计
+    # 外，并打一条 warning），所以这份表不求穷尽——它的作用是把常见模拟组明确
+    # 标出来，让"未知"这个信号留给真正没见过的组名，运维一看日志就知道券商那边
+    # 新开了组。
+    # Known demo namings. Anything unlisted is classified unknown (excluded from
+    # live stats, with a warning) rather than live, so this list needn't be
+    # exhaustive — it exists so the "unknown" signal stays meaningful.
     "demo_group_prefixes": ["demo", "preliminary"],
 }
 
