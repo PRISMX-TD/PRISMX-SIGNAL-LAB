@@ -25,8 +25,9 @@
 // 点错了地方。
 //
 // 欧洲盘与纽约盘重叠的四小时里两个盘都在进行，就各给一块；不在任何盘内时用
-// 「其他时段」那一桶。**选择器只出现在整块顶部一次**，不放进每个盘的块里——重叠
-// 时会渲染两块，两套控件读者不知道该动哪个。
+// 「其他时段」那一桶。**选择器只渲染一次，摆在「现在：X 盘」那一行之后**——那一行
+// 是结论，选择器是调节它的控件，控件不该挡在结论前面；重叠时只交给第一块，两套
+// 控件读者不知道该动哪个。
 //
 // 选哪几个按 Wilson 下限（把薄样本沉下去），选出来之后按胜率排。整页不显示笔数，
 // 也不显示写着判定的芯片：胜率数字的颜色本身就是判定，绿=明显高于一半、
@@ -61,9 +62,10 @@
 // links here, and differing selections would read as a wrong landing.
 //
 // During the London/New York overlap both sessions get a block; outside all
-// three, the "outside" bucket is used. **The pickers appear once, above the
-// blocks** — with two blocks on screen, two sets of controls leave the reader
-// unsure which one to touch.
+// three, the "outside" bucket is used. **The pickers render once, below the
+// "Now: X session" line** — that line is the conclusion and a control adjusting
+// it does not belong in front of it; during an overlap only the first block gets
+// them, since two sets would leave the reader unsure which to touch.
 //
 // Selection is by Wilson lower bound (thin samples sink), display by rate.
 // Neither trade counts nor worded verdict chips appear: the colour of the
@@ -130,13 +132,17 @@ function Group({ label, hint, children }: { label: string; hint: string; childre
 /** 一个时段的"该不该盯"块：名字 + 剩余时间 → 盘里最好的几个钟点 → 可以留意的品种。
  *  One session's "worth watching?" block: name + time left → its best hours →
  *  symbols worth a look. */
-function SessionBlock({ data, symbolRow, sessionKey, title, minutesLeft, now }: {
+function SessionBlock({ data, symbolRow, sessionKey, title, minutesLeft, now, pickers }: {
   data: AdminStrategyWinRate
   symbolRow: SymbolWinRate | undefined
   sessionKey: string
   title: string
   minutesLeft?: number
   now: Date
+  // 两个选择器。**只有第一块拿得到**（见下方渲染处与调用处的说明）。
+  // The two pickers; **only the first block receives them** — see the note at the
+  // render site below and at the call site.
+  pickers?: React.ReactNode
 }) {
   const { t } = useTranslation()
   const hours = pickHours(data, symbolRow, sessionKey, now)
@@ -158,6 +164,13 @@ function SessionBlock({ data, symbolRow, sessionKey, title, minutesLeft, now }: 
           </span>
         )}
       </h3>
+
+      {/* 选择器摆在「现在：亚洲盘」**之后**：那一行是结论（现在该不该盯），
+          选择器是调节它的控件，控件不该挡在结论前面。
+          The pickers sit *after* the "Now: Asian session" line: that line is the
+          conclusion (is now worth watching), and a control that adjusts it does
+          not belong in front of it. */}
+      {pickers}
 
       <div className="mt-3 space-y-4">
         <Group label={t('admin.winrate.watch.hoursGood')} hint={t('admin.winrate.watch.hoursHint', { days: data.days })}>
@@ -181,6 +194,44 @@ export default function WatchNow({ data, now }: { data: AdminStrategyWinRate; no
   const { t } = useTranslation()
   const { pick, row, symbolRow, chooseStrategy, chooseSymbol } = useWinratePick(data)
   const statuses = data.sessions.map((s) => ({ s, st: sessionStatus(s, now) }))
+
+  // 两个选择器构造一次，**只交给第一个时段块**。欧洲盘与纽约盘重叠的四小时里
+  // 下面会渲染两块，每块都给一套的话读者不知道该动哪个——而它们本来就是管整段的，
+  // 不是管某一个盘的。代价是重叠时它们视觉上贴着第一个盘，看起来像只管那个盘；
+  // 换来的是不会出现两套互相矛盾的控件。
+  // **没有「全部」这一项**：这一层回答的是「我这一路现在该几点盯」，而"全部策略的
+  // 全部品种"合起来的钟点胜率不指向任何一个能下手的动作。
+  //
+  // Built once and handed to the **first** session block only. During the four-hour
+  // London/New York overlap two blocks render below; a set per block would leave
+  // the reader unsure which to touch, when they govern the whole section rather
+  // than any one session. The cost is that during an overlap they sit visually
+  // against the first session and can read as belonging to it; the gain is never
+  // showing two sets of controls that appear to disagree.
+  // **No "all" option**: this layer answers "when should I watch my line", and an
+  // hour rate pooled over every strategy and symbol points at no action anyone can
+  // take.
+  const pickers = pick && row ? (
+    <div className="mt-3 flex flex-wrap items-center gap-2">
+      <Select
+        className="min-w-0"
+        ariaLabel={t('dashboard.sessionWinrate.pickStrategy')}
+        value={pick.strategy}
+        options={data.strategies.map((s) => ({
+          value: s.strategy,
+          label: s.strategy || t('admin.winrate.strategies.unnamed'),
+        }))}
+        onChange={chooseStrategy}
+      />
+      <Select
+        className="min-w-0 tabular-nums"
+        ariaLabel={t('dashboard.sessionWinrate.pickSymbol')}
+        value={pick.symbol}
+        options={row.symbols.map((s) => ({ value: s.symbol, label: s.symbol }))}
+        onChange={chooseSymbol}
+      />
+    </div>
+  ) : null
   const active = statuses.filter((x) => x.st.state === 'active')
   const next = statuses
     .filter((x): x is { s: typeof x.s; st: { state: 'upcoming'; minutesToStart: number } } => x.st.state === 'upcoming')
@@ -191,46 +242,17 @@ export default function WatchNow({ data, now }: { data: AdminStrategyWinRate; no
         <div className="min-w-0">
           <h2 className="text-2xs uppercase tracking-wider text-neutral-500">{t('admin.winrate.watch.title')}</h2>
 
-          {/* 两个选择器，**整块只出现一次**（重叠时段下面会有两块，两套控件读者不
-              知道该动哪个）。**没有「全部」这一项**：这一层回答的是"我这一路现在该
-              几点盯"，而"全部策略的全部品种"合起来的钟点胜率不指向任何能下手的动作。
-              Two pickers, **rendered once** for the whole section: during an overlap
-              two session blocks appear below, and two sets of controls would leave
-              the reader unsure which to touch. **No "all" option** — this layer
-              answers "when should I watch my line", and an hour rate pooled over
-              every strategy and symbol points at no action anyone can take. */}
-          {pick && row && (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Select
-                className="min-w-0"
-                ariaLabel={t('dashboard.sessionWinrate.pickStrategy')}
-                value={pick.strategy}
-                options={data.strategies.map((s) => ({
-                  value: s.strategy,
-                  label: s.strategy || t('admin.winrate.strategies.unnamed'),
-                }))}
-                onChange={chooseStrategy}
-              />
-              <Select
-                className="min-w-0 tabular-nums"
-                ariaLabel={t('dashboard.sessionWinrate.pickSymbol')}
-                value={pick.symbol}
-                options={row.symbols.map((s) => ({ value: s.symbol, label: s.symbol }))}
-                onChange={chooseSymbol}
-              />
-            </div>
-          )}
-
-          <div className="mt-4 space-y-6">
+          <div className="mt-3 space-y-6">
             {active.length > 0 ? (
-              active.map(({ s, st }) => (
+              active.map(({ s, st }, i) => (
                 <SessionBlock key={s.key} data={data} symbolRow={symbolRow} sessionKey={s.key} now={now}
                               title={t('admin.winrate.watch.nowActive', { name: t(`admin.winrate.session.${s.key}`) })}
-                              minutesLeft={st.state === 'active' ? st.minutesToEnd : undefined} />
+                              minutesLeft={st.state === 'active' ? st.minutesToEnd : undefined}
+                              pickers={i === 0 ? pickers : undefined} />
               ))
             ) : (
               <SessionBlock data={data} symbolRow={symbolRow} sessionKey="outside" now={now}
-                            title={t('admin.winrate.watch.nowOutside')} />
+                            title={t('admin.winrate.watch.nowOutside')} pickers={pickers} />
             )}
           </div>
 
