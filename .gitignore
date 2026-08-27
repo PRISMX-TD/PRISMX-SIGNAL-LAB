@@ -14,9 +14,18 @@ dist/
 .mypy_cache/
 .ruff_cache/
 
-# 测试代码：不纳入公开仓库
-# Tests: kept out of the public repo
-backend/tests/
+# 后端测试**纳入仓库**（2026-08-27 改）。此前排除在外的理由是不纳入公开仓库，
+# 代价是没有任何一条 CI 守得住回归——直到一次静默的生产数据丢失（closed_trades
+# 重建清空数据、服务起不来，见 CURRENT_SCHEMA_REV 的 rev 8）逼出这个结论：
+# 那类 bug 全程不报错，只有测试能拦住，而测试留在本地等于没有。
+# 纳入前已把夹具里的真实 MT5 账号换成假号（公开仓库不该出现真实账号）。
+# Backend tests are now tracked (2026-08-27). They were excluded to keep them out
+# of a public repo, at the cost of no CI guarding any regression — until a silent
+# production data loss (the closed_trades rebuild emptying the table while the
+# service failed to start; see rev 8) settled the question: that class of bug
+# raises nothing, only a test catches it, and a test that lives only on one
+# machine catches nothing. Real MT5 logins in the fixtures were replaced with
+# fake ones before tracking, since a public repo is no place for them.
 
 # 覆盖率报告 / coverage reports
 .coverage
