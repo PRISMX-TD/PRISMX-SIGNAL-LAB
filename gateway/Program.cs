@@ -343,8 +343,11 @@ namespace Prismx.Mt5Gateway
                 }
 
                 Console.WriteLine();
-                Console.WriteLine("  提示: 用 diag 测试具体品种:");
-                Console.WriteLine("    mt5gateway.exe diag 100039 <品种名>");
+                // 上面每个品种已经逐个试过报价，再往下一步是「这个品种在某个账号
+                // 上能不能真的下单」——那是 selftest 的第三步。原提示指向的 diag
+                // 模式早已从 Main 的 switch 里删掉，照着敲只会得到「未知模式」。
+                Console.WriteLine("  提示: 上面已逐个试过报价；要验证某账号能否真的下单:");
+                Console.WriteLine("    mt5gateway.exe selftest <客户账号> <品种名> 0.01");
             }
 
             return 0;

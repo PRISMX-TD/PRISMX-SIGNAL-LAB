@@ -1,11 +1,27 @@
 """API Token 路由：网页端查看/重置连接 MT5 所用的专属 Token。
 API token router: view/reset the per-user token used to connect MT5.
 
-历史上本路由还承载 EA 的账号登记、后缀与在线状态端点；EA 接入方式已移除，
-MT5 统一经 PRISMX Bridge 接入（多账号与后缀见 /api/bridge/*）。
-Historically this router also served the EA's account registration, suffix and
-status endpoints. The EA integrations have been removed; MT5 connects solely
-via the PRISMX Bridge (accounts & suffix live under /api/bridge/*).
+历史上本路由还承载 EA 的账号登记、后缀与在线状态端点，这几个已经移除：交易
+账号现在有两条接入通道，PRISMX Bridge（/api/bridge/*，用户机上的桌面程序）与
+券商直连网关（/api/gateway/*），按 mt5_accounts.source 区分。
+
+注意别把上面那句读成「EA 已经不用了」：被移除的只是**账号登记**这一块。行情
+推送的 EA 通道仍在跑，而且是全站唯一的喂价来源——K 线与报价都由
+PRISMX_MarketFeed.mq5 推到 /api/feed/*（见 routers/chart.py），多周期趋势推到
+/api/webhook/trend。停掉它，图表、策略求值与信号胜负判定会一起断粮。
+
+This router historically also served the EA's account registration, suffix and
+status endpoints; those are gone. Trading accounts now arrive through two
+channels — the PRISMX Bridge (/api/bridge/*, a desktop app on the user's
+machine) and the direct broker gateway (/api/gateway/*) — told apart by
+mt5_accounts.source.
+
+Do not read that as "the EA is no longer used": only account registration was
+removed. The EA's market-data channel is still running and is the sole price
+feed for the whole platform — PRISMX_MarketFeed.mq5 pushes candles and quotes to
+/api/feed/* (see routers/chart.py) and multi-timeframe trends to
+/api/webhook/trend. Stop it and charts, strategy evaluation and signal
+resolution all lose their input at once.
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session

@@ -62,6 +62,38 @@ PAGE_SIZE_DEFAULT = 50
 PAGE_SIZE_MAX = 200
 
 
+def _user_out(u: User, account_count: int) -> AdminUserOut:
+    """把 User 行转成管理端的用户载荷。
+
+    一份定义而不是每个端点各写一遍：列表与单用户 PATCH 此前各自构造，PATCH 那份
+    漏了 phone。漏字段不会报错——AdminUserOut 里 phone 有默认值 None，缺了就是安静
+    地返回 null。前端保存后拿响应整行替换列表行（AdminPage.tsx），于是管理员每改
+    一次用户，那一行的手机号就空掉，要刷新页面才回来。这类漏字段只要构造点不止
+    一个就会再次发生，所以收敛成一处。
+
+    Serialize a User row into the admin-facing payload.
+
+    One definition rather than one per endpoint: the list and the single-user
+    PATCH each built their own, and the PATCH one omitted phone. A missing field
+    raises nothing — phone defaults to None on AdminUserOut, so it just returns
+    null quietly. The frontend replaces the whole list row with the response
+    (AdminPage.tsx), so every admin edit blanked that user's phone until a page
+    reload. This recurs as long as there is more than one construction site.
+    """
+    return AdminUserOut(
+        id=u.id,
+        email=u.email,
+        phone=u.phone,
+        role=u.role,
+        plan=u.plan,
+        planExpiresAt=u.plan_expires_at,
+        planNote=u.plan_note,
+        createdAt=u.created_at,
+        lastActiveAt=u.last_active_at,
+        mt5AccountCount=account_count,
+    )
+
+
 @router.get("/users", response_model=dict)
 def list_users(
     q: str | None = Query(default=None, max_length=128, description="按邮箱或手机号模糊搜索 / fuzzy search by email or phone"),
@@ -111,21 +143,7 @@ def list_users(
         ):
             counts[uid] = cnt
 
-    users = [
-        AdminUserOut(
-            id=u.id,
-            email=u.email,
-            phone=u.phone,
-            role=u.role,
-            plan=u.plan,
-            planExpiresAt=u.plan_expires_at,
-            planNote=u.plan_note,
-            createdAt=u.created_at,
-            lastActiveAt=u.last_active_at,
-            mt5AccountCount=counts.get(u.id, 0),
-        )
-        for u in rows
-    ]
+    users = [_user_out(u, counts.get(u.id, 0)) for u in rows]
     return {"users": [x.model_dump(mode="json") for x in users], "total": total, "limit": limit, "offset": offset}
 
 
@@ -227,17 +245,7 @@ def update_user(
     db.refresh(target)
 
     account_count = db.query(func.count(MT5Account.id)).filter(MT5Account.user_id == target.id).scalar() or 0
-    return AdminUserOut(
-        id=target.id,
-        email=target.email,
-        role=target.role,
-        plan=target.plan,
-        planExpiresAt=target.plan_expires_at,
-        planNote=target.plan_note,
-        createdAt=target.created_at,
-        lastActiveAt=target.last_active_at,
-        mt5AccountCount=account_count,
-    )
+    return _user_out(target, account_count)
 
 
 # ---------- 平台设置：合作券商锁 / platform settings: partner-broker lock ----------

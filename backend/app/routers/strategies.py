@@ -518,31 +518,33 @@ def update_strategy(
         row.take_profit_value = body.takeProfitValue
     if body.oneTradeAtATime is not None:
         row.one_trade_at_a_time = body.oneTradeAtATime
-    if body.exitTimeoutBars is not None:
+    # 以下四个可空字段一律用 model_fields_set 而不是 `is not None` 判断。
+    #
+    # 显式传 null（把这项关掉）与压根不传（保持原值）在 Pydantic 里都是 None，
+    # 只有「这个键出现过吗」能区分两者。用 is not None 判断的后果是关不掉——用户
+    # 在编辑器里把「超时出场 30 根」改成 0（前端转成 null 发出，见
+    # StrategiesPage.tsx 的 `v > 0 ? v : null`），保存提示成功，回来一看还是 30。
+    # 这四个字段前端都是恒定传出的，不存在「省略键」的调用方，所以判据换成键是否
+    # 出现之后，语义就是前端一直以为的那个。
+    #
+    # These four nullable fields all key off model_fields_set rather than
+    # `is not None`. An explicit null (turn this off) and an omitted field both
+    # arrive as None in Pydantic, and only "was this key present" separates them.
+    # With an `is not None` guard they cannot be switched off: the user sets
+    # "exit after 30 bars" to 0 in the editor (sent as null — see
+    # `v > 0 ? v : null` in StrategiesPage.tsx), the save reports success, and the
+    # value is still 30 on return. The frontend always sends all four, so no
+    # caller omits them, and keying off presence gives them the semantics the
+    # frontend assumed all along.
+    if "exitTimeoutBars" in body.model_fields_set:
         row.exit_timeout_bars = body.exitTimeoutBars
-    # 用 model_fields_set 而不是 `is not None`：显式传 null（清空时段）与压根不传
-    # （保持原值）在 Pydantic 里都是 None，只有「这个键出现过吗」能区分两者。
-    # 前端的「不限制」就是显式 null，用 is not None 判断会让它永远清不掉。
-    # 已知缺陷：同一写法也让 exitTimeoutBars / dailySignalCap / cooldownMinutes
-    # 三个可空字段无法被 PATCH 清回 null（编辑器里它们填 0 表示不启用，前端把 0
-    # 转成 null 发出，同样清不掉）。改动它们会牵动编辑器语义与既有测试，此处只修
-    # sessionFilter，另三项明确记录在案而不静默带过。
-    # Keyed off model_fields_set rather than `is not None`: an explicit null
-    # (clear the session) and an omitted field both arrive as None in Pydantic,
-    # and only "was this key present" separates them. The UI's "no restriction"
-    # sends an explicit null, which an `is not None` guard would never apply.
-    # Known defect: the same pattern keeps exitTimeoutBars / dailySignalCap /
-    # cooldownMinutes from being cleared back to null by PATCH (the editor sends
-    # 0 as null for "off", which likewise never applies). Changing those would
-    # touch the editor's semantics and existing tests, so only sessionFilter is
-    # fixed here and the rest is recorded rather than passed over silently.
     if "sessionFilter" in body.model_fields_set:
         row.session_filter = (
             json.dumps(body.sessionFilter.model_dump()) if body.sessionFilter else None
         )
-    if body.dailySignalCap is not None:
+    if "dailySignalCap" in body.model_fields_set:
         row.daily_signal_cap = body.dailySignalCap
-    if body.cooldownMinutes is not None:
+    if "cooldownMinutes" in body.model_fields_set:
         row.cooldown_minutes = body.cooldownMinutes
     row.updated_at = datetime.now(timezone.utc)
     if touches_scope:
