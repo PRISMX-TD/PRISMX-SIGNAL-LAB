@@ -119,6 +119,24 @@ def test_cross_boundary_leg_counts_full_profit(db_session):
     assert abs(ret["A"]["score"] - (50.0 + 50.0) / 2000.0) < 1e-9
 
 
+def test_opted_out_user_disappears_from_both_boards(db_session):
+    """期中退榜（设计 §4.1）：用户基线拍好、已有合格交易，两榜都出行；
+    退榜开关一开，下次算行两榜都要立刻不出行——即使基线拍照发生在退榜之前。"""
+    u = _user(db_session, "oo1@t.co"); _acct(db_session, u, "A", balance=2000.0)
+    ensure_baselines(db_session, PK, T0)
+    _mk(db_session, u, "A", 15, 5)                  # 20 笔，净 +125，两榜都够格
+    rows = compute_board_rows(db_session, PK)
+    assert "A" in {r["login"] for r in rows["return_pct"]}
+    assert "A" in {r["login"] for r in rows["win_rate"]}
+
+    u.leaderboard_opt_out = True
+    db_session.commit()
+
+    rows2 = compute_board_rows(db_session, PK)
+    assert rows2["return_pct"] == []
+    assert rows2["win_rate"] == []
+
+
 def test_unphotographed_account_does_not_leak_into_sibling_account(db_session):
     """同一用户两个账户：A 已拍基线，B 是期中新开、从未拍照——B 完全不出行，
     且 B 的盈亏不能混进 A 的分子/样本（跨账户订单/腿要按 login 隔离）。"""

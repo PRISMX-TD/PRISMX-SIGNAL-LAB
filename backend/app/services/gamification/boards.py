@@ -13,10 +13,6 @@ RECONCILE_TOLERANCE = 0.01
 REAL = 2
 
 
-def _now():
-    return datetime.now(timezone.utc)
-
-
 def _aware(dt):
     return dt if dt is None or dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
@@ -120,13 +116,22 @@ def _resolved_in_period(db, user_id, logins, period_key, taken_at_by_login):
 def compute_board_rows(db, period_key: str) -> dict:
     """两榜行计算（设计 §4.1）：按有基线的账户分组、整仓归期过滤、双闸门槛。
     返回 {"return_pct": [...], "win_rate": [...]}，行已过滤门槛、未排名。
+
+    退榜（User.leaderboard_opt_out）在这里再判一次：即使基线已在退榜前拍好，
+    只要用户当下仍标记退榜，其名下全部账户在本次快照计算时直接跳过（设计
+    §4.1）——做到「下轮快照即消失」。注意这是计算期（compute）层面的过滤，
+    不能挪到 build_leaderboard_payload（读取期）：那样会把已封存的历史榜也
+    按当前状态重新过滤，等于回溯改写已封存快照，违反封存不可变的约定。
     """
     from app.services.settings_store import get_gamification_settings
     min_baseline = float(get_gamification_settings(db).get("min_baseline_usd", 500.0))
+    opted_out = {r[0] for r in db.query(User.id).filter(User.leaderboard_opt_out.is_(True))}
     baselines = db.query(PeriodBaseline).filter(
         PeriodBaseline.period_key == period_key).all()
     by_user = defaultdict(dict)
     for b in baselines:
+        if b.user_id in opted_out:
+            continue
         by_user[b.user_id][b.mt5_login] = b
     ret_rows, wr_rows = [], []
     for uid, blmap in by_user.items():

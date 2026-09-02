@@ -95,6 +95,28 @@ def test_return_board_tie_break_by_sample(db_session):
     assert by_login["D"].rank < by_login["C"].rank                # 样本多者优先
 
 
+def test_sealed_period_not_retroactively_filtered_by_opt_out(db_session):
+    """退榜的过滤是算行（compute）时机的事，不是读榜（payload）时机的事：
+    一个周期已封存（出窗）后，用户才退榜，不该回溯改写这条已封存快照——
+    已封存的历史榜不回溯改写。"""
+    users = _seed_two_accounts(db_session)          # [(user_A, "A"), (user_B, "B")]
+    snapshot_boards(db_session, NOW)
+    sealed_time = datetime(2026, 9, 10, 0, 0, tzinfo=UTC)
+    snapshot_boards(db_session, sealed_time)         # 出窗：W36 封存
+    before = {(x.mt5_login, x.board): x.id for x in
+              db_session.query(LeaderboardSnapshot).filter_by(period_key="2026-W36")}
+    assert before                                    # 确认封存前确实有行，断言才有意义
+
+    user_a, _login_a = users[0]
+    user_a.leaderboard_opt_out = True                # 封存之后才退榜
+    db_session.commit()
+    snapshot_boards(db_session, sealed_time + timedelta(days=1))
+
+    after = {(x.mt5_login, x.board): x.id for x in
+             db_session.query(LeaderboardSnapshot).filter_by(period_key="2026-W36")}
+    assert before == after                           # 行未被删重建，退榜未回溯生效
+
+
 def test_grace_window_recompute_and_seal(db_session):
     _seed_two_accounts(db_session)
     snapshot_boards(db_session, NOW)
