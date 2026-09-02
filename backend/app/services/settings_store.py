@@ -753,3 +753,63 @@ def save_account_type_settings(db, data: dict) -> None:
     else:
         row.value = encoded
     invalidate_account_type_cache()
+
+
+# ---- 游戏化设置独立缓存（与其它设置分开） ----
+GAMIFICATION_DEFAULTS: dict = {
+    "user_visible": False,
+}
+
+_gamification_cache: dict = {}
+_gamification_cache_at: float = 0.0
+
+
+def invalidate_gamification_cache() -> None:
+    global _gamification_cache_at
+    with _lock:
+        _gamification_cache_at = 0.0
+
+
+def _load_gamification_from_db(db) -> dict:
+    """从 DB 读游戏化设置 JSON，缺失的 key 回落到默认值。
+    仅接受布尔值，通过 bool() 收敛。"""
+    data = dict(GAMIFICATION_DEFAULTS)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "gamification").first()
+    if row:
+        try:
+            stored = json.loads(row.value)
+            if isinstance(stored, dict):
+                for k in GAMIFICATION_DEFAULTS:
+                    if k in stored:
+                        data[k] = bool(stored[k])
+        except (ValueError, TypeError):
+            logger.warning("platform_settings: invalid JSON for gamification, using defaults")
+    return data
+
+
+def get_gamification_settings(db) -> dict:
+    """读取游戏化设置（独立缓存）。
+    Read gamification settings (separate cache)."""
+    global _gamification_cache, _gamification_cache_at
+    now = time.time()
+    with _lock:
+        if _gamification_cache and now - _gamification_cache_at < _CACHE_TTL_SECONDS:
+            return dict(_gamification_cache)
+    data = _load_gamification_from_db(db)
+    with _lock:
+        _gamification_cache = data
+        _gamification_cache_at = now
+    return dict(data)
+
+
+def save_gamification_settings(db, data: dict) -> None:
+    """写入游戏化设置（不提交，调用方 commit 后 invalidate）。
+    Write gamification settings (no commit; caller commits then invalidates cache)."""
+    merged = _load_gamification_from_db(db)
+    merged.update(data)
+    encoded = json.dumps(merged, ensure_ascii=False)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "gamification").first()
+    if row is None:
+        db.add(PlatformSetting(key="gamification", value=encoded))
+    else:
+        row.value = encoded
