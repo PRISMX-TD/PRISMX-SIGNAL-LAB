@@ -1018,3 +1018,53 @@ export interface ProfileOut {
   leaderboardOptOut: boolean
   equippedBadge: string | null
 }
+
+// 排行榜（设计 §4.3）/ Leaderboard
+// 榜单 id：收益率榜 / 胜率榜——与后端 LEADERBOARD_BOARDS 一一对应。
+// Board id: return-rate board / win-rate board — matches backend LEADERBOARD_BOARDS 1:1.
+export type LeaderboardBoard = 'return_pct' | 'win_rate'
+
+// 榜单一行：displayName 已按 nickname_public 打码（未公开昵称时脱敏），不是
+// 原始邮箱/昵称本身。 One leaderboard row: displayName is already masked per
+// nickname_public (redacted when the nickname isn't public) — not the raw
+// email/nickname.
+export interface LeaderboardRow {
+  rank: number
+  displayName: string
+  login: string
+  score: number
+  sample: number
+  isSelf: boolean
+  equippedBadge: string | null
+}
+
+// GET /gamification/leaderboard 、GET /admin/gamification/leaderboard 的完整
+// 响应。me 为 null 表示本期未上榜（含未参与）。
+// Full response of GET /gamification/leaderboard and
+// GET /admin/gamification/leaderboard. me is null when not ranked this
+// period (including not having participated).
+export interface LeaderboardPayload {
+  board: string
+  periodKey: string
+  rows: LeaderboardRow[]
+  me: { rank: number; score: number; sample: number } | null
+}
+
+// 游戏化设置组（管理端，GET/PATCH /admin/gamification/settings）。
+// Gamification settings group (admin, GET/PATCH /admin/gamification/settings).
+export interface GamificationSettings {
+  userVisible: boolean
+  leaderboardVisible: boolean
+  competitionsVisible: boolean
+  minBaselineUsd: number
+}
+
+// PATCH /admin/gamification/settings 请求体：全部可选，只改传了的字段。
+// PATCH /admin/gamification/settings request body: every field optional,
+// only the ones actually sent change.
+export interface GamificationSettingsPatch {
+  userVisible?: boolean
+  leaderboardVisible?: boolean
+  competitionsVisible?: boolean
+  minBaselineUsd?: number
+}

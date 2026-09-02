@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, ProfilePatch, ProfileOut } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, GamificationSettings, GamificationSettingsPatch } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 
 const TOKEN_KEY = 'prismx_token'
@@ -530,6 +530,7 @@ export const userApi = {
       // Gamification: whether the feature is visible to this user, plus 4
       // profile fields, in one round trip instead of a separate /gamification/me call.
       gamificationVisible: boolean
+      leaderboardVisible: boolean
       nickname: string | null
       nicknamePublic: boolean
       leaderboardOptOut: boolean
@@ -627,6 +628,17 @@ export const notificationApi = {
 // tasks, badges, win rate in one call
 export const gamificationApi = {
   me: () => request<GamificationMe>('/gamification/me'),
+  // 排行榜（设计 §4.3）：period 既接受 "week"/"month"（当前进行中周期），也
+  // 接受显式周期 key（如 "2026-W36"）访问已封存的历史周期。403 = 内测未开放
+  // （见 gamification.admin.leaderboardSwitch）。
+  // Leaderboard: period accepts either "week"/"month" (the current
+  // in-progress period) or an explicit period key (e.g. "2026-W36") to reach
+  // a sealed historical period. 403 = beta not yet open (see
+  // gamification.admin.leaderboardSwitch).
+  leaderboard: (board: LeaderboardBoard, period: string) =>
+    request<LeaderboardPayload>(
+      `/gamification/leaderboard?board=${encodeURIComponent(board)}&period=${encodeURIComponent(period)}`
+    ),
 }
 
 // 工单 / Tickets
@@ -792,6 +804,23 @@ export const adminApi = {
         method: 'PATCH',
         body: JSON.stringify({ userVisible }),
       }),
+    // 设置组（Phase 2）：与上面的 /visibility 共用同一份存储记录，读-合并-写
+    // 语义组合，互不清空对方的键。Settings group (Phase 2): shares the same
+    // stored record as /visibility above, composed via read-merge-write
+    // semantics so neither clobbers the other's keys.
+    gamificationSettings: () => request<GamificationSettings>('/admin/gamification/settings'),
+    updateGamificationSettings: (patch: GamificationSettingsPatch) =>
+      request<GamificationSettings>('/admin/gamification/settings', {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }),
+    // 榜单预览：以请求管理员为 viewer，不受 leaderboardVisible 开关限制。
+    // Leaderboard preview: the requesting admin is the viewer; not gated by
+    // the leaderboardVisible switch.
+    gamificationLeaderboard: (board: LeaderboardBoard, period: string) =>
+      request<LeaderboardPayload>(
+        `/admin/gamification/leaderboard?board=${encodeURIComponent(board)}&period=${encodeURIComponent(period)}`
+      ),
   }
 
 // 自动仓位管理（PRO）/ auto position management (PRO)

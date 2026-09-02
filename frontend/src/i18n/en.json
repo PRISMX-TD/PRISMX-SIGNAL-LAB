@@ -1924,5 +1924,24 @@
     "admin": { "tab": "Gamification", "inspect": "User Inspector", "searchUser": "Search by user email",
                "visibility": "User-facing visibility", "visibleOn": "Open to all users",
                "visibleOff": "In beta (admin-only)", "confirmOpen": "Once opened, this is permanent — up only, never revoked. Confirm opening?" }
+  },
+  "leaderboard": {
+    "title": "Leaderboard",
+    "boards": { "return_pct": "Return Board", "win_rate": "Win Rate Board" },
+    "periods": { "week": "Weekly", "month": "Monthly" },
+    "colRank": "Rank", "colTrader": "Trader", "colAccount": "Account",
+    "colScore": { "return_pct": "Return", "win_rate": "Win rate" },
+    "colSample": "Trades",
+    "empty": "No ranked accounts this period", "myRank": "My rank",
+    "notRanked": "Not ranked this period — needs ≥{{n}} full closes this period and to clear the threshold",
+    "youTag": "You",
+    "rules": {
+      "return_pct": "Ranked by return rate (%): starting capital is locked in at period start and mid-period deposits are folded into the denominator. Accounts below the minimum baseline or with fewer than 5 trades don't rank.",
+      "win_rate": "Needs ≥20 trades this period with positive P&L to rank — a high win rate alone doesn't mean profit."
+    },
+    "admin": { "preview": "Leaderboard preview", "leaderboardSwitch": "Leaderboard user-facing visibility",
+               "competitionsSwitch": "Competitions user-facing visibility (Phase 3)",
+               "minBaseline": "Minimum baseline for the return board (USD)",
+               "confirmOpenBoard": "Once opened, the leaderboard is visible to all users. Confirm opening?" }
   }
 }
