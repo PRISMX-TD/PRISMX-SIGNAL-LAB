@@ -6,3 +6,7 @@ from .conditions import (  # noqa: F401
     has_consecutive_active_days,
 )
 from .badges import BADGES, judge_and_award_badges, award_badge  # noqa: F401
+from .loop import (  # noqa: F401
+    backfill_account_trade_modes, backfill_order_trade_modes,
+    run_gamification_pass, gamification_loop,
+)

@@ -22,6 +22,7 @@ from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
 from app.services.candle_store import candle_retention_sweep_loop
 from app.services.discipline import discipline_snapshot_loop
+from app.services.gamification.loop import gamification_loop
 from app.services.plan_expiry import plan_expiry_sweep_loop
 from app.services.sentiment_store import sentiment_loop
 from app.services.signal_resolution import stale_signal_sweep_loop
@@ -136,6 +137,14 @@ async def lifespan(app: FastAPI):
     # Discipline-score daily snapshot: persists today's score for recently
     # active users, powering the frontend's 30-day trend line.
     discipline_task = asyncio.create_task(discipline_snapshot_loop())
+    # 游戏化每小时循环：账号/订单 trade_mode 补章 + 全量条件与勋章判定
+    # （见 services/gamification/loop.py）。startup_delay 25s，与上面 discipline
+    # 的 20s、下面 candle 的 30s 错开，避免首轮同时抢占启动窗口。
+    # Gamification hourly loop: trade_mode backfill for accounts/orders plus a
+    # full pass of condition and badge judging (see services/gamification/loop.py).
+    # startup_delay is 25s, offset from discipline's 20s and candle's 30s below so
+    # their first passes don't all compete for the startup window at once.
+    gamification_task = asyncio.create_task(gamification_loop())
     # K 线历史保留策略：每天清理过期的 1 分钟线（见 services/candle_store.py）
     # Candle retention sweep: trims expired 1-minute candles daily
     candle_retention_task = asyncio.create_task(candle_retention_sweep_loop())
@@ -156,6 +165,7 @@ async def lifespan(app: FastAPI):
     sentiment_task.cancel()
     plan_expiry_task.cancel()
     discipline_task.cancel()
+    gamification_task.cancel()
     candle_retention_task.cancel()
     gateway_positions_task.cancel()
     
