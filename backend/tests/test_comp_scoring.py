@@ -137,6 +137,79 @@ def test_disqualified_participant_excluded(db_session):
     assert rows == []
 
 
+def test_return_board_min_baseline_floor_gate(db_session):
+    """denom（baseline+adjust）低于 min_baseline_usd（默认 500）门槛：不入 return_pct 榜，
+    即使笔数达标；同赛高于门槛的参赛者正常上榜。"""
+    comp = _comp(db_session)
+    u_low = _user(db_session, "floor_low@t.co"); _acct(db_session, u_low, "A", balance=100.0)
+    _baseline(db_session, comp, u_low, "A", balance=100.0)     # < 500
+    _participant(db_session, comp, u_low, "A")
+    _mk(db_session, u_low, "A", 5, 0)                          # 5 笔达标，denom 不达标
+
+    u_ok = _user(db_session, "floor_ok@t.co"); _acct(db_session, u_ok, "B", balance=2000.0)
+    _baseline(db_session, comp, u_ok, "B", balance=2000.0)     # >= 500
+    _participant(db_session, comp, u_ok, "B")
+    _mk(db_session, u_ok, "B", 5, 0)
+
+    rows = compute_comp_rows(db_session, comp)
+    logins = {r["login"] for r in rows}
+    assert "A" not in logins
+    assert "B" in logins
+
+
+def test_win_rate_net_losing_excluded_despite_high_win_rate(db_session):
+    """win_rate 榜第二道闸：sum(profit) > 0。20 笔、16 胜 4 负但小赢大亏、净亏损——
+    即使胜率高达 80% 也不该上榜。"""
+    comp = _comp(db_session, metric="win_rate")
+    u = _user(db_session, "wrloss@t.co"); _acct(db_session, u, "A", balance=2000.0)
+    _baseline(db_session, comp, u, "A", balance=2000.0)
+    _participant(db_session, comp, u, "A")
+    _mk(db_session, u, "A", 16, 4, win_p=1.0, loss_p=-10.0)    # 16*1 - 4*10 = -24 < 0
+
+    rows = compute_comp_rows(db_session, comp)
+    assert {r["login"] for r in rows} == set()
+
+
+def test_snapshot_two_running_comps_both_scored(db_session):
+    comp1 = _comp(db_session, name="Comp 1")
+    comp2 = _comp(db_session, name="Comp 2")
+    u1 = _user(db_session, "multi1@t.co"); _acct(db_session, u1, "A", balance=2000.0)
+    _baseline(db_session, comp1, u1, "A", balance=2000.0)
+    _participant(db_session, comp1, u1, "A")
+    _mk(db_session, u1, "A", 5, 0)
+
+    u2 = _user(db_session, "multi2@t.co"); _acct(db_session, u2, "B", balance=2000.0)
+    _baseline(db_session, comp2, u2, "B", balance=2000.0)
+    _participant(db_session, comp2, u2, "B")
+    _mk(db_session, u2, "B", 5, 0)
+
+    result = snapshot_competitions(db_session, T0 + timedelta(days=1))
+    assert result == {"comps": 2, "rows": 2}
+
+    row1 = (db_session.query(LeaderboardSnapshot)
+            .filter_by(board="return_pct", period_key=comp_period_key(comp1.id)).first())
+    row2 = (db_session.query(LeaderboardSnapshot)
+            .filter_by(board="return_pct", period_key=comp_period_key(comp2.id)).first())
+    assert row1 is not None and row1.mt5_login == "A"
+    assert row2 is not None and row2.mt5_login == "B"
+
+
+def test_participant_without_baseline_skipped_others_unaffected(db_session):
+    comp = _comp(db_session)
+    u1 = _user(db_session, "nobl@t.co"); _acct(db_session, u1, "A", balance=2000.0)
+    # 没有拍基线，直接注册参赛
+    _participant(db_session, comp, u1, "A")
+    _mk(db_session, u1, "A", 5, 0)
+
+    u2 = _user(db_session, "haveb@t.co"); _acct(db_session, u2, "B", balance=2000.0)
+    _baseline(db_session, comp, u2, "B", balance=2000.0)
+    _participant(db_session, comp, u2, "B")
+    _mk(db_session, u2, "B", 5, 0)
+
+    rows = compute_comp_rows(db_session, comp)
+    assert {r["login"] for r in rows} == {"B"}
+
+
 def test_win_rate_metric_20_trade_gate(db_session):
     comp = _comp(db_session, metric="win_rate")
     u = _user(db_session, "wr1@t.co"); _acct(db_session, u, "A", balance=2000.0)
