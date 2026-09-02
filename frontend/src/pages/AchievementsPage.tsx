@@ -255,19 +255,18 @@ export default function AchievementsPage() {
         </div>
       </section>
 
-      {/* 五个条件组 */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {me.groups.map((group) => (
-          <section key={group.group} className="card glass p-[18px]">
-            <h3 className="sec-h-title">{t(`gamification.groups.${group.group}`)}</h3>
-            <ul className="mt-3 space-y-3">
-              {group.tasks.map((task) => (
-                <TaskRow key={task.id} task={task} t={t} />
-              ))}
-            </ul>
-          </section>
-        ))}
-      </div>
+      {/* 当前等级组：只显示正在闯的这一关，已过的和未解锁的都不列 */}
+      {/* Current group only: the level being worked on — cleared and locked groups are not listed */}
+      {nextGroup && (
+        <section className="card glass p-[18px]">
+          <h3 className="sec-h-title">{t(`gamification.groups.${nextGroup.group}`)}</h3>
+          <ul className="mt-3 space-y-3">
+            {nextGroup.tasks.map((task) => (
+              <TaskRow key={task.id} task={task} t={t} />
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* 勋章墙 */}
       <section className="card glass p-[18px]">
