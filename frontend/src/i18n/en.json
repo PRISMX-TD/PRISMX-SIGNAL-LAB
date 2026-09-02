@@ -1942,6 +1942,7 @@
     "admin": { "preview": "Leaderboard preview", "leaderboardSwitch": "Leaderboard user-facing visibility",
                "competitionsSwitch": "Competitions user-facing visibility (Phase 3)",
                "minBaseline": "Minimum baseline for the return board (USD)",
-               "confirmOpenBoard": "Once opened, the leaderboard is visible to all users. Confirm opening?" }
+               "confirmOpenBoard": "Once opened, the leaderboard is visible to all users. Confirm opening?",
+               "pickBoard": "Pick a board", "pickPeriod": "Pick a period" }
   }
 }

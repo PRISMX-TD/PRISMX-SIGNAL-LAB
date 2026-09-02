@@ -1940,6 +1940,7 @@
     "admin": { "preview": "榜单预览", "leaderboardSwitch": "排行榜用户端可见性",
                "competitionsSwitch": "比赛用户端可见性（Phase 3）",
                "minBaseline": "收益榜最低本金（USD）",
-               "confirmOpenBoard": "开放后榜单对全体用户可见，确认开放？" }
+               "confirmOpenBoard": "开放后榜单对全体用户可见，确认开放？",
+               "pickBoard": "选择榜单", "pickPeriod": "选择周期" }
   }
 }
