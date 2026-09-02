@@ -1150,3 +1150,39 @@ class LeaderboardSnapshot(Base):
     score = Column(Float, nullable=False)         # 小数：0.124 = 12.4%
     sample = Column(Integer, nullable=True)       # 期内已判定整仓数
     computed_at = Column(DateTime, default=_now)
+
+
+class Competition(Base):
+    """比赛 = 后台可配置的限时榜单模板（设计 §1.7）。行永不删除。"""
+    __tablename__ = "competitions"
+    id = Column(String, primary_key=True, default=_uuid)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    track = Column(String, nullable=False, default="real")      # Phase 4 预留
+    metric = Column(String, nullable=False, default="return_pct")  # return_pct / win_rate
+    enrollment = Column(String, nullable=False, default="signup")  # signup / auto
+    reg_opens_at = Column(DateTime, nullable=True)
+    reg_closes_at = Column(DateTime, nullable=True)
+    starts_at = Column(DateTime, nullable=False)
+    ends_at = Column(DateTime, nullable=False)
+    status = Column(String, nullable=False, default="draft")    # draft→upcoming→running→ended→settled 只进不退
+    prize_note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_now)
+
+
+class CompetitionParticipant(Base):
+    """参赛条目 = 一个账户（设计 §1.8；基线统一存 period_baselines，见计划约束）。"""
+    __tablename__ = "competition_participants"
+    __table_args__ = (
+        UniqueConstraint("competition_id", "mt5_login", name="uq_comp_login"),
+    )
+    id = Column(String, primary_key=True, default=_uuid)
+    competition_id = Column(String, ForeignKey("competitions.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    mt5_login = Column(String, nullable=False)
+    registered_at = Column(DateTime, default=_now)
+    scoring_from = Column(DateTime, nullable=True)   # 计分起点 = max(开赛, 报名, 基线拍照)
+    final_score = Column(Float, nullable=True)       # 终审写死
+    final_rank = Column(Integer, nullable=True)
+    disqualified = Column(Boolean, nullable=False, default=False)
+    disqualify_reason = Column(String, nullable=True)
