@@ -1,28 +1,131 @@
-"""比赛（设计 §1.7/§1.8/§1.9，Phase 3 Task 5）：管理端 CRUD/状态推进/参赛管理/终审。
+"""比赛（设计 §1.7/§1.8/§1.9，Phase 3 Task 5/6）：管理端 CRUD/状态推进/参赛管理/
+终审 + 用户端公开列表/详情/报名。
 
-用户端 `router`（报名/查看，Task 6 实现）与管理端 `admin_router`（本任务）拆成两个
-router 是照 gamification.py 的先例——权限收口方式也一样：admin_router 本身不带
-require_admin，在 main.py 的 include_router(..., dependencies=[Depends(require_admin)])
-里统一挂上。
+用户端 `router`（本任务）与管理端 `admin_router`（Task 5）拆成两个 router 是照
+gamification.py 的先例——权限收口方式也一样：admin_router 本身不带 require_admin，
+在 main.py 的 include_router(..., dependencies=[Depends(require_admin)]) 里统一
+挂上；用户端则是每个端点各自挂 `require_competitions_visible`（内测开关，克隆自
+gamification.py 的 `require_leaderboard_visible`）。
 """
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
+from app.core.rate_limit import limiter
 from app.models import Competition, CompetitionParticipant, User
 from app.routers.admin import _log_change
 from app.routers.gamification import build_board_rows_payload
 from app.schemas import (
-    CompetitionCreateIn, CompetitionParticipantPatchIn, CompetitionPatchIn)
+    CompetitionCreateIn, CompetitionParticipantPatchIn, CompetitionPatchIn,
+    CompetitionRegisterIn)
 from app.services.deps import get_current_user, get_db
 from app.services.gamification.competitions import (
-    auto_enroll, comp_period_key, settle_competition)
+    auto_enroll, comp_period_key, register_participant, settle_competition)
+from app.services.settings_store import get_gamification_settings
 from app.utils.timeutil import aware as _aware
 
-# ---- 用户端 / user-facing（Task 6 实现，本任务只建 router 对象供 main.py 挂载）----
+# ---- 用户端 / user-facing ----
 router = APIRouter(prefix="/competitions", tags=["competitions"])
+
+MSG_COMP_NOT_FOUND = "比赛不存在 / Competition not found"
+
+
+def _check_competitions_visible(db: Session, user: User) -> None:
+    if user.role == "admin":
+        return
+    if not get_gamification_settings(db).get("competitions_visible"):
+        raise HTTPException(403, "比赛内测中，暂未开放 / Competitions in beta, not yet available")
+
+
+def require_competitions_visible(db: Session = Depends(get_db),
+                                  user: User = Depends(get_current_user)) -> User:
+    _check_competitions_visible(db, user)
+    return user
+
+
+def _summary_out(comp: Competition) -> dict:
+    return {
+        "id": comp.id,
+        "name": comp.name,
+        "description": comp.description,
+        "metric": comp.metric,
+        "enrollment": comp.enrollment,
+        "status": comp.status,
+        "regOpensAt": comp.reg_opens_at.isoformat() if comp.reg_opens_at else None,
+        "regClosesAt": comp.reg_closes_at.isoformat() if comp.reg_closes_at else None,
+        "startsAt": comp.starts_at.isoformat() if comp.starts_at else None,
+        "endsAt": comp.ends_at.isoformat() if comp.ends_at else None,
+        "prizeNote": comp.prize_note,
+    }
+
+
+def _get_public_comp_or_404(db: Session, comp_id: str) -> Competition:
+    """草稿对用户端一律视同不存在——404 不区分「没有这条记录」和「记录还在
+    draft」，避免把「有一场比赛正在筹备」这个信息透给未获授权查看的用户。"""
+    comp = db.get(Competition, comp_id)
+    if comp is None or comp.status == "draft":
+        raise HTTPException(404, MSG_COMP_NOT_FOUND)
+    return comp
+
+
+@router.get("")
+def list_competitions(db: Session = Depends(get_db),
+                       user: User = Depends(require_competitions_visible)):
+    """非 draft 比赛按状态分组；ended/settled 统一归 finished。upcoming 按开赛时间
+    正序（最快开始的排前面），running/finished 按开赛时间倒序（最新的排前面）。
+    """
+    comps = db.query(Competition).filter(Competition.status != "draft").all()
+    upcoming = sorted((c for c in comps if c.status == "upcoming"), key=lambda c: c.starts_at)
+    running = sorted((c for c in comps if c.status == "running"),
+                      key=lambda c: c.starts_at, reverse=True)
+    finished = sorted((c for c in comps if c.status in ("ended", "settled")),
+                       key=lambda c: c.starts_at, reverse=True)
+    return {
+        "upcoming": [_summary_out(c) for c in upcoming],
+        "running": [_summary_out(c) for c in running],
+        "finished": [_summary_out(c) for c in finished],
+    }
+
+
+@router.get("/{comp_id}")
+def get_competition(comp_id: str, db: Session = Depends(get_db),
+                     user: User = Depends(require_competitions_visible)):
+    """详情 + 实时榜（读快照，行构造复用 `build_board_rows_payload`——对 upcoming
+    比赛而言快照还没有任何行，返回空 rows/me=None，函数本身不需要区分状态）+
+    当前用户在本场比赛下的参赛条目 + pendingSettle（ended 且未终审）。"""
+    comp = _get_public_comp_or_404(db, comp_id)
+    board = build_board_rows_payload(db, user, comp.metric, comp_period_key(comp.id))
+    my_rows = (db.query(CompetitionParticipant)
+                 .filter(CompetitionParticipant.competition_id == comp.id,
+                         CompetitionParticipant.user_id == user.id)
+                 .order_by(CompetitionParticipant.registered_at.asc()).all())
+    out = _summary_out(comp)
+    out["board"] = board
+    out["myEntries"] = [{
+        "login": p.mt5_login,
+        "scoringFrom": p.scoring_from.isoformat() if p.scoring_from else None,
+        "finalRank": p.final_rank,
+        "finalScore": p.final_score,
+        "disqualified": p.disqualified,
+    } for p in my_rows]
+    out["pendingSettle"] = comp.status == "ended"
+    return out
+
+
+@router.post("/{comp_id}/register")
+@limiter.limit(settings.RATE_LIMIT_COMPETITION)
+def register_for_competition(request: Request, comp_id: str, body: CompetitionRegisterIn,
+                              db: Session = Depends(get_db),
+                              user: User = Depends(require_competitions_visible)):
+    comp = _get_public_comp_or_404(db, comp_id)
+    participant = register_participant(db, comp, user, body.mt5Login, now=datetime.now(timezone.utc))
+    return {
+        "login": participant.mt5_login,
+        "scoringFrom": participant.scoring_from.isoformat() if participant.scoring_from else None,
+    }
 
 
 # ---- 管理员端 / admin endpoints ----

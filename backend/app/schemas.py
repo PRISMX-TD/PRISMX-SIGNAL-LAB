@@ -213,6 +213,13 @@ class CompetitionParticipantPatchIn(BaseModel):
     disqualifyReason: str | None = None
 
 
+class CompetitionRegisterIn(BaseModel):
+    """比赛报名（用户端）：仅账户号，语义校验（本人名下/实盘/报名窗口）在
+    `register_participant` 服务函数里做。"""
+
+    mt5Login: str = Field(pattern=LOGIN_PATTERN)
+
+
 class AdminBulkUserUpdate(AdminUserUpdate):
     # 目标用户 id 列表；其余字段语义与 AdminUserUpdate 完全一致（仅传要改的字段）。
     # Target user ids; remaining fields behave exactly like AdminUserUpdate

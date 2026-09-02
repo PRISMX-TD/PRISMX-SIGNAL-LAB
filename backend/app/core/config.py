@@ -229,6 +229,10 @@ class Settings(BaseSettings):
     # Leaderboard reads: lighter than /me (no judging pass), but still a
     # masking + batch-user-load query worth a backstop.
     RATE_LIMIT_LEADERBOARD: str = "60/minute"
+    # 比赛报名：写操作，节奏与其它写端点（策略/密码）同一量级。
+    # Competition registration: a write endpoint, same order of magnitude as
+    # the other write endpoints (strategy/password).
+    RATE_LIMIT_COMPETITION: str = "30/minute"
     # 单次回测的成本上限：bars 数 × 规则条件数。纯速率限制无法阻止"一次请求就
     # 占满 CPU 很久"，这一层直接把单次请求的工作量封顶。默认 60000 = 5000 根 ×
     # 12 条，恰好容纳滥用上限下的最坏合法情况。

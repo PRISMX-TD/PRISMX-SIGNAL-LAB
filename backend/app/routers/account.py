@@ -38,6 +38,7 @@ class AccountInfoOut(BaseModel):
     # without a separate /gamification/me round trip.
     gamificationVisible: bool = False
     leaderboardVisible: bool = False
+    competitionsVisible: bool = False
     nickname: str | None = None
     nicknamePublic: bool = False
     leaderboardOptOut: bool = False
@@ -86,6 +87,10 @@ def get_account(
         leaderboardVisible=(
             True if current_user.role == "admin"
             else bool(get_gamification_settings(db).get("leaderboard_visible"))
+        ),
+        competitionsVisible=(
+            True if current_user.role == "admin"
+            else bool(get_gamification_settings(db).get("competitions_visible"))
         ),
         nickname=current_user.nickname,
         nicknamePublic=bool(current_user.nickname_public),
