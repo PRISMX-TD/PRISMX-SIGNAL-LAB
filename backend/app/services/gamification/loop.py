@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
 
 from app.core.database import SessionLocal
 from app.models import MT5Account, Order, User
@@ -85,9 +86,22 @@ def run_gamification_pass() -> dict:
                 log.exception("gamification pass: user %s judging failed", uid)
                 db.rollback()
                 failed += 1
+        board_stats = {}
+        try:
+            from .boards import snapshot_boards
+            board_stats = snapshot_boards(db, datetime.now(timezone.utc))
+        except Exception:
+            # 榜单快照失败不该拖累前三阶段已经判出的结果——记日志、回滚榜单相关的
+            # 未提交残留，本轮的条件/勋章判定照常返回，下一轮再补拍快照。
+            log.exception("gamification pass: board snapshot failed")
+            db.rollback()
+            board_stats = {"error": True}
         return {"accounts": acc, "stamped": stamped, "sentinel": sentinel,
                 "users": len(uids), "newConditions": conds, "newBadges": badges,
-                "failedUsers": failed}
+                "failedUsers": failed,
+                "boardPeriods": board_stats.get("periods", 0),
+                "boardRows": board_stats.get("rows", 0),
+                "boardsError": board_stats.get("error", False)}
     finally:
         db.close()
 

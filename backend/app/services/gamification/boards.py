@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 
 from sqlalchemy.exc import IntegrityError
 
-from app.models import ClosedTrade, MT5Account, PeriodBaseline, User
-from .periods import period_bounds
+from app.models import ClosedTrade, LeaderboardSnapshot, MT5Account, PeriodBaseline, User
+from .periods import active_period_keys, period_bounds
 
 log = logging.getLogger("gamification")
 RECONCILE_TOLERANCE = 0.01
@@ -145,3 +145,34 @@ def compute_board_rows(db, period_key: str) -> dict:
                 wr_rows.append({"userId": uid, "login": lg,
                                 "score": wins / sample, "sample": sample})
     return {"return_pct": ret_rows, "win_rate": wr_rows}
+
+
+def snapshot_boards(db, now: datetime) -> dict:
+    """快照排名（设计 §1.6/§4）：对每个 active period key，若仍在进行中先拍基线
+    + 对账，再算行、排序、定名次，先删后插该 (board, period_key) 的全部快照行，
+    一次 commit。出窗（>48h）的周期不在 active keys 里——天然封存，行永不再动。
+
+    `now` 是这一趟批处理唯一的时钟基准：既用来判断哪些周期仍需拍基线/对账
+    （`end > now`），也原样透传给 `reconcile_deposits`（它内部还有一层
+    `now >= end` 的防御性兜底），确保「现在」在一次调用里只有一个含义。
+    """
+    total_rows = 0
+    keys = active_period_keys(now)
+    for key in keys:
+        _start, end = period_bounds(key)
+        if end > now:                                # 进行中：拍基线 + 对账
+            ensure_baselines(db, key, now)
+            reconcile_deposits(db, key, now=now)
+        rows_by_board = compute_board_rows(db, key)
+        for board, rows in rows_by_board.items():
+            rows.sort(key=lambda r: (-r["score"], -r["sample"], r["login"]))
+            db.query(LeaderboardSnapshot).filter(
+                LeaderboardSnapshot.board == board,
+                LeaderboardSnapshot.period_key == key).delete()
+            for i, r in enumerate(rows, start=1):
+                db.add(LeaderboardSnapshot(board=board, period_key=key,
+                                           user_id=r["userId"], mt5_login=r["login"],
+                                           rank=i, score=r["score"], sample=r["sample"]))
+            total_rows += len(rows)
+        db.commit()
+    return {"periods": len(keys), "rows": total_rows}

@@ -14,5 +14,5 @@ from .periods import (  # noqa: F401
     week_key, month_key, period_bounds, active_period_keys, RECOMPUTE_GRACE_HOURS,
 )
 from .boards import (  # noqa: F401
-    ensure_baselines, reconcile_deposits, RECONCILE_TOLERANCE,
+    ensure_baselines, reconcile_deposits, snapshot_boards, RECONCILE_TOLERANCE,
 )
