@@ -1,5 +1,6 @@
 """榜单计算（设计 §1.5/§1.6/§4）：按账户拍基线、对账入金、整仓计分、快照排名。"""
 import logging
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from sqlalchemy.exc import IntegrityError
@@ -94,3 +95,53 @@ def reconcile_deposits(db, period_key: str, now: datetime = None) -> int:
     if adjusted:
         db.commit()
     return adjusted
+
+
+def _resolved_in_period(db, user_id, logins, period_key, taken_at_by_login):
+    """整仓判定 + 归期：返回 login -> list[profit]。归期 = 最后一腿时间落在
+    [max(期初, 该账户 taken_at), 期末)。订单锚定 lifetime（开仓可早于期初）。"""
+    from .stats import _filled_orders, _legs_by_position, _resolve
+    from app.services.trade_performance import position_id_of
+    start, end = period_bounds(period_key)
+    orders = [o for o in _filled_orders(db, user_id, cutoff=None)
+              if o.trade_mode == REAL and o.mt5_login in logins]
+    keys = {(o.mt5_login, position_id_of(o)) for o in orders if position_id_of(o)}
+    legs_map = _legs_by_position(db, user_id, keys)
+    out = defaultdict(list)
+    for o, p in _resolve(orders, legs_map):
+        legs = legs_map[(o.mt5_login, position_id_of(o))]
+        last_close = _aware(max(l.closed_at for l in legs))
+        lower = max(start, _aware(taken_at_by_login[o.mt5_login]))
+        if lower <= last_close < end:
+            out[o.mt5_login].append(p)
+    return out
+
+
+def compute_board_rows(db, period_key: str) -> dict:
+    """两榜行计算（设计 §4.1）：按有基线的账户分组、整仓归期过滤、双闸门槛。
+    返回 {"return_pct": [...], "win_rate": [...]}，行已过滤门槛、未排名。
+    """
+    from app.services.settings_store import get_gamification_settings
+    min_baseline = float(get_gamification_settings(db).get("min_baseline_usd", 500.0))
+    baselines = db.query(PeriodBaseline).filter(
+        PeriodBaseline.period_key == period_key).all()
+    by_user = defaultdict(dict)
+    for b in baselines:
+        by_user[b.user_id][b.mt5_login] = b
+    ret_rows, wr_rows = [], []
+    for uid, blmap in by_user.items():
+        taken = {lg: b.taken_at for lg, b in blmap.items()}
+        profits_by_login = _resolved_in_period(db, uid, set(blmap), period_key, taken)
+        for lg, b in blmap.items():
+            profits = profits_by_login.get(lg, [])
+            sample = len(profits)
+            total = sum(profits)
+            denom = b.baseline + b.adjust
+            if sample >= 5 and denom >= min_baseline and denom > 0:
+                ret_rows.append({"userId": uid, "login": lg,
+                                 "score": total / denom, "sample": sample})
+            if sample >= 20 and total > 0:
+                wins = sum(1 for p in profits if p > 0)
+                wr_rows.append({"userId": uid, "login": lg,
+                                "score": wins / sample, "sample": sample})
+    return {"return_pct": ret_rows, "win_rate": wr_rows}
