@@ -723,8 +723,18 @@ def _result_db_work(db: Session, user_id: int, req: "BridgeResultRequest"):
     # 兜底路由时补上实际执行账号，指定过目标账号的订单不覆盖已有值。
     # Backfill the actual executing account for fallback-routed orders; never
     # overwrite an order that already specified its target account.
+    login = req.login or order.mt5_login
     if req.login and not order.mt5_login:
         values["mt5_login"] = req.login
+
+    # 成交打章：从账号行拷贝 trade_mode 快照（设计 §1.2），失败/拒绝不打章。
+    # Stamp the trade_mode snapshot from the account row on a genuine fill
+    # (design §1.2); rejected orders are left unstamped.
+    if req.success:
+        from app.services.gamification.stamp import lookup_trade_mode
+        tm = lookup_trade_mode(db, user_id, login)
+        if tm is not None:
+            values["trade_mode"] = tm
 
     # 真实回执覆盖状态（包括迟到回执纠正已超时作废的 FAILED——实际执行结果为准），
     # 但已是终态的不覆盖：这正是幂等判重，现在由 WHERE 条件表达。

@@ -496,6 +496,8 @@ def _try_gateway_execute(db: Session, order: Order) -> dict | None:
             return order_update_payload(order)
 
         _apply_trade_result(order, rsp)
+        from app.services.gamification.stamp import stamp_order_trade_mode
+        stamp_order_trade_mode(db, order)
         db.commit()
         db.refresh(order)
 
