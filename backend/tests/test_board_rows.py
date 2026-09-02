@@ -92,3 +92,45 @@ def test_account_without_baseline_not_listed(db_session):
     # 不拍基线直接有交易 → 不出行
     _mk(db_session, u, "A", 5, 0)
     assert compute_board_rows(db_session, PK)["return_pct"] == []
+
+
+def test_cross_boundary_leg_counts_full_profit(db_session):
+    """跨界仓：同一仓位分两腿平仓，第一腿在期初前，最后一腿在期内——归期规则看
+    最后一腿，命中即整仓（两腿）盈亏都进分子，不能只算期内那一腿。"""
+    u = _user(db_session, "cb1@t.co"); _acct(db_session, u, "A", balance=2000.0)
+    ensure_baselines(db_session, PK, T0)
+    db_session.add(Order(user_id=u.id, client_order_id="cA100", symbol="X",
+                         side="BUY", volume=0.2, status="FILLED", mt5_login="A",
+                         mt5_ticket=100, trade_mode=2,
+                         created_at=T0 - timedelta(days=3)))
+    db_session.add(ClosedTrade(user_id=u.id, mt5_login="A", symbol="X", side="BUY",
+                               close_volume=0.1, close_price=1, profit=30.0,
+                               position_ticket=100, deal_ticket=1001,
+                               closed_at=T0 - timedelta(days=2), verified=True))
+    db_session.add(ClosedTrade(user_id=u.id, mt5_login="A", symbol="X", side="BUY",
+                               close_volume=0.1, close_price=1, profit=20.0,
+                               position_ticket=100, deal_ticket=1002,
+                               closed_at=IN_WEEK, verified=True))
+    db_session.commit()
+    _mk(db_session, u, "A", 5, 0, win_p=10.0, start_ticket=200)  # 再垫 5 笔期内单腿单
+    rows = compute_board_rows(db_session, PK)
+    ret = {r["login"]: r for r in rows["return_pct"]}
+    assert ret["A"]["sample"] == 6
+    assert abs(ret["A"]["score"] - (50.0 + 50.0) / 2000.0) < 1e-9
+
+
+def test_unphotographed_account_does_not_leak_into_sibling_account(db_session):
+    """同一用户两个账户：A 已拍基线，B 是期中新开、从未拍照——B 完全不出行，
+    且 B 的盈亏不能混进 A 的分子/样本（跨账户订单/腿要按 login 隔离）。"""
+    u = _user(db_session, "mix1@t.co")
+    _acct(db_session, u, "A", balance=2000.0)
+    ensure_baselines(db_session, PK, T0)          # 此刻只有 A，只拍 A
+    _acct(db_session, u, "B", balance=2000.0)     # B 期中才开户，从未拍照
+    _mk(db_session, u, "A", 5, 0, win_p=10.0, start_ticket=1)     # A: 5 笔 +10
+    _mk(db_session, u, "B", 5, 0, win_p=10.0, start_ticket=200)   # B: 5 笔 +10（应被排除）
+    rows = compute_board_rows(db_session, PK)
+    logins = {r["login"] for r in rows["return_pct"]}
+    assert logins == {"A"}
+    ret = {r["login"]: r for r in rows["return_pct"]}
+    assert ret["A"]["sample"] == 5
+    assert abs(ret["A"]["score"] - 50.0 / 2000.0) < 1e-9
