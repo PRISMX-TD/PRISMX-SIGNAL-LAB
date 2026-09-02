@@ -55,7 +55,8 @@ def _realized_since(db, user_id, login, since, until) -> float:
     return sum(leg.profit or 0.0 for leg in q.all())
 
 
-def reconcile_deposits(db, period_key: str, now: datetime = None) -> int:
+def reconcile_deposits(db, period_key: str, now: datetime = None,
+                        bounds: tuple[datetime, datetime] | None = None) -> int:
     """对每条基线，若账号行仍在且 balance 非 NULL：
     delta = balance − (baseline + adjust) − realized_since(taken_at, login)；
     delta > RECONCILE_TOLERANCE → adjust += delta（入金并入分母）；
@@ -70,8 +71,13 @@ def reconcile_deposits(db, period_key: str, now: datetime = None) -> int:
     Task 5 的 `snapshot_boards(db, now)` 会把它接的 now 原样透传到这里，保证
     一趟批处理里「现在」只有一个含义；测试也借此固定成确定性时间，不受真实
     时钟推移影响。
+
+    `bounds` 可选：显式传 (start, end) 时跳过 `period_bounds(period_key)` 解析——
+    比赛 key（`comp:<id>`）不是 `period_bounds` 能解析的自然周/月格式，调用方
+    （Task 2 的比赛快照）传比赛的 (starts_at, ends_at) 走这条路；默认 None 时
+    行为与 Phase 2 完全一致（周期榜调用路径零变化）。
     """
-    _start, end = period_bounds(period_key)
+    _start, end = bounds if bounds is not None else period_bounds(period_key)
     now = now if now is not None else datetime.now(timezone.utc)
     if now >= end:
         return 0    # 已结束周期：期后交易会污染对账，冻结不动（重算窗内也不对账）
@@ -93,12 +99,18 @@ def reconcile_deposits(db, period_key: str, now: datetime = None) -> int:
     return adjusted
 
 
-def _resolved_in_period(db, user_id, logins, period_key, taken_at_by_login):
+def _resolved_in_period(db, user_id, logins, period_key, taken_at_by_login,
+                         bounds: tuple[datetime, datetime] | None = None):
     """整仓判定 + 归期：返回 login -> list[profit]。归期 = 最后一腿时间落在
-    [max(期初, 该账户 taken_at), 期末)。订单锚定 lifetime（开仓可早于期初）。"""
+    [max(期初, 该账户 taken_at), 期末)。订单锚定 lifetime（开仓可早于期初）。
+
+    `bounds` 可选：显式传 (start, end) 时跳过 `period_bounds(period_key)` 解析
+    （比赛 key 不是自然周/月格式，解析不了）；默认 None 时行为与 Phase 2 完全
+    一致。
+    """
     from .stats import _filled_orders, _legs_by_position, _resolve
     from app.services.trade_performance import position_id_of
-    start, end = period_bounds(period_key)
+    start, end = bounds if bounds is not None else period_bounds(period_key)
     orders = [o for o in _filled_orders(db, user_id, cutoff=None)
               if o.trade_mode == REAL and o.mt5_login in logins]
     keys = {(o.mt5_login, position_id_of(o)) for o in orders if position_id_of(o)}

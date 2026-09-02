@@ -16,3 +16,6 @@ from .periods import (  # noqa: F401
 from .boards import (  # noqa: F401
     ensure_baselines, reconcile_deposits, snapshot_boards, RECONCILE_TOLERANCE,
 )
+from .competitions import (  # noqa: F401
+    comp_period_key, compute_comp_rows, snapshot_competitions,
+)
