@@ -999,7 +999,8 @@
       "ops": "运营设置",
       "system": "系统参数",
       "guide": "策略介绍",
-      "tickets": "工单管理"
+      "tickets": "工单管理",
+      "gamification": "游戏化"
     },
     "winrate": {
       "verdict": {
@@ -1868,5 +1869,55 @@
       "pickSymbol": "选择品种",
       "noneForPair": "这个组合近 30 天在本时段还没有足够的样本"
     }
+  },
+  "gamification": {
+    "title": "成就", "levelLabel": "等级", "badgeWall": "勋章墙",
+    "titles": { "novice": "入门交易员", "junior": "初级交易员", "elite": "精英交易员",
+                "senior": "资深交易员", "chief": "首席交易员", "legend": "传奇交易员" },
+    "groups": { "qicheng": "启程", "fengmang": "锋芒", "moli": "磨砺",
+                "zhizhang": "执掌", "fengshen": "封神" },
+    "tasks": {
+      "set_nickname": "亮出名号——设置昵称", "bind_account": "接入战场——绑定第一个 MT5 账号",
+      "first_trades_5": "小试牛刀——累计完成 5 笔交易（模拟盘也算）", "streak_3": "三日之约——连续活跃 3 日",
+      "trade_days_30": "三十而立——累计实盘交易日 30 天", "trades_100": "百战沙场——累计完成 100 笔交易",
+      "lots_10": "十手战功——累计实盘交易量 10 手", "winrate_35": "初露锋芒——交易胜率 > 35%",
+      "trade_days_100": "百日锤炼——累计实盘交易日 100 天", "trades_500": "久经沙场——累计完成 500 笔交易",
+      "lots_100": "百手战功——累计实盘交易量 100 手", "own_strategy": "自成一派——创建并启用一个自己的策略",
+      "winrate_50": "稳操胜券——交易胜率 > 50%",
+      "trade_days_180": "半年征途——累计实盘交易日 180 天", "trades_1000": "穿越牛熊——累计完成 1000 笔交易",
+      "lots_1000": "千手战功——累计实盘交易量 1000 手", "profit_positive_5": "真金白银——累计盈亏为正",
+      "winrate_55": "常胜将军——交易胜率 > 55%",
+      "trades_10000": "洞悉万象——累计完成 10000 笔交易", "lots_10000": "万手战功——累计实盘交易量 10000 手",
+      "profit_positive_6": "真金白银——累计盈亏为正", "winrate_60": "胜率为王——交易胜率 > 60%"
+    },
+    "taskState": { "locked": "完成同组其他条件后开考", "pending": "待达标", "done": "已达成" },
+    "rarity": { "common": "普通", "rare": "稀有", "epic": "史诗", "legendary": "传说", "limited": "绝版" },
+    "badges": {
+      "profile_complete": { "name": "完善资料", "desc": "设置昵称并绑定 MT5 账号" },
+      "first_close": { "name": "首笔平仓", "desc": "完成第一笔完整平仓（模拟盘也算）" },
+      "first_real_trade": { "name": "首笔实盘", "desc": "第一笔真实账户成交" },
+      "comp_finisher": { "name": "完赛", "desc": "完成一届比赛" },
+      "evergreen_3m": { "name": "季度常青", "desc": "连续 3 个月，每月实盘盈亏为正" },
+      "discipline_90_7": { "name": "纪律标兵", "desc": "纪律分 ≥90 连续保持 7 天" },
+      "hundred_wins": { "name": "百战百胜", "desc": "单账户 100 笔盈利单、≥20 手且总盈亏为正" },
+      "midas_touch": { "name": "点金胜手", "desc": "单账户 500 笔、≥100 手、胜率 >60% 且盈亏为正" },
+      "profit_factor_2": { "name": "盈亏比之王", "desc": "近一年平均盈亏比 ≥2、≥100 笔且盈亏为正" },
+      "evergreen_6m": { "name": "半年常青", "desc": "连续 6 个月，每月实盘盈亏为正" },
+      "discipline_90_30": { "name": "纪律大师", "desc": "纪律分 ≥90 连续保持 30 天" },
+      "no_bad_sl_50": { "name": "铁律如山", "desc": "连续 50 笔信号单不乱动止损" },
+      "comp_podium": { "name": "比赛前三", "desc": "任意一届比赛前三名" },
+      "evergreen_12m": { "name": "全年常青", "desc": "连续 12 个月，每月实盘盈亏为正" },
+      "comp_winner": { "name": "比赛冠军", "desc": "任意一届比赛冠军" },
+      "comp_back_to_back": { "name": "卫冕王", "desc": "连续两届比赛冠军" },
+      "founder_2026": { "name": "创始元老", "desc": "2026 年内注册并完成首笔实盘（永久绝版）" }
+    },
+    "winRateCard": { "combined": "综合胜率（考核口径）", "account": "账户胜率",
+                     "toNext": "距下一级还差 {{pct}}%", "breakdown": "构成" },
+    "equip": "佩戴", "unequip": "取消佩戴", "notEarned": "未获得",
+    "profile": { "nickname": "昵称", "nicknamePublic": "榜单完整展示昵称",
+                 "leaderboardOptOut": "退出所有排行榜", "save": "保存", "saved": "已保存" },
+    "admin": { "tab": "游戏化", "inspect": "用户检查器", "searchUser": "搜索用户邮箱",
+               "visibility": "用户端可见性", "visibleOn": "已对全体用户开放",
+               "visibleOff": "内测中（仅管理员可见）", "confirmOpen": "开放后「只升不降、发出不收回」永久生效，确认开放？" }
   }
 }

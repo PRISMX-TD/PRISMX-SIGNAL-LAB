@@ -999,7 +999,8 @@
       "ops": "Operations",
       "system": "System",
       "guide": "Strategy Guide",
-      "tickets": "Tickets"
+      "tickets": "Tickets",
+      "gamification": "Gamification"
     },
     "winrate": {
       "verdict": {
@@ -1870,5 +1871,55 @@
       "pickSymbol": "Choose a symbol",
       "noneForPair": "Not enough data for this pair in this session over the last 30 days"
     }
+  },
+  "gamification": {
+    "title": "Achievements", "levelLabel": "Level", "badgeWall": "Badge Wall",
+    "titles": { "novice": "Novice Trader", "junior": "Junior Trader", "elite": "Elite Trader",
+                "senior": "Senior Trader", "chief": "Chief Trader", "legend": "Legendary Trader" },
+    "groups": { "qicheng": "Embark", "fengmang": "Edge", "moli": "Temper",
+                "zhizhang": "Command", "fengshen": "Ascension" },
+    "tasks": {
+      "set_nickname": "Make Your Mark — set a nickname", "bind_account": "Enter the Arena — bind your first MT5 account",
+      "first_trades_5": "First Steps — complete 5 trades total (demo counts)", "streak_3": "Three-Day Pact — stay active 3 days in a row",
+      "trade_days_30": "Thirty Days Strong — 30 real-account trading days", "trades_100": "Battle-Tested — complete 100 trades total",
+      "lots_10": "Ten-Lot Milestone — 10 lots of real-account volume", "winrate_35": "Early Edge — win rate above 35%",
+      "trade_days_100": "Hundred-Day Forge — 100 real-account trading days", "trades_500": "Battle-Hardened — complete 500 trades total",
+      "lots_100": "Hundred-Lot Milestone — 100 lots of real-account volume", "own_strategy": "Forge Your Own Path — create and enable a strategy of your own",
+      "winrate_50": "Steady Hand — win rate above 50%",
+      "trade_days_180": "Half-Year Journey — 180 real-account trading days", "trades_1000": "Through Bulls and Bears — complete 1000 trades total",
+      "lots_1000": "Thousand-Lot Milestone — 1000 lots of real-account volume", "profit_positive_5": "Real Gains — cumulative P&L positive",
+      "winrate_55": "Reigning Champion — win rate above 55%",
+      "trades_10000": "All-Seeing — complete 10000 trades total", "lots_10000": "Ten-Thousand-Lot Milestone — 10000 lots of real-account volume",
+      "profit_positive_6": "Real Gains — cumulative P&L positive", "winrate_60": "Win Rate Supreme — win rate above 60%"
+    },
+    "taskState": { "locked": "Unlocks after the other tasks in this group", "pending": "In progress", "done": "Completed" },
+    "rarity": { "common": "Common", "rare": "Rare", "epic": "Epic", "legendary": "Legendary", "limited": "Limited" },
+    "badges": {
+      "profile_complete": { "name": "Profile Complete", "desc": "Set a nickname and bind an MT5 account" },
+      "first_close": { "name": "First Close", "desc": "Complete your first full close (demo counts)" },
+      "first_real_trade": { "name": "First Live Trade", "desc": "First fill on a real account" },
+      "comp_finisher": { "name": "Finisher", "desc": "Complete a competition" },
+      "evergreen_3m": { "name": "Quarterly Evergreen", "desc": "3 consecutive months with positive live P&L" },
+      "discipline_90_7": { "name": "Discipline Streak", "desc": "Discipline score ≥90 sustained for 7 days" },
+      "hundred_wins": { "name": "Century of Wins", "desc": "100 winning trades on one account, ≥20 lots, with positive total P&L" },
+      "midas_touch": { "name": "Midas Touch", "desc": "500 trades on one account, ≥100 lots, win rate >60%, with positive P&L" },
+      "profit_factor_2": { "name": "Profit Factor King", "desc": "Trailing-year average profit factor ≥2, ≥100 trades, with positive P&L" },
+      "evergreen_6m": { "name": "Half-Year Evergreen", "desc": "6 consecutive months with positive live P&L" },
+      "discipline_90_30": { "name": "Discipline Master", "desc": "Discipline score ≥90 sustained for 30 days" },
+      "no_bad_sl_50": { "name": "Iron Discipline", "desc": "50 consecutive signal trades without touching stop-loss" },
+      "comp_podium": { "name": "Podium Finish", "desc": "Top 3 in any competition" },
+      "evergreen_12m": { "name": "Annual Evergreen", "desc": "12 consecutive months with positive live P&L" },
+      "comp_winner": { "name": "Champion", "desc": "Winner of any competition" },
+      "comp_back_to_back": { "name": "Back-to-Back Champion", "desc": "Winner of two consecutive competitions" },
+      "founder_2026": { "name": "Founding Member", "desc": "Registered in 2026 and completed a first live trade (permanently limited)" }
+    },
+    "winRateCard": { "combined": "Combined win rate (qualifying basis)", "account": "Account win rate",
+                     "toNext": "{{pct}}% to the next level", "breakdown": "Breakdown" },
+    "equip": "Equip", "unequip": "Unequip", "notEarned": "Not earned",
+    "profile": { "nickname": "Nickname", "nicknamePublic": "Show full nickname on leaderboards",
+                 "leaderboardOptOut": "Opt out of all leaderboards", "save": "Save", "saved": "Saved" },
+    "admin": { "tab": "Gamification", "inspect": "User Inspector", "searchUser": "Search by user email",
+               "visibility": "User-facing visibility", "visibleOn": "Open to all users",
+               "visibleOff": "In beta (admin-only)", "confirmOpen": "Once opened, this is permanent — up only, never revoked. Confirm opening?" }
   }
 }

@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, ProfilePatch, ProfileOut } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 
 const TOKEN_KEY = 'prismx_token'
@@ -525,7 +525,24 @@ export const userApi = {
         company: string | null
         online: boolean
       }>
+      // 游戏化（设计 §6/§11）：功能是否对该用户可见 + 4 个资料字段，供前端
+      // 一次性拿到而不必再单独请求 /gamification/me。
+      // Gamification: whether the feature is visible to this user, plus 4
+      // profile fields, in one round trip instead of a separate /gamification/me call.
+      gamificationVisible: boolean
+      nickname: string | null
+      nicknamePublic: boolean
+      leaderboardOptOut: boolean
+      equippedBadge: string | null
     }>('/auth/me'),
+  // 游戏化资料局部更新：昵称/榜单展示/退出排行榜/佩戴勋章，只改传了的字段。
+  // Partial update of the gamification profile: nickname / leaderboard display /
+  // leaderboard opt-out / equipped badge — only the fields actually sent change.
+  updateProfile: (payload: ProfilePatch) =>
+    request<ProfileOut>('/auth/profile', {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
   // 后端会在改密时让所有旧 token 失效（见 account.py 的说明），并随响应
   // 带回一个已盖新会话版本号的 token——调用方必须用它替换本地 token，
   // 否则这次请求自己带的旧 token 也已失效，下一个请求会被 401 踢出登录。
@@ -604,6 +621,12 @@ export const notificationApi = {
     }),
   getIndicators: () => request<string[]>('/notifications/indicators'),
   getSymbols: () => request<string[]>('/notifications/symbols'),
+}
+
+// 游戏化（设计 §6/§11）：等级/任务/勋章/胜率一次性拿全 / gamification: level,
+// tasks, badges, win rate in one call
+export const gamificationApi = {
+  me: () => request<GamificationMe>('/gamification/me'),
 }
 
 // 工单 / Tickets
@@ -753,6 +776,21 @@ export const adminApi = {
       request<Ticket>(`/admin/tickets/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         body: JSON.stringify(patch),
+      }),
+    // ---- 游戏化管理 / Gamification admin ----
+    // 用户检查器：目标用户的完整游戏化面板（含 email），触发一次真实判定
+    // （同 60 秒节流）。User inspector: the target user's full gamification
+    // panel (with email), triggering a real judging pass (same 60s throttle).
+    gamificationUser: (id: string) =>
+      request<GamificationMe & { email: string }>(`/admin/gamification/user/${encodeURIComponent(id)}`),
+    gamificationVisibility: () => request<{ userVisible: boolean }>('/admin/gamification/visibility'),
+    // 只升不降、发出不收回：一旦对用户开放就不再提供关闭接口，前端确认文案见
+    // gamification.admin.confirmOpen。Up only, never revoked: once opened there
+    // is no path back to closed; the confirmation copy is gamification.admin.confirmOpen.
+    setGamificationVisibility: (userVisible: boolean) =>
+      request<{ userVisible: boolean }>('/admin/gamification/visibility', {
+        method: 'PATCH',
+        body: JSON.stringify({ userVisible }),
       }),
   }
 

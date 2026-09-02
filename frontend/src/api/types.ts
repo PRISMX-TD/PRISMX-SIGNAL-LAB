@@ -924,3 +924,84 @@ export interface TicketListItem {
   updatedAt: string
   latestReply: TicketReply | null
 }
+
+// 游戏化（设计 §6/§11）/ Gamification
+// 勋章稀有度 / badge rarity tiers
+export type GamificationBadgeRarity = 'common' | 'rare' | 'epic' | 'legendary' | 'limited'
+
+export interface GamificationBadge {
+  id: string
+  rarity: GamificationBadgeRarity
+  category: string
+  earned: boolean
+  awardedAt: string | null
+  equipped: boolean
+}
+
+// 单个条件（任务）的判定状态。progressNow/progressTarget/currentWinRate 只在
+// 有进度可展示的条件上出现（如"累计交易日 30 天"），纯布尔条件（如"设置昵称"）
+// 不带这些字段。state 为 locked 时表示同组前置条件未满足，任务尚未开始计入。
+// One task's judged state. progressNow/progressTarget/currentWinRate appear only
+// on conditions that have progress to show (e.g. "30 real-account trading
+// days"); purely boolean conditions (e.g. "set a nickname") omit them. state
+// "locked" means the group's prerequisite tasks aren't met yet, so this one
+// hasn't started counting.
+export interface GamificationTask {
+  id: string
+  done: boolean
+  progressNow?: number
+  progressTarget?: number
+  state?: 'locked' | 'pending' | 'done'
+  currentWinRate?: number | null
+}
+
+export interface GamificationGroup {
+  group: string
+  tasks: GamificationTask[]
+}
+
+// 单个 MT5 账号在胜率窗口内的表现 / one MT5 login's performance within the win-rate window
+export interface GamificationPerLoginWinRate {
+  login: string
+  trades: number
+  wins: number
+  winRate: number | null
+  excluded: boolean
+}
+
+export interface GamificationWinRate {
+  value: number | null
+  windowDays: number
+  perLogin: GamificationPerLoginWinRate[]
+}
+
+// GET /gamification/me 的完整响应。 / full response of GET /gamification/me
+export interface GamificationMe {
+  level: number
+  title: string
+  groups: GamificationGroup[]
+  badges: GamificationBadge[]
+  winRate: GamificationWinRate
+  nickname: string | null
+  nicknamePublic: boolean
+  leaderboardOptOut: boolean
+  equippedBadge: string | null
+}
+
+// PATCH /auth/profile 的请求体：全部可选，只改传了的字段。equippedBadge 显式
+// 传 null 表示卸下勋章，与不传（保持不变）不同。
+// PATCH /auth/profile request body: every field optional, only sent ones
+// change. equippedBadge: null explicitly unequips, distinct from omitting it.
+export interface ProfilePatch {
+  nickname?: string
+  nicknamePublic?: boolean
+  leaderboardOptOut?: boolean
+  equippedBadge?: string | null
+}
+
+export interface ProfileOut {
+  nickname: string | null
+  nicknamePublic: boolean
+  leaderboardOptOut: boolean
+  equippedBadge: string | null
+}
