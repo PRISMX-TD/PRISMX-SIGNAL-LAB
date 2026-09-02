@@ -15,6 +15,7 @@ from app.schemas import PhoneRequest, UserOut
 from app.services.phone import compose_phone
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user
+from app.services.settings_store import get_gamification_settings
 
 router = APIRouter(prefix="/auth", tags=["account"])
 
@@ -30,6 +31,16 @@ class AccountInfoOut(BaseModel):
     hasPassword: bool
     createdAt: str | None
     mt5Accounts: list[dict]
+    # 游戏化（设计 §6/§11）：功能是否对该用户可见 + 4 个资料字段，供前端
+    # 一次性拿到而不必再单独请求 /gamification/me 才知道要不要显示入口。
+    # Gamification: whether the feature is visible to this user, plus 4
+    # profile fields — so the frontend knows whether to show the entry point
+    # without a separate /gamification/me round trip.
+    gamificationVisible: bool = False
+    nickname: str | None = None
+    nicknamePublic: bool = False
+    leaderboardOptOut: bool = False
+    equippedBadge: str | None = None
     class Config:
         from_attributes = True
 
@@ -67,6 +78,14 @@ def get_account(
             }
             for b in bindings
         ],
+        gamificationVisible=(
+            True if current_user.role == "admin"
+            else bool(get_gamification_settings(db).get("user_visible"))
+        ),
+        nickname=current_user.nickname,
+        nicknamePublic=bool(current_user.nickname_public),
+        leaderboardOptOut=bool(current_user.leaderboard_opt_out),
+        equippedBadge=current_user.equipped_badge,
     )
 
 

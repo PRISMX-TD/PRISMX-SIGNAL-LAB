@@ -221,6 +221,10 @@ class Settings(BaseSettings):
     # 策略写操作（创建/更新/删除信号）限流，同样按用户维度。
     # Strategy write endpoints (create/update/clear signals), also per user.
     RATE_LIMIT_STRATEGY_WRITE: str = "30/minute"
+    # 游戏化 /me：每次请求都可能触发单人判定查询，限流兜底防刷。
+    # Gamification /me: each hit can trigger a per-user judging pass; rate-limit
+    # as a backstop against abuse.
+    RATE_LIMIT_GAMIFICATION: str = "30/minute"
     # 单次回测的成本上限：bars 数 × 规则条件数。纯速率限制无法阻止"一次请求就
     # 占满 CPU 很久"，这一层直接把单次请求的工作量封顶。默认 60000 = 5000 根 ×
     # 12 条，恰好容纳滥用上限下的最坏合法情况。
