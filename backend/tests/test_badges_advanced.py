@@ -98,3 +98,73 @@ def test_missing_sl_abstains_when_signal_had_no_stop(db_session):
              signal_id=sig.id, sl=0.9, price=1.0)
     # 弃权仓被跳过（不计入也不断串），倒序遍历仍能数满其余 3 笔干净仓
     assert _consecutive_clean_signal_positions(db_session, u.id) == 3
+
+
+def test_modify_matched_by_login_and_ticket_not_ticket_alone(db_session):
+    """ticket 只在单账号内唯一——两个账号撞同一个编号时，A 账号的 MODIFY
+    不能牵连 B 账号同编号的仓位（对照 discipline.py 的 _user_modify_close_map）。"""
+    u = _user(db_session, email="sl6@t.co")
+    sig = Signal(symbol="X", side="BUY", stop_loss=0.9)
+    db_session.add(sig); db_session.commit()
+    # B 账号仓位（最近平仓）——ticket 与 A 账号撞号，但从未被改过止损
+    db_session.add(Order(user_id=u.id, client_order_id="pB", symbol="X", side="BUY",
+                         volume=0.1, status="FILLED", mt5_login="B", mt5_ticket=700,
+                         trade_mode=2, created_at=NOW - timedelta(days=2, hours=1),
+                         signal_id=sig.id, sl=0.9, filled_price=1.0))
+    db_session.add(ClosedTrade(user_id=u.id, mt5_login="B", symbol="X", side="BUY",
+                               close_volume=0.1, close_price=1, profit=1.0,
+                               position_ticket=700, deal_ticket=7001,
+                               closed_at=NOW - timedelta(days=1), verified=True))
+    # A 账号仓位（更早平仓）——同样 ticket=700，会被下面的恶意 MODIFY 命中
+    db_session.add(Order(user_id=u.id, client_order_id="pA", symbol="X", side="BUY",
+                         volume=0.1, status="FILLED", mt5_login="A", mt5_ticket=700,
+                         trade_mode=2, created_at=NOW - timedelta(days=3, hours=1),
+                         signal_id=sig.id, sl=0.9, filled_price=1.0))
+    db_session.add(ClosedTrade(user_id=u.id, mt5_login="A", symbol="X", side="BUY",
+                               close_volume=0.1, close_price=1, profit=1.0,
+                               position_ticket=700, deal_ticket=7002,
+                               closed_at=NOW - timedelta(days=2), verified=True))
+    # 恶意 MODIFY 只打在 A 账号的 700 号仓位上
+    db_session.add(Order(user_id=u.id, client_order_id="mA", symbol="X", side="BUY",
+                         volume=0.1, status="FILLED", mt5_login="A", action="MODIFY",
+                         ticket=700, sl=0, created_at=NOW - timedelta(days=2, hours=12)))
+    db_session.commit()
+    # 倒序：B（干净，计入）→ A（违规，断串）——B 不该被 A 的改单牵连
+    assert _consecutive_clean_signal_positions(db_session, u.id) == 1
+
+
+def test_missing_entry_price_abstains_without_signal_fallback(db_session):
+    """订单没有成交价、信号也没给入场价——无法算距离/容差，弃权（跳过，不计入也不断串）。"""
+    u = _user(db_session, email="sl7@t.co")
+    sig = Signal(symbol="X", side="BUY", stop_loss=0.9)  # 未设 entry
+    db_session.add(sig); db_session.commit()
+    _pos(db_session, u, 530, 1.0, NOW - timedelta(days=3),
+         signal_id=sig.id, sl=0.9, price=1.0)              # 最早，干净
+    _pos(db_session, u, 531, 1.0, NOW - timedelta(days=2),
+         signal_id=sig.id, sl=0.9, price=None)              # 中间，缺成交价+信号无入场价 → 弃权
+    _pos(db_session, u, 532, 1.0, NOW - timedelta(days=1),
+         signal_id=sig.id, sl=0.9, price=1.0)              # 最近，干净
+    # 弃权仓被跳过（不计入也不断串），倒序遍历数满其余 2 笔干净仓
+    assert _consecutive_clean_signal_positions(db_session, u.id) == 2
+
+
+def test_profit_factor_excludes_exact_zero_positions(db_session):
+    """恰好 0 盈亏的仓位不进胜负任何一边，只占样本量和总盈亏两道闸门——
+    否则会拉低亏损仓的平均亏损，把本该够不着 2.0 的盈亏比错误撑过线。"""
+    u = _user(db_session, email="pf2@t.co")
+    for i in range(60):                        # 60 胜每笔 +3 → 均盈利 3
+        _pos(db_session, u, 800 + i, 3.0, NOW - timedelta(days=5))
+    for i in range(40):                        # 40 负每笔 -2 → 均亏损 2，盈亏比 1.5，本不该达标
+        _pos(db_session, u, 900 + i, -2.0, NOW - timedelta(days=5))
+    for i in range(40):                        # 40 笔恰好 0——若被算进「亏损」会把均亏损拉到 1.0，误判达标
+        _pos(db_session, u, 1000 + i, 0.0, NOW - timedelta(days=5))
+    assert "profit_factor_2" not in judge_and_award_badges(db_session, u.id)
+
+
+def test_evergreen_dec_to_jan_adjacency(db_session):
+    """跨年 12 月→1 月要接得上（_next 用 (y+1, 1)），不是巧合刚好过了年就断串。"""
+    u = _user(db_session, email="ev3@t.co")
+    _pos(db_session, u, 601, 5.0, datetime(2025, 11, 15, tzinfo=timezone.utc))
+    _pos(db_session, u, 602, 5.0, datetime(2025, 12, 15, tzinfo=timezone.utc))
+    _pos(db_session, u, 603, 5.0, datetime(2026, 1, 15, tzinfo=timezone.utc))
+    assert _evergreen_months(db_session, u.id) == 3

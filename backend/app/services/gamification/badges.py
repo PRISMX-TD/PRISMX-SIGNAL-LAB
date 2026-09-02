@@ -129,7 +129,11 @@ def _j_profit_factor(db, user, ctx):
     if sum(profits) <= 0:
         return False
     wins = [p for p in profits if p > 0]
-    losses = [-p for p in profits if p <= 0]
+    losses = [-p for p in profits if p < 0]   # 恰好 0 的仓位不进胜负任何一边——仍占样本量和总盈亏两道闸门，
+                                               # 但不该拉低亏损仓的平均亏损（也不该算赢）。
+                                               # exact-zero positions enter neither side: they still count
+                                               # toward the sample-size and total-profit gates, but shouldn't
+                                               # dilute avg-loss (nor count as a win).
     if not losses:
         return True
     if not wins:
@@ -154,28 +158,55 @@ def _consecutive_clean_signal_positions(db, user_id) -> int:
     # the order doesn't -> violation, cleared at entry). Fetched once, not
     # per-position inside the walk.
     sig_ids = {o.signal_id for o, _t in sig_pos}
-    sig_sl_map: dict[str, float | None] = dict(
-        db.query(Signal.id, Signal.stop_loss).filter(Signal.id.in_(sig_ids)).all()
-    ) if sig_ids else {}
+    sig_map: dict[str, tuple] = {
+        sid: (sl, entry)
+        for sid, sl, entry in (
+            db.query(Signal.id, Signal.stop_loss, Signal.entry)
+              .filter(Signal.id.in_(sig_ids)).all()
+            if sig_ids else []
+        )
+    }
     mods = (db.query(Order)
               .filter(Order.user_id == user_id, Order.action == "MODIFY",
                       Order.status == "FILLED").all())
     mods = [m for m in mods if not (m.client_order_id or "").startswith("auto_")]
-    by_ticket: dict[int, list] = {}
+    # 分组键是 (账号, ticket) 而不是只用 ticket：ticket 只在单账号内唯一，同一用户
+    # 绑多个账号时会撞车，只按 ticket 分组会把 A 账号的改单错记到 B 账号同编号的
+    # 仓位上（凭空多判违规，或者反过来把真违规盖住）。对照 discipline.py 的
+    # _user_modify_close_map（~L198-218），同一条约束搬过来。
+    # Grouping key is (login, ticket), not ticket alone: tickets are only unique
+    # within an account, so a user with several accounts can collide — grouping by
+    # ticket alone would credit account A's edits to account B's same-numbered
+    # position (inventing a violation, or masking a real one the other way).
+    # Mirrors discipline.py's _user_modify_close_map (~L198-218), same constraint.
+    by_key: dict[tuple, list] = {}
     for m in mods:
         if m.ticket is not None:
-            by_ticket.setdefault(m.ticket, []).append(m)
+            by_key.setdefault((m.mt5_login, m.ticket), []).append(m)
     run = 0
     for o, _t in sig_pos:
-        orig_sl, entry = o.sl, o.filled_price
+        orig_sl = o.sl
+        sig = sig_map.get(o.signal_id)
+        sig_sl = sig[0] if sig else None
         if orig_sl in (None, 0):
-            sig_sl = sig_sl_map.get(o.signal_id)
             if sig_sl in (None, 0):
                 continue                               # 信号本就没给止损：弃权，不计入序列
             break                                       # 信号给了、订单上却没有：下单时被抹掉，违规断串
-        dist = abs((entry or 0) - orig_sl)
+        # 入场价：优先真实成交价，回落到信号给的入场价（对照 discipline.py 的
+        # _entry_of，L258-264）；两边都没有就没法算距离/容差，宁缺勿错，弃权整仓
+        # （不计入也不断串），不瞎猜一个 0 把容差带撑大。
+        # Entry price: real fill first, falling back to the signal's entry
+        # (mirrors discipline.py's _entry_of, L258-264); with neither there's no
+        # distance to scale the tolerance by — abstain the whole position (skip,
+        # not counted, not breaking) rather than guessing 0 and inflating the band.
+        entry = o.filled_price
+        if entry is None:
+            entry = sig[1] if sig else None
+        if entry is None:
+            continue                                   # 入场价未知：弃权，不计入序列
+        dist = abs(entry - orig_sl)
         violated = False
-        for m in by_ticket.get(position_id_of(o), []):
+        for m in by_key.get((o.mt5_login, position_id_of(o)), []):
             new_sl = m.sl
             if new_sl in (None, 0):
                 violated = True; break                 # 清掉止损
