@@ -1948,7 +1948,7 @@
     "title": "交易比赛",
     "empty": "暂无比赛",
     "backToList": "返回比赛列表",
-    "status": { "upcoming": "即将开始", "regOpen": "报名中", "running": "进行中",
+    "status": { "draft": "草稿", "upcoming": "即将开始", "regOpen": "报名中", "running": "进行中",
                 "finished": "已结束", "settled": "已终审" },
     "enrollment": { "signup": "报名制", "auto": "自动参赛" },
     "regWindow": "报名窗口",
@@ -1978,6 +1978,15 @@
     "admin": {
       "create": "新建比赛",
       "edit": "编辑比赛",
+      "list": "比赛列表",
+      "colName": "名称",
+      "colStatus": "状态",
+      "colMetric": "计分指标",
+      "colWindow": "时间窗口",
+      "colParticipants": "参赛人数",
+      "lockedHint": "比赛开始筹备后，仅文案与报名窗口可修改",
+      "autoEnrolled": "已自动为 {{n}} 个账户开赛入场",
+      "settleResult": "终审完成，共 {{n}} 人定榜",
       "fields": { "name": "名称", "description": "简介", "metric": "计分指标",
                   "enrollment": "参赛方式", "regOpensAt": "报名开始", "regClosesAt": "报名截止",
                   "startsAt": "开赛时间", "endsAt": "结束时间", "prizeNote": "奖品说明" },
@@ -1985,7 +1994,8 @@
       "participants": {
         "title": "参赛名单", "empty": "暂无参赛者",
         "colEmail": "邮箱", "colLogin": "账户", "colRegisteredAt": "报名时间",
-        "colScoringFrom": "计分起点", "colFinalScore": "最终成绩", "colFinalRank": "最终名次"
+        "colScoringFrom": "计分起点", "colFinalScore": "最终成绩", "colFinalRank": "最终名次",
+        "colDisqualified": "资格状态"
       },
       "disqualify": "取消资格",
       "restore": "恢复资格",

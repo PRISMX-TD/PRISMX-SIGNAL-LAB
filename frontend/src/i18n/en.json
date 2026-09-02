@@ -1950,7 +1950,7 @@
     "title": "Competitions",
     "empty": "No competitions yet",
     "backToList": "Back to competitions",
-    "status": { "upcoming": "Upcoming", "regOpen": "Registration open", "running": "Live",
+    "status": { "draft": "Draft", "upcoming": "Upcoming", "regOpen": "Registration open", "running": "Live",
                 "finished": "Finished", "settled": "Settled" },
     "enrollment": { "signup": "Sign-up", "auto": "Auto-enrolled" },
     "regWindow": "Registration window",
@@ -1980,6 +1980,15 @@
     "admin": {
       "create": "New competition",
       "edit": "Edit competition",
+      "list": "Competitions",
+      "colName": "Name",
+      "colStatus": "Status",
+      "colMetric": "Metric",
+      "colWindow": "Time window",
+      "colParticipants": "Participants",
+      "lockedHint": "Once a competition leaves draft, only copy and the registration window remain editable",
+      "autoEnrolled": "Auto-enrolled {{n}} accounts",
+      "settleResult": "Settlement complete — {{n}} ranked",
       "fields": { "name": "Name", "description": "Description", "metric": "Metric",
                   "enrollment": "Enrollment", "regOpensAt": "Registration opens", "regClosesAt": "Registration closes",
                   "startsAt": "Starts at", "endsAt": "Ends at", "prizeNote": "Prize note" },
@@ -1987,7 +1996,8 @@
       "participants": {
         "title": "Participants", "empty": "No participants yet",
         "colEmail": "Email", "colLogin": "Account", "colRegisteredAt": "Registered at",
-        "colScoringFrom": "Scoring from", "colFinalScore": "Final score", "colFinalRank": "Final rank"
+        "colScoringFrom": "Scoring from", "colFinalScore": "Final score", "colFinalRank": "Final rank",
+        "colDisqualified": "Eligibility"
       },
       "disqualify": "Disqualify",
       "restore": "Restore",

@@ -12,6 +12,7 @@ import PlatformStrategiesPanel from '../components/admin/PlatformStrategiesPanel
 import InviteLinksPanel from '../components/admin/InviteLinksPanel'
 import StrategyWinratePanel from '../components/admin/StrategyWinratePanel'
 import GamificationPanel from '../components/admin/GamificationPanel'
+import CompetitionsPanel from '../components/admin/CompetitionsPanel'
 import type { AdminBrokerSettings, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
@@ -40,8 +41,8 @@ const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
 // winrate sits right after data: both are "look at numbers", but the
 // strategy x session matrix has its own range picker and a wide table, and
 // folding it into data would bury the operating metrics and page stats.
-type AdminTab = 'data' | 'winrate' | 'users' | 'invites' | 'ops' | 'system' | 'guide' | 'tickets' | 'gamification'
-const ADMIN_TABS: AdminTab[] = ['data', 'winrate', 'users', 'invites', 'ops', 'system', 'guide', 'tickets', 'gamification']
+type AdminTab = 'data' | 'winrate' | 'users' | 'invites' | 'ops' | 'system' | 'guide' | 'tickets' | 'gamification' | 'competitions'
+const ADMIN_TABS: AdminTab[] = ['data', 'winrate', 'users', 'invites', 'ops', 'system', 'guide', 'tickets', 'gamification', 'competitions']
 
 interface Draft {
   role: UserRole
@@ -1095,6 +1096,8 @@ export default function AdminPage() {
       {tab === 'tickets' && <AdminTicketsPanel />}
 
       {tab === 'gamification' && <GamificationPanel />}
+
+      {tab === 'competitions' && <CompetitionsPanel />}
 
       {tab === 'users' && (
         <>
