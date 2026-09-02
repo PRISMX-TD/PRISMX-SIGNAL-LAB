@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError
 
-from app.models import DisciplineSnapshot, MT5Account, Order, UserBadge
+from app.models import DisciplineSnapshot, MT5Account, Order, User, UserBadge
 from .stats import compute_account_lifetime_stats, compute_comprehensive_stats
 
 FOUNDER_DEADLINE = datetime(2027, 1, 1, tzinfo=timezone.utc)
@@ -29,9 +29,21 @@ def award_badge(db, user_id, badge_id) -> bool:
 
 
 def _has_real_fill(db, user_id) -> bool:
+    """"首笔实盘成交"要求一笔真正的开仓（action=="ORDER"）。Gateway 的
+    _apply_trade_result 对 CLOSE/MODIFY 动作同样会置 FILLED 并照样打
+    trade_mode 快照，若不按 action 过滤，只改过止损或平掉一笔非本平台开的
+    实盘仓位、从未真正开过仓的用户也会被判定"已实盘"——与 stats.py 的
+    _filled_orders 同一道理，同样只认 ORDER。
+    "first real trade" requires an actual open (action=="ORDER"). Gateway's
+    _apply_trade_result marks CLOSE/MODIFY FILLED too and still stamps
+    trade_mode, so without this filter a user who only ever modified a stop
+    or closed a position this platform never opened — on a real account —
+    would be judged as having a real trade. Mirrors stats.py's
+    _filled_orders, which only counts ORDER for the same reason.
+    """
     return (db.query(Order.id)
               .filter(Order.user_id == user_id, Order.status == "FILLED",
-                      Order.trade_mode == REAL)
+                      Order.action == "ORDER", Order.trade_mode == REAL)
               .first() is not None)
 
 
@@ -104,7 +116,6 @@ BADGES: dict[str, dict] = {
 
 
 def judge_and_award_badges(db, user_id) -> list[str]:
-    from app.models import User
     user = db.get(User, user_id)
     if user is None:
         return []

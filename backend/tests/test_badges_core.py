@@ -82,6 +82,26 @@ def test_founder_window(db_session):
     assert "founder_2026" not in judge_and_award_badges(db_session, u2.id)
 
 
+def test_first_real_trade_requires_open_not_modify(db_session):
+    u = _user(db_session)
+    u.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    # 一笔 FILLED 的实盘 MODIFY（改止损）——Gateway 对 CLOSE/MODIFY 同样置 FILLED
+    # 并打 trade_mode 快照，但这不是"开仓"，不该算首笔实盘成交。
+    db_session.add(Order(user_id=u.id, client_order_id="m1", symbol="X", side="BUY",
+                         volume=0.1, status="FILLED", mt5_login="1", mt5_ticket=1,
+                         action="MODIFY", trade_mode=2, created_at=NOW))
+    db_session.commit()
+    got = judge_and_award_badges(db_session, u.id)
+    assert "first_real_trade" not in got and "founder_2026" not in got
+    # 补一笔真正的实盘开仓（action 默认 ORDER）——现在才该发
+    db_session.add(Order(user_id=u.id, client_order_id="o1", symbol="X", side="BUY",
+                         volume=0.1, status="FILLED", mt5_login="1", mt5_ticket=2,
+                         trade_mode=2, created_at=NOW))
+    db_session.commit()
+    got = judge_and_award_badges(db_session, u.id)
+    assert "first_real_trade" in got and "founder_2026" in got
+
+
 def test_discipline_streak_null_breaks(db_session):
     u = _user(db_session)
     base = NOW.date()
