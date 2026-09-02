@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from app.models import NotificationPref
 from app.services.push_dispatch import (
+    EVENT_BADGE_AWARDED,
     EVENT_TYPES,
     _event_prefs_allow,
     _parse_event_types,
@@ -89,9 +90,12 @@ class TestWithinPushWindow:
 
 
 class TestParseEventTypes:
-    def test_null_means_all_on(self):
-        # NULL = 从未配置 → 默认全部开启 / never configured → all on
-        assert _parse_event_types(None) == set(EVENT_TYPES)
+    def test_null_means_all_on_except_badge(self):
+        # NULL = 从未配置 → 除 badge_awarded 外默认全部开启（后者需显式
+        # opt-in，见 push_dispatch.py 的 EVENT_BADGE_AWARDED 说明）。
+        # never configured -> all on except badge_awarded (that one needs
+        # explicit opt-in, see the EVENT_BADGE_AWARDED note in push_dispatch.py).
+        assert _parse_event_types(None) == set(EVENT_TYPES) - {EVENT_BADGE_AWARDED}
 
     def test_empty_list_means_all_off(self):
         assert _parse_event_types("[]") == set()

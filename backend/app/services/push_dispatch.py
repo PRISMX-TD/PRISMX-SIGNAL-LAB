@@ -96,9 +96,20 @@ EVENT_STRATEGY_SIGNAL = "strategy_signal"
 # A separate kind rather than reusing bridge_offline: offline means wait, this
 # means act — until the user re-verifies, every automated order silently fails.
 EVENT_ACCOUNT_REVOKED = "account_revoked"
+# 勋章授予通知。刻意不进 _parse_event_types 的 NULL 默认全开集合——勋章推送
+# 是新加的、跟前面几类"账户/交易层面出了事"的性质不同（不痛不痒的正向反馈,
+# 不是需要用户处理的事），NULL（从未配置过偏好）不该替这一种事件类型做主，
+# 得等用户自己在通知设置里勾选才推。
+# Badge-awarded notification. Deliberately excluded from the NULL-default-on
+# set in _parse_event_types: it's new, and unlike the account/trading events
+# above (something went wrong, needs the user's attention) it's a low-stakes
+# positive nudge — a NULL pref (never configured) shouldn't opt users into it
+# on their behalf; it only fires once they explicitly enable it.
+EVENT_BADGE_AWARDED = "badge_awarded"
 EVENT_TYPES = {
     EVENT_ORDER_FILLED, EVENT_ORDER_REJECTED, EVENT_AUTO_MANAGE,
     EVENT_BRIDGE_OFFLINE, EVENT_ACCOUNT_REVOKED, EVENT_STRATEGY_SIGNAL,
+    EVENT_BADGE_AWARDED,
 }
 
 # 白名单哨兵值："不限"，命中任意取值（含此刻还不存在、以后才出现的品种/类别）。
@@ -115,15 +126,20 @@ def _list_matches(selected: list, value: str) -> bool:
 
 
 def _parse_event_types(raw: str | None) -> set[str]:
-    """解析偏好行的事件白名单。NULL = 用户从未配置过 → 默认全部事件开启
-    （产品语义，见 models.NotificationPref）；"[]" = 明确全关；解析失败按
-    全关处理（脏数据不该反而放大推送面）。
+    """解析偏好行的事件白名单。NULL = 用户从未配置过 → 除 badge_awarded 外
+    默认全部事件开启（产品语义，见 models.NotificationPref）；badge_awarded
+    是后加的低风险正向通知，NULL 不该替用户做主打开它，必须显式 opt-in 才推
+    （见 EVENT_BADGE_AWARDED 处的说明）。"[]" = 明确全关；解析失败按全关
+    处理（脏数据不该反而放大推送面）。
     Parse a pref row's event whitelist. NULL = never configured → all events
-    on by default (product semantics, see models.NotificationPref); "[]" =
-    explicitly all off; unparseable data counts as all off (bad data must not
-    widen the push surface)."""
+    on by default (product semantics, see models.NotificationPref), except
+    badge_awarded: it's a later-added, low-stakes positive notification that
+    NULL should not silently opt users into — it needs an explicit opt-in
+    (see the note by EVENT_BADGE_AWARDED). "[]" = explicitly all off;
+    unparseable data counts as all off (bad data must not widen the push
+    surface)."""
     if raw is None:
-        return set(EVENT_TYPES)
+        return set(EVENT_TYPES) - {EVENT_BADGE_AWARDED}
     try:
         parsed = json.loads(raw)
     except (json.JSONDecodeError, TypeError):

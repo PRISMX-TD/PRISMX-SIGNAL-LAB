@@ -1,4 +1,5 @@
 """勋章注册表与判定（设计 §3）。17 枚，稀有度金字塔；比赛类 Phase 3 终审授予。"""
+import logging
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError
@@ -22,10 +23,32 @@ def award_badge(db, user_id, badge_id) -> bool:
     db.add(UserBadge(user_id=user_id, badge_id=badge_id))
     try:
         db.commit()
-        return True
     except IntegrityError:
         db.rollback()
         return False
+    # 授予落库后才推送（先例见 auto_manage.py L390-399、gateway.py
+    # _notify_binding_revoked）：推送失败不该撤销已经生效的授予，也不该拖垮
+    # 判定循环，所以单独 try/except 兜住、只记日志。事件白名单 NULL 默认不含
+    # badge_awarded（见 push_dispatch.EVENT_BADGE_AWARDED），用户得自己去
+    # 通知设置里勾选才会真的收到。
+    # Only push after the award is actually committed (precedent:
+    # auto_manage.py L390-399, gateway.py _notify_binding_revoked): a push
+    # failure must not undo an award that already took effect, nor sink the
+    # judging loop — caught and logged on its own. NULL event whitelists
+    # exclude badge_awarded by default (see push_dispatch.EVENT_BADGE_AWARDED),
+    # so users only get this once they opt in via notification settings.
+    try:
+        from app.services.push_dispatch import EVENT_BADGE_AWARDED, dispatch_event_push
+        dispatch_event_push(
+            user_id, EVENT_BADGE_AWARDED,
+            "获得新勋章",
+            f"你解锁了勋章「{badge_id}」，去看看吧。",
+        )
+    except Exception:
+        logging.getLogger("gamification").exception(
+            "badge push failed (user=%s badge=%s)", user_id, badge_id
+        )
+    return True
 
 
 def _has_real_fill(db, user_id) -> bool:
