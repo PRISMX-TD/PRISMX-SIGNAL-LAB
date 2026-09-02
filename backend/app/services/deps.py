@@ -2,12 +2,13 @@
 from datetime import datetime, timezone
 
 from fastapi import Depends, Header, HTTPException, Response, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import create_access_token, decode_token_payload
-from app.models import User
+from app.models import User, UserActiveDay
 from app.services.plan_expiry import downgrade_if_expired
 
 # 滑动续期响应头：token 剩余有效期不足一半时，经此头下发新 token，
@@ -119,11 +120,14 @@ def get_current_user(
 def _touch_last_active(db: Session, user: User) -> None:
     """限流写入 last_active_at：同一用户 5 分钟内只落库一次，供 DAU 统计用。
     跨 UTC 日界的首次触发额外写一行 user_active_days（「三日之约」数据源）；
-    同日撞唯一约束时忽略，不影响 last_active_at 的落库。
+    与另一并发会话撞唯一约束时，整次提交回滚放弃（含 last_active_at），
+    绝不向上抛异常——下次请求节流仍失效，会自然重试。
     Throttled last_active_at write: at most once per 5 minutes per user, for DAU.
     The first touch that crosses a UTC day boundary also inserts one
-    user_active_days row (source of the "3-day promise" feature); a same-day
-    unique-constraint collision is swallowed and never blocks last_active_at."""
+    user_active_days row (source of the "3-day promise" feature). If that
+    collides with a concurrent session on the unique constraint, the whole
+    commit (including last_active_at) is rolled back and dropped — never
+    raised — and the next request's throttle naturally retries."""
     now = datetime.now(timezone.utc)
     last = user.last_active_at
     if last is not None:
@@ -135,17 +139,19 @@ def _touch_last_active(db: Session, user: User) -> None:
     prev_day = last.strftime("%Y-%m-%d") if last is not None else None
     user.last_active_at = now
     if prev_day != today:
-        from sqlalchemy.exc import IntegrityError
-
-        from app.models import UserActiveDay
-
         db.add(UserActiveDay(user_id=user.id, day=today))
         try:
             db.commit()
         except IntegrityError:
+            # 并发请求下的竞态：同一 (user_id, day) 已被另一会话写入。
+            # 直接放弃本次落库，绝不让节流帮手向上抛异常——下次请求时
+            # last_active_at 仍是旧值，节流自然失效，会再次尝试更新。
+            # Concurrent race: another session already wrote this
+            # (user_id, day). Drop this attempt rather than retry inside
+            # the helper — never let it raise. last_active_at stays stale,
+            # so the throttle naturally lets the next request try again.
             db.rollback()
-            user.last_active_at = now
-            db.commit()
+            return
     else:
         db.commit()
 
