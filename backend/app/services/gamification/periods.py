@@ -5,7 +5,7 @@ RECOMPUTE_GRACE_HOURS = 48
 
 
 def _utc(dt: datetime) -> datetime:
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def week_key(dt: datetime) -> str:
