@@ -69,3 +69,31 @@ def test_reconcile_skips_unbound_account(db_session):
     ensure_baselines(db_session, PK, NOW)
     db_session.query(MT5Account).delete(); db_session.commit()   # 期中解绑
     assert reconcile_deposits(db_session, PK) == 0               # 冻结，不报错
+
+
+def test_reconcile_noop_for_ended_period(db_session):
+    u = _user(db_session, email="b6@t.co")
+    _acct(db_session, u, "R1", 1000.0)
+    past_pk = "2020-W01"
+    db_session.add(PeriodBaseline(user_id=u.id, mt5_login="R1", period_key=past_pk,
+                                  baseline=1000.0, taken_at=NOW))
+    db_session.commit()
+    acct = db_session.query(MT5Account).first()
+    acct.balance = 1250.0                        # 期后账户仍在正常涨——不该被当成入金
+    db_session.commit()
+    assert reconcile_deposits(db_session, past_pk) == 0
+    assert db_session.query(PeriodBaseline).first().adjust == 0.0
+
+
+def test_reconcile_idempotent_when_no_state_change(db_session):
+    u = _user(db_session, email="b7@t.co")
+    _acct(db_session, u, "R1", 1000.0)
+    ensure_baselines(db_session, PK, NOW)
+    acct = db_session.query(MT5Account).first()
+    acct.balance = 1200.0
+    db_session.commit()
+    assert reconcile_deposits(db_session, PK) == 1
+    row = db_session.query(PeriodBaseline).first()
+    assert abs(row.adjust - 200.0) < 1e-6
+    assert reconcile_deposits(db_session, PK) == 0   # 无状态变化：再跑一次不重复调整
+    assert abs(db_session.query(PeriodBaseline).first().adjust - 200.0) < 1e-6

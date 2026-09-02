@@ -63,8 +63,15 @@ def reconcile_deposits(db, period_key: str) -> int:
     delta = balance − (baseline + adjust) − realized_since(taken_at, login)；
     delta > RECONCILE_TOLERANCE → adjust += delta（入金并入分母）；
     负 delta（出金）忽略；账号行已不在（解绑）→ 冻结不动，不报错。
+
+    只对当前进行中的周期调用（结束周期不对账）：周期结束后账户仍在正常交易，
+    期后的盈亏会被 _realized_since 当成「realized」减掉，从而把期后的正常
+    交易误判成入金、永久污染一个已封存周期的分母——即使在 48h 重算窗内也不
+    对账，重算窗只重算榜单快照，不重开基线/对账。
     """
     _start, end = period_bounds(period_key)
+    if datetime.now(timezone.utc) >= end:
+        return 0    # 已结束周期：期后交易会污染对账，冻结不动（重算窗内也不对账）
     acct_map = {(a.user_id, a.login): a.balance
                 for a in db.query(MT5Account).filter(MT5Account.balance.isnot(None))}
     adjusted = 0
