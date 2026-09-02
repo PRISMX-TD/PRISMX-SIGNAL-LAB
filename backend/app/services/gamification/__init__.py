@@ -5,3 +5,4 @@ from .conditions import (  # noqa: F401
     judge_and_record_conditions, level_of, condition_states, GROUPS, LEVEL_TITLES,
     has_consecutive_active_days,
 )
+from .badges import BADGES, judge_and_award_badges, award_badge  # noqa: F401
