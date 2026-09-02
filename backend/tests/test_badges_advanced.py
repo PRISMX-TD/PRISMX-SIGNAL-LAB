@@ -69,3 +69,32 @@ def test_clean_signal_streak_stops_at_violation(db_session):
                          ticket=500, sl=0, created_at=NOW - timedelta(days=3)))
     db_session.commit()
     assert _consecutive_clean_signal_positions(db_session, u.id) == 2  # 到违规仓即停
+
+
+def test_missing_sl_violates_when_signal_had_stop(db_session):
+    """信号给了止损、订单上却没有——下单时被主动抹掉，判违规，断串（对照 discipline.py D1）。"""
+    u = _user(db_session, email="sl4@t.co")
+    sig = Signal(symbol="X", side="BUY", stop_loss=0.9)
+    db_session.add(sig); db_session.commit()
+    # 最近两笔正常（有止损），最早一笔订单上没有止损 → 遇到即停
+    for i in (1, 2):
+        _pos(db_session, u, 510 + i, 1.0, NOW - timedelta(days=3 - i),
+             signal_id=sig.id, sl=0.9, price=1.0)
+    _pos(db_session, u, 510, 1.0, NOW - timedelta(days=3),
+         signal_id=sig.id, sl=None, price=1.0)
+    assert _consecutive_clean_signal_positions(db_session, u.id) == 2
+
+
+def test_missing_sl_abstains_when_signal_had_no_stop(db_session):
+    """信号本身没给止损——订单没止损不是用户的锅，弃权（跳过，不计入也不断串）。"""
+    u = _user(db_session, email="sl5@t.co")
+    sig = Signal(symbol="X", side="BUY")           # 无 stop_loss
+    db_session.add(sig); db_session.commit()
+    # 最早一笔（信号无止损、订单也无止损）弃权，其余三笔正常有止损
+    _pos(db_session, u, 520, 1.0, NOW - timedelta(days=4),
+         signal_id=sig.id, sl=None, price=1.0)
+    for i in (1, 2, 3):
+        _pos(db_session, u, 520 + i, 1.0, NOW - timedelta(days=4 - i),
+             signal_id=sig.id, sl=0.9, price=1.0)
+    # 弃权仓被跳过（不计入也不断串），倒序遍历仍能数满其余 3 笔干净仓
+    assert _consecutive_clean_signal_positions(db_session, u.id) == 3

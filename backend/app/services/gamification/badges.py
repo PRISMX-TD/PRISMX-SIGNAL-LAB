@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError
 
-from app.models import DisciplineSnapshot, MT5Account, Order, User, UserBadge
+from app.models import DisciplineSnapshot, MT5Account, Order, Signal, User, UserBadge
 from .stats import compute_account_lifetime_stats, compute_comprehensive_stats
 
 FOUNDER_DEADLINE = datetime(2027, 1, 1, tzinfo=timezone.utc)
@@ -145,6 +145,18 @@ def _consecutive_clean_signal_positions(db, user_id) -> int:
     sig_pos = [(o, t) for o, _p, t in _resolved_real_positions(db, user_id)
                if o.signal_id is not None]
     sig_pos.sort(key=lambda x: x[1], reverse=True)
+    # 批量取信号原始止损——判定"订单没止损"是弃权还是违规，要看信号本身有没有
+    # 给止损（discipline.py D1：信号无止损→弃权；信号有止损但订单上没有→违规，
+    # 是下单时被主动抹掉）。一次查完，不在循环里逐仓查。
+    # Batch-load each signal's original stop loss: whether an order with no SL
+    # is an abstain or a violation depends on whether the signal itself carried
+    # one (discipline.py D1: no signal stop -> abstain; signal had a stop but
+    # the order doesn't -> violation, cleared at entry). Fetched once, not
+    # per-position inside the walk.
+    sig_ids = {o.signal_id for o, _t in sig_pos}
+    sig_sl_map: dict[str, float | None] = dict(
+        db.query(Signal.id, Signal.stop_loss).filter(Signal.id.in_(sig_ids)).all()
+    ) if sig_ids else {}
     mods = (db.query(Order)
               .filter(Order.user_id == user_id, Order.action == "MODIFY",
                       Order.status == "FILLED").all())
@@ -157,7 +169,10 @@ def _consecutive_clean_signal_positions(db, user_id) -> int:
     for o, _t in sig_pos:
         orig_sl, entry = o.sl, o.filled_price
         if orig_sl in (None, 0):
-            continue                                   # 弃权仓：不计入序列
+            sig_sl = sig_sl_map.get(o.signal_id)
+            if sig_sl in (None, 0):
+                continue                               # 信号本就没给止损：弃权，不计入序列
+            break                                       # 信号给了、订单上却没有：下单时被抹掉，违规断串
         dist = abs((entry or 0) - orig_sl)
         violated = False
         for m in by_ticket.get(position_id_of(o), []):
