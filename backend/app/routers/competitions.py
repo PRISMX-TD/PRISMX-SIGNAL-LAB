@@ -72,7 +72,8 @@ def _get_public_comp_or_404(db: Session, comp_id: str) -> Competition:
 
 
 @router.get("")
-def list_competitions(db: Session = Depends(get_db),
+@limiter.limit(settings.RATE_LIMIT_COMPETITION)
+def list_competitions(request: Request, db: Session = Depends(get_db),
                        user: User = Depends(require_competitions_visible)):
     """非 draft 比赛按状态分组；ended/settled 统一归 finished。upcoming 按开赛时间
     正序（最快开始的排前面），running/finished 按开赛时间倒序（最新的排前面）。
@@ -91,11 +92,18 @@ def list_competitions(db: Session = Depends(get_db),
 
 
 @router.get("/{comp_id}")
-def get_competition(comp_id: str, db: Session = Depends(get_db),
+@limiter.limit(settings.RATE_LIMIT_COMPETITION)
+def get_competition(request: Request, comp_id: str, db: Session = Depends(get_db),
                      user: User = Depends(require_competitions_visible)):
     """详情 + 实时榜（读快照，行构造复用 `build_board_rows_payload`——对 upcoming
     比赛而言快照还没有任何行，返回空 rows/me=None，函数本身不需要区分状态）+
-    当前用户在本场比赛下的参赛条目 + pendingSettle（ended 且未终审）。"""
+    当前用户在本场比赛下的参赛条目 + pendingSettle（ended 且未终审）。
+
+    与 `POST /register` 同样挂 `RATE_LIMIT_COMPETITION`（同 gamification.py 的
+    `/me`、`/leaderboard` 两个 GET 都挂限流的先例一致）——这里每次调用都会跑一遍
+    `build_board_rows_payload`，开关翻开后大概率被前端轮询，不该是唯一不设限的
+    公开端点。
+    """
     comp = _get_public_comp_or_404(db, comp_id)
     board = build_board_rows_payload(db, user, comp.metric, comp_period_key(comp.id))
     my_rows = (db.query(CompetitionParticipant)

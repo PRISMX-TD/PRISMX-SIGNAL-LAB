@@ -17,10 +17,11 @@ from app.services.settings_store import invalidate_gamification_cache, save_gami
 
 @pytest.fixture(autouse=True)
 def _disable_rate_limiter(monkeypatch):
-    """`register_for_competition` 挂了 `@limiter.limit`，直接函数调用（本文件的
-    direct-function-call 约定）传 `request=None`——同 test_gateway_binding_revoke.py
-    的先例，绕开 slowapi 对 `request` 类型的校验，不测限流本身（限流值本身没有
-    业务逻辑好测，装饰器接的是现成的 settings.RATE_LIMIT_COMPETITION）。"""
+    """三个端点（list/get/register）都挂了 `@limiter.limit`，直接函数调用（本
+    文件的 direct-function-call 约定）传 `request=None`——同
+    test_gateway_binding_revoke.py 的先例，绕开 slowapi 对 `request` 类型的
+    校验，不测限流本身（限流值本身没有业务逻辑好测，装饰器接的是现成的
+    settings.RATE_LIMIT_COMPETITION）。"""
     monkeypatch.setattr(rate_limit.limiter, "enabled", False)
 
 UTC = timezone.utc
@@ -87,7 +88,7 @@ def test_list_groups_by_status_excludes_draft_and_orders_correctly(db_session):
     ended_old = _comp(db_session, status="ended", starts_at=T0 - timedelta(days=30), name="EndedOld")
     settled_new = _comp(db_session, status="settled", starts_at=T0 - timedelta(days=20), name="SettledNew")
 
-    out = list_competitions(db=db_session, user=u)
+    out = list_competitions(request=None, db=db_session, user=u)
 
     assert [c["name"] for c in out["upcoming"]] == ["UpNear", "UpFar"]
     assert [c["name"] for c in out["running"]] == ["RunNew", "RunOld"]
@@ -113,13 +114,13 @@ def test_detail_404_for_missing_and_draft(db_session):
     _make_visible(db_session)
     u = _user(db_session, "det1@t.co")
     with pytest.raises(HTTPException) as exc:
-        get_competition("nope", db=db_session, user=u)
+        get_competition(request=None, comp_id="nope", db=db_session, user=u)
     assert exc.value.status_code == 404
     assert exc.value.detail == "比赛不存在 / Competition not found"
 
     draft = _comp(db_session, status="draft")
     with pytest.raises(HTTPException) as exc2:
-        get_competition(draft.id, db=db_session, user=u)
+        get_competition(request=None, comp_id=draft.id, db=db_session, user=u)
     assert exc2.value.status_code == 404
 
 
@@ -136,7 +137,7 @@ def test_detail_board_rows_no_user_id_and_isself(db_session):
                                        score=0.1, sample=10))
     db_session.commit()
 
-    out = get_competition(comp.id, db=db_session, user=viewer)
+    out = get_competition(request=None, comp_id=comp.id, db=db_session, user=viewer)
 
     assert out["board"]["board"] == comp.metric
     assert out["board"]["periodKey"] == comp_period_key(comp.id)
@@ -155,7 +156,7 @@ def test_detail_upcoming_has_empty_board_rows(db_session):
     comp = _comp(db_session, status="upcoming")
     u = _user(db_session, "det4@t.co")
 
-    out = get_competition(comp.id, db=db_session, user=u)
+    out = get_competition(request=None, comp_id=comp.id, db=db_session, user=u)
 
     assert out["board"]["rows"] == []
     assert out["board"]["me"] is None
@@ -172,7 +173,7 @@ def test_detail_myentries_shape_and_pending_settle(db_session):
                                disqualified=False)
     db_session.add(p); db_session.commit(); db_session.refresh(p)
 
-    out = get_competition(comp_ended.id, db=db_session, user=u)
+    out = get_competition(request=None, comp_id=comp_ended.id, db=db_session, user=u)
 
     assert out["pendingSettle"] is True
     assert out["myEntries"] == [{
@@ -192,7 +193,7 @@ def test_detail_settled_board_matches_final_ranks(db_session):
                                        score=0.3, sample=12))
     db_session.commit()
 
-    out = get_competition(comp.id, db=db_session, user=u)
+    out = get_competition(request=None, comp_id=comp.id, db=db_session, user=u)
 
     assert out["pendingSettle"] is False
     assert out["board"]["rows"][0]["rank"] == 1
