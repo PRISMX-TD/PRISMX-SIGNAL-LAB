@@ -44,6 +44,12 @@ def test_demo_and_unverified_and_window_excluded(db_session):
     s = compute_comprehensive_stats(db_session, u.id)
     assert s["trades"] == 0 and s["lots"] == 0.1  # lots 只数窗内实盘（ticket2）
     assert s["trades_any"] == 1                    # demo 整仓计入 trades_any
+    assert s["win_rate"] is None                   # trades==0 时不判定胜率
+    # per_login：混合实盘/模拟盘账号——ticket1（demo）计入 excluded，ticket2
+    # （实盘但未核验，未解决）不计 trades/wins；ticket3 出窗不出现在这里。
+    assert s["per_login"] == {
+        "500123": {"trades": 0, "wins": 0, "winRate": None, "excluded": 1},
+    }
 
 
 def test_partial_close_not_resolved(db_session):
@@ -52,6 +58,9 @@ def test_partial_close_not_resolved(db_session):
     _close(db_session, u, "500123", 1, 3.0, vol=0.1)   # 只平一半
     s = compute_comprehensive_stats(db_session, u.id)
     assert s["trades"] == 0
+    # lots/trade_days 不看仓位是否已解决——只看窗内实盘 FILLED 开仓单本身
+    assert s["lots"] == 0.2
+    assert s["trade_days"] == 1
 
 
 def test_ever_bound_account_counts(db_session):
@@ -67,3 +76,17 @@ def test_lifetime_per_account(db_session):
     _fill(db_session, u, "A", 2); _close(db_session, u, "A", 2, -1.0)
     life = compute_account_lifetime_stats(db_session, u.id)
     assert life["A"]["trades"] == 2 and life["A"]["wins"] == 1 and life["A"]["profit"] == 8.0
+
+
+def test_lifetime_excludes_demo_and_unverified(db_session):
+    u = _user(db_session)
+    # demo 整仓（tm=0）——lifetime 只看实盘，demo 订单整个不进 real 集合
+    _fill(db_session, u, "B", 1, tm=0); _close(db_session, u, "B", 1, 5.0)
+    # 实盘整仓但平仓腿未核验——resolve 时因 legs_map 过滤 verified 而查不到腿，
+    # 判定为未解决，不计 trades/wins/profit
+    _fill(db_session, u, "B", 2); _close(db_session, u, "B", 2, 5.0, verified=False)
+    life = compute_account_lifetime_stats(db_session, u.id)
+    b = life.get("B", {})
+    assert b.get("trades", 0) == 0
+    assert b.get("wins", 0) == 0
+    assert b.get("profit", 0.0) == 0.0
