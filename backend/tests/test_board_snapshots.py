@@ -46,11 +46,53 @@ def test_snapshot_ranks_and_upserts(db_session):
                  .order_by(LeaderboardSnapshot.rank).all())
     assert [x.mt5_login for x in week_rows] == ["A", "B"]
     assert week_rows[0].rank == 1 and week_rows[1].rank == 2
+    # win_rate 榜：A/B 都是 20 笔全胜（win_p 不同但都 >0），score=1.0、
+    # sample=20 完全打平——真正落到第三个 tie-break（login 升序）身上，
+    # 不是靠 score/sample 分出的名次。
+    wr_rows = (db_session.query(LeaderboardSnapshot)
+               .filter_by(board="win_rate", period_key="2026-W36")
+               .order_by(LeaderboardSnapshot.rank).all())
+    assert [x.mt5_login for x in wr_rows] == ["A", "B"]
+    assert [x.rank for x in wr_rows] == [1, 2]
+    assert wr_rows[0].score == wr_rows[1].score == 1.0
+    assert wr_rows[0].sample == wr_rows[1].sample == 20
     # 重跑覆盖不翻倍
     snapshot_boards(db_session, NOW)
     n = db_session.query(LeaderboardSnapshot).filter_by(
         board="return_pct", period_key="2026-W36").count()
     assert n == 2
+
+
+def test_return_board_tie_break_by_sample(db_session):
+    """return_pct 榜：两账户 score 相等（同总盈利、同基线）但 sample 不同——
+    第二个 tie-break（-sample）该让样本更多的账户排前面，不是巧合命中
+    login 顺序（这里刻意让样本多的账户 login 排在字母序后面，'D' > 'C'，
+    若 tie-break 顺序错了会排反）。"""
+    for email, login, n, profit_each in (("s3@t.co", "D", 8, 7.5),
+                                         ("s4@t.co", "C", 6, 10.0)):
+        u = User(email=email, api_token="tok_" + email); db_session.add(u); db_session.commit()
+        db_session.add(MT5Account(user_id=u.id, login=login, server="s", balance=2000.0,
+                                  trade_mode=2)); db_session.commit()
+        ensure_baselines(db_session, "2026-W36", T0)
+        for t in range(1, n + 1):
+            closed = T0 + timedelta(hours=t)
+            db_session.add(Order(user_id=u.id, client_order_id=f"c{login}{t}", symbol="X",
+                                 side="BUY", volume=0.1, status="FILLED", mt5_login=login,
+                                 mt5_ticket=t, trade_mode=2,
+                                 created_at=closed - timedelta(hours=1)))
+            db_session.add(ClosedTrade(user_id=u.id, mt5_login=login, symbol="X", side="BUY",
+                                       close_volume=0.1, close_price=1, profit=profit_each,
+                                       position_ticket=t, deal_ticket=t * 10,
+                                       closed_at=closed, verified=True))
+        db_session.commit()
+    snapshot_boards(db_session, NOW)
+    rows = (db_session.query(LeaderboardSnapshot)
+            .filter_by(board="return_pct", period_key="2026-W36")
+            .order_by(LeaderboardSnapshot.rank).all())
+    by_login = {r.mt5_login: r for r in rows if r.mt5_login in ("C", "D")}
+    assert abs(by_login["C"].score - by_login["D"].score) < 1e-9   # 60/2000 打平
+    assert by_login["C"].sample == 6 and by_login["D"].sample == 8
+    assert by_login["D"].rank < by_login["C"].rank                # 样本多者优先
 
 
 def test_grace_window_recompute_and_seal(db_session):
