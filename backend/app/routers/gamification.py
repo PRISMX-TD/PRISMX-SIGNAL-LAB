@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.models import LeaderboardSnapshot, User, UserBadge, UserTask
-from app.schemas import VisibilityPatchIn
+from app.schemas import GamificationSettingsPatchIn, VisibilityPatchIn
 from app.services.deps import get_current_user, get_db
 from app.services.gamification import (
     BADGES, LEVEL_TITLES, compute_comprehensive_stats, condition_states,
@@ -199,3 +199,64 @@ def admin_set_visibility(body: VisibilityPatchIn, db: Session = Depends(get_db))
     db.commit()
     invalidate_gamification_cache()
     return {"userVisible": bool(body.userVisible)}
+
+
+# snake_case 存储键 ↔ camelCase API 字段——两处写死在一起，改字段时两侧一起改。
+# snake_case store keys <-> camelCase API fields, kept side by side so a
+# field rename touches both at once.
+_SETTINGS_KEY_MAP = {
+    "user_visible": "userVisible",
+    "leaderboard_visible": "leaderboardVisible",
+    "competitions_visible": "competitionsVisible",
+    "min_baseline_usd": "minBaselineUsd",
+}
+
+
+def _settings_to_camel(data: dict) -> dict:
+    return {camel: data[snake] for snake, camel in _SETTINGS_KEY_MAP.items()}
+
+
+@admin_router.get("/settings")
+def admin_get_settings(db: Session = Depends(get_db)):
+    return _settings_to_camel(get_gamification_settings(db))
+
+
+@admin_router.patch("/settings")
+def admin_patch_settings(body: GamificationSettingsPatchIn, db: Session = Depends(get_db)):
+    """设置组局部更新：全字段可选，只改 model_fields_set 里出现过的那些——
+    与 `/visibility` PATCH 共用同一份 settings_store 记录，靠
+    `save_gamification_settings` 的读-合并-写语义组合，互不清空对方的键。
+
+    Partial update for the settings group: only fields present in
+    model_fields_set are touched. Shares the same settings_store record with
+    the `/visibility` PATCH; composed via `save_gamification_settings`'s
+    read-merge-write semantics so neither endpoint clobbers the other's keys.
+    """
+    sent = body.model_fields_set
+    patch: dict = {}
+    if "userVisible" in sent:
+        patch["user_visible"] = bool(body.userVisible)
+    if "leaderboardVisible" in sent:
+        patch["leaderboard_visible"] = bool(body.leaderboardVisible)
+    if "competitionsVisible" in sent:
+        patch["competitions_visible"] = bool(body.competitionsVisible)
+    if "minBaselineUsd" in sent:
+        if body.minBaselineUsd is None or body.minBaselineUsd <= 0:
+            raise HTTPException(400, "最低本金需大于 0 / Minimum baseline must be > 0")
+        patch["min_baseline_usd"] = float(body.minBaselineUsd)
+    if patch:
+        save_gamification_settings(db, patch)
+        db.commit()
+        invalidate_gamification_cache()
+    return _settings_to_camel(get_gamification_settings(db))
+
+
+@admin_router.get("/leaderboard")
+def admin_leaderboard(board: str, period: str, db: Session = Depends(get_db),
+                       admin: User = Depends(get_current_user)):
+    """管理端榜单预览：以请求管理员为 viewer，不受用户端 leaderboard_visible
+    开关限制（该开关只挡用户端 /gamification/leaderboard）。
+    Admin leaderboard preview: the requesting admin is the viewer, and this
+    is not gated by leaderboard_visible (that gate only guards the
+    user-facing /gamification/leaderboard)."""
+    return build_leaderboard_payload(db, admin, board, period)

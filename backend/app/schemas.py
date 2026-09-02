@@ -144,6 +144,30 @@ class VisibilityPatchIn(BaseModel):
     userVisible: bool
 
 
+class GamificationSettingsPatchIn(BaseModel):
+    """游戏化设置组局部更新（管理端）：全部字段可选，只改传了的那些。
+
+    与 `VisibilityPatchIn`（Phase 1 面板，只管 userVisible）并存——两者都
+    落到同一份 settings_store 记录，靠 `save_gamification_settings` 的
+    读-合并-写语义组合，互不清空对方的键。用 model_fields_set 而非
+    `is not None` 判断是否传了某字段，照 ProfilePatchIn 的先例。
+
+    Partial update for the gamification settings group (admin): every field
+    is optional, only the ones actually sent are changed. Coexists with
+    `VisibilityPatchIn` (the Phase 1 panel, which only knows userVisible) —
+    both write to the same settings_store record, composed via
+    `save_gamification_settings`'s read-merge-write semantics, so neither
+    clobbers the other's keys. Uses model_fields_set rather than `is not
+    None` to tell "field sent" from "field absent", matching ProfilePatchIn's
+    precedent.
+    """
+
+    userVisible: bool | None = None
+    leaderboardVisible: bool | None = None
+    competitionsVisible: bool | None = None
+    minBaselineUsd: float | None = None
+
+
 class AdminBulkUserUpdate(AdminUserUpdate):
     # 目标用户 id 列表；其余字段语义与 AdminUserUpdate 完全一致（仅传要改的字段）。
     # Target user ids; remaining fields behave exactly like AdminUserUpdate
