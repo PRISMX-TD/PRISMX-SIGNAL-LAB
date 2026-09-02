@@ -65,7 +65,7 @@ def require_leaderboard_visible(db: Session = Depends(get_db),
 
 
 def build_leaderboard_payload(db: Session, viewer: User, board: str, period: str) -> dict:
-    """榜单页负载（设计 §4.3）：board/period 校验、打码、isSelf、me 块。
+    """榜单页负载（设计 §4.3）：board/period 校验后转交 `build_board_rows_payload`。
 
     `period` 既接受 "week"/"month"（解析为以当前 UTC 时间算出的进行中周期
     key），也接受显式 key（校验格式），后者是已封存历史周期唯一的访问方式——
@@ -81,7 +81,19 @@ def build_leaderboard_payload(db: Session, viewer: User, board: str, period: str
         if not _PERIOD_KEY_RE.match(period or ""):
             raise HTTPException(400, "周期格式错误 / Invalid period")
         period_key = period
+    return build_board_rows_payload(db, viewer, board, period_key)
 
+
+def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: str) -> dict:
+    """行构造（设计 §4.3）：打码、isSelf、me 块——不做 board/period 格式校验。
+
+    从 `build_leaderboard_payload` 中抽出，供两类调用方共用：一是该函数自己
+    （已经校验过 board 白名单与 period 格式），二是 Phase 3 比赛管理端的实时榜
+    预览（`competitions.py` 的 `/admin/competitions/{id}/board`）——比赛的
+    period_key 是 `comp:<id>`，不是 `_PERIOD_KEY_RE` 能匹配的自然周/月格式，
+    所以它绕过 `build_leaderboard_payload` 直接调这个函数，board 用
+    `comp.metric`（已在创建/编辑时校验过白名单）。
+    """
     all_rows = (db.query(LeaderboardSnapshot)
                   .filter(LeaderboardSnapshot.board == board,
                           LeaderboardSnapshot.period_key == period_key)

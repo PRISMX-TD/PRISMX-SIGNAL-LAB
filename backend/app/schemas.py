@@ -168,6 +168,51 @@ class GamificationSettingsPatchIn(BaseModel):
     minBaselineUsd: float | None = None
 
 
+class CompetitionCreateIn(BaseModel):
+    """创建比赛（管理端，Phase 3 §1.7）。语义级校验（metric/enrollment 白名单、
+    starts<ends、signup 赛的报名窗口）在路由层做，这里只管字段形状——原因同
+    `GamificationSettingsPatchIn` 一带的先例：错误信息要双语，Pydantic 的
+    field_validator 报错走的是英文 422，不是这里想要的 400 双语文案。
+    """
+
+    name: str
+    description: str | None = None
+    metric: str
+    enrollment: str
+    regOpensAt: datetime | None = None
+    regClosesAt: datetime | None = None
+    startsAt: datetime
+    endsAt: datetime
+    prizeNote: str | None = None
+
+
+class CompetitionPatchIn(BaseModel):
+    """编辑比赛（管理端）：全字段可选，用 model_fields_set 判断「传了哪些」——
+    draft 状态可改的字段集合与非 draft 状态可改的字段集合不同，路由层要能区分
+    「没传」和「传了但值不变」。`status` 单独处理（相邻前进校验），不与其余
+    字段的 draft/非 draft 白名单校验混在一起。
+    """
+
+    name: str | None = None
+    description: str | None = None
+    metric: str | None = None
+    enrollment: str | None = None
+    regOpensAt: datetime | None = None
+    regClosesAt: datetime | None = None
+    startsAt: datetime | None = None
+    endsAt: datetime | None = None
+    prizeNote: str | None = None
+    status: str | None = None
+
+
+class CompetitionParticipantPatchIn(BaseModel):
+    """取消/恢复参赛资格（管理端）。disqualifyReason 仅在 disqualified=True 时
+    落库，恢复资格时路由层清空，不靠前端主动传 null。"""
+
+    disqualified: bool
+    disqualifyReason: str | None = None
+
+
 class AdminBulkUserUpdate(AdminUserUpdate):
     # 目标用户 id 列表；其余字段语义与 AdminUserUpdate 完全一致（仅传要改的字段）。
     # Target user ids; remaining fields behave exactly like AdminUserUpdate
