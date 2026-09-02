@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, GamificationSettings, GamificationSettingsPatch } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 
 const TOKEN_KEY = 'prismx_token'
@@ -531,6 +531,14 @@ export const userApi = {
       // profile fields, in one round trip instead of a separate /gamification/me call.
       gamificationVisible: boolean
       leaderboardVisible: boolean
+      // 比赛（Phase 3）对该用户是否可见（内测开关，独立于上面两个——见后端
+      // GamificationSettings.competitionsVisible）。同样只在 refreshUser()
+      // 之后才会补上，先例同 gamificationVisible/leaderboardVisible。
+      // Whether competitions (Phase 3) are visible to this user (a beta gate
+      // independent of the two above — see the backend's
+      // GamificationSettings.competitionsVisible). Likewise only filled in by
+      // refreshUser(); same precedent as gamificationVisible/leaderboardVisible.
+      competitionsVisible: boolean
       nickname: string | null
       nicknamePublic: boolean
       leaderboardOptOut: boolean
@@ -639,6 +647,20 @@ export const gamificationApi = {
     request<LeaderboardPayload>(
       `/gamification/leaderboard?board=${encodeURIComponent(board)}&period=${encodeURIComponent(period)}`
     ),
+}
+
+// 交易比赛（设计 §1.7/§1.8/§1.9，Phase 3）：用户端公开列表/详情/报名。
+// 403 = 内测未开放（见 gamification.admin.competitionsSwitch）。
+// Trading competitions (Phase 3): user-facing public list/detail/register.
+// 403 = beta not yet open (see gamification.admin.competitionsSwitch).
+export const competitionApi = {
+  list: () => request<CompetitionListGrouped>('/competitions'),
+  detail: (id: string) => request<CompetitionDetail>(`/competitions/${encodeURIComponent(id)}`),
+  register: (id: string, mt5Login: string) =>
+    request<CompetitionRegisterResult>(`/competitions/${encodeURIComponent(id)}/register`, {
+      method: 'POST',
+      body: JSON.stringify({ mt5Login }),
+    }),
 }
 
 // 工单 / Tickets
@@ -821,6 +843,48 @@ export const adminApi = {
       request<LeaderboardPayload>(
         `/admin/gamification/leaderboard?board=${encodeURIComponent(board)}&period=${encodeURIComponent(period)}`
       ),
+    // ---- 比赛管理（Phase 3）/ Competition admin (Phase 3) ----
+    // 全部比赛（含 draft），按创建时间倒序，每条带参赛数。
+    // Every competition (draft included), newest-created first, with a participant count each.
+    competitions: () => request<CompetitionAdminRow[]>('/admin/competitions'),
+    createCompetition: (payload: CompetitionCreate) =>
+      request<CompetitionAdminRow>('/admin/competitions', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    // draft 状态下全字段可改；非 draft 状态仅文案 + 报名窗口可改，其余字段一律
+    // 400（后端强制）；status 只能按 draft→upcoming→running→ended 相邻推进。
+    // In draft, every field is editable; once non-draft only copy + the
+    // registration window remain editable (anything else 400s server-side);
+    // status only advances one adjacent step at a time.
+    updateCompetition: (id: string, patch: CompetitionPatch) =>
+      request<CompetitionAdminRow>(`/admin/competitions/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }),
+    competitionParticipants: (id: string) =>
+      request<ParticipantAdminRow[]>(`/admin/competitions/${encodeURIComponent(id)}/participants`),
+    // 取消/恢复参赛资格。compId/pid 顺序与路径 /admin/competitions/{compId}/participants/{pid} 一致。
+    // Disqualify/restore a participant. compId/pid order matches the path
+    // /admin/competitions/{compId}/participants/{pid}.
+    updateParticipant: (compId: string, pid: string, patch: ParticipantPatch) =>
+      request<ParticipantAdminRow>(
+        `/admin/competitions/${encodeURIComponent(compId)}/participants/${encodeURIComponent(pid)}`,
+        { method: 'PATCH', body: JSON.stringify(patch) }
+      ),
+    // 终审：仅 status=="ended" 的比赛可调用，不可重跑（后端以 status 为闸）。
+    // 名次永久定格并自动发奖——见 competition.admin.settleConfirm 的确认文案。
+    // Settle: only callable on status=="ended" competitions, not re-runnable
+    // (gated by status server-side). Ranks lock in permanently and prizes are
+    // awarded automatically — see the competition.admin.settleConfirm copy.
+    settleCompetition: (id: string) =>
+      request<CompetitionSettleResult>(`/admin/competitions/${encodeURIComponent(id)}/settle`, {
+        method: 'POST',
+      }),
+    // 实时榜预览：以请求管理员为 viewer，形状与用户端 LeaderboardPayload 一致。
+    // Live board preview: the requesting admin is the viewer; same shape as the user-facing LeaderboardPayload.
+    competitionBoard: (id: string) =>
+      request<LeaderboardPayload>(`/admin/competitions/${encodeURIComponent(id)}/board`),
   }
 
 // 自动仓位管理（PRO）/ auto position management (PRO)

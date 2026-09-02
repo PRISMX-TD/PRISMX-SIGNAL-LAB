@@ -1000,7 +1000,8 @@
       "system": "系统参数",
       "guide": "策略介绍",
       "tickets": "工单管理",
-      "gamification": "游戏化"
+      "gamification": "游戏化",
+      "competitions": "比赛"
     },
     "winrate": {
       "verdict": {
@@ -1942,5 +1943,53 @@
                "minBaseline": "收益榜最低本金（USD）",
                "confirmOpenBoard": "开放后榜单对全体用户可见，确认开放？",
                "pickBoard": "选择榜单", "pickPeriod": "选择周期" }
+  },
+  "competition": {
+    "title": "交易比赛",
+    "empty": "暂无比赛",
+    "status": { "upcoming": "即将开始", "regOpen": "报名中", "running": "进行中",
+                "finished": "已结束", "settled": "已终审" },
+    "enrollment": { "signup": "报名制", "auto": "自动参赛" },
+    "regWindow": "报名窗口",
+    "liveBoard": "实时榜",
+    "finalBoard": "最终榜",
+    "pendingSettle": "比赛已结束，成绩终审中",
+    "prizeNote": "奖品说明",
+    "starts": "开赛时间",
+    "ends": "结束时间",
+    "myEntries": "我的参赛账户",
+    "scoringFrom": "计分起点",
+    "finalRank": "最终名次",
+    "disqualified": "已取消资格",
+    "register": "报名",
+    "pickAccount": "选择参赛账户",
+    "pickAccountHint": "仅可选择本人名下的实盘账户参赛",
+    "registered": "已报名",
+    "registerSuccess": "报名成功",
+    "regNotOpen": "报名尚未开始",
+    "regClosed": "报名已截止",
+    "rules": {
+      "scoringFrom": "报名后的成绩才计入——开赛前报名从开赛起计分，开赛后报名从报名时刻起计分",
+      "minSamples": "达到所选口径的笔数门槛（与常设榜一致）才有名次",
+      "final": "实时榜仅供参考，最终名次与奖品发放以终审结果为准"
+    },
+    "admin": {
+      "create": "新建比赛",
+      "edit": "编辑比赛",
+      "fields": { "name": "名称", "description": "简介", "metric": "计分指标",
+                  "enrollment": "参赛方式", "regOpensAt": "报名开始", "regClosesAt": "报名截止",
+                  "startsAt": "开赛时间", "endsAt": "结束时间", "prizeNote": "奖品说明" },
+      "advance": { "toUpcoming": "发布", "toRunning": "开赛", "toEnded": "结束比赛" },
+      "participants": {
+        "title": "参赛名单", "empty": "暂无参赛者",
+        "colEmail": "邮箱", "colLogin": "账户", "colRegisteredAt": "报名时间",
+        "colScoringFrom": "计分起点", "colFinalScore": "最终成绩", "colFinalRank": "最终名次"
+      },
+      "disqualify": "取消资格",
+      "restore": "恢复资格",
+      "disqualifyReason": "取消资格原因",
+      "settle": "终审",
+      "settleConfirm": "终审后名次永久定格并自动发奖，确认？"
+    }
   }
 }

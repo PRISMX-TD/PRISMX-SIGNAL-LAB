@@ -1000,7 +1000,8 @@
       "system": "System",
       "guide": "Strategy Guide",
       "tickets": "Tickets",
-      "gamification": "Gamification"
+      "gamification": "Gamification",
+      "competitions": "Competitions"
     },
     "winrate": {
       "verdict": {
@@ -1944,5 +1945,53 @@
                "minBaseline": "Minimum baseline for the return board (USD)",
                "confirmOpenBoard": "Once opened, the leaderboard is visible to all users. Confirm opening?",
                "pickBoard": "Pick a board", "pickPeriod": "Pick a period" }
+  },
+  "competition": {
+    "title": "Competitions",
+    "empty": "No competitions yet",
+    "status": { "upcoming": "Upcoming", "regOpen": "Registration open", "running": "Live",
+                "finished": "Finished", "settled": "Settled" },
+    "enrollment": { "signup": "Sign-up", "auto": "Auto-enrolled" },
+    "regWindow": "Registration window",
+    "liveBoard": "Live board",
+    "finalBoard": "Final board",
+    "pendingSettle": "Competition ended — results pending final settlement",
+    "prizeNote": "Prize",
+    "starts": "Starts",
+    "ends": "Ends",
+    "myEntries": "My entries",
+    "scoringFrom": "Scoring from",
+    "finalRank": "Final rank",
+    "disqualified": "Disqualified",
+    "register": "Register",
+    "pickAccount": "Pick your entry account",
+    "pickAccountHint": "Only your own real-money accounts are eligible",
+    "registered": "Registered",
+    "registerSuccess": "Registered successfully",
+    "regNotOpen": "Registration hasn't opened yet",
+    "regClosed": "Registration is closed",
+    "rules": {
+      "scoringFrom": "Only results after registration count — registering before the start scores from the start, registering after the start scores from the moment you register",
+      "minSamples": "Ranking requires clearing the sample-size threshold for the chosen metric, same as the standing leaderboard",
+      "final": "The live board is for reference only — final rank and prizes follow the settled result"
+    },
+    "admin": {
+      "create": "New competition",
+      "edit": "Edit competition",
+      "fields": { "name": "Name", "description": "Description", "metric": "Metric",
+                  "enrollment": "Enrollment", "regOpensAt": "Registration opens", "regClosesAt": "Registration closes",
+                  "startsAt": "Starts at", "endsAt": "Ends at", "prizeNote": "Prize note" },
+      "advance": { "toUpcoming": "Publish", "toRunning": "Start", "toEnded": "End competition" },
+      "participants": {
+        "title": "Participants", "empty": "No participants yet",
+        "colEmail": "Email", "colLogin": "Account", "colRegisteredAt": "Registered at",
+        "colScoringFrom": "Scoring from", "colFinalScore": "Final score", "colFinalRank": "Final rank"
+      },
+      "disqualify": "Disqualify",
+      "restore": "Restore",
+      "disqualifyReason": "Disqualification reason",
+      "settle": "Settle",
+      "settleConfirm": "Settlement is permanent — final ranks lock in and prizes are awarded automatically. Confirm?"
+    }
   }
 }

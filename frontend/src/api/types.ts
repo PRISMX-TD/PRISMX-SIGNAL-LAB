@@ -1076,3 +1076,175 @@ export interface GamificationSettingsPatch {
   competitionsVisible?: boolean
   minBaselineUsd?: number
 }
+
+// 交易比赛（设计 §1.7/§1.8/§1.9，Phase 3）/ Trading competitions
+// 计分指标：与排行榜同一套值域（后端 _METRICS 与 LEADERBOARD_BOARDS 完全一致），
+// 复用 LeaderboardBoard 而不是另定义一遍同样的两个字面量。
+// Scoring metric: the same value domain as the leaderboard (backend _METRICS
+// matches LEADERBOARD_BOARDS exactly) — reuses LeaderboardBoard rather than
+// redeclaring the same two literals.
+export type CompetitionMetric = LeaderboardBoard
+// 参赛方式：signup 报名制（用户在报名窗口内自选账户）/ auto 自动参赛（开赛时
+// 全部达标实盘账户自动入场，退榜用户除外）。
+// Enrollment mode: signup (user picks an account within the registration
+// window) / auto (every qualifying real account is auto-enrolled at start,
+// opted-out users excluded).
+export type CompetitionEnrollment = 'signup' | 'auto'
+// 状态只进不退：draft→upcoming→running→ended→settled。draft 对用户端一律
+// 视同不存在（后端 404），只出现在管理端。
+// Status only advances: draft→upcoming→running→ended→settled. draft is
+// treated as nonexistent on the user-facing API (backend 404s it) and only
+// ever appears on the admin side.
+export type CompetitionStatus = 'draft' | 'upcoming' | 'running' | 'ended' | 'settled'
+
+// 比赛概览（用户端 GET /competitions 的分组列表项，GET /competitions/{id} 详情
+// 的基础字段）。startsAt/endsAt 理论上非 draft 比赛必填，但后端输出防御性地
+// 允许 null，这里如实跟随。
+// Competition summary (list-grouping item of the user-facing GET /competitions,
+// and the base fields of GET /competitions/{id}). startsAt/endsAt are required
+// for any non-draft competition in practice, but the backend's output is
+// defensively nullable, so this follows suit.
+export interface CompetitionSummary {
+  id: string
+  name: string
+  description: string | null
+  metric: CompetitionMetric
+  enrollment: CompetitionEnrollment
+  status: CompetitionStatus
+  regOpensAt: string | null
+  regClosesAt: string | null
+  startsAt: string | null
+  endsAt: string | null
+  prizeNote: string | null
+}
+
+// GET /competitions 的完整响应：非 draft 比赛按状态分组。
+// Full response of GET /competitions: non-draft competitions grouped by status.
+export interface CompetitionListGrouped {
+  upcoming: CompetitionSummary[]
+  running: CompetitionSummary[]
+  finished: CompetitionSummary[]
+}
+
+// 当前用户在这场比赛下的一个参赛条目（GET /competitions/{id} 的 myEntries 项）。
+// One of the current user's entries in this competition (an item of
+// GET /competitions/{id}'s myEntries).
+export interface CompetitionEntry {
+  login: string
+  scoringFrom: string | null
+  finalRank: number | null
+  finalScore: number | null
+  disqualified: boolean
+}
+
+// GET /competitions/{id} 的完整响应：概览 + 实时榜（LeaderboardPayload 同一套
+// 形状，行构造复用 gamification.build_board_rows_payload）+ 我的参赛条目 +
+// 是否待终审（status=="ended"）。
+// Full response of GET /competitions/{id}: summary + live board (same shape as
+// LeaderboardPayload — the row construction is shared with
+// gamification.build_board_rows_payload) + my entries + whether it's pending
+// final settlement (status=="ended").
+export interface CompetitionDetail extends CompetitionSummary {
+  board: LeaderboardPayload
+  myEntries: CompetitionEntry[]
+  pendingSettle: boolean
+}
+
+// POST /competitions/{id}/register 的响应。 / response of POST /competitions/{id}/register
+export interface CompetitionRegisterResult {
+  login: string
+  scoringFrom: string | null
+}
+
+// 管理端比赛行（GET/POST /admin/competitions、PATCH /admin/competitions/{id}
+// 的响应）：概览字段之上多带 track（Phase 4 预留，恒为 "real"）、createdAt、
+// participantCount。autoEnrolled 只在这次 PATCH 把状态推进到 running 且
+// enrollment=="auto" 时才出现——展示"这次自动拉入了几个账户"。
+// Admin competition row (response of GET/POST /admin/competitions and
+// PATCH /admin/competitions/{id}): adds track (reserved for Phase 4, always
+// "real"), createdAt, participantCount on top of the summary fields.
+// autoEnrolled appears only when this PATCH advanced status to running with
+// enrollment=="auto" — how many accounts were just auto-enrolled.
+export interface CompetitionAdminRow extends CompetitionSummary {
+  track: string
+  createdAt: string | null
+  participantCount: number
+  autoEnrolled?: number
+}
+
+// POST /admin/competitions 请求体。startsAt/endsAt 必填，其余按管理端表单可选。
+// POST /admin/competitions request body. startsAt/endsAt are required; the
+// rest follow the admin form's optionality.
+export interface CompetitionCreate {
+  name: string
+  description?: string | null
+  metric: CompetitionMetric
+  enrollment: CompetitionEnrollment
+  regOpensAt?: string | null
+  regClosesAt?: string | null
+  startsAt: string
+  endsAt: string
+  prizeNote?: string | null
+}
+
+// PATCH /admin/competitions/{id} 请求体：全部可选，只改传了的字段——draft 状态
+// 下全字段可改，非 draft 状态下后端只接受文案与报名窗口字段（其余出现即 400），
+// status 走单独的相邻推进校验。这些约束由后端强制，此处仅描述字段形状。
+// PATCH /admin/competitions/{id} request body: every field optional, only the
+// ones sent change. In draft, every field is editable; once non-draft the
+// backend accepts only copy + registration-window fields (anything else 400s),
+// and status follows its own adjacent-advance check. Those constraints are
+// enforced server-side; this only describes the field shapes.
+export interface CompetitionPatch {
+  name?: string
+  description?: string | null
+  metric?: CompetitionMetric
+  enrollment?: CompetitionEnrollment
+  regOpensAt?: string | null
+  regClosesAt?: string | null
+  startsAt?: string
+  endsAt?: string
+  prizeNote?: string | null
+  status?: CompetitionStatus
+}
+
+// GET /admin/competitions/{id}/participants 的一行、PATCH 参赛条目的响应。
+// One row of GET /admin/competitions/{id}/participants, and the response of
+// PATCHing a participant.
+export interface ParticipantAdminRow {
+  id: string
+  userId: string
+  email: string | null
+  login: string
+  registeredAt: string | null
+  scoringFrom: string | null
+  finalScore: number | null
+  finalRank: number | null
+  disqualified: boolean
+  disqualifyReason: string | null
+}
+
+// PATCH /admin/competitions/{id}/participants/{pid} 请求体：取消/恢复资格。
+// disqualifyReason 仅在 disqualified=true 时落库，恢复资格（false）时后端
+// 自动清空，不必显式传 null。
+// PATCH /admin/competitions/{id}/participants/{pid} request body:
+// disqualify/restore. disqualifyReason is only stored when disqualified is
+// true; restoring (false) clears it server-side automatically, no need to
+// pass null explicitly.
+export interface ParticipantPatch {
+  disqualified: boolean
+  disqualifyReason?: string | null
+}
+
+// POST /admin/competitions/{id}/settle 的响应。badgeErrors 非空不代表终审本身
+// 失败——名次与 status 已在此前一次独立 commit 中落定，只是某枚勋章发放失败
+// （可人工补发，幂等）。
+// Response of POST /admin/competitions/{id}/settle. A non-empty badgeErrors
+// does not mean settlement itself failed — ranks and status were already
+// committed in a prior, separate commit; only a badge award failed (can be
+// re-granted manually, idempotently).
+export interface CompetitionSettleResult {
+  ranked: number
+  badges: Array<{ userId: string; badgeId: string }>
+  badgeErrors: Array<{ userId: string; badgeId: string; error: string }>
+}
