@@ -87,6 +87,28 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
     return rows
 
 
+def _snapshot_one_comp(db, comp: Competition) -> list[dict]:
+    """单场比赛的算行 + 排名 + 快照原子替换（delete-then-insert），不 commit——
+    commit 时机由调用方决定：`snapshot_competitions` 每场比赛提交一次；
+    `settle_competition` 把这一步并入终审第一段事务，不单独提交。
+
+    返回排好名次的行（在 `compute_comp_rows` 的行基础上原地加了 `rank`），供
+    调用方直接使用，不必再回查一遍 `leaderboard_snapshots`。
+    """
+    key = comp_period_key(comp.id)
+    rows = compute_comp_rows(db, comp)
+    rows.sort(key=lambda r: (-r["score"], -r["sample"], r["login"]))
+    db.query(LeaderboardSnapshot).filter(
+        LeaderboardSnapshot.board == comp.metric,
+        LeaderboardSnapshot.period_key == key).delete()
+    for i, r in enumerate(rows, start=1):
+        r["rank"] = i
+        db.add(LeaderboardSnapshot(board=comp.metric, period_key=key,
+                                   user_id=r["userId"], mt5_login=r["login"],
+                                   rank=i, score=r["score"], sample=r["sample"]))
+    return rows
+
+
 def snapshot_competitions(db, now: datetime) -> dict:
     """对 status in ("running", "ended")（未 settled）的比赛算行、排名、快照。
 
@@ -94,6 +116,9 @@ def snapshot_competitions(db, now: datetime) -> dict:
     ends_at))`（基线拍照在报名/自动入场时完成，快照不补拍），再算行。
     ended（未 settled）：只重算计分，不再对账（与周期榜「结束周期不对账」的
     语义一致）。settled/draft/upcoming 绝不触碰。
+
+    单场比赛的算行/排名/快照替换逻辑复用 `_snapshot_one_comp`——`settle_competition`
+    终审前刷新快照走的是同一份实现，不重复维护两套。
     """
     comps = (db.query(Competition)
                .filter(Competition.status.in_(("running", "ended"))).all())
@@ -104,15 +129,7 @@ def snapshot_competitions(db, now: datetime) -> dict:
         ends_at = _aware(comp.ends_at)
         if comp.status == "running":
             reconcile_deposits(db, key, now=now, bounds=(starts_at, ends_at))
-        rows = compute_comp_rows(db, comp)
-        rows.sort(key=lambda r: (-r["score"], -r["sample"], r["login"]))
-        db.query(LeaderboardSnapshot).filter(
-            LeaderboardSnapshot.board == comp.metric,
-            LeaderboardSnapshot.period_key == key).delete()
-        for i, r in enumerate(rows, start=1):
-            db.add(LeaderboardSnapshot(board=comp.metric, period_key=key,
-                                       user_id=r["userId"], mt5_login=r["login"],
-                                       rank=i, score=r["score"], sample=r["sample"]))
+        rows = _snapshot_one_comp(db, comp)
         total_rows += len(rows)
         db.commit()
     return {"comps": len(comps), "rows": total_rows}
@@ -128,6 +145,9 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
     """
     if comp.enrollment != "signup":
         raise HTTPException(status_code=400, detail="本比赛为自动参赛 / This competition auto-enrolls")
+    if comp.status not in ("upcoming", "running"):
+        raise HTTPException(status_code=400,
+                            detail="比赛已结束，无法报名 / Competition already finished")
 
     now = _aware(now)
     opens, closes = _aware(comp.reg_opens_at), _aware(comp.reg_closes_at)
@@ -214,23 +234,29 @@ def auto_enroll(db, comp: Competition, now: datetime) -> int:
 def settle_competition(db, comp: Competition, admin_id: str) -> dict:
     """终审（设计 §1.7/§1.9，Phase 3 Task 4）：结算不可重跑，一切以 status 为闸。
 
-    两段式、中间夹一次 commit，且顺序不可换：第一段把名次和 status="settled"
-    连同审计行一起落盘并 commit——这一段完成后，比赛就已经终局，`comp.status
-    != "ended"` 的前置校验会挡住任何重复调用。第二段才发奖：award_badge 内部
-    自行 commit（沿用既有 house pattern），单枚失败只会漏发一枚勋章（可人工
-    补发，幂等），绝不会传导回去把已经写死的名次或 status 撤回——所以失败被
-    捕获进返回值的 badgeErrors，而不是抛出让调用方以为终审本身失败了。
+    终审前先刷新一遍本场比赛的快照（`_snapshot_one_comp`，与每小时循环
+    `snapshot_competitions` 共用同一份实现）：最近一次落盘的快照最长可能有一小
+    时陈旧——「取消资格 → 立刻终审」这个自然的管理流程会踩到这个陈旧窗口：
+    被取消资格的人还占着上一次快照里的名次（compute_comp_rows 已经把 disqualified
+    参赛者排除在计分之外，但那是下一次快照才生效），若终审直接读旧快照，永久
+    名次表会把他钉在榜上、幸存者拿不到该有的名次（比如没有 rank 1）、
+    comp_winner 也会因此静默漏发。这里的刷新和后面「名次 + status + 审计」的
+    落盘算在同一段事务里，一起 commit。
+
+    两段式、中间夹一次 commit，且顺序不可换：第一段把（刷新后的）名次和
+    status="settled" 连同审计行一起落盘并 commit——这一段完成后，比赛就已经
+    终局，`comp.status != "ended"` 的前置校验会挡住任何重复调用。第二段才发
+    奖：award_badge 内部自行 commit（沿用既有 house pattern），单枚失败只会
+    漏发一枚勋章（可人工补发，幂等），绝不会传导回去把已经写死的名次或 status
+    撤回——所以失败被捕获进返回值的 badgeErrors，而不是抛出让调用方以为终审
+    本身失败了。
     """
     if comp.status != "ended":
         raise HTTPException(
             status_code=400,
             detail="仅可终审已结束的比赛 / Only ended competitions can be settled")
 
-    key = comp_period_key(comp.id)
-    snapshots = (db.query(LeaderboardSnapshot)
-                   .filter(LeaderboardSnapshot.board == comp.metric,
-                           LeaderboardSnapshot.period_key == key)
-                   .order_by(LeaderboardSnapshot.rank.asc()).all())
+    rows = _snapshot_one_comp(db, comp)   # 先落定最新名次，再读——见上方 docstring
     by_login = {p.mt5_login: p for p in
                 db.query(CompetitionParticipant).filter(
                     CompetitionParticipant.competition_id == comp.id)}
@@ -239,20 +265,20 @@ def settle_competition(db, comp: Competition, admin_id: str) -> dict:
     finisher_users: set[str] = set()
     podium_users: set[str] = set()
     winner_user = None
-    for snap in snapshots:
-        participant = by_login.get(snap.mt5_login)
-        # 双保险：disqualified 的参赛者理论上根本不会有快照行（compute_comp_rows
-        # 已经把他们排除在计分之外），但终审是终局动作，宁可多判一次也不让一条
-        # 意外留下的快照行把取消资格的人写进名次或发出奖。
+    for r in rows:
+        participant = by_login.get(r["login"])
+        # 双保险：disqualified 的参赛者理论上根本不会出现在刚刷新的 rows 里
+        # （compute_comp_rows 已经把他们排除在计分之外），但终审是终局动作，
+        # 宁可多判一次也不让意外情况把取消资格的人写进名次或发出奖。
         if participant is None or participant.disqualified:
             continue
-        participant.final_score = snap.score
-        participant.final_rank = snap.rank
+        participant.final_score = r["score"]
+        participant.final_rank = r["rank"]
         ranked += 1
         finisher_users.add(participant.user_id)
-        if snap.rank <= 3:
+        if r["rank"] <= 3:
             podium_users.add(participant.user_id)
-        if snap.rank == 1:
+        if r["rank"] == 1:
             winner_user = participant.user_id
 
     comp.status = "settled"

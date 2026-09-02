@@ -49,6 +49,17 @@ def test_register_rejects_auto_enroll_competition(db_session):
     assert "自动参赛" in exc.value.detail
 
 
+def test_register_rejects_ended_competition(db_session):
+    """status 已推进到 ended（或更后）的比赛不可再报名，哪怕报名窗口本身还没
+    关——比赛已经打完了，不该有新参赛者半路插进来。"""
+    comp = _comp(db_session, status="ended")
+    u = _user(db_session, "ended1@t.co"); _acct(db_session, u, "A")
+    with pytest.raises(HTTPException) as exc:
+        register_participant(db_session, comp, u, "A", IN_WINDOW)
+    assert exc.value.status_code == 400
+    assert "已结束" in exc.value.detail
+
+
 def test_register_rejects_outside_window(db_session):
     comp = _comp(db_session)
     u = _user(db_session, "win1@t.co"); _acct(db_session, u, "A")

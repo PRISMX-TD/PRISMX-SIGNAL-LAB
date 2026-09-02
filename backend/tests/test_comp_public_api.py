@@ -93,7 +93,6 @@ def test_list_groups_by_status_excludes_draft_and_orders_correctly(db_session):
     assert [c["name"] for c in out["upcoming"]] == ["UpNear", "UpFar"]
     assert [c["name"] for c in out["running"]] == ["RunNew", "RunOld"]
     assert [c["name"] for c in out["finished"]] == ["SettledNew", "EndedOld"]
-    all_ids = {c["id"] for group in out.values() for c in group}
     assert all("Draft" != c["name"] for group in out.values() for c in group)
     row = out["upcoming"][0]
     assert set(["id", "name", "description", "metric", "enrollment", "status",

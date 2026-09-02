@@ -155,6 +155,7 @@ MSG_UNKNOWN_METRIC = "未知计分指标 / Unknown metric"
 MSG_UNKNOWN_ENROLLMENT = "未知参赛方式 / Unknown enrollment mode"
 MSG_NON_DRAFT_FIELDS = "比赛开始后仅可修改文案与报名窗口 / Only copy and registration window are editable after draft"
 MSG_STATUS_SEQUENCE = "状态只能按顺序推进 / Status can only advance sequentially"
+MSG_SETTLED_FROZEN = "已终审的比赛不可再改参赛状态 / Settled competitions are frozen"
 
 
 def _validate_core(metric: str, enrollment: str,
@@ -225,7 +226,7 @@ def _participant_out(p: CompetitionParticipant, email: str | None) -> dict:
 def _get_comp_or_404(db: Session, comp_id: str) -> Competition:
     comp = db.get(Competition, comp_id)
     if comp is None:
-        raise HTTPException(404, "比赛不存在 / Competition not found")
+        raise HTTPException(404, MSG_COMP_NOT_FOUND)
     return comp
 
 
@@ -338,7 +339,9 @@ def admin_patch_participant(comp_id: str, participant_id: str,
                              body: CompetitionParticipantPatchIn,
                              db: Session = Depends(get_db),
                              admin: User = Depends(get_current_user)):
-    _get_comp_or_404(db, comp_id)
+    comp = _get_comp_or_404(db, comp_id)
+    if comp.status == "settled":
+        raise HTTPException(400, MSG_SETTLED_FROZEN)
     participant = (db.query(CompetitionParticipant)
                      .filter(CompetitionParticipant.id == participant_id,
                              CompetitionParticipant.competition_id == comp_id).first())

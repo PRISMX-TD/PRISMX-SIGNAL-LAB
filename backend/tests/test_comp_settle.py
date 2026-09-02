@@ -36,11 +36,24 @@ def _participant(db, comp, u, login, disqualified=False):
     db.add(p); db.commit(); return p
 
 
-def _snap(db, comp, u, login, rank, score=0.1, sample=10):
-    db.add(LeaderboardSnapshot(board=comp.metric, period_key=comp_period_key(comp.id),
-                               user_id=u.id, mt5_login=login, rank=rank,
-                               score=score, sample=sample))
-    db.commit()
+def _stub_compute_rows(monkeypatch, comp, rows):
+    """settle_competition 现在终审前会先重算一遍这场比赛的快照（`_snapshot_one_comp`
+    内部调用 `compute_comp_rows`）——见 competitions.py 里 settle_competition 的
+    docstring。这里的测试只关心 settle 自身的排名/发奖/审计逻辑，不必为每个用例
+    搭一整套真实成交 + 基线数据（那是 test_comp_scoring.py 的职责），所以直接把
+    `compute_comp_rows(db, comp)` 对这场比赛的返回值钉死成 `rows`（未排名的
+    `{userId, login, score, sample}` 行，形状与 compute_comp_rows 真实返回值一致）；
+    其它比赛仍走真实实现，不受影响。
+    """
+    import app.services.gamification.competitions as comp_mod
+    real_compute = comp_mod.compute_comp_rows
+
+    def _fake(db, c):
+        if c.id == comp.id:
+            return list(rows)
+        return real_compute(db, c)
+
+    monkeypatch.setattr(comp_mod, "compute_comp_rows", _fake)
 
 
 def _badges(db, user_id):
@@ -62,17 +75,19 @@ def test_settle_rejects_non_ended_status(db_session):
 
 # ---- ranks written, unranked stay NULL -------------------------------------
 
-def test_settle_writes_final_rank_and_score_matching_snapshot(db_session):
+def test_settle_writes_final_rank_and_score_matching_snapshot(db_session, monkeypatch):
     admin = _admin(db_session)
     comp = _comp(db_session)
     u1 = _user(db_session, "s1@t.co"); _acct = MT5Account(user_id=u1.id, login="A", server="s",
                                                             balance=1000.0, trade_mode=2)
     db_session.add(_acct); db_session.commit()
     p1 = _participant(db_session, comp, u1, "A")
-    _snap(db_session, comp, u1, "A", rank=1, score=0.5, sample=20)
 
     u2 = _user(db_session, "s2@t.co")
-    p2 = _participant(db_session, comp, u2, "B")           # 没入榜：无快照行
+    p2 = _participant(db_session, comp, u2, "B")           # 没入榜：compute 不出这行
+
+    _stub_compute_rows(monkeypatch, comp,
+                       [{"userId": u1.id, "login": "A", "score": 0.5, "sample": 20}])
 
     result = settle_competition(db_session, comp, admin.id)
 
@@ -85,31 +100,36 @@ def test_settle_writes_final_rank_and_score_matching_snapshot(db_session):
 
 # ---- badge matrix -----------------------------------------------------------
 
-def test_settle_badge_matrix_winner_podium_finisher_unranked_disqualified(db_session):
+def test_settle_badge_matrix_winner_podium_finisher_unranked_disqualified(db_session, monkeypatch):
     admin = _admin(db_session)
     comp = _comp(db_session)
 
     u_winner = _user(db_session, "win@t.co")
     _participant(db_session, comp, u_winner, "A")
-    _snap(db_session, comp, u_winner, "A", rank=1)
 
     u_second = _user(db_session, "sec@t.co")
     _participant(db_session, comp, u_second, "B")
-    _snap(db_session, comp, u_second, "B", rank=2)
 
     u_third = _user(db_session, "third@t.co")
     _participant(db_session, comp, u_third, "C")
-    _snap(db_session, comp, u_third, "C", rank=3)
 
     u_fourth = _user(db_session, "fourth@t.co")
     _participant(db_session, comp, u_fourth, "D")
-    _snap(db_session, comp, u_fourth, "D", rank=4)
 
     u_unranked = _user(db_session, "unranked@t.co")
-    _participant(db_session, comp, u_unranked, "E")        # 无快照行
+    _participant(db_session, comp, u_unranked, "E")        # compute 不出这行
 
     u_dq = _user(db_session, "dq@t.co")
-    _participant(db_session, comp, u_dq, "F", disqualified=True)
+    _participant(db_session, comp, u_dq, "F", disqualified=True)  # 取消资格：不参与计分
+
+    # 同分同笔数：排名靠 (-score, -sample, login) 里的 login 打破平局——
+    # A<B<C<D 正好对应 rank 1..4，与原先手写的名次一致。
+    _stub_compute_rows(monkeypatch, comp, [
+        {"userId": u_winner.id, "login": "A", "score": 0.5, "sample": 10},
+        {"userId": u_second.id, "login": "B", "score": 0.5, "sample": 10},
+        {"userId": u_third.id, "login": "C", "score": 0.5, "sample": 10},
+        {"userId": u_fourth.id, "login": "D", "score": 0.5, "sample": 10},
+    ])
 
     settle_competition(db_session, comp, admin.id)
 
@@ -121,15 +141,19 @@ def test_settle_badge_matrix_winner_podium_finisher_unranked_disqualified(db_ses
     assert _badges(db_session, u_dq.id) == set()
 
 
-def test_settle_disqualified_with_stale_snapshot_kept_out(db_session):
-    """取消资格发生在拍快照之后（陈旧快照行未清）：line-247 的双保险要挡住这种
-    情况——disqualified 参赛者哪怕有 rank=1 的快照行，也不该写 final_*，不该
-    被计入任何一枚勋章。"""
+def test_settle_disqualified_participant_stays_excluded_even_if_compute_returns_a_row(
+        db_session, monkeypatch):
+    """双保险：`compute_comp_rows` 按设计根本不会给 disqualified 参赛者出行，但
+    终审是终局动作，这里故意让替身 compute_comp_rows 违反这条约定（模拟潜在
+    bug 或数据竞态），验证 settle 自己那道 `participant.disqualified` 检查仍然
+    挡得住——不写 final_*，不计入 ranked，不发任何勋章。"""
     admin = _admin(db_session)
     comp = _comp(db_session)
     u_dq = _user(db_session, "staledq@t.co")
     p_dq = _participant(db_session, comp, u_dq, "A", disqualified=True)
-    _snap(db_session, comp, u_dq, "A", rank=1)          # 陈旧快照：取消资格前留下的
+
+    _stub_compute_rows(monkeypatch, comp,
+                       [{"userId": u_dq.id, "login": "A", "score": 0.9, "sample": 30}])
 
     result = settle_competition(db_session, comp, admin.id)
 
@@ -139,15 +163,67 @@ def test_settle_disqualified_with_stale_snapshot_kept_out(db_session):
     assert result["ranked"] == 0
 
 
-def test_settle_multi_account_same_user_dedups_badges(db_session):
+def test_settle_refreshes_stale_snapshot_before_reading(db_session, monkeypatch):
+    """核心场景：上一次每小时快照留了 2 行（rank 1/2），rank 1 的参赛者在那之后
+    被取消资格——终审必须先按当前 disqualified 状态重算，而不是照单全收陈旧
+    快照。刷新后：永久榜只剩幸存者一行且排到 rank 1，comp_winner 发给幸存者，
+    取消资格那一行从 leaderboard_snapshots 里消失（不是继续躺在榜上）。"""
+    admin = _admin(db_session)
+    comp = _comp(db_session)
+    key = comp_period_key(comp.id)
+
+    u_dq = _user(db_session, "wasfirst@t.co")
+    p_dq = _participant(db_session, comp, u_dq, "A", disqualified=False)
+    u_ok = _user(db_session, "survivor@t.co")
+    p_ok = _participant(db_session, comp, u_ok, "B")
+
+    # 模拟上一次每小时快照：rank 1 = A（此时还没被取消资格），rank 2 = B。
+    db_session.add(LeaderboardSnapshot(board=comp.metric, period_key=key,
+                                       user_id=u_dq.id, mt5_login="A", rank=1,
+                                       score=0.9, sample=30))
+    db_session.add(LeaderboardSnapshot(board=comp.metric, period_key=key,
+                                       user_id=u_ok.id, mt5_login="B", rank=2,
+                                       score=0.3, sample=15))
+    db_session.commit()
+
+    # 快照之后才发生：管理员取消 A 的资格。
+    p_dq.disqualified = True
+    db_session.commit()
+
+    # compute_comp_rows 的真实实现本就会把 disqualified 参赛者排除在外
+    # （见 test_comp_scoring.test_disqualified_participant_excluded）——这里
+    # 直接钉死它对本场比赛的返回值，等价于「A 已不出行，B 照旧」，不必为 B
+    # 搭一整套真实成交数据。
+    _stub_compute_rows(monkeypatch, comp,
+                       [{"userId": u_ok.id, "login": "B", "score": 0.3, "sample": 15}])
+
+    result = settle_competition(db_session, comp, admin.id)
+
+    db_session.refresh(p_dq); db_session.refresh(p_ok)
+    assert p_dq.final_rank is None and p_dq.final_score is None
+    assert p_ok.final_rank == 1 and p_ok.final_score == 0.3
+    assert result["ranked"] == 1
+    assert "comp_winner" in _badges(db_session, u_ok.id)
+    assert _badges(db_session, u_dq.id) == set()
+
+    snaps = db_session.query(LeaderboardSnapshot).filter_by(
+        board=comp.metric, period_key=key).all()
+    assert len(snaps) == 1
+    assert snaps[0].mt5_login == "B" and snaps[0].rank == 1
+
+
+def test_settle_multi_account_same_user_dedups_badges(db_session, monkeypatch):
     """同一人两个账户占 1/2 名：winner/podium/finisher 各只发一枚，不因两行快照重复。"""
     admin = _admin(db_session)
     comp = _comp(db_session)
     u = _user(db_session, "dual@t.co")
     _participant(db_session, comp, u, "A")
     _participant(db_session, comp, u, "B")
-    _snap(db_session, comp, u, "A", rank=1)
-    _snap(db_session, comp, u, "B", rank=2)
+
+    _stub_compute_rows(monkeypatch, comp, [
+        {"userId": u.id, "login": "A", "score": 0.5, "sample": 10},
+        {"userId": u.id, "login": "B", "score": 0.5, "sample": 10},
+    ])
 
     result = settle_competition(db_session, comp, admin.id)
 
@@ -168,7 +244,8 @@ def test_settle_badge_award_failure_lands_in_badgeErrors_finality_intact(db_sess
     comp = _comp(db_session)
     u = _user(db_session, "boom@t.co")
     _participant(db_session, comp, u, "A")
-    _snap(db_session, comp, u, "A", rank=1)
+    _stub_compute_rows(monkeypatch, comp,
+                       [{"userId": u.id, "login": "A", "score": 0.5, "sample": 10}])
 
     real_award_badge = comp_mod.award_badge
 
@@ -200,48 +277,53 @@ def test_settle_badge_award_failure_lands_in_badgeErrors_finality_intact(db_sess
 
 # ---- back-to-back -----------------------------------------------------------
 
-def test_settle_back_to_back_awarded_when_same_winner(db_session):
+def test_settle_back_to_back_awarded_when_same_winner(db_session, monkeypatch):
     admin = _admin(db_session)
     u = _user(db_session, "champ@t.co")
 
     comp1 = _comp(db_session, starts_at=T0, ends_at=ENDS, name="Comp 1")
     _participant(db_session, comp1, u, "A")
-    _snap(db_session, comp1, u, "A", rank=1)
+    _stub_compute_rows(monkeypatch, comp1,
+                       [{"userId": u.id, "login": "A", "score": 0.5, "sample": 10}])
     settle_competition(db_session, comp1, admin.id)
     assert "comp_back_to_back" not in _badges(db_session, u.id)   # 首场没有「上一届」
 
     comp2 = _comp(db_session, starts_at=ENDS + timedelta(days=1),
                   ends_at=ENDS + timedelta(days=8), name="Comp 2")
     _participant(db_session, comp2, u, "A")
-    _snap(db_session, comp2, u, "A", rank=1)
+    _stub_compute_rows(monkeypatch, comp2,
+                       [{"userId": u.id, "login": "A", "score": 0.5, "sample": 10}])
     settle_competition(db_session, comp2, admin.id)
 
     assert "comp_back_to_back" in _badges(db_session, u.id)
 
 
-def test_settle_back_to_back_not_awarded_when_different_winner(db_session):
+def test_settle_back_to_back_not_awarded_when_different_winner(db_session, monkeypatch):
     admin = _admin(db_session)
     u1 = _user(db_session, "champ1@t.co")
     u2 = _user(db_session, "champ2@t.co")
 
     comp1 = _comp(db_session, starts_at=T0, ends_at=ENDS, name="Comp 1")
     _participant(db_session, comp1, u1, "A")
-    _snap(db_session, comp1, u1, "A", rank=1)
+    _stub_compute_rows(monkeypatch, comp1,
+                       [{"userId": u1.id, "login": "A", "score": 0.5, "sample": 10}])
     settle_competition(db_session, comp1, admin.id)
 
     comp2 = _comp(db_session, starts_at=ENDS + timedelta(days=1),
                   ends_at=ENDS + timedelta(days=8), name="Comp 2")
     _participant(db_session, comp2, u2, "B")
-    _snap(db_session, comp2, u2, "B", rank=1)
+    _stub_compute_rows(monkeypatch, comp2,
+                       [{"userId": u2.id, "login": "B", "score": 0.5, "sample": 10}])
     settle_competition(db_session, comp2, admin.id)
 
     assert "comp_back_to_back" not in _badges(db_session, u1.id)
     assert "comp_back_to_back" not in _badges(db_session, u2.id)
 
 
-def test_settle_back_to_back_empty_board_adjacent_no_crash_no_spurious_award(db_session):
-    """相邻（按 starts_at）的一场比赛没有任何快照行（零参赛/零入榜）：那一届没有
-    冠军（winner_by_comp 为 None），不该让相邻对的比较抛异常，也不该误发
+def test_settle_back_to_back_empty_board_adjacent_no_crash_no_spurious_award(db_session, monkeypatch):
+    """相邻（按 starts_at）的一场比赛没有任何参赛者（零参赛/零入榜，真实
+    compute_comp_rows 对零参赛自然返回空，不必 stub）：那一届没有冠军
+    （winner_by_comp 为 None），不该让相邻对的比较抛异常，也不该误发
     comp_back_to_back 给任何人。"""
     admin = _admin(db_session)
     u = _user(db_session, "soloChamp@t.co")
@@ -252,7 +334,8 @@ def test_settle_back_to_back_empty_board_adjacent_no_crash_no_spurious_award(db_
     comp_winner = _comp(db_session, starts_at=ENDS + timedelta(days=1),
                         ends_at=ENDS + timedelta(days=8), name="Comp Winner")
     _participant(db_session, comp_winner, u, "A")
-    _snap(db_session, comp_winner, u, "A", rank=1)
+    _stub_compute_rows(monkeypatch, comp_winner,
+                       [{"userId": u.id, "login": "A", "score": 0.5, "sample": 10}])
     result = settle_competition(db_session, comp_winner, admin.id)
 
     assert comp_empty.status == "settled" and comp_winner.status == "settled"
@@ -262,12 +345,13 @@ def test_settle_back_to_back_empty_board_adjacent_no_crash_no_spurious_award(db_
 
 # ---- audit -------------------------------------------------------------------
 
-def test_settle_writes_audit_log(db_session):
+def test_settle_writes_audit_log(db_session, monkeypatch):
     admin = _admin(db_session)
     comp = _comp(db_session)
     u = _user(db_session, "audit@t.co")
     _participant(db_session, comp, u, "A")
-    _snap(db_session, comp, u, "A", rank=1)
+    _stub_compute_rows(monkeypatch, comp,
+                       [{"userId": u.id, "login": "A", "score": 0.5, "sample": 10}])
 
     settle_competition(db_session, comp, admin.id)
 
@@ -279,12 +363,13 @@ def test_settle_writes_audit_log(db_session):
 
 # ---- not re-runnable ----------------------------------------------------------
 
-def test_settle_is_not_rerunnable(db_session):
+def test_settle_is_not_rerunnable(db_session, monkeypatch):
     admin = _admin(db_session)
     comp = _comp(db_session)
     u = _user(db_session, "once@t.co")
     _participant(db_session, comp, u, "A")
-    _snap(db_session, comp, u, "A", rank=1)
+    _stub_compute_rows(monkeypatch, comp,
+                       [{"userId": u.id, "login": "A", "score": 0.5, "sample": 10}])
 
     settle_competition(db_session, comp, admin.id)
     assert comp.status == "settled"

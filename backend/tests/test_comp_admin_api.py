@@ -38,10 +38,12 @@ def _acct(db, u, login, balance=2000.0, tm=2):
 
 def _comp(db, enrollment="signup", status="draft", starts_at=T0, ends_at=ENDS,
           reg_opens_at=REG_OPENS, reg_closes_at=REG_CLOSES, metric="return_pct",
-          name="Comp A"):
+          name="Comp A", created_at=None):
     c = Competition(name=name, metric=metric, enrollment=enrollment, status=status,
                      starts_at=starts_at, ends_at=ends_at,
                      reg_opens_at=reg_opens_at, reg_closes_at=reg_closes_at)
+    if created_at is not None:
+        c.created_at = created_at
     db.add(c); db.commit(); return c
 
 
@@ -62,9 +64,11 @@ def _create_body(**overrides):
 # ---- GET "" -----------------------------------------------------------------
 
 def test_list_returns_all_statuses_newest_first_with_participant_count(db_session):
-    c1 = _comp(db_session, status="draft", name="Older")
-    import time; time.sleep(0.01)
-    c2 = _comp(db_session, status="running", name="Newer")
+    # created_at 是 Python 侧 default（models._now），显式给两个不同的值而不是
+    # 靠 time.sleep 制造时间差——后者在快机器上可能因为分辨率不够而两次
+    # created_at 相同，排序断言变得脆弱。
+    c1 = _comp(db_session, status="draft", name="Older", created_at=T0 - timedelta(hours=1))
+    c2 = _comp(db_session, status="running", name="Newer", created_at=T0)
     u = _user(db_session, "p1@t.co")
     _participant(db_session, c2, u, "A")
 
@@ -392,6 +396,23 @@ def test_reason_only_change_on_already_disqualified_participant_is_audited(db_se
     assert len(rows) == 1
     assert "old reason" in rows[0].old_value
     assert "new reason" in rows[0].new_value
+
+
+def test_patch_participant_rejects_settled_competition(db_session):
+    """终审后比赛冻结：参赛状态（取消/恢复资格）不可再改，哪怕参赛条目本身还在。"""
+    admin = _admin(db_session)
+    comp = _comp(db_session, status="settled")
+    u = _user(db_session, "frozen1@t.co")
+    p = _participant(db_session, comp, u, "A")
+
+    with pytest.raises(HTTPException) as exc:
+        admin_patch_participant(
+            comp.id, p.id, CompetitionParticipantPatchIn(disqualified=True, disqualifyReason="x"),
+            db=db_session, admin=admin)
+    assert exc.value.status_code == 400
+    assert "已终审" in exc.value.detail
+    db_session.refresh(p)
+    assert p.disqualified is False                     # 未被改动
 
 
 def test_patch_participant_404_when_missing(db_session):

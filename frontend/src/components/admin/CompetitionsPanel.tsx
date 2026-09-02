@@ -673,7 +673,11 @@ export default function CompetitionsPanel() {
                   <tr className="text-neutral-500">
                     <th className="py-1.5 pr-4 font-medium">{t('competition.admin.participants.colEmail')}</th>
                     <th className="py-1.5 pr-4 font-medium">{t('competition.admin.participants.colLogin')}</th>
+                    <th className="py-1.5 pr-4 font-medium">
+                      {t('competition.admin.participants.colRegisteredAt')}
+                    </th>
                     <th className="py-1.5 pr-4 font-medium">{t('competition.admin.participants.colScoringFrom')}</th>
+                    <th className="py-1.5 pr-4 font-medium">{t('competition.admin.participants.colFinalScore')}</th>
                     <th className="py-1.5 pr-4 font-medium">{t('competition.admin.participants.colFinalRank')}</th>
                     <th className="py-1.5 pr-4 font-medium">
                       {t('competition.admin.participants.colDisqualified')}
@@ -689,7 +693,13 @@ export default function CompetitionsPanel() {
                       </td>
                       <td className="num py-1.5 pr-4 text-neutral-300">{p.login}</td>
                       <td className="num py-1.5 pr-4 text-neutral-400">
+                        {p.registeredAt ? fmtDate(p.registeredAt) : '—'}
+                      </td>
+                      <td className="num py-1.5 pr-4 text-neutral-400">
                         {p.scoringFrom ? fmtDate(p.scoringFrom) : '—'}
+                      </td>
+                      <td className="num py-1.5 pr-4 text-neutral-400">
+                        {p.finalScore != null ? fmtScorePct(p.finalScore) : '—'}
                       </td>
                       <td className="num py-1.5 pr-4 text-neutral-400">{p.finalRank ?? '—'}</td>
                       <td className="py-1.5 pr-4">
