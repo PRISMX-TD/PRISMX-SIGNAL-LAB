@@ -118,7 +118,12 @@ def get_current_user(
 
 def _touch_last_active(db: Session, user: User) -> None:
     """限流写入 last_active_at：同一用户 5 分钟内只落库一次，供 DAU 统计用。
-    Throttled last_active_at write: at most once per 5 minutes per user, for DAU."""
+    跨 UTC 日界的首次触发额外写一行 user_active_days（「三日之约」数据源）；
+    同日撞唯一约束时忽略，不影响 last_active_at 的落库。
+    Throttled last_active_at write: at most once per 5 minutes per user, for DAU.
+    The first touch that crosses a UTC day boundary also inserts one
+    user_active_days row (source of the "3-day promise" feature); a same-day
+    unique-constraint collision is swallowed and never blocks last_active_at."""
     now = datetime.now(timezone.utc)
     last = user.last_active_at
     if last is not None:
@@ -126,8 +131,23 @@ def _touch_last_active(db: Session, user: User) -> None:
             last = last.replace(tzinfo=timezone.utc)
         if (now - last).total_seconds() < LAST_ACTIVE_THROTTLE_SECONDS:
             return
+    today = now.strftime("%Y-%m-%d")
+    prev_day = last.strftime("%Y-%m-%d") if last is not None else None
     user.last_active_at = now
-    db.commit()
+    if prev_day != today:
+        from sqlalchemy.exc import IntegrityError
+
+        from app.models import UserActiveDay
+
+        db.add(UserActiveDay(user_id=user.id, day=today))
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            user.last_active_at = now
+            db.commit()
+    else:
+        db.commit()
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:
