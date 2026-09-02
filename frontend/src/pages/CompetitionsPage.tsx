@@ -13,6 +13,7 @@
 // of a raw API error (same precedent as AchievementsPage/LeaderboardPage).
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { competitionApi } from '../api/client'
@@ -494,14 +495,30 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
       )}
 
       {/* 报名区：仅 signup 赛显示——auto 参赛没有用户可操作的动作，整块连提示
-          都不出现。三态互斥：报名未开始/已截止各一句提示；窗口内且还有可报
-          账户时给按钮；窗口内但账户已报完则显示"已报名"标记而不是空按钮。
+          都不出现。窗口内（rState==='open'）细分三态，靠 availableAccounts 是否
+          为空、以及"是不是因为已经报完"来互斥：
+            1) availableAccounts 非空 → 给按钮；
+            2) availableAccounts 为空且 enteredLogins 非空 → 已把能报的都报了，
+               显示"已报名"标记；
+            3) availableAccounts 为空且 enteredLogins 也空 → 唯一成因是这个用户
+               压根没连接任何账户（见 availableAccounts = accounts.filter(...)
+               的说明），此时"已报名"是假话——之前这里曾经把它和 2) 混在一起
+               判，对零账户用户显示"已报名"。改成指向绑定账户的提示。
           Registration block: signup competitions only — auto-enrollment has no
-          user action, so the whole block (including hints) is omitted. Three
-          mutually exclusive states: a one-line hint for not-yet-open/closed;
-          a button while the window is open and an eligible account remains;
-          a "registered" tag instead of a dead button once every connected
-          account is already entered. */}
+          user action, so the whole block (including hints) is omitted. Inside
+          the open window (rState==='open') there are three mutually exclusive
+          states, keyed off whether availableAccounts is empty and, if so,
+          whether that's because everything eligible is already entered:
+            1) availableAccounts non-empty → the register button;
+            2) empty AND enteredLogins non-empty → every connected account is
+               already entered, show the "registered" tag;
+            3) empty AND enteredLogins also empty → the only way both are
+               empty at once is this user has no connected accounts at all
+               (see the availableAccounts = accounts.filter(...) comment
+               above) — "registered" would be a lie here (this used to be
+               folded into case 2, wrongly showing "registered" to a
+               zero-account user). Shown instead as a hint pointing at
+               account binding. */}
       {canShowRegisterAction && (
         <div className="card glass p-5">
           {rState === 'notOpen' && <p className="text-sm text-neutral-400">{t('competition.regNotOpen')}</p>}
@@ -518,8 +535,18 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
               >
                 {t('competition.register')}
               </button>
-            ) : (
+            ) : enteredLogins.size > 0 ? (
               <span className="tag bg-prism-600/20 text-[11px] text-prism-300">{t('competition.registered')}</span>
+            ) : (
+              <div>
+                <p className="text-sm text-neutral-400">{t('competition.noAccounts')}</p>
+                <Link
+                  to="/bind"
+                  className="mt-2 inline-block text-xs text-prism-300 transition hover:text-prism-200"
+                >
+                  {t('nav.bind')}
+                </Link>
+              </div>
             ))}
           {registerMsg && <p className="mt-2 text-sm text-up">{registerMsg}</p>}
           {registerError && <p className="mt-2 text-sm text-down">{registerError}</p>}
