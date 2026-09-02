@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from app.models import (
     Competition, CompetitionParticipant, LeaderboardSnapshot, MT5Account, PeriodBaseline, User,
 )
+from .badges import award_badge
 from .boards import REAL, _aware, _resolved_in_period, reconcile_deposits
 
 
@@ -208,3 +209,93 @@ def auto_enroll(db, comp: Competition, now: datetime) -> int:
         already.add(acct.login)
         enrolled += 1
     return enrolled
+
+
+def settle_competition(db, comp: Competition, admin_id: str) -> dict:
+    """终审（设计 §1.7/§1.9，Phase 3 Task 4）：结算不可重跑，一切以 status 为闸。
+
+    两段式、中间夹一次 commit，且顺序不可换：第一段把名次和 status="settled"
+    连同审计行一起落盘并 commit——这一段完成后，比赛就已经终局，`comp.status
+    != "ended"` 的前置校验会挡住任何重复调用。第二段才发奖：award_badge 内部
+    自行 commit（沿用既有 house pattern），单枚失败只会漏发一枚勋章（可人工
+    补发，幂等），绝不会传导回去把已经写死的名次或 status 撤回——所以失败被
+    捕获进返回值的 badgeErrors，而不是抛出让调用方以为终审本身失败了。
+    """
+    if comp.status != "ended":
+        raise HTTPException(
+            status_code=400,
+            detail="仅可终审已结束的比赛 / Only ended competitions can be settled")
+
+    key = comp_period_key(comp.id)
+    snapshots = (db.query(LeaderboardSnapshot)
+                   .filter(LeaderboardSnapshot.board == comp.metric,
+                           LeaderboardSnapshot.period_key == key)
+                   .order_by(LeaderboardSnapshot.rank.asc()).all())
+    by_login = {p.mt5_login: p for p in
+                db.query(CompetitionParticipant).filter(
+                    CompetitionParticipant.competition_id == comp.id)}
+
+    ranked = 0
+    finisher_users: set[str] = set()
+    podium_users: set[str] = set()
+    winner_user = None
+    for snap in snapshots:
+        participant = by_login.get(snap.mt5_login)
+        # 双保险：disqualified 的参赛者理论上根本不会有快照行（compute_comp_rows
+        # 已经把他们排除在计分之外），但终审是终局动作，宁可多判一次也不让一条
+        # 意外留下的快照行把取消资格的人写进名次或发出奖。
+        if participant is None or participant.disqualified:
+            continue
+        participant.final_score = snap.score
+        participant.final_rank = snap.rank
+        ranked += 1
+        finisher_users.add(participant.user_id)
+        if snap.rank <= 3:
+            podium_users.add(participant.user_id)
+        if snap.rank == 1:
+            winner_user = participant.user_id
+
+    comp.status = "settled"
+
+    # 审计：照 admin.py 的 _log_change 先例（本函数内 import，不在模块顶层，
+    # 避免给 admin 路由模块和 gamification 服务层之间引入任何加载顺序耦合）。
+    # old/new 特意给出两个不同的值——_log_change 在两者相等时直接静默跳过写入。
+    from app.routers.admin import _log_change
+    _log_change(db, admin_id, admin_id, f"competition:settle:{comp.id}", "ended", "settled")
+
+    db.commit()   # 名次 + status + 审计：终局状态到此为止，下面发奖失败不会回退到这里
+
+    badges: list[dict] = []
+    badge_errors: list[dict] = []
+
+    def _award(user_id: str, badge_id: str) -> None:
+        try:
+            if award_badge(db, user_id, badge_id):
+                badges.append({"userId": user_id, "badgeId": badge_id})
+        except Exception as exc:
+            badge_errors.append({"userId": user_id, "badgeId": badge_id, "error": str(exc)})
+
+    for uid in finisher_users:
+        _award(uid, "comp_finisher")
+    for uid in podium_users:
+        _award(uid, "comp_podium")
+    if winner_user is not None:
+        _award(winner_user, "comp_winner")
+
+    # 卫冕王：按 starts_at 升序取全部已 settled 的比赛（含本场——本场的 status
+    # 与 final_rank 已经在上面那次 commit 里落盘），相邻两届冠军是同一人才发奖。
+    settled_comps = (db.query(Competition)
+                        .filter(Competition.status == "settled")
+                        .order_by(Competition.starts_at.asc()).all())
+    winner_by_comp: dict[str, str | None] = {}
+    for c in settled_comps:
+        row = (db.query(CompetitionParticipant.user_id)
+                 .filter(CompetitionParticipant.competition_id == c.id,
+                         CompetitionParticipant.final_rank == 1).first())
+        winner_by_comp[c.id] = row[0] if row else None
+    for prev, cur in zip(settled_comps, settled_comps[1:]):
+        w_prev, w_cur = winner_by_comp[prev.id], winner_by_comp[cur.id]
+        if w_prev is not None and w_prev == w_cur:
+            _award(w_cur, "comp_back_to_back")
+
+    return {"ranked": ranked, "badges": badges, "badgeErrors": badge_errors}
