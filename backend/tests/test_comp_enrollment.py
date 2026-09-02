@@ -62,6 +62,22 @@ def test_register_rejects_outside_window(db_session):
         register_participant(db_session, comp, u, "A", REG_OPENS - timedelta(minutes=1))
 
 
+def test_register_window_boundary_open_inclusive_close_exclusive(db_session):
+    """`reg_opens_at <= now < reg_closes_at`：左闭右开。"""
+    comp = _comp(db_session)
+    u = _user(db_session, "win3@t.co"); _acct(db_session, u, "A", balance=1000.0)
+    # now == reg_opens_at → 通过（不抛异常）
+    p = register_participant(db_session, comp, u, "A", REG_OPENS)
+    assert p is not None
+
+    u2 = _user(db_session, "win4@t.co"); _acct(db_session, u2, "B", balance=1000.0)
+    # now == reg_closes_at → 拒绝（右开，不含端点）
+    with pytest.raises(HTTPException) as exc:
+        register_participant(db_session, comp, u2, "B", REG_CLOSES)
+    assert exc.value.status_code == 400
+    assert "报名窗口" in exc.value.detail
+
+
 def test_register_rejects_missing_window_bounds(db_session):
     """报名窗口字段任一边缺失（None）：一律视为窗口未开放——不是「一直开放」。"""
     comp = _comp(db_session, reg_opens_at=None, reg_closes_at=None)
@@ -142,11 +158,50 @@ def test_register_duplicate_is_idempotent_returns_existing(db_session):
     assert p1.id == p2.id
     assert db_session.query(CompetitionParticipant).filter_by(
         competition_id=comp.id, mt5_login="A").count() == 1
-    assert db_session.query(PeriodBaseline).filter_by(
-        period_key=comp_period_key(comp.id), user_id=u.id, mt5_login="A").count() == 1
+    baseline = db_session.query(PeriodBaseline).filter_by(
+        period_key=comp_period_key(comp.id), user_id=u.id, mt5_login="A").first()
+    # 重复报名不重拍基线：taken_at 钉在第一次报名的时间，不是第二次调用的时间
+    assert _aware(baseline.taken_at) == IN_WINDOW
+
+
+def test_register_recovers_from_orphaned_baseline(db_session):
+    """孤儿基线（period_baselines 有行、competition_participants 无对应行——成因不
+    追究，防御性场景）：报名应成功补写参赛行，复用既有基线，不重拍 taken_at。"""
+    comp = _comp(db_session)
+    u = _user(db_session, "orphan1@t.co"); _acct(db_session, u, "A", balance=1500.0)
+    orphan_taken_at = IN_WINDOW - timedelta(hours=5)
+    db_session.add(PeriodBaseline(user_id=u.id, mt5_login="A",
+                                  period_key=comp_period_key(comp.id),
+                                  baseline=999.0, taken_at=orphan_taken_at))
+    db_session.commit()
+    assert db_session.query(CompetitionParticipant).filter_by(
+        competition_id=comp.id, mt5_login="A").count() == 0
+
+    p = register_participant(db_session, comp, u, "A", IN_WINDOW)
+
+    assert p is not None and p.mt5_login == "A" and p.user_id == u.id
+    assert db_session.query(CompetitionParticipant).filter_by(
+        competition_id=comp.id, mt5_login="A").count() == 1
+    baselines = db_session.query(PeriodBaseline).filter_by(
+        period_key=comp_period_key(comp.id), user_id=u.id, mt5_login="A").all()
+    assert len(baselines) == 1
+    assert baselines[0].baseline == 999.0                       # 原基线值未被覆盖
+    assert _aware(baselines[0].taken_at) == orphan_taken_at     # 未重拍
 
 
 # ---- auto_enroll ----------------------------------------------------------
+
+def test_auto_enroll_rejects_signup_competition(db_session):
+    """防误用：signup 比赛不该被批量拉入参赛——静默返回 0，不写任何行。"""
+    comp = _comp(db_session, enrollment="signup", status="running")
+    u = _user(db_session, "guard1@t.co"); _acct(db_session, u, "A", balance=1000.0)
+
+    count = auto_enroll(db_session, comp, T0)
+
+    assert count == 0
+    assert db_session.query(CompetitionParticipant).filter_by(
+        competition_id=comp.id).count() == 0
+
 
 def test_auto_enroll_enrolls_all_eligible_real_accounts(db_session):
     comp = _comp(db_session, enrollment="auto", status="running")

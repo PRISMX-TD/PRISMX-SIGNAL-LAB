@@ -156,7 +156,18 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
                               CompetitionParticipant.mt5_login == mt5_login).first())
         if existing is not None:
             return existing
-        raise
+        # 撞的不是参赛行的唯一约束，而是 period_baselines 的——孤儿基线（此前
+        # 某次写入只落了基线没落参赛行，成因不追究，防御性兜底）：基线已在，
+        # 复用它（不重拍 taken_at），只补插参赛行。
+        db.add(CompetitionParticipant(competition_id=comp.id, user_id=user.id,
+                                      mt5_login=mt5_login, scoring_from=scoring_from))
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(
+                status_code=400,
+                detail="报名状态异常，请联系管理员 / Registration state error, contact admin")
 
     return (db.query(CompetitionParticipant)
               .filter(CompetitionParticipant.competition_id == comp.id,
@@ -169,6 +180,9 @@ def auto_enroll(db, comp: Competition, now: datetime) -> int:
     比赛没有报名，起点即开赛）。已入场（撞唯一约束）静默跳过——幂等，可反复调用
     （由状态推进到 running 的 admin 端点触发，Task 5）。返回新入场数。
     """
+    if comp.enrollment != "auto":
+        return 0    # 防误用：signup 比赛不该被批量拉入参赛（无声吞掉，不抛错）
+
     now = _aware(now)
     key = comp_period_key(comp.id)
     scoring_from = _aware(comp.starts_at)
