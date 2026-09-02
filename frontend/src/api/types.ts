@@ -966,7 +966,10 @@ export interface GamificationPerLoginWinRate {
   trades: number
   wins: number
   winRate: number | null
-  excluded: boolean
+  // 该账号在窗口内被剔出统计范围的下单数（非实盘等），不是一个布尔标记。
+  // Count of this login's window orders excluded from the assessment (e.g.
+  // non-real-account orders) — a count, not a boolean flag.
+  excluded: number
 }
 
 export interface GamificationWinRate {
