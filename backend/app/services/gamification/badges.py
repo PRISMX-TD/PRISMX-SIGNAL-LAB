@@ -78,6 +78,104 @@ def _j_founder_2026(db, user, ctx):
     return created is not None and created < FOUNDER_DEADLINE and _has_real_fill(db, user.id)
 
 
+def _resolved_real_positions(db, user_id, cutoff=None):
+    """[(order, profit, last_close_at)]，实盘 + verified + 整仓。"""
+    from .stats import _filled_orders, _legs_by_position, _resolve
+    from app.services.trade_performance import position_id_of
+    orders = [o for o in _filled_orders(db, user_id, cutoff) if o.trade_mode == REAL]
+    keys = {(o.mt5_login, position_id_of(o)) for o in orders if position_id_of(o)}
+    legs_map = _legs_by_position(db, user_id, keys)
+    out = []
+    for o, p in _resolve(orders, legs_map):
+        legs = legs_map[(o.mt5_login, position_id_of(o))]
+        out.append((o, p, max(l.closed_at for l in legs)))
+    return out
+
+
+def _evergreen_months(db, user_id) -> int:
+    now = datetime.now(timezone.utc)
+    cur_month = (now.year, now.month)
+    monthly: dict[tuple[int, int], float] = {}
+    for _o, p, closed in _resolved_real_positions(db, user_id):
+        ts = closed if closed.tzinfo else closed.replace(tzinfo=timezone.utc)
+        key = (ts.year, ts.month)
+        if key != cur_month:                       # 未结束的当前月不计
+            monthly[key] = monthly.get(key, 0.0) + p
+    def _next(k):
+        y, m = k
+        return (y + 1, 1) if m == 12 else (y, m + 1)
+    best = run = 0
+    prev = None
+    for key in sorted(monthly):
+        ok = monthly[key] > 0
+        run = (run + 1 if ok and prev is not None and _next(prev) == key
+               else (1 if ok else 0))
+        best = max(best, run)
+        prev = key
+    return best
+
+
+def _j_evergreen(n):
+    return lambda db, u, c: _evergreen_months(db, u.id) >= n
+
+
+def _j_profit_factor(db, user, ctx):
+    from .stats import GAMIFICATION_WINDOW_DAYS
+    cutoff = datetime.now(timezone.utc) - timedelta(days=GAMIFICATION_WINDOW_DAYS)
+    res = _resolved_real_positions(db, user.id, cutoff)
+    if len(res) < 100:
+        return False
+    profits = [p for _o, p, _t in res]
+    if sum(profits) <= 0:
+        return False
+    wins = [p for p in profits if p > 0]
+    losses = [-p for p in profits if p <= 0]
+    if not losses:
+        return True
+    if not wins:
+        return False
+    return (sum(wins) / len(wins)) / (sum(losses) / len(losses)) >= 2.0
+
+
+def _consecutive_clean_signal_positions(db, user_id) -> int:
+    """按平仓时间倒序数「无恶意移损」的信号整仓连续串（对照 discipline.py D1 口径）。"""
+    from app.services.settings_store import get_discipline_settings
+    from app.services.trade_performance import position_id_of
+    tol = float(get_discipline_settings(db).get("sl_tolerance_pct", 0.10))
+    sig_pos = [(o, t) for o, _p, t in _resolved_real_positions(db, user_id)
+               if o.signal_id is not None]
+    sig_pos.sort(key=lambda x: x[1], reverse=True)
+    mods = (db.query(Order)
+              .filter(Order.user_id == user_id, Order.action == "MODIFY",
+                      Order.status == "FILLED").all())
+    mods = [m for m in mods if not (m.client_order_id or "").startswith("auto_")]
+    by_ticket: dict[int, list] = {}
+    for m in mods:
+        if m.ticket is not None:
+            by_ticket.setdefault(m.ticket, []).append(m)
+    run = 0
+    for o, _t in sig_pos:
+        orig_sl, entry = o.sl, o.filled_price
+        if orig_sl in (None, 0):
+            continue                                   # 弃权仓：不计入序列
+        dist = abs((entry or 0) - orig_sl)
+        violated = False
+        for m in by_ticket.get(position_id_of(o), []):
+            new_sl = m.sl
+            if new_sl in (None, 0):
+                violated = True; break                 # 清掉止损
+            if dist <= 0:
+                continue                                # 距离为 0（entry==sl）无法判容差，宁缺勿错，对照 discipline.py 的 dist>0 判定
+            if o.side == "BUY" and new_sl < orig_sl - dist * tol:
+                violated = True; break
+            if o.side == "SELL" and new_sl > orig_sl + dist * tol:
+                violated = True; break
+        if violated:
+            break
+        run += 1
+    return run
+
+
 def _discipline_streak(db, user_id, n) -> bool:
     """login="" 聚合行；total<90 或 NULL 或缺日均断连（设计 §3.2：宁严勿松）。"""
     rows = (db.query(DisciplineSnapshot.date, DisciplineSnapshot.total)
@@ -97,18 +195,19 @@ BADGES: dict[str, dict] = {
     "first_close":      {"rarity": "common", "category": "growth", "judge": _j_first_close},
     "first_real_trade": {"rarity": "common", "category": "growth", "judge": _j_first_real_trade},
     "comp_finisher":    {"rarity": "common", "category": "competition", "judge": None},
-    "evergreen_3m":     {"rarity": "rare", "category": "performance", "judge": None},   # Task 9 填
+    "evergreen_3m":     {"rarity": "rare", "category": "performance", "judge": _j_evergreen(3)},
     "discipline_90_7":  {"rarity": "rare", "category": "discipline",
                          "judge": lambda db, u, c: _discipline_streak(db, u.id, 7)},
     "hundred_wins":     {"rarity": "rare", "category": "performance", "judge": _j_hundred_wins},
     "midas_touch":      {"rarity": "epic", "category": "performance", "judge": _j_midas_touch},
-    "profit_factor_2":  {"rarity": "epic", "category": "performance", "judge": None},   # Task 9 填
-    "evergreen_6m":     {"rarity": "epic", "category": "performance", "judge": None},   # Task 9 填
+    "profit_factor_2":  {"rarity": "epic", "category": "performance", "judge": _j_profit_factor},
+    "evergreen_6m":     {"rarity": "epic", "category": "performance", "judge": _j_evergreen(6)},
     "discipline_90_30": {"rarity": "epic", "category": "discipline",
                          "judge": lambda db, u, c: _discipline_streak(db, u.id, 30)},
-    "no_bad_sl_50":     {"rarity": "epic", "category": "discipline", "judge": None},    # Task 9 填
+    "no_bad_sl_50":     {"rarity": "epic", "category": "discipline",
+                         "judge": lambda db, u, c: _consecutive_clean_signal_positions(db, u.id) >= 50},
     "comp_podium":      {"rarity": "epic", "category": "competition", "judge": None},
-    "evergreen_12m":    {"rarity": "legendary", "category": "performance", "judge": None},  # Task 9 填
+    "evergreen_12m":    {"rarity": "legendary", "category": "performance", "judge": _j_evergreen(12)},
     "comp_winner":      {"rarity": "legendary", "category": "competition", "judge": None},
     "comp_back_to_back": {"rarity": "legendary", "category": "competition", "judge": None},
     "founder_2026":     {"rarity": "limited", "category": "limited", "judge": _j_founder_2026},
