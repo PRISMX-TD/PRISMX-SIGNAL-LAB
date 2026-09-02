@@ -121,6 +121,24 @@ def test_settle_badge_matrix_winner_podium_finisher_unranked_disqualified(db_ses
     assert _badges(db_session, u_dq.id) == set()
 
 
+def test_settle_disqualified_with_stale_snapshot_kept_out(db_session):
+    """取消资格发生在拍快照之后（陈旧快照行未清）：line-247 的双保险要挡住这种
+    情况——disqualified 参赛者哪怕有 rank=1 的快照行，也不该写 final_*，不该
+    被计入任何一枚勋章。"""
+    admin = _admin(db_session)
+    comp = _comp(db_session)
+    u_dq = _user(db_session, "staledq@t.co")
+    p_dq = _participant(db_session, comp, u_dq, "A", disqualified=True)
+    _snap(db_session, comp, u_dq, "A", rank=1)          # 陈旧快照：取消资格前留下的
+
+    result = settle_competition(db_session, comp, admin.id)
+
+    db_session.refresh(p_dq)
+    assert p_dq.final_rank is None and p_dq.final_score is None
+    assert _badges(db_session, u_dq.id) == set()
+    assert result["ranked"] == 0
+
+
 def test_settle_multi_account_same_user_dedups_badges(db_session):
     """同一人两个账户占 1/2 名：winner/podium/finisher 各只发一枚，不因两行快照重复。"""
     admin = _admin(db_session)
@@ -137,6 +155,47 @@ def test_settle_multi_account_same_user_dedups_badges(db_session):
     winner_badges = [b for b in result["badges"] if b["userId"] == u.id]
     ids = [b["badgeId"] for b in winner_badges]
     assert sorted(ids) == ["comp_finisher", "comp_podium", "comp_winner"]  # 各一次
+
+
+# ---- badge award failures don't undo finality -------------------------------
+
+def test_settle_badge_award_failure_lands_in_badgeErrors_finality_intact(db_session, monkeypatch):
+    """某一枚勋章授予中途抛出非 IntegrityError 异常：settle 正常返回，比赛仍
+    settled，名次仍写死，失败进 badgeErrors——不传导成整场结算的异常。"""
+    import app.services.gamification.competitions as comp_mod
+
+    admin = _admin(db_session)
+    comp = _comp(db_session)
+    u = _user(db_session, "boom@t.co")
+    _participant(db_session, comp, u, "A")
+    _snap(db_session, comp, u, "A", rank=1)
+
+    real_award_badge = comp_mod.award_badge
+
+    def _boom(db, user_id, badge_id):
+        if badge_id == "comp_winner":
+            raise RuntimeError("simulated award failure")
+        return real_award_badge(db, user_id, badge_id)
+
+    monkeypatch.setattr(comp_mod, "award_badge", _boom)
+
+    result = settle_competition(db_session, comp, admin.id)
+
+    assert comp.status == "settled"
+    p = db_session.query(CompetitionParticipant).filter_by(
+        competition_id=comp.id, mt5_login="A").first()
+    assert p.final_rank == 1                            # 名次不受发奖失败影响
+
+    errors = [e for e in result["badgeErrors"] if e["badgeId"] == "comp_winner"]
+    assert len(errors) == 1 and errors[0]["userId"] == u.id
+    # comp_winner 失败不该拖垮同一用户的其它勋章授予（同一次 _award 调用互不影响）
+    assert "comp_finisher" in _badges(db_session, u.id)
+    assert "comp_podium" in _badges(db_session, u.id)
+    assert "comp_winner" not in _badges(db_session, u.id)
+
+    # session 在异常后仍可用（未被脏事务卡死）——能正常再查询/写入
+    assert db_session.query(CompetitionParticipant).filter_by(
+        competition_id=comp.id).count() == 1
 
 
 # ---- back-to-back -----------------------------------------------------------
@@ -178,6 +237,27 @@ def test_settle_back_to_back_not_awarded_when_different_winner(db_session):
 
     assert "comp_back_to_back" not in _badges(db_session, u1.id)
     assert "comp_back_to_back" not in _badges(db_session, u2.id)
+
+
+def test_settle_back_to_back_empty_board_adjacent_no_crash_no_spurious_award(db_session):
+    """相邻（按 starts_at）的一场比赛没有任何快照行（零参赛/零入榜）：那一届没有
+    冠军（winner_by_comp 为 None），不该让相邻对的比较抛异常，也不该误发
+    comp_back_to_back 给任何人。"""
+    admin = _admin(db_session)
+    u = _user(db_session, "soloChamp@t.co")
+
+    comp_empty = _comp(db_session, starts_at=T0, ends_at=ENDS, name="Comp Empty")
+    settle_competition(db_session, comp_empty, admin.id)   # 零参赛、零快照，照样能终审
+
+    comp_winner = _comp(db_session, starts_at=ENDS + timedelta(days=1),
+                        ends_at=ENDS + timedelta(days=8), name="Comp Winner")
+    _participant(db_session, comp_winner, u, "A")
+    _snap(db_session, comp_winner, u, "A", rank=1)
+    result = settle_competition(db_session, comp_winner, admin.id)
+
+    assert comp_empty.status == "settled" and comp_winner.status == "settled"
+    assert "comp_back_to_back" not in _badges(db_session, u.id)
+    assert result["badgeErrors"] == []
 
 
 # ---- audit -------------------------------------------------------------------

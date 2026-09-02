@@ -273,6 +273,12 @@ def settle_competition(db, comp: Competition, admin_id: str) -> dict:
             if award_badge(db, user_id, badge_id):
                 badges.append({"userId": user_id, "badgeId": badge_id})
         except Exception as exc:
+            # award_badge 自己只兜住 IntegrityError；任何其它异常（推送逻辑之外，
+            # 比如 commit 中途的连接错误）会把 session 撂在一个"脏"事务里——
+            # Postgres 下这类 session 后续任何语句都会被级联拒绝（当前语句失败后
+            # 事务已 abort），必须先 rollback 清空，才能继续发下一枚勋章或做别的
+            # 查询。失败本身不重新抛出，收进 badge_errors 供人工补发。
+            db.rollback()
             badge_errors.append({"userId": user_id, "badgeId": badge_id, "error": str(exc)})
 
     for uid in finisher_users:
