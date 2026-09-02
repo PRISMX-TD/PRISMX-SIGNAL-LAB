@@ -37,6 +37,7 @@ class AccountInfoOut(BaseModel):
     # profile fields — so the frontend knows whether to show the entry point
     # without a separate /gamification/me round trip.
     gamificationVisible: bool = False
+    leaderboardVisible: bool = False
     nickname: str | None = None
     nicknamePublic: bool = False
     leaderboardOptOut: bool = False
@@ -81,6 +82,10 @@ def get_account(
         gamificationVisible=(
             True if current_user.role == "admin"
             else bool(get_gamification_settings(db).get("user_visible"))
+        ),
+        leaderboardVisible=(
+            True if current_user.role == "admin"
+            else bool(get_gamification_settings(db).get("leaderboard_visible"))
         ),
         nickname=current_user.nickname,
         nicknamePublic=bool(current_user.nickname_public),

@@ -4,16 +4,23 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
+import re
+from datetime import datetime, timezone
+
 from app.core.config import settings
 from app.core.rate_limit import limiter
-from app.models import User, UserBadge, UserTask
+from app.models import LeaderboardSnapshot, User, UserBadge, UserTask
 from app.schemas import VisibilityPatchIn
 from app.services.deps import get_current_user, get_db
 from app.services.gamification import (
     BADGES, LEVEL_TITLES, compute_comprehensive_stats, condition_states,
     judge_and_award_badges, judge_and_record_conditions, level_of)
+from app.services.gamification import identity, periods
 from app.services.settings_store import (
     get_gamification_settings, invalidate_gamification_cache, save_gamification_settings)
+
+LEADERBOARD_BOARDS = ("return_pct", "win_rate")
+_PERIOD_KEY_RE = re.compile(r"^\d{4}-W\d{2}$|^\d{4}-\d{2}$")
 
 router = APIRouter(prefix="/gamification", tags=["gamification"])
 
@@ -42,6 +49,73 @@ def require_gamification_visible(db: Session = Depends(get_db),
                                   user: User = Depends(get_current_user)) -> User:
     _check_visible(db, user)
     return user
+
+
+def _check_leaderboard_visible(db: Session, user: User) -> None:
+    if user.role == "admin":
+        return
+    if not get_gamification_settings(db).get("leaderboard_visible"):
+        raise HTTPException(403, "排行榜内测中，暂未开放 / Leaderboard in beta, not yet available")
+
+
+def require_leaderboard_visible(db: Session = Depends(get_db),
+                                 user: User = Depends(get_current_user)) -> User:
+    _check_leaderboard_visible(db, user)
+    return user
+
+
+def build_leaderboard_payload(db: Session, viewer: User, board: str, period: str) -> dict:
+    """榜单页负载（设计 §4.3）：board/period 校验、打码、isSelf、me 块。
+
+    `period` 既接受 "week"/"month"（解析为以当前 UTC 时间算出的进行中周期
+    key），也接受显式 key（校验格式），后者是已封存历史周期唯一的访问方式——
+    快照是只读的，不需要额外的可见性判断。
+    """
+    if board not in LEADERBOARD_BOARDS:
+        raise HTTPException(400, "未知榜单 / Unknown board")
+    if period == "week":
+        period_key = periods.week_key(datetime.now(timezone.utc))
+    elif period == "month":
+        period_key = periods.month_key(datetime.now(timezone.utc))
+    else:
+        if not _PERIOD_KEY_RE.match(period or ""):
+            raise HTTPException(400, "周期格式错误 / Invalid period")
+        period_key = period
+
+    all_rows = (db.query(LeaderboardSnapshot)
+                  .filter(LeaderboardSnapshot.board == board,
+                          LeaderboardSnapshot.period_key == period_key)
+                  .order_by(LeaderboardSnapshot.rank)
+                  .all())
+    top_rows = all_rows[:50]
+
+    users_by_id = {}
+    if top_rows:
+        ids = {r.user_id for r in top_rows}
+        users_by_id = {u.id: u for u in db.query(User).filter(User.id.in_(ids))}
+
+    rows = []
+    for r in top_rows:
+        u = users_by_id.get(r.user_id)
+        rows.append({
+            "rank": r.rank,
+            "displayName": identity.display_name(
+                u.nickname if u else None, u.email if u else None,
+                bool(u.nickname_public) if u else False),
+            "login": r.mt5_login,
+            "score": r.score,
+            "sample": r.sample,
+            "isSelf": r.user_id == viewer.id,
+            "equippedBadge": u.equipped_badge if u else None,
+        })
+
+    me = None
+    my_rows = [r for r in all_rows if r.user_id == viewer.id]
+    if my_rows:
+        best = min(my_rows, key=lambda r: r.rank)
+        me = {"rank": best.rank, "score": best.score, "sample": best.sample}
+
+    return {"board": board, "periodKey": period_key, "rows": rows, "me": me}
 
 
 def build_me_payload(db: Session, user: User, judge: bool) -> dict:
@@ -80,6 +154,14 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
 def gamification_me(request: Request, db: Session = Depends(get_db),
                      user: User = Depends(require_gamification_visible)):
     return build_me_payload(db, user, judge=True)
+
+
+@router.get("/leaderboard")
+@limiter.limit(settings.RATE_LIMIT_LEADERBOARD)
+def gamification_leaderboard(request: Request, board: str, period: str,
+                              db: Session = Depends(get_db),
+                              user: User = Depends(require_leaderboard_visible)):
+    return build_leaderboard_payload(db, user, board, period)
 
 
 # ---- 管理员端 / admin endpoints ----

@@ -1,0 +1,60 @@
+import pytest
+from fastapi import HTTPException
+from datetime import datetime, timezone
+from app.models import User, LeaderboardSnapshot
+from app.routers.gamification import build_leaderboard_payload, _check_leaderboard_visible
+from app.services.settings_store import save_gamification_settings, invalidate_gamification_cache
+
+NOW = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
+
+
+def _user(db, email, role="user", nickname=None, badge=None):
+    u = User(email=email, api_token="tok_" + email, role=role, nickname=nickname,
+             equipped_badge=badge)
+    db.add(u); db.commit(); return u
+
+
+def _row(db, u, login, rank, score):
+    db.add(LeaderboardSnapshot(board="return_pct", period_key="2026-W36",
+                               user_id=u.id, mt5_login=login, rank=rank,
+                               score=score, sample=8))
+    db.commit()
+
+
+def test_gate_and_admin_bypass(db_session):
+    invalidate_gamification_cache()
+    u = _user(db_session, "g1@t.co")
+    with pytest.raises(HTTPException) as e:
+        _check_leaderboard_visible(db_session, u)
+    assert e.value.status_code == 403
+    _check_leaderboard_visible(db_session, _user(db_session, "ga@t.co", role="admin"))
+    save_gamification_settings(db_session, {"leaderboard_visible": True})
+    db_session.commit(); invalidate_gamification_cache()
+    _check_leaderboard_visible(db_session, u)
+
+
+def test_payload_masking_isself_and_me(db_session):
+    a = _user(db_session, "top@t.co", nickname="Trader", badge="midas_touch")
+    b = _user(db_session, "second@t.co")           # 无昵称 → 邮箱前缀打码
+    _row(db_session, a, "500123", 1, 0.20)
+    _row(db_session, a, "500999", 3, 0.05)         # 同一人第二个账户
+    _row(db_session, b, "600001", 2, 0.10)
+    p = build_leaderboard_payload(db_session, b, "return_pct", "2026-W36")
+    assert p["periodKey"] == "2026-W36" and len(p["rows"]) == 3
+    r1, r2, _r3 = p["rows"]
+    assert r1["displayName"] == "T***r" and r1["login"] == "500123"
+    assert r1["equippedBadge"] == "midas_touch" and r1["isSelf"] is False
+    assert r2["displayName"] == "s***d" and r2["isSelf"] is True
+    assert "userId" not in r1
+    assert p["me"] == {"rank": 2, "score": 0.10, "sample": 8}
+    # a 的 me 取最好名次
+    pa = build_leaderboard_payload(db_session, a, "return_pct", "2026-W36")
+    assert pa["me"]["rank"] == 1
+
+
+def test_invalid_board_and_period(db_session):
+    u = _user(db_session, "v1@t.co")
+    with pytest.raises(HTTPException):
+        build_leaderboard_payload(db_session, u, "profit", "2026-W36")
+    with pytest.raises(HTTPException):
+        build_leaderboard_payload(db_session, u, "return_pct", "bogus")
