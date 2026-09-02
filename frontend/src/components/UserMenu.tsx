@@ -17,6 +17,7 @@ export default function UserMenu({
   isAdmin,
   gamificationVisible,
   leaderboardVisible,
+  competitionsVisible,
   onLogout,
 }: {
   email: string | undefined
@@ -24,6 +25,7 @@ export default function UserMenu({
   isAdmin: boolean
   gamificationVisible: boolean
   leaderboardVisible: boolean
+  competitionsVisible: boolean
   onLogout: () => void
 }) {
   const { t } = useTranslation()
@@ -98,6 +100,16 @@ export default function UserMenu({
           {leaderboardVisible && (
             <Link to="/leaderboard" onClick={() => setOpen(false)} className={linkClass}>
               {t("leaderboard.title")}
+            </Link>
+          )}
+          {/* 比赛：又一个独立于 gamificationVisible/leaderboardVisible 的内测开关，
+              理由同上两条。
+              Competitions: another beta switch independent of
+              gamificationVisible/leaderboardVisible, same rationale as the two
+              links above. */}
+          {competitionsVisible && (
+            <Link to="/competitions" onClick={() => setOpen(false)} className={linkClass}>
+              {t("competition.title")}
             </Link>
           )}
           {showUpgrade && (

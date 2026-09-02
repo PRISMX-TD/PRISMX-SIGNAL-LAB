@@ -180,6 +180,13 @@ function TabIcon({ name }: { name: string }) {
           <path d="M4 20V11M10 20V4M16 20v-7M22 20H2" />
         </svg>
       )
+    case 'competitions':
+      return (
+        <svg className={c} viewBox="0 0 24 24" {...p}>
+          <path d="M5 3v18" />
+          <path d="M5 4h13l-3 4 3 4H5" />
+        </svg>
+      )
     default:
       return null
   }
@@ -355,6 +362,15 @@ export default function Layout() {
     // as the achievements item above.
     ...(user?.leaderboardVisible
       ? [{ to: '/leaderboard', icon: 'leaderboard', label: t('leaderboard.title') }]
+      : []),
+    // 比赛：又一个独立于 gamificationVisible/leaderboardVisible 的内测开关
+    // （见后端 GamificationSettings.competitionsVisible），入口判断先例同上两条。
+    // Competitions: another beta switch independent of
+    // gamificationVisible/leaderboardVisible (see the backend's
+    // GamificationSettings.competitionsVisible); same entry-hiding precedent
+    // as the two items above.
+    ...(user?.competitionsVisible
+      ? [{ to: '/competitions', icon: 'competitions', label: t('competition.title') }]
       : []),
     ...(isAdmin ? [{ to: '/admin', icon: 'admin', label: t('nav.admin') }] : []),
   ]
@@ -595,6 +611,7 @@ export default function Layout() {
                   isAdmin={isAdmin}
                   gamificationVisible={!!user?.gamificationVisible}
                   leaderboardVisible={!!user?.leaderboardVisible}
+                  competitionsVisible={!!user?.competitionsVisible}
                   onLogout={handleLogout}
                 />
               </div>

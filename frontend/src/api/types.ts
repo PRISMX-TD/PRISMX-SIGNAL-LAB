@@ -88,6 +88,14 @@ export interface User {
   // GamificationSettings.leaderboardVisible). Likewise only filled in by
   // refreshUser(); see the gamificationVisible comment above for the precedent.
   leaderboardVisible?: boolean
+  // 比赛（Phase 3）对该用户是否可见（内测开关，独立于上面两个——见后端
+  // GamificationSettings.competitionsVisible）。同样只在 refreshUser() 之后
+  // 才会补上，先例同 gamificationVisible/leaderboardVisible。
+  // Whether competitions (Phase 3) are visible to this user (a beta gate
+  // independent of the two above — see the backend's
+  // GamificationSettings.competitionsVisible). Likewise only filled in by
+  // refreshUser(); see the gamificationVisible comment above for the precedent.
+  competitionsVisible?: boolean
 }
 
 // 管理后台：用户列表条目 / admin: one row in the user list

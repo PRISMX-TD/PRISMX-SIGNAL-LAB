@@ -1949,6 +1949,7 @@
   "competition": {
     "title": "Competitions",
     "empty": "No competitions yet",
+    "backToList": "Back to competitions",
     "status": { "upcoming": "Upcoming", "regOpen": "Registration open", "running": "Live",
                 "finished": "Finished", "settled": "Settled" },
     "enrollment": { "signup": "Sign-up", "auto": "Auto-enrolled" },

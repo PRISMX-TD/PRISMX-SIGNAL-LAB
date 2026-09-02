@@ -1947,6 +1947,7 @@
   "competition": {
     "title": "交易比赛",
     "empty": "暂无比赛",
+    "backToList": "返回比赛列表",
     "status": { "upcoming": "即将开始", "regOpen": "报名中", "running": "进行中",
                 "finished": "已结束", "settled": "已终审" },
     "enrollment": { "signup": "报名制", "auto": "自动参赛" },

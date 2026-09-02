@@ -172,6 +172,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // a separate switch, riding the same trip on the same precedent.
           gamificationVisible: me.gamificationVisible,
           leaderboardVisible: me.leaderboardVisible,
+          // 比赛可见性是第三个独立内测开关，搭同一趟车——先例同上两行。
+          // Competitions visibility is a third, independent beta switch riding
+          // the same trip — same precedent as the two lines above.
+          competitionsVisible: me.competitionsVisible,
         }
       })
       const stored = localStorage.getItem(USER_KEY)
@@ -182,6 +186,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         parsed.planExpiresAt = me.planExpiresAt
         parsed.gamificationVisible = me.gamificationVisible
         parsed.leaderboardVisible = me.leaderboardVisible
+        parsed.competitionsVisible = me.competitionsVisible
         localStorage.setItem(USER_KEY, JSON.stringify(parsed))
       }
     } catch {

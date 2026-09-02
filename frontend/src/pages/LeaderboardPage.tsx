@@ -13,7 +13,8 @@ import { useTranslation } from 'react-i18next'
 import { gamificationApi } from '../api/client'
 import { SkeletonPage } from '../components/Skeleton'
 import BadgeIcon from '../components/badges/BadgeIcon'
-import type { GamificationBadgeRarity, LeaderboardBoard, LeaderboardPayload } from '../api/types'
+import { BADGE_RARITY } from '../components/badges/badgeRarity'
+import type { LeaderboardBoard, LeaderboardPayload } from '../api/types'
 
 const BOARDS: LeaderboardBoard[] = ['return_pct', 'win_rate']
 type Period = 'week' | 'month'
@@ -31,40 +32,10 @@ const RANK_THRESHOLD: Record<LeaderboardBoard, number> = {
   win_rate: 20,
 }
 
-// 勋章稀有度镜像表：排行榜行内只带 badge id（LeaderboardRow.equippedBadge），
-// 稀有度要另查——勋章注册表本身在后端（services/gamification/badges.py），
-// 与 AchievementsPage 不同：那边从 /gamification/me 拿到完整 badge 对象（自带
-// rarity），这里没有那趟往返可搭。17 条与后端注册表一一对应，Phase 3 的比赛类
-// 勋章（comp_finisher/comp_podium/comp_winner/comp_back_to_back）已经在列，
-// 到时候不用再补。
-// Badge-rarity mirror: a leaderboard row carries only the badge id
-// (LeaderboardRow.equippedBadge), so the rarity has to be looked up
-// separately — the badge registry itself lives server-side
-// (services/gamification/badges.py). Unlike AchievementsPage, which gets full
-// badge objects (rarity included) from /gamification/me, there's no such
-// round trip to piggyback on here. These 17 entries mirror the backend
-// registry 1:1; Phase 3's competition badges (comp_finisher/comp_podium/
-// comp_winner/comp_back_to_back) are already listed, so nothing needs adding
-// when that phase ships.
-const BADGE_RARITY: Record<string, GamificationBadgeRarity> = {
-  profile_complete: 'common',
-  first_close: 'common',
-  first_real_trade: 'common',
-  comp_finisher: 'common',
-  evergreen_3m: 'rare',
-  discipline_90_7: 'rare',
-  hundred_wins: 'rare',
-  midas_touch: 'epic',
-  profit_factor_2: 'epic',
-  evergreen_6m: 'epic',
-  discipline_90_30: 'epic',
-  no_bad_sl_50: 'epic',
-  comp_podium: 'epic',
-  evergreen_12m: 'legendary',
-  comp_winner: 'legendary',
-  comp_back_to_back: 'legendary',
-  founder_2026: 'limited',
-}
+// 勋章稀有度镜像表：见 components/badges/badgeRarity.ts 的说明——现在与
+// CompetitionsPage 的比赛榜共用同一份，拆出去后这里只剩 import。
+// Badge-rarity mirror: see components/badges/badgeRarity.ts — now shared with
+// CompetitionsPage's competition board, hence just an import here.
 
 // score 是分数（0.124 = 12.4%），两榜统一按百分比一位小数显示——收益率榜可能
 // 为负（亏损），toFixed 对负数一样成立，不需要特判。
