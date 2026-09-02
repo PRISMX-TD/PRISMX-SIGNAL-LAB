@@ -17,9 +17,9 @@ from app.routers.gamification import build_board_rows_payload
 from app.schemas import (
     CompetitionCreateIn, CompetitionParticipantPatchIn, CompetitionPatchIn)
 from app.services.deps import get_current_user, get_db
-from app.services.gamification.boards import _aware
 from app.services.gamification.competitions import (
     auto_enroll, comp_period_key, settle_competition)
+from app.utils.timeutil import aware as _aware
 
 # ---- 用户端 / user-facing（Task 6 实现，本任务只建 router 对象供 main.py 挂载）----
 router = APIRouter(prefix="/competitions", tags=["competitions"])
@@ -46,7 +46,7 @@ MSG_NON_DRAFT_FIELDS = "比赛开始后仅可修改文案与报名窗口 / Only 
 MSG_STATUS_SEQUENCE = "状态只能按顺序推进 / Status can only advance sequentially"
 
 
-def _validate_core(name: str, metric: str, enrollment: str,
+def _validate_core(metric: str, enrollment: str,
                     starts_at: datetime | None, ends_at: datetime | None) -> None:
     if metric not in _METRICS:
         raise HTTPException(400, MSG_UNKNOWN_METRIC)
@@ -127,7 +127,7 @@ def admin_list_competitions(db: Session = Depends(get_db)):
 
 @admin_router.post("")
 def admin_create_competition(body: CompetitionCreateIn, db: Session = Depends(get_db)):
-    _validate_core(body.name, body.metric, body.enrollment, body.startsAt, body.endsAt)
+    _validate_core(body.metric, body.enrollment, body.startsAt, body.endsAt)
     _validate_reg_window(body.enrollment, body.regOpensAt, body.regClosesAt)
     comp = Competition(
         name=body.name, description=body.description, metric=body.metric,
@@ -151,14 +151,13 @@ def admin_patch_competition(comp_id: str, body: CompetitionPatchIn, db: Session 
         raise HTTPException(400, MSG_NON_DRAFT_FIELDS)
 
     if comp.status == "draft":
-        name = body.name if "name" in sent else comp.name
         metric = body.metric if "metric" in sent else comp.metric
         enrollment = body.enrollment if "enrollment" in sent else comp.enrollment
         starts_at = body.startsAt if "startsAt" in sent else comp.starts_at
         ends_at = body.endsAt if "endsAt" in sent else comp.ends_at
         reg_opens_at = body.regOpensAt if "regOpensAt" in sent else comp.reg_opens_at
         reg_closes_at = body.regClosesAt if "regClosesAt" in sent else comp.reg_closes_at
-        _validate_core(name, metric, enrollment, starts_at, ends_at)
+        _validate_core(metric, enrollment, starts_at, ends_at)
         _validate_reg_window(enrollment, reg_opens_at, reg_closes_at)
 
         if "name" in sent:
@@ -235,12 +234,24 @@ def admin_patch_participant(comp_id: str, participant_id: str,
     if participant is None:
         raise HTTPException(404, "参赛条目不存在 / Participant not found")
 
-    old = participant.disqualified
+    # 审计的 old/new 把 disqualified 和 reason 拼进同一个字符串一起比较——
+    # `_log_change` 在 old==new 时静默跳过写入，如果只传 disqualified 会漏掉
+    # "已取消资格，仅改理由" 这种重新 PATCH（disqualified 前后都是 True，
+    # reason 变了）：那种情况理应留痕，不能因为 disqualified 本身没变就被吞掉。
+    #
+    # The audit old/new packs disqualified and reason into one comparable
+    # string. `_log_change` no-ops when old==new; comparing only `disqualified`
+    # would silently drop a re-PATCH that only changes the reason on an
+    # already-disqualified participant (disqualified stays True, reason
+    # changes) — that should still leave an audit trail.
+    old_state = f"{participant.disqualified}:{participant.disqualify_reason}"
+    new_reason = body.disqualifyReason if body.disqualified else None
+    new_state = f"{body.disqualified}:{new_reason}"
     participant.disqualified = body.disqualified
-    participant.disqualify_reason = body.disqualifyReason if body.disqualified else None
+    participant.disqualify_reason = new_reason
     _log_change(db, admin.id, participant.user_id,
                 f"competition:participant:{participant.id}:disqualified",
-                old, body.disqualified)
+                old_state, new_state)
     db.commit()
     db.refresh(participant)
     email = db.query(User.email).filter(User.id == participant.user_id).scalar()

@@ -276,6 +276,33 @@ def test_patch_advance_to_running_is_not_refired_on_later_patches(db_session):
         competition_id=comp.id).count() == 1
 
 
+def test_patch_combined_status_and_allowed_field_both_applied(db_session):
+    """upcoming + {status:"running", prizeNote:"x"}：status 推进合法（相邻一步），
+    prizeNote 在非 draft 白名单内——两处改动都该生效。"""
+    comp = _comp(db_session, status="upcoming", enrollment="signup")
+    out = admin_patch_competition(
+        comp.id, CompetitionPatchIn(status="running", prizeNote="x"), db=db_session)
+    assert out["status"] == "running"
+    assert out["prizeNote"] == "x"
+    db_session.refresh(comp)
+    assert comp.status == "running" and comp.prize_note == "x"
+
+
+def test_patch_combined_status_and_disallowed_field_rejects_without_mutating(db_session):
+    """upcoming + {status:"running", metric:"win_rate"}：metric 不在非 draft
+    白名单内——整体 400，且 status 完全没被改动（校验先于任何写入）。"""
+    comp = _comp(db_session, status="upcoming", enrollment="signup")
+    with pytest.raises(HTTPException) as exc:
+        admin_patch_competition(
+            comp.id, CompetitionPatchIn(status="running", metric="win_rate"), db=db_session)
+    assert exc.value.status_code == 400
+
+    db_session.expire(comp)
+    reloaded = db_session.get(Competition, comp.id)
+    assert reloaded.status == "upcoming"
+    assert reloaded.metric == "return_pct"
+
+
 def test_patch_404_when_missing(db_session):
     with pytest.raises(HTTPException) as exc:
         admin_patch_competition("nope", CompetitionPatchIn(name="x"), db=db_session)
@@ -341,6 +368,30 @@ def test_requalify_participant_clears_reason(db_session):
 
     assert out["disqualified"] is False
     assert out["disqualifyReason"] is None
+
+
+def test_reason_only_change_on_already_disqualified_participant_is_audited(db_session):
+    """disqualified 前后都是 True，只有 reason 变了：_log_change 单看
+    disqualified 会判定 old==new 而静默跳过——审计行必须仍然写入。"""
+    admin = _admin(db_session)
+    comp = _comp(db_session)
+    u = _user(db_session, "dq3@t.co")
+    p = _participant(db_session, comp, u, "A", disqualified=True)
+    p.disqualify_reason = "old reason"
+    db_session.commit()
+
+    out = admin_patch_participant(
+        comp.id, p.id, CompetitionParticipantPatchIn(disqualified=True, disqualifyReason="new reason"),
+        db=db_session, admin=admin)
+
+    assert out["disqualified"] is True
+    assert out["disqualifyReason"] == "new reason"
+
+    rows = db_session.query(AdminAuditLog).filter(
+        AdminAuditLog.field == f"competition:participant:{p.id}:disqualified").all()
+    assert len(rows) == 1
+    assert "old reason" in rows[0].old_value
+    assert "new reason" in rows[0].new_value
 
 
 def test_patch_participant_404_when_missing(db_session):
