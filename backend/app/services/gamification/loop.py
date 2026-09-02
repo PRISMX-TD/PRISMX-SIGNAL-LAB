@@ -65,12 +65,23 @@ def run_gamification_pass() -> dict:
                 conds += len(judge_and_record_conditions(db, uid))
                 badges += len(judge_and_award_badges(db, uid))
             except Exception:
-                # 单个用户的判定失败不该拖垮整轮——回滚这个用户的半截改动，
-                # 记日志，继续下一个。否则一条脏数据就能让全体用户当轮判定全部跳过。
-                # One user's judging failure must not sink the whole pass: roll
-                # back that user's partial writes, log, and move on to the next
-                # user. Otherwise a single bad row would skip judging for everyone
-                # in this pass.
+                # 单个用户的判定失败不该拖垮整轮——记日志，继续下一个，否则一条
+                # 脏数据就能让全体用户当轮判定全部跳过。这里的 rollback 不是在
+                # 撤销已生效的写入：_record/award_badge 各自按条 commit（成功一
+                # 条落一条，IntegrityError 各自 rollback 后返回 False），加上
+                # UserTask/UserBadge 的唯一约束，已提交的部分是幂等的，下一轮
+                # 重新判定也不会重复写入。这里的 rollback 只是清掉抛异常那一刻
+                # session 里任何未提交的残留，让下一个用户拿到一个干净的事务。
+                # One user's judging failure must not sink the whole pass: log
+                # and move on, otherwise a single bad row would skip judging for
+                # everyone in this pass. The rollback here does not undo work
+                # that already took effect: _record/award_badge each commit per
+                # record (a success persists immediately; an IntegrityError rolls
+                # back and returns False), and the UserTask/UserBadge unique
+                # constraints make the committed subset idempotent, so a retry
+                # next pass won't double-write. This rollback only clears
+                # whatever uncommitted state is left on the session at the point
+                # of the exception, so the next user starts from a clean transaction.
                 log.exception("gamification pass: user %s judging failed", uid)
                 db.rollback()
                 failed += 1
