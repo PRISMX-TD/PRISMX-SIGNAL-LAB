@@ -256,8 +256,13 @@ export default function GamificationPanel() {
   // is valid and differs from the current setting — the two switches already
   // send single-field PATCHes naturally; this dirty check is the same "only
   // send what changed" rule applied to the numeric input.
+  // 后端拒绝 0（下限必须为正数），>= 0 会放过 0 让保存按钮可点、点了却被 400
+  // 打回来——校验口径改成 > 0，和后端一致，按钮直接在 0 上就disable。
+  // The backend rejects 0 (the baseline must be positive); >= 0 would let 0
+  // through and enable Save only to get bounced by a 400. Validation now
+  // matches the backend at > 0, so the button disables right at 0.
   const baselineNum = Number(baselineDraft)
-  const baselineValid = baselineDraft.trim() !== '' && Number.isFinite(baselineNum) && baselineNum >= 0
+  const baselineValid = baselineDraft.trim() !== '' && Number.isFinite(baselineNum) && baselineNum > 0
   const baselineDirty = settings != null && baselineValid && baselineNum !== settings.minBaselineUsd
 
   const saveBaseline = async () => {
