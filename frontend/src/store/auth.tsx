@@ -165,10 +165,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           planExpiresAt: me.planExpiresAt,
           // 游戏化可见性也搭这一趟车：见 User.gamificationVisible 的说明——
           // 它同样不在登录响应里，Layout/UserMenu 的入口靠这次刷新才补上。
+          // 排行榜可见性是独立开关，同一趟车、同一先例。
           // Gamification visibility rides along too — see User.gamificationVisible;
           // it's likewise absent from the login response, and the nav entries
-          // only appear once this refresh fills it in.
+          // only appear once this refresh fills it in. Leaderboard visibility is
+          // a separate switch, riding the same trip on the same precedent.
           gamificationVisible: me.gamificationVisible,
+          leaderboardVisible: me.leaderboardVisible,
         }
       })
       const stored = localStorage.getItem(USER_KEY)
@@ -178,6 +181,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         parsed.planIsTrial = me.planIsTrial
         parsed.planExpiresAt = me.planExpiresAt
         parsed.gamificationVisible = me.gamificationVisible
+        parsed.leaderboardVisible = me.leaderboardVisible
         localStorage.setItem(USER_KEY, JSON.stringify(parsed))
       }
     } catch {

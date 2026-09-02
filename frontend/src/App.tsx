@@ -27,6 +27,7 @@ const AdminPage = lazy(() => import('./pages/AdminPage'))
 const SimulatorPage = lazy(() => import('./pages/SimulatorPage'))
 const StrategiesPage = lazy(() => import('./pages/StrategiesPage'))
 const AchievementsPage = lazy(() => import('./pages/AchievementsPage'))
+const LeaderboardPage = lazy(() => import('./pages/LeaderboardPage'))
 const LegalPage = lazy(() => import('./pages/LegalPage'))
 const FaqPage = lazy(() => import('./pages/FaqPage'))
 const SupportPage = lazy(() => import('./pages/SupportPage'))
@@ -200,6 +201,16 @@ export default function App() {
                   page degrades into a beta hint on its own (see
                   AchievementsPage's forbidden branch). */}
               <Route path="/achievements" element={<AchievementsPage />} />
+              {/* 排行榜：路由本身不做可见性门控，理由与上面 /achievements 完全
+                  一致——只隐藏导航入口（见 Layout.tsx/UserMenu.tsx 的
+                  leaderboardVisible 判断），直接打 URL 撞上后端 403 由页面
+                  自己降级成一条内测提示（见 LeaderboardPage 的 forbidden 分支）。
+                  Leaderboard: same rationale as /achievements above — the route
+                  carries no visibility gate, only the nav entries are hidden
+                  (see Layout.tsx/UserMenu.tsx's leaderboardVisible checks); a
+                  direct URL hit gets a backend 403, degraded by the page itself
+                  (see LeaderboardPage's forbidden branch). */}
+              <Route path="/leaderboard" element={<LeaderboardPage />} />
               <Route path="/upgrade" element={<UpgradePage />} />
               <Route path="/account" element={<AccountPage />} />
               <Route path="/download" element={<DownloadPage />} />

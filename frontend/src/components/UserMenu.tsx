@@ -16,12 +16,14 @@ export default function UserMenu({
   showUpgrade,
   isAdmin,
   gamificationVisible,
+  leaderboardVisible,
   onLogout,
 }: {
   email: string | undefined
   showUpgrade: boolean
   isAdmin: boolean
   gamificationVisible: boolean
+  leaderboardVisible: boolean
   onLogout: () => void
 }) {
   const { t } = useTranslation()
@@ -88,6 +90,14 @@ export default function UserMenu({
           {gamificationVisible && (
             <Link to="/achievements" onClick={() => setOpen(false)} className={linkClass}>
               {t("gamification.title")}
+            </Link>
+          )}
+          {/* 排行榜：独立于 gamificationVisible 的另一个内测开关，理由同上一条。
+              Leaderboard: gated on its own beta switch, same rationale as the
+              achievements link above. */}
+          {leaderboardVisible && (
+            <Link to="/leaderboard" onClick={() => setOpen(false)} className={linkClass}>
+              {t("leaderboard.title")}
             </Link>
           )}
           {showUpgrade && (

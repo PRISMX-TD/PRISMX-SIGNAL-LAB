@@ -80,6 +80,14 @@ export interface User {
   // so it's fine for them to be briefly absent right after login rather than
   // leaking the beta feature to everyone from the first render.
   gamificationVisible?: boolean
+  // 排行榜对该用户是否可见（内测开关，独立于 gamificationVisible——见后端
+  // GamificationSettings.leaderboardVisible）。同样只在 refreshUser() 之后
+  // 才会补上，先例见 gamificationVisible 上方注释。
+  // Whether the leaderboard is visible to this user (a beta gate independent
+  // of gamificationVisible — see the backend's
+  // GamificationSettings.leaderboardVisible). Likewise only filled in by
+  // refreshUser(); see the gamificationVisible comment above for the precedent.
+  leaderboardVisible?: boolean
 }
 
 // 管理后台：用户列表条目 / admin: one row in the user list
