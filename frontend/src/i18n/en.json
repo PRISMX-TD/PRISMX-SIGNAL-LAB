@@ -1919,7 +1919,7 @@
                      "colLogin": "Account", "colTrades": "Trades", "colWins": "Wins",
                      "colWinRate": "Win rate", "colExcluded": "Excluded" },
     "equip": "Equip", "unequip": "Unequip", "notEarned": "Not earned",
-    "profile": { "nickname": "Nickname", "nicknamePublic": "Show full nickname on leaderboards",
+    "profile": { "sectionTitle": "Profile", "nickname": "Nickname", "nicknamePublic": "Show full nickname on leaderboards",
                  "leaderboardOptOut": "Opt out of all leaderboards", "save": "Save", "saved": "Saved" },
     "admin": { "tab": "Gamification", "inspect": "User Inspector", "searchUser": "Search by user email",
                "visibility": "User-facing visibility", "visibleOn": "Open to all users",

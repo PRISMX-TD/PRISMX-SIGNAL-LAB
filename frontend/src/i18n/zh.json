@@ -1917,7 +1917,7 @@
                      "colLogin": "账户", "colTrades": "交易数", "colWins": "盈利数",
                      "colWinRate": "胜率", "colExcluded": "剔除数" },
     "equip": "佩戴", "unequip": "取消佩戴", "notEarned": "未获得",
-    "profile": { "nickname": "昵称", "nicknamePublic": "榜单完整展示昵称",
+    "profile": { "sectionTitle": "个人资料", "nickname": "昵称", "nicknamePublic": "榜单完整展示昵称",
                  "leaderboardOptOut": "退出所有排行榜", "save": "保存", "saved": "已保存" },
     "admin": { "tab": "游戏化", "inspect": "用户检查器", "searchUser": "搜索用户邮箱",
                "visibility": "用户端可见性", "visibleOn": "已对全体用户开放",

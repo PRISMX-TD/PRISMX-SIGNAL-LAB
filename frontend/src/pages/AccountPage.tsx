@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { userApi, notificationApi, setToken } from "../api/client"
+import type { ProfilePatch } from "../api/types"
 import { fmtTime, fmtDate, localizeApiError } from "../api/utils"
 import { getSWReg } from "../utils/push"
 import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
@@ -32,6 +33,19 @@ export default function AccountPage() {
   const [oldPw, setOldPw] = useState("")
   const [newPw, setNewPw] = useState("")
   const [pwMsg, setPwMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
+
+  // 游戏化个人资料：昵称 + 榜单展示/退出两个开关（设计 §6/§11）。草稿值只在
+  // load() 成功、以及保存成功后从服务端回填，不在本地做长度等预校验——后端
+  // 校验（2-20 字/保留词）失败会带回双语错误文案，直接展示即可，不重复一份。
+  // Gamification profile: nickname + the two leaderboard toggles. Drafts are
+  // only seeded from the server on load() and after a successful save — no
+  // client-side length pre-check duplicating the backend's (2-20 chars /
+  // reserved word), whose failures already carry a ready-to-show bilingual message.
+  const [nicknameDraft, setNicknameDraft] = useState("")
+  const [nicknamePublicDraft, setNicknamePublicDraft] = useState(false)
+  const [leaderboardOptOutDraft, setLeaderboardOptOutDraft] = useState(false)
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [profileMsg, setProfileMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
 
   // 通知 / notifications
   const location = useLocation()
@@ -133,7 +147,11 @@ export default function AccountPage() {
     // the notifications section degrades to empty lists — it shouldn't take
     // down the password section too.
     try {
-      setInfo(await userApi.me())
+      const acct = await userApi.me()
+      setInfo(acct)
+      setNicknameDraft(acct.nickname ?? "")
+      setNicknamePublicDraft(acct.nicknamePublic)
+      setLeaderboardOptOutDraft(acct.leaderboardOptOut)
     } catch (err: unknown) {
       console.error("account load:", err)
       setLoading(false)
@@ -187,6 +205,51 @@ export default function AccountPage() {
         kind: "err",
         text: err instanceof Error ? localizeApiError(err.message) : t("account.pwError"),
       })
+    }
+  }
+
+  // 只把实际改过的字段塞进 PATCH body——后端是按传了哪个字段局部更新，不是
+  // 整份覆盖，多传等于多改一个用户没碰过的字段。昵称按 trim 后与服务端当前值
+  // （null 记作空串）比较，避免"没碰过昵称输入框"也被当成一次改动提交。
+  // Only the fields actually touched go into the PATCH body — the backend
+  // updates per-field-present, not a full overwrite, so sending an untouched
+  // field would still change it. Nickname compares the trimmed draft against
+  // the server's current value (null treated as ""), so leaving the input
+  // untouched never counts as a change.
+  async function handleProfileSave() {
+    if (!info) return
+    setProfileMsg(null)
+    const patch: ProfilePatch = {}
+    const trimmedNick = nicknameDraft.trim()
+    if (trimmedNick !== (info.nickname ?? "")) patch.nickname = trimmedNick
+    if (nicknamePublicDraft !== info.nicknamePublic) patch.nicknamePublic = nicknamePublicDraft
+    if (leaderboardOptOutDraft !== info.leaderboardOptOut) patch.leaderboardOptOut = leaderboardOptOutDraft
+    if (Object.keys(patch).length === 0) return
+    setProfileSaving(true)
+    try {
+      const res = await userApi.updateProfile(patch)
+      setInfo((prev) =>
+        prev
+          ? {
+              ...prev,
+              nickname: res.nickname,
+              nicknamePublic: res.nicknamePublic,
+              leaderboardOptOut: res.leaderboardOptOut,
+              equippedBadge: res.equippedBadge,
+            }
+          : prev,
+      )
+      setNicknameDraft(res.nickname ?? "")
+      setNicknamePublicDraft(res.nicknamePublic)
+      setLeaderboardOptOutDraft(res.leaderboardOptOut)
+      setProfileMsg({ kind: "ok", text: t("gamification.profile.saved") })
+    } catch (err: unknown) {
+      setProfileMsg({
+        kind: "err",
+        text: err instanceof Error ? localizeApiError(err.message) : t("admin.saveError"),
+      })
+    } finally {
+      setProfileSaving(false)
     }
   }
 
@@ -447,6 +510,61 @@ export default function AccountPage() {
               {pwMsg && (
                 <p className={`text-sm ${pwMsg.kind === "err" ? "text-down" : "text-up"}`}>
                   {pwMsg.text}
+                </p>
+              )}
+            </div>
+          </section>
+
+          {/* 个人资料（游戏化）/ Profile (gamification identity fields) */}
+          <section className="glass-neon p-5">
+            <h3 className="sec-h-title">
+              {t("gamification.profile.sectionTitle")}
+            </h3>
+            <div className="mt-3 space-y-3">
+              <input
+                type="text"
+                value={nicknameDraft}
+                onChange={(e) => setNicknameDraft(e.target.value)}
+                placeholder={t("gamification.profile.nickname")}
+                maxLength={20}
+                className="input w-full"
+              />
+              <div className="flex items-center gap-3">
+                <label className="relative inline-flex cursor-pointer items-center">
+                  <input
+                    type="checkbox"
+                    checked={nicknamePublicDraft}
+                    onChange={(e) => setNicknamePublicDraft(e.target.checked)}
+                    className="peer sr-only"
+                  />
+                  <div className="h-6 w-11 rounded-full bg-white/10 transition peer-checked:bg-prism-500" />
+                  <div className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
+                </label>
+                <span className="text-sm text-neutral-100">{t("gamification.profile.nicknamePublic")}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="relative inline-flex cursor-pointer items-center">
+                  <input
+                    type="checkbox"
+                    checked={leaderboardOptOutDraft}
+                    onChange={(e) => setLeaderboardOptOutDraft(e.target.checked)}
+                    className="peer sr-only"
+                  />
+                  <div className="h-6 w-11 rounded-full bg-white/10 transition peer-checked:bg-prism-500" />
+                  <div className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
+                </label>
+                <span className="text-sm text-neutral-100">{t("gamification.profile.leaderboardOptOut")}</span>
+              </div>
+              <button
+                onClick={handleProfileSave}
+                className="btn-primary px-5 py-2 disabled:opacity-40"
+                disabled={profileSaving}
+              >
+                {profileSaving ? t("common.loading") : t("gamification.profile.save")}
+              </button>
+              {profileMsg && (
+                <p className={`text-sm ${profileMsg.kind === "err" ? "text-down" : "text-up"}`}>
+                  {profileMsg.text}
                 </p>
               )}
             </div>
