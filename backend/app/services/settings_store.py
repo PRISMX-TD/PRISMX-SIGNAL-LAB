@@ -789,10 +789,13 @@ def _load_gamification_from_db(db) -> dict:
                     if isinstance(default, bool):
                         data[k] = bool(stored[k])
                     elif isinstance(default, float):
-                        try:
-                            data[k] = float(stored[k])
-                        except (TypeError, ValueError):
-                            data[k] = default   # 坏值回退默认，宁缺勿错
+                        if isinstance(stored[k], bool):
+                            data[k] = default   # bool 冒充数值：float(True)==1.0 会悄悄改值，必须先拦
+                        else:
+                            try:
+                                data[k] = float(stored[k])
+                            except (TypeError, ValueError):
+                                data[k] = default   # 坏值回退默认，宁缺勿错
         except (ValueError, TypeError):
             logger.warning("platform_settings: invalid JSON for gamification, using defaults")
     return data

@@ -55,3 +55,7 @@ def test_settings_new_keys_and_typing(db_session):
     save_gamification_settings(db_session, {"min_baseline_usd": "garbage"})
     db_session.commit(); invalidate_gamification_cache()
     assert get_gamification_settings(db_session)["min_baseline_usd"] == 500.0
+    # bool 冒充数值：float(True) == 1.0 会悄悄把 500.0 改成 1.0，必须回退默认而不是转换
+    save_gamification_settings(db_session, {"min_baseline_usd": True})
+    db_session.commit(); invalidate_gamification_cache()
+    assert get_gamification_settings(db_session)["min_baseline_usd"] == 500.0
