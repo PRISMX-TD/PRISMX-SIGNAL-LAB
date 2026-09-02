@@ -1115,3 +1115,38 @@ class UserActiveDay(Base):
     id = Column(String, primary_key=True, default=_uuid)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     day = Column(String, nullable=False)  # UTC ISO 日期 "2026-09-02"
+
+
+class PeriodBaseline(Base):
+    """收益率榜分母基线（设计 §1.5）：按账户各拍各的，周期内冻结。"""
+    __tablename__ = "period_baselines"
+    __table_args__ = (
+        UniqueConstraint("user_id", "mt5_login", "period_key", name="uq_baseline_acct_period"),
+    )
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    mt5_login = Column(String, nullable=False)
+    period_key = Column(String, nullable=False)   # 2026-W36 / 2026-09 / comp:<id>
+    baseline = Column(Float, nullable=False)      # 拍照时该账户 MT5Account.balance
+    taken_at = Column(DateTime, default=_now)     # 分子只计此刻之后的平仓（防双计）
+    adjust = Column(Float, nullable=False, default=0.0)  # 期内入金并入分母；出金不减
+    created_at = Column(DateTime, default=_now)
+
+
+class LeaderboardSnapshot(Base):
+    """榜单快照（设计 §1.6）：一行 = 一个账户；一人多账户 = 多行多名次（设计意图）。"""
+    __tablename__ = "leaderboard_snapshots"
+    __table_args__ = (
+        UniqueConstraint("board", "period_key", "user_id", "mt5_login",
+                         name="uq_board_period_acct"),
+        Index("idx_snapshot_board_period_rank", "board", "period_key", "rank"),
+    )
+    id = Column(String, primary_key=True, default=_uuid)
+    board = Column(String, nullable=False)        # return_pct / win_rate
+    period_key = Column(String, nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    mt5_login = Column(String, nullable=False)
+    rank = Column(Integer, nullable=False)
+    score = Column(Float, nullable=False)         # 小数：0.124 = 12.4%
+    sample = Column(Integer, nullable=True)       # 期内已判定整仓数
+    computed_at = Column(DateTime, default=_now)

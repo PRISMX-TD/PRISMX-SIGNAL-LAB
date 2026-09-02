@@ -758,6 +758,9 @@ def save_account_type_settings(db, data: dict) -> None:
 # ---- 游戏化设置独立缓存（与其它设置分开） ----
 GAMIFICATION_DEFAULTS: dict = {
     "user_visible": False,
+    "leaderboard_visible": False,
+    "competitions_visible": False,
+    "min_baseline_usd": 500.0,
 }
 
 _gamification_cache: dict = {}
@@ -772,16 +775,24 @@ def invalidate_gamification_cache() -> None:
 
 def _load_gamification_from_db(db) -> dict:
     """从 DB 读游戏化设置 JSON，缺失的 key 回落到默认值。
-    仅接受布尔值，通过 bool() 收敛。"""
+    按默认值的类型收敛每个键：布尔键用 bool()，数值键用 float()——
+    数值键坏值（无法转 float）回退默认，宁缺勿错，不让一个脏值把整组设置读挂。"""
     data = dict(GAMIFICATION_DEFAULTS)
     row = db.query(PlatformSetting).filter(PlatformSetting.key == "gamification").first()
     if row:
         try:
             stored = json.loads(row.value)
             if isinstance(stored, dict):
-                for k in GAMIFICATION_DEFAULTS:
-                    if k in stored:
+                for k, default in GAMIFICATION_DEFAULTS.items():
+                    if k not in stored:
+                        continue
+                    if isinstance(default, bool):
                         data[k] = bool(stored[k])
+                    elif isinstance(default, float):
+                        try:
+                            data[k] = float(stored[k])
+                        except (TypeError, ValueError):
+                            data[k] = default   # 坏值回退默认，宁缺勿错
         except (ValueError, TypeError):
             logger.warning("platform_settings: invalid JSON for gamification, using defaults")
     return data
