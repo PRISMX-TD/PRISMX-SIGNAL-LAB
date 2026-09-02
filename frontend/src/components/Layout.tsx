@@ -166,6 +166,14 @@ function TabIcon({ name }: { name: string }) {
           <polygon points="12 2 22 22 2 22" />
         </svg>
       )
+    case 'achievements':
+      return (
+        <svg className={c} viewBox="0 0 24 24" {...p}>
+          <path d="M8 4h8v5a4 4 0 0 1-8 0V4Z" />
+          <path d="M8 5H5.5A1.5 1.5 0 0 0 4 6.5 3.5 3.5 0 0 0 7.5 10M16 5h2.5A1.5 1.5 0 0 1 20 6.5 3.5 3.5 0 0 1 16.5 10" />
+          <path d="M12 13v3M9 20h6M10 20v-2h4v2" />
+        </svg>
+      )
     default:
       return null
   }
@@ -322,6 +330,17 @@ export default function Layout() {
     // the App.tsx route; the PRO gate lives in-page/backend, so the nav entry
     // no longer needs admin status.
     { to: '/strategies', icon: 'strategies', label: t('nav.strategies') },
+    // 成就页：仅当 gamificationVisible 为真才露出入口（内测期普通用户不可见，
+    // 管理员恒可见——见 backend gamification.py 的 _check_visible）。直接打
+    // URL 仍能进（AchievementsPage 自己兜底 403），这里只藏入口。
+    // Achievements: the entry appears only when gamificationVisible is true
+    // (hidden from regular users during the beta window, always visible to
+    // admins — see the backend's gamification.py _check_visible). Direct URL
+    // access still works (AchievementsPage handles its own 403); this only
+    // hides the entry point.
+    ...(user?.gamificationVisible
+      ? [{ to: '/achievements', icon: 'achievements', label: t('gamification.title') }]
+      : []),
     ...(isAdmin ? [{ to: '/admin', icon: 'admin', label: t('nav.admin') }] : []),
   ]
   const moreActive = moreItems.some((m) => location.pathname === m.to)
@@ -559,6 +578,7 @@ export default function Layout() {
                   email={user?.email}
                   showUpgrade={user?.plan !== 'PRO'}
                   isAdmin={isAdmin}
+                  gamificationVisible={!!user?.gamificationVisible}
                   onLogout={handleLogout}
                 />
               </div>

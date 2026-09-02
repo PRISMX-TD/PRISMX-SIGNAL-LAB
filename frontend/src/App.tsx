@@ -26,6 +26,7 @@ const AccountPage = lazy(() => import('./pages/AccountPage'))
 const AdminPage = lazy(() => import('./pages/AdminPage'))
 const SimulatorPage = lazy(() => import('./pages/SimulatorPage'))
 const StrategiesPage = lazy(() => import('./pages/StrategiesPage'))
+const AchievementsPage = lazy(() => import('./pages/AchievementsPage'))
 const LegalPage = lazy(() => import('./pages/LegalPage'))
 const FaqPage = lazy(() => import('./pages/FaqPage'))
 const SupportPage = lazy(() => import('./pages/SupportPage'))
@@ -188,6 +189,17 @@ export default function App() {
                   a clear 403 on enabling, so no extra route-level gate is
                   needed. */}
               <Route path="/strategies" element={<StrategiesPage />} />
+              {/* 成就页：路由本身不做可见性门控，仅隐藏导航入口（见
+                  Layout.tsx/UserMenu.tsx 的 gamificationVisible 判断）——直接
+                  打这个 URL 的内测期普通用户会撞上后端 403，页面自己降级成
+                  一条内测提示（见 AchievementsPage 的 forbidden 分支）。
+                  Achievements: the route itself carries no visibility gate,
+                  only the nav entries are hidden (see Layout.tsx/UserMenu.tsx's
+                  gamificationVisible checks) — a regular user hitting this URL
+                  directly during the beta window gets a backend 403, which the
+                  page degrades into a beta hint on its own (see
+                  AchievementsPage's forbidden branch). */}
+              <Route path="/achievements" element={<AchievementsPage />} />
               <Route path="/upgrade" element={<UpgradePage />} />
               <Route path="/account" element={<AccountPage />} />
               <Route path="/download" element={<DownloadPage />} />

@@ -70,6 +70,16 @@ export interface User {
   // banner has to tell them apart or, for one render right after load, it would
   // treat everyone as a permanent PRO.
   planExpiresAt?: string | null
+  // 游戏化功能对该用户是否可见（内测开关）。与 planIsTrial/planExpiresAt 同样
+  // 不在登录/注册响应里，只有 refreshUser()（GET /auth/me）之后才会补上——
+  // 导航入口据此门控，登录瞬间的一次渲染里入口先不出现，随后台判定补上,
+  // 优于把内测用户提前漏出去。
+  // Whether gamification is visible to this user (beta gate). Like
+  // planIsTrial/planExpiresAt, absent from the login/register response and
+  // only filled in by refreshUser() (GET /auth/me); nav entries gate on this,
+  // so it's fine for them to be briefly absent right after login rather than
+  // leaking the beta feature to everyone from the first render.
+  gamificationVisible?: boolean
 }
 
 // 管理后台：用户列表条目 / admin: one row in the user list

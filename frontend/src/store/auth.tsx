@@ -158,7 +158,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const me = await userApi.me()
       setUser((prev) => {
         if (!prev) return null
-        return { ...prev, plan: me.plan, planIsTrial: me.planIsTrial, planExpiresAt: me.planExpiresAt }
+        return {
+          ...prev,
+          plan: me.plan,
+          planIsTrial: me.planIsTrial,
+          planExpiresAt: me.planExpiresAt,
+          // 游戏化可见性也搭这一趟车：见 User.gamificationVisible 的说明——
+          // 它同样不在登录响应里，Layout/UserMenu 的入口靠这次刷新才补上。
+          // Gamification visibility rides along too — see User.gamificationVisible;
+          // it's likewise absent from the login response, and the nav entries
+          // only appear once this refresh fills it in.
+          gamificationVisible: me.gamificationVisible,
+        }
       })
       const stored = localStorage.getItem(USER_KEY)
       if (stored) {
@@ -166,6 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         parsed.plan = me.plan
         parsed.planIsTrial = me.planIsTrial
         parsed.planExpiresAt = me.planExpiresAt
+        parsed.gamificationVisible = me.gamificationVisible
         localStorage.setItem(USER_KEY, JSON.stringify(parsed))
       }
     } catch {

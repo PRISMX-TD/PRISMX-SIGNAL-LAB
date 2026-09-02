@@ -1874,6 +1874,7 @@
   },
   "gamification": {
     "title": "Achievements", "levelLabel": "Level", "badgeWall": "Badge Wall",
+    "remainingToNext": "{{count}} more to the next level", "maxLevel": "Max level reached",
     "titles": { "novice": "Novice Trader", "junior": "Junior Trader", "elite": "Elite Trader",
                 "senior": "Senior Trader", "chief": "Chief Trader", "legend": "Legendary Trader" },
     "groups": { "qicheng": "Embark", "fengmang": "Edge", "moli": "Temper",
@@ -1914,7 +1915,9 @@
       "founder_2026": { "name": "Founding Member", "desc": "Registered in 2026 and completed a first live trade (permanently limited)" }
     },
     "winRateCard": { "combined": "Combined win rate (qualifying basis)", "account": "Account win rate",
-                     "toNext": "{{pct}}% to the next level", "breakdown": "Breakdown" },
+                     "toNext": "{{pct}}% to the next level", "breakdown": "Breakdown",
+                     "colLogin": "Account", "colTrades": "Trades", "colWins": "Wins",
+                     "colWinRate": "Win rate", "colExcluded": "Excluded" },
     "equip": "Equip", "unequip": "Unequip", "notEarned": "Not earned",
     "profile": { "nickname": "Nickname", "nicknamePublic": "Show full nickname on leaderboards",
                  "leaderboardOptOut": "Opt out of all leaderboards", "save": "Save", "saved": "Saved" },

@@ -15,11 +15,13 @@ export default function UserMenu({
   email,
   showUpgrade,
   isAdmin,
+  gamificationVisible,
   onLogout,
 }: {
   email: string | undefined
   showUpgrade: boolean
   isAdmin: boolean
+  gamificationVisible: boolean
   onLogout: () => void
 }) {
   const { t } = useTranslation()
@@ -74,6 +76,20 @@ export default function UserMenu({
           <Link to="/support" onClick={() => setOpen(false)} className={linkClass}>
             {t("nav.support")}
           </Link>
+          {/* 成就页：入口按 gamificationVisible 门控，理由同 Layout.tsx「其他」
+              抽屉的同名判断。等级角标（用户名旁的 t(`gamification.titles.…`)）
+              需要额外拉一次 gamificationApi.me()，这里先不做——只加入口链接,
+              避免为一个下拉菜单多发一个请求。
+              Achievements: gated on gamificationVisible, same rationale as the
+              "more" drawer's matching check in Layout.tsx. The level badge next
+              to the username would need an extra gamificationApi.me() call;
+              skipped here — just the entry link, so opening this dropdown
+              doesn't cost an extra request. */}
+          {gamificationVisible && (
+            <Link to="/achievements" onClick={() => setOpen(false)} className={linkClass}>
+              {t("gamification.title")}
+            </Link>
+          )}
           {showUpgrade && (
             <Link to="/upgrade" onClick={() => setOpen(false)} className={`${linkClass} text-prism-300`}>
               {t("nav.upgrade")}
