@@ -516,6 +516,14 @@ export default function AccountPage() {
           </section>
 
           {/* 个人资料（游戏化）/ Profile (gamification identity fields) */}
+          {/* 内测门控：功能整体未开放时（gamificationVisible=false）不展示昵称/
+              榜单展示/退出排行榜——这些榜单当下并不存在。管理员的 gamificationVisible
+              恒为 true，自测入口不受影响。
+              Beta wall: while the feature is off for this user
+              (gamificationVisible=false), hide nickname / leaderboard-display /
+              leaderboard-opt-out — those leaderboards don't exist yet. Admins
+              always get gamificationVisible=true, so admin self-testing is unaffected. */}
+          {info.gamificationVisible && (
           <section className="glass-neon p-5">
             <h3 className="sec-h-title">
               {t("gamification.profile.sectionTitle")}
@@ -569,6 +577,7 @@ export default function AccountPage() {
               )}
             </div>
           </section>
+          )}
           </div>
 
           {/* 通知设置 / Notifications */}

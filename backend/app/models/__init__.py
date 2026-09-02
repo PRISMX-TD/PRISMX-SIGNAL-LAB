@@ -371,17 +371,24 @@ class NotificationPref(Base):
     # auto_manage / bridge_offline / strategy_signal。与上面的指标类别是两套
     # 独立的白名单——指标类别只管"新信号推送该不该发"，这个字段管"账户/交易
     # 事件该不该推"。
-    # 语义约定：NULL = 用户从未配置过（读取方按"全部事件默认开启"处理），
-    # "[]" = 用户明确全部取消。因此新行默认 NULL 而不是 "[]"——产品要求这些
-    # 提醒对新用户默认开启，同时保留老用户明确关掉的选择。
+    # 语义约定：NULL = 用户从未配置过（读取方按"默认开启事件"处理，但
+    # badge_awarded 除外——它默认不推，见 push_dispatch.EVENT_BADGE_AWARDED
+    # 在 _parse_event_types 里的排除逻辑），"[]" = 用户明确全部取消。因此新行
+    # 默认 NULL 而不是 "[]"——产品要求这些提醒对新用户默认开启，同时保留老
+    # 用户明确关掉的选择。下面列出的具体事件名只是举例，可能滞后于
+    # push_dispatch.EVENT_TYPES 的实际清单。
     # Event-notification whitelist (JSON array): order_filled / order_rejected
     # / auto_manage / bridge_offline / strategy_signal. A separate whitelist
     # from the indicator categories above — those gate "should a new-signal
     # push fire", this gates "should an account/trading-event push fire".
-    # Semantics: NULL = never configured (readers treat it as "all events on
-    # by default"), "[]" = explicitly opted out of everything. New rows
-    # therefore default to NULL rather than "[]" — the product wants these
-    # alerts on by default while preserving an explicit opt-out.
+    # Semantics: NULL = never configured (readers treat it as "default-on
+    # events" — except badge_awarded, which defaults off; see the
+    # EVENT_BADGE_AWARDED exclusion in push_dispatch._parse_event_types),
+    # "[]" = explicitly opted out of everything. New rows therefore default to
+    # NULL rather than "[]" — the product wants these alerts on by default
+    # while preserving an explicit opt-out. The enumerated event names above
+    # are illustrative only and may lag the actual list in
+    # push_dispatch.EVENT_TYPES.
     event_types = Column(Text, default=None)
     # 推送时段限制（用户本地时间的 "HH:MM"）。两者都非空才生效；支持跨零点
     # （start > end 视为隔夜时段，如 22:00–07:00）。时区存 IANA 名称（如

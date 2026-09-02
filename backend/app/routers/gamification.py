@@ -10,7 +10,7 @@ from app.models import User, UserBadge, UserTask
 from app.schemas import VisibilityPatchIn
 from app.services.deps import get_current_user, get_db
 from app.services.gamification import (
-    BADGES, GROUPS, LEVEL_TITLES, compute_comprehensive_stats, condition_states,
+    BADGES, LEVEL_TITLES, compute_comprehensive_stats, condition_states,
     judge_and_award_badges, judge_and_record_conditions, level_of)
 from app.services.settings_store import (
     get_gamification_settings, invalidate_gamification_cache, save_gamification_settings)

@@ -108,9 +108,14 @@ def get_prefs(
         syms = json.loads(pref.selected_symbols or "[]")
     except (json.JSONDecodeError, TypeError):
         syms = []
-    # NULL（从未配置）→ 默认全部事件开启；派发侧 _parse_event_types 同一套语义。
-    # NULL (never configured) → all events on by default; the dispatch side
-    # shares this exact semantics via _parse_event_types.
+    # NULL（从未配置）→ 默认开启事件，但 badge_awarded 除外（默认不推，见
+    # push_dispatch.EVENT_BADGE_AWARDED）；派发侧 _parse_event_types 同一套
+    # 语义。下面走的是同一个 _parse_event_types，具体事件名清单可能滞后于
+    # push_dispatch.EVENT_TYPES。
+    # NULL (never configured) → events default on, except badge_awarded which
+    # defaults off (see push_dispatch.EVENT_BADGE_AWARDED); the dispatch side
+    # shares this exact semantics via _parse_event_types. The enumerated event
+    # names may lag the actual list in push_dispatch.EVENT_TYPES.
     events = sorted(_parse_event_types(pref.event_types))
     return NotificationPrefsOut(
         enabled=pref.enabled,

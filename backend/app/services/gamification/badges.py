@@ -27,12 +27,12 @@ def award_badge(db, user_id, badge_id) -> bool:
         db.rollback()
         return False
     # 授予落库后才推送（先例见 auto_manage.py L390-399、gateway.py
-    # _notify_binding_revoked）：推送失败不该撤销已经生效的授予，也不该拖垮
+    # _notify_revoked）：推送失败不该撤销已经生效的授予，也不该拖垮
     # 判定循环，所以单独 try/except 兜住、只记日志。事件白名单 NULL 默认不含
     # badge_awarded（见 push_dispatch.EVENT_BADGE_AWARDED），用户得自己去
     # 通知设置里勾选才会真的收到。
     # Only push after the award is actually committed (precedent:
-    # auto_manage.py L390-399, gateway.py _notify_binding_revoked): a push
+    # auto_manage.py L390-399, gateway.py _notify_revoked): a push
     # failure must not undo an award that already took effect, nor sink the
     # judging loop — caught and logged on its own. NULL event whitelists
     # exclude badge_awarded by default (see push_dispatch.EVENT_BADGE_AWARDED),
