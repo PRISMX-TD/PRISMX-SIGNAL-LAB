@@ -11,7 +11,7 @@ from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models import MT5Account, User, UserPref
-from app.schemas import PhoneRequest, UserOut
+from app.schemas import PhoneRequest, ProfilePatchIn, UserOut
 from app.services.phone import compose_phone
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user
@@ -87,6 +87,76 @@ def get_account(
         leaderboardOptOut=bool(current_user.leaderboard_opt_out),
         equippedBadge=current_user.equipped_badge,
     )
+
+
+def _apply_profile_patch(db: Session, user: User, body: ProfilePatchIn) -> User:
+    """局部更新游戏化资料四个字段；只处理 body 里实际传了的字段。
+
+    用 model_fields_set 而不是 `is not None` 判断「是否传了这个字段」——
+    equippedBadge 显式传 null（卸下）与没传（不变）语义不同，只有前者才能
+    这样区分。校验（昵称长度/保留词、勋章持有）在赋值前做，一旦某个字段
+    校验失败就直接抛 400，此前（如果有）已赋的字段仍停留在 session 里但
+    还没 commit——请求整体失败，调用方看到的是纯粹的错误响应，不会有「改了
+    一半」的落库结果。
+
+    Partially updates the 4 gamification profile fields — only fields actually
+    present in body are touched. Uses model_fields_set rather than `is not
+    None` to tell "field sent" from "field absent": equippedBadge sent as null
+    (unequip) is semantically different from omitted (untouched), and only
+    fields_set can distinguish the two. Validation (nickname length/reserved
+    word, badge ownership) happens before assignment; if a field's validation
+    fails partway through, any earlier assignment this call made is still
+    sitting in the session but never committed — the whole request fails and
+    the caller only sees the error response, never a half-applied write.
+    """
+    from app.models import UserBadge
+    from app.services.gamification import nickname_reserved
+
+    sent = body.model_fields_set
+    if "nickname" in sent:
+        nick = (body.nickname or "").strip()
+        if not (2 <= len(nick) <= 20):
+            raise HTTPException(400, "昵称需 2-20 个字符 / Nickname must be 2-20 characters")
+        if nickname_reserved(nick):
+            raise HTTPException(400, "昵称包含保留词 / Nickname contains a reserved word")
+        user.nickname = nick
+    if "nicknamePublic" in sent and body.nicknamePublic is not None:
+        user.nickname_public = body.nicknamePublic
+    if "leaderboardOptOut" in sent and body.leaderboardOptOut is not None:
+        user.leaderboard_opt_out = body.leaderboardOptOut
+    if "equippedBadge" in sent:
+        if body.equippedBadge is None:
+            user.equipped_badge = None
+        else:
+            owned = (
+                db.query(UserBadge.id)
+                .filter(UserBadge.user_id == user.id, UserBadge.badge_id == body.equippedBadge)
+                .first()
+            )
+            if owned is None:
+                raise HTTPException(400, "尚未获得该勋章 / Badge not earned yet")
+            user.equipped_badge = body.equippedBadge
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.patch("/profile")
+@limiter.limit(settings.RATE_LIMIT_PASSWORD)
+def patch_profile(
+    request: Request,
+    body: ProfilePatchIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """局部更新昵称/隐私开关/佩戴勋章，只改传了的字段。"""
+    u = _apply_profile_patch(db, current_user, body)
+    return {
+        "nickname": u.nickname,
+        "nicknamePublic": u.nickname_public,
+        "leaderboardOptOut": u.leaderboard_opt_out,
+        "equippedBadge": u.equipped_badge,
+    }
 
 
 @router.post("/phone", response_model=UserOut)

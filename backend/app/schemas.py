@@ -59,6 +59,24 @@ class PhoneRequest(BaseModel):
     phone: str = Field(min_length=3, max_length=24)
 
 
+class ProfilePatchIn(BaseModel):
+    """游戏化资料局部更新：全部字段可选，只改传了的那些。
+
+    `equippedBadge` 显式传 null 表示卸下勋章，与「没传」（保持不变）不同——
+    用 model_fields_set 区分两者，照 StrategyUpdate 的先例。
+
+    Partial update for the gamification profile: every field is optional and
+    only the ones actually sent are changed. `equippedBadge: null` means
+    "unequip", distinct from omitting it (leave untouched) — distinguished via
+    model_fields_set, matching StrategyUpdate's precedent.
+    """
+
+    nickname: str | None = None
+    nicknamePublic: bool | None = None
+    leaderboardOptOut: bool | None = None
+    equippedBadge: str | None = None
+
+
 class GoogleAuthRequest(BaseModel):
     # 前端 Google Identity Services 返回的 ID Token / ID token from Google Identity Services
     credential: str = Field(min_length=1, max_length=4096)
