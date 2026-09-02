@@ -47,7 +47,7 @@ def test_reconcile_deposit_joins_denominator(db_session):
                                closed_at=NOW + timedelta(hours=1), verified=True))
     acct.balance = 1250.0
     db_session.commit()
-    assert reconcile_deposits(db_session, PK) == 1
+    assert reconcile_deposits(db_session, PK, now=NOW) == 1
     row = db_session.query(PeriodBaseline).first()
     assert abs(row.adjust - 200.0) < 1e-6
 
@@ -59,7 +59,7 @@ def test_reconcile_withdrawal_ignored(db_session):
     acct = db_session.query(MT5Account).first()
     acct.balance = 700.0                        # 纯出金 300
     db_session.commit()
-    assert reconcile_deposits(db_session, PK) == 0
+    assert reconcile_deposits(db_session, PK, now=NOW) == 0
     assert db_session.query(PeriodBaseline).first().adjust == 0.0
 
 
@@ -68,7 +68,7 @@ def test_reconcile_skips_unbound_account(db_session):
     _acct(db_session, u, "R1", 1000.0)
     ensure_baselines(db_session, PK, NOW)
     db_session.query(MT5Account).delete(); db_session.commit()   # 期中解绑
-    assert reconcile_deposits(db_session, PK) == 0               # 冻结，不报错
+    assert reconcile_deposits(db_session, PK, now=NOW) == 0      # 冻结，不报错
 
 
 def test_reconcile_noop_for_ended_period(db_session):
@@ -81,7 +81,7 @@ def test_reconcile_noop_for_ended_period(db_session):
     acct = db_session.query(MT5Account).first()
     acct.balance = 1250.0                        # 期后账户仍在正常涨——不该被当成入金
     db_session.commit()
-    assert reconcile_deposits(db_session, past_pk) == 0
+    assert reconcile_deposits(db_session, past_pk, now=NOW) == 0
     assert db_session.query(PeriodBaseline).first().adjust == 0.0
 
 
@@ -92,8 +92,8 @@ def test_reconcile_idempotent_when_no_state_change(db_session):
     acct = db_session.query(MT5Account).first()
     acct.balance = 1200.0
     db_session.commit()
-    assert reconcile_deposits(db_session, PK) == 1
+    assert reconcile_deposits(db_session, PK, now=NOW) == 1
     row = db_session.query(PeriodBaseline).first()
     assert abs(row.adjust - 200.0) < 1e-6
-    assert reconcile_deposits(db_session, PK) == 0   # 无状态变化：再跑一次不重复调整
+    assert reconcile_deposits(db_session, PK, now=NOW) == 0   # 无状态变化：再跑一次不重复调整
     assert abs(db_session.query(PeriodBaseline).first().adjust - 200.0) < 1e-6

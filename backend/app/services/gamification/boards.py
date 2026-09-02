@@ -58,7 +58,7 @@ def _realized_since(db, user_id, login, since, until) -> float:
     return sum(leg.profit or 0.0 for leg in q.all())
 
 
-def reconcile_deposits(db, period_key: str) -> int:
+def reconcile_deposits(db, period_key: str, now: datetime = None) -> int:
     """对每条基线，若账号行仍在且 balance 非 NULL：
     delta = balance − (baseline + adjust) − realized_since(taken_at, login)；
     delta > RECONCILE_TOLERANCE → adjust += delta（入金并入分母）；
@@ -68,9 +68,15 @@ def reconcile_deposits(db, period_key: str) -> int:
     期后的盈亏会被 _realized_since 当成「realized」减掉，从而把期后的正常
     交易误判成入金、永久污染一个已封存周期的分母——即使在 48h 重算窗内也不
     对账，重算窗只重算榜单快照，不重开基线/对账。
+
+    `now` 可注入（默认取系统当前 UTC 时间），供调用方传入统一的时钟基准——
+    Task 5 的 `snapshot_boards(db, now)` 会把它接的 now 原样透传到这里，保证
+    一趟批处理里「现在」只有一个含义；测试也借此固定成确定性时间，不受真实
+    时钟推移影响。
     """
     _start, end = period_bounds(period_key)
-    if datetime.now(timezone.utc) >= end:
+    now = now if now is not None else datetime.now(timezone.utc)
+    if now >= end:
         return 0    # 已结束周期：期后交易会污染对账，冻结不动（重算窗内也不对账）
     acct_map = {(a.user_id, a.login): a.balance
                 for a in db.query(MT5Account).filter(MT5Account.balance.isnot(None))}
