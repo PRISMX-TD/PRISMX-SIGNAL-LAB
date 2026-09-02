@@ -104,7 +104,8 @@ def _hash_legacy_api_tokens() -> None:
 #        是新键"而跳过整段并写下 rev 7，此后一路走快速通道，数据永远搬不回来。
 # rev 9: mt5_accounts.pass_change_at / revoked_at / revoked_reason
 #        （gateway 绑定的撤销机制：券商侧改密码后作废旧绑定）
-CURRENT_SCHEMA_REV = 9
+# rev 10 — users 昵称/隐私/佩戴 4 列、orders.trade_mode 快照 + 存量回填、user_active_days 等新表、游戏化索引
+CURRENT_SCHEMA_REV = 10
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -379,6 +380,7 @@ def _migrate_columns() -> None:
             # Gateway 成交后的真实仓位号，平仓明细靠它判归属
             # real position id after a gateway fill; closed-trade attribution key
             "mt5_position": "INTEGER",
+            "trade_mode": "INTEGER",
         }
         with engine.begin() as conn:
             for name, col_type in order_new.items():
@@ -482,6 +484,35 @@ def _migrate_columns() -> None:
             if "revoked_reason" not in acc_cols:
                 conn.execute(text("ALTER TABLE mt5_accounts ADD COLUMN revoked_reason VARCHAR"))
 
+    # orders.trade_mode 存量回填：必须排在上面的 mt5_accounts 补列之后——回填
+    # 语句读 mt5_accounts.trade_mode，旧库上这一列要等 rev 7 那段 ALTER 跑完才
+    # 存在，提前查会以 "no such column" 打断迁移（同 idx_* 建在补列之前那类
+    # 坑，只是这次踩在 UPDATE 上而不是 CREATE INDEX 上）。
+    #
+    # rev 10 回填：按 (user_id, mt5_login) 从现存账号行盖章存量 FILLED 订单（设计 §1.2）。
+    # 幂等：只补 orders.trade_mode 仍为 NULL 的行，重跑不会覆盖已回填/已由
+    # 网关成交路径写入的值。
+    #
+    # orders.trade_mode backfill: must come after the mt5_accounts ADD COLUMN
+    # above — it reads mt5_accounts.trade_mode, which doesn't exist on a legacy
+    # database until rev 7's ALTER runs; querying it earlier fails with "no such
+    # column" (the same bug class as an index built before its column, just on
+    # an UPDATE instead of a CREATE INDEX).
+    #
+    # Idempotent: only backfills rows where orders.trade_mode is still NULL, so
+    # re-running never clobbers a value already backfilled or written by the
+    # gateway fill path.
+    if "orders" in inspector.get_table_names() and "mt5_accounts" in inspector.get_table_names():
+        with engine.begin() as conn:
+            conn.execute(text(
+                "UPDATE orders SET trade_mode = ("
+                " SELECT a.trade_mode FROM mt5_accounts a"
+                " WHERE a.user_id = orders.user_id AND a.login = orders.mt5_login"
+                "   AND a.trade_mode IS NOT NULL LIMIT 1)"
+                " WHERE orders.trade_mode IS NULL AND orders.status = 'FILLED'"
+                "   AND orders.mt5_login IS NOT NULL"
+            ))
+
     # closed_trades 表：① 补 verified 列（服务端归属核验结论，见 models 里的说明）；
     # ② 把去重唯一键从 (user_id, deal_ticket) 换成 (user_id, mt5_login, deal_ticket)。
     #
@@ -572,6 +603,10 @@ def _migrate_columns() -> None:
             "phone": "VARCHAR",
             "phone_required": "BOOLEAN",
             "invite_code": "VARCHAR",
+            "nickname": "VARCHAR",
+            "nickname_public": "BOOLEAN",
+            "leaderboard_opt_out": "BOOLEAN",
+            "equipped_badge": "VARCHAR",
         }
         with engine.begin() as conn:
             for name, col_type in user_new.items():
@@ -645,6 +680,12 @@ def _migrate_columns() -> None:
             # as version 0 at auth time, matching the backfill here.
             if "token_version" not in user_cols:
                 conn.execute(text("UPDATE users SET token_version = 0 WHERE token_version IS NULL"))
+            # rev 10：nickname_public / leaderboard_opt_out 声明为 NOT NULL，
+            # 旧行补列后为 NULL，回填为各自的模型默认值 False。
+            # rev 10: nickname_public / leaderboard_opt_out are declared NOT
+            # NULL; backfill existing rows to their model default of False.
+            conn.execute(text("UPDATE users SET nickname_public = 0 WHERE nickname_public IS NULL"))
+            conn.execute(text("UPDATE users SET leaderboard_opt_out = 0 WHERE leaderboard_opt_out IS NULL"))
 
     # user_strategies 表：止损止盈从"百分比距离 + R 倍数"一种固定组合改成
     # 两个方式独立可选，外加策略命名。已启用的策略要按原逻辑等价换算成新
@@ -924,6 +965,24 @@ def _migrate_columns() -> None:
         ))
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_users_invite_code ON users(invite_code)"
+        ))
+        # rev 10 游戏化索引：胜率/连续活跃统计按 (user_id, closed_at) 与
+        # (mt5_login, closed_at) 扫 closed_trades；升级条件之一按
+        # (user_id, status, created_at) 扫 orders。
+        # rev 10 gamification indexes: win-rate/streak stats scan closed_trades
+        # by (user_id, closed_at) and (mt5_login, closed_at); one upgrade
+        # condition scans orders by (user_id, status, created_at).
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_closed_trades_user_closed "
+            "ON closed_trades(user_id, closed_at)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_closed_trades_login_closed "
+            "ON closed_trades(mt5_login, closed_at)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_orders_user_status_created "
+            "ON orders(user_id, status, created_at)"
         ))
 
     # 全部步骤跑完才记版本号：中途抛异常就不写，下次启动会重跑（所有步骤幂等）。

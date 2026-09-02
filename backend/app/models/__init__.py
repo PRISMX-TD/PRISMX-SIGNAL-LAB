@@ -139,6 +139,10 @@ class User(Base):
     # which is exactly the "can't use Google login after setting a password"
     # bug reported 2026-07.
     google_linked_at = Column(DateTime, nullable=True)
+    nickname = Column(String, nullable=True)            # 2-20 字，展示时默认打码；保留词校验在写入端
+    nickname_public = Column(Boolean, nullable=False, default=False)
+    leaderboard_opt_out = Column(Boolean, nullable=False, default=False)
+    equipped_badge = Column(String, nullable=True)      # 佩戴的勋章 id，只能佩戴已获得的
 
 
 # 说明：旧的 EABinding（ea_bindings 表，EA 单账号绑定）已随 EA 接入方式移除。
@@ -329,6 +333,7 @@ class Order(Base):
     mt5_position = Column(Integer, nullable=True)
     filled_price = Column(Float, nullable=True)
     message = Column(String, nullable=True)
+    trade_mode = Column(Integer, nullable=True)  # 成交时从账号行拷贝的不可变快照；-1=确认无法判定
     # 桥接最近一次把该仓位报为"仍持仓"的时间；用于拿 MT5 实时持仓对账个人胜率
     # ——平仓明细可能因桥接离线/手动平仓漏报，仅靠平仓记录会让仓位永远卡在
     # "进行中"。近期没被报为持仓、又没有完整平仓记录的仓位视为已在别处平掉、
@@ -1074,3 +1079,32 @@ class InviteLink(Base):
     # backfills them to False and every read wraps in bool().
     grants_trial = Column(Boolean, default=False, nullable=True)
     created_at = Column(DateTime, default=_now)
+
+
+class UserTask(Base):
+    """升级条件完成记录。等级由本表派生（连续完整完成的组数），不单独存等级列。"""
+    __tablename__ = "user_tasks"
+    __table_args__ = (UniqueConstraint("user_id", "task_id", name="uq_user_task"),)
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    task_id = Column(String, nullable=False)
+    completed_at = Column(DateTime, default=_now)
+
+
+class UserBadge(Base):
+    """勋章授予记录。发出不收回（内测期除外，见设计 §11 发布策略）。"""
+    __tablename__ = "user_badges"
+    __table_args__ = (UniqueConstraint("user_id", "badge_id", name="uq_user_badge"),)
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    badge_id = Column(String, nullable=False)
+    awarded_at = Column(DateTime, default=_now)
+
+
+class UserActiveDay(Base):
+    """活跃日标记，「三日之约」数据源。写入点在 deps._touch_last_active。"""
+    __tablename__ = "user_active_days"
+    __table_args__ = (UniqueConstraint("user_id", "day", name="uq_user_active_day"),)
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    day = Column(String, nullable=False)  # UTC ISO 日期 "2026-09-02"
