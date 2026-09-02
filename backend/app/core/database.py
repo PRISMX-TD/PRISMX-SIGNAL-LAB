@@ -684,8 +684,8 @@ def _migrate_columns() -> None:
             # 旧行补列后为 NULL，回填为各自的模型默认值 False。
             # rev 10: nickname_public / leaderboard_opt_out are declared NOT
             # NULL; backfill existing rows to their model default of False.
-            conn.execute(text("UPDATE users SET nickname_public = 0 WHERE nickname_public IS NULL"))
-            conn.execute(text("UPDATE users SET leaderboard_opt_out = 0 WHERE leaderboard_opt_out IS NULL"))
+            conn.execute(text("UPDATE users SET nickname_public = FALSE WHERE nickname_public IS NULL"))
+            conn.execute(text("UPDATE users SET leaderboard_opt_out = FALSE WHERE leaderboard_opt_out IS NULL"))
 
     # user_strategies 表：止损止盈从"百分比距离 + R 倍数"一种固定组合改成
     # 两个方式独立可选，外加策略命名。已启用的策略要按原逻辑等价换算成新

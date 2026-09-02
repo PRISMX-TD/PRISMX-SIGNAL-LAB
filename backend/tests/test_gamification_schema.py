@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 import pytest
 from sqlalchemy.exc import IntegrityError
 from app.models import User, Order, UserTask, UserBadge, UserActiveDay
