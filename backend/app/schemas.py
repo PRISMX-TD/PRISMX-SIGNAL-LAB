@@ -137,6 +137,13 @@ class AdminUserUpdate(BaseModel):
     planNote: str | None = Field(default=None, max_length=256)
 
 
+class VisibilityPatchIn(BaseModel):
+    """游戏化功能对用户端的可见性开关（管理端）。
+    Gamification user-facing visibility toggle (admin)."""
+
+    userVisible: bool
+
+
 class AdminBulkUserUpdate(AdminUserUpdate):
     # 目标用户 id 列表；其余字段语义与 AdminUserUpdate 完全一致（仅传要改的字段）。
     # Target user ids; remaining fields behave exactly like AdminUserUpdate

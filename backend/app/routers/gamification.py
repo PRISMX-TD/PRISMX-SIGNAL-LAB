@@ -7,11 +7,13 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.models import User, UserBadge, UserTask
+from app.schemas import VisibilityPatchIn
 from app.services.deps import get_current_user, get_db
 from app.services.gamification import (
     BADGES, GROUPS, LEVEL_TITLES, compute_comprehensive_stats, condition_states,
     judge_and_award_badges, judge_and_record_conditions, level_of)
-from app.services.settings_store import get_gamification_settings
+from app.services.settings_store import (
+    get_gamification_settings, invalidate_gamification_cache, save_gamification_settings)
 
 router = APIRouter(prefix="/gamification", tags=["gamification"])
 
@@ -78,3 +80,40 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
 def gamification_me(request: Request, db: Session = Depends(get_db),
                      user: User = Depends(require_gamification_visible)):
     return build_me_payload(db, user, judge=True)
+
+
+# ---- 管理员端 / admin endpoints ----
+# 权限收口方式同 tickets.admin_router / invite.admin_router 先例：路由本身不带
+# require_admin，在 main.py 的 include_router(..., dependencies=[Depends(require_admin)])
+# 里统一挂上，避免每个端点各写一遍。
+# Auth is gated the same way as tickets.admin_router / invite.admin_router: the
+# router itself carries no require_admin dependency — it's attached once in
+# main.py's include_router(..., dependencies=[Depends(require_admin)]) instead
+# of repeating it on every endpoint.
+admin_router = APIRouter(prefix="/admin/gamification", tags=["admin"])
+
+
+@admin_router.get("/user/{user_id}")
+def admin_inspect_user(user_id: str, db: Session = Depends(get_db)):
+    """管理端检查器：目标用户的完整游戏化面板，触发一次真实判定（同 60 秒节流）。
+    Admin inspector: the target user's full gamification panel, triggering a
+    real judging pass (same 60s throttle)."""
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(404, "用户不存在 / User not found")
+    payload = build_me_payload(db, target, judge=True)
+    payload["email"] = target.email
+    return payload
+
+
+@admin_router.get("/visibility")
+def admin_get_visibility(db: Session = Depends(get_db)):
+    return {"userVisible": bool(get_gamification_settings(db).get("user_visible"))}
+
+
+@admin_router.patch("/visibility")
+def admin_set_visibility(body: VisibilityPatchIn, db: Session = Depends(get_db)):
+    save_gamification_settings(db, {"user_visible": bool(body.userVisible)})
+    db.commit()
+    invalidate_gamification_cache()
+    return {"userVisible": bool(body.userVisible)}

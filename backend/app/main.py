@@ -238,6 +238,7 @@ app.include_router(tickets.admin_router, prefix=settings.API_PREFIX, dependencie
 app.include_router(invite.router, prefix=settings.API_PREFIX)
 app.include_router(invite.admin_router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
 app.include_router(gamification.router, prefix=settings.API_PREFIX)
+app.include_router(gamification.admin_router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
 # WebSocket 路由 / WebSocket routers
 app.include_router(ws.router)
 
