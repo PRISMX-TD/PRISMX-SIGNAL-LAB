@@ -20,17 +20,19 @@ const BOARDS: LeaderboardBoard[] = ['return_pct', 'win_rate']
 type Period = 'week' | 'month'
 const PERIODS: Period[] = ['week', 'month']
 
-// 上榜门槛笔数，对应 i18n leaderboard.rules.<board> 里写明的数字（收益榜"不足
-// 5 笔不入榜"、胜率榜"≥20 笔"），notRanked 提示的 {{n}} 复用同一份数字——
-// 两处若不同步就会互相矛盾，所以只在这一处定义。
-// Ranking thresholds, matching the numbers spelled out in
-// leaderboard.rules.<board> (return board: fewer than 5 trades don't rank;
-// win-rate board: needs >=20). The notRanked hint's {{n}} reuses this single
-// source rather than a second hard-coded number that could drift out of sync.
-const RANK_THRESHOLD: Record<LeaderboardBoard, number> = {
-  return_pct: 5,
-  win_rate: 20,
-}
+// 上榜门槛：改由后端 payload 的 gates 字段下发（管理端可调），不再在前端写死
+// 5/20/500——榜规文案与 notRanked 提示的 {{n}}/{{usd}} 都从 data.gates 取。
+// DEFAULT_GATES 只在首个 payload 到达前当占位，避免 loading 阶段闪出
+// "{{n}}" 这种未插值的原始 key；一旦 data 到位就完全让位给真实值，绝不会
+// 展示成一个陈旧或错误的数字。
+// Entry gates now come from the backend payload's gates field
+// (admin-adjustable), no longer hardcoded to 5/20/500 in the frontend — both
+// the rules copy and the notRanked hint's {{n}}/{{usd}} read from
+// data.gates. DEFAULT_GATES is only a placeholder before the first payload
+// arrives, so the loading phase never flashes the raw "{{n}}" token; once
+// data lands it fully defers to the real values, never showing a stale or
+// wrong number.
+const DEFAULT_GATES = { minTradesReturn: 5, minTradesWinrate: 20, minBaselineUsd: 500 }
 
 // 勋章稀有度镜像表：见 components/badges/badgeRarity.ts 的说明——现在与
 // CompetitionsPage 的比赛榜共用同一份，拆出去后这里只剩 import。
@@ -43,6 +45,14 @@ const RANK_THRESHOLD: Record<LeaderboardBoard, number> = {
 // with one decimal. The return board's score can be negative (a loss);
 // toFixed handles that the same way, no special-casing needed.
 const fmtScorePct = (v: number): string => `${(v * 100).toFixed(1)}%`
+
+// 最低本金门槛的展示格式：整数美元不带小数（500 而不是 500.00），非整数才保留
+// 两位——管理端目前只允许输入正数，没有强制整数，所以两种都要处理。
+// Display formatting for the minimum-baseline gate: a whole-dollar figure
+// renders without decimals (500, not 500.00); anything else keeps two. The
+// admin form only requires a positive number, not an integer, so both shapes
+// are possible.
+const fmtUsd = (v: number): string => (Number.isInteger(v) ? String(v) : v.toFixed(2))
 
 export default function LeaderboardPage() {
   const { t } = useTranslation()
@@ -96,6 +106,15 @@ export default function LeaderboardPage() {
     )
   }
 
+  // data.gates should always be present once a payload lands (the backend
+  // always sends it) — the fallback is defensive only, so a mid-rollout
+  // mismatch degrades to the old hardcoded numbers instead of throwing.
+  const gates = data.gates ?? DEFAULT_GATES
+  const rankThreshold: Record<LeaderboardBoard, number> = {
+    return_pct: gates.minTradesReturn,
+    win_rate: gates.minTradesWinrate,
+  }
+
   return (
     <div className="mx-auto max-w-[1100px] space-y-6 pb-24 lg:pb-6">
       <h2 className="font-display text-2xl font-bold text-neutral-100">
@@ -139,7 +158,9 @@ export default function LeaderboardPage() {
           are unrelated (the return board gates on a capital baseline, the
           win-rate board on trade count and P&L), so one shared sentence
           wouldn't fit either. */}
-      <p className="text-xs leading-relaxed text-neutral-500">{t(`leaderboard.rules.${board}`)}</p>
+      <p className="text-xs leading-relaxed text-neutral-500">
+        {t(`leaderboard.rules.${board}`, { n: rankThreshold[board], usd: fmtUsd(gates.minBaselineUsd) })}
+      </p>
 
       <section className="card glass overflow-hidden p-0">
         {data.rows.length === 0 ? (
@@ -197,14 +218,16 @@ export default function LeaderboardPage() {
       </section>
 
       {/* 底部固定「我的名次」条：me 为 null 表示本期未上榜（含未参与），此时
-          n 取当前选中榜的门槛笔数——两榜门槛不同（5/20），写死一个数字会在
-          切榜之后说错话。bottom 在 lg 以下额外抬高，让开移动端固定底栏
-          （.lg-tabbar，见 Layout.tsx），否则两条固定在底部的条会叠在一起。
+          n 取当前选中榜在 data.gates 里的门槛笔数——两榜门槛不同，且管理端可调，
+          写死一个数字既会在切榜之后说错话，也会在管理员调松/调严门槛后过时。
+          bottom 在 lg 以下额外抬高，让开移动端固定底栏（.lg-tabbar，见
+          Layout.tsx），否则两条固定在底部的条会叠在一起。
           Sticky-bottom "my rank" bar: me is null when not ranked this period
           (including not participating), in which case n is the threshold for
-          the currently selected board — the two differ (5/20), so a fixed
-          number would misstate itself after switching boards. The bottom
-          offset is raised below lg to clear the mobile fixed tab bar
+          the currently selected board, read from data.gates — the two boards
+          differ and the admin can retune either, so a hardcoded number would
+          misstate itself both across boards and after any admin change. The
+          bottom offset is raised below lg to clear the mobile fixed tab bar
           (.lg-tabbar, see Layout.tsx), or the two bottom-pinned bars would
           overlap. */}
       <div className="sticky bottom-[84px] z-20 lg:bottom-4">
@@ -220,7 +243,7 @@ export default function LeaderboardPage() {
             </div>
           ) : (
             <span className="text-sm text-neutral-400">
-              {t('leaderboard.notRanked', { n: RANK_THRESHOLD[board] })}
+              {t('leaderboard.notRanked', { n: rankThreshold[board] })}
             </span>
           )}
         </div>

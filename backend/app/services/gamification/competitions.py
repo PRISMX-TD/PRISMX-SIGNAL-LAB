@@ -16,7 +16,7 @@ from app.models import (
     Competition, CompetitionParticipant, LeaderboardSnapshot, MT5Account, PeriodBaseline, User,
 )
 from .badges import award_badge
-from .boards import REAL, _aware, _resolved_in_period, reconcile_deposits
+from .boards import REAL, _aware, _resolved_in_period, board_gates, reconcile_deposits
 
 
 def comp_period_key(comp_id: str) -> str:
@@ -34,13 +34,15 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
     """
     from app.services.settings_store import get_gamification_settings
     gset = get_gamification_settings(db)
-    min_baseline = float(gset.get("min_baseline_usd", 500.0))
     # 比赛用的是所选 metric 的完整周期榜规则（含门槛），必须和 boards.py 保持
-    # 同步——见那边同名变量的注释。
+    # 同步——复用同一个 board_gates()，两处不会分叉。
     # A competition uses its metric's full board rules including gates, kept in
-    # lockstep with boards.py — see that file's comment on the same variables.
-    min_trades_return = max(1, int(gset.get("min_trades_return", 5)))
-    min_trades_winrate = max(1, int(gset.get("min_trades_winrate", 20)))
+    # lockstep with boards.py by sharing the same board_gates() rather than
+    # re-deriving it.
+    gates = board_gates(gset)
+    min_baseline = gates["min_baseline_usd"]
+    min_trades_return = gates["min_trades_return"]
+    min_trades_winrate = gates["min_trades_winrate"]
     period_key = comp_period_key(comp.id)
     starts_at = _aware(comp.starts_at)
     ends_at = _aware(comp.ends_at)

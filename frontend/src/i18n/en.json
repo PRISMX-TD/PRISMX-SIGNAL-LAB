@@ -1937,8 +1937,8 @@
     "notRanked": "Not ranked this period — needs ≥{{n}} full closes this period and to clear the threshold",
     "youTag": "You",
     "rules": {
-      "return_pct": "Ranked by return rate (%): starting capital is locked in at period start and mid-period deposits are folded into the denominator. Accounts below the minimum baseline or with fewer than 5 trades don't rank.",
-      "win_rate": "Needs ≥20 trades this period with positive P&L to rank — a high win rate alone doesn't mean profit."
+      "return_pct": "Ranked by return rate (%): starting capital is locked in at period start and mid-period deposits are folded into the denominator. Accounts below {{usd}} USD baseline or with fewer than {{n}} trades don't rank.",
+      "win_rate": "Needs ≥{{n}} trades this period with positive P&L to rank — a high win rate alone doesn't mean profit."
     },
     "admin": { "preview": "Leaderboard preview", "leaderboardSwitch": "Leaderboard user-facing visibility",
                "competitionsSwitch": "Competitions user-facing visibility",

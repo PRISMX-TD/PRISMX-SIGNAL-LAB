@@ -63,3 +63,26 @@ def test_invalid_board_and_period(db_session):
         build_leaderboard_payload(db_session, u, "profit", "2026-W36")
     with pytest.raises(HTTPException):
         build_leaderboard_payload(db_session, u, "return_pct", "bogus")
+
+
+def test_payload_gates_reflect_admin_settings(db_session):
+    """gates 必须读的是当下生效的设置，不是硬编码的 5/20/500——改了设置后
+    同一个 payload 构造函数要立刻返回新值（同 test_board_rows.py 的覆盖/复位
+    写法）。"""
+    invalidate_gamification_cache()
+    u = _user(db_session, "gate1@t.co")
+    p = build_leaderboard_payload(db_session, u, "return_pct", "2026-W36")
+    assert p["gates"] == {"minTradesReturn": 5, "minTradesWinrate": 20, "minBaselineUsd": 500.0}
+
+    save_gamification_settings(db_session, {
+        "min_trades_return": 1, "min_trades_winrate": 2, "min_baseline_usd": 50.0,
+    })
+    db_session.commit(); invalidate_gamification_cache()
+    try:
+        p2 = build_leaderboard_payload(db_session, u, "win_rate", "2026-W36")
+        assert p2["gates"] == {"minTradesReturn": 1, "minTradesWinrate": 2, "minBaselineUsd": 50.0}
+    finally:
+        save_gamification_settings(db_session, {
+            "min_trades_return": 5, "min_trades_winrate": 20, "min_baseline_usd": 500.0,
+        })
+        db_session.commit(); invalidate_gamification_cache()

@@ -1059,11 +1059,27 @@ export interface LeaderboardRow {
 // Full response of GET /gamification/leaderboard and
 // GET /admin/gamification/leaderboard. me is null when not ranked this
 // period (including not having participated).
+// 当前生效的入榜门槛（后端 boards.board_gates 下发，管理端可调）——前端渲染
+// 榜规文案/未上榜提示用这份活数字，不再写死 5/20/500。比赛详情页
+// （CompetitionDetail.board）复用同一个 LeaderboardPayload 形状，因此也带这份
+// gates。
+// The currently effective entry gates (sent by the backend's
+// boards.board_gates, admin-adjustable) — the frontend renders its rules copy
+// / not-ranked hint from this live number instead of hardcoding 5/20/500. The
+// competition detail page reuses this same LeaderboardPayload shape
+// (CompetitionDetail.board), so it carries gates too.
+export interface LeaderboardGates {
+  minTradesReturn: number
+  minTradesWinrate: number
+  minBaselineUsd: number
+}
+
 export interface LeaderboardPayload {
   board: string
   periodKey: string
   rows: LeaderboardRow[]
   me: { rank: number; score: number; sample: number } | null
+  gates: LeaderboardGates
 }
 
 // 游戏化设置组（管理端，GET/PATCH /admin/gamification/settings）。
