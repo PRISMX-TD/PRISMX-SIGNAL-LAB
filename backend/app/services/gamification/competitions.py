@@ -33,7 +33,14 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
     账户不得混入（哪怕它恰好也在 period_baselines 里留了同 key 的脏行）。
     """
     from app.services.settings_store import get_gamification_settings
-    min_baseline = float(get_gamification_settings(db).get("min_baseline_usd", 500.0))
+    gset = get_gamification_settings(db)
+    min_baseline = float(gset.get("min_baseline_usd", 500.0))
+    # 比赛用的是所选 metric 的完整周期榜规则（含门槛），必须和 boards.py 保持
+    # 同步——见那边同名变量的注释。
+    # A competition uses its metric's full board rules including gates, kept in
+    # lockstep with boards.py — see that file's comment on the same variables.
+    min_trades_return = max(1, int(gset.get("min_trades_return", 5)))
+    min_trades_winrate = max(1, int(gset.get("min_trades_winrate", 20)))
     period_key = comp_period_key(comp.id)
     starts_at = _aware(comp.starts_at)
     ends_at = _aware(comp.ends_at)
@@ -76,11 +83,14 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
             total = sum(profits)
             denom = b.baseline + b.adjust
             if comp.metric == "return_pct":
-                if sample >= 5 and denom >= min_baseline and denom > 0:
+                if sample >= min_trades_return and denom >= min_baseline and denom > 0:
                     rows.append({"userId": uid, "login": lg,
                                 "score": total / denom, "sample": sample})
             elif comp.metric == "win_rate":
-                if sample >= 20 and total > 0:
+                # `total > 0` 同 boards.py：原则性的盈亏正闸，刻意不做成设置项。
+                # Same as boards.py: a principled profit-positive gate,
+                # deliberately not a setting.
+                if sample >= min_trades_winrate and total > 0:
                     wins = sum(1 for pr in profits if pr > 0)
                     rows.append({"userId": uid, "login": lg,
                                 "score": wins / sample, "sample": sample})

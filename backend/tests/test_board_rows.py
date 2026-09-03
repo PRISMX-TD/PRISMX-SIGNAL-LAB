@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from app.models import User, MT5Account, Order, ClosedTrade, PeriodBaseline
 from app.services.gamification.boards import ensure_baselines, compute_board_rows
+from app.services.settings_store import save_gamification_settings, invalidate_gamification_cache
 
 UTC = timezone.utc
 PK = "2026-W36"
@@ -135,6 +136,44 @@ def test_opted_out_user_disappears_from_both_boards(db_session):
     rows2 = compute_board_rows(db_session, PK)
     assert rows2["return_pct"] == []
     assert rows2["win_rate"] == []
+
+
+def test_configurable_return_gate_lets_single_trade_through(db_session):
+    """min_trades_return 调到 1：过去硬编码 5 笔起步，单笔合格仓位也能上收益榜。"""
+    save_gamification_settings(db_session, {"min_trades_return": 1})
+    db_session.commit(); invalidate_gamification_cache()
+    try:
+        u = _user(db_session, "cfg1@t.co"); _acct(db_session, u, "A", balance=2000.0)
+        ensure_baselines(db_session, PK, T0)
+        _mk(db_session, u, "A", 1, 0)                # 只 1 笔
+        ret = {r["login"]: r for r in compute_board_rows(db_session, PK)["return_pct"]}
+        assert "A" in ret and ret["A"]["sample"] == 1
+    finally:
+        save_gamification_settings(db_session, {"min_trades_return": 5})
+        db_session.commit(); invalidate_gamification_cache()
+
+
+def test_configurable_winrate_gate_lets_two_trades_through(db_session):
+    """min_trades_winrate 调到 2：过去硬编码 20 笔起步，两笔正盈利也能上胜率榜；
+    盈亏为正这道闸不受影响——净亏账户即使笔数够也依旧被挡下。"""
+    save_gamification_settings(db_session, {"min_trades_winrate": 2})
+    db_session.commit(); invalidate_gamification_cache()
+    try:
+        u = _user(db_session, "cfg2@t.co"); _acct(db_session, u, "A", balance=2000.0)
+        ensure_baselines(db_session, PK, T0)
+        _mk(db_session, u, "A", 2, 0)                # 2 笔全胜，净 +20
+        wr = {r["login"]: r for r in compute_board_rows(db_session, PK)["win_rate"]}
+        assert "A" in wr and wr["A"]["sample"] == 2 and wr["A"]["score"] == 1.0
+
+        # 盈亏为正这道闸依旧生效：笔数够（2 笔）但净亏 → 不上榜
+        u2 = _user(db_session, "cfg3@t.co"); _acct(db_session, u2, "B", balance=2000.0)
+        ensure_baselines(db_session, PK, T0)
+        _mk(db_session, u2, "B", 1, 1, win_p=1.0, loss_p=-10.0)   # 1 胜 1 负，净 -9
+        wr2 = {r["login"] for r in compute_board_rows(db_session, PK)["win_rate"]}
+        assert "B" not in wr2
+    finally:
+        save_gamification_settings(db_session, {"min_trades_winrate": 20})
+        db_session.commit(); invalidate_gamification_cache()
 
 
 def test_unphotographed_account_does_not_leak_into_sibling_account(db_session):

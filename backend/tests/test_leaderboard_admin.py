@@ -16,17 +16,35 @@ def test_settings_roundtrip_partial(db_session):
     invalidate_gamification_cache()
     s = admin_get_settings(db=db_session)
     assert s == {"userVisible": False, "leaderboardVisible": False,
-                 "competitionsVisible": False, "minBaselineUsd": 500.0}
+                 "competitionsVisible": False, "minBaselineUsd": 500.0,
+                 "minTradesReturn": 5, "minTradesWinrate": 20}
     admin_patch_settings(GamificationSettingsPatchIn(leaderboardVisible=True), db=db_session)
     invalidate_gamification_cache()
     got = get_gamification_settings(db_session)
     assert got["leaderboard_visible"] is True and got["user_visible"] is False
     assert got["min_baseline_usd"] == 500.0        # 未传字段不动
+    assert got["min_trades_return"] == 5 and got["min_trades_winrate"] == 20
 
 
 def test_min_baseline_validation(db_session):
     with pytest.raises(HTTPException):
         admin_patch_settings(GamificationSettingsPatchIn(minBaselineUsd=0), db=db_session)
+
+
+def test_min_trades_validation(db_session):
+    with pytest.raises(HTTPException):
+        admin_patch_settings(GamificationSettingsPatchIn(minTradesReturn=0), db=db_session)
+    with pytest.raises(HTTPException):
+        admin_patch_settings(GamificationSettingsPatchIn(minTradesWinrate=0), db=db_session)
+
+
+def test_min_trades_roundtrip(db_session):
+    invalidate_gamification_cache()
+    admin_patch_settings(GamificationSettingsPatchIn(minTradesReturn=1, minTradesWinrate=2),
+                          db=db_session)
+    invalidate_gamification_cache()
+    got = get_gamification_settings(db_session)
+    assert got["min_trades_return"] == 1 and got["min_trades_winrate"] == 2
 
 
 def test_admin_preview_ignores_user_gate(db_session):

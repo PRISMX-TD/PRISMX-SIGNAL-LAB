@@ -136,7 +136,15 @@ def compute_board_rows(db, period_key: str) -> dict:
     按当前状态重新过滤，等于回溯改写已封存快照，违反封存不可变的约定。
     """
     from app.services.settings_store import get_gamification_settings
-    min_baseline = float(get_gamification_settings(db).get("min_baseline_usd", 500.0))
+    gset = get_gamification_settings(db)
+    min_baseline = float(gset.get("min_baseline_usd", 500.0))
+    # 入榜笔数门槛：管理员可调（内测期放松、生产期收紧），下限 1——
+    # 设置读到坏值/负值时 max(1, ...) 兜底，绝不能让门槛塌成 0 或负数放空行入榜。
+    # Trade-count gates: admin-adjustable (loose in beta, strict in production),
+    # floored at 1 — a bad/negative setting can never collapse the gate to
+    # zero or negative and let empty rows onto a board.
+    min_trades_return = max(1, int(gset.get("min_trades_return", 5)))
+    min_trades_winrate = max(1, int(gset.get("min_trades_winrate", 20)))
     opted_out = {r[0] for r in db.query(User.id).filter(User.leaderboard_opt_out.is_(True))}
     baselines = db.query(PeriodBaseline).filter(
         PeriodBaseline.period_key == period_key).all()
@@ -154,10 +162,18 @@ def compute_board_rows(db, period_key: str) -> dict:
             sample = len(profits)
             total = sum(profits)
             denom = b.baseline + b.adjust
-            if sample >= 5 and denom >= min_baseline and denom > 0:
+            if sample >= min_trades_return and denom >= min_baseline and denom > 0:
                 ret_rows.append({"userId": uid, "login": lg,
                                  "score": total / denom, "sample": sample})
-            if sample >= 20 and total > 0:
+            # `total > 0`（本期盈利为正）刻意不做成设置项：这是原则，不是门槛。
+            # 高胜率不等于盈利——没有这道闸，榜首可能是一个在亏钱的账户
+            # （比如高胜率、小赢大亏）。笔数门槛可以为了内测松一松，这道闸不行。
+            # `total > 0` (period profit must be positive) is deliberately left
+            # hardcoded, not a setting: it's a principle, not a threshold. A high
+            # win rate doesn't mean profitable — without this gate the board's
+            # top entry could be a net-losing account (many small wins, one big
+            # loss). The count gate can loosen for the beta; this one never does.
+            if sample >= min_trades_winrate and total > 0:
                 wins = sum(1 for p in profits if p > 0)
                 wr_rows.append({"userId": uid, "login": lg,
                                 "score": wins / sample, "sample": sample})

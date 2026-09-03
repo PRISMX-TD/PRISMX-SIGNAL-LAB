@@ -1073,6 +1073,11 @@ export interface GamificationSettings {
   leaderboardVisible: boolean
   competitionsVisible: boolean
   minBaselineUsd: number
+  // 两榜入榜笔数门槛（管理端可调，内测期放松、生产期收紧）。
+  // Trade-count gates for the two boards (admin-adjustable; loose in beta,
+  // strict in production).
+  minTradesReturn: number
+  minTradesWinrate: number
 }
 
 // PATCH /admin/gamification/settings 请求体：全部可选，只改传了的字段。
@@ -1083,6 +1088,8 @@ export interface GamificationSettingsPatch {
   leaderboardVisible?: boolean
   competitionsVisible?: boolean
   minBaselineUsd?: number
+  minTradesReturn?: number
+  minTradesWinrate?: number
 }
 
 // 交易比赛（设计 §1.7/§1.8/§1.9，Phase 3）/ Trading competitions

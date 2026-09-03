@@ -1941,6 +1941,9 @@
     "admin": { "preview": "榜单预览", "leaderboardSwitch": "排行榜用户端可见性",
                "competitionsSwitch": "比赛用户端可见性（Phase 3）",
                "minBaseline": "收益榜最低本金（USD）",
+               "minTradesReturn": "收益榜最低笔数",
+               "minTradesWinrate": "胜率榜最低笔数",
+               "minTradesHint": "内测期可临时调低门槛，方便观察榜单效果；正式对用户开放前请改回默认值（收益榜 5 笔 / 胜率榜 20 笔）。",
                "confirmOpenBoard": "开放后榜单对全体用户可见，确认开放？",
                "pickBoard": "选择榜单", "pickPeriod": "选择周期" }
   },

@@ -221,6 +221,8 @@ _SETTINGS_KEY_MAP = {
     "leaderboard_visible": "leaderboardVisible",
     "competitions_visible": "competitionsVisible",
     "min_baseline_usd": "minBaselineUsd",
+    "min_trades_return": "minTradesReturn",
+    "min_trades_winrate": "minTradesWinrate",
 }
 
 
@@ -256,6 +258,14 @@ def admin_patch_settings(body: GamificationSettingsPatchIn, db: Session = Depend
         if body.minBaselineUsd is None or body.minBaselineUsd <= 0:
             raise HTTPException(400, "最低本金需大于 0 / Minimum baseline must be > 0")
         patch["min_baseline_usd"] = float(body.minBaselineUsd)
+    if "minTradesReturn" in sent:
+        if body.minTradesReturn is None or body.minTradesReturn < 1:
+            raise HTTPException(400, "入榜笔数门槛需至少为 1 / Trade-count gate must be at least 1")
+        patch["min_trades_return"] = int(body.minTradesReturn)
+    if "minTradesWinrate" in sent:
+        if body.minTradesWinrate is None or body.minTradesWinrate < 1:
+            raise HTTPException(400, "入榜笔数门槛需至少为 1 / Trade-count gate must be at least 1")
+        patch["min_trades_winrate"] = int(body.minTradesWinrate)
     if patch:
         save_gamification_settings(db, patch)
         db.commit()

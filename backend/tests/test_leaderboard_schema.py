@@ -59,3 +59,33 @@ def test_settings_new_keys_and_typing(db_session):
     save_gamification_settings(db_session, {"min_baseline_usd": True})
     db_session.commit(); invalidate_gamification_cache()
     assert get_gamification_settings(db_session)["min_baseline_usd"] == 500.0
+
+
+def test_settings_trade_count_gates_typing(db_session):
+    invalidate_gamification_cache()
+    s = get_gamification_settings(db_session)
+    assert s["min_trades_return"] == 5 and isinstance(s["min_trades_return"], int)
+    assert s["min_trades_winrate"] == 20 and isinstance(s["min_trades_winrate"], int)
+    assert GAMIFICATION_DEFAULTS["min_trades_return"] == 5
+    assert GAMIFICATION_DEFAULTS["min_trades_winrate"] == 20
+
+    # 整数覆盖原样往返
+    save_gamification_settings(db_session, {"min_trades_return": 1, "min_trades_winrate": 2})
+    db_session.commit(); invalidate_gamification_cache()
+    s = get_gamification_settings(db_session)
+    assert s["min_trades_return"] == 1 and isinstance(s["min_trades_return"], int)
+    assert s["min_trades_winrate"] == 2 and isinstance(s["min_trades_winrate"], int)
+
+    # bool 冒充数值：int(True) == 1 会悄悄改值，必须回退默认而不是转换
+    save_gamification_settings(db_session, {"min_trades_return": True})
+    db_session.commit(); invalidate_gamification_cache()
+    assert get_gamification_settings(db_session)["min_trades_return"] == 5
+
+    # 负数/垃圾值一律回退默认
+    save_gamification_settings(db_session, {"min_trades_winrate": -3})
+    db_session.commit(); invalidate_gamification_cache()
+    assert get_gamification_settings(db_session)["min_trades_winrate"] == 20
+
+    save_gamification_settings(db_session, {"min_trades_return": "garbage"})
+    db_session.commit(); invalidate_gamification_cache()
+    assert get_gamification_settings(db_session)["min_trades_return"] == 5

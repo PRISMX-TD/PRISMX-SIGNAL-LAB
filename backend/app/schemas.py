@@ -166,6 +166,8 @@ class GamificationSettingsPatchIn(BaseModel):
     leaderboardVisible: bool | None = None
     competitionsVisible: bool | None = None
     minBaselineUsd: float | None = None
+    minTradesReturn: int | None = None
+    minTradesWinrate: int | None = None
 
 
 class CompetitionCreateIn(BaseModel):

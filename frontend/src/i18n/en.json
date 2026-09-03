@@ -1943,6 +1943,9 @@
     "admin": { "preview": "Leaderboard preview", "leaderboardSwitch": "Leaderboard user-facing visibility",
                "competitionsSwitch": "Competitions user-facing visibility (Phase 3)",
                "minBaseline": "Minimum baseline for the return board (USD)",
+               "minTradesReturn": "Minimum trades for the return board",
+               "minTradesWinrate": "Minimum trades for the win rate board",
+               "minTradesHint": "Loosen these during the beta to make the boards observable; restore the defaults (5 for the return board, 20 for the win rate board) before opening them to real users.",
                "confirmOpenBoard": "Once opened, the leaderboard is visible to all users. Confirm opening?",
                "pickBoard": "Pick a board", "pickPeriod": "Pick a period" }
   },

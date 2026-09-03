@@ -194,6 +194,9 @@ export default function GamificationPanel() {
   const [savingLeaderboardVisible, setSavingLeaderboardVisible] = useState(false)
   const [baselineDraft, setBaselineDraft] = useState('')
   const [savingBaseline, setSavingBaseline] = useState(false)
+  const [minTradesReturnDraft, setMinTradesReturnDraft] = useState('')
+  const [minTradesWinrateDraft, setMinTradesWinrateDraft] = useState('')
+  const [savingTradeGates, setSavingTradeGates] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -203,6 +206,8 @@ export default function GamificationPanel() {
         if (!cancelled) {
           setSettings(res)
           setBaselineDraft(String(res.minBaselineUsd))
+          setMinTradesReturnDraft(String(res.minTradesReturn))
+          setMinTradesWinrateDraft(String(res.minTradesWinrate))
         }
       })
       .catch((err) => {
@@ -277,6 +282,48 @@ export default function GamificationPanel() {
       setSettingsError(err instanceof Error ? localizeApiError(err.message) : 'Save failed')
     } finally {
       setSavingBaseline(false)
+    }
+  }
+
+  // 入榜笔数门槛（收益榜/胜率榜各一个），同下限输入框一样的 dirty-gated 保存：
+  // 只在整数 >= 1 时视为合法（后端 400 的边界同这里一致），只把真的改过的字段
+  // 塞进 PATCH——两个字段没必要拆两个按钮，一次 PATCH 只带变更的那些即可。
+  // Trade-count gates for the two boards, same dirty-gated save as the
+  // baseline input: valid only as an integer >= 1 (matches the backend's 400
+  // boundary), and only the fields actually changed go into the PATCH — no
+  // need for two separate buttons since a single PATCH already omits the
+  // untouched one.
+  const minTradesReturnNum = Number(minTradesReturnDraft)
+  const minTradesReturnValid =
+    minTradesReturnDraft.trim() !== '' && Number.isInteger(minTradesReturnNum) && minTradesReturnNum >= 1
+  const minTradesReturnDirty =
+    settings != null && minTradesReturnValid && minTradesReturnNum !== settings.minTradesReturn
+
+  const minTradesWinrateNum = Number(minTradesWinrateDraft)
+  const minTradesWinrateValid =
+    minTradesWinrateDraft.trim() !== '' && Number.isInteger(minTradesWinrateNum) && minTradesWinrateNum >= 1
+  const minTradesWinrateDirty =
+    settings != null && minTradesWinrateValid && minTradesWinrateNum !== settings.minTradesWinrate
+
+  const tradeGatesDirty = minTradesReturnDirty || minTradesWinrateDirty
+  const tradeGatesValid = minTradesReturnValid && minTradesWinrateValid
+
+  const saveTradeGates = async () => {
+    if (!tradeGatesDirty || !tradeGatesValid) return
+    setSavingTradeGates(true)
+    setSettingsError(null)
+    try {
+      const patch: { minTradesReturn?: number; minTradesWinrate?: number } = {}
+      if (minTradesReturnDirty) patch.minTradesReturn = minTradesReturnNum
+      if (minTradesWinrateDirty) patch.minTradesWinrate = minTradesWinrateNum
+      const res = await adminApi.updateGamificationSettings(patch)
+      setSettings(res)
+      setMinTradesReturnDraft(String(res.minTradesReturn))
+      setMinTradesWinrateDraft(String(res.minTradesWinrate))
+    } catch (err) {
+      setSettingsError(err instanceof Error ? localizeApiError(err.message) : 'Save failed')
+    } finally {
+      setSavingTradeGates(false)
     }
   }
 
@@ -422,6 +469,43 @@ export default function GamificationPanel() {
               >
                 {savingBaseline ? t('common.loading') : t('common.save')}
               </button>
+            </div>
+
+            {/* 入榜笔数门槛：内测期放松用，正式面向用户前记得改回默认值（见 hint 文案）。 */}
+            {/* Trade-count board gates: loosen these for the beta, remember to restore
+                the defaults before opening the boards to real users (see the hint copy). */}
+            <div className="flex flex-wrap items-end gap-3 border-t border-white/5 pt-3">
+              <label className="flex flex-col gap-1 text-xs text-neutral-500">
+                {t('leaderboard.admin.minTradesReturn')}
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  className="input w-40"
+                  value={minTradesReturnDraft}
+                  onChange={(e) => setMinTradesReturnDraft(e.target.value)}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-neutral-500">
+                {t('leaderboard.admin.minTradesWinrate')}
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  className="input w-40"
+                  value={minTradesWinrateDraft}
+                  onChange={(e) => setMinTradesWinrateDraft(e.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                className="btn-primary px-4 py-1.5 text-xs disabled:opacity-40"
+                disabled={!tradeGatesDirty || !tradeGatesValid || savingTradeGates}
+                onClick={saveTradeGates}
+              >
+                {savingTradeGates ? t('common.loading') : t('common.save')}
+              </button>
+              <p className="w-full text-xs text-neutral-500">{t('leaderboard.admin.minTradesHint')}</p>
             </div>
           </div>
         )}

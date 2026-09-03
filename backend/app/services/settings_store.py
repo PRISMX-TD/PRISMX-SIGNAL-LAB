@@ -829,11 +829,33 @@ def save_account_type_settings(db, data: dict) -> None:
 
 
 # ---- 游戏化设置独立缓存（与其它设置分开） ----
+# min_trades_return / min_trades_winrate：两块榜的入榜笔数门槛，内测期改松、
+# 生产期改严，用同一套设置机制。默认值就是原来硬编码的数字，含义不变：
+#   ≥5（收益榜）——挡掉"一笔运气单就冲上榜"，一笔交易不足以定义一个收益率；
+#   ≥20（胜率榜）——挡掉"4 笔打 3 中=75%"这种小样本胜率冲上榜首。
+# 内测期这两个数字定得太严，平台刚跑起来根本没人凑得够笔数，导致榜单永远
+# 空、功能形同没上线；开放给管理员调整后，内测可以先调到 1 观察效果，正式
+# 面向用户前记得调回默认值。
+#
+# min_trades_return / min_trades_winrate: the trade-count gate for each board.
+# Loose during the admin beta, strict in production, both via this same
+# settings mechanism. Defaults equal the numbers that used to be hardcoded,
+# same meaning:
+#   >=5 (return board) — stops a single lucky trade from defining a return
+#   figure;
+#   >=20 (win-rate board) — stops a small sample like "3 wins out of 4 = 75%"
+#   from topping the win-rate board.
+# During the beta these were too strict for the low trading volume to ever
+# populate a board, making the feature unobservable. Now admin-adjustable —
+# loosen to 1 to observe during beta, remember to restore the defaults before
+# opening the boards to real users.
 GAMIFICATION_DEFAULTS: dict = {
     "user_visible": False,
     "leaderboard_visible": False,
     "competitions_visible": False,
     "min_baseline_usd": 500.0,
+    "min_trades_return": 5,
+    "min_trades_winrate": 20,
 }
 
 _gamification_cache: dict = {}
@@ -848,8 +870,11 @@ def invalidate_gamification_cache() -> None:
 
 def _load_gamification_from_db(db) -> dict:
     """从 DB 读游戏化设置 JSON，缺失的 key 回落到默认值。
-    按默认值的类型收敛每个键：布尔键用 bool()，数值键用 float()——
-    数值键坏值（无法转 float）回退默认，宁缺勿错，不让一个脏值把整组设置读挂。"""
+    按默认值的类型收敛每个键：布尔键用 bool()，整数键用 int()，浮点键用 float()——
+    数值键坏值（无法转换）回退默认，宁缺勿错，不让一个脏值把整组设置读挂。
+    ⚠ isinstance(True, int) 为 True，所以 bool 分支必须排在 int 分支前面；
+    int 分支同样要像 float 分支那样显式拦一次 bool，否则 JSON 里的 true 会
+    被 int() 悄悄变成 1。"""
     data = dict(GAMIFICATION_DEFAULTS)
     row = db.query(PlatformSetting).filter(PlatformSetting.key == "gamification").first()
     if row:
@@ -861,6 +886,20 @@ def _load_gamification_from_db(db) -> dict:
                         continue
                     if isinstance(default, bool):
                         data[k] = bool(stored[k])
+                    elif isinstance(default, int):
+                        if isinstance(stored[k], bool):
+                            data[k] = default   # bool 冒充数值：int(True)==1 会悄悄改值，必须先拦
+                        else:
+                            try:
+                                parsed = int(stored[k])
+                                # 目前所有整数键都是入榜笔数门槛，语义上不允许 <1；
+                                # 负数/零一律当坏值处理，回退默认。
+                                # Every int key today is a trade-count gate, which
+                                # is meaningless below 1; treat negative/zero as a
+                                # bad value and fall back to the default too.
+                                data[k] = parsed if parsed >= 1 else default
+                            except (TypeError, ValueError):
+                                data[k] = default   # 坏值回退默认，宁缺勿错
                     elif isinstance(default, float):
                         if isinstance(stored[k], bool):
                             data[k] = default   # bool 冒充数值：float(True)==1.0 会悄悄改值，必须先拦
