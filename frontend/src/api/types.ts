@@ -512,6 +512,12 @@ export interface MT5Account {
   // Separate from `online`: offline means wait, this means act.
   needsReverify?: boolean
   revokedReason?: string | null
+  // 账户类型：0=模拟，1=竞赛，2=实盘，null/undefined=尚未判定。消费方须把
+  // 未知当"非实盘"处理，不能默认放行（例如比赛报名选择器）。
+  // Account trade mode: 0=demo, 1=contest, 2=real, null/undefined=not yet
+  // determined. Consumers must treat unknown as "not real", never
+  // default-allow (e.g. the competition registration picker).
+  tradeMode?: number | null
 }
 
 export interface Quote {

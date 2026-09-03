@@ -37,6 +37,15 @@ import type {
 // Both pages define this locally rather than sharing a module for one line.
 const fmtScorePct = (v: number): string => `${(v * 100).toFixed(1)}%`
 
+// tradeMode: 0=模拟, 1=竞赛, 2=实盘, null/undefined=尚未判定（见后端
+// services/account_type.py）。报名只认实盘，未判定的一律当"非实盘"处理，
+// 不能默认放行。
+// tradeMode: 0=demo, 1=contest, 2=real, null/undefined=not yet determined
+// (see backend services/account_type.py). Registration only accepts real
+// accounts; an undetermined value is treated as "not real", never
+// default-allowed.
+const isRealAccount = (a: MT5Account): boolean => a.tradeMode === 2
+
 const LIST_GROUPS: Array<keyof CompetitionListGrouped> = ['upcoming', 'running', 'finished']
 
 // 状态 tag 的取值集合与 i18n competition.status 的键一一对应：upcoming/running/
@@ -229,15 +238,18 @@ function BoardTable({
 // 参赛账户选择弹窗：复用 SlideOrderModal/ConfirmModal 的 portal-to-body + 玻璃卡
 // 居中弹窗模式（原因同 ConfirmModal 顶部注释——本页调用点本身就在 .glass 卡片
 // 内部，不 portal 会被 backdrop-filter 截断）。列表来自 useLive().accounts（见
-// DetailView 的说明），不做 trade_mode 过滤，选错的账户由后端 400 拒绝并把
-// 原因回显给用户。
+// DetailView 的说明），调用方（DetailView）已经用 isRealAccount 过滤过，这里
+// 收到的都是实盘账户；后端仍会独立复核一遍并在选错时用 400 拒绝，前端过滤只是
+// 少让用户走一趟弯路，不是唯一防线。
 // Entry-account picker: reuses the SlideOrderModal/ConfirmModal
 // portal-to-body + centered glass-card modal pattern (same reason as
 // ConfirmModal's top comment — this page's call site sits inside a .glass
 // card, and skipping the portal would get clipped by its backdrop-filter).
-// The list comes from useLive().accounts (see DetailView's comment); it is
-// not filtered by trade_mode — an ineligible pick is rejected by the backend
-// with a 400 whose reason is echoed back to the user.
+// The list comes from useLive().accounts (see DetailView's comment); the
+// caller (DetailView) has already filtered it with isRealAccount, so
+// everything here is a real account. The backend still validates
+// independently and rejects an ineligible pick with a 400 — this client-side
+// filter just saves the user a wasted round trip, it isn't the only guard.
 function AccountPickerModal({
   accounts,
   busy,
@@ -300,18 +312,20 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
   // 账户来源用 useLive().accounts 而不是另发一次 accountApi.list()：这份状态
   // 已经在 LiveProvider（Layout 挂的）里全站共享、随桥接心跳保持新鲜，
   // SlideOrderModal 的账户选择器就是这么拿的——同一个先例，这里不重新造。
-  // GET /bridge/accounts 的响应（MT5AccountOut）不带 trade_mode 字段，前端
-  // 因此无法本地过滤"仅实盘账户"；这仅是本页的限制，不影响后端校验（见上面
-  // AccountPickerModal 的说明）。
+  // GET /bridge/accounts 的响应（MT5AccountOut）现在带 tradeMode 字段，下面
+  // 用 isRealAccount 在本地把非实盘账户过滤掉；后端仍然独立复核（见
+  // AccountPickerModal 的说明），前端过滤只是不再把模拟/竞赛账户列出来让用户
+  // 白选一次。
   // Accounts come from useLive().accounts rather than a second
   // accountApi.list() call: that state is already shared app-wide via
   // LiveProvider (mounted by Layout) and kept fresh by the bridge heartbeat —
   // SlideOrderModal's own account switcher sources it the same way, so this
   // follows the same precedent rather than reinventing it. GET
-  // /bridge/accounts's response (MT5AccountOut) carries no trade_mode field,
-  // so the frontend cannot filter to "real accounts only" locally; that's a
-  // display-side limitation only and doesn't weaken backend validation (see
-  // AccountPickerModal's comment above).
+  // /bridge/accounts's response (MT5AccountOut) now carries a tradeMode
+  // field, filtered locally below via isRealAccount. The backend still
+  // validates independently (see AccountPickerModal's comment) — the
+  // client-side filter just keeps demo/contest accounts from being listed as
+  // pickable in the first place.
   const { accounts } = useLive()
   const [detail, setDetail] = useState<CompetitionDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -388,12 +402,14 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
   const tagKey = statusTagKey(detail, now)
   const rState = regState(detail, now)
   const enteredLogins = new Set(detail.myEntries.map((e) => e.login))
-  // 只列本人已连接、且这场比赛还没报过的账户——报过的再选一遍，后端会幂等
-  // 返回原条目而不是报错，但前端不必让用户白走一趟。
-  // Only accounts already connected and not yet entered in this competition;
-  // re-picking an entered one would just get the same row back idempotently
-  // from the backend, but there's no reason to let the user walk that path.
-  const availableAccounts = accounts.filter((a) => !enteredLogins.has(a.login))
+  // 只列本人已连接、是实盘、且这场比赛还没报过的账户——报过的再选一遍，后端会
+  // 幂等返回原条目而不是报错，但前端不必让用户白走一趟；非实盘账户报名注定
+  // 被后端拒绝，同样不必列出来。
+  // Only accounts that are connected, real-money, and not yet entered in this
+  // competition: re-picking an entered one would just get the same row back
+  // idempotently from the backend, and a non-real account would be rejected
+  // by the backend anyway — neither is worth listing.
+  const availableAccounts = accounts.filter((a) => isRealAccount(a) && !enteredLogins.has(a.login))
   const canShowRegisterAction = detail.enrollment === 'signup'
   const boardHeading = detail.status === 'settled' ? t('competition.finalBoard') : t('competition.liveBoard')
 
@@ -495,30 +511,33 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
       )}
 
       {/* 报名区：仅 signup 赛显示——auto 参赛没有用户可操作的动作，整块连提示
-          都不出现。窗口内（rState==='open'）细分三态，靠 availableAccounts 是否
-          为空、以及"是不是因为已经报完"来互斥：
+          都不出现。窗口内（rState==='open'）细分三态，靠 availableAccounts（已
+          先过滤成"实盘且未报过"）是否为空、以及"是不是因为已经报完"来互斥：
             1) availableAccounts 非空 → 给按钮；
-            2) availableAccounts 为空且 enteredLogins 非空 → 已把能报的都报了，
-               显示"已报名"标记；
-            3) availableAccounts 为空且 enteredLogins 也空 → 唯一成因是这个用户
-               压根没连接任何账户（见 availableAccounts = accounts.filter(...)
-               的说明），此时"已报名"是假话——之前这里曾经把它和 2) 混在一起
-               判，对零账户用户显示"已报名"。改成指向绑定账户的提示。
+            2) availableAccounts 为空且 enteredLogins 非空 → 能报的实盘账户都报
+               了，显示"已报名"标记；
+            3) availableAccounts 为空且 enteredLogins 也空 → 这个用户要么压根
+               没连接任何账户，要么连了但没有一个是实盘——两种情况下"已报名"
+               都是假话（这曾经和 2）混判，对零账户用户显示"已报名"）。用
+               accounts.length 是否为零区分这两种子情况，分别指向不同文案：
+               零账户复用 noAccounts，有账户但非实盘用新的 noRealAccounts，
+               两者都链到绑定页。
           Registration block: signup competitions only — auto-enrollment has no
           user action, so the whole block (including hints) is omitted. Inside
           the open window (rState==='open') there are three mutually exclusive
-          states, keyed off whether availableAccounts is empty and, if so,
-          whether that's because everything eligible is already entered:
+          states, keyed off whether availableAccounts (already filtered to
+          "real and not yet entered") is empty and, if so, whether that's
+          because everything eligible is already entered:
             1) availableAccounts non-empty → the register button;
-            2) empty AND enteredLogins non-empty → every connected account is
-               already entered, show the "registered" tag;
-            3) empty AND enteredLogins also empty → the only way both are
-               empty at once is this user has no connected accounts at all
-               (see the availableAccounts = accounts.filter(...) comment
-               above) — "registered" would be a lie here (this used to be
-               folded into case 2, wrongly showing "registered" to a
-               zero-account user). Shown instead as a hint pointing at
-               account binding. */}
+            2) empty AND enteredLogins non-empty → every eligible real account
+               is already entered, show the "registered" tag;
+            3) empty AND enteredLogins also empty → this user either has no
+               connected accounts at all, or has some but none real — in
+               both cases "registered" would be a lie (this used to be folded
+               into case 2, wrongly showing "registered" to a zero-account
+               user). accounts.length === 0 distinguishes the two sub-cases:
+               zero accounts reuses noAccounts, accounts-but-none-real uses
+               the new noRealAccounts — both link to the bind page. */}
       {canShowRegisterAction && (
         <div className="card glass p-5">
           {rState === 'notOpen' && <p className="text-sm text-neutral-400">{t('competition.regNotOpen')}</p>}
@@ -539,7 +558,9 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
               <span className="tag bg-prism-600/20 text-[11px] text-prism-300">{t('competition.registered')}</span>
             ) : (
               <div>
-                <p className="text-sm text-neutral-400">{t('competition.noAccounts')}</p>
+                <p className="text-sm text-neutral-400">
+                  {accounts.length === 0 ? t('competition.noAccounts') : t('competition.noRealAccounts')}
+                </p>
                 <Link
                   to="/bind"
                   className="mt-2 inline-block text-xs text-prism-300 transition hover:text-prism-200"

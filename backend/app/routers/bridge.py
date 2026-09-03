@@ -1097,6 +1097,7 @@ def list_accounts(user: User = Depends(get_current_user), db: Session = Depends(
             lastHeartbeat=r.last_heartbeat,
             needsReverify=is_revoked(r),
             revokedReason=r.revoked_reason,
+            tradeMode=r.trade_mode,
         )
         for r in rows
     ]
