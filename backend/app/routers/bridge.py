@@ -381,15 +381,23 @@ def _upsert_account(
     if acc.tradeMode is not None:
         row.trade_mode = acc.tradeMode
     elif row.trade_mode is None:
-        # 旧版桥接不报 tradeMode，且账号还没判定过：按组名/服务器名兜底判一次
-        # （见 classify_account）。这里能拿到组名的账号很少——桥接载荷本身不带
-        # MT5 组名，这个分支实际主要靠服务器名白名单命中；判不出来仍是 None，
-        # 等下一轮 gamification 回填或运维补白名单。
+        # 旧版桥接不报 tradeMode，且账号还没判定过：按组名/登录号段/服务器名
+        # 依次兜底判一次（见 classify_account）。这里能拿到组名的账号很少——
+        # 桥接载荷本身不带 MT5 组名，这个分支实际主要靠 server_login_rules
+        # 的登录号段规则命中（如 Make Capital 一台服务器混跑模拟与实盘，靠
+        # 登录号前几位区分）；`real_server_names` 整服务器白名单默认为空，
+        # 只在券商真把模拟/实盘分到不同服务器时才配置。判不出来仍是 None，
+        # 等下一轮 gamification 回填或运维补规则。
         # Older bridge omits tradeMode and the account has never been
-        # classified: try the group/server fallback (see classify_account).
-        # The bridge payload carries no MT5 group, so in practice this branch
-        # is driven by the server-name whitelist; still None when nothing
-        # matches, left for the next gamification backfill pass or an ops fix.
+        # classified: try the group / login-prefix / server fallback chain
+        # (see classify_account). The bridge payload carries no MT5 group, so
+        # in practice this branch is driven by the server_login_rules
+        # login-prefix rules (e.g. Make Capital mixes demo and live on one
+        # server, told apart by login prefix); the whole-server
+        # `real_server_names` whitelist defaults to empty and only applies to
+        # brokers that genuinely segregate demo/live onto separate servers.
+        # Still None when nothing matches, left for the next gamification
+        # backfill pass or an ops fix.
         settings = get_account_type_settings(db)
         row.trade_mode = classify_account(
             row.mt5_group, acc.server or row.server, acc.login, settings

@@ -133,6 +133,32 @@ def test_classify_login_unconfigured_server_is_unknown():
     assert classify_login("SomeOtherBroker-Live", "600345", _SETTINGS) is None
 
 
+def test_classify_login_longest_prefix_wins_across_lists():
+    """最长前缀命中跨列表比较，不是"先在哪个列表命中就用哪个"——`real` 里的
+    "6" 和 `demo` 里的 "60" 同时能匹配 "600345" 时，更长的 "60"（demo）必须赢，
+    即便它在字典/循环顺序上排在 real 前缀检查之后。这条 tie-break 是从
+    `classify_group` 搬过来的同一套逻辑，最容易在将来被人不小心改成
+    "谁先命中用谁"，需要专门钉住。
+
+    Longest-prefix-wins must compare across all three lists, not just take
+    whichever list happens to match first. With real=["6"] and demo=["60"],
+    login "600345" must classify DEMO — the longer prefix wins even though it
+    isn't the one iterated first. This tie-break mirrors classify_group and is
+    the part most likely to get quietly broken by a future edit.
+    """
+    settings = {
+        "server_login_rules": [
+            {
+                "server": "MakeCapital-Live",
+                "real_login_prefixes": ["6"],
+                "demo_login_prefixes": ["60"],
+                "contest_login_prefixes": [],
+            },
+        ],
+    }
+    assert classify_login("MakeCapital-Live", "600345", settings) == DEMO
+
+
 def test_classify_login_empty_or_none_is_unknown():
     assert classify_login(None, "600345", _SETTINGS) is None
     assert classify_login("MakeCapital-Live", None, _SETTINGS) is None

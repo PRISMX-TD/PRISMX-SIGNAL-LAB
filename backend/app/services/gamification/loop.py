@@ -21,7 +21,11 @@ SLOW_PASS_WARN_SECONDS = 120
 
 def backfill_account_trade_modes(db) -> int:
     """把还没判定过的账号补上 trade_mode：组名优先（gateway 通道权威），
-    没有组名或组名判不出来时按服务器名兜底（桥接通道，见 classify_account）。
+    没有组名或组名判不出来时依次按登录号段、服务器名兜底（桥接通道，见
+    classify_account）。桥接账号实际主要靠 `server_login_rules` 的登录号段
+    规则命中——比如 Make Capital 一台服务器混跑模拟与实盘，靠登录号前几位
+    区分；`real_server_names` 整服务器白名单默认为空，只在券商真把模拟/
+    实盘分到不同服务器时才配置。
 
     **为什么要放宽到"组名 OR 服务器名非空"**：老版本桥接客户端不上报组名，
     只上报 server——只筛 `mt5_group.isnot(None)` 会把这些账号永远排除在这轮
@@ -29,8 +33,13 @@ def backfill_account_trade_modes(db) -> int:
     None，行不受影响。
 
     Backfill accounts still missing trade_mode: group name first (gateway
-    channel, authoritative), server name as fallback when there's no group or
-    the group doesn't classify (bridge channel — see classify_account). Widened
+    channel, authoritative), then login-prefix, then server name as fallback
+    when there's no group or the group doesn't classify (bridge channel — see
+    classify_account). In practice bridge accounts are driven by the
+    server_login_rules login-prefix rules — e.g. Make Capital mixes demo and
+    live on one server, told apart by login prefix; the whole-server
+    `real_server_names` whitelist defaults to empty and only applies to
+    brokers that genuinely segregate demo/live onto separate servers. Widened
     to "group OR server non-null" because older bridge clients report no group
     at all; classify_account still returns None for anything it can't place.
     """
