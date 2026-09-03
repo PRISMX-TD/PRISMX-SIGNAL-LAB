@@ -7,7 +7,7 @@
 能解析的自然周/月格式。
 """
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
@@ -241,8 +241,19 @@ def auto_enroll(db, comp: Competition, now: datetime) -> int:
     return enrolled
 
 
-def settle_competition(db, comp: Competition, admin_id: str) -> dict:
-    """终审（设计 §1.7/§1.9，Phase 3 Task 4）：结算不可重跑，一切以 status 为闸。
+def settle_competition(db, comp: Competition, admin_id: str,
+                        now: datetime | None = None) -> dict:
+    """终审（设计 §1.7/§1.9，Phase 3 Task 4；§5.3 宽限期，Task F）：结算不可重跑，
+    一切以 status 为闸。
+
+    §5.3：比赛结束（`ends_at`，计分上界）后 24 小时内不可终审——留出宽限期让
+    迟到的平仓（比如比赛结束时仍持仓、随后才平的单）能被 `_resolved_in_period`
+    收进最后一次快照。宽限期从 `ends_at` 起算，不是从 status 被人工推到
+    "ended" 那一刻起算：管理端状态推进是人工操作，可能早于/晚于 ends_at，
+    只有 ends_at 才是 §5.3 里定义的计分截止点。
+    Grace period counts from `ends_at` (the scoring upper bound per §5.3), not
+    from whenever an admin manually advances status to "ended" — the two can
+    diverge, and only `ends_at` is the cutoff the spec defines.
 
     终审前先刷新一遍本场比赛的快照（`_snapshot_one_comp`，与每小时循环
     `snapshot_competitions` 共用同一份实现）：最近一次落盘的快照最长可能有一小
@@ -265,6 +276,15 @@ def settle_competition(db, comp: Competition, admin_id: str) -> dict:
         raise HTTPException(
             status_code=400,
             detail="仅可终审已结束的比赛 / Only ended competitions can be settled")
+
+    now = _aware(now) or datetime.now(timezone.utc)
+    grace_until = _aware(comp.ends_at) + timedelta(hours=24)
+    if now < grace_until:
+        raise HTTPException(
+            status_code=400,
+            detail="比赛结束后需等待 24 小时方可终审，以收齐迟到的平仓 / "
+                    "Settlement opens 24 hours after the competition ends, "
+                    "so late closes are counted")
 
     rows = _snapshot_one_comp(db, comp)   # 先落定最新名次，再读——见上方 docstring
     by_login = {p.mt5_login: p for p in

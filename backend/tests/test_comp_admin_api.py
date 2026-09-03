@@ -429,7 +429,12 @@ def test_patch_participant_404_when_missing(db_session):
 
 def test_settle_endpoint_calls_through(db_session):
     admin = _admin(db_session)
-    comp = _comp(db_session, status="ended")
+    # settle_competition (§5.3) now requires now >= ends_at + 24h; this test
+    # calls through with the real clock, so ends_at must sit safely in the
+    # past — starts_at follows suit purely to keep starts_at < ends_at.
+    past_ends = T0 - timedelta(days=100)
+    comp = _comp(db_session, status="ended",
+                 starts_at=past_ends - timedelta(days=7), ends_at=past_ends)
     result = admin_settle_competition(comp.id, db=db_session, admin=admin)
     assert result["ranked"] == 0
     db_session.refresh(comp)

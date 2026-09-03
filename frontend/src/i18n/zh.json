@@ -2005,7 +2005,8 @@
       "restore": "恢复资格",
       "disqualifyReason": "取消资格原因",
       "settle": "终审",
-      "settleConfirm": "终审后名次永久定格并自动发奖，确认？"
+      "settleConfirm": "终审后名次永久定格并自动发奖，确认？",
+      "settleWait": "结束后 24 小时内不可终审（等待迟到平仓入账）"
     }
   }
 }

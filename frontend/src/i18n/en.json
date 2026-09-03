@@ -2007,7 +2007,8 @@
       "restore": "Restore",
       "disqualifyReason": "Disqualification reason",
       "settle": "Settle",
-      "settleConfirm": "Settlement is permanent — final ranks lock in and prizes are awarded automatically. Confirm?"
+      "settleConfirm": "Settlement is permanent — final ranks lock in and prizes are awarded automatically. Confirm?",
+      "settleWait": "Settlement opens 24 h after the end time (late closes are still arriving)"
     }
   }
 }

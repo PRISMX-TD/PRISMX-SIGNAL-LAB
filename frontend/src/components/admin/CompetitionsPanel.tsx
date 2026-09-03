@@ -494,16 +494,40 @@ export default function CompetitionsPanel() {
                                 : t(`competition.admin.advance.${ADVANCE_LABEL_KEY[c.status]}`)}
                             </button>
                           )}
-                          {c.status === 'ended' && (
-                            <button
-                              type="button"
-                              className="btn-primary whitespace-nowrap px-2.5 py-1 text-[11px] disabled:opacity-40"
-                              disabled={settlingId === c.id}
-                              onClick={() => settle(c)}
-                            >
-                              {settlingId === c.id ? t('common.loading') : t('competition.admin.settle')}
-                            </button>
-                          )}
+                          {c.status === 'ended' && (() => {
+                            // §5.3 宽限期：结束（endsAt）后 24 小时内前端也把按钮禁掉——
+                            // 真正的闸在后端 settle_competition，这里只是不让管理员点了
+                            // 白等一个必然 400。settleOpensAt 算不出来（endsAt 缺失，理论
+                            // 上不会发生，ended 比赛必有 endsAt）时不拦，交给后端兜底。
+                            // §5.3 grace period: also disable the button client-side for
+                            // 24h after endsAt — the real gate is settle_competition on the
+                            // backend, this just avoids a click that's guaranteed to 400.
+                            // If settleOpensAt can't be computed (missing endsAt, shouldn't
+                            // happen for an ended competition) don't block; the backend
+                            // still enforces it.
+                            const settleOpensAt = c.endsAt
+                              ? new Date(c.endsAt).getTime() + 24 * 60 * 60 * 1000
+                              : null
+                            const waiting = settleOpensAt != null && Date.now() < settleOpensAt
+                            return (
+                              <span className="inline-flex items-center gap-1.5">
+                                {waiting && (
+                                  <span className="text-[10px] text-neutral-500">
+                                    {t('competition.admin.settleWait')}
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  className="btn-primary whitespace-nowrap px-2.5 py-1 text-[11px] disabled:opacity-40"
+                                  disabled={settlingId === c.id || waiting}
+                                  title={waiting ? t('competition.admin.settleWait') : undefined}
+                                  onClick={() => settle(c)}
+                                >
+                                  {settlingId === c.id ? t('common.loading') : t('competition.admin.settle')}
+                                </button>
+                              </span>
+                            )
+                          })()}
                         </div>
                       </td>
                     </tr>
