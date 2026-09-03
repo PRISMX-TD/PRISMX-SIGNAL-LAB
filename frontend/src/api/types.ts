@@ -1141,12 +1141,54 @@ export interface LeaderboardGates {
   minBaselineUsd: number
 }
 
+// 观众本期未上榜但已拍过基线时的进度块（多账户取本期已判定整仓数最多的
+// 那个）；本期从未拍过基线（未参与/未开实盘账户）时为 null。
+// The viewer's progress block when unranked this period but with at least
+// one account baseline taken (with multiple accounts, the one with the most
+// resolved positions this period); null when no baseline was ever taken
+// this period (didn't participate / no real account yet).
+export interface LeaderboardProgress {
+  login: string
+  sample: number
+  baselineUsd: number
+  minTrades: number
+  minBaselineUsd: number
+}
+
+// 上期冠军（领奖台/空榜提示用）——上一个自然周/月的第一名，displayName 已
+// 按同一套打码规则处理。比赛榜（period_key 形如 comp:<id>）没有"上一期"概念，
+// 恒为 null。
+// Previous period's #1 (used by the podium / empty-state hint) — the prior
+// natural week/month's rank-1 row, displayName masked by the same rules. A
+// competition board (period_key like comp:<id>) has no "previous period"
+// concept and this is always null there.
+export interface LeaderboardPreviousWinner {
+  displayName: string
+  score: number
+}
+
 export interface LeaderboardPayload {
   board: string
   periodKey: string
   rows: LeaderboardRow[]
-  me: { rank: number; score: number; sample: number } | null
+  me: { rank: number; score: number; sample: number; login: string } | null
+  progress?: LeaderboardProgress | null
+  previousWinner?: LeaderboardPreviousWinner | null
   gates: LeaderboardGates
+  // 周期边界/封存时间：只对能被自然周/月 key 解析出边界的榜单出现——比赛
+  // 详情页复用同一个响应形状，其 period_key（comp:<id>）解析不了边界，
+  // 三个字段整段缺席，而不是 null。
+  // Period bounds / seal time: present only for a board whose period key
+  // resolves to natural week/month bounds — the competition detail page
+  // reuses this same response shape, and its period_key (comp:<id>) has no
+  // bounds to derive, so the three fields are absent entirely, not null.
+  periodStart?: string
+  periodEnd?: string
+  sealAt?: string
+  // 上次快照写入时间——快照为空（还没人上榜）时没有可取的时间，缺席。
+  // When the snapshot was last written — absent when there are no rows to
+  // take a time from (nobody has qualified yet).
+  snapshotAt?: string
 }
 
 // 游戏化设置组（管理端，GET/PATCH /admin/gamification/settings）。

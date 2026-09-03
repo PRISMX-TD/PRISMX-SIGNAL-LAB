@@ -46,7 +46,9 @@ interface MaterialDef {
   seal?: string
 }
 
-const MAT: Record<GamificationBadgeRarity, MaterialDef> = {
+// exported so RankCoin.tsx can borrow the rim tuples for name-coins without
+// re-declaring the same color values a second time.
+export const MAT: Record<GamificationBadgeRarity, MaterialDef> = {
   common:    { name:'石墨',       rim:['#B8BBC4','#73767F','#40434B'], field:['#1D1D25','#0E0E13'], L:'#DEE0E6', D:'#5A5D66', H:'#F6F7FA', tick:'#3A3D45', inlay:null },
   rare:      { name:'银',         rim:['#FFFFFF','#BCC1CC','#6C7282'], field:['#1F2028','#0F1015'], L:'#F8F9FC', D:'#7A8090', H:'#FFFFFF', tick:'#4A505E', inlay:'#D5D9E2' },
   epic:      { name:'黑曜石镶金', rim:['#4C4C5A','#24242C','#0F0F13'], field:['#1A1A22','#0D0D11'], L:'#F0D38A', D:'#8A6A2C', H:'#FFF1C2', tick:'#5A4A2A', inlay:'#D2B06A' },

@@ -6,18 +6,18 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings
 from app.core.rate_limit import limiter
-from app.models import LeaderboardSnapshot, User, UserBadge, UserTask
+from app.models import LeaderboardSnapshot, PeriodBaseline, User, UserBadge, UserTask
 from app.schemas import GamificationSettingsPatchIn, VisibilityPatchIn
 from app.services.deps import get_current_user, get_db
 from app.services.gamification import (
     BADGES, GROUPS, LEVEL_TITLES, compute_comprehensive_stats, condition_states,
     judge_and_award_badges, judge_and_record_conditions, level_of)
 from app.services.gamification import identity, periods
-from app.services.gamification.boards import board_gates
+from app.services.gamification.boards import _resolved_in_period, board_gates
 from app.services.gamification.conditions import WINRATE_CONDITIONS
 from app.services.settings_store import (
     get_gamification_settings, invalidate_gamification_cache, save_gamification_settings)
@@ -137,16 +137,108 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
     my_rows = [r for r in all_rows if r.user_id == viewer.id]
     if my_rows:
         best = min(my_rows, key=lambda r: r.rank)
-        me = {"rank": best.rank, "score": best.score, "sample": best.sample}
+        me = {"rank": best.rank, "score": best.score, "sample": best.sample,
+              "login": best.mt5_login}
 
-    return {
+    # 周期边界/封存时间：只对能被 `period_bounds` 解析的自然周/月 key 求值——
+    # 比赛详情页复用的 period_key 是 `comp:<id>`，解析不了，此时三个字段全部
+    # 省略（前端按 optional 处理），而不是让整个 payload 构造抛错。
+    # Period bounds / seal time: only computed for keys `period_bounds` can
+    # parse (natural week/month). The competition detail page reuses this
+    # function with a `comp:<id>` key, which it can't parse — the three
+    # fields are simply omitted then (the frontend treats them as optional)
+    # rather than the whole payload build throwing.
+    period_start = period_end = seal_at = None
+    if _PERIOD_KEY_RE.match(period_key):
+        period_start, period_end = periods.period_bounds(period_key)
+        seal_at = period_end + timedelta(hours=periods.RECOMPUTE_GRACE_HOURS)
+
+    # snapshotAt——「上次刷新」：快照行本身没有单独的 created_at/updated_at
+    # 字段，`computed_at` 就是它（每次 `snapshot_boards` 重算都先删后插，
+    # 所以 computed_at 天然等于"这批快照最后一次写入的时间"）。没有行时
+    # （空榜）没有时间可取，留 None，前端按 optional 处理。
+    # snapshotAt ("last refreshed"): the snapshot rows carry no separate
+    # created_at/updated_at column — `computed_at` fills that role (each
+    # `snapshot_boards` recompute deletes-then-inserts, so computed_at is
+    # already "when this batch of snapshot rows was last written"). With no
+    # rows (an empty board) there is nothing to take a time from; left None,
+    # the frontend treats it as optional.
+    snapshot_at = max((r.computed_at for r in all_rows if r.computed_at), default=None)
+
+    # 上期冠军：previous_period_key 对 comp:<id> 这类它不认识的 key 返回
+    # None，天然跳过——不需要额外的 guard。
+    # Previous winner: previous_period_key returns None for keys it doesn't
+    # recognize (like comp:<id>), which naturally skips this — no extra
+    # guard needed.
+    previous_winner = None
+    prev_key = periods.previous_period_key(period_key)
+    if prev_key:
+        prev_row = (db.query(LeaderboardSnapshot)
+                      .filter(LeaderboardSnapshot.board == board,
+                              LeaderboardSnapshot.period_key == prev_key,
+                              LeaderboardSnapshot.rank == 1)
+                      .first())
+        if prev_row:
+            pu = db.query(User).filter(User.id == prev_row.user_id).first()
+            previous_winner = {
+                "displayName": identity.display_name(
+                    pu.nickname if pu else None, pu.email if pu else None,
+                    bool(pu.nickname_public) if pu else False),
+                "score": prev_row.score,
+            }
+
+    # progress：观众本期未上榜（me is None）但在本期至少拍过一个账户的基线——
+    # 只对能解析出 period_start/period_end 的自然周/月 key 算（同上面的
+    # guard 理由，comp:<id> 传不进 `_resolved_in_period` 的 bounds 参数）。
+    # 多账户取"本期已判定整仓数最多"的那个，与榜单计算同一个
+    # `_resolved_in_period`，口径不会分叉。
+    # progress: the viewer is unranked this period (me is None) but has
+    # taken at least one account baseline this period — only computed for a
+    # natural week/month key whose bounds we could parse (same guard reason
+    # as above; a comp:<id> key has no bounds to hand `_resolved_in_period`).
+    # With multiple accounts, picks the one with the most resolved positions
+    # this period, using the same `_resolved_in_period` the board itself
+    # uses so the two never diverge.
+    progress = None
+    if me is None and period_start is not None:
+        baseline_rows = (db.query(PeriodBaseline)
+                            .filter(PeriodBaseline.user_id == viewer.id,
+                                    PeriodBaseline.period_key == period_key)
+                            .all())
+        if baseline_rows:
+            logins = {b.mt5_login for b in baseline_rows}
+            taken_at_by_login = {b.mt5_login: b.taken_at for b in baseline_rows}
+            profits_by_login = _resolved_in_period(
+                db, viewer.id, logins, period_key, taken_at_by_login,
+                bounds=(period_start, period_end))
+            best = max(baseline_rows,
+                       key=lambda b: len(profits_by_login.get(b.mt5_login, [])))
+            progress = {
+                "login": best.mt5_login,
+                "sample": len(profits_by_login.get(best.mt5_login, [])),
+                "baselineUsd": best.baseline + best.adjust,
+                "minTrades": (gates["min_trades_return"] if board == "return_pct"
+                              else gates["min_trades_winrate"]),
+                "minBaselineUsd": gates["min_baseline_usd"],
+            }
+
+    payload = {
         "board": board, "periodKey": period_key, "rows": rows, "me": me,
+        "progress": progress, "previousWinner": previous_winner,
         "gates": {
             "minTradesReturn": gates["min_trades_return"],
             "minTradesWinrate": gates["min_trades_winrate"],
             "minBaselineUsd": gates["min_baseline_usd"],
         },
     }
+    if period_start is not None:
+        payload["periodStart"] = period_start.isoformat()
+        payload["periodEnd"] = period_end.isoformat()
+        payload["sealAt"] = seal_at.isoformat()
+    if snapshot_at is not None:
+        payload["snapshotAt"] = (snapshot_at if snapshot_at.tzinfo
+                                  else snapshot_at.replace(tzinfo=timezone.utc)).isoformat()
+    return payload
 
 
 def build_me_payload(db: Session, user: User, judge: bool) -> dict:

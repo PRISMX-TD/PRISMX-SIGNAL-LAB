@@ -148,6 +148,17 @@ def test_detail_board_rows_no_user_id_and_isself(db_session):
     assert by_login["A"]["isSelf"] is True
     assert by_login["B"]["isSelf"] is False
     assert out["board"]["me"]["rank"] == 1
+    assert out["board"]["me"]["login"] == "A"
+    # comp:<id> 不是 period_bounds 能解析的自然周/月格式——periodStart/End/
+    # sealAt 必须被 build_board_rows_payload 的 guard 整段省略，而不是让
+    # 详情页构造抛错。
+    # comp:<id> is not a natural week/month key period_bounds can parse —
+    # periodStart/End/sealAt must be entirely omitted by
+    # build_board_rows_payload's guard rather than the detail page build
+    # throwing.
+    assert "periodStart" not in out["board"]
+    assert "periodEnd" not in out["board"]
+    assert "sealAt" not in out["board"]
 
 
 def test_detail_upcoming_has_empty_board_rows(db_session):
@@ -160,6 +171,14 @@ def test_detail_upcoming_has_empty_board_rows(db_session):
 
     assert out["board"]["rows"] == []
     assert out["board"]["me"] is None
+    # 未上榜 + comp:<id> 无法解出 period bounds → progress 也必须原样省略
+    # （不是抛错），previousWinner 同理（comp key 没有"上一期"）。
+    # Unranked + comp:<id> has no parseable period bounds → progress must
+    # likewise come back None (not throw); same for previousWinner (a comp
+    # key has no "previous period").
+    assert out["board"]["progress"] is None
+    assert out["board"]["previousWinner"] is None
+    assert "snapshotAt" not in out["board"]
     assert out["myEntries"] == []
     assert out["pendingSettle"] is False
 

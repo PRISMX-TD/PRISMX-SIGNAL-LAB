@@ -1,8 +1,17 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi import HTTPException
-from app.models import User, LeaderboardSnapshot
+from app.models import ClosedTrade, LeaderboardSnapshot, MT5Account, Order, PeriodBaseline, User
 from app.routers.gamification import build_leaderboard_payload, _check_leaderboard_visible
+from app.services.gamification import periods
+from app.services.gamification.boards import ensure_baselines
 from app.services.settings_store import save_gamification_settings, invalidate_gamification_cache
+
+UTC = timezone.utc
+PK = "2026-W36"
+T0 = datetime(2026, 8, 31, 0, 0, tzinfo=UTC)      # 周一（期初），与 test_board_rows.py 同一 key
+IN_WEEK = T0 + timedelta(days=2)
 
 
 def _user(db, email, role="user", nickname=None, badge=None, nickname_public=False):
@@ -11,10 +20,27 @@ def _user(db, email, role="user", nickname=None, badge=None, nickname_public=Fal
     db.add(u); db.commit(); return u
 
 
-def _row(db, u, login, rank, score):
-    db.add(LeaderboardSnapshot(board="return_pct", period_key="2026-W36",
+def _row(db, u, login, rank, score, board="return_pct", period_key="2026-W36"):
+    db.add(LeaderboardSnapshot(board=board, period_key=period_key,
                                user_id=u.id, mt5_login=login, rank=rank,
                                score=score, sample=8))
+    db.commit()
+
+
+def _acct(db, u, login, balance=2000.0):
+    db.add(MT5Account(user_id=u.id, login=login, server="s", balance=balance,
+                      trade_mode=2)); db.commit()
+
+
+def _pos(db, u, login, ticket, profit, closed_at, vol=0.1):
+    db.add(Order(user_id=u.id, client_order_id=f"c{login}{ticket}", symbol="X",
+                 side="BUY", volume=vol, status="FILLED", mt5_login=login,
+                 mt5_ticket=ticket, trade_mode=2,
+                 created_at=closed_at - timedelta(hours=2)))
+    db.add(ClosedTrade(user_id=u.id, mt5_login=login, symbol="X", side="BUY",
+                       close_volume=vol, close_price=1, profit=profit,
+                       position_ticket=ticket, deal_ticket=ticket * 10,
+                       closed_at=closed_at, verified=True))
     db.commit()
 
 
@@ -47,7 +73,7 @@ def test_payload_masking_isself_and_me(db_session):
     assert "userId" not in r1
     # 昵称公开的用户：displayName 用行自己的 nickname_public 读到的真实值，不打码
     assert r4["displayName"] == "Trader" and r4["isSelf"] is False
-    assert p["me"] == {"rank": 2, "score": 0.10, "sample": 8}
+    assert p["me"] == {"rank": 2, "score": 0.10, "sample": 8, "login": "600001"}
     # a 的 me 取最好名次
     pa = build_leaderboard_payload(db_session, a, "return_pct", "2026-W36")
     assert pa["me"]["rank"] == 1
@@ -86,3 +112,50 @@ def test_payload_gates_reflect_admin_settings(db_session):
             "min_trades_return": 5, "min_trades_winrate": 20, "min_baseline_usd": 500.0,
         })
         db_session.commit(); invalidate_gamification_cache()
+
+
+def test_period_bounds_and_seal_at_for_week_key(db_session):
+    u = _user(db_session, "bounds1@t.co")
+    p = build_leaderboard_payload(db_session, u, "return_pct", PK)
+    start, end = periods.period_bounds(PK)
+    assert p["periodStart"] == start.isoformat()
+    assert p["periodEnd"] == end.isoformat()
+    assert p["sealAt"] == (end + timedelta(hours=periods.RECOMPUTE_GRACE_HOURS)).isoformat()
+
+
+def test_progress_for_unranked_viewer_with_baseline(db_session):
+    """未上榜（本期笔数不够）但已拍基线的用户：progress 用 board 计算同一套
+    `_resolved_in_period`，样本数与门槛回显必须与 gates 完全一致。"""
+    u = _user(db_session, "prog1@t.co")
+    _acct(db_session, u, "A", balance=1864.99)
+    ensure_baselines(db_session, PK, T0)
+    _pos(db_session, u, "A", 1, 10.0, IN_WEEK)
+    _pos(db_session, u, "A", 2, -3.0, IN_WEEK)      # 2 笔，未达默认门槛 5 笔 → 不上榜
+
+    p = build_leaderboard_payload(db_session, u, "return_pct", PK)
+    assert p["me"] is None
+    assert p["progress"] == {
+        "login": "A", "sample": 2, "baselineUsd": 1864.99,
+        "minTrades": 5, "minBaselineUsd": 500.0,
+    }
+
+
+def test_progress_null_without_baseline(db_session):
+    """本期从未拍过基线（未参与/未开实盘账户）：progress 必须是 None，不是
+    一个笔数为 0 的假进度。"""
+    u = _user(db_session, "prog2@t.co")
+    p = build_leaderboard_payload(db_session, u, "return_pct", PK)
+    assert p["me"] is None
+    assert p["progress"] is None
+
+
+def test_previous_winner_from_seeded_prior_period(db_session):
+    prev_key = periods.previous_period_key(PK)
+    assert prev_key == "2026-W35"
+    a = _user(db_session, "champ@t.co", nickname="Champion")
+    _row(db_session, a, "900001", 1, 0.087, period_key=prev_key)
+    # 本期（PK）无关行，验证 previousWinner 读的是上一期而不是本期
+    b = _user(db_session, "viewer1@t.co")
+
+    p = build_leaderboard_payload(db_session, b, "return_pct", PK)
+    assert p["previousWinner"] == {"displayName": "C***n", "score": 0.087}
