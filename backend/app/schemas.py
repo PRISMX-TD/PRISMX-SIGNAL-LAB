@@ -856,6 +856,12 @@ class MT5AccountOut(BaseModel):
     # leave the user waiting forever. Always False for bridge accounts.
     needsReverify: bool = False
     revokedReason: str | None = None
+    # 账户类型：0=模拟，1=竞赛，2=实盘，None=尚未判定（见 services/account_type.py）。
+    # 消费方（如比赛报名选择器）必须把 None 当"非实盘"处理，不能默认放行。
+    # Account trade mode: 0=demo, 1=contest, 2=real, None=not yet determined
+    # (see services/account_type.py). Consumers (e.g. the competition
+    # registration picker) must treat None as "not real", never default-allow.
+    tradeMode: int | None = None
 
 
 class AccountSuffixRequest(BaseModel):
