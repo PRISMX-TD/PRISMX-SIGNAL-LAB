@@ -1916,7 +1916,9 @@
       "founder_2026": { "name": "Founding Member", "desc": "Registered in 2026 and completed a first live trade (permanently limited)" }
     },
     "winRateCard": { "combined": "Combined win rate (qualifying basis)", "account": "Account win rate",
-                     "toNext": "{{pct}}% to the next level", "breakdown": "Breakdown",
+                     "toNext": "{{pct}}% to the next level",
+                     "metNext": "Meets the next level's win-rate bar",
+                     "breakdown": "Breakdown",
                      "colLogin": "Account", "colTrades": "Trades", "colWins": "Wins",
                      "colWinRate": "Win rate", "colExcluded": "Excluded" },
     "equip": "Equip", "unequip": "Unequip", "notEarned": "Not earned",

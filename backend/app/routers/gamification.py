@@ -13,9 +13,10 @@ from app.models import LeaderboardSnapshot, User, UserBadge, UserTask
 from app.schemas import GamificationSettingsPatchIn, VisibilityPatchIn
 from app.services.deps import get_current_user, get_db
 from app.services.gamification import (
-    BADGES, LEVEL_TITLES, compute_comprehensive_stats, condition_states,
+    BADGES, GROUPS, LEVEL_TITLES, compute_comprehensive_stats, condition_states,
     judge_and_award_badges, judge_and_record_conditions, level_of)
 from app.services.gamification import identity, periods
+from app.services.gamification.conditions import WINRATE_CONDITIONS
 from app.services.settings_store import (
     get_gamification_settings, invalidate_gamification_cache, save_gamification_settings)
 
@@ -159,6 +160,76 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
         "leaderboardOptOut": user.leaderboard_opt_out,
         "equippedBadge": user.equipped_badge,
     }
+
+
+# 仪表盘胜率卡摘要（设计 §2.4/§7）：独立缓存，与 /me 的 60 秒判定节流是两回事——
+# 这里从不触发 judge_and_record_conditions/judge_and_award_badges（那是重的一
+# 半在“判定”，不在“统计”），只读 compute_comprehensive_stats + 已落库的
+# UserTask。但 compute_comprehensive_stats 本身仍是 365 天整仓聚合，仪表盘卡
+# 45 秒轮询一次，所以照样按用户缓存 60 秒——避免每次轮询都把这条查询打一遍。
+# 进程内 dict，理由同 _last_judged（本部署单进程）。
+# Dashboard win-rate-card summary (§2.4/§7): a separate cache from /me's 60s
+# judging throttle — this endpoint never triggers judge_and_record_conditions/
+# judge_and_award_badges (the expensive half is "judging", not "reading
+# stats"), it only reads compute_comprehensive_stats + already-persisted
+# UserTask rows. But compute_comprehensive_stats is itself a 365-day
+# full-position aggregation, and the dashboard card polls it every 45s, so it
+# still gets a 60s per-user cache to avoid re-running that query on every
+# poll. In-process dict for the same reason as _last_judged (single-process
+# deployment).
+_SUMMARY_CACHE_SECONDS = 60
+_summary_cache: dict[str, tuple[float, dict]] = {}
+
+
+def build_winrate_summary_payload(db: Session, user: User) -> dict:
+    now = time.monotonic()
+    cached = _summary_cache.get(user.id)
+    if cached is not None and now - cached[0] < _SUMMARY_CACHE_SECONDS:
+        return cached[1]
+
+    stats = compute_comprehensive_stats(db, user.id)
+    done = {t.task_id for t in db.query(UserTask).filter(UserTask.user_id == user.id)}
+    level = level_of(done)
+    win_rate = stats["win_rate"]
+
+    # 下一级的胜率毕业线：GROUPS 里第一个尚未全部完成的组——与 level_of 走的
+    # 是同一条判定路径，所以这里找到的组恰好是「用户正在闯的下一关」。满级
+    # （所有组都已完成）时没有下一关，三个字段都是 None/0.0 由下方兜底。
+    # The next level's win-rate bar: the first group in GROUPS not yet fully
+    # done — the same walk level_of does, so the group found here is exactly
+    # "the level the user is working toward next". At max level (every group
+    # done) there is no next group, handled by the None fallback below.
+    next_target: float | None = None
+    for _gid, conds in GROUPS:
+        if all(c in done for c in conds):
+            continue
+        for c in conds:
+            if c in WINRATE_CONDITIONS:
+                next_target = WINRATE_CONDITIONS[c]
+        break
+
+    gap_pct: float | None = None
+    if next_target is not None and win_rate is not None:
+        gap_pct = round((next_target - win_rate) * 100, 1) if win_rate < next_target else 0.0
+
+    payload = {
+        "winRate": win_rate,
+        "windowDays": stats["window_days"],
+        "trades": stats["trades"],
+        "level": level,
+        "title": LEVEL_TITLES[level - 1],
+        "nextWinRateTarget": next_target,
+        "gapPct": gap_pct,
+    }
+    _summary_cache[user.id] = (now, payload)
+    return payload
+
+
+@router.get("/winrate-summary")
+@limiter.limit(settings.RATE_LIMIT_GAMIFICATION)
+def gamification_winrate_summary(request: Request, db: Session = Depends(get_db),
+                                  user: User = Depends(require_gamification_visible)):
+    return build_winrate_summary_payload(db, user)
 
 
 @router.get("/me")

@@ -6,9 +6,10 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { orderApi } from '../api/client'
+import { gamificationApi, orderApi } from '../api/client'
 import { displaySymbol } from '../api/utils'
-import type { PersonalWinRate } from '../api/types'
+import type { GamificationWinRateSummary, PersonalWinRate } from '../api/types'
+import { useAuth } from '../store/auth'
 import { useLive } from '../store/live'
 import RadialGauge from './RadialGauge'
 import { symbolMeta } from '../utils/symbolMeta'
@@ -25,8 +26,11 @@ interface Props {
 
 export default function PersonalWinRateCard({ variant = 'compact', login, className = '' }: Props) {
   const { t } = useTranslation()
+  const { user } = useAuth()
   const { closedTradeTick } = useLive()
   const [data, setData] = useState<PersonalWinRate | null>(null)
+  const detailed = variant === 'detailed'
+  const [gwr, setGwr] = useState<GamificationWinRateSummary | null>(null)
 
   // 切账号要先清空再拉（避免闪上一个账号的胜率），但因新平仓而重拉时不能清空
   // ——否则每次平仓卡片都会闪一下空白。所以只在 login 变化时清。
@@ -65,8 +69,42 @@ export default function PersonalWinRateCard({ variant = 'compact', login, classN
     // lags the trade list beneath it.
   }, [login, closedTradeTick])
 
+  // 综合胜率（考核口径）：只在仪表盘 compact 卡 + 开关打开时拉取，独立端点 +
+  // 服务端 60 秒缓存，跟随上面同一个 45 秒轮询/焦点刷新节奏（设计 §2.4/§7）。
+  // 失败静默——403（开关未开放）与网络错误都直接不显示这一块，不打扰账户
+  // 胜率主体的展示。
+  // Combined win rate (qualifying basis): fetched only for the dashboard's
+  // compact card while the switch is on, via its own endpoint with a 60s
+  // server-side cache, riding the same 45s poll/focus cadence as above
+  // (§2.4/§7). Failures are silent — a 403 (switch off) or a network error
+  // just leaves this block hidden without disturbing the main account
+  // win-rate display.
+  useEffect(() => {
+    if (detailed || !user?.gamificationVisible) {
+      setGwr(null)
+      return
+    }
+    let mounted = true
+    const load = () => {
+      gamificationApi.winrateSummary().then((r) => { if (mounted) setGwr(r) }).catch(() => {})
+    }
+    load()
+    const timer = window.setInterval(() => {
+      if (!document.hidden) load()
+    }, 45_000)
+    const onVisible = () => { if (!document.hidden) load() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => {
+      mounted = false
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+    }
+  }, [detailed, user?.gamificationVisible])
+
   const pct = data?.winRate != null ? Math.round(data.winRate * 100) : null
-  const detailed = variant === 'detailed'
+  const gwrPct = gwr?.winRate != null ? Math.round(gwr.winRate * 100) : null
 
   return (
     <section className={`card glass ${detailed ? 'p-5' : 'p-[18px]'}${className ? ` ${className}` : ''}`}>
@@ -145,6 +183,44 @@ export default function PersonalWinRateCard({ variant = 'compact', login, classN
             </div>
           )}
         </>
+      )}
+
+      {/* 综合胜率（考核口径）：与上方账户胜率并排出现在同一张卡里，视觉上明显
+          次于账户胜率主体（更小字号、独立分隔块）——账户胜率是给用户自己复
+          盘的镜子，这一块是等级考核的第二个数字，两者第一次出现就摆在一起，
+          不分先后地各带标签（设计 §2.4/§7）。只在 compact 卡、开关打开、且
+          请求已经拿到数据时渲染；不依赖账户胜率是否已有数据（data 为 null
+          时也能显示）。
+          Combined win rate (qualifying basis): appears in the same card as the
+          account win rate above it, visually subordinate to that main figure
+          (smaller type, its own bordered block) — the account rate is the
+          user's own mirror, this is the second, qualifying number, and the
+          two show up together from the start, each carrying its own label
+          (§2.4/§7). Rendered only on the compact card once the switch is on
+          and the request has resolved; independent of whether the account
+          win rate itself has data yet. */}
+      {!detailed && gwr && (
+        <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2.5">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-neutral-500">{t('gamification.winRateCard.combined')}</span>
+            <span className="num font-semibold text-neutral-200">
+              {gwrPct != null ? `${gwrPct}%` : '—'}
+            </span>
+          </div>
+          <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-neutral-500">
+            <span>{t('winrate.resolvedCount', { n: gwr.trades })}</span>
+            {gwr.level >= 6 ? (
+              <span>{t('gamification.maxLevel')}</span>
+            ) : gwr.gapPct === 0 ? (
+              <span className="text-up">{t('gamification.winRateCard.metNext')}</span>
+            ) : gwr.gapPct != null && gwr.gapPct > 0 ? (
+              <span>{t('gamification.winRateCard.toNext', { pct: gwr.gapPct })}</span>
+            ) : null}
+          </div>
+          <Link to="/achievements" className="mt-1.5 block text-right text-[10px] text-prism-300 hover:text-prism-200">
+            {t('gamification.title')} ›
+          </Link>
+        </div>
       )}
       {detailed && <p className="mt-3 text-[10px] text-neutral-500">{t('winrate.disclaimer')}</p>}
     </section>
