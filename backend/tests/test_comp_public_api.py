@@ -172,15 +172,55 @@ def test_detail_upcoming_has_empty_board_rows(db_session):
     assert out["board"]["rows"] == []
     assert out["board"]["me"] is None
     # 未上榜 + comp:<id> 无法解出 period bounds → progress 也必须原样省略
-    # （不是抛错），previousWinner 同理（comp key 没有"上一期"）。
+    # （不是抛错）。previousWinner 这个键本身在 comp 榜上整段不出现（不是
+    # "键在但是 null"）——它跟 periodStart/periodEnd/sealAt 走的是同一条
+    # guard（只对自然周/月 key 出现），comp key 没有"上一期"概念。
     # Unranked + comp:<id> has no parseable period bounds → progress must
-    # likewise come back None (not throw); same for previousWinner (a comp
-    # key has no "previous period").
+    # likewise come back None (not throw). The previousWinner key itself is
+    # entirely absent on a competition board (not "present but null") — it
+    # shares the same guard as periodStart/periodEnd/sealAt (natural
+    # week/month keys only); a comp key has no "previous period" concept.
     assert out["board"]["progress"] is None
-    assert out["board"]["previousWinner"] is None
+    assert "previousWinner" not in out["board"]
     assert "snapshotAt" not in out["board"]
     assert out["myEntries"] == []
     assert out["pendingSettle"] is False
+
+
+def test_detail_unranked_participant_with_comp_baseline_does_not_crash(db_session):
+    """回归用例：比赛参与者在 comp:<id> 这个 period_key 下拍了基线
+    （PeriodBaseline），但本人未上榜（没有 LeaderboardSnapshot 行）——这正是
+    `progress` 计算分支会摸到的输入形状（me is None 且该用户有基线行）。
+    `period_start is not None` 这道 guard 如果被误删或误改，`_resolved_in_period`
+    会拿 `bounds=(None, None)` 去跑，从 period_bounds(period_key) 的兜底解析
+    (comp:<id> 不是 -W 也不是 YYYY-MM 格式) 里炸出 ValueError/TypeError——这个
+    用例专门盯住这条路径不回归。
+    Regression: a competition participant has taken a baseline
+    (PeriodBaseline) under the comp:<id> period key but is themselves
+    unranked (no LeaderboardSnapshot row) — exactly the input shape that
+    reaches the `progress` branch (me is None, and this user has a baseline
+    row). If the `period_start is not None` guard were ever weakened, this
+    would call `_resolved_in_period` with unparseable bounds and raise. This
+    test exists to pin that path.
+    """
+    from app.models import PeriodBaseline
+    _make_visible(db_session)
+    comp = _comp(db_session, status="running")
+    u = _user(db_session, "det6@t.co")
+    _acct(db_session, u, "A", balance=2000.0)
+    db_session.add(PeriodBaseline(user_id=u.id, mt5_login="A",
+                                  period_key=comp_period_key(comp.id),
+                                  baseline=2000.0, taken_at=T0))
+    db_session.commit()
+
+    out = get_competition(request=None, comp_id=comp.id, db=db_session, user=u)
+
+    assert out["board"]["me"] is None
+    assert out["board"]["progress"] is None
+    assert "periodStart" not in out["board"]
+    assert "periodEnd" not in out["board"]
+    assert "sealAt" not in out["board"]
+    assert "previousWinner" not in out["board"]
 
 
 def test_detail_myentries_shape_and_pending_settle(db_session):

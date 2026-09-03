@@ -150,12 +150,52 @@ def test_progress_null_without_baseline(db_session):
 
 
 def test_previous_winner_from_seeded_prior_period(db_session):
+    """previousWinner 只在本榜当前为空时才算（前端只在空榜态渲染它）——这里
+    本期（PK）故意不插任何行，同时验证读的是上一期而不是本期。"""
     prev_key = periods.previous_period_key(PK)
     assert prev_key == "2026-W35"
     a = _user(db_session, "champ@t.co", nickname="Champion")
     _row(db_session, a, "900001", 1, 0.087, period_key=prev_key)
-    # 本期（PK）无关行，验证 previousWinner 读的是上一期而不是本期
+    # 本期（PK）无关行，验证 previousWinner 读的是上一期而不是本期，且本期
+    # 榜本身确实是空的（previousWinner 计算的前提条件）。
     b = _user(db_session, "viewer1@t.co")
 
     p = build_leaderboard_payload(db_session, b, "return_pct", PK)
+    assert p["rows"] == []
     assert p["previousWinner"] == {"displayName": "C***n", "score": 0.087}
+
+
+def test_previous_winner_not_computed_when_board_nonempty(db_session):
+    """本期榜非空时，previousWinner 这个键依然存在（自然周/月榜恒定带这个
+    键，types.ts 才站得住），但值必须是 None——不实际去查上一期，因为前端
+    只在空榜态渲染它，非空态算了也是白算。"""
+    prev_key = periods.previous_period_key(PK)
+    a = _user(db_session, "champ2@t.co", nickname="Champion")
+    _row(db_session, a, "900002", 1, 0.087, period_key=prev_key)
+    # 本期塞一行，让本期榜非空
+    c = _user(db_session, "current1@t.co")
+    _row(db_session, c, "900003", 1, 0.05, period_key=PK)
+    d = _user(db_session, "viewer2@t.co")
+
+    p = build_leaderboard_payload(db_session, d, "return_pct", PK)
+    assert len(p["rows"]) == 1
+    assert p["previousWinner"] is None
+
+
+def test_progress_null_for_opted_out_viewer(db_session):
+    """退榜用户（leaderboard_opt_out）即使本期拍了基线、也有已判定整仓的
+    交易，progress 也必须是 None——`compute_board_rows` 计算快照时本就把
+    退榜用户整段跳过（§4.1「下轮快照即消失」），这个用户这期永远不会真的
+    上榜，给他一个"本期已完成 s / N 笔"的进度条是误导。"""
+    u = _user(db_session, "optout1@t.co")
+    _acct(db_session, u, "A", balance=2000.0)
+    ensure_baselines(db_session, PK, T0)          # 拍照时尚未退榜，基线正常拍下
+    _pos(db_session, u, "A", 1, 10.0, IN_WEEK)
+    _pos(db_session, u, "A", 2, 10.0, IN_WEEK)
+    _pos(db_session, u, "A", 3, 10.0, IN_WEEK)
+    u.leaderboard_opt_out = True                  # 期中才退榜——基线已经拍好了
+    db_session.commit()
+
+    p = build_leaderboard_payload(db_session, u, "return_pct", PK)
+    assert p["me"] is None
+    assert p["progress"] is None

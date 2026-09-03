@@ -165,33 +165,56 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
     # the frontend treats it as optional.
     snapshot_at = max((r.computed_at for r in all_rows if r.computed_at), default=None)
 
-    # 上期冠军：previous_period_key 对 comp:<id> 这类它不认识的 key 返回
-    # None，天然跳过——不需要额外的 guard。
-    # Previous winner: previous_period_key returns None for keys it doesn't
-    # recognize (like comp:<id>), which naturally skips this — no extra
-    # guard needed.
+    # 上期冠军：只在本榜当前为空（`not rows`）时才算——前端只在空榜态渲染这个
+    # 字段，非空榜时没有展示位，算了也是白算。同时只对能解析出边界的自然周/月
+    # key 算：comp:<id> 没有"上一期"概念，previous_period_key 对它返回 None，
+    # 天然跳过。这两条判据都收在下面 `if period_start is not None:` 的 payload
+    # 组装里——comp 榜整段不带 previousWinner 键（同 periodStart 一样，不是
+    # "键在但是 null"），自然周/月榜哪怕非空也带这个键（值是 None），
+    # 让 types.ts 的 optional 字段保持"缺席=不适用该榜、null=适用但没有"两种
+    # 语义分开，不混在一起。
+    # Previous winner: only computed when this board is currently empty
+    # (`not rows`) — the frontend only has a slot for it in the empty state,
+    # so computing it otherwise would be wasted work. Also only for a
+    # natural week/month key whose bounds we could parse: a comp:<id> key
+    # has no "previous period" concept and previous_period_key returns None
+    # for it, which naturally skips this. Both conditions are folded into
+    # the `if period_start is not None:` payload assembly below — a
+    # competition board carries no previousWinner key at all (not "present
+    # but null", like periodStart), while a natural week/month board always
+    # carries the key (value None when not applicable), keeping "absent =
+    # doesn't apply to this board" and "null = applies but nothing there"
+    # as two distinct, non-conflated signals for types.ts's optional field.
     previous_winner = None
-    prev_key = periods.previous_period_key(period_key)
-    if prev_key:
-        prev_row = (db.query(LeaderboardSnapshot)
-                      .filter(LeaderboardSnapshot.board == board,
-                              LeaderboardSnapshot.period_key == prev_key,
-                              LeaderboardSnapshot.rank == 1)
-                      .first())
-        if prev_row:
-            pu = db.query(User).filter(User.id == prev_row.user_id).first()
-            previous_winner = {
-                "displayName": identity.display_name(
-                    pu.nickname if pu else None, pu.email if pu else None,
-                    bool(pu.nickname_public) if pu else False),
-                "score": prev_row.score,
-            }
+    if period_start is not None and not rows:
+        prev_key = periods.previous_period_key(period_key)
+        if prev_key:
+            prev_row = (db.query(LeaderboardSnapshot)
+                          .filter(LeaderboardSnapshot.board == board,
+                                  LeaderboardSnapshot.period_key == prev_key,
+                                  LeaderboardSnapshot.rank == 1)
+                          .first())
+            if prev_row:
+                pu = db.query(User).filter(User.id == prev_row.user_id).first()
+                previous_winner = {
+                    "displayName": identity.display_name(
+                        pu.nickname if pu else None, pu.email if pu else None,
+                        bool(pu.nickname_public) if pu else False),
+                    "score": prev_row.score,
+                }
 
     # progress：观众本期未上榜（me is None）但在本期至少拍过一个账户的基线——
     # 只对能解析出 period_start/period_end 的自然周/月 key 算（同上面的
     # guard 理由，comp:<id> 传不进 `_resolved_in_period` 的 bounds 参数）。
     # 多账户取"本期已判定整仓数最多"的那个，与榜单计算同一个
     # `_resolved_in_period`，口径不会分叉。
+    #
+    # 退榜用户（leaderboard_opt_out）额外拦一道：`compute_board_rows` 计算
+    # 快照时本就把退榜用户整段跳过（设计 §4.1「下轮快照即消失」），一个退榜
+    # 用户不管拍没拍基线、笔数多少，这期永远不会真的上榜——如果这里照样算出
+    # 一个 progress，前端会显示"本期已完成 s / N 笔"这种误导文案，暗示"再等等
+    # 就能上榜"，而事实是永远不会。退榜状态与「是否上榜」是同一个判定源，
+    # 这里必须跟 compute_board_rows 保持同一立场。
     # progress: the viewer is unranked this period (me is None) but has
     # taken at least one account baseline this period — only computed for a
     # natural week/month key whose bounds we could parse (same guard reason
@@ -199,8 +222,17 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
     # With multiple accounts, picks the one with the most resolved positions
     # this period, using the same `_resolved_in_period` the board itself
     # uses so the two never diverge.
+    #
+    # An extra gate for opted-out users: `compute_board_rows` already
+    # excludes them wholesale when computing snapshots (§4.1, "gone by the
+    # next snapshot") — an opted-out user will never actually rank this
+    # period no matter how many trades they close. Computing a `progress`
+    # for them anyway would show a misleading "completed s / N this period"
+    # that implies they're about to rank, when they never will be. Opt-out
+    # status and "does this viewer rank" share the same source of truth；
+    # this must agree with compute_board_rows rather than diverge from it.
     progress = None
-    if me is None and period_start is not None:
+    if me is None and period_start is not None and not viewer.leaderboard_opt_out:
         baseline_rows = (db.query(PeriodBaseline)
                             .filter(PeriodBaseline.user_id == viewer.id,
                                     PeriodBaseline.period_key == period_key)
@@ -224,7 +256,7 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
 
     payload = {
         "board": board, "periodKey": period_key, "rows": rows, "me": me,
-        "progress": progress, "previousWinner": previous_winner,
+        "progress": progress,
         "gates": {
             "minTradesReturn": gates["min_trades_return"],
             "minTradesWinrate": gates["min_trades_winrate"],
@@ -235,6 +267,7 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
         payload["periodStart"] = period_start.isoformat()
         payload["periodEnd"] = period_end.isoformat()
         payload["sealAt"] = seal_at.isoformat()
+        payload["previousWinner"] = previous_winner
     if snapshot_at is not None:
         payload["snapshotAt"] = (snapshot_at if snapshot_at.tzinfo
                                   else snapshot_at.replace(tzinfo=timezone.utc)).isoformat()

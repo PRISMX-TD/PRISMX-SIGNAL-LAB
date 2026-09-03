@@ -4,7 +4,7 @@
 // 其余（4+、未上榜的"我的名次"卡）用石墨。直接借用 medal.ts 里 MAT 表的
 // rim 三色渐变（legendary=足金、rare=银、limited=青铜火漆、common=石墨），
 // 与勋章墙用的是同一套材质语言，不另起一份配色。
-// 几何/纹理照抄设计稿（leaderboard-design.html）的 coin() 函数：60 道边缘
+// 几何/纹理照抄设计稿（leaderboard-design.html）的 coin() 函数：40 道边缘
 // 齿纹 + 双层圆环倒角 + 居中数字，纯装饰、不含用户输入，dangerouslySetInnerHTML
 // 是安全的（同 medal.ts 顶部说明的理由）。
 //
@@ -15,7 +15,7 @@
 // speaks the same material language as the badge wall, rather than a
 // separate palette.
 // Geometry/texture ported verbatim from the design board's coin() function:
-// 60 rim ticks + a two-ring bevel + a centered numeral — purely decorative,
+// 40 rim ticks + a two-ring bevel + a centered numeral — purely decorative,
 // no user input, so dangerouslySetInnerHTML is safe (same rationale as the
 // top of medal.ts).
 import { useId } from 'react'
