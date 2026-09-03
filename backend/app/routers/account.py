@@ -10,8 +10,9 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.core.security import create_access_token, hash_password, verify_password
-from app.models import MT5Account, User, UserPref
+from app.models import MT5Account, User, UserPref, UserTask
 from app.schemas import PhoneRequest, ProfilePatchIn, UserOut
+from app.services.gamification.conditions import LEVEL_TITLES, level_of
 from app.services.phone import compose_phone
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user
@@ -43,6 +44,13 @@ class AccountInfoOut(BaseModel):
     nicknamePublic: bool = False
     leaderboardOptOut: bool = False
     equippedBadge: str | None = None
+    # 等级/称号：搭 /auth/me 这趟便车下发，用户菜单角标不用再单独请求
+    # gamificationApi.me()；只在 gamificationVisible 为真时算，否则为 None
+    # （§7）。Level/title: piggyback on this /auth/me round trip so the
+    # user-menu badge costs no extra request; computed only when
+    # gamificationVisible is true for this user, else None (§7).
+    gamificationLevel: int | None = None
+    gamificationTitle: str | None = None
     class Config:
         from_attributes = True
 
@@ -58,6 +66,23 @@ def get_account(
         .filter(MT5Account.user_id == current_user.id)
         .all()
     )
+    gamification_visible = (
+        True if current_user.role == "admin"
+        else bool(get_gamification_settings(db).get("user_visible"))
+    )
+    gamification_level: int | None = None
+    gamification_title: str | None = None
+    if gamification_visible:
+        # 一次带索引的查询（user_id 上有索引），不算完整 stats——够便宜，可以
+        # 搭这趟 /auth/me 的车。One indexed query (user_id is indexed), no
+        # full stats computation — cheap enough to piggyback on this /auth/me
+        # round trip.
+        done_ids = {
+            row[0] for row in
+            db.query(UserTask.task_id).filter(UserTask.user_id == current_user.id)
+        }
+        gamification_level = level_of(done_ids)
+        gamification_title = LEVEL_TITLES[gamification_level - 1]
     return AccountInfoOut(
         id=current_user.id,
         email=current_user.email,
@@ -80,10 +105,9 @@ def get_account(
             }
             for b in bindings
         ],
-        gamificationVisible=(
-            True if current_user.role == "admin"
-            else bool(get_gamification_settings(db).get("user_visible"))
-        ),
+        gamificationVisible=gamification_visible,
+        gamificationLevel=gamification_level,
+        gamificationTitle=gamification_title,
         leaderboardVisible=(
             True if current_user.role == "admin"
             else bool(get_gamification_settings(db).get("leaderboard_visible"))

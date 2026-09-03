@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.core import rate_limit
-from app.models import Competition, CompetitionParticipant, LeaderboardSnapshot, MT5Account, User
+from app.models import Competition, CompetitionParticipant, LeaderboardSnapshot, MT5Account, User, UserTask
 from app.routers.account import get_account
 from app.routers.competitions import (
     _check_competitions_visible, get_competition, list_competitions,
@@ -12,6 +12,7 @@ from app.routers.competitions import (
 )
 from app.schemas import CompetitionRegisterIn
 from app.services.gamification.competitions import comp_period_key
+from app.services.gamification.conditions import GROUPS
 from app.services.settings_store import invalidate_gamification_cache, save_gamification_settings
 
 
@@ -285,3 +286,39 @@ def test_account_me_exposes_competitions_visible(db_session):
     out3 = get_account(db=db_session, current_user=admin)
     assert out3.competitionsVisible is True
     invalidate_gamification_cache()
+
+
+# ---- /auth/me gamificationLevel/gamificationTitle --------------------------------
+
+def test_account_me_exposes_gamification_level(db_session):
+    """§7：等级/称号搭 /auth/me 便车下发——只在 gamificationVisible 为真时算。"""
+    invalidate_gamification_cache()
+
+    # admin：即使没做任何任务，也因 gamificationVisible 恒真而拿到 1 级 novice。
+    admin = _user(db_session, "lvl-admin@t.co", role="admin")
+    out_admin = get_account(db=db_session, current_user=admin)
+    assert out_admin.gamificationVisible is True
+    assert out_admin.gamificationLevel == 1
+    assert out_admin.gamificationTitle == "novice"
+
+    # 普通用户，开关关闭：级别/称号都是 None。
+    off_user = _user(db_session, "lvl-off@t.co")
+    out_off = get_account(db=db_session, current_user=off_user)
+    assert out_off.gamificationVisible is False
+    assert out_off.gamificationLevel is None
+    assert out_off.gamificationTitle is None
+
+    # 普通用户，开关打开，做完第一组全部条件：升到 2 级 junior。
+    save_gamification_settings(db_session, {"user_visible": True})
+    db_session.commit(); invalidate_gamification_cache()
+    on_user = _user(db_session, "lvl-on@t.co")
+    for task_id in GROUPS[0][1]:
+        db_session.add(UserTask(user_id=on_user.id, task_id=task_id))
+    db_session.commit()
+    out_on = get_account(db=db_session, current_user=on_user)
+    assert out_on.gamificationVisible is True
+    assert out_on.gamificationLevel == 2
+    assert out_on.gamificationTitle == "junior"
+
+    save_gamification_settings(db_session, {"user_visible": False})
+    db_session.commit(); invalidate_gamification_cache()

@@ -96,6 +96,17 @@ export interface User {
   // GamificationSettings.competitionsVisible). Likewise only filled in by
   // refreshUser(); see the gamificationVisible comment above for the precedent.
   competitionsVisible?: boolean
+  // 等级/称号（§7）：随 gamificationVisible 一起搭 refreshUser()（GET
+  // /auth/me）这趟便车下发，用户菜单角标不用再单独请求 gamificationApi.me()。
+  // 只有 gamificationVisible 为真时后端才会算，否则是 null——先例同上面三个
+  // 可见性开关。
+  // Level/title (§7): piggyback on the same refreshUser() (GET /auth/me)
+  // round trip as gamificationVisible, so the user-menu badge costs no extra
+  // request. The backend only computes these when gamificationVisible is
+  // true for this user, otherwise null — same precedent as the three
+  // visibility flags above.
+  gamificationLevel?: number | null
+  gamificationTitle?: string | null
 }
 
 // 管理后台：用户列表条目 / admin: one row in the user list

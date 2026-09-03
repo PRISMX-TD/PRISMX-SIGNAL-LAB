@@ -612,6 +612,8 @@ export default function Layout() {
                   gamificationVisible={!!user?.gamificationVisible}
                   leaderboardVisible={!!user?.leaderboardVisible}
                   competitionsVisible={!!user?.competitionsVisible}
+                  gamificationLevel={user?.gamificationLevel}
+                  gamificationTitle={user?.gamificationTitle}
                   onLogout={handleLogout}
                 />
               </div>
