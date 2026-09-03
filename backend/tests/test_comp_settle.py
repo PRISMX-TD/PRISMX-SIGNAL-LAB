@@ -10,7 +10,14 @@ from app.models import (
 from app.services.gamification.competitions import comp_period_key, settle_competition
 
 UTC = timezone.utc
-T0 = datetime(2026, 8, 31, 0, 0, tzinfo=UTC)
+# 远早于任何测试运行时的真实 now——settle_competition 现在（§5.3）要求
+# now >= ends_at + 24h 才放行终审，大多数用例走默认 now（真实时钟），必须
+# 让 ends_at 稳稳落在过去，不依赖测试运行的具体日期。
+# Far in the past relative to any real wall-clock test run — settle_competition
+# now (§5.3) requires now >= ends_at + 24h, and most cases use the default now
+# (the real clock), so ends_at must sit safely in the past regardless of when
+# the suite actually runs.
+T0 = datetime(2020, 1, 1, 0, 0, tzinfo=UTC)
 ENDS = T0 + timedelta(days=7)
 
 
@@ -71,6 +78,38 @@ def test_settle_rejects_non_ended_status(db_session):
         assert exc.value.status_code == 400
         assert "已结束" in exc.value.detail
         assert comp.status == status                      # 未被改动
+
+
+# ---- §5.3 24h grace period after ends_at ------------------------------------
+
+def test_settle_rejects_within_24h_grace_window(db_session):
+    """比赛结束（ends_at）后仅 23 小时：宽限期未满，终审应被拒绝——即便 status
+    已经是 ended（管理员可能手动推进得比 ends_at 更晚，但宽限期只认 ends_at）。
+    """
+    admin = _admin(db_session)
+    comp = _comp(db_session, ends_at=ENDS)
+    now = ENDS + timedelta(hours=23)
+    with pytest.raises(HTTPException) as exc:
+        settle_competition(db_session, comp, admin.id, now=now)
+    assert exc.value.status_code == 400
+    assert "24 小时" in exc.value.detail
+    assert comp.status == "ended"                      # 未被改动
+
+
+def test_settle_succeeds_after_24h_grace_window(db_session, monkeypatch):
+    """结束后 25 小时：宽限期已满，终审照常放行。"""
+    admin = _admin(db_session)
+    comp = _comp(db_session, ends_at=ENDS)
+    u = _user(db_session, "grace@t.co")
+    _participant(db_session, comp, u, "A")
+    _stub_compute_rows(monkeypatch, comp,
+                       [{"userId": u.id, "login": "A", "score": 0.5, "sample": 10}])
+
+    now = ENDS + timedelta(hours=25)
+    result = settle_competition(db_session, comp, admin.id, now=now)
+
+    assert comp.status == "settled"
+    assert result["ranked"] == 1
 
 
 # ---- ranks written, unranked stay NULL -------------------------------------
