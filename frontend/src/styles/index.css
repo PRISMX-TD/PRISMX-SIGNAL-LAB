@@ -5189,6 +5189,32 @@ body {
   .lb-podium-card:hover { transform: none; }
 }
 
+/* ═════════════ 排行榜 · 手机端分段控件全宽 / leaderboard mobile seg-tabs ═════════════
+   .seg-tabs 自带 width:fit-content、.seg-tabs button 自带 flex-shrink:0——
+   两条都是组件层规则，跟 Tailwind 的 w-full / flex-1 撞在同一批属性上。这份
+   构建里顶层 @layer components { 块在文件中段就已经闭合，.seg-tabs 之后的
+   定义其实落在普通全局作用域，物理位置又晚于文件顶部被搬运过来的
+   utilities——实测 w-full/flex-1 单靠类名叠加压不过组件规则。用更高特异度的
+   复合选择器 + 媒体查询直接改，比继续跟层级顺序较劲更可靠。
+   .seg-tabs ships its own width:fit-content, .seg-tabs button its own
+   flex-shrink:0 — both are component-layer rules colliding with Tailwind's
+   w-full / flex-1 on the same properties. In this build the top-level
+   @layer components block actually closes partway through this giant
+   index.css, so everything defined after .seg-tabs's own block sits in
+   plain global scope — physically later than the utilities Tailwind hoists
+   to the top — so w-full/flex-1 alone don't out-cascade the component rule
+   in practice. A higher-specificity compound selector under a media query
+   beats fighting the layer ordering. */
+@media (max-width: 639px) {
+  .lb-controls .seg-tabs {
+    width: 100%;
+  }
+  .lb-controls .seg-tabs button {
+    flex: 1 1 0%;
+  }
+}
+
+
 
 /* ═════════════ 分区标题 / section headings ═════════════
    账户页的分区标题原本是 13px 大写 + 中等字距的半粗灰字，和说明性小字
