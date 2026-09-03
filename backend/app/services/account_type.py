@@ -106,24 +106,102 @@ def classify_server(server: str | None, settings: dict) -> int | None:
     return None
 
 
-def classify_account(group: str | None, server: str | None, settings: dict) -> int | None:
-    """账户类型判定的统一入口：组名优先（权威），服务器名兜底。
+def classify_login(server: str | None, login: str | None, settings: dict) -> int | None:
+    """按「服务器 + 登录号段」判定账户类型；判不出来返回 None（未知）。
+
+    **为什么需要它**：`classify_server` 假设"整台服务器只跑一种账户"，但
+    2026-09-03 与 Make Capital 确认这个假设不成立——`MakeCapital-Live` 一台
+    MT5 服务器同时跑模拟和实盘，靠登录号段区分（`1` 开头模拟、`6` 开头实盘）。
+    这正是把账号 100016（模拟、余额刚好 10000.00）误判成实盘的那条规则的替代。
+
+    匹配两层：先按服务器名**精确**匹配（大小写/首尾空白不敏感）找到规则条目，
+    再在该条目内按登录号**前缀**匹配——三个前缀列表放在一起比较，最长前缀命中
+    的胜出（与 `classify_group` 同一套 tie-break，写法直接复用）。
+
+    没有该服务器的规则、或号段前缀不在配置里，一律 None，不猜——原因同
+    `classify_group`：猜错方向是把模拟记成实盘，代价远大于漏判一个账号。
+    规则条目本身若损坏（不是 dict、缺 "server" 键）直接跳过，不抛异常——
+    这是运维配置，不该因为一条脏数据打断整批判定。
+
+    Classify by (server, login-prefix); None when nothing matches. This exists
+    because a whole-server claim (`classify_server`) can be wrong when a broker
+    actually mixes demo and live logins on one server — Make Capital's
+    MakeCapital-Live does exactly that (confirmed with the broker 2026-09-03),
+    told apart only by login prefix (1xxxxx = demo, 6xxxxx = live). Server match
+    is exact; login match within that rule is longest-prefix-wins across all
+    three lists, mirroring classify_group. Unmatched (no rule for the server, or
+    no prefix hit) stays None — never guess. Malformed rule entries are skipped
+    defensively rather than raising.
+    """
+    if not server or not login:
+        return None
+    server_name = server.strip().lower()
+    if not server_name:
+        return None
+    login_str = str(login).strip()
+    if not login_str:
+        return None
+
+    for rule in settings.get("server_login_rules") or []:
+        if not isinstance(rule, dict):
+            continue
+        rule_server = rule.get("server")
+        if not isinstance(rule_server, str):
+            continue
+        if rule_server.strip().lower() != server_name:
+            continue
+
+        best_len = 0
+        best_mode: int | None = None
+        for key, mode in (
+            ("real_login_prefixes", REAL),
+            ("contest_login_prefixes", CONTEST),
+            ("demo_login_prefixes", DEMO),
+        ):
+            for prefix in rule.get(key) or []:
+                p = str(prefix).strip()
+                if p and login_str.startswith(p) and len(p) > best_len:
+                    best_len = len(p)
+                    best_mode = mode
+        return best_mode
+    return None
+
+
+def classify_account(
+    group: str | None, server: str | None, login: str | None, settings: dict
+) -> int | None:
+    """账户类型判定的统一入口：组名 > 登录号段 > 整台服务器，依次兜底。
+
+    **为什么登录号段排在服务器名前面**：服务器名规则只能表达"这整台服务器
+    都是实盘"这一种断言；登录号段规则能表达"这台服务器是混跑的，靠号段区分"
+    ——后者是前者的精细化版本，配置了它就说明运维已经知道这台服务器不能
+    一刀切。两者都配置时，更具体的必须赢，否则整台服务器的断言会静默压制
+    号段规则本该纠正的那批账号——这正是 100016 被误判为实盘的那个 bug。
 
     **⚠ falsy-zero 陷阱**：`DEMO == 0`，所以绝不能写
-    `classify_group(...) or classify_server(...)`——组名判成 DEMO 时
-    `0 or ...` 会继续求值右边，把一个已经判出来的模拟账户送去服务器名单里
-    再查一次。必须显式判断 `is not None`，只有组名**完全没判出来**（None）
-    才落到服务器名兜底。
+    `classify_group(...) or classify_login(...) or classify_server(...)`——
+    组名判成 DEMO 时 `0 or ...` 会继续求值右边，把一个已经判出来的模拟账户
+    送去后面的规则里再查一次。必须显式判断 `is not None`，只有前一层
+    **完全没判出来**（None）才落到下一层兜底。
 
-    Single entry point: group name first (authoritative), server name only as
-    a fallback when the group yields nothing. CRITICAL: DEMO == 0 is falsy, so
-    `classify_group(...) or classify_server(...)` is a bug — a group correctly
-    classified as DEMO would fall through to the server whitelist. Must check
-    `is not None` explicitly.
+    Single entry point, first non-None wins, in this order:
+    1. classify_group — broker group via Manager API, authoritative (gateway channel).
+    2. classify_login — server + login-prefix; more specific than a whole-server
+       claim because it can express "this server is mixed", which a server-name
+       rule cannot. Where both are configured for the same server, the
+       finer-grained per-login rule must win, or a whole-server assertion would
+       silently override the very correction it was configured to make.
+    3. classify_server — whole-server-is-live claim; still valid for brokers
+       that genuinely segregate demo/live onto separate servers.
+    CRITICAL: DEMO == 0 is falsy, so chaining with `or` is a bug — must check
+    `is not None` explicitly at every step.
     """
     by_group = classify_group(group, settings)
     if by_group is not None:
         return by_group
+    by_login = classify_login(server, login, settings)
+    if by_login is not None:
+        return by_login
     return classify_server(server, settings)
 
 

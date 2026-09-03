@@ -705,33 +705,62 @@ ACCOUNT_TYPE_DEFAULTS: dict = {
     # 不上报 tradeMode，且桥接载荷本身不含 MT5 组名）的情况——见
     # services/account_type.py 的 classify_server/classify_account。
     #
-    # "MakeCapital-Live" 是精确服务器名，不是前缀：这是一份经确认为真实实盘的
-    # 服务器白名单，只做精确匹配。可信度上限就是桥接自报的 tradeMode 本身（同
-    # 属客户端来源，不比它更权威）——真正的反作弊防线是服务端订单归因校验
-    # （`closed_trades.verified`），这份名单不降低那道防线的地位，只是让老版本
-    # 桥接客户端的真实账户不再被漏判成"未知"。
+    # 这张表只做精确匹配，且**只能列"确认整台服务器都是实盘"的服务器名**。
+    # `MakeCapital-Live` 原来在这张表里，2026-09-03 被移除——券商确认那台
+    # MT5 服务器同时跑模拟和实盘，靠登录号段区分（见下面 server_login_rules），
+    # 整台服务器判实盘的前提不成立。生产上账号 100016（模拟、余额刚好
+    # 10000.00）就是这条错规则的受害者：单纯因为服务器名命中白名单被判成
+    # REAL，这正是本模块 docstring 开头点名要避免的方向。已知的另一个反例：
+    # `HolaPrime-Server1` 同样实盘与模拟混跑（2026-09-03 与券商确认）。
+    # 这张表现在留给真正把 demo/live 分到不同服务器的券商用。
     #
     # Server-name whitelist: the bridge channel's fallback, used only when an
     # account has no group name (an older bridge client that never reports
     # tradeMode, and the bridge payload itself carries no MT5 group) — see
     # classify_server/classify_account in services/account_type.py.
     #
-    # "MakeCapital-Live" is an exact server name, not a prefix: a curated
-    # whitelist of servers confirmed to be live, exact-match only. Its trust
-    # ceiling is the same as the bridge's self-reported tradeMode (both are
-    # client-sourced) — the real anti-fraud line remains the server-side order-
-    # attribution check (`closed_trades.verified`); this list doesn't lower
-    # that bar, it just stops older bridge clients' genuine live accounts from
-    # being misclassified as unknown.
-    # ⚠ 只列**确认整台服务器都是实盘**的服务器名。已知反例：`HolaPrime-Server1`
-    # 上面实盘与模拟账户混跑（2026-09-03 与券商确认），所以它**不能**进这张表——
-    # 那台服务器上的账户只能靠桥接 v1.3.20+ 自报的 tradeMode 逐个判定。
-    # Only list servers confirmed to be live-only. Counter-example: HolaPrime-Server1
-    # mixes live and demo accounts, so it must NOT be whitelisted — accounts there can
-    # only be classified per-account by bridge v1.3.20+'s self-reported tradeMode.
-    "real_server_names": ["MakeCapital-Live"],
+    # Exact match only, and only ever list a server confirmed to be **entirely**
+    # live. `MakeCapital-Live` used to be here and was removed 2026-09-03: the
+    # broker confirmed that MT5 server hosts both demo and live accounts, told
+    # apart by login prefix (see server_login_rules below), so the whole-server
+    # premise was false. In production, account 100016 (demo, balance exactly
+    # 10000.00) was misclassified REAL purely by this whitelist match — exactly
+    # the failure direction this module's docstring warns against. Known
+    # counter-example: HolaPrime-Server1 also mixes live and demo accounts
+    # (confirmed with the broker 2026-09-03). This list now exists only for
+    # brokers that genuinely segregate demo/live onto separate servers.
+    "real_server_names": [],
     "contest_server_names": [],
     "demo_server_names": [],
+    # 服务器 + 登录号段规则：一台 MT5 服务器混跑模拟与实盘时，靠券商自己的
+    # 登录号编号习惯区分（不是猜的，是跟券商确认过的）——见
+    # services/account_type.py 的 classify_login/classify_account。
+    #
+    # Make Capital 已确认（2026-09-03）：`MakeCapital-Live` 一台服务器同时开
+    # 模拟和实盘账户，登录号 `1` 开头是模拟、`6` 开头是实盘。没列在这里的号段
+    # （比如 `9` 开头）一律判未知，**排除在实盘统计外**——这是有意的：往
+    # "模拟记成实盘"这个方向猜，代价远大于漏算一个账号；等券商确认了具体
+    # 号段再补进配置，下一轮回填自动纠正。
+    #
+    # Server + login-prefix rules: when one MT5 server mixes demo and live
+    # accounts, the broker's own login-numbering convention tells them apart
+    # (confirmed with the broker, not guessed) — see classify_login/
+    # classify_account in services/account_type.py.
+    #
+    # Make Capital confirmed (2026-09-03): MakeCapital-Live hosts both account
+    # types on one server, logins starting with 1 are demo, 6 are live. Prefixes
+    # not listed here (e.g. 9) classify as unknown and are deliberately excluded
+    # from live statistics — guessing in the "demo counted as live" direction
+    # poisons every statistic; the next backfill self-corrects once the broker
+    # confirms the missing prefix and it's added here.
+    "server_login_rules": [
+        {
+            "server": "MakeCapital-Live",
+            "real_login_prefixes": ["6"],
+            "demo_login_prefixes": ["1"],
+            "contest_login_prefixes": [],
+        },
+    ],
 }
 
 _account_type_cache: dict = {}

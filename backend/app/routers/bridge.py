@@ -391,7 +391,9 @@ def _upsert_account(
         # is driven by the server-name whitelist; still None when nothing
         # matches, left for the next gamification backfill pass or an ops fix.
         settings = get_account_type_settings(db)
-        row.trade_mode = classify_account(row.mt5_group, acc.server or row.server, settings)
+        row.trade_mode = classify_account(
+            row.mt5_group, acc.server or row.server, acc.login, settings
+        )
     row.online = True
     row.last_heartbeat = datetime.now(timezone.utc)
     return row, created

@@ -41,7 +41,7 @@ def backfill_account_trade_modes(db) -> int:
     cfg = get_account_type_settings(db)
     n = 0
     for row in rows:
-        tm = classify_account(row.mt5_group, row.server, cfg)
+        tm = classify_account(row.mt5_group, row.server, row.login, cfg)
         if tm is not None:
             row.trade_mode = tm
             n += 1
