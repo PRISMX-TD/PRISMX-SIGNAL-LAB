@@ -723,6 +723,12 @@ ACCOUNT_TYPE_DEFAULTS: dict = {
     # attribution check (`closed_trades.verified`); this list doesn't lower
     # that bar, it just stops older bridge clients' genuine live accounts from
     # being misclassified as unknown.
+    # ⚠ 只列**确认整台服务器都是实盘**的服务器名。已知反例：`HolaPrime-Server1`
+    # 上面实盘与模拟账户混跑（2026-09-03 与券商确认），所以它**不能**进这张表——
+    # 那台服务器上的账户只能靠桥接 v1.3.20+ 自报的 tradeMode 逐个判定。
+    # Only list servers confirmed to be live-only. Counter-example: HolaPrime-Server1
+    # mixes live and demo accounts, so it must NOT be whitelisted — accounts there can
+    # only be classified per-account by bridge v1.3.20+'s self-reported tradeMode.
     "real_server_names": ["MakeCapital-Live"],
     "contest_server_names": [],
     "demo_server_names": [],
