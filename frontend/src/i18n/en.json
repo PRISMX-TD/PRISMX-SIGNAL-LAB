@@ -1941,12 +1941,13 @@
       "win_rate": "Needs ≥20 trades this period with positive P&L to rank — a high win rate alone doesn't mean profit."
     },
     "admin": { "preview": "Leaderboard preview", "leaderboardSwitch": "Leaderboard user-facing visibility",
-               "competitionsSwitch": "Competitions user-facing visibility (Phase 3)",
+               "competitionsSwitch": "Competitions user-facing visibility",
                "minBaseline": "Minimum baseline for the return board (USD)",
                "minTradesReturn": "Minimum trades for the return board",
                "minTradesWinrate": "Minimum trades for the win rate board",
                "minTradesHint": "Loosen these during the beta to make the boards observable; restore the defaults (5 for the return board, 20 for the win rate board) before opening them to real users.",
                "confirmOpenBoard": "Once opened, the leaderboard is visible to all users. Confirm opening?",
+               "confirmOpenCompetitions": "Once opened, competitions are visible to all users. Confirm opening?",
                "pickBoard": "Pick a board", "pickPeriod": "Pick a period" }
   },
   "competition": {

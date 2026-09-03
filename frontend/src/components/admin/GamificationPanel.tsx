@@ -192,6 +192,7 @@ export default function GamificationPanel() {
   const [settingsError, setSettingsError] = useState<string | null>(null)
   const [savingUserVisible, setSavingUserVisible] = useState(false)
   const [savingLeaderboardVisible, setSavingLeaderboardVisible] = useState(false)
+  const [savingCompetitionsVisible, setSavingCompetitionsVisible] = useState(false)
   const [baselineDraft, setBaselineDraft] = useState('')
   const [savingBaseline, setSavingBaseline] = useState(false)
   const [minTradesReturnDraft, setMinTradesReturnDraft] = useState('')
@@ -251,6 +252,19 @@ export default function GamificationPanel() {
       setSettingsError(err instanceof Error ? localizeApiError(err.message) : 'Save failed')
     } finally {
       setSavingLeaderboardVisible(false)
+    }
+  }
+
+  const toggleCompetitionsVisible = async (next: boolean) => {
+    if (next && !window.confirm(t('leaderboard.admin.confirmOpenCompetitions'))) return
+    setSavingCompetitionsVisible(true)
+    setSettingsError(null)
+    try {
+      setSettings(await adminApi.updateGamificationSettings({ competitionsVisible: next }))
+    } catch (err) {
+      setSettingsError(err instanceof Error ? localizeApiError(err.message) : 'Save failed')
+    } finally {
+      setSavingCompetitionsVisible(false)
     }
   }
 
@@ -432,23 +446,18 @@ export default function GamificationPanel() {
               offLabel={t('gamification.admin.visibleOff')}
               onChange={toggleLeaderboardVisible}
             />
-            {/* 比赛开关：Phase 3 未上线，永久禁用态展示，不设 confirm（没有可翻的动作）。 */}
-            {/* Competitions switch: Phase 3 hasn't shipped, permanently disabled — no
-                confirm needed since there's no action to flip. */}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <span className="text-sm text-neutral-600">{t('leaderboard.admin.competitionsSwitch')}</span>
-              <span className="relative inline-flex cursor-not-allowed items-center opacity-50">
-                <input
-                  type="checkbox"
-                  checked={!!settings?.competitionsVisible}
-                  disabled
-                  readOnly
-                  className="peer sr-only"
-                />
-                <span className="h-6 w-11 rounded-full bg-white/10" />
-                <span className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white/70 shadow" />
-              </span>
-            </div>
+            {/* 比赛开关：Phase 3 已上线，与前两个开关同一套「翻开要 confirm、只升不降」。
+                这里曾是 Phase 2 留的禁用占位，Phase 3 合并时漏了激活——完整性审计抓出。 */}
+            {/* Competitions switch: live since Phase 3, same confirm-on-open discipline
+                as the other two. Was a disabled placeholder left over from Phase 2. */}
+            <SettingsToggleRow
+              label={t('leaderboard.admin.competitionsSwitch')}
+              checked={!!settings?.competitionsVisible}
+              saving={savingCompetitionsVisible}
+              onLabel={t('gamification.admin.visibleOn')}
+              offLabel={t('gamification.admin.visibleOff')}
+              onChange={toggleCompetitionsVisible}
+            />
 
             <div className="flex flex-wrap items-end gap-3 border-t border-white/5 pt-3">
               <label className="flex flex-col gap-1 text-xs text-neutral-500">
