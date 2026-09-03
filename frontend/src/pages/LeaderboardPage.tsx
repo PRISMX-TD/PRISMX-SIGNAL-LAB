@@ -23,6 +23,7 @@
 // of a raw API error (same pattern as AchievementsPage).
 import type { CSSProperties } from 'react'
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { gamificationApi } from '../api/client'
 import { SkeletonPage } from '../components/Skeleton'
@@ -277,6 +278,168 @@ function ListRow({ row, board, maxAbs }: { row: LeaderboardRow; board: Leaderboa
   )
 }
 
+// ═══════════════════════ 手机端 v2（< 640px）专用组件 ═══════════════════════
+// 领奖台三列（2|1|3，中间抬高）、密排榜单行、钉在底栏上方的名次条——都只在
+// < 640px 渲染，desktop（≥ 640px）继续走上面已有的 PodiumCard / ListRow /
+// MyRankCard，一像素不改。
+// ═══════════════════════ mobile v2 (< 640px) only components ═══════════════
+// Three-column podium (2|1|3, center raised), a dense list row, and the
+// rank bar pinned above the tab bar — all render only below 640px; desktop
+// (≥ 640px) keeps using PodiumCard / ListRow / MyRankCard above, unchanged.
+
+// 领奖台底色光斑只打在中间（冠军）列，颜色照抄 PODIUM_TINT[1]（金）——领奖台
+// 面板本身没有分材质底色，光斑是唯一提示"这是冠军位"的视觉线索。
+// The podium's tint spot only sits behind the center (champion) column,
+// reusing PODIUM_TINT[1]'s gold — the panel itself has no per-rank field
+// color, so the spot is the only cue marking "this is the champion slot".
+function PodiumColumnMobile({ row, board, center }: { row: LeaderboardRow; board: LeaderboardBoard; center: boolean }) {
+  const { t } = useTranslation()
+  return (
+    <div className={`relative flex min-w-0 flex-col items-center gap-1 text-center ${center ? '-translate-y-2' : 'pt-4'}`}>
+      {center && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -inset-x-3 -top-4 -z-10 h-24 opacity-80"
+          style={{ backgroundImage: 'radial-gradient(circle at 50% 25%, rgba(228,190,106,.28), transparent 65%)' }}
+        />
+      )}
+      <RankCoin rank={row.rank} size={center ? 48 : 38} />
+      <div className="flex w-full min-w-0 items-center justify-center gap-1">
+        <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-neutral-100">{row.displayName}</span>
+        {row.equippedBadge && (
+          <BadgeIcon id={row.equippedBadge} rarity={BADGE_RARITY[row.equippedBadge] ?? 'common'} earned size={14} className="shrink-0" />
+        )}
+      </div>
+      <b
+        className={`num font-display font-extrabold leading-none tracking-tight ${center ? 'text-[22px]' : 'text-[17px]'} ${scoreColorClass(board, row.score)}`}
+      >
+        {fmtScore(board, row.score)}
+      </b>
+      <small className="num text-[10.5px] text-neutral-500">{t('leaderboard.sampleCount', { n: row.sample })}</small>
+    </div>
+  )
+}
+
+// 密排榜单行：无卡片外壳，靠 divide-y 分隔；账户号/幅度条整体不出现在手机端
+// （宽度不够摆下，笔数已经搬到名字下面那行）。
+// Dense list row: no card shell, separated by divide-y; the account column
+// and the magnitude bar don't appear on mobile at all (no room, and the
+// trade count already moved under the name).
+function ListRowMobile({ row, board }: { row: LeaderboardRow; board: LeaderboardBoard }) {
+  const { t } = useTranslation()
+  return (
+    <div
+      className={`relative grid grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2 py-2.5 ${row.isSelf ? 'bg-prism-600/[0.07]' : ''}`}
+    >
+      {row.isSelf && <span aria-hidden className="absolute bottom-1 left-0 top-1 w-[3px] rounded-r-[3px] bg-prism-400" />}
+      <span className={`num text-[13px] ${row.isSelf ? 'font-semibold text-neutral-100' : 'text-neutral-400'}`}>
+        {String(row.rank).padStart(2, '0')}
+      </span>
+      <div className="flex min-w-0 items-center gap-2">
+        {row.equippedBadge && (
+          <BadgeIcon id={row.equippedBadge} rarity={BADGE_RARITY[row.equippedBadge] ?? 'common'} earned size={16} className="shrink-0" />
+        )}
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className={`truncate text-[13px] ${row.isSelf ? 'font-semibold text-neutral-100' : 'text-neutral-200'}`}>
+              {row.displayName}
+            </span>
+            {row.isSelf && (
+              <span className="tag shrink-0 bg-prism-600/25 text-[11px] text-prism-300">{t('leaderboard.youTag')}</span>
+            )}
+          </div>
+          <div className="text-[11px] text-neutral-500">{t('leaderboard.sampleCount', { n: row.sample })}</div>
+        </div>
+      </div>
+      <b className={`num text-right text-[13px] font-semibold ${scoreColorClass(board, row.score)}`}>{fmtScore(board, row.score)}</b>
+    </div>
+  )
+}
+
+// 名次栏钉在底栏上方：背景/模糊照抄 .lg-tabbar-inner 的例外做法——它也是常驻
+// 悬浮在滚动内容之上的一层，模糊在这里同样"有功能"（见 index.css 该组件的
+// 注释）。bottom 的 100px = 底栏自身离屏幕底边 12px + 底栏自身高度（约
+// 78px：8 内边距×2 + 26 图标 + 4 间距 + 约 13 文字）+ 10px 间隙，整体再叠上
+// env(safe-area-inset-bottom)。
+// The rank bar pinned above the tab bar: background/blur copies the one
+// exception at .lg-tabbar-inner — it's also a persistent layer floating over
+// scrolling content, so blur is functional there too (see that rule's own
+// comment in index.css). The 100px in `bottom` = the tab bar's own 12px gap
+// from the screen edge + its own ~78px height (8+8 padding, 26 icon, 4 gap,
+// ~13 label) + a 10px clearance, stacked on top of the safe-area inset.
+const MY_RANK_BAR_BOTTOM = 'calc(env(safe-area-inset-bottom) + 100px)'
+
+// 用 Portal 挂到 body：页面内容外层 .page-enter 有 transform 动画（见
+// SlideOrderModal.tsx/ChartOrderModal.tsx/ConfirmModal.tsx 同一条注释），会
+// 成为 fixed 定位的包含块，导致这张钉住的条相对内容区而非视口定位——量出来
+// 会紧贴在内容末尾附近而不是贴着底栏。挂到 body 可脱离该祖先，让 fixed 重新
+// 相对视口计算。
+// Portal to body: the .page-enter wrapper around page content has a
+// transform animation (same note as SlideOrderModal.tsx /
+// ChartOrderModal.tsx / ConfirmModal.tsx), which becomes the containing
+// block for fixed positioning — without this the pinned bar ends up
+// anchored near the end of the content box instead of the viewport bottom,
+// nowhere near the tab bar. Portaling to body escapes that ancestor so
+// fixed positions against the viewport again.
+function MyRankBarMobile({ data, board }: { data: LeaderboardPayload; board: LeaderboardBoard }) {
+  const { t } = useTranslation()
+
+  if (data.me) {
+    const above = data.rows.find((r) => r.rank === data.me!.rank - 1)
+    let cta: string | null = null
+    if (data.me.rank === 1) {
+      cta = t('leaderboard.atTop')
+    } else if (above) {
+      const gap = above.score - data.me.score
+      cta = t('leaderboard.gapToNext', { gap: fmtScore(board, gap), rank: data.me.rank - 1 })
+    }
+    return createPortal(
+      <div
+        className="lb-mine-m fixed inset-x-3 z-20 flex h-14 items-center gap-2 rounded-[16px] border border-white/[0.14] bg-ink-950/85 px-3 backdrop-blur-lg sm:hidden"
+        style={{ bottom: MY_RANK_BAR_BOTTOM }}
+      >
+        <RankCoin rank={data.me.rank} size={32} />
+        <span className="num shrink-0 text-base font-bold leading-none text-neutral-100">#{data.me.rank}</span>
+        <b className={`num shrink-0 text-sm font-semibold ${scoreColorClass(board, data.me.score)}`}>
+          {fmtScore(board, data.me.score)}
+        </b>
+        <span className="shrink-0 text-[11px] text-neutral-500">{t('leaderboard.sampleCount', { n: data.me.sample })}</span>
+        {cta && <span className="ml-auto min-w-0 truncate text-right text-xs text-neutral-400">{cta}</span>}
+      </div>,
+      document.body,
+    )
+  }
+
+  if (data.progress) {
+    const p = data.progress
+    const belowBaseline = p.baselineUsd < p.minBaselineUsd
+    const pct = Math.max(0, Math.min(100, (p.sample / Math.max(1, p.minTrades)) * 100))
+    return createPortal(
+      <div
+        className="lb-mine-m fixed inset-x-3 z-20 overflow-hidden rounded-[16px] border border-white/[0.14] bg-ink-950/85 backdrop-blur-lg sm:hidden"
+        style={{ bottom: MY_RANK_BAR_BOTTOM }}
+      >
+        <div className="flex h-14 items-center gap-2 px-3">
+          <span className="shrink-0 text-sm font-bold text-neutral-500">{t('leaderboard.notRankedShort')}</span>
+          <span className="ml-auto min-w-0 truncate text-right text-xs text-neutral-400">
+            {t('leaderboard.progressCount', { s: p.sample, n: p.minTrades })}
+            {' · '}
+            {belowBaseline
+              ? t('leaderboard.progressBaselineLow', { usd: fmtUsd(p.baselineUsd), gap: fmtUsd(p.minBaselineUsd - p.baselineUsd) })
+              : t('leaderboard.progressBaselineOk', { usd: fmtUsd(p.baselineUsd) })}
+          </span>
+        </div>
+        <div className="h-[3px] w-full bg-white/[0.08]">
+          <GrowBar pct={pct} className="h-full" style={{ background: 'linear-gradient(90deg, var(--purple), var(--purple-hi))' }} />
+        </div>
+      </div>,
+      document.body,
+    )
+  }
+
+  return null
+}
+
 // 「我的名次」卡：三态——已上榜（名次徽标 + 成绩 + 追赶提示）/ 未上榜但本期
 // 已拍基线（进度条 + 本金门槛回显）/ 未上榜且无基线（沿用旧版 notRanked 提示）。
 // "My rank" card: three states — ranked (rank coin + score + a catch-up
@@ -296,7 +459,12 @@ function MyRankCard({ data, board, rankThreshold }: { data: LeaderboardPayload; 
       cta = t('leaderboard.gapToNext', { gap: fmtScore(board, gap), rank: data.me.rank - 1 })
     }
     return (
-      <div className="lb-my-rank glass flex flex-col gap-4 p-[18px_22px] sm:flex-row sm:items-center sm:justify-between">
+      // < 640px 这一态改由 MyRankBarMobile 钉在底栏上方渲染，这里只在
+      // ≥ 640px 显示——桌面这张卡本身一像素不改。
+      // Below 640px this state is rendered by MyRankBarMobile instead,
+      // pinned above the tab bar — this card only shows at ≥ 640px and is
+      // otherwise untouched.
+      <div className="lb-my-rank glass hidden flex-col gap-4 p-[18px_22px] sm:flex sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <RankCoin rank={data.me.rank} size={44} />
           <div>
@@ -340,7 +508,10 @@ function MyRankCard({ data, board, rankThreshold }: { data: LeaderboardPayload; 
     const p = data.progress
     const belowBaseline = p.baselineUsd < p.minBaselineUsd
     return (
-      <div className="lb-my-rank glass grid gap-3 p-[18px_22px] sm:grid-cols-[auto_1fr] sm:gap-[22px]">
+      // 同上：< 640px 由 MyRankBarMobile 顶替（带底部进度线），这张卡只在
+      // ≥ 640px 显示。Same as above: below 640px MyRankBarMobile takes over
+      // (with a bottom progress line); this card only shows at ≥ 640px.
+      <div className="lb-my-rank glass hidden gap-3 p-[18px_22px] sm:grid sm:grid-cols-[auto_1fr] sm:gap-[22px]">
         <div>
           <div className="text-[11px] uppercase tracking-wider text-neutral-500">{t('leaderboard.myRank')}</div>
           <div className="font-display text-[28px] font-extrabold leading-tight tracking-tight text-neutral-500">
@@ -488,49 +659,92 @@ export default function LeaderboardPage() {
   const { year, week, month } = parsePeriodKey(data.periodKey, period)
   const sealed = data.sealAt ? Date.now() >= new Date(data.sealAt).getTime() : false
 
-  const gateChips: string[] = isReturn
+  // quantitative: true 的几条（笔数/本金/盈亏为正）手机端常显；false 的几条
+  // 是说明性文案（比收益率不比金额、入金并入分母、按账户·打码·明示），手机端
+  // 用 hidden sm:inline-flex 藏起来腾地方，桌面端仍然全部显示、不变。
+  // quantitative: true entries (trade count / baseline / positive P&L) stay
+  // visible on mobile; the false ones are descriptive copy (metric framing,
+  // deposit handling, identity policy) hidden on mobile via
+  // hidden sm:inline-flex to save room — desktop still shows all of them,
+  // unchanged.
+  const gateChips: { text: string; quantitative: boolean }[] = isReturn
     ? [
-        t('leaderboard.gates.returnMetric'),
-        t('leaderboard.gates.minTradesReturn', { n: gates.minTradesReturn }),
-        t('leaderboard.gates.minBaseline', { usd: fmtUsd(gates.minBaselineUsd) }),
-        t('leaderboard.gates.deposits'),
-        t('leaderboard.gates.identity'),
+        { text: t('leaderboard.gates.returnMetric'), quantitative: false },
+        { text: t('leaderboard.gates.minTradesReturn', { n: gates.minTradesReturn }), quantitative: true },
+        { text: t('leaderboard.gates.minBaseline', { usd: fmtUsd(gates.minBaselineUsd) }), quantitative: true },
+        { text: t('leaderboard.gates.deposits'), quantitative: false },
+        { text: t('leaderboard.gates.identity'), quantitative: false },
       ]
     : [
-        t('leaderboard.gates.minTradesWinrate', { n: gates.minTradesWinrate }),
-        t('leaderboard.gates.positive'),
-        t('leaderboard.gates.identity'),
+        { text: t('leaderboard.gates.minTradesWinrate', { n: gates.minTradesWinrate }), quantitative: true },
+        { text: t('leaderboard.gates.positive'), quantitative: true },
+        { text: t('leaderboard.gates.identity'), quantitative: false },
       ]
 
   return (
-    <div className="mx-auto max-w-[1100px] space-y-6 pb-10">
+    // pb-[76px]：手机端把「我的名次」钉在底栏上方，页面内容需要留出净空，
+    // 否则榜单最后几行会被那张浮动条挡住摸不到；桌面端 sm:pb-10 原样不变。
+    // pb-[76px]: mobile pins the rank bar above the tab bar, so page content
+    // needs clearance or the list's last rows end up trapped under it;
+    // desktop keeps the original sm:pb-10 unchanged.
+    <div className="mx-auto max-w-[1100px] space-y-6 pb-[76px] sm:pb-10">
       <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h2 className="font-display text-2xl font-bold text-neutral-100">
             <span className="neon-text">{t('leaderboard.title')}</span>
           </h2>
           {data.periodStart && data.periodEnd && (
-            <div className="mt-2 flex flex-wrap items-center gap-x-3.5 gap-y-2 text-[13px] text-neutral-400">
-              <span className="font-semibold text-neutral-100">
-                {period === 'week' ? t('leaderboard.periodWeek', { year, week }) : t('leaderboard.periodMonth', { year, month })}
-              </span>
-              <span className="text-neutral-600">·</span>
-              <span className="num">
-                {fmtUtcShortDate(data.periodStart)} – {fmtUtcShortDate(new Date(new Date(data.periodEnd).getTime() - 86400000).toISOString())}
-              </span>
-              <span className="text-neutral-600">·</span>
-              <span className="chip inline-flex items-center gap-1.5 border border-white/10 text-neutral-300">
-                <i
-                  aria-hidden
-                  className={`h-1.5 w-1.5 rounded-full ${sealed ? 'bg-neutral-500' : 'bg-up shadow-[0_0_0_3px_rgba(53,201,122,.15)]'}`}
-                />
-                {sealed || !data.sealAt ? t('leaderboard.sealed') : t('leaderboard.sealRunning', { time: fmtUtcClock(data.sealAt) })}
-              </span>
-            </div>
+            <>
+              {/* ≥ 640px：原样不动。桌面这行一像素不改。
+                  ≥ 640px: unchanged verbatim — pixel-identical to before. */}
+              <div className="mt-2 hidden flex-wrap items-center gap-x-3.5 gap-y-2 text-[13px] text-neutral-400 sm:flex">
+                <span className="font-semibold text-neutral-100">
+                  {period === 'week' ? t('leaderboard.periodWeek', { year, week }) : t('leaderboard.periodMonth', { year, month })}
+                </span>
+                <span className="text-neutral-600">·</span>
+                <span className="num">
+                  {fmtUtcShortDate(data.periodStart)} –{' '}
+                  {fmtUtcShortDate(new Date(new Date(data.periodEnd).getTime() - 86400000).toISOString())}
+                </span>
+                <span className="text-neutral-600">·</span>
+                <span className="chip inline-flex items-center gap-1.5 border border-white/10 text-neutral-300">
+                  <i
+                    aria-hidden
+                    className={`h-1.5 w-1.5 rounded-full ${sealed ? 'bg-neutral-500' : 'bg-up shadow-[0_0_0_3px_rgba(53,201,122,.15)]'}`}
+                  />
+                  {sealed || !data.sealAt ? t('leaderboard.sealed') : t('leaderboard.sealRunning', { time: fmtUtcClock(data.sealAt) })}
+                </span>
+              </div>
+              {/* < 640px：周期+日期揉成一条 13px 的浅色行，封存 chip 收窄 padding，
+                  两者放进同一个 flex-wrap 行，装不下才换行——不是原本桌面版那种
+                  永远分成两三段的写法。
+                  < 640px: the period label and dates fold into one muted 13px
+                  line, and the seal chip gets tighter padding; both sit in one
+                  flex-wrap row that only breaks onto a second line when it
+                  doesn't fit, unlike the desktop version's always-segmented
+                  layout. */}
+              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 sm:hidden">
+                <span className="text-[13px] text-neutral-400">
+                  {period === 'week' ? t('leaderboard.periodWeek', { year, week }) : t('leaderboard.periodMonth', { year, month })}
+                  <span className="text-neutral-600"> · </span>
+                  <span className="num">
+                    {fmtUtcShortDate(data.periodStart)} –{' '}
+                    {fmtUtcShortDate(new Date(new Date(data.periodEnd).getTime() - 86400000).toISOString())}
+                  </span>
+                </span>
+                <span className="chip inline-flex items-center gap-1.5 border border-white/10 px-2 py-1 text-[11px] text-neutral-300">
+                  <i
+                    aria-hidden
+                    className={`h-1.5 w-1.5 rounded-full ${sealed ? 'bg-neutral-500' : 'bg-up shadow-[0_0_0_3px_rgba(53,201,122,.15)]'}`}
+                  />
+                  {sealed || !data.sealAt ? t('leaderboard.sealed') : t('leaderboard.sealRunning', { time: fmtUtcClock(data.sealAt) })}
+                </span>
+              </div>
+            </>
           )}
         </div>
-        <div className="lb-controls flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center">
-          <div className="seg-tabs w-full sm:w-fit" role="tablist">
+        <div className="lb-controls flex flex-row items-center gap-2 sm:flex-wrap sm:gap-2.5">
+          <div className="lb-seg-board seg-tabs w-full sm:w-fit" role="tablist">
             {BOARDS.map((b) => (
               <button
                 key={b}
@@ -544,7 +758,7 @@ export default function LeaderboardPage() {
               </button>
             ))}
           </div>
-          <div className="seg-tabs w-full sm:w-fit" role="tablist">
+          <div className="lb-seg-period seg-tabs w-full sm:w-fit" role="tablist">
             {PERIODS.map((p) => (
               <button
                 key={p}
@@ -563,8 +777,11 @@ export default function LeaderboardPage() {
 
       <div className="lb-gates -mx-4 flex flex-nowrap gap-2 overflow-x-auto px-4 no-scrollbar sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
         {gateChips.map((chip) => (
-          <span key={chip} className="chip shrink-0 border border-white/10 bg-white/[0.04] text-neutral-400">
-            {chip}
+          <span
+            key={chip.text}
+            className={`chip shrink-0 border border-white/10 bg-white/[0.04] h-[26px] px-2.5 text-[11px] text-neutral-400 sm:h-auto sm:px-2 sm:py-1 sm:text-xs ${chip.quantitative ? '' : 'hidden sm:inline-flex'}`}
+          >
+            {chip.text}
           </span>
         ))}
       </div>
@@ -573,8 +790,14 @@ export default function LeaderboardPage() {
         <EmptyState data={data} board={board} rankThreshold={rankThreshold[board]} minBaselineUsd={gates.minBaselineUsd} />
       ) : (
         <>
+          {/* ≥ 640px：三张卡（PodiumCard），布局/断点原样不动。
+              ≥ 640px: the three PodiumCard cards, layout and breakpoints
+              untouched. */}
           {podiumRows.length > 0 && (
-            <div className="lb-podium flex flex-col gap-3 md:grid md:items-end md:gap-3.5" style={{ gridTemplateColumns: gridTemplate }}>
+            <div
+              className="lb-podium hidden flex-col gap-3 sm:flex md:grid md:items-end md:gap-3.5"
+              style={{ gridTemplateColumns: gridTemplate }}
+            >
               {visualOrder.map((rank) => {
                 const row = rowByRank.get(rank)
                 if (!row) return null
@@ -583,8 +806,35 @@ export default function LeaderboardPage() {
             </div>
           )}
 
+          {/* < 640px：真领奖台——一块玻璃面板，2|1|3 三列，中间列抬高+金色光斑。
+              < 640px: a real podium — one glass panel, three columns in
+              2|1|3 order, the center column raised with a gold spotlight. */}
+          {podiumRows.length > 0 && (
+            <div
+              className={`lb-podium-m glass relative grid items-end gap-2 p-3 sm:hidden ${
+                visualOrder.length === 3 ? 'grid-cols-3' : visualOrder.length === 2 ? 'grid-cols-2' : 'grid-cols-1 justify-items-center'
+              }`}
+            >
+              {visualOrder.map((rank) => {
+                const row = rowByRank.get(rank)
+                if (!row) return null
+                return <PodiumColumnMobile key={row.rank} row={row} board={board} center={row.rank === 1} />
+              })}
+            </div>
+          )}
+
           {listRows.length > 0 && (
-            <section className="glass overflow-hidden p-0">
+            <section className="lb-list-m divide-y divide-white/[0.08] sm:hidden">
+              {listRows.map((row) => (
+                <ListRowMobile key={row.rank} row={row} board={board} />
+              ))}
+            </section>
+          )}
+
+          {/* ≥ 640px：原表头 + ListRow，一像素不改。
+              ≥ 640px: the original header row + ListRow, untouched. */}
+          {listRows.length > 0 && (
+            <section className="glass hidden overflow-hidden p-0 sm:block">
               <div className="grid grid-cols-[40px_minmax(0,1fr)_84px] gap-2 px-3 pb-2 pt-2.5 text-[11px] uppercase tracking-wider text-neutral-500 md:grid-cols-[56px_minmax(0,1.4fr)_120px_minmax(0,1.2fr)_88px] md:gap-3 md:px-[18px]">
                 <span>{t('leaderboard.colRank')}</span>
                 <span>{t('leaderboard.colTrader')}</span>
@@ -601,6 +851,7 @@ export default function LeaderboardPage() {
       )}
 
       <MyRankCard data={data} board={board} rankThreshold={rankThreshold[board]} />
+      <MyRankBarMobile data={data} board={board} />
     </div>
   )
 }

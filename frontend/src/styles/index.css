@@ -5189,28 +5189,45 @@ body {
   .lb-podium-card:hover { transform: none; }
 }
 
-/* ═════════════ 排行榜 · 手机端分段控件全宽 / leaderboard mobile seg-tabs ═════════════
+/* ═════════════ 排行榜 · 手机端控件一行 v2 / leaderboard mobile controls row v2 ═════════════
    .seg-tabs 自带 width:fit-content、.seg-tabs button 自带 flex-shrink:0——
-   两条都是组件层规则，跟 Tailwind 的 w-full / flex-1 撞在同一批属性上。这份
-   构建里顶层 @layer components { 块在文件中段就已经闭合，.seg-tabs 之后的
-   定义其实落在普通全局作用域，物理位置又晚于文件顶部被搬运过来的
-   utilities——实测 w-full/flex-1 单靠类名叠加压不过组件规则。用更高特异度的
-   复合选择器 + 媒体查询直接改，比继续跟层级顺序较劲更可靠。
+   两条都是普通全局规则（这份构建里顶层 @layer components 块在文件中段就已经
+   闭合，.seg-tabs 定义在那之后，物理位置又晚于文件顶部被搬运过来的
+   utilities），单靠 Tailwind 类名压不过，只能在这个层级直接改。
+   v1 曾经让两个分段控件在手机端一起变成 width:100%——于是两条控件各占一整行、
+   堆成两个 60px 高的药丸（见 v2 设计稿"为什么"一节）。v2 改成两者分工：
+   榜单切换（board）撑满一行剩余空间，周期切换（period）只按内容取宽，两者
+   在同一行——用 .lb-seg-board / .lb-seg-period 两个标记类分别处理，而不是再
+   笼统地扣在 .lb-controls .seg-tabs 上。
    .seg-tabs ships its own width:fit-content, .seg-tabs button its own
-   flex-shrink:0 — both are component-layer rules colliding with Tailwind's
-   w-full / flex-1 on the same properties. In this build the top-level
-   @layer components block actually closes partway through this giant
-   index.css, so everything defined after .seg-tabs's own block sits in
-   plain global scope — physically later than the utilities Tailwind hoists
-   to the top — so w-full/flex-1 alone don't out-cascade the component rule
-   in practice. A higher-specificity compound selector under a media query
-   beats fighting the layer ordering. */
+   flex-shrink:0 — both are plain global rules in this build (the top-level
+   @layer components block closes partway through this file, before
+   .seg-tabs's own definition, which also sits physically later than the
+   utilities Tailwind hoists to the top) — Tailwind classes alone can't
+   out-cascade them, so this has to be edited at this level directly.
+   v1 forced both segmented controls to width:100% on mobile, which stacked
+   them into two full-row 60px pills (see the v2 design brief's "why"
+   section). v2 splits the two apart: the board switch fills the row's
+   remaining space, the period switch only takes as much width as its
+   content needs, and both sit in the same row — targeted via the
+   .lb-seg-board / .lb-seg-period marker classes instead of blanket-styling
+   every .seg-tabs under .lb-controls. */
 @media (max-width: 639px) {
-  .lb-controls .seg-tabs {
-    width: 100%;
-  }
-  .lb-controls .seg-tabs button {
+  .lb-controls .lb-seg-board {
+    width: auto;
     flex: 1 1 0%;
+  }
+  .lb-controls .lb-seg-board button {
+    flex: 1 1 0%;
+    height: 36px;
+  }
+  .lb-controls .lb-seg-period {
+    width: fit-content;
+    flex: 0 0 auto;
+  }
+  .lb-controls .lb-seg-period button {
+    flex: 0 0 auto;
+    height: 36px;
   }
 }
 
