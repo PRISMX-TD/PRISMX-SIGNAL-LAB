@@ -24,7 +24,17 @@ export const ALL_SENTINEL = "__ALL__"
 // the platform strategy categories.
 export const ACCOUNT_EVENT_TYPES = ["order_filled", "order_rejected", "auto_manage", "bridge_offline", "account_revoked"] as const
 export const EVENT_STRATEGY_SIGNAL = "strategy_signal"
-export const EVENT_TYPES = [...ACCOUNT_EVENT_TYPES, EVENT_STRATEGY_SIGNAL] as const
+// 游戏化事件（目前只有 badge_awarded），渲染在独立的「成就提醒」分组——语义
+// 上不是交易/账户提醒，且只在 gamificationVisible 时才展示（见 AccountPage）。
+// 后端 NULL 偏好默认不含它（opt-in，见 push_dispatch.EVENT_BADGE_AWARDED），
+// 不能塞进 ACCOUNT_EVENT_TYPES 让它跟着账户提醒一起默认全开的语义走。
+// Gamification events (currently just badge_awarded), rendered in their own
+// "achievement alerts" group — not a trading/account alert semantically, and
+// only shown when gamificationVisible (see AccountPage). A NULL backend pref
+// excludes it by default (opt-in, see push_dispatch.EVENT_BADGE_AWARDED), so
+// it must not join ACCOUNT_EVENT_TYPES and inherit that group's default-on story.
+export const GAMIFICATION_EVENT_TYPES = ["badge_awarded"] as const
+export const EVENT_TYPES = [...ACCOUNT_EVENT_TYPES, EVENT_STRATEGY_SIGNAL, ...GAMIFICATION_EVENT_TYPES] as const
 
 export type NotifPrefs = {
   enabled: boolean

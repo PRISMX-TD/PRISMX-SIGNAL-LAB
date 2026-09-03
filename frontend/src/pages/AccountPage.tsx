@@ -16,6 +16,7 @@ import {
   ALL_SENTINEL,
   ACCOUNT_EVENT_TYPES,
   EVENT_STRATEGY_SIGNAL,
+  GAMIFICATION_EVENT_TYPES,
   ENABLE_ERROR_KEYS,
   disableNotifications,
   enableNotifications,
@@ -714,6 +715,28 @@ export default function AccountPage() {
                     {t("account.notifEventsHeading")}
                   </p>
                   {ACCOUNT_EVENT_TYPES.map((ev) => (
+                    <label key={ev} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={notifEvents.includes(ev)}
+                        onChange={(e) => handleNotifEventToggle(ev, e.target.checked)}
+                        className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500"
+                      />
+                      <span className="text-neutral-300">{t(`account.notifEvent.${ev}`)}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              {/* 成就提醒：勋章授予推送。内测门控——功能整体未开放（gamificationVisible=
+                  false）时不展示，跟上面「个人资料」分组同一道闸。
+                  Achievement alerts: badge-award pushes. Beta-gated the same way as
+                  the profile section above — hidden while gamificationVisible is false. */}
+              {notifEnabled && info.gamificationVisible && (
+                <div className="space-y-2 border-t border-white/5 pt-4 pl-1">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+                    {t("account.notifEventsGamificationHeading")}
+                  </p>
+                  {GAMIFICATION_EVENT_TYPES.map((ev) => (
                     <label key={ev} className="flex items-center gap-2 text-sm">
                       <input
                         type="checkbox"

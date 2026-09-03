@@ -39,10 +39,20 @@ def award_badge(db, user_id, badge_id) -> bool:
     # so users only get this once they opt in via notification settings.
     try:
         from app.services.push_dispatch import EVENT_BADGE_AWARDED, dispatch_event_push
+        # 推送正文要人话，不能是原始 badge_id（如 "first_close"）。展示名只在
+        # BADGES[badge_id]["name"] 里镜像一份——真正的展示名源头是前端 i18n
+        # gamification.badges.<id>.name，那边才是维护入口；这里缺失时兜底回落
+        # 原始 id，绝不能让推送直接炸掉。
+        # Push copy needs a human name, not the raw badge_id (e.g. "first_close").
+        # The display name is mirrored onto BADGES[badge_id]["name"] — the real
+        # source of truth stays the frontend i18n at
+        # gamification.badges.<id>.name; falls back to the raw id if missing so
+        # a push never blows up over it.
+        name = BADGES.get(badge_id, {}).get("name") or badge_id
         dispatch_event_push(
             user_id, EVENT_BADGE_AWARDED,
             "获得新勋章",
-            f"你解锁了勋章「{badge_id}」，去看看吧。",
+            f"你解锁了勋章「{name}」，去看看吧。",
         )
     except Exception:
         logging.getLogger("gamification").exception(
@@ -259,27 +269,56 @@ def _discipline_streak(db, user_id, n) -> bool:
     return n <= 1 and bool(ok_days)
 
 
+# "name" 是给推送正文用的展示名镜像，逐条从 frontend/src/i18n/zh.json 的
+# gamification.badges.<id>.name 原样抄来（不是重新措辞）。展示名的维护入口
+# 还是那边的前端 i18n；这里改了名字记得同步过来，两边失步只会让推送文案
+# 悄悄跟页面对不上，不会报错。推送本身只走中文（沿用 gateway.py/auto_manage.py
+# 的先例），所以这里不需要 en 版本。
+# "name" mirrors the display name used in push copy, copied verbatim per-entry
+# from frontend/src/i18n/zh.json's gamification.badges.<id>.name (not
+# reworded). The frontend i18n stays the real source of truth for on-page
+# names — keep this in sync whenever a badge is renamed there, since drifting
+# apart only shows up as push copy silently disagreeing with the page, never
+# as an error. Push copy itself is Chinese-only (following gateway.py /
+# auto_manage.py precedent), so no English variant is needed here.
 BADGES: dict[str, dict] = {
-    "profile_complete": {"rarity": "common", "category": "growth", "judge": _j_profile_complete},
-    "first_close":      {"rarity": "common", "category": "growth", "judge": _j_first_close},
-    "first_real_trade": {"rarity": "common", "category": "growth", "judge": _j_first_real_trade},
-    "comp_finisher":    {"rarity": "common", "category": "competition", "judge": None},
-    "evergreen_3m":     {"rarity": "rare", "category": "performance", "judge": _j_evergreen(3)},
+    "profile_complete": {"rarity": "common", "category": "growth", "judge": _j_profile_complete,
+                         "name": "完善资料"},
+    "first_close":      {"rarity": "common", "category": "growth", "judge": _j_first_close,
+                         "name": "首笔平仓"},
+    "first_real_trade": {"rarity": "common", "category": "growth", "judge": _j_first_real_trade,
+                         "name": "首笔实盘"},
+    "comp_finisher":    {"rarity": "common", "category": "competition", "judge": None,
+                         "name": "完赛"},
+    "evergreen_3m":     {"rarity": "rare", "category": "performance", "judge": _j_evergreen(3),
+                         "name": "季度常青"},
     "discipline_90_7":  {"rarity": "rare", "category": "discipline",
-                         "judge": lambda db, u, c: _discipline_streak(db, u.id, 7)},
-    "hundred_wins":     {"rarity": "rare", "category": "performance", "judge": _j_hundred_wins},
-    "midas_touch":      {"rarity": "epic", "category": "performance", "judge": _j_midas_touch},
-    "profit_factor_2":  {"rarity": "epic", "category": "performance", "judge": _j_profit_factor},
-    "evergreen_6m":     {"rarity": "epic", "category": "performance", "judge": _j_evergreen(6)},
+                         "judge": lambda db, u, c: _discipline_streak(db, u.id, 7),
+                         "name": "纪律标兵"},
+    "hundred_wins":     {"rarity": "rare", "category": "performance", "judge": _j_hundred_wins,
+                         "name": "百战百胜"},
+    "midas_touch":      {"rarity": "epic", "category": "performance", "judge": _j_midas_touch,
+                         "name": "点金胜手"},
+    "profit_factor_2":  {"rarity": "epic", "category": "performance", "judge": _j_profit_factor,
+                         "name": "盈亏比之王"},
+    "evergreen_6m":     {"rarity": "epic", "category": "performance", "judge": _j_evergreen(6),
+                         "name": "半年常青"},
     "discipline_90_30": {"rarity": "epic", "category": "discipline",
-                         "judge": lambda db, u, c: _discipline_streak(db, u.id, 30)},
+                         "judge": lambda db, u, c: _discipline_streak(db, u.id, 30),
+                         "name": "纪律大师"},
     "no_bad_sl_50":     {"rarity": "epic", "category": "discipline",
-                         "judge": lambda db, u, c: _consecutive_clean_signal_positions(db, u.id) >= 50},
-    "comp_podium":      {"rarity": "epic", "category": "competition", "judge": None},
-    "evergreen_12m":    {"rarity": "legendary", "category": "performance", "judge": _j_evergreen(12)},
-    "comp_winner":      {"rarity": "legendary", "category": "competition", "judge": None},
-    "comp_back_to_back": {"rarity": "legendary", "category": "competition", "judge": None},
-    "founder_2026":     {"rarity": "limited", "category": "limited", "judge": _j_founder_2026},
+                         "judge": lambda db, u, c: _consecutive_clean_signal_positions(db, u.id) >= 50,
+                         "name": "铁律如山"},
+    "comp_podium":      {"rarity": "epic", "category": "competition", "judge": None,
+                         "name": "比赛前三"},
+    "evergreen_12m":    {"rarity": "legendary", "category": "performance", "judge": _j_evergreen(12),
+                         "name": "全年常青"},
+    "comp_winner":      {"rarity": "legendary", "category": "competition", "judge": None,
+                         "name": "比赛冠军"},
+    "comp_back_to_back": {"rarity": "legendary", "category": "competition", "judge": None,
+                         "name": "卫冕王"},
+    "founder_2026":     {"rarity": "limited", "category": "limited", "judge": _j_founder_2026,
+                         "name": "创始元老"},
 }
 
 
