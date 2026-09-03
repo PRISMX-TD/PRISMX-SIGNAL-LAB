@@ -18,6 +18,8 @@ export default function UserMenu({
   gamificationVisible,
   leaderboardVisible,
   competitionsVisible,
+  gamificationLevel,
+  gamificationTitle,
   onLogout,
 }: {
   email: string | undefined
@@ -26,6 +28,13 @@ export default function UserMenu({
   gamificationVisible: boolean
   leaderboardVisible: boolean
   competitionsVisible: boolean
+  // 等级/称号：随 /auth/me 一起下发（见 store/auth.tsx refreshUser），角标
+  // 只在两者都有值时渲染——gamificationVisible 为假时后端本就不算，值是 null。
+  // Level/title: delivered alongside /auth/me (see store/auth.tsx
+  // refreshUser); the badge renders only when both are present — the backend
+  // leaves them null whenever gamificationVisible is false for this user.
+  gamificationLevel?: number | null
+  gamificationTitle?: string | null
   onLogout: () => void
 }) {
   const { t } = useTranslation()
@@ -68,6 +77,25 @@ export default function UserMenu({
           {email && (
             <div className="truncate px-3 py-2 text-xs text-neutral-500">{email}</div>
           )}
+          {/* 等级/称号角标（设计 §7）：随 /auth/me 一起下发，不必为它多发一次
+              请求——见上面 props 的注释和 store/auth.tsx refreshUser()。点进去
+              就是成就页，同下面的成就入口一致。
+              Level/title chip (design §7): delivered alongside /auth/me, no
+              extra request needed for it — see the props comment above and
+              store/auth.tsx refreshUser(). Links to the achievements page,
+              same destination as the achievements entry below. */}
+          {gamificationVisible && gamificationLevel != null && (
+            <Link
+              to="/achievements"
+              onClick={() => setOpen(false)}
+              className="mx-3 mb-1 mt-0.5 flex w-fit"
+            >
+              <span className="tag bg-prism-600/20 text-xs text-prism-300">
+                L{gamificationLevel}
+                {gamificationTitle ? ` · ${t(`gamification.titles.${gamificationTitle}`)}` : ""}
+              </span>
+            </Link>
+          )}
           <Link to="/account" onClick={() => setOpen(false)} className={linkClass}>
             {t("nav.account")}
           </Link>
@@ -81,14 +109,9 @@ export default function UserMenu({
             {t("nav.support")}
           </Link>
           {/* 成就页：入口按 gamificationVisible 门控，理由同 Layout.tsx「其他」
-              抽屉的同名判断。等级角标（用户名旁的 t(`gamification.titles.…`)）
-              需要额外拉一次 gamificationApi.me()，这里先不做——只加入口链接,
-              避免为一个下拉菜单多发一个请求。
+              抽屉的同名判断。
               Achievements: gated on gamificationVisible, same rationale as the
-              "more" drawer's matching check in Layout.tsx. The level badge next
-              to the username would need an extra gamificationApi.me() call;
-              skipped here — just the entry link, so opening this dropdown
-              doesn't cost an extra request. */}
+              "more" drawer's matching check in Layout.tsx. */}
           {gamificationVisible && (
             <Link to="/achievements" onClick={() => setOpen(false)} className={linkClass}>
               {t("gamification.title")}

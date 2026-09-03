@@ -176,6 +176,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Competitions visibility is a third, independent beta switch riding
           // the same trip — same precedent as the two lines above.
           competitionsVisible: me.competitionsVisible,
+          // 等级/称号同样搭这趟车：后端只在 gamificationVisible 为真时算，
+          // 否则是 null——UserMenu 的角标靠这两个字段渲染，不用再单独请求。
+          // Level/title ride the same trip: the backend only computes these
+          // when gamificationVisible is true for this user, else null —
+          // UserMenu's badge renders off these two fields with no extra request.
+          gamificationLevel: me.gamificationLevel,
+          gamificationTitle: me.gamificationTitle,
         }
       })
       const stored = localStorage.getItem(USER_KEY)
@@ -187,6 +194,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         parsed.gamificationVisible = me.gamificationVisible
         parsed.leaderboardVisible = me.leaderboardVisible
         parsed.competitionsVisible = me.competitionsVisible
+        parsed.gamificationLevel = me.gamificationLevel
+        parsed.gamificationTitle = me.gamificationTitle
         localStorage.setItem(USER_KEY, JSON.stringify(parsed))
       }
     } catch {

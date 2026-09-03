@@ -543,6 +543,13 @@ export const userApi = {
       nicknamePublic: boolean
       leaderboardOptOut: boolean
       equippedBadge: string | null
+      // 等级/称号（§7）：只在 gamificationVisible 为真时后端才会算，否则是
+      // null——用户菜单角标靠这两个字段渲染，不用再单独请求 gamificationApi.me()。
+      // Level/title (§7): the backend only computes these when
+      // gamificationVisible is true for this user, else null — the user-menu
+      // badge renders off these two fields with no extra gamificationApi.me() call.
+      gamificationLevel: number | null
+      gamificationTitle: string | null
     }>('/auth/me'),
   // 游戏化资料局部更新：昵称/榜单展示/退出排行榜/佩戴勋章，只改传了的字段。
   // Partial update of the gamification profile: nickname / leaderboard display /
