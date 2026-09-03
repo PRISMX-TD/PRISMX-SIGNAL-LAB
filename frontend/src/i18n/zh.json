@@ -1900,7 +1900,7 @@
     "family": { "growth": "成长", "evergreen": "常青", "discipline": "纪律",
                 "performance": "表现", "competition": "比赛", "limited": "绝版" },
     "shape": { "growth": "圆章", "evergreen": "桂冠环", "discipline": "盾章",
-               "performance": "切面六角", "competition": "八芒星章", "limited": "火漆封印" },
+               "performance": "切面六角", "competition": "八芒星章", "limited": "火漆封印 · 绶带" },
     "detail": {
       "awardedAt": "获得日期",
       "owners": "全站拥有 {{n}} 人 · {{pct}}",

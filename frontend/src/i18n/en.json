@@ -1902,7 +1902,7 @@
     "family": { "growth": "Growth", "evergreen": "Evergreen", "discipline": "Discipline",
                 "performance": "Performance", "competition": "Competition", "limited": "Limited" },
     "shape": { "growth": "Coin", "evergreen": "Laurel Ring", "discipline": "Shield",
-               "performance": "Faceted Hexagon", "competition": "Eight-Point Star", "limited": "Wax Seal" },
+               "performance": "Faceted Hexagon", "competition": "Eight-Point Star", "limited": "Wax Seal · Ribbon" },
     "detail": {
       "awardedAt": "Awarded",
       "owners": "{{n}} holders sitewide · {{pct}}",
