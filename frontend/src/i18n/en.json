@@ -1952,6 +1952,7 @@
     "notRanked": "Not ranked this period — needs ≥{{n}} full closes this period and to clear the threshold",
     "notRankedShort": "Unranked",
     "youTag": "You",
+    "rankLabel": "Rank {{n}}",
     "sampleCount": "{{n}} trades",
     "periodWeek": "{{year}} · Week {{week}}",
     "periodMonth": "{{year}} · Month {{month}}",

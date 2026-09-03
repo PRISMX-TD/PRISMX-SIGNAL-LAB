@@ -1949,6 +1949,7 @@
     "notRanked": "本期未上榜——需本期 ≥{{n}} 笔完整平仓且达到门槛",
     "notRankedShort": "未上榜",
     "youTag": "你",
+    "rankLabel": "第 {{n}} 名",
     "sampleCount": "{{n}} 笔",
     "periodWeek": "{{year}} 年 · 第 {{week}} 周",
     "periodMonth": "{{year}} 年 · {{month}} 月",

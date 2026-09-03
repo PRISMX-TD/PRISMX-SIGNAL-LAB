@@ -5169,6 +5169,26 @@ body {
   .seg-tabs button:active { transform: none; }
 }
 
+/* ═════════════ 排行榜 · 领奖台悬浮 / leaderboard podium hover ═════════════
+   悬浮上浮只在真正的指针设备（鼠标）上触发——用 (hover: hover) 守卫，而不是
+   直接用 Tailwind 的 hover: 变体。触屏没有 hover 这个状态，浏览器会把「点按」
+   模拟成一次悬浮，松手前卡片会卡在上浮的位置，看起来像点了没反应。
+   Hover-lift only fires on a real pointer device, guarded by (hover: hover)
+   instead of a bare Tailwind hover: variant. Touch has no hover state; browsers
+   simulate one on tap, so without the guard a tapped card would stay lifted
+   until released, reading as an unresponsive tap. */
+.lb-podium-card {
+  transition: transform var(--dur-base) var(--ease-out);
+}
+@media (hover: hover) {
+  .lb-podium-card:hover {
+    transform: translateY(-4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lb-podium-card:hover { transform: none; }
+}
+
 
 /* ═════════════ 分区标题 / section headings ═════════════
    账户页的分区标题原本是 13px 大写 + 中等字距的半粗灰字，和说明性小字

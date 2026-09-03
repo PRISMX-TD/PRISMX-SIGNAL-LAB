@@ -163,7 +163,7 @@ function PodiumCard({ row, board, maxAbs }: { row: LeaderboardRow; board: Leader
 
   return (
     <article
-      className={`glass relative overflow-hidden rounded-[20px] px-[22px] pb-[18px] transition-transform duration-300 ease-out hover:-translate-y-1 motion-reduce:hover:translate-y-0 ${big ? 'pt-[30px]' : 'pt-[22px]'} ${row.rank === 1 ? 'order-first md:order-none' : ''}`}
+      className={`lb-podium-card glass relative overflow-hidden rounded-[20px] px-[22px] pb-[18px] ${big ? 'pt-[30px]' : 'pt-[22px]'} ${row.rank === 1 ? 'order-first md:order-none' : ''}`}
     >
       <div
         aria-hidden
@@ -171,23 +171,30 @@ function PodiumCard({ row, board, maxAbs }: { row: LeaderboardRow; board: Leader
         style={{ backgroundImage: PODIUM_TINT[row.rank] }}
       />
       <div className="relative flex items-center gap-3">
-        <RankCoin rank={row.rank} size={big ? 64 : 52} />
+        <RankCoin rank={row.rank} size={44} className="sm:hidden" />
+        <RankCoin rank={row.rank} size={big ? 64 : 52} className="hidden sm:block" />
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="truncate text-[15px] font-semibold text-neutral-100">{row.displayName}</span>
+            <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-neutral-100 sm:flex-initial">
+              {row.displayName}
+            </span>
             {row.equippedBadge && (
               <BadgeIcon id={row.equippedBadge} rarity={BADGE_RARITY[row.equippedBadge] ?? 'common'} earned size={20} />
             )}
             {row.isSelf && (
               <span className="tag shrink-0 bg-prism-600/25 text-[11px] text-prism-300">{t('leaderboard.youTag')}</span>
             )}
+            {/* 手机端把账户号并进同一行，省一行竖直空间；桌面端仍走下面单独一行。
+                Mobile folds the account number into this same line to save a row
+                of vertical space; desktop keeps it on its own line below. */}
+            <span className="num shrink-0 text-xs text-neutral-500 sm:hidden">{row.login}</span>
           </div>
-          <div className="num mt-0.5 text-xs text-neutral-500">{row.login}</div>
+          <div className="num mt-0.5 hidden text-xs text-neutral-500 sm:block">{row.login}</div>
         </div>
       </div>
       <div className="relative mt-[18px] flex items-baseline gap-2.5">
         <b
-          className={`num font-display font-extrabold leading-none tracking-tight ${big ? 'text-[42px]' : 'text-[34px]'} ${scoreColorClass(board, row.score)}`}
+          className={`num font-display font-extrabold leading-none tracking-tight text-[30px] ${big ? 'sm:text-[42px]' : 'sm:text-[34px]'} ${scoreColorClass(board, row.score)}`}
         >
           {fmtScore(board, row.score)}
         </b>
@@ -213,7 +220,7 @@ function ListRow({ row, board, maxAbs }: { row: LeaderboardRow; board: Leaderboa
 
   return (
     <div
-      className={`relative grid grid-cols-[40px_minmax(0,1fr)_84px] items-center gap-2 border-t border-white/[0.08] px-3 py-3 md:grid-cols-[56px_minmax(0,1.4fr)_120px_minmax(0,1.2fr)_88px] md:gap-3 md:px-[18px] ${row.isSelf ? 'bg-prism-600/[0.07]' : ''}`}
+      className={`lb-row relative grid grid-cols-[40px_minmax(0,1fr)_84px] items-center gap-2 border-t border-white/[0.08] px-3 py-3 md:grid-cols-[56px_minmax(0,1.4fr)_120px_minmax(0,1.2fr)_88px] md:gap-3 md:px-[18px] ${row.isSelf ? 'bg-prism-600/[0.07]' : ''}`}
     >
       {row.isSelf && <span aria-hidden className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-[3px] bg-prism-400" />}
       <span className={`num text-[15px] ${row.isSelf ? 'font-semibold text-neutral-100' : 'text-neutral-400'}`}>
@@ -223,12 +230,22 @@ function ListRow({ row, board, maxAbs }: { row: LeaderboardRow; board: Leaderboa
         {row.equippedBadge && (
           <BadgeIcon id={row.equippedBadge} rarity={BADGE_RARITY[row.equippedBadge] ?? 'common'} earned size={20} />
         )}
-        <span className={`truncate ${row.isSelf ? 'font-semibold text-neutral-100' : 'text-neutral-200'}`}>
-          {row.displayName}
-        </span>
-        {row.isSelf && (
-          <span className="tag shrink-0 bg-prism-600/25 text-[11px] text-prism-300">{t('leaderboard.youTag')}</span>
-        )}
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className={`truncate ${row.isSelf ? 'font-semibold text-neutral-100' : 'text-neutral-200'}`}>
+              {row.displayName}
+            </span>
+            {row.isSelf && (
+              <span className="tag shrink-0 bg-prism-600/25 text-[11px] text-prism-300">{t('leaderboard.youTag')}</span>
+            )}
+          </div>
+          {/* 手机端隐藏了账户号列和幅度条，笔数搬到名字下面这行补上；桌面端
+              自己有独立列显示笔数，这行只在手机端出现。
+              Mobile hides the account column and the magnitude bar, so the trade
+              count moves to this line under the name instead; desktop already
+              has its own column for it, so this line only shows on mobile. */}
+          <div className="text-[11px] text-neutral-500 md:hidden">{t('leaderboard.sampleCount', { n: row.sample })}</div>
+        </div>
       </div>
       <span className="num hidden text-[13px] text-neutral-500 md:block">{row.login}</span>
       <div className="hidden items-center gap-3 md:flex">
@@ -279,9 +296,9 @@ function MyRankCard({ data, board, rankThreshold }: { data: LeaderboardPayload; 
       cta = t('leaderboard.gapToNext', { gap: fmtScore(board, gap), rank: data.me.rank - 1 })
     }
     return (
-      <div className="glass flex flex-col gap-4 p-[18px_22px] sm:flex-row sm:items-center sm:justify-between">
+      <div className="lb-my-rank glass flex flex-col gap-4 p-[18px_22px] sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          <RankCoin rank={data.me.rank} size={40} />
+          <RankCoin rank={data.me.rank} size={44} />
           <div>
             <div className="text-[11px] uppercase tracking-wider text-neutral-500">{t('leaderboard.myRank')}</div>
             <div className="num font-display text-[28px] font-extrabold leading-tight tracking-tight text-neutral-100">
@@ -289,7 +306,14 @@ function MyRankCard({ data, board, rankThreshold }: { data: LeaderboardPayload; 
             </div>
           </div>
         </div>
-        <div className="flex flex-wrap gap-6">
+        {/* 手机端三项统计排成 2 列网格（不是任其自然换行）：3 项换行会变成
+            "2 + 孤零零 1 个"，网格至少让第二行占满第一列，观感更稳。桌面端
+            照旧横排 flex-wrap。
+            Mobile lays the three stats out as a 2-col grid instead of letting
+            them wrap freely — free-wrapping 3 items becomes "2 + 1 orphan";
+            the grid at least anchors the second row to column 1. Desktop keeps
+            the original flex-wrap row. */}
+        <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-6">
           <div>
             <span className="block text-[11px] uppercase tracking-wider text-neutral-500">
               {t(`leaderboard.colScore.${board}`)}
@@ -316,7 +340,7 @@ function MyRankCard({ data, board, rankThreshold }: { data: LeaderboardPayload; 
     const p = data.progress
     const belowBaseline = p.baselineUsd < p.minBaselineUsd
     return (
-      <div className="glass grid gap-3 p-[18px_22px] sm:grid-cols-[auto_1fr] sm:gap-[22px]">
+      <div className="lb-my-rank glass grid gap-3 p-[18px_22px] sm:grid-cols-[auto_1fr] sm:gap-[22px]">
         <div>
           <div className="text-[11px] uppercase tracking-wider text-neutral-500">{t('leaderboard.myRank')}</div>
           <div className="font-display text-[28px] font-extrabold leading-tight tracking-tight text-neutral-500">
@@ -349,7 +373,7 @@ function MyRankCard({ data, board, rankThreshold }: { data: LeaderboardPayload; 
   }
 
   return (
-    <div className="glass flex flex-wrap items-center justify-between gap-3 p-4">
+    <div className="lb-my-rank glass flex flex-wrap items-center justify-between gap-3 p-4">
       <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500">{t('leaderboard.myRank')}</span>
       <span className="text-sm text-neutral-400">{t('leaderboard.notRanked', { n: rankThreshold })}</span>
     </div>
@@ -364,7 +388,7 @@ function EmptyState({ data, board, rankThreshold, minBaselineUsd }: {
 }) {
   const { t } = useTranslation()
   return (
-    <section className="glass grid justify-items-center gap-2.5 px-7 py-11 text-center">
+    <section className="glass grid justify-items-center gap-2.5 px-4 py-7 text-center sm:px-7 sm:py-11">
       <h3 className="text-lg font-bold text-neutral-100">{t('leaderboard.emptyHeading')}</h3>
       <p className="max-w-[52ch] text-sm text-neutral-300">
         {data.periodStart
@@ -505,8 +529,8 @@ export default function LeaderboardPage() {
             </div>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-2.5">
-          <div className="seg-tabs" role="tablist">
+        <div className="lb-controls flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="seg-tabs w-full sm:w-fit" role="tablist">
             {BOARDS.map((b) => (
               <button
                 key={b}
@@ -514,13 +538,13 @@ export default function LeaderboardPage() {
                 role="tab"
                 aria-selected={board === b}
                 onClick={() => setBoard(b)}
-                className={board === b ? 'on' : ''}
+                className={`flex-1 sm:flex-none ${board === b ? 'on' : ''}`}
               >
                 {t(`leaderboard.boards.${b}`)}
               </button>
             ))}
           </div>
-          <div className="seg-tabs" role="tablist">
+          <div className="seg-tabs w-full sm:w-fit" role="tablist">
             {PERIODS.map((p) => (
               <button
                 key={p}
@@ -528,7 +552,7 @@ export default function LeaderboardPage() {
                 role="tab"
                 aria-selected={period === p}
                 onClick={() => setPeriod(p)}
-                className={period === p ? 'on' : ''}
+                className={`flex-1 sm:flex-none ${period === p ? 'on' : ''}`}
               >
                 {t(`leaderboard.periods.${p}`)}
               </button>
@@ -537,9 +561,9 @@ export default function LeaderboardPage() {
         </div>
       </header>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="lb-gates -mx-4 flex flex-nowrap gap-2 overflow-x-auto px-4 no-scrollbar sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
         {gateChips.map((chip) => (
-          <span key={chip} className="chip border border-white/10 bg-white/[0.04] text-neutral-400">
+          <span key={chip} className="chip shrink-0 border border-white/10 bg-white/[0.04] text-neutral-400">
             {chip}
           </span>
         ))}
@@ -550,7 +574,7 @@ export default function LeaderboardPage() {
       ) : (
         <>
           {podiumRows.length > 0 && (
-            <div className="flex flex-col gap-3 md:grid md:items-end md:gap-3.5" style={{ gridTemplateColumns: gridTemplate }}>
+            <div className="lb-podium flex flex-col gap-3 md:grid md:items-end md:gap-3.5" style={{ gridTemplateColumns: gridTemplate }}>
               {visualOrder.map((rank) => {
                 const row = rowByRank.get(rank)
                 if (!row) return null
