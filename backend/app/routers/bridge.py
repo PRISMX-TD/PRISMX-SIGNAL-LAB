@@ -32,7 +32,12 @@ from app.services.push_dispatch import (
     dispatch_event_push_async,
 )
 from app.services import bridge_version_check
-from app.services.settings_store import get_broker_settings, server_matches_broker
+from app.services.account_type import classify_account
+from app.services.settings_store import (
+    get_account_type_settings,
+    get_broker_settings,
+    server_matches_broker,
+)
 from app.services.symbol_aliases import broker_symbol
 from app.services.trade_performance import mark_positions_seen
 
@@ -375,6 +380,18 @@ def _upsert_account(
     # wipe a value that's already there.
     if acc.tradeMode is not None:
         row.trade_mode = acc.tradeMode
+    elif row.trade_mode is None:
+        # 旧版桥接不报 tradeMode，且账号还没判定过：按组名/服务器名兜底判一次
+        # （见 classify_account）。这里能拿到组名的账号很少——桥接载荷本身不带
+        # MT5 组名，这个分支实际主要靠服务器名白名单命中；判不出来仍是 None，
+        # 等下一轮 gamification 回填或运维补白名单。
+        # Older bridge omits tradeMode and the account has never been
+        # classified: try the group/server fallback (see classify_account).
+        # The bridge payload carries no MT5 group, so in practice this branch
+        # is driven by the server-name whitelist; still None when nothing
+        # matches, left for the next gamification backfill pass or an ops fix.
+        settings = get_account_type_settings(db)
+        row.trade_mode = classify_account(row.mt5_group, acc.server or row.server, settings)
     row.online = True
     row.last_heartbeat = datetime.now(timezone.utc)
     return row, created

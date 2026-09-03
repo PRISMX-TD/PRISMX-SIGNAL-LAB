@@ -65,6 +65,68 @@ def classify_group(group: str | None, settings: dict) -> int | None:
     return best_mode
 
 
+def classify_server(server: str | None, settings: dict) -> int | None:
+    """按服务器名判定账户类型；判不出来返回 None（未知）。
+
+    **只用于桥接通道没有组名的账号**：桥接上报的载荷只有 `server`/`company`/
+    `tradeMode`，没有 MT5 组名，`classify_group` 对这类账号永远判不出来。这个
+    函数是它的兜底。
+
+    **为什么是精确匹配而不是前缀匹配**：服务器名是券商分配的短字符串，前缀匹配
+    会有意外命中——比如白名单写 "MakeCapital" 会把 "MakeCapital-Demo" 也扫进
+    实盘，这正是 `classify_group` 那边"宁可漏算不猜错"的教训在这里的翻版。服务器
+    名不像组名那样有天然的层级前缀关系，没有理由承担这个风险，精确匹配是更安全
+    的方向。
+
+    判不出来（空值、或不在任何名单里）一律 None，不猜——原因同 `classify_group`。
+
+    Classify by exact server name (case/whitespace-insensitive); None when
+    nothing matches. This exists only as a fallback for bridge accounts with no
+    group name (the bridge payload carries server/company/tradeMode but no MT5
+    group). Exact match, not prefix: server names are short broker-assigned
+    strings with no natural prefix hierarchy, and a prefix like "MakeCapital"
+    would sweep in "MakeCapital-Demo" — the same wrong-direction risk
+    `classify_group` avoids by never guessing. Unmatched stays None.
+    """
+    if not server:
+        return None
+    name = server.strip().lower()
+    if not name:
+        return None
+
+    for key, mode in (
+        ("real_server_names", REAL),
+        ("contest_server_names", CONTEST),
+        ("demo_server_names", DEMO),
+    ):
+        for candidate in settings.get(key) or []:
+            c = str(candidate).strip().lower()
+            if c and c == name:
+                return mode
+    return None
+
+
+def classify_account(group: str | None, server: str | None, settings: dict) -> int | None:
+    """账户类型判定的统一入口：组名优先（权威），服务器名兜底。
+
+    **⚠ falsy-zero 陷阱**：`DEMO == 0`，所以绝不能写
+    `classify_group(...) or classify_server(...)`——组名判成 DEMO 时
+    `0 or ...` 会继续求值右边，把一个已经判出来的模拟账户送去服务器名单里
+    再查一次。必须显式判断 `is not None`，只有组名**完全没判出来**（None）
+    才落到服务器名兜底。
+
+    Single entry point: group name first (authoritative), server name only as
+    a fallback when the group yields nothing. CRITICAL: DEMO == 0 is falsy, so
+    `classify_group(...) or classify_server(...)` is a bug — a group correctly
+    classified as DEMO would fall through to the server whitelist. Must check
+    `is not None` explicitly.
+    """
+    by_group = classify_group(group, settings)
+    if by_group is not None:
+        return by_group
+    return classify_server(server, settings)
+
+
 def is_real(trade_mode: int | None) -> bool:
     """是否真实账户。None（未知）判 False——保守起见不计入实盘统计。
     Whether this is a live account; unknown counts as not-real."""

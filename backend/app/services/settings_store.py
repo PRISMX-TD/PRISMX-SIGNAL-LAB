@@ -701,6 +701,31 @@ ACCOUNT_TYPE_DEFAULTS: dict = {
     # live stats, with a warning) rather than live, so this list needn't be
     # exhaustive — it exists so the "unknown" signal stays meaningful.
     "demo_group_prefixes": ["demo", "preliminary"],
+    # 服务器名白名单：桥接通道的兜底判据，只用于账号没有组名（老版本桥接客户端
+    # 不上报 tradeMode，且桥接载荷本身不含 MT5 组名）的情况——见
+    # services/account_type.py 的 classify_server/classify_account。
+    #
+    # "MakeCapital-Live" 是精确服务器名，不是前缀：这是一份经确认为真实实盘的
+    # 服务器白名单，只做精确匹配。可信度上限就是桥接自报的 tradeMode 本身（同
+    # 属客户端来源，不比它更权威）——真正的反作弊防线是服务端订单归因校验
+    # （`closed_trades.verified`），这份名单不降低那道防线的地位，只是让老版本
+    # 桥接客户端的真实账户不再被漏判成"未知"。
+    #
+    # Server-name whitelist: the bridge channel's fallback, used only when an
+    # account has no group name (an older bridge client that never reports
+    # tradeMode, and the bridge payload itself carries no MT5 group) — see
+    # classify_server/classify_account in services/account_type.py.
+    #
+    # "MakeCapital-Live" is an exact server name, not a prefix: a curated
+    # whitelist of servers confirmed to be live, exact-match only. Its trust
+    # ceiling is the same as the bridge's self-reported tradeMode (both are
+    # client-sourced) — the real anti-fraud line remains the server-side order-
+    # attribution check (`closed_trades.verified`); this list doesn't lower
+    # that bar, it just stops older bridge clients' genuine live accounts from
+    # being misclassified as unknown.
+    "real_server_names": ["MakeCapital-Live"],
+    "contest_server_names": [],
+    "demo_server_names": [],
 }
 
 _account_type_cache: dict = {}

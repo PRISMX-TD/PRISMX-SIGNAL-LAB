@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 
 from app.core.database import SessionLocal
 from app.models import MT5Account, Order, User
-from app.services.account_type import classify_group
+from sqlalchemy import or_
+
+from app.services.account_type import classify_account
 from app.services.settings_store import get_account_type_settings
 from .conditions import judge_and_record_conditions
 from .badges import judge_and_award_badges
@@ -18,13 +20,28 @@ SLOW_PASS_WARN_SECONDS = 120
 
 
 def backfill_account_trade_modes(db) -> int:
+    """把还没判定过的账号补上 trade_mode：组名优先（gateway 通道权威），
+    没有组名或组名判不出来时按服务器名兜底（桥接通道，见 classify_account）。
+
+    **为什么要放宽到"组名 OR 服务器名非空"**：老版本桥接客户端不上报组名，
+    只上报 server——只筛 `mt5_group.isnot(None)` 会把这些账号永远排除在这轮
+    回填之外。宽到两者任一非空，剩下靠 classify_account 自己判不出来时返回
+    None，行不受影响。
+
+    Backfill accounts still missing trade_mode: group name first (gateway
+    channel, authoritative), server name as fallback when there's no group or
+    the group doesn't classify (bridge channel — see classify_account). Widened
+    to "group OR server non-null" because older bridge clients report no group
+    at all; classify_account still returns None for anything it can't place.
+    """
     rows = (db.query(MT5Account)
               .filter(MT5Account.trade_mode.is_(None),
-                      MT5Account.mt5_group.isnot(None)).all())
+                      or_(MT5Account.mt5_group.isnot(None),
+                          MT5Account.server.isnot(None))).all())
     cfg = get_account_type_settings(db)
     n = 0
     for row in rows:
-        tm = classify_group(row.mt5_group, cfg)
+        tm = classify_account(row.mt5_group, row.server, cfg)
         if tm is not None:
             row.trade_mode = tm
             n += 1
