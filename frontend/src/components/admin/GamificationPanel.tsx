@@ -4,8 +4,8 @@
 // client.ts 的 setGamificationVisibility / updateGamificationSettings 注释）
 // ——后端接口本身仍接受传 false，真正的闸门只有一处：翻到「开」之前必须
 // window.confirm 一次。翻回「关」不设二次确认，与任务书口径一致（这不是
-// 后端强制的单向锁，是前端刻意做的最后一道人工关卡）。比赛开关是 Phase 3
-// 占位，永久禁用态展示，没有可翻的动作也就没有 confirm。
+// 后端强制的单向锁，是前端刻意做的最后一道人工关卡）。比赛开关自 Phase 3
+// 上线起与前两个走同一套纪律（曾是 Phase 2 留下的禁用占位，488cf41 激活）。
 //
 // 榜单预览卡不受任何开关限制——管理员打 /admin/gamification/leaderboard
 // 本身就不看 leaderboardVisible，专为内测期核对数字用。
@@ -25,8 +25,9 @@
 // still accepts false; the one real gate is the confirm() before flipping to
 // true. Flipping back to false needs no second confirmation, per the task
 // brief (this is a deliberate front-end-only last check, not a
-// backend-enforced one-way lock). The competitions switch is a Phase 3
-// placeholder, permanently disabled — no action to flip, so no confirm.
+// backend-enforced one-way lock). The competitions switch follows the same
+// discipline since Phase 3 shipped (it was a disabled Phase 2 placeholder
+// until 488cf41).
 //
 // The leaderboard preview card isn't gated on any switch — the admin's own
 // call to /admin/gamification/leaderboard doesn't consult
@@ -82,12 +83,11 @@ function fmtScorePct(v: number): string {
   return `${(v * 100).toFixed(1)}%`
 }
 
-// 一行开关：等级勋章 / 排行榜两个「可翻」开关复用的行布局，比赛开关是永久
-// 禁用态，样式和交互都不同，单独写（见下方渲染处），不硬塞进这个组件。
-// One toggle row: shared layout for the two flippable switches (badges/
-// levels, leaderboard). The competitions switch is permanently disabled with
-// different styling/interaction, so it's rendered separately below rather
-// than forced through this component.
+// 单条开关行：三个可翻开关（等级勋章 / 排行榜 / 比赛）共用的布局——翻开要
+// confirm、只升不降的纪律在各自的 toggle 处理函数里，这个组件只管展示。
+// One toggle row: shared layout for the three flippable switches (badges/
+// levels, leaderboard, competitions). The confirm-on-open / up-only
+// discipline lives in each toggle handler; this component only renders.
 function SettingsToggleRow({
   label,
   checked,
