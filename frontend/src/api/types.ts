@@ -1034,6 +1034,30 @@ export interface GamificationMe {
   equippedBadge: string | null
 }
 
+// GET /gamification/winrate-summary 的响应（设计 §2.4/§7）：仪表盘胜率卡的
+// 轻量并行数据源——独立于 /gamification/me，服务端做了 60 秒缓存，可以放心
+// 跟 orderApi.winrate() 同一个 45 秒轮询节奏一起拉。
+// Response of GET /gamification/winrate-summary (§2.4/§7): the lightweight,
+// parallel data source for the dashboard win-rate card — separate from
+// /gamification/me, server-side cached for 60s, safe to poll on the same 45s
+// cadence as orderApi.winrate().
+export interface GamificationWinRateSummary {
+  winRate: number | null
+  windowDays: number
+  trades: number
+  level: number
+  title: string
+  // 下一级毕业线的胜率门槛；已满级（没有下一关）时为 null。
+  // The next level's win-rate graduation bar; null at max level (no next group).
+  nextWinRateTarget: number | null
+  // 距下一级还差多少个百分点：null=胜率未知（trades=0）或已满级；0=已达标；
+  // 否则是正数（尚差多少个百分点）。
+  // Percentage points still needed to clear the next bar: null = win rate
+  // unknown (trades=0) or max level; 0 = already meets it; otherwise a
+  // positive number of points still needed.
+  gapPct: number | null
+}
+
 // PATCH /auth/profile 的请求体：全部可选，只改传了的字段。equippedBadge 显式
 // 传 null 表示卸下勋章，与不传（保持不变）不同。
 // PATCH /auth/profile request body: every field optional, only sent ones
