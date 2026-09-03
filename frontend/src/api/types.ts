@@ -979,6 +979,10 @@ export interface GamificationBadge {
   earned: boolean
   awardedAt: string | null
   equipped: boolean
+  // 全站拥有此勋章的用户数（一次分组计数覆盖全部勋章，见 build_me_payload）。
+  // Sitewide holder count for this badge (one grouped count over all badges,
+  // see build_me_payload).
+  owners: number
 }
 
 // 单个条件（任务）的判定状态。progressNow/progressTarget/currentWinRate 只在
@@ -1032,6 +1036,9 @@ export interface GamificationMe {
   nicknamePublic: boolean
   leaderboardOptOut: boolean
   equippedBadge: string | null
+  // 全站用户数（详情层拥有率 owners/population 的分母）。
+  // Sitewide user count (the denominator for the detail layer's owners/population rate).
+  population: number
 }
 
 // GET /gamification/winrate-summary 的响应（设计 §2.4/§7）：仪表盘胜率卡的

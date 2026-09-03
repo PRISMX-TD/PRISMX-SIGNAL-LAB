@@ -1898,6 +1898,17 @@
     },
     "taskState": { "locked": "Unlocks after the other tasks in this group", "pending": "In progress", "done": "Completed" },
     "rarity": { "common": "Common", "rare": "Rare", "epic": "Epic", "legendary": "Legendary", "limited": "Limited" },
+    "material": { "common": "Graphite", "rare": "Silver", "epic": "Obsidian & Gold", "legendary": "Gold", "limited": "Bronze Seal" },
+    "family": { "growth": "Growth", "evergreen": "Evergreen", "discipline": "Discipline",
+                "performance": "Performance", "competition": "Competition", "limited": "Limited" },
+    "shape": { "growth": "Coin", "evergreen": "Laurel Ring", "discipline": "Shield",
+               "performance": "Faceted Hexagon", "competition": "Eight-Point Star", "limited": "Wax Seal" },
+    "detail": {
+      "awardedAt": "Awarded",
+      "owners": "{{n}} holders sitewide · {{pct}}",
+      "wearHint": "Equipping it shows next to your name on the leaderboard and competition boards",
+      "close": "Close"
+    },
     "badges": {
       "profile_complete": { "name": "Profile Complete", "desc": "Set a nickname and bind an MT5 account" },
       "first_close": { "name": "First Close", "desc": "Complete your first full close (demo counts)" },

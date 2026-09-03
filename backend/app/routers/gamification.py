@@ -2,6 +2,7 @@
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import re
@@ -159,6 +160,20 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
     owned = {b.badge_id: b.awarded_at
              for b in db.query(UserBadge).filter(UserBadge.user_id == user.id)}
     level = level_of(done)
+    # 详情层「全站拥有 N 人」——一次分组计数覆盖全部 17 枚，不逐枚各查一次。
+    # 未出现在结果里的勋章（尚无人拥有）在下方用 .get(bid, 0) 补零，不需要
+    # LEFT JOIN 到勋章注册表（那是个 dict，不是表）。population 同理只查一次。
+    # Detail-layer "N holders sitewide": one grouped count covers all 17
+    # badges instead of a per-badge query. A badge absent from the result
+    # (nobody owns it yet) is zero-filled below via .get(bid, 0) — no need to
+    # LEFT JOIN the badge registry (it's a dict, not a table). population is
+    # likewise a single query.
+    owners_by_badge = dict(
+        db.query(UserBadge.badge_id, func.count(UserBadge.id.distinct()))
+        .group_by(UserBadge.badge_id)
+        .all()
+    )
+    population = db.query(func.count(User.id)).scalar() or 0
     return {
         "level": level,
         "title": LEVEL_TITLES[level - 1],
@@ -168,6 +183,7 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
             "earned": bid in owned,
             "awardedAt": owned.get(bid).isoformat() if bid in owned else None,
             "equipped": user.equipped_badge == bid,
+            "owners": owners_by_badge.get(bid, 0),
         } for bid, meta in BADGES.items()],
         "winRate": {
             "value": stats["win_rate"], "windowDays": stats["window_days"],
@@ -176,6 +192,7 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
         "nickname": user.nickname, "nicknamePublic": user.nickname_public,
         "leaderboardOptOut": user.leaderboard_opt_out,
         "equippedBadge": user.equipped_badge,
+        "population": population,
     }
 
 

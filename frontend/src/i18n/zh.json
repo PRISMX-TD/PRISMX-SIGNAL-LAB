@@ -1896,6 +1896,17 @@
     },
     "taskState": { "locked": "完成同组其他条件后开考", "pending": "待达标", "done": "已达成" },
     "rarity": { "common": "普通", "rare": "稀有", "epic": "史诗", "legendary": "传说", "limited": "绝版" },
+    "material": { "common": "石墨", "rare": "银", "epic": "黑曜石镶金", "legendary": "足金", "limited": "青铜火漆" },
+    "family": { "growth": "成长", "evergreen": "常青", "discipline": "纪律",
+                "performance": "表现", "competition": "比赛", "limited": "绝版" },
+    "shape": { "growth": "圆章", "evergreen": "桂冠环", "discipline": "盾章",
+               "performance": "切面六角", "competition": "八芒星章", "limited": "火漆封印" },
+    "detail": {
+      "awardedAt": "获得日期",
+      "owners": "全站拥有 {{n}} 人 · {{pct}}",
+      "wearHint": "佩戴中的用户会在排行榜与比赛榜的名字旁显示它",
+      "close": "关闭"
+    },
     "badges": {
       "profile_complete": { "name": "完善资料", "desc": "设置昵称并绑定 MT5 账号" },
       "first_close": { "name": "首笔平仓", "desc": "完成第一笔完整平仓（模拟盘也算）" },

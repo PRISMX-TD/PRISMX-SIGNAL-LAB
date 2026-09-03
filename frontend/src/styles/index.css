@@ -5508,3 +5508,122 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .grow-x { animation: none; }
 }
+
+/* ═════════════ V5 铸币勋章：倾斜流光 + 铸造瞬间 / V5 minted badges: tilt-sheen + mint moment ═════════════
+   逐条对照设计稿 badge-atlas.html 移植（该文件的 .tilt/.light/.minting 系列
+   规则，见 medal.ts 顶部注释里对这份设计稿的说明）。类名换了两处：.tilt →
+   .medal-tilt（React 组件叫 MedalTilt，避免跟站内其它 "tilt" 语义撞名）、
+   .minting → .badge-minting（同理避免撞名，语义不变）。关键帧名
+   （strike/flash/sweepOnce/fieldIn）、动画时长、缓动全部照抄，不做"优化"。 */
+/* Ported rule-for-rule from the design reference (badge-atlas.html's
+   .tilt/.light/.minting family; see medal.ts's header comment for that
+   reference). Two renames only: .tilt -> .medal-tilt (the React component
+   is named MedalTilt, avoiding a clash with other "tilt" usage in the app)
+   and .minting -> .badge-minting (same reason). Keyframe names
+   (strike/flash/sweepOnce/fieldIn), durations and easings are copied
+   as-is — no "improvements". */
+.medal-tilt {
+  position: relative;
+  display: inline-block;
+  transform-style: preserve-3d;
+  transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+.medal-tilt svg {
+  display: block;
+}
+.medal-tilt .medal-light {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s;
+  background: radial-gradient(circle at var(--lx, 30%) var(--ly, 25%), rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.06) 32%, transparent 58%);
+  mix-blend-mode: screen;
+}
+.medal-tilt:hover .medal-light {
+  opacity: 1;
+}
+.medal-tilt.no-transition {
+  transition: none;
+}
+
+.badge-minting .emb {
+  transform-origin: 32px 32px;
+  transform: scale(1.18);
+  opacity: 0;
+}
+.badge-minting .flash {
+  opacity: 0;
+}
+.badge-minting.play .emb {
+  animation: strike 0.55s cubic-bezier(0.2, 0.9, 0.2, 1) 0.45s forwards;
+}
+.badge-minting.play .flash {
+  animation: flash 0.7s ease-out 0.5s forwards;
+}
+.badge-minting.play .sheen {
+  animation: sweepOnce 1.3s cubic-bezier(0.4, 0, 0.2, 1) 0.55s forwards;
+}
+.badge-minting.play .fieldwrap {
+  animation: fieldIn 0.45s ease-out forwards;
+}
+.badge-minting .sheen {
+  transform-origin: 32px 32px;
+  transform-box: view-box;
+}
+
+@keyframes strike {
+  0% { transform: scale(1.18); opacity: 0; }
+  60% { transform: scale(0.97); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes flash {
+  0% { opacity: 0; }
+  20% { opacity: 0.95; }
+  100% { opacity: 0; }
+}
+@keyframes sweepOnce {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes fieldIn {
+  from { filter: saturate(0.2) brightness(0.6); }
+  to { filter: none; }
+}
+
+/* prefers-reduced-motion：倾斜/高光整体关闭（比设计稿原文更严——原文只去掉
+   过渡，这里连效果本身也不出现，跟 MedalTilt.tsx 里的 JS 判断双保险），
+   铸造动画同样直接落在终态，不放关键帧。 */
+/* prefers-reduced-motion: the tilt/highlight are disabled outright
+   (stricter than the reference, which only drops the transition — here the
+   effect itself never appears, doubled up with the JS check in
+   MedalTilt.tsx), and the mint animation snaps straight to its end state
+   instead of playing the keyframes. */
+@media (prefers-reduced-motion: reduce) {
+  .medal-tilt,
+  .medal-tilt .medal-light {
+    transition: none;
+  }
+  .medal-tilt {
+    transform: none !important;
+  }
+  .medal-tilt .medal-light {
+    display: none;
+  }
+  .badge-minting .emb {
+    transform: scale(1);
+    opacity: 1;
+  }
+  .badge-minting.play .emb,
+  .badge-minting.play .flash,
+  .badge-minting.play .sheen,
+  .badge-minting.play .fieldwrap {
+    animation: none;
+  }
+}

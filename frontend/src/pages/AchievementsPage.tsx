@@ -7,7 +7,7 @@
 // Layout/UserMenu); this only handles someone hitting the URL directly —
 // in practice only a regular user during the beta window, degraded to one
 // line of copy instead of a raw API error.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { gamificationApi, userApi } from '../api/client'
@@ -15,9 +15,54 @@ import { localizeApiError, fmtDate } from '../api/utils'
 import { fmtPct } from '../components/winrate/shared'
 import { SkeletonPage } from '../components/Skeleton'
 import BadgeIcon from '../components/badges/BadgeIcon'
-import type { GamificationBadgeRarity, GamificationMe, GamificationTask } from '../api/types'
+import MedalTilt from '../components/badges/MedalTilt'
+import BadgeDetailModal from '../components/badges/BadgeDetailModal'
+import type { GamificationBadge, GamificationBadgeRarity, GamificationMe, GamificationTask } from '../api/types'
 
 const RARITY_ORDER: GamificationBadgeRarity[] = ['common', 'rare', 'epic', 'legendary', 'limited']
+
+// 铸造瞬间只在用户第一次看到这枚新勋章时播——已看过的记进 localStorage（try/
+// catch 包住每次读写：隐私模式/存储已满都不该炸页面，退化成"每次都当作已看
+// 过"，最多是少放一次动画，不是报错）。
+// The mint moment plays only the first time a user sees a given new badge —
+// seen ids live in localStorage (every read/write wrapped in try/catch:
+// private browsing or a full quota shouldn't crash the page, it just
+// degrades to "treat as already seen", i.e. one skipped animation, not an
+// error).
+const SEEN_BADGES_KEY = 'prismx_badges_seen'
+// 首次铸造动画错峰上限：一次性拿到 17 枚也只放最近获得的 3 枚，其余静默标记
+// 已看过——不然新用户一进成就页要盯着 17 遍"毛坯→压印→闪光→流光"。
+// Cap on staggered first-time mint animations: even a first load with all 17
+// badges earned only plays the 3 most recently awarded; the rest are marked
+// seen silently — otherwise a new user would sit through 17 rounds of
+// blank -> strike -> flash -> sweep.
+const MINT_STAGGER_CAP = 3
+const MINT_DURATION_MS = 2200
+
+function readSeenBadges(): Set<string> {
+  try {
+    const raw = localStorage.getItem(SEEN_BADGES_KEY)
+    return raw ? new Set(JSON.parse(raw)) : new Set()
+  } catch {
+    return new Set()
+  }
+}
+
+function writeSeenBadges(ids: Set<string>): void {
+  try {
+    localStorage.setItem(SEEN_BADGES_KEY, JSON.stringify([...ids]))
+  } catch {
+    // 存储不可用（隐私模式/已满）：静默放弃，下次加载顶多重放一次铸造动画。
+    // Storage unavailable (private mode / full quota): give up silently —
+    // worst case the mint animation replays once on the next load.
+  }
+}
+
+function markBadgeSeen(id: string): void {
+  const seen = readSeenBadges()
+  seen.add(id)
+  writeSeenBadges(seen)
+}
 
 // 进度数字：lots 类条件可能带小数（stats 按 4 位小数四舍五入），交易数/交易日
 // 都是整数——这里统一"整数不带小数点，小数最多两位"，不针对条件类型特判。
@@ -101,6 +146,16 @@ export default function AchievementsPage() {
   const [showBreakdown, setShowBreakdown] = useState(false)
   const [equipping, setEquipping] = useState<string | null>(null)
   const [equipMsg, setEquipMsg] = useState<string | null>(null)
+  const [mintIds, setMintIds] = useState<Set<string>>(new Set())
+  const [detailBadge, setDetailBadge] = useState<GamificationBadge | null>(null)
+  // 只在数据第一次到达时判定一次「哪些勋章要放铸造动画」——之后佩戴/取消
+  // 佩戴触发的 setMe 会换新的 badges 数组引用，但不该重新判定一遍（不然乐观
+  // 更新一次佩戴态就重放一次铸造动画）。
+  // Which badges get the mint animation is decided exactly once, on the
+  // data's first arrival — later equip/unequip calls replace the badges
+  // array reference via setMe, but must not re-trigger this judging (or an
+  // optimistic equip toggle would replay the mint animation).
+  const mintCheckedRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -124,6 +179,36 @@ export default function AchievementsPage() {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (!me || mintCheckedRef.current) return
+    mintCheckedRef.current = true
+
+    const seen = readSeenBadges()
+    const earned = me.badges.filter((b) => b.earned)
+    const unseen = earned.filter((b) => !seen.has(b.id))
+    if (unseen.length === 0) return
+
+    // 最近获得优先——awardedAt 是 ISO 字符串，字典序降序等价于时间降序。
+    // Most-recently-awarded first — awardedAt is an ISO string, so
+    // descending lexical order is descending chronological order.
+    const sorted = [...unseen].sort((a, b) => (b.awardedAt ?? '').localeCompare(a.awardedAt ?? ''))
+    const toMint = sorted.slice(0, MINT_STAGGER_CAP)
+    const toSkip = sorted.slice(MINT_STAGGER_CAP)
+
+    if (toSkip.length > 0) {
+      const next = new Set(seen)
+      toSkip.forEach((b) => next.add(b.id))
+      writeSeenBadges(next)
+    }
+    if (toMint.length === 0) return
+
+    setMintIds(new Set(toMint.map((b) => b.id)))
+    const timers = toMint.map((b) => setTimeout(() => markBadgeSeen(b.id), MINT_DURATION_MS))
+    return () => {
+      timers.forEach(clearTimeout)
+    }
+  }, [me])
 
   async function toggleEquip(badgeId: string, equipped: boolean) {
     if (!me || equipping) return
@@ -174,6 +259,7 @@ export default function AchievementsPage() {
     rarity,
     badges: me.badges.filter((b) => b.rarity === rarity),
   })).filter((g) => g.badges.length > 0)
+  const equippedBadge = me.equippedBadge ? me.badges.find((b) => b.id === me.equippedBadge) ?? null : null
 
   return (
     <div className="mx-auto max-w-[1100px] space-y-6">
@@ -194,6 +280,28 @@ export default function AchievementsPage() {
         <p className="mt-2 text-sm text-neutral-400">
           {nextGroup ? t('gamification.remainingToNext', { count: remaining }) : t('gamification.maxLevel')}
         </p>
+
+        {/* 佩戴中的勋章：96 像素，倾斜 + 缓慢自转（16s 一圈，比列表行的静态展示
+            郑重一档，但不到详情层放大图那么夸张）。 */}
+        {/* Currently-equipped badge: 96px, tilt + a slow 16s spin — a notch more
+            ceremonial than the static row-sized display, short of the detail
+            layer's full-size render. */}
+        {equippedBadge && (
+          <div className="mt-4 flex items-center gap-3 border-t border-white/10 pt-4">
+            <MedalTilt
+              ariaLabel={t(`gamification.badges.${equippedBadge.id}.name`)}
+              onClick={() => setDetailBadge(equippedBadge)}
+            >
+              <BadgeIcon id={equippedBadge.id} rarity={equippedBadge.rarity} earned size={96} spin />
+            </MedalTilt>
+            <div>
+              <span className="text-xs text-neutral-500">{t('gamification.equip')}</span>
+              <div className="text-sm font-semibold text-white">
+                {t(`gamification.badges.${equippedBadge.id}.name`)}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="mt-4 border-t border-white/10 pt-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -283,7 +391,12 @@ export default function AchievementsPage() {
                     key={b.id}
                     className="flex flex-col items-center gap-1.5 rounded-xl bg-white/[0.03] p-3 text-center"
                   >
-                    <BadgeIcon id={b.id} rarity={b.rarity} earned={b.earned} size={56} />
+                    <MedalTilt
+                      ariaLabel={t(`gamification.badges.${b.id}.name`)}
+                      onClick={() => setDetailBadge(b)}
+                    >
+                      <BadgeIcon id={b.id} rarity={b.rarity} earned={b.earned} size={72} mint={mintIds.has(b.id)} />
+                    </MedalTilt>
                     <span className="text-xs font-semibold text-neutral-200">
                       {t(`gamification.badges.${b.id}.name`)}
                     </span>
@@ -323,6 +436,10 @@ export default function AchievementsPage() {
         </div>
         {equipMsg && <p className="mt-3 text-sm text-down">{equipMsg}</p>}
       </section>
+
+      {detailBadge && (
+        <BadgeDetailModal badge={detailBadge} population={me.population} onClose={() => setDetailBadge(null)} />
+      )}
     </div>
   )
 }

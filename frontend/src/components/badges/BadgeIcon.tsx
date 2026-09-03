@@ -1,56 +1,82 @@
 // frontend/src/components/badges/BadgeIcon.tsx
-// 17 枚勋章矢量图形。禁止 emoji（产品要求）。稀有度=底座材质，id=中央图形。
-// 初版为几何 glyph，后续设计稿只替换 GLYPHS 路径，接口不变。
-const RARITY_COLORS: Record<string, [string, string]> = {
-  common: ['#8a8f98', '#5b5e66'], rare: ['#4f7cff', '#274a99'],
-  epic: ['#a24bf3', '#5c2b8a'], legendary: ['#e8b54d', '#8a6a2a'],
-  limited: ['#e8b54d', '#8a6a2a'],
+// V5 铸币勋章：真正的渲染在 medal.ts（纯函数，字符串拼 SVG，见该文件顶部
+// 关于为什么不用 JSX 的说明）；这里只是把它接进 React——用 useId() 给这枚
+// 勋章的渐变/裁剪 id 一个稳定且跨枚不冲突的前缀，用 dangerouslySetInnerHTML
+// 把内层标记灌进去（安全性同样在 medal.ts 里说明过：markup 全静态、不含用户
+// 输入）。对外接口保持 { id, rarity, earned, size } 不变，四个既有调用点
+// （AchievementsPage 56、LeaderboardPage 20、CompetitionsPage 20、
+// GamificationPanel 40）不用改一行；新增的 spin/mint/className 是可选项。
+//
+// V5 minted-medal badges: the actual rendering lives in medal.ts (a pure
+// function that string-builds SVG; see that file's header for why not
+// JSX). This component just wires it into React — useId() gives this
+// badge's gradient/clip ids a stable prefix that won't collide with other
+// badges on the same page, and dangerouslySetInnerHTML splices in the inner
+// markup (the safety case is made in medal.ts: the markup is fully static,
+// no user input flows through it). The public props stay
+// { id, rarity, earned, size } exactly as before, so the four existing call
+// sites (AchievementsPage 56, LeaderboardPage 20, CompetitionsPage 20,
+// GamificationPanel 40) compile unchanged; spin/mint/className are new and
+// optional.
+import { useEffect, useId, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
+import { renderMedalInner } from './medal'
+import type { GamificationBadgeRarity } from '../../api/types'
+
+interface Props {
+  id: string
+  rarity: GamificationBadgeRarity | string
+  earned: boolean
+  size?: number
+  // 传说勋章的环缘流光缓慢自转（16s 一圈）；仅头部佩戴展示用，勋章墙/榜单
+  // 行都不传。Slow 16s rim-sheen rotation for legendary/limited badges;
+  // header "equipped" display only — the wall and leaderboard rows don't pass it.
+  spin?: boolean
+  // 铸造瞬间：毛坯 → 压印 → 闪光 → 流光，见下方 effect 与全局 CSS 的
+  // .badge-minting 关键帧。Mint moment: blank → strike → flash → sweep, see
+  // the effect below and the .badge-minting keyframes in the global stylesheet.
+  mint?: boolean
+  className?: string
 }
 
-// 每枚一个独立中央图形（viewBox 0 0 24 24，stroke 风格与站内 TabIcon 一致）
-const GLYPHS: Record<string, JSX.Element> = {
-  profile_complete: <path d="M12 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-5 8c0-2.8 2.2-5 5-5s5 2.2 5 5" />,
-  first_close: <path d="M5 12h14M13 6l6 6-6 6" />,
-  first_real_trade: <path d="M4 17l5-5 3 3 7-8M16 7h4v4" />,
-  comp_finisher: <path d="M6 4h12v4a6 6 0 0 1-12 0V4ZM9 20h6M12 14v6" />,
-  evergreen_3m: <path d="M12 4l3 5h-2l3 5h-2l3 5H7l3-5H8l3-5H9l3-5Z" />,
-  discipline_90_7: <path d="M12 3l7 4v5c0 4-3 7-7 9-4-2-7-5-7-9V7l7-4ZM9 12l2 2 4-4" />,
-  hundred_wins: <path d="M7 4v7a5 5 0 0 0 10 0V4M4 6h3M17 6h3M12 16v4M8 20h8" />,
-  midas_touch: <path d="M12 3l2.4 5 5.6.7-4 3.9.9 5.4-4.9-2.6L7.1 18l.9-5.4-4-3.9L9.6 8 12 3Z" />,
-  profit_factor_2: <path d="M4 16l5-6 4 3 7-9M4 20h16" />,
-  evergreen_6m: <path d="M12 3l3.5 6h-2.3l3.3 6h-2.2l3.2 6H6.5l3.2-6H7.5l3.3-6H8.5L12 3Z" />,
-  discipline_90_30: <path d="M12 3l7 4v5c0 4-3 7-7 9-4-2-7-5-7-9V7l7-4ZM12 8v5l3 2" />,
-  no_bad_sl_50: <path d="M6 20V10l6-6 6 6v10M9 20v-6h6v6" />,
-  comp_podium: <path d="M3 20v-6h6v6M9 20V8h6v12M15 20v-9h6v9" />,
-  evergreen_12m: <path d="M12 2l4 7h-2.6l3.6 7h-2.4l3.4 6H6l3.4-6H7l3.6-7H8l4-7Z" />,
-  comp_winner: <path d="M12 3l2 4 4.5.6-3.3 3.2.8 4.5L12 13l-4 2.3.8-4.5L5.5 7.6 10 7l2-4ZM12 16v5" />,
-  comp_back_to_back: <path d="M8 4l1.5 3 3.5.5-2.5 2.4.6 3.5L8 11.7 4.9 13.4l.6-3.5L3 7.5 6.5 7 8 4Zm8 6l1.5 3 3.5.5-2.5 2.4.6 3.5-3.1-1.7-3.1 1.7.6-3.5L11 13.5l3.5-.5L16 10Z" />,
-  founder_2026: <path d="M12 3v3M12 18v3M3 12h3M18 12h3M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" />,
-}
+export default function BadgeIcon({ id, rarity, earned, size = 56, spin, mint, className }: Props) {
+  const { t } = useTranslation()
+  const reactId = useId()
+  const svgRef = useRef<SVGSVGElement>(null)
 
-export default function BadgeIcon({ id, rarity, earned, size = 56 }: {
-  id: string; rarity: string; earned: boolean; size?: number
-}) {
-  const [hi, lo] = RARITY_COLORS[rarity] ?? RARITY_COLORS.common
-  const gid = `bg-${id}`
+  // 铸造动画只播一次：svg 挂载时（毛坯态，.emb 被 CSS 压暗缩放）加一帧
+  // setTimeout 后追加 .play 类触发关键帧——不用 requestAnimationFrame，因为
+  // 后台标签页从不触发 rAF（用户切走标签再切回时动画会像是从没播过），而
+  // 30ms 的 setTimeout 在后台标签页仍会（延迟地）执行，播放只是稍晚而不是
+  // 从不播放。
+  // The mint animation plays once: on mount (blank state, .emb dimmed/scaled
+  // by CSS) a 30ms setTimeout adds the .play class to trigger the keyframes.
+  // Not requestAnimationFrame — background tabs never fire rAF (switch away
+  // and back, and the animation would look like it never played), whereas a
+  // 30ms setTimeout still fires (just later) in a background tab, so it
+  // plays late rather than never.
+  useEffect(() => {
+    if (!mint) return
+    const svg = svgRef.current
+    if (!svg) return
+    const timer = setTimeout(() => svg.classList.add('play'), 30)
+    return () => clearTimeout(timer)
+  }, [mint])
+
+  const inner = renderMedalInner(id, (rarity as GamificationBadgeRarity) ?? 'common', size, reactId, { earned, spin })
+  const classes = [mint ? 'badge-minting' : null, className ?? null].filter(Boolean).join(' ')
+
   return (
-    <svg width={size} height={size} viewBox="0 0 48 48"
-         style={earned ? undefined : { filter: 'grayscale(1) opacity(0.45)' }}>
-      <defs>
-        <linearGradient id={gid} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor={hi} /><stop offset="100%" stopColor={lo} />
-        </linearGradient>
-      </defs>
-      {rarity === 'limited' && (
-        <circle cx="24" cy="24" r="22.5" fill="none" stroke={hi}
-                strokeWidth="1.4" strokeDasharray="2.5 3" />
-      )}
-      <circle cx="24" cy="24" r="19" fill="var(--surface, #1b1b21)"
-              stroke={`url(#${gid})`} strokeWidth="2.6" />
-      <g transform="translate(12 12)" fill="none" stroke={`url(#${gid})`}
-         strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        {GLYPHS[id] ?? <circle cx="12" cy="12" r="7" />}
-      </g>
-    </svg>
+    <svg
+      ref={svgRef}
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      role="img"
+      aria-label={t(`gamification.badges.${id}.name`)}
+      className={classes || undefined}
+      style={earned ? undefined : { filter: 'grayscale(1) brightness(.72)', opacity: .42 }}
+      dangerouslySetInnerHTML={{ __html: inner }}
+    />
   )
 }
