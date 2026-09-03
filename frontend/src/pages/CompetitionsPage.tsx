@@ -559,7 +559,23 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
             ) : (
               <div>
                 <p className="text-sm text-neutral-400">
-                  {accounts.length === 0 ? t('competition.noAccounts') : t('competition.noRealAccounts')}
+                  {/* 三选一：零账户 -> noAccounts；有账户、没一个实盘、但有账户
+                      tradeMode 还是 null（backfill 尚未跑到/桥接没给分组信息）
+                      -> pendingAccountType（"尚未判定"，不能说"没有实盘"，那是
+                      在没查清楚之前就下结论）；有账户、都判定过、确实没一个实盘
+                      -> noRealAccounts（M-5）。
+                      Three-way: zero accounts -> noAccounts; accounts exist,
+                      none real, but at least one still has tradeMode null
+                      (backfill hasn't reached it yet / bridge gave no group
+                      info) -> pendingAccountType ("not yet determined" — must
+                      not claim "no real accounts" before it's actually known);
+                      accounts exist, all determined, genuinely none real ->
+                      noRealAccounts (M-5). */}
+                  {accounts.length === 0
+                    ? t('competition.noAccounts')
+                    : accounts.some((a) => a.tradeMode == null)
+                      ? t('competition.pendingAccountType')
+                      : t('competition.noRealAccounts')}
                 </p>
                 <Link
                   to="/bind"

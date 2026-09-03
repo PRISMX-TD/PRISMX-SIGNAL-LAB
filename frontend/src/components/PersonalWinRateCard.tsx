@@ -207,14 +207,28 @@ export default function PersonalWinRateCard({ variant = 'compact', login, classN
               {gwrPct != null ? `${gwrPct}%` : '—'}
             </span>
           </div>
+          {/* 优先级：满级 > 下一关有胜率门槛（已达标/还差多少）> 下一关无胜率
+              门槛但还有别的条件没做完（如一级 qicheng）> 什么都不知道就不渲染。
+              isMaxLevel/metNext 由后端算好传来，不再用 level >= 6 或
+              gapPct === 0 这类前端自己猜的口径（见 types.ts 注释）。
+              Priority: max level > next group has a win-rate bar (met/still
+              short) > next group has no win-rate bar but other undone
+              conditions (e.g. level 1's qicheng) > render nothing if none of
+              the above apply. isMaxLevel/metNext come pre-computed from the
+              backend, not inferred client-side via level >= 6 or
+              gapPct === 0 (see the types.ts comment). */}
           <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-neutral-500">
             <span>{t('winrate.resolvedCount', { n: gwr.trades })}</span>
-            {gwr.level >= 6 ? (
+            {gwr.isMaxLevel ? (
               <span>{t('gamification.maxLevel')}</span>
-            ) : gwr.gapPct === 0 ? (
-              <span className="text-up">{t('gamification.winRateCard.metNext')}</span>
-            ) : gwr.gapPct != null && gwr.gapPct > 0 ? (
-              <span>{t('gamification.winRateCard.toNext', { pct: gwr.gapPct })}</span>
+            ) : gwr.nextWinRateTarget != null ? (
+              gwr.metNext ? (
+                <span className="text-up">{t('gamification.winRateCard.metNext')}</span>
+              ) : gwr.gapPct != null ? (
+                <span>{t('gamification.winRateCard.toNext', { pct: gwr.gapPct })}</span>
+              ) : null
+            ) : gwr.remainingToNext != null ? (
+              <span>{t('gamification.remainingToNext', { count: gwr.remainingToNext })}</span>
             ) : null}
           </div>
           <Link to="/achievements" className="mt-1.5 block text-right text-[10px] text-prism-300 hover:text-prism-200">

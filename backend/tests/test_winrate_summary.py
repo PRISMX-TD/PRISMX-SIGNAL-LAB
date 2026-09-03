@@ -45,16 +45,20 @@ def test_payload_shape_fresh_user(db_session):
     p = build_winrate_summary_payload(db_session, u)
     assert set(p.keys()) == {
         "winRate", "windowDays", "trades", "level", "title",
-        "nextWinRateTarget", "gapPct"}
+        "nextWinRateTarget", "metNext", "gapPct", "remainingToNext", "isMaxLevel"}
     assert p["level"] == 1 and p["title"] == "novice"
     assert p["windowDays"] == 365
     assert p["trades"] == 0 and p["winRate"] is None
     # qicheng（第一组）没有胜率条件——刚起步的用户下一关不涉及胜率，
-    # target/gap 都应是 None，不是 0。
+    # target/metNext/gap 都应是 None，不是 0/False。isMaxLevel 是 False；
+    # remainingToNext 是 4——qicheng 全部 4 个条件都还没做（M-3）。
     # qicheng (the first group) carries no win-rate condition — a
-    # brand-new user's next milestone doesn't involve win rate at all,
-    # so target/gap must be None, not 0.
-    assert p["nextWinRateTarget"] is None and p["gapPct"] is None
+    # brand-new user's next milestone doesn't involve win rate at all, so
+    # target/metNext/gap must be None, not 0/False. isMaxLevel is False;
+    # remainingToNext is 4 — all 4 of qicheng's conditions are still undone (M-3).
+    assert p["nextWinRateTarget"] is None and p["metNext"] is None and p["gapPct"] is None
+    assert p["isMaxLevel"] is False
+    assert p["remainingToNext"] == 4
 
 
 def test_gap_computed_when_below_target(db_session):
@@ -68,7 +72,14 @@ def test_gap_computed_when_below_target(db_session):
     assert p["level"] == 2 and p["trades"] == 5
     assert p["winRate"] == pytest.approx(0.2)
     assert p["nextWinRateTarget"] == 0.35
+    assert p["metNext"] is False
     assert p["gapPct"] == pytest.approx(15.0)
+    assert p["isMaxLevel"] is False
+    # 锋芒组四个条件（trade_days_30/trades_100/lots_10/winrate_35）一个都没
+    # 落库完成（这里只做了判定所需的交易数据，没跑 judge_and_record_conditions）。
+    # None of fengmang's four conditions are persisted done (only the raw
+    # trade data was set up here, judge_and_record_conditions was never run).
+    assert p["remainingToNext"] == 4
 
 
 def test_gap_zero_when_target_met(db_session):
@@ -78,6 +89,32 @@ def test_gap_zero_when_target_met(db_session):
         _fill_and_close(db_session, u, "500123", i, 5.0 if i <= 4 else -1.0)
     p = build_winrate_summary_payload(db_session, u)
     assert p["nextWinRateTarget"] == 0.35
+    assert p["metNext"] is True
+    assert p["gapPct"] == 0.0
+
+
+def test_gap_exact_at_bar_is_not_met(db_session):
+    """M-2：恰好卡在门槛上（win_rate == target）不算达标——判定口径
+    （conditions.py 的 wr > target，严格大于）与摘要必须一致。exactly-at-bar
+    显示"还差 0.0%"而不是"已达标"：数字是 0，但 metNext 为 False，前端据此
+    渲染 toNext 文案而非 metNext 文案。
+    M-2: sitting exactly at the bar (win_rate == target) does not count as met
+    — judging (conditions.py's wr > target, strictly greater) and the summary
+    must agree. Exactly-at-bar shows "still 0.0% short", not "met": the number
+    is 0 but metNext is False, so the frontend renders the toNext copy, not
+    the metNext copy."""
+    u = _user(db_session, email="exact@t.co", tok="tok_exact")
+    _mark_done(db_session, u.id, QICHENG)
+    # 7 胜 13 负 => win_rate 恰好 0.35，与锋芒组门槛相等。
+    # 7 wins, 13 losses => win_rate exactly 0.35, equal to fengmang's bar.
+    for i in range(1, 8):
+        _fill_and_close(db_session, u, "500123", i, 5.0)
+    for i in range(8, 21):
+        _fill_and_close(db_session, u, "500123", i, -1.0)
+    p = build_winrate_summary_payload(db_session, u)
+    assert p["winRate"] == pytest.approx(0.35)
+    assert p["nextWinRateTarget"] == 0.35
+    assert p["metNext"] is False
     assert p["gapPct"] == 0.0
 
 
@@ -86,10 +123,19 @@ def test_max_level_has_no_next_target(db_session):
     _mark_done(db_session, u.id, ALL_TASK_IDS)
     p = build_winrate_summary_payload(db_session, u)
     assert p["level"] == 6 and p["title"] == "legend"
-    assert p["nextWinRateTarget"] is None and p["gapPct"] is None
+    assert p["nextWinRateTarget"] is None and p["metNext"] is None and p["gapPct"] is None
+    assert p["isMaxLevel"] is True
+    assert p["remainingToNext"] is None
 
 
 def test_visibility_gate(db_session):
+    # try/finally：user_visible 是进程全局设置缓存，一旦某条断言在复位前失败
+    # 就会让开关卡在 True，污染跑在它之后的其它测试（同 test_leaderboard_api.py
+    # 的 test_payload_gates_reflect_admin_settings 写法）。
+    # try/finally: user_visible is a process-global settings cache — an
+    # assertion failing before the reset would leave the switch stuck True and
+    # pollute whatever test runs after this one (same pattern as
+    # test_leaderboard_api.py's test_payload_gates_reflect_admin_settings).
     invalidate_gamification_cache()
     u = _user(db_session, email="plain@t.co", tok="tok_plain")
     with pytest.raises(HTTPException) as e:
@@ -99,8 +145,11 @@ def test_visibility_gate(db_session):
     require_gamification_visible(db=db_session, user=admin)   # admin 直通不抛
     save_gamification_settings(db_session, {"user_visible": True})
     db_session.commit(); invalidate_gamification_cache()
-    require_gamification_visible(db=db_session, user=u)       # 开关开了不抛
-    invalidate_gamification_cache()
+    try:
+        require_gamification_visible(db=db_session, user=u)       # 开关开了不抛
+    finally:
+        save_gamification_settings(db_session, {"user_visible": False})
+        db_session.commit(); invalidate_gamification_cache()
 
 
 def test_cache_hit_then_recompute_after_ttl(db_session, monkeypatch):

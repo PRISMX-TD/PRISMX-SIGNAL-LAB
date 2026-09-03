@@ -131,7 +131,16 @@ export async function enableNotifications(
   // CDN cache lag where old and new code run side by side.
   const cats = current.selected_categories?.length > 0 ? current.selected_categories : [ALL_SENTINEL]
   const syms = current.selected_symbols?.length > 0 ? current.selected_symbols : [ALL_SENTINEL]
-  const events = current.event_types?.length > 0 ? current.event_types : [...EVENT_TYPES]
+  // 事件白名单默认全选时排除 GAMIFICATION_EVENT_TYPES（badge_awarded）：这是
+  // 显式落库（不再是 NULL），必须跟后端 _parse_event_types 的 NULL 默认口径
+  // 一致——否则"关闭再开启"这一次往返就会把用户静默 opt-in 到勋章推送，
+  // 在功能对其可见之前就先收到通知。
+  // Exclude GAMIFICATION_EVENT_TYPES (badge_awarded) from the select-all
+  // default: this writes an explicit list (no longer NULL), so it must match
+  // backend _parse_event_types's NULL-default semantics — otherwise one
+  // disable-then-enable round trip silently opts the user into badge pushes
+  // before the feature is even visible to them.
+  const events = current.event_types?.length > 0 ? current.event_types : [...ACCOUNT_EVENT_TYPES, EVENT_STRATEGY_SIGNAL]
 
   const vapidPromise = pushApi.getVapidKey()
   await Promise.all([

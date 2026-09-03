@@ -1977,6 +1977,7 @@
     "pickAccountHint": "Only your real-money accounts are listed",
     "noAccounts": "No trading accounts connected yet — bind an account first",
     "noRealAccounts": "No real-money accounts connected — only real accounts may enter",
+    "pendingAccountType": "Account type not yet determined — please try again later",
     "registered": "Registered",
     "registerSuccess": "Registered successfully",
     "regNotOpen": "Registration hasn't opened yet",

@@ -309,16 +309,24 @@ def test_account_me_exposes_gamification_level(db_session):
     assert out_off.gamificationTitle is None
 
     # 普通用户，开关打开，做完第一组全部条件：升到 2 级 junior。
+    # try/finally：user_visible 是进程全局设置缓存，断言若在复位前失败会让
+    # 开关卡在 True，污染跑在它之后的其它测试（同 test_leaderboard_api.py 的
+    # test_payload_gates_reflect_admin_settings 写法）。
+    # try/finally: user_visible is a process-global settings cache — an
+    # assertion failing before the reset would leave the switch stuck True and
+    # pollute whatever test runs after this one (same pattern as
+    # test_leaderboard_api.py's test_payload_gates_reflect_admin_settings).
     save_gamification_settings(db_session, {"user_visible": True})
     db_session.commit(); invalidate_gamification_cache()
-    on_user = _user(db_session, "lvl-on@t.co")
-    for task_id in GROUPS[0][1]:
-        db_session.add(UserTask(user_id=on_user.id, task_id=task_id))
-    db_session.commit()
-    out_on = get_account(db=db_session, current_user=on_user)
-    assert out_on.gamificationVisible is True
-    assert out_on.gamificationLevel == 2
-    assert out_on.gamificationTitle == "junior"
-
-    save_gamification_settings(db_session, {"user_visible": False})
-    db_session.commit(); invalidate_gamification_cache()
+    try:
+        on_user = _user(db_session, "lvl-on@t.co")
+        for task_id in GROUPS[0][1]:
+            db_session.add(UserTask(user_id=on_user.id, task_id=task_id))
+        db_session.commit()
+        out_on = get_account(db=db_session, current_user=on_user)
+        assert out_on.gamificationVisible is True
+        assert out_on.gamificationLevel == 2
+        assert out_on.gamificationTitle == "junior"
+    finally:
+        save_gamification_settings(db_session, {"user_visible": False})
+        db_session.commit(); invalidate_gamification_cache()

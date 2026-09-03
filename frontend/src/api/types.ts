@@ -1047,15 +1047,34 @@ export interface GamificationWinRateSummary {
   trades: number
   level: number
   title: string
-  // 下一级毕业线的胜率门槛；已满级（没有下一关）时为 null。
-  // The next level's win-rate graduation bar; null at max level (no next group).
+  // 下一级毕业线的胜率门槛；下一关不含胜率条件（如一级 qicheng）或已满级时为
+  // null——区分这两种 null 要看 isMaxLevel。
+  // The next level's win-rate graduation bar; null when the next group has no
+  // win-rate condition (e.g. level 1's qicheng) or at max level — disambiguate
+  // the two via isMaxLevel.
   nextWinRateTarget: number | null
-  // 距下一级还差多少个百分点：null=胜率未知（trades=0）或已满级；0=已达标；
+  // 是否已达下一级胜率门槛（严格大于，跟 conditions.py 的判定口径一致，
+  // ==target 不算达标）；nextWinRateTarget 为 null 时这里也是 null。
+  // Whether the next win-rate bar is already cleared (strictly greater than,
+  // matching conditions.py's judging — == target does not count); null
+  // whenever nextWinRateTarget is null.
+  metNext: boolean | null
+  // 距下一级还差多少个百分点：null=胜率未知（trades=0）、下一关无胜率条件、
+  // 或已满级；0=恰好卡在门槛上或以上（配合 metNext 判断到底是否已达标）；
   // 否则是正数（尚差多少个百分点）。
   // Percentage points still needed to clear the next bar: null = win rate
-  // unknown (trades=0) or max level; 0 = already meets it; otherwise a
-  // positive number of points still needed.
+  // unknown (trades=0), the next group has no win-rate condition, or max
+  // level; 0 = sitting at or above the bar (pair with metNext to know whether
+  // it's actually cleared); otherwise a positive number of points still needed.
   gapPct: number | null
+  // 下一关里还没做完的条件数（含非胜率条件）；已满级时为 null。
+  // Undone condition count in the next group (including non-win-rate ones);
+  // null at max level.
+  remainingToNext: number | null
+  // 是否已满级（GROUPS 里没有下一关了），取代前端曾经硬编码的 level >= 6。
+  // Whether the user is already at max level (no next group in GROUPS) —
+  // replaces the frontend's former hardcoded level >= 6 check.
+  isMaxLevel: boolean
 }
 
 // PATCH /auth/profile 的请求体：全部可选，只改传了的字段。equippedBadge 显式

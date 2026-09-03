@@ -169,6 +169,23 @@ export default function CompetitionsPanel() {
   const [listError, setListError] = useState<string | null>(null)
   const [advancingId, setAdvancingId] = useState<string | null>(null)
   const [settlingId, setSettlingId] = useState<string | null>(null)
+  // M-6：settle 按钮的 24h 宽限期是拿 Date.now() 跟 settleOpensAt 比出来的，
+  // 只在渲染时算一次——管理员开着这个页签跨过 24h 那一刻，按钮不会自己解禁，
+  // 得等下一次因为别的原因重渲染（如轮询列表）才会更新，容易让人以为卡住了。
+  // 每分钟摆一次这个 tick 触发重渲染即可，真正的闸在后端 settle_competition，
+  // 这里只是让前端的禁用状态别滞后太久。
+  // M-6: the settle button's 24h grace period is Date.now() vs. settleOpensAt,
+  // computed once per render — an admin who leaves this tab open across the
+  // 24h mark won't see the button re-enable until something else triggers a
+  // re-render (e.g. the list poll), which reads as stuck. Ticking this once a
+  // minute just forces a re-render; the real gate stays on the backend
+  // (settle_competition), this only keeps the frontend's disabled state from
+  // lagging too far behind it.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const loadList = async () => {
     setListLoading(true)
@@ -508,7 +525,7 @@ export default function CompetitionsPanel() {
                             const settleOpensAt = c.endsAt
                               ? new Date(c.endsAt).getTime() + 24 * 60 * 60 * 1000
                               : null
-                            const waiting = settleOpensAt != null && Date.now() < settleOpensAt
+                            const waiting = settleOpensAt != null && now < settleOpensAt
                             return (
                               <span className="inline-flex items-center gap-1.5">
                                 {waiting && (

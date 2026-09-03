@@ -1,7 +1,11 @@
 """badge_awarded 推送事件：NULL 偏好行默认关闭，需显式 opt-in。
 badge_awarded push event: a NULL prefs row defaults it OFF, requiring
 explicit opt-in (unlike every other event type, which stays default-on)."""
+import json
+from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from app.services.gamification.badges import BADGES, award_badge
 from app.services.push_dispatch import _parse_event_types, EVENT_TYPES, EVENT_BADGE_AWARDED
@@ -30,6 +34,30 @@ def test_all_badges_have_a_display_name():
     something like "you unlocked badge 'first_close'"."""
     for badge_id, meta in BADGES.items():
         assert meta.get("name"), f"{badge_id} missing a display name"
+
+
+def test_badge_names_mirror_zh_json():
+    """BADGES 的中文 name 与 zh.json 的 gamification.badges.<id>.name 必须字字
+    一致——推送正文（award_badge）用的是 BADGES['name']，前端页面用的是 i18n
+    key，两处各改各的很容易改岔。缺文件（例如独立跑 backend 测试、没有拉全
+    仓库）就跳过而不是判失败。
+    BADGES' Chinese name must mirror zh.json's gamification.badges.<id>.name
+    byte-for-byte — push copy (award_badge) reads BADGES['name'] while the
+    frontend reads the i18n key, and the two are easy to edit independently
+    and let drift. Skip (not fail) when the file is absent, e.g. running the
+    backend tests standalone without the full monorepo checkout."""
+    zh_path = Path(__file__).resolve().parents[2] / "frontend" / "src" / "i18n" / "zh.json"
+    if not zh_path.exists():
+        pytest.skip(f"frontend/src/i18n/zh.json not found at {zh_path}; skipping mirror check")
+
+    zh = json.loads(zh_path.read_text(encoding="utf-8"))
+    zh_badges = zh["gamification"]["badges"]
+
+    assert set(BADGES.keys()) == set(zh_badges.keys()), "badge id set diverged between BADGES and zh.json"
+    for badge_id, meta in BADGES.items():
+        assert meta.get("name") == zh_badges[badge_id]["name"], (
+            f"{badge_id}: BADGES name {meta.get('name')!r} != zh.json name {zh_badges[badge_id]['name']!r}"
+        )
 
 
 def test_award_badge_push_uses_display_name_not_raw_id(db_session):

@@ -184,7 +184,8 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
 # 半在“判定”，不在“统计”），只读 compute_comprehensive_stats + 已落库的
 # UserTask。但 compute_comprehensive_stats 本身仍是 365 天整仓聚合，仪表盘卡
 # 45 秒轮询一次，所以照样按用户缓存 60 秒——避免每次轮询都把这条查询打一遍。
-# 进程内 dict，理由同 _last_judged（本部署单进程）。
+# 进程内 dict，理由同 _last_judged（本部署单进程）；按用户数封顶，永不清空，
+# 与 _last_judged 同一设计——量级上可接受，不做淘汰。
 # Dashboard win-rate-card summary (§2.4/§7): a separate cache from /me's 60s
 # judging throttle — this endpoint never triggers judge_and_record_conditions/
 # judge_and_award_badges (the expensive half is "judging", not "reading
@@ -193,7 +194,8 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
 # full-position aggregation, and the dashboard card polls it every 45s, so it
 # still gets a 60s per-user cache to avoid re-running that query on every
 # poll. In-process dict for the same reason as _last_judged (single-process
-# deployment).
+# deployment); bounded by user count and never evicted, by design, same as
+# _last_judged — acceptable at this scale.
 _SUMMARY_CACHE_SECONDS = 60
 _summary_cache: dict[str, tuple[float, dict]] = {}
 
@@ -209,25 +211,47 @@ def build_winrate_summary_payload(db: Session, user: User) -> dict:
     level = level_of(done)
     win_rate = stats["win_rate"]
 
-    # 下一级的胜率毕业线：GROUPS 里第一个尚未全部完成的组——与 level_of 走的
-    # 是同一条判定路径，所以这里找到的组恰好是「用户正在闯的下一关」。满级
-    # （所有组都已完成）时没有下一关，三个字段都是 None/0.0 由下方兜底。
-    # The next level's win-rate bar: the first group in GROUPS not yet fully
+    # 下一级的毕业线：GROUPS 里第一个尚未全部完成的组——与 level_of 走的是同一条
+    # 判定路径，所以这里找到的组恰好是「用户正在闯的下一关」。isMaxLevel（没有
+    # 下一关）与 remainingToNext（下一关里还没做完的条件数，含非胜率条件——跟
+    # AchievementsPage.tsx 的 nextGroup/remaining 是同一份算法）给前端，不再靠
+    # `level >= 6` 硬编码判满级，也不再对"下一关不是胜率关"（如一级 qicheng）
+    # 什么都不显示。next_target 仅在该组含胜率条件时才有值。
+    # The next level's graduation bar: the first group in GROUPS not yet fully
     # done — the same walk level_of does, so the group found here is exactly
-    # "the level the user is working toward next". At max level (every group
-    # done) there is no next group, handled by the None fallback below.
+    # "the level the user is working toward next". isMaxLevel (no next group)
+    # and remainingToNext (undone conditions in that next group, including
+    # non-win-rate ones — the same algorithm as AchievementsPage.tsx's
+    # nextGroup/remaining) go to the frontend so it stops hardcoding
+    # `level >= 6` for max level and stops showing nothing when the next group
+    # isn't a win-rate group (e.g. level 1's qicheng). next_target is only set
+    # when that group actually has a win-rate condition.
     next_target: float | None = None
+    remaining_to_next: int | None = None
+    is_max_level = True
     for _gid, conds in GROUPS:
         if all(c in done for c in conds):
             continue
+        is_max_level = False
+        remaining_to_next = sum(1 for c in conds if c not in done)
         for c in conds:
             if c in WINRATE_CONDITIONS:
                 next_target = WINRATE_CONDITIONS[c]
         break
 
+    # metNext/gapPct 必须跟 conditions.py 的严判口径（wr > target，严格大于）
+    # 一致：卡在 == target 上时不能说"已达标"（那样用户会纳闷为什么条件迟迟不
+    # 完成），而是如实报"还差 0.0%"——数字是 0 但没过线，跟严判的判定结果对得上。
+    # metNext/gapPct must agree with conditions.py's strict judging (wr >
+    # target, strictly greater): sitting exactly at == target must not read as
+    # "met" (the user would be puzzled why the condition never completes) —
+    # instead it truthfully reports "still 0.0% short", a zero that hasn't
+    # actually cleared the bar, matching the judging outcome.
+    met_next: bool | None = None
     gap_pct: float | None = None
     if next_target is not None and win_rate is not None:
-        gap_pct = round((next_target - win_rate) * 100, 1) if win_rate < next_target else 0.0
+        met_next = win_rate > next_target
+        gap_pct = 0.0 if met_next else round(max(next_target - win_rate, 0.0) * 100, 1)
 
     payload = {
         "winRate": win_rate,
@@ -236,7 +260,10 @@ def build_winrate_summary_payload(db: Session, user: User) -> dict:
         "level": level,
         "title": LEVEL_TITLES[level - 1],
         "nextWinRateTarget": next_target,
+        "metNext": met_next,
         "gapPct": gap_pct,
+        "remainingToNext": remaining_to_next,
+        "isMaxLevel": is_max_level,
     }
     _summary_cache[user.id] = (now, payload)
     return payload
