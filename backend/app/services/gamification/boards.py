@@ -125,6 +125,49 @@ def _resolved_in_period(db, user_id, logins, period_key, taken_at_by_login,
     return out
 
 
+def board_gates(gset: dict) -> dict:
+    """把游戏化设置收敛成两块榜（及走同一套规则的比赛榜）共用的入榜门槛。
+
+    与 `settings_store._load_gamification_from_db` 的坏值兜底是两层不同的
+    防线：那边保证存进缓存的值本身可信（读时已经做过 int/float 转换和
+    负值/坏值回退默认），这里再做一次 `max(1, ...)` 下限收敛，是因为门槛的
+    语义下限（笔数至少 1）比"值是不是能转成 int"更严格——两层防线独立，
+    任何一层失手另一层仍能兜住，不能只留一层。
+
+    `compute_board_rows`（周期榜）与 `compute_comp_rows`（比赛榜，复用同一
+    metric 的门槛）都必须调用这个函数，不能各自重复 max(1, int(...)) 的算法——
+    两处逻辑分叉是历史上真实出现过的 bug 来源（一处改了下限、另一处忘改）。
+    `build_board_rows_payload` 把它下发给前端展示，同一个函数保证"页面上写的
+    门槛"与"计算时用的门槛"永远是同一个数。
+
+    Distills gamification settings into the entry gates shared by both boards
+    (and by the competition board, which reuses whichever metric's rules
+    apply).
+
+    This is a second line of defense on top of
+    `settings_store._load_gamification_from_db`'s own bad-value fallback: that
+    one guarantees the cached value is itself trustworthy (int/float coercion
+    and negative/bad-value fallback already happened at read time); this one
+    additionally floors the value at its semantic minimum (a trade count can
+    never mean "fewer than 1"), which is a stricter requirement than merely
+    "convertible to int". The two layers are independent so a failure in
+    either is still caught by the other.
+
+    Both `compute_board_rows` (the standing boards) and `compute_comp_rows`
+    (competitions, which reuse whichever metric's rules apply) must call this
+    rather than each re-deriving max(1, int(...)) — divergence between the two
+    has been a real bug source (one side's floor gets changed, the other
+    forgotten). `build_board_rows_payload` hands the same dict to the frontend,
+    so the number shown on the page and the number used to compute the rows
+    are guaranteed to be the same value.
+    """
+    return {
+        "min_baseline_usd": float(gset.get("min_baseline_usd", 500.0)),
+        "min_trades_return": max(1, int(gset.get("min_trades_return", 5))),
+        "min_trades_winrate": max(1, int(gset.get("min_trades_winrate", 20))),
+    }
+
+
 def compute_board_rows(db, period_key: str) -> dict:
     """两榜行计算（设计 §4.1）：按有基线的账户分组、整仓归期过滤、双闸门槛。
     返回 {"return_pct": [...], "win_rate": [...]}，行已过滤门槛、未排名。
@@ -137,14 +180,10 @@ def compute_board_rows(db, period_key: str) -> dict:
     """
     from app.services.settings_store import get_gamification_settings
     gset = get_gamification_settings(db)
-    min_baseline = float(gset.get("min_baseline_usd", 500.0))
-    # 入榜笔数门槛：管理员可调（内测期放松、生产期收紧），下限 1——
-    # 设置读到坏值/负值时 max(1, ...) 兜底，绝不能让门槛塌成 0 或负数放空行入榜。
-    # Trade-count gates: admin-adjustable (loose in beta, strict in production),
-    # floored at 1 — a bad/negative setting can never collapse the gate to
-    # zero or negative and let empty rows onto a board.
-    min_trades_return = max(1, int(gset.get("min_trades_return", 5)))
-    min_trades_winrate = max(1, int(gset.get("min_trades_winrate", 20)))
+    gates = board_gates(gset)
+    min_baseline = gates["min_baseline_usd"]
+    min_trades_return = gates["min_trades_return"]
+    min_trades_winrate = gates["min_trades_winrate"]
     opted_out = {r[0] for r in db.query(User.id).filter(User.leaderboard_opt_out.is_(True))}
     baselines = db.query(PeriodBaseline).filter(
         PeriodBaseline.period_key == period_key).all()

@@ -16,6 +16,7 @@ from app.services.gamification import (
     BADGES, LEVEL_TITLES, compute_comprehensive_stats, condition_states,
     judge_and_award_badges, judge_and_record_conditions, level_of)
 from app.services.gamification import identity, periods
+from app.services.gamification.boards import board_gates
 from app.services.settings_store import (
     get_gamification_settings, invalidate_gamification_cache, save_gamification_settings)
 
@@ -93,7 +94,16 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
     period_key 是 `comp:<id>`，不是 `_PERIOD_KEY_RE` 能匹配的自然周/月格式，
     所以它绕过 `build_leaderboard_payload` 直接调这个函数，board 用
     `comp.metric`（已在创建/编辑时校验过白名单）。
+
+    负载里带的 `gates` 是当前生效的入榜门槛（来自 `boards.board_gates`），
+    供前端渲染榜规文案/未上榜提示用的活数字，不再由前端写死 5/20/500——
+    比赛详情页复用的也是这份 gates（比赛与常设榜共用同一套门槛规则）。
+    A live snapshot of the current entry gates (via `boards.board_gates`),
+    for the frontend to render its rules copy / not-ranked hint from instead
+    of hardcoding 5/20/500 — the competition detail page reuses this same
+    key (competitions share the standing boards' gate rules).
     """
+    gates = board_gates(get_gamification_settings(db))
     all_rows = (db.query(LeaderboardSnapshot)
                   .filter(LeaderboardSnapshot.board == board,
                           LeaderboardSnapshot.period_key == period_key)
@@ -127,7 +137,14 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
         best = min(my_rows, key=lambda r: r.rank)
         me = {"rank": best.rank, "score": best.score, "sample": best.sample}
 
-    return {"board": board, "periodKey": period_key, "rows": rows, "me": me}
+    return {
+        "board": board, "periodKey": period_key, "rows": rows, "me": me,
+        "gates": {
+            "minTradesReturn": gates["min_trades_return"],
+            "minTradesWinrate": gates["min_trades_winrate"],
+            "minBaselineUsd": gates["min_baseline_usd"],
+        },
+    }
 
 
 def build_me_payload(db: Session, user: User, judge: bool) -> dict:
