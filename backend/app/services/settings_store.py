@@ -755,10 +755,23 @@ ACCOUNT_TYPE_DEFAULTS: dict = {
     # confirms the missing prefix and it's added here.
     "server_login_rules": [
         {
+            # Make Capital 一台 MT5 服务器同时跑模拟与实盘（2026-09-03 与券商
+            # 确认），只能靠登录号段区分：**6 开头是实盘，其余一律模拟**。
+            # 用 `default` 而不是把 1/9/... 逐个列出来，是因为这才是券商给的
+            # 原话——列举号段的写法会在券商新开一个号段时把它判成"未知"，而
+            # 事实上那也该是模拟。`default` 只接受 demo/contest（见
+            # account_type._DEFAULT_MODES），兜底判实盘是被禁止的。
+            # One MT5 server hosting both demo and live accounts (confirmed with
+            # the broker 2026-09-03), told apart only by login prefix: 6… is
+            # live, everything else is demo. Expressed as a `default` rather
+            # than enumerating ranges because that is literally what the broker
+            # said — enumerating would leave any newly-opened range as
+            # "unknown" when it should be demo. A `default` may never be "real".
             "server": "MakeCapital-Live",
             "real_login_prefixes": ["6"],
-            "demo_login_prefixes": ["1"],
+            "demo_login_prefixes": [],
             "contest_login_prefixes": [],
+            "default": "demo",
         },
     ],
 }

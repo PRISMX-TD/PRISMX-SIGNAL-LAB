@@ -28,6 +28,14 @@ DEMO = 0
 CONTEST = 1
 REAL = 2
 
+# `server_login_rules` 里 `default` 兜底只允许保守方向：一台服务器上「其余号段」
+# 可以声明为模拟或竞赛，**不能声明为实盘**——那等于凭空猜一批账号是真金白银，
+# 正是本模块开篇反复强调不能做的事。配成 "real" 会被忽略（仍判未知）。
+# The per-rule `default` may only fall back to demo/contest, never real:
+# blanket-guessing a range as live money is the one direction this module exists
+# to prevent. A "real" default is ignored (stays unknown).
+_DEFAULT_MODES = {"demo": DEMO, "contest": CONTEST}
+
 
 def classify_group(group: str | None, settings: dict) -> int | None:
     """按组名判定账户类型；判不出来返回 None（未知）。
@@ -120,6 +128,8 @@ def classify_login(server: str | None, login: str | None, settings: dict) -> int
 
     没有该服务器的规则、或号段前缀不在配置里，一律 None，不猜——原因同
     `classify_group`：猜错方向是把模拟记成实盘，代价远大于漏判一个账号。
+    规则条目可带 `default`（只能是 "demo"/"contest"）声明该服务器上其余号段的
+    归类——Make Capital 就是「6 开头实盘、其余一律模拟」。
     规则条目本身若损坏（不是 dict、缺 "server" 键）直接跳过，不抛异常——
     这是运维配置，不该因为一条脏数据打断整批判定。
 
@@ -163,7 +173,17 @@ def classify_login(server: str | None, login: str | None, settings: dict) -> int
                 if p and login_str.startswith(p) and len(p) > best_len:
                     best_len = len(p)
                     best_mode = mode
-        return best_mode
+        if best_mode is not None:
+            return best_mode
+        # 号段没命中时，规则可以用 `default` 声明「这台服务器上其余号段一律算
+        # 什么」。这是券商给的事实（Make Capital：6 开头实盘，其余全是模拟），
+        # 比把号段一个个列出来更贴近真相，也不会在券商新开一个号段时把它默默
+        # 判成未知。只接受 demo/contest，见 _DEFAULT_MODES。
+        # A rule may declare what every OTHER login range on that server is.
+        # This encodes the broker's own statement ("6… is live, everything else
+        # is demo") rather than enumerating ranges, and keeps a newly-opened
+        # range from silently landing in "unknown". Demo/contest only.
+        return _DEFAULT_MODES.get(str(rule.get("default") or "").strip().lower())
     return None
 
 

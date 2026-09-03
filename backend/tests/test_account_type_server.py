@@ -108,11 +108,15 @@ def test_classify_server_shipped_defaults_no_longer_whitelist_make_capital_live(
 
 
 def test_classify_login_shipped_defaults_classify_make_capital_live_by_prefix():
-    """出厂配置：合作券商确认的登录号段规则（2026-09-03）。"""
+    """出厂配置：合作券商确认的登录号段规则（2026-09-03）。
+
+    最终口径是「6 开头实盘，其余一律模拟」——`991073` 这类当初判不出来的号段
+    现在由 `default` 兜底归为模拟，而不是停在未知。
+    """
     assert classify_login("MakeCapital-Live", "600345", ACCOUNT_TYPE_DEFAULTS) == REAL
     assert classify_login("makecapital-live", "600345", ACCOUNT_TYPE_DEFAULTS) == REAL
     assert classify_login("MakeCapital-Live", "100016", ACCOUNT_TYPE_DEFAULTS) == DEMO
-    assert classify_login("MakeCapital-Live", "991073", ACCOUNT_TYPE_DEFAULTS) is None
+    assert classify_login("MakeCapital-Live", "991073", ACCOUNT_TYPE_DEFAULTS) == DEMO
 
 
 # ---------- classify_login：服务器精确匹配 + 登录号最长前缀 ----------
@@ -263,15 +267,15 @@ def test_backfill_classifies_make_capital_live_by_login_prefix(db_session):
     ])
     db_session.commit()
 
-    # 只有前两行判得出来（6.../1...），"9..." 号段未确认，仍是 None。
-    # Only the first two resolve (6.../1...); the unconfirmed "9..." prefix
-    # is still None, so it isn't counted as newly-classified.
-    assert backfill_account_trade_modes(db_session) == 2
+    # 三行全判得出来：6... 是实盘，1... 和 9... 都由 default 兜底归模拟。
+    # All three resolve: 6... is live; 1... and 9... both fall to the demo
+    # default, since the broker's rule is "6 is live, everything else is demo".
+    assert backfill_account_trade_modes(db_session) == 3
 
     by_login = {a.login: a.trade_mode for a in db_session.query(MT5Account).all()}
     assert by_login["600345"] == REAL
     assert by_login["100016"] == DEMO
-    assert by_login["991073"] is None
+    assert by_login["991073"] == DEMO
 
 
 def test_backfill_leaves_unknown_server_null(db_session):
@@ -363,3 +367,71 @@ def test_upsert_unknown_server_without_trademode_stays_null(db_session):
     db_session.commit()
 
     assert row.trade_mode is None
+
+
+# --- `default` 兜底：一台服务器上「其余号段一律算什么」 ---------------------
+# Make Capital 的原话是「6 开头实盘，其余全是模拟」，这比逐个列举号段更贴近
+# 事实，也保证券商新开号段时不会掉进"未知"。
+
+
+_ABSENT = object()
+
+
+def _rule(**over):
+    base = {
+        "server": "MixedServer",
+        "real_login_prefixes": ["6"],
+        "demo_login_prefixes": [],
+        "contest_login_prefixes": [],
+        "default": "demo",
+    }
+    base.update(over)
+    return {"server_login_rules": [base]}
+
+
+def test_default_catches_every_other_login_range():
+    cfg = _rule()
+    assert classify_login("MixedServer", "600345", cfg) == REAL
+    # 号段未列出 → 落到 default=demo，而不是 None
+    for lg in ("100016", "991073", "700001", "0"):
+        assert classify_login("MixedServer", lg, cfg) == DEMO, lg
+
+
+def test_default_never_promotes_to_real():
+    """兜底判实盘是被禁止的——那等于凭空猜一批账号是真金白银。"""
+    cfg = _rule(real_login_prefixes=[], default="real")
+    assert classify_login("MixedServer", "600345", cfg) is None
+    assert classify_login("MixedServer", "100016", cfg) is None
+
+
+def test_default_absent_or_garbage_stays_unknown():
+    """没写 default、或写了看不懂的值，一律回到「判不出来」，绝不瞎兜。"""
+    for bad in (_ABSENT, "", "живой", 2, None):
+        cfg = _rule(real_login_prefixes=[])
+        if bad is _ABSENT:
+            cfg["server_login_rules"][0].pop("default")
+        else:
+            cfg["server_login_rules"][0]["default"] = bad
+        assert classify_login("MixedServer", "100016", cfg) is None, bad
+
+
+def test_default_does_not_leak_to_other_servers():
+    """兜底只作用于该条规则匹配的服务器，别的服务器仍判未知。"""
+    cfg = _rule()
+    assert classify_login("OtherServer", "100016", cfg) is None
+
+
+def test_shipped_defaults_make_capital_six_is_live_rest_is_demo():
+    """出厂配置直接体现券商给的规则。"""
+    assert classify_login("MakeCapital-Live", "600345", ACCOUNT_TYPE_DEFAULTS) == REAL
+    assert classify_login("MakeCapital-Live", "669586", ACCOUNT_TYPE_DEFAULTS) == REAL
+    assert classify_login("MakeCapital-Live", "100016", ACCOUNT_TYPE_DEFAULTS) == DEMO
+    assert classify_login("MakeCapital-Live", "991073", ACCOUNT_TYPE_DEFAULTS) == DEMO
+
+
+def test_group_still_outranks_default():
+    """网关拿到的券商组名永远压过号段兜底。"""
+    cfg = _rule()
+    cfg.update(ACCOUNT_TYPE_DEFAULTS)
+    cfg["server_login_rules"] = _rule()["server_login_rules"]
+    assert classify_account(r"MCSA\I-STD-SLAB-USD", "MixedServer", "100016", cfg) == REAL
