@@ -1,9 +1,9 @@
-// 成就页 = 一座陈列台：聚光灯下的佩戴勋章 + 收藏度 + 当前关卡 + 按材质分层的勋章库。
+// 成就页 = 一座陈列台：聚光灯下的佩戴勋章 + 当前关卡 + 按材质分层的勋章库。
 // 入口本身按 gamificationVisible 门控（见 Layout/UserMenu），这里只处理直接
 // 打 URL 绕过入口的情况——理论上只有内测期的普通用户会撞上 403，兜底成一句
 // 提示而不是把接口错误糊在脸上。
-// Achievements page as a showcase: the equipped badges under a spotlight, a
-// collection meter, the current stage, and the badge vault shelved by material.
+// Achievements page as a showcase: the equipped badges under a spotlight, the
+// current stage, and the badge vault shelved by material.
 // The entry point itself is gated on gamificationVisible (see Layout/UserMenu);
 // this only handles someone hitting the URL directly — in practice only a
 // regular user during the beta window, degraded to one line of copy instead of
@@ -22,9 +22,9 @@ import BadgeDetailModal from '../components/badges/BadgeDetailModal'
 import PedestalStage from '../components/badges/PedestalStage'
 import type { GamificationBadge, GamificationBadgeRarity, GamificationMe, GamificationTask } from '../api/types'
 
-// 收藏度从普通到绝版；勋章库反过来，最珍贵的一层在最上面——进门先看到镇馆之宝。
-// Collection meter runs common → limited; the vault is the reverse, most precious
-// shelf on top — the centrepiece is the first thing you see.
+// 勋章库按稀有度从高到低分层，最珍贵的一层在最上面——进门先看到镇馆之宝。
+// The vault is shelved rarest-first, most precious on top — the centrepiece is the
+// first thing you see.
 const RARITY_ORDER: GamificationBadgeRarity[] = ['common', 'rare', 'epic', 'legendary', 'limited']
 const VAULT_ORDER: GamificationBadgeRarity[] = [...RARITY_ORDER].reverse()
 // 与后端 LEVEL_TITLES 同序 / same order as the backend's LEVEL_TITLES
@@ -541,32 +541,6 @@ export default function AchievementsPage() {
           </div>
         </section>
       )}
-
-      {/* ── 收藏度 / collection ───────────────────────────────── */}
-      <section aria-labelledby="ach-collection">
-        <div className="ach-sec-h">
-          <h3 id="ach-collection"><b>{t('gamification.stage.collection')}</b></h3>
-          <div className="r"><b className="num">{earnedCount} / {me.badges.length}</b></div>
-        </div>
-        <div className="ach-meter">
-          {RARITY_ORDER.map((rarity) => {
-            const group = me.badges.filter((b) => b.rarity === rarity)
-            if (group.length === 0) return null
-            const got = group.filter((b) => b.earned).length
-            return (
-              <div key={rarity} className={`ach-mgrp ach-m-${rarity}`} style={{ flexGrow: group.length }}>
-                <div className="ach-segs" role="img" aria-label={`${t(`gamification.rarity.${rarity}`)} ${got}/${group.length}`}>
-                  {group.map((b) => <i key={b.id} className={b.earned ? 'on' : ''} />)}
-                </div>
-                <small>
-                  {t(`gamification.rarity.${rarity}`)} · {t(`gamification.material.${rarity}`)}{' '}
-                  <b className="num">{got}/{group.length}</b>
-                </small>
-              </div>
-            )
-          })}
-        </div>
-      </section>
 
       {/* ── 当前关卡 / current stage ───────────────────────────── */}
       {nextGroup && (

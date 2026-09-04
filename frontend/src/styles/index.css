@@ -5406,11 +5406,11 @@ body {
 }
 
 /* ═════════════ 成就页 · 陈列台 / achievements showcase ═════════════
-   页面 = 陈列台（.ach-stage）+ 收藏度（.ach-meter）+ 当前关卡（沿用 .tk-*）+
+   页面 = 陈列台（.ach-stage）+ 当前关卡（沿用 .tk-*）+
    勋章库（.ach-vault，按材质分层的架子）。舞台是页面里唯一的纯黑块：聚光锥、
    地面光斑、勋章倒影、极光缓漂，默认那枚 236px 缓慢浮动。架子上每枚勋章带底光
    与架沿阴影，传说层暖金环境光、绝版层火漆红，未获得的只剩轮廓与虚线圈。
-   The page = stage (.ach-stage) + collection meter (.ach-meter) + current stage
+   The page = stage (.ach-stage) + current stage
    (reusing .tk-*) + vault (.ach-vault, shelves by material). The stage is the one
    near-black block on the page: a light cone, floor pool, badge reflections, a
    slow aurora drift, the default badge at 236px floating gently. Shelved badges
@@ -5760,21 +5760,6 @@ body {
 .ach-sec-h .r b { font-weight: 600; color: #f4f4f5; }
 .ach .tk-grid { margin-top: 14px; }
 
-.ach-meter { display: flex; gap: 12px; margin-top: 14px; }
-/* 每组宽度按枚数分（flexGrow = 枚数），但留 104px 下限，一枚的绝版组标签也放得下。
-   Width per group scales with its badge count (flexGrow = count) with a 104px floor, so the
-   one-badge limited group still fits its label. */
-.ach-mgrp { display: flex; flex-direction: column; gap: 8px; flex-basis: 0; min-width: 104px; }
-.ach-segs { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; height: 6px; }
-.ach-segs i { border-radius: 999px; background: rgba(255, 255, 255, 0.08); }
-.ach-mgrp small { font-size: 11px; line-height: 1.4; color: #71717a; }
-.ach-mgrp small b { color: #a1a1aa; font-weight: 600; }
-.ach-m-common i.on { background: #7c7f88; }
-.ach-m-rare i.on { background: #b8bec8; }
-.ach-m-epic i.on { background: linear-gradient(90deg, #3a3a44, #c9a24a); }
-.ach-m-legendary i.on { background: #c9a24a; }
-.ach-m-limited i.on { background: #9c2f2f; }
-
 .ach-vault { display: flex; flex-direction: column; gap: 22px; }
 .ach-shelf { position: relative; padding: 14px 18px 18px; border-radius: 18px; }
 .ach-shelf::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
@@ -5873,8 +5858,8 @@ body {
   50% { transform: translateY(-7px) rotateY(7deg); }
 }
 
-/* 手机：舞台竖排，勋章居中；收藏度换成两行；架子两枚一行。
-   Mobile: stage stacks with the badge centred; meter wraps; shelves two per row. */
+/* 手机：舞台竖排，勋章居中；架子两枚一行。
+   Mobile: stage stacks with the badge centred; shelves two per row. */
 @media (max-width: 767px) {
   .ach-stage { grid-template-columns: 1fr; gap: 10px; min-height: 0; padding: 18px 18px 22px; }
   /* 手机：勋章先出场，文字在后 / phones: the badge leads, the text follows */
@@ -5897,8 +5882,6 @@ body {
   .ach-floorline { display: none; }
   .ach-rail b { font-size: 10px; }
   .ach-stats strong { font-size: 18px; }
-  .ach-meter { flex-wrap: wrap; }
-  .ach-mgrp { flex-basis: calc(50% - 6px); }
   .ach-shelf { padding: 12px 10px 14px; }
   .ach-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
