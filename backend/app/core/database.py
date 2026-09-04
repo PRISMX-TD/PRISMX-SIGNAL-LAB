@@ -106,7 +106,8 @@ def _hash_legacy_api_tokens() -> None:
 #        （gateway 绑定的撤销机制：券商侧改密码后作废旧绑定）
 # rev 10 — users 昵称/隐私/佩戴 4 列、orders.trade_mode 快照 + 存量回填、user_active_days 等新表、游戏化索引
 # rev 11 — users.equipped_badges（可佩戴 3 枚，有序，首枚 = equipped_badge 那枚默认；从旧列回填）
-CURRENT_SCHEMA_REV = 11
+# rev 12 — competitions.min_baseline_usd / min_trades（每场比赛可覆盖入榜门槛；track 列已存在，本次起真正启用 real/demo）
+CURRENT_SCHEMA_REV = 12
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -452,6 +453,24 @@ def _migrate_columns() -> None:
     # mt5_accounts: add the broker group name and the derived account type. Both
     # nullable with no backfill — existing rows get classified on the next account
     # refresh; guessing a default here could mark demo accounts as real.
+    # competitions 表：每场比赛可覆盖的两个门槛（留空 = 用全局设置）。
+    # 两列都可空、不回填——NULL 本身就是"跟随全局"的语义，回填任何具体值都会把
+    # 存量比赛从"跟随"钉死成"覆盖"。track 列建表时就有（默认 "real"），本次起
+    # 真正启用，存量行的 "real" 恰好就是过去写死的行为，同样不需要动。
+    # competitions: two per-competition gate overrides (NULL = use the global
+    # settings). Both nullable with no backfill — NULL *is* the "follow global"
+    # semantic, and writing any concrete value would freeze existing competitions
+    # into an override. The track column already exists (default "real") and only
+    # becomes meaningful now; "real" on existing rows is exactly the old hardcoded
+    # behaviour, so it needs no backfill either.
+    if "competitions" in inspector.get_table_names():
+        comp_cols = {c["name"] for c in inspector.get_columns("competitions")}
+        with engine.begin() as conn:
+            if "min_baseline_usd" not in comp_cols:
+                conn.execute(text("ALTER TABLE competitions ADD COLUMN min_baseline_usd FLOAT"))
+            if "min_trades" not in comp_cols:
+                conn.execute(text("ALTER TABLE competitions ADD COLUMN min_trades INTEGER"))
+
     if "mt5_accounts" in inspector.get_table_names():
         acc_cols = {c["name"] for c in inspector.get_columns("mt5_accounts")}
         with engine.begin() as conn:

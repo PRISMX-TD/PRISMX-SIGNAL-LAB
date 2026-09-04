@@ -15,7 +15,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.rate_limit import limiter
-from app.models import Competition, CompetitionParticipant, User
+from app.models import (
+    Competition, CompetitionParticipant, LeaderboardSnapshot, PeriodBaseline, User)
 from app.routers.admin import _log_change
 from app.routers.gamification import build_board_rows_payload
 from app.schemas import (
@@ -23,7 +24,8 @@ from app.schemas import (
     CompetitionRegisterIn)
 from app.services.deps import get_current_user, get_db
 from app.services.gamification.competitions import (
-    auto_enroll, comp_period_key, register_participant, settle_competition)
+    TRACKS, auto_enroll, comp_gates, comp_period_key, register_participant,
+    settle_competition)
 from app.services.settings_store import get_gamification_settings
 from app.utils.timeutil import aware as _aware
 
@@ -54,6 +56,12 @@ def _summary_out(comp: Competition) -> dict:
         "metric": comp.metric,
         "enrollment": comp.enrollment,
         "status": comp.status,
+        # 用户端也要知道赛道：报名时账户选择器按它过滤（实盘赛只列实盘、
+        # 模拟赛只列模拟），否则模拟赛的选择器会是空的。
+        # The user side needs the track too: the registration selector filters by it
+        # (a live competition lists live accounts, a demo one lists demo accounts);
+        # without it a demo competition would show an empty selector.
+        "track": comp.track,
         "regOpensAt": comp.reg_opens_at.isoformat() if comp.reg_opens_at else None,
         "regClosesAt": comp.reg_closes_at.isoformat() if comp.reg_closes_at else None,
         "startsAt": comp.starts_at.isoformat() if comp.starts_at else None,
@@ -105,7 +113,8 @@ def get_competition(request: Request, comp_id: str, db: Session = Depends(get_db
     公开端点。
     """
     comp = _get_public_comp_or_404(db, comp_id)
-    board = build_board_rows_payload(db, user, comp.metric, comp_period_key(comp.id))
+    board = build_board_rows_payload(db, user, comp.metric, comp_period_key(comp.id),
+                                      gates_override=_comp_gates(db, comp))
     my_rows = (db.query(CompetitionParticipant)
                  .filter(CompetitionParticipant.competition_id == comp.id,
                          CompetitionParticipant.user_id == user.id)
@@ -153,6 +162,12 @@ MSG_START_BEFORE_END = "开赛时间需早于结束时间 / Start must precede e
 MSG_SIGNUP_WINDOW = "报名制比赛需设置报名窗口 / Signup competitions require a registration window"
 MSG_UNKNOWN_METRIC = "未知计分指标 / Unknown metric"
 MSG_UNKNOWN_ENROLLMENT = "未知参赛方式 / Unknown enrollment mode"
+MSG_UNKNOWN_TRACK = "未知参赛账户类型 / Unknown account track"
+MSG_BAD_MIN_BASELINE = "最低本金需大于 0 / Minimum baseline must be > 0"
+MSG_BAD_MIN_TRADES = "最低笔数需至少为 1 / Minimum trade count must be at least 1"
+MSG_DELETE_SETTLED = ("已终审的比赛不可删除（勋章已发出，删除会让卫冕判定错乱）"
+                      " / A settled competition cannot be deleted (badges are already "
+                      "awarded and back-to-back judging would break)")
 MSG_NON_DRAFT_FIELDS = "比赛开始后仅可修改文案与报名窗口 / Only copy and registration window are editable after draft"
 MSG_STATUS_SEQUENCE = "状态只能按顺序推进 / Status can only advance sequentially"
 MSG_SETTLED_FROZEN = "已终审的比赛不可再改参赛状态 / Settled competitions are frozen"
@@ -168,6 +183,21 @@ def _validate_core(metric: str, enrollment: str,
         raise HTTPException(400, MSG_START_BEFORE_END)
 
 
+def _validate_options(track: str | None, min_baseline: float | None,
+                       min_trades: int | None) -> None:
+    """赛道白名单 + 两个门槛的下限。三者都允许为 None（跟随默认/全局），只有
+    给了值才校验——空值和坏值是两回事，不能一起拒。
+    Track whitelist plus the floors for the two gates. All three may be None
+    (follow the default / the global settings); only a supplied value is checked,
+    since "absent" and "invalid" are different things."""
+    if track is not None and track not in TRACKS:
+        raise HTTPException(400, MSG_UNKNOWN_TRACK)
+    if min_baseline is not None and min_baseline <= 0:
+        raise HTTPException(400, MSG_BAD_MIN_BASELINE)
+    if min_trades is not None and min_trades < 1:
+        raise HTTPException(400, MSG_BAD_MIN_TRADES)
+
+
 def _validate_reg_window(enrollment: str, reg_opens_at: datetime | None,
                           reg_closes_at: datetime | None) -> None:
     """signup 赛必须给两端且 opens<closes；报名窗口允许与比赛重叠（开赛后仍可
@@ -179,6 +209,13 @@ def _validate_reg_window(enrollment: str, reg_opens_at: datetime | None,
         raise HTTPException(400, MSG_SIGNUP_WINDOW)
 
 
+def _comp_gates(db: Session, comp: Competition) -> dict:
+    """本场比赛实际生效的门槛（比赛自己的值优先，否则全局），下发给前端回显。
+    The gates actually in force for this competition (its own values first,
+    otherwise the global ones), sent to the frontend for display."""
+    return comp_gates(comp, get_gamification_settings(db))
+
+
 def _comp_out(comp: Competition, participant_count: int) -> dict:
     return {
         "id": comp.id,
@@ -188,6 +225,11 @@ def _comp_out(comp: Competition, participant_count: int) -> dict:
         "enrollment": comp.enrollment,
         "status": comp.status,
         "track": comp.track,
+        # 两个门槛：null 表示跟随全局设置，前端据此显示"跟随全局"而不是一个假数字。
+        # Both gates: null means "follow the global settings", which the frontend shows
+        # as such rather than inventing a number.
+        "minBaselineUsd": comp.min_baseline_usd,
+        "minTrades": comp.min_trades,
         "regOpensAt": comp.reg_opens_at.isoformat() if comp.reg_opens_at else None,
         "regClosesAt": comp.reg_closes_at.isoformat() if comp.reg_closes_at else None,
         "startsAt": comp.starts_at.isoformat() if comp.starts_at else None,
@@ -241,11 +283,14 @@ def admin_list_competitions(db: Session = Depends(get_db)):
 def admin_create_competition(body: CompetitionCreateIn, db: Session = Depends(get_db)):
     _validate_core(body.metric, body.enrollment, body.startsAt, body.endsAt)
     _validate_reg_window(body.enrollment, body.regOpensAt, body.regClosesAt)
+    _validate_options(body.track, body.minBaselineUsd, body.minTrades)
     comp = Competition(
         name=body.name, description=body.description, metric=body.metric,
         enrollment=body.enrollment, reg_opens_at=body.regOpensAt,
         reg_closes_at=body.regClosesAt, starts_at=body.startsAt, ends_at=body.endsAt,
         prize_note=body.prizeNote, status="draft",
+        track=body.track or "real",
+        min_baseline_usd=body.minBaselineUsd, min_trades=body.minTrades,
     )
     db.add(comp)
     db.commit()
@@ -271,6 +316,9 @@ def admin_patch_competition(comp_id: str, body: CompetitionPatchIn, db: Session 
         reg_closes_at = body.regClosesAt if "regClosesAt" in sent else comp.reg_closes_at
         _validate_core(metric, enrollment, starts_at, ends_at)
         _validate_reg_window(enrollment, reg_opens_at, reg_closes_at)
+        _validate_options(body.track if "track" in sent else None,
+                          body.minBaselineUsd if "minBaselineUsd" in sent else None,
+                          body.minTrades if "minTrades" in sent else None)
 
         if "name" in sent:
             comp.name = body.name
@@ -290,6 +338,17 @@ def admin_patch_competition(comp_id: str, body: CompetitionPatchIn, db: Session 
             comp.ends_at = body.endsAt
         if "prizeNote" in sent:
             comp.prize_note = body.prizeNote
+        if "track" in sent and body.track is not None:
+            comp.track = body.track
+        # 这两个显式传 null 表示"改回跟随全局"，与没传（不动）语义不同——用
+        # model_fields_set 区分，同 ProfilePatchIn 的先例。
+        # Sending null for these two means "go back to following the global
+        # settings", which differs from omitting them (leave as is) —
+        # distinguished via model_fields_set, matching ProfilePatchIn.
+        if "minBaselineUsd" in sent:
+            comp.min_baseline_usd = body.minBaselineUsd
+        if "minTrades" in sent:
+            comp.min_trades = body.minTrades
     else:
         if "regOpensAt" in sent or "regClosesAt" in sent:
             reg_opens_at = body.regOpensAt if "regOpensAt" in sent else comp.reg_opens_at
@@ -322,6 +381,38 @@ def admin_patch_competition(comp_id: str, body: CompetitionPatchIn, db: Session 
     if auto_enrolled is not None:
         out["autoEnrolled"] = auto_enrolled
     return out
+
+
+@admin_router.delete("/{comp_id}")
+def admin_delete_competition(comp_id: str, db: Session = Depends(get_db)):
+    """删除一场比赛，连同它的参赛行、基线、榜单快照一起清掉。
+
+    **已终审的比赛拒绝删除**：终审会发勋章（比赛冠军/前三/完赛，"发出不收回"），
+    而卫冕王要看相邻两届——删掉一届会让已经发出的勋章失去依据、也会让后续的
+    卫冕判定错乱。想撤销一场已终审的比赛，得先决定那些勋章怎么办，那是另一件事。
+    草稿/未开始/进行中/已结束但未终审的都可以删——这些状态下没有任何不可逆的
+    产物流出系统。
+
+    Deletes a competition along with its participants, baselines and board
+    snapshots. **Settled competitions are refused**: settling awards badges
+    (winner / podium / finisher, and badges are never revoked), and the
+    back-to-back badge compares consecutive editions — removing one would strand
+    already-awarded badges and corrupt later judging. Undoing a settled
+    competition first requires deciding what happens to those badges, which is a
+    separate matter. Draft / upcoming / running / ended-but-unsettled are all
+    deletable: nothing irreversible has left the system in those states.
+    """
+    comp = _get_comp_or_404(db, comp_id)
+    if comp.status == "settled":
+        raise HTTPException(400, MSG_DELETE_SETTLED)
+    key = comp_period_key(comp.id)
+    participants = (db.query(CompetitionParticipant)
+                      .filter(CompetitionParticipant.competition_id == comp.id).delete())
+    db.query(PeriodBaseline).filter(PeriodBaseline.period_key == key).delete()
+    db.query(LeaderboardSnapshot).filter(LeaderboardSnapshot.period_key == key).delete()
+    db.delete(comp)
+    db.commit()
+    return {"deleted": comp_id, "participants": participants}
 
 
 @admin_router.get("/{comp_id}/participants")
@@ -389,4 +480,5 @@ def admin_competition_board(comp_id: str, db: Session = Depends(get_db),
     与用户端榜单同一套负载形状，前端不用为管理端单独写一套渲染）。
     """
     comp = _get_comp_or_404(db, comp_id)
-    return build_board_rows_payload(db, admin, comp.metric, comp_period_key(comp.id))
+    return build_board_rows_payload(db, admin, comp.metric, comp_period_key(comp.id),
+                                     gates_override=_comp_gates(db, comp))

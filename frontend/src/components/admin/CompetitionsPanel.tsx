@@ -41,10 +41,12 @@ import type {
   CompetitionMetric,
   CompetitionPatch,
   CompetitionStatus,
+  CompetitionTrack,
   LeaderboardPayload,
   ParticipantAdminRow,
 } from '../../api/types'
 
+const TRACKS: CompetitionTrack[] = ['real', 'demo']
 const METRICS: CompetitionMetric[] = ['return_pct', 'win_rate']
 const ENROLLMENTS: CompetitionEnrollment[] = ['signup', 'auto']
 
@@ -124,6 +126,14 @@ interface FormDraft {
   startsAt: string
   endsAt: string
   prizeNote: string
+  track: CompetitionTrack
+  // 两个门槛在表单里是字符串（空串 = 跟随全局），提交时才转数字/null——
+  // 数字输入框清空后是 ''，不是 0，两者语义完全不同。
+  // Both gates are strings in the form (empty = follow the global settings) and
+  // only become numbers/null on submit: a cleared number input is '', not 0, and
+  // the two mean entirely different things.
+  minBaselineUsd: string
+  minTrades: string
 }
 
 const EMPTY_DRAFT: FormDraft = {
@@ -136,6 +146,9 @@ const EMPTY_DRAFT: FormDraft = {
   startsAt: '',
   endsAt: '',
   prizeNote: '',
+  track: 'real',
+  minBaselineUsd: '',
+  minTrades: '',
 }
 
 function toFormDraft(c: CompetitionAdminRow): FormDraft {
@@ -149,7 +162,18 @@ function toFormDraft(c: CompetitionAdminRow): FormDraft {
     startsAt: isoToLocalInput(c.startsAt),
     endsAt: isoToLocalInput(c.endsAt),
     prizeNote: c.prizeNote ?? '',
+    track: c.track,
+    minBaselineUsd: c.minBaselineUsd == null ? '' : String(c.minBaselineUsd),
+    minTrades: c.minTrades == null ? '' : String(c.minTrades),
   }
+}
+
+// 表单里的门槛 → 请求体：空串 = null（跟随全局），否则转数字。
+// A gate field → request body: empty means null (follow the global settings),
+// otherwise a number.
+function gateValue(raw: string): number | null {
+  const v = raw.trim()
+  return v === '' ? null : Number(v)
 }
 
 export default function CompetitionsPanel() {
@@ -169,6 +193,7 @@ export default function CompetitionsPanel() {
   const [listError, setListError] = useState<string | null>(null)
   const [advancingId, setAdvancingId] = useState<string | null>(null)
   const [settlingId, setSettlingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   // M-6：settle 按钮的 24h 宽限期是拿 Date.now() 跟 settleOpensAt 比出来的，
   // 只在渲染时算一次——管理员开着这个页签跨过 24h 那一刻，按钮不会自己解禁，
   // 得等下一次因为别的原因重渲染（如轮询列表）才会更新，容易让人以为卡住了。
@@ -236,6 +261,27 @@ export default function CompetitionsPanel() {
     setFormError(null)
   }
 
+  // 删除：不可撤销，参赛行/基线/快照一并清掉，所以先 confirm 一次（文案里写明
+  // 会连带删掉多少人的参赛记录）。删掉的正好是当前编辑对象时，表单退回新建态。
+  // Deleting is irreversible and also clears participants/baselines/snapshots, so it
+  // confirms first (the copy names how many entries go with it). If the deleted row
+  // is the one being edited, the form falls back to create mode.
+  async function remove(c: CompetitionAdminRow) {
+    if (!window.confirm(t('competition.admin.deleteConfirm', { name: c.name, n: c.participantCount }))) return
+    setDeletingId(c.id)
+    try {
+      await adminApi.deleteCompetition(c.id)
+      setComps((prev) => prev.filter((x) => x.id !== c.id))
+      if (selectedId === c.id) setSelectedId(null)
+      if (editingId === c.id) startCreate()
+      showToast('ok', t('competition.admin.deleted'))
+    } catch (err) {
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('common.error'))
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!form.name.trim()) return
@@ -259,6 +305,9 @@ export default function CompetitionsPanel() {
           startsAt: startsIso,
           endsAt: endsIso,
           prizeNote: form.prizeNote.trim() || null,
+          track: form.track,
+          minBaselineUsd: gateValue(form.minBaselineUsd),
+          minTrades: gateValue(form.minTrades),
         })
         setComps((prev) => [created, ...prev])
         showToast('ok', t('admin.saved'))
@@ -282,6 +331,9 @@ export default function CompetitionsPanel() {
             startsAt: startsIso,
             endsAt: endsIso,
             prizeNote: form.prizeNote.trim() || null,
+            track: form.track,
+            minBaselineUsd: gateValue(form.minBaselineUsd),
+            minTrades: gateValue(form.minTrades),
           }
         } else {
           // 非 draft：patch 对象里绝不出现 metric/enrollment/startsAt/endsAt 的
@@ -470,6 +522,7 @@ export default function CompetitionsPanel() {
                   <th className="py-1.5 pr-4 font-medium">{t('competition.admin.colName')}</th>
                   <th className="py-1.5 pr-4 font-medium">{t('competition.admin.colStatus')}</th>
                   <th className="py-1.5 pr-4 font-medium">{t('competition.admin.colMetric')}</th>
+                  <th className="py-1.5 pr-4 font-medium">{t('competition.admin.colTrack')}</th>
                   <th className="py-1.5 pr-4 font-medium">{t('competition.admin.colWindow')}</th>
                   <th className="py-1.5 pr-4 font-medium">{t('competition.admin.colParticipants')}</th>
                   <th className="py-1.5 font-medium" />
@@ -493,6 +546,7 @@ export default function CompetitionsPanel() {
                         </span>
                       </td>
                       <td className="py-1.5 pr-4 text-neutral-400">{t(`leaderboard.boards.${c.metric}`)}</td>
+                      <td className="py-1.5 pr-4 text-neutral-400">{t(`competition.track.${c.track}`)}</td>
                       <td className="num py-1.5 pr-4 text-neutral-500">
                         {c.startsAt ? fmtDate(c.startsAt) : '—'} → {c.endsAt ? fmtDate(c.endsAt) : '—'}
                       </td>
@@ -545,6 +599,19 @@ export default function CompetitionsPanel() {
                               </span>
                             )
                           })()}
+                          {/* 删除：已终审的不给（后端也会 400）——勋章已发出，删了卫冕判定会错乱。
+                              Delete: not offered for settled competitions (the backend also
+                              400s) — badges are already out and back-to-back judging would break. */}
+                          {c.status !== 'settled' && (
+                            <button
+                              type="button"
+                              className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] text-down disabled:opacity-40"
+                              disabled={deletingId === c.id}
+                              onClick={() => remove(c)}
+                            >
+                              {deletingId === c.id ? t('common.loading') : t('competition.admin.delete')}
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -622,6 +689,57 @@ export default function CompetitionsPanel() {
                 />
               )}
             </div>
+          </div>
+
+          {/* 赛道与本场门槛：与 metric/enrollment 同属"开赛后不可改"的一组，
+              锁定时同样只读展示原值，不塞进 patch（见文件头注释）。
+              Track and this competition's gates belong to the same "frozen after
+              draft" group as metric/enrollment: when locked they render read-only
+              and never enter the patch (see the file header). */}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div>
+              <label className="label">{t('competition.admin.fields.track')}</label>
+              {fieldsLocked ? (
+                <p className="input flex items-center text-neutral-400">
+                  {t(`competition.track.${form.track}`)}
+                </p>
+              ) : (
+                <Select
+                  value={form.track}
+                  onChange={(v) => setForm({ ...form, track: v as CompetitionTrack })}
+                  options={TRACKS.map((tr) => ({ value: tr, label: t(`competition.track.${tr}`) }))}
+                />
+              )}
+            </div>
+            <div>
+              <label className="label">{t('competition.admin.fields.minBaselineUsd')}</label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                className="input disabled:opacity-50"
+                placeholder={t('competition.admin.fields.gateFollowGlobal')}
+                value={form.minBaselineUsd}
+                onChange={(e) => setForm({ ...form, minBaselineUsd: e.target.value })}
+                disabled={fieldsLocked}
+              />
+            </div>
+            <div>
+              <label className="label">{t('competition.admin.fields.minTrades')}</label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                className="input disabled:opacity-50"
+                placeholder={t('competition.admin.fields.gateFollowGlobal')}
+                value={form.minTrades}
+                onChange={(e) => setForm({ ...form, minTrades: e.target.value })}
+                disabled={fieldsLocked}
+              />
+            </div>
+            <p className="text-xs text-neutral-500 md:col-span-3">
+              {t('competition.admin.fields.gateHint')}
+            </p>
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

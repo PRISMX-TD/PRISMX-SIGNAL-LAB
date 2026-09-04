@@ -24,6 +24,7 @@ import BadgeIcon from '../components/badges/BadgeIcon'
 import { BADGE_RARITY } from '../components/badges/badgeRarity'
 import type {
   CompetitionDetail,
+  CompetitionTrack,
   CompetitionListGrouped,
   CompetitionMetric,
   CompetitionSummary,
@@ -45,6 +46,13 @@ const fmtScorePct = (v: number): string => `${(v * 100).toFixed(1)}%`
 // accounts; an undetermined value is treated as "not real", never
 // default-allowed.
 const isRealAccount = (a: MT5Account): boolean => a.tradeMode === 2
+// 账户是否符合这场比赛的赛道：实盘赛只收 tradeMode===2，模拟赛只收 0/1
+//（模拟与赛区）。未判定（null/undefined）两个赛道都不收——后端同样拒绝。
+// Whether an account matches this competition's track: a live competition takes
+// tradeMode===2 only, a demo one takes 0/1 (demo and contest). Unclassified
+// (null/undefined) matches neither, and the backend refuses it too.
+const matchesTrack = (a: MT5Account, track: CompetitionTrack): boolean =>
+  track === 'demo' ? a.tradeMode === 0 || a.tradeMode === 1 : isRealAccount(a)
 
 const LIST_GROUPS: Array<keyof CompetitionListGrouped> = ['upcoming', 'running', 'finished']
 
@@ -402,14 +410,15 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
   const tagKey = statusTagKey(detail, now)
   const rState = regState(detail, now)
   const enteredLogins = new Set(detail.myEntries.map((e) => e.login))
-  // 只列本人已连接、是实盘、且这场比赛还没报过的账户——报过的再选一遍，后端会
-  // 幂等返回原条目而不是报错，但前端不必让用户白走一趟；非实盘账户报名注定
-  // 被后端拒绝，同样不必列出来。
-  // Only accounts that are connected, real-money, and not yet entered in this
-  // competition: re-picking an entered one would just get the same row back
-  // idempotently from the backend, and a non-real account would be rejected
-  // by the backend anyway — neither is worth listing.
-  const availableAccounts = accounts.filter((a) => isRealAccount(a) && !enteredLogins.has(a.login))
+  // 只列本人已连接、符合本场赛道、且这场比赛还没报过的账户——报过的再选一遍，
+  // 后端会幂等返回原条目而不是报错，但前端不必让用户白走一趟；赛道不符的账户
+  // 报名注定被后端拒绝，同样不必列出来。
+  // Only accounts that are connected, match this competition's track, and aren't
+  // entered yet: re-picking an entered one would just get the same row back
+  // idempotently from the backend, and an off-track account would be rejected by
+  // the backend anyway — neither is worth listing.
+  const availableAccounts = accounts.filter(
+    (a) => matchesTrack(a, detail.track) && !enteredLogins.has(a.login))
   const canShowRegisterAction = detail.enrollment === 'signup'
   const boardHeading = detail.status === 'settled' ? t('competition.finalBoard') : t('competition.liveBoard')
 

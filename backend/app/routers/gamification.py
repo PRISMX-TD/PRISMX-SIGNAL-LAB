@@ -90,7 +90,8 @@ def build_leaderboard_payload(db: Session, viewer: User, board: str, period: str
 
 
 def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: str,
-                              reveal: bool = False) -> dict:
+                              reveal: bool = False,
+                              gates_override: dict | None = None) -> dict:
     """行构造（设计 §4.3）：打码、isSelf、me 块——不做 board/period 格式校验。
 
     从 `build_leaderboard_payload` 中抽出，供两类调用方共用：一是该函数自己
@@ -108,7 +109,13 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
     of hardcoding 5/20/500 — the competition detail page reuses this same
     key (competitions share the standing boards' gate rules).
     """
-    gates = board_gates(get_gamification_settings(db))
+    # gates_override：比赛榜用本场比赛自己的门槛（可覆盖全局，见 competitions.comp_gates）。
+    # 形状与 board_gates() 一致，所以下面的取值一行不用改——「页面上写的门槛」与「计算时用的门槛」仍是同一个来源。
+    # gates_override: a competition board uses that competition's own gates (which may
+    # override the global ones, see competitions.comp_gates). Same shape as
+    # board_gates(), so the reads below are unchanged and the number shown still comes
+    # from the same source as the number used to compute.
+    gates = gates_override or board_gates(get_gamification_settings(db))
     all_rows = (db.query(LeaderboardSnapshot)
                   .filter(LeaderboardSnapshot.board == board,
                           LeaderboardSnapshot.period_key == period_key)

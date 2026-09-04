@@ -313,3 +313,61 @@ def test_snapshot_draft_and_upcoming_untouched(db_session):
     result = snapshot_competitions(db_session, T0 + timedelta(days=1))
     assert result == {"comps": 0, "rows": 0}
     assert db_session.query(LeaderboardSnapshot).count() == 0
+
+
+# ── 赛道与本场门槛 / track and per-competition gates ─────────────────
+
+def test_comp_gates_override_global(db_session):
+    """本场比赛配了门槛就用自己的，没配回落全局；min_trades 一个值管两种 metric。"""
+    from app.services.gamification.competitions import comp_gates
+    from app.services.settings_store import get_gamification_settings
+    invalidate_gamification_cache()
+    gset = get_gamification_settings(db_session)
+    comp = _comp(db_session)
+    g = comp_gates(comp, gset)
+    assert g["min_baseline_usd"] == 500.0 and g["min_trades_return"] == 5   # 跟随全局
+    comp.min_baseline_usd, comp.min_trades = 50.0, 2
+    db_session.commit()
+    g2 = comp_gates(comp, gset)
+    assert g2["min_baseline_usd"] == 50.0
+    assert g2["min_trades_return"] == 2 and g2["min_trades_winrate"] == 2
+
+
+def test_comp_own_gate_lets_small_account_in(db_session):
+    """全局门槛 500 USD / 5 笔挡下的账户，本场比赛把门槛调低后照常上榜。"""
+    invalidate_gamification_cache()
+    comp = _comp(db_session)
+    u = _user(db_session, "gate@t.co"); _acct(db_session, u, "A", balance=100.0)
+    _baseline(db_session, comp, u, "A", balance=100.0)
+    _participant(db_session, comp, u, "A")
+    _mk(db_session, u, "A", 2, 0)                       # 2 笔，本金 100
+    assert compute_comp_rows(db_session, comp) == []    # 全局门槛：本金与笔数都不够
+    comp.min_baseline_usd, comp.min_trades = 50.0, 2
+    db_session.commit()
+    rows = compute_comp_rows(db_session, comp)
+    assert {r["login"] for r in rows} == {"A"} and rows[0]["sample"] == 2
+
+
+def test_track_modes_and_auto_enroll_by_track(db_session):
+    """demo 赛道只拉模拟账户，real 赛道只拉实盘——两类账户不混进同一场比赛。"""
+    from app.services.gamification.competitions import auto_enroll, track_modes
+    assert track_modes("real") == (2,) and set(track_modes("demo")) == {0, 1}
+    real_u = _user(db_session, "tr_real@t.co"); _acct(db_session, real_u, "R", tm=2)
+    demo_u = _user(db_session, "tr_demo@t.co"); _acct(db_session, demo_u, "D", tm=0)
+    unknown = _user(db_session, "tr_null@t.co"); _acct(db_session, unknown, "N", tm=None)
+
+    demo_comp = _comp(db_session, name="Demo Cup")
+    demo_comp.enrollment, demo_comp.track = "auto", "demo"
+    db_session.commit()
+    auto_enroll(db_session, demo_comp, T0)
+    got = {p.mt5_login for p in db_session.query(CompetitionParticipant)
+           .filter(CompetitionParticipant.competition_id == demo_comp.id)}
+    assert got == {"D"}                                  # 未判定类型的 N 两个赛道都不收
+
+    real_comp = _comp(db_session, name="Real Cup")
+    real_comp.enrollment, real_comp.track = "auto", "real"
+    db_session.commit()
+    auto_enroll(db_session, real_comp, T0)
+    got2 = {p.mt5_login for p in db_session.query(CompetitionParticipant)
+            .filter(CompetitionParticipant.competition_id == real_comp.id)}
+    assert got2 == {"R"}

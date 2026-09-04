@@ -1278,6 +1278,11 @@ export type CompetitionStatus = 'draft' | 'upcoming' | 'running' | 'ended' | 'se
 // and the base fields of GET /competitions/{id}). startsAt/endsAt are required
 // for any non-draft competition in practice, but the backend's output is
 // defensively nullable, so this follows suit.
+// 参赛账户类型：real 只收实盘、demo 只收模拟/赛区。一场比赛只收一类。
+// Account track: real takes live accounts only, demo takes demo/contest only.
+// A competition takes one kind.
+export type CompetitionTrack = 'real' | 'demo'
+
 export interface CompetitionSummary {
   id: string
   name: string
@@ -1285,6 +1290,9 @@ export interface CompetitionSummary {
   metric: CompetitionMetric
   enrollment: CompetitionEnrollment
   status: CompetitionStatus
+  // 参赛账户类型：报名选择器按它过滤（见 CompetitionsPage）。
+  // Account track; the registration selector filters by it (see CompetitionsPage).
+  track: CompetitionTrack
   regOpensAt: string | null
   regClosesAt: string | null
   startsAt: string | null
@@ -1340,7 +1348,12 @@ export interface CompetitionRegisterResult {
 // autoEnrolled appears only when this PATCH advanced status to running with
 // enrollment=="auto" — how many accounts were just auto-enrolled.
 export interface CompetitionAdminRow extends CompetitionSummary {
-  track: string
+  track: CompetitionTrack
+  // 本场专属门槛；null = 跟随管理端「游戏化」页签的全局设置。
+  // This competition's own gates; null = follow the global settings on the admin
+  // Gamification tab.
+  minBaselineUsd: number | null
+  minTrades: number | null
   createdAt: string | null
   participantCount: number
   autoEnrolled?: number
@@ -1359,6 +1372,12 @@ export interface CompetitionCreate {
   startsAt: string
   endsAt: string
   prizeNote?: string | null
+  track?: CompetitionTrack
+  // 省略 = 跟随全局；显式 null（仅 PATCH）= 改回跟随全局。
+  // Omitted = follow the global settings; an explicit null (PATCH only) = go back
+  // to following them.
+  minBaselineUsd?: number | null
+  minTrades?: number | null
 }
 
 // PATCH /admin/competitions/{id} 请求体：全部可选，只改传了的字段——draft 状态
@@ -1380,6 +1399,9 @@ export interface CompetitionPatch {
   endsAt?: string
   prizeNote?: string | null
   status?: CompetitionStatus
+  track?: CompetitionTrack
+  minBaselineUsd?: number | null
+  minTrades?: number | null
 }
 
 // GET /admin/competitions/{id}/participants 的一行、PATCH 参赛条目的响应。

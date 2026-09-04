@@ -482,3 +482,66 @@ def test_board_404_when_comp_missing(db_session):
     with pytest.raises(HTTPException) as exc:
         admin_competition_board("nope", db=db_session, admin=admin)
     assert exc.value.status_code == 404
+
+
+# ── 删除比赛 / deleting a competition ────────────────────────────────
+
+def test_delete_competition_removes_participants_baselines_snapshots(db_session):
+    """删除要连根拔：参赛行、comp:<id> 基线、榜单快照一起清掉，比赛行本身也没了。"""
+    from app.models import LeaderboardSnapshot, PeriodBaseline
+    from app.routers.competitions import admin_delete_competition
+    comp = _comp(db_session, status="running")
+    u = _user(db_session, "del1@t.co"); _acct(db_session, u, "A")
+    _participant(db_session, comp, u, "A")
+    key = comp_period_key(comp.id)
+    db_session.add(PeriodBaseline(user_id=u.id, mt5_login="A", period_key=key,
+                                  baseline=2000.0, taken_at=T0))
+    db_session.add(LeaderboardSnapshot(board="return_pct", period_key=key, user_id=u.id,
+                                       mt5_login="A", rank=1, score=0.1, sample=5))
+    db_session.commit()
+
+    out = admin_delete_competition(comp.id, db=db_session)
+    assert out["deleted"] == comp.id and out["participants"] == 1
+    assert db_session.query(Competition).filter(Competition.id == comp.id).first() is None
+    assert db_session.query(CompetitionParticipant).filter(
+        CompetitionParticipant.competition_id == comp.id).count() == 0
+    assert db_session.query(PeriodBaseline).filter(
+        PeriodBaseline.period_key == key).count() == 0
+    assert db_session.query(LeaderboardSnapshot).filter(
+        LeaderboardSnapshot.period_key == key).count() == 0
+
+
+def test_delete_settled_competition_refused(db_session):
+    """已终审的比赛拒删：勋章已发出（不收回），删掉会让卫冕王的相邻两届判定错乱。"""
+    from app.routers.competitions import admin_delete_competition
+    comp = _comp(db_session, status="settled")
+    with pytest.raises(HTTPException):
+        admin_delete_competition(comp.id, db=db_session)
+    assert db_session.query(Competition).filter(Competition.id == comp.id).first() is not None
+
+
+# ── 赛道与本场门槛 / track and per-competition gates ─────────────────
+
+def test_create_with_track_and_gates(db_session):
+    """新建时可指定赛道与本场门槛；不传时赛道默认 real、门槛留空（跟随全局）。"""
+    out = admin_create_competition(
+        _create_body(track="demo", minBaselineUsd=100.0, minTrades=3),
+        db=db_session)
+    assert out["track"] == "demo" and out["minBaselineUsd"] == 100.0 and out["minTrades"] == 3
+    plain = admin_create_competition(_create_body(name="Plain"), db=db_session)
+    assert plain["track"] == "real" and plain["minBaselineUsd"] is None and plain["minTrades"] is None
+
+
+def test_create_rejects_bad_track_and_gates(db_session):
+    for bad in (dict(track="paper"), dict(minBaselineUsd=0), dict(minTrades=0)):
+        with pytest.raises(HTTPException):
+            admin_create_competition(_create_body(**bad), db=db_session)
+
+
+def test_patch_gates_null_means_follow_global(db_session):
+    """显式传 null = 改回跟随全局，与没传（不动）语义不同。"""
+    comp = _comp(db_session, status="draft")
+    comp.min_trades = 7; db_session.commit()
+    admin_patch_competition(comp.id, CompetitionPatchIn(minTrades=None), db=db_session)
+    db_session.refresh(comp)
+    assert comp.min_trades is None

@@ -875,6 +875,14 @@ export const adminApi = {
         method: 'PATCH',
         body: JSON.stringify(patch),
       }),
+    // 删除一场比赛，连同参赛行/基线/快照。已终审的后端拒绝（400）。
+    // Deletes a competition with its participants/baselines/snapshots. Settled ones
+    // are refused server-side (400).
+    deleteCompetition: (id: string) =>
+      request<{ deleted: string; participants: number }>(
+        `/admin/competitions/${encodeURIComponent(id)}`,
+        { method: 'DELETE' },
+      ),
     competitionParticipants: (id: string) =>
       request<ParticipantAdminRow[]>(`/admin/competitions/${encodeURIComponent(id)}/participants`),
     // 取消/恢复参赛资格。compId/pid 顺序与路径 /admin/competitions/{compId}/participants/{pid} 一致。

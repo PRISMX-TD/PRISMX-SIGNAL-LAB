@@ -195,6 +195,14 @@ class CompetitionCreateIn(BaseModel):
     startsAt: datetime
     endsAt: datetime
     prizeNote: str | None = None
+    # 参赛账户类型（real / demo）与本场专属门槛（留空 = 跟随全局设置）。
+    # 语义级校验在路由层（同 metric/enrollment 的先例），这里只管字段形状。
+    # Account track (real / demo) and this competition's own gates (omit to follow
+    # the global settings). Semantic validation lives in the router, as with
+    # metric/enrollment; this only declares the field shapes.
+    track: str | None = None
+    minBaselineUsd: float | None = None
+    minTrades: int | None = None
 
 
 class CompetitionPatchIn(BaseModel):
@@ -214,6 +222,11 @@ class CompetitionPatchIn(BaseModel):
     endsAt: datetime | None = None
     prizeNote: str | None = None
     status: str | None = None
+    # 与创建同义；三者都只在 draft 状态可改（见 _NON_DRAFT_ALLOWED）。
+    # Same meaning as on create; all three are draft-only (see _NON_DRAFT_ALLOWED).
+    track: str | None = None
+    minBaselineUsd: float | None = None
+    minTrades: int | None = None
 
 
 class CompetitionParticipantPatchIn(BaseModel):

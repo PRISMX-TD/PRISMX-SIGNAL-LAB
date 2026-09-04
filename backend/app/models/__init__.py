@@ -1164,7 +1164,19 @@ class Competition(Base):
     id = Column(String, primary_key=True, default=_uuid)
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
-    track = Column(String, nullable=False, default="real")      # Phase 4 预留
+    # 参赛账户类型：real = 只收实盘，demo = 只收模拟/赛区账户。一场比赛只收一类，
+    # 不混着算——两类账户的本金与风险完全不可比，混在一张榜上没有意义。
+    # Which accounts may enter: real = live accounts only, demo = demo/contest only.
+    # One competition takes one kind; mixing them on a single board is meaningless
+    # because the capital and risk behind the two aren't comparable.
+    track = Column(String, nullable=False, default="real")      # real / demo
+    # 本场比赛专属的入榜门槛，留空则回落到全局设置（管理端「游戏化」页签那两个）。
+    # min_trades 一个值同时管两种 metric——比赛只用其中一种，分成两列没有意义。
+    # Per-competition entry gates; NULL falls back to the global settings (the two
+    # on the admin Gamification tab). One min_trades covers either metric, since a
+    # competition only ever uses one of them.
+    min_baseline_usd = Column(Float, nullable=True)
+    min_trades = Column(Integer, nullable=True)
     metric = Column(String, nullable=False, default="return_pct")  # return_pct / win_rate
     enrollment = Column(String, nullable=False, default="signup")  # signup / auto
     reg_opens_at = Column(DateTime, nullable=True)

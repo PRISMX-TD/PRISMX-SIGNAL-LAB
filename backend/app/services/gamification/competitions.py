@@ -16,7 +16,45 @@ from app.models import (
     Competition, CompetitionParticipant, LeaderboardSnapshot, MT5Account, PeriodBaseline, User,
 )
 from .badges import award_badge
+from app.services.account_type import CONTEST, DEMO
 from .boards import REAL, _aware, _resolved_in_period, board_gates, reconcile_deposits
+
+
+TRACKS = ("real", "demo")
+# 赛道 → 允许参赛的 trade_mode 集合。demo 赛道收模拟与赛区账户（都不是真金白银）；
+# trade_mode 为 NULL（尚未判定）的账户两个赛道都不收——宁可不让报名，也不能把
+# 一个还没判出类型的账户放进以本金论英雄的榜里。
+# Track → the trade_mode values it accepts. The demo track takes both demo and
+# contest accounts (neither is real money). Accounts with a NULL trade_mode (not yet
+# classified) are accepted by neither: better to refuse entry than to admit an
+# unclassified account to a board scored on capital.
+_TRACK_MODES = {"real": (REAL,), "demo": (DEMO, CONTEST)}
+
+
+def track_modes(track: str) -> tuple[int, ...]:
+    return _TRACK_MODES.get(track or "real", _TRACK_MODES["real"])
+
+
+def comp_gates(comp: Competition, gset: dict) -> dict:
+    """这场比赛实际生效的门槛：比赛自己配了就用自己的，没配回落全局。
+
+    形状与 `board_gates()` 完全一致，因为下游（`compute_comp_rows` 与比赛详情
+    页的 gates 回显）就是照那份形状读的——"页面上写的门槛"与"计算时用的门槛"
+    必须永远是同一个来源，这条约定见 `board_gates` 的说明。
+
+    The gates actually in force for this competition: its own values when set,
+    otherwise the global ones. Shape is identical to `board_gates()` because
+    that's what the consumers read — the number shown on the page and the number
+    used to compute rows must come from one source (see `board_gates`).
+    """
+    gates = dict(board_gates(gset))
+    if comp.min_baseline_usd is not None:
+        gates["min_baseline_usd"] = float(comp.min_baseline_usd)
+    if comp.min_trades is not None:
+        n = max(1, int(comp.min_trades))
+        gates["min_trades_return"] = n
+        gates["min_trades_winrate"] = n
+    return gates
 
 
 def comp_period_key(comp_id: str) -> str:
@@ -34,12 +72,12 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
     """
     from app.services.settings_store import get_gamification_settings
     gset = get_gamification_settings(db)
-    # 比赛用的是所选 metric 的完整周期榜规则（含门槛），必须和 boards.py 保持
-    # 同步——复用同一个 board_gates()，两处不会分叉。
-    # A competition uses its metric's full board rules including gates, kept in
-    # lockstep with boards.py by sharing the same board_gates() rather than
-    # re-deriving it.
-    gates = board_gates(gset)
+    # 比赛用的是所选 metric 的完整周期榜规则，默认与 boards.py 同步（同一个
+    # board_gates()，两处不会分叉）；本场比赛单独配了门槛时由 comp_gates 覆盖。
+    # A competition uses its metric's full board rules, by default in lockstep with
+    # boards.py (same board_gates(), so the two can't diverge); comp_gates applies
+    # this competition's own overrides on top when it has any.
+    gates = comp_gates(comp, gset)
     min_baseline = gates["min_baseline_usd"]
     min_trades_return = gates["min_trades_return"]
     min_trades_winrate = gates["min_trades_winrate"]
@@ -152,7 +190,7 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
                           now: datetime) -> CompetitionParticipant:
     """报名参赛（设计 §1.7/§1.8）：仅 `enrollment=="signup"` 的比赛可报名，报名窗口内
     （`reg_opens_at <= now < reg_closes_at`；任一边未配置视为窗口未开放），账户须是
-    本人名下、`trade_mode==2`（实盘）且余额已同步。参赛行 + `period_baselines
+    本人名下、类型与比赛赛道相符（real 收实盘 / demo 收模拟）且余额已同步。参赛行 + `period_baselines
     (comp:<id>)` 基线在同一事务内一并插入、一次 commit——中途崩溃不会留下有参赛行
     却没基线的半截状态。撞唯一约束（并发重复报名）→ 回滚、原样返回已有条目（幂等）。
     """
@@ -169,8 +207,10 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
 
     acct = (db.query(MT5Account)
               .filter(MT5Account.user_id == user.id, MT5Account.login == mt5_login).first())
-    if acct is None or acct.trade_mode != REAL:
-        raise HTTPException(status_code=400, detail="仅实盘账户可参赛 / Only real accounts may enter")
+    if acct is None or acct.trade_mode not in track_modes(comp.track):
+        detail = ("仅实盘账户可参赛 / Only real accounts may enter" if comp.track == "real"
+                  else "仅模拟账户可参赛 / Only demo accounts may enter")
+        raise HTTPException(status_code=400, detail=detail)
     if acct.balance is None:
         raise HTTPException(status_code=400,
                             detail="账户余额未同步，请先连接账户 / Account balance not synced yet")
@@ -209,7 +249,7 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
 
 
 def auto_enroll(db, comp: Competition, now: datetime) -> int:
-    """自动入场（设计 §1.7/§1.8）：全部实盘（`trade_mode==2`）、余额非 NULL、属主
+    """自动入场（设计 §1.7/§1.8）：类型与赛道相符（real 收实盘 / demo 收模拟）、余额非 NULL、属主
     未退榜的账户逐个写参赛行 + 拍基线，`scoring_from = comp.starts_at`（自动参赛的
     比赛没有报名，起点即开赛）。已入场（撞唯一约束）静默跳过——幂等，可反复调用
     （由状态推进到 running 的 admin 端点触发，Task 5）。返回新入场数。
@@ -225,7 +265,8 @@ def auto_enroll(db, comp: Competition, now: datetime) -> int:
                db.query(CompetitionParticipant).filter(
                    CompetitionParticipant.competition_id == comp.id)}
     accounts = (db.query(MT5Account)
-                  .filter(MT5Account.trade_mode == REAL, MT5Account.balance.isnot(None)).all())
+                  .filter(MT5Account.trade_mode.in_(track_modes(comp.track)),
+                          MT5Account.balance.isnot(None)).all())
     enrolled = 0
     for acct in accounts:
         if acct.user_id in opted_out or acct.login in already:
