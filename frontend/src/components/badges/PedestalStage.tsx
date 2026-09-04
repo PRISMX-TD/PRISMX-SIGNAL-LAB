@@ -43,28 +43,44 @@ function useDeviceTilt(target: RefObject<HTMLElement | null>, active: boolean) {
     if (!active) return
     const el = target.current
     if (!el) return
-    let raf = 0
+    // 传感器原始值 → 目标值；每帧向目标值靠 18%（指数平滑），手一抖高光不会跟着抖，
+    // 又不至于拖泥带水。另外算出光线方位角 --la（度）和倾斜强度 --gi（0..1）：
+    // 反光带沿方位角横扫，边缘的高光点也顺着它转；强度决定整体亮度与反光带浓淡。
+    // Raw sensor → target; each frame moves 18% of the way (exponential smoothing),
+    // so a shaky hand doesn't make the highlight jitter yet it never feels laggy.
+    // Also derives the light azimuth --la (deg) and tilt strength --gi (0..1): the
+    // sheen band sweeps along the azimuth, the rim glint turns with it, and the
+    // strength drives overall brightness and how dense the band is.
+    let tx = 0
+    let ty = 0
     let gx = 0
     let gy = 0
+    let raf = 0
+    let running = true
     const onOrient = (e: DeviceOrientationEvent) => {
-      gx = Math.max(-1, Math.min(1, (e.gamma ?? 0) / 35))
-      gy = Math.max(-1, Math.min(1, ((e.beta ?? 0) - 40) / 35))
-      if (!raf) {
-        raf = requestAnimationFrame(() => {
-          raf = 0
-          el.style.setProperty('--gx', gx.toFixed(3))
-          el.style.setProperty('--gy', gy.toFixed(3))
-        })
-      }
+      tx = Math.max(-1, Math.min(1, (e.gamma ?? 0) / 28))
+      ty = Math.max(-1, Math.min(1, ((e.beta ?? 0) - 40) / 28))
+    }
+    const tick = () => {
+      if (!running) return
+      gx += (tx - gx) * 0.18
+      gy += (ty - gy) * 0.18
+      const gi = Math.min(1, Math.hypot(gx, gy))
+      const la = (Math.atan2(-gy, gx) * 180) / Math.PI
+      el.style.setProperty('--gx', gx.toFixed(3))
+      el.style.setProperty('--gy', gy.toFixed(3))
+      el.style.setProperty('--gi', gi.toFixed(3))
+      el.style.setProperty('--la', la.toFixed(1))
+      raf = requestAnimationFrame(tick)
     }
     el.style.setProperty('--gyro-on', '1')
     window.addEventListener('deviceorientation', onOrient)
+    raf = requestAnimationFrame(tick)
     return () => {
+      running = false
       window.removeEventListener('deviceorientation', onOrient)
       if (raf) cancelAnimationFrame(raf)
-      el.style.removeProperty('--gyro-on')
-      el.style.removeProperty('--gx')
-      el.style.removeProperty('--gy')
+      for (const v of ['--gyro-on', '--gx', '--gy', '--gi', '--la']) el.style.removeProperty(v)
     }
   }, [target, active])
 }
@@ -191,6 +207,7 @@ export default function PedestalStage({ badges, defaultId, busy, onOpen, onMakeD
                     <BadgeIcon id={b.id} rarity={b.rarity} earned size={RENDER_SIZE} spin={slot === 'c'} />
                   </MedalTilt>
                   <i className="ach-sheen" aria-hidden />
+                  <i className="ach-glint" aria-hidden />
                 </div>
               </div>
             )
