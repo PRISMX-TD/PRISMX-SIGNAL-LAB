@@ -5180,6 +5180,18 @@ body {
 .lb-podium-card {
   transition: transform var(--dur-base) var(--ease-out);
 }
+/* 榜单骨架延迟显形：150ms 内数据就到（本地 / 缓存命中）时直接淡入内容，骨架根本不露面，
+   避免"骨架闪一下再换内容"的二次闪烁；慢网时 150ms 后柔和浮现给反馈。
+   Delayed skeleton: if data lands within 150ms (local / cache hit) content fades in and
+   the skeleton never shows, avoiding a "skeleton blinks, then content" double flash;
+   on a slow network it eases in after 150ms as feedback. */
+@keyframes lb-skel-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.lb-skel {
+  animation: lb-skel-in 0.2s var(--ease-out) 0.15s both;
+}
 @media (hover: hover) {
   .lb-podium-card:hover {
     transform: translateY(-4px);

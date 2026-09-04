@@ -26,7 +26,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { gamificationApi } from '../api/client'
-import { SkeletonPage } from '../components/Skeleton'
+import { SkeletonBlock, SkeletonLine } from '../components/Skeleton'
 import BadgeIcon from '../components/badges/BadgeIcon'
 import RankCoin from '../components/badges/RankCoin'
 import { BADGE_RARITY } from '../components/badges/badgeRarity'
@@ -48,6 +48,15 @@ const PERIODS: Period[] = ['week', 'month']
 // the loading phase never flashes the raw "{{n}}" token; once data lands it
 // fully defers to the real values, never showing a stale or wrong number.
 const DEFAULT_GATES = { minTradesReturn: 5, minTradesWinrate: 20, minBaselineUsd: 500 }
+
+// 骨架尺寸按真实版式在浏览器里量过（桌面 ≥ 640px 三张领奖台卡、手机领奖台面板、
+// 我的名次卡），骨架与内容等高，换入时页面不跳。
+// Skeleton sizes measured in-browser against the real layout (desktop podium
+// cards, mobile podium panel, my-rank card) so the swap doesn't shift the page.
+const SKEL_PODIUM_SIDE = 165
+const SKEL_PODIUM_CENTER = 193
+const SKEL_PODIUM_MOBILE = 143
+const SKEL_MINE = 90
 
 // score 是分数（0.124 = 12.4%），两榜统一按百分比一位小数显示——收益率榜可能
 // 为负（亏损），toFixed 对负数一样成立，不需要特判。收益率榜额外带正负号
@@ -587,67 +596,25 @@ function EmptyState({ data, board, rankThreshold, minBaselineUsd }: {
   )
 }
 
-export default function LeaderboardPage() {
+// 榜单主体：领奖台 / 名次列表 / 我的名次。从页面拆出来是为了让页头、分段控件、
+// 榜规在加载期间始终留在原位——切榜时只有这一块在骨架与数据之间切换，不再整页
+// 消失又出现（用户反馈"点击时卡顿闪烁一下才出现内容"的根因）。
+// Board body: podium / ranked list / my rank. Split out of the page so the
+// header, segmented controls and gate chips stay put while loading — only this
+// region swaps between skeleton and data on a toggle, instead of the whole page
+// vanishing and reappearing (root cause of the reported "flash before content").
+function BoardBody({
+  data,
+  board,
+  rankThreshold,
+  minBaselineUsd,
+}: {
+  data: LeaderboardPayload
+  board: LeaderboardBoard
+  rankThreshold: number
+  minBaselineUsd: number
+}) {
   const { t } = useTranslation()
-  const [board, setBoard] = useState<LeaderboardBoard>('return_pct')
-  const [period, setPeriod] = useState<Period>('week')
-  const [data, setData] = useState<LeaderboardPayload | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [forbidden, setForbidden] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setForbidden(false)
-    gamificationApi
-      .leaderboard(board, period)
-      .then((res) => {
-        if (!cancelled) setData(res)
-      })
-      .catch(() => {
-        // 唯一预期的失败是入口理论上已隐藏、用户直接打 URL 撞上 403——不细分
-        // 错误类型，统一退化成内测提示（同 AchievementsPage）。
-        // The one expected failure is someone hitting a URL whose entry is
-        // already hidden and getting a 403 — not worth distinguishing error
-        // kinds; everything degrades to the same beta hint (same as
-        // AchievementsPage).
-        if (!cancelled) setForbidden(true)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [board, period])
-
-  if (loading) {
-    return (
-      <div className="mx-auto max-w-[1100px]">
-        <SkeletonPage cards={3} />
-      </div>
-    )
-  }
-
-  if (forbidden || !data) {
-    return (
-      <div className="mx-auto flex min-h-[40vh] max-w-[1100px] items-center justify-center">
-        <p className="card glass p-6 text-center text-sm text-neutral-400">
-          {t('gamification.admin.visibleOff')}
-        </p>
-      </div>
-    )
-  }
-
-  // data.gates should always be present once a payload lands (the backend
-  // always sends it) — the fallback is defensive only, so a mid-rollout
-  // mismatch degrades to the old hardcoded numbers instead of throwing.
-  const gates = data.gates ?? DEFAULT_GATES
-  const rankThreshold: Record<LeaderboardBoard, number> = {
-    return_pct: gates.minTradesReturn,
-    win_rate: gates.minTradesWinrate,
-  }
-
   const isReturn = board === 'return_pct'
   const podiumRows = data.rows.slice(0, 3)
   const listRows = data.rows.slice(3)
@@ -656,138 +623,10 @@ export default function LeaderboardPage() {
   const rowByRank = new Map(podiumRows.map((r) => [r.rank, r]))
   const gridTemplate = visualOrder.length === 3 ? '1fr 1.18fr 1fr' : visualOrder.length === 2 ? '1fr 1.18fr' : '1fr'
 
-  const { year, week, month } = parsePeriodKey(data.periodKey, period)
-  const sealed = data.sealAt ? Date.now() >= new Date(data.sealAt).getTime() : false
-
-  // quantitative: true 的几条（笔数/本金/盈亏为正）手机端常显；false 的几条
-  // 是说明性文案（比收益率不比金额、入金并入分母、按账户·打码·明示），手机端
-  // 用 hidden sm:inline-flex 藏起来腾地方，桌面端仍然全部显示、不变。
-  // quantitative: true entries (trade count / baseline / positive P&L) stay
-  // visible on mobile; the false ones are descriptive copy (metric framing,
-  // deposit handling, identity policy) hidden on mobile via
-  // hidden sm:inline-flex to save room — desktop still shows all of them,
-  // unchanged.
-  const gateChips: { text: string; quantitative: boolean }[] = isReturn
-    ? [
-        { text: t('leaderboard.gates.returnMetric'), quantitative: false },
-        { text: t('leaderboard.gates.minTradesReturn', { n: gates.minTradesReturn }), quantitative: true },
-        { text: t('leaderboard.gates.minBaseline', { usd: fmtUsd(gates.minBaselineUsd) }), quantitative: true },
-        { text: t('leaderboard.gates.deposits'), quantitative: false },
-        { text: t('leaderboard.gates.identity'), quantitative: false },
-      ]
-    : [
-        { text: t('leaderboard.gates.minTradesWinrate', { n: gates.minTradesWinrate }), quantitative: true },
-        { text: t('leaderboard.gates.positive'), quantitative: true },
-        { text: t('leaderboard.gates.identity'), quantitative: false },
-      ]
-
   return (
-    // pb-[76px]：手机端把「我的名次」钉在底栏上方，页面内容需要留出净空，
-    // 否则榜单最后几行会被那张浮动条挡住摸不到；桌面端 sm:pb-10 原样不变。
-    // pb-[76px]: mobile pins the rank bar above the tab bar, so page content
-    // needs clearance or the list's last rows end up trapped under it;
-    // desktop keeps the original sm:pb-10 unchanged.
-    <div className="mx-auto max-w-[1100px] space-y-6 pb-[76px] sm:pb-10">
-      <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h2 className="font-display text-2xl font-bold text-neutral-100">
-            <span className="neon-text">{t('leaderboard.title')}</span>
-          </h2>
-          {data.periodStart && data.periodEnd && (
-            <>
-              {/* ≥ 640px：原样不动。桌面这行一像素不改。
-                  ≥ 640px: unchanged verbatim — pixel-identical to before. */}
-              <div className="mt-2 hidden flex-wrap items-center gap-x-3.5 gap-y-2 text-[13px] text-neutral-400 sm:flex">
-                <span className="font-semibold text-neutral-100">
-                  {period === 'week' ? t('leaderboard.periodWeek', { year, week }) : t('leaderboard.periodMonth', { year, month })}
-                </span>
-                <span className="text-neutral-600">·</span>
-                <span className="num">
-                  {fmtUtcShortDate(data.periodStart)} –{' '}
-                  {fmtUtcShortDate(new Date(new Date(data.periodEnd).getTime() - 86400000).toISOString())}
-                </span>
-                <span className="text-neutral-600">·</span>
-                <span className="chip inline-flex items-center gap-1.5 border border-white/10 text-neutral-300">
-                  <i
-                    aria-hidden
-                    className={`h-1.5 w-1.5 rounded-full ${sealed ? 'bg-neutral-500' : 'bg-up shadow-[0_0_0_3px_rgba(53,201,122,.15)]'}`}
-                  />
-                  {sealed || !data.sealAt ? t('leaderboard.sealed') : t('leaderboard.sealRunning', { time: fmtUtcClock(data.sealAt) })}
-                </span>
-              </div>
-              {/* < 640px：周期+日期揉成一条 13px 的浅色行，封存 chip 收窄 padding，
-                  两者放进同一个 flex-wrap 行，装不下才换行——不是原本桌面版那种
-                  永远分成两三段的写法。
-                  < 640px: the period label and dates fold into one muted 13px
-                  line, and the seal chip gets tighter padding; both sit in one
-                  flex-wrap row that only breaks onto a second line when it
-                  doesn't fit, unlike the desktop version's always-segmented
-                  layout. */}
-              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 sm:hidden">
-                <span className="text-[13px] text-neutral-400">
-                  {period === 'week' ? t('leaderboard.periodWeek', { year, week }) : t('leaderboard.periodMonth', { year, month })}
-                  <span className="text-neutral-600"> · </span>
-                  <span className="num">
-                    {fmtUtcShortDate(data.periodStart)} –{' '}
-                    {fmtUtcShortDate(new Date(new Date(data.periodEnd).getTime() - 86400000).toISOString())}
-                  </span>
-                </span>
-                <span className="chip inline-flex items-center gap-1.5 border border-white/10 px-2 py-1 text-[11px] text-neutral-300">
-                  <i
-                    aria-hidden
-                    className={`h-1.5 w-1.5 rounded-full ${sealed ? 'bg-neutral-500' : 'bg-up shadow-[0_0_0_3px_rgba(53,201,122,.15)]'}`}
-                  />
-                  {sealed || !data.sealAt ? t('leaderboard.sealed') : t('leaderboard.sealRunning', { time: fmtUtcClock(data.sealAt) })}
-                </span>
-              </div>
-            </>
-          )}
-        </div>
-        <div className="lb-controls flex flex-row items-center gap-2 sm:flex-wrap sm:gap-2.5">
-          <div className="lb-seg-board seg-tabs w-full sm:w-fit" role="tablist">
-            {BOARDS.map((b) => (
-              <button
-                key={b}
-                type="button"
-                role="tab"
-                aria-selected={board === b}
-                onClick={() => setBoard(b)}
-                className={`flex-1 sm:flex-none ${board === b ? 'on' : ''}`}
-              >
-                {t(`leaderboard.boards.${b}`)}
-              </button>
-            ))}
-          </div>
-          <div className="lb-seg-period seg-tabs w-full sm:w-fit" role="tablist">
-            {PERIODS.map((p) => (
-              <button
-                key={p}
-                type="button"
-                role="tab"
-                aria-selected={period === p}
-                onClick={() => setPeriod(p)}
-                className={`flex-1 sm:flex-none ${period === p ? 'on' : ''}`}
-              >
-                {t(`leaderboard.periods.${p}`)}
-              </button>
-            ))}
-          </div>
-        </div>
-      </header>
-
-      <div className="lb-gates -mx-4 flex flex-nowrap gap-2 overflow-x-auto px-4 no-scrollbar sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
-        {gateChips.map((chip) => (
-          <span
-            key={chip.text}
-            className={`chip shrink-0 border border-white/10 bg-white/[0.04] h-[26px] px-2.5 text-[11px] text-neutral-400 sm:h-auto sm:px-2 sm:py-1 sm:text-xs ${chip.quantitative ? '' : 'hidden sm:inline-flex'}`}
-          >
-            {chip.text}
-          </span>
-        ))}
-      </div>
-
+    <>
       {data.rows.length === 0 ? (
-        <EmptyState data={data} board={board} rankThreshold={rankThreshold[board]} minBaselineUsd={gates.minBaselineUsd} />
+        <EmptyState data={data} board={board} rankThreshold={rankThreshold} minBaselineUsd={minBaselineUsd} />
       ) : (
         <>
           {/* ≥ 640px：三张卡（PodiumCard），布局/断点原样不动。
@@ -850,8 +689,272 @@ export default function LeaderboardPage() {
         </>
       )}
 
-      <MyRankCard data={data} board={board} rankThreshold={rankThreshold[board]} />
+      <MyRankCard data={data} board={board} rankThreshold={rankThreshold} />
       <MyRankBarMobile data={data} board={board} />
+    </>
+  )
+}
+
+// 贴合榜单版式的骨架：桌面三张领奖台卡 / 手机一块领奖台面板，加四行名次和一张
+// 我的名次卡。靠 .lb-skel 延迟 150ms 才显形——本地或缓存命中时请求几十毫秒就
+// 回来，骨架根本轮不到露面，也就不会出现"骨架闪一下再换内容"的二次闪烁。
+// Layout-matched skeleton: three podium cards on desktop / one podium panel on
+// mobile, plus four ranked rows and a my-rank card. .lb-skel delays it 150ms —
+// a fast (local / cached) response lands before it ever shows, so there is no
+// "skeleton blinks, then content" double flash.
+function BoardSkeleton() {
+  return (
+    <div className="lb-skel space-y-6" aria-hidden>
+      <div className="hidden items-end gap-3.5 sm:grid" style={{ gridTemplateColumns: '1fr 1.18fr 1fr' }}>
+        <SkeletonBlock height={SKEL_PODIUM_SIDE} radius="var(--r-lg)" />
+        <SkeletonBlock height={SKEL_PODIUM_CENTER} radius="var(--r-lg)" />
+        <SkeletonBlock height={SKEL_PODIUM_SIDE} radius="var(--r-lg)" />
+      </div>
+      <div className="sm:hidden">
+        <SkeletonBlock height={SKEL_PODIUM_MOBILE} radius="var(--r-lg)" />
+      </div>
+      <div className="skeleton-card divide-y divide-white/[0.06] overflow-hidden">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="flex items-center gap-3 px-4 py-4 sm:px-[18px] sm:py-2.5">
+            <SkeletonBlock width={28} height={28} radius={999} />
+            <SkeletonLine width={i % 2 ? '30%' : '40%'} height={12} />
+            <SkeletonLine width={64} height={12} className="ml-auto" />
+          </div>
+        ))}
+      </div>
+      {/* 手机端「我的名次」是钉在底栏上的浮动条（portal），不占页面高度，骨架也不占。
+          On mobile the my-rank bar is a fixed portal above the tab bar and takes no page
+          height, so its skeleton is desktop-only too. */}
+      <div className="hidden sm:block">
+        <SkeletonBlock height={SKEL_MINE} radius="var(--r-lg)" />
+      </div>
+    </div>
+  )
+}
+
+export default function LeaderboardPage() {
+  const { t } = useTranslation()
+  const [board, setBoard] = useState<LeaderboardBoard>('return_pct')
+  const [period, setPeriod] = useState<Period>('week')
+  // 按 (榜单, 周期) 缓存 payload：切回看过的组合零等待直接出内容并后台静默刷新；
+  // 没看过的组合只把榜单主体换成骨架，页头 / 控件 / 榜规原地不动。
+  // Payload cache keyed by (board, period): a seen combo renders instantly and
+  // refreshes silently in the background; an unseen one swaps only the board
+  // body for a skeleton while header / controls / gate chips stay in place.
+  const [cache, setCache] = useState<Partial<Record<string, LeaderboardPayload>>>({})
+  const [forbidden, setForbidden] = useState(false)
+  const key = `${board}:${period}`
+  const data = cache[key]
+
+  useEffect(() => {
+    let cancelled = false
+    const k = `${board}:${period}`
+    gamificationApi
+      .leaderboard(board, period)
+      .then((res) => {
+        if (!cancelled) setCache((c) => ({ ...c, [k]: res }))
+      })
+      .catch(() => {
+        // 唯一预期的失败是入口理论上已隐藏、用户直接打 URL 撞上 403——不细分
+        // 错误类型，统一退化成内测提示（同 AchievementsPage）。
+        // The one expected failure is someone hitting a URL whose entry is
+        // already hidden and getting a 403 — not worth distinguishing error
+        // kinds; everything degrades to the same beta hint (same as
+        // AchievementsPage).
+        if (!cancelled) setForbidden(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [board, period])
+
+  if (forbidden) {
+    return (
+      <div className="mx-auto flex min-h-[40vh] max-w-[1100px] items-center justify-center">
+        <p className="card glass p-6 text-center text-sm text-neutral-400">
+          {t('gamification.admin.visibleOff')}
+        </p>
+      </div>
+    )
+  }
+
+  // 榜规不随榜单 / 周期变，周期区间不随榜单变：任一已到的 payload 都能先顶上，
+  // 切榜时榜规芯片和周期行就不会跟着闪空；只有首屏什么都没有时才放占位。
+  // Gates don't vary by board / period and the period range doesn't vary by
+  // board, so any payload already in hand can stand in — chips and the period
+  // line never blank out on a toggle; placeholders appear only on a cold start.
+  const anyPayload = data ?? Object.values(cache).find(Boolean)
+  const periodSrc = data ?? BOARDS.map((b) => cache[`${b}:${period}`]).find(Boolean)
+  // data.gates should always be present once a payload lands (the backend
+  // always sends it) — the fallback is defensive only, so a mid-rollout
+  // mismatch degrades to the old hardcoded numbers instead of throwing.
+  const gates = anyPayload?.gates ?? DEFAULT_GATES
+  const rankThreshold: Record<LeaderboardBoard, number> = {
+    return_pct: gates.minTradesReturn,
+    win_rate: gates.minTradesWinrate,
+  }
+  const isReturn = board === 'return_pct'
+
+  const { year, week, month } = parsePeriodKey(periodSrc?.periodKey ?? '', period)
+  const sealed = periodSrc?.sealAt ? Date.now() >= new Date(periodSrc.sealAt).getTime() : false
+
+  // quantitative: true 的几条（笔数/本金/盈亏为正）手机端常显；false 的几条
+  // 是说明性文案（比收益率不比金额、入金并入分母、按账户·打码·明示），手机端
+  // 用 hidden sm:inline-flex 藏起来腾地方，桌面端仍然全部显示、不变。
+  // quantitative: true entries (trade count / baseline / positive P&L) stay
+  // visible on mobile; the false ones are descriptive copy (metric framing,
+  // deposit handling, identity policy) hidden on mobile via
+  // hidden sm:inline-flex to save room — desktop still shows all of them,
+  // unchanged.
+  const gateChips: { text: string; quantitative: boolean }[] = isReturn
+    ? [
+        { text: t('leaderboard.gates.returnMetric'), quantitative: false },
+        { text: t('leaderboard.gates.minTradesReturn', { n: gates.minTradesReturn }), quantitative: true },
+        { text: t('leaderboard.gates.minBaseline', { usd: fmtUsd(gates.minBaselineUsd) }), quantitative: true },
+        { text: t('leaderboard.gates.deposits'), quantitative: false },
+        { text: t('leaderboard.gates.identity'), quantitative: false },
+      ]
+    : [
+        { text: t('leaderboard.gates.minTradesWinrate', { n: gates.minTradesWinrate }), quantitative: true },
+        { text: t('leaderboard.gates.positive'), quantitative: true },
+        { text: t('leaderboard.gates.identity'), quantitative: false },
+      ]
+
+  return (
+    // pb-[76px]：手机端把「我的名次」钉在底栏上方，页面内容需要留出净空，
+    // 否则榜单最后几行会被那张浮动条挡住摸不到；桌面端 sm:pb-10 原样不变。
+    // pb-[76px]: mobile pins the rank bar above the tab bar, so page content
+    // needs clearance or the list's last rows end up trapped under it;
+    // desktop keeps the original sm:pb-10 unchanged.
+    <div className="mx-auto max-w-[1100px] space-y-6 pb-[76px] sm:pb-10">
+      <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h2 className="font-display text-2xl font-bold text-neutral-100">
+            <span className="neon-text">{t('leaderboard.title')}</span>
+          </h2>
+          {periodSrc?.periodStart && periodSrc.periodEnd && (
+            <>
+              {/* ≥ 640px：原样不动。桌面这行一像素不改。
+                  ≥ 640px: unchanged verbatim — pixel-identical to before. */}
+              <div className="mt-2 hidden flex-wrap items-center gap-x-3.5 gap-y-2 text-[13px] text-neutral-400 sm:flex">
+                <span className="font-semibold text-neutral-100">
+                  {period === 'week' ? t('leaderboard.periodWeek', { year, week }) : t('leaderboard.periodMonth', { year, month })}
+                </span>
+                <span className="text-neutral-600">·</span>
+                <span className="num">
+                  {fmtUtcShortDate(periodSrc.periodStart)} –{' '}
+                  {fmtUtcShortDate(new Date(new Date(periodSrc.periodEnd).getTime() - 86400000).toISOString())}
+                </span>
+                <span className="text-neutral-600">·</span>
+                <span className="chip inline-flex items-center gap-1.5 border border-white/10 text-neutral-300">
+                  <i
+                    aria-hidden
+                    className={`h-1.5 w-1.5 rounded-full ${sealed ? 'bg-neutral-500' : 'bg-up shadow-[0_0_0_3px_rgba(53,201,122,.15)]'}`}
+                  />
+                  {sealed || !periodSrc.sealAt ? t('leaderboard.sealed') : t('leaderboard.sealRunning', { time: fmtUtcClock(periodSrc.sealAt) })}
+                </span>
+              </div>
+              {/* < 640px：周期+日期揉成一条 13px 的浅色行，封存 chip 收窄 padding，
+                  两者放进同一个 flex-wrap 行，装不下才换行——不是原本桌面版那种
+                  永远分成两三段的写法。
+                  < 640px: the period label and dates fold into one muted 13px
+                  line, and the seal chip gets tighter padding; both sit in one
+                  flex-wrap row that only breaks onto a second line when it
+                  doesn't fit, unlike the desktop version's always-segmented
+                  layout. */}
+              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 sm:hidden">
+                <span className="text-[13px] text-neutral-400">
+                  {period === 'week' ? t('leaderboard.periodWeek', { year, week }) : t('leaderboard.periodMonth', { year, month })}
+                  <span className="text-neutral-600"> · </span>
+                  <span className="num">
+                    {fmtUtcShortDate(periodSrc.periodStart)} –{' '}
+                    {fmtUtcShortDate(new Date(new Date(periodSrc.periodEnd).getTime() - 86400000).toISOString())}
+                  </span>
+                </span>
+                <span className="chip inline-flex items-center gap-1.5 border border-white/10 px-2 py-1 text-[11px] text-neutral-300">
+                  <i
+                    aria-hidden
+                    className={`h-1.5 w-1.5 rounded-full ${sealed ? 'bg-neutral-500' : 'bg-up shadow-[0_0_0_3px_rgba(53,201,122,.15)]'}`}
+                  />
+                  {sealed || !periodSrc.sealAt ? t('leaderboard.sealed') : t('leaderboard.sealRunning', { time: fmtUtcClock(periodSrc.sealAt) })}
+                </span>
+              </div>
+            </>
+          )}
+          {/* 冷启动占位：撑住周期行的高度，payload 一到就被真实周期行顶掉。
+              Cold-start placeholder holding the period line's height until the
+              first payload replaces it. */}
+          {!periodSrc && (
+            <div className="lb-skel mt-3.5 space-y-2">
+              <SkeletonLine width={280} height={14} />
+              {/* 手机端周期行会折成两行（日期 + 封存芯片），多撑一枚芯片高度。
+                  On mobile the period line wraps to two rows (dates + seal chip),
+                  so hold one extra chip-height there. */}
+              <SkeletonLine width={150} height={22} className="sm:!hidden" />
+            </div>
+          )}
+        </div>
+        <div className="lb-controls flex flex-row items-center gap-2 sm:flex-wrap sm:gap-2.5">
+          <div className="lb-seg-board seg-tabs w-full sm:w-fit" role="tablist">
+            {BOARDS.map((b) => (
+              <button
+                key={b}
+                type="button"
+                role="tab"
+                aria-selected={board === b}
+                onClick={() => setBoard(b)}
+                className={`flex-1 sm:flex-none ${board === b ? 'on' : ''}`}
+              >
+                {t(`leaderboard.boards.${b}`)}
+              </button>
+            ))}
+          </div>
+          <div className="lb-seg-period seg-tabs w-full sm:w-fit" role="tablist">
+            {PERIODS.map((p) => (
+              <button
+                key={p}
+                type="button"
+                role="tab"
+                aria-selected={period === p}
+                onClick={() => setPeriod(p)}
+                className={`flex-1 sm:flex-none ${period === p ? 'on' : ''}`}
+              >
+                {t(`leaderboard.periods.${p}`)}
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      <div className="lb-gates -mx-4 flex flex-nowrap gap-2 overflow-x-auto px-4 no-scrollbar sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
+        {!anyPayload &&
+          [120, 96, 132].map((w) => (
+            <span key={w} className="lb-skel shrink-0">
+              <SkeletonBlock width={w} height={26} radius={999} />
+            </span>
+          ))}
+        {anyPayload &&
+          gateChips.map((chip) => (
+          <span
+            key={chip.text}
+            className={`chip shrink-0 border border-white/10 bg-white/[0.04] h-[26px] px-2.5 text-[11px] text-neutral-400 sm:h-auto sm:px-2 sm:py-1 sm:text-xs ${chip.quantitative ? '' : 'hidden sm:inline-flex'}`}
+          >
+            {chip.text}
+          </span>
+        ))}
+      </div>
+
+      {data ? (
+        // key 跟着 (榜单, 周期) 走：换组合时主体整块淡入，同一组合的后台刷新
+        // 只更新数据、不重新播动画。
+        // Keyed by (board, period): switching combos fades the whole body in;
+        // a background refresh of the same combo just updates data, no replay.
+        <div key={key} className="content-fade space-y-6">
+          <BoardBody data={data} board={board} rankThreshold={rankThreshold[board]} minBaselineUsd={gates.minBaselineUsd} />
+        </div>
+      ) : (
+        <BoardSkeleton />
+      )}
     </div>
   )
 }
