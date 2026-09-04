@@ -1994,6 +1994,9 @@
                "minTradesReturn": "Minimum trades for the return board",
                "minTradesWinrate": "Minimum trades for the win rate board",
                "minTradesHint": "Loosen these during the beta to make the boards observable; restore the defaults (5 for the return board, 20 for the win rate board) before opening them to real users.",
+               "winrateRequireProfit": "Win-rate board requires positive P&L",
+               "gateOn": "On", "gateOff": "Off",
+               "winrateRequireProfitHint": "When on, an account that is net-negative for the period stays off the win-rate board however high its rate. Samples are tiny during the beta, so leave it off for now and turn it on before going public.",
                "confirmOpenBoard": "Once opened, the leaderboard is visible to all users. Confirm opening?",
                "confirmOpenCompetitions": "Once opened, competitions are visible to all users. Confirm opening?",
                "pickBoard": "Pick a board", "pickPeriod": "Pick a period" }

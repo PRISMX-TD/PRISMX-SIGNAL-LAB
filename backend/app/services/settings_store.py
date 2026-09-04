@@ -856,6 +856,15 @@ GAMIFICATION_DEFAULTS: dict = {
     "min_baseline_usd": 500.0,
     "min_trades_return": 5,
     "min_trades_winrate": 20,
+    # 胜率榜是否要求本期盈亏为正才能上榜。设计上这是条原则（高胜率 ≠ 赚钱），
+    # 一度写死在 boards.py 里；2026-09-04 应产品要求改成可配开关，默认关闭。
+    # 想把它作为公开时的准入条件，在管理端「游戏化」页签打开即可，不用改代码。
+    # Whether the win-rate board requires the period P&L to be positive. This is a
+    # principle by design (a high win rate is not the same as making money) and was
+    # hardcoded in boards.py until 2026-09-04, when the product owner asked for it to
+    # be configurable; default off. Turn it back on from the admin Gamification tab
+    # before going public — no code change needed.
+    "winrate_require_profit": False,
 }
 
 _gamification_cache: dict = {}

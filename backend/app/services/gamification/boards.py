@@ -165,6 +165,7 @@ def board_gates(gset: dict) -> dict:
         "min_baseline_usd": float(gset.get("min_baseline_usd", 500.0)),
         "min_trades_return": max(1, int(gset.get("min_trades_return", 5))),
         "min_trades_winrate": max(1, int(gset.get("min_trades_winrate", 20))),
+        "winrate_require_profit": bool(gset.get("winrate_require_profit", False)),
     }
 
 
@@ -184,6 +185,7 @@ def compute_board_rows(db, period_key: str) -> dict:
     min_baseline = gates["min_baseline_usd"]
     min_trades_return = gates["min_trades_return"]
     min_trades_winrate = gates["min_trades_winrate"]
+    wr_require_profit = gates["winrate_require_profit"]
     opted_out = {r[0] for r in db.query(User.id).filter(User.leaderboard_opt_out.is_(True))}
     baselines = db.query(PeriodBaseline).filter(
         PeriodBaseline.period_key == period_key).all()
@@ -204,15 +206,17 @@ def compute_board_rows(db, period_key: str) -> dict:
             if sample >= min_trades_return and denom >= min_baseline and denom > 0:
                 ret_rows.append({"userId": uid, "login": lg,
                                  "score": total / denom, "sample": sample})
-            # `total > 0`（本期盈利为正）刻意不做成设置项：这是原则，不是门槛。
-            # 高胜率不等于盈利——没有这道闸，榜首可能是一个在亏钱的账户
-            # （比如高胜率、小赢大亏）。笔数门槛可以为了内测松一松，这道闸不行。
-            # `total > 0` (period profit must be positive) is deliberately left
-            # hardcoded, not a setting: it's a principle, not a threshold. A high
-            # win rate doesn't mean profitable — without this gate the board's
-            # top entry could be a net-losing account (many small wins, one big
-            # loss). The count gate can loosen for the beta; this one never does.
-            if sample >= min_trades_winrate and total > 0:
+            # 「本期盈亏为正」原本写死在这里（高胜率 ≠ 赚钱：小赢大亏的打法能刷出
+            # 高胜率却在亏钱，这道闸挡的就是它）。2026-09-04 应产品要求改成可配
+            # 开关 `winrate_require_profit`，默认关闭——内测期样本太小，这道闸把
+            # 大部分账户挡在榜外。**公开前建议在管理端打开**，理由见设计 §4。
+            # "Period P&L must be positive" used to be hardcoded here (a high win rate
+            # is not the same as making money: small-wins/big-losses trading scores a
+            # high rate while losing, and this gate is what stops it). Made configurable
+            # via `winrate_require_profit` on 2026-09-04 at the product owner's request,
+            # default off — in beta the samples are tiny and this gate keeps most
+            # accounts off the board. **Turn it back on before going public** (design §4).
+            if sample >= min_trades_winrate and (total > 0 or not wr_require_profit):
                 wins = sum(1 for p in profits if p > 0)
                 wr_rows.append({"userId": uid, "login": lg,
                                 "score": wins / sample, "sample": sample})

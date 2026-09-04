@@ -1153,6 +1153,10 @@ export interface LeaderboardGates {
   minTradesReturn: number
   minTradesWinrate: number
   minBaselineUsd: number
+  // 胜率榜是否要求本期盈亏为正（管理端可配，默认关）。为 false 时不渲染那条榜规芯片。
+  // Whether the win-rate board requires positive period P&L (admin-configurable,
+  // default off). When false, that gate chip isn't rendered.
+  winrateRequireProfit: boolean
 }
 
 // 观众本期未上榜但已拍过基线时的进度块（多账户取本期已判定整仓数最多的
@@ -1217,6 +1221,10 @@ export interface GamificationSettings {
   // strict in production).
   minTradesReturn: number
   minTradesWinrate: number
+  // 胜率榜盈亏正闸：设计上是条原则（高胜率 ≠ 赚钱），2026-09-04 改成可配，默认关。
+  // Win-rate profit gate: a principle by design (a high win rate isn't profit);
+  // made configurable on 2026-09-04, default off.
+  winrateRequireProfit: boolean
 }
 
 // PATCH /admin/gamification/settings 请求体：全部可选，只改传了的字段。
@@ -1229,6 +1237,7 @@ export interface GamificationSettingsPatch {
   minBaselineUsd?: number
   minTradesReturn?: number
   minTradesWinrate?: number
+  winrateRequireProfit?: boolean
 }
 
 // 交易比赛（设计 §1.7/§1.8/§1.9，Phase 3）/ Trading competitions

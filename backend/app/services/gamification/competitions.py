@@ -43,6 +43,7 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
     min_baseline = gates["min_baseline_usd"]
     min_trades_return = gates["min_trades_return"]
     min_trades_winrate = gates["min_trades_winrate"]
+    wr_require_profit = gates["winrate_require_profit"]
     period_key = comp_period_key(comp.id)
     starts_at = _aware(comp.starts_at)
     ends_at = _aware(comp.ends_at)
@@ -89,10 +90,10 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
                     rows.append({"userId": uid, "login": lg,
                                 "score": total / denom, "sample": sample})
             elif comp.metric == "win_rate":
-                # `total > 0` 同 boards.py：原则性的盈亏正闸，刻意不做成设置项。
+                # 盈亏正闸同 boards.py：现在是可配开关 winrate_require_profit（默认关）。
                 # Same as boards.py: a principled profit-positive gate,
                 # deliberately not a setting.
-                if sample >= min_trades_winrate and total > 0:
+                if sample >= min_trades_winrate and (total > 0 or not wr_require_profit):
                     wins = sum(1 for pr in profits if pr > 0)
                     rows.append({"userId": uid, "login": lg,
                                 "score": wins / sample, "sample": sample})

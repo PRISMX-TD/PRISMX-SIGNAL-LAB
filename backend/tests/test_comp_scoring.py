@@ -8,6 +8,7 @@ from app.services.gamification.competitions import (
     comp_period_key, compute_comp_rows, snapshot_competitions,
 )
 from app.services.gamification.boards import reconcile_deposits
+from app.services.settings_store import save_gamification_settings, invalidate_gamification_cache
 
 UTC = timezone.utc
 T0 = datetime(2026, 8, 31, 0, 0, tzinfo=UTC)
@@ -159,15 +160,23 @@ def test_return_board_min_baseline_floor_gate(db_session):
 
 def test_win_rate_net_losing_excluded_despite_high_win_rate(db_session):
     """win_rate 榜第二道闸：sum(profit) > 0。20 笔、16 胜 4 负但小赢大亏、净亏损——
-    即使胜率高达 80% 也不该上榜。"""
+    胜率高达 80% 也不该上榜。这道闸 2026-09-04 起是可配开关（默认关，与周期榜
+    共用同一个 board_gates），所以要显式打开才生效；默认关时该账户照常上榜。"""
     comp = _comp(db_session, metric="win_rate")
     u = _user(db_session, "wrloss@t.co"); _acct(db_session, u, "A", balance=2000.0)
     _baseline(db_session, comp, u, "A", balance=2000.0)
     _participant(db_session, comp, u, "A")
     _mk(db_session, u, "A", 16, 4, win_p=1.0, loss_p=-10.0)    # 16*1 - 4*10 = -24 < 0
 
-    rows = compute_comp_rows(db_session, comp)
-    assert {r["login"] for r in rows} == set()
+    invalidate_gamification_cache()
+    assert {r["login"] for r in compute_comp_rows(db_session, comp)} == {"A"}   # 默认关：照常上榜
+    save_gamification_settings(db_session, {"winrate_require_profit": True})
+    db_session.commit(); invalidate_gamification_cache()
+    try:
+        assert {r["login"] for r in compute_comp_rows(db_session, comp)} == set()
+    finally:
+        save_gamification_settings(db_session, {"winrate_require_profit": False})
+        db_session.commit(); invalidate_gamification_cache()
 
 
 def test_snapshot_two_running_comps_both_scored(db_session):

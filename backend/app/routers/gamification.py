@@ -262,6 +262,7 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
             "minTradesReturn": gates["min_trades_return"],
             "minTradesWinrate": gates["min_trades_winrate"],
             "minBaselineUsd": gates["min_baseline_usd"],
+            "winrateRequireProfit": gates["winrate_require_profit"],
         },
     }
     if period_start is not None:
@@ -484,6 +485,7 @@ _SETTINGS_KEY_MAP = {
     "min_baseline_usd": "minBaselineUsd",
     "min_trades_return": "minTradesReturn",
     "min_trades_winrate": "minTradesWinrate",
+    "winrate_require_profit": "winrateRequireProfit",
 }
 
 
@@ -527,6 +529,8 @@ def admin_patch_settings(body: GamificationSettingsPatchIn, db: Session = Depend
         if body.minTradesWinrate is None or body.minTradesWinrate < 1:
             raise HTTPException(400, "入榜笔数门槛需至少为 1 / Trade-count gate must be at least 1")
         patch["min_trades_winrate"] = int(body.minTradesWinrate)
+    if "winrateRequireProfit" in sent:
+        patch["winrate_require_profit"] = bool(body.winrateRequireProfit)
     if patch:
         save_gamification_settings(db, patch)
         db.commit()

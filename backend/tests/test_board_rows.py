@@ -69,12 +69,21 @@ def test_winrate_board_two_gates(db_session):
     _mk(db_session, u, "A", 13, 7)
     wr = {r["login"]: r for r in compute_board_rows(db_session, PK)["win_rate"]}
     assert abs(wr["A"]["score"] - 13 / 20) < 1e-9
-    # 高胜率但净亏：小赢大亏 → 拦下
+    # 高胜率但净亏：小赢大亏。盈亏正闸默认关（2026-09-04 起可配），所以默认上榜；
+    # 打开 winrate_require_profit 才拦下。
     u2 = _user(db_session, "w2@t.co"); _acct(db_session, u2, "B")
     ensure_baselines(db_session, PK, T0)
     _mk(db_session, u2, "B", 16, 4, win_p=1.0, loss_p=-10.0)   # 胜率 80% 净 -24
     wr2 = {r["login"] for r in compute_board_rows(db_session, PK)["win_rate"]}
-    assert "B" not in wr2
+    assert "B" in wr2                                          # 默认：不拦净亏
+    save_gamification_settings(db_session, {"winrate_require_profit": True})
+    db_session.commit(); invalidate_gamification_cache()
+    try:
+        wr3 = {r["login"] for r in compute_board_rows(db_session, PK)["win_rate"]}
+        assert "B" not in wr3 and "A" in wr3                   # 打开后：净亏被拦，盈利照常
+    finally:
+        save_gamification_settings(db_session, {"winrate_require_profit": False})
+        db_session.commit(); invalidate_gamification_cache()
 
 
 def test_taken_at_excludes_prior_closes(db_session):
@@ -155,8 +164,8 @@ def test_configurable_return_gate_lets_single_trade_through(db_session):
 
 def test_configurable_winrate_gate_lets_two_trades_through(db_session):
     """min_trades_winrate 调到 2：过去硬编码 20 笔起步，两笔正盈利也能上胜率榜；
-    盈亏为正这道闸不受影响——净亏账户即使笔数够也依旧被挡下。"""
-    save_gamification_settings(db_session, {"min_trades_winrate": 2})
+    同时打开 winrate_require_profit，验证两道闸各管各的——笔数够但净亏仍被挡下。"""
+    save_gamification_settings(db_session, {"min_trades_winrate": 2, "winrate_require_profit": True})
     db_session.commit(); invalidate_gamification_cache()
     try:
         u = _user(db_session, "cfg2@t.co"); _acct(db_session, u, "A", balance=2000.0)
@@ -165,15 +174,27 @@ def test_configurable_winrate_gate_lets_two_trades_through(db_session):
         wr = {r["login"]: r for r in compute_board_rows(db_session, PK)["win_rate"]}
         assert "A" in wr and wr["A"]["sample"] == 2 and wr["A"]["score"] == 1.0
 
-        # 盈亏为正这道闸依旧生效：笔数够（2 笔）但净亏 → 不上榜
+        # 盈亏正闸打开时依旧生效：笔数够（2 笔）但净亏 → 不上榜
         u2 = _user(db_session, "cfg3@t.co"); _acct(db_session, u2, "B", balance=2000.0)
         ensure_baselines(db_session, PK, T0)
         _mk(db_session, u2, "B", 1, 1, win_p=1.0, loss_p=-10.0)   # 1 胜 1 负，净 -9
         wr2 = {r["login"] for r in compute_board_rows(db_session, PK)["win_rate"]}
         assert "B" not in wr2
     finally:
-        save_gamification_settings(db_session, {"min_trades_winrate": 20})
+        save_gamification_settings(db_session, {"min_trades_winrate": 20,
+                                                "winrate_require_profit": False})
         db_session.commit(); invalidate_gamification_cache()
+
+
+def test_winrate_profit_gate_defaults_off(db_session):
+    """盈亏正闸默认关（2026-09-04 产品决定）：净亏账户笔数够就能上胜率榜。
+    这条钉住"默认值"本身——上面那条测的是开关打开后的行为。"""
+    invalidate_gamification_cache()
+    u = _user(db_session, "wrdef@t.co"); _acct(db_session, u, "A", balance=2000.0)
+    ensure_baselines(db_session, PK, T0)
+    _mk(db_session, u, "A", 16, 4, win_p=1.0, loss_p=-10.0)    # 胜率 80%，净 -24
+    wr = {r["login"]: r for r in compute_board_rows(db_session, PK)["win_rate"]}
+    assert "A" in wr and abs(wr["A"]["score"] - 0.8) < 1e-9
 
 
 def test_unphotographed_account_does_not_leak_into_sibling_account(db_session):

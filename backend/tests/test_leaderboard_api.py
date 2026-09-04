@@ -98,18 +98,22 @@ def test_payload_gates_reflect_admin_settings(db_session):
     invalidate_gamification_cache()
     u = _user(db_session, "gate1@t.co")
     p = build_leaderboard_payload(db_session, u, "return_pct", "2026-W36")
-    assert p["gates"] == {"minTradesReturn": 5, "minTradesWinrate": 20, "minBaselineUsd": 500.0}
+    assert p["gates"] == {"minTradesReturn": 5, "minTradesWinrate": 20,
+                          "minBaselineUsd": 500.0, "winrateRequireProfit": False}
 
     save_gamification_settings(db_session, {
         "min_trades_return": 1, "min_trades_winrate": 2, "min_baseline_usd": 50.0,
+        "winrate_require_profit": True,
     })
     db_session.commit(); invalidate_gamification_cache()
     try:
         p2 = build_leaderboard_payload(db_session, u, "win_rate", "2026-W36")
-        assert p2["gates"] == {"minTradesReturn": 1, "minTradesWinrate": 2, "minBaselineUsd": 50.0}
+        assert p2["gates"] == {"minTradesReturn": 1, "minTradesWinrate": 2,
+                               "minBaselineUsd": 50.0, "winrateRequireProfit": True}
     finally:
         save_gamification_settings(db_session, {
             "min_trades_return": 5, "min_trades_winrate": 20, "min_baseline_usd": 500.0,
+            "winrate_require_profit": False,
         })
         db_session.commit(); invalidate_gamification_cache()
 

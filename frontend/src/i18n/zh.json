@@ -1991,6 +1991,9 @@
                "minTradesReturn": "收益榜最低笔数",
                "minTradesWinrate": "胜率榜最低笔数",
                "minTradesHint": "内测期可临时调低门槛，方便观察榜单效果；正式对用户开放前请改回默认值（收益榜 5 笔 / 胜率榜 20 笔）。",
+               "winrateRequireProfit": "胜率榜要求本期盈亏为正",
+               "gateOn": "已启用", "gateOff": "已关闭",
+               "winrateRequireProfitHint": "开启后，本期净亏损的账户即使胜率再高也不上胜率榜（小赢大亏刷不出名次）。内测期样本小，建议先关；正式公开前打开。",
                "confirmOpenBoard": "开放后榜单对全体用户可见，确认开放？",
                "confirmOpenCompetitions": "开放后比赛对全体用户可见，确认开放？",
                "pickBoard": "选择榜单", "pickPeriod": "选择周期" }

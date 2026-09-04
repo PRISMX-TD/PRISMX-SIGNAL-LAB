@@ -176,6 +176,7 @@ class GamificationSettingsPatchIn(BaseModel):
     minBaselineUsd: float | None = None
     minTradesReturn: int | None = None
     minTradesWinrate: int | None = None
+    winrateRequireProfit: bool | None = None
 
 
 class CompetitionCreateIn(BaseModel):

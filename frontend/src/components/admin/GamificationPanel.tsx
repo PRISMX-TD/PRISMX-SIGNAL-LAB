@@ -189,6 +189,7 @@ export default function GamificationPanel() {
   const [minTradesReturnDraft, setMinTradesReturnDraft] = useState('')
   const [minTradesWinrateDraft, setMinTradesWinrateDraft] = useState('')
   const [savingTradeGates, setSavingTradeGates] = useState(false)
+  const [savingWrProfit, setSavingWrProfit] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -312,6 +313,22 @@ export default function GamificationPanel() {
 
   const tradeGatesDirty = minTradesReturnDirty || minTradesWinrateDirty
   const tradeGatesValid = minTradesReturnValid && minTradesWinrateValid
+
+  // 胜率榜盈亏正闸：单开关即存，不跟着「保存」按钮走——它没有草稿态，
+  // 与三个可见性开关同一种交互。
+  // The win-rate profit gate saves on toggle rather than via the Save button: it has
+  // no draft state, matching how the three visibility switches behave.
+  const toggleWrProfit = async (next: boolean) => {
+    setSavingWrProfit(true)
+    setSettingsError(null)
+    try {
+      setSettings(await adminApi.updateGamificationSettings({ winrateRequireProfit: next }))
+    } catch (err) {
+      setSettingsError(err instanceof Error ? localizeApiError(err.message) : 'Save failed')
+    } finally {
+      setSavingWrProfit(false)
+    }
+  }
 
   const saveTradeGates = async () => {
     if (!tradeGatesDirty || !tradeGatesValid) return
@@ -506,6 +523,21 @@ export default function GamificationPanel() {
                 {savingTradeGates ? t('common.loading') : t('common.save')}
               </button>
               <p className="w-full text-xs text-neutral-500">{t('leaderboard.admin.minTradesHint')}</p>
+            </div>
+
+            {/* 盈亏正闸：默认关（内测期样本小，开着几乎没人上胜率榜）；公开前建议打开。 */}
+            {/* Profit gate: off by default (tiny beta samples leave the win-rate board
+                almost empty when it's on); recommended back on before going public. */}
+            <div className="border-t border-white/5 pt-3">
+              <SettingsToggleRow
+                label={t('leaderboard.admin.winrateRequireProfit')}
+                checked={settings?.winrateRequireProfit ?? false}
+                saving={savingWrProfit}
+                onLabel={t('leaderboard.admin.gateOn')}
+                offLabel={t('leaderboard.admin.gateOff')}
+                onChange={toggleWrProfit}
+              />
+              <p className="mt-2 text-xs text-neutral-500">{t('leaderboard.admin.winrateRequireProfitHint')}</p>
             </div>
           </div>
         )}

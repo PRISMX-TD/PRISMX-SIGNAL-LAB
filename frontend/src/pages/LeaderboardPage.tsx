@@ -47,7 +47,8 @@ const PERIODS: Period[] = ['week', 'month']
 // DEFAULT_GATES is only a placeholder before the first payload arrives, so
 // the loading phase never flashes the raw "{{n}}" token; once data lands it
 // fully defers to the real values, never showing a stale or wrong number.
-const DEFAULT_GATES = { minTradesReturn: 5, minTradesWinrate: 20, minBaselineUsd: 500 }
+const DEFAULT_GATES = { minTradesReturn: 5, minTradesWinrate: 20, minBaselineUsd: 500,
+                        winrateRequireProfit: false }
 
 // 骨架尺寸按真实版式在浏览器里量过（桌面 ≥ 640px 三张领奖台卡、手机领奖台面板、
 // 我的名次卡），骨架与内容等高，换入时页面不跳。
@@ -816,7 +817,12 @@ export default function LeaderboardPage() {
       ]
     : [
         { text: t('leaderboard.gates.minTradesWinrate', { n: gates.minTradesWinrate }), quantitative: true },
-        { text: t('leaderboard.gates.positive'), quantitative: true },
+        // 盈亏正闸是可配的（管理端默认关）——关着的时候这条榜规不成立，不能挂在页面上。
+        // The profit gate is configurable (off by default in admin); while it's off the
+        // rule isn't true, so the chip must not be shown.
+        ...(gates.winrateRequireProfit
+          ? [{ text: t('leaderboard.gates.positive'), quantitative: true }]
+          : []),
         { text: t('leaderboard.gates.identity'), quantitative: false },
       ]
 

@@ -17,13 +17,29 @@ def test_settings_roundtrip_partial(db_session):
     s = admin_get_settings(db=db_session)
     assert s == {"userVisible": False, "leaderboardVisible": False,
                  "competitionsVisible": False, "minBaselineUsd": 500.0,
-                 "minTradesReturn": 5, "minTradesWinrate": 20}
+                 "minTradesReturn": 5, "minTradesWinrate": 20,
+                 "winrateRequireProfit": False}
     admin_patch_settings(GamificationSettingsPatchIn(leaderboardVisible=True), db=db_session)
     invalidate_gamification_cache()
     got = get_gamification_settings(db_session)
     assert got["leaderboard_visible"] is True and got["user_visible"] is False
     assert got["min_baseline_usd"] == 500.0        # 未传字段不动
     assert got["min_trades_return"] == 5 and got["min_trades_winrate"] == 20
+    assert got["winrate_require_profit"] is False
+
+
+def test_winrate_require_profit_roundtrip(db_session):
+    """胜率榜盈亏正闸：管理端可翻，来回一趟都要落库、其余键不受影响。"""
+    invalidate_gamification_cache()
+    out = admin_patch_settings(GamificationSettingsPatchIn(winrateRequireProfit=True), db=db_session)
+    assert out["winrateRequireProfit"] is True
+    invalidate_gamification_cache()
+    got = get_gamification_settings(db_session)
+    assert got["winrate_require_profit"] is True
+    assert got["min_trades_winrate"] == 20        # 未传字段不动
+    # 复位，免得污染同库跑的其他测试（同本文件其余设置测试的写法）
+    admin_patch_settings(GamificationSettingsPatchIn(winrateRequireProfit=False), db=db_session)
+    invalidate_gamification_cache()
 
 
 def test_min_baseline_validation(db_session):
