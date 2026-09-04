@@ -579,6 +579,7 @@ export default function GamificationPanel() {
                 <tr className="text-neutral-500">
                   <th className="py-1.5 pr-4 font-medium">{t('leaderboard.colRank')}</th>
                   <th className="py-1.5 pr-4 font-medium">{t('leaderboard.colTrader')}</th>
+                  <th className="py-1.5 pr-4 font-medium">{t('leaderboard.admin.colIdentity')}</th>
                   <th className="py-1.5 pr-4 font-medium">{t('leaderboard.colAccount')}</th>
                   <th className="py-1.5 pr-4 font-medium">{t(`leaderboard.colScore.${previewBoard}`)}</th>
                   <th className="py-1.5 font-medium">{t('leaderboard.colSample')}</th>
@@ -589,6 +590,17 @@ export default function GamificationPanel() {
                   <tr key={row.rank} className="border-t border-white/5">
                     <td className="num py-1.5 pr-4 text-neutral-300">{row.rank}</td>
                     <td className="py-1.5 pr-4 text-neutral-200">{row.displayName}</td>
+                    {/* 管理端看真实身份（后端 reveal=True 下发）：昵称原文优先，没设昵称
+                        就显示邮箱，两者都缺才回落打码名。
+                        Admins see the real identity (backend sends it with reveal=True):
+                        raw nickname first, email when no nickname is set, falling back to
+                        the masked name only if both are absent. */}
+                    <td className="py-1.5 pr-4 font-mono text-[11px] text-neutral-400">
+                      <span className="block truncate">{row.nickname || row.email || row.displayName}</span>
+                      {row.nickname && row.email && (
+                        <span className="block truncate text-neutral-600">{row.email}</span>
+                      )}
+                    </td>
                     <td className="num py-1.5 pr-4 text-neutral-400">{row.login}</td>
                     <td className="num py-1.5 pr-4 text-neutral-100">{fmtScorePct(row.score)}</td>
                     <td className="num py-1.5 text-neutral-500">{row.sample}</td>

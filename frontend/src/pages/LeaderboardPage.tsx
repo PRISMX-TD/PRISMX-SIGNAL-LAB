@@ -209,7 +209,6 @@ function PodiumCard({ row, board, maxAbs }: { row: LeaderboardRow; board: Leader
         >
           {fmtScore(board, row.score)}
         </b>
-        <small className="num text-xs text-neutral-500">{t('leaderboard.sampleCount', { n: row.sample })}</small>
       </div>
       <div className="relative mt-3.5 h-[3px] overflow-hidden rounded-full bg-white/[0.06]">
         <GrowBar
@@ -231,7 +230,7 @@ function ListRow({ row, board, maxAbs }: { row: LeaderboardRow; board: Leaderboa
 
   return (
     <div
-      className={`lb-row relative grid grid-cols-[40px_minmax(0,1fr)_84px] items-center gap-2 border-t border-white/[0.08] px-3 py-3 md:grid-cols-[56px_minmax(0,1.4fr)_120px_minmax(0,1.2fr)_88px] md:gap-3 md:px-[18px] ${row.isSelf ? 'bg-prism-600/[0.07]' : ''}`}
+      className={`lb-row relative grid grid-cols-[40px_minmax(0,1fr)_84px] items-center gap-2 border-t border-white/[0.08] px-3 py-3 md:grid-cols-[56px_minmax(0,1.4fr)_120px_minmax(0,1.2fr)] md:gap-3 md:px-[18px] ${row.isSelf ? 'bg-prism-600/[0.07]' : ''}`}
     >
       {row.isSelf && <span aria-hidden className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-[3px] bg-prism-400" />}
       <span className={`num text-[15px] ${row.isSelf ? 'font-semibold text-neutral-100' : 'text-neutral-400'}`}>
@@ -250,12 +249,6 @@ function ListRow({ row, board, maxAbs }: { row: LeaderboardRow; board: Leaderboa
               <span className="tag shrink-0 bg-prism-600/25 text-[11px] text-prism-300">{t('leaderboard.youTag')}</span>
             )}
           </div>
-          {/* 手机端隐藏了账户号列和幅度条，笔数搬到名字下面这行补上；桌面端
-              自己有独立列显示笔数，这行只在手机端出现。
-              Mobile hides the account column and the magnitude bar, so the trade
-              count moves to this line under the name instead; desktop already
-              has its own column for it, so this line only shows on mobile. */}
-          <div className="text-[11px] text-neutral-500 md:hidden">{t('leaderboard.sampleCount', { n: row.sample })}</div>
         </div>
       </div>
       <span className="num hidden text-[13px] text-neutral-500 md:block">{row.login}</span>
@@ -283,7 +276,6 @@ function ListRow({ row, board, maxAbs }: { row: LeaderboardRow; board: Leaderboa
       <b className={`num text-right text-sm font-semibold md:hidden ${scoreColorClass(board, row.score)}`}>
         {fmtScore(board, row.score)}
       </b>
-      <span className="num hidden text-right text-[13px] text-neutral-500 md:block">{row.sample}</span>
     </div>
   )
 }
@@ -303,7 +295,6 @@ function ListRow({ row, board, maxAbs }: { row: LeaderboardRow; board: Leaderboa
 // reusing PODIUM_TINT[1]'s gold — the panel itself has no per-rank field
 // color, so the spot is the only cue marking "this is the champion slot".
 function PodiumColumnMobile({ row, board, center }: { row: LeaderboardRow; board: LeaderboardBoard; center: boolean }) {
-  const { t } = useTranslation()
   return (
     <div className={`relative flex min-w-0 flex-col items-center gap-1 text-center ${center ? '-translate-y-2' : 'pt-4'}`}>
       {center && (
@@ -325,7 +316,6 @@ function PodiumColumnMobile({ row, board, center }: { row: LeaderboardRow; board
       >
         {fmtScore(board, row.score)}
       </b>
-      <small className="num text-[10.5px] text-neutral-500">{t('leaderboard.sampleCount', { n: row.sample })}</small>
     </div>
   )
 }
@@ -358,7 +348,6 @@ function ListRowMobile({ row, board }: { row: LeaderboardRow; board: Leaderboard
               <span className="tag shrink-0 bg-prism-600/25 text-[11px] text-prism-300">{t('leaderboard.youTag')}</span>
             )}
           </div>
-          <div className="text-[11px] text-neutral-500">{t('leaderboard.sampleCount', { n: row.sample })}</div>
         </div>
       </div>
       <b className={`num text-right text-[13px] font-semibold ${scoreColorClass(board, row.score)}`}>{fmtScore(board, row.score)}</b>
@@ -413,7 +402,6 @@ function MyRankBarMobile({ data, board }: { data: LeaderboardPayload; board: Lea
         <b className={`num shrink-0 text-sm font-semibold ${scoreColorClass(board, data.me.score)}`}>
           {fmtScore(board, data.me.score)}
         </b>
-        <span className="shrink-0 text-[11px] text-neutral-500">{t('leaderboard.sampleCount', { n: data.me.sample })}</span>
         {cta && <span className="ml-auto min-w-0 truncate text-right text-xs text-neutral-400">{cta}</span>}
       </div>,
       document.body,
@@ -499,10 +487,6 @@ function MyRankCard({ data, board, rankThreshold }: { data: LeaderboardPayload; 
             <b className={`num text-base font-semibold ${scoreColorClass(board, data.me.score)}`}>
               {fmtScore(board, data.me.score)}
             </b>
-          </div>
-          <div>
-            <span className="block text-[11px] uppercase tracking-wider text-neutral-500">{t('leaderboard.colSample')}</span>
-            <b className="num text-base font-semibold text-neutral-100">{t('leaderboard.sampleCount', { n: data.me.sample })}</b>
           </div>
           <div>
             <span className="block text-[11px] uppercase tracking-wider text-neutral-500">{t('leaderboard.colAccount')}</span>
@@ -675,12 +659,11 @@ function BoardBody({
               ≥ 640px: the original header row + ListRow, untouched. */}
           {listRows.length > 0 && (
             <section className="glass hidden overflow-hidden p-0 sm:block">
-              <div className="grid grid-cols-[40px_minmax(0,1fr)_84px] gap-2 px-3 pb-2 pt-2.5 text-[11px] uppercase tracking-wider text-neutral-500 md:grid-cols-[56px_minmax(0,1.4fr)_120px_minmax(0,1.2fr)_88px] md:gap-3 md:px-[18px]">
+              <div className="grid grid-cols-[40px_minmax(0,1fr)_84px] gap-2 px-3 pb-2 pt-2.5 text-[11px] uppercase tracking-wider text-neutral-500 md:grid-cols-[56px_minmax(0,1.4fr)_120px_minmax(0,1.2fr)] md:gap-3 md:px-[18px]">
                 <span>{t('leaderboard.colRank')}</span>
                 <span>{t('leaderboard.colTrader')}</span>
                 <span className="hidden md:block">{t('leaderboard.colAccount')}</span>
                 <span>{t(`leaderboard.colScore.${board}`)}</span>
-                <span className="hidden text-right md:block">{t('leaderboard.colSample')}</span>
               </div>
               {listRows.map((row) => (
                 <ListRow key={row.rank} row={row} board={board} maxAbs={maxAbs} />

@@ -68,7 +68,8 @@ def require_leaderboard_visible(db: Session = Depends(get_db),
     return user
 
 
-def build_leaderboard_payload(db: Session, viewer: User, board: str, period: str) -> dict:
+def build_leaderboard_payload(db: Session, viewer: User, board: str, period: str,
+                              reveal: bool = False) -> dict:
     """榜单页负载（设计 §4.3）：board/period 校验后转交 `build_board_rows_payload`。
 
     `period` 既接受 "week"/"month"（解析为以当前 UTC 时间算出的进行中周期
@@ -85,10 +86,11 @@ def build_leaderboard_payload(db: Session, viewer: User, board: str, period: str
         if not _PERIOD_KEY_RE.match(period or ""):
             raise HTTPException(400, "周期格式错误 / Invalid period")
         period_key = period
-    return build_board_rows_payload(db, viewer, board, period_key)
+    return build_board_rows_payload(db, viewer, board, period_key, reveal=reveal)
 
 
-def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: str) -> dict:
+def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: str,
+                              reveal: bool = False) -> dict:
     """行构造（设计 §4.3）：打码、isSelf、me 块——不做 board/period 格式校验。
 
     从 `build_leaderboard_payload` 中抽出，供两类调用方共用：一是该函数自己
@@ -122,7 +124,7 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
     rows = []
     for r in top_rows:
         u = users_by_id.get(r.user_id)
-        rows.append({
+        row = {
             "rank": r.rank,
             "displayName": identity.display_name(
                 u.nickname if u else None, u.email if u else None,
@@ -132,7 +134,22 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
             "sample": r.sample,
             "isSelf": r.user_id == viewer.id,
             "equippedBadge": u.equipped_badge if u else None,
-        })
+        }
+        # reveal 只由管理端入口传 True（见 admin_leaderboard）。用户端 §4.3 的
+        # 契约不变：不下发 user_id、昵称一律打码——这三个字段永远不会出现在
+        # /gamification/leaderboard 的响应里，管理员看真实身份是运营需要，
+        # 与"对用户打码"不冲突，但两条路径必须泾渭分明。
+        # reveal is passed True only by the admin entry point (see
+        # admin_leaderboard). The user-facing §4.3 contract is unchanged: no
+        # user_id, names always masked — these three fields never appear in a
+        # /gamification/leaderboard response. Admins seeing real identities is an
+        # operational need and doesn't conflict with masking for users, but the
+        # two paths must stay strictly separate.
+        if reveal:
+            row["userId"] = r.user_id
+            row["nickname"] = u.nickname if u else None
+            row["email"] = u.email if u else None
+        rows.append(row)
 
     me = None
     my_rows = [r for r in all_rows if r.user_id == viewer.id]
@@ -545,5 +562,11 @@ def admin_leaderboard(board: str, period: str, db: Session = Depends(get_db),
     开关限制（该开关只挡用户端 /gamification/leaderboard）。
     Admin leaderboard preview: the requesting admin is the viewer, and this
     is not gated by leaderboard_visible (that gate only guards the
-    user-facing /gamification/leaderboard)."""
-    return build_leaderboard_payload(db, admin, board, period)
+    user-facing /gamification/leaderboard).
+
+    `reveal=True`：管理端看真实身份（user_id / 昵称原文 / 邮箱），不打码——
+    运营需要知道榜上是谁。用户端那条路径永远不传这个参数。
+    `reveal=True`: admins see real identities (user_id / raw nickname / email),
+    unmasked — operations needs to know who is on the board. The user-facing
+    path never passes this flag."""
+    return build_leaderboard_payload(db, admin, board, period, reveal=True)

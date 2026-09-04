@@ -1999,7 +1999,7 @@
                "winrateRequireProfitHint": "When on, an account that is net-negative for the period stays off the win-rate board however high its rate. Samples are tiny during the beta, so leave it off for now and turn it on before going public.",
                "confirmOpenBoard": "Once opened, the leaderboard is visible to all users. Confirm opening?",
                "confirmOpenCompetitions": "Once opened, competitions are visible to all users. Confirm opening?",
-               "pickBoard": "Pick a board", "pickPeriod": "Pick a period" }
+               "pickBoard": "Pick a board", "colIdentity": "Real identity", "pickPeriod": "Pick a period" }
   },
   "competition": {
     "title": "Competitions",

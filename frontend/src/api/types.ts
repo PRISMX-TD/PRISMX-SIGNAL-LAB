@@ -1130,9 +1130,20 @@ export interface LeaderboardRow {
   displayName: string
   login: string
   score: number
+  // sample 仍在负载里（排序的次级键、未上榜进度都要用），只是榜单页不再展示。
+  // sample stays in the payload (it is the sort tiebreaker and feeds the
+  // not-ranked progress block); the board just no longer displays it.
   sample: number
   isSelf: boolean
   equippedBadge: string | null
+  // 以下三个只在管理端预览（GET /admin/gamification/leaderboard）里出现——
+  // 用户端响应永远不带它们（昵称打码、不下发 user_id 是 §4.3 的契约）。
+  // These three appear only in the admin preview (GET
+  // /admin/gamification/leaderboard); the user-facing response never carries
+  // them (masked names and no user_id are the §4.3 contract).
+  userId?: string
+  nickname?: string | null
+  email?: string
 }
 
 // GET /gamification/leaderboard 、GET /admin/gamification/leaderboard 的完整
