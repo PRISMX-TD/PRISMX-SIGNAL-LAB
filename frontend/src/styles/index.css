@@ -5604,14 +5604,18 @@ body {
   height: 1px;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
 }
-/* 场景随陀螺仪微倾（±8° / ±12°），台座与勋章之间产生视差。
-   The scene tilts with the gyroscope (±8° / ±12°) for parallax between plinth and badge. */
+/* 场景随陀螺仪平移 + 微倾（±14px / ±12° / ±16°），台座与勋章之间产生视差——陀螺仪只做这件事，
+   不再叠反光（真机上试过不好看）。
+   The scene shifts and tilts with the gyroscope (±14px / ±12° / ±16°) for parallax between
+   plinth and badge — that is all the gyroscope does now; the sheen overlay was tried and dropped. */
 .ach-scene {
   position: relative;
   width: 100%;
   padding-bottom: 84px;
   transform-style: preserve-3d;
-  transform: rotateX(calc(var(--gy, 0) * -12deg)) rotateY(calc(var(--gx, 0) * 16deg));
+  transform:
+    translate3d(calc(var(--gx, 0) * 14px), calc(var(--gy, 0) * -10px), 0)
+    rotateX(calc(var(--gy, 0) * -12deg)) rotateY(calc(var(--gx, 0) * 16deg));
   transition: transform 0.08s linear;
 }
 .ach-trio {
@@ -5659,52 +5663,6 @@ body {
   filter: drop-shadow(0 26px 30px rgba(0, 0, 0, 0.6));
 }
 .ach-hero svg { width: 100%; height: 100%; }
-/* 陀螺仪反光，三层叠在勋章上，陀螺仪没开时 --gyro-on 为 0 整组不可见：
-   ① .ach-sheen：一道沿光线方位角 --la 排布的反光带，随 --gx/--gy 横扫过表面（背景放大到
-      260% 再用 background-position 推，带子才有足够行程），下面垫一团软光；screen 混合，
-      圆形遮罩挡住背景，浓淡跟倾斜强度 --gi。
-   ② .ach-glint：勋章边缘一小段亮弧，conic 渐变从 --la 起算、环形遮罩只留边缘——金属边
-      "咬"住光的那一下。
-   ③ 整枚亮度随 --gi 微升（见下方 .ach-3d-c .ach-hero），转向光源时整体更亮。
-   Gyroscope sheen, three layers over the badge, invisible until --gyro-on is 1:
-   ① .ach-sheen: a band laid along the light azimuth --la, swept across the face by
-      --gx/--gy (background scaled to 260% and pushed via background-position so the
-      band has travel), over a soft glow; screen-blended, circular mask keeps it off the
-      background, density follows tilt strength --gi.
-   ② .ach-glint: a short bright arc on the rim — a conic gradient starting at --la under
-      a ring mask — the moment a metal edge catches the light.
-   ③ Whole-badge brightness rises slightly with --gi (see .ach-3d-c .ach-hero below). */
-.ach-sheen {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: calc(var(--gyro-on, 0) * (0.35 + var(--gi, 0) * 0.65));
-  background:
-    linear-gradient(calc(var(--la, 45) * 1deg + 90deg),
-      transparent 38%, rgba(255, 255, 255, 0.10) 45%, rgba(255, 255, 255, 0.62) 50%,
-      rgba(255, 255, 255, 0.10) 55%, transparent 62%),
-    radial-gradient(circle at calc(50% + var(--gx, 0) * 40%) calc(50% + var(--gy, 0) * -40%),
-      rgba(255, 255, 255, 0.28), transparent 55%);
-  background-size: 260% 260%, 100% 100%;
-  background-position: calc(50% + var(--gx, 0) * 80%) calc(50% + var(--gy, 0) * -80%), 0 0;
-  mix-blend-mode: screen;
-  -webkit-mask-image: radial-gradient(circle, #000 57%, transparent 66%);
-  mask-image: radial-gradient(circle, #000 57%, transparent 66%);
-}
-.ach-glint {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border-radius: 50%;
-  opacity: calc(var(--gyro-on, 0) * (0.25 + var(--gi, 0) * 0.75));
-  background: conic-gradient(from calc(var(--la, 45) * -1deg + 60deg),
-    transparent 0 62%, rgba(255, 255, 255, 0.15) 70%, rgba(255, 255, 255, 0.85) 76%,
-    rgba(255, 255, 255, 0.15) 82%, transparent 90% 100%);
-  mix-blend-mode: screen;
-  -webkit-mask-image: radial-gradient(circle, transparent 60%, #000 62.5%, #000 66%, transparent 68.5%);
-  mask-image: radial-gradient(circle, transparent 60%, #000 62.5%, #000 66%, transparent 68.5%);
-}
-.ach-3d-c .ach-hero { filter: drop-shadow(0 26px 30px rgba(0, 0, 0, 0.6)) brightness(calc(1 + var(--gyro-on, 0) * var(--gi, 0) * 0.14)); }
 .ach-plinth {
   position: absolute;
   left: 50%;
