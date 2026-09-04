@@ -5445,7 +5445,6 @@ body {
    Grid items default to min-width:auto; the three-badge row would widen the column past the container
    (mobile clipped the right badge and the rail's last node). */
 .ach-pedestal { min-width: 0; }
-.ach-trio { max-width: 100%; }
 .ach-eyebrow {
   font-size: 11px;
   letter-spacing: 0.16em;
@@ -5564,6 +5563,12 @@ body {
   place-items: end center;
   perspective: 900px;
   overflow: hidden;
+  /* 转盘几何：勋章一律按 236 渲染，C 位 1:1，副戴按 --side 缩放；--gx/--gy 由陀螺仪写入。
+     Turntable geometry: badges render at 236, the centre at 1:1, sides scaled by --side;
+     --gx/--gy are written by the gyroscope. */
+  --hero: 236px;
+  --side: 0.39;
+  --offset: 0.78;
 }
 .ach-cone {
   position: absolute;
@@ -5599,22 +5604,78 @@ body {
   height: 1px;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
 }
-.ach-trio {
+/* 场景随陀螺仪微倾（±8° / ±12°），台座与勋章之间产生视差。
+   The scene tilts with the gyroscope (±8° / ±12°) for parallax between plinth and badge. */
+.ach-scene {
   position: relative;
-  display: flex;
-  align-items: flex-end;
-  gap: 18px;
+  width: 100%;
   padding-bottom: 84px;
   transform-style: preserve-3d;
+  transform: rotateX(calc(var(--gy, 0) * -8deg)) rotateY(calc(var(--gx, 0) * 12deg));
+  transition: transform 0.25s ease-out;
 }
-/* 3D 摆位：副戴向中心转 26° 并后退一层（像唱片架），默认那枚左右轻摇 + 浮动。
-   3D placement: side badges turn 26° toward the centre and sit one layer back
-   (coverflow-style); the default one sways gently and floats. */
-.ach-3d { display: block; transform-style: preserve-3d; }
-.ach-3d-l { transform: translateZ(-70px) rotateY(26deg); }
-.ach-3d-r { transform: translateZ(-70px) rotateY(-26deg); }
-.ach-3d-c { animation: ach-sway 7s ease-in-out infinite; }
-/* 台座圆盘：压扁 72°，外盘一圈亮边、内盘一圈暗槛 / plinth discs flattened 72°, outer rim lit, inner step dark */
+.ach-trio {
+  position: relative;
+  width: 100%;
+  height: var(--hero);
+  transform-style: preserve-3d;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* 转盘上的三个位子：C 位居中原尺寸；左右两位平移到两侧、后退一层、向中心转 26°、
+   缩到 --side。位子换人时靠 transform 过渡转过去。
+   The three turntable slots: centre at full size; left/right shifted aside, set back a
+   layer, turned 26° toward the centre and scaled to --side. A change of occupant
+   transitions via transform. */
+.ach-3d {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--hero);
+  height: var(--hero);
+  margin: calc(var(--hero) / -2) 0 0 calc(var(--hero) / -2);
+  transform-style: preserve-3d;
+  transition: transform 0.65s var(--ease-out), filter 0.65s var(--ease-out);
+  will-change: transform;
+}
+.ach-3d-c { transform: translateZ(0); z-index: 2; }
+.ach-3d-l {
+  transform: translateX(calc(var(--hero) * var(--offset) * -1)) translateZ(-70px) rotateY(26deg) scale(var(--side));
+  filter: brightness(0.88);
+}
+.ach-3d-r {
+  transform: translateX(calc(var(--hero) * var(--offset))) translateZ(-70px) rotateY(-26deg) scale(var(--side));
+  filter: brightness(0.88);
+}
+/* 摇摆放在内层，MedalTilt 的行内 transform 才不会被动画压住
+   The sway lives on an inner layer so MedalTilt's inline transform isn't overridden by the animation */
+.ach-sway { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; }
+.ach-3d-c .ach-sway { animation: ach-sway 7s ease-in-out infinite; }
+.ach-hero {
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 26px 30px rgba(0, 0, 0, 0.6));
+}
+.ach-hero svg { width: 100%; height: 100%; }
+/* 陀螺仪反光：一团随 --gx/--gy 游走的高光，soft-light 叠在勋章上，圆形遮罩挡住背景。
+   陀螺仪没开时 --gyro-on 为 0，整层不可见。
+   Gyroscope sheen: a highlight that roams with --gx/--gy, soft-light over the badge, a
+   circular mask keeping it off the background. Invisible until --gyro-on is 1. */
+.ach-sheen {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: calc(var(--gyro-on, 0) * 0.9);
+  background: radial-gradient(
+    circle at calc(50% + var(--gx, 0) * 42%) calc(50% + var(--gy, 0) * -42%),
+    rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.14) 26%, transparent 56%);
+  mix-blend-mode: screen;
+  -webkit-mask-image: radial-gradient(circle, #000 58%, transparent 67%);
+  mask-image: radial-gradient(circle, #000 58%, transparent 67%);
+  transition: opacity 0.3s;
+}
 .ach-plinth {
   position: absolute;
   left: 50%;
@@ -5637,48 +5698,22 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: radial-gradient(circle, rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.12) 60%, transparent 75%);
 }
-.ach-hero {
-  display: block;
-  width: 236px;
-  height: 236px;
-  filter: drop-shadow(0 26px 30px rgba(0, 0, 0, 0.6));
-}
-.ach-side {
-  display: block;
-  width: 92px;
-  height: 92px;
-  margin-bottom: 10px;
-  filter: brightness(0.88) drop-shadow(0 12px 14px rgba(0, 0, 0, 0.55));
-}
-/* BadgeIcon 把 size 写成 svg 的 width/height 属性（桌面 236 / 92）；手机上外层缩小后，svg 必须跟着外层走，
-   否则 236px 的图从 168px 的框里溢出去，右边那枚被舞台裁掉。
-   BadgeIcon writes size as the svg's width/height attributes (236 / 92 on desktop); when the wrapper
-   shrinks on phones the svg must follow it, or a 236px drawing spills out of a 168px box and the
-   right-hand badge gets clipped by the stage. */
-.ach-hero svg, .ach-side svg { width: 100%; height: 100%; }
-/* 空槽位：虚线圈占着位置，邀请去戴 / empty slot: a dashed ring holding the place */
-.ach-slot { display: block; border-radius: 999px; border: 1px dashed rgba(255, 255, 255, 0.16); }
-.ach-slot-hero { width: 236px; height: 236px; }
-.ach-slot-side { width: 92px; height: 92px; margin-bottom: 10px; }
-.ach-slot-ghost { border-color: transparent; }
+/* 空位：虚线圈占着位置，邀请去戴 / empty slot: a dashed ring holding the place */
+.ach-slot { display: block; width: 100%; height: 100%; border-radius: 999px; border: 1px dashed rgba(255, 255, 255, 0.16); }
 .ach-refl {
   position: absolute;
   left: 0;
   right: 0;
   top: 100%;
-  margin-top: -78px;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  gap: 26px;
+  height: var(--hero);
   pointer-events: none;
   transform: scaleY(-1);
+  transform-style: preserve-3d;
   opacity: 0.42;
   filter: blur(1px);
-  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent 55%);
-  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent 55%);
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent 45%);
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent 45%);
 }
-.ach-refl .ach-3d-c { animation: none; }
 .ach-cap {
   position: absolute;
   left: 0;
@@ -5689,9 +5724,36 @@ body {
   color: #71717a;
 }
 .ach-cap b { display: block; margin-bottom: 3px; font-size: 15px; font-weight: 600; color: #f4f4f5; }
+.ach-cap-btn {
+  padding: 3px 10px;
+  border: 1px solid rgba(139, 108, 255, 0.45);
+  border-radius: 999px;
+  background: rgba(110, 66, 255, 0.16);
+  font-size: 11px;
+  color: #d9ceff;
+  cursor: pointer;
+}
+.ach-cap-btn:disabled { opacity: 0.5; cursor: default; }
 .ach-slots { display: inline-flex; gap: 6px; margin-left: 10px; vertical-align: middle; }
-.ach-slots i { width: 6px; height: 6px; border-radius: 999px; background: theme('colors.prism.400'); }
+.ach-slots i { width: 6px; height: 6px; border-radius: 999px; background: rgba(139, 108, 255, 0.45); transition: background var(--dur-base), transform var(--dur-base); }
+.ach-slots i.cur { background: theme('colors.prism.300'); transform: scale(1.25); }
 .ach-slots i.empty { background: transparent; border: 1px solid rgba(255, 255, 255, 0.25); }
+.ach-swipe-hint { display: none; margin-top: 4px; font-size: 10.5px; color: #52525b; }
+.ach-gyro-btn {
+  display: none;
+  margin: 8px auto 0;
+  padding: 5px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+  color: #a1a1aa;
+  cursor: pointer;
+}
+@media (hover: none) and (pointer: coarse) {
+  .ach-swipe-hint { display: block; }
+  .ach-gyro-btn { display: block; }
+}
 
 /* 小节标题：粗体名 + 浅色说明 + 右侧数字 / section header: bold name + muted note + right figure */
 .ach-sec-h {
@@ -5834,19 +5896,18 @@ body {
   .ach-stats > div { padding-right: 10px; }
   .ach-stats > div + div { padding-left: 10px; }
   .ach-title { font-size: 30px; }
-  .ach-pedestal { height: 332px; perspective: 700px; }
-  .ach-trio { gap: 10px; padding-bottom: 96px; }
-  .ach-refl { gap: 10px; opacity: 0.3; margin-top: -90px; }
-  .ach-3d-l { transform: translateZ(-60px) rotateY(30deg); }
-  .ach-3d-r { transform: translateZ(-60px) rotateY(-30deg); }
-  .ach-hero, .ach-slot-hero { width: 168px; height: 168px; }
-  .ach-side, .ach-slot-side { width: 56px; height: 56px; margin-bottom: 16px; }
+  /* 手机：C 位 168、副戴放大到 0.5（约 84px）并少偏一点，三枚都落在 303px 宽的舞台里。
+     Phones: centre 168, sides up to 0.5 (~84px) with a smaller offset, all three inside the 303px stage. */
+  .ach-pedestal { height: 344px; perspective: 700px; --hero: 168px; --side: 0.5; --offset: 0.7; }
+  .ach-scene { padding-bottom: 104px; }
+  .ach-3d-l { transform: translateX(calc(var(--hero) * var(--offset) * -1)) translateZ(-50px) rotateY(30deg) scale(var(--side)); }
+  .ach-3d-r { transform: translateX(calc(var(--hero) * var(--offset))) translateZ(-50px) rotateY(-30deg) scale(var(--side)); }
+  .ach-refl { opacity: 0.3; }
   .ach-plinth-outer { width: 250px; height: 250px; bottom: -43px; }
   .ach-plinth-inner { width: 176px; height: 176px; bottom: -6px; }
   .ach-cone { width: 320px; height: 250px; opacity: 0.55; }
   .ach-floor { width: 260px; bottom: 62px; }
   .ach-floorline { display: none; }
-  .ach-refl { margin-top: -58px; }
   .ach-rail b { font-size: 10px; }
   .ach-stats strong { font-size: 18px; }
   .ach-meter { flex-wrap: wrap; }
@@ -5855,7 +5916,8 @@ body {
   .ach-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ach-stage::before, .ach-cone, .ach-3d-c { animation: none; }
+  .ach-stage::before, .ach-cone, .ach-3d-c .ach-sway { animation: none; }
+  .ach-scene, .ach-3d { transition: none; }
 }
 
 .seg-tabs {

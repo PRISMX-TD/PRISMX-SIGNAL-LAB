@@ -1939,7 +1939,7 @@
     "equip": "Equip", "unequip": "Unequip", "notEarned": "Not earned",
     "equipSlots": { "setDefault": "Set as default", "isDefault": "Default", "full": "You can wear {{max}} at a time - unequip one first", "count": "{{n}} / {{max}} equipped", "onBoard": "The default one appears on the leaderboard" },
     "levelShort": { "novice": "Novice", "junior": "Junior", "elite": "Elite", "senior": "Senior", "chief": "Chief", "legend": "Legend" },
-    "stage": { "collection": "Collection", "collected": "Collected", "vault": "Badge Vault", "vaultHint": "Shelved by material · unearned badges show their outline and condition",
+    "stage": { "swipeHint": "Swipe to rotate", "gyroEnable": "Enable tilt reflections", "collection": "Collection", "collected": "Collected", "vault": "Badge Vault", "vaultHint": "Shelved by material · unearned badges show their outline and condition",
                "noEquip": "No badge equipped yet", "noEquipHint": "Pick one from the vault below - it appears here and on the leaderboard",
                "nth": "Stage {{n}}", "toward": "toward {{title}}", "awardedOn": "Awarded {{date}}" },
     "profile": { "sectionTitle": "Profile", "nickname": "Nickname", "nicknamePublic": "Show full nickname on leaderboards",

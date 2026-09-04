@@ -19,6 +19,7 @@ import { SkeletonBlock, SkeletonLine } from '../components/Skeleton'
 import BadgeIcon from '../components/badges/BadgeIcon'
 import MedalTilt from '../components/badges/MedalTilt'
 import BadgeDetailModal from '../components/badges/BadgeDetailModal'
+import PedestalStage from '../components/badges/PedestalStage'
 import type { GamificationBadge, GamificationBadgeRarity, GamificationMe, GamificationTask } from '../api/types'
 
 // 收藏度从普通到绝版；勋章库反过来，最珍贵的一层在最上面——进门先看到镇馆之宝。
@@ -440,30 +441,6 @@ export default function AchievementsPage() {
   const equippedBadges = me.equippedBadges
     .map((id) => me.badges.find((b) => b.id === id))
     .filter((b): b is GamificationBadge => b != null)
-  const [heroBadge, leftBadge, rightBadge] = [equippedBadges[0], equippedBadges[1], equippedBadges[2]]
-
-  // 陈列台上的一枚（可点开详情）。副戴两枚静态、退后半步；默认那枚缓慢自转。
-  // One badge on the pedestal (opens the detail layer). The two side badges sit
-  // still, a step back; the default one turns slowly.
-  // 3D 摆位放在外层 .ach-3d 上（副戴向中心转 26°、后退一层；默认那枚缓慢左右摇），
-  // MedalTilt 自己会往根元素写行内 transform 跟随指针，两者不能落在同一个元素。
-  // The 3D placement lives on the outer .ach-3d (side badges turned 26° toward the
-  // centre and set back; the default one sways slowly). MedalTilt writes an inline
-  // transform on its own root to follow the pointer, so the two must not share an element.
-  const pedestalBadge = (b: GamificationBadge | undefined, role: 'hero' | 'side', pos: 'l' | 'c' | 'r') => (
-    <span className={`ach-3d ach-3d-${pos}`}>
-      {b ? (
-        <MedalTilt ariaLabel={t(`gamification.badges.${b.id}.name`)} onClick={() => setDetailBadge(b)} className={`ach-${role}`}>
-          <BadgeIcon id={b.id} rarity={b.rarity} earned size={role === 'hero' ? 236 : 92} spin={role === 'hero'} />
-        </MedalTilt>
-      ) : (
-        <span className={`ach-slot ach-slot-${role}`} aria-hidden />
-      )}
-    </span>
-  )
-  const reflectionBadge = (b: GamificationBadge | undefined, role: 'hero' | 'side') =>
-    b ? <BadgeIcon id={b.id} rarity={b.rarity} earned size={role === 'hero' ? 236 : 92} className={`ach-${role}`} />
-      : <span className={`ach-slot ach-slot-${role} ach-slot-ghost`} aria-hidden />
 
   return (
     <div className="ach mx-auto max-w-[1100px] space-y-8">
@@ -519,44 +496,13 @@ export default function AchievementsPage() {
           </div>
         </div>
 
-        <div className="ach-pedestal">
-          <div className="ach-cone" aria-hidden />
-          <div className="ach-floorline" aria-hidden />
-          <div className="ach-floor" aria-hidden />
-          {/* 台座：两个透视压扁的圆盘，勋章"站"在上面，而不是浮在一片光里。
-              Plinth: two perspective-flattened discs the badge stands on, instead of
-              hovering in a pool of light. */}
-          <i className="ach-plinth ach-plinth-outer" aria-hidden />
-          <i className="ach-plinth ach-plinth-inner" aria-hidden />
-          <div className="ach-trio">
-            {pedestalBadge(leftBadge, 'side', 'l')}
-            {pedestalBadge(heroBadge, 'hero', 'c')}
-            {pedestalBadge(rightBadge, 'side', 'r')}
-            <div className="ach-refl" aria-hidden>
-              {reflectionBadge(leftBadge, 'side')}
-              {reflectionBadge(heroBadge, 'hero')}
-              {reflectionBadge(rightBadge, 'side')}
-            </div>
-          </div>
-          <div className="ach-cap">
-            {heroBadge ? (
-              <>
-                <b>{t(`gamification.badges.${heroBadge.id}.name`)}</b>
-                {t('gamification.equipSlots.onBoard')}
-                <span className="ach-slots" aria-label={t('gamification.equipSlots.count', { n: equippedBadges.length, max: EQUIP_SLOTS })}>
-                  {Array.from({ length: EQUIP_SLOTS }).map((_, i) => (
-                    <i key={i} className={i < equippedBadges.length ? '' : 'empty'} />
-                  ))}
-                </span>
-              </>
-            ) : (
-              <>
-                <b>{t('gamification.stage.noEquip')}</b>
-                {t('gamification.stage.noEquipHint')}
-              </>
-            )}
-          </div>
-        </div>
+        <PedestalStage
+          badges={equippedBadges}
+          defaultId={me.equippedBadge}
+          busy={equipping != null}
+          onOpen={setDetailBadge}
+          onMakeDefault={makeDefault}
+        />
       </section>
 
       {/* 综合胜率构成：从陈列台的「构成」按钮展开，独立一块，不挤进舞台。

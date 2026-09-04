@@ -1936,7 +1936,7 @@
     "equip": "佩戴", "unequip": "取消佩戴", "notEarned": "未获得",
     "equipSlots": { "setDefault": "设为默认", "isDefault": "默认", "full": "最多同时佩戴 {{max}} 枚，先取消一枚再戴", "count": "佩戴 {{n}} / {{max}}", "onBoard": "榜单上展示默认这一枚" },
     "levelShort": { "novice": "入门", "junior": "初级", "elite": "精英", "senior": "资深", "chief": "首席", "legend": "传奇" },
-    "stage": { "collection": "收藏度", "collected": "已收集", "vault": "勋章库", "vaultHint": "按材质分层 · 未获得的显示轮廓与条件",
+    "stage": { "swipeHint": "左右滑动切换", "gyroEnable": "开启陀螺仪反光", "collection": "收藏度", "collected": "已收集", "vault": "勋章库", "vaultHint": "按材质分层 · 未获得的显示轮廓与条件",
                "noEquip": "还没佩戴勋章", "noEquipHint": "从下方勋章库选一枚戴上，它会出现在这里和榜单上",
                "nth": "第 {{n}} 关", "toward": "通往{{title}}", "awardedOn": "{{date}} 获得" },
     "profile": { "sectionTitle": "个人资料", "nickname": "昵称", "nicknamePublic": "榜单完整展示昵称",
