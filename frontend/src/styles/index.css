@@ -5229,6 +5229,18 @@ body {
     flex: 0 0 auto;
     height: 36px;
   }
+  /* 胶囊本体：全局在 ≤1023px 给 .seg-tabs 加了 padding-block:8px（触摸热区
+     伪元素要装进 overflow 裁剪盒），结果上下 8px / 左右 3px——环形上下厚、
+     左右薄，36px 的按钮悬在 54px 的胶囊中间，看起来"上下不平衡"。这里四边
+     统一 3px，按钮加高到 40px：胶囊 46px，触摸目标仍 ≥44px，44px 的 ::after
+     热区带被裁到胶囊盒内也正好齐边。周期按钮补最小宽度，两组看起来是同一套。
+     The global ≤1023px rule pads .seg-tabs 8px top/bottom (so the 44px tap
+     band fits inside the overflow clip) but only 3px on the sides, leaving a
+     36px button floating in a 54px pill. Uniform 3px + 40px buttons keeps the
+     tap target ≥44px while making the ring even. */
+  .lb-controls .seg-tabs { padding: 3px; }
+  .lb-controls .seg-tabs button { height: 40px; }
+  .lb-controls .lb-seg-period button { min-width: 64px; padding: 0 14px; }
 }
 
 
