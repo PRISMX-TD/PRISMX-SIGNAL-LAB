@@ -143,6 +143,12 @@ class User(Base):
     nickname_public = Column(Boolean, nullable=False, default=False)
     leaderboard_opt_out = Column(Boolean, nullable=False, default=False)
     equipped_badge = Column(String, nullable=True)      # 佩戴的勋章 id，只能佩戴已获得的
+    # 佩戴的全部勋章（有序，逗号分隔，最多 3 枚），第一枚即上面的默认。两列同写：
+    # equipped_badge 是派生值，榜单/比赛/auth 那几条读单枚的路径一行不用改。空串 = 全部卸下。
+    # All equipped badges (ordered, comma-separated, max 3); the first is the default
+    # above. Written together: equipped_badge is derived, so the leaderboard /
+    # competition / auth paths that read a single id stay untouched. Empty string = none.
+    equipped_badges = Column(String, nullable=True)
 
 
 # 说明：旧的 EABinding（ea_bindings 表，EA 单账号绑定）已随 EA 接入方式移除。

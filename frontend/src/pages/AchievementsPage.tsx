@@ -38,6 +38,12 @@ const SEEN_BADGES_KEY = 'prismx_badges_seen'
 // seen silently — otherwise a new user would sit through 17 rounds of
 // blank -> strike -> flash -> sweep.
 const MINT_STAGGER_CAP = 3
+// 可同时佩戴的枚数，与后端 EQUIP_SLOTS 对齐。第一枚是默认——榜单行与比赛条目
+// 只画那一枚，其余两枚只在这一页露面。
+// How many badges can be worn at once, mirroring the backend's EQUIP_SLOTS.
+// The first is the default: leaderboard rows and competition entries draw only
+// that one, the other two appear on this page alone.
+const EQUIP_SLOTS = 3
 const MINT_DURATION_MS = 2200
 
 function readSeenBadges(): Set<string> {
@@ -314,29 +320,53 @@ export default function AchievementsPage() {
     }
   }, [me])
 
-  async function toggleEquip(badgeId: string, equipped: boolean) {
+  // 佩戴写的是一份有序列表：首枚 = 默认（上榜那枚）。三个动作共用一次 PATCH——
+  // 戴上（追加到末尾）、取下（从列表移除）、设为默认（移到首位）。
+  // Equipping writes one ordered list: first = default (the one that goes on the
+  // board). Three actions share a single PATCH — equip (append), unequip
+  // (remove), set-default (move to front).
+  async function writeEquipped(next: string[], busyId: string) {
     if (!me || equipping) return
-    const next = equipped ? null : badgeId
     const prev = me
-    setEquipping(badgeId)
+    setEquipping(busyId)
     setEquipMsg(null)
-    // 乐观更新：佩戴态立即翻转，失败再回滚——同一枚勋章的按钮不必等一次
-    // 往返才有反馈。
-    // Optimistic: flip the equipped state immediately, roll back on failure —
-    // the button for this badge doesn't have to wait a round trip for feedback.
+    // 乐观更新：佩戴态立即翻转，失败再回滚——按钮不必等一次往返才有反馈。
+    // Optimistic: flip immediately and roll back on failure, so the button
+    // doesn't wait a round trip for feedback.
+    const nextSet = new Set(next)
     setMe({
       ...me,
-      equippedBadge: next,
-      badges: me.badges.map((b) => ({ ...b, equipped: b.id === next })),
+      equippedBadge: next[0] ?? null,
+      equippedBadges: next,
+      badges: me.badges.map((b) => ({ ...b, equipped: nextSet.has(b.id) })),
     })
     try {
-      await userApi.updateProfile({ equippedBadge: next })
+      await userApi.updateProfile({ equippedBadges: next })
     } catch (err) {
       setMe(prev)
       setEquipMsg(err instanceof Error ? localizeApiError(err.message) : t('account.notifError'))
     } finally {
       setEquipping(null)
     }
+  }
+
+  function toggleEquip(badgeId: string, equipped: boolean) {
+    if (!me) return
+    const current = me.equippedBadges
+    if (equipped) {
+      void writeEquipped(current.filter((id) => id !== badgeId), badgeId)
+      return
+    }
+    if (current.length >= EQUIP_SLOTS) {
+      setEquipMsg(t('gamification.equipSlots.full', { max: EQUIP_SLOTS }))
+      return
+    }
+    void writeEquipped([...current, badgeId], badgeId)
+  }
+
+  function makeDefault(badgeId: string) {
+    if (!me) return
+    void writeEquipped([badgeId, ...me.equippedBadges.filter((id) => id !== badgeId)], badgeId)
   }
 
   if (loading) {
@@ -363,7 +393,12 @@ export default function AchievementsPage() {
     rarity,
     badges: me.badges.filter((b) => b.rarity === rarity),
   })).filter((g) => g.badges.length > 0)
-  const equippedBadge = me.equippedBadge ? me.badges.find((b) => b.id === me.equippedBadge) ?? null : null
+  // 按佩戴顺序取出勋章对象；首枚是默认，页头把它画大一档。
+  // Resolve badges in equipped order; the first is the default and the header
+  // renders it one size up.
+  const equippedBadges = me.equippedBadges
+    .map((id) => me.badges.find((b) => b.id === id))
+    .filter((b): b is GamificationBadge => b != null)
 
   return (
     <div className="mx-auto max-w-[1100px] space-y-6">
@@ -390,19 +425,40 @@ export default function AchievementsPage() {
         {/* Currently-equipped badge: 96px, tilt + a slow 16s spin — a notch more
             ceremonial than the static row-sized display, short of the detail
             layer's full-size render. */}
-        {equippedBadge && (
-          <div className="mt-4 flex items-center gap-3 border-t border-white/10 pt-4">
-            <MedalTilt
-              ariaLabel={t(`gamification.badges.${equippedBadge.id}.name`)}
-              onClick={() => setDetailBadge(equippedBadge)}
-            >
-              <BadgeIcon id={equippedBadge.id} rarity={equippedBadge.rarity} earned size={96} spin />
-            </MedalTilt>
-            <div>
+        {equippedBadges.length > 0 && (
+          <div className="mt-4 flex items-center gap-4 border-t border-white/10 pt-4">
+            <div className="flex items-end gap-2.5">
+              {equippedBadges.map((b, i) => (
+                <MedalTilt
+                  key={b.id}
+                  ariaLabel={t(`gamification.badges.${b.id}.name`)}
+                  onClick={() => setDetailBadge(b)}
+                >
+                  {/* 默认那枚 96px 且缓慢自转，其余两枚 56px 静态——大小本身就说明
+                      了哪一枚会出现在榜单上，不用再加一行文字。
+                      The default renders at 96px with a slow spin, the others at
+                      56px and static: size alone says which one reaches the
+                      board, no extra caption needed. */}
+                  <BadgeIcon id={b.id} rarity={b.rarity} earned size={i === 0 ? 96 : 56} spin={i === 0} />
+                </MedalTilt>
+              ))}
+            </div>
+            <div className="min-w-0">
               <span className="text-xs text-neutral-500">{t('gamification.equip')}</span>
-              <div className="text-sm font-semibold text-white">
-                {t(`gamification.badges.${equippedBadge.id}.name`)}
+              <div className="truncate text-sm font-semibold text-white">
+                {t(`gamification.badges.${equippedBadges[0].id}.name`)}
               </div>
+              {/* 「榜单上展示默认这一枚」在 375px 会把这行挤成三行——手机只留计数，
+                  那句说明桌面才显示。
+                  The "default one appears on the leaderboard" clause wraps this to
+                  three lines at 375px, so mobile keeps only the count. */}
+              <p className="mt-0.5 text-[11px] text-neutral-500">
+                {t('gamification.equipSlots.count', { n: equippedBadges.length, max: EQUIP_SLOTS })}
+                <span className="hidden sm:inline">
+                  {' · '}
+                  {t('gamification.equipSlots.onBoard')}
+                </span>
+              </p>
             </div>
           </div>
         )}
@@ -522,18 +578,40 @@ export default function AchievementsPage() {
                         {b.awardedAt && (
                           <span className="text-[10px] text-neutral-500">{fmtDate(b.awardedAt)}</span>
                         )}
-                        <button
-                          type="button"
-                          disabled={equipping === b.id}
-                          onClick={() => toggleEquip(b.id, b.equipped)}
-                          className={`tag text-[11px] transition disabled:opacity-50 ${
-                            b.equipped
-                              ? 'bg-prism-600/25 text-prism-300'
-                              : 'bg-white/5 text-neutral-400 hover:bg-white/10'
-                          }`}
-                        >
-                          {b.equipped ? t('gamification.unequip') : t('gamification.equip')}
-                        </button>
+                        <div className="flex flex-wrap items-center justify-center gap-1">
+                          <button
+                            type="button"
+                            disabled={equipping === b.id}
+                            onClick={() => toggleEquip(b.id, b.equipped)}
+                            className={`tag text-[11px] transition disabled:opacity-50 ${
+                              b.equipped
+                                ? 'bg-prism-600/25 text-prism-300'
+                                : 'bg-white/5 text-neutral-400 hover:bg-white/10'
+                            }`}
+                          >
+                            {b.equipped ? t('gamification.unequip') : t('gamification.equip')}
+                          </button>
+                          {/* 已佩戴的非默认枚才给「设为默认」；默认那枚显示一枚静态标签，
+                              免得三枚里每枚都挂两个按钮。
+                              Only an equipped non-default badge offers "set as default";
+                              the default itself shows a static tag, so the three don't
+                              each carry two buttons. */}
+                          {b.equipped && b.id !== me.equippedBadge && (
+                            <button
+                              type="button"
+                              disabled={equipping === b.id}
+                              onClick={() => makeDefault(b.id)}
+                              className="tag bg-white/5 text-[11px] text-neutral-400 transition hover:bg-white/10 disabled:opacity-50"
+                            >
+                              {t('gamification.equipSlots.setDefault')}
+                            </button>
+                          )}
+                          {b.id === me.equippedBadge && (
+                            <span className="tag bg-white/[0.06] text-[11px] text-neutral-300">
+                              {t('gamification.equipSlots.isDefault')}
+                            </span>
+                          )}
+                        </div>
                       </>
                     ) : (
                       <>

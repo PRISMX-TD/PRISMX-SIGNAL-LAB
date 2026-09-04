@@ -18,6 +18,44 @@ REAL = 2
 # stats.py's _resolve using _VOL_EPS.
 _LOT_EPS = 1e-6
 
+# 可同时佩戴的勋章枚数。第一枚是「默认」——榜单行与比赛条目位置有限，只画
+# 这一枚（设计 §3.4 的展示规则不变），其余两枚只在成就页露面。
+# How many badges can be worn at once. The first is the default: leaderboard
+# rows and competition entries have room for exactly one (the §3.4 display
+# rule is unchanged), so the other two show only on the achievements page.
+EQUIP_SLOTS = 3
+
+
+def equipped_list(user) -> list[str]:
+    """读佩戴列表（有序，首枚为默认）。新列为空时退回旧的单枚列——迁移回填
+    之前、或某条历史路径只写了旧列时都能拿到正确结果。
+    Read the equipped list (ordered, first = default). Falls back to the legacy
+    single-badge column when the new one is empty, so rows read correctly before
+    the backfill runs or if some legacy path wrote only the old column."""
+    raw = (getattr(user, "equipped_badges", None) or "").strip()
+    if raw:
+        return [x for x in raw.split(",") if x]
+    single = getattr(user, "equipped_badge", None)
+    return [single] if single else []
+
+
+def set_equipped_list(user, badge_ids) -> list[str]:
+    """写佩戴列表：保序去重、截到 EQUIP_SLOTS 枚，并把首枚同步进旧的单枚列。
+    **不做持有校验**——调用方（account._apply_profile_patch）先校验再调这里，
+    因为它要在校验失败时抛 400 而不是静默丢弃。
+    Write the equipped list: dedupe in place, cap at EQUIP_SLOTS, and mirror the
+    first entry into the legacy single column. **Does not check ownership** — the
+    caller (account._apply_profile_patch) validates first, since it must raise 400
+    rather than silently drop an unowned id."""
+    seen: list[str] = []
+    for b in badge_ids:
+        if b and b not in seen:
+            seen.append(b)
+    seen = seen[:EQUIP_SLOTS]
+    user.equipped_badges = ",".join(seen)
+    user.equipped_badge = seen[0] if seen else None
+    return seen
+
 
 def award_badge(db, user_id, badge_id) -> bool:
     db.add(UserBadge(user_id=user_id, badge_id=badge_id))

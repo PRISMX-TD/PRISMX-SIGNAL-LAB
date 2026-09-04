@@ -1038,7 +1038,13 @@ export interface GamificationMe {
   nickname: string | null
   nicknamePublic: boolean
   leaderboardOptOut: boolean
+  // equippedBadge 是列表首枚（榜单/比赛行上画的那枚默认）；equippedBadges 是
+  // 全部佩戴（有序，最多 3 枚），只在成就页展示。
+  // equippedBadge is the list's first entry (the default drawn on leaderboard /
+  // competition rows); equippedBadges is the full ordered set (max 3), shown
+  // only on the achievements page.
   equippedBadge: string | null
+  equippedBadges: string[]
   // 全站用户数（详情层拥有率 owners/population 的分母）。
   // Sitewide user count (the denominator for the detail layer's owners/population rate).
   population: number
@@ -1096,6 +1102,10 @@ export interface ProfilePatch {
   nicknamePublic?: boolean
   leaderboardOptOut?: boolean
   equippedBadge?: string | null
+  // 有序佩戴列表，首枚为默认；传 [] = 全部卸下。同时传两个字段时后端以本字段为准。
+  // Ordered equipped list, first = default; [] unequips all. When both fields are
+  // sent the backend takes this one.
+  equippedBadges?: string[]
 }
 
 export interface ProfileOut {
@@ -1103,6 +1113,7 @@ export interface ProfileOut {
   nicknamePublic: boolean
   leaderboardOptOut: boolean
   equippedBadge: string | null
+  equippedBadges: string[]
 }
 
 // 排行榜（设计 §4.3）/ Leaderboard

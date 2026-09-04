@@ -144,7 +144,7 @@ def _apply_profile_patch(db: Session, user: User, body: ProfilePatchIn) -> User:
     the caller only sees the error response, never a half-applied write.
     """
     from app.models import UserBadge
-    from app.services.gamification import nickname_reserved
+    from app.services.gamification import EQUIP_SLOTS, nickname_reserved, set_equipped_list
 
     sent = body.model_fields_set
     if "nickname" in sent:
@@ -158,9 +158,14 @@ def _apply_profile_patch(db: Session, user: User, body: ProfilePatchIn) -> User:
         user.nickname_public = body.nicknamePublic
     if "leaderboardOptOut" in sent and body.leaderboardOptOut is not None:
         user.leaderboard_opt_out = body.leaderboardOptOut
+    # 单枚字段保留给旧前端（缓存的旧 bundle 仍会发它）：语义等价于「列表里只有
+    # 这一枚」，与它上线前的行为一致。两个字段都传时下面的列表分支后跑，覆盖它。
+    # The single-badge field stays for old clients (a cached bundle still sends
+    # it): it means "a list holding just this one", matching its pre-launch
+    # behaviour. When both are sent the list branch below runs later and wins.
     if "equippedBadge" in sent:
         if body.equippedBadge is None:
-            user.equipped_badge = None
+            set_equipped_list(user, [])
         else:
             owned = (
                 db.query(UserBadge.id)
@@ -169,7 +174,19 @@ def _apply_profile_patch(db: Session, user: User, body: ProfilePatchIn) -> User:
             )
             if owned is None:
                 raise HTTPException(400, "尚未获得该勋章 / Badge not earned yet")
-            user.equipped_badge = body.equippedBadge
+            set_equipped_list(user, [body.equippedBadge])
+    if "equippedBadges" in sent:
+        ids = body.equippedBadges or []
+        if len(ids) > EQUIP_SLOTS:
+            raise HTTPException(400, f"最多佩戴 {EQUIP_SLOTS} 枚勋章 / At most {EQUIP_SLOTS} badges")
+        if ids:
+            owned = {
+                b for (b,) in db.query(UserBadge.badge_id)
+                .filter(UserBadge.user_id == user.id, UserBadge.badge_id.in_(ids))
+            }
+            if any(b not in owned for b in ids):
+                raise HTTPException(400, "尚未获得该勋章 / Badge not earned yet")
+        set_equipped_list(user, ids)
     db.commit()
     db.refresh(user)
     return user
@@ -184,12 +201,14 @@ def patch_profile(
     current_user: User = Depends(get_current_user),
 ):
     """局部更新昵称/隐私开关/佩戴勋章，只改传了的字段。"""
+    from app.services.gamification import equipped_list
     u = _apply_profile_patch(db, current_user, body)
     return {
         "nickname": u.nickname,
         "nicknamePublic": u.nickname_public,
         "leaderboardOptOut": u.leaderboard_opt_out,
         "equippedBadge": u.equipped_badge,
+        "equippedBadges": equipped_list(u),
     }
 
 

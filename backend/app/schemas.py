@@ -75,6 +75,14 @@ class ProfilePatchIn(BaseModel):
     nicknamePublic: bool | None = None
     leaderboardOptOut: bool | None = None
     equippedBadge: str | None = None
+    # 有序佩戴列表，首枚为默认；显式传 [] 或 null 都是全部卸下。与 equippedBadge
+    # 同时传时以本字段为准（旧前端只会传单枚，语义等价于一枚的列表）。
+    # max_length 只是防超大 payload 的粗闸，真正的「最多 3 枚」在处理函数里报 400。
+    # Ordered equipped list, first = default; [] or null both mean unequip all.
+    # Wins over equippedBadge when both are sent (an old client only ever sends
+    # the single field, which is equivalent to a one-item list). max_length is a
+    # coarse payload guard; the real "max 3" check raises 400 in the handler.
+    equippedBadges: list[str] | None = Field(default=None, max_length=16)
 
 
 class GoogleAuthRequest(BaseModel):

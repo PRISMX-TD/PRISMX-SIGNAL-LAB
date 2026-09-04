@@ -1937,6 +1937,7 @@
                      "colLogin": "Account", "colTrades": "Trades", "colWins": "Wins",
                      "colWinRate": "Win rate", "colExcluded": "Excluded" },
     "equip": "Equip", "unequip": "Unequip", "notEarned": "Not earned",
+    "equipSlots": { "setDefault": "Set as default", "isDefault": "Default", "full": "You can wear {{max}} at a time - unequip one first", "count": "{{n}} / {{max}} equipped", "onBoard": "The default one appears on the leaderboard" },
     "profile": { "sectionTitle": "Profile", "nickname": "Nickname", "nicknamePublic": "Show full nickname on leaderboards",
                  "leaderboardOptOut": "Opt out of all leaderboards", "save": "Save", "saved": "Saved" },
     "admin": { "tab": "Gamification", "inspect": "User Inspector", "searchUser": "Search by user email",

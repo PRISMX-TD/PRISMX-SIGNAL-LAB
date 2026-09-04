@@ -15,7 +15,8 @@ from app.schemas import GamificationSettingsPatchIn, VisibilityPatchIn
 from app.services.deps import get_current_user, get_db
 from app.services.gamification import (
     BADGES, GROUPS, LEVEL_TITLES, compute_comprehensive_stats, condition_states,
-    judge_and_award_badges, judge_and_record_conditions, level_of)
+    judge_and_award_badges, judge_and_record_conditions, level_of, equipped_list,
+)
 from app.services.gamification import identity, periods
 from app.services.gamification.boards import _resolved_in_period, board_gates
 from app.services.gamification.conditions import WINRATE_CONDITIONS
@@ -299,6 +300,8 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
         .all()
     )
     population = db.query(func.count(User.id)).scalar() or 0
+    equipped = equipped_list(user)
+    equipped_set = set(equipped)
     return {
         "level": level,
         "title": LEVEL_TITLES[level - 1],
@@ -307,7 +310,7 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
             "id": bid, "rarity": meta["rarity"], "category": meta["category"],
             "earned": bid in owned,
             "awardedAt": owned.get(bid).isoformat() if bid in owned else None,
-            "equipped": user.equipped_badge == bid,
+            "equipped": bid in equipped_set,
             "owners": owners_by_badge.get(bid, 0),
         } for bid, meta in BADGES.items()],
         "winRate": {
@@ -317,6 +320,7 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
         "nickname": user.nickname, "nicknamePublic": user.nickname_public,
         "leaderboardOptOut": user.leaderboard_opt_out,
         "equippedBadge": user.equipped_badge,
+        "equippedBadges": equipped,
         "population": population,
     }
 

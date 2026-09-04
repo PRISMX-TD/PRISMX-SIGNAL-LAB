@@ -105,7 +105,8 @@ def _hash_legacy_api_tokens() -> None:
 # rev 9: mt5_accounts.pass_change_at / revoked_at / revoked_reason
 #        （gateway 绑定的撤销机制：券商侧改密码后作废旧绑定）
 # rev 10 — users 昵称/隐私/佩戴 4 列、orders.trade_mode 快照 + 存量回填、user_active_days 等新表、游戏化索引
-CURRENT_SCHEMA_REV = 10
+# rev 11 — users.equipped_badges（可佩戴 3 枚，有序，首枚 = equipped_badge 那枚默认；从旧列回填）
+CURRENT_SCHEMA_REV = 11
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -607,11 +608,27 @@ def _migrate_columns() -> None:
             "nickname_public": "BOOLEAN",
             "leaderboard_opt_out": "BOOLEAN",
             "equipped_badge": "VARCHAR",
+            "equipped_badges": "VARCHAR",
         }
         with engine.begin() as conn:
             for name, col_type in user_new.items():
                 if name not in user_cols:
                     conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {col_type}"))
+            # equipped_badges 回填：佩戴从「一枚」扩成「有序三枚，首枚为默认」，
+            # 老行那一枚就是新列表的唯一一枚。只在本次刚加列时跑一次——之后
+            # 用户主动卸下全部会把新列写成空串，无条件 UPDATE 会把它当成
+            # 「还没回填」再塞回旧列的值，把卸下的勋章又戴回去。
+            # equipped_badges backfill: equipping grows from one badge to an
+            # ordered three (first = default), so an existing row's single badge
+            # becomes the sole entry. Guarded to run only when the column is
+            # first added: unequipping everything later writes an empty string,
+            # and an unconditional UPDATE would read that as "not backfilled"
+            # and re-equip the badge the user just took off.
+            if "equipped_badges" not in user_cols:
+                conn.execute(text(
+                    "UPDATE users SET equipped_badges = equipped_badge "
+                    "WHERE equipped_badge IS NOT NULL"
+                ))
             # google_linked_at 回填：这个字段刚加进来时，无法从历史数据反推
             # "谁的账号最初是通过 Google 验证创建的"——干脆把当前所有已持有
             # 密码的老用户一律回填为已验证（用 created_at 兜底一个时间戳），
