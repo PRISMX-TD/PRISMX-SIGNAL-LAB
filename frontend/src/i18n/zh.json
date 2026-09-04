@@ -1928,7 +1928,7 @@
       "comp_back_to_back": { "name": "卫冕王", "desc": "连续两届比赛冠军" },
       "founder_2026": { "name": "创始元老", "desc": "2026 年内注册并完成首笔实盘（永久绝版）" }
     },
-    "winRateCard": { "combined": "综合胜率（考核口径）", "account": "账户胜率",
+    "winRateCard": { "combined": "综合胜率（考核口径）", "combinedShort": "综合胜率", "account": "账户胜率",
                      "toNext": "距下一级还差 {{pct}}%", "metNext": "已达下一级胜率要求",
                      "breakdown": "构成",
                      "colLogin": "账户", "colTrades": "交易数", "colWins": "盈利数",

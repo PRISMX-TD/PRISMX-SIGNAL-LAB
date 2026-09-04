@@ -5559,21 +5559,24 @@ body {
 
 .ach-pedestal {
   position: relative;
-  height: 360px;
+  height: 372px;
   display: grid;
   place-items: end center;
+  perspective: 900px;
+  overflow: hidden;
 }
 .ach-cone {
   position: absolute;
   left: 50%;
-  top: -30px;
+  top: 0;
   width: 520px;
   height: 330px;
   transform: translateX(-50%);
   pointer-events: none;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.03) 55%, transparent);
-  clip-path: polygon(44% 0, 56% 0, 96% 100%, 4% 100%);
-  opacity: 0.75;
+  clip-path: polygon(40% 0, 60% 0, 100% 100%, 0 100%);
+  opacity: 0.7;
+  filter: blur(14px);
   animation: ach-breathe 6s ease-in-out infinite;
 }
 .ach-floor {
@@ -5600,15 +5603,45 @@ body {
   position: relative;
   display: flex;
   align-items: flex-end;
-  gap: 26px;
-  padding-bottom: 70px;
+  gap: 18px;
+  padding-bottom: 84px;
+  transform-style: preserve-3d;
+}
+/* 3D 摆位：副戴向中心转 26° 并后退一层（像唱片架），默认那枚左右轻摇 + 浮动。
+   3D placement: side badges turn 26° toward the centre and sit one layer back
+   (coverflow-style); the default one sways gently and floats. */
+.ach-3d { display: block; transform-style: preserve-3d; }
+.ach-3d-l { transform: translateZ(-70px) rotateY(26deg); }
+.ach-3d-r { transform: translateZ(-70px) rotateY(-26deg); }
+.ach-3d-c { animation: ach-sway 7s ease-in-out infinite; }
+/* 台座圆盘：压扁 72°，外盘一圈亮边、内盘一圈暗槛 / plinth discs flattened 72°, outer rim lit, inner step dark */
+.ach-plinth {
+  position: absolute;
+  left: 50%;
+  border-radius: 50%;
+  transform: translateX(-50%) rotateX(72deg);
+  pointer-events: none;
+}
+.ach-plinth-outer {
+  width: 300px;
+  height: 300px;
+  bottom: -80px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: radial-gradient(circle, rgba(139, 108, 255, 0.10), rgba(255, 255, 255, 0.02) 55%, transparent 70%);
+  box-shadow: inset 0 0 40px rgba(110, 66, 255, 0.10), 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+.ach-plinth-inner {
+  width: 210px;
+  height: 210px;
+  bottom: -35px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: radial-gradient(circle, rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.12) 60%, transparent 75%);
 }
 .ach-hero {
   display: block;
   width: 236px;
   height: 236px;
   filter: drop-shadow(0 26px 30px rgba(0, 0, 0, 0.6));
-  animation: ach-float 6s ease-in-out infinite;
 }
 .ach-side {
   display: block;
@@ -5617,6 +5650,12 @@ body {
   margin-bottom: 10px;
   filter: brightness(0.88) drop-shadow(0 12px 14px rgba(0, 0, 0, 0.55));
 }
+/* BadgeIcon 把 size 写成 svg 的 width/height 属性（桌面 236 / 92）；手机上外层缩小后，svg 必须跟着外层走，
+   否则 236px 的图从 168px 的框里溢出去，右边那枚被舞台裁掉。
+   BadgeIcon writes size as the svg's width/height attributes (236 / 92 on desktop); when the wrapper
+   shrinks on phones the svg must follow it, or a 236px drawing spills out of a 168px box and the
+   right-hand badge gets clipped by the stage. */
+.ach-hero svg, .ach-side svg { width: 100%; height: 100%; }
 /* 空槽位：虚线圈占着位置，邀请去戴 / empty slot: a dashed ring holding the place */
 .ach-slot { display: block; border-radius: 999px; border: 1px dashed rgba(255, 255, 255, 0.16); }
 .ach-slot-hero { width: 236px; height: 236px; }
@@ -5627,7 +5666,7 @@ body {
   left: 0;
   right: 0;
   top: 100%;
-  margin-top: -64px;
+  margin-top: -78px;
   display: flex;
   justify-content: center;
   align-items: flex-start;
@@ -5639,7 +5678,7 @@ body {
   -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent 55%);
   mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent 55%);
 }
-.ach-refl .ach-hero { animation: none; }
+.ach-refl .ach-3d-c { animation: none; }
 .ach-cap {
   position: absolute;
   left: 0;
@@ -5780,21 +5819,34 @@ body {
 
 @keyframes ach-aurora { from { transform: translateX(-2%) scale(1); } to { transform: translateX(2%) scale(1.06); } }
 @keyframes ach-breathe { 50% { opacity: 0.55; } }
-@keyframes ach-float { 50% { transform: translateY(-6px); } }
+@keyframes ach-sway {
+  0%, 100% { transform: translateY(0) rotateY(-7deg); }
+  50% { transform: translateY(-7px) rotateY(7deg); }
+}
 
 /* 手机：舞台竖排，勋章居中；收藏度换成两行；架子两枚一行。
    Mobile: stage stacks with the badge centred; meter wraps; shelves two per row. */
 @media (max-width: 767px) {
-  .ach-stage { grid-template-columns: 1fr; gap: 6px; min-height: 0; padding: 24px 18px 20px; }
+  .ach-stage { grid-template-columns: 1fr; gap: 10px; min-height: 0; padding: 18px 18px 22px; }
+  /* 手机：勋章先出场，文字在后 / phones: the badge leads, the text follows */
+  .ach-pedestal { order: -1; }
+  .ach-stage-l { padding-top: 4px; }
+  .ach-stats > div { padding-right: 10px; }
+  .ach-stats > div + div { padding-left: 10px; }
   .ach-title { font-size: 30px; }
-  .ach-pedestal { height: 280px; }
-  .ach-trio { gap: 12px; }
-  .ach-refl { gap: 12px; }
-  .ach-hero, .ach-slot-hero { width: 164px; height: 164px; }
-  .ach-side, .ach-slot-side { width: 54px; height: 54px; }
-  .ach-cone { width: 320px; height: 250px; }
-  .ach-floor { width: 260px; }
-  .ach-refl { margin-top: -50px; }
+  .ach-pedestal { height: 332px; perspective: 700px; }
+  .ach-trio { gap: 10px; padding-bottom: 96px; }
+  .ach-refl { gap: 10px; opacity: 0.3; margin-top: -90px; }
+  .ach-3d-l { transform: translateZ(-60px) rotateY(30deg); }
+  .ach-3d-r { transform: translateZ(-60px) rotateY(-30deg); }
+  .ach-hero, .ach-slot-hero { width: 168px; height: 168px; }
+  .ach-side, .ach-slot-side { width: 56px; height: 56px; margin-bottom: 16px; }
+  .ach-plinth-outer { width: 250px; height: 250px; bottom: -43px; }
+  .ach-plinth-inner { width: 176px; height: 176px; bottom: -6px; }
+  .ach-cone { width: 320px; height: 250px; opacity: 0.55; }
+  .ach-floor { width: 260px; bottom: 62px; }
+  .ach-floorline { display: none; }
+  .ach-refl { margin-top: -58px; }
   .ach-rail b { font-size: 10px; }
   .ach-stats strong { font-size: 18px; }
   .ach-meter { flex-wrap: wrap; }
@@ -5803,7 +5855,7 @@ body {
   .ach-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ach-stage::before, .ach-cone, .ach-hero { animation: none; }
+  .ach-stage::before, .ach-cone, .ach-3d-c { animation: none; }
 }
 
 .seg-tabs {

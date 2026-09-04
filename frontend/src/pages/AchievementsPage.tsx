@@ -445,14 +445,22 @@ export default function AchievementsPage() {
   // 陈列台上的一枚（可点开详情）。副戴两枚静态、退后半步；默认那枚缓慢自转。
   // One badge on the pedestal (opens the detail layer). The two side badges sit
   // still, a step back; the default one turns slowly.
-  const pedestalBadge = (b: GamificationBadge | undefined, role: 'hero' | 'side') => {
-    if (!b) return <span className={`ach-slot ach-slot-${role}`} aria-hidden />
-    return (
-      <MedalTilt ariaLabel={t(`gamification.badges.${b.id}.name`)} onClick={() => setDetailBadge(b)} className={`ach-${role}`}>
-        <BadgeIcon id={b.id} rarity={b.rarity} earned size={role === 'hero' ? 236 : 92} spin={role === 'hero'} />
-      </MedalTilt>
-    )
-  }
+  // 3D 摆位放在外层 .ach-3d 上（副戴向中心转 26°、后退一层；默认那枚缓慢左右摇），
+  // MedalTilt 自己会往根元素写行内 transform 跟随指针，两者不能落在同一个元素。
+  // The 3D placement lives on the outer .ach-3d (side badges turned 26° toward the
+  // centre and set back; the default one sways slowly). MedalTilt writes an inline
+  // transform on its own root to follow the pointer, so the two must not share an element.
+  const pedestalBadge = (b: GamificationBadge | undefined, role: 'hero' | 'side', pos: 'l' | 'c' | 'r') => (
+    <span className={`ach-3d ach-3d-${pos}`}>
+      {b ? (
+        <MedalTilt ariaLabel={t(`gamification.badges.${b.id}.name`)} onClick={() => setDetailBadge(b)} className={`ach-${role}`}>
+          <BadgeIcon id={b.id} rarity={b.rarity} earned size={role === 'hero' ? 236 : 92} spin={role === 'hero'} />
+        </MedalTilt>
+      ) : (
+        <span className={`ach-slot ach-slot-${role}`} aria-hidden />
+      )}
+    </span>
+  )
   const reflectionBadge = (b: GamificationBadge | undefined, role: 'hero' | 'side') =>
     b ? <BadgeIcon id={b.id} rarity={b.rarity} earned size={role === 'hero' ? 236 : 92} className={`ach-${role}`} />
       : <span className={`ach-slot ach-slot-${role} ach-slot-ghost`} aria-hidden />
@@ -486,7 +494,13 @@ export default function AchievementsPage() {
           </ol>
           <div className="ach-stats">
             <div>
-              <small>{t('gamification.winRateCard.combined')}</small>
+              {/* 手机上「综合胜率（考核口径）」会折成两行把三栏挤歪，短标签只在 <640 用。
+                  The full label wraps to two lines on phones and skews the three columns;
+                  the short one is for <640 only. */}
+              <small>
+                <span className="hidden sm:inline">{t('gamification.winRateCard.combined')}</span>
+                <span className="sm:hidden">{t('gamification.winRateCard.combinedShort')}</span>
+              </small>
               <strong className="num text-up">{me.winRate.value != null ? fmtPct(me.winRate.value) : '—'}</strong>
               {me.winRate.perLogin.length > 0 && (
                 <button type="button" className="ach-link" onClick={() => setShowBreakdown((v) => !v)}>
@@ -509,10 +523,15 @@ export default function AchievementsPage() {
           <div className="ach-cone" aria-hidden />
           <div className="ach-floorline" aria-hidden />
           <div className="ach-floor" aria-hidden />
+          {/* 台座：两个透视压扁的圆盘，勋章"站"在上面，而不是浮在一片光里。
+              Plinth: two perspective-flattened discs the badge stands on, instead of
+              hovering in a pool of light. */}
+          <i className="ach-plinth ach-plinth-outer" aria-hidden />
+          <i className="ach-plinth ach-plinth-inner" aria-hidden />
           <div className="ach-trio">
-            {pedestalBadge(leftBadge, 'side')}
-            {pedestalBadge(heroBadge, 'hero')}
-            {pedestalBadge(rightBadge, 'side')}
+            {pedestalBadge(leftBadge, 'side', 'l')}
+            {pedestalBadge(heroBadge, 'hero', 'c')}
+            {pedestalBadge(rightBadge, 'side', 'r')}
             <div className="ach-refl" aria-hidden>
               {reflectionBadge(leftBadge, 'side')}
               {reflectionBadge(heroBadge, 'hero')}

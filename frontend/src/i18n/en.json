@@ -1930,7 +1930,7 @@
       "comp_back_to_back": { "name": "Back-to-Back Champion", "desc": "Winner of two consecutive competitions" },
       "founder_2026": { "name": "Founding Member", "desc": "Registered in 2026 and completed a first live trade (permanently limited)" }
     },
-    "winRateCard": { "combined": "Combined win rate (qualifying basis)", "account": "Account win rate",
+    "winRateCard": { "combined": "Combined win rate (qualifying basis)", "combinedShort": "Win rate", "account": "Account win rate",
                      "toNext": "{{pct}}% to the next level",
                      "metNext": "Meets the next level's win-rate bar",
                      "breakdown": "Breakdown",
