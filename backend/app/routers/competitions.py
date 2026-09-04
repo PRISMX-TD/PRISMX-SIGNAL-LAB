@@ -49,12 +49,18 @@ def require_competitions_visible(db: Session = Depends(get_db),
     return user
 
 
-def _summary_out(comp: Competition, champion: dict | None = None) -> dict:
+def _summary_out(comp: Competition, top: list[dict] | None = None,
+                 participants: int = 0) -> dict:
+    top = top or []
     return {
-        # 已终审比赛的冠军（列表页荣誉墙用），其余 None；由 _champions 一次查齐。
-        # The champion of a settled competition (for the list page's hall of
-        # champions), None otherwise; fetched for all rows at once by _champions.
-        "champion": champion,
+        # 榜首三行（列表头版的跑马灯用）与参赛账户数，由 _leaders / 列表端点一次
+        # 查齐；champion 只在已终审时给（荣誉墙用），其余 None。
+        # Top three rows (for the list front page's ticker) and the entered-account
+        # count, fetched for all rows at once; champion only once settled (hall of
+        # champions), None otherwise.
+        "top": top,
+        "participants": participants,
+        "champion": top[0] if comp.status == "settled" and top else None,
         "id": comp.id,
         "name": comp.name,
         "description": comp.description,
@@ -75,40 +81,41 @@ def _summary_out(comp: Competition, champion: dict | None = None) -> dict:
     }
 
 
-def _champions(db: Session, comps: list[Competition]) -> dict[str, dict]:
-    """已终审比赛的榜首行 → {comp_id: {displayName, score, equippedBadge}}。
-    一次 IN 查询取所有 rank=1 的快照行，再一次取用户，不逐场查；昵称按公开
-    设置打码，与榜单行同一个 identity.display_name（用户端永远看不到真实身份）。
-    只认 board == comp.metric 的行——同一个 period_key 理论上只有一种 board，
-    防御性地过滤一下。
-    Rank-1 snapshot rows of settled competitions → {comp_id: {...}}. One IN query
-    for every rank-1 row, one for the users, no per-competition lookups; names
-    masked per the nickname setting via the same identity.display_name the board
-    rows use (the user side never sees a real identity). Only rows whose board
-    matches comp.metric count; a period_key should only ever carry one board, so
-    this is a defensive filter."""
-    settled = {comp_period_key(c.id): c for c in comps if c.status == "settled"}
-    if not settled:
+def _leaders(db: Session, comps: list[Competition]) -> dict[str, list[dict]]:
+    """各场比赛的前三行 → {comp_id: [{displayName, score, equippedBadge}, ...]}，
+    按名次排好。一次 IN 查询取所有 rank<=3 的快照行，再一次取用户，不逐场查；
+    昵称按公开设置打码，与榜单行同一个 identity.display_name（用户端永远看不到
+    真实身份）。只认 board == comp.metric 的行——同一个 period_key 理论上只有
+    一种 board，防御性地过滤一下。
+    Top-three snapshot rows per competition → {comp_id: [...]} in rank order. One
+    IN query for every rank<=3 row, one for the users, no per-competition lookups;
+    names masked per the nickname setting via the same identity.display_name the
+    board rows use (the user side never sees a real identity). Only rows whose
+    board matches comp.metric count; a period_key should only ever carry one
+    board, so this is a defensive filter."""
+    by_key = {comp_period_key(c.id): c for c in comps}
+    if not by_key:
         return {}
     rows = (db.query(LeaderboardSnapshot)
-              .filter(LeaderboardSnapshot.period_key.in_(list(settled)),
-                      LeaderboardSnapshot.rank == 1)
+              .filter(LeaderboardSnapshot.period_key.in_(list(by_key)),
+                      LeaderboardSnapshot.rank <= 3)
+              .order_by(LeaderboardSnapshot.rank)
               .all())
     users = ({u.id: u for u in db.query(User).filter(User.id.in_({r.user_id for r in rows}))}
              if rows else {})
-    out: dict[str, dict] = {}
+    out: dict[str, list[dict]] = {}
     for r in rows:
-        comp = settled[r.period_key]
+        comp = by_key[r.period_key]
         if r.board != comp.metric:
             continue
         u = users.get(r.user_id)
-        out[comp.id] = {
+        out.setdefault(comp.id, []).append({
             "displayName": identity.display_name(
                 u.nickname if u else None, u.email if u else None,
                 bool(u.nickname_public) if u else False),
             "score": r.score,
             "equippedBadge": u.equipped_badge if u else None,
-        }
+        })
     return out
 
 
@@ -134,11 +141,16 @@ def list_competitions(request: Request, db: Session = Depends(get_db),
                       key=lambda c: c.starts_at, reverse=True)
     finished = sorted((c for c in comps if c.status in ("ended", "settled")),
                        key=lambda c: c.starts_at, reverse=True)
-    champions = _champions(db, finished)
+    leaders = _leaders(db, running + finished)
+    # 参赛数复用管理端同一个分组查询（含被取消资格的条目：报了名就是参赛）。
+    # The count reuses the admin side's grouped query (disqualified entries
+    # included: entered is entered).
+    counts = _participant_counts(db, [c.id for c in comps])
+    out = lambda c: _summary_out(c, leaders.get(c.id), counts.get(c.id, 0))  # noqa: E731
     return {
-        "upcoming": [_summary_out(c) for c in upcoming],
-        "running": [_summary_out(c) for c in running],
-        "finished": [_summary_out(c, champions.get(c.id)) for c in finished],
+        "upcoming": [out(c) for c in upcoming],
+        "running": [out(c) for c in running],
+        "finished": [out(c) for c in finished],
     }
 
 

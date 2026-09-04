@@ -5899,446 +5899,180 @@ body {
    prize plaque, settled plates). The list reads as a schedule, the detail as an
    awards floor: banner → my standing → podium → dense rows → fine-print rules. */
 
-/* ── 分组眉头 / group header ── */
-.cmp-group-h {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.cmp-group-h h3 {
-  margin: 0;
-  flex: none;
-  font-size: 13px;
-  font-weight: 700;
-  color: #f4f4f5;
-  letter-spacing: -0.01em;
-}
-.cmp-group-h i {
-  flex: 1;
-  height: 1px;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0.14), transparent);
-}
-.cmp-group-h > span {
-  flex: none;
-  font-size: 12px;
-  color: #52525b;
-}
-
-/* ── 列表 / list ──
-   三个分组三种版式：进行中是广告牌（这页的主角），即将开始是赛程行，已结束是
-   荣誉墙。没有一处把比赛画成一格格的卡片。
-   Three groups, three layouts: running is the billboard (the page's lead),
-   upcoming is schedule rows, finished is the hall of champions. Nowhere is a
-   competition drawn as a tile in a card grid. */
-.cmp-list { display: flex; flex-direction: column; gap: 40px; }
+/* ── 转播台 / broadcast ──
+   把比赛当成一场正在直播的赛事。列表：赛名 76px 的头版 + 角标倒计时 + 前三名
+   跑马灯；即将开始与荣誉墙是"栏目 + 发丝线行"。详情：左 380px 字幕条（赛名、大钟、
+   你的名次、事实、报名），右边名次梯——54px 描边名次、只有冠军填金。
+   紫只给"你"，金只给第一名与奖品，分数按正负绿红。
+   Treat the competition as a live broadcast. List: a 76px front page with a countdown
+   bug and a top-three ticker; upcoming and the hall of champions as "column + hairline
+   rows". Detail: a 380px caption rail on the left, the ladder on the right with 54px
+   outlined ranks and only the champion filled gold. Violet only for "you", gold only
+   for #1 and the prize, scores green/red by sign. */
+.cmp-list { display: flex; flex-direction: column; gap: 36px; }
+.cmp-kicker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 0; font-size: 12px; color: #a1a1aa; }
+.cmp-kicker > span + span { margin-left: 14px; padding-left: 14px; border-left: 1px solid rgba(255, 255, 255, 0.14); }
+.cmp-status-tag { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
 .cmp-live-dot {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin-right: 6px;
-  border-radius: 999px;
-  background: currentColor;
-  vertical-align: middle;
-  animation: cmp-breathe 2s ease-in-out infinite;
+  display: inline-block; width: 5px; height: 5px; margin-right: 6px; border-radius: 999px;
+  background: currentColor; vertical-align: middle; animation: cmp-breathe 2s ease-in-out infinite;
 }
+.cmp-you { display: inline-block; margin-left: 8px; padding: 2px 7px; border-radius: 999px; background: rgba(110, 66, 255, 0.25); color: #b9a6ff; font-size: 10px; font-weight: 600; vertical-align: middle; }
 
-/* 广告牌 / billboard */
-.cmp-bill {
-  position: relative;
-  isolation: isolate;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 20px 40px;
-  align-items: center;
-  width: 100%;
-  padding: 26px 28px;
-  text-align: left;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.02);
-  overflow: hidden;
-  transition: transform var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out);
+/* 头版 / front page */
+.cmp-hero {
+  position: relative; isolation: isolate; display: block; width: 100%; padding: 8px 0 0; text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08); overflow: hidden;
 }
-.cmp-bill::before {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  right: -10%;
-  top: -60%;
-  width: 55%;
-  height: 200%;
-  pointer-events: none;
-  background: radial-gradient(ellipse at 60% 50%, rgba(110, 66, 255, 0.2), transparent 62%);
-  filter: blur(22px);
-  animation: cmp-aurora 16s ease-in-out infinite alternate;
+.cmp-ghost {
+  position: absolute; z-index: -1; right: -8px; top: -18px; pointer-events: none; user-select: none;
+  font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 190px; font-weight: 900; line-height: 1;
+  letter-spacing: -0.06em; color: transparent; -webkit-text-stroke: 1px rgba(255, 255, 255, 0.09);
 }
-@media (hover: hover) {
-  .cmp-bill:hover { transform: translateY(-2px); border-color: rgba(255, 255, 255, 0.18); }
+.cmp-bug {
+  position: absolute; right: 0; top: 10px; display: flex; align-items: center; gap: 14px;
+  padding: 8px 8px 8px 16px; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 999px;
+  background: rgba(8, 8, 11, 0.7); font-size: 12px; color: #a1a1aa;
 }
-.cmp-bill:active { transform: translateY(0); }
-.cmp-bill-name {
-  margin: 12px 0 0;
-  font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
-  font-size: 32px;
-  font-weight: 800;
-  line-height: 1.05;
-  letter-spacing: -0.025em;
-  color: #f4f4f5;
-  text-wrap: balance;
+.cmp-bug b { padding: 6px 12px; border-radius: 999px; background: rgba(255, 255, 255, 0.06); font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color: #f4f4f5; }
+.cmp-hero-name {
+  margin: 14px 0 0; font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
+  font-size: 76px; font-weight: 900; line-height: 0.95; letter-spacing: -0.045em; color: #f4f4f5; text-wrap: balance;
 }
-.cmp-bill-prize { margin: 10px 0 0; font-size: 13px; font-weight: 600; color: #f0e2c0; }
-.cmp-bill-prize span { margin-right: 10px; font-weight: 600; color: #c9a24a; }
-.cmp-bill-dates { margin: 12px 0 0; font-size: 11.5px; color: #71717a; }
-.cmp-bill-clock { text-align: right; }
-.cmp-clock-sm .cmp-clock-cell { min-width: 52px; }
-.cmp-clock-sm .cmp-clock-cell b { font-size: 44px; }
-.cmp-clock-sm .cmp-clock-row { gap: 12px; }
+.cmp-hero-name.is-detail { font-size: 46px; letter-spacing: -0.035em; line-height: 1; }
+.cmp-hero-sub { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px 40px; margin-top: 18px; }
+.cmp-hero-prize { font-size: 13px; color: #f0e2c0; max-width: 52ch; }
+.cmp-hero-prize small { display: block; margin-bottom: 4px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #c9a24a; }
+.cmp-hero-when { font-size: 12px; color: #71717a; }
+.cmp-hero-cta {
+  margin-left: auto; padding: 12px 20px; border-radius: 10px; background: #f4f4f5; color: #0a0a0d;
+  font-size: 13px; font-weight: 700; transition: transform var(--dur-base) var(--ease-out);
+}
+.cmp-hero:hover .cmp-hero-cta { transform: translateY(-1px); }
+.cmp-hero:active .cmp-hero-cta { transform: translateY(0) scale(0.98); }
+.cmp-ticker {
+  display: flex; align-items: center; height: 38px; margin-top: 22px; overflow: hidden; white-space: nowrap;
+  border-top: 1px solid rgba(255, 255, 255, 0.08); font-size: 12px; color: #a1a1aa;
+  mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+}
+.cmp-ticker > div { display: flex; gap: 40px; padding-right: 40px; animation: cmp-tick 28s linear infinite; }
+.cmp-ticker b { color: #f4f4f5; font-weight: 600; }
+.cmp-ticker .num { font-size: 12px; font-weight: 600; }
 
-/* 赛程行 / schedule rows */
-.cmp-up {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px 24px;
-  align-items: center;
-  width: 100%;
-  padding: 16px 8px;
-  text-align: left;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+/* 栏目 + 行 / column + rows */
+.cmp-sec { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 36px; }
+.cmp-sec h4 { margin: 0; font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif; font-size: 20px; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; color: #f4f4f5; }
+.cmp-sec h4 small { display: block; margin-top: 8px; font-family: var(--font-body, inherit); font-size: 12px; font-weight: 400; line-height: 1.5; color: #71717a; }
+.cmp-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) 200px 160px; align-items: center; gap: 24px;
+  width: 100%; padding: 18px 8px; text-align: left; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   transition: background-color var(--dur-base) var(--ease-out);
 }
-.cmp-up:first-child { border-top: 1px solid rgba(255, 255, 255, 0.08); }
-@media (hover: hover) { .cmp-up:hover { background: rgba(255, 255, 255, 0.025); } }
-.cmp-up-name { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; color: #f4f4f5; }
-.cmp-up .cmp-status { margin-top: 7px; font-size: 11.5px; }
-.cmp-up-right { text-align: right; }
-.cmp-up-right span { display: block; font-size: 11px; color: #71717a; }
-.cmp-up-right b {
-  display: block;
-  margin-top: 2px;
-  font-family: var(--font-display, 'Archivo'), sans-serif;
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: #f4f4f5;
-}
+.cmp-sec > div > .cmp-row:first-child { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+@media (hover: hover) { .cmp-row:hover { background: rgba(255, 255, 255, 0.025); } }
+.cmp-row-name { display: block; font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif; font-size: 22px; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; color: #f4f4f5; }
+.cmp-row-meta { margin-top: 4px; font-size: 12px; color: #71717a; }
+.cmp-row-cd { text-align: right; }
+.cmp-row-cd small { display: block; font-size: 11px; color: #71717a; }
+.cmp-row-cd b { display: block; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; color: #f4f4f5; }
+.cmp-row-score { font-size: 22px !important; }
+.cmp-champ { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.cmp-champ b { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 700; color: #f4f4f5; }
+.cmp-champ small { display: block; margin-top: 1px; font-size: 11px; color: #71717a; }
+.cmp-champ-none { font-size: 13px; color: #a1a1aa; }
 
-/* 荣誉墙 / hall of champions */
-.cmp-hall { display: grid; grid-template-columns: 1fr 1fr; gap: 0 40px; }
-.cmp-plate {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 16px;
-  align-items: center;
-  width: 100%;
-  padding: 18px 8px;
-  text-align: left;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  transition: background-color var(--dur-base) var(--ease-out);
-}
-@media (hover: hover) { .cmp-plate:hover { background: rgba(255, 255, 255, 0.025); } }
-.cmp-plate-mark {
-  display: block;
-  width: 48px;
-  height: 48px;
-  border-radius: 999px;
-  border: 1px dashed rgba(255, 255, 255, 0.16);
-}
-.cmp-plate-comp { font-size: 12px; color: #71717a; }
-.cmp-plate-champ {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 4px;
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: #f4f4f5;
-}
-.cmp-plate-champ small { flex: none; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: #c9a24a; }
-.cmp-plate-champ > b { margin-left: auto; font-size: 18px; }
-.cmp-plate-none { font-size: 13px; font-weight: 500; color: #a1a1aa; }
-.cmp-plate-dates { margin-top: 5px; font-size: 11px; color: #52525b; }
-
-/* ── 赛场 / arena ──
-   不做黑盒子。赛名直接落在页面上，右上角一团极光当舞台光；左栏读一遍就够的
-   奖品与时间，右栏是"数字栏"（大钟 + 你的名次 + 报名动作）。
-   No black box. The name sits straight on the page with an aurora as stage light
-   in the top-right; read-once prize and dates on the left, the "numbers rail" on
-   the right (big clock, your rank, enrol action). */
-.cmp-detail { display: flex; flex-direction: column; gap: 30px; }
+/* 详情 / detail */
+.cmp-detail { display: flex; flex-direction: column; gap: 26px; }
 .cmp-back { align-self: flex-start; font-size: 12px; color: #71717a; transition: color var(--dur-base) var(--ease-out); }
 .cmp-back:hover { color: #e4e4e7; }
-.cmp-arena {
-  position: relative;
-  isolation: isolate;
-  padding: 2px 0 30px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-.cmp-arena::before {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  right: -6%;
-  top: -140px;
-  width: 58%;
-  height: 380px;
-  pointer-events: none;
-  background: radial-gradient(ellipse at 60% 45%, rgba(110, 66, 255, 0.22), transparent 62%);
-  filter: blur(26px);
-  animation: cmp-aurora 16s ease-in-out infinite alternate;
-}
-.cmp-status {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 0;
-  font-size: 12px;
-  color: #a1a1aa;
-}
-.cmp-status > span + span {
-  margin-left: 14px;
-  padding-left: 14px;
-  border-left: 1px solid rgba(255, 255, 255, 0.12);
-}
-.cmp-status-tag {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 600;
-}
-.cmp-name {
-  margin: 16px 0 0;
-  font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
-  font-size: 54px;
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: -0.03em;
-  color: #f4f4f5;
-  text-wrap: balance;
-}
-.cmp-desc {
-  margin: 16px 0 0;
-  max-width: 60ch;
-  font-size: 13.5px;
-  line-height: 1.7;
-  color: #a1a1aa;
-}
-.cmp-arena-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 24px 48px;
-  align-items: end;
-  margin-top: 32px;
-}
-.cmp-meta {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 9px 18px;
-  margin: 0;
-  font-size: 13px;
-}
-.cmp-meta > div { display: contents; }
-.cmp-meta dt { color: #71717a; }
-.cmp-meta dd { margin: 0; color: #d4d4d8; }
-/* 奖品是页面上唯一的金色文字——荣耀只落一处才有分量。
-   The prize is the only gold text on the page: glory carries weight when it lands
-   in a single place. */
-.cmp-meta .is-prize dt { color: #c9a24a; }
-.cmp-meta .is-prize dd { color: #f0e2c0; font-weight: 600; }
-
-.cmp-rail {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 18px;
-  text-align: right;
-}
-.cmp-rail-label { display: block; font-size: 11px; letter-spacing: 0.06em; color: #71717a; }
-.cmp-clock-row { display: flex; justify-content: flex-end; gap: 16px; margin-top: 6px; }
-.cmp-clock-cell { display: flex; flex-direction: column; align-items: center; min-width: 64px; }
-.cmp-clock-cell b {
-  font-family: var(--font-display, 'Archivo'), sans-serif;
-  font-size: 58px;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: -0.03em;
-  color: #f4f4f5;
-  font-variant-numeric: tabular-nums;
-}
-.cmp-clock-cell span { margin-top: 7px; font-size: 11px; color: #71717a; }
-.cmp-clock-soon {
-  display: block;
-  margin-top: 6px;
-  font-family: var(--font-display, 'Archivo'), sans-serif;
-  font-size: 26px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: #f4f4f5;
-}
-.cmp-standing { min-width: 264px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
-.cmp-standing ul { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 0; padding: 0; list-style: none; }
-.cmp-standing li { display: flex; align-items: center; gap: 12px; }
-.cmp-standing li.is-dq { opacity: 0.6; }
-.cmp-standing-rank {
-  flex: none;
-  font-family: var(--font-display, 'Archivo'), sans-serif;
-  font-size: 30px;
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: -0.02em;
-  color: #f4f4f5;
-}
-.cmp-standing li > div { text-align: left; }
-.cmp-standing li > div span { display: block; font-size: 13px; color: #e4e4e7; }
-.cmp-standing li > div small { display: block; margin-top: 1px; font-size: 11px; color: #71717a; }
-.cmp-standing li.is-dq small { color: var(--down); }
-.cmp-standing-score { margin-left: auto; font-size: 22px; font-weight: 700; }
-.cmp-enroll { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; font-size: 13px; color: #a1a1aa; }
+.cmp-split { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 48px; align-items: start; }
+.cmp-side { padding-right: 40px; border-right: 1px solid rgba(255, 255, 255, 0.08); }
+.cmp-desc { margin: 14px 0 0; font-size: 13px; line-height: 1.7; color: #a1a1aa; }
+.cmp-clock { display: flex; gap: 14px; margin-top: 26px; }
+.cmp-clock > div { flex: 1; padding: 14px 0 12px; border-top: 2px solid #f4f4f5; }
+.cmp-clock > div.is-wide { flex: none; width: 100%; }
+.cmp-clock b { display: block; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 44px; font-weight: 900; line-height: 1; letter-spacing: -0.04em; color: #f4f4f5; }
+.cmp-clock b.is-text { font-size: 22px; letter-spacing: -0.02em; }
+.cmp-clock span { font-size: 11px; color: #71717a; }
+.cmp-mine { margin-top: 28px; padding: 16px 18px; border: 1px solid rgba(110, 66, 255, 0.35); border-radius: 12px; background: rgba(110, 66, 255, 0.12); }
+.cmp-mine > small { font-size: 11px; letter-spacing: 0.1em; color: #b9a6ff; }
+.cmp-mine-row { display: flex; align-items: center; gap: 14px; margin-top: 8px; }
+.cmp-mine-row + .cmp-mine-row { padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.cmp-mine-row.is-dq { opacity: 0.6; }
+.cmp-mine-row > b { flex: none; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 40px; font-weight: 900; line-height: 1; letter-spacing: -0.04em; color: #f4f4f5; }
+.cmp-mine-row > span { min-width: 0; }
+.cmp-mine-row > span > span { display: block; font-size: 13px; color: #e4e4e7; }
+.cmp-mine-row > span > small { display: block; font-size: 11px; color: #a1a1aa; }
+.cmp-mine-row.is-dq small { color: var(--down); }
+.cmp-mine-score { margin-left: auto; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 20px; font-weight: 700; }
+.cmp-facts { display: grid; gap: 8px; margin: 26px 0 0; font-size: 12.5px; }
+.cmp-facts > div { display: flex; gap: 14px; }
+.cmp-facts dt { flex: none; width: 64px; color: #71717a; }
+.cmp-facts dd { margin: 0; color: #d4d4d8; }
+.cmp-facts dd.is-prize { color: #f0e2c0; font-weight: 600; }
+.cmp-enroll { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 22px; font-size: 13px; color: #a1a1aa; }
 .cmp-enroll p { margin: 0; }
-/* 已在场的人再报一个账户是次要动作，用幽灵钮；但幽灵钮在这里没有底色可衬，
-   补一圈发丝边，不然看着像一行漏排的文字。
-   Entering another account is secondary for someone already in, so a ghost
-   button; with no surface behind it here it needs a hairline edge, or it reads
-   as a stray line of text. */
-.cmp-enroll .btn-ghost { border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 10px; }
-
-/* ── 榜单 / board ──
-   冠军整行（金色顶线、大铸币、大分数），亚季军对半分，其余密排。
-   Champion as a full row (gold top rule, big coin, big score), second and third
-   in halves, the rest dense. */
-.cmp-champ {
-  position: relative;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 20px;
-  padding: 26px 8px 26px 6px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(90deg, rgba(201, 162, 74, 0.09), transparent 55%);
+.cmp-btn { padding: 12px 20px; border-radius: 10px; background: #f4f4f5; color: #0a0a0d; font-size: 13px; font-weight: 700; transition: transform var(--dur-base) var(--ease-out); }
+.cmp-btn:hover { transform: translateY(-1px); } .cmp-btn:active { transform: scale(0.98); }
+.cmp-btn-ghost { padding: 11px 18px; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 10px; color: #e4e4e7; font-size: 13px; font-weight: 600; }
+.cmp-btn-ghost:hover { border-color: rgba(255, 255, 255, 0.3); }
+.cmp-ladder-h { display: flex; align-items: baseline; gap: 12px; padding-bottom: 10px; }
+.cmp-ladder-h h3 { margin: 0; font-size: 13px; font-weight: 700; color: #f4f4f5; }
+.cmp-ladder-h > span:last-child { margin-left: auto; font-size: 12px; color: #52525b; }
+.cmp-ladder { margin: 0; padding: 0; list-style: none; }
+.cmp-ladder li {
+  position: relative; display: grid; grid-template-columns: 110px minmax(0, 1fr) 120px 150px; align-items: center; gap: 18px;
+  padding: 16px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
-.cmp-champ::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 1px;
-  background: linear-gradient(90deg, #d8b565, rgba(216, 181, 101, 0.25) 55%, transparent);
+.cmp-ladder li:first-child { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.cmp-ladder li.is-self { margin: 0 -14px; padding-left: 14px; padding-right: 14px; background: linear-gradient(90deg, rgba(110, 66, 255, 0.14), transparent 60%); }
+.cmp-ladder-rank {
+  font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 54px; font-weight: 900; line-height: 1; letter-spacing: -0.05em;
+  color: transparent; -webkit-text-stroke: 1px rgba(255, 255, 255, 0.28);
 }
-.cmp-champ.is-self { box-shadow: inset 3px 0 0 rgba(139, 108, 255, 0.75); padding-left: 16px; }
-.cmp-champ-who { min-width: 0; }
-.cmp-champ-who b {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: #f4f4f5;
-}
-.cmp-champ-who b > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cmp-champ-who > span { display: block; margin-top: 4px; font-size: 12px; color: #71717a; }
-.cmp-champ-score { text-align: right; }
-.cmp-champ-score b {
-  display: block;
-  font-family: var(--font-display, 'Archivo'), sans-serif;
-  font-size: 44px;
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: -0.03em;
-}
-.cmp-champ-score span { display: block; margin-top: 6px; font-size: 11px; color: #71717a; }
-.cmp-halves { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
-.cmp-halves-1 { grid-template-columns: 1fr; }
-.cmp-half {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-  padding: 18px 8px;
-}
-.cmp-half + .cmp-half { padding-left: 22px; border-left: 1px solid rgba(255, 255, 255, 0.08); }
-.cmp-half.is-self { background: linear-gradient(90deg, rgba(110, 66, 255, 0.10), transparent); }
-.cmp-half-who { min-width: 0; }
-.cmp-half-who b { display: flex; align-items: center; gap: 7px; font-size: 15px; font-weight: 600; color: #f4f4f5; }
-.cmp-half-who > span { display: block; margin-top: 2px; font-size: 11.5px; color: #71717a; }
-.cmp-half-score {
-  font-family: var(--font-display, 'Archivo'), sans-serif;
-  font-size: 24px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-}
-.cmp-rows { margin: 0; padding: 0; list-style: none; }
-.cmp-rows li {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-.cmp-rows li.is-self { background: linear-gradient(90deg, rgba(110, 66, 255, 0.10), transparent); }
-.cmp-rank { font-size: 13px; color: #71717a; }
-.cmp-row-who { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 13.5px; color: #e4e4e7; }
-.cmp-row-login { display: none; font-size: 12px; color: #71717a; }
-.cmp-row-score { font-size: 15px; font-weight: 600; }
-.cmp-empty {
-  display: grid;
-  place-items: center;
-  padding: 44px 20px;
-  border: 1px dashed rgba(255, 255, 255, 0.10);
-  border-radius: 16px;
-}
+.cmp-ladder li:first-child .cmp-ladder-rank { color: #c9a24a; -webkit-text-stroke: 0; }
+.cmp-ladder-who { min-width: 0; }
+.cmp-ladder-who b { display: flex; align-items: center; gap: 6px; font-size: 16px; font-weight: 700; color: #f4f4f5; }
+.cmp-ladder-who > span { display: block; margin-top: 2px; font-size: 11.5px; color: #71717a; }
+.cmp-ladder-bar { display: block; height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--up), rgba(53, 201, 122, 0.15)); }
+.cmp-ladder-bar.is-neg { background: linear-gradient(90deg, var(--down), rgba(240, 78, 90, 0.15)); }
+.cmp-ladder-score { text-align: right; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
+.cmp-empty { display: grid; place-items: center; padding: 44px 20px; border: 1px dashed rgba(255, 255, 255, 0.10); border-radius: 16px; }
 .cmp-empty p { margin: 0; font-size: 13px; color: #a1a1aa; }
-.cmp-rules { margin: 0; padding: 0 0 0 16px; list-style: disc; }
+.cmp-rules { margin: 22px 0 0; padding: 0 0 0 16px; list-style: disc; }
 .cmp-rules li { font-size: 11.5px; line-height: 1.8; color: #52525b; }
 
-@keyframes cmp-aurora {
-  from { transform: translate3d(-2%, 0, 0) scale(1); }
-  to { transform: translate3d(2%, 2%, 0) scale(1.06); }
-}
-@keyframes cmp-breathe { 50% { opacity: 0.45; } }
+@keyframes cmp-breathe { 50% { opacity: 0.35; } }
+@keyframes cmp-tick { to { transform: translateX(-100%); } }
 
-@media (min-width: 768px) {
-  .cmp-row-login { display: block; }
-  .cmp-rows li { grid-template-columns: 40px minmax(0, 1fr) 110px auto; }
-}
 @media (max-width: 767px) {
-  .cmp-detail { gap: 24px; }
-  .cmp-arena { padding-bottom: 24px; }
-  .cmp-arena::before { right: -20%; top: -100px; width: 90%; height: 300px; }
-  .cmp-name { font-size: 34px; }
-  .cmp-arena-grid { grid-template-columns: 1fr; gap: 22px; margin-top: 24px; }
-  /* 手机上数字栏排到奖品/时间之前：倒计时和你的名次比日期重要。
-     On phones the numbers rail goes before prize/dates: the countdown and your
-     rank matter more than the dates. */
-  .cmp-rail { order: -1; align-items: stretch; text-align: left; }
-  .cmp-clock-row { justify-content: flex-start; }
-  .cmp-clock-cell { min-width: 56px; }
-  .cmp-clock-cell b { font-size: 44px; }
-  .cmp-standing { min-width: 0; }
-  .cmp-enroll { align-items: flex-start; }
-  .cmp-list { gap: 32px; }
-  .cmp-bill { grid-template-columns: 1fr; gap: 18px; padding: 20px 18px; border-radius: 18px; }
-  .cmp-bill-name { font-size: 26px; }
-  .cmp-bill-clock { text-align: left; }
-  .cmp-clock-sm .cmp-clock-cell b { font-size: 40px; }
-  .cmp-up { grid-template-columns: 1fr; gap: 10px; }
-  .cmp-up-right { text-align: left; }
-  .cmp-up-right span { display: inline; margin-right: 8px; }
-  .cmp-up-right b { display: inline; font-size: 18px; }
-  .cmp-hall { grid-template-columns: 1fr; }
-  .cmp-champ { grid-template-columns: auto minmax(0, 1fr); gap: 12px 14px; padding: 20px 6px; }
-  .cmp-champ-who b { font-size: 18px; }
-  .cmp-champ-score { grid-column: 2; text-align: left; }
-  .cmp-champ-score b { font-size: 34px; }
-  .cmp-halves { grid-template-columns: 1fr; }
-  .cmp-half + .cmp-half { padding-left: 8px; border-left: 0; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+  .cmp-list { gap: 30px; }
+  .cmp-ghost { font-size: 120px; top: -10px; right: -6px; }
+  .cmp-bug { position: static; display: inline-flex; margin-bottom: 14px; }
+  .cmp-hero-name { font-size: 42px; }
+  .cmp-hero-name.is-detail { font-size: 34px; }
+  .cmp-hero-sub { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .cmp-hero-cta { margin-left: 0; }
+  .cmp-sec { grid-template-columns: 1fr; gap: 14px; }
+  .cmp-row { grid-template-columns: minmax(0, 1fr) auto; gap: 10px 16px; padding: 14px 4px; }
+  .cmp-row > .cmp-status-tag { grid-column: 2; grid-row: 1; justify-self: end; }
+  .cmp-row-cd { grid-column: 1 / -1; text-align: left; }
+  .cmp-row-cd small { display: inline; margin-right: 8px; }
+  .cmp-row-cd b { display: inline; font-size: 18px; }
+  .cmp-row-name { font-size: 19px; }
+  .cmp-champ { grid-column: 1 / -1; }
+  .cmp-row-honor .cmp-row-cd { grid-column: 2; grid-row: 1; text-align: right; }
+  .cmp-split { grid-template-columns: 1fr; gap: 28px; }
+  .cmp-side { padding-right: 0; padding-bottom: 24px; border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+  .cmp-clock b { font-size: 38px; }
+  .cmp-ladder li { grid-template-columns: 64px minmax(0, 1fr) auto; gap: 12px; padding: 14px 0; }
+  .cmp-ladder li.is-self { margin: 0 -8px; padding-left: 8px; padding-right: 8px; }
+  .cmp-ladder-rank { font-size: 40px; }
+  .cmp-ladder-bar { grid-column: 2 / -1; grid-row: 2; }
+  .cmp-ladder-score { font-size: 20px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .cmp-arena::before, .cmp-bill::before, .cmp-live-dot { animation: none; }
+  .cmp-live-dot, .cmp-ticker > div { animation: none; }
 }
 
 

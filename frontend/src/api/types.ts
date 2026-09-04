@@ -1304,6 +1304,12 @@ export interface CompetitionSummary {
   // nickname setting); null while unsettled or when nobody ranked. The list page's
   // hall of champions shows them without opening each detail.
   champion?: CompetitionChampion | null
+  // 榜首三行（进行中 / 已结束 / 已终审都有；未开赛为空）——列表头版的跑马灯用。
+  // Top three rows (running / ended / settled; empty before start), for the list
+  // page's ticker.
+  top?: CompetitionChampion[]
+  // 未取消资格的参赛账户数。/ Entered accounts not disqualified.
+  participants?: number
 }
 
 export interface CompetitionChampion {

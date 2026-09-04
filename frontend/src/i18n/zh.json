@@ -2003,7 +2003,7 @@
     "title": "交易比赛",
     "empty": "暂无比赛",
     "backToList": "返回比赛列表",
-    "cd": { "toStart": "距开赛", "toEnd": "距结束", "dh": "{{d}} 天 {{h}} 小时", "hm": "{{h}} 小时 {{m}} 分", "m": "{{m}} 分", "soon": "即将", "units": { "d": "天", "h": "小时", "m": "分" } }, "myLiveRank": "当前第 {{n}} 名", "myPending": "成绩计算中，达到笔数门槛后进榜", "prizeLabel": "奖品", "myRank": "你的名次", "registerMore": "再报一个账户", "hall": "荣誉墙", "champion": "冠军", "noChampion": "无人上榜", "settling": "待终审",
+    "cd": { "toStart": "距开赛", "toEnd": "距结束", "dh": "{{d}} 天 {{h}} 小时", "hm": "{{h}} 小时 {{m}} 分", "m": "{{m}} 分", "soon": "即将", "units": { "d": "天", "h": "小时", "m": "分" } }, "myLiveRank": "当前第 {{n}} 名", "myPending": "成绩计算中，达到笔数门槛后进榜", "prizeLabel": "奖品", "myRank": "你的名次", "registerMore": "再报一个账户", "hall": "荣誉墙", "champion": "冠军", "noChampion": "无人上榜", "settling": "待终审", "enterArena": "进入赛场", "upcomingHint": "报名中的赛事，点进去报名", "hallHint": "已终审赛事的冠军", "ticker": { "empty": "暂无成绩，等第一笔平仓", "participants": "参赛 {{n}} 账户", "live": "实时更新" },
     "status": { "draft": "草稿", "upcoming": "即将开始", "regOpen": "报名中", "running": "进行中",
                 "finished": "已结束", "settled": "已终审" },
     "enrollment": { "signup": "报名制", "auto": "自动参赛" },

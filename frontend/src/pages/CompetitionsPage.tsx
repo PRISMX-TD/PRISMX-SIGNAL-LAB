@@ -27,7 +27,6 @@ import type {
   CompetitionDetail,
   CompetitionTrack,
   CompetitionListGrouped,
-  CompetitionMetric,
   CompetitionSummary,
   LeaderboardPayload,
   MT5Account,
@@ -183,15 +182,13 @@ function regState(c: CompetitionSummary, nowMs: number): 'notOpen' | 'open' | 'c
   return 'open'
 }
 
-// 状态行：状态芯片 + 计分口径 / 赛道 / 参赛方式，发丝线隔开。列表三种版式和
-// 详情页赛场共用同一行，三处长得一样。
+// 状态行：状态芯片 + 计分口径 / 赛道 / 参赛方式，发丝线隔开。列表与详情共用。
 // The status line: status pill plus metric / track / enrollment, hairline-separated.
-// Shared by all three list layouts and the detail arena, so it reads the same
-// everywhere.
+// Shared by the list and the detail.
 function StatusLine({ c, tagKey, t }: { c: CompetitionSummary; tagKey: string; t: TFunction }) {
   const live = tagKey === 'running' || tagKey === 'regOpen'
   return (
-    <div className="cmp-status">
+    <div className="cmp-kicker">
       <span className={`cmp-status-tag ${STATUS_TAG_CLASS[tagKey] ?? ''}`}>
         {live && <i className="cmp-live-dot" aria-hidden />}
         {t(`competition.status.${tagKey}`)}
@@ -215,12 +212,34 @@ const fmtDay = (iso: string): string =>
 const fmtRange = (c: CompetitionSummary) =>
   `${c.startsAt ? fmtDay(c.startsAt) : '—'} → ${c.endsAt ? fmtDay(c.endsAt) : '—'}`
 
-// 进行中 = 广告牌：这页的主角。左边赛名 32px、奖品一行金字、时间窗口；右边
-// 天/小时/分 三格倒计时。整块是按钮。
-// Running = the billboard, the page's lead. Name at 32px, a gold prize line and
-// the time window on the left; the day / hour / minute countdown on the right.
-// The whole block is a button.
-function LiveBillboard({
+// 转播角标的读数：固定 DD:HH:MM，不足一天也补 00，读数的位置和宽度永远不变。
+// The broadcast bug's readout: always DD:HH:MM, zero-padded under a day, so the
+// readout never changes place or width.
+function bugReadout(parts: Array<{ unit: ClockUnit; value: number }>): string {
+  const v: Record<ClockUnit, number> = { d: 0, h: 0, m: 0 }
+  for (const p of parts) v[p.unit] = p.value
+  return [v.d, v.h, v.m].map((n) => String(n).padStart(2, '0')).join(':')
+}
+
+// 分数按正负上色：收益率会为负，胜率恒为正，同一条规则两边都对。
+// Score coloured by sign: a return can be negative, a win rate never is, and one
+// rule covers both.
+function ScoreText({ score, className = '' }: { score: number; className?: string }) {
+  return (
+    <b className={`num ${score < 0 ? 'text-down' : 'text-up'} ${className}`}>{fmtScorePct(score)}</b>
+  )
+}
+
+const badgeOf = (id: string | null | undefined) =>
+  id ? <BadgeIcon id={id} rarity={BADGE_RARITY[id] ?? 'common'} earned size={18} /> : null
+
+// ── 列表：头版（进行中）──
+// 把比赛当成一场正在直播的赛事：赛名 76px 压住整个头版，右上角是转播里的角标
+// 倒计时，底下一条跑马灯滚着前三名。整块可点。
+// The list's front page (running): treat the competition as a live broadcast. The
+// name at 76px owns the page, a broadcast bug with the countdown sits top-right,
+// and a ticker runs the top three underneath. The whole block is a button.
+function LiveHero({
   c,
   nowMs,
   onClick,
@@ -232,43 +251,52 @@ function LiveBillboard({
   t: TFunction
 }) {
   const clock = clockOf(c, nowMs, t)
+  const top = c.top ?? []
+  // 跑马灯内容复制两份首尾相接，动画走满一份的宽度就无缝回到起点。
+  // The ticker content is duplicated end to end; the animation travels one copy's
+  // width and loops seamlessly.
+  const ticker = (
+    <>
+      {top.length > 0
+        ? top.map((r, i) => (
+            <span key={i}>
+              {String(i + 1).padStart(2, '0')} <b>{r.displayName}</b> <ScoreText score={r.score} />
+            </span>
+          ))
+        : <span>{t('competition.ticker.empty')}</span>}
+      <span>{t('competition.ticker.participants', { n: c.participants ?? 0 })}</span>
+      <span>{t('competition.ticker.live')}</span>
+    </>
+  )
   return (
-    <button type="button" onClick={onClick} className="cmp-bill">
-      <div className="min-w-0">
-        <StatusLine c={c} tagKey={statusTagKey(c, nowMs)} t={t} />
-        <h4 className="cmp-bill-name">{c.name}</h4>
-        {c.prizeNote && (
-          <p className="cmp-bill-prize">
-            <span>{t('competition.prizeLabel')}</span>
-            {c.prizeNote}
-          </p>
-        )}
-        <p className="cmp-bill-dates num">{fmtRange(c)}</p>
-      </div>
+    <button type="button" onClick={onClick} className="cmp-hero">
+      <span className="cmp-ghost" aria-hidden>LIVE</span>
       {clock && (
-        <div className="cmp-bill-clock cmp-clock-sm">
-          <span className="cmp-rail-label">{clock.label}</span>
-          {clock.parts ? (
-            <div className="cmp-clock-row">
-              {clock.parts.map((part) => (
-                <div key={part.unit} className="cmp-clock-cell">
-                  <b className="num">{String(part.value).padStart(2, '0')}</b>
-                  <span>{t(`competition.cd.units.${part.unit}`)}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <b className="cmp-clock-soon num">{t('competition.cd.soon')}</b>
-          )}
-        </div>
+        <span className="cmp-bug">
+          <span>{clock.label}</span>
+          <b className="num">{clock.parts ? bugReadout(clock.parts) : t('competition.cd.soon')}</b>
+        </span>
       )}
+      <StatusLine c={c} tagKey={statusTagKey(c, nowMs)} t={t} />
+      <h3 className="cmp-hero-name">{c.name}</h3>
+      <div className="cmp-hero-sub">
+        {c.prizeNote && (
+          <span className="cmp-hero-prize">
+            <small>{t('competition.prizeLabel')}</small>
+            {c.prizeNote}
+          </span>
+        )}
+        <span className="cmp-hero-when num">{fmtRange(c)}</span>
+        <span className="cmp-hero-cta">{t('competition.enterArena')}</span>
+      </div>
+      <div className="cmp-ticker" aria-hidden>
+        <div>{ticker}{ticker}</div>
+      </div>
     </button>
   )
 }
 
-// 即将开始 = 赛程行：名字 + 状态行在左，右边一句距开赛。发丝线分行，不套框。
-// Upcoming = schedule rows: name and status line on the left, "starts in" on the
-// right. Hairlines between rows, no boxes.
+// ── 列表：赛程行（即将开始）──
 function UpcomingRow({
   c,
   nowMs,
@@ -281,57 +309,52 @@ function UpcomingRow({
   t: TFunction
 }) {
   const cd = countdownOf(c, nowMs, t)
+  const tagKey = statusTagKey(c, nowMs)
   return (
-    <button type="button" onClick={onClick} className="cmp-up">
+    <button type="button" onClick={onClick} className="cmp-row">
       <div className="min-w-0">
-        <div className="cmp-up-name">{c.name}</div>
-        <StatusLine c={c} tagKey={statusTagKey(c, nowMs)} t={t} />
+        <b className="cmp-row-name">{c.name}</b>
+        <div className="cmp-row-meta">
+          {t(`leaderboard.boards.${c.metric}`)} · {t(`competition.track.${c.track}`)} · {t(`competition.enrollment.${c.enrollment}`)}
+        </div>
       </div>
-      <div className="cmp-up-right">
-        {cd ? (
-          <>
-            <span>{cd.label}</span>
-            <b className="num">{cd.value}</b>
-          </>
-        ) : (
-          <b className="num">{c.startsAt ? fmtDate(c.startsAt) : '—'}</b>
-        )}
+      <span className={`cmp-status-tag ${STATUS_TAG_CLASS[tagKey] ?? ''}`}>
+        {tagKey === 'regOpen' && <i className="cmp-live-dot" aria-hidden />}
+        {t(`competition.status.${tagKey}`)}
+      </span>
+      <div className="cmp-row-cd">
+        {cd ? (<><small>{cd.label}</small><b>{cd.value}</b></>) : <b className="num">{c.startsAt ? fmtDay(c.startsAt) : '—'}</b>}
       </div>
     </button>
   )
 }
 
-// 已结束 = 荣誉墙：一场比赛一块牌，冠军铸币 + 冠军名 + 夺冠成绩在前，赛名在上
-// 一行小字。终审前没有冠军可挂，铸币位置留一枚虚线空位并写"待终审"。
-// Finished = the hall of champions: one plate per competition, with the rank-1 coin,
-// the champion's name and winning score leading, and the competition name as a small
-// line above. Before settlement there is no champion to hang, so the coin slot stays
-// a dashed blank with "pending".
-function HonorPlate({ c, onClick, t }: { c: CompetitionSummary; onClick: () => void; t: TFunction }) {
+// ── 列表：荣誉墙行（已结束）──
+// 冠军铸币 + 冠军名在中间，夺冠成绩在右；未终审的中间写"待终审"。
+// Champion coin and name in the middle, the winning score on the right; unsettled
+// ones say "pending" in the middle instead.
+function HonorRow({ c, onClick, t }: { c: CompetitionSummary; onClick: () => void; t: TFunction }) {
   const champ = c.status === 'settled' ? c.champion ?? null : null
   return (
-    <button type="button" onClick={onClick} className="cmp-plate">
-      {champ ? <RankCoin rank={1} size={48} /> : <i className="cmp-plate-mark" aria-hidden />}
+    <button type="button" onClick={onClick} className="cmp-row cmp-row-honor">
       <div className="min-w-0">
-        <div className="cmp-plate-comp">{c.name}</div>
-        <div className="cmp-plate-champ">
-          {champ ? (
-            <>
-              <small>{t('competition.champion')}</small>
-              {champ.equippedBadge && (
-                <BadgeIcon id={champ.equippedBadge} rarity={BADGE_RARITY[champ.equippedBadge] ?? 'common'} earned size={18} />
-              )}
-              <span className="truncate">{champ.displayName}</span>
-              <ScoreText score={champ.score} />
-            </>
-          ) : (
-            <span className="cmp-plate-none">
-              {c.status === 'settled' ? t('competition.noChampion') : t('competition.settling')}
-            </span>
-          )}
-        </div>
-        <div className="cmp-plate-dates num">{fmtRange(c)}</div>
+        <b className="cmp-row-name">{c.name}</b>
+        <div className="cmp-row-meta num">{fmtRange(c)}</div>
       </div>
+      <div className="cmp-champ">
+        {champ ? (
+          <>
+            <RankCoin rank={1} size={40} />
+            <div className="min-w-0">
+              <b>{badgeOf(champ.equippedBadge)}<span className="truncate">{champ.displayName}</span></b>
+              <small>{t('competition.champion')} · {t(`leaderboard.boards.${c.metric}`)}</small>
+            </div>
+          </>
+        ) : (
+          <span className="cmp-champ-none">{c.status === 'settled' ? t('competition.noChampion') : t('competition.settling')}</span>
+        )}
+      </div>
+      <div className="cmp-row-cd">{champ && <ScoreText score={champ.score} className="cmp-row-score" />}</div>
     </button>
   )
 }
@@ -354,34 +377,20 @@ function ListView({
       </div>
     )
   }
-  // 三个分组三种版式：进行中是广告牌（主角），即将开始是赛程行，已结束是荣誉墙。
-  // 同一页不重复用一种版式，也不把三种东西都画成卡片。
-  // Three groups, three layouts: running is the billboard (the lead), upcoming is
-  // schedule rows, finished is the hall of champions. No layout repeats on the page,
-  // and none of the three is drawn as a card grid.
-  const header = (title: string, n: number) => (
-    <div className="cmp-group-h">
-      <h3>{title}</h3>
-      <i aria-hidden />
-      <span className="num">{n}</span>
-    </div>
-  )
+  // 版式：进行中是头版（一场一块，通常只有一场），即将开始与荣誉墙是"栏目 + 行"
+  // ——左边 220px 栏目名与一句说明，右边发丝线分行。
+  // Layout: running is the front page (one block each, usually just one); upcoming
+  // and the hall of champions are "column + rows": a 220px column title with one
+  // line of copy on the left, hairline rows on the right.
   return (
     <div className="cmp-list">
-      {data.running.length > 0 && (
-        <section>
-          {header(t('competition.status.running'), data.running.length)}
-          <div className="mt-4 space-y-3">
-            {data.running.map((c) => (
-              <LiveBillboard key={c.id} c={c} nowMs={nowMs} t={t} onClick={() => onOpen(c.id)} />
-            ))}
-          </div>
-        </section>
-      )}
+      {data.running.map((c) => (
+        <LiveHero key={c.id} c={c} nowMs={nowMs} t={t} onClick={() => onOpen(c.id)} />
+      ))}
       {data.upcoming.length > 0 && (
-        <section>
-          {header(t('competition.status.upcoming'), data.upcoming.length)}
-          <div className="mt-3">
+        <section className="cmp-sec">
+          <h4>{t('competition.status.upcoming')}<small>{t('competition.upcomingHint')}</small></h4>
+          <div>
             {data.upcoming.map((c) => (
               <UpcomingRow key={c.id} c={c} nowMs={nowMs} t={t} onClick={() => onOpen(c.id)} />
             ))}
@@ -389,11 +398,11 @@ function ListView({
         </section>
       )}
       {data.finished.length > 0 && (
-        <section>
-          {header(t('competition.hall'), data.finished.length)}
-          <div className="cmp-hall mt-3">
+        <section className="cmp-sec">
+          <h4>{t('competition.hall')}<small>{t('competition.hallHint')}</small></h4>
+          <div>
             {data.finished.map((c) => (
-              <HonorPlate key={c.id} c={c} t={t} onClick={() => onOpen(c.id)} />
+              <HonorRow key={c.id} c={c} t={t} onClick={() => onOpen(c.id)} />
             ))}
           </div>
         </section>
@@ -402,32 +411,13 @@ function ListView({
   )
 }
 
-// 分数按正负上色：收益率会为负，胜率恒为正，同一条规则两边都对。
-// Score coloured by sign: a return can be negative, a win rate never is, and one
-// rule covers both.
-function ScoreText({ score, className = '' }: { score: number; className?: string }) {
-  return (
-    <b className={`num ${score < 0 ? 'text-down' : 'text-up'} ${className}`}>{fmtScorePct(score)}</b>
-  )
-}
-
-// 榜单 = 冠军整行（金色顶线、大铸币、大分数）+ 亚季军对半分 + 其余密排。不做
-// 台座卡片：名次靠尺寸和位置说话，边框只会把冠军和第八名框成一样的东西。
-// 数据仍是 LeaderboardPayload（后端与常设榜共用 build_board_rows_payload）。
-// The board = a full-width champion row (gold top rule, big coin, big score),
-// second and third split in halves, the rest in dense rows. No plinth cards: rank
-// is expressed by size and position, and a border would frame the champion and
-// the eighth place as the same thing. The data is still a LeaderboardPayload (the
-// backend shares build_board_rows_payload with the standing boards).
-function BoardBlock({
-  board,
-  metric,
-  t,
-}: {
-  board: LeaderboardPayload
-  metric: CompetitionMetric
-  t: TFunction
-}) {
+// ── 详情：名次梯 ──
+// 名次是 54px 的描边巨型数字，只有第一名填成金色；每行一根按分数比例的细线
+// （负数红色），分数 24px 在最右。表格把冠军和第八名画得一样重，这个不会。
+// The ladder: ranks as 54px outlined giants, only #1 filled gold; a thin bar per row
+// proportional to the score (red when negative), the score at 24px on the right. A
+// table draws the champion and the eighth place with equal weight; this doesn't.
+function Ladder({ board, t }: { board: LeaderboardPayload; t: TFunction }) {
   if (board.rows.length === 0) {
     return (
       <div className="cmp-empty">
@@ -435,68 +425,29 @@ function BoardBlock({
       </div>
     )
   }
-  const [first, ...others] = board.rows
-  const halves = others.filter((r) => r.rank <= 3)
-  const rest = others.filter((r) => r.rank > 3)
-  const youTag = (
-    <span className="tag shrink-0 bg-prism-600/25 text-[10px] text-prism-300">{t('leaderboard.youTag')}</span>
-  )
-  const badgeOf = (id: string | null) =>
-    id ? <BadgeIcon id={id} rarity={BADGE_RARITY[id] ?? 'common'} earned size={18} /> : null
+  const maxAbs = Math.max(...board.rows.map((r) => Math.abs(r.score)), 1e-9)
   return (
-    <div className="cmp-board">
-      <article className={`cmp-champ ${first.isSelf ? 'is-self' : ''}`}>
-        <RankCoin rank={first.rank} size={64} />
-        <div className="cmp-champ-who">
-          <b>
-            <span>{first.displayName}</span>
-            {badgeOf(first.equippedBadge)}
-            {first.isSelf && youTag}
-          </b>
-          <span className="num">{first.login}</span>
-        </div>
-        <div className="cmp-champ-score">
-          <ScoreText score={first.score} />
-          <span>{t(`leaderboard.colScore.${metric}`)}</span>
-        </div>
-      </article>
-
-      {halves.length > 0 && (
-        <div className={`cmp-halves cmp-halves-${halves.length}`}>
-          {halves.map((row) => (
-            <article key={row.rank} className={`cmp-half ${row.isSelf ? 'is-self' : ''}`}>
-              <RankCoin rank={row.rank} size={44} />
-              <div className="cmp-half-who">
-                <b>
-                  <span className="truncate">{row.displayName}</span>
-                  {badgeOf(row.equippedBadge)}
-                  {row.isSelf && youTag}
-                </b>
-                <span className="num">{row.login}</span>
-              </div>
-              <ScoreText score={row.score} className="cmp-half-score" />
-            </article>
-          ))}
-        </div>
-      )}
-
-      {rest.length > 0 && (
-        <ul className="cmp-rows">
-          {rest.map((row) => (
-            <li key={row.rank} className={row.isSelf ? 'is-self' : ''}>
-              <span className="num cmp-rank">{String(row.rank).padStart(2, '0')}</span>
-              <div className="cmp-row-who">
-                {badgeOf(row.equippedBadge)}
-                <span className="truncate">{row.displayName}</span>
-                {row.isSelf && youTag}
-              </div>
-              <span className="num cmp-row-login">{row.login}</span>
-              <ScoreText score={row.score} className="cmp-row-score" />
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+    <ol className="cmp-ladder">
+      {board.rows.map((row) => (
+        <li key={`${row.rank}-${row.login}`} className={row.isSelf ? 'is-self' : ''}>
+          <span className="cmp-ladder-rank">{String(row.rank).padStart(2, '0')}</span>
+          <div className="cmp-ladder-who">
+            <b>
+              {badgeOf(row.equippedBadge)}
+              <span className="truncate">{row.displayName}</span>
+              {row.isSelf && <span className="cmp-you">{t('leaderboard.youTag')}</span>}
+            </b>
+            <span className="num">{row.login}</span>
+          </div>
+          <i
+            className={`cmp-ladder-bar ${row.score < 0 ? 'is-neg' : ''}`}
+            style={{ width: `${Math.max(2, (Math.abs(row.score) / maxAbs) * 100)}%` }}
+            aria-hidden
+          />
+          <ScoreText score={row.score} className="cmp-ladder-score" />
+        </li>
+      ))}
+    </ol>
   )
 }
 
@@ -685,7 +636,6 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
   // enter several accounts, one row each). "Your rank" reads live rank and score
   // per account off this.
   const myRows = new Map(detail.board.rows.filter((r) => r.isSelf).map((r) => [r.login, r]))
-  const isLive = tagKey === 'running' || tagKey === 'regOpen'
   const boardHeading = detail.status === 'settled' ? t('competition.finalBoard') : t('competition.liveBoard')
 
   return (
@@ -694,39 +644,71 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
         ← {t('competition.backToList')}
       </button>
 
-      {/* ── 赛场 ────────────────────────────────────────────────
-          不再是一只黑盒子：赛名直接落在页面上，右上角一团极光当舞台光。上面
-          一行是状态与口径，中间是赛名与说明，下面左右分两栏——左栏是奖品与
-          时间（读一遍就够的信息），右栏是"数字栏"：倒计时大钟 + 你的名次 +
-          报名动作，也就是用户进来真正要看、要做的那几样。
-          The arena: no longer a black box. The name sits straight on the page with
-          an aurora in the top-right corner as stage light. Status and scoring on
-          one line, name and description in the middle, then two columns: prize
-          and dates on the left (read-once information), and on the right the
-          "numbers rail": the big countdown clock, your rank, and the enrol action,
-          i.e. the few things a visitor actually came to see and do. */}
-      <section className="cmp-arena">
-        <div className="cmp-status">
-          <span className={`cmp-status-tag ${STATUS_TAG_CLASS[tagKey] ?? ''}`}>
-            {isLive && <i className="cmp-live-dot" aria-hidden />}
-            {t(`competition.status.${tagKey}`)}
-          </span>
-          <span>{t(`leaderboard.boards.${detail.metric}`)}</span>
-          <span>{t(`competition.track.${detail.track}`)}</span>
-          <span>{t(`competition.enrollment.${detail.enrollment}`)}</span>
-          {detail.pendingSettle && (
-            <span className="text-amber-300">{t('competition.pendingSettle')}</span>
-          )}
-        </div>
-        <h2 className="cmp-name">{detail.name}</h2>
-        {detail.description && <p className="cmp-desc">{detail.description}</p>}
+      {/* ── 转播台式详情：左 380px 侧栏（赛名、大钟、你的名次、事实、报名动作），
+          右侧名次梯。侧栏是"字幕条"，名次梯是"画面"。
+          Broadcast-style detail: a 380px side rail (name, big clock, your rank, facts,
+          enrol action) on the left, the ladder on the right. The rail is the caption
+          strip; the ladder is the picture. */}
+      <div className="cmp-split">
+        <aside className="cmp-side">
+          <StatusLine c={detail} tagKey={tagKey} t={t} />
+          <h2 className="cmp-hero-name is-detail">{detail.name}</h2>
+          {detail.description && <p className="cmp-desc">{detail.description}</p>}
 
-        <div className="cmp-arena-grid">
-          <dl className="cmp-meta">
+          <div className="cmp-clock">
+            {clock?.parts ? (
+              ['d', 'h', 'm'].map((u) => {
+                const part = clock.parts!.find((x) => x.unit === u)
+                return (
+                  <div key={u}>
+                    <b className="num">{String(part?.value ?? 0).padStart(2, '0')}</b>
+                    <span>{t(`competition.cd.units.${u}`)}</span>
+                  </div>
+                )
+              })
+            ) : (
+              <div className="is-wide">
+                <b className="num is-text">{clock ? t('competition.cd.soon') : detail.endsAt ? fmtDate(detail.endsAt) : '—'}</b>
+                <span>{clock ? clock.label : t('competition.ends')}</span>
+              </div>
+            )}
+          </div>
+
+          {detail.myEntries.length > 0 && (
+            <div className="cmp-mine">
+              <small>{t('competition.myRank')}</small>
+              {detail.myEntries.map((entry) => {
+                const row = myRows.get(entry.login) ?? null
+                const rank = entry.finalRank ?? row?.rank ?? null
+                return (
+                  <div key={entry.login} className={`cmp-mine-row ${entry.disqualified ? 'is-dq' : ''}`}>
+                    <b className="num">{rank != null ? `#${rank}` : '—'}</b>
+                    <span>
+                      <span className="num">{entry.login}</span>
+                      <small>
+                        {entry.disqualified
+                          ? t('competition.disqualified')
+                          : entry.finalRank != null
+                            ? t('competition.finalRank')
+                            : rank == null
+                              ? t('competition.myPending')
+                              : entry.scoringFrom
+                                ? `${t('competition.scoringFrom')} ${fmtDate(entry.scoringFrom)}`
+                                : ''}
+                      </small>
+                    </span>
+                    {row && <ScoreText score={row.score} className="cmp-mine-score" />}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          <dl className="cmp-facts">
             {detail.prizeNote && (
-              <div className="is-prize">
+              <div>
                 <dt>{t('competition.prizeLabel')}</dt>
-                <dd>{detail.prizeNote}</dd>
+                <dd className="is-prize">{detail.prizeNote}</dd>
               </div>
             )}
             <div>
@@ -741,139 +723,69 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
               <div>
                 <dt>{t('competition.regWindow')}</dt>
                 <dd className="num">
-                  {detail.regOpensAt ? fmtDate(detail.regOpensAt) : '—'} – {detail.regClosesAt ? fmtDate(detail.regClosesAt) : '—'}
+                  {detail.regOpensAt ? fmtDay(detail.regOpensAt) : '—'} – {detail.regClosesAt ? fmtDay(detail.regClosesAt) : '—'}
                 </dd>
               </div>
             )}
           </dl>
 
-          <div className="cmp-rail">
-            {/* 钟表：进行中/未开赛给大数字倒计时；结束后没有倒计时可倒，改放
-                结束时刻，位置与字号不变，页面不会因为状态不同而塌掉一块。
-                The clock: a big-numeral countdown while running or upcoming; once
-                over there is nothing to count down, so the end instant sits there
-                at the same size, and the page doesn't lose a block by status. */}
-            <div className="cmp-clock">
-              <span className="cmp-rail-label">{clock ? clock.label : t('competition.ends')}</span>
-              {clock?.parts ? (
-                <div className="cmp-clock-row">
-                  {clock.parts.map((part) => (
-                    <div key={part.unit} className="cmp-clock-cell">
-                      <b className="num">{String(part.value).padStart(2, '0')}</b>
-                      <span>{t(`competition.cd.units.${part.unit}`)}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <b className="cmp-clock-soon num">
-                  {clock ? t('competition.cd.soon') : detail.endsAt ? fmtDate(detail.endsAt) : '—'}
-                </b>
-              )}
+          {/* 报名动作：仅 signup 赛。窗口内三态互斥（有可报账户 → 按钮，已报完 →
+              什么都不显示，"你的名次"已经说明了；一个账户都没有 → 指向绑定页）。
+              已经在场的人不再看到"报名已截止"。
+              Enrol action: signup competitions only. Inside the window three mutually
+              exclusive states (eligible accounts → button; all entered → nothing, "your
+              rank" already says so; no accounts → the bind page). Someone already in
+              never sees "registration closed". */}
+          {canShowRegisterAction && (
+            <div className="cmp-enroll">
+              {rState === 'notOpen' && <p>{t('competition.regNotOpen')}</p>}
+              {rState === 'closed' && enteredLogins.size === 0 && <p>{t('competition.regClosed')}</p>}
+              {rState === 'open' &&
+                (availableAccounts.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPickerOpen(true)
+                      setRegisterError(null)
+                    }}
+                    className={enteredLogins.size > 0 ? 'cmp-btn-ghost' : 'cmp-btn'}
+                  >
+                    {t(enteredLogins.size > 0 ? 'competition.registerMore' : 'competition.register')}
+                  </button>
+                ) : enteredLogins.size > 0 ? null : (
+                  <div>
+                    <p>
+                      {accounts.length === 0
+                        ? t('competition.noAccounts')
+                        : accounts.some((a) => a.tradeMode == null)
+                          ? t('competition.pendingAccountType')
+                          : t('competition.noRealAccounts')}
+                    </p>
+                    <Link to="/bind" className="mt-1 inline-block text-xs text-prism-300 transition hover:text-prism-200">
+                      {t('nav.bind')}
+                    </Link>
+                  </div>
+                ))}
+              {registerMsg && <p className="text-up">{registerMsg}</p>}
+              {registerError && <p className="text-down">{registerError}</p>}
             </div>
+          )}
+        </aside>
 
-            {detail.myEntries.length > 0 && (
-              <div className="cmp-standing">
-                <span className="cmp-rail-label">{t('competition.myRank')}</span>
-                <ul>
-                  {detail.myEntries.map((entry) => {
-                    const row = myRows.get(entry.login) ?? null
-                    const rank = entry.finalRank ?? row?.rank ?? null
-                    return (
-                      <li key={entry.login} className={entry.disqualified ? 'is-dq' : ''}>
-                        <b className="cmp-standing-rank num">{rank != null ? `#${rank}` : '—'}</b>
-                        <div className="min-w-0">
-                          <span className="num">{entry.login}</span>
-                          <small className="num">
-                            {entry.disqualified
-                              ? t('competition.disqualified')
-                              : entry.finalRank != null
-                                ? t('competition.finalRank')
-                                : rank == null
-                                  ? t('competition.myPending')
-                                  : entry.scoringFrom
-                                    ? `${t('competition.scoringFrom')} ${fmtDate(entry.scoringFrom)}`
-                                    : ''}
-                          </small>
-                        </div>
-                        {row && <ScoreText score={row.score} className="cmp-standing-score" />}
-                      </li>
-                    )
-                  })}
-                </ul>
-              </div>
-            )}
-
-            {/* 报名动作：仅 signup 赛。窗口内三态互斥（有可报账户 → 按钮，已报
-                完 → 什么都不显示，"你的名次"已经说明了；一个账户都没有 → 指向
-                绑定页）。已经在场的人不再看到"报名已截止"，那句是对没进来的人说的。
-                Enrol action: signup competitions only. Inside the window three
-                mutually exclusive states (eligible accounts → button; all entered
-                → nothing, "your rank" already says so; no accounts → point to the
-                bind page). Someone already in never sees "registration closed";
-                that line is for people who aren't. */}
-            {canShowRegisterAction && (
-              <div className="cmp-enroll">
-                {rState === 'notOpen' && <p>{t('competition.regNotOpen')}</p>}
-                {rState === 'closed' && enteredLogins.size === 0 && <p>{t('competition.regClosed')}</p>}
-                {rState === 'open' &&
-                  (availableAccounts.length > 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPickerOpen(true)
-                        setRegisterError(null)
-                      }}
-                      className={`${enteredLogins.size > 0 ? 'btn-ghost' : 'btn-primary'} px-5 py-2.5 text-sm`}
-                    >
-                      {t(enteredLogins.size > 0 ? 'competition.registerMore' : 'competition.register')}
-                    </button>
-                  ) : enteredLogins.size > 0 ? null : (
-                    <div>
-                      <p>
-                        {/* 三选一：零账户 -> noAccounts；有账户但 tradeMode 还有 null
-                            （尚未判定）-> pendingAccountType；都判定过且没一个符合
-                            -> noRealAccounts。
-                            Three-way: zero accounts -> noAccounts; accounts with a
-                            null tradeMode still (undetermined) -> pendingAccountType;
-                            all determined and none eligible -> noRealAccounts. */}
-                        {accounts.length === 0
-                          ? t('competition.noAccounts')
-                          : accounts.some((a) => a.tradeMode == null)
-                            ? t('competition.pendingAccountType')
-                            : t('competition.noRealAccounts')}
-                      </p>
-                      <Link to="/bind" className="mt-1 inline-block text-xs text-prism-300 transition hover:text-prism-200">
-                        {t('nav.bind')}
-                      </Link>
-                    </div>
-                  ))}
-                {registerMsg && <p className="text-up">{registerMsg}</p>}
-                {registerError && <p className="text-down">{registerError}</p>}
-              </div>
-            )}
+        <main className="min-w-0">
+          <div className="cmp-ladder-h">
+            <h3>{boardHeading}</h3>
+            {detail.pendingSettle && <span className="text-amber-300">{t('competition.pendingSettle')}</span>}
+            <span className="num">{detail.board.rows.length}</span>
           </div>
-        </div>
-      </section>
-
-      <div>
-        <div className="cmp-group-h">
-          <h3>{boardHeading}</h3>
-          <i aria-hidden />
-          <span className="num">{detail.board.rows.length}</span>
-        </div>
-        <div className="mt-2">
-          <BoardBlock board={detail.board} metric={detail.metric} t={t} />
-        </div>
+          <Ladder board={detail.board} t={t} />
+          <ul className="cmp-rules">
+            <li>{t('competition.rules.scoringFrom')}</li>
+            <li>{t('competition.rules.minSamples')}</li>
+            <li>{t('competition.rules.final')}</li>
+          </ul>
+        </main>
       </div>
-
-      {/* 规则在最底：进详情是来看名次的，规则是查证用的。
-          Rules at the bottom: people come for the standings; the rules are there to
-          check against. */}
-      <ul className="cmp-rules">
-        <li>{t('competition.rules.scoringFrom')}</li>
-        <li>{t('competition.rules.minSamples')}</li>
-        <li>{t('competition.rules.final')}</li>
-      </ul>
 
       {pickerOpen && (
         <AccountPickerModal

@@ -134,6 +134,18 @@ def test_list_carries_champion_for_settled_only(db_session):
     assert by_name["Ended"]["champion"] is None      # 未终审不挂冠军
     assert by_name["Empty"]["champion"] is None      # 终审了但没人上榜
     assert all(c["champion"] is None for c in out["upcoming"] + out["running"])
+    # 前三行按名次给全（跑马灯用），未终审的也给；参赛数按未取消资格的条目数
+    assert [r["score"] for r in by_name["Settled"]["top"]] == [0.093, 0.041]
+    assert [r["score"] for r in by_name["Ended"]["top"]] == [0.5]
+    assert by_name["Empty"]["top"] == []
+    db_session.add(CompetitionParticipant(competition_id=settled.id, user_id=winner.id, mt5_login="L1"))
+    db_session.add(CompetitionParticipant(competition_id=settled.id, user_id=viewer.id, mt5_login="L2",
+                                          disqualified=True))
+    db_session.commit()
+    out = list_competitions(request=None, db=db_session, user=viewer)
+    by_name = {c["name"]: c for c in out["finished"]}
+    # 参赛数含被取消资格的条目（报了名就是参赛），与管理端口径一致
+    assert by_name["Settled"]["participants"] == 2 and by_name["Empty"]["participants"] == 0
 
 # ---- GET "/{id}" ----------------------------------------------------------------
 
