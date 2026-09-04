@@ -791,6 +791,7 @@
     "actions": "操作",
     "deleteAccount": "删除账号",
     "deleteNeedOffline": "请先断开桥接程序（账号离线）后再删除",
+    "deleteSettledConfirm": "删除已终审的比赛「{{name}}」？将清除 {{n}} 条参赛记录、基线与榜单快照，且不可恢复。注意：**已发出的勋章不会收回**（勋章表没有记录是哪场比赛发的，无法选择性撤销），需要彻底复原请另行清理。",
     "deleteConfirm": "确定从列表中移除账号 {{login}} 吗？若桥接程序之后再次上报该账号，它会重新出现。",
     "tokenTitle": "你的 API Token",
     "tokenHint": "此 Token 等同密码，请妥善保管。复制后粘贴到 PRISMX 桥接程序中以建立连接。",

@@ -268,7 +268,10 @@ export default function CompetitionsPanel() {
   // confirms first (the copy names how many entries go with it). If the deleted row
   // is the one being edited, the form falls back to create mode.
   async function remove(c: CompetitionAdminRow) {
-    if (!window.confirm(t('competition.admin.deleteConfirm', { name: c.name, n: c.participantCount }))) return
+    const key = c.status === 'settled'
+      ? 'competition.admin.deleteSettledConfirm'
+      : 'competition.admin.deleteConfirm'
+    if (!window.confirm(t(key, { name: c.name, n: c.participantCount }))) return
     setDeletingId(c.id)
     try {
       await adminApi.deleteCompetition(c.id)
@@ -665,10 +668,13 @@ export default function CompetitionsPanel() {
                               </span>
                             )
                           })()}
-                          {/* 删除：已终审的不给（后端也会 400）——勋章已发出，删了卫冕判定会错乱。
-                              Delete: not offered for settled competitions (the backend also
-                              400s) — badges are already out and back-to-back judging would break. */}
-                          {c.status !== 'settled' && (
+                          {/* 删除：任何状态都能删（含已终审，测试需要）。已终审那一档确认
+                              文案会额外说明"勋章不收回"——user_badges 没有"哪场比赛发的"
+                              这一列，无从选择性撤销。
+                              Delete: any status, settled included (needed for testing). The
+                              settled branch's confirm adds that badges are not revoked —
+                              user_badges has no "which competition" column, so there is no way
+                              to revoke selectively. */}
                             <button
                               type="button"
                               className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] text-down disabled:opacity-40"
@@ -677,7 +683,6 @@ export default function CompetitionsPanel() {
                             >
                               {deletingId === c.id ? t('common.loading') : t('competition.admin.delete')}
                             </button>
-                          )}
                         </div>
                       </td>
                     </tr>

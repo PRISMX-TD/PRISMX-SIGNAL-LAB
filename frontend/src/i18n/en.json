@@ -791,6 +791,7 @@
     "actions": "Actions",
     "deleteAccount": "Delete account",
     "deleteNeedOffline": "Disconnect the bridge (account offline) before deleting",
+    "deleteSettledConfirm": "Delete the settled competition \"{{name}}\"? This removes {{n}} entries, their baselines and board snapshots, and cannot be undone. Note: **badges already awarded are not revoked** (the badge table has no record of which competition awarded them, so they cannot be revoked selectively); clear them separately for a full reset.",
     "deleteConfirm": "Remove account {{login}} from your list? It will reappear if the bridge reports it again.",
     "tokenTitle": "Your API Token",
     "tokenHint": "This token is like a password. Keep it safe. Paste it into the PRISMX Bridge app to connect.",

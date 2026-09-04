@@ -171,9 +171,6 @@ MSG_UNKNOWN_ENROLLMENT = "未知参赛方式 / Unknown enrollment mode"
 MSG_UNKNOWN_TRACK = "未知参赛账户类型 / Unknown account track"
 MSG_BAD_MIN_BASELINE = "最低本金需大于 0 / Minimum baseline must be > 0"
 MSG_BAD_MIN_TRADES = "最低笔数需至少为 1 / Minimum trade count must be at least 1"
-MSG_DELETE_SETTLED = ("已终审的比赛不可删除（勋章已发出，删除会让卫冕判定错乱）"
-                      " / A settled competition cannot be deleted (badges are already "
-                      "awarded and back-to-back judging would break)")
 MSG_NON_DRAFT_FIELDS = "比赛开始后仅可修改文案与报名窗口 / Only copy and registration window are editable after draft"
 MSG_STATUS_SEQUENCE = "状态只能按顺序推进 / Status can only advance sequentially"
 MSG_SETTLED_FROZEN = "已终审的比赛不可再改参赛状态 / Settled competitions are frozen"
@@ -391,34 +388,40 @@ def admin_patch_competition(comp_id: str, body: CompetitionPatchIn, db: Session 
 
 @admin_router.delete("/{comp_id}")
 def admin_delete_competition(comp_id: str, db: Session = Depends(get_db)):
-    """删除一场比赛，连同它的参赛行、基线、榜单快照一起清掉。
+    """删除一场比赛，连同它的参赛行、基线、榜单快照一起清掉。**任何状态都能删**，
+    已终审的也能（应产品要求为测试放开，2026-09-04）。
 
-    **已终审的比赛拒绝删除**：终审会发勋章（比赛冠军/前三/完赛，"发出不收回"），
-    而卫冕王要看相邻两届——删掉一届会让已经发出的勋章失去依据、也会让后续的
-    卫冕判定错乱。想撤销一场已终审的比赛，得先决定那些勋章怎么办，那是另一件事。
-    草稿/未开始/进行中/已结束但未终审的都可以删——这些状态下没有任何不可逆的
-    产物流出系统。
+    ⚠️ **删除不收回已发出的勋章**：`user_badges` 只记 (user_id, badge_id)，没有
+    「哪一场比赛发的」这个字段，所以无从选择性撤销——按参赛者一刀切会误删他在
+    别场比赛拿到的同名勋章。删掉一场已终审的比赛之后：① 参赛者身上的比赛勋章
+    照旧留着（成就页仍会显示）；② 卫冕王看的是相邻两届，少一届会改变后续判定。
+    测试完想彻底复原，得单独清 `user_badges` 里那几个 comp_* 勋章。
 
-    Deletes a competition along with its participants, baselines and board
-    snapshots. **Settled competitions are refused**: settling awards badges
-    (winner / podium / finisher, and badges are never revoked), and the
-    back-to-back badge compares consecutive editions — removing one would strand
-    already-awarded badges and corrupt later judging. Undoing a settled
-    competition first requires deciding what happens to those badges, which is a
-    separate matter. Draft / upcoming / running / ended-but-unsettled are all
-    deletable: nothing irreversible has left the system in those states.
+    Deletes a competition with its participants, baselines and board snapshots.
+    **Any status, settled included** (opened up for testing at the product owner's
+    request, 2026-09-04).
+
+    ⚠️ **Deleting does not revoke badges already awarded**: `user_badges` stores only
+    (user_id, badge_id) with no "which competition" column, so there is no way to
+    revoke selectively — wiping by participant would also remove the same badge
+    earned in a different competition. After deleting a settled competition:
+    (1) participants keep their competition badges (still shown on the achievements
+    page); (2) the back-to-back badge compares consecutive editions, so removing one
+    changes later judging. A full reset means clearing the comp_* rows in
+    `user_badges` separately.
     """
     comp = _get_comp_or_404(db, comp_id)
-    if comp.status == "settled":
-        raise HTTPException(400, MSG_DELETE_SETTLED)
     key = comp_period_key(comp.id)
     participants = (db.query(CompetitionParticipant)
                       .filter(CompetitionParticipant.competition_id == comp.id).delete())
     db.query(PeriodBaseline).filter(PeriodBaseline.period_key == key).delete()
     db.query(LeaderboardSnapshot).filter(LeaderboardSnapshot.period_key == key).delete()
+    was_settled = comp.status == "settled"
     db.delete(comp)
     db.commit()
-    return {"deleted": comp_id, "participants": participants}
+    # settled 回传给前端：已终审的比赛删掉后勋章仍在，确认框要说清这一点。
+    # settled is echoed back so the UI can spell out that badges survive the delete.
+    return {"deleted": comp_id, "participants": participants, "settled": was_settled}
 
 
 @admin_router.get("/{comp_id}/participants")

@@ -518,13 +518,22 @@ def test_delete_competition_removes_participants_baselines_snapshots(db_session)
         LeaderboardSnapshot.period_key == key).count() == 0
 
 
-def test_delete_settled_competition_refused(db_session):
-    """已终审的比赛拒删：勋章已发出（不收回），删掉会让卫冕王的相邻两届判定错乱。"""
+def test_delete_settled_competition_allowed_but_keeps_badges(db_session):
+    """已终审的比赛也能删（测试需要）：比赛行没了，但**已发出的勋章不收回**——
+    user_badges 没有"哪一场比赛发的"这一列，无从选择性撤销。"""
+    from app.models import UserBadge
     from app.routers.competitions import admin_delete_competition
     comp = _comp(db_session, status="settled")
-    with pytest.raises(HTTPException):
-        admin_delete_competition(comp.id, db=db_session)
-    assert db_session.query(Competition).filter(Competition.id == comp.id).first() is not None
+    u = _user(db_session, "settled_del@t.co")
+    _participant(db_session, comp, u, "A")
+    db_session.add(UserBadge(user_id=u.id, badge_id="comp_winner")); db_session.commit()
+
+    out = admin_delete_competition(comp.id, db=db_session)
+    assert out["settled"] is True and out["participants"] == 1
+    assert db_session.query(Competition).filter(Competition.id == comp.id).first() is None
+    # 勋章仍在：这是刻意的，不是遗漏
+    assert db_session.query(UserBadge).filter(
+        UserBadge.user_id == u.id, UserBadge.badge_id == "comp_winner").count() == 1
 
 
 # ── 赛道与本场门槛 / track and per-competition gates ─────────────────
