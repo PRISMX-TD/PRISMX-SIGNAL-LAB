@@ -5212,51 +5212,95 @@ body {
 }
 
 
-/* ═════════════ 成就页任务进度 / achievement task progress ═════════════
-   每条任务一行：状态点 | 名称 + 右侧数值 | 4px 进度条。三态：done 绿、active 紫
-   （带一道缓慢流光）、locked 灰。进度条用 clip-path 从左展开、行级错峰入场；
-   胜率条件另画一道阈值刻度。关卡轨 .tk-rail 在组标题下按任务分段。
-   One row per task: status dot | name + right-hand value | 4px bar. Three
-   states: done green, active violet (with a slow sheen), locked grey. Bars
-   reveal from the left via clip-path with a per-row stagger; win-rate tasks
-   get a threshold tick. The stage rail .tk-rail sits under the group title. */
-.tk-rail {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
-  gap: 4px;
-  height: 3px;
-  margin-top: 10px;
+/* ═════════════ 成就页任务瓦片 / achievement task tiles ═════════════
+   一任务一格：状态点 + 右上数值 / 短名 / 条件 / 3px 进度条。三态：done（绿勾、
+   绿数值、不画条）、active（紫描边 + 紫进度）、locked（虚线描边、灰条 + 阈值刻度）。
+   组标题右侧一枚完成度环代替之前那条分段轨。瓦片错峰入场，条从左展开。
+   One tile per task: status dot + top-right value / short name / condition /
+   3px bar. Three states: done (green check + value, no bar), active (violet
+   outline + violet bar), locked (dashed outline, grey bar + threshold tick).
+   A completion ring beside the group title replaces the old segmented rail.
+   Tiles stagger in; bars reveal from the left. */
+.tk-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
-.tk-seg {
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+.tk-head-sub {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #a1a1aa;
 }
-.tk-seg-done { background: var(--up); }
-.tk-seg-active { background: theme('colors.prism.500'); }
+.tk-ring {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  flex: none;
+}
+.tk-ring svg { position: absolute; inset: 0; }
+.tk-ring-arc {
+  transition: stroke-dashoffset 0.9s var(--ease-out);
+  animation: tk-ring-in 1s var(--ease-out) both;
+}
+.tk-ring-num {
+  position: relative;
+  font-size: 12px;
+  font-weight: 600;
+  color: #f4f4f5;
+  letter-spacing: -0.01em;
+}
+.tk-ring-num span {
+  font-weight: 500;
+  color: #71717a;
+}
 
-.tk-list {
+.tk-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+.tk-tile {
+  position: relative;
   display: flex;
   flex-direction: column;
-}
-.tk-row {
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
-  column-gap: 12px;
-  align-items: start;
-  padding: 12px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  animation: tk-in 0.5s var(--ease-out) both;
+  padding: 14px 14px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.025);
+  animation: tk-in 0.45s var(--ease-out) both;
   animation-delay: calc(var(--i, 0) * 60ms);
 }
-.tk-row:first-child {
-  padding-top: 6px;
-  border-top: 0;
+.tk-active {
+  border-color: rgba(110, 66, 255, 0.4);
+  background: linear-gradient(180deg, rgba(110, 66, 255, 0.10), rgba(110, 66, 255, 0.03));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.tk-done {
+  background: rgba(53, 201, 122, 0.04);
+  border-color: rgba(53, 201, 122, 0.16);
+}
+.tk-locked {
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.10);
+  background: transparent;
+}
+
+.tk-tile-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
 }
 .tk-status {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 20px;
   height: 20px;
   color: #71717a;
 }
@@ -5269,23 +5313,7 @@ body {
   animation: tk-breathe 2.4s ease-in-out infinite;
 }
 .tk-locked .tk-status { opacity: 0.55; }
-
-.tk-line {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 14px;
-  line-height: 20px;
-}
-.tk-name {
-  min-width: 0;
-  color: #a1a1aa;
-}
-.tk-active .tk-name { color: #f4f4f5; }
-.tk-locked .tk-name { color: #71717a; }
 .tk-value {
-  flex: none;
   font-size: 12px;
   color: #71717a;
   white-space: nowrap;
@@ -5297,70 +5325,84 @@ body {
 .tk-done .tk-value b { color: var(--up); }
 .tk-locked .tk-value b { color: #a1a1aa; }
 
+.tk-title {
+  margin-top: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+  color: #f4f4f5;
+  letter-spacing: -0.01em;
+}
+.tk-done .tk-title { color: #d4d4d8; }
+.tk-locked .tk-title { color: #a1a1aa; }
+.tk-cond {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 17px;
+  color: #71717a;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .tk-track {
   position: relative;
-  height: 4px;
-  margin-top: 8px;
+  height: 3px;
+  margin-top: 14px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.08);
 }
 .tk-fill {
   position: absolute;
   inset: 0;
   width: calc(var(--pct, 0) * 100%);
-  min-width: 0;
-  overflow: hidden;
   border-radius: 999px;
   background: linear-gradient(90deg, theme('colors.prism.400'), theme('colors.prism.500'));
   animation: tk-grow 0.9s var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 60ms + 120ms);
+  animation-delay: calc(var(--i, 0) * 60ms + 150ms);
 }
-.tk-done .tk-fill { background: var(--up); }
-.tk-locked .tk-fill { background: rgba(255, 255, 255, 0.18); }
-/* 推进中的条带一道流光——只在有进度时（宽度为 0 什么也看不见）
-   A sheen on active bars only (a zero-width bar has nothing to show) */
-.tk-active .tk-fill::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.45) 50%, transparent 100%);
-  transform: translateX(-100%);
-  animation: tk-sheen 3.2s ease-in-out infinite;
-  animation-delay: 1.4s;
-}
+.tk-locked .tk-fill { background: rgba(255, 255, 255, 0.22); }
 .tk-tick {
   position: absolute;
   top: -3px;
   width: 2px;
-  height: 10px;
+  height: 9px;
   border-radius: 1px;
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.6);
   transform: translateX(-50%);
 }
 .tk-hint {
-  margin-top: 6px;
+  margin-top: 8px;
   font-size: 11px;
+  line-height: 15px;
   color: #71717a;
 }
 
 @keyframes tk-in {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }
 }
 @keyframes tk-grow {
   from { clip-path: inset(0 100% 0 0); }
   to { clip-path: inset(0 0 0 0); }
 }
-@keyframes tk-sheen {
-  0%, 35% { transform: translateX(-100%); }
-  65%, 100% { transform: translateX(100%); }
+@keyframes tk-ring-in {
+  from { stroke-dashoffset: 113.1; }
 }
 @keyframes tk-breathe {
   0%, 100% { box-shadow: 0 0 0 3px rgba(110, 66, 255, 0.16); }
   50% { box-shadow: 0 0 0 5px rgba(110, 66, 255, 0.06); }
 }
+/* 手机：两列小瓦片，不然四五块整块叠成一长条 / mobile: two compact columns instead of a tall stack */
+@media (max-width: 639px) {
+  .tk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .tk-tile { padding: 12px; border-radius: 12px; }
+  .tk-title { margin-top: 10px; font-size: 14px; }
+  .tk-track { margin-top: 12px; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .tk-row, .tk-fill, .tk-dot, .tk-active .tk-fill::after { animation: none; }
+  .tk-tile, .tk-fill, .tk-dot, .tk-ring-arc { animation: none; }
 }
 
 .seg-tabs {

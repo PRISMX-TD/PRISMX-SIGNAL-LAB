@@ -172,38 +172,73 @@ function TaskValue({ task, t }: { task: GamificationTask; t: TFunction }) {
   }
 }
 
-function TaskRow({ task, index, t }: { task: GamificationTask; index: number; t: TFunction }) {
+// 任务名的文案是「短名——条件」（英文用 " — "），拆成两行：短名做标题、条件做说明。
+// 拆不开就整句当标题。
+// Task copy is "short name — condition" (" — " in English); split into a title
+// line and a condition line. If it doesn't split, the whole string is the title.
+function splitTaskName(label: string): { title: string; cond: string } {
+  const m = label.match(/^(.*?)\s*(?:——|\s—\s|\s-\s)\s*(.+)$/)
+  return m ? { title: m[1], cond: m[2] } : { title: label, cond: '' }
+}
+
+function TaskTile({ task, index, t }: { task: GamificationTask; index: number; t: TFunction }) {
   const visual = taskVisual(task)
   const pct = taskPct(task)
+  const { title, cond } = splitTaskName(t(`gamification.tasks.${task.id}`))
   const style = { '--i': index, '--pct': pct } as CSSProperties
   return (
-    <li className={`tk-row tk-${visual}`} style={style}>
-      <span className="tk-status" aria-hidden>
-        {visual === 'done' ? <CheckIcon /> : visual === 'locked' ? <LockIcon /> : <i className="tk-dot" />}
-      </span>
-      <div className="min-w-0">
-        <div className="tk-line">
-          <span className="tk-name">{t(`gamification.tasks.${task.id}`)}</span>
-          <span className="tk-value num">
-            <TaskValue task={task} t={t} />
-          </span>
-        </div>
+    <li className={`tk-tile tk-${visual}`} style={style}>
+      <div className="tk-tile-top">
+        <span className="tk-status" aria-hidden>
+          {visual === 'done' ? <CheckIcon /> : visual === 'locked' ? <LockIcon /> : <i className="tk-dot" />}
+        </span>
+        <span className="tk-value num">
+          <TaskValue task={task} t={t} />
+        </span>
+      </div>
+      <div className="tk-title">{title}</div>
+      {cond && <div className="tk-cond">{cond}</div>}
+      {/* 已完成的瓦片不再画条——勾和绿色数值已经说完了；进度条只给还在推进和锁定的。
+          Done tiles carry no bar: the check and green value already say it;
+          bars are for in-progress and locked tasks only. */}
+      {visual !== 'done' && (
         <div
           className="tk-track"
           role="progressbar"
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={Math.round(pct * 100)}
-          aria-label={t(`gamification.tasks.${task.id}`)}
+          aria-label={title}
         >
           <i className="tk-fill" />
-          {task.kind === 'winrate' && !task.done && (
+          {task.kind === 'winrate' && (
             <i className="tk-tick" style={{ left: `${(task.progressTarget ?? 0) * 100}%` }} />
           )}
         </div>
-        {visual === 'locked' && <p className="tk-hint">{t('gamification.taskState.locked')}</p>}
-      </div>
+      )}
+      {visual === 'locked' && <p className="tk-hint">{t('gamification.taskState.locked')}</p>}
     </li>
+  )
+}
+
+// 组标题右侧的完成度环：r=18 → 周长 ≈ 113，按 done/total 走 dashoffset。
+// Completion ring beside the group title: r=18 → circumference ≈ 113, dashoffset by done/total.
+function StageRing({ done, total }: { done: number; total: number }) {
+  const C = 2 * Math.PI * 18
+  const ratio = total > 0 ? done / total : 0
+  return (
+    <span className="tk-ring" aria-hidden>
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <circle cx="24" cy="24" r="18" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="3" />
+        <circle
+          cx="24" cy="24" r="18" fill="none" stroke="var(--up)" strokeWidth="3" strokeLinecap="round"
+          strokeDasharray={C} strokeDashoffset={C * (1 - ratio)}
+          transform="rotate(-90 24 24)"
+          className="tk-ring-arc"
+        />
+      </svg>
+      <span className="tk-ring-num num">{done}<span>/{total}</span></span>
+    </span>
   )
 }
 
@@ -436,26 +471,23 @@ export default function AchievementsPage() {
       {/* Current group only: the level being worked on — cleared and locked groups are not listed */}
       {nextGroup && (
         <section className="card glass p-[18px]">
-          <div className="flex items-baseline justify-between gap-3">
-            <h3 className="sec-h-title">{t(`gamification.groups.${nextGroup.group}`)}</h3>
-            <span className="num text-xs text-neutral-500">
-              {t('gamification.taskProgress.groupDone', {
-                done: nextGroup.tasks.length - remaining,
-                total: nextGroup.tasks.length,
-              })}
-            </span>
+          <div className="tk-head">
+            <div>
+              <h3 className="sec-h-title">{t(`gamification.groups.${nextGroup.group}`)}</h3>
+              <p className="tk-head-sub">
+                {t('gamification.taskProgress.groupDone', {
+                  done: nextGroup.tasks.length - remaining,
+                  total: nextGroup.tasks.length,
+                })}
+              </p>
+            </div>
+            <StageRing done={nextGroup.tasks.length - remaining} total={nextGroup.tasks.length} />
           </div>
-          {/* 关卡轨：一段一条任务，绿 = 已完成、紫 = 推进中、灰 = 锁定，一眼看出这关走到哪。
-              Level rail: one segment per task — green done, violet in progress,
-              grey locked — the whole stage's shape at a glance. */}
-          <div className="tk-rail" aria-hidden>
-            {nextGroup.tasks.map((task) => (
-              <i key={task.id} className={`tk-seg tk-seg-${taskVisual(task)}`} />
-            ))}
-          </div>
-          <ul className="tk-list mt-2">
+          {/* 任务瓦片：一任务一格，自动排列（桌面一行放完，手机单列）。
+              Task tiles: one per task, auto-flow (one row on desktop, single column on mobile). */}
+          <ul className="tk-grid">
             {nextGroup.tasks.map((task, i) => (
-              <TaskRow key={task.id} task={task} index={i} t={t} />
+              <TaskTile key={task.id} task={task} index={i} t={t} />
             ))}
           </ul>
         </section>
