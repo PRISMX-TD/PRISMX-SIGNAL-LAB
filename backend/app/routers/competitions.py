@@ -485,11 +485,14 @@ def admin_refresh_competition(comp_id: str, db: Session = Depends(get_db)):
 def admin_settle_competition(comp_id: str, force: bool = False,
                               db: Session = Depends(get_db),
                               admin: User = Depends(get_current_user)):
-    """`force=true`：跳过 §5.3 的 24 小时宽限期立刻终审（管理端按钮会先警告）。
-    状态闸不受影响：仍然只有 ended 的比赛能终审，且不可重跑。
-    `force=true` settles immediately, skipping the §5.3 24h grace period (the admin
-    button warns first). The status guard is unaffected: still ended-only, still
-    not re-runnable."""
+    """`force=true`：跳过**全部**前置条件立刻终审——状态不必是 ended、不必等
+    §5.3 的 24 小时宽限期、已终审的也能再跑一次（应产品要求为测试放开）。
+    管理端按钮会先弹确认，说明尚未平仓与迟到的单不会计入。
+    `force=true` settles immediately, skipping **every** precondition: status need
+    not be "ended", the §5.3 24h grace period need not have passed, and an already
+    settled competition can be run again (opened up for testing at the product
+    owner's request). The admin button confirms first, spelling out that still-open
+    and late-arriving closes won't be counted."""
     comp = _get_comp_or_404(db, comp_id)
     return settle_competition(db, comp, admin.id, force=force)
 

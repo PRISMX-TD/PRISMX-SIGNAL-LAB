@@ -326,8 +326,8 @@ def auto_enroll(db, comp: Competition, now: datetime) -> int:
 
 def settle_competition(db, comp: Competition, admin_id: str,
                         now: datetime | None = None, force: bool = False) -> dict:
-    """终审（设计 §1.7/§1.9，Phase 3 Task 4；§5.3 宽限期，Task F）：结算不可重跑，
-    一切以 status 为闸。
+    """终审（设计 §1.7/§1.9，Phase 3 Task 4；§5.3 宽限期，Task F）：默认不可重跑，
+    一切以 status 为闸；`force=True` 跳过全部前置条件（见下方注释）。
 
     §5.3：比赛结束（`ends_at`，计分上界）后 24 小时内不可终审（`force=True` 可由
     管理员显式跳过，见下方注释）——留出宽限期让
@@ -356,26 +356,38 @@ def settle_competition(db, comp: Competition, admin_id: str,
     撤回——所以失败被捕获进返回值的 badgeErrors，而不是抛出让调用方以为终审
     本身失败了。
     """
-    if comp.status != "ended":
-        raise HTTPException(
-            status_code=400,
-            detail="仅可终审已结束的比赛 / Only ended competitions can be settled")
-
+    # force=True 跳过**全部前置条件**：状态不必是 ended、不必等 24 小时宽限期、
+    # 已终审的也能再跑一次。应产品要求为测试放开（2026-09-04），不是默认路径——
+    # force 只由管理端那颗按钮显式传，用户端根本没有终审入口。
+    #
+    # 放开之后仍然成立的性质（靠实现本身，不靠这几行校验）：名次与 status 在第一
+    # 段事务里一次落盘；award_badge 幂等（唯一约束），重复终审不会重复发勋章，
+    # 只会按当前数据重算一遍名次。真正的代价是「早于实际结束时间终审」会漏掉尚未
+    # 平仓和迟到的单——管理端按钮已经把这句写进确认框。
+    #
+    # force=True skips **every** precondition: status need not be "ended", the 24h
+    # grace period need not have passed, and an already-settled competition can be
+    # run again. Opened up for testing at the product owner's request (2026-09-04),
+    # not the default path — force is passed only by that one admin button, and the
+    # user-facing side has no settle entry point at all.
+    #
+    # What still holds regardless (by construction, not by these checks): ranks and
+    # status land in one transaction, and award_badge is idempotent (unique
+    # constraint), so re-settling never double-awards — it just recomputes ranks from
+    # current data. The real cost of settling early is missing still-open and
+    # late-arriving closes, which the admin button spells out in its confirm.
     now = _aware(now) or datetime.now(timezone.utc)
-    grace_until = _aware(comp.ends_at) + timedelta(hours=24)
-    # force=True：管理员明知宽限期没到也要立刻终审（管理端按钮会先弹一次警告，
-    # 说明可能漏掉尚未平仓/迟到的单）。状态这一关（必须 ended、不可重跑）永远
-    # 不给绕——那是数据一致性，不是等待策略。
-    # force=True: the admin deliberately settles before the grace period ends (the
-    # admin button warns first that still-open or late closes may be missed). The
-    # status guard (must be ended, never re-runnable) is never bypassed — that one
-    # is about data consistency, not about waiting.
-    if now < grace_until and not force:
-        raise HTTPException(
-            status_code=400,
-            detail="比赛结束后需等待 24 小时方可终审，以收齐迟到的平仓 / "
-                    "Settlement opens 24 hours after the competition ends, "
-                    "so late closes are counted")
+    if not force:
+        if comp.status != "ended":
+            raise HTTPException(
+                status_code=400,
+                detail="仅可终审已结束的比赛 / Only ended competitions can be settled")
+        if now < _aware(comp.ends_at) + timedelta(hours=24):
+            raise HTTPException(
+                status_code=400,
+                detail="比赛结束后需等待 24 小时方可终审，以收齐迟到的平仓 / "
+                        "Settlement opens 24 hours after the competition ends, "
+                        "so late closes are counted")
 
     rows = _snapshot_one_comp(db, comp)   # 先落定最新名次，再读——见上方 docstring
     by_login = {p.mt5_login: p for p in

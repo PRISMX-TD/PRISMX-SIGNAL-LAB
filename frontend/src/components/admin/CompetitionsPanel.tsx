@@ -411,7 +411,16 @@ export default function CompetitionsPanel() {
   }
 
   async function settle(comp: CompetitionAdminRow, force = false) {
-    const msg = force ? t('competition.admin.settleForceConfirm') : t('competition.admin.settleConfirm')
+    // 三种确认文案：正常终审 / 宽限期内强制（ended，会漏迟到的单）/ 比赛还没结束就
+    // 强制（草稿·未开始·进行中，直接把比赛终结掉）。后两种风险不同，不能共用一句。
+    // Three confirm messages: normal settle / forcing during the grace period (ended —
+    // late closes get missed) / forcing before the competition ends (draft·upcoming·
+    // running — it ends the competition outright). The last two carry different risks.
+    const msg = !force
+      ? t('competition.admin.settleConfirm')
+      : comp.status === 'ended'
+        ? t('competition.admin.settleForceConfirm')
+        : t('competition.admin.settleForceStatusConfirm')
     if (!window.confirm(msg)) return
     setSettlingId(comp.id)
     try {
@@ -598,6 +607,23 @@ export default function CompetitionsPanel() {
                               onClick={() => refreshBoard(c)}
                             >
                               {refreshingId === c.id ? t('common.loading') : t('competition.admin.refresh')}
+                            </button>
+                          )}
+                          {/* 强制终审：给还没到 ended 的比赛（草稿/未开始/进行中）用，
+                              测试期不必等比赛真的走完。ended 自己有那颗主按钮（宽限期内
+                              也走 force），已终审的不再显示。
+                              Force settle: for competitions not yet ended (draft / upcoming /
+                              running) so testing doesn't have to wait one out. An ended one has
+                              its own primary button (which also forces during the grace
+                              period); a settled one shows nothing. */}
+                          {c.status !== 'ended' && c.status !== 'settled' && (
+                            <button
+                              type="button"
+                              className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] text-amber-300 disabled:opacity-40"
+                              disabled={settlingId === c.id}
+                              onClick={() => settle(c, true)}
+                            >
+                              {settlingId === c.id ? t('common.loading') : t('competition.admin.settleForce')}
                             </button>
                           )}
                           {c.status === 'ended' && (() => {

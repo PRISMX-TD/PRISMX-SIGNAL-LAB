@@ -2061,7 +2061,8 @@
       "disqualifyReason": "取消资格原因",
       "settle": "终审",
       "settleConfirm": "终审后名次永久定格并自动发奖，确认？",
-      "refresh": "立即刷新", "refreshed": "榜单已重算", "refreshSkipped": "仅进行中的比赛可刷新", "settleForceConfirm": "尚未过 24 小时宽限期。此刻终审会立即定格名次并发出勋章，结束时仍持仓、之后才平的单不会计入。确认立即终审？",
+      "refresh": "立即刷新", "refreshed": "榜单已重算", "refreshSkipped": "仅进行中的比赛可刷新", "settleForce": "强制终审", "settleForceStatusConfirm": "这场比赛尚未结束。强制终审会按当前数据立即定格名次并发出勋章，之后比赛即告终局。仅供测试使用，确认继续？",
+ "settleForceConfirm": "尚未过 24 小时宽限期。此刻终审会立即定格名次并发出勋章，结束时仍持仓、之后才平的单不会计入。确认立即终审？",
       "settleWait": "结束后 24 小时内不可终审（等待迟到平仓入账）"
     }
   }

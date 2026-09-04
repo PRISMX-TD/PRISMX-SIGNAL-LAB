@@ -445,23 +445,25 @@ def test_refresh_comp_board_recomputes_and_throttles(db_session):
         assert C.refresh_comp_board(db_session, comp, force=True) is False
 
 
-def test_settle_force_skips_grace_but_not_status_gate(db_session):
-    """force=True 跳过 24h 宽限期立刻终审；状态闸不受影响——非 ended 依旧拒绝，
-    终审后不可重跑。"""
+def test_settle_force_skips_every_precondition(db_session):
+    """force=True 跳过全部前置条件：状态不必是 ended、不必等 24h 宽限期、已终审
+    也能再跑。不带 force 时两道闸照旧生效。"""
     import pytest
     from fastapi import HTTPException
     from app.services.gamification.competitions import settle_competition
     admin = _user(db_session, "fadmin@t.co")
-    comp = _comp(db_session, status="running")     # 还没 ended
-    with pytest.raises(HTTPException):
-        settle_competition(db_session, comp, admin.id, force=True)
+    comp = _comp(db_session, status="running")
+    just_ended = ENDS + timedelta(minutes=5)                   # 远早于 ends+24h
 
-    comp.status = "ended"
-    db_session.commit()
-    just_ended = ENDS + timedelta(minutes=5)                    # 远早于 ends+24h
-    with pytest.raises(HTTPException):
-        settle_competition(db_session, comp, admin.id, now=just_ended)      # 宽限期未到
+    with pytest.raises(HTTPException):                          # 默认：非 ended 拒绝
+        settle_competition(db_session, comp, admin.id, now=just_ended)
     out = settle_competition(db_session, comp, admin.id, now=just_ended, force=True)
-    assert out["ranked"] == 0 and comp.status == "settled"
+    assert out["ranked"] == 0 and comp.status == "settled"      # force：running 也能终审
+
+    comp.status = "ended"                                       # 默认：宽限期未到拒绝
+    db_session.commit()
     with pytest.raises(HTTPException):
-        settle_competition(db_session, comp, admin.id, now=just_ended, force=True)  # 不可重跑
+        settle_competition(db_session, comp, admin.id, now=just_ended)
+    # force：已终审/宽限期内都能再跑一次，勋章靠唯一约束幂等，不会重复发
+    again = settle_competition(db_session, comp, admin.id, now=just_ended, force=True)
+    assert again["ranked"] == 0 and comp.status == "settled"
