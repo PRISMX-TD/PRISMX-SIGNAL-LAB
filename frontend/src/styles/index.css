@@ -5229,17 +5229,8 @@ body {
     flex: 0 0 auto;
     height: 36px;
   }
-  /* 胶囊本体：全局在 ≤1023px 给 .seg-tabs 加了 padding-block:8px（触摸热区
-     伪元素要装进 overflow 裁剪盒），结果上下 8px / 左右 3px——环形上下厚、
-     左右薄，36px 的按钮悬在 54px 的胶囊中间，看起来"上下不平衡"。这里四边
-     统一 3px，按钮加高到 40px：胶囊 46px，触摸目标仍 ≥44px，44px 的 ::after
-     热区带被裁到胶囊盒内也正好齐边。周期按钮补最小宽度，两组看起来是同一套。
-     The global ≤1023px rule pads .seg-tabs 8px top/bottom (so the 44px tap
-     band fits inside the overflow clip) but only 3px on the sides, leaving a
-     36px button floating in a 54px pill. Uniform 3px + 40px buttons keeps the
-     tap target ≥44px while making the ring even. */
-  .lb-controls .seg-tabs { padding: 3px; }
-  .lb-controls .seg-tabs button { height: 40px; }
+  /* 胶囊环的四边等距与 40px 按钮已在下方 ≤1023px 的触摸热区块里全局处理（排行榜/订单/信号三页共用），这里只补周期按钮等宽。
+     Even ring + 40px buttons are handled globally in the ≤1023px tap-target block below; only the period buttons' equal width lives here. */
   .lb-controls .lb-seg-period button { min-width: 64px; padding: 0 14px; }
 }
 
@@ -5358,9 +5349,23 @@ body {
      伪元素超出容器盒的部分会被直接裁掉，热区扩张在这里会完全失效。
      给容器补上下内边距，把 44px 的带子装进裁剪盒里。
      overflow-x:auto clips the pseudo-element; padding makes room for it. */
-  .sig-filters,
-  .seg-tabs {
+  .sig-filters {
     padding-block: 8px;
+  }
+  /* .seg-tabs 是带边框的胶囊环，不能用 padding-block:8px 装热区带——那会让
+     环上下 8px / 左右 3px，36px 的按钮悬在 54px 的胶囊里（排行榜/订单/信号
+     三页都中招，平板与窄屏电脑同样在 ≤1023 范围内）。改为四边仍 3px、按钮
+     加高到 40px：胶囊 46px 本身就是 ≥44px 的触摸目标，44px 的 ::after 带子
+     被 overflow 裁到胶囊盒内也正好齐边。
+     .seg-tabs is a bordered pill ring; padding-block:8px makes the ring
+     8px top/bottom vs 3px sides with a 36px button floating inside. Keep the
+     ring even (3px) and grow the buttons to 40px instead: the 46px pill is
+     itself a ≥44px target and the 44px ::after band clips flush inside it. */
+  .seg-tabs {
+    padding: 3px;
+  }
+  .seg-tabs button {
+    height: 40px;
   }
 }
 
