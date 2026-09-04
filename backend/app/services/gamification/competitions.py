@@ -6,6 +6,7 @@
 (comp.starts_at, comp.ends_at)，因为比赛 key（`comp:<id>`）不是 `period_bounds`
 能解析的自然周/月格式。
 """
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -160,6 +161,44 @@ def _snapshot_one_comp(db, comp: Competition) -> list[dict]:
     return rows
 
 
+# 按需刷新的进程内节流：{comp_id: 上次刷新的 monotonic 秒}。榜单页会被多个用户
+# 同时轮询，每次都重算一遍聚合查询没有意义——同一场比赛 REFRESH_MIN_INTERVAL
+# 秒内只真正算一次，其余请求直接读刚落盘的快照。单进程部署，理由同
+# gamification.py 的 _last_judged；按比赛数封顶，不做淘汰。
+# In-process throttle for on-demand refreshes: {comp_id: last refresh, monotonic
+# seconds}. The board is polled by many users at once and recomputing the whole
+# aggregate每 request would be pointless — one real recompute per competition per
+# REFRESH_MIN_INTERVAL seconds, everyone else reads the snapshot just written.
+# Single-process deployment, same rationale as gamification.py's _last_judged;
+# bounded by the number of competitions, never evicted.
+REFRESH_MIN_INTERVAL = 20.0
+_last_refresh: dict[str, float] = {}
+
+
+def refresh_comp_board(db, comp: Competition, force: bool = False) -> bool:
+    """把这场比赛的榜单快照重算一遍并落盘，返回是否真的算了。
+
+    进行中的比赛才有必要刷（未开始没有行、已结束/已终审的行不该再动）；
+    `force=True` 由管理端「立即刷新」按钮使用，跳过节流但仍守状态这一关。
+
+    Recomputes and persists this competition's board snapshot; returns whether it
+    actually ran. Only a running competition is worth refreshing (an upcoming one
+    has no rows, and an ended/settled one's rows must not move). `force=True` comes
+    from the admin "refresh now" button: it skips the throttle but still respects
+    the status guard.
+    """
+    if comp.status != "running":
+        return False
+    key = comp.id
+    now = time.monotonic()
+    if not force and now - _last_refresh.get(key, 0.0) < REFRESH_MIN_INTERVAL:
+        return False
+    _last_refresh[key] = now
+    _snapshot_one_comp(db, comp)
+    db.commit()
+    return True
+
+
 def snapshot_competitions(db, now: datetime) -> dict:
     """对 status in ("running", "ended")（未 settled）的比赛算行、排名、快照。
 
@@ -286,11 +325,12 @@ def auto_enroll(db, comp: Competition, now: datetime) -> int:
 
 
 def settle_competition(db, comp: Competition, admin_id: str,
-                        now: datetime | None = None) -> dict:
+                        now: datetime | None = None, force: bool = False) -> dict:
     """终审（设计 §1.7/§1.9，Phase 3 Task 4；§5.3 宽限期，Task F）：结算不可重跑，
     一切以 status 为闸。
 
-    §5.3：比赛结束（`ends_at`，计分上界）后 24 小时内不可终审——留出宽限期让
+    §5.3：比赛结束（`ends_at`，计分上界）后 24 小时内不可终审（`force=True` 可由
+    管理员显式跳过，见下方注释）——留出宽限期让
     迟到的平仓（比如比赛结束时仍持仓、随后才平的单）能被 `_resolved_in_period`
     收进最后一次快照。宽限期从 `ends_at` 起算，不是从 status 被人工推到
     "ended" 那一刻起算：管理端状态推进是人工操作，可能早于/晚于 ends_at，
@@ -323,7 +363,14 @@ def settle_competition(db, comp: Competition, admin_id: str,
 
     now = _aware(now) or datetime.now(timezone.utc)
     grace_until = _aware(comp.ends_at) + timedelta(hours=24)
-    if now < grace_until:
+    # force=True：管理员明知宽限期没到也要立刻终审（管理端按钮会先弹一次警告，
+    # 说明可能漏掉尚未平仓/迟到的单）。状态这一关（必须 ended、不可重跑）永远
+    # 不给绕——那是数据一致性，不是等待策略。
+    # force=True: the admin deliberately settles before the grace period ends (the
+    # admin button warns first that still-open or late closes may be missed). The
+    # status guard (must be ended, never re-runnable) is never bypassed — that one
+    # is about data consistency, not about waiting.
+    if now < grace_until and not force:
         raise HTTPException(
             status_code=400,
             detail="比赛结束后需等待 24 小时方可终审，以收齐迟到的平仓 / "

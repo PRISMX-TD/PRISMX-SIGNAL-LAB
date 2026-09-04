@@ -22,7 +22,7 @@ from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
 from app.services.candle_store import candle_retention_sweep_loop
 from app.services.discipline import discipline_snapshot_loop
-from app.services.gamification.loop import gamification_loop
+from app.services.gamification.loop import competition_loop, gamification_loop
 from app.services.plan_expiry import plan_expiry_sweep_loop
 from app.services.sentiment_store import sentiment_loop
 from app.services.signal_resolution import stale_signal_sweep_loop
@@ -145,6 +145,12 @@ async def lifespan(app: FastAPI):
     # startup_delay is 25s, offset from discipline's 20s and candle's 30s below so
     # their first passes don't all compete for the startup window at once.
     gamification_task = asyncio.create_task(gamification_loop())
+    # 比赛榜快循环（60 秒）：整点那趟 pass 对正在进行的比赛太慢，名次要跟着平仓走。
+    # 没有进行中的比赛时它每轮只花一次 count 查询。startup_delay 35s，与上面几条错开。
+    # Fast competition-board loop (60s): the hourly pass is too slow for a live
+    # competition, where ranks should follow closed trades. With no live competition it
+    # costs one count query per tick. startup_delay 35s, staggered from the others.
+    competition_task = asyncio.create_task(competition_loop())
     # K 线历史保留策略：每天清理过期的 1 分钟线（见 services/candle_store.py）
     # Candle retention sweep: trims expired 1-minute candles daily
     candle_retention_task = asyncio.create_task(candle_retention_sweep_loop())
@@ -166,6 +172,7 @@ async def lifespan(app: FastAPI):
     plan_expiry_task.cancel()
     discipline_task.cancel()
     gamification_task.cancel()
+    competition_task.cancel()
     candle_retention_task.cancel()
     gateway_positions_task.cancel()
     

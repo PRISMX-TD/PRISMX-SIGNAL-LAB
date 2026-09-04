@@ -24,8 +24,8 @@ from app.schemas import (
     CompetitionRegisterIn)
 from app.services.deps import get_current_user, get_db
 from app.services.gamification.competitions import (
-    TRACKS, auto_enroll, comp_gates, comp_period_key, register_participant,
-    settle_competition)
+    TRACKS, auto_enroll, comp_gates, comp_period_key, refresh_comp_board,
+    register_participant, settle_competition)
 from app.services.settings_store import get_gamification_settings
 from app.utils.timeutil import aware as _aware
 
@@ -113,6 +113,12 @@ def get_competition(request: Request, comp_id: str, db: Session = Depends(get_db
     公开端点。
     """
     comp = _get_public_comp_or_404(db, comp_id)
+    # 读之前先按需刷新：进行中的比赛不必等每小时那趟循环，最多 20 秒陈旧
+    # （refresh_comp_board 自带节流，多人同时轮询也只真算一次）。
+    # Refresh before reading: a running competition doesn't wait for the hourly pass,
+    # so the board is at most ~20s stale (refresh_comp_board throttles itself, so
+    # simultaneous pollers still trigger only one real recompute).
+    refresh_comp_board(db, comp)
     board = build_board_rows_payload(db, user, comp.metric, comp_period_key(comp.id),
                                       gates_override=_comp_gates(db, comp))
     my_rows = (db.query(CompetitionParticipant)
@@ -463,11 +469,29 @@ def admin_patch_participant(comp_id: str, participant_id: str,
     return _participant_out(participant, email)
 
 
-@admin_router.post("/{comp_id}/settle")
-def admin_settle_competition(comp_id: str, db: Session = Depends(get_db),
-                              admin: User = Depends(get_current_user)):
+@admin_router.post("/{comp_id}/refresh")
+def admin_refresh_competition(comp_id: str, db: Session = Depends(get_db)):
+    """立即重算本场比赛的榜单快照，跳过节流。只对进行中的比赛有意义——未开始
+    没有行，已结束/已终审的行不该再动，两种情况都返回 refreshed=false。
+    Recompute this competition's board snapshot now, bypassing the throttle. Only
+    meaningful while running: an upcoming competition has no rows and an
+    ended/settled one's rows must not move, so both return refreshed=false."""
     comp = _get_comp_or_404(db, comp_id)
-    return settle_competition(db, comp, admin.id)
+    refreshed = refresh_comp_board(db, comp, force=True)
+    return {"refreshed": refreshed, "status": comp.status}
+
+
+@admin_router.post("/{comp_id}/settle")
+def admin_settle_competition(comp_id: str, force: bool = False,
+                              db: Session = Depends(get_db),
+                              admin: User = Depends(get_current_user)):
+    """`force=true`：跳过 §5.3 的 24 小时宽限期立刻终审（管理端按钮会先警告）。
+    状态闸不受影响：仍然只有 ended 的比赛能终审，且不可重跑。
+    `force=true` settles immediately, skipping the §5.3 24h grace period (the admin
+    button warns first). The status guard is unaffected: still ended-only, still
+    not re-runnable."""
+    comp = _get_comp_or_404(db, comp_id)
+    return settle_competition(db, comp, admin.id, force=force)
 
 
 @admin_router.get("/{comp_id}/board")
@@ -480,5 +504,6 @@ def admin_competition_board(comp_id: str, db: Session = Depends(get_db),
     与用户端榜单同一套负载形状，前端不用为管理端单独写一套渲染）。
     """
     comp = _get_comp_or_404(db, comp_id)
+    refresh_comp_board(db, comp)
     return build_board_rows_payload(db, admin, comp.metric, comp_period_key(comp.id),
                                      gates_override=_comp_gates(db, comp))

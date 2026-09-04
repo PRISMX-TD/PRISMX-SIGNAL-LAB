@@ -194,6 +194,7 @@ export default function CompetitionsPanel() {
   const [advancingId, setAdvancingId] = useState<string | null>(null)
   const [settlingId, setSettlingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [refreshingId, setRefreshingId] = useState<string | null>(null)
   // M-6：settle 按钮的 24h 宽限期是拿 Date.now() 跟 settleOpensAt 比出来的，
   // 只在渲染时算一次——管理员开着这个页签跨过 24h 那一刻，按钮不会自己解禁，
   // 得等下一次因为别的原因重渲染（如轮询列表）才会更新，容易让人以为卡住了。
@@ -386,11 +387,35 @@ export default function CompetitionsPanel() {
     }
   }
 
-  async function settle(comp: CompetitionAdminRow) {
-    if (!window.confirm(t('competition.admin.settleConfirm'))) return
+  // force：宽限期没到就终审。多问一句——这一刀切下去名次永久定格、勋章立即发出，
+  // 而此刻可能还有没平的仓或迟到的平仓没算进来。
+  // force: settling before the grace period is up. It asks once more — ranks lock in
+  // permanently and badges go out immediately, while positions may still be open or
+  // late closes not yet counted.
+  // 立即重算这场比赛的榜单：进行中的比赛本来最多 20 秒陈旧（读接口会按需刷新），
+  // 这个按钮是给"改完参赛资格想马上看结果"的场合，跳过节流立刻算一遍。
+  // Recompute this competition's board now: a running competition is already at most
+  // ~20s stale (the read path refreshes on demand); this button is for "I just changed
+  // an entry and want to see it immediately" and skips the throttle.
+  async function refreshBoard(comp: CompetitionAdminRow) {
+    setRefreshingId(comp.id)
+    try {
+      const res = await adminApi.refreshCompetitionBoard(comp.id)
+      showToast('ok', res.refreshed ? t('competition.admin.refreshed') : t('competition.admin.refreshSkipped'))
+      if (selectedId === comp.id) loadBoard(comp.id)
+    } catch (err) {
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('common.error'))
+    } finally {
+      setRefreshingId(null)
+    }
+  }
+
+  async function settle(comp: CompetitionAdminRow, force = false) {
+    const msg = force ? t('competition.admin.settleForceConfirm') : t('competition.admin.settleConfirm')
+    if (!window.confirm(msg)) return
     setSettlingId(comp.id)
     try {
-      const result = await adminApi.settleCompetition(comp.id)
+      const result = await adminApi.settleCompetition(comp.id, force)
       setComps((prev) => prev.map((c) => (c.id === comp.id ? { ...c, status: 'settled' } : c)))
       showToast('ok', t('competition.admin.settleResult', { n: result.ranked }))
       if (selectedId === comp.id) {
@@ -565,6 +590,16 @@ export default function CompetitionsPanel() {
                                 : t(`competition.admin.advance.${ADVANCE_LABEL_KEY[c.status]}`)}
                             </button>
                           )}
+                          {c.status === 'running' && (
+                            <button
+                              type="button"
+                              className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] disabled:opacity-40"
+                              disabled={refreshingId === c.id}
+                              onClick={() => refreshBoard(c)}
+                            >
+                              {refreshingId === c.id ? t('common.loading') : t('competition.admin.refresh')}
+                            </button>
+                          )}
                           {c.status === 'ended' && (() => {
                             // §5.3 宽限期：结束（endsAt）后 24 小时内前端也把按钮禁掉——
                             // 真正的闸在后端 settle_competition，这里只是不让管理员点了
@@ -587,12 +622,17 @@ export default function CompetitionsPanel() {
                                     {t('competition.admin.settleWait')}
                                   </span>
                                 )}
+                                {/* 宽限期内按钮照样可点，走 force=true——多一次警告确认，
+                                    不再是"必须等满 24 小时"。
+                                    During the grace period the button stays clickable and
+                                    goes through force=true after one extra warning; it is no
+                                    longer "you must wait the full 24 hours". */}
                                 <button
                                   type="button"
                                   className="btn-primary whitespace-nowrap px-2.5 py-1 text-[11px] disabled:opacity-40"
-                                  disabled={settlingId === c.id || waiting}
+                                  disabled={settlingId === c.id}
                                   title={waiting ? t('competition.admin.settleWait') : undefined}
-                                  onClick={() => settle(c)}
+                                  onClick={() => settle(c, waiting)}
                                 >
                                   {settlingId === c.id ? t('common.loading') : t('competition.admin.settle')}
                                 </button>

@@ -17,6 +17,18 @@ from .badges import judge_and_award_badges
 log = logging.getLogger("gamification")
 LOOP_INTERVAL_SECONDS = 3600
 SLOW_PASS_WARN_SECONDS = 120
+# 比赛榜单单独一条快循环：整点那趟 pass 一小时才跑一次，对正在进行的比赛来说太慢——
+# 用户平仓后要等最多一小时名次才动。比赛快照只碰 running/ended 的比赛与它们的参赛
+# 账户，比整趟 pass（全体用户的条件 + 勋章 + 两张周期榜）轻得多，可以跑得密。
+# 没有进行中的比赛时这条循环只花一次 count 查询就睡下，等于不产生负载。
+# Competition boards get their own fast loop: the hourly pass is far too slow for a
+# live competition (a trader would wait up to an hour to see their rank move). A
+# competition snapshot only touches running/ended competitions and their entrants —
+# much lighter than a full pass (every user's conditions + badges + both period
+# boards) — so it can run often. With no live competition it costs one count query
+# per tick and goes back to sleep, i.e. no load at all.
+COMP_LOOP_INTERVAL_SECONDS = 60
+SLOW_COMP_PASS_WARN_SECONDS = 20
 
 
 def backfill_account_trade_modes(db) -> int:
@@ -144,6 +156,61 @@ def run_gamification_pass() -> dict:
                 "compsError": comp_stats.get("error", False)}
     finally:
         db.close()
+
+
+def run_competition_pass() -> dict:
+    """只重算比赛榜快照（不碰条件/勋章/周期榜）。没有进行中或待终审的比赛时
+    直接返回，不开销任何计算——快循环绝大多数时候走的就是这条路。
+
+    Recomputes competition board snapshots only (no conditions/badges/period
+    boards). Returns immediately when no competition is running or awaiting
+    settlement, which is what this fast loop does almost all of the time."""
+    from app.models import Competition
+    from .competitions import snapshot_competitions
+    db = SessionLocal()
+    try:
+        live = (db.query(Competition.id)
+                  .filter(Competition.status.in_(("running", "ended"))).first())
+        if live is None:
+            return {"comps": 0, "rows": 0, "idle": True}
+        try:
+            return snapshot_competitions(db, datetime.now(timezone.utc))
+        except Exception:
+            # 与整趟 pass 里的处理一致：记日志、回滚未提交的残留，下一轮再来。
+            # 快循环失败绝不能把循环本身带崩——名次晚一分钟远好过不再更新。
+            # Same handling as inside the full pass: log, roll back whatever is
+            # uncommitted, retry next tick. A failure here must never kill the loop:
+            # a rank that is one minute stale beats a rank that stops updating.
+            log.exception("competition pass failed")
+            db.rollback()
+            return {"comps": 0, "rows": 0, "error": True}
+    finally:
+        db.close()
+
+
+async def competition_loop(startup_delay: float = 35.0):
+    """比赛榜快循环（默认 60 秒）。整点那趟 pass 仍然照常也会刷比赛快照——
+    两者都是「先删后插同一批行」，重复执行幂等，不需要互斥。
+    Fast competition-board loop (60s by default). The hourly pass still refreshes
+    competition snapshots as well; both are delete-then-insert over the same rows,
+    so running them both is idempotent and needs no mutual exclusion."""
+    await asyncio.sleep(startup_delay)      # 首个 await 前零阻塞（main.py:61-70 约束）
+    from starlette.concurrency import run_in_threadpool
+    while True:
+        try:
+            t0 = time.monotonic()
+            result = await run_in_threadpool(run_competition_pass)
+            dur = time.monotonic() - t0
+            # 空转（没有进行中的比赛）不打日志，否则一分钟一行把日志刷满。
+            # Idle ticks (no live competition) aren't logged, or this would fill the
+            # log with one line a minute.
+            if not result.get("idle"):
+                log.info("competition pass %.1fs %s", dur, result)
+            if dur > SLOW_COMP_PASS_WARN_SECONDS:
+                log.warning("competition pass slow: %.1fs", dur)
+        except Exception:
+            log.exception("competition loop failed")
+        await asyncio.sleep(COMP_LOOP_INTERVAL_SECONDS)
 
 
 async def gamification_loop(startup_delay: float = 25.0):

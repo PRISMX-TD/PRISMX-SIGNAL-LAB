@@ -371,3 +371,97 @@ def test_track_modes_and_auto_enroll_by_track(db_session):
     got2 = {p.mt5_login for p in db_session.query(CompetitionParticipant)
             .filter(CompetitionParticipant.competition_id == real_comp.id)}
     assert got2 == {"R"}
+
+
+# ── 比赛快循环 / fast competition loop ───────────────────────────────
+
+def test_competition_pass_idle_without_live_comps(db_session, monkeypatch):
+    """没有 running/ended 的比赛时，快循环一行不算就返回——空转不该有开销。"""
+    from app.services.gamification import loop as loop_mod
+    monkeypatch.setattr(loop_mod, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(db_session, "close", lambda: None)
+    _comp(db_session, status="draft", name="Draft only")
+    assert loop_mod.run_competition_pass() == {"comps": 0, "rows": 0, "idle": True}
+
+
+def test_competition_pass_refreshes_running_board(db_session, monkeypatch):
+    """进行中的比赛：快循环直接把快照刷出来，不必等整点那趟 pass。"""
+    from app.services.gamification import loop as loop_mod
+    monkeypatch.setattr(loop_mod, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(db_session, "close", lambda: None)
+    invalidate_gamification_cache()
+    comp = _comp(db_session, status="running")
+    u = _user(db_session, "fast@t.co"); _acct(db_session, u, "A", balance=2000.0)
+    _baseline(db_session, comp, u, "A", balance=2000.0)
+    _participant(db_session, comp, u, "A")
+    _mk(db_session, u, "A", 5, 0)
+
+    out = loop_mod.run_competition_pass()
+    assert out["comps"] == 1 and out["rows"] == 1 and "idle" not in out
+    snap = (db_session.query(LeaderboardSnapshot)
+            .filter(LeaderboardSnapshot.period_key == comp_period_key(comp.id)).all())
+    assert [(r.rank, r.mt5_login) for r in snap] == [(1, "A")]
+
+
+def test_competition_pass_survives_failure(db_session, monkeypatch):
+    """算行炸了不能把循环带崩：记日志、回滚、返回 error 标记，下一轮照常再来。"""
+    from app.services.gamification import loop as loop_mod
+    from app.services.gamification import competitions as comp_mod
+    monkeypatch.setattr(loop_mod, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(db_session, "close", lambda: None)
+    _comp(db_session, status="running")
+
+    def boom(*a, **kw):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(comp_mod, "snapshot_competitions", boom)
+    out = loop_mod.run_competition_pass()
+    assert out == {"comps": 0, "rows": 0, "error": True}
+
+
+# ── 按需刷新与强制终审 / on-demand refresh and forced settle ─────────
+
+def test_refresh_comp_board_recomputes_and_throttles(db_session):
+    """进行中的比赛按需刷新：第一次真算并落盘，节流窗口内第二次直接跳过；
+    未开始/已结束的比赛不刷（行不该再动）。"""
+    from app.services.gamification import competitions as C
+    comp = _comp(db_session)                       # status="running"
+    u = _user(db_session, "rf@t.co"); _acct(db_session, u, "A")
+    _baseline(db_session, comp, u, "A")
+    _participant(db_session, comp, u, "A")
+    _mk(db_session, u, "A", 5, 0)
+    C._last_refresh.pop(comp.id, None)
+
+    assert C.refresh_comp_board(db_session, comp) is True
+    rows = (db_session.query(LeaderboardSnapshot)
+            .filter(LeaderboardSnapshot.period_key == comp_period_key(comp.id)).all())
+    assert len(rows) == 1 and rows[0].mt5_login == "A"
+    assert C.refresh_comp_board(db_session, comp) is False     # 节流窗口内
+    assert C.refresh_comp_board(db_session, comp, force=True) is True   # force 跳过节流
+
+    for st in ("upcoming", "ended", "settled"):
+        comp.status = st
+        db_session.commit()
+        C._last_refresh.pop(comp.id, None)
+        assert C.refresh_comp_board(db_session, comp, force=True) is False
+
+
+def test_settle_force_skips_grace_but_not_status_gate(db_session):
+    """force=True 跳过 24h 宽限期立刻终审；状态闸不受影响——非 ended 依旧拒绝，
+    终审后不可重跑。"""
+    import pytest
+    from fastapi import HTTPException
+    from app.services.gamification.competitions import settle_competition
+    admin = _user(db_session, "fadmin@t.co")
+    comp = _comp(db_session, status="running")     # 还没 ended
+    with pytest.raises(HTTPException):
+        settle_competition(db_session, comp, admin.id, force=True)
+
+    comp.status = "ended"
+    db_session.commit()
+    just_ended = ENDS + timedelta(minutes=5)                    # 远早于 ends+24h
+    with pytest.raises(HTTPException):
+        settle_competition(db_session, comp, admin.id, now=just_ended)      # 宽限期未到
+    out = settle_competition(db_session, comp, admin.id, now=just_ended, force=True)
+    assert out["ranked"] == 0 and comp.status == "settled"
+    with pytest.raises(HTTPException):
+        settle_competition(db_session, comp, admin.id, now=just_ended, force=True)  # 不可重跑

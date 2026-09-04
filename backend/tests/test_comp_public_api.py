@@ -126,7 +126,14 @@ def test_detail_404_for_missing_and_draft(db_session):
 
 def test_detail_board_rows_no_user_id_and_isself(db_session):
     _make_visible(db_session)
-    comp = _comp(db_session, status="running")
+    # 用 ended 比赛：进行中的比赛现在读之前会按需重算快照（refresh_comp_board），
+    # 手工种进去的快照行会被真实计算结果覆盖掉。这条测的是「负载形状」，不是
+    # 刷新行为，所以选一个刷新不生效的状态；刷新本身另有测试。
+    # Uses an ended competition: a running one now recomputes its snapshot before
+    # the read (refresh_comp_board), which would overwrite hand-planted rows. This
+    # test is about payload shape, not refresh, so it picks a status where refresh
+    # is a no-op; refreshing has its own test.
+    comp = _comp(db_session, status="ended")
     viewer = _user(db_session, "det2@t.co")
     other = _user(db_session, "det3@t.co")
     db_session.add(LeaderboardSnapshot(board=comp.metric, period_key=comp_period_key(comp.id),

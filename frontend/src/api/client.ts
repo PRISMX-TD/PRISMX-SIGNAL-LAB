@@ -898,10 +898,23 @@ export const adminApi = {
     // Settle: only callable on status=="ended" competitions, not re-runnable
     // (gated by status server-side). Ranks lock in permanently and prizes are
     // awarded automatically — see the competition.admin.settleConfirm copy.
-    settleCompetition: (id: string) =>
-      request<CompetitionSettleResult>(`/admin/competitions/${encodeURIComponent(id)}/settle`, {
-        method: 'POST',
-      }),
+    // 立即重算这场比赛的榜单快照（跳过 20 秒节流）。只对进行中的比赛有效，
+    // 其余状态返回 refreshed:false。
+    // Recompute this competition's board snapshot now (bypassing the 20s throttle).
+    // Only effective while running; other statuses return refreshed:false.
+    refreshCompetitionBoard: (id: string) =>
+      request<{ refreshed: boolean; status: string }>(
+        `/admin/competitions/${encodeURIComponent(id)}/refresh`,
+        { method: 'POST' },
+      ),
+    // force=true 跳过结束后 24 小时的宽限期立刻终审；状态闸不受影响。
+    // force=true settles immediately, skipping the 24h post-end grace period; the
+    // status guard is unaffected.
+    settleCompetition: (id: string, force = false) =>
+      request<CompetitionSettleResult>(
+        `/admin/competitions/${encodeURIComponent(id)}/settle${force ? '?force=true' : ''}`,
+        { method: 'POST' },
+      ),
     // 实时榜预览：以请求管理员为 viewer，形状与用户端 LeaderboardPayload 一致。
     // Live board preview: the requesting admin is the viewer; same shape as the user-facing LeaderboardPayload.
     competitionBoard: (id: string) =>

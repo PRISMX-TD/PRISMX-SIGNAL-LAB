@@ -2064,6 +2064,7 @@
       "disqualifyReason": "Disqualification reason",
       "settle": "Settle",
       "settleConfirm": "Settlement is permanent — final ranks lock in and prizes are awarded automatically. Confirm?",
+      "refresh": "Refresh now", "refreshed": "Board recomputed", "refreshSkipped": "Only a running competition can be refreshed", "settleForceConfirm": "The 24h grace period has not passed. Settling now locks ranks and awards badges immediately; positions still open at the end, or closed afterwards, will not be counted. Settle anyway?",
       "settleWait": "Settlement opens 24 h after the end time (late closes are still arriving)"
     }
   }
