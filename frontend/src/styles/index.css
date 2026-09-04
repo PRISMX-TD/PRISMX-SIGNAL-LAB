@@ -5405,6 +5405,407 @@ body {
   .tk-tile, .tk-fill, .tk-dot, .tk-ring-arc { animation: none; }
 }
 
+/* ═════════════ 成就页 · 陈列台 / achievements showcase ═════════════
+   页面 = 陈列台（.ach-stage）+ 收藏度（.ach-meter）+ 当前关卡（沿用 .tk-*）+
+   勋章库（.ach-vault，按材质分层的架子）。舞台是页面里唯一的纯黑块：聚光锥、
+   地面光斑、勋章倒影、极光缓漂，默认那枚 236px 缓慢浮动。架子上每枚勋章带底光
+   与架沿阴影，传说层暖金环境光、绝版层火漆红，未获得的只剩轮廓与虚线圈。
+   The page = stage (.ach-stage) + collection meter (.ach-meter) + current stage
+   (reusing .tk-*) + vault (.ach-vault, shelves by material). The stage is the one
+   near-black block on the page: a light cone, floor pool, badge reflections, a
+   slow aurora drift, the default badge at 236px floating gently. Shelved badges
+   get an under-glow and a shelf-edge shadow; the legendary shelf a warm gold
+   ambience, the limited shelf wax red; unearned ones keep only outline + ring. */
+.ach-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 24px;
+  align-items: center;
+  min-height: 420px;
+  padding: 34px 36px 30px;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: #050507;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 30px 80px -30px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+}
+.ach-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 60% 70% at 70% 8%, rgba(110, 66, 255, 0.22), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 20% 100%, rgba(110, 66, 255, 0.06), transparent 70%);
+  animation: ach-aurora 14s ease-in-out infinite alternate;
+}
+.ach-stage-l { position: relative; min-width: 0; }
+/* 网格子项默认 min-width:auto，三枚勋章一排会把整列撑到比容器还宽（手机上右边那枚和关卡轨末端被裁掉）。
+   Grid items default to min-width:auto; the three-badge row would widen the column past the container
+   (mobile clipped the right badge and the rail's last node). */
+.ach-pedestal { min-width: 0; }
+.ach-trio { max-width: 100%; }
+.ach-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #71717a;
+  font-weight: 500;
+}
+.ach-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 14px 0 0;
+  font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
+  font-weight: 800;
+  font-size: 40px;
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  color: #f4f4f5;
+  text-wrap: balance;
+}
+.ach-lv {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: 1px solid rgba(139, 108, 255, 0.55);
+  background: radial-gradient(circle at 35% 30%, rgba(139, 108, 255, 0.35), rgba(110, 66, 255, 0.08) 70%);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #d9ceff;
+}
+.ach-sub { margin: 12px 0 0; font-size: 14px; color: #a1a1aa; }
+
+.ach-rail {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  margin: 26px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ach-rail::before {
+  content: "";
+  position: absolute;
+  left: 8.33%;
+  right: 8.33%;
+  top: 7px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+}
+.ach-rail li { position: relative; }
+.ach-rail i {
+  display: block;
+  position: relative;
+  width: 14px;
+  height: 14px;
+  margin: 0 auto;
+  border-radius: 999px;
+  background: #0d0d11;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+.ach-rail .on i {
+  background: theme('colors.prism.500');
+  border-color: theme('colors.prism.400');
+  box-shadow: 0 0 0 4px rgba(110, 66, 255, 0.18);
+}
+.ach-rail .cur i::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 999px;
+  background: #fff;
+}
+.ach-rail b {
+  display: block;
+  margin-top: 9px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 500;
+  color: #71717a;
+}
+.ach-rail .on b { color: #a1a1aa; }
+.ach-rail .cur b { color: #f4f4f5; font-weight: 700; }
+
+.ach-stats {
+  display: flex;
+  margin-top: 26px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.ach-stats > div { flex: 1; min-width: 0; padding-right: 16px; }
+.ach-stats > div + div { padding-left: 16px; border-left: 1px solid rgba(255, 255, 255, 0.07); }
+.ach-stats small { display: block; font-size: 11px; color: #71717a; letter-spacing: 0.04em; }
+.ach-stats strong { display: block; margin-top: 4px; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; color: #f4f4f5; }
+.ach-stats strong span { font-size: 14px; font-weight: 500; color: #71717a; }
+.ach-link {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 11px;
+  color: #a1a1aa;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.ach-link:hover { color: #f4f4f5; }
+
+.ach-pedestal {
+  position: relative;
+  height: 360px;
+  display: grid;
+  place-items: end center;
+}
+.ach-cone {
+  position: absolute;
+  left: 50%;
+  top: -30px;
+  width: 520px;
+  height: 330px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.03) 55%, transparent);
+  clip-path: polygon(44% 0, 56% 0, 96% 100%, 4% 100%);
+  opacity: 0.75;
+  animation: ach-breathe 6s ease-in-out infinite;
+}
+.ach-floor {
+  position: absolute;
+  left: 50%;
+  bottom: 34px;
+  width: 420px;
+  max-width: 100%;
+  height: 70px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(139, 108, 255, 0.38), rgba(110, 66, 255, 0.12) 45%, transparent 72%);
+  filter: blur(6px);
+}
+.ach-floorline {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: 68px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
+}
+.ach-trio {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 26px;
+  padding-bottom: 70px;
+}
+.ach-hero {
+  display: block;
+  width: 236px;
+  height: 236px;
+  filter: drop-shadow(0 26px 30px rgba(0, 0, 0, 0.6));
+  animation: ach-float 6s ease-in-out infinite;
+}
+.ach-side {
+  display: block;
+  width: 92px;
+  height: 92px;
+  margin-bottom: 10px;
+  filter: brightness(0.88) drop-shadow(0 12px 14px rgba(0, 0, 0, 0.55));
+}
+/* 空槽位：虚线圈占着位置，邀请去戴 / empty slot: a dashed ring holding the place */
+.ach-slot { display: block; border-radius: 999px; border: 1px dashed rgba(255, 255, 255, 0.16); }
+.ach-slot-hero { width: 236px; height: 236px; }
+.ach-slot-side { width: 92px; height: 92px; margin-bottom: 10px; }
+.ach-slot-ghost { border-color: transparent; }
+.ach-refl {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  margin-top: -64px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 26px;
+  pointer-events: none;
+  transform: scaleY(-1);
+  opacity: 0.42;
+  filter: blur(1px);
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent 55%);
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent 55%);
+}
+.ach-refl .ach-hero { animation: none; }
+.ach-cap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  text-align: center;
+  font-size: 12px;
+  color: #71717a;
+}
+.ach-cap b { display: block; margin-bottom: 3px; font-size: 15px; font-weight: 600; color: #f4f4f5; }
+.ach-slots { display: inline-flex; gap: 6px; margin-left: 10px; vertical-align: middle; }
+.ach-slots i { width: 6px; height: 6px; border-radius: 999px; background: theme('colors.prism.400'); }
+.ach-slots i.empty { background: transparent; border: 1px solid rgba(255, 255, 255, 0.25); }
+
+/* 小节标题：粗体名 + 浅色说明 + 右侧数字 / section header: bold name + muted note + right figure */
+.ach-sec-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ach-sec-h h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: #71717a;
+}
+.ach-sec-h h3 b { margin-right: 10px; font-size: 15px; font-weight: 700; color: #f4f4f5; }
+.ach-sec-h .r { font-size: 12px; color: #71717a; }
+.ach-sec-h .r b { font-weight: 600; color: #f4f4f5; }
+.ach .tk-grid { margin-top: 14px; }
+
+.ach-meter { display: flex; gap: 12px; margin-top: 14px; }
+/* 每组宽度按枚数分（flexGrow = 枚数），但留 104px 下限，一枚的绝版组标签也放得下。
+   Width per group scales with its badge count (flexGrow = count) with a 104px floor, so the
+   one-badge limited group still fits its label. */
+.ach-mgrp { display: flex; flex-direction: column; gap: 8px; flex-basis: 0; min-width: 104px; }
+.ach-segs { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; height: 6px; }
+.ach-segs i { border-radius: 999px; background: rgba(255, 255, 255, 0.08); }
+.ach-mgrp small { font-size: 11px; line-height: 1.4; color: #71717a; }
+.ach-mgrp small b { color: #a1a1aa; font-weight: 600; }
+.ach-m-common i.on { background: #7c7f88; }
+.ach-m-rare i.on { background: #b8bec8; }
+.ach-m-epic i.on { background: linear-gradient(90deg, #3a3a44, #c9a24a); }
+.ach-m-legendary i.on { background: #c9a24a; }
+.ach-m-limited i.on { background: #9c2f2f; }
+
+.ach-vault { display: flex; flex-direction: column; gap: 22px; }
+.ach-shelf { position: relative; padding: 14px 18px 18px; border-radius: 18px; }
+.ach-shelf::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
+.ach-s-rare::before { background: radial-gradient(ellipse 60% 100% at 50% 110%, rgba(184, 190, 200, 0.09), transparent 70%); }
+.ach-s-epic::before { background: radial-gradient(ellipse 60% 100% at 50% 110%, rgba(201, 162, 74, 0.10), transparent 70%); }
+.ach-s-legendary::before { background: radial-gradient(ellipse 70% 110% at 50% 110%, rgba(201, 162, 74, 0.20), transparent 70%); }
+.ach-s-limited::before { background: radial-gradient(ellipse 60% 110% at 50% 110%, rgba(156, 47, 47, 0.22), transparent 70%); }
+.ach-shelf-h { position: relative; display: flex; align-items: baseline; justify-content: space-between; }
+.ach-shelf-h h4 { margin: 0; font-size: 14px; font-weight: 700; color: #f4f4f5; }
+.ach-shelf-h h4 span { margin-left: 10px; font-size: 11px; font-weight: 500; letter-spacing: 0.04em; color: #71717a; }
+.ach-shelf-h .r { font-size: 12px; color: #71717a; }
+.ach-shelf-h .r b { color: #a1a1aa; font-weight: 600; }
+.ach-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px 12px;
+  margin: 8px 0 0;
+  padding: 0 0 18px;
+  list-style: none;
+}
+.ach-row::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18) 15%, rgba(255, 255, 255, 0.18) 85%, transparent);
+  box-shadow: 0 10px 24px -6px rgba(0, 0, 0, 0.7);
+}
+.ach-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 14px 8px 22px;
+  border-radius: 14px;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+@media (hover: hover) { .ach-item:hover { transform: translateY(-4px); } }
+.ach-glow {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  width: 110px;
+  height: 26px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  filter: blur(8px);
+  opacity: 0.75;
+  pointer-events: none;
+}
+.ach-s-common .ach-glow { background: radial-gradient(ellipse, rgba(140, 144, 156, 0.35), transparent 70%); }
+.ach-s-rare .ach-glow { background: radial-gradient(ellipse, rgba(184, 190, 200, 0.45), transparent 70%); }
+.ach-s-epic .ach-glow { background: radial-gradient(ellipse, rgba(201, 162, 74, 0.40), transparent 70%); }
+.ach-s-legendary .ach-glow { background: radial-gradient(ellipse, rgba(201, 162, 74, 0.6), transparent 70%); }
+.ach-s-limited .ach-glow { background: radial-gradient(ellipse, rgba(156, 47, 47, 0.6), transparent 70%); }
+.ach-item.ghost .ach-glow { opacity: 0.12; }
+.ach-item svg { filter: drop-shadow(0 10px 12px rgba(0, 0, 0, 0.55)); }
+.ach-ring {
+  position: absolute;
+  top: 10px;
+  width: 100px;
+  height: 100px;
+  border-radius: 999px;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  pointer-events: none;
+}
+.ach-name { margin-top: 10px; font-size: 13px; font-weight: 600; color: #f4f4f5; }
+.ach-item.ghost .ach-name { color: #a1a1aa; }
+.ach-meta { margin-top: 3px; max-width: 160px; font-size: 11px; line-height: 1.35; color: #71717a; }
+.ach-own { margin-top: 6px; font-size: 10.5px; color: #71717a; }
+.ach-eq { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 5px; margin-top: 8px; }
+.ach-eq button, .ach-eq span {
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.06);
+  color: #a1a1aa;
+  cursor: pointer;
+  transition: background var(--dur-base) var(--ease-out);
+}
+.ach-eq button:hover { background: rgba(255, 255, 255, 0.10); color: #f4f4f5; }
+.ach-eq button:disabled { opacity: 0.5; cursor: default; }
+.ach-eq .on { background: rgba(110, 66, 255, 0.22); color: #d9ceff; }
+.ach-eq .static { cursor: default; }
+
+@keyframes ach-aurora { from { transform: translateX(-2%) scale(1); } to { transform: translateX(2%) scale(1.06); } }
+@keyframes ach-breathe { 50% { opacity: 0.55; } }
+@keyframes ach-float { 50% { transform: translateY(-6px); } }
+
+/* 手机：舞台竖排，勋章居中；收藏度换成两行；架子两枚一行。
+   Mobile: stage stacks with the badge centred; meter wraps; shelves two per row. */
+@media (max-width: 767px) {
+  .ach-stage { grid-template-columns: 1fr; gap: 6px; min-height: 0; padding: 24px 18px 20px; }
+  .ach-title { font-size: 30px; }
+  .ach-pedestal { height: 280px; }
+  .ach-trio { gap: 12px; }
+  .ach-refl { gap: 12px; }
+  .ach-hero, .ach-slot-hero { width: 164px; height: 164px; }
+  .ach-side, .ach-slot-side { width: 54px; height: 54px; }
+  .ach-cone { width: 320px; height: 250px; }
+  .ach-floor { width: 260px; }
+  .ach-refl { margin-top: -50px; }
+  .ach-rail b { font-size: 10px; }
+  .ach-stats strong { font-size: 18px; }
+  .ach-meter { flex-wrap: wrap; }
+  .ach-mgrp { flex-basis: calc(50% - 6px); }
+  .ach-shelf { padding: 12px 10px 14px; }
+  .ach-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ach-stage::before, .ach-cone, .ach-hero { animation: none; }
+}
+
 .seg-tabs {
   display: flex;
   gap: 4px;

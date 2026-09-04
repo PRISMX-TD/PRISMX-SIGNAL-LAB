@@ -1,12 +1,13 @@
-// 成就页：称号/等级头部 + 五个闯关条件组 + 勋章墙。
+// 成就页 = 一座陈列台：聚光灯下的佩戴勋章 + 收藏度 + 当前关卡 + 按材质分层的勋章库。
 // 入口本身按 gamificationVisible 门控（见 Layout/UserMenu），这里只处理直接
 // 打 URL 绕过入口的情况——理论上只有内测期的普通用户会撞上 403，兜底成一句
 // 提示而不是把接口错误糊在脸上。
-// Achievements page: title/level header + the five condition groups + the
-// badge wall. The entry point itself is gated on gamificationVisible (see
-// Layout/UserMenu); this only handles someone hitting the URL directly —
-// in practice only a regular user during the beta window, degraded to one
-// line of copy instead of a raw API error.
+// Achievements page as a showcase: the equipped badges under a spotlight, a
+// collection meter, the current stage, and the badge vault shelved by material.
+// The entry point itself is gated on gamificationVisible (see Layout/UserMenu);
+// this only handles someone hitting the URL directly — in practice only a
+// regular user during the beta window, degraded to one line of copy instead of
+// a raw API error.
 import type { CSSProperties } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -14,13 +15,19 @@ import type { TFunction } from 'i18next'
 import { gamificationApi, userApi } from '../api/client'
 import { localizeApiError, fmtDate } from '../api/utils'
 import { fmtPct } from '../components/winrate/shared'
-import { SkeletonPage } from '../components/Skeleton'
+import { SkeletonBlock, SkeletonLine } from '../components/Skeleton'
 import BadgeIcon from '../components/badges/BadgeIcon'
 import MedalTilt from '../components/badges/MedalTilt'
 import BadgeDetailModal from '../components/badges/BadgeDetailModal'
 import type { GamificationBadge, GamificationBadgeRarity, GamificationMe, GamificationTask } from '../api/types'
 
+// 收藏度从普通到绝版；勋章库反过来，最珍贵的一层在最上面——进门先看到镇馆之宝。
+// Collection meter runs common → limited; the vault is the reverse, most precious
+// shelf on top — the centrepiece is the first thing you see.
 const RARITY_ORDER: GamificationBadgeRarity[] = ['common', 'rare', 'epic', 'legendary', 'limited']
+const VAULT_ORDER: GamificationBadgeRarity[] = [...RARITY_ORDER].reverse()
+// 与后端 LEVEL_TITLES 同序 / same order as the backend's LEVEL_TITLES
+const LEVEL_KEYS = ['novice', 'junior', 'elite', 'senior', 'chief', 'legend'] as const
 
 // 铸造瞬间只在用户第一次看到这枚新勋章时播——已看过的记进 localStorage（try/
 // catch 包住每次读写：隐私模式/存储已满都不该炸页面，退化成"每次都当作已看
@@ -71,14 +78,22 @@ function markBadgeSeen(id: string): void {
   writeSeenBadges(seen)
 }
 
-// 进度数字：lots 类条件可能带小数（stats 按 4 位小数四舍五入），交易数/交易日
-// 都是整数——这里统一"整数不带小数点，小数最多两位"，不针对条件类型特判。
+// 进度数字：手数类条件可能带小数（stats 保留 4 位），笔数/天数类是整数——统一
+// "整数不带小数点，小数最多两位"，不针对条件类型特判。
 // Progress numbers: lot-based conditions can carry a fraction (stats round to
-// 4dp); trade/day counts are integers. Uniformly "no decimals when whole,
-// at most 2dp otherwise" rather than special-casing by condition type.
+// 4dp); trade/day counts are integers. Uniformly "no decimals when whole, at
+// most 2dp otherwise" rather than special-casing by condition type.
 function fmtProgressNum(n: number): string {
   const rounded = Math.round(n * 100) / 100
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2)
+}
+
+// population 为 0（数据库为空的边界情况）时不做除零——直接报 0.0%，比 NaN% 更能看。
+// population zero (an empty-database edge case) avoids a divide-by-zero — reports
+// 0.0% outright rather than NaN%.
+function fmtOwnerPct(owners: number, population: number): string {
+  if (population <= 0) return '0.0%'
+  return `${((owners / population) * 100).toFixed(1)}%`
 }
 
 function CheckIcon() {
@@ -227,8 +242,8 @@ function TaskTile({ task, index, t }: { task: GamificationTask; index: number; t
   )
 }
 
-// 组标题右侧的完成度环：r=18 → 周长 ≈ 113，按 done/total 走 dashoffset。
-// Completion ring beside the group title: r=18 → circumference ≈ 113, dashoffset by done/total.
+// 关卡标题右侧的完成度环：r=18 → 周长 ≈ 113，按 done/total 走 dashoffset。
+// Completion ring beside the stage title: r=18 → circumference ≈ 113, dashoffset by done/total.
 function StageRing({ done, total }: { done: number; total: number }) {
   const C = 2 * Math.PI * 18
   const ratio = total > 0 ? done / total : 0
@@ -245,6 +260,34 @@ function StageRing({ done, total }: { done: number; total: number }) {
       </svg>
       <span className="tk-ring-num num">{done}<span>/{total}</span></span>
     </span>
+  )
+}
+
+// 首屏骨架贴陈列台版式：左侧文字块 + 右侧一个大圆；下面两行占位。延迟 150ms 显形
+// （.lb-skel 那条规则），本地/缓存命中时根本不露面。
+// First-load skeleton shaped like the stage: text block left, one big disc right,
+// two placeholder rows below. Appears after 150ms (.lb-skel), so a fast response
+// never shows it at all.
+function PageSkeleton() {
+  return (
+    <div className="ach mx-auto max-w-[1100px] space-y-8 lb-skel" aria-hidden>
+      <div className="ach-stage" style={{ minHeight: 420 }}>
+        <div className="flex flex-col gap-4 pt-2">
+          <SkeletonLine width={90} height={11} />
+          <SkeletonLine width={260} height={40} />
+          <SkeletonLine width={180} height={14} />
+          <SkeletonLine width="100%" height={14} className="mt-6" />
+          <SkeletonLine width="100%" height={44} className="mt-4" />
+        </div>
+        <div className="flex items-end justify-center gap-6 pb-16">
+          <SkeletonBlock width={92} height={92} radius={999} />
+          <SkeletonBlock width={236} height={236} radius={999} />
+          <SkeletonBlock width={92} height={92} radius={999} />
+        </div>
+      </div>
+      <SkeletonBlock height={64} radius="var(--r-lg)" />
+      <SkeletonBlock height={220} radius="var(--r-lg)" />
+    </div>
   )
 }
 
@@ -369,13 +412,7 @@ export default function AchievementsPage() {
     void writeEquipped([badgeId, ...me.equippedBadges.filter((id) => id !== badgeId)], badgeId)
   }
 
-  if (loading) {
-    return (
-      <div className="mx-auto max-w-[1100px]">
-        <SkeletonPage cards={3} />
-      </div>
-    )
-  }
+  if (loading) return <PageSkeleton />
 
   if (forbidden || !me) {
     return (
@@ -389,158 +426,193 @@ export default function AchievementsPage() {
 
   const nextGroup = me.groups.find((g) => g.tasks.some((task) => !task.done))
   const remaining = nextGroup ? nextGroup.tasks.filter((task) => !task.done).length : 0
-  const badgesByRarity = RARITY_ORDER.map((rarity) => ({
+  // 关卡序号 = 组在 groups 里的下标 + 1；通往的称号 = 当前等级 + 1。
+  // Stage number = the group's index + 1; the title it leads to = current level + 1.
+  const stageIndex = nextGroup ? me.groups.indexOf(nextGroup) + 1 : me.groups.length
+  const nextTitleKey = LEVEL_KEYS[Math.min(me.level, LEVEL_KEYS.length - 1)]
+  const earnedCount = me.badges.filter((b) => b.earned).length
+  const shelves = VAULT_ORDER.map((rarity) => ({
     rarity,
     badges: me.badges.filter((b) => b.rarity === rarity),
   })).filter((g) => g.badges.length > 0)
-  // 按佩戴顺序取出勋章对象；首枚是默认，页头把它画大一档。
-  // Resolve badges in equipped order; the first is the default and the header
-  // renders it one size up.
+  // 按佩戴顺序取出勋章对象；首枚是默认，站陈列台正中。
+  // Resolve badges in equipped order; the first is the default and takes centre stage.
   const equippedBadges = me.equippedBadges
     .map((id) => me.badges.find((b) => b.id === id))
     .filter((b): b is GamificationBadge => b != null)
+  const [heroBadge, leftBadge, rightBadge] = [equippedBadges[0], equippedBadges[1], equippedBadges[2]]
+
+  // 陈列台上的一枚（可点开详情）。副戴两枚静态、退后半步；默认那枚缓慢自转。
+  // One badge on the pedestal (opens the detail layer). The two side badges sit
+  // still, a step back; the default one turns slowly.
+  const pedestalBadge = (b: GamificationBadge | undefined, role: 'hero' | 'side') => {
+    if (!b) return <span className={`ach-slot ach-slot-${role}`} aria-hidden />
+    return (
+      <MedalTilt ariaLabel={t(`gamification.badges.${b.id}.name`)} onClick={() => setDetailBadge(b)} className={`ach-${role}`}>
+        <BadgeIcon id={b.id} rarity={b.rarity} earned size={role === 'hero' ? 236 : 92} spin={role === 'hero'} />
+      </MedalTilt>
+    )
+  }
+  const reflectionBadge = (b: GamificationBadge | undefined, role: 'hero' | 'side') =>
+    b ? <BadgeIcon id={b.id} rarity={b.rarity} earned size={role === 'hero' ? 236 : 92} className={`ach-${role}`} />
+      : <span className={`ach-slot ach-slot-${role} ach-slot-ghost`} aria-hidden />
 
   return (
-    <div className="mx-auto max-w-[1100px] space-y-6">
-      <h2 className="font-display text-2xl font-bold text-neutral-100">
-        <span className="neon-text">{t('gamification.title')}</span>
-      </h2>
-
-      {/* 头部：称号 + 等级 + 距下一级 + 综合胜率 */}
-      <section className="card glass p-[18px]">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="tag bg-prism-600/20 text-sm text-prism-300">
-            {t('gamification.levelLabel')} L{me.level}
-          </span>
-          <h3 className="font-display text-xl font-bold text-white">
-            {t(`gamification.titles.${me.title}`)}
-          </h3>
-        </div>
-        <p className="mt-2 text-sm text-neutral-400">
-          {nextGroup ? t('gamification.remainingToNext', { count: remaining }) : t('gamification.maxLevel')}
-        </p>
-
-        {/* 佩戴中的勋章：96 像素，倾斜 + 缓慢自转（16s 一圈，比列表行的静态展示
-            郑重一档，但不到详情层放大图那么夸张）。 */}
-        {/* Currently-equipped badge: 96px, tilt + a slow 16s spin — a notch more
-            ceremonial than the static row-sized display, short of the detail
-            layer's full-size render. */}
-        {equippedBadges.length > 0 && (
-          <div className="mt-4 flex items-center gap-4 border-t border-white/10 pt-4">
-            <div className="flex items-end gap-2.5">
-              {equippedBadges.map((b, i) => (
-                <MedalTilt
-                  key={b.id}
-                  ariaLabel={t(`gamification.badges.${b.id}.name`)}
-                  onClick={() => setDetailBadge(b)}
-                >
-                  {/* 默认那枚 96px 且缓慢自转，其余两枚 56px 静态——大小本身就说明
-                      了哪一枚会出现在榜单上，不用再加一行文字。
-                      The default renders at 96px with a slow spin, the others at
-                      56px and static: size alone says which one reaches the
-                      board, no extra caption needed. */}
-                  <BadgeIcon id={b.id} rarity={b.rarity} earned size={i === 0 ? 96 : 56} spin={i === 0} />
-                </MedalTilt>
-              ))}
-            </div>
-            <div className="min-w-0">
-              <span className="text-xs text-neutral-500">{t('gamification.equip')}</span>
-              <div className="truncate text-sm font-semibold text-white">
-                {t(`gamification.badges.${equippedBadges[0].id}.name`)}
-              </div>
-              {/* 「榜单上展示默认这一枚」在 375px 会把这行挤成三行——手机只留计数，
-                  那句说明桌面才显示。
-                  The "default one appears on the leaderboard" clause wraps this to
-                  three lines at 375px, so mobile keeps only the count. */}
-              <p className="mt-0.5 text-[11px] text-neutral-500">
-                {t('gamification.equipSlots.count', { n: equippedBadges.length, max: EQUIP_SLOTS })}
-                <span className="hidden sm:inline">
-                  {' · '}
-                  {t('gamification.equipSlots.onBoard')}
-                </span>
-              </p>
-            </div>
-          </div>
-        )}
-
-        <div className="mt-4 border-t border-white/10 pt-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="ach mx-auto max-w-[1100px] space-y-8">
+      {/* ── 陈列台 / stage ────────────────────────────────────── */}
+      <section className="ach-stage" aria-labelledby="ach-title">
+        <div className="ach-stage-l">
+          <div className="ach-eyebrow">{t('gamification.title')}</div>
+          <h2 id="ach-title" className="ach-title">
+            <span className="ach-lv num">L{me.level}</span>
+            <span>{t(`gamification.titles.${me.title}`)}</span>
+          </h2>
+          <p className="ach-sub">
+            {nextGroup
+              ? `${t('gamification.remainingToNext', { count: remaining })} · ${t(`gamification.groups.${nextGroup.group}`)}`
+              : t('gamification.maxLevel')}
+          </p>
+          <ol className="ach-rail" aria-label={t('gamification.levelLabel')}>
+            {LEVEL_KEYS.map((key, i) => {
+              const lv = i + 1
+              const cls = lv < me.level ? 'on' : lv === me.level ? 'on cur' : ''
+              return (
+                <li key={key} className={cls} aria-current={lv === me.level ? 'step' : undefined}>
+                  <i aria-hidden />
+                  <b>{t(`gamification.levelShort.${key}`)}</b>
+                </li>
+              )
+            })}
+          </ol>
+          <div className="ach-stats">
             <div>
-              <span className="text-xs text-neutral-500">{t('gamification.winRateCard.combined')}</span>
-              <div className="num text-2xl font-bold text-up">
-                {me.winRate.value != null ? fmtPct(me.winRate.value) : '—'}
-              </div>
-              {me.winRate.value != null && (
-                <p className="text-[11px] text-neutral-500">
-                  {t('winrate.windowHint', { days: me.winRate.windowDays })}
-                </p>
+              <small>{t('gamification.winRateCard.combined')}</small>
+              <strong className="num text-up">{me.winRate.value != null ? fmtPct(me.winRate.value) : '—'}</strong>
+              {me.winRate.perLogin.length > 0 && (
+                <button type="button" className="ach-link" onClick={() => setShowBreakdown((v) => !v)}>
+                  {t('gamification.winRateCard.breakdown')}
+                </button>
               )}
             </div>
-            {me.winRate.perLogin.length > 0 && (
-              <button
-                type="button"
-                className="btn-ghost shrink-0 px-3 py-1.5 text-xs"
-                onClick={() => setShowBreakdown((v) => !v)}
-              >
-                {t('gamification.winRateCard.breakdown')}
-              </button>
+            <div>
+              <small>{t('gamification.stage.collected')}</small>
+              <strong className="num">{earnedCount} <span>/ {me.badges.length}</span></strong>
+            </div>
+            <div>
+              <small>{t('gamification.equip')}</small>
+              <strong className="num">{equippedBadges.length} <span>/ {EQUIP_SLOTS}</span></strong>
+            </div>
+          </div>
+        </div>
+
+        <div className="ach-pedestal">
+          <div className="ach-cone" aria-hidden />
+          <div className="ach-floorline" aria-hidden />
+          <div className="ach-floor" aria-hidden />
+          <div className="ach-trio">
+            {pedestalBadge(leftBadge, 'side')}
+            {pedestalBadge(heroBadge, 'hero')}
+            {pedestalBadge(rightBadge, 'side')}
+            <div className="ach-refl" aria-hidden>
+              {reflectionBadge(leftBadge, 'side')}
+              {reflectionBadge(heroBadge, 'hero')}
+              {reflectionBadge(rightBadge, 'side')}
+            </div>
+          </div>
+          <div className="ach-cap">
+            {heroBadge ? (
+              <>
+                <b>{t(`gamification.badges.${heroBadge.id}.name`)}</b>
+                {t('gamification.equipSlots.onBoard')}
+                <span className="ach-slots" aria-label={t('gamification.equipSlots.count', { n: equippedBadges.length, max: EQUIP_SLOTS })}>
+                  {Array.from({ length: EQUIP_SLOTS }).map((_, i) => (
+                    <i key={i} className={i < equippedBadges.length ? '' : 'empty'} />
+                  ))}
+                </span>
+              </>
+            ) : (
+              <>
+                <b>{t('gamification.stage.noEquip')}</b>
+                {t('gamification.stage.noEquipHint')}
+              </>
             )}
           </div>
-
-          {showBreakdown && me.winRate.perLogin.length > 0 && (
-            <div className="mt-4">
-              <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
-                {t('gamification.winRateCard.account')}
-              </span>
-              <div className="mt-2 overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="text-neutral-500">
-                      <th className="py-1.5 pr-4 font-medium">{t('gamification.winRateCard.colLogin')}</th>
-                      <th className="py-1.5 pr-4 font-medium">{t('gamification.winRateCard.colTrades')}</th>
-                      <th className="py-1.5 pr-4 font-medium">{t('gamification.winRateCard.colWins')}</th>
-                      <th className="py-1.5 pr-4 font-medium">{t('gamification.winRateCard.colWinRate')}</th>
-                      <th className="py-1.5 font-medium">{t('gamification.winRateCard.colExcluded')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {me.winRate.perLogin.map((row) => (
-                      <tr key={row.login} className="border-t border-white/5">
-                        <td className="num py-1.5 pr-4 text-neutral-200">{row.login}</td>
-                        <td className="num py-1.5 pr-4 text-neutral-300">{row.trades}</td>
-                        <td className="num py-1.5 pr-4 text-neutral-300">{row.wins}</td>
-                        <td className="num py-1.5 pr-4 text-neutral-300">
-                          {row.winRate != null ? fmtPct(row.winRate) : '—'}
-                        </td>
-                        <td className="num py-1.5 text-neutral-500">{row.excluded}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
         </div>
       </section>
 
-      {/* 当前等级组：只显示正在闯的这一关，已过的和未解锁的都不列 */}
-      {/* Current group only: the level being worked on — cleared and locked groups are not listed */}
+      {/* 综合胜率构成：从陈列台的「构成」按钮展开，独立一块，不挤进舞台。
+          Win-rate breakdown: toggled from the stage's button, its own block so the
+          table never crowds the stage. */}
+      {showBreakdown && me.winRate.perLogin.length > 0 && (
+        <section className="glass p-[18px] content-fade">
+          <div className="ach-sec-h">
+            <h3><b>{t('gamification.winRateCard.account')}</b>{t('winrate.windowHint', { days: me.winRate.windowDays })}</h3>
+          </div>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="text-neutral-500">
+                  <th className="py-1.5 pr-4 font-medium">{t('gamification.winRateCard.colLogin')}</th>
+                  <th className="py-1.5 pr-4 font-medium">{t('gamification.winRateCard.colTrades')}</th>
+                  <th className="py-1.5 pr-4 font-medium">{t('gamification.winRateCard.colWins')}</th>
+                  <th className="py-1.5 pr-4 font-medium">{t('gamification.winRateCard.colWinRate')}</th>
+                  <th className="py-1.5 font-medium">{t('gamification.winRateCard.colExcluded')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {me.winRate.perLogin.map((row) => (
+                  <tr key={row.login} className="border-t border-white/5">
+                    <td className="num py-1.5 pr-4 text-neutral-200">{row.login}</td>
+                    <td className="num py-1.5 pr-4 text-neutral-300">{row.trades}</td>
+                    <td className="num py-1.5 pr-4 text-neutral-300">{row.wins}</td>
+                    <td className="num py-1.5 pr-4 text-neutral-300">
+                      {row.winRate != null ? fmtPct(row.winRate) : '—'}
+                    </td>
+                    <td className="num py-1.5 text-neutral-500">{row.excluded}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {/* ── 收藏度 / collection ───────────────────────────────── */}
+      <section aria-labelledby="ach-collection">
+        <div className="ach-sec-h">
+          <h3 id="ach-collection"><b>{t('gamification.stage.collection')}</b></h3>
+          <div className="r"><b className="num">{earnedCount} / {me.badges.length}</b></div>
+        </div>
+        <div className="ach-meter">
+          {RARITY_ORDER.map((rarity) => {
+            const group = me.badges.filter((b) => b.rarity === rarity)
+            if (group.length === 0) return null
+            const got = group.filter((b) => b.earned).length
+            return (
+              <div key={rarity} className={`ach-mgrp ach-m-${rarity}`} style={{ flexGrow: group.length }}>
+                <div className="ach-segs" role="img" aria-label={`${t(`gamification.rarity.${rarity}`)} ${got}/${group.length}`}>
+                  {group.map((b) => <i key={b.id} className={b.earned ? 'on' : ''} />)}
+                </div>
+                <small>
+                  {t(`gamification.rarity.${rarity}`)} · {t(`gamification.material.${rarity}`)}{' '}
+                  <b className="num">{got}/{group.length}</b>
+                </small>
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* ── 当前关卡 / current stage ───────────────────────────── */}
       {nextGroup && (
-        <section className="card glass p-[18px]">
-          <div className="tk-head">
-            <div>
-              <h3 className="sec-h-title">{t(`gamification.groups.${nextGroup.group}`)}</h3>
-              <p className="tk-head-sub">
-                {t('gamification.taskProgress.groupDone', {
-                  done: nextGroup.tasks.length - remaining,
-                  total: nextGroup.tasks.length,
-                })}
-              </p>
-            </div>
+        <section aria-labelledby="ach-stage-title">
+          <div className="ach-sec-h">
+            <h3 id="ach-stage-title">
+              <b>{t(`gamification.groups.${nextGroup.group}`)}</b>
+              {t('gamification.stage.nth', { n: stageIndex })} · {t('gamification.stage.toward', { title: t(`gamification.titles.${nextTitleKey}`) })}
+            </h3>
             <StageRing done={nextGroup.tasks.length - remaining} total={nextGroup.tasks.length} />
           </div>
-          {/* 任务瓦片：一任务一格，自动排列（桌面一行放完，手机单列）。
-              Task tiles: one per task, auto-flow (one row on desktop, single column on mobile). */}
           <ul className="tk-grid">
             {nextGroup.tasks.map((task, i) => (
               <TaskTile key={task.id} task={task} index={i} t={t} />
@@ -549,87 +621,69 @@ export default function AchievementsPage() {
         </section>
       )}
 
-      {/* 勋章墙 */}
-      <section className="card glass p-[18px]">
-        <h3 className="sec-h-title">{t('gamification.badgeWall')}</h3>
-        <div className="mt-4 space-y-6">
-          {badgesByRarity.map(({ rarity, badges }) => (
-            <div key={rarity}>
-              <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
-                {t(`gamification.rarity.${rarity}`)}
-              </span>
-              <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-                {badges.map((b) => (
-                  <div
-                    key={b.id}
-                    className="flex flex-col items-center gap-1.5 rounded-xl bg-white/[0.03] p-3 text-center"
-                  >
-                    <MedalTilt
-                      ariaLabel={t(`gamification.badges.${b.id}.name`)}
-                      onClick={() => setDetailBadge(b)}
-                    >
-                      <BadgeIcon id={b.id} rarity={b.rarity} earned={b.earned} size={72} mint={mintIds.has(b.id)} />
-                    </MedalTilt>
-                    <span className="text-xs font-semibold text-neutral-200">
-                      {t(`gamification.badges.${b.id}.name`)}
-                    </span>
-                    {b.earned ? (
-                      <>
-                        {b.awardedAt && (
-                          <span className="text-[10px] text-neutral-500">{fmtDate(b.awardedAt)}</span>
-                        )}
-                        <div className="flex flex-wrap items-center justify-center gap-1">
+      {/* ── 勋章库 / vault ────────────────────────────────────── */}
+      <section className="ach-vault" aria-labelledby="ach-vault-title">
+        <div className="ach-sec-h">
+          <h3 id="ach-vault-title"><b>{t('gamification.stage.vault')}</b>{t('gamification.stage.vaultHint')}</h3>
+          <div className="r"><b className="num">{me.badges.length}</b></div>
+        </div>
+        {equipMsg && <p className="text-sm text-down">{equipMsg}</p>}
+
+        {shelves.map(({ rarity, badges }) => {
+          const got = badges.filter((b) => b.earned).length
+          return (
+            <div key={rarity} className={`ach-shelf ach-s-${rarity}`}>
+              <div className="ach-shelf-h">
+                <h4>
+                  {t(`gamification.rarity.${rarity}`)}
+                  <span>{t(`gamification.material.${rarity}`)}</span>
+                </h4>
+                <div className="r"><b className="num">{got} / {badges.length}</b></div>
+              </div>
+              <ul className="ach-row">
+                {badges.map((b) => {
+                  const isDefault = b.id === me.equippedBadge
+                  return (
+                    <li key={b.id} className={`ach-item ${b.earned ? '' : 'ghost'}`}>
+                      <i className="ach-glow" aria-hidden />
+                      {!b.earned && <i className="ach-ring" aria-hidden />}
+                      <MedalTilt ariaLabel={t(`gamification.badges.${b.id}.name`)} onClick={() => setDetailBadge(b)}>
+                        <BadgeIcon id={b.id} rarity={b.rarity} earned={b.earned} size={92} mint={mintIds.has(b.id)} />
+                      </MedalTilt>
+                      <b className="ach-name">{t(`gamification.badges.${b.id}.name`)}</b>
+                      <small className="ach-meta">
+                        {b.earned
+                          ? (b.awardedAt ? t('gamification.stage.awardedOn', { date: fmtDate(b.awardedAt) }) : '')
+                          : t(`gamification.badges.${b.id}.desc`)}
+                      </small>
+                      <small className="ach-own">
+                        {t('gamification.detail.owners', { n: b.owners, pct: fmtOwnerPct(b.owners, me.population) })}
+                      </small>
+                      {b.earned && (
+                        <div className="ach-eq">
+                          {isDefault && <span className="on static">{t('gamification.equipSlots.isDefault')}</span>}
+                          {b.equipped && !isDefault && (
+                            <button type="button" disabled={equipping === b.id} onClick={() => makeDefault(b.id)}>
+                              {t('gamification.equipSlots.setDefault')}
+                            </button>
+                          )}
                           <button
                             type="button"
                             disabled={equipping === b.id}
                             onClick={() => toggleEquip(b.id, b.equipped)}
-                            className={`tag text-[11px] transition disabled:opacity-50 ${
-                              b.equipped
-                                ? 'bg-prism-600/25 text-prism-300'
-                                : 'bg-white/5 text-neutral-400 hover:bg-white/10'
-                            }`}
+                            className={b.equipped ? 'on' : ''}
                           >
                             {b.equipped ? t('gamification.unequip') : t('gamification.equip')}
                           </button>
-                          {/* 已佩戴的非默认枚才给「设为默认」；默认那枚显示一枚静态标签，
-                              免得三枚里每枚都挂两个按钮。
-                              Only an equipped non-default badge offers "set as default";
-                              the default itself shows a static tag, so the three don't
-                              each carry two buttons. */}
-                          {b.equipped && b.id !== me.equippedBadge && (
-                            <button
-                              type="button"
-                              disabled={equipping === b.id}
-                              onClick={() => makeDefault(b.id)}
-                              className="tag bg-white/5 text-[11px] text-neutral-400 transition hover:bg-white/10 disabled:opacity-50"
-                            >
-                              {t('gamification.equipSlots.setDefault')}
-                            </button>
-                          )}
-                          {b.id === me.equippedBadge && (
-                            <span className="tag bg-white/[0.06] text-[11px] text-neutral-300">
-                              {t('gamification.equipSlots.isDefault')}
-                            </span>
-                          )}
                         </div>
-                      </>
-                    ) : (
-                      <>
-                        <span className="tag bg-white/5 text-[11px] text-neutral-500">
-                          {t('gamification.notEarned')}
-                        </span>
-                        <span className="text-[10px] leading-relaxed text-neutral-500">
-                          {t(`gamification.badges.${b.id}.desc`)}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                ))}
-              </div>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
             </div>
-          ))}
-        </div>
-        {equipMsg && <p className="mt-3 text-sm text-down">{equipMsg}</p>}
+          )
+        })}
       </section>
 
       {detailBadge && (
