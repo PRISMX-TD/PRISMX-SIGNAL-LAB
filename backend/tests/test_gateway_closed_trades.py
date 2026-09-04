@@ -12,7 +12,9 @@
 
 from dataclasses import dataclass
 
-from app.routers.gateway import build_closed_trade_legs
+from datetime import datetime, timezone
+
+from app.routers.gateway import build_closed_trade_legs, observe_server_offset
 
 PREFIX = "PRISMX"
 
@@ -147,3 +149,50 @@ def test_partial_closes_share_position_and_split_fees():
     # 总费用 -4，按 0.3/0.4 与 0.1/0.4 分摊
     assert by_deal[1]["profit"] == 30.0 + (-4.0 * 0.75)
     assert by_deal[2]["profit"] == 10.0 + (-4.0 * 0.25)
+
+
+# ---- 服务器时区偏移 / server zone offset --------------------------------------
+# Manager API 的 deal.time 是服务器墙钟 epoch。开仓腿的 time 与我们 orders.created_at
+# （真 UTC）之差 = 偏移；平仓腿落库前减掉它。见 gateway.observe_server_offset。
+
+_OPENED = datetime(2026, 9, 4, 13, 30, 0, tzinfo=timezone.utc)   # 我们下单的 UTC 时刻
+_SERVER_AHEAD = 3 * 3600                                          # 服务器 UTC+3
+
+
+def _in_out(pos: int, opened_utc: datetime, ahead: int, latency: int = 2):
+    """一开一平，time 都按"服务器领先 ahead 秒"的参照系给出。"""
+    t_open = int(opened_utc.timestamp()) + ahead + latency
+    return [
+        FakeDeal(ticket=pos * 10, position_id=pos, symbol="XAUUSD", action=0, entry=0,
+                 volume=0.1, price=2400.0, profit=0.0, comment="PRISMX", time=t_open),
+        FakeDeal(ticket=pos * 10 + 1, position_id=pos, symbol="XAUUSD", action=1, entry=1,
+                 volume=0.1, price=2410.0, profit=100.0, comment="", time=t_open + 600),
+    ]
+
+
+def test_offset_observed_from_in_leg_rounded_to_half_hour():
+    deals = _in_out(1, _OPENED, _SERVER_AHEAD)
+    assert observe_server_offset(deals, {1: _OPENED}) == _SERVER_AHEAD
+    # 执行延迟几十秒也不影响：四舍五入到半小时
+    assert observe_server_offset(_in_out(2, _OPENED, _SERVER_AHEAD, latency=40), {2: _OPENED}) == _SERVER_AHEAD
+
+
+def test_offset_none_without_platform_in_leg_and_ignores_outliers():
+    only_out = [d for d in _in_out(1, _OPENED, _SERVER_AHEAD) if d.entry == 1]
+    assert observe_server_offset(only_out, {1: _OPENED}) is None        # 窗口里没有开仓腿
+    assert observe_server_offset(_in_out(1, _OPENED, _SERVER_AHEAD), {}) is None   # 不是我们开的
+    # 相差一个月的样本不可能是时区，丢弃
+    stale = _in_out(3, _OPENED, 30 * 86400)
+    assert observe_server_offset(stale, {3: _OPENED}) is None
+
+
+def test_closed_at_shifted_back_to_true_utc():
+    deals = _in_out(7, _OPENED, _SERVER_AHEAD)
+    legs = build_closed_trade_legs(deals, PREFIX, {7}, server_offset_seconds=_SERVER_AHEAD)
+    assert len(legs) == 1
+    closed = legs[0]["closedAt"]
+    # 真 UTC：开仓后 10 分钟 + 2 秒延迟，不再多出 3 小时
+    assert closed == _OPENED.replace(second=2) + (datetime(2026, 1, 1, 0, 10) - datetime(2026, 1, 1))
+    # 默认 0 偏移 = 旧行为（仍然领先 3 小时）
+    legacy = build_closed_trade_legs(deals, PREFIX, {7})[0]["closedAt"]
+    assert (legacy - closed).total_seconds() == _SERVER_AHEAD

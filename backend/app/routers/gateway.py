@@ -605,9 +605,68 @@ GATEWAY_DEALS_SCAN_INTERVAL_SUBSCRIBED = 15.0
 # Re-reading the same deals is harmless: the unique constraint dedupes.
 GATEWAY_DEALS_CATCHUP_SECONDS = 7 * 24 * 60 * 60
 
+# ---------- 成交时间戳的参照系 / the time frame of deal timestamps ----------
+# Manager API 给的 deal.time 和 MetaTrader5 Python 包一样，是**按券商服务器墙钟
+# 算出来的 epoch**，不是 UTC——直接 fromtimestamp(tz=utc) 会整体偏出服务器时区
+# （常见 +2/+3 小时）。后果是真实的：一笔平在旧比赛窗口内的成交，落库后时间被推
+# 后几小时，就"漂"进了之后才开赛的新比赛窗口，新比赛还没交易就有了上一场的成绩
+# （2026-09-05 用户实测）。桥接那侧早就修了（bridge/mt5_worker._server_epoch_to_utc），
+# 这里是同一个坑的 gateway 版本。
+#
+# 观测办法不靠 gateway 增加接口：本平台开的仓位，它的开仓成交（entry=IN）在
+# Manager API 里的 time 与我们下单时记的 orders.created_at（真 UTC）只差执行延迟，
+# 两者之差就是"服务器时间 − UTC"。每次扫描都用窗口里的开仓腿重新观测，按账号
+# 记住最近一次有效值；窗口里没有开仓腿时沿用记住的值；从未观测到就按 0 处理
+# （维持旧行为，拿不准时不猜，和桥接侧同一条原则）。
+#
+# Manager API deal.time, like the MetaTrader5 Python package, is an epoch computed
+# from the broker server's wall clock, not UTC; fromtimestamp(tz=utc) shifts every
+# close by the server's zone (typically +2/+3h). The consequence is real: a close
+# inside an older competition's window drifted a few hours later and landed inside
+# a newer competition's window, giving it a score before any trade (user-reported
+# 2026-09-05). The bridge side fixed the same trap long ago
+# (bridge/mt5_worker._server_epoch_to_utc); this is the gateway edition.
+#
+# Observation needs no new gateway endpoint: for a position we opened, the IN deal's
+# time and our own orders.created_at (true UTC) differ only by execution latency,
+# so their difference is server-minus-UTC. Re-observed on every scan from the IN
+# legs in the window, remembered per login; reused when the window has no IN leg;
+# 0 when never observed (old behaviour: don't guess).
+_OFFSET_MAX_SECONDS = 14.5 * 3600       # 超出这个就不是时区 / beyond a timezone
+_OFFSET_ROUND_SECONDS = 30 * 60         # 时区偏移都是半小时的整数倍 / zones are half-hour multiples
+_gateway_utc_offset: dict[str, float] = {}   # login -> 最近观测到的偏移（秒）
+
+
+def observe_server_offset(deals: list, opened_at_by_position: dict[int, datetime]) -> float | None:
+    """从窗口里本平台仓位的开仓腿观测「服务器时间 − UTC」（秒），取半小时整。
+
+    取中位数：每个样本 = 真实偏移 + 执行延迟（几秒），没有系统性偏向；中位数
+    再抗一两条异常。没有可用样本返回 None（由调用方决定沿用旧值还是 0）。
+    Median of (IN deal time − our order's created_at) over platform-opened positions
+    in the window, rounded to the half hour; None when there is no usable sample.
+    """
+    samples = []
+    for d in deals:
+        if d.entry != _DEAL_ENTRY_IN or not d.position_id:
+            continue
+        opened = opened_at_by_position.get(int(d.position_id))
+        if opened is None or not d.time:
+            continue
+        if opened.tzinfo is None:
+            opened = opened.replace(tzinfo=timezone.utc)
+        delta = float(d.time) - opened.timestamp()
+        if abs(delta) <= _OFFSET_MAX_SECONDS:
+            samples.append(delta)
+    if not samples:
+        return None
+    samples.sort()
+    median = samples[len(samples) // 2]
+    return round(median / _OFFSET_ROUND_SECONDS) * _OFFSET_ROUND_SECONDS
+
 # MT5 成交类型/进出方向常量（对应 SDK 的 EnDealAction / EnDealEntry）
 _DEAL_ACTION_BUY = 0
 _DEAL_ACTION_SELL = 1
+_DEAL_ENTRY_IN = 0
 _DEAL_ENTRY_OUT = 1
 _DEAL_ENTRY_INOUT = 2
 _DEAL_ENTRY_OUT_BY = 3
@@ -617,6 +676,7 @@ def build_closed_trade_legs(
     deals: list,
     comment_prefix: str,
     known_position_tickets: set[int] | None = None,
+    server_offset_seconds: float = 0.0,
 ) -> list[dict]:
     """从成交历史里挑出「本平台开的仓位的平仓腿」，算好净盈亏后返回待入库记录。
 
@@ -643,6 +703,9 @@ def build_closed_trade_legs(
     bridge/mt5_worker.py 的 fee_share 算法保持一致——否则同一笔交易在两条通道
     下会算出不同的净盈亏。注意窗口里可能缺开仓腿，那笔手续费就分摊不到；宁可
     少算费用，也不能因此丢掉整条平仓记录。
+
+    `server_offset_seconds`：deal.time 所在的服务器墙钟相对 UTC 的偏移（见
+    observe_server_offset），落库前减掉，closedAt 才是真 UTC。默认 0 = 旧行为。
 
     纯函数，不碰数据库，便于单独验证。
 
@@ -701,7 +764,7 @@ def build_closed_trade_legs(
                 "profit": (d.profit or 0.0) + total_fees * (d.volume / total_out_volume),
                 "positionTicket": pos_id,
                 "dealTicket": int(d.ticket),
-                "closedAt": datetime.fromtimestamp(d.time, tz=timezone.utc),
+                "closedAt": datetime.fromtimestamp(d.time - server_offset_seconds, tz=timezone.utc),
             })
 
     return legs_out
@@ -886,8 +949,12 @@ async def gateway_positions_loop() -> None:
             # Match on mt5_position (the real position id). mt5_ticket holds an
             # order or deal ticket — a different numbering space from a closing
             # deal's position_id, so comparing against it never matches.
-            known = {
-                int(t) for (t,) in db.query(Order.mt5_position).filter(
+            # created_at 一并取出：开仓腿的服务器时间与它相减就是服务器时区偏移
+            #（见 observe_server_offset）。
+            # created_at comes along: the IN leg's server time minus it is the
+            # server's zone offset (see observe_server_offset).
+            opened_at = {
+                int(t): c for (t, c) in db.query(Order.mt5_position, Order.created_at).filter(
                     Order.user_id == user_id,
                     Order.mt5_login == login,
                     Order.action == "ORDER",
@@ -895,10 +962,19 @@ async def gateway_positions_loop() -> None:
                     Order.mt5_position.isnot(None),
                 ).all()
             }
+            known = set(opened_at)
         finally:
             db.close()
 
-        legs = build_closed_trade_legs(deals, settings.GATEWAY_COMMENT_PREFIX, known)
+        offset = observe_server_offset(deals, opened_at)
+        if offset is not None:
+            if _gateway_utc_offset.get(login) != offset:
+                logger.info("Gateway 服务器时区偏移 login=%s = %+.1f 小时", login, offset / 3600)
+            _gateway_utc_offset[login] = offset
+        else:
+            offset = _gateway_utc_offset.get(login, 0.0)
+
+        legs = build_closed_trade_legs(deals, settings.GATEWAY_COMMENT_PREFIX, known, offset)
         if not legs:
             return 0
 
@@ -1009,10 +1085,14 @@ async def gateway_positions_loop() -> None:
             # Pad `to` by a day: MT5 server time often runs ahead
             # of UTC, and cutting at "now" would drop fresh deals.
             to_unix = int(time.time()) + 86400
+            # from 同理：服务器时钟落后 UTC（负偏移）时，刚平的单在服务器参照系
+            # 里"更早"，窗口起点要再往前让出这段。
+            # Likewise `from`: with a server clock behind UTC (negative offset) a
+            # fresh close sits "earlier" in the server frame, so the start moves back.
             from_unix = int(time.time()) - (
                 GATEWAY_DEALS_CATCHUP_SECONDS if first_scan
                 else GATEWAY_DEALS_LOOKBACK_SECONDS
-            )
+            ) - int(max(0.0, -_gateway_utc_offset.get(login, 0.0)))
             deals, derr = await gw_get_deals(int(login), from_unix, to_unix)
             if derr:
                 logger.warning("Gateway 成交历史读取失败 login=%s: %s", login, derr)

@@ -96,6 +96,10 @@ function fmtCountdown(ms: number, t: TFunction): string {
 type ClockUnit = 'd' | 'h' | 'm'
 function clockOf(c: CompetitionSummary, nowMs: number, t: TFunction):
     { label: string; parts: Array<{ unit: ClockUnit; value: number }> | null } | null {
+  // 已结束 / 已终审（可能是提前强制终审）没有什么可倒数的，哪怕 endsAt 还在未来。
+  // Ended / settled (possibly force-settled early) has nothing left to count down,
+  // even when endsAt is still in the future.
+  if (c.status === 'ended' || c.status === 'settled') return null
   const starts = parseTime(c.startsAt)?.getTime() ?? null
   const ends = parseTime(c.endsAt)?.getTime() ?? null
   const target = starts != null && nowMs < starts
@@ -120,6 +124,7 @@ function clockOf(c: CompetitionSummary, nowMs: number, t: TFunction):
 // nothing once it's over.
 function countdownOf(c: CompetitionSummary, nowMs: number, t: TFunction):
     { label: string; value: string } | null {
+  if (c.status === 'ended' || c.status === 'settled') return null
   // parseTime 返回 Date，倒计时要的是毫秒差，先取时间戳。
   // parseTime returns a Date; the countdown needs a millisecond delta, so take the stamp.
   const starts = parseTime(c.startsAt)?.getTime() ?? null
