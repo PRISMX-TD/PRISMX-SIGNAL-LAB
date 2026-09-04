@@ -467,3 +467,34 @@ def test_settle_force_skips_every_precondition(db_session):
     # force：已终审/宽限期内都能再跑一次，勋章靠唯一约束幂等，不会重复发
     again = settle_competition(db_session, comp, admin.id, now=just_ended, force=True)
     assert again["ranked"] == 0 and comp.status == "settled"
+
+
+def test_demo_track_scores_demo_account_fills(db_session):
+    """模拟赛必须算模拟账户的成交单：加赛道那版只改了报名资格，计分函数仍写死
+    只认实盘（_resolved_in_period 的 modes 默认 (REAL,)），模拟赛永远算不出行。
+    这条钉住修复——同一批数据，demo 赛出行、real 赛不出行。"""
+    comp = _comp(db_session, name="Demo Cup")
+    comp.track = "demo"
+    db_session.commit()
+    u = _user(db_session, "demo_tr@t.co")
+    _acct(db_session, u, "D", balance=2000.0, tm=0)          # 模拟账户
+    _baseline(db_session, comp, u, "D")
+    _participant(db_session, comp, u, "D")
+    # 成交单的 trade_mode 快照跟着账户走 = 0（模拟）
+    for i in range(5):
+        t = 500 + i
+        db_session.add(Order(user_id=u.id, client_order_id=f"cD{t}", symbol="X", side="BUY",
+                             volume=0.1, status="FILLED", mt5_login="D", mt5_ticket=t,
+                             trade_mode=0, created_at=IN_WINDOW - timedelta(hours=2)))
+        db_session.add(ClosedTrade(user_id=u.id, mt5_login="D", symbol="X", side="BUY",
+                                   close_volume=0.1, close_price=1, profit=10.0,
+                                   position_ticket=t, deal_ticket=t * 10,
+                                   closed_at=IN_WINDOW, verified=True))
+    db_session.commit()
+
+    rows = compute_comp_rows(db_session, comp)
+    assert {r["login"] for r in rows} == {"D"} and rows[0]["sample"] == 5
+
+    comp.track = "real"                                       # 同一批数据换成实盘赛
+    db_session.commit()
+    assert compute_comp_rows(db_session, comp) == []          # 模拟单不该进实盘赛

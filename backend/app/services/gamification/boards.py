@@ -100,19 +100,31 @@ def reconcile_deposits(db, period_key: str, now: datetime = None,
 
 
 def _resolved_in_period(db, user_id, logins, period_key, taken_at_by_login,
-                         bounds: tuple[datetime, datetime] | None = None):
+                         bounds: tuple[datetime, datetime] | None = None,
+                         modes: tuple[int, ...] = (REAL,)):
     """整仓判定 + 归期：返回 login -> list[profit]。归期 = 最后一腿时间落在
     [max(期初, 该账户 taken_at), 期末)。订单锚定 lifetime（开仓可早于期初）。
 
     `bounds` 可选：显式传 (start, end) 时跳过 `period_bounds(period_key)` 解析
     （比赛 key 不是自然周/月格式，解析不了）；默认 None 时行为与 Phase 2 完全
     一致。
+
+    `modes`：参与计分的 `orders.trade_mode` 集合，默认只认实盘。周期榜永远只
+    算实盘（设计 §4），传默认值即可；**模拟盘比赛**必须把赛道对应的模式传进来
+    （`competitions.track_modes`），否则模拟账户的成交单会在这里被整个滤掉，
+    比赛榜永远算不出行——2026-09-04 加赛道时就漏了这一处。
+    `modes`: which `orders.trade_mode` values count, real-only by default. The
+    standing boards are always real-only (design §4) and take the default; a
+    **demo-track competition** must pass its track's modes
+    (`competitions.track_modes`) or every fill from a demo account is filtered out
+    right here and the competition board can never produce a row — exactly the case
+    missed when tracks were added on 2026-09-04.
     """
     from .stats import _filled_orders, _legs_by_position, _resolve
     from app.services.trade_performance import position_id_of
     start, end = bounds if bounds is not None else period_bounds(period_key)
     orders = [o for o in _filled_orders(db, user_id, cutoff=None)
-              if o.trade_mode == REAL and o.mt5_login in logins]
+              if o.trade_mode in modes and o.mt5_login in logins]
     keys = {(o.mt5_login, position_id_of(o)) for o in orders if position_id_of(o)}
     legs_map = _legs_by_position(db, user_id, keys)
     out = defaultdict(list)

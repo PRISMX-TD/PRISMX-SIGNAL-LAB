@@ -22,6 +22,7 @@
     python -m scripts.diagnose_board --period month   # 当前月榜
     python -m scripts.diagnose_board --key 2026-W36   # 指定周期键
     python -m scripts.diagnose_board --verbose        # 逐个账户打印明细
+    python -m scripts.diagnose_board --comp "比赛名"   # 改为诊断一场比赛
 """
 import argparse
 import sys
@@ -43,11 +44,11 @@ def _fmt(dt) -> str:
     return _aware(dt).strftime("%Y-%m-%d %H:%M UTC") if dt else "—"
 
 
-def _login_detail(db, uid, login, start, end, taken_at):
+def _login_detail(db, uid, login, start, end, taken_at, modes=(REAL,)):
     """一个账户的仓位漏斗：成交单 → 有核验腿 → 整仓平掉 → 落在归期窗口内。
     与 `_resolved_in_period` 同口径，只是把中间各级的数量也留下来。"""
     orders = [o for o in _filled_orders(db, uid, cutoff=None)
-              if o.trade_mode == REAL and o.mt5_login == login and position_id_of(o)]
+              if o.trade_mode in modes and o.mt5_login == login and position_id_of(o)]
     keys = {(o.mt5_login, position_id_of(o)) for o in orders}
     legs_map = _legs_by_position(db, uid, keys)
     with_legs = [o for o in orders if legs_map.get((o.mt5_login, position_id_of(o)))]
@@ -71,12 +72,104 @@ def _login_detail(db, uid, login, start, end, taken_at):
             "unverified_legs": unverified, "lower": lower}
 
 
+def _diagnose_comp(ident: str, verbose: bool) -> int:
+    """比赛版漏斗：参赛行 → 有基线 → 分母达标 → 本场整仓笔数 → 上榜。
+    与周期榜的区别都在这里显式打印：赛道（决定哪些账户与哪些成交单参与）、
+    本场门槛（可覆盖全局）、计分窗口（开赛 / 报名 / 拍基线三者取晚）。
+    Competition funnel: participants → baseline → denominator → resolved trades →
+    on board. The competition-specific parts are printed explicitly: the track
+    (which accounts and which fills count), this competition's gates (may override
+    the global ones), and the scoring window (latest of start / registration /
+    baseline)."""
+    from app.models import Competition, CompetitionParticipant
+    from app.services.gamification.competitions import (
+        comp_gates, comp_period_key, track_modes)
+
+    db = SessionLocal()
+    try:
+        comp = (db.query(Competition).filter(Competition.id == ident).first()
+                or db.query(Competition).filter(Competition.name == ident).first())
+        if comp is None:
+            print(f"找不到比赛：{ident}")
+            return 1
+        gates = comp_gates(comp, get_gamification_settings(db))
+        modes = track_modes(comp.track)
+        min_trades = (gates["min_trades_return"] if comp.metric == "return_pct"
+                      else gates["min_trades_winrate"])
+        key = comp_period_key(comp.id)
+        start, end = _aware(comp.starts_at), _aware(comp.ends_at)
+        print(f"比赛「{comp.name}」 {comp.id}")
+        print(f"  状态 {comp.status} · 指标 {comp.metric} · 赛道 {comp.track}"
+              f"（计分只认 trade_mode ∈ {modes} 的成交单）")
+        print(f"  窗口 {_fmt(start)} → {_fmt(end)}")
+        print(f"  门槛：≥{min_trades} 笔 · 分母 ≥{gates['min_baseline_usd']:g} USD"
+              f"（{'本场自定义' if comp.min_trades is not None or comp.min_baseline_usd is not None else '跟随全局'}）")
+        print()
+
+        parts = (db.query(CompetitionParticipant)
+                   .filter(CompetitionParticipant.competition_id == comp.id).all())
+        live = [p for p in parts if not p.disqualified]
+        baselines = {(b.user_id, b.mt5_login): b for b in
+                     db.query(PeriodBaseline).filter(PeriodBaseline.period_key == key)}
+        with_base = [p for p in live if (p.user_id, p.mt5_login) in baselines]
+        print("── 参赛漏斗 ──")
+        print(f"  参赛行                            {len(parts):>4}"
+              f"   （被取消资格 {len(parts) - len(live)}）")
+        print(f"  └ 有基线                          {len(with_base):>4}"
+              f"   （无基线 {len(live) - len(with_base)}）")
+        print()
+
+        on_board, dropped = [], []
+        for p in with_base:
+            b = baselines[(p.user_id, p.mt5_login)]
+            lower = max(start, _aware(b.taken_at),
+                        *([_aware(p.scoring_from)] if p.scoring_from else []))
+            d = _login_detail(db, p.user_id, p.mt5_login, lower, end, b.taken_at, modes)
+            denom = b.baseline + b.adjust
+            row = {"p": p, "b": b, "denom": denom, "d": d, "lower": lower}
+            (on_board if len(d["in_window"]) >= min_trades and denom >= gates["min_baseline_usd"]
+             and denom > 0 else dropped).append(row)
+        print(f"── 结果 ──  上榜 {len(on_board)} · 未上榜 {len(dropped)}")
+        print()
+        for row in dropped:
+            p, d = row["p"], row["d"]
+            reason = []
+            if d["orders"] == 0:
+                reason.append(f"名下没有该赛道（trade_mode ∈ {modes}）的成交单")
+            else:
+                if d["with_legs"] < d["orders"]:
+                    reason.append(f"{d['orders'] - d['with_legs']} 单没有已核验的平仓腿")
+                if d["resolved"] < d["with_legs"]:
+                    reason.append(f"{d['with_legs'] - d['resolved']} 单未整仓平掉")
+                if d["before_lower"]:
+                    reason.append(f"{d['before_lower']} 笔平在计分起点之前")
+                if d["after_end"]:
+                    reason.append(f"{d['after_end']} 笔平在比赛结束之后")
+            if row["denom"] < gates["min_baseline_usd"]:
+                reason.append(f"分母 {row['denom']:.2f} 不足 {gates['min_baseline_usd']:g}")
+            print(f"  {p.mt5_login}  本场 {len(d['in_window'])} 笔（需 {min_trades}）"
+                  f" · 分母 {row['denom']:.2f} · 计分起点 {_fmt(row['lower'])}")
+            print(f"      → {'；'.join(reason) if reason else '无明显原因，需人工细查'}")
+        if verbose:
+            for row in on_board:
+                p, d = row["p"], row["d"]
+                print(f"  [上榜] {p.mt5_login}  {len(d['in_window'])} 笔 · 盈亏 "
+                      f"{sum(d['in_window']):+.2f} · 分母 {row['denom']:.2f}")
+        return 0
+    finally:
+        db.close()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="排行榜入榜漏斗诊断（只读）")
     ap.add_argument("--period", choices=("week", "month"), default="week")
     ap.add_argument("--key", help="直接指定周期键，如 2026-W36 或 2026-09")
     ap.add_argument("--verbose", action="store_true", help="逐个账户打印明细")
+    ap.add_argument("--comp", help="改为诊断一场比赛（传比赛 id 或名称）")
     args = ap.parse_args()
+
+    if args.comp:
+        return _diagnose_comp(args.comp, args.verbose)
 
     db = SessionLocal()
     try:

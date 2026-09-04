@@ -116,8 +116,14 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
             logins.add(p.mt5_login)
         if not logins:
             continue
+        # modes：按本场赛道取（real 赛只算实盘单、demo 赛只算模拟单）。不传的话
+        # _resolved_in_period 默认只认实盘，模拟赛的成交会被整个滤掉。
+        # modes: taken from this competition's track (a real competition scores only
+        # live fills, a demo one only demo fills). Without it _resolved_in_period
+        # defaults to real-only and a demo competition's fills all get filtered out.
         profits_by_login = _resolved_in_period(db, uid, logins, period_key, taken,
-                                                bounds=(starts_at, ends_at))
+                                                bounds=(starts_at, ends_at),
+                                                modes=track_modes(comp.track))
         for lg in logins:
             b = baseline_by_login[lg]
             profits = profits_by_login.get(lg, [])
