@@ -2006,7 +2006,7 @@
     "title": "Competitions",
     "empty": "No competitions yet",
     "backToList": "Back to competitions",
-    "cd": { "toStart": "Starts in", "toEnd": "Ends in", "dh": "{{d}}d {{h}}h", "hm": "{{h}}h {{m}}m", "m": "{{m}}m", "soon": "any moment", "units": { "d": "days", "h": "hrs", "m": "min" } }, "myLiveRank": "Currently #{{n}}", "myPending": "Score pending - you enter the board once the trade gate is met", "prizeLabel": "Prize", "myRank": "Your rank", "registerMore": "Enter another account",
+    "cd": { "toStart": "Starts in", "toEnd": "Ends in", "dh": "{{d}}d {{h}}h", "hm": "{{h}}h {{m}}m", "m": "{{m}}m", "soon": "any moment", "units": { "d": "days", "h": "hrs", "m": "min" } }, "myLiveRank": "Currently #{{n}}", "myPending": "Score pending - you enter the board once the trade gate is met", "prizeLabel": "Prize", "myRank": "Your rank", "registerMore": "Enter another account", "hall": "Hall of champions", "champion": "Champion", "noChampion": "No one ranked", "settling": "Pending review",
     "status": { "draft": "Draft", "upcoming": "Upcoming", "regOpen": "Registration open", "running": "Live",
                 "finished": "Finished", "settled": "Settled" },
     "enrollment": { "signup": "Sign-up", "auto": "Auto-enrolled" },

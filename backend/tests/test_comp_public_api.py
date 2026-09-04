@@ -108,6 +108,33 @@ def test_list_groups_by_status_excludes_draft_and_orders_correctly(db_session):
 # 见 test_leaderboard_api.test_gate_and_admin_bypass）。
 
 
+
+def test_list_carries_champion_for_settled_only(db_session):
+    """荣誉墙数据：已终审比赛带榜首行（昵称打码、分数、佩戴勋章），未终审的
+    ended 与空榜的 settled 都是 None。"""
+    _make_visible(db_session)
+    viewer = _user(db_session, "listc@t.co")
+    winner = _user(db_session, "champion@t.co")
+    winner.nickname = "Ace Trader"; winner.nickname_public = False; winner.equipped_badge = "first_trade"
+    db_session.commit()
+    settled = _comp(db_session, status="settled", starts_at=T0 - timedelta(days=20), name="Settled")
+    ended = _comp(db_session, status="ended", starts_at=T0 - timedelta(days=30), name="Ended")
+    empty = _comp(db_session, status="settled", starts_at=T0 - timedelta(days=40), name="Empty")
+    for comp, uid, rank, score in ((settled, winner.id, 1, 0.093), (settled, viewer.id, 2, 0.041),
+                                   (ended, viewer.id, 1, 0.5)):
+        db_session.add(LeaderboardSnapshot(board="return_pct", period_key=comp_period_key(comp.id),
+                                           user_id=uid, mt5_login=f"L{rank}", rank=rank, score=score))
+    db_session.commit()
+
+    out = list_competitions(request=None, db=db_session, user=viewer)
+    by_name = {c["name"]: c for c in out["finished"]}
+    champ = by_name["Settled"]["champion"]
+    assert champ["score"] == 0.093 and champ["equippedBadge"] == "first_trade"
+    assert champ["displayName"] != "Ace Trader" and "champion@t.co" not in champ["displayName"]
+    assert by_name["Ended"]["champion"] is None      # 未终审不挂冠军
+    assert by_name["Empty"]["champion"] is None      # 终审了但没人上榜
+    assert all(c["champion"] is None for c in out["upcoming"] + out["running"])
+
 # ---- GET "/{id}" ----------------------------------------------------------------
 
 def test_detail_404_for_missing_and_draft(db_session):

@@ -1298,6 +1298,18 @@ export interface CompetitionSummary {
   startsAt: string | null
   endsAt: string | null
   prizeNote: string | null
+  // 已终审比赛的冠军（榜首那一行，昵称按公开设置打码）；未终审或空榜为 null。
+  // 列表页的荣誉墙靠它把冠军摆出来，不必逐场打开详情。
+  // The champion of a settled competition (its rank-1 row, name masked per the
+  // nickname setting); null while unsettled or when nobody ranked. The list page's
+  // hall of champions shows them without opening each detail.
+  champion?: CompetitionChampion | null
+}
+
+export interface CompetitionChampion {
+  displayName: string
+  score: number
+  equippedBadge: string | null
 }
 
 // GET /competitions 的完整响应：非 draft 比赛按状态分组。

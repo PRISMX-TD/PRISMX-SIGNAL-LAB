@@ -55,7 +55,7 @@ const isRealAccount = (a: MT5Account): boolean => a.tradeMode === 2
 const matchesTrack = (a: MT5Account, track: CompetitionTrack): boolean =>
   track === 'demo' ? a.tradeMode === 0 || a.tradeMode === 1 : isRealAccount(a)
 
-const LIST_GROUPS: Array<keyof CompetitionListGrouped> = ['upcoming', 'running', 'finished']
+const LIST_GROUPS: Array<keyof CompetitionListGrouped> = ['running', 'upcoming', 'finished']
 
 // 每 30 秒走一次的时钟：倒计时与"进行中/已结束"的判定都读它。30 秒够用——
 // 倒计时最小单位是分钟，秒级刷新只是白白重渲染整页。
@@ -178,14 +178,44 @@ function regState(c: CompetitionSummary, nowMs: number): 'notOpen' | 'open' | 'c
   return 'open'
 }
 
-// 赛事牌：左缘一道状态色带（进行中紫并呼吸、已终审金、其余中性），名称压在
-// 顶部，下面一行是计分口径 / 赛道 / 参赛方式三枚芯片，底部是时间窗口与倒计时。
-// 整张卡是按钮，按下轻微下沉。
-// Competition plate: a status stripe down the left edge (violet and breathing
-// while running, gold once settled, neutral otherwise), the name up top, a row of
-// metric / track / enrollment chips under it, and the time window plus countdown
-// along the bottom. The whole plate is a button that dips slightly on press.
-function CompetitionCard({
+// 状态行：状态芯片 + 计分口径 / 赛道 / 参赛方式，发丝线隔开。列表三种版式和
+// 详情页赛场共用同一行，三处长得一样。
+// The status line: status pill plus metric / track / enrollment, hairline-separated.
+// Shared by all three list layouts and the detail arena, so it reads the same
+// everywhere.
+function StatusLine({ c, tagKey, t }: { c: CompetitionSummary; tagKey: string; t: TFunction }) {
+  const live = tagKey === 'running' || tagKey === 'regOpen'
+  return (
+    <div className="cmp-status">
+      <span className={`cmp-status-tag ${STATUS_TAG_CLASS[tagKey] ?? ''}`}>
+        {live && <i className="cmp-live-dot" aria-hidden />}
+        {t(`competition.status.${tagKey}`)}
+      </span>
+      <span>{t(`leaderboard.boards.${c.metric}`)}</span>
+      <span>{t(`competition.track.${c.track}`)}</span>
+      <span>{t(`competition.enrollment.${c.enrollment}`)}</span>
+    </div>
+  )
+}
+
+// 列表上的时间窗口只到日：两端各带时分和时区的一串在手机上要折两行，而列表
+// 只需要知道"哪几天"，精确到分钟的时刻详情页才需要。
+// Time windows on the list stop at the day: two full timestamps with zone wrap onto
+// two lines on a phone, and the list only needs "which days"; minute precision
+// belongs to the detail page.
+const fmtDay = (iso: string): string =>
+  (parseTime(iso) ?? new Date(NaN)).toLocaleDateString('en-GB', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  })
+const fmtRange = (c: CompetitionSummary) =>
+  `${c.startsAt ? fmtDay(c.startsAt) : '—'} → ${c.endsAt ? fmtDay(c.endsAt) : '—'}`
+
+// 进行中 = 广告牌：这页的主角。左边赛名 32px、奖品一行金字、时间窗口；右边
+// 天/小时/分 三格倒计时。整块是按钮。
+// Running = the billboard, the page's lead. Name at 32px, a gold prize line and
+// the time window on the left; the day / hour / minute countdown on the right.
+// The whole block is a button.
+function LiveBillboard({
   c,
   nowMs,
   onClick,
@@ -196,34 +226,106 @@ function CompetitionCard({
   onClick: () => void
   t: TFunction
 }) {
-  const tagKey = statusTagKey(c, nowMs)
-  const cd = countdownOf(c, nowMs, t)
-  const tone = tagKey === 'settled' || tagKey === 'finished' ? 'done'
-    : tagKey === 'running' || tagKey === 'regOpen' ? 'live' : 'soon'
+  const clock = clockOf(c, nowMs, t)
   return (
-    <button type="button" onClick={onClick} className={`cmp-card cmp-${tone}`}>
-      <i className="cmp-stripe" aria-hidden />
-      <div className="cmp-card-head">
-        <h4 className="cmp-card-name">{c.name}</h4>
-        <span className={`tag shrink-0 text-[11px] ${STATUS_TAG_CLASS[tagKey] ?? ''}`}>
-          {tone === 'live' && <i className="cmp-live-dot" aria-hidden />}
-          {t(`competition.status.${tagKey}`)}
-        </span>
-      </div>
-      <div className="cmp-chips">
-        <span className="chip">{t(`leaderboard.boards.${c.metric}`)}</span>
-        <span className="chip">{t(`competition.track.${c.track}`)}</span>
-        <span className="chip">{t(`competition.enrollment.${c.enrollment}`)}</span>
-      </div>
-      <div className="cmp-card-foot">
-        <span className="num">
-          {c.startsAt ? fmtDate(c.startsAt) : '—'} → {c.endsAt ? fmtDate(c.endsAt) : '—'}
-        </span>
-        {cd && (
-          <span className="cmp-cd-inline">
-            {cd.label} <b className="num">{cd.value}</b>
-          </span>
+    <button type="button" onClick={onClick} className="cmp-bill">
+      <div className="min-w-0">
+        <StatusLine c={c} tagKey={statusTagKey(c, nowMs)} t={t} />
+        <h4 className="cmp-bill-name">{c.name}</h4>
+        {c.prizeNote && (
+          <p className="cmp-bill-prize">
+            <span>{t('competition.prizeLabel')}</span>
+            {c.prizeNote}
+          </p>
         )}
+        <p className="cmp-bill-dates num">{fmtRange(c)}</p>
+      </div>
+      {clock && (
+        <div className="cmp-bill-clock cmp-clock-sm">
+          <span className="cmp-rail-label">{clock.label}</span>
+          {clock.parts ? (
+            <div className="cmp-clock-row">
+              {clock.parts.map((part) => (
+                <div key={part.unit} className="cmp-clock-cell">
+                  <b className="num">{String(part.value).padStart(2, '0')}</b>
+                  <span>{t(`competition.cd.units.${part.unit}`)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <b className="cmp-clock-soon num">{t('competition.cd.soon')}</b>
+          )}
+        </div>
+      )}
+    </button>
+  )
+}
+
+// 即将开始 = 赛程行：名字 + 状态行在左，右边一句距开赛。发丝线分行，不套框。
+// Upcoming = schedule rows: name and status line on the left, "starts in" on the
+// right. Hairlines between rows, no boxes.
+function UpcomingRow({
+  c,
+  nowMs,
+  onClick,
+  t,
+}: {
+  c: CompetitionSummary
+  nowMs: number
+  onClick: () => void
+  t: TFunction
+}) {
+  const cd = countdownOf(c, nowMs, t)
+  return (
+    <button type="button" onClick={onClick} className="cmp-up">
+      <div className="min-w-0">
+        <div className="cmp-up-name">{c.name}</div>
+        <StatusLine c={c} tagKey={statusTagKey(c, nowMs)} t={t} />
+      </div>
+      <div className="cmp-up-right">
+        {cd ? (
+          <>
+            <span>{cd.label}</span>
+            <b className="num">{cd.value}</b>
+          </>
+        ) : (
+          <b className="num">{c.startsAt ? fmtDate(c.startsAt) : '—'}</b>
+        )}
+      </div>
+    </button>
+  )
+}
+
+// 已结束 = 荣誉墙：一场比赛一块牌，冠军铸币 + 冠军名 + 夺冠成绩在前，赛名在上
+// 一行小字。终审前没有冠军可挂，铸币位置留一枚虚线空位并写"待终审"。
+// Finished = the hall of champions: one plate per competition, with the rank-1 coin,
+// the champion's name and winning score leading, and the competition name as a small
+// line above. Before settlement there is no champion to hang, so the coin slot stays
+// a dashed blank with "pending".
+function HonorPlate({ c, onClick, t }: { c: CompetitionSummary; onClick: () => void; t: TFunction }) {
+  const champ = c.status === 'settled' ? c.champion ?? null : null
+  return (
+    <button type="button" onClick={onClick} className="cmp-plate">
+      {champ ? <RankCoin rank={1} size={48} /> : <i className="cmp-plate-mark" aria-hidden />}
+      <div className="min-w-0">
+        <div className="cmp-plate-comp">{c.name}</div>
+        <div className="cmp-plate-champ">
+          {champ ? (
+            <>
+              <small>{t('competition.champion')}</small>
+              {champ.equippedBadge && (
+                <BadgeIcon id={champ.equippedBadge} rarity={BADGE_RARITY[champ.equippedBadge] ?? 'common'} earned size={18} />
+              )}
+              <span className="truncate">{champ.displayName}</span>
+              <ScoreText score={champ.score} />
+            </>
+          ) : (
+            <span className="cmp-plate-none">
+              {c.status === 'settled' ? t('competition.noChampion') : t('competition.settling')}
+            </span>
+          )}
+        </div>
+        <div className="cmp-plate-dates num">{fmtRange(c)}</div>
       </div>
     </button>
   )
@@ -247,28 +349,49 @@ function ListView({
       </div>
     )
   }
+  // 三个分组三种版式：进行中是广告牌（主角），即将开始是赛程行，已结束是荣誉墙。
+  // 同一页不重复用一种版式，也不把三种东西都画成卡片。
+  // Three groups, three layouts: running is the billboard (the lead), upcoming is
+  // schedule rows, finished is the hall of champions. No layout repeats on the page,
+  // and none of the three is drawn as a card grid.
+  const header = (title: string, n: number) => (
+    <div className="cmp-group-h">
+      <h3>{title}</h3>
+      <i aria-hidden />
+      <span className="num">{n}</span>
+    </div>
+  )
   return (
-    <div className="space-y-9">
-      {LIST_GROUPS.map(
-        (g) =>
-          data[g].length > 0 && (
-            <section key={g}>
-              {/* 分组眉头：标题 + 一道贯穿的发丝线 + 场次数，比单独一行小标题更像
-                  赛程表的分节。
-                  Group header: title, a hairline running across, and the count —
-                  reads like a schedule's section break rather than a lone caption. */}
-              <div className="cmp-group-h">
-                <h3>{t(`competition.status.${g}`)}</h3>
-                <i aria-hidden />
-                <span className="num">{data[g].length}</span>
-              </div>
-              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {data[g].map((c) => (
-                  <CompetitionCard key={c.id} c={c} nowMs={nowMs} t={t} onClick={() => onOpen(c.id)} />
-                ))}
-              </div>
-            </section>
-          )
+    <div className="cmp-list">
+      {data.running.length > 0 && (
+        <section>
+          {header(t('competition.status.running'), data.running.length)}
+          <div className="mt-4 space-y-3">
+            {data.running.map((c) => (
+              <LiveBillboard key={c.id} c={c} nowMs={nowMs} t={t} onClick={() => onOpen(c.id)} />
+            ))}
+          </div>
+        </section>
+      )}
+      {data.upcoming.length > 0 && (
+        <section>
+          {header(t('competition.status.upcoming'), data.upcoming.length)}
+          <div className="mt-3">
+            {data.upcoming.map((c) => (
+              <UpcomingRow key={c.id} c={c} nowMs={nowMs} t={t} onClick={() => onOpen(c.id)} />
+            ))}
+          </div>
+        </section>
+      )}
+      {data.finished.length > 0 && (
+        <section>
+          {header(t('competition.hall'), data.finished.length)}
+          <div className="cmp-hall mt-3">
+            {data.finished.map((c) => (
+              <HonorPlate key={c.id} c={c} t={t} onClick={() => onOpen(c.id)} />
+            ))}
+          </div>
+        </section>
       )}
     </div>
   )

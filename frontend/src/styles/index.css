@@ -5924,79 +5924,140 @@ body {
   color: #52525b;
 }
 
-/* ── 赛事牌 / competition plate ── */
-.cmp-card {
-  position: relative;
-  display: block;
-  width: 100%;
-  padding: 16px 16px 14px 20px;
-  text-align: left;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012));
-  overflow: hidden;
-  transition: transform var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out);
-}
-@media (hover: hover) {
-  .cmp-card:hover { transform: translateY(-2px); border-color: rgba(255, 255, 255, 0.16); }
-}
-.cmp-card:active { transform: translateY(0); }
-.cmp-stripe {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: rgba(255, 255, 255, 0.14);
-}
-.cmp-live .cmp-stripe {
-  background: linear-gradient(180deg, theme('colors.prism.400'), theme('colors.prism.600'));
-  animation: cmp-breathe 2.6s ease-in-out infinite;
-}
-.cmp-done .cmp-stripe { background: linear-gradient(180deg, #d8b565, #8a6f2c); }
-.cmp-live { border-color: rgba(110, 66, 255, 0.28); }
-.cmp-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-.cmp-card-name {
-  margin: 0;
-  min-width: 0;
-  font-size: 15px;
-  font-weight: 700;
-  color: #f4f4f5;
-  letter-spacing: -0.01em;
-}
-.cmp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.cmp-chips .chip {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  font-size: 11px;
-  color: #a1a1aa;
-}
-.cmp-card-foot {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 12px;
-  font-size: 11px;
-  color: #71717a;
-}
-.cmp-cd-inline b { margin-left: 4px; color: #e4e4e7; font-weight: 600; }
+/* ── 列表 / list ──
+   三个分组三种版式：进行中是广告牌（这页的主角），即将开始是赛程行，已结束是
+   荣誉墙。没有一处把比赛画成一格格的卡片。
+   Three groups, three layouts: running is the billboard (the page's lead),
+   upcoming is schedule rows, finished is the hall of champions. Nowhere is a
+   competition drawn as a tile in a card grid. */
+.cmp-list { display: flex; flex-direction: column; gap: 40px; }
 .cmp-live-dot {
   display: inline-block;
   width: 5px;
   height: 5px;
-  margin-right: 5px;
+  margin-right: 6px;
   border-radius: 999px;
   background: currentColor;
   vertical-align: middle;
   animation: cmp-breathe 2s ease-in-out infinite;
 }
+
+/* 广告牌 / billboard */
+.cmp-bill {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px 40px;
+  align-items: center;
+  width: 100%;
+  padding: 26px 28px;
+  text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+  transition: transform var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out);
+}
+.cmp-bill::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  right: -10%;
+  top: -60%;
+  width: 55%;
+  height: 200%;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 60% 50%, rgba(110, 66, 255, 0.2), transparent 62%);
+  filter: blur(22px);
+  animation: cmp-aurora 16s ease-in-out infinite alternate;
+}
+@media (hover: hover) {
+  .cmp-bill:hover { transform: translateY(-2px); border-color: rgba(255, 255, 255, 0.18); }
+}
+.cmp-bill:active { transform: translateY(0); }
+.cmp-bill-name {
+  margin: 12px 0 0;
+  font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  color: #f4f4f5;
+  text-wrap: balance;
+}
+.cmp-bill-prize { margin: 10px 0 0; font-size: 13px; font-weight: 600; color: #f0e2c0; }
+.cmp-bill-prize span { margin-right: 10px; font-weight: 600; color: #c9a24a; }
+.cmp-bill-dates { margin: 12px 0 0; font-size: 11.5px; color: #71717a; }
+.cmp-bill-clock { text-align: right; }
+.cmp-clock-sm .cmp-clock-cell { min-width: 52px; }
+.cmp-clock-sm .cmp-clock-cell b { font-size: 44px; }
+.cmp-clock-sm .cmp-clock-row { gap: 12px; }
+
+/* 赛程行 / schedule rows */
+.cmp-up {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 24px;
+  align-items: center;
+  width: 100%;
+  padding: 16px 8px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  transition: background-color var(--dur-base) var(--ease-out);
+}
+.cmp-up:first-child { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+@media (hover: hover) { .cmp-up:hover { background: rgba(255, 255, 255, 0.025); } }
+.cmp-up-name { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; color: #f4f4f5; }
+.cmp-up .cmp-status { margin-top: 7px; font-size: 11.5px; }
+.cmp-up-right { text-align: right; }
+.cmp-up-right span { display: block; font-size: 11px; color: #71717a; }
+.cmp-up-right b {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-display, 'Archivo'), sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #f4f4f5;
+}
+
+/* 荣誉墙 / hall of champions */
+.cmp-hall { display: grid; grid-template-columns: 1fr 1fr; gap: 0 40px; }
+.cmp-plate {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  width: 100%;
+  padding: 18px 8px;
+  text-align: left;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  transition: background-color var(--dur-base) var(--ease-out);
+}
+@media (hover: hover) { .cmp-plate:hover { background: rgba(255, 255, 255, 0.025); } }
+.cmp-plate-mark {
+  display: block;
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+}
+.cmp-plate-comp { font-size: 12px; color: #71717a; }
+.cmp-plate-champ {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #f4f4f5;
+}
+.cmp-plate-champ small { flex: none; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: #c9a24a; }
+.cmp-plate-champ > b { margin-left: auto; font-size: 18px; }
+.cmp-plate-none { font-size: 13px; font-weight: 500; color: #a1a1aa; }
+.cmp-plate-dates { margin-top: 5px; font-size: 11px; color: #52525b; }
 
 /* ── 赛场 / arena ──
    不做黑盒子。赛名直接落在页面上，右上角一团极光当舞台光；左栏读一遍就够的
@@ -6259,6 +6320,16 @@ body {
   .cmp-clock-cell b { font-size: 44px; }
   .cmp-standing { min-width: 0; }
   .cmp-enroll { align-items: flex-start; }
+  .cmp-list { gap: 32px; }
+  .cmp-bill { grid-template-columns: 1fr; gap: 18px; padding: 20px 18px; border-radius: 18px; }
+  .cmp-bill-name { font-size: 26px; }
+  .cmp-bill-clock { text-align: left; }
+  .cmp-clock-sm .cmp-clock-cell b { font-size: 40px; }
+  .cmp-up { grid-template-columns: 1fr; gap: 10px; }
+  .cmp-up-right { text-align: left; }
+  .cmp-up-right span { display: inline; margin-right: 8px; }
+  .cmp-up-right b { display: inline; font-size: 18px; }
+  .cmp-hall { grid-template-columns: 1fr; }
   .cmp-champ { grid-template-columns: auto minmax(0, 1fr); gap: 12px 14px; padding: 20px 6px; }
   .cmp-champ-who b { font-size: 18px; }
   .cmp-champ-score { grid-column: 2; text-align: left; }
@@ -6267,7 +6338,7 @@ body {
   .cmp-half + .cmp-half { padding-left: 8px; border-left: 0; border-top: 1px solid rgba(255, 255, 255, 0.08); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .cmp-arena::before, .cmp-live .cmp-stripe, .cmp-live-dot { animation: none; }
+  .cmp-arena::before, .cmp-bill::before, .cmp-live-dot { animation: none; }
 }
 
 
