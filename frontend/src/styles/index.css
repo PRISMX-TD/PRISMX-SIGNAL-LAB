@@ -5890,6 +5890,364 @@ body {
   .ach-scene, .ach-3d { transition: none; }
 }
 
+/* ═════════════ 交易比赛 / competitions ═════════════
+   与成就页陈列台同一套语言：纯黑舞台 + 极光 + 聚光，紫是唯一强调色，金只留给
+   荣耀那几处（冠军铸币、奖品牌、已终审的赛事牌）。列表是"赛程表"，详情是
+   "颁奖场"：横幅 → 我的战况 → 领奖台 → 密排名次 → 规则小字。
+   Same language as the achievements showcase: a near-black stage with an aurora and
+   a spotlight, violet as the single accent, gold reserved for glory (champion coin,
+   prize plaque, settled plates). The list reads as a schedule, the detail as an
+   awards floor: banner → my standing → podium → dense rows → fine-print rules. */
+
+/* ── 分组眉头 / group header ── */
+.cmp-group-h {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cmp-group-h h3 {
+  margin: 0;
+  flex: none;
+  font-size: 13px;
+  font-weight: 700;
+  color: #f4f4f5;
+  letter-spacing: -0.01em;
+}
+.cmp-group-h i {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.14), transparent);
+}
+.cmp-group-h > span {
+  flex: none;
+  font-size: 12px;
+  color: #52525b;
+}
+
+/* ── 赛事牌 / competition plate ── */
+.cmp-card {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 16px 16px 14px 20px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012));
+  overflow: hidden;
+  transition: transform var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out);
+}
+@media (hover: hover) {
+  .cmp-card:hover { transform: translateY(-2px); border-color: rgba(255, 255, 255, 0.16); }
+}
+.cmp-card:active { transform: translateY(0); }
+.cmp-stripe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: rgba(255, 255, 255, 0.14);
+}
+.cmp-live .cmp-stripe {
+  background: linear-gradient(180deg, theme('colors.prism.400'), theme('colors.prism.600'));
+  animation: cmp-breathe 2.6s ease-in-out infinite;
+}
+.cmp-done .cmp-stripe { background: linear-gradient(180deg, #d8b565, #8a6f2c); }
+.cmp-live { border-color: rgba(110, 66, 255, 0.28); }
+.cmp-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.cmp-card-name {
+  margin: 0;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #f4f4f5;
+  letter-spacing: -0.01em;
+}
+.cmp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.cmp-chips .chip {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 11px;
+  color: #a1a1aa;
+}
+.cmp-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 11px;
+  color: #71717a;
+}
+.cmp-cd-inline b { margin-left: 4px; color: #e4e4e7; font-weight: 600; }
+.cmp-live-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  vertical-align: middle;
+  animation: cmp-breathe 2s ease-in-out infinite;
+}
+
+/* ── 赛事横幅 / banner ── */
+.cmp-banner {
+  position: relative;
+  padding: 26px 26px 0;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 22px;
+  background: #050507;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 26px 70px -30px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+}
+.cmp-banner-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 55% 60% at 78% -10%, rgba(110, 66, 255, 0.24), transparent 62%),
+    radial-gradient(ellipse 40% 40% at 10% 110%, rgba(110, 66, 255, 0.07), transparent 70%);
+  animation: cmp-aurora 15s ease-in-out infinite alternate;
+}
+.cmp-banner-main {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: start;
+}
+.cmp-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #71717a;
+  font-weight: 500;
+}
+.cmp-title {
+  margin: 10px 0 0;
+  font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: #f4f4f5;
+  text-wrap: balance;
+}
+.cmp-desc {
+  margin: 14px 0 0;
+  max-width: 62ch;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #a1a1aa;
+}
+.cmp-banner-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+  text-align: right;
+}
+.cmp-cd { display: flex; flex-direction: column; gap: 2px; }
+.cmp-cd span { font-size: 11px; color: #71717a; }
+.cmp-cd b {
+  font-size: 24px;
+  font-weight: 700;
+  color: #f4f4f5;
+  letter-spacing: -0.01em;
+}
+/* 奖品牌：整块金，页面上唯一一处金色实体——荣耀的落点只有一个才有分量。
+   Prize plaque: the one solid gold object on the page. Glory carries weight only
+   when it lands in a single place. */
+.cmp-prize {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 30ch;
+  padding: 10px 14px;
+  border: 1px solid rgba(201, 162, 74, 0.4);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(201, 162, 74, 0.16), rgba(201, 162, 74, 0.05));
+}
+.cmp-prize span { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #c9a24a; }
+.cmp-prize b { font-size: 13px; font-weight: 600; color: #f0e2c0; line-height: 1.45; }
+.cmp-facts {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0;
+  margin: 24px -26px 0;
+  padding: 14px 26px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.015);
+}
+.cmp-facts > div + div { padding-left: 18px; border-left: 1px solid rgba(255, 255, 255, 0.07); }
+.cmp-facts dt { font-size: 11px; color: #71717a; }
+.cmp-facts dd { margin: 3px 0 0; font-size: 12.5px; color: #d4d4d8; }
+
+/* ── 我的战况 / my standing ── */
+.cmp-mine {
+  padding: 16px 18px;
+  border: 1px solid rgba(110, 66, 255, 0.26);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(110, 66, 255, 0.10), rgba(110, 66, 255, 0.03));
+}
+.cmp-mine-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.cmp-mine-h h3 { margin: 0; font-size: 13px; font-weight: 700; color: #f4f4f5; }
+.cmp-mine-score { font-size: 20px; font-weight: 700; }
+.cmp-mine-list { display: flex; flex-direction: column; gap: 10px; margin: 12px 0 0; padding: 0; list-style: none; }
+.cmp-mine-list li { display: flex; align-items: center; gap: 12px; }
+.cmp-mine-list li.is-dq { opacity: 0.6; }
+.cmp-mine-list li.is-dq span { color: var(--down); }
+.cmp-mine-rank {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 12px;
+  font-weight: 600;
+  color: #a1a1aa;
+}
+.cmp-mine-list b { display: block; font-size: 13.5px; font-weight: 600; color: #f4f4f5; }
+.cmp-mine-list li > div > span { display: block; margin-top: 2px; font-size: 11.5px; color: #a1a1aa; }
+.cmp-mine-from { margin-left: auto; flex: none; font-size: 11px; color: #71717a; }
+
+/* ── 领奖台 / podium ── */
+.cmp-podium {
+  display: grid;
+  gap: 10px;
+  align-items: end;
+}
+.cmp-podium-3 { grid-template-columns: 1fr 1.16fr 1fr; }
+.cmp-podium-2 { grid-template-columns: 1fr 1.16fr; }
+.cmp-podium-1 { grid-template-columns: minmax(0, 1fr); }
+.cmp-plinth {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
+  text-align: center;
+  overflow: hidden;
+}
+.cmp-plinth.is-first {
+  padding-top: 26px;
+  border-color: rgba(201, 162, 74, 0.32);
+  background: linear-gradient(180deg, rgba(201, 162, 74, 0.12), rgba(255, 255, 255, 0.015));
+}
+.cmp-plinth.is-self { box-shadow: inset 0 0 0 1px rgba(139, 108, 255, 0.5); }
+.cmp-spot {
+  position: absolute;
+  left: 50%;
+  top: -46px;
+  width: 200px;
+  height: 120px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(201, 162, 74, 0.34), transparent 68%);
+  filter: blur(8px);
+}
+.cmp-plinth-name {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f4f4f5;
+}
+.cmp-plinth-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmp-plinth-score {
+  position: relative;
+  font-family: var(--font-display, 'Archivo'), sans-serif;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.cmp-plinth.is-first .cmp-plinth-score { font-size: 28px; }
+.cmp-plinth-login { position: relative; font-size: 11px; color: #71717a; }
+
+/* ── 密排名次 / dense rows ── */
+.cmp-rows { margin: 0; padding: 0; list-style: none; }
+.cmp-rows li {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.cmp-rows li.is-self { background: rgba(110, 66, 255, 0.07); border-radius: 8px; }
+.cmp-rank { font-size: 13px; color: #71717a; }
+.cmp-row-who { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 13.5px; color: #e4e4e7; }
+.cmp-row-login { display: none; font-size: 12px; color: #71717a; }
+.cmp-row-score { font-size: 14px; font-weight: 600; color: #f4f4f5; }
+.cmp-metric-note { margin: 2px 0 0; font-size: 11px; color: #52525b; }
+.cmp-empty {
+  display: grid;
+  place-items: center;
+  padding: 40px 20px;
+  border: 1px dashed rgba(255, 255, 255, 0.10);
+  border-radius: 16px;
+}
+.cmp-empty p { margin: 0; font-size: 13px; color: #a1a1aa; }
+
+/* ── 报名区与规则 / register block and rules ── */
+.cmp-register {
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.cmp-rules { margin: 0; padding: 0 0 0 16px; list-style: disc; }
+.cmp-rules li { font-size: 11.5px; line-height: 1.8; color: #52525b; }
+
+@keyframes cmp-aurora {
+  from { transform: translateX(-2%) scale(1); }
+  to { transform: translateX(2%) scale(1.05); }
+}
+@keyframes cmp-breathe { 50% { opacity: 0.45; } }
+
+@media (min-width: 768px) {
+  .cmp-row-login { display: block; }
+  .cmp-rows li { grid-template-columns: 40px minmax(0, 1fr) 110px auto; padding: 12px 8px; }
+}
+@media (max-width: 767px) {
+  .cmp-banner { padding: 20px 18px 0; border-radius: 18px; }
+  .cmp-banner-main { grid-template-columns: 1fr; gap: 16px; }
+  .cmp-banner-side { align-items: flex-start; text-align: left; }
+  .cmp-prize { max-width: none; }
+  .cmp-title { font-size: 26px; }
+  .cmp-facts { margin: 18px -18px 0; padding: 12px 18px; gap: 10px; }
+  .cmp-facts > div + div { padding-left: 0; border-left: 0; }
+  .cmp-podium-3, .cmp-podium-2 { grid-template-columns: 1fr; }
+  .cmp-plinth { flex-direction: row; justify-content: flex-start; gap: 12px; padding: 12px 14px; text-align: left; }
+  .cmp-plinth.is-first { padding-top: 12px; }
+  .cmp-plinth-score { margin-left: auto; font-size: 20px; }
+  .cmp-plinth.is-first .cmp-plinth-score { font-size: 22px; }
+  .cmp-plinth-login { display: none; }
+  .cmp-spot { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cmp-banner-glow, .cmp-live .cmp-stripe, .cmp-live-dot { animation: none; }
+}
+
+
 .seg-tabs {
   display: flex;
   gap: 4px;
