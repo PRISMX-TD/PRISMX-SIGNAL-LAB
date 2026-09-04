@@ -5212,6 +5212,157 @@ body {
 }
 
 
+/* ═════════════ 成就页任务进度 / achievement task progress ═════════════
+   每条任务一行：状态点 | 名称 + 右侧数值 | 4px 进度条。三态：done 绿、active 紫
+   （带一道缓慢流光）、locked 灰。进度条用 clip-path 从左展开、行级错峰入场；
+   胜率条件另画一道阈值刻度。关卡轨 .tk-rail 在组标题下按任务分段。
+   One row per task: status dot | name + right-hand value | 4px bar. Three
+   states: done green, active violet (with a slow sheen), locked grey. Bars
+   reveal from the left via clip-path with a per-row stagger; win-rate tasks
+   get a threshold tick. The stage rail .tk-rail sits under the group title. */
+.tk-rail {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+  height: 3px;
+  margin-top: 10px;
+}
+.tk-seg {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.tk-seg-done { background: var(--up); }
+.tk-seg-active { background: theme('colors.prism.500'); }
+
+.tk-list {
+  display: flex;
+  flex-direction: column;
+}
+.tk-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  column-gap: 12px;
+  align-items: start;
+  padding: 12px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  animation: tk-in 0.5s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+.tk-row:first-child {
+  padding-top: 6px;
+  border-top: 0;
+}
+.tk-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  color: #71717a;
+}
+.tk-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 2px solid theme('colors.prism.400');
+  box-shadow: 0 0 0 3px rgba(110, 66, 255, 0.16);
+  animation: tk-breathe 2.4s ease-in-out infinite;
+}
+.tk-locked .tk-status { opacity: 0.55; }
+
+.tk-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+  line-height: 20px;
+}
+.tk-name {
+  min-width: 0;
+  color: #a1a1aa;
+}
+.tk-active .tk-name { color: #f4f4f5; }
+.tk-locked .tk-name { color: #71717a; }
+.tk-value {
+  flex: none;
+  font-size: 12px;
+  color: #71717a;
+  white-space: nowrap;
+}
+.tk-value b {
+  font-weight: 600;
+  color: #e4e4e7;
+}
+.tk-done .tk-value b { color: var(--up); }
+.tk-locked .tk-value b { color: #a1a1aa; }
+
+.tk-track {
+  position: relative;
+  height: 4px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.tk-fill {
+  position: absolute;
+  inset: 0;
+  width: calc(var(--pct, 0) * 100%);
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: linear-gradient(90deg, theme('colors.prism.400'), theme('colors.prism.500'));
+  animation: tk-grow 0.9s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 60ms + 120ms);
+}
+.tk-done .tk-fill { background: var(--up); }
+.tk-locked .tk-fill { background: rgba(255, 255, 255, 0.18); }
+/* 推进中的条带一道流光——只在有进度时（宽度为 0 什么也看不见）
+   A sheen on active bars only (a zero-width bar has nothing to show) */
+.tk-active .tk-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.45) 50%, transparent 100%);
+  transform: translateX(-100%);
+  animation: tk-sheen 3.2s ease-in-out infinite;
+  animation-delay: 1.4s;
+}
+.tk-tick {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 10px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.55);
+  transform: translateX(-50%);
+}
+.tk-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #71717a;
+}
+
+@keyframes tk-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes tk-grow {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+@keyframes tk-sheen {
+  0%, 35% { transform: translateX(-100%); }
+  65%, 100% { transform: translateX(100%); }
+}
+@keyframes tk-breathe {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(110, 66, 255, 0.16); }
+  50% { box-shadow: 0 0 0 5px rgba(110, 66, 255, 0.06); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tk-row, .tk-fill, .tk-dot, .tk-active .tk-fill::after { animation: none; }
+}
+
 .seg-tabs {
   display: flex;
   gap: 4px;

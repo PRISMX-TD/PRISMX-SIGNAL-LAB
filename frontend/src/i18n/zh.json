@@ -1895,6 +1895,8 @@
       "profit_positive_6": "真金白银——累计盈亏为正", "winrate_60": "胜率为王——交易胜率 > 60%"
     },
     "taskState": { "locked": "完成同组其他条件后开考", "pending": "待达标", "done": "已达成" },
+    "taskUnits": { "trades": "笔", "lots": "手", "days": "天" },
+    "taskProgress": { "pending": "待完成", "profitTarget": "盈亏为正", "groupDone": "已完成 {{done}} / {{total}}" },
     "rarity": { "common": "普通", "rare": "稀有", "epic": "史诗", "legendary": "传说", "limited": "绝版" },
     "material": { "common": "石墨", "rare": "银", "epic": "黑曜石镶金", "legendary": "足金", "limited": "青铜火漆" },
     "family": { "growth": "成长", "evergreen": "常青", "discipline": "纪律",

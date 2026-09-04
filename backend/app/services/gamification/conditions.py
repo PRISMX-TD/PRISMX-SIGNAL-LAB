@@ -1,5 +1,5 @@
 """六级闯关条件（设计 §2.2/§2.3）。条件定义不进数据库；等级由 user_tasks 派生。"""
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError
 
@@ -38,6 +38,28 @@ def has_consecutive_active_days(db, user_id, n: int) -> bool:
         if run >= n:
             return True
     return n <= 1 and bool(days)
+
+
+def current_active_streak(db, user_id, today: date | None = None) -> int:
+    """成就页进度用：以今天（UTC）或昨天为锚，往回数连续活跃天数。
+    最近一次活跃早于昨天 → 连续已断，返回 0；今天还没来但昨天来过 → 仍算延续
+    （今天还有机会接上）。判定本身仍走 has_consecutive_active_days（任意历史窗口）。
+    Progress for the achievements page: anchored on today (UTC) or yesterday,
+    count back the run of consecutive active days. Last activity before
+    yesterday → the run is broken → 0; not yet today but active yesterday →
+    still alive (today can extend it). Judging itself still uses
+    has_consecutive_active_days over any historical window."""
+    today = today or datetime.now(timezone.utc).date()
+    rows = db.query(UserActiveDay.day).filter(UserActiveDay.user_id == user_id).all()
+    days = {date.fromisoformat(r[0]) for r in rows}
+    anchor = today if today in days else today - timedelta(days=1)
+    if anchor not in days:
+        return 0
+    run = 0
+    while anchor in days:
+        run += 1
+        anchor -= timedelta(days=1)
+    return run
 
 
 def _judge_plain(db, user, cond_id, stats) -> bool:
@@ -104,24 +126,60 @@ def level_of(done_ids: set[str]) -> int:
     return level
 
 
-def condition_states(db, user_id, stats) -> list[dict]:
-    """成就页数据：每组每条件的 done / 进度 / 胜率三态。"""
+# 成就页每条任务的「进度种类」：前端据此选单位与画法。
+# boolean = 一次性动作（0/1）；days/trades/lots = 计数；profit = 盈亏正负；winrate = 毕业考。
+# Progress "kind" per task for the achievements page — the frontend picks
+# units and bar style from it. boolean = one-shot action (0/1); days / trades /
+# lots = counters; profit = sign of realised P&L; winrate = graduation exam.
+_BOOLEAN_CONDITIONS = ("set_nickname", "bind_account", "own_strategy")
+_KIND_BY_STATS_KEY = {"trades_any": "trades", "trades": "trades", "lots": "lots", "trade_days": "days"}
+STREAK_TARGET = 3
+
+
+def condition_states(db, user_id, stats, today: date | None = None) -> list[dict]:
+    """成就页数据：每组每条件的 done / 进度 / 胜率三态。每条任务都带 kind +
+    progressNow/progressTarget，成就页给全部任务画进度条。
+    Achievements page data: done / progress / win-rate state per condition in
+    every group. Every task carries kind + progressNow/progressTarget so the
+    page can draw a bar for all of them."""
+    from app.models import User
+    user = db.get(User, user_id)
     done = {t.task_id: t.completed_at
             for t in db.query(UserTask).filter(UserTask.user_id == user_id)}
+    streak = None
     out = []
     for gid, conds in GROUPS:
         items = []
         for c in conds:
             entry = {"id": c, "done": c in done}
-            if c in CONDITION_TARGETS:
-                key, target = CONDITION_TARGETS[c]
-                entry["progressNow"] = round(stats.get(key) or 0, 4)
-                entry["progressTarget"] = target
             if c in WINRATE_CONDITIONS:
                 others_done = all(x in done for x in conds if x != c)
+                entry["kind"] = "winrate"
+                entry["progressNow"] = round(stats.get("win_rate") or 0, 4)
+                entry["progressTarget"] = WINRATE_CONDITIONS[c]
                 entry["state"] = ("done" if c in done
-                                 else "pending" if others_done else "locked")
+                                  else "pending" if others_done else "locked")
                 entry["currentWinRate"] = stats.get("win_rate")
+            elif c in _BOOLEAN_CONDITIONS:
+                met = c in done or (user is not None and _judge_plain(db, user, c, stats))
+                entry["kind"] = "boolean"
+                entry["progressNow"] = 1 if met else 0
+                entry["progressTarget"] = 1
+            elif c == "streak_3":
+                if streak is None:
+                    streak = current_active_streak(db, user_id, today)
+                entry["kind"] = "days"
+                entry["progressNow"] = STREAK_TARGET if c in done else streak
+                entry["progressTarget"] = STREAK_TARGET
+            elif c in ("profit_positive_5", "profit_positive_6"):
+                entry["kind"] = "profit"
+                entry["progressNow"] = round(stats.get("profit") or 0, 2)
+                entry["progressTarget"] = 0
+            else:
+                key, target = CONDITION_TARGETS[c]
+                entry["kind"] = _KIND_BY_STATS_KEY[key]
+                entry["progressNow"] = round(stats.get(key) or 0, 4)
+                entry["progressTarget"] = target
             items.append(entry)
         out.append({"group": gid, "tasks": items})
     return out

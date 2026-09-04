@@ -996,6 +996,9 @@ export interface GamificationBadge {
 export interface GamificationTask {
   id: string
   done: boolean
+  // 进度种类：前端据此选单位与画法（后端 condition_states 下发）
+  // Progress kind — the page picks units and bar style from it (sent by condition_states)
+  kind?: 'boolean' | 'days' | 'trades' | 'lots' | 'profit' | 'winrate'
   progressNow?: number
   progressTarget?: number
   state?: 'locked' | 'pending' | 'done'

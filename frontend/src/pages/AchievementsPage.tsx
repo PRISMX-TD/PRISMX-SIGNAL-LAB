@@ -7,6 +7,7 @@
 // Layout/UserMenu); this only handles someone hitting the URL directly —
 // in practice only a regular user during the beta window, degraded to one
 // line of copy instead of a raw API error.
+import type { CSSProperties } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
@@ -83,57 +84,125 @@ function CheckIcon() {
   )
 }
 
-// 胜率毕业考条件的 tag 配色：done 走 CheckIcon 不会到这里；pending 用中性面
-// （还没到，不该给它已完成的绿），locked 更淡一档。
-// Colouring for the win-rate graduation tag: "done" never reaches here (it
-// renders CheckIcon instead); "pending" stays neutral (not yet met, so no
-// green), "locked" one shade fainter.
-function taskStateClass(state: 'locked' | 'pending' | 'done'): string {
-  if (state === 'pending') return 'bg-white/[0.06] text-neutral-300'
-  return 'bg-white/[0.03] text-neutral-500'
+function LockIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="5" y="11" width="14" height="10" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  )
 }
 
-function TaskRow({ task, t }: { task: GamificationTask; t: TFunction }) {
-  const isWinrate = task.state !== undefined
-  const target = task.progressTarget
-  const pct = target ? Math.min(100, ((task.progressNow ?? 0) / target) * 100) : 0
+// 每条任务三种视觉态：done 绿 / active 紫（正在推进）/ locked 灰（胜率毕业考
+// 未开考）。锁定态照样画条——画的是当前胜率在 0–100% 标尺上的位置，加一道阈值
+// 刻度，用户能看到"离开考线还有多远"，只是不上色不计入。
+// Three visual states per task: done (green) / active (violet, in progress) /
+// locked (grey, win-rate exam not yet open). Locked rows still get a bar — the
+// current win rate on a 0–100% scale with a threshold tick — so the distance
+// to the pass line stays visible; it just isn't coloured or counted.
+type TaskVisual = 'done' | 'active' | 'locked'
 
+function taskVisual(task: GamificationTask): TaskVisual {
+  if (task.done) return 'done'
+  if (task.state === 'locked') return 'locked'
+  return 'active'
+}
+
+// 进度比例：计数类 now/target；布尔 0/1；盈亏看正负；胜率按 0–100% 标尺画当前值。
+// Fill ratio: counters now/target; boolean 0/1; P&L by sign; win rate on a 0–100% scale.
+function taskPct(task: GamificationTask): number {
+  if (task.done) return 1
+  const now = task.progressNow ?? 0
+  if (task.kind === 'profit') return now > 0 ? 1 : 0
+  if (task.kind === 'winrate') return Math.min(1, Math.max(0, now))
+  const target = task.progressTarget ?? 0
+  return target > 0 ? Math.min(1, now / target) : 0
+}
+
+function fmtSignedUsd(n: number): string {
+  const abs = Math.abs(n).toFixed(2)
+  return `${n > 0 ? '+' : n < 0 ? '−' : ''}${abs} USD`
+}
+
+// 右侧数值：计数「2 / 5 笔」、盈亏「+128.40 USD · 盈亏为正」、胜率「41.7% / 35%」、
+// 布尔只给一个词。done 时数字变绿，布尔 done 不显示（左侧勾已经说明）。
+// Right-hand value: counters "2 / 5 trades", P&L "+128.40 USD · above zero",
+// win rate "41.7% / 35%", boolean a single word. Numbers turn green when done;
+// a done boolean shows nothing (the check on the left already says it).
+function TaskValue({ task, t }: { task: GamificationTask; t: TFunction }) {
+  const now = task.progressNow ?? 0
+  const target = task.progressTarget ?? 0
+  switch (task.kind) {
+    case 'boolean':
+      return task.done ? null : <span>{t('gamification.taskProgress.pending')}</span>
+    case 'profit':
+      return (
+        <>
+          <b className={now > 0 ? 'text-up' : now < 0 ? 'text-down' : ''}>{fmtSignedUsd(now)}</b>
+          <span className="hidden sm:inline"> · {t('gamification.taskProgress.profitTarget')}</span>
+        </>
+      )
+    case 'winrate':
+      return (
+        <>
+          <b>{task.currentWinRate != null ? fmtPct(task.currentWinRate) : '—'}</b>
+          <span> / {fmtPct(target)}</span>
+        </>
+      )
+    default: {
+      const unit = task.kind ? t(`gamification.taskUnits.${task.kind}`) : ''
+      // 已完成的计数只报实际值（「6 笔」），不再拖着目标——「6 / 5」读起来像超卖。
+      // A done counter reports the actual value only ("6 trades"); "6 / 5" reads oddly.
+      if (task.done) {
+        return (
+          <>
+            <b>{fmtProgressNum(now)}</b>
+            {unit ? <span> {unit}</span> : null}
+          </>
+        )
+      }
+      return (
+        <>
+          <b>{fmtProgressNum(now)}</b>
+          <span> / {fmtProgressNum(target)}{unit ? ` ${unit}` : ''}</span>
+        </>
+      )
+    }
+  }
+}
+
+function TaskRow({ task, index, t }: { task: GamificationTask; index: number; t: TFunction }) {
+  const visual = taskVisual(task)
+  const pct = taskPct(task)
+  const style = { '--i': index, '--pct': pct } as CSSProperties
   return (
-    <li>
-      <div className="flex items-center justify-between gap-3 text-sm">
-        <span className={task.done ? 'text-neutral-200' : 'text-neutral-400'}>
-          {t(`gamification.tasks.${task.id}`)}
-        </span>
-        {task.done ? (
-          <CheckIcon />
-        ) : isWinrate && task.state ? (
-          <span className={`tag shrink-0 text-[11px] ${taskStateClass(task.state)}`}>
-            {t(`gamification.taskState.${task.state}`)}
-          </span>
-        ) : null}
-      </div>
-
-      {/* 胜率条件用 state 表达进度，不叠加进度条——两套语义摆一起会互相矛盾。
-          Win-rate conditions express progress via `state`; no progress bar on
-          top of it, or the two would say conflicting things. */}
-      {!task.done && isWinrate && task.state === 'pending' && (
-        <p className="mt-1 text-xs text-neutral-500">
-          {task.currentWinRate != null ? fmtPct(task.currentWinRate) : '—'}
-          {' / '}
-          {target != null ? fmtPct(target) : '—'}
-        </p>
-      )}
-
-      {!task.done && !isWinrate && target != null && (
-        <div className="mt-1.5 flex items-center gap-2">
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
-            <div className="h-full rounded-full bg-prism-500" style={{ width: `${pct}%` }} />
-          </div>
-          <span className="num shrink-0 text-[11px] text-neutral-500">
-            {fmtProgressNum(task.progressNow ?? 0)}/{fmtProgressNum(target)}
+    <li className={`tk-row tk-${visual}`} style={style}>
+      <span className="tk-status" aria-hidden>
+        {visual === 'done' ? <CheckIcon /> : visual === 'locked' ? <LockIcon /> : <i className="tk-dot" />}
+      </span>
+      <div className="min-w-0">
+        <div className="tk-line">
+          <span className="tk-name">{t(`gamification.tasks.${task.id}`)}</span>
+          <span className="tk-value num">
+            <TaskValue task={task} t={t} />
           </span>
         </div>
-      )}
+        <div
+          className="tk-track"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(pct * 100)}
+          aria-label={t(`gamification.tasks.${task.id}`)}
+        >
+          <i className="tk-fill" />
+          {task.kind === 'winrate' && !task.done && (
+            <i className="tk-tick" style={{ left: `${(task.progressTarget ?? 0) * 100}%` }} />
+          )}
+        </div>
+        {visual === 'locked' && <p className="tk-hint">{t('gamification.taskState.locked')}</p>}
+      </div>
     </li>
   )
 }
@@ -367,10 +436,26 @@ export default function AchievementsPage() {
       {/* Current group only: the level being worked on — cleared and locked groups are not listed */}
       {nextGroup && (
         <section className="card glass p-[18px]">
-          <h3 className="sec-h-title">{t(`gamification.groups.${nextGroup.group}`)}</h3>
-          <ul className="mt-3 space-y-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <h3 className="sec-h-title">{t(`gamification.groups.${nextGroup.group}`)}</h3>
+            <span className="num text-xs text-neutral-500">
+              {t('gamification.taskProgress.groupDone', {
+                done: nextGroup.tasks.length - remaining,
+                total: nextGroup.tasks.length,
+              })}
+            </span>
+          </div>
+          {/* 关卡轨：一段一条任务，绿 = 已完成、紫 = 推进中、灰 = 锁定，一眼看出这关走到哪。
+              Level rail: one segment per task — green done, violet in progress,
+              grey locked — the whole stage's shape at a glance. */}
+          <div className="tk-rail" aria-hidden>
             {nextGroup.tasks.map((task) => (
-              <TaskRow key={task.id} task={task} t={t} />
+              <i key={task.id} className={`tk-seg tk-seg-${taskVisual(task)}`} />
+            ))}
+          </div>
+          <ul className="tk-list mt-2">
+            {nextGroup.tasks.map((task, i) => (
+              <TaskRow key={task.id} task={task} index={i} t={t} />
             ))}
           </ul>
         </section>
