@@ -50,6 +50,7 @@ import { fmtPct } from '../winrate/shared'
 import { SkeletonLine } from '../Skeleton'
 import BadgeIcon from '../badges/BadgeIcon'
 import Select from '../Select'
+import Switch from '../Switch'
 import type {
   AdminUser,
   GamificationMe,
@@ -110,17 +111,7 @@ function SettingsToggleRow({
         <span className={`text-xs ${checked ? 'text-up' : 'text-neutral-500'}`}>
           {checked ? onLabel : offLabel}
         </span>
-        <span className="relative inline-flex items-center">
-          <input
-            type="checkbox"
-            checked={checked}
-            disabled={saving}
-            onChange={(e) => onChange(e.target.checked)}
-            className="peer sr-only"
-          />
-          <span className="h-6 w-11 rounded-full bg-white/10 transition peer-checked:bg-prism-500 peer-disabled:opacity-60" />
-          <span className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
-        </span>
+        <Switch checked={checked} disabled={saving} onChange={onChange} />
       </label>
     </div>
   )

@@ -12,6 +12,7 @@ import { getSWReg } from "../utils/push"
 import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
 import PushDiagnostics from "../components/PushDiagnostics"
 import { SkeletonPage } from "../components/Skeleton"
+import Switch from "../components/Switch"
 import {
   ALL_SENTINEL,
   ACCOUNT_EVENT_TYPES,
@@ -539,30 +540,16 @@ export default function AccountPage() {
                 className="input w-full"
               />
               <div className="flex items-center gap-3">
-                <label className="relative inline-flex cursor-pointer items-center">
-                  <input
-                    type="checkbox"
-                    checked={nicknamePublicDraft}
-                    onChange={(e) => setNicknamePublicDraft(e.target.checked)}
-                    className="peer sr-only"
-                  />
-                  <div className="h-6 w-11 rounded-full bg-white/10 transition peer-checked:bg-prism-500" />
-                  <div className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
+                <Switch id="profile-nickname-public" checked={nicknamePublicDraft} onChange={setNicknamePublicDraft} />
+                <label htmlFor="profile-nickname-public" className="cursor-pointer text-sm text-neutral-100">
+                  {t("gamification.profile.nicknamePublic")}
                 </label>
-                <span className="text-sm text-neutral-100">{t("gamification.profile.nicknamePublic")}</span>
               </div>
               <div className="flex items-center gap-3">
-                <label className="relative inline-flex cursor-pointer items-center">
-                  <input
-                    type="checkbox"
-                    checked={leaderboardOptOutDraft}
-                    onChange={(e) => setLeaderboardOptOutDraft(e.target.checked)}
-                    className="peer sr-only"
-                  />
-                  <div className="h-6 w-11 rounded-full bg-white/10 transition peer-checked:bg-prism-500" />
-                  <div className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
+                <Switch id="profile-leaderboard-opt-out" checked={leaderboardOptOutDraft} onChange={setLeaderboardOptOutDraft} />
+                <label htmlFor="profile-leaderboard-opt-out" className="cursor-pointer text-sm text-neutral-100">
+                  {t("gamification.profile.leaderboardOptOut")}
                 </label>
-                <span className="text-sm text-neutral-100">{t("gamification.profile.leaderboardOptOut")}</span>
               </div>
               <button
                 onClick={handleProfileSave}
@@ -588,22 +575,16 @@ export default function AccountPage() {
             </h3>
             <div className="mt-3 space-y-4">
               <div className="flex items-center gap-3">
-                <label className="relative inline-flex cursor-pointer items-center">
-                  <input
-                    type="checkbox"
-                    checked={notifEnabled}
-                    disabled={notifLoading || info.plan === "FREE"}
-                    onChange={(e) => handleNotifToggle(e.target.checked)}
-                    className="peer sr-only"
-                  />
-                  <div className="h-6 w-11 rounded-full bg-white/10 transition peer-checked:bg-prism-500 peer-disabled:opacity-60" />
-                  <div className="absolute left-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-white shadow transition peer-checked:translate-x-5">
-                    {notifLoading && (
-                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-prism-500/40 border-t-prism-600" />
-                    )}
-                  </div>
+                <Switch
+                  id="account-notif-enable"
+                  checked={notifEnabled}
+                  disabled={info.plan === "FREE"}
+                  busy={notifLoading}
+                  onChange={(next) => handleNotifToggle(next)}
+                />
+                <label htmlFor="account-notif-enable" className="cursor-pointer text-sm text-neutral-100">
+                  {t("account.notifEnable")}
                 </label>
-                <span className="text-sm text-neutral-100">{t("account.notifEnable")}</span>
                 {notifLoading && (
                   <span className="text-xs text-neutral-500">{t("account.notifProcessing")}</span>
                 )}

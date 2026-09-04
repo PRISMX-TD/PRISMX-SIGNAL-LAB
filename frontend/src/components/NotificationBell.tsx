@@ -11,6 +11,7 @@ import { notificationApi } from "../api/client"
 import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
 import { disableNotifications, enableNotifications, ENABLE_ERROR_KEYS, NotifEnableError } from "../utils/notifications"
 import { useBackToClose } from "../utils/useBackToClose"
+import Switch from "./Switch"
 
 type Status = "off" | "on" | "attention"
 
@@ -136,20 +137,16 @@ export default function NotificationBell() {
           <div className="text-sm font-bold text-white">{t("notifPanel.title")}</div>
 
           <div className="mt-3 flex items-center gap-3">
-            <label className="relative inline-flex cursor-pointer items-center">
-              <input
-                type="checkbox"
-                checked={enabled}
-                disabled={!loaded || busy}
-                onChange={(e) => handleToggle(e.target.checked)}
-                className="peer sr-only"
-              />
-              <div className="h-6 w-11 rounded-full bg-white/10 transition peer-checked:bg-prism-500 peer-disabled:opacity-60" />
-              <div className="absolute left-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-white shadow transition peer-checked:translate-x-5">
-                {busy && <span className="h-3 w-3 animate-spin rounded-full border-2 border-prism-500/40 border-t-prism-600" />}
-              </div>
+            <Switch
+              id="notif-bell-enable"
+              checked={enabled}
+              disabled={!loaded}
+              busy={busy}
+              onChange={(next) => handleToggle(next)}
+            />
+            <label htmlFor="notif-bell-enable" className="cursor-pointer text-sm text-neutral-100">
+              {t("account.notifEnable")}
             </label>
-            <span className="text-sm text-neutral-100">{t("account.notifEnable")}</span>
           </div>
 
           {status === "attention" && (
