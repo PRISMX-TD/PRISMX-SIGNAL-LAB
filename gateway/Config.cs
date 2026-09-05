@@ -20,7 +20,12 @@ namespace Prismx.Mt5Gateway
 
         // --- HTTP 服务 ---
         // 默认只监听 127.0.0.1:接口不暴露到公网,由后端通过隧道/内网访问。
-        public string ListenPrefix = "http://127.0.0.1:8788/";
+        // 默认只听本机、端口与 install-service.ps1 的兜底和 README 的生产写法一致
+        // (8800)。以前这里是 8788,三处各写一个数字,有 ini 时无影响、没 ini 时自检
+        // 与安装脚本会各猜各的。
+        // Loopback-only by default; the port matches install-service.ps1's fallback
+        // and the README (8800). It used to be 8788 here, a third number nobody used.
+        public string ListenPrefix = "http://127.0.0.1:8800/";
 
         // 调用方必须带 X-Gateway-Token 头,值与此一致。
         public string ApiToken = "";

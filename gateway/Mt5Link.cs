@@ -353,13 +353,36 @@ namespace Prismx.Mt5Gateway
         // restarts it"; now it's visible and self-healing.
         private volatile bool _dealerActive;
 
-        // 缓存: auto-resolve symbol suffix per (group, baseSymbol)
-        private readonly Dictionary<string, string> _symbolCache =
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // 缓存: auto-resolve symbol suffix per (group, baseSymbol)。带 TTL,见下。
+        private readonly Dictionary<string, TimedString> _symbolCache =
+            new Dictionary<string, TimedString>(StringComparer.OrdinalIgnoreCase);
 
-        // 缓存: user's group per login
-        private readonly Dictionary<ulong, string> _groupCache =
-            new Dictionary<ulong, string>();
+        // 缓存: user's group per login。
+        //
+        // 以前这两个缓存永久有效、重连也不清:理由是"猜错后缀只是下单失败"。
+        // 但券商把账号换组之后,这里会一直拿旧组名去解析品种,下单就**持续**失败
+        // 直到 gateway 重启——不是失败一次,而是每一次。5 分钟 TTL 把"换组后不可
+        // 交易"的窗口压到可接受,重连时也一并清空(断线期间最可能发生换组)。
+        // These two used to live forever and survive reconnects, on the theory that
+        // a wrong suffix only fails one order. But after a broker moves an account
+        // to another group, the stale group name makes *every* order fail until the
+        // gateway restarts. A 5-minute TTL bounds that window; both are also
+        // cleared on reconnect, when a group change is most likely to have happened.
+        private readonly Dictionary<ulong, TimedString> _groupCache =
+            new Dictionary<ulong, TimedString>();
+
+        private const int ResolveCacheTtlMs = 5 * 60 * 1000;
+
+        private struct TimedString
+        {
+            public string Value;
+            public int AtTickCount;
+        }
+
+        private static bool Fresh(TimedString entry)
+        {
+            return unchecked(Environment.TickCount - entry.AtTickCount) < ResolveCacheTtlMs;
+        }
 
         // 缓存:品种手数限制(volMin/volMax/volStep)。每次开仓都要校验手数,
         // 原本每次都进 _gate 锁查一次 MT5。这些值几乎不变,缓存后既省一次
@@ -800,6 +823,8 @@ namespace Prismx.Mt5Gateway
                         _selected.Clear();
                         _limitsCache.Clear();
                         _tradableCache.Clear();
+                        _groupCache.Clear();
+                        _symbolCache.Clear();
                     }
 
                     // 重连后重开 dealer 通道。返回码此前被直接丢弃——它一旦失败,
@@ -1056,10 +1081,17 @@ namespace Prismx.Mt5Gateway
         /// <summary>
         /// 读一段时间内的成交历史(Unix 秒,闭区间)。
         ///
-        /// 时间参数由 MT5 服务器按 UTC 秒解读,直接传 Unix 时间戳即可 —— 不像
-        /// Bridge 那边用 MetaTrader5 Python 包时要先换算服务器本地时区(见
-        /// bridge/mt5_worker.py 的 _server_now 注释)。Manager API 走的是
-        /// int64 秒,不存在那个参照系陷阱。
+        /// 时间参数与返回的 deal.time 都在**服务器墙钟**参照系里(本券商 UTC+3),
+        /// 与 Bridge 那边 MetaTrader5 Python 包的陷阱是同一个。网关不换算:后端按
+        /// "本平台开仓腿的服务器时间 − orders.created_at"观测偏移并在落库前减掉
+        /// (routers/gateway.observe_server_offset),查询窗口的 from 也按偏移前移。
+        /// 此处原先写着"Manager API 走 int64 秒,不存在那个参照系陷阱"——错的,
+        /// 2026-09-05 已被一笔漂进别场比赛的平仓证伪。
+        /// Both the arguments and the returned deal.time live in the **server wall
+        /// clock** frame (UTC+3 for this broker) — the same trap as the bridge's
+        /// MetaTrader5 package. The gateway does not convert; the backend observes
+        /// the offset and subtracts it before persisting. The earlier note claiming
+        /// the Manager API was immune was wrong (disproved 2026-09-05).
         /// </summary>
         public DealInfo[] GetDeals(ulong login, long fromUnix, long toUnix, out MTRetCode res)
         {
@@ -1166,7 +1198,12 @@ namespace Prismx.Mt5Gateway
             {
                 // --- 1. lookup group ---
                 string group;
-                if (!_groupCache.TryGetValue(login, out group))
+                TimedString groupHit;
+                if (_groupCache.TryGetValue(login, out groupHit) && Fresh(groupHit))
+                {
+                    group = groupHit.Value;
+                }
+                else
                 {
                     using (CIMTUser user = _manager.UserCreate())
                     {
@@ -1174,15 +1211,15 @@ namespace Prismx.Mt5Gateway
                         if (r != MTRetCode.MT_RET_OK)
                             return baseSymbol;
                         group = user.Group();
-                        _groupCache[login] = group;
+                        _groupCache[login] = new TimedString { Value = group, AtTickCount = Environment.TickCount };
                     }
                 }
 
                 string cacheKey = group.ToUpperInvariant() + "|" + baseSymbol.ToUpperInvariant();
 
-                string cached;
-                if (_symbolCache.TryGetValue(cacheKey, out cached))
-                    return cached;
+                TimedString cached;
+                if (_symbolCache.TryGetValue(cacheKey, out cached) && Fresh(cached))
+                    return cached.Value;
 
                 // 每个别名写法都走一遍"精确匹配 -> 前缀扫描"。只按传进来的名字
                 // 扫是不够的:比特币的信号名是 BTCUSDT,券商品种表里以它为前缀的
@@ -1198,7 +1235,7 @@ namespace Prismx.Mt5Gateway
                     {
                         if (_manager.SymbolGet(alias, group, sym) == MTRetCode.MT_RET_OK)
                         {
-                            _symbolCache[cacheKey] = alias;
+                            _symbolCache[cacheKey] = new TimedString { Value = alias, AtTickCount = Environment.TickCount };
                             return alias;
                         }
                     }
@@ -1241,13 +1278,13 @@ namespace Prismx.Mt5Gateway
                         Log.Info("品种名自动匹配: {0} -> {1} (组={2})",
                             baseSymbol, resolved, group);
 
-                        _symbolCache[cacheKey] = resolved;
+                        _symbolCache[cacheKey] = new TimedString { Value = resolved, AtTickCount = Environment.TickCount };
                         return resolved;
                     }
                 }
 
                 // No match — return as-is, let caller handle the error
-                _symbolCache[cacheKey] = baseSymbol;
+                _symbolCache[cacheKey] = new TimedString { Value = baseSymbol, AtTickCount = Environment.TickCount };
                 return baseSymbol;
             }
         }

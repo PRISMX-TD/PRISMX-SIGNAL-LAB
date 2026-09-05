@@ -75,7 +75,15 @@ namespace Prismx.Mt5Gateway
         public double Profit;
         public double Commission;
         public double Storage;      // 隔夜利息
-        public long Time;           // Unix 秒(服务器给的就是 UTC 秒)
+        // 注意:这是**券商服务器墙钟**换算出来的 epoch 秒,不是真 UTC——本券商领先
+        // UTC 3 小时。网关原样透传,换算在后端(routers/gateway.observe_server_offset,
+        // 2026-09-05 起,偏移持久化在 mt5_accounts.server_utc_offset)。这里曾写着
+        // "服务器给的就是 UTC 秒",那是错的,害一笔平仓漂进了下一场比赛的窗口。
+        // NOTE: epoch seconds derived from the **broker server's wall clock**, not true
+        // UTC (this broker runs UTC+3). The gateway passes it through untouched; the
+        // backend converts (routers/gateway.observe_server_offset). The old comment
+        // claiming "the server gives UTC seconds" was wrong.
+        public long Time;
         public string Comment = "";
     }
 }

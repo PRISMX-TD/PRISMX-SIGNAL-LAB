@@ -42,7 +42,8 @@ try {
         "HttpServer.cs",
         "Models.cs",
         "Json.cs",
-        "Log.cs"
+        "Log.cs",
+        "Idempotency.cs"
     )
 
     & $csc /nologo /target:exe /platform:x64 /optimize+ /out:mt5gateway.exe `

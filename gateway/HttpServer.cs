@@ -28,12 +28,78 @@ namespace Prismx.Mt5Gateway
         private readonly byte[] _tokenBytes;
         private volatile bool _stopping;
 
+        // 交易幂等缓存,见 Idempotency.cs。24 小时与桥接程序的 clientOrderId 缓存对齐。
+        // Trade idempotency cache (Idempotency.cs); 24h matches the bridge's cache.
+        private readonly IdempotencyCache _idem = new IdempotencyCache(TimeSpan.FromHours(24));
+
         public HttpServer(Config cfg, Mt5Link link)
         {
             _cfg = cfg;
             _link = link;
             _tokenBytes = Encoding.UTF8.GetBytes(cfg.ApiToken);
             _listener.Prefixes.Add(cfg.ListenPrefix);
+        }
+
+        /// <summary>
+        /// 带幂等保护地执行一次交易动作。clientOrderId 为空时退回旧行为(每次都执行)。
+        ///
+        /// 同一个 key 已经有结果 → 原样回,response 里 replayed=true;正在执行 → 等它
+        /// 完成再回同一份结果(最多等 dealer 超时再加 5 秒,覆盖"后端超时重发时上一次
+        /// 还没等到回执"的窗口);等不到 → 200 + ok:false + retcode IN_PROGRESS,后端
+        /// 据此不把它当拒绝,而是稍后再问一次。
+        ///
+        /// Runs one trade action under idempotency. Empty clientOrderId keeps the
+        /// old always-execute behaviour. A completed key replays its result; an
+        /// in-flight key waits (dealer timeout + 5s) for the same result; if it
+        /// still isn't done the response is ok:false / IN_PROGRESS, which the
+        /// backend treats as "ask again", not as a rejection.
+        /// </summary>
+        private void ExecuteIdempotent(HttpListenerContext ctx, ulong login, string action,
+            string clientOrderId, Func<TradeResult> run)
+        {
+            if (clientOrderId.Length == 0)
+            {
+                WriteTradeResult(ctx, run(), false);
+                return;
+            }
+
+            string key = IdempotencyCache.Key(login, action, clientOrderId);
+            TradeResult existing;
+            bool replayed;
+
+            if (!_idem.TryBegin(key, _cfg.DealerTimeoutMs + 5000, out existing, out replayed))
+            {
+                if (existing == null)
+                {
+                    Log.Warn("{0} 重复请求仍在执行中 login={1} clientOrderId={2}", action, login, clientOrderId);
+                    WriteTradeResult(ctx, TradeResult.Fail("IN_PROGRESS",
+                        "同一 clientOrderId 的请求仍在执行,请稍后重新查询"), true);
+                    return;
+                }
+
+                Log.Info("{0} 重复请求,回放缓存结果 login={1} clientOrderId={2} -> {3} {4}",
+                    action, login, clientOrderId, existing.Ok ? "成功" : "失败", existing.Retcode);
+                WriteTradeResult(ctx, existing, true);
+                return;
+            }
+
+            TradeResult r;
+
+            try
+            {
+                r = run();
+            }
+            catch (Exception ex)
+            {
+                // 记成失败而不是删条目:异常若发生在 dealer 请求发出之后,仓位可能已
+                // 经开了,放重试再开一次比回"失败"危险(见 Idempotency.cs)。
+                // Recorded as a failure, not dropped — see Idempotency.cs.
+                _idem.Complete(key, TradeResult.Fail("exception", ex.Message));
+                throw;
+            }
+
+            _idem.Complete(key, r);
+            WriteTradeResult(ctx, r, false);
         }
 
         public void Start()
@@ -622,14 +688,20 @@ namespace Prismx.Mt5Gateway
                 }
             }
 
-            TradeResult r = _link.OpenPosition(login, symbol, side == "BUY", volume,
-                body.GetDouble("stopLoss"), body.GetDouble("takeProfit"),
-                body.GetString("tag"));
+            double stopLoss = body.GetDouble("stopLoss");
+            double takeProfit = body.GetDouble("takeProfit");
+            string tag = body.GetString("tag");
 
-            Log.Info("开仓 login={0} {1} {2} {3} 手 -> {4} {5}",
-                login, symbol, side, volume, r.Ok ? "成交" : "失败", r.Retcode);
+            ExecuteIdempotent(ctx, login, "open", body.GetString("clientOrderId"), delegate
+            {
+                TradeResult r = _link.OpenPosition(login, symbol, side == "BUY", volume,
+                    stopLoss, takeProfit, tag);
 
-            WriteTradeResult(ctx, r);
+                Log.Info("开仓 login={0} {1} {2} {3} 手 -> {4} {5}",
+                    login, symbol, side, volume, r.Ok ? "成交" : "失败", r.Retcode);
+
+                return r;
+            });
         }
 
         //+------------------------------------------------------------------+
@@ -649,13 +721,20 @@ namespace Prismx.Mt5Gateway
             if (!EnsureTradableAccount(ctx, login))
                 return;
 
-            TradeResult r = _link.ClosePosition(login, ticket,
-                body.GetDouble("volume"), body.GetString("tag"));
+            double closeVolume = body.GetDouble("volume");
+            string closeTag = body.GetString("tag");
 
-            Log.Info("平仓 login={0} ticket={1} -> {2} {3}",
-                login, ticket, r.Ok ? "成交" : "失败", r.Retcode);
+            // 平仓同样要幂等:部分平仓重复执行等于平两次。
+            // Closes are guarded too: a duplicated partial close closes twice.
+            ExecuteIdempotent(ctx, login, "close", body.GetString("clientOrderId"), delegate
+            {
+                TradeResult r = _link.ClosePosition(login, ticket, closeVolume, closeTag);
 
-            WriteTradeResult(ctx, r);
+                Log.Info("平仓 login={0} ticket={1} -> {2} {3}",
+                    login, ticket, r.Ok ? "成交" : "失败", r.Retcode);
+
+                return r;
+            });
         }
 
         //+------------------------------------------------------------------+
@@ -682,7 +761,9 @@ namespace Prismx.Mt5Gateway
                 login, ticket, body.GetDouble("stopLoss"), body.GetDouble("takeProfit"),
                 r.Ok ? "成功" : "失败", r.Retcode);
 
-            WriteTradeResult(ctx, r);
+            // 改单天然幂等(同样的 SL/TP 设两次结果一样),不走缓存。
+            // Modify is naturally idempotent; no cache needed.
+            WriteTradeResult(ctx, r, false);
         }
 
         /// <summary>
@@ -713,7 +794,7 @@ namespace Prismx.Mt5Gateway
             return true;
         }
 
-        private void WriteTradeResult(HttpListenerContext ctx, TradeResult r)
+        private void WriteTradeResult(HttpListenerContext ctx, TradeResult r, bool replayed)
         {
             JsonWriter j = new JsonWriter();
             j.BeginObject()
@@ -728,6 +809,9 @@ namespace Prismx.Mt5Gateway
                 // stores it and later uses it to attribute closed trades.
                 .Field("position", r.Position)
                 .Field("price", r.Price)
+                // 这次回复是不是同一 clientOrderId 的缓存回放(见 ExecuteIdempotent)。
+                // Whether this is a replay for a previously seen clientOrderId.
+                .Field("replayed", replayed)
              .EndObject();
 
             // 交易被拒是业务结果而非服务故障,统一用 200 返回,
