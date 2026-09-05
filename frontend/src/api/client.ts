@@ -132,6 +132,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     }
     throw new Error(detail)
   }
+  // 204 / 空体：成功但没有内容（邀请点击打点、将来任何"只需知道成功"的端点）。
+  // 以前这里无条件 res.json()，空体会抛 SyntaxError，逼得调用方绕开本封装用裸
+  // fetch——两套错误处理、两套鉴权头。这里统一吞掉，返回 undefined。
+  // 204 / empty body: success with nothing to parse (invite-click tracking, any
+  // future fire-and-forget endpoint). Unconditional res.json() threw on it and
+  // forced callers to bypass this wrapper with raw fetch.
+  if (res.status === 204 || res.headers.get('content-length') === '0') {
+    return undefined as T
+  }
   return res.json() as Promise<T>
 }
 
@@ -875,9 +884,10 @@ export const adminApi = {
         method: 'PATCH',
         body: JSON.stringify(patch),
       }),
-    // 删除一场比赛，连同参赛行/基线/快照。已终审的后端拒绝（400）。
-    // Deletes a competition with its participants/baselines/snapshots. Settled ones
-    // are refused server-side (400).
+    // 删除一场比赛，连同参赛行/基线/快照。只有 draft / upcoming 可删，开赛之后
+    // 后端一律 400（内测期曾放开到任何状态，上线前收回）。
+    // Deletes a competition with its participants/baselines/snapshots. Only draft /
+    // upcoming may be deleted; anything started is refused server-side (400).
     deleteCompetition: (id: string) =>
       request<{ deleted: string; participants: number }>(
         `/admin/competitions/${encodeURIComponent(id)}`,
@@ -907,12 +917,13 @@ export const adminApi = {
         `/admin/competitions/${encodeURIComponent(id)}/refresh`,
         { method: 'POST' },
       ),
-    // force=true 跳过结束后 24 小时的宽限期立刻终审；状态闸不受影响。
-    // force=true settles immediately, skipping the 24h post-end grace period; the
-    // status guard is unaffected.
-    settleCompetition: (id: string, force = false) =>
+    // 三道闸都在后端：必须 ended、必须过 24 小时宽限期、不可重跑。内测期的
+    // force=true 已移除。
+    // All three gates are server-side: must be ended, the 24h grace period must have
+    // passed, not re-runnable. The beta-era force=true is gone.
+    settleCompetition: (id: string) =>
       request<CompetitionSettleResult>(
-        `/admin/competitions/${encodeURIComponent(id)}/settle${force ? '?force=true' : ''}`,
+        `/admin/competitions/${encodeURIComponent(id)}/settle`,
         { method: 'POST' },
       ),
     // 实时榜预览：以请求管理员为 viewer，形状与用户端 LeaderboardPayload 一致。
@@ -1002,6 +1013,10 @@ export const paymentApi = {
 export const inviteApi = {
   getOffer: (code: string) =>
     request<{ trialDays: number | null }>(`/invite/offer?code=${encodeURIComponent(code)}`),
+  // 点击打点：后端一律 204（防枚举），request 现在能处理空体。
+  // Click tracking: always 204 server-side (anti-enumeration); request handles the empty body.
+  click: (code: string) =>
+    request<void>('/invite/click', { method: 'POST', body: JSON.stringify({ code }) }),
 }
 
 // 推送订阅 / Push subscriptions

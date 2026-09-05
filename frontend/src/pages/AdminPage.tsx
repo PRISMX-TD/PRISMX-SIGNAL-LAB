@@ -2,6 +2,8 @@
 // Admin page: operating metrics + user list (role/plan adjustable, bulk edit supported)
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
+import Switch from '../components/Switch'
+import { useToast } from '../utils/useToast'
 import { Link } from 'react-router-dom'
 import { adminApi } from '../api/client'
 import { fmtTime, localizeApiError } from '../api/utils'
@@ -84,14 +86,7 @@ function AdminTicketsPanel() {
   const [replyStatus, setReplyStatus] = useState<TicketStatus | ''>('')
   const [replyPriority, setReplyPriority] = useState<TicketPriority | ''>('')
   const [sending, setSending] = useState(false)
-  const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
-  const toastTimer = useRef<number>(undefined)
-
-  const showToast = (kind: 'ok' | 'err', text: string) => {
-    if (toastTimer.current) window.clearTimeout(toastTimer.current)
-    setToast({ kind, text })
-    toastTimer.current = window.setTimeout(() => setToast(null), 4000)
-  }
+  const { toast, showToast } = useToast()
 
   const load = async () => {
     setLoading(true)
@@ -334,8 +329,7 @@ export default function AdminPage() {
   const [planFilter, setPlanFilter] = useState('')
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [savingId, setSavingId] = useState<string | null>(null)
-  const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
-  const toastTimer = useRef<number | undefined>(undefined)
+  const { toast, showToast } = useToast()
 
   // 合作券商锁设置（patterns 在输入框里以逗号分隔编辑）
   // partner-broker lock settings (patterns edited as a comma-separated string)
@@ -390,16 +384,17 @@ export default function AdminPage() {
   const [bulkSaving, setBulkSaving] = useState(false)
   const headerCheckboxRef = useRef<HTMLInputElement>(null)
 
-  const showToast = (kind: 'ok' | 'err', text: string) => {
-    if (toastTimer.current) window.clearTimeout(toastTimer.current)
-    setToast({ kind, text })
-    toastTimer.current = window.setTimeout(() => setToast(null), 4000)
-  }
-
   const load = async (opts: { q?: string; plan?: string } = {}) => {
     setLoading(true)
     try {
-      const [usersRes, metricsRes, pageStatsRes, settingsRes, pricingRes, trialRes, disciplineRes, candleRes, strategyRes] = await Promise.all([
+      // 九个接口分区加载：以前是一个 Promise.all，任一失败整页报错、其余八块
+      // 明明拿到了数据也不显示。现在各自成败各自算，失败的块保留旧值（首屏就是
+      // 空态），只提示"N 项没加载出来"。其它页面早就吃过这个教训。
+      // Nine endpoints settle independently: a single Promise.all used to fail the
+      // whole page when any one of them failed, hiding data the other eight had
+      // already returned. Each section now keeps its previous value on failure
+      // and one toast says how many didn't load.
+      const results = await Promise.allSettled([
         adminApi.listUsers({ q: (opts.q ?? query) || undefined, plan: (opts.plan ?? planFilter) || undefined, limit: 100 }),
         adminApi.metrics(),
         adminApi.pageStats(pageStatsDays),
@@ -410,21 +405,47 @@ export default function AdminPage() {
         adminApi.getCandleHistory(),
         adminApi.getStrategySettings(),
       ])
-      setUsers(usersRes.users)
-      setTotal(usersRes.total)
-      setMetrics(metricsRes)
-      setPageStats(pageStatsRes)
-      setDrafts(Object.fromEntries(usersRes.users.map((u) => [u.id, toDraft(u)])))
-      setBrokerSettings(settingsRes)
-      setBrokerPatternsText(settingsRes.brokerPatterns.join(', '))
-      setPricing(pricingRes)
-      setTrial(trialRes)
-      setSavedTrialEnabled(trialRes.trialEnabled)
-      setDiscipline(disciplineRes)
-      setCandleSettings(candleRes)
-      setStrategySettings(strategyRes)
-    } catch (err) {
-      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.loadError'))
+      const [usersRes, metricsRes, pageStatsRes, settingsRes, pricingRes, trialRes, disciplineRes, candleRes, strategyRes] = results
+      let failed = 0
+      const ok = <T,>(r: PromiseSettledResult<T>): T | null => {
+        if (r.status === 'fulfilled') return r.value
+        failed += 1
+        return null
+      }
+      const users = ok(usersRes)
+      if (users) {
+        setUsers(users.users)
+        setTotal(users.total)
+        setDrafts(Object.fromEntries(users.users.map((u) => [u.id, toDraft(u)])))
+      }
+      const metrics = ok(metricsRes)
+      if (metrics) setMetrics(metrics)
+      const pageStatsVal = ok(pageStatsRes)
+      if (pageStatsVal) setPageStats(pageStatsVal)
+      const settings = ok(settingsRes)
+      if (settings) {
+        setBrokerSettings(settings)
+        setBrokerPatternsText(settings.brokerPatterns.join(', '))
+      }
+      const pricingVal = ok(pricingRes)
+      if (pricingVal) setPricing(pricingVal)
+      const trialVal = ok(trialRes)
+      if (trialVal) {
+        setTrial(trialVal)
+        setSavedTrialEnabled(trialVal.trialEnabled)
+      }
+      const disciplineVal = ok(disciplineRes)
+      if (disciplineVal) setDiscipline(disciplineVal)
+      const candleVal = ok(candleRes)
+      if (candleVal) setCandleSettings(candleVal)
+      const strategyVal = ok(strategyRes)
+      if (strategyVal) setStrategySettings(strategyVal)
+      if (failed > 0) {
+        const firstErr = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
+        const reason = firstErr?.reason
+        const detail = reason instanceof Error ? localizeApiError(reason.message) : ''
+        showToast('err', t('admin.loadPartialError', { n: failed, total: results.length }) + (detail ? `：${detail}` : ''))
+      }
     } finally {
       setLoading(false)
     }
@@ -535,9 +556,6 @@ export default function AdminPage() {
 
   useEffect(() => {
     load()
-    return () => {
-      if (toastTimer.current) window.clearTimeout(toastTimer.current)
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -718,12 +736,7 @@ export default function AdminPage() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h3 className="font-display text-lg font-semibold text-neutral-100">{t('admin.brokerTitle')}</h3>
             <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
-              <input
-                type="checkbox"
-                checked={brokerSettings.brokerLockEnabled}
-                onChange={(e) => setBrokerSettings({ ...brokerSettings, brokerLockEnabled: e.target.checked })}
-                className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-              />
+              <Switch checked={brokerSettings.brokerLockEnabled} onChange={(v) => setBrokerSettings({ ...brokerSettings, brokerLockEnabled: v })} />
               {t('admin.brokerLockEnabled')}
             </label>
           </div>
@@ -778,12 +791,7 @@ export default function AdminPage() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h3 className="font-display text-lg font-semibold text-neutral-100">{t('admin.pricingTitle')}</h3>
             <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
-              <input
-                type="checkbox"
-                checked={pricing.saleEnabled}
-                onChange={(e) => setPricing({ ...pricing, saleEnabled: e.target.checked })}
-                className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-              />
+              <Switch checked={pricing.saleEnabled} onChange={(v) => setPricing({ ...pricing, saleEnabled: v })} />
               {t('admin.saleEnabled')}
             </label>
           </div>
@@ -871,12 +879,7 @@ export default function AdminPage() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h3 className="font-display text-lg font-semibold text-neutral-100">{t('admin.trialTitle')}</h3>
             <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
-              <input
-                type="checkbox"
-                checked={trial.trialEnabled}
-                onChange={(e) => setTrial({ ...trial, trialEnabled: e.target.checked })}
-                className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-              />
+              <Switch checked={trial.trialEnabled} onChange={(v) => setTrial({ ...trial, trialEnabled: v })} />
               {t('admin.trialEnabled')}
             </label>
           </div>
@@ -1061,12 +1064,7 @@ export default function AdminPage() {
             </div>
             <div className="flex items-end pb-2">
               <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
-                <input
-                  type="checkbox"
-                  checked={strategySettings.proOnly}
-                  onChange={(e) => setStrategySettings({ ...strategySettings, proOnly: e.target.checked })}
-                  className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-                />
+                <Switch checked={strategySettings.proOnly} onChange={(v) => setStrategySettings({ ...strategySettings, proOnly: v })} />
                 {t('admin.strategyProOnly')}
               </label>
             </div>

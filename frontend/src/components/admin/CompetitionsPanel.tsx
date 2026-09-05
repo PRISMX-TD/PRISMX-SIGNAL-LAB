@@ -29,12 +29,14 @@
 //   patch object at all, rather than sending-but-disabling them.
 // - The advance action's request carries only { status }, never bundled with
 //   the copy/time-field edit.
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
 import { fmtDate, localizeApiError } from '../../api/utils'
 import { SkeletonLine } from '../Skeleton'
 import Select from '../Select'
+import ConfirmModal from '../ConfirmModal'
+import { useToast } from '../../utils/useToast'
 import type {
   CompetitionAdminRow,
   CompetitionEnrollment,
@@ -178,14 +180,10 @@ function gateValue(raw: string): number | null {
 
 export default function CompetitionsPanel() {
   const { t } = useTranslation()
-  const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
-  const toastTimer = useRef<number | undefined>(undefined)
-
-  const showToast = (kind: 'ok' | 'err', text: string) => {
-    if (toastTimer.current) window.clearTimeout(toastTimer.current)
-    setToast({ kind, text })
-    toastTimer.current = window.setTimeout(() => setToast(null), 4000)
-  }
+  const { toast, showToast } = useToast()
+  // 待确认的破坏性动作（删除 / 终审），用站内 ConfirmModal 而不是 window.confirm。
+  // Pending destructive action (delete / settle), confirmed via ConfirmModal.
+  const [pendingAction, setPendingAction] = useState<{ kind: 'delete' | 'settle'; comp: CompetitionAdminRow } | null>(null)
 
   // ---- ① 比赛列表 / competition list ----
   const [comps, setComps] = useState<CompetitionAdminRow[]>([])
@@ -227,9 +225,6 @@ export default function CompetitionsPanel() {
 
   useEffect(() => {
     loadList()
-    return () => {
-      if (toastTimer.current) window.clearTimeout(toastTimer.current)
-    }
   }, [])
 
   // ---- ② 创建/编辑表单 / create-edit form ----
@@ -268,10 +263,6 @@ export default function CompetitionsPanel() {
   // confirms first (the copy names how many entries go with it). If the deleted row
   // is the one being edited, the form falls back to create mode.
   async function remove(c: CompetitionAdminRow) {
-    const key = c.status === 'settled'
-      ? 'competition.admin.deleteSettledConfirm'
-      : 'competition.admin.deleteConfirm'
-    if (!window.confirm(t(key, { name: c.name, n: c.participantCount }))) return
     setDeletingId(c.id)
     try {
       await adminApi.deleteCompetition(c.id)
@@ -390,11 +381,6 @@ export default function CompetitionsPanel() {
     }
   }
 
-  // force：宽限期没到就终审。多问一句——这一刀切下去名次永久定格、勋章立即发出，
-  // 而此刻可能还有没平的仓或迟到的平仓没算进来。
-  // force: settling before the grace period is up. It asks once more — ranks lock in
-  // permanently and badges go out immediately, while positions may still be open or
-  // late closes not yet counted.
   // 立即重算这场比赛的榜单：进行中的比赛本来最多 20 秒陈旧（读接口会按需刷新），
   // 这个按钮是给"改完参赛资格想马上看结果"的场合，跳过节流立刻算一遍。
   // Recompute this competition's board now: a running competition is already at most
@@ -413,21 +399,16 @@ export default function CompetitionsPanel() {
     }
   }
 
-  async function settle(comp: CompetitionAdminRow, force = false) {
-    // 三种确认文案：正常终审 / 宽限期内强制（ended，会漏迟到的单）/ 比赛还没结束就
-    // 强制（草稿·未开始·进行中，直接把比赛终结掉）。后两种风险不同，不能共用一句。
-    // Three confirm messages: normal settle / forcing during the grace period (ended —
-    // late closes get missed) / forcing before the competition ends (draft·upcoming·
-    // running — it ends the competition outright). The last two carry different risks.
-    const msg = !force
-      ? t('competition.admin.settleConfirm')
-      : comp.status === 'ended'
-        ? t('competition.admin.settleForceConfirm')
-        : t('competition.admin.settleForceStatusConfirm')
-    if (!window.confirm(msg)) return
+  async function settle(comp: CompetitionAdminRow) {
+    // 只有一种终审：ended 且过了 24 小时宽限期。内测期的"强制终审"（跳过状态与
+    // 宽限期）已随后端一起移除——早于实际结束终审会漏掉尚未平仓和迟到的单，而名次
+    // 一旦定格就是永久的。
+    // One kind of settlement only: ended and past the 24h grace period. The beta-era
+    // "force settle" went away with the backend bypass — settling early drops
+    // still-open and late closes, and ranks are permanent once locked.
     setSettlingId(comp.id)
     try {
-      const result = await adminApi.settleCompetition(comp.id, force)
+      const result = await adminApi.settleCompetition(comp.id)
       setComps((prev) => prev.map((c) => (c.id === comp.id ? { ...c, status: 'settled' } : c)))
       showToast('ok', t('competition.admin.settleResult', { n: result.ranked }))
       if (selectedId === comp.id) {
@@ -612,34 +593,15 @@ export default function CompetitionsPanel() {
                               {refreshingId === c.id ? t('common.loading') : t('competition.admin.refresh')}
                             </button>
                           )}
-                          {/* 强制终审：给还没到 ended 的比赛（草稿/未开始/进行中）用，
-                              测试期不必等比赛真的走完。ended 自己有那颗主按钮（宽限期内
-                              也走 force），已终审的不再显示。
-                              Force settle: for competitions not yet ended (draft / upcoming /
-                              running) so testing doesn't have to wait one out. An ended one has
-                              its own primary button (which also forces during the grace
-                              period); a settled one shows nothing. */}
-                          {c.status !== 'ended' && c.status !== 'settled' && (
-                            <button
-                              type="button"
-                              className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] text-amber-300 disabled:opacity-40"
-                              disabled={settlingId === c.id}
-                              onClick={() => settle(c, true)}
-                            >
-                              {settlingId === c.id ? t('common.loading') : t('competition.admin.settleForce')}
-                            </button>
-                          )}
                           {c.status === 'ended' && (() => {
-                            // §5.3 宽限期：结束（endsAt）后 24 小时内前端也把按钮禁掉——
-                            // 真正的闸在后端 settle_competition，这里只是不让管理员点了
-                            // 白等一个必然 400。settleOpensAt 算不出来（endsAt 缺失，理论
-                            // 上不会发生，ended 比赛必有 endsAt）时不拦，交给后端兜底。
-                            // §5.3 grace period: also disable the button client-side for
-                            // 24h after endsAt — the real gate is settle_competition on the
-                            // backend, this just avoids a click that's guaranteed to 400.
-                            // If settleOpensAt can't be computed (missing endsAt, shouldn't
-                            // happen for an ended competition) don't block; the backend
-                            // still enforces it.
+                            // §5.3 宽限期：结束（endsAt）后 24 小时内按钮禁用——真正的闸在
+                            // 后端 settle_competition，这里只是不让管理员点了白等一个必然
+                            // 400。settleOpensAt 算不出来（endsAt 缺失，理论上不会发生）时
+                            // 不拦，交给后端兜底。
+                            // §5.3 grace period: the button is disabled for 24h after endsAt —
+                            // the real gate is settle_competition on the backend, this just
+                            // avoids a click that's guaranteed to 400. If settleOpensAt can't
+                            // be computed, don't block; the backend still enforces it.
                             const settleOpensAt = c.endsAt
                               ? new Date(c.endsAt).getTime() + 24 * 60 * 60 * 1000
                               : null
@@ -651,38 +613,35 @@ export default function CompetitionsPanel() {
                                     {t('competition.admin.settleWait')}
                                   </span>
                                 )}
-                                {/* 宽限期内按钮照样可点，走 force=true——多一次警告确认，
-                                    不再是"必须等满 24 小时"。
-                                    During the grace period the button stays clickable and
-                                    goes through force=true after one extra warning; it is no
-                                    longer "you must wait the full 24 hours". */}
                                 <button
                                   type="button"
                                   className="btn-primary whitespace-nowrap px-2.5 py-1 text-[11px] disabled:opacity-40"
-                                  disabled={settlingId === c.id}
+                                  disabled={settlingId === c.id || waiting}
                                   title={waiting ? t('competition.admin.settleWait') : undefined}
-                                  onClick={() => settle(c, waiting)}
+                                  onClick={() => setPendingAction({ kind: 'settle', comp: c })}
                                 >
                                   {settlingId === c.id ? t('common.loading') : t('competition.admin.settle')}
                                 </button>
                               </span>
                             )
                           })()}
-                          {/* 删除：任何状态都能删（含已终审，测试需要）。已终审那一档确认
-                              文案会额外说明"勋章不收回"——user_badges 没有"哪场比赛发的"
-                              这一列，无从选择性撤销。
-                              Delete: any status, settled included (needed for testing). The
-                              settled branch's confirm adds that badges are not revoked —
-                              user_badges has no "which competition" column, so there is no way
-                              to revoke selectively. */}
+                          {/* 删除：只有草稿 / 未开始可删。开赛之后后端一律 400，按钮干脆
+                              不画——running/ended 删掉等于抹掉正在争的名次；settled 删掉
+                              勋章收不回且会改变卫冕王判定。
+                              Delete: draft / upcoming only. Once started the backend refuses,
+                              so the button isn't rendered — deleting running/ended wipes
+                              ranks being competed for; deleting settled can't revoke badges
+                              and shifts the back-to-back judgement. */}
+                          {(c.status === 'draft' || c.status === 'upcoming') && (
                             <button
                               type="button"
                               className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] text-down disabled:opacity-40"
                               disabled={deletingId === c.id}
-                              onClick={() => remove(c)}
+                              onClick={() => setPendingAction({ kind: 'delete', comp: c })}
                             >
                               {deletingId === c.id ? t('common.loading') : t('competition.admin.delete')}
                             </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1020,6 +979,26 @@ export default function CompetitionsPanel() {
             !boardError && <p className="mt-3 text-sm text-neutral-400">{t('leaderboard.empty')}</p>
           )}
         </div>
+      )}
+
+      {pendingAction && (
+        <ConfirmModal
+          center
+          title={pendingAction.kind === 'delete' ? t('competition.admin.delete') : t('competition.admin.settle')}
+          message={
+            pendingAction.kind === 'delete'
+              ? t('competition.admin.deleteConfirm', { name: pendingAction.comp.name, n: pendingAction.comp.participantCount })
+              : t('competition.admin.settleConfirm')
+          }
+          danger={pendingAction.kind === 'delete'}
+          onCancel={() => setPendingAction(null)}
+          onConfirm={() => {
+            const action = pendingAction
+            setPendingAction(null)
+            if (action.kind === 'delete') void remove(action.comp)
+            else void settle(action.comp)
+          }}
+        />
       )}
     </div>
   )

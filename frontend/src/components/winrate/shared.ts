@@ -243,6 +243,19 @@ export const fmtInt = (n: number): string => n.toLocaleString('en-US')
 
 /** 某个 IANA 时区在给定时刻的 UTC 偏移（分钟）。夏令时体现在这里。
  *  A zone's UTC offset in minutes at a given instant; DST shows up here. */
+/** 某个 UTC 钟点落在哪些时段内。与后端 session_keys_for 同一条判断（时段按该金融
+ *  中心的本地钟点定义），只是这里一次判一个钟点而不是一条信号。以前在时段胜率卡
+ *  与「现在该盯什么」两处各写一份。
+ *  Which sessions a given UTC hour falls in — the backend's session_keys_for rule
+ *  applied to an hour. Was duplicated in SessionWinrateCard and WatchNow. */
+export function sessionsForUtcHour(hour: number, sessions: SessionWindow[], now: Date): string[] {
+  const hit = sessions.filter((s) => {
+    const local = ((((hour * 60 + zoneOffsetMinutes(s.tz, now)) % 1440) + 1440) % 1440) / 60
+    return s.startHour <= local && local < s.endHour
+  })
+  return hit.length > 0 ? hit.map((s) => s.key) : ['outside']
+}
+
 export function zoneOffsetMinutes(tz: string, at: Date): number {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset' }).formatToParts(at)
   const name = parts.find((p) => p.type === 'timeZoneName')?.value ?? 'GMT+0'

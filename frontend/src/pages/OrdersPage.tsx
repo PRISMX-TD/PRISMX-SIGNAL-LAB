@@ -1,6 +1,7 @@
 // 订单与回执页 / Orders & receipts page
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import Pager from '../components/Pager'
 import { useAuth } from '../store/auth'
 import { useLive, usePositions } from '../store/live'
 import { orderApi } from '../api/client'
@@ -677,29 +678,14 @@ export default function OrdersPage() {
           locally (new orders show instantly); with a date filter, page via the
           backend, reaching history beyond the live 100. */}
       {(visibleOrders.length > 0 || dateFilterActive) && (
-        <div className="mt-3 flex items-center justify-between text-xs text-neutral-400">
-          <span>
-            {pageLoading
-              ? t('common.loading')
-              : t('orders.pageInfo', { page: safePage + 1, totalPages, total: pageTotal })}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setPage(Math.max(0, safePage - 1))}
-              disabled={safePage === 0 || pageLoading}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {t('common.prevPage')}
-            </button>
-            <button
-              onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))}
-              disabled={pageLoading || safePage + 1 >= totalPages}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {t('common.nextPage')}
-            </button>
-          </div>
-        </div>
+        <Pager
+          page={safePage}
+          totalPages={totalPages}
+          total={pageTotal}
+          loading={pageLoading}
+          onPrev={() => setPage(Math.max(0, safePage - 1))}
+          onNext={() => setPage(Math.min(totalPages - 1, safePage + 1))}
+        />
       )}
       </>
       )}

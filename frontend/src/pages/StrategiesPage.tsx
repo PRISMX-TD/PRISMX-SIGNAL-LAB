@@ -21,6 +21,7 @@
 // unmanageable.
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { segBtn } from '../utils/segBtn'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../store/auth'
 import { useLive, useQuotes } from '../store/live'
@@ -314,15 +315,6 @@ function StrategyEditor({
       setSaving(false)
     }
   }
-
-  const segBtn = (active: boolean, disabled = false) =>
-    `rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-      disabled
-        ? 'cursor-not-allowed border-white/5 bg-white/[0.02] text-neutral-500'
-        : active
-          ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'
-          : 'border-white/10 bg-white/5 text-neutral-400 hover:text-neutral-100'
-    }`
 
   const steps = [
     { key: 'stepBasics', hint: 'stepBasicsHint' },

@@ -23,6 +23,9 @@
 // against.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import Pager from '../Pager'
+import { segBtn } from '../../utils/segBtn'
+import { fmtChartTime, toLinePoints } from '../../utils/chartSeries'
 import {
   createChart,
   ColorType,
@@ -74,36 +77,8 @@ function fmtMoney(v: number): string {
   return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-// 时间轴刻度与十字准线的悬浮时间标签是 lightweight-charts 两套独立的格式化配置，
-// 都不设会回退成浏览器本地时区/UTC，与全站其它时间显示（UTC+8）对不上。与
-// ChartsPage.tsx 的 fmtChartTime 同一实现。
-// Tick-mark labels and the crosshair's hover readout are two separate formatting
-// hooks; leaving either unset falls back to the browser's timezone/UTC, which
-// disagrees with the rest of the site (UTC+8). Same implementation as
-// ChartsPage.tsx's fmtChartTime.
-function fmtChartTime(time: UTCTimestamp): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Shanghai',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(time * 1000))
-}
-
-// 把含 null（预热期）的指标序列转成折线点，丢掉 null 而不是补 0——补 0 会在图上
-// 画一条假的归零线。与 ChartsPage 的 toLinePoints 同一处理。
-// Turn an indicator series containing nulls (warm-up) into line points, dropping
-// the nulls rather than substituting 0, which would draw a false line down to
-// zero. Same handling as ChartsPage's toLinePoints.
-function toLinePoints(times: UTCTimestamp[], values: (number | null)[]) {
-  const out: { time: UTCTimestamp; value: number }[] = []
-  for (let i = 0; i < values.length; i++) {
-    const v = values[i]
-    if (v != null) out.push({ time: times[i], value: v })
-  }
-  return out
-}
+// fmtChartTime / toLinePoints 与图表页共用一份：utils/chartSeries.ts。
+// fmtChartTime / toLinePoints are shared with the chart page: utils/chartSeries.ts.
 
 interface BacktestChartProps {
   bars: Candle[]
@@ -595,11 +570,6 @@ export default function BacktestPanel({
   // tables make it impossible to tell which one you're reading.
   const tradesDesc = result && !result.insufficientData ? [...result.trades].reverse() : []
   const totalPages = Math.max(1, Math.ceil(tradesDesc.length / TRADE_PAGE_SIZE))
-  const segBtn = (active: boolean) =>
-    `rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-      active ? 'border-prism-500/50 bg-prism-600/20 text-prism-200' : 'border-white/10 bg-white/5 text-neutral-400 hover:text-neutral-100'
-    }`
-
   return (
     <div>
       <h4 className="mb-3 text-sm font-semibold text-neutral-300">{t('strategy.sectionBacktest')}</h4>
@@ -859,27 +829,13 @@ export default function BacktestPanel({
                 </table>
               </div>
               {result.trades.length > TRADE_PAGE_SIZE && (
-                <div className="mt-3 flex items-center justify-between text-xs text-neutral-400">
-                  <span>{t('orders.pageInfo', { page: tradePage + 1, totalPages, total: result.trades.length })}</span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setTradePage((p) => Math.max(0, p - 1))}
-                      disabled={tradePage === 0}
-                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      {t('common.prevPage')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTradePage((p) => Math.min(totalPages - 1, p + 1))}
-                      disabled={tradePage + 1 >= totalPages}
-                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      {t('common.nextPage')}
-                    </button>
-                  </div>
-                </div>
+                <Pager
+                  page={tradePage}
+                  totalPages={totalPages}
+                  total={result.trades.length}
+                  onPrev={() => setTradePage((p) => Math.max(0, p - 1))}
+                  onNext={() => setTradePage((p) => Math.min(totalPages - 1, p + 1))}
+                />
               )}
             </div>
           )}

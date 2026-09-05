@@ -542,8 +542,6 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
     return () => window.removeEventListener('keydown', onKey)
   }, [confirmState])
 
-  if (!visible) return null
-
   // 确认框里用的品种名：去后缀 / symbol name for the confirm dialog, suffix stripped
   const displaySymbol = useMemo(() => {
     if (!confirmState) return ''
@@ -552,6 +550,13 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
   const oldPrice = confirmState
     ? (confirmState.kind === 'sl' ? confirmState.marker.sl : confirmState.marker.tp)
     : null
+
+  // 提前返回必须放在所有 Hook 之后：父组件用 visible 属性切换显示而不是条件挂载，
+  // 若在 useMemo 之前返回，visible 翻转时 Hook 数量会变，React 直接报错。
+  // The early return has to come after every Hook: the parent toggles `visible`
+  // as a prop rather than mounting conditionally, so returning above the useMemo
+  // changes the Hook count between renders and React throws.
+  if (!visible) return null
 
   return (
     <>

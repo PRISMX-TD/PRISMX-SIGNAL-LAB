@@ -51,6 +51,7 @@ import { SkeletonLine } from '../Skeleton'
 import BadgeIcon from '../badges/BadgeIcon'
 import Select from '../Select'
 import Switch from '../Switch'
+import ConfirmModal from '../ConfirmModal'
 import type {
   AdminUser,
   GamificationMe,
@@ -221,8 +222,11 @@ export default function GamificationPanel() {
   // each switch uses its own domain's confirm copy (badges/levels reuses the
   // legacy confirmOpen, the leaderboard uses the new confirmOpenBoard). See
   // the file header for the "up only, never revoked" framing.
-  const toggleUserVisible = async (next: boolean) => {
-    if (next && !window.confirm(t('gamification.admin.confirmOpen'))) return
+  // 翻开哪一个开关正等着确认（站内 ConfirmModal，不再用 window.confirm）。
+  // Which switch is waiting for its open-confirmation.
+  const [pendingOpen, setPendingOpen] = useState<null | 'user' | 'board' | 'comps'>(null)
+
+  const applyUserVisible = async (next: boolean) => {
     setSavingUserVisible(true)
     setSettingsError(null)
     try {
@@ -234,8 +238,7 @@ export default function GamificationPanel() {
     }
   }
 
-  const toggleLeaderboardVisible = async (next: boolean) => {
-    if (next && !window.confirm(t('leaderboard.admin.confirmOpenBoard'))) return
+  const applyLeaderboardVisible = async (next: boolean) => {
     setSavingLeaderboardVisible(true)
     setSettingsError(null)
     try {
@@ -247,8 +250,7 @@ export default function GamificationPanel() {
     }
   }
 
-  const toggleCompetitionsVisible = async (next: boolean) => {
-    if (next && !window.confirm(t('leaderboard.admin.confirmOpenCompetitions'))) return
+  const applyCompetitionsVisible = async (next: boolean) => {
     setSavingCompetitionsVisible(true)
     setSettingsError(null)
     try {
@@ -259,6 +261,12 @@ export default function GamificationPanel() {
       setSavingCompetitionsVisible(false)
     }
   }
+
+  // 翻开 → 先弹确认；翻回关 → 直接生效（与任务书口径一致：不设二次确认）。
+  // Opening asks first; closing applies immediately.
+  const toggleUserVisible = (next: boolean) => (next ? setPendingOpen('user') : void applyUserVisible(false))
+  const toggleLeaderboardVisible = (next: boolean) => (next ? setPendingOpen('board') : void applyLeaderboardVisible(false))
+  const toggleCompetitionsVisible = (next: boolean) => (next ? setPendingOpen('comps') : void applyCompetitionsVisible(false))
 
   // 下限输入框自己的保存按钮，只在数值合法且与当前设置不同时才可点——两个开关
   // 各自单字段 PATCH 已经天然「只送变更字段」，这里的 dirty 判断是同一条铁律
@@ -466,6 +474,33 @@ export default function GamificationPanel() {
               offLabel={t('gamification.admin.visibleOff')}
               onChange={toggleCompetitionsVisible}
             />
+            {pendingOpen && (
+              <ConfirmModal
+                center
+                title={
+                  pendingOpen === 'user'
+                    ? t('gamification.admin.visibility')
+                    : pendingOpen === 'board'
+                      ? t('leaderboard.admin.leaderboardSwitch')
+                      : t('leaderboard.admin.competitionsSwitch')
+                }
+                message={
+                  pendingOpen === 'user'
+                    ? t('gamification.admin.confirmOpen')
+                    : pendingOpen === 'board'
+                      ? t('leaderboard.admin.confirmOpenBoard')
+                      : t('leaderboard.admin.confirmOpenCompetitions')
+                }
+                onCancel={() => setPendingOpen(null)}
+                onConfirm={() => {
+                  const k = pendingOpen
+                  setPendingOpen(null)
+                  if (k === 'user') void applyUserVisible(true)
+                  else if (k === 'board') void applyLeaderboardVisible(true)
+                  else void applyCompetitionsVisible(true)
+                }}
+              />
+            )}
 
             <div className="flex flex-wrap items-end gap-3 border-t border-white/5 pt-3">
               <label className="flex flex-col gap-1 text-xs text-neutral-500">

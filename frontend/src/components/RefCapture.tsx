@@ -15,7 +15,7 @@
 // against an always-204 empty body that request() would try to JSON-parse.
 import { useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
-import { API_BASE, storeRef } from '../api/client'
+import { inviteApi, storeRef } from '../api/client'
 
 const CLICKED_KEY = 'prismx.ref.clicked'
 
@@ -47,11 +47,7 @@ export default function RefCapture() {
       storeRef(code)
       if (sessionStorage.getItem(CLICKED_KEY) === code) return
       sessionStorage.setItem(CLICKED_KEY, code)
-      fetch(`${API_BASE}/api/invite/click`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code }),
-      }).catch(() => {
+      inviteApi.click(code).catch(() => {
         // 打点失败不打扰用户：点击数本就是软指标 / soft metric, fail silently
       })
     } catch {

@@ -2,6 +2,7 @@
 // Strong reveal modal shown right after generating a token: large text +
 // one-click copy; the user must confirm they've saved it before closing.
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 
 interface Props {
@@ -19,9 +20,15 @@ export default function TokenRevealModal({ token, onClose }: Props) {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  return (
+  // portal 到 body：调用点在 .glass 卡片里，backdrop-filter / transform 会劫持
+  // fixed 的包含块。宽度用 sm: 前缀而不是内联 style——内联会覆盖 .slide-sheet 的
+  // 手机端媒体查询，把贴底抽屉挤成一个窄条（ConfirmModal 里记过同一课）。
+  // Portal to body (the caller sits inside a .glass card whose backdrop-filter
+  // hijacks fixed positioning). Width via sm: prefix, never inline style, which
+  // would override .slide-sheet's mobile media query.
+  return createPortal(
     <div className="slide-overlay">
-      <div className="slide-sheet" style={{ width: 420 }}>
+      <div className="slide-sheet sm:w-[420px]">
         <div className="flex flex-col items-center text-center">
           <div className="mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-prism-600/15 text-prism-300">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -46,6 +53,7 @@ export default function TokenRevealModal({ token, onClose }: Props) {
           {t('bind.tokenSavedClose')}
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

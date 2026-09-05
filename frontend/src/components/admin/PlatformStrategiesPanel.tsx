@@ -30,8 +30,10 @@
 // Saving replaces the whole list (PUT /admin/platform-strategies): the admin
 // edits a complete ordered list, so per-item PATCH would only add ordering and
 // deletion merge problems.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import Switch from '../Switch'
+import { useToast } from '../../utils/useToast'
 import { adminApi } from '../../api/client'
 import { localizeApiError } from '../../api/utils'
 import ImageField from './ImageField'
@@ -120,14 +122,7 @@ export default function PlatformStrategiesPanel() {
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
-  const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
-  const toastTimer = useRef<number>(undefined)
-
-  const showToast = (kind: 'ok' | 'err', text: string) => {
-    if (toastTimer.current) window.clearTimeout(toastTimer.current)
-    setToast({ kind, text })
-    toastTimer.current = window.setTimeout(() => setToast(null), 4000)
-  }
+  const { toast, showToast } = useToast()
 
   useEffect(() => {
     adminApi
@@ -273,11 +268,7 @@ export default function PlatformStrategiesPanel() {
               {openId === s.id && (
                 <div className="mt-4 space-y-3 border-t border-white/10 pt-4">
                   <label className="flex items-center gap-2 text-sm text-neutral-300">
-                    <input
-                      type="checkbox"
-                      checked={s.published}
-                      onChange={(e) => patch(s.id, { published: e.target.checked })}
-                    />
+                    <Switch checked={s.published} onChange={(v) => patch(s.id, { published: v })} />
                     {t('admin.strategyGuide.publishedLabel')}
                   </label>
 

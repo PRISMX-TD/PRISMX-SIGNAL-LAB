@@ -65,6 +65,7 @@ import RateChip from './RateChip'
 import SessionTimeline from './SessionTimeline'
 import {
   SESSION_COLORS, fmtClock, fmtDurationHm, rankHours, sessionStatus, zoneOffsetMinutes,
+  sessionsForUtcHour,
 } from './shared'
 import { useWinratePick } from './useWinratePick'
 
@@ -95,14 +96,6 @@ function pickSession(sessions: SessionWindow[], now: Date): { key: string; minut
   withStart.sort((a, b) => b.localStart - a.localStart)
   const top = withStart[0]
   return { key: top.s.key, minutesLeft: top.st.state === 'active' ? top.st.minutesToEnd : undefined }
-}
-
-function sessionsForUtcHour(hour: number, sessions: SessionWindow[], now: Date): string[] {
-  const hit = sessions.filter((s) => {
-    const local = ((((hour * 60 + zoneOffsetMinutes(s.tz, now)) % 1440) + 1440) % 1440) / 60
-    return s.startHour <= local && local < s.endHour
-  })
-  return hit.length > 0 ? hit.map((s) => s.key) : ['outside']
 }
 
 const SessionWinrateCard: FC = () => {

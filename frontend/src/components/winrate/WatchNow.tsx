@@ -71,29 +71,17 @@
 // Neither trade counts nor worded verdict chips appear: the colour of the
 // percentage is the verdict — green from 51%, amber 40-50%, red below 40%.
 import { useTranslation } from 'react-i18next'
-import type { AdminStrategyWinRate, SessionWindow, SymbolWinRate } from '../../api/types'
+import type { AdminStrategyWinRate, SymbolWinRate } from '../../api/types'
 import RateChip from './RateChip'
 import Select from '../Select'
 import SessionTimeline from './SessionTimeline'
 import {
-  SESSION_COLORS, fmtClock, fmtDurationHm, rankHours, sessionStatus, zoneOffsetMinutes,
+  SESSION_COLORS, fmtClock, fmtDurationHm, rankHours, sessionStatus,
+  sessionsForUtcHour,
 } from './shared'
 import { useWinratePick } from './useWinratePick'
 
 const TOP_WATCH = 3
-
-/** 某个 UTC 钟点落在哪些时段内。与后端 session_keys_for 同一条判断（时段按该金融
- *  中心的本地钟点定义），只是这里一次判一个钟点而不是一条信号。
- *  Which sessions a given UTC hour falls in — the same rule as the backend's
- *  session_keys_for (a session is a range on its centre's own clock), applied to
- *  an hour rather than a signal. */
-function sessionsForUtcHour(hour: number, sessions: SessionWindow[], now: Date): string[] {
-  const hit = sessions.filter((s) => {
-    const local = ((((hour * 60 + zoneOffsetMinutes(s.tz, now)) % 1440) + 1440) % 1440) / 60
-    return s.startHour <= local && local < s.endHour
-  })
-  return hit.length > 0 ? hit.map((s) => s.key) : ['outside']
-}
 
 /** 选中的那一路在这个盘里胜率最高的几个钟点。
  *

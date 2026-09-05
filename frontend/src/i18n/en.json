@@ -791,8 +791,9 @@
     "actions": "Actions",
     "deleteAccount": "Delete account",
     "deleteNeedOffline": "Disconnect the bridge (account offline) before deleting",
-    "deleteSettledConfirm": "Delete the settled competition \"{{name}}\"? This removes {{n}} entries, their baselines and board snapshots, and cannot be undone. Note: **badges already awarded are not revoked** (the badge table has no record of which competition awarded them, so they cannot be revoked selectively); clear them separately for a full reset.",
     "deleteConfirm": "Remove account {{login}} from your list? It will reappear if the bridge reports it again.",
+    "backToBind": "← Back to MT5 connection",
+    "bridgeTitle": "Bridge connection",
     "tokenTitle": "Your API Token",
     "tokenHint": "This token is like a password. Keep it safe. Paste it into the PRISMX Bridge app to connect.",
     "tokenHidden": "For security the token is stored encrypted and shown only once at generation. Click \"Reset Token\" to generate and view a new one (the old token stops working).",
@@ -1182,6 +1183,7 @@
     "totalCount": "{{n}} users total",
     "noUsers": "No users found",
     "loadError": "Failed to load",
+    "loadPartialError": "{{n}} of {{total}} sections failed to load; the rest are shown as usual",
     "saved": "Saved",
     "saveError": "Failed to save",
     "notePlaceholder": "Internal note (not shown to the user)",
@@ -2066,8 +2068,7 @@
       "disqualifyReason": "Disqualification reason",
       "settle": "Settle",
       "settleConfirm": "Settlement is permanent — final ranks lock in and prizes are awarded automatically. Confirm?",
-      "refresh": "Refresh now", "refreshed": "Board recomputed", "refreshSkipped": "Only a running competition can be refreshed", "settleForce": "Force settle", "settleForceStatusConfirm": "This competition hasn't ended. Force-settling locks ranks from current data and awards badges immediately, ending the competition. For testing only - continue?",
- "settleForceConfirm": "The 24h grace period has not passed. Settling now locks ranks and awards badges immediately; positions still open at the end, or closed afterwards, will not be counted. Settle anyway?",
+      "refresh": "Refresh now", "refreshed": "Board recomputed", "refreshSkipped": "Only a running competition can be refreshed",
       "settleWait": "Settlement opens 24 h after the end time (late closes are still arriving)"
     }
   }

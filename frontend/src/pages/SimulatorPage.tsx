@@ -19,6 +19,8 @@
 // needs no changes.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import Pager from '../components/Pager'
+import { segBtn } from '../utils/segBtn'
 import { simulateApi } from '../api/client'
 import { displaySymbol, fmtTime, localizeApiError } from '../api/utils'
 import { SkeletonLine } from '../components/Skeleton'
@@ -172,13 +174,6 @@ export default function SimulatorPage() {
   const totalPages = Math.max(1, Math.ceil(trades.length / PAGE_SIZE))
   const safePage = Math.min(page, totalPages - 1)
   const pageTrades = trades.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE)
-
-  const segBtn = (active: boolean) =>
-    `rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-      active
-        ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'
-        : 'border-white/10 bg-white/5 text-neutral-400 hover:text-neutral-100'
-    }`
 
   return (
     <div>
@@ -355,25 +350,13 @@ export default function SimulatorPage() {
             </div>
 
             {totalPages > 1 && (
-              <div className="mt-3 flex items-center justify-between text-xs text-neutral-400">
-                <span>{t('orders.pageInfo', { page: safePage + 1, totalPages, total: trades.length })}</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setPage((p) => Math.max(0, p - 1))}
-                    disabled={safePage === 0}
-                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {t('common.prevPage')}
-                  </button>
-                  <button
-                    onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                    disabled={safePage + 1 >= totalPages}
-                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {t('common.nextPage')}
-                  </button>
-                </div>
-              </div>
+              <Pager
+                page={safePage}
+                totalPages={totalPages}
+                total={trades.length}
+                onPrev={() => setPage((p) => Math.max(0, p - 1))}
+                onNext={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              />
             )}
           </section>
         </>

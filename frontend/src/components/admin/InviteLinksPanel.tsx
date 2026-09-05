@@ -8,8 +8,9 @@
 // registration (renames don't backfill); counts group by the hidden
 // attribution code. Links are built from ORIGIN, not window.location.origin —
 // copied URLs must stay canonical even when the admin works on a preview host.
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useToast } from '../../utils/useToast'
 import { adminApi } from '../../api/client'
 import { fmtTime, localizeApiError } from '../../api/utils'
 import { SkeletonLine } from '../Skeleton'
@@ -22,8 +23,6 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
   const { t } = useTranslation()
   const [links, setLinks] = useState<InviteLink[]>([])
   const [loading, setLoading] = useState(true)
-  const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
-  const toastTimer = useRef<number>(undefined)
   const [newLabel, setNewLabel] = useState('')
   // 'create' 或正在保存的链接 id；同一时刻只放行一个写操作，避免连点。
   // 'create' or the id being saved; one in-flight write at a time.
@@ -31,18 +30,7 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
   const [labelDrafts, setLabelDrafts] = useState<Record<string, string>>({})
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
-  // 先清掉上一个定时器再设新 toast，4 秒后自动消失——照 PlatformStrategiesPanel
-  // 的写法。没有这一步，一条过期的失败提示会赖着不走：管理员重试并成功后，
-  // 屏幕上还挂着"失败"的红条，误导人以为操作仍未成功。
-  // Clear any pending timer before setting a new toast, auto-dismiss after 4s —
-  // following PlatformStrategiesPanel's pattern. Without this, a stale failure
-  // banner lingers: after a retry succeeds, the red "failed" toast is still on
-  // screen, wrongly implying the operation is still broken.
-  const showToast = (kind: 'ok' | 'err', text: string) => {
-    if (toastTimer.current) window.clearTimeout(toastTimer.current)
-    setToast({ kind, text })
-    toastTimer.current = window.setTimeout(() => setToast(null), 4000)
-  }
+  const { toast, showToast } = useToast()
 
   const showErr = (err: unknown, fallbackKey: string) =>
     showToast('err', err instanceof Error ? localizeApiError(err.message) : t(fallbackKey))

@@ -10,6 +10,7 @@
 // as a table/card list + pagination.
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import Pager from './Pager'
 import { displaySymbol, fmtTime } from '../api/utils'
 import type { ClosedTrade } from '../api/types'
 
@@ -106,25 +107,13 @@ export default function ClosedTradesList({ trades }: Props) {
 
           {/* 分页：每页 10 笔，其余翻页 / pagination: 10 per page */}
           {totalPages > 1 && (
-            <div className="mt-3 flex items-center justify-between text-xs text-neutral-400">
-              <span>{t('orders.pageInfo', { page: safePage + 1, totalPages, total: trades.length })}</span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  disabled={safePage === 0}
-                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {t('common.prevPage')}
-                </button>
-                <button
-                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                  disabled={safePage + 1 >= totalPages}
-                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {t('common.nextPage')}
-                </button>
-              </div>
-            </div>
+            <Pager
+              page={safePage}
+              totalPages={totalPages}
+              total={trades.length}
+              onPrev={() => setPage((p) => Math.max(0, p - 1))}
+              onNext={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            />
           )}
         </>
       )}

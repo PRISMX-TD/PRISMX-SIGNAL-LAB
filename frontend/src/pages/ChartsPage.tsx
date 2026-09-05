@@ -14,6 +14,7 @@
 // at the repo root.
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
+import { fmtChartTime, toLinePoints } from '../utils/chartSeries'
 import {
   createChart,
   ColorType,
@@ -429,19 +430,8 @@ function toLwPoint(b: Candle) {
   return { time: b.t as UTCTimestamp, open: b.o, high: b.h, low: b.l, close: b.c }
 }
 
-// 把一条可能含 null（预热期）的指标序列转成 lightweight-charts 的折线数据点，
-// 丢掉 null 位置（而不是传 0，那样会在图上画出一条假的归零线）。
-// Convert an indicator series that may contain null (warm-up) entries into
-// lightweight-charts line-series points, dropping the null positions (rather
-// than sending 0, which would draw a false line down to zero).
-function toLinePoints(times: UTCTimestamp[], values: (number | null)[]): { time: UTCTimestamp; value: number }[] {
-  const out: { time: UTCTimestamp; value: number }[] = []
-  for (let i = 0; i < values.length; i++) {
-    const v = values[i]
-    if (v != null) out.push({ time: times[i], value: v })
-  }
-  return out
-}
+// toLinePoints / fmtChartTime 与回测面板共用：utils/chartSeries.ts。
+// toLinePoints / fmtChartTime are shared with the backtest panel: utils/chartSeries.ts.
 
 // MACD 柱状图：同上但带正负配色 / MACD histogram: same, but colored by sign
 function toHistPoints(
@@ -496,27 +486,11 @@ function computeDayStats(bars: { t: number; o: number; h: number; l: number; c: 
   return { high, low, changePct }
 }
 
-// 时间轴刻度和十字准线悬浮时间标签是 lightweight-charts 两套独立的格式化配置
-// （timeScale.tickMarkFormatter 只管坐标轴刻度；localization.timeFormatter 才
-// 管鼠标悬停时显示的精确时间）。之前只设了前者，鼠标悬停显示的还是浏览器本地
-// 时区，跟坐标轴上标的 UTC+8 对不上——这正是"图表时间还是不对"的真正原因。
-// 两处统一用同一个格式化函数，确保悬停时间与坐标轴时间口径一致。
-// Tick-mark labels and the crosshair's hover time readout are two separate
-// lightweight-charts formatting hooks (timeScale.tickMarkFormatter only
-// controls the axis ticks; localization.timeFormatter controls the precise
-// time shown while hovering). Only the former was set, so hovering still
-// showed the browser's local timezone while the axis said UTC+8 — this
-// mismatch was the actual "chart time is still wrong" bug. Both now share one
-// formatter so the hover time and the axis time always agree.
-function fmtChartTime(time: UTCTimestamp): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Shanghai',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(time * 1000))
-}
+// 时间轴刻度（timeScale.tickMarkFormatter）与十字准线悬停（localization.timeFormatter）
+// 必须用同一个格式化函数，否则悬停显示浏览器本地时区、轴上是 UTC+8——那正是当年
+// "图表时间还是不对"的根因。函数本体在 utils/chartSeries.ts。
+// Axis ticks and crosshair hover must share one formatter or they disagree on
+// timezone (the original "chart time is still wrong" bug). See utils/chartSeries.ts.
 
 export default function ChartsPage() {
   const { t } = useTranslation()
@@ -1963,7 +1937,6 @@ export default function ChartsPage() {
             lastPrice={lastPrice}
             barTimes={getBarTimes}
             digits={decimals}
-            hideToolbar
           />
         )}
         {!hasData && (

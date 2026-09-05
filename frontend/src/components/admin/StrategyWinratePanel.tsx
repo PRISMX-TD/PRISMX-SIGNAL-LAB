@@ -31,6 +31,7 @@
 // and a person has to make it once, deliberately.
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import Switch from '../Switch'
 import { adminApi } from '../../api/client'
 import { SkeletonLine } from '../Skeleton'
 import type { AdminWinrateSettings, AdminWinrateStrategy } from '../../api/types'
@@ -162,13 +163,7 @@ export default function StrategyWinratePanel() {
                         "unnamed strategy" for users and means nothing. The backend
                         rejects it too. */}
                     <label className={`flex items-center gap-2 text-xs ${row.strategy ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'}`}>
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-                        checked={on}
-                        disabled={!row.strategy}
-                        onChange={() => toggle(row.strategy)}
-                      />
+                      <Switch checked={on} disabled={!row.strategy} onChange={() => toggle(row.strategy)} />
                       <span className={on ? 'text-prism-200' : 'text-neutral-500'}>
                         {t('admin.winratePublish.publicLabel')}
                       </span>

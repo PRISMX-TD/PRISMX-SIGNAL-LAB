@@ -115,10 +115,10 @@ export default function BridgePage() {
     <div>
       <div className="mb-6">
         <Link to="/bind" className="text-xs text-neutral-400 transition hover:text-prism-300">
-          ← 返回 MT5 连接
+          {t('bind.backToBind')}
         </Link>
         <h2 className="mt-2 font-display text-2xl font-bold text-neutral-100">
-          <span className="neon-text">桥接程序连接</span>
+          <span className="neon-text">{t('bind.bridgeTitle')}</span>
         </h2>
         <p className="mt-1 text-sm text-neutral-400">{t('bind.subtitle')}</p>
       </div>

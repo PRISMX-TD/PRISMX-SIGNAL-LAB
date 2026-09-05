@@ -22,6 +22,7 @@
 // that ambiguous pair simply can't be selected, rather than being selectable
 // and then silently doing nothing.
 import { useTranslation } from 'react-i18next'
+import { segBtn } from '../../utils/segBtn'
 import Select from '../Select'
 import type { StrategySessionFilter } from '../../api/types'
 
@@ -60,13 +61,6 @@ export default function SessionFilterField({ value, onChange }: SessionFilterFie
   const hours = wraps ? 24 - start + end : end - start
 
   const setOn = (next: boolean) => onChange(next ? DEFAULT_FILTER : null)
-
-  const segBtn = (active: boolean) =>
-    `rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-      active
-        ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'
-        : 'border-white/10 bg-white/5 text-neutral-400 hover:text-neutral-100'
-    }`
 
   return (
     <div className="flex flex-col gap-1.5">

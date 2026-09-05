@@ -13,6 +13,7 @@
 // RGB picker (unnecessary complexity for most users).
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { NumberField } from '../strategies/NumberField'
 import type { IndicatorFlags } from '../../pages/ChartsPage'
 import {
   COLOR_PRESETS,
@@ -34,79 +35,9 @@ interface Props {
   onClose: () => void
 }
 
-// 数字输入框：内部维护一份独立于父级的文本缓冲区，输入过程中任意打字/清空
-// 都不会被父级的受控 value 弹回去；只有失焦（或按回车）那一刻才解析、夹紧到
-// [min,max] 并真正回传给父级。
-// 之前的实现是"每敲一下键就解析+夹紧+立刻回传"：清空到空字符串时
-// parseInt("")=NaN，直接跳过不回传，但输入框仍然受控绑定着父级那个没变的
-// 旧值，于是 React 下一帧就把它弹回原样——表现为"删不空、卡住"。更隐蔽的是
-// 那些下限是两位数的字段（如 RSI 超买 min=50）：哪怕清空成功，敲第一位数字
-// (比如从 70 改成 55，敲了个 "5") parseInt("5")=5 会被 Math.max(50,5) 立刻
-// 夹成 50 并回传，父级 value 一变，下一帧又把输入框强制刷成 "50"，用户还没
-// 来得及敲第二个 "5"，第一个数字就已经被吞掉——这正是"剩个位数直接卡住"的
-// 根因。现在把夹紧这一步推迟到失焦时才做，输入过程中完全不介入。
-// Number input: keeps its own text buffer independent of the parent's
-// controlled value, so typing or clearing mid-edit is never bounced back;
-// only on blur (or Enter) does it parse, clamp to [min,max], and actually
-// propagate to the parent.
-// The previous implementation parsed + clamped + propagated on every
-// keystroke: clearing to an empty string made parseInt("") = NaN, which was
-// skipped (not propagated) — but the input was still bound to the parent's
-// unchanged old value, so React snapped it back next frame, reading as
-// "won't clear, stuck". More subtly, for fields whose minimum is two digits
-// (e.g. RSI overbought, min=50): even after successfully clearing, typing the
-// first digit (say going from 70 to 55, typing "5") had parseInt("5")=5
-// immediately clamped by Math.max(50,5) to 50 and propagated — the parent's
-// value changed, so next frame the input was force-refreshed to "50" before
-// the user could type the second "5", swallowing the first digit. That's the
-// exact "stuck on a single digit" bug. Clamping is now deferred to blur;
-// nothing interferes while the user is still typing.
-function NumberField({
-  label,
-  value,
-  onChange,
-  min = 1,
-  max = 500,
-}: {
-  label: string
-  value: number
-  onChange: (v: number) => void
-  min?: number
-  max?: number
-}) {
-  const [text, setText] = useState(String(value))
-  // 父级 value 变化时（比如"恢复默认"按钮）同步本地缓冲区；用户自己打字导致
-  // 的变化不会触发这里，因为那时 value 还没变（要等失焦才回传）。
-  // Sync the local buffer when the parent's value changes (e.g. the "reset
-  // to defaults" button); the user's own typing never triggers this, because
-  // value hasn't changed yet at that point (it only updates on blur).
-  useEffect(() => {
-    setText(String(value))
-  }, [value])
-
-  const commit = () => {
-    const n = parseInt(text, 10)
-    const clamped = Number.isNaN(n) ? value : Math.min(max, Math.max(min, n))
-    setText(String(clamped))
-    if (clamped !== value) onChange(clamped)
-  }
-
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-[10px] uppercase tracking-wide text-neutral-500">{label}</span>
-      <input
-        type="number"
-        className="input w-16 px-1.5 py-1 text-center text-xs"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-        }}
-      />
-    </label>
-  )
-}
+// 数字框与策略编辑器共用 strategies/NumberField（失焦才夹紧的实现原本在这里，
+// 已上收）。/ Number inputs share strategies/NumberField (the blur-only clamping
+// originated here and was hoisted).
 
 // 颜色选择：一个圆形色块按钮，点开一个装着预设色板的小弹层，点色板里的颜色
 // 即选中并关闭——不出现系统原生的 RGB 取色器。
@@ -186,6 +117,7 @@ function LineList({ cfg, onChange }: { cfg: LinesConfig; onChange: (next: LinesC
       {cfg.periods.map((period, i) => (
         <div key={i} className="flex items-end gap-2">
           <NumberField
+            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
             label={`${t('charts.indicators.period')} ${i + 1}`}
             value={period}
             onChange={(v) => {
@@ -295,11 +227,13 @@ export default function IndicatorSettingsModal({ indicators, onToggle, settings,
           <Card checked={indicators.boll} onToggle={() => onToggle('boll')} title={t('charts.indicators.boll')}>
             <div className="flex flex-wrap items-end gap-3">
               <NumberField
+            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
                 label={t('charts.indicators.period')}
                 value={settings.boll.period}
                 onChange={(v) => onChange({ ...settings, boll: { ...settings.boll, period: v } })}
               />
               <NumberField
+            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
                 label={t('charts.indicators.multiplier')}
                 value={settings.boll.mult}
                 min={1}
@@ -332,11 +266,13 @@ export default function IndicatorSettingsModal({ indicators, onToggle, settings,
           <Card checked={indicators.rsi} onToggle={() => onToggle('rsi')} title={t('charts.indicators.rsi')}>
             <div className="flex flex-wrap items-end gap-3">
               <NumberField
+            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
                 label={t('charts.indicators.period')}
                 value={settings.rsi.period}
                 onChange={(v) => onChange({ ...settings, rsi: { ...settings.rsi, period: v } })}
               />
               <NumberField
+            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
                 label={t('charts.indicators.overbought')}
                 value={settings.rsi.overbought}
                 min={50}
@@ -344,6 +280,7 @@ export default function IndicatorSettingsModal({ indicators, onToggle, settings,
                 onChange={(v) => onChange({ ...settings, rsi: { ...settings.rsi, overbought: v } })}
               />
               <NumberField
+            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
                 label={t('charts.indicators.oversold')}
                 value={settings.rsi.oversold}
                 min={1}
@@ -361,16 +298,19 @@ export default function IndicatorSettingsModal({ indicators, onToggle, settings,
           <Card checked={indicators.macd} onToggle={() => onToggle('macd')} title={t('charts.indicators.macd')}>
             <div className="flex flex-wrap items-end gap-3">
               <NumberField
+            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
                 label={t('charts.indicators.fast')}
                 value={settings.macd.fast}
                 onChange={(v) => onChange({ ...settings, macd: { ...settings.macd, fast: v } })}
               />
               <NumberField
+            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
                 label={t('charts.indicators.slow')}
                 value={settings.macd.slow}
                 onChange={(v) => onChange({ ...settings, macd: { ...settings.macd, slow: v } })}
               />
               <NumberField
+            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
                 label={t('charts.indicators.signal')}
                 value={settings.macd.signal}
                 onChange={(v) => onChange({ ...settings, macd: { ...settings.macd, signal: v } })}

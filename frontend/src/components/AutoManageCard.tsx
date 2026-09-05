@@ -21,6 +21,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import Switch from './Switch'
 import { automationApi } from '../api/client'
 import { localizeApiError } from '../api/utils'
 import type { AutoManageSettings } from '../api/types'
@@ -76,12 +77,7 @@ export default function AutoManageCard({ isPro }: { isPro: boolean }) {
       ) : (
         <div className="mt-4 space-y-4">
           <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-100">
-            <input
-              type="checkbox"
-              checked={autoCfg.enabled}
-              onChange={(e) => setAutoCfg({ ...autoCfg, enabled: e.target.checked })}
-              className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-            />
+            <Switch checked={autoCfg.enabled} onChange={(v) => setAutoCfg({ ...autoCfg, enabled: v })} />
             {t('account.autoEnable')}
           </label>
 
@@ -90,12 +86,7 @@ export default function AutoManageCard({ isPro }: { isPro: boolean }) {
               {/* 保本 / break-even */}
               <div className="flex flex-wrap items-center gap-3">
                 <label className="flex w-40 cursor-pointer items-center gap-2 text-sm text-neutral-200">
-                  <input
-                    type="checkbox"
-                    checked={autoCfg.beEnabled}
-                    onChange={(e) => setAutoCfg({ ...autoCfg, beEnabled: e.target.checked })}
-                    className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-                  />
+                  <Switch checked={autoCfg.beEnabled} onChange={(v) => setAutoCfg({ ...autoCfg, beEnabled: v })} />
                   {t('account.autoBe')}
                 </label>
                 <span className="text-xs text-neutral-500">{t('account.autoTriggerAt')}</span>
@@ -111,12 +102,7 @@ export default function AutoManageCard({ isPro }: { isPro: boolean }) {
               {/* 追踪止损 / trailing stop */}
               <div className="flex flex-wrap items-center gap-3">
                 <label className="flex w-40 cursor-pointer items-center gap-2 text-sm text-neutral-200">
-                  <input
-                    type="checkbox"
-                    checked={autoCfg.trailEnabled}
-                    onChange={(e) => setAutoCfg({ ...autoCfg, trailEnabled: e.target.checked })}
-                    className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-                  />
+                  <Switch checked={autoCfg.trailEnabled} onChange={(v) => setAutoCfg({ ...autoCfg, trailEnabled: v })} />
                   {t('account.autoTrail')}
                 </label>
                 <span className="text-xs text-neutral-500">{t('account.autoTriggerAt')}</span>
@@ -139,12 +125,7 @@ export default function AutoManageCard({ isPro }: { isPro: boolean }) {
               {/* 分批止盈 / partial take-profit */}
               <div className="flex flex-wrap items-center gap-3">
                 <label className="flex w-40 cursor-pointer items-center gap-2 text-sm text-neutral-200">
-                  <input
-                    type="checkbox"
-                    checked={autoCfg.ptpEnabled}
-                    onChange={(e) => setAutoCfg({ ...autoCfg, ptpEnabled: e.target.checked })}
-                    className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-                  />
+                  <Switch checked={autoCfg.ptpEnabled} onChange={(v) => setAutoCfg({ ...autoCfg, ptpEnabled: v })} />
                   {t('account.autoPtp')}
                 </label>
                 <span className="text-xs text-neutral-500">{t('account.autoTriggerAt')}</span>

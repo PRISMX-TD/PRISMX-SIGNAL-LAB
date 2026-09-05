@@ -41,31 +41,44 @@
         min-height: 100vh;
         min-height: 100svh;
       }
+      /* 与站内设计令牌对齐（tailwind.config.js「颜料，不是光」）：实色面、
+         1px 发丝线、四档圆角（8 / 14 / 24）、九档字号（12 / 13 / 15 / 20），
+         不再有霓虹光晕。这页没有构建产物可引，所以数值手抄。
+         Aligned with the site's design tokens ("paint, not light"): solid
+         surfaces, 1px hairlines, the 8/14/24 radius scale, the 12/13/15/20 type
+         scale, no neon glow. Values are copied by hand — this page can't import
+         build output. */
       .box { max-width: 380px; text-align: center; }
-      .glow {
-        width: 64px; height: 64px; margin: 0 auto 22px;
+      .mark {
+        width: 56px; height: 56px; margin: 0 auto 24px;
         border-radius: 50%;
-        background: radial-gradient(circle, rgba(139, 92, 246, 0.55) 0%, rgba(139, 92, 246, 0) 70%);
+        background: #1b1b21;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        position: relative;
       }
-      h1 { margin: 0 0 10px; font-size: 19px; font-weight: 700; letter-spacing: 0.01em; }
-      p { margin: 0 0 6px; font-size: 13.5px; line-height: 1.65; color: #b8b4ca; }
-      p.en { color: #7b7598; font-size: 12.5px; }
+      .mark::after {
+        content: ""; position: absolute; inset: 18px;
+        border-radius: 50%; background: #5a22ee;
+      }
+      h1 { margin: 0 0 12px; font-size: 20px; font-weight: 700; letter-spacing: 0.01em; color: #EDEDF0; }
+      p { margin: 0 0 8px; font-size: 15px; line-height: 1.6; color: #B4B4BC; }
+      p.en { color: #9C9CA6; font-size: 13px; }
       button {
-        margin-top: 22px; padding: 10px 22px;
-        border: 1px solid rgba(139, 92, 246, 0.45);
-        border-radius: 10px;
-        background: rgba(139, 92, 246, 0.16);
-        color: #ddd6fe;
-        font-size: 13.5px; font-weight: 600;
+        margin-top: 24px; padding: 10px 24px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        background: #5a22ee;
+        color: #EDEDF0;
+        font-size: 13px; font-weight: 500;
         font-family: inherit;
         cursor: pointer;
       }
-      button:active { background: rgba(139, 92, 246, 0.28); }
+      button:active { background: #4a1bc4; }
     </style>
   </head>
   <body>
     <div class="box">
-      <div class="glow"></div>
+      <div class="mark"></div>
       <h1>当前处于离线状态</h1>
       <p>网络连接断开了，暂时无法加载 Signal Lab。恢复网络后点下面的按钮重试。</p>
       <p class="en">You're offline. Reconnect and try again.</p>

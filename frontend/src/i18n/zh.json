@@ -791,8 +791,9 @@
     "actions": "操作",
     "deleteAccount": "删除账号",
     "deleteNeedOffline": "请先断开桥接程序（账号离线）后再删除",
-    "deleteSettledConfirm": "删除已终审的比赛「{{name}}」？将清除 {{n}} 条参赛记录、基线与榜单快照，且不可恢复。注意：**已发出的勋章不会收回**（勋章表没有记录是哪场比赛发的，无法选择性撤销），需要彻底复原请另行清理。",
     "deleteConfirm": "确定从列表中移除账号 {{login}} 吗？若桥接程序之后再次上报该账号，它会重新出现。",
+    "backToBind": "← 返回 MT5 连接",
+    "bridgeTitle": "桥接程序连接",
     "tokenTitle": "你的 API Token",
     "tokenHint": "此 Token 等同密码，请妥善保管。复制后粘贴到 PRISMX 桥接程序中以建立连接。",
     "tokenHidden": "出于安全，Token 已加密保存，仅在生成时显示一次。点击「重置 Token」生成并查看新 Token（旧 Token 将失效）。",
@@ -1182,6 +1183,7 @@
     "totalCount": "共 {{n}} 位用户",
     "noUsers": "没有找到用户",
     "loadError": "加载失败",
+    "loadPartialError": "{{total}} 项数据里有 {{n}} 项没加载出来，其余照常显示",
     "saved": "已保存",
     "saveError": "保存失败",
     "notePlaceholder": "内部备注（用户不可见）",
@@ -2063,8 +2065,7 @@
       "disqualifyReason": "取消资格原因",
       "settle": "终审",
       "settleConfirm": "终审后名次永久定格并自动发奖，确认？",
-      "refresh": "立即刷新", "refreshed": "榜单已重算", "refreshSkipped": "仅进行中的比赛可刷新", "settleForce": "强制终审", "settleForceStatusConfirm": "这场比赛尚未结束。强制终审会按当前数据立即定格名次并发出勋章，之后比赛即告终局。仅供测试使用，确认继续？",
- "settleForceConfirm": "尚未过 24 小时宽限期。此刻终审会立即定格名次并发出勋章，结束时仍持仓、之后才平的单不会计入。确认立即终审？",
+      "refresh": "立即刷新", "refreshed": "榜单已重算", "refreshSkipped": "仅进行中的比赛可刷新",
       "settleWait": "结束后 24 小时内不可终审（等待迟到平仓入账）"
     }
   }

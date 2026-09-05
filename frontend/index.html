@@ -49,8 +49,16 @@
       t.src=v;s=b.getElementsByTagName(e)[0];
       s.parentNode.insertBefore(t,s)}(window, document,'script',
       'https://connect.facebook.net/en_US/fbevents.js');
-      fbq('init', '1386130166986351');
-      fbq('track', 'PageView');
+      // 只在正式域名上初始化：本地开发和预览域名不往 Meta 报 PageView，
+      // 免得投放数据里混进开发者自己的访问。src/components/MetaPixel.tsx 里的
+      // 路由补发已经按 fbq 是否存在判断，这里不初始化它就自然不发。
+      // Initialise only on the production hostname: local dev and preview
+      // deployments must not report PageViews to Meta. MetaPixel.tsx already
+      // checks for fbq before firing, so leaving it uninitialised is enough.
+      if (/(^|\.)prismxsignallab\.com$/.test(location.hostname)) {
+        fbq('init', '1386130166986351');
+        fbq('track', 'PageView');
+      }
     </script>
     <!-- End Meta Pixel Code -->
     <!-- 配套的 noscript 兜底像素放在 body 开头，不在这里——HTML 规范规定

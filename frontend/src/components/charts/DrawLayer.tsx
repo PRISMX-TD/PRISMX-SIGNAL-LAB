@@ -43,48 +43,13 @@ export interface DrawLayerHandle {
   redo: () => void
 }
 
-// ──── 工具分组定义 / tool group definitions ────
-interface ToolGroup {
-  key: string
-  tools: { id: Tool; svg: JSX.Element }[]
-}
-
-const TOOL_GROUPS: ToolGroup[] = [
-  {
-    key: 'cursors',
-    tools: [
-      { id: 'cursor', svg: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 3l7 17 2.5-6.5L20 11 4 3z" /></svg> },
-      { id: 'cross', svg: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><line x1="12" y1="3" x2="12" y2="21" /><line x1="3" y1="12" x2="21" y2="12" /></svg> },
-    ],
-  },
-  {
-    key: 'lines',
-    tools: [
-      { id: 'trend', svg: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20L20 4" /><circle cx="4" cy="20" r="2" /><circle cx="20" cy="4" r="2" /></svg> },
-      { id: 'hline', svg: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h18" /><circle cx="12" cy="12" r="2" /></svg> },
-      { id: 'vline', svg: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18" /><circle cx="12" cy="12" r="2" /></svg> },
-      { id: 'ray', svg: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="18" x2="18" y2="6" /><line x1="18" y1="6" x2="22" y2="2" /><circle cx="6" cy="18" r="2" /></svg> },
-      { id: 'crossline', svg: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h18" /><path d="M12 3v18" /><circle cx="12" cy="12" r="2" /></svg> },
-    ],
-  },
-  {
-    key: 'fib',
-    tools: [
-      { id: 'fib', svg: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5h18M3 10h18M3 14h18M3 19h18" /><path d="M4 19L20 5" opacity="0.5" /></svg> },
-    ],
-  },
-  {
-    key: 'shapes',
-    tools: [
-      { id: 'rect', svg: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="6" width="16" height="12" rx="1" /></svg> },
-    ],
-  },
-]
+// 工具分组与竖排工具栏已随 hideToolbar 一起删除；工具由图表页的工具栏经 ref 切换。
+// Tool groups / the vertical toolbar were removed with hideToolbar; the page's own toolbar drives tools via the ref.
 
 // ──── 常量 / constants ────
 interface Point { t: number; p: number }
 interface Drawing { id: string; type: DrawType; pts: Point[]; color: string; locked?: boolean; lineWidth?: number; lineStyle?: 'solid' | 'dashed' | 'dotted' }
-interface Props { chart: IChartApi; series: ISeriesApi<'Candlestick'>; host: HTMLDivElement; symbol: string; lastPrice: number; barTimes: () => number[]; digits?: number; hideToolbar?: boolean }
+interface Props { chart: IChartApi; series: ISeriesApi<'Candlestick'>; host: HTMLDivElement; symbol: string; lastPrice: number; barTimes: () => number[]; digits?: number }
 
 const TOL_DESKTOP = 12
 const TOL_MOBILE = 24
@@ -122,7 +87,12 @@ function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, b
 // 模块级 bar 时间访问器，由 DrawLayer 组件挂上；primitive 渲染时读取。
 // Module-level bar-times accessor, set by the DrawLayer component; read by the
 // primitive during rendering.
-let _barTimesGetter: () => number[] = () => []
+// 每个图表实例各自的 bar 时间访问器。以前是一个模块级变量，同一页面若有两个图表
+// 会互相覆盖；按 chart 对象存进 WeakMap，实例之间互不干扰，图表销毁后自动回收。
+// Per-chart accessor for bar times. Used to be one module-level variable, which
+// two charts on the same page would overwrite; keyed by the chart object instead.
+const barTimesByChart = new WeakMap<IChartApi, () => number[]>()
+const barTimesOf = (chart: IChartApi): number[] => barTimesByChart.get(chart)?.() ?? []
 
 function barInterval(bt: number[]): number {
   const n = bt.length
@@ -164,7 +134,7 @@ function timeToX(chart: IChartApi, t: number): number | null {
   const ts = chart.timeScale()
   const c = ts.timeToCoordinate(t as UTCTimestamp) as number | null
   if (c != null) return c
-  const lg = timeToLogical(_barTimesGetter(), t)
+  const lg = timeToLogical(barTimesOf(chart), t)
   if (lg == null) return null
   return ts.logicalToCoordinate(lg as Logical) as number | null
 }
@@ -176,7 +146,7 @@ function xToTime(chart: IChartApi, x: number): number | null {
   if (t != null) return t
   const lg = ts.coordinateToLogical(x) as number | null
   if (lg == null) return null
-  return logicalToTime(_barTimesGetter(), lg)
+  return logicalToTime(barTimesOf(chart), lg)
 }
 
 // ──── ISeriesPrimitive 画线基类 / drawing primitive base ────
@@ -470,14 +440,14 @@ class RendererImpl implements IPrimitivePaneRenderer {
 }
 
 // ──── 组件 / component ────
-function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, hideToolbar }: Props, ref: React.Ref<DrawLayerHandle>) {
+function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2 }: Props, ref: React.Ref<DrawLayerHandle>) {
   const { t } = useTranslation()
   const { getPref, setPref } = usePrefs()
 
-  // 把 bar 时间访问器挂到模块级，供 primitive 渲染与坐标外推读取（见文件顶部
-  // timeToX/xToTime）。/ Expose the bar-times accessor at module scope for the
-  // primitive renderer and coordinate extrapolation (see timeToX/xToTime above).
-  _barTimesGetter = barTimes
+  // 把 bar 时间访问器按本图表登记，供 primitive 渲染与坐标外推读取（见文件顶部
+  // timeToX/xToTime）。/ Register the bar-times accessor for this chart, read by
+  // the primitive renderer and coordinate extrapolation (timeToX/xToTime above).
+  barTimesByChart.set(chart, barTimes)
 
   const tol = isTouchDevice ? TOL_MOBILE : TOL_DESKTOP
   const handleSz = isTouchDevice ? HANDLE_MOBILE : HANDLE_DESKTOP
@@ -491,13 +461,9 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, hideTool
   const [stayInDraw, setStayInDraw] = useState(false)
   const [visible, setVisible] = useState(true)
 
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ fib: true, shapes: true })
-
   // undo/redo
   const undoStackRef = useRef<Drawing[][]>([])
   const redoStackRef = useRef<Drawing[][]>([])
-  const [canUndo, setCanUndo] = useState(false)
-  const [canRedo, setCanRedo] = useState(false)
 
   // context menu
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; drawingId: string } | null>(null)
@@ -569,7 +535,6 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, hideTool
     undoStackRef.current.push(current)
     if (undoStackRef.current.length > UNDO_MAX) undoStackRef.current.shift()
     redoStackRef.current = []
-    setCanUndo(true); setCanRedo(false)
   }, [])
 
   const commitNoHistory = useCallback((next: Drawing[]) => {
@@ -594,7 +559,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, hideTool
     const prev = stack.pop()!
     redoStackRef.current.push(drawingsRef.current)
     commitNoHistory(prev)
-    setCanUndo(stack.length > 0); setCanRedo(true); setSelectedId(null); setPropsPanel(null)
+    setSelectedId(null); setPropsPanel(null)
   }, [commitNoHistory])
 
   const redo = useCallback(() => {
@@ -602,7 +567,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, hideTool
     const next = stack.pop()!
     undoStackRef.current.push(drawingsRef.current)
     commitNoHistory(next)
-    setCanUndo(true); setCanRedo(stack.length > 0); setSelectedId(null); setPropsPanel(null)
+    setSelectedId(null); setPropsPanel(null)
   }, [commitNoHistory])
 
   // ──── 操作 / actions ────
@@ -1090,15 +1055,6 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, hideTool
     else { el.style.pointerEvents = 'none'; setCursorStyle('') }
   }, [tool])
 
-  // ──── 工具栏 UI helpers ────
-  const toolBtn = (id: Tool, icon: JSX.Element, label: string) => (
-    <button type="button" title={label} aria-label={label} onClick={() => { setTool(id); if (id !== 'cursor' && id !== 'cross') setSelectedId(null) }}
-      className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${tool === id ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100'}`}
-    >{icon}</button>
-  )
-
-  const toggleCollapse = (key: string) => setCollapsed((p) => ({ ...p, [key]: !p[key] }))
-
   return (
     <>
       {/* 叠加交互层 / transparent interaction layer */}
@@ -1118,92 +1074,10 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, hideTool
       />
 
       {/* 左侧浮动工具栏 */}
-      {!hideToolbar && (
-        <div className="absolute left-3 top-3 z-20 flex flex-col overflow-y-auto rounded-xl border border-white/10 bg-ink-900/80 p-1.5 backdrop-blur" style={{ maxHeight: 'calc(100dvh - 80px)' }}>
-          <div className="flex flex-col gap-1 -mx-0.5 px-0.5 pb-1 border-b border-white/10 mb-1">
-            <button type="button" title={t('charts.draw.stayInDraw')} aria-label={t('charts.draw.stayInDraw')}
-              onClick={() => setStayInDraw(!stayInDraw)}
-              className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${stayInDraw ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100'}`}
-            ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3l4 4-4 4" /><path d="M3 17l4 4-4 4" /><line x1="21" y1="7" x2="7" y2="21" /><line x1="7" y1="3" x2="21" y2="17" /></svg></button>
-            <button type="button" title={visible ? t('charts.draw.hideAll') : t('charts.draw.showAll')} aria-label={visible ? t('charts.draw.hideAll') : t('charts.draw.showAll')}
-              onClick={() => setVisible(!visible)}
-              className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${!visible ? 'border-amber-400/60 bg-amber-400/15 text-amber-300' : 'border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100'}`}
-            ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{visible ? <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></> : <><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></>}</svg></button>
-          </div>
-
-          {/* 工具分组 / tool groups */}
-          {TOOL_GROUPS.map((group) => {
-            const isCollapsed = collapsed[group.key]
-            return (
-              <div key={group.key}>
-                {isCollapsed ? (
-                  <button type="button" onClick={() => toggleCollapse(group.key)}
-                    title={String(t(`charts.draw.${group.key}`))} aria-label={String(t(`charts.draw.${group.key}`))}
-                    className="flex h-8 w-8 items-center justify-between rounded-md border border-white/10 bg-ink-800/60 px-1.5 text-neutral-400 transition hover:text-neutral-100"
-                  >
-                    <span className="scale-75">{group.tools[0].svg}</span>
-                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="opacity-40"><polyline points="6 9 12 15 18 9" /></svg>
-                  </button>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-1 mb-1">
-                      <div className="h-px flex-1 bg-white/10" />
-                      <button type="button" onClick={() => toggleCollapse(group.key)} className="text-[10px] text-neutral-500 hover:text-neutral-300 px-1">{t(`charts.draw.${group.key}`)} <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="inline -mt-px"><polyline points="18 15 12 9 6 15" /></svg></button>
-                      <div className="h-px flex-1 bg-white/10" />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      {group.tools.map((ti) => toolBtn(ti.id, ti.svg, String(t(`charts.draw.${ti.id}`))))}
-                    </div>
-                    <div className="my-0.5 h-px w-full bg-white/10" />
-                  </>
-                )}
-              </div>
-            )
-          })}
-
-          {/* 颜色 / colors */}
-          <div className="flex flex-col items-center gap-1">
-            {COLORS.map((c) => (
-              <button key={c} type="button" title={t('charts.draw.color')} aria-label={t('charts.draw.color')}
-                onClick={() => { setColor(c); if (selectedId) commit(drawings.map((d) => (d.id === selectedId ? { ...d, color: c } : d))) }}
-                className={`h-4 w-4 rounded-full border transition ${color === c ? 'border-white scale-110' : 'border-white/20'}`}
-                style={{ background: c }}
-              />
-            ))}
-          </div>
-          <div className="my-0.5 h-px w-full bg-white/10" />
-
-          {/* 锁定 / lock */}
-          <button type="button" title={selectedId && drawings.find((d) => d.id === selectedId)?.locked ? t('charts.draw.unlock') : t('charts.draw.lock')} aria-label={t('charts.draw.lock')}
-            onClick={toggleLock} disabled={!selectedId}
-            className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${selectedId && drawings.find((d) => d.id === selectedId)?.locked ? 'border-amber-400/60 bg-amber-400/15 text-amber-300' : 'border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100'} disabled:opacity-30`}
-          ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg></button>
-          <button type="button" title={t('charts.draw.lockAll')} aria-label={t('charts.draw.lockAll')} onClick={lockAll} disabled={drawCount === 0}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-neutral-400 hover:text-amber-300 disabled:opacity-30"
-          ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" /><line x1="12" y1="15" x2="12" y2="18" /></svg></button>
-          <button type="button" title={t('charts.draw.unlockAll')} aria-label={t('charts.draw.unlockAll')} onClick={unlockAll} disabled={lockedCount === 0}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100 disabled:opacity-30"
-          ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 019.9-1" /><line x1="12" y1="15" x2="12" y2="18" /></svg></button>
-          <div className="my-0.5 h-px w-full bg-white/10" />
-
-          {/* 撤销/重做 */}
-          <button type="button" title={t('charts.draw.undo')} aria-label={t('charts.draw.undo')} onClick={undo} disabled={!canUndo}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100 disabled:opacity-30"
-          ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 102.13-9.36L1 10" /></svg></button>
-          <button type="button" title={t('charts.draw.redo')} aria-label={t('charts.draw.redo')} onClick={redo} disabled={!canRedo}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100 disabled:opacity-30"
-          ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" /></svg></button>
-          <div className="my-0.5 h-px w-full bg-white/10" />
-
-          {/* 删除 */}
-          <button type="button" title={t('charts.draw.delete')} aria-label={t('charts.draw.delete')} onClick={deleteSelected} disabled={!selectedId}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-neutral-400 hover:text-down disabled:opacity-30"
-          ><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg></button>
-          <button type="button" title={t('charts.draw.clear')} aria-label={t('charts.draw.clear')} onClick={clearAll} disabled={drawCount === 0}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-ink-800/60 text-neutral-400 hover:text-down disabled:opacity-30"
-          ><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 5L5 19M5 5l14 14" /></svg></button>
-        </div>
-      )}
+      {/* 左侧竖排工具栏已删除：图表页始终传 hideToolbar，这 90 行从未渲染过；工具
+          选择由图表页自己的工具栏经 ref 调用。/ The left-hand vertical toolbar is
+          gone: the chart page always hid it, so it never rendered; tools are driven
+          through the ref by the page's own toolbar. */}
 
       {/* 浮动属性栏 */}
       {propsPanel && selectedId && (() => { const d = drawings.find((dw) => dw.id === selectedId); if (!d) return null; return (
