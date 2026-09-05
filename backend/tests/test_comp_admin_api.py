@@ -497,7 +497,7 @@ def test_delete_competition_removes_participants_baselines_snapshots(db_session)
     """删除要连根拔：参赛行、comp:<id> 基线、榜单快照一起清掉，比赛行本身也没了。"""
     from app.models import LeaderboardSnapshot, PeriodBaseline
     from app.routers.competitions import admin_delete_competition
-    comp = _comp(db_session, status="running")
+    comp = _comp(db_session, status="upcoming")
     u = _user(db_session, "del1@t.co"); _acct(db_session, u, "A")
     _participant(db_session, comp, u, "A")
     key = comp_period_key(comp.id)
@@ -518,22 +518,34 @@ def test_delete_competition_removes_participants_baselines_snapshots(db_session)
         LeaderboardSnapshot.period_key == key).count() == 0
 
 
-def test_delete_settled_competition_allowed_but_keeps_badges(db_session):
-    """已终审的比赛也能删（测试需要）：比赛行没了，但**已发出的勋章不收回**——
-    user_badges 没有"哪一场比赛发的"这一列，无从选择性撤销。"""
-    from app.models import UserBadge
+@pytest.mark.parametrize("status", ["running", "ended", "settled"])
+def test_delete_refused_once_started(db_session, status):
+    """开赛之后不可删：running/ended 删掉等于抹掉正在争的名次；settled 删掉勋章收不回
+    （user_badges 没有"哪场比赛发的"这一列）且会改变卫冕王判定。内测期曾放开到任何
+    状态，上线前收回。"""
     from app.routers.competitions import admin_delete_competition
-    comp = _comp(db_session, status="settled")
-    u = _user(db_session, "settled_del@t.co")
+    comp = _comp(db_session, status=status)
+    u = _user(db_session, f"del_{status}@t.co")
     _participant(db_session, comp, u, "A")
-    db_session.add(UserBadge(user_id=u.id, badge_id="comp_winner")); db_session.commit()
 
+    with pytest.raises(HTTPException) as exc:
+        admin_delete_competition(comp.id, db=db_session)
+    assert exc.value.status_code == 400
+    assert db_session.query(Competition).filter(Competition.id == comp.id).first() is not None
+    assert db_session.query(CompetitionParticipant).filter(
+        CompetitionParticipant.competition_id == comp.id).count() == 1
+
+
+def test_delete_draft_allowed(db_session):
+    from app.routers.competitions import admin_delete_competition
+    comp = _comp(db_session, status="draft")
     out = admin_delete_competition(comp.id, db=db_session)
-    assert out["settled"] is True and out["participants"] == 1
-    assert db_session.query(Competition).filter(Competition.id == comp.id).first() is None
-    # 勋章仍在：这是刻意的，不是遗漏
-    assert db_session.query(UserBadge).filter(
-        UserBadge.user_id == u.id, UserBadge.badge_id == "comp_winner").count() == 1
+    assert out == {"deleted": comp.id, "participants": 0}
+
+
+def test_settle_endpoint_has_no_force_parameter():
+    import inspect
+    assert "force" not in inspect.signature(admin_settle_competition).parameters
 
 
 # ── 赛道与本场门槛 / track and per-competition gates ─────────────────

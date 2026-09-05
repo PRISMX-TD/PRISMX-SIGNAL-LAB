@@ -19,6 +19,38 @@ from sqlalchemy import or_, tuple_
 
 from app.models import ClosedTrade, Order
 
+
+def known_position_ids(db, user_id: str, logins: set[str]) -> set[tuple[str, int]]:
+    """本用户已成交开仓订单的 (账号, 仓位编号) 集合——平仓明细归属核验的依据。
+
+    两条通道的仓位编号存在不同列：bridge 在 mt5_ticket，gateway 在 mt5_position
+    （见 position_id_of），两个都收。只查上报涉及的账号，不扫全表。
+    以前叫 routers/bridge._known_position_ids，scripts/backfill_verified.py 从
+    router 反向 import；搬到这里之后 router 与脚本都从 services 拿。
+    (login, position id) pairs of this user's filled opening orders — the basis
+    for attributing closed legs. Both id columns are collected (bridge stores the
+    ticket, gateway the real position id). Moved here from routers/bridge.py so
+    scripts stop importing from a router.
+    """
+    if not logins:
+        return set()
+    rows = (
+        db.query(Order.mt5_login, Order.mt5_ticket, Order.mt5_position)
+        .filter(
+            Order.user_id == user_id,
+            Order.action == "ORDER",
+            Order.status == "FILLED",
+            Order.mt5_login.in_(list(logins)),
+        )
+        .all()
+    )
+    known: set[tuple[str, int]] = set()
+    for login, ticket, position in rows:
+        for pos_id in (ticket, position):
+            if pos_id:
+                known.add((str(login), int(pos_id)))
+    return known
+
 # 手数浮点误差容忍度 / float tolerance when comparing cumulative volumes
 _VOLUME_EPS = 1e-6
 

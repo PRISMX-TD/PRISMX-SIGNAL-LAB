@@ -40,12 +40,61 @@ compared on every funds refresh. Missing signals never revoke: see above.
 import logging
 from datetime import datetime, timezone
 
+from sqlalchemy import or_
+
+from app.models import MT5Account
+
 logger = logging.getLogger("prismx.gateway.binding")
 
 # 撤销原因。存进 mt5_accounts.revoked_reason，前端据此选提示文案。
 # Revocation reasons, stored in mt5_accounts.revoked_reason; the frontend picks
 # its wording from this value.
 REASON_PASSWORD_CHANGED = "password_changed"
+# 用户自己在界面上"删除/解绑"了这个账号。**不是真删行**：orders / closed_trades
+# 都按 (user, login) 关联，删了行历史战绩就失去归属，个人胜率与已平仓明细会
+# 凭空消失，重绑才回来。行留着、打上这个标记：列表不显示、不能下单、不进
+# 榜、不算账户数；桥接再次上报或 gateway 重新验证时自动复活。两条通道共用这
+# 一个标记，bridge 行也会有 revoked_at，但 is_revoked() 对 bridge 仍恒 False
+# ——"需重新验证"那套语义只属于 gateway，删除是另一件事。
+# The user removed the account from the UI. Not a hard delete: orders and
+# closed_trades are keyed by (user, login), so dropping the row orphans the
+# history and the user's win rate silently vanishes until they re-bind. The row
+# stays with this marker: hidden from lists, not orderable, not eligible for
+# boards, not counted toward the plan limit; revived when the bridge reports it
+# again or the gateway re-verifies. Shared by both channels — a bridge row gets
+# revoked_at too, but is_revoked() stays False for bridge rows: the
+# "re-verify" semantics belong to the gateway, removal is a different thing.
+REASON_USER_REMOVED = "user_removed"
+
+
+def is_removed(row) -> bool:
+    """用户是否已在界面上删除/解绑了这个账号（软删）。"""
+    return getattr(row, "revoked_reason", None) == REASON_USER_REMOVED
+
+
+def not_removed():
+    """SQLAlchemy 过滤条件：排除软删的行。查"当前有效账号"的地方都应带上它。
+    Filter clause excluding soft-removed rows; every "current accounts" query takes it."""
+    return or_(MT5Account.revoked_reason.is_(None),
+               MT5Account.revoked_reason != REASON_USER_REMOVED)
+
+
+def mark_removed(db, row) -> None:
+    """软删：打标记、置离线，提交。"""
+    row.revoked_at = datetime.now(timezone.utc)
+    row.revoked_reason = REASON_USER_REMOVED
+    row.online = False
+    db.commit()
+
+
+def restore_removed(row) -> bool:
+    """账号重新出现（桥接再次上报 / gateway 重新验证）：清掉软删标记。
+    返回是否真的复活了一行。不提交，由调用方与其它字段一起提交。"""
+    if not is_removed(row):
+        return False
+    row.revoked_at = None
+    row.revoked_reason = None
+    return True
 
 
 def is_revoked(row) -> bool:

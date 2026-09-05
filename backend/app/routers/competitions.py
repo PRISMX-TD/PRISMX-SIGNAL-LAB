@@ -17,12 +17,12 @@ from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.models import (
     Competition, CompetitionParticipant, LeaderboardSnapshot, PeriodBaseline, User)
-from app.routers.admin import _log_change
+from app.services.audit import log_change as _log_change
 from app.routers.gamification import build_board_rows_payload
 from app.schemas import (
     CompetitionCreateIn, CompetitionParticipantPatchIn, CompetitionPatchIn,
     CompetitionRegisterIn)
-from app.services.deps import get_current_user, get_db
+from app.services.deps import get_current_user, get_db, require_admin
 from app.services.gamification import identity
 from app.services.gamification.competitions import (
     TRACKS, auto_enroll, comp_gates, comp_period_key, refresh_comp_board,
@@ -208,7 +208,10 @@ def register_for_competition(request: Request, comp_id: str, body: CompetitionRe
 
 # ---- 管理员端 / admin endpoints ----
 # 权限收口方式同 gamification.admin_router 先例：见模块docstring。
-admin_router = APIRouter(prefix="/admin/competitions", tags=["admin"])
+# 守卫写在 router 自己身上（见 gamification.py 同一处的说明）。
+# Guard on the router itself (see the note in gamification.py).
+admin_router = APIRouter(prefix="/admin/competitions", tags=["admin"],
+                         dependencies=[Depends(require_admin)])
 
 _METRICS = ("return_pct", "win_rate")
 _ENROLLMENTS = ("signup", "auto")
@@ -441,42 +444,41 @@ def admin_patch_competition(comp_id: str, body: CompetitionPatchIn, db: Session 
     return out
 
 
+# 可删除的比赛状态：还没开赛、没有任何成绩与勋章产生的两档。
+# 内测期曾放开到任何状态（2026-09-04），上线前收回（2026-09-05）：
+#   · running/ended 删掉等于把参赛者正在争的名次抹掉；
+#   · settled 删掉之后勋章收不回（user_badges 没有"哪场比赛发的"这一列），且卫冕王
+#     看的是相邻两届，少一届会改变后续判定——删了就是一笔说不清的糊涂账。
+# Deletable statuses: the two before anything has been scored or awarded. Was
+# opened to every status for testing (2026-09-04) and closed again before launch:
+# deleting a running/ended competition wipes ranks people are competing for, and
+# deleting a settled one cannot revoke badges (no "which competition" column) and
+# shifts the back-to-back judgement.
+DELETABLE_STATUSES = frozenset({"draft", "upcoming"})
+MSG_DELETE_LOCKED = (
+    "只有草稿或未开始的比赛可以删除；已开赛的比赛请让它走完流程 / "
+    "Only draft or upcoming competitions can be deleted; a started competition must run its course"
+)
+
+
 @admin_router.delete("/{comp_id}")
 def admin_delete_competition(comp_id: str, db: Session = Depends(get_db)):
-    """删除一场比赛，连同它的参赛行、基线、榜单快照一起清掉。**任何状态都能删**，
-    已终审的也能（应产品要求为测试放开，2026-09-04）。
-
-    ⚠️ **删除不收回已发出的勋章**：`user_badges` 只记 (user_id, badge_id)，没有
-    「哪一场比赛发的」这个字段，所以无从选择性撤销——按参赛者一刀切会误删他在
-    别场比赛拿到的同名勋章。删掉一场已终审的比赛之后：① 参赛者身上的比赛勋章
-    照旧留着（成就页仍会显示）；② 卫冕王看的是相邻两届，少一届会改变后续判定。
-    测试完想彻底复原，得单独清 `user_badges` 里那几个 comp_* 勋章。
-
-    Deletes a competition with its participants, baselines and board snapshots.
-    **Any status, settled included** (opened up for testing at the product owner's
-    request, 2026-09-04).
-
-    ⚠️ **Deleting does not revoke badges already awarded**: `user_badges` stores only
-    (user_id, badge_id) with no "which competition" column, so there is no way to
-    revoke selectively — wiping by participant would also remove the same badge
-    earned in a different competition. After deleting a settled competition:
-    (1) participants keep their competition badges (still shown on the achievements
-    page); (2) the back-to-back badge compares consecutive editions, so removing one
-    changes later judging. A full reset means clearing the comp_* rows in
-    `user_badges` separately.
+    """删除一场**尚未开赛**的比赛，连同它的参赛行、基线、榜单快照一起清掉。
+    running / ended / settled 一律 400（见 DELETABLE_STATUSES 的说明）。
+    Deletes a competition that has not started, with its participants, baselines
+    and board snapshots. Started or settled competitions are refused (400).
     """
     comp = _get_comp_or_404(db, comp_id)
+    if comp.status not in DELETABLE_STATUSES:
+        raise HTTPException(400, MSG_DELETE_LOCKED)
     key = comp_period_key(comp.id)
     participants = (db.query(CompetitionParticipant)
                       .filter(CompetitionParticipant.competition_id == comp.id).delete())
     db.query(PeriodBaseline).filter(PeriodBaseline.period_key == key).delete()
     db.query(LeaderboardSnapshot).filter(LeaderboardSnapshot.period_key == key).delete()
-    was_settled = comp.status == "settled"
     db.delete(comp)
     db.commit()
-    # settled 回传给前端：已终审的比赛删掉后勋章仍在，确认框要说清这一点。
-    # settled is echoed back so the UI can spell out that badges survive the delete.
-    return {"deleted": comp_id, "participants": participants, "settled": was_settled}
+    return {"deleted": comp_id, "participants": participants}
 
 
 @admin_router.get("/{comp_id}/participants")
@@ -540,19 +542,20 @@ def admin_refresh_competition(comp_id: str, db: Session = Depends(get_db)):
 
 
 @admin_router.post("/{comp_id}/settle")
-def admin_settle_competition(comp_id: str, force: bool = False,
+def admin_settle_competition(comp_id: str,
                               db: Session = Depends(get_db),
                               admin: User = Depends(get_current_user)):
-    """`force=true`：跳过**全部**前置条件立刻终审——状态不必是 ended、不必等
-    §5.3 的 24 小时宽限期、已终审的也能再跑一次（应产品要求为测试放开）。
-    管理端按钮会先弹确认，说明尚未平仓与迟到的单不会计入。
-    `force=true` settles immediately, skipping **every** precondition: status need
-    not be "ended", the §5.3 24h grace period need not have passed, and an already
-    settled competition can be run again (opened up for testing at the product
-    owner's request). The admin button confirms first, spelling out that still-open
-    and late-arriving closes won't be counted."""
+    """终审。三道闸全部由 settle_competition 把守：状态必须是 ended、必须过了
+    §5.3 的 24 小时宽限期、已终审的不能再跑。内测期曾有 `force=true` 跳过全部前置
+    （2026-09-04），上线前已移除（2026-09-05）——早于实际结束时间终审会漏掉尚未
+    平仓和迟到的单，名次一旦定格就是永久的，没有任何运营场景值得拿这个换。
+    Settlement. All three gates live in settle_competition: status must be ended,
+    the 24h grace period must have passed, and a settled competition cannot be
+    re-run. A `force=true` bypass existed during the closed beta and was removed
+    before launch: settling early drops still-open and late closes, and ranks are
+    permanent once locked."""
     comp = _get_comp_or_404(db, comp_id)
-    return settle_competition(db, comp, admin.id, force=force)
+    return settle_competition(db, comp, admin.id)
 
 
 @admin_router.get("/{comp_id}/board")

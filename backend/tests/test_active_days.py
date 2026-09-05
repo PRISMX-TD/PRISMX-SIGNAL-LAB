@@ -51,3 +51,24 @@ def test_day_boundary_collision_does_not_raise(db_session):
     _touch_last_active(db_session, u)  # 不应抛出 IntegrityError 或任何异常
 
     assert db_session.query(UserActiveDay).filter_by(user_id=u.id).count() == 1
+
+
+def test_collision_keeps_sibling_writes_on_the_session(db_session):
+    """撞唯一约束只撤销 user_active_days 那一行：last_active_at 和 session 里其它
+    未提交改动照常提交（以前整体 rollback 会把它们一起吃掉）。"""
+    u = User(email="f@t.co", api_token="tok_f")
+    db_session.add(u); db_session.commit()
+    u.last_active_at = datetime.now(timezone.utc) - timedelta(days=1)
+    db_session.commit()
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    db_session.add(UserActiveDay(user_id=u.id, day=today)); db_session.commit()
+
+    u.nickname = "kept"                      # 同一请求里更早的未提交写入
+    before = u.last_active_at
+    _touch_last_active(db_session, u)
+
+    db_session.expire_all()
+    fresh = db_session.query(User).filter_by(id=u.id).one()
+    assert fresh.nickname == "kept"
+    assert fresh.last_active_at != before
+    assert db_session.query(UserActiveDay).filter_by(user_id=u.id).count() == 1

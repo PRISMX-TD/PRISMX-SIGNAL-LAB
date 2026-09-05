@@ -31,6 +31,7 @@ import logging
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.core.database import SessionLocal
 from app.models import AdminAuditLog, User
@@ -83,35 +84,50 @@ def downgrade_if_expired(db: Session, user: User) -> bool:
     return True
 
 
+def sweep_expired_plans(now: datetime | None = None) -> int:
+    """一趟扫描：把所有已到期的付费用户落库降级为 FREE，返回降级人数。
+    同步、开自己的 session；由 plan_expiry_sweep_loop 放进线程池调用。
+    One sweep: persist every expired paid user down to FREE, returning the count.
+    Synchronous with its own session; the loop runs it in the thread pool."""
+    now = now or datetime.now(timezone.utc)
+    db = SessionLocal()
+    try:
+        # 付费用户很少，取出所有设了到期时间的非 FREE 用户，由纯判定逐个复核，
+        # 避免不同数据库上 naive/aware 时间比较的坑（signal_expiry_loop 同思路）。
+        # Paid users are few; pull all non-FREE users with an expiry set
+        # and let the pure predicate re-check each, sidestepping naive/
+        # aware datetime comparison quirks across DBs (same approach as
+        # signal_expiry_loop).
+        rows = (
+            db.query(User)
+            .filter(User.plan != "FREE", User.plan_expires_at.isnot(None))
+            .all()
+        )
+        count = 0
+        for user in rows:
+            if is_plan_expired(user.plan, user.plan_expires_at, now) and downgrade_if_expired(db, user):
+                count += 1
+        if count:
+            db.commit()
+            logger.info("plan_expiry_sweep_loop: downgraded %d user(s) to FREE", count)
+        return count
+    finally:
+        db.close()
+
+
 async def plan_expiry_sweep_loop() -> None:
     """定时把所有已到期的付费用户落库降级为 FREE（启动即先跑一次，再按间隔循环）。
-    Periodically persist every expired paid user down to FREE (runs once on
-    startup, then loops at the fixed interval)."""
+
+    扫描本身是同步 DB 操作，必须放进线程池：直接跑在事件循环上会把 WS 推送、
+    bridge 轮询、gateway 事件泵一起卡住，付费用户多了之后每 15 分钟卡一次。
+    与 gamification_loop / candle_retention_sweep_loop 的做法一致。
+    Periodically persist every expired paid user down to FREE. The sweep is
+    synchronous DB work and runs in the thread pool — on the event loop it would
+    stall WS pushes, bridge polling and the gateway event pump every 15 minutes
+    once there are enough paid users. Same pattern as the other loops."""
     while True:
         try:
-            db = SessionLocal()
-            try:
-                now = datetime.now(timezone.utc)
-                # 付费用户很少，取出所有设了到期时间的非 FREE 用户，由纯判定逐个复核，
-                # 避免不同数据库上 naive/aware 时间比较的坑（signal_expiry_loop 同思路）。
-                # Paid users are few; pull all non-FREE users with an expiry set
-                # and let the pure predicate re-check each, sidestepping naive/
-                # aware datetime comparison quirks across DBs (same approach as
-                # signal_expiry_loop).
-                rows = (
-                    db.query(User)
-                    .filter(User.plan != "FREE", User.plan_expires_at.isnot(None))
-                    .all()
-                )
-                count = 0
-                for user in rows:
-                    if is_plan_expired(user.plan, user.plan_expires_at, now) and downgrade_if_expired(db, user):
-                        count += 1
-                if count:
-                    db.commit()
-                    logger.info("plan_expiry_sweep_loop: downgraded %d user(s) to FREE", count)
-            finally:
-                db.close()
+            await run_in_threadpool(sweep_expired_plans)
         except Exception:
             logger.exception("plan_expiry_sweep_loop error")
         await asyncio.sleep(SWEEP_INTERVAL_SECONDS)

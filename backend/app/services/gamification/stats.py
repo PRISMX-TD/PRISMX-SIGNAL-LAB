@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.models import ClosedTrade, Order
 from app.services.trade_performance import position_id_of
+from app.utils.timeutil import aware
 
 GAMIFICATION_WINDOW_DAYS = 365
 _VOL_EPS = 1e-6
@@ -56,12 +57,42 @@ def _resolve(orders, legs_map):
     return resolved
 
 
-def compute_comprehensive_stats(db, user_id) -> dict:
-    cutoff = _now() - timedelta(days=GAMIFICATION_WINDOW_DAYS)
-    orders = _filled_orders(db, user_id, cutoff)
-    real = [o for o in orders if o.trade_mode == REAL]
+def load_trade_data(db, user_id) -> dict:
+    """一次把该用户全部 FILLED 开仓单和对应的 verified 平仓腿读进来。
+
+    **为什么有它**：每小时循环里，综合统计、终身统计、常青 ×3、盈亏比、铁律如山
+    各自调一遍 _filled_orders + _legs_by_position，一个用户每小时要把 365 天的
+    订单加载 7 次以上，用户数一上百这条循环就跑不完。现在循环只读一次，把这份
+    数据传给所有判定函数；不传（data=None）时各函数照旧自己读，行为不变。
+
+    Loads every FILLED opening order and its verified closing legs once. The
+    hourly pass used to reload the same rows 7+ times per user (comprehensive
+    stats, lifetime stats, evergreen ×3, profit factor, no_bad_sl); with a hundred
+    users the pass no longer fits in its hour. Every judge now accepts this dict;
+    when omitted (data=None) they load for themselves exactly as before.
+    """
+    orders = _filled_orders(db, user_id)
     keys = {(o.mt5_login, position_id_of(o)) for o in orders if position_id_of(o)}
-    legs_map = _legs_by_position(db, user_id, keys)
+    return {"orders": orders, "legs": _legs_by_position(db, user_id, keys)}
+
+
+def _orders_since(orders, cutoff):
+    """按 created_at >= cutoff 过滤（与 _filled_orders 的 SQL 条件同义）。"""
+    if cutoff is None:
+        return list(orders)
+    return [o for o in orders if o.created_at is not None and aware(o.created_at) >= cutoff]
+
+
+def compute_comprehensive_stats(db, user_id, data: dict | None = None) -> dict:
+    cutoff = _now() - timedelta(days=GAMIFICATION_WINDOW_DAYS)
+    if data is None:
+        orders = _filled_orders(db, user_id, cutoff)
+        keys = {(o.mt5_login, position_id_of(o)) for o in orders if position_id_of(o)}
+        legs_map = _legs_by_position(db, user_id, keys)
+    else:
+        orders = _orders_since(data["orders"], cutoff)
+        legs_map = data["legs"]
+    real = [o for o in orders if o.trade_mode == REAL]
 
     res_all = _resolve(orders, legs_map)
     res_real = [(o, p) for o, p in res_all if o.trade_mode == REAL]
@@ -102,12 +133,13 @@ def compute_comprehensive_stats(db, user_id) -> dict:
     }
 
 
-def compute_account_lifetime_stats(db, user_id) -> dict:
+def compute_account_lifetime_stats(db, user_id, data: dict | None = None) -> dict:
     """两枚表现勋章的口径：单账号、累计全时段、实盘 + verified、整仓。"""
-    orders = _filled_orders(db, user_id, cutoff=None)
+    if data is None:
+        data = load_trade_data(db, user_id)
+    orders = data["orders"]
     real = [o for o in orders if o.trade_mode == REAL]
-    keys = {(o.mt5_login, position_id_of(o)) for o in real if position_id_of(o)}
-    legs_map = _legs_by_position(db, user_id, keys)
+    legs_map = data["legs"]
     out = defaultdict(lambda: {"trades": 0, "wins": 0, "lots": 0.0, "profit": 0.0})
     for o in real:
         out[o.mt5_login]["lots"] += o.volume or 0

@@ -66,7 +66,9 @@ def _judge_plain(db, user, cond_id, stats) -> bool:
     if cond_id == "set_nickname":
         return bool(user.nickname)
     if cond_id == "bind_account":
-        return db.query(MT5Account.id).filter(MT5Account.user_id == user.id).first() is not None
+        from app.services.gateway_binding import not_removed
+        return (db.query(MT5Account.id)
+                  .filter(MT5Account.user_id == user.id, not_removed()).first() is not None)
     if cond_id == "streak_3":
         return has_consecutive_active_days(db, user.id, 3)
     if cond_id == "own_strategy":
@@ -89,13 +91,18 @@ def _record(db, user_id, cond_id) -> bool:
         return False
 
 
-def judge_and_record_conditions(db, user_id) -> list[str]:
+def judge_and_record_conditions(db, user_id, stats: dict | None = None) -> list[str]:
+    """`stats` 可由调用方预先算好传入（每小时循环与勋章判定共用一份，见
+    stats.load_trade_data）；不传就自己算，结果一样。
+    `stats` may be precomputed by the caller (the hourly pass shares one with the
+    badge judge, see stats.load_trade_data); omitted, it is computed here."""
     from app.models import User
     user = db.get(User, user_id)
     if user is None:
         return []
     done = {t.task_id for t in db.query(UserTask).filter(UserTask.user_id == user_id)}
-    stats = compute_comprehensive_stats(db, user_id)
+    if stats is None:
+        stats = compute_comprehensive_stats(db, user_id)
     newly: list[str] = []
     for _gid, conds in GROUPS:
         # 第一遍：普通条件

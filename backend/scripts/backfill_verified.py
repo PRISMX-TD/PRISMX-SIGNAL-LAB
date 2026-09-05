@@ -10,7 +10,7 @@ NULL。游戏化统计引擎只认 `verified IS TRUE`（见 services/gamificatio
 把同一条规则补量到这批老数据上，就能把它们纳入统计——这不是放宽标准，是把同一把
 尺子量到之前没量过的地方。
 
-规则来源刻意复用 `routers.bridge._known_position_ids`（落库时用的同一个函数），
+规则来源刻意复用 `services.trade_performance.known_position_ids`（落库时用的同一个函数），
 而不是在这里重写一遍：将来那条规则若有调整，本脚本自动跟随，不会产生第二套口径。
 
 匹配上的标 True；对不上的**保持 NULL**，不写 False——它们是「从未校验过」而不是
@@ -35,7 +35,7 @@ from collections import defaultdict
 
 from app.core.database import SessionLocal
 from app.models import ClosedTrade
-from app.routers.bridge import _known_position_ids
+from app.services.trade_performance import known_position_ids as _known_position_ids
 
 
 def main() -> int:

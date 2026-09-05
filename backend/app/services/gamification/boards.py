@@ -25,9 +25,10 @@ def ensure_baselines(db, period_key: str, now: datetime) -> int:
     existing = {(r.user_id, r.mt5_login) for r in
                 db.query(PeriodBaseline).filter(PeriodBaseline.period_key == period_key)}
     created = 0
+    from app.services.gateway_binding import not_removed
     accounts = (db.query(MT5Account)
                   .filter(MT5Account.trade_mode == REAL,
-                          MT5Account.balance.isnot(None)).all())
+                          MT5Account.balance.isnot(None), not_removed()).all())
     for a in accounts:
         if a.user_id in opted_out or (a.user_id, a.login) in existing:
             continue

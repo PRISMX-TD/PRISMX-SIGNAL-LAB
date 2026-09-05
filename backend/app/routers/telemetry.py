@@ -30,18 +30,30 @@ Two hard limits, both to stop this endpoint from being used to bloat the table:
    hours, which would skew the average dwell time badly, so anything above the
    cap counts as the cap.
 """
+import json
+import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.models import PageVisitorDay, PageViewStat, User
 from app.schemas import PageViewIn
 from app.services.deps import get_current_user
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
+logger = logging.getLogger("prismx.csp")
+
+# 一份 CSP 违规报告最多读这么多字节：浏览器发的报告只有几百字节，超长的一律
+# 是有人往这个匿名端点灌东西。Cap on a CSP report body; real ones are a few hundred bytes.
+CSP_REPORT_MAX_BYTES = 8192
+CSP_REPORT_FIELDS = (
+    "document-uri", "violated-directive", "effective-directive", "blocked-uri",
+    "source-file", "line-number", "disposition",
+)
 
 # 允许上报的前端路由，与 App.tsx 的受保护路由一一对应。新增页面时要同步加，
 # 否则该页的访问不会被统计（宁可漏统计，也不放开任意 path 写入）。
@@ -73,6 +85,49 @@ ALLOWED_PATHS = frozenset({
 # Per-visit dwell cap (seconds): 30 minutes. Beyond that it's almost certainly
 # an abandoned open tab rather than actual reading.
 MAX_DWELL_SECONDS = 1800.0
+
+
+@router.post("/csp-report", status_code=204)
+@limiter.limit("60/minute")
+async def csp_report(request: Request) -> Response:
+    """接收浏览器的 CSP 违规报告（vercel.json 里 `report-uri` 指向这里），只写日志。
+
+    **为什么有它**：前端的 Content-Security-Policy 一直是 Report-Only 且没配上报
+    地址——浏览器算出违规后无处可送，等于策略根本没在观察。有了这个端点，先看
+    一周 journald 里 `csp violation` 的日志：有误杀就改策略，没有就把响应头从
+    Report-Only 换成正式的 Content-Security-Policy。
+
+    匿名端点（浏览器不带我们的 token），所以：按 IP 限流、只读固定几个字段、
+    正文超过 8KB 直接丢、任何格式错误都静默 204——这是观测，不是业务。
+    Content-Type 是 application/csp-report（老规范）或 application/reports+json，
+    所以自己读 body 而不是让 FastAPI 按 JSON 解析。
+
+    Receives browser CSP violation reports (vercel.json's report-uri) and logs
+    them. The frontend CSP has been Report-Only with no report endpoint, i.e. not
+    observed at all; watch these logs for a week, fix false positives, then
+    promote the header to enforcing. Anonymous, so: IP rate limit, fixed field
+    whitelist, 8KB cap, and always 204.
+    """
+    body = await request.body()
+    if not body or len(body) > CSP_REPORT_MAX_BYTES:
+        return Response(status_code=204)
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return Response(status_code=204)
+    report = data.get("csp-report") if isinstance(data, dict) else None
+    if not isinstance(report, dict):
+        # Reporting API 新格式：[{"type":"csp-violation","body":{...}}]
+        # Newer Reporting API shape: a list of {type, body}.
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            report = data[0].get("body")
+        if not isinstance(report, dict):
+            return Response(status_code=204)
+    fields = {k: str(report.get(k))[:300] for k in CSP_REPORT_FIELDS if report.get(k) is not None}
+    if not fields:
+        fields = {k: str(v)[:300] for k, v in report.items() if k in ("documentURL", "effectiveDirective", "blockedURL", "disposition")}
+    logger.warning("csp violation %s", json.dumps(fields, ensure_ascii=False))
+    return Response(status_code=204)
 
 
 @router.post("/pageview", status_code=204)

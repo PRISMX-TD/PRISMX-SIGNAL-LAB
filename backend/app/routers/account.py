@@ -61,9 +61,10 @@ def get_account(
     current_user: User = Depends(get_current_user),
 ):
     """返回当前用户的基本信息和绑定的 MT5 账号概览。"""
+    from app.services.gateway_binding import not_removed
     bindings = (
         db.query(MT5Account)
-        .filter(MT5Account.user_id == current_user.id)
+        .filter(MT5Account.user_id == current_user.id, not_removed())
         .all()
     )
     gamification_visible = (

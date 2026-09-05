@@ -426,10 +426,12 @@ def _execute_gateway_orders(db: Session, user_id: str, orders: list[Order]) -> N
     rather than duplicating the retcode-to-status mapping; imported inside the
     function to avoid a services/routers import cycle.
     """
+    from app.services.gateway_binding import not_removed
     gateway_logins = {
         row[0] for row in db.query(MT5Account.login).filter(
             MT5Account.user_id == user_id,
             MT5Account.source == "gateway",
+            not_removed(),
         ).all()
     }
     targets = [o for o in orders if o.mt5_login and o.mt5_login in gateway_logins]

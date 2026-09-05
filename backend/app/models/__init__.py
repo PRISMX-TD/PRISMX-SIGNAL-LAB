@@ -238,6 +238,22 @@ class MT5Account(Base):
     # keyed by (user, login) and dropping it would orphan the user's history.
     revoked_at = Column(DateTime, nullable=True)
     revoked_reason = Column(String, nullable=True)
+    # 券商 MT5 服务器墙钟相对 UTC 的偏移（秒，半小时的整数倍），只有 gateway 通道写。
+    #
+    # Manager API 给的成交时间是服务器本地时间，不是 UTC；平仓腿落库前必须减掉这个
+    # 偏移（见 routers/gateway.observe_server_offset）。偏移是从「本平台开仓腿的服务器
+    # 时间 − 我们自己 orders.created_at」观测出来的，以前只放在进程内存里：后端一重启
+    # 就忘，要等该账号再出现一笔本平台开仓才学得回来，学不回来就按 0 处理——而
+    # closed_trades 按 deal_ticket 去重，错的时间一旦入库就永远不会自愈。存到这里之后
+    # 重启即可读回；NULL = 从未观测到（不是 0）。
+    #
+    # Offset of the broker's MT5 server clock from UTC (seconds, half-hour multiple),
+    # gateway channel only. Deal times from the Manager API are server-local, so
+    # closing legs subtract this before persisting. Previously memory-only: lost on
+    # restart, re-learned only when the account next opened a platform position,
+    # and treated as 0 until then — while closed_trades dedupes on deal_ticket, so a
+    # wrong timestamp never self-corrects. NULL means never observed, not zero.
+    server_utc_offset = Column(Integer, nullable=True)
     online = Column(Boolean, default=False)
     last_heartbeat = Column(DateTime, nullable=True)
 

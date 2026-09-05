@@ -41,8 +41,8 @@ def loop_db(monkeypatch):
 def _stub_stages_1_4(monkeypatch):
     monkeypatch.setattr(loop_module, "backfill_account_trade_modes", lambda db: 0)
     monkeypatch.setattr(loop_module, "backfill_order_trade_modes", lambda db: (0, 0))
-    monkeypatch.setattr(loop_module, "judge_and_record_conditions", lambda db, uid: [])
-    monkeypatch.setattr(loop_module, "judge_and_award_badges", lambda db, uid: [])
+    monkeypatch.setattr(loop_module, "judge_and_record_conditions", lambda db, uid, *a: [])
+    monkeypatch.setattr(loop_module, "judge_and_award_badges", lambda db, uid, *a: [])
     monkeypatch.setattr(boards_module, "snapshot_boards",
                          lambda db, now: {"periods": 2, "rows": 5})
 

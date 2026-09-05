@@ -3,20 +3,32 @@
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from app.core.database import SessionLocal
-from app.models import MT5Account, Order, User
+from app.models import ClosedTrade, MT5Account, Order, User
 from sqlalchemy import or_
 
 from app.services.account_type import classify_account
 from app.services.settings_store import get_account_type_settings
 from .conditions import judge_and_record_conditions
 from .badges import judge_and_award_badges
+from .stats import compute_comprehensive_stats, load_trade_data
 
 log = logging.getLogger("gamification")
 LOOP_INTERVAL_SECONDS = 3600
 SLOW_PASS_WARN_SECONDS = 120
+# 增量判定的候选窗口回退量：上一趟 pass 的起点再往前让 10 分钟，抵消"成交落库
+# 时刻晚于 closed_at"和两趟 pass 之间的时钟抖动，宁可多判几个人也不漏。
+# Slack subtracted from the previous pass's start when picking candidates: covers
+# rows persisted slightly after their timestamps and clock jitter between passes.
+CANDIDATE_SLACK = timedelta(minutes=10)
+# 进程内：上一趟 pass 的起点、最近一次全量 pass 的 UTC 日期。重启后两者为空 →
+# 第一趟必然全量，不需要持久化。
+# In-process: when the previous pass started and the UTC day of the last full pass.
+# Both empty after a restart, so the first pass is always full — nothing to persist.
+_last_pass_started_at: datetime | None = None
+_last_full_pass_day: date | None = None
 # 比赛榜单单独一条快循环：整点那趟 pass 一小时才跑一次，对正在进行的比赛来说太慢——
 # 用户平仓后要等最多一小时名次才动。比赛快照只碰 running/ended 的比赛与它们的参赛
 # 账户，比整趟 pass（全体用户的条件 + 勋章 + 两张周期榜）轻得多，可以跑得密。
@@ -91,18 +103,72 @@ def backfill_order_trade_modes(db) -> tuple[int, int]:
     return stamped, sentinel
 
 
-def run_gamification_pass() -> dict:
+def select_candidate_users(db, since: datetime | None) -> list[str]:
+    """本趟要判定的用户。since=None → 全体（全量 pass）。
+
+    增量 pass 只挑 since 以来"有可能变化"的人：
+      · 有新的 FILLED 开仓单（created_at）——笔数/手数/交易日/胜率类条件；
+      · 有新落库的平仓腿（created_at，不是 closed_at：回补进来的老成交也算）——
+        整仓判定、盈亏类条件、五枚看整仓的勋章；
+      · 活跃过（last_active_at，任何已登录请求都会 5 分钟节流地打这一列）——
+        改昵称、绑账号、开策略、活跃日连续这些不经过交易表的条件。
+    纪律分快照、自然月翻页这类"用户什么都没做也会变"的输入，靠每天一趟全量
+    pass 兜底（见 run_gamification_pass）；用户自己打开成就页也会即时判定一次。
+
+    Users to judge this pass; None means everyone. An incremental pass takes only
+    users who could have changed since `since`: new FILLED orders, newly persisted
+    closing legs (created_at, so backfilled old closes count too), or any activity
+    (last_active_at covers nickname/bind/strategy/streak). Inputs that move
+    without the user doing anything — discipline snapshots, month rollover — are
+    caught by the daily full pass, and by the user opening the achievements page.
+    """
+    if since is None:
+        return [r[0] for r in db.query(User.id).all()]
+    ids: set[str] = set()
+    ids.update(r[0] for r in db.query(User.id).filter(User.last_active_at >= since))
+    ids.update(r[0] for r in db.query(Order.user_id)
+                               .filter(Order.status == "FILLED", Order.created_at >= since)
+                               .distinct())
+    ids.update(r[0] for r in db.query(ClosedTrade.user_id)
+                               .filter(ClosedTrade.created_at >= since)
+                               .distinct())
+    return sorted(ids)
+
+
+def run_gamification_pass(full: bool | None = None) -> dict:
+    """整趟 pass。`full`：None=自动（重启后首趟、或今天还没跑过全量 → 全量；否则
+    增量，只判 select_candidate_users 挑出的人）；True/False 强制。
+
+    **为什么要分增量/全量**：原来每小时把全体用户逐个判一遍，每人还要把 365 天
+    订单读 7 次以上，是 O(用户数 × 订单数) 的活，用户过百这条循环就跑不完
+    （SLOW_PASS_WARN_SECONDS 就是为它预留的告警）。绝大多数用户在任意一小时里
+    什么都没变，判了也是白判。每天一趟全量是为了兜住"没人动它也会变"的输入。
+
+    Full vs incremental: the pass used to judge every user every hour, reloading
+    each user's year of orders 7+ times — O(users × orders), unworkable past a
+    hundred users. Almost nobody changes in a given hour. One full pass a day
+    still catches inputs that move on their own (snapshots, month rollover).
+    """
+    global _last_pass_started_at, _last_full_pass_day
+    started = datetime.now(timezone.utc)
+    if full is None:
+        full = _last_pass_started_at is None or _last_full_pass_day != started.date()
+    since = None if full else _last_pass_started_at - CANDIDATE_SLACK
     db = SessionLocal()
     try:
         acc = backfill_account_trade_modes(db)
         stamped, sentinel = backfill_order_trade_modes(db)
-        uids = [r[0] for r in db.query(User.id).all()]
+        uids = select_candidate_users(db, since)
         conds = badges = 0
         failed = 0
         for uid in uids:
             try:
-                conds += len(judge_and_record_conditions(db, uid))
-                badges += len(judge_and_award_badges(db, uid))
+                # 一次读、处处用：订单+平仓腿读一遍，综合统计算一遍，条件与勋章共用。
+                # Load once, judge everything from it.
+                data = load_trade_data(db, uid)
+                stats = compute_comprehensive_stats(db, uid, data)
+                conds += len(judge_and_record_conditions(db, uid, stats))
+                badges += len(judge_and_award_badges(db, uid, data))
             except Exception:
                 # 单个用户的判定失败不该拖垮整轮——记日志，继续下一个，否则一条
                 # 脏数据就能让全体用户当轮判定全部跳过。这里的 rollback 不是在
@@ -145,8 +211,16 @@ def run_gamification_pass() -> dict:
             log.exception("gamification pass: competition snapshot failed")
             db.rollback()
             comp_stats = {"error": True}
+        # 只有整趟跑到这里才推进水位：中途异常抛出去的话，下一趟会以更早的
+        # since 重判，宁可重复不可漏判。
+        # Advance the watermark only on completion; an exception leaves it, so the
+        # next pass re-judges from the earlier point — duplicates are harmless, gaps aren't.
+        _last_pass_started_at = started
+        if full:
+            _last_full_pass_day = started.date()
         return {"accounts": acc, "stamped": stamped, "sentinel": sentinel,
-                "users": len(uids), "newConditions": conds, "newBadges": badges,
+                "users": len(uids), "full": full,
+                "newConditions": conds, "newBadges": badges,
                 "failedUsers": failed,
                 "boardPeriods": board_stats.get("periods", 0),
                 "boardRows": board_stats.get("rows", 0),

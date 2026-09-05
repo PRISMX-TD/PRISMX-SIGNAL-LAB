@@ -5,7 +5,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
-from jose import JWTError, jwt
+import jwt
 
 from app.core.config import settings
 
@@ -59,9 +59,16 @@ def decode_access_token(token: str) -> str | None:
 def decode_token_payload(token: str) -> dict | None:
     """解析 JWT，返回完整载荷（含 sub 与 exp），无效返回 None。
     Decode a JWT and return its full payload (sub & exp); None if invalid."""
+    # PyJWT：过期、签名错、格式错都是 PyJWTError 的子类，一并按"无效"处理。
+    # 只允许配置里那一种算法（HS256），拒绝 token 头里自报的其它算法——这正是
+    # 旧库 python-jose 3.3.0 曾出过的那类算法混淆问题。
+    # PyJWT: expiry, bad signature and malformed tokens are all PyJWTError
+    # subclasses. Only the configured algorithm is accepted; whatever the token
+    # header claims is ignored — the algorithm-confusion class of bug the old
+    # python-jose 3.3.0 dependency was known for.
     try:
         return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
-    except JWTError:
+    except jwt.PyJWTError:
         return None
 
 

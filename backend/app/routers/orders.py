@@ -28,7 +28,7 @@ from app.schemas import (
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user, is_account_online, validate_order, validate_sl_tp_direction
 from app.services.discipline import compute_discipline
-from app.services.gateway_binding import is_revoked
+from app.services.gateway_binding import is_revoked, not_removed
 from app.services.gateway_client import (
     TradeRsp,
     run_on_main_loop,
@@ -138,7 +138,7 @@ def place_order(
     #    entirely. Only when multiple accounts are online (target genuinely
     #    unknown) is the equity check skipped — but that case is rejected
     #    outright by the online_count check below before an order is ever placed.
-    accounts = db.query(MT5Account).filter(MT5Account.user_id == user.id).all()
+    accounts = db.query(MT5Account).filter(MT5Account.user_id == user.id, not_removed()).all()
     online_accounts = [acc for acc in accounts if is_account_online(acc)]
     target_acc = None
     if req.mt5Login:
@@ -379,22 +379,33 @@ def _resolve_single_online_login(db: Session, user_id: str) -> str | None:
     CLOSE/MODIFY omit mt5Login: the bridge has its own fallback routing, but
     gateway accounts need an explicit login to execute.
     """
-    accounts = db.query(MT5Account).filter(MT5Account.user_id == user_id).all()
+    accounts = db.query(MT5Account).filter(MT5Account.user_id == user_id, not_removed()).all()
     online = [a for a in accounts if is_account_online(a)]
     return online[0].login if len(online) == 1 else None
 
 
-def _gateway_account(db: Session, mt5_login: str | None) -> MT5Account | None:
+def _gateway_account(db: Session, mt5_login: str | None, user_id: str | None = None) -> MT5Account | None:
     """取目标 MT5 账号的 gateway 绑定行；不是 gateway 账号返回 None。
 
     以前这里是个只回 bool 的 _is_gateway_account。改成返回整行，是因为调用方
     现在还要看这条绑定有没有被撤销——只回 bool 就得再查一次同一行。
     This used to be a bool-only _is_gateway_account; callers now also need to
     know whether the binding was revoked, which a bool would cost a second query.
+
+    必须带 user_id：唯一约束是 (user_id, login, server)，两个用户可以绑同一个
+    登录号（各自验证过主密码）。只按 login 查会随机拿到别人的那一行，用别人的
+    撤销状态和来源来判断自己的单——下单本身仍打本人账号（前面已校验归属），
+    但判定依据错行。user_id 传 None 只为兼容旧调用，新代码一律传。
+    Must scope by user_id: the unique key is (user_id, login, server), so two
+    users may hold the same login. Filtering on login alone picks an arbitrary
+    row and judges this order by someone else's revocation state and source.
     """
     if not mt5_login:
         return None
-    acc = db.query(MT5Account).filter(MT5Account.login == mt5_login).first()
+    q = db.query(MT5Account).filter(MT5Account.login == mt5_login)
+    if user_id is not None:
+        q = q.filter(MT5Account.user_id == user_id)
+    acc = q.first()
     if acc is None or acc.source != "gateway":
         return None
     return acc
@@ -414,9 +425,73 @@ def _apply_trade_result(order: Order, rsp: TradeRsp) -> None:
             order.mt5_position = rsp.position
         order.filled_price = rsp.price or None
         order.message = ""
+    elif rsp.error == "timeout":
+        # 网关没回话不等于拒绝：这笔可能已经执行（见 _call_gateway_idempotent）。
+        # 落 FAILED 而不是 REJECTED，界面文案据此提示"先核对持仓"。
+        # No answer is not a rejection — the order may have executed. FAILED, not
+        # REJECTED, so the UI says "check your positions" rather than "declined".
+        order.status = "FAILED"
+        order.message = rsp.retcode + (": " + rsp.message if rsp.message else "")
     else:
         order.status = "REJECTED"
         order.message = rsp.retcode + (": " + rsp.message if rsp.message else "")
+
+
+# 一次网关交易调用的时限（秒）。dealer 回执最长 60 秒（gateway.ini 的
+# dealer_timeout_ms），再留 5 秒给网络。
+# One gateway trade call's budget: the dealer wait is up to 60s, plus 5s for the wire.
+GATEWAY_TRADE_TIMEOUT = 65.0
+# 超时后用同一 clientOrderId 再问一次的时限：网关那边若仍在等 dealer，会等到
+# dealer 超时 + 5 秒才回，这里要比它长。
+# Budget for the follow-up ask: the gateway may hold the call for dealer timeout + 5s.
+GATEWAY_RECONCILE_TIMEOUT = 75.0
+
+
+def _call_gateway_idempotent(order: Order, make_call) -> TradeRsp:
+    """带"超时再问一次"的网关交易调用。
+
+    **为什么**：网关等 dealer 回执最长 60 秒，一旦这边超时，那笔单可能已经成交。
+    以前直接落 REJECTED/FAILED，用户看到"失败"就重下，真仓里就多一笔（2026-08-11
+    的事故是同一类）。现在网关按 clientOrderId 做了幂等缓存，超时后拿**同一个**
+    clientOrderId 再问一次：已执行 → 拿到缓存结果；仍在执行 → 网关等它完成再回；
+    还是等不到 → 落 FAILED，且提示先核对持仓再重下。第二问不会造成第二笔成交。
+
+    `make_call(timeout)` 返回一个协程；本函数在线程池里，经 run_on_main_loop 提交。
+    Gateway trade call with one follow-up on timeout. The dealer wait can take
+    60s; after a timeout the order may already be filled, and marking it
+    REJECTED made users re-place it. With the gateway's clientOrderId cache the
+    follow-up returns the cached result (or waits for the in-flight one) instead
+    of executing again. Still unknown after that → FAILED with a "check your
+    positions first" message.
+    """
+    def _once(timeout: float) -> TradeRsp:
+        try:
+            return run_on_main_loop(make_call(timeout), timeout=timeout + 5.0)
+        except TimeoutError:
+            return TradeRsp(ok=False, retcode="", message="Gateway 响应超时",
+                            deal=0, order=0, price=0.0, error="timeout")
+
+    rsp = _once(GATEWAY_TRADE_TIMEOUT)
+    if rsp.error != "timeout" and rsp.retcode != "IN_PROGRESS":
+        return rsp
+    logger.warning(
+        "Gateway %s %s 超时/仍在执行，用同一 clientOrderId 再问一次",
+        order.action, order.client_order_id,
+    )
+    again = _once(GATEWAY_RECONCILE_TIMEOUT)
+    if again.error == "timeout" or again.retcode == "IN_PROGRESS":
+        return TradeRsp(
+            ok=False, retcode="GATEWAY_TIMEOUT",
+            message=(
+                "网关两次未在时限内回话，这笔指令可能已经执行，请先核对持仓再重下 / "
+                "gateway timed out twice; the order may have executed, check positions before retrying"
+            ),
+            deal=0, order=0, price=0.0, error="timeout",
+        )
+    if again.replayed:
+        logger.info("Gateway %s %s 第二问拿到缓存结果 -> ok=%s %s",
+                    order.action, order.client_order_id, again.ok, again.retcode)
+    return again
 
 
 def _try_gateway_execute(db: Session, order: Order) -> dict | None:
@@ -427,7 +502,7 @@ def _try_gateway_execute(db: Session, order: Order) -> dict | None:
     immediately via the gateway HTTP API. Returns an ORDER_UPDATE push payload,
     or None for non-gateway accounts.
     """
-    account = _gateway_account(db, order.mt5_login)
+    account = _gateway_account(db, order.mt5_login, order.user_id)
     if account is None:
         return None
 
@@ -473,17 +548,21 @@ def _try_gateway_execute(db: Session, order: Order) -> dict | None:
             # nothing in the broker's table, so it went out as-is and was
             # always rejected. The suffix still comes from the gateway's own
             # per-group resolution; only the name is collapsed here.
-            rsp = run_on_main_loop(gw_open(
+            rsp = _call_gateway_idempotent(order, lambda timeout: gw_open(
                 login, broker_symbol(order.symbol),
                 order.side or "BUY", order.volume or 0.01,
                 order.sl or 0, order.tp or 0,
                 order.client_order_id or "",
-            ), timeout=65.0)
+                client_order_id=order.client_order_id or "",
+                timeout=timeout,
+            ))
         elif order.action == "CLOSE":
-            rsp = run_on_main_loop(gw_close(
+            rsp = _call_gateway_idempotent(order, lambda timeout: gw_close(
                 login, order.ticket or 0, order.volume or 0,
                 order.client_order_id or "",
-            ), timeout=65.0)
+                client_order_id=order.client_order_id or "",
+                timeout=timeout,
+            ))
         elif order.action == "MODIFY":
             rsp = run_on_main_loop(gw_modify(
                 login, order.ticket or 0, order.sl or 0, order.tp or 0,
@@ -518,8 +597,14 @@ def _try_gateway_execute(db: Session, order: Order) -> dict | None:
 
 
 def _bound_logins(db: Session, user_id: str) -> list[str]:
-    """该用户当前仍绑定的 MT5 账号登录名（已删除/换绑的旧账号不在内）。
-    This user's currently-bound MT5 account logins (deleted/replaced accounts excluded)."""
+    """该用户名下所有 MT5 账号登录名，**含用户已删除（软删）的**。
+
+    这是胜率 / 已平仓明细的过滤集：删除账号是"不想再看到它、不想再往里下单"，
+    不是"抹掉我在它上面的战绩"。软删之前这里的行真的没了，历史随之消失，重绑
+    才回来——正是软删要修的问题。
+    All of this user's logins **including soft-removed ones**: this feeds the
+    win-rate / closed-trade filters, and removing an account means "stop showing
+    and trading it", not "erase my record on it"."""
     return [row[0] for row in db.query(MT5Account.login).filter(MT5Account.user_id == user_id).all()]
 
 
@@ -658,7 +743,7 @@ def _assert_account_owned(db: Session, user_id: str, mt5_login: str | None) -> N
         return
     acc = (
         db.query(MT5Account)
-        .filter(MT5Account.user_id == user_id, MT5Account.login == mt5_login)
+        .filter(MT5Account.user_id == user_id, MT5Account.login == mt5_login, not_removed())
         .first()
     )
     if acc is None:

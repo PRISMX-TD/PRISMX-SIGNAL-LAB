@@ -23,7 +23,9 @@ from app.core.rate_limit import (
 from app.models import ClosedTrade, MT5Account, Order, User
 from app.services.account_type import classify_group
 from app.services.deps import get_current_user
-from app.services.gateway_binding import enforce, is_revoked
+from app.services.gateway_binding import (
+    enforce, is_removed, is_revoked, mark_removed, not_removed,
+)
 from app.services.gateway_client import (
     get_account as gw_get_account,
     get_deals as gw_get_deals,
@@ -284,10 +286,12 @@ def gateway_verify(
     #    revoked binding — blocking it would strand FREE users unless they unbind
     #    first, which orphans their trading history.
     account_limit = max_mt5_accounts(user.plan)
-    if existing is None and rsp.valid and account_limit is not None:
+    # 软删过的行按"新绑定"算：受账户数上限约束，放行则复活。
+    # A soft-removed row re-verifying counts as a new binding for the plan limit.
+    if (existing is None or is_removed(existing)) and rsp.valid and account_limit is not None:
         existing_count = (
             db.query(MT5Account)
-            .filter(MT5Account.user_id == user.id)
+            .filter(MT5Account.user_id == user.id, not_removed())
             .count()
         )
         if existing_count >= account_limit:
@@ -397,7 +401,7 @@ def list_gateway_accounts(
     """列出当前用户的所有 Gateway 绑定账号。"""
     rows = (
         db.query(MT5Account)
-        .filter(MT5Account.user_id == user.id, MT5Account.source == "gateway")
+        .filter(MT5Account.user_id == user.id, MT5Account.source == "gateway", not_removed())
         .all()
     )
     return [
@@ -488,21 +492,24 @@ def unbind_gateway_account(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """解绑一个 Gateway 账号。"""
+    """解绑一个 Gateway 账号。**软删**（见 gateway_binding.REASON_USER_REMOVED）：
+    行留着，订单与平仓明细的归属不丢；轮询、下单、榜单、列表全部不再看到它；
+    重新验证即复活。Soft delete: the row stays so history keeps its owner; the
+    account leaves polling, orders, boards and lists; re-verifying revives it."""
     row = (
         db.query(MT5Account)
         .filter(
             MT5Account.user_id == user.id,
             MT5Account.login == login,
             MT5Account.source == "gateway",
+            not_removed(),
         )
         .first()
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Gateway 账号不存在")
 
-    db.delete(row)
-    db.commit()
+    mark_removed(db, row)
 
     logger.info("Gateway 解绑: user=%s login=%s", user.id, login)
     return {"ok": True}
@@ -634,7 +641,68 @@ GATEWAY_DEALS_CATCHUP_SECONDS = 7 * 24 * 60 * 60
 # 0 when never observed (old behaviour: don't guess).
 _OFFSET_MAX_SECONDS = 14.5 * 3600       # 超出这个就不是时区 / beyond a timezone
 _OFFSET_ROUND_SECONDS = 30 * 60         # 时区偏移都是半小时的整数倍 / zones are half-hour multiples
+# 进程内缓存，真身在 mt5_accounts.server_utc_offset。以前只有这个 dict：重启就忘，
+# 要等该账号再有一笔本平台开仓才学得回来，学不回来就按 0 入库——而 closed_trades
+# 按 deal_ticket 去重，错的时间永远不会自愈（scripts/shift_closed_at.py 就是为此
+# 而生）。现在：观测到就写库，读不到缓存就读库，_gateway_accounts 每轮顺带预热。
+# In-process cache; the source of truth is mt5_accounts.server_utc_offset. This
+# dict used to be all there was: lost on restart, re-learned only when the login
+# next opened a platform position, 0 until then — and closed_trades dedupes on
+# deal_ticket, so a wrong timestamp never self-corrects. Now persisted on
+# observation, loaded on cache miss, and pre-warmed by _gateway_accounts.
 _gateway_utc_offset: dict[str, float] = {}   # login -> 最近观测到的偏移（秒）
+
+
+def load_server_offset(db: Session, login: str) -> float | None:
+    """读该账号持久化的服务器时区偏移；本账号没有就借同一网关下任一账号的。
+
+    网关只连一台 MT5 服务器（gateway.ini 的 server），偏移是**服务器级**的，
+    不是账号级的：一个从未在本平台开过仓的新绑定账号，用别的账号观测到的值是
+    对的，比按 0 处理强得多。两边都没有返回 None，由调用方决定退回 0。
+    只看 gateway 通道的行：bridge 账号的时间已在客户端换算过，与此无关。
+
+    Persisted offset for this login, falling back to any other gateway login's
+    value: the gateway talks to exactly one MT5 server, so the offset is
+    per-server, not per-login. None when nothing has ever been observed.
+    """
+    own = (
+        db.query(MT5Account.server_utc_offset)
+        .filter(
+            MT5Account.source == "gateway",
+            MT5Account.login == login,
+            MT5Account.server_utc_offset.isnot(None),
+        )
+        .first()
+    )
+    if own is not None:
+        return float(own[0])
+    sibling = (
+        db.query(MT5Account.server_utc_offset)
+        .filter(
+            MT5Account.source == "gateway",
+            MT5Account.server_utc_offset.isnot(None),
+        )
+        .first()
+    )
+    return float(sibling[0]) if sibling is not None else None
+
+
+def store_server_offset(db: Session, login: str, offset: float) -> None:
+    """把观测到的偏移写到该 login 的所有 gateway 行（多用户绑同一账号时一起更新）。"""
+    db.query(MT5Account).filter(
+        MT5Account.source == "gateway",
+        MT5Account.login == login,
+    ).update({MT5Account.server_utc_offset: int(offset)}, synchronize_session=False)
+    db.commit()
+
+
+def cached_server_offset(login: str) -> float:
+    """缓存里该 login 的偏移；没有就借任一已缓存的（同一服务器），再没有才 0。"""
+    if login in _gateway_utc_offset:
+        return _gateway_utc_offset[login]
+    for value in _gateway_utc_offset.values():
+        return value
+    return 0.0
 
 
 def observe_server_offset(deals: list, opened_at_by_position: dict[int, datetime]) -> float | None:
@@ -849,13 +917,20 @@ async def gateway_positions_loop() -> None:
         db = SessionLocal()
         try:
             rows = (
-                db.query(MT5Account.user_id, MT5Account.login)
+                db.query(MT5Account.user_id, MT5Account.login, MT5Account.server_utc_offset)
                 .filter(
                     MT5Account.source == "gateway",
                     MT5Account.revoked_at.is_(None),
                 )
                 .all()
             )
+            # 顺带预热时区偏移缓存：重启后第一轮扫描的 from 窗口就能用上库里的值，
+            # 不必等 _save_closed_trades 先跑一次。只补缺，不覆盖本轮已观测到的。
+            # Pre-warm the offset cache so the first post-restart scan window uses
+            # the persisted value; fills gaps only, never overrides a fresh observation.
+            for _uid, login, offset in rows:
+                if offset is not None and login not in _gateway_utc_offset:
+                    _gateway_utc_offset[login] = float(offset)
             return [(r[0], r[1]) for r in rows]
         finally:
             db.close()
@@ -963,16 +1038,30 @@ async def gateway_positions_loop() -> None:
                 ).all()
             }
             known = set(opened_at)
+
+            offset = observe_server_offset(deals, opened_at)
+            if offset is not None:
+                # 新观测优先：变了就同时更新缓存与库，重启后从库读回。
+                # Fresh observation wins; persist on change so a restart reads it back.
+                if _gateway_utc_offset.get(login) != offset:
+                    logger.info("Gateway 服务器时区偏移 login=%s = %+.1f 小时", login, offset / 3600)
+                    store_server_offset(db, login, offset)
+                _gateway_utc_offset[login] = offset
+            elif login in _gateway_utc_offset:
+                offset = _gateway_utc_offset[login]
+            else:
+                # 窗口里没有本平台开仓腿且缓存也没有（典型：刚重启）：读库，
+                # 本账号没有就借同一服务器上别的账号的；都没有才退回 0。
+                # No IN leg and nothing cached (typically right after a restart):
+                # read the persisted value, or a sibling login's; 0 only as last resort.
+                loaded = load_server_offset(db, login)
+                if loaded is not None:
+                    _gateway_utc_offset[login] = loaded
+                    offset = loaded
+                else:
+                    offset = 0.0
         finally:
             db.close()
-
-        offset = observe_server_offset(deals, opened_at)
-        if offset is not None:
-            if _gateway_utc_offset.get(login) != offset:
-                logger.info("Gateway 服务器时区偏移 login=%s = %+.1f 小时", login, offset / 3600)
-            _gateway_utc_offset[login] = offset
-        else:
-            offset = _gateway_utc_offset.get(login, 0.0)
 
         legs = build_closed_trade_legs(deals, settings.GATEWAY_COMMENT_PREFIX, known, offset)
         if not legs:
@@ -1092,7 +1181,7 @@ async def gateway_positions_loop() -> None:
             from_unix = int(time.time()) - (
                 GATEWAY_DEALS_CATCHUP_SECONDS if first_scan
                 else GATEWAY_DEALS_LOOKBACK_SECONDS
-            ) - int(max(0.0, -_gateway_utc_offset.get(login, 0.0)))
+            ) - int(max(0.0, -cached_server_offset(login)))
             deals, derr = await gw_get_deals(int(login), from_unix, to_unix)
             if derr:
                 logger.warning("Gateway 成交历史读取失败 login=%s: %s", login, derr)

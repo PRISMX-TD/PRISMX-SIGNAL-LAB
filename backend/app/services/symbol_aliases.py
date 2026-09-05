@@ -58,7 +58,10 @@ from __future__ import annotations
 # deliberately not merged.
 _ALIAS_GROUPS: tuple[frozenset[str], ...] = (
     frozenset({"BTCUSD", "BTCUSDT"}),
-    frozenset({"WTI", "USOIL", "XTIUSD", "WTICOUSD"}),
+    # CL 是桥接与网关两份表里都有的原油写法，这里以前漏了——scripts/check_symbol_aliases
+    # 上线时抓到的第一处漂移。/ "CL" was in the bridge and gateway tables but missing
+    # here: the first drift the alias check caught.
+    frozenset({"WTI", "USOIL", "XTIUSD", "WTICOUSD", "CL"}),
 )
 
 # 展开成 名字 -> 该名字所在的整组，查表 O(1)。

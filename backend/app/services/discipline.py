@@ -60,6 +60,7 @@ import statistics
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import distinct, or_
+from starlette.concurrency import run_in_threadpool
 
 from app.core.database import SessionLocal
 from app.models import ClosedTrade, DisciplineSnapshot, MT5Account, Order, Signal
@@ -720,81 +721,95 @@ async def discipline_snapshot_loop(
     Periodically compute and persist each active user's discipline-score
     snapshot for today (runs once on startup, then loops at the fixed interval).
 
-    首轮延后一点:这里整段是同步 DB 操作,直接跑在事件循环上,生产实测首轮阻塞
-    1.3 秒,顶在 uvicorn bind 端口之前。快照不紧急,让端口先起来。
-    (只推迟首轮时机,不动计算逻辑——本轮只处理启动阻塞。)
-    The first pass is delayed: this body is all synchronous DB work running on the
-    event loop, measured blocking 1.3s before uvicorn binds the port. Snapshots
-    aren't urgent, so let the port come up first. (Timing only; the computation is
-    untouched, since this change is scoped to the startup stall.)
+    首轮延后一点：快照不紧急，让端口先起来，与其它循环错峰。计算本身在
+    snapshot_all_discipline 里，走线程池——它是全同步 DB 操作，且对每个用户 ×
+    (1 + 账号数) 各算一次纪律分，生产实测首轮 1.3 秒；直接跑在事件循环上会把 WS
+    推送、bridge 轮询、gateway 事件泵一起卡住，用户越多卡越久。
+    The first pass is delayed so the port comes up first and the loops stagger.
+    The work lives in snapshot_all_discipline and runs in the thread pool: it is
+    all synchronous DB work, computing a score per user × (1 + accounts), measured
+    at 1.3s — on the event loop it would stall WS pushes, bridge polling and the
+    gateway event pump, for longer as the user base grows.
 
-    startup_delay 可覆盖,便于测试里立即跑首轮。
+    startup_delay 可覆盖，便于测试里立即跑首轮。
     startup_delay is overridable so tests can run the first pass immediately.
     """
     if startup_delay:
         await asyncio.sleep(startup_delay)
     while True:
         try:
-            db = SessionLocal()
-            try:
-                cfg = get_discipline_settings(db)
-                window_days = int(cfg["window_days"])
-                cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
-                user_ids = [
-                    row[0]
-                    for row in db.query(distinct(Order.user_id))
-                    .filter(
-                        Order.signal_id.isnot(None),
-                        Order.action == "ORDER",
-                        Order.status == "FILLED",
-                        Order.created_at >= cutoff,
-                    )
-                    .all()
-                ]
-                today = datetime.now(timezone.utc).date().isoformat()
-                count = 0
-                for user_id in user_ids:
-                    bound = [
-                        row[0]
-                        for row in db.query(MT5Account.login).filter(MT5Account.user_id == user_id).all()
-                    ]
-                    # "全部账号"聚合行（login=""）+ 每个绑定账号各一行
-                    targets: list[str | None] = [None] + bound
-                    for target_login in targets:
-                        snapshot_login = "" if target_login is None else target_login
-                        result = compute_discipline(
-                            db, user_id,
-                            bound_logins=bound if target_login is None else None,
-                            login=target_login,
-                        )
-                        row = (
-                            db.query(DisciplineSnapshot)
-                            .filter(
-                                DisciplineSnapshot.user_id == user_id,
-                                DisciplineSnapshot.login == snapshot_login,
-                                DisciplineSnapshot.date == today,
-                            )
-                            .first()
-                        )
-                        if row is None:
-                            db.add(
-                                DisciplineSnapshot(
-                                    user_id=user_id,
-                                    login=snapshot_login,
-                                    date=today,
-                                    total=result["total"],
-                                    dimensions=json.dumps(result["dimensions"]),
-                                )
-                            )
-                        else:
-                            row.total = result["total"]
-                            row.dimensions = json.dumps(result["dimensions"])
-                        count += 1
-                if count:
-                    db.commit()
-                    logger.info("discipline_snapshot_loop: upserted %d snapshot row(s)", count)
-            finally:
-                db.close()
+            await run_in_threadpool(snapshot_all_discipline)
         except Exception:
             logger.exception("discipline_snapshot_loop error")
         await asyncio.sleep(SNAPSHOT_INTERVAL_SECONDS)
+
+
+def snapshot_all_discipline(today: str | None = None) -> int:
+    """一趟快照：给每个窗口内有信号单成交的用户写当日纪律分（聚合行 + 每账号一行），
+    返回 upsert 的行数。同步、开自己的 session；由 discipline_snapshot_loop 放进
+    线程池调用，也可在脚本/测试里直接调。
+    One snapshot pass: upsert today's discipline score for every user with a
+    signal fill inside the window (aggregate row + one per account); returns the
+    row count. Synchronous with its own session; the loop runs it in the thread
+    pool, and scripts/tests may call it directly."""
+    db = SessionLocal()
+    try:
+        cfg = get_discipline_settings(db)
+        window_days = int(cfg["window_days"])
+        cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
+        user_ids = [
+            row[0]
+            for row in db.query(distinct(Order.user_id))
+            .filter(
+                Order.signal_id.isnot(None),
+                Order.action == "ORDER",
+                Order.status == "FILLED",
+                Order.created_at >= cutoff,
+            )
+            .all()
+        ]
+        today = today or datetime.now(timezone.utc).date().isoformat()
+        count = 0
+        for user_id in user_ids:
+            bound = [
+                row[0]
+                for row in db.query(MT5Account.login).filter(MT5Account.user_id == user_id).all()
+            ]
+            # "全部账号"聚合行（login=""）+ 每个绑定账号各一行
+            targets: list[str | None] = [None] + bound
+            for target_login in targets:
+                snapshot_login = "" if target_login is None else target_login
+                result = compute_discipline(
+                    db, user_id,
+                    bound_logins=bound if target_login is None else None,
+                    login=target_login,
+                )
+                row = (
+                    db.query(DisciplineSnapshot)
+                    .filter(
+                        DisciplineSnapshot.user_id == user_id,
+                        DisciplineSnapshot.login == snapshot_login,
+                        DisciplineSnapshot.date == today,
+                    )
+                    .first()
+                )
+                if row is None:
+                    db.add(
+                        DisciplineSnapshot(
+                            user_id=user_id,
+                            login=snapshot_login,
+                            date=today,
+                            total=result["total"],
+                            dimensions=json.dumps(result["dimensions"]),
+                        )
+                    )
+                else:
+                    row.total = result["total"]
+                    row.dimensions = json.dumps(result["dimensions"])
+                count += 1
+        if count:
+            db.commit()
+            logger.info("discipline_snapshot_loop: upserted %d snapshot row(s)", count)
+        return count
+    finally:
+        db.close()

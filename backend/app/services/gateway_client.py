@@ -104,6 +104,15 @@ class TradeRsp:
     # Real position id, resolved by the gateway on open (0 for close/modify).
     # Older gateways omit the field; defaulting to 0 keeps the old behaviour.
     position: int = 0
+    # 网关按 clientOrderId 回放的缓存结果（同一笔请求第二次问）。旧网关没有这个
+    # 字段，缺省 False。
+    # True when the gateway replayed a cached result for this clientOrderId.
+    replayed: bool = False
+    # 传输层错误分类（_post 的 error 字段）："timeout" 表示网关没在时限内回话——
+    # 请求可能已经执行，调用方必须用同一 clientOrderId 再问一次而不是当作拒绝。
+    # Transport-level error class from _post; "timeout" means the gateway may have
+    # executed the request, so the caller must re-ask with the same clientOrderId.
+    error: str = ""
 
 
 @dataclass
@@ -479,20 +488,7 @@ async def get_deals(login: int, from_unix: int, to_unix: int) -> tuple[list[Deal
     return deals, ""
 
 
-async def trade_open(
-    login: int, symbol: str, side: str, volume: float,
-    stop_loss: float = 0, take_profit: float = 0, tag: str = "",
-) -> TradeRsp:
-    """市价开仓。"""
-    data = await _post("/trade/open", {
-        "login": login,
-        "symbol": symbol,
-        "side": side.upper(),
-        "volume": volume,
-        "stopLoss": stop_loss,
-        "takeProfit": take_profit,
-        "tag": tag,
-    })
+def _trade_rsp(data: dict) -> TradeRsp:
     return TradeRsp(
         ok=data.get("ok", False),
         retcode=str(data.get("retcode", "")),
@@ -501,25 +497,49 @@ async def trade_open(
         order=data.get("order", 0),
         price=data.get("price", 0.0),
         position=data.get("position", 0) or 0,
+        replayed=bool(data.get("replayed", False)),
+        error=str(data.get("error", "") or ""),
     )
 
 
-async def trade_close(login: int, ticket: int, volume: float = 0, tag: str = "") -> TradeRsp:
-    """平仓（volume=0 全平）。"""
+async def trade_open(
+    login: int, symbol: str, side: str, volume: float,
+    stop_loss: float = 0, take_profit: float = 0, tag: str = "",
+    client_order_id: str = "", timeout: float | None = None,
+) -> TradeRsp:
+    """市价开仓。
+
+    `client_order_id` 是幂等键：网关对同一 (login, clientOrderId) 只执行一次，重复
+    请求回放缓存结果（见 gateway/Idempotency.cs）。`tag` 仍然照旧写进 comment。
+    `client_order_id` is the idempotency key — the gateway executes one
+    (login, clientOrderId) once and replays the cached result after that.
+    """
+    data = await _post("/trade/open", {
+        "login": login,
+        "symbol": symbol,
+        "side": side.upper(),
+        "volume": volume,
+        "stopLoss": stop_loss,
+        "takeProfit": take_profit,
+        "tag": tag,
+        "clientOrderId": client_order_id,
+    }, timeout=timeout)
+    return _trade_rsp(data)
+
+
+async def trade_close(
+    login: int, ticket: int, volume: float = 0, tag: str = "",
+    client_order_id: str = "", timeout: float | None = None,
+) -> TradeRsp:
+    """平仓（volume=0 全平）。`client_order_id` 语义同 trade_open。"""
     data = await _post("/trade/close", {
         "login": login,
         "ticket": ticket,
         "volume": volume,
         "tag": tag,
-    })
-    return TradeRsp(
-        ok=data.get("ok", False),
-        retcode=str(data.get("retcode", "")),
-        message=data.get("message", ""),
-        deal=data.get("deal", 0),
-        order=data.get("order", 0),
-        price=data.get("price", 0.0),
-    )
+        "clientOrderId": client_order_id,
+    }, timeout=timeout)
+    return _trade_rsp(data)
 
 
 async def trade_modify(login: int, ticket: int, sl: float = 0, tp: float = 0) -> TradeRsp:

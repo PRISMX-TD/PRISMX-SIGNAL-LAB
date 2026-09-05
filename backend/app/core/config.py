@@ -6,7 +6,7 @@ import logging
 import os
 import sys
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("prismx.config")
 
@@ -549,9 +549,11 @@ class Settings(BaseSettings):
     # forwarding — a high cap would let concurrent uploads eat RAM.
     UPLOAD_MAX_BYTES: int = 4 * 1024 * 1024
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    # pydantic-settings v2 写法；语义与旧的 `class Config` 完全一致（含默认
+    # extra="forbid"——.env 里多一个未知键仍会拒绝启动，运维踩坑 #24 那条不变）。
+    # pydantic-settings v2 form; identical semantics to the old inner Config class,
+    # including the default extra="forbid" (an unknown .env key still refuses to start).
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 
 settings = Settings()

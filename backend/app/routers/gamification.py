@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.models import LeaderboardSnapshot, PeriodBaseline, User, UserBadge, UserTask
 from app.schemas import GamificationSettingsPatchIn, VisibilityPatchIn
-from app.services.deps import get_current_user, get_db
+from app.services.deps import get_current_user, get_db, require_admin
 from app.services.gamification import (
     BADGES, GROUPS, LEVEL_TITLES, compute_comprehensive_stats, condition_states,
     judge_and_award_badges, judge_and_record_conditions, level_of, equipped_list,
@@ -470,7 +470,14 @@ def gamification_leaderboard(request: Request, board: str, period: str,
 # router itself carries no require_admin dependency — it's attached once in
 # main.py's include_router(..., dependencies=[Depends(require_admin)]) instead
 # of repeating it on every endpoint.
-admin_router = APIRouter(prefix="/admin/gamification", tags=["admin"])
+# 守卫写在 router 自己身上，不只靠 main.py 挂载处的 dependencies：以后谁单独
+# include_router 这个对象（测试、拆服务），端点也不会裸奔。main.py 那一层保留，
+# 两层都是 require_admin，重复校验的代价是一次角色比较。
+# The guard lives on the router itself, not only on main.py's include_router:
+# anyone including this router elsewhere still gets it. main.py keeps its own
+# layer too; a duplicated role check costs nothing.
+admin_router = APIRouter(prefix="/admin/gamification", tags=["admin"],
+                         dependencies=[Depends(require_admin)])
 
 
 @admin_router.get("/user/{user_id}")

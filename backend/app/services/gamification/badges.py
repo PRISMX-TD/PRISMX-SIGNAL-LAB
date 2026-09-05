@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.exc import IntegrityError
 
 from app.models import DisciplineSnapshot, MT5Account, Order, Signal, User, UserBadge
-from .stats import compute_account_lifetime_stats, compute_comprehensive_stats
+from .stats import compute_account_lifetime_stats, compute_comprehensive_stats, load_trade_data
 
 FOUNDER_DEADLINE = datetime(2027, 1, 1, tzinfo=timezone.utc)
 REAL = 2
@@ -119,7 +119,8 @@ def _has_real_fill(db, user_id) -> bool:
 
 
 def _j_profile_complete(db, user, ctx):
-    bound = db.query(MT5Account.id).filter(MT5Account.user_id == user.id).first()
+    from app.services.gateway_binding import not_removed
+    bound = db.query(MT5Account.id).filter(MT5Account.user_id == user.id, not_removed()).first()
     return bool(user.nickname) and bound is not None
 
 
@@ -149,13 +150,16 @@ def _j_founder_2026(db, user, ctx):
     return created is not None and created < FOUNDER_DEADLINE and _has_real_fill(db, user.id)
 
 
-def _resolved_real_positions(db, user_id, cutoff=None):
-    """[(order, profit, last_close_at)]，实盘 + verified + 整仓。"""
-    from .stats import _filled_orders, _legs_by_position, _resolve
+def _resolved_real_positions(db, user_id, cutoff=None, data: dict | None = None):
+    """[(order, profit, last_close_at)]，实盘 + verified + 整仓。
+    `data` 是 stats.load_trade_data 的结果；传了就不再查库（每小时循环里五枚
+    勋章共用一份），不传就自己查。"""
+    from .stats import _orders_since, _resolve
     from app.services.trade_performance import position_id_of
-    orders = [o for o in _filled_orders(db, user_id, cutoff) if o.trade_mode == REAL]
-    keys = {(o.mt5_login, position_id_of(o)) for o in orders if position_id_of(o)}
-    legs_map = _legs_by_position(db, user_id, keys)
+    if data is None:
+        data = load_trade_data(db, user_id)
+    orders = [o for o in _orders_since(data["orders"], cutoff) if o.trade_mode == REAL]
+    legs_map = data["legs"]
     out = []
     for o, p in _resolve(orders, legs_map):
         legs = legs_map[(o.mt5_login, position_id_of(o))]
@@ -163,11 +167,11 @@ def _resolved_real_positions(db, user_id, cutoff=None):
     return out
 
 
-def _evergreen_months(db, user_id) -> int:
+def _evergreen_months(db, user_id, data: dict | None = None) -> int:
     now = datetime.now(timezone.utc)
     cur_month = (now.year, now.month)
     monthly: dict[tuple[int, int], float] = {}
-    for _o, p, closed in _resolved_real_positions(db, user_id):
+    for _o, p, closed in _resolved_real_positions(db, user_id, data=data):
         ts = closed if closed.tzinfo else closed.replace(tzinfo=timezone.utc)
         key = (ts.year, ts.month)
         if key != cur_month:                       # 未结束的当前月不计
@@ -187,13 +191,13 @@ def _evergreen_months(db, user_id) -> int:
 
 
 def _j_evergreen(n):
-    return lambda db, u, c: _evergreen_months(db, u.id) >= n
+    return lambda db, u, c: _evergreen_months(db, u.id, c.get("data")) >= n
 
 
 def _j_profit_factor(db, user, ctx):
     from .stats import GAMIFICATION_WINDOW_DAYS
     cutoff = datetime.now(timezone.utc) - timedelta(days=GAMIFICATION_WINDOW_DAYS)
-    res = _resolved_real_positions(db, user.id, cutoff)
+    res = _resolved_real_positions(db, user.id, cutoff, data=ctx.get("data"))
     if len(res) < 100:
         return False
     profits = [p for _o, p, _t in res]
@@ -212,12 +216,12 @@ def _j_profit_factor(db, user, ctx):
     return (sum(wins) / len(wins)) / (sum(losses) / len(losses)) >= 2.0
 
 
-def _consecutive_clean_signal_positions(db, user_id) -> int:
+def _consecutive_clean_signal_positions(db, user_id, data: dict | None = None) -> int:
     """按平仓时间倒序数「无恶意移损」的信号整仓连续串（对照 discipline.py D1 口径）。"""
     from app.services.settings_store import get_discipline_settings
     from app.services.trade_performance import position_id_of
     tol = float(get_discipline_settings(db).get("sl_tolerance_pct", 0.10))
-    sig_pos = [(o, t) for o, _p, t in _resolved_real_positions(db, user_id)
+    sig_pos = [(o, t) for o, _p, t in _resolved_real_positions(db, user_id, data=data)
                if o.signal_id is not None]
     sig_pos.sort(key=lambda x: x[1], reverse=True)
     # 批量取信号原始止损——判定"订单没止损"是弃权还是违规，要看信号本身有没有
@@ -293,12 +297,24 @@ def _consecutive_clean_signal_positions(db, user_id) -> int:
     return run
 
 
-def _discipline_streak(db, user_id, n) -> bool:
-    """login="" 聚合行；total<90 或 NULL 或缺日均断连（设计 §3.2：宁严勿松）。"""
+# 「纪律标兵 / 纪律大师」的分数线。设计文档按 08-27 重定口径**之前**的分数分布定的
+# 90 分，重定之后分数整体上移，技术文档 §15 要求用真实数据重新校准——跑
+# `python -m scripts.calibrate_discipline_badges` 看分布再定。集中成一个常量，
+# 校准脚本按不同分数线试算时也走同一个判定函数，不另写一份。
+# Threshold for the two discipline-streak badges. The spec picked 90 against the
+# pre-08-27 score distribution; scores moved up after the redefinition and the
+# tech doc (§15) asks for recalibration on real data — run
+# scripts/calibrate_discipline_badges.py. One constant, and the calibration script
+# reuses this very judge with alternative thresholds instead of a second copy.
+DISCIPLINE_BADGE_THRESHOLD = 90.0
+
+
+def _discipline_streak(db, user_id, n, threshold: float = DISCIPLINE_BADGE_THRESHOLD) -> bool:
+    """login="" 聚合行；total<threshold 或 NULL 或缺日均断连（设计 §3.2：宁严勿松）。"""
     rows = (db.query(DisciplineSnapshot.date, DisciplineSnapshot.total)
               .filter(DisciplineSnapshot.user_id == user_id,
                       DisciplineSnapshot.login == "").all())
-    ok_days = sorted(date.fromisoformat(d) for d, t in rows if t is not None and t >= 90)
+    ok_days = sorted(date.fromisoformat(d) for d, t in rows if t is not None and t >= threshold)
     run = 1
     for a, b in zip(ok_days, ok_days[1:]):
         run = run + 1 if b - a == timedelta(days=1) else 1
@@ -345,7 +361,7 @@ BADGES: dict[str, dict] = {
                          "judge": lambda db, u, c: _discipline_streak(db, u.id, 30),
                          "name": "纪律大师"},
     "no_bad_sl_50":     {"rarity": "epic", "category": "discipline",
-                         "judge": lambda db, u, c: _consecutive_clean_signal_positions(db, u.id) >= 50,
+                         "judge": lambda db, u, c: _consecutive_clean_signal_positions(db, u.id, c.get("data")) >= 50,
                          "name": "铁律如山"},
     "comp_podium":      {"rarity": "epic", "category": "competition", "judge": None,
                          "name": "比赛前三"},
@@ -360,13 +376,21 @@ BADGES: dict[str, dict] = {
 }
 
 
-def judge_and_award_badges(db, user_id) -> list[str]:
+def judge_and_award_badges(db, user_id, data: dict | None = None) -> list[str]:
+    """`data` 是 stats.load_trade_data 的结果，可由每小时循环预先读好传入；
+    这里把它放进 ctx，五枚要遍历整仓的勋章都从这一份数据判，不再各自查库。
+    `data` (from stats.load_trade_data) may be preloaded by the hourly pass; it
+    rides in ctx so the five position-walking judges share it instead of each
+    reloading the user's orders."""
     user = db.get(User, user_id)
     if user is None:
         return []
     owned = {b.badge_id for b in db.query(UserBadge).filter(UserBadge.user_id == user_id)}
-    ctx = {"stats": compute_comprehensive_stats(db, user_id),
-           "lifetime": compute_account_lifetime_stats(db, user_id)}
+    if data is None:
+        data = load_trade_data(db, user_id)
+    ctx = {"stats": compute_comprehensive_stats(db, user_id, data),
+           "lifetime": compute_account_lifetime_stats(db, user_id, data),
+           "data": data}
     newly = []
     for bid, meta in BADGES.items():
         if bid in owned or meta["judge"] is None:

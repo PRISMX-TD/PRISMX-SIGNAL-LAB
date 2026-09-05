@@ -23,7 +23,7 @@ from app.schemas import LOGIN_PATTERN, SUFFIX_PATTERN, AccountSuffixRequest, MT5
 from app.services.auto_manage import AUTO_PREFIX, evaluate_positions
 from app.services.connection_manager import manager
 from app.services.deps import ONLINE_WINDOW, get_current_user, is_account_online
-from app.services.gateway_binding import is_revoked
+from app.services.gateway_binding import is_removed, is_revoked, mark_removed, not_removed, restore_removed
 from app.services.plans import max_mt5_accounts
 from app.services.push_dispatch import (
     EVENT_BRIDGE_OFFLINE,
@@ -39,7 +39,7 @@ from app.services.settings_store import (
     server_matches_broker,
 )
 from app.services.symbol_aliases import broker_symbol
-from app.services.trade_performance import mark_positions_seen
+from app.services.trade_performance import known_position_ids, mark_positions_seen
 
 logger = logging.getLogger("prismx.bridge")
 
@@ -354,6 +354,14 @@ def _upsert_account(
         .first()
     )
     created = False
+    # 用户删过、桥接又报上来了：按"新账号"对待——受账户数上限约束，放行则复活。
+    # A soft-removed row the bridge reports again counts as new: subject to the
+    # plan limit, revived if allowed.
+    if row is not None and is_removed(row):
+        if account_limit is not None and existing_count >= account_limit:
+            return None, False
+        restore_removed(row)
+        created = True
     if row is None:
         if account_limit is not None and existing_count >= account_limit:
             return None, False
@@ -441,7 +449,7 @@ def _poll_db_work(
     bound_logins_ordered = [
         row[0]
         for row in db.query(MT5Account.login)
-        .filter(MT5Account.user_id == user.id)
+        .filter(MT5Account.user_id == user.id, not_removed())
         .order_by(MT5Account.login.asc())
         .all()
     ]
@@ -712,7 +720,7 @@ class BridgeResultRequest(BaseModel):
     login: str | None = Field(default=None, pattern=LOGIN_PATTERN)
 
 
-def _result_db_work(db: Session, user_id: int, req: "BridgeResultRequest"):
+def _result_db_work(db: Session, user_id: str, req: "BridgeResultRequest"):
     """回执落库的同步段。返回 (order, duplicate)。
 
     幂等判重下沉进 UPDATE 的 WHERE，用受影响行数判定，而不是"先读状态再无条件写"。
@@ -926,31 +934,10 @@ class BridgeClosedTradesRequest(BaseModel):
     data: list[BridgeClosedTrade] = []
 
 
-def _known_position_ids(db: Session, user_id: str, logins: set[str]) -> set[tuple[str, int]]:
-    """本用户已成交开仓订单的 (账号, 仓位编号) 集合——归属核验的依据。
-
-    两条通道的仓位编号存在不同列：bridge 在 mt5_ticket，gateway 在 mt5_position
-    （见 services/trade_performance.position_id_of），两个都收。只查上报涉及的
-    账号，不扫全表。
-    """
-    if not logins:
-        return set()
-    rows = (
-        db.query(Order.mt5_login, Order.mt5_ticket, Order.mt5_position)
-        .filter(
-            Order.user_id == user_id,
-            Order.action == "ORDER",
-            Order.status == "FILLED",
-            Order.mt5_login.in_(list(logins)),
-        )
-        .all()
-    )
-    known: set[tuple[str, int]] = set()
-    for login, ticket, position in rows:
-        for pos_id in (ticket, position):
-            if pos_id:
-                known.add((str(login), int(pos_id)))
-    return known
+# 归属核验的仓位号集合搬到 services/trade_performance.known_position_ids；
+# 保留别名，落库路径与既有测试的调用不动。
+# Moved to services/trade_performance.known_position_ids; alias kept for callers.
+_known_position_ids = known_position_ids
 
 
 def _trade_history_db_work(
@@ -1077,7 +1064,7 @@ def list_accounts(user: User = Depends(get_current_user), db: Session = Depends(
     """列出当前用户的所有 MT5 账号 / list all MT5 accounts of the user."""
     rows = (
         db.query(MT5Account)
-        .filter(MT5Account.user_id == user.id)
+        .filter(MT5Account.user_id == user.id, not_removed())
         .order_by(MT5Account.login.asc())
         .all()
     )
@@ -1124,15 +1111,15 @@ def delete_account(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """删除一个已知 MT5 账号（如已换券商的旧账号）。
+    """删除一个已知 MT5 账号（如已换券商的旧账号）。**软删**（见
+    gateway_binding.REASON_USER_REMOVED）：行留着，历史战绩不丢；列表不再显示。
 
-    在线账号拒绝删除：桥接仍在上报的话，下次轮询会立刻把它重新插回，
+    在线账号拒绝删除：桥接仍在上报的话，下次轮询会立刻把它复活，
     删除只会看起来"闪一下又出现"，不如直接提示用户先断开。
 
-    Delete a known MT5 account (e.g. a stale one after switching brokers).
-    Refuses to delete an online account: if the bridge is still reporting it,
-    the next poll would just re-insert the row, so deletion would appear to
-    flicker back — better to tell the user to disconnect first.
+    Remove a known MT5 account (e.g. a stale one after switching brokers). Soft
+    delete: the row stays so the user's history keeps its owner; it just leaves
+    the list. Refuses while online: the bridge's next poll would revive it.
     """
     row = (
         db.query(MT5Account)
@@ -1140,6 +1127,7 @@ def delete_account(
             MT5Account.user_id == user.id,
             MT5Account.login == login,
             MT5Account.server == (server or None),
+            not_removed(),
         )
         .first()
     )
@@ -1150,8 +1138,7 @@ def delete_account(
             status_code=409,
             detail="账号仍在线，请先断开桥接程序再删除 / Account is online; disconnect the bridge before deleting",
         )
-    db.delete(row)
-    db.commit()
+    mark_removed(db, row)
     return {"ok": True}
 
 

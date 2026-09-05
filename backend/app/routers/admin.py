@@ -22,6 +22,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
 from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
+from app.services.audit import log_change
 from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
 from app.services.strategy_winrate import compute_strategy_session_winrate
@@ -147,20 +148,10 @@ def list_users(
     return {"users": [x.model_dump(mode="json") for x in users], "total": total, "limit": limit, "offset": offset}
 
 
-def _log_change(db: Session, admin_id: str, target_id: str, field: str, old_value, new_value) -> None:
-    old_s = "" if old_value is None else str(old_value)
-    new_s = "" if new_value is None else str(new_value)
-    if old_s == new_s:
-        return
-    db.add(
-        AdminAuditLog(
-            admin_user_id=admin_id,
-            target_user_id=target_id,
-            field=field,
-            old_value=old_s,
-            new_value=new_s,
-        )
-    )
+# 审计写入搬到 services/audit.py（比赛终审等 services 层也要用，不该反向 import
+# router）。这里保留同名别名，本文件几十处调用点不动。
+# Audit logging lives in services/audit.py now; same-named alias keeps call sites.
+_log_change = log_change
 
 
 @router.patch("/users/bulk", response_model=dict)

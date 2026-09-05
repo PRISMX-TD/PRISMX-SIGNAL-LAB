@@ -27,7 +27,15 @@ logger = logging.getLogger("prismx.candle_store")
 # 60 秒 TTL，避免 tick 模式每秒都查几千行。
 # Replay baseline cache: (symbol, interval) -> (baseline: set, cached_at: float)
 # 60s TTL to avoid querying thousands of rows every second in tick mode.
-_baseline_cache: dict[tuple[str, str], tuple[set, float]] = {}
+# 重放基线缓存：(symbol, interval) -> (指纹集合, 存入时刻, 这份基线对应的 batch_floor)。
+# batch_floor 必须进缓存：基线是「batch_floor 之前那段」的指纹，60 秒内先来一批实时
+# tick、再来一批几天前的 backfill，后者若复用前者的基线，拿到的是**晚于它自己**的
+# bar 做对照——与"只和更早的 bar 比"的语义相反。floor 不同就重查，不复用。
+# Replay baseline cache: (symbol, interval) -> (fingerprints, stored_at, batch_floor).
+# The floor is part of the entry: the baseline is "everything before batch_floor",
+# and a backfill batch arriving within 60s of a live tick would otherwise reuse a
+# baseline that lies *after* its own bars — the opposite of "compare with earlier".
+_baseline_cache: dict[tuple[str, str], tuple[set, float, int]] = {}
 _BASELINE_CACHE_TTL = 60
 
 # 各周期的秒数,用于判断一根 K 线是否已经走完(t + 秒数 <= 当前时间)。
@@ -963,7 +971,11 @@ def filter_tradeable_bars(
     cache_key = (symbol, interval)
     now_mono = time.monotonic()
     cached = _baseline_cache.get(cache_key)
-    if cached is not None and now_mono - cached[1] < _BASELINE_CACHE_TTL:
+    if (
+        cached is not None
+        and now_mono - cached[1] < _BASELINE_CACHE_TTL
+        and cached[2] == batch_floor
+    ):
         baseline = set(cached[0])  # 复制：下面会往里加本批 bar，不能污染缓存
     else:
         baseline = {
@@ -979,7 +991,7 @@ def filter_tradeable_bars(
             .limit(REPLAY_BASELINE_MAX_ROWS)
             .all()
         }
-        _baseline_cache[cache_key] = (set(baseline), now_mono)
+        _baseline_cache[cache_key] = (set(baseline), now_mono, batch_floor)
     accepted: list[dict] = []
     replay_count = 0
     for b in closed:

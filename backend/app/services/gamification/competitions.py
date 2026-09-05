@@ -250,8 +250,10 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
     if opens is None or closes is None or not (opens <= now < closes):
         raise HTTPException(status_code=400, detail="不在报名窗口内 / Registration window closed")
 
+    from app.services.gateway_binding import not_removed
     acct = (db.query(MT5Account)
-              .filter(MT5Account.user_id == user.id, MT5Account.login == mt5_login).first())
+              .filter(MT5Account.user_id == user.id, MT5Account.login == mt5_login,
+                      not_removed()).first())
     if acct is None or acct.trade_mode not in track_modes(comp.track):
         detail = ("仅实盘账户可参赛 / Only real accounts may enter" if comp.track == "real"
                   else "仅模拟账户可参赛 / Only demo accounts may enter")
@@ -309,9 +311,10 @@ def auto_enroll(db, comp: Competition, now: datetime) -> int:
     already = {p.mt5_login for p in
                db.query(CompetitionParticipant).filter(
                    CompetitionParticipant.competition_id == comp.id)}
+    from app.services.gateway_binding import not_removed
     accounts = (db.query(MT5Account)
                   .filter(MT5Account.trade_mode.in_(track_modes(comp.track)),
-                          MT5Account.balance.isnot(None)).all())
+                          MT5Account.balance.isnot(None), not_removed()).all())
     enrolled = 0
     for acct in accounts:
         if acct.user_id in opted_out or acct.login in already:
@@ -331,12 +334,11 @@ def auto_enroll(db, comp: Competition, now: datetime) -> int:
 
 
 def settle_competition(db, comp: Competition, admin_id: str,
-                        now: datetime | None = None, force: bool = False) -> dict:
-    """终审（设计 §1.7/§1.9，Phase 3 Task 4；§5.3 宽限期，Task F）：默认不可重跑，
-    一切以 status 为闸；`force=True` 跳过全部前置条件（见下方注释）。
+                        now: datetime | None = None) -> dict:
+    """终审（设计 §1.7/§1.9，Phase 3 Task 4；§5.3 宽限期，Task F）：不可重跑，
+    一切以 status 为闸。
 
-    §5.3：比赛结束（`ends_at`，计分上界）后 24 小时内不可终审（`force=True` 可由
-    管理员显式跳过，见下方注释）——留出宽限期让
+    §5.3：比赛结束（`ends_at`，计分上界）后 24 小时内不可终审——留出宽限期让
     迟到的平仓（比如比赛结束时仍持仓、随后才平的单）能被 `_resolved_in_period`
     收进最后一次快照。宽限期从 `ends_at` 起算，不是从 status 被人工推到
     "ended" 那一刻起算：管理端状态推进是人工操作，可能早于/晚于 ends_at，
@@ -362,38 +364,25 @@ def settle_competition(db, comp: Competition, admin_id: str,
     撤回——所以失败被捕获进返回值的 badgeErrors，而不是抛出让调用方以为终审
     本身失败了。
     """
-    # force=True 跳过**全部前置条件**：状态不必是 ended、不必等 24 小时宽限期、
-    # 已终审的也能再跑一次。应产品要求为测试放开（2026-09-04），不是默认路径——
-    # force 只由管理端那颗按钮显式传，用户端根本没有终审入口。
-    #
-    # 放开之后仍然成立的性质（靠实现本身，不靠这几行校验）：名次与 status 在第一
-    # 段事务里一次落盘；award_badge 幂等（唯一约束），重复终审不会重复发勋章，
-    # 只会按当前数据重算一遍名次。真正的代价是「早于实际结束时间终审」会漏掉尚未
-    # 平仓和迟到的单——管理端按钮已经把这句写进确认框。
-    #
-    # force=True skips **every** precondition: status need not be "ended", the 24h
-    # grace period need not have passed, and an already-settled competition can be
-    # run again. Opened up for testing at the product owner's request (2026-09-04),
-    # not the default path — force is passed only by that one admin button, and the
-    # user-facing side has no settle entry point at all.
-    #
-    # What still holds regardless (by construction, not by these checks): ranks and
-    # status land in one transaction, and award_badge is idempotent (unique
-    # constraint), so re-settling never double-awards — it just recomputes ranks from
-    # current data. The real cost of settling early is missing still-open and
-    # late-arriving closes, which the admin button spells out in its confirm.
+    # 内测期这里有过 force=True 跳过全部前置条件的分支（2026-09-04 为测试放开），
+    # 上线前移除（2026-09-05）：早于实际结束时间终审会漏掉尚未平仓和迟到的单，
+    # 而名次一旦定格就是永久的。要在测试库里快速终审，改 ends_at 或改时钟，不要
+    # 给生产代码留后门。
+    # A force=True bypass lived here during the closed beta (2026-09-04) and was
+    # removed before launch (2026-09-05): settling early drops still-open and
+    # late closes, and ranks are permanent once locked. To settle quickly in a test
+    # database, move ends_at or the clock — don't leave a backdoor in production code.
     now = _aware(now) or datetime.now(timezone.utc)
-    if not force:
-        if comp.status != "ended":
-            raise HTTPException(
-                status_code=400,
-                detail="仅可终审已结束的比赛 / Only ended competitions can be settled")
-        if now < _aware(comp.ends_at) + timedelta(hours=24):
-            raise HTTPException(
-                status_code=400,
-                detail="比赛结束后需等待 24 小时方可终审，以收齐迟到的平仓 / "
-                        "Settlement opens 24 hours after the competition ends, "
-                        "so late closes are counted")
+    if comp.status != "ended":
+        raise HTTPException(
+            status_code=400,
+            detail="仅可终审已结束的比赛 / Only ended competitions can be settled")
+    if now < _aware(comp.ends_at) + timedelta(hours=24):
+        raise HTTPException(
+            status_code=400,
+            detail="比赛结束后需等待 24 小时方可终审，以收齐迟到的平仓 / "
+                    "Settlement opens 24 hours after the competition ends, "
+                    "so late closes are counted")
 
     rows = _snapshot_one_comp(db, comp)   # 先落定最新名次，再读——见上方 docstring
     by_login = {p.mt5_login: p for p in

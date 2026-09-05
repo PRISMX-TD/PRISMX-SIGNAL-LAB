@@ -107,7 +107,8 @@ def _hash_legacy_api_tokens() -> None:
 # rev 10 — users 昵称/隐私/佩戴 4 列、orders.trade_mode 快照 + 存量回填、user_active_days 等新表、游戏化索引
 # rev 11 — users.equipped_badges（可佩戴 3 枚，有序，首枚 = equipped_badge 那枚默认；从旧列回填）
 # rev 12 — competitions.min_baseline_usd / min_trades（每场比赛可覆盖入榜门槛；track 列已存在，本次起真正启用 real/demo）
-CURRENT_SCHEMA_REV = 12
+# rev 13 — mt5_accounts.server_utc_offset（gateway 服务器时区偏移持久化，重启不再丢；不回填，NULL=从未观测）
+CURRENT_SCHEMA_REV = 13
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -503,6 +504,12 @@ def _migrate_columns() -> None:
                 ))
             if "revoked_reason" not in acc_cols:
                 conn.execute(text("ALTER TABLE mt5_accounts ADD COLUMN revoked_reason VARCHAR"))
+            # rev 13：服务器时区偏移持久化。不回填——猜一个值等于把可能错的时间
+            # 写成"确定"，NULL 让读取逻辑走"从未观测"分支，首次扫到开仓腿时才记下。
+            # rev 13: persisted server zone offset. Never backfilled — NULL keeps
+            # the "never observed" path until the first IN leg is seen.
+            if "server_utc_offset" not in acc_cols:
+                conn.execute(text("ALTER TABLE mt5_accounts ADD COLUMN server_utc_offset INTEGER"))
 
     # orders.trade_mode 存量回填：必须排在上面的 mt5_accounts 补列之后——回填
     # 语句读 mt5_accounts.trade_mode，旧库上这一列要等 rev 7 那段 ALTER 跑完才

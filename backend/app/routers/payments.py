@@ -345,7 +345,7 @@ async def create_payment_order(
     }
 
 
-def _load_own_payment(db: Session, payment_id: str, user_id: int):
+def _load_own_payment(db: Session, payment_id: str, user_id: str):
     """按 NOWPayments 支付号取本人的订单。同步查询，供线程池调用。
     Load the caller's own payment by NOWPayments id; blocking, for the threadpool."""
     return (

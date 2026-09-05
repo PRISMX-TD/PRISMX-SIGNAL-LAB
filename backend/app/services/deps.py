@@ -50,6 +50,13 @@ def is_account_online(row) -> bool:
     The order path additionally refuses explicitly — the duplication is
     intentional: this one is for the UI, that one is the money-safety backstop.
     """
+    from app.services.gateway_binding import is_removed
+
+    # 用户已删除的账号（软删）一律离线，两条通道都是：删除后它不该再被路由到。
+    # A user-removed (soft-deleted) account is offline on either channel.
+    if is_removed(row):
+        return False
+
     if getattr(row, "source", None) == "gateway":
         from app.services.gateway_binding import is_revoked
         from app.services.gateway_client import is_gateway_online
@@ -120,14 +127,19 @@ def get_current_user(
 def _touch_last_active(db: Session, user: User) -> None:
     """限流写入 last_active_at：同一用户 5 分钟内只落库一次，供 DAU 统计用。
     跨 UTC 日界的首次触发额外写一行 user_active_days（「三日之约」数据源）；
-    与另一并发会话撞唯一约束时，整次提交回滚放弃（含 last_active_at），
-    绝不向上抛异常——下次请求节流仍失效，会自然重试。
+    与另一并发会话撞唯一约束时只撤销这一行（SAVEPOINT），last_active_at 与
+    session 里其它未提交的改动照常提交，绝不向上抛异常。
+
+    **为什么用 SAVEPOINT 而不是整体 rollback**：本函数跑在 get_current_user 里，
+    与同一请求的其它写操作共用 session。整体 rollback 会把它们一起撤掉——目前
+    downgrade_if_expired 先于本函数 commit 所以没实害，但以后谁在鉴权链里再加一
+    个写，就会被这里悄悄吃掉。撞约束说明那一行已经存在，跳过它就是正确结果。
     Throttled last_active_at write: at most once per 5 minutes per user, for DAU.
     The first touch that crosses a UTC day boundary also inserts one
-    user_active_days row (source of the "3-day promise" feature). If that
-    collides with a concurrent session on the unique constraint, the whole
-    commit (including last_active_at) is rolled back and dropped — never
-    raised — and the next request's throttle naturally retries."""
+    user_active_days row. A unique-constraint collision with a concurrent
+    session rolls back only that insert (SAVEPOINT); last_active_at and anything
+    else pending on the session still commit. A whole-session rollback here
+    would silently discard sibling writes made earlier in the auth chain."""
     now = datetime.now(timezone.utc)
     last = user.last_active_at
     if last is not None:
@@ -139,21 +151,18 @@ def _touch_last_active(db: Session, user: User) -> None:
     prev_day = last.strftime("%Y-%m-%d") if last is not None else None
     user.last_active_at = now
     if prev_day != today:
-        db.add(UserActiveDay(user_id=user.id, day=today))
         try:
-            db.commit()
+            with db.begin_nested():
+                db.add(UserActiveDay(user_id=user.id, day=today))
+                db.flush()
         except IntegrityError:
-            # 并发请求下的竞态：同一 (user_id, day) 已被另一会话写入。
-            # 直接放弃本次落库，绝不让节流帮手向上抛异常——下次请求时
-            # last_active_at 仍是旧值，节流自然失效，会再次尝试更新。
-            # Concurrent race: another session already wrote this
-            # (user_id, day). Drop this attempt rather than retry inside
-            # the helper — never let it raise. last_active_at stays stale,
-            # so the throttle naturally lets the next request try again.
-            db.rollback()
-            return
-    else:
-        db.commit()
+            # 并发请求下的竞态：同一 (user_id, day) 已被另一会话写入。SAVEPOINT
+            # 只撤掉这一行的插入，那一行本来就已存在，结果是对的。
+            # Concurrent race: another session already wrote this (user_id, day).
+            # The savepoint undoes only this insert; the row exists, which is the
+            # correct end state.
+            pass
+    db.commit()
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:
