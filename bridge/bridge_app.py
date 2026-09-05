@@ -190,24 +190,36 @@ def load_config() -> dict:
     return cfg
 
 
+class TokenStorageError(Exception):
+    """Token 无法加密存盘（DPAPI 不可用）。调用方应提示用户、但可以继续用内存里的 token 连接。
+    The token could not be encrypted for storage (DPAPI unavailable); the caller
+    should warn but may keep using the in-memory token for this session."""
+
+
 def save_config(cfg: dict) -> None:
-    """保存本地配置；Token 加密后存盘，不落明文。
-    Persist config; the token is encrypted, never written in plaintext.
+    """保存本地配置；Token 加密后存盘，**绝不落明文**。
+
+    以前 DPAPI 失败会退回明文写盘。这个退路的代价是：一台 DPAPI 坏掉的机器上，
+    用户的 API Token 会以明文躺在用户目录里，任何能读文件的程序都能拿走它去冒充
+    桥接程序下单。现在 DPAPI 失败就只保存后端地址、不保存 token，并抛
+    TokenStorageError 让界面提示"这次能用，下次启动要重新输入"。
+    Persist config; the token is encrypted, never written in plaintext. The old
+    plaintext fallback left the API token readable on disk whenever DPAPI was
+    broken; now the token is simply not persisted and TokenStorageError tells
+    the UI to warn that it must be re-entered next launch.
     """
     out = {"backend": cfg.get("backend", DEFAULT_BACKEND)}
     token = cfg.get("token", "")
-    if token:
-        enc = _dpapi_encrypt(token)
-        if enc:
-            out["token_enc"] = enc
-        else:
-            # DPAPI 不可用时退回明文（仅极端情况）/ fall back to plaintext only if DPAPI fails
-            out["token"] = token
+    enc = _dpapi_encrypt(token) if token else None
+    if enc:
+        out["token_enc"] = enc
     try:
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(out, f)
     except Exception:
         pass
+    if token and not enc:
+        raise TokenStorageError("DPAPI encryption unavailable; token not persisted")
 
 
 # ---------- 开机自启 / Start with Windows ----------
@@ -1130,7 +1142,19 @@ class BridgeGUI:
         if not token:
             messagebox.showwarning("PRISMX Bridge", "请先填写 API Token / Please enter your API token")
             return
-        save_config({"token": token, "backend": backend})
+        try:
+            save_config({"token": token, "backend": backend})
+        except TokenStorageError:
+            # 加密不可用：token 只留在内存里，照常连接，但要告诉用户下次得重输。
+            # Encryption unavailable: keep the token in memory only, connect as
+            # usual, and tell the user it must be re-entered next time.
+            logger.warning("DPAPI 不可用，token 未保存 / DPAPI unavailable, token not persisted")
+            messagebox.showwarning(
+                "PRISMX Bridge",
+                "无法安全保存 API Token（系统加密不可用）。本次仍可连接，但下次启动需要重新输入。\n"
+                "The API token could not be stored securely (system encryption unavailable). "
+                "This session will connect, but you will need to enter it again next launch.",
+            )
         self.engine = BridgeEngine(token, backend, self._on_status)
         self.engine.start()
         logger.info("已连接后端 / connected to backend: %s", backend)
