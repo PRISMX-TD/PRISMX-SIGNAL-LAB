@@ -108,7 +108,8 @@ def _hash_legacy_api_tokens() -> None:
 # rev 11 — users.equipped_badges（可佩戴 3 枚，有序，首枚 = equipped_badge 那枚默认；从旧列回填）
 # rev 12 — competitions.min_baseline_usd / min_trades（每场比赛可覆盖入榜门槛；track 列已存在，本次起真正启用 real/demo）
 # rev 13 — mt5_accounts.server_utc_offset（gateway 服务器时区偏移持久化，重启不再丢；不回填，NULL=从未观测）
-CURRENT_SCHEMA_REV = 13
+# rev 14 — discipline_snapshots.positions（评分仓位数，纪律勋章的资格门槛；不回填，快照循环 6 小时内自然补齐）
+CURRENT_SCHEMA_REV = 14
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -510,6 +511,17 @@ def _migrate_columns() -> None:
             # the "never observed" path until the first IN leg is seen.
             if "server_utc_offset" not in acc_cols:
                 conn.execute(text("ALTER TABLE mt5_accounts ADD COLUMN server_utc_offset INTEGER"))
+
+    # rev 14：纪律分快照记评分仓位数（两枚纪律勋章的资格门槛）。不回填——过去某天
+    # 的仓位数已无法重算，NULL 让判定走"不满足门槛"，下一轮快照循环写今天的行时补上。
+    # rev 14: scored-position count on discipline snapshots. Never backfilled — a
+    # past day's count can't be recomputed; NULL reads as "not eligible" until the
+    # next snapshot pass rewrites today's row.
+    if "discipline_snapshots" in inspector.get_table_names():
+        snap_cols = {c["name"] for c in inspector.get_columns("discipline_snapshots")}
+        if "positions" not in snap_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE discipline_snapshots ADD COLUMN positions INTEGER"))
 
     # orders.trade_mode 存量回填：必须排在上面的 mt5_accounts 补列之后——回填
     # 语句读 mt5_accounts.trade_mode，旧库上这一列要等 rev 7 那段 ALTER 跑完才

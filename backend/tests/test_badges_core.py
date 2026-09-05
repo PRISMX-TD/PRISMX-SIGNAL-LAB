@@ -108,7 +108,7 @@ def test_discipline_streak_null_breaks(db_session):
     for i in range(7):
         d = (base - timedelta(days=i)).isoformat()
         total = None if i == 3 else 95.0     # 中间一天 NULL → 断连
-        db_session.add(DisciplineSnapshot(user_id=u.id, login="", date=d, total=total))
+        db_session.add(DisciplineSnapshot(user_id=u.id, login="", date=d, total=total, positions=120))
     db_session.commit()
     assert "discipline_90_7" not in judge_and_award_badges(db_session, u.id)
     db_session.query(DisciplineSnapshot).filter_by(user_id=u.id).update({"total": 95.0})

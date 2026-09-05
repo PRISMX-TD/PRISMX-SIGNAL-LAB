@@ -630,6 +630,14 @@ class DisciplineSnapshot(Base):
     date = Column(String, nullable=False)  # UTC 日期 ISO 字符串 "2026-07-17"
     total = Column(Float, nullable=True)   # 当日总分；样本不足无法评分时为 NULL
     dimensions = Column(Text, default="{}")  # 三维度明细 JSON（结构见 discipline.py）
+    # 参与评分的信号仓位数（窗口内整仓平掉的信号单）。两枚纪律勋章用它做资格门槛：
+    # 只跟过 2 单没犯错也是满分，和跟了 200 单一次没犯错的人分数一样，勋章就不值钱。
+    # rev 14 加列，历史行为 NULL = 不满足门槛（宁严勿松），新快照写入后自然补齐。
+    # Number of scored signal positions behind this score. The two discipline
+    # badges gate on it: two clean trades score 100 just like two hundred do.
+    # Added in rev 14; NULL on historical rows means "not eligible" until the
+    # snapshot loop rewrites them.
+    positions = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=_now)
 
 

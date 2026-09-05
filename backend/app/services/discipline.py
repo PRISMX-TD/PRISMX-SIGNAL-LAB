@@ -801,11 +801,13 @@ def snapshot_all_discipline(today: str | None = None) -> int:
                             date=today,
                             total=result["total"],
                             dimensions=json.dumps(result["dimensions"]),
+                            positions=result["positions"],
                         )
                     )
                 else:
                     row.total = result["total"]
                     row.dimensions = json.dumps(result["dimensions"])
+                    row.positions = result["positions"]
                 count += 1
         if count:
             db.commit()

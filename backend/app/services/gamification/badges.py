@@ -297,30 +297,56 @@ def _consecutive_clean_signal_positions(db, user_id, data: dict | None = None) -
     return run
 
 
-# 「纪律标兵 / 纪律大师」的分数线。设计文档按 08-27 重定口径**之前**的分数分布定的
-# 90 分，重定之后分数整体上移，技术文档 §15 要求用真实数据重新校准——跑
-# `python -m scripts.calibrate_discipline_badges` 看分布再定。集中成一个常量，
-# 校准脚本按不同分数线试算时也走同一个判定函数，不另写一份。
-# Threshold for the two discipline-streak badges. The spec picked 90 against the
-# pre-08-27 score distribution; scores moved up after the redefinition and the
-# tech doc (§15) asks for recalibration on real data — run
-# scripts/calibrate_discipline_badges.py. One constant, and the calibration script
-# reuses this very judge with alternative thresholds instead of a second copy.
-DISCIPLINE_BADGE_THRESHOLD = 90.0
+# 两枚纪律勋章的规则（2026-09-06 按生产数据校准后定案）：
+#   纪律标兵：纪律分 ≥95 连续 7 天，且至少 100 个评分仓位；
+#   纪律大师：纪律分满分 100 连续 30 天，且至少 300 个评分仓位。
+# 设计文档原来两枚都是"≥90"，那是按 08-27 重定口径之前的分布定的。09-06 现算 19
+# 个生产用户：中位数 100、84% 在 90 以上——线太松；而且分数是"每仓每维度 0 或
+# 100"再平均，只跟过两单没犯错就是满分，与跟了两百单一次没犯错的人同分。所以
+# 分数线抬高、两枚分开定，并加评分仓位数门槛。勋章 id 里的 90 是历史名字，前端
+# 图标与 i18n 键都靠它，不改。
+# Rules for the two discipline badges (calibrated on production data 2026-09-06):
+# streak ≥95 for 7 days with ≥100 scored positions; a perfect 100 for 30 days
+# with ≥300. The spec's "≥90" predated the 08-27 score redefinition; live data
+# showed a median of 100 and 84% above 90. Scores are per-position 0/100
+# averages, so a tiny sample scores 100 trivially — hence the position gate.
+# The "90" in the badge ids is historical; frontend icons and i18n key off it.
+DISCIPLINE_BADGE_RULES: dict[str, dict] = {
+    "discipline_90_7":  {"days": 7,  "threshold": 95.0,  "min_positions": 100},
+    "discipline_90_30": {"days": 30, "threshold": 100.0, "min_positions": 300},
+}
 
 
-def _discipline_streak(db, user_id, n, threshold: float = DISCIPLINE_BADGE_THRESHOLD) -> bool:
-    """login="" 聚合行；total<threshold 或 NULL 或缺日均断连（设计 §3.2：宁严勿松）。"""
-    rows = (db.query(DisciplineSnapshot.date, DisciplineSnapshot.total)
+def _discipline_streak(db, user_id, n, threshold: float = 95.0, min_positions: int = 0) -> bool:
+    """login="" 聚合行：total ≥ threshold 连续 n 天（NULL 或缺日断连，设计 §3.2 宁严勿松），
+    且**最新一天**的评分仓位数 ≥ min_positions（NULL 视为不满足）。
+
+    门槛看最新快照而不是逐天：它回答的是"这个人跟过多少单"，是资格不是连续性；
+    逐天要求会让 rev 14 之前的历史行（positions 为 NULL）把整条连续串掐断。
+    The position gate reads the latest snapshot only: it is an eligibility
+    question ("how much has this person traded"), not a per-day one, and per-day
+    would let pre-rev-14 rows (NULL) break every streak."""
+    rows = (db.query(DisciplineSnapshot.date, DisciplineSnapshot.total, DisciplineSnapshot.positions)
               .filter(DisciplineSnapshot.user_id == user_id,
                       DisciplineSnapshot.login == "").all())
-    ok_days = sorted(date.fromisoformat(d) for d, t in rows if t is not None and t >= threshold)
+    if not rows:
+        return False
+    if min_positions > 0:
+        latest = max(rows, key=lambda r: r[0])
+        if latest[2] is None or latest[2] < min_positions:
+            return False
+    ok_days = sorted(date.fromisoformat(d) for d, t, _p in rows if t is not None and t >= threshold)
     run = 1
     for a, b in zip(ok_days, ok_days[1:]):
         run = run + 1 if b - a == timedelta(days=1) else 1
         if run >= n:
             return True
     return n <= 1 and bool(ok_days)
+
+
+def _j_discipline(badge_id: str):
+    r = DISCIPLINE_BADGE_RULES[badge_id]
+    return lambda db, u, c: _discipline_streak(db, u.id, r["days"], r["threshold"], r["min_positions"])
 
 
 # "name" 是给推送正文用的展示名镜像，逐条从 frontend/src/i18n/zh.json 的
@@ -347,7 +373,7 @@ BADGES: dict[str, dict] = {
     "evergreen_3m":     {"rarity": "rare", "category": "performance", "judge": _j_evergreen(3),
                          "name": "季度常青"},
     "discipline_90_7":  {"rarity": "rare", "category": "discipline",
-                         "judge": lambda db, u, c: _discipline_streak(db, u.id, 7),
+                         "judge": _j_discipline("discipline_90_7"),
                          "name": "纪律标兵"},
     "hundred_wins":     {"rarity": "rare", "category": "performance", "judge": _j_hundred_wins,
                          "name": "百战百胜"},
@@ -358,7 +384,7 @@ BADGES: dict[str, dict] = {
     "evergreen_6m":     {"rarity": "epic", "category": "performance", "judge": _j_evergreen(6),
                          "name": "半年常青"},
     "discipline_90_30": {"rarity": "epic", "category": "discipline",
-                         "judge": lambda db, u, c: _discipline_streak(db, u.id, 30),
+                         "judge": _j_discipline("discipline_90_30"),
                          "name": "纪律大师"},
     "no_bad_sl_50":     {"rarity": "epic", "category": "discipline",
                          "judge": lambda db, u, c: _consecutive_clean_signal_positions(db, u.id, c.get("data")) >= 50,
