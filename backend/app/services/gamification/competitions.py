@@ -414,10 +414,11 @@ def settle_competition(db, comp: Competition, admin_id: str,
 
     comp.status = "settled"
 
-    # 审计：照 admin.py 的 _log_change 先例（本函数内 import，不在模块顶层，
-    # 避免给 admin 路由模块和 gamification 服务层之间引入任何加载顺序耦合）。
-    # old/new 特意给出两个不同的值——_log_change 在两者相等时直接静默跳过写入。
-    from app.routers.admin import _log_change
+    # 审计走 services/audit.log_change（admin 路由的 _log_change 就是它的别名）——
+    # 服务层不 import 路由模块。old/new 特意给出两个不同的值——两者相等时直接静默跳过写入。
+    # Audit via services/audit.log_change (the admin router's _log_change is an
+    # alias of it); the service layer never imports a router.
+    from app.services.audit import log_change as _log_change
     _log_change(db, admin_id, admin_id, f"competition:settle:{comp.id}", "ended", "settled")
 
     db.commit()   # 名次 + status + 审计：终局状态到此为止，下面发奖失败不会回退到这里

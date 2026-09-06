@@ -167,7 +167,7 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
     #   - Bridge：mt5_ticket 存的是 order_send 回执的 result.order，而 MT5 里
     #     仓位号就等于开仓订单的 ticket，所以它本身就是仓位号。
     #   - Gateway：mt5_ticket 存的是订单号**或成交号**（见 orders.py 的
-    #     _apply_trade_result），成交号与仓位号不是同一套编号，拿来比对配不上；
+    #     services/gateway_execute.apply_trade_result），成交号与仓位号不是同一套编号，拿来比对配不上；
     #     真正的仓位号由 gateway 开仓后反查填进 mt5_position。
     # 只查 mt5_ticket 会让 gateway 账号的 platform_tickets 恒为空，自动仓位管理
     # 静默失效——规则一次都不会被评估。两列取并集，各自通道走各自的那一列。
@@ -414,7 +414,7 @@ def _execute_gateway_orders(db: Session, user_id: str, orders: list[Order]) -> N
     FILLED/REJECTED 的映射、成交价回退、仓位号回填都在那边，两份实现迟早会
     不一致。函数内导入是为了避免 services 与 routers 在模块加载期循环依赖。
 
-    单条指令失败只影响它自己：_try_gateway_execute 内部已把异常落成 FAILED，
+    单条指令失败只影响它自己：gateway_execute.try_gateway_execute 内部已把异常落成 FAILED，
     这里再兜一层，确保一条炸掉不会拖累同批的其它指令，更不会把异常抛回持仓
     上报的主流程。
 
@@ -438,13 +438,13 @@ def _execute_gateway_orders(db: Session, user_id: str, orders: list[Order]) -> N
     if not targets:
         return
 
-    from app.routers.orders import _try_gateway_execute
+    from app.services import gateway_execute
     from app.services.connection_manager import manager
     from app.services.gateway_client import run_on_main_loop
 
     for order in targets:
         try:
-            payload = _try_gateway_execute(db, order)
+            payload = gateway_execute.try_gateway_execute(db, order)
             logger.info(
                 "auto_manage: gateway executed %s %s -> %s",
                 order.action, order.client_order_id, order.status,

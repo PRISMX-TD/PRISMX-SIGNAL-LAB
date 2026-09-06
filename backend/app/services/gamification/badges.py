@@ -101,12 +101,12 @@ def award_badge(db, user_id, badge_id) -> bool:
 
 def _has_real_fill(db, user_id) -> bool:
     """"首笔实盘成交"要求一笔真正的开仓（action=="ORDER"）。Gateway 的
-    _apply_trade_result 对 CLOSE/MODIFY 动作同样会置 FILLED 并照样打
+    gateway_execute.apply_trade_result 对 CLOSE/MODIFY 动作同样会置 FILLED 并照样打
     trade_mode 快照，若不按 action 过滤，只改过止损或平掉一笔非本平台开的
     实盘仓位、从未真正开过仓的用户也会被判定"已实盘"——与 stats.py 的
     _filled_orders 同一道理，同样只认 ORDER。
     "first real trade" requires an actual open (action=="ORDER"). Gateway's
-    _apply_trade_result marks CLOSE/MODIFY FILLED too and still stamps
+    gateway_execute.apply_trade_result marks CLOSE/MODIFY FILLED too and still stamps
     trade_mode, so without this filter a user who only ever modified a stop
     or closed a position this platform never opened — on a real account —
     would be judged as having a real trade. Mirrors stats.py's

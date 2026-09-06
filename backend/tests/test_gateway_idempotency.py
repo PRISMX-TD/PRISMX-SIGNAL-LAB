@@ -14,7 +14,7 @@ second unknown lands as FAILED with a "check positions" message.
 import pytest
 
 from app.models import MT5Account, Order, User
-from app.routers import orders as orders_mod
+from app.services import gateway_execute as gx
 from app.services import gateway_client
 
 LOGIN = "601144"
@@ -56,7 +56,7 @@ TIMEOUT = {"ok": False, "error": "timeout", "message": "Gateway 响应超时", "
 def test_open_and_close_carry_client_order_id(stub, db_session):
     stub.responses = [OK]
     o = _order(db_session)
-    orders_mod._try_gateway_execute(db_session, o)
+    gx.try_gateway_execute(db_session, o)
     assert len(stub.calls) == 1
     path, body = stub.calls[0]
     assert path == "/trade/open" and body["clientOrderId"] == "co_abc" and body["tag"] == "co_abc"
@@ -66,14 +66,14 @@ def test_open_and_close_carry_client_order_id(stub, db_session):
     c = Order(user_id="u1", mt5_login=LOGIN, action="CLOSE", symbol="XAUUSD", side="SELL",
               volume=0, status="PENDING", client_order_id="co_close", ticket=22)
     db_session.add(c); db_session.commit()
-    orders_mod._try_gateway_execute(db_session, c)
+    gx.try_gateway_execute(db_session, c)
     assert stub.calls[0][0] == "/trade/close" and stub.calls[0][1]["clientOrderId"] == "co_close"
 
 
 def test_timeout_then_replay_fills_without_second_execution(stub, db_session):
     stub.responses = [TIMEOUT, dict(OK, replayed=True)]
     o = _order(db_session)
-    orders_mod._try_gateway_execute(db_session, o)
+    gx.try_gateway_execute(db_session, o)
     assert [p for p, _ in stub.calls] == ["/trade/open", "/trade/open"]
     assert stub.calls[0][1]["clientOrderId"] == stub.calls[1][1]["clientOrderId"] == "co_abc"
     assert o.status == "FILLED" and o.mt5_ticket == 22 and o.filled_price == 2000.0
@@ -85,7 +85,7 @@ def test_in_progress_then_result(stub, db_session):
         {"ok": False, "retcode": "MT_RET_REQUEST_INVALID_STOPS", "message": "止损太近", "replayed": True},
     ]
     o = _order(db_session)
-    orders_mod._try_gateway_execute(db_session, o)
+    gx.try_gateway_execute(db_session, o)
     assert len(stub.calls) == 2
     assert o.status == "REJECTED" and "MT_RET_REQUEST_INVALID_STOPS" in o.message
 
@@ -93,7 +93,7 @@ def test_in_progress_then_result(stub, db_session):
 def test_double_timeout_lands_failed_with_check_positions_hint(stub, db_session):
     stub.responses = [TIMEOUT, TIMEOUT]
     o = _order(db_session)
-    orders_mod._try_gateway_execute(db_session, o)
+    gx.try_gateway_execute(db_session, o)
     assert len(stub.calls) == 2                       # 只多问一次，不无限重试
     assert o.status == "FAILED"
     assert "GATEWAY_TIMEOUT" in o.message and "核对持仓" in o.message
@@ -101,7 +101,7 @@ def test_double_timeout_lands_failed_with_check_positions_hint(stub, db_session)
 
 def test_main_loop_timeout_is_treated_like_transport_timeout(stub, db_session, monkeypatch):
     calls = []
-    real = orders_mod.run_on_main_loop
+    real = gx.run_on_main_loop
 
     def _flaky(coro, timeout):
         calls.append(timeout)
@@ -110,10 +110,10 @@ def test_main_loop_timeout_is_treated_like_transport_timeout(stub, db_session, m
             raise TimeoutError("主循环排队超时")
         return real(coro, timeout)
 
-    monkeypatch.setattr(orders_mod, "run_on_main_loop", _flaky)
+    monkeypatch.setattr(gx, "run_on_main_loop", _flaky)
     stub.responses = [dict(OK, replayed=True)]
     o = _order(db_session)
-    orders_mod._try_gateway_execute(db_session, o)
+    gx.try_gateway_execute(db_session, o)
     assert len(calls) == 2 and calls[1] > calls[0]    # 第二问给的时限更长
     assert o.status == "FILLED"
 
@@ -121,7 +121,7 @@ def test_main_loop_timeout_is_treated_like_transport_timeout(stub, db_session, m
 def test_rejection_does_not_trigger_follow_up(stub, db_session):
     stub.responses = [{"ok": False, "retcode": "MT_RET_REQUEST_REJECT", "message": "no money"}]
     o = _order(db_session)
-    orders_mod._try_gateway_execute(db_session, o)
+    gx.try_gateway_execute(db_session, o)
     assert len(stub.calls) == 1 and o.status == "REJECTED"
 
 
@@ -142,9 +142,9 @@ def test_gateway_account_lookup_is_scoped_to_the_ordering_user(stub, db_session)
     db_session.add(revoked); db_session.commit()
     revoke(db_session, revoked, REASON_PASSWORD_CHANGED)
 
-    assert orders_mod._gateway_account(db_session, LOGIN, "u2").revoked_at is not None
-    assert orders_mod._gateway_account(db_session, LOGIN, "u1").revoked_at is None
-    assert orders_mod._gateway_account(db_session, LOGIN, "nobody") is None
+    assert gx.gateway_account(db_session, LOGIN, "u2").revoked_at is not None
+    assert gx.gateway_account(db_session, LOGIN, "u1").revoked_at is None
+    assert gx.gateway_account(db_session, LOGIN, "nobody") is None
 
-    orders_mod._try_gateway_execute(db_session, o)
+    gx.try_gateway_execute(db_session, o)
     assert o.status == "FILLED" and len(stub.calls) == 1

@@ -236,7 +236,7 @@ def test_revoked_account_refuses_orders_without_calling_the_gateway(db_session, 
     单独判「离线」不够：自动仓管与策略自动下单都会带着明确的 mt5Login 走到
     _try_gateway_execute，不经过任何在线判定。
     """
-    import app.routers.orders as orders_mod
+    from app.services import gateway_execute as orders_mod
 
     called = []
     monkeypatch.setattr(
@@ -259,7 +259,7 @@ def test_revoked_account_refuses_orders_without_calling_the_gateway(db_session, 
     db_session.add(order)
     db_session.commit()
 
-    payload = orders_mod._try_gateway_execute(db_session, order)
+    payload = orders_mod.try_gateway_execute(db_session, order)
 
     assert payload is not None          # 是 gateway 账号，不能当成 bridge 放过去
     assert order.status == "REJECTED"

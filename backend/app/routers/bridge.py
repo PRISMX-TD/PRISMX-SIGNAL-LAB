@@ -18,7 +18,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import authenticate_api_token, hash_api_token
 from app.models import ClosedTrade, MT5Account, Order, Signal, User
-from app.routers.orders import is_stale_pending, order_update_payload, void_stale_order
+from app.services.order_payload import is_stale_pending, order_update_payload, void_stale_order
 from app.schemas import LOGIN_PATTERN, SUFFIX_PATTERN, AccountSuffixRequest, MT5AccountOut
 from app.services.auto_manage import AUTO_PREFIX, evaluate_positions
 from app.services.connection_manager import manager

@@ -84,8 +84,8 @@ def executed(monkeypatch):
         db.commit()
         return {"type": "ORDER_UPDATE", "data": {"clientOrderId": order.client_order_id}}
 
-    import app.routers.orders as orders_router
-    monkeypatch.setattr(orders_router, "_try_gateway_execute", _fake_execute)
+    from app.services import gateway_execute
+    monkeypatch.setattr(gateway_execute, "try_gateway_execute", _fake_execute)
     # 推送不该在单测里真的发出去
     monkeypatch.setattr(auto_manage, "dispatch_event_push", lambda *a, **k: None)
     return calls

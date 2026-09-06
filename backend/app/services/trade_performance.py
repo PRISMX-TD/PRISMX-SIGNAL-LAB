@@ -64,7 +64,7 @@ def position_id_of(order) -> int | None:
       所以它一直能和平仓腿的 `position_ticket` 对上；
     - Gateway（合作券商）通道的 `mt5_ticket` 存的是**订单号或成交号**，与仓位号
       是两套独立编号，真实仓位号另存在 `mt5_position`（见 routers/orders.py 的
-      `_apply_trade_result` 与 routers/gateway.py 的入库注释：拿 `mt5_ticket` 去
+      `services/gateway_execute.apply_trade_result` 与 routers/gateway.py 的入库注释：拿 `mt5_ticket` 去
       比对平仓成交的 position_id「永远不中」）。
 
     此前本模块与 discipline.py 都只按 `mt5_ticket` 匹配，于是 gateway 账号的仓位
