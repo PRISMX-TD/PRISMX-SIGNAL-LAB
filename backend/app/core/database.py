@@ -108,10 +108,12 @@ def _hash_legacy_api_tokens() -> None:
 # rev 11 — users.equipped_badges（可佩戴 3 枚，有序，首枚 = equipped_badge 那枚默认；从旧列回填）
 # rev 12 — competitions.min_baseline_usd / min_trades（每场比赛可覆盖入榜门槛；track 列已存在，本次起真正启用 real/demo）
 # rev 13 — mt5_accounts.server_utc_offset（gateway 服务器时区偏移持久化，重启不再丢；不回填，NULL=从未观测）
-# rev 14 — discipline_snapshots.positions（评分仓位数，纪律勋章的资格门槛；不回填，快照循环 6 小时内自然补齐）
+# rev 14 — （已作废）discipline_snapshots.positions；纪律体系于 rev 16 整个撤销，表已删
 # rev 15 — period_baselines.flows（出入金流水，逐仓按当时本金计分；不回填，旧行 adjust 全程生效）
 #          + mt5_accounts.trade_mode_source（实盘标记来源；回填：有组名=group、其余已判定=self，循环再用规则重判）
-CURRENT_SCHEMA_REV = 15
+# rev 16 — 勋章改制：user_badges.tier（铜/银/金），旧 17 枚 id 并成 6 枚 + 档位；纪律类勋章删除；
+#          drop discipline_snapshots；platform_settings 里的纪律参数删除；users 佩戴列表改写
+CURRENT_SCHEMA_REV = 16
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -513,17 +515,6 @@ def _migrate_columns() -> None:
             # the "never observed" path until the first IN leg is seen.
             if "server_utc_offset" not in acc_cols:
                 conn.execute(text("ALTER TABLE mt5_accounts ADD COLUMN server_utc_offset INTEGER"))
-
-    # rev 14：纪律分快照记评分仓位数（两枚纪律勋章的资格门槛）。不回填——过去某天
-    # 的仓位数已无法重算，NULL 让判定走"不满足门槛"，下一轮快照循环写今天的行时补上。
-    # rev 14: scored-position count on discipline snapshots. Never backfilled — a
-    # past day's count can't be recomputed; NULL reads as "not eligible" until the
-    # next snapshot pass rewrites today's row.
-    if "discipline_snapshots" in inspector.get_table_names():
-        snap_cols = {c["name"] for c in inspector.get_columns("discipline_snapshots")}
-        if "positions" not in snap_cols:
-            with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE discipline_snapshots ADD COLUMN positions INTEGER"))
 
     # rev 15：出入金流水 + 实盘标记来源。flows 不回填——过去的入金没有时间信息，
     # 旧行的 adjust 按「全程生效」读（boards.capital_at 的 residue）。
@@ -982,6 +973,68 @@ def _migrate_columns() -> None:
                 conn.execute(text(
                     "UPDATE invite_links SET grants_trial = FALSE WHERE grants_trial IS NULL"
                 ))
+
+    # rev 16：勋章改制。user_badges 加 tier；旧 id 按 badges.LEGACY_BADGE_MAP 并成
+    # "新 id + 档位"（同一人同一新 id 只留最高档，先删输家再改赢家——唯一约束
+    # (user, badge) 在 UPDATE 时就会撞）；纪律类三枚整行删；users 的佩戴列表同步改写。
+    # 只在 tier 列刚加时跑一次（守法同 rev 11 的 equipped_badges 回填）。
+    # 纪律体系撤销：discipline_snapshots 表与后台参数一并删除。
+    # rev 16: badge overhaul. user_badges gains tier; legacy ids fold into
+    # "new id + tier" per badges.LEGACY_BADGE_MAP (one row per user and new id,
+    # highest tier wins — losers are deleted before winners are rewritten, since the
+    # (user, badge) unique constraint fires on UPDATE); the three discipline badges
+    # are deleted outright; users' equipped lists are rewritten to match. Runs once,
+    # when the tier column is first added. The discipline system is withdrawn:
+    # its snapshot table and admin settings go with it.
+    tables = inspector.get_table_names()
+    if "user_badges" in tables:
+        badge_cols = {c["name"] for c in inspector.get_columns("user_badges")}
+        if "tier" not in badge_cols:
+            from app.services.gamification.badges import LEGACY_BADGE_MAP, LEGACY_DROPPED
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE user_badges ADD COLUMN tier INTEGER NOT NULL DEFAULT 0"))
+                rows = conn.execute(text("SELECT id, user_id, badge_id FROM user_badges")).fetchall()
+                best: dict[tuple[str, str], tuple[str, int]] = {}
+                losers: list[str] = []
+                for rid, uid, bid in rows:
+                    if bid in LEGACY_DROPPED:
+                        losers.append(rid)
+                        continue
+                    new_id, tier = LEGACY_BADGE_MAP.get(bid, (bid, 0))
+                    key = (uid, new_id)
+                    cur = best.get(key)
+                    if cur is None or tier > cur[1]:
+                        if cur is not None:
+                            losers.append(cur[0])
+                        best[key] = (rid, tier)
+                    else:
+                        losers.append(rid)
+                for rid in losers:
+                    conn.execute(text("DELETE FROM user_badges WHERE id = :i"), {"i": rid})
+                for (_uid, new_id), (rid, tier) in best.items():
+                    conn.execute(text("UPDATE user_badges SET badge_id = :b, tier = :t WHERE id = :i"),
+                                 {"b": new_id, "t": tier, "i": rid})
+                urows = conn.execute(text(
+                    "SELECT id, equipped_badge, equipped_badges FROM users "
+                    "WHERE equipped_badge IS NOT NULL OR (equipped_badges IS NOT NULL AND equipped_badges <> '')"
+                )).fetchall()
+                for uid, single, multi in urows:
+                    ids = [x for x in (multi or "").split(",") if x] or ([single] if single else [])
+                    out: list[str] = []
+                    for x in ids:
+                        if x in LEGACY_DROPPED:
+                            continue
+                        nx = LEGACY_BADGE_MAP.get(x, (x, 0))[0]
+                        if nx not in out:
+                            out.append(nx)
+                    conn.execute(text("UPDATE users SET equipped_badge = :s, equipped_badges = :m WHERE id = :i"),
+                                 {"s": out[0] if out else None, "m": ",".join(out), "i": uid})
+    if "discipline_snapshots" in tables:
+        with engine.begin() as conn:
+            conn.execute(text("DROP TABLE discipline_snapshots"))
+    if "platform_settings" in tables:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM platform_settings WHERE key = 'discipline'"))
 
     # ── 统一索引块 ────────────────────────────────────────────────────────────
     # create_all 只给**新建**的表建索引，已存在的表不会补，所以这些要手工建。

@@ -319,18 +319,6 @@ export interface AdminTrialSettings {
   trialDays: number
 }
 
-// 管理后台：纪律分参数设置 / admin: discipline-score parameter settings
-export interface AdminDisciplineSettings {
-  windowDays: number
-  weightStop: number
-  weightVolume: number
-  weightExit: number
-  slTolerancePct: number
-  volumeMultiple: number
-  volumeHistoryMin: number
-  exitSlDistancePct: number
-}
-
 // 免费试用当前状态（用户端）/ current free-trial status (user-facing)
 export interface TrialStatus {
   enabled: boolean
@@ -440,31 +428,6 @@ export interface PersonalWinRate {
   // without limit as a user keeps trading (see trade_performance.WINDOW_DAYS).
   // It has to be shown: a bounded number read as an all-time record misleads.
   windowDays: number
-}
-
-// 纪律分单一维度的评分明细 / one scoring dimension of the discipline score
-export interface DisciplineDimension {
-  score: number | null
-  violations: number
-  samples: number
-}
-
-// 纪律分：回答"有没有按计划执行"，与赚不赚钱无关，只有自己能看到自己的。
-// 对所有登录用户开放。
-// Discipline score: whether the plan was followed, independent of P&L,
-// visible only to the user themself. Open to all logged-in users.
-export interface DisciplineScore {
-  total: number | null
-  windowDays: number
-  positions: number
-  trend: Array<{ date: string; total: number | null }>
-  // 只有 PRO 才有这个键（后端按 user.plan 裁剪，不是前端隐藏）
-  // Present only for PRO (gated server-side by user.plan, not hidden client-side)
-  dimensions?: {
-    stopLoss: DisciplineDimension
-    volume: DisciplineDimension
-    exit: DisciplineDimension
-  }
 }
 
 // 真实平仓成交明细（逐笔），个人跟单胜率同一份数据源，只有自己能看到自己的
@@ -970,19 +933,25 @@ export interface TicketListItem {
 
 // 游戏化（设计 §6/§11）/ Gamification
 // 勋章稀有度 / badge rarity tiers
-export type GamificationBadgeRarity = 'common' | 'rare' | 'epic' | 'legendary' | 'limited'
-
+// 勋章（2026-09-07 改制）：四枚进阶勋章各有 1 铜 / 2 银 / 3 金三档（maxTier=3），
+// 两枚独立勋章没有档位（maxTier=0）。tier 是当前到达的档，未获得为 0。
+// Badges (2026-09-07 overhaul): four tiered badges with 1 bronze / 2 silver /
+// 3 gold (maxTier=3), two standalone ones without tiers (maxTier=0). tier is the
+// tier reached so far, 0 when unearned.
 export interface GamificationBadge {
   id: string
-  rarity: GamificationBadgeRarity
   category: string
+  maxTier: number
+  tier: number
   earned: boolean
   awardedAt: string | null
   equipped: boolean
-  // 全站拥有此勋章的用户数（一次分组计数覆盖全部勋章，见 build_me_payload）。
-  // Sitewide holder count for this badge (one grouped count over all badges,
-  // see build_me_payload).
+  // 全站拥有此勋章的用户数（不分档），与各档当前持有人数 [铜, 银, 金]（独立
+  // 勋章为空数组）。一次分组计数覆盖全部勋章，见 build_me_payload。
+  // Sitewide holders (any tier) and current holders per tier [bronze, silver,
+  // gold] (empty for standalone badges). One grouped count, see build_me_payload.
   owners: number
+  tierOwners: number[]
 }
 
 // 单个条件（任务）的判定状态。progressNow/progressTarget/currentWinRate 只在
@@ -1136,6 +1105,9 @@ export interface LeaderboardRow {
   sample: number
   isSelf: boolean
   equippedBadge: string | null
+  // 佩戴勋章的档位（画金银铜用）；没戴 / 独立勋章为 0。
+  // The equipped badge's tier (bronze / silver / gold); 0 when none or standalone.
+  equippedBadgeTier?: number
   // 以下三个只在管理端预览（GET /admin/gamification/leaderboard）里出现——
   // 用户端响应永远不带它们（昵称打码、不下发 user_id 是 §4.3 的契约）。
   // These three appear only in the admin preview (GET
@@ -1321,6 +1293,7 @@ export interface CompetitionChampion {
   displayName: string
   score: number
   equippedBadge: string | null
+  equippedBadgeTier?: number
 }
 
 // GET /competitions 的完整响应：非 draft 比赛按状态分组。

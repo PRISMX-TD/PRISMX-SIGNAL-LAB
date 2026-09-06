@@ -10,7 +10,7 @@ from app.services.settings_store import get_gamification_settings, invalidate_ga
 def test_inspector_returns_target_payload(db_session):
     t = User(email="target@t.co", api_token="tok_t"); db_session.add(t); db_session.commit()
     p = admin_inspect_user(t.id, db=db_session)
-    assert p["email"] == "target@t.co" and p["level"] == 1 and len(p["badges"]) == 17
+    assert p["email"] == "target@t.co" and p["level"] == 1 and len(p["badges"]) == 6
 
 
 def test_inspector_404_when_user_missing(db_session):

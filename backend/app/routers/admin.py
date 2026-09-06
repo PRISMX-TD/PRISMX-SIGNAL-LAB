@@ -23,14 +23,13 @@ from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
 from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
 from app.services.audit import log_change
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminDisciplineSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
 from app.services.strategy_winrate import compute_strategy_session_winrate
 from app.utils.timeutil import aware as _aware
 from app.services.settings_store import (
     get_broker_settings,
     get_candle_settings,
-    get_discipline_settings,
     get_platform_strategies,
     get_pricing_settings,
     get_strategy_costs,
@@ -38,7 +37,6 @@ from app.services.settings_store import (
     get_trial_settings,
     get_winrate_settings,
     invalidate_candle_cache,
-    invalidate_discipline_cache,
     invalidate_platform_strategies_cache,
     invalidate_pricing_cache,
     invalidate_settings_cache,
@@ -47,7 +45,6 @@ from app.services.settings_store import (
     invalidate_trial_cache,
     invalidate_winrate_settings_cache,
     save_candle_settings,
-    save_discipline_settings,
     save_platform_strategies,
     save_pricing_settings,
     save_strategy_costs,
@@ -706,58 +703,6 @@ def put_trial(
     db.commit()
     invalidate_trial_cache()
     return get_trial(db, admin)
-
-
-# ---------- 纪律分参数设置 / discipline-score parameter settings ----------
-
-@router.get("/discipline", response_model=AdminDisciplineSettings)
-def get_discipline(
-    db: Session = Depends(get_db),
-    _admin: User = Depends(require_admin),
-):
-    """读取纪律分参数。Read discipline-score parameters."""
-    c = get_discipline_settings(db)
-    return AdminDisciplineSettings(
-        windowDays=int(c["window_days"]),
-        weightStop=int(c["weight_stop"]),
-        weightVolume=int(c["weight_volume"]),
-        weightExit=int(c["weight_exit"]),
-        slTolerancePct=float(c["sl_tolerance_pct"]),
-        volumeMultiple=float(c["volume_multiple"]),
-        volumeHistoryMin=int(c["volume_history_min"]),
-        exitSlDistancePct=float(c["exit_sl_distance_pct"]),
-    )
-
-
-@router.put("/discipline", response_model=AdminDisciplineSettings)
-def put_discipline(
-    body: AdminDisciplineSettings,
-    db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
-):
-    """保存纪律分参数。三个权重不能全为零，否则总分永远算不出来。
-    Save discipline-score parameters. The three weights can't all be zero,
-    or the total score could never be computed."""
-    if body.weightStop + body.weightVolume + body.weightExit <= 0:
-        raise HTTPException(
-            status_code=400,
-            detail="权重不能全为零 / Weights cannot all be zero",
-        )
-    data = {
-        "window_days": body.windowDays,
-        "weight_stop": body.weightStop,
-        "weight_volume": body.weightVolume,
-        "weight_exit": body.weightExit,
-        "sl_tolerance_pct": body.slTolerancePct,
-        "volume_multiple": body.volumeMultiple,
-        "volume_history_min": body.volumeHistoryMin,
-        "exit_sl_distance_pct": body.exitSlDistancePct,
-    }
-    save_discipline_settings(db, data)
-    _log_change(db, admin.id, admin.id, "setting:discipline", None, json.dumps(data))
-    db.commit()
-    invalidate_discipline_cache()
-    return get_discipline(db, admin)
 
 
 # ---------- K 线历史保留策略设置 / candle-history retention settings ----------

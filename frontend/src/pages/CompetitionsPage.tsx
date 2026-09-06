@@ -22,7 +22,6 @@ import { useLive } from '../store/live'
 import { SkeletonPage } from '../components/Skeleton'
 import BadgeIcon from '../components/badges/BadgeIcon'
 import RankCoin from '../components/badges/RankCoin'
-import { BADGE_RARITY } from '../components/badges/badgeRarity'
 import type {
   CompetitionDetail,
   CompetitionTrack,
@@ -230,8 +229,8 @@ function ScoreText({ score, className = '' }: { score: number; className?: strin
   )
 }
 
-const badgeOf = (id: string | null | undefined) =>
-  id ? <BadgeIcon id={id} rarity={BADGE_RARITY[id] ?? 'common'} earned size={18} /> : null
+const badgeOf = (id: string | null | undefined, tier?: number | null) =>
+  id ? <BadgeIcon id={id} tier={tier ?? 0} earned size={18} /> : null
 
 // ── 列表：头版（进行中）──
 // 把比赛当成一场正在直播的赛事：赛名 76px 压住整个头版，右上角是转播里的角标
@@ -346,7 +345,7 @@ function HonorRow({ c, onClick, t }: { c: CompetitionSummary; onClick: () => voi
           <>
             <RankCoin rank={1} size={40} />
             <div className="min-w-0">
-              <b>{badgeOf(champ.equippedBadge)}<span className="truncate">{champ.displayName}</span></b>
+              <b>{badgeOf(champ.equippedBadge, champ.equippedBadgeTier)}<span className="truncate">{champ.displayName}</span></b>
               <small>{t('competition.champion')} · {t(`leaderboard.boards.${c.metric}`)}</small>
             </div>
           </>
@@ -433,7 +432,7 @@ function Ladder({ board, t }: { board: LeaderboardPayload; t: TFunction }) {
           <span className="cmp-ladder-rank">{String(row.rank).padStart(2, '0')}</span>
           <div className="cmp-ladder-who">
             <b>
-              {badgeOf(row.equippedBadge)}
+              {badgeOf(row.equippedBadge, row.equippedBadgeTier)}
               <span className="truncate">{row.displayName}</span>
               {row.isSelf && <span className="cmp-you">{t('leaderboard.youTag')}</span>}
             </b>

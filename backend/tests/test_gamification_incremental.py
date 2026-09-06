@@ -27,7 +27,7 @@ import app.services.gamification.boards as boards_module
 import app.services.gamification.competitions as competitions_module
 from app.services.gamification import loop as loop_module
 from app.services.gamification.badges import (
-    _consecutive_clean_signal_positions, _evergreen_months, judge_and_award_badges)
+    _evergreen_months, judge_and_award_badges)
 from app.services.gamification.conditions import judge_and_record_conditions
 from app.services.gamification.stats import (
     compute_account_lifetime_stats, compute_comprehensive_stats, load_trade_data)
@@ -177,8 +177,6 @@ def test_preloaded_data_gives_identical_results(db_session):
     assert compute_comprehensive_stats(db_session, u.id, data) == compute_comprehensive_stats(db_session, u.id)
     assert compute_account_lifetime_stats(db_session, u.id, data) == compute_account_lifetime_stats(db_session, u.id)
     assert _evergreen_months(db_session, u.id, data) == _evergreen_months(db_session, u.id) == 4
-    assert _consecutive_clean_signal_positions(db_session, u.id, data) == \
-        _consecutive_clean_signal_positions(db_session, u.id)
     # 窗口外的那笔只进终身口径 / the 400-day-old close counts lifetime-only
     assert compute_comprehensive_stats(db_session, u.id, data)["trades"] == 5
     assert compute_account_lifetime_stats(db_session, u.id, data)["1"]["trades"] == 6
@@ -197,7 +195,7 @@ def test_loop_path_awards_same_as_direct_calls(db_session):
     got_c = judge_and_record_conditions(db_session, u.id, stats)
     got_b = judge_and_award_badges(db_session, u.id, data)
     assert "first_trades_5" in got_c
-    assert {"first_close", "first_real_trade", "evergreen_3m"} <= set(got_b)
+    assert {"starter:3", "evergreen:1"} <= set(got_b)   # 起步取满足的最高档（首笔实盘 = 金）
     # 第二次（自查路径）什么都不新增：结果一致且幂等
     assert judge_and_record_conditions(db_session, u.id) == []
     assert judge_and_award_badges(db_session, u.id) == []

@@ -549,10 +549,8 @@
 .ach-vault { display: flex; flex-direction: column; gap: 22px; }
 .ach-shelf { position: relative; padding: 14px 18px 18px; border-radius: 18px; }
 .ach-shelf::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
-.ach-s-rare::before { background: radial-gradient(ellipse 60% 100% at 50% 110%, rgba(184, 190, 200, 0.09), transparent 70%); }
-.ach-s-epic::before { background: radial-gradient(ellipse 60% 100% at 50% 110%, rgba(201, 162, 74, 0.10), transparent 70%); }
-.ach-s-legendary::before { background: radial-gradient(ellipse 70% 110% at 50% 110%, rgba(201, 162, 74, 0.20), transparent 70%); }
-.ach-s-limited::before { background: radial-gradient(ellipse 60% 110% at 50% 110%, rgba(156, 47, 47, 0.22), transparent 70%); }
+.ach-s-tiered::before { background: radial-gradient(ellipse 70% 110% at 50% 110%, rgba(201, 162, 74, 0.12), transparent 70%); }
+.ach-s-single::before { background: radial-gradient(ellipse 60% 110% at 50% 110%, rgba(156, 47, 47, 0.16), transparent 70%); }
 .ach-shelf-h { position: relative; display: flex; align-items: baseline; justify-content: space-between; }
 .ach-shelf-h h4 { margin: 0; font-size: 14px; font-weight: 700; color: #f4f4f5; }
 .ach-shelf-h h4 span { margin-left: 10px; font-size: 11px; font-weight: 500; letter-spacing: 0.04em; color: #71717a; }
@@ -600,11 +598,14 @@
   opacity: 0.75;
   pointer-events: none;
 }
-.ach-s-common .ach-glow { background: radial-gradient(ellipse, rgba(140, 144, 156, 0.35), transparent 70%); }
-.ach-s-rare .ach-glow { background: radial-gradient(ellipse, rgba(184, 190, 200, 0.45), transparent 70%); }
-.ach-s-epic .ach-glow { background: radial-gradient(ellipse, rgba(201, 162, 74, 0.40), transparent 70%); }
-.ach-s-legendary .ach-glow { background: radial-gradient(ellipse, rgba(201, 162, 74, 0.6), transparent 70%); }
-.ach-s-limited .ach-glow { background: radial-gradient(ellipse, rgba(156, 47, 47, 0.6), transparent 70%); }
+/* 台座光晕按材质（= 档位）：铜 / 银 / 金 / 足金星芒 / 青铜火漆。
+   Plinth glow by material (= tier): bronze / silver / gold / legend / limited. */
+.ach-m-plain .ach-glow { background: radial-gradient(ellipse, rgba(140, 144, 156, 0.35), transparent 70%); }
+.ach-m-bronze .ach-glow { background: radial-gradient(ellipse, rgba(193, 138, 85, 0.45), transparent 70%); }
+.ach-m-silver .ach-glow { background: radial-gradient(ellipse, rgba(188, 193, 204, 0.5), transparent 70%); }
+.ach-m-gold .ach-glow { background: radial-gradient(ellipse, rgba(201, 162, 74, 0.55), transparent 70%); }
+.ach-m-legend .ach-glow { background: radial-gradient(ellipse, rgba(201, 162, 74, 0.7), transparent 70%); }
+.ach-m-limited .ach-glow { background: radial-gradient(ellipse, rgba(156, 47, 47, 0.6), transparent 70%); }
 .ach-item.ghost .ach-glow { opacity: 0.12; }
 .ach-item svg { filter: drop-shadow(0 10px 12px rgba(0, 0, 0, 0.55)); }
 .ach-ring {
@@ -617,6 +618,22 @@
   pointer-events: none;
 }
 .ach-name { margin-top: 10px; font-size: 13px; font-weight: 600; color: #f4f4f5; }
+/* 三档指示：三粒小点 铜 / 银 / 金，到了的点亮。/ Tier pips: bronze / silver / gold, lit when reached. */
+.ach-tiers { display: inline-flex; align-items: center; gap: 4px; margin-top: 5px; }
+.ach-tiers i { width: 7px; height: 7px; border-radius: 999px; background: rgba(255, 255, 255, 0.10); }
+.ach-tiers i.t1.on { background: #C18A55; }
+.ach-tiers i.t2.on { background: #D5D9E2; }
+.ach-tiers i.t3.on { background: #E4BE6A; box-shadow: 0 0 6px rgba(228, 190, 106, 0.6); }
+.ach-tiers small { margin-left: 4px; font-size: 10.5px; color: #a1a1aa; }
+.ach-item.ghost .ach-tiers small { color: #71717a; }
+/* 详情层的三档阶梯 / the detail layer's tier ladder */
+.ach-ladder { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.ach-ladder li { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 12px; background: rgba(255, 255, 255, 0.03); opacity: 0.55; text-align: left; }
+.ach-ladder li.on { opacity: 1; background: rgba(255, 255, 255, 0.06); }
+.ach-ladder li b { display: block; font-size: 13px; font-weight: 700; color: #f4f4f5; }
+.ach-ladder li > div > span { display: block; margin-top: 1px; font-size: 11.5px; line-height: 1.4; color: #a1a1aa; }
+.ach-ladder li small { font-size: 11px; color: #71717a; white-space: nowrap; }
+.ach-ladder-check { margin-left: 6px; font-size: 11px; color: var(--up); }
 .ach-item.ghost .ach-name { color: #a1a1aa; }
 .ach-meta { margin-top: 3px; max-width: 160px; font-size: 11px; line-height: 1.35; color: #71717a; }
 .ach-own { margin-top: 6px; font-size: 10.5px; color: #71717a; }

@@ -6,8 +6,8 @@ from .conditions import (  # noqa: F401
     has_consecutive_active_days,
 )
 from .badges import (  # noqa: F401
-    BADGES, judge_and_award_badges, award_badge,
-    EQUIP_SLOTS, equipped_list, set_equipped_list,
+    BADGES, judge_and_award_badges, award_badge, badge_display_name,
+    EQUIP_SLOTS, MAX_TIER, TIER_NAMES, equipped_list, set_equipped_list, equipped_badge_tiers,
 )
 from .loop import (  # noqa: F401
     backfill_account_trade_modes, backfill_order_trade_modes,

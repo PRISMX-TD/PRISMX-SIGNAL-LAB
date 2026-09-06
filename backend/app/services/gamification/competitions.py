@@ -426,10 +426,10 @@ def settle_competition(db, comp: Competition, admin_id: str,
     badges: list[dict] = []
     badge_errors: list[dict] = []
 
-    def _award(user_id: str, badge_id: str) -> None:
+    def _award(user_id: str, badge_id: str, tier: int = 0) -> None:
         try:
-            if award_badge(db, user_id, badge_id):
-                badges.append({"userId": user_id, "badgeId": badge_id})
+            if award_badge(db, user_id, badge_id, tier):
+                badges.append({"userId": user_id, "badgeId": badge_id, "tier": tier})
         except Exception as exc:
             # award_badge 自己只兜住 IntegrityError；任何其它异常（推送逻辑之外，
             # 比如 commit 中途的连接错误）会把 session 撂在一个"脏"事务里——
@@ -439,12 +439,20 @@ def settle_competition(db, comp: Competition, admin_id: str,
             db.rollback()
             badge_errors.append({"userId": user_id, "badgeId": badge_id, "error": str(exc)})
 
+    # 赛场勋章一枚三档：完赛铜 / 前三银 / 冠军金。每人只发其最高档一次——
+    # award_badge 只升不降，之前的比赛拿过银的这次夺冠会升成金。
+    # One arena badge, three tiers: finisher bronze / podium silver / champion gold.
+    # Each user gets their highest tier once; award_badge only moves up, so a
+    # silver from an earlier competition becomes gold on winning this one.
+    arena_tier: dict[str, int] = {}
     for uid in finisher_users:
-        _award(uid, "comp_finisher")
+        arena_tier[uid] = max(arena_tier.get(uid, 0), 1)
     for uid in podium_users:
-        _award(uid, "comp_podium")
+        arena_tier[uid] = max(arena_tier.get(uid, 0), 2)
     if winner_user is not None:
-        _award(winner_user, "comp_winner")
+        arena_tier[winner_user] = 3
+    for uid, tier in arena_tier.items():
+        _award(uid, "arena", tier)
 
     # 卫冕王：按 starts_at 升序取全部已 settled 的比赛（含本场——本场的 status
     # 与 final_rank 已经在上面那次 commit 里落盘），相邻两届冠军是同一人才发奖。

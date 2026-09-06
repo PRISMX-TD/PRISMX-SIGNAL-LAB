@@ -1,21 +1,21 @@
 // frontend/src/components/badges/medal.ts
 //
 // V5 铸币勋章渲染器：从设计稿（badge-atlas.html，已批准的视觉方案）逐一对照
-// 移植的纯函数，不依赖 React、不访问 DOM。两条轴——形状 = 家族（六种轮廓，
-// 20 像素也能分辨），材质 = 稀有度（五种金属，只回答"多难得"）——具体数值、
-// 路径、配色全部照抄原稿，不做"优化"。
+// 移植的纯函数，不依赖 React、不访问 DOM。两条轴——形状 = 家族（五种轮廓，
+// 20 像素也能分辨），材质 = **档位**（2026-09-07 改制：进阶勋章铜 / 银 / 金，
+// 独立勋章各有固定材质，见 materialOf）——具体数值、路径、配色照抄原稿。
 //
 // 为什么用字符串拼 SVG 而不是 JSX：17 枚纹章都是手绘路径 + 逐点计算的坐标
 // （扇形、星形、桂叶沿贝塞尔切线排布……），产出的标记是纯静态、作者可控的
-// ——这里没有一处数据来自用户输入（badge id 来自后端注册表，rarity 来自
-// 前端自己的镜像表），所以调用方用 dangerouslySetInnerHTML 灌入是安全的；
+// ——这里没有一处数据来自用户输入（badge id 来自后端注册表，档位来自
+// 后端随行下发），所以调用方用 dangerouslySetInnerHTML 灌入是安全的；
 // 真正需要防的是把不可信文本当 HTML 灌进去，这套渲染器通篇不碰那类数据。
 //
 // Why string-built SVG instead of JSX: the 17 emblems are hand-drawn paths
 // with per-point computed geometry (sectors, stars, laurel leaves swept
 // along a bezier tangent...). The output markup is fully static and
 // author-controlled — nothing here originates from user input (the badge id
-// comes from the backend registry, rarity from our own mirror table) — so a
+// comes from the backend registry, the tier from its payload) — so a
 // caller using dangerouslySetInnerHTML is safe. The thing to actually guard
 // against is untrusted text treated as HTML, and none of that happens in
 // this renderer.
@@ -26,10 +26,16 @@
 // This file touches no window/document at module scope (SSR-prerender
 // safe); its one runtime environment check (prefers-reduced-motion) is
 // deferred to call time inside renderMedalInner, guarded by typeof window.
-import type { GamificationBadgeRarity } from '../../api/types'
-
 // ---------------- 家族（= 形状） ----------------
-export type BadgeFamily = 'growth' | 'evergreen' | 'discipline' | 'performance' | 'competition' | 'limited'
+export type BadgeFamily = 'growth' | 'evergreen' | 'performance' | 'competition' | 'limited'
+
+// ---------------- 材质（= 档位） ----------------
+// plain 只给未知 id 的兜底；bronze / silver / gold 是三档；legend 是足金 + 星芒 +
+// 宝石（卫冕王，冠军之上）；limited 是青铜火漆（绝版创始元老）。
+// plain is the fallback for unknown ids; bronze / silver / gold are the three
+// tiers; legend is gold with rays and gems (back-to-back champion, above gold);
+// limited is the bronze wax seal (the founder).
+export type BadgeMaterial = 'plain' | 'bronze' | 'silver' | 'gold' | 'legend' | 'limited'
 
 interface MaterialDef {
   name: string
@@ -48,33 +54,45 @@ interface MaterialDef {
 
 // exported so RankCoin.tsx can borrow the rim tuples for name-coins without
 // re-declaring the same color values a second time.
-export const MAT: Record<GamificationBadgeRarity, MaterialDef> = {
-  common:    { name:'石墨',       rim:['#B8BBC4','#73767F','#40434B'], field:['#1D1D25','#0E0E13'], L:'#DEE0E6', D:'#5A5D66', H:'#F6F7FA', tick:'#3A3D45', inlay:null },
-  rare:      { name:'银',         rim:['#FFFFFF','#BCC1CC','#6C7282'], field:['#1F2028','#0F1015'], L:'#F8F9FC', D:'#7A8090', H:'#FFFFFF', tick:'#4A505E', inlay:'#D5D9E2' },
-  epic:      { name:'黑曜石镶金', rim:['#4C4C5A','#24242C','#0F0F13'], field:['#1A1A22','#0D0D11'], L:'#F0D38A', D:'#8A6A2C', H:'#FFF1C2', tick:'#5A4A2A', inlay:'#D2B06A' },
-  legendary: { name:'足金',       rim:['#FFF0B8','#E4BE6A','#8E6626'], field:['#241E14','#120F0A'], L:'#FFEBB0', D:'#8C672A', H:'#FFFBEA', tick:'#6A4E22', inlay:'#F3D68F', sun:true, gems:true, rays:true },
-  limited:   { name:'青铜火漆',   rim:['#F0BE8C','#B8763F','#5E3419'], field:['#2A1612','#170B09'], L:'#F5CFA6', D:'#7A4A2A', H:'#FFE9D2', tick:'#5A3A26', inlay:'#D89A66', sun:true, seal:'#D89A66' },
+export const MAT: Record<BadgeMaterial, MaterialDef> = {
+  plain:   { name:'石墨',     rim:['#B8BBC4','#73767F','#40434B'], field:['#1D1D25','#0E0E13'], L:'#DEE0E6', D:'#5A5D66', H:'#F6F7FA', tick:'#3A3D45', inlay:null },
+  bronze:  { name:'青铜',     rim:['#F3CBA3','#C18A55','#6B4322'], field:['#221410','#120A07'], L:'#F7D3AC', D:'#7C4E2C', H:'#FFEBD6', tick:'#5C3D27', inlay:'#DBA574' },
+  silver:  { name:'白银',     rim:['#FFFFFF','#BCC1CC','#6C7282'], field:['#1F2028','#0F1015'], L:'#F8F9FC', D:'#7A8090', H:'#FFFFFF', tick:'#4A505E', inlay:'#D5D9E2' },
+  gold:    { name:'足金',     rim:['#FFF0B8','#E4BE6A','#8E6626'], field:['#241E14','#120F0A'], L:'#FFEBB0', D:'#8C672A', H:'#FFFBEA', tick:'#6A4E22', inlay:'#F3D68F', sun:true },
+  legend:  { name:'足金星芒', rim:['#FFF0B8','#E4BE6A','#8E6626'], field:['#241E14','#120F0A'], L:'#FFEBB0', D:'#8C672A', H:'#FFFBEA', tick:'#6A4E22', inlay:'#F3D68F', sun:true, gems:true, rays:true },
+  limited: { name:'青铜火漆', rim:['#F0BE8C','#B8763F','#5E3419'], field:['#2A1612','#170B09'], L:'#F5CFA6', D:'#7A4A2A', H:'#FFE9D2', tick:'#5A3A26', inlay:'#D89A66', sun:true, seal:'#D89A66' },
+}
+
+// 勋章 + 档位 → 材质。进阶勋章按档位；未获得时按铜画轮廓（灰度由调用方处理）；
+// 独立勋章各有固定材质；未知 id 用石墨兜底，绝不抛错。
+// Badge + tier → material. Tiered badges follow the tier (unearned draws the
+// bronze outline; the caller greys it); standalone badges have fixed materials;
+// unknown ids fall back to graphite, never throw.
+export function materialOf(id: string, tier: number | null | undefined): BadgeMaterial {
+  if (id === 'founder_2026') return 'limited'
+  if (id === 'comp_back_to_back') return 'legend'
+  if (!(id in FAMILY)) return 'plain'
+  if (tier === 3) return 'gold'
+  if (tier === 2) return 'silver'
+  return 'bronze'
 }
 
 const ENAMEL: Record<string, [string, string]> = {
-  evergreen: ['#2C6A4A', '#4F9A72'], discipline: ['#3A5B80', '#6A8DB5'],
+  evergreen: ['#2C6A4A', '#4F9A72'],
   competition: ['#8A2D3B', '#C0555F'], seal: ['#6E2626', '#A24444'],
 }
 
-// 勋章 id -> 家族。id 集合与后端注册表（services/gamification/badges.py）/
-// 前端镜像表（badgeRarity.ts）一一对应，17 条。
-// Badge id -> family. The id set mirrors the backend registry
-// (services/gamification/badges.py) / the frontend mirror (badgeRarity.ts),
-// 17 entries.
+// 勋章 id -> 家族。id 集合与后端注册表（services/gamification/badges.py）一一
+// 对应，六条：四枚进阶（起步 / 常青 / 胜手 / 赛场）+ 两枚独立（卫冕王 / 创始元老）。
+// Badge id -> family. Mirrors the backend registry: four tiered badges (starter /
+// evergreen / winning hand / arena) plus two standalone ones.
 const FAMILY: Record<string, BadgeFamily> = {
-  profile_complete: 'growth', first_close: 'growth', first_real_trade: 'growth', comp_finisher: 'competition',
-  evergreen_3m: 'evergreen', discipline_90_7: 'discipline', hundred_wins: 'performance', midas_touch: 'performance', profit_factor_2: 'performance',
-  evergreen_6m: 'evergreen', discipline_90_30: 'discipline', no_bad_sl_50: 'discipline', comp_podium: 'competition',
-  evergreen_12m: 'evergreen', comp_winner: 'competition', comp_back_to_back: 'competition', founder_2026: 'limited',
+  starter: 'growth', evergreen: 'evergreen', winning_hand: 'performance',
+  arena: 'competition', comp_back_to_back: 'competition', founder_2026: 'limited',
 }
 
 const FAM_ENAMEL: Partial<Record<BadgeFamily, string>> = {
-  evergreen: 'evergreen', discipline: 'discipline', competition: 'competition', limited: 'seal',
+  evergreen: 'evergreen', competition: 'competition', limited: 'seal',
 }
 
 // 未知 id 的兜底家族——圆章 + 素圈纹章，绝不抛错。
@@ -160,68 +178,26 @@ export const crown = (cx: number, cy: number, s = 1): string => `<g transform="t
 interface EmblemDef { off: [number, number]; art: string }
 
 const EMB: Record<string, EmblemDef> = {
-  profile_complete: { off: [0, .4], art: `
-    <ellipse cx="32" cy="32" rx="11.5" ry="14.5" fill="none" stroke="{G}" stroke-width="2.2"/><ellipse cx="32" cy="32" rx="9.6" ry="12.6" fill="none" stroke="{D}" stroke-width=".5" opacity=".7"/>
-    ${[0, 36, 72, 108, 144, 180, 216, 252, 288, 324].map(a => { const t = (a - 90) * Math.PI / 180; return `<circle cx="${f(32 + Math.cos(t) * 11.5)}" cy="${f(32 + Math.sin(t) * 14.5)}" r=".95" fill="{H}"/>` }).join('')}
-    <path d="M32 21.8c2.9 0 4.7 2.4 4.7 5.1 0 2.2-1 4-2.6 4.9v1.7c4.2.9 6.9 3.7 7.7 8.1-2.6 1.9-6 2.9-9.8 2.9s-7.2-1-9.8-2.9c.8-4.4 3.5-7.2 7.7-8.1v-1.7c-1.6-.9-2.6-2.7-2.6-4.9 0-2.7 1.8-5.1 4.7-5.1z" fill="{G}"/>
-    <path d="M29.1 26.9c0 2.2 1 4 2.6 4.9M26.6 41.2c1.4-3 3.4-4.8 5.4-5.2" fill="none" stroke="{D}" stroke-width=".5" opacity=".7"/>` },
-  first_close: { off: [0, -1.2], art: `
-    <path fill-rule="evenodd" d="M32 18.5a13.5 13.5 0 1 0 .01 0zM32 23.2a8.8 8.8 0 1 1-.01 0z" fill="{G}"/><path d="M32 18.5a13.5 13.5 0 1 0 .01 0z" fill="none" stroke="{D}" stroke-width=".5" opacity=".8"/><path d="M32 23.2a8.8 8.8 0 1 1-.01 0z" fill="none" stroke="{H}" stroke-width=".5" opacity=".6"/>
-    <path d="M24.5 40.5h15a1.6 1.6 0 0 1 1.6 1.6v5a1.6 1.6 0 0 1-1.6 1.6h-15a1.6 1.6 0 0 1-1.6-1.6v-5a1.6 1.6 0 0 1 1.6-1.6z" fill="{G}"/><path d="M24.5 40.5h15a1.6 1.6 0 0 1 1.6 1.6v5a1.6 1.6 0 0 1-1.6 1.6h-15a1.6 1.6 0 0 1-1.6-1.6v-5a1.6 1.6 0 0 1 1.6-1.6z" fill="none" stroke="{D}" stroke-width=".5"/>
-    <circle cx="27.3" cy="44.6" r="1" fill="{D}"/><circle cx="36.7" cy="44.6" r="1" fill="{D}"/><path d="M30.2 44.6l1.4 1.5 2.6-3" fill="none" stroke="{H}" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>` },
-  first_real_trade: { off: [0, 0], art: `
+  starter: { off: [0, 0], art: `
     <circle cx="32" cy="32" r="13.5" fill="{G}"/><circle cx="32" cy="32" r="13.5" fill="none" stroke="{D}" stroke-width=".6"/><circle cx="32" cy="32" r="11" fill="none" stroke="{D}" stroke-width=".6" opacity=".8"/>
     ${[...Array(24)].map((_, i) => `<line x1="32" y1="19.6" x2="32" y2="21" transform="rotate(${i * 15} 32 32)" stroke="{D}" stroke-width=".6"/>`).join('')}
     <path d="M30.2 25.2h3.6v13.6h-3.6z" fill="{D}"/><path d="M29.8 24.6h4.4v14.8h-4.4z" fill="none" stroke="{H}" stroke-width=".45" opacity=".7"/><path d="M27.6 24.6h8.8v2.1h-8.8zM27.6 37.3h8.8v2.1h-8.8z" fill="{D}"/>
     <path d="M43.5 22.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z" fill="{H}"/>` },
-  comp_finisher: { off: [0, 1.2], art: `
-    <path d="M22 15.5v32" stroke="{G}" stroke-width="2.2" stroke-linecap="round"/><circle cx="22" cy="15.2" r="1.8" fill="{H}"/>
-    <path d="M23.5 18.5c4-2.2 8 1.6 12-.4s6.5-2.2 9.5-.2v12.4c-3-2-6 .2-9.5 1.6s-8-1.6-12 .6z" fill="{E}"/>
-    ${[[24.5, 20], [36.5, 18.3], [30.5, 24.6], [24.5, 30], [36.5, 28.3]].map(([x, y]) => `<path d="M${x} ${y}c1.9-.6 3.9-.4 5.5.2v4.6c-1.6-.6-3.6-.8-5.5-.2z" fill="{L}"/>`).join('')}
-    <path d="M23.5 18.5c4-2.2 8 1.6 12-.4s6.5-2.2 9.5-.2v12.4c-3-2-6 .2-9.5 1.6s-8-1.6-12 .6z" fill="none" stroke="{D}" stroke-width=".6"/>` },
-  evergreen_3m: { off: [1.4, 1.6], art: `${sprig([[23, 45], [24, 34], [32, 24], [42, 19]], 3, 0, 6.6, 2.4)}` },
-  discipline_90_7: { off: [0, 1.2], art: `
-    <circle cx="32" cy="15.6" r="2.4" fill="none" stroke="{G}" stroke-width="1.6"/><path d="M32 18v13.5" stroke="{G}" stroke-width="1.2"/>
-    <path d="M27.8 31.5h8.4v2.6h-8.4z" fill="{G}"/><path d="M27.8 31.5h8.4v2.6h-8.4z" fill="none" stroke="{D}" stroke-width=".5"/>
-    <path d="M28.2 34.1h7.6l-.8 5.6L32 48l-3-8.3z" fill="{E}"/><path d="M28.2 34.1h7.6l-.8 5.6L32 48l-3-8.3z" fill="none" stroke="{D}" stroke-width=".6"/>
-    <path d="M30.2 35.2l1.1 4.4 1 6.6" stroke="{EL}" stroke-width=".6" opacity=".7"/><path d="M29.2 39.7h5.6" stroke="{H}" stroke-width=".7" opacity=".8"/>` },
-  hundred_wins: { off: [-.7, -.6], art: `
-    <path d="${sector(13.5, 8.4, -155, 155)}" transform="rotate(180 32 32)" fill="{G}"/><path d="${sector(13.5, 8.4, -155, 155)}" transform="rotate(180 32 32)" fill="none" stroke="{D}" stroke-width=".55"/>
-    <path d="${sector(12.6, 9.3, -150, 150)}" transform="rotate(180 32 32)" fill="none" stroke="{H}" stroke-width=".4" opacity=".5"/>
-    <path d="${star5(43.8, 32, 3.4)}" fill="{H}"/><path d="${star5(43.8, 32, 3.4)}" fill="none" stroke="{D}" stroke-width=".4"/><path d="${star5(41.2, 23.6, 1.9)}" fill="{H}"/><path d="${star5(41.2, 40.4, 1.9)}" fill="{H}"/>` },
-  midas_touch: { off: [-1.9, 1.0], art: `
-    <path d="M21 45.5l10.8-10.8" stroke="{G}" stroke-width="6.6" stroke-linecap="round"/><path d="M21 45.5l10.8-10.8" stroke="{D}" stroke-width=".6" opacity=".6"/>
-    <path d="M29.4 32.4a2.7 2.7 0 0 1 3.6 3.6" fill="none" stroke="{H}" stroke-width=".9" stroke-linecap="round"/><path d="M18.6 46.6c-1.2-1.2-.8-3 0-3.8" fill="none" stroke="{H}" stroke-width=".7" opacity=".7"/>
-    <circle cx="40.2" cy="24" r="6.2" fill="{G}"/><circle cx="40.2" cy="24" r="6.2" fill="none" stroke="{D}" stroke-width=".6"/><circle cx="40.2" cy="24" r="4.4" fill="none" stroke="{D}" stroke-width=".5" opacity=".7"/><path d="M39.2 21.2h2v5.6h-2z" fill="{D}"/>
-    ${[0, 45, 90, 135].map(a => `<line x1="40.2" y1="14.2" x2="40.2" y2="16.4" transform="rotate(${a} 40.2 24)" stroke="{H}" stroke-width="1" stroke-linecap="round"/><line x1="40.2" y1="14.2" x2="40.2" y2="16.4" transform="rotate(${a + 180} 40.2 24)" stroke="{H}" stroke-width="1" stroke-linecap="round"/>`).join('')}` },
-  profit_factor_2: { off: [-1.1, 1.4], art: `
-    <path d="M32 19.5v22" stroke="{G}" stroke-width="1.8" stroke-linecap="round"/><path d="M24 44.5l2-3.5h12l2 3.5z" fill="{G}"/><path d="M24 44.5l2-3.5h12l2 3.5z" fill="none" stroke="{D}" stroke-width=".5"/><circle cx="32" cy="19" r="2.2" fill="{H}"/>
-    <g transform="rotate(-9 32 23)"><path d="M18 23h28" stroke="{G}" stroke-width="1.8" stroke-linecap="round"/><path d="M18 23l-4 9M18 23l4 9M46 23l-4 9M46 23l4 9" stroke="{D}" stroke-width=".7"/>
-      <path d="M11.5 32.5q6.5 6 13 0z" fill="{G}"/><path d="M11.5 32.5q6.5 6 13 0z" fill="none" stroke="{D}" stroke-width=".5"/><path d="M39.5 32.5q6.5 6 13 0z" fill="{G}"/><path d="M39.5 32.5q6.5 6 13 0z" fill="none" stroke="{D}" stroke-width=".5"/>
-      <circle cx="18" cy="35.2" r="1.3" fill="{H}"/><circle cx="16" cy="35.2" r="1.3" fill="{H}"/><circle cx="20" cy="35.2" r="1.3" fill="{H}"/><circle cx="46" cy="34.6" r="1.1" fill="{D}"/></g>` },
-  evergreen_6m: { off: [0, -1.0], art: `${sprig([[28, 47], [19, 40], [17, 27], [23, 18]], 3, -1, 6.2, 2.2)}${sprig([[36, 47], [45, 40], [47, 27], [41, 18]], 3, 1, 6.2, 2.2)}<path d="M28 47.5q4 2.5 8 0" fill="none" stroke="{G}" stroke-width="1.6" stroke-linecap="round"/>` },
-  discipline_90_30: { off: [0, 0], art: `
-    <rect x="15.5" y="27.5" width="33" height="9" rx="2" fill="{G}"/><rect x="15.5" y="27.5" width="33" height="9" rx="2" fill="none" stroke="{D}" stroke-width=".6"/>
-    <rect x="15.5" y="27.5" width="3.2" height="9" fill="{D}" opacity=".5"/><rect x="45.3" y="27.5" width="3.2" height="9" fill="{D}" opacity=".5"/>
-    <rect x="25" y="29.6" width="14" height="4.8" rx="2.4" fill="{E}"/><rect x="25" y="29.6" width="14" height="4.8" rx="2.4" fill="none" stroke="{D}" stroke-width=".5"/>
-    <path d="M30.2 29.6v4.8M33.8 29.6v4.8" stroke="{H}" stroke-width=".5" opacity=".8"/><ellipse cx="32" cy="31.6" rx="2.2" ry="1.4" fill="{EL}"/><ellipse cx="31.3" cy="31.1" rx=".8" ry=".45" fill="#fff" opacity=".8"/>
-    <path d="M17.5 32h4M42.5 32h4" stroke="{H}" stroke-width=".6" opacity=".7"/><path d="M32 21.5v4.6M32 38v4.5" stroke="{G}" stroke-width="1.4" stroke-linecap="round"/>` },
-  no_bad_sl_50: { off: [0, -2.8], art: `
-    <path d="M17 42l8.5-14 3.5 5.5 4.5-11.5 4 7.5 2.5-3.5L47 42z" fill="{E}"/><path d="M25.5 28l3.5 5.5 4.5-11.5 4 7.5 2.5-3.5" fill="none" stroke="{D}" stroke-width=".6" opacity=".8"/>
-    <path d="M33.5 22l-1.6 4.1 1.9.7 1.5-2.4 1.2 2.3 1.4-1.9z" fill="{H}"/><path d="M25.5 28l-1.7 2.8 1.6.6 1.4-1.9z" fill="{H}"/>
-    <path d="M33.5 22l-4 11.5-4.5-6L17 42h30z" fill="none" stroke="{D}" stroke-width=".6"/><path d="M36 32.5l-5.5 9.5" stroke="{D}" stroke-width=".5" opacity=".6"/>
-    <path d="M15 45h34" stroke="{G}" stroke-width="3" stroke-linecap="round"/><path d="M15 45h34" stroke="{H}" stroke-width=".6" opacity=".6"/><path d="M15 42.5v5M49 42.5v5" stroke="{G}" stroke-width="1.8" stroke-linecap="round"/>` },
-  comp_podium: { off: [0, -2.8], art: `
-    <path d="M17.5 45.5v-8.8l2-1.6h7.5v10.4zM27 45.5V25.2l2-1.6h8l-2 1.6v20.3zM37 45.5V32.5l2-1.6h7.5v14.6z" fill="{G}"/>
-    <path d="M17.5 36.7l2-1.6h7.5M27 25.2l2-1.6h8M37 32.5l2-1.6h7.5" fill="none" stroke="{H}" stroke-width=".6"/><path d="M19.5 35.1v10.4M29 23.6v21.9M39 30.9v14.6" fill="none" stroke="{D}" stroke-width=".55" opacity=".8"/>
-    <path d="M17.5 45.5v-8.8l2-1.6h7.5v10.4zM27 45.5V25.2l2-1.6h8l-2 1.6v20.3zM37 45.5V32.5l2-1.6h7.5v14.6z" fill="none" stroke="{D}" stroke-width=".5"/>
-    <path d="M29.6 26.4h5.4v2.2h-5.4z" fill="{E}"/><path d="${star5(32.3, 31.6, 2.3)}" fill="{H}"/><path d="M15 46h34" stroke="{D}" stroke-width=".8" opacity=".7"/>` },
-  evergreen_12m: { off: [0, 0], art: `
+  evergreen: { off: [0, 0], art: `
     <circle cx="32" cy="32" r="8.6" fill="{G}"/><circle cx="32" cy="32" r="8.6" fill="none" stroke="{D}" stroke-width=".6"/><circle cx="32" cy="32" r="6.2" fill="none" stroke="{H}" stroke-width=".45" opacity=".6"/>
     ${[...Array(12)].map((_, i) => `<path d="M32 21.6l-2.1 4.2h4.2z" transform="rotate(${i * 30} 32 32)" fill="{G}"/><path d="M32 21.6l-2.1 4.2h4.2z" transform="rotate(${i * 30} 32 32)" fill="none" stroke="{D}" stroke-width=".4"/>`).join('')}
     ${[...Array(12)].map((_, i) => `<line x1="32" y1="20.4" x2="32" y2="17.2" transform="rotate(${i * 30 + 15} 32 32)" stroke="{E}" stroke-width="1.3" stroke-linecap="round"/>`).join('')}
     <circle cx="32" cy="32" r="2.6" fill="{H}"/>` },
-  comp_winner: { off: [0, 2.3], art: `${crown(32, 31, 1.12)}` },
+  winning_hand: { off: [-1.9, 1.0], art: `
+    <path d="M21 45.5l10.8-10.8" stroke="{G}" stroke-width="6.6" stroke-linecap="round"/><path d="M21 45.5l10.8-10.8" stroke="{D}" stroke-width=".6" opacity=".6"/>
+    <path d="M29.4 32.4a2.7 2.7 0 0 1 3.6 3.6" fill="none" stroke="{H}" stroke-width=".9" stroke-linecap="round"/><path d="M18.6 46.6c-1.2-1.2-.8-3 0-3.8" fill="none" stroke="{H}" stroke-width=".7" opacity=".7"/>
+    <circle cx="40.2" cy="24" r="6.2" fill="{G}"/><circle cx="40.2" cy="24" r="6.2" fill="none" stroke="{D}" stroke-width=".6"/><circle cx="40.2" cy="24" r="4.4" fill="none" stroke="{D}" stroke-width=".5" opacity=".7"/><path d="M39.2 21.2h2v5.6h-2z" fill="{D}"/>
+    ${[0, 45, 90, 135].map(a => `<line x1="40.2" y1="14.2" x2="40.2" y2="16.4" transform="rotate(${a} 40.2 24)" stroke="{H}" stroke-width="1" stroke-linecap="round"/><line x1="40.2" y1="14.2" x2="40.2" y2="16.4" transform="rotate(${a + 180} 40.2 24)" stroke="{H}" stroke-width="1" stroke-linecap="round"/>`).join('')}` },
+  arena: { off: [0, -2.8], art: `
+    <path d="M17.5 45.5v-8.8l2-1.6h7.5v10.4zM27 45.5V25.2l2-1.6h8l-2 1.6v20.3zM37 45.5V32.5l2-1.6h7.5v14.6z" fill="{G}"/>
+    <path d="M17.5 36.7l2-1.6h7.5M27 25.2l2-1.6h8M37 32.5l2-1.6h7.5" fill="none" stroke="{H}" stroke-width=".6"/><path d="M19.5 35.1v10.4M29 23.6v21.9M39 30.9v14.6" fill="none" stroke="{D}" stroke-width=".55" opacity=".8"/>
+    <path d="M17.5 45.5v-8.8l2-1.6h7.5v10.4zM27 45.5V25.2l2-1.6h8l-2 1.6v20.3zM37 45.5V32.5l2-1.6h7.5v14.6z" fill="none" stroke="{D}" stroke-width=".5"/>
+    <path d="M29.6 26.4h5.4v2.2h-5.4z" fill="{E}"/><path d="${star5(32.3, 31.6, 2.3)}" fill="{H}"/><path d="M15 46h34" stroke="{D}" stroke-width=".8" opacity=".7"/>` },
   comp_back_to_back: { off: [0, -2.0], art: `
     <path d="M22 44l-2.5 6h9l-1.5-6zM42 44l2.5 6h-9l1.5-6z" fill="{E}"/><path d="M22 44l-2.5 6h9l-1.5-6zM42 44l2.5 6h-9l1.5-6z" fill="none" stroke="{D}" stroke-width=".5"/>
     ${sprig([[26, 45], [18, 38], [17, 26], [24, 20]], 4, -1, 4.8, 1.7, 1.2)}${sprig([[38, 45], [46, 38], [47, 26], [40, 20]], 4, 1, 4.8, 1.7, 1.2)}${crown(32, 31.5, .82)}` },
@@ -229,6 +205,7 @@ const EMB: Record<string, EmblemDef> = {
     <path d="M24.5 21.5h15l3.8 19H20.7z" fill="{G}"/><path d="M24.5 21.5h15l3.8 19H20.7z" fill="none" stroke="{D}" stroke-width=".6"/><path d="M26.3 23.4h11.4l2.9 15.1H23.4z" fill="none" stroke="{H}" stroke-width=".45" opacity=".6"/>
     <path d="M24.5 21.5l1.8 1.9M39.5 21.5l-1.8 1.9M20.7 40.5l2.7-2M43.3 40.5l-2.7-2" stroke="{D}" stroke-width=".5" opacity=".8"/><path d="M27 31h10" stroke="{D}" stroke-width=".7"/><path d="M27 31.9h10" stroke="{H}" stroke-width=".5" opacity=".6"/>
     <path d="${star5(32, 14.6, 3.6)}" fill="{H}"/><path d="${star5(32, 14.6, 3.6)}" fill="none" stroke="{D}" stroke-width=".4"/>` },
+
 }
 
 // 未知 id 的兜底纹章：素圈，绝不抛错。
@@ -239,7 +216,6 @@ const FALLBACK_EMB: EmblemDef = {
 }
 
 // ---------------- 形状（= 家族） ----------------
-const SHIELD = 'M32 4.5C40.5 4.5 48 6.6 52.5 9V30.5C52.5 46.5 42.5 55.5 32 60.5C21.5 55.5 11.5 46.5 11.5 30.5V9C16 6.6 23.5 4.5 32 4.5Z'
 const HEX = 'M32 3.5L55.5 17.5V46.5L32 60.5L8.5 46.5V17.5Z'
 const inset = (d: string, s: number): string => `<path d="${d}" transform="translate(32 32) scale(${s}) translate(-32 -32)"`
 
@@ -256,7 +232,6 @@ interface ShapeDef {
 const SHAPES: Record<BadgeFamily, ShapeDef> = {
   growth:      { kind: 'round',  R: 29,  emb: 1.06, gemR: 25.6 },
   evergreen:   { kind: 'laurel', R: 29,  emb: .92,  gemR: 23.2 },
-  discipline:  { kind: 'path',   d: SHIELD, emb: .9,  fieldS: .84, bevelS: .92, gemR: 22 },
   performance: { kind: 'path',   d: HEX,    emb: .92, fieldS: .84, bevelS: .92, gemR: 22 },
   competition: { kind: 'star',   emb: .88,  gemR: 22.5 },
   limited:     { kind: 'seal',   emb: .98,  gemR: 22 },
@@ -296,12 +271,13 @@ function prefersReducedMotion(): boolean {
  */
 export function renderMedalInner(
   id: string,
-  rarity: GamificationBadgeRarity,
+  tier: number,
   size: number,
   key: string,
   opts: RenderMedalOpts = {},
 ): string {
-  const m = MAT[rarity] ?? MAT.common
+  const mat = materialOf(id, tier)
+  const m = MAT[mat]
   // useId() 之类的 key 可能带冒号（如 ":r1:"），拼进 SVG id 前先去掉非
   // id-safe 字符，保留一个稳定前缀。
   // A caller key like useId()'s may carry colons (":r1:") — strip
@@ -400,12 +376,12 @@ export function renderMedalInner(
   let sun = ''
   if (m.sun) {
     for (let i = 0; i < 48; i++) { sun += `<line x1="32" y1="26" x2="32" y2="6" transform="rotate(${i * 7.5} 32 32)"/>` }
-    sun = `<g stroke="${m.L}" stroke-width=".8" opacity="${rarity === 'limited' ? '.10' : '.14'}">${sun}</g>`
+    sun = `<g stroke="${m.L}" stroke-width=".8" opacity="${mat === 'limited' ? '.10' : '.14'}">${sun}</g>`
   }
   let guil = ''
-  if (rarity === 'epic' || rarity === 'rare') {
+  if (mat === 'silver' || mat === 'gold') {
     for (let i = 0; i < 10; i++) { guil += `<ellipse cx="32" cy="32" rx="21" ry="7.5" transform="rotate(${i * 18} 32 32)"/>` }
-    guil = `<g fill="none" stroke="${m.inlay}" stroke-width=".45" opacity="${rarity === 'epic' ? '.16' : '.10'}">${guil}</g>`
+    guil = `<g fill="none" stroke="${m.inlay}" stroke-width=".45" opacity="${mat === 'gold' ? '.16' : '.10'}">${guil}</g>`
   }
   const legend = (fam === 'limited' && big)
     ? `<defs><path id="${k}-arc" d="M11.6 40.5A22 22 0 1 1 52.4 40.5"/></defs><text font-family="JetBrains Mono, ui-monospace, monospace" font-size="3.55" letter-spacing=".5" fill="${m.L}" opacity=".95"><textPath href="#${k}-arc" startOffset="50%" text-anchor="middle">PRISMX · MMXXVI · FOUNDING MEMBER</textPath></text>`

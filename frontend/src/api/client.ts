@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, DisciplineScore, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 
 const TOKEN_KEY = 'prismx_token'
@@ -314,11 +314,6 @@ export const orderApi = {
   winrate: (login?: string) =>
     request<PersonalWinRate>(`/orders/winrate${login ? `?login=${encodeURIComponent(login)}` : ''}`),
   closedTrades: () => request<{ trades: ClosedTrade[] }>('/orders/closed-trades'),
-  // 纪律分：对所有登录用户开放，FREE/PRO 的明细裁剪见 api/types.ts 的 DisciplineScore 注释。
-  // Discipline score: open to all logged-in users; FREE/PRO detail gating is
-  // described in api/types.ts's DisciplineScore comment.
-  discipline: (login?: string) =>
-    request<DisciplineScore>(`/orders/discipline${login ? `?login=${encodeURIComponent(login)}` : ''}`),
 }
 
 // 自定义策略：挑条件 → 查数据覆盖 → 回测 → 启用 → 触发个人信号 → 一键下单
@@ -763,12 +758,6 @@ export const adminApi = {
     getTrial: () => request<AdminTrialSettings>('/admin/trial'),
     updateTrial: (payload: AdminTrialSettings) =>
       request<AdminTrialSettings>('/admin/trial', {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      }),
-    getDiscipline: () => request<AdminDisciplineSettings>('/admin/discipline'),
-    updateDiscipline: (payload: AdminDisciplineSettings) =>
-      request<AdminDisciplineSettings>('/admin/discipline', {
         method: 'PUT',
         body: JSON.stringify(payload),
       }),

@@ -64,7 +64,7 @@ def _stub_compute_rows(monkeypatch, comp, rows):
 
 
 def _badges(db, user_id):
-    return {b.badge_id for b in db.query(UserBadge).filter_by(user_id=user_id)}
+    return {(b.badge_id, b.tier) for b in db.query(UserBadge).filter_by(user_id=user_id)}
 
 
 # ---- status guard ----------------------------------------------------------
@@ -172,10 +172,11 @@ def test_settle_badge_matrix_winner_podium_finisher_unranked_disqualified(db_ses
 
     settle_competition(db_session, comp, admin.id)
 
-    assert _badges(db_session, u_winner.id) == {"comp_winner", "comp_podium", "comp_finisher"}
-    assert _badges(db_session, u_second.id) == {"comp_podium", "comp_finisher"}
-    assert _badges(db_session, u_third.id) == {"comp_podium", "comp_finisher"}
-    assert _badges(db_session, u_fourth.id) == {"comp_finisher"}
+    # 赛场勋章一枚三档：冠军金、前三银、完赛铜，每人只有一行
+    assert _badges(db_session, u_winner.id) == {("arena", 3)}
+    assert _badges(db_session, u_second.id) == {("arena", 2)}
+    assert _badges(db_session, u_third.id) == {("arena", 2)}
+    assert _badges(db_session, u_fourth.id) == {("arena", 1)}
     assert _badges(db_session, u_unranked.id) == set()
     assert _badges(db_session, u_dq.id) == set()
 
@@ -242,7 +243,7 @@ def test_settle_refreshes_stale_snapshot_before_reading(db_session, monkeypatch)
     assert p_dq.final_rank is None and p_dq.final_score is None
     assert p_ok.final_rank == 1 and p_ok.final_score == 0.3
     assert result["ranked"] == 1
-    assert "comp_winner" in _badges(db_session, u_ok.id)
+    assert ("arena", 3) in _badges(db_session, u_ok.id)
     assert _badges(db_session, u_dq.id) == set()
 
     snaps = db_session.query(LeaderboardSnapshot).filter_by(
@@ -266,10 +267,9 @@ def test_settle_multi_account_same_user_dedups_badges(db_session, monkeypatch):
 
     result = settle_competition(db_session, comp, admin.id)
 
-    assert _badges(db_session, u.id) == {"comp_winner", "comp_podium", "comp_finisher"}
+    assert _badges(db_session, u.id) == {("arena", 3)}
     winner_badges = [b for b in result["badges"] if b["userId"] == u.id]
-    ids = [b["badgeId"] for b in winner_badges]
-    assert sorted(ids) == ["comp_finisher", "comp_podium", "comp_winner"]  # 各一次
+    assert [(b["badgeId"], b["tier"]) for b in winner_badges] == [("arena", 3)]  # 只发一次、直接金档
 
 
 # ---- badge award failures don't undo finality -------------------------------
@@ -288,10 +288,10 @@ def test_settle_badge_award_failure_lands_in_badgeErrors_finality_intact(db_sess
 
     real_award_badge = comp_mod.award_badge
 
-    def _boom(db, user_id, badge_id):
-        if badge_id == "comp_winner":
+    def _boom(db, user_id, badge_id, tier=0):
+        if badge_id == "arena" and tier == 3:
             raise RuntimeError("simulated award failure")
-        return real_award_badge(db, user_id, badge_id)
+        return real_award_badge(db, user_id, badge_id, tier)
 
     monkeypatch.setattr(comp_mod, "award_badge", _boom)
 
@@ -302,12 +302,10 @@ def test_settle_badge_award_failure_lands_in_badgeErrors_finality_intact(db_sess
         competition_id=comp.id, mt5_login="A").first()
     assert p.final_rank == 1                            # 名次不受发奖失败影响
 
-    errors = [e for e in result["badgeErrors"] if e["badgeId"] == "comp_winner"]
+    errors = [e for e in result["badgeErrors"] if e["badgeId"] == "arena"]
     assert len(errors) == 1 and errors[0]["userId"] == u.id
-    # comp_winner 失败不该拖垮同一用户的其它勋章授予（同一次 _award 调用互不影响）
-    assert "comp_finisher" in _badges(db_session, u.id)
-    assert "comp_podium" in _badges(db_session, u.id)
-    assert "comp_winner" not in _badges(db_session, u.id)
+    # 发奖失败只记入 badgeErrors 供人工补发，本人这场什么都没拿到
+    assert _badges(db_session, u.id) == set()
 
     # session 在异常后仍可用（未被脏事务卡死）——能正常再查询/写入
     assert db_session.query(CompetitionParticipant).filter_by(
@@ -334,7 +332,7 @@ def test_settle_back_to_back_awarded_when_same_winner(db_session, monkeypatch):
                        [{"userId": u.id, "login": "A", "score": 0.5, "sample": 10}])
     settle_competition(db_session, comp2, admin.id)
 
-    assert "comp_back_to_back" in _badges(db_session, u.id)
+    assert ("comp_back_to_back", 0) in _badges(db_session, u.id)
 
 
 def test_settle_back_to_back_not_awarded_when_different_winner(db_session, monkeypatch):

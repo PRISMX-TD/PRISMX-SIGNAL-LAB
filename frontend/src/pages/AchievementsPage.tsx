@@ -20,13 +20,13 @@ import BadgeIcon from '../components/badges/BadgeIcon'
 import MedalTilt from '../components/badges/MedalTilt'
 import BadgeDetailModal from '../components/badges/BadgeDetailModal'
 import PedestalStage from '../components/badges/PedestalStage'
-import type { GamificationBadge, GamificationBadgeRarity, GamificationMe, GamificationTask } from '../api/types'
+import { materialOf } from '../components/badges/medal'
+import type { GamificationBadge, GamificationMe, GamificationTask } from '../api/types'
 
-// 勋章库按稀有度从高到低分层，最珍贵的一层在最上面——进门先看到镇馆之宝。
-// The vault is shelved rarest-first, most precious on top — the centrepiece is the
-// first thing you see.
-const RARITY_ORDER: GamificationBadgeRarity[] = ['common', 'rare', 'epic', 'legendary', 'limited']
-const VAULT_ORDER: GamificationBadgeRarity[] = [...RARITY_ORDER].reverse()
+// 勋章库分两层：四枚进阶勋章（各有铜 / 银 / 金三档）在上，两枚独立勋章在下。
+// The vault has two shelves: the four tiered badges (bronze / silver / gold) on
+// top, the two standalone badges below.
+const TIERS = [1, 2, 3] as const
 // 与后端 LEVEL_TITLES 同序 / same order as the backend's LEVEL_TITLES
 const LEVEL_KEYS = ['novice', 'junior', 'elite', 'senior', 'chief', 'legend'] as const
 
@@ -39,7 +39,7 @@ const LEVEL_KEYS = ['novice', 'junior', 'elite', 'senior', 'chief', 'legend'] as
 // degrades to "treat as already seen", i.e. one skipped animation, not an
 // error).
 const SEEN_BADGES_KEY = 'prismx_badges_seen'
-// 首次铸造动画错峰上限：一次性拿到 17 枚也只放最近获得的 3 枚，其余静默标记
+// 首次铸造动画错峰上限：一次性拿到多枚也只放最近获得的 3 枚，其余静默标记
 // 已看过——不然新用户一进成就页要盯着 17 遍"毛坯→压印→闪光→流光"。
 // Cap on staggered first-time mint animations: even a first load with all 17
 // badges earned only plays the 3 most recently awarded; the rest are marked
@@ -432,10 +432,10 @@ export default function AchievementsPage() {
   const stageIndex = nextGroup ? me.groups.indexOf(nextGroup) + 1 : me.groups.length
   const nextTitleKey = LEVEL_KEYS[Math.min(me.level, LEVEL_KEYS.length - 1)]
   const earnedCount = me.badges.filter((b) => b.earned).length
-  const shelves = VAULT_ORDER.map((rarity) => ({
-    rarity,
-    badges: me.badges.filter((b) => b.rarity === rarity),
-  })).filter((g) => g.badges.length > 0)
+  const shelves = [
+    { key: 'tiered', badges: me.badges.filter((b) => b.maxTier > 0) },
+    { key: 'single', badges: me.badges.filter((b) => b.maxTier === 0) },
+  ].filter((g) => g.badges.length > 0)
   // 按佩戴顺序取出勋章对象；首枚是默认，站陈列台正中。
   // Resolve badges in equipped order; the first is the default and takes centre stage.
   const equippedBadges = me.equippedBadges
@@ -568,33 +568,48 @@ export default function AchievementsPage() {
         </div>
         {equipMsg && <p className="text-sm text-down">{equipMsg}</p>}
 
-        {shelves.map(({ rarity, badges }) => {
+        {shelves.map(({ key, badges }) => {
           const got = badges.filter((b) => b.earned).length
           return (
-            <div key={rarity} className={`ach-shelf ach-s-${rarity}`}>
+            <div key={key} className={`ach-shelf ach-s-${key}`}>
               <div className="ach-shelf-h">
                 <h4>
-                  {t(`gamification.rarity.${rarity}`)}
-                  <span>{t(`gamification.material.${rarity}`)}</span>
+                  {t(`gamification.shelf.${key}`)}
+                  <span>{t(`gamification.shelf.${key}Hint`)}</span>
                 </h4>
                 <div className="r"><b className="num">{got} / {badges.length}</b></div>
               </div>
               <ul className="ach-row">
                 {badges.map((b) => {
                   const isDefault = b.id === me.equippedBadge
+                  const tiered = b.maxTier > 0
+                  // 未获得：进阶勋章写铜档条件，独立勋章写它的条件；已获得但没到金：
+                  // 写下一档条件；金 / 独立已获得：写获得日期。
+                  // Unearned: the bronze condition (tiered) or the badge's own; earned
+                  // below gold: the next tier's condition; gold / standalone earned:
+                  // the awarded date.
+                  const meta = !b.earned
+                    ? t(tiered ? `gamification.badges.${b.id}.tiers.1` : `gamification.badges.${b.id}.desc`)
+                    : tiered && b.tier < b.maxTier
+                      ? t('gamification.detail.nextTier', { desc: t(`gamification.badges.${b.id}.tiers.${b.tier + 1}`) })
+                      : (b.awardedAt ? t('gamification.stage.awardedOn', { date: fmtDate(b.awardedAt) }) : '')
                   return (
-                    <li key={b.id} className={`ach-item ${b.earned ? '' : 'ghost'}`}>
+                    <li key={b.id} className={`ach-item ach-m-${materialOf(b.id, b.tier)} ${b.earned ? '' : 'ghost'}`}>
                       <i className="ach-glow" aria-hidden />
                       {!b.earned && <i className="ach-ring" aria-hidden />}
                       <MedalTilt ariaLabel={t(`gamification.badges.${b.id}.name`)} onClick={() => setDetailBadge(b)}>
-                        <BadgeIcon id={b.id} rarity={b.rarity} earned={b.earned} size={92} mint={mintIds.has(b.id)} />
+                        <BadgeIcon id={b.id} tier={b.tier} earned={b.earned} size={92} mint={mintIds.has(b.id)} />
                       </MedalTilt>
                       <b className="ach-name">{t(`gamification.badges.${b.id}.name`)}</b>
-                      <small className="ach-meta">
-                        {b.earned
-                          ? (b.awardedAt ? t('gamification.stage.awardedOn', { date: fmtDate(b.awardedAt) }) : '')
-                          : t(`gamification.badges.${b.id}.desc`)}
-                      </small>
+                      {tiered && (
+                        <span className="ach-tiers" aria-label={b.tier > 0 ? t(`gamification.tier.${b.tier}`) : t('gamification.notEarned')}>
+                          {TIERS.map((tier) => (
+                            <i key={tier} className={`t${tier} ${b.tier >= tier ? 'on' : ''}`} aria-hidden />
+                          ))}
+                          <small>{b.tier > 0 ? t(`gamification.tier.${b.tier}`) : t('gamification.notEarned')}</small>
+                        </span>
+                      )}
+                      <small className="ach-meta">{meta}</small>
                       <small className="ach-own">
                         {t('gamification.detail.owners', { n: b.owners, pct: fmtOwnerPct(b.owners, me.population) })}
                       </small>

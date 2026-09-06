@@ -22,8 +22,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 import app.models  # noqa: F401
-from app.models import AdminAuditLog, DisciplineSnapshot, MT5Account, Order, Signal, User
-import app.services.discipline as disc
+from app.models import AdminAuditLog, User
 import app.services.plan_expiry as pe
 
 NOW = datetime.now(timezone.utc)
@@ -35,7 +34,6 @@ def loop_db(monkeypatch):
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     monkeypatch.setattr(pe, "SessionLocal", Session)
-    monkeypatch.setattr(disc, "SessionLocal", Session)
     yield Session
     engine.dispose()
 
@@ -68,40 +66,6 @@ def test_sweep_expired_plans_downgrades_only_expired(loop_db):
     db.close()
 
 
-# ---- discipline snapshot -----------------------------------------------------------
-
-def test_snapshot_all_discipline_writes_aggregate_and_per_login_rows(loop_db):
-    db = loop_db()
-    uid = _user(db, "d@t.co")
-    db.add(MT5Account(user_id=uid, login="1", server="s"))
-    db.add(MT5Account(user_id=uid, login="2", server="s"))
-    sig = Signal(symbol="XAUUSD", side="BUY", entry=100.0, stop_loss=99.0, take_profit=102.0,
-                 indicator="x", source="test", external_id="e1",
-                 expire_at=(NOW + timedelta(minutes=10)).replace(tzinfo=None))
-    db.add(sig); db.commit()
-    db.add(Order(user_id=uid, signal_id=sig.id, client_order_id="c1", symbol="XAUUSD",
-                 side="BUY", volume=0.1, status="FILLED", mt5_login="1", mt5_ticket=11,
-                 sl=99.0, created_at=(NOW - timedelta(days=1)).replace(tzinfo=None)))
-    _user(db, "idle@t.co")                                   # 没信号单，不写快照
-    db.commit(); db.close()
-
-    n = disc.snapshot_all_discipline(today="2026-09-05")
-    assert n == 3                                            # 聚合行 + 两个账号
-
-    db = loop_db()
-    rows = db.query(DisciplineSnapshot).filter_by(user_id=uid).all()
-    assert {r.login for r in rows} == {"", "1", "2"}
-    assert all(r.date == "2026-09-05" for r in rows)
-    assert db.query(DisciplineSnapshot).count() == 3        # idle 用户没有行
-    db.close()
-
-    # 同一天再跑一次是更新不是新增 / rerun updates in place
-    assert disc.snapshot_all_discipline(today="2026-09-05") == 3
-    db = loop_db()
-    assert db.query(DisciplineSnapshot).count() == 3
-    db.close()
-
-
 # ---- 循环走线程池 / loops go through the thread pool ------------------------------
 
 def _run_one_iteration(monkeypatch, module, loop_coro, target_name, **kwargs):
@@ -129,6 +93,4 @@ def test_plan_expiry_loop_uses_threadpool(monkeypatch):
     _run_one_iteration(monkeypatch, pe, pe.plan_expiry_sweep_loop, "sweep_expired_plans")
 
 
-def test_discipline_loop_uses_threadpool(monkeypatch):
-    _run_one_iteration(monkeypatch, disc, disc.discipline_snapshot_loop,
-                       "snapshot_all_discipline", startup_delay=0)
+

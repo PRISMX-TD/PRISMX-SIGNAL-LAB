@@ -15,7 +15,7 @@ import InviteLinksPanel from '../components/admin/InviteLinksPanel'
 import StrategyWinratePanel from '../components/admin/StrategyWinratePanel'
 import GamificationPanel from '../components/admin/GamificationPanel'
 import CompetitionsPanel from '../components/admin/CompetitionsPanel'
-import type { AdminBrokerSettings, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminDisciplineSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
+import type { AdminBrokerSettings, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
 const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
@@ -358,9 +358,6 @@ export default function AdminPage() {
   // saveTrial(), and pass THAT to InviteLinksPanel.
   const [savedTrialEnabled, setSavedTrialEnabled] = useState(false)
 
-  // 纪律分参数设置 / discipline-score parameter settings
-  const [discipline, setDiscipline] = useState<AdminDisciplineSettings | null>(null)
-  const [savingDiscipline, setSavingDiscipline] = useState(false)
 
   // K 线历史保留策略设置 / candle-history retention settings
   const [candleSettings, setCandleSettings] = useState<AdminCandleSettings | null>(null)
@@ -401,11 +398,10 @@ export default function AdminPage() {
         adminApi.getSettings(),
         adminApi.getPricing(),
         adminApi.getTrial(),
-        adminApi.getDiscipline(),
         adminApi.getCandleHistory(),
         adminApi.getStrategySettings(),
       ])
-      const [usersRes, metricsRes, pageStatsRes, settingsRes, pricingRes, trialRes, disciplineRes, candleRes, strategyRes] = results
+      const [usersRes, metricsRes, pageStatsRes, settingsRes, pricingRes, trialRes, candleRes, strategyRes] = results
       let failed = 0
       const ok = <T,>(r: PromiseSettledResult<T>): T | null => {
         if (r.status === 'fulfilled') return r.value
@@ -434,8 +430,6 @@ export default function AdminPage() {
         setTrial(trialVal)
         setSavedTrialEnabled(trialVal.trialEnabled)
       }
-      const disciplineVal = ok(disciplineRes)
-      if (disciplineVal) setDiscipline(disciplineVal)
       const candleVal = ok(candleRes)
       if (candleVal) setCandleSettings(candleVal)
       const strategyVal = ok(strategyRes)
@@ -509,20 +503,6 @@ export default function AdminPage() {
       showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
     } finally {
       setSavingTrial(false)
-    }
-  }
-
-  const saveDiscipline = async () => {
-    if (!discipline) return
-    setSavingDiscipline(true)
-    try {
-      const updated = await adminApi.updateDiscipline(discipline)
-      setDiscipline(updated)
-      showToast('ok', t('admin.saved'))
-    } catch (err) {
-      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
-    } finally {
-      setSavingDiscipline(false)
     }
   }
 
@@ -912,113 +892,6 @@ export default function AdminPage() {
 
       {tab === 'system' && (
         <>
-      {/* 纪律分参数设置 / discipline-score parameter settings */}
-      {discipline && (
-        <div className="glass mb-5 p-5">
-          <h3 className="mb-4 font-display text-lg font-semibold text-neutral-100">{t('admin.disciplineTitle')}</h3>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-            <div>
-              <label className="label">{t('admin.dscWindowDays')}</label>
-              <input
-                type="number"
-                className="input"
-                min="7"
-                max="365"
-                value={discipline.windowDays}
-                onChange={(e) => setDiscipline({ ...discipline, windowDays: Math.min(365, Math.max(7, parseInt(e.target.value) || 7)) })}
-              />
-            </div>
-            <div>
-              <label className="label">{t('admin.dscWeightStop')}</label>
-              <input
-                type="number"
-                className="input"
-                min="0"
-                max="100"
-                value={discipline.weightStop}
-                onChange={(e) => setDiscipline({ ...discipline, weightStop: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) })}
-              />
-            </div>
-            <div>
-              <label className="label">{t('admin.dscWeightVolume')}</label>
-              <input
-                type="number"
-                className="input"
-                min="0"
-                max="100"
-                value={discipline.weightVolume}
-                onChange={(e) => setDiscipline({ ...discipline, weightVolume: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) })}
-              />
-            </div>
-            <div>
-              <label className="label">{t('admin.dscWeightExit')}</label>
-              <input
-                type="number"
-                className="input"
-                min="0"
-                max="100"
-                value={discipline.weightExit}
-                onChange={(e) => setDiscipline({ ...discipline, weightExit: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) })}
-              />
-            </div>
-            <div>
-              <label className="label">{t('admin.dscSlTolerance')}</label>
-              <input
-                type="number"
-                className="input"
-                min="0"
-                max="1"
-                step="0.01"
-                value={discipline.slTolerancePct}
-                onChange={(e) => setDiscipline({ ...discipline, slTolerancePct: Math.min(1, Math.max(0, parseFloat(e.target.value) || 0)) })}
-              />
-            </div>
-            <div>
-              <label className="label">{t('admin.dscVolumeMultiple')}</label>
-              <input
-                type="number"
-                className="input"
-                min="1"
-                max="20"
-                step="0.1"
-                value={discipline.volumeMultiple}
-                onChange={(e) => setDiscipline({ ...discipline, volumeMultiple: Math.min(20, Math.max(1, parseFloat(e.target.value) || 1)) })}
-              />
-            </div>
-            <div>
-              <label className="label">{t('admin.dscHistoryMin')}</label>
-              <input
-                type="number"
-                className="input"
-                min="1"
-                max="50"
-                value={discipline.volumeHistoryMin}
-                onChange={(e) => setDiscipline({ ...discipline, volumeHistoryMin: Math.min(50, Math.max(1, parseInt(e.target.value) || 1)) })}
-              />
-            </div>
-            <div>
-              <label className="label">{t('admin.dscExitDistance')}</label>
-              <input
-                type="number"
-                className="input"
-                min="0"
-                max="1"
-                step="0.05"
-                value={discipline.exitSlDistancePct}
-                onChange={(e) => setDiscipline({ ...discipline, exitSlDistancePct: Math.min(1, Math.max(0, parseFloat(e.target.value) || 0)) })}
-              />
-            </div>
-          </div>
-          <button
-            className="btn-primary mt-4 px-5 py-2 text-sm disabled:opacity-40"
-            disabled={savingDiscipline}
-            onClick={saveDiscipline}
-          >
-            {savingDiscipline ? t('common.loading') : t('common.save')}
-          </button>
-        </div>
-      )}
-
       {/* K 线历史保留策略设置 / candle-history retention settings */}
       {candleSettings && (
         <div className="glass mb-5 p-5">

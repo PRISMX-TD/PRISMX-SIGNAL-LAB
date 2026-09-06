@@ -29,7 +29,6 @@ import { gamificationApi } from '../api/client'
 import { SkeletonBlock, SkeletonLine } from '../components/Skeleton'
 import BadgeIcon from '../components/badges/BadgeIcon'
 import RankCoin from '../components/badges/RankCoin'
-import { BADGE_RARITY } from '../components/badges/badgeRarity'
 import type { LeaderboardBoard, LeaderboardPayload, LeaderboardRow } from '../api/types'
 
 const BOARDS: LeaderboardBoard[] = ['return_pct', 'win_rate']
@@ -190,7 +189,7 @@ function PodiumCard({ row, board, maxAbs }: { row: LeaderboardRow; board: Leader
               {row.displayName}
             </span>
             {row.equippedBadge && (
-              <BadgeIcon id={row.equippedBadge} rarity={BADGE_RARITY[row.equippedBadge] ?? 'common'} earned size={20} />
+              <BadgeIcon id={row.equippedBadge} tier={row.equippedBadgeTier ?? 0} earned size={20} />
             )}
             {row.isSelf && (
               <span className="tag shrink-0 bg-prism-600/25 text-[11px] text-prism-300">{t('leaderboard.youTag')}</span>
@@ -238,7 +237,7 @@ function ListRow({ row, board, maxAbs }: { row: LeaderboardRow; board: Leaderboa
       </span>
       <div className="flex min-w-0 items-center gap-2">
         {row.equippedBadge && (
-          <BadgeIcon id={row.equippedBadge} rarity={BADGE_RARITY[row.equippedBadge] ?? 'common'} earned size={20} />
+          <BadgeIcon id={row.equippedBadge} tier={row.equippedBadgeTier ?? 0} earned size={20} />
         )}
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
@@ -308,7 +307,7 @@ function PodiumColumnMobile({ row, board, center }: { row: LeaderboardRow; board
       <div className="flex w-full min-w-0 items-center justify-center gap-1">
         <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-neutral-100">{row.displayName}</span>
         {row.equippedBadge && (
-          <BadgeIcon id={row.equippedBadge} rarity={BADGE_RARITY[row.equippedBadge] ?? 'common'} earned size={14} className="shrink-0" />
+          <BadgeIcon id={row.equippedBadge} tier={row.equippedBadgeTier ?? 0} earned size={14} className="shrink-0" />
         )}
       </div>
       <b
@@ -337,7 +336,7 @@ function ListRowMobile({ row, board }: { row: LeaderboardRow; board: Leaderboard
       </span>
       <div className="flex min-w-0 items-center gap-2">
         {row.equippedBadge && (
-          <BadgeIcon id={row.equippedBadge} rarity={BADGE_RARITY[row.equippedBadge] ?? 'common'} earned size={16} className="shrink-0" />
+          <BadgeIcon id={row.equippedBadge} tier={row.equippedBadgeTier ?? 0} earned size={16} className="shrink-0" />
         )}
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">

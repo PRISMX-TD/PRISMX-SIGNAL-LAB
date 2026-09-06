@@ -44,10 +44,10 @@ const FIELD_R = R - 3.6 // 25.4
 const INLAY_R = FIELD_R - 3 // 22.4
 
 function materialFor(rank: number) {
-  if (rank === 1) return MAT.legendary
-  if (rank === 2) return MAT.rare
-  if (rank === 3) return MAT.limited
-  return MAT.common
+  if (rank === 1) return MAT.legend
+  if (rank === 2) return MAT.silver
+  if (rank === 3) return MAT.bronze
+  return MAT.plain
 }
 
 function ticksMarkup(): string {
@@ -63,7 +63,7 @@ function ticksMarkup(): string {
 // Champion rays: 12 short tapered spikes, tips outside the rim (r 31.5),
 // bases hidden under the disc (r 27) — rendered before the disc so the disc
 // covers the bases and only the tips show.
-function raysMarkup(k: string, m: typeof MAT.legendary): string {
+function raysMarkup(k: string, m: typeof MAT.legend): string {
   let rays = ''
   for (let i = 0; i < 12; i++) {
     const [x1, y1] = P(31.5, i * 30)
@@ -81,7 +81,7 @@ function raysMarkup(k: string, m: typeof MAT.legendary): string {
 // but tones them locally — leaf fill is the gold material's L (light gold),
 // midrib is D (dark gold), no family enamel. {G} (the stem) lands on the
 // same H→L→D gradient the numeral's face uses.
-function sprigsMarkup(k: string, m: typeof MAT.legendary): string {
+function sprigsMarkup(k: string, m: typeof MAT.legend): string {
   const tone = (s: string) => s.replace(/\{G\}/g, `url(#${k}g)`).replace(/\{E\}/g, m.L).replace(/\{D\}/g, m.D)
   const left = sprig([[27, 45], [19, 39], [17, 27], [23, 20]], 3, -1, 6.2, 2.2, 1.4)
   const right = sprig([[37, 45], [45, 39], [47, 27], [41, 20]], 3, 1, 6.2, 2.2, 1.4)
@@ -131,7 +131,7 @@ export default function RankCoin({ rank, size = 40, className }: Props) {
     <circle cx="32" cy="32" r="28.7" fill="none" stroke="#fff" stroke-width=".6" opacity=".25"/>
     <circle cx="32" cy="32" r="${FIELD_R}" fill="url(#${k}f)"/>
     <circle cx="32" cy="32" r="${INLAY_R}" fill="none" stroke="${inlayColor}" stroke-width="${inlayW}" opacity="${inlayOp}"/>
-    ${rank === 2 ? `<circle cx="32" cy="32" r="20.6" fill="none" stroke="${MAT.rare.L}" stroke-width=".7" opacity=".6"/>` : ''}
+    ${rank === 2 ? `<circle cx="32" cy="32" r="20.6" fill="none" stroke="${MAT.silver.L}" stroke-width=".7" opacity=".6"/>` : ''}
     ${champion ? sprigsMarkup(k, m) : ''}
     ${numeral}
     <path d="M13.5 20.5A22 22 0 0 1 24 10.4" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" opacity=".32"/>`

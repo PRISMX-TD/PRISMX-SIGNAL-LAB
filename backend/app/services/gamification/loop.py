@@ -130,14 +130,14 @@ def select_candidate_users(db, since: datetime | None) -> list[str]:
         整仓判定、盈亏类条件、五枚看整仓的勋章；
       · 活跃过（last_active_at，任何已登录请求都会 5 分钟节流地打这一列）——
         改昵称、绑账号、开策略、活跃日连续这些不经过交易表的条件。
-    纪律分快照、自然月翻页这类"用户什么都没做也会变"的输入，靠每天一趟全量
+    自然月翻页这类"用户什么都没做也会变"的输入，靠每天一趟全量
     pass 兜底（见 run_gamification_pass）；用户自己打开成就页也会即时判定一次。
 
     Users to judge this pass; None means everyone. An incremental pass takes only
     users who could have changed since `since`: new FILLED orders, newly persisted
     closing legs (created_at, so backfilled old closes count too), or any activity
     (last_active_at covers nickname/bind/strategy/streak). Inputs that move
-    without the user doing anything — discipline snapshots, month rollover — are
+    without the user doing anything — month rollover — are
     caught by the daily full pass, and by the user opening the achievements page.
     """
     if since is None:

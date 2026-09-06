@@ -9,7 +9,6 @@ import { displaySymbol, fmtTime, localizeApiError } from '../api/utils'
 import type { ClosedTrade, Order, OrderStatus } from '../api/types'
 import PositionCard from '../components/PositionCard'
 import PersonalWinRateCard from '../components/PersonalWinRateCard'
-import DisciplineScoreCard from '../components/DisciplineScoreCard'
 import ClosedTradesList from '../components/ClosedTradesList'
 import AutoManageCard from '../components/AutoManageCard'
 import OnboardingCard from '../components/OnboardingCard'
@@ -60,7 +59,7 @@ export default function OrdersPage() {
   // 发现下面数字没变，很容易误解成数据不对。声明放在最前面，因为下面的订单
   // 请求和各处派生值都要用它。
   // One account selector for the whole page: the header choice drives the
-  // account bar, positions, win-rate card, discipline score, closed trades and
+  // account bar, positions, win-rate card, closed trades and
   // the activity log alike. Previously the account card and the performance
   // section each had their own, so clicking one left the other's numbers
   // unchanged — easy to misread as bad data. Declared first because the order
@@ -143,7 +142,7 @@ export default function OrdersPage() {
   // 纪律分用的是同一份数据源，所以数字和明细永远对得上。
   // Closed trades are fetched in full (the endpoint isn't paginated) and
   // filtered client-side by the header's account — the same data source the
-  // win-rate card and discipline score use, so the aggregates always agree
+  // win-rate card uses, so the aggregates always agree
   // with the records shown beneath them.
   const [trades, setTrades] = useState<ClosedTrade[] | null>(null)
 
@@ -425,14 +424,14 @@ export default function OrdersPage() {
         </>
       )}
 
-      {/* 绩效分析：胜率卡、纪律分与已平仓明细都跟着页头选中的账号 /
-          Performance: win-rate card, discipline score and closed trades all
-          follow the account selected in the page head */}
+      {/* 绩效分析：胜率卡与已平仓明细都跟着页头选中的账号（纪律分已于 2026-09-07
+          整体撤销）/ Performance: the win-rate card and closed trades follow the
+          account selected in the page head (the discipline score was withdrawn on
+          2026-09-07) */}
       {tab === 'performance' && (
         <>
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5">
             <PersonalWinRateCard variant="detailed" login={selectedLogin ?? undefined} />
-            <DisciplineScoreCard login={selectedLogin ?? undefined} isPro={isPro} />
           </div>
           <div className="mt-5">
             <ClosedTradesList trades={visibleTrades} />

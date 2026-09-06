@@ -1,36 +1,37 @@
 // frontend/src/components/badges/BadgeIcon.tsx
-// V5 铸币勋章：真正的渲染在 medal.ts（纯函数，字符串拼 SVG，见该文件顶部
-// 关于为什么不用 JSX 的说明）；这里只是把它接进 React——用 useId() 给这枚
-// 勋章的渐变/裁剪 id 一个稳定且跨枚不冲突的前缀，用 dangerouslySetInnerHTML
-// 把内层标记灌进去（安全性同样在 medal.ts 里说明过：markup 全静态、不含用户
-// 输入）。对外接口保持 { id, rarity, earned, size } 不变，四个既有调用点
-// （AchievementsPage 56、LeaderboardPage 20、CompetitionsPage 20、
-// GamificationPanel 40）不用改一行；新增的 spin/mint/className 是可选项。
+// 铸币勋章：真正的渲染在 medal.ts（纯函数，字符串拼 SVG，见该文件顶部关于为什么
+// 不用 JSX 的说明）；这里只是把它接进 React——用 useId() 给这枚勋章的渐变/裁剪
+// id 一个稳定且跨枚不冲突的前缀，用 dangerouslySetInnerHTML 把内层标记灌进去
+//（安全性同样在 medal.ts 里说明过：markup 全静态、不含用户输入）。
 //
-// V5 minted-medal badges: the actual rendering lives in medal.ts (a pure
-// function that string-builds SVG; see that file's header for why not
-// JSX). This component just wires it into React — useId() gives this
-// badge's gradient/clip ids a stable prefix that won't collide with other
-// badges on the same page, and dangerouslySetInnerHTML splices in the inner
-// markup (the safety case is made in medal.ts: the markup is fully static,
-// no user input flows through it). The public props stay
-// { id, rarity, earned, size } exactly as before, so the four existing call
-// sites (AchievementsPage 56, LeaderboardPage 20, CompetitionsPage 20,
-// GamificationPanel 40) compile unchanged; spin/mint/className are new and
-// optional.
+// 2026-09-07 改制：材质不再由「稀有度」决定，而由**档位**决定——进阶勋章铜 /
+// 银 / 金，独立勋章各有固定材质（materialOf）。调用方传 tier（榜单行、比赛行
+// 用后端随行下发的 equippedBadgeTier），不再需要前端镜像表。
+//
+// Minted-medal badges: the actual rendering lives in medal.ts (a pure function
+// that string-builds SVG; see that file's header for why not JSX). This
+// component wires it into React — useId() gives this badge's gradient/clip ids
+// a stable prefix, and dangerouslySetInnerHTML splices in the inner markup (the
+// safety case is made in medal.ts: fully static markup, no user input).
+//
+// 2026-09-07 overhaul: the material follows the **tier** (bronze / silver / gold
+// for tiered badges, a fixed material for standalone ones — see materialOf), not
+// a rarity. Callers pass the tier (board rows use the backend's per-row
+// equippedBadgeTier), so no frontend mirror table is needed any more.
 import { useEffect, useId, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { renderMedalInner } from './medal'
-import type { GamificationBadgeRarity } from '../../api/types'
 
 interface Props {
   id: string
-  rarity: GamificationBadgeRarity | string
+  // 档位：1 铜 / 2 银 / 3 金；独立勋章或未获得传 0 / 不传。
+  // Tier: 1 bronze / 2 silver / 3 gold; 0 / omitted for standalone or unearned.
+  tier?: number | null
   earned: boolean
   size?: number
-  // 传说勋章的环缘流光缓慢自转（16s 一圈）；仅头部佩戴展示用，勋章墙/榜单
-  // 行都不传。Slow 16s rim-sheen rotation for legendary/limited badges;
-  // header "equipped" display only — the wall and leaderboard rows don't pass it.
+  // 环缘流光缓慢自转（16s 一圈）；仅头部佩戴展示用，勋章墙/榜单行都不传。
+  // Slow 16s rim-sheen rotation; header "equipped" display only — the wall and
+  // leaderboard rows don't pass it.
   spin?: boolean
   // 铸造瞬间：毛坯 → 压印 → 闪光 → 流光，见下方 effect 与全局 CSS 的
   // .badge-minting 关键帧。Mint moment: blank → strike → flash → sweep, see
@@ -39,7 +40,7 @@ interface Props {
   className?: string
 }
 
-export default function BadgeIcon({ id, rarity, earned, size = 56, spin, mint, className }: Props) {
+export default function BadgeIcon({ id, tier, earned, size = 56, spin, mint, className }: Props) {
   const { t } = useTranslation()
   const reactId = useId()
   const svgRef = useRef<SVGSVGElement>(null)
@@ -63,7 +64,7 @@ export default function BadgeIcon({ id, rarity, earned, size = 56, spin, mint, c
     return () => clearTimeout(timer)
   }, [mint])
 
-  const inner = renderMedalInner(id, (rarity as GamificationBadgeRarity) ?? 'common', size, reactId, { earned, spin })
+  const inner = renderMedalInner(id, tier ?? 0, size, reactId, { earned, spin })
   const classes = [mint ? 'badge-minting' : null, className ?? null].filter(Boolean).join(' ')
 
   return (

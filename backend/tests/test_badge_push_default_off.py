@@ -68,11 +68,11 @@ def test_award_badge_push_uses_display_name_not_raw_id(db_session):
     db_session.add(user)
     db_session.commit()
 
-    badge_id = "first_close"
-    expected_name = BADGES[badge_id]["name"]
+    badge_id = "starter"
+    expected_name = BADGES[badge_id]["name"] + " · 银"      # 进阶勋章的推送名带档位
 
     with patch("app.services.push_dispatch.dispatch_event_push") as mock_push:
-        assert award_badge(db_session, user.id, badge_id) is True
+        assert award_badge(db_session, user.id, badge_id, 2) is True
 
     assert mock_push.call_count == 1
     args = mock_push.call_args[0]

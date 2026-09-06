@@ -24,6 +24,7 @@ from app.schemas import (
     CompetitionRegisterIn)
 from app.services.deps import get_current_user, get_db, require_admin
 from app.services.gamification import identity
+from app.services.gamification.badges import equipped_badge_tiers
 from app.services.gamification.competitions import (
     TRACKS, auto_enroll, comp_gates, comp_period_key, refresh_comp_board,
     register_participant, settle_competition)
@@ -103,6 +104,7 @@ def _leaders(db: Session, comps: list[Competition]) -> dict[str, list[dict]]:
               .all())
     users = ({u.id: u for u in db.query(User).filter(User.id.in_({r.user_id for r in rows}))}
              if rows else {})
+    badge_tiers = equipped_badge_tiers(db, users.values())
     out: dict[str, list[dict]] = {}
     for r in rows:
         comp = by_key[r.period_key]
@@ -115,6 +117,7 @@ def _leaders(db: Session, comps: list[Competition]) -> dict[str, list[dict]]:
                 bool(u.nickname_public) if u else False),
             "score": r.score,
             "equippedBadge": u.equipped_badge if u else None,
+            "equippedBadgeTier": badge_tiers.get(r.user_id, 0),
         })
     return out
 

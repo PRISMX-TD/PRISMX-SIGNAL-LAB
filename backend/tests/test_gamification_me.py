@@ -15,7 +15,7 @@ def test_payload_shape(db_session):
     p = build_me_payload(db_session, u, judge=True)
     assert p["level"] == 1 and p["title"] == "novice"
     assert len(p["groups"]) == 5
-    assert len(p["badges"]) == 17
+    assert len(p["badges"]) == 6                 # 改制后：四枚进阶 + 两枚独立
     assert p["winRate"]["windowDays"] == 365
 
 
@@ -31,17 +31,19 @@ def test_badge_owners_and_population(db_session):
     u2 = _user(db_session, role="u2")
     u3 = _user(db_session, role="u3")
     db_session.add_all([
-        UserBadge(user_id=u1.id, badge_id="profile_complete"),
-        UserBadge(user_id=u2.id, badge_id="profile_complete"),
-        UserBadge(user_id=u3.id, badge_id="first_close"),
+        UserBadge(user_id=u1.id, badge_id="starter", tier=1),
+        UserBadge(user_id=u2.id, badge_id="starter", tier=3),
+        UserBadge(user_id=u3.id, badge_id="evergreen", tier=1),
     ])
     db_session.commit()
 
     p = build_me_payload(db_session, u1, judge=False)
-    owners = {b["id"]: b["owners"] for b in p["badges"]}
-    assert owners["profile_complete"] == 2
-    assert owners["first_close"] == 1
-    assert owners["founder_2026"] == 0  # 未获得的勋章：0，不是缺键
+    by_id = {b["id"]: b for b in p["badges"]}
+    assert by_id["starter"]["owners"] == 2 and by_id["starter"]["tierOwners"] == [1, 0, 1]
+    assert by_id["evergreen"]["owners"] == 1
+    assert by_id["founder_2026"]["owners"] == 0 and by_id["founder_2026"]["tierOwners"] == []  # 未获得：0，不是缺键
+    assert by_id["starter"]["tier"] == 1 and by_id["starter"]["earned"] and by_id["starter"]["maxTier"] == 3
+    assert by_id["evergreen"]["tier"] == 0 and not by_id["evergreen"]["earned"]
     assert p["population"] == 3
 
 

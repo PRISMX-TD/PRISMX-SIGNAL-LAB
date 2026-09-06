@@ -618,37 +618,6 @@ class AutoManagedPosition(Base):
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
 
-class DisciplineSnapshot(Base):
-    """纪律分每日快照：驱动前端 30 天趋势线。当日分数由后台循环 upsert，
-    实时值另由 API 现算——快照只为趋势，不是实时值的缓存。
-
-    Daily discipline-score snapshot, powering the 30-day trend line. Upserted
-    by a background loop; the live value is computed on demand by the API —
-    snapshots exist for the trend, not as a cache of the live number.
-    """
-    __tablename__ = "discipline_snapshots"
-    __table_args__ = (
-        # login 为空字符串表示"全部绑定账号"聚合行 / "" = the all-accounts aggregate row
-        UniqueConstraint("user_id", "login", "date", name="uq_discipline_user_login_date"),
-    )
-
-    id = Column(String, primary_key=True, default=_uuid)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
-    login = Column(String, nullable=False, default="")
-    date = Column(String, nullable=False)  # UTC 日期 ISO 字符串 "2026-07-17"
-    total = Column(Float, nullable=True)   # 当日总分；样本不足无法评分时为 NULL
-    dimensions = Column(Text, default="{}")  # 三维度明细 JSON（结构见 discipline.py）
-    # 参与评分的信号仓位数（窗口内整仓平掉的信号单）。两枚纪律勋章用它做资格门槛：
-    # 只跟过 2 单没犯错也是满分，和跟了 200 单一次没犯错的人分数一样，勋章就不值钱。
-    # rev 14 加列，历史行为 NULL = 不满足门槛（宁严勿松），新快照写入后自然补齐。
-    # Number of scored signal positions behind this score. The two discipline
-    # badges gate on it: two clean trades score 100 just like two hundred do.
-    # Added in rev 14; NULL on historical rows means "not eligible" until the
-    # snapshot loop rewrites them.
-    positions = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=_now)
-
-
 class PlatformSetting(Base):
     """平台级设置（键值对，值为 JSON 字符串）。
 
@@ -1143,6 +1112,12 @@ class UserBadge(Base):
     id = Column(String, primary_key=True, default=_uuid)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     badge_id = Column(String, nullable=False)
+    # 档位：进阶勋章 1 铜 / 2 银 / 3 金，独立勋章 0。只升不降（badges.award_badge）。
+    # rev 16 加列，旧的 17 枚 id 在迁移里并成"新 id + 档位"。
+    # Tier: 1 bronze / 2 silver / 3 gold for tiered badges, 0 for standalone ones.
+    # Only ever goes up (badges.award_badge). Added in rev 16, where the old 17 ids
+    # were folded into "new id + tier".
+    tier = Column(Integer, nullable=False, default=0, server_default="0")
     awarded_at = Column(DateTime, default=_now)
 
 

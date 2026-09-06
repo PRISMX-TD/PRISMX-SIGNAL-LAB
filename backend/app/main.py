@@ -21,7 +21,6 @@ from app.routers.bridge import offline_monitor_loop
 from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
 from app.services.candle_store import candle_retention_sweep_loop
-from app.services.discipline import discipline_snapshot_loop
 from app.services.gamification.loop import competition_loop, gamification_loop
 from app.services.plan_expiry import plan_expiry_sweep_loop
 from app.services.sentiment_store import sentiment_loop
@@ -125,9 +124,7 @@ async def lifespan(app: FastAPI):
         "sentiment": sentiment_loop,
         # 会员到期自动降级 / membership expiry downgrade
         "plan_expiry": plan_expiry_sweep_loop,
-        # 纪律分每日快照 / discipline daily snapshot
-        "discipline_snapshot": discipline_snapshot_loop,
-        # 游戏化每小时循环（startup_delay 25s，与纪律 20s / K 线 30s 错开）/ gamification hourly pass
+        # 游戏化每小时循环（startup_delay 25s，与 K 线 30s 错开）/ gamification hourly pass
         "gamification": gamification_loop,
         # 比赛榜快循环（60 秒）/ fast competition-board loop
         "competitions": competition_loop,

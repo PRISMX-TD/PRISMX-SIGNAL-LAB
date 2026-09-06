@@ -743,7 +743,7 @@ export default function GamificationPanel() {
               <div className="mt-2 grid grid-cols-6 gap-2 sm:grid-cols-8 md:grid-cols-10">
                 {selected.badges.map((b) => (
                   <div key={b.id} className="flex flex-col items-center gap-1" title={t(`gamification.badges.${b.id}.name`)}>
-                    <BadgeIcon id={b.id} rarity={b.rarity} earned={b.earned} size={40} />
+                    <BadgeIcon id={b.id} tier={b.tier} earned={b.earned} size={40} />
                   </div>
                 ))}
               </div>

@@ -200,7 +200,7 @@ export default function PedestalStage({ badges, defaultId, busy, onOpen, onMakeD
               <div key={b.id} className={`ach-3d ach-3d-${slot}`}>
                 <div className="ach-sway">
                   <MedalTilt ariaLabel={t(`gamification.badges.${b.id}.name`)} onClick={() => onOpen(b)} className="ach-hero">
-                    <BadgeIcon id={b.id} rarity={b.rarity} earned size={RENDER_SIZE} spin={slot === 'c'} />
+                    <BadgeIcon id={b.id} tier={b.tier} earned size={RENDER_SIZE} spin={slot === 'c'} />
                   </MedalTilt>
                 </div>
               </div>
@@ -214,7 +214,7 @@ export default function PedestalStage({ badges, defaultId, busy, onOpen, onMakeD
           <div className="ach-refl" aria-hidden>
             {badges.map((b, i) => (
               <span key={b.id} className={`ach-3d ach-3d-${slotOf(i)}`}>
-                <BadgeIcon id={b.id} rarity={b.rarity} earned size={RENDER_SIZE} className="ach-hero" />
+                <BadgeIcon id={b.id} tier={b.tier} earned size={RENDER_SIZE} className="ach-hero" />
               </span>
             ))}
           </div>

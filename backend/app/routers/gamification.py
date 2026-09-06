@@ -16,6 +16,7 @@ from app.services.deps import get_current_user, get_db, require_admin
 from app.services.gamification import (
     BADGES, GROUPS, LEVEL_TITLES, compute_comprehensive_stats, condition_states,
     judge_and_award_badges, judge_and_record_conditions, level_of, equipped_list,
+    equipped_badge_tiers,
 )
 from app.services.gamification import identity, periods
 from app.services.gamification.boards import _resolved_in_period, board_gates
@@ -136,6 +137,9 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
             for a in db.query(MT5Account).filter(MT5Account.user_id.in_(ids)):
                 source_by_acct.setdefault((a.user_id, a.login), a.trade_mode_source)
 
+    # 佩戴勋章的档位随行下发：只有 id 画不出金银铜。
+    # The equipped badge's tier travels with the row: the id alone can't tell gold from bronze.
+    badge_tiers = equipped_badge_tiers(db, users_by_id.values())
     rows = []
     for r in top_rows:
         u = users_by_id.get(r.user_id)
@@ -149,6 +153,7 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
             "sample": r.sample,
             "isSelf": r.user_id == viewer.id,
             "equippedBadge": u.equipped_badge if u else None,
+            "equippedBadgeTier": badge_tiers.get(r.user_id, 0),
         }
         # reveal 只由管理端入口传 True（见 admin_leaderboard）。用户端 §4.3 的
         # 契约不变：不下发 user_id、昵称一律打码——这三个字段永远不会出现在
@@ -317,22 +322,18 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
         judge_and_award_badges(db, user.id)
     stats = compute_comprehensive_stats(db, user.id)
     done = {t.task_id for t in db.query(UserTask).filter(UserTask.user_id == user.id)}
-    owned = {b.badge_id: b.awarded_at
-             for b in db.query(UserBadge).filter(UserBadge.user_id == user.id)}
+    owned = {b.badge_id: b for b in db.query(UserBadge).filter(UserBadge.user_id == user.id)}
     level = level_of(done)
-    # 详情层「全站拥有 N 人」——一次分组计数覆盖全部 17 枚，不逐枚各查一次。
-    # 未出现在结果里的勋章（尚无人拥有）在下方用 .get(bid, 0) 补零，不需要
-    # LEFT JOIN 到勋章注册表（那是个 dict，不是表）。population 同理只查一次。
-    # Detail-layer "N holders sitewide": one grouped count covers all 17
-    # badges instead of a per-badge query. A badge absent from the result
-    # (nobody owns it yet) is zero-filled below via .get(bid, 0) — no need to
-    # LEFT JOIN the badge registry (it's a dict, not a table). population is
-    # likewise a single query.
-    owners_by_badge = dict(
-        db.query(UserBadge.badge_id, func.count(UserBadge.id.distinct()))
-        .group_by(UserBadge.badge_id)
-        .all()
-    )
+    # 详情层「全站拥有 N 人」——一次按 (勋章, 档位) 分组计数覆盖全部勋章，不逐枚
+    # 各查一次；owners 是不分档的总数，tierOwners 是各档当前持有人数（升档后只算
+    # 在新档里）。未出现在结果里的勋章补零，不需要 LEFT JOIN 到注册表（那是个 dict）。
+    # Detail-layer "N holders sitewide": one count grouped by (badge, tier) covers
+    # every badge; owners is the total across tiers, tierOwners the current holders
+    # per tier (an upgrade moves someone to the new tier). Absent badges zero-fill.
+    tier_counts: dict[str, dict[int, int]] = {}
+    for bid, tier, n in (db.query(UserBadge.badge_id, UserBadge.tier, func.count(UserBadge.id.distinct()))
+                           .group_by(UserBadge.badge_id, UserBadge.tier).all()):
+        tier_counts.setdefault(bid, {})[tier or 0] = n
     population = db.query(func.count(User.id)).scalar() or 0
     equipped = equipped_list(user)
     equipped_set = set(equipped)
@@ -341,11 +342,14 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
         "title": LEVEL_TITLES[level - 1],
         "groups": condition_states(db, user.id, stats),
         "badges": [{
-            "id": bid, "rarity": meta["rarity"], "category": meta["category"],
+            "id": bid, "category": meta["category"], "maxTier": meta["max_tier"],
+            "tier": (owned[bid].tier or 0) if bid in owned else 0,
             "earned": bid in owned,
-            "awardedAt": owned.get(bid).isoformat() if bid in owned else None,
+            "awardedAt": owned[bid].awarded_at.isoformat() if bid in owned and owned[bid].awarded_at else None,
             "equipped": bid in equipped_set,
-            "owners": owners_by_badge.get(bid, 0),
+            "owners": sum(tier_counts.get(bid, {}).values()),
+            "tierOwners": ([tier_counts.get(bid, {}).get(t, 0) for t in (1, 2, 3)]
+                           if meta["max_tier"] else []),
         } for bid, meta in BADGES.items()],
         "winRate": {
             "value": stats["win_rate"], "windowDays": stats["window_days"],
