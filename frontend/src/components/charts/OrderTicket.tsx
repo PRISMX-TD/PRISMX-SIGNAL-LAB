@@ -1,27 +1,23 @@
 // 交易终端：停靠式下单面板（右栏）/ Trading terminal: docked order ticket.
 //
-// 取代原来"点击买卖→弹窗"的流程：手数、止损止盈、账户、风险预览都内嵌在图表
-// 右侧常驻面板里，点"下单"即提交。下单/回执逻辑复用父级传入的 onPlace（内部
-// 走 useOrderPlacement.placeManualOrder），本组件只管表单与就地回执提示。
-// 校验规则（止损止盈方向、按风险%估手数、保证金估算）与 ChartOrderModal 一致。
-// Replaces the old "click buy/sell → modal" flow: volume, SL/TP, account and a
-// risk preview all live inline in the docked right-rail panel; clicking Place
-// submits. Placement/receipt logic reuses the parent's onPlace (which calls
-// useOrderPlacement.placeManualOrder); this component owns only the form and an
-// inline receipt. Validation (SL/TP direction, risk-% sizing, margin estimate)
-// matches ChartOrderModal.
-import { useEffect, useMemo, useState } from 'react'
+// 手数、止损止盈、账户、风险预览都内嵌在图表右侧常驻面板里，点"下单"即提交。
+// 表单逻辑是 order/useOrderForm（与两个滑动弹窗同一份，校验规则不会分叉），本组件
+// 只管面板布局与就地回执提示；下单 / 回执走父级传入的 onPlace。
+// 账户列表这里用纯在线过滤而不是弹窗那套"保留掉线账号"：面板常驻，掉线的账号
+// 留在列表里会误导。
+//
+// Volume, SL/TP, account and a risk preview live inline in the right rail;
+// clicking Place submits. Form logic is order/useOrderForm (shared with both
+// slide modals); this component owns only the layout and inline receipt. The
+// account list is a plain online filter here — the panel is persistent, so the
+// modals' "keep offline accounts" rule would mislead.
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Select from '../Select'
-import { useLastAccount, pickDefaultAccount } from '../../utils/useLastAccount'
 import type { MT5Account, Quote } from '../../api/types'
-import {
-  clientOrderId,
-  contractSize,
-  localizeApiError,
-  suggestVolumeByRisk,
-  usdMarginBasis,
-} from '../../api/utils'
+import { localizeApiError } from '../../api/utils'
+import { QUICK_LOTS, QUICK_RISK_PCTS, formatMoney } from '../order/orderMath'
+import { useOrderForm, type Side } from '../order/useOrderForm'
 
 interface Props {
   symbol: string
@@ -36,7 +32,7 @@ interface Props {
   refPrice: number
   digits: number
   onPlace: (
-    side: 'BUY' | 'SELL',
+    side: Side,
     volume: number,
     mt5Login: string | null,
     stopLoss: number | null,
@@ -50,139 +46,41 @@ interface Props {
   className?: string
 }
 
-const QUICK_LOTS = [0.01, 0.1, 0.5, 1.0]
-const QUICK_RISK = [0.5, 1, 2, 3]
-
-function suggestVolume(eq?: number | null): string {
-  if (!eq || eq <= 0) return '0.10'
-  const v = Math.max(0.01, Math.min(eq / 200, 1))
-  return (Math.floor(v * 100) / 100).toFixed(2)
-}
-
 export default function OrderTicket({ symbol, accounts, quotesByAccount, globalQuote, refPrice, digits, onPlace, selectedLogin, onSelectLogin, className = '' }: Props) {
   const { t } = useTranslation()
   const onlineAccounts = useMemo(() => accounts.filter((a) => a.online), [accounts])
-  const [side, setSide] = useState<'BUY' | 'SELL'>('BUY')
-  // 账户选择受控优先：父级传了 selectedLogin 就用它，否则回落到内部默认（第一个在线账户）。
-  // 通过 setLogin 统一出口，既更新本地兜底、也通知父级。/ Controlled selection takes
-  // priority; setLogin updates the local fallback and notifies the parent.
-  const { lastLogin, rememberAccount } = useLastAccount()
-  const [localLogin, setLocalLogin] = useState<string>(() => pickDefaultAccount(onlineAccounts, lastLogin))
-  const login = selectedLogin || localLogin
-  const setLogin = (v: string) => { setLocalLogin(v); onSelectLogin?.(v) }
-  // 用户从下拉里主动选择时才记忆。下面那个「选中账户掉线就拉回第一个」的兜底走
-  // setLogin，不能走这里——否则偏好的账户掉线一次，记忆就被兜底值冲掉，等它恢复
-  // 也不会再被默认选中。/ Only an explicit pick is remembered; the offline-snap
-  // fallback below uses setLogin, so one dropout can't erase the preference.
-  const chooseLogin = (v: string) => { setLogin(v); rememberAccount(v) }
-  const [volume, setVolume] = useState(() => suggestVolume(onlineAccounts[0]?.equity))
-  const [sl, setSl] = useState('')
-  const [tp, setTp] = useState('')
-  const [sizeMode, setSizeMode] = useState<'quick' | 'risk'>('quick')
-  const [riskPct, setRiskPct] = useState('1')
+  const [side, setSide] = useState<Side>('BUY')
+  const form = useOrderForm({
+    symbol, side,
+    accounts: onlineAccounts,
+    quotesByAccount,
+    fallbackQuote: globalQuote,
+    refPrice,
+    login: selectedLogin,
+    onLoginChange: onSelectLogin,
+  })
+  const { isBuy, selected } = form
   const [submitting, setSubmitting] = useState(false)
   const [receipt, setReceipt] = useState<{ kind: 'ok' | 'error' | 'info'; msg: string } | null>(null)
 
-  const selected = onlineAccounts.find((a) => a.login === login) ?? onlineAccounts[0] ?? null
-  const isBuy = side === 'BUY'
-
-  // 选中账户没在线时把 login 拉回第一个在线账户 / snap login to the first online account
-  useEffect(() => {
-    if ((!login || !onlineAccounts.some((a) => a.login === login)) && onlineAccounts[0]) {
-      setLogin(pickDefaultAccount(onlineAccounts, lastLogin))
-    }
-  }, [onlineAccounts, login, lastLogin])
-
-  // 报价：优先选中账户的交易商报价，否则全站统一报价 / prefer the account's broker quote, else the site-wide one
-  const quote = (selected && quotesByAccount[selected.login]?.[symbol]) || globalQuote
-  const bid = quote?.bid ?? (refPrice > 0 ? refPrice : null)
-  const ask = quote?.ask ?? (refPrice > 0 ? refPrice : null)
-  // 入场参考价：买用卖价、卖用买价 / entry reference: ask for buy, bid for sell
-  const entryRef = isBuy ? ask : bid
-
-  const slNum = sl.trim() === '' ? null : parseFloat(sl)
-  const tpNum = tp.trim() === '' ? null : parseFloat(tp)
-  const slTpCross =
-    slNum != null && tpNum != null && !Number.isNaN(slNum) && !Number.isNaN(tpNum) &&
-    (isBuy ? slNum >= tpNum : slNum <= tpNum)
-  const slInvalid =
-    slTpCross ||
-    (slNum != null && !Number.isNaN(slNum) && entryRef != null && (isBuy ? slNum >= entryRef : slNum <= entryRef))
-  const tpInvalid =
-    slTpCross ||
-    (tpNum != null && !Number.isNaN(tpNum) && entryRef != null && (isBuy ? tpNum <= entryRef : tpNum >= entryRef))
-
-  // 按风险%估手数 / size volume from a risk percentage
-  useEffect(() => {
-    if (sizeMode !== 'risk') return
-    if (slNum == null || Number.isNaN(slNum) || entryRef == null) return
-    const distance = Math.abs(entryRef - slNum)
-    const pct = parseFloat(riskPct) || 0
-    const suggested = suggestVolumeByRisk(symbol, selected?.equity, pct, distance, entryRef)
-    if (suggested != null) setVolume(suggested.toFixed(2))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sizeMode, riskPct, sl, selected?.equity, symbol, quote?.bid, quote?.ask, refPrice])
-
-  // 换账户时按净值重估默认手数（仅手数模式，风险模式由上面的 effect 负责）
-  // Re-suggest default volume on account change (lots mode only)
-  useEffect(() => {
-    if (sizeMode === 'quick') setVolume(suggestVolume(selected?.equity))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.login])
-
-  const estMargin = useMemo(() => {
-    const vol = parseFloat(volume)
-    const lev = selected?.leverage
-    if (!vol || vol <= 0 || !lev || lev <= 0) return null
-    const basis = usdMarginBasis(symbol)
-    if (basis == null) return null
-    const size = contractSize(symbol)
-    if (basis === 'base') return (vol * size) / lev
-    if (!entryRef || entryRef <= 0) return null
-    return (vol * size * entryRef) / lev
-  }, [volume, selected?.leverage, symbol, entryRef])
-
-  // 风险/盈利预览（美元近似）：用入场→止损/止盈的距离 × 每点价值估算。
-  // Risk/reward preview (USD approx): distance to SL/TP × per-point value.
-  const rrPreview = useMemo(() => {
-    if (entryRef == null || slNum == null || Number.isNaN(slNum)) return null
-    const basis = usdMarginBasis(symbol)
-    if (basis == null) return null
-    const size = contractSize(symbol)
-    const vol = parseFloat(volume)
-    if (!vol || vol <= 0) return null
-    const toUsd = (priceDist: number) => {
-      if (basis === 'base') {
-        if (!entryRef || entryRef <= 0) return null
-        return (priceDist * size * vol) / entryRef
-      }
-      return priceDist * size * vol
-    }
-    const riskUsd = toUsd(Math.abs(entryRef - slNum))
-    const rewardUsd = tpNum != null && !Number.isNaN(tpNum) ? toUsd(Math.abs(tpNum - entryRef)) : null
-    const rr = riskUsd && rewardUsd ? rewardUsd / riskUsd : null
-    return { riskUsd, rewardUsd, rr }
-  }, [entryRef, slNum, tpNum, symbol, volume])
-
-  const stepLot = (dir: number) => {
-    const v = parseFloat(volume) || 0.01
-    setVolume(String(Math.max(0.01, Math.min(10, +(v + dir * 0.01).toFixed(2)))))
-  }
-
-  const hasAccounts = onlineAccounts.length > 0
-  const canSubmit = hasAccounts && !slInvalid && !tpInvalid && !submitting
+  const canSubmit = form.hasAccounts && !form.slTpInvalid && !submitting
   const ccy = selected?.accountCurrency ?? ''
 
   const submit = async () => {
-    const vol = parseFloat(volume)
-    if (!vol || vol <= 0) {
+    const vol = form.parsedVolume
+    if (vol == null) {
       setReceipt({ kind: 'error', msg: String(t('charts.ticket.invalidVolume')) })
       return
     }
     setSubmitting(true)
     setReceipt({ kind: 'info', msg: String(t('charts.ticket.submitting')) })
     try {
-      await onPlace(side, vol, login || null, slNum, tpNum, clientOrderId())
+      // 幂等号在成功前固定不变：失败后再点一次复用同一个号，"已收单但没收到回执"
+      // 不会变成两笔。成功后换新号，下一单是新的。
+      // The idempotency key stays fixed until a success, so a retry after "received
+      // but no receipt" can't double-place; rotated after success for the next order.
+      await onPlace(side, vol, form.login || null, form.slNum, form.tpNum, form.orderId)
+      form.rotateOrderId()
       setReceipt({ kind: 'ok', msg: String(t('charts.ticket.submitted')) })
       setTimeout(() => setReceipt(null), 2500)
     } catch (e) {
@@ -193,8 +91,8 @@ export default function OrderTicket({ symbol, accounts, quotesByAccount, globalQ
   }
 
   const px = (v: number | null) => (v == null ? '—' : v.toFixed(digits))
-  const money = (v: number | null | undefined) =>
-    v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: 2 })
+  const money = (v: number | null | undefined) => formatMoney(v, '—')
+  const rr = form.riskPreview
 
   return (
     <div className={`term-panel ${className}`}>
@@ -206,11 +104,11 @@ export default function OrderTicket({ symbol, accounts, quotesByAccount, globalQ
         <div className="term-bs-row">
           <button type="button" className={`term-bs sell ${!isBuy ? 'on' : ''}`} onClick={() => setSide('SELL')}>
             <span className="lab">{t('charts.ticket.sell')}</span>
-            <span className="px num">{px(bid)}</span>
+            <span className="px num">{px(form.bid)}</span>
           </button>
           <button type="button" className={`term-bs buy ${isBuy ? 'on' : ''}`} onClick={() => setSide('BUY')}>
             <span className="lab">{t('charts.ticket.buy')}</span>
-            <span className="px num">{px(ask)}</span>
+            <span className="px num">{px(form.ask)}</span>
           </button>
         </div>
 
@@ -220,8 +118,8 @@ export default function OrderTicket({ symbol, accounts, quotesByAccount, globalQ
             <span className="term-field-k">{t('charts.ticket.account')}</span>
             <Select
               className="term-acct-select"
-              value={login}
-              onChange={chooseLogin}
+              value={form.login}
+              onChange={form.chooseLogin}
               options={onlineAccounts.map((a) => ({
                 value: a.login,
                 label: `${a.login}${a.accountName ? ` · ${a.accountName}` : ''}`,
@@ -232,106 +130,87 @@ export default function OrderTicket({ symbol, accounts, quotesByAccount, globalQ
 
         {/* 手数模式切换 / size mode */}
         <div className="term-seg2">
-          <button type="button" className={sizeMode === 'quick' ? 'on' : ''} onClick={() => setSizeMode('quick')}>{t('charts.ticket.sizeLots')}</button>
-          <button type="button" className={sizeMode === 'risk' ? 'on' : ''} onClick={() => setSizeMode('risk')}>{t('charts.ticket.sizeRisk')}</button>
+          <button type="button" className={form.sizeMode === 'quick' ? 'on' : ''} onClick={() => form.setSizeMode('quick')}>{t('charts.ticket.sizeLots')}</button>
+          <button type="button" className={form.sizeMode === 'risk' ? 'on' : ''} onClick={() => form.setSizeMode('risk')}>{t('charts.ticket.sizeRisk')}</button>
         </div>
 
         {/* 手数输入 / volume */}
         <label className="term-field">
           <span className="term-field-k">{t('charts.ticket.volume')}</span>
           <div className="term-stepper">
-            <button type="button" onClick={() => stepLot(-1)}>−</button>
+            <button type="button" onClick={() => form.stepLot(-1)}>−</button>
             <input
               className="num"
-              value={volume}
+              value={form.volume}
               inputMode="decimal"
-              onChange={(e) => setVolume(e.target.value.replace(/[^0-9.]/g, ''))}
-              onBlur={() => {
-                const v = parseFloat(volume)
-                setVolume((!v || v <= 0 ? 0.01 : Math.min(10, v)).toFixed(2))
-              }}
+              onChange={(e) => form.typeVolume(e.target.value)}
+              onBlur={form.blurVolume}
             />
-            <button type="button" onClick={() => stepLot(1)}>＋</button>
+            <button type="button" onClick={() => form.stepLot(1)}>＋</button>
           </div>
         </label>
 
-        {sizeMode === 'quick' ? (
+        {form.sizeMode === 'quick' ? (
           <div className="term-chips">
             {QUICK_LOTS.map((q) => (
-              <button key={q} type="button" className="term-chip num" onClick={() => setVolume(q.toFixed(2))}>
+              <button key={q} type="button" className="term-chip num" onClick={() => form.setVolume(q.toFixed(2))}>
                 {q.toFixed(2)}
               </button>
             ))}
           </div>
         ) : (
           <div className="term-chips">
-            {QUICK_RISK.map((p) => (
-              <button
-                key={p}
-                type="button"
-                className={`term-chip num ${riskPct === String(p) ? 'on' : ''}`}
-                onClick={() => setRiskPct(String(p))}
-              >
+            {QUICK_RISK_PCTS.map((p) => (
+              <button key={p} type="button" className={`term-chip num ${form.riskPct === String(p) ? 'on' : ''}`} onClick={() => form.setRiskPct(String(p))}>
                 {p}%
               </button>
             ))}
           </div>
         )}
-        {sizeMode === 'risk' && slNum == null && (
-          <p className="term-ticket-warn">{t('charts.ticket.riskNeedsSl')}</p>
-        )}
+        {form.riskNeedsSl && <p className="term-ticket-warn">{t('charts.ticket.riskNeedsSl')}</p>}
 
         {/* 止损止盈 / SL & TP */}
         <div className="term-field-row">
           <label className="term-field">
             <span className="term-field-k down">{t('charts.ticket.sl')}</span>
-            <div className={`term-inp ${slInvalid ? 'bad' : ''}`}>
-              <input className="num" value={sl} inputMode="decimal" placeholder="—" onChange={(e) => setSl(e.target.value.replace(/[^0-9.]/g, ''))} />
+            <div className={`term-inp ${form.slInvalid ? 'bad' : ''}`}>
+              <input className="num" value={form.sl} inputMode="decimal" placeholder="—" onChange={(e) => form.setSl(e.target.value.replace(/[^0-9.]/g, ''))} />
             </div>
           </label>
           <label className="term-field">
             <span className="term-field-k up">{t('charts.ticket.tp')}</span>
-            <div className={`term-inp ${tpInvalid ? 'bad' : ''}`}>
-              <input className="num" value={tp} inputMode="decimal" placeholder="—" onChange={(e) => setTp(e.target.value.replace(/[^0-9.]/g, ''))} />
+            <div className={`term-inp ${form.tpInvalid ? 'bad' : ''}`}>
+              <input className="num" value={form.tp} inputMode="decimal" placeholder="—" onChange={(e) => form.setTp(e.target.value.replace(/[^0-9.]/g, ''))} />
             </div>
           </label>
         </div>
-        {(slInvalid || tpInvalid) && (
-          <p className="term-ticket-warn">{t('charts.ticket.slTpWrong')}</p>
-        )}
+        {form.slTpInvalid && <p className="term-ticket-warn">{t('charts.ticket.slTpWrong')}</p>}
 
         {/* 风险预览 / risk preview */}
         <div className="term-risk">
           <span className="k">{t('charts.ticket.riskAmount')}</span>
-          <span className="v down">{rrPreview?.riskUsd != null ? `−${money(rrPreview.riskUsd)} ${ccy}` : '—'}</span>
+          <span className="v down">{rr?.riskUsd != null ? `−${money(rr.riskUsd)} ${ccy}` : '—'}</span>
           <span className="k">{t('charts.ticket.potentialProfit')}</span>
-          <span className="v up">{rrPreview?.rewardUsd != null ? `+${money(rrPreview.rewardUsd)} ${ccy}` : '—'}</span>
+          <span className="v up">{rr?.rewardUsd != null ? `+${money(rr.rewardUsd)} ${ccy}` : '—'}</span>
           <span className="k">{t('charts.ticket.rr')}</span>
-          <span className="v">{rrPreview?.rr != null ? `1 : ${rrPreview.rr.toFixed(2)}` : '—'}</span>
+          <span className="v">{rr?.rr != null ? `1 : ${rr.rr.toFixed(2)}` : '—'}</span>
           <span className="k">{t('charts.ticket.requiredMargin')}</span>
-          <span className="v">{estMargin != null ? `≈ ${money(estMargin)} ${ccy}` : '—'}</span>
+          <span className="v">{form.estMargin != null ? `≈ ${money(form.estMargin)} ${ccy}` : '—'}</span>
         </div>
 
-        {!hasAccounts && (
+        {!form.hasAccounts && (
           <p className="term-ticket-warn">
             {accounts.length === 0 ? t('charts.ticket.noBridge') : t('charts.ticket.offline')}
           </p>
         )}
 
-        <button
-          type="button"
-          className={`term-place ${isBuy ? 'buy' : 'sell'}`}
-          disabled={!canSubmit}
-          onClick={submit}
-        >
+        <button type="button" className={`term-place ${isBuy ? 'buy' : 'sell'}`} disabled={!canSubmit} onClick={submit}>
           {submitting
             ? t('charts.ticket.submitting')
-            : t('charts.ticket.place', { side: isBuy ? t('charts.ticket.buy') : t('charts.ticket.sell'), volume: parseFloat(volume) || 0 })}
+            : t('charts.ticket.place', { side: isBuy ? t('charts.ticket.buy') : t('charts.ticket.sell'), volume: form.parsedVolume ?? 0 })}
         </button>
 
-        {receipt && (
-          <p className={`term-ticket-receipt ${receipt.kind}`}>{receipt.msg}</p>
-        )}
+        {receipt && <p className={`term-ticket-receipt ${receipt.kind}`}>{receipt.msg}</p>}
       </div>
     </div>
   )
