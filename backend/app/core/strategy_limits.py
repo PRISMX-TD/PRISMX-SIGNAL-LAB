@@ -16,6 +16,7 @@ import hashlib
 import json
 import threading
 import time
+import uuid
 from contextlib import contextmanager
 
 from slowapi import Limiter
@@ -58,8 +59,12 @@ class BacktestBusy(Exception):
     """该用户已有一个回测在执行 / this user already has a backtest running."""
 
 
-_gate_lock = threading.Lock()
-_running: set[str] = set()
+# 闸门状态在 services/shared_state：配了 REDIS_URL 是全体 worker 共享的锁，没配是
+# 进程内。锁带 10 分钟过期，进程被杀时不会把这个用户永远卡在"回测中"。
+# The gate lives in services/shared_state: a shared lock across workers with
+# REDIS_URL, in-process otherwise. 10-minute expiry so a killed process can't
+# leave a user stuck "busy" forever.
+BACKTEST_GATE_TTL_SECONDS = 600
 
 
 @contextmanager
@@ -75,15 +80,19 @@ def backtest_gate(user_id: str):
     the wait onto held connections (production is 2 cores, single process, so a
     queue means the whole process stays bogged down longer).
     """
-    with _gate_lock:
-        if user_id in _running:
-            raise BacktestBusy(user_id)
-        _running.add(user_id)
+    from app.services import shared_state
+
+    # 持有者标识每次调用都不同：同一 worker 内同一用户的第二个并发回测也必须被拒，
+    # 不能因为"同一进程"就被当成续期。
+    # A fresh owner token per call: a second concurrent backtest for the same user
+    # on the same worker must be refused too, not treated as a lock renewal.
+    owner = f"{shared_state.WORKER_ID}:{uuid.uuid4().hex}"   # time_ns 在 Windows 上粒度 15ms，会撞 / time_ns is too coarse on Windows
+    if not shared_state.try_lock(f"backtest:{user_id}", BACKTEST_GATE_TTL_SECONDS, owner=owner):
+        raise BacktestBusy(user_id)
     try:
         yield
     finally:
-        with _gate_lock:
-            _running.discard(user_id)
+        shared_state.release_lock(f"backtest:{user_id}", owner=owner)
 
 
 def cost_units(bars: int, conditions: int) -> int:

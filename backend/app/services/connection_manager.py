@@ -4,8 +4,29 @@ Connection manager: maps user_id to client WebSocket connections.
 import asyncio
 import hashlib
 import json
+import logging
 
 from fastapi import WebSocket
+
+from app.services import shared_state
+
+logger = logging.getLogger("prismx.ws")
+
+# 多 worker 下的跨进程转发（配了 REDIS_URL 才启用）：
+#   · 发送方不直接写本进程的 socket，而是 publish 到 Redis 频道 `prismx:ws`；
+#   · 每个 worker 起一个订阅协程（run_fanout_subscriber），收到后投递给**本进程**
+#     连着的那些 socket。发送方自己也是订阅者之一，所以本进程的用户同样收得到；
+#   · 在线用户名单（connected_user_ids）= 本进程的 ∪ Redis 里带过期的 ZSET
+#     `prismx:ws:users`，每个 worker 每 30 秒把自己这边的用户续一次期（90 秒过期）。
+# 单 worker（REDIS_URL 留空）时全部走本地，与从前一模一样。
+# Cross-worker fan-out (only with REDIS_URL): senders publish to `prismx:ws`
+# instead of writing local sockets; every worker runs a subscriber that delivers
+# to its own sockets (the sender included). The connected-user roster merges the
+# local set with an expiring ZSET refreshed every 30s by each worker.
+WS_CHANNEL = "ws"
+PRESENCE_KEY = "ws:users"
+PRESENCE_TTL_SECONDS = 90
+PRESENCE_REFRESH_SECONDS = 30
 
 
 class ConnectionManager:
@@ -150,6 +171,7 @@ class ConnectionManager:
     async def register_client(self, user_id: str, ws: WebSocket) -> None:
         async with self._lock:
             self._clients.setdefault(user_id, set()).add(ws)
+            self._mark_present(user_id)
             # 让持仓去重失效：新连接（多开一个标签页也算）还没收到过任何快照，
             # 若沿用旧摘要，内容不变时下一拍会被跳过，新页面就只能干等到持仓
             # 真的发生变化。
@@ -171,7 +193,22 @@ class ConnectionManager:
                     self._last_positions_push.pop(user_id, None)
 
     async def push_to_client(self, user_id: str, message: dict) -> None:
-        """向指定用户的所有前端连接推送，并顺带清掉发不出去的连接。
+        """向指定用户的所有前端连接推送。多 worker 时改为发布到 Redis，由各 worker
+        的订阅协程投递到自己的 socket（含本进程）；单 worker 直接本地投递。
+        Push to all of a user's connections: publish across workers with Redis,
+        deliver locally otherwise."""
+        if shared_state.enabled():
+            try:
+                shared_state.publish(WS_CHANNEL, {"user": user_id, "message": message})
+                return
+            except Exception as e:
+                # Redis 不可达：退回本地投递，至少连在本进程的用户不断流。
+                # Redis unreachable: fall back to local delivery so this worker's users still get it.
+                logger.warning("WS 跨进程转发失败，退回本地投递 / fan-out publish failed, delivering locally: %s", e)
+        await self._deliver_local(user_id, message)
+
+    async def _deliver_local(self, user_id: str, message: dict) -> None:
+        """向连在**本进程**的该用户连接推送，并顺带清掉发不出去的连接。
 
         Push to all of a user's client connections, dropping any that fail.
 
@@ -245,14 +282,97 @@ class ConnectionManager:
 
     async def broadcast_to_clients(self, message: dict) -> None:
         """向所有在线前端广播（如新信号）/ broadcast to all clients (e.g. new signals)."""
+        if shared_state.enabled():
+            try:
+                shared_state.publish(WS_CHANNEL, {"user": None, "message": message})
+                return
+            except Exception as e:
+                logger.warning("WS 跨进程广播失败，退回本地 / broadcast publish failed, delivering locally: %s", e)
+        await self._broadcast_local(message)
+
+    async def _broadcast_local(self, message: dict) -> None:
         for user_id in list(self._clients.keys()):
-            await self.push_to_client(user_id, message)
+            await self._deliver_local(user_id, message)
 
     def connected_user_ids(self) -> list[str]:
-        """当前有前端连接的用户 id 列表，供按等级过滤广播时查询这些用户的 plan。
-        User ids with an active client connection right now, so callers can
-        look up these users' plans before a plan-filtered broadcast."""
-        return list(self._clients.keys())
+        """当前有前端连接的用户 id 列表（多 worker 时含连在其它 worker 的），供按等级
+        过滤广播时查询这些用户的 plan。
+        User ids with an active client connection right now (across workers with
+        Redis), so callers can look up these users' plans before a plan-filtered
+        broadcast."""
+        local = list(self._clients.keys())
+        if not shared_state.enabled():
+            return local
+        try:
+            remote = shared_state.set_members(PRESENCE_KEY)
+        except Exception as e:
+            logger.warning("在线名单读取失败，只用本进程的 / presence read failed, using local only: %s", e)
+            return local
+        seen = set(local)
+        return local + [u for u in remote if u not in seen]
+
+    # ---------- 多 worker 的转发与在线名单 / cross-worker fan-out & presence ----------
+    def _mark_present(self, user_id: str) -> None:
+        if not shared_state.enabled():
+            return
+        try:
+            shared_state.set_add(PRESENCE_KEY, user_id, PRESENCE_TTL_SECONDS)
+        except Exception as e:
+            logger.warning("在线名单写入失败 / presence write failed: %s", e)
+
+    async def refresh_presence_loop(self) -> None:
+        """每 30 秒把本进程连着的用户续一次期（90 秒过期），进程死了名单自然掉。
+        Renew this worker's users every 30s (90s expiry); a dead worker's entries lapse."""
+        while True:
+            await asyncio.sleep(PRESENCE_REFRESH_SECONDS)
+            for user_id in list(self._clients.keys()):
+                self._mark_present(user_id)
+
+    async def handle_fanout_message(self, raw: str) -> None:
+        """处理一条来自 Redis 频道的转发消息（也供测试直接调用）。
+        Handle one fan-out message from the channel (also called directly by tests)."""
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            return
+        message = data.get("message")
+        if not isinstance(message, dict):
+            return
+        user_id = data.get("user")
+        if user_id is None:
+            await self._broadcast_local(message)
+        elif user_id in self._clients:
+            await self._deliver_local(str(user_id), message)
+
+    async def run_fanout_subscriber(self) -> None:
+        """订阅 Redis 频道并投递到本进程的 socket；断线后 3 秒重连。
+        Subscribe to the channel and deliver locally; reconnect 3s after a drop."""
+        while True:
+            try:
+                sub = shared_state.new_async_pubsub(WS_CHANNEL)
+                if sub is None:
+                    return
+                pubsub, channel = sub
+                await pubsub.subscribe(channel)
+                async for msg in pubsub.listen():
+                    if msg.get("type") != "message":
+                        continue
+                    await self.handle_fanout_message(msg.get("data") or "")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning("WS 转发订阅中断，3 秒后重连 / fan-out subscriber dropped, reconnecting in 3s: %s", e)
+                await asyncio.sleep(3)
+
+    def start_cross_worker_tasks(self) -> list[asyncio.Task]:
+        """多 worker 时每个进程都要跑的两条协程；单 worker 返回空列表。
+        The two per-worker coroutines needed with Redis; empty without it."""
+        if not shared_state.enabled():
+            return []
+        return [
+            asyncio.create_task(self.run_fanout_subscriber(), name="ws:fanout"),
+            asyncio.create_task(self.refresh_presence_loop(), name="ws:presence"),
+        ]
 
 
 manager = ConnectionManager()

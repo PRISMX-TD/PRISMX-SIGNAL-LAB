@@ -22,6 +22,7 @@ from app.services.gamification.boards import _resolved_in_period, board_gates
 from app.services.gamification.conditions import WINRATE_CONDITIONS
 from app.services.settings_store import (
     get_gamification_settings, invalidate_gamification_cache, save_gamification_settings)
+from app.services import shared_state
 
 LEADERBOARD_BOARDS = ("return_pct", "win_rate")
 _PERIOD_KEY_RE = re.compile(r"^\d{4}-W\d{2}$|^\d{4}-\d{2}$")
@@ -30,16 +31,15 @@ router = APIRouter(prefix="/gamification", tags=["gamification"])
 
 # 单人判定节流：设计 §6 要求 /me 不能每次请求都跑全量判定（数据库查询代价不小），
 # 但又要让用户操作后（如设了昵称、绑了账号）尽快看到新等级/勋章，60 秒是折中。
-# 进程内 dict 是有意的——本部署强制单进程（见 rate_limit.py 同款注释），多进程需
-# 迁到 Redis。
+# 时间戳放在 services/shared_state（配了 REDIS_URL 全体 worker 共享，没配就是进程内），
+# 键 60 秒过期：键在 = 60 秒内判过，不再判。
 # Per-user judging throttle: §6 says /me can't re-run the full judging pass on
 # every request (the queries aren't cheap), but a user should still see a new
 # level/badge shortly after acting (setting a nickname, binding an account) —
-# 60s is the compromise. The in-process dict is deliberate: this deployment is
-# pinned to a single process (same rationale as rate_limit.py); multi-process
-# needs this moved to Redis.
+# 60s is the compromise. The stamp lives in services/shared_state (shared across
+# workers with REDIS_URL, in-process otherwise) as a key with a 60s expiry:
+# key present = judged within the last 60s, skip.
 _JUDGE_THROTTLE_SECONDS = 60
-_last_judged: dict[str, float] = {}
 
 
 def _check_visible(db: Session, user: User) -> None:
@@ -311,8 +311,8 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
 
 def build_me_payload(db: Session, user: User, judge: bool) -> dict:
     now = time.monotonic()
-    if judge and now - _last_judged.get(user.id, 0.0) >= _JUDGE_THROTTLE_SECONDS:
-        _last_judged[user.id] = now
+    if judge and shared_state.kv_get(f"judge:{user.id}") is None:
+        shared_state.kv_set(f"judge:{user.id}", str(now), ttl=_JUDGE_THROTTLE_SECONDS)
         judge_and_record_conditions(db, user.id)
         judge_and_award_badges(db, user.id)
     stats = compute_comprehensive_stats(db, user.id)
@@ -364,8 +364,7 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
 # 半在“判定”，不在“统计”），只读 compute_comprehensive_stats + 已落库的
 # UserTask。但 compute_comprehensive_stats 本身仍是 365 天整仓聚合，仪表盘卡
 # 45 秒轮询一次，所以照样按用户缓存 60 秒——避免每次轮询都把这条查询打一遍。
-# 进程内 dict，理由同 _last_judged（本部署单进程）；按用户数封顶，永不清空，
-# 与 _last_judged 同一设计——量级上可接受，不做淘汰。
+# 缓存也在 services/shared_state，60 秒过期，多 worker 共享。
 # Dashboard win-rate-card summary (§2.4/§7): a separate cache from /me's 60s
 # judging throttle — this endpoint never triggers judge_and_record_conditions/
 # judge_and_award_badges (the expensive half is "judging", not "reading
@@ -373,18 +372,14 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
 # UserTask rows. But compute_comprehensive_stats is itself a 365-day
 # full-position aggregation, and the dashboard card polls it every 45s, so it
 # still gets a 60s per-user cache to avoid re-running that query on every
-# poll. In-process dict for the same reason as _last_judged (single-process
-# deployment); bounded by user count and never evicted, by design, same as
-# _last_judged — acceptable at this scale.
+# poll. Cached in services/shared_state with a 60s expiry, shared across workers.
 _SUMMARY_CACHE_SECONDS = 60
-_summary_cache: dict[str, tuple[float, dict]] = {}
 
 
 def build_winrate_summary_payload(db: Session, user: User) -> dict:
-    now = time.monotonic()
-    cached = _summary_cache.get(user.id)
-    if cached is not None and now - cached[0] < _SUMMARY_CACHE_SECONDS:
-        return cached[1]
+    cached = shared_state.kv_get_json(f"winrate-summary:{user.id}")
+    if cached is not None:
+        return cached
 
     stats = compute_comprehensive_stats(db, user.id)
     done = {t.task_id for t in db.query(UserTask).filter(UserTask.user_id == user.id)}
@@ -445,7 +440,7 @@ def build_winrate_summary_payload(db: Session, user: User) -> dict:
         "remainingToNext": remaining_to_next,
         "isMaxLevel": is_max_level,
     }
-    _summary_cache[user.id] = (now, payload)
+    shared_state.kv_set_json(f"winrate-summary:{user.id}", payload, ttl=_SUMMARY_CACHE_SECONDS)
     return payload
 
 

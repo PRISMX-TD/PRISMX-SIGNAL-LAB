@@ -27,6 +27,8 @@ from app.services.plan_expiry import plan_expiry_sweep_loop
 from app.services.sentiment_store import sentiment_loop
 from app.services.signal_resolution import stale_signal_sweep_loop
 from app.services.strategy.resolution import stale_strategy_signal_sweep_loop
+from app.services.background import BackgroundLoops
+from app.services.connection_manager import manager
 
 
 # uvicorn 只配置自己的 logger，不动 root，所以应用代码里的 logger.info(...) 会
@@ -83,12 +85,13 @@ async def lifespan(app: FastAPI):
     # not block startup, but it shouldn't pass in silence either: when something
     # does go wrong, this line is the only thing that will remind anyone that the
     # limits are counted per process.
-    if not settings.RATE_LIMIT_STORAGE_URI.strip():
+    if not settings.REDIS_URL.strip():
         logger.warning(
-            "限流/登录锁定/回测闸门为进程内计数，本部署必须是单 worker；"
-            "多进程会让这些防护各算各的（检测到的 worker 数: %s）"
-            " / rate limits, login lockout and the backtest gate are per-process counters;"
-            " this deployment must run a single worker (detected worker count: %s)",
+            "REDIS_URL 为空：限流/登录锁定/回测闸门/后台循环/WS 推送/EA 行情全在进程内，"
+            "本部署必须是单 worker；多进程会让这些各算各的（检测到的 worker 数: %s）"
+            " / REDIS_URL is empty: rate limits, lockouts, the backtest gate, background loops,"
+            " WS pushes and the EA market stores are per-process; this deployment must run a"
+            " single worker (detected worker count: %s)",
             _WORKER_COUNT if _WORKER_COUNT is not None else "未知/unknown",
             _WORKER_COUNT if _WORKER_COUNT is not None else "未知/unknown",
         )
@@ -101,80 +104,48 @@ async def lifespan(app: FastAPI):
     set_main_loop(asyncio.get_running_loop())
     init_client()
     
-    task = (
-        asyncio.create_task(signal_loop())
-        if settings.ENABLE_MOCK_SIGNAL_ENGINE
-        else None
-    )
-    monitor = asyncio.create_task(offline_monitor_loop())
-    stale_sweep = asyncio.create_task(stale_order_monitor_loop())
-    # 信号过期广播：独立于模拟引擎，webhook 信号也依赖它 / expiry broadcast,
-    # independent of the mock engine; webhook signals rely on it too
-    expiry_sweep = asyncio.create_task(signal_expiry_loop())
-    # 信号胜负判定的保险丝：清扫长期无行情更新的 PENDING 信号 / win-rate safety
-    # net: sweep PENDING signals stuck without any price update
-    stale_signal_sweep = asyncio.create_task(stale_signal_sweep_loop())
-    # 策略信号的 STALE 兜底：数据源中断会让策略信号永久 PENDING，进而使「一次
-    # 一单」策略永久卡死不再触发。与平台信号的清扫各自独立，因为两张表的
-    # PENDING 集合与判定驱动源不同。
-    # STALE safety net for strategy signals: a feed outage would leave them
-    # PENDING forever, which in turn permanently jams any one-trade-at-a-time
-    # strategy. Kept separate from the platform sweep since the two tables have
-    # different PENDING sets and different resolution triggers.
-    stale_strategy_sweep = asyncio.create_task(stale_strategy_signal_sweep_loop())
-    # 社区情绪定时抓取（FXSSI 公开聚合数据，见 services/sentiment_store.py）
-    # Community sentiment periodic fetch (FXSSI's public aggregate data, see
-    # services/sentiment_store.py)
-    sentiment_task = asyncio.create_task(sentiment_loop())
-    # 会员到期自动降级：把到期的付费用户落库改回 FREE（读取时即时降级的兜底，
-    # 覆盖只被 WS 广播/推送按 DB plan 命中的在线用户，见 services/plan_expiry.py）
-    # Auto-downgrade expired memberships to FREE in the DB (a safety net behind
-    # the read-time downgrade, covering online users only hit via the DB plan by
-    # WS broadcast/push; see services/plan_expiry.py)
-    plan_expiry_task = asyncio.create_task(plan_expiry_sweep_loop())
-    # 纪律分每日快照：给近期有信号单成交的用户落库当日纪律分，驱动前端 30 天
-    # 趋势线（见 services/discipline.py）。
-    # Discipline-score daily snapshot: persists today's score for recently
-    # active users, powering the frontend's 30-day trend line.
-    discipline_task = asyncio.create_task(discipline_snapshot_loop())
-    # 游戏化每小时循环：账号/订单 trade_mode 补章 + 全量条件与勋章判定
-    # （见 services/gamification/loop.py）。startup_delay 25s，与上面 discipline
-    # 的 20s、下面 candle 的 30s 错开，避免首轮同时抢占启动窗口。
-    # Gamification hourly loop: trade_mode backfill for accounts/orders plus a
-    # full pass of condition and badge judging (see services/gamification/loop.py).
-    # startup_delay is 25s, offset from discipline's 20s and candle's 30s below so
-    # their first passes don't all compete for the startup window at once.
-    gamification_task = asyncio.create_task(gamification_loop())
-    # 比赛榜快循环（60 秒）：整点那趟 pass 对正在进行的比赛太慢，名次要跟着平仓走。
-    # 没有进行中的比赛时它每轮只花一次 count 查询。startup_delay 35s，与上面几条错开。
-    # Fast competition-board loop (60s): the hourly pass is too slow for a live
-    # competition, where ranks should follow closed trades. With no live competition it
-    # costs one count query per tick. startup_delay 35s, staggered from the others.
-    competition_task = asyncio.create_task(competition_loop())
-    # K 线历史保留策略：每天清理过期的 1 分钟线（见 services/candle_store.py）
-    # Candle retention sweep: trims expired 1-minute candles daily
-    candle_retention_task = asyncio.create_task(candle_retention_sweep_loop())
-    # Gateway 账号持仓轮询：gateway 账号没有桥接上报，持仓列表/图表标记/自动仓管
-    # 这条链路要靠后端主动拉（见 routers/gateway.py）。
-    # Gateway position polling: gateway accounts have no bridge report, so the
-    # backend pulls positions to feed the same UI/auto-manage path.
-    gateway_positions_task = asyncio.create_task(gateway_positions_loop())
+    # 后台循环统一交给 BackgroundLoops：单 worker 直接全部起（与从前一样）；配了
+    # REDIS_URL 时每个 worker 只起一个监督协程去抢领导锁，抢到的那个跑全部循环
+    # （见 services/background.py）。各条循环的用途见各自模块的 docstring。
+    # Background loops go through BackgroundLoops: started directly on a single
+    # worker (as before); with REDIS_URL each worker runs one supervisor and only
+    # the lock holder runs the loops (see services/background.py).
+    loops = BackgroundLoops({
+        # 模拟信号引擎（本地开发用）/ mock signal engine (local development only)
+        **({"signal_engine": signal_loop} if settings.ENABLE_MOCK_SIGNAL_ENGINE else {}),
+        "offline_monitor": offline_monitor_loop,
+        "stale_orders": stale_order_monitor_loop,
+        # 信号过期广播：独立于模拟引擎，webhook 信号也依赖它 / expiry broadcast
+        "signal_expiry": signal_expiry_loop,
+        # 信号胜负判定的保险丝：清扫长期无行情更新的 PENDING 信号 / stale-signal safety net
+        "stale_signals": stale_signal_sweep_loop,
+        # 策略信号的 STALE 兜底（与平台信号的清扫各自独立）/ strategy-signal STALE safety net
+        "stale_strategy_signals": stale_strategy_signal_sweep_loop,
+        # 社区情绪定时抓取 / community sentiment fetch
+        "sentiment": sentiment_loop,
+        # 会员到期自动降级 / membership expiry downgrade
+        "plan_expiry": plan_expiry_sweep_loop,
+        # 纪律分每日快照 / discipline daily snapshot
+        "discipline_snapshot": discipline_snapshot_loop,
+        # 游戏化每小时循环（startup_delay 25s，与纪律 20s / K 线 30s 错开）/ gamification hourly pass
+        "gamification": gamification_loop,
+        # 比赛榜快循环（60 秒）/ fast competition-board loop
+        "competitions": competition_loop,
+        # K 线历史保留策略 / candle retention sweep
+        "candle_retention": candle_retention_sweep_loop,
+        # Gateway 账号持仓轮询 / gateway position polling
+        "gateway_positions": gateway_positions_loop,
+    })
+    loops.launch()
+    app.state.background_loops = loops
+    # 多 worker 时每个进程都要跑的 WS 转发订阅与在线名单续期（单 worker 为空）。
+    # Per-worker WS fan-out subscriber and presence refresh (empty on a single worker).
+    cross_worker_tasks = manager.start_cross_worker_tasks()
     yield
-    # 关闭：停止后台任务 / shutdown: stop background tasks
-    if task is not None:
-        task.cancel()
-    monitor.cancel()
-    stale_sweep.cancel()
-    expiry_sweep.cancel()
-    stale_signal_sweep.cancel()
-    stale_strategy_sweep.cancel()
-    sentiment_task.cancel()
-    plan_expiry_task.cancel()
-    discipline_task.cancel()
-    gamification_task.cancel()
-    competition_task.cancel()
-    candle_retention_task.cancel()
-    gateway_positions_task.cancel()
+    # 关闭：停止后台任务（多 worker 时顺带释放领导锁）/ shutdown: stop background tasks
+    loops.shutdown()
+    for t in cross_worker_tasks:
+        t.cancel()
     
     # 关闭 gateway 客户端连接池
     await close_client()

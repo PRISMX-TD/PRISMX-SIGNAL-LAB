@@ -157,6 +157,19 @@ class Settings(BaseSettings):
     # memory (single instance only); multi-instance deployments must point this
     # at Redis or the effective limit is multiplied by the instance count.
     RATE_LIMIT_STORAGE_URI: str = ""
+    # 跨进程共享状态的 Redis（如 redis://127.0.0.1:6379/0）。留空 = 单 worker，全部
+    # 状态在进程内存里，行为与从前完全一致。配上之后：限流计数、登录 / MT5 验证
+    # 锁定、回测并发闸门、/me 判定节流、后台循环只由一个 worker 跑（其余待命）、
+    # WebSocket 推送跨 worker 转发、EA 喂进来的报价与 K 线——全部走 Redis，这时才
+    # 可以开多个 worker（见 services/shared_state.py）。RATE_LIMIT_STORAGE_URI 单独
+    # 配也行（老写法，只管 slowapi），两者都配以 REDIS_URL 为准。
+    # Redis for cross-process shared state. Empty = single worker, everything
+    # in-process exactly as before. Set it and rate limits, lockouts, the backtest
+    # gate, the /me throttle, background-loop leadership, WebSocket fan-out and the
+    # EA market stores all go through Redis — only then may several workers run
+    # (see services/shared_state.py). RATE_LIMIT_STORAGE_URI alone still works for
+    # slowapi only; REDIS_URL wins when both are set.
+    REDIS_URL: str = ""
     RATE_LIMIT_LOGIN: str = "10/minute"
     RATE_LIMIT_REGISTER: str = "5/minute"
     RATE_LIMIT_GOOGLE: str = "10/minute"
@@ -280,12 +293,16 @@ class Settings(BaseSettings):
     # ⚠️ 生产环境 gateway 跑在**另一台 Windows VPS** 上，不是后端同机——
     # GATEWAY_URL 必须填那台 Windows VPS 的地址，而不是券商 MT5 服务器的地址
     # （这两个 IP 曾被搞混，排查了很久）。默认值只适用于本地开发。
+    # 走 WireGuard 隧道后填隧道内网地址 http://10.66.0.2:8800（见 gateway/WIREGUARD.md），
+    # 网关那头只监听这个地址，公网 IP 上不再有东西响应。
     #
     # MT5 Gateway (C# app, talks to MT5 via Manager API directly — no bridge
     # needed). Make Capital users' orders are routed through this channel.
     # In production the gateway runs on a separate Windows VPS, so GATEWAY_URL
     # must point at that VPS — not at the broker's MT5 server. The default only
-    # applies to local development.
+    # applies to local development. Over WireGuard this is the tunnel address
+    # http://10.66.0.2:8800 (see gateway/WIREGUARD.md); nothing answers on the
+    # public IP any more.
     GATEWAY_URL: str = "http://127.0.0.1:8800"
     GATEWAY_TOKEN: str = ""
 
@@ -682,22 +699,26 @@ def detect_worker_count(argv: list[str], env: dict) -> int | None:
 # loud one, not to decide on the ambiguous cases.
 _WORKER_COUNT = detect_worker_count(sys.argv, os.environ)
 
+# 2026-09-06 起：配了 REDIS_URL 就全部走 Redis（见 services/shared_state.py），多
+# worker 才是受支持的部署；只配 RATE_LIMIT_STORAGE_URI（老写法）仍只覆盖 slowapi，
+# 锁定 / 闸门 / 循环 / 推送 / 行情还在进程内，多 worker 照样拒绝。
+# Since 2026-09-06 REDIS_URL moves every piece of shared state to Redis and makes
+# multi-worker a supported deployment; RATE_LIMIT_STORAGE_URI alone (the older
+# form) covers slowapi only, so multi-worker is still refused.
 if (
     settings.ENV.lower() == "production"
     and _WORKER_COUNT is not None
     and _WORKER_COUNT > 1
-    and not settings.RATE_LIMIT_STORAGE_URI.strip()
+    and not settings.REDIS_URL.strip()
 ):
     raise RuntimeError(
-        f"检测到 {_WORKER_COUNT} 个 worker，但 RATE_LIMIT_STORAGE_URI 为空——限流与登录锁定"
-        "是进程内计数，多进程下每个 worker 各算各的，防护会静默除以 worker 数。"
-        "请改回单 worker，或配置 RATE_LIMIT_STORAGE_URI 指向 Redis。"
-        "注意：即便配了 Redis，登录/MT5 验证的失败锁定与回测并发闸门仍是进程内状态"
-        "（见 core/rate_limit.py 与 core/strategy_limits.py），需要一并迁移才算真正支持多进程。"
-        f" / Detected {_WORKER_COUNT} workers with an empty RATE_LIMIT_STORAGE_URI: rate limits"
-        " and the login lockout are per-process counters, so each worker counts separately and"
-        " every protection silently divides by the worker count. Go back to a single worker, or"
-        " point RATE_LIMIT_STORAGE_URI at Redis. Note that even with Redis the login/MT5-verify"
-        " lockouts and the backtest gate remain in-process (see core/rate_limit.py and"
-        " core/strategy_limits.py) and must be migrated too before multi-process is truly supported."
+        f"检测到 {_WORKER_COUNT} 个 worker，但 REDIS_URL 为空——限流、登录 / MT5 验证锁定、回测"
+        "闸门、后台循环、WebSocket 推送、EA 行情缓存都是进程内状态，多进程下每个 worker 各算各的："
+        "防护静默除以 worker 数、循环跑 N 遍、推送只到达连在本进程的用户、图表在别的 worker 上没数据。"
+        "请改回单 worker，或在 .env 配置 REDIS_URL（如 redis://127.0.0.1:6379/0）。"
+        f" / Detected {_WORKER_COUNT} workers with an empty REDIS_URL: rate limits, lockouts, the"
+        " backtest gate, background loops, WebSocket pushes and the EA market stores are per-process,"
+        " so every protection silently divides by the worker count, loops run N times, pushes only"
+        " reach users connected to this process and charts are empty on the other workers. Go back"
+        " to a single worker, or set REDIS_URL (e.g. redis://127.0.0.1:6379/0)."
     )

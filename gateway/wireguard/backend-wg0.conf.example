@@ -1,0 +1,24 @@
+# 后端 VPS（Linux）的 WireGuard 配置 —— 复制到 /etc/wireguard/wg0.conf
+# Backend VPS (Linux) WireGuard config — copy to /etc/wireguard/wg0.conf
+#
+# 拓扑 / Topology
+#   后端 VPS   10.66.0.1   监听 UDP 51820（云安全组只对网关 VPS 的公网 IP 放行）
+#   网关 VPS   10.66.0.2   主动连过来（Windows 侧不需要任何入站规则）
+#   backend    10.66.0.1   listens on UDP 51820 (cloud SG: allow only the gateway VPS's public IP)
+#   gateway    10.66.0.2   dials out (no inbound rule needed on the Windows side)
+#
+# 隧道里只走这两台机器之间的流量（AllowedIPs 是对方的 /32），不接管默认路由。
+# Only traffic between the two hosts rides the tunnel (AllowedIPs is the peer's /32);
+# the default route is untouched.
+
+[Interface]
+Address = 10.66.0.1/24
+ListenPort = 51820
+# 本机私钥：cat /etc/wireguard/privatekey / this host's private key
+PrivateKey = <后端私钥 backend-private-key>
+
+[Peer]
+# 网关 VPS 的公钥（在 Windows 的 WireGuard 客户端里生成后复制过来）
+# The gateway VPS's public key (generated in the Windows WireGuard client)
+PublicKey = <网关公钥 gateway-public-key>
+AllowedIPs = 10.66.0.2/32

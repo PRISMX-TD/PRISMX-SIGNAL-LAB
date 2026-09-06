@@ -16,3 +16,5 @@ google-auth==2.35.0
 requests==2.32.3
 pywebpush==2.0.0
 httpx==0.27.2
+# 跨进程共享状态（REDIS_URL 配了才连；没配也要装，import 在配了时才发生）
+redis==5.0.8

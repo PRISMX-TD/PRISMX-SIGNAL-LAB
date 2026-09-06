@@ -368,7 +368,7 @@ Write-Host "================ 安装完成 ================" -ForegroundColor Gre
 Write-Host ""
 Write-Host "接下来请务必做这一步(本次改造的真正目的):" -ForegroundColor Yellow
 Write-Host "  直接关掉远程桌面窗口,等 5 分钟,再从后端 VPS 执行:"
-Write-Host "      curl -m 5 http://150.109.22.166:8800/health"
+Write-Host "      curl -m 5 http://<网关地址>:8800/health     # 走 WireGuard 时是 10.66.0.2,见 WIREGUARD.md"
 Write-Host "  改造前这一步必然失败(进程随会话死),现在应该照常返回 JSON。"
 Write-Host ""
 Write-Host "日常命令:"

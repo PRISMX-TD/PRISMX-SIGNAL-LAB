@@ -26,14 +26,19 @@ limiter = Limiter(
 # 用途是限流器挡不住的那一类攻击：攻击者轮换出口 IP，对**同一个标的**（一个邮箱、
 # 一个 MT5 账号）持续撞库。按 IP 的限流对此完全无效，必须按标的本身计数。
 #
-# 同限流器一样是进程内状态：多实例部署时每个实例各持一份计数，锁定阈值被实例数
-# 稀释。真要多实例，这份状态也应随 RATE_LIMIT_STORAGE_URI 一起迁到 Redis。
+# 计数放在 services/shared_state：配了 REDIS_URL 就是全体 worker 共享的一份，没配
+# 就是进程内内存（与从前的 dict 行为一致）。键带过期：距最后一次失败超过锁定时长
+# 就整条清掉，所以阈值以下的失败也会在安静一段时间后归零——比原来「永不遗忘」
+# 更合理，也免得 Redis 里堆积键。
 #
 # Covers the attack the IP limiter cannot: rotating egress IPs against one
 # *target* (a single email, a single MT5 login). Per-IP limits do nothing there,
 # so the count has to be keyed by the target itself. Like the limiter, this is
 # in-process state — multi-instance deployments dilute the threshold by the
-# instance count and should move it to Redis alongside the limiter.
+# instance count. Counters now live in services/shared_state: one shared copy
+# across workers with REDIS_URL, in-process memory otherwise. Entries expire a
+# lockout-window after the last failure, so sub-threshold counts reset after a
+# quiet spell (saner than "never forget", and no key pile-up in Redis).
 # ---------------------------------------------------------------------------
 
 # (最大失败次数, 锁定秒数) / (max failures, lockout seconds), per namespace
@@ -49,30 +54,60 @@ _POLICIES: dict[str, tuple[int, int]] = {
     "mt5_verify": (5, 900),
 }
 
-_failures: dict[tuple[str, str], tuple[int, float]] = {}
+def _lock_key(namespace: str, key: str) -> str:
+    return f"lockout:{namespace}:{key}"
+
+
+def _read(namespace: str, key: str) -> tuple[int, float] | None:
+    from app.services import shared_state
+
+    entry = shared_state.kv_get_json(_lock_key(namespace, key))
+    if not isinstance(entry, list) or len(entry) != 2:
+        return None
+    return int(entry[0]), float(entry[1])
 
 
 def _is_locked(namespace: str, key: str) -> bool:
+    from app.services import shared_state
+
     max_attempts, lockout_seconds = _POLICIES[namespace]
-    entry = _failures.get((namespace, key))
+    entry = _read(namespace, key)
     if not entry:
         return False
     count, locked_at = entry
     if count < max_attempts:
         return False
     if time.time() - locked_at > lockout_seconds:
-        _failures.pop((namespace, key), None)
+        shared_state.kv_delete(_lock_key(namespace, key))
         return False
     return True
 
 
 def _record_failure(namespace: str, key: str) -> None:
-    count, _ = _failures.get((namespace, key), (0, 0.0))
-    _failures[(namespace, key)] = (count + 1, time.time())
+    from app.services import shared_state
+
+    _max_attempts, lockout_seconds = _POLICIES[namespace]
+    count, _ = _read(namespace, key) or (0, 0.0)
+    shared_state.kv_set_json(_lock_key(namespace, key), [count + 1, time.time()], ttl=lockout_seconds + 1)
 
 
 def _clear_failures(namespace: str, key: str) -> None:
-    _failures.pop((namespace, key), None)
+    from app.services import shared_state
+
+    shared_state.kv_delete(_lock_key(namespace, key))
+
+
+class _FailuresCompat:
+    """老测试写 `rate_limit._failures.clear()` 清状态；保留这个名字，清的是共享状态。
+    Kept for tests that call `_failures.clear()`; resets the shared-state backend."""
+
+    def clear(self) -> None:
+        from app.services import shared_state
+
+        shared_state.reset_for_tests()
+
+
+_failures = _FailuresCompat()
 
 
 # ---- 登录 / login ----

@@ -165,13 +165,15 @@ def test_cache_hit_then_recompute_after_ttl(db_session, monkeypatch):
 
     p1 = build_winrate_summary_payload(db_session, u)
     p2 = build_winrate_summary_payload(db_session, u)   # 60 秒内命中缓存
-    assert p1 is p2
+    assert p1 == p2                                        # 缓存走共享状态（JSON 往返），比内容不比身份
     assert len(calls) == 1
 
-    # 把缓存时间戳拨回 61 秒前，模拟 TTL 过期后应重新计算。
-    # Push the cached timestamp back 61s to simulate TTL expiry -> recompute.
-    ts, payload = G._summary_cache[u.id]
-    G._summary_cache[u.id] = (ts - 61, payload)
+    # 把时钟拨到 61 秒后，模拟 TTL 过期后应重新计算（缓存在 services/shared_state，按 time.time 过期）。
+    # Advance the clock 61s to simulate TTL expiry -> recompute (cache lives in
+    # services/shared_state and expires on time.time).
+    import time as _time
+    real = _time.time
+    monkeypatch.setattr(_time, "time", lambda: real() + 61)
     p3 = build_winrate_summary_payload(db_session, u)
     assert len(calls) == 2
-    assert p3 is not p1
+    assert p3 == p1
