@@ -28,6 +28,20 @@ DEMO = 0
 CONTEST = 1
 REAL = 2
 
+# trade_mode 的来源（写进 mt5_accounts.trade_mode_source）。前三种是券商或后台
+# 规则给的，用户碰不到；self 是桥接程序自报、没人核实过。「信得过的说了算，信不过
+# 的只能做参考」：自报值只在前三种都判不出来时才被采用，而且永远不能把一个规则
+# 判成非实盘的账号抬成实盘（见 routers/bridge._upsert_account）。
+# Provenance of trade_mode. The first three come from the broker or admin rules
+# and are out of the user's reach; self is the bridge's unverified claim, used
+# only when nothing else classifies and never to raise a rule-classified
+# account to real.
+SOURCE_GROUP = "group"
+SOURCE_LOGIN_RULE = "login_rule"
+SOURCE_SERVER_RULE = "server_rule"
+SOURCE_SELF = "self"
+VERIFIED_SOURCES = frozenset({SOURCE_GROUP, SOURCE_LOGIN_RULE, SOURCE_SERVER_RULE})
+
 # `server_login_rules` 里 `default` 兜底只允许保守方向：一台服务器上「其余号段」
 # 可以声明为模拟或竞赛，**不能声明为实盘**——那等于凭空猜一批账号是真金白银，
 # 正是本模块开篇反复强调不能做的事。配成 "real" 会被忽略（仍判未知）。
@@ -111,6 +125,18 @@ def classify_server(server: str | None, settings: dict) -> int | None:
             c = str(candidate).strip().lower()
             if c and c == name:
                 return mode
+    # 服务器名里带 demo 字样（"XYZ-Demo"、"DemoServer"）一律判模拟——这是这个模块
+    # 唯一允许的子串匹配，因为它只往「安全方向」猜：真金白银的账户不会挂在名字
+    # 带 Demo 的服务器上，误判的代价是漏算一个模拟盘，不是把模拟记成实盘。桥接
+    # 自报实盘也压不过它（见 classify_account 的顺序）。
+    # A server whose name contains "demo" is demo, full stop. The one substring
+    # match this module allows, because it only ever guesses in the safe
+    # direction: no live account sits on a "-Demo" server. Outranks the bridge's
+    # self-reported value.
+    for kw in settings.get("demo_server_keywords") or []:
+        k = str(kw).strip().lower()
+        if k and k in name:
+            return DEMO
     return None
 
 
@@ -216,13 +242,43 @@ def classify_account(
     CRITICAL: DEMO == 0 is falsy, so chaining with `or` is a bug — must check
     `is not None` explicitly at every step.
     """
+    return classify_account_with_source(group, server, login, settings)[0]
+
+
+def classify_account_with_source(
+    group: str | None, server: str | None, login: str | None, settings: dict
+) -> tuple[int | None, str | None]:
+    """同 classify_account，多返回一个来源（SOURCE_GROUP / SOURCE_LOGIN_RULE /
+    SOURCE_SERVER_RULE），判不出来返回 (None, None)。
+    Same as classify_account plus which rule decided; (None, None) when nothing did.
+    """
     by_group = classify_group(group, settings)
     if by_group is not None:
-        return by_group
+        return by_group, SOURCE_GROUP
     by_login = classify_login(server, login, settings)
     if by_login is not None:
-        return by_login
-    return classify_server(server, settings)
+        return by_login, SOURCE_LOGIN_RULE
+    by_server = classify_server(server, settings)
+    if by_server is not None:
+        return by_server, SOURCE_SERVER_RULE
+    return None, None
+
+
+def apply_self_reported(
+    ruled: int | None, self_reported: int | None
+) -> int | None:
+    """把桥接自报值与规则判定合成最终值。规则判出来了就以规则为准，唯一的例外是
+    自报值把账号**往下**降（规则说实盘、MT5 自己说模拟）——往下降是安全方向，
+    伪造它对用户没有任何好处。规则没判出来才采用自报值。两者都没有 → None。
+    Merge the bridge's self-report with the rule verdict. The rule wins, except a
+    self-report may lower a rule-real account to non-real (safe direction, nothing
+    to gain by faking it). With no rule verdict the self-report is used.
+    """
+    if ruled is not None:
+        if ruled == REAL and self_reported is not None and self_reported != REAL:
+            return self_reported
+        return ruled
+    return self_reported
 
 
 def is_real(trade_mode: int | None) -> bool:

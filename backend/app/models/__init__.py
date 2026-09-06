@@ -205,6 +205,14 @@ class MT5Account(Base):
     # it from the broker's group name; bridge self-reports it. The two are NOT
     # equally trustworthy — see the note above.
     trade_mode = Column(Integer, nullable=True)
+    # trade_mode 是怎么来的（services/account_type.py 的 SOURCE_*）：group=券商组名、
+    # login_rule=后台登录号段规则、server_rule=后台服务器名规则/含 demo 字样，这三种
+    # 用户碰不到；self=桥接程序自报、未经核实。管理端榜单预览按它标「自报」，每小时
+    # 循环会拿规则重判 self 行。NULL = 还没判定或 rev 15 之前的行。
+    # Provenance of trade_mode: group / login_rule / server_rule are broker- or
+    # admin-derived and out of the user's reach; self is the bridge's own claim,
+    # unverified. Admin previews flag self rows; the hourly loop re-checks them.
+    trade_mode_source = Column(String, nullable=True)
     # 绑定当时券商记录的「上次改密码时间」（Unix 秒），只有 gateway 通道写。
     #
     # **为什么需要**：gateway 绑定只在验证那一刻校验一次主密码，之后读持仓、
@@ -1159,7 +1167,12 @@ class PeriodBaseline(Base):
     period_key = Column(String, nullable=False)   # 2026-W36 / 2026-09 / comp:<id>
     baseline = Column(Float, nullable=False)      # 拍照时该账户 MT5Account.balance
     taken_at = Column(DateTime, default=_now)     # 分子只计此刻之后的平仓（防双计）
-    adjust = Column(Float, nullable=False, default=0.0)  # 期内入金并入分母；出金不减
+    adjust = Column(Float, nullable=False, default=0.0)  # 期内出入金净额（流水总和），入金正、出金负
+    # 出入金流水 JSON [[iso 时刻, 金额], ...]：计分时按每笔仓位开/平仓时刻取「当时本金」
+    # （boards.capital_at）。NULL = rev 15 之前的行，adjust 按全程生效处理。
+    # Cash-flow ledger as JSON; scoring reads capital-at-time per position
+    # (boards.capital_at). NULL on pre-rev-15 rows: adjust applies to the whole period.
+    flows = Column(Text, nullable=True)
     created_at = Column(DateTime, default=_now)
 
 

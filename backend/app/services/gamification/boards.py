@@ -1,4 +1,5 @@
-"""榜单计算（设计 §1.5/§1.6/§4）：按账户拍基线、对账入金、整仓计分、快照排名。"""
+"""榜单计算（设计 §1.5/§1.6/§4）：按账户拍基线、对账出入金、逐仓按当时本金计分、快照排名。"""
+import json
 import logging
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -10,6 +11,14 @@ from .periods import active_period_keys, period_bounds
 
 log = logging.getLogger("gamification")
 RECONCILE_TOLERANCE = 0.01
+# 出金门槛：余额少掉的钱要同时超过这两条线才算出金（取两者较大）。手续费、隔夜
+# 利息、点差返还都是几美金到几十美金的量级，够不到这条线，照旧忽略；真出金一般
+# 是几百起。本金按账户币种原值比较，与 min_baseline_usd 同一口径（不换汇）。
+# Withdrawal threshold: a balance drop counts as a withdrawal only when it clears
+# both lines (the larger wins). Commission / swap / rebates are single- to
+# double-digit noise and stay ignored; a real withdrawal is hundreds and up.
+WITHDRAWAL_MIN_ABS = 100.0
+WITHDRAWAL_MIN_FRAC = 0.05
 REAL = 2
 
 
@@ -44,6 +53,87 @@ def ensure_baselines(db, period_key: str, now: datetime) -> int:
     return created
 
 
+# ---- 出入金流水与「当时本金」 / cash flows and capital-at-time ---------------------
+#
+# 2026-09-06 之前分母是「基线 + 期内全部入金」，出金一律不减。对出金的人不公平
+# （出掉大半资金后继续赚，收益率被大分母压低），但改成「出金直接减分母」会开一个
+# 洞：先赚 1000 再把 9000 提走，分母从 10000 变 1000，同一笔利润的收益率从 10%
+# 变 100%。所以分母不再是一个数，而是**每一笔仓位各算各的**：
+#   这笔仓位的本金 = max(开仓那一刻账户里的钱, 平仓那一刻账户里的钱)
+#   收益率 = Σ 每笔盈亏 ÷ 该笔本金
+# 「钱只要在开仓或平仓任一时刻在账户里，就算这笔的本金」——赚完再提走，本金按提走
+# 前算，放大不了；提走后再交易，本金按提走后算，不再被压低；交易中途入金，本金按
+# 入金后算，与原来「入金摊薄」的保守方向一致。没有出入金时公式与原来完全相同
+# （Σp ÷ D）。
+# 流水记在基线行的 flows（JSON [[iso 时刻, 金额], ...]），`adjust` 仍是流水总和，
+# rev 15 之前只有 adjust 没流水的旧行按「全程生效」处理（capital_at 里的 residue）。
+#
+# Before 2026-09-06 the denominator was baseline + all deposits, withdrawals
+# ignored. Subtracting withdrawals naively opens a hole (earn 1000 on 10000,
+# withdraw 9000, the same profit now reads 100%). So each position gets its own
+# denominator: max(capital when it opened, capital when it closed) — money counts
+# as this position's capital if it was in the account at either moment. Earn-then-
+# withdraw can't inflate; withdraw-then-trade is no longer deflated; deposit mid-
+# trade keeps the old dilute-conservatively direction. With no flows the formula
+# reduces to the old Σp ÷ D exactly. Flows live on the baseline row as JSON;
+# `adjust` stays their running sum, and legacy rows with adjust but no flows are
+# treated as "in effect for the whole period" (the residue term in capital_at).
+
+def _flows(b) -> list[tuple[datetime, float]]:
+    """基线行的出入金流水，按时间升序；坏 JSON 当作没有流水（不抛）。"""
+    raw = getattr(b, "flows", None)
+    if not raw:
+        return []
+    try:
+        items = json.loads(raw)
+        out = [(_aware(datetime.fromisoformat(t)), float(a)) for t, a in items]
+    except (ValueError, TypeError):
+        return []
+    out.sort(key=lambda x: x[0])
+    return out
+
+
+def _append_flow(b, at: datetime, amount: float) -> None:
+    items = [[t.isoformat(), a] for t, a in _flows(b)]
+    items.append([_aware(at).isoformat(), float(amount)])
+    b.flows = json.dumps(items)
+
+
+def capital_at(b, t: datetime) -> float:
+    """t 时刻账户里的本金：基线 + 在 t 之前（含）发生的流水 + 无时间信息的残差。
+    残差 = adjust − 流水总和，只有 rev 15 之前记的入金会落在这里，按全程生效。"""
+    flows = _flows(b)
+    residue = float(b.adjust or 0.0) - sum(a for _, a in flows)
+    t = _aware(t)
+    return float(b.baseline) + residue + sum(a for at, a in flows if at <= t)
+
+
+def position_denominator(b, opened_at: datetime, closed_at: datetime) -> float:
+    return max(capital_at(b, opened_at), capital_at(b, closed_at))
+
+
+def return_score(b, resolved, min_baseline: float):
+    """收益榜一行的分数：resolved = [(opened_at, closed_at, profit), ...]。
+    返回 (score, sample)；任一笔仓位的本金低于门槛或 ≤ 0 → None（整行不入榜，
+    与原来「分母 ≥ min_baseline」的闸同一语义：本金不够时的交易不排名）。
+    Score for one return_pct row. None when any position's capital is below the
+    floor or non-positive — the whole row stays off the board, same semantics as
+    the old denominator gate.
+    """
+    # 先按本金分组再各除一次，而不是逐笔相除再相加：没有出入金时结果与原来的
+    # total / denom 逐位相同（逐笔相除会多出浮点尾差，让本该打平的两行分不出胜负）。
+    # Sum per distinct denominator, then divide once each: with no flows this is
+    # bit-for-bit the old total / denom (per-position division would introduce
+    # float noise and break exact ties).
+    by_denom: dict[float, float] = defaultdict(float)
+    for opened_at, closed_at, profit in resolved:
+        denom = position_denominator(b, opened_at, closed_at)
+        if denom <= 0 or denom < min_baseline:
+            return None
+        by_denom[denom] += profit
+    return sum(total / d for d, total in by_denom.items()), len(resolved)
+
+
 def _realized_since(db, user_id, login, since, until) -> float:
     """sum(ClosedTrade.profit)，不过滤 verified：对账针对的是余额变动，任何已
     报告的平仓（无论能否被服务端核对）都会真实地改变 MT5 账户余额。
@@ -60,8 +150,13 @@ def reconcile_deposits(db, period_key: str, now: datetime = None,
                         bounds: tuple[datetime, datetime] | None = None) -> int:
     """对每条基线，若账号行仍在且 balance 非 NULL：
     delta = balance − (baseline + adjust) − realized_since(taken_at, login)；
-    delta > RECONCILE_TOLERANCE → adjust += delta（入金并入分母）；
-    负 delta（出金）忽略；账号行已不在（解绑）→ 冻结不动，不报错。
+    delta > RECONCILE_TOLERANCE → 入金：adjust += delta，记一条流水；
+    −delta ≥ max(WITHDRAWAL_MIN_ABS, WITHDRAWAL_MIN_FRAC × 当前本金) → 出金：
+    adjust += delta（负数），记一条流水；够不到门槛的小额负差（手续费、隔夜利息）
+    忽略；账号行已不在（解绑）→ 冻结不动，不报错。
+    流水带时间，计分时按每笔仓位开/平仓时刻各取本金（见 capital_at）。桥接晚报的
+    平仓单会先被看成一笔出金、下一轮余额对上后再记一笔等额入金，两条流水相抵，
+    在此之前平掉的仓位本金不受影响（取的是它平仓时刻的本金）。
 
     只对当前进行中的周期调用（结束周期不对账）：周期结束后账户仍在正常交易，
     期后的盈亏会被 _realized_since 当成「realized」减掉，从而把期后的正常
@@ -91,9 +186,15 @@ def reconcile_deposits(db, period_key: str, now: datetime = None,
             continue                                    # 解绑/无余额：冻结不动
         realized = _realized_since(db, row.user_id, row.mt5_login,
                                    _aware(row.taken_at), end)
-        delta = balance - (row.baseline + row.adjust) - realized
+        denom = row.baseline + row.adjust
+        delta = balance - denom - realized
         if delta > RECONCILE_TOLERANCE:
-            row.adjust += delta                          # 入金并入分母
+            row.adjust += delta                          # 入金：并入此后仓位的本金
+            _append_flow(row, now, delta)
+            adjusted += 1
+        elif delta < 0 and -delta >= max(WITHDRAWAL_MIN_ABS, WITHDRAWAL_MIN_FRAC * denom):
+            row.adjust += delta                          # 出金：此后仓位的本金减少
+            _append_flow(row, now, delta)
             adjusted += 1
     if adjusted:
         db.commit()
@@ -103,8 +204,9 @@ def reconcile_deposits(db, period_key: str, now: datetime = None,
 def _resolved_in_period(db, user_id, logins, period_key, taken_at_by_login,
                          bounds: tuple[datetime, datetime] | None = None,
                          modes: tuple[int, ...] = (REAL,)):
-    """整仓判定 + 归期：返回 login -> list[profit]。归期 = 最后一腿时间落在
-    [max(期初, 该账户 taken_at), 期末)。订单锚定 lifetime（开仓可早于期初）。
+    """整仓判定 + 归期：返回 login -> list[(opened_at, closed_at, profit)]。归期 =
+    最后一腿时间落在 [max(期初, 该账户 taken_at), 期末)。订单锚定 lifetime（开仓可
+    早于期初）。开/平仓时刻给 return_score 取「当时本金」用；胜率榜只看 profit。
 
     `bounds` 可选：显式传 (start, end) 时跳过 `period_bounds(period_key)` 解析
     （比赛 key 不是自然周/月格式，解析不了）；默认 None 时行为与 Phase 2 完全
@@ -134,7 +236,7 @@ def _resolved_in_period(db, user_id, logins, period_key, taken_at_by_login,
         last_close = _aware(max(l.closed_at for l in legs))
         lower = max(start, _aware(taken_at_by_login[o.mt5_login]))
         if lower <= last_close < end:
-            out[o.mt5_login].append(p)
+            out[o.mt5_login].append((_aware(o.created_at), last_close, p))
     return out
 
 
@@ -212,13 +314,14 @@ def compute_board_rows(db, period_key: str) -> dict:
         taken = {lg: b.taken_at for lg, b in blmap.items()}
         profits_by_login = _resolved_in_period(db, uid, set(blmap), period_key, taken)
         for lg, b in blmap.items():
-            profits = profits_by_login.get(lg, [])
+            resolved = profits_by_login.get(lg, [])
+            profits = [p for _o, _c, p in resolved]
             sample = len(profits)
             total = sum(profits)
-            denom = b.baseline + b.adjust
-            if sample >= min_trades_return and denom >= min_baseline and denom > 0:
+            scored = return_score(b, resolved, min_baseline)
+            if sample >= min_trades_return and scored is not None:
                 ret_rows.append({"userId": uid, "login": lg,
-                                 "score": total / denom, "sample": sample})
+                                 "score": scored[0], "sample": sample})
             # 「本期盈亏为正」原本写死在这里（高胜率 ≠ 赚钱：小赢大亏的打法能刷出
             # 高胜率却在亏钱，这道闸挡的就是它）。2026-09-04 应产品要求改成可配
             # 开关 `winrate_require_profit`，默认关闭——内测期样本太小，这道闸把

@@ -21,7 +21,7 @@ from app.core.rate_limit import (
     record_failed_mt5_verify,
 )
 from app.models import ClosedTrade, MT5Account, Order, User
-from app.services.account_type import classify_group
+from app.services.account_type import SOURCE_GROUP, classify_group
 from app.services.deps import get_current_user
 from app.services.gateway_binding import (
     enforce, is_removed, is_revoked, mark_removed, not_removed,
@@ -321,6 +321,7 @@ def gateway_verify(
         # 每次刷新都重写，规则改了下一轮自动纠正。
         existing.mt5_group = rsp.group or None
         existing.trade_mode = classify_group(rsp.group, get_account_type_settings(db))
+        existing.trade_mode_source = SOURCE_GROUP if existing.trade_mode is not None else None
 
         # 记下券商侧的「上次改密码时间」。这是本次授权的凭据：轮询每 15 秒拿
         # 当前值来比，对不上就说明用户刚才输的那个密码已经不是账号现在的密码，
@@ -993,6 +994,7 @@ async def gateway_positions_loop() -> None:
             if rsp.group:
                 row.mt5_group = rsp.group
                 row.trade_mode = classify_group(rsp.group, get_account_type_settings(db))
+                row.trade_mode_source = SOURCE_GROUP if row.trade_mode is not None else None
             db.commit()
             return float(row.balance or 0.0)
         finally:

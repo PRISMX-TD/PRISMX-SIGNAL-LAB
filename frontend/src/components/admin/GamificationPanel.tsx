@@ -636,7 +636,20 @@ export default function GamificationPanel() {
                         <span className="block truncate text-neutral-600">{row.email}</span>
                       )}
                     </td>
-                    <td className="num py-1.5 pr-4 text-neutral-400">{row.login}</td>
+                    <td className="num py-1.5 pr-4 text-neutral-400">
+                      {row.login}
+                      {/* 实盘身份只是桥接自报、没经过券商组名或后台规则核实的账户，标出来供抽查。
+                          Accounts whose real-account status is only self-reported by the
+                          bridge (not verified by broker group / admin rule) get a tag. */}
+                      {row.tradeModeSource === 'self' && (
+                        <span
+                          className="ml-1.5 rounded border border-amber-400/40 px-1 py-px text-[10px] font-medium text-amber-300"
+                          title={t('leaderboard.admin.selfReportedHint')}
+                        >
+                          {t('leaderboard.admin.selfReported')}
+                        </span>
+                      )}
+                    </td>
                     <td className="num py-1.5 pr-4 text-neutral-100">{fmtScorePct(row.score)}</td>
                     <td className="num py-1.5 text-neutral-500">{row.sample}</td>
                   </tr>

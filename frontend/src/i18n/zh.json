@@ -1979,13 +1979,13 @@
       "returnMetric": "比收益率，不比金额",
       "minTradesReturn": "本期 ≥{{n}} 笔完整平仓",
       "minBaseline": "期初本金 ≥{{usd}} USD",
-      "deposits": "期中入金并入分母 · 出金不减",
+      "deposits": "本金按每笔开仓、平仓时账户里的钱算（取较大者）· 入金出金都算",
       "identity": "以账户为单位 · 昵称打码 · 账户号明示",
       "minTradesWinrate": "本期 ≥{{n}} 笔",
       "positive": "盈亏为正才能上榜"
     },
     "rules": {
-      "return_pct": "比的是收益率（百分比），期初定格本金、期中入金并入分母；本金低于 {{usd}} USD 或不足 {{n}} 笔不入榜。",
+      "return_pct": "比的是收益率（百分比）：每笔盈亏除以它开仓、平仓时账户里的本金（取较大者），入金、出金都跟着变；本金低于 {{usd}} USD 或不足 {{n}} 笔不入榜。",
       "win_rate": "本期 ≥{{n}} 笔且盈亏为正才能上榜——胜率高不等于赚钱。"
     },
     "admin": { "preview": "榜单预览", "leaderboardSwitch": "排行榜用户端可见性",
@@ -1999,7 +1999,9 @@
                "winrateRequireProfitHint": "开启后，本期净亏损的账户即使胜率再高也不上胜率榜（小赢大亏刷不出名次）。内测期样本小，建议先关；正式公开前打开。",
                "confirmOpenBoard": "开放后榜单对全体用户可见，确认开放？",
                "confirmOpenCompetitions": "开放后比赛对全体用户可见，确认开放？",
-               "pickBoard": "选择榜单", "colIdentity": "真实身份", "pickPeriod": "选择周期" }
+               "pickBoard": "选择榜单", "colIdentity": "真实身份", "pickPeriod": "选择周期",
+               "selfReported": "自报",
+               "selfReportedHint": "这个账户的实盘身份来自用户电脑上的桥接程序自报，未经券商组名或后台规则核实，建议抽查。" }
   },
   "competition": {
     "title": "交易比赛",

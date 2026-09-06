@@ -9,7 +9,7 @@ from app.core.database import SessionLocal
 from app.models import ClosedTrade, MT5Account, Order, User
 from sqlalchemy import or_
 
-from app.services.account_type import classify_account
+from app.services.account_type import SOURCE_SELF, VERIFIED_SOURCES, classify_account_with_source
 from app.services.settings_store import get_account_type_settings
 from .conditions import judge_and_record_conditions
 from .badges import judge_and_award_badges
@@ -44,9 +44,10 @@ SLOW_COMP_PASS_WARN_SECONDS = 20
 
 
 def backfill_account_trade_modes(db) -> int:
-    """把还没判定过的账号补上 trade_mode：组名优先（gateway 通道权威），
-    没有组名或组名判不出来时依次按登录号段、服务器名兜底（桥接通道，见
-    classify_account）。桥接账号实际主要靠 `server_login_rules` 的登录号段
+    """把还没判定过的账号补上 trade_mode，并用规则重判桥接自报（source=self）的行：
+    组名优先（gateway 通道权威），没有组名或组名判不出来时依次按登录号段、服务器
+    名兜底（桥接通道，见 classify_account_with_source）。自报实盘但服务器名带
+    demo、或号段规则说模拟的，这里每小时改回来。桥接账号实际主要靠 `server_login_rules` 的登录号段
     规则命中——比如 Make Capital 一台服务器混跑模拟与实盘，靠登录号前几位
     区分；`real_server_names` 整服务器白名单默认为空，只在券商真把模拟/
     实盘分到不同服务器时才配置。
@@ -68,15 +69,32 @@ def backfill_account_trade_modes(db) -> int:
     at all; classify_account still returns None for anything it can't place.
     """
     rows = (db.query(MT5Account)
-              .filter(MT5Account.trade_mode.is_(None),
+              .filter(or_(MT5Account.trade_mode.is_(None),
+                          MT5Account.trade_mode_source.is_(None),
+                          MT5Account.trade_mode_source == SOURCE_SELF),
                       or_(MT5Account.mt5_group.isnot(None),
                           MT5Account.server.isnot(None))).all())
     cfg = get_account_type_settings(db)
     n = 0
     for row in rows:
-        tm = classify_account(row.mt5_group, row.server, row.login, cfg)
+        tm, src = classify_account_with_source(row.mt5_group, row.server, row.login, cfg)
         if tm is not None:
-            row.trade_mode = tm
+            # 规则判出来了：没判过的补上；桥接自报的（self / 来源未知）用规则重判——
+            # 规则说模拟就改回模拟，说实盘就把来源升级成规则。自报把账号往下降的
+            # 情况（规则实盘、自报非实盘）保留，理由同 account_type.apply_self_reported。
+            # Rule hit: fill unclassified rows; re-judge self-reported rows — a
+            # rule verdict overrides, except a self-reported downgrade is kept.
+            downgrade = (row.trade_mode_source == SOURCE_SELF and tm == 2
+                         and row.trade_mode is not None and row.trade_mode != 2)
+            if not downgrade and (row.trade_mode != tm or row.trade_mode_source != src):
+                row.trade_mode = tm
+                row.trade_mode_source = src
+                n += 1
+        elif row.trade_mode is not None and row.trade_mode_source not in VERIFIED_SOURCES \
+                and row.trade_mode_source != SOURCE_SELF:
+            # 有值但不知道哪来的（rev 15 之前的行）：只能是自报，标上让管理端看得见。
+            # Classified but of unknown provenance (pre-rev-15): can only be self-reported.
+            row.trade_mode_source = SOURCE_SELF
             n += 1
     if n:
         db.commit()

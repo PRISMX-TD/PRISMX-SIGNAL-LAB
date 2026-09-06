@@ -1144,6 +1144,11 @@ export interface LeaderboardRow {
   userId?: string
   nickname?: string | null
   email?: string
+  // 实盘标记的来源（同样只在管理端预览出现）：group / login_rule / server_rule 是券商
+  // 或后台规则给的；self 是桥接程序自报、没人核实过，预览里标「自报」供抽查。
+  // Provenance of the real-account flag (admin preview only): group / login_rule /
+  // server_rule are broker- or admin-derived; self is the bridge's unverified claim.
+  tradeModeSource?: string | null
 }
 
 // GET /gamification/leaderboard 、GET /admin/gamification/leaderboard 的完整

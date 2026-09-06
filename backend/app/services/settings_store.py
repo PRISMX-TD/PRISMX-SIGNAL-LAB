@@ -732,6 +732,12 @@ ACCOUNT_TYPE_DEFAULTS: dict = {
     "real_server_names": [],
     "contest_server_names": [],
     "demo_server_names": [],
+    # 服务器名子串（小写比较）命中即判模拟，压过桥接自报的实盘——见
+    # services/account_type.py 的 classify_server。只往安全方向猜，所以允许子串。
+    # Server-name substrings that force demo, outranking the bridge's self-reported
+    # real flag (see classify_server). Substring match is allowed here because it
+    # only ever guesses in the safe direction.
+    "demo_server_keywords": ["demo"],
     # 服务器 + 登录号段规则：一台 MT5 服务器混跑模拟与实盘时，靠券商自己的
     # 登录号编号习惯区分（不是猜的，是跟券商确认过的）——见
     # services/account_type.py 的 classify_login/classify_account。

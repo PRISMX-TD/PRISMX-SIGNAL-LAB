@@ -1982,13 +1982,13 @@
       "returnMetric": "Ranked by return rate, not P&L amount",
       "minTradesReturn": "≥{{n}} full closes this period",
       "minBaseline": "≥{{usd}} USD starting capital",
-      "deposits": "Mid-period deposits raise the denominator · withdrawals don't reduce it",
+      "deposits": "Capital per trade = money in the account when it opened or closed (the larger) · deposits and withdrawals both count",
       "identity": "Per account · nickname masked · account number shown",
       "minTradesWinrate": "≥{{n}} trades this period",
       "positive": "Positive P&L required to rank"
     },
     "rules": {
-      "return_pct": "Ranked by return rate (%): starting capital is locked in at period start and mid-period deposits are folded into the denominator. Accounts below {{usd}} USD baseline or with fewer than {{n}} trades don't rank.",
+      "return_pct": "Ranked by return rate (%): each trade's P&L is divided by the capital in the account when it opened or closed (the larger), so deposits and withdrawals both count. Accounts below {{usd}} USD capital or with fewer than {{n}} trades don't rank.",
       "win_rate": "Needs ≥{{n}} trades this period with positive P&L to rank — a high win rate alone doesn't mean profit."
     },
     "admin": { "preview": "Leaderboard preview", "leaderboardSwitch": "Leaderboard user-facing visibility",
@@ -2002,7 +2002,9 @@
                "winrateRequireProfitHint": "When on, an account that is net-negative for the period stays off the win-rate board however high its rate. Samples are tiny during the beta, so leave it off for now and turn it on before going public.",
                "confirmOpenBoard": "Once opened, the leaderboard is visible to all users. Confirm opening?",
                "confirmOpenCompetitions": "Once opened, competitions are visible to all users. Confirm opening?",
-               "pickBoard": "Pick a board", "colIdentity": "Real identity", "pickPeriod": "Pick a period" }
+               "pickBoard": "Pick a board", "colIdentity": "Real identity", "pickPeriod": "Pick a period",
+               "selfReported": "Self-reported",
+               "selfReportedHint": "This account's real-money status was self-reported by the bridge on the user's PC and has not been verified by a broker group or an admin rule. Worth a spot check." }
   },
   "competition": {
     "title": "Competitions",

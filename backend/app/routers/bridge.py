@@ -32,7 +32,7 @@ from app.services.push_dispatch import (
     dispatch_event_push_async,
 )
 from app.services import bridge_version_check
-from app.services.account_type import classify_account
+from app.services.account_type import SOURCE_SELF, apply_self_reported, classify_account_with_source
 from app.services.settings_store import (
     get_account_type_settings,
     get_broker_settings,
@@ -383,33 +383,32 @@ def _upsert_account(
     # 探测后缀仅作兜底（用户未手动设置时）/ detected suffix is fallback only
     if acc.detectedSuffix is not None and not (row.symbol_suffix or "").strip():
         row.symbol_suffix = acc.detectedSuffix
-    # 只在上报了才写：旧版桥接不带该字段，不能让 None 把已有值抹掉。
-    # Only written when reported: an older bridge omits it, and None must not
-    # wipe a value that's already there.
-    if acc.tradeMode is not None:
+    # 实盘标记：信得过的说了算，信不过的只做参考（services/account_type.py）。
+    #   1. 券商组名 / 后台登录号段规则 / 服务器名规则（含 demo 字样）先判——这些
+    #      用户碰不到；判出来了桥接自报压不过它，唯一例外是自报把账号往下降
+    #      （规则说实盘、MT5 自己说模拟），往下降是安全方向。
+    #   2. 规则判不出来才采用桥接自报值，来源标 self（管理端预览会标「自报」，
+    #      每小时循环还会拿规则重判）。
+    #   3. 有券商组名但组名没判出来的账号，不采用自报值——那是"运维还没配前缀"
+    #      的状态，该留 None 等配置，不该让用户侧的值替券商说话。
+    #   4. 旧版桥接不报 tradeMode、规则也判不出来：保持原值不动（None 让 None
+    #      把已有值抹掉是最早的一条约定）。
+    # Real-account flag: trusted sources decide, the self-report is only a hint.
+    # Rules (broker group / admin login-prefix / server name incl. "demo") go
+    # first and outrank the bridge's claim, except a downgrade; the self-report is
+    # used only when no rule applies, marked self; a known-but-unclassified broker
+    # group stays None for ops rather than taking the user's word.
+    settings = get_account_type_settings(db)
+    ruled, ruled_src = classify_account_with_source(
+        row.mt5_group, acc.server or row.server, acc.login, settings
+    )
+    if ruled is not None:
+        final = apply_self_reported(ruled, acc.tradeMode)
+        row.trade_mode = final
+        row.trade_mode_source = ruled_src if final == ruled else SOURCE_SELF
+    elif acc.tradeMode is not None and not (row.mt5_group or "").strip():
         row.trade_mode = acc.tradeMode
-    elif row.trade_mode is None:
-        # 旧版桥接不报 tradeMode，且账号还没判定过：按组名/登录号段/服务器名
-        # 依次兜底判一次（见 classify_account）。这里能拿到组名的账号很少——
-        # 桥接载荷本身不带 MT5 组名，这个分支实际主要靠 server_login_rules
-        # 的登录号段规则命中（如 Make Capital 一台服务器混跑模拟与实盘，靠
-        # 登录号前几位区分）；`real_server_names` 整服务器白名单默认为空，
-        # 只在券商真把模拟/实盘分到不同服务器时才配置。判不出来仍是 None，
-        # 等下一轮 gamification 回填或运维补规则。
-        # Older bridge omits tradeMode and the account has never been
-        # classified: try the group / login-prefix / server fallback chain
-        # (see classify_account). The bridge payload carries no MT5 group, so
-        # in practice this branch is driven by the server_login_rules
-        # login-prefix rules (e.g. Make Capital mixes demo and live on one
-        # server, told apart by login prefix); the whole-server
-        # `real_server_names` whitelist defaults to empty and only applies to
-        # brokers that genuinely segregate demo/live onto separate servers.
-        # Still None when nothing matches, left for the next gamification
-        # backfill pass or an ops fix.
-        settings = get_account_type_settings(db)
-        row.trade_mode = classify_account(
-            row.mt5_group, acc.server or row.server, acc.login, settings
-        )
+        row.trade_mode_source = SOURCE_SELF
     row.online = True
     row.last_heartbeat = datetime.now(timezone.utc)
     return row, created

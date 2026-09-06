@@ -18,7 +18,7 @@ from app.models import (
 )
 from .badges import award_badge
 from app.services.account_type import CONTEST, DEMO
-from .boards import REAL, _aware, _resolved_in_period, board_gates, reconcile_deposits
+from .boards import REAL, _aware, _resolved_in_period, board_gates, reconcile_deposits, return_score
 
 
 TRACKS = ("real", "demo")
@@ -126,14 +126,17 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
                                                 modes=track_modes(comp.track))
         for lg in logins:
             b = baseline_by_login[lg]
-            profits = profits_by_login.get(lg, [])
+            resolved = profits_by_login.get(lg, [])
+            profits = [pr for _o, _c, pr in resolved]
             sample = len(profits)
             total = sum(profits)
-            denom = b.baseline + b.adjust
             if comp.metric == "return_pct":
-                if sample >= min_trades_return and denom >= min_baseline and denom > 0:
+                # 逐仓按当时本金计分，与周期榜同一个 return_score（出入金口径不分叉）。
+                # Per-position capital, same return_score as the standing board.
+                scored = return_score(b, resolved, min_baseline)
+                if sample >= min_trades_return and scored is not None:
                     rows.append({"userId": uid, "login": lg,
-                                "score": total / denom, "sample": sample})
+                                "score": scored[0], "sample": sample})
             elif comp.metric == "win_rate":
                 # 盈亏正闸同 boards.py：现在是可配开关 winrate_require_profit（默认关）。
                 # Same as boards.py: a principled profit-positive gate,

@@ -104,7 +104,9 @@ def test_classify_server_shipped_defaults_no_longer_whitelist_make_capital_live(
     classification takes over via classify_login instead.
     """
     assert classify_server("MakeCapital-Live", ACCOUNT_TYPE_DEFAULTS) is None
-    assert classify_server("MakeCapital-Demo", ACCOUNT_TYPE_DEFAULTS) is None
+    # 2026-09-06 起名字带 demo 的服务器按关键字直接判模拟（安全方向），不再是未知。
+    # Since 2026-09-06 a "-Demo" server classifies demo by keyword, not unknown.
+    assert classify_server("MakeCapital-Demo", ACCOUNT_TYPE_DEFAULTS) == DEMO
 
 
 def test_classify_login_shipped_defaults_classify_make_capital_live_by_prefix():

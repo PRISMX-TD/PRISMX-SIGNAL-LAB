@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings
 from app.core.rate_limit import limiter
-from app.models import LeaderboardSnapshot, PeriodBaseline, User, UserBadge, UserTask
+from app.models import LeaderboardSnapshot, MT5Account, PeriodBaseline, User, UserBadge, UserTask
 from app.schemas import GamificationSettingsPatchIn, VisibilityPatchIn
 from app.services.deps import get_current_user, get_db, require_admin
 from app.services.gamification import (
@@ -124,9 +124,17 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
     top_rows = all_rows[:50]
 
     users_by_id = {}
+    source_by_acct: dict[tuple[str, str], str | None] = {}
     if top_rows:
         ids = {r.user_id for r in top_rows}
         users_by_id = {u.id: u for u in db.query(User).filter(User.id.in_(ids))}
+        if reveal:
+            # 管理端要看得出哪些上榜账户的实盘身份只是桥接自报、没经过券商组名或
+            # 后台规则核实（trade_mode_source=self）——抽查就靠这个标记。
+            # Admins need to see which ranked accounts are only self-reported real
+            # (trade_mode_source=self) so they can spot-check them.
+            for a in db.query(MT5Account).filter(MT5Account.user_id.in_(ids)):
+                source_by_acct.setdefault((a.user_id, a.login), a.trade_mode_source)
 
     rows = []
     for r in top_rows:
@@ -156,6 +164,7 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
             row["userId"] = r.user_id
             row["nickname"] = u.nickname if u else None
             row["email"] = u.email if u else None
+            row["tradeModeSource"] = source_by_acct.get((r.user_id, r.mt5_login))
         rows.append(row)
 
     me = None

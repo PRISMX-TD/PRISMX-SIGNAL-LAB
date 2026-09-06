@@ -109,7 +109,9 @@ def _hash_legacy_api_tokens() -> None:
 # rev 12 — competitions.min_baseline_usd / min_trades（每场比赛可覆盖入榜门槛；track 列已存在，本次起真正启用 real/demo）
 # rev 13 — mt5_accounts.server_utc_offset（gateway 服务器时区偏移持久化，重启不再丢；不回填，NULL=从未观测）
 # rev 14 — discipline_snapshots.positions（评分仓位数，纪律勋章的资格门槛；不回填，快照循环 6 小时内自然补齐）
-CURRENT_SCHEMA_REV = 14
+# rev 15 — period_baselines.flows（出入金流水，逐仓按当时本金计分；不回填，旧行 adjust 全程生效）
+#          + mt5_accounts.trade_mode_source（实盘标记来源；回填：有组名=group、其余已判定=self，循环再用规则重判）
+CURRENT_SCHEMA_REV = 15
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -522,6 +524,40 @@ def _migrate_columns() -> None:
         if "positions" not in snap_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE discipline_snapshots ADD COLUMN positions INTEGER"))
+
+    # rev 15：出入金流水 + 实盘标记来源。flows 不回填——过去的入金没有时间信息，
+    # 旧行的 adjust 按「全程生效」读（boards.capital_at 的 residue）。
+    # trade_mode_source 回填只分两类：有券商组名的是 group（用户碰不到），其余已判定
+    # 的一律先标 self（未经核实）——其中靠登录号段规则判出来的，每小时循环会用规则
+    # 重判一次、把来源升级成 login_rule/server_rule，一小时内自动纠正。
+    # rev 15: cash-flow ledger + trade_mode provenance. flows is never backfilled
+    # (past deposits carry no timestamp; legacy adjust applies whole-period).
+    # trade_mode_source backfill: group where a broker group exists, else self for
+    # anything already classified — the hourly loop re-runs the rules on self rows
+    # and upgrades the ones a rule actually explains within the hour.
+    tables = inspector.get_table_names()
+    if "period_baselines" in tables:
+        cols = {c["name"] for c in inspector.get_columns("period_baselines")}
+        if "flows" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE period_baselines ADD COLUMN flows TEXT"))
+    if "mt5_accounts" in tables:
+        # 同一趟里上面可能刚 ALTER 过 mt5_accounts，inspector 的缓存列表不含新列——
+        # 无妨：这里只问 trade_mode_source 在不在，旧库缓存里没有 → 加；新库有 → 跳。
+        # The inspector may hold a pre-ALTER column list for mt5_accounts; harmless,
+        # we only ask whether trade_mode_source exists (absent on legacy → add).
+        cols = {c["name"] for c in inspector.get_columns("mt5_accounts")}
+        if "trade_mode_source" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE mt5_accounts ADD COLUMN trade_mode_source VARCHAR"))
+                conn.execute(text(
+                    "UPDATE mt5_accounts SET trade_mode_source = 'group'"
+                    " WHERE trade_mode IS NOT NULL AND mt5_group IS NOT NULL AND mt5_group <> ''"
+                ))
+                conn.execute(text(
+                    "UPDATE mt5_accounts SET trade_mode_source = 'self'"
+                    " WHERE trade_mode IS NOT NULL AND trade_mode_source IS NULL"
+                ))
 
     # orders.trade_mode 存量回填：必须排在上面的 mt5_accounts 补列之后——回填
     # 语句读 mt5_accounts.trade_mode，旧库上这一列要等 rev 7 那段 ALTER 跑完才
