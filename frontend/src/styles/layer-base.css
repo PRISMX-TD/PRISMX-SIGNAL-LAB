@@ -1,0 +1,221 @@
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  html {
+    color-scheme: dark;
+    /* 锁死横向滚动，避免移动端页面整体右偏 / clip horizontal scroll to keep mobile pages from shifting right */
+    overflow-x: clip;
+  }
+
+  #root {
+    overflow-x: clip;
+    max-width: 100%;
+  }
+
+  body {
+    @apply antialiased;
+    background: var(--bg);
+    color: var(--text);
+    /* Archivo 打头、Noto Sans SC 承接中文。上一版是 Space Grotesk 打头，而它
+       没有汉字字形——本站默认语言是中文，所有中文实际掉到系统 PingFang/雅黑，
+       与旁边的拉丁字母在字重、字面大小、基线上都对不齐。显式指定 SC 字体后
+       中英两侧字重轴一一对应。
+       Archivo first, Noto Sans SC carrying Chinese. The previous stack led with
+       Space Grotesk, which has no CJK glyphs — and this site defaults to
+       Chinese, so all Chinese fell back to the system PingFang/YaHei and
+       mismatched the adjacent Latin in weight, apparent size and baseline.
+       Declaring the SC face explicitly aligns the two weight axes. */
+    font-family: "Archivo", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 13px;
+    min-height: 100vh;
+    /* 必须用 clip 而不是 hidden：hidden 会让 overflow-y 计算为 auto，把 body 变成
+       滚动容器（window.scrollY 恒为 0，一切依赖 window 滚动的逻辑失效——吸底 CTA、
+       滚动叙事都是受害者）；clip 只裁剪、不产生滚动容器，滚动回到视口。
+       Must be clip, not hidden: hidden computes overflow-y to auto and turns body
+       into the scroll container (window.scrollY stays 0, breaking everything that
+       listens to window scroll — the sticky CTA and scroll-driven reveals both).
+       clip only clips without creating a scroller, so the viewport scrolls again. */
+    overflow-x: clip;
+    /* pan-y：只允许纵向滚动，禁止双指缩放和左右拖动页面。内部横向滚动组件
+       （表格、K 线图工具栏）有各自独立的 overflow-x: auto，不受影响。
+       pan-y: vertical scrolling only. Inner horizontal scrollers (tables, chart
+       toolbars) have their own overflow-x: auto and are unaffected. */
+    touch-action: pan-y;
+    /* none：关掉 iOS 拉到顶/底时那层橡皮筋回弹。PWA 在 standalone 模式下仍会有
+       一个视口级 bounce，不加这个从主屏图标打开后上下拉会露出白底。
+       none: disable iOS rubber-band at scroll edges. Standalone PWA still has
+       viewport-level bounce without this — pulling past the top reveals white. */
+    overscroll-behavior: none;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    /* 关掉长按文字弹出的系统「选择/复制」气泡：PWA 里长按报价、按钮文字被原生
+       选择菜单打断，观感一下就「网页化」了。input/textarea/可编辑区域单独放开。
+       Disable the system Select/Copy callout on long-press: in the PWA it breaks
+       the native-app illusion. Re-enabled on inputs/textareas/editable regions. */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  input, textarea, [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+
+  /* ── 排版比例 / type scale ──
+     标题走 Archivo 的宽度轴（wdth 112–118）+ 重字重，拿到海报式的编辑语气；
+     界面文字留在标准字宽保持中性。这是一支可变字体覆盖两种语气的方式，比
+     再下载一支「显示字体」省一次网络往返。
+     Headlines ride Archivo's width axis (wdth 112–118) at heavy weights for an
+     editorial/poster voice; UI text stays at normal width and reads neutral.
+     One variable family covering both registers costs one fewer font request
+     than adding a separate display face. */
+  .font-display {
+    font-family: "Archivo", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+    font-variation-settings: "wdth" 112;
+    letter-spacing: -0.018em;
+  }
+  /* 超大标题：字宽再放一档，字距收紧——大字号下字距必须负得更多，否则字母
+     之间的空隙会随字号线性放大，读起来是散的。
+     Display-scale headlines: one more width step and tighter tracking. At large
+     sizes tracking must go more negative or the gaps scale linearly with the
+     type and the line reads loose. */
+  .font-display-xl {
+    font-family: "Archivo", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+    font-variation-settings: "wdth" 118;
+    font-weight: 700;
+    letter-spacing: -0.035em;
+    line-height: 0.94;
+  }
+
+  /* 数字等宽 / tabular numbers */
+  .num {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  /* 键盘焦点环全局可见 / visible keyboard focus ring everywhere
+     input / select / textarea 补进来：原来只覆盖 button / a / [tabindex]，
+     而订单页的筛选器用的是裸 <select> 和 <input type=date>，拿不到系统的
+     紫色焦点环，只能吃浏览器默认样式。
+     Form controls added: the Orders filter bar uses bare <select> and
+     <input type="date">, which fell through to the UA default ring. */
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid var(--purple-hi);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* ═════════════ 图标描边 / icon stroke ═════════════
+     实测全站图标用了四种描边：1.4 / 2 / 2.2 / 2.6。12–20px 的图标上，1.4 与
+     2.6 的视觉重量差近一倍——同一排图标里有的发虚有的发实。统一成 1.8。
+
+     只作用在 <svg> 元素上：环形图、仪表盘、迷你折线这些图表的
+     <circle>/<polyline> 各自带 stroke-width 属性，而「直接指定」永远压过
+     「继承」，所以图表描边不受影响，不用写例外。
+     Icons had four stroke weights; unified to 1.8. Applied to <svg> only, so
+     chart primitives with their own stroke-width attribute are untouched. */
+  svg {
+    stroke-width: 1.8;
+  }
+
+  /* ═════════════ 触摸目标 / touch targets ═════════════
+     实测手机视口下几乎每个可点元素都偏小：跟单按钮 60×34、持仓操作 90×30、
+     账号药丸 72×28、页内 Tab 84×32、筛选 67×30、开关 40×23。
+     WCAG 2.2 AA（2.5.8）的门槛是 24×24，这些多数过得去，但全都低于移动端
+     HIG 的 44px。
+
+     做法是盖一层 44px 高的透明伪元素，只扩热区、不改布局也不改 DOM，
+     且**只在纵向扩**——这些控件都是横向排列的，纵向扩不会吃掉邻居的点击。
+     Invisible 44px-tall hit areas, expanded vertically only so neighbours in a
+     row keep their own taps. */
+  @media (hover: none) and (pointer: coarse) {
+    .btn,
+    .chip,
+    .tag,
+    .seg button,
+    .seg-pill button,
+    .filter-cycle,
+    .qt-trade-btn,
+    .mt5-pill,
+    .view-all-btn {
+      position: relative;
+    }
+    .btn::after,
+    .chip::after,
+    .tag::after,
+    .seg button::after,
+    .seg-pill button::after,
+    .filter-cycle::after,
+    .qt-trade-btn::after,
+    .mt5-pill::after,
+    .view-all-btn::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 50%;
+      height: 44px;
+      transform: translateY(-50%);
+      border-radius: inherit;
+    }
+  }
+
+  /* ═════════════ 按下反馈 / press feedback ═════════════
+     全站 42 条 :hover 只配了 16 条 :active。手机上 hover 根本不触发，
+     :active 是用户唯一能拿到的反馈，而最常按的那几个控件一条都没有。
+     On touch hover never fires, so :active is the only feedback there is. */
+  .seg button:active,
+  .seg-pill button:active,
+  .filter-cycle:active,
+  .qt-trade-btn:active,
+  .mt5-pill:active,
+  .view-all-btn:active {
+    transform: scale(0.96);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .seg button:active,
+    .seg-pill button:active,
+    .filter-cycle:active,
+    .qt-trade-btn:active,
+    .mt5-pill:active,
+    .view-all-btn:active {
+      transform: none;
+    }
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full;
+    /* 中性灰而不是紫色渐变：滚动条是系统部件，给它上品牌色只会在每一页
+       边缘制造一条与内容无关的彩色条带。
+       Neutral grey rather than a violet gradient: the scrollbar is chrome, and
+       branding it just paints an irrelevant coloured stripe down every page. */
+    background: rgba(255, 255, 255, 0.14);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.24);
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::selection {
+    background: var(--purple);
+    color: #fff;
+  }
+}

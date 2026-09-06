@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { NumberField } from '../strategies/NumberField'
-import type { IndicatorFlags } from '../../pages/ChartsPage'
+import type { IndicatorFlags } from './chartConfig'
 import {
   COLOR_PRESETS,
   MAX_LINES,

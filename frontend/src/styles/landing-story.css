@@ -1,0 +1,1538 @@
+/* ══════════════════════════════════════════════
+   3D 手机滚动叙事 / phone scrolltelling (landing)
+   ──────────────────────────────────────────────
+   技术路线是 CSS 3D（preserve-3d + 分层机身），不是 WebGL：
+   屏幕里渲染的是真实 DOM 组件——文字像素级锐利、i18n 免费、倒计时等动画
+   是活的。分幕脚本里没有任何一幕需要看到手机背面，为用不到的视角引入
+   three.js（约 600KB，上一轮刚移除）是负收益。
+   The implementation is CSS 3D (preserve-3d + stacked slabs), not WebGL: the
+   screen renders real DOM components, so text stays crisp, i18n is free and
+   the countdown actually ticks. No scene in the storyboard ever shows the
+   phone's back, and re-adding three.js (~600KB, removed last round) for an
+   unused viewing angle would be a net loss.
+
+   两种运行模式，同一份 DOM：
+   · scrub（桌面 ≥1024px 且未开减少动态）：根节点带 .is-scrub，GSAP 接管一切
+     内联样式，本文件里的过渡全部关闭。
+   · steps（移动端 / reduced-motion）：IntersectionObserver 给当前幕加 .on，
+     由下面这些 CSS 过渡完成交叉淡入——没有 pin、没有 scrub、没有倾斜。
+   Two runtime modes over one DOM tree:
+   · scrub (desktop >=1024px, no reduced-motion): root carries .is-scrub, GSAP
+     owns every value inline and the transitions below are disabled.
+   · steps (mobile / reduced-motion): IntersectionObserver toggles .on per
+     scene and these CSS transitions do the crossfades. No pin, no scrub,
+     no tilt.
+   ══════════════════════════════════════════════ */
+.story-section {
+  position: relative;
+  /* 5 幕 × 约一屏多一点的滚动行程。520vh 是节奏参数：每幕拿到约 104vh，
+     短于 90vh 会赶，长于 130vh 会拖。
+     Five scenes at just over one viewport of travel each. 520vh is a pacing
+     constant: each scene gets ~104vh of scroll; under 90vh feels rushed,
+     over 130vh drags. */
+  height: 520vh;
+}
+.story-stage {
+  position: sticky;
+  top: 0;
+  /* 高度用 svh 而不是 dvh。
+     dvh 会随移动浏览器地址栏的收起/展开**连续变化**——而这是个 sticky 满屏
+     舞台，里面的手机层、遮罩、文案面板全是相对它绝对定位的。地址栏一收，
+     舞台高度在滚动途中逐帧改变，三层内容跟着逐帧重排，滚动就是一顿一顿的。
+     svh 取的是「地址栏展开时」的高度，是个**在滚动期间不变**的值，代价是
+     地址栏收起后底部多出约 60px 背景——两边都是近黑，看不出来，比卡顿划算。
+     （dvh 留作回退：不认识 svh 的浏览器仍拿到可用值。）
+     svh, not dvh: dvh changes continuously as the mobile URL bar collapses, and
+     this is a sticky full-screen stage whose phone layer, scrim and copy panel
+     are all positioned against it — so every frame of the bar's collapse
+     reflows three layers mid-scroll. svh is fixed during scroll; the cost is a
+     ~60px strip of background once the bar hides, invisible on a near-black
+     page. dvh stays as the fallback. */
+  height: 100dvh;
+  height: 100svh;
+  overflow: hidden;
+}
+/* IO 哨兵：五段各占叙事区 20% 高度的隐形柱，中线穿越即切幕。
+   IO sentinels: five invisible 20%-tall strips; crossing the midline switches
+   the scene. */
+.story-step {
+  position: absolute;
+  left: 0;
+  width: 1px;
+  height: 20%;
+  pointer-events: none;
+}
+
+/* ── 手机定位与姿态 / phone placement & pose ── */
+.story-phone {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -52%);
+  z-index: 10;
+}
+.dev-scene {
+  perspective: 1500px;
+}
+.dev-pose,
+.dev-tilt,
+.dev-body {
+  transform-style: preserve-3d;
+}
+.dev-pose {
+  will-change: transform;
+}
+/* steps 模式的静态姿态：一个可信的 3/4 侧身，不做任何 scrub。
+   Static pose for steps mode: one believable three-quarter stance, no scrub. */
+.story-root:not(.is-scrub) .dev-pose {
+  transform: rotateY(-16deg) rotateX(5deg);
+}
+
+/* ── 机身：8 层堆叠剪影伪造厚度 / body: 8 stacked silhouettes fake depth ──
+   每层同轮廓、逐层后移 2px、色阶递暗：旋转 ±40° 内侧壁连续可信。这是
+   「不引入 WebGL 的立体感」的全部成本——8 个空 div。
+   Same silhouette per layer, each 2px further back and one step darker: the
+   side wall reads continuous within ±40°. This is the entire cost of depth
+   without WebGL: eight empty divs. */
+.dev-body {
+  position: relative;
+  width: var(--dev-w, clamp(240px, 23vw, 330px));
+  aspect-ratio: 9 / 19.4;
+}
+.dev-slab {
+  position: absolute;
+  inset: 0;
+  border-radius: 16.1% / 7.47%;
+  /* 横向金属渐变：两端亮、中间暗。旋转时露出的层边是被光打亮的铝轨。
+     中间层不描边（1px 边框旋转时会叠出「年轮」）。
+     Horizontal metal gradient, bright at both ends: the exposed layer edges
+     read as lit aluminium rails. No borders on middle slabs (they stack into
+     growth rings when rotated). */
+  background: linear-gradient(90deg, #4a4a55 0%, #1c1c22 3%, #101014 50%, #1c1c22 97%, #4a4a55 100%);
+}
+.dev-slab:nth-child(1) {
+  transform: translateZ(-25.2px);
+  background: #08080b;
+  border: 1px solid #1c1c22;
+}
+.dev-slab:nth-child(2) { transform: translateZ(-22.4px); }
+.dev-slab:nth-child(3) { transform: translateZ(-19.6px); }
+.dev-slab:nth-child(4) { transform: translateZ(-16.8px); }
+.dev-slab:nth-child(5) { transform: translateZ(-14px); }
+.dev-slab:nth-child(6) { transform: translateZ(-11.2px); }
+.dev-slab:nth-child(7) { transform: translateZ(-8.4px); }
+.dev-slab:nth-child(8) { transform: translateZ(-5.6px); }
+.dev-slab:nth-child(9) { transform: translateZ(-2.8px); }
+/* 正面：金属包边 / front face: the metallic rim
+   真实感来自三层：① 沿光源方向的明暗渐变（左上受光）；② 左右两条 1px 镜面
+   棱线（铝边被环境光勾出的亮边，::before/::after）；③ 包边与屏幕之间的一圈
+   纯黑屏框（真机的 bezel，下面 .dev-screen 的 border 承担）。
+   Realism comes from three layers: a light-direction gradient (lit from the
+   upper left); two 1px specular ridge lines where ambient light catches the
+   aluminium edge (::before/::after); and the pure-black bezel ring between rim
+   and panel (carried by .dev-screen's border below). */
+.dev-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 16.1% / 7.47%;
+  transform: translateZ(0.5px);
+  background:
+    linear-gradient(155deg, #3a3a44 0%, #17171c 34%, #101013 62%, #23232b 100%);
+  border: 1px solid #46464f;
+}
+.dev-face::before,
+.dev-face::after {
+  content: '';
+  position: absolute;
+  top: 6%;
+  bottom: 6%;
+  width: 1px;
+  pointer-events: none;
+}
+.dev-face::before {
+  left: 0.5px;
+  background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.5) 18%, rgba(255, 255, 255, 0.14) 55%, transparent);
+}
+.dev-face::after {
+  right: 0.5px;
+  background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.22) 30%, transparent 80%);
+}
+.dev-facelight {
+  position: absolute;
+  inset: 0;
+  border-radius: 16.1% / 7.47%;
+  overflow: hidden;
+  transform: translateZ(0.6px);
+  pointer-events: none;
+}
+.dev-facelight i {
+  position: absolute;
+  top: -10%;
+  bottom: -10%;
+  left: -30%;
+  width: 160%;
+  background: linear-gradient(100deg, transparent 38%, rgba(255, 255, 255, 0.07) 50%, transparent 62%);
+  /* steps 模式的静态落位；scrub 模式由 GSAP 内联覆盖。
+     Static resting position for steps mode; GSAP overrides inline in scrub. */
+  transform: translateX(-8%);
+}
+
+/* 侧键：右缘电源键、左缘两枚音量键。挂在机身中层深度（translateZ 负半程），
+   机身左右转动时从边缘探出——这是「一眼看出是真手机」性价比最高的细节。
+   Side keys: power on the right edge, two volume keys on the left, seated at
+   mid-body depth so they emerge from the edge as the body turns. The single
+   highest-value realism detail per line of CSS. */
+.dev-key {
+  position: absolute;
+  width: 1.9%;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #3c3c46, #1a1a21 55%, #2a2a33);
+  transform: translateZ(-12px);
+}
+.dev-key.power { right: -1.2%; top: 26%; height: 9%; }
+.dev-key.vol-a { left: -1.2%; top: 20%; height: 6%; }
+.dev-key.vol-b { left: -1.2%; top: 27.5%; height: 6%; }
+/* 屏幕：真实 DOM 的容器。container-type 让屏幕内文字随机身宽度缩放
+   （cqw 单位），移动端的小手机与桌面大手机共用一份屏幕组件。
+   The screen hosts real DOM. container-type lets in-screen type scale with
+   the body width (cqw units), so the small mobile phone and the large desktop
+   phone share one set of screen components. */
+.dev-screen {
+  position: absolute;
+  inset: 1.6% 3%;
+  border-radius: 13.9% / 6.28%;
+  background: #060608;
+  overflow: hidden;
+  transform: translateZ(1px);
+  container-type: inline-size;
+  /* bezel：包边与发光面板之间的纯黑圈。真机上这一圈永远存在，缺了它屏幕
+     会显得「贴」在机身上而不是嵌进去。内圈再补一线 1px 微光：发光面板与
+     bezel 的交界在真机上永远有一线亮。
+     The bezel: the pure-black ring between rim and lit panel; plus a 1px inner
+     rim of light where the lit panel meets it, always visible on real hardware. */
+  border: 2px solid #000;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.045);
+}
+.dev-island {
+  position: absolute;
+  top: 2%;
+  left: 50%;
+  transform: translateX(-50%) translateZ(2px);
+  width: 25%;
+  height: 2.4%;
+  border-radius: 999px;
+  background: #000;
+  border: 1px solid #17171c;
+  z-index: 40;
+}
+.dev-island::after {
+  content: '';
+  position: absolute;
+  right: 8%;
+  top: 50%;
+  width: 22%;
+  aspect-ratio: 1;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 32%, #3d4368 0%, #14162a 38%, #05050a 72%);
+}
+/* 反光层：这是反射不是发光——白色渐变盖在屏幕上方，转场时 GSAP 把透明度
+   抬一下再放下，模拟机身转动时扫过的环境光。
+   The sheen is a reflection, not an emission: a white gradient over the
+   screen whose opacity GSAP lifts and drops at transitions, reading as
+   ambient light sweeping across a turning body. */
+.dev-sheen {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  border-radius: 13.9% / 6.28%;
+  background: linear-gradient(115deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.04) 32%, transparent 55%);
+  opacity: 0.06;
+  transform: translateZ(1.5px);
+}
+/* 地影：中性黑椭圆，表达高度。/ ground shadow: neutral, elevation only. */
+/* 地影两层：贴地一层小而深（接触阴影），外围一层大而淡（环境遮蔽）。
+   单层椭圆影是「浮起来的贴纸」，双层才是「悬在空间里的物体」。
+   Two shadow layers: small and deep at contact, wide and faint around it
+   (ambient occlusion). One ellipse reads as a floating sticker; two read as an
+   object suspended in space. */
+.dev-ground {
+  position: absolute;
+  left: 50%;
+  bottom: -8.5%;
+  width: 96%;
+  height: 5.5%;
+  transform: translateX(-50%) translateZ(-27px);
+  border-radius: 50%;
+  background:
+    radial-gradient(32% 46% at 50% 50%, rgba(0, 0, 0, 0.72), transparent 72%),
+    radial-gradient(50% 50% at 50% 50%, rgba(0, 0, 0, 0.38), transparent 74%);
+  filter: blur(8px);
+}
+
+/* ── 屏内 App 骨架 / in-screen app chrome ──
+   顶部品牌条 + 底部五格 Tab 栏，逐幕高亮对应 Tab。这两条是「贴近真实画面」的
+   骨架：登录后的产品正是 顶栏 + 内容 + 底部 Tab 的结构（见 Layout.tsx 与
+   .lg-tabbar），手机屏幕里复刻同一骨架，观感上就是那个 App。
+   Top brand strip + five-tab bottom bar, with the active tab following the
+   scene. These two strips are the skeleton of looking-like-the-real-app: the
+   logged-in product IS header + content + bottom tabs (see Layout.tsx and
+   .lg-tabbar), so the phone reproduces that exact skeleton. */
+.pc-head {
+  position: absolute;
+  /* 13.5cqw 是「让开灵动岛」的下界：岛高 3.8% 屏高、顶边距上沿 1.3%，换算到
+     以屏宽为基准的 cqw 后，岛的下沿落在约 11cqw。此前这里是 6.5cqw，正好被岛
+     压住品牌名（截图里「Signal Lab」被切一半）。
+     13.5cqw is the clearance floor for the Dynamic Island: at 3.8% of screen
+     height starting 1.3% down, its lower edge converts to roughly 11cqw against
+     the width-based cqw unit. This was 6.5cqw, which put the brand name directly
+     under the island (the screenshot shows "Signal Lab" sliced). */
+  top: 13.5cqw;
+  left: 5cqw;
+  right: 5cqw;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 2.2cqw;
+  padding-bottom: 3cqw;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+.pc-head img {
+  width: 6.5cqw;
+  height: 6.5cqw;
+  object-fit: contain;
+}
+.pc-head b {
+  font-size: 3.9cqw;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.pc-head .dot {
+  margin-left: auto;
+  width: 1.8cqw;
+  height: 1.8cqw;
+  border-radius: 999px;
+  background: var(--up);
+}
+/* 底部 Tab 栏：胶囊形。
+   这里绕了一圈才找到对的形状，值得记下来。先是四角统一 5cqw，与屏幕底部圆角
+   不共圆心，缝隙在直边处窄、拐角处张开；改成「下角取同心值、上角受 CSS 规范
+   限制只能很小」之后，外框成了躺倒的「D」，内部紫块更是四个角里只有一个特别
+   圆——几何上正确，视觉上是歪的。
+
+   根因是同心公式在**矮元素**上会退化：同心只约束单个角的半径，不保证四角彼此
+   协调，元素越矮，那个被放大的角占高度的比例越离谱。
+
+   胶囊一次性解决全部矛盾：
+   · 半径 = 高 / 2，四角天然对称，不存在「一个角特别圆」；
+   · 内层胶囊的高 = 外层高 − 2 × 内边距，于是内半径 = 外半径 − 内边距，
+     **同心关系自动成立**，不必再为首尾 Tab 单独写角半径；
+   · 把栏高定到 84px，则 84 / 2 = 42px 恰好等于「屏幕圆角 53 − 内缩 11」，
+     与屏幕拐角也共圆心。
+   84px 在 822px 的屏幕上占 10.2%，与真机底栏（约 10%）一致，不是为了凑数。
+
+   The bottom tab bar as a capsule. This took a couple of wrong turns worth
+   recording. Four uniform 5cqw corners were not concentric with the screen, so
+   the gap stayed narrow along the straight edges and flared at the corners.
+   Switching to a concentric bottom radius (with the top forced small by the CSS
+   radius-scaling rule) turned the bar into a sideways "D", and left the inner
+   violet block with one corner far rounder than its other three - geometrically
+   right, visually lopsided.
+
+   The root cause: the concentric formula constrains one corner at a time and
+   says nothing about the four agreeing with each other. The shorter the element,
+   the more absurd the enlarged corner's share of its height becomes.
+
+   A capsule dissolves every one of these at once: radius = height / 2 makes all
+   four corners equal by construction; an inner capsule's height is the outer
+   height minus twice the padding, so inner radius = outer radius - padding and
+   concentricity holds automatically with no per-corner rules for the first and
+   last tabs; and fixing the bar at 84px tall makes 84 / 2 = 42px exactly equal
+   to the screen radius (53) minus the inset (11), so it is concentric with the
+   screen corner too. 84px is 10.2% of the 822px screen, matching a real tab bar
+   at roughly 10% - the number was not chosen to make the maths work. */
+.pc-tabs {
+  position: absolute;
+  left: 3cqw;
+  right: 3cqw;
+  bottom: 3cqw;
+  z-index: 10;
+  display: flex;
+  gap: 1cqw;
+  padding: 2.4cqw;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(16, 16, 18, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+/* 单个 Tab 也是胶囊。加高到约 64px 是为了让外框落到 84px（见上），
+   同时图标与字号一并放大，避免「高度撑大了但内容还是原来那么小」的空洞感。
+   Each tab is a capsule too. The height rises to about 64px so the bar lands at
+   84px (see above), with the icon and label scaled up alongside it so the extra
+   height does not read as hollow padding around unchanged content. */
+.pc-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.1cqw;
+  padding: 4cqw 0 3.6cqw;
+  border-radius: 999px;
+  color: var(--text-3);
+  font-size: 2.9cqw;
+  font-weight: 600;
+  line-height: 1;
+  transition: background-color 0.35s var(--ease-out), color 0.35s var(--ease-out);
+}
+.pc-tab svg {
+  width: 5.4cqw;
+  height: 5.4cqw;
+}
+.pc-tab.on {
+  color: #fff;
+  background: var(--purple);
+}
+
+/* ── 屏幕内容（五幕）/ screens ── */
+.scr {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  /* 上让品牌条（13.5 起 + 高约 9.5 = 23，留 3 的呼吸），下让 Tab 栏（~17）。
+     左右由 7cqw 收到 5cqw：380px 的屏幕 DOM 上 7cqw ≈ 27pt，比 iOS 常规的
+     16-20pt 边距宽出一截，屏幕本来就窄，这几 pt 很值钱。
+     Top clears the brand strip (starts at 13.5, about 9.5 tall, plus 3 of
+     breathing room); bottom clears the tab bar. Horizontal padding drops from
+     7cqw to 5cqw: on the 380px screen DOM 7cqw is about 27pt against iOS's usual
+     16-20pt, and on a screen this narrow those points are worth reclaiming. */
+  padding: 26cqw 5cqw 28cqw;
+  opacity: 0;
+  visibility: hidden;
+}
+.story-root:not(.is-scrub) .scr {
+  transform: translateY(10px);
+  transition:
+    opacity 0.5s var(--ease-out),
+    transform 0.5s var(--ease-out),
+    visibility 0s linear 0.5s;
+}
+/* 可见态是无条件规则：scrub 能力的浏览器在 GSAP 加载完成之前也必须能看到
+   首幕（预渲染 HTML 与 LCP 都依赖它）；GSAP 建成后以内联样式覆盖类规则。
+   The .on visible state is unconditional: scrub-capable browsers must show
+   scene 0 before GSAP finishes loading (prerendered HTML and LCP both depend
+   on it); once built, GSAP overrides the class rule with inline styles. */
+.scr.on {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition-delay: 0s;
+}
+
+/* steps 模式下，滑块与止损线在该幕激活时用 CSS 过渡走到终点——scrub 模式里
+   这两个值由时间线逐帧驱动。
+   In steps mode the order knob and the SL line transition to their end state
+   when the scene activates; in scrub mode the timeline drives them per frame. */
+.story-root:not(.is-scrub) .js-knob {
+  transition: transform 1.1s var(--ease-in-out) 0.35s;
+}
+/* 行程用 cqw 而不是写死的 150px。轨道宽 = 100cqw 减去 .scr 左右各 5cqw 的内边距
+   = 90cqw；滑块宽 11cqw、左右各留 1.5cqw，故行程 = 90 − 11 − 3 = 76cqw。
+   此前 --knob-travel 从未被定义，一直在吃 150px 的兜底值——桌面上轨道约 250px
+   时勉强合适，全出血后轨道有 351px，滑块只滑到一半就停了。用 cqw 之后它随容器
+   自动缩放，两端都不需要再调。
+   Travel in cqw rather than a hardcoded 150px. The track is 100cqw minus .scr's
+   5cqw of padding per side = 90cqw; the knob is 11cqw with 1.5cqw of margin each
+   side, so the travel is 90 - 11 - 3 = 76cqw. --knob-travel was never actually
+   defined, so the 150px fallback was always in play - passable on a ~250px desktop
+   track, but the full-bleed mobile track is 351px and the knob stopped halfway.
+   In cqw it scales with the container and needs no per-breakpoint tuning. */
+.story-root:not(.is-scrub) .scr.on .js-knob {
+  /* 减 2px 是轨道左右两条 1px 边框：cqw 按外宽算，而滑块的 left 是相对内边距框
+     定位的，不扣掉边框会让终点的右间隙比起点的左间隙少 2px（实测 4.85 vs 6.85）。
+     The 2px subtracts the track's two 1px borders: cqw resolves against the outer
+     width while the knob's left is positioned against the padding box, so without
+     it the right gap at the end lands 2px short of the left gap at the start
+     (measured 4.85 against 6.85). */
+  transform: translateX(calc(var(--knob-travel, 76cqw) - 2px));
+}
+/* 填充层与滑块同步推进 / the fill advances in step with the knob */
+.story-root:not(.is-scrub) .js-fill {
+  transition: transform 1.1s var(--ease-in-out) 0.35s;
+}
+.story-root:not(.is-scrub) .scr.on .js-fill {
+  transform: scaleX(1);
+}
+.story-root:not(.is-scrub) .js-filled {
+  transition: opacity 0.4s var(--ease-out) 1.5s;
+  opacity: 0;
+}
+.story-root:not(.is-scrub) .scr.on .js-filled {
+  opacity: 1;
+}
+.story-root:not(.is-scrub) .js-sl {
+  transition: transform 1.6s var(--ease-in-out) 0.4s;
+}
+.story-root:not(.is-scrub) .scr.on .js-sl {
+  transform: translateY(-26px);
+}
+.story-root:not(.is-scrub) .js-be {
+  transition: opacity 0.4s var(--ease-out) 1.2s;
+  opacity: 0;
+}
+.story-root:not(.is-scrub) .scr.on .js-be {
+  opacity: 1;
+}
+
+/* ── 文字面板 / text panels ── */
+.story-panel {
+  position: absolute;
+  z-index: 20;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+/* 只有含按钮的面板需要接住点击；visibility 参与淡入淡出，隐藏时不拦截。
+   Only panels with buttons take pointer events; visibility being part of the
+   fade means hidden panels cannot intercept clicks. */
+.story-panel.pe {
+  pointer-events: auto;
+}
+.story-root:not(.is-scrub) .story-panel {
+  transform: translateY(14px);
+  transition:
+    opacity 0.5s var(--ease-out),
+    transform 0.5s var(--ease-out),
+    visibility 0s linear 0.5s;
+}
+/* 选择器必须与基础规则同权重，否则这条 transform: none 永远不生效。
+   基础规则是 .story-root:not(.is-scrub) .story-panel —— :not() 的权重取其参数，
+   所以它是三个类，而 .story-panel.on 只有两个，一直输。实测结果是移动端的文案
+   面板始终停在 translateY(14px)：进场动画从来没有跑完过，只是位移小到没人发现。
+   这一版把面板改成绝对定位压在遮罩上之后，那 14px 直接把它推到合规声明上，才
+   暴露出来。
+   The selector has to match the base rule's specificity or this transform: none
+   never applies. The base is .story-root:not(.is-scrub) .story-panel, and :not()
+   contributes its argument's specificity, making it three classes against this
+   rule's two, so it always lost. Measured, the mobile copy panel sat permanently at
+   translateY(14px): the enter animation never completed, and the offset was small
+   enough that nobody noticed. It surfaced only once this pass made the panel
+   absolute over the scrim, where those 14px pushed it onto the disclaimer. */
+.story-panel.on,
+.story-root:not(.is-scrub) .story-panel.on {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition-delay: 0s;
+}
+/* scrub 模式：GSAP 拥有一切，CSS 过渡必须让路，否则两套系统抢同一属性。
+   Scrub mode: GSAP owns everything; CSS transitions must yield or the two
+   systems fight over the same properties. */
+.is-scrub .scr,
+.is-scrub .story-panel,
+.is-scrub .js-knob,
+.is-scrub .js-fill,
+.is-scrub .js-filled,
+.is-scrub .js-sl,
+.is-scrub .js-be {
+  transition: none;
+}
+
+@media (min-width: 1024px) {
+  /* 内容框上限 1440：超宽屏不再把两栏越推越开。
+     7vw 这类纯百分比在 1920 上会把手机推到 +365px（19vw），而文案栏封顶 480
+     不动，空隙实测涨到 557px / 29%——比原来的问题还大。改成先取一个不超过
+     1440 的内容框，再在框内按比例排，于是 ≥1440 的屏一律按 1440 的构图渲染。
+     手机那一侧的同款上限在 PhoneStory 里（xPx 用 min(stageWidth, 1440)）。
+     A 1440 content frame: pure viewport percentages push the two columns further
+     apart the wider the screen gets — measured 557px of void at 1920. Above 1440
+     everything composes as if the viewport were 1440. */
+  .panel-l {
+    left: calc((100vw - min(100vw, 1440px)) / 2 + 0.07 * min(100vw, 1440px));
+    top: 50%;
+    max-width: 26rem;
+  }
+  .panel-r {
+    right: calc((100vw - min(100vw, 1440px)) / 2 + 0.07 * min(100vw, 1440px));
+    top: 50%;
+    max-width: 26rem;
+  }
+
+  .panel-l > .panel-inner,
+  .panel-r > .panel-inner { transform: translateY(-50%); }
+}
+
+/* ── 幕计数刻度 / scene ticks ── */
+.story-ticks {
+  position: absolute;
+  right: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 20;
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+}
+@media (min-width: 1024px) {
+  .story-ticks {
+    display: flex;
+  }
+}
+.js-tick {
+  height: 20px;
+  width: 3px;
+  border-radius: 999px;
+}
+
+/* ══════════════════════════════════════════════
+   真机（< 1024px）：去掉手机外壳，屏幕直接当卡片用
+   ──────────────────────────────────────────────
+   用户手里拿着的就是一台手机，画面里再画一台是冗余的——而代价极其具体：
+   外壳把 62% 的宽度让给了机身边框与左右留白，屏幕只剩 38.2% 屏宽（390px 机上
+   实测 149px）。屏内文字用 cqw 定尺（按 380px 宽的屏幕标定），容器缩到 149px
+   后实际渲染成：卡片标题 7.1px、品种代码 6.6px、入场价 6.3px、Tab 标签 3.9px、
+   tile 小标 3.4px。iOS 人机界面指南的正文下限是 11pt——这些数字全线不可读，
+   「展示产品真实界面」的前提在真机上直接失效。
+
+   而且这不是「把手机放大」能解决的：外壳高宽比 2.16，要让文字可读需要约 92vw
+   宽，高度就到 750px，占满 89% 屏高，文字区一点不剩。外壳必须去掉。
+
+   去掉之后屏幕铺到 92vw（约 359px），与 cqw 的 380px 标定基准只差 6%，屏内字号
+   自动回到接近真实 App 的大小（卡片标题 16px、入场价 12px）。
+
+   同时布局从「绝对定位互相避让」改成两行栅格：第一行是画面、第二行是文字。
+   绝对定位在不同机型的屏高下会算错避让距离（iPhone SE 的 667px 与 Pro Max 的
+   932px 差了 40%），栅格让浏览器自己分配，任何屏高都不会重叠。五个文字面板全部
+   落在第二行同一格里，天然叠放，交叉淡入的逻辑不变。
+
+   Real devices (< 1024px): drop the phone shell and use the screen as a card.
+   The user is already holding a phone, so drawing another one is redundant - and
+   the cost is concrete: the shell gave 62% of the width to body, bezel and
+   margins, leaving the screen at 38.2% of viewport width (measured 149px on a
+   390px device). In-screen type is sized in cqw calibrated against a 380px-wide
+   screen, so at 149px it rendered at 7.1px for card titles, 6.6px for symbols,
+   6.3px for prices, 3.9px for tab labels and 3.4px for tile captions. Apple's HIG
+   puts the floor at 11pt; every one of those is unreadable, which voids the whole
+   premise of showing the real product UI.
+
+   Enlarging the phone cannot fix it: at an aspect of 2.16, a legible width of
+   about 92vw makes it 750px tall, filling 89% of the viewport with nothing left
+   for text. The shell has to go.
+
+   Without it the screen spans 92vw (about 359px), within 6% of the 380px cqw
+   basis, so in-screen sizes land back near the real app (16px card titles, 12px
+   prices).
+
+   The layout also moves from absolute positioning to a two-row grid: image on
+   top, text below. Absolute offsets mis-compute the clearance across device
+   heights (an iPhone SE's 667px and a Pro Max's 932px differ by 40%), while the
+   grid lets the browser allocate and nothing can overlap at any height. All five
+   text panels share the second row's single cell, so they still stack and
+   cross-fade exactly as before.
+   ══════════════════════════════════════════════ */
+@media (max-width: 1023px) {
+  /* 滚动行程 520vh → 320vh。
+     440vh 分给 5 幕是每幕 88vh——也就是**每换一幕要划将近一整屏**，而每一幕
+     真正要读的只有一句标题加两行正文。滚动到一半时画面已经切完、手指还在划，
+     那段空转就是「怪」的来源：行程与内容量不匹配，不是动画本身的问题。
+     320vh → 每幕 64vh，约三分之二屏换一幕，跟读完那点文字的时间对得上。
+     桌面保持 520vh：鼠标滚轮一格的位移比手指小得多，同样的 vh 手感更轻。
+     440vh over five scenes means nearly a full screen of dragging per scene,
+     while each scene only carries a headline and two lines. The scene has
+     already changed while the finger is still moving — that idle stretch is
+     what reads as "off". 320vh puts a scene change at about two thirds of a
+     screen, matching how long the copy takes to read. */
+  /* 行程高度移到文件末尾的「移动端叙事」块统一管理（320svh，与判定幕同拍）。
+     Travel height now lives in the end-of-file mobile narrative block. */
+  /* ══ 移动端首屏：产品先行 ══
+     原来是三行栅格（画面 / 刻度 / 文字），画面只占上面一格，于是首屏从上到下是
+     导航 → 截图 → 声明 → 刻度 → 标题，标题落在 871px 屏幕的 68% 位置。访客
+     落地看到的第一样东西是一张**没有任何铺垫的产品截图**：他还不知道这是什么，
+     就先看到了 XAUUSD 和一串价格。桌面端不存在这个问题，因为手机和标题是并排的，
+     一眼同时收到；竖排之后变成先后关系，而先出现的是错的那个。
+     现在画面铺满整个舞台，文字绝对定位压在下方的实色遮罩上。层序固定：
+     画面 z1 → 遮罩 z2 → 文字 z3，五幕共用同一套布局，滚动中不会发生重排。
+     Mobile opening, product first. The stage used to be a three-row grid with the
+     visual confined to the top cell, so the first screen read nav, screenshot,
+     disclaimer, ticks, headline, putting the headline 68% of the way down an
+     871px screen. The first thing a visitor saw was an unframed product
+     screenshot: XAUUSD and a row of prices before they knew what this was. Desktop
+     never had the problem because the phone and the headline sit side by side and
+     arrive together; stacking them makes it sequential, and the wrong one came
+     first. The visual now fills the stage with the type absolutely positioned over
+     a scrim at the bottom. The layer order is fixed at visual, scrim, type, and all
+     five scenes share one layout so nothing reflows mid-scroll. */
+  .story-stage {
+    display: block;
+    /* 上留导航（64px）与刘海，下留吸底 CTA（约 68px）与安全区。
+       左右不再留白：画面改为全出血，横向留白下放给刻度条与文字面板各自承担，
+       让 App 界面从边到边铺满——移动端的「沉浸感」几乎全部来自这一点。
+       Top clears the nav and the notch; bottom clears the sticky CTA and the safe
+       area. No horizontal padding any more: the visual goes full-bleed and the
+       side margins move down into the ticks and the text panel individually, so
+       the app interface runs edge to edge - which is where nearly all of the
+       immersion on mobile comes from. */
+    padding: 0;
+  }
+
+  /* 吸底 CTA 与安全区的净空，下面几层共用 / clearance shared by the layers below */
+  .story-stage {
+    --m-bot: calc(env(safe-area-inset-bottom) + 76px);
+  }
+  .story-phone {
+    position: absolute;
+    inset: calc(64px + env(safe-area-inset-top)) 0 var(--m-bot) 0;
+    transform: none;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    z-index: 1;
+  }
+  /* 高度靠 flex 拉伸逐层传递，不用 height: 100%。
+     百分比高度要求父级有"确定的"高度，而 .dev-scene 是个没有显式高度的 flex
+     item，百分比无法解析、退化成 auto——实测屏幕因此溢出父容器 114px，压在了
+     下方的示例声明上。改成每层都是 flex 容器后，子元素靠 align-items: stretch
+     自动撑满交叉轴，链条不会断。
+     Heights propagate by flex stretch instead of height: 100%. A percentage
+     height needs a definite height on the parent, and .dev-scene is a flex item
+     with no explicit height, so the percentage failed to resolve and fell back to
+     auto - measured, the screen overflowed its parent by 114px and covered the
+     sample-data caption below it. Making every level a flex container lets
+     align-items: stretch fill the cross axis so the chain cannot break. */
+  .dev-scene {
+    flex: 1 1 auto;
+    min-height: 0;
+    perspective: none;
+    display: flex;
+  }
+  .dev-pose,
+  .dev-tilt,
+  .dev-body {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+  }
+  /* 卡片是平的，不再做 3/4 侧身——特意与基础层同样的选择器权重，靠后来居上
+     覆盖。/ The card is flat, no three-quarter stance; the selector deliberately
+     matches the base rule's specificity and wins by source order. */
+  .story-root:not(.is-scrub) .dev-pose {
+    transform: none;
+  }
+  .dev-body {
+    width: auto;
+    aspect-ratio: auto;
+  }
+  .dev-slab,
+  .dev-face,
+  .dev-facelight,
+  .dev-key,
+  .dev-island,
+  .dev-ground,
+  .dev-sheen {
+    display: none;
+  }
+  /* relative 而不是 static：屏内五幕是 position: absolute; inset: 0，需要它
+     继续充当定位祖先，同时 overflow 与圆角才能把内容裁在卡片里。
+     relative rather than static: the five scenes inside are absolutely inset to
+     0 and need this to stay their containing block, which also keeps overflow
+     and the radius clipping content to the card. */
+  /* 全出血：只保留上下两条发丝线界定范围，左右到边、圆角归零。
+     带边框的圆角卡片读起来是「一张贴在页面上的截图」；铺到边之后读起来是
+     「你正在用的界面」。
+     Full bleed: only a hairline top and bottom delimits it, sides run to the
+     edge and the radius goes to zero. A bordered rounded card reads as a
+     screenshot pasted onto the page; edge to edge reads as the interface you are
+     using. */
+  .dev-screen {
+    position: relative;
+    inset: auto;
+    flex: 1 1 auto;
+    min-width: 0;
+    border: 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    box-shadow: none;
+  }
+  /* 声明与刻度条要各自补回横向留白（画面已经没有了）
+     The caption and ticks restore their own side margins now the visual has none */
+  .story-phone > p {
+    margin-top: 8px;
+    padding: 0 5vw;
+  }
+  /* 屏内的 App 骨架（品牌条 + 底部 Tab 栏）在真机上全部去掉。
+     它们本来是为「这是一台手机里的 App」服务的，而手机外壳已经不存在了：
+     页面顶部已有一条真实的站点导航（Signal Lab / 语言 / 免费注册），卡片里
+     再放一条应用头部就是两层重复的头；底部 Tab 栏更是直接压住内容——实测它
+     连同上下让位一共吃掉 147px，而卡片内容区总共才 280px，两张信号卡根本装不下。
+     去掉之后内容区从 280px 涨到约 400px，信号卡终于完整可见。
+     The in-screen app chrome (brand strip and bottom tab bar) is removed entirely
+     on real devices. Both existed to say "this is an app inside a phone", and the
+     phone is gone: the page already carries a real site header above (Signal Lab,
+     language, register), so a second header inside the card is simply two stacked
+     headers, and the tab bar actively covered content - measured, it and its
+     clearance consumed 147px out of a 280px content area, which is why the second
+     signal card did not fit. Without them the content area grows to about 400px
+     and the cards are finally whole. */
+  .pc-head,
+  .pc-tabs {
+    display: none;
+  }
+  .scr {
+    padding: 4.5cqw 5cqw 4.5cqw;
+  }
+
+  /* 首幕是「今日信号」列表，两张卡的总高本就超过画面区（实测需 453px、可用
+     395px）。与其把内边距调到刚好卡在某一种屏高上——iPhone SE 的 667px 与
+     Pro Max 的 932px 差 40%，任何定死的数值都只在一种机型上成立——不如让裁切
+     本身成为有意的设计：底部加一道渐隐，读起来就是真实 App 里「列表还有下文」
+     的折线，而不是「内容被切了」。这个做法在任何屏高上都成立。
+     只作用于首幕：其余四幕的内容都装得下，给它们加渐隐反而会压暗合法的收尾
+     文字。
+     Scene 0 is the signal list, and two cards inherently exceed the visual area
+     (453px needed against 395px available). Rather than tuning padding to fit one
+     particular viewport height - an iPhone SE's 667px and a Pro Max's 932px differ
+     by 40%, so any fixed number holds on exactly one device - the crop itself
+     becomes deliberate: a fade at the bottom reads as the fold of a real app list
+     with more below, not as content being severed. That holds at any height.
+     Scoped to scene 0 only: the other four fit, and a fade there would merely dim
+     their legitimate closing lines. */
+  /* ══ 第一幕：一张卡，放大 ══
+     原来两张卡加一个列表头，尺寸接近、明度接近，谁也不是主角——「单调」的直接
+     来源。现在只留一张：三个数字（入场/止损/止盈）正是产品的全部主张，放大到
+     它们成为整屏的焦点。
+     其余四幕不动：它们是演示，本来就该是完整界面。
+     One card, enlarged. Two cards plus a list header meant three similar blocks at
+     similar value with nothing dominating, which is where the flatness came from.
+     Only one remains, and the three numbers that are the product's entire claim
+     are enlarged until they are the focal point of the screen. The other four
+     scenes are untouched: they are demonstrations and should stay whole. */
+  /* 其余四幕约束回上半区。画面从 464px 拉到 729px 之后，那些贴容器底对齐的
+     元素（「确认下单」「已成交」「判定规则公开」）跟着掉了下去，实测落在遮罩
+     以下 335-349px，被文字整块盖住。约束成 50% 之后它们回到 y=428，刚好在
+     遮罩顶（436）之上。
+     边框由 .dev-screen 承担、不随之变化，所以卡片的外框在五幕之间是稳定的，
+     只有内容的可用高度变了。
+     The other four scenes are constrained back to the upper half. When the visual
+     grew from 464px to 729px, the elements anchored to the container's bottom
+     (the order confirmation, the fill notice, the rules line) fell with it and
+     measured 335 to 349px below the scrim, fully covered by the type. Held to 50%
+     they return to y=428, just above the scrim top at 436. The border belongs to
+     .dev-screen and does not move, so the card's frame stays fixed across all five
+     scenes and only the content's available height changes. */
+  .scr:not([data-scr='0']) {
+    bottom: 50%;
+  }
+
+  [data-scr='0'] .sig-list > *:nth-child(2) {
+    display: none;
+  }
+  [data-scr='0'] {
+    display: flex;
+    flex-direction: column;
+    /* 顶部对齐而不是居中：居中要靠一个巨大的底部内边距去把卡片顶上来，那个
+       数值随屏高变化，实测卡片下沿仍探进遮罩 100px（遮罩顶 383、卡片底 483），
+       下缘被压掉约五成不透明度，读起来像被裁。顶部对齐后落点只由一个内边距
+       决定，任何屏高都成立。
+       Top-aligned rather than centred: centring needs a huge bottom padding to lift
+       the card, and that value shifts with viewport height. Measured, the card's
+       lower edge still reached 100px into the scrim (scrim top 383 against a card
+       bottom of 483) and lost about half its opacity there, reading as cropped.
+       Aligned to the top, the position depends on one padding and holds at any
+       height. */
+    padding: 16cqw 5cqw 0;
+  }
+  [data-scr='0'] .sig-card {
+    padding: 5.4cqw;
+    border-radius: 4.4cqw;
+  }
+  [data-scr='0'] .sig-sym {
+    font-size: 6.4cqw;
+  }
+  [data-scr='0'] .sig-rr {
+    font-size: 6.4cqw;
+  }
+  [data-scr='0'] .sig-tiles {
+    margin-top: 4.4cqw;
+    gap: 2.4cqw;
+  }
+  [data-scr='0'] .sig-key {
+    font-size: 3.4cqw;
+  }
+  [data-scr='0'] .sig-val {
+    font-size: 5.4cqw;
+  }
+  /* 只剩一张卡就装得下了，「列表还有下文」的渐隐失去依据，留着只会读成截断。
+     With a single card everything fits, so the fade that stood for "more below"
+     no longer refers to anything and would only read as truncation. */
+  [data-scr='0']::after {
+    display: none;
+  }
+
+  /* 幕计数：横跨全宽的分段进度条，占栅格第二行。
+     Scene ticks: a full-width segmented progress bar occupying the second row. */
+  /* 刻度在移动端也保持**竖排**（与桌面一致），只是挪到右缘。
+     上一版把它改成横跨全宽的分段进度条——而「一排分段 + 当前段高亮」正是
+     轮播 / 左右翻页的通用语汇，放在一个纵向滚动的叙事里，等于在告诉用户
+     「向右滑」。方向读错，比没有指示更糟。
+     竖排 + 贴右缘则是纵向进度的常规写法，和实际的交互方向对得上。
+     Kept vertical on mobile too. A full-width row of segments with one
+     highlighted is the vocabulary of a horizontal pager, so in a vertically
+     scrolled story it actively points the wrong way — worse than no indicator.
+     A vertical stack at the right edge matches the real interaction. */
+  /* ⚠ .story-ticks 是叙事区（.story-stage）与判定幕（.mkt-stage）**共用**的类。
+     上一版只给 .story-stage 写了右缘绝对定位，判定幕于是拿到下面这条基础规则
+     ——静态、栅格第二行、竖排——结果刻度贴死在屏幕最左边还被裁掉。
+     这个坑文件里早有一条注释警告过（见下方「共用类」那段），我又踩了一次。
+     所以两个舞台一起写，样式只有一份。
+     .story-ticks is SHARED by the story section and the verdict act; scoping the
+     new positioning to .story-stage alone left the verdict act on the base rule
+     and pinned its ticks to the far left edge. Both stages are handled together
+     so there is only one source of truth. */
+  .story-ticks {
+    position: static;
+    grid-area: 2 / 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    transform: none;
+    padding: 0;
+  }
+  .story-stage .story-ticks,
+  .mkt-stage .story-ticks {
+    position: absolute;
+    left: auto;
+    /* 12px 而不是 10：刻度压在全出血的界面上，贴太近会读成「被裁了一半」。
+       12px rather than 10 — the ticks sit over a full-bleed screen, and closer
+       than that reads as clipped rather than as an edge indicator. */
+    right: 12px;
+    top: 50%;
+    bottom: auto;
+    transform: translateY(-50%);
+    z-index: 3;
+    transition: opacity 0.35s var(--ease-out);
+  }
+  /* 第一幕不显示进度：访客还不知道这里有一段五幕的叙事，先给刻度是没有指涉的。
+     Hidden on the first scene: nothing has progressed yet, and a progress bar
+     before the visitor knows a sequence exists refers to nothing. */
+  .story-root[data-active='0'] .story-stage .story-ticks {
+    opacity: 0;
+  }
+  .story-stage .js-tick,
+  .mkt-stage .js-tick {
+    height: 16px;
+    width: 3px;
+    flex: none;
+    border-radius: 999px;
+  }
+
+  /* .story-panel 与 .story-ticks 是叙事区与判定幕**共用**的类。上一版把它们直接
+     改成绝对定位 + bottom: calc(var(--m-bot) + …)，而 --m-bot 只声明在
+     .story-stage 上——判定幕里那个变量不存在，整条 bottom 声明因此失效，面板
+     跌回 top: 0，标题直接顶到固定导航下面被挡住（实测面板矩形只比舞台顶低
+     14px，而舞台的 padding-top 是 77.9px，说明 padding 也被绕开了：栅格容器的
+     绝对定位子元素以 padding box 为包含块，top: 0 就是贴着容器顶）。
+     所以通用规则恢复成栅格布局（判定幕原样），绝对定位只收进 .story-stage。
+     .story-panel and .story-ticks are SHARED by the story section and the verdict
+     act. The previous pass switched them straight to absolute with a bottom of
+     calc(var(--m-bot) + …), but --m-bot is declared only on .story-stage, so inside
+     the verdict act the variable does not exist, the whole bottom declaration is
+     invalid, and the panel falls back to top: 0 with its headline hidden under the
+     fixed nav. Measured, the panel's rect sat just 14px below the stage top against
+     a padding-top of 77.9px, confirming the padding was bypassed too: an absolutely
+     positioned child of a grid container resolves against the padding box, so top:
+     0 means flush with the container. The shared rules are restored to the grid
+     layout the verdict act still needs, and the absolute positioning is scoped to
+     .story-stage. */
+  .story-panel {
+    position: static;
+    grid-area: 3 / 1;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    padding: 0 5vw;
+    background: none;
+  }
+  .story-stage .story-panel {
+    position: absolute;
+    left: 0;
+    right: auto;
+    top: auto;
+    bottom: calc(var(--m-bot) + 58px);
+    width: 100%;
+    z-index: 3;
+  }
+  .story-stage .story-panel > .panel-inner {
+    transform: none;
+  }
+  /* 合规声明：紧贴刻度之上的一行小字。它标注的是上方那块界面，留在这里最合理。
+     The disclaimer sits just above the ticks: it labels the interface above it,
+     which is where it belongs. */
+  /* 自下而上：吸底 CTA（外部）→ 刻度 → 声明 → 文案面板。
+     上一版把声明的 bottom 设成 -22px，等于推到 .story-phone 之外、压在吸底 CTA
+     上（实测落在 y 802-817，而 CTA 从 795 开始）。
+     Bottom up: the sticky CTA (external), the ticks, the disclaimer, then the copy
+     panel. The previous -22px pushed the disclaimer outside .story-phone and onto
+     the sticky CTA, measured at y 802-817 against a CTA starting at 795. */
+  .story-phone > p {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 14px;
+    margin: 0;
+    padding: 0 5vw;
+    font-size: 10px;
+    text-align: left;
+    z-index: 3;
+  }
+}
+
+/* ── WebGL 接管态 / WebGL-active state ──
+   .gl-on 由 PhoneStory 在 createPhoneGL 成功后加到叙事区根节点。此时 CSS 机身
+   整个退场（机身改由 three 绘制），而屏幕节点已被 CSS3DRenderer 搬进它自己的
+   容器，因此不受 .dev-scene 隐藏的影响——它需要的是一套固定像素尺寸，好让
+   CSS3DObject 按 世界单位/像素 的比例精确缩放。
+   .gl-on is added to the story root by PhoneStory once createPhoneGL succeeds.
+   The CSS body leaves entirely (three draws it now), while the screen node has
+   already been moved into CSS3DRenderer's own container and so is unaffected by
+   hiding .dev-scene - what it needs instead is a fixed pixel size, so the
+   CSS3DObject can scale it by an exact world-units-per-pixel ratio. */
+.gl-on .dev-scene {
+  display: none;
+}
+/* 示例声明改为舞台底部居中：手机的位置现在由相机决定，标注跟不动它，
+   索性给它一个稳定的落点。/ The disclaimer moves to the bottom of the stage:
+   the phone's position is the camera's business now, so the caption gets its
+   own stable anchor instead of trying to track it. */
+.gl-on .story-phone {
+  top: auto;
+  bottom: 2.5vh;
+  transform: translateX(-50%);
+}
+/* 屏幕节点在 CSS3D 容器里：定位与变换归 CSS3DRenderer，这里只负责它自己的
+   外观。圆角 40px = 世界坐标 7mm ÷ 0.175 的像素等价值，与机身开孔对齐。
+   Inside the CSS3D container the node's position and transform belong to
+   CSS3DRenderer; this rule only governs its own appearance. The 40px radius is
+   the pixel equivalent of 7mm at the 0.175 scale, matching the body aperture. */
+.gl-on .dev-screen {
+  inset: auto;
+  border: 0;
+  /* 48px 对应机身开孔的圆角（世界坐标 10.2mm ÷ 0.1774 ≈ 57 DOM px）并留有
+     余量：屏幕 DOM 的圆角必须**小于等于**开孔圆角，否则四角会露出页面背景。
+     48px matches the body's aperture radius (10.2mm world / 0.1774 is about 57
+     DOM px) with margin to spare: the screen DOM's radius must stay at or below
+     the aperture's, or the page background shows through at the corners. */
+  border-radius: 48px;
+  box-shadow: none;
+  background: #06060a;
+}
+
+
+/* ══════════════════════════════════════════════
+   全页 3D 空间 / the page-wide 3D space
+   ──────────────────────────────────────────────
+   三层叠在同一个 fixed 容器里，顺序即降级顺序：
+     1. .landing-space-grid  静态网格，SSR 就有，永远存在
+     2. .landing-space-gl    WebGL 世界，起来了才淡入（<html>.space-on）
+     3. .landing-space-fade  上下渐隐，保证导航与页脚下方没有线条压着文字
+   静态网格不是「被替换」而是「被盖住」：3D 起不来时它就是最终版面，不留空白。
+   Three layers in one fixed container, stacked in degradation order: the static
+   grid that SSR already emits and that always exists; the WebGL world which fades
+   in only once it is actually running (html.space-on); and the top/bottom fades
+   that keep lines from sitting under the nav and the footer. The grid is covered,
+   never replaced, so a failed 3D start simply leaves the previous layout intact.
+   ══════════════════════════════════════════════ */
+.landing-space {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.landing-space-grid,
+.landing-space-gl,
+.landing-space-fade {
+  position: absolute;
+}
+.landing-space-grid,
+.landing-space-gl {
+  inset: 0;
+}
+/* 基线层同样不用格子：一道自下而上的柔光地平，与 3D 版的扫光地面同一种
+   视觉语言。降级应该看起来更简单，而不是换一套语言。
+   The baseline carries no grid either, just a soft bottom-up horizon wash in the
+   same visual language as the 3D sweep. Degrading should look simpler, not
+   different. */
+.landing-space-grid {
+  background:
+    radial-gradient(120% 62% at 50% 104%, rgba(255, 255, 255, 0.07), transparent 70%),
+    radial-gradient(80% 40% at 50% 100%, rgba(255, 255, 255, 0.05), transparent 72%);
+  transition: opacity 0.9s var(--ease-out);
+}
+.landing-space-gl {
+  opacity: 0;
+  transition: opacity 1.1s var(--ease-out);
+}
+.space-on .landing-space-grid {
+  opacity: 0;
+}
+.space-on .landing-space-gl {
+  opacity: 1;
+}
+.landing-space-fade {
+  left: 0;
+  right: 0;
+  height: 8rem;
+}
+.landing-space-fade.t {
+  top: 0;
+  background: linear-gradient(180deg, #09090b, transparent);
+}
+.landing-space-fade.b {
+  bottom: 0;
+  background: linear-gradient(0deg, #09090b, transparent);
+}
+
+/* ══════════════════════════════════════════════
+   第二幕：判定走廊 / act II, the verdict corridor
+   ──────────────────────────────────────────────
+   本幕的舞台是空的——3D 全部由固定在页面底层的空间层绘制，这里只有文字。
+   所以它不需要 GSAP、不需要 WebGL、也不需要知道空间层是否存在：IntersectionObserver
+   判拍，CSS 过渡交叉淡入，与叙事区的 steps 模式完全同构。走廊起不来时，这一幕
+   退化成一段排版讲究的规则说明，四条规则一字不少。
+   The stage for this act is empty: all of its 3D is drawn by the fixed space layer
+   behind the page, and only type lives here. So it needs no GSAP, no WebGL and no
+   knowledge of whether the space came up - an IntersectionObserver picks the beat
+   and CSS transitions cross-fade, exactly as the story's steps mode does. Without
+   the corridor it degrades into a well-set statement of the rules, complete.
+   ══════════════════════════════════════════════ */
+.mkt-section {
+  position: relative;
+  /* 5 拍 × 80vh。比叙事区的 104vh/幕 紧：这里每一拍只有一条规则加一句注解，
+     阅读量约为叙事区的一半，同样的行程会拖。
+     Five beats at 80vh each, tighter than the story's 104vh per scene: a beat here
+     carries one rule and one note, about half the reading of a story scene, and the
+     longer run would drag. */
+  height: 400vh;
+}
+.mkt-stage {
+  position: sticky;
+  top: 0;
+  /* 同 .story-stage：svh 在滚动期间不变，dvh 会随地址栏逐帧改高。
+     Same as .story-stage — svh is stable during scroll. */
+  height: 100dvh;
+  height: 100svh;
+  overflow: hidden;
+}
+
+@media (max-width: 1023px) {
+  /* 同上：行程高度统一在文件末尾管理。/ Same - managed at end of file. */
+  /* 与叙事区同一套三行栅格：上面留给走廊，中间是拍计数，下面是文字。
+     文字靠底而不是居中——走廊的灭点在画面中上部，压在它上面会同时毁掉两者。
+     The same three-row grid as the story: corridor above, beat counter, type below.
+     The type sits at the bottom rather than centred, because the corridor's
+     vanishing point is in the upper middle and overlapping the two ruins both. */
+  .mkt-stage {
+    display: grid;
+    grid-template-columns: 100%;
+    grid-template-rows: minmax(0, 1fr) auto auto;
+    row-gap: 2.2vh;
+    padding: calc(64px + env(safe-area-inset-top) + 1.6vh) 0 calc(env(safe-area-inset-bottom) + 82px);
+  }
+  /* 文字区垫底：走廊的地板线会一直延伸到画面底部，正文压在细线上读起来发毛。
+     一道到底色的渐变把下三分之一压回纯底色，线条自然消失在文字后面。
+     A scrim under the type: the corridor's floor lines run to the bottom edge and
+     body text over hairlines reads fuzzy. A gradient back to the page colour sinks
+     the lower third to flat, and the lines simply end behind the words. */
+  /* z-index: -1 而不是给所有子元素加 position: relative 把它们抬上来。
+     .mkt-stage 是 sticky，本身就是层叠上下文，-1 只会把遮罩压到该上下文内所有
+     在流内容之下，不会掉到页面背景之后。抬子元素的做法实测有副作用：
+     .story-ticks 的基础规则带着 right: 1rem，从 static 变成 relative 之后那
+     1rem 就变成了「向左推 16px」，刻度条量出来 x=-16、宽 375，整条溢出屏幕。
+     Using z-index -1 rather than lifting every child with position: relative.
+     .mkt-stage is sticky and therefore already a stacking context, so -1 只 drops
+     the scrim below all in-flow content inside it without falling behind the page
+     backdrop. Lifting the children had a measured side effect: .story-ticks
+     carries right: 1rem from its base rule, and switching it from static to
+     relative turned that into a 16px leftward shove - the bar measured x=-16 at
+     375 wide, hanging off the screen. */
+  .mkt-stage::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    /* 高度与断点按文字实际落位定：文字行占屏幕底部 234px（面板 152 + 吸底
+       CTA 让位 82），812 高的机上是 28.8%。遮罩取 60% 高、46% 处转实色，
+       实色区从底部往上 263px，整段正文都落在纯底色上。
+       Height and stop set from where the type actually lands: the text occupies the
+       bottom 234px of the screen (a 152px panel plus 82px of sticky-CTA clearance),
+       which is 28.8% on an 812-tall device. The scrim runs 60% tall and turns solid
+       at 46% of that, giving 263px of flat colour from the bottom up, so the whole
+       body column clears the corridor's floor lines. */
+    height: 60%;
+    z-index: -1;
+    pointer-events: none;
+    background: linear-gradient(180deg, transparent, #09090b 46%);
+  }
+}
+
+/* 桌面端左侧压暗：文字面板固定在 left: 7vw、宽 26rem 的一列里，而走廊是一片
+   覆盖大半个画面的网格。把相机偏航镜像过来之后，面板区域的线条覆盖率已经从
+   40.9% 降到 6.6-23.2%（画面其余部分 6.5-19%），但入场那两拍仍有两成线条落在
+   正文后面。一道到底色的横向渐变把左列压回纯底，走廊从渐变外缘开始——这不是
+   给读不清打补丁，是合成里一直在用的遮罩：让主体出现在它该出现的地方。
+   A scrim down the left on desktop. The text panel occupies a fixed column at 7vw
+   with a 26rem width while the corridor is a grid covering most of the frame.
+   Mirroring the camera yaw already cut line coverage inside that column from 40.9%
+   to between 6.6% and 23.2% (against 6.5-19% for the rest of the frame), but the
+   two entry beats still leave a fifth of it behind body copy. A horizontal gradient
+   back to the page colour flattens the left column and lets the corridor begin past
+   its edge. Not a patch for illegibility: the ordinary compositing matte that puts
+   a subject where it belongs. */
+@media (min-width: 1024px) {
+  /* 判决墙的桌面遮罩：底部横带，不再是左侧竖列。墙的三条价位线都在画面上
+     部 71% 以内，文字面板压在左下角——把最下面一段压回底色，价位线与判决
+     闪带完整保留在上方。
+     The wall's desktop scrim is a bottom band, no longer a left column. All
+     three price lines live in the upper 71% of the frame and the text panel
+     sits lower left, so sinking the bottom strip back to the page colour keeps
+     every level line and verdict flash fully visible above it. */
+  /* 左下角袋形遮罩，不再是整条底带。判决碑的止损线与判决章落在画面底部
+     72-88% 的右侧——整条底带会把「先碰止损记输」那一拍的全部戏剧压进黑里
+     （投影核对：SL 线在 84% 高度）。改成罩住文字面板的左下椭圆之后，右下的
+     判决区完全放开。实测右下角 (100%,100%) 与章位 (88%,84%) 都落在透明区。
+     A lower-left pocket, no longer a full-width band. The stone's stop-loss
+     line and verdict stamps land on the right at 72-88% of frame height, and a
+     full band would sink beat two's whole drama into black (projection check:
+     the SL line sits at 84%). An ellipse over the text panel frees the lower
+     right verdict zone entirely - both the corner and the stamp position fall
+     in the transparent region. */
+  .mkt-stage::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(95% 105% at 10% 100%, #09090b 30%, rgba(9, 9, 11, 0.78) 55%, transparent 78%);
+  }
+}
+
+/* 叙事区底部渐隐 / story stage bottom vignette
+   ──────────────────────────────────────────────
+   空间层提权之后，hero 文案身后的地面线实测覆盖率 37.2%、峰值亮度 105。
+   #A3A3A3 的正文压在 105 的线上对比度只有 2.20:1，远低于 AA 的 4.5:1 —— 而这是
+   整页最重要的一段文字。
+   解法是压暗**最近的**那几行地面线，不是把整个空间调暗：让人相信「这是一个
+   地方」的是地面在地平线附近的透视收敛，不是画面最下缘那几根最粗的线。所以
+   这是一道自下而上的渐隐，地平线一带原样保留。
+   同一道渐隐在真机上也正好压住底部的刻度条与文字行。
+   After the space layer's weight increase, the floor lines behind the hero copy
+   measured 37.2% coverage at a peak luminance of 105. Body text at #A3A3A3 over a
+   line at 105 has a contrast ratio of 2.20:1 against the 4.5:1 AA floor - and this
+   is the most important type on the page.
+   The fix is to damp the NEAREST floor lines rather than dim the whole space: what
+   makes the scene read as a place is the grid's perspective convergence up near the
+   horizon, not the few heaviest lines along the bottom edge. Hence a bottom-up
+   fade that leaves the horizon band untouched. The same fade covers the tick bar
+   and the text row on real devices. */
+.story-stage::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 46%;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(0deg, #09090b 26%, rgba(9, 9, 11, 0.62) 64%, transparent);
+}
+
+/* ══════════════════════════════════════════════
+   判决墙 / the verdict wall (act II)
+   ──────────────────────────────────────────────
+   一面全出血的 SVG 行情图。滚动驱动时间：每拍画一条价格线，触线的瞬间整条
+   价位线闪成实色、判决章落在触点上。桌面 scrub 由 GSAP 拥有一切（.is-scrub
+   下这些过渡全部让路）；steps 模式（真机 / 减少动态）由下面的过渡完成同一套
+   编排：画线 1.5s，判决延迟 1.5s 落下。
+   A full-bleed SVG chart. Scroll drives time: each beat draws one price path,
+   and at the touch the whole level flashes solid while the stamp lands. Under
+   scrub GSAP owns everything (these transitions yield via .is-scrub); in steps
+   mode the same choreography runs on the transitions below - the path draws
+   over 1.5s and the verdict lands 1.5s in.
+   ══════════════════════════════════════════════ */
+.mkt-wall {
+  position: absolute;
+  inset: 0;
+  /* 静态微倾角：墙立在空间里而不是贴在页面上。scrub 模式下由 GSAP 接管并
+     缓慢转正。/ A slight static tilt so the wall stands in the space rather
+     than sitting on the page; under scrub GSAP takes over and squares it up. */
+  transform: perspective(1400px) rotateY(-3deg);
+  transform-origin: 62% 50%;
+}
+.mkt-wall svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.sc-label {
+  font-size: 20px;
+  letter-spacing: 0.08em;
+}
+.mkt-scene {
+  opacity: 0;
+  transition: opacity 0.45s var(--ease-out);
+}
+.mkt-scene.sc-on {
+  opacity: 1;
+}
+.sc-path {
+  fill: none;
+  stroke-width: 2.5;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 1.5s var(--ease-out);
+}
+.mkt-scene.sc-on .sc-path {
+  stroke-dashoffset: 0;
+  transition-delay: 0.25s;
+}
+.sc-band {
+  opacity: 0;
+  transition: opacity 0.35s var(--ease-out);
+}
+.mkt-scene.sc-on .sc-band {
+  opacity: 1;
+  transition-delay: 1.5s;
+}
+.sc-stamp {
+  opacity: 0;
+  transform: scale(0.5);
+  transform-origin: center;
+  transform-box: fill-box;
+  transition:
+    opacity 0.3s var(--ease-out),
+    transform 0.3s var(--ease-out);
+}
+.mkt-scene.sc-on .sc-stamp {
+  opacity: 1;
+  transform: scale(1);
+  transition-delay: 1.55s;
+}
+/* scrub：GSAP 拥有一切 / scrub: GSAP owns every value */
+.is-scrub .mkt-scene,
+.is-scrub .sc-path,
+.is-scrub .sc-band,
+.is-scrub .sc-stamp {
+  transition: none;
+}
+
+/* 桌面：文字面板压到左下角。基础规则把 .panel-l 垂直居中（top:50% + 内层
+   -50% 位移），判决墙的构图是「上 71% 画面、左下角宣判」，居中会压在价位
+   线上。/ Desktop: the panel moves to the lower left. The base rule centres
+   .panel-l vertically, but this act composes as "chart in the upper 71%,
+   pronouncement lower left" - centring would sit on the level lines. */
+@media (min-width: 1024px) {
+  .mkt-section .panel-l {
+    top: auto;
+    bottom: 8vh;
+    max-width: 38rem;
+  }
+  .mkt-section .panel-l > .panel-inner {
+    transform: none;
+  }
+}
+
+@media (max-width: 1023px) {
+  /* 真机：墙占栅格第一行（画面 / 刻度 / 文字三行制，与叙事区同构）。meet
+     模式整图完整可见；非缩放描边保证线宽不随缩小变虚。价位线文字标签在此
+     尺度下只有几像素，直接隐藏。
+     Real devices: the wall takes the grid's first row (visual, ticks, text -
+     the same three rows as the story). meet keeps the whole drawing visible
+     and non-scaling strokes keep line weight; the level labels would be a few
+     pixels tall here, so they hide. */
+  .mkt-wall {
+    position: static;
+    grid-area: 1 / 1;
+    min-height: 0;
+    transform: none;
+  }
+  .sc-label {
+    display: none;
+  }
+}
+
+/* ══════════════════════════════════════════════
+   判定终端 / the verdict terminal (act II, take four)
+   ──────────────────────────────────────────────
+   一块真实的行情终端面板，重演第一幕手机里那条 XAUUSD 信号在四种结局下如何
+   被判定。配色直接用产品令牌（--up/--down），与手机屏内的信号卡一致——这一
+   幕的说服力来自「这就是产品本身」。蜡烛按 --ci 逐根级联出现（steps 模式），
+   scrub 模式由 GSAP 接管同一套编排。
+   A real terminal panel replaying act I's XAUUSD signal under its four endings,
+   in the product's own tokens (--up/--down), identical to the phone's signal
+   card - this act persuades by being the product itself. Candles cascade in by
+   --ci under steps; GSAP owns the same choreography under scrub.
+   ══════════════════════════════════════════════ */
+.term-bg {
+  fill: #0b0b0f;
+  fill-opacity: 0.9;
+  stroke: #ffffff;
+  stroke-opacity: 0.09;
+  stroke-width: 1;
+}
+.mkt-wall text {
+  font-family: inherit;
+}
+.mkt-wall .tnum {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.cnd-up { fill: var(--up); }
+.cnd-dn { fill: var(--down); }
+.cnd-up-s { stroke: var(--up); }
+.cnd-dn-s { stroke: var(--down); }
+.lvl-up { stroke: var(--up); stroke-opacity: 0.7; }
+.lvl-dn { stroke: var(--down); stroke-opacity: 0.7; }
+.bnd-up { fill: var(--up); }
+.bnd-dn { fill: var(--down); }
+.chip-up { fill: var(--up-bg); stroke: rgba(53, 201, 122, 0.4); stroke-width: 1; }
+.chip-dn { fill: var(--down-bg); stroke: rgba(240, 77, 99, 0.4); stroke-width: 1; }
+.chip-en { fill: rgba(255, 255, 255, 0.04); stroke: rgba(255, 255, 255, 0.12); stroke-width: 1; }
+.chip-t-up { fill: var(--up); }
+.chip-t-dn { fill: var(--down); }
+.chip-t-en { fill: #ededf0; }
+/* 判决章：描边橡皮章，不发光 / verdict stamps: outlined rubber stamps, no glow */
+.st-win { fill: rgba(9, 9, 11, 0.78); stroke: var(--up); stroke-width: 3.5; }
+.st-win-t { fill: var(--up); }
+.st-loss { fill: rgba(9, 9, 11, 0.78); stroke: #a1a1aa; stroke-width: 3.5; }
+.st-loss-t { fill: #c4c4cc; }
+/* 蜡烛级联：steps 模式按 --ci 逐根出现，画完 ~1.3s 后判决落下（沿用
+   .sc-band/.sc-stamp 既有的 1.5s 延迟规则）。
+   Candle cascade under steps: one per --ci step, with the verdict landing about
+   1.3s after the march (the existing .sc-band/.sc-stamp delay rules). */
+/* 只动透明度：蜡烛的位置由标注坐标唯一决定，任何变换都有把它挪走的前科
+   （GSAP 的 viewBox 原点 × CSS fill-box 原点打架，实测整组蜡烛飘出绘图区）。
+   Opacity only: a candle's position belongs to its authored coordinates alone.
+   Transforms have a record here - GSAP's viewBox origin fought CSS's fill-box
+   origin and the whole series drifted out of the plot. */
+.sc-candle {
+  opacity: 0;
+  transition: opacity 0.35s var(--ease-out);
+  transition-delay: calc(var(--ci) * 55ms + 0.25s);
+}
+.mkt-scene.sc-on .sc-candle {
+  opacity: 1;
+}
+.is-scrub .sc-candle {
+  transition: none;
+}
+
+/* 背景创意元素层 / the creative backdrop motif layer
+   固定全屏，压在 3D 画布之上、页面内容之下。纯装饰，不接指针事件。
+   Fixed full-screen, above the 3D canvas and below page content. Purely
+   decorative, takes no pointer events. */
+.backdrop-art {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.backdrop-art svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.backdrop-art text {
+  font-family: inherit;
+}
+.backdrop-art .tnum,
+.backdrop-art .tnum text {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* 移动端遮罩层序 / mobile scrim stacking
+   必须写在 .story-stage::after 基础规则之后：两条选择器权重相同，靠源码顺序
+   决胜。写在 @media 块里但位置靠前时实测完全不生效（z-index 仍是 -1，遮罩压在
+   画面之下等于没画），正文于是直接落在 App 界面上。
+   桌面端遮罩在画面之下（它压的是地面扫光），移动端必须反过来：
+   画面 z1 → 遮罩 z2 → 文字 z3。
+   This has to sit after the base .story-stage::after rule: same specificity, so
+   source order decides. Placed earlier inside the media block it measured as having
+   no effect at all - z-index stayed -1, putting the scrim behind the visual - and
+   the copy landed straight on the app interface. Desktop keeps the scrim behind the
+   visual, where it damps the floor sweep; mobile inverts to visual, scrim, type. */
+@media (max-width: 1023px) {
+  .story-stage::after {
+    z-index: 2;
+    /* 56% → 50%：遮罩顶从 y=383 降到 436，卡片下沿（432）这才完全脱离渐变。
+       56% 时卡片最后 49px 被压掉最多两成半，读起来是被裁而不是被淡出。
+       56 to 50 percent moves the scrim top from y=383 to 436, finally clearing the
+       card whose lower edge sits at 432. At 56 the card lost up to a quarter of its
+       opacity across its last 49px, which reads as cropped rather than faded. */
+    height: 50%;
+    background: linear-gradient(0deg, #09090b 36%, rgba(9, 9, 11, 0.86) 66%, transparent);
+  }
+
+  /* ── 遮罩按幕分档 ──
+     上一轮把遮罩整体调强（62% / 实心到 80%）是为了救首屏：scene 0 是「产品
+     先行」，标题**直接压在卡片上**，遮罩必须够到标题顶才不透字。但那个值套到
+     后面四幕就过头了——那四幕的界面内容位置完全不同（确认下单按钮、滑动确认
+     条、追踪止损说明都落在视口 50% 附近），实心区提到 49.6% 正好把它们压掉。
+
+     两种幕的需求本来就相反，用一个值必然顾此失彼。改成按 data-active 分档：
+     只有 scene 0 用强遮罩，其余四幕回到原来的轻遮罩。
+     Scene 0 puts the headline directly on top of the card and needs the opaque
+     band to reach it; scenes 1–4 have UI content sitting around the 50% mark
+     that the same band would swallow. One value can't serve both, so the strong
+     scrim is scoped to scene 0. */
+  .story-root[data-active='0'] .story-stage::after {
+    /* 实心区 78%。这一档是**没有完美解**的：卡片内容底与标题顶只差约 14px
+       （412×792 实测 421 vs 435），要让标题完全压在实心上、又完全不碰卡片，
+       需要的窗口比 14px 还窄，换个机型就翻车。
+       78% 的取舍是：标题在三个常见尺寸上都完全落在实心区（余量 11–26px），
+       代价是卡片最底下那行说明（「判定规则公开 · 不可删改」）被渐变吃掉约
+       12px——那本来就是模拟界面的页脚小字，淡出反而符合「卡片溶进标题」的
+       意图；真正的数据（价格、盈亏比、有效期）都在实心区之上。
+       No perfect value exists here: the card's last line and the headline sit
+       14px apart, narrower than the window either constraint needs. 78% keeps
+       the headline fully backed on every tested size and lets only the mock's
+       footer caption fade — which reads as the card dissolving into the
+       headline rather than as clipping. */
+    height: 62%;
+    background: linear-gradient(0deg, #09090b 0 78%, rgba(9, 9, 11, 0.8) 92%, transparent);
+  }
+}
+
+/* 矮屏收一档 / short viewports step down
+   ──────────────────────────────────────────────
+   667px 高的机上实测撞车：卡片下沿 382，标题顶 328，重叠 54px。原因是竖向预算
+   本来就紧——导航 64 + 列表头 50 + 卡片 206 + 文案面板 219 + 声明 15 + 刻度 3
+   + 吸底 CTA 76 = 633，只剩 34px 给所有间隙。871px 的机上同一套数值有 238px
+   富余，所以按高度分档而不是按宽度：宽度决定字号（cqw），高度决定留白。
+   Measured collision on a 667-tall device: the card's lower edge at 382 against a
+   headline top of 328, overlapping by 54px. The vertical budget is simply tight -
+   nav 64 plus list header 50 plus card 206 plus copy panel 219 plus disclaimer 15
+   plus ticks 3 plus sticky CTA 76 comes to 633, leaving 34px for every gap. The
+   same numbers have 238px of slack on an 871-tall device, so the step is keyed to
+   HEIGHT rather than width: width sets the type size through cqw, height sets the
+   breathing room. */
+@media (max-width: 1023px) and (max-height: 730px) {
+  .story-stage .story-panel {
+    bottom: calc(var(--m-bot) + 40px);
+  }
+  [data-scr='0'] {
+    padding-top: 2vh;
+  }
+  [data-scr='0'] .sig-card {
+    padding: 4.4cqw;
+  }
+  [data-scr='0'] .sig-sym,
+  [data-scr='0'] .sig-rr {
+    font-size: 5.4cqw;
+  }
+  [data-scr='0'] .sig-val {
+    font-size: 4.6cqw;
+  }
+  [data-scr='0'] .sig-tiles {
+    margin-top: 3.4cqw;
+  }
+}

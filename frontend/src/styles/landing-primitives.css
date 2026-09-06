@@ -1,0 +1,96 @@
+/* ══════════════════════════════════════════════
+   Landing 3D 重设计追加样式（2026-07）
+   ══════════════════════════════════════════════ */
+
+/* 平滑锚点滚动（尊重减少动态偏好） */
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
+/* ── 小节眉题 / section eyebrow ──
+   类保留，但用法在落地页被严格配额：每三个分区最多一个。此前每个分区头部
+   都挂一条紫色全大写宽字距标签，八个分区八条——那是模板化节奏最明显的来源，
+   读者第三次看到它就知道页面是按模板批量生成的。
+   字距从 0.3em 收到 0.16em（0.3em 在中文旁边会拆散字形），颜色从品牌紫改成
+   中性灰：眉题是次要信息，不该抢走整页唯一彩度。
+   The class stays but its use is now rationed on the landing page: at most one
+   per three sections. Previously every section header carried a violet all-caps
+   wide-tracked label — eight sections, eight labels — the single clearest source
+   of templated rhythm; by the third one a reader knows the page was mass-produced.
+   Tracking tightened from 0.3em to 0.16em (0.3em shears Chinese glyphs apart when
+   the two scripts sit on one line) and the colour dropped from brand violet to
+   neutral grey: an eyebrow is secondary information and should not spend the
+   page's only chroma. */
+.eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* ── 滚动显现 / scroll reveal ──
+   位移 34px → 14px，去掉 scale 与 6px 模糊，时长 0.9s → 0.5s。
+   原来的参数组合（大位移 + 缩放 + 模糊）是「入场感」堆出来的，代价是每个
+   元素进入视口时都触发一次全尺寸模糊重绘，在中端安卓上肉眼可见掉帧；而且
+   0.9s 慢到用户滚过去了内容还没到位。现在只保留位移 + 透明度，两者都是
+   合成器属性，不触发重排也不触发重绘。
+   Travel 34px → 14px, scale and the 6px blur removed, duration 0.9s → 0.5s.
+   The old combination (long travel + scale + blur) was "entrance feel" stacked
+   up, and it cost a full-size blur repaint every time an element crossed the
+   viewport — visibly dropping frames on mid-range Android. At 0.9s the user had
+   already scrolled past before the content settled. What is left is transform
+   plus opacity: both compositor-only, no layout and no paint. */
+.reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.5s var(--ease-out), transform 0.5s var(--ease-out);
+}
+.reveal.in {
+  opacity: 1;
+  transform: none;
+}
+.reveal-d1 { transition-delay: 0.06s; }
+.reveal-d2 { transition-delay: 0.12s; }
+.reveal-d3 { transition-delay: 0.18s; }
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+}
+
+/* ── 卡片悬浮微交互 / card hover lift ── */
+.card-hover {
+  transition: border-color var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out);
+}
+.card-hover:hover {
+  transform: translateY(-1px);
+  border-color: var(--line-hi);
+}
+@media (prefers-reduced-motion: reduce) {
+  .card-hover:hover { transform: none; }
+}
+
+/* ── 落地页卡片 / landing surface ──
+   曾经是「浮在极光流体上的玻璃卡」：半透明 + 20px 背景模糊 + 内高光 + 4px
+   悬浮位移。极光背景已经删掉，模糊就失去了它唯一的依据——底下没有东西可透。
+   现在与 App 内的 .glass 同一种材质：实色面 + 1px 发丝线，两侧观感终于统一。
+   Formerly a "glass card floating over the aurora": translucent, 20px backdrop
+   blur, inset highlight, 4px hover lift. The aurora backdrop is gone, which
+   removes blur's only justification — there is nothing underneath to see through.
+   It now uses the same material as .glass inside the app: an opaque plane with a
+   1px hairline, so the marketing and product surfaces finally match. */
+.glass-card {
+  position: relative;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: none;
+  transition: border-color var(--dur-base) var(--ease-out), background-color var(--dur-base) var(--ease-out);
+}
+.glass-card:hover {
+  border-color: var(--line-hi);
+  background: var(--surface-2);
+}
+@media (prefers-reduced-motion: reduce) {
+  .glass-card:hover { transform: none; }
+}

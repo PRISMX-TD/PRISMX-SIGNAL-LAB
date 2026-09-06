@@ -1,0 +1,243 @@
+@layer components {
+  /* ── 滑动确认弹窗 / slide-to-confirm ──
+     背景淡入复用 .lg-sheet 那套 lg-fade 动效，手机端下面还会让 .slide-sheet
+     叠加 lg-slide-up——让下单确认/二次确认这些弹窗跟"其他"面板一样，是从
+     底部滑上来盖住当前页，而不是毫无动效地凭空出现，贴近原生 App 手感。
+     Backdrop fade reuses the same lg-fade animation as .lg-sheet; the mobile
+     block below additionally layers lg-slide-up onto .slide-sheet — so order
+     confirmations feel like the "More" panel: sliding up from the bottom to
+     cover the page, not popping in with no motion, closer to a native app. */
+  .slide-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    /* 遮罩底色去紫、加深：这是下单确认弹窗的背景，它的职责是把注意力从页面
+       上摘下来，不是给页面加一层紫色滤镜。
+       Scrim de-tinted and deepened: this backs the order-confirmation dialog and
+       its job is to lift attention off the page, not to tint the page violet. */
+    background: rgba(9, 9, 11, 0.72);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: grid;
+    place-items: center;
+    animation: lg-fade 0.2s ease;
+  }
+  /* 下单确认面板改为实色。这是全站风险最高的一次交互——用户在这里确认真金
+     白银的仓位——半透明面意味着背后的行情数字会从面板下方透出来，与面板上
+     的手数、止损叠在一起。这不是审美问题，是可读性问题。
+     The order-confirmation panel is now opaque. This is the highest-stakes
+     interaction in the product — the user is confirming a real-money position —
+     and a translucent surface lets the live quotes behind it bleed through and
+     collide with the lot size and stop-loss printed on top. That is a legibility
+     defect, not a taste call. */
+  .slide-sheet {
+    position: relative;
+    width: 400px;
+    max-width: calc(100vw - 32px);
+    max-height: 90vh;
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--line-hi);
+    border-radius: var(--r-xl);
+    padding: 24px;
+    box-shadow: 0 24px 64px -16px rgba(0, 0, 0, 0.8);
+  }
+  .slide-sheet-head {
+    text-align: center;
+  }
+  .slide-sheet-ava {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    margin: 0 auto;
+    display: grid;
+    place-items: center;
+    font-size: 20px;
+    font-weight: 700;
+  }
+  .slide-sheet-rows {
+    margin-top: 16px;
+    border-radius: var(--r-tile);
+    background: var(--nest);
+    border: 1px solid var(--line);
+    padding: 4px 16px;
+  }
+  .slide-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 0;
+    font-size: 13px;
+  }
+  .slide-row + .slide-row {
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+  }
+  .slide-row .k {
+    color: var(--text-2);
+  }
+  .slide-row .v {
+    font-weight: 700;
+    color: #fff;
+  }
+  .slide-row .v i {
+    font-style: normal;
+    color: var(--text-3);
+    font-weight: 400;
+  }
+  .stepper {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .stepper button {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--line-hi);
+    background: var(--nest-hi);
+    color: var(--text-2);
+    font-size: 15px;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    line-height: 1;
+    transition: transform 0.25s cubic-bezier(0.34, 1.45, 0.64, 1), border-color 0.2s;
+  }
+  .stepper button:hover {
+    border-color: var(--purple-hi);
+    color: var(--purple-hi);
+  }
+  .stepper button:active {
+    transform: scale(0.88);
+  }
+  .stepper .lot-val {
+    font-size: 17px;
+    font-weight: 700;
+    min-width: 52px;
+    text-align: center;
+    color: #fff;
+  }
+  .stepper .lot-input {
+    width: 52px;
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 0;
+  }
+  .stepper .lot-input:focus {
+    color: var(--purple-hi);
+  }
+  .slide-row-acct {
+    position: relative;
+  }
+  .slide-acct-picker {
+    position: relative;
+  }
+  .slide-acct-trigger {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--nest-hi);
+    border: 1px solid var(--line-hi);
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff;
+    cursor: pointer;
+    max-width: 190px;
+  }
+  .slide-acct-trigger:hover {
+    border-color: var(--purple-hi);
+  }
+  .slide-acct-trigger svg {
+    flex-shrink: 0;
+    color: var(--text-3);
+    transition: transform 0.15s;
+  }
+  .slide-acct-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+  }
+  .slide-acct-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 41;
+    min-width: 220px;
+    max-height: 220px;
+    overflow-y: auto;
+    background: #17171d;
+    border: 1px solid var(--line-hi);
+    border-radius: var(--r-panel);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    padding: 4px;
+  }
+  .slide-acct-opt {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 8px;
+    border-radius: var(--r-tile);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+  }
+  .slide-acct-opt:hover {
+    background: var(--nest-hi);
+  }
+  .slide-acct-opt.active {
+    background: rgba(90, 34, 238, 0.14);
+  }
+  .slide-acct-opt .opt-login {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff;
+  }
+  /* 账号在线状态点。列表会保留本次弹窗期间掉线的账号（见 useStickyOnlineAccounts），
+     靠这个点区分，而不是把它从列表里抽走——抽走会让下拉在用户手指底下重排。
+     Online dot: the list keeps accounts that dropped offline during the modal, and
+     this marks them instead of yanking the row out from under the cursor. */
+  .slide-acct-opt .opt-dot {
+    flex-shrink: 0;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-3);
+  }
+  .slide-acct-opt .opt-dot.on {
+    background: var(--up, #2fe6a0);
+    box-shadow: none;
+  }
+  .slide-acct-opt .opt-equity {
+    font-size: 12px;
+    color: var(--text-3);
+  }
+
+  /* 手机号区号下拉。
+     Select 原本是给图表页那些紧凑面板做的（30.8px 高、8px 圆角、12.5px 字），
+     直接放进认证表单会比旁边的 .input（43px 高、12px 圆角、14px 字）矮一大截，
+     两个框并排时一眼就能看出没对齐。这里把它对齐到 .input 的度量。
+     触发器只显示国旗 + 区号（见 PhoneField 的 short 字段），所以宽度不用留给国名。
+     Select is sized for the charts page's compact panels; next to an auth-form
+     .input it sits visibly short. These rules align it to .input's metrics. The
+     trigger shows only flag + dial code, so no width is reserved for a name. */
+  .phone-dial-select {
+    width: 104px;
+    flex-shrink: 0;
+  }
+  .phone-dial-select .select-trigger {
+    height: 43px;
+    padding: 10px 12px;
+    border-radius: 999px;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+}

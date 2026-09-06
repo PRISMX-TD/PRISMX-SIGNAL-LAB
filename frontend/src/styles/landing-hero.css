@@ -1,0 +1,334 @@
+/* ═════════════ 分区标题 / section headings ═════════════
+   账户页的分区标题原本是 13px 大写 + 中等字距的半粗灰字，和说明性小字
+   （caption）是两套不同的小字处理。收进同一套语汇：更小、更宽的字距、
+   更轻的字重，再补一条发丝线把标题和内容分开。
+   Section headings and captions were two different treatments of small type;
+   they now share one. */
+.sec-h-title {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  font-weight: 500;
+  color: var(--text-3);
+  text-transform: uppercase;
+}
+
+/* 报价表限宽：606px 的容器里内容只占约 420px，品种名钉在最左、价格甩到
+   最右，中间一大片空。限宽之后留白落在表格右侧，读成「余量」而不是
+   「被扯开的两端」。
+   （彻底的解法是把报价表挪出这一栏，那是版面改动，不在换皮范围内。）
+   The quotes table was pinned to both edges of a container ~180px wider than
+   its content, leaving a void in the middle. */
+@media (min-width: 1024px) {
+  .dash-quotes .qt-table {
+    max-width: 500px;
+  }
+}
+
+
+/* ═════════════ 与设计样本对齐的剩余几条 ═════════════ */
+
+/* 样本 68：入场 / 止损 / 止盈三格右对齐。
+   这三个数存在的意义就是互相比较。等宽字体 + 右对齐 = 小数点自动成列，
+   位数不同也不会错位（1.07418 与 1.07602 这种才是真正会露馅的场景）。
+   Three prices that exist to be compared: right-aligned monospace puts the
+   decimal points on a common axis even when digit counts differ. */
+.exec-tile,
+.sig-tile {
+  text-align: right;
+}
+
+/* 样本 24：报价表整行可悬停——列表从「表格」变成「可点的行」。 */
+.qt-table tbody tr {
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.qt-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+/* 样本 80–84：按下反馈。
+   全站 42 条 :hover、16 条 :active——手机上 hover 根本不触发，:active 是
+   用户唯一能得到的反馈，而最常按的那几个控件一条都没有。
+   Touch has no hover; :active is the only feedback a phone user gets. */
+.seg-pill button,
+.filter-cycle,
+.seg-tabs button,
+.view-all-btn,
+.lg-tab,
+.hero-arrow-btn {
+  transition: transform 0.09s var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.seg-pill button:active,
+.filter-cycle:active,
+.seg-tabs button:active,
+.view-all-btn:active,
+.lg-tab:active,
+.hero-arrow-btn:active {
+  transform: scale(0.96);
+}
+@media (prefers-reduced-motion: reduce) {
+  .seg-pill button:active,
+  .filter-cycle:active,
+  .seg-tabs button:active,
+  .view-all-btn:active,
+  .lg-tab:active,
+  .hero-arrow-btn:active {
+    transform: none;
+  }
+}
+
+/* 样本 70–72：触摸热区扩张（视觉上完全不可见）。
+   实测手机视口下几乎每个可点元素都偏小：跟单按钮 60×34、筛选 67×30、
+   页内 Tab 84×32。WCAG 2.2 AA（2.5.8）的门槛是 24×24，这些过得去，但
+   低于所有移动端 HIG 的 44px。
+   做法是盖一层 44px 高的透明伪元素，只扩热区、不改布局也不改 DOM，
+   而且**只在纵向扩**——这些控件都是横向排列的，纵向扩不会吃掉邻居的点击。
+   A transparent 44px band expands the tap target without touching layout. */
+@media (max-width: 1023px) {
+  .seg-pill button,
+  .filter-cycle,
+  .seg-tabs button,
+  .view-all-btn,
+  .qt-trade-btn {
+    position: relative;
+  }
+  .seg-pill button::after,
+  .filter-cycle::after,
+  .seg-tabs button::after,
+  .view-all-btn::after,
+  .qt-trade-btn::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 44px;
+    transform: translateY(-50%);
+  }
+  /* 筛选栏是 overflow-x:auto（窄屏横滑），而 auto 会建立裁剪上下文——
+     伪元素超出容器盒的部分会被直接裁掉，热区扩张在这里会完全失效。
+     给容器补上下内边距，把 44px 的带子装进裁剪盒里。
+     overflow-x:auto clips the pseudo-element; padding makes room for it. */
+  .sig-filters {
+    padding-block: 8px;
+  }
+  /* .seg-tabs 是带边框的胶囊环，不能用 padding-block:8px 装热区带——那会让
+     环上下 8px / 左右 3px，36px 的按钮悬在 54px 的胶囊里（排行榜/订单/信号
+     三页都中招，平板与窄屏电脑同样在 ≤1023 范围内）。改为四边仍 3px、按钮
+     加高到 40px：胶囊 46px 本身就是 ≥44px 的触摸目标，44px 的 ::after 带子
+     被 overflow 裁到胶囊盒内也正好齐边。
+     .seg-tabs is a bordered pill ring; padding-block:8px makes the ring
+     8px top/bottom vs 3px sides with a 36px button floating inside. Keep the
+     ring even (3px) and grow the buttons to 40px instead: the 46px pill is
+     itself a ≥44px target and the 44px ::after band clips flush inside it. */
+  .seg-tabs {
+    padding: 3px;
+  }
+  .seg-tabs button {
+    height: 40px;
+  }
+}
+
+
+/* ═════════════ 多周期轨道：窄屏收紧 ═════════════
+   六个周期在 360–412px 的机上装不下：每格「M15 ↓」按 12px 等宽字约 36px 宽，
+   加左右 12px 内边距是 60px，六格 360px 再加轨道内边距，已经超出可用宽度，
+   最后一格被切掉。轨道虽然能横滑，但一条**读数带**被裁掉一截就失去意义
+   ——它要表达的正是「几个周期站在同一边」，看不全就数不出来。
+   所以窄屏收紧格子而不是靠滑动：字号 12→11、左右内边距 12→8，
+   六格约 294px，360px 的机上也能整条读完。
+   Six cells don't fit on a 360–412px screen, and a readout band that gets cut
+   off loses its whole point — you're meant to count how many periods agree.
+   Tighten the cells on narrow screens rather than relying on horizontal scroll. */
+@media (max-width: 480px) {
+  .tf-row {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .tf-tag {
+    padding: 4px 8px;
+    font-size: 11px;
+    gap: 2px;
+  }
+}
+@media (max-width: 360px) {
+  .tf-tag {
+    padding: 4px 6px;
+    font-size: 10px;
+  }
+}
+
+
+/* ═════════════ 下滑提示 / scroll cue ═════════════
+   只在移动端的第一幕出现。桌面有滚动条，用户天然知道页面还有下文；手机上
+   首屏 CTA 之下就是空白，没有任何东西说明「下面还有一段五幕的叙事」。
+   切到第二幕就淡出——那之后叙事本身已经在说话，再留着就是噪音。
+   Mobile, first scene only: desktop has a scrollbar to imply continuation,
+   while on a phone the space below the CTA reads as the end of the page. */
+.scroll-cue {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity 0.4s var(--ease-out);
+  pointer-events: none;
+}
+.scroll-cue svg {
+  stroke-width: 1.8;
+  animation: cue-nudge 1.8s var(--ease-in-out) infinite;
+}
+@keyframes cue-nudge {
+  0%, 100% { transform: translateY(0); opacity: 0.55; }
+  50% { transform: translateY(4px); opacity: 1; }
+}
+@media (max-width: 1023px) {
+  .story-root[data-active='0'] .scroll-cue {
+    display: flex;
+    opacity: 1;
+  }
+}
+/* 箭头是邀请不是装饰，但静止的用户不该被强迫看动画。
+   The nudge is an invitation, not decoration — it stops when motion is reduced. */
+@media (prefers-reduced-motion: reduce) {
+  .scroll-cue svg {
+    animation: none;
+    opacity: 0.8;
+  }
+}
+
+
+/* ── 首屏文案栏放宽 / wider hero copy column ──
+   栏宽由「面板 max-width」与「正文的 ch 上限」双重决定，抬一个会被另一个卡住，
+   所以两处一起改（正文见 PhoneStory 的 sm:max-w-[58ch]）。
+
+   两条边界都是有理由的：
+   · 只放宽首屏——后面四幕的面板与手机是排过位置的，一起放宽会撞上机身。
+   · 只在 ≥1280 生效——1024 上文案右缘会推到 552，而手机机身左缘约 558，
+     只剩 6px；那个宽度本来就没有空隙问题（实测空隙 9.9% 已经偏紧）。
+   Both bounds are deliberate: hero only, because the later scenes' panels are
+   choreographed against the phone; and ≥1280 only, because at 1024 the widened
+   column leaves 6px to the phone body — and that width never had a gap problem. */
+@media (min-width: 1280px) {
+  .panel-l[data-panel='hero'] {
+    max-width: 30rem;
+  }
+  /* 叙事区的文字向中间靠：左右面板同步从内容框的 7% 收到 12%。
+     必须两侧一起动——五幕的面板左右交替（hero/3/4 在左、1/2 在右，手机在
+     对侧），只动一侧会让左右幕的留白节奏不一致。同为 panel-l 的三幕一起移，
+     切幕时文字块的左基线不跳。
+     只从 1280 起：更窄的桌面上空隙本来就只剩 ~90px，再收会贴到机身。
+     判定幕（.mkt-section 也用 panel-l）不在此列——它的文字是压在判定墙上
+     排的，另有自己的对位。
+     Both sides move together (scenes alternate sides with the phone opposite),
+     story section only — the verdict act composes its copy against the wall. */
+  .story-section .panel-l {
+    left: calc((100vw - min(100vw, 1440px)) / 2 + 0.12 * min(100vw, 1440px));
+  }
+  .story-section .panel-r {
+    right: calc((100vw - min(100vw, 1440px)) / 2 + 0.12 * min(100vw, 1440px));
+  }
+}
+
+
+/* ═════════════ 移动端叙事：自适应行程 + 连续反馈 + 更快的切幕 ═════════════
+   针对的体感问题：「推了很久都没有反应」。它有三个来源，各修一处。 */
+@media (max-width: 1023px) {
+  /* ① 行程改用 svh，并把两段叙事对齐到同一节奏（64svh/幕）。
+     「跟着机型自适应」的正确单位就是视口本身：每幕 64svh = 每换一幕划过
+     自己屏幕的 64%，SE 和 Pro Max 上手感一致——绝对像素反而不自适应。
+     svh 取「地址栏展开时」的高度：vh 在移动端等于地址栏收起后的大视口，
+     比 svh 高约 8%，等于每幕都被偷偷加长了一截，且滚动中途地址栏一收，
+     行程与 sticky 舞台（100svh）的换算就对不上。
+     判定幕 340vh → 320svh，顺带与叙事区完全同拍（原来差 6%）。
+     Travel in svh: 64svh per scene means the same fraction of the user's own
+     screen on every device — that IS the adaptive unit. vh equals the large
+     viewport on mobile (~8% taller), silently stretching every scene and
+     drifting against the 100svh sticky stage when the URL bar collapses. */
+  .story-section {
+    height: 320vh;
+    height: 320svh;
+  }
+  .mkt-section {
+    height: 320vh;
+    height: 320svh;
+  }
+
+  /* ② 右缘刻度从「第几幕」升级成滚动温度计。
+     steps 模式只在幕边界切一次幕，边界之间滚多少都纹丝不动——那段死区就是
+     「没反应」的主体。刻度改成连续填充（--sec-p 由 useSectionProgress 每帧
+     写入）后，手指动一毫米刻度就动一毫米：结构没变，感知从「离散跳变」变成
+     「每帧有回应」。
+     轨道底色固定中性（覆盖掉 React 侧的按幕换色——那套仍服务桌面），
+     填充走品牌紫。scaleY 是合成器属性，逐帧变化不触发布局。
+     The ticks become a continuously filling gauge driven by --sec-p. The dead
+     air between sentinel boundaries is exactly what "nothing responds" meant;
+     now every millimetre of scroll moves something. scaleY composites. */
+  .story-stage .js-tick,
+  .mkt-stage .js-tick {
+    position: relative;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.15);
+  }
+  .story-stage .js-tick::after,
+  .mkt-stage .js-tick::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--purple-hi);
+    transform-origin: top;
+    transform: scaleY(var(--tick-f, 0));
+  }
+  /* 五段均分：第 i 段在总进度 [i/5, (i+1)/5] 内从 0 填到 1。
+     Five equal segments, each filling across its fifth of the total travel. */
+  :is(.story-stage, .mkt-stage) .js-tick:nth-child(1)::after { --tick-f: clamp(0, calc(var(--sec-p, 0) * 5 - 0), 1); }
+  :is(.story-stage, .mkt-stage) .js-tick:nth-child(2)::after { --tick-f: clamp(0, calc(var(--sec-p, 0) * 5 - 1), 1); }
+  :is(.story-stage, .mkt-stage) .js-tick:nth-child(3)::after { --tick-f: clamp(0, calc(var(--sec-p, 0) * 5 - 2), 1); }
+  :is(.story-stage, .mkt-stage) .js-tick:nth-child(4)::after { --tick-f: clamp(0, calc(var(--sec-p, 0) * 5 - 3), 1); }
+  :is(.story-stage, .mkt-stage) .js-tick:nth-child(5)::after { --tick-f: clamp(0, calc(var(--sec-p, 0) * 5 - 4), 1); }
+
+  /* ③ 切幕过渡 0.5s → 0.28s，位移 14px → 10px。
+     0.5s 是桌面 scrub 前的取值：手机上一次快划 200ms 就能跨过幕边界，切幕
+     动画比手势本身慢一倍多，读起来就是「滞后」。0.28s 贴着手势的尾巴走。
+     visibility 的退场延迟同步缩短；.on 的零延迟必须在此**重新声明**——
+     这两条 shorthand 写在文件末尾，会在层叠里赢过前面 .on 规则的
+     transition-delay: 0s，不补回去的话入场的 visibility 会等 0.28s 才翻转，
+     面板直接从透明「弹」到全亮。
+     0.5s transitions lag behind a 200ms flick. The .on zero-delay must be
+     re-asserted after these late-in-file shorthands or enter-visibility waits
+     out the delay and the panel pops instead of fading. */
+  .story-root:not(.is-scrub) .story-panel {
+    transform: translateY(10px);
+    transition:
+      opacity 0.28s var(--ease-out),
+      transform 0.28s var(--ease-out),
+      visibility 0s linear 0.28s;
+  }
+  /* .scr 的过渡真身挂在 .story-root:not(.is-scrub) .scr（3 类权重）上，
+     覆盖必须同权重。顺带修一个由此挖出的潜伏 bug：.scr.on 的
+     transition-delay: 0s 只有 2 类权重，против那条 3 类的 shorthand **一直输**
+     ——也就是说 steps 模式的入场从来没有真正淡入过：visibility 等满 0.5s 才
+     翻转，屏幕是在渐变结束的瞬间「硬切」进来的，只有退场在淡。下面用 4 类
+     权重的 .on 规则把零延迟真正落地，入场淡入这才第一次生效。
+     The real .scr transition lives on a 3-class selector, and the 2-class
+     .scr.on zero-delay has been losing to it all along - meaning steps-mode
+     screens never actually faded IN (visibility flipped only after the full
+     delay, a hard cut). The 4-class rule below lands the zero delay for real. */
+  .story-root:not(.is-scrub) .scr {
+    transition:
+      opacity 0.28s var(--ease-out),
+      transform 0.28s var(--ease-out),
+      visibility 0s linear 0.28s;
+  }
+  .story-panel.on,
+  .story-root:not(.is-scrub) .story-panel.on,
+  .story-root:not(.is-scrub) .scr.on {
+    transition-delay: 0s;
+  }
+}

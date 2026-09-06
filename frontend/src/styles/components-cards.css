@@ -1,0 +1,1342 @@
+@layer components {
+  /* ═════════════ 面 / surfaces ═════════════
+     .glass 这个类名保留（117 处引用），但它不再是玻璃：实色抬升面 + 1px 发丝
+     线，无模糊、无阴影、无内高光。名字是历史包袱，材质已经换掉。
+     The .glass class name is kept (117 call sites) but it is no longer glass:
+     an opaque raised plane with a 1px hairline — no blur, no shadow, no inset
+     highlight. The name is legacy; the material is not. */
+  .glass,
+  .panel {
+    position: relative;
+    background: var(--surface);
+    /* 边框留在盒模型里、只把颜色改透明：几何完全不变，不会因为少了 1px
+       而整页位移。分层改由面承担（见 --surface / --line 的说明）。
+       The border stays in the box model with a transparent colour so geometry
+       is untouched; layering is carried by the surface. */
+    border: 1px solid transparent;
+    border-radius: var(--r-lg);
+    box-shadow: none;
+    transition: border-color var(--dur-base) var(--ease-out),
+                background-color var(--dur-base) var(--ease-out);
+  }
+
+  /* hover 不再靠描边——描边已经透明了。改成面提亮一档。
+     Hover lifts the surface instead of the (now transparent) stroke. */
+  .glass:hover,
+  .panel:hover {
+    background: var(--surface-2);
+  }
+
+  /* hover 上浮：位移压到 1px。3–4px 的上浮在密集列表里会让整页「跳动」。
+     Hover lift capped at 1px: 3–4px lifts make a dense list feel jittery. */
+  .glass.lift:hover {
+    background: var(--surface-2);
+    transform: translateY(-1px);
+  }
+
+  .no-sheen::before {
+    content: none;
+  }
+
+  .flat-card {
+    box-shadow: none !important;
+  }
+
+  .card {
+    @apply glass;
+  }
+
+  /* 悬停时描边转为品牌紫。这是紫色在卡片上唯一被允许的出场方式：
+     一条 1px 的边，不是一团光。
+     Hover turns the hairline violet. This is the only way violet is allowed to
+     appear on a card: a 1px edge, not a halo. */
+  .glass-neon {
+    @apply glass;
+  }
+  /* 卡片外轮廓已取消，紫色描边无处可挂——hover 改成面提亮，与 .glass 一致。
+     With the card outline gone there is no stroke to tint; hover lifts the
+     surface instead, matching .glass. */
+  .glass-neon:hover {
+    background: var(--surface-2);
+  }
+
+  /* ── 持仓卡：嵌在卡里的卡，需要自己的面 ──
+     去掉外轮廓之后，全站只有这一处真的丢了边界：它是「当前持仓」那张卡里面
+     的卡，父子背景都是 --surface，边框一去三张卡就和父卡连成一片。
+     （其他嵌套没这个问题：内嵌格用 --nest 有自己的面；信号卡直接坐在页面底色
+     上，有 ΔL* 7.5 的台阶。）
+
+     先试过加一条去饱和紫的边，看起来突兀——整套皮的分层原则是「靠面不靠线」，
+     唯独这里破例加线，必然显得是外挂上去的。所以给它一个自己的面：+8.3 的
+     ΔL*，色相跟着现有灰阶（冷调偏移 +8，与 --nest 的 +9 同族）。
+     Nested cards need their own surface, not a stroke: adding one line where the
+     whole system layers by surface reads as bolted on. */
+  .pos-card {
+    background: #2c2c34;
+  }
+  /* 面抬高之后，压在**半透明色块**上的东西会掉出 AA（卖出芯片 4.13、
+     品种芯片 4.13）——芯片自己那层 14% 红底才是主要贡献者，把面调暗救不回来。
+     自定义属性会继承，所以这张卡就是一个「局部面」上下文：它自己的语义色跟着
+     它自己的面走，卡外的一切不受影响。
+     Custom properties inherit, so the card is its own surface context. */
+  .pos-card {
+    --down: #ff8090;
+    --text-3: #b0b0ba;
+  }
+  /* 卡内按钮改成**下沉**（比面暗），不是上浮：容器的面亮了，控件凹进去才对，
+     上浮是给深底容器用的。顺带把「平仓」从 4.28 提到 6.3——往亮的方向补只会
+     更糟（8% 白底反而掉到 4.20）。
+     Controls recess inside a lighter panel rather than floating above it. */
+  .pos-card button:not(.btn) {
+    background: rgba(0, 0, 0, 0.22);
+  }
+
+
+  /* 实色紫面板。整段区块直接刷成品牌色——这是「颜料」用法的主场：
+     大面积平涂，白字压上去，没有任何渐变或光晕。
+     Solid violet plane. Whole blocks painted in the brand colour — the main
+     event for the pigment approach: large flat fills with white type on top,
+     no gradient and no halo anywhere. */
+  .plane-uv {
+    background: var(--purple);
+    color: #fff;
+    border: none;
+    border-radius: var(--r-lg);
+  }
+  .plane-uv .sub {
+    color: rgba(255, 255, 255, 0.72);
+  }
+
+  /* ═════════════ 签名图形：光谱线 / signature: the spectral rule ═════════════
+     一条 1px 发丝线裂成三条微偏移色带——棱镜色散的平面化表达。全站唯一的
+     「品牌装饰」，每屏最多出现一次，用来标记真正的分节点。不发光。
+     A 1px hairline splitting into three micro-offset bands: dispersion rendered
+     as flat print. The only brand ornament in the system; at most one per view,
+     marking a genuine section break. It does not glow. */
+  .rule-spectral {
+    position: relative;
+    height: 3px;
+    border: 0;
+    background: none;
+  }
+  .rule-spectral::before,
+  .rule-spectral::after,
+  .rule-spectral > i {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1px;
+  }
+  .rule-spectral::before {
+    top: 0;
+    background: linear-gradient(90deg, transparent, var(--purple-hi) 22%, transparent 70%);
+  }
+  .rule-spectral > i {
+    top: 1px;
+    background: linear-gradient(90deg, transparent 8%, var(--text) 46%, transparent 88%);
+    opacity: 0.55;
+  }
+  .rule-spectral::after {
+    top: 2px;
+    background: linear-gradient(90deg, transparent 30%, var(--purple) 78%, transparent);
+  }
+
+  /* ═════════════ 按钮 / buttons ═════════════ */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 42px;
+    padding: 0 20px;
+    border: 1px solid transparent;
+    border-radius: var(--r-md);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color var(--dur-fast) var(--ease-out),
+                border-color var(--dur-fast) var(--ease-out),
+                color var(--dur-fast) var(--ease-out),
+                transform var(--dur-fast) var(--ease-out);
+  }
+  /* 按下时轻微下沉而不是整体缩放：缩放会让按钮里的文字一起糊掉。
+     Press sinks 1px instead of scaling: scaling blurs the label with it. */
+  .btn:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+  .btn:disabled {
+    opacity: 0.38;
+    cursor: not-allowed;
+  }
+
+  /* 主按钮：实色品牌紫，白字。无渐变、无外发光。
+     白 #fff 压在 #5A22EE 上对比度 ≈ 8.4:1，远超 AA。
+     Primary: flat brand violet, white label. No gradient, no outer glow.
+     #fff on #5A22EE is ~8.4:1, comfortably past AA. */
+  .btn-primary,
+  .btn-brand {
+    background: var(--purple);
+    color: #fff;
+    border-color: var(--purple);
+  }
+  .btn-primary:hover:not(:disabled),
+  .btn-brand:hover:not(:disabled) {
+    background: var(--purple-vivid);
+    border-color: var(--purple-vivid);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-2);
+    border-color: var(--line);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--nest);
+    border-color: var(--line-hi);
+    color: var(--text);
+  }
+
+  /* 次级按钮：实心中性面，用于「与主操作同等重要但不同方向」的选择。
+     Secondary: solid neutral fill, for choices as important as the primary
+     action but pointing elsewhere. */
+  .btn-secondary {
+    background: var(--nest);
+    color: var(--text);
+    border-color: var(--line);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--nest-hi);
+    border-color: var(--line-hi);
+  }
+
+  /* ═════════════ 输入 / input ═════════════ */
+  .input {
+    width: 100%;
+    border-radius: var(--r-md);
+    border: 1px solid var(--line);
+    background: var(--nest);
+    padding: 8px 16px;
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    transition: border-color var(--dur-fast) var(--ease-out),
+                background-color var(--dur-fast) var(--ease-out);
+    outline: none;
+  }
+  /* 占位符必须仍然可读：--text-3 (#71717A) 压在 --nest (#16161A) 上约 4.6:1，
+     过 AA。上一版更暗，在户外屏幕上基本消失。
+     Placeholders must stay legible: --text-3 (#71717A) on --nest (#16161A) is
+     ~4.6:1, past AA. The previous value was darker and vanished outdoors. */
+  .input::placeholder {
+    color: var(--text-3);
+  }
+  .input:focus {
+    border-color: var(--purple-hi);
+    background: var(--surface-2);
+    /* 焦点环用 1px 实色扩边而不是 3px 紫色柔光：柔光是发光语言。
+       Focus ring is a 1px solid expansion, not a 3px violet haze — haze is the
+       glow vocabulary being removed. */
+    box-shadow: 0 0 0 1px var(--purple-hi);
+  }
+  .input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .label {
+    @apply mb-1.5 block text-sm;
+    color: var(--text-2);
+  }
+
+  /* ═════════════ 标签 / chip / tag ═════════════ */
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: var(--r-xs);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: var(--r-xs);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+  .chip.buy,
+  .chip-buy {
+    background: var(--up-bg);
+    color: var(--up);
+    border: 1px solid rgba(53, 201, 122, 0.32);
+  }
+  .chip.sell,
+  .chip-sell {
+    background: var(--down-bg);
+    color: var(--down);
+    border: 1px solid rgba(240, 77, 99, 0.32);
+  }
+  .chip.live {
+    background: var(--up-bg);
+    color: var(--up);
+    border: 1px solid rgba(53, 201, 122, 0.28);
+  }
+  .chip.dim,
+  .chip-dim {
+    background: var(--nest);
+    color: var(--text-2);
+    border: 1px solid var(--line);
+    font-weight: 500;
+  }
+  /* 计数徽章：实色紫底白字。半透明紫底 + 紫字是上一版的做法，在深色卡片上
+     对比不足。/ Count badge: solid violet, white label. The previous
+     translucent-violet-on-violet-text version under-contrasted on dark cards. */
+  .count-badge {
+    min-width: 20px;
+    height: 20px;
+    padding: 0 8px;
+    border-radius: var(--r-xs);
+    background: var(--purple);
+    color: #fff;
+    font-size: 12px;
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    border: none;
+  }
+
+  /* ═════════════ 分段控制器 / segmented control ═════════════ */
+  .seg {
+    display: flex;
+    background: var(--nest);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    padding: 4px;
+    gap: 4px;
+  }
+  .seg button {
+    height: 28px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-3);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color var(--dur-fast) var(--ease-out),
+                color var(--dur-fast) var(--ease-out);
+  }
+  .seg button:hover {
+    color: var(--text-2);
+  }
+  /* 激活态：实色紫。原本是紫色渐变，渐变在 28px 高的小控件上完全看不出来，
+     只是白白多一层绘制。/ Active: flat violet. It used to be a gradient, which
+     is invisible at 28px and costs an extra paint for nothing. */
+  .seg button.on {
+    background: var(--purple);
+    color: #fff;
+  }
+
+  /* ═════════════ 文字强调 / emphasised text ═════════════
+     .neon-text 保留类名（8 个页面标题在用），但渐变裁切文字已移除——那是
+     被点名最多的 AI 签名之一，而且它会破坏子像素抗锯齿、让标题在低分屏上发虚。
+     现在是实色 + 收紧字距的编辑式标题。
+     .neon-text keeps its name (8 page titles use it) but the gradient-clipped
+     fill is gone: it is one of the most-flagged AI signatures, and it disables
+     subpixel antialiasing, which makes headings look soft on low-DPI screens.
+     It is now a flat, tightly-tracked editorial heading. */
+  .neon-text {
+    color: var(--text);
+    font-variation-settings: "wdth" 112;
+    letter-spacing: -0.022em;
+    background: none;
+    -webkit-background-clip: initial;
+    background-clip: initial;
+    -webkit-text-fill-color: currentColor;
+  }
+  /* 需要品牌色强调时用这个，而不是渐变。/ Use this, not a gradient, when the
+     brand hue genuinely needs to carry an accent. */
+  .text-uv {
+    color: var(--purple-hi);
+  }
+
+  /* ═════════════ 动画 / animations ═════════════ */
+  .animate-breathe {
+    animation: breathe 2.4s ease-in-out infinite;
+  }
+  .animate-fade-in-up {
+    animation: fade-in-up 0.45s var(--ease-out) both;
+  }
+  /* 发光脉冲已移除，退化为静态：它是纯装饰的无限循环，也是移动端持续重绘的
+     主要来源之一。/ The glow pulse is gone, degraded to static: a purely
+     decorative infinite loop and a major source of continuous mobile repaint. */
+  .animate-glow-pulse {
+    animation: none;
+  }
+  .animate-spin {
+    animation: spin 0.8s linear infinite;
+  }
+  /* 全局减少动态：所有无限循环一律停掉，进场动画退化为直接可见。
+     Global reduced-motion: every infinite loop stops and enter animations
+     collapse to their final state. */
+  @media (prefers-reduced-motion: reduce) {
+    .animate-breathe,
+    .animate-glow-pulse {
+      animation: none;
+    }
+    .animate-fade-in-up {
+      animation: none;
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  /* ── 顶栏 MT5 药丸 / topbar MT5 pill ── */
+  .mt5-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 16px;
+    border-radius: 999px;
+    background: rgba(53, 201, 122, 0.10);
+    border: 1px solid rgba(53, 201, 122, 0.35);
+    color: var(--up);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .mt5-pill .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+  }
+  .mt5-pill .dot.up {
+    background: var(--up);
+    box-shadow: none;
+    animation: breathe 2.4s ease-in-out infinite;
+  }
+
+  /* ── 英雄卡 / hero card ── */
+  .hero-card {
+    position: relative;
+    overflow: hidden;
+  }
+  .hero-nebula {
+    position: absolute;
+    right: -30px;
+    top: 0;
+    width: 62%;
+    height: 100%;
+    pointer-events: none;
+    opacity: 0.95;
+  }
+  /* 故事式分段指示器：一排细条，当前项拉宽并渐变高亮，点按任意段跳转。
+     跨端统一（桌面+手机都用这个），替代旧的圆点/计数器/箭头组合。
+     Story-style segmented indicator: a row of thin bars; the active one widens
+     with a gradient fill; tap any to jump. Unified across desktop and mobile. */
+  /* 点 + 线指示器：未选中为圆点，当前项为一条渐变短线。
+     Dot + line indicator: inactive items are dots, the current one is a bar. */
+  .hero-segs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  /* 焦点指示条：可见形状与可点范围拆开。
+     原来整个按钮就是那颗 6×6 的点——6px 的热区实际点不中（WCAG 2.2 AA 的
+     门槛是 24×24）。改成 24×26 的透明按钮，可见的那道细条由 ::before 画，
+     再叠一层 44px 的纵向热区。同一份 DOM，只是「看得见的形状」不再等于
+     「可点的范围」。
+     The visible mark and the tap target are separated: the button is a
+     transparent 24×26 box with the bar drawn by ::before, plus a 44px band. */
+  .hero-seg {
+    position: relative;
+    width: 24px;
+    height: 26px;
+    border: none;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    transition: width 0.32s cubic-bezier(0.34, 1.4, 0.64, 1);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .hero-seg::before {
+    content: "";
+    width: 16px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.22);
+    transition: width 0.32s cubic-bezier(0.34, 1.4, 0.64, 1), background 0.28s ease;
+  }
+  .hero-seg::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 44px;
+    transform: translateY(-50%);
+  }
+  .hero-seg:hover::before {
+    background: rgba(255, 255, 255, 0.36);
+  }
+  .hero-seg.on {
+    width: 34px;
+  }
+  .hero-seg.on::before {
+    width: 26px;
+    background: var(--purple-hi);
+  }
+  /* 桌面端左右箭头：无按钮背景，纯图标点击；手机端隐藏（靠滑动切换即可）
+     Desktop prev/next arrows: no button background, icon-only; hidden on
+     mobile where swipe already handles navigation. */
+  .hero-arrow-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    background: none;
+    border: none;
+    color: var(--text-3);
+    cursor: pointer;
+    transition: color 0.2s ease, transform 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .hero-arrow-btn:hover {
+    color: #fff;
+  }
+  .hero-arrow-btn:active {
+    transform: scale(0.88);
+  }
+  @media (min-width: 640px) {
+    .hero-arrow-btn {
+      display: flex;
+    }
+  }
+  .stance-word {
+    font-size: 40px;
+    font-weight: 700;
+    line-height: 1.05;
+    letter-spacing: 0.03em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  /* 立场大字（BUY / SELL）是信号卡的语义焦点。此前它靠一层 5s 呼吸的彩色
+     光晕来「显得重要」——发光的文字既是本次重做要清掉的签名，也会关掉子像素
+     抗锯齿让大字发虚，还要为一个纯装饰的无限循环付出持续重绘。
+     现在改用排版本身建立层级：字重、字宽轴、字距，颜色只负责语义。
+     The stance word (BUY / SELL) is the semantic focus of a signal card. It
+     used to look important via a 5s breathing coloured glow — glowing text is
+     both the signature this redesign removes and a real defect: it disables
+     subpixel antialiasing (soft edges at display size) and costs continuous
+     repaint for a purely decorative infinite loop. Hierarchy now comes from
+     typography — weight, width axis, tracking — and colour carries only meaning. */
+  .stance-word.bull,
+  .stance-word.bear,
+  .stance-word.neutral {
+    font-variation-settings: "wdth" 112;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    text-shadow: none;
+    animation: none;
+  }
+  .stance-word.bull {
+    color: var(--up);
+  }
+  .stance-word.bear {
+    color: var(--down);
+  }
+  .stance-word.neutral {
+    color: var(--text-3);
+  }
+  .conf-val {
+    font-size: 26px;
+    font-weight: 700;
+    color: #fff;
+    margin-top: 4px;
+  }
+
+  /* 多周期标签 / multi-TF tags */
+  /* 多周期标签从「一排各自独立的小药丸」改成一条**分段轨道**。
+     它是一组同类读数（同一个品种在 6 个周期上的方向），不是 6 个不相干的
+     标签——排版要说出这件事。轨道本身是一个面，格子之间用发丝线分开，
+     方向仍由颜色承担。
+     The multi-timeframe row is one reading across six periods, not six
+     unrelated tags: it becomes a single segmented track. */
+  .tf-row {
+    display: flex;
+    gap: 0;
+    width: fit-content;
+    padding: 3px;
+    background: var(--nest);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  .tf-row::-webkit-scrollbar { display: none; }
+  .tf-tag {
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    font-family: "JetBrains Mono", monospace;
+    background: transparent;
+    color: var(--up);
+    border: 0;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .tf-tag + .tf-tag {
+    box-shadow: inset 1px 0 0 var(--line);
+  }
+  /* 轨道里的格子一律透明，颜色只落在**箭头**上——周期名（M5/H1）保持中性。
+     原来是整格染色（红底/绿底 + 彩色描边），六格并排就是六块彩色面积，
+     轨道读起来像「一排彩色药丸装在盒子里」而不是一条连续的读数带；
+     而且三种方向各有一套底色，页面上凭空多出两片彩度。
+     Cells stay transparent and only the arrow carries colour; the timeframe
+     label stays neutral. Tinting whole cells made the track read as six
+     separate pills in a box rather than one continuous readout. */
+  .tf-tag {
+    color: var(--text-2);
+  }
+  .tf-tag .d {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+  }
+  .tf-tag.up .d {
+    color: var(--up);
+  }
+  .tf-tag.down .d {
+    color: var(--down);
+  }
+  .tf-tag.neutral .d {
+    color: var(--text-3);
+  }
+  /* 单格不再上浮：它是一条轨道里的一段，不是独立按钮。
+     No per-cell lift — a segment of a track is not a standalone button. */
+  .tf-tag:hover {
+    transform: none;
+  }
+
+  /* 情绪条 / sentiment bar */
+  .senti-bar {
+    height: 9px;
+    border-radius: 99px;
+    overflow: hidden;
+    display: flex;
+    background: rgba(255, 255, 255, 0.09);
+  }
+  .senti-bar .a {
+    background: linear-gradient(90deg, #16a866, #35c97a);
+    border-radius: 99px 0 0 99px;
+  }
+  .senti-bar .b {
+    background: linear-gradient(90deg, #f04d63, #c22743);
+    border-radius: 0 99px 99px 0;
+    margin-left: auto;
+  }
+
+  /* ── 执行卡片 / exec card ── */
+  .exec-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .exec-sym-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .entry-block {
+    text-align: center;
+    margin: 16px 0 4px;
+  }
+  .entry-block .cap {
+    font-size: 12px;
+    color: var(--text-3);
+    letter-spacing: 0.1em;
+  }
+  .entry-block .val {
+    font-size: 40px;
+    font-weight: 700;
+    margin-top: 4px;
+    color: #fff;
+  }
+  .sl-tp-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  /* 三列变体用于信号卡片 / 3-col variant for signal cards */
+  .sl-tp-grid.three {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+  /* 止损 / 止盈格子：中性底 + 只给**数字**着色。
+     原来整块格子都染成红/绿（8% 底 + 45% 彩色描边），三格并排时页面上出现
+     两大片彩色面积，把语义色从「标注一个数」升级成「一整块区域」——而红绿在
+     这个产品里是**数据**，不是装饰。数字本身已经是红/绿，块面再染一遍是重复
+     编码，代价是整屏的彩度预算被这两个格子吃掉。
+     底改成与「入场」格一致的中性面，描边回到通用发丝线，颜色只留在数值上。
+     Neutral fill, coloured numerals only: tinting the whole tile promoted the
+     semantic colour from "marks a number" to "owns a region", and red/green
+     here are data, not decoration. The value is already coloured — the block
+     was encoding it twice. */
+  .tile-sl,
+  .tile-tp {
+    border: 1px solid var(--line);
+    background: var(--nest);
+  }
+  .tile-sl .val {
+    color: var(--down);
+  }
+  .tile-tp .val {
+    color: var(--up);
+  }
+  .exec-tile {
+    border-radius: var(--r-tile);
+    padding: 12px 8px;
+    text-align: center;
+  }
+  /* 说明性小字加字距、压字重：让标签与旁边 700 字重的数值靠「轻/重」分开，
+     而不是两行同样灰的小字。字距对汉字是有效的排印手段（大写不是——实测
+     这套界面 60 个 caption 里 59 个是纯中文，text-transform 几乎不做事）。
+     Tracking, not uppercase: 59 of 60 captions here are Chinese, where
+     text-transform does nothing. */
+  .exec-tile .cap,
+  .sig-tile .cap {
+    letter-spacing: 0.08em;
+    font-weight: 500;
+  }
+  .exec-tile .cap {
+    font-size: 12px;
+    color: var(--text-2);
+  }
+  .exec-tile .val {
+    font-size: 17px;
+    font-weight: 700;
+    margin-top: 4px;
+  }
+  .exec-stats-row {
+    display: flex;
+  }
+  .exec-stats-row > div {
+    flex: 1;
+  }
+  .exec-stats-row .k {
+    font-size: 12px;
+    color: var(--text-3);
+  }
+  .exec-stats-row .v {
+    font-size: 20px;
+    font-weight: 700;
+    color: #fff;
+    margin-top: 4px;
+  }
+  .exec-stats-row > div:last-child {
+    text-align: right;
+  }
+  .exec-full-btn {
+    width: 100%;
+    height: 46px;
+    font-size: 15px;
+    margin-top: 16px;
+  }
+  .exec-expiry {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-3);
+    margin-top: 12px;
+  }
+
+  /* ── 信号卡（其他活跃）─ */
+  /* 其他活跃信号：原来是 3 张各自独立的 .card，嵌在页面里就是「卡中卡中卡」
+     三层边框，边框噪音盖过内容。合并成一张卡 + 分隔线的行——参考图里的
+     流水/持仓一律是这个形态。每一行的元素一个没少。
+     Three standalone cards become one card with divider rows; the nested
+     borders were louder than the content. */
+  .others-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    background: var(--surface);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+  }
+  .sig-mini-card {
+    padding: 16px;
+    background: transparent;
+    border-radius: 0;
+  }
+  .sig-mini-card + .sig-mini-card {
+    border-top: 1px solid var(--line);
+  }
+  .sig-mini-top {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .sig-mini-top .rr {
+    margin-left: auto;
+    text-align: right;
+  }
+  .sig-mini-top .rr .v {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--up);
+  }
+  .sig-mini-top .rr .k {
+    font-size: 11px;
+    color: var(--text-3);
+  }
+  .sig-mini-tiles {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .sig-tile {
+    border-radius: var(--r-tile);
+    padding: 8px 4px;
+    text-align: center;
+    background: var(--nest);
+    border: 1px solid var(--line);
+    min-width: 0;
+  }
+  .sig-tile .cap {
+    font-size: 11px;
+    color: var(--text-3);
+  }
+  .sig-tile .val {
+    font-size: 13px;
+    font-weight: 700;
+    margin-top: 4px;
+    color: #fff;
+  }
+  /* 同上：信号卡里的三格也一样，中性底、只有数字着色。 */
+  .sig-tile.sl .val {
+    color: var(--down);
+  }
+  .sig-tile.tp .val {
+    color: var(--up);
+  }
+  .sig-ttl-bar {
+    height: 5px;
+    border-radius: 99px;
+    background: rgba(255, 255, 255, 0.09);
+    overflow: hidden;
+    margin-top: 4px;
+  }
+  .sig-ttl-bar i {
+    display: block;
+    height: 100%;
+    border-radius: 99px;
+    background: var(--purple);
+    transition: width 1s linear;
+  }
+  .view-all-btn {
+    height: 42px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--nest);
+    color: var(--text-2);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .view-all-btn:hover {
+    color: #fff;
+    border-color: var(--line-hi);
+  }
+
+  /* ── 卡片标题行 / card header ── */
+  .card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 4px 12px;
+  }
+  .card-head h3 {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    margin: 0;
+  }
+  .card-head .aux {
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--text-3);
+  }
+
+  /* ── 行情表 / quotes table ── */
+  .qt-mobile-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 0;
+  }
+  .qt-mobile-row .qt-sym-cell {
+    flex: 1;
+    min-width: 0;
+  }
+  .qt-mobile-row .qt-price {
+    text-align: right;
+    white-space: nowrap;
+  }
+  .qt-table-wrap {
+    overflow-x: auto;
+  }
+  .qt-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .qt-table th {
+    text-align: right;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-3);
+    padding: 0 0 8px;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+  .qt-table th:first-child {
+    text-align: left;
+  }
+  .qt-table td {
+    padding: 12px 0;
+    text-align: right;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .qt-table td:first-child {
+    text-align: left;
+  }
+  .qt-table tbody tr {
+    transition: background 0.2s;
+  }
+  .qt-table tbody tr:hover {
+    background: rgba(90, 34, 238, 0.07);
+  }
+  .qt-sym-cell {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  /* 身份芯片。标识从首字母换成三字母（见 symbolMeta.ts），所以字号要能装下
+     三个字符：34px 的圆里 10px 等宽约占 18px，放得下且不挤。
+     Identity chip: three characters now, so the type is sized to fit them. */
+  .qt-sym-ava {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+  /* 身份芯片的小号变体：信号卡、持仓卡、订单表里跟在品种名前面。
+     34px 的报价表版本在这些密度下太大，26px 是能装下三个字符的下限。
+     A smaller variant of the identity chip for signal/position/order rows,
+     where the 34px quotes-table version is too large. */
+  .sym-ava {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+
+  .qt-sym-cell .nm b {
+    display: block;
+    font-size: 13px;
+    color: #fff;
+  }
+  .qt-sym-cell .nm span {
+    font-size: 11px;
+    color: var(--text-3);
+    white-space: nowrap;
+  }
+  .qt-price {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    transition: color 0.15s;
+  }
+  .qt-chg-chip {
+    display: inline-block;
+    min-width: 64px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .qt-chg-chip.up {
+    background: var(--up-bg);
+    color: var(--up);
+  }
+  .qt-chg-chip.down {
+    background: var(--down-bg);
+    color: var(--down);
+  }
+  .qt-trade-btn {
+    height: 31px;
+    padding: 0 16px;
+    font-size: 13px;
+    border-radius: 999px;
+    background: linear-gradient(92deg, rgba(90, 34, 238, 0.85), rgba(168, 85, 247, 0.85));
+    color: #fff;
+    border: none;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    box-shadow: 0 2px 12px rgba(90, 34, 238, 0.35);
+    transition: filter 0.2s, transform 0.25s cubic-bezier(0.34, 1.45, 0.64, 1);
+  }
+  .qt-trade-btn:hover {
+    filter: brightness(1.12);
+  }
+  .qt-trade-btn:active {
+    transform: scale(0.94);
+  }
+
+  /* ── 市场概览 / market overview ── */
+  .donut-wrap {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-top: 12px;
+  }
+  .donut {
+    position: relative;
+    width: 116px;
+    height: 116px;
+    flex-shrink: 0;
+  }
+  .donut svg {
+    transform: rotate(-90deg);
+  }
+  .donut-center {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    text-align: center;
+  }
+  .donut-center b {
+    font-size: 26px;
+    display: block;
+    line-height: 1.1;
+    color: #fff;
+  }
+  .donut-center span {
+    font-size: 11px;
+    color: var(--text-3);
+  }
+  .ov-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 13px;
+    flex: 1;
+  }
+  .ov-legend .row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .ov-legend .sw {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+  }
+  .ov-legend .k {
+    color: var(--text-2);
+    white-space: nowrap;
+  }
+  .ov-legend .v {
+    margin-left: auto;
+    font-weight: 700;
+    color: #fff;
+    white-space: nowrap;
+  }
+  .ov-legend .v i {
+    font-style: normal;
+    color: var(--text-3);
+    font-weight: 400;
+  }
+  .acc-section {
+    margin-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    padding-top: 12px;
+  }
+  .acc-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .acc-row .k {
+    font-size: 13px;
+    color: var(--text-3);
+  }
+  .acc-row .v {
+    font-size: 26px;
+    font-weight: 700;
+    color: #c4b5fd;
+    margin-left: auto;
+  }
+  .acc-spark {
+    display: block;
+    width: 100%;
+    height: 56px;
+    margin-top: 4px;
+  }
+  .acc-x-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-3);
+    margin-top: 4px;
+    padding: 0 4px;
+    font-family: "JetBrains Mono", monospace;
+  }
+
+  /* ── 仪表盘网格 / dashboard grid ──
+     改用列内 flex 纵向堆叠，避免 grid 跨列共享行高（stretch）
+     导致 dash-exec 卡片内容多少反过来撑大/压缩 dash-hero 结构。
+     use per-column flex stacks instead of a shared grid row, so that
+     dash-exec's variable content height no longer stretches dash-hero. */
+  .dash-grid {
+    display: grid;
+    /* minmax(0, …fr) 让每列宽度只由比例决定，不被卡片内容撑大，
+       从而「可执行信号」有无内容时卡片尺寸一致、整体不偏移。
+       minmax(0, …fr) sizes columns purely by ratio (never by content),
+       so the exec card keeps the same width with or without a signal. */
+    /* 原来是 1.62 / 1 / 0.94 —— 中栏与右栏实测 400 vs 376，差 6%：既不相等
+       也不明显不同，读起来像没对齐而不像有意的比例。改成「一宽 + 两等宽」，
+       这是一个看得出来的决定。
+       The middle and right columns used to differ by 6% — neither equal nor
+       clearly different. One wide plus two equal reads as a decision. */
+    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 16px;
+  }
+  .dash-col-1,
+  .dash-col-2,
+  .dash-others {
+    min-width: 0;
+  }
+  .dash-col-1,
+  .dash-col-2 {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .dash-hero {
+    /* 视觉上全隐形 / visually invisible */
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border-radius: 0 !important;
+  }
+  .dash-hero::before {
+    display: none;
+  }
+  @media (max-width: 1240px) {
+    .dash-grid {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+  }
+
+  /* ── 信号面板视图 / signals panel view ── */
+  .sig-page-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .sig-page-head h2 {
+    font-size: 20px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .sig-page-head p {
+    font-size: 13px;
+    color: var(--text-3);
+    margin-left: 4px;
+  }
+  /* 单排筛选栏：可横向滚动，避免窄屏换行错位 / single-row filter bar, horizontally scrollable */
+  .sig-filters {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    margin-bottom: 16px;
+    padding-bottom: 4px;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .sig-filters::-webkit-scrollbar {
+    display: none;
+  }
+  /* 通用隐藏滚动条工具类（横向滑动工具栏等） */
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .sig-filters .fgroup {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .sig-filters .fk {
+    font-size: 13px;
+    color: var(--text-3);
+    white-space: nowrap;
+  }
+  .sig-filters .fsep {
+    width: 1px;
+    height: 18px;
+    background: var(--line);
+    flex-shrink: 0;
+  }
+
+  /* 筛选栏里的品种下拉：尺寸对齐旁边的药丸按钮（.seg-pill button / .filter-cycle
+     都是 30px 高、999px 圆角），否则这一排会一高一矮。选中非「全部」时套用与药丸
+     选中态同一套高亮，让「我筛过了」这件事在两种控件上长得一样。
+     The symbol dropdown in the filter bar, sized to the pills beside it (both
+     .seg-pill button and .filter-cycle are 30px tall with a 999px radius) so the
+     row does not step up and down. When something other than "all" is picked it
+     takes the same highlight as an active pill, so "I have filtered" reads the
+     same across both kinds of control. */
+  .sig-symbol-select {
+    flex-shrink: 0;
+  }
+  .sig-symbol-select .select-trigger {
+    height: 30px;
+    padding: 0 12px;
+    font-weight: 500;
+  }
+  .sig-symbol-select.on .select-trigger {
+    background: var(--purple);
+    border-color: transparent;
+    color: #fff;
+  }
+  .sig-symbol-select.on .select-trigger svg {
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  /* 药丸形筛选按钮 / pill-shaped filter buttons */
+  .seg-pill {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .seg-pill button {
+    height: 30px;
+    padding: 0 16px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--nest);
+    color: var(--text-3);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: all 0.2s;
+  }
+  .seg-pill button:hover {
+    color: var(--text-2);
+    border-color: var(--line-hi);
+  }
+  .seg-pill button.on {
+    background: var(--purple);
+    border-color: transparent;
+    color: #fff;
+  }
+  /* 手机端循环筛选按钮：仅显示当前值，点击切换 / mobile cycle filter button */
+  .filter-cycle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 30px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--nest);
+    color: #fff;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: all 0.2s;
+  }
+  .filter-cycle svg {
+    color: var(--text-3);
+  }
+  .filter-cycle.active {
+    background: var(--purple);
+    border-color: transparent;
+  }
+  .filter-cycle.active svg {
+    color: rgba(255, 255, 255, 0.85);
+  }
+  .sig-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+    gap: 16px;
+  }
+  /* 防止卡片内不可压缩内容撑破网格列 / stop rigid card content from blowing out the grid column */
+  .sig-grid > * {
+    min-width: 0;
+  }
+  .sig-empty {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 48px 0;
+    color: var(--text-3);
+    font-size: 13px;
+    border: 1px dashed var(--line);
+    border-radius: var(--r-lg);
+  }
+}

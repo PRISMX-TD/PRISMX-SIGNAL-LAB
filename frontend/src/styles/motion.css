@@ -1,0 +1,111 @@
+/* ══════════════════════════════════════════════
+   全局流畅度优化 / global smoothness polish
+   ══════════════════════════════════════════════ */
+
+/* 页面切换柔和淡入：路由变化时内容不再"硬弹"出现，而是快速上浮淡入，
+   让每次导航都有一致的、轻盈的呈现节奏（在 Layout 里按 pathname 重挂载触发）。
+   Soft page-enter on route change: content rises + fades in instead of hard-
+   popping, giving every navigation a consistent, light rhythm (re-triggered by
+   remounting on pathname in Layout). */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.page-enter {
+  animation: page-enter 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* 滚动体验：阻断滚动链导致的回弹抖动 + iOS 惯性滚动，内部滚动区更跟手。
+   Scroll feel: stop scroll-chaining bounce jitter + iOS momentum scrolling so
+   inner scroll regions track the finger. */
+html,
+body {
+  overscroll-behavior-y: contain;
+}
+:where(.overflow-auto, .overflow-y-auto, .overflow-x-auto, .overflow-scroll) {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* 减少动态偏好：停用装饰性无限动画（背景光球/漂移/走马灯/呼吸/辉光/流光），
+   并取消页面淡入，回到即时呈现；加载指示（spin）保留。既是无障碍支持，也让
+   低端/低电量设备省掉持续合成开销。
+   Reduced motion: pause decorative infinite animations and the page-enter
+   fade for instant presentation; the loading spinner stays. Accessibility plus
+   a battery/perf win on low-end devices that no longer composite continuously. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-float,
+  .animate-float-slow,
+  .animate-drift,
+  .animate-drift-slow,
+  .animate-breathe,
+  .animate-glow-pulse,
+  .animate-marquee,
+  .animate-shimmer,
+  .animate-gradient-x,
+  .page-enter {
+    animation: none !important;
+  }
+}
+
+/* ── 骨架屏 / skeleton placeholders ──
+   数据加载时用贴合布局的低对比占位替代全屏 spinner，加载完成再由 .content-fade
+   柔和淡入，消除"spinner → 内容硬弹出"的割裂感。底色复用卡片/嵌套色，微光扫过
+   用低对比高光，避免刺眼。
+   Skeletons: layout-shaped low-contrast placeholders replace full-screen spinners
+   while data loads; resolved content then eases in via .content-fade, removing the
+   "spinner → hard content pop" jank. Colors reuse card/nest tokens; the sweep uses
+   a low-contrast highlight to avoid glare. */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--nest);
+  border-radius: var(--r-tile);
+}
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.06) 50%,
+    transparent 100%
+  );
+  animation: skeleton-sweep 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-sweep {
+  100% { transform: translateX(100%); }
+}
+.skeleton-line { height: 12px; border-radius: var(--r-tile); }
+.skeleton-card {
+  border: 1px solid var(--line);
+  background: var(--card-a);
+  border-radius: var(--r-lg);
+}
+
+/* 内容淡入：数据/异步内容就绪时统一上浮淡入，替代硬弹出。
+   Content fade: async/resolved content rises + fades in instead of hard-popping. */
+@keyframes content-fade {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.content-fade {
+  animation: content-fade var(--dur-slow) var(--ease-out) both;
+}
+
+/* 统一 tap 反馈：可点卡片/标签/胶囊按下时轻微回弹，触感一致。
+   Unified tap feedback: clickable cards/tabs/chips dip slightly on press. */
+.card-hover:active,
+.tap-press:active {
+  transform: scale(0.98);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after { animation: none !important; }
+  .content-fade { animation: none !important; }
+  .card-hover:active,
+  .tap-press:active { transform: none; }
+}

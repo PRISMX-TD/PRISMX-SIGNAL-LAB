@@ -1,0 +1,176 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   PRISMX 设计令牌 / design tokens
+   ───────────────────────────────────────────────────────────────────────────
+   一句话原则：**颜料，不是光。**  Pigment, not glow.
+
+   上一版把品牌紫当成发光体使用——外发光阴影、渐变标题、玻璃拟态上的紫色光晕。
+   那套语言是 LLM 生成界面的默认签名：它不表达任何层级，只是在「让页面显得
+   有设计」。这一版保留同一个品牌色相，但把它当成**油墨**：实色面、硬边、
+   1px 发丝线，紫色从不照亮相邻的像素。
+
+   随之而来的三个结构性变更：
+   1. 画布从紫调黑（#06030f）换成中性黑（#09090B / zinc-950）。紫调黑 + 紫色
+      前景 = 一锅粥；中性黑让紫成为整页唯一的彩度，对比度自己会把质感做出来。
+   2. backdrop-filter 从「全站卡片」收缩到「固定悬浮层」（顶栏、底部 Tab、
+      弹层）。模糊只有在**真的有内容从下面穿过**时才成立，其余位置一律实色面
+      —— 这同时消掉了移动端最贵的一类持续重绘。
+   3. 圆角从六个数（18/16/12/11/10/7）收敛成一套四档规则，全站遵守。
+
+   The previous version used the brand violet as a light source: outer glow
+   shadows, gradient headlines, purple halos on frosted glass. That vocabulary
+   is the default signature of LLM-generated UI — it encodes no hierarchy, it
+   just tries to look designed. This version keeps the same brand hue but treats
+   it as ink: flat fills, hard edges, 1px hairlines, and violet never
+   illuminates neighbouring pixels.
+
+   Three structural consequences:
+   1. Canvas moved from violet-tinted black (#06030f) to neutral black
+      (#09090B / zinc-950). Violet-tinted black under violet foreground is mush;
+      a neutral ground makes violet the only chroma on the page and lets
+      contrast do the work that glow was faking.
+   2. backdrop-filter shrank from "every card" to "fixed overlays only" (header,
+      bottom tab bar, sheets). Blur is only honest when real content passes
+      underneath; everywhere else is a solid fill — which also removes the most
+      expensive class of continuous repaint on mobile.
+   3. Radii collapsed from six ad-hoc values (18/16/12/11/10/7) into one
+      four-step scale obeyed everywhere.
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* ── 画布 / canvas ──
+     中性 zinc 系，与代码里既有的 neutral / zinc 工具类同族，避免冷暖不一。
+     Neutral zinc family, matching the neutral/zinc utilities already used
+     throughout the codebase so the greys don't fight each other. */
+  --bg: #09090b;
+  /* 卡面对底色的亮度台阶从 ΔL* 2.2 抬到 7.5。原值几乎完全靠那条 8% 的发丝线
+     撑住卡片边界；去掉外轮廓之后（见 .glass）边界必须由面本身承担。
+     实测：#15151A ΔL* 4.5 太弱 / #1B1B21 ΔL* 7.5 可用 / #1E1E25 ΔL* 9 更稳但
+     在整片黑底上开始读成灰。取 7.5 这一档，并把卡间距放宽到 24 让负空间补位。
+     Card surface lifted from ΔL* 2.2 to 7.5 above the canvas. The old value
+     leaned entirely on the 8% hairline to hold the card edge; with the outline
+     gone that job falls to the surface itself. */
+  --surface: #1b1b21;
+  --surface-2: #232329;
+
+  /* 卡片填充：实色而非半透明。半透明 + backdrop-filter 是上一版的默认卡片
+     材质，也是「万物玻璃」观感的来源。这里保留变量名（下游 ~2700 行仍在
+     引用），但值改成不透明的抬升面。
+     Card fills: opaque, not translucent. Translucent + backdrop-filter was the
+     previous default card material and the source of the all-glass look. The
+     variable names are kept (the ~2700 lines downstream still reference them)
+     but now resolve to opaque raised surfaces. */
+  --card-a: #1b1b21;
+  --card-b: #1b1b21;
+  /* 内嵌格跟着面走，保持对卡面约 6 的 ΔL*——对一个有填充的小方块足够。
+     Nested tiles track the surface, keeping ~6 ΔL* above it. */
+  --nest: #272730;
+  --nest-hi: #32323c;
+
+  /* 发丝线：只用于**卡片内部**的分组（表格行线、分区线、控件描边）。
+     卡片的外轮廓已经取消——暗底上那圈线读成白边，卡片挨得近时会连成网格纸。
+     分层改由「面」承担，见 --surface 的说明。
+     Hairlines now only group things *inside* a card (row rules, section
+     dividers, control strokes). The card outline itself is gone: on a dark
+     ground that ring reads as a white edge, and adjacent cards knit into graph
+     paper. Layering is carried by surfaces instead. */
+  --line: rgba(255, 255, 255, 0.07);
+  --line-hi: rgba(255, 255, 255, 0.14);
+
+  /* ── 文字灰阶：四档，每档都有职责 / four tiers, each with a job ──
+     #FFF 强调（标题、主数值）· --text 正文 · --text-2 次级 · --text-3 说明。
+     --text-2 从 #A1A1AA 归位到 #D4D4D8：实测全站 #D4D4D8 被硬编码用了 48 次
+     （事实上的次级正文），而 --text-2 本身只用了 8 次，几乎是死变量。
+     --text-3 提亮是因为面抬高了——面每动一次，压在面上的灰就得跟着走。
+     --text-2 moves to the value the codebase actually uses (#D4D4D8 appears 48
+     times hardcoded; the token itself only 8). --text-3 is lifted because the
+     surface was. */
+  --text: #ededf0;
+  --text-2: #d4d4d8;
+  --text-3: #9c9ca6;
+
+  /* ── 品牌紫（油墨）/ brand violet, as ink ──
+     色相比 Tailwind violet 更蓝、明度更低，读起来像印刷专色而不是框架默认值。
+     --purple      主颜料：按钮填充、实色面、激活态。白字压在上面约 8.4:1。
+     --purple-hi   暗底上的强调文字色，对 #09090B 约 5.4:1（过 WCAG AA）。
+     --purple-vivid 仅用于需要再亮一档的小面积交互反馈。
+     Bluer hue and lower lightness than Tailwind's violet so it reads as a spot
+     colour rather than a framework default.
+     --purple       primary pigment: button fills, solid planes, active states.
+                    White on top scores ~8.4:1.
+     --purple-hi    accent text tone on dark, ~5.4:1 against #09090B (WCAG AA).
+     --purple-vivid one step brighter, small-area interaction feedback only. */
+  --purple: #5a22ee;
+  /* 面抬高之后，压在面上和压在半透明色块上的强调色会整片掉出 AA。
+     修法不是逐个补丁，而是把 token 本身推上去，让所有引用点一起走。
+     实测 #8B6CFF 在新面上 4.49（不过 AA），#9284FF 为 5.5；紫色芯片底上 4.9。
+     Accent tones move up with the surface — a token change, not per-site patches. */
+  --purple-hi: #9284ff;
+  --purple-vivid: #6e42ff;
+  --purple-deep: #240b63;
+
+  /* ── 市场语义色 / market semantics ──
+     这两个颜色是**数据**，不是品牌色。它们从霓虹薄荷/糖果玫瑰调深一档：
+     长时间盯盘不刺眼，且在实色面上仍然过 AA。永远不参与装饰。
+     These two are *data*, not brand. Deepened one step from neon mint / candy
+     rose so they don't sting over a long session while still passing AA on
+     solid fills. Never used decoratively. */
+  --up: #3ad584;
+  --up-bg: rgba(58, 213, 132, 0.13);
+  /* 跌色同样跟着面抬一档：#F04D63 在新面上的芯片底（14% 红）上只有 4.1。
+     Down tone lifted with the surface for the same reason as --purple-hi. */
+  --down: #ff6478;
+  --down-bg: rgba(255, 100, 120, 0.13);
+  /* 中间档：胜率不上不下（40–50%）。也是**数据**，和涨跌同一等级，所以放在
+     这里而不是复用 --gold（那是终端里的告警/过期色，语义不同）。亮度按 --up
+     配平：卡面上 8.98、自己 13% 底上 6.96，与绿的 9.00 / 7.02 基本同权，
+     免得橙色读起来比绿色"轻一档"。
+     The middle band: a rate that is neither (40–50%). Also *data*, same rank as
+     up/down, so it lives here rather than reusing --gold (a terminal warn/stale
+     tone with a different meaning). Tuned to match --up's weight — 8.98 on the
+     card surface and 6.96 on its own 13% tint, against green's 9.00 / 7.02 — so
+     the amber does not read a step lighter than the green. */
+  --mid: #ffa85c;
+  --mid-bg: rgba(255, 168, 92, 0.13);
+  --gold: #e0a83c;
+
+  /* ── 圆角：三档，全站遵守 / three radii, obeyed everywhere ──
+     999 小件与控件（chip/tag/按钮/输入）· 8 内嵌格 · 14 小浮层 · 24 卡片
+
+     从四档（6/10/14/20）收到三档。药丸让「可点的东西」和「只是块面」在形状上
+     就分得开——这是三张参考图共享的控件语汇。卡片取 24 是为了同心圆角成立：
+     内半径 = 外半径 − 内边距，24 − 16 = 8，而旧值 14 − 16 会得到负数，所以
+     以前的内嵌格（10px）永远比容器还圆，读成「贴上去的贴纸」。
+     旧变量名保留，下游 ~2700 行仍在引用。
+
+     Down from four steps to three. Pills separate "clickable" from "just a
+     plane" by shape alone. Cards move to 26 so concentric radii work out:
+     inner = outer - padding, and 24 - 16 = 8. */
+  --r-xs: 999px;
+  --r-md: 999px;
+  --r-lg: 24px;
+  --r-xl: 24px;
+  /* 内嵌格专用（原来没有这一档，内嵌格借用 --r-md）。
+     Nested tiles get their own step; they used to borrow --r-md. */
+  --r-tile: 8px;
+  /* 小浮层（下拉菜单、账号选择器）。样本里没有这类元素，是落到生产代码时才
+     发现的第四档：一个 180px 宽的下拉套 26px 圆角会读成胶囊，套 8px 又不像
+     浮层。与其硬塞进三档，不如承认它是独立的一档。
+     A fourth step discovered only when porting to production: the sample had no
+     dropdowns. 26px on a 180px menu reads as a capsule; 8px doesn't read as a
+     floating layer. */
+  --r-panel: 14px;
+
+  /* ── 动效节奏 / motion tokens ──
+     去掉了原来那条弹性过冲曲线（cubic-bezier(0.34,1.45,0.64,1)）作为默认值：
+     过冲在按钮和卡片上会读成「玩具感」。默认改成有减速无过冲的 ease-out，
+     过冲只保留给真的需要物理反馈的地方（滑动确认、底部弹层）。
+     The old springy overshoot curve is no longer the default: overshoot on
+     buttons and cards reads as toy-like. The default is now a decelerating
+     ease-out with no overshoot; the spring is kept only where physical feedback
+     is the point (slide-to-confirm, bottom sheets). */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --dur-fast: 0.14s;
+  --dur-base: 0.24s;
+  --dur-slow: 0.45s;
+}

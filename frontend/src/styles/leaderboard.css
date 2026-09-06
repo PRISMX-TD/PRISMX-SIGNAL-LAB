@@ -1,0 +1,76 @@
+/* ═════════════ 排行榜 · 领奖台悬浮 / leaderboard podium hover ═════════════
+   悬浮上浮只在真正的指针设备（鼠标）上触发——用 (hover: hover) 守卫，而不是
+   直接用 Tailwind 的 hover: 变体。触屏没有 hover 这个状态，浏览器会把「点按」
+   模拟成一次悬浮，松手前卡片会卡在上浮的位置，看起来像点了没反应。
+   Hover-lift only fires on a real pointer device, guarded by (hover: hover)
+   instead of a bare Tailwind hover: variant. Touch has no hover state; browsers
+   simulate one on tap, so without the guard a tapped card would stay lifted
+   until released, reading as an unresponsive tap. */
+.lb-podium-card {
+  transition: transform var(--dur-base) var(--ease-out);
+}
+/* 榜单骨架延迟显形：150ms 内数据就到（本地 / 缓存命中）时直接淡入内容，骨架根本不露面，
+   避免"骨架闪一下再换内容"的二次闪烁；慢网时 150ms 后柔和浮现给反馈。
+   Delayed skeleton: if data lands within 150ms (local / cache hit) content fades in and
+   the skeleton never shows, avoiding a "skeleton blinks, then content" double flash;
+   on a slow network it eases in after 150ms as feedback. */
+@keyframes lb-skel-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.lb-skel {
+  animation: lb-skel-in 0.2s var(--ease-out) 0.15s both;
+}
+@media (hover: hover) {
+  .lb-podium-card:hover {
+    transform: translateY(-4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lb-podium-card:hover { transform: none; }
+}
+
+/* ═════════════ 排行榜 · 手机端控件一行 v2 / leaderboard mobile controls row v2 ═════════════
+   .seg-tabs 自带 width:fit-content、.seg-tabs button 自带 flex-shrink:0——
+   两条都是普通全局规则（这份构建里顶层 @layer components 块在文件中段就已经
+   闭合，.seg-tabs 定义在那之后，物理位置又晚于文件顶部被搬运过来的
+   utilities），单靠 Tailwind 类名压不过，只能在这个层级直接改。
+   v1 曾经让两个分段控件在手机端一起变成 width:100%——于是两条控件各占一整行、
+   堆成两个 60px 高的药丸（见 v2 设计稿"为什么"一节）。v2 改成两者分工：
+   榜单切换（board）撑满一行剩余空间，周期切换（period）只按内容取宽，两者
+   在同一行——用 .lb-seg-board / .lb-seg-period 两个标记类分别处理，而不是再
+   笼统地扣在 .lb-controls .seg-tabs 上。
+   .seg-tabs ships its own width:fit-content, .seg-tabs button its own
+   flex-shrink:0 — both are plain global rules in this build (the top-level
+   @layer components block closes partway through this file, before
+   .seg-tabs's own definition, which also sits physically later than the
+   utilities Tailwind hoists to the top) — Tailwind classes alone can't
+   out-cascade them, so this has to be edited at this level directly.
+   v1 forced both segmented controls to width:100% on mobile, which stacked
+   them into two full-row 60px pills (see the v2 design brief's "why"
+   section). v2 splits the two apart: the board switch fills the row's
+   remaining space, the period switch only takes as much width as its
+   content needs, and both sit in the same row — targeted via the
+   .lb-seg-board / .lb-seg-period marker classes instead of blanket-styling
+   every .seg-tabs under .lb-controls. */
+@media (max-width: 639px) {
+  .lb-controls .lb-seg-board {
+    width: auto;
+    flex: 1 1 0%;
+  }
+  .lb-controls .lb-seg-board button {
+    flex: 1 1 0%;
+    height: 36px;
+  }
+  .lb-controls .lb-seg-period {
+    width: fit-content;
+    flex: 0 0 auto;
+  }
+  .lb-controls .lb-seg-period button {
+    flex: 0 0 auto;
+    height: 36px;
+  }
+  /* 胶囊环的四边等距与 40px 按钮已在下方 ≤1023px 的触摸热区块里全局处理（排行榜/订单/信号三页共用），这里只补周期按钮等宽。
+     Even ring + 40px buttons are handled globally in the ≤1023px tap-target block below; only the period buttons' equal width lives here. */
+  .lb-controls .lb-seg-period button { min-width: 64px; padding: 0 14px; }
+}

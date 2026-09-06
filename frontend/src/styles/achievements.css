@@ -1,0 +1,677 @@
+/* ═════════════ 成就页任务瓦片 / achievement task tiles ═════════════
+   一任务一格：状态点 + 右上数值 / 短名 / 条件 / 3px 进度条。三态：done（绿勾、
+   绿数值、不画条）、active（紫描边 + 紫进度）、locked（虚线描边、灰条 + 阈值刻度）。
+   组标题右侧一枚完成度环代替之前那条分段轨。瓦片错峰入场，条从左展开。
+   One tile per task: status dot + top-right value / short name / condition /
+   3px bar. Three states: done (green check + value, no bar), active (violet
+   outline + violet bar), locked (dashed outline, grey bar + threshold tick).
+   A completion ring beside the group title replaces the old segmented rail.
+   Tiles stagger in; bars reveal from the left. */
+.tk-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.tk-head-sub {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #a1a1aa;
+}
+.tk-ring {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  flex: none;
+}
+.tk-ring svg { position: absolute; inset: 0; }
+.tk-ring-arc {
+  transition: stroke-dashoffset 0.9s var(--ease-out);
+  animation: tk-ring-in 1s var(--ease-out) both;
+}
+.tk-ring-num {
+  position: relative;
+  font-size: 12px;
+  font-weight: 600;
+  color: #f4f4f5;
+  letter-spacing: -0.01em;
+}
+.tk-ring-num span {
+  font-weight: 500;
+  color: #71717a;
+}
+
+.tk-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+.tk-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 14px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.025);
+  animation: tk-in 0.45s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+.tk-active {
+  border-color: rgba(110, 66, 255, 0.4);
+  background: linear-gradient(180deg, rgba(110, 66, 255, 0.10), rgba(110, 66, 255, 0.03));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.tk-done {
+  background: rgba(53, 201, 122, 0.04);
+  border-color: rgba(53, 201, 122, 0.16);
+}
+.tk-locked {
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.10);
+  background: transparent;
+}
+
+.tk-tile-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
+}
+.tk-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: #71717a;
+}
+.tk-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 2px solid theme('colors.prism.400');
+  box-shadow: 0 0 0 3px rgba(110, 66, 255, 0.16);
+  animation: tk-breathe 2.4s ease-in-out infinite;
+}
+.tk-locked .tk-status { opacity: 0.55; }
+.tk-value {
+  font-size: 12px;
+  color: #71717a;
+  white-space: nowrap;
+}
+.tk-value b {
+  font-weight: 600;
+  color: #e4e4e7;
+}
+.tk-done .tk-value b { color: var(--up); }
+.tk-locked .tk-value b { color: #a1a1aa; }
+
+.tk-title {
+  margin-top: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+  color: #f4f4f5;
+  letter-spacing: -0.01em;
+}
+.tk-done .tk-title { color: #d4d4d8; }
+.tk-locked .tk-title { color: #a1a1aa; }
+.tk-cond {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 17px;
+  color: #71717a;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.tk-track {
+  position: relative;
+  height: 3px;
+  margin-top: 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.tk-fill {
+  position: absolute;
+  inset: 0;
+  width: calc(var(--pct, 0) * 100%);
+  border-radius: 999px;
+  background: linear-gradient(90deg, theme('colors.prism.400'), theme('colors.prism.500'));
+  animation: tk-grow 0.9s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 60ms + 150ms);
+}
+.tk-locked .tk-fill { background: rgba(255, 255, 255, 0.22); }
+.tk-tick {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 9px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.6);
+  transform: translateX(-50%);
+}
+.tk-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 15px;
+  color: #71717a;
+}
+
+@keyframes tk-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes tk-grow {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+@keyframes tk-ring-in {
+  from { stroke-dashoffset: 113.1; }
+}
+@keyframes tk-breathe {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(110, 66, 255, 0.16); }
+  50% { box-shadow: 0 0 0 5px rgba(110, 66, 255, 0.06); }
+}
+/* 手机：两列小瓦片，不然四五块整块叠成一长条 / mobile: two compact columns instead of a tall stack */
+@media (max-width: 639px) {
+  .tk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .tk-tile { padding: 12px; border-radius: 12px; }
+  .tk-title { margin-top: 10px; font-size: 14px; }
+  .tk-track { margin-top: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tk-tile, .tk-fill, .tk-dot, .tk-ring-arc { animation: none; }
+}
+
+/* ═════════════ 成就页 · 陈列台 / achievements showcase ═════════════
+   页面 = 陈列台（.ach-stage）+ 当前关卡（沿用 .tk-*）+
+   勋章库（.ach-vault，按材质分层的架子）。舞台是页面里唯一的纯黑块：聚光锥、
+   地面光斑、勋章倒影、极光缓漂，默认那枚 236px 缓慢浮动。架子上每枚勋章带底光
+   与架沿阴影，传说层暖金环境光、绝版层火漆红，未获得的只剩轮廓与虚线圈。
+   The page = stage (.ach-stage) + current stage
+   (reusing .tk-*) + vault (.ach-vault, shelves by material). The stage is the one
+   near-black block on the page: a light cone, floor pool, badge reflections, a
+   slow aurora drift, the default badge at 236px floating gently. Shelved badges
+   get an under-glow and a shelf-edge shadow; the legendary shelf a warm gold
+   ambience, the limited shelf wax red; unearned ones keep only outline + ring. */
+.ach-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 24px;
+  align-items: center;
+  min-height: 420px;
+  padding: 34px 36px 30px;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: #050507;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 30px 80px -30px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+}
+.ach-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 60% 70% at 70% 8%, rgba(110, 66, 255, 0.22), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 20% 100%, rgba(110, 66, 255, 0.06), transparent 70%);
+  animation: ach-aurora 14s ease-in-out infinite alternate;
+}
+.ach-stage-l { position: relative; min-width: 0; }
+/* 网格子项默认 min-width:auto，三枚勋章一排会把整列撑到比容器还宽（手机上右边那枚和关卡轨末端被裁掉）。
+   Grid items default to min-width:auto; the three-badge row would widen the column past the container
+   (mobile clipped the right badge and the rail's last node). */
+.ach-pedestal { min-width: 0; }
+.ach-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #71717a;
+  font-weight: 500;
+}
+.ach-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 14px 0 0;
+  font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
+  font-weight: 800;
+  font-size: 40px;
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  color: #f4f4f5;
+  text-wrap: balance;
+}
+.ach-lv {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: 1px solid rgba(139, 108, 255, 0.55);
+  background: radial-gradient(circle at 35% 30%, rgba(139, 108, 255, 0.35), rgba(110, 66, 255, 0.08) 70%);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #d9ceff;
+}
+.ach-sub { margin: 12px 0 0; font-size: 14px; color: #a1a1aa; }
+
+.ach-rail {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  margin: 26px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ach-rail::before {
+  content: "";
+  position: absolute;
+  left: 8.33%;
+  right: 8.33%;
+  top: 7px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+}
+.ach-rail li { position: relative; }
+.ach-rail i {
+  display: block;
+  position: relative;
+  width: 14px;
+  height: 14px;
+  margin: 0 auto;
+  border-radius: 999px;
+  background: #0d0d11;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+.ach-rail .on i {
+  background: theme('colors.prism.500');
+  border-color: theme('colors.prism.400');
+  box-shadow: 0 0 0 4px rgba(110, 66, 255, 0.18);
+}
+.ach-rail .cur i::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 999px;
+  background: #fff;
+}
+.ach-rail b {
+  display: block;
+  margin-top: 9px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 500;
+  color: #71717a;
+}
+.ach-rail .on b { color: #a1a1aa; }
+.ach-rail .cur b { color: #f4f4f5; font-weight: 700; }
+
+.ach-stats {
+  display: flex;
+  margin-top: 26px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.ach-stats > div { flex: 1; min-width: 0; padding-right: 16px; }
+.ach-stats > div + div { padding-left: 16px; border-left: 1px solid rgba(255, 255, 255, 0.07); }
+.ach-stats small { display: block; font-size: 11px; color: #71717a; letter-spacing: 0.04em; }
+.ach-stats strong { display: block; margin-top: 4px; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; color: #f4f4f5; }
+.ach-stats strong span { font-size: 14px; font-weight: 500; color: #71717a; }
+.ach-link {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 11px;
+  color: #a1a1aa;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.ach-link:hover { color: #f4f4f5; }
+
+.ach-pedestal {
+  position: relative;
+  height: 372px;
+  display: grid;
+  place-items: end center;
+  perspective: 900px;
+  overflow: hidden;
+  /* 转盘几何：勋章一律按 236 渲染，C 位 1:1，副戴按 --side 缩放；--gx/--gy 由陀螺仪写入。
+     Turntable geometry: badges render at 236, the centre at 1:1, sides scaled by --side;
+     --gx/--gy are written by the gyroscope. */
+  --hero: 236px;
+  --side: 0.39;
+  --offset: 0.78;
+}
+.ach-cone {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 520px;
+  height: 330px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.03) 55%, transparent);
+  clip-path: polygon(40% 0, 60% 0, 100% 100%, 0 100%);
+  opacity: 0.7;
+  filter: blur(14px);
+  animation: ach-breathe 6s ease-in-out infinite;
+}
+.ach-floor {
+  position: absolute;
+  left: 50%;
+  bottom: 34px;
+  width: 420px;
+  max-width: 100%;
+  height: 70px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(139, 108, 255, 0.38), rgba(110, 66, 255, 0.12) 45%, transparent 72%);
+  filter: blur(6px);
+}
+.ach-floorline {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: 68px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
+}
+/* 场景随陀螺仪平移 + 微倾（±14px / ±12° / ±16°），台座与勋章之间产生视差——陀螺仪只做这件事，
+   不再叠反光（真机上试过不好看）。
+   The scene shifts and tilts with the gyroscope (±14px / ±12° / ±16°) for parallax between
+   plinth and badge — that is all the gyroscope does now; the sheen overlay was tried and dropped. */
+.ach-scene {
+  position: relative;
+  width: 100%;
+  padding-bottom: 84px;
+  transform-style: preserve-3d;
+  transform:
+    translate3d(calc(var(--gx, 0) * 14px), calc(var(--gy, 0) * -10px), 0)
+    rotateX(calc(var(--gy, 0) * -12deg)) rotateY(calc(var(--gx, 0) * 16deg));
+  transition: transform 0.08s linear;
+}
+.ach-trio {
+  position: relative;
+  width: 100%;
+  height: var(--hero);
+  transform-style: preserve-3d;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* 转盘上的三个位子：C 位居中原尺寸；左右两位平移到两侧、后退一层、向中心转 26°、
+   缩到 --side。位子换人时靠 transform 过渡转过去。
+   The three turntable slots: centre at full size; left/right shifted aside, set back a
+   layer, turned 26° toward the centre and scaled to --side. A change of occupant
+   transitions via transform. */
+.ach-3d {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--hero);
+  height: var(--hero);
+  margin: calc(var(--hero) / -2) 0 0 calc(var(--hero) / -2);
+  transform-style: preserve-3d;
+  transition: transform 0.65s var(--ease-out), filter 0.65s var(--ease-out);
+  will-change: transform;
+}
+.ach-3d-c { transform: translateZ(0); z-index: 2; }
+.ach-3d-l {
+  transform: translateX(calc(var(--hero) * var(--offset) * -1)) translateZ(-70px) rotateY(26deg) scale(var(--side));
+  filter: brightness(0.88);
+}
+.ach-3d-r {
+  transform: translateX(calc(var(--hero) * var(--offset))) translateZ(-70px) rotateY(-26deg) scale(var(--side));
+  filter: brightness(0.88);
+}
+/* 摇摆放在内层，MedalTilt 的行内 transform 才不会被动画压住
+   The sway lives on an inner layer so MedalTilt's inline transform isn't overridden by the animation */
+.ach-sway { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; }
+.ach-3d-c .ach-sway { animation: ach-sway 7s ease-in-out infinite; }
+.ach-hero {
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 26px 30px rgba(0, 0, 0, 0.6));
+}
+.ach-hero svg { width: 100%; height: 100%; }
+.ach-plinth {
+  position: absolute;
+  left: 50%;
+  border-radius: 50%;
+  transform: translateX(-50%) rotateX(72deg);
+  pointer-events: none;
+}
+.ach-plinth-outer {
+  width: 300px;
+  height: 300px;
+  bottom: -80px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: radial-gradient(circle, rgba(139, 108, 255, 0.10), rgba(255, 255, 255, 0.02) 55%, transparent 70%);
+  box-shadow: inset 0 0 40px rgba(110, 66, 255, 0.10), 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+.ach-plinth-inner {
+  width: 210px;
+  height: 210px;
+  bottom: -35px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: radial-gradient(circle, rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.12) 60%, transparent 75%);
+}
+/* 空位：虚线圈占着位置，邀请去戴 / empty slot: a dashed ring holding the place */
+.ach-slot { display: block; width: 100%; height: 100%; border-radius: 999px; border: 1px dashed rgba(255, 255, 255, 0.16); }
+.ach-refl {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: var(--hero);
+  pointer-events: none;
+  transform: scaleY(-1);
+  transform-style: preserve-3d;
+  opacity: 0.42;
+  filter: blur(1px);
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent 45%);
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent 45%);
+}
+.ach-cap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  text-align: center;
+  font-size: 12px;
+  color: #71717a;
+}
+.ach-cap b { display: block; margin-bottom: 3px; font-size: 15px; font-weight: 600; color: #f4f4f5; }
+.ach-cap-btn {
+  padding: 3px 10px;
+  border: 1px solid rgba(139, 108, 255, 0.45);
+  border-radius: 999px;
+  background: rgba(110, 66, 255, 0.16);
+  font-size: 11px;
+  color: #d9ceff;
+  cursor: pointer;
+}
+.ach-cap-btn:disabled { opacity: 0.5; cursor: default; }
+.ach-slots { display: inline-flex; gap: 6px; margin-left: 10px; vertical-align: middle; }
+.ach-slots i { width: 6px; height: 6px; border-radius: 999px; background: rgba(139, 108, 255, 0.45); transition: background var(--dur-base), transform var(--dur-base); }
+.ach-slots i.cur { background: theme('colors.prism.300'); transform: scale(1.25); }
+.ach-slots i.empty { background: transparent; border: 1px solid rgba(255, 255, 255, 0.25); }
+.ach-swipe-hint { display: none; margin-top: 4px; font-size: 10.5px; color: #52525b; }
+.ach-gyro-btn {
+  display: none;
+  margin: 8px auto 0;
+  padding: 5px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+  color: #a1a1aa;
+  cursor: pointer;
+}
+@media (hover: none) and (pointer: coarse) {
+  .ach-swipe-hint { display: block; }
+  .ach-gyro-btn { display: block; }
+}
+
+/* 小节标题：粗体名 + 浅色说明 + 右侧数字 / section header: bold name + muted note + right figure */
+.ach-sec-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ach-sec-h h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: #71717a;
+}
+.ach-sec-h h3 b { margin-right: 10px; font-size: 15px; font-weight: 700; color: #f4f4f5; }
+.ach-sec-h .r { font-size: 12px; color: #71717a; }
+.ach-sec-h .r b { font-weight: 600; color: #f4f4f5; }
+.ach .tk-grid { margin-top: 14px; }
+
+.ach-vault { display: flex; flex-direction: column; gap: 22px; }
+.ach-shelf { position: relative; padding: 14px 18px 18px; border-radius: 18px; }
+.ach-shelf::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
+.ach-s-rare::before { background: radial-gradient(ellipse 60% 100% at 50% 110%, rgba(184, 190, 200, 0.09), transparent 70%); }
+.ach-s-epic::before { background: radial-gradient(ellipse 60% 100% at 50% 110%, rgba(201, 162, 74, 0.10), transparent 70%); }
+.ach-s-legendary::before { background: radial-gradient(ellipse 70% 110% at 50% 110%, rgba(201, 162, 74, 0.20), transparent 70%); }
+.ach-s-limited::before { background: radial-gradient(ellipse 60% 110% at 50% 110%, rgba(156, 47, 47, 0.22), transparent 70%); }
+.ach-shelf-h { position: relative; display: flex; align-items: baseline; justify-content: space-between; }
+.ach-shelf-h h4 { margin: 0; font-size: 14px; font-weight: 700; color: #f4f4f5; }
+.ach-shelf-h h4 span { margin-left: 10px; font-size: 11px; font-weight: 500; letter-spacing: 0.04em; color: #71717a; }
+.ach-shelf-h .r { font-size: 12px; color: #71717a; }
+.ach-shelf-h .r b { color: #a1a1aa; font-weight: 600; }
+.ach-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px 12px;
+  margin: 8px 0 0;
+  padding: 0 0 18px;
+  list-style: none;
+}
+.ach-row::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18) 15%, rgba(255, 255, 255, 0.18) 85%, transparent);
+  box-shadow: 0 10px 24px -6px rgba(0, 0, 0, 0.7);
+}
+.ach-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 14px 8px 22px;
+  border-radius: 14px;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+@media (hover: hover) { .ach-item:hover { transform: translateY(-4px); } }
+.ach-glow {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  width: 110px;
+  height: 26px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  filter: blur(8px);
+  opacity: 0.75;
+  pointer-events: none;
+}
+.ach-s-common .ach-glow { background: radial-gradient(ellipse, rgba(140, 144, 156, 0.35), transparent 70%); }
+.ach-s-rare .ach-glow { background: radial-gradient(ellipse, rgba(184, 190, 200, 0.45), transparent 70%); }
+.ach-s-epic .ach-glow { background: radial-gradient(ellipse, rgba(201, 162, 74, 0.40), transparent 70%); }
+.ach-s-legendary .ach-glow { background: radial-gradient(ellipse, rgba(201, 162, 74, 0.6), transparent 70%); }
+.ach-s-limited .ach-glow { background: radial-gradient(ellipse, rgba(156, 47, 47, 0.6), transparent 70%); }
+.ach-item.ghost .ach-glow { opacity: 0.12; }
+.ach-item svg { filter: drop-shadow(0 10px 12px rgba(0, 0, 0, 0.55)); }
+.ach-ring {
+  position: absolute;
+  top: 10px;
+  width: 100px;
+  height: 100px;
+  border-radius: 999px;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  pointer-events: none;
+}
+.ach-name { margin-top: 10px; font-size: 13px; font-weight: 600; color: #f4f4f5; }
+.ach-item.ghost .ach-name { color: #a1a1aa; }
+.ach-meta { margin-top: 3px; max-width: 160px; font-size: 11px; line-height: 1.35; color: #71717a; }
+.ach-own { margin-top: 6px; font-size: 10.5px; color: #71717a; }
+.ach-eq { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 5px; margin-top: 8px; }
+.ach-eq button, .ach-eq span {
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.06);
+  color: #a1a1aa;
+  cursor: pointer;
+  transition: background var(--dur-base) var(--ease-out);
+}
+.ach-eq button:hover { background: rgba(255, 255, 255, 0.10); color: #f4f4f5; }
+.ach-eq button:disabled { opacity: 0.5; cursor: default; }
+.ach-eq .on { background: rgba(110, 66, 255, 0.22); color: #d9ceff; }
+.ach-eq .static { cursor: default; }
+
+@keyframes ach-aurora { from { transform: translateX(-2%) scale(1); } to { transform: translateX(2%) scale(1.06); } }
+@keyframes ach-breathe { 50% { opacity: 0.55; } }
+@keyframes ach-sway {
+  0%, 100% { transform: translateY(0) rotateY(-7deg); }
+  50% { transform: translateY(-7px) rotateY(7deg); }
+}
+
+/* 手机：舞台竖排，勋章居中；架子两枚一行。
+   Mobile: stage stacks with the badge centred; shelves two per row. */
+@media (max-width: 767px) {
+  .ach-stage { grid-template-columns: 1fr; gap: 10px; min-height: 0; padding: 18px 18px 22px; }
+  /* 手机：勋章先出场，文字在后 / phones: the badge leads, the text follows */
+  .ach-pedestal { order: -1; }
+  .ach-stage-l { padding-top: 4px; }
+  .ach-stats > div { padding-right: 10px; }
+  .ach-stats > div + div { padding-left: 10px; }
+  .ach-title { font-size: 30px; }
+  /* 手机：C 位 168、副戴放大到 0.5（约 84px）并少偏一点，三枚都落在 303px 宽的舞台里。
+     Phones: centre 168, sides up to 0.5 (~84px) with a smaller offset, all three inside the 303px stage. */
+  .ach-pedestal { height: 344px; perspective: 700px; --hero: 168px; --side: 0.5; --offset: 0.7; }
+  .ach-scene { padding-bottom: 104px; }
+  .ach-3d-l { transform: translateX(calc(var(--hero) * var(--offset) * -1)) translateZ(-50px) rotateY(30deg) scale(var(--side)); }
+  .ach-3d-r { transform: translateX(calc(var(--hero) * var(--offset))) translateZ(-50px) rotateY(-30deg) scale(var(--side)); }
+  .ach-refl { opacity: 0.3; }
+  .ach-plinth-outer { width: 250px; height: 250px; bottom: -43px; }
+  .ach-plinth-inner { width: 176px; height: 176px; bottom: -6px; }
+  .ach-cone { width: 320px; height: 250px; opacity: 0.55; }
+  .ach-floor { width: 260px; bottom: 62px; }
+  .ach-floorline { display: none; }
+  .ach-rail b { font-size: 10px; }
+  .ach-stats strong { font-size: 18px; }
+  .ach-shelf { padding: 12px 10px 14px; }
+  .ach-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ach-stage::before, .ach-cone, .ach-3d-c .ach-sway { animation: none; }
+  .ach-scene, .ach-3d { transition: none; }
+}

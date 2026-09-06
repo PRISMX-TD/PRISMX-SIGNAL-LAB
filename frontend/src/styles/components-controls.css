@@ -1,0 +1,655 @@
+@layer components {
+  /* ── 通用自定义下拉（替代原生 select）/ generic custom dropdown ── */
+  .select-picker {
+    position: relative;
+    display: inline-block;
+  }
+  .select-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    min-width: 84px;
+    background: var(--nest);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 4px 8px;
+    font: inherit;
+    font-size: 13px;
+    color: var(--text);
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .select-trigger:hover {
+    border-color: var(--line-hi);
+  }
+  /* 表单内的下拉：尺寸对齐 .input，让它和同一表单里的输入框/文本域看起来是一套。
+     Form-sized dropdown: matches .input's metrics so it reads as part of the
+     same field set as the inputs/textareas around it. */
+  .select-lg .select-trigger {
+    border-radius: var(--r-md);
+    padding: 8px 16px;
+    font-size: 13px;
+  }
+  .select-trigger svg {
+    flex-shrink: 0;
+    color: var(--text-3);
+    transition: transform 0.15s;
+  }
+  /* 触发按钮的文字超出容器宽度时省略号截断（如很长的交易商账户名）；flex 子项
+     默认按内容撑开、不会自动收缩，必须显式 min-width: 0 才会让 ellipsis 生效。
+     只截断触发按钮本身——下拉列表里的选项（.select-opt）保持完整文字不截断。
+     Ellipsis-truncate the trigger's label when it overflows the container
+     (e.g. a long broker account name); a flex item defaults to sizing by its
+     content and won't shrink on its own — min-width: 0 is required for the
+     ellipsis to take effect. Only the trigger truncates — the dropdown list's
+     options (.select-opt) keep the full untruncated text.
+   */
+  .select-trigger span {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .select-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+  }
+  /* portal 到 <body>，用 fixed 定位（left/top/width/bottom 由组件按触发器坐标
+     内联注入），因此这里不再写死 top/left，避免被祖先 overflow 裁切。
+     Portaled to <body> with fixed positioning (left/top/width/bottom injected
+     inline by the component from the trigger rect), so no hard-coded top/left
+     here — this is what escapes ancestor overflow clipping. */
+  .select-menu {
+    position: fixed;
+    z-index: 60;
+    max-height: 240px;
+    overflow-y: auto;
+    background: #17171d;
+    border: 1px solid var(--line-hi);
+    border-radius: var(--r-panel);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    padding: 4px;
+  }
+  .select-opt {
+    display: block;
+    width: 100%;
+    padding: 8px 8px;
+    border-radius: var(--r-tile);
+    background: transparent;
+    border: none;
+    color: var(--text-2);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .select-opt:hover {
+    background: var(--nest-hi);
+    color: #fff;
+  }
+  .select-opt.active {
+    background: rgba(90, 34, 238, 0.18);
+    color: #fff;
+  }
+
+  .slide-track {
+    position: relative;
+    height: 56px;
+    border-radius: 999px;
+    background: var(--nest);
+    border: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    user-select: none;
+    touch-action: none;
+    margin-top: 16px;
+  }
+  .slide-track-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    background: rgba(90, 34, 238, 0.28);
+    transition: width 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: width;
+  }
+  .slide-track-label {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+    color: var(--text-2);
+    font-weight: 500;
+  }
+  .slide-knob {
+    position: absolute;
+    z-index: 2;
+    top: 50%;
+    left: 5px;
+    transform: translateY(-50%);
+    width: 46px;
+    height: 46px;
+    border-radius: 999px;
+    background: var(--purple);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    cursor: grab;
+    box-shadow: 0 4px 18px rgba(90, 34, 238, 0.55);
+    transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), background 0.2s, box-shadow 0.2s;
+    will-change: transform;
+    touch-action: none;
+  }
+  .slide-knob:active {
+    cursor: grabbing;
+  }
+  /* 拖动中关闭过渡，让滑块与手指 1:1 实时跟随 / no transition while dragging → 1:1 finger tracking */
+  .slide-track.dragging .slide-knob,
+  .slide-track.dragging .slide-track-fill {
+    transition: none;
+  }
+  .slide-track.done {
+    border-color: rgba(53, 201, 122, 0.5);
+  }
+  .slide-track.done .slide-track-fill {
+    background: rgba(53, 201, 122, 0.16);
+    width: 100% !important;
+  }
+  .slide-track.done .slide-knob {
+    background: linear-gradient(130deg, #16a866, #35c97a);
+    box-shadow: 0 4px 18px rgba(53, 201, 122, 0.5);
+  }
+  .receipt-card {
+    margin-top: 12px;
+    animation: pop 0.45s cubic-bezier(0.34, 1.45, 0.64, 1);
+  }
+  .receipt-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-radius: var(--r-tile);
+    font-size: 13px;
+  }
+  .receipt-line.wait {
+    background: rgba(90, 34, 238, 0.14);
+    color: var(--purple-hi);
+  }
+  .receipt-line.ok {
+    background: var(--up-bg);
+    color: var(--up);
+    font-weight: 700;
+    border: 1px solid rgba(53, 201, 122, 0.3);
+  }
+  .spinner {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid rgba(139, 108, 255, 0.3);
+    border-top-color: var(--purple-hi);
+    animation: spin 0.8s linear infinite;
+  }
+  .slide-cancel-x {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: var(--nest);
+    border: 1px solid var(--line);
+    color: var(--text-3);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+  }
+  .slide-note {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    font-size: 12px;
+    color: var(--text-3);
+    margin: 12px 4px 16px;
+    line-height: 1.6;
+  }
+  .slide-close-btn {
+    width: 100%;
+    margin-top: 12px;
+  }
+
+  /* ══════════════════════════════════════════════
+     手机端底部导航 / mobile bottom nav
+     这是全站唯一仍然保留背景模糊的常驻组件，而且它是有依据的：它固定悬浮在
+     滚动内容之上，底下**确实**有东西穿过。其余位置的模糊已全部移除。
+     注意这里不再自称「苹果液态玻璃」——Apple 的 Liquid Glass 是 Apple 平台的
+     原生材质，网页端只能做近似，把近似称作原物是不诚实的命名。
+     This is the only persistent component that still uses backdrop blur, and it
+     earns it: it floats above scrolling content, so something genuinely passes
+     underneath. Blur was removed everywhere else.
+     Note it no longer claims to be "Apple liquid glass" — Liquid Glass is a
+     native Apple-platform material; the web can only approximate it, and naming
+     an approximation after the original is dishonest.
+     ══════════════════════════════════════════════ */
+  .lg-tabbar {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(env(safe-area-inset-bottom) + 12px);
+    z-index: 40;
+  }
+  .lg-tabbar-inner {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    padding: 8px;
+    /* 圆角对齐卡片的 24：底栏是全站唯一还停在旧值（18）的容器。
+       内边距同时抹平横竖差，同心圆角才成立（26 − 8 = 18，见 .lg-tab）。 */
+    border-radius: var(--r-lg);
+    /* ── 液态玻璃（按要求恢复，并做到位）──
+       这里先前被改成实色面，理由是「设计系统不用玻璃」。现在按要求改回玻璃，
+       但只在**这一个元素**上破例：它是全站唯一悬浮在滚动内容之上的持久层，
+       玻璃在这里是有功能的——它让你知道下面还有内容在动。其余地方仍然实色。
+
+       诚实说明：Apple 的 Liquid Glass 只为自家平台定义，网页上**没有官方实现**，
+       下面是用 CSS 逼近，不是移植。三层：
+         ① backdrop-filter 的 blur + saturate——只 blur 会发灰，饱和度补回来
+            才有「透过玻璃看颜色」的感觉；
+         ② 顶缘一道 1px 内高光 + 底缘一道暗边，模拟玻璃厚度的两个折射面；
+         ③ 一层极淡的白色叠底，让玻璃在纯黑背景上也有实体感（否则纯 blur 在
+            没有内容经过时等于透明）。
+       不支持 backdrop-filter 时回落到实色面，观感退化但不破。
+
+       Apple documents Liquid Glass for its own platforms only; there is no
+       official web implementation. This is a CSS approximation: blur+saturate,
+       a bright top edge and dark bottom edge for glass thickness, and a faint
+       white wash so the panel still reads as a solid object over pure black. */
+    background: rgba(27, 27, 33, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow:
+      0 12px 36px -12px rgba(0, 0, 0, 0.7),
+      inset 0 1px 0 rgba(255, 255, 255, 0.16),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+  }
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .lg-tabbar-inner {
+      background: rgba(27, 27, 33, 0.52);
+      backdrop-filter: blur(24px) saturate(180%);
+      -webkit-backdrop-filter: blur(24px) saturate(180%);
+    }
+  }
+  .lg-tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 8px 0 8px;
+    /* 同心圆角：底栏 24 − 内边距 8 = 16。
+       这里**不能**用药丸：Tab 的盒子是 67×54（长宽比 1.22），999px 已经超过
+       短边的一半，整块会被压成椭圆疙瘩，跟同屏所有卡片的形状语言都不搭。
+       药丸只在「宽而扁」的形状上才读作药丸。
+       Not a pill: at 67×54 a 999px radius exceeds half the short side and the
+       box collapses into an ellipse. Pills only read as pills on wide, short
+       shapes. Concentric instead: 24 - 8 = 16. */
+    border-radius: 16px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-3);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out),
+                transform 0.09s var(--ease-out);
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* 手机上 hover 永不触发，:active 是用户唯一能拿到的反馈。全站 42 条 :hover
+     只配了 16 条 :active，而底栏这种最常按的控件一条都没有。
+     On touch, hover never fires and :active is the only feedback there is. */
+  .lg-tab:active {
+    transform: scale(0.96);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .lg-tab:active { transform: none; }
+  }
+  .lg-tab .lg-ico {
+    display: grid;
+    place-items: center;
+    height: 26px;
+  }
+  /* 激活态：实色品牌紫。原本是一层「紫→淡紫」的斜向半透明渐变加白色内高光，
+     在半透明底栏上会与背后滚过的内容混色，选中项的位置随内容漂移。实色一填，
+     选中态在任何背景上都是同一个样子。
+     Active tab: flat brand violet. It used to be a diagonal translucent violet
+     gradient with a white inset highlight, which blended with whatever scrolled
+     underneath the translucent bar — so the selected item visibly shifted colour
+     as the page moved. A flat fill looks identical over any background. */
+  .lg-tab.on {
+    color: #fff;
+    background: var(--purple);
+    border-color: var(--purple);
+    box-shadow: none;
+  }
+
+  /* 「其他」弹出面板 / "More" liquid-glass sheet */
+  .lg-sheet-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: flex-end;
+    background: rgba(0, 0, 0, 0.42);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+    animation: lg-fade 0.2s ease;
+  }
+  /* 面板本身改为实色：它上面是导航项文字，背后是整页内容，半透明只会让两层
+     文字互相干扰。遮罩层负责「隔开」，面板负责「承载」，各司其职。
+     The sheet itself is opaque: it carries navigation labels over a full page of
+     content, and translucency just makes two layers of text interfere. The scrim
+     separates, the sheet holds content — one job each. */
+  .lg-sheet {
+    width: 100%;
+    padding: 8px 16px calc(env(safe-area-inset-bottom) + 16px);
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+    background: var(--surface);
+    border-top: 1px solid var(--line-hi);
+    box-shadow: 0 -12px 40px -12px rgba(0, 0, 0, 0.7);
+    animation: lg-slide-up 0.3s var(--ease-out);
+  }
+  .lg-sheet-handle {
+    width: 40px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.28);
+    margin: 4px auto 16px;
+  }
+  .lg-sheet-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  /* 又是「药丸半径开在近方形盒子上」——这些格子约 100×84，999px 的半径会把
+     它压成椭圆疙瘩，跟同屏所有直角圆角的东西都不搭。药丸只在宽而扁的形状上
+     才读作药丸。
+     按同心式取值：面板圆角 24 − 面板内边距 16 = 8。
+     Pill radius on a near-square box yields a lozenge, not a pill. Concentric
+     instead: sheet radius 24 minus its 16px padding = 8. */
+  .lg-sheet-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 16px 8px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    color: var(--text-2);
+    font-size: 12px;
+    font-weight: 500;
+    text-align: center;
+    transition: background 0.25s, color 0.25s, border-color 0.25s;
+  }
+  .lg-sheet-item svg {
+    width: 22px;
+    height: 22px;
+  }
+  .lg-sheet-item.on {
+    color: #fff;
+    background: linear-gradient(158deg, rgba(180, 120, 255, 0.34), rgba(90, 34, 238, 0.24));
+    border-color: rgba(255, 255, 255, 0.22);
+  }
+  .lg-sheet-logout {
+    width: 100%;
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 999px;
+    background: rgba(240, 77, 99, 0.12);
+    border: 1px solid rgba(240, 77, 99, 0.32);
+    color: #ff8095;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  @keyframes lg-slide-up {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+  @keyframes lg-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  /* ══════════════════════════════════════════════
+     图表全屏模式 / Chart fullscreen mode
+     ══════════════════════════════════════════════ */
+  /* body 锁滚动，同时隐藏 header 和底部 Tab 栏（它们 z-index 低于全屏容器） */
+  body.chart-fullscreen {
+    overflow: hidden;
+    /* 防止 iOS Safari 弹性滚动拉出白底 */
+    position: fixed;
+    inset: 0;
+  }
+  /* 全屏容器：覆盖整个视口，z-60 盖过 header(z-30) 和 tabbar(z-40) */
+  .chart-fullscreen-container {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 60 !important;
+    height: 100dvh !important;
+    min-height: unset !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+    padding: 6px !important;
+    background: #080510 !important;
+  }
+
+  /* 全屏态悬浮画线工具栏 */
+  .chart-fs-toolbar {
+    position: absolute;
+    z-index: 70;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    padding: 8px 8px 8px;
+    border-radius: 14px;
+    background: rgba(16, 16, 18, 0.92);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.55),
+      0 1px 4px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .chart-fs-toolbar-handle {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 22px;
+    margin: -4px -4px 4px;
+    padding: 4px 0;
+    border-radius: 8px;
+    color: #fff;
+    cursor: grab;
+    touch-action: none;
+  }
+  .chart-fs-toolbar-handle:active {
+    cursor: grabbing;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  /* ══════════════════════════════════════════════
+     手机端响应式 / Mobile responsive  (< 640px)
+     ══════════════════════════════════════════════ */
+  @media (max-width: 639px) {
+
+    /* ── 隐藏滚动条：手机端更贴近原生 App / hide scrollbars on mobile for a native feel ── */
+    ::-webkit-scrollbar {
+      display: none;
+      width: 0;
+      height: 0;
+    }
+    html,
+    body {
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+
+    /* ── 仪表盘网格：单列堆叠 / single column stack ── */
+    .dash-grid {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 12px;
+    }
+    .dash-col-1,
+    .dash-col-2,
+    .dash-others {
+      grid-column: 1 !important;
+      grid-row: auto !important;
+    }
+    /* display:contents 把第二列摊平，它的三张卡直接变成单列网格的成员，
+       于是能各自排序。/ display:contents flattens the second column so its
+       three cards become items of the single-column grid and can be ordered. */
+    .dash-col-2 {
+      display: contents;
+    }
+    /* 手机端只有一列，位置就是优先级。「我的交易表现」是自己的历史成绩、
+       看不看都不影响这一刻的决定，沉到最底下；「当前时段胜率」留在 DOM 原位，
+       也就是紧跟「可执行信号」，正好落在交易表现之上。
+       On mobile there is one column, so position is priority. "My performance"
+       is one's own past record — it changes nothing about the decision at hand —
+       so it sinks to the bottom, while the session win rate keeps its DOM slot
+       right after the executable signal, which puts it above that record. */
+    .dash-personal {
+      order: 1;
+    }
+
+    /* ── 英雄卡收缩 / hero card compact ── */
+    /* 手机端隐藏「多周期趋势」标题文字，省出顶部空间 */
+    .hero-heading {
+      display: none;
+    }
+    /* 指示器居中，上下留白对称。
+       上方间距来自 <main> 的 pt-6(24px)：用等量负 margin 完全抵消，
+       再由卡片自身 padding-top 与品种块 margin-top 提供对称的 14px。 */
+    .hero-header-row {
+      min-height: 0;
+      justify-content: center;
+      margin: 0;
+    }
+    .hero-segs {
+      margin: 0 auto;
+    }
+    .hero-card {
+      margin-top: -24px !important;
+      padding-top: 16px !important;
+    }
+    /* 指示器行的下一个兄弟（品种块）：上间距与卡片顶 padding 相等 */
+    .hero-header-row + div {
+      margin-top: 16px !important;
+    }
+    .hero-nebula {
+      width: 46%;
+      opacity: 0.55;
+    }
+    .stance-word {
+      font-size: 26px;
+    }
+    .conf-val {
+      font-size: 20px;
+    }
+
+    /* ── 执行卡手机版：套用普通信号卡结构，无需特殊规则 ── */
+    /* 信号卡瓦片手机端内边距收紧（含可执行信号卡）*/
+    .exec-tile {
+      padding: 8px 8px;
+    }
+    .exec-tile .val {
+      font-size: 13px;
+    }
+    .exec-tile .cap {
+      font-size: 11px;
+    }
+
+    /* ── 下单弹窗：底部全屏上滑 / bottom sheet ── */
+    .slide-overlay {
+      align-items: flex-end;
+    }
+    .slide-sheet {
+      width: 100%;
+      max-width: 100%;
+      border-radius: var(--r-lg) var(--r-lg) 0 0;
+      max-height: 92vh;
+      padding: 20px 16px calc(16px + env(safe-area-inset-bottom));
+      /* 只在真正贴底成为 bottom sheet 的手机端才叠加上滑动效——桌面居中弹窗
+         用位移动画会显得突兀，desktop 那份只保留上面 overlay 的淡入。
+         Only layer the slide-up here, where it's actually a bottom sheet — a
+         translateY entrance on a centered desktop dialog would look odd; the
+         desktop version keeps just the overlay fade above. */
+      animation: lg-slide-up 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    /* ── 信号卡三列保持不变（手机端也放得下）── */
+
+    /* ── 信号网格单列 / signal grid single col ── */
+    .sig-grid {
+      grid-template-columns: 1fr;
+    }
+
+    /* ── 其他信号列表 / others list compact ── */
+    .sig-mini-tiles {
+      gap: 4px;
+    }
+
+    /* ── 行情表 / quotes table compact ── */
+    .qt-sym-cell .nm span {
+      display: none;
+    }
+    .qt-sym-ava {
+      width: 28px;
+      height: 28px;
+      font-size: 10px;
+    }
+
+    /* ── 环形图缩小 / donut smaller ── */
+    .donut-wrap {
+      gap: 12px;
+    }
+    .donut {
+      width: 90px;
+      height: 90px;
+    }
+    .donut-center b {
+      font-size: 17px;
+    }
+
+    /* ── 按钮全宽 / full-width btn ── */
+    .view-all-btn {
+      width: 100%;
+    }
+
+    /* ── 信号面板标题行 / signal page head ── */
+    .sig-page-head {
+      flex-wrap: wrap;
+    }
+    .sig-page-head p {
+      width: 100%;
+      margin-left: 0;
+    }
+  }
+}
