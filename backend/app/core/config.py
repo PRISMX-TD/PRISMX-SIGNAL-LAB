@@ -293,16 +293,16 @@ class Settings(BaseSettings):
     # ⚠️ 生产环境 gateway 跑在**另一台 Windows VPS** 上，不是后端同机——
     # GATEWAY_URL 必须填那台 Windows VPS 的地址，而不是券商 MT5 服务器的地址
     # （这两个 IP 曾被搞混，排查了很久）。默认值只适用于本地开发。
-    # 走 WireGuard 隧道后填隧道内网地址 http://10.66.0.2:8800（见 gateway/WIREGUARD.md），
-    # 网关那头只监听这个地址，公网 IP 上不再有东西响应。
+    # 走 WireGuard 隧道后填隧道内网地址 http://10.66.0.2:8800（见 gateway/WIREGUARD.md；
+    # 2026-09-06 起生产就是这个），公网 8800 由云安全组封死。
     #
     # MT5 Gateway (C# app, talks to MT5 via Manager API directly — no bridge
     # needed). Make Capital users' orders are routed through this channel.
     # In production the gateway runs on a separate Windows VPS, so GATEWAY_URL
     # must point at that VPS — not at the broker's MT5 server. The default only
     # applies to local development. Over WireGuard this is the tunnel address
-    # http://10.66.0.2:8800 (see gateway/WIREGUARD.md); nothing answers on the
-    # public IP any more.
+    # http://10.66.0.2:8800 (see gateway/WIREGUARD.md; production since 2026-09-06);
+    # the cloud security group keeps port 8800 closed to the internet.
     GATEWAY_URL: str = "http://127.0.0.1:8800"
     GATEWAY_TOKEN: str = ""
 
