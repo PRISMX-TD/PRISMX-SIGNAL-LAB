@@ -81,25 +81,34 @@ function Test-Admin {
         [Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# 从 gateway.ini 里读监听端口,读不到就按默认 8800。
+# 从 gateway.ini 里读监听地址,读不到就按默认 127.0.0.1:8800。
 # 注意 Config.cs 是忽略 [section] 的,所以这里也只按 key 匹配。
-function Get-ListenPort($iniPath) {
-    if (-not (Test-Path $iniPath)) { return 8800 }
-    foreach ($line in [System.IO.File]::ReadAllLines($iniPath)) {
-        $t = $line.Trim()
-        if ($t.StartsWith("#") -or $t.StartsWith(";")) { continue }
-        if ($t -match '^\s*listen\s*=\s*(.+?)\s*$') {
-            if ($matches[1] -match ':(\d+)') { return [int]$matches[1] }
+# 主机部分:`+` / `*` / `0.0.0.0`(监听全部地址)在本机用 127.0.0.1 探活;
+# 写了具体 IP(比如 WireGuard 隧道的 10.66.0.2,见 WIREGUARD.md)就打那个 IP——
+# 网关只听隧道地址时,127.0.0.1 上根本没有它,老写法会把好好的网关误报成"无响应"。
+function Get-ListenAddress($iniPath) {
+    $listenHost = "127.0.0.1"; $port = 8800
+    if (Test-Path $iniPath) {
+        foreach ($line in [System.IO.File]::ReadAllLines($iniPath)) {
+            $t = $line.Trim()
+            if ($t.StartsWith("#") -or $t.StartsWith(";")) { continue }
+            if ($t -match '^\s*listen\s*=\s*(.+?)\s*$') {
+                $url = $matches[1]
+                if ($url -match '://([^/:]+):(\d+)') {
+                    $h = $matches[1]; $port = [int]$matches[2]
+                    if ($h -ne "+" -and $h -ne "*" -and $h -ne "0.0.0.0") { $listenHost = $h }
+                } elseif ($url -match ':(\d+)') { $port = [int]$matches[1] }
+            }
         }
     }
-    return 8800
+    return "$($listenHost):$port"
 }
 
-function Test-Health($port) {
+function Test-Health($listen) {
     try {
         $wc = New-Object System.Net.WebClient
         $wc.Encoding = [System.Text.Encoding]::UTF8
-        return $wc.DownloadString("http://127.0.0.1:$port/health")
+        return $wc.DownloadString("http://$listen/health")
     } catch {
         return $null
     }
@@ -110,7 +119,7 @@ function Test-Health($port) {
 $GatewayDir = $PSScriptRoot
 $ExePath    = Join-Path $GatewayDir $ExeName
 $IniPath    = Join-Path $GatewayDir "gateway.ini"
-$Port       = Get-ListenPort $IniPath
+$Port       = Get-ListenAddress $IniPath   # host:port
 
 # ---------------------------------------------------------------- status
 
@@ -139,7 +148,7 @@ if ($Status) {
     }
     $health = Test-Health $Port
     if ($health) { Write-Ok "健康检查      : $health" }
-    else         { Write-Bad "健康检查      : 端口 $Port 无响应" }
+    else         { Write-Bad "健康检查      : $Port 无响应(按 gateway.ini 的 listen 探活)" }
     return
 }
 
@@ -222,7 +231,7 @@ if ($Start) {
             Write-Bad "注意:mt5Connected 不是 true,起来了但没连上券商。看 logs\ 下当天日志。"
         }
     } else {
-        Write-Bad "健康检查失败:$Port 端口无响应"
+        Write-Bad "健康检查失败:$Port 无响应(按 gateway.ini 的 listen 探活)"
         Write-Note "看日志:  Get-Content logs\gateway-$(Get-Date -Format yyyyMMdd).log -Tail 40"
         exit 1
     }
@@ -257,12 +266,12 @@ if (-not (Test-Path $IniPath)) {
     Write-Bad "找不到 gateway.ini。这是配置文件,没有它 gateway 起不来。"
     exit 1
 }
-Write-Ok "找到 gateway.ini,监听端口 $Port"
+Write-Ok "找到 gateway.ini,监听地址 $Port"
 
 # 记录改造前的健康状态,便于最后对比
 $before = Test-Health $Port
 if ($before) { Write-Note "改造前健康检查: $before" }
-else         { Write-Note "改造前:$Port 端口无响应(gateway 当前没在跑)" }
+else         { Write-Note "改造前:$Port 无响应(gateway 当前没在跑)" }
 
 # ---------------------------------------------------------------- install
 
@@ -350,7 +359,7 @@ if ($health) {
         Write-Bad "注意:mt5Connected 不是 true,gateway 起来了但没连上券商。看 logs\ 下当天日志。"
     }
 } else {
-    Write-Bad "健康检查失败:$Port 端口无响应"
+    Write-Bad "健康检查失败:$Port 无响应(按 gateway.ini 的 listen 探活)"
     Write-Host ""
     Write-Host "排查:" -ForegroundColor Yellow
     Write-Host "  1. 看任务结果:  Get-ScheduledTaskInfo -TaskName $TaskName"
