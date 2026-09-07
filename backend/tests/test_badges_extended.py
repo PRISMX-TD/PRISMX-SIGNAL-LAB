@@ -237,12 +237,12 @@ def test_has_comeback_pure():
     assert _has_comeback({(2025, 1): -200.0, (2025, 3): 500.0}) is False      # 隔了一个月
     assert _has_comeback({(2024, 12): -50.0, (2025, 1): 50.0}) is True        # 跨年相邻
     assert _has_comeback({(2025, 1): 10.0, (2025, 2): 20.0}) is False
-    # 二进制浮点表示误差下的恰好回本：-0.3 与 0.1+0.2 数学上相等，但
-    # 0.1+0.2 == 0.30000000000000004，精确比较 (>=) 会因这道误差误判未回本。
-    # Exact break-even under binary float representation error: -0.3 and
-    # 0.1+0.2 are mathematically equal, but 0.1+0.2 == 0.30000000000000004,
-    # so an exact >= comparison would misjudge this as not recovered.
-    assert _has_comeback({(2025, 1): -0.3, (2025, 2): 0.1 + 0.2}) is True
+    # 二进制浮点表示误差下的恰好回本：亏 0.1+0.2（== 0.30000000000000004）、赚 0.3，
+    # 数学上刚好回本，但精确比较 (>=) 会因这道误差误判未回本——去掉 _RECOVERY_EPS 这条就红。
+    # Exact break-even under binary float error: lose 0.1+0.2 (== 0.30000000000000004),
+    # win 0.3 — mathematically even, but an exact >= misjudges it as not recovered.
+    # This line goes red without _RECOVERY_EPS.
+    assert _has_comeback({(2025, 1): -(0.1 + 0.2), (2025, 2): 0.3}) is True
 
 
 def test_comeback_awarded_only_when_recovered(db_session):
