@@ -96,21 +96,28 @@ EVENT_STRATEGY_SIGNAL = "strategy_signal"
 # A separate kind rather than reusing bridge_offline: offline means wait, this
 # means act — until the user re-verifies, every automated order silently fails.
 EVENT_ACCOUNT_REVOKED = "account_revoked"
-# 勋章授予通知。刻意不进 _parse_event_types 的 NULL 默认全开集合——勋章推送
-# 是新加的、跟前面几类"账户/交易层面出了事"的性质不同（不痛不痒的正向反馈,
-# 不是需要用户处理的事），NULL（从未配置过偏好）不该替这一种事件类型做主，
-# 得等用户自己在通知设置里勾选才推。
-# Badge-awarded notification. Deliberately excluded from the NULL-default-on
-# set in _parse_event_types: it's new, and unlike the account/trading events
-# above (something went wrong, needs the user's attention) it's a low-stakes
-# positive nudge — a NULL pref (never configured) shouldn't opt users into it
-# on their behalf; it only fires once they explicitly enable it.
+# 勋章授予通知。2026-09-07 起与账户 / 交易事件同一待遇：开了通知总开关就推
+# （此前是 opt-in，NULL 偏好默认不含它）。
+# Badge-awarded notification; since 2026-09-07 treated like the account/trading
+# events: on whenever notifications are on (it used to be opt-in).
 EVENT_BADGE_AWARDED = "badge_awarded"
 EVENT_TYPES = {
     EVENT_ORDER_FILLED, EVENT_ORDER_REJECTED, EVENT_AUTO_MANAGE,
     EVENT_BRIDGE_OFFLINE, EVENT_ACCOUNT_REVOKED, EVENT_STRATEGY_SIGNAL,
     EVENT_BADGE_AWARDED,
 }
+
+# 只要通知总开关打开就一定推的事件（账户 / 交易 + 成就），不看事件白名单：通知
+# 设置页 2026-09-07 起不再给这些事件单独的开关——它们要么是需要用户处理的事
+# （成交 / 拒单 / 掉线 / 需重新验证 / 自动仓管动作），要么是低频正向反馈，没有
+# "开了通知却不想知道"的合理场景，单独开关只会多一层误关的机会。事件白名单
+# 现在只管 strategy_signal（我的策略信号）这一个仍由用户自己勾选的事件。
+# Events that fire whenever notifications are on, regardless of the per-event
+# whitelist. The settings page no longer offers toggles for them (2026-09-07):
+# they are either things the user must act on or rare positive feedback, and
+# a per-event switch only added a way to turn them off by accident. The
+# whitelist now only governs strategy_signal, the one still user-toggled event.
+ALWAYS_ON_EVENTS = EVENT_TYPES - {EVENT_STRATEGY_SIGNAL}
 
 # 白名单哨兵值："不限"，命中任意取值（含此刻还不存在、以后才出现的品种/类别）。
 # Whitelist sentinel meaning "unrestricted" — matches any value, including
@@ -126,20 +133,17 @@ def _list_matches(selected: list, value: str) -> bool:
 
 
 def _parse_event_types(raw: str | None) -> set[str]:
-    """解析偏好行的事件白名单。NULL = 用户从未配置过 → 除 badge_awarded 外
-    默认全部事件开启（产品语义，见 models.NotificationPref）；badge_awarded
-    是后加的低风险正向通知，NULL 不该替用户做主打开它，必须显式 opt-in 才推
-    （见 EVENT_BADGE_AWARDED 处的说明）。"[]" = 明确全关；解析失败按全关
-    处理（脏数据不该反而放大推送面）。
+    """解析偏好行的事件白名单。NULL = 用户从未配置过 → 全部事件默认开启（产品
+    语义，见 models.NotificationPref）。"[]" = 明确全关；解析失败按全关处理
+    （脏数据不该反而放大推送面）。注意派发侧对 ALWAYS_ON_EVENTS 不看这份白名单
+    （见 _event_prefs_allow），这里的结果只对 strategy_signal 有实际约束力。
     Parse a pref row's event whitelist. NULL = never configured → all events
-    on by default (product semantics, see models.NotificationPref), except
-    badge_awarded: it's a later-added, low-stakes positive notification that
-    NULL should not silently opt users into — it needs an explicit opt-in
-    (see the note by EVENT_BADGE_AWARDED). "[]" = explicitly all off;
-    unparseable data counts as all off (bad data must not widen the push
-    surface)."""
+    on by default. "[]" = explicitly all off; unparseable data counts as all
+    off (bad data must not widen the push surface). Dispatch ignores this list
+    for ALWAYS_ON_EVENTS (see _event_prefs_allow), so in practice it only
+    constrains strategy_signal."""
     if raw is None:
-        return set(EVENT_TYPES) - {EVENT_BADGE_AWARDED}
+        return set(EVENT_TYPES)
     try:
         parsed = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
@@ -387,7 +391,11 @@ def _event_prefs_allow(db, user_id: str, event_type: str) -> bool:
     pref = db.query(NotificationPref).filter(NotificationPref.user_id == user_id).first()
     if not pref or not pref.enabled:
         return False
-    if event_type not in _parse_event_types(pref.event_types):
+    # 账户 / 交易 / 成就事件不看白名单：总开关开了就推（见 ALWAYS_ON_EVENTS）。
+    # 老用户以前在设置页勾掉过的项也一并恢复——那些开关已经撤了。
+    # Account/trading/badge events skip the whitelist: on means on (see
+    # ALWAYS_ON_EVENTS); toggles users unticked before are gone with the UI.
+    if event_type not in ALWAYS_ON_EVENTS and event_type not in _parse_event_types(pref.event_types):
         return False
     if not _within_push_window(pref):
         return False

@@ -90,12 +90,10 @@ class TestWithinPushWindow:
 
 
 class TestParseEventTypes:
-    def test_null_means_all_on_except_badge(self):
-        # NULL = 从未配置 → 除 badge_awarded 外默认全部开启（后者需显式
-        # opt-in，见 push_dispatch.py 的 EVENT_BADGE_AWARDED 说明）。
-        # never configured -> all on except badge_awarded (that one needs
-        # explicit opt-in, see the EVENT_BADGE_AWARDED note in push_dispatch.py).
-        assert _parse_event_types(None) == set(EVENT_TYPES) - {EVENT_BADGE_AWARDED}
+    def test_null_means_all_on(self):
+        # NULL = 从未配置 → 全部事件默认开启（badge_awarded 2026-09-07 起也在内）
+        # never configured -> every event on (badge_awarded included since 2026-09-07)
+        assert _parse_event_types(None) == set(EVENT_TYPES)
 
     def test_empty_list_means_all_off(self):
         assert _parse_event_types("[]") == set()
@@ -124,11 +122,16 @@ class TestEventPrefsAllow:
         assert _event_prefs_allow(db_session, u.id, "order_filled")
         assert _event_prefs_allow(db_session, u.id, "strategy_signal")
 
-    def test_explicit_empty_blocks(self, db_session):
+    def test_explicit_empty_blocks_only_the_whitelisted_kind(self, db_session):
+        # "[]" 只能关掉仍由用户勾选的 strategy_signal；账户 / 交易 / 成就事件不看
+        # 白名单，总开关开着就推（2026-09-07 起，push_dispatch.ALWAYS_ON_EVENTS）。
+        # "[]" only silences strategy_signal; account/trading/badge events bypass
+        # the whitelist and push whenever notifications are on.
         u = self._user(db_session)
         db_session.add(NotificationPref(user_id=u.id, enabled=True, event_types="[]"))
         db_session.commit()
-        assert not _event_prefs_allow(db_session, u.id, "order_filled")
+        assert not _event_prefs_allow(db_session, u.id, "strategy_signal")
+        assert _event_prefs_allow(db_session, u.id, "order_filled")
 
     def test_window_blocks_event_push(self, db_session):
         u = self._user(db_session)

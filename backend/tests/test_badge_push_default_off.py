@@ -1,6 +1,8 @@
-"""badge_awarded 推送事件：NULL 偏好行默认关闭，需显式 opt-in。
-badge_awarded push event: a NULL prefs row defaults it OFF, requiring
-explicit opt-in (unlike every other event type, which stays default-on)."""
+"""badge_awarded 推送事件：2026-09-07 起与账户 / 交易事件同一待遇——通知总开关
+开了就推，不看事件白名单（push_dispatch.ALWAYS_ON_EVENTS）；此前是 opt-in。
+badge_awarded push event: since 2026-09-07 it fires whenever notifications are
+on, bypassing the per-event whitelist like the account/trading events (it used
+to be opt-in)."""
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -8,22 +10,52 @@ from unittest.mock import patch
 import pytest
 
 from app.services.gamification.badges import BADGES, award_badge
-from app.services.push_dispatch import _parse_event_types, EVENT_TYPES, EVENT_BADGE_AWARDED
+from app.models import NotificationPref
+from app.services.push_dispatch import (
+    ALWAYS_ON_EVENTS,
+    EVENT_BADGE_AWARDED,
+    EVENT_ORDER_FILLED,
+    EVENT_STRATEGY_SIGNAL,
+    EVENT_TYPES,
+    _event_prefs_allow,
+    _parse_event_types,
+)
 
 
-def test_null_means_all_on_except_badge():
-    allowed = _parse_event_types(None)
+def test_null_means_every_event_on():
     assert EVENT_BADGE_AWARDED in EVENT_TYPES
-    assert EVENT_BADGE_AWARDED not in allowed
-    assert allowed == set(EVENT_TYPES) - {EVENT_BADGE_AWARDED}
+    assert _parse_event_types(None) == set(EVENT_TYPES)
 
 
-def test_empty_list_still_all_off():
+def test_empty_list_still_all_off_for_the_whitelist():
     assert _parse_event_types("[]") == set()
 
 
-def test_explicit_opt_in_works():
-    assert EVENT_BADGE_AWARDED in _parse_event_types(f'["{EVENT_BADGE_AWARDED}"]')
+def test_always_on_events_are_everything_but_strategy_signal():
+    assert ALWAYS_ON_EVENTS == set(EVENT_TYPES) - {EVENT_STRATEGY_SIGNAL}
+    assert EVENT_BADGE_AWARDED in ALWAYS_ON_EVENTS and EVENT_ORDER_FILLED in ALWAYS_ON_EVENTS
+
+
+def test_unticked_account_and_badge_events_still_push(db_session):
+    """老用户以前勾掉的账户 / 成就事件照推；strategy_signal 仍看白名单。
+    Events unticked back when the toggles existed still push; strategy_signal
+    still honours the whitelist."""
+    from app.models import User
+    user = User(email="always-on@example.com", api_token="tok_always_on", plan="PRO")
+    db_session.add(user)
+    db_session.commit()
+    db_session.add(NotificationPref(user_id=user.id, enabled=True, event_types='["order_rejected"]'))
+    db_session.commit()
+    with patch("app.services.push_dispatch.can_use_push", return_value=True):
+        assert _event_prefs_allow(db_session, user.id, EVENT_ORDER_FILLED) is True
+        assert _event_prefs_allow(db_session, user.id, EVENT_BADGE_AWARDED) is True
+        assert _event_prefs_allow(db_session, user.id, EVENT_STRATEGY_SIGNAL) is False
+
+    pref = db_session.query(NotificationPref).filter(NotificationPref.user_id == user.id).one()
+    pref.enabled = False
+    db_session.commit()
+    with patch("app.services.push_dispatch.can_use_push", return_value=True):
+        assert _event_prefs_allow(db_session, user.id, EVENT_ORDER_FILLED) is False, "总开关关了就全关 / master switch off"
 
 
 def test_all_badges_have_a_display_name():

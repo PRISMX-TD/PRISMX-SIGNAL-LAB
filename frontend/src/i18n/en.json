@@ -455,8 +455,6 @@
     "notifStrategyLabel": "By strategy",
     "notifSymbolLabel": "By symbol",
     "notifAll": "All",
-    "notifEventsHeading": "Trading & account alerts",
-    "notifEventsGamificationHeading": "Achievement alerts",
     "notifEvent": {
       "order_filled": "Order filled",
       "order_rejected": "Order rejected",

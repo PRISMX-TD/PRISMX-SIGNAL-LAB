@@ -26,8 +26,10 @@ export const ACCOUNT_EVENT_TYPES = ["order_filled", "order_rejected", "auto_mana
 export const EVENT_STRATEGY_SIGNAL = "strategy_signal"
 // 游戏化事件（目前只有 badge_awarded），渲染在独立的「成就提醒」分组——语义
 // 上不是交易/账户提醒，且只在 gamificationVisible 时才展示（见 AccountPage）。
-// 后端 NULL 偏好默认不含它（opt-in，见 push_dispatch.EVENT_BADGE_AWARDED），
-// 不能塞进 ACCOUNT_EVENT_TYPES 让它跟着账户提醒一起默认全开的语义走。
+// 2026-09-07 起与账户事件同一待遇：总开关开了就推，设置页不再单列开关
+// （见 push_dispatch.ALWAYS_ON_EVENTS）。列表保留给类型与默认全选用。
+// Since 2026-09-07 treated like the account events: on whenever notifications
+// are on, no per-event toggle on the settings page (push_dispatch.ALWAYS_ON_EVENTS).
 // Gamification events (currently just badge_awarded), rendered in their own
 // "achievement alerts" group — not a trading/account alert semantically, and
 // only shown when gamificationVisible (see AccountPage). A NULL backend pref
@@ -131,16 +133,14 @@ export async function enableNotifications(
   // CDN cache lag where old and new code run side by side.
   const cats = current.selected_categories?.length > 0 ? current.selected_categories : [ALL_SENTINEL]
   const syms = current.selected_symbols?.length > 0 ? current.selected_symbols : [ALL_SENTINEL]
-  // 事件白名单默认全选时排除 GAMIFICATION_EVENT_TYPES（badge_awarded）：这是
-  // 显式落库（不再是 NULL），必须跟后端 _parse_event_types 的 NULL 默认口径
-  // 一致——否则"关闭再开启"这一次往返就会把用户静默 opt-in 到勋章推送，
-  // 在功能对其可见之前就先收到通知。
-  // Exclude GAMIFICATION_EVENT_TYPES (badge_awarded) from the select-all
-  // default: this writes an explicit list (no longer NULL), so it must match
-  // backend _parse_event_types's NULL-default semantics — otherwise one
-  // disable-then-enable round trip silently opts the user into badge pushes
-  // before the feature is even visible to them.
-  const events = current.event_types?.length > 0 ? current.event_types : [...ACCOUNT_EVENT_TYPES, EVENT_STRATEGY_SIGNAL]
+  // 事件白名单默认全选（含 badge_awarded）：2026-09-07 起账户 / 交易 / 成就事件在
+  // 后端不看白名单、总开关开了就推（push_dispatch.ALWAYS_ON_EVENTS），这份列表
+  // 实际只管 strategy_signal；写全集是为了跟后端 NULL 默认口径一致。
+  // Select-all default (badge_awarded included): since 2026-09-07 the backend
+  // pushes account/trading/badge events whenever notifications are on
+  // (push_dispatch.ALWAYS_ON_EVENTS); this list effectively only governs
+  // strategy_signal, and the full set mirrors the backend's NULL default.
+  const events = current.event_types?.length > 0 ? current.event_types : [...EVENT_TYPES]
 
   const vapidPromise = pushApi.getVapidKey()
   await Promise.all([
