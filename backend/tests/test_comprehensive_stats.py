@@ -52,6 +52,19 @@ def test_demo_and_unverified_and_window_excluded(db_session):
     }
 
 
+def test_per_login_lists_real_accounts_only(db_session):
+    """构成只显示实盘：纯模拟盘账号不进 per_login；实盘账号上的非实盘单仍计入 excluded。
+    Breakdown shows live accounts only: a demo-only login is dropped, while
+    non-real orders on a live login still count toward its excluded."""
+    u = _user(db_session)
+    _fill(db_session, u, "777", 1, tm=0); _close(db_session, u, "777", 1, 5.0)          # 纯模拟盘账号
+    _fill(db_session, u, "888", 2); _close(db_session, u, "888", 2, 5.0)                 # 实盘
+    _fill(db_session, u, "888", 3, tm=0); _close(db_session, u, "888", 3, 5.0)          # 同一实盘账号上的模拟单
+    s = compute_comprehensive_stats(db_session, u.id)
+    assert "777" not in s["per_login"]
+    assert s["per_login"]["888"] == {"trades": 1, "wins": 1, "winRate": 1.0, "excluded": 1}
+
+
 def test_partial_close_not_resolved(db_session):
     u = _user(db_session)
     _fill(db_session, u, "500123", 1, vol=0.2)

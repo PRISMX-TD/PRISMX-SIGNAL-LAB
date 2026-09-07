@@ -517,7 +517,7 @@ export default function AchievementsPage() {
       {showBreakdown && me.winRate.perLogin.length > 0 && (
         <section className="glass p-[18px] content-fade">
           <div className="ach-sec-h">
-            <h3><b>{t('gamification.winRateCard.account')}</b>{t('winrate.windowHint', { days: me.winRate.windowDays })}</h3>
+            <h3><b>{t('gamification.winRateCard.account')}</b>{t('winrate.windowHint', { days: me.winRate.windowDays })}{t('gamification.winRateCard.realOnly')}</h3>
           </div>
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-left text-xs">

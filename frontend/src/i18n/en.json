@@ -1896,7 +1896,7 @@
       "comeback": { "name": "Comeback", "desc": "A losing month followed by a month that wins back the entire loss" },
       "founder_2026": { "name": "Founding Member", "desc": "Registered in 2026 and completed a first live trade (permanently limited)" }
     },
-    "winRateCard": { "combined": "Combined win rate (qualifying basis)", "combinedShort": "Win rate", "account": "Account win rate",
+    "winRateCard": { "realOnly": " Live accounts only; demo and contest accounts are not counted.", "combined": "Combined win rate (qualifying basis)", "combinedShort": "Win rate", "account": "Account win rate",
                      "toNext": "{{pct}}% to the next level",
                      "metNext": "Meets the next level's win-rate bar",
                      "breakdown": "Breakdown",

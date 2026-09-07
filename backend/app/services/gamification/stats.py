@@ -103,16 +103,18 @@ def compute_comprehensive_stats(db, user_id, data: dict | None = None) -> dict:
         d["trades"] += 1
         d["wins"] += 1 if p > 0 else 0
     # excluded：该账号在窗口内被剔出统计范围的下单数（非实盘，含 NULL 与 -1
-    # 哨兵）。喂给成就页"构成展开"——告诉用户这个账号有多少条模拟盘/未核验
-    # 记录没进赢率口径。按窗口内全部订单（不限模式）分组，即使一个账号全是
-    # 非实盘单也要出现在 per_login 里（trades=0, winRate=None）。
+    # 哨兵）。喂给成就页"构成展开"——告诉用户这个账号有多少条未核验 / 模式未定
+    # 的记录没进胜率口径。**只列有实盘下单的账号**（2026-09-07 用户定案：构成只显示
+    # 实盘）——纯模拟盘 / 竞赛账号不进 per_login，页面上标注「仅实盘账户」。
     # excluded: how many of this login's window orders were excluded from the
     # scope (non-real, including NULL and the -1 sentinel). Feeds the
-    # achievement page's "构成展开" breakdown. Grouped from all window orders
-    # regardless of mode, so a login with only non-real orders still shows up.
+    # achievement page's breakdown. **Only logins with at least one real order**
+    # are listed (2026-09-07: the breakdown shows live accounts only); demo /
+    # contest-only logins are dropped and the page says so.
+    real_logins = {o.mt5_login for o in real}
     excluded_counts = defaultdict(int)
     for o in orders:
-        if o.trade_mode != REAL:
+        if o.trade_mode != REAL and o.mt5_login in real_logins:
             excluded_counts[o.mt5_login] += 1
     for login, cnt in excluded_counts.items():
         per_login[login]["excluded"] = cnt
