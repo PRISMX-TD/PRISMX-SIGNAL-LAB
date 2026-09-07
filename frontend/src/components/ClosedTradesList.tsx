@@ -173,9 +173,9 @@ export default function ClosedTradesList({ trades }: Props) {
   )
 
   return (
-    <div className="glass p-5">
-      <h3 className="font-display text-lg font-semibold text-neutral-100">{t('winrate.closedTradesTitle')}</h3>
-      <p className="mt-1 text-xs text-neutral-500">{t('winrate.closedTradesHint')}</p>
+    <div className="ord-block">
+      <div className="ord-h"><h4>{t('winrate.closedTradesTitle')}</h4></div>
+      <p className="ord-p">{t('winrate.closedTradesHint')}</p>
 
       {trades === null ? (
         <div className="flex items-center justify-center py-10">

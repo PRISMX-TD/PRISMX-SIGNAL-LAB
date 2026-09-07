@@ -725,8 +725,29 @@
   },
   "orders": {
     "title": "Orders & Receipts",
-    "subtitle": "Execution status and fill receipts",
+    "subtitle": "Execution status and fill receipts. Every instruction sent to MT5 leaves a receipt here.",
     "empty": "No orders yet",
+    "emptyHint": "Once you place an order from the Signals or Charts page, every instruction's status and fill receipt is kept here.",
+    "eyebrow": "Orders · Receipts · UTC+8",
+    "live": "Live",
+    "awaitingReceipt": "Sent — waiting for the execution receipt…",
+    "day": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "count": "{{n}} orders"
+    },
+    "acct": {
+      "login": "Login"
+    },
+    "perf": {
+      "netTitle": "Net P&L · closed",
+      "winRate": "Win rate",
+      "record": "{{w}} wins · {{l}} losses · {{n}} resolved",
+      "bySymbol": "P&L by symbol",
+      "bySymbolHint": "Net · aligned at zero",
+      "scope": "Covering the last {{days}} days · {{account}} · based on your own real closed trades",
+      "trades": "{{n}} trades"
+    },
     "colTime": "Time",
     "colType": "Type",
     "colSymbol": "Symbol",

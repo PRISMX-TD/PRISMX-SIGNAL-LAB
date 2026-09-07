@@ -1,31 +1,33 @@
 // 订单与回执页 / Orders & receipts page
+//
+// 2026-09-08 重做视觉（样式见 styles/orders.css）：三个页签共用页头（眉题 + 标题 +
+// 账号药丸 + 光谱线）；操作记录从表格改成「一行一张回执单」；绩效分析只剩净盈亏、
+// 胜率、品种盈亏三样加已平仓明细；持仓页签的账户信息改成账本条。数据流与筛选 /
+// 分页逻辑没有变，下面那些注释仍然有效。
+// Visual redesign 2026-09-08 (styles in styles/orders.css): one shared head; the
+// activity log became one receipt slip per order; the performance tab is just
+// net P&L, win rate, P&L by symbol plus the closed-trade list; the account bar
+// became a ledger strip. Data flow, filtering and paging are unchanged.
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import Pager from '../components/Pager'
 import { useAuth } from '../store/auth'
 import { useLive, usePositions } from '../store/live'
 import { usePrefs } from '../store/prefs'
 import { orderApi } from '../api/client'
-import { displaySymbol, fmtTime, localizeApiError } from '../api/utils'
+import { baseSymbol, displaySymbol, localizeApiError } from '../api/utils'
 import type { ClosedTrade, Order, OrderStatus } from '../api/types'
 import PositionCard from '../components/PositionCard'
-import PersonalWinRateCard from '../components/PersonalWinRateCard'
+import PerformanceSummary from '../components/PerformanceSummary'
 import ClosedTradesList from '../components/ClosedTradesList'
 import AutoManageCard from '../components/AutoManageCard'
 import OnboardingCard from '../components/OnboardingCard'
 import { usePartnerBroker } from '../components/PartnerBrokerCard'
 import { symbolMeta } from '../utils/symbolMeta'
 
-const statusStyle: Record<OrderStatus, string> = {
-  PENDING: 'bg-amber-500/15 text-amber-400',
-  FILLED: 'bg-up/15 text-up',
-  REJECTED: 'bg-down/15 text-down',
-  FAILED: 'bg-down/15 text-down',
-  CANCELLED: 'bg-white/10 text-neutral-400',
-}
-
 type StatusFilter = 'ALL' | OrderStatus
-type SideFilter = 'ALL' | 'BUY' | 'SELL'
+const STATUS_FILTERS: StatusFilter[] = ['ALL', 'PENDING', 'FILLED', 'REJECTED', 'FAILED', 'CANCELLED']
 
 // 页面分三个 Tab：实时（持仓与账户）、回顾（绩效分析）、查询（操作记录）。
 // 三者节奏完全不同，摊在一条滚动线上会让页面过长；分开后每屏只回答一个问题。
@@ -38,10 +40,32 @@ type OrdersTab = 'positions' | 'performance' | 'activity'
 const TAB_STORAGE_KEY = 'prismx.orders.tab'
 const TABS: OrdersTab[] = ['positions', 'performance', 'activity']
 
+// 时间全部按 UTC+8 显示，与 fmtTime 同一时区；没带时区的 ISO 串按 UTC 解。
+// All times render in UTC+8 like fmtTime; a zone-less ISO string is read as UTC.
+const TZ = 'Asia/Shanghai'
+function parseIso(iso: string): Date {
+  return new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + 'Z')
+}
+function clockOf(iso: string): string {
+  return parseIso(iso).toLocaleTimeString('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+function dayKeyOf(d: Date): string {
+  return d.toLocaleDateString('en-CA', { timeZone: TZ }) // YYYY-MM-DD
+}
+// 成交价：整数位与小数位拆开，小数位在回执单上降一号。
+// Fill price split into integer and fraction; the fraction renders one size down.
+function priceParts(n: number): { int: string; frac: string | null } {
+  const s = n.toLocaleString('en-US', { maximumFractionDigits: 5 })
+  const i = s.indexOf('.')
+  return i < 0 ? { int: s, frac: null } : { int: s.slice(0, i), frac: s.slice(i + 1) }
+}
+const money2 = (n: number | null | undefined): string =>
+  n == null ? '—' : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
 export default function OrdersPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { user, refreshUser } = useAuth()
-  const { orders, accounts, refreshAll, closedTradeTick } = useLive()
+  const { orders, accounts, refreshAll, closedTradeTick, wsConnected } = useLive()
   // gateway 账号不落库券商名，账户横条的券商列回落到合作券商名（与绑定页一致）
   // Gateway rows don't store a company; the account bar's broker falls back to
   // the partner broker name, matching the bind page.
@@ -52,7 +76,6 @@ export default function OrdersPage() {
   const [cancellingId, setCancellingId] = useState<string | null>(null)
 
   const [statusF, setStatusF] = useState<StatusFilter>('ALL')
-  const [sideF, setSideF] = useState<SideFilter>('ALL')
   const [symbolF, setSymbolF] = useState('')
 
   // 全页只有一个账号选择器：页头选中的账号同时决定账户横条、持仓、胜率卡、
@@ -236,29 +259,46 @@ export default function OrdersPage() {
     return { pnl, buy, sell, total: visiblePositions.length }
   }, [visiblePositions])
 
+  // 品种搜索框按用户看到的名字来，BTCUSD 展示成 BTCUSDT 后，搜索框也得认
+  // "BTCUSDT" 才能搜出那些行，不能只匹配后端原始的 BTCUSD 字符串。
+  // The symbol search box should match what the user actually sees — now
+  // that BTCUSD displays as BTCUSDT, typing "BTCUSDT" must still find
+  // those rows, not just the raw backend BTCUSD string.
+  const symbolQuery = symbolF.trim().toLowerCase()
+  const matchesSymbol = (o: Order) =>
+    !symbolQuery || o.symbol.toLowerCase().includes(symbolQuery) || displaySymbol(o.symbol).toLowerCase().includes(symbolQuery)
+
   const filteredOrders = useMemo(() => {
     return baseOrders.filter((o) => {
       if (statusF !== 'ALL' && o.status !== statusF) return false
-      if (sideF !== 'ALL' && o.side !== sideF) return false
-      // 品种搜索框按用户看到的名字来，BTCUSD 展示成 BTCUSDT 后，搜索框也得认
-      // "BTCUSDT" 才能搜出那些行，不能只匹配后端原始的 BTCUSD 字符串。
-      // The symbol search box should match what the user actually sees — now
-      // that BTCUSD displays as BTCUSDT, typing "BTCUSDT" must still find
-      // those rows, not just the raw backend BTCUSD string.
-      const q = symbolF.trim().toLowerCase()
-      if (q && !o.symbol.toLowerCase().includes(q) && !displaySymbol(o.symbol).toLowerCase().includes(q)) return false
-      return true
+      return matchesSymbol(o)
     })
-  }, [baseOrders, statusF, sideF, symbolF])
+  }, [baseOrders, statusF, symbolQuery])
 
-  // 状态/方向/品种筛选变化时回到第一页，避免停在一个筛选后已不存在的页码上。
+  // 状态筛选芯片上的计数：按品种筛完、还没按状态筛的那一份来数。日期筛选时集合
+  // 在服务端分页，前端只拿到一页，数不出全量——那时不显示计数。
+  // Counts on the status chips come from the set after the symbol filter but
+  // before the status filter. Under a date filter the set is server-paged and
+  // only one page is here, so no counts are shown.
+  const statusCounts = useMemo(() => {
+    if (dateFilterActive) return null
+    const c: Partial<Record<StatusFilter, number>> = { ALL: 0 }
+    for (const o of baseOrders) {
+      if (!matchesSymbol(o)) continue
+      c.ALL = (c.ALL ?? 0) + 1
+      c[o.status] = (c[o.status] ?? 0) + 1
+    }
+    return c
+  }, [baseOrders, symbolQuery, dateFilterActive])
+
+  // 状态/品种筛选变化时回到第一页，避免停在一个筛选后已不存在的页码上。
   // 日期筛选的回第一页放在各自的 onChange 里同步做（见下方日期输入框），这样切到
   // 服务端分页时不会先按旧页码多发一次请求。
-  // Reset to page 0 when the status/side/symbol filters change. Date-filter
+  // Reset to page 0 when the status/symbol filters change. Date-filter
   // resets happen synchronously in their own onChange handlers (see the date
   // inputs below) so switching into server pagination doesn't fire an extra
   // request at the stale page first.
-  useEffect(() => { setPage(0) }, [statusF, sideF, symbolF, selectedLogin])
+  useEffect(() => { setPage(0) }, [statusF, symbolF, selectedLogin])
 
   // 分页派生：日期筛选时服务端每页只取 10 条（serverTotal 为该区间总数）；否则在
   // 实时集合上本地切 10 条一页。safePage 夹紧，防止数据刷新后停在越界页码。
@@ -274,6 +314,48 @@ export default function OrdersPage() {
     : filteredOrders.slice(safePage * ORDERS_PAGE_SIZE, safePage * ORDERS_PAGE_SIZE + ORDERS_PAGE_SIZE)
   const pageTotal = dateFilterActive ? serverTotal : filteredOrders.length
 
+  // 回执单按日分组（UTC+8）：今天 / 昨天 / MM-DD 周几。
+  // Slips grouped by day (UTC+8): today / yesterday / MM-DD weekday.
+  const dayGroups = useMemo(() => {
+    const now = new Date()
+    const todayKey = dayKeyOf(now)
+    const yesterdayKey = dayKeyOf(new Date(now.getTime() - 86_400_000))
+    const locale = i18n.language.startsWith('zh') ? 'zh-CN' : 'en-GB'
+    const groups: { key: string; label: string; sub: string; items: Order[] }[] = []
+    for (const o of visibleOrders) {
+      const d = parseIso(o.createdAt)
+      const key = dayKeyOf(d)
+      let g = groups[groups.length - 1]
+      if (!g || g.key !== key) {
+        const md = key.slice(5)
+        const weekday = d.toLocaleDateString(locale, { timeZone: TZ, weekday: 'short' })
+        g = key === todayKey
+          ? { key, label: t('orders.day.today'), sub: `${md} ${weekday}`, items: [] }
+          : key === yesterdayKey
+            ? { key, label: t('orders.day.yesterday'), sub: `${md} ${weekday}`, items: [] }
+            : { key, label: md, sub: weekday, items: [] }
+        groups.push(g)
+      }
+      g.items.push(o)
+    }
+    return groups
+  }, [visibleOrders, i18n.language, t])
+
+  // 印章落下的动画只在状态真的变了（WS 推来回执）时播一次：记住每条上次渲染的
+  // 状态，本次不同就给印章加 land。首屏没有"上次"，所以不播。
+  // The stamp-drop animation plays only when a status actually changed (a
+  // receipt arrived over WS): remember each order's last rendered status and
+  // mark the stamp when it differs. First paint has no "last", so nothing plays.
+  const seenStatus = useRef<Map<string, OrderStatus>>(new Map())
+  const landed = new Set<string>()
+  for (const o of visibleOrders) {
+    const prev = seenStatus.current.get(o.id)
+    if (prev && prev !== o.status) landed.add(o.id)
+  }
+  useEffect(() => {
+    for (const o of visibleOrders) seenStatus.current.set(o.id, o.status)
+  })
+
   const doCancel = async (id: string) => {
     setCancellingId(id)
     try {
@@ -286,37 +368,142 @@ export default function OrdersPage() {
     }
   }
 
+  const accountLabel = activeAccount
+    ? `${activeAccount.login} · ${activeAccount.company || (activeAccount.source === 'gateway' ? brokerName : '')}`.replace(/ · $/, '')
+    : ''
+
+  // 一张回执单 / one receipt slip
+  const renderSlip = (o: Order, i: number) => {
+    const meta = symbolMeta(baseSymbol(o.symbol))
+    const shown = displaySymbol(o.symbol)
+    const zhName = t(`signals.symbolNames.${baseSymbol(o.symbol)}`, { defaultValue: '' })
+    const statusLabel = t(`orders.status.${o.status}`)
+    const bad = o.status === 'REJECTED' || o.status === 'FAILED'
+    const msg = o.message ? localizeApiError(o.message) : o.status === 'PENDING' ? t('orders.awaitingReceipt') : null
+    const price = o.filledPrice != null ? priceParts(o.filledPrice) : null
+    return (
+      <article key={o.id} className="ord-slip" data-status={o.status} style={{ '--i': i } as CSSProperties}>
+        <div className="ord-stub">
+          <div className="ord-stub-t">{clockOf(o.createdAt)}</div>
+          {/* 本地库里有少量旧行 action 是 'OPEN'（不在 OrderAction 枚举里），
+              兜底成「开仓」而不是把 i18n 键名原样打出来。
+              A few legacy rows carry action 'OPEN' (outside the OrderAction
+              enum); fall back to "Open" rather than printing the raw i18n key. */}
+          <div className="ord-stub-a">
+            {t(`orders.action.${o.action ?? 'ORDER'}`, { defaultValue: t('orders.action.ORDER') })}
+          </div>
+        </div>
+        <div className="ord-body">
+          <div className="ord-ident">
+            <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
+            <span className="ord-name">{shown}</span>
+            {zhName && zhName !== shown && <span className="ord-zh">{zhName}</span>}
+            <span className={`tag ${o.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
+              {o.side === 'BUY' ? t('common.buy') : t('common.sell')}
+            </span>
+            <span className="ord-vol">{o.volume}<small>{t('positions.lots')}</small></span>
+          </div>
+          {msg && <div className={`ord-msg ${bad ? 'bad' : ''}`}>{msg}</div>}
+        </div>
+        <div className="ord-price">
+          <div className="ord-k">{t('orders.colPrice')}</div>
+          <div className={`ord-v ${price ? '' : 'none'}`}>
+            {price ? <>{price.int}{price.frac != null && <>.<span className="frac">{price.frac}</span></>}</> : '—'}
+          </div>
+        </div>
+        <div className="ord-tk">
+          <div className="ord-k">{t('orders.colTicket')}</div>
+          <div className={`ord-v ${o.mt5Ticket ? '' : 'none'}`}>{o.mt5Ticket ? `#${o.mt5Ticket}` : '—'}</div>
+        </div>
+        <div className="ord-stampcell">
+          {o.status === 'PENDING' && (
+            <button
+              type="button"
+              onClick={() => doCancel(o.id)}
+              disabled={cancellingId === o.id}
+              className="btn rounded-pill border border-down/40 bg-down/10 text-down hover:bg-down/20"
+            >
+              {t('common.cancel')}
+            </button>
+          )}
+          <span key={o.status} className={`ord-stamp ${landed.has(o.id) ? 'land' : ''}`}>
+            {o.status}
+            {statusLabel.toUpperCase() !== o.status && (
+              <>
+                <i />
+                <span className="zh">{statusLabel}</span>
+              </>
+            )}
+          </span>
+        </div>
+      </article>
+    )
+  }
+
+  // 日期筛选请求中的骨架：贴合回执单的形状 / date-filter loading: slip-shaped skeletons
+  const skeletonSlips = (
+    <div className="ord-slips mt-5">
+      {[0, 1, 2].map((i) => (
+        <article key={i} className="ord-slip skel" aria-hidden>
+          <div className="ord-stub"><span className="skeleton" style={{ display: 'block', width: 64, height: 14 }} /><span className="skeleton" style={{ display: 'block', width: 28, height: 10, marginTop: 10 }} /></div>
+          <div className="ord-body"><span className="skeleton" style={{ display: 'block', width: '46%', height: 16 }} /></div>
+          <div className="ord-price"><span className="skeleton" style={{ display: 'block', width: 80, height: 14, marginLeft: 'auto' }} /></div>
+          <div className="ord-tk"><span className="skeleton" style={{ display: 'block', width: 70, height: 12, marginLeft: 'auto' }} /></div>
+          <div className="ord-stampcell"><span className="skeleton" style={{ display: 'block', width: 104, height: 26, borderRadius: 4 }} /></div>
+        </article>
+      ))}
+    </div>
+  )
+
   return (
     <div>
-      {/* 页头：标题 + 全页统一账号切换器 / page head: title + page-wide account switcher */}
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+      {/* 页头：眉题 + 标题 + 全页统一账号切换器 / page head: eyebrow, title, page-wide account switcher */}
+      <header className="ord-hd animate-fade-in-up">
         <div>
-          <h2 className="font-display text-2xl font-bold text-neutral-100">
-            <span className="neon-text">{t('orders.title')}</span>
-          </h2>
-          <p className="mt-1 text-sm text-neutral-400">{t('orders.subtitle')}</p>
+          <div className="ord-eyebrow">
+            {t('orders.eyebrow').split('·').map((part, i, arr) => (
+              <span key={i} className="contents">
+                {part.trim()}
+                {i < arr.length - 1 && <i />}
+              </span>
+            ))}
+            {wsConnected && (
+              <>
+                <i />
+                <span className="ord-live">{t('orders.live')}</span>
+              </>
+            )}
+          </div>
+          <h2 className="ord-title font-display">{t('orders.title')}</h2>
+          <p className="ord-sub">{t('orders.subtitle')}</p>
         </div>
         {accounts.length > 1 && (
-          <div className="flex flex-wrap gap-2">
+          <div className="ord-accts" role="tablist">
             {accounts.map((a) => (
               <button
                 key={a.login}
+                type="button"
+                role="tab"
+                aria-selected={a.login === selectedLogin}
                 onClick={() => chooseLogin(a.login)}
-                className={`rounded-lg border px-3 py-1.5 font-mono text-xs transition ${
-                  a.login === selectedLogin
-                    ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'
-                    : 'border-white/10 bg-white/5 text-neutral-400 hover:text-neutral-100'
-                }`}
+                className={`ord-acct ${a.login === selectedLogin ? 'on' : ''} ${a.online ? 'online' : ''}`}
               >
+                <span className="ord-acct-dot" />
                 {a.login}
+                {a.balance != null && <span className="ord-acct-bal">{money2(a.balance)}</span>}
               </button>
             ))}
           </div>
         )}
+      </header>
+
+      {/* 光谱线：全站签名图形，每屏一次 / the spectral rule: once per view */}
+      <div className="rule-spectral my-6" aria-hidden>
+        <i />
       </div>
 
       {/* Tab 导航 / tab navigation */}
-      <div className="seg-tabs mb-5" role="tablist">
+      <div className="seg-tabs mb-6" role="tablist">
         {TABS.map((key) => (
           <button
             key={key}
@@ -341,88 +528,85 @@ export default function OrdersPage() {
               onboarding card supplies the next step. */}
           <OnboardingCard />
 
-          {/* 账户状态紧凑横条：详细的账号管理在 /account 页，这里只回答"这个账号
-              现在什么状态"。/ Compact account bar: detailed account management
-              lives on /account; this only answers "how is this account doing". */}
-          {/* 两种连接方式展示同一组信息：登录号、状态、账户名、券商、余额、净值、
-              杠杆。此前 bridge 账号多带一个 "@server" 而 gateway 没有——券商列
-              已经承担了"这是哪家"的信息，server 后缀去掉，两边完全一致。
-              Both connection types show one identical info set: login, status,
-              account name, broker, balance, equity, leverage. Bridge rows used
-              to carry an extra "@server" that gateway never had — the broker
-              field already answers "which broker", so the suffix is gone and
-              the two render identically. */}
+          {/* 账户账本条：详细的账号管理在 /account 页，这里只回答"这个账号现在什么
+              状态"。两种连接方式展示同一组信息：登录号、状态、账户名、券商、余额、
+              净值、杠杆；bridge 账号原来多带的 "@server" 后缀去掉，券商列已经回答了
+              "这是哪家"。
+              Account ledger strip: detailed account management lives on /account;
+              this only answers "how is this account doing". Both connection types
+              show one identical info set; the bridge-only "@server" suffix is gone
+              because the broker column already answers "which broker". */}
           {activeAccount && (
-            <div className="glass mb-5 flex flex-wrap items-center gap-x-6 gap-y-2 px-5 py-3 text-xs">
-              <span className="font-mono text-sm text-neutral-100">{activeAccount.login}</span>
-              <span className={`tag text-xs ${activeAccount.online ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-500'}`}>
-                {activeAccount.online ? t('common.online') : t('common.offline')}
-              </span>
-              <span className="text-neutral-500">
-                {t('bind.accountName')}{' '}
-                <b className="text-sm font-medium text-neutral-100">{activeAccount.accountName || '—'}</b>
-              </span>
-              <span className="text-neutral-500">
-                {t('bind.company')}{' '}
-                <b className="text-sm font-medium text-neutral-100">
-                  {activeAccount.company || (activeAccount.source === 'gateway' ? brokerName : '—')}
-                </b>
-              </span>
-              <span className="text-neutral-500">
-                {t('account.balance')}{' '}
-                <b className="font-mono text-sm font-medium text-neutral-100">{activeAccount.balance?.toFixed(2) ?? '-'}</b>
-              </span>
-              <span className="text-neutral-500">
-                {t('account.equity')}{' '}
-                <b className="font-mono text-sm font-medium text-neutral-100">{activeAccount.equity?.toFixed(2) ?? '-'}</b>
-              </span>
-              <span className="text-neutral-500">
-                {t('account.leverage')}{' '}
-                <b className="font-mono text-sm font-medium text-neutral-100">
-                  {activeAccount.leverage ? `1:${activeAccount.leverage}` : '-'}
-                </b>
-              </span>
+            <div className="ord-strip">
+              <div className="ord-cell">
+                <div className="ord-k">{t('orders.acct.login')}</div>
+                <div className="ord-v">
+                  {activeAccount.login}
+                  <span className={activeAccount.online ? 'ord-pill-on' : 'ord-pill-off'}>
+                    {activeAccount.online ? t('common.online') : t('common.offline')}
+                  </span>
+                </div>
+              </div>
+              <div className="ord-cell">
+                <div className="ord-k">{t('bind.accountName')}</div>
+                <div className="ord-v sans">{activeAccount.accountName || '—'}</div>
+              </div>
+              <div className="ord-cell">
+                <div className="ord-k">{t('bind.company')}</div>
+                <div className="ord-v sans">{activeAccount.company || (activeAccount.source === 'gateway' ? brokerName : '—')}</div>
+              </div>
+              <div className="ord-cell">
+                <div className="ord-k">{t('account.balance')}</div>
+                <div className="ord-v">
+                  {money2(activeAccount.balance)}
+                  {activeAccount.accountCurrency && <small>{activeAccount.accountCurrency}</small>}
+                </div>
+              </div>
+              <div className="ord-cell">
+                <div className="ord-k">{t('account.equity')}</div>
+                <div className="ord-v">
+                  {money2(activeAccount.equity)}
+                  {activeAccount.accountCurrency && <small>{activeAccount.accountCurrency}</small>}
+                </div>
+              </div>
+              <div className="ord-cell">
+                <div className="ord-k">{t('account.leverage')}</div>
+                <div className="ord-v">{activeAccount.leverage ? `1:${activeAccount.leverage}` : '—'}</div>
+              </div>
             </div>
           )}
 
           {/* 持仓概览 / positions overview */}
-          <div className="glass p-5">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-              <h3 className="font-display text-lg font-semibold text-neutral-100">
-                {t('orders.positions')}
-              </h3>
-              {visiblePositions.length > 0 && (
-                <div className="flex flex-wrap items-center gap-4 text-xs">
-                  <span className="text-neutral-400">
-                    {t('orders.summary.positions')}{' '}
-                    <b className="font-mono text-sm text-neutral-100">{posSummary.total}</b>
-                  </span>
-                  <span className="text-neutral-400">
-                    {t('common.buy')} <b className="font-mono text-sm text-up">{posSummary.buy}</b>
-                    {' '}/{' '}
-                    {t('common.sell')} <b className="font-mono text-sm text-down">{posSummary.sell}</b>
-                  </span>
-                  <span className="text-neutral-400">
-                    {t('orders.summary.totalPnl')}{' '}
-                    <b className={`font-mono text-sm ${posSummary.pnl >= 0 ? 'text-up' : 'text-down'}`}>
-                      {posSummary.pnl >= 0 ? '+' : ''}
-                      {posSummary.pnl.toFixed(2)}
-                    </b>
-                  </span>
-                </div>
-              )}
-            </div>
-            <p className="mb-3 text-xs text-neutral-500">{t('orders.positionsScopeHint')}</p>
-            {visiblePositions.length === 0 ? (
-              <p className="py-4 text-center text-sm text-neutral-500">{t('orders.noPositions')}</p>
-            ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {visiblePositions.map((p, i) => (
-                  <PositionCard key={p.ticket ?? i} position={p} onActionDone={showToast} />
-                ))}
+          <div className="ord-sec">
+            <h3>{t('orders.positions')}</h3>
+            {visiblePositions.length > 0 && (
+              <div className="ord-sec-sum">
+                <span>{t('orders.summary.positions')} <b>{posSummary.total}</b></span>
+                <span>
+                  {t('common.buy')} <b className="text-up">{posSummary.buy}</b>
+                  {' '}/{' '}
+                  {t('common.sell')} <b className="text-down">{posSummary.sell}</b>
+                </span>
+                <span>
+                  {t('orders.summary.totalPnl')}{' '}
+                  <b className={posSummary.pnl >= 0 ? 'text-up' : 'text-down'}>
+                    {posSummary.pnl >= 0 ? '+' : ''}
+                    {posSummary.pnl.toFixed(2)}
+                  </b>
+                </span>
               </div>
             )}
           </div>
+          <p className="ord-p">{t('orders.positionsScopeHint')}</p>
+          {visiblePositions.length === 0 ? (
+            <p className="py-8 text-sm text-neutral-500">{t('orders.noPositions')}</p>
+          ) : (
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {visiblePositions.map((p, i) => (
+                <PositionCard key={p.ticket ?? i} position={p} onActionDone={showToast} />
+              ))}
+            </div>
+          )}
 
           {/* 自动仓位管理：放在持仓下方（管理对象就是上面这些仓位，挨着看最直观），
               但必须显式划出来——它是每用户一条的全局配置（AutoManageSettings 的
@@ -438,276 +622,130 @@ export default function OrdersPage() {
               who tunes it under account A and switches to B sees identical
               values and reasonably concludes it leaked across accounts or
               failed to save. Hence the divider plus an explicit scope note. */}
-          <div className="mt-6 border-t border-white/10 pt-6">
-            <p className="mb-3 text-xs text-neutral-500">{t('orders.autoManageScopeHint')}</p>
+          <div className="ord-block">
+            <p className="ord-p mb-4 mt-0">{t('orders.autoManageScopeHint')}</p>
             <AutoManageCard isPro={isPro} />
           </div>
         </>
       )}
 
-      {/* 绩效分析：胜率卡与已平仓明细都跟着页头选中的账号（纪律分已于 2026-09-07
-          整体撤销）/ Performance: the win-rate card and closed trades follow the
-          account selected in the page head (the discipline score was withdrawn on
-          2026-09-07) */}
+      {/* 绩效分析：净盈亏 / 胜率 / 品种盈亏 + 已平仓明细，都跟着页头选中的账号
+          （纪律分已于 2026-09-07 整体撤销）/ Performance: net P&L, win rate, P&L by
+          symbol and the closed-trade list, all following the account selected in
+          the page head (the discipline score was withdrawn on 2026-09-07) */}
       {tab === 'performance' && (
         <>
-          <div className="grid grid-cols-1 gap-5">
-            <PersonalWinRateCard variant="detailed" login={selectedLogin ?? undefined} />
-          </div>
-          <div className="mt-5">
-            <ClosedTradesList trades={visibleTrades} />
-          </div>
+          <PerformanceSummary
+            trades={visibleTrades}
+            login={selectedLogin ?? undefined}
+            currency={activeAccount?.accountCurrency}
+            accountLabel={accountLabel}
+          />
+          <ClosedTradesList trades={visibleTrades} />
         </>
       )}
 
-
-      {/* 操作记录：只列选中账号的指令，所以表里不再重复"账户"一列 /
-          Activity log: scoped to the selected account, so the table no longer
-          repeats an "account" column */}
+      {/* 操作记录：只列选中账号的指令，一行一张回执单 /
+          Activity log: scoped to the selected account, one receipt slip per order */}
       {tab === 'activity' && (
-      <>
-      {/* Tab 名已经写着"操作记录"，这里不再重复标题，只留一行说明 /
-          the tab is already labelled "Activity Log", so no repeated heading */}
-      <p className="mb-3 text-xs text-neutral-500">{t('orders.historyHint')}</p>
-
-      {/* 筛选条 / filter bar */}
-      <div className="glass mb-3 flex flex-wrap items-center gap-3 p-3">
-        <label className="flex items-center gap-2 text-xs">
-          <span className="text-neutral-500">{t('orders.filterStatus')}</span>
-          <select
-            value={statusF}
-            onChange={(e) => setStatusF(e.target.value as StatusFilter)}
-            className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-neutral-100 outline-none transition focus:border-prism-500"
-          >
-            <option value="ALL">{t('signals.all')}</option>
-            <option value="PENDING">{t('orders.status.PENDING')}</option>
-            <option value="FILLED">{t('orders.status.FILLED')}</option>
-            <option value="REJECTED">{t('orders.status.REJECTED')}</option>
-            <option value="FAILED">{t('orders.status.FAILED')}</option>
-            <option value="CANCELLED">{t('orders.status.CANCELLED')}</option>
-          </select>
-        </label>
-        <label className="flex items-center gap-2 text-xs">
-          <span className="text-neutral-500">{t('orders.filterSide')}</span>
-          <select
-            value={sideF}
-            onChange={(e) => setSideF(e.target.value as SideFilter)}
-            className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-neutral-100 outline-none transition focus:border-prism-500"
-          >
-            <option value="ALL">{t('signals.all')}</option>
-            <option value="BUY">{t('common.buy')}</option>
-            <option value="SELL">{t('common.sell')}</option>
-          </select>
-        </label>
-        <label className="flex items-center gap-2 text-xs">
-          <span className="text-neutral-500">{t('orders.filterSymbol')}</span>
-          <input
-            value={symbolF}
-            onChange={(e) => setSymbolF(e.target.value)}
-            placeholder={t('orders.symbolPlaceholder')}
-            className="w-28 rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-neutral-100 outline-none transition focus:border-prism-500"
-          />
-        </label>
-        <label className="flex items-center gap-2 text-xs">
-          <span className="text-neutral-500">{t('orders.filterFrom')}</span>
-          <input
-            type="date"
-            value={sinceF}
-            max={untilF || undefined}
-            onChange={(e) => { setSinceF(e.target.value); setPage(0) }}
-            className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-neutral-100 outline-none transition focus:border-prism-500"
-          />
-        </label>
-        <label className="flex items-center gap-2 text-xs">
-          <span className="text-neutral-500">{t('orders.filterTo')}</span>
-          <input
-            type="date"
-            value={untilF}
-            min={sinceF || undefined}
-            onChange={(e) => { setUntilF(e.target.value); setPage(0) }}
-            className="rounded-lg border border-white/10 bg-ink-800/80 px-2 py-1 text-xs text-neutral-100 outline-none transition focus:border-prism-500"
-          />
-        </label>
-        {dateFilterActive && (
-          <button
-            onClick={() => { setSinceF(''); setUntilF(''); setPage(0) }}
-            className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-neutral-400 transition hover:text-neutral-100"
-          >
-            {t('orders.clearDateFilter')}
-          </button>
-        )}
-      </div>
-
-      {/* 订单表 / orders table */}
-      <div className="glass overflow-hidden">
-        {visibleOrders.length === 0 ? (
-          <p className="py-16 text-center text-sm text-neutral-500">{t('orders.empty')}</p>
-        ) : (
-          <>
-            {/* 桌面端表格 / desktop table */}
-            <div className="hidden overflow-x-auto md:block">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-neutral-500">
-                  <th className="px-4 py-3 font-medium">{t('orders.colTime')}</th>
-                  <th className="px-4 py-3 font-medium">{t('orders.colType')}</th>
-                  <th className="px-4 py-3 font-medium">{t('orders.colSymbol')}</th>
-                  <th className="px-4 py-3 font-medium">{t('orders.colSide')}</th>
-                  <th className="px-4 py-3 font-medium">{t('orders.colVolume')}</th>
-                  <th className="px-4 py-3 font-medium">{t('orders.colStatus')}</th>
-                  <th className="px-4 py-3 font-medium">{t('orders.colTicket')}</th>
-                  <th className="px-4 py-3 font-medium">{t('orders.colPrice')}</th>
-                  <th className="px-4 py-3 font-medium">{t('orders.colMessage')}</th>
-                  <th className="px-4 py-3 font-medium">{t('orders.colAction')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleOrders.map((o) => (
-                  <tr
-                    key={o.id}
-                    className="border-b border-white/5 transition hover:bg-prism-600/10"
-                  >
-                    <td className="whitespace-nowrap px-4 py-3 text-neutral-400">
-                      {fmtTime(o.createdAt)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="tag border border-white/10 bg-white/[0.05] text-neutral-300">
-                        {t(`orders.action.${o.action ?? 'ORDER'}`)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="sym-ava"
-                          style={{ background: symbolMeta(o.symbol).color + '33', color: symbolMeta(o.symbol).ink }}
-                        >
-                          {symbolMeta(o.symbol).letter}
-                        </span>
-                        <span className="font-mono text-neutral-100">{displaySymbol(o.symbol)}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`tag ${
-                          o.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'
-                        }`}
-                      >
-                        {o.side === 'BUY' ? t('common.buy') : t('common.sell')}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-neutral-200">{o.volume}</td>
-                    <td className="px-4 py-3">
-                      <span className={`tag ${statusStyle[o.status]}`}>
-                        {t(`orders.status.${o.status}`)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-neutral-400">{o.mt5Ticket ?? '-'}</td>
-                    <td className="px-4 py-3 font-mono text-neutral-200">{o.filledPrice ?? '-'}</td>
-                    <td className="max-w-[200px] truncate px-4 py-3 text-neutral-400">
-                      {o.message ? localizeApiError(o.message) : '-'}
-                    </td>
-                    <td className="px-4 py-3">
-                      {o.status === 'PENDING' && (
-                        <button
-                          onClick={() => doCancel(o.id)}
-                          disabled={cancellingId === o.id}
-                          className="rounded-lg border border-down/40 bg-down/10 px-2.5 py-1 text-xs font-medium text-down transition hover:bg-down/20 disabled:opacity-50"
-                        >
-                          {t('common.cancel')}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            </div>
-
-            {/* 移动端卡片列表 / mobile card list */}
-            <div className="divide-y divide-white/5 md:hidden">
-              {visibleOrders.map((o) => (
-                <div key={o.id} className="p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="sym-ava"
-                        style={{ background: symbolMeta(o.symbol).color + '33', color: symbolMeta(o.symbol).ink }}
-                      >
-                        {symbolMeta(o.symbol).letter}
-                      </span>
-                      <span className="font-mono text-base font-bold text-neutral-100">{displaySymbol(o.symbol)}</span>
-                      <span
-                        className={`tag ${
-                          o.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'
-                        }`}
-                      >
-                        {o.side === 'BUY' ? t('common.buy') : t('common.sell')}
-                      </span>
-                    </div>
-                    <span className={`tag ${statusStyle[o.status]}`}>
-                      {t(`orders.status.${o.status}`)}
-                    </span>
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                    <div className="flex justify-between gap-2">
-                      <span className="text-neutral-500">{t('orders.colType')}</span>
-                      <span className="text-neutral-300">{t(`orders.action.${o.action ?? 'ORDER'}`)}</span>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <span className="text-neutral-500">{t('orders.colVolume')}</span>
-                      <span className="font-mono text-neutral-200">{o.volume}</span>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <span className="text-neutral-500">{t('orders.colPrice')}</span>
-                      <span className="font-mono text-neutral-200">{o.filledPrice ?? '-'}</span>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <span className="text-neutral-500">{t('orders.colTicket')}</span>
-                      <span className="font-mono text-neutral-400">{o.mt5Ticket ?? '-'}</span>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <span className="text-neutral-500">{t('orders.colTime')}</span>
-                      <span className="text-neutral-400">{fmtTime(o.createdAt)}</span>
-                    </div>
-                  </div>
-
-                  {o.message && (
-                    <p className="mt-2 break-words text-xs text-neutral-500">{localizeApiError(o.message)}</p>
-                  )}
-
-                  {o.status === 'PENDING' && (
-                    <button
-                      onClick={() => doCancel(o.id)}
-                      disabled={cancellingId === o.id}
-                      className="mt-3 w-full rounded-lg border border-down/40 bg-down/10 py-1.5 text-xs font-medium text-down transition hover:bg-down/20 disabled:opacity-50"
-                    >
-                      {t('common.cancel')}
-                    </button>
-                  )}
-                </div>
+        <>
+          {/* 筛选条：状态芯片（带计数）+ 品种 + 日期区间 / filter bar */}
+          <div className="ord-tb">
+            <div className="ord-chips" role="tablist" aria-label={t('orders.filterStatus')}>
+              {STATUS_FILTERS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  role="tab"
+                  aria-selected={statusF === s}
+                  onClick={() => setStatusF(s)}
+                  className={`ord-chip ${statusF === s ? 'on' : ''}`}
+                >
+                  {s === 'ALL' ? t('signals.all') : t(`orders.status.${s}`)}
+                  {statusCounts && statusCounts[s] != null && <b>{statusCounts[s]}</b>}
+                </button>
               ))}
             </div>
-          </>
-        )}
-      </div>
+            <div className="ord-tb-r">
+              <input
+                value={symbolF}
+                onChange={(e) => setSymbolF(e.target.value)}
+                placeholder={t('orders.symbolPlaceholder')}
+                aria-label={t('orders.filterSymbol')}
+                className="input ord-in-sym w-36"
+              />
+              <div className="ord-tb-dates">
+                <input
+                  type="date"
+                  value={sinceF}
+                  max={untilF || undefined}
+                  aria-label={t('orders.filterFrom')}
+                  onChange={(e) => { setSinceF(e.target.value); setPage(0) }}
+                  className="input"
+                />
+                <span className="ord-tb-sep">–</span>
+                <input
+                  type="date"
+                  value={untilF}
+                  min={sinceF || undefined}
+                  aria-label={t('orders.filterTo')}
+                  onChange={(e) => { setUntilF(e.target.value); setPage(0) }}
+                  className="input"
+                />
+              </div>
+              {dateFilterActive && (
+                <button
+                  type="button"
+                  onClick={() => { setSinceF(''); setUntilF(''); setPage(0) }}
+                  className="btn btn-ghost h-8 px-3 text-xs"
+                >
+                  {t('orders.clearDateFilter')}
+                </button>
+              )}
+            </div>
+          </div>
 
-      {/* 分页：每页 10 条。不设日期筛选时在实时集合上本地翻页（新单即时可见）；
-          设了日期筛选则向后端按页请求，可翻到实时那 100 条之外的历史订单。
-          Pagination: 10 per page. Without a date filter, page the live set
-          locally (new orders show instantly); with a date filter, page via the
-          backend, reaching history beyond the live 100. */}
-      {(visibleOrders.length > 0 || dateFilterActive) && (
-        <Pager
-          page={safePage}
-          totalPages={totalPages}
-          total={pageTotal}
-          loading={pageLoading}
-          onPrev={() => setPage(Math.max(0, safePage - 1))}
-          onNext={() => setPage(Math.min(totalPages - 1, safePage + 1))}
-        />
-      )}
-      </>
+          {pageLoading && visibleOrders.length === 0 ? (
+            skeletonSlips
+          ) : visibleOrders.length === 0 ? (
+            <div className="ord-ghost">
+              <div className="ord-ghost-t">--:--:--</div>
+              <div className="ord-ghost-b">
+                <b>{t('orders.empty')}</b>
+                <p>{t('orders.emptyHint')}</p>
+              </div>
+            </div>
+          ) : (
+            dayGroups.map((g, gi) => (
+              <div key={g.key}>
+                <div className="ord-day">
+                  <div className="ord-day-d">{g.label}<span>{g.sub}</span></div>
+                  <div className="ord-day-n">{t('orders.day.count', { n: g.items.length })}</div>
+                </div>
+                <div className="ord-slips">
+                  {g.items.map((o, i) => renderSlip(o, gi * ORDERS_PAGE_SIZE + i))}
+                </div>
+              </div>
+            ))
+          )}
+
+          {/* 分页：每页 10 条。不设日期筛选时在实时集合上本地翻页（新单即时可见）；
+              设了日期筛选则向后端按页请求，可翻到实时那 100 条之外的历史订单。
+              Pagination: 10 per page. Without a date filter, page the live set
+              locally (new orders show instantly); with a date filter, page via the
+              backend, reaching history beyond the live 100. */}
+          {(visibleOrders.length > 0 || dateFilterActive) && (
+            <Pager
+              page={safePage}
+              totalPages={totalPages}
+              total={pageTotal}
+              loading={pageLoading}
+              onPrev={() => setPage(Math.max(0, safePage - 1))}
+              onNext={() => setPage(Math.min(totalPages - 1, safePage + 1))}
+              className="mt-5"
+            />
+          )}
+        </>
       )}
 
       {toast && (

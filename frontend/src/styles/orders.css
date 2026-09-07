@@ -1,0 +1,837 @@
+/* ═════════════ 订单与回执页 / orders & receipts page ═════════════
+   2026-09-08 重做。三个页签共用一个页头（眉题 + 标题 + 账号药丸 + 一条光谱线），
+   下面各自只回答一个问题：
+   · 操作记录：一行一张「回执单」（.ord-slip）——左侧时间票根加打孔虚线，右侧状态
+     印章。它是这页上唯一的「物件」，其余分层全靠发丝线与留白，没有第二层卡片。
+   · 绩效分析：只剩两个数（净盈亏、胜率）+ 品种盈亏细条 + 已平仓明细。曾做过资金
+     曲线 / 胜负条带 / 八行指标账本 / 出场方式 / R 分布，产品负责人逐轮砍掉，不要加回。
+   · 持仓与账户：账户信息改成发丝线分区的账本条，不再套卡片；持仓卡与自动仓管沿用。
+   全部类名带 ord- 前缀：样例阶段一个裸的 .pos 与持仓卡的 .pos 撞名，把正数条撑成
+   了 34px 高——这页的类名都不进全局词汇。
+   Redesigned 2026-09-08. One shared head (eyebrow + title + account pills + the
+   spectral rule); each tab answers one question. The receipt slip is the only
+   "object" on the page; everything else layers by hairline and whitespace. The
+   performance tab is deliberately minimal — the equity curve, streak ribbon,
+   KPI ledger, exit-reason and R-distribution blocks were all cut by the product
+   owner; do not bring them back. Every class is ord- prefixed after a bare .pos
+   collided with the position card during the mock. */
+
+/* ── 页头 / head ── */
+.ord-hd {
+  display: grid;
+  gap: 22px;
+  align-items: end;
+}
+@media (min-width: 1024px) {
+  .ord-hd {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 48px;
+  }
+}
+.ord-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.ord-eyebrow i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+/* 实时点：只在 WebSocket 真的连着时出现，是状态不是装饰。
+   Live dot: rendered only while the WebSocket is actually connected. */
+.ord-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--up);
+}
+.ord-live::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--up);
+  animation: breathe 2.4s ease-in-out infinite;
+}
+.ord-title {
+  margin: 16px 0 0;
+  font-size: clamp(30px, 3.4vw, 42px);
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #fff;
+  text-wrap: balance;
+}
+.ord-sub {
+  margin: 10px 0 0;
+  max-width: 52ch;
+  font-size: 14px;
+  color: var(--text-3);
+}
+/* 账号切换：药丸 = 可点的东西。选中态是实色紫（颜料），未选中只有一圈发丝线。
+   Account switcher: pills mean clickable; the selected one is flat violet ink. */
+.ord-accts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ord-acct {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 14px 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-hi);
+  color: var(--text-2);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.ord-acct:hover { color: var(--text); }
+.ord-acct:active { transform: translateY(1px); }
+.ord-acct.on {
+  background: var(--purple);
+  color: #fff;
+  box-shadow: none;
+}
+.ord-acct-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.ord-acct.online .ord-acct-dot {
+  background: var(--up);
+  animation: breathe 2.4s ease-in-out infinite;
+}
+.ord-acct.on .ord-acct-dot { background: #fff; }
+.ord-acct-bal {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* ── 通用：区块标题 / 状态药丸 ── */
+.ord-block {
+  margin-top: 40px;
+  padding-top: 30px;
+  border-top: 1px solid var(--line);
+}
+.ord-h {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.ord-h h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+}
+.ord-h span {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.ord-p {
+  margin: 6px 0 0;
+  max-width: 60ch;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+.ord-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ord-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.ord-chip b {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.ord-chip:hover {
+  color: var(--text-2);
+  box-shadow: inset 0 0 0 1px var(--line-hi);
+}
+.ord-chip.on {
+  background: var(--purple);
+  color: #fff;
+  box-shadow: none;
+}
+.ord-chip.on b { color: rgba(255, 255, 255, 0.72); }
+.ord-k {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* ── 操作记录：筛选条 / filter bar ── */
+.ord-tb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.ord-tb-r {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.ord-tb-r .input {
+  width: auto;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 12.5px;
+}
+.ord-tb-r input[type="date"].input {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+.ord-tb-dates {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ord-tb-sep {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+/* ── 操作记录：按日分组 / day groups ── */
+.ord-day {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 22px 4px 10px;
+}
+.ord-day-d {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.ord-day-d span {
+  margin-left: 8px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+.ord-day-n {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+}
+.ord-slips {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── 回执单 / the receipt slip ──
+   五列：票根 · 主体 · 成交价 · MT5 单号 · 印章。圆角取小浮层档（14）：24 压在
+   一个 60px 高的条上会读成药丸。
+   Five columns: stub · body · fill price · MT5 ticket · stamp. Radius uses the
+   floating-layer step (14): the card step (24) on a 60px row reads as a pill. */
+.ord-slip {
+  position: relative;
+  display: grid;
+  grid-template-columns: 106px minmax(0, 1fr) 128px 118px auto;
+  grid-template-areas: "stub body price tk stamp";
+  align-items: center;
+  background: var(--surface);
+  border-radius: var(--r-panel);
+  transition: background-color var(--dur-base) var(--ease-out);
+  animation: ord-in 0.5s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+.ord-slip:hover { background: var(--surface-2); }
+.ord-slip[data-status="CANCELLED"] > * { opacity: 0.6; }
+.ord-stub {
+  grid-area: stub;
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 14px 14px 14px 18px;
+  border-right: 1px dashed var(--line-hi);
+}
+/* 票根打孔：两枚半圆缺口，填画布色 / ticket notches: two half-circles in canvas colour */
+.ord-stub::before,
+.ord-stub::after {
+  content: "";
+  position: absolute;
+  right: -6.5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bg);
+  z-index: 1;
+}
+.ord-stub::before { top: -6px; }
+.ord-stub::after { bottom: -6px; }
+.ord-stub-t {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.ord-stub-a {
+  margin-top: 7px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.ord-body {
+  grid-area: body;
+  min-width: 0;
+  padding: 12px 18px;
+}
+.ord-ident {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ord-name {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 14px;
+  font-weight: 500;
+  color: #fff;
+}
+.ord-zh {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.ord-vol {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.ord-vol small {
+  margin-left: 3px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+.ord-msg {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.ord-msg.bad { color: var(--down); }
+.ord-price,
+.ord-tk {
+  text-align: right;
+  padding: 12px 8px;
+}
+.ord-price { grid-area: price; }
+.ord-tk { grid-area: tk; }
+.ord-v {
+  margin-top: 5px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--text);
+}
+.ord-price .ord-v {
+  font-size: 17px;
+  font-weight: 500;
+}
+/* 小数位降一号：交易确认单的排版惯例，整数位先读到。
+   Smaller fraction digits — the trade-confirmation convention; the integer reads first. */
+.ord-price .ord-v .frac {
+  font-size: 13px;
+  color: var(--text-2);
+}
+.ord-tk .ord-v {
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.ord-v.none { color: var(--text-3); }
+.ord-stampcell {
+  grid-area: stamp;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-width: 176px;
+  padding: 12px 20px 12px 12px;
+}
+.ord-stampcell .btn {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+/* 印章：1.5px 描边、微倾 4°、等宽大写。颜色是数据（成交 / 待执行 / 拒绝），不是装饰。
+   The stamp: 1.5px stroke, 4° tilt, mono caps. Its colour is data, not ornament. */
+.ord-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transform: rotate(-4deg);
+  opacity: 0.9;
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+.ord-stamp i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.7;
+}
+.ord-stamp .zh {
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: none;
+}
+.ord-slip:hover .ord-stamp { opacity: 1; }
+.ord-slip[data-status="FILLED"] .ord-stamp { color: var(--up); }
+.ord-slip[data-status="PENDING"] .ord-stamp {
+  color: var(--mid);
+  animation: breathe 2.4s ease-in-out infinite;
+}
+.ord-slip[data-status="REJECTED"] .ord-stamp,
+.ord-slip[data-status="FAILED"] .ord-stamp { color: var(--down); }
+.ord-slip[data-status="CANCELLED"] .ord-stamp { color: var(--text-3); }
+/* 回执刚到：印章落下一次。只在状态真的变化时加这个类，首屏不播。
+   A receipt just landed: the stamp drops once. Applied only on a real status
+   change, never on first paint. */
+.ord-stamp.land { animation: ord-stamp-in 0.6s var(--ease-out) both; }
+
+/* 加载 / 空 / loading & empty */
+.ord-slip.skel { animation: none; }
+.ord-slip.skel:hover { background: var(--surface); }
+.ord-ghost {
+  display: grid;
+  grid-template-columns: 106px minmax(0, 1fr);
+  margin-top: 22px;
+  border: 1px dashed var(--line-hi);
+  border-radius: var(--r-panel);
+}
+.ord-ghost-t {
+  padding: 18px 14px 18px 18px;
+  border-right: 1px dashed var(--line-hi);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.ord-ghost-b { padding: 18px 20px; }
+.ord-ghost-b b {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.ord-ghost-b p {
+  margin: 6px 0 0;
+  max-width: 44ch;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+/* ── 持仓与账户：账本条 / account strip ── */
+.ord-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 40px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.ord-cell { padding: 14px 0; }
+.ord-cell .ord-k {
+  font-size: 10.5px;
+}
+.ord-cell .ord-v {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 15px;
+  font-weight: 500;
+}
+.ord-cell .ord-v.sans { font-family: inherit; }
+.ord-cell .ord-v small {
+  font-family: Archivo, "Noto Sans SC", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+.ord-pill-on,
+.ord-pill-off {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-family: Archivo, "Noto Sans SC", system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+}
+.ord-pill-on {
+  background: var(--up-bg);
+  color: var(--up);
+}
+.ord-pill-on::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: breathe 2.4s ease-in-out infinite;
+}
+.ord-pill-off {
+  background: var(--nest);
+  color: var(--text-3);
+}
+.ord-sec {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  margin: 30px 0 6px;
+}
+.ord-sec h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+}
+.ord-sec-sum {
+  display: flex;
+  gap: 18px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.ord-sec-sum b {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+/* ── 绩效分析 / performance ── */
+.ord-perf-head {
+  display: grid;
+  gap: 32px;
+  margin-top: 6px;
+}
+@media (min-width: 768px) {
+  .ord-perf-head {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 440px);
+    gap: 48px;
+    align-items: start;
+  }
+}
+@media (min-width: 1024px) {
+  .ord-perf-head { gap: 72px; }
+}
+/* 净盈亏是这页的领衔数字：等宽、大号、按盈亏上色（站内所有盈亏数字都这样上色）。
+   Net P&L leads the page: mono, large, coloured by sign like every P&L figure in the app. */
+.ord-perf-net {
+  margin-top: 12px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: clamp(44px, 5vw, 64px);
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  color: #fff;
+}
+.ord-perf-net.up { color: var(--up); }
+.ord-perf-net.dn { color: var(--down); }
+.ord-perf-net small {
+  margin-left: 10px;
+  font-family: Archivo, "Noto Sans SC", system-ui, sans-serif;
+  font-size: 15px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-3);
+}
+.ord-perf-wr { margin-top: 30px; }
+.ord-perf-wrn {
+  margin-top: 12px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 34px;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+.ord-perf-wrn small {
+  margin-left: 2px;
+  font-size: 16px;
+  color: var(--text-2);
+}
+.ord-tug {
+  display: flex;
+  gap: 2px;
+  width: 200px;
+  max-width: 100%;
+  height: 4px;
+  margin-top: 14px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.ord-tug i {
+  display: block;
+  height: 100%;
+  transform-origin: left center;
+  animation: grow-x var(--dur-slow) var(--ease-out) both;
+}
+.ord-perf-rec {
+  margin-top: 8px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+.ord-perf-nodata {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.ord-eyebrow-split {
+  justify-content: space-between;
+  gap: 12px;
+}
+.ord-eyebrow-split span:last-child {
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.ord-sbars {
+  display: grid;
+  gap: 4px;
+  margin-top: 16px;
+}
+/* 品种盈亏：一条 6px 细条，零轴对齐，正右负左。条厚不超过 8px——数据要安静。
+   P&L by symbol: a 6px bar aligned at zero, gains right, losses left. */
+.ord-sbar {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) 88px;
+  gap: 12px;
+  align-items: center;
+  height: 32px;
+  animation: ord-in 0.45s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 50ms);
+}
+.ord-sbar-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.ord-sbar-id .sym-ava {
+  width: 20px;
+  height: 20px;
+  font-size: 7.5px;
+}
+.ord-sbar-trk {
+  position: relative;
+  height: 12px;
+}
+.ord-sbar-zero {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line-hi);
+}
+.ord-sbar-b {
+  position: absolute;
+  top: 3px;
+  height: 6px;
+  animation: grow-x var(--dur-slow) var(--ease-out) both;
+}
+.ord-sbar-b.gain {
+  background: var(--up);
+  border-radius: 0 3px 3px 0;
+  transform-origin: left center;
+}
+.ord-sbar-b.loss {
+  background: var(--down);
+  border-radius: 3px 0 0 3px;
+  transform-origin: right center;
+}
+.ord-sbar-v {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--text);
+}
+.ord-sbar-v.up { color: var(--up); }
+.ord-sbar-v.dn { color: var(--down); }
+.ord-perf-scope {
+  margin: 28px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+@keyframes ord-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ord-stamp-in {
+  0% { transform: rotate(-11deg) scale(1.4); opacity: 0; }
+  55% { opacity: 1; }
+  100% { transform: rotate(-4deg) scale(1); opacity: 0.9; }
+}
+
+/* ── 手机：回执单变成三行（票根 + 印章 / 主体 / 成交价 + 单号）── */
+@media (max-width: 767px) {
+  .ord-tb-r {
+    width: 100%;
+    margin-left: 0;
+  }
+  .ord-tb-r .input.ord-in-sym { flex: 1; }
+  .ord-tb-dates { width: 100%; }
+  .ord-tb-dates .input { flex: 1; min-width: 0; }
+  .ord-slip {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "stub stamp"
+      "body body"
+      "price tk";
+  }
+  .ord-stub {
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-right: 0;
+    border-bottom: 1px dashed var(--line-hi);
+  }
+  .ord-stub-a { margin-top: 0; }
+  .ord-stub::before {
+    top: auto;
+    right: auto;
+    left: -6px;
+    bottom: -6.5px;
+  }
+  .ord-stub::after { display: none; }
+  .ord-stampcell {
+    position: relative;
+    align-self: stretch;
+    min-width: 0;
+    padding: 12px 16px 12px 0;
+    border-bottom: 1px dashed var(--line-hi);
+  }
+  .ord-stampcell::after {
+    content: "";
+    position: absolute;
+    right: -6px;
+    bottom: -6.5px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg);
+    z-index: 1;
+  }
+  .ord-stamp { transform: rotate(-3deg); }
+  .ord-body { padding: 14px 16px 4px; }
+  .ord-price,
+  .ord-tk {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 8px 16px 14px;
+    text-align: left;
+  }
+  .ord-tk {
+    justify-content: flex-end;
+    padding-left: 0;
+  }
+  .ord-v { margin-top: 0; }
+  .ord-perf-net { font-size: 44px; }
+  .ord-perf-net small {
+    display: block;
+    margin: 6px 0 0;
+  }
+  .ord-sbar {
+    grid-template-columns: 84px minmax(0, 1fr) 80px;
+    gap: 10px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ord-slip,
+  .ord-sbar,
+  .ord-sbar-b,
+  .ord-tug i,
+  .ord-stamp.land,
+  .ord-live::before,
+  .ord-acct.online .ord-acct-dot,
+  .ord-pill-on::before,
+  .ord-slip[data-status="PENDING"] .ord-stamp {
+    animation: none;
+  }
+}

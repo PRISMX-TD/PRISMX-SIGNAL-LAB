@@ -40,4 +40,5 @@
 @import './winrate.css';   /* 胜率页：拔河条进场 */
 @import './badges.css';   /* V5 铸币勋章：倾斜流光 + 铸造瞬间 */
 @import './account.css';   /* 账户页：身份牌 / 分区账本 / 药丸选择器 / 推送时段小时条 */
+@import './orders.css';   /* 订单与回执页：页头 / 回执单 / 账本条 / 绩效两个数 */
 @import './profile.css';   /* 公开主页：陈列台 / 榜单四格 / 交易画像 */

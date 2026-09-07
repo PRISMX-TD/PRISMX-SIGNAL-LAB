@@ -725,8 +725,29 @@
   },
   "orders": {
     "title": "订单与回执",
-    "subtitle": "下单指令的执行状态与成交回执",
+    "subtitle": "下单指令的执行状态与成交回执。每一笔发进 MT5 的指令，都会在这里留下一张回执单。",
     "empty": "暂无订单记录",
+    "emptyHint": "在信号页或图表页下单后，每一笔指令的执行状态与成交回执都会在这里留底。",
+    "eyebrow": "Orders · Receipts · UTC+8",
+    "live": "Live",
+    "awaitingReceipt": "已发出，等待执行回执…",
+    "day": {
+      "today": "今天",
+      "yesterday": "昨天",
+      "count": "{{n}} 笔"
+    },
+    "acct": {
+      "login": "登录号"
+    },
+    "perf": {
+      "netTitle": "净盈亏 · 已平仓",
+      "winRate": "胜率",
+      "record": "盈利 {{w}} · 亏损 {{l}} · 已判定 {{n}} 笔",
+      "bySymbol": "品种盈亏",
+      "bySymbolHint": "净额 · 零轴对齐",
+      "scope": "统计范围：近 {{days}} 天 · {{account}} · 基于你自己真实的平仓记录",
+      "trades": "{{n}} 笔"
+    },
     "colTime": "时间",
     "colType": "类型",
     "colSymbol": "品种",
