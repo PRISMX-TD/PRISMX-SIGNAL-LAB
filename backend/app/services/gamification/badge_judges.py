@@ -25,6 +25,14 @@ REAL = 2
 # threshold sum just under it (e.g. 19.99999999999996). Same rationale as
 # stats.py's _resolve using _VOL_EPS.
 _LOT_EPS = 1e-6
+# 翻盘回本边界判定用浮点容差：亏损月的 p 和盈利月的 nxt 都是浮点累加出来的，
+# 恰好回本（如 -0.3 与 0.1+0.2）会因二进制浮点表示误差在末位差一点点，同
+# _LOT_EPS 的道理。
+# Epsilon for the comeback recovery-boundary check: both the losing month's p
+# and the recovering month's nxt are summed floats, so an exact break-even
+# (e.g. -0.3 vs 0.1+0.2) can miss by a hair from binary float representation —
+# same rationale as _LOT_EPS.
+_RECOVERY_EPS = 1e-6
 
 
 def _has_real_fill(db, user_id) -> bool:
@@ -147,7 +155,7 @@ def _has_comeback(monthly: dict[tuple[int, int], float]) -> bool:
     for key, p in monthly.items():
         if p < 0:
             nxt = monthly.get(_next_month(key))
-            if nxt is not None and nxt >= -p:
+            if nxt is not None and nxt + _RECOVERY_EPS >= -p:
                 return True
     return False
 
@@ -217,8 +225,17 @@ def _board_return_best(db, user_id, now: datetime | None = None) -> tuple[int | 
 
 
 def _j_board_return(tier: int):
+    # judge_and_award_badges 按档位从高到低往下判（3→已持有档），铜/银/金三个
+    # 判定函数都会被调用一遍，但查的是同一个用户的同一份收益榜数据——按用户
+    # 记进 ctx，一次 pass 只查一次库，不随档位数重复查询。
+    # judge_and_award_badges walks tiers top-down (3 -> the held tier), calling
+    # all three tier judges, but they all read the same user's same board-return
+    # data — memoize per user in ctx so one pass queries the DB once, not once
+    # per tier.
     def judge(db, user, ctx):
-        week, month = _board_return_best(db, user.id)
+        if "board_best" not in ctx:
+            ctx["board_best"] = _board_return_best(db, user.id)
+        week, month = ctx["board_best"]
         if tier == 1:
             return week is not None and week <= BOARD_RETURN_TOP
         if tier == 2:
@@ -255,7 +272,11 @@ def campaigner_tier(n: int) -> int:
 
 
 def _j_campaigner(n):
-    return lambda db, u, c: finished_competition_count(db, u.id) >= n
+    def judge(db, u, c):
+        if "finished_comps" not in c:
+            c["finished_comps"] = finished_competition_count(db, u.id)
+        return c["finished_comps"] >= n
+    return judge
 
 
 # ---- 常客 / regular：历史最长连续登录 ----
@@ -264,4 +285,9 @@ REGULAR_THRESHOLDS = (7, 30, 100)
 
 def _j_regular(n):
     from .conditions import longest_active_streak
-    return lambda db, u, c: longest_active_streak(db, u.id) >= n
+
+    def judge(db, u, c):
+        if "active_streak" not in c:
+            c["active_streak"] = longest_active_streak(db, u.id)
+        return c["active_streak"] >= n
+    return judge

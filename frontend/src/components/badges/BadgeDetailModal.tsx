@@ -16,6 +16,7 @@ import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import BadgeIcon from './BadgeIcon'
+import LimitedClosesLine from './LimitedClosesLine'
 import MedalTilt from './MedalTilt'
 import { FAMILY_OF, materialOf } from './medal'
 import { fmtDate } from '../../api/utils'
@@ -82,14 +83,8 @@ export default function BadgeDetailModal({ badge, population, onClose }: Props) 
             {t(`gamification.material.${material}`)} · {t(`gamification.family.${family}`)} · {t(`gamification.shape.${family}`)}
           </span>
           {!tiered && <p className="text-sm text-neutral-400">{t(`gamification.badges.${badge.id}.desc`)}</p>}
-          {badge.shelf === 'limited' && badge.closesAt && (
-            <p className="text-xs text-neutral-500">
-              {t('gamification.limited.closes', { date: fmtDate(badge.closesAt) })}
-              {' · '}
-              {new Date(badge.closesAt).getTime() > Date.now()
-                ? t('gamification.limited.open')
-                : t('gamification.limited.closed')}
-            </p>
+          {badge.shelf === 'limited' && (
+            <LimitedClosesLine closesAt={badge.closesAt} as="p" className="text-xs text-neutral-500" />
           )}
         </div>
 

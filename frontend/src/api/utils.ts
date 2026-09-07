@@ -77,6 +77,20 @@ export function parseTime(iso: string | null | undefined): Date | null {
   const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)
   return new Date(hasTz ? iso : iso + 'Z')
 }
+
+// 只到日的日期，不带时分——用于只需要"哪一天"的场景（绝版勋章截止日等），
+// 精确到分钟的时刻详情已经有 fmtDate/fmtTime。
+// Date-only, no time-of-day — for spots that only need "which day" (limited
+// badge closing dates, etc.); minute-precision detail already has fmtDate/fmtTime.
+export function fmtDay(iso: string | null | undefined): string {
+  const d = parseTime(iso) ?? new Date(NaN)
+  return d.toLocaleDateString('en-GB', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+}
 // 每个品种一个 pip 的价格大小，用于把价差换算成点数。
 // 匹配不到的品种返回 null，调用方只显示价差、不显示点数。
 // Price size of one pip per symbol, to convert price distance into pips.

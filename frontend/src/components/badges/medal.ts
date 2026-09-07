@@ -94,11 +94,11 @@ const ENAMEL: Record<string, [string, string]> = {
 
 // 勋章 id -> 家族。id 集合与后端注册表（services/gamification/badges.py）一一
 // 对应，十一条，分三层：进阶（起步 / 常客 / 常青 / 胜手 / 老兵 / 榜上有名 /
-// 翻盘 / 赛场 / 老将）+ 特殊（卫冕王）+ 绝版（创始元老）。
+// 赛场 / 老将）+ 特殊（卫冕王 / 翻盘）+ 绝版（创始元老）。
 // Badge id -> family. Mirrors the backend registry: eleven ids across three
 // shelves — tiered (starter / regular / evergreen / winning hand / veteran /
-// board_return / comeback / arena / campaigner), special (back-to-back
-// champion), and limited (founder).
+// board_return / arena / campaigner), special (back-to-back champion /
+// comeback), and limited (founder).
 const FAMILY: Record<string, BadgeFamily> = {
   starter: 'growth', regular: 'growth',
   evergreen: 'evergreen',

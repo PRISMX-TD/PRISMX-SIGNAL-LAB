@@ -17,7 +17,7 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { competitionApi } from '../api/client'
-import { fmtDate, localizeApiError, parseTime } from '../api/utils'
+import { fmtDate, fmtDay, localizeApiError, parseTime } from '../api/utils'
 import { useLive } from '../store/live'
 import { SkeletonPage } from '../components/Skeleton'
 import BadgeIcon from '../components/badges/BadgeIcon'
@@ -200,14 +200,12 @@ function StatusLine({ c, tagKey, t }: { c: CompetitionSummary; tagKey: string; t
 }
 
 // 列表上的时间窗口只到日：两端各带时分和时区的一串在手机上要折两行，而列表
-// 只需要知道"哪几天"，精确到分钟的时刻详情页才需要。
+// 只需要知道"哪几天"，精确到分钟的时刻详情页才需要。fmtDay 本身现在住在
+// api/utils.ts（勋章详情/成就页的绝版截止日也要用同一个格式化）。
 // Time windows on the list stop at the day: two full timestamps with zone wrap onto
 // two lines on a phone, and the list only needs "which days"; minute precision
-// belongs to the detail page.
-const fmtDay = (iso: string): string =>
-  (parseTime(iso) ?? new Date(NaN)).toLocaleDateString('en-GB', {
-    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
-  })
+// belongs to the detail page. fmtDay itself now lives in api/utils.ts (the
+// limited-badge closing date on the achievements/detail pages needs the same format).
 const fmtRange = (c: CompetitionSummary) =>
   `${c.startsAt ? fmtDay(c.startsAt) : '—'} → ${c.endsAt ? fmtDay(c.endsAt) : '—'}`
 

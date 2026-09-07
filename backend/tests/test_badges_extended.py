@@ -10,8 +10,11 @@ from app.models import (
     User, Order, ClosedTrade, UserBadge, UserActiveDay,
     LeaderboardSnapshot, Competition, CompetitionParticipant,
 )
+from app.services.gamification import badge_judges
+from app.services.gamification.badge_judges import _board_return_best, _has_comeback
 from app.services.gamification.badges import BADGES, SHELVES, badge_display_name, judge_and_award_badges
-from app.services.gamification.periods import week_key, month_key
+from app.services.gamification.conditions import longest_active_streak
+from app.services.gamification.periods import week_key, month_key, period_bounds
 
 NOW = datetime.now(timezone.utc)
 
@@ -130,6 +133,21 @@ def test_board_return_ignores_winrate_board_and_competition_snapshots(db_session
     assert not {b for b in _owned(db_session, u.id) if b[0] == "board_return"}
 
 
+# 封存边界：结束 + 48h 的重算窗关闭前一分钟仍未封存，关闭后一分钟才算数——
+# 直接钉 _board_return_best 的 now 参数，不依赖挂钟时间。
+# Sealing boundary: one minute before the end+48h recompute window closes it's
+# still unsealed, one minute after it counts — pins _board_return_best's `now`
+# param directly rather than depending on wall-clock time.
+def test_board_return_sealing_boundary(db_session):
+    u = _user(db_session, "bd6@t.co")
+    _snap(db_session, u, "return_pct", "2024-03", 1)
+    _start, end = period_bounds("2024-03")
+    still_open = end + timedelta(hours=48) - timedelta(minutes=1)
+    just_sealed = end + timedelta(hours=48) + timedelta(minutes=1)
+    assert _board_return_best(db_session, u.id, now=still_open) == (None, None)
+    assert _board_return_best(db_session, u.id, now=just_sealed) == (None, 1)
+
+
 # ---- 老将：完赛场次（只看出勤）----
 
 T0 = datetime(2020, 1, 1, tzinfo=timezone.utc)
@@ -164,9 +182,6 @@ def test_campaigner_ignores_unsettled_and_disqualified(db_session):
 
 
 # ---- 常客：历史最长连续登录 ----
-
-from app.services.gamification.conditions import longest_active_streak
-
 
 def _active(db, u, start, n):
     for i in range(n):
@@ -207,9 +222,6 @@ def test_regular_silver_from_historical_run(db_session):
 
 # ---- 翻盘：亏损月后紧接的下一个月把亏的全赚回来 ----
 
-from app.services.gamification.badge_judges import _has_comeback
-
-
 def _month(offset):
     """当前月往前 offset 个月的 15 日（offset=0 是当前月）。"""
     y, m = NOW.year, NOW.month
@@ -225,6 +237,12 @@ def test_has_comeback_pure():
     assert _has_comeback({(2025, 1): -200.0, (2025, 3): 500.0}) is False      # 隔了一个月
     assert _has_comeback({(2024, 12): -50.0, (2025, 1): 50.0}) is True        # 跨年相邻
     assert _has_comeback({(2025, 1): 10.0, (2025, 2): 20.0}) is False
+    # 二进制浮点表示误差下的恰好回本：-0.3 与 0.1+0.2 数学上相等，但
+    # 0.1+0.2 == 0.30000000000000004，精确比较 (>=) 会因这道误差误判未回本。
+    # Exact break-even under binary float representation error: -0.3 and
+    # 0.1+0.2 are mathematically equal, but 0.1+0.2 == 0.30000000000000004,
+    # so an exact >= comparison would misjudge this as not recovered.
+    assert _has_comeback({(2025, 1): -0.3, (2025, 2): 0.1 + 0.2}) is True
 
 
 def test_comeback_awarded_only_when_recovered(db_session):
@@ -256,6 +274,22 @@ def test_registry_is_eleven_badges_in_display_order():
         ["starter", "regular", "evergreen", "winning_hand", "veteran", "board_return", "arena", "campaigner"]
     assert [b for b, m in BADGES.items() if m["shelf"] == "special"] == ["comp_back_to_back", "comeback"]
     assert [b for b, m in BADGES.items() if m["shelf"] == "limited"] == ["founder_2026"]
+
+
+# ---- 记忆化：三档共享一次查询，不随档位数重复查库 ----
+
+def test_board_return_best_memoized_once_per_pass(db_session, monkeypatch):
+    u = _user(db_session, "mz1@t.co")
+    calls = []
+    real = badge_judges._board_return_best
+
+    def counting(db, user_id, now=None):
+        calls.append(1)
+        return real(db, user_id, now=now)
+
+    monkeypatch.setattr(badge_judges, "_board_return_best", counting)
+    judge_and_award_badges(db_session, u.id)          # 无快照：三档全判一遍
+    assert len(calls) == 1
 
 
 def test_display_names_for_new_badges():

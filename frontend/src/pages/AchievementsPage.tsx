@@ -19,6 +19,7 @@ import { SkeletonBlock, SkeletonLine } from '../components/Skeleton'
 import BadgeIcon from '../components/badges/BadgeIcon'
 import MedalTilt from '../components/badges/MedalTilt'
 import BadgeDetailModal from '../components/badges/BadgeDetailModal'
+import LimitedClosesLine from '../components/badges/LimitedClosesLine'
 import PedestalStage from '../components/badges/PedestalStage'
 import { materialOf } from '../components/badges/medal'
 import type { GamificationBadge, GamificationMe, GamificationTask } from '../api/types'
@@ -614,14 +615,8 @@ export default function AchievementsPage() {
                         </span>
                       )}
                       <small className="ach-meta">{meta}</small>
-                      {b.shelf === 'limited' && b.closesAt && (
-                        <small className="ach-closes">
-                          {t('gamification.limited.closes', { date: fmtDate(b.closesAt) })}
-                          {' · '}
-                          {new Date(b.closesAt).getTime() > Date.now()
-                            ? t('gamification.limited.open')
-                            : t('gamification.limited.closed')}
-                        </small>
+                      {b.shelf === 'limited' && (
+                        <LimitedClosesLine closesAt={b.closesAt} className="ach-closes" />
                       )}
                       <small className="ach-own">
                         {t('gamification.detail.owners', { n: b.owners, pct: fmtOwnerPct(b.owners, me.population) })}
