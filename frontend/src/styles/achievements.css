@@ -550,12 +550,14 @@
 .ach-shelf { position: relative; padding: 14px 18px 18px; border-radius: 18px; }
 .ach-shelf::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
 .ach-s-tiered::before { background: radial-gradient(ellipse 70% 110% at 50% 110%, rgba(201, 162, 74, 0.12), transparent 70%); }
-.ach-s-single::before { background: radial-gradient(ellipse 60% 110% at 50% 110%, rgba(156, 47, 47, 0.16), transparent 70%); }
+.ach-s-special::before { background: radial-gradient(ellipse 60% 110% at 50% 110%, rgba(184, 150, 78, 0.14), transparent 70%); }
+.ach-s-limited::before { background: radial-gradient(ellipse 60% 110% at 50% 110%, rgba(156, 47, 47, 0.16), transparent 70%); }
 .ach-shelf-h { position: relative; display: flex; align-items: baseline; justify-content: space-between; }
 .ach-shelf-h h4 { margin: 0; font-size: 14px; font-weight: 700; color: #f4f4f5; }
 .ach-shelf-h h4 span { margin-left: 10px; font-size: 11px; font-weight: 500; letter-spacing: 0.04em; color: #71717a; }
 .ach-shelf-h .r { font-size: 12px; color: #71717a; }
 .ach-shelf-h .r b { color: #a1a1aa; font-weight: 600; }
+.ach-closes { display: block; margin-top: 4px; font-size: 11px; letter-spacing: 0.02em; color: #b9846a; }
 .ach-row {
   position: relative;
   display: grid;
@@ -606,6 +608,7 @@
 .ach-m-gold .ach-glow { background: radial-gradient(ellipse, rgba(201, 162, 74, 0.55), transparent 70%); }
 .ach-m-legend .ach-glow { background: radial-gradient(ellipse, rgba(201, 162, 74, 0.7), transparent 70%); }
 .ach-m-limited .ach-glow { background: radial-gradient(ellipse, rgba(156, 47, 47, 0.6), transparent 70%); }
+.ach-m-onyx .ach-glow { background: radial-gradient(ellipse, rgba(184, 150, 78, 0.5), transparent 70%); }
 .ach-item.ghost .ach-glow { opacity: 0.12; }
 .ach-item svg { filter: drop-shadow(0 10px 12px rgba(0, 0, 0, 0.55)); }
 .ach-ring {

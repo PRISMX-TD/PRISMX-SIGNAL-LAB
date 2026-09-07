@@ -82,6 +82,15 @@ export default function BadgeDetailModal({ badge, population, onClose }: Props) 
             {t(`gamification.material.${material}`)} · {t(`gamification.family.${family}`)} · {t(`gamification.shape.${family}`)}
           </span>
           {!tiered && <p className="text-sm text-neutral-400">{t(`gamification.badges.${badge.id}.desc`)}</p>}
+          {badge.shelf === 'limited' && badge.closesAt && (
+            <p className="text-xs text-neutral-500">
+              {t('gamification.limited.closes', { date: fmtDate(badge.closesAt) })}
+              {' · '}
+              {new Date(badge.closesAt).getTime() > Date.now()
+                ? t('gamification.limited.open')
+                : t('gamification.limited.closed')}
+            </p>
+          )}
         </div>
 
         {/* 三档阶梯：每档一行——小铸币、档名、条件、当前持有人数；到了的档打钩。

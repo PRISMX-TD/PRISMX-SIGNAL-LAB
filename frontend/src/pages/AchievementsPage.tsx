@@ -23,10 +23,13 @@ import PedestalStage from '../components/badges/PedestalStage'
 import { materialOf } from '../components/badges/medal'
 import type { GamificationBadge, GamificationMe, GamificationTask } from '../api/types'
 
-// 勋章库分两层：四枚进阶勋章（各有铜 / 银 / 金三档）在上，两枚独立勋章在下。
-// The vault has two shelves: the four tiered badges (bronze / silver / gold) on
-// top, the two standalone badges below.
+// 勋章库分三层：进阶勋章（各有铜 / 银 / 金三档）、特殊勋章（无档位）、绝版勋章
+// （窗口关闭后永久停发），严格按接口的 shelf 字段分组，空层不渲染。
+// The vault has three shelves: tiered badges (bronze / silver / gold), special
+// badges (no tiers), and limited badges (never awarded again once the window
+// closes) — grouped strictly by the API's `shelf` field, empty shelves skipped.
 const TIERS = [1, 2, 3] as const
+const SHELF_KEYS = ['tiered', 'special', 'limited'] as const
 // 与后端 LEVEL_TITLES 同序 / same order as the backend's LEVEL_TITLES
 const LEVEL_KEYS = ['novice', 'junior', 'elite', 'senior', 'chief', 'legend'] as const
 
@@ -432,10 +435,11 @@ export default function AchievementsPage() {
   const stageIndex = nextGroup ? me.groups.indexOf(nextGroup) + 1 : me.groups.length
   const nextTitleKey = LEVEL_KEYS[Math.min(me.level, LEVEL_KEYS.length - 1)]
   const earnedCount = me.badges.filter((b) => b.earned).length
-  const shelves = [
-    { key: 'tiered', badges: me.badges.filter((b) => b.maxTier > 0) },
-    { key: 'single', badges: me.badges.filter((b) => b.maxTier === 0) },
-  ].filter((g) => g.badges.length > 0)
+  // 三层严格按接口的 shelf 分：进阶 / 特殊 / 绝版。空层不渲染。
+  // Three shelves strictly by the API's `shelf`; empty shelves are skipped.
+  const shelves = SHELF_KEYS
+    .map((key) => ({ key, badges: me.badges.filter((b) => b.shelf === key) }))
+    .filter((g) => g.badges.length > 0)
   // 按佩戴顺序取出勋章对象；首枚是默认，站陈列台正中。
   // Resolve badges in equipped order; the first is the default and takes centre stage.
   const equippedBadges = me.equippedBadges
@@ -610,6 +614,15 @@ export default function AchievementsPage() {
                         </span>
                       )}
                       <small className="ach-meta">{meta}</small>
+                      {b.shelf === 'limited' && b.closesAt && (
+                        <small className="ach-closes">
+                          {t('gamification.limited.closes', { date: fmtDate(b.closesAt) })}
+                          {' · '}
+                          {new Date(b.closesAt).getTime() > Date.now()
+                            ? t('gamification.limited.open')
+                            : t('gamification.limited.closed')}
+                        </small>
+                      )}
                       <small className="ach-own">
                         {t('gamification.detail.owners', { n: b.owners, pct: fmtOwnerPct(b.owners, me.population) })}
                       </small>
