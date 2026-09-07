@@ -839,10 +839,6 @@ export default function CompetitionsPage() {
 
   return (
     <div className="mx-auto max-w-[1100px] space-y-6 pb-10">
-      <h2 className="font-display text-2xl font-bold text-neutral-100">
-        <span className="neon-text">{t('competition.title')}</span>
-      </h2>
-
       {listLoading ? (
         <SkeletonPage cards={3} />
       ) : listForbidden || !listData ? (

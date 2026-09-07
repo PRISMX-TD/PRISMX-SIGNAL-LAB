@@ -20,8 +20,6 @@ export default function UserMenu({
   showUpgrade,
   isAdmin,
   gamificationVisible,
-  leaderboardVisible,
-  competitionsVisible,
   gamificationLevel,
   gamificationTitle,
   onLogout,
@@ -30,8 +28,6 @@ export default function UserMenu({
   showUpgrade: boolean
   isAdmin: boolean
   gamificationVisible: boolean
-  leaderboardVisible: boolean
-  competitionsVisible: boolean
   // 等级/称号：随 /auth/me 一起下发（见 store/auth.tsx refreshUser），角标
   // 只在两者都有值时渲染——gamificationVisible 为假时后端本就不算，值是 null。
   // Level/title: delivered alongside /auth/me (see store/auth.tsx
@@ -106,36 +102,20 @@ export default function UserMenu({
           <Link to="/bind" onClick={() => setOpen(false)} className={linkClass}>
             {t("nav.bind")}
           </Link>
+          {/* 自定义策略 2026-09-07 从顶栏挪到这里：偶尔配置一次的工具，与连接 MT5
+              同频。Custom strategies moved here from the top nav (2026-09-07): a
+              configure-once tool, same cadence as the MT5 connection. */}
+          <Link to="/strategies" onClick={() => setOpen(false)} className={linkClass}>
+            {t("nav.strategies")}
+          </Link>
           <Link to="/support" onClick={() => setOpen(false)} className={linkClass}>
             {t("nav.support")}
           </Link>
-          {/* 成就页：入口按 gamificationVisible 门控，理由同 Layout.tsx「其他」
-              抽屉的同名判断。
-              Achievements: gated on gamificationVisible, same rationale as the
-              "more" drawer's matching check in Layout.tsx. */}
-          {gamificationVisible && (
-            <Link to="/achievements" onClick={() => setOpen(false)} className={linkClass}>
-              {t("gamification.title")}
-            </Link>
-          )}
-          {/* 排行榜：独立于 gamificationVisible 的另一个内测开关，理由同上一条。
-              Leaderboard: gated on its own beta switch, same rationale as the
-              achievements link above. */}
-          {leaderboardVisible && (
-            <Link to="/leaderboard" onClick={() => setOpen(false)} className={linkClass}>
-              {t("leaderboard.title")}
-            </Link>
-          )}
-          {/* 比赛：又一个独立于 gamificationVisible/leaderboardVisible 的内测开关，
-              理由同上两条。
-              Competitions: another beta switch independent of
-              gamificationVisible/leaderboardVisible, same rationale as the two
-              links above. */}
-          {competitionsVisible && (
-            <Link to="/competitions" onClick={() => setOpen(false)} className={linkClass}>
-              {t("competition.title")}
-            </Link>
-          )}
+          {/* 成就 / 排行榜 / 比赛三条入口 2026-09-07 撤出菜单：它们合并进顶栏的
+              「成长」入口（见 Layout.tsx），上面的等级药丸仍直达成就页。
+              The achievements / leaderboard / competitions links left this menu
+              on 2026-09-07: they merged into the top-nav "Growth" entry (see
+              Layout.tsx); the level chip above still deep-links to achievements. */}
           {showUpgrade && (
             <Link to="/upgrade" onClick={() => setOpen(false)} className={`${linkClass} text-prism-300`}>
               {t("nav.upgrade")}

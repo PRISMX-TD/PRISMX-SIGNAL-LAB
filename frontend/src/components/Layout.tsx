@@ -32,18 +32,27 @@ import { reportPageView } from '../utils/pageTracking'
 // The active indicator is now the spectral rule, the system's signature graphic:
 // still a thin line, but composed of three micro-offset bands expressing prism
 // dispersion. Here the brand language does a job instead of decorating.
-function NavItem({ to, label }: { to: string; label: string }) {
+// match：额外算作「当前」的路径。「成长」一个入口对应三条路由（成就 / 排行榜 /
+// 比赛），站在任一条上都要点亮它。
+// match: extra paths that also count as "current". The single "Growth" entry
+// fronts three routes (achievements / leaderboard / competitions) and must
+// light up on any of them.
+function NavItem({ to, label, match }: { to: string; label: string; match?: string[] }) {
+  const { pathname } = useLocation()
+  const matched = !!match?.some((p) => pathname === p || pathname.startsWith(p + '/'))
   return (
     <NavLink
       to={to}
       end={to === '/app'}
       className={({ isActive }) =>
         `relative whitespace-nowrap px-3 py-2 text-sm font-medium transition-colors ${
-          isActive ? 'text-white' : 'text-neutral-400 hover:text-neutral-100'
+          isActive || matched ? 'text-white' : 'text-neutral-400 hover:text-neutral-100'
         }`
       }
     >
-      {({ isActive }) => (
+      {({ isActive: routeActive }) => {
+        const isActive = routeActive || matched
+        return (
         <>
           {label}
           {/* 指示线的偏移：-9px 让文字底到线顶足足 14px，那不像下划线、像一条
@@ -58,7 +67,8 @@ function NavItem({ to, label }: { to: string; label: string }) {
             </span>
           )}
         </>
-      )}
+        )
+      }}
     </NavLink>
   )
 }
@@ -594,8 +604,20 @@ export default function Layout() {
               <NavItem to="/dashboard" label={t('nav.dashboard')} />
               <NavItem to="/app" label={t('nav.signals')} />
               <NavItem to="/charts" label={t('nav.charts')} />
-              <NavItem to="/strategies" label={t('nav.strategies')} />
               <NavItem to="/orders" label={t('nav.orders')} />
+              {/* 「成长」：成就 / 排行榜 / 比赛三页的唯一顶栏入口（2026-09-07），
+                  三个内测开关任一打开即露出；自定义策略挪进了头像菜单。
+                  "Growth": the single top-nav entry for achievements /
+                  leaderboard / competitions (2026-09-07), shown when any of the
+                  three beta switches is on; custom strategies moved into the
+                  user menu. */}
+              {(user?.gamificationVisible || user?.leaderboardVisible || user?.competitionsVisible) && (
+                <NavItem
+                  to={user?.gamificationVisible ? '/achievements' : user?.leaderboardVisible ? '/leaderboard' : '/competitions'}
+                  label={t('nav.growth')}
+                  match={['/achievements', '/leaderboard', '/competitions']}
+                />
+              )}
             </nav>
 
             <div className="ml-auto flex items-center gap-2 sm:gap-3">
@@ -609,8 +631,6 @@ export default function Layout() {
                   showUpgrade={user?.plan !== 'PRO'}
                   isAdmin={isAdmin}
                   gamificationVisible={!!user?.gamificationVisible}
-                  leaderboardVisible={!!user?.leaderboardVisible}
-                  competitionsVisible={!!user?.competitionsVisible}
                   gamificationLevel={user?.gamificationLevel}
                   gamificationTitle={user?.gamificationTitle}
                   onLogout={handleLogout}

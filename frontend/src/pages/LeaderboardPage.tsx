@@ -817,9 +817,6 @@ export default function LeaderboardPage() {
     <div className="mx-auto max-w-[1100px] space-y-6 pb-[76px] sm:pb-10">
       <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h2 className="font-display text-2xl font-bold text-neutral-100">
-            <span className="neon-text">{t('leaderboard.title')}</span>
-          </h2>
           {periodSrc?.periodStart && periodSrc.periodEnd && (
             <>
               {/* ≥ 640px：原样不动。桌面这行一像素不改。

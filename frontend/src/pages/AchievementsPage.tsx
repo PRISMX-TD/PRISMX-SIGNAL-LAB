@@ -453,7 +453,6 @@ export default function AchievementsPage() {
       {/* ── 陈列台 / stage ────────────────────────────────────── */}
       <section className="ach-stage" aria-labelledby="ach-title">
         <div className="ach-stage-l">
-          <div className="ach-eyebrow">{t('gamification.title')}</div>
           <h2 id="ach-title" className="ach-title">
             <span className="ach-lv num">L{me.level}</span>
             <span>{t(`gamification.titles.${me.title}`)}</span>

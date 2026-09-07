@@ -8,6 +8,10 @@ import ErrorBoundary from './components/ErrorBoundary'
 import MetaPixel from './components/MetaPixel'
 import RefCapture from './components/RefCapture'
 import PublicShell from './seo/PublicShell'
+// 「成长」外壳不走 lazy：几十行的壳，三条路由共用，拆 chunk 只多一次往返。
+// The Growth shell is not lazy: a few dozen lines shared by three routes —
+// a separate chunk would only add a round trip.
+import GrowthHub from './pages/GrowthHub'
 
 // 路由级代码分割：首屏只加载当前页面的代码，其余按需加载（如图表页）。
 // Route-level code splitting: only the current page's code loads up front;
@@ -201,7 +205,10 @@ export default function App() {
                   directly during the beta window gets a backend 403, which the
                   page degrades into a beta hint on its own (see
                   AchievementsPage's forbidden branch). */}
-              <Route path="/achievements" element={<AchievementsPage />} />
+              {/* 2026-09-07：三页共用 GrowthHub 外壳（一个页头 + 页签），路由不变。
+                  Since 2026-09-07 the three pages share the GrowthHub shell
+                  (one header + tab strip); the routes themselves are unchanged. */}
+              <Route path="/achievements" element={<GrowthHub tab="achievements"><AchievementsPage /></GrowthHub>} />
               {/* 排行榜：路由本身不做可见性门控，理由与上面 /achievements 完全
                   一致——只隐藏导航入口（见 Layout.tsx/UserMenu.tsx 的
                   leaderboardVisible 判断），直接打 URL 撞上后端 403 由页面
@@ -211,7 +218,7 @@ export default function App() {
                   (see Layout.tsx/UserMenu.tsx's leaderboardVisible checks); a
                   direct URL hit gets a backend 403, degraded by the page itself
                   (see LeaderboardPage's forbidden branch). */}
-              <Route path="/leaderboard" element={<LeaderboardPage />} />
+              <Route path="/leaderboard" element={<GrowthHub tab="leaderboard"><LeaderboardPage /></GrowthHub>} />
               {/* 比赛：路由本身不做可见性门控，理由与上面 /achievements、
                   /leaderboard 完全一致——只隐藏导航入口（见
                   Layout.tsx/UserMenu.tsx 的 competitionsVisible 判断），直接打
@@ -223,7 +230,7 @@ export default function App() {
                   competitionsVisible checks); a direct URL hit gets a backend
                   403, degraded by the page itself (see CompetitionsPage's
                   forbidden branch). */}
-              <Route path="/competitions" element={<CompetitionsPage />} />
+              <Route path="/competitions" element={<GrowthHub tab="competitions"><CompetitionsPage /></GrowthHub>} />
               <Route path="/upgrade" element={<UpgradePage />} />
               <Route path="/account" element={<AccountPage />} />
               <Route path="/download" element={<DownloadPage />} />
