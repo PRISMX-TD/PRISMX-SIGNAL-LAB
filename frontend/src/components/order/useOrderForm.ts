@@ -17,7 +17,7 @@
 // online for the docked ticket) — that difference is intentional.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MT5Account, Quote } from '../../api/types'
-import { clientOrderId } from '../../api/utils'
+import { brokerSymbol, clientOrderId } from '../../api/utils'
 import { pickDefaultAccount, useLastAccount } from '../../utils/useLastAccount'
 import { useLastVolume } from '../../utils/useLastVolume'
 import {
@@ -131,7 +131,11 @@ export function useOrderForm({
   }, [accounts, login, lastLogin])
 
   // ---- 报价与参考价 / quote & reference ---------------------------------------
-  const quote = (selected && quotesByAccount[selected.login]?.[symbol]) || fallbackQuote
+  // 按账户报价按券商品种名（BTCUSD）键入，信号名可能是 BTCUSDT：两个名字都查一遍。
+  // Per-account quotes are keyed by the broker's name (BTCUSD); the signal may
+  // say BTCUSDT, so try both spellings.
+  const accountQuotes = selected ? quotesByAccount[selected.login] : undefined
+  const quote = accountQuotes?.[symbol] || accountQuotes?.[brokerSymbol(symbol)] || fallbackQuote
   const ref = refPrice != null && refPrice > 0 ? refPrice : null
   const bid = quote?.bid ?? ref
   const ask = quote?.ask ?? ref

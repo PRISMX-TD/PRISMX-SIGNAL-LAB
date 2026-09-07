@@ -7,8 +7,9 @@
 // prefilled from the signal. Form logic is order/useOrderForm, shared with the
 // chart modal and the docked ticket.
 import { useTranslation } from 'react-i18next'
+import { useGlobalQuotes } from '../store/live'
 import type { MT5Account, Quote, Signal } from '../api/types'
-import { calcCountdown } from '../api/utils'
+import { brokerSymbol, calcCountdown } from '../api/utils'
 import { SIGNAL_LIFESPAN_MS } from './signals/SignalView'
 import { useNow } from './signals/hooks'
 import { useStickyOnlineAccounts } from '../utils/useStickyOnlineAccounts'
@@ -31,11 +32,16 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
   // 表现为"一点切换账号，弹窗就没了"。见 useStickyOnlineAccounts 的说明。
   // Not a plain online filter — a flickering flag would unmount the switcher mid-click.
   const availableAccounts = useStickyOnlineAccounts(accounts)
+  // 兜底报价：网关账户没有按账户报价，取 EA 全站报价，按券商品种名（BTCUSDT → BTCUSD）查。
+  // Fallback quote for gateway accounts (no per-account feed): the site-wide EA
+  // feed, keyed by the broker's symbol name (BTCUSDT → BTCUSD).
+  const globalQuotes = useGlobalQuotes()
   const form = useOrderForm({
     symbol: signal.symbol,
     side: signal.side === 'BUY' ? 'BUY' : 'SELL',
     accounts: availableAccounts,
     quotesByAccount,
+    fallbackQuote: globalQuotes[brokerSymbol(signal.symbol)],
     refPrice: signal.entry,
     initialStopLoss: signal.stopLoss,
     initialTakeProfit: signal.takeProfit,

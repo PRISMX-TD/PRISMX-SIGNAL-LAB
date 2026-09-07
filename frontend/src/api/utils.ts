@@ -112,9 +112,36 @@ const PIP_SIZE: Record<string, number> = {
   ETHUSD: 0.1,
 }
 
-// 去掉券商后缀后取基础品种名 / strip broker suffix to get the base symbol
+// 平台 / 信号侧的品种名 → 券商 MT5 侧的基础名（不含后缀），与后端
+// services/symbol_aliases.broker_symbol 同一张表、同一条通用规则：TradingView 的加密
+// 警报一律以 USDT 计价（BTCUSDT / ETHUSDT），MT5 券商的加密 CFD 一律叫 …USD。
+// 真实信号存的就是 "BTCUSDT"，以前下单表单拿它直接查合约规模 / 美元基准 / 按账户
+// 报价，一个都查不到——风险百分比对比特币永远"暂不支持"，现价也拿不到券商报价。
+// Signal-side symbol → broker MT5 base name, mirroring the backend's
+// broker_symbol(): TradingView crypto alerts are USDT-quoted while broker CFDs
+// are …USD. Real signals store "BTCUSDT", which used to miss every table and
+// quote lookup in the order form, so risk-% sizing never worked for bitcoin.
+const BROKER_NAMES: Record<string, string> = {
+  BTCUSDT: 'BTCUSD',
+  USOIL: 'WTI',
+  XTIUSD: 'WTI',
+  WTICOUSD: 'WTI',
+}
+
+export function brokerSymbol(symbol: string): string {
+  const s = symbol.trim().toUpperCase()
+  const mapped = BROKER_NAMES[s]
+  if (mapped) return mapped
+  if (s.endsWith('USDT') && s.length > 4) return s.slice(0, -1)
+  return s
+}
+
+// 去掉券商后缀后取基础品种名，并归一到券商叫法（BTCUSDT → BTCUSD），所以下面所有
+// 按品种查表的函数对信号名和券商名一视同仁。
+// Strip the broker suffix and normalize to the broker's name (BTCUSDT → BTCUSD),
+// so every per-symbol table below accepts signal-side and broker-side names alike.
 export function baseSymbol(symbol: string): string {
-  return symbol.toUpperCase().replace(/[._-].*$/, '')
+  return brokerSymbol(symbol.toUpperCase().replace(/[._-].*$/, ''))
 }
 
 // 展示名映射：MT5/信号引擎/桥接上下行全程用的都是 BTCUSD（这是 MT5 上实际的
