@@ -146,3 +146,12 @@ def _j_profit_factor(db, user, ctx):
     if not wins:
         return False
     return (sum(wins) / len(wins)) / (sum(losses) / len(losses)) >= 2.0
+
+
+# ---- 老兵 / veteran：实盘已核验整仓平仓笔数，全时段、多账户合计 ----
+# Veteran: lifetime count of real, verified, fully-closed positions across all accounts.
+VETERAN_THRESHOLDS = (100, 500, 2000)
+
+
+def _j_veteran(n):
+    return lambda db, u, c: sum(a["trades"] for a in c["lifetime"].values()) >= n

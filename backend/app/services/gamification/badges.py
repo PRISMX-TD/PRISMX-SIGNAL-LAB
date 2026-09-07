@@ -30,6 +30,7 @@ from .badge_judges import (  # noqa: F401  —— 判定函数在 badge_judges.p
     FOUNDER_DEADLINE, REAL, _LOT_EPS, _has_real_fill, _resolved_real_positions, _evergreen_months,
     _j_profile_complete, _j_first_close, _j_first_real_trade,
     _j_hundred_wins, _j_midas_touch, _j_profit_factor, _j_founder_2026, _j_evergreen,
+    VETERAN_THRESHOLDS, _j_veteran,
 )
 
 # 可同时佩戴的勋章枚数。第一枚是「默认」——榜单行与比赛条目位置有限，只画
@@ -195,6 +196,8 @@ BADGES: dict[str, dict] = {
         "category": "performance", "shelf": "tiered", "name": "胜手", "max_tier": 3,
         "judges": [_j_hundred_wins, _j_midas_touch, _j_profit_factor],
     },
+    "veteran": {"category": "performance", "shelf": "tiered", "name": "老兵", "max_tier": 3,
+                "judges": [_j_veteran(n) for n in VETERAN_THRESHOLDS]},
     # 赛场：完赛铜 / 前三银 / 冠军金，终审事务内授予（competitions.settle_competition）。
     # Arena: finisher bronze / podium silver / champion gold, awarded at settlement.
     "arena": {"category": "competition", "shelf": "tiered", "name": "赛场", "max_tier": 3, "judges": None},
