@@ -343,6 +343,8 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
         "groups": condition_states(db, user.id, stats),
         "badges": [{
             "id": bid, "category": meta["category"], "maxTier": meta["max_tier"],
+            "shelf": meta["shelf"],
+            "closesAt": meta["closes_at"].isoformat() if meta.get("closes_at") else None,
             "tier": (owned[bid].tier or 0) if bid in owned else 0,
             "earned": bid in owned,
             "awardedAt": owned[bid].awarded_at.isoformat() if bid in owned and owned[bid].awarded_at else None,

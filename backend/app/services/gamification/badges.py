@@ -44,6 +44,12 @@ EQUIP_SLOTS = 3
 MAX_TIER = 3
 TIER_NAMES = {1: "铜", 2: "银", 3: "金"}
 
+# 陈列层：tiered 进阶（三档）/ special 特殊（无档、仍可获得）/ limited 绝版（窗口关闭后停发）。
+# 前端成就页三层完全按这个字段分，不靶 max_tier 或 category 猜。
+# Shelf: tiered / special (no tiers, still obtainable) / limited (closed window).
+# The achievements page groups strictly by this field.
+SHELVES = ("tiered", "special", "limited")
+
 # 旧 id → (新 id, 档位)。给 rev 16 迁移、测试与任何还拿着旧 id 的调用方用；
 # 纪律类三枚没有去处，整行删除。
 # Legacy id -> (new id, tier), for the rev 16 migration and anything still holding
@@ -178,24 +184,25 @@ def equipped_badge_tiers(db, users) -> dict[str, int]:
 # max_tier=0 is a standalone badge with a single judge (or None).
 BADGES: dict[str, dict] = {
     "starter": {
-        "category": "growth", "name": "起步", "max_tier": 3,
+        "category": "growth", "shelf": "tiered", "name": "起步", "max_tier": 3,
         "judges": [_j_profile_complete, _j_first_close, _j_first_real_trade],
     },
     "evergreen": {
-        "category": "performance", "name": "常青", "max_tier": 3,
+        "category": "performance", "shelf": "tiered", "name": "常青", "max_tier": 3,
         "judges": [_j_evergreen(3), _j_evergreen(6), _j_evergreen(12)],
     },
     "winning_hand": {
-        "category": "performance", "name": "胜手", "max_tier": 3,
+        "category": "performance", "shelf": "tiered", "name": "胜手", "max_tier": 3,
         "judges": [_j_hundred_wins, _j_midas_touch, _j_profit_factor],
     },
     # 赛场：完赛铜 / 前三银 / 冠军金，终审事务内授予（competitions.settle_competition）。
     # Arena: finisher bronze / podium silver / champion gold, awarded at settlement.
-    "arena": {"category": "competition", "name": "赛场", "max_tier": 3, "judges": None},
+    "arena": {"category": "competition", "shelf": "tiered", "name": "赛场", "max_tier": 3, "judges": None},
     # 卫冕王：连续两届冠军，终审时判；冠军之上再无档位，独立一枚。
     # Back-to-back champion: judged at settlement; above gold, so a standalone badge.
-    "comp_back_to_back": {"category": "competition", "name": "卫冕王", "max_tier": 0, "judges": None},
-    "founder_2026": {"category": "limited", "name": "创始元老", "max_tier": 0, "judges": _j_founder_2026},
+    "comp_back_to_back": {"category": "competition", "shelf": "special", "name": "卫冕王", "max_tier": 0, "judges": None},
+    "founder_2026": {"category": "limited", "shelf": "limited", "name": "创始元老", "max_tier": 0,
+                     "judges": _j_founder_2026, "closes_at": FOUNDER_DEADLINE},
 }
 
 

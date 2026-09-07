@@ -31,7 +31,7 @@ def _real_fill(db, u, ticket, login="1", profit=1.0, volume=0.2, trade_mode=2, c
 
 
 def test_registry_shape():
-    assert set(BADGES) == {"starter", "evergreen", "winning_hand", "arena", "comp_back_to_back", "founder_2026"}
+    assert {"starter", "evergreen", "winning_hand", "arena", "comp_back_to_back", "founder_2026"} <= set(BADGES)
     for bid in ("starter", "evergreen", "winning_hand"):
         assert BADGES[bid]["max_tier"] == MAX_TIER and len(BADGES[bid]["judges"]) == 3
     assert BADGES["arena"]["max_tier"] == 3 and BADGES["arena"]["judges"] is None      # 终审授予

@@ -2,6 +2,7 @@ import pytest
 from fastapi import HTTPException
 from app.models import User, UserBadge
 from app.routers.gamification import build_me_payload, _check_visible
+from app.services.gamification.badges import BADGES
 from app.services.settings_store import save_gamification_settings, invalidate_gamification_cache
 
 
@@ -15,7 +16,10 @@ def test_payload_shape(db_session):
     p = build_me_payload(db_session, u, judge=True)
     assert p["level"] == 1 and p["title"] == "novice"
     assert len(p["groups"]) == 5
-    assert len(p["badges"]) == 6                 # 改制后：四枚进阶 + 两枚独立
+    assert len(p["badges"]) == len(BADGES)        # 改制后：四枚进阶 + 两枚独立（后续任务再加五枚）
+    by_id = {b["id"]: b for b in p["badges"]}
+    assert by_id["founder_2026"]["shelf"] == "limited" and by_id["founder_2026"]["closesAt"].startswith("2027-01-01")
+    assert by_id["starter"]["shelf"] == "tiered" and by_id["starter"]["closesAt"] is None
     assert p["winRate"]["windowDays"] == 365
 
 
