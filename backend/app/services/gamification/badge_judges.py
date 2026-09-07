@@ -10,7 +10,7 @@ awarding and equipping live in badges.py. Signature is (db, user, ctx) -> bool.
 """
 from datetime import datetime, timedelta, timezone
 
-from app.models import MT5Account, Order
+from app.models import LeaderboardSnapshot, MT5Account, Order
 from .stats import load_trade_data
 
 FOUNDER_DEADLINE = datetime(2027, 1, 1, tzinfo=timezone.utc)
@@ -155,3 +155,43 @@ VETERAN_THRESHOLDS = (100, 500, 2000)
 
 def _j_veteran(n):
     return lambda db, u, c: sum(a["trades"] for a in c["lifetime"].values()) >= n
+
+
+# ---- 榜上有名 / board_return：只看收益榜，只算封存周期 ----
+# 快照在周期结束 + RECOMPUTE_GRACE_HOURS 之后不再重算（boards.snapshot_boards 只
+# 处理 active_period_keys），之前的名次还会变，不能作为荣誉依据。比赛快照的
+# period_key 是 "comp:<id>"，那是赛场勋章的事，这里跳过。
+# Only the return board, only sealed periods (end + grace ≤ now): before that the
+# rank can still move. Competition snapshots ("comp:<id>") belong to the arena badge.
+BOARD_RETURN_TOP = 10
+
+
+def _board_return_best(db, user_id, now: datetime | None = None) -> tuple[int | None, int | None]:
+    from .periods import RECOMPUTE_GRACE_HOURS, period_bounds
+    now = now or datetime.now(timezone.utc)
+    grace = timedelta(hours=RECOMPUTE_GRACE_HOURS)
+    rows = (db.query(LeaderboardSnapshot.period_key, LeaderboardSnapshot.rank)
+              .filter(LeaderboardSnapshot.user_id == user_id,
+                      LeaderboardSnapshot.board == "return_pct",
+                      LeaderboardSnapshot.period_key.notlike("comp:%")).all())
+    best_week = best_month = None
+    for key, rank in rows:
+        _start, end = period_bounds(key)
+        if end + grace > now:
+            continue
+        if "-W" in key:
+            best_week = rank if best_week is None else min(best_week, rank)
+        else:
+            best_month = rank if best_month is None else min(best_month, rank)
+    return best_week, best_month
+
+
+def _j_board_return(tier: int):
+    def judge(db, user, ctx):
+        week, month = _board_return_best(db, user.id)
+        if tier == 1:
+            return week is not None and week <= BOARD_RETURN_TOP
+        if tier == 2:
+            return month is not None and month <= BOARD_RETURN_TOP
+        return month == 1
+    return judge

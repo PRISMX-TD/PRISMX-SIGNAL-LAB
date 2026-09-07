@@ -11,6 +11,7 @@ from app.models import (
     LeaderboardSnapshot, Competition, CompetitionParticipant,
 )
 from app.services.gamification.badges import BADGES, SHELVES, badge_display_name, judge_and_award_badges
+from app.services.gamification.periods import week_key, month_key
 
 NOW = datetime.now(timezone.utc)
 
@@ -80,3 +81,50 @@ def test_veteran_sums_across_accounts(db_session):
         _fill(db_session, u, i, login="2")
     db_session.commit()
     assert "veteran:1" in judge_and_award_badges(db_session, u.id)          # 60 + 60 = 120 ≥ 100
+
+
+# ---- 榜上有名（只看收益榜、只算封存周期）----
+
+SEALED = datetime(2024, 3, 13, tzinfo=timezone.utc)      # 早已出窗
+
+
+def _snap(db, u, board, key, rank, login="1"):
+    db.add(LeaderboardSnapshot(board=board, period_key=key, user_id=u.id,
+                               mt5_login=login, rank=rank, score=0.1, sample=20))
+    db.commit()
+
+
+def test_board_return_weekly_top10_is_bronze(db_session):
+    u = _user(db_session, "bd1@t.co")
+    _snap(db_session, u, "return_pct", week_key(SEALED), 10)
+    assert "board_return:1" in judge_and_award_badges(db_session, u.id)
+
+
+def test_board_return_rank_11_not_awarded(db_session):
+    u = _user(db_session, "bd2@t.co")
+    _snap(db_session, u, "return_pct", week_key(SEALED), 11)
+    judge_and_award_badges(db_session, u.id)
+    assert not {b for b in _owned(db_session, u.id) if b[0] == "board_return"}
+
+
+def test_board_return_monthly_top10_silver_and_first_gold(db_session):
+    u = _user(db_session, "bd3@t.co")
+    _snap(db_session, u, "return_pct", month_key(SEALED), 7)
+    assert "board_return:2" in judge_and_award_badges(db_session, u.id)
+    _snap(db_session, u, "return_pct", "2024-04", 1)
+    assert "board_return:3" in judge_and_award_badges(db_session, u.id)
+
+
+def test_board_return_ignores_unsealed_current_period(db_session):
+    u = _user(db_session, "bd4@t.co")
+    _snap(db_session, u, "return_pct", month_key(NOW), 1)              # 进行中：不算
+    judge_and_award_badges(db_session, u.id)
+    assert not {b for b in _owned(db_session, u.id) if b[0] == "board_return"}
+
+
+def test_board_return_ignores_winrate_board_and_competition_snapshots(db_session):
+    u = _user(db_session, "bd5@t.co")
+    _snap(db_session, u, "win_rate", month_key(SEALED), 1)              # 胜率榜第一：不算
+    _snap(db_session, u, "return_pct", "comp:abc", 1)                   # 比赛快照：不算
+    judge_and_award_badges(db_session, u.id)
+    assert not {b for b in _owned(db_session, u.id) if b[0] == "board_return"}
