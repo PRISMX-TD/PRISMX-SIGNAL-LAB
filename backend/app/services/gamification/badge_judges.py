@@ -10,7 +10,9 @@ awarding and equipping live in badges.py. Signature is (db, user, ctx) -> bool.
 """
 from datetime import datetime, timedelta, timezone
 
-from app.models import LeaderboardSnapshot, MT5Account, Order
+from sqlalchemy import func
+
+from app.models import Competition, CompetitionParticipant, LeaderboardSnapshot, MT5Account, Order
 from .stats import load_trade_data
 
 FOUNDER_DEADLINE = datetime(2027, 1, 1, tzinfo=timezone.utc)
@@ -195,3 +197,34 @@ def _j_board_return(tier: int):
             return month is not None and month <= BOARD_RETURN_TOP
         return month == 1
     return judge
+
+
+# ---- 老将 / campaigner：完赛场次，只看出勤不看名次 ----
+# "完赛" 与赛场铜同一口径：比赛已 settled、参赛条目有 final_rank、未被取消资格。
+# 一人多账户参赛 = 多个条目，各算一场（与榜单"一行 = 一个账户"一致）。
+# Campaigner: number of finished entries. Same definition as arena bronze:
+# competition settled, entry ranked, not disqualified. One entry per account.
+CAMPAIGNER_THRESHOLDS = (3, 10, 25)
+
+
+def finished_competition_count(db, user_id) -> int:
+    return (db.query(func.count(CompetitionParticipant.id))
+              .join(Competition, Competition.id == CompetitionParticipant.competition_id)
+              .filter(CompetitionParticipant.user_id == user_id,
+                      CompetitionParticipant.final_rank.isnot(None),
+                      CompetitionParticipant.disqualified.is_(False),
+                      Competition.status == "settled")
+              .scalar() or 0)
+
+
+def campaigner_tier(n: int) -> int:
+    """完赛场次 → 应得档位（0 = 还没到铜）。"""
+    tier = 0
+    for i, threshold in enumerate(CAMPAIGNER_THRESHOLDS, start=1):
+        if n >= threshold:
+            tier = i
+    return tier
+
+
+def _j_campaigner(n):
+    return lambda db, u, c: finished_competition_count(db, u.id) >= n

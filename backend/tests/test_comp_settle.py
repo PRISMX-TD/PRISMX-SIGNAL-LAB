@@ -380,6 +380,23 @@ def test_settle_back_to_back_empty_board_adjacent_no_crash_no_spurious_award(db_
     assert result["badgeErrors"] == []
 
 
+def test_settle_awards_campaigner_alongside_arena_on_third_finish(db_session, monkeypatch):
+    """第三次完赛：终审时赛场铜与老将铜同一场到手。"""
+    admin = _admin(db_session)
+    u = _user(db_session, "camp@t.co")
+    for i in range(2):                                     # 两场历史完赛
+        past = _comp(db_session, status="settled", name=f"past{i}",
+                     starts_at=T0 - timedelta(days=60 - 20 * i), ends_at=T0 - timedelta(days=53 - 20 * i))
+        p = _participant(db_session, past, u, f"P{i}")
+        p.final_rank = 4; p.final_score = 0.1; db_session.commit()
+    comp = _comp(db_session)
+    _participant(db_session, comp, u, "A")
+    _stub_compute_rows(monkeypatch, comp, [{"userId": u.id, "login": "A", "score": 0.2, "sample": 10}])
+    res = settle_competition(db_session, comp, admin.id)
+    assert {("arena", 3), ("campaigner", 1)} <= _badges(db_session, u.id)
+    assert {"userId": u.id, "badgeId": "campaigner", "tier": 1} in res["badges"]
+
+
 # ---- audit -------------------------------------------------------------------
 
 def test_settle_writes_audit_log(db_session, monkeypatch):

@@ -128,3 +128,36 @@ def test_board_return_ignores_winrate_board_and_competition_snapshots(db_session
     _snap(db_session, u, "return_pct", "comp:abc", 1)                   # 比赛快照：不算
     judge_and_award_badges(db_session, u.id)
     assert not {b for b in _owned(db_session, u.id) if b[0] == "board_return"}
+
+
+# ---- 老将：完赛场次（只看出勤）----
+
+T0 = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+
+def _finished(db, u, n, status="settled", disqualified=False, rank=5):
+    """给用户造 n 个"已完赛"参赛条目。"""
+    for i in range(n):
+        c = Competition(name=f"c{u.email}{i}", status=status,
+                        starts_at=T0 + timedelta(days=30 * i), ends_at=T0 + timedelta(days=30 * i + 7))
+        db.add(c); db.flush()
+        db.add(CompetitionParticipant(competition_id=c.id, user_id=u.id, mt5_login=f"L{i}",
+                                      final_rank=rank, final_score=0.1, disqualified=disqualified))
+    db.commit()
+
+
+def test_campaigner_bronze_at_three_finishes(db_session):
+    u = _user(db_session, "cp1@t.co")
+    _finished(db_session, u, 2)
+    judge_and_award_badges(db_session, u.id)
+    assert ("campaigner", 1) not in _owned(db_session, u.id)
+    _finished(db_session, u, 1)
+    assert "campaigner:1" in judge_and_award_badges(db_session, u.id)
+
+
+def test_campaigner_ignores_unsettled_and_disqualified(db_session):
+    u = _user(db_session, "cp2@t.co")
+    _finished(db_session, u, 3, status="running")           # 未终审：final_rank 就算被写了也不算
+    _finished(db_session, u, 3, disqualified=True)          # 取消资格：不算
+    judge_and_award_badges(db_session, u.id)
+    assert not {b for b in _owned(db_session, u.id) if b[0] == "campaigner"}

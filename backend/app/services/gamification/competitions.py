@@ -17,6 +17,7 @@ from app.models import (
     Competition, CompetitionParticipant, LeaderboardSnapshot, MT5Account, PeriodBaseline, User,
 )
 from .badges import award_badge
+from .badge_judges import campaigner_tier, finished_competition_count
 from app.services.account_type import CONTEST, DEMO
 from .boards import REAL, _aware, _resolved_in_period, board_gates, reconcile_deposits, return_score
 
@@ -453,6 +454,16 @@ def settle_competition(db, comp: Competition, admin_id: str,
         arena_tier[winner_user] = 3
     for uid, tier in arena_tier.items():
         _award(uid, "arena", tier)
+
+    # 老将：完赛场次到档就发，和赛场勋章同一场到手。本场的 final_rank 与 status
+    # 已在上面那次 commit 落盘，所以这里数到的场次已含本场。每小时循环也会判
+    # 这枚（badge_judges._j_campaigner），这里只是让"第三场完赛"当场就有反馈。
+    # Campaigner: awarded here so the third finish shows up at settlement, not an
+    # hour later. This competition is already committed, so the count includes it.
+    for uid in finisher_users:
+        tier = campaigner_tier(finished_competition_count(db, uid))
+        if tier:
+            _award(uid, "campaigner", tier)
 
     # 卫冕王：按 starts_at 升序取全部已 settled 的比赛（含本场——本场的 status
     # 与 final_rank 已经在上面那次 commit 里落盘），相邻两届冠军是同一人才发奖。
