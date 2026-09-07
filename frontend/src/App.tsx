@@ -33,6 +33,7 @@ const StrategiesPage = lazy(() => import('./pages/StrategiesPage'))
 const AchievementsPage = lazy(() => import('./pages/AchievementsPage'))
 const LeaderboardPage = lazy(() => import('./pages/LeaderboardPage'))
 const CompetitionsPage = lazy(() => import('./pages/CompetitionsPage'))
+const ProfilePage = lazy(() => import('./pages/ProfilePage'))
 const LegalPage = lazy(() => import('./pages/LegalPage'))
 const FaqPage = lazy(() => import('./pages/FaqPage'))
 const SupportPage = lazy(() => import('./pages/SupportPage'))
@@ -231,6 +232,9 @@ export default function App() {
                   403, degraded by the page itself (see CompetitionsPage's
                   forbidden branch). */}
               <Route path="/competitions" element={<GrowthHub tab="competitions"><CompetitionsPage /></GrowthHub>} />
+              {/* 公开主页（2026-09-07）：从榜面名字点进来；不套外壳，自带返回。
+                  Public profile: reached from board names; no shell, carries its own back link. */}
+              <Route path="/u/:publicId" element={<ProfilePage />} />
               <Route path="/upgrade" element={<UpgradePage />} />
               <Route path="/account" element={<AccountPage />} />
               <Route path="/download" element={<DownloadPage />} />

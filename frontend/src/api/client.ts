@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 
 const TOKEN_KEY = 'prismx_token'
@@ -554,6 +554,10 @@ export const userApi = {
       // badge renders off these two fields with no extra gamificationApi.me() call.
       gamificationLevel: number | null
       gamificationTitle: string | null
+      // 公开主页（2026-09-07）：publicId 拼「查看我的公开主页」链接；statsPublic 是交易画像开关。
+      // Public profile: publicId builds the "view my public profile" link; statsPublic is the stats switch.
+      publicId: string | null
+      statsPublic: boolean
     }>('/auth/me'),
   // 游戏化资料局部更新：昵称/榜单展示/退出排行榜/佩戴勋章，只改传了的字段。
   // Partial update of the gamification profile: nickname / leaderboard display /
@@ -664,6 +668,9 @@ export const gamificationApi = {
     request<LeaderboardPayload>(
       `/gamification/leaderboard?board=${encodeURIComponent(board)}&period=${encodeURIComponent(period)}`
     ),
+  // 公开主页（2026-09-07）：404 = 不存在或已退榜（后端不区分）；403 同排行榜的内测门控。
+  // Public profile: 404 = unknown or opted out (indistinguishable by design); 403 = same beta gate as the leaderboard.
+  profile: (publicId: string) => request<PublicProfile>(`/gamification/profile/${encodeURIComponent(publicId)}`),
 }
 
 // 交易比赛（设计 §1.7/§1.8/§1.9，Phase 3）：用户端公开列表/详情/报名。

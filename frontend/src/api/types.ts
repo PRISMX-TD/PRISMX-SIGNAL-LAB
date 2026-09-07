@@ -1113,6 +1113,8 @@ export interface ProfilePatch {
   // Ordered equipped list, first = default; [] unequips all. When both fields are
   // sent the backend takes this one.
   equippedBadges?: string[]
+  // 公开主页：允许他人看到综合胜率与考核笔数。/ Public profile: expose win rate & trade count.
+  statsPublic?: boolean
 }
 
 export interface ProfileOut {
@@ -1121,6 +1123,31 @@ export interface ProfileOut {
   leaderboardOptOut: boolean
   equippedBadge: string | null
   equippedBadges: string[]
+  statsPublic: boolean
+}
+
+// GET /gamification/profile/{publicId}（2026-09-07 公开主页设计）。名字已按对方
+// 的昵称公开设置打码；stats 仅在对方开了 statsPublic（或本人自看）时非空。
+// Public profile payload. displayName is already masked per the owner's
+// setting; stats is non-null only when the owner has statsPublic on (or the
+// viewer is the owner).
+export interface PublicProfile {
+  displayName: string
+  isSelf: boolean
+  level: number
+  title: string
+  equippedBadges: { id: string; tier: number }[]
+  memberSince: string | null
+  badges: { id: string; tier: number; awardedAt: string | null }[]
+  boards: {
+    board: LeaderboardBoard
+    period: 'week' | 'month'
+    periodKey: string
+    entries: { login: string; rank: number; score: number }[]
+  }[]
+  competitions: { id: string; name: string; login: string; finalRank: number; finalScore: number | null }[]
+  stats: { winRate: number | null; windowDays: number; trades: number } | null
+  statsPublic: boolean
 }
 
 // 排行榜（设计 §4.3）/ Leaderboard
@@ -1146,6 +1173,11 @@ export interface LeaderboardRow {
   // 佩戴勋章的档位（画金银铜用）；没戴 / 独立勋章为 0。
   // The equipped badge's tier (bronze / silver / gold); 0 when none or standalone.
   equippedBadgeTier?: number
+  // 公开主页标识（users.public_id，不透明随机串，不是 user_id）；点名字进
+  // /u/{profileId}。旧后端响应没有这个键时退回不可点。
+  // Public-profile token (users.public_id — opaque, not the user_id); names
+  // link to /u/{profileId}. Absent on older backend payloads → not clickable.
+  profileId?: string | null
   // 以下三个只在管理端预览（GET /admin/gamification/leaderboard）里出现——
   // 用户端响应永远不带它们（昵称打码、不下发 user_id 是 §4.3 的契约）。
   // These three appear only in the admin preview (GET
@@ -1209,6 +1241,7 @@ export interface LeaderboardProgress {
 export interface LeaderboardPreviousWinner {
   displayName: string
   score: number
+  profileId?: string | null
 }
 
 export interface LeaderboardPayload {
@@ -1332,6 +1365,7 @@ export interface CompetitionChampion {
   score: number
   equippedBadge: string | null
   equippedBadgeTier?: number
+  profileId?: string | null
 }
 
 // GET /competitions 的完整响应：非 draft 比赛按状态分组。

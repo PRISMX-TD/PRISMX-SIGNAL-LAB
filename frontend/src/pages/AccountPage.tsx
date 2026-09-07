@@ -46,6 +46,9 @@ export default function AccountPage() {
   const [nicknameDraft, setNicknameDraft] = useState("")
   const [nicknamePublicDraft, setNicknamePublicDraft] = useState(false)
   const [leaderboardOptOutDraft, setLeaderboardOptOutDraft] = useState(false)
+  // 公开主页的交易画像开关（2026-09-07），与上面两个开关同一条保存路径。
+  // The public-profile trading-stats switch (2026-09-07), saved on the same path as the two above.
+  const [statsPublicDraft, setStatsPublicDraft] = useState(false)
   const [profileSaving, setProfileSaving] = useState(false)
   const [profileMsg, setProfileMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
 
@@ -154,6 +157,7 @@ export default function AccountPage() {
       setNicknameDraft(acct.nickname ?? "")
       setNicknamePublicDraft(acct.nicknamePublic)
       setLeaderboardOptOutDraft(acct.leaderboardOptOut)
+      setStatsPublicDraft(acct.statsPublic)
     } catch (err: unknown) {
       console.error("account load:", err)
       setLoading(false)
@@ -226,6 +230,7 @@ export default function AccountPage() {
     if (trimmedNick !== (info.nickname ?? "")) patch.nickname = trimmedNick
     if (nicknamePublicDraft !== info.nicknamePublic) patch.nicknamePublic = nicknamePublicDraft
     if (leaderboardOptOutDraft !== info.leaderboardOptOut) patch.leaderboardOptOut = leaderboardOptOutDraft
+    if (statsPublicDraft !== info.statsPublic) patch.statsPublic = statsPublicDraft
     if (Object.keys(patch).length === 0) return
     setProfileSaving(true)
     try {
@@ -238,12 +243,14 @@ export default function AccountPage() {
               nicknamePublic: res.nicknamePublic,
               leaderboardOptOut: res.leaderboardOptOut,
               equippedBadge: res.equippedBadge,
+              statsPublic: res.statsPublic,
             }
           : prev,
       )
       setNicknameDraft(res.nickname ?? "")
       setNicknamePublicDraft(res.nicknamePublic)
       setLeaderboardOptOutDraft(res.leaderboardOptOut)
+      setStatsPublicDraft(res.statsPublic)
       setProfileMsg({ kind: "ok", text: t("gamification.profile.saved") })
     } catch (err: unknown) {
       setProfileMsg({
@@ -578,6 +585,11 @@ export default function AccountPage() {
             <div>
               <h2 className="font-display acct-row-h">{t("gamification.profile.sectionTitle")}</h2>
               <p className="acct-row-p">{t("account.profileDesc")}</p>
+              {info.publicId && (
+                <Link to={`/u/${info.publicId}`} className="acct-row-link">
+                  {t("publicProfile.viewMine")} →
+                </Link>
+              )}
             </div>
             <div className="acct-row-body">
               <div className="acct-field">
@@ -609,6 +621,13 @@ export default function AccountPage() {
                     <div className="acct-setting-d">{t("account.leaderboardOptOutDesc")}</div>
                   </label>
                   <Switch id="profile-leaderboard-opt-out" checked={leaderboardOptOutDraft} onChange={setLeaderboardOptOutDraft} />
+                </div>
+                <div className="acct-setting">
+                  <label htmlFor="profile-stats-public" className="acct-setting-l">
+                    <div className="acct-setting-t">{t("account.statsPublic")}</div>
+                    <div className="acct-setting-d">{t("account.statsPublicDesc")}</div>
+                  </label>
+                  <Switch id="profile-stats-public" checked={statsPublicDraft} onChange={setStatsPublicDraft} />
                 </div>
               </div>
               <div className="acct-actions">

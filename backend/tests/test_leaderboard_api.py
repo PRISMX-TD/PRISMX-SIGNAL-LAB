@@ -166,7 +166,7 @@ def test_previous_winner_from_seeded_prior_period(db_session):
 
     p = build_leaderboard_payload(db_session, b, "return_pct", PK)
     assert p["rows"] == []
-    assert p["previousWinner"] == {"displayName": "C***n", "score": 0.087}
+    assert p["previousWinner"] == {"displayName": "C***n", "score": 0.087, "profileId": a.public_id}
 
 
 def test_previous_winner_not_computed_when_board_nonempty(db_session):

@@ -526,7 +526,9 @@
     "notifStateOn": "推送已开启",
     "notifStateOff": "推送已关闭",
     "notifStateLocked": "PRO 专属",
-    "notifWindowAllDay": "全天"
+    "notifWindowAllDay": "全天",
+    "statsPublic": "公开交易画像",
+    "statsPublicDesc": "允许别人在你的主页看到综合胜率与考核笔数"
   },
   "charts": {
     "footer": "UTC+8 · 数据源自平台自有喂价，仅供参考",
@@ -2088,5 +2090,23 @@
       "refresh": "立即刷新", "refreshed": "榜单已重算", "refreshSkipped": "仅进行中的比赛可刷新",
       "settleWait": "结束后 24 小时内不可终审（等待迟到平仓入账）"
     }
+  },
+  "publicProfile": {
+    "title": "公开主页",
+    "back": "返回",
+    "notFound": "该用户未公开主页",
+    "memberSince": "加入于",
+    "badgesNone": "还没有获得勋章",
+    "boardsTitle": "榜单成绩",
+    "notRanked": "本期未上榜",
+    "compsTitle": "比赛成绩",
+    "compsNone": "还没有已终审的比赛",
+    "statsTitle": "交易画像",
+    "winRate": "综合胜率",
+    "trades": "考核笔数",
+    "window": "口径窗口",
+    "windowDays": "近 {{n}} 天",
+    "statsPrivateSelf": "仅你可见，未公开",
+    "viewMine": "查看我的公开主页"
   }
 }

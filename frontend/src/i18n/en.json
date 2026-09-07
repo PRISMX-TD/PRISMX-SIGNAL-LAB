@@ -526,7 +526,9 @@
     "notifStateOn": "Push on",
     "notifStateOff": "Push off",
     "notifStateLocked": "PRO only",
-    "notifWindowAllDay": "All day"
+    "notifWindowAllDay": "All day",
+    "statsPublic": "Show trading stats publicly",
+    "statsPublicDesc": "Let others see your win rate and trade count on your profile"
   },
   "charts": {
     "footer": "UTC+8 · Data from platform feed, for reference only",
@@ -2091,5 +2093,23 @@
       "refresh": "Refresh now", "refreshed": "Board recomputed", "refreshSkipped": "Only a running competition can be refreshed",
       "settleWait": "Settlement opens 24 h after the end time (late closes are still arriving)"
     }
+  },
+  "publicProfile": {
+    "title": "Public profile",
+    "back": "Back",
+    "notFound": "This user has no public profile",
+    "memberSince": "Member since",
+    "badgesNone": "No badges yet",
+    "boardsTitle": "Board standings",
+    "notRanked": "Not ranked this period",
+    "compsTitle": "Competition results",
+    "compsNone": "No settled competitions yet",
+    "statsTitle": "Trading profile",
+    "winRate": "Win rate",
+    "trades": "Trades counted",
+    "window": "Window",
+    "windowDays": "Last {{n}} days",
+    "statsPrivateSelf": "Only you can see this; not public",
+    "viewMine": "View my public profile"
   }
 }

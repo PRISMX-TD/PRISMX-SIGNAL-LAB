@@ -1,4 +1,5 @@
 """ORM 数据模型 / ORM data models."""
+import secrets
 import uuid
 from datetime import datetime, timezone
 
@@ -14,6 +15,21 @@ def _uuid() -> str:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# 公开主页标识：10 位随机串，字符集去掉易混的 0/o/1/l。与 user_id 无关、不可
+# 枚举，是榜面上「点名字进主页」唯一下发给用户端的身份标识（设计 §4.3 的
+# 「不下发 user_id」契约不变）。32^10 ≈ 1e15，撞键概率可忽略，但列上仍有唯一约束兜底。
+# Public profile id: 10 random chars from an alphabet without the confusable
+# 0/o/1/l. Unrelated to user_id and not enumerable — the only identity token
+# the user-facing board rows carry for "click a name to open a profile" (the
+# §4.3 "no user_id" contract stands). 32^10 ≈ 1e15 makes collisions negligible;
+# the unique constraint on the column is the backstop.
+PUBLIC_ID_ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789"
+
+
+def new_public_id() -> str:
+    return "".join(secrets.choice(PUBLIC_ID_ALPHABET) for _ in range(10))
 
 
 class User(Base):
@@ -149,6 +165,15 @@ class User(Base):
     # above. Written together: equipped_badge is derived, so the leaderboard /
     # competition / auth paths that read a single id stay untouched. Empty string = none.
     equipped_badges = Column(String, nullable=True)
+    # 公开主页（2026-09-07）：public_id 是主页 URL 与榜单行 profileId 用的不透明
+    # 标识（见 new_public_id）；stats_public 是「允许他人在我的主页看到综合胜率
+    # 与考核笔数」开关，默认关。迁移 rev 18 给存量用户回填 public_id。
+    # Public profile (2026-09-07): public_id is the opaque token used in the
+    # profile URL and as the board rows' profileId (see new_public_id);
+    # stats_public is the "let others see my win rate / trade count" switch,
+    # off by default. Migration rev 18 backfills public_id for existing users.
+    public_id = Column(String(16), unique=True, nullable=True, default=new_public_id)
+    stats_public = Column(Boolean, nullable=False, default=False)
 
 
 # 说明：旧的 EABinding（ea_bindings 表，EA 单账号绑定）已随 EA 接入方式移除。

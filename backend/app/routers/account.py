@@ -51,6 +51,11 @@ class AccountInfoOut(BaseModel):
     # gamificationVisible is true for this user, else None (§7).
     gamificationLevel: int | None = None
     gamificationTitle: str | None = None
+    # 公开主页（2026-09-07）：publicId 供「查看我的公开主页」拼链接；statsPublic
+    # 是交易画像公开开关。Public profile: publicId builds the "view my public
+    # profile" link; statsPublic is the trading-stats switch.
+    publicId: str | None = None
+    statsPublic: bool = False
     class Config:
         from_attributes = True
 
@@ -121,6 +126,8 @@ def get_account(
         nicknamePublic=bool(current_user.nickname_public),
         leaderboardOptOut=bool(current_user.leaderboard_opt_out),
         equippedBadge=current_user.equipped_badge,
+        publicId=current_user.public_id,
+        statsPublic=bool(current_user.stats_public),
     )
 
 
@@ -159,6 +166,8 @@ def _apply_profile_patch(db: Session, user: User, body: ProfilePatchIn) -> User:
         user.nickname_public = body.nicknamePublic
     if "leaderboardOptOut" in sent and body.leaderboardOptOut is not None:
         user.leaderboard_opt_out = body.leaderboardOptOut
+    if "statsPublic" in sent and body.statsPublic is not None:
+        user.stats_public = body.statsPublic
     # 单枚字段保留给旧前端（缓存的旧 bundle 仍会发它）：语义等价于「列表里只有
     # 这一枚」，与它上线前的行为一致。两个字段都传时下面的列表分支后跑，覆盖它。
     # The single-badge field stays for old clients (a cached bundle still sends
@@ -210,6 +219,7 @@ def patch_profile(
         "leaderboardOptOut": u.leaderboard_opt_out,
         "equippedBadge": u.equipped_badge,
         "equippedBadges": equipped_list(u),
+        "statsPublic": bool(u.stats_public),
     }
 
 

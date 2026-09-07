@@ -25,6 +25,7 @@ import type { CSSProperties } from 'react'
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
+import ProfileLink from '../components/ProfileLink'
 import { gamificationApi } from '../api/client'
 import { SkeletonBlock, SkeletonLine } from '../components/Skeleton'
 import BadgeIcon from '../components/badges/BadgeIcon'
@@ -185,9 +186,9 @@ function PodiumCard({ row, board, maxAbs }: { row: LeaderboardRow; board: Leader
         <RankCoin rank={row.rank} size={big ? 64 : 52} className="hidden sm:block" />
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-neutral-100 sm:flex-initial">
+            <ProfileLink profileId={row.profileId} className="min-w-0 flex-1 truncate text-[15px] font-semibold text-neutral-100 sm:flex-initial">
               {row.displayName}
-            </span>
+            </ProfileLink>
             {row.equippedBadge && (
               <BadgeIcon id={row.equippedBadge} tier={row.equippedBadgeTier ?? 0} earned size={20} />
             )}
@@ -241,9 +242,9 @@ function ListRow({ row, board, maxAbs }: { row: LeaderboardRow; board: Leaderboa
         )}
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className={`truncate ${row.isSelf ? 'font-semibold text-neutral-100' : 'text-neutral-200'}`}>
+            <ProfileLink profileId={row.profileId} className={`truncate ${row.isSelf ? 'font-semibold text-neutral-100' : 'text-neutral-200'}`}>
               {row.displayName}
-            </span>
+            </ProfileLink>
             {row.isSelf && (
               <span className="tag shrink-0 bg-prism-600/25 text-[11px] text-prism-300">{t('leaderboard.youTag')}</span>
             )}
@@ -305,7 +306,7 @@ function PodiumColumnMobile({ row, board, center }: { row: LeaderboardRow; board
       )}
       <RankCoin rank={row.rank} size={center ? 48 : 38} />
       <div className="flex w-full min-w-0 items-center justify-center gap-1">
-        <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-neutral-100">{row.displayName}</span>
+        <ProfileLink profileId={row.profileId} className="min-w-0 flex-1 truncate text-[12px] font-semibold text-neutral-100">{row.displayName}</ProfileLink>
         {row.equippedBadge && (
           <BadgeIcon id={row.equippedBadge} tier={row.equippedBadgeTier ?? 0} earned size={14} className="shrink-0" />
         )}
@@ -340,9 +341,9 @@ function ListRowMobile({ row, board }: { row: LeaderboardRow; board: Leaderboard
         )}
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className={`truncate text-[13px] ${row.isSelf ? 'font-semibold text-neutral-100' : 'text-neutral-200'}`}>
+            <ProfileLink profileId={row.profileId} className={`truncate text-[13px] ${row.isSelf ? 'font-semibold text-neutral-100' : 'text-neutral-200'}`}>
               {row.displayName}
-            </span>
+            </ProfileLink>
             {row.isSelf && (
               <span className="tag shrink-0 bg-prism-600/25 text-[11px] text-prism-300">{t('leaderboard.youTag')}</span>
             )}
@@ -567,12 +568,12 @@ function EmptyState({ data, board, rankThreshold, minBaselineUsd }: {
             </span>
           )}
           {data.previousWinner && (
-            <span className="chip border border-white/10 bg-white/[0.04] text-neutral-400">
+            <ProfileLink profileId={data.previousWinner.profileId} className="chip border border-white/10 bg-white/[0.04] text-neutral-400">
               {t('leaderboard.prevWinner', { name: data.previousWinner.displayName })}
               <b className={`num ml-1 ${scoreColorClass(board, data.previousWinner.score)}`}>
                 {fmtScore(board, data.previousWinner.score)}
               </b>
-            </span>
+            </ProfileLink>
           )}
         </div>
       )}

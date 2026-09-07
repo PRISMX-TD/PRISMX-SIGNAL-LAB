@@ -10,7 +10,8 @@ from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings
 from app.core.rate_limit import limiter
-from app.models import LeaderboardSnapshot, MT5Account, PeriodBaseline, User, UserBadge, UserTask
+from app.models import (Competition, CompetitionParticipant, LeaderboardSnapshot, MT5Account,
+                        PeriodBaseline, User, UserBadge, UserTask)
 from app.schemas import GamificationSettingsPatchIn, VisibilityPatchIn
 from app.services.deps import get_current_user, get_db, require_admin
 from app.services.gamification import (
@@ -156,6 +157,11 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
             "isSelf": r.user_id == viewer.id,
             "equippedBadge": u.equipped_badge if u else None,
             "equippedBadgeTier": badge_tiers.get(r.user_id, 0),
+            # profileId：公开主页的不透明标识（users.public_id），不是 user_id——
+            # 见 models.new_public_id 的说明；§4.3「不下发 user_id」不变。
+            # profileId: the opaque public-profile token (users.public_id), not the
+            # user_id — see models.new_public_id; §4.3's "no user_id" stands.
+            "profileId": u.public_id if u else None,
         }
         # reveal 只由管理端入口传 True（见 admin_leaderboard）。用户端 §4.3 的
         # 契约不变：不下发 user_id、昵称一律打码——这三个字段永远不会出现在
@@ -242,6 +248,7 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
                         pu.nickname if pu else None, pu.email if pu else None,
                         bool(pu.nickname_public) if pu else False),
                     "score": prev_row.score,
+                    "profileId": pu.public_id if pu else None,
                 }
 
     # progress：观众本期未上榜（me is None）但在本期至少拍过一个账户的基线——
@@ -478,6 +485,105 @@ def gamification_leaderboard(request: Request, board: str, period: str,
                               db: Session = Depends(get_db),
                               user: User = Depends(require_leaderboard_visible)):
     return build_leaderboard_payload(db, user, board, period)
+
+
+# ---- 公开主页 / public profile（2026-09-07 设计：docs/superpowers/specs/2026-09-07-public-profile-design.md）----
+# 交易画像是 365 天整仓聚合，重；只在对方开了 stats_public（或本人自看）时算，
+# 并按 public_id 缓存 60 秒——与仪表盘胜率摘要同一手法。其余块都是按 user_id
+# 索引的单表查询，不缓存。
+# The trading-stats block is a 365-day full-position aggregation — computed only
+# when the owner has stats_public on (or is viewing themself) and cached 60s per
+# public_id, same technique as the dashboard win-rate summary. Every other block
+# is a single indexed query and is not cached.
+_PROFILE_STATS_CACHE_SECONDS = 60
+MSG_PROFILE_NOT_FOUND = "该用户未公开主页 / Profile not available"
+
+
+def _profile_stats(db: Session, target: User) -> dict:
+    key = f"profile-stats:{target.public_id}"
+    cached = shared_state.kv_get_json(key)
+    if cached is not None:
+        return cached
+    stats = compute_comprehensive_stats(db, target.id)
+    payload = {"winRate": stats["win_rate"], "windowDays": stats["window_days"], "trades": stats["trades"]}
+    shared_state.kv_set_json(key, payload, ttl=_PROFILE_STATS_CACHE_SECONDS)
+    return payload
+
+
+def build_profile_payload(db: Session, viewer: User, public_id: str) -> dict:
+    """他人主页负载。找不到与退榜（leaderboard_opt_out）都是同一个 404——退榜的
+    语义就是「不想被看见」，且两种情况不可区分，免得拿 404/403 之差探测某个 id 是否存在。
+    Profile payload. Unknown id and opted-out (leaderboard_opt_out) both 404 with the
+    same message: opting out means "don't show me", and keeping the two
+    indistinguishable stops the status code from leaking whether an id exists."""
+    target = db.query(User).filter(User.public_id == public_id).first() if public_id else None
+    if target is None or target.leaderboard_opt_out:
+        raise HTTPException(404, MSG_PROFILE_NOT_FOUND)
+    is_self = target.id == viewer.id
+
+    done = {t.task_id for t in db.query(UserTask).filter(UserTask.user_id == target.id)}
+    level = level_of(done)
+    owned = {b.badge_id: b for b in db.query(UserBadge).filter(UserBadge.user_id == target.id)
+             if b.badge_id in BADGES}
+    # 勋章墙按注册表顺序列已获得的；不带进度、不带全站拥有人数（那是本人成就页的详情层）。
+    # The badge wall lists earned badges in registry order — no progress, no
+    # sitewide holder counts (those belong to the owner's own achievements page).
+    badges = [{
+        "id": bid, "tier": owned[bid].tier or 0,
+        "awardedAt": owned[bid].awarded_at.isoformat() if owned[bid].awarded_at else None,
+    } for bid in BADGES if bid in owned]
+    equipped = [{"id": bid, "tier": owned[bid].tier or 0}
+                for bid in equipped_list(target) if bid in owned]
+
+    now = datetime.now(timezone.utc)
+    boards = []
+    for period, key in (("week", periods.week_key(now)), ("month", periods.month_key(now))):
+        for board in LEADERBOARD_BOARDS:
+            rows = (db.query(LeaderboardSnapshot)
+                      .filter(LeaderboardSnapshot.board == board,
+                              LeaderboardSnapshot.period_key == key,
+                              LeaderboardSnapshot.user_id == target.id)
+                      .order_by(LeaderboardSnapshot.rank).all())
+            boards.append({
+                "board": board, "period": period, "periodKey": key,
+                "entries": [{"login": r.mt5_login, "rank": r.rank, "score": r.score} for r in rows],
+            })
+
+    comps = (db.query(CompetitionParticipant, Competition)
+               .join(Competition, Competition.id == CompetitionParticipant.competition_id)
+               .filter(CompetitionParticipant.user_id == target.id,
+                       CompetitionParticipant.final_rank.isnot(None),
+                       CompetitionParticipant.disqualified.is_(False),
+                       Competition.status == "settled")
+               .order_by(Competition.ends_at.desc(), CompetitionParticipant.final_rank.asc())
+               .all())
+    competitions = [{
+        "id": c.id, "name": c.name, "login": p.mt5_login,
+        "finalRank": p.final_rank, "finalScore": p.final_score,
+    } for p, c in comps]
+
+    stats = _profile_stats(db, target) if (target.stats_public or is_self) else None
+    created = target.created_at
+    return {
+        "displayName": identity.display_name(target.nickname, target.email, bool(target.nickname_public)),
+        "isSelf": is_self,
+        "level": level,
+        "title": LEVEL_TITLES[level - 1],
+        "equippedBadges": equipped,
+        "memberSince": created.strftime("%Y-%m") if created else None,
+        "badges": badges,
+        "boards": boards,
+        "competitions": competitions,
+        "stats": stats,
+        "statsPublic": bool(target.stats_public),
+    }
+
+
+@router.get("/profile/{public_id}")
+@limiter.limit(settings.RATE_LIMIT_LEADERBOARD)
+def gamification_profile(request: Request, public_id: str, db: Session = Depends(get_db),
+                          user: User = Depends(require_leaderboard_visible)):
+    return build_profile_payload(db, user, public_id)
 
 
 # ---- 管理员端 / admin endpoints ----

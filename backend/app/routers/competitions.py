@@ -118,6 +118,7 @@ def _leaders(db: Session, comps: list[Competition]) -> dict[str, list[dict]]:
             "score": r.score,
             "equippedBadge": u.equipped_badge if u else None,
             "equippedBadgeTier": badge_tiers.get(r.user_id, 0),
+            "profileId": u.public_id if u else None,
         })
     return out
 

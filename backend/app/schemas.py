@@ -83,6 +83,9 @@ class ProfilePatchIn(BaseModel):
     # the single field, which is equivalent to a one-item list). max_length is a
     # coarse payload guard; the real "max 3" check raises 400 in the handler.
     equippedBadges: list[str] | None = Field(default=None, max_length=16)
+    # 公开主页：允许他人看到综合胜率与考核笔数（2026-09-07）。
+    # Public profile: let others see the win rate / trade count (2026-09-07).
+    statsPublic: bool | None = None
 
 
 class GoogleAuthRequest(BaseModel):

@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import ProfileLink from '../components/ProfileLink'
 import type { TFunction } from 'i18next'
 import { competitionApi } from '../api/client'
 import { fmtDate, fmtDay, localizeApiError, parseTime } from '../api/utils'
@@ -257,7 +258,7 @@ function LiveHero({
       {top.length > 0
         ? top.map((r, i) => (
             <span key={i}>
-              {String(i + 1).padStart(2, '0')} <b>{r.displayName}</b> <ScoreText score={r.score} />
+              {String(i + 1).padStart(2, '0')} <b><ProfileLink profileId={r.profileId}>{r.displayName}</ProfileLink></b> <ScoreText score={r.score} />
             </span>
           ))
         : <span>{t('competition.ticker.empty')}</span>}
@@ -343,7 +344,7 @@ function HonorRow({ c, onClick, t }: { c: CompetitionSummary; onClick: () => voi
           <>
             <RankCoin rank={1} size={40} />
             <div className="min-w-0">
-              <b>{badgeOf(champ.equippedBadge, champ.equippedBadgeTier)}<span className="truncate">{champ.displayName}</span></b>
+              <b>{badgeOf(champ.equippedBadge, champ.equippedBadgeTier)}<ProfileLink profileId={champ.profileId} className="truncate">{champ.displayName}</ProfileLink></b>
               <small>{t('competition.champion')} · {t(`leaderboard.boards.${c.metric}`)}</small>
             </div>
           </>
@@ -431,7 +432,7 @@ function Ladder({ board, t }: { board: LeaderboardPayload; t: TFunction }) {
           <div className="cmp-ladder-who">
             <b>
               {badgeOf(row.equippedBadge, row.equippedBadgeTier)}
-              <span className="truncate">{row.displayName}</span>
+              <ProfileLink profileId={row.profileId} className="truncate">{row.displayName}</ProfileLink>
               {row.isSelf && <span className="cmp-you">{t('leaderboard.youTag')}</span>}
             </b>
             <span className="num">{row.login}</span>

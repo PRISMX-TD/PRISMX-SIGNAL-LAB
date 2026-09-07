@@ -1,0 +1,273 @@
+/* ═════════════ 公开主页 /u/:publicId（2026-09-07）═════════════
+   与账户页同一套语言：左对齐大字名字 + 右侧佩戴勋章，下面按发丝线分区。
+   勋章墙直接复用成就页的 .ach-row / .ach-item，这里只补主页自己的骨架。
+   Same language as the account page: a left-aligned display name with the
+   equipped badges on the right, hairline-divided sections below. The badge
+   wall reuses the achievements page's .ach-row / .ach-item; only the page's
+   own scaffolding lives here. */
+.pf {
+  max-width: 1100px;
+  margin: 0 auto;
+  animation: acct-in 0.5s var(--ease-out) both;
+}
+.pf-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.pf-back:hover {
+  color: var(--text);
+}
+
+/* ── 陈列台 / stage ── */
+.pf-head {
+  display: grid;
+  gap: 24px;
+  align-items: center;
+}
+@media (min-width: 1024px) {
+  .pf-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 48px;
+  }
+}
+.pf-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: clamp(30px, 4vw, 48px);
+  color: #fff;
+  overflow-wrap: anywhere;
+}
+.pf-you {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--r-xs);
+  background: rgba(90, 34, 238, 0.25);
+  font-family: "Archivo", "Noto Sans SC", system-ui, sans-serif;
+  font-variation-settings: "wdth" 100;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--purple-hi);
+}
+.pf-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.pf-meta b {
+  font-weight: 500;
+  color: var(--text);
+}
+.pf-lv {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-xs);
+  background: var(--nest);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text);
+}
+.pf-lv b {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 500;
+  color: var(--purple-hi);
+}
+.pf-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+/* 佩戴勋章：首枚放大居中，其余两枚靠两侧、略低。
+   Equipped badges: the default one larger in the middle, the other two lower at the sides. */
+.pf-equipped {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+.pf-equipped .medal-tilt {
+  cursor: default;
+}
+/* DOM 顺序是 [默认, 第二, 第三]（首枚 = 默认）；视觉上要默认居中，所以把第二枚
+   提到最前。DOM order is [default, second, third]; the default should sit in
+   the middle visually, so the second one is pulled in front. */
+.pf-equipped .medal-tilt.is-main {
+  order: 0;
+}
+.pf-equipped .medal-tilt:not(.is-main) {
+  transform: translateY(12px);
+  opacity: 0.92;
+}
+.pf-equipped .medal-tilt:nth-child(2) {
+  order: -1;
+}
+.pf-equipped svg {
+  filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.6));
+}
+
+/* ── 分区 / sections ── */
+.pf-sec {
+  margin-top: 36px;
+  padding-top: 28px;
+  border-top: 1px solid var(--line);
+}
+.pf-none {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.pf-private {
+  font-size: 12px;
+  color: #e0a83c;
+}
+
+/* 榜单四格 / four standings tiles */
+.pf-boards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+@media (min-width: 1024px) {
+  .pf-boards {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.pf-tile {
+  min-height: 96px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--surface);
+}
+.pf-tile-h {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.pf-tile-h b {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+.pf-tile-none {
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.pf-entries {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.pf-entries li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.pf-entries li:first-child {
+  border-top: 0;
+}
+.pf-entries b {
+  font-weight: 500;
+  color: #fff;
+}
+.pf-entries span {
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-entries em {
+  font-style: normal;
+  color: var(--text);
+}
+.pf-entries-wide li {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+.pf-login {
+  color: var(--text-3);
+}
+.pf-comps {
+  margin-top: 18px;
+}
+.pf-comps-h {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* 交易画像 / trading profile */
+.pf-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.pf-stat {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--surface);
+}
+.pf-stat span {
+  display: block;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.pf-stat b {
+  display: block;
+  margin-top: 6px;
+  font-size: 22px;
+  font-weight: 500;
+  color: #fff;
+}
+@media (max-width: 639px) {
+  .pf-stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pf-empty {
+  padding: 40px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--text-3);
+}
+.pf-empty p {
+  margin: 0 0 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pf {
+    animation: none;
+  }
+}

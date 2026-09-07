@@ -231,13 +231,6 @@
    Grid items default to min-width:auto; the three-badge row would widen the column past the container
    (mobile clipped the right badge and the rail's last node). */
 .ach-pedestal { min-width: 0; }
-.ach-eyebrow {
-  font-size: 11px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: #71717a;
-  font-weight: 500;
-}
 .ach-title {
   display: flex;
   align-items: center;

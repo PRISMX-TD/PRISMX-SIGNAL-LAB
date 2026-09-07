@@ -292,6 +292,15 @@
   line-height: 1.55;
   color: var(--text-3);
 }
+.acct-row-link {
+  display: inline-block;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--purple-hi);
+}
+.acct-row-link:hover {
+  text-decoration: underline;
+}
 .acct-row-body {
   min-width: 0;
   max-width: 640px;

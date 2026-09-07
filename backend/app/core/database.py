@@ -116,7 +116,9 @@ def _hash_legacy_api_tokens() -> None:
 # rev 17: closed_trades 补 MT5 历史「仓位」视图的其余列（open_time / open_price /
 #         gross_profit / commission / swap / sl / tp / reason / comment），全部可空，
 #         旧行由桥接 / 网关一次性回扫补齐。
-CURRENT_SCHEMA_REV = 17
+# rev 18 — users.public_id（公开主页的不透明标识；回填：存量用户逐个生成）
+#          + users.stats_public（交易画像公开开关，默认 false）
+CURRENT_SCHEMA_REV = 18
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -688,6 +690,8 @@ def _migrate_columns() -> None:
             "leaderboard_opt_out": "BOOLEAN",
             "equipped_badge": "VARCHAR",
             "equipped_badges": "VARCHAR",
+            "public_id": "VARCHAR(16)",
+            "stats_public": "BOOLEAN",
         }
         with engine.begin() as conn:
             for name, col_type in user_new.items():
@@ -782,6 +786,23 @@ def _migrate_columns() -> None:
             # NULL; backfill existing rows to their model default of False.
             conn.execute(text("UPDATE users SET nickname_public = FALSE WHERE nickname_public IS NULL"))
             conn.execute(text("UPDATE users SET leaderboard_opt_out = FALSE WHERE leaderboard_opt_out IS NULL"))
+            # rev 18：stats_public 同款 NOT NULL 补默认；public_id 给存量用户逐个
+            # 生成——只挑 NULL 的行，重跑迁移不会改写已经发出去的链接。
+            # rev 18: stats_public gets the same NOT NULL default fill; public_id is
+            # generated per existing row — only NULL rows, so re-running the migration
+            # never rewrites an id that is already out there as a link.
+            conn.execute(text("UPDATE users SET stats_public = FALSE WHERE stats_public IS NULL"))
+            from app.models import new_public_id
+            missing = [uid for (uid,) in conn.execute(
+                text("SELECT id FROM users WHERE public_id IS NULL")).fetchall()]
+            taken = {pid for (pid,) in conn.execute(
+                text("SELECT public_id FROM users WHERE public_id IS NOT NULL")).fetchall()}
+            for uid in missing:
+                pid = new_public_id()
+                while pid in taken:
+                    pid = new_public_id()
+                taken.add(pid)
+                conn.execute(text("UPDATE users SET public_id = :p WHERE id = :u"), {"p": pid, "u": uid})
 
     # user_strategies 表：止损止盈从"百分比距离 + R 倍数"一种固定组合改成
     # 两个方式独立可选，外加策略命名。已启用的策略要按原逻辑等价换算成新
@@ -1088,6 +1109,10 @@ def _migrate_columns() -> None:
     # above will fail it.
     with engine.begin() as conn:
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)"))
+        # rev 18：public_id 唯一索引。旧表 ADD COLUMN 时带不上 UNIQUE，所以在这里补。
+        # rev 18: unique index on public_id — ADD COLUMN can't carry UNIQUE on an
+        # existing table, so it is added here.
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_public_id ON users(public_id)"))
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_signals_status_expire ON signals(status, expire_at)"
         ))
