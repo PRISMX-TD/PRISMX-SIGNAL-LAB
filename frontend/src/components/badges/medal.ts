@@ -35,7 +35,9 @@ export type BadgeFamily = 'growth' | 'evergreen' | 'performance' | 'competition'
 // plain is the fallback for unknown ids; bronze / silver / gold are the three
 // tiers; legend is gold with rays and gems (back-to-back champion, above gold);
 // limited is the bronze wax seal (the founder).
-export type BadgeMaterial = 'plain' | 'bronze' | 'silver' | 'gold' | 'legend' | 'limited'
+// onyx 是乌金（深底暗金高光）——特殊层里除卫冕王之外的成员用它。
+// onyx is dark gold for special-shelf badges other than the back-to-back champion.
+export type BadgeMaterial = 'plain' | 'bronze' | 'silver' | 'gold' | 'legend' | 'limited' | 'onyx'
 
 interface MaterialDef {
   name: string
@@ -61,6 +63,7 @@ export const MAT: Record<BadgeMaterial, MaterialDef> = {
   gold:    { name:'足金',     rim:['#FFF0B8','#E4BE6A','#8E6626'], field:['#241E14','#120F0A'], L:'#FFEBB0', D:'#8C672A', H:'#FFFBEA', tick:'#6A4E22', inlay:'#F3D68F', sun:true },
   legend:  { name:'足金星芒', rim:['#FFF0B8','#E4BE6A','#8E6626'], field:['#241E14','#120F0A'], L:'#FFEBB0', D:'#8C672A', H:'#FFFBEA', tick:'#6A4E22', inlay:'#F3D68F', sun:true, gems:true, rays:true },
   limited: { name:'青铜火漆', rim:['#F0BE8C','#B8763F','#5E3419'], field:['#2A1612','#170B09'], L:'#F5CFA6', D:'#7A4A2A', H:'#FFE9D2', tick:'#5A3A26', inlay:'#D89A66', sun:true, seal:'#D89A66' },
+  onyx:    { name:'乌金',     rim:['#D9C08A','#8A6F3A','#3A2E17'], field:['#15120C','#0A0806'], L:'#E2C98F', D:'#5C4A22', H:'#F2E2B8', tick:'#3F3418', inlay:'#B8964E', sun:true },
 }
 
 // 勋章 + 档位 → 材质。进阶勋章按档位；未获得时按铜画轮廓（灰度由调用方处理）；
@@ -68,9 +71,16 @@ export const MAT: Record<BadgeMaterial, MaterialDef> = {
 // Badge + tier → material. Tiered badges follow the tier (unearned draws the
 // bronze outline; the caller greys it); standalone badges have fixed materials;
 // unknown ids fall back to graphite, never throw.
+// 独立勋章的固定材质：卫冕王足金星芒（冠军之上）、创始元老青铜火漆（绝版）、
+// 其余特殊勋章乌金。以后加特殊勋章往这张表加一行即可。
+// Fixed materials for standalone badges; new special badges get onyx.
+const FIXED_MATERIAL: Record<string, BadgeMaterial> = {
+  comp_back_to_back: 'legend', founder_2026: 'limited', comeback: 'onyx',
+}
+
 export function materialOf(id: string, tier: number | null | undefined): BadgeMaterial {
-  if (id === 'founder_2026') return 'limited'
-  if (id === 'comp_back_to_back') return 'legend'
+  const fixed = FIXED_MATERIAL[id]
+  if (fixed) return fixed
   if (!(id in FAMILY)) return 'plain'
   if (tier === 3) return 'gold'
   if (tier === 2) return 'silver'
@@ -83,12 +93,18 @@ const ENAMEL: Record<string, [string, string]> = {
 }
 
 // 勋章 id -> 家族。id 集合与后端注册表（services/gamification/badges.py）一一
-// 对应，六条：四枚进阶（起步 / 常青 / 胜手 / 赛场）+ 两枚独立（卫冕王 / 创始元老）。
-// Badge id -> family. Mirrors the backend registry: four tiered badges (starter /
-// evergreen / winning hand / arena) plus two standalone ones.
+// 对应，十一条，分三层：进阶（起步 / 常客 / 常青 / 胜手 / 老兵 / 榜上有名 /
+// 翻盘 / 赛场 / 老将）+ 特殊（卫冕王）+ 绝版（创始元老）。
+// Badge id -> family. Mirrors the backend registry: eleven ids across three
+// shelves — tiered (starter / regular / evergreen / winning hand / veteran /
+// board_return / comeback / arena / campaigner), special (back-to-back
+// champion), and limited (founder).
 const FAMILY: Record<string, BadgeFamily> = {
-  starter: 'growth', evergreen: 'evergreen', winning_hand: 'performance',
-  arena: 'competition', comp_back_to_back: 'competition', founder_2026: 'limited',
+  starter: 'growth', regular: 'growth',
+  evergreen: 'evergreen',
+  winning_hand: 'performance', veteran: 'performance', board_return: 'performance', comeback: 'performance',
+  arena: 'competition', campaigner: 'competition', comp_back_to_back: 'competition',
+  founder_2026: 'limited',
 }
 
 const FAM_ENAMEL: Partial<Record<BadgeFamily, string>> = {
@@ -201,6 +217,31 @@ const EMB: Record<string, EmblemDef> = {
   comp_back_to_back: { off: [0, -2.0], art: `
     <path d="M22 44l-2.5 6h9l-1.5-6zM42 44l2.5 6h-9l1.5-6z" fill="{E}"/><path d="M22 44l-2.5 6h9l-1.5-6zM42 44l2.5 6h-9l1.5-6z" fill="none" stroke="{D}" stroke-width=".5"/>
     ${sprig([[26, 45], [18, 38], [17, 26], [24, 20]], 4, -1, 4.8, 1.7, 1.2)}${sprig([[38, 45], [46, 38], [47, 26], [40, 20]], 4, 1, 4.8, 1.7, 1.2)}${crown(32, 31.5, .82)}` },
+  // 老兵：三道向上的军阶条，从下往上叠。Veteran: three stacked chevrons.
+  veteran: { off: [0, 0.5], art: `
+    ${[0, 7, 14].map(dy => `<path d="M20.5 ${23 + dy}l11.5 6.4 11.5-6.4v3.9l-11.5 6.4-11.5-6.4z" fill="{G}"/><path d="M20.5 ${23 + dy}l11.5 6.4 11.5-6.4v3.9l-11.5 6.4-11.5-6.4z" fill="none" stroke="{D}" stroke-width=".55"/><path d="M22.2 ${23.9 + dy}l9.8 5.4 9.8-5.4" fill="none" stroke="{H}" stroke-width=".45" opacity=".7"/>`).join('')}` },
+  // 榜上有名：三阶向上的阶梯，顶阶一颗星。Board: a rising three-step stair with a star on top.
+  board_return: { off: [0, 1.0], art: `
+    <path d="M17.5 44.5v-6.5h9.5v-6.5h9.5v-6.5h9v19.5z" fill="{G}"/><path d="M17.5 44.5v-6.5h9.5v-6.5h9.5v-6.5h9v19.5z" fill="none" stroke="{D}" stroke-width=".6"/>
+    <path d="M19 38.6h8M28.5 32.1h8M38 25.6h6.4" fill="none" stroke="{H}" stroke-width=".55" opacity=".75"/><path d="M27 38v6.5M36.5 31.5v13" fill="none" stroke="{D}" stroke-width=".5" opacity=".8"/>
+    <path d="${star5(40.5, 19.5, 3.2)}" fill="{H}"/><path d="${star5(40.5, 19.5, 3.2)}" fill="none" stroke="{D}" stroke-width=".4"/><path d="M15 45h34" stroke="{D}" stroke-width=".8" opacity=".7"/>` },
+  // 老将：一面竖旗。Campaigner: a pennant on a pole.
+  campaigner: { off: [0, 0], art: `
+    <path d="M25.5 17.5v29" stroke="{G}" stroke-width="2.2" stroke-linecap="round"/><path d="M25.5 17.5v29" stroke="{D}" stroke-width=".5" opacity=".6"/><circle cx="25.5" cy="16.5" r="1.8" fill="{H}"/>
+    <path d="M27 19.5h14.5l-3.4 6 3.4 6H27z" fill="{E}"/><path d="M27 19.5h14.5l-3.4 6 3.4 6H27z" fill="none" stroke="{D}" stroke-width=".6"/><path d="M28.6 21.2h10.2" stroke="{H}" stroke-width=".5" opacity=".7"/>
+    <path d="M21 46.5h9" stroke="{D}" stroke-width=".8" opacity=".7"/>` },
+  // 常客：一盏长明灯。Regular: an ever-burning lamp.
+  regular: { off: [0, 1.5], art: `
+    <ellipse cx="32" cy="43" rx="9" ry="2.3" fill="{G}"/><ellipse cx="32" cy="43" rx="9" ry="2.3" fill="none" stroke="{D}" stroke-width=".5"/>
+    <path d="M29.5 40.7h5v-3h-5z" fill="{G}"/><path d="M24.5 33.5h15l-2.2 4.4H26.7z" fill="{G}"/><path d="M24.5 33.5h15l-2.2 4.4H26.7z" fill="none" stroke="{D}" stroke-width=".55"/><path d="M26.4 34.6h11.2" stroke="{H}" stroke-width=".5" opacity=".7"/>
+    <path d="M32 21.5c-3.4 4.2-3.6 7.6 0 10.2 3.6-2.6 3.4-6 0-10.2z" fill="{H}"/><path d="M32 25c-1.4 2-1.5 3.8 0 5.2 1.5-1.4 1.4-3.2 0-5.2z" fill="{G}" opacity=".85"/>
+    ${[-40, 0, 40].map(a => `<line x1="32" y1="18.4" x2="32" y2="16.4" transform="rotate(${a} 32 26)" stroke="{H}" stroke-width=".9" stroke-linecap="round" opacity=".8"/>`).join('')}` },
+  // 翻盘：先探底再回旋向上的箭。Comeback: an arrow that dips, then swings back up.
+  comeback: { off: [0, 0.5], art: `
+    <path d="M19.5 27c1.5 8.6 5.5 13.4 12.5 13.4 6.2 0 9.6-4.2 10.8-11.2" fill="none" stroke="{G}" stroke-width="3.2" stroke-linecap="round"/>
+    <path d="M19.5 27c1.5 8.6 5.5 13.4 12.5 13.4 6.2 0 9.6-4.2 10.8-11.2" fill="none" stroke="{D}" stroke-width=".55" opacity=".6"/>
+    <path d="M38.2 30.6l4.6-8.4 4.4 8.6z" fill="{G}"/><path d="M38.2 30.6l4.6-8.4 4.4 8.6z" fill="none" stroke="{D}" stroke-width=".55"/>
+    <path d="M22 28.2c1.2 5.6 3.8 9 8 10" fill="none" stroke="{H}" stroke-width=".7" opacity=".7"/>` },
   founder_2026: { off: [0, 2.0], art: `
     <path d="M24.5 21.5h15l3.8 19H20.7z" fill="{G}"/><path d="M24.5 21.5h15l3.8 19H20.7z" fill="none" stroke="{D}" stroke-width=".6"/><path d="M26.3 23.4h11.4l2.9 15.1H23.4z" fill="none" stroke="{H}" stroke-width=".45" opacity=".6"/>
     <path d="M24.5 21.5l1.8 1.9M39.5 21.5l-1.8 1.9M20.7 40.5l2.7-2M43.3 40.5l-2.7-2" stroke="{D}" stroke-width=".5" opacity=".8"/><path d="M27 31h10" stroke="{D}" stroke-width=".7"/><path d="M27 31.9h10" stroke="{H}" stroke-width=".5" opacity=".6"/>

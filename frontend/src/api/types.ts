@@ -938,9 +938,16 @@ export interface TicketListItem {
 // Badges (2026-09-07 overhaul): four tiered badges with 1 bronze / 2 silver /
 // 3 gold (maxTier=3), two standalone ones without tiers (maxTier=0). tier is the
 // tier reached so far, 0 when unearned.
+export type BadgeShelf = 'tiered' | 'special' | 'limited'
+
 export interface GamificationBadge {
   id: string
   category: string
+  // 陈列层：进阶（三档）/ 特殊（无档、仍可获得）/ 绝版（窗口关闭后停发）。成就页
+  // 三层完全按它分。Shelf drives the three achievements-page groups.
+  shelf: BadgeShelf
+  // 绝版勋章的停发时刻（ISO），其余为 null。Closing time for limited badges, else null.
+  closesAt: string | null
   maxTier: number
   tier: number
   earned: boolean
