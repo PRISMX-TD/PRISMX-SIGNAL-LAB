@@ -856,13 +856,6 @@ def build_closed_trade_legs(
         if not out_legs:
             continue
 
-        total_commission = sum((d.commission or 0.0) for d in legs)
-        total_swap = sum((d.storage or 0.0) for d in legs)
-        total_fees = total_commission + total_swap
-        total_out_volume = sum(d.volume for d in out_legs)
-        if total_out_volume <= 0:
-            continue
-
         # 开仓腿（窗口里可能没有，见上）：开仓价按手数加权、开仓时间取最早。缺了就
         # 留空，落库时由平台订单表兜底（closed_trade_store.platform_position_facts）。
         # Opening legs (may predate the window): volume-weighted open price,
@@ -881,16 +874,29 @@ def build_closed_trade_legs(
         )
         in_sl = next((getattr(d, "sl", 0.0) for d in in_legs if getattr(d, "sl", 0.0)), 0.0)
         in_tp = next((getattr(d, "tp", 0.0) for d in in_legs if getattr(d, "tp", 0.0)), 0.0)
+        # 费用分摊：这条腿 = 自己那笔平仓成交的手续费 / 隔夜利息 + 开仓腿费用 × 本腿手数
+        # ÷ 开仓手数，与 bridge/mt5_worker.py 同一算法（两条通道对同一笔交易必须算出同一个
+        # 净盈亏）。以前按"已平仓手数占比"摊总费用，分批平仓会把开仓手续费算重。窗口里
+        # 没有开仓腿时开仓费用未知，只算自己那笔——宁可少算，也不能丢记录；deep rescan
+        # 带上开仓腿后会以 feeAlloc=2 覆盖补正。
+        # Fee allocation: own closing deal's fees + opening fees × volume share,
+        # same as the bridge. Without the opening leg in the window the opening
+        # fees are unknown and only the leg's own fees count; a deep rescan that
+        # includes it overwrites via feeAlloc=2.
+        in_commission = sum((d.commission or 0.0) for d in in_legs)
+        in_swap = sum((d.storage or 0.0) for d in in_legs)
 
         for d in out_legs:
-            share = d.volume / total_out_volume
+            share_in = d.volume / in_volume if in_volume > 0 else 0.0
+            leg_commission = (d.commission or 0.0) + in_commission * share_in
+            leg_swap = (d.storage or 0.0) + in_swap * share_in
             legs_out.append({
                 "symbol": d.symbol,
                 # 平仓成交方向与原仓位相反：SELL 平的是多单，BUY 平的是空单
                 "side": "BUY" if d.action == _DEAL_ACTION_SELL else "SELL",
                 "closeVolume": d.volume,
                 "closePrice": d.price,
-                "profit": (d.profit or 0.0) + total_fees * share,
+                "profit": (d.profit or 0.0) + leg_commission + leg_swap,
                 "positionTicket": pos_id,
                 "dealTicket": int(d.ticket),
                 "closedAt": datetime.fromtimestamp(d.time - server_offset_seconds, tz=timezone.utc),
@@ -898,8 +904,9 @@ def build_closed_trade_legs(
                 "openTime": open_time,
                 "openPrice": open_price,
                 "grossProfit": d.profit or 0.0,
-                "commission": total_commission * share,
-                "swap": total_swap * share,
+                "commission": leg_commission,
+                "swap": leg_swap,
+                "feeAlloc": 2,
                 # 平仓成交上带的是平仓时刻的止损止盈；没有就退到开仓腿的初值
                 # The closing deal carries the SL/TP at close; else the opening leg's
                 "sl": (getattr(d, "sl", 0.0) or in_sl) or None,

@@ -159,6 +159,39 @@ def test_gateway_legs_carry_open_facts_fees_and_reason():
     assert first["reason"] == "TP" and second["comment"] == "[tp 4020.00]"
 
 
+def test_gateway_partial_closes_do_not_double_count_the_opening_commission():
+    """2.5 手分两次各平 1.25：开仓手续费 -7.5、两腿各 -3.75，每腿应摊 -7.5，合计 -15。
+    旧算法第一腿摊到 -11.25、第二腿 -7.5，合计 -18.75（开仓手续费算了 1.5 次）。"""
+    deals = [
+        FakeDeal(ticket=1, position_id=60, symbol="EURUSD", action=0, entry=0, volume=2.5, price=1.16108,
+                 profit=0.0, comment="PRISMX", commission=-7.5, time=1_785_930_000),
+        FakeDeal(ticket=2, position_id=60, symbol="EURUSD", action=1, entry=1, volume=1.25, price=1.16125,
+                 profit=21.25, comment="", commission=-3.75, time=1_785_936_000),
+        FakeDeal(ticket=3, position_id=60, symbol="EURUSD", action=1, entry=1, volume=1.25, price=1.16106,
+                 profit=-2.5, comment="[sl 1.16108]", commission=-3.75, time=1_785_936_500, reason=3),
+    ]
+    a, b = build_closed_trade_legs(deals, "PRISMX", {60})
+    assert a["commission"] == pytest.approx(-7.5) and b["commission"] == pytest.approx(-7.5)
+    assert a["profit"] == pytest.approx(13.75) and b["profit"] == pytest.approx(-10.0)
+    assert a["feeAlloc"] == 2
+    # 同一批成交不管一次扫到还是分两轮扫到，结果一样 / the same whichever scan sees them
+    (a_only,) = build_closed_trade_legs(deals[:2], "PRISMX", {60})
+    assert a_only["commission"] == pytest.approx(-7.5) and a_only["profit"] == pytest.approx(13.75)
+
+
+def test_stable_fee_report_overwrites_the_old_allocation(db_session, user):
+    """旧算法落库的费用 / 净盈亏，被 feeAlloc=2 的重复上报覆盖；没带 feeAlloc 的不覆盖。"""
+    flawed = _leg(openPrice=1.16108, grossProfit=21.25, commission=-11.25, swap=0.0, profit=10.0)
+    assert upsert_leg(db_session, user.id, LOGIN, flawed, True) == "inserted"
+    legacy_report = _leg(openPrice=1.16108, grossProfit=21.25, commission=-9.0, swap=0.0, profit=12.25)
+    assert upsert_leg(db_session, user.id, LOGIN, legacy_report, True) == "unchanged"
+    fixed = _leg(openPrice=1.16108, grossProfit=21.25, commission=-7.5, swap=0.0, profit=13.75, feeAlloc=2)
+    assert upsert_leg(db_session, user.id, LOGIN, fixed, True) == "enriched"
+    row = db_session.query(ClosedTrade).one()
+    assert (row.commission, row.profit) == (-7.5, 13.75)
+    assert upsert_leg(db_session, user.id, LOGIN, fixed, True) == "unchanged"
+
+
 def test_gateway_legs_without_opening_leg_leave_open_facts_empty():
     deals = [FakeDeal(ticket=9, position_id=51, symbol="EURUSD.s", action=0, entry=1, volume=1.0,
                       price=1.1, profit=-50.0, comment="", reason=3)]
@@ -197,7 +230,8 @@ def test_bridge_position_facts_and_reason(monkeypatch):
     facts = mt5_worker._position_facts(777, deals, LOGIN)
     assert facts["open_price"] == 2000.0
     assert facts["open_time"] == datetime.fromtimestamp(1_700_000_000, tz=timezone.utc).isoformat()
-    assert (facts["commission"], facts["swap"], facts["out_volume"]) == (-5.0, -1.0, 1.0)
+    assert (facts["commission"], facts["swap"]) == (-5.0, -1.0)
+    assert (facts["open_commission"], facts["open_swap"], facts["in_volume"]) == (-5.0, 0.0, 1.0)
     assert (facts["sl"], facts["tp"]) == (1990.0, 2020.0), "开仓单上的初值 / the opening order's values"
     assert facts["orders"][12] is closing
 

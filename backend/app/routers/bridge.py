@@ -977,6 +977,11 @@ class BridgeClosedTrade(BaseModel):
     tp: float | None = Field(default=None, ge=0)
     reason: str | None = Field(default=None, max_length=16)
     comment: str | None = Field(default=None, max_length=64)
+    # 费用分摊算法版本：2 = 只看成交记录的稳定算法（桥接 v1.3.24 起），后端据此允许
+    # 覆盖旧的费用 / 净盈亏；缺省 / 其它值只补空列（见 closed_trade_store.upsert_leg）。
+    # Fee-allocation version: 2 = scan-independent (bridge >= 1.3.24), allowed to
+    # overwrite older fee/net values; anything else only fills nulls.
+    feeAlloc: int | None = None
 
 
 class BridgeClosedTradesRequest(BaseModel):

@@ -48,6 +48,17 @@ BACKFILL_DAYS = 365
 # 通道拿不到时才从平台订单表兜底的列 / columns the platform orders table may fill
 _FALLBACK_COLS = ("open_price", "open_time", "sl", "tp")
 
+# 费用列：载荷带 feeAlloc=2（只看成交记录的稳定分摊，桥接 v1.3.24 / 网关）且带开仓价
+# （说明看到了开仓腿）时允许覆盖已有值，并按 毛盈亏 + 手续费 + 隔夜利息 重算净盈亏。
+# 旧分摊随扫描时机变化、分批平仓会算重，重复上报的新值是更准的那个；反过来旧版桥接
+# 的上报不带 feeAlloc，只能补空列，不会把新值冲掉。
+# Fee columns: a report with feeAlloc=2 (scan-independent allocation) and an
+# open price (the opening leg was seen) may overwrite existing values, and the
+# net profit is recomputed as gross + commission + swap. Older reports lack
+# feeAlloc and can only fill nulls, so they never clobber corrected values.
+_FEE_COLS = ("gross_profit", "commission", "swap")
+FEE_ALLOC_STABLE = 2
+
 
 def platform_position_facts(db: Session, user_id: str, login: str, position_ticket: int) -> dict:
     """平台自己记的开仓事实：开仓单的成交价 / 成交时间 / 止损止盈，再叠加之后成功的改单。
@@ -163,10 +174,24 @@ def upsert_leg(db: Session, user_id: str, login: str, leg: dict, verified: bool 
             if existing is None:
                 return "unchanged"
 
+    authoritative = (
+        leg.get("feeAlloc") == FEE_ALLOC_STABLE
+        and leg.get("openPrice") is not None
+        and all(details[c] is not None for c in _FEE_COLS)
+    )
     changed = False
     for col, val in details.items():
-        if val is not None and getattr(existing, col) is None:
+        if val is None:
+            continue
+        cur = getattr(existing, col)
+        overwrite = authoritative and col in _FEE_COLS and cur is not None and abs(cur - val) > 0.005
+        if cur is None or overwrite:
             setattr(existing, col, val)
+            changed = True
+    if authoritative:
+        net = details["gross_profit"] + details["commission"] + details["swap"]
+        if existing.profit is None or abs(existing.profit - net) > 0.005:
+            existing.profit = net
             changed = True
     if changed:
         db.commit()

@@ -854,7 +854,13 @@ def _position_facts(pos_id: int, pos_deals, login: str) -> dict:
         "open_time": _server_epoch_to_utc(min(d.time for d in in_deals), login).isoformat() if in_deals else None,
         "commission": sum(float(d.commission) for d in pos_deals),
         "swap": sum(float(d.swap) for d in pos_deals),
-        "out_volume": sum(float(d.volume) for d in pos_deals if d.entry == mt5.DEAL_ENTRY_OUT) or 1.0,
+        # 开仓腿自己的手续费 / 隔夜利息与开仓手数：平仓腿按"自己那笔成交的费用 +
+        # 开仓费用 × 本腿手数 ÷ 开仓手数"分摊（见平仓腿处的说明）。
+        # The opening legs' own fees and volume: each closing leg takes its own
+        # deal's fees plus a volume share of these (see the closing-leg note).
+        "open_commission": sum(float(d.commission) for d in in_deals),
+        "open_swap": sum(float(d.swap) for d in in_deals),
+        "in_volume": in_volume,
         "sl": None,
         "tp": None,
         "orders": {},
@@ -1047,13 +1053,22 @@ def _closed_trades_payload(path: str, deep_backfill: bool = False) -> list:
         # a closing SELL deal flattens a BUY position, and vice versa
         side = "BUY" if d.type == mt5.DEAL_TYPE_SELL else "SELL"
         facts = position_facts[pos_id]
-        share = float(d.volume) / facts["out_volume"]
-        # 按这笔平仓手数占全部平仓手数的比例，分摊仓位总手续费+隔夜利息
-        # （只有一次性全部平仓时，占比就是 100%，等价于把开仓那笔的手续费
-        # 也算全）。/ Allocate the position's total fees to this close by its
-        # share of the total closed volume (a single full close gets 100% of
-        # it, equivalent to also counting the opening deal's commission in full).
-        fee_share = (facts["commission"] + facts["swap"]) * share
+        # 费用分摊（2026-09-07 改，桥接 v1.3.24）：这条腿 = 自己那笔平仓成交的手续费
+        # / 隔夜利息 + 开仓那笔的费用 × 本腿手数 ÷ 开仓手数。结果只取决于成交记录，
+        # 不随扫描时机变化。以前按"本腿手数 ÷ 已平仓手数"摊"仓位到目前为止的总费用"：
+        # 分批平仓时第一腿平掉一半就把开仓手续费全摊给它，第二腿又按一半再摊一次，
+        # 开仓手续费被算了 1.5 次——一笔 2.5 手 EURUSD 分两次平，真实手续费 15 记成
+        # 18.75，净赚 3.75 显示成 0。一次性全平的单子两种算法结果相同。
+        # Fee allocation (bridge 1.3.24): this leg = its own closing deal's
+        # commission/swap + the opening deal's fees × leg volume ÷ opened volume.
+        # Depends only on the deals, not on when the scan ran. The old "share of
+        # closed-so-far volume of the fees-so-far" double-counted the opening
+        # commission across partial closes (a 2.5-lot EURUSD closed in halves
+        # recorded 18.75 of fees instead of 15). Single full closes are unchanged.
+        share_in = float(d.volume) / facts["in_volume"] if facts["in_volume"] > 0 else 1.0
+        leg_commission = float(d.commission) + facts["open_commission"] * share_in
+        leg_swap = float(d.swap) + facts["open_swap"] * share_in
+        fee_share = leg_commission + leg_swap
         reason = _deal_reason_name(getattr(d, "reason", None))
         sl, tp = facts["sl"], facts["tp"]
         # 止损 / 止盈触发的平仓：服务器生成的平仓单 price_open 就是触发价，比开仓单初值准
@@ -1086,8 +1101,13 @@ def _closed_trades_payload(path: str, deep_backfill: bool = False) -> list:
             "openTime": facts["open_time"],
             "openPrice": facts["open_price"],
             "grossProfit": float(d.profit),
-            "commission": facts["commission"] * share,
-            "swap": facts["swap"] * share,
+            "commission": leg_commission,
+            "swap": leg_swap,
+            # feeAlloc=2：费用分摊已是"只看成交记录"的稳定算法，后端据此允许用本次的
+            # 费用 / 净盈亏覆盖旧值（旧算法随扫描时机变化，不能反过来覆盖新值）。
+            # feeAlloc=2 marks the scan-independent allocation; the backend lets
+            # such reports overwrite older fee/net values, never the reverse.
+            "feeAlloc": 2,
             "sl": sl,
             "tp": tp,
             "reason": reason,
