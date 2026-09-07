@@ -8,7 +8,6 @@
 Judging functions only: "which tier does this user satisfy right now". Registry,
 awarding and equipping live in badges.py. Signature is (db, user, ctx) -> bool.
 """
-import logging
 from datetime import datetime, timedelta, timezone
 
 from app.models import MT5Account, Order
