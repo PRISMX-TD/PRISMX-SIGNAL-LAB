@@ -22,9 +22,23 @@ html,
 body {
   overscroll-behavior-y: contain;
 }
-:where(.overflow-auto, .overflow-y-auto, .overflow-x-auto, .overflow-scroll) {
+:where(.overflow-auto, .overflow-y-auto, .overflow-scroll) {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+}
+/* 只横向滚动的容器（宽表格、工具栏）只截断横向滚动链。overflow-x:auto 会让元素
+   在纵向也成为滚动容器，之前对它一并写 overscroll-behavior: contain，纵向就成了
+   滚动链边界——鼠标停在表格上滚滚轮、手机在表格上拖，页面都纹丝不动（2026-09-07
+   订单页已平仓明细踩到）。纵向保持 auto，滚动照常传给页面。
+   Horizontal-only scrollers (wide tables, toolbars) contain only the x axis.
+   overflow-x:auto also makes the element a vertical scroll container, and the
+   old blanket "contain" made it a chaining boundary vertically too: wheel or
+   drag over the table and the page wouldn't move. Keep y as auto so vertical
+   scrolling chains to the page. */
+:where(.overflow-x-auto) {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
 }
 
 /* 减少动态偏好：停用装饰性无限动画（背景光球/漂移/走马灯/呼吸/辉光/流光），

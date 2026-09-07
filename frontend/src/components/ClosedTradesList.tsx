@@ -52,6 +52,20 @@ interface PositionRow {
   detailed: boolean
 }
 
+/** 按各腿价格里最多的小数位数取整，避免加权均价出现 156.11700000000002 这种浮点尾巴。
+ *  Round to the most decimals any leg's price carries, so the weighted average
+ *  doesn't show float noise like 156.11700000000002. */
+function roundLikePrices(value: number, legs: ClosedTrade[]): number {
+  const decimals = legs.reduce((m, l) => {
+    const s = l.closePrice == null ? '' : String(l.closePrice)
+    const i = s.indexOf('.')
+    return Math.max(m, i < 0 ? 0 : s.length - i - 1)
+  }, 0)
+  // 加权均价比单腿多一位就够（两腿 1.16125 / 1.16106 的均价 1.161155）
+  // One extra decimal covers the average of two legs (1.16125 / 1.16106 → 1.161155)
+  return Number(value.toFixed(Math.min(decimals + 1, 8)))
+}
+
 function sumOrNull(legs: ClosedTrade[], pick: (l: ClosedTrade) => number | null | undefined): number | null {
   let total = 0
   for (const l of legs) {
@@ -80,7 +94,7 @@ function groupPositions(trades: ClosedTrade[]): PositionRow[] {
     const withTp = legs.find((l) => l.tp != null)
     const openTimes = legs.map((l) => l.openTime).filter((x): x is string => !!x).sort()
     const closePrice = volume > 0 && legs.every((l) => l.closePrice != null)
-      ? legs.reduce((s, l) => s + (l.closePrice ?? 0) * l.closeVolume, 0) / volume
+      ? roundLikePrices(legs.reduce((s, l) => s + (l.closePrice ?? 0) * l.closeVolume, 0) / volume, legs)
       : legs[0].closePrice
     rows.push({
       key,
