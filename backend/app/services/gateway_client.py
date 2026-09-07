@@ -190,6 +190,11 @@ class DealRsp:
     storage: float
     time: int  # Unix 秒（UTC）
     comment: str
+    # 网关新版才有：成交原因（Manager API 枚举原值，-1 = 旧网关没给）、平仓时刻的
+    # 止损止盈（0 = 无）。/ Newer gateways only: reason enum (-1 = absent), SL/TP at close.
+    reason: int = -1
+    sl: float = 0.0
+    tp: float = 0.0
 
 
 @dataclass
@@ -484,6 +489,9 @@ async def get_deals(login: int, from_unix: int, to_unix: int) -> tuple[list[Deal
             storage=d.get("storage", 0.0),
             time=d.get("time", 0),
             comment=d.get("comment", ""),
+            reason=d.get("reason", -1),
+            sl=d.get("sl", 0.0) or 0.0,
+            tp=d.get("tp", 0.0) or 0.0,
         ))
     return deals, ""
 

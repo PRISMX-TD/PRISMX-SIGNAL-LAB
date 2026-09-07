@@ -113,7 +113,10 @@ def _hash_legacy_api_tokens() -> None:
 #          + mt5_accounts.trade_mode_source（实盘标记来源；回填：有组名=group、其余已判定=self，循环再用规则重判）
 # rev 16 — 勋章改制：user_badges.tier（铜/银/金），旧 17 枚 id 并成 6 枚 + 档位；纪律类勋章删除；
 #          drop discipline_snapshots；platform_settings 里的纪律参数删除；users 佩戴列表改写
-CURRENT_SCHEMA_REV = 16
+# rev 17: closed_trades 补 MT5 历史「仓位」视图的其余列（open_time / open_price /
+#         gross_profit / commission / swap / sl / tp / reason / comment），全部可空，
+#         旧行由桥接 / 网关一次性回扫补齐。
+CURRENT_SCHEMA_REV = 17
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -598,6 +601,17 @@ def _migrate_columns() -> None:
             # 不回填：历史行无从判定归属（当时既没记录核验结论，也不保证订单仍在），
             # NULL 就是"上线前写入、未知"这个语义本身。
             # No backfill: NULL *is* the "written before this column existed" state.
+
+        # rev 17：MT5 完整字段（见 models.ClosedTrade 的说明）。逐列补、可重入。
+        # rev 17: the full MT5 detail columns; added one by one, re-entrant.
+        for col, ddl in (
+            ("open_time", "TIMESTAMP"), ("open_price", "FLOAT"), ("gross_profit", "FLOAT"),
+            ("commission", "FLOAT"), ("swap", "FLOAT"), ("sl", "FLOAT"), ("tp", "FLOAT"),
+            ("reason", "VARCHAR(16)"), ("comment", "VARCHAR(64)"),
+        ):
+            if col not in ct_cols:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE closed_trades ADD COLUMN {col} {ddl}"))
 
         if is_postgres:
             # 命名约束可直接换。DROP 与 CREATE 分开跑：老库可能已经没有旧约束了。

@@ -416,6 +416,17 @@ def list_closed_trades(
                 "positionTicket": r.position_ticket,
                 "dealTicket": r.deal_ticket,
                 "closedAt": r.closed_at.isoformat() if r.closed_at else None,
+                # MT5 历史「仓位」视图的其余字段；旧记录为 null，回扫后补上
+                # The rest of MT5's positions view; null on legacy rows until rescanned
+                "openTime": r.open_time.isoformat() if r.open_time else None,
+                "openPrice": r.open_price,
+                "grossProfit": r.gross_profit,
+                "commission": r.commission,
+                "swap": r.swap,
+                "sl": r.sl,
+                "tp": r.tp,
+                "reason": r.reason,
+                "comment": r.comment,
             }
             for r in rows
         ]

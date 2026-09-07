@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import Pager from '../components/Pager'
 import { useAuth } from '../store/auth'
 import { useLive, usePositions } from '../store/live'
+import { usePrefs } from '../store/prefs'
 import { orderApi } from '../api/client'
 import { displaySymbol, fmtTime, localizeApiError } from '../api/utils'
 import type { ClosedTrade, Order, OrderStatus } from '../api/types'
@@ -64,13 +65,33 @@ export default function OrdersPage() {
   // section each had their own, so clicking one left the other's numbers
   // unchanged — easy to misread as bad data. Declared first because the order
   // fetch and several derived values below depend on it.
-  const [selectedLogin, setSelectedLogin] = useState<string | null>(null)
+  //
+  // 记住用户最后点的账号（prefs `orders.lastAccount`，按用户存后端、跨设备），下次
+  // 进来默认还是它，而不是永远回到第一个。只在用户点击时写入；下面那条"选中的
+  // 账号不在列表里就回落"是代码纠正状态，不写记忆——否则记忆的账号临时掉线一次
+  // 就被冲掉（与 useLastAccount 同一原则）。与下单表单的 trade.lastAccount 分开存：
+  // 这里看的是回执，不该改变默认下单账户。
+  // Remembers the last clicked account (prefs `orders.lastAccount`, server-side
+  // per user) so the page reopens on it instead of the first one. Written only
+  // on an explicit click; the fallback below never writes, so a transient
+  // dropout can't erase the preference. Kept separate from the order form's
+  // trade.lastAccount — viewing receipts must not change the ordering default.
+  const { getPref, setPref } = usePrefs()
+  const rememberedLogin = getPref<string>('orders', 'lastAccount', '')
+  const [selectedLogin, setSelectedLogin] = useState<string | null>(() => rememberedLogin || null)
+  const touchedRef = useRef(false)
+  const chooseLogin = (login: string) => { touchedRef.current = true; setSelectedLogin(login); setPref('orders', 'lastAccount', login) }
   useEffect(() => {
     if (accounts.length === 0) return
+    const remembered = rememberedLogin && accounts.some((a) => a.login === rememberedLogin) ? rememberedLogin : null
     if (selectedLogin === null || !accounts.some((a) => a.login === selectedLogin)) {
-      setSelectedLogin(accounts[0].login)
+      setSelectedLogin(remembered ?? accounts[0].login)
+    } else if (!touchedRef.current && remembered && remembered !== selectedLogin) {
+      // 记忆从云端晚到（新设备没本地缓存）：用户还没点过就补应用
+      // Memory arriving late from the cloud (fresh device): apply it if the user hasn't clicked yet
+      setSelectedLogin(remembered)
     }
-  }, [accounts, selectedLogin])
+  }, [accounts, selectedLogin, rememberedLogin])
   const activeAccount = accounts.find((a) => a.login === selectedLogin) ?? accounts[0]
 
   const [tab, setTab] = useState<OrdersTab>(() => {
@@ -280,7 +301,7 @@ export default function OrdersPage() {
             {accounts.map((a) => (
               <button
                 key={a.login}
-                onClick={() => setSelectedLogin(a.login)}
+                onClick={() => chooseLogin(a.login)}
                 className={`rounded-lg border px-3 py-1.5 font-mono text-xs transition ${
                   a.login === selectedLogin
                     ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'

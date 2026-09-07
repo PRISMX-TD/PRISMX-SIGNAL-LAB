@@ -22,6 +22,7 @@ from app.services.order_payload import is_stale_pending, order_update_payload, v
 from app.schemas import LOGIN_PATTERN, SUFFIX_PATTERN, AccountSuffixRequest, MT5AccountOut
 from app.services.auto_manage import AUTO_PREFIX, evaluate_positions
 from app.services.connection_manager import manager
+from app.services.closed_trade_store import logins_needing_backfill, upsert_leg
 from app.services.deps import ONLINE_WINDOW, get_current_user, is_account_online
 from app.services.gateway_binding import is_removed, is_revoked, mark_removed, not_removed, restore_removed
 from app.services.plans import max_mt5_accounts
@@ -695,11 +696,36 @@ async def bridge_poll(
     # limit. brokerRejected: logins rejected because the MT5 server name
     # doesn't match the partner broker. The current bridge app doesn't read
     # these yet; a future version can surface them to the user.
+    # tradeHistoryBackfill：近一年内还有缺 MT5 完整字段的平仓记录的账号，桥接对
+    # 每个账号做一次近一年的回扫补齐（桥接进程内只做一次，见 bridge_app）。
+    # tradeHistoryBackfill: accounts whose closed legs from the last year still
+    # lack the detail columns; the bridge rescans a year once per process.
+    backfill = await run_in_threadpool(
+        _backfill_logins_cached, db, user.id, [a.login for a in req.accounts]
+    )
+
     return {
         "commands": commands,
         "accountLimitExceeded": rejected_logins,
         "brokerRejected": broker_rejected,
+        "tradeHistoryBackfill": backfill,
     }
+
+
+# 回扫名单每用户缓存一分钟：轮询两秒一拍，这条查询不值得每拍都跑。
+# Cached per user for a minute — the poll ticks every 2s.
+_backfill_cache: dict[str, tuple[float, list[str]]] = {}
+_BACKFILL_CACHE_TTL = 60.0
+
+
+def _backfill_logins_cached(db: Session, user_id: str, logins: list[str]) -> list[str]:
+    now = time.monotonic()
+    hit = _backfill_cache.get(user_id)
+    if hit is not None and now - hit[0] < _BACKFILL_CACHE_TTL:
+        return hit[1]
+    out = logins_needing_backfill(db, user_id, logins) if logins else []
+    _backfill_cache[user_id] = (now, out)
+    return out
 
 
 class BridgeResultRequest(BaseModel):
@@ -937,6 +963,20 @@ class BridgeClosedTrade(BaseModel):
     positionTicket: int = Field(gt=0)
     dealTicket: int = Field(gt=0)
     closedAt: datetime
+    # ---- MT5 历史「仓位」视图的其余字段（桥接 v1.3.23 起上报，见 mt5_worker._closed_trades_payload）。
+    # 全部可选：旧版桥接不带，落库为空，等回扫补齐。手续费 / 隔夜利息 / 毛盈亏是这条
+    # 平仓腿分摊到的份额；reason 是桥接侧从终端枚举转好的名字。
+    # The rest of MT5's positions-view fields (bridge >= 1.3.23), all optional so
+    # older bridges keep working. Fees / gross are this leg's allocated share.
+    openTime: datetime | None = None
+    openPrice: float | None = Field(default=None, ge=0)
+    grossProfit: float | None = None
+    commission: float | None = None
+    swap: float | None = None
+    sl: float | None = Field(default=None, ge=0)
+    tp: float | None = Field(default=None, ge=0)
+    reason: str | None = Field(default=None, max_length=16)
+    comment: str | None = Field(default=None, max_length=64)
 
 
 class BridgeClosedTradesRequest(BaseModel):
@@ -966,25 +1006,12 @@ def _trade_history_db_work(
         is_ours = (leg.login, leg.positionTicket) in known
         if not is_ours:
             unverified += 1
-        db.add(ClosedTrade(
-            user_id=user_id,
-            mt5_login=leg.login,
-            symbol=leg.symbol,
-            side=leg.side,
-            close_volume=leg.closeVolume,
-            close_price=leg.closePrice,
-            profit=leg.profit,
-            position_ticket=leg.positionTicket,
-            deal_ticket=leg.dealTicket,
-            closed_at=leg.closedAt,
-            verified=is_ours,
-        ))
-        try:
-            db.commit()
+        # 撞去重键不再丢弃，只补空列（一次性回扫补齐旧记录），见 closed_trade_store。
+        # "inserted" 计数把补齐也算进去：都是新落地的数据，都该推 CLOSED_TRADE_NEW。
+        # Duplicate keys back-fill null columns instead of being dropped (deep
+        # rescans enrich old rows); enrichment counts as inserted for the push.
+        if upsert_leg(db, user_id, leg.login, leg.model_dump(), is_ours) in ("inserted", "enriched"):
             inserted += 1
-        except IntegrityError:
-            # 唯一约束冲突：已经上报过这笔成交，跳过 / already reported, skip
-            db.rollback()
     return inserted, unverified
 
 

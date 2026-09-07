@@ -638,6 +638,10 @@ _BACKFILL_WINDOW = timedelta(days=7)
 # failure so the next round rescans the same stretch.
 _last_scan_at: dict[str, datetime] = {}
 
+# 后端点名的一次性回扫（旧记录缺 MT5 完整字段）回看一年——个人胜率 / 明细页的统计
+# 范围就是 365 天。/ One-off deep rescan window requested by the backend.
+_DEEP_BACKFILL_WINDOW = timedelta(days=365)
+
 # 服务器时区偏移的观测值：(账号, UTC 日期) -> 当日观测到的最大偏移秒数。
 #
 # 必须按账号分开存：一个进程可以同时连多个终端，不同经纪商的服务器时区可以不同
@@ -798,7 +802,77 @@ def _scan_window(now: datetime, last: datetime | None) -> tuple[datetime, bool]:
     return now - _TRADE_SCAN_WINDOW, False
 
 
-def _closed_trades_payload(path: str) -> list:
+def _deal_reason_name(code) -> str | None:
+    """终端侧成交原因枚举 → 名字。与网关侧 routers/gateway.gateway_deal_reason 用同一套
+    名字，但两边枚举**数值不同**（终端 SL=4，Manager API SL=3），所以各自在源头转好。
+    Terminal-side deal reason enum → name (same names as the gateway side, whose
+    enum differs numerically, hence mapping at the source)."""
+    if code is None or mt5 is None:
+        return None
+    names = {
+        getattr(mt5, "DEAL_REASON_CLIENT", 0): "CLIENT",
+        getattr(mt5, "DEAL_REASON_MOBILE", 1): "MOBILE",
+        getattr(mt5, "DEAL_REASON_WEB", 2): "WEB",
+        getattr(mt5, "DEAL_REASON_EXPERT", 3): "EXPERT",
+        getattr(mt5, "DEAL_REASON_SL", 4): "SL",
+        getattr(mt5, "DEAL_REASON_TP", 5): "TP",
+        getattr(mt5, "DEAL_REASON_SO", 6): "SO",
+        getattr(mt5, "DEAL_REASON_ROLLOVER", 7): "ROLLOVER",
+        getattr(mt5, "DEAL_REASON_VMARGIN", 8): "VMARGIN",
+        getattr(mt5, "DEAL_REASON_SPLIT", 9): "SPLIT",
+    }
+    try:
+        return names.get(int(code), "OTHER")
+    except (TypeError, ValueError):
+        return None
+
+
+def _position_facts(pos_id: int, pos_deals, login: str) -> dict:
+    """一个仓位的开仓事实与费用汇总，供它的每条平仓腿共用（MT5 历史「仓位」视图那一行
+    除平仓腿自身之外的信息）。
+
+    - open_price / open_time：开仓腿（entry=IN / INOUT）按手数加权的均价、最早时间
+      （换算成真 UTC，同 closedAt）。
+    - commission / swap：整个仓位的手续费与隔夜利息合计，平仓腿按手数占比分摊——
+      与原先"总费用一起摊"的算法等价，只是拆开存。
+    - sl / tp：MT5 Python 接口的成交记录**不带**止损止盈，只能读该仓位的订单历史：
+      开仓单上的是下单时的初值；止损 / 止盈触发的平仓由服务器生成一张平仓单，其
+      price_open 就是触发价，比初值准，平仓腿那边按 reason 覆盖。用户在客户端手动
+      改过、且不是被触发平掉的，这里读不到，后端再用平台改单记录兜底。
+
+    Per-position facts shared by its closing legs: weighted open price / earliest
+    open time, total commission / swap (allocated per leg by volume share), and
+    SL/TP read from the position's order history (deals don't carry them here).
+    """
+    in_deals = [
+        d for d in pos_deals
+        if d.entry in (mt5.DEAL_ENTRY_IN, getattr(mt5, "DEAL_ENTRY_INOUT", 2)) and float(d.volume) > 0
+    ]
+    in_volume = sum(float(d.volume) for d in in_deals)
+    facts = {
+        "open_price": (sum(float(d.price) * float(d.volume) for d in in_deals) / in_volume) if in_volume > 0 else None,
+        "open_time": _server_epoch_to_utc(min(d.time for d in in_deals), login).isoformat() if in_deals else None,
+        "commission": sum(float(d.commission) for d in pos_deals),
+        "swap": sum(float(d.swap) for d in pos_deals),
+        "out_volume": sum(float(d.volume) for d in pos_deals if d.entry == mt5.DEAL_ENTRY_OUT) or 1.0,
+        "sl": None,
+        "tp": None,
+        "orders": {},
+    }
+    try:
+        orders = mt5.history_orders_get(position=pos_id) or ()
+    except Exception as e:
+        logger.warning("平仓检测：history_orders_get(position=%s) 抛异常 / threw: %s", pos_id, e)
+        orders = ()
+    facts["orders"] = {int(o.ticket): o for o in orders}
+    opening = min(orders, key=lambda o: getattr(o, "time_setup", 0)) if orders else None
+    if opening is not None:
+        facts["sl"] = float(getattr(opening, "sl", 0) or 0) or None
+        facts["tp"] = float(getattr(opening, "tp", 0) or 0) or None
+    return facts
+
+
+def _closed_trades_payload(path: str, deep_backfill: bool = False) -> list:
     """检测该终端账号最近的平仓成交，且仅限本平台开的仓位（个人胜率用）。
 
     先按仓位编号在 MT5 历史里查这个仓位的开仓成交是不是打了 PRISMX 的魔术号
@@ -887,6 +961,13 @@ def _closed_trades_payload(path: str) -> list:
 
     last = _last_scan_at.get(login)
     since, catching_up = _scan_window(now, last)
+    if deep_backfill:
+        # 后端点名的一次性回扫（旧记录缺 MT5 完整字段）：回看一年。上报幂等，后端只补
+        # 空列；不推进游标，这一轮不代表常规扫描的连续性。
+        # Backend-requested one-off rescan: look back a year. Idempotent; the
+        # cursor is left alone since this round isn't part of the regular cadence.
+        since, catching_up = now - _DEEP_BACKFILL_WINDOW, True
+        logger.info("平仓检测：账号 %s 一次性回扫近一年补齐 MT5 明细 / one-off deep rescan", login)
     if catching_up:
         logger.info(
             "平仓检测：账号 %s 补扫 [%s, %s]（上次成功扫描：%s）/ catch-up scan",
@@ -925,7 +1006,7 @@ def _closed_trades_payload(path: str) -> list:
     # the closing deal's own commission field at 0; looking only at the
     # closing deal then misses that fee, overstating the reported profit
     # versus what MT5 itself shows.
-    position_fees: dict[int, tuple[float, float]] = {}  # pos_id -> (total_fees, total_out_volume)
+    position_facts: dict[int, dict | None] = {}  # pos_id -> 开仓事实与费用汇总 / open facts & fee totals
     for d in deals:
         if d.entry != mt5.DEAL_ENTRY_OUT:
             continue  # 只关心平仓成交（含部分平仓）/ only closing deals (incl. partial)
@@ -951,9 +1032,9 @@ def _closed_trades_payload(path: str) -> list:
                 deferred = True
                 continue
             position_is_ours[pos_id] = any(getattr(pd, "magic", 0) == PRISMX_MAGIC for pd in pos_deals)
-            total_fees = sum(float(pd.commission) + float(pd.swap) for pd in pos_deals)
-            total_out_volume = sum(float(pd.volume) for pd in pos_deals if pd.entry == mt5.DEAL_ENTRY_OUT) or 1.0
-            position_fees[pos_id] = (total_fees, total_out_volume)
+            facts = _position_facts(pos_id, pos_deals, login) if position_is_ours[pos_id] else None
+            position_facts[pos_id] = facts
+            total_fees = (facts["commission"] + facts["swap"]) if facts else 0.0
             logger.info(
                 "平仓检测：仓位 %s 共 %d 条历史成交，魔术号匹配=%s，总手续费+隔夜利息=%.2f / "
                 "position %s has %d deal(s), magic match=%s, total commission+swap=%.2f",
@@ -965,13 +1046,24 @@ def _closed_trades_payload(path: str) -> list:
         # 平仓成交的方向与原仓位相反：SELL 平的是多单，BUY 平的是空单
         # a closing SELL deal flattens a BUY position, and vice versa
         side = "BUY" if d.type == mt5.DEAL_TYPE_SELL else "SELL"
-        total_fees, total_out_volume = position_fees[pos_id]
+        facts = position_facts[pos_id]
+        share = float(d.volume) / facts["out_volume"]
         # 按这笔平仓手数占全部平仓手数的比例，分摊仓位总手续费+隔夜利息
         # （只有一次性全部平仓时，占比就是 100%，等价于把开仓那笔的手续费
         # 也算全）。/ Allocate the position's total fees to this close by its
         # share of the total closed volume (a single full close gets 100% of
         # it, equivalent to also counting the opening deal's commission in full).
-        fee_share = total_fees * (float(d.volume) / total_out_volume)
+        fee_share = (facts["commission"] + facts["swap"]) * share
+        reason = _deal_reason_name(getattr(d, "reason", None))
+        sl, tp = facts["sl"], facts["tp"]
+        # 止损 / 止盈触发的平仓：服务器生成的平仓单 price_open 就是触发价，比开仓单初值准
+        # SL/TP-triggered close: the server's closing order carries the trigger price
+        closing_order = facts["orders"].get(int(getattr(d, "order", 0) or 0))
+        trigger = float(getattr(closing_order, "price_open", 0) or 0) if closing_order is not None else 0.0
+        if trigger > 0 and reason == "SL":
+            sl = trigger
+        elif trigger > 0 and reason == "TP":
+            tp = trigger
         out.append({
             "login": login,
             "symbol": d.symbol,
@@ -990,6 +1082,16 @@ def _closed_trades_payload(path: str) -> list:
             # d.time is an epoch computed from the *server's* wall clock; storing
             # it as UTC shifts every close by the broker's offset.
             "closedAt": _server_epoch_to_utc(d.time, login).isoformat(),
+            # ---- MT5 历史「仓位」视图的其余字段 / the rest of MT5's positions view ----
+            "openTime": facts["open_time"],
+            "openPrice": facts["open_price"],
+            "grossProfit": float(d.profit),
+            "commission": facts["commission"] * share,
+            "swap": facts["swap"] * share,
+            "sl": sl,
+            "tp": tp,
+            "reason": reason,
+            "comment": (str(getattr(d, "comment", "") or "")[:64] or None),
         })
 
     # 推进游标。有仓位归属未定时**不能原地不动**：那样下一轮会判定成"还有缺口"
@@ -1001,7 +1103,8 @@ def _closed_trades_payload(path: str) -> list:
     # so a permanently unreadable position would rescan 7 days every 1.5s.
     # Park it one normal window back instead: the retry still happens, via the
     # normal path.
-    _last_scan_at[login] = (now - _TRADE_SCAN_WINDOW) if deferred else now
+    if not deep_backfill:
+        _last_scan_at[login] = (now - _TRADE_SCAN_WINDOW) if deferred else now
 
     if deals:
         logger.info("平仓检测：本轮产出 %d 条待上报记录 / this round produced %d entrie(s)", len(out), len(out))
@@ -1325,7 +1428,7 @@ def _dispatch_command(cmd: dict, suffix: str = "") -> dict:
         }
 
 
-def poll_terminal(path: str, orders: list[dict] | None = None) -> dict:
+def poll_terminal(path: str, orders: list[dict] | None = None, deep_backfill: bool = False) -> dict:
     """连接一个终端，读取账号/持仓，并执行传入的下单指令。
     Attach to one terminal, read account/positions, execute given orders.
 
@@ -1377,7 +1480,7 @@ def poll_terminal(path: str, orders: list[dict] | None = None) -> dict:
     # _closed_trades_payload's own internal retry logic, and wasn't covered
     # by either of the previous two fixes.
     try:
-        out["closedTrades"] = _closed_trades_payload(path)
+        out["closedTrades"] = _closed_trades_payload(path, deep_backfill)
     except Exception as e:
         if not out["error"]:
             out["error"] = str(e)

@@ -22,6 +22,7 @@ from app.core.rate_limit import (
 )
 from app.models import ClosedTrade, MT5Account, Order, User
 from app.services.account_type import SOURCE_GROUP, classify_group
+from app.services.closed_trade_store import logins_needing_backfill, upsert_leg
 from app.services.deps import get_current_user
 from app.services.gateway_binding import (
     enforce, is_removed, is_revoked, mark_removed, not_removed,
@@ -613,6 +614,43 @@ GATEWAY_DEALS_SCAN_INTERVAL_SUBSCRIBED = 15.0
 # Re-reading the same deals is harmless: the unique constraint dedupes.
 GATEWAY_DEALS_CATCHUP_SECONDS = 7 * 24 * 60 * 60
 
+# 一次性回扫：该账号近一年内还有缺 MT5 完整字段的平仓记录（明细列上线前写入的）时，
+# 首扫回看一年而不是七天，让 upsert_leg 把空列补上。只在进程首扫做一次。
+# One-off deep rescan: when the account still has legs missing the detail
+# columns, the first scan of the process looks back a year instead of a week.
+GATEWAY_DEALS_DEEP_BACKFILL_SECONDS = 365 * 24 * 60 * 60
+
+
+def _needs_deep_backfill(user_id: str, login: str) -> bool:
+    db = SessionLocal()
+    try:
+        return bool(logins_needing_backfill(db, user_id, [login]))
+    finally:
+        db.close()
+
+
+# Manager API 的成交原因枚举（CIMTDeal.EnDealReason）→ 名字。与桥接侧
+# mt5_worker._deal_reason_name 用同一套名字，但**数值不同**（终端 SL=4 / 网关 SL=3），
+# 所以两边各自在源头转字符串，落库只存名字。
+# Manager API deal reason enum → name. Same names as the bridge side, different
+# numeric values, hence each channel maps at the source.
+_GATEWAY_DEAL_REASONS = {
+    0: "CLIENT", 1: "EXPERT", 2: "DEALER", 3: "SL", 4: "TP", 5: "SO", 6: "ROLLOVER",
+    7: "CLIENT", 9: "GATEWAY", 10: "SIGNAL", 16: "MOBILE", 17: "WEB", 18: "SPLIT",
+}
+
+
+def gateway_deal_reason(code) -> str | None:
+    if code is None:
+        return None
+    try:
+        code = int(code)
+    except (TypeError, ValueError):
+        return None
+    if code < 0:
+        return None
+    return _GATEWAY_DEAL_REASONS.get(code, "OTHER")
+
 # ---------- 成交时间戳的参照系 / the time frame of deal timestamps ----------
 # Manager API 给的 deal.time 和 MetaTrader5 Python 包一样，是**按券商服务器墙钟
 # 算出来的 epoch**，不是 UTC——直接 fromtimestamp(tz=utc) 会整体偏出服务器时区
@@ -818,22 +856,56 @@ def build_closed_trade_legs(
         if not out_legs:
             continue
 
-        total_fees = sum((d.commission or 0.0) + (d.storage or 0.0) for d in legs)
+        total_commission = sum((d.commission or 0.0) for d in legs)
+        total_swap = sum((d.storage or 0.0) for d in legs)
+        total_fees = total_commission + total_swap
         total_out_volume = sum(d.volume for d in out_legs)
         if total_out_volume <= 0:
             continue
 
+        # 开仓腿（窗口里可能没有，见上）：开仓价按手数加权、开仓时间取最早。缺了就
+        # 留空，落库时由平台订单表兜底（closed_trade_store.platform_position_facts）。
+        # Opening legs (may predate the window): volume-weighted open price,
+        # earliest time; absent → None, back-filled from the platform's orders.
+        in_legs = [
+            d for d in legs
+            if d.entry in (_DEAL_ENTRY_IN, _DEAL_ENTRY_INOUT)
+            and d.action in (_DEAL_ACTION_BUY, _DEAL_ACTION_SELL)
+            and d.volume > 0
+        ]
+        in_volume = sum(d.volume for d in in_legs)
+        open_price = (sum(d.price * d.volume for d in in_legs) / in_volume) if in_volume > 0 else None
+        open_time = (
+            datetime.fromtimestamp(min(d.time for d in in_legs) - server_offset_seconds, tz=timezone.utc)
+            if in_legs else None
+        )
+        in_sl = next((getattr(d, "sl", 0.0) for d in in_legs if getattr(d, "sl", 0.0)), 0.0)
+        in_tp = next((getattr(d, "tp", 0.0) for d in in_legs if getattr(d, "tp", 0.0)), 0.0)
+
         for d in out_legs:
+            share = d.volume / total_out_volume
             legs_out.append({
                 "symbol": d.symbol,
                 # 平仓成交方向与原仓位相反：SELL 平的是多单，BUY 平的是空单
                 "side": "BUY" if d.action == _DEAL_ACTION_SELL else "SELL",
                 "closeVolume": d.volume,
                 "closePrice": d.price,
-                "profit": (d.profit or 0.0) + total_fees * (d.volume / total_out_volume),
+                "profit": (d.profit or 0.0) + total_fees * share,
                 "positionTicket": pos_id,
                 "dealTicket": int(d.ticket),
                 "closedAt": datetime.fromtimestamp(d.time - server_offset_seconds, tz=timezone.utc),
+                # ---- MT5 历史「仓位」视图的其余字段 / the rest of MT5's positions view ----
+                "openTime": open_time,
+                "openPrice": open_price,
+                "grossProfit": d.profit or 0.0,
+                "commission": total_commission * share,
+                "swap": total_swap * share,
+                # 平仓成交上带的是平仓时刻的止损止盈；没有就退到开仓腿的初值
+                # The closing deal carries the SL/TP at close; else the opening leg's
+                "sl": (getattr(d, "sl", 0.0) or in_sl) or None,
+                "tp": (getattr(d, "tp", 0.0) or in_tp) or None,
+                "reason": gateway_deal_reason(getattr(d, "reason", None)),
+                "comment": (d.comment or None),
             })
 
     return legs_out
@@ -1073,32 +1145,14 @@ async def gateway_positions_loop() -> None:
         db = SessionLocal()
         try:
             for leg in legs:
-                db.add(ClosedTrade(
-                    user_id=user_id,
-                    mt5_login=login,
-                    symbol=leg["symbol"],
-                    side=leg["side"],
-                    close_volume=leg["closeVolume"],
-                    close_price=leg["closePrice"],
-                    profit=leg["profit"],
-                    position_ticket=leg["positionTicket"],
-                    deal_ticket=leg["dealTicket"],
-                    closed_at=leg["closedAt"],
-                    # 这条通道天然可核验：成交历史是本服务端直接向券商 Manager API
-                    # 取的，不经用户机器；归属判定也已在 build_closed_trade_legs
-                    # 里做过（主依据就是上面这份 known 仓位号）。与桥接通道的
-                    # verified 是同一个语义，见 models.ClosedTrade.verified。
-                    # Inherently verifiable: this history comes from the broker's
-                    # Manager API through our own server, never via the user's
-                    # machine, and attribution already ran in build_closed_trade_legs.
-                    verified=True,
-                ))
-                try:
-                    db.commit()
-                    inserted += 1
-                except IntegrityError:
-                    # 已上报过这笔成交（回看窗口重叠导致），跳过
-                    db.rollback()
+                # 撞去重键只补空列（回扫补齐旧记录），见 closed_trade_store。这条通道
+                # 天然可核验（成交历史由本服务端直接向券商 Manager API 取，不经用户
+                # 机器；归属已在 build_closed_trade_legs 判定），所以 verified=True。
+                # Duplicate keys only back-fill null columns (deep rescan). This
+                # channel is inherently verifiable (history straight from the
+                # broker's Manager API, attribution done above), hence verified=True.
+                if upsert_leg(db, user_id, login, leg, True) in ("inserted", "enriched"):
+                    inserted += 1
         finally:
             db.close()
         return inserted
@@ -1180,10 +1234,11 @@ async def gateway_positions_loop() -> None:
             # 里"更早"，窗口起点要再往前让出这段。
             # Likewise `from`: with a server clock behind UTC (negative offset) a
             # fresh close sits "earlier" in the server frame, so the start moves back.
-            from_unix = int(time.time()) - (
-                GATEWAY_DEALS_CATCHUP_SECONDS if first_scan
-                else GATEWAY_DEALS_LOOKBACK_SECONDS
-            ) - int(max(0.0, -cached_server_offset(login)))
+            lookback = GATEWAY_DEALS_CATCHUP_SECONDS if first_scan else GATEWAY_DEALS_LOOKBACK_SECONDS
+            if first_scan and await run_in_threadpool(_needs_deep_backfill, user_id, login):
+                lookback = GATEWAY_DEALS_DEEP_BACKFILL_SECONDS
+                logger.info("Gateway 平仓明细一次性回扫近一年补齐 MT5 字段 login=%s", login)
+            from_unix = int(time.time()) - lookback - int(max(0.0, -cached_server_offset(login)))
             deals, derr = await gw_get_deals(int(login), from_unix, to_unix)
             if derr:
                 logger.warning("Gateway 成交历史读取失败 login=%s: %s", login, derr)

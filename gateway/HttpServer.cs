@@ -607,6 +607,9 @@ namespace Prismx.Mt5Gateway
                     .Field("storage", d.Storage)
                     .Field("time", (ulong)d.Time)
                     .Field("comment", d.Comment)
+                    .Field("reason", d.Reason)
+                    .Field("sl", d.PriceSL)
+                    .Field("tp", d.PriceTP)
                  .EndObject();
             }
 

@@ -525,6 +525,26 @@ class ClosedTrade(Base):
     position_ticket = Column(Integer, nullable=False)  # 仓位编号，同一仓位的多次部分平仓共享 / shared across partial closes
     deal_ticket = Column(Integer, nullable=False)  # MT5 成交编号，用于去重 / MT5 deal ticket, for dedup
     closed_at = Column(DateTime, nullable=False)
+    # ---- MT5 历史「仓位」视图的其余字段（2026-09-07，rev 17）。全部可空：旧记录靠
+    # 桥接 / 网关一次性回扫补齐（services/closed_trade_store.upsert_leg 只补空列）。
+    # 手续费 / 隔夜利息 / 毛盈亏是**这条平仓腿**分摊到的份额，profit（净）= 三者之和；
+    # 按仓位展示时把各腿加总即得 MT5 那一行。止损 / 止盈是平仓时的值：网关直接读成交
+    # 记录；桥接读开仓单初值 + 触发平仓的服务器单价格，再由平台改单记录兜底，用户在
+    # MT5 客户端手动改过的对不上。reason 是两条通道各自从枚举转好的名字
+    # （SL / TP / CLIENT / EXPERT / MOBILE / WEB / SO / …），两边枚举数值不同。
+    # The remaining MT5 "positions" history columns, all nullable and back-filled
+    # for old rows. Fees / gross are this leg's allocated share (net profit is
+    # their sum). SL/TP are the values at close; reason is a name mapped from
+    # each channel's own enum (the two enums differ numerically).
+    open_time = Column(DateTime, nullable=True)
+    open_price = Column(Float, nullable=True)
+    gross_profit = Column(Float, nullable=True)
+    commission = Column(Float, nullable=True)
+    swap = Column(Float, nullable=True)
+    sl = Column(Float, nullable=True)
+    tp = Column(Float, nullable=True)
+    reason = Column(String, nullable=True)
+    comment = Column(String, nullable=True)
     # 服务端能否为这条记录背书：该平仓腿的 (账号, 仓位编号) 是否对得上本平台
     # 一笔已成交的开仓订单。
     #

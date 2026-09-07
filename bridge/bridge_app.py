@@ -71,6 +71,15 @@ POLL_INTERVAL = 1.5  # 后端轮询间隔（秒）/ backend poll interval (secon
 # Max closing legs per POST; a reconnect catch-up can produce hundreds at once.
 _TRADES_PER_POST = 100
 
+# 后端在 /poll 响应里点名"需要一次性回扫补齐 MT5 明细"的账号（tradeHistoryBackfill）。
+# 每个账号在本进程里只回扫一次：回扫回看一年、上报幂等，但没必要每拍都扫；后端那边
+# 只要还有补不上的旧记录（比如终端历史里已经查不到的仓位）就会一直点名。
+# Accounts the backend flags for a one-off deep rescan; done once per process
+# per account — the backend keeps flagging while any row stays unfillable.
+_backfill_requested: set[str] = set()
+_backfill_done: set[str] = set()
+_path_login: dict[str, str] = {}
+
 # 已执行指令结果的本地持久化：程序重启后缓存不丢，后端超时重发同一指令时
 # 只重报缓存结果、绝不重复下单（防止"已执行但回执丢失 + 重启"导致重复开仓）。
 # Persisted cache of executed command results: survives restarts, so if the
@@ -455,7 +464,11 @@ class BridgeEngine:
         login_to_path: dict[str, str] = {}
         worker_errors: list[str] = []
         for path in paths:
-            res = poll_terminal(path)
+            login_hint = _path_login.get(path)
+            deep = login_hint is not None and login_hint in _backfill_requested and login_hint not in _backfill_done
+            if deep:
+                _backfill_done.add(login_hint)
+            res = poll_terminal(path, deep_backfill=deep)
             if res.get("error"):
                 worker_errors.append(res["error"])
                 # 只要账号在线（accounts 非空），这个错误此前完全不会展示在状态栏
@@ -471,6 +484,7 @@ class BridgeEngine:
             if acc:
                 accounts.append(acc)
                 login_to_path[acc["login"]] = path
+                _path_login[path] = acc["login"]
                 positions.extend(res.get("positions", []))
                 # 按账户上报，不跨终端合并——下单确认页要按选中账户取对应
                 # 交易商的报价。/ report per account, no cross-terminal merge —
@@ -533,6 +547,9 @@ class BridgeEngine:
             limit_exceeded = [
                 str(x) for x in (resp.get("accountLimitExceeded") or []) if x
             ]
+            _backfill_requested.update(
+                str(x) for x in (resp.get("tradeHistoryBackfill") or []) if x
+            )
             parts = []
             if broker_rejected:
                 parts.append(

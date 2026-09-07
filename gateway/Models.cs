@@ -75,6 +75,14 @@ namespace Prismx.Mt5Gateway
         public double Profit;
         public double Commission;
         public double Storage;      // 隔夜利息
+        // 成交原因(CIMTDeal.EnDealReason 原值,SL=3 / TP=4 / SO=5 …,后端转成名字)与
+        // 平仓时刻的止损止盈(0 = 无)。网页端「已平仓明细」按 MT5 历史「仓位」视图
+        // 显示,这三项是那一行里成交记录之外拿不到的信息。
+        // Deal reason (raw EnDealReason, mapped to a name backend-side) and the
+        // SL/TP at close (0 = none), for the MT5-style closed-trade view.
+        public uint Reason;
+        public double PriceSL;
+        public double PriceTP;
         // 注意:这是**券商服务器墙钟**换算出来的 epoch 秒,不是真 UTC——本券商领先
         // UTC 3 小时。网关原样透传,换算在后端(routers/gateway.observe_server_offset,
         // 2026-09-05 起,偏移持久化在 mt5_accounts.server_utc_offset)。这里曾写着

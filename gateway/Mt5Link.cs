@@ -1134,7 +1134,10 @@ namespace Prismx.Mt5Gateway
                             Commission = d.Commission(),
                             Storage = d.Storage(),
                             Time = d.Time(),
-                            Comment = d.Comment()
+                            Comment = d.Comment(),
+                            Reason = (uint)d.Reason(),
+                            PriceSL = d.PriceSL(),
+                            PriceTP = d.PriceTP()
                         };
                     }
 

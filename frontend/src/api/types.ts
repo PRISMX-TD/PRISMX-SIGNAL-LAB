@@ -444,6 +444,19 @@ export interface ClosedTrade {
   positionTicket: number
   dealTicket: number
   closedAt: string | null
+  // MT5 历史「仓位」视图的其余字段（2026-09-07 起）。旧记录为 null，通道回扫后补上。
+  // 手续费 / 隔夜利息 / 毛盈亏是这条平仓腿分摊到的份额，profit（净）= 三者之和。
+  // The rest of MT5's positions view; null on legacy rows until rescanned.
+  // Fees / gross are this leg's allocated share; profit (net) is their sum.
+  openTime?: string | null
+  openPrice?: number | null
+  grossProfit?: number | null
+  commission?: number | null
+  swap?: number | null
+  sl?: number | null
+  tp?: number | null
+  reason?: string | null
+  comment?: string | null
 }
 
 export type OrderStatus = 'PENDING' | 'FILLED' | 'REJECTED' | 'FAILED' | 'CANCELLED'
