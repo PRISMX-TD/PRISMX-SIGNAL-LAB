@@ -640,6 +640,18 @@
 .ach-item.ghost .ach-name { color: #a1a1aa; }
 .ach-meta { margin-top: 3px; max-width: 160px; font-size: 11px; line-height: 1.35; color: #71717a; }
 .ach-own { margin-top: 6px; font-size: 10.5px; color: #71717a; }
+/* 勋章进度条：瓦片上「下一档」下面一条 3px 细条，详情阶梯里未到的档一条。
+   与顶部任务瓦片的 .tk-track 同一视觉语言（同高、同圆角、同渐变）。
+   Badge progress: a 3px bar under the tile's next-tier line and in unreached
+   ladder rows; same visual language as the task tiles' .tk-track. */
+.ach-prog { display: block; width: 100%; }
+.ach-prog.compact { max-width: 160px; margin: 6px auto 0; }
+.ach-prog-track { display: block; position: relative; height: 3px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.ach-prog-fill { position: absolute; inset: 0; width: calc(var(--pct, 0) * 100%); border-radius: 999px; background: linear-gradient(90deg, theme('colors.prism.400'), theme('colors.prism.500')); transition: width 0.5s var(--ease-out); }
+.ach-prog-label { display: block; margin-top: 4px; font-size: 10.5px; line-height: 1.3; color: #71717a; text-align: right; }
+.ach-prog.compact .ach-prog-label { text-align: center; }
+.ach-ladder .ach-prog { margin-top: 5px; }
+.ach-ladder .ach-prog-label { text-align: left; }
 .ach-eq { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 5px; margin-top: 8px; }
 .ach-eq button, .ach-eq span {
   font-size: 10.5px;

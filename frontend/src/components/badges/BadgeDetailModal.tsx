@@ -17,6 +17,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import BadgeIcon from './BadgeIcon'
 import LimitedClosesLine from './LimitedClosesLine'
+import { BadgeProgressBar } from './BadgeProgressBar'
 import MedalTilt from './MedalTilt'
 import { FAMILY_OF, materialOf } from './medal'
 import { fmtDate } from '../../api/utils'
@@ -104,6 +105,7 @@ export default function BadgeDetailModal({ badge, population, onClose }: Props) 
                       {reached && <span className="ach-ladder-check" aria-hidden>✓</span>}
                     </b>
                     <span>{t(`gamification.badges.${badge.id}.tiers.${tier}`)}</span>
+                    {!reached && badge.progress && <BadgeProgressBar p={badge.progress[tier - 1]} />}
                   </div>
                   <small className="num">{t('gamification.detail.tierOwners', { n: badge.tierOwners[tier - 1] ?? 0 })}</small>
                 </li>

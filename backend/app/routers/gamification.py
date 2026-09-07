@@ -19,6 +19,8 @@ from app.services.gamification import (
     equipped_badge_tiers,
 )
 from app.services.gamification import identity, periods
+from app.services.gamification.badge_progress import badge_progress
+from app.services.gamification.stats import compute_account_lifetime_stats, load_trade_data
 from app.services.gamification.boards import _resolved_in_period, board_gates
 from app.services.gamification.conditions import WINRATE_CONDITIONS
 from app.services.settings_store import (
@@ -320,7 +322,12 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
         shared_state.kv_set(f"judge:{user.id}", str(now), ttl=_JUDGE_THROTTLE_SECONDS)
         judge_and_record_conditions(db, user.id)
         judge_and_award_badges(db, user.id)
-    stats = compute_comprehensive_stats(db, user.id)
+    # 一次读全该用户的成交数据：综合统计、终身统计、勋章进度三处共用，不各自查库。
+    # Load the user's trade data once; stats, lifetime stats and badge progress share it.
+    data = load_trade_data(db, user.id)
+    stats = compute_comprehensive_stats(db, user.id, data)
+    ctx = {"stats": stats, "lifetime": compute_account_lifetime_stats(db, user.id, data), "data": data}
+    progress = badge_progress(db, user, ctx)
     done = {t.task_id for t in db.query(UserTask).filter(UserTask.user_id == user.id)}
     owned = {b.badge_id: b for b in db.query(UserBadge).filter(UserBadge.user_id == user.id)}
     level = level_of(done)
@@ -345,6 +352,7 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
             "id": bid, "category": meta["category"], "maxTier": meta["max_tier"],
             "shelf": meta["shelf"],
             "closesAt": meta["closes_at"].isoformat() if meta.get("closes_at") else None,
+            "progress": progress.get(bid),
             "tier": (owned[bid].tier or 0) if bid in owned else 0,
             "earned": bid in owned,
             "awardedAt": owned[bid].awarded_at.isoformat() if bid in owned and owned[bid].awarded_at else None,

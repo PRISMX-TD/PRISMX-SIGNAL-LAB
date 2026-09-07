@@ -22,6 +22,7 @@ import BadgeDetailModal from '../components/badges/BadgeDetailModal'
 import LimitedClosesLine from '../components/badges/LimitedClosesLine'
 import PedestalStage from '../components/badges/PedestalStage'
 import { materialOf } from '../components/badges/medal'
+import { BadgeProgressBar } from '../components/badges/BadgeProgressBar'
 import type { GamificationBadge, GamificationMe, GamificationTask } from '../api/types'
 
 // 勋章库分三层：进阶勋章（各有铜 / 银 / 金三档）、特殊勋章（无档位）、绝版勋章
@@ -615,6 +616,9 @@ export default function AchievementsPage() {
                         </span>
                       )}
                       <small className="ach-meta">{meta}</small>
+                      {tiered && b.progress && b.tier < b.maxTier && (
+                        <BadgeProgressBar p={b.progress[b.tier]} compact />
+                      )}
                       {b.shelf === 'limited' && (
                         <LimitedClosesLine closesAt={b.closesAt} className="ach-closes" />
                       )}

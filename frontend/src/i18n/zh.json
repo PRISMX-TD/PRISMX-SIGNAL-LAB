@@ -1864,6 +1864,7 @@
     "taskState": { "locked": "完成同组其他条件后开考", "pending": "待达标", "done": "已达成" },
     "taskUnits": { "trades": "笔", "lots": "手", "days": "天" },
     "taskProgress": { "pending": "待完成", "profitTarget": "盈亏为正", "groupDone": "已完成 {{done}} / {{total}}" },
+    "progressUnit": {"days": "天", "trades": "笔", "wins": "笔盈利单", "comps": "场", "months": "个月"},
     "tier": { "1": "铜", "2": "银", "3": "金" },
     "material": { "plain": "石墨", "bronze": "青铜", "silver": "白银", "gold": "足金", "legend": "足金星芒", "limited": "青铜火漆", "onyx": "乌金" },
     "shelf": { "tiered": "进阶勋章", "tieredHint": "每枚三档：铜 → 银 → 金，只升不降",

@@ -1866,6 +1866,7 @@
     "taskState": { "locked": "Unlocks after the other tasks in this group", "pending": "In progress", "done": "Completed" },
     "taskUnits": { "trades": "trades", "lots": "lots", "days": "days" },
     "taskProgress": { "pending": "Not yet", "profitTarget": "P&L above zero", "groupDone": "{{done}} / {{total}} done" },
+    "progressUnit": {"days": "days", "trades": "trades", "wins": "winning trades", "comps": "competitions", "months": "months"},
     "tier": { "1": "Bronze", "2": "Silver", "3": "Gold" },
     "material": { "plain": "Graphite", "bronze": "Bronze", "silver": "Silver", "gold": "Gold", "legend": "Gold & Rays", "limited": "Bronze Seal", "onyx": "Dark Gold" },
     "shelf": { "tiered": "Tiered badges", "tieredHint": "Three tiers each: bronze → silver → gold, never downgraded",

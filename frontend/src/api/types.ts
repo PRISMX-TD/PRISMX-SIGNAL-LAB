@@ -940,6 +940,12 @@ export interface TicketListItem {
 // tier reached so far, 0 when unearned.
 export type BadgeShelf = 'tiered' | 'special' | 'limited'
 
+export interface BadgeProgress {
+  value: number
+  target: number
+  unit: string
+}
+
 export interface GamificationBadge {
   id: string
   category: string
@@ -948,6 +954,9 @@ export interface GamificationBadge {
   shelf: BadgeShelf
   // 绝版勋章的停发时刻（ISO），其余为 null。Closing time for limited badges, else null.
   closesAt: string | null
+  // 三档各自的进度（当前值 / 目标 / 单位 i18n 键），只有"数到某个数"的勋章有，
+  // 其余为 null。见 badge_progress.py。Per-tier progress for count-based badges.
+  progress: BadgeProgress[] | null
   maxTier: number
   tier: number
   earned: boolean
