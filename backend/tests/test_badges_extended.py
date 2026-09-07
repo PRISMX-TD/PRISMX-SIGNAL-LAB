@@ -203,3 +203,45 @@ def test_regular_silver_from_historical_run(db_session):
     u = _user(db_session, "rg3@t.co")
     _active(db_session, u, datetime(2025, 1, 1, tzinfo=timezone.utc), 30)
     assert "regular:2" in judge_and_award_badges(db_session, u.id)
+
+
+# ---- 翻盘：亏损月后紧接的下一个月把亏的全赚回来 ----
+
+from app.services.gamification.badge_judges import _has_comeback
+
+
+def _month(offset):
+    """当前月往前 offset 个月的 15 日（offset=0 是当前月）。"""
+    y, m = NOW.year, NOW.month
+    m -= offset
+    while m <= 0:
+        m += 12; y -= 1
+    return datetime(y, m, 15, tzinfo=timezone.utc)
+
+
+def test_has_comeback_pure():
+    assert _has_comeback({(2025, 1): -200.0, (2025, 2): 200.0}) is True
+    assert _has_comeback({(2025, 1): -200.0, (2025, 2): 150.0}) is False      # 没回本
+    assert _has_comeback({(2025, 1): -200.0, (2025, 3): 500.0}) is False      # 隔了一个月
+    assert _has_comeback({(2024, 12): -50.0, (2025, 1): 50.0}) is True        # 跨年相邻
+    assert _has_comeback({(2025, 1): 10.0, (2025, 2): 20.0}) is False
+
+
+def test_comeback_awarded_only_when_recovered(db_session):
+    u = _user(db_session, "cb1@t.co")
+    _fill(db_session, u, 1, profit=-200.0, closed_at=_month(2))
+    _fill(db_session, u, 2, profit=150.0, closed_at=_month(1))
+    db_session.commit()
+    judge_and_award_badges(db_session, u.id)
+    assert ("comeback", 0) not in _owned(db_session, u.id)
+    _fill(db_session, u, 3, profit=50.0, closed_at=_month(1)); db_session.commit()   # 150 + 50 = 200
+    assert "comeback" in judge_and_award_badges(db_session, u.id)
+
+
+def test_comeback_ignores_current_month(db_session):
+    u = _user(db_session, "cb2@t.co")
+    _fill(db_session, u, 1, profit=-100.0, closed_at=_month(1))
+    _fill(db_session, u, 2, profit=300.0, closed_at=_month(0))                # 当前月未结束
+    db_session.commit()
+    judge_and_award_badges(db_session, u.id)
+    assert ("comeback", 0) not in _owned(db_session, u.id)

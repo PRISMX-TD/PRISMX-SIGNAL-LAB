@@ -34,6 +34,7 @@ from .badge_judges import (  # noqa: F401  —— 判定函数在 badge_judges.p
     _j_board_return,
     CAMPAIGNER_THRESHOLDS, _j_campaigner,
     REGULAR_THRESHOLDS, _j_regular,
+    _j_comeback,
 )
 
 # 可同时佩戴的勋章枚数。第一枚是「默认」——榜单行与比赛条目位置有限，只画
@@ -213,6 +214,7 @@ BADGES: dict[str, dict] = {
     # 卫冕王：连续两届冠军，终审时判；冠军之上再无档位，独立一枚。
     # Back-to-back champion: judged at settlement; above gold, so a standalone badge.
     "comp_back_to_back": {"category": "competition", "shelf": "special", "name": "卫冕王", "max_tier": 0, "judges": None},
+    "comeback": {"category": "performance", "shelf": "special", "name": "翻盘", "max_tier": 0, "judges": _j_comeback},
     "founder_2026": {"category": "limited", "shelf": "limited", "name": "创始元老", "max_tier": 0,
                      "judges": _j_founder_2026, "closes_at": FOUNDER_DEADLINE},
 }

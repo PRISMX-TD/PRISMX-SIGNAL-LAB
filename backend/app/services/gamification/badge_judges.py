@@ -101,23 +101,33 @@ def _resolved_real_positions(db, user_id, cutoff=None, data: dict | None = None)
 
 # ---- 常青 / evergreen ----
 
-def _evergreen_months(db, user_id, data: dict | None = None) -> int:
+def _next_month(key: tuple[int, int]) -> tuple[int, int]:
+    y, m = key
+    return (y + 1, 1) if m == 12 else (y, m + 1)
+
+
+def _monthly_real_profit(db, user_id, data: dict | None = None) -> dict[tuple[int, int], float]:
+    """按最后一腿平仓月聚合的实盘整仓盈亏，不含当前月（未结束）。常青与翻盘共用。
+    Real, fully-closed P/L per month keyed by the last leg's close month, excluding
+    the current (unfinished) month. Shared by evergreen and comeback."""
     now = datetime.now(timezone.utc)
     cur_month = (now.year, now.month)
     monthly: dict[tuple[int, int], float] = {}
     for _o, p, closed in _resolved_real_positions(db, user_id, data=data):
         ts = closed if closed.tzinfo else closed.replace(tzinfo=timezone.utc)
         key = (ts.year, ts.month)
-        if key != cur_month:                       # 未结束的当前月不计
+        if key != cur_month:
             monthly[key] = monthly.get(key, 0.0) + p
-    def _next(k):
-        y, m = k
-        return (y + 1, 1) if m == 12 else (y, m + 1)
+    return monthly
+
+
+def _evergreen_months(db, user_id, data: dict | None = None) -> int:
+    monthly = _monthly_real_profit(db, user_id, data)
     best = run = 0
     prev = None
     for key in sorted(monthly):
         ok = monthly[key] > 0
-        run = (run + 1 if ok and prev is not None and _next(prev) == key
+        run = (run + 1 if ok and prev is not None and _next_month(prev) == key
                else (1 if ok else 0))
         best = max(best, run)
         prev = key
@@ -126,6 +136,24 @@ def _evergreen_months(db, user_id, data: dict | None = None) -> int:
 
 def _j_evergreen(n):
     return lambda db, u, c: _evergreen_months(db, u.id, c.get("data")) >= n
+
+
+# ---- 翻盘 / comeback：某月亏损，紧接着的下一个月盈利 ≥ 亏掉的金额 ----
+# "相邻"是日历上紧接的下一个月；中间空一个无交易月不算。金额本身就是门槛，
+# 不另设最低亏损额（2026-09-07 用户定案：回本口径）。
+# Comeback: a losing month followed immediately by a month whose profit covers the
+# loss. Adjacent means the very next calendar month; the loss itself is the bar.
+def _has_comeback(monthly: dict[tuple[int, int], float]) -> bool:
+    for key, p in monthly.items():
+        if p < 0:
+            nxt = monthly.get(_next_month(key))
+            if nxt is not None and nxt >= -p:
+                return True
+    return False
+
+
+def _j_comeback(db, user, ctx):
+    return _has_comeback(_monthly_real_profit(db, user.id, ctx.get("data")))
 
 
 def _j_profit_factor(db, user, ctx):

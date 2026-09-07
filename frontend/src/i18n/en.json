@@ -1888,6 +1888,7 @@
       "campaigner": { "name": "Campaigner", "tiers": { "1": "Finished 3 competitions (attendance only, rank ignored)", "2": "Finished 10 competitions (attendance only, rank ignored)", "3": "Finished 25 competitions (attendance only, rank ignored)" } },
       "arena": { "name": "Arena", "tiers": { "1": "Complete a competition", "2": "Top 3 in any competition", "3": "Winner of any competition" } },
       "comp_back_to_back": { "name": "Back-to-Back Champion", "desc": "Winner of two consecutive competitions" },
+      "comeback": { "name": "Comeback", "desc": "A losing month followed by a month that wins back the entire loss" },
       "founder_2026": { "name": "Founding Member", "desc": "Registered in 2026 and completed a first live trade (permanently limited)" }
     },
     "winRateCard": { "combined": "Combined win rate (qualifying basis)", "combinedShort": "Win rate", "account": "Account win rate",
