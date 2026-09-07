@@ -890,6 +890,16 @@ class BridgeQuote(BaseModel):
     ask: float
     digits: int | None = Field(default=None, ge=0, le=10)
     ts: str | None = Field(default=None, max_length=40)
+    # 券商对该品种的真实合约规格（桥接 v1.3.23 起上报，见 mt5_worker._symbol_spec）：
+    # 每手标的数量、最小变动价位及其亏损方向的盈亏（账户货币）。网页端下单表单
+    # 拿它算风险金额 / 按风险%建议手数，不再依赖写死的合约规模表。全部可选：
+    # 旧版桥接不带，网页端自动退回估算表。原样透传给前端（update_quotes 存整条）。
+    # The broker's real contract spec (bridge >= 1.3.23): units per lot, tick
+    # size and loss-side tick value in the deposit currency. Optional so older
+    # bridges keep working; passed through to the web app as-is.
+    contractSize: float | None = Field(default=None, gt=0)
+    tickSize: float | None = Field(default=None, gt=0)
+    tickValue: float | None = Field(default=None, gt=0)
 
 
 class BridgeQuotesRequest(BaseModel):

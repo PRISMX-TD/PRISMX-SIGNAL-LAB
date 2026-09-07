@@ -135,18 +135,24 @@ export function displaySymbol(symbol: string): string {
   return SYMBOL_DISPLAY_NAMES[baseSymbol(symbol)] ?? symbol
 }
 
-// 每手合约规模（标的单位数），用于按风险百分比估算手数。
-// 与保证金估算一样是量级提示：真实合约规模以经纪商 MT5 规格为准。
-// Contract size per lot (units of the underlying), used to size volume by a
-// risk percentage. Like the margin estimate, this is indicative only — the
-// real contract size is whatever the broker's MT5 spec says.
+// 每手合约规模（标的单位数）——**兜底表**。桥接 v1.3.23 起按账户报价自带券商真实
+// 规格（Quote.contractSize / tickSize / tickValue），下单表单优先用那个；这张表只在
+// 拿不到时用：网关账户（合作券商 Make Capital，没有按账户报价）、旧版桥接、EA 全站
+// 报价。所以表里的数按合作券商品种表（MT4 symbols.raw，2026-09-07 实测）填：
+// 黄金 100 盎司、白银 5000 盎司、BTC 1 枚、ETH **10** 枚、WTI **100** 桶——后两项
+// 此前按"常见值"写成 1 和 1000，在合作券商上风险金额 / 建议手数各错 10 倍。
+// Contract size per lot — the *fallback* table. Bridge >= 1.3.23 sends the
+// broker's real spec with per-account quotes and the order form prefers it;
+// this table only serves gateway accounts (partner broker, no per-account
+// quotes), older bridges and the site-wide EA feed. Values therefore follow the
+// partner broker's symbol table (MT4 symbols.raw, verified 2026-09-07): ETH is
+// 10 per lot and WTI 100 barrels — the old 1 / 1000 were off by 10x there.
 const CONTRACT_SIZE: Record<string, number> = {
   XAUUSD: 100,
   XAGUSD: 5000,
   BTCUSD: 1,
-  ETHUSD: 1,
-  WTI: 1000, // 常见经纪商 WTI CFD 标准手规模(桶)，各家可能不同,仅作量级提示
-             // common broker standard-lot size (barrels) for WTI CFDs; varies by broker, indicative only
+  ETHUSD: 10,
+  WTI: 100,
 }
 const DEFAULT_CONTRACT_SIZE = 100000 // 标准外汇对 / standard FX pairs
 
@@ -201,18 +207,21 @@ export function usdMarginBasis(symbol: string): 'quote' | 'base' | null {
 // Returns null (no wrong number) when the symbol's basis is unknown (cross
 // pairs), the SL distance is 0, equity is missing, or ('base' symbols) the
 // current price is missing.
+// contractSizeOverride：券商上报的真实每手规模（有则优先于兜底表）。
+// contractSizeOverride: the broker-reported units per lot, preferred over the table.
 export function suggestVolumeByRisk(
   symbol: string,
   equity: number | null | undefined,
   riskPct: number,
   slPriceDistance: number,
   refPrice?: number | null,
+  contractSizeOverride?: number | null,
 ): number | null {
   if (!equity || equity <= 0 || !slPriceDistance || slPriceDistance <= 0 || riskPct <= 0) return null
   const basis = usdMarginBasis(symbol)
   if (basis == null) return null
   const riskAmount = equity * (riskPct / 100)
-  const size = contractSize(symbol)
+  const size = contractSizeOverride && contractSizeOverride > 0 ? contractSizeOverride : contractSize(symbol)
   let raw: number
   if (basis === 'quote') {
     raw = riskAmount / (slPriceDistance * size)

@@ -243,6 +243,19 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
               <span className="v num">≈ {form.estMargin.toLocaleString(undefined, { maximumFractionDigits: 0 })} {selected?.accountCurrency ?? ''}</span>
             </div>
           )}
+          {/* 止损处的亏损金额（有止盈再带盈利与盈亏比），让用户能核对手数 / 风险% 算得对不对
+              Loss at the SL (plus profit and R:R when a TP is set) so the user can sanity-check the sizing */}
+          {form.riskPreview?.riskUsd != null && (
+            <div className="slide-row">
+              <span className="k">{t('charts.ticket.riskAmount')}</span>
+              <span className="v num">
+                <span className="text-down">−{formatMoney(form.riskPreview.riskUsd)}</span>
+                {form.riskPreview.rewardUsd != null && <i> / <span className="text-up">+{formatMoney(form.riskPreview.rewardUsd)}</span></i>}
+                {' '}{selected?.accountCurrency ?? ''}
+                {form.riskPreview.rr != null && <i> · 1 : {form.riskPreview.rr.toFixed(2)}</i>}
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="slide-note">

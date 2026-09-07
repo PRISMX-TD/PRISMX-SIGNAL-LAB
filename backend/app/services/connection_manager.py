@@ -145,10 +145,19 @@ class ConnectionManager:
         Merge a user's per-account quote snapshot; return only entries changed
         since last time.
 
-        quotes: [{"symbol": str, "login": str, "bid": float, "ask": float, "digits": int?}, ...]
+        quotes: [{"symbol": str, "login": str, "bid": float, "ask": float, "digits": int?,
+                  "contractSize": float?, "tickSize": float?, "tickValue": float?}, ...]
+
+        合约规格三个字段也参与"是否变化"的判断：桥接升级到会上报规格的版本后，
+        第一轮报价的价格可能与升级前完全相同，只比 bid/ask 会把规格漏推给前端，
+        直到价格下一次跳动。ts 不参与，否则每轮都算变化。
+        The spec fields take part in change detection too: right after a bridge
+        upgrade the first quote may carry the same price as before, and comparing
+        bid/ask alone would withhold the spec until the next tick. ts is excluded.
         """
         prev = self._quotes.setdefault(user_id, {})
         changed: list = []
+        watched = ("bid", "ask", "contractSize", "tickSize", "tickValue")
         for q in quotes or []:
             sym = q.get("symbol")
             login = q.get("login")
@@ -156,7 +165,7 @@ class ConnectionManager:
                 continue
             by_symbol = prev.setdefault(login, {})
             old = by_symbol.get(sym)
-            if old is None or old.get("bid") != q.get("bid") or old.get("ask") != q.get("ask"):
+            if old is None or any(old.get(k) != q.get(k) for k in watched):
                 by_symbol[sym] = q
                 changed.append(q)
         return changed

@@ -477,6 +477,45 @@ def _account_payload(suffix: str) -> dict | None:
     }
 
 
+def _symbol_spec(info) -> dict:
+    """券商对该品种的真实合约规格，随报价一起上报给网页端算风险金额 / 按风险%建议手数。
+
+    以前网页端按一张写死的合约规模表估算（黄金 100 / 白银 5000 / BTC 1 …），
+    但各券商规格不同（合作券商 ETHUSD 每手 10 而不是 1、WTI 每手 100 而不是
+    1000），用户换一家券商表就错了、且错得悄无声息。终端里 symbol_info 给的
+    就是这家券商的真实值：
+
+    - contractSize：每手标的数量（trade_contract_size）。
+    - tickSize / tickValue：最小变动价位及其对应的**亏损方向**盈亏（以账户货币计，
+      trade_tick_value_loss）。风险金额 = 手数 × (止损距离 ÷ tickSize) × tickValue，
+      这是 MT5 自己算盈亏的公式，对外汇直盘 / 交叉盘 / 贵金属 / 加密 / 指数一律
+      成立，也顺带解决了 EURGBP 这类交叉盘网页端"无法换算成美元"的问题。取亏损
+      方向而不是盈利方向，是因为止损本来就是亏损那一侧，两者相差一个换算点差。
+
+    读不到（None / 0）就不带字段，网页端退回旧的估算表，不会算出 0 手。
+
+    The broker's real contract spec for this symbol, sent alongside the quote so
+    the web app can size risk from actual numbers instead of a hard-coded table
+    (which was wrong for e.g. ETHUSD=10 and WTI=100 at the partner broker).
+    tickValue is the *loss-side* per-tick value in the deposit currency
+    (trade_tick_value_loss) — a stop-loss is the losing side by definition.
+    Missing / zero values omit the keys so the web app falls back to its table.
+    """
+    if info is None:
+        return {}
+    spec: dict = {}
+    size = float(getattr(info, "trade_contract_size", 0) or 0)
+    if size > 0:
+        spec["contractSize"] = size
+    tick_size = float(getattr(info, "trade_tick_size", 0) or 0)
+    tick_value = float(getattr(info, "trade_tick_value_loss", 0) or 0) \
+        or float(getattr(info, "trade_tick_value", 0) or 0)
+    if tick_size > 0 and tick_value > 0:
+        spec["tickSize"] = tick_size
+        spec["tickValue"] = tick_value
+    return spec
+
+
 def _quotes_payload(base_symbols: list[str], suffix: str = "") -> list:
     """采集品种的 bid/ask 报价 / collect bid/ask quotes for symbols.
 
@@ -503,12 +542,15 @@ def _quotes_payload(base_symbols: list[str], suffix: str = "") -> list:
         # Broker's decimal digits; round strictly to remove float noise.
         info = mt5.symbol_info(broker_sym)
         digits = int(info.digits) if info is not None else 5
-        out.append({
+        entry = {
             "symbol": base,
             "bid": round(float(tick.bid), digits),
             "ask": round(float(tick.ask), digits),
             "digits": digits,
-        })
+        }
+        # 券商真实合约规格（见 _symbol_spec）/ broker's real contract spec
+        entry.update(_symbol_spec(info))
+        out.append(entry)
     return out
 
 

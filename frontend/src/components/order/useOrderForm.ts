@@ -17,17 +17,19 @@
 // online for the docked ticket) — that difference is intentional.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MT5Account, Quote } from '../../api/types'
-import { clientOrderId, usdMarginBasis } from '../../api/utils'
+import { clientOrderId } from '../../api/utils'
 import { pickDefaultAccount, useLastAccount } from '../../utils/useLastAccount'
+import { useLastVolume } from '../../utils/useLastVolume'
 import {
+  canSizeByRisk,
   checkSlTp,
+  defaultVolume,
   estimateMargin,
   normalizeVolume,
   parseOptionalNumber,
   previewRisk,
   sanitizeDecimal,
   stepVolume,
-  suggestVolume,
   suggestVolumeForRisk,
 } from './orderMath'
 
@@ -67,6 +69,7 @@ export interface OrderForm {
   /** 入场参考价：买用卖价、卖用买价 / entry reference: ask for BUY, bid for SELL */
   entryRef: number | null
   volume: string
+  /** 用户主动设置（快捷档等）：会记忆为下次默认 / explicit pick, remembered as the next default */
   setVolume: (v: string) => void
   /** 输入框 onChange 用：只留数字和小数点 / for the input's onChange */
   typeVolume: (raw: string) => void
@@ -135,14 +138,33 @@ export function useOrderForm({
   const entryRef = isBuy ? ask : bid
 
   // ---- 手数 / volume ----------------------------------------------------------
-  const [volume, setVolume] = useState(() => suggestVolume(accounts[0]?.equity))
+  // 默认 = 用户上次自己设的手数（没有就 0.01），不再按净值推算。只有用户主动
+  // 设置（输入后失焦 / ± 步进 / 快捷档 / 成功下单）才写记忆；风险模式自动算出
+  // 的手数只进表单不进记忆——用户定的是"风险 1%"，不是那个手数。
+  // Default = the user's last explicitly-set lots (else 0.01); no more
+  // equity-based guess. Only explicit edits (blur / step / quick chip / a
+  // successful submit) are remembered; risk-mode auto-sizing fills the form
+  // but never the memory — the user chose "1% risk", not that lot number.
+  const { lastVolume, rememberVolume } = useLastVolume()
+  const [volume, setVolumeState] = useState(() => defaultVolume(lastVolume))
   const [sizeMode, setSizeMode] = useState<SizeMode>('quick')
   const [riskPct, setRiskPct] = useState('1')
-  const typeVolume = (raw: string) => setVolume(sanitizeDecimal(raw))
+  const touchedRef = useRef(false)
+  const setVolume = (v: string) => { touchedRef.current = true; setVolumeState(v); rememberVolume(v) }
+  const typeVolume = (raw: string) => { touchedRef.current = true; setVolumeState(sanitizeDecimal(raw)) }
   const blurVolume = () => setVolume(normalizeVolume(volume))
   const stepLot = (dir: 1 | -1) => setVolume(stepVolume(volume, dir))
   const parsedVolumeRaw = parseFloat(volume)
   const parsedVolume = parsedVolumeRaw > 0 ? parsedVolumeRaw : null
+
+  // 偏好从云端晚到（本地缓存为空的新设备 / 新浏览器）：用户还没碰过手数时补应用记忆值。
+  // Prefs arriving late from the cloud (fresh device, empty local cache): apply
+  // the remembered lots as long as the user hasn't touched the field yet.
+  useEffect(() => {
+    if (touchedRef.current || sizeMode !== 'quick') return
+    setVolumeState(defaultVolume(lastVolume))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastVolume])
 
   // ---- 止损止盈 / SL & TP -----------------------------------------------------
   const [sl, setSl] = useState(() => (initialStopLoss != null ? String(initialStopLoss) : ''))
@@ -151,33 +173,30 @@ export function useOrderForm({
   const tpNum = parseOptionalNumber(tp)
   const { slInvalid, tpInvalid } = checkSlTp(isBuy, slNum, tpNum, entryRef)
 
-  // 换账户时按净值重估默认手数（仅手数模式；风险模式由下面的 effect 负责）。
-  // Re-suggest the default lots on account change (lots mode only).
-  useEffect(() => {
-    if (sizeMode === 'quick') setVolume(suggestVolume(selected?.equity))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.login])
-
-  // 按风险百分比建议手数：净值 × 风险% ÷ 止损距离，随 SL / 净值 / 风险% / 报价变化重算。
-  // Risk-% sizing, recomputed whenever SL, equity, risk % or the quote moves.
+  // 按风险百分比建议手数：净值 × 风险% ÷ 每手止损亏损，随 SL / 净值 / 风险% / 报价
+  // （含券商规格）变化重算。选中账户的报价自带该券商的合约规格（桥接 ≥ 1.3.23），
+  // 所以换账户 / 换券商自动按新规格算，见 orderMath 的说明。
+  // Risk-% sizing, recomputed whenever SL, equity, risk % or the quote (incl.
+  // the broker spec it carries) moves. The selected account's quote brings its
+  // own broker's contract spec, so switching accounts re-sizes correctly.
   useEffect(() => {
     if (sizeMode !== 'risk') return
-    const suggested = suggestVolumeForRisk(symbol, selected?.equity, riskPct, slNum, entryRef)
-    if (suggested != null) setVolume(suggested)
+    const suggested = suggestVolumeForRisk(symbol, selected?.equity, riskPct, slNum, entryRef, quote)
+    if (suggested != null) setVolumeState(suggested)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slNum/entryRef derive from these
-  }, [sizeMode, riskPct, sl, selected?.equity, symbol, quote?.bid, quote?.ask, refPrice])
+  }, [sizeMode, riskPct, sl, selected?.equity, symbol, quote?.bid, quote?.ask, quote?.tickSize, quote?.tickValue, quote?.contractSize, refPrice])
 
   const riskNeedsSl = sizeMode === 'risk' && slNum == null
-  const riskUnsupported = sizeMode === 'risk' && slNum != null && usdMarginBasis(symbol) == null
+  const riskUnsupported = sizeMode === 'risk' && slNum != null && !canSizeByRisk(symbol, quote)
 
   // ---- 估算 / estimates -------------------------------------------------------
   const estMargin = useMemo(
-    () => estimateMargin(symbol, volume, selected?.leverage, entryRef),
-    [symbol, volume, selected?.leverage, entryRef],
+    () => estimateMargin(symbol, volume, selected?.leverage, entryRef, quote),
+    [symbol, volume, selected?.leverage, entryRef, quote],
   )
   const riskPreview = useMemo(
-    () => previewRisk(symbol, volume, entryRef, slNum, tpNum),
-    [symbol, volume, entryRef, slNum, tpNum],
+    () => previewRisk(symbol, volume, entryRef, slNum, tpNum, quote),
+    [symbol, volume, entryRef, slNum, tpNum, quote],
   )
 
   // ---- 幂等号 / idempotency key ----------------------------------------------
@@ -188,7 +207,14 @@ export function useOrderForm({
   const orderIdRef = useRef<string>('')
   if (!orderIdRef.current) orderIdRef.current = clientOrderId()
   const [orderId, setOrderId] = useState(orderIdRef.current)
-  const rotateOrderId = () => { orderIdRef.current = clientOrderId(); setOrderId(orderIdRef.current) }
+  // 成功下单也算"用户定下了这个手数"（仅手数模式）：输入完直接滑动确认、没触发
+  // 失焦的情况也能记住。/ A successful submit also settles the lots (lots mode
+  // only), covering "type then slide" flows that never blur the input.
+  const rotateOrderId = () => {
+    if (sizeMode === 'quick') rememberVolume(normalizeVolume(volume))
+    orderIdRef.current = clientOrderId()
+    setOrderId(orderIdRef.current)
+  }
 
   return {
     isBuy, accounts, hasAccounts: accounts.length > 0, login, selected, chooseLogin,

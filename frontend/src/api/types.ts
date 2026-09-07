@@ -506,6 +506,15 @@ export interface Quote {
   // price re-sent while the market is closed, not a live-moving quote.
   // Present only on the site-wide display feed (EA-pushed).
   closed?: boolean
+  // 券商对该品种的真实合约规格（桥接 v1.3.23 起随按账户报价上报）：每手标的数量、
+  // 最小变动价位及其亏损方向的盈亏（账户货币）。下单表单优先用它算风险金额与
+  // 按风险%建议手数；旧版桥接 / 网关账户 / EA 全站报价没有这三项，退回估算表。
+  // The broker's real contract spec (bridge >= 1.3.23, per-account quotes only):
+  // units per lot, tick size and loss-side tick value in the deposit currency.
+  // The order form prefers these for risk math; absent → table fallback.
+  contractSize?: number
+  tickSize?: number
+  tickValue?: number
   // 上报该报价的 MT5 账号 login：仅按账户区分的报价（下单确认页用）携带此字段，
   // 全站统一展示报价（EA 推送）没有 / present only on per-account quotes (order
   // confirmation); absent on the site-wide display feed (EA-pushed).
