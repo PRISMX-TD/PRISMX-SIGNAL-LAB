@@ -878,7 +878,9 @@
       "f4": "接入步骤",
       "collapsedTitle": "用的是其他券商？展开桥接程序方案",
       "collapsedHint": "高级选项 · 需要在一台不关机的电脑上常驻运行桥接程序",
-      "openCta": "打开桥接设置"
+      "openCta": "打开桥接设置",
+      "downloadCta": "下载桥接程序",
+      "guideLink": "安装教程与注意事项"
     },
     "steps": {
       "title": "接入步骤",

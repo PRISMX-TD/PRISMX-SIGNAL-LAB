@@ -1,8 +1,12 @@
-// 用户菜单：头部右侧只放一个头像入口，账户/下载桥接/升级/管理页/退出这些
-// 低频项收进下拉，腾出空间给高频导航——英文标签普遍比中文长，不收进来的话
-// 桌面导航栏在英文下很容易挤到超出屏幕。
+// 用户菜单：头部右侧只放一个头像入口，账户/升级/管理页/退出这些低频项收进
+// 下拉，腾出空间给高频导航——英文标签普遍比中文长，不收进来的话桌面导航栏
+// 在英文下很容易挤到超出屏幕。桥接下载不再单独占一项：合作券商直连的用户
+// 用不到它，入口收进「连接 MT5」页的桥接折叠区（2026-09-07）。
 // User menu: the header's right side gets a single avatar entry point;
-// low-frequency items (account, download bridge, upgrade, admin, logout)
+// low-frequency items (account, upgrade, admin, logout) collapse into a
+// dropdown. The bridge download is no longer its own item — partner-broker
+// users never need it — and lives in the Bind page's bridge section instead.
+// Low-frequency items
 // collapse into a dropdown, freeing room for the high-frequency nav — English
 // labels run longer than Chinese ones, so without this the desktop nav
 // overflows the viewport in English.
@@ -101,9 +105,6 @@ export default function UserMenu({
           </Link>
           <Link to="/bind" onClick={() => setOpen(false)} className={linkClass}>
             {t("nav.bind")}
-          </Link>
-          <Link to="/download" onClick={() => setOpen(false)} className={linkClass}>
-            {t("nav.download")}
           </Link>
           <Link to="/support" onClick={() => setOpen(false)} className={linkClass}>
             {t("nav.support")}

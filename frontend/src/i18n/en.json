@@ -878,7 +878,9 @@
       "f4": "Setup steps",
       "collapsedTitle": "Using a different broker? Expand the Bridge option",
       "collapsedHint": "Advanced · the Bridge app has to keep running on a PC you leave switched on",
-      "openCta": "Open Bridge setup"
+      "openCta": "Open Bridge setup",
+      "downloadCta": "Download the Bridge app",
+      "guideLink": "Install guide & notes"
     },
     "steps": {
       "title": "Setup Steps",

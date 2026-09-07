@@ -334,7 +334,6 @@ export default function Layout() {
   const moreItems = [
     { to: '/bind', icon: 'bind', label: t('nav.bind') },
     { to: '/account', icon: 'account', label: t('nav.account') },
-    { to: '/download', icon: 'download', label: t('nav.download') },
     { to: '/support', icon: 'support', label: t('nav.support') },
     ...(user?.plan !== 'PRO' ? [{ to: '/upgrade', icon: 'upgrade', label: t('nav.upgrade') }] : []),
     // 自定义策略：已对全体登录用户开放，见 App.tsx 路由处的说明；PRO 门槛在
@@ -575,13 +574,13 @@ export default function Layout() {
               </div>
             </div>
 
-            {/* 主导航只留高频项；账户/下载桥接/升级/管理页这些低频项收进右侧用户
+            {/* 主导航只留高频项；账户/升级/管理页这些低频项收进右侧用户
                 菜单——英文标签普遍比中文长，9 项塞不下会在英文下直接溢出屏幕。
                 桌面导航在 sm~lg 之间（约 640–1000px）实测仍然挤不下 5 项 + 右侧
                 一排图标，所以把"桌面/移动布局"的切换点从 sm 整体挪到 lg：这段
                 过渡宽度改用手机的底部 Tab 栏（本来就是为窄屏设计的固定网格，
                 天然不会溢出），比硬挤横向导航更稳妥。
-                Primary nav keeps only the high-frequency items; account/download
+                Primary nav keeps only the high-frequency items; account/
                 bridge/upgrade/admin (low-frequency) collapse into the user menu
                 on the right — English labels run longer than Chinese, and 9
                 items don't fit without overflowing in English. Measured that

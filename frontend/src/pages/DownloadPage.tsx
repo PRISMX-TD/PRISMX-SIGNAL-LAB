@@ -4,14 +4,9 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { bridgeVersionApi } from '../api/client'
 
-// 安装包直链与发布页（托管于 GitHub Releases）。
-// 在 GitHub 仓库创建 Release，并按下方文件名上传安装包资产，点击即可直接下载，无需改代码。
-// Installer direct link + releases page (hosted on GitHub Releases).
-// Create a Release in the repo and upload the installer asset with the
-// filename below; clicking downloads it directly with no code change.
-const GITHUB_REPO = 'https://github.com/PRISMX-TD/PRISMX-SIGNAL-LAB'
-const BRIDGE_FILENAME = 'PRISMX-Bridge-Setup.exe'
-const DOWNLOAD_URL = `${GITHUB_REPO}/releases/latest/download/${BRIDGE_FILENAME}`
+// 安装包直链见 api/bridgeDownload.ts（与「连接 MT5」页的下载入口共用一份）。
+// Installer link lives in api/bridgeDownload.ts, shared with the Bind page's entry.
+import { BRIDGE_DOWNLOAD_URL as DOWNLOAD_URL, BRIDGE_FILENAME } from '../api/bridgeDownload'
 
 export default function DownloadPage() {
   const { t } = useTranslation()

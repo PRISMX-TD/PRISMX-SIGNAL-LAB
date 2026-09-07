@@ -12,10 +12,11 @@
 // the bridge is the fallback for non-partner brokers. It drops from a co-equal
 // entry card to a closed-by-default <details> so new users don't conclude they
 // must install something.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { gatewayApi } from '../api/client'
+import { bridgeVersionApi, gatewayApi } from '../api/client'
+import { BRIDGE_DOWNLOAD_URL, BRIDGE_FILENAME } from '../api/bridgeDownload'
 import { useLive } from '../store/live'
 import { localizeApiError } from '../api/utils'
 import PartnerBrokerCard, { usePartnerBroker } from '../components/PartnerBrokerCard'
@@ -24,6 +25,17 @@ export default function BindPage() {
   const { t, i18n } = useTranslation()
   const { accounts, refreshAll } = useLive()
   const { name: brokerName } = usePartnerBroker()
+
+  // 桥接程序版本徽标：后端抓 GitHub releases/latest 的 tag（10 分钟缓存），拿不到
+  // 就不显示，宁缺毋错——见 DownloadPage 里同一段说明。
+  // Bridge version badge from the backend (GitHub releases/latest tag, cached);
+  // omitted when unavailable — no information beats wrong information.
+  const [bridgeVersion, setBridgeVersion] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    bridgeVersionApi.status().then((r) => { if (alive && r.latest) setBridgeVersion(r.latest) }).catch(() => {})
+    return () => { alive = false }
+  }, [])
 
   // ---------- Gateway 绑定状态（Make Capital 用户无需本地 Bridge）----------
   const [gwLogin, setGwLogin] = useState('')
@@ -283,12 +295,32 @@ export default function BindPage() {
               <span className="rounded bg-white/5 px-2 py-1">{t('bind.bridgeEntry.f3')}</span>
               <span className="rounded bg-white/5 px-2 py-1">{t('bind.bridgeEntry.f4')}</span>
             </div>
-            <Link
-              to="/bind/bridge"
-              className="btn btn-ghost mt-4 h-10 px-5 text-sm"
-            >
-              {t('bind.bridgeEntry.openCta')} →
-            </Link>
+            {/* 下载入口就在这里（用户菜单里那项已撤）：直连合作券商的用户根本用不到
+                桥接，把它藏进这个折叠区，只有真需要的人展开才看到。
+                The download entry lives here (the user-menu item is gone): partner-
+                broker users never need the bridge, so only those who expand see it. */}
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <a
+                href={BRIDGE_DOWNLOAD_URL}
+                download={BRIDGE_FILENAME}
+                className="btn-primary flex h-10 items-center gap-2 px-5 text-sm"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                {t('bind.bridgeEntry.downloadCta')}
+                {bridgeVersion && <span className="font-mono text-xs opacity-80">v{bridgeVersion}</span>}
+              </a>
+              <Link to="/bind/bridge" className="btn btn-ghost h-10 px-5 text-sm">
+                {t('bind.bridgeEntry.openCta')} →
+              </Link>
+              <Link to="/download" className="text-xs text-neutral-500 underline-offset-2 transition hover:text-prism-300 hover:underline">
+                {t('bind.bridgeEntry.guideLink')}
+              </Link>
+            </div>
+            <p className="mt-2 text-xs text-neutral-500">{t('download.platform')}</p>
           </div>
         </details>
       </div>
