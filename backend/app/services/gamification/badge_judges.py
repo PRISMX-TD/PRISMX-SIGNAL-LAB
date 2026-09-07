@@ -228,3 +228,12 @@ def campaigner_tier(n: int) -> int:
 
 def _j_campaigner(n):
     return lambda db, u, c: finished_competition_count(db, u.id) >= n
+
+
+# ---- 常客 / regular：历史最长连续登录 ----
+REGULAR_THRESHOLDS = (7, 30, 100)
+
+
+def _j_regular(n):
+    from .conditions import longest_active_streak
+    return lambda db, u, c: longest_active_streak(db, u.id) >= n

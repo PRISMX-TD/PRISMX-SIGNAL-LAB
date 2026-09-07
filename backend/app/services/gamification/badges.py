@@ -33,6 +33,7 @@ from .badge_judges import (  # noqa: F401  —— 判定函数在 badge_judges.p
     VETERAN_THRESHOLDS, _j_veteran,
     _j_board_return,
     CAMPAIGNER_THRESHOLDS, _j_campaigner,
+    REGULAR_THRESHOLDS, _j_regular,
 )
 
 # 可同时佩戴的勋章枚数。第一枚是「默认」——榜单行与比赛条目位置有限，只画
@@ -190,6 +191,8 @@ BADGES: dict[str, dict] = {
         "category": "growth", "shelf": "tiered", "name": "起步", "max_tier": 3,
         "judges": [_j_profile_complete, _j_first_close, _j_first_real_trade],
     },
+    "regular": {"category": "growth", "shelf": "tiered", "name": "常客", "max_tier": 3,
+                "judges": [_j_regular(n) for n in REGULAR_THRESHOLDS]},
     "evergreen": {
         "category": "performance", "shelf": "tiered", "name": "常青", "max_tier": 3,
         "judges": [_j_evergreen(3), _j_evergreen(6), _j_evergreen(12)],

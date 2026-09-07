@@ -1881,6 +1881,7 @@
     },
     "badges": {
       "starter": { "name": "Starter", "tiers": { "1": "Set a nickname and bind an MT5 account", "2": "Complete your first full close (demo counts)", "3": "First fill on a real account" } },
+      "regular": { "name": "Regular", "tiers": { "1": "7 consecutive days signed in", "2": "30 consecutive days signed in", "3": "100 consecutive days signed in" } },
       "evergreen": { "name": "Evergreen", "tiers": { "1": "3 consecutive months with positive live P&L", "2": "6 consecutive months with positive live P&L", "3": "12 consecutive months with positive live P&L" } },
       "winning_hand": { "name": "Winning Hand", "tiers": { "1": "100 winning trades on one account, ≥20 lots, with positive total P&L", "2": "500 trades on one account, ≥100 lots, win rate >60%, with positive P&L", "3": "Trailing-year average profit factor ≥2, ≥100 trades, with positive P&L" } },
       "board_return": { "name": "On the Board", "tiers": { "1": "Top 10 on a weekly return board (win-rate board excluded)", "2": "Top 10 on a monthly return board (win-rate board excluded)", "3": "Winner of a monthly return board (win-rate board excluded)" } },

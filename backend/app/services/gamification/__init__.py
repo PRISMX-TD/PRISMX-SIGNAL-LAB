@@ -3,7 +3,7 @@ from .identity import mask_name, display_name, nickname_reserved  # noqa: F401
 from .stats import compute_comprehensive_stats, compute_account_lifetime_stats, GAMIFICATION_WINDOW_DAYS  # noqa: F401
 from .conditions import (  # noqa: F401
     judge_and_record_conditions, level_of, condition_states, GROUPS, LEVEL_TITLES,
-    has_consecutive_active_days,
+    has_consecutive_active_days, longest_active_streak,
 )
 from .badges import (  # noqa: F401
     BADGES, judge_and_award_badges, award_badge, badge_display_name,

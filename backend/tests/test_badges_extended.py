@@ -161,3 +161,45 @@ def test_campaigner_ignores_unsettled_and_disqualified(db_session):
     _finished(db_session, u, 3, disqualified=True)          # 取消资格：不算
     judge_and_award_badges(db_session, u.id)
     assert not {b for b in _owned(db_session, u.id) if b[0] == "campaigner"}
+
+
+# ---- 常客：历史最长连续登录 ----
+
+from app.services.gamification.conditions import longest_active_streak
+
+
+def _active(db, u, start, n):
+    for i in range(n):
+        db.add(UserActiveDay(user_id=u.id, day=(start + timedelta(days=i)).date().isoformat()))
+    db.commit()
+
+
+def test_longest_active_streak_counts_best_run_even_if_broken_now(db_session):
+    u = _user(db_session, "rg0@t.co")
+    assert longest_active_streak(db_session, u.id) == 0
+    _active(db_session, u, datetime(2025, 1, 1, tzinfo=timezone.utc), 30)   # 早已中断的 30 天
+    _active(db_session, u, datetime(2025, 3, 1, tzinfo=timezone.utc), 4)
+    assert longest_active_streak(db_session, u.id) == 30
+
+
+def test_regular_bronze_at_seven_days(db_session):
+    u = _user(db_session, "rg1@t.co")
+    _active(db_session, u, datetime(2025, 1, 1, tzinfo=timezone.utc), 6)
+    judge_and_award_badges(db_session, u.id)
+    assert ("regular", 1) not in _owned(db_session, u.id)
+    db_session.add(UserActiveDay(user_id=u.id, day="2025-01-07")); db_session.commit()
+    assert "regular:1" in judge_and_award_badges(db_session, u.id)
+
+
+def test_regular_gap_resets_the_run(db_session):
+    u = _user(db_session, "rg2@t.co")
+    _active(db_session, u, datetime(2025, 1, 1, tzinfo=timezone.utc), 4)
+    _active(db_session, u, datetime(2025, 1, 6, tzinfo=timezone.utc), 4)     # 1 月 5 日缺席
+    judge_and_award_badges(db_session, u.id)
+    assert ("regular", 1) not in _owned(db_session, u.id)
+
+
+def test_regular_silver_from_historical_run(db_session):
+    u = _user(db_session, "rg3@t.co")
+    _active(db_session, u, datetime(2025, 1, 1, tzinfo=timezone.utc), 30)
+    assert "regular:2" in judge_and_award_badges(db_session, u.id)

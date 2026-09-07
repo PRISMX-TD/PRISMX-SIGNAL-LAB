@@ -29,15 +29,24 @@ CONDITION_TARGETS = {
 }
 
 
-def has_consecutive_active_days(db, user_id, n: int) -> bool:
+def longest_active_streak(db, user_id) -> int:
+    """历史最长连续活跃天数（UTC 日历日）。无记录为 0。等级条件 streak_3 与
+    常客勋章共用。
+    Longest run of consecutive active days ever (UTC calendar days); 0 if none.
+    Shared by the streak_3 level condition and the regular badge."""
     rows = db.query(UserActiveDay.day).filter(UserActiveDay.user_id == user_id).all()
     days = sorted({date.fromisoformat(r[0]) for r in rows})
-    run = 1
+    if not days:
+        return 0
+    best = run = 1
     for a, b in zip(days, days[1:]):
         run = run + 1 if b - a == timedelta(days=1) else 1
-        if run >= n:
-            return True
-    return n <= 1 and bool(days)
+        best = max(best, run)
+    return best
+
+
+def has_consecutive_active_days(db, user_id, n: int) -> bool:
+    return longest_active_streak(db, user_id) >= n
 
 
 def current_active_streak(db, user_id, today: date | None = None) -> int:
