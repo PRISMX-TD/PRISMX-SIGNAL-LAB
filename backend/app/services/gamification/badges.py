@@ -1,19 +1,21 @@
 """勋章注册表与判定（设计 §3，2026-09-07 改制）。
 
-六枚勋章：四枚**进阶勋章**各有铜 / 银 / 金三档（起步 / 常青 / 胜手 / 赛场），两枚
-**独立勋章**没有档位（卫冕王、绝版的创始元老）。原来 17 枚各自独立、按稀有度分
-五档的做法作废——相似的合并成一枚分三档，材质只回答"到了第几档"。纪律类勋章
-连同整个纪律分体系一并撤销（2026-09-07 用户定案）。
+十一枚勋章（2026-09-07 扩充）：八枚**进阶勋章**各有铜 / 银 / 金三档（起步 / 常客 /
+常青 / 胜手 / 老兵 / 榜上有名 / 赛场 / 老将），两枚**特殊勋章**没有档位但仍可获得
+（卫冕王 / 翻盘），一枚**绝版勋章**窗口关闭后永久停发（创始元老）。陈列层由
+注册表的 shelf 字段决定，判定函数在 badge_judges.py。
 
 档位规则：判定取**满足的最高档**，不要求低档也满足——首笔实盘的人没设昵称也该
 拿到起步·金，档位是荣誉的高低，不是关卡。`award_badge` 只升不降：已持有更高或
 相同档位则不动，更低则升档并推送。「发出不收回」的不变量不变。
 
-Six badges: four **tiered** ones with bronze / silver / gold (starter / evergreen /
-winning hand / arena) and two **standalone** ones (back-to-back champion, the
-limited founder). The old 17 independent badges across five rarities are gone:
-similar ones merged into one badge with three tiers, and the material now only
-says "which tier". Discipline badges were removed with the discipline system.
+Eleven badges: eight **tiered** ones with bronze / silver / gold (starter /
+regular / evergreen / winning hand / veteran / on the board / arena /
+campaigner), two **special** ones with no tiers but still obtainable
+(back-to-back champion / comeback), and one **limited** badge that stops
+being issued for good once its window closes (founder). The display shelf
+comes from the registry's `shelf` field; the judge functions live in
+badge_judges.py.
 
 Tier rule: the highest satisfied tier is awarded, lower tiers need not hold — a
 first live trade earns starter gold even without a nickname; tiers rank honour,

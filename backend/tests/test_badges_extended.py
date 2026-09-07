@@ -245,3 +245,22 @@ def test_comeback_ignores_current_month(db_session):
     db_session.commit()
     judge_and_award_badges(db_session, u.id)
     assert ("comeback", 0) not in _owned(db_session, u.id)
+
+
+# ---- 注册表定稿：11 枚、固定顺序、展示名 ----
+
+def test_registry_is_eleven_badges_in_display_order():
+    assert list(BADGES) == ["starter", "regular", "evergreen", "winning_hand", "veteran", "board_return",
+                            "arena", "campaigner", "comp_back_to_back", "comeback", "founder_2026"]
+    assert [b for b, m in BADGES.items() if m["shelf"] == "tiered"] == \
+        ["starter", "regular", "evergreen", "winning_hand", "veteran", "board_return", "arena", "campaigner"]
+    assert [b for b, m in BADGES.items() if m["shelf"] == "special"] == ["comp_back_to_back", "comeback"]
+    assert [b for b, m in BADGES.items() if m["shelf"] == "limited"] == ["founder_2026"]
+
+
+def test_display_names_for_new_badges():
+    assert badge_display_name("veteran", 2) == "老兵 · 银"
+    assert badge_display_name("board_return", 3) == "榜上有名 · 金"
+    assert badge_display_name("campaigner", 1) == "老将 · 铜"
+    assert badge_display_name("regular", 3) == "常客 · 金"
+    assert badge_display_name("comeback") == "翻盘"
