@@ -39,3 +39,4 @@
 @import './landing-hero.css';   /* 落地页首屏：分区标题 / 多周期轨道 / 下滑提示 / 移动端叙事 */
 @import './winrate.css';   /* 胜率页：拔河条进场 */
 @import './badges.css';   /* V5 铸币勋章：倾斜流光 + 铸造瞬间 */
+@import './account.css';   /* 账户页：身份牌 / 分区账本 / 药丸选择器 / 推送时段小时条 */

@@ -3,15 +3,17 @@
 // MT5 account balances are deliberately not shown here — connection and
 // account info live on the /bind page.
 import { useEffect, useRef, useState } from "react"
+import type { ReactNode } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { userApi, notificationApi, setToken } from "../api/client"
 import type { ProfilePatch } from "../api/types"
-import { fmtTime, fmtDate, localizeApiError } from "../api/utils"
+import { localizeApiError } from "../api/utils"
 import { getSWReg } from "../utils/push"
 import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
 import PushDiagnostics from "../components/PushDiagnostics"
-import { SkeletonPage } from "../components/Skeleton"
+import { SkeletonBlock, SkeletonLine } from "../components/Skeleton"
+import BadgeIcon from "../components/badges/BadgeIcon"
 import Switch from "../components/Switch"
 import {
   ALL_SENTINEL,
@@ -419,331 +421,567 @@ export default function AccountPage() {
     })
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // 以下是渲染层。2026-09-07 重做：三张同款卡片 → 顶部「身份牌」+ 下方发丝线
+  // 分区的「账本」。上面的数据与保存逻辑一行没动，只换了皮。样式见
+  // styles/account.css 顶部说明。
+  // Rendering below. Redesigned 2026-09-07: three identical cards → an identity
+  // plate on top and a hairline-divided ledger underneath. Nothing above this
+  // line (data + save logic) changed; only the skin did. See the header of
+  // styles/account.css.
+  // ─────────────────────────────────────────────────────────────────────────
+
   if (loading) {
+    // 骨架与真实布局同形：左大字、右一张牌、下面三条分区。页眉常驻。
+    // Skeleton shaped like the real layout: headline left, plate right, three
+    // ledger rows below. The eyebrow stays put.
     return (
-      <div className="max-w-[900px] mx-auto">
-        <SkeletonPage cards={3} />
+      <div>
+        <p className="eyebrow">{t("account.title")}</p>
+        <div className="acct-hero mt-3">
+          <div>
+            <SkeletonLine width="42%" height={40} />
+            <SkeletonLine width="60%" height={14} className="mt-4" />
+          </div>
+          <div className="acct-plate-wrap">
+            <SkeletonBlock className="acct-skel-plate" radius={24} />
+          </div>
+        </div>
+        <div className="acct-ledger">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="acct-row" style={{ ["--i" as string]: i }}>
+              <div>
+                <SkeletonLine width="38%" height={16} />
+                <SkeletonLine width="80%" height={12} className="mt-3" />
+              </div>
+              <div className="acct-row-body">
+                <SkeletonBlock height={40} radius={999} />
+                <SkeletonBlock height={40} radius={999} className="mt-3" />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     )
   }
 
+  if (!info) {
+    return (
+      <div>
+        <p className="eyebrow">{t("account.title")}</p>
+        <div className="acct-empty mt-6">{t("account.loadError")}</div>
+      </div>
+    )
+  }
+
+  const displayName = info.nickname?.trim() || info.email.split("@")[0]
+  const isPro = info.plan === "PRO"
+  const mt5Count = info.mt5Accounts?.length ?? 0
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+  const strength = pwStrength(newPw)
+  const catsAll = notifCats.includes(ALL_SENTINEL)
+  const symsAll = notifSymbols.includes(ALL_SENTINEL)
+  const catsCount = catsAll ? allCats.length : notifCats.filter((c) => c !== ALL_SENTINEL).length
+  const symsCount = symsAll ? allSymbols.length : notifSymbols.filter((s) => s !== ALL_SENTINEL).length
+  const hourCells = notifWinOn ? windowHours(notifWinStart, notifWinEnd) : null
+  let rowIndex = 0
+
   return (
-    // 页面宽度交给 Layout 的 max-w-7xl 统一决定，与订单/策略等页面对齐——这里
-    // 以前自己套了一层 max-w-2xl，导致切到本页时内容块明显比别的页面窄一截。
-    // 铺满后靠下面的两栏栅格控制可读行宽，而不是把整页压窄。
-    // Page width is left to Layout's max-w-7xl so this matches the orders /
-    // strategies pages — it used to add its own max-w-2xl, which made the page
-    // visibly narrower than the rest. Readable line length now comes from the
-    // two-column grid below instead of squeezing the whole page.
-    <div className="space-y-6">
-      <h2 className="font-display text-2xl font-bold text-neutral-100">
-        <span className="neon-text">{t("account.title")}</span>
-      </h2>
-      {!info ? (
-        <div className="glass p-6 text-center text-sm text-neutral-400">{t("account.loadError")}</div>
-      ) : (
-        // 宽屏两栏：左栏放账户信息与密码，右栏单独留给最长的通知设置，避免一栏
-        // 到底时右侧大片空白。items-start 让两栏各自按内容高度收边。
-        // Two columns on wide screens: account info and password on the left, the
-        // much taller notification settings alone on the right, so a single
-        // column doesn't leave a large empty gutter. items-start lets each
-        // column end at its own content height.
-        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
-          <div className="space-y-6">
-          {/* 平台账户 / Platform account */}
-          <section className="glass-neon p-5">
-            <div className="flex items-center justify-between">
-              <h3 className="sec-h-title">
-                {t("account.platform")}
-              </h3>
-              <span className="tag bg-prism-600/20 text-prism-300">
-                {info.plan === "PRO" && info.planIsTrial ? t("account.planTrialTag") : info.plan}
-              </span>
-            </div>
-            <div className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+    <div>
+      {/* ── 顶部：姓名 + 身份牌 / hero ── */}
+      <p className="eyebrow">{t("account.title")}</p>
+      <header className="acct-hero mt-3">
+        <div className="min-w-0">
+          <h1 className="font-display-xl acct-name">{displayName}</h1>
+          <div className="acct-meta">
+            <span className="acct-meta-email">{info.email}</span>
+          </div>
+          <div className="acct-meta" style={{ marginTop: 10 }}>
+            <span>
+              {mt5Count > 0
+                ? t("account.mt5Linked", { count: mt5Count })
+                : t("account.mt5None")}
+            </span>
+            <i className="acct-meta-dot" aria-hidden />
+            <Link to="/bind" className="text-uv hover:underline">
+              {t("account.goBind")}
+            </Link>
+          </div>
+        </div>
+
+        <PlateTilt>
+          <div className="acct-plate-top">
+            <span className="acct-plate-brand">
+              <img src="/logo.png" alt="" draggable={false} />
+              Signal Lab
+            </span>
+            <span className={`acct-plan ${isPro ? "pro" : "free"}`}>
+              {isPro && info.planIsTrial ? t("account.planTrialTag") : info.plan}
+            </span>
+          </div>
+          {/* 佩戴中的勋章压在光谱线右端，像盖在卡上的封印；不占底行的三列。
+              The equipped badge sits on the right end of the spectral rule like a
+              seal on the card, leaving the bottom row to its three columns. */}
+          {info.gamificationVisible && info.equippedBadge && (
+            <span className="acct-plate-badge">
+              <BadgeIcon id={info.equippedBadge} tier={null} earned size={48} />
+            </span>
+          )}
+          <div className="acct-plate-rule" aria-hidden />
+          <div className="acct-plate-bottom">
+            <div className="acct-plate-cols">
               <div className="min-w-0">
-                <span className="text-neutral-500">{t("account.email")}</span>
-                <div className="break-all font-mono text-neutral-100">{info.email}</div>
+                <div className="acct-plate-k">{t("account.plateMemberSince")}</div>
+                <div className="acct-plate-v">{fmtDay(info.createdAt)}</div>
               </div>
               <div className="min-w-0">
-                <span className="text-neutral-500">{t("account.registeredAt")}</span>
-                <div className="font-mono text-neutral-100">{fmtTime(info.createdAt)}</div>
+                <div className="acct-plate-k">{t("account.plateValidThru")}</div>
+                <div className="acct-plate-v">
+                  {isPro
+                    ? info.planExpiresAt
+                      ? fmtDay(info.planExpiresAt)
+                      : t("account.neverExpires")
+                    : "—"}
+                </div>
               </div>
-              {info.plan === "PRO" && (
+              {/* 等级称号只在游戏化对该用户可见且后端算出了等级时才印；否则这一列
+                  不出现，牌上只剩两列。
+                  The level column prints only when gamification is visible to
+                  this user and the backend computed a level; otherwise the
+                  plate has two columns. */}
+              {info.gamificationVisible && info.gamificationLevel != null && (
                 <div className="min-w-0">
-                  <span className="text-neutral-500">{t("account.expiresAt")}</span>
-                  <div className="font-mono text-neutral-100">
-                    {info.planExpiresAt ? fmtDate(info.planExpiresAt) : t("account.neverExpires")}
+                  <div className="acct-plate-k">{t("account.plateLevel")}</div>
+                  <div className="acct-plate-v acct-plate-v-wrap">
+                    <b className="acct-plate-lv">L{info.gamificationLevel}</b>
+                    {info.gamificationTitle ? ` ${t(`gamification.titles.${info.gamificationTitle}`)}` : null}
                   </div>
                 </div>
               )}
             </div>
-          </section>
+          </div>
+        </PlateTilt>
+      </header>
 
-          {/* 密码管理 / Password */}
-          <section className="glass-neon p-5">
-            <h3 className="sec-h-title">
-              {info.hasPassword ? t("account.changePassword") : t("account.setPassword")}
-            </h3>
-            <div className="mt-3 space-y-3">
-              {info.hasPassword && (
+      {/* ── 账本 / ledger ── */}
+      <div className="acct-ledger">
+        {/* 个人资料（游戏化）/ Profile (gamification identity fields) */}
+        {/* 内测门控：功能整体未开放时（gamificationVisible=false）不展示昵称/
+            榜单展示/退出排行榜——这些榜单当下并不存在。管理员的 gamificationVisible
+            恒为 true，自测入口不受影响。
+            Beta wall: while the feature is off for this user
+            (gamificationVisible=false), hide nickname / leaderboard-display /
+            leaderboard-opt-out — those leaderboards don't exist yet. Admins
+            always get gamificationVisible=true, so admin self-testing is unaffected. */}
+        {info.gamificationVisible && (
+          <section className="acct-row" style={{ ["--i" as string]: rowIndex++ }}>
+            <div>
+              <h2 className="font-display acct-row-h">{t("gamification.profile.sectionTitle")}</h2>
+              <p className="acct-row-p">{t("account.profileDesc")}</p>
+            </div>
+            <div className="acct-row-body">
+              <div className="acct-field">
+                <label htmlFor="profile-nickname" className="acct-field-l">
+                  {t("gamification.profile.nickname")}
+                </label>
                 <input
+                  id="profile-nickname"
+                  type="text"
+                  value={nicknameDraft}
+                  onChange={(e) => setNicknameDraft(e.target.value)}
+                  placeholder={t("gamification.profile.nickname")}
+                  maxLength={20}
+                  className="input"
+                />
+                <span className="acct-field-help">{t("account.nicknameHelp")}</span>
+              </div>
+              <div className="acct-settings mt-5">
+                <div className="acct-setting">
+                  <label htmlFor="profile-nickname-public" className="acct-setting-l">
+                    <div className="acct-setting-t">{t("gamification.profile.nicknamePublic")}</div>
+                    <div className="acct-setting-d">{t("account.nicknamePublicDesc")}</div>
+                  </label>
+                  <Switch id="profile-nickname-public" checked={nicknamePublicDraft} onChange={setNicknamePublicDraft} />
+                </div>
+                <div className="acct-setting">
+                  <label htmlFor="profile-leaderboard-opt-out" className="acct-setting-l">
+                    <div className="acct-setting-t">{t("gamification.profile.leaderboardOptOut")}</div>
+                    <div className="acct-setting-d">{t("account.leaderboardOptOutDesc")}</div>
+                  </label>
+                  <Switch id="profile-leaderboard-opt-out" checked={leaderboardOptOutDraft} onChange={setLeaderboardOptOutDraft} />
+                </div>
+              </div>
+              <div className="acct-actions">
+                <button onClick={handleProfileSave} className="btn btn-primary" disabled={profileSaving}>
+                  {profileSaving ? t("common.loading") : t("gamification.profile.save")}
+                </button>
+                {profileMsg && <p className={`acct-msg ${profileMsg.kind}`}>{profileMsg.text}</p>}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* 安全 / Security */}
+        <section className="acct-row" style={{ ["--i" as string]: rowIndex++ }}>
+          <div>
+            <h2 className="font-display acct-row-h">{t("account.securityTitle")}</h2>
+            <p className="acct-row-p">{t("account.securityDesc")}</p>
+          </div>
+          <div className="acct-row-body">
+            {info.hasPassword && (
+              <div className="acct-field">
+                <label htmlFor="pw-old" className="acct-field-l">{t("account.oldPassword")}</label>
+                <input
+                  id="pw-old"
                   type="password"
                   value={oldPw}
                   onChange={(e) => setOldPw(e.target.value)}
                   placeholder={t("account.oldPassword")}
-                  className="input w-full"
+                  className="input"
                   autoComplete="current-password"
                 />
-              )}
+              </div>
+            )}
+            <div className="acct-field">
+              <label htmlFor="pw-new" className="acct-field-l">{t("account.newPassword")}</label>
               <input
+                id="pw-new"
                 type="password"
                 value={newPw}
                 onChange={(e) => setNewPw(e.target.value)}
                 placeholder={t("account.newPassword")}
-                className="input w-full"
+                className="input"
                 autoComplete="new-password"
               />
-              <button onClick={handlePassword} className="btn-primary px-5 py-2">
+              <div className="acct-strength" data-level={strength} aria-hidden>
+                <i /><i /><i /><i />
+              </div>
+              <div className="acct-strength-l">
+                <span>{t("account.pwStrengthLabel")}</span>
+                <b>{strength === 0 ? "—" : t(`account.pwStrength.${strength}`)}</b>
+              </div>
+            </div>
+            <div className="acct-actions">
+              <button onClick={handlePassword} className="btn btn-primary">
                 {info.hasPassword ? t("account.changePassword") : t("account.setPassword")}
               </button>
-              {pwMsg && (
-                <p className={`text-sm ${pwMsg.kind === "err" ? "text-down" : "text-up"}`}>
-                  {pwMsg.text}
-                </p>
-              )}
+              {pwMsg && <p className={`acct-msg ${pwMsg.kind}`}>{pwMsg.text}</p>}
             </div>
-          </section>
-
-          {/* 个人资料（游戏化）/ Profile (gamification identity fields) */}
-          {/* 内测门控：功能整体未开放时（gamificationVisible=false）不展示昵称/
-              榜单展示/退出排行榜——这些榜单当下并不存在。管理员的 gamificationVisible
-              恒为 true，自测入口不受影响。
-              Beta wall: while the feature is off for this user
-              (gamificationVisible=false), hide nickname / leaderboard-display /
-              leaderboard-opt-out — those leaderboards don't exist yet. Admins
-              always get gamificationVisible=true, so admin self-testing is unaffected. */}
-          {info.gamificationVisible && (
-          <section className="glass-neon p-5">
-            <h3 className="sec-h-title">
-              {t("gamification.profile.sectionTitle")}
-            </h3>
-            <div className="mt-3 space-y-3">
-              <input
-                type="text"
-                value={nicknameDraft}
-                onChange={(e) => setNicknameDraft(e.target.value)}
-                placeholder={t("gamification.profile.nickname")}
-                maxLength={20}
-                className="input w-full"
-              />
-              <div className="flex items-center gap-3">
-                <Switch id="profile-nickname-public" checked={nicknamePublicDraft} onChange={setNicknamePublicDraft} />
-                <label htmlFor="profile-nickname-public" className="cursor-pointer text-sm text-neutral-100">
-                  {t("gamification.profile.nicknamePublic")}
-                </label>
-              </div>
-              <div className="flex items-center gap-3">
-                <Switch id="profile-leaderboard-opt-out" checked={leaderboardOptOutDraft} onChange={setLeaderboardOptOutDraft} />
-                <label htmlFor="profile-leaderboard-opt-out" className="cursor-pointer text-sm text-neutral-100">
-                  {t("gamification.profile.leaderboardOptOut")}
-                </label>
-              </div>
-              <button
-                onClick={handleProfileSave}
-                className="btn-primary px-5 py-2 disabled:opacity-40"
-                disabled={profileSaving}
-              >
-                {profileSaving ? t("common.loading") : t("gamification.profile.save")}
-              </button>
-              {profileMsg && (
-                <p className={`text-sm ${profileMsg.kind === "err" ? "text-down" : "text-up"}`}>
-                  {profileMsg.text}
-                </p>
-              )}
-            </div>
-          </section>
-          )}
           </div>
+        </section>
 
-          {/* 通知设置 / Notifications */}
-          <section id="notifications" ref={notifSectionRef} className="glass-neon scroll-mt-20 p-5">
-            <h3 className="sec-h-title">
-              {t("account.notifications")}
-            </h3>
-            <div className="mt-3 space-y-4">
-              <div className="flex items-center gap-3">
-                <Switch
-                  id="account-notif-enable"
-                  checked={notifEnabled}
-                  disabled={info.plan === "FREE"}
-                  busy={notifLoading}
-                  onChange={(next) => handleNotifToggle(next)}
-                />
-                <label htmlFor="account-notif-enable" className="cursor-pointer text-sm text-neutral-100">
-                  {t("account.notifEnable")}
-                </label>
-                {notifLoading && (
-                  <span className="text-xs text-neutral-500">{t("account.notifProcessing")}</span>
+        {/* 通知设置 / Notifications */}
+        <section
+          id="notifications"
+          ref={notifSectionRef}
+          className="acct-row scroll-mt-20"
+          style={{ ["--i" as string]: rowIndex++ }}
+        >
+          <div>
+            <h2 className="font-display acct-row-h">{t("account.notifications")}</h2>
+            <p className="acct-row-p">{t("account.notifDesc")}</p>
+          </div>
+          <div className="acct-row-body">
+            <div className="acct-master">
+              <label htmlFor="account-notif-enable" className="acct-setting-l">
+                <div className="acct-master-t">{t("account.notifEnable")}</div>
+                <div className={`acct-master-s ${notifEnabled ? "on" : ""}`}>
+                  <i aria-hidden />
+                  {notifLoading
+                    ? t("account.notifProcessing")
+                    : info.plan === "FREE"
+                      ? t("account.notifStateLocked")
+                      : notifEnabled
+                        ? t("account.notifStateOn")
+                        : t("account.notifStateOff")}
+                </div>
+              </label>
+              <Switch
+                id="account-notif-enable"
+                checked={notifEnabled}
+                disabled={info.plan === "FREE"}
+                busy={notifLoading}
+                onChange={(next) => handleNotifToggle(next)}
+              />
+            </div>
+            {info.plan === "FREE" && (
+              <p className="acct-hint">
+                {t("account.notifUpgradeRequired")}{" "}
+                <Link to="/upgrade" className="text-uv hover:underline">
+                  {t("nav.upgrade")}
+                </Link>
+              </p>
+            )}
+            {notifEnabled && hintKey && <p className="acct-hint warn">{t(hintKey)}</p>}
+            {notifEnabled && <p className="acct-hint">{t("account.notifFilterHint")}</p>}
+
+            {notifEnabled && (
+              <div className="acct-group">
+                <div className="acct-group-h">
+                  <span className="sec-h-title">{t("account.notifStrategyLabel")}</span>
+                  {allCats.length > 0 && (
+                    <span className="acct-group-n">{catsCount}/{allCats.length}</span>
+                  )}
+                </div>
+                {allCats.length === 0 ? (
+                  <p className="acct-field-help">{t("account.notifNoCategories")}</p>
+                ) : (
+                  <div className="acct-chips">
+                    <button
+                      type="button"
+                      className="acct-chip acct-chip-all"
+                      aria-pressed={catsAll}
+                      onClick={() => handleNotifCatToggle(ALL_SENTINEL, !catsAll)}
+                    >
+                      {t("account.notifAll")}
+                    </button>
+                    {allCats.map((cat) => {
+                      const on = notifCats.includes(cat)
+                      return (
+                        <button
+                          key={cat}
+                          type="button"
+                          className="acct-chip"
+                          aria-pressed={on}
+                          data-included={catsAll || undefined}
+                          disabled={catsAll}
+                          onClick={() => handleNotifCatToggle(cat, !on)}
+                        >
+                          {cat}
+                        </button>
+                      )
+                    })}
+                    {/* 我的策略信号：数据上是事件白名单（单用户推送路径），UI 上归入
+                        按策略——对用户而言它就是"我自己策略发出的信号"。不受上面
+                        「全部」哨兵影响（那是平台策略类别的维度）。
+                        My strategy signals: event-whitelist data (the single-user
+                        push path) presented under "by strategy" — to the user it's
+                        simply "signals from my own strategies". Unaffected by the
+                        "全部" sentinel above (that's the platform-category
+                        dimension). */}
+                    <i className="acct-chip-sep" aria-hidden />
+                    <button
+                      type="button"
+                      className="acct-chip"
+                      aria-pressed={notifEvents.includes(EVENT_STRATEGY_SIGNAL)}
+                      onClick={() =>
+                        handleNotifEventToggle(EVENT_STRATEGY_SIGNAL, !notifEvents.includes(EVENT_STRATEGY_SIGNAL))
+                      }
+                    >
+                      {t("account.notifEvent.strategy_signal")}
+                    </button>
+                  </div>
                 )}
               </div>
-              {info.plan === "FREE" && (
-                <p className="text-xs text-neutral-500">
-                  {t("account.notifUpgradeRequired")}{" "}
-                  <Link to="/upgrade" className="text-prism-400 underline hover:text-prism-300">
-                    {t("nav.upgrade")}
-                  </Link>
-                </p>
-              )}
-              {notifEnabled && hintKey && (
-                <p className="text-xs text-amber-400">{t(hintKey)}</p>
-              )}
-              {notifEnabled && (
-                <p className="text-xs leading-relaxed text-neutral-500">{t("account.notifFilterHint")}</p>
-              )}
-              {notifEnabled && (
-                <div className="space-y-2 pl-1">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
-                    {t("account.notifStrategyLabel")}
-                  </p>
-                  {allCats.length === 0 ? (
-                    <p className="text-xs text-neutral-500">{t("account.notifNoCategories")}</p>
-                  ) : (
-                    <>
-                      <label className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={notifCats.includes(ALL_SENTINEL)}
-                          onChange={(e) => handleNotifCatToggle(ALL_SENTINEL, e.target.checked)}
-                          className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500"
-                        />
-                        <span className="font-medium text-neutral-200">{t("account.notifAll")}</span>
-                      </label>
-                      {allCats.map((cat) => (
-                        <label key={cat} className="flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={notifCats.includes(cat) || notifCats.includes(ALL_SENTINEL)}
-                            disabled={notifCats.includes(ALL_SENTINEL)}
-                            onChange={(e) => handleNotifCatToggle(cat, e.target.checked)}
-                            className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500 disabled:opacity-50"
-                          />
-                          <span className="text-neutral-300">{cat}</span>
-                        </label>
-                      ))}
-                    </>
+            )}
+
+            {notifEnabled && (
+              <div className="acct-group">
+                <div className="acct-group-h">
+                  <span className="sec-h-title">{t("account.notifSymbolLabel")}</span>
+                  {allSymbols.length > 0 && (
+                    <span className="acct-group-n">{symsCount}/{allSymbols.length}</span>
                   )}
-                  {/* 我的策略信号：数据上是事件白名单（单用户推送路径），UI 上归入
-                      按策略——对用户而言它就是"我自己策略发出的信号"。不受上面
-                      「全部」哨兵影响（那是平台策略类别的维度）。
-                      My strategy signals: event-whitelist data (the single-user
-                      push path) presented under "by strategy" — to the user it's
-                      simply "signals from my own strategies". Unaffected by the
-                      "全部" sentinel above (that's the platform-category
-                      dimension). */}
-                  <label className="mt-1 flex items-center gap-2 border-t border-white/5 pt-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={notifEvents.includes(EVENT_STRATEGY_SIGNAL)}
-                      onChange={(e) => handleNotifEventToggle(EVENT_STRATEGY_SIGNAL, e.target.checked)}
-                      className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500"
-                    />
-                    <span className="text-neutral-300">{t("account.notifEvent.strategy_signal")}</span>
+                </div>
+                {allSymbols.length === 0 ? (
+                  <p className="acct-field-help">{t("account.notifNoSymbols")}</p>
+                ) : (
+                  <div className="acct-chips">
+                    <button
+                      type="button"
+                      className="acct-chip acct-chip-all"
+                      aria-pressed={symsAll}
+                      onClick={() => handleNotifSymbolToggle(ALL_SENTINEL, !symsAll)}
+                    >
+                      {t("account.notifAll")}
+                    </button>
+                    {allSymbols.map((sym) => {
+                      const on = notifSymbols.includes(sym)
+                      return (
+                        <button
+                          key={sym}
+                          type="button"
+                          className="acct-chip"
+                          aria-pressed={on}
+                          data-included={symsAll || undefined}
+                          disabled={symsAll}
+                          onClick={() => handleNotifSymbolToggle(sym, !on)}
+                        >
+                          {t(`signals.symbolNames.${sym}`, { defaultValue: "" }) || sym}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 「交易与账户提醒」「成就提醒」两组开关 2026-09-07 撤掉：这些事件在总开关
+                打开后一律推送（后端 push_dispatch.ALWAYS_ON_EVENTS），不再让用户逐项勾选。
+                The "trading & account" / "achievement" toggle groups were removed
+                (2026-09-07): those events push whenever notifications are on
+                (backend push_dispatch.ALWAYS_ON_EVENTS), no per-event opt-out. */}
+            {/* 推送时段 / push window */}
+            {notifEnabled && (
+              <div className="acct-group">
+                <div className="acct-group-h">
+                  <span className="sec-h-title">{t("account.notifWindowHeading")}</span>
+                  <span className="acct-group-n">
+                    {notifWinOn ? `${notifWinStart} – ${notifWinEnd}` : t("account.notifWindowAllDay")}
+                  </span>
+                </div>
+                <div className="acct-setting" style={{ padding: 0, borderTop: 0 }}>
+                  <label htmlFor="account-notif-window" className="acct-setting-l">
+                    <div className="acct-setting-t">{t("account.notifWindowEnable")}</div>
                   </label>
+                  <Switch id="account-notif-window" checked={notifWinOn} onChange={handleWinToggle} />
                 </div>
-              )}
-              {notifEnabled && (
-                <div className="space-y-2 border-t border-white/5 pt-4 pl-1">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
-                    {t("account.notifSymbolLabel")}
-                  </p>
-                  {allSymbols.length === 0 ? (
-                    <p className="text-xs text-neutral-500">{t("account.notifNoSymbols")}</p>
-                  ) : (
-                    <>
-                      <label className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={notifSymbols.includes(ALL_SENTINEL)}
-                          onChange={(e) => handleNotifSymbolToggle(ALL_SENTINEL, e.target.checked)}
-                          className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500"
-                        />
-                        <span className="font-medium text-neutral-200">{t("account.notifAll")}</span>
-                      </label>
-                      {allSymbols.map((sym) => (
-                        <label key={sym} className="flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={notifSymbols.includes(sym) || notifSymbols.includes(ALL_SENTINEL)}
-                            disabled={notifSymbols.includes(ALL_SENTINEL)}
-                            onChange={(e) => handleNotifSymbolToggle(sym, e.target.checked)}
-                            className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500 disabled:opacity-50"
-                          />
-                          <span className="text-neutral-300">
-                            {t(`signals.symbolNames.${sym}`, { defaultValue: "" }) || sym}
-                          </span>
-                        </label>
+                {notifWinOn && hourCells && (
+                  <>
+                    <div className="acct-window">
+                      <input
+                        type="time"
+                        value={notifWinStart}
+                        onChange={(e) => handleWinTime("start", e.target.value)}
+                        className="input"
+                        aria-label={t("account.notifWindowHeading")}
+                      />
+                      <span className="acct-window-to">{t("account.notifWindowTo")}</span>
+                      <input
+                        type="time"
+                        value={notifWinEnd}
+                        onChange={(e) => handleWinTime("end", e.target.value)}
+                        className="input"
+                        aria-label={t("account.notifWindowHeading")}
+                      />
+                    </div>
+                    <div className="acct-hours" aria-hidden>
+                      {hourCells.map((on, h) => (
+                        <i key={h} className={on ? "on" : undefined} />
                       ))}
-                    </>
-                  )}
-                </div>
-              )}
-              {/* 「交易与账户提醒」「成就提醒」两组开关 2026-09-07 撤掉：这些事件在总开关
-                  打开后一律推送（后端 push_dispatch.ALWAYS_ON_EVENTS），不再让用户逐项勾选。
-                  The "trading & account" / "achievement" toggle groups were removed
-                  (2026-09-07): those events push whenever notifications are on
-                  (backend push_dispatch.ALWAYS_ON_EVENTS), no per-event opt-out. */}
-              {/* 推送时段 / push window */}
-              {notifEnabled && (
-                <div className="space-y-2 border-t border-white/5 pt-4 pl-1">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
-                    {t("account.notifWindowHeading")}
-                  </p>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={notifWinOn}
-                      onChange={(e) => handleWinToggle(e.target.checked)}
-                      className="h-4 w-4 rounded border-white/20 bg-white/5 text-prism-500 accent-prism-500"
-                    />
-                    <span className="text-neutral-300">{t("account.notifWindowEnable")}</span>
-                  </label>
-                  {notifWinOn && (
-                    <>
-                      <div className="flex flex-wrap items-center gap-2 text-sm">
-                        <input
-                          type="time"
-                          value={notifWinStart}
-                          onChange={(e) => handleWinTime("start", e.target.value)}
-                          className="input h-9 w-28 font-mono text-sm"
-                        />
-                        <span className="text-neutral-500">{t("account.notifWindowTo")}</span>
-                        <input
-                          type="time"
-                          value={notifWinEnd}
-                          onChange={(e) => handleWinTime("end", e.target.value)}
-                          className="input h-9 w-28 font-mono text-sm"
-                        />
-                      </div>
-                      <p className="text-xs leading-relaxed text-neutral-500">
-                        {t("account.notifWindowHint", {
-                          tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-                        })}
-                      </p>
-                    </>
-                  )}
-                </div>
-              )}
-              {notifMsg && (
-                <p className={`text-sm ${notifMsg.kind === "err" ? "text-down" : "text-up"}`}>
-                  {notifMsg.text}
-                </p>
-              )}
-              <PushDiagnostics />
-            </div>
-          </section>
-        </div>
-      )}
+                    </div>
+                    <div className="acct-hours-ticks" aria-hidden>
+                      <span>00</span><span>06</span><span>12</span><span>18</span><span>24</span>
+                    </div>
+                    <p className="acct-hint">{t("account.notifWindowHint", { tz })}</p>
+                  </>
+                )}
+              </div>
+            )}
+            {notifMsg && <p className={`acct-msg ${notifMsg.kind} mt-4`}>{notifMsg.text}</p>}
+            <PushDiagnostics />
+          </div>
+        </section>
+      </div>
+    </div>
+  )
+}
+
+// ── 页内小部件 / page-local helpers ──
+
+// 身份牌只印日期不印时分：一张牌上的「加入于 / 有效期至」是日历日，带上
+// 19:23 只会把三列挤爆。时区仍按全站惯例取 UTC+8，日期不需要再打标签。
+// The plate prints calendar days, not clock times: "member since / valid thru"
+// are dates, and a 19:23 suffix only overflows the three columns. The zone is
+// still the site-wide UTC+8; a bare date needs no label.
+function fmtDay(iso: string | null | undefined): string {
+  if (!iso) return "—"
+  const hasTz = /[zZ]|[+-]d{2}:?d{2}$/.test(iso)
+  const d = new Date(hasTz ? iso : iso + "Z")
+  return d.toLocaleDateString("en-GB", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" })
+}
+
+// 密码强度：纯视觉反馈，不是校验——校验仍是 handlePassword 的「至少 8 位」和后端。
+// 不足 8 位一律记「弱」，之后按长度 ≥12、字母+数字、含符号各加一档。
+// Password strength: visual feedback only, not validation — that stays with
+// handlePassword's 8-char floor and the backend. Under 8 is always "weak";
+// then ≥12 chars, letters+digits, and a symbol each add a step.
+function pwStrength(pw: string): 0 | 1 | 2 | 3 | 4 {
+  if (!pw) return 0
+  if (pw.length < 8) return 1
+  let s = 1
+  if (pw.length >= 12) s++
+  if (/[A-Za-z]/.test(pw) && /\d/.test(pw)) s++
+  if (/[^A-Za-z0-9]/.test(pw)) s++
+  return Math.min(4, s) as 1 | 2 | 3 | 4
+}
+
+// 24 格小时条：每格取该小时的中点判断是否落在时段内；起点 ≥ 终点按跨零点处理，
+// 与后端的隔夜语义一致（见 notifWindowHint 文案）。
+// The 24-cell hour strip: each cell tests its hour's midpoint against the
+// window; start ≥ end wraps overnight, matching the backend's semantics.
+function windowHours(start: string, end: string): boolean[] {
+  const toMin = (s: string) => {
+    const [h, m] = s.split(":").map(Number)
+    return (h || 0) * 60 + (m || 0)
+  }
+  const s = toMin(start)
+  const e = toMin(end)
+  return Array.from({ length: 24 }, (_, h) => {
+    const mid = h * 60 + 30
+    return s < e ? mid >= s && mid < e : mid >= s || mid < e
+  })
+}
+
+// 身份牌的指针倾斜：与 badges/MedalTilt 同一套 ref + rAF 手法（不进 React
+// 渲染循环），只是角度从勋章的 ±22° 收到卡片的 ±5° / ±7°——一张 400px 的牌
+// 转 22° 会像在甩它。prefers-reduced-motion 下完全不动，与 CSS 那侧双保险。
+// Pointer tilt for the plate: the same ref + rAF technique as badges/MedalTilt
+// (outside React's render loop), with the angle pulled from the medal's ±22°
+// down to ±5° / ±7° — a 400px plate at 22° looks flung. prefers-reduced-motion
+// disables it entirely, doubling up with the CSS side.
+function PlateTilt({ children }: { children: ReactNode }) {
+  const elRef = useRef<HTMLDivElement | null>(null)
+  const rafRef = useRef<number | null>(null)
+  const pendingRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null)
+  const reducedRef = useRef(false)
+
+  useEffect(() => {
+    reducedRef.current =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
+    }
+  }, [])
+
+  function apply() {
+    rafRef.current = null
+    const el = elRef.current
+    const p = pendingRef.current
+    if (!el || !p) return
+    pendingRef.current = null
+    const dx = p.x / p.w - 0.5
+    const dy = p.y / p.h - 0.5
+    el.style.transform = `rotateX(${(-dy * 5).toFixed(2)}deg) rotateY(${(dx * 7).toFixed(2)}deg)`
+    el.style.setProperty("--lx", `${((p.x / p.w) * 100).toFixed(1)}%`)
+    el.style.setProperty("--ly", `${((p.y / p.h) * 100).toFixed(1)}%`)
+  }
+
+  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (reducedRef.current) return
+    const el = elRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    pendingRef.current = { x: e.clientX - r.left, y: e.clientY - r.top, w: r.width, h: r.height }
+    el.classList.add("no-transition")
+    if (rafRef.current == null) rafRef.current = requestAnimationFrame(apply)
+  }
+
+  function onPointerLeave() {
+    const el = elRef.current
+    if (!el) return
+    el.classList.remove("no-transition")
+    el.style.transform = ""
+  }
+
+  return (
+    <div className="acct-plate-wrap">
+      <div ref={elRef} className="acct-plate" onPointerMove={onPointerMove} onPointerLeave={onPointerLeave}>
+        {children}
+        <div className="acct-plate-light" aria-hidden />
+      </div>
     </div>
   )
 }

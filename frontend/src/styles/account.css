@@ -1,0 +1,629 @@
+/* ═════════════ 账户页：身份牌 + 分区账本 / account page: identity plate + ledger ═════════════
+   2026-09-07 重做。上一版是三张同款卡片摞在左栏、一张长卡占右栏——每个区块都
+   被同一个「卡片」包着，层级全靠标题字号硬撑。这一版换成两个部件：
+
+   · 身份牌（.acct-plate）：页面上唯一一个「物件」。信用卡比例、实色面、
+     压印斜纹，中间一条光谱线（全站签名图形），指针划过会轻微倾斜、表面走一道
+     白色低透明度的镜面反光——反光是**中性白**，不是紫色光晕，符合「颜料不是光」。
+   · 账本（.acct-ledger）：其余全部设置都不再装卡片，改成发丝线分区的两栏
+     定义表——左栏是分区名与一句说明，右栏是控件。分层靠留白与 1px 线，
+     不靠面；这正是 tokens.css 里「面只用在真正需要抬升的地方」的推论。
+
+   Redesigned 2026-09-07. The previous version stacked three identical cards in
+   the left column and one tall card in the right — every block wrapped in the
+   same "card", hierarchy carried by heading size alone. Two parts replace it:
+
+   · The plate (.acct-plate): the one physical *object* on the page. Credit-card
+     ratio, opaque surface, embossed hatching, the spectral rule (the site's
+     signature graphic) across the middle; it tilts slightly under the pointer
+     and a low-alpha *white* specular slides over it — neutral, not a violet
+     halo, so it stays inside "pigment, not glow".
+   · The ledger (.acct-ledger): every remaining setting drops its card and
+     becomes a hairline-divided two-column definition table — section name and
+     one line of copy on the left, controls on the right. Layering by
+     whitespace and 1px rules, not by surfaces. */
+
+/* ── 顶部：姓名 + 身份牌 / hero: name + plate ── */
+.acct-hero {
+  display: grid;
+  gap: 28px;
+  align-items: end;
+  animation: acct-in 0.5s var(--ease-out) both;
+}
+@media (min-width: 1024px) {
+  .acct-hero {
+    grid-template-columns: minmax(0, 1fr) 400px;
+    gap: 56px;
+  }
+}
+/* 姓名：走 Archivo 宽度轴的展示级标题。字号封顶 52px——层级靠字重与宽度，
+   不靠把字堆到屏幕那么大。overflow-wrap 兜底超长邮箱前缀。
+   The name: a display-scale headline on Archivo's width axis, capped at 52px
+   — hierarchy from weight and width, not from filling the viewport.
+   overflow-wrap guards an overlong email local-part. */
+.acct-name {
+  font-size: clamp(32px, 4.2vw, 52px);
+  color: #fff;
+  overflow-wrap: anywhere;
+}
+.acct-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.acct-meta-email {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.acct-meta-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+/* ── 身份牌 / plate ── */
+.acct-plate-wrap {
+  perspective: 900px;
+  animation: acct-in 0.6s var(--ease-out) 0.08s both;
+}
+@media (min-width: 1024px) {
+  .acct-plate-wrap {
+    justify-self: end;
+    width: 100%;
+  }
+}
+.acct-plate {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 400px;
+  aspect-ratio: 1.586;
+  padding: 20px 22px 18px;
+  border-radius: var(--r-lg);
+  background: #141417;
+  /* 一圈 1px 内描边 + 顶部 1px 高光是「物件的倒角」，不是卡片外轮廓（全站卡片
+     已去掉外轮廓）；投影只有中性黑，无彩色扩散。
+     The 1px inset stroke plus the 1px top highlight are the object's bevel,
+     not a card outline (card outlines are gone site-wide); the drop shadow is
+     neutral black with no coloured spread. */
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    0 28px 60px -28px rgba(0, 0, 0, 0.9);
+  overflow: hidden;
+  transform-style: preserve-3d;
+  transition: transform 0.55s var(--ease-out);
+  will-change: transform;
+  user-select: none;
+}
+/* 压印斜纹：2.8% 白，7px 节距。远看是哑光质地，近看才是线。
+   Embossed hatching: 2.8% white on a 7px pitch — matte texture from a distance,
+   lines only up close. */
+.acct-plate::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.028) 0 1px,
+    transparent 1px 7px
+  );
+}
+/* 右上角一点环境光，让面不是一整块平涂。中性白，极低透明度。
+   A touch of ambient light top-right so the surface isn't a flat fill.
+   Neutral white, very low alpha. */
+.acct-plate::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(120% 90% at 100% 0%, rgba(255, 255, 255, 0.05), transparent 55%);
+}
+.acct-plate > * {
+  position: relative;
+  z-index: 1;
+}
+.acct-plate.no-transition {
+  transition: none;
+}
+/* 指针镜面反光：随 --lx/--ly 走，白色 10%。
+   Pointer specular: follows --lx/--ly, white at 10%. */
+.acct-plate-light {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s var(--ease-out);
+  background: radial-gradient(
+    circle at var(--lx, 30%) var(--ly, 25%),
+    rgba(255, 255, 255, 0.10),
+    rgba(255, 255, 255, 0.03) 30%,
+    transparent 60%
+  );
+}
+.acct-plate:hover .acct-plate-light {
+  opacity: 1;
+}
+.acct-plate-top,
+.acct-plate-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.acct-plate-bottom {
+  align-items: flex-end;
+}
+.acct-plate-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.acct-plate-brand img {
+  width: 26px;
+  height: 26px;
+}
+/* 会员等级章：PRO 实色紫，白字；FREE 中性面。药丸形状 = 控件语汇。
+   Plan mark: PRO is flat violet ink with white text; FREE a neutral plane. */
+.acct-plan {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--r-xs);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.acct-plan.pro {
+  background: var(--purple);
+  color: #fff;
+}
+.acct-plan.free {
+  background: var(--nest);
+  color: var(--text-2);
+  box-shadow: inset 0 0 0 1px var(--line-hi);
+}
+/* 光谱线：全站签名图形，1px 发丝在中段裂成三条微偏移色带。
+   The spectral rule: the site's signature graphic. */
+.acct-plate-rule {
+  height: 1px;
+  margin: 0 -22px;
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    rgba(139, 108, 255, 0.9) 18%,
+    rgba(237, 237, 240, 0.9) 50%,
+    rgba(90, 34, 238, 0.9) 82%,
+    transparent
+  );
+}
+.acct-plate-cols {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 18px;
+  flex: 1;
+  min-width: 0;
+}
+.acct-plate-k {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.acct-plate-v {
+  margin-top: 4px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.acct-plate-lv {
+  font-weight: 500;
+  color: var(--purple-hi);
+}
+/* 等级称号可能比一格宽（英文 "Legendary trader" 之类），允许换行而不是溢出。
+   The level title may outgrow its cell (e.g. English "Legendary trader"); let it
+   wrap rather than overflow. */
+.acct-plate-v-wrap {
+  white-space: normal;
+  line-height: 1.3;
+}
+/* 勋章：绝对定位在光谱线右端、垂直居中于线上。牌是 flex 纵向布局，
+   光谱线正好在中线附近，所以 top:50% 落在线的位置。
+   The badge sits at the right end of the spectral rule, centred on it. */
+.acct-plate-badge {
+  position: absolute;
+  right: 22px;
+  top: 50%;
+  z-index: 3;
+  transform: translateY(-50%);
+  line-height: 0;
+}
+
+/* ── 账本 / ledger ── */
+.acct-ledger {
+  margin-top: 44px;
+}
+.acct-row {
+  display: grid;
+  gap: 20px;
+  padding: 32px 0;
+  border-top: 1px solid var(--line);
+  animation: acct-in 0.5s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 80ms + 120ms);
+}
+@media (min-width: 1024px) {
+  .acct-row {
+    grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
+    gap: 56px;
+    padding: 40px 0;
+  }
+}
+.acct-row-h {
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+}
+.acct-row-p {
+  margin-top: 6px;
+  max-width: 36ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+.acct-row-body {
+  min-width: 0;
+  max-width: 640px;
+}
+
+/* 字段：标签在上、输入在下、说明在下 / field: label above, input, helper below */
+.acct-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.acct-field + .acct-field {
+  margin-top: 16px;
+}
+.acct-field-l {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-2);
+}
+.acct-field-help {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.acct-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  margin-top: 20px;
+}
+.acct-msg {
+  font-size: 13px;
+}
+.acct-msg.ok {
+  color: var(--up);
+}
+.acct-msg.err {
+  color: var(--down);
+}
+
+/* 开关行 / switch rows */
+.acct-settings {
+  margin-top: 8px;
+}
+.acct-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+.acct-setting:first-child {
+  border-top: 0;
+}
+.acct-setting-t {
+  font-size: 13px;
+  color: var(--text);
+}
+.acct-setting-d {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+.acct-setting-l {
+  cursor: pointer;
+  min-width: 0;
+}
+
+/* 通知主开关：整页最重的一个开关，标题与状态词并排。
+   Master notification switch: the heaviest control on the page. */
+.acct-master {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.acct-master-t {
+  font-size: 15px;
+  font-weight: 500;
+  color: #fff;
+}
+.acct-master-s {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.acct-master-s i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.acct-master-s.on {
+  color: var(--up);
+}
+.acct-master-s.on i {
+  background: var(--up);
+  animation: breathe 2.4s ease-in-out infinite;
+}
+.acct-hint {
+  margin-top: 14px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+.acct-hint.warn {
+  color: #e0a83c;
+}
+
+/* 分组 / groups inside the notification body */
+.acct-group {
+  padding-top: 20px;
+}
+.acct-group + .acct-group {
+  margin-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.acct-group-h {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.acct-group-h .sec-h-title {
+  letter-spacing: 0.14em;
+}
+.acct-group-n {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* 药丸选择器：取代复选框列表。选中 = 实色紫；「全部」选中后其余项变成
+   紫描边的「已包含」态并不可点。
+   Pill selectors replacing the checkbox list. Selected = flat violet; once
+   "All" is on, the specific items switch to an outlined "included" state. */
+.acct-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.acct-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: var(--nest);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.acct-chip:hover:not(:disabled) {
+  background: var(--nest-hi);
+  color: var(--text);
+}
+.acct-chip:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.acct-chip[aria-pressed="true"] {
+  background: var(--purple);
+  color: #fff;
+  box-shadow: none;
+}
+.acct-chip[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--purple-vivid);
+  color: #fff;
+}
+.acct-chip[data-included="true"] {
+  background: transparent;
+  color: var(--purple-hi);
+  box-shadow: inset 0 0 0 1px rgba(146, 132, 255, 0.38);
+  cursor: default;
+}
+.acct-chip-all::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.7;
+}
+.acct-chip-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--line-hi);
+}
+
+/* 密码强度：四段，是**数据**，所以借用涨/中/跌三档数据色。
+   Password strength: four segments — data, hence the up/mid/down data tones. */
+.acct-strength {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+.acct-strength i {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--nest-hi);
+  transition: background-color var(--dur-base) var(--ease-out);
+}
+.acct-strength[data-level="1"] i:nth-child(-n + 1) {
+  background: var(--down);
+}
+.acct-strength[data-level="2"] i:nth-child(-n + 2) {
+  background: var(--mid);
+}
+.acct-strength[data-level="3"] i:nth-child(-n + 3) {
+  background: var(--up);
+}
+.acct-strength[data-level="4"] i {
+  background: var(--up);
+}
+.acct-strength-l {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.acct-strength-l b {
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+/* 推送时段：两个时间输入 + 一条 24 格的小时条。跨零点时两端都亮。
+   Push window: two time inputs + a 24-cell hour strip; overnight ranges light
+   both ends. */
+.acct-window {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin-top: 14px;
+}
+.acct-window .input {
+  width: 112px;
+  height: 36px;
+  padding: 0 12px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.acct-window-to {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.acct-hours {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  gap: 2px;
+  margin-top: 14px;
+}
+.acct-hours i {
+  height: 8px;
+  border-radius: 2px;
+  background: var(--nest-hi);
+  transition: background-color var(--dur-base) var(--ease-out);
+}
+.acct-hours i.on {
+  background: var(--purple);
+}
+.acct-hours-ticks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+/* 空态 / empty state */
+.acct-empty {
+  padding: 28px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+/* 骨架：与真实布局同形 / skeleton shaped like the real layout */
+.acct-skel-plate {
+  width: 100%;
+  max-width: 400px;
+  aspect-ratio: 1.586;
+  border-radius: var(--r-lg);
+}
+
+@keyframes acct-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .acct-hero,
+  .acct-plate-wrap,
+  .acct-row {
+    animation: none;
+  }
+  .acct-plate {
+    transform: none !important;
+    transition: none;
+  }
+  .acct-plate-light {
+    display: none;
+  }
+  .acct-master-s.on i {
+    animation: none;
+  }
+}
