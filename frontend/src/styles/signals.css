@@ -1,0 +1,377 @@
+/* ═════════════ 信号面板：看板页头 + 信号牌面 ═════════════
+   Signals board: board head + signal cards
+
+   2026-09-08 重做。改版前的牌面是「三格价格瓦片 + 倒计时条 + 页脚」四行叠着，
+   三个价位一样大、一样的灰底小方块，读者要逐格找入场价在哪；倒计时条自己占
+   一整行。这版把同样的信息重新排成三段：
+
+   ① 牌头：品种用 Archivo 展示字宽（wdth 112）放到 26px，是牌上最重的字；策略名
+      与发出时间作为署名跟在下面；盈亏比等宽 20px 靠右。
+   ② 价格阶梯：止损｜入场｜止盈三个价位一排，入场 26px 居中最大，止损/止盈
+      15px 各靠一边；下面一条 6px 的「风险｜回报」尺，红段长度 : 绿段长度 =
+      风险距离 : 回报距离，白色刻度线落在分割点。盈亏比从「一个数」变成
+      「一眼能量出来的两段长度」——这是这版唯一新增的图形，它画的是数据。
+   ③ 页脚：22px 倒计时环 + mm:ss，右边下单药丸。
+
+   材质与色彩不越过 tokens.css 的原则：面是 --surface 实色，无模糊无光晕；紫只
+   出现在页头那一个计数数字、倒计时环的进度弧与「新到」牌的 1px 边；涨跌色只
+   压在数据（价位、尺段、告急倒计时）上。「高级感」来自尺度层级与留白，不来自
+   发光。
+
+   Redesigned 2026-09-08. The previous card stacked four rows: three equal
+   price tiles, a countdown bar, a footer. This one arranges the same data in
+   three bands: a head (symbol at display width 26px, byline under it, R:R
+   right), a price ladder (SL | entry | TP with entry at 26px, over a 6px
+   risk|reward rule whose red:green length ratio equals the risk:reward distance
+   with a white notch at the split), and a footer (22px countdown ring + digits,
+   pill CTA). Materials stay within tokens.css: opaque surface, no blur, no
+   halo; violet appears only as the head count, the ring's progress arc and the
+   1px edge of a newly arrived card; up/down tones sit only on data. */
+
+/* ── 页头 / board head ── */
+.sig-board-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 24px;
+  margin-bottom: 24px;
+}
+.sig-board-title {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.sig-board-title h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  font-size: 26px;
+  line-height: 1.1;
+  font-weight: 700;
+  color: #fff;
+}
+.sig-board-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+/* 计数：页头里唯一的彩度。--purple-hi 对 --bg 约 5.4:1，过 AA。
+   The count is the head's only chroma; --purple-hi on --bg is ~5.4:1. */
+.sig-board-count b {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--purple-hi);
+  letter-spacing: -0.02em;
+}
+.sig-board-count span {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+.sig-board-title p {
+  font-size: 13px;
+  color: var(--text-3);
+}
+/* 筛选器进了页头，原来的下外边距交给页头统一管。
+   The filter bar now lives in the head; the head owns the bottom margin. */
+.sig-board-head .sig-filters {
+  margin-bottom: 0;
+  max-width: 100%;
+}
+
+/* ── 牌面 / card ── */
+.sig-card {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  /* 内边距与卡片圆角同取 24：同心圆角成立，牌面四边留白一致。
+     Padding equals the card radius (24) so the corners read concentric. */
+  padding: 24px;
+}
+/* 进场：逐张 45ms 错开，最多错到第 9 张（≈360ms），之后同时出现。
+   整页已经有 .content-fade，这里的错开让牌面按顺序落桌，读起来像一条正在
+   刷新的流水，而不是一块整体贴上来的图。
+   Entrance: staggered 45ms per card, capped at the 9th (~360ms). The page
+   already fades in as a whole; the stagger lands cards in sequence, reading as
+   a feed that is arriving rather than a block pasted on. */
+@keyframes sig-card-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.sig-grid > .sig-card {
+  animation: sig-card-in var(--dur-slow) var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+/* 新到的牌：1px 边转品牌紫，6 秒后由 .glass 自带的 border-color 过渡褪回。
+   紫色在牌面上只被允许以一条边出现（见 components-cards.css 的 .glass-neon）。
+   A newly arrived card: the 1px edge turns violet and fades back after 6s via
+   .glass's own border-color transition. Violet may appear on a card only as an
+   edge (see .glass-neon in components-cards.css). */
+.sig-card.is-new {
+  border-color: var(--purple-hi);
+}
+
+/* 牌头 / head */
+.sig-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+/* 身份芯片放大到 36px：它现在与 26px 的品种名并排，26px 的圆在旁边显得像个圆点。
+   字号全部落在全站九档阶梯上（15/17/20/26），不另起一档。
+   Identity chip up to 36px: beside a 26px symbol the 26px circle read as a dot.
+   Every size on the card sits on the app's nine-step type scale (15/17/20/26). */
+.sig-card .sym-ava {
+  width: 36px;
+  height: 36px;
+  font-size: 11px;
+}
+.sig-card-id {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sig-card-sym {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.sig-card-sym b {
+  font-size: 26px;
+  line-height: 1;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+}
+.sig-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.sig-card-meta .strat {
+  color: var(--text-2);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sig-card-meta .at {
+  flex: none;
+}
+.sig-card-rr {
+  flex: none;
+  text-align: right;
+}
+.sig-card-rr b {
+  display: block;
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 700;
+}
+.sig-card-rr span {
+  display: block;
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+
+/* 价格阶梯 / price ladder */
+.sig-ladder {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sig-ladder-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
+  gap: 12px;
+}
+.sig-ladder-row .lv {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.sig-ladder-row .lv.en { text-align: center; }
+.sig-ladder-row .lv.tp { text-align: right; }
+/* 说明性小字：字距 0.08em、500 字重，与 .exec-tile .cap 同一套（汉字用字距
+   不用大写，理由见那里）。
+   Captions: 0.08em tracking at 500, same recipe as .exec-tile .cap. */
+.sig-ladder-row .cap {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+.sig-ladder-row b {
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sig-ladder-row .sl b { color: var(--down); }
+.sig-ladder-row .tp b { color: var(--up); }
+.sig-ladder-row .en b {
+  font-size: 26px;
+  color: #fff;
+}
+/* 风险｜回报尺。--risk 是分割点（由组件按风险/(风险+回报) 算出，夹在 8–92%）。
+   两段各让出 3px，刻度线 2px 落在中间的空隙上；轨道底色 --nest 在空隙处露出。
+   The risk|reward rule. --risk is the split (risk/(risk+reward), clamped 8–92%
+   by the component). Each segment steps back 3px so the 2px notch sits in a
+   gap where the --nest track shows through. */
+.sig-ladder-bar {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--nest);
+}
+.sig-ladder-bar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: block;
+}
+.sig-ladder-bar .risk {
+  left: 0;
+  width: calc(var(--risk, 50%) - 3px);
+  border-radius: 999px 0 0 999px;
+  background: var(--down);
+}
+.sig-ladder-bar .reward {
+  left: calc(var(--risk, 50%) + 3px);
+  right: 0;
+  border-radius: 0 999px 999px 0;
+  background: var(--up);
+}
+.sig-ladder-bar .mark {
+  left: calc(var(--risk, 50%) - 1px);
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  border-radius: 1px;
+  background: #fff;
+}
+/* 缺价位（算不出比例）时只留轨道，不画假的两段。
+   With a price missing there is no ratio; show the bare track, not a fake split. */
+.sig-ladder-bar.none i {
+  display: none;
+}
+
+/* 页脚 / footer */
+.sig-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: auto;
+}
+.sig-ttl {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.sig-ttl svg {
+  flex: none;
+}
+.sig-ttl .ring-track {
+  stroke: var(--line-hi);
+}
+/* 弧长每秒变一次，1s 线性过渡把它连成连续的转动。
+   The arc updates once a second; a 1s linear transition turns steps into a sweep. */
+.sig-ttl .ring-fill {
+  stroke: var(--purple-hi);
+  transition: stroke-dashoffset 1s linear, stroke var(--dur-base) var(--ease-out);
+}
+.sig-ttl b {
+  font-size: 17px;
+  line-height: 1;
+  font-weight: 700;
+  color: #fff;
+  transition: color var(--dur-base) var(--ease-out);
+}
+.sig-ttl span {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+/* 剩余不足 2 分钟：环与数字一起转跌色。 / Under two minutes: ring and digits go down-tone. */
+.sig-ttl.urgent b { color: var(--down); }
+.sig-ttl.urgent .ring-fill { stroke: var(--down); }
+
+.sig-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.sig-result b {
+  font-size: 13px;
+  font-weight: 700;
+}
+.sig-result span {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.sig-cta {
+  height: 40px;
+  padding: 0 24px;
+  font-size: 14px;
+  font-weight: 700;
+  flex: none;
+}
+.sig-card.is-expired .sig-cta:disabled {
+  opacity: 1;
+  color: var(--text-3);
+}
+
+/* ── 手机 / mobile ── */
+@media (max-width: 639px) {
+  .sig-board-head {
+    margin-bottom: 20px;
+  }
+  .sig-board-title h2 {
+    font-size: 26px;
+  }
+  .sig-card {
+    padding: 16px;
+    gap: 16px;
+  }
+  .sig-card-sym b {
+    font-size: 20px;
+  }
+  .sig-card-rr b {
+    font-size: 17px;
+  }
+  .sig-ladder-row .en b {
+    font-size: 20px;
+  }
+  .sig-ladder-row b {
+    font-size: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sig-grid > .sig-card {
+    animation: none;
+  }
+  .sig-ttl .ring-fill {
+    transition: none;
+  }
+}

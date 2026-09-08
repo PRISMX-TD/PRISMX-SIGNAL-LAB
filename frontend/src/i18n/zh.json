@@ -304,6 +304,7 @@
   "signals": {
     "title": "实时交易信号",
     "subtitle": "棱镜量化因子驱动",
+    "countUnit": "条",
     "tabs": {
       "realtime": "实时信号",
       "platformStrategies": "策略介绍",

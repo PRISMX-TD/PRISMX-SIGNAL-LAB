@@ -642,14 +642,5 @@
     .view-all-btn {
       width: 100%;
     }
-
-    /* ── 信号面板标题行 / signal page head ── */
-    .sig-page-head {
-      flex-wrap: wrap;
-    }
-    .sig-page-head p {
-      width: 100%;
-      margin-left: 0;
-    }
   }
 }

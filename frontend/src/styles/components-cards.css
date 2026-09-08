@@ -1178,23 +1178,10 @@
     }
   }
 
-  /* ── 信号面板视图 / signals panel view ── */
-  .sig-page-head {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 14px;
-  }
-  .sig-page-head h2 {
-    font-size: 20px;
-    font-weight: 700;
-    color: #fff;
-  }
-  .sig-page-head p {
-    font-size: 13px;
-    color: var(--text-3);
-    margin-left: 4px;
-  }
+  /* ── 信号面板视图 / signals panel view ──
+     页头与牌面规则在 signals.css（2026-09-08 重做）；这里只剩筛选栏与网格。
+     Head and card rules live in signals.css (redesigned 2026-09-08); only the
+     filter bar and the grid remain here. */
   /* 单排筛选栏：可横向滚动，避免窄屏换行错位 / single-row filter bar, horizontally scrollable */
   .sig-filters {
     display: flex;
@@ -1321,10 +1308,16 @@
   .filter-cycle.active svg {
     color: rgba(255, 255, 255, 0.85);
   }
+  /* 列宽下限 320：牌面里入场价 24px 等宽 + 两侧 15px 价位要并排放得下五位小数
+     （1.35386 一类）。间距 20：卡片外轮廓已取消，边界靠面与负空间，16 在三列时
+     两张牌几乎贴上。
+     Column floor 320: the ladder row must fit a 24px entry plus two 15px prices
+     at five decimals. Gap 20: with the card outline gone, boundaries rely on
+     surface and negative space; 16 nearly fused adjacent cards at three columns. */
   .sig-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 20px;
   }
   /* 防止卡片内不可压缩内容撑破网格列 / stop rigid card content from blowing out the grid column */
   .sig-grid > * {

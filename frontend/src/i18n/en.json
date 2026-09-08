@@ -304,6 +304,7 @@
   "signals": {
     "title": "Live Trading Signals",
     "subtitle": "Powered by Signal Lab quant factors",
+    "countUnit": "signals",
     "tabs": {
       "realtime": "Live Signals",
       "platformStrategies": "Strategy Guide",

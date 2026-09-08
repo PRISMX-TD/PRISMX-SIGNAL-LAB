@@ -1,14 +1,14 @@
-// 信号面板独立视图：筛选器 + 信号网格
-// Signal panel view: filters + signal cards grid
-import { type FC, memo, useState, useEffect, useMemo } from 'react'
+// 信号面板独立视图：看板页头 + 筛选器 + 信号牌面网格
+// Signal panel view: board head + filters + signal card grid
+import { type CSSProperties, type FC, memo, useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../../store/prefs'
 import Select from '../Select'
 import type { Signal, UserPlan } from '../../api/types'
-import { calcRiskReward, calcCountdown, displaySymbol, fmtTime, parseTime } from '../../api/utils'
-import { SIGNAL_LIFESPAN_MS, effectiveStatus, resultLabel, resultTone, rrTone } from './SignalView'
-import { useClock } from './hooks'
+import { calcRiskReward, calcCountdown, displaySymbol, parseTime } from '../../api/utils'
+import { EXPIRING_THRESHOLD_MS, SIGNAL_LIFESPAN_MS, effectiveStatus, resultLabel, resultTone, rrTone } from './SignalView'
+import { useClock, useNewSignalIds } from './hooks'
 import { symbolMeta } from '../../utils/symbolMeta'
 
 interface Props {
@@ -23,24 +23,77 @@ interface Props {
   activeSymbols: string[]
 }
 
-// 倒计时叶子：订阅共享时钟自行每秒刷新，不牵动整张卡片/网格重渲染。
-// Countdown leaf: subscribes to the shared clock and ticks on its own, without
-// dragging the whole card/grid into a per-second re-render.
+// ── 倒计时环 / countdown ring ──
+// 订阅共享时钟自行每秒刷新，不牵动整张卡片/网格重渲染。
+// 原来是一条 5px 的横向进度条，占卡片整整一行；换成 22px 的环嵌在页脚里，
+// 同样的信息（还剩多少 / 走了多少）只占一个图标的位置，把省下的一行还给
+// 价格阶梯。剩余不足 2 分钟（EXPIRING）时环与数字一起转成跌色——这是真实
+// 的状态变化，不是装饰。
+// Subscribes to the shared clock and ticks on its own, without dragging the
+// whole card/grid into a per-second re-render. The old 5px horizontal bar cost
+// a full card row; a 22px ring in the footer carries the same reading (how much
+// is left / used) in the footprint of an icon, and the row goes to the price
+// ladder. Under two minutes (EXPIRING) both ring and digits turn the down tone —
+// a real state change, not decoration.
+const RING_R = 9
+const RING_C = 2 * Math.PI * RING_R
 const Countdown: FC<{ expireAt: string | null; label: string }> = memo(({ expireAt, label }) => {
   const now = useClock()
   const cd = calcCountdown(expireAt, SIGNAL_LIFESPAN_MS, now)
+  const urgent = cd != null && !cd.expired && cd.remainMs <= EXPIRING_THRESHOLD_MS
+  const frac = cd?.fraction ?? 0
   return (
-    <>
-      <div className="flex justify-between text-[11px] mb-1">
-        <span className="text-neutral-500">{label}</span>
-        <span className="num text-prism-300">{cd?.text ?? '-'}</span>
-      </div>
-      <div className="sig-ttl-bar">
-        <i style={{ width: `${Math.round((cd?.fraction ?? 0) * 100)}%` }} />
-      </div>
-    </>
+    <div className={`sig-ttl${urgent ? ' urgent' : ''}`} aria-live="off">
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+        <circle className="ring-track" cx="11" cy="11" r={RING_R} fill="none" strokeWidth="2" />
+        <circle
+          className="ring-fill"
+          cx="11" cy="11" r={RING_R} fill="none" strokeWidth="2" strokeLinecap="round"
+          strokeDasharray={RING_C}
+          strokeDashoffset={RING_C * (1 - frac)}
+          transform="rotate(-90 11 11)"
+        />
+      </svg>
+      <b className="num">{cd?.text ?? '--:--'}</b>
+      <span>{label}</span>
+    </div>
   )
 })
+
+// ── 价格格式 / price formatting ──
+// 三个价位按同一位数显示。后端给的是浮点数，1.35100 会以 1.351 到达，与旁边的
+// 1.35386 并排就是「一个五位一个三位」——同一张牌上的三个价位必须对齐到同一
+// 精度，否则读者会去找那两位丢到哪里了。位数取三者中最长的一个（上限 5），
+// 数值本身不变。
+// All three prices on a card share one precision. The backend sends floats, so
+// 1.35100 arrives as 1.351 and sits next to 1.35386 as "five digits, three
+// digits". Take the longest fractional length among the three (capped at 5);
+// the values are untouched.
+function decimalsOf(v: number | null): number {
+  if (v == null || !Number.isFinite(v)) return 0
+  const frac = String(v).split('.')[1]
+  return frac ? Math.min(frac.length, 5) : 0
+}
+function fmtPx(v: number | null, decimals: number): string {
+  if (v == null || !Number.isFinite(v)) return '-'
+  return v.toFixed(decimals)
+}
+
+// 牌上的发出时间只到时分秒。fmtTime 的完整写法「08/09, 14:33:48 UTC+8」有 21 个
+// 字符，和策略名并排在一行里放不下，实测策略名被截成「棱镜突…」——而策略名才
+// 是读者认信号的依据。这块牌只活 10 分钟，日期与时区后缀在这里是冗余信息；
+// 订单回执页仍用完整写法。时区仍按全站约定取上海时间，只是不再写出来。
+// The card's issue time is clock-only. fmtTime's full form ("08/09, 14:33:48
+// UTC+8") is 21 characters and does not share a line with the strategy name,
+// which got clipped to "棱镜突…" — and the strategy is what the reader
+// identifies a signal by. A card lives ten minutes; date and zone suffix are
+// redundant here (the receipts page keeps the full form). Still Asia/Shanghai
+// per the app-wide convention, just not spelled out.
+function fmtClock(iso: string | null | undefined): string {
+  const d = parseTime(iso)
+  if (!d || Number.isNaN(d.getTime())) return '-'
+  return d.toLocaleTimeString('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
 
 const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) => {
   const { t } = useTranslation()
@@ -68,6 +121,15 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
   const sortLabel = sortF === 'latest' ? t('signals.sort.latest') : t('signals.sort.expiry')
 
   const isFree = userPlan === 'FREE'
+
+  // 刚到达的信号短暂标记：hooks 里这个钩子早就写好了，网格一直没接。新牌上
+  // 桌时 1px 边转成品牌紫、并带一次进场位移，6 秒后自行褪回——盯盘的人余光
+  // 就能知道「哪张是新的」，不必逐张对时间戳。
+  // Freshly arrived signals get a brief mark: the hook existed in hooks.ts but
+  // the grid never used it. A new card lands with a violet 1px edge and one
+  // entrance move, fading back after 6s — peripheral vision tells the reader
+  // which card is new without comparing timestamps.
+  const newIds = useNewSignalIds(signals)
 
   // 这批信号里**实际出现过**的品种，而不是一份写死的清单：写死的话，某个品种
   // 停发信号之后它还挂在下拉里，选中只会得到一张空网格。
@@ -184,59 +246,75 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
 
   return (
     <div>
-      {/* Page head */}
-      <div className="sig-page-head">
-        <h2>{t('signals.title')}</h2>
-        <span className="count-badge">{filtered.length}</span>
-        <p>{t('signals.subtitle')}</p>
+      {/* 看板页头：左边标题 + 计数 + 副题，右边筛选器。原来是「标题一行、筛选
+          一行」两层叠着；筛选器与标题同属页头这一层级，并排之后网格上方少一
+          层，牌面直接顶到页头下面。窄屏筛选器自动折到第二行（仍可横向滚动）。
+          Board head: title + count + subtitle on the left, filters on the right.
+          They used to stack as two rows; the filters belong to the same level as
+          the title, and sitting beside it removes one layer above the grid. On
+          narrow screens the filters wrap to a second line (still scrollable). */}
+      <div className="sig-board-head">
+        <div className="sig-board-title">
+          <h2 className="font-display">
+            {t('signals.title')}
+            {/* 计数从实色紫药丸改成一个紫色等宽数字：页头里唯一的彩度就是它。
+                Count moves from a solid violet pill to one violet tabular numeral,
+                the only chroma in the head. */}
+            <span className="sig-board-count">
+              <b className="num">{filtered.length}</b>
+              <span>{t('signals.countUnit')}</span>
+            </span>
+          </h2>
+          <p>{t('signals.subtitle')}</p>
+        </div>
+
+        {/* 筛选器。品种是下拉，桌面手机共用同一个控件——下拉在窄屏本来就好用，
+            不需要再单独做一套「点击循环」。排序仍是桌面药丸 / 手机循环两套：它只有
+            两个值，为两个值开一个下拉是多余的层级。
+            Filters. The symbol picker is one dropdown shared by both breakpoints — a
+            dropdown already works on narrow screens, so it needs no separate
+            tap-to-cycle variant. Sort keeps its pills/cycle split: with only two
+            values, a dropdown would be more chrome than choice. */}
+        <div className="sig-filters">
+          <div className="fgroup">
+            <span className="fk">{t('signals.filterSymbol')}</span>
+            {/* 用共享的自定义 Select：原生 <select> 的弹出列表由浏览器/系统渲染，
+                深色主题下压不住样式，实测是一片白底黑字。
+                The shared custom Select: a native popup list is rendered by the
+                browser/OS and will not take dark-theme styling — a slab of white. */}
+            <Select
+              className={`sig-symbol-select${effectiveSymbol !== 'ALL' ? ' on' : ''}`}
+              ariaLabel={t('signals.filterSymbol')}
+              value={effectiveSymbol}
+              options={symbolOptions}
+              onChange={setSymbolF}
+            />
+          </div>
+          <span className="fsep hidden sm:block" />
+          <div className="fgroup">
+            <span className="fk">{t('signals.sortBy')}</span>
+            {/* 桌面：药丸；手机：点击循环 / desktop pills, mobile tap-to-cycle */}
+            <div className="seg-pill hidden sm:flex">
+              <button className={sortF === 'latest' ? 'on' : ''} onClick={() => setSortF('latest')}>{t('signals.sort.latest')}</button>
+              <button className={sortF === 'expiry' ? 'on' : ''} onClick={() => setSortF('expiry')}>{t('signals.sort.expiry')}</button>
+            </div>
+            <button className="filter-cycle flex sm:hidden" onClick={cycleSort}>
+              <span>{sortLabel}</span>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* FREE 用户提醒：升级看实时信号 / FREE tier notice: upgrade for live signals */}
       {isFree && (
-        <div className="mb-4 rounded-xl border border-prism-400/30 bg-prism-500/10 px-4 py-3 text-sm text-neutral-300">
+        <div className="mb-5 rounded-xl border border-prism-400/30 bg-prism-500/10 px-4 py-3 text-sm text-neutral-300">
           {t('upgrade.freeBanner')}{" "}
           <Link to="/upgrade" className="font-semibold text-prism-400 underline hover:text-prism-300">
             {t('nav.upgrade')}
           </Link>
         </div>
       )}
-
-      {/* 筛选器。品种是下拉，桌面手机共用同一个控件——下拉在窄屏本来就好用，
-          不需要再单独做一套「点击循环」。排序仍是桌面药丸 / 手机循环两套：它只有
-          两个值，为两个值开一个下拉是多余的层级。
-          Filters. The symbol picker is one dropdown shared by both breakpoints — a
-          dropdown already works on narrow screens, so it needs no separate
-          tap-to-cycle variant. Sort keeps its pills/cycle split: with only two
-          values, a dropdown would be more chrome than choice. */}
-      <div className="sig-filters">
-        <div className="fgroup">
-          <span className="fk">{t('signals.filterSymbol')}</span>
-          {/* 用共享的自定义 Select：原生 <select> 的弹出列表由浏览器/系统渲染，
-              深色主题下压不住样式，实测是一片白底黑字。
-              The shared custom Select: a native popup list is rendered by the
-              browser/OS and will not take dark-theme styling — a slab of white. */}
-          <Select
-            className={`sig-symbol-select${effectiveSymbol !== 'ALL' ? ' on' : ''}`}
-            ariaLabel={t('signals.filterSymbol')}
-            value={effectiveSymbol}
-            options={symbolOptions}
-            onChange={setSymbolF}
-          />
-        </div>
-        <span className="fsep hidden sm:block" />
-        <div className="fgroup">
-          <span className="fk">{t('signals.sortBy')}</span>
-          {/* 桌面：药丸；手机：点击循环 / desktop pills, mobile tap-to-cycle */}
-          <div className="seg-pill hidden sm:flex">
-            <button className={sortF === 'latest' ? 'on' : ''} onClick={() => setSortF('latest')}>{t('signals.sort.latest')}</button>
-            <button className={sortF === 'expiry' ? 'on' : ''} onClick={() => setSortF('expiry')}>{t('signals.sort.expiry')}</button>
-          </div>
-          <button className="filter-cycle flex sm:hidden" onClick={cycleSort}>
-            <span>{sortLabel}</span>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
-          </button>
-        </div>
-      </div>
 
       {/* Signal grid */}
       <div className="sig-grid">
@@ -252,7 +330,7 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
               : t('signals.noneForSymbol', { symbol: effectiveSymbol })}
           </div>
         )}
-        {filtered.map((sig) => {
+        {filtered.map((sig, idx) => {
           const oRr = calcRiskReward(sig.symbol, sig.entry, sig.stopLoss, sig.takeProfit)
           const isBuy = sig.side === 'BUY'
           // FREE 用户是这个网格里唯一会看到 EXPIRED 信号的人(PRO 已在上面被过滤掉)；
@@ -263,89 +341,122 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
           // expired inside the modal. Disable it up front and label it honestly
           // instead of a button that looks live but always dead-ends.
           const isExpired = sig.status === 'EXPIRED'
+          const meta = symbolMeta(sig.symbol)
+          const decimals = Math.max(decimalsOf(sig.entry), decimalsOf(sig.stopLoss), decimalsOf(sig.takeProfit))
+
+          // 价格阶梯的分割点：风险距离占（风险 + 回报）的比例。1:2 的信号分在
+          // 1/3 处，红段一格、绿段两格——盈亏比不再只是一个数，而是一眼能量出来
+          // 的两段长度。夹在 8%–92% 之间，极端比例下两段与刻度线都还看得见。
+          // 止损永远在左、止盈永远在右，不随买卖方向翻转：这是一条「风险｜回报」
+          // 尺，不是价格轴。整板牌面列序一致，扫读时不用每张重新找止损在哪。
+          // The ladder's split: risk distance over (risk + reward). A 1:2 signal
+          // splits at one third — one part red, two parts green — so R:R is a
+          // length you can see, not only a number. Clamped to 8–92% so both
+          // segments and the notch stay visible at extreme ratios. SL is always
+          // left and TP always right regardless of side: this is a risk|reward
+          // rule, not a price axis, and a consistent column order lets the eye
+          // scan a board without re-locating the stop on each card.
+          const riskFrac = oRr && oRr.riskPrice + oRr.rewardPrice > 0
+            ? Math.min(0.92, Math.max(0.08, oRr.riskPrice / (oRr.riskPrice + oRr.rewardPrice)))
+            : null
+          const style = {
+            '--i': Math.min(idx, 8),
+            ...(riskFrac != null ? { '--risk': `${(riskFrac * 100).toFixed(1)}%` } : {}),
+          } as CSSProperties
 
           return (
-            <div
+            <article
               key={sig.id}
-              className="card glass p-4"
+              className={`card glass sig-card${newIds.has(sig.id) ? ' is-new' : ''}${isExpired ? ' is-expired' : ''}`}
+              style={style}
             >
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-2">
-                  {/* 身份芯片：数据早就在 symbolMeta() 里，此前只有报价表用它。
-                      Identity chip; the data was always there. */}
-                  <span
-                    className="sym-ava"
-                    style={{ background: symbolMeta(sig.symbol).color + '33', color: symbolMeta(sig.symbol).ink }}
-                  >
-                    {symbolMeta(sig.symbol).letter}
-                  </span>
-                  <b className="text-lg font-bold text-white">{displaySymbol(sig.symbol)}</b>
-                  <span className={`chip ${isBuy ? 'chip-buy' : 'chip-sell'}`}>
-                    {isBuy ? t('common.buy') : t('common.sell')}
-                  </span>
-                </div>
-                <div className="text-right">
-                  <div className={`text-xl font-bold ${rrTone(oRr?.rr ?? null)}`}>
-                    {oRr?.rr != null ? `1:${oRr.rr.toFixed(2)}` : '-'}
+              {/* 牌头：身份芯片 + 品种（展示字宽）+ 方向；右侧盈亏比。策略名与
+                  发出时间从页脚挪到品种下面——它们是这条信号的「署名」，跟品种
+                  是一组，不该和下单按钮挤在最后一行。
+                  Head: identity chip + symbol (display width) + side; R:R on the
+                  right. Strategy and timestamp move up from the footer to sit under
+                  the symbol — they are the signal's byline and belong with it, not
+                  crammed on the last row beside the CTA. */}
+              <header className="sig-card-head">
+                <span
+                  className="sym-ava"
+                  style={{ background: meta.color + '33', color: meta.ink }}
+                >
+                  {meta.letter}
+                </span>
+                <div className="sig-card-id">
+                  <div className="sig-card-sym">
+                    <b className="font-display">{displaySymbol(sig.symbol)}</b>
+                    <span className={`chip ${isBuy ? 'chip-buy' : 'chip-sell'}`}>
+                      {isBuy ? t('common.buy') : t('common.sell')}
+                    </span>
                   </div>
-                  <div className="text-[10px] uppercase text-neutral-500">{t('signals.focus.rrLabel')}</div>
+                  <div className="sig-card-meta">
+                    <span className="strat">{sig.indicator || t('signals.indicatorNone')}</span>
+                    <span className="at num">{fmtClock(sig.createdAt)}</span>
+                  </div>
+                </div>
+                <div className="sig-card-rr">
+                  <b className={`num ${rrTone(oRr?.rr ?? null)}`}>
+                    {oRr?.rr != null ? `1:${oRr.rr.toFixed(2)}` : '-'}
+                  </b>
+                  <span>{t('signals.focus.rrLabel')}</span>
+                </div>
+              </header>
+
+              {/* 价格阶梯：止损｜入场｜止盈 + 风险/回报比例条。入场价是这张牌上
+                  最大的数字——它是下单要对的那个数。
+                  Price ladder: SL | entry | TP over the risk/reward rule. Entry is the
+                  largest figure on the card — it is the number an order is checked
+                  against. */}
+              <div className="sig-ladder">
+                <div className="sig-ladder-row">
+                  <div className="lv sl">
+                    <span className="cap">{t('signals.colSl')}</span>
+                    <b className="num">{fmtPx(sig.stopLoss, decimals)}</b>
+                  </div>
+                  <div className="lv en">
+                    <span className="cap">{t('signals.colEntry')}</span>
+                    <b className="num">{fmtPx(sig.entry, decimals)}</b>
+                  </div>
+                  <div className="lv tp">
+                    <span className="cap">{t('signals.colTp')}</span>
+                    <b className="num">{fmtPx(sig.takeProfit, decimals)}</b>
+                  </div>
+                </div>
+                <div className={`sig-ladder-bar${riskFrac == null ? ' none' : ''}`} aria-hidden="true">
+                  <i className="risk" />
+                  <i className="reward" />
+                  <i className="mark" />
                 </div>
               </div>
 
-              <div className="sl-tp-grid three mt-3">
-                <div className="exec-tile" style={{ background: 'rgba(255,255,255,0.03)' }}>
-                  <div className="cap">{t('signals.colEntry')}</div>
-                  <div className="val num" style={{ color: '#fff', fontSize: '13px' }}>{sig.entry ?? '-'}</div>
-                </div>
-                <div className="exec-tile tile-sl">
-                  <div className="cap">{t('signals.colSl')}</div>
-                  <div className="val num" style={{ fontSize: '13px' }}>{sig.stopLoss ?? '-'}</div>
-                </div>
-                <div className="exec-tile tile-tp">
-                  <div className="cap">{t('signals.colTp')}</div>
-                  <div className="val num" style={{ fontSize: '13px' }}>{sig.takeProfit ?? '-'}</div>
-                </div>
-              </div>
-
-              {isExpired ? (
-                // FREE 用户唯一能看到的信号就是这些已过期的——让延迟信号本身说话：
-                // 展示它最终判定的输赢，并提示 PRO 用户提前看到了它。数据早就在
-                // 后端返回体里（signal_resolution.py 判定），此前前端完全没用它。
-                // FREE users only ever see already-expired signals — let the delayed
-                // signal make its own case: show its final win/loss and note that PRO
-                // users saw it before it expired. The data was already in the API
-                // response (judged by signal_resolution.py); the frontend just never
-                // used it before.
-                <div className="mt-3 flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
-                  <span className={`text-xs font-bold ${resultTone(sig.result)}`}>
-                    {resultLabel(sig.result, t)}
-                  </span>
-                  <span className="text-[10px] text-neutral-500">{t('signals.proSawFirst')}</span>
-                </div>
-              ) : (
-                <div className="mt-3">
+              <footer className="sig-card-foot">
+                {isExpired ? (
+                  // FREE 用户唯一能看到的信号就是这些已过期的——让延迟信号本身说话：
+                  // 展示它最终判定的输赢，并提示 PRO 用户提前看到了它。数据早就在
+                  // 后端返回体里（signal_resolution.py 判定），此前前端完全没用它。
+                  // FREE users only ever see already-expired signals — let the delayed
+                  // signal make its own case: show its final win/loss and note that PRO
+                  // users saw it before it expired. The data was already in the API
+                  // response (judged by signal_resolution.py); the frontend just never
+                  // used it before.
+                  <div className="sig-result">
+                    <b className={resultTone(sig.result)}>{resultLabel(sig.result, t)}</b>
+                    <span>{t('signals.proSawFirst')}</span>
+                  </div>
+                ) : (
                   <Countdown expireAt={sig.expireAt} label={t('signals.focus.remainingTtl')} />
-                </div>
-              )}
-
-              <div className="flex items-center justify-between mt-3">
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm text-neutral-300 truncate">{sig.indicator || '-'}</div>
-                  <div className="text-[10px] text-neutral-500 mt-0.5">{fmtTime(sig.createdAt)}</div>
-                </div>
+                )}
                 <button
                   onClick={() => !isExpired && onTrade(sig)}
                   disabled={isExpired}
-                  className={`btn rounded-xl px-6 py-2 text-[13px] font-semibold shrink-0 ml-3 ${
-                    isExpired
-                      ? 'cursor-not-allowed border border-white/10 bg-white/5 text-neutral-500'
-                      : 'btn-primary'
-                  }`}
+                  className={`btn sig-cta ${isExpired ? 'btn-secondary' : 'btn-primary'}`}
                 >
                   {isExpired ? t('signals.expired') : t('signals.trade')}
                 </button>
-              </div>
-            </div>
+              </footer>
+            </article>
           )
         })}
       </div>

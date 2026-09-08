@@ -33,6 +33,7 @@
 @import './motion.css';   /* 页面切换 / 骨架屏 / 内容淡入 / tap 反馈 */
 @import './landing-story.css';   /* 落地页叙事：手机机身 / 屏幕五幕 / 文字面板 / WebGL 接管 / 判决印章 */
 @import './tabs.css';   /* 页内 Tab（分段药丸轨道） */
+@import './signals.css';   /* 信号面板：看板页头 / 信号牌面（价格阶梯 + 倒计时环） */
 @import './achievements.css';   /* 成就页：任务瓦片 / 陈列台 */
 @import './competitions.css';   /* 交易比赛：转播台 / 头版 / 详情 */
 @import './leaderboard.css';   /* 排行榜：领奖台悬浮 / 手机端控件 */
