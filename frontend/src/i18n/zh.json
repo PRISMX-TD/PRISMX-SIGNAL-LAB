@@ -534,6 +534,9 @@
     "footer": "UTC+8 · 数据源自平台自有喂价，仅供参考",
     "empty": "图表数据加载中或暂不可用…",
     "stale": "数据延迟",
+    "openPositions": "持仓",
+    "sheetTicket": "快速下单",
+    "tools": "画线工具",
     "indicators": {
       "button": "添加指标",
       "ma": "MA 均线",
@@ -653,7 +656,10 @@
       "place": "{{side}} · {{volume}} 手",
       "invalidVolume": "手数无效",
       "submitted": "已提交，等待回执",
-      "placeFailed": "下单失败"
+      "placeFailed": "下单失败",
+      "points": "点",
+      "spreadUnit": "点差",
+      "footnote": "市价单，经 PRISMX Bridge 送达 MT5，回执落在订单页。"
     },
     "account": {
       "title": "账户",
@@ -664,7 +670,10 @@
       "floating": "浮动盈亏",
       "leverage": "杠杆 1:{{leverage}}",
       "online": "● 在线",
-      "offlineDot": "○ 离线"
+      "offlineDot": "○ 离线",
+      "leverageK": "杠杆",
+      "onlineK": "在线",
+      "offlineK": "离线"
     },
     "dock": {
       "positions": "持仓",

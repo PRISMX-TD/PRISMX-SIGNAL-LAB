@@ -534,6 +534,9 @@
     "footer": "UTC+8 · Data from platform feed, for reference only",
     "empty": "Chart data is loading or temporarily unavailable…",
     "stale": "Data delayed",
+    "openPositions": "Positions",
+    "sheetTicket": "Quick order",
+    "tools": "Drawing tools",
     "indicators": {
       "button": "Add Indicators",
       "ma": "MA",
@@ -653,7 +656,10 @@
       "place": "{{side}} · {{volume}} lots",
       "invalidVolume": "Invalid volume",
       "submitted": "Submitted, awaiting confirmation",
-      "placeFailed": "Order failed"
+      "placeFailed": "Order failed",
+      "points": "pts",
+      "spreadUnit": "spread",
+      "footnote": "Market order, delivered to MT5 via PRISMX Bridge; the receipt lands on the Orders page."
     },
     "account": {
       "title": "Account",
@@ -664,7 +670,10 @@
       "floating": "Floating P&L",
       "leverage": "Leverage 1:{{leverage}}",
       "online": "● Online",
-      "offlineDot": "○ Offline"
+      "offlineDot": "○ Offline",
+      "leverageK": "Leverage",
+      "onlineK": "Online",
+      "offlineK": "Offline"
     },
     "dock": {
       "positions": "Positions",

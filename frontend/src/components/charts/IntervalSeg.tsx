@@ -1,5 +1,5 @@
-// 周期切换按钮组。桌面工具栏、手机工具栏、全屏态右上角三处共用（2026-09-06
-// 之前是三份逐字相同的 map）。seg = 工具栏里的 .term-ivseg 分段；fullscreen =
+// 周期切换按钮组。桌面工具条、手机工具条、全屏态右上角三处共用（2026-09-06
+// 之前是三份逐字相同的 map）。seg = 工具条里的 .term-tf 药丸段；fullscreen =
 // 全屏态右上角的紧凑横排。
 // Interval switch shared by the desktop toolbar, mobile toolbar and the
 // fullscreen top-right corner (three identical copies before 2026-09-06).
@@ -30,11 +30,13 @@ export default function IntervalSeg({ value, onChange, variant = 'seg' }: {
     )
   }
   return (
-    <div className="term-ivseg">
+    <div className="term-tf" role="tablist">
       {INTERVALS.map((iv) => (
         <button
           key={iv.code}
           type="button"
+          role="tab"
+          aria-selected={value === iv.code}
           onClick={() => onChange(iv.code)}
           className={value === iv.code ? 'on' : ''}
         >

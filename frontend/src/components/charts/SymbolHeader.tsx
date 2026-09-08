@@ -1,16 +1,20 @@
-// 交易终端：品种行情头 / Trading terminal: symbol quote header.
+// 交易终端：报价条 / Trading terminal: quote strip.
 //
-// 图表上方常驻的一条：品种名 + 买价/卖价/点差/日内高低/涨跌。买卖价来自
-// 全站统一报价（EA 推送，见 store/live 的 useGlobalQuotes），日内高低与涨跌
-// 幅由 ChartsPage 从已加载的 K 线窗口算出后传入（dayStats）——都用已有数据，
-// 不需要新后端。
-// The strip docked above the chart: symbol + bid/ask/spread/day range/change.
-// Bid/ask come from the site-wide quote feed (EA-pushed, useGlobalQuotes);
-// day high/low and change% are computed by ChartsPage from the loaded candle
-// window and passed in (dayStats). All from existing data — no new backend.
-import { Link } from 'react-router-dom'
+// 图表上方常驻的一条：品种 + 大价格 + 买卖价 / 点差 / 日内高低 + 实时状态。
+// 买卖价来自全站统一报价（EA 推送，见 store/live 的 useGlobalQuotes），日内
+// 高低与涨跌幅由 ChartsPage 从已加载的 K 线窗口算出后传入（dayStats）。
+// 大价格用外汇的「大手 + 点位」写法：1.16 小 · 23 大 · 8 上标（见 splitPrice）。
+// 手机端压成两行：品种（可点，弹自选抽屉）+ 大价格一行，五个统计一行。
+// The strip docked above the chart: symbol + big price + bid/ask/spread/day
+// range + live state. Bid/ask come from the site-wide quote feed; day stats
+// are computed by ChartsPage from the loaded candle window. The big price uses
+// the FX big-figure/pip convention (see splitPrice). On mobile it folds to two
+// rows and the symbol becomes a button that opens the watchlist sheet.
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { displaySymbol } from '../../api/utils'
+import { symbolMeta } from '../../utils/symbolMeta'
+import { INTERVALS } from './chartConfig'
 
 export interface DayStats {
   high: number
@@ -22,20 +26,46 @@ export interface DayStats {
 
 interface Props {
   symbol: string
+  interval: string
   bid: number | null
   ask: number | null
   digits: number
   dayStats: DayStats | null
   // 无实时报价时的兜底价（最新收盘价）/ fallback price when no live quote (latest close)
   fallbackPrice: number
+  stale: boolean
+  // 手机端点品种名打开自选抽屉 / mobile: tapping the symbol opens the watchlist sheet
+  onSymbolClick?: () => void
 }
 
 function fmt(v: number | null | undefined, digits: number): string {
   return v == null || !Number.isFinite(v) ? '—' : v.toFixed(digits)
 }
 
-export default function SymbolHeader({ symbol, bid, ask, digits, dayStats, fallbackPrice }: Props) {
+// 大手 / 点位 / 末位：5 位价（1.16238）→ 1.16 · 23 · 8；3 位价（153.305）→ 153. · 30 · 5；
+// 2 位价（4431.01）→ 4431. · 01，没有上标；更少位数不拆。
+// Big figure / pips / last digit: 5-digit → 1.16 · 23 · 8; 3-digit → 153. · 30 · 5;
+// 2-digit → 4431. · 01 with no superscript; fewer digits are not split.
+export function splitPrice(price: number | null, digits: number): { base: string; pip: string; sup: string } | null {
+  if (price == null || !Number.isFinite(price)) return null
+  const s = price.toFixed(digits)
+  if (digits >= 3) return { base: s.slice(0, -3), pip: s.slice(-3, -1), sup: s.slice(-1) }
+  if (digits === 2) return { base: s.slice(0, -2), pip: s.slice(-2), sup: '' }
+  return { base: s, pip: '', sup: '' }
+}
+
+function useClock(): string {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [])
+  return new Date(now).toLocaleTimeString('en-GB', { hour12: false, timeZone: 'Asia/Shanghai' })
+}
+
+export default function SymbolHeader({ symbol, interval, bid, ask, digits, dayStats, fallbackPrice, stale, onSymbolClick }: Props) {
   const { t } = useTranslation()
+  const clock = useClock()
   // 点差按最小价位单位（point）计：(ask - bid) × 10^digits，四舍五入。
   // Spread in points: (ask - bid) × 10^digits, rounded.
   const spread =
@@ -44,96 +74,65 @@ export default function SymbolHeader({ symbol, bid, ask, digits, dayStats, fallb
       : null
   const changePct = dayStats?.changePct ?? null
   const up = changePct != null && changePct >= 0
-  const changeStr =
-    changePct == null ? '—' : `${up ? '+' : ''}${(changePct * 100).toFixed(2)}%`
+  const changeStr = changePct == null ? '—' : `${up ? '+' : ''}${(changePct * 100).toFixed(2)}%`
   const bidStr = fmt(bid ?? (fallbackPrice || null), digits)
   const askStr = fmt(ask ?? (fallbackPrice || null), digits)
-  // 中间价：手机端大字号主价格用它——买卖价分开列两行在窄屏上不如 Web3 手机
-  // 交易 App 那种"一个大数字"直观，且中间价本来就是买卖价的公允折中。
-  // Mid price: the mobile big-number headline — separately listing bid/ask
-  // reads worse on a narrow screen than the single big number Web3 mobile
-  // trading apps lead with, and the mid is the fair midpoint of the two anyway.
+  // 大字用中间价：买卖价的公允折中。/ The headline is the mid price.
   const mid = bid != null && ask != null ? (bid + ask) / 2 : fallbackPrice || null
-  const midStr = fmt(mid, digits)
+  const parts = splitPrice(mid, digits)
+  const meta = symbolMeta(symbol)
+  const ivLabel = INTERVALS.find((iv) => iv.code === interval)?.label ?? interval
 
   return (
-    <>
-      {/* 桌面行情条：品种 + 六格统计横排。可见性放在这层普通 wrapper 上而不是
-          直接给 .term-symhead 加 hidden——理由同 ChartsPage 里其它折叠面板的
-          注释（自带 display 的自定义类会盖掉 Tailwind 的 .hidden）。
-          Desktop quote bar: symbol + six stats in a row. Visibility lives on
-          this plain wrapper for the same reason documented elsewhere in
-          ChartsPage (a custom class with its own display would override
-          Tailwind's .hidden). */}
-      <div className="hidden lg:block">
-        <div className="term-symhead">
-          <div className="term-symhead-id">
-            <div className="term-symhead-sym">{symbol || '—'}</div>
-            <div className="term-symhead-name">{symbol ? displaySymbol(symbol) : ''}</div>
-          </div>
-          <div className="term-symhead-stats no-sb">
-            <Stat k={String(t('charts.symhead.bid'))} v={bidStr} tone="up" />
-            <Stat k={String(t('charts.symhead.ask'))} v={askStr} tone="down" />
-            <Stat k={String(t('charts.symhead.spread'))} v={spread == null ? '—' : String(spread)} />
-            <Stat k={String(t('charts.symhead.high'))} v={fmt(dayStats?.high, digits)} />
-            <Stat k={String(t('charts.symhead.low'))} v={fmt(dayStats?.low, digits)} />
-            <Stat k={String(t('charts.symhead.change'))} v={changeStr} tone={changePct == null ? undefined : up ? 'up' : 'down'} />
-          </div>
+    <div className="term-qs">
+      <button type="button" className="term-qs-id" onClick={onSymbolClick} aria-label={String(t('charts.watchlist.title'))}>
+        <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
+        <div>
+          <h2>
+            {symbol || '—'}
+            <svg className="lg:hidden" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
+          </h2>
+          <p>{symbol ? `${displaySymbol(symbol)} · ${ivLabel}` : ''}</p>
+        </div>
+      </button>
+
+      <div className="term-qs-px">
+        <div className="term-big num">
+          {parts ? (
+            <>
+              {parts.base}
+              {parts.pip && <span className="pip">{parts.pip}</span>}
+              {parts.sup && <sup>{parts.sup}</sup>}
+            </>
+          ) : '—'}
+        </div>
+        <div className={`term-chg ${changePct == null ? '' : up ? 'up' : 'down'}`}>
+          <span>{changeStr}</span>
+          <small>{t('charts.symhead.change')}</small>
         </div>
       </div>
 
-      {/* 手机端行情卡（紧凑版）：品种名 + 大字号价格 + 涨跌徽章挤在同一行，
-          买卖价/点差/日内高低压成下方一条横排内联小字。只占两行高度。
-          Mobile quote card (compact): symbol + big price + change badge share
-          one row; bid/ask/spread/day range collapse into a single inline row of
-          small text below. Two rows tall total. */}
-      <div className="lg:hidden">
-        <div className="term-symhead-m">
-          <div className="term-symhead-m-top">
-            <div className="term-symhead-m-id">
-              <span className="sym">{symbol || '—'}</span>
-              <span className="nm">{symbol ? displaySymbol(symbol) : ''}</span>
-            </div>
-            <div className={`term-symhead-m-price num ${changePct == null ? '' : up ? 'up' : 'down'}`}>
-              {midStr}
-            </div>
-            <span className={`term-symhead-m-chg ${changePct == null ? '' : up ? 'up' : 'down'}`}>
-              {changeStr}
-            </span>
-          </div>
-          {/* 次要统计与策略入口同一行：统计小字靠左（可横滑），自定义策略缩成
-              右侧一个小 chip——不再占一整行的大按钮。
-              Secondary stats and the strategy entry share one row: stats on the
-              left (scrollable), custom-strategy shrinks to a small chip on the
-              right — no longer a full-width button taking its own row.
-              自定义策略为 PRO 功能，2026-07 起对全体开放；未订阅者进页面会看到
-              升级提示，这里不用重复判断。/ Custom-strategy is PRO, opened to all
-              in 2026-07; non-PRO users get an upgrade hint on the page itself. */}
-          <div className="term-symhead-m-btm">
-            <div className="term-symhead-m-stats no-sb">
-              <span>{t('charts.symhead.mBid')} <b className="num up">{bidStr}</b></span>
-              <span>{t('charts.symhead.mAsk')} <b className="num down">{askStr}</b></span>
-              <span>{t('charts.symhead.mSpread')} <b className="num">{spread == null ? '—' : spread}</b></span>
-              <span>{t('charts.symhead.mHigh')} <b className="num">{fmt(dayStats?.high, digits)}</b></span>
-              <span>{t('charts.symhead.mLow')} <b className="num">{fmt(dayStats?.low, digits)}</b></span>
-            </div>
-            <Link to="/strategies" className="term-symhead-m-strat" aria-label={t('nav.strategies')}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg>
-              <span>{t('nav.strategies')}</span>
-            </Link>
-          </div>
-        </div>
+      <div className="term-qs-st no-sb">
+        <Stat k={String(t('charts.symhead.bid'))} v={bidStr} tone="up" />
+        <Stat k={String(t('charts.symhead.ask'))} v={askStr} tone="down" />
+        <Stat k={String(t('charts.symhead.spread'))} v={spread == null ? '—' : String(spread)} />
+        <Stat k={String(t('charts.symhead.high'))} v={fmt(dayStats?.high, digits)} />
+        <Stat k={String(t('charts.symhead.low'))} v={fmt(dayStats?.low, digits)} />
       </div>
-    </>
+
+      <div className={`term-qs-live ${stale ? 'stale' : ''}`}>
+        <i />
+        {stale ? t('charts.stale') : 'Live'} · UTC+8 {clock}
+      </div>
+    </div>
   )
 }
 
 function Stat({ k, v, tone }: { k: string; v: string; tone?: 'up' | 'down' }) {
-  const cls = tone === 'up' ? 'up' : tone === 'down' ? 'down' : ''
   return (
-    <div className="term-sstat">
-      <span className="term-sstat-k">{k}</span>
-      <span className={`term-sstat-v num ${cls}`}>{v}</span>
+    <div className="term-st">
+      <div className="k">{k}</div>
+      <div className={`v num ${tone ?? ''}`}>{v}</div>
     </div>
   )
 }

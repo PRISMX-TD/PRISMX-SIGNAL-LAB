@@ -16,9 +16,9 @@ export default function IndicatorLegends({ indicators, indicatorSettings, legend
   const { t } = useTranslation()
   return (
     <>
-      {/* 主图指标图例：留出左侧画图工具栏的宽度 / main-pane indicator legend: clears the draw toolbar on the left */}
+      {/* 主图指标图例（画线工具已移到图表外的竖轨，不再需要让位）/ main-pane indicator legend */}
       {(indicators.ma || indicators.ema || indicators.boll) && (
-        <div className="pointer-events-none absolute left-14 top-3 z-20 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-ink-900/40 px-2 py-1 font-mono text-[11px] backdrop-blur-sm">
+        <div className="term-legend main">
           {indicators.ma &&
             indicatorSettings.ma.periods.map((p, i) => (
               <span key={`ma${i}`} style={{ color: indicatorSettings.ma.colors[i] }}>
@@ -43,24 +43,24 @@ export default function IndicatorLegends({ indicators, indicatorSettings, legend
       {/* Sub-pane legends: positioned at the top of their own pane; offsets computed by applyPaneHeights */}
       {indicators.volume && paneOffsets.volume != null && (
         <div
-          className="pointer-events-none absolute left-3 z-20 rounded-md bg-ink-900/40 px-2 py-0.5 font-mono text-[11px] text-neutral-300 backdrop-blur-sm"
-          style={{ top: paneOffsets.volume + 6 }}
+          className="term-legend"
+          style={{ left: 12, top: paneOffsets.volume + 6 }}
         >
           {t('charts.indicators.volume')} {legend.volume != null ? Math.round(legend.volume).toLocaleString() : '—'}
         </div>
       )}
       {indicators.rsi && paneOffsets.rsi != null && (
         <div
-          className="pointer-events-none absolute left-3 z-20 rounded-md bg-ink-900/40 px-2 py-0.5 font-mono text-[11px] backdrop-blur-sm"
-          style={{ top: paneOffsets.rsi + 6, color: indicatorSettings.rsi.color }}
+          className="term-legend"
+          style={{ left: 12, top: paneOffsets.rsi + 6, color: indicatorSettings.rsi.color }}
         >
           RSI({indicatorSettings.rsi.period}) {fmtLegendNum(legend.rsi, 2)}
         </div>
       )}
       {indicators.macd && paneOffsets.macd != null && (
         <div
-          className="pointer-events-none absolute left-3 z-20 flex gap-2 rounded-md bg-ink-900/40 px-2 py-0.5 font-mono text-[11px] backdrop-blur-sm"
-          style={{ top: paneOffsets.macd + 6 }}
+          className="term-legend"
+          style={{ left: 12, top: paneOffsets.macd + 6 }}
         >
           <span style={{ color: indicatorSettings.macd.macdColor }}>MACD {fmtLegendNum(legend.macd.macd, 4)}</span>
           <span style={{ color: indicatorSettings.macd.signalColor }}>Sig {fmtLegendNum(legend.macd.signal, 4)}</span>

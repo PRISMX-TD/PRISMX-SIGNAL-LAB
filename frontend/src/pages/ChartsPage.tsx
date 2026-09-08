@@ -13,15 +13,21 @@
 // depends on TradingView's script or data channel. See CHART_SELFHOST_PLAN.md
 // at the repo root.
 //
-// 2026-09-06 拆分：这个文件原来 2222 行。常量与纯函数在 components/charts/chartConfig.ts，
-// 图表实例与指标 series 在 useChartEngine，历史/轮询在 useChartData，全屏在
-// useChartFullscreen，工具行 / 图例 / 全屏工具栏 / 周期按钮各自成组件。这里只剩
-// 用户偏好、账户选择与布局。
-// Split 2026-09-06 (was 2222 lines): constants → chartConfig, chart instance and
-// indicator series → useChartEngine, history/poll → useChartData, fullscreen →
-// useChartFullscreen, toolbar rows / legends / fullscreen toolbar / interval
-// buttons → their own components. What remains is prefs, account selection and layout.
+// 2026-09-06 拆分：常量与纯函数在 components/charts/chartConfig.ts，图表实例与
+// 指标 series 在 useChartEngine，历史/轮询在 useChartData，全屏在 useChartFullscreen。
+// 2026-09-08 外壳重做（样式见 styles/terminal.css 头注）：桌面「一块地三条发丝线」
+// 撑满顶栏以下整个视口；手机端不再是顶部四页签切换，而是图表占满 + 底部固定
+// 「卖 | 点差 | 买」交易条，自选 / 下单票 / 持仓都是底部抽屉。图表容器始终挂载
+// ——抽屉只是盖在上面，绝不卸载图表（否则会丢掉 lightweight-charts 实例与画线）。
+// Split 2026-09-06 (config → chartConfig, chart instance → useChartEngine,
+// history/poll → useChartData, fullscreen → useChartFullscreen). Shell redone
+// 2026-09-08 (see the header comment in styles/terminal.css): on desktop one
+// ground with three hairlines filling the viewport below the header; on mobile
+// the chart fills the screen with a fixed sell | spread | buy bar, and the
+// watchlist / ticket / positions open as bottom sheets. The chart container is
+// always mounted — sheets overlay it, never unmount it.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../store/prefs'
 import { useLive, useQuotes } from '../store/live'
@@ -34,7 +40,6 @@ import {
   type IndicatorSettings,
 } from '../components/charts/indicatorSettings'
 import DrawLayer, { type DrawLayerHandle } from '../components/charts/DrawLayer'
-import ChartOrderModal from '../components/ChartOrderModal'
 import IndicatorSettingsModal from '../components/charts/IndicatorSettingsModal'
 import SymbolHeader from '../components/charts/SymbolHeader'
 import WatchlistPanel from '../components/charts/WatchlistPanel'
@@ -51,6 +56,7 @@ import { useChartFullscreen } from '../components/charts/useChartFullscreen'
 import { useChartEngine } from '../components/charts/useChartEngine'
 import { useChartData } from '../components/charts/useChartData'
 import { useGlobalQuotes, usePositions } from '../store/live'
+import type { Side } from '../components/order/useOrderForm'
 import {
   DEFAULT_INDICATORS, INTERVAL_KEY, SYMBOL_DECIMALS, SYMBOL_KEY, type IndicatorFlags,
 } from '../components/charts/chartConfig'
@@ -58,6 +64,8 @@ import {
 // IndicatorFlags 原本定义在这里，IndicatorSettingsModal 等按老路径引用；保留再导出。
 // IndicatorFlags used to be defined here; re-exported so old import paths keep working.
 export type { IndicatorFlags }
+
+type Sheet = 'watchlist' | 'trade' | 'positions' | null
 
 export default function ChartsPage() {
   const { t } = useTranslation()
@@ -87,7 +95,6 @@ export default function ChartsPage() {
   const [indicatorSettings, setIndicatorSettingsState] = useState<IndicatorSettings>(() =>
     mergeIndicatorSettings(DEFAULT_INDICATOR_SETTINGS, getPref<Partial<IndicatorSettings>>('charts', 'indicatorSettings', {}))
   )
-  // 指标设置弹窗展开态 / indicator settings modal open state
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [drawVersion, setDrawVersion] = useState(0)
   const bumpDraw = useCallback(() => setDrawVersion((v) => v + 1), [])
@@ -100,36 +107,23 @@ export default function ChartsPage() {
     () => getPref<boolean>('charts', 'showPositions', true)
   )
 
-  // 手动下单弹窗：null 表示关闭 / manual order modal: null = closed
-  const [orderSide, setOrderSide] = useState<'BUY' | 'SELL' | null>(null)
-
-  // 手机端终端视图切换：图表 / 自选 / 交易 / 持仓。桌面（lg+）忽略此状态，
-  // 三栏同时展示；手机上用顶部分段控件一次切一个视图。图表容器始终挂载
-  // （切走时只用 CSS 隐藏，绝不卸载——否则会丢掉 lightweight-charts 实例与画线）。
-  // Mobile terminal view switch: chart / watchlist / trade / positions. Ignored
-  // at lg+ (all three columns show at once); on mobile a top segmented control
-  // shows one view at a time. The chart container stays mounted always (hidden
-  // via CSS when switched away, never unmounted — that would drop the
-  // lightweight-charts instance and drawings).
-  const [mobileView, setMobileView] = useState<'chart' | 'watchlist' | 'trade' | 'positions'>('chart')
-  // 手机端画线工具是否展开：桌面工具栏一直平铺展示全部画线工具，手机端默认
-  // 收起（只留周期切换 + 画笔开关 + 添加指标三件套），点画笔才展开完整工具行
-  // ——参考 Web3 手机端交易 App（如 Hyperliquid/dYdX）默认界面精简、进阶操作
-  // 收进一个入口的做法，避免小屏被十几个小图标塞满。
-  // Whether the mobile draw-tool row is expanded: the desktop toolbar always
-  // shows every draw tool inline; mobile starts collapsed (interval switch +
-  // a draw toggle + add-indicator only) and expands the full row on tap —
-  // mirrors how Web3 mobile trading apps (Hyperliquid, dYdX) keep the default
-  // screen lean and tuck power-user controls behind one entry point instead of
-  // packing a dozen small icons onto a narrow screen.
+  // 手机端抽屉：自选 / 下单票 / 持仓，一次只开一个；tradeSide 记住从交易条的哪一侧
+  // 点进来。桌面（lg+）三栏常驻，抽屉不渲染（CSS 里 ≥1024 直接 display:none）。
+  // Mobile sheets: watchlist / ticket / positions, one at a time; tradeSide
+  // remembers which side of the trade bar opened the ticket. Desktop shows the
+  // three columns and the sheets are display:none at ≥1024.
+  const [sheet, setSheet] = useState<Sheet>(null)
+  const [tradeSide, setTradeSide] = useState<Side>('BUY')
+  // 手机端画线工具是否展开：默认收起（只留周期 + 持仓 + 画笔 + 指标），点画笔才展开
+  // 换行工具行，避免小屏被十几个小图标塞满。
+  // Mobile draw tools start collapsed and expand into the wrapping row on tap.
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false)
 
-  // 这两个都是全屏弹窗，手机上划返回应该先关掉弹窗、而不是直接退出图表页
-  // （见 useBackToClose 的说明）。/ Both are full-screen modals; on mobile,
-  // swiping back should close the modal first rather than exiting the charts
-  // page outright (see useBackToClose's comment).
+  // 这些都是覆盖层，手机上划返回应该先关掉它们、而不是直接退出图表页
+  // （见 useBackToClose 的说明）。/ All overlays: swiping back on mobile should
+  // close them first rather than leaving the page (see useBackToClose).
   useBackToClose(settingsOpen, () => setSettingsOpen(false))
-  useBackToClose(orderSide != null, () => setOrderSide(null))
+  useBackToClose(sheet != null, () => setSheet(null))
 
   // 手机端全屏模式（CSS 全屏 + 原生 Fullscreen API + 横屏锁定）与全屏工具栏拖动
   // Mobile fullscreen + floating toolbar drag: see useChartFullscreen
@@ -144,32 +138,32 @@ export default function ChartsPage() {
   const positions = usePositions()
   const { toast, placeManualOrder, showToast } = useOrderPlacement()
 
-  // 每个品种的价格轴小数位（与图表 series 精度一致），供自选列表/行情头统一取用。
+  // 每个品种的价格轴小数位（与图表 series 精度一致），供自选列表/报价条统一取用。
   // Per-symbol price precision (matches the chart series), shared by the
-  // watchlist and symbol header.
+  // watchlist and quote strip.
   const digitsFor = useCallback((s: string) => SYMBOL_DECIMALS[s] ?? 2, [])
 
-  // 当前品种的全站统一报价（EA 推送，含 bid/ask）；行情头与右栏下单价用它。
+  // 当前品种的全站统一报价（EA 推送，含 bid/ask）；报价条与下单价用它。
   // The active symbol's site-wide quote (EA-pushed, bid/ask); used by the
-  // symbol header and the order price on the right rail.
+  // quote strip and the ticket's price.
   const activeQuote = symbol ? globalQuotes[symbol] : undefined
 
-  // 右栏账户摘要展示的账户：优先在线账号，否则第一个绑定的。
-  // Account shown in the right-rail summary: prefer an online one, else the first bound.
+  // 右栏账户条展示的账户：优先在线账号，否则第一个绑定的。
+  // Account shown in the right-rail strip: prefer an online one, else the first bound.
   const primaryAccount = accounts.find((a) => a.online) ?? accounts[0] ?? null
 
-  // 当前选中的交易账户（login）——由下单面板的账户下拉驱动，提升到这里让账户摘要、
+  // 当前选中的交易账户（login）——由下单票的账户下拉驱动，提升到这里让账户条、
   // 底部持仓/挂单都跟着切换，而不是永远只显示第一个账户。空串表示还没手动选，
   // 走 primaryAccount 兜底。/ Currently selected trading account (login), driven by
-  // the ticket's account picker and lifted here so the account summary and the
+  // the ticket's account picker and lifted here so the account strip and the
   // positions/orders dock all follow the selection instead of being stuck on the
   // first account. Empty string means no manual pick yet — falls back to primary.
   const [selectedLogin, setSelectedLogin] = useState<string>('')
-  // 上次下单用过的账户。它不只喂给下单栏——右侧账户摘要、底部持仓/挂单都跟着
-  // selectedLogin 走，所以要在这一层就认，否则会出现「下单栏显示记住的账户、
-  // 账户面板还显示兜底账户」这种自相矛盾的画面。
+  // 上次下单用过的账户。它不只喂给下单票——账户条、持仓/挂单都跟着 selectedLogin
+  // 走，所以要在这一层就认，否则会出现「下单票显示记住的账户、账户条还显示兜底
+  // 账户」这种自相矛盾的画面。
   // The remembered account is applied at this level, not just inside the ticket:
-  // the account summary and positions/orders dock all follow selectedLogin, so
+  // the account strip and positions/orders dock all follow selectedLogin, so
   // resolving it lower down would leave the panels disagreeing with the ticket.
   const { lastLogin } = useLastAccount()
   const effectiveLogin = selectedLogin || (accounts.some((a) => a.login === lastLogin) ? lastLogin : '')
@@ -193,22 +187,6 @@ export default function ChartsPage() {
     () => (multiAccount && activeAccount ? orders.filter((o) => String(o.mt5Login ?? '') === String(activeAccount.login)) : orders),
     [multiAccount, activeAccount, orders],
   )
-
-  const handleOrderConfirm = async (
-    volume: number,
-    mt5Login: string | null,
-    stopLoss: number | null,
-    takeProfit: number | null,
-    clientOrderId: string,
-  ) => {
-    if (!orderSide) return
-    // 不在这里关弹窗：ChartOrderModal 自己会展示"已提交"回执卡片，再调用
-    // onCancel 关闭；立刻关闭会让回执卡片还没渲染出来就被卸载。
-    // Don't close the modal here: ChartOrderModal shows its own "submitted"
-    // receipt card and calls onCancel itself; closing immediately would
-    // unmount it before the receipt card ever gets to render.
-    await placeManualOrder(symbol, orderSide, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
-  }
 
   // 云端偏好加载完成后覆盖本地初始值 / override initial values when cloud prefs arrive
   useEffect(() => {
@@ -284,353 +262,269 @@ export default function ChartsPage() {
   }, [])
 
   // 图表实例、指标 series、图例、pane 高度 → useChartEngine；历史 / 翻页 / 轮询 → useChartData。
-  // mobileView 作为 refitKey：手机端切回图表视图时补一次 resize（原来的 effect 就是这个用途）。
+  // 图表现在从不被藏起，refitKey 只在进出全屏时变（那两次容器尺寸确实变了）。
   // Chart instance / indicator series / legend / panes → useChartEngine; history /
-  // paging / polling → useChartData. mobileView is the refit key (the old
-  // "returning to the chart view forces a resize" effect).
-  const engine = useChartEngine(containerRef, indicators, indicatorSettings, mobileView)
+  // paging / polling → useChartData. The chart is never hidden any more, so the
+  // refit key only changes on entering/leaving fullscreen (a real resize).
+  const engine = useChartEngine(containerRef, indicators, indicatorSettings, isFullscreen)
   const { chartRef, seriesRef, getBarTimes, legend, paneOffsets, drawReady } = engine
   const { hasData, stale, lastPrice, dayStats } = useChartData(symbol, interval, engine)
 
   const decimals = SYMBOL_DECIMALS[symbol] ?? 2
+  const px = (v: number | null | undefined) => (v != null ? v.toFixed(decimals) : lastPrice ? lastPrice.toFixed(decimals) : '—')
+  const spreadPts = activeQuote && activeQuote.ask >= activeQuote.bid ? Math.round((activeQuote.ask - activeQuote.bid) * Math.pow(10, decimals)) : null
+  const openTrade = (side: Side) => { setTradeSide(side); setSheet('trade') }
+
+  const ticket = (initialSide?: Side) => (
+    <OrderTicket
+      key={initialSide ?? 'desk'}
+      symbol={symbol}
+      accounts={accounts}
+      quotesByAccount={accountQuotes}
+      globalQuote={activeQuote}
+      refPrice={lastPrice}
+      digits={decimals}
+      selectedLogin={effectiveLogin}
+      onSelectLogin={setSelectedLogin}
+      initialSide={initialSide}
+      onPlace={(side, volume, mt5Login, stopLoss, takeProfit, coid) =>
+        placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid)
+      }
+    />
+  )
 
   return (
     <div className="term-shell">
       {/* drawVersion 用于外部画线工具栏状态变更时强制 ChartsPage 重渲染 */}
       {void drawVersion}
 
-      {/* 左栏：自选品种列表（桌面常驻；窄屏隐藏，手机端终端在阶段 3 单独做）。
-          可见性放在这层普通 wrapper 上，而不是直接给 .term-panel 加 hidden——
-          .term-panel 的 display:flex 在样式表里排在 Tailwind .hidden 之后，会盖
-          掉它，wrapper 不是 .term-panel 就没有这个冲突。
-          Left column: watchlist (desktop only for now). Visibility lives on this
-          plain wrapper, not on .term-panel directly — .term-panel's display:flex
-          comes after Tailwind's .hidden in the sheet and would override it; the
-          wrapper isn't a .term-panel so there's no conflict. */}
-      <div className="term-col-left hidden min-h-0 lg:flex lg:flex-col">
+      {/* 左栏：自选（桌面常驻；手机从报价条的品种名点开抽屉）
+          Left column: watchlist (desktop; on mobile it opens as a sheet from the quote strip) */}
+      <aside className="term-col term-col-left">
+        <div className="term-ph"><h3>{t('charts.watchlist.title')}</h3><span>{activeSymbols.length}</span></div>
         <WatchlistPanel
-          className="flex-1"
+          className="flex min-h-0 flex-1 flex-col"
           symbols={activeSymbols}
           quotes={globalQuotes}
           active={symbol}
           onSelect={setSymbol}
           digitsFor={digitsFor}
         />
-      </div>
+      </aside>
 
-      {/* 中栏：行情头 + 控制条 + 图表 / center: symbol header + controls + chart */}
-      <div className="term-center">
-        {/* 手机端视图切换（桌面隐藏；全屏时隐藏）：图表 / 自选 / 交易 / 持仓。
-            Mobile view switcher (hidden on desktop & in fullscreen). */}
-        {!isFullscreen && (
-          <div className="term-mtabs lg:hidden">
-            {(['chart', 'watchlist', 'trade', 'positions'] as const).map((key) => (
-              <button
-                key={key}
-                type="button"
-                className={mobileView === key ? 'on' : ''}
-                onClick={() => setMobileView(key)}
-              >
-                {t(`charts.mtabs.${key}`)}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* 图表视图：桌面恒显示（三栏之一）；手机端仅在"图表"视图显示。
-            图表容器无论如何都保持挂载，切走时靠外层 max-lg:hidden 隐藏而非卸载。
-            Chart view: always shown on desktop; on mobile only in the chart view.
-            The chart stays mounted regardless — hidden via max-lg:hidden, never
-            unmounted. */}
-        <div className={`term-chartview ${mobileView === 'chart' ? '' : 'max-lg:hidden'}`}>
-        {/* 品种行情头（全屏时隐藏）/ symbol header (hidden in fullscreen) */}
+      {/* 中栏：报价条 + [竖轨 | 工具条 / 图表] + 持仓停靠 / center: quote strip + [rail | toolbar / chart] + dock */}
+      <section className="term-center">
         {!isFullscreen && (
           <SymbolHeader
             symbol={symbol}
+            interval={interval}
             bid={activeQuote?.bid ?? null}
             ask={activeQuote?.ask ?? null}
             digits={decimals}
             dayStats={dayStats}
             fallbackPrice={lastPrice}
+            stale={stale}
+            onSymbolClick={() => setSheet('watchlist')}
           />
         )}
 
-      {/* 桌面单条工具栏（全屏时隐藏）：周期钉左 · 画线工具中部横滑 · 添加指标钉右。
-          可见性放在这层普通 wrapper 上而不是直接给 .term-toolbar 加 hidden——
-          .term-toolbar 自带 display:flex，在样式表里排在 Tailwind .hidden 之后会
-          盖掉它（与左栏自选同一个坑，见其注释）。
-          Desktop single toolbar (hidden in fullscreen): interval pinned left ·
-          draw tools scroll in the middle · add-indicator pinned right.
-          Visibility lives on this plain wrapper, not on .term-toolbar directly —
-          it has its own display:flex which would override Tailwind's .hidden
-          coming earlier in the sheet (same pitfall as the watchlist; see its
-          comment). */}
-      {!isFullscreen && (
-        <div className="hidden lg:block">
-          <div className="term-toolbar">
-            <IntervalSeg value={interval} onChange={setIntervalCode} />
-            {drawReady && <DrawToolsRow drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} />}
-            <div className="term-toolbar-right">
-              {stale && <span className="term-stale">{t('charts.stale')}</span>}
-              <PositionMarkerToggle on={showPositions} onToggle={() => setShowPositions((v) => !v)} t={t} />
-              <button type="button" onClick={() => setSettingsOpen(true)} className="term-tool-indicator">
-                {t('charts.indicators.button')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+        <div className="term-cv">
+          {/* 画线竖轨（桌面；全屏时换成悬浮工具栏）。引擎就绪前先占位，免得网格跳动。
+              Draw rail (desktop; fullscreen uses the floating toolbar). A placeholder
+              holds the column before the engine is ready so the grid doesn't jump. */}
+          {!isFullscreen && (drawReady
+            ? <DrawToolsRow variant="rail" drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} />
+            : <div className="term-rail" />)}
 
-      {/* 手机端工具栏（全屏时隐藏）：周期切换 + 画笔开关 + 添加指标三件套，参考
-          Web3 手机交易 App 的精简默认界面——画线工具默认收起，点画笔才展开成
-          下面的可换行工具行，避免十几个小图标常驻挤在窄屏上。
-          Mobile toolbar (hidden in fullscreen): interval switch + a draw toggle +
-          add-indicator only, mirroring the lean default screen of Web3 mobile
-          trading apps — draw tools start collapsed and expand into the wrapping
-          row below on tap, instead of a dozen small icons permanently crowding a
-          narrow screen. */}
-      {!isFullscreen && (
-        <div className="lg:hidden">
-          <div className="term-toolbar-m">
-            <IntervalSeg value={interval} onChange={setIntervalCode} />
-            <div className="term-toolbar-m-right">
-              {stale && <span className="term-stale">{t('charts.stale')}</span>}
-              <PositionMarkerToggle on={showPositions} onToggle={() => setShowPositions((v) => !v)} t={t} />
-              {drawReady && (
-                <button
-                  type="button"
-                  onClick={() => setMobileToolsOpen((v) => !v)}
-                  aria-label={String(t('charts.draw.button'))}
-                  className={`term-tool-btn ${mobileToolsOpen ? 'on' : ''}`}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+          {/* 工具条：周期钉左；右侧 持仓（手机）· 画笔（手机）· 持仓标记 · 添加指标
+              Toolbar: intervals left; positions (mobile) · pen (mobile) · markers · indicators right */}
+          {!isFullscreen && (
+            <div className="term-tb">
+              <IntervalSeg value={interval} onChange={setIntervalCode} />
+              <div className="term-tbr">
+                <button type="button" className="term-tbr-btn lg:hidden" onClick={() => setSheet('positions')}>
+                  {t('charts.openPositions')} <b>{accountPositions.length}</b>
                 </button>
+                {drawReady && (
+                  <button
+                    type="button"
+                    onClick={() => setMobileToolsOpen((v) => !v)}
+                    aria-label={String(t('charts.draw.button'))}
+                    aria-pressed={mobileToolsOpen}
+                    className={`term-tool-btn lg:hidden ${mobileToolsOpen ? 'on' : ''}`}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+                  </button>
+                )}
+                <PositionMarkerToggle on={showPositions} onToggle={() => setShowPositions((v) => !v)} t={t} />
+                <button type="button" onClick={() => setSettingsOpen(true)} className="term-tbr-btn">
+                  {t('charts.indicators.button')}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 图表容器：无缝，填满网格剩余高度。/ Chart container: seamless, fills the grid. */}
+          <div className={`term-chart ${isFullscreen ? 'chart-fullscreen-container' : ''}`}>
+            {/* 全屏开关（仅手机端）：同一个按钮进出，进入自动横屏，退出恢复竖屏 */}
+            <button
+              type="button"
+              onClick={isFullscreen ? exitFullscreen : enterFullscreen}
+              aria-label={isFullscreen ? t('charts.fullscreen.exit') : t('charts.fullscreen.enter')}
+              title={isFullscreen ? t('charts.fullscreen.exit') : t('charts.fullscreen.enter')}
+              className="lg:hidden absolute top-2 right-2 z-30 flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-ink-900/70 text-neutral-300 backdrop-blur-sm transition hover:text-white hover:border-white/20 active:scale-90"
+            >
+              {isFullscreen ? (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="4 14 10 14 10 20" />
+                  <polyline points="20 10 14 10 14 4" />
+                  <line x1="14" y1="10" x2="21" y2="3" />
+                  <line x1="10" y1="14" x2="3" y2="21" />
+                </svg>
+              ) : (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="15 3 21 3 21 9" />
+                  <polyline points="9 21 3 21 3 15" />
+                  <line x1="21" y1="3" x2="14" y2="10" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
+                </svg>
               )}
-              <button type="button" onClick={() => setSettingsOpen(true)} className="term-tool-indicator">
-                {t('charts.indicators.button')}
-              </button>
-            </div>
+            </button>
+
+            {/* 全屏态时间周期切换：右上角横排 */}
+            {isFullscreen && <IntervalSeg variant="fullscreen" value={interval} onChange={setIntervalCode} />}
+
+            <div ref={containerRef} className="h-full w-full" />
+            {/* 持仓标记层：入场价/止损/止盈线 + 拖动改单。刻意排在画图层之前——两层
+                都用「悬停到自己的目标才抢指针事件」的策略，DOM 上后者在上，于是画线
+                操作天然优先于拖止损线，不会互相抢。/ Position markers: entry/SL/TP
+                lines + drag-to-modify. Deliberately mounted before the draw layer:
+                both only capture pointer events while hovering their own targets, and
+                being later in the DOM puts the draw layer on top, so drawing
+                naturally takes precedence over dragging an SL line. */}
+            {drawReady && chartRef.current && seriesRef.current && (
+              <PositionOverlay
+                chart={chartRef.current}
+                series={seriesRef.current}
+                positions={accountPositions}
+                symbol={symbol}
+                digits={decimals}
+                visible={showPositions}
+                onToast={showToast}
+              />
+            )}
+            {drawReady && chartRef.current && seriesRef.current && containerRef.current && (
+              <DrawLayer
+                ref={drawLayerRef}
+                chart={chartRef.current}
+                series={seriesRef.current}
+                host={containerRef.current}
+                symbol={symbol}
+                lastPrice={lastPrice}
+                barTimes={getBarTimes}
+                digits={decimals}
+              />
+            )}
+            {!hasData && <div className="term-chart-empty">{t('charts.empty')}</div>}
+
+            {/* 指标图例（主图叠加 + 各副图）/ indicator legends (main-pane overlays + each sub-pane) */}
+            <IndicatorLegends indicators={indicators} indicatorSettings={indicatorSettings} legend={legend} paneOffsets={paneOffsets} decimals={decimals} />
+
+            {/* 全屏态悬浮画线工具栏（可拖移）*/}
+            {isFullscreen && drawReady && (
+              <FullscreenToolbar
+                toolbarRef={fsToolbarRef}
+                pos={fsToolbarPos}
+                onPointerDown={onFsToolbarPointerDown}
+                onPointerMove={onFsToolbarPointerMove}
+                onPointerUp={onFsToolbarPointerUp}
+                drawLayerRef={drawLayerRef}
+                bumpDraw={bumpDraw}
+                showPositions={showPositions}
+                onTogglePositions={() => setShowPositions((v) => !v)}
+              />
+            )}
           </div>
-          {drawReady && mobileToolsOpen && (
-            <div className="term-toolbar-m-expand">
-              <DrawToolsRow drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} wrap />
+
+          {/* 手机端展开的画线行 / mobile expanded draw row */}
+          {!isFullscreen && drawReady && mobileToolsOpen && (
+            <div className="lg:hidden term-tools-slot">
+              <DrawToolsRow variant="wrap" drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} />
             </div>
           )}
         </div>
-      )}
 
-      {/* 手机端·常驻买卖条：紧贴周期/工具栏下方（不再挤在图表下面要滚动才能
-          看到），矮一些更省高度。点开走既有的滑动确认下单弹窗（ChartOrderModal）。
-          桌面隐藏（右栏已有完整下单面板）。全屏时隐藏。
-          Mobile docked buy/sell bar: right under the interval/toolbar row
-          (no longer squeezed below the chart, out of easy reach), shorter to
-          save height. Opens the existing slide-to-confirm order modal. Hidden
-          on desktop (the right rail has the full ticket) and in fullscreen. */}
-      {!isFullscreen && (
-        <div className="term-mbuysell lg:hidden">
-          <button type="button" className="sell" onClick={() => setOrderSide('SELL')}>
-            <span className="lab">{t('charts.ticket.sell')}</span>
-            <span className="px num">{activeQuote?.bid != null ? activeQuote.bid.toFixed(decimals) : lastPrice ? lastPrice.toFixed(decimals) : '—'}</span>
-          </button>
-          <button type="button" className="buy" onClick={() => setOrderSide('BUY')}>
-            <span className="lab">{t('charts.ticket.buy')}</span>
-            <span className="px num">{activeQuote?.ask != null ? activeQuote.ask.toFixed(decimals) : lastPrice ? lastPrice.toFixed(decimals) : '—'}</span>
-          </button>
-        </div>
-      )}
-
-      {/* 图表容器：无缝（无自身边框/圆角/内边距），窄屏 70vh，桌面填满中栏剩余
-          高度（.term-chart 内处理）。/ Chart container: seamless (no own border/
-          radius/padding); 70vh on narrow screens, fills the center column on
-          desktop (handled in .term-chart). */}
-      <div className={`term-chart ${isFullscreen ? 'chart-fullscreen-container' : ''}`}>
-        {/* 全屏开关按钮（仅手机端显示）：同一个按钮进出，进入自动横屏，退出恢复竖屏 */}
-        <button
-          type="button"
-          onClick={isFullscreen ? exitFullscreen : enterFullscreen}
-          aria-label={isFullscreen ? t('charts.fullscreen.exit') : t('charts.fullscreen.enter')}
-          title={isFullscreen ? t('charts.fullscreen.exit') : t('charts.fullscreen.enter')}
-          className="lg:hidden absolute top-2 left-2 z-30 flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-ink-900/70 text-neutral-300 backdrop-blur-sm transition hover:text-white hover:border-white/20 active:scale-90"
-        >
-          {isFullscreen ? (
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="4 14 10 14 10 20" />
-              <polyline points="20 10 14 10 14 4" />
-              <line x1="14" y1="10" x2="21" y2="3" />
-              <line x1="10" y1="14" x2="3" y2="21" />
-            </svg>
-          ) : (
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="15 3 21 3 21 9" />
-              <polyline points="9 21 3 21 3 15" />
-              <line x1="21" y1="3" x2="14" y2="10" />
-              <line x1="3" y1="21" x2="10" y2="14" />
-            </svg>
-          )}
-        </button>
-
-        {/* 全屏态时间周期切换：右上角横排，紧凑按钮，方便横屏时切周期 */}
-        {isFullscreen && <IntervalSeg variant="fullscreen" value={interval} onChange={setIntervalCode} />}
-
-        <div ref={containerRef} className="h-full w-full" />
-        {/* 持仓标记层：入场价/止损/止盈线 + 拖动改单。刻意排在画图层之前——两层
-            都用「悬停到自己的目标才抢指针事件」的策略，DOM 上后者在上，于是画线
-            操作天然优先于拖止损线，不会互相抢。/ Position markers: entry/SL/TP
-            lines + drag-to-modify. Deliberately mounted before the draw layer:
-            both only capture pointer events while hovering their own targets, and
-            being later in the DOM puts the draw layer on top, so drawing
-            naturally takes precedence over dragging an SL line. */}
-        {drawReady && chartRef.current && seriesRef.current && (
-          <PositionOverlay
-            chart={chartRef.current}
-            series={seriesRef.current}
-            positions={accountPositions}
-            symbol={symbol}
-            digits={decimals}
-            visible={showPositions}
-            onToast={showToast}
-          />
-        )}
-        {drawReady && chartRef.current && seriesRef.current && containerRef.current && (
-          <DrawLayer
-            ref={drawLayerRef}
-            chart={chartRef.current}
-            series={seriesRef.current}
-            host={containerRef.current}
-            symbol={symbol}
-            lastPrice={lastPrice}
-            barTimes={getBarTimes}
-            digits={decimals}
-          />
-        )}
-        {!hasData && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-neutral-500">
-            {t('charts.empty')}
+        {/* 持仓 / 挂单停靠（桌面；手机走底部抽屉）/ positions dock (desktop; mobile uses the sheet) */}
+        {!isFullscreen && (
+          <div className="hidden lg:flex lg:flex-shrink-0 lg:flex-col">
+            <PositionsDock positions={accountPositions} orders={accountOrders} digitsFor={digitsFor} onToast={showToast} />
           </div>
         )}
 
-        {/* 指标图例（主图叠加 + 各副图）/ indicator legends (main-pane overlays + each sub-pane) */}
-        <IndicatorLegends indicators={indicators} indicatorSettings={indicatorSettings} legend={legend} paneOffsets={paneOffsets} decimals={decimals} />
-
-        {/* 全屏态悬浮画线工具栏（可拖移）*/}
-        {isFullscreen && drawReady && (
-          <FullscreenToolbar
-            toolbarRef={fsToolbarRef}
-            pos={fsToolbarPos}
-            onPointerDown={onFsToolbarPointerDown}
-            onPointerMove={onFsToolbarPointerMove}
-            onPointerUp={onFsToolbarPointerUp}
-            drawLayerRef={drawLayerRef}
-            bumpDraw={bumpDraw}
-            showPositions={showPositions}
-            onTogglePositions={() => setShowPositions((v) => !v)}
-          />
+        {/* 手机端底部交易条：卖 | 点差 | 买，点开下单票抽屉
+            Mobile trade bar: sell | spread | buy, opens the ticket sheet */}
+        {!isFullscreen && (
+          <div className="term-mbar">
+            <button type="button" className="sell" onClick={() => openTrade('SELL')}>
+              <span className="lab">{t('charts.ticket.sell')}</span>
+              <span className="px"><PipText s={px(activeQuote?.bid)} /></span>
+            </button>
+            <div className="sp">{t('charts.ticket.spreadUnit')}<b>{spreadPts ?? '—'}</b></div>
+            <button type="button" className="buy" onClick={() => openTrade('BUY')}>
+              <span className="lab">{t('charts.ticket.buy')}</span>
+              <span className="px"><PipText s={px(activeQuote?.ask)} /></span>
+            </button>
+          </div>
         )}
-      </div>
-      </div>
-      {/* /term-chartview */}
+      </section>
 
-      {/* 底部持仓 / 挂单（桌面终端常驻；全屏时隐藏）。固定高度，不抢图表的
-          flex 空间。手机端由下方"持仓"视图承载。
-          Positions/orders dock (desktop terminal; hidden in fullscreen). Fixed
-          height so it doesn't steal the chart's flex space. On mobile the
-          "positions" view below carries this instead. */}
-      {!isFullscreen && (
-        <div className="hidden lg:flex lg:h-[196px] lg:flex-shrink-0 lg:flex-col">
-          <PositionsDock
-            className="flex-1"
-            positions={accountPositions}
-            orders={accountOrders}
-            digitsFor={digitsFor}
-            onToast={showToast}
-          />
-        </div>
-      )}
-
-      {/* 手机端·自选视图：点某品种即切换主图并跳回图表视图 / mobile watchlist
-          view: tapping a symbol switches the chart and jumps back to it */}
-      {!isFullscreen && (
-        <div className={`term-mview lg:hidden ${mobileView === 'watchlist' ? 'flex flex-col' : 'hidden'}`}>
-          <WatchlistPanel
-            className="flex-1"
-            symbols={activeSymbols}
-            quotes={globalQuotes}
-            active={symbol}
-            onSelect={(s) => { setSymbol(s); setMobileView('chart') }}
-            digitsFor={digitsFor}
-          />
-        </div>
-      )}
-
-      {/* 手机端·交易视图：完整停靠下单面板 / mobile trade view: full docked ticket */}
-      {!isFullscreen && (
-        <div className={`term-mview lg:hidden ${mobileView === 'trade' ? 'flex flex-col gap-2.5' : 'hidden'}`}>
-          <OrderTicket
-            symbol={symbol}
-            accounts={accounts}
-            quotesByAccount={accountQuotes}
-            globalQuote={activeQuote}
-            refPrice={lastPrice}
-            digits={decimals}
-            selectedLogin={effectiveLogin}
-            onSelectLogin={setSelectedLogin}
-            onPlace={(side, volume, mt5Login, stopLoss, takeProfit, coid) =>
-              placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid)
-            }
-          />
-          {/* 手机交易视图也带上账户摘要——桌面端常驻、手机端此前只在持仓视图有，
-              交易页填补了下单按钮下方的空白。/ Show the account summary here too;
-              on desktop it's always visible, mobile previously only had it on the
-              positions view — this fills the blank below the place button. */}
-          <AccountSummary account={activeAccount} />
-        </div>
-      )}
-
-      {/* 手机端·持仓视图：持仓/挂单 + 账户摘要 / mobile positions view */}
-      {!isFullscreen && (
-        <div className={`term-mview lg:hidden ${mobileView === 'positions' ? 'flex flex-col gap-2.5' : 'hidden'}`}>
-          <PositionsDock
-            className="flex-1"
-            positions={accountPositions}
-            orders={accountOrders}
-            digitsFor={digitsFor}
-            onToast={showToast}
-          />
-          <AccountSummary account={activeAccount} />
-        </div>
-      )}
-
-      {/* 免责声明：仅手机端图表视图显示 / disclaimer: mobile chart view only */}
-      {!isFullscreen && mobileView === 'chart' && (
-        <p className="mt-2 text-center text-[11px] text-neutral-500 lg:hidden">
-          {t('charts.footer')}
-        </p>
-      )}
-      </div>
-      {/* /term-center */}
-
-      {/* 右栏：停靠式下单面板 + 账户摘要（桌面常驻；窄屏隐藏，手机端在阶段 3
-          单独做）。下单面板占据剩余高度并可内部滚动，账户摘要固定在底部。
-          Right column: docked order ticket + account summary (desktop only).
-          The ticket takes the remaining height and scrolls internally; the
-          account summary stays pinned at the bottom. */}
-      <div className="term-col-right term-right hidden min-h-0 flex-col lg:flex">
-        <OrderTicket
-          className="min-h-0 flex-1"
-          symbol={symbol}
-          accounts={accounts}
-          quotesByAccount={accountQuotes}
-          globalQuote={activeQuote}
-          refPrice={lastPrice}
-          digits={decimals}
-          selectedLogin={effectiveLogin}
-          onSelectLogin={setSelectedLogin}
-          onPlace={(side, volume, mt5Login, stopLoss, takeProfit, coid) =>
-            placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid)
-          }
-        />
+      {/* 右栏：下单票 + 账户条（桌面常驻）。票占剩余高度并可内部滚动，账户条钉底。
+          Right column: ticket + account strip (desktop). The ticket takes the
+          remaining height and scrolls internally; the strip stays pinned at the bottom. */}
+      <aside className="term-col term-col-right">
+        <div className="term-ph"><h3>{t('charts.ticket.title')}</h3><span>{symbol || '—'}</span></div>
+        {ticket()}
         <AccountSummary account={activeAccount} />
-      </div>
+      </aside>
+
+      {/* 手机端抽屉：走 portal 挂到 body——页面切换动画（.page-enter）会给 <main>
+          造一个层叠上下文，抽屉留在里面的话 z-index 再高也压不过全站底栏（z-40）。
+          Mobile sheets are portalled to body: the page-enter animation gives
+          <main> its own stacking context, inside which no z-index beats the app
+          tab bar (z-40). */}
+      {sheet && !isFullscreen && createPortal(
+        <>
+          <div className="term-scrim" onClick={() => setSheet(null)} />
+          <div className="term-sheet" role="dialog" aria-modal="true">
+            <div className="term-ph">
+              <h3>{sheet === 'watchlist' ? t('charts.watchlist.title') : sheet === 'trade' ? t('charts.sheetTicket') : t('charts.openPositions')}</h3>
+              <span>{sheet === 'watchlist' ? activeSymbols.length : sheet === 'trade' ? `${symbol} · ${activeAccount ? `#${activeAccount.login}` : ''}` : accountPositions.length}</span>
+            </div>
+            <div className="term-sheet-body no-sb">
+              {sheet === 'watchlist' && (
+                <WatchlistPanel
+                  className="flex min-h-0 flex-1 flex-col"
+                  symbols={activeSymbols}
+                  quotes={globalQuotes}
+                  active={symbol}
+                  onSelect={(s) => { setSymbol(s); setSheet(null) }}
+                  digitsFor={digitsFor}
+                />
+              )}
+              {sheet === 'trade' && (
+                <>
+                  {ticket(tradeSide)}
+                  <AccountSummary account={activeAccount} />
+                </>
+              )}
+              {sheet === 'positions' && (
+                <PositionsDock positions={accountPositions} orders={accountOrders} digitsFor={digitsFor} onToast={showToast} />
+              )}
+            </div>
+          </div>
+        </>,
+        document.body,
+      )}
 
       {settingsOpen && (
         <IndicatorSettingsModal
@@ -643,19 +537,6 @@ export default function ChartsPage() {
         />
       )}
 
-      {orderSide && (
-        <ChartOrderModal
-          symbol={symbol}
-          side={orderSide}
-          accounts={accounts}
-          quotesByAccount={accountQuotes}
-          refPrice={lastPrice}
-          digits={decimals}
-          onCancel={() => setOrderSide(null)}
-          onConfirm={handleOrderConfirm}
-        />
-      )}
-
       {toast && (
         <div className={`fixed bottom-24 left-1/2 z-50 -translate-x-1/2 animate-fade-in-up rounded-xl border px-5 py-3 text-sm shadow-prism sm:bottom-6 ${toastToneClass(toast.kind)}`}>
           {toast.msg}
@@ -663,4 +544,10 @@ export default function ChartsPage() {
       )}
     </div>
   )
+}
+
+// 价格末两位加粗（点位）/ bold the last two digits (the pips)
+function PipText({ s }: { s: string }) {
+  if (s.length < 3 || s === '—') return <>{s}</>
+  return <>{s.slice(0, -2)}<b>{s.slice(-2)}</b></>
 }

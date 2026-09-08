@@ -686,7 +686,7 @@ export default function Layout() {
         <main
           className={`w-full flex-1 ${
             isTerminal
-              ? 'px-2 pb-24 pt-2 sm:px-3 sm:pb-3 lg:px-4'
+              ? 'p-0'
               : 'mx-auto max-w-7xl px-4 pb-24 pt-6 sm:px-6 sm:pb-6'
           }`}
         >

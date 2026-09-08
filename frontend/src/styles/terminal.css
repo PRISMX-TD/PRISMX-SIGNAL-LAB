@@ -1,707 +1,1017 @@
 /* ══════════════════════════════════════════════
    交易终端 / trading terminal (charts page)
-   终端级信息密度：收紧留白、等宽数字、高对比、发丝线分隔。
-   Terminal-grade density: tight gutters, tabular figures, high contrast,
-   hairline dividers.
+   2026-09-08 按样例稿重做外壳（图表引擎、下单逻辑、画线层不动）：
+   · 一块地，三条发丝线：自选 ▏图表 ▏下单票 坐在同一块底色上，桌面端撑满
+     顶栏以下整个视口，不再是「三张各自带圆角边框的卡片」。
+   · 报价条用外汇的「大手 + 点位」写法（1.16 小 · 23 大 · 8 上标）。
+   · 画线工具收进图表左侧的竖轨；周期药丸与指标入口在图表上方一条。
+   · 下单票：连体卖/买大按钮 + 点差徽记，风险预览排成发丝线账本。
+   · 持仓停靠：发丝线行，不套表格，操作按钮悬停才出现。
+   · 手机：图表占满，报价条压成两行，底部固定「卖 | 点差 | 买」交易条，
+     自选 / 下单票 / 持仓都作为底部抽屉升起，不再有顶部四页签切换。
+   全部类名 term- 前缀。
+   Shell redesigned 2026-09-08 to the mock (engine, order logic and draw layer
+   untouched): one ground with three hairlines instead of three framed cards;
+   big-figure/pip price; draw tools in a left rail; conjoined sell/buy with a
+   spread badge; hairline ledger rows for risk and positions; on mobile the
+   chart fills the screen with a fixed trade bar and bottom sheets.
    ══════════════════════════════════════════════ */
 
-/* 隐藏滚动条但保留滚动（终端里溢出兜底区不该露出滚动条）。
-   Hide the scrollbar but keep scrolling (overflow gutters in the terminal). */
+:root {
+  /* 顶栏 65px（40 logo + 24 padding + 1 border）；手机底栏 = 底栏本体 + 12px 悬浮间距。
+     Header is 65px; the mobile tab bar clearance includes its 12px float gap. */
+  --term-hdr: 65px;
+  --term-tabbar: calc(92px + env(safe-area-inset-bottom, 0px));
+}
+
 .no-sb { scrollbar-width: none; }
 .no-sb::-webkit-scrollbar { display: none; }
 
-/* 三栏骨架：左自选 ▏中图表 ▏右下单/账户。桌面填满视口高度，窄屏退回单列。
-   Three columns: watchlist ▏chart ▏ticket/account. Fills the viewport height on
-   desktop; collapses to a single column on narrow screens. */
+/* ── 骨架 / shell ── */
 .term-shell {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 8px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: calc(100dvh - var(--term-hdr) - var(--term-tabbar));
+  background: var(--bg);
+}
+.term-col {
+  display: none;
+  min-height: 0;
+  min-width: 0;
+  flex-direction: column;
+}
+.term-center {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
 @media (min-width: 1024px) {
-  /* 桌面：整块无缝终端——一层外框 + 内部发丝线分隔，不是「各自带圆角边框、
-     中间留缝」的浮动卡片。
-     背景从半透明白渐变改成实色抬升面：渐变在这里唯一的作用是模拟玻璃，而终端
-     里每一栏都有自己的内容底色，叠一层白渐变只会让三栏的实际亮度各不相同。
-     Desktop: one seamless terminal — a single outer frame with internal hairline
-     dividers, not floating rounded cards separated by gaps.
-     The background changed from a translucent white gradient to an opaque raised
-     surface: the gradient's only job was simulating glass, and since each column
-     has its own content backdrop, overlaying it made the three columns render at
-     visibly different brightnesses. */
   .term-shell {
-    /* 侧栏用固定像素、中栏 minmax(0, 1fr) 吃掉剩余全部宽度：自选列表和下单面板
-       的内容宽度是确定的（品种代码 + 价格 / 表单控件），给它们百分比只会在宽屏上
-       把已经排好的内容拉散；而图表的价值直接正比于能看到多少根 K 线，所有多出来
-       的像素都应该归它。1614px 屏上中栏从 706px 变成约 1090px。
-       Fixed pixel side columns with minmax(0, 1fr) in the middle: the watchlist and
-       the order ticket have determinate content widths (symbol code plus price, form
-       controls), so giving them percentages only stretches already-resolved content
-       on wide displays — while the chart's value scales directly with how many
-       candles fit, so every surplus pixel belongs to it. On a 1614px display the
-       centre column goes from 706px to roughly 1090px. */
-    grid-template-columns: 236px minmax(0, 1fr) 288px;
-    gap: 0;
-    /* 高度按「视口 - 顶栏 - 容器上下内边距」精确算，不留富余：终端页不滚动，
-       多算一像素就出现滚动条，少算一像素就白丢一像素的图表高度。
-       65px 顶栏 + 8px 上内边距 + 12px 下内边距 = 85px。
-       用 dvh 而不是 vh —— 移动浏览器地址栏收起时 vh 不更新，会让终端底部被裁掉。
-       Height is computed exactly as viewport minus header minus container padding,
-       with no slack: this page does not scroll, so one pixel too many produces a
-       scrollbar and one too few wastes a pixel of chart. 65px header + 8px top pad
-       + 12px bottom pad = 85px. dvh rather than vh because vh does not update when
-       a mobile browser collapses its address bar, which clips the terminal's base. */
-    height: calc(100dvh - 85px);
-    border: 1px solid var(--line-hi);
-    border-radius: var(--r-lg);
-    overflow: hidden;
-    background: var(--surface);
+    display: grid;
+    grid-template-columns: 248px minmax(0, 1fr) 312px;
+    grid-template-rows: minmax(0, 1fr);
+    height: calc(100dvh - var(--term-hdr));
   }
+  .term-col { display: flex; }
   .term-col-left { border-right: 1px solid var(--line); }
   .term-col-right { border-left: 1px solid var(--line); }
 }
 
-/* 面板在无缝框里不再各自带边框/圆角/背景，避免「浮动卡片 + 裂缝」观感；
-   区块之间的分隔改用发丝线（见各自的 border-bottom/top）。
-   Inside the seamless frame, panels drop their own border/radius/background so
-   they don't read as floating cards; sections are separated by hairlines. */
-.term-panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-}
-
-/* 栏目标题条。字距从 0.13em 收到 0.1em——全大写 + 宽字距在 11px 下已经够费力，
-   0.13em 会让中文标签（「自选」「持仓」）的字距大到像是漏排。
-   Pane header. Tracking tightened from 0.13em to 0.1em: all-caps plus wide
-   tracking is already hard work at 11px, and 0.13em spaced the Chinese labels
-   (自选 / 持仓) far enough apart to read as a typesetting error. */
-.term-pane-head {
+/* 栏目标题条 / pane head */
+.term-ph {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 32px;
+  justify-content: space-between;
   flex-shrink: 0;
-  padding: 0 12px;
+  height: 44px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--line);
-  font-size: 11px;
+}
+.term-ph h3 {
+  margin: 0;
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text-2);
-}
-.term-pane-head-r {
-  margin-left: auto;
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--text-3);
-}
-
-/* ── 中栏 / center column ── */
-.term-center {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-
-/* 图表视图容器：桌面填满中栏剩余高度（图表在其内部再 flex-1）。无缝——各区块
-   靠发丝线分隔，不留缝。/ Chart-view wrapper: fills the center column's
-   remaining height on desktop; seamless, sections split by hairlines. */
-.term-chartview {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-@media (min-width: 1024px) {
-  .term-chartview { flex: 1; }
-}
-
-/* 手机端顶部视图切换（分段控件）：比标准 Tab 栏更轻——高度矮、字号小、
-   背景弱化，读起来像一组 chip 切换而不是"又一条导航栏"，不跟 App 全局底部
-   Tab 栏抢视觉权重（那才是真正的一级导航）。参考 Web3 手机交易 App 里
-   Markets/Trade 页顶部常见的轻量分段控件。
-   Mobile top view switcher: deliberately lighter than a standard tab bar —
-   shorter, smaller type, a quieter background — so it reads as a chip toggle
-   rather than "yet another nav bar" competing with the app's global bottom tab
-   bar (the actual primary navigation). Mirrors the light segmented control
-   Web3 mobile trading apps put atop their Markets/Trade screens. */
-.term-mtabs {
-  display: flex;
-  gap: 2px;
-  margin-bottom: 10px;
-  padding: 2px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--nest);
-}
-.term-mtabs button {
-  flex: 1;
-  height: 28px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-3);
-  font: inherit;
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: color 0.15s, background-color 0.15s;
-}
-.term-mtabs button.on { background: var(--purple); color: #fff; }
-
-/* 手机端单视图容器：撑起大半屏，内部面板自行滚动，底部给 App 全局 Tab 栏留白。
-   Mobile single-view container: fills most of the screen; inner panels scroll
-   themselves, leaving room at the bottom for the app's global tab bar. */
-.term-mview {
-  height: calc(100vh - 12.5rem);
-  min-height: 340px;
-  min-width: 0;
-}
-
-/* 手机端图表视图的常驻买卖条：图表正下方，实色绿红、大热区，拇指可达。
-   Mobile chart-view docked buy/sell bar: right under the chart, solid green/red,
-   big tap targets, thumb-reachable. */
-/* 挪到周期/工具栏正下方后改矮一档（原来在图表下面单独占一整块，现在夹在
-   工具栏和图表之间，得更省高度）；左右各留一点外边距做视觉呼吸。
-   Shrunk a step now that it sits right under the interval/toolbar row instead
-   of alone below the chart — needs to be leaner to fit; a little side margin
-   keeps it from touching the frame edges. */
-.term-mbuysell { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 6px 4px; flex-shrink: 0; }
-.term-mbuysell button {
-  display: flex;
-  flex-direction: row;
-  align-items: baseline;
-  justify-content: center;
-  gap: 6px;
-  padding: 6px 0;
-  border: 0;
-  border-radius: 8px;
   color: #fff;
-  font: inherit;
-  cursor: pointer;
-  transition: transform 0.1s, filter 0.15s;
 }
-.term-mbuysell button:active { transform: scale(0.98); }
-.term-mbuysell button:hover { filter: brightness(1.06); }
-.term-mbuysell .lab { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; }
-.term-mbuysell .px { font-size: 12px; font-weight: 600; opacity: 0.9; }
-.term-mbuysell button.sell { background: linear-gradient(92deg, #c53350, var(--down)); }
-.term-mbuysell button.buy { background: linear-gradient(92deg, #1f9d5b, var(--up)); }
-
-/* ── 品种行情头 / symbol header ── */
-.term-symhead {
-  display: flex;
-  align-items: stretch;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--line);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.028), transparent);
-  overflow: hidden;
-}
-.term-symhead-id {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 8px 16px;
-  min-width: 148px;
-  border-right: 1px solid var(--line);
-}
-.term-symhead-sym { font-size: 18px; font-weight: 700; letter-spacing: 0.01em; }
-.term-symhead-name { font-size: 11px; color: var(--text-3); }
-.term-symhead-stats { display: flex; flex: 1; overflow-x: auto; }
-.term-sstat {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 2px;
-  padding: 8px 16px;
-  white-space: nowrap;
-}
-.term-sstat-k { font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); }
-.term-sstat-v { font-size: 14px; font-weight: 600; }
-
-/* ── 手机端行情卡：大字号价格 + 涨跌徽章，次要信息降级为底部小字一行 ──
-   Mobile quote card: big price + change badge, secondary details drop to a
-   small caption row underneath. */
-.term-symhead-m {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--line);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.028), transparent);
-}
-/* 品种名 + 大价格 + 涨跌徽章同一行：品种钉左，价格居中弹性撑开，徽章钉右。
-   Symbol + big price + change badge on one row: symbol pinned left, price
-   grows in the middle, badge pinned right. */
-.term-symhead-m-top { display: flex; align-items: baseline; gap: 8px; }
-.term-symhead-m-id { display: flex; align-items: baseline; gap: 7px; min-width: 0; flex-shrink: 0; }
-.term-symhead-m-id .sym { font-size: 15px; font-weight: 700; letter-spacing: 0.01em; }
-.term-symhead-m-id .nm { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.term-symhead-m-price { flex: 1 1 auto; text-align: right; font-size: 22px; font-weight: 700; line-height: 1.1; color: var(--text); min-width: 0; }
-.term-symhead-m-price.up { color: var(--up); }
-.term-symhead-m-price.down { color: var(--down); }
-.term-symhead-m-chg {
-  flex-shrink: 0;
-  font-size: 12px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: var(--nest);
-  color: var(--text-2);
-}
-.term-symhead-m-chg.up { background: var(--up-bg); color: var(--up); }
-.term-symhead-m-chg.down { background: var(--down-bg); color: var(--down); }
-/* 底部行：次要统计（靠左，可横滑）+ 自定义策略小 chip（钉右）同一行。
-   Bottom row: secondary stats (left, scrollable) + custom-strategy chip
-   (pinned right) on one line. */
-.term-symhead-m-btm { display: flex; align-items: center; gap: 10px; }
-.term-symhead-m-stats {
-  display: flex;
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-x: auto;
-  gap: 12px;
+.term-ph span {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 11px;
+  font-weight: 500;
   color: var(--text-3);
-  white-space: nowrap;
 }
-.term-symhead-m-stats span { flex-shrink: 0; }
-.term-symhead-m-stats b { font-weight: 600; color: var(--text-2); margin-left: 3px; }
-.term-symhead-m-stats b.up { color: var(--up); }
-.term-symhead-m-stats b.down { color: var(--down); }
-/* 自定义策略入口：缩成右侧一个紧凑小 chip（图标 + 短文案），不再占整行。
-   Custom-strategy entry: a compact chip on the right (icon + short label),
-   no longer a full-width row. */
-.term-symhead-m-strat {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  padding: 4px 9px;
-  border-radius: 999px;
-  border: 1px solid rgba(90, 34, 238, 0.32);
-  background: rgba(90, 34, 238, 0.1);
-  color: var(--purple-hi);
-  font-size: 11.5px;
-  font-weight: 600;
-  text-decoration: none;
-  white-space: nowrap;
-}
-.term-symhead-m-strat:active { background: rgba(90, 34, 238, 0.18); }
 
-/* ── 单条工具栏：周期（钉左）· 画线工具（中部可横滑）· 添加指标（钉右）──
-   Single toolbar: interval (pinned left) · draw tools (scrollable middle) ·
-   add-indicator (pinned right). */
-.term-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 38px;
+/* ── 自选 / watchlist ── */
+.term-wls {
+  position: relative;
   flex-shrink: 0;
-  padding: 0 8px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--line);
 }
-.term-ivseg {
-  display: flex;
-  flex-shrink: 0;
-  padding: 2px;
-  gap: 1px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--nest);
-}
-.term-ivseg button {
-  height: 24px;
-  padding: 0 9px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-3);
-  font: inherit;
-  font-size: 11.5px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.term-ivseg button:hover { color: var(--text-2); }
-.term-ivseg button.on { background: var(--purple); color: #fff; }
-/* 桌面端画线工具行的外层：占据中部弹性空间，纵向堆叠"工具行 + 自定义拖拽条"。
-   固定 30px 高（26px 图标行 + 4px 拖拽条区），拖拽条绝对定位在底部，不参与
-   布局、不会把图标行顶高。
-   Desktop draw-tools wrapper: takes the flexible middle space and stacks the
-   icon row above the custom drag bar. Fixed 30px tall (26px icons + 4px bar);
-   the bar is absolutely positioned at the bottom so it never displaces icons. */
-.term-toolbar-scroll {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-  height: 34px;
-}
-.term-toolbar-tools {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  overflow-x: auto;
-  overflow-y: hidden;
-}
-/* 隐藏原生滚动条（no-sb 兜底同样处理），厚度改由下面的自定义拖拽条掌控。
-   Hide the native scrollbar (no-sb also covers it); thickness is now owned by
-   the custom drag bar below. */
-.term-toolbar-tools {
-  scrollbar-width: none;
-}
-.term-toolbar-tools::-webkit-scrollbar { display: none; }
-/* 自定义超细拖拽条：轨道透明贴底，thumb 就是这里写死的 2px 高——不受任何浏览器
-   原生滚动条最小厚度下限影响，想多细就多细。颜色用主题紫，一眼是"可拖动"提示。
-   Custom ultra-thin drag bar: transparent track pinned to the bottom; the thumb
-   is exactly the 2px height set here — free of any browser's native-scrollbar
-   minimum, as thin as we want. Purple = a clear "draggable" affordance. */
-.term-toolbar-track {
+.term-wls svg {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 4px;
-  display: flex;
-  align-items: center;
-}
-.term-toolbar-thumb {
-  height: 2px;
-  border-radius: 999px;
-  background: rgba(139, 108, 255, 0.55);
-  cursor: grab;
-  transition: background-color 0.15s;
-  touch-action: none;
-}
-.term-toolbar-thumb:hover,
-.term-toolbar-thumb:active { background: rgba(139, 108, 255, 0.9); }
-.term-toolbar-thumb:active { cursor: grabbing; }
-/* wrap 变体：手机端展开行用——铺满宽度换行显示，不用横向滚动藏起后面的工具
-   （发现性更好），按钮/颜色点也放大一档更好点按。手机有触屏手势不需要这条
-   拖动提示条，固定高度也不适用（多行换行需要按内容自适应高度），一并重置。
-   wrap variant: used by the mobile expand row — wraps to fill the width
-   instead of scrolling tools out of sight (better discoverability);
-   buttons/dots also size up for easier tapping. Mobile has touch gestures so
-   doesn't need this drag affordance, and the fixed height doesn't apply here
-   (wrapped rows need to grow with content) — both reset for this variant. */
-.term-toolbar-tools.wrap {
-  flex-wrap: wrap;
-  overflow: visible;
-  height: auto;
-  row-gap: 8px;
-  scrollbar-width: none;
-}
-.term-toolbar-tools.wrap::-webkit-scrollbar { display: none; }
-.term-toolbar-tools.wrap .term-tool-btn { width: 32px; height: 32px; }
-.term-toolbar-tools.wrap .term-color-dot { width: 20px; height: 20px; }
-.term-toolbar-divider { width: 1px; height: 18px; flex-shrink: 0; background: var(--line); }
-.term-tool-btn {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  flex-shrink: 0;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--nest);
+  left: 24px;
+  top: 20px;
   color: var(--text-3);
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+  pointer-events: none;
 }
-.term-tool-btn:hover:not(:disabled) { color: var(--text); border-color: var(--line-hi); }
-.term-tool-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-.term-tool-btn.on { color: var(--purple-hi); border-color: rgba(90, 34, 238, 0.5); background: rgba(90, 34, 238, 0.14); }
-.term-tool-btn.warn.on { color: var(--gold); border-color: rgba(246, 196, 83, 0.5); background: rgba(246, 196, 83, 0.14); }
-.term-color-dot {
-  width: 15px;
-  height: 15px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  cursor: pointer;
-  transition: transform 0.12s;
-}
-.term-color-dot.on { border-color: #fff; transform: scale(1.15); }
-.term-toolbar-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.term-tool-indicator {
-  height: 26px;
-  padding: 0 11px;
-  border: 1px solid rgba(90, 34, 238, 0.4);
-  border-radius: 6px;
-  background: rgba(90, 34, 238, 0.14);
-  color: var(--purple-hi);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.term-tool-indicator:hover { background: rgba(90, 34, 238, 0.24); }
-.term-stale { font-size: 11px; font-weight: 600; color: var(--gold); background: rgba(246, 196, 83, 0.12); border-radius: 5px; padding: 2px 7px; white-space: nowrap; }
-
-/* ── 手机端工具栏：周期钉左 · 画笔开关 + 添加指标钉右（画线工具默认收起）──
-   Mobile toolbar: interval pinned left · draw toggle + add-indicator pinned
-   right (draw tools start collapsed). */
-.term-toolbar-m {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 4px;
-  border-bottom: 1px solid var(--line);
-}
-.term-toolbar-m-right { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-shrink: 0; }
-/* 展开的画线工具行：贴着工具栏下方，浅底色跟折叠态区分开，换行铺满。
-   Expanded draw-tool row: sits right under the toolbar, a faint tint sets it
-   apart from the collapsed state, wraps to fill the width. */
-.term-toolbar-m-expand {
-  padding: 10px 10px 12px;
-  border-bottom: 1px solid var(--line);
-  background: rgba(90, 34, 238, 0.045);
-}
-
-/* ── 图表容器：无缝、无自身边框圆角内边距（K 线自带深色背景）──
-   Chart container: seamless, no own border/radius/padding (candles have their
-   own dark background). */
-.term-chart {
-  position: relative;
-  overflow: hidden;
-  height: 70vh;
-  min-height: 420px;
-}
-@media (min-width: 1024px) {
-  .term-chart { height: auto; min-height: 0; flex: 1; }
-}
-
-/* ── 自选列表 / watchlist ── */
-.term-wl-search {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 8px 10px;
-  padding: 0 9px;
-  height: 30px;
-  flex-shrink: 0;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--nest);
-  color: var(--text-3);
-}
-.term-wl-search input {
-  flex: 1;
-  min-width: 0;
+.term-wls input {
+  width: 100%;
+  height: 32px;
+  padding: 0 12px 0 32px;
   border: 0;
-  background: transparent;
+  border-radius: 999px;
+  background: var(--surface);
   color: var(--text);
   font: inherit;
   font-size: 12.5px;
+  box-shadow: inset 0 0 0 1px var(--line);
   outline: none;
 }
-.term-wl { flex: 1; overflow-y: auto; }
+.term-wls input:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); }
+.term-wl { flex: 1; min-height: 0; overflow-y: auto; }
 .term-wl-empty { padding: 20px 12px; font-size: 12.5px; color: var(--text-3); text-align: center; }
-.term-wl-row {
+.term-wr {
+  position: relative;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 24px minmax(0, 1fr) 52px auto;
+  gap: 0 10px;
   align-items: center;
-  gap: 9px;
   width: 100%;
-  padding: 7px 12px 7px 10px;
+  height: 52px;
+  padding: 0 12px 0 14px;
   border: 0;
-  border-left: 2px solid transparent;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--line);
   background: transparent;
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background-color 0.15s;
+  transition: background-color var(--dur-fast) var(--ease-out);
 }
-.term-wl-row:hover { background: rgba(255, 255, 255, 0.03); }
-.term-wl-row.on {
-  border-left-color: var(--purple);
-  background: linear-gradient(90deg, rgba(90, 34, 238, 0.14), transparent 82%);
+.term-wr:hover, .term-wr.on { background: var(--surface); }
+/* 选中态：左缘一道 2px 紫墨，不用渐变。/ Selected: a 2px violet ink bar, no gradient. */
+.term-wr.on::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  background: var(--purple-hi);
 }
-.term-wl-badge {
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border: 1px solid;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 700;
+.term-wr .sym-ava { width: 24px; height: 24px; font-size: 9px; }
+.term-wr-sym { font: 600 12.5px/1.1 "JetBrains Mono", ui-monospace, monospace; color: #fff; }
+.term-wr-nm { margin-top: 2px; font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 迷你走势：页面打开后收到的报价序列，不是日线——没数据时空着，不编。
+   Sparkline of the ticks received since the page opened, not a daily series;
+   stays blank until there is data rather than inventing any. */
+.term-wr-spark { width: 52px; height: 20px; display: block; }
+.term-wr-px {
+  font: 500 12.5px "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  transition: color 0.4s;
 }
-.term-wl-id { display: flex; flex-direction: column; min-width: 0; }
-.term-wl-sym { font-size: 13px; font-weight: 600; letter-spacing: 0.01em; }
-.term-wl-nm { font-size: 10.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.term-wl-px { font-size: 13px; font-weight: 600; text-align: right; transition: color 0.4s; }
+.term-wr-px.up { color: var(--up); }
+.term-wr-px.down { color: var(--down); }
 
-/* ── 账户摘要 / account summary ── */
-.term-account { border-top: 1px solid var(--line); }
-.term-account-body { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
-.term-account-empty { font-size: 12px; color: var(--text-3); line-height: 1.6; }
-.term-account-row { display: flex; align-items: baseline; justify-content: space-between; font-size: 12.5px; }
-.term-account-k { color: var(--text-3); }
-.term-account-v { font-weight: 600; }
-.term-account-v.strong { font-size: 14px; }
-.term-account-meta {
+/* ── 报价条 / quote strip ── */
+.term-qs {
   display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 2px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-  font-size: 10.5px;
-  color: var(--text-3);
+  align-items: stretch;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--line);
 }
-
-/* ── 右栏快速下单 / right-rail quick order ── */
-.term-quickorder { display: flex; flex-direction: column; gap: 9px; padding: 12px; }
-.term-bs-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.term-bs {
+.term-qs-id {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.term-qs-id .sym-ava { width: 30px; height: 30px; font-size: 10.5px; }
+.term-qs-id h2 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+.term-qs-id p { margin: 2px 0 0; font-size: 11px; color: var(--text-3); }
+.term-qs-px {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 18px;
+  border-right: 1px solid var(--line);
+}
+/* 大手 + 点位：外汇报价的写法，点位（倒数第 2、3 位）放大，最后一位上标。
+   Big figure + pips: FX convention, pips enlarged and the last digit superscript. */
+.term-big {
+  display: inline-flex;
+  align-items: baseline;
+  font: 500 30px/1 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: -0.03em;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.term-big .pip { font-size: 38px; font-weight: 600; }
+.term-big sup { margin-left: 2px; font-size: 14px; color: var(--text-2); transform: translateY(-6px); }
+.term-chg {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 9px 0;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--nest);
+  font: 500 12.5px "JetBrains Mono", ui-monospace, monospace;
+}
+.term-chg small { font-family: inherit; font-size: 10.5px; color: var(--text-3); font-family: var(--sans, inherit); }
+.term-chg.up { color: var(--up); }
+.term-chg.down { color: var(--down); }
+.term-qs-st {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  padding: 0 20px;
+  min-width: 0;
+  overflow-x: auto;
+}
+.term-st { white-space: nowrap; }
+.term-st .k {
+  font: 500 10px/1 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   color: var(--text-3);
-  font: inherit;
-  cursor: pointer;
-  transition: border-color 0.18s, background-color 0.18s, transform 0.12s;
 }
-.term-bs:active { transform: scale(0.97); }
-.term-bs .lab { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; }
-.term-bs .px { font-size: 15px; font-weight: 600; }
-.term-bs.buy:hover { border-color: rgba(53, 201, 122, 0.55); background: var(--up-bg); color: var(--up); }
-.term-bs.sell:hover { border-color: rgba(240, 77, 99, 0.55); background: var(--down-bg); color: var(--down); }
-.term-quickorder-hint { margin: 0; font-size: 11px; color: var(--text-3); text-align: center; }
-
-/* ── 停靠下单面板 / docked order ticket ── */
-.term-ticket { display: flex; flex-direction: column; gap: 9px; padding: 11px; overflow-y: auto; }
-.term-field { display: flex; flex-direction: column; gap: 4px; }
-.term-field-k { font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); }
-.term-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-/* 下单面板账户选择器：复用通用 .select-picker（自定义下拉，深色可控），仅需让它
-   在字段里占满宽度、触发器高度对齐其它输入框。/ Ticket account picker: reuses the
-   shared .select-picker (custom dark-controllable dropdown); just make it fill the
-   field width and align the trigger height with the other inputs. */
-.term-acct-select { display: block; width: 100%; }
-.term-acct-select .select-trigger { height: 32px; font-size: 13px; border-radius: 7px; padding: 0 10px; }
-.term-seg2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 3px; background: var(--nest); border: 1px solid var(--line); border-radius: 8px; }
-.term-seg2 button {
-  height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--text-3);
-  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+.term-st .v {
+  margin-top: 6px;
+  font: 500 13.5px/1 "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
-.term-seg2 button.on { background: var(--purple); color: #fff; }
-.term-stepper { display: flex; align-items: center; gap: 6px; }
-.term-stepper input {
-  flex: 1; min-width: 0; height: 32px; border: 1px solid var(--line); border-radius: 7px;
-  background: var(--nest); color: var(--text); font-size: 14px; text-align: center; outline: none;
-}
-.term-stepper input:focus { border-color: var(--purple); }
-.term-stepper button {
-  width: 32px; height: 32px; flex-shrink: 0; border: 1px solid var(--line); border-radius: 7px;
-  background: var(--nest); color: var(--text-2); font-size: 16px; cursor: pointer;
-}
-.term-stepper button:hover { border-color: var(--line-hi); color: var(--text); }
-.term-chips { display: flex; gap: 6px; }
-.term-chip {
-  flex: 1; height: 26px; border: 1px solid var(--line); border-radius: 6px; background: var(--nest);
-  color: var(--text-2); font-size: 12px; cursor: pointer;
-}
-.term-chip:hover { border-color: var(--line-hi); color: var(--text); }
-.term-chip.on { border-color: rgba(90, 34, 238, 0.55); background: rgba(90, 34, 238, 0.16); color: var(--purple-hi); }
-.term-inp { height: 32px; border: 1px solid var(--line); border-radius: 7px; background: var(--nest); display: flex; align-items: center; padding: 0 9px; }
-.term-inp input { width: 100%; border: 0; background: transparent; color: var(--text); font-size: 13px; text-align: right; outline: none; }
-.term-inp.bad { border-color: var(--down); }
-.term-risk {
-  display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; padding: 9px 11px;
-  border: 1px solid var(--line); border-radius: 8px; background: var(--nest); font-size: 11.5px;
-}
-.term-risk .k { color: var(--text-3); }
-.term-risk .v { text-align: right; font-family: var(--font-mono, "JetBrains Mono", ui-monospace, monospace); font-weight: 600; }
-.term-place {
-  height: 40px; border: 0; border-radius: 9px; font: inherit; font-size: 14px; font-weight: 700;
-  color: #fff; cursor: pointer; letter-spacing: 0.02em; transition: filter 0.15s, transform 0.1s;
-}
-.term-place:active { transform: scale(0.98); }
-.term-place:disabled { opacity: 0.45; cursor: not-allowed; }
-.term-place.buy { background: linear-gradient(92deg, #1f9d5b, var(--up)); box-shadow: 0 5px 18px -6px rgba(53, 201, 122, 0.5); }
-.term-place.sell { background: linear-gradient(92deg, #c53350, var(--down)); box-shadow: 0 5px 18px -6px rgba(240, 77, 99, 0.5); }
-.term-place:not(:disabled):hover { filter: brightness(1.08); }
-.term-ticket-warn { margin: 0; font-size: 11px; color: var(--gold); }
-.term-ticket-receipt { margin: 0; font-size: 12px; text-align: center; }
-.term-ticket-receipt.ok { color: var(--up); }
-.term-ticket-receipt.error { color: var(--down); }
-.term-ticket-receipt.info { color: var(--text-2); }
-
-/* ── 底部持仓 / 挂单 / positions & orders dock ── */
-.term-dock { flex-shrink: 0; border-top: 1px solid var(--line); }
-.term-dock-tabs { display: flex; gap: 2px; padding: 5px 8px 0; border-bottom: 1px solid var(--line); flex-shrink: 0; }
-.term-dock-tab {
-  display: flex; align-items: center; gap: 6px; padding: 6px 12px 8px; border: 0; background: transparent;
-  color: var(--text-3); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
-  border-bottom: 2px solid transparent;
-}
-.term-dock-tab.on { color: var(--text); border-bottom-color: var(--purple); }
-.term-dock-cnt { font-family: var(--font-mono, ui-monospace, monospace); font-size: 10px; background: rgba(90, 34, 238, 0.2); color: var(--purple-hi); border-radius: 5px; padding: 0 5px; }
-.term-dock-body { overflow: auto; }
-.term-dock-empty { padding: 22px 12px; text-align: center; font-size: 12.5px; color: var(--text-3); }
-.term-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.term-tbl th {
-  position: sticky; top: 0; z-index: 1; text-align: right; padding: 7px 12px; white-space: nowrap;
-  font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3);
-  background: var(--bg); border-bottom: 1px solid var(--line);
-}
-.term-tbl th:first-child, .term-tbl td:first-child { text-align: left; }
-.term-tbl td { padding: 7px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid rgba(255, 255, 255, 0.035); }
-.term-tbl tr:hover td { background: rgba(255, 255, 255, 0.02); }
-.term-tbl-sym { font-weight: 600; }
-.term-tbl-status { color: var(--gold); }
-.term-pill { font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 5px; }
-.term-pill.buy { background: var(--up-bg); color: var(--up); }
-.term-pill.sell { background: var(--down-bg); color: var(--down); }
-.term-tbl-actions { display: flex; gap: 6px; justify-content: flex-end; }
-.term-x-btn { border: 1px solid var(--line); background: var(--nest); color: var(--text-3); border-radius: 5px; font-size: 11px; padding: 3px 9px; cursor: pointer; }
-.term-x-btn:hover:not(:disabled) { color: var(--down); border-color: rgba(240, 77, 99, 0.4); }
-.term-x-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.term-x-btn.alt:hover:not(:disabled) { color: var(--purple-hi); border-color: rgba(90, 34, 238, 0.45); }
-.term-x-btn.alt.on { color: var(--purple-hi); border-color: rgba(90, 34, 238, 0.5); background: rgba(90, 34, 238, 0.14); }
-
-/* 仓位管理展开面板：部分平仓 + 改止损止盈 / position manage panel */
-.term-tbl-open td { background: rgba(90, 34, 238, 0.05); border-bottom-color: transparent; }
-.term-pos-expand td { padding: 0; }
-.term-pos-panel {
-  display: flex; flex-wrap: wrap; gap: 14px;
-  padding: 10px 12px 12px;
-  background: rgba(90, 34, 238, 0.05);
-  border-bottom: 1px solid var(--line);
-}
-.term-pos-group { display: flex; flex-direction: column; gap: 5px; }
-.term-pos-group-k { font-size: 10.5px; color: var(--text-3); letter-spacing: 0.03em; }
-.term-pos-row { display: flex; align-items: center; gap: 6px; }
-.term-pos-inp {
-  width: 92px; height: 30px; border: 1px solid var(--line); border-radius: 6px; background: var(--nest);
-  color: var(--text); font-size: 12.5px; text-align: right; padding: 0 8px; outline: none;
-}
-.term-pos-inp:focus { border-color: var(--purple); }
-.term-pos-inp.bad { border-color: var(--down); }
-.term-pos-btn {
-  height: 30px; padding: 0 12px; border: 1px solid rgba(90, 34, 238, 0.4); border-radius: 6px;
-  background: rgba(90, 34, 238, 0.15); color: var(--purple-hi); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+.term-st .v.up { color: var(--up); }
+.term-st .v.down { color: var(--down); }
+/* 右端状态：实时 / 延迟。绿点只在真的有实时喂价时出现。
+   Right end: live / stale. The green dot appears only while the feed is live. */
+.term-qs-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  padding: 0 18px;
+  font: 500 10.5px "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
   white-space: nowrap;
 }
-.term-pos-btn:hover:not(:disabled) { background: rgba(90, 34, 238, 0.25); }
-.term-pos-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.term-pos-warn { font-size: 10.5px; color: var(--down); }
+.term-qs-live i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--up);
+  animation: breathe 2.4s ease-in-out infinite;
+}
+.term-qs-live.stale { color: var(--gold); }
+.term-qs-live.stale i { background: var(--gold); animation: none; }
 
-/* 涨跌色（终端内复用）/ up-down colors reused inside the terminal */
-.term-panel .up, .term-symhead .up { color: var(--up); }
-.term-panel .down, .term-symhead .down { color: var(--down); }
+/* ── 图表区：左竖轨 + 工具条 + 画布 / chart area ── */
+.term-cv {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-rows: 40px minmax(0, 1fr);
+}
+.term-rail {
+  grid-row: 1 / 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 0;
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+}
+.term-rail hr {
+  width: 18px;
+  margin: 6px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+.term-tool-btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: var(--r-tile);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.term-tool-btn:hover:not(:disabled) { color: var(--text); background: var(--surface); }
+.term-tool-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.term-tool-btn.on { color: #fff; background: var(--purple); }
+.term-tool-btn.warn.on { color: #0b0b0e; background: var(--gold); }
+.term-color-dot {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  margin: 3px 0;
+  border: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast);
+}
+.term-color-dot.on { box-shadow: 0 0 0 2px #fff; transform: scale(1.15); }
+.term-toolbar-divider { width: 1px; height: 18px; flex-shrink: 0; background: var(--line); }
+/* 手机端展开的画线行：换行铺满，按钮放大一档好点按。
+   Mobile expanded draw row: wraps to fill, larger buttons for thumbs. */
+.term-tools-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 4px;
+  padding: 10px 12px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.term-tools-wrap .term-tool-btn { width: 34px; height: 34px; }
+.term-tools-wrap .term-tool-btn:hover:not(:disabled) { background: var(--surface-2); }
+.term-tools-wrap .term-color-dot { width: 16px; height: 16px; margin: 0 4px; }
+
+.term-tb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+.term-tf {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--surface);
+}
+.term-tf button {
+  height: 24px;
+  min-width: 34px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  font: 500 11.5px "JetBrains Mono", ui-monospace, monospace;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.term-tf button:hover { color: var(--text); }
+.term-tf button.on { background: var(--purple); color: #fff; }
+.term-tbr {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.term-tbr-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--line-hi);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.term-tbr-btn:hover { color: #fff; }
+.term-tbr-btn b {
+  font: 500 10.5px "JetBrains Mono", ui-monospace, monospace;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  display: inline-grid;
+  place-items: center;
+}
+.term-tbr .term-tool-btn { width: 26px; height: 26px; box-shadow: inset 0 0 0 1px var(--line-hi); }
+.term-tbr .term-tool-btn.on { box-shadow: none; }
+
+/* 图表容器：无边框无圆角，K 线自带底色。/ Chart container: seamless. */
+.term-chart {
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.term-chart-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  font-size: 13px;
+  color: var(--text-3);
+}
+/* 指标图例：裸等宽字，不套模糊药丸。/ Indicator legends: plain mono, no blurred pill. */
+.term-legend {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  pointer-events: none;
+  font: 500 11px "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.term-legend.main { left: 12px; top: 10px; }
+
+/* ── 持仓停靠 / positions dock ── */
+.term-dock {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-height: 0;
+  border-top: 1px solid var(--line);
+}
+@media (min-width: 1024px) {
+  .term-dock { height: 186px; }
+}
+.term-dk-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  height: 38px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+.term-dk-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.term-dk-tab.on { color: #fff; background: var(--surface); }
+.term-dk-tab b {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font: 500 10.5px "JetBrains Mono", ui-monospace, monospace;
+}
+.term-dk-tab.on b { background: var(--purple); color: #fff; }
+.term-dk-sum {
+  margin-left: auto;
+  font: 500 11px "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.term-dk-sum b { margin-left: 6px; font-size: 12px; font-weight: 500; }
+.term-dk-body { flex: 1; min-height: 0; overflow: auto; }
+.term-dk-empty { padding: 22px 12px; text-align: center; font-size: 12.5px; color: var(--text-3); }
+/* 持仓行：一行一仓，发丝线分隔。/ One position per hairline row. */
+.term-pr {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) 1fr 1fr 1fr 1fr minmax(0, 1.1fr) auto;
+  gap: 0 16px;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  animation: term-in 0.45s var(--ease-out) both;
+}
+.term-pr:hover, .term-pr.open { background: var(--surface); }
+.term-pr.pend { grid-template-columns: minmax(0, 1.4fr) auto auto; justify-content: space-between; }
+.term-pr .k {
+  margin-bottom: 4px;
+  font: 500 9.5px/1 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.term-pr .v {
+  font: 500 12.5px/1 "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.term-pr .v.up { color: var(--up); }
+.term-pr .v.down { color: var(--down); }
+.term-pr-id { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.term-pr-id .sym-ava { width: 20px; height: 20px; font-size: 8px; }
+.term-pr-id b { font: 600 12.5px "JetBrains Mono", ui-monospace, monospace; color: #fff; }
+.term-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font: 500 10.5px "JetBrains Mono", ui-monospace, monospace;
+  white-space: nowrap;
+}
+.term-tag.buy { background: var(--up-bg); color: var(--up); }
+.term-tag.sell { background: var(--down-bg); color: var(--down); }
+.term-tag.pending { background: var(--mid-bg); color: var(--mid); }
+.term-pnl {
+  font: 500 14px "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.term-pnl.up { color: var(--up); }
+.term-pnl.down { color: var(--down); }
+.term-pa { display: flex; gap: 4px; justify-content: flex-end; }
+.term-pa button {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.term-pa button:hover:not(:disabled) { color: #fff; background: var(--nest-hi); }
+.term-pa button.warn { color: var(--down); }
+.term-pa button.on { background: var(--purple); color: #fff; }
+.term-pa button:disabled { opacity: 0.4; cursor: not-allowed; }
+/* 有悬停能力的设备才把操作藏到悬停；触屏一直显示。
+   Hide actions until hover only where hover exists; touch shows them always. */
+@media (hover: hover) {
+  .term-pr .term-pa { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
+  .term-pr:hover .term-pa, .term-pr.open .term-pa, .term-pr:focus-within .term-pa { opacity: 1; }
+}
+/* 管理展开：部分平仓 + 改止损止盈。/ Manage panel: partial close + modify SL/TP. */
+.term-pr-x {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 28px;
+  padding: 12px 16px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.term-pr-xg { display: flex; flex-direction: column; gap: 6px; }
+.term-pr-xk { font-size: 11px; color: var(--text-3); }
+.term-pr-xr { display: flex; align-items: center; gap: 6px; }
+.term-pr-inp {
+  width: 96px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--nest);
+  color: var(--text);
+  font: 500 12.5px "JetBrains Mono", ui-monospace, monospace;
+  text-align: right;
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.term-pr-inp:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); }
+.term-pr-inp.bad { box-shadow: inset 0 0 0 1px var(--down); }
+.term-pr-btn {
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--purple);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.term-pr-btn:hover:not(:disabled) { background: var(--purple-vivid); }
+.term-pr-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.term-pr-warn { font-size: 11px; color: var(--down); }
+
+/* ── 下单票 / order ticket ── */
+.term-tk {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 16px 16px;
+}
+.term-acct-select { display: block; margin-top: 14px; }
+.term-acct-select .select-trigger {
+  height: 34px;
+  padding: 0 12px;
+  background: var(--surface);
+  border: 0;
+  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text-2);
+}
+.term-side {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 12px;
+}
+.term-side button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 64px;
+  border: 0;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), transform var(--dur-fast);
+}
+.term-side button:first-child { border-radius: var(--r-panel) 0 0 var(--r-panel); }
+.term-side button:last-child { border-radius: 0 var(--r-panel) var(--r-panel) 0; }
+.term-side button:active { transform: scale(0.985); }
+.term-side .lab {
+  font: 500 10.5px "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.term-side .px {
+  font: 500 17px "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.term-side .px b { font-size: 21px; font-weight: 600; }
+.term-side button.sell.on { background: var(--down); }
+.term-side button.buy.on { background: var(--up); }
+.term-side button.on .lab, .term-side button.on .px { color: #0b0b0e; }
+.term-spread {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line-hi);
+  font: 500 10.5px "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text-2);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.term-spread small { color: var(--text-3); }
+.term-fk {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 18px 0 6px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.term-fk b { font-weight: 500; color: var(--text-2); }
+.term-mode {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--surface);
+}
+.term-mode button {
+  height: 20px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.term-mode button.on { background: var(--nest-hi); color: #fff; }
+.term-step {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 36px;
+  height: 40px;
+  border-radius: 999px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.term-step button {
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: 500 18px "JetBrains Mono", ui-monospace, monospace;
+  cursor: pointer;
+}
+.term-step button:hover { background: var(--surface-2); color: #fff; }
+.term-step input {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font: 500 16px "JetBrains Mono", ui-monospace, monospace;
+  text-align: center;
+  outline: none;
+  font-variant-numeric: tabular-nums;
+}
+.term-pre {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  margin-top: 6px;
+}
+.term-pre button {
+  height: 26px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  font: 500 11px "JetBrains Mono", ui-monospace, monospace;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+.term-pre button:hover { color: var(--text); box-shadow: inset 0 0 0 1px var(--line-hi); }
+.term-pre button.on { color: #fff; background: var(--purple); box-shadow: none; }
+.term-two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.term-fld { display: flex; flex-direction: column; min-width: 0; }
+.term-fld .term-fk { margin: 14px 0 6px; }
+.term-inp {
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface);
+  color: #fff;
+  font: 500 13px "JetBrains Mono", ui-monospace, monospace;
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-variant-numeric: tabular-nums;
+}
+.term-inp::placeholder { color: var(--text-3); }
+.term-inp:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); }
+.term-inp.bad { box-shadow: inset 0 0 0 1px var(--down); }
+.term-fh {
+  margin-top: 5px;
+  padding-left: 12px;
+  font: 500 10.5px "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text-3);
+  min-height: 13px;
+}
+.term-fh .up { color: var(--up); }
+.term-fh .down { color: var(--down); }
+.term-led { margin-top: 16px; border-top: 1px solid var(--line); }
+.term-lr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 32px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--text-3);
+}
+.term-lr b {
+  font: 500 12.5px "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.term-lr b small { margin-left: 4px; font-weight: 400; color: var(--text-3); }
+.term-lr b.up { color: var(--up); }
+.term-lr b.down { color: var(--down); }
+.term-lr.em { height: 36px; }
+.term-lr.em span { color: var(--text-2); }
+.term-lr.em b { font-size: 14px; }
+.term-warn { margin: 10px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--gold); }
+.term-cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  height: 46px;
+  margin-top: 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--up);
+  color: #0b0b0e;
+  font: 600 14px var(--sans, inherit);
+  cursor: pointer;
+  transition: transform var(--dur-fast), filter var(--dur-fast);
+}
+.term-cta.sell { background: var(--down); }
+.term-cta .px {
+  font: 500 13px "JetBrains Mono", ui-monospace, monospace;
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+.term-cta:hover:not(:disabled) { filter: brightness(1.06); }
+.term-cta:active:not(:disabled) { transform: translateY(1px); }
+.term-cta:disabled { opacity: 0.45; cursor: not-allowed; }
+.term-ctah { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-3); text-align: center; }
+.term-receipt { margin: 8px 0 0; font-size: 12px; text-align: center; }
+.term-receipt.ok { color: var(--up); }
+.term-receipt.error { color: var(--down); }
+.term-receipt.info { color: var(--text-2); }
+
+/* ── 账户条 / account ── */
+.term-ac {
+  flex-shrink: 0;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--line);
+}
+.term-ac .term-ph { height: 30px; padding: 0; border: 0; }
+.term-ac-empty { margin: 6px 0 0; font-size: 12px; line-height: 1.6; color: var(--text-3); }
+.term-acg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 16px;
+  margin-top: 4px;
+}
+.term-acg .k {
+  font: 500 9.5px/1 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.term-acg .v {
+  margin-top: 5px;
+  font: 500 14px/1 "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.term-acg .v small { margin-left: 4px; font-size: 10.5px; color: var(--text-3); }
+.term-acg .v.up { color: var(--up); }
+.term-acg .v.down { color: var(--down); }
+.term-acm {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+  font: 500 10.5px "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text-3);
+}
+.term-acm .ok { display: inline-flex; align-items: center; gap: 6px; color: var(--up); }
+.term-acm .ok::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+/* ── 手机 / mobile ── */
+.term-mbar, .term-sheet, .term-scrim { display: none; }
+@media (max-width: 1023px) {
+  .term-qs { flex-wrap: wrap; }
+  .term-qs-id { flex: 1; min-width: 0; padding: 12px 16px 0; border-right: 0; cursor: pointer; }
+  .term-qs-id .sym-ava { display: none; }
+  .term-qs-id h2 { display: flex; align-items: center; gap: 6px; }
+  .term-qs-id h2 svg { color: var(--text-3); }
+  .term-qs-px { flex-direction: column; align-items: flex-end; gap: 2px; padding: 10px 16px 0; border-right: 0; }
+  .term-big { font-size: 24px; }
+  .term-big .pip { font-size: 30px; }
+  .term-big sup { font-size: 12px; }
+  .term-chg { flex-direction: row; align-items: baseline; gap: 8px; }
+  .term-qs-st { width: 100%; justify-content: space-between; gap: 0; padding: 10px 16px 12px; }
+  .term-st .k { font-size: 9px; }
+  .term-st .v { margin-top: 4px; font-size: 12px; }
+  .term-qs-live { display: none; }
+  .term-cv { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 40px auto; }
+  .term-rail { display: none; }
+  .term-chart { grid-row: 1; }
+  .term-tb { grid-row: 2; border-bottom: 0; border-top: 1px solid var(--line); padding: 0 10px; overflow-x: auto; scrollbar-width: none; }
+  .term-tb::-webkit-scrollbar { display: none; }
+  .term-tf button { min-width: 34px; height: 26px; padding: 0 8px; }
+  .term-tools-slot { grid-row: 3; }
+  .term-tools-wrap { border-bottom: 0; border-top: 1px solid var(--line); }
+  .term-dock { display: none; }
+
+  /* 底部交易条：卖 | 点差 | 买。点开是下单票抽屉。
+     Bottom trade bar: sell | spread | buy; tapping opens the ticket sheet. */
+  .term-mbar {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    padding: 8px 12px;
+    border-top: 1px solid var(--line);
+    background: var(--bg);
+  }
+  .term-mbar button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    height: 52px;
+    border: 0;
+    border-radius: var(--r-panel);
+    font: inherit;
+    cursor: pointer;
+    transition: transform var(--dur-fast);
+  }
+  .term-mbar button:active { transform: scale(0.98); }
+  .term-mbar .sell { background: var(--down-bg); color: var(--down); }
+  .term-mbar .buy { background: var(--up-bg); color: var(--up); }
+  .term-mbar .lab { font: 500 10px "JetBrains Mono", ui-monospace, monospace; letter-spacing: 0.1em; text-transform: uppercase; }
+  .term-mbar .px { font: 500 16px "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  .term-mbar .px b { font-size: 20px; font-weight: 600; }
+  .term-mbar .sp { font: 500 10.5px/1.3 "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); text-align: center; }
+  .term-mbar .sp b { display: block; font-size: 12px; font-weight: 500; color: var(--text-2); }
+
+  /* 抽屉：自选 / 下单票 / 持仓。盖在全站底栏之上。
+     Sheets: watchlist / ticket / positions, above the app tab bar. */
+  .term-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 44;
+    background: rgba(0, 0, 0, 0.55);
+    animation: term-fade 0.25s var(--ease-out) both;
+  }
+  .term-sheet {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 45;
+    max-height: 88dvh;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    background: var(--surface);
+    animation: term-sheet-in 0.32s var(--ease-out) both;
+  }
+  .term-sheet::before {
+    content: "";
+    flex-shrink: 0;
+    width: 36px;
+    height: 4px;
+    margin: 10px auto 0;
+    border-radius: 2px;
+    background: var(--line-hi);
+  }
+  .term-sheet .term-ph { height: 40px; padding: 0 16px; border: 0; }
+  .term-sheet-body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; }
+  /* 抽屉里的面用再抬一档，与抽屉底色分开。/ Inner planes step up once more. */
+  .term-sheet .term-wls input, .term-sheet .term-side button, .term-sheet .term-step,
+  .term-sheet .term-inp, .term-sheet .term-mode, .term-sheet .term-acct-select .select-trigger,
+  .term-sheet .term-pr:hover, .term-sheet .term-pr.open, .term-sheet .term-pr-x, .term-sheet .term-dk-tab.on { background: var(--nest); }
+  .term-sheet .term-side button.sell.on { background: var(--down); }
+  .term-sheet .term-side button.buy.on { background: var(--up); }
+  .term-sheet .term-spread { background: var(--surface); }
+  .term-sheet .term-wr:hover, .term-sheet .term-wr.on { background: var(--nest); }
+  .term-sheet .term-wl { max-height: 60dvh; }
+  /* 抽屉里整体滚动，票不再自己内滚——否则下单按钮会被账户条截一半。
+     Inside the sheet the body scrolls as a whole; a self-scrolling ticket would leave the CTA half-hidden. */
+  .term-sheet .term-tk { flex: none; overflow: visible; }
+  .term-sheet .term-dock { display: flex; border-top: 0; }
+  .term-sheet .term-ac { padding: 12px 16px 20px; }
+  .term-sheet .term-ac .term-ph { padding: 0; }
+  /* 持仓行在窄屏收成两行：品种 + 盈亏 一行，四个价位一行，操作在最后。
+     Position rows fold to two lines on narrow screens. */
+  .term-pr {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-areas: "id id id pnl" "e c sl tp" "pa pa pa pa";
+    gap: 10px 8px;
+    padding: 12px 16px;
+  }
+  .term-pr-id { grid-area: id; }
+  .term-pr .pnl { grid-area: pnl; text-align: right; }
+  .term-pr .c-e { grid-area: e; }
+  .term-pr .c-c { grid-area: c; }
+  .term-pr .c-sl { grid-area: sl; }
+  .term-pr .c-tp { grid-area: tp; }
+  .term-pa { grid-area: pa; justify-content: flex-start; }
+  .term-pr.pend { grid-template-areas: "id id id st" "pa pa pa pa"; }
+  .term-pr .c-st { grid-area: st; text-align: right; }
+}
+
+@keyframes term-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes term-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes term-sheet-in { from { transform: translateY(100%); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .term-pr, .term-scrim, .term-sheet { animation: none; }
+  .term-qs-live i { animation: none; }
+}
