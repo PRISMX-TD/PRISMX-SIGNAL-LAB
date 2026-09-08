@@ -425,13 +425,10 @@ function Foot({ t }: { t: T }) {
 
 
 /* ═══════════════ 段位 / rank ladder ═══════════════
-   六级按账本行排：罗马数字 · 称号 · 条件，一行一级，当前级紫底。
-   称号直接读 gamification.titles.*（与成就页、用户菜单同一份文案），
-   条件是落地页自己的短句。示例：站在第四级。
-   Six tiers as ledger rows: numeral, title, conditions; the current tier
-   sits on a violet plane. Titles read gamification.titles.* (the same strings
-   the achievements page and user menu use); conditions are the landing
-   page's own short lines. Sample: standing at tier IV. */
+   六个称号一行，当前级紫底；条件不在落地页上展开，进成就页再看。
+   称号读 gamification.titles.*，与成就页、用户菜单同一份文案。示例：第四级。
+   Six titles in one row, the current tier on a violet plane; conditions stay
+   on the achievements page. Titles read gamification.titles.*. Sample: tier IV. */
 const LEVEL_KEYS = ['novice', 'junior', 'elite', 'senior', 'chief', 'legend'] as const
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI']
 const CURRENT_LEVEL = 4
@@ -444,118 +441,70 @@ function RankLadder({ t }: { t: T }) {
       <div className="mt-3">
         <Heading title={t('landing.rkTitle')} subtitle={t('landing.rkSubtitle')} />
       </div>
-      <ol className="reveal mt-12 border-t border-white/[0.14]">
+      <ol className="reveal mt-10 grid grid-cols-2 gap-px overflow-hidden rounded-lg bg-white/[0.07] sm:grid-cols-3 lg:grid-cols-6">
         {LEVEL_KEYS.map((k, i) => {
           const lv = i + 1
           const state = lv < CURRENT_LEVEL ? 'done' : lv === CURRENT_LEVEL ? 'now' : 'locked'
           return (
-            <li
-              key={k}
-              className={`grid grid-cols-[3rem_1fr] items-baseline gap-x-4 border-b border-white/[0.07] py-5 sm:grid-cols-[3.5rem_1fr] sm:gap-x-6 ${
-                state === 'now' ? '-mx-4 rounded-md bg-prism-600/10 px-4 sm:-mx-5 sm:px-5' : ''
-              }`}
-            >
-              <span className={`num text-[15px] ${state === 'now' ? 'text-prism-300' : 'text-neutral-500'}`}>{ROMAN[i]}</span>
-              <div>
-                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                  <b className={`font-display text-[clamp(1.05rem,1.6vw,1.35rem)] font-bold ${state === 'locked' ? 'text-neutral-400' : 'text-white'}`}>
-                    {t(`gamification.titles.${k}`)}
-                  </b>
-                  {state === 'now' && (
-                    <span className="rounded-full bg-prism-600 px-2 py-0.5 text-[11px] font-semibold text-white">{t('landing.rkNow')}</span>
-                  )}
-                  {state === 'done' && <span className="text-[11px] text-up">{t('landing.rkDone')}</span>}
-                </div>
-                <p className="mt-1 text-[13px] leading-relaxed text-neutral-500">{t(`landing.rkCond${lv}`)}</p>
-              </div>
+            <li key={k} className={`flex flex-col gap-2 px-5 py-6 ${state === 'now' ? 'bg-prism-600/20' : 'bg-ink-950'}`}>
+              <span className={`num text-[13px] ${state === 'now' ? 'text-prism-300' : 'text-neutral-500'}`}>{ROMAN[i]}</span>
+              <b className={`font-display text-[17px] font-bold ${state === 'locked' ? 'text-neutral-500' : 'text-white'}`}>
+                {t(`gamification.titles.${k}`)}
+              </b>
+              <span className={`text-[11px] ${state === 'now' ? 'text-prism-300' : state === 'done' ? 'text-up' : 'text-neutral-600'}`}>
+                {state === 'now' ? t('landing.rkNow') : state === 'done' ? t('landing.rkDone') : ' '}
+              </span>
             </li>
           )
         })}
       </ol>
-      <div className="reveal mt-10 grid gap-6 sm:grid-cols-3">
-        {[1, 2, 3].map((n) => (
-          <div key={n} className="border-t border-white/[0.14] pt-4">
-            <b className="block text-[15px] font-semibold text-white">{t(`landing.rkNote${n}T`)}</b>
-            <p className="mt-1.5 text-[13px] leading-relaxed text-neutral-500">{t(`landing.rkNote${n}D`)}</p>
-          </div>
-        ))}
-      </div>
     </section>
   )
 }
 
 /* ═══════════════ 勋章 / honor wall ═══════════════
-   十一枚全部是站内真实的 BadgeIcon（medal.ts 铸币渲染器），按成就页的三层
-   陈列：进阶 / 特殊 / 绝版。名字读 gamification.badges.*.name，档位读
-   gamification.tier.*——落地页不另写一份勋章文案。示例：已获得 7 枚。
-   All eleven are the product's real BadgeIcon (the medal.ts renderer), shelved
-   as on the achievements page. Names and tiers read the gamification strings;
-   the landing page keeps no second copy. Sample: seven earned. */
-const WALL: { id: string; tier: number; earned: boolean; shelf: 'tiered' | 'special' | 'limited' }[] = [
-  { id: 'starter', tier: 3, earned: true, shelf: 'tiered' },
-  { id: 'regular', tier: 2, earned: true, shelf: 'tiered' },
-  { id: 'evergreen', tier: 1, earned: true, shelf: 'tiered' },
-  { id: 'winning_hand', tier: 2, earned: true, shelf: 'tiered' },
-  { id: 'veteran', tier: 1, earned: true, shelf: 'tiered' },
-  { id: 'board_return', tier: 0, earned: false, shelf: 'tiered' },
-  { id: 'arena', tier: 1, earned: true, shelf: 'tiered' },
-  { id: 'campaigner', tier: 0, earned: false, shelf: 'tiered' },
-  { id: 'comp_back_to_back', tier: 0, earned: true, shelf: 'special' },
-  { id: 'comeback', tier: 0, earned: false, shelf: 'special' },
-  { id: 'founder_2026', tier: 0, earned: true, shelf: 'limited' },
+   十一枚全部是站内真实的 BadgeIcon，只带名字；档位和条件进成就页再看。
+   示例：已获得 7 枚，未获得的灰阶。
+   All eleven are the product's real BadgeIcon, names only; tiers and
+   conditions live on the achievements page. Sample: seven earned. */
+const WALL: { id: string; tier: number; earned: boolean }[] = [
+  { id: 'starter', tier: 3, earned: true },
+  { id: 'regular', tier: 2, earned: true },
+  { id: 'evergreen', tier: 1, earned: true },
+  { id: 'winning_hand', tier: 2, earned: true },
+  { id: 'veteran', tier: 1, earned: true },
+  { id: 'board_return', tier: 0, earned: false },
+  { id: 'arena', tier: 1, earned: true },
+  { id: 'campaigner', tier: 0, earned: false },
+  { id: 'comp_back_to_back', tier: 0, earned: true },
+  { id: 'comeback', tier: 0, earned: false },
+  { id: 'founder_2026', tier: 0, earned: true },
 ]
 
 function HonorWall({ t }: { t: T }) {
   const ref = useReveal<HTMLElement>()
-  const shelves = [
-    ['tiered', 'landing.hnTiered'],
-    ['special', 'gamification.shelf.special'],
-    ['limited', 'landing.hnLimited'],
-  ] as const
   return (
     <section ref={ref} id="honor" className={`${SHELL} scroll-mt-24 py-20 sm:py-28`}>
-      <div className="grid gap-10 lg:grid-cols-12 lg:gap-12">
-        <div className="lg:col-span-5">
-          <p className="reveal eyebrow">{t('landing.hnEyebrow')}</p>
-          <div className="mt-3">
-            <Heading title={t('landing.hnTitle')} subtitle={t('landing.hnSubtitle')} />
-          </div>
-          <p className="reveal mt-8 max-w-[34ch] text-[clamp(1.05rem,1.5vw,1.25rem)] font-medium leading-snug text-neutral-200">
-            {t('landing.hnStatement')}
-          </p>
-        </div>
-        <div className="reveal flex flex-col gap-8 lg:col-span-7">
-          {shelves.map(([shelf, label]) => (
-            <div key={shelf}>
-              <p className="text-[11px] uppercase tracking-[0.14em] text-neutral-500">{t(label)}</p>
-              <ul className="mt-4 grid grid-cols-4 gap-x-3 gap-y-6">
-                {WALL.filter((b) => b.shelf === shelf).map((b) => (
-                  <li key={b.id} className={`flex flex-col items-center text-center ${b.earned ? '' : 'opacity-40 grayscale'}`}>
-                    <BadgeIcon id={b.id} tier={b.tier || undefined} earned={b.earned} size={64} />
-                    <b className="mt-2.5 text-[13px] font-semibold text-white">{t(`gamification.badges.${b.id}.name`)}</b>
-                    <span className="mt-0.5 text-[11px] text-neutral-500">
-                      {!b.earned
-                        ? t('landing.hnNotEarned')
-                        : b.tier
-                          ? t(`gamification.tier.${b.tier}`)
-                          : t(`gamification.shelf.${shelf}`)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
+      <p className="reveal eyebrow">{t('landing.hnEyebrow')}</p>
+      <div className="mt-3">
+        <Heading title={t('landing.hnTitle')} subtitle={t('landing.hnSubtitle')} />
       </div>
+      <ul className="reveal mt-10 grid grid-cols-4 gap-x-3 gap-y-7 sm:grid-cols-6 lg:grid-cols-11">
+        {WALL.map((b) => (
+          <li key={b.id} className={`flex flex-col items-center text-center ${b.earned ? '' : 'opacity-35 grayscale'}`}>
+            <BadgeIcon id={b.id} tier={b.tier || undefined} earned={b.earned} size={64} />
+            <b className="mt-2.5 text-[12px] font-semibold text-white">{t(`gamification.badges.${b.id}.name`)}</b>
+          </li>
+        ))}
+      </ul>
     </section>
   )
 }
 
 /* ═══════════════ 排位与比赛 / boards & contests ═══════════════
-   左：榜单预览，前三用真实 RankCoin，「你」那一行紫底（同 .lb-row.me）；
-   右：比赛四要素。示例数据。
-   Left: a board preview with real RankCoin for the top three and the "you"
-   row on a violet plane; right: the four facts of a contest. Sample data. */
+   榜单预览一张（前三真实 RankCoin，「你」那一行紫底），比赛一句话。示例数据。
+   One board preview (real RankCoin for the top three, the "you" row on a
+   violet plane) and a single line on contests. Sample data. */
 const BOARD = [
   { r: 1, n: 'Mo***ch', a: '600 402', s: '+14.2%' },
   { r: 2, n: 'Ka***en', a: '600 118', s: '+9.4%' },
@@ -568,16 +517,20 @@ function Arena({ t }: { t: T }) {
   const ref = useReveal<HTMLElement>()
   return (
     <section ref={ref} id="arena" className={`${SHELL} scroll-mt-24 py-20 sm:py-28`}>
-      <p className="reveal eyebrow">{t('landing.arEyebrow')}</p>
-      <div className="mt-3">
-        <Heading title={t('landing.arTitle')} subtitle={t('landing.arSubtitle')} />
-      </div>
-      <div className="mt-12 grid gap-6 lg:grid-cols-12 lg:gap-8">
-        <div className="reveal glass-card p-6 lg:col-span-7">
-          <div className="flex items-baseline justify-between">
-            <b className="font-display text-[15px] font-bold text-white">{t('landing.arBoard')}</b>
-            <span className="text-[11px] text-neutral-500">{t('landing.arLive')}</span>
+      <div className="grid gap-10 lg:grid-cols-12 lg:gap-12">
+        <div className="lg:col-span-5">
+          <p className="reveal eyebrow">{t('landing.arEyebrow')}</p>
+          <div className="mt-3">
+            <Heading title={t('landing.arTitle')} subtitle={t('landing.arSubtitle')} />
           </div>
+          <div className="reveal mt-8 border-t border-white/[0.14] pt-5">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-prism-400">{t('landing.arCompEyebrow')}</p>
+            <h3 className="mt-2 font-display text-[clamp(1.15rem,1.8vw,1.5rem)] font-bold text-white">{t('landing.arCompTitle')}</h3>
+            <p className="mt-2 max-w-[40ch] text-[14px] leading-relaxed text-neutral-400">{t('landing.arCompDesc')}</p>
+          </div>
+        </div>
+        <div className="reveal glass-card p-6 lg:col-span-7">
+          <b className="font-display text-[15px] font-bold text-white">{t('landing.arBoard')}</b>
           <ul className="mt-4 border-t border-white/[0.14]">
             {BOARD.map((x) => (
               <li
@@ -602,20 +555,6 @@ function Arena({ t }: { t: T }) {
               </li>
             ))}
           </ul>
-          <p className="mt-4 text-[12px] leading-relaxed text-neutral-500">{t('landing.arGate')}</p>
-        </div>
-        <div className="reveal flex flex-col justify-center lg:col-span-5">
-          <p className="text-[11px] uppercase tracking-[0.14em] text-prism-400">{t('landing.arCompEyebrow')}</p>
-          <h3 className="mt-3 font-display-xl text-[clamp(1.5rem,2.6vw,2.1rem)] text-white">{t('landing.arCompTitle')}</h3>
-          <p className="mt-3 max-w-[46ch] text-[14px] leading-relaxed text-neutral-400">{t('landing.arCompDesc')}</p>
-          <dl className="mt-6 grid grid-cols-2 gap-4">
-            {[1, 2, 3, 4].map((n) => (
-              <div key={n} className="border-t border-white/[0.14] pt-3">
-                <dt className="text-[11px] text-neutral-500">{t(`landing.arMeta${n}K`)}</dt>
-                <dd className="mt-1 font-display text-[17px] font-bold text-white">{t(`landing.arMeta${n}V`)}</dd>
-              </div>
-            ))}
-          </dl>
         </div>
       </div>
     </section>
