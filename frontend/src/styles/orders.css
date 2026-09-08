@@ -1,5 +1,5 @@
 /* ═════════════ 订单与回执页 / orders & receipts page ═════════════
-   2026-09-08 重做。三个页签共用一个页头（眉题 + 标题 + 账号药丸 + 一条光谱线），
+   2026-09-08 重做。三个页签共用全站统一的页头（PageHead：标题 + 副题 + 账号药丸），
    下面各自只回答一个问题：
    · 操作记录：一行一张「回执单」（.ord-slip）——左侧时间票根加打孔虚线，右侧状态
      印章。它是这页上唯一的「物件」，其余分层全靠发丝线与留白，没有第二层卡片。
@@ -8,75 +8,14 @@
    · 持仓与账户：账户信息改成发丝线分区的账本条，不再套卡片；持仓卡与自动仓管沿用。
    全部类名带 ord- 前缀：样例阶段一个裸的 .pos 与持仓卡的 .pos 撞名，把正数条撑成
    了 34px 高——这页的类名都不进全局词汇。
-   Redesigned 2026-09-08. One shared head (eyebrow + title + account pills + the
-   spectral rule); each tab answers one question. The receipt slip is the only
+   Redesigned 2026-09-08. One shared head (the site-wide PageHead: title, subtitle, account pills); each tab answers one question. The receipt slip is the only
    "object" on the page; everything else layers by hairline and whitespace. The
    performance tab is deliberately minimal — the equity curve, streak ribbon,
    KPI ledger, exit-reason and R-distribution blocks were all cut by the product
    owner; do not bring them back. Every class is ord- prefixed after a bare .pos
    collided with the position card during the mock. */
 
-/* ── 页头 / head ── */
-.ord-hd {
-  display: grid;
-  gap: 22px;
-  align-items: end;
-}
-@media (min-width: 1024px) {
-  .ord-hd {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 48px;
-  }
-}
-.ord-eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
-  line-height: 1;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--text-3);
-}
-.ord-eyebrow i {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: var(--text-3);
-}
-/* 实时点：只在 WebSocket 真的连着时出现，是状态不是装饰。
-   Live dot: rendered only while the WebSocket is actually connected. */
-.ord-live {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--up);
-}
-.ord-live::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--up);
-  animation: breathe 2.4s ease-in-out infinite;
-}
-.ord-title {
-  margin: 16px 0 0;
-  font-size: clamp(30px, 3.4vw, 42px);
-  line-height: 1.05;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: #fff;
-  text-wrap: balance;
-}
-.ord-sub {
-  margin: 10px 0 0;
-  max-width: 52ch;
-  font-size: 14px;
-  color: var(--text-3);
-}
+/* ── 页头：全站统一的 PageHead（page-head.css），这里只剩账号切换药丸 ── */
 /* 账号切换：药丸 = 可点的东西。选中态是实色紫（颜料），未选中只有一圈发丝线。
    Account switcher: pills mean clickable; the selected one is flat violet ink. */
 .ord-accts {
@@ -844,7 +783,6 @@
   .ord-slip,
   .ord-tug i,
   .ord-stamp.land,
-  .ord-live::before,
   .ord-acct.online .ord-acct-dot,
   .ord-pill-on::before,
   .ord-slip[data-status="PENDING"] .ord-stamp {

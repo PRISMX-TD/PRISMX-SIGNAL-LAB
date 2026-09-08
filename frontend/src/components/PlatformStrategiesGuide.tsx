@@ -39,6 +39,7 @@ import { signalApi } from '../api/client'
 import { localizeApiError } from '../api/utils'
 import { IndicatorList, RiskRewardFigure, SpecFact, SymbolChips, TimeframeTrack, pick } from './strategyGuide'
 import { SkeletonBlock } from './Skeleton'
+import PageHead from './PageHead'
 import type { PlatformStrategy } from '../api/types'
 import { safeHttpUrl } from '../utils/safeUrl'
 
@@ -71,21 +72,13 @@ export default function PlatformStrategiesGuide() {
 
   return (
     <div>
-      {/* 页头与信号板同一套：标题 + 计数 + 副题。/ Same head recipe as the board. */}
-      <div className="sig-board-head">
-        <div className="sig-board-title">
-          <h2 className="font-display">
-            {t('signals.tabs.platformStrategies')}
-            {!loading && !error && items.length > 0 && (
-              <span className="sig-board-count">
-                <b className="num">{items.length}</b>
-                <span>{t('signals.guide.countUnit')}</span>
-              </span>
-            )}
-          </h2>
-          <p>{t('signals.guide.subtitle')}</p>
-        </div>
-      </div>
+      {/* 页头与全站同一套：标题 + 计数 + 副题。/ The site-wide PageHead. */}
+      <PageHead
+        title={t('signals.tabs.platformStrategies')}
+        count={!loading && !error && items.length > 0 ? items.length : null}
+        countUnit={t('signals.guide.countUnit')}
+        subtitle={t('signals.guide.subtitle')}
+      />
 
       {loading ? (
         // 骨架贴合最终形状（两整行牌），不用转圈。/ Skeleton in the final shape.

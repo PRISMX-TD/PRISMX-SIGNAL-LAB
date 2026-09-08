@@ -1,6 +1,7 @@
 // 管理后台页：运营指标 + 用户列表（可调整角色/订阅等级，支持批量修改）
 // Admin page: operating metrics + user list (role/plan adjustable, bulk edit supported)
 import { useEffect, useRef, useState, type FormEvent } from 'react'
+import PageHead from '../components/PageHead'
 import { useTranslation } from 'react-i18next'
 import Switch from '../components/Switch'
 import { useToast } from '../utils/useToast'
@@ -628,12 +629,7 @@ export default function AdminPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h2 className="font-display text-2xl font-bold text-neutral-100">
-          <span className="neon-text">{t('admin.title')}</span>
-        </h2>
-        <p className="mt-1 text-sm text-neutral-400">{t('admin.subtitle')}</p>
-      </div>
+      <PageHead as="h1" title={t('admin.title')} subtitle={t('admin.subtitle')} />
 
       {toast && (
         <div

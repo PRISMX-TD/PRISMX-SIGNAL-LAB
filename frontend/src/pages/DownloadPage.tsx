@@ -1,6 +1,7 @@
 // 下载页：提供 PRISMX 桥接程序下载、使用教程与注意事项。
 // Download page: PRISMX Bridge download, usage guide and important notes.
 import { useEffect, useState } from 'react'
+import PageHead from '../components/PageHead'
 import { useTranslation } from 'react-i18next'
 import { bridgeVersionApi } from '../api/client'
 
@@ -70,16 +71,16 @@ export default function DownloadPage() {
     // Page width is left to Layout's max-w-7xl to match the other pages; this
     // used to add its own max-w-4xl, making the page narrower than the rest.
     <div>
-      {/* 头部 + 下载卡 / header + download card */}
-      <div className="glass-neon relative overflow-hidden p-8">
-        <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-prism-600/20 blur-3xl" />
-        <div className="relative flex flex-col items-start gap-6 sm:flex-row sm:items-center sm:justify-between">
+      {/* 页头用全站统一的 PageHead；下载卡只留版本 / 平台与按钮。原来标题在卡里，
+          还压着一团紫色模糊光球——全站早已不用发光，这里一并去掉。
+          The site-wide PageHead; the card keeps only version / platform and the
+          button. The title used to sit inside the card under a violet blur blob,
+          which the rest of the app stopped using long ago. */}
+      <PageHead as="h1" title={t('download.title')} subtitle={t('download.subtitle')} />
+      <div className="glass p-6">
+        <div className="flex flex-col items-start gap-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="font-display text-2xl font-bold text-neutral-100">
-              <span className="neon-text">{t('download.title')}</span>
-            </h2>
-            <p className="mt-2 max-w-xl text-sm text-neutral-400">{t('download.subtitle')}</p>
-            <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-neutral-500">
+            <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
               {version && (
                 <span className="tag border border-prism-600/40 bg-prism-600/10 text-prism-300">
                   {t('download.version')} v{version}

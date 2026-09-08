@@ -13,6 +13,7 @@
 // entry card to a closed-by-default <details> so new users don't conclude they
 // must install something.
 import { useEffect, useState } from 'react'
+import PageHead from '../components/PageHead'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { bridgeVersionApi, gatewayApi } from '../api/client'
@@ -106,12 +107,7 @@ export default function BindPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h2 className="font-display text-2xl font-bold text-neutral-100">
-          <span className="neon-text">{t('bind.title')}</span>
-        </h2>
-        <p className="mt-1 text-sm text-neutral-400">{t('bind.gw.pageSubtitle', { name: brokerName })}</p>
-      </div>
+      <PageHead as="h1" title={t('bind.title')} subtitle={t('bind.gw.pageSubtitle', { name: brokerName })} />
 
       {/* grid-cols-1 不能省：Tailwind 的 grid-cols-* 展开成 minmax(0,1fr)，列才
           允许收缩到视口宽度以内，账号表在窄屏才会落进自己的横向滚动容器；没有

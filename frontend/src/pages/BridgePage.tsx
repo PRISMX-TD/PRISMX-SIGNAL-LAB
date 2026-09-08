@@ -2,7 +2,8 @@
 // Bridge sub-page: everything that requires the local PRISMX Bridge (API token,
 // connected accounts, symbol suffix, setup steps).
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import PageHead from '../components/PageHead'
+
 import { useTranslation } from 'react-i18next'
 import { accountApi, eaApi } from '../api/client'
 import { useLive } from '../store/live'
@@ -113,15 +114,12 @@ export default function BridgePage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <Link to="/bind" className="text-xs text-neutral-400 transition hover:text-prism-300">
-          {t('bind.backToBind')}
-        </Link>
-        <h2 className="mt-2 font-display text-2xl font-bold text-neutral-100">
-          <span className="neon-text">{t('bind.bridgeTitle')}</span>
-        </h2>
-        <p className="mt-1 text-sm text-neutral-400">{t('bind.subtitle')}</p>
-      </div>
+      <PageHead
+        as="h1"
+        back={{ to: '/bind', label: t('bind.backToBind') }}
+        title={t('bind.bridgeTitle')}
+        subtitle={t('bind.subtitle')}
+      />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {bridgeAccounts.length > 0 && (

@@ -822,8 +822,6 @@
     "subtitle": "下单指令的执行状态与成交回执。每一笔发进 MT5 的指令，都会在这里留下一张回执单。",
     "empty": "暂无订单记录",
     "emptyHint": "在信号页或图表页下单后，每一笔指令的执行状态与成交回执都会在这里留底。",
-    "eyebrow": "Orders · Receipts · UTC+8",
-    "live": "Live",
     "awaitingReceipt": "已发出，等待执行回执…",
     "day": {
       "today": "今天",

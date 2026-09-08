@@ -1,0 +1,106 @@
+/* ═════════════ 页头 / page head ═════════════
+   全站登录后页面共用的一套页头（components/PageHead.tsx）。2026-09-08 从信号板的
+   .sig-board-head 提升为全站规则：标题 26px 展示字宽、可选紫色等宽计数、13px 副题，
+   右侧 actions 槽底边对齐，窄屏折到下一行。紫只落在计数上。
+   The one page head shared by every logged-in page (components/PageHead.tsx),
+   promoted 2026-09-08 from the signal board's .sig-board-head: 26px display-width
+   title, optional violet tabular count, 13px subtitle, right-hand actions slot
+   aligned to the baseline and wrapping below on narrow screens. */
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 24px;
+  margin-bottom: 24px;
+}
+.page-head-title {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.page-head-title h1,
+.page-head-title h2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+  font-size: 26px;
+  line-height: 1.1;
+  font-weight: 700;
+  color: #fff;
+}
+.page-head-name {
+  text-wrap: balance;
+}
+.page-head-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+/* 计数：页头里唯一的彩度。--purple-hi 对 --bg 约 5.4:1，过 AA。
+   The count is the head's only chroma; --purple-hi on --bg is ~5.4:1. */
+.page-head-count b {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--purple-hi);
+  letter-spacing: -0.02em;
+}
+.page-head-count span {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+/* 标题后的小标签（.tag / .chip）按基线对齐后略微下沉，抬回 2px。
+   A small tag after the title sits a touch low on the baseline; lift it 2px. */
+.page-head-title h1 > .tag,
+.page-head-title h2 > .tag,
+.page-head-title h1 > .chip,
+.page-head-title h2 > .chip {
+  position: relative;
+  top: -2px;
+}
+.page-head-title p {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-3);
+  max-width: 64ch;
+}
+.page-head-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: var(--text-3);
+  text-decoration: none;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.page-head-back:hover {
+  color: #fff;
+}
+.page-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+/* 筛选栏进了页头，原来的下外边距交给页头统一管。
+   The filter bar now lives in the head; the head owns the bottom margin. */
+.page-head-actions .sig-filters {
+  margin-bottom: 0;
+}
+@media (max-width: 639px) {
+  .page-head {
+    margin-bottom: 20px;
+  }
+  /* 窄屏下右侧槽独占一行、撑满，页签条与筛选栏才有横向空间。
+     On narrow screens the slot takes its own full-width row. */
+  .page-head-actions {
+    flex-basis: 100%;
+  }
+}

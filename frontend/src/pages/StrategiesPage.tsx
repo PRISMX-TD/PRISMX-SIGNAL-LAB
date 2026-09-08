@@ -20,6 +20,7 @@
 // which adding a condition editor plus cost/out-of-sample views would have made
 // unmanageable.
 import { useCallback, useEffect, useState } from 'react'
+import PageHead from '../components/PageHead'
 import { useTranslation } from 'react-i18next'
 import { segBtn } from '../utils/segBtn'
 import { Link } from 'react-router-dom'
@@ -1126,10 +1127,7 @@ export default function StrategiesPage() {
 
   return (
     <div>
-      <div className="mb-5">
-        <h2 className="font-display text-2xl font-bold text-neutral-50">{t('strategy.title')}</h2>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-neutral-400">{t('strategy.subtitle')}</p>
-      </div>
+      <PageHead as="h1" title={t('strategy.title')} subtitle={t('strategy.subtitle')} />
 
       {!isPro && (
         <div className="glass mb-5 border-prism-500/20 bg-prism-600/5 p-4 text-center text-sm text-neutral-300">

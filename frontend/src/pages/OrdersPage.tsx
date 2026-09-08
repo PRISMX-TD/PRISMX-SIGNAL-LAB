@@ -23,6 +23,7 @@ import PerformanceSummary from '../components/PerformanceSummary'
 import ClosedTradesList from '../components/ClosedTradesList'
 import AutoManageCard from '../components/AutoManageCard'
 import OnboardingCard from '../components/OnboardingCard'
+import PageHead from '../components/PageHead'
 import { usePartnerBroker } from '../components/PartnerBrokerCard'
 import { symbolMeta } from '../utils/symbolMeta'
 
@@ -65,7 +66,7 @@ const money2 = (n: number | null | undefined): string =>
 export default function OrdersPage() {
   const { t, i18n } = useTranslation()
   const { user, refreshUser } = useAuth()
-  const { orders, accounts, refreshAll, closedTradeTick, wsConnected } = useLive()
+  const { orders, accounts, refreshAll, closedTradeTick } = useLive()
   // gateway 账号不落库券商名，账户横条的券商列回落到合作券商名（与绑定页一致）
   // Gateway rows don't store a company; the account bar's broker falls back to
   // the partner broker name, matching the bind page.
@@ -457,27 +458,16 @@ export default function OrdersPage() {
 
   return (
     <div>
-      {/* 页头：眉题 + 标题 + 全页统一账号切换器 / page head: eyebrow, title, page-wide account switcher */}
-      <header className="ord-hd animate-fade-in-up">
-        <div>
-          <div className="ord-eyebrow">
-            {t('orders.eyebrow').split('·').map((part, i, arr) => (
-              <span key={i} className="contents">
-                {part.trim()}
-                {i < arr.length - 1 && <i />}
-              </span>
-            ))}
-            {wsConnected && (
-              <>
-                <i />
-                <span className="ord-live">{t('orders.live')}</span>
-              </>
-            )}
-          </div>
-          <h2 className="ord-title font-display">{t('orders.title')}</h2>
-          <p className="ord-sub">{t('orders.subtitle')}</p>
-        </div>
-        {accounts.length > 1 && (
+      {/* 页头：全站统一的 PageHead，右侧是全页统一的账号切换器。原来这页自带一套
+          「等宽大写眉题 + 42px 标题 + 光谱线」，2026-09-08 统一掉。
+          Page head: the site-wide PageHead with the page-wide account switcher on
+          the right. This page used to carry its own mono-caps eyebrow, 42px title
+          and spectral rule; unified 2026-09-08. */}
+      <PageHead
+        as="h1"
+        title={t('orders.title')}
+        subtitle={t('orders.subtitle')}
+        actions={accounts.length > 1 ? (
           <div className="ord-accts" role="tablist">
             {accounts.map((a) => (
               <button
@@ -494,13 +484,8 @@ export default function OrdersPage() {
               </button>
             ))}
           </div>
-        )}
-      </header>
-
-      {/* 光谱线：全站签名图形，每屏一次 / the spectral rule: once per view */}
-      <div className="rule-spectral my-6" aria-hidden>
-        <i />
-      </div>
+        ) : undefined}
+      />
 
       {/* Tab 导航 / tab navigation */}
       <div className="seg-tabs mb-6" role="tablist">

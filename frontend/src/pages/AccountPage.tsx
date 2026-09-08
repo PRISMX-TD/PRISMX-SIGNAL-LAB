@@ -15,6 +15,7 @@ import PushDiagnostics from "../components/PushDiagnostics"
 import { SkeletonBlock, SkeletonLine } from "../components/Skeleton"
 import BadgeIcon from "../components/badges/BadgeIcon"
 import Switch from "../components/Switch"
+import PageHead from "../components/PageHead"
 import {
   ALL_SENTINEL,
   EVENT_STRATEGY_SIGNAL,
@@ -475,8 +476,8 @@ export default function AccountPage() {
   if (!info) {
     return (
       <div>
-        <p className="eyebrow">{t("account.title")}</p>
-        <div className="acct-empty mt-6">{t("account.loadError")}</div>
+        <PageHead as="h1" title={t("account.title")} />
+        <div className="acct-empty">{t("account.loadError")}</div>
       </div>
     )
   }
@@ -495,9 +496,11 @@ export default function AccountPage() {
 
   return (
     <div>
+      {/* 页头用全站统一的 PageHead；下面才是姓名 + 身份牌那块 hero。
+          The site-wide PageHead; the name + plate hero follows. */}
+      <PageHead as="h1" title={t("account.title")} />
       {/* ── 顶部：姓名 + 身份牌 / hero ── */}
-      <p className="eyebrow">{t("account.title")}</p>
-      <header className="acct-hero mt-3">
+      <header className="acct-hero">
         <div className="min-w-0">
           <h1 className="font-display-xl acct-name">{displayName}</h1>
           <div className="acct-meta">

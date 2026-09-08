@@ -25,6 +25,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useAuth } from '../store/auth'
+import PageHead from '../components/PageHead'
 
 export type GrowthTab = 'achievements' | 'leaderboard' | 'competitions'
 
@@ -45,11 +46,10 @@ export default function GrowthHub({ tab, children }: { tab: GrowthTab; children:
 
   return (
     <div className="mx-auto max-w-[1100px]">
-      <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="font-display text-2xl font-bold text-neutral-100">
-          <span className="neon-text">{t('nav.growth')}</span>
-        </h2>
-        {visible.length > 1 && (
+      <PageHead
+        as="h1"
+        title={t('nav.growth')}
+        actions={visible.length > 1 ? (
           <div className="seg-tabs w-full sm:w-fit" role="tablist" aria-label={t('nav.growth')}>
             {visible.map((x) => (
               <button
@@ -66,8 +66,8 @@ export default function GrowthHub({ tab, children }: { tab: GrowthTab; children:
               </button>
             ))}
           </div>
-        )}
-      </header>
+        ) : undefined}
+      />
       {children}
     </div>
   )

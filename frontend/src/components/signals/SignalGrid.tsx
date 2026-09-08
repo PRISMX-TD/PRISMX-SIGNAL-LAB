@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../../store/prefs'
 import Select from '../Select'
+import PageHead from '../PageHead'
 import type { Signal, UserPlan } from '../../api/types'
 import { calcRiskReward, displaySymbol, parseTime } from '../../api/utils'
 import { effectiveStatus, fmtIssueClock, fmtPx, priceDecimals, resultLabel, resultTone, riskFraction, rrTone } from './SignalView'
@@ -194,28 +195,22 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
           They used to stack as two rows; the filters belong to the same level as
           the title, and sitting beside it removes one layer above the grid. On
           narrow screens the filters wrap to a second line (still scrollable). */}
-      <div className="sig-board-head">
-        <div className="sig-board-title">
-          <h2 className="font-display">
-            {t('signals.title')}
-            {/* 计数从实色紫药丸改成一个紫色等宽数字：页头里唯一的彩度就是它。
-                Count moves from a solid violet pill to one violet tabular numeral,
-                the only chroma in the head. */}
-            <span className="sig-board-count">
-              <b className="num">{filtered.length}</b>
-              <span>{t('signals.countUnit')}</span>
-            </span>
-          </h2>
-          <p>{t('signals.subtitle')}</p>
-        </div>
-
-        {/* 筛选器。品种是下拉，桌面手机共用同一个控件——下拉在窄屏本来就好用，
+      {/* 计数从实色紫药丸改成一个紫色等宽数字：页头里唯一的彩度就是它。
+          Count moves from a solid violet pill to one violet tabular numeral, the
+          only chroma in the head. */}
+      <PageHead
+        title={t('signals.title')}
+        count={filtered.length}
+        countUnit={t('signals.countUnit')}
+        subtitle={t('signals.subtitle')}
+        actions={
+        /* 筛选器。品种是下拉，桌面手机共用同一个控件——下拉在窄屏本来就好用，
             不需要再单独做一套「点击循环」。排序仍是桌面药丸 / 手机循环两套：它只有
             两个值，为两个值开一个下拉是多余的层级。
             Filters. The symbol picker is one dropdown shared by both breakpoints — a
             dropdown already works on narrow screens, so it needs no separate
             tap-to-cycle variant. Sort keeps its pills/cycle split: with only two
-            values, a dropdown would be more chrome than choice. */}
+            values, a dropdown would be more chrome than choice. */
         <div className="sig-filters">
           <div className="fgroup">
             <span className="fk">{t('signals.filterSymbol')}</span>
@@ -245,7 +240,8 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
             </button>
           </div>
         </div>
-      </div>
+        }
+      />
 
       {/* FREE 用户提醒：升级看实时信号 / FREE tier notice: upgrade for live signals */}
       {isFree && (

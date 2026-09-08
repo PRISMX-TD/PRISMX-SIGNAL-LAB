@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import PageHead from '../components/PageHead'
 import { useTranslation } from 'react-i18next'
 import { ticketApi } from '../api/client'
 import Select from '../components/Select'
@@ -222,14 +223,15 @@ export default function SupportPage() {
   return (
     <div className="mx-auto max-w-2xl">
       {error && <div className="mb-4 rounded-lg border border-down/40 bg-down/15 px-4 py-2.5 text-sm text-down">{error}</div>}
-      <div className="mb-6 flex items-center justify-between">
-        <h2 className="font-display text-2xl font-bold text-neutral-100">
-          <span className="neon-text">{t('tickets.title')}</span>
-        </h2>
-        <button onClick={() => setView('form')} className="btn-primary px-4 py-2 text-sm">
-          {t('tickets.newTicket')}
-        </button>
-      </div>
+      <PageHead
+        as="h1"
+        title={t('tickets.title')}
+        actions={
+          <button onClick={() => setView('form')} className="btn btn-primary">
+            {t('tickets.newTicket')}
+          </button>
+        }
+      />
 
       {loading ? (
         <div className="glass flex flex-col gap-3 p-5">

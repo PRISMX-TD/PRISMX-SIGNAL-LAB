@@ -822,8 +822,6 @@
     "subtitle": "Execution status and fill receipts. Every instruction sent to MT5 leaves a receipt here.",
     "empty": "No orders yet",
     "emptyHint": "Once you place an order from the Signals or Charts page, every instruction's status and fill receipt is kept here.",
-    "eyebrow": "Orders · Receipts · UTC+8",
-    "live": "Live",
     "awaitingReceipt": "Sent — waiting for the execution receipt…",
     "day": {
       "today": "Today",

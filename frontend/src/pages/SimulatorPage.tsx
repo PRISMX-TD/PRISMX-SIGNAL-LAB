@@ -18,6 +18,7 @@
 // AdminOnly wrapper + the two isAdmin entry checks — this component itself
 // needs no changes.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import PageHead from '../components/PageHead'
 import { useTranslation } from 'react-i18next'
 import Pager from '../components/Pager'
 import { segBtn } from '../utils/segBtn'
@@ -177,16 +178,12 @@ export default function SimulatorPage() {
 
   return (
     <div>
-      {/* 标题 / header */}
-      <div className="mb-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="font-display text-2xl font-bold text-neutral-50">{t('simulator.title')}</h2>
-          <span className="tag bg-amber-400/15 text-amber-300 ring-1 ring-amber-400/30">
-            {t('simulator.adminOnly')}
-          </span>
-        </div>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-neutral-400">{t('simulator.subtitle')}</p>
-      </div>
+      <PageHead
+        as="h1"
+        title={t('simulator.title')}
+        badge={<span className="tag bg-amber-400/15 text-amber-300 ring-1 ring-amber-400/30">{t('simulator.adminOnly')}</span>}
+        subtitle={t('simulator.subtitle')}
+      />
 
       {/* 参数 / parameters */}
       <section className="glass mb-5 p-5">

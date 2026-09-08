@@ -2,7 +2,7 @@
    内容规则一条都没动（见 docs/superpowers/specs/2026-08-22-winrate-watch-dashboard-design.md
    与 shared.ts 的 verdictOf）：判定仍只由颜色承担、不显示笔数、不加图形。这里只重排
    字号层级与材质，让它和信号板、策略介绍是同一套：
-   · 页头复用 .sig-board-head；「现在：亚洲盘」放到 26px 展示字宽，是这一屏的结论。
+   · 页头复用全站 .page-head；「现在：亚洲盘」放到 26px 展示字宽，是这一屏的结论。
    · 胜率芯片（RateChip）：钟点 15px 白、胜率 17px 等宽着色，md/sm 两档。
    · 策略卡：策略名 20px 展示字宽，开合用 32px 圆形箭头；打开时 1px 边转品牌紫。
    · 展开层：三块问题各是一块 --nest 内嵌面（8px 圆角），行内百分比 17px 等宽，

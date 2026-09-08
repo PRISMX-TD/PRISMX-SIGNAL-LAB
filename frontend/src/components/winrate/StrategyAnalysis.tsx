@@ -32,6 +32,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { signalApi } from '../../api/client'
 import { SkeletonBlock, SkeletonLine } from '../Skeleton'
+import PageHead from '../PageHead'
 import type { AdminStrategyWinRate } from '../../api/types'
 import { sessionStatus } from './shared'
 import WatchNow from './WatchNow'
@@ -153,14 +154,8 @@ export default function StrategyAnalysis() {
 
   return (
     <div>
-      {/* 页头与信号板、策略介绍同一套（.sig-board-head，见 signals.css）。
-          Same head recipe as the board and the guide. */}
-      <div className="sig-board-head">
-        <div className="sig-board-title">
-          <h2 className="font-display">{t('signals.analysis.title')}</h2>
-          <p>{t('signals.analysis.subtitle', { days: data?.days ?? 30 })}</p>
-        </div>
-      </div>
+      {/* 页头与全站同一套（components/PageHead）。/ The site-wide PageHead. */}
+      <PageHead title={t('signals.analysis.title')} subtitle={t('signals.analysis.subtitle', { days: data?.days ?? 30 })} />
 
       <div className="space-y-6">
       {error && (

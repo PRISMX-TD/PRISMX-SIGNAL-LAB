@@ -28,59 +28,7 @@
    halo; violet appears only as the head count, the ring's progress arc and the
    1px edge of a newly arrived card; up/down tones sit only on data. */
 
-/* ── 页头 / board head ── */
-.sig-board-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px 24px;
-  margin-bottom: 24px;
-}
-.sig-board-title {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-.sig-board-title h2 {
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
-  font-size: 26px;
-  line-height: 1.1;
-  font-weight: 700;
-  color: #fff;
-}
-.sig-board-count {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-}
-/* 计数：页头里唯一的彩度。--purple-hi 对 --bg 约 5.4:1，过 AA。
-   The count is the head's only chroma; --purple-hi on --bg is ~5.4:1. */
-.sig-board-count b {
-  font-size: 26px;
-  font-weight: 700;
-  color: var(--purple-hi);
-  letter-spacing: -0.02em;
-}
-.sig-board-count span {
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  color: var(--text-3);
-}
-.sig-board-title p {
-  font-size: 13px;
-  color: var(--text-3);
-}
-/* 筛选器进了页头，原来的下外边距交给页头统一管。
-   The filter bar now lives in the head; the head owns the bottom margin. */
-.sig-board-head .sig-filters {
-  margin-bottom: 0;
-  max-width: 100%;
-}
+/* 页头见 page-head.css（全站统一）。/ The head lives in page-head.css, shared site-wide. */
 
 /* ── 牌面 / card ── */
 .sig-card {
@@ -344,12 +292,6 @@
 
 /* ── 手机 / mobile ── */
 @media (max-width: 639px) {
-  .sig-board-head {
-    margin-bottom: 20px;
-  }
-  .sig-board-title h2 {
-    font-size: 26px;
-  }
   .sig-card {
     padding: 16px;
     gap: 16px;

@@ -33,6 +33,7 @@
 @import './motion.css';   /* 页面切换 / 骨架屏 / 内容淡入 / tap 反馈 */
 @import './landing-story.css';   /* 落地页叙事：手机机身 / 屏幕五幕 / 文字面板 / WebGL 接管 / 判决印章 */
 @import './tabs.css';   /* 页内 Tab（分段药丸轨道） */
+@import './page-head.css';   /* 全站统一页头（components/PageHead.tsx） */
 @import './signals.css';   /* 信号面板：看板页头 / 信号牌面（价格阶梯 + 倒计时环） */
 @import './guide.css';   /* 策略介绍：目录牌 / 详情页（大标题 + 吸顶规格栏） */
 @import './dashboard.css';   /* 仪表盘：焦点趋势 / 可执行信号牌 / 其他活跃信号 / 行情 / 时段胜率 / 我的表现 */
