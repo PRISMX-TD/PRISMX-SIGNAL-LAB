@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from app.models import User, Order, ClosedTrade
 from app.services.gamification.stats import (
-    compute_comprehensive_stats, compute_account_lifetime_stats)
+    compute_comprehensive_stats, compute_account_lifetime_stats, lot_weight)
 
 NOW = datetime.now(timezone.utc)
 
@@ -11,8 +11,8 @@ def _user(db):
     return u
 
 
-def _fill(db, u, login, ticket, vol=0.1, tm=2, days_ago=1, cid=None):
-    o = Order(user_id=u.id, client_order_id=cid or f"c{ticket}", symbol="XAUUSD",
+def _fill(db, u, login, ticket, vol=0.1, tm=2, days_ago=1, cid=None, symbol="XAUUSD"):
+    o = Order(user_id=u.id, client_order_id=cid or f"c{ticket}", symbol=symbol,
               side="BUY", volume=vol, status="FILLED", mt5_login=login,
               mt5_ticket=ticket, trade_mode=tm,
               created_at=NOW - timedelta(days=days_ago))
@@ -103,3 +103,30 @@ def test_lifetime_excludes_demo_and_unverified(db_session):
     assert b.get("trades", 0) == 0
     assert b.get("wins", 0) == 0
     assert b.get("profit", 0.0) == 0.0
+
+
+# ---- 手数折算：Make Capital 原油 100 桶/手 = 0.1 标准手 ----
+
+def test_lot_weight_table():
+    assert lot_weight("WTI") == 0.1
+    assert lot_weight("wti.s") == 0.1          # 券商后缀 + 小写
+    assert lot_weight("USOIL") == 0.1          # 别名归到 WTI
+    assert lot_weight("XTIUSD.pc") == 0.1
+    assert lot_weight("XAUUSD") == 1.0
+    assert lot_weight("XAUUSD.s") == 1.0
+    assert lot_weight("BRENT") == 1.0          # 不在表里的一律 1（用户定案只折 WTI）
+    assert lot_weight(None) == 1.0 and lot_weight("") == 1.0
+
+
+def test_wti_lots_weighted_in_comprehensive_and_lifetime(db_session):
+    """1 手 WTI 只记 0.1 手；黄金照旧。综合口径与胜手终身口径都要折。
+    One WTI lot counts as 0.1; gold is untouched. Both the comprehensive and the
+    lifetime (winning-hand) tallies apply the weight."""
+    u = _user(db_session)
+    _fill(db_session, u, "500123", 1, vol=1.0, symbol="WTI")
+    _fill(db_session, u, "500123", 2, vol=2.0, symbol="USOIL.s")
+    _fill(db_session, u, "500123", 3, vol=0.5, symbol="XAUUSD")
+    s = compute_comprehensive_stats(db_session, u.id)
+    assert abs(s["lots"] - 0.8) < 1e-9          # 0.1 + 0.2 + 0.5
+    life = compute_account_lifetime_stats(db_session, u.id)
+    assert abs(life["500123"]["lots"] - 0.8) < 1e-9

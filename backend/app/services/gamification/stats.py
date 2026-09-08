@@ -4,12 +4,47 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from app.models import ClosedTrade, Order
+from app.services.symbol_aliases import symbol_match_set
 from app.services.trade_performance import position_id_of
 from app.utils.timeutil import aware
 
 GAMIFICATION_WINDOW_DAYS = 365
 _VOL_EPS = 1e-6
 REAL = 2
+
+# 手数折算权重，键是平台规范品种名（去券商后缀、并别名）。
+#
+# 合作券商 Make Capital 的原油是 **100 桶/手的小合约**（MT4 symbols.raw 实测，
+# 2026-09-08），而行业标准 CL 合约是 1000 桶——1 手 WTI 名义只有约 6 千美元，
+# 是外汇一手的 1/15、黄金一手的 1/50。等级条件 lots_10…lots_10000 与胜手勋章的
+# 手数门槛如果原样累加，原油就成了刷手数最便宜的口子。平台现有品种里只有它规格
+# 反常（黄金 100 oz、白银 5000 oz、BTC 1 枚都与惯例一致），所以这里是一张按品种
+# 的小表，不是通用的名义额换算；将来再有反常品种往表里加一行即可。
+#
+# Lot weights keyed by the platform's canonical symbol (suffix stripped, aliases
+# folded). Make Capital's crude is a **100-barrel mini contract** (read from the
+# MT4 symbols.raw, 2026-09-08) against the industry-standard 1000-barrel CL, so
+# one WTI lot is ~$6k notional — 1/15 of an FX lot, 1/50 of a gold lot. Summed
+# raw, crude would be the cheapest way to farm the lots_* level conditions and
+# the winning-hand thresholds. It is the only anomalous spec among the platform's
+# symbols (gold 100 oz, silver 5000 oz, BTC 1 all match convention), hence a
+# per-symbol table rather than a general notional conversion.
+LOT_WEIGHTS = {"WTI": 0.1}
+
+
+def lot_weight(symbol: str | None) -> float:
+    """该品种 1 手折算成多少手。无记录的品种为 1。/ Lots-per-lot for a symbol; 1 if unlisted."""
+    root = (symbol or "").split(".")[0].strip().upper()
+    if not root:
+        return 1.0
+    for canon, w in LOT_WEIGHTS.items():
+        if root in symbol_match_set(canon):
+            return w
+    return 1.0
+
+
+def weighted_lots(order) -> float:
+    return (order.volume or 0) * lot_weight(order.symbol)
 
 
 def _now():
@@ -126,7 +161,7 @@ def compute_comprehensive_stats(db, user_id, data: dict | None = None) -> dict:
     return {
         "trades": n, "wins": wins, "losses": n - wins,
         "win_rate": (wins / n) if n else None,
-        "lots": sum(o.volume or 0 for o in real),
+        "lots": sum(weighted_lots(o) for o in real),
         "trade_days": len({o.created_at.strftime("%Y-%m-%d") for o in real if o.created_at}),
         "profit": sum(p for _, p in res_real),
         "trades_any": len(res_all),
@@ -144,7 +179,7 @@ def compute_account_lifetime_stats(db, user_id, data: dict | None = None) -> dic
     legs_map = data["legs"]
     out = defaultdict(lambda: {"trades": 0, "wins": 0, "lots": 0.0, "profit": 0.0})
     for o in real:
-        out[o.mt5_login]["lots"] += o.volume or 0
+        out[o.mt5_login]["lots"] += weighted_lots(o)
     for o, p in _resolve(real, legs_map):
         d = out[o.mt5_login]
         d["trades"] += 1
