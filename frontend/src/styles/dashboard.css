@@ -1,0 +1,522 @@
+/* ═════════════ 仪表盘 / dashboard ═════════════
+   2026-09-08 视觉重做，架构一点没动：一宽两窄三栏、列内纵向堆叠、平板两列、手机单列
+   且「我的交易表现」沉底（那些规则仍在 components-cards.css / components-controls.css）。
+   这里只换视觉，并且和信号板、策略介绍、策略分析是同一套语言：
+   · 焦点趋势：品种 40px 展示字宽 + 立场大字靠右；六周期轨道满宽等分；情绪两段尺。
+   · 可执行信号：信号牌放大版——入场 40px、止损｜止盈 + 风险｜回报尺、倒计时环、48px 通栏下单。
+   · 其他活跃信号：分隔行里的紧凑牌（入场 20px 居中、尺、环、药丸）。
+   · 行情 / 时段胜率 / 我的表现：字号层级与芯片、圆环对齐，内容不增不减。
+   Visual relay 2026-09-08 with the architecture untouched (one wide + two narrow
+   columns, per-column stacks, the tablet/mobile rules stay where they were). Only
+   the visuals change, in the same language as the board, the guide and the analysis. */
+
+/* 栏间距 16 → 20：卡片外轮廓已取消，边界靠面与负空间。/ 16 → 20 now that cards have no outline. */
+.dash-grid,
+.dash-col-1,
+.dash-col-2 {
+  gap: 20px;
+}
+.dash-others {
+  gap: 20px;
+}
+
+/* 说明性小字：与信号板同一档 / captions, same recipe as the board */
+.dh-cap {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+
+/* ── 焦点趋势 / focus hero ── */
+.dh-hero-title {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 24px;
+}
+.dh-hero-sym {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.dh-hero-sym b {
+  font-size: 40px;
+  color: #fff;
+}
+.dh-hero-sym .cn {
+  font-size: 17px;
+  color: var(--text-2);
+}
+.dh-hero-title .stance-word {
+  flex: none;
+  line-height: 1;
+}
+.dh-hero-title .stance-word svg {
+  width: 30px;
+  height: 30px;
+}
+.dh-hero-note {
+  margin-top: 12px;
+  font-size: 15px;
+  color: var(--text-2);
+}
+.dh-rails {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-top: 28px;
+}
+.dh-rail {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+}
+/* 六周期轨道满宽、格子等分；格子仍透明，颜色只落在箭头上（规则见 .tf-tag）。
+   Full-width track with equal cells; cells stay transparent, only the arrow is coloured. */
+.tf-row.dh-tf {
+  width: 100%;
+  padding: 4px;
+}
+.dh-tf .tf-tag {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 8px;
+  font-size: 15px;
+}
+/* 情绪尺：两段 + 两端等宽读数 / sentiment rule with tabular readings at both ends */
+.dh-senti {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+}
+.dh-senti .v small {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+.dh-senti .v b {
+  display: block;
+  font-size: 17px;
+  line-height: 1;
+  font-weight: 700;
+}
+.dh-senti .bull b { color: var(--up); }
+.dh-senti .bear { text-align: right; }
+.dh-senti .bear b { color: var(--down); }
+.dh-senti-bar {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--nest);
+  overflow: hidden;
+}
+.dh-senti-bar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: block;
+}
+.dh-senti-bar .a {
+  left: 0;
+  width: calc(var(--long, 50%) - 2px);
+  border-radius: 999px 0 0 999px;
+  background: var(--up);
+}
+.dh-senti-bar .b {
+  left: calc(var(--long, 50%) + 2px);
+  right: 0;
+  border-radius: 0 999px 999px 0;
+  background: var(--down);
+}
+.dh-senti-bar.none .a,
+.dh-senti-bar.none .b {
+  background: var(--nest-hi);
+}
+
+/* ── 可执行信号 / executable signal ── */
+.dh-exec {
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+}
+.dh-exec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dh-exec-head h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+}
+.dh-exec-head h3 svg {
+  color: var(--purple-hi);
+}
+.dh-exec-id {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 20px;
+}
+.dh-exec-id .sym-ava {
+  width: 36px;
+  height: 36px;
+  font-size: 11px;
+}
+.dh-exec-sym {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.dh-exec-sym b {
+  font-size: 26px;
+  line-height: 1;
+  color: #fff;
+  white-space: nowrap;
+}
+.dh-exec-by {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.dh-exec-by .s {
+  color: var(--text-2);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dh-entry {
+  margin-top: 24px;
+}
+.dh-entry b {
+  display: block;
+  margin-top: 8px;
+  font-size: 40px;
+  line-height: 1;
+  color: #fff;
+}
+.dh-ladder {
+  margin-top: 20px;
+}
+.dh-ladder .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dh-ladder .lv {
+  min-width: 0;
+}
+.dh-ladder .lv b {
+  display: block;
+  margin-top: 6px;
+  font-size: 17px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.dh-ladder .lv.en { text-align: center; }
+.dh-ladder .lv.tp { text-align: right; }
+.dh-ladder .sl b { color: var(--down); }
+.dh-ladder .tp b { color: var(--up); }
+.dh-ladder .en b { color: #fff; }
+.dh-ladder .sig-ladder-bar {
+  margin-top: 12px;
+}
+.dh-exec-stats {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.dh-exec-stats b {
+  display: block;
+  margin-top: 8px;
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 700;
+}
+.dh-exec-stats .r {
+  text-align: right;
+  min-width: 0;
+}
+.dh-exec-stats .r b {
+  font-size: 15px;
+  line-height: 1.2;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dh-exec-cta {
+  width: 100%;
+  height: 48px;
+  margin-top: 24px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+/* ── 其他活跃信号 / other active signals ── */
+.dh-others-head {
+  padding: 24px 24px 0;
+}
+.dh-others-head h3 {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+}
+.dh-others-head h3 b {
+  font-size: 20px;
+  line-height: 1;
+  color: var(--purple-hi);
+}
+.dh-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px 24px;
+}
+.dh-mini-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dh-mini-top .sym-ava {
+  width: 32px;
+  height: 32px;
+}
+.dh-mini-top .sym {
+  min-width: 0;
+}
+.dh-mini-top .sym b {
+  display: block;
+  font-size: 20px;
+  line-height: 1;
+  color: #fff;
+}
+.dh-mini-top .sym span {
+  display: block;
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dh-mini-top .rr {
+  margin-left: auto;
+  flex: none;
+  text-align: right;
+}
+.dh-mini-top .rr b {
+  display: block;
+  font-size: 17px;
+  line-height: 1;
+  font-weight: 700;
+}
+.dh-mini-top .rr span {
+  display: block;
+  margin-top: 5px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+.dh-mini .dh-ladder {
+  margin-top: 0;
+}
+.dh-mini .dh-ladder .lv b {
+  font-size: 14px;
+}
+.dh-mini .dh-ladder .en b {
+  font-size: 20px;
+}
+.dh-mini-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dh-mini-cta {
+  height: 36px;
+  padding: 0 20px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* ── 实时行情 / live quotes ── */
+.dash-quotes .qt-table th {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  padding-bottom: 10px;
+}
+.dash-quotes .qt-sym-ava {
+  width: 30px;
+  height: 30px;
+}
+.dash-quotes .qt-sym-cell {
+  gap: 10px;
+}
+.dash-quotes .qt-sym-cell .nm b {
+  font-size: 15px;
+  line-height: 1.1;
+}
+.dash-quotes .qt-sym-cell .nm span {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+}
+.dash-quotes .qt-price {
+  font-size: 17px;
+}
+/* 悬停从紫色 7% 改成中性 3%：紫只留给按钮、计数与链接。
+   Hover goes neutral; violet stays reserved for buttons, counts and links. */
+.dash-quotes .qt-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+/* 焦点品种那一行：一层从左淡出的微亮底，和英雄卡对上。
+   The focus symbol's row carries a faint left-to-right tint, matching the hero. */
+.dash-quotes .qt-table tbody tr.focus {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.035), transparent);
+}
+
+/* ── 当前时段胜率 / session win rate ── */
+.dh-session .wr-now-title {
+  margin-top: 16px;
+}
+.dh-session .wr-now-title .name {
+  font-size: 20px;
+}
+.dh-session .wr-now-title .left {
+  font-size: 13px;
+}
+.dh-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--purple-hi);
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.dh-link:hover {
+  color: #fff;
+}
+.dh-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* ── 我的交易表现 / my performance ── */
+.dh-perf {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-top: 20px;
+}
+.dh-perf-rows {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dh-perf-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--text-3);
+}
+.dh-perf-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.dh-perf-row b {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+/* ── 手机 / mobile ── */
+@media (max-width: 639px) {
+  .dash-grid,
+  .dash-others {
+    gap: 16px;
+  }
+  .dh-hero-title {
+    margin-top: 16px;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+  .dh-hero-sym b {
+    font-size: 26px;
+  }
+  .dh-hero-sym .cn {
+    font-size: 15px;
+  }
+  .dh-hero-title .stance-word svg {
+    width: 22px;
+    height: 22px;
+  }
+  .dh-rails {
+    margin-top: 20px;
+    gap: 16px;
+  }
+  .dh-rail {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .dh-tf .tf-tag {
+    height: 36px;
+    font-size: 13px;
+    gap: 6px;
+    padding: 0 4px;
+  }
+  .dh-exec {
+    padding: 20px;
+  }
+  .dh-entry b {
+    font-size: 26px;
+  }
+  .dh-others-head {
+    padding: 20px 20px 0;
+  }
+  .dh-mini {
+    padding: 16px 20px 20px;
+  }
+}

@@ -206,9 +206,10 @@
 }
 .sig-ladder-row .lv.en { text-align: center; }
 .sig-ladder-row .lv.tp { text-align: right; }
-/* 说明性小字：字距 0.08em、500 字重，与 .exec-tile .cap 同一套（汉字用字距
-   不用大写，理由见那里）。
-   Captions: 0.08em tracking at 500, same recipe as .exec-tile .cap. */
+/* 说明性小字：字距 0.08em、500 字重（汉字用字距不用大写：这套界面的说明字
+   几乎全是中文，text-transform 什么都不做）。
+   Captions: 0.08em tracking at 500; tracking rather than uppercase, since
+   nearly every caption here is Chinese and text-transform does nothing. */
 .sig-ladder-row .cap {
   font-size: 11px;
   font-weight: 500;

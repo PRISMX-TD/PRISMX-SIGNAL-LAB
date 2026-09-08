@@ -162,13 +162,13 @@ const SessionWinrateCard: FC = () => {
   const selectCls = 'select-picker min-w-0 flex-1'
 
   return (
-    <section className="card glass dash-overview p-[18px]">
+    <section className="card glass dash-overview dh-session p-[18px] sm:p-6">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-bold text-white">{t('dashboard.sessionWinrate.title')}</h3>
+        <h3 className="text-[15px] font-bold text-white">{t('dashboard.sessionWinrate.title')}</h3>
         {!loading && !empty && (
-          <Link to="/app?tab=analysis"
-                className="shrink-0 text-xs text-prism-300 transition-colors hover:text-prism-200">
-            {t('winrate.viewDetail')} ›
+          <Link to="/app?tab=analysis" className="dh-link">
+            {t('winrate.viewDetail')}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6" /></svg>
           </Link>
         )}
       </div>
@@ -181,14 +181,15 @@ const SessionWinrateCard: FC = () => {
         </p>
       ) : (
         <>
-          <p className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-            <span className="flex items-center gap-2 font-display text-lg font-semibold text-neutral-50">
-              <i className="h-2 w-2 shrink-0 rounded-full animate-breathe"
-                 style={{ backgroundColor: SESSION_COLORS[picked!.key] ?? SESSION_COLORS.outside }} />
+          {/* 与「策略分析」页首屏同一套结论行（.wr-now-title，见 winrate.css），这里字号缩一档。
+              The same conclusion line as the analysis page (.wr-now-title), one size smaller. */}
+          <p className="wr-now-title">
+            <span className="name font-display">
+              <i className="animate-breathe" style={{ backgroundColor: SESSION_COLORS[picked!.key] ?? SESSION_COLORS.outside }} />
               {sessionName}
             </span>
             {picked!.minutesLeft !== undefined && (
-              <span className="text-xs font-medium tabular-nums" style={{ color: 'var(--up)' }}>
+              <span className="left">
                 {t('admin.winrate.watch.nowLeft', { time: fmtDurationHm(picked!.minutesLeft) })}
               </span>
             )}
@@ -232,19 +233,19 @@ const SessionWinrateCard: FC = () => {
             />
           </div>
 
-          <div className="mt-3">
-            <p className="text-2xs uppercase tracking-wider text-neutral-500">
+          <div className="mt-4">
+            <p className="wr-cap">
               {t('admin.winrate.watch.hoursGood')}
             </p>
             {hours.length > 0 ? (
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
+              <div className="dh-chips">
                 {hours.map((h) => (
                   <RateChip key={h.localMinutes} size="sm" kind={h.kind}
                             name={fmtClock(h.localMinutes)} rate={h.rate} />
                 ))}
               </div>
             ) : (
-              <p className="mt-1 text-xs text-neutral-600">
+              <p className="wr-none">
                 {t('dashboard.sessionWinrate.noneForPair')}
               </p>
             )}

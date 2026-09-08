@@ -1,10 +1,24 @@
 // 交易信号执行卡：入场价 + SL/TP + RR + 倒计时 + 下单按钮
 // Signal exec card: entry + SL/TP + RR + countdown + trade button
-import { memo, type FC } from 'react'
+//
+// 2026-09-08 版式重做：桌面版与手机版原来是两套标记（桌面完整执行卡、手机套用旧
+// 信号卡），现在合成一份——就是信号板那张牌的放大版：牌头（标题 + 倒计时环）、
+// 身份行（芯片 + 品种 26px + 方向）、入场价 40px 等宽、止损｜止盈两端 + 风险｜
+// 回报尺、盈亏比与触发指标一行、48px 通栏下单。手机端只缩字号，不换结构。
+// 无信号时同一套骨架显示「-」并禁用按钮，卡片不随有无信号忽大忽小。
+// Relaid 2026-09-08 as one markup for both breakpoints (desktop used to carry a
+// full exec card and mobile a copy of the old signal card): the board ticket
+// scaled up — head with countdown ring, identity row, 40px tabular entry, SL|TP
+// over the risk|reward rule, R:R and trigger on one line, 48px full-width CTA.
+// Mobile only shrinks type. With no signal the same skeleton shows "-" and a
+// disabled button, so the card never changes size.
+import { memo, type CSSProperties, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Signal } from '../../api/types'
-import { calcRiskReward, calcCountdown, displaySymbol, fmtTime } from '../../api/utils'
-import { SIGNAL_LIFESPAN_MS, rrTone } from './SignalView'
+import { calcRiskReward, displaySymbol } from '../../api/utils'
+import { fmtIssueClock, fmtPx, priceDecimals, riskFraction, rrTone } from './SignalView'
+import { symbolMeta } from '../../utils/symbolMeta'
+import TtlRing from './TtlRing'
 
 interface Props {
   signal: Signal | null
@@ -12,167 +26,101 @@ interface Props {
   onTrade: (s: Signal) => void
 }
 
-// 无信号时的骨架同样撑满高度，避免卡片随有无信号忽大忽小
-// keep the same skeleton height when there's no signal, so the card
-// never shrinks/grows depending on whether a signal is present
 const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
   const { t } = useTranslation()
   const rr = signal ? calcRiskReward(signal.symbol, signal.entry, signal.stopLoss, signal.takeProfit) : null
-  const cd = signal ? calcCountdown(signal.expireAt, SIGNAL_LIFESPAN_MS, now) : null
   const isBuy = signal?.side === 'BUY'
   const sideTag = isBuy ? t('common.buy') : t('common.sell')
-  const symName = signal ? t(`signals.symbolNames.${signal.symbol}`, { defaultValue: '' }) : ''
   const indicatorLabel = signal ? signal.indicator ?? t('signals.indicatorNone') : t('signals.focus.noExecutable')
-
-  // 倒计时颜色：剩余不足2分钟变红 / countdown turns red when < 2 min
-  const cdTone = cd && cd.remainMs < 2 * 60 * 1000 ? 'text-down' : 'text-neutral-300'
+  const decimals = signal ? priceDecimals(signal.entry, signal.stopLoss, signal.takeProfit) : 0
+  const riskFrac = rr ? riskFraction(rr.riskPrice, rr.rewardPrice) : null
+  const meta = signal ? symbolMeta(signal.symbol) : null
 
   return (
-    <>
-      {/* ══ 桌面版：完整执行卡 / desktop: full exec card ══ */}
-      <section className="card glass dash-exec p-[18px] flex-col hidden sm:flex">
-        {/* 标题行：可执行信号 + 倒计时 / title + countdown */}
-        <div className="exec-title-row">
-          <div className="flex items-center gap-2">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--purple-hi)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" />
-            </svg>
-            <h3 className="text-[15px] font-bold leading-none">{t('signals.focus.signalHeading')}</h3>
-          </div>
-          <span className={`flex items-center gap-1 text-xs font-semibold ${cdTone}`}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
-            </svg>
-            <span className="num">{cd?.text ?? '--:--'}</span>
-          </span>
-        </div>
-
-        {/* 品种行：名称 + 代码 + 方向 / symbol + code + side */}
-        <div className="exec-sym-row">
-          <span className="text-[15px] font-bold leading-none">
-            {signal ? symName || displaySymbol(signal.symbol) : '-'}
-          </span>
-          {symName && (
-            <span className="text-[11px] text-neutral-400 font-mono">{displaySymbol(signal!.symbol)}</span>
-          )}
-          {signal && <span className={`chip ${isBuy ? 'chip-buy' : 'chip-sell'}`}>{sideTag}</span>}
-        </div>
-
-        {/* 入场价 / Entry price */}
-        <div className="entry-block">
-          <div className="cap">{t('signals.colEntry').toUpperCase()}</div>
-          <div className="val num">{signal?.entry ?? '-'}</div>
-        </div>
-
-        {/* 止损 / 止盈 / SL + TP */}
-        <div className="sl-tp-grid mt-4">
-          <div className="exec-tile tile-sl">
-            <div className="cap">{t('signals.colSl')}</div>
-            <div className="val num">{signal?.stopLoss ?? '-'}</div>
-          </div>
-          <div className="exec-tile tile-tp">
-            <div className="cap">{t('signals.colTp')}</div>
-            <div className="val num">{signal?.takeProfit ?? '-'}</div>
-          </div>
-        </div>
-
-        {/* 统计行：盈亏比 + 触发指标 / Stats: RR + indicator */}
-        <div className="exec-stats-row mt-4">
-          <div>
-            <div className="k">{t('signals.focus.rrLabel')}</div>
-            <div className={`v num ${rrTone(rr?.rr ?? null)}`}>
-              {rr?.rr != null ? `1 : ${rr.rr.toFixed(2)}` : '-'}
-            </div>
-          </div>
-          <div>
-            <div className="k">{t('signals.colIndicator')}</div>
-            <div className="v" style={{ fontSize: '13px', fontWeight: 500, color: '#c4b5fd', marginTop: 4 }}>
-              {indicatorLabel}
-            </div>
-          </div>
-        </div>
-
-        {/* 下单按钮 / Trade button */}
-        <button
-          onClick={() => signal && onTrade(signal)}
-          disabled={!signal}
-          className="btn btn-primary exec-full-btn mt-auto disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-          </svg>
-          {t('signals.trade')}
-        </button>
-      </section>
-
-      {/* ══ 手机版：套用普通信号卡设计 / mobile: reuse signal card design ══ */}
-      <div className="card glass p-[18px] sm:hidden">
-        {/* 顶部标签："可执行信号" */}
-        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-prism-300 mb-2">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <section className="card glass dash-exec dh-exec">
+      {/* 牌头：标题 + 倒计时环 / head: title + countdown ring */}
+      <div className="dh-exec-head">
+        <h3>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" />
           </svg>
           {t('signals.focus.signalHeading')}
-        </div>
+        </h3>
+        {signal ? (
+          <TtlRing expireAt={signal.expireAt} now={now} label={t('signals.focus.remainingTtl')} />
+        ) : (
+          <span className="sig-ttl"><b className="num">--:--</b></span>
+        )}
+      </div>
 
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <b className="text-lg font-bold text-white">{signal ? symName || displaySymbol(signal.symbol) : '-'}</b>
-              {signal && <span className={`chip ${isBuy ? 'chip-buy' : 'chip-sell'}`}>{sideTag}</span>}
-            </div>
-            {symName && (
-              <div className="text-[11px] text-neutral-400 mt-0.5">{indicatorLabel}</div>
-            )}
+      {/* 身份行：芯片 + 品种 + 方向；署名是策略名与发出时间
+          Identity row: chip + symbol + side; byline is strategy and issue time */}
+      <div className="dh-exec-id">
+        <span
+          className="sym-ava"
+          style={meta ? { background: meta.color + '33', color: meta.ink } : { background: 'var(--nest)', color: 'var(--text-3)' }}
+        >
+          {meta ? meta.letter : '-'}
+        </span>
+        <div className="min-w-0">
+          <div className="dh-exec-sym">
+            <b className="font-display">{signal ? displaySymbol(signal.symbol) : '-'}</b>
+            {signal && <span className={`chip ${isBuy ? 'chip-buy' : 'chip-sell'}`}>{sideTag}</span>}
           </div>
-          <div className="text-right">
-            <div className={`text-xl font-bold ${rrTone(rr?.rr ?? null)}`}>
-              {rr?.rr != null ? `1:${rr.rr.toFixed(2)}` : '-'}
-            </div>
-            <div className="text-[10px] uppercase text-neutral-500">{t('signals.focus.rrLabel')}</div>
+          <div className="dh-exec-by">
+            <span className="s">{indicatorLabel}</span>
+            {signal && <span className="num">{fmtIssueClock(signal.createdAt)}</span>}
           </div>
-        </div>
-
-        <div className="sl-tp-grid three mt-3">
-          <div className="exec-tile" style={{ background: 'rgba(255,255,255,0.03)' }}>
-            <div className="cap">{t('signals.colEntry')}</div>
-            <div className="val num" style={{ color: '#fff', fontSize: '13px' }}>{signal?.entry ?? '-'}</div>
-          </div>
-          <div className="exec-tile tile-sl">
-            <div className="cap">{t('signals.colSl')}</div>
-            <div className="val num" style={{ fontSize: '13px' }}>{signal?.stopLoss ?? '-'}</div>
-          </div>
-          <div className="exec-tile tile-tp">
-            <div className="cap">{t('signals.colTp')}</div>
-            <div className="val num" style={{ fontSize: '13px' }}>{signal?.takeProfit ?? '-'}</div>
-          </div>
-        </div>
-
-        <div className="mt-3">
-          <div className="flex justify-between text-[11px] mb-1">
-            <span className="text-neutral-500">{t('signals.focus.remainingTtl')}</span>
-            <span className={`num ${cdTone}`}>{cd?.text ?? '-'}</span>
-          </div>
-          <div className="sig-ttl-bar">
-            <i style={{ width: `${Math.round((cd?.fraction ?? 0) * 100)}%` }} />
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between mt-3">
-          <div className="min-w-0 flex-1">
-            <div className="text-sm text-neutral-300 truncate">{indicatorLabel}</div>
-            <div className="text-[10px] text-neutral-500 mt-0.5">{signal ? fmtTime(signal.createdAt) : ''}</div>
-          </div>
-          <button
-            onClick={() => signal && onTrade(signal)}
-            disabled={!signal}
-            className="btn btn-primary rounded-xl px-6 py-2 text-[13px] font-semibold shrink-0 ml-3 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {t('signals.trade')}
-          </button>
         </div>
       </div>
-    </>
+
+      {/* 入场价：这张牌上最大的数字，是下单要对的那个数
+          Entry: the largest figure on the card, the number an order is checked against */}
+      <div className="dh-entry">
+        <span className="dh-cap">{t('signals.colEntry')}</span>
+        <b className="num">{signal ? fmtPx(signal.entry, decimals) : '-'}</b>
+      </div>
+
+      {/* 止损｜止盈 + 风险｜回报尺 / SL | TP over the risk|reward rule */}
+      <div className="dh-ladder">
+        <div className="row">
+          <div className="lv sl"><span className="dh-cap">{t('signals.colSl')}</span><b className="num">{signal ? fmtPx(signal.stopLoss, decimals) : '-'}</b></div>
+          <div className="lv tp"><span className="dh-cap">{t('signals.colTp')}</span><b className="num">{signal ? fmtPx(signal.takeProfit, decimals) : '-'}</b></div>
+        </div>
+        <div
+          className={`sig-ladder-bar${riskFrac == null ? ' none' : ''}`}
+          style={riskFrac != null ? ({ '--risk': `${(riskFrac * 100).toFixed(1)}%` } as CSSProperties) : undefined}
+          aria-hidden="true"
+        >
+          <i className="risk" />
+          <i className="reward" />
+          <i className="mark" />
+        </div>
+      </div>
+
+      {/* 盈亏比 + 触发指标 / R:R + trigger */}
+      <div className="dh-exec-stats">
+        <div>
+          <span className="dh-cap">{t('signals.focus.rrLabel')}</span>
+          <b className={`num ${rrTone(rr?.rr ?? null)}`}>{rr?.rr != null ? `1:${rr.rr.toFixed(2)}` : '-'}</b>
+        </div>
+        <div className="r">
+          <span className="dh-cap">{t('signals.colIndicator')}</span>
+          <b>{signal ? indicatorLabel : '-'}</b>
+        </div>
+      </div>
+
+      <button
+        onClick={() => signal && onTrade(signal)}
+        disabled={!signal}
+        className="btn btn-primary dh-exec-cta"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+        </svg>
+        {t('signals.trade')}
+      </button>
+    </section>
   )
 }
 

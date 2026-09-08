@@ -6,8 +6,9 @@ import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../../store/prefs'
 import Select from '../Select'
 import type { Signal, UserPlan } from '../../api/types'
-import { calcRiskReward, calcCountdown, displaySymbol, parseTime } from '../../api/utils'
-import { EXPIRING_THRESHOLD_MS, SIGNAL_LIFESPAN_MS, effectiveStatus, resultLabel, resultTone, rrTone } from './SignalView'
+import { calcRiskReward, displaySymbol, parseTime } from '../../api/utils'
+import { effectiveStatus, fmtIssueClock, fmtPx, priceDecimals, resultLabel, resultTone, riskFraction, rrTone } from './SignalView'
+import TtlRing from './TtlRing'
 import { useClock, useNewSignalIds } from './hooks'
 import { symbolMeta } from '../../utils/symbolMeta'
 
@@ -24,76 +25,16 @@ interface Props {
 }
 
 // ── 倒计时环 / countdown ring ──
-// 订阅共享时钟自行每秒刷新，不牵动整张卡片/网格重渲染。
-// 原来是一条 5px 的横向进度条，占卡片整整一行；换成 22px 的环嵌在页脚里，
-// 同样的信息（还剩多少 / 走了多少）只占一个图标的位置，把省下的一行还给
-// 价格阶梯。剩余不足 2 分钟（EXPIRING）时环与数字一起转成跌色——这是真实
-// 的状态变化，不是装饰。
+// 订阅共享时钟自行每秒刷新，不牵动整张卡片/网格重渲染。环本身是三处共用的
+// TtlRing（signals/TtlRing.tsx）。原来是一条 5px 的横向进度条，占卡片整整一行；
+// 换成 22px 的环嵌在页脚里，同样的信息只占一个图标的位置，把省下的一行还给价格阶梯。
 // Subscribes to the shared clock and ticks on its own, without dragging the
-// whole card/grid into a per-second re-render. The old 5px horizontal bar cost
-// a full card row; a 22px ring in the footer carries the same reading (how much
-// is left / used) in the footprint of an icon, and the row goes to the price
-// ladder. Under two minutes (EXPIRING) both ring and digits turn the down tone —
-// a real state change, not decoration.
-const RING_R = 9
-const RING_C = 2 * Math.PI * RING_R
+// whole card/grid into a per-second re-render. The ring is the shared TtlRing;
+// it replaced a full-row 5px bar and gave that row back to the price ladder.
 const Countdown: FC<{ expireAt: string | null; label: string }> = memo(({ expireAt, label }) => {
   const now = useClock()
-  const cd = calcCountdown(expireAt, SIGNAL_LIFESPAN_MS, now)
-  const urgent = cd != null && !cd.expired && cd.remainMs <= EXPIRING_THRESHOLD_MS
-  const frac = cd?.fraction ?? 0
-  return (
-    <div className={`sig-ttl${urgent ? ' urgent' : ''}`} aria-live="off">
-      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-        <circle className="ring-track" cx="11" cy="11" r={RING_R} fill="none" strokeWidth="2" />
-        <circle
-          className="ring-fill"
-          cx="11" cy="11" r={RING_R} fill="none" strokeWidth="2" strokeLinecap="round"
-          strokeDasharray={RING_C}
-          strokeDashoffset={RING_C * (1 - frac)}
-          transform="rotate(-90 11 11)"
-        />
-      </svg>
-      <b className="num">{cd?.text ?? '--:--'}</b>
-      <span>{label}</span>
-    </div>
-  )
+  return <TtlRing expireAt={expireAt} now={now} label={label} />
 })
-
-// ── 价格格式 / price formatting ──
-// 三个价位按同一位数显示。后端给的是浮点数，1.35100 会以 1.351 到达，与旁边的
-// 1.35386 并排就是「一个五位一个三位」——同一张牌上的三个价位必须对齐到同一
-// 精度，否则读者会去找那两位丢到哪里了。位数取三者中最长的一个（上限 5），
-// 数值本身不变。
-// All three prices on a card share one precision. The backend sends floats, so
-// 1.35100 arrives as 1.351 and sits next to 1.35386 as "five digits, three
-// digits". Take the longest fractional length among the three (capped at 5);
-// the values are untouched.
-function decimalsOf(v: number | null): number {
-  if (v == null || !Number.isFinite(v)) return 0
-  const frac = String(v).split('.')[1]
-  return frac ? Math.min(frac.length, 5) : 0
-}
-function fmtPx(v: number | null, decimals: number): string {
-  if (v == null || !Number.isFinite(v)) return '-'
-  return v.toFixed(decimals)
-}
-
-// 牌上的发出时间只到时分秒。fmtTime 的完整写法「08/09, 14:33:48 UTC+8」有 21 个
-// 字符，和策略名并排在一行里放不下，实测策略名被截成「棱镜突…」——而策略名才
-// 是读者认信号的依据。这块牌只活 10 分钟，日期与时区后缀在这里是冗余信息；
-// 订单回执页仍用完整写法。时区仍按全站约定取上海时间，只是不再写出来。
-// The card's issue time is clock-only. fmtTime's full form ("08/09, 14:33:48
-// UTC+8") is 21 characters and does not share a line with the strategy name,
-// which got clipped to "棱镜突…" — and the strategy is what the reader
-// identifies a signal by. A card lives ten minutes; date and zone suffix are
-// redundant here (the receipts page keeps the full form). Still Asia/Shanghai
-// per the app-wide convention, just not spelled out.
-function fmtClock(iso: string | null | undefined): string {
-  const d = parseTime(iso)
-  if (!d || Number.isNaN(d.getTime())) return '-'
-  return d.toLocaleTimeString('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', second: '2-digit' })
-}
 
 const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) => {
   const { t } = useTranslation()
@@ -342,23 +283,11 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
           // instead of a button that looks live but always dead-ends.
           const isExpired = sig.status === 'EXPIRED'
           const meta = symbolMeta(sig.symbol)
-          const decimals = Math.max(decimalsOf(sig.entry), decimalsOf(sig.stopLoss), decimalsOf(sig.takeProfit))
+          const decimals = priceDecimals(sig.entry, sig.stopLoss, sig.takeProfit)
 
-          // 价格阶梯的分割点：风险距离占（风险 + 回报）的比例。1:2 的信号分在
-          // 1/3 处，红段一格、绿段两格——盈亏比不再只是一个数，而是一眼能量出来
-          // 的两段长度。夹在 8%–92% 之间，极端比例下两段与刻度线都还看得见。
-          // 止损永远在左、止盈永远在右，不随买卖方向翻转：这是一条「风险｜回报」
-          // 尺，不是价格轴。整板牌面列序一致，扫读时不用每张重新找止损在哪。
-          // The ladder's split: risk distance over (risk + reward). A 1:2 signal
-          // splits at one third — one part red, two parts green — so R:R is a
-          // length you can see, not only a number. Clamped to 8–92% so both
-          // segments and the notch stay visible at extreme ratios. SL is always
-          // left and TP always right regardless of side: this is a risk|reward
-          // rule, not a price axis, and a consistent column order lets the eye
-          // scan a board without re-locating the stop on each card.
-          const riskFrac = oRr && oRr.riskPrice + oRr.rewardPrice > 0
-            ? Math.min(0.92, Math.max(0.08, oRr.riskPrice / (oRr.riskPrice + oRr.rewardPrice)))
-            : null
+          // 价格阶梯的分割点见 SignalView.riskFraction：止损永远在左、止盈在右。
+          // The ladder split lives in SignalView.riskFraction: SL left, TP right.
+          const riskFrac = oRr ? riskFraction(oRr.riskPrice, oRr.rewardPrice) : null
           const style = {
             '--i': Math.min(idx, 8),
             ...(riskFrac != null ? { '--risk': `${(riskFrac * 100).toFixed(1)}%` } : {}),
@@ -393,7 +322,7 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
                   </div>
                   <div className="sig-card-meta">
                     <span className="strat">{sig.indicator || t('signals.indicatorNone')}</span>
-                    <span className="at num">{fmtClock(sig.createdAt)}</span>
+                    <span className="at num">{fmtIssueClock(sig.createdAt)}</span>
                   </div>
                 </div>
                 <div className="sig-card-rr">

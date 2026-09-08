@@ -1,11 +1,20 @@
 // 其他活跃信号列表（仪表盘右栏贯通）
 // Other active signals list (dashboard right column, spans two rows)
-import { memo, type FC } from 'react'
+//
+// 2026-09-08 版式重做：仍是一张卡里的分隔行，但每行换成一张完整的紧凑牌——
+// 身份行（芯片 + 品种 20px + 策略 + 方向 + 盈亏比）、止损｜入场｜止盈 + 风险｜
+// 回报尺、页脚倒计时环 + 下单药丸。标题从卡外挪进卡里，计数改成一个紫色等宽数字。
+// Relaid 2026-09-08: still divider rows inside one card, but each row is a full
+// compact ticket (identity row, SL | entry | TP over the risk|reward rule,
+// countdown ring + pill CTA). The header moves inside the card; the count is one
+// violet tabular numeral.
+import { memo, type CSSProperties, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Signal } from '../../api/types'
-import { calcRiskReward, calcCountdown, displaySymbol, fmtTime } from '../../api/utils'
-import { SIGNAL_LIFESPAN_MS, type FocusState } from './SignalView'
+import { calcRiskReward, displaySymbol } from '../../api/utils'
+import { fmtPx, priceDecimals, riskFraction, rrTone, type FocusState } from './SignalView'
 import { symbolMeta } from '../../utils/symbolMeta'
+import TtlRing from './TtlRing'
 
 interface OtherEntry {
   symbol: string
@@ -25,91 +34,73 @@ interface Props {
 const SignalOthers: FC<Props> = ({ entries, now, onTrade, onFocus, onViewAll }) => {
   const { t } = useTranslation()
 
-  // Dynamism: show up to 3 items, with animation
+  // 最多列 3 条，其余交给「其他活跃信号 ›」/ up to 3 rows; the rest live behind the button
   const visible = entries.slice(0, 3)
 
   return (
-    <section className="dash-others flex flex-col gap-3">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-0.5">
-        <h3 className="text-[15px] font-bold">{t('signals.focus.otherActive')}</h3>
-        <span className="count-badge">{entries.length}</span>
-      </div>
-
-      {/* Signal mini cards */}
+    <section className="dash-others flex flex-col gap-5">
       <div className="others-list">
+        <div className="dh-others-head">
+          <h3>
+            {t('signals.focus.otherActive')}
+            <b className="num">{entries.length}</b>
+          </h3>
+        </div>
+
         {visible.length === 0 && (
-          <div className="card glass sig-mini-card text-center text-sm text-neutral-400">
+          <div className="sig-mini-card text-center text-sm text-neutral-400">
             {t('signals.focus.noExecutable')}
           </div>
         )}
         {visible.map(({ symbol, signal: sig, idx }) => {
           const oRr = calcRiskReward(sig.symbol, sig.entry, sig.stopLoss, sig.takeProfit)
-          const cd = calcCountdown(sig.expireAt, SIGNAL_LIFESPAN_MS, now)
           const isBuy = sig.side === 'BUY'
           const sideTag = isBuy ? t('common.buy') : t('common.sell')
+          const meta = symbolMeta(symbol)
+          const decimals = priceDecimals(sig.entry, sig.stopLoss, sig.takeProfit)
+          const riskFrac = oRr ? riskFraction(oRr.riskPrice, oRr.rewardPrice) : null
 
           return (
             <div
               key={sig.id}
-              className="card glass sig-mini-card cursor-pointer"
+              className="sig-mini-card dh-mini cursor-pointer"
               onClick={() => onFocus(idx)}
             >
-              {/* Top row: symbol + RR */}
-              <div className="sig-mini-top">
-                <span
-                  className="sym-ava"
-                  style={{ background: symbolMeta(symbol).color + '33', color: symbolMeta(symbol).ink }}
-                >
-                  {symbolMeta(symbol).letter}
-                </span>
-                <div>
-                  <b className="text-base text-white">{displaySymbol(symbol)}</b>
-                  <div className="text-[11px] text-neutral-400 mt-0.5">{sig.indicator || '-'}</div>
+              <div className="dh-mini-top">
+                <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
+                <div className="sym">
+                  <b className="font-display">{displaySymbol(symbol)}</b>
+                  <span>{sig.indicator || t('signals.indicatorNone')}</span>
                 </div>
                 <span className={`chip shrink-0 ${isBuy ? 'chip-buy' : 'chip-sell'}`}>{sideTag}</span>
-                <div className="rr ml-auto">
-                  <div className="v num">{oRr?.rr != null ? `1:${oRr.rr.toFixed(2)}` : '-'}</div>
-                  <div className="k">{t('signals.focus.rrLabel')}</div>
+                <div className="rr">
+                  <b className={`num ${rrTone(oRr?.rr ?? null)}`}>{oRr?.rr != null ? `1:${oRr.rr.toFixed(2)}` : '-'}</b>
+                  <span>{t('signals.focus.rrLabel')}</span>
                 </div>
               </div>
 
-              {/* Entry / SL / TP mini tiles */}
-              <div className="sig-mini-tiles">
-                <div className="sig-tile">
-                  <div className="cap">{t('signals.colEntry')}</div>
-                  <div className="val num">{sig.entry ?? '-'}</div>
+              <div className="dh-ladder">
+                <div className="row">
+                  <div className="lv sl"><span className="dh-cap">{t('signals.colSl')}</span><b className="num">{fmtPx(sig.stopLoss, decimals)}</b></div>
+                  <div className="lv en"><span className="dh-cap">{t('signals.colEntry')}</span><b className="num">{fmtPx(sig.entry, decimals)}</b></div>
+                  <div className="lv tp"><span className="dh-cap">{t('signals.colTp')}</span><b className="num">{fmtPx(sig.takeProfit, decimals)}</b></div>
                 </div>
-                <div className="sig-tile sl">
-                  <div className="cap">{t('signals.colSl')}</div>
-                  <div className="val num">{sig.stopLoss ?? '-'}</div>
-                </div>
-                <div className="sig-tile tp">
-                  <div className="cap">{t('signals.colTp')}</div>
-                  <div className="val num">{sig.takeProfit ?? '-'}</div>
-                </div>
-              </div>
-
-              {/* TTL bar */}
-              <div className="mt-2.5">
-                <div className="flex justify-between text-[11px] text-neutral-400 mb-1">
-                  <span>{t('signals.focus.remainingTtl')}</span>
-                  <span className="num text-prism-300">{cd?.text ?? '-'}</span>
-                </div>
-                <div className="sig-ttl-bar">
-                  <i style={{ width: `${Math.round((cd?.fraction ?? 0) * 100)}%` }} />
+                <div
+                  className={`sig-ladder-bar${riskFrac == null ? ' none' : ''}`}
+                  style={riskFrac != null ? ({ '--risk': `${(riskFrac * 100).toFixed(1)}%` } as CSSProperties) : undefined}
+                  aria-hidden="true"
+                >
+                  <i className="risk" />
+                  <i className="reward" />
+                  <i className="mark" />
                 </div>
               </div>
 
-              {/* Footer: indicator + trade btn */}
-              <div className="flex items-center gap-2 mt-2.5">
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs text-neutral-300 truncate">{sig.indicator || '-'}</div>
-                  <div className="text-[10px] text-neutral-500 mt-0.5">{fmtTime(sig.createdAt)}</div>
-                </div>
+              <div className="dh-mini-foot">
+                <TtlRing expireAt={sig.expireAt} now={now} label={t('signals.focus.remainingTtl')} />
                 <button
                   onClick={(e) => { e.stopPropagation(); onTrade(sig) }}
-                  className="btn btn-primary rounded-lg h-[34px] px-4 text-[13px] shrink-0"
+                  className="btn btn-primary dh-mini-cta"
                 >
                   {t('signals.trade')}
                 </button>
@@ -122,7 +113,7 @@ const SignalOthers: FC<Props> = ({ entries, now, onTrade, onFocus, onViewAll }) 
       {/* View all button */}
       <button className="view-all-btn" onClick={onViewAll}>
         {t('signals.focus.otherActive')}
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M9 18l6-6-6-6" />
         </svg>
       </button>

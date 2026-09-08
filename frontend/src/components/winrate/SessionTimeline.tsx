@@ -26,7 +26,7 @@ const W = 1440 // 1 分钟 = 1 单位 / one unit per minute
 // into a grey wash.
 const SIZE = {
   full: { h: 36, band: 8, y: { asia: 2, europe: 14, newyork: 26 }, gridEvery: 180, ticks: [0, 360, 720, 1080], showNow: true },
-  compact: { h: 20, band: 5, y: { asia: 0, europe: 7, newyork: 14 }, gridEvery: 360, ticks: [0, 360, 720, 1080], showNow: false },
+  compact: { h: 24, band: 6, y: { asia: 0, europe: 9, newyork: 18 }, gridEvery: 360, ticks: [0, 360, 720, 1080], showNow: false },
 } as const
 // 0.7：在 --surface 上合成后三条带色度够、又不压过白色游标（见 git 历史里的 dataviz 校验）。
 // 0.7 keeps the three bands distinguishable over --surface without out-shouting the cursor.

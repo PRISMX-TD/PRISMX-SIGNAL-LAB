@@ -87,6 +87,51 @@ export function effectiveStatus(signal: Signal, now: number): EffStatus {
   return 'ACTIVE'
 }
 
+// ── 牌面上的价格与时间写法（信号板、仪表盘可执行信号卡、其他活跃信号行共用）──
+// Price and time formatting shared by every signal ticket.
+
+// 三个价位按同一位数显示。后端给的是浮点数，1.35100 会以 1.351 到达，与旁边的
+// 1.35386 并排就是「一个五位一个三位」——同一张牌上的三个价位必须对齐到同一
+// 精度。位数取三者中最长的一个（上限 5），数值本身不变。
+// All three prices on a ticket share one precision: the longest fractional
+// length among them (capped at 5); the values are untouched.
+function decimalsOf(v: number | null): number {
+  if (v == null || !Number.isFinite(v)) return 0
+  const frac = String(v).split('.')[1]
+  return frac ? Math.min(frac.length, 5) : 0
+}
+export function priceDecimals(entry: number | null, sl: number | null, tp: number | null): number {
+  return Math.max(decimalsOf(entry), decimalsOf(sl), decimalsOf(tp))
+}
+export function fmtPx(v: number | null, decimals: number): string {
+  if (v == null || !Number.isFinite(v)) return '-'
+  return v.toFixed(decimals)
+}
+
+// 风险｜回报尺的分割点：风险距离占（风险 + 回报）的比例，夹在 8%–92% 之间，
+// 极端比例下两段与刻度线都还看得见。算不出（缺价位）返回 null，调用方画空轨道。
+// 止损永远在左、止盈永远在右，不随买卖方向翻转：这是一条「风险｜回报」尺，
+// 不是价格轴，整板列序一致才扫得快。
+// The risk|reward rule's split: risk over (risk + reward), clamped to 8–92% so
+// both segments and the notch survive extreme ratios; null when a price is
+// missing. SL is always left and TP always right regardless of side.
+export function riskFraction(riskPrice: number, rewardPrice: number): number | null {
+  const total = riskPrice + rewardPrice
+  if (!(total > 0)) return null
+  return Math.min(0.92, Math.max(0.08, riskPrice / total))
+}
+
+// 牌上的发出时间只到时分秒。fmtTime 的完整写法「08/09, 14:33:48 UTC+8」有 21 个
+// 字符，和策略名并排放不下。这块牌只活 10 分钟，日期与时区后缀在这里是冗余；
+// 订单回执页仍用完整写法。时区按全站约定取上海时间，只是不再写出来。
+// Clock-only issue time: fmtTime's 21-character form does not share a line with
+// the strategy name, and a ten-minute ticket needs no date or zone suffix.
+export function fmtIssueClock(iso: string | null | undefined): string {
+  const d = parseTime(iso)
+  if (!d || Number.isNaN(d.getTime())) return '-'
+  return d.toLocaleTimeString('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
 // 风险回报比颜色 / risk-reward color
 export function rrTone(rr: number | null): string {
   if (rr == null) return 'text-neutral-400'

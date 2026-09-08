@@ -354,6 +354,7 @@
       "adviceNeutral": "Timeframes disagree, trend is unclear for now.",
       "signalHeading": "Executable signal",
       "communitySentiment": "Community sentiment",
+      "tfRail": "Timeframes",
       "noExecutable": "No executable signal · AI monitoring",
       "remainingTtl": "Time left",
       "otherActive": "Other active signals",

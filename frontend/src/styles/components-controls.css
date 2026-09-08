@@ -574,17 +574,7 @@
       font-size: 20px;
     }
 
-    /* ── 执行卡手机版：套用普通信号卡结构，无需特殊规则 ── */
-    /* 信号卡瓦片手机端内边距收紧（含可执行信号卡）*/
-    .exec-tile {
-      padding: 8px 8px;
-    }
-    .exec-tile .val {
-      font-size: 13px;
-    }
-    .exec-tile .cap {
-      font-size: 11px;
-    }
+    /* ── 执行卡手机版：与桌面同一份标记，字号在 dashboard.css 里缩 ── */
 
     /* ── 下单弹窗：底部全屏上滑 / bottom sheet ── */
     .slide-overlay {

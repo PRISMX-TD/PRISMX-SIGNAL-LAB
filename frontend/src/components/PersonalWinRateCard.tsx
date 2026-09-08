@@ -107,14 +107,15 @@ export default function PersonalWinRateCard({ variant = 'compact', login, classN
   const gwrPct = gwr?.winRate != null ? Math.round(gwr.winRate * 100) : null
 
   return (
-    <section className={`card glass ${detailed ? 'p-5' : 'p-[18px]'}${className ? ` ${className}` : ''}`}>
-      <div className="flex items-center justify-between">
+    <section className={`card glass ${detailed ? 'p-5' : 'p-[18px] sm:p-6'}${className ? ` ${className}` : ''}`}>
+      <div className="flex items-center justify-between gap-3">
         <h3 className={`font-bold text-white ${detailed ? 'text-lg' : 'text-[15px]'}`}>
           {t('winrate.personalTitle')}
         </h3>
         {!detailed && (
-          <Link to="/orders" className="text-xs text-prism-300 hover:text-prism-200">
-            {t('winrate.viewDetail')} ›
+          <Link to="/orders" className="dh-link">
+            {t('winrate.viewDetail')}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6" /></svg>
           </Link>
         )}
       </div>
@@ -128,7 +129,7 @@ export default function PersonalWinRateCard({ variant = 'compact', login, classN
           record — the same rule that turned the strategy card's "longest losing
           streak" into "longest in the last 200": if what a number measures
           changes, say so. */}
-      <p className="mt-1 text-[11px] leading-relaxed text-neutral-500">
+      <p className="mt-1.5 text-xs leading-relaxed text-neutral-500">
         {t('winrate.personalHint')}
         {data && ` ${t('winrate.windowHint', { days: data.windowDays })}`}
       </p>
@@ -137,25 +138,28 @@ export default function PersonalWinRateCard({ variant = 'compact', login, classN
         <div className="mt-3 py-3 text-center text-sm text-neutral-500">{t('winrate.noData')}</div>
       ) : (
         <>
-          <div className="mt-4 flex items-center gap-4">
+          {/* 三个数从三块灰底格改成发丝线分隔的行：格子把三个数各自框成小卡，
+              读起来是三件事；分隔行才是一份账。/ Three hairline rows instead of
+              three grey tiles: tiles read as three separate objects, rows as one ledger. */}
+          <div className="dh-perf">
             <RadialGauge value={pct} color="var(--up)" size={detailed ? 116 : 88} strokeWidth={detailed ? 13 : 10}>
-              <b className={`num font-bold text-up ${detailed ? 'text-3xl' : 'text-2xl'}`}>{pct}%</b>
+              <b className={`num font-bold text-white ${detailed ? 'text-3xl' : 'text-2xl'}`}>{pct}%</b>
               <span className="mt-0.5 text-center text-[10px] leading-tight text-neutral-500">
                 {t('winrate.resolvedCount', { n: data!.totalResolved })}
               </span>
             </RadialGauge>
-            <div className="grid flex-1 grid-cols-1 gap-1.5 text-xs">
-              <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
-                <span className="text-neutral-500">{t('winrate.wins')}</span>
-                <span className="num font-bold text-up">{data!.wins}</span>
+            <div className="dh-perf-rows">
+              <div className="dh-perf-row">
+                <span>{t('winrate.wins')}</span>
+                <b className="num text-up">{data!.wins}</b>
               </div>
-              <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
-                <span className="text-neutral-500">{t('winrate.losses')}</span>
-                <span className="num font-bold text-down">{data!.losses}</span>
+              <div className="dh-perf-row">
+                <span>{t('winrate.losses')}</span>
+                <b className="num text-down">{data!.losses}</b>
               </div>
-              <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
-                <span className="text-neutral-500">{t('winrate.openPositions')}</span>
-                <span className="num font-bold text-neutral-300">{data!.openPositions}</span>
+              <div className="dh-perf-row">
+                <span>{t('winrate.openPositions')}</span>
+                <b className="num text-white">{data!.openPositions}</b>
               </div>
             </div>
           </div>

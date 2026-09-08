@@ -30,9 +30,9 @@ const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => 
     : '-'
 
   return (
-    <section className="card glass dash-quotes p-4 sm:p-5">
+    <section className="card glass dash-quotes p-4 sm:p-6">
       {/* 标题栏（仅桌面）：左「实时行情报价」右 MT5 状态 / title bar, desktop only */}
-      <div className="hidden sm:flex items-center justify-between mb-3">
+      <div className="hidden sm:flex items-center justify-between mb-4">
         <h3 className="text-[15px] font-bold text-white">{t('signals.focus.quotesHeading', '实时行情报价')}</h3>
         <div className="flex items-center gap-2 text-xs">
           <span className={`inline-block w-[7px] h-[7px] rounded-full ${mt5Online ? 'bg-up animate-breathe' : 'bg-neutral-500'}`} />
@@ -86,7 +86,9 @@ const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => 
                 const bid = q?.bid != null ? q.bid.toFixed(digits) : null
                 const ask = q?.ask != null ? q.ask.toFixed(digits) : null
                 return (
-                  <tr key={sym}>
+                  // 焦点品种那一行带一层微亮底，和英雄卡里正在看的品种对上。
+                  // The focus symbol's row is tinted to match the hero's current pick.
+                  <tr key={sym} className={sym === focusSym ? 'focus' : undefined}>
                     <td>
                       <div className="qt-sym-cell">
                         <div className="qt-sym-ava" style={{ background: color + '33', color: ink }}>{letter}</div>
