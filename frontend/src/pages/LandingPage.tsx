@@ -544,18 +544,20 @@ function GrowthStage({ t, navigate }: { t: T; navigate: ReturnType<typeof useNav
               {t('competition.status.regOpen')}
             </span>
           </span>
-          <span className="cmp-hero-name block">{t('landing.ggCompName')}</span>
-          <span className="cmp-hero-sub">
+          <h3 className="cmp-hero-name">{t('landing.ggCompName')}</h3>
+          <div className="cmp-hero-sub">
             <span className="cmp-hero-prize">
               <small>{t('competition.prizeLabel')}</small>
               {t('landing.ggPrize')}
             </span>
             <span className="cmp-hero-when num">2026.09.15 - 2026.09.30</span>
             <span className="cmp-hero-cta">{t('competition.enterArena')}</span>
-          </span>
-          <span className="cmp-ticker" aria-hidden>
-            <span className="flex">{ticker}{ticker}</span>
-          </span>
+          </div>
+          {/* 与比赛页同构：div 在 button 里，.cmp-ticker > div 的跑马灯规则才接得上。
+              Same structure as the competitions page so the .cmp-ticker > div marquee applies. */}
+          <div className="cmp-ticker" aria-hidden>
+            <div>{ticker}{ticker}</div>
+          </div>
         </button>
         <div className="cmp-ladder-h mt-8">
           <h3>{t('leaderboard.boards.return_pct')} · {t('leaderboard.periods.week')}</h3>
