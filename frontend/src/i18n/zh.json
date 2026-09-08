@@ -830,13 +830,9 @@
       "login": "登录号"
     },
     "perf": {
-      "netTitle": "净盈亏 · 已平仓",
       "winRate": "胜率",
       "record": "盈利 {{w}} · 亏损 {{l}} · 已判定 {{n}} 笔",
-      "bySymbol": "品种盈亏",
-      "bySymbolHint": "净额 · 零轴对齐",
-      "scope": "统计范围：近 {{days}} 天 · {{account}} · 基于你自己真实的平仓记录",
-      "trades": "{{n}} 笔"
+      "scope": "统计范围：近 {{days}} 天 · {{account}} · 基于你自己真实的平仓记录"
     },
     "colTime": "时间",
     "colType": "类型",

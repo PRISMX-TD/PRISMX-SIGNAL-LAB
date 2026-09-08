@@ -830,13 +830,9 @@
       "login": "Login"
     },
     "perf": {
-      "netTitle": "Net P&L · closed",
       "winRate": "Win rate",
       "record": "{{w}} wins · {{l}} losses · {{n}} resolved",
-      "bySymbol": "P&L by symbol",
-      "bySymbolHint": "Net · aligned at zero",
-      "scope": "Covering the last {{days}} days · {{account}} · based on your own real closed trades",
-      "trades": "{{n}} trades"
+      "scope": "Covering the last {{days}} days · {{account}} · based on your own real closed trades"
     },
     "colTime": "Time",
     "colType": "Type",

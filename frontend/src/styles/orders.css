@@ -573,44 +573,20 @@
   color: var(--text);
 }
 
-/* ── 绩效分析 / performance ── */
+/* ── 绩效分析 / performance ──
+   页头只有一行：左边胜率（大数 + 胜负条 + 记录），右边统计范围。净盈亏与品种盈亏
+   已撤（2026-09-08，产品负责人要求），已平仓明细紧随其后。
+   One row: win rate (figure, tug bar, record) on the left, the scope line on the
+   right. Net P&L and per-symbol bars were removed 2026-09-08 at the product
+   owner's request; the closed-trade list follows directly. */
 .ord-perf-head {
-  display: grid;
-  gap: 32px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px 32px;
   margin-top: 6px;
 }
-@media (min-width: 768px) {
-  .ord-perf-head {
-    grid-template-columns: minmax(0, 1fr) minmax(300px, 440px);
-    gap: 48px;
-    align-items: start;
-  }
-}
-@media (min-width: 1024px) {
-  .ord-perf-head { gap: 72px; }
-}
-/* 净盈亏是这页的领衔数字：等宽、大号、按盈亏上色（站内所有盈亏数字都这样上色）。
-   Net P&L leads the page: mono, large, coloured by sign like every P&L figure in the app. */
-.ord-perf-net {
-  margin-top: 12px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: clamp(44px, 5vw, 64px);
-  line-height: 1;
-  font-weight: 500;
-  letter-spacing: -0.035em;
-  color: #fff;
-}
-.ord-perf-net.up { color: var(--up); }
-.ord-perf-net.dn { color: var(--down); }
-.ord-perf-net small {
-  margin-left: 10px;
-  font-family: Archivo, "Noto Sans SC", system-ui, sans-serif;
-  font-size: 15px;
-  font-weight: 400;
-  letter-spacing: 0;
-  color: var(--text-3);
-}
-.ord-perf-wr { margin-top: 30px; }
 .ord-perf-wrn {
   margin-top: 12px;
   font-family: "JetBrains Mono", ui-monospace, monospace;
@@ -653,88 +629,15 @@
   font-size: 13px;
   color: var(--text-3);
 }
-.ord-eyebrow-split {
-  justify-content: space-between;
-  gap: 12px;
-}
-.ord-eyebrow-split span:last-child {
-  letter-spacing: 0.04em;
-  text-transform: none;
-}
-.ord-sbars {
-  display: grid;
-  gap: 4px;
-  margin-top: 16px;
-}
-/* 品种盈亏：一条 6px 细条，零轴对齐，正右负左。条厚不超过 8px——数据要安静。
-   P&L by symbol: a 6px bar aligned at zero, gains right, losses left. */
-.ord-sbar {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr) 88px;
-  gap: 12px;
-  align-items: center;
-  height: 32px;
-  animation: ord-in 0.45s var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 50ms);
-}
-.ord-sbar-id {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--text-2);
-}
-.ord-sbar-id .sym-ava {
-  width: 20px;
-  height: 20px;
-  font-size: 7.5px;
-}
-.ord-sbar-trk {
-  position: relative;
-  height: 12px;
-}
-.ord-sbar-zero {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: var(--line-hi);
-}
-.ord-sbar-b {
-  position: absolute;
-  top: 3px;
-  height: 6px;
-  animation: grow-x var(--dur-slow) var(--ease-out) both;
-}
-.ord-sbar-b.gain {
-  background: var(--up);
-  border-radius: 0 3px 3px 0;
-  transform-origin: left center;
-}
-.ord-sbar-b.loss {
-  background: var(--down);
-  border-radius: 3px 0 0 3px;
-  transform-origin: right center;
-}
-.ord-sbar-v {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 12.5px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  color: var(--text);
-}
-.ord-sbar-v.up { color: var(--up); }
-.ord-sbar-v.dn { color: var(--down); }
 .ord-perf-scope {
-  margin: 28px 0 0;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
+  margin: 0;
+  max-width: 44ch;
   font-size: 12.5px;
+  line-height: 1.55;
   color: var(--text-3);
+}
+@media (min-width: 768px) {
+  .ord-perf-scope { text-align: right; }
 }
 
 @keyframes ord-in {
@@ -936,20 +839,9 @@
     padding-left: 0;
   }
   .ord-v { margin-top: 0; }
-  .ord-perf-net { font-size: 44px; }
-  .ord-perf-net small {
-    display: block;
-    margin: 6px 0 0;
-  }
-  .ord-sbar {
-    grid-template-columns: 84px minmax(0, 1fr) 80px;
-    gap: 10px;
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   .ord-slip,
-  .ord-sbar,
-  .ord-sbar-b,
   .ord-tug i,
   .ord-stamp.land,
   .ord-live::before,

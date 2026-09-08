@@ -632,12 +632,7 @@ export default function OrdersPage() {
           the page head (the discipline score was withdrawn on 2026-09-07) */}
       {tab === 'performance' && (
         <>
-          <PerformanceSummary
-            trades={visibleTrades}
-            login={selectedLogin ?? undefined}
-            currency={activeAccount?.accountCurrency}
-            accountLabel={accountLabel}
-          />
+          <PerformanceSummary login={selectedLogin ?? undefined} accountLabel={accountLabel} />
           <ClosedTradesList trades={visibleTrades} />
         </>
       )}
