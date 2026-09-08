@@ -559,7 +559,8 @@
       "reset": "Reset to defaults",
       "done": "Done",
       "addLine": "Add line",
-      "removeLine": "Remove line"
+      "removeLine": "Remove line",
+      "enabledCount": "{{n}} on"
     },
     "draw": {
       "tools": "Drawing tools",

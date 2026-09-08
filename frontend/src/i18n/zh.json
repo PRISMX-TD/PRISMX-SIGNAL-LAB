@@ -559,7 +559,8 @@
       "reset": "恢复默认",
       "done": "完成",
       "addLine": "添加均线",
-      "removeLine": "删除均线"
+      "removeLine": "删除均线",
+      "enabledCount": "已开 {{n}} 个"
     },
     "draw": {
       "tools": "画图工具",

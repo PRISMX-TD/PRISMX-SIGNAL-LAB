@@ -1,19 +1,25 @@
-// 指标设置弹窗：开关 + 周期/颜色客制化，六个指标各一张卡片。字段改动即时
-// 生效（由父组件 ChartsPage 重新计算并画到图上），弹窗本身不缓存草稿、没有
-// 单独的"保存"步骤——与站内其它偏好设置（画线颜色、下单默认手数等）的即时
-// 生效习惯保持一致。MA/EMA 是变长的均线列表，可逐条增删；颜色一律从预设
-// 色板点选，不用原生 RGB 取色器（那对大多数用户是不必要的复杂度）。
-// Indicator settings modal: on/off + period/color customization, one card per
-// indicator. Field edits take effect immediately (the parent ChartsPage
-// recomputes and redraws) — the modal holds no draft state and has no
-// separate "Save" step, consistent with how other in-app preferences (draw
-// colors, default order volume, etc.) already apply instantly. MA/EMA are
-// variable-length line lists that can be added to / removed from one at a
-// time; colors are always picked from a preset palette rather than a native
-// RGB picker (unnecessary complexity for most users).
+// 指标面板：开关 + 周期/颜色客制化，六个指标各一行。字段改动即时生效（由父组件
+// ChartsPage 重新计算并画到图上），面板本身不缓存草稿、没有单独的"保存"步骤
+// ——与站内其它偏好设置（画线颜色、下单默认手数等）的即时生效习惯一致。
+// MA/EMA 是变长的均线列表，可逐条增删；颜色一律从预设色板点选，不用原生取色器。
+// 2026-09-08 重做：桌面是居中的一张面（560 宽），手机是贴底抽屉；发丝线一行一个
+// 指标，行头是开关 + 名称 + 当前颜色点 + 参数摘要，参数区在行下（关掉时减淡但仍
+// 可改）。整个面板 portal 到 body——页面切换动画给 <main> 造了层叠上下文，留在里
+// 面的话再高的 z-index 也压不过全站底栏（z-40），之前手机上就是这样被底栏挡住。
+// Indicator panel: on/off + period/color customization, one hairline row per
+// indicator. Edits apply immediately (ChartsPage recomputes and redraws); no
+// draft state, no separate Save. MA/EMA are variable-length line lists; colors
+// come from a preset palette, never a native picker.
+// Redone 2026-09-08: a centered 560px plane on desktop, a bottom sheet on
+// mobile. Row head = switch + name + current color dots + a parameter summary;
+// params sit under the row (dimmed when off, still editable). The whole panel
+// is portalled to body: the page-enter animation gives <main> a stacking
+// context inside which no z-index beats the app tab bar (z-40), which is how
+// the tab bar used to cover this panel on phones.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { NumberField } from '../strategies/NumberField'
+import Switch from '../Switch'
 import type { IndicatorFlags } from './chartConfig'
 import {
   COLOR_PRESETS,
@@ -35,309 +41,221 @@ interface Props {
   onClose: () => void
 }
 
-// 数字框与策略编辑器共用 strategies/NumberField（失焦才夹紧的实现原本在这里，
-// 已上收）。/ Number inputs share strategies/NumberField (the blur-only clamping
-// originated here and was hoisted).
+// 数字框：失焦才解析、夹紧、上报——逐键夹紧会把正在输入的 "1" 弹成下限。
+// Number field: parse / clamp / propagate on blur only — clamping per keystroke
+// bounces a half-typed "1" to the minimum.
+function Num({ value, min = 1, max = 500, isFloat = false, onChange, ariaLabel }: {
+  value: number
+  min?: number
+  max?: number
+  isFloat?: boolean
+  onChange: (v: number) => void
+  ariaLabel: string
+}) {
+  const [text, setText] = useState(String(value))
+  useEffect(() => { setText(String(value)) }, [value])
+  const commit = () => {
+    const n = isFloat ? parseFloat(text) : parseInt(text, 10)
+    const clamped = !Number.isFinite(n) ? value : Math.min(max, Math.max(min, n))
+    setText(String(clamped))
+    if (clamped !== value) onChange(clamped)
+  }
+  return (
+    <input
+      className="ind-in"
+      value={text}
+      inputMode={isFloat ? 'decimal' : 'numeric'}
+      aria-label={ariaLabel}
+      onChange={(e) => setText(e.target.value.replace(isFloat ? /[^0-9.]/g : /[^0-9]/g, ''))}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+    />
+  )
+}
 
-// 颜色选择：一个圆形色块按钮，点开一个装着预设色板的小弹层，点色板里的颜色
-// 即选中并关闭——不出现系统原生的 RGB 取色器。
-// Color picker: a circular swatch button; clicking opens a small popover of
-// preset colors, clicking one selects it and closes the popover — no native
-// OS/RGB color picker ever appears.
-function ColorPicker({ label, value, onChange }: { label?: string; value: string; onChange: (v: string) => void }) {
+// 颜色选择：一个圆点，点开一小块预设色板，点色即选中并关闭——不出现系统取色器。
+// 它是"弹窗里的弹窗"：划返回先收色板，再收整个面板。
+// Color picker: a dot that opens a small preset palette; picking closes it — no
+// native picker. Nested modal: swipe-back closes the palette first, then the panel.
+function ColorDot({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) {
   const [open, setOpen] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
-  // 这个色板套在指标设置弹窗内部，是"弹窗里的弹窗"：划返回应该先收起色板，
-  // 再收起外层的整个设置弹窗，而不是一划直接把设置弹窗也带走。
-  // This palette nests inside the indicator settings modal — a "modal within
-  // a modal": swiping back should close the palette first, then the outer
-  // settings modal on a second swipe, not take both out in one go.
+  const rootRef = useRef<HTMLSpanElement>(null)
   useBackToClose(open, () => setOpen(false))
-
   useEffect(() => {
     if (!open) return
-    const onClick = (e: MouseEvent) => {
+    const onDown = (e: PointerEvent) => {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
     }
-    document.addEventListener('mousedown', onClick)
-    return () => document.removeEventListener('mousedown', onClick)
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
   }, [open])
-
   return (
-    <div className="relative flex flex-col gap-1" ref={rootRef}>
-      {label && <span className="text-[10px] uppercase tracking-wide text-neutral-500">{label}</span>}
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="h-6 w-6 shrink-0 rounded-full border-2 border-white/25 transition hover:border-white/50"
-        style={{ background: value }}
-        aria-label={label}
-      />
+    <span className="ind-cp" ref={rootRef}>
+      <button type="button" className="ind-dot" style={{ background: value }} aria-label={label} aria-expanded={open} onClick={() => setOpen((v) => !v)} />
       {open && (
-        // 贴着按钮本身弹出（不去屏幕底部单开一个抽屉，那没有必要）；给一个
-        // 明确宽度（w-36）而不是让内容撑开，避免网格在窄父级里挤压出圆点
-        // 重叠的观感；right-0/left-0 各占一半屏幕时用 CSS 的
-        // max(calc(...)) 兜底不必要——弹窗本身已经是移动端全宽抽屉，两侧
-        // 留白足够，贴左对齐通常就不会出屏幕。
-        // Anchored to the button itself (no separate bottom-of-screen drawer
-        // — unnecessary). Given an explicit width (w-36) instead of
-        // shrink-to-fit, so the grid never gets squeezed into
-        // overlapping-looking circles by an ambiguous parent width. The
-        // modal itself is already a full-width bottom sheet on mobile with
-        // comfortable side margins, so a left-anchored popover has enough
-        // room without needing edge-avoidance logic.
-        <div className="absolute left-0 top-full z-30 mt-1 grid w-36 grid-cols-5 gap-1.5 rounded-lg border border-white/10 bg-ink-900/95 p-2 shadow-prism backdrop-blur">
+        <span className="ind-pal" role="listbox">
           {COLOR_PRESETS.map((c) => (
             <button
               key={c}
               type="button"
-              onClick={() => {
-                onChange(c)
-                setOpen(false)
-              }}
-              className={`h-5 w-5 shrink-0 rounded-full border-2 transition hover:border-white/70 ${c === value ? 'border-white' : 'border-white/20'}`}
+              role="option"
+              aria-selected={c === value}
+              className={`ind-dot sm ${c === value ? 'on' : ''}`}
               style={{ background: c }}
+              onClick={() => { onChange(c); setOpen(false) }}
             />
           ))}
-        </div>
+        </span>
       )}
-    </div>
+    </span>
   )
 }
 
-// MA/EMA 共用的"均线列表"编辑区：逐条显示周期 + 颜色 + 删除按钮，底部一个
-// "添加"按钮；条数触达上下限时对应按钮置灰。
-// The line-list editor shared by MA/EMA: each line shows period + color +
-// a remove button, with an "add" button below; add/remove disable at the
-// configured bounds.
+function Field({ k, children }: { k: string; children: ReactNode }) {
+  return (
+    <label className="ind-f">
+      <span className="k">{k}</span>
+      {children}
+    </label>
+  )
+}
+
+// MA/EMA 的均线列表：一条一枚药丸（周期 · 颜色 · 删），末尾一枚虚线「添加」。
+// MA/EMA line list: one pill per line (period · color · remove) and a dashed "add" pill.
 function LineList({ cfg, onChange }: { cfg: LinesConfig; onChange: (next: LinesConfig) => void }) {
   const { t } = useTranslation()
   return (
-    <div className="flex flex-col gap-2">
+    <div className="ind-lines">
       {cfg.periods.map((period, i) => (
-        <div key={i} className="flex items-end gap-2">
-          <NumberField
-            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
-            label={`${t('charts.indicators.period')} ${i + 1}`}
+        <span key={i} className="ind-line">
+          <Num
             value={period}
-            onChange={(v) => {
-              const periods = [...cfg.periods]
-              periods[i] = v
-              onChange({ ...cfg, periods })
-            }}
+            ariaLabel={`${t('charts.indicators.period')} ${i + 1}`}
+            onChange={(v) => { const periods = [...cfg.periods]; periods[i] = v; onChange({ ...cfg, periods }) }}
           />
-          <ColorPicker
+          <ColorDot
             value={cfg.colors[i]}
-            onChange={(v) => {
-              const colors = [...cfg.colors]
-              colors[i] = v
-              onChange({ ...cfg, colors })
-            }}
+            label={String(t('charts.indicators.color'))}
+            onChange={(v) => { const colors = [...cfg.colors]; colors[i] = v; onChange({ ...cfg, colors }) }}
           />
           <button
             type="button"
+            className="ind-x"
             onClick={() => onChange(removeLine(cfg, i))}
             disabled={cfg.periods.length <= MIN_LINES}
-            className="mb-0.5 flex h-6 w-6 items-center justify-center rounded-md text-neutral-500 transition hover:text-down disabled:cursor-not-allowed disabled:opacity-30"
-            aria-label={t('charts.indicators.removeLine')}
+            aria-label={String(t('charts.indicators.removeLine'))}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
           </button>
-        </div>
+        </span>
       ))}
-      <button
-        type="button"
-        onClick={() => onChange(addLine(cfg))}
-        disabled={cfg.periods.length >= MAX_LINES}
-        className="flex w-fit items-center gap-1 rounded-md border border-dashed border-white/20 px-2 py-1 text-[11px] text-neutral-400 transition hover:border-prism-500/50 hover:text-prism-200 disabled:cursor-not-allowed disabled:opacity-30"
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+      <button type="button" className="ind-add" onClick={() => onChange(addLine(cfg))} disabled={cfg.periods.length >= MAX_LINES}>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
         {t('charts.indicators.addLine')}
       </button>
     </div>
   )
 }
 
-// 一张指标卡片：开关 + 标题 + 参数区（禁用时整体降低透明度但不隐藏，用户
-// 仍能看到/预设参数，只是要先勾选开关才会画到图上）。
-// One indicator card: toggle + title + params area (dims when off but stays
-// visible/editable — the user can still see and pre-configure the settings
-// before flipping the toggle to actually draw it).
-function Card({
-  checked,
-  onToggle,
-  title,
-  children,
-}: {
-  checked: boolean
+// 一行指标：开关 + 名称 + 当前颜色点 + 参数摘要；参数区在下，关掉时减淡但仍可改。
+// One indicator row: switch + name + color dots + summary; params below, dimmed when off.
+function Row({ on, onToggle, name, colors, summary, children }: {
+  on: boolean
   onToggle: () => void
-  title: string
+  name: string
+  colors: string[]
+  summary: string
   children: ReactNode
 }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-      <label className="flex cursor-pointer items-center gap-2">
-        <input type="checkbox" checked={checked} onChange={onToggle} className="h-4 w-4 accent-prism-500" />
-        <span className="text-sm font-semibold text-neutral-100">{title}</span>
-      </label>
-      <div className={`mt-2.5 pl-6 transition-opacity ${checked ? '' : 'opacity-40'}`}>{children}</div>
+    <div className="ind-row" data-off={!on || undefined}>
+      <div className="ind-head">
+        <Switch checked={on} onChange={onToggle} aria-label={name} />
+        <span className="ind-name">{name}</span>
+        <span className="ind-sw" aria-hidden>{colors.map((c, i) => <i key={i} style={{ background: c }} />)}</span>
+        <span className="ind-sum">{summary}</span>
+      </div>
+      <div className="ind-body">{children}</div>
     </div>
   )
 }
 
 export default function IndicatorSettingsModal({ indicators, onToggle, settings, onChange, onReset, onClose }: Props) {
   const { t } = useTranslation()
+  const onCount = Object.values(indicators).filter(Boolean).length
 
-  return (
-    <div className="slide-overlay" onClick={onClose}>
-      {/* 宽度不用内联 style：.slide-sheet 自带的移动端媒体查询
-          （<640px 时变成贴底全屏抽屉）靠的就是 CSS 类选择器，内联 style 的
-          优先级会盖过媒体查询把它废掉——之前 style={{width:480}} 正是这样
-          在手机上把全站统一的抽屉式弹窗行为顶掉，导致内容在窄屏上溢出。
-          这里改用 Tailwind 的 sm: 前缀只在桌面宽度（≥640px，与站内媒体查询
-          的断点严丝合缝互补）加宽到 480px，移动端完全交还给已验证过的
-          抽屉样式。
-          No inline style for width: .slide-sheet's own mobile media query
-          (becomes a full-width bottom sheet below 640px) relies on a plain
-          CSS class selector, and an inline style's specificity beats a media
-          query outright — that's exactly how the previous
-          style={{width:480}} clobbered the site-wide bottom-sheet modal
-          behavior on phones, causing content to overflow on narrow screens.
-          Using Tailwind's sm: prefix here only widens to 480px at desktop
-          widths (>=640px, which dovetails exactly with the site's own
-          breakpoint), leaving mobile entirely to the already-proven sheet
-          style. */}
-      <div className="slide-sheet sm:w-[480px]" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-bold text-white">{t('charts.indicators.settingsTitle')}</h3>
-          <button type="button" onClick={onClose} className="text-neutral-400 hover:text-white" aria-label={t('common.close')}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const period = String(t('charts.indicators.period'))
+  const color = String(t('charts.indicators.color'))
+
+  return createPortal(
+    <div className="ind-overlay" onClick={onClose}>
+      <div className="ind-dlg" role="dialog" aria-modal="true" aria-label={String(t('charts.indicators.settingsTitle'))} onClick={(e) => e.stopPropagation()}>
+        <div className="ind-hd">
+          <div>
+            <h3>{t('charts.indicators.settingsTitle')}</h3>
+            <span>{t('charts.indicators.enabledCount', { n: onCount })}</span>
+          </div>
+          <button type="button" className="ind-close" onClick={onClose} aria-label={String(t('common.close'))}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
           </button>
         </div>
 
-        <div className="mt-3 flex flex-col gap-3">
-          <Card checked={indicators.ma} onToggle={() => onToggle('ma')} title={t('charts.indicators.ma')}>
+        <div className="ind-list no-sb">
+          <Row on={indicators.ma} onToggle={() => onToggle('ma')} name={String(t('charts.indicators.ma'))} colors={settings.ma.colors} summary={settings.ma.periods.join(' · ')}>
             <LineList cfg={settings.ma} onChange={(ma) => onChange({ ...settings, ma })} />
-          </Card>
+          </Row>
 
-          <Card checked={indicators.ema} onToggle={() => onToggle('ema')} title={t('charts.indicators.ema')}>
+          <Row on={indicators.ema} onToggle={() => onToggle('ema')} name={String(t('charts.indicators.ema'))} colors={settings.ema.colors} summary={settings.ema.periods.join(' · ')}>
             <LineList cfg={settings.ema} onChange={(ema) => onChange({ ...settings, ema })} />
-          </Card>
+          </Row>
 
-          <Card checked={indicators.boll} onToggle={() => onToggle('boll')} title={t('charts.indicators.boll')}>
-            <div className="flex flex-wrap items-end gap-3">
-              <NumberField
-            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
-                label={t('charts.indicators.period')}
-                value={settings.boll.period}
-                onChange={(v) => onChange({ ...settings, boll: { ...settings.boll, period: v } })}
-              />
-              <NumberField
-            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
-                label={t('charts.indicators.multiplier')}
-                value={settings.boll.mult}
-                min={1}
-                max={5}
-                onChange={(v) => onChange({ ...settings, boll: { ...settings.boll, mult: v } })}
-              />
-              <ColorPicker
-                label={t('charts.indicators.color')}
-                value={settings.boll.color}
-                onChange={(v) => onChange({ ...settings, boll: { ...settings.boll, color: v } })}
-              />
+          <Row on={indicators.boll} onToggle={() => onToggle('boll')} name={String(t('charts.indicators.boll'))} colors={[settings.boll.color]} summary={`${settings.boll.period} × ${settings.boll.mult}σ`}>
+            <div className="ind-params">
+              <Field k={period}><Num value={settings.boll.period} ariaLabel={period} onChange={(v) => onChange({ ...settings, boll: { ...settings.boll, period: v } })} /></Field>
+              <Field k={String(t('charts.indicators.multiplier'))}><Num value={settings.boll.mult} min={1} max={5} isFloat ariaLabel={String(t('charts.indicators.multiplier'))} onChange={(v) => onChange({ ...settings, boll: { ...settings.boll, mult: v } })} /></Field>
+              <Field k={color}><ColorDot value={settings.boll.color} label={color} onChange={(v) => onChange({ ...settings, boll: { ...settings.boll, color: v } })} /></Field>
             </div>
-          </Card>
+          </Row>
 
-          <Card checked={indicators.volume} onToggle={() => onToggle('volume')} title={t('charts.indicators.volume')}>
-            <div className="flex flex-wrap items-end gap-3">
-              <ColorPicker
-                label={t('charts.indicators.upColor')}
-                value={settings.volume.upColor}
-                onChange={(v) => onChange({ ...settings, volume: { ...settings.volume, upColor: v } })}
-              />
-              <ColorPicker
-                label={t('charts.indicators.downColor')}
-                value={settings.volume.downColor}
-                onChange={(v) => onChange({ ...settings, volume: { ...settings.volume, downColor: v } })}
-              />
+          <Row on={indicators.volume} onToggle={() => onToggle('volume')} name={String(t('charts.indicators.volume'))} colors={[settings.volume.upColor, settings.volume.downColor]} summary="">
+            <div className="ind-params">
+              <Field k={String(t('charts.indicators.upColor'))}><ColorDot value={settings.volume.upColor} label={String(t('charts.indicators.upColor'))} onChange={(v) => onChange({ ...settings, volume: { ...settings.volume, upColor: v } })} /></Field>
+              <Field k={String(t('charts.indicators.downColor'))}><ColorDot value={settings.volume.downColor} label={String(t('charts.indicators.downColor'))} onChange={(v) => onChange({ ...settings, volume: { ...settings.volume, downColor: v } })} /></Field>
             </div>
-          </Card>
+          </Row>
 
-          <Card checked={indicators.rsi} onToggle={() => onToggle('rsi')} title={t('charts.indicators.rsi')}>
-            <div className="flex flex-wrap items-end gap-3">
-              <NumberField
-            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
-                label={t('charts.indicators.period')}
-                value={settings.rsi.period}
-                onChange={(v) => onChange({ ...settings, rsi: { ...settings.rsi, period: v } })}
-              />
-              <NumberField
-            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
-                label={t('charts.indicators.overbought')}
-                value={settings.rsi.overbought}
-                min={50}
-                max={99}
-                onChange={(v) => onChange({ ...settings, rsi: { ...settings.rsi, overbought: v } })}
-              />
-              <NumberField
-            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
-                label={t('charts.indicators.oversold')}
-                value={settings.rsi.oversold}
-                min={1}
-                max={50}
-                onChange={(v) => onChange({ ...settings, rsi: { ...settings.rsi, oversold: v } })}
-              />
-              <ColorPicker
-                label={t('charts.indicators.color')}
-                value={settings.rsi.color}
-                onChange={(v) => onChange({ ...settings, rsi: { ...settings.rsi, color: v } })}
-              />
+          <Row on={indicators.rsi} onToggle={() => onToggle('rsi')} name={String(t('charts.indicators.rsi'))} colors={[settings.rsi.color]} summary={`${settings.rsi.period} · ${settings.rsi.overbought} / ${settings.rsi.oversold}`}>
+            <div className="ind-params">
+              <Field k={period}><Num value={settings.rsi.period} ariaLabel={period} onChange={(v) => onChange({ ...settings, rsi: { ...settings.rsi, period: v } })} /></Field>
+              <Field k={String(t('charts.indicators.overbought'))}><Num value={settings.rsi.overbought} min={50} max={99} ariaLabel={String(t('charts.indicators.overbought'))} onChange={(v) => onChange({ ...settings, rsi: { ...settings.rsi, overbought: v } })} /></Field>
+              <Field k={String(t('charts.indicators.oversold'))}><Num value={settings.rsi.oversold} min={1} max={50} ariaLabel={String(t('charts.indicators.oversold'))} onChange={(v) => onChange({ ...settings, rsi: { ...settings.rsi, oversold: v } })} /></Field>
+              <Field k={color}><ColorDot value={settings.rsi.color} label={color} onChange={(v) => onChange({ ...settings, rsi: { ...settings.rsi, color: v } })} /></Field>
             </div>
-          </Card>
+          </Row>
 
-          <Card checked={indicators.macd} onToggle={() => onToggle('macd')} title={t('charts.indicators.macd')}>
-            <div className="flex flex-wrap items-end gap-3">
-              <NumberField
-            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
-                label={t('charts.indicators.fast')}
-                value={settings.macd.fast}
-                onChange={(v) => onChange({ ...settings, macd: { ...settings.macd, fast: v } })}
-              />
-              <NumberField
-            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
-                label={t('charts.indicators.slow')}
-                value={settings.macd.slow}
-                onChange={(v) => onChange({ ...settings, macd: { ...settings.macd, slow: v } })}
-              />
-              <NumberField
-            inputClassName="w-16 px-1.5 py-1 text-center text-xs"
-                label={t('charts.indicators.signal')}
-                value={settings.macd.signal}
-                onChange={(v) => onChange({ ...settings, macd: { ...settings.macd, signal: v } })}
-              />
-              <ColorPicker
-                label="MACD"
-                value={settings.macd.macdColor}
-                onChange={(v) => onChange({ ...settings, macd: { ...settings.macd, macdColor: v } })}
-              />
-              <ColorPicker
-                label={t('charts.indicators.signal')}
-                value={settings.macd.signalColor}
-                onChange={(v) => onChange({ ...settings, macd: { ...settings.macd, signalColor: v } })}
-              />
+          <Row on={indicators.macd} onToggle={() => onToggle('macd')} name={String(t('charts.indicators.macd'))} colors={[settings.macd.macdColor, settings.macd.signalColor]} summary={`${settings.macd.fast} · ${settings.macd.slow} · ${settings.macd.signal}`}>
+            <div className="ind-params">
+              <Field k={String(t('charts.indicators.fast'))}><Num value={settings.macd.fast} ariaLabel={String(t('charts.indicators.fast'))} onChange={(v) => onChange({ ...settings, macd: { ...settings.macd, fast: v } })} /></Field>
+              <Field k={String(t('charts.indicators.slow'))}><Num value={settings.macd.slow} ariaLabel={String(t('charts.indicators.slow'))} onChange={(v) => onChange({ ...settings, macd: { ...settings.macd, slow: v } })} /></Field>
+              <Field k={String(t('charts.indicators.signal'))}><Num value={settings.macd.signal} ariaLabel={String(t('charts.indicators.signal'))} onChange={(v) => onChange({ ...settings, macd: { ...settings.macd, signal: v } })} /></Field>
+              <Field k="MACD"><ColorDot value={settings.macd.macdColor} label="MACD" onChange={(v) => onChange({ ...settings, macd: { ...settings.macd, macdColor: v } })} /></Field>
+              <Field k={String(t('charts.indicators.signal'))}><ColorDot value={settings.macd.signalColor} label={String(t('charts.indicators.signal'))} onChange={(v) => onChange({ ...settings, macd: { ...settings.macd, signalColor: v } })} /></Field>
             </div>
-          </Card>
+          </Row>
         </div>
 
-        <div className="mt-4 flex gap-3">
-          <button onClick={onReset} className="btn-ghost flex-1 py-2 text-sm">
-            {t('charts.indicators.reset')}
-          </button>
-          <button onClick={onClose} className="btn-primary flex-1 rounded-xl py-2 text-sm font-semibold">
-            {t('charts.indicators.done')}
-          </button>
+        <div className="ind-ft">
+          <button type="button" className="ind-btn" onClick={onReset}>{t('charts.indicators.reset')}</button>
+          <button type="button" className="ind-btn primary" onClick={onClose}>{t('charts.indicators.done')}</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
