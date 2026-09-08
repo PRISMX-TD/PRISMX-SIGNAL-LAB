@@ -8,6 +8,7 @@ import type { UTCTimestamp } from 'lightweight-charts'
 import type { Candle } from '../../api/types'
 import type { Tool } from './DrawLayer'
 import type { DayStats } from './SymbolHeader'
+import type { IndicatorId } from './indicatorCatalog'
 
 // 图表价格轴的小数位数：贵金属/原油 2~3 位，外汇对按经纪商常见的 5 位报价
 // （日元对 3 位），加密货币 2 位。未在表中的品种回退到 2 位。
@@ -94,43 +95,22 @@ export const UP_COLOR = '#2ee07e'
 export const DOWN_COLOR = '#ff4d67'
 
 // ---------- 指标开关 / indicator toggles ----------
-export interface IndicatorFlags {
-  ma: boolean
-  ema: boolean
-  boll: boolean
-  volume: boolean
-  rsi: boolean
-  macd: boolean
-}
+// 2026-09-08 起键集合来自 indicatorCatalog（14 个），这里只保留类型与默认值。
+// Since 2026-09-08 the key set comes from indicatorCatalog (14 ids); only the
+// type and defaults live here.
+export type IndicatorFlags = Record<IndicatorId, boolean>
 export const DEFAULT_INDICATORS: IndicatorFlags = {
-  ma: false,
-  ema: false,
-  boll: false,
+  ma: false, ema: false, boll: false, donch: false, vwap: false, st: false, sar: false,
+  rsi: false, macd: false, kdj: false, cci: false, wr: false, atr: false,
   volume: true, // 默认开：这一整轮 EA/后端改造就是为了喂出 volume，默认可见让效果立刻看得见
-  rsi: false,
-  macd: false,
+  obv: false,
 }
-// 十字准线/触摸拖动悬停时展示的各指标"当前值"；不悬停时回退到最新一根的值
-// （见 recomputeIndicators 与 subscribeCrosshairMove 的说明）。
-// The indicator values shown while hovering the crosshair or touch-dragging;
-// falls back to the latest bar's values when not hovering (see
-// recomputeIndicators and the subscribeCrosshairMove wiring below).
-export interface LegendValues {
-  ma: (number | null)[]
-  ema: (number | null)[]
-  boll: { mid: number | null; upper: number | null; lower: number | null }
-  volume: number | null
-  rsi: number | null
-  macd: { macd: number | null; signal: number | null; hist: number | null }
-}
-export const EMPTY_LEGEND: LegendValues = {
-  ma: [],
-  ema: [],
-  boll: { mid: null, upper: null, lower: null },
-  volume: null,
-  rsi: null,
-  macd: { macd: null, signal: null, hist: null },
-}
+// 十字准线/触摸拖动悬停时展示的各指标"当前值"（按指标 → series key），不悬停时
+// 回退到最新一根的值（见 recomputeIndicators 与 subscribeCrosshairMove 的说明）。
+// The indicator values shown while hovering the crosshair (indicator → series
+// key → value); falls back to the latest bar's values when not hovering.
+export type LegendValues = Partial<Record<IndicatorId, Record<string, number | null>>>
+export const EMPTY_LEGEND: LegendValues = {}
 
 export function toLwPoint(b: Candle) {
   return { time: b.t as UTCTimestamp, open: b.o, high: b.h, low: b.l, close: b.c }

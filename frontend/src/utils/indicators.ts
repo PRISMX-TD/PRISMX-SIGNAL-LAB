@@ -164,3 +164,208 @@ export function donchianLow(lows: number[], period: number): (number | null)[] {
 export function closes(bars: Candle[]): number[] {
   return bars.map((b) => b.c)
 }
+
+// ───────── 2026-09-08 指标库扩充 / indicator library expansion ─────────
+// 下面这些都吃完整 K 线（要用到高低价 / 成交量），返回与输入等长、预热期为 null 的数组。
+// These take full candles (they need highs/lows/volume) and return same-length
+// arrays with null over the warm-up head, like everything above.
+
+// 真实波幅（Wilder 平滑）/ Average True Range with Wilder smoothing
+export function atr(bars: Candle[], period = 14): (number | null)[] {
+  const out: (number | null)[] = new Array(bars.length).fill(null)
+  if (bars.length <= period) return out
+  const tr = bars.map((b, i) => (i === 0 ? b.h - b.l : Math.max(b.h - b.l, Math.abs(b.h - bars[i - 1].c), Math.abs(b.l - bars[i - 1].c))))
+  let sum = 0
+  for (let i = 1; i <= period; i++) sum += tr[i]
+  let prev = sum / period
+  out[period] = prev
+  for (let i = period + 1; i < bars.length; i++) {
+    prev = (prev * (period - 1) + tr[i]) / period
+    out[i] = prev
+  }
+  return out
+}
+
+export interface SuperTrendResult {
+  // 多头段（线在价格下方）与空头段（线在价格上方）分成两条，各自在不属于自己的
+  // 区间填 null，这样两条不同颜色的 series 拼起来就是一条会变色的线。
+  // Bull segments (line below price) and bear segments (above) as two arrays,
+  // each null where the other owns the bar, so two colored series read as one
+  // line that changes color.
+  bull: (number | null)[]
+  bear: (number | null)[]
+}
+
+// 超级趋势：ATR 通道 + 方向翻转规则（标准实现）/ SuperTrend: ATR bands with the standard flip rule
+export function superTrend(bars: Candle[], period = 10, mult = 3): SuperTrendResult {
+  const n = bars.length
+  const bull: (number | null)[] = new Array(n).fill(null)
+  const bear: (number | null)[] = new Array(n).fill(null)
+  const a = atr(bars, period)
+  let finalUpper = 0
+  let finalLower = 0
+  let dir = 1
+  let started = false
+  for (let i = 0; i < n; i++) {
+    const av = a[i]
+    if (av == null) continue
+    const hl2 = (bars[i].h + bars[i].l) / 2
+    const upper = hl2 + mult * av
+    const lower = hl2 - mult * av
+    if (!started) {
+      finalUpper = upper
+      finalLower = lower
+      started = true
+    } else {
+      const prevClose = bars[i - 1].c
+      finalUpper = upper < finalUpper || prevClose > finalUpper ? upper : finalUpper
+      finalLower = lower > finalLower || prevClose < finalLower ? lower : finalLower
+    }
+    const c = bars[i].c
+    if (dir === 1 && c < finalLower) dir = -1
+    else if (dir === -1 && c > finalUpper) dir = 1
+    if (dir === 1) bull[i] = finalLower
+    else bear[i] = finalUpper
+  }
+  return { bull, bear }
+}
+
+// 抛物线转向 SAR（Wilder）/ Parabolic SAR
+export function parabolicSar(bars: Candle[], step = 0.02, max = 0.2): (number | null)[] {
+  const n = bars.length
+  const out: (number | null)[] = new Array(n).fill(null)
+  if (n < 2) return out
+  let up = bars[1].c >= bars[0].c
+  let sar = up ? bars[0].l : bars[0].h
+  let ep = up ? bars[0].h : bars[0].l
+  let af = step
+  for (let i = 1; i < n; i++) {
+    const b = bars[i]
+    sar = sar + af * (ep - sar)
+    if (up) {
+      sar = Math.min(sar, bars[i - 1].l, i >= 2 ? bars[i - 2].l : bars[i - 1].l)
+      if (b.l < sar) {
+        up = false
+        sar = ep
+        ep = b.l
+        af = step
+      } else if (b.h > ep) {
+        ep = b.h
+        af = Math.min(max, af + step)
+      }
+    } else {
+      sar = Math.max(sar, bars[i - 1].h, i >= 2 ? bars[i - 2].h : bars[i - 1].h)
+      if (b.h > sar) {
+        up = true
+        sar = ep
+        ep = b.h
+        af = step
+      } else if (b.l < ep) {
+        ep = b.l
+        af = Math.min(max, af + step)
+      }
+    }
+    out[i] = sar
+  }
+  return out
+}
+
+// 成交量加权均价，按自然日（UTC+8，与图表坐标轴同一时区）重置锚点。
+// VWAP anchored to the natural day (UTC+8, same zone as the chart axis).
+export function vwap(bars: Candle[]): (number | null)[] {
+  const out: (number | null)[] = new Array(bars.length).fill(null)
+  const TZ = 8 * 3600
+  let day = -1
+  let pv = 0
+  let vol = 0
+  for (let i = 0; i < bars.length; i++) {
+    const b = bars[i]
+    const d = Math.floor((b.t + TZ) / 86400)
+    if (d !== day) {
+      day = d
+      pv = 0
+      vol = 0
+    }
+    const tp = (b.h + b.l + b.c) / 3
+    pv += tp * b.v
+    vol += b.v
+    out[i] = vol > 0 ? pv / vol : null
+  }
+  return out
+}
+
+export interface KdjResult {
+  k: (number | null)[]
+  d: (number | null)[]
+  j: (number | null)[]
+}
+
+// KDJ：RSV 的两级平滑（国内软件通用的 9/3/3 口径），J = 3K − 2D。
+// KDJ: two-stage smoothed RSV (the common 9/3/3 convention), J = 3K − 2D.
+export function kdj(bars: Candle[], period = 9, kSmooth = 3, dSmooth = 3): KdjResult {
+  const n = bars.length
+  const k: (number | null)[] = new Array(n).fill(null)
+  const d: (number | null)[] = new Array(n).fill(null)
+  const j: (number | null)[] = new Array(n).fill(null)
+  let kPrev = 50
+  let dPrev = 50
+  for (let i = period - 1; i < n; i++) {
+    let hi = -Infinity
+    let lo = Infinity
+    for (let x = i - period + 1; x <= i; x++) {
+      if (bars[x].h > hi) hi = bars[x].h
+      if (bars[x].l < lo) lo = bars[x].l
+    }
+    const rsv = hi === lo ? 50 : ((bars[i].c - lo) / (hi - lo)) * 100
+    kPrev = ((kSmooth - 1) * kPrev + rsv) / kSmooth
+    dPrev = ((dSmooth - 1) * dPrev + kPrev) / dSmooth
+    k[i] = kPrev
+    d[i] = dPrev
+    j[i] = 3 * kPrev - 2 * dPrev
+  }
+  return { k, d, j }
+}
+
+// 顺势指标 CCI = (TP − SMA(TP)) / (0.015 × 平均绝对偏差)
+// Commodity Channel Index = (TP − SMA(TP)) / (0.015 × mean absolute deviation)
+export function cci(bars: Candle[], period = 20): (number | null)[] {
+  const tp = bars.map((b) => (b.h + b.l + b.c) / 3)
+  const mean = sma(tp, period)
+  return tp.map((v, i) => {
+    const m = mean[i]
+    if (m == null) return null
+    let dev = 0
+    for (let x = i - period + 1; x <= i; x++) dev += Math.abs(tp[x] - m)
+    dev /= period
+    return dev === 0 ? 0 : (v - m) / (0.015 * dev)
+  })
+}
+
+// 威廉指标 %R = (Hn − C) / (Hn − Ln) × −100，范围 −100 到 0
+// Williams %R = (Hn − C) / (Hn − Ln) × −100, ranging −100 to 0
+export function williamsR(bars: Candle[], period = 14): (number | null)[] {
+  return bars.map((b, i) => {
+    if (i < period - 1) return null
+    let hi = -Infinity
+    let lo = Infinity
+    for (let x = i - period + 1; x <= i; x++) {
+      if (bars[x].h > hi) hi = bars[x].h
+      if (bars[x].l < lo) lo = bars[x].l
+    }
+    return hi === lo ? -50 : ((hi - b.c) / (hi - lo)) * -100
+  })
+}
+
+// 能量潮：收涨累加成交量，收跌累减 / On-Balance Volume
+export function obv(bars: Candle[]): (number | null)[] {
+  const out: (number | null)[] = new Array(bars.length).fill(null)
+  let acc = 0
+  for (let i = 0; i < bars.length; i++) {
+    if (i > 0) {
+      if (bars[i].c > bars[i - 1].c) acc += bars[i].v
+      else if (bars[i].c < bars[i - 1].c) acc -= bars[i].v
+    }
+    out[i] = acc
+  }
+  return out
+}

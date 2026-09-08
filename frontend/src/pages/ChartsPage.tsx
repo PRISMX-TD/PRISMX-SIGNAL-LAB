@@ -257,10 +257,6 @@ export default function ChartsPage() {
     setIndicatorsState((prev) => ({ ...prev, [key]: !prev[key] }))
   }, [])
 
-  const resetIndicatorSettings = useCallback(() => {
-    setIndicatorSettingsState(DEFAULT_INDICATOR_SETTINGS)
-  }, [])
-
   // 图表实例、指标 series、图例、pane 高度 → useChartEngine；历史 / 翻页 / 轮询 → useChartData。
   // 图表现在从不被藏起，refitKey 只在进出全屏时变（那两次容器尺寸确实变了）。
   // Chart instance / indicator series / legend / panes → useChartEngine; history /
@@ -530,9 +526,10 @@ export default function ChartsPage() {
         <IndicatorSettingsModal
           indicators={indicators}
           onToggle={toggleIndicator}
+          onSetIndicators={setIndicatorsState}
+          getCandles={() => engine.candlesRef.current}
           settings={indicatorSettings}
           onChange={setIndicatorSettingsState}
-          onReset={resetIndicatorSettings}
           onClose={() => setSettingsOpen(false)}
         />
       )}
