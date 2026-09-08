@@ -38,7 +38,7 @@ import PublicLanguageToggle from '../components/PublicLanguageToggle'
 import FaqSection from '../components/landing/FaqSection'
 import MobileStickyCta from '../components/landing/MobileStickyCta'
 import PhoneStory from '../components/landing/PhoneStory'
-import MarketStory, { MarketOutro } from '../components/landing/MarketStory'
+import MarketStory from '../components/landing/MarketStory'
 import LandingSpaceLayer from '../components/landing/LandingSpaceLayer'
 import { usePublicLang } from '../seo/PublicShell'
 import { localePath } from '../seo/meta'
@@ -601,7 +601,6 @@ export default function LandingPage() {
         <Navbar t={t} navigate={navigate} />
         <PhoneStory />
         <MarketStory />
-        <MarketOutro />
         <GrowthStage t={t} navigate={navigate} />
         <Pricing t={t} navigate={navigate} />
         <FaqSection />

@@ -36,7 +36,6 @@
 // ════════════════════════════════════════════════════════════════════════════
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router-dom'
 import { CASES, P_ENTRY, P_SL, P_TP, type Candle } from './verdictData'
 import { useSectionProgress } from './useSectionProgress'
 
@@ -410,36 +409,6 @@ export default function MarketStory() {
       {Array.from({ length: BEATS }, (_, i) => (
         <div key={i} className="story-step" data-step={i} style={{ top: `${i * 20}%` }} aria-hidden />
       ))}
-    </section>
-  )
-}
-
-/* 判定看完的落点：正是「进去看实时胜率」的时刻——wrNote 把话挑明（注册可见
-   两套互不粉饰的数据），CTA 直接接住。整页转化诉求最强的位置。
-   Where you land after the verdicts: the moment for "see the live win rate".
-   wrNote says it plainly and the CTA catches it - the page's strongest
-   conversion moment. */
-export function MarketOutro() {
-  const { t } = useTranslation()
-  const navigate = useNavigate()
-  return (
-    <section className="mx-auto w-full max-w-[1240px] px-5 pb-4 pt-16 sm:px-8 sm:pt-24">
-      <div className="rule-spectral mb-12">
-        <i />
-      </div>
-      <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-12">
-        <p className="max-w-[38ch] text-[clamp(1.25rem,2.4vw,1.85rem)] font-medium leading-snug text-neutral-200 lg:col-span-7">
-          {t('landing.wrNote')}
-        </p>
-        <div className="lg:col-span-4 lg:col-start-9">
-          <button
-            onClick={() => navigate('/login?mode=register')}
-            className="btn btn-primary h-14 w-full px-8 text-[15px]"
-          >
-            {t('landing.wrCta')}
-          </button>
-        </div>
-      </div>
     </section>
   )
 }
