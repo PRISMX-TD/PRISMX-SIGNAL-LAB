@@ -623,8 +623,7 @@ export default function OrdersPage() {
               values and reasonably concludes it leaked across accounts or
               failed to save. Hence the divider plus an explicit scope note. */}
           <div className="ord-block">
-            <p className="ord-p mb-4 mt-0">{t('orders.autoManageScopeHint')}</p>
-            <AutoManageCard isPro={isPro} />
+            <AutoManageCard isPro={isPro} scopeHint={t('orders.autoManageScopeHint')} />
           </div>
         </>
       )}

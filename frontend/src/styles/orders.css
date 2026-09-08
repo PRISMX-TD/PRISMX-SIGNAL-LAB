@@ -748,6 +748,113 @@
 }
 
 /* ── 手机：回执单变成三行（票根 + 印章 / 主体 / 成交价 + 单号）── */
+/* ── 自动仓位管理 / auto position management ──
+   发丝线账本分区，不套卡：标题行 · 说明 · 作用范围（带紫点，因为它是这个
+   Tab 里唯一不随账号切换的东西）· 总开关 · 三条规则行 · 保存。规则关掉时参数
+   减淡但仍可改，开回来数值还在。
+   Hairline ledger section, no card: heading · hint · scope line (violet dot —
+   the one thing in this tab that ignores the account switch) · master toggle ·
+   three rule rows · save. A disabled rule dims its parameters but keeps them
+   editable so values survive a toggle. */
+.ord-am-scope {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 14px 0 0;
+  max-width: 60ch;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+.ord-am-scope::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--purple);
+}
+.ord-am-upgrade {
+  margin: 18px 0 0;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.ord-am-body { margin-top: 24px; }
+.ord-am-master {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #fff;
+  cursor: pointer;
+}
+.ord-am-rules {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.ord-am-rule {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 10px 24px;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.ord-am-rule-n {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+}
+.ord-am-rule-p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.ord-am-rule[data-off] .ord-am-rule-p { opacity: 0.4; }
+.ord-am-rule-p .input {
+  width: 84px;
+  height: 32px;
+  padding: 0 12px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.ord-am-lbl {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.ord-am-lbl-2 { margin-left: 10px; }
+.ord-am-u {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.ord-am-note {
+  margin: 14px 0 0;
+  max-width: 70ch;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+.ord-am-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 22px;
+}
+.ord-am-msg {
+  margin: 0;
+  font-size: 13px;
+}
+
 @media (max-width: 767px) {
   .ord-tb-r {
     width: 100%;
@@ -756,6 +863,8 @@
   .ord-tb-r .input.ord-in-sym { flex: 1; }
   .ord-tb-dates { width: 100%; }
   .ord-tb-dates .input { flex: 1; min-width: 0; }
+  .ord-am-rule { grid-template-columns: 1fr; gap: 10px; }
+  .ord-am-lbl-2 { margin-left: 0; }
   .ord-slip {
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
