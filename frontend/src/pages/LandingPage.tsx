@@ -25,7 +25,7 @@
 // and untranslated); the prerender pipeline is unaffected (scene 0 is visible
 // in raw HTML); the pigment-not-glow token system carries over as-is.
 // ════════════════════════════════════════════════════════════════════════════
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { paymentApi, inviteApi, readRef } from '../api/client'
@@ -424,139 +424,141 @@ function Foot({ t }: { t: T }) {
 }
 
 
-/* ═══════════════ 段位 / rank ladder ═══════════════
-   六个称号一行，当前级紫底；条件不在落地页上展开，进成就页再看。
-   称号读 gamification.titles.*，与成就页、用户菜单同一份文案。示例：第四级。
-   Six titles in one row, the current tier on a violet plane; conditions stay
-   on the achievements page. Titles read gamification.titles.*. Sample: tier IV. */
+/* ═══════════════ 成长体系：四格等分 / the growth system, four equal cells ═══════════════
+   等级、勋章、排行榜、比赛四样东西分量相同：同一张卡、同一套结构（标题 / 一句话 /
+   一块真实产品画面 / 一行事实），2×2 排布，任何一格都不比另一格大。
+   画面全部是站内真实组件或真实排版：等级导轨（成就页 .ach-rail 的写法）、
+   BadgeIcon、RankCoin 榜单行、比赛卡（比赛页的状态芯片 + 倒计时）。示例数据。
+   Levels, badges, boards and contests carry equal weight: one card, one
+   structure (title / one line / one real product visual / one fact), laid out
+   2×2 so no cell outranks another. Visuals are the product's own components or
+   layouts. Sample data. */
 const LEVEL_KEYS = ['novice', 'junior', 'elite', 'senior', 'chief', 'legend'] as const
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI']
 const CURRENT_LEVEL = 4
 
-function RankLadder({ t }: { t: T }) {
-  const ref = useReveal<HTMLElement>()
+function LevelRail({ t }: { t: T }) {
   return (
-    <section ref={ref} id="rank" className={`${SHELL} scroll-mt-24 py-20 sm:py-28`}>
-      <p className="reveal eyebrow">{t('landing.rkEyebrow')}</p>
-      <div className="mt-3">
-        <Heading title={t('landing.rkTitle')} subtitle={t('landing.rkSubtitle')} />
-      </div>
-      <ol className="reveal mt-10 grid grid-cols-2 gap-px overflow-hidden rounded-lg bg-white/[0.07] sm:grid-cols-3 lg:grid-cols-6">
-        {LEVEL_KEYS.map((k, i) => {
-          const lv = i + 1
-          const state = lv < CURRENT_LEVEL ? 'done' : lv === CURRENT_LEVEL ? 'now' : 'locked'
-          return (
-            <li key={k} className={`flex flex-col gap-2 px-5 py-6 ${state === 'now' ? 'bg-prism-600/20' : 'bg-ink-950'}`}>
-              <span className={`num text-[13px] ${state === 'now' ? 'text-prism-300' : 'text-neutral-500'}`}>{ROMAN[i]}</span>
-              <b className={`font-display text-[17px] font-bold ${state === 'locked' ? 'text-neutral-500' : 'text-white'}`}>
-                {t(`gamification.titles.${k}`)}
-              </b>
-              <span className={`text-[11px] ${state === 'now' ? 'text-prism-300' : state === 'done' ? 'text-up' : 'text-neutral-600'}`}>
-                {state === 'now' ? t('landing.rkNow') : state === 'done' ? t('landing.rkDone') : ' '}
-              </span>
-            </li>
-          )
-        })}
-      </ol>
-    </section>
+    <ol className="grid grid-cols-6 gap-1.5">
+      {LEVEL_KEYS.map((k, i) => {
+        const lv = i + 1
+        const state = lv < CURRENT_LEVEL ? 'done' : lv === CURRENT_LEVEL ? 'now' : 'locked'
+        return (
+          <li key={k} className="flex flex-col items-center gap-2 text-center">
+            <span
+              className={`num grid h-9 w-9 place-items-center rounded-full text-[12px] font-semibold ${
+                state === 'done'
+                  ? 'bg-prism-600 text-white'
+                  : state === 'now'
+                    ? 'border-2 border-prism-400 bg-prism-600/20 text-prism-200'
+                    : 'bg-white/[0.06] text-neutral-500'
+              }`}
+            >
+              {ROMAN[i]}
+            </span>
+            <span className={`text-[11px] leading-tight ${state === 'locked' ? 'text-neutral-600' : 'text-neutral-300'}`}>
+              {t(`gamification.levelShort.${k}`)}
+            </span>
+          </li>
+        )
+      })}
+    </ol>
   )
 }
 
-/* ═══════════════ 勋章 / honor wall ═══════════════
-   十一枚全部是站内真实的 BadgeIcon，只带名字；档位和条件进成就页再看。
-   示例：已获得 7 枚，未获得的灰阶。
-   All eleven are the product's real BadgeIcon, names only; tiers and
-   conditions live on the achievements page. Sample: seven earned. */
-const WALL: { id: string; tier: number; earned: boolean }[] = [
-  { id: 'starter', tier: 3, earned: true },
-  { id: 'regular', tier: 2, earned: true },
-  { id: 'evergreen', tier: 1, earned: true },
-  { id: 'winning_hand', tier: 2, earned: true },
-  { id: 'veteran', tier: 1, earned: true },
-  { id: 'board_return', tier: 0, earned: false },
-  { id: 'arena', tier: 1, earned: true },
-  { id: 'campaigner', tier: 0, earned: false },
-  { id: 'comp_back_to_back', tier: 0, earned: true },
-  { id: 'comeback', tier: 0, earned: false },
-  { id: 'founder_2026', tier: 0, earned: true },
+const WORN: { id: string; tier: number }[] = [
+  { id: 'starter', tier: 3 },
+  { id: 'winning_hand', tier: 2 },
+  { id: 'evergreen', tier: 1 },
+  { id: 'comp_back_to_back', tier: 0 },
 ]
 
-function HonorWall({ t }: { t: T }) {
-  const ref = useReveal<HTMLElement>()
+function BadgeRow({ t }: { t: T }) {
   return (
-    <section ref={ref} id="honor" className={`${SHELL} scroll-mt-24 py-20 sm:py-28`}>
-      <p className="reveal eyebrow">{t('landing.hnEyebrow')}</p>
-      <div className="mt-3">
-        <Heading title={t('landing.hnTitle')} subtitle={t('landing.hnSubtitle')} />
+    <ul className="grid grid-cols-4 gap-2">
+      {WORN.map((b) => (
+        <li key={b.id} className="flex flex-col items-center gap-2 text-center">
+          <BadgeIcon id={b.id} tier={b.tier || undefined} earned size={52} />
+          <span className="text-[11px] leading-tight text-neutral-300">{t(`gamification.badges.${b.id}.name`)}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+const BOARD = [
+  { r: 1, n: 'Mo***ch', s: '+14.2%' },
+  { r: 2, n: 'Ka***en', s: '+9.4%' },
+  { r: 3, n: 'Li***ng', s: '+7.8%' },
+  { r: 7, n: 'Tr***er', s: '+4.9%', me: true },
+]
+
+function BoardRows({ t }: { t: T }) {
+  return (
+    <ul>
+      {BOARD.map((x) => (
+        <li
+          key={x.r}
+          className={`grid grid-cols-[2rem_1fr_auto] items-center gap-3 border-b border-white/[0.07] py-2 last:border-0 ${
+            x.me ? '-mx-2 rounded-md bg-prism-600/15 px-2' : ''
+          }`}
+        >
+          <span className="grid place-items-center">
+            {x.r <= 3 ? <RankCoin rank={x.r} size={24} /> : <b className="num text-[13px] text-prism-300">{x.r}</b>}
+          </span>
+          <span className="min-w-0 truncate text-[13px] text-white">
+            <b className="font-semibold">{x.n}</b>
+            {x.me && <span className="ml-2 text-[11px] font-semibold text-prism-300">{t('landing.ggYou')}</span>}
+          </span>
+          <span className="num text-[13px] font-bold text-up">{x.s}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function ContestCard({ t }: { t: T }) {
+  return (
+    <div className="rounded-lg bg-white/[0.04] p-4">
+      <div className="flex items-center justify-between gap-3">
+        <b className="font-display text-[15px] font-bold text-white">{t('landing.ggCompName')}</b>
+        <span className="rounded-full bg-down/15 px-2 py-0.5 text-[11px] font-semibold text-down">{t('competition.status.regOpen')}</span>
       </div>
-      <ul className="reveal mt-10 grid grid-cols-4 gap-x-3 gap-y-7 sm:grid-cols-6 lg:grid-cols-11">
-        {WALL.map((b) => (
-          <li key={b.id} className={`flex flex-col items-center text-center ${b.earned ? '' : 'opacity-35 grayscale'}`}>
-            <BadgeIcon id={b.id} tier={b.tier || undefined} earned={b.earned} size={64} />
-            <b className="mt-2.5 text-[12px] font-semibold text-white">{t(`gamification.badges.${b.id}.name`)}</b>
+      <div className="mt-3 flex items-end justify-between gap-4">
+        <div>
+          <div className="text-[11px] text-neutral-500">{t('competition.cd.toStart')}</div>
+          <div className="num font-display text-[24px] font-bold leading-tight text-white">{t('competition.cd.dh', { d: 3, h: 14 })}</div>
+        </div>
+        <div className="text-right">
+          <div className="text-[11px] text-neutral-500">{t('competition.prizeLabel')}</div>
+          <div className="text-[13px] font-semibold text-prism-300">{t('landing.ggCompPrize')}</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function GrowthGrid({ t }: { t: T }) {
+  const ref = useReveal<HTMLElement>()
+  const cells: { k: string; body: ReactNode }[] = [
+    { k: 'Level', body: <LevelRail t={t} /> },
+    { k: 'Badge', body: <BadgeRow t={t} /> },
+    { k: 'Board', body: <BoardRows t={t} /> },
+    { k: 'Comp', body: <ContestCard t={t} /> },
+  ]
+  return (
+    <section ref={ref} id="rank" className={`${SHELL} scroll-mt-24 py-20 sm:py-28`}>
+      <Heading title={t('landing.ggTitle')} subtitle={t('landing.ggSubtitle')} />
+      <ul className="reveal mt-12 grid gap-5 md:grid-cols-2">
+        {cells.map((c) => (
+          <li key={c.k} className="glass-card flex flex-col p-6">
+            <b className="font-display text-[19px] font-bold text-white">{t(`landing.gg${c.k}T`)}</b>
+            <p className="mt-1.5 text-[13px] text-neutral-400">{t(`landing.gg${c.k}D`)}</p>
+            <div className="mt-6 flex flex-1 flex-col justify-center">{c.body}</div>
+            <p className="mt-6 border-t border-white/[0.07] pt-3 text-[12px] text-neutral-500">{t(`landing.gg${c.k}F`)}</p>
           </li>
         ))}
       </ul>
-    </section>
-  )
-}
-
-/* ═══════════════ 排位与比赛 / boards & contests ═══════════════
-   榜单预览一张（前三真实 RankCoin，「你」那一行紫底），比赛一句话。示例数据。
-   One board preview (real RankCoin for the top three, the "you" row on a
-   violet plane) and a single line on contests. Sample data. */
-const BOARD = [
-  { r: 1, n: 'Mo***ch', a: '600 402', s: '+14.2%' },
-  { r: 2, n: 'Ka***en', a: '600 118', s: '+9.4%' },
-  { r: 3, n: 'Li***ng', a: '600 077', s: '+7.8%' },
-  { r: 4, n: 'Wi***ow', a: '600 233', s: '+6.1%' },
-  { r: 7, n: 'Tr***er', a: '600 231', s: '+4.9%', me: true },
-]
-
-function Arena({ t }: { t: T }) {
-  const ref = useReveal<HTMLElement>()
-  return (
-    <section ref={ref} id="arena" className={`${SHELL} scroll-mt-24 py-20 sm:py-28`}>
-      <div className="grid gap-10 lg:grid-cols-12 lg:gap-12">
-        <div className="lg:col-span-5">
-          <p className="reveal eyebrow">{t('landing.arEyebrow')}</p>
-          <div className="mt-3">
-            <Heading title={t('landing.arTitle')} subtitle={t('landing.arSubtitle')} />
-          </div>
-          <div className="reveal mt-8 border-t border-white/[0.14] pt-5">
-            <p className="text-[11px] uppercase tracking-[0.14em] text-prism-400">{t('landing.arCompEyebrow')}</p>
-            <h3 className="mt-2 font-display text-[clamp(1.15rem,1.8vw,1.5rem)] font-bold text-white">{t('landing.arCompTitle')}</h3>
-            <p className="mt-2 max-w-[40ch] text-[14px] leading-relaxed text-neutral-400">{t('landing.arCompDesc')}</p>
-          </div>
-        </div>
-        <div className="reveal glass-card p-6 lg:col-span-7">
-          <b className="font-display text-[15px] font-bold text-white">{t('landing.arBoard')}</b>
-          <ul className="mt-4 border-t border-white/[0.14]">
-            {BOARD.map((x) => (
-              <li
-                key={x.r}
-                className={`grid grid-cols-[2.5rem_1fr_auto] items-center gap-3 border-b border-white/[0.07] py-3 ${
-                  x.me ? '-mx-3 rounded-md bg-prism-600/15 px-3' : ''
-                }`}
-              >
-                <span className="grid place-items-center">
-                  {x.r <= 3 ? (
-                    <RankCoin rank={x.r} size={30} />
-                  ) : (
-                    <b className={`num text-[15px] ${x.me ? 'text-prism-300' : 'text-neutral-500'}`}>{x.r}</b>
-                  )}
-                </span>
-                <span className="min-w-0 truncate text-[15px] text-white">
-                  <b className="font-semibold">{x.n}</b>
-                  <span className="num ml-2 text-[12px] text-neutral-500">{x.a}</span>
-                  {x.me && <span className="ml-2 text-[12px] font-semibold text-prism-300">{t('landing.arYou')}</span>}
-                </span>
-                <span className="num text-[15px] font-bold text-up">{x.s}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
     </section>
   )
 }
@@ -581,15 +583,7 @@ function OfflineCard({ t }: { t: T }) {
           <div className="mt-3">
             <Heading title={t('landing.cdTitle')} subtitle={t('landing.cdDesc')} />
           </div>
-          <dl className="reveal mt-8 border-t border-white/[0.14]">
-            {[1, 2, 3].map((n) => (
-              <div key={n} className="grid grid-cols-[4.5rem_1fr] gap-4 border-b border-white/[0.07] py-3.5 text-[14px]">
-                <dt className="font-display font-bold text-white">{t(`landing.cdRead${n}K`)}</dt>
-                <dd className="text-neutral-400">{t(`landing.cdRead${n}V`)}</dd>
-              </div>
-            ))}
-          </dl>
-          <p className="reveal mt-6 inline-flex items-center gap-2 rounded-full bg-white/[0.04] px-3 py-1.5 text-[12px] text-neutral-400">
+          <p className="reveal mt-8 inline-flex items-center gap-2 rounded-full bg-white/[0.04] px-3 py-1.5 text-[12px] text-neutral-400">
             <i className="h-1.5 w-1.5 rounded-full bg-prism-400" />
             {t('landing.cdSoon')}
           </p>
@@ -647,9 +641,7 @@ export default function LandingPage() {
         <PhoneStory />
         <MarketStory />
         <MarketOutro />
-        <RankLadder t={t} />
-        <HonorWall t={t} />
-        <Arena t={t} />
+        <GrowthGrid t={t} />
         <OfflineCard t={t} />
         <Pricing t={t} navigate={navigate} />
         <FaqSection />
