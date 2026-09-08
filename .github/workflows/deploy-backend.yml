@@ -1,0 +1,61 @@
+# 后端自动部署：推送到 main 且改动涉及 backend/ 时，SSH 到 VPS 执行 backend/scripts/deploy.sh
+# （拉代码 → 需要时装依赖 → 重启 prismx → 健康检查，失败自动回滚）。
+# 前端不经过这里：Vercel 自己监听 GitHub 推送。
+#
+# 需要在仓库 Settings → Secrets and variables → Actions 配三个 secret：
+#   VPS_HOST         VPS 公网 IP（43.134.110.47）
+#   VPS_SSH_KEY      专用部署密钥的私钥（ed25519，公钥已放进 VPS 上 ubuntu 用户的 authorized_keys）
+#   VPS_KNOWN_HOSTS  `ssh-keyscan -t ed25519 <VPS_HOST>` 的输出（固定主机指纹，防中间人）
+# VPS 侧的一次性准备见运维手册《部署与上线进度》2.2 节。
+name: Deploy backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "!backend/tests/**"
+      - "!backend/requirements-dev.txt"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch: {}
+
+# 同一时间只跑一个部署；排队而不是取消，保证最后一次推送一定落地
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prepare SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -eu
+          : "${VPS_SSH_KEY:?缺少 secret VPS_SSH_KEY}"
+          : "${VPS_KNOWN_HOSTS:?缺少 secret VPS_KNOWN_HOSTS}"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Deploy on VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          set -eu
+          : "${VPS_HOST:?缺少 secret VPS_HOST}"
+          # 远端命令：先 fetch，再把 origin/main 上最新的 deploy.sh 落到文件后执行
+          #（不依赖 VPS 本地已有旧脚本）。注意必须落文件再 bash，不能 `git show ... | bash`：
+          # 管道形式下 git show 失败时 bash 读到空输入照样退出 0，脚本没跑却报成功。
+          # 若 authorized_keys 里配了 command="..." 强制命令，这里传什么都会被它覆盖，两种配置都能工作。
+          ssh -i ~/.ssh/deploy_key \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=20 \
+              -o ServerAliveInterval=15 \
+              "ubuntu@${VPS_HOST}" \
+              'cd ~/PRISMX-SIGNAL-LAB && git fetch -q origin main && git show origin/main:backend/scripts/deploy.sh > ~/.prismx-deploy.sh && bash ~/.prismx-deploy.sh'
