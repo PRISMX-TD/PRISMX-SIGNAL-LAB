@@ -749,108 +749,124 @@
 
 /* ── 手机：回执单变成三行（票根 + 印章 / 主体 / 成交价 + 单号）── */
 /* ── 自动仓位管理 / auto position management ──
-   发丝线账本分区，不套卡：标题行 · 说明 · 作用范围（带紫点，因为它是这个
-   Tab 里唯一不随账号切换的东西）· 总开关 · 三条规则行 · 保存。规则关掉时参数
-   减淡但仍可改，开回来数值还在。
-   Hairline ledger section, no card: heading · hint · scope line (violet dot —
-   the one thing in this tab that ignores the account switch) · master toggle ·
-   three rule rows · save. A disabled rule dims its parameters but keeps them
-   editable so values survive a toggle. */
-.ord-am-scope {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin: 14px 0 0;
-  max-width: 60ch;
-  font-size: 12.5px;
-  line-height: 1.55;
-  color: var(--text-2);
-}
-.ord-am-scope::before {
-  content: "";
-  flex: none;
-  width: 6px;
-  height: 6px;
-  margin-top: 7px;
-  border-radius: 50%;
-  background: var(--purple);
-}
-.ord-am-upgrade {
-  margin: 18px 0 0;
-  font-size: 13px;
-  color: var(--text-3);
-}
-.ord-am-body { margin-top: 24px; }
-.ord-am-master {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 14px;
-  font-weight: 500;
-  color: #fff;
-  cursor: pointer;
-}
-.ord-am-rules {
-  margin-top: 18px;
+   与样例稿一致的「账本行」：左 4 / 右 8 两栏，靠上方一条发丝线与持仓区隔开，
+   不套卡片。左栏标题（带 PRO 药丸）+ 作用范围 + 说明；右栏一行一条规则——
+   规则名、一句把数字框嵌进去的说明、开关在右缘。总开关是第一行，关掉后三条
+   规则减淡但仍可改，开回来数值还在。
+   The "ledger row" from the mock: 4/8 two-column grid set off from the
+   positions above by one hairline, no card. Left: title (PRO pill), scope,
+   hint. Right: one rule per row — name, a sentence with the number fields
+   inline, switch at the right edge. The master switch is the first row; when
+   off, the three rules dim but stay editable so values survive a toggle. */
+.ord-lrow {
+  display: grid;
+  gap: 22px;
+  margin-top: 34px;
+  padding: 30px 0 6px;
   border-top: 1px solid var(--line);
 }
-.ord-am-rule {
-  display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
-  gap: 10px 24px;
-  align-items: center;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--line);
+@media (min-width: 1024px) {
+  .ord-lrow {
+    grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
+    gap: 56px;
+    padding: 36px 0 8px;
+  }
 }
-.ord-am-rule-n {
+.ord-lrow h4 {
   display: flex;
   align-items: center;
-  gap: 12px;
-  font-size: 14px;
-  color: var(--text);
-  cursor: pointer;
+  gap: 8px;
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
 }
-.ord-am-rule-p {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 10px;
-  transition: opacity var(--dur-fast) var(--ease-out);
-}
-.ord-am-rule[data-off] .ord-am-rule-p { opacity: 0.4; }
-.ord-am-rule-p .input {
-  width: 84px;
-  height: 32px;
-  padding: 0 12px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 12.5px;
-  font-variant-numeric: tabular-nums;
-}
-.ord-am-lbl {
-  font-size: 12px;
-  color: var(--text-3);
-}
-.ord-am-lbl-2 { margin-left: 10px; }
-.ord-am-u {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 12px;
-  color: var(--text-2);
-}
-.ord-am-note {
-  margin: 14px 0 0;
-  max-width: 70ch;
-  font-size: 12px;
+.ord-lrow p {
+  margin: 8px 0 0;
+  max-width: 36ch;
+  font-size: 13px;
   line-height: 1.55;
   color: var(--text-3);
 }
-.ord-am-foot {
+.ord-lrow p.ord-lrow-scope { color: var(--text-2); }
+.ord-pro {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--purple);
+  color: #fff;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+}
+.ord-pro.off {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-hi);
+  color: var(--text-3);
+}
+.ord-lrow-bd {
+  min-width: 0;
+  max-width: 640px;
+}
+.ord-rules { transition: opacity var(--dur-fast) var(--ease-out); }
+.ord-rules[data-off] { opacity: 0.45; }
+.ord-rule {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.ord-rule-master { padding-top: 0; }
+.ord-rule-k {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+.ord-rule-master .ord-rule-k {
+  font-size: 14px;
+  color: #fff;
+}
+.ord-rule-d {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.9;
+  color: var(--text-3);
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.ord-rule-master .ord-rule-d { line-height: 1.55; }
+.ord-rule:not(.ord-rule-master)[data-off] .ord-rule-d { opacity: 0.5; }
+.ord-rule-in.input {
+  display: inline-block;
+  width: 60px;
+  height: 26px;
+  margin: 0 5px;
+  padding: 0 8px;
+  vertical-align: middle;
+  text-align: center;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.ord-rule-up {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+.ord-rule-foot {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 14px;
-  margin-top: 22px;
+  padding-top: 18px;
 }
-.ord-am-msg {
+.ord-rule-msg {
   margin: 0;
   font-size: 13px;
 }
@@ -863,8 +879,7 @@
   .ord-tb-r .input.ord-in-sym { flex: 1; }
   .ord-tb-dates { width: 100%; }
   .ord-tb-dates .input { flex: 1; min-width: 0; }
-  .ord-am-rule { grid-template-columns: 1fr; gap: 10px; }
-  .ord-am-lbl-2 { margin-left: 0; }
+  .ord-lrow p { max-width: none; }
   .ord-slip {
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:

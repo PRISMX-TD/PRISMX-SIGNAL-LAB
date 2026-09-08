@@ -806,6 +806,11 @@
     },
     "positions": "当前持仓",
     "positionsScopeHint": "仅显示经 PRISMX 下单开出的仓位；在 MT5 客户端手动开的仓不会出现在这里，也不会被这里的操作影响。",
+    "am": {
+      "be": { "pre": "浮盈达到", "post": "R 时，把止损移到开仓价" },
+      "trail": { "pre": "浮盈达到", "mid": "R 后启动，止损跟随", "post": "R" },
+      "ptp": { "pre": "到达", "mid": "R 先落袋", "post": "%，剩余部分交给追踪止损" }
+    },
     "autoManageScopeHint": "以下设置对你绑定的全部 MT5 账号生效，不随上方选中的账号变化。",
     "noPositions": "暂无持仓",
     "summary": {

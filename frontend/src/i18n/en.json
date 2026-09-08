@@ -806,6 +806,11 @@
     },
     "positions": "Open Positions",
     "positionsScopeHint": "Only shows positions opened via PRISMX orders; positions you open manually in the MT5 client never appear here and are never affected by actions here.",
+    "am": {
+      "be": { "pre": "Once open profit reaches", "post": "R, move the stop to entry" },
+      "trail": { "pre": "Starts once profit reaches", "mid": "R; the stop then trails by", "post": "R" },
+      "ptp": { "pre": "At", "mid": "R, take", "post": "% off the table; the rest rides the trailing stop" }
+    },
     "autoManageScopeHint": "These settings apply to every MT5 account you've linked; they don't change with the account selected above.",
     "noPositions": "No open positions",
     "summary": {
