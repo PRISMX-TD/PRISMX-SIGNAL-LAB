@@ -1,46 +1,74 @@
+// 客服工单：列表 → 表单 → 详情对话，三个视图由 view 状态切换（不走路由）。
+// 2026-09-08 视觉重做，数据流与接口调用不变；样式在 styles/support.css（.sup-*）。
+// Support tickets: list → form → thread, switched by the `view` state (not routes).
+// Relaid 2026-09-08 with the data flow and API calls unchanged; styled by
+// styles/support.css (.sup-*).
 import { useEffect, useState, type FormEvent } from 'react'
 import PageHead from '../components/PageHead'
 import { useTranslation } from 'react-i18next'
 import { ticketApi } from '../api/client'
 import Select from '../components/Select'
-import { SkeletonLine } from '../components/Skeleton'
-import type { Ticket, TicketCategory, TicketListItem } from '../api/types'
+import { parseTime } from '../api/utils'
+import type { Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 type View = 'list' | 'form' | { ticket: Ticket }
 
 const CATEGORY_OPTIONS: TicketCategory[] = ['account', 'payment', 'technical', 'feature']
 
-const statusClass: Record<string, string> = {
-  open: 'bg-amber-400/15 text-amber-300',
-  in_progress: 'bg-blue-400/15 text-blue-300',
-  closed: 'bg-neutral-500/15 text-neutral-400',
+// 更新日期：列表里只要「几号」，同一年内省掉年份。/ Updated date: day-level in the list.
+function fmtDay(iso: string): string {
+  const d = parseTime(iso) ?? new Date(iso)
+  const sameYear = d.getFullYear() === new Date().getFullYear()
+  return d.toLocaleDateString(undefined, sameYear ? { month: '2-digit', day: '2-digit' } : { year: 'numeric', month: '2-digit', day: '2-digit' })
+}
+function fmtStamp(iso: string): string {
+  return (parseTime(iso) ?? new Date(iso)).toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+function initial(email: string): string {
+  return (email.trim()[0] || '?').toUpperCase()
 }
 
-const priorityClass: Record<string, string> = {
-  low: 'bg-neutral-500/15 text-neutral-400',
-  normal: 'bg-blue-400/15 text-blue-300',
-  urgent: 'bg-down/15 text-down',
+// 状态点 + 状态词：一处渲染，列表行与页头小标签共用。
+// Status dot + word, shared by list rows and the head badge.
+function StatusWord({ status, badge, t }: { status: TicketStatus; badge?: boolean; t: ReturnType<typeof useTranslation>['t'] }) {
+  return (
+    <span className={`sup-status ${status}${badge ? ' badge' : ''}`}>
+      <i aria-hidden="true" />
+      {t(`tickets.status.${status}`)}
+    </span>
+  )
 }
 
-function ReplyBubble({ authorEmail, authorRole, body, createdAt, t }: {
+// 分类与优先级小标签：普通优先级不占位——它是默认值，写出来只是噪音。
+// Category and priority chips; "normal" priority is not rendered — it is the default.
+function MetaChips({ category, priority, t }: { category: TicketCategory; priority: TicketPriority; t: ReturnType<typeof useTranslation>['t'] }) {
+  return (
+    <>
+      <span className="tag sup-cat">{t(`tickets.category.${category}`)}</span>
+      {priority !== 'normal' && <span className={`tag sup-pri ${priority}`}>{t(`tickets.priority.${priority}`)}</span>}
+    </>
+  )
+}
+
+function Message({ authorEmail, authorRole, body, createdAt, index, t }: {
   authorEmail: string
   authorRole: string
   body: string
   createdAt: string
+  index: number
   t: ReturnType<typeof useTranslation>['t']
 }) {
   const isAdmin = authorRole === 'admin'
   return (
-    <div className={`flex ${isAdmin ? 'justify-start' : 'justify-end'} mb-3`}>
-      <div className={`max-w-[80%] rounded-xl px-4 py-3 ${
-        isAdmin ? 'bg-white/5' : 'bg-prism-600/15'
-      }`}>
-        <div className="mb-1 flex items-center gap-2 text-[11px] text-neutral-500">
-          <span className="font-medium text-neutral-300">{authorEmail}</span>
-          {isAdmin && <span className="rounded bg-prism-600/20 px-1.5 py-0.5 text-[10px] text-prism-300">{t('admin.staff')}</span>}
-          <span>{new Date(createdAt).toLocaleString()}</span>
+    <div className={`sup-msg-row${isAdmin ? ' staff' : ''}`} style={{ '--i': index } as React.CSSProperties}>
+      <span className="sup-ava" aria-hidden="true">{initial(authorEmail)}</span>
+      <div className="min-w-0">
+        <div className="sup-msg-meta">
+          <span className="name">{authorEmail}</span>
+          {isAdmin && <span className="staff">{t('admin.staff')}</span>}
+          <span className="time num">{fmtStamp(createdAt)}</span>
         </div>
-        <p className="whitespace-pre-wrap text-sm text-neutral-200">{body}</p>
+        <p className="sup-msg-body">{body}</p>
       </div>
     </div>
   )
@@ -123,45 +151,52 @@ export default function SupportPage() {
     }
   }
 
+  const errorBanner = error ? <div className="sup-msg err" role="alert">{error}</div> : null
+  const backToList = { label: t('tickets.backToList'), onClick: () => { setView('list'); loadTickets() } }
+
   // Form view
   if (view === 'form') {
     return (
-      <div className="mx-auto max-w-lg">
-        {error && <div className="mb-4 rounded-lg border border-down/40 bg-down/15 px-4 py-2.5 text-sm text-down">{error}</div>}
-        <button onClick={() => setView('list')} className="btn-ghost mb-4 px-3 py-1.5 text-sm">
-          &larr; {t('tickets.backToList')}
-        </button>
-        <h2 className="mb-6 font-display text-xl font-bold text-neutral-100">{t('tickets.newTicket')}</h2>
-        <form onSubmit={handleSubmit} className="glass p-5 space-y-4">
-          <div>
-            <label className="label">{t('tickets.form.title')}</label>
-            <input className="input" value={title} onChange={(e) => setTitle(e.target.value)}
-              placeholder={t('tickets.form.titlePlaceholder')} maxLength={200} required />
-          </div>
-          {/* 分类用自定义下拉：原生 select 的选项列表在深色主题下是白底黑字，见 Select.tsx 的说明。
-              优先级不在此处提供——由管理员在后台按工单内容判定。
-              Category uses the custom dropdown — a native select's option list renders
-              white-on-black in the dark theme, see Select.tsx. Priority isn't offered
-              here; admins set it in the back office based on the ticket's content. */}
-          <div>
-            <label className="label">{t('tickets.form.category')}</label>
-            <Select
-              className="w-full select-lg"
-              value={category}
-              onChange={(v) => setCategory(v as TicketCategory)}
-              options={CATEGORY_OPTIONS.map((c) => ({ value: c, label: t(`tickets.category.${c}`) }))}
-            />
-          </div>
-          <div>
-            <label className="label">{t('tickets.form.content')}</label>
-            <textarea className="input min-h-[160px] resize-y" value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder={t('tickets.form.contentPlaceholder')} maxLength={5000} required />
-          </div>
-          <button type="submit" className="btn-primary w-full py-2.5 text-sm disabled:opacity-40" disabled={submitting}>
-            {submitting ? t('tickets.form.submitting') : t('tickets.form.submit')}
-          </button>
-        </form>
+      <div className="sup-wrap">
+        {errorBanner}
+        <PageHead as="h1" title={t('tickets.newTicket')} subtitle={t('tickets.form.intro')} back={{ label: t('tickets.backToList'), onClick: () => setView('list') }} />
+        <div className="card glass sup-form-card">
+          <ul className="sup-tips">
+            <li>{t('tickets.form.tip1')}</li>
+            <li>{t('tickets.form.tip2')}</li>
+            <li>{t('tickets.form.tip3')}</li>
+          </ul>
+          <form onSubmit={handleSubmit} className="sup-form">
+            <div className="sup-field">
+              <label htmlFor="ticket-title">{t('tickets.form.title')}</label>
+              <input id="ticket-title" className="input" value={title} onChange={(e) => setTitle(e.target.value)}
+                placeholder={t('tickets.form.titlePlaceholder')} maxLength={200} required />
+            </div>
+            {/* 分类用自定义下拉：原生 select 的选项列表在深色主题下是白底黑字，见 Select.tsx 的说明。
+                优先级不在此处提供——由管理员在后台按工单内容判定。
+                Category uses the custom dropdown — a native select's option list renders
+                white-on-black in the dark theme, see Select.tsx. Priority isn't offered
+                here; admins set it in the back office based on the ticket's content. */}
+            <div className="sup-field">
+              <label>{t('tickets.form.category')}</label>
+              <Select
+                className="w-full select-lg"
+                value={category}
+                onChange={(v) => setCategory(v as TicketCategory)}
+                options={CATEGORY_OPTIONS.map((c) => ({ value: c, label: t(`tickets.category.${c}`) }))}
+              />
+            </div>
+            <div className="sup-field">
+              <label htmlFor="ticket-body">{t('tickets.form.content')}</label>
+              <textarea id="ticket-body" className="input sup-textarea" value={body}
+                onChange={(e) => setBody(e.target.value)}
+                placeholder={t('tickets.form.contentPlaceholder')} maxLength={5000} required />
+            </div>
+            <button type="submit" className="btn btn-primary sup-submit" disabled={submitting}>
+              {submitting ? t('tickets.form.submitting') : t('tickets.form.submit')}
+            </button>
+          </form>
+        </div>
       </div>
     )
   }
@@ -169,63 +204,66 @@ export default function SupportPage() {
   // Detail view
   if (typeof view === 'object' && 'ticket' in view) {
     const ticket = view.ticket
+    const closed = ticket.status === 'closed'
+    const busy = closed ? reopening : replying
     return (
-      <div className="mx-auto max-w-2xl">
-        {error && <div className="mb-4 rounded-lg border border-down/40 bg-down/15 px-4 py-2.5 text-sm text-down">{error}</div>}
-        <button onClick={() => { setView('list'); loadTickets() }} className="btn-ghost mb-4 px-3 py-1.5 text-sm">
-          &larr; {t('tickets.backToList')}
-        </button>
-        <div className="glass p-5 mb-4">
-          <h2 className="font-display text-lg font-bold text-neutral-100 mb-3">{ticket.title}</h2>
-          <div className="flex flex-wrap items-center gap-2 mb-1">
-            <span className={`tag ${statusClass[ticket.status]}`}>{t(`tickets.status.${ticket.status}`)}</span>
-            <span className={`tag ${priorityClass[ticket.priority]}`}>{t(`tickets.priority.${ticket.priority}`)}</span>
-            <span className="tag bg-white/5 text-neutral-400">{t(`tickets.category.${ticket.category}`)}</span>
-          </div>
-          <p className="text-xs text-neutral-500 mt-2">
-            {ticket.userEmail} &middot; {new Date(ticket.createdAt).toLocaleString()}
-          </p>
-        </div>
+      <div className="sup-wrap">
+        {errorBanner}
+        <PageHead
+          as="h1"
+          title={ticket.title}
+          badge={<StatusWord status={ticket.status} badge t={t} />}
+          subtitle={<>{ticket.userEmail} &middot; {t('tickets.openedAt')} <span className="num">{fmtStamp(ticket.createdAt)}</span></>}
+          actions={<div className="sup-head-chips"><MetaChips category={ticket.category} priority={ticket.priority} t={t} /></div>}
+          back={backToList}
+        />
+        <div className="sup-stack">
+          <section className="card glass sup-thread">
+            <div className="sup-thread-head">
+              <h3>{t('tickets.thread')}</h3>
+              <b className="num">{ticket.replies.length}</b>
+              <span>{t('tickets.replyUnit')}</span>
+            </div>
+            {ticket.replies.length === 0 ? (
+              <p className="sup-thread-empty">{t('tickets.empty')}</p>
+            ) : (
+              ticket.replies.map((r, i) => (
+                <Message key={r.id} index={i} authorEmail={r.authorEmail} authorRole={r.authorRole} body={r.body} createdAt={r.createdAt} t={t} />
+              ))
+            )}
+          </section>
 
-        <div className="mb-4">
-          {ticket.replies.map((r) => (
-            <ReplyBubble key={r.id} authorEmail={r.authorEmail} authorRole={r.authorRole} body={r.body} createdAt={r.createdAt} t={t} />
-          ))}
+          <section className="card glass sup-compose">
+            <textarea className="input sup-textarea" value={replyText}
+              onChange={(e) => setReplyText(e.target.value)}
+              placeholder={t('tickets.replyPlaceholder')} maxLength={5000} aria-label={t('tickets.reply')} />
+            <div className="sup-compose-foot">
+              {closed && <p>{t('tickets.closedWarning')}</p>}
+              <button
+                type="button"
+                onClick={() => (closed ? handleReopen(ticket.id) : handleReply(ticket.id))}
+                className="btn btn-primary"
+                disabled={busy || !replyText.trim()}
+              >
+                {busy ? '…' : closed ? t('tickets.reopen') : t('tickets.reply')}
+              </button>
+            </div>
+          </section>
         </div>
-
-        {ticket.status === 'closed' ? (
-          <div className="glass p-4">
-            <p className="mb-3 text-sm text-neutral-400">{t('tickets.closedWarning')}</p>
-            <textarea className="input mb-3 min-h-[80px] w-full resize-y" value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
-              placeholder={t('tickets.replyPlaceholder')} maxLength={5000} />
-            <button onClick={() => handleReopen(ticket.id)}
-              className="btn-primary px-5 py-2 text-sm disabled:opacity-40" disabled={reopening || !replyText.trim()}>
-              {reopening ? '...' : t('tickets.reopen')}
-            </button>
-          </div>
-        ) : (
-          <div className="glass p-4">
-            <textarea className="input mb-3 min-h-[80px] w-full resize-y" value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
-              placeholder={t('tickets.replyPlaceholder')} maxLength={5000} />
-            <button onClick={() => handleReply(ticket.id)}
-              className="btn-primary px-5 py-2 text-sm disabled:opacity-40" disabled={replying || !replyText.trim()}>
-              {replying ? '...' : t('tickets.reply')}
-            </button>
-          </div>
-        )}
       </div>
     )
   }
 
   // List view (default)
   return (
-    <div className="mx-auto max-w-2xl">
-      {error && <div className="mb-4 rounded-lg border border-down/40 bg-down/15 px-4 py-2.5 text-sm text-down">{error}</div>}
+    <div className="sup-wrap">
+      {errorBanner}
       <PageHead
         as="h1"
         title={t('tickets.title')}
+        count={loading ? null : tickets.length}
+        countUnit={t('tickets.countUnit')}
+        subtitle={t('tickets.subtitle')}
         actions={
           <button onClick={() => setView('form')} className="btn btn-primary">
             {t('tickets.newTicket')}
@@ -233,46 +271,59 @@ export default function SupportPage() {
         }
       />
 
-      {loading ? (
-        <div className="glass flex flex-col gap-3 p-5">
-          <SkeletonLine width="50%" height={16} />
-          <SkeletonLine />
-          <SkeletonLine width="80%" />
-        </div>
-      ) : tickets.length === 0 ? (
-        <div className="glass p-8 text-center text-sm text-neutral-500">{t('tickets.empty')}</div>
-      ) : (
-        <div className="space-y-3">
-          {tickets.map((ticket) => (
+      <section className="card glass sup-list" aria-busy={loading || undefined}>
+        {loading ? (
+          [0, 1, 2].map((i) => (
+            <div key={i} className="sup-row skel" aria-hidden="true">
+              <span className="skeleton" style={{ width: 64 }} />
+              <span className="sup-main">
+                <span className="skeleton" style={{ width: '46%' }} />
+                <span className="skeleton" style={{ width: '72%', marginTop: 8 }} />
+              </span>
+              <span className="skeleton" style={{ width: 72 }} />
+              <span className="skeleton" style={{ width: 40 }} />
+              <span />
+            </div>
+          ))
+        ) : tickets.length === 0 ? (
+          <div className="sup-empty">
+            <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M6 22h8l2 4h8l2-4h8" />
+              <path d="M6 22v10a2 2 0 0 0 2 2h24a2 2 0 0 0 2-2V22L29 8H11L6 22z" />
+              <path d="M14 14h12M15 18h10" />
+            </svg>
+            <b>{t('tickets.empty')}</b>
+            <p>{t('tickets.emptyHint')}</p>
+          </div>
+        ) : (
+          tickets.map((ticket, i) => (
             <button
               key={ticket.id}
+              type="button"
+              className="sup-row"
+              style={{ '--i': i } as React.CSSProperties}
               onClick={async () => {
                 try { setView({ ticket: await ticketApi.get(ticket.id) }) } catch { showError(t('common.error')) }
               }}
-              className="glass w-full p-4 text-left transition hover:bg-white/[0.03]"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className={`tag text-[10px] ${statusClass[ticket.status]}`}>{t(`tickets.status.${ticket.status}`)}</span>
-                    <span className={`tag text-[10px] ${priorityClass[ticket.priority]}`}>{t(`tickets.priority.${ticket.priority}`)}</span>
-                    <span className="text-[10px] text-neutral-500">{t(`tickets.category.${ticket.category}`)}</span>
-                  </div>
-                  <h3 className="truncate text-sm font-medium text-neutral-200">{ticket.title}</h3>
-                  {ticket.latestReply && (
-                    <p className="mt-1.5 truncate text-xs text-neutral-500">
-                      {ticket.latestReply.authorEmail}: {ticket.latestReply.body}
-                    </p>
-                  )}
-                </div>
-                <span className="shrink-0 text-[11px] text-neutral-500">
-                  {new Date(ticket.updatedAt).toLocaleDateString()}
-                </span>
-              </div>
+              <StatusWord status={ticket.status} t={t} />
+              <span className="sup-main">
+                <span className="sup-title">{ticket.title}</span>
+                {ticket.latestReply && (
+                  <span className="sup-last">
+                    <span className="who">{ticket.latestReply.authorRole === 'admin' ? t('admin.staff') : t('tickets.me')}</span>
+                    {' · '}
+                    {ticket.latestReply.body}
+                  </span>
+                )}
+              </span>
+              <span className="sup-meta"><MetaChips category={ticket.category} priority={ticket.priority} t={t} /></span>
+              <time className="sup-date num" dateTime={ticket.updatedAt}>{fmtDay(ticket.updatedAt)}</time>
+              <svg className="sup-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
             </button>
-          ))}
-        </div>
-      )}
+          ))
+        )}
+      </section>
     </div>
   )
 }

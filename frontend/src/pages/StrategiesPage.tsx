@@ -355,53 +355,38 @@ function StrategyEditor({
   }`
 
   return (
-    <section className="glass mb-5 p-5">
+    <section className="card glass stg-editor">
       {/* 步骤条：既是进度，也是导航——已经走过的步骤可以点回去改，没走到的不能跳，
           否则会跳过那一步的说明文字（新手唯一的解释来源）。
           The stepper is progress and navigation both: visited steps are clickable
           for edits, unvisited ones aren't, since jumping ahead skips that step's
           explanatory copy — a beginner's only source of it. */}
-      <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-2">
+      <ol className="stg-stepper">
         {steps.map((s, i) => {
           const done = i < step
           const current = i === step
           const reachable = editing || i <= step
           return (
-            <li key={s.key} className="flex items-center gap-1.5">
+            <li key={s.key}>
               <button
                 type="button"
                 onClick={() => { if (reachable) { setStepError(null); setStep(i) } }}
                 disabled={!reachable}
                 aria-current={current ? 'step' : undefined}
-                className={`flex items-center gap-2 rounded-pill border px-3 py-1.5 text-xs transition ${
-                  current
-                    ? 'border-prism-500/50 bg-prism-600/20 text-prism-200'
-                    : reachable
-                      ? 'border-white/10 bg-white/5 text-neutral-300 hover:border-prism-400/40'
-                      : 'cursor-default border-white/5 bg-white/[0.02] text-neutral-500'
-                }`}
+                className={`stg-stepbtn${current ? ' current' : done ? ' done' : reachable ? '' : ' locked'}`}
               >
-                <span
-                  className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-semibold ${
-                    current ? 'bg-prism-500 text-white' : done ? 'bg-up/20 text-up' : 'bg-white/5 text-neutral-500'
-                  }`}
-                >
-                  {done ? '✓' : i + 1}
-                </span>
+                <span className="n num" aria-hidden="true">{done ? '✓' : i + 1}</span>
                 {t(`strategy.${s.key}`)}
               </button>
-              {i < steps.length - 1 && <span aria-hidden className="text-neutral-700">·</span>}
             </li>
           )
         })}
       </ol>
 
-      <div className="mt-4">
-        <p className="text-[11px] uppercase tracking-wide text-neutral-500">
-          {t('strategy.stepOf', { n: step + 1, total: steps.length })}
-        </p>
-        <h4 className="mt-1 font-display text-base font-semibold text-neutral-100">{t(`strategy.${steps[step].key}`)}</h4>
-        <p className="mt-1.5 max-w-2xl text-xs leading-relaxed text-neutral-400">{t(`strategy.${steps[step].hint}`)}</p>
+      <div className="stg-step-head">
+        <p className="cap">{t('strategy.stepOf', { n: step + 1, total: steps.length })}</p>
+        <h4 className="font-display">{t(`strategy.${steps[step].key}`)}</h4>
+        <p>{t(`strategy.${steps[step].hint}`)}</p>
       </div>
 
       {/* 第 1 步 · 选市场：命名 + 品种（单选）+ 周期（单选）
@@ -762,13 +747,13 @@ function StrategyEditor({
           The nav bar: the first three steps only offer "next", and the save buttons
           appear only on the last one — a mid-flow save would strip all force from
           "backtest before you enable". Cancel stays far right at every step. */}
-      <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-white/10 pt-4">
+      <div className="stg-editor-foot">
         {step > 0 && (
           <button
             type="button"
             onClick={() => { setStepError(null); setStep((s) => s - 1) }}
             disabled={saving}
-            className="rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-neutral-300 transition hover:text-white disabled:opacity-40"
+            className="btn btn-ghost"
           >
             {t('strategy.stepPrev')}
           </button>
@@ -777,11 +762,7 @@ function StrategyEditor({
           <button
             type="button"
             onClick={goNext}
-            className={
-              editing
-                ? 'rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-neutral-300 transition hover:text-white'
-                : 'btn-primary px-5 py-2 text-sm'
-            }
+            className={editing ? 'btn btn-ghost' : 'btn btn-primary'}
           >
             {t('strategy.stepNext')}
           </button>
@@ -794,14 +775,14 @@ function StrategyEditor({
             this works. */}
         {(editing || step === steps.length - 1) && (
           <>
-            <button type="button" onClick={() => save(true)} disabled={saving || !canSave} className="btn-primary px-5 py-2 text-sm disabled:opacity-40">
+            <button type="button" onClick={() => save(true)} disabled={saving || !canSave} className="btn btn-primary">
               {t('strategy.saveAndEnable')}
             </button>
             <button
               type="button"
               onClick={() => save(false)}
               disabled={saving || !canSave}
-              className="rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-neutral-300 transition hover:text-white disabled:opacity-40"
+              className="btn btn-secondary"
             >
               {t('strategy.saveOnly')}
             </button>
@@ -811,7 +792,7 @@ function StrategyEditor({
           type="button"
           onClick={onCancel}
           disabled={saving}
-          className="ml-auto rounded-lg border border-white/10 bg-white/5 px-5 py-2 text-sm text-neutral-400 transition hover:text-white"
+          className="btn btn-ghost end"
         >
           {t('common.cancel')}
         </button>
@@ -1125,14 +1106,32 @@ export default function StrategiesPage() {
     await placeManualOrder(orderTarget.symbol, orderTarget.side, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
   }
 
+  // 新建按钮上移到页头：目录拿不到时禁用——新草稿的第一条条件必须由目录给出，
+  // 放进去只会得到一个编不出合法条件的空编辑器。
+  // The new-strategy button lives in the head; disabled without the catalogue,
+  // since a new draft's first condition has to come from it.
+  const newButton = isPro && !draft ? (
+    <button type="button" onClick={openNewDraft} disabled={!catalog} className="btn btn-primary">
+      {t('strategy.newStrategy')}
+    </button>
+  ) : undefined
+
   return (
-    <div>
-      <PageHead as="h1" title={t('strategy.title')} subtitle={t('strategy.subtitle')} />
+    <div className="stg-stack">
+      <PageHead
+        as="h1"
+        title={t('strategy.title')}
+        count={strategiesLoaded && isPro ? strategies.length : null}
+        countUnit={t('strategy.countUnit')}
+        subtitle={t('strategy.subtitle')}
+        actions={newButton}
+        className="!mb-0"
+      />
 
       {!isPro && (
-        <div className="glass mb-5 border-prism-500/20 bg-prism-600/5 p-4 text-center text-sm text-neutral-300">
-          {t('strategy.proOnlyHint')}{' '}
-          <Link to="/upgrade" className="text-prism-300 underline hover:text-prism-200">{t('winrate.viewDetail')}</Link>
+        <div className="card glass stg-callout">
+          <span>{t('strategy.proOnlyHint')}</span>
+          <Link to="/upgrade">{t('winrate.viewDetail')} →</Link>
         </div>
       )}
 
@@ -1145,21 +1144,22 @@ export default function StrategiesPage() {
           being created; a user with running strategies doesn't need the lecture on
           every visit. */}
       {isPro && (strategies.length === 0 || draft != null || picking) && (
-        <section className="glass mb-5 p-5">
-          <h3 className="font-display text-base font-semibold text-neutral-100">{t('strategy.flowTitle')}</h3>
-          <ol className="mt-3.5 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-3">
+        <section className="card glass stg-flow">
+          <div className="stg-flow-lead">
+            <h3 className="font-display">{t('strategy.flowTitle')}</h3>
+            <p>{t('strategy.flowLead')}</p>
+          </div>
+          <ol className="stg-steps">
             {([
               ['flowStep1', 'flowStep1Desc'],
               ['flowStep2', 'flowStep2Desc'],
               ['flowStep3', 'flowStep3Desc'],
             ] as const).map(([label, desc], i) => (
-              <li key={label} className="flex gap-3">
-                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-prism-500/40 bg-prism-600/15 font-mono text-xs font-semibold text-prism-200">
-                  {i + 1}
-                </span>
+              <li key={label} className="stg-step">
+                <span className="n num" aria-hidden="true">{i + 1}</span>
                 <span className="min-w-0">
-                  <span className="block text-sm font-medium text-neutral-100">{t(`strategy.${label}`)}</span>
-                  <span className="mt-1 block text-xs leading-relaxed text-neutral-400">{t(`strategy.${desc}`)}</span>
+                  <b>{t(`strategy.${label}`)}</b>
+                  <p>{t(`strategy.${desc}`)}</p>
                 </span>
               </li>
             ))}
@@ -1173,30 +1173,16 @@ export default function StrategiesPage() {
           belongs on the page. This used to fail silently, leaving the user with
           buttons that do nothing and no way to tell a misclick from an outage. */}
       {catalogError && (
-        <div className="glass mb-5 border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-200">
+        <div className="stg-msg warn" role="alert">
           {t('strategy.catalogUnavailable')} {catalogError}
         </div>
       )}
 
       {/* 我的策略列表 / my strategies */}
-      <section className="glass mb-5 p-5">
-        <div className="flex items-center justify-between">
-          <h3 className="font-display text-lg font-semibold text-neutral-100">{t('strategy.myStrategies')}</h3>
-          {/* 目录拿不到时禁用新建：新草稿的第一条条件必须由目录给出，放进去只会
-              得到一个编不出合法条件的空编辑器。
-              New drafts are disabled without the catalogue: a new draft's first
-              condition has to come from it, and going ahead would only open an
-              editor that can't produce a valid condition. */}
-          {isPro && !draft && (
-            <button
-              type="button"
-              onClick={openNewDraft}
-              disabled={!catalog}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:border-prism-400/50 hover:text-prism-200 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {t('strategy.newStrategy')}
-            </button>
-          )}
+      <section className="card glass stg-sec" aria-busy={!strategiesLoaded || undefined}>
+        <div className="stg-sec-head">
+          <h3>{t('strategy.myStrategies')}</h3>
+          {strategiesLoaded && !listError && <b className="num">{strategies.length}</b>}
         </div>
 
         {/* 四态而非两态：未加载显示骨架，失败说明原因，加载完为空才说"还没有策略"。
@@ -1205,32 +1191,36 @@ export default function StrategiesPage() {
             and "no strategies" only once loaded and actually empty. Merging
             "loading" with "empty" flashes a false empty state at new users. */}
         {!strategiesLoaded ? (
-          <div className="mt-4 flex flex-col gap-2" aria-busy="true">
-            {[0, 1].map((i) => (
-              <div key={i} className="h-16 animate-pulse rounded-lg border border-white/5 bg-white/[0.03]" />
-            ))}
-          </div>
+          [0, 1].map((i) => (
+            <div key={i} className="stg-skel" aria-hidden="true">
+              <span className="skeleton ava" />
+              <span>
+                <span className="skeleton" style={{ display: 'block', width: '38%', height: 14 }} />
+                <span className="skeleton" style={{ display: 'block', width: '58%', height: 10, marginTop: 10 }} />
+              </span>
+              <span className="skeleton" style={{ display: 'block', height: 12 }} />
+            </div>
+          ))
         ) : listError ? (
-          <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-200">
+          <div className="stg-msg warn stg-msgrow" role="alert">
             {t('strategy.listUnavailable')} {listError}
           </div>
         ) : strategies.length === 0 ? (
-          <div className="mt-4 py-6 text-center text-sm text-neutral-500">{t('strategy.noStrategies')}</div>
+          <div className="stg-empty"><p>{t('strategy.noStrategies')}</p></div>
         ) : (
-          <div className="mt-4 flex flex-col gap-2">
-            {strategies.map((s) => (
-              <StrategyCard
-                key={s.id}
-                strategy={s}
-                performance={performance[s.id] ?? null}
-                backtestWinRate={backtestWinRates[s.id] ?? null}
-                fallbackName={s.template ? t(TEMPLATE_LABEL_KEYS[s.template]) : t('strategy.nameplaceholderCustom')}
-                onEdit={() => openEditDraft(s)}
-                onToggle={() => toggleEnabled(s)}
-                onDelete={() => setDeleteTarget(s)}
-              />
-            ))}
-          </div>
+          strategies.map((s, i) => (
+            <StrategyCard
+              key={s.id}
+              index={i}
+              strategy={s}
+              performance={performance[s.id] ?? null}
+              backtestWinRate={backtestWinRates[s.id] ?? null}
+              fallbackName={s.template ? t(TEMPLATE_LABEL_KEYS[s.template]) : t('strategy.nameplaceholderCustom')}
+              onEdit={() => openEditDraft(s)}
+              onToggle={() => toggleEnabled(s)}
+              onDelete={() => setDeleteTarget(s)}
+            />
+          ))
         )}
       </section>
 
@@ -1259,7 +1249,7 @@ export default function StrategiesPage() {
           them the only thing editable is a payload the backend will reject. Show a
           loading state rather than an empty editor. */}
       {draft && !catalog && (
-        <section className="glass mb-5 p-5 text-center text-sm text-neutral-500">{t('common.loading')}</section>
+        <section className="card glass stg-empty" style={{ borderTop: 0 }}>{t('common.loading')}</section>
       )}
 
       {draft && catalog && (
@@ -1276,23 +1266,28 @@ export default function StrategiesPage() {
       )}
 
       {/* 我的策略信号 / my strategy signals */}
-      <section className="glass mb-5 p-5">
-        <div className="flex items-center justify-between">
-          <h3 className="font-display text-lg font-semibold text-neutral-100">{t('strategy.mySignals')}</h3>
+      <section className="card glass stg-sec" aria-busy={!signalsLoaded || undefined}>
+        <div className="stg-sec-head">
+          <h3>{t('strategy.mySignals')}</h3>
+          {signalsLoaded && !signalsError && signals.length > 0 && <b className="num">{signals.length}</b>}
           {signals.length > 0 && (
             <button
               type="button"
               onClick={() => setConfirmClearSignals(true)}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-400 transition hover:border-down/30 hover:text-down"
+              className="stg-act danger aux"
             >
               {t('strategy.clearSignals')}
             </button>
           )}
         </div>
         {!signalsLoaded ? (
-          <div className="mt-4 h-16 animate-pulse rounded-lg border border-white/5 bg-white/[0.03]" aria-busy="true" />
+          <div className="stg-skel" aria-hidden="true">
+            <span className="skeleton ava" />
+            <span className="skeleton" style={{ display: 'block', width: '40%', height: 14 }} />
+            <span className="skeleton" style={{ display: 'block', height: 12 }} />
+          </div>
         ) : signalsError ? (
-          <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-200">
+          <div className="stg-msg warn stg-msgrow" role="alert">
             {t('strategy.signalsUnavailable')} {signalsError}
           </div>
         ) : (
@@ -1300,7 +1295,7 @@ export default function StrategiesPage() {
         )}
       </section>
 
-      <p className="text-xs leading-relaxed text-neutral-500">{t('strategy.disclaimer')}</p>
+      <p className="stg-disclaimer">{t('strategy.disclaimer')}</p>
 
       {confirmClearSignals && (
         <ConfirmModal

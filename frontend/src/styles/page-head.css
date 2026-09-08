@@ -73,9 +73,15 @@
   align-items: center;
   gap: 6px;
   margin-bottom: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: 13px;
   color: var(--text-3);
   text-decoration: none;
+  cursor: pointer;
+  align-self: flex-start;
   transition: color var(--dur-fast) var(--ease-out);
 }
 .page-head-back:hover {

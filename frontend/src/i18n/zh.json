@@ -1704,6 +1704,10 @@
     "oneClickOrder": "一键下单",
     "signalExpired": "已过期",
     "signalTriggeredAt": "触发于",
+    "countUnit": "个",
+    "signalCountUnit": "条",
+    "ttlLabel": "后失效",
+    "flowLead": "先挑条件，再用真实行情验证，最后才启用。",
     "disclaimer": "策略信号只在满足你设置的条件时才会生成，纯只读判断，不会自动下单；回测已按后台配置计入点差、滑点与手续费，但未计入隔夜利息，也不模拟拒单与成交延迟，不构成任何收益承诺，过往表现不代表未来结果。"
   },
   "faqPage": {
@@ -1951,11 +1955,22 @@
   "tickets": {
     "title": "客服工单",
     "newTicket": "提交工单",
+    "subtitle": "账户、支付、技术故障或功能建议都可以在这里提交；客服的回复会同步到对应工单。",
+    "countUnit": "张",
+    "emptyHint": "提交后可以在这里跟进每一次回复。",
+    "thread": "对话",
+    "replyUnit": "条回复",
+    "openedAt": "提交于",
+    "me": "我",
     "listTitle": "我的工单",
     "empty": "暂无工单",
     "form": {
       "title": "标题",
       "titlePlaceholder": "简要描述你的问题",
+      "intro": "写清楚发生了什么、什么时候、页面上出现了什么提示，处理会快很多。",
+      "tip1": "一张工单只描述一个问题",
+      "tip2": "附上出错时的品种、时间与提示文字",
+      "tip3": "提交后可以在对话里继续补充",
       "category": "分类",
       "content": "详细描述",
       "contentPlaceholder": "请尽量详细描述你遇到的问题…",

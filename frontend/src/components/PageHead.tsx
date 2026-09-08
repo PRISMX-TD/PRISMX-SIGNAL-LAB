@@ -35,11 +35,19 @@ interface Props {
   badge?: ReactNode
   // 右侧槽。/ The right-hand slot.
   actions?: ReactNode
-  back?: { to: string; label: string }
+  // 返回：给 to 渲染路由链接，给 onClick 渲染按钮（视图切换不走路由的页面，如客服工单）。
+  // Back: `to` renders a router link, `onClick` a button (pages whose views are state, not routes).
+  back?: { to?: string; onClick?: () => void; label: string }
   // 语义层级：独立页面用 h1，页签内的看板用 h2（默认）。
   // Semantic level: h1 for a standalone page, h2 (default) for a board inside tabs.
   as?: 'h1' | 'h2'
   className?: string
+}
+
+function BackChevron() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+  )
 }
 
 export default function PageHead({ title, subtitle, count, countUnit, badge, actions, back, as = 'h2', className = '' }: Props) {
@@ -47,12 +55,17 @@ export default function PageHead({ title, subtitle, count, countUnit, badge, act
   return (
     <div className={`page-head${className ? ` ${className}` : ''}`}>
       <div className="page-head-title">
-        {back && (
+        {back && (back.to ? (
           <Link to={back.to} className="page-head-back">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+            <BackChevron />
             {back.label}
           </Link>
-        )}
+        ) : (
+          <button type="button" onClick={back.onClick} className="page-head-back">
+            <BackChevron />
+            {back.label}
+          </button>
+        ))}
         <Tag className="font-display">
           <span className="page-head-name">{title}</span>
           {count != null && (

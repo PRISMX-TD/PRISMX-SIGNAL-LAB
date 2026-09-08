@@ -1706,6 +1706,10 @@
     "oneClickOrder": "One-Click Order",
     "signalExpired": "Expired",
     "signalTriggeredAt": "Triggered at",
+    "countUnit": "strategies",
+    "signalCountUnit": "signals",
+    "ttlLabel": "left",
+    "flowLead": "Pick conditions, verify against real prices, then enable.",
     "disclaimer": "Strategy signals fire only when your conditions are met — a read-only judgement that never places an order by itself. Backtests do account for spread, slippage and commission as configured, but not for overnight swap, and they do not simulate rejections or execution latency. Nothing here is a promise of returns, and past performance does not predict future results."
   },
   "faqPage": {
@@ -1953,11 +1957,22 @@
   "tickets": {
     "title": "Support Tickets",
     "newTicket": "Submit Ticket",
+    "subtitle": "Account, billing, technical faults and feature requests all go here; support replies land in the ticket thread.",
+    "countUnit": "tickets",
+    "emptyHint": "Once submitted, every reply is tracked here.",
+    "thread": "Thread",
+    "replyUnit": "replies",
+    "openedAt": "Opened",
+    "me": "Me",
     "listTitle": "My Tickets",
     "empty": "No tickets yet",
     "form": {
       "title": "Title",
       "titlePlaceholder": "Briefly describe your issue",
+      "intro": "Say what happened, when, and what the app showed; it speeds things up.",
+      "tip1": "One issue per ticket",
+      "tip2": "Include the symbol, time and any message shown",
+      "tip3": "You can add detail in the thread after submitting",
       "category": "Category",
       "content": "Description",
       "contentPlaceholder": "Describe your issue in detail…",

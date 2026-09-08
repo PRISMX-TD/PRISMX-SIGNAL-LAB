@@ -1,0 +1,708 @@
+/* ═════════════ 自定义策略 / custom strategies ═════════════
+   2026-09-08 视觉重做（页面结构、状态机与编辑器内部逻辑不变）。
+   · 页头带紫色计数（策略数），新建按钮上移到页头右侧。
+   · 三步说明分两栏：左边标题与一句话，右边一条竖向时间线——36px 圆形序号
+     （紫色等宽数字）用 1px 竖线连起来，这是真实的先后顺序，不是装饰编号。
+   · 「我的策略」从卡中卡改成账本行：36px 品种芯片 + 20px 展示字宽策略名，
+     署名行是品种 / 周期 / 模板；状态是真实语义的点 + 字；三枚安静的 36px 药丸
+     操作。绩效一行是 17px 等宽的数字格。
+   · 「我的策略信号」每行是一张紧凑小票：方向芯片 ｜ 品种 + 周期 ｜ 触发时间 ｜
+     22px 倒计时环（与信号板同一套）或结果，右端一键下单药丸。
+   · 预设选择与编辑器沿用同一张面：28px 内边距、36px 药丸步骤条（当前步是紫色
+     实色）、20px 步骤标题。
+   材质同全站：实色面、无模糊无光晕；紫只落在计数、序号、当前步、倒计时弧与主按钮。
+   Relaid 2026-09-08; structure, state machine and editor internals unchanged.
+   Count in the head; the explainer becomes a two-column timeline; strategies
+   become ledger rows anchored by a 36px symbol chip and a 20px display name;
+   signals become compact tickets with the board's countdown ring; the picker
+   and editor share one 28px surface with a 36px pill stepper. Opaque surfaces,
+   no blur, no halo; violet only as ink. */
+
+.stg-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── 提示条 / callouts ── */
+.stg-callout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 18px 28px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.stg-callout::before {
+  content: '';
+  flex: none;
+  width: 2px;
+  height: 14px;
+  border-radius: 1px;
+  background: var(--purple-hi);
+}
+.stg-callout a {
+  font-weight: 500;
+  color: var(--purple-hi);
+  text-decoration: none;
+}
+.stg-callout a:hover {
+  color: #fff;
+}
+.stg-msg {
+  padding: 14px 20px;
+  border-radius: var(--r-panel);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.stg-msg.warn { background: var(--mid-bg); color: var(--mid); }
+.stg-msg.err { background: var(--down-bg); color: var(--down); }
+
+/* ── 三步说明：时间线 / explainer as a timeline ── */
+.stg-flow {
+  display: grid;
+  gap: 24px;
+  padding: 28px;
+}
+.stg-flow-lead h3 {
+  font-size: 20px;
+  line-height: 1.15;
+  font-weight: 700;
+  color: #fff;
+}
+.stg-flow-lead p {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-3);
+  max-width: 36ch;
+}
+.stg-steps {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.stg-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 16px;
+  padding-bottom: 20px;
+}
+.stg-step:last-child {
+  padding-bottom: 0;
+}
+/* 序号之间的 1px 竖线：从本步圆圈底部连到下一步圆圈顶部。
+   The 1px rail between numerals runs from this circle's bottom to the next one's top. */
+.stg-step:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 17px;
+  top: 40px;
+  bottom: 4px;
+  width: 1px;
+  background: var(--line-hi);
+}
+.stg-step .n {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--line-hi);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--purple-hi);
+}
+.stg-step b {
+  display: block;
+  padding-top: 8px;
+  font-size: 15px;
+  line-height: 1.3;
+  font-weight: 700;
+  color: #fff;
+}
+.stg-step p {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-3);
+  max-width: 56ch;
+}
+
+/* ── 分区面：头 + 行 / section surface: head + rows ── */
+.stg-sec {
+  padding: 0;
+  overflow: hidden;
+}
+.stg-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 28px 20px;
+}
+.stg-sec-head h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+}
+.stg-sec-head b {
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--purple-hi);
+}
+.stg-sec-head .aux {
+  margin-left: auto;
+}
+/* 安静的药丸操作：描边、36px；删除 / 清空悬停才转跌色。
+   Quiet pill actions: outlined, 36px; delete / clear turn down-tone only on hover. */
+.stg-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line-hi);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.stg-act:hover:not(:disabled) {
+  color: #fff;
+  border-color: var(--text-3);
+}
+.stg-act:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.stg-act:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+.stg-act.danger:hover:not(:disabled) {
+  color: var(--down);
+  border-color: var(--down);
+}
+.stg-act.accent {
+  color: var(--purple-hi);
+}
+
+/* 策略行 / strategy rows */
+.stg-row {
+  padding: 20px 28px;
+  border-top: 1px solid var(--line);
+  animation: fade-in-up 0.45s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+.stg-row-top {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 16px 24px;
+  align-items: center;
+}
+.stg-row .sym-ava {
+  width: 36px;
+  height: 36px;
+  font-size: 11px;
+}
+.stg-row-name {
+  min-width: 0;
+}
+.stg-row-name b {
+  display: block;
+  font-size: 20px;
+  line-height: 1.15;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stg-row-by {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.stg-row-by .sym {
+  font-weight: 500;
+  color: var(--text-2);
+}
+.stg-row-by .tag {
+  background: var(--nest);
+  color: var(--text-2);
+}
+.stg-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.stg-state i {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.stg-state.on { color: var(--up); }
+.stg-state.on i { background: var(--up); animation: breathe 2.4s ease-in-out infinite; }
+.stg-state.off { color: var(--text-3); }
+.stg-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* 绩效：17px 等宽数字格，键 11px 说明字；非数字的值（样本不足 / 暂无）退到 13px。
+   Performance: 17px tabular cells under 11px captions; non-numeric values drop to 13px. */
+.stg-perf {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 40px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.stg-perf .k {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+.stg-perf .v {
+  display: block;
+  margin-top: 6px;
+  font-size: 17px;
+  line-height: 1;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+}
+.stg-perf .v.txt {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+  line-height: 1.2;
+}
+.stg-perf .v small {
+  margin-left: 2px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.stg-perf-note {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* 空态与骨架 / empty and skeleton */
+.stg-empty {
+  padding: 40px 28px 44px;
+  border-top: 1px solid var(--line);
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+.stg-empty p {
+  margin: 0 auto;
+  max-width: 44ch;
+}
+.stg-skel {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 120px;
+  gap: 16px 24px;
+  align-items: center;
+  padding: 20px 28px;
+  border-top: 1px solid var(--line);
+}
+.stg-skel .ava {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+}
+.stg-skel .skeleton + .skeleton {
+  margin-top: 0;
+}
+.stg-msgrow {
+  margin: 0 28px 28px;
+}
+
+/* ── 策略信号：紧凑小票 / signal tickets ── */
+.stg-sig {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 12px 24px;
+  align-items: center;
+  padding: 18px 28px;
+  border-top: 1px solid var(--line);
+  transition: opacity var(--dur-base) var(--ease-out);
+  animation: fade-in-up 0.45s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+.stg-sig.off {
+  opacity: 0.55;
+}
+.stg-sig-sym {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+.stg-sig-sym b {
+  font-size: 17px;
+  line-height: 1;
+  color: #fff;
+}
+.stg-sig-sym .tag {
+  background: var(--nest);
+  color: var(--text-2);
+}
+.stg-sig-time {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+.stg-sig-time .k {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+.stg-sig-time .num {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.stg-sig-end {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.stg-sig-end .btn {
+  height: 36px;
+  padding: 0 18px;
+}
+.stg-sig-state {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+/* 结果压语义色：这是数据，不是装饰。/ Outcome in semantic tone: data, not decoration. */
+.stg-sig-state.tp { color: var(--up); background: var(--up-bg); border-color: transparent; }
+.stg-sig-state.sl { color: var(--down); background: var(--down-bg); border-color: transparent; }
+.stg-sig-state.to { color: var(--text-2); background: var(--nest); border-color: transparent; }
+
+/* ── 预设选择 / preset picker ── */
+.stg-picker {
+  padding: 28px;
+}
+.stg-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.stg-picker-head h3 {
+  font-size: 20px;
+  line-height: 1.15;
+  font-weight: 700;
+  color: #fff;
+}
+.stg-picker h4 {
+  margin-top: 24px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+}
+.stg-picker-hint {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-3);
+  max-width: 64ch;
+}
+.stg-picker-note {
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.stg-picker-note.warn {
+  color: var(--mid);
+}
+.stg-presets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+/* 预设牌：嵌套面 + 1px 边，悬停时边转品牌紫（紫在牌上只允许以一条边出现）。
+   Preset tile: nested plane + 1px edge; hover turns the edge violet (the one
+   way violet may appear on a tile). */
+.stg-preset {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px 20px;
+  border-radius: var(--r-panel);
+  border: 1px solid var(--line);
+  background: var(--nest);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.stg-preset:hover {
+  border-color: var(--purple-hi);
+  background: var(--nest-hi);
+}
+.stg-preset:active {
+  transform: translateY(1px);
+}
+.stg-preset-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.stg-preset-top b {
+  font-size: 15px;
+  line-height: 1.3;
+  font-weight: 700;
+  color: #fff;
+}
+.stg-preset-top span {
+  flex: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.stg-preset:hover .stg-preset-top span {
+  color: var(--purple-hi);
+}
+.stg-preset p {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+.stg-blank {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.stg-blank b {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+}
+.stg-blank p {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+/* ── 编辑器外壳与步骤条 / editor shell and stepper ── */
+.stg-editor {
+  padding: 28px;
+}
+.stg-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.stg-stepbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-hi);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+.stg-stepbtn .n {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--nest-hi);
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 700;
+}
+.stg-stepbtn:hover:not(:disabled) {
+  color: #fff;
+  border-color: var(--text-3);
+}
+/* 当前步：品牌紫实色——这是「颜料」用法。已完成：数字位换成涨色对勾。未到：降灰。
+   Current: flat brand violet (pigment). Done: the numeral becomes an up-tone tick. Locked: dimmed. */
+.stg-stepbtn.current {
+  background: var(--purple);
+  border-color: var(--purple);
+  color: #fff;
+}
+.stg-stepbtn.current .n {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+.stg-stepbtn.done .n {
+  background: var(--up-bg);
+  color: var(--up);
+}
+.stg-stepbtn.locked {
+  color: var(--text-3);
+  border-color: var(--line);
+  cursor: default;
+}
+.stg-stepbtn.locked .n {
+  background: var(--nest);
+}
+.stg-step-head {
+  margin-top: 24px;
+}
+.stg-step-head .cap {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+.stg-step-head h4 {
+  margin-top: 6px;
+  font-size: 20px;
+  line-height: 1.15;
+  font-weight: 700;
+  color: #fff;
+}
+.stg-step-head p {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-3);
+  max-width: 64ch;
+}
+.stg-editor-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.stg-editor-foot .btn {
+  height: 40px;
+}
+.stg-editor-foot .end {
+  margin-left: auto;
+}
+
+.stg-disclaimer {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-3);
+  max-width: 88ch;
+}
+
+@media (min-width: 1024px) {
+  .stg-flow {
+    grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
+    gap: 40px;
+  }
+}
+@media (max-width: 767px) {
+  .stg-row-top {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .stg-state {
+    grid-column: 1 / -1;
+  }
+  .stg-acts {
+    grid-column: 1 / -1;
+  }
+  .stg-perf-note {
+    margin-left: 0;
+    flex-basis: 100%;
+    white-space: normal;
+  }
+  .stg-sig {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .stg-sig-time {
+    grid-column: 1 / -1;
+  }
+  .stg-sig-end {
+    grid-column: 1 / -1;
+    justify-content: space-between;
+  }
+  .stg-presets {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 639px) {
+  .stg-flow,
+  .stg-picker,
+  .stg-editor {
+    padding: 20px;
+  }
+  .stg-callout,
+  .stg-sec-head,
+  .stg-row,
+  .stg-sig,
+  .stg-skel,
+  .stg-empty {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+  .stg-msgrow {
+    margin-left: 20px;
+    margin-right: 20px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stg-row,
+  .stg-sig { animation: none; }
+  .stg-state.on i { animation: none; }
+}

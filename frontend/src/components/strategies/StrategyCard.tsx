@@ -13,8 +13,10 @@
 // behaviour, only the number from the backtest. Below the threshold no
 // percentage is shown — 1-0 rendered as 100% talks people into sizing up. The
 // threshold comes from the backend's sampleThreshold; it is not hardcoded here.
+import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { displaySymbol } from '../../api/utils'
+import { symbolMeta } from '../../utils/symbolMeta'
 import { intervalLabel } from './conditionTypes'
 import type { StrategyPerformance, UserStrategy } from '../../api/types'
 
@@ -34,80 +36,77 @@ export interface StrategyCardProps {
   // Fallback display name when the strategy is unnamed, computed by the page
   // (template may be null).
   fallbackName: string
+  // 行序号：进场动画逐行错开 45ms。/ Row index: staggers the entrance by 45ms per row.
+  index?: number
   onEdit: () => void
   onToggle: () => void
   onDelete: () => void
 }
 
 export default function StrategyCard({
-  strategy, performance, backtestWinRate, fallbackName, onEdit, onToggle, onDelete,
+  strategy, performance, backtestWinRate, fallbackName, index = 0, onEdit, onToggle, onDelete,
 }: StrategyCardProps) {
   const { t } = useTranslation()
-  const btnClass = 'rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 transition hover:text-white'
   const named = strategy.name?.trim()
+  const meta = symbolMeta(strategy.symbol)
 
   // 实盘胜率的三态：足够样本给百分比 / 不足样本给"样本不足 (n/阈值)" / 还没判定过
   // 任何一笔给"暂无"。三态分开是必须的——把后两者合并成"0%"就是在说谎。
   // Three live-win-rate states: enough sample → a percentage; too small → "sample
   // too small (n/threshold)"; nothing resolved at all → "none yet". Collapsing
   // the last two into "0%" would simply be false.
+  const liveNumeric = !!performance && performance.resolved > 0 && !performance.insufficientSample && performance.winRate != null
   const liveText = !performance
     ? null
     : performance.resolved === 0
       ? t('strategy.perfNoneYet')
-      : performance.insufficientSample || performance.winRate == null
+      : !liveNumeric
         ? t('strategy.perfInsufficient', { n: performance.resolved, threshold: performance.sampleThreshold })
-        : `${Math.round(performance.winRate * 100)}%`
+        : `${Math.round(performance.winRate! * 100)}%`
 
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-semibold text-neutral-100">{named || fallbackName}</span>
-          {named && <span className="text-xs text-neutral-500">{fallbackName}</span>}
-          <span className="tag bg-white/5 text-neutral-400">{displaySymbol(strategy.symbol)}</span>
-          <span className="tag bg-white/5 text-neutral-400">{intervalLabel(strategy.interval)}</span>
-          <span className={`tag ${strategy.enabled ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-500'}`}>
-            {strategy.enabled ? t('strategy.enabled') : t('strategy.disabled')}
-          </span>
+    <div className="stg-row" style={{ '--i': index } as CSSProperties}>
+      <div className="stg-row-top">
+        <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }} aria-hidden="true">{meta.letter}</span>
+        <div className="stg-row-name">
+          <b className="font-display">{named || fallbackName}</b>
+          <div className="stg-row-by">
+            <span className="sym num">{displaySymbol(strategy.symbol)}</span>
+            <span className="tag">{intervalLabel(strategy.interval)}</span>
+            {named && <span>{fallbackName}</span>}
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={onEdit} className={btnClass}>{t('strategy.editStrategy')}</button>
-          <button type="button" onClick={onToggle} className={btnClass}>
+        <span className={`stg-state ${strategy.enabled ? 'on' : 'off'}`}>
+          <i aria-hidden="true" />
+          {strategy.enabled ? t('strategy.enabled') : t('strategy.disabled')}
+        </span>
+        <div className="stg-acts">
+          <button type="button" onClick={onEdit} className="stg-act">{t('strategy.editStrategy')}</button>
+          <button type="button" onClick={onToggle} className={`stg-act${strategy.enabled ? '' : ' accent'}`}>
             {strategy.enabled ? t('strategy.disable') : t('strategy.enable')}
           </button>
-          <button
-            type="button"
-            onClick={onDelete}
-            className="rounded-lg border border-down/30 bg-down/10 px-3 py-1.5 text-xs text-down transition hover:bg-down/20"
-          >
+          <button type="button" onClick={onDelete} className="stg-act danger">
             {t('strategy.delete')}
           </button>
         </div>
       </div>
 
       {performance && (
-        <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-1.5 border-t border-white/5 pt-2.5 text-[11px]">
-          <span className="text-neutral-500">
-            {t('strategy.perfLiveWinRate')} <span className="font-mono text-neutral-200">{liveText}</span>
+        <div className="stg-perf">
+          <span>
+            <span className="k">{t('strategy.perfLiveWinRate')}</span>
+            <span className={`v${liveNumeric ? ' num' : ' txt'}`}>{liveText}</span>
           </span>
-          <span className="text-neutral-500">
-            {t('strategy.perfBacktestWinRate')}{' '}
-            <span className="font-mono text-neutral-200">
+          <span>
+            <span className="k">{t('strategy.perfBacktestWinRate')}</span>
+            <span className={`v${backtestWinRate == null ? ' txt' : ' num'}`}>
               {backtestWinRate == null ? t('strategy.perfNoBacktest') : `${Math.round(backtestWinRate * 100)}%`}
             </span>
           </span>
-          <span className="font-mono text-neutral-500">
-            {t('strategy.perfBreakdown', {
-              wins: performance.wins,
-              losses: performance.losses,
-              timeouts: performance.timeouts,
-              pending: performance.pending,
-            })}
-          </span>
           {performance.avgRr != null && (
-            <span className="text-neutral-500">
-              {t('simulator.avgRr')} <span className="font-mono text-neutral-200">{performance.avgRr.toFixed(2)}R</span>
+            <span>
+              <span className="k">{t('simulator.avgRr')}</span>
+              <span className="v num">{performance.avgRr.toFixed(2)}<small>R</small></span>
             </span>
           )}
           {performance.maxLossStreak > 0 && (
@@ -118,11 +117,19 @@ export default function StrategyCard({
             // back only streakWindow resolved signals, not all history. The
             // backtest panel and simulator show a full-history figure, so they
             // keep the original label.
-            <span className="text-neutral-500">
-              {t('strategy.maxLossStreakWindowed', { count: performance.streakWindow })}{' '}
-              <span className="font-mono text-neutral-200">{performance.maxLossStreak}</span>
+            <span>
+              <span className="k">{t('strategy.maxLossStreakWindowed', { count: performance.streakWindow })}</span>
+              <span className="v num">{performance.maxLossStreak}</span>
             </span>
           )}
+          <span className="stg-perf-note num">
+            {t('strategy.perfBreakdown', {
+              wins: performance.wins,
+              losses: performance.losses,
+              timeouts: performance.timeouts,
+              pending: performance.pending,
+            })}
+          </span>
         </div>
       )}
     </div>
