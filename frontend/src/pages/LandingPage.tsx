@@ -25,14 +25,15 @@
 // and untranslated); the prerender pipeline is unaffected (scene 0 is visible
 // in raw HTML); the pigment-not-glow token system carries over as-is.
 // ════════════════════════════════════════════════════════════════════════════
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { paymentApi, inviteApi, readRef } from '../api/client'
 import { SUPPORT_EMAIL } from '../config/site'
 import Logo from '../components/Logo'
 import BadgeIcon from '../components/badges/BadgeIcon'
-import RankCoin from '../components/badges/RankCoin'
+import PedestalStage from '../components/badges/PedestalStage'
+import type { GamificationBadge } from '../api/types'
 import PublicLanguageToggle from '../components/PublicLanguageToggle'
 import FaqSection from '../components/landing/FaqSection'
 import MobileStickyCta from '../components/landing/MobileStickyCta'
@@ -424,201 +425,159 @@ function Foot({ t }: { t: T }) {
 }
 
 
-/* ═══════════════ 成长体系：四格等分 / the growth system, four equal cells ═══════════════
-   等级、勋章、排行榜、比赛四样东西分量相同：同一张卡、同一套结构（标题 / 一句话 /
-   一块真实产品画面 / 一行事实），2×2 排布，任何一格都不比另一格大。
-   画面全部是站内真实组件或真实排版：等级导轨（成就页 .ach-rail 的写法）、
-   BadgeIcon、RankCoin 榜单行、比赛卡（比赛页的状态芯片 + 倒计时）。示例数据。
-   Levels, badges, boards and contests carry equal weight: one card, one
-   structure (title / one line / one real product visual / one fact), laid out
-   2×2 so no cell outranks another. Visuals are the product's own components or
-   layouts. Sample data. */
+/* ═══════════════ 成长体系：陈列台 + 转播台 ═══════════════
+   等级 / 勋章 / 排行榜 / 比赛不再各占一格，而是按「从进阶到加冕」分成两幕，每幕
+   直接复用站内那一页的真实排版，落地页不另画一套：
+   · 进阶 = 成就页的陈列台（.ach-stage + PedestalStage）：等级药丸、关卡导轨、
+     三枚佩戴勋章的转盘、三项统计——登录后 /achievements 的首屏原样搬来；
+   · 加冕 = 比赛页的转播台（.cmp-hero + .cmp-ladder）：头版赛事、角标倒计时、
+     跑马灯、巨型描边名次只有冠军填金——/competitions 的首屏原样搬来。
+   示例数据。
+   Levels, badges, boards and contests are no longer four equal cells but two
+   acts, "climb" and "crown", each reusing the real layout of the product page
+   it comes from: the achievements stage (level pill, rail, badge turntable,
+   three stats) and the competitions broadcast desk (front-page contest, clock
+   bug, ticker, giant outlined placings with only the champion in gold). The
+   landing page draws nothing of its own here. Sample data. */
 const LEVEL_KEYS = ['novice', 'junior', 'elite', 'senior', 'chief', 'legend'] as const
-const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI']
-const CURRENT_LEVEL = 4
+const CURRENT_LEVEL = 3
 
-function LevelRail({ t }: { t: T }) {
-  return (
-    <ol className="grid grid-cols-6 gap-1.5">
-      {LEVEL_KEYS.map((k, i) => {
-        const lv = i + 1
-        const state = lv < CURRENT_LEVEL ? 'done' : lv === CURRENT_LEVEL ? 'now' : 'locked'
-        return (
-          <li key={k} className="flex flex-col items-center gap-2 text-center">
-            <span
-              className={`num grid h-9 w-9 place-items-center rounded-full text-[12px] font-semibold ${
-                state === 'done'
-                  ? 'bg-prism-600 text-white'
-                  : state === 'now'
-                    ? 'border-2 border-prism-400 bg-prism-600/20 text-prism-200'
-                    : 'bg-white/[0.06] text-neutral-500'
-              }`}
-            >
-              {ROMAN[i]}
-            </span>
-            <span className={`text-[11px] leading-tight ${state === 'locked' ? 'text-neutral-600' : 'text-neutral-300'}`}>
-              {t(`gamification.levelShort.${k}`)}
-            </span>
-          </li>
-        )
-      })}
-    </ol>
-  )
+function sampleBadge(id: string, tier: number): GamificationBadge {
+  return {
+    id,
+    category: '',
+    shelf: 'tiered',
+    closesAt: null,
+    progress: null,
+    maxTier: 3,
+    tier,
+    earned: true,
+    awardedAt: null,
+    equipped: true,
+    owners: 0,
+    tierOwners: [],
+  }
 }
-
-const WORN: { id: string; tier: number }[] = [
-  { id: 'starter', tier: 3 },
-  { id: 'winning_hand', tier: 2 },
-  { id: 'evergreen', tier: 1 },
-  { id: 'comp_back_to_back', tier: 0 },
-]
-
-function BadgeRow({ t }: { t: T }) {
-  return (
-    <ul className="grid grid-cols-4 gap-2">
-      {WORN.map((b) => (
-        <li key={b.id} className="flex flex-col items-center gap-2 text-center">
-          <BadgeIcon id={b.id} tier={b.tier || undefined} earned size={52} />
-          <span className="text-[11px] leading-tight text-neutral-300">{t(`gamification.badges.${b.id}.name`)}</span>
-        </li>
-      ))}
-    </ul>
-  )
-}
+// 首枚是默认（C 位），与成就页一致 / the first one is the default, centre stage
+const WORN = [sampleBadge('starter', 3), sampleBadge('winning_hand', 2), sampleBadge('arena', 1)]
 
 const BOARD = [
-  { r: 1, n: 'Mo***ch', s: '+14.2%' },
-  { r: 2, n: 'Ka***en', s: '+9.4%' },
-  { r: 3, n: 'Li***ng', s: '+7.8%' },
-  { r: 7, n: 'Tr***er', s: '+4.9%', me: true },
+  { r: 1, n: 'Mo***ch', a: '600 402', s: 14.2, badge: 'comp_back_to_back', tier: 0 },
+  { r: 2, n: 'Ka***en', a: '600 118', s: 9.4, badge: 'evergreen', tier: 2 },
+  { r: 3, n: 'Li***ng', a: '600 077', s: 7.8, badge: 'winning_hand', tier: 1 },
+  { r: 7, n: 'Tr***er', a: '600 231', s: 4.9, badge: 'starter', tier: 3, me: true },
 ]
 
-function BoardRows({ t }: { t: T }) {
-  return (
-    <ul>
-      {BOARD.map((x) => (
-        <li
-          key={x.r}
-          className={`grid grid-cols-[2rem_1fr_auto] items-center gap-3 border-b border-white/[0.07] py-2 last:border-0 ${
-            x.me ? '-mx-2 rounded-md bg-prism-600/15 px-2' : ''
-          }`}
-        >
-          <span className="grid place-items-center">
-            {x.r <= 3 ? <RankCoin rank={x.r} size={24} /> : <b className="num text-[13px] text-prism-300">{x.r}</b>}
-          </span>
-          <span className="min-w-0 truncate text-[13px] text-white">
-            <b className="font-semibold">{x.n}</b>
-            {x.me && <span className="ml-2 text-[11px] font-semibold text-prism-300">{t('landing.ggYou')}</span>}
-          </span>
-          <span className="num text-[13px] font-bold text-up">{x.s}</span>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-function ContestCard({ t }: { t: T }) {
-  return (
-    <div className="rounded-lg bg-white/[0.04] p-4">
-      <div className="flex items-center justify-between gap-3">
-        <b className="font-display text-[15px] font-bold text-white">{t('landing.ggCompName')}</b>
-        <span className="rounded-full bg-down/15 px-2 py-0.5 text-[11px] font-semibold text-down">{t('competition.status.regOpen')}</span>
-      </div>
-      <div className="mt-3 flex items-end justify-between gap-4">
-        <div>
-          <div className="text-[11px] text-neutral-500">{t('competition.cd.toStart')}</div>
-          <div className="num font-display text-[24px] font-bold leading-tight text-white">{t('competition.cd.dh', { d: 3, h: 14 })}</div>
-        </div>
-        <div className="text-right">
-          <div className="text-[11px] text-neutral-500">{t('competition.prizeLabel')}</div>
-          <div className="text-[13px] font-semibold text-prism-300">{t('landing.ggCompPrize')}</div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function GrowthGrid({ t }: { t: T }) {
+function GrowthStage({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate> }) {
   const ref = useReveal<HTMLElement>()
-  const cells: { k: string; body: ReactNode }[] = [
-    { k: 'Level', body: <LevelRail t={t} /> },
-    { k: 'Badge', body: <BadgeRow t={t} /> },
-    { k: 'Board', body: <BoardRows t={t} /> },
-    { k: 'Comp', body: <ContestCard t={t} /> },
-  ]
+  const noop = () => {}
+  const ticker = (
+    <>
+      {BOARD.slice(0, 3).map((x) => (
+        <span key={x.r}>
+          <b>{String(x.r).padStart(2, '0')}</b> {x.n} <span className="num text-up">+{x.s.toFixed(1)}%</span>
+        </span>
+      ))}
+      <span>{t('competition.ticker.participants', { n: 38 })}</span>
+      <span>{t('competition.ticker.live')}</span>
+    </>
+  )
   return (
     <section ref={ref} id="rank" className={`${SHELL} scroll-mt-24 py-20 sm:py-28`}>
       <Heading title={t('landing.ggTitle')} subtitle={t('landing.ggSubtitle')} />
-      <ul className="reveal mt-12 grid gap-5 md:grid-cols-2">
-        {cells.map((c) => (
-          <li key={c.k} className="glass-card flex flex-col p-6">
-            <b className="font-display text-[19px] font-bold text-white">{t(`landing.gg${c.k}T`)}</b>
-            <p className="mt-1.5 text-[13px] text-neutral-400">{t(`landing.gg${c.k}D`)}</p>
-            <div className="mt-6 flex flex-1 flex-col justify-center">{c.body}</div>
-            <p className="mt-6 border-t border-white/[0.07] pt-3 text-[12px] text-neutral-500">{t(`landing.gg${c.k}F`)}</p>
-          </li>
-        ))}
-      </ul>
-    </section>
-  )
-}
 
-/* ═══════════════ 线下名片 / the offline card ═══════════════
-   公开主页（/u/:publicId）的浓缩：称号、佩戴勋章、三组数字。社区尚在筹备，
-   文案只承诺「会员之间可互相查看公开主页」。
-   A condensed public profile: title, worn badges, three figures. The community
-   is still forming, so the copy promises only what exists today. */
-function OfflineCard({ t }: { t: T }) {
-  const ref = useReveal<HTMLElement>()
-  const stats: [string, string][] = [
-    ['52.8%', 'cdWinRate'],
-    ['612', 'cdTrades'],
-    ['#7', 'cdRank'],
-  ]
-  return (
-    <section ref={ref} id="offline" className={`${SHELL} py-20 sm:py-28`}>
-      <div className="grid items-center gap-10 lg:grid-cols-12 lg:gap-12">
-        <div className="lg:col-span-6">
-          <p className="reveal eyebrow">{t('landing.cdEyebrow')}</p>
-          <div className="mt-3">
-            <Heading title={t('landing.cdTitle')} subtitle={t('landing.cdDesc')} />
-          </div>
-          <p className="reveal mt-8 inline-flex items-center gap-2 rounded-full bg-white/[0.04] px-3 py-1.5 text-[12px] text-neutral-400">
-            <i className="h-1.5 w-1.5 rounded-full bg-prism-400" />
-            {t('landing.cdSoon')}
-          </p>
-        </div>
-        <div className="reveal flex justify-center lg:col-span-6 lg:justify-end">
-          <div className="glass-card w-full max-w-[440px] p-6">
-            <div className="flex justify-between text-[11px] uppercase tracking-[0.14em] text-neutral-500">
-              <span>Signal Lab</span>
-              <span className="num">Trader · 7k2m9x4pq</span>
-            </div>
-            <div className="mt-6 flex items-center gap-4">
-              <BadgeIcon id="winning_hand" tier={3} earned size={64} spin />
-              <div className="min-w-0 flex-1">
-                <div className="font-display text-[24px] font-bold text-white">Tr***er</div>
-                <div className="mt-0.5 text-[13px] text-prism-300">L3 · {t('gamification.titles.elite')}</div>
-                <div className="num mt-1 text-[11px] text-neutral-500">{t('landing.cdSince')}</div>
+      {/* ── 进阶：成就页陈列台 / climb: the achievements stage ── */}
+      <div className="ach reveal mt-12">
+        <h3 className="mb-4 text-[13px] font-semibold text-neutral-400">{t('landing.ggClimb')}</h3>
+        <div className="ach-stage">
+          <div className="ach-stage-l">
+            <h4 className="ach-title">
+              <span className="ach-lv num">L{CURRENT_LEVEL}</span>
+              <span>{t('gamification.titles.elite')}</span>
+            </h4>
+            <p className="ach-sub">
+              {t('gamification.remainingToNext', { count: 2 })} · {t('gamification.groups.moli')}
+            </p>
+            <ol className="ach-rail" aria-label={t('gamification.levelLabel')}>
+              {LEVEL_KEYS.map((key, i) => {
+                const lv = i + 1
+                const cls = lv < CURRENT_LEVEL ? 'on' : lv === CURRENT_LEVEL ? 'on cur' : ''
+                return (
+                  <li key={key} className={cls}>
+                    <i aria-hidden />
+                    <b>{t(`gamification.levelShort.${key}`)}</b>
+                  </li>
+                )
+              })}
+            </ol>
+            <div className="ach-stats">
+              <div>
+                <small>{t('gamification.winRateCard.combinedShort')}</small>
+                <strong className="num text-up">52.8%</strong>
+              </div>
+              <div>
+                <small>{t('gamification.stage.collected')}</small>
+                <strong className="num">7 <span>/ 11</span></strong>
+              </div>
+              <div>
+                <small>{t('gamification.equip')}</small>
+                <strong className="num">3 <span>/ 3</span></strong>
               </div>
             </div>
-            <dl className="mt-6 grid grid-cols-3 gap-3 border-t border-white/[0.07] pt-4">
-              {stats.map(([v, k]) => (
-                <div key={k}>
-                  <dd className="num text-[17px] font-semibold text-white">{v}</dd>
-                  <dt className="mt-0.5 text-[10px] uppercase tracking-[0.06em] text-neutral-500">{t(`landing.${k}`)}</dt>
-                </div>
-              ))}
-            </dl>
-            <div className="mt-5 flex items-center gap-2.5">
-              <BadgeIcon id="starter" tier={3} earned size={34} />
-              <BadgeIcon id="evergreen" tier={2} earned size={34} />
-              <BadgeIcon id="arena" tier={1} earned size={34} />
-              <BadgeIcon id="comp_back_to_back" earned size={34} />
-              <span className="num ml-auto text-[11px] text-neutral-500">7 / 11</span>
-            </div>
           </div>
+          <PedestalStage badges={WORN} defaultId="starter" busy={false} onOpen={noop} onMakeDefault={noop} />
         </div>
+      </div>
+
+      {/* ── 加冕：比赛页转播台 / crown: the competitions broadcast desk ── */}
+      <div className="reveal mt-16">
+        <h3 className="mb-4 text-[13px] font-semibold text-neutral-400">{t('landing.ggCrown')}</h3>
+        <button type="button" onClick={() => navigate('/login?mode=register')} className="cmp-hero">
+          <span className="cmp-ghost" aria-hidden>LIVE</span>
+          <span className="cmp-bug">
+            <span>{t('competition.cd.toStart')}</span>
+            <b className="num">{t('competition.cd.dh', { d: 3, h: 14 })}</b>
+          </span>
+          <span className="cmp-kicker">
+            <span className="cmp-status-tag bg-prism-600/20 text-prism-300">
+              <i className="cmp-live-dot" aria-hidden />
+              {t('competition.status.regOpen')}
+            </span>
+          </span>
+          <span className="cmp-hero-name block">{t('landing.ggCompName')}</span>
+          <span className="cmp-hero-sub">
+            <span className="cmp-hero-prize">
+              <small>{t('competition.prizeLabel')}</small>
+              {t('landing.ggPrize')}
+            </span>
+            <span className="cmp-hero-when num">2026.09.15 - 2026.09.30</span>
+            <span className="cmp-hero-cta">{t('competition.enterArena')}</span>
+          </span>
+          <span className="cmp-ticker" aria-hidden>
+            <span className="flex">{ticker}{ticker}</span>
+          </span>
+        </button>
+        <div className="cmp-ladder-h mt-8">
+          <h3>{t('leaderboard.boards.return_pct')} · {t('leaderboard.periods.week')}</h3>
+          <span>{t('competition.ticker.live')}</span>
+        </div>
+        <ol className="cmp-ladder">
+          {BOARD.map((x) => (
+            <li key={x.r} className={x.me ? 'is-self' : ''}>
+              <span className="cmp-ladder-rank">{String(x.r).padStart(2, '0')}</span>
+              <div className="cmp-ladder-who">
+                <b>
+                  <BadgeIcon id={x.badge} tier={x.tier || undefined} earned size={18} />
+                  <span className="truncate">{x.n}</span>
+                  {x.me && <span className="cmp-you">{t('leaderboard.youTag')}</span>}
+                </b>
+                <span className="num">{x.a}</span>
+              </div>
+              <i className="cmp-ladder-bar" style={{ width: `${Math.max(2, (x.s / 14.2) * 100)}%` }} aria-hidden />
+              <span className="cmp-ladder-score num text-up">+{x.s.toFixed(1)}%</span>
+            </li>
+          ))}
+        </ol>
       </div>
     </section>
   )
@@ -641,8 +600,7 @@ export default function LandingPage() {
         <PhoneStory />
         <MarketStory />
         <MarketOutro />
-        <GrowthGrid t={t} />
-        <OfflineCard t={t} />
+        <GrowthStage t={t} navigate={navigate} />
         <Pricing t={t} navigate={navigate} />
         <FaqSection />
         <ClosingCta t={t} navigate={navigate} />
