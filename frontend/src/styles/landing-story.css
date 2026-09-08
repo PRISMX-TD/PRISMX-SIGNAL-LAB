@@ -536,8 +536,20 @@
 .is-scrub .js-fill,
 .is-scrub .js-filled,
 .is-scrub .js-sl,
-.is-scrub .js-be {
+.is-scrub .js-be,
+.is-scrub .js-rec,
+.is-scrub .js-row,
+.is-scrub .js-toast {
   transition: none;
+}
+
+/* 屏内的真实勋章 / 名次币：组件按 px 出 svg 宽度，这里改成跟随 cqw 容器。
+   Real badges and rank coins inside the screen: the components emit px widths,
+   the wrapper makes them follow the cqw container instead. */
+.cq-svg svg {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 @media (min-width: 1024px) {

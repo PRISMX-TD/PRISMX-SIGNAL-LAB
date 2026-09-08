@@ -35,7 +35,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { PhoneChrome, ScreenSignals, ScreenPlan, ScreenOrder, ScreenGuard, ScreenRecord } from './PhoneScreens'
+import { PhoneChrome, ScreenRank, ScreenPlan, ScreenOrder, ScreenRecord, ScreenBoard } from './PhoneScreens'
 import { createPhoneGL, type PhoneGLHandle } from './PhoneGL'
 import { useSectionProgress } from './useSectionProgress'
 
@@ -48,7 +48,9 @@ const SCENES = 5
 // Active bottom tab per scene: the first three happen inside the signal panel
 // (the order sheet overlays it), guarding lights the dashboard, the record
 // lights order receipts. The moving highlight narrates an app in use.
-const TAB_BY_SCENE = ['signals', 'signals', 'signals', 'dashboard', 'orders'] as const
+// 2026-09 新剧本：成就（目标）→ 信号 → 下单 → 战绩 → 上榜（结果）。
+// New script: achievements (the goal) → signal → order → record → board (the result).
+const TAB_BY_SCENE = ['growth', 'signals', 'signals', 'orders', 'growth'] as const
 
 export default function PhoneStory() {
   const { t } = useTranslation()
@@ -220,7 +222,8 @@ export default function PhoneStory() {
         ;['1', '2', '3', '4'].forEach((id) => gsap.set(pan(id), { autoAlpha: 0, y: 24 }))
         gsap.set('.js-filled', { autoAlpha: 0 })
         gsap.set('.js-fill', { scaleX: 0 })
-        gsap.set('.js-be', { autoAlpha: 0 })
+        gsap.set('.js-row', { autoAlpha: 0, y: 12 })
+        gsap.set('.js-toast', { autoAlpha: 0, y: 10 })
         gsap.set('.js-rec', { autoAlpha: 0, y: 12 })
         /* 面光初始落位：与 hero 姿态（rotY -22°）相称，光带偏左。
            Face light resting position matching the hero pose (rotY -22°). */
@@ -362,9 +365,9 @@ export default function PhoneStory() {
            再追踪行情推进到 -26。SVG 子元素的 CSS transform 以用户坐标系为单位。
            Scene 3: SL jumps to breakeven (-10 user units, past entry), the badge
            lights, then trails to -26. CSS transforms on SVG children use user units. */
-        tl.to('.js-sl', { y: -10, duration: 4, ease: 'power2.inOut' }, 53)
-        tl.to('.js-be', { autoAlpha: 1, duration: 2 }, 56.5)
-        tl.to('.js-sl', { y: -26, duration: 5, ease: 'none' }, 58)
+        /* 幕3 现在是战绩：记录逐行入场，赢亏同权重。
+           Scene 3 is now the record: rows stagger in, wins and losses equal. */
+        tl.to('.js-rec', { autoAlpha: 1, y: 0, duration: 2, stagger: 1.6 }, 53)
 
         /* 64–70 转场④ / guard → record */
         panelOut(tl, '3', 64)
@@ -375,7 +378,10 @@ export default function PhoneStory() {
         panelIn(tl, '4', 68)
 
         /* 70–84 幕4：记录逐行入场，赢亏同权重 / record rows stagger in, wins and losses equal */
-        tl.to('.js-rec', { autoAlpha: 1, y: 0, duration: 2, stagger: 1.6 }, 71)
+        /* 幕4 上榜：榜单行逐条入场，最后一拍勋章到手。
+           Scene 4, the board: rows stagger in, then the badge-earned toast lands. */
+        tl.to('.js-row', { autoAlpha: 1, y: 0, duration: 2, stagger: 1.4 }, 71)
+        tl.to('.js-toast', { autoAlpha: 1, y: 0, duration: 2.5 }, 79)
 
         /* 84–100 收尾：手机归正居中并**退远**，把画面交给身后那个空间。
            这一段原本只缩到 0.92，接下来判定区的走廊就硬切进来。现在退到 0.7：
@@ -487,11 +493,11 @@ export default function PhoneStory() {
                     <i className="js-facelight" />
                   </div>
                   <div className="dev-screen">
-                    <ScreenSignals t={t as T} on={active === 0} />
+                    <ScreenRank t={t as T} on={active === 0} />
                     <ScreenPlan t={t as T} on={active === 1} />
                     <ScreenOrder t={t as T} on={active === 2} />
-                    <ScreenGuard t={t as T} on={active === 3} />
-                    <ScreenRecord t={t as T} on={active === 4} />
+                    <ScreenRecord t={t as T} on={active === 3} />
+                    <ScreenBoard t={t as T} on={active === 4} />
                     {/* App 骨架常驻：品牌条与 Tab 栏不随幕淡出，正如真实 App 的
                         导航不随页面内容消失。/ The chrome persists: brand strip
                         and tab bar never fade with a scene, exactly as real app
@@ -538,7 +544,7 @@ export default function PhoneStory() {
                 {t('landing.ctaPrimary')}
               </button>
               <a
-                href="#pricing"
+                href="#rank"
                 className="inline-block py-2 text-[13px] lg:text-[15px] text-neutral-400 underline decoration-white/20 underline-offset-[6px] transition-colors hover:text-white hover:decoration-white/60"
               >
                 {t('landing.ctaSecondary')}

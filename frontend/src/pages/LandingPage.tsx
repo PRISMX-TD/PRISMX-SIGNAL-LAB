@@ -31,6 +31,8 @@ import { useTranslation } from 'react-i18next'
 import { paymentApi, inviteApi, readRef } from '../api/client'
 import { SUPPORT_EMAIL } from '../config/site'
 import Logo from '../components/Logo'
+import BadgeIcon from '../components/badges/BadgeIcon'
+import RankCoin from '../components/badges/RankCoin'
 import PublicLanguageToggle from '../components/PublicLanguageToggle'
 import FaqSection from '../components/landing/FaqSection'
 import MobileStickyCta from '../components/landing/MobileStickyCta'
@@ -98,7 +100,8 @@ function Navbar({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate
   // sections merged into the story scenes, so their anchors retire with them.
   const links = [
     { h: '#showcase', k: 'navShowcase' },
-    { h: '#verdict', k: 'wrEyebrow' },
+    { h: '#rank', k: 'navRank' },
+    { h: '#verdict', k: 'navWinrate' },
     { h: '#pricing', k: 'navPricing' },
     { h: '#faq', k: 'navFaq' },
   ]
@@ -348,7 +351,8 @@ function Foot({ t }: { t: T }) {
   const lang = usePublicLang()
   const links = [
     { h: '#showcase', k: 'navShowcase' },
-    { h: '#verdict', k: 'wrEyebrow' },
+    { h: '#rank', k: 'navRank' },
+    { h: '#verdict', k: 'navWinrate' },
     { h: '#pricing', k: 'navPricing' },
     { h: '#faq', k: 'navFaq' },
   ]
@@ -419,6 +423,274 @@ function Foot({ t }: { t: T }) {
   )
 }
 
+
+/* ═══════════════ 段位 / rank ladder ═══════════════
+   六级按账本行排：罗马数字 · 称号 · 条件，一行一级，当前级紫底。
+   称号直接读 gamification.titles.*（与成就页、用户菜单同一份文案），
+   条件是落地页自己的短句。示例：站在第四级。
+   Six tiers as ledger rows: numeral, title, conditions; the current tier
+   sits on a violet plane. Titles read gamification.titles.* (the same strings
+   the achievements page and user menu use); conditions are the landing
+   page's own short lines. Sample: standing at tier IV. */
+const LEVEL_KEYS = ['novice', 'junior', 'elite', 'senior', 'chief', 'legend'] as const
+const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI']
+const CURRENT_LEVEL = 4
+
+function RankLadder({ t }: { t: T }) {
+  const ref = useReveal<HTMLElement>()
+  return (
+    <section ref={ref} id="rank" className={`${SHELL} scroll-mt-24 py-20 sm:py-28`}>
+      <p className="reveal eyebrow">{t('landing.rkEyebrow')}</p>
+      <div className="mt-3">
+        <Heading title={t('landing.rkTitle')} subtitle={t('landing.rkSubtitle')} />
+      </div>
+      <ol className="reveal mt-12 border-t border-white/[0.14]">
+        {LEVEL_KEYS.map((k, i) => {
+          const lv = i + 1
+          const state = lv < CURRENT_LEVEL ? 'done' : lv === CURRENT_LEVEL ? 'now' : 'locked'
+          return (
+            <li
+              key={k}
+              className={`grid grid-cols-[3rem_1fr] items-baseline gap-x-4 border-b border-white/[0.07] py-5 sm:grid-cols-[3.5rem_1fr] sm:gap-x-6 ${
+                state === 'now' ? '-mx-4 rounded-md bg-prism-600/10 px-4 sm:-mx-5 sm:px-5' : ''
+              }`}
+            >
+              <span className={`num text-[15px] ${state === 'now' ? 'text-prism-300' : 'text-neutral-500'}`}>{ROMAN[i]}</span>
+              <div>
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <b className={`font-display text-[clamp(1.05rem,1.6vw,1.35rem)] font-bold ${state === 'locked' ? 'text-neutral-400' : 'text-white'}`}>
+                    {t(`gamification.titles.${k}`)}
+                  </b>
+                  {state === 'now' && (
+                    <span className="rounded-full bg-prism-600 px-2 py-0.5 text-[11px] font-semibold text-white">{t('landing.rkNow')}</span>
+                  )}
+                  {state === 'done' && <span className="text-[11px] text-up">{t('landing.rkDone')}</span>}
+                </div>
+                <p className="mt-1 text-[13px] leading-relaxed text-neutral-500">{t(`landing.rkCond${lv}`)}</p>
+              </div>
+            </li>
+          )
+        })}
+      </ol>
+      <div className="reveal mt-10 grid gap-6 sm:grid-cols-3">
+        {[1, 2, 3].map((n) => (
+          <div key={n} className="border-t border-white/[0.14] pt-4">
+            <b className="block text-[15px] font-semibold text-white">{t(`landing.rkNote${n}T`)}</b>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-neutral-500">{t(`landing.rkNote${n}D`)}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/* ═══════════════ 勋章 / honor wall ═══════════════
+   十一枚全部是站内真实的 BadgeIcon（medal.ts 铸币渲染器），按成就页的三层
+   陈列：进阶 / 特殊 / 绝版。名字读 gamification.badges.*.name，档位读
+   gamification.tier.*——落地页不另写一份勋章文案。示例：已获得 7 枚。
+   All eleven are the product's real BadgeIcon (the medal.ts renderer), shelved
+   as on the achievements page. Names and tiers read the gamification strings;
+   the landing page keeps no second copy. Sample: seven earned. */
+const WALL: { id: string; tier: number; earned: boolean; shelf: 'tiered' | 'special' | 'limited' }[] = [
+  { id: 'starter', tier: 3, earned: true, shelf: 'tiered' },
+  { id: 'regular', tier: 2, earned: true, shelf: 'tiered' },
+  { id: 'evergreen', tier: 1, earned: true, shelf: 'tiered' },
+  { id: 'winning_hand', tier: 2, earned: true, shelf: 'tiered' },
+  { id: 'veteran', tier: 1, earned: true, shelf: 'tiered' },
+  { id: 'board_return', tier: 0, earned: false, shelf: 'tiered' },
+  { id: 'arena', tier: 1, earned: true, shelf: 'tiered' },
+  { id: 'campaigner', tier: 0, earned: false, shelf: 'tiered' },
+  { id: 'comp_back_to_back', tier: 0, earned: true, shelf: 'special' },
+  { id: 'comeback', tier: 0, earned: false, shelf: 'special' },
+  { id: 'founder_2026', tier: 0, earned: true, shelf: 'limited' },
+]
+
+function HonorWall({ t }: { t: T }) {
+  const ref = useReveal<HTMLElement>()
+  const shelves = [
+    ['tiered', 'landing.hnTiered'],
+    ['special', 'gamification.shelf.special'],
+    ['limited', 'landing.hnLimited'],
+  ] as const
+  return (
+    <section ref={ref} id="honor" className={`${SHELL} scroll-mt-24 py-20 sm:py-28`}>
+      <div className="grid gap-10 lg:grid-cols-12 lg:gap-12">
+        <div className="lg:col-span-5">
+          <p className="reveal eyebrow">{t('landing.hnEyebrow')}</p>
+          <div className="mt-3">
+            <Heading title={t('landing.hnTitle')} subtitle={t('landing.hnSubtitle')} />
+          </div>
+          <p className="reveal mt-8 max-w-[34ch] text-[clamp(1.05rem,1.5vw,1.25rem)] font-medium leading-snug text-neutral-200">
+            {t('landing.hnStatement')}
+          </p>
+        </div>
+        <div className="reveal flex flex-col gap-8 lg:col-span-7">
+          {shelves.map(([shelf, label]) => (
+            <div key={shelf}>
+              <p className="text-[11px] uppercase tracking-[0.14em] text-neutral-500">{t(label)}</p>
+              <ul className="mt-4 grid grid-cols-4 gap-x-3 gap-y-6">
+                {WALL.filter((b) => b.shelf === shelf).map((b) => (
+                  <li key={b.id} className={`flex flex-col items-center text-center ${b.earned ? '' : 'opacity-40 grayscale'}`}>
+                    <BadgeIcon id={b.id} tier={b.tier || undefined} earned={b.earned} size={64} />
+                    <b className="mt-2.5 text-[13px] font-semibold text-white">{t(`gamification.badges.${b.id}.name`)}</b>
+                    <span className="mt-0.5 text-[11px] text-neutral-500">
+                      {!b.earned
+                        ? t('landing.hnNotEarned')
+                        : b.tier
+                          ? t(`gamification.tier.${b.tier}`)
+                          : t(`gamification.shelf.${shelf}`)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/* ═══════════════ 排位与比赛 / boards & contests ═══════════════
+   左：榜单预览，前三用真实 RankCoin，「你」那一行紫底（同 .lb-row.me）；
+   右：比赛四要素。示例数据。
+   Left: a board preview with real RankCoin for the top three and the "you"
+   row on a violet plane; right: the four facts of a contest. Sample data. */
+const BOARD = [
+  { r: 1, n: 'Mo***ch', a: '600 402', s: '+14.2%' },
+  { r: 2, n: 'Ka***en', a: '600 118', s: '+9.4%' },
+  { r: 3, n: 'Li***ng', a: '600 077', s: '+7.8%' },
+  { r: 4, n: 'Wi***ow', a: '600 233', s: '+6.1%' },
+  { r: 7, n: 'Tr***er', a: '600 231', s: '+4.9%', me: true },
+]
+
+function Arena({ t }: { t: T }) {
+  const ref = useReveal<HTMLElement>()
+  return (
+    <section ref={ref} id="arena" className={`${SHELL} scroll-mt-24 py-20 sm:py-28`}>
+      <p className="reveal eyebrow">{t('landing.arEyebrow')}</p>
+      <div className="mt-3">
+        <Heading title={t('landing.arTitle')} subtitle={t('landing.arSubtitle')} />
+      </div>
+      <div className="mt-12 grid gap-6 lg:grid-cols-12 lg:gap-8">
+        <div className="reveal glass-card p-6 lg:col-span-7">
+          <div className="flex items-baseline justify-between">
+            <b className="font-display text-[15px] font-bold text-white">{t('landing.arBoard')}</b>
+            <span className="text-[11px] text-neutral-500">{t('landing.arLive')}</span>
+          </div>
+          <ul className="mt-4 border-t border-white/[0.14]">
+            {BOARD.map((x) => (
+              <li
+                key={x.r}
+                className={`grid grid-cols-[2.5rem_1fr_auto] items-center gap-3 border-b border-white/[0.07] py-3 ${
+                  x.me ? '-mx-3 rounded-md bg-prism-600/15 px-3' : ''
+                }`}
+              >
+                <span className="grid place-items-center">
+                  {x.r <= 3 ? (
+                    <RankCoin rank={x.r} size={30} />
+                  ) : (
+                    <b className={`num text-[15px] ${x.me ? 'text-prism-300' : 'text-neutral-500'}`}>{x.r}</b>
+                  )}
+                </span>
+                <span className="min-w-0 truncate text-[15px] text-white">
+                  <b className="font-semibold">{x.n}</b>
+                  <span className="num ml-2 text-[12px] text-neutral-500">{x.a}</span>
+                  {x.me && <span className="ml-2 text-[12px] font-semibold text-prism-300">{t('landing.arYou')}</span>}
+                </span>
+                <span className="num text-[15px] font-bold text-up">{x.s}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-4 text-[12px] leading-relaxed text-neutral-500">{t('landing.arGate')}</p>
+        </div>
+        <div className="reveal flex flex-col justify-center lg:col-span-5">
+          <p className="text-[11px] uppercase tracking-[0.14em] text-prism-400">{t('landing.arCompEyebrow')}</p>
+          <h3 className="mt-3 font-display-xl text-[clamp(1.5rem,2.6vw,2.1rem)] text-white">{t('landing.arCompTitle')}</h3>
+          <p className="mt-3 max-w-[46ch] text-[14px] leading-relaxed text-neutral-400">{t('landing.arCompDesc')}</p>
+          <dl className="mt-6 grid grid-cols-2 gap-4">
+            {[1, 2, 3, 4].map((n) => (
+              <div key={n} className="border-t border-white/[0.14] pt-3">
+                <dt className="text-[11px] text-neutral-500">{t(`landing.arMeta${n}K`)}</dt>
+                <dd className="mt-1 font-display text-[17px] font-bold text-white">{t(`landing.arMeta${n}V`)}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/* ═══════════════ 线下名片 / the offline card ═══════════════
+   公开主页（/u/:publicId）的浓缩：称号、佩戴勋章、三组数字。社区尚在筹备，
+   文案只承诺「会员之间可互相查看公开主页」。
+   A condensed public profile: title, worn badges, three figures. The community
+   is still forming, so the copy promises only what exists today. */
+function OfflineCard({ t }: { t: T }) {
+  const ref = useReveal<HTMLElement>()
+  const stats: [string, string][] = [
+    ['52.8%', 'cdWinRate'],
+    ['612', 'cdTrades'],
+    ['#7', 'cdRank'],
+  ]
+  return (
+    <section ref={ref} id="offline" className={`${SHELL} py-20 sm:py-28`}>
+      <div className="grid items-center gap-10 lg:grid-cols-12 lg:gap-12">
+        <div className="lg:col-span-6">
+          <p className="reveal eyebrow">{t('landing.cdEyebrow')}</p>
+          <div className="mt-3">
+            <Heading title={t('landing.cdTitle')} subtitle={t('landing.cdDesc')} />
+          </div>
+          <dl className="reveal mt-8 border-t border-white/[0.14]">
+            {[1, 2, 3].map((n) => (
+              <div key={n} className="grid grid-cols-[4.5rem_1fr] gap-4 border-b border-white/[0.07] py-3.5 text-[14px]">
+                <dt className="font-display font-bold text-white">{t(`landing.cdRead${n}K`)}</dt>
+                <dd className="text-neutral-400">{t(`landing.cdRead${n}V`)}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="reveal mt-6 inline-flex items-center gap-2 rounded-full bg-white/[0.04] px-3 py-1.5 text-[12px] text-neutral-400">
+            <i className="h-1.5 w-1.5 rounded-full bg-prism-400" />
+            {t('landing.cdSoon')}
+          </p>
+        </div>
+        <div className="reveal flex justify-center lg:col-span-6 lg:justify-end">
+          <div className="glass-card w-full max-w-[440px] p-6">
+            <div className="flex justify-between text-[11px] uppercase tracking-[0.14em] text-neutral-500">
+              <span>Signal Lab</span>
+              <span className="num">Trader · 7k2m9x4pq</span>
+            </div>
+            <div className="mt-6 flex items-center gap-4">
+              <BadgeIcon id="winning_hand" tier={3} earned size={64} spin />
+              <div className="min-w-0 flex-1">
+                <div className="font-display text-[24px] font-bold text-white">Tr***er</div>
+                <div className="mt-0.5 text-[13px] text-prism-300">L3 · {t('gamification.titles.elite')}</div>
+                <div className="num mt-1 text-[11px] text-neutral-500">{t('landing.cdSince')}</div>
+              </div>
+            </div>
+            <dl className="mt-6 grid grid-cols-3 gap-3 border-t border-white/[0.07] pt-4">
+              {stats.map(([v, k]) => (
+                <div key={k}>
+                  <dd className="num text-[17px] font-semibold text-white">{v}</dd>
+                  <dt className="mt-0.5 text-[10px] uppercase tracking-[0.06em] text-neutral-500">{t(`landing.${k}`)}</dt>
+                </div>
+              ))}
+            </dl>
+            <div className="mt-5 flex items-center gap-2.5">
+              <BadgeIcon id="starter" tier={3} earned size={34} />
+              <BadgeIcon id="evergreen" tier={2} earned size={34} />
+              <BadgeIcon id="arena" tier={1} earned size={34} />
+              <BadgeIcon id="comp_back_to_back" earned size={34} />
+              <span className="num ml-auto text-[11px] text-neutral-500">7 / 11</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 /* ═══════════════ 页面 / page ═══════════════ */
 export default function LandingPage() {
   const { t } = useTranslation()
@@ -436,6 +708,10 @@ export default function LandingPage() {
         <PhoneStory />
         <MarketStory />
         <MarketOutro />
+        <RankLadder t={t} />
+        <HonorWall t={t} />
+        <Arena t={t} />
+        <OfflineCard t={t} />
         <Pricing t={t} navigate={navigate} />
         <FaqSection />
         <ClosingCta t={t} navigate={navigate} />

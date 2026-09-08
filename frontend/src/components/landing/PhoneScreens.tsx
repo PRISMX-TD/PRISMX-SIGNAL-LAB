@@ -27,6 +27,8 @@
 // 与移动端 150px 的手机共用同一份组件。/ Sizing is cqw so the desktop and
 // mobile phones share one component set.
 import { useEffect, useState } from 'react'
+import BadgeIcon from '../badges/BadgeIcon'
+import RankCoin from '../badges/RankCoin'
 
 type T = (k: string) => string
 
@@ -77,6 +79,13 @@ function TabGlyph({ name }: { name: string }) {
           <rect x="14" y="14" width="7" height="7" rx="1" />
         </svg>
       )
+    case 'growth':
+      return (
+        <svg viewBox="0 0 24 24" {...p}>
+          <circle cx="12" cy="9" r="6" />
+          <path d="M8.5 14.5L7 22l5-3 5 3-1.5-7.5" />
+        </svg>
+      )
     case 'orders':
       return (
         <svg viewBox="0 0 24 24" {...p}>
@@ -102,7 +111,7 @@ function TabGlyph({ name }: { name: string }) {
 export function PhoneChrome({ t, activeTab }: { t: T; activeTab: string }) {
   const tabs = [
     { id: 'signals', k: 'nav.signals' },
-    { id: 'charts', k: 'nav.charts' },
+    { id: 'growth', k: 'nav.growth' },
     { id: 'dashboard', k: 'nav.dashboard' },
     { id: 'orders', k: 'nav.orders' },
     { id: 'more', k: 'nav.more' },
@@ -208,44 +217,6 @@ function MiniSignalCard({
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-/* ═════ 幕 0（Hero）：信号面板 / scene 0: the signal panel ═════ */
-export function ScreenSignals({ t, on }: { t: T; on: boolean }) {
-  return (
-    <div className={`scr ${on ? 'on' : ''}`} data-scr="0">
-      <div className="mb-[3.4cqw] flex items-center gap-[2cqw]">
-        <b className="text-[5cqw] font-bold text-white">{t('landing.scrSignals')}</b>
-        {/* 计数徽章：同 .count-badge / count badge, as .count-badge */}
-        <span className="grid min-w-[4.6cqw] place-items-center rounded-[1.6cqw] bg-prism-600 px-[1.4cqw] py-[0.5cqw] text-[2.8cqw] font-bold text-white">
-          2
-        </span>
-      </div>
-      <div className="sig-list flex flex-col gap-[3cqw]">
-        <MiniSignalCard
-          t={t}
-          sym="XAUUSD"
-          side="buy"
-          entry="3412.80"
-          sl="3398.20"
-          tp="3445.60"
-          rr="1:2.26"
-          ttlPct={78}
-          fresh
-        />
-        <MiniSignalCard
-          t={t}
-          sym="EURUSD"
-          side="sell"
-          entry="1.08420"
-          sl="1.08760"
-          tp="1.07850"
-          rr="1:1.68"
-          ttlPct={41}
-        />
-      </div>
     </div>
   )
 }
@@ -382,61 +353,7 @@ export function ScreenOrder({ t, on }: { t: T; on: boolean }) {
   )
 }
 
-/* ═════ 幕 3：自动守夜 / scene 3: automatic position management ═════ */
-export function ScreenGuard({ t, on }: { t: T; on: boolean }) {
-  return (
-    <div className={`scr ${on ? 'on' : ''}`} data-scr="3">
-      <div className="mb-[3.4cqw] flex items-center justify-between border-b border-white/[0.08] pb-[3cqw]">
-        <b className="text-[4.6cqw] font-bold text-white">{t('landing.scrAutoTitle')}</b>
-        {/* 呼吸点：真实「运行中」语义（同 EAStatusBadge）
-            Breathing dot: genuine running-state semantics, as EAStatusBadge. */}
-        <span className="h-[1.8cqw] w-[1.8cqw] animate-breathe rounded-full bg-up" />
-      </div>
-      {/* viewBox 从 100×62 压到 100×50，全部 y 坐标与线宽按 50/62 等比重映射。
-          原因：这个盒子是 .scr 这条 flex 列里的可压缩项（flex: 0 1 auto），而 SVG
-          只有 viewBox 没有 height，浏览器按比例从宽度算自然高——实测 322 宽 →
-          200 高，可竖向预算只给到 167，多出的 33px 被 overflow:hidden 切掉，
-          SL 那条线和徽章几乎整条看不见。
-
-          试过给 SVG 加 max-h-full 让它按 meet 等比缩进盒内，不裁了，但内容被缩到
-          中间、两侧各留 29px 空白——SL 线和入场虚线是**价格水平线**，贯穿整幅才
-          读得对，留白等于把它们变成了两段悬空的线段。所以正解是让这幅画本身matches
-          格子的比例（100:50 ≈ 可用的 322:167），而不是缩小它。
-          max-h-full 保留作为兜底：万一某个机型更矮，宁可等比缩也不裁。
-
-          The drawing was simply too tall for its slot. Scaling it to fit (meet)
-          stopped the clipping but inset the SL and entry lines by 29px a side —
-          and those are price levels, which have to span the full width to read
-          correctly. So the artwork's own ratio changes to match the slot. */}
-      <div className="relative min-h-0 overflow-hidden rounded-[3.4cqw] border border-white/[0.09] bg-white/[0.03]">
-        <svg viewBox="0 0 100 50" className="block max-h-full w-full" aria-hidden>
-          <polyline
-            points="2,41.9 12,38.7 18,40.3 26,33.9 33,35.5 42,27.4 49,29.8 58,21.8 64,24.2 73,16.1 81,18.5 90,10.5 98,12.1"
-            fill="none"
-            stroke="var(--up)"
-            strokeWidth="1.3"
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-          <line x1="0" y1="37.1" x2="100" y2="37.1" stroke="#71717A" strokeWidth="0.56" strokeDasharray="1.9 1.9" />
-          <g className="js-sl">
-            <line x1="0" y1="45.2" x2="100" y2="45.2" stroke="#8B6CFF" strokeWidth="0.9" />
-            <rect x="2" y="40.8" width="11.3" height="6.5" rx="1.3" fill="#5A22EE" />
-            <text x="7.65" y="45.5" textAnchor="middle" fontSize="3.7" fontWeight="700" fill="#FFFFFF" fontFamily="inherit">
-              SL
-            </text>
-          </g>
-        </svg>
-        <div className="js-be absolute left-[3.4cqw] top-[3.4cqw] rounded-[2cqw] border border-prism-400/40 bg-prism-600/25 px-[2.6cqw] py-[1.3cqw] text-[2.9cqw] font-semibold text-prism-200">
-          {t('landing.scrBeMoved')}
-        </div>
-      </div>
-      <p className="mt-[3.6cqw] text-[3.2cqw] leading-relaxed text-neutral-400">{t('landing.scrTrailOn')}</p>
-    </div>
-  )
-}
-
-/* ═════ 幕 4：全量留痕 / scene 4: the full record ═════
+/* ═════ 幕 3：全量留痕 / scene 3: the full record ═════
    赢单与亏单同字号同排版：亏损不缩小不变灰——这个视觉决定就是产品的核心主张。
    Wins and losses identical in size and layout: that decision IS the claim. */
 export function ScreenRecord({ t, on }: { t: T; on: boolean }) {
@@ -447,7 +364,7 @@ export function ScreenRecord({ t, on }: { t: T; on: boolean }) {
     { sym: 'AUDUSD', side: 'sell' as const, win: true, pnl: '+158.03' },
   ]
   return (
-    <div className={`scr ${on ? 'on' : ''}`} data-scr="4">
+    <div className={`scr ${on ? 'on' : ''}`} data-scr="3">
       <div className="mb-[3cqw] border-b border-white/[0.08] pb-[3cqw]">
         <b className="text-[4.6cqw] font-bold text-white">{t('landing.scrRecordTitle')}</b>
       </div>
@@ -476,6 +393,139 @@ export function ScreenRecord({ t, on }: { t: T; on: boolean }) {
       <p className="mt-auto border-t border-white/[0.08] pt-[3cqw] text-[2.8cqw] text-neutral-500">
         {t('landing.scrRecordFoot')}
       </p>
+    </div>
+  )
+}
+
+/* ═════ 幕 0（Hero）：成就陈列台 / scene 0: the achievements stage ═════
+   镜像 /achievements 的三样东西：等级药丸（UserMenu 同款 L3 · 称号）、佩戴的
+   三枚勋章（真实 BadgeIcon，首枚居中放大，同 PedestalStage）、当前关卡的条件
+   清单（同 .tk-title 的「勾 / 进度 / 毕业考锁定」三态）。首屏就把「加冕」这个
+   目标摆出来，后面四幕再讲它是怎么一笔一笔挣来的。
+   Mirrors three things from /achievements: the level pill (as UserMenu),
+   the three equipped badges (real BadgeIcon, first one centred and larger as
+   in PedestalStage) and the current stage's condition list with its three
+   states. The opening shows the goal; the next four scenes show how it is
+   earned one trade at a time. */
+export function ScreenRank({ t, on }: { t: T; on: boolean }) {
+  const tasks = [
+    { k: 'scrTask1', state: 'done' as const },
+    { k: 'scrTask2', state: 'done' as const },
+    { k: 'scrTask3', state: 'pending' as const, pct: 71 },
+    { k: 'scrTask4', state: 'done' as const },
+    { k: 'scrTask5', state: 'locked' as const },
+  ]
+  return (
+    <div className={`scr ${on ? 'on' : ''}`} data-scr="0">
+      <div className="mb-[3cqw] flex items-center justify-between">
+        <b className="text-[5cqw] font-bold text-white">{t('landing.scrRankTitle')}</b>
+        <span className="rounded-[1.6cqw] bg-prism-600 px-[2cqw] py-[0.7cqw] text-[2.8cqw] font-bold text-white">
+          {t('landing.scrRankLv')} · {t('landing.scrRankLevel')}
+        </span>
+      </div>
+      <div className="rounded-[3.4cqw] border border-white/[0.09] bg-white/[0.035] px-[3.8cqw] pb-[3.4cqw] pt-[3.6cqw] text-center">
+        <div className="text-[5.4cqw] font-bold leading-none text-white">{t('landing.scrRankLevel')}</div>
+        <div className="mt-[3.2cqw] flex items-end justify-center gap-[3cqw]">
+          <span className="cq-svg w-[15cqw]"><BadgeIcon id="winning_hand" tier={2} earned /></span>
+          <span className="cq-svg w-[21cqw]"><BadgeIcon id="starter" tier={3} earned /></span>
+          <span className="cq-svg w-[15cqw]"><BadgeIcon id="arena" tier={1} earned /></span>
+        </div>
+      </div>
+      <div className="mt-[3cqw] flex flex-col">
+        <div className="flex items-baseline justify-between border-b border-white/[0.08] pb-[1.8cqw] text-[2.9cqw] text-neutral-500">
+          <span>{t('landing.scrRankStage')}</span>
+          <span className="num text-prism-300">{t('landing.scrRankProgress')}</span>
+        </div>
+        {tasks.map((x) => (
+          <div
+            key={x.k}
+            className={`flex items-center gap-[2.4cqw] border-b border-white/[0.06] py-[2.4cqw] text-[3.1cqw] last:border-0 ${
+              x.state === 'locked' ? 'text-neutral-500' : 'text-neutral-200'
+            }`}
+          >
+            <span
+              className={`grid h-[3.8cqw] w-[3.8cqw] flex-none place-items-center rounded-full ${
+                x.state === 'done' ? 'bg-up' : 'border border-white/20'
+              }`}
+            >
+              {x.state === 'done' && (
+                <svg viewBox="0 0 12 12" className="h-[2.4cqw] w-[2.4cqw]" fill="none" stroke="#06301a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2.5 6.5l2.5 2.5 4.5-5" />
+                </svg>
+              )}
+            </span>
+            <span className="min-w-0 flex-1 truncate">{t(`landing.${x.k}`)}</span>
+            {x.state === 'pending' && (
+              <span className="h-[1.1cqw] w-[16cqw] flex-none overflow-hidden rounded-full bg-white/[0.09]">
+                <span className="block h-full rounded-full bg-prism-600" style={{ width: `${x.pct}%` }} />
+              </span>
+            )}
+            {x.state === 'locked' && (
+              <svg viewBox="0 0 24 24" className="h-[3cqw] w-[3cqw] flex-none" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="4" y="11" width="16" height="10" rx="2" />
+                <path d="M8 11V7a4 4 0 018 0v4" />
+              </svg>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/* ═════ 幕 4：上榜 / scene 4: on the board ═════
+   镜像 /leaderboard 的榜单行：名次币（前三真实 RankCoin）、打码昵称 + 账户号、
+   收益率；「你」那一行紫底高亮（同 .lb-row.me）。底部一条勋章到手的提示，
+   用真实 BadgeIcon——这一幕是整段叙事的落点：一笔交易最终变成名次和勋章。
+   Mirrors the /leaderboard rows: rank coin (real RankCoin for the top three),
+   masked name + account, return; the "you" row highlighted as .lb-row.me. A
+   badge-earned toast closes the scene: one trade has become rank and honor. */
+export function ScreenBoard({ t, on }: { t: T; on: boolean }) {
+  const rows = [
+    { r: 1, n: 'Mo***ch', a: '600 402', s: '+14.2%' },
+    { r: 2, n: 'Ka***en', a: '600 118', s: '+9.4%' },
+    { r: 3, n: 'Li***ng', a: '600 077', s: '+7.8%' },
+    { r: 4, n: 'Wi***ow', a: '600 233', s: '+6.1%' },
+    { r: 7, n: 'Tr***er', a: '600 231', s: '+4.9%', me: true },
+  ]
+  return (
+    <div className={`scr ${on ? 'on' : ''}`} data-scr="4">
+      <div className="mb-[2.4cqw] flex items-baseline justify-between border-b border-white/[0.08] pb-[3cqw]">
+        <b className="text-[4.6cqw] font-bold text-white">{t('landing.scrBoardTitle')}</b>
+        <span className="text-[2.7cqw] text-neutral-500">W37</span>
+      </div>
+      <div className="flex flex-col">
+        {rows.map((x) => (
+          <div
+            key={x.r}
+            className={`js-row flex items-center gap-[2.6cqw] border-b border-white/[0.06] py-[2.6cqw] last:border-0 ${
+              x.me ? '-mx-[2cqw] rounded-[2cqw] bg-prism-600/20 px-[2cqw]' : ''
+            }`}
+          >
+            <span className="grid w-[7.5cqw] flex-none place-items-center">
+              {x.r <= 3 ? (
+                <span className="cq-svg block w-[7cqw]"><RankCoin rank={x.r} size={28} /></span>
+              ) : (
+                <b className={`num text-[3.8cqw] ${x.me ? 'text-prism-300' : 'text-neutral-500'}`}>{x.r}</b>
+              )}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[3.4cqw] text-white">
+              <b className="font-semibold">{x.n}</b>
+              <span className="num ml-[1.6cqw] text-[2.7cqw] text-neutral-500">{x.a}</span>
+              {x.me && <span className="ml-[1.6cqw] text-[2.7cqw] font-semibold text-prism-300">{t('landing.scrBoardYou')}</span>}
+            </span>
+            <span className="num text-[3.6cqw] font-bold text-up">{x.s}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-[2.4cqw] text-[2.8cqw] text-neutral-500">{t('landing.scrBoardGap')}</p>
+      <div className="js-toast mt-auto flex items-center gap-[3cqw] rounded-[3cqw] border border-prism-400/40 bg-prism-600/20 px-[3.4cqw] py-[2.6cqw]">
+        <span className="cq-svg w-[10cqw] flex-none"><BadgeIcon id="board_return" tier={1} earned /></span>
+        <div className="min-w-0">
+          <div className="text-[2.6cqw] uppercase tracking-[0.14em] text-prism-300">{t('landing.scrToast')}</div>
+          <b className="block truncate text-[3.6cqw] font-bold text-white">{t('landing.scrToastBadge')}</b>
+        </div>
+      </div>
     </div>
   )
 }

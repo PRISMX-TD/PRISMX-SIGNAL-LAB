@@ -21,12 +21,12 @@ export const PUBLIC_PAGES: PageDef[] = [
     id: 'home',
     path: { zh: '/', en: '/en' },
     title: {
-      zh: 'Signal Lab · 信号实验室 · by PRISMX',
-      en: 'Signal Lab · Trading Signals with Discipline · by PRISMX',
+      zh: 'Signal Lab · 信号实验室 · 从进阶到加冕 · by PRISMX',
+      en: 'Signal Lab · Trading Signals & Trader Ranks · by PRISMX',
     },
     description: {
-      zh: '每条信号只锁定三个数字——进场、止损、止盈，一键直达你自己的 MT5。资金始终在你自己的券商账户，判定规则公开。',
-      en: 'Every signal locks three numbers — entry, stop, target — sent to your own MT5 in one tap. Funds stay in your own broker account; scoring rules are public.',
+      zh: '聚合智能信号、数据复盘与竞技排位于一体的交易员赋能平台。每一笔经平台下的实盘单，都在为你的等级、勋章和名次记账。资金始终在你自己的券商账户。',
+      en: 'Smart signals, trade review and competitive ranking in one trader platform. Every live trade counts toward your level, badges and standing. Funds stay in your own broker account.',
     },
   },
   {

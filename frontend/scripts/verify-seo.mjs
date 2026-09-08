@@ -41,8 +41,8 @@ const expectInTitle = (rel, html, needle, label) => {
 
 // [文件, canonical 路径, html lang, 正文标志文案, title 标志文案]
 const PAGES = [
-  ['index.html', '/', 'zh-CN', '情绪归零', '信号实验室'],
-  ['en/index.html', '/en', 'en', 'Emotions to zero', 'Trading Signals'],
+  ['index.html', '/', 'zh-CN', '从进阶', '信号实验室'],
+  ['en/index.html', '/en', 'en', 'From the climb', 'Trading Signals'],
   ['terms/index.html', '/terms', 'zh-CN', '服务条款', '服务条款'],
   ['en/terms/index.html', '/en/terms', 'en', 'Terms of Service', 'Terms of Service'],
   ['privacy/index.html', '/privacy', 'zh-CN', '隐私政策', '隐私政策'],
