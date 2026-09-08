@@ -1101,6 +1101,53 @@ class TicketReply(Base):
     author = relationship("User", backref="ticket_replies")
 
 
+class Announcement(Base):
+    """平台公告：管理员在后台撰写、发布，用户在顶栏铃铛面板与 /announcements 页看到。
+
+    正文沿用策略介绍的四种内容块（heading / paragraph / list / image，JSON 数组，
+    字段 camelCase 与 schemas.PlatformStrategyBlock 一致），不做富文本：渲染侧零解析、
+    无注入面，图片走同一条管理员上传通道。中英各一份标题 / 摘要，英文可空回落中文。
+    单独建表而不塞 platform_settings：公告会越攒越多，且要按条记已读。
+
+    Platform announcements, written and published by admins, shown in the top-bar
+    bell panel and on /announcements. The body reuses the strategy guide's four
+    content-block kinds (JSON, same camelCase shape as schemas.PlatformStrategyBlock)
+    rather than rich text: nothing to parse at render time, no injection surface,
+    images go through the same admin upload path. Bilingual title/summary with
+    English falling back to Chinese. Its own table rather than platform_settings:
+    the list grows without bound and read state is tracked per row.
+    """
+    __tablename__ = "announcements"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    title_zh = Column(String, nullable=False, default="")
+    title_en = Column(String, nullable=False, default="")
+    summary_zh = Column(String, nullable=False, default="")
+    summary_en = Column(String, nullable=False, default="")
+    blocks = Column(Text, nullable=False, default="[]")  # JSON 数组 / JSON array of blocks
+    cover_image_url = Column(String, nullable=False, default="")
+    pinned = Column(Boolean, nullable=False, default=False)
+    published = Column(Boolean, nullable=False, default=False, index=True)
+    # 首次发布时间；取消发布再发布不重置，未读判定与排序都用它。
+    # Set on first publish and kept across unpublish/republish; ordering and unread use it.
+    published_at = Column(DateTime, nullable=True, index=True)
+    created_by = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
+class AnnouncementRead(Base):
+    """用户 × 公告 的已读标记：打开详情页即写入一行。
+    Per-user read marks: one row written when the detail page is opened."""
+    __tablename__ = "announcement_reads"
+    __table_args__ = (UniqueConstraint("user_id", "announcement_id", name="uq_announcement_read"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    announcement_id = Column(String, ForeignKey("announcements.id"), nullable=False, index=True)
+    read_at = Column(DateTime, default=_now)
+
+
 class InviteLink(Base):
     """邀请链接：管理员生成的带标记推广链接。code 进 URL（?ref=code），label 是
     管理员起的标记名；用户经链接注册时 label 快照进 users.plan_note、code 写进

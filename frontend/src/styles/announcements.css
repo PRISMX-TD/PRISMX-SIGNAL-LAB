@@ -1,0 +1,402 @@
+/* ═════════════ 公告 / announcements ═════════════
+   2026-09-08 新增：顶栏铃铛面板重做 + 公告列表页 + 公告详情页。
+   · 铃铛面板：实色面（不再是毛玻璃），360px；上段是最近公告的账本行（未读点 /
+     置顶标记 ｜ 标题与摘要 ｜ 日期），下段是原有的推送开关压成一行。角标：有未读
+     公告显示紫色数字，无未读才退回推送状态点。
+   · 列表页：与客服工单同一套账本行。
+   · 详情页：沿用策略详情的文章版式（guide.css 的 .guide-detail / .guide-h / .guide-p /
+     .guide-ul / .guide-fig），单栏 760px。
+   材质同全站：实色面、无模糊无光晕；紫只落在未读点 / 未读数、置顶刻度与主按钮。
+   Added 2026-09-08: the bell panel redone as an opaque 360px surface with recent
+   announcements as ledger rows over the existing push toggle; a list page sharing
+   the support ledger; a detail page reusing the strategy article layout in one
+   760px column. Violet only as unread ink and the pinned tick. */
+
+/* ── 铃铛 / bell ── */
+.nb {
+  position: relative;
+}
+.nb-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+.nb-btn:hover,
+.nb-btn.open {
+  color: #fff;
+  border-color: var(--line-hi);
+  background: var(--nest);
+}
+.nb-btn.on { color: var(--text-2); }
+.nb-btn.attention { color: var(--mid); }
+/* 状态点（无未读时）/ status dot (when nothing is unread) */
+.nb-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--purple-hi);
+  border: 2px solid var(--bg);
+  box-sizing: content-box;
+}
+.nb-btn.attention .nb-dot { background: var(--mid); }
+/* 未读数：品牌紫实色小药丸，压过状态点 / unread count: flat violet pill, wins over the dot */
+.nb-count {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--purple);
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  font-weight: 700;
+  text-align: center;
+  border: 2px solid var(--bg);
+  box-sizing: content-box;
+}
+
+.nb-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 40;
+  width: 360px;
+  padding: 0;
+  overflow: hidden;
+  border-color: var(--line);
+  animation: fade-in-up 0.24s var(--ease-out) both;
+}
+.nb-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 20px 20px 12px;
+}
+.nb-head h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+}
+.nb-head b {
+  font-size: 17px;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--purple-hi);
+}
+.nb-head span {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+.nb-sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 20px 8px;
+}
+.nb-sec-head .cap {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+.nb-sec-head a {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--purple-hi);
+  text-decoration: none;
+}
+.nb-sec-head a:hover { color: #fff; }
+.nb-ann {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px 20px;
+  border-top: 1px solid var(--line);
+  color: inherit;
+  text-decoration: none;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.nb-ann:hover { background: var(--surface-2); }
+.nb-ann-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: transparent;
+}
+.nb-ann.unread .nb-ann-dot { background: var(--purple-hi); }
+.nb-ann-main { min-width: 0; }
+.nb-ann-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.nb-ann-title b {
+  font-size: 13px;
+  line-height: 1.35;
+  font-weight: 500;
+  color: var(--text-2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nb-ann.unread .nb-ann-title b {
+  font-weight: 700;
+  color: #fff;
+}
+.nb-ann-sum {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nb-ann time {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  padding-top: 2px;
+}
+.nb-empty {
+  padding: 8px 20px 16px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.nb-skel {
+  display: grid;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--line);
+}
+/* 置顶刻度：2px 紫色竖线，与全站说明项同形 / pinned tick: the 2px violet rule used site-wide */
+.ann-pin {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--purple-hi);
+  white-space: nowrap;
+}
+.ann-pin::before {
+  content: '';
+  width: 2px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--purple-hi);
+}
+
+/* 推送段：原有开关压成一行 / push section: the existing toggle in one row */
+.nb-push {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 20px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.nb-push-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.nb-push-row label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+}
+.nb-push-row a {
+  font-size: 12px;
+  color: var(--text-3);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.nb-push-row a:hover { color: #fff; }
+.nb-push p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.nb-push p.warn { color: var(--mid); }
+.nb-push p.err { color: var(--down); }
+
+/* ── 列表页 / list page ── */
+.ann-wrap {
+  max-width: 920px;
+  margin: 0 auto;
+}
+.ann-list {
+  padding: 0;
+  overflow: hidden;
+}
+.ann-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  gap: 16px 18px;
+  align-items: center;
+  padding: 18px 28px;
+  color: inherit;
+  text-decoration: none;
+  transition: background-color var(--dur-fast) var(--ease-out);
+  animation: fade-in-up 0.45s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+.ann-row + .ann-row { border-top: 1px solid var(--line); }
+.ann-row:hover { background: var(--surface-2); }
+.ann-row-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: transparent;
+}
+.ann-row.unread .ann-row-dot { background: var(--purple-hi); }
+.ann-row-main { min-width: 0; }
+.ann-row-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ann-row-title b {
+  font-size: 15px;
+  line-height: 1.3;
+  font-weight: 700;
+  color: #fff;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ann-row-sum {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ann-row-end {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.ann-row time {
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.ann-row .chev {
+  color: var(--text-3);
+  transition: color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.ann-row:hover .chev { color: #fff; transform: translateX(2px); }
+.ann-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 56px 28px;
+  text-align: center;
+}
+.ann-empty svg { width: 40px; height: 40px; margin-bottom: 8px; color: var(--text-3); }
+.ann-empty b { font-size: 15px; font-weight: 700; color: #fff; }
+.ann-empty p { font-size: 13px; color: var(--text-3); max-width: 44ch; }
+.ann-skel {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) 56px;
+  gap: 18px;
+  align-items: center;
+  padding: 20px 28px;
+}
+.ann-skel + .ann-skel { border-top: 1px solid var(--line); }
+
+/* ── 详情页 / detail page ── */
+.ann-detail {
+  max-width: 760px;
+  margin: 0 auto;
+}
+.ann-detail .guide-detail-head h1 {
+  max-width: none;
+}
+.ann-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.ann-meta .num { color: var(--text-2); }
+.ann-body {
+  margin-top: 36px;
+  min-width: 0;
+}
+.ann-body .guide-p,
+.ann-body .guide-ul li {
+  font-size: 15px;
+}
+.ann-detail .guide-pager {
+  margin-top: 48px;
+}
+.ann-notfound {
+  max-width: 560px;
+  margin: 64px auto;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+@media (max-width: 639px) {
+  .nb-panel {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: calc(64px + env(safe-area-inset-top));
+    width: auto;
+  }
+  .ann-row {
+    grid-template-columns: 8px minmax(0, 1fr);
+    padding: 16px 20px;
+  }
+  .ann-row-end {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+  .ann-row .chev { display: none; }
+  .ann-row-title b,
+  .ann-row-sum { white-space: normal; }
+  .ann-skel,
+  .ann-empty { padding-left: 20px; padding-right: 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nb-panel,
+  .ann-row { animation: none; }
+}

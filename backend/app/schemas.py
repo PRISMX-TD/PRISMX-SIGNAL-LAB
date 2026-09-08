@@ -651,6 +651,86 @@ class PlatformStrategyListOut(BaseModel):
 
 
 
+# ---------- 公告 / Announcements ----------
+# 正文块直接复用 PlatformStrategyBlock：四种类型、camelCase 字段、同一套校验，
+# 管理端的块编辑器与用户端的渲染器也因此可以原样复用。
+# The body reuses PlatformStrategyBlock: same four kinds, same camelCase fields and
+# validation, so the admin block editor and the user-side renderer carry over as is.
+AnnouncementBlock = PlatformStrategyBlock
+
+
+class AnnouncementIn(BaseModel):
+    """管理员新建 / 修改公告的请求体 / admin create-or-update payload."""
+
+    titleZh: str = Field(default="", max_length=120)
+    titleEn: str = Field(default="", max_length=120)
+    summaryZh: str = Field(default="", max_length=300)
+    summaryEn: str = Field(default="", max_length=300)
+    blocks: list[AnnouncementBlock] = Field(default_factory=list, max_length=60)
+    coverImageUrl: str = Field(default="", max_length=500)
+    pinned: bool = False
+    published: bool = False
+    # 发布时是否给开启了推送的用户发一条 Web Push；只在本次请求把 published 由
+    # false 翻到 true 时生效，编辑已发布的公告不会再推。
+    # Whether to Web Push subscribed users on publish; only acts when this request
+    # flips published from false to true, never on edits of an already-published one.
+    notify: bool = False
+
+    @field_validator("coverImageUrl")
+    @classmethod
+    def _cover_http_only(cls, v: str) -> str:
+        v = (v or "").strip()
+        if v and not re.match(r"^https?://", v, re.IGNORECASE):
+            raise ValueError("图片地址必须以 http(s):// 开头 / image URL must start with http(s)://")
+        return v
+
+
+class AnnouncementOut(BaseModel):
+    """公告（用户端与管理端共用；read 只对用户端有意义）。
+    One announcement (shared by both sides; `read` is meaningful to users only)."""
+
+    id: str
+    titleZh: str
+    titleEn: str
+    summaryZh: str
+    summaryEn: str
+    blocks: list[AnnouncementBlock]
+    coverImageUrl: str
+    pinned: bool
+    published: bool
+    publishedAt: datetime | None
+    createdAt: datetime
+    updatedAt: datetime
+    read: bool = True
+
+
+class AnnouncementListOut(BaseModel):
+    """公告清单 + 未读数 / list plus unread count."""
+
+    items: list[AnnouncementOut]
+    unreadCount: int = 0
+    total: int = 0
+
+
+class TranslateIn(BaseModel):
+    """管理员一键翻译：一批文本按顺序译为目标语言。
+    Admin one-click translation: a batch of strings translated in order."""
+
+    texts: list[str] = Field(min_length=1, max_length=80)
+    target: Literal["en", "zh"] = "en"
+
+    @field_validator("texts")
+    @classmethod
+    def _cap_each(cls, v: list[str]) -> list[str]:
+        if any(len(t) > 4000 for t in v):
+            raise ValueError("单段文本不能超过 4000 字 / each text must be 4000 chars or fewer")
+        return v
+
+
+class TranslateOut(BaseModel):
+    texts: list[str]
+
+
 # ---------- 自定义策略 / User strategies ----------
 # 模板清单的唯一来源在引擎侧（services/strategy/presets.py）。此前这里有两份
 # 硬写的 Literal，加一个模板要改三处、漏一处就是"能建不能回测"的静默不一致。

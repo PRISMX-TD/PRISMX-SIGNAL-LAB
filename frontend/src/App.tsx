@@ -38,6 +38,8 @@ const LegalPage = lazy(() => import('./pages/LegalPage'))
 const FaqPage = lazy(() => import('./pages/FaqPage'))
 const SupportPage = lazy(() => import('./pages/SupportPage'))
 const StrategyGuidePage = lazy(() => import('./pages/StrategyGuidePage'))
+const AnnouncementsPage = lazy(() => import('./pages/AnnouncementsPage'))
+const AnnouncementPage = lazy(() => import('./pages/AnnouncementPage'))
 const CompleteProfilePage = lazy(() => import('./pages/CompleteProfilePage'))
 
 function Protected({ children }: { children: ReactNode }) {
@@ -239,6 +241,8 @@ export default function App() {
               <Route path="/account" element={<AccountPage />} />
               <Route path="/download" element={<DownloadPage />} />
               <Route path="/support" element={<SupportPage />} />
+              <Route path="/announcements" element={<AnnouncementsPage />} />
+              <Route path="/announcements/:id" element={<AnnouncementPage />} />
               <Route
                 path="/admin"
                 element={

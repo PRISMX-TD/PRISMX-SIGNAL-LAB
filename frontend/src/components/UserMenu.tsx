@@ -111,6 +111,9 @@ export default function UserMenu({
           <Link to="/support" onClick={() => setOpen(false)} className={linkClass}>
             {t("nav.support")}
           </Link>
+          <Link to="/announcements" onClick={() => setOpen(false)} className={linkClass}>
+            {t("nav.announcements")}
+          </Link>
           {/* 成就 / 排行榜 / 比赛三条入口 2026-09-07 撤出菜单：它们合并进顶栏的
               「成长」入口（见 Layout.tsx），上面的等级药丸仍直达成就页。
               The achievements / leaderboard / competitions links left this menu

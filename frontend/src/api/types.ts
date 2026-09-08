@@ -593,6 +593,46 @@ export interface PlatformStrategyBlock {
   imageUrl: string
 }
 
+// ---------- 公告 / Announcements ----------
+// 正文复用策略介绍的内容块（PlatformStrategyBlock）：同一套块编辑器与渲染器。
+// The body reuses the strategy guide's blocks: same editor, same renderer.
+export interface Announcement {
+  id: string
+  titleZh: string
+  titleEn: string
+  summaryZh: string
+  summaryEn: string
+  blocks: PlatformStrategyBlock[]
+  coverImageUrl: string
+  pinned: boolean
+  published: boolean
+  publishedAt: string | null
+  createdAt: string
+  updatedAt: string
+  // 当前用户是否已读（管理端列表恒为 true）/ read by the current user (always true on the admin list)
+  read: boolean
+}
+
+export interface AnnouncementList {
+  items: Announcement[]
+  unreadCount: number
+  total: number
+}
+
+// 管理员新建 / 修改用；notify 只在本次把 published 翻到 true 时生效。
+// Admin create/update payload; notify only acts when this request flips published to true.
+export interface AnnouncementInput {
+  titleZh: string
+  titleEn: string
+  summaryZh: string
+  summaryEn: string
+  blocks: PlatformStrategyBlock[]
+  coverImageUrl: string
+  pinned: boolean
+  published: boolean
+  notify: boolean
+}
+
 export interface PlatformStrategy {
   id: string
   order: number
@@ -907,7 +947,7 @@ export interface AccountFunds {
 }
 
 export interface WSMessage {
-  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'QUOTES' | 'GLOBAL_QUOTES' | 'TREND_UPDATE' | 'PREFS_UPDATE' | 'STRATEGY_SIGNAL' | 'CLOSED_TRADE_NEW'
+  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'QUOTES' | 'GLOBAL_QUOTES' | 'TREND_UPDATE' | 'PREFS_UPDATE' | 'STRATEGY_SIGNAL' | 'CLOSED_TRADE_NEW' | 'ANNOUNCEMENT_NEW'
   data?: unknown
   // 仅 POSITIONS 携带 / only present on POSITIONS
   funds?: AccountFunds[]

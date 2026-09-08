@@ -1,5 +1,6 @@
 // REST 客户端封装 / REST client wrapper
 import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult } from './types'
+import type { Announcement, AnnouncementInput, AnnouncementList } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 
 const TOKEN_KEY = 'prismx_token'
@@ -702,8 +703,26 @@ export const ticketApi = {
     }),
 }
 
+// 公告（用户端）/ announcements, user side
+export const announcementApi = {
+  list: () => request<AnnouncementList>('/announcements'),
+  // 打开详情即记已读，由后端完成 / opening marks it read on the backend
+  get: (id: string) => request<Announcement>(`/announcements/${encodeURIComponent(id)}`),
+}
+
 // 管理后台 / Admin
 export const adminApi = {
+  listAnnouncements: () => request<AnnouncementList>('/admin/announcements'),
+  createAnnouncement: (payload: AnnouncementInput) =>
+    request<Announcement>('/admin/announcements', { method: 'POST', body: JSON.stringify(payload) }),
+  updateAnnouncement: (id: string, payload: AnnouncementInput) =>
+    request<Announcement>(`/admin/announcements/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteAnnouncement: (id: string) =>
+    request<{ ok: boolean }>(`/admin/announcements/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // 一键翻译：按顺序返回同长度数组 / one-click translation, same length and order back
+  translate: (texts: string[], target: 'en' | 'zh') =>
+    request<{ texts: string[] }>('/admin/announcements/translate', { method: 'POST', body: JSON.stringify({ texts, target }) }),
+  translateStatus: () => request<{ configured: boolean }>('/admin/announcements/translate/status'),
   pageStats: (days = 7) => request<AdminPageStats>(`/admin/page-stats?days=${days}`),
   // 策略 × 交易时段胜率（默认近 7 天）。时段窗口由后端随数据一起返回，前端不
   // 复制一份小时区间——夏令时的正确性只能在后端保证。

@@ -40,6 +40,7 @@
 @import './bind.css';   /* 连接 MT5：直连面板 / 已绑定账号账本行 / 桥接折叠块 */
 @import './support.css';   /* 客服工单：账本行 / 两栏表单 / 对话流 */
 @import './strategies.css';   /* 自定义策略：三步时间线 / 策略账本行 / 信号小票 / 预设与步骤条 */
+@import './announcements.css';   /* 公告：铃铛面板 / 公告列表 / 公告详情 */
 @import './achievements.css';   /* 成就页：任务瓦片 / 陈列台 */
 @import './competitions.css';   /* 交易比赛：转播台 / 头版 / 详情 */
 @import './leaderboard.css';   /* 排行榜：领奖台悬浮 / 手机端控件 */

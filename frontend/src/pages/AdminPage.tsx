@@ -12,6 +12,7 @@ import Select from '../components/Select'
 import { SkeletonLine } from '../components/Skeleton'
 import PageStatsCard from '../components/admin/PageStatsCard'
 import PlatformStrategiesPanel from '../components/admin/PlatformStrategiesPanel'
+import AnnouncementsPanel from '../components/admin/AnnouncementsPanel'
 import InviteLinksPanel from '../components/admin/InviteLinksPanel'
 import StrategyWinratePanel from '../components/admin/StrategyWinratePanel'
 import GamificationPanel from '../components/admin/GamificationPanel'
@@ -44,8 +45,8 @@ const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
 // winrate sits right after data: both are "look at numbers", but the
 // strategy x session matrix has its own range picker and a wide table, and
 // folding it into data would bury the operating metrics and page stats.
-type AdminTab = 'data' | 'winrate' | 'users' | 'invites' | 'ops' | 'system' | 'guide' | 'tickets' | 'gamification' | 'competitions'
-const ADMIN_TABS: AdminTab[] = ['data', 'winrate', 'users', 'invites', 'ops', 'system', 'guide', 'tickets', 'gamification', 'competitions']
+type AdminTab = 'data' | 'winrate' | 'users' | 'invites' | 'ops' | 'system' | 'guide' | 'announcements' | 'tickets' | 'gamification' | 'competitions'
+const ADMIN_TABS: AdminTab[] = ['data', 'winrate', 'users', 'invites', 'ops', 'system', 'guide', 'announcements', 'tickets', 'gamification', 'competitions']
 
 interface Draft {
   role: UserRole
@@ -954,6 +955,8 @@ export default function AdminPage() {
       {tab === 'winrate' && <StrategyWinratePanel />}
 
       {tab === 'guide' && <PlatformStrategiesPanel />}
+
+      {tab === 'announcements' && <AnnouncementsPanel />}
 
       {/* 传已保存值、不传 trial 表单草稿：见上面 savedTrialEnabled 的定义与注释。
           Pass the persisted value, not the trial form draft — see

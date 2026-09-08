@@ -7,6 +7,11 @@
   },
   "notifPanel": {
     "title": "Notifications",
+    "unread": "unread",
+    "announcements": "Announcements",
+    "allAnnouncements": "All announcements",
+    "noAnnouncements": "No announcements yet",
+    "push": "Push",
     "fullSettings": "Full settings"
   },
   "nav": {
@@ -25,7 +30,8 @@
     "strategies": "Custom Strategies",
     "growth": "Growth",
     "growthBadges": "Level & Badges",
-    "support": "Contact support"
+    "support": "Contact support",
+    "announcements": "Announcements"
   },
   "common": {
     "loading": "Loading…",
@@ -1174,6 +1180,7 @@
       "ops": "Operations",
       "system": "System",
       "guide": "Strategy Guide",
+      "announcements": "Announcements",
       "tickets": "Tickets",
       "gamification": "Gamification",
       "competitions": "Competitions"
@@ -1269,6 +1276,42 @@
       "enable": "Enable",
       "disable": "Disable",
       "empty": "No invite links yet — create one above"
+    },
+    "announcements": {
+      "hint": "Write and publish announcements here. Users see published ones in the bell panel and on the Announcements page; drafts are admin-only. Fill in both languages; if only one is filled, the other language falls back to it.",
+      "add": "New announcement",
+      "edit": "Edit",
+      "editing": "Edit announcement",
+      "creating": "New announcement",
+      "empty": "No announcements yet. Click \"New announcement\" to start.",
+      "untitled": "Untitled announcement",
+      "published": "Published",
+      "draft": "Draft",
+      "pinned": "Pinned",
+      "titleZh": "Title (Chinese)",
+      "titleEn": "Title (English)",
+      "summaryZh": "Summary (Chinese)",
+      "summaryEn": "Summary (English)",
+      "summaryHint": "One line, shown in the bell panel and the list",
+      "cover": "Cover image (optional)",
+      "pinnedLabel": "Pin to top",
+      "publishedLabel": "Published (visible to users)",
+      "notifyLabel": "Push a notification on publish",
+      "notifyHint": "Sends one Web Push to users with notifications on; only when this save turns a draft into a published post.",
+      "translateToEn": "Translate to English",
+      "translateToZh": "Translate to Chinese",
+      "translating": "Translating…",
+      "translateNotConfigured": "Translation is unavailable (check the backend TRANSLATE_PROVIDER setting)",
+      "translateOverwriteTitle": "Overwrite existing translation?",
+      "translateOverwrite": "The target-language fields already have content; the translation will replace them.",
+      "translateDone": "Translation filled in. Review, then save.",
+      "save": "Save",
+      "saved": "Saved",
+      "deleteConfirmTitle": "Delete announcement",
+      "deleteConfirm": "It disappears for users immediately and can't be recovered. Delete?",
+      "needTitle": "A title in at least one language is required to publish",
+      "blocks": "Body",
+      "blocksHint": "Same blocks as the strategy guide: subheading, paragraph, bullet list, image (uploadable)"
     },
     "strategyGuide": {
       "hint": "Maintain the platform strategy write-ups here. Users read them under the Platform Strategies tab on the signals page. Fill in both languages; if only one is filled, the other locale falls back to it.",
@@ -1953,6 +1996,20 @@
     "s3Desc": "Once the account shows online, one-click orders from the signal panel execute straight on your MT5.",
     "bridgeNote": "Trading with a broker other than {{name}}? You'll need to keep the PRISMX Bridge app running on your own PC.",
     "bridgeCta": "See the Bridge setup"
+  },
+  "announcements": {
+    "title": "Announcements",
+    "countUnit": "posts",
+    "subtitle": "Platform updates, maintenance windows and important notices are published here.",
+    "empty": "No announcements yet",
+    "emptyHint": "New announcements appear here and in the bell at the top.",
+    "pinned": "Pinned",
+    "unread": "unread",
+    "publishedAt": "Published",
+    "back": "All announcements",
+    "notFound": "This announcement doesn't exist or was taken down",
+    "prev": "Previous",
+    "next": "Next"
   },
   "tickets": {
     "title": "Support Tickets",

@@ -66,6 +66,9 @@ interface LiveContextValue {
   // "refetch now" signal: subscribers put it in a useEffect dependency instead
   // of waiting out their own poll interval.
   closedTradeTick: number
+  // 新公告发布的计数器：每收到一条 ANNOUNCEMENT_NEW 加一，铃铛据此重新拉列表。
+  // Bumps on every ANNOUNCEMENT_NEW so the bell refetches its list.
+  announcementTick: number
 }
 
 const LiveContext = createContext<LiveContextValue | null>(null)
@@ -179,6 +182,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [loaded, setLoaded] = useState(false)
   const [backendUnreachable, setBackendUnreachable] = useState(false)
   const [closedTradeTick, setClosedTradeTick] = useState(0)
+  const [announcementTick, setAnnouncementTick] = useState(0)
 
   const refreshAll = useCallback(async () => {
     // 关键请求单独包一层，除了拿数据还要拿到「这条到底成没成」。其余请求
@@ -329,6 +333,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         // the way platform signals are).
         setStrategySignals((prev) => [msg.data as StrategySignal, ...prev].slice(0, 50))
         break
+      case 'ANNOUNCEMENT_NEW':
+        setAnnouncementTick((n) => n + 1)
+        break
       case 'ORDER_UPDATE': {
         const updated = msg.data as Order
         setOrders((prev) => {
@@ -466,11 +473,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     () => ({
       signals, strategySignals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
       anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected, backendUnreachable,
-      closedTradeTick,
+      closedTradeTick, announcementTick,
     }),
     [signals, strategySignals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
      anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected, backendUnreachable,
-     closedTradeTick]
+     closedTradeTick, announcementTick]
   )
 
   return (

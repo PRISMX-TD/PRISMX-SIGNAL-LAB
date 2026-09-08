@@ -7,6 +7,11 @@
   },
   "notifPanel": {
     "title": "通知",
+    "unread": "未读",
+    "announcements": "公告",
+    "allAnnouncements": "全部公告",
+    "noAnnouncements": "暂无公告",
+    "push": "推送",
     "fullSettings": "完整设置"
   },
   "nav": {
@@ -25,7 +30,8 @@
     "strategies": "自定义策略",
     "growth": "成长",
     "growthBadges": "等级勋章",
-    "support": "联系客服"
+    "support": "联系客服",
+    "announcements": "公告"
   },
   "common": {
     "loading": "加载中…",
@@ -1174,6 +1180,7 @@
       "ops": "运营设置",
       "system": "系统参数",
       "guide": "策略介绍",
+      "announcements": "公告",
       "tickets": "工单管理",
       "gamification": "游戏化",
       "competitions": "比赛"
@@ -1269,6 +1276,42 @@
       "enable": "启用",
       "disable": "停用",
       "empty": "还没有邀请链接，先在上方生成一条"
+    },
+    "announcements": {
+      "hint": "在这里撰写并发布公告。用户会在顶栏铃铛面板与「公告」页看到已发布的公告；草稿只有管理员可见。中英文都填写；只填一种时，另一种语言的界面会回落显示已填的那一份。",
+      "add": "新建公告",
+      "edit": "编辑",
+      "editing": "编辑公告",
+      "creating": "新建公告",
+      "empty": "还没有公告，点「新建公告」开始。",
+      "untitled": "未命名公告",
+      "published": "已发布",
+      "draft": "草稿",
+      "pinned": "置顶",
+      "titleZh": "标题（中文）",
+      "titleEn": "标题（英文）",
+      "summaryZh": "摘要（中文）",
+      "summaryEn": "摘要（英文）",
+      "summaryHint": "一句话，显示在铃铛面板与列表里",
+      "cover": "封面图（可选）",
+      "pinnedLabel": "置顶显示",
+      "publishedLabel": "发布（对用户可见）",
+      "notifyLabel": "发布时推送通知",
+      "notifyHint": "给开启了通知的用户发一条 Web Push，只在本次由草稿变为发布时生效。",
+      "translateToEn": "一键翻译成英文",
+      "translateToZh": "一键翻译成中文",
+      "translating": "翻译中…",
+      "translateNotConfigured": "翻译服务不可用（检查后端 TRANSLATE_PROVIDER 配置）",
+      "translateOverwriteTitle": "覆盖已有译文？",
+      "translateOverwrite": "目标语言的字段里已经有内容，翻译结果会覆盖它们。",
+      "translateDone": "已填入译文，请检查后保存",
+      "save": "保存",
+      "saved": "已保存",
+      "deleteConfirmTitle": "删除公告",
+      "deleteConfirm": "删除后用户端立即消失，且不可恢复。确认删除？",
+      "needTitle": "发布前至少填写一种语言的标题",
+      "blocks": "正文",
+      "blocksHint": "与策略介绍相同的内容块：小标题、段落、要点列表、图片（可上传）"
     },
     "strategyGuide": {
       "hint": "这里维护策略介绍内容，用户在信号面板页的「策略介绍」标签下只读查看。中英文都填写；只填一种时，另一种语言的界面会回落显示已填的那一份。",
@@ -1951,6 +1994,20 @@
     "s3Desc": "账户状态变为在线后，信号面板的一键下单会直接打到你的 MT5 执行。",
     "bridgeNote": "用的是 {{name}} 以外的券商？那就需要在自己的电脑上常驻运行 PRISMX 桥接程序。",
     "bridgeCta": "查看桥接方案"
+  },
+  "announcements": {
+    "title": "公告",
+    "countUnit": "条",
+    "subtitle": "平台更新、维护安排与重要提醒都会发布在这里。",
+    "empty": "暂无公告",
+    "emptyHint": "有新公告时会在这里和顶栏的铃铛里出现。",
+    "pinned": "置顶",
+    "unread": "未读",
+    "publishedAt": "发布于",
+    "back": "全部公告",
+    "notFound": "公告不存在或已下线",
+    "prev": "上一条",
+    "next": "下一条"
   },
   "tickets": {
     "title": "客服工单",

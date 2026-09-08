@@ -101,10 +101,15 @@ EVENT_ACCOUNT_REVOKED = "account_revoked"
 # Badge-awarded notification; since 2026-09-07 treated like the account/trading
 # events: on whenever notifications are on (it used to be opt-in).
 EVENT_BADGE_AWARDED = "badge_awarded"
+# 平台公告。低频、由管理员逐条决定是否推送（AnnouncementIn.notify），用户侧与
+# 账户事件同一待遇：开了通知总开关就收。
+# Platform announcement. Rare, and each one opts into push on the admin side
+# (AnnouncementIn.notify); users receive it whenever notifications are on.
+EVENT_ANNOUNCEMENT = "announcement"
 EVENT_TYPES = {
     EVENT_ORDER_FILLED, EVENT_ORDER_REJECTED, EVENT_AUTO_MANAGE,
     EVENT_BRIDGE_OFFLINE, EVENT_ACCOUNT_REVOKED, EVENT_STRATEGY_SIGNAL,
-    EVENT_BADGE_AWARDED,
+    EVENT_BADGE_AWARDED, EVENT_ANNOUNCEMENT,
 }
 
 # 只要通知总开关打开就一定推的事件（账户 / 交易 + 成就），不看事件白名单：通知
@@ -511,6 +516,66 @@ def dispatch_ticket_reply(ticket_id: str, recipient_id: str, replier_email: str)
         logger.exception("[push] dispatch_ticket_reply error (ticket=%s, user=%s)", ticket_id, recipient_id)
     finally:
         db.close()
+
+
+# ---------- 公告推送（全体订阅用户）/ announcement push (every subscribed user) ----------
+
+
+def dispatch_announcement_push(announcement_id: str, title: str, body: str) -> None:
+    """管理员发布公告并勾选了推送：给每个「开了通知总开关、有订阅、当前在推送时段内、
+    等级允许推送」的用户推一条。逐用户复用 _event_prefs_allow，与账户事件同一套判定。
+    同步、阻塞网络 IO，调用方须放线程池（见 dispatch_announcement_push_async）。
+    An admin published an announcement with push ticked: notify every user whose
+    master switch is on, who has subscriptions, is inside their push window and
+    whose plan allows push, reusing _event_prefs_allow per user. Synchronous,
+    blocking IO; callers use the thread pool (dispatch_announcement_push_async)."""
+    pem = settings.vapid_private_key
+    if not pem or not settings.VAPID_PUBLIC_KEY:
+        return
+    db = SessionLocal()
+    try:
+        user_ids = [row[0] for row in db.query(PushSubscription.user_id).distinct().all()]
+        if not user_ids:
+            return
+        vapid_claims = {"sub": settings.VAPID_SUBJECT}
+        payload = json.dumps({
+            "title": title,
+            "body": body,
+            "icon": "/icons/icon-192.png",
+            "tag": f"prismx-announcement-{announcement_id}",
+            "url": f"/announcements/{announcement_id}",
+        }, ensure_ascii=False)
+        # 公告不紧急：正常优先级，一天内送达即可。/ Not urgent: normal priority, a day's TTL.
+        push_headers = {"Urgency": "normal", "TTL": str(86400)}
+        failed_ids: list[str] = []
+        sent = 0
+        for uid in user_ids:
+            if not _event_prefs_allow(db, uid, EVENT_ANNOUNCEMENT):
+                continue
+            subs = db.query(PushSubscription).filter(PushSubscription.user_id == uid).all()
+            for sub in subs:
+                ok, stale = _webpush_one(sub, payload, pem, vapid_claims, push_headers)
+                sent += int(ok)
+                if stale:
+                    failed_ids.append(sub.id)
+        if failed_ids:
+            db.query(PushSubscription).filter(
+                PushSubscription.id.in_(failed_ids)
+            ).delete(synchronize_session=False)
+            db.commit()
+        logger.info("[push] announcement %s pushed to %d subscriptions", announcement_id, sent)
+    except Exception:
+        logger.exception("[push] dispatch_announcement_push error (announcement=%s)", announcement_id)
+    finally:
+        db.close()
+
+
+async def dispatch_announcement_push_async(announcement_id: str, title: str, body: str) -> None:
+    """线程池里跑公告推送 / run the announcement push in a thread pool."""
+    try:
+        await run_in_threadpool(dispatch_announcement_push, announcement_id, title, body)
+    except Exception:
+        logger.exception("dispatch_announcement_push_async error")
 
 
 # ---------- 诊断用测试推送 / diagnostic test push ----------

@@ -566,6 +566,25 @@ class Settings(BaseSettings):
     # forwarding — a high cap would let concurrent uploads eat RAM.
     UPLOAD_MAX_BYTES: int = 4 * 1024 * 1024
 
+    # ---- 公告一键翻译 / Announcement one-click translation ----
+    # 只给管理员后台用：把中文公告译成英文（或反向）。TRANSLATE_PROVIDER 是逗号分隔
+    # 的候选链，按顺序尝试、首个成功者胜出：
+    #   google_free  Google 翻译公开接口，不需要密钥（非官方，可能限流）
+    #   mymemory     MyMemory 公开接口，不需要密钥（匿名每天约 5000 字符，兜底）
+    #   deepl        DeepL API，需 DEEPL_API_KEY（官方，质量最好，免费档每月 50 万字符）
+    #   anthropic    Anthropic Messages API，需 ANTHROPIC_API_KEY（可选）
+    # 默认不配任何密钥按钮就能用；配了 DeepL 把它排到链首即可。见 services/translate.py。
+    # Admin-only translation between Chinese and English. TRANSLATE_PROVIDER is a
+    # comma-separated chain tried in order: google_free (public, no key, unofficial),
+    # mymemory (public, no key, fallback), deepl (DEEPL_API_KEY; official, best
+    # quality) and anthropic (ANTHROPIC_API_KEY). Works with no keys by default;
+    # put deepl first once you have a key. See services/translate.py.
+    TRANSLATE_PROVIDER: str = "google_free,mymemory"
+    DEEPL_API_KEY: str = ""
+    ANTHROPIC_API_KEY: str = ""
+    # anthropic 后端用的模型 / model for the anthropic provider
+    TRANSLATE_MODEL: str = "claude-haiku-4-5-20251001"
+
     # pydantic-settings v2 写法；语义与旧的 `class Config` 完全一致（含默认
     # extra="forbid"——.env 里多一个未知键仍会拒绝启动，运维踩坑 #24 那条不变）。
     # pydantic-settings v2 form; identical semantics to the old inner Config class,
