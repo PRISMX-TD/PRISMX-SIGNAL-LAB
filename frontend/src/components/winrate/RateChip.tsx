@@ -5,13 +5,14 @@
 // （见 shared.ts 的 verdictOf）。
 //
 // 全部用 <span>：策略卡把这些芯片放在一个 <button> 里，按钮内只允许短语内容。
+// 样式在 winrate.css 的 .rate-chip（钟点白、胜率着色、md/sm 两档）。
 //
 // The page's one "name + rate" chip, used by the top layer's best-hours and
 // worth-a-look lists and by the strategy card's best hours / symbols. The verdict
 // carries no word and no glyph — only the tint and text colour (green from 51%,
 // amber 40-50%, red below 40%; see verdictOf in shared.ts). Spans throughout:
 // the strategy card renders these inside a <button>, which allows phrasing
-// content only.
+// content only. Styled by .rate-chip in winrate.css.
 import { useTranslation } from 'react-i18next'
 import { VERDICT_BG, VERDICT_COLOR, fmtPct, type VerdictKind } from './shared'
 
@@ -33,14 +34,12 @@ export default function RateChip({ kind, name, rate, size = 'md', aria }: {
   const label = `${aria ?? `${name} ${fmtPct(rate)}`} · ${t(`admin.winrate.verdict.${kind}`)}`
   return (
     <span
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full ${
-        size === 'sm' ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm'
-      }`}
+      className={`rate-chip${size === 'sm' ? ' sm' : ''}`}
       style={{ background: VERDICT_BG[kind], color: VERDICT_COLOR[kind] }}
       aria-label={label}
     >
-      <span className="font-semibold tabular-nums text-neutral-100">{name}</span>
-      <span className="font-semibold tabular-nums">{fmtPct(rate)}</span>
+      <span className="n num">{name}</span>
+      <span className="r num">{fmtPct(rate)}</span>
     </span>
   )
 }

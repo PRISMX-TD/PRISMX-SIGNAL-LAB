@@ -312,6 +312,8 @@
     },
     "guide": {
       "empty": "策略介绍正在整理中。",
+      "subtitle": "每条策略的设计特征：适用行情、典型持仓、风险回报比与所用指标。",
+      "countUnit": "条",
       "marketRegime": "适用行情",
       "holdingTime": "典型持仓",
       "riskReward": "风险回报比",

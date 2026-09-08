@@ -152,14 +152,17 @@ export default function StrategyAnalysis() {
   const empty = data !== null && data.overall.total.samples === 0
 
   return (
-    <div className="space-y-6">
-      <header className="px-1">
-        <h2 className="font-display text-xl font-semibold text-neutral-100">{t('signals.analysis.title')}</h2>
-        <p className="mt-1 text-sm text-neutral-500">
-          {t('signals.analysis.subtitle', { days: data?.days ?? 30 })}
-        </p>
-      </header>
+    <div>
+      {/* 页头与信号板、策略介绍同一套（.sig-board-head，见 signals.css）。
+          Same head recipe as the board and the guide. */}
+      <div className="sig-board-head">
+        <div className="sig-board-title">
+          <h2 className="font-display">{t('signals.analysis.title')}</h2>
+          <p>{t('signals.analysis.subtitle', { days: data?.days ?? 30 })}</p>
+        </div>
+      </div>
 
+      <div className="space-y-6">
       {error && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm"
              style={{ background: 'var(--down-bg)', color: 'var(--down)' }} role="alert">
@@ -180,15 +183,16 @@ export default function StrategyAnalysis() {
           <WatchNow data={data} now={now} />
 
           <section>
-            <header className="mb-3 px-1">
-              <h3 className="text-lg font-semibold text-neutral-100">{t('admin.winrate.strategies.title')}</h3>
-              <p className="mt-1 text-xs text-neutral-500">{t('admin.winrate.strategies.caption')}</p>
+            <header className="wr-sec-head">
+              <h3 className="font-display">{t('admin.winrate.strategies.title')}</h3>
+              <p>{t('admin.winrate.strategies.caption')}</p>
             </header>
             <StrategyList data={data} selected={selected} onSelect={setSelected}
                           activeKeys={activeKeys} now={now} />
           </section>
         </>
       ) : null}
+      </div>
     </div>
   )
 }

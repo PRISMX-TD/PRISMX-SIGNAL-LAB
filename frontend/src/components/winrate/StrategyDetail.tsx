@@ -35,13 +35,13 @@ function Block({ title, hint, children, className = '' }: {
   className?: string
 }) {
   return (
-    <section className={`rounded-lg p-4 ${className}`} style={{ background: 'var(--nest)' }}>
-      <h4 className="text-sm font-semibold text-neutral-100">{title}</h4>
+    <section className={`wr-block ${className}`}>
+      <h4>{title}</h4>
       {/* 提示用 12px 而不是 10px：这几行带着该块最重要的口径说明，手机上 10px
           中文会是整页最难读的字。/ 12px, not 10px: these lines carry the block's
           key caveats and 10px Chinese is the least legible text on a phone. */}
-      {hint && <p className="mt-0.5 text-xs leading-5 text-neutral-500">{hint}</p>}
-      <div className="mt-3">{children}</div>
+      {hint && <p className="hint">{hint}</p>}
+      <div className="body">{children}</div>
     </section>
   )
 }
@@ -56,17 +56,16 @@ function RateRow({ label, dotColor, bucket, tag }: {
     label, tp: bucket.hitTp, sl: bucket.hitSl, rate: hasRate ? fmtPct(bucket.winRate!) : '—',
   })
   return (
-    <div className="border-t border-white/5 py-2.5 first:border-t-0 first:pt-0">
-      <div className="flex items-center justify-between gap-3">
-        <span className="flex min-w-0 items-center gap-2 text-sm text-neutral-200">
-          <i className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: dotColor }} />
-          <span className="truncate">{label}</span>
+    <div className="wr-rate-row">
+      <div className="top">
+        <span className="lbl">
+          <i style={{ backgroundColor: dotColor }} />
+          <span className="txt">{label}</span>
           {tag && (
-            <span className="shrink-0 rounded-full px-1.5 py-px text-2xs font-medium"
-                  style={{ color: dotColor, background: 'rgba(255,255,255,0.06)' }}>{tag}</span>
+            <span className="tag" style={{ color: dotColor }}>{tag}</span>
           )}
         </span>
-        <span className="shrink-0 text-sm font-semibold tabular-nums" style={{ color: VERDICT_COLOR[kind] }}>
+        <span className="pct num" style={{ color: VERDICT_COLOR[kind] }}>
           {hasRate ? fmtPct(bucket.winRate!) : '—'}
         </span>
       </div>
@@ -97,7 +96,7 @@ function HourGrid({ hourly, now }: { hourly: HourOutcome[]; now: Date }) {
     .sort((a, b) => a.localMinutes - b.localMinutes)
 
   return (
-    <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
+    <div className="wr-hours">
       {slots.map((s) => {
         const rate = rateFromCounts(s.tp, s.sl)
         // 格子窄，百分比取整（下面的 fmtPct(..., 0)）——判定也要按整数切，
@@ -108,17 +107,16 @@ function HourGrid({ hourly, now }: { hourly: HourOutcome[]; now: Date }) {
         const label = fmtClock(s.localMinutes)
         if (!isRated(kind)) {
           return (
-            <span key={s.localMinutes} className="rounded-md px-2 py-1.5 text-center"
-                  style={{ background: 'rgba(255,255,255,0.03)' }}>
-              <span className="block text-2xs tabular-nums text-neutral-600">{label}</span>
-              <span className="block text-sm text-neutral-700">—</span>
+            <span key={s.localMinutes} className="wr-hour off">
+              <span className="h num">{label}</span>
+              <span className="p num">—</span>
             </span>
           )
         }
         return (
-          <span key={s.localMinutes} className="rounded-md px-2 py-1.5 text-center"
+          <span key={s.localMinutes} className="wr-hour"
                 style={{ background: VERDICT_BG[kind], color: VERDICT_COLOR[kind] }}>
-            <span className="block text-2xs tabular-nums text-neutral-500">{label}</span>
+            <span className="h num">{label}</span>
             {/* 判定图形（↑↓=?）已按产品要求去掉，格子只剩钟点和百分比，判定由颜色
                 承担。代价是这里变成纯颜色编码：色弱读者分不出绿和红，「差不多」和
                 「还看不出」两种灰更是分不开。下面这行 sr-only 因此保留——它是读屏器
@@ -130,7 +128,7 @@ function HourGrid({ hourly, now }: { hourly: HourOutcome[]; now: Date }) {
                 "can't tell") not at all. The sr-only line below therefore stays: it
                 is the only place a screen reader can get the verdict. */}
             <span className="sr-only">{t(`admin.winrate.verdict.${kind}`)}</span>
-            <span className="block text-sm font-semibold tabular-nums">{fmtPct(rate.winRate!, 0)}</span>
+            <span className="p num">{fmtPct(rate.winRate!, 0)}</span>
           </span>
         )
       })}
@@ -217,24 +215,22 @@ export default function StrategyDetail({ row, sessions, activeKeys, days, now, d
   const hourly = target.total.hourly
   const sessionKeys = [...sessions.map((s) => s.key), 'outside']
 
-  const pill = (active: boolean) =>
-    `rounded-full px-3 py-1 text-xs transition active:scale-[0.97] ${
-      active ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40' : 'text-neutral-400 hover:bg-white/5 hover:text-neutral-200'
-    }`
-
+  // 品种页签用全站的 .seg-pill（信号板筛选器同一套药丸），不再自带一套半透明紫。
+  // Symbol tabs use the site-wide .seg-pill (the board's filter pills), not a
+  // bespoke translucent-violet variant.
   return (
-    <div className="border-t border-white/5 px-5 pb-6 pt-5 md:px-6">
-      <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <span className="text-xs text-neutral-500">{t('admin.winrate.detail.intro')}</span>
+    <div className="wr-detail">
+      <div className="wr-detail-intro">
+        <span>{t('admin.winrate.detail.intro')}</span>
         {row.symbols.length > 0 && (
-          <div className="flex flex-wrap gap-1.5" role="tablist">
+          <div className="seg-pill flex-wrap" role="tablist">
             <button type="button" role="tab" aria-selected={effectiveTab === 'all'}
-                    onClick={() => setSymbolTab('all')} className={pill(effectiveTab === 'all')}>
+                    onClick={() => setSymbolTab('all')} className={effectiveTab === 'all' ? 'on' : ''}>
               {t('admin.winrate.detail.allSymbols')}
             </button>
             {row.symbols.map((s) => (
               <button key={s.symbol} type="button" role="tab" aria-selected={effectiveTab === s.symbol}
-                      onClick={() => setSymbolTab(s.symbol)} className={`${pill(effectiveTab === s.symbol)} tabular-nums`}>
+                      onClick={() => setSymbolTab(s.symbol)} className={`num${effectiveTab === s.symbol ? ' on' : ''}`}>
                 {s.symbol}
               </button>
             ))}

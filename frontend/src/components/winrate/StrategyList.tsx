@@ -50,12 +50,12 @@ function ChipGroup({ label, chips, empty }: {
 }) {
   const { t } = useTranslation()
   return (
-    <span className="block min-w-0">
-      <span className="block text-2xs uppercase tracking-wider text-neutral-500">{label}</span>
+    <span className="wr-card-cell">
+      <span className="wr-cap">{label}</span>
       {empty ? (
-        <span className="mt-1.5 block text-sm text-neutral-600">{t('admin.winrate.strategies.tooThin')}</span>
+        <span className="wr-thin">{t('admin.winrate.strategies.tooThin')}</span>
       ) : (
-        <span className="mt-1.5 flex flex-wrap gap-1.5">{chips}</span>
+        <span className="wr-chips-sm">{chips}</span>
       )}
     </span>
   )
@@ -104,7 +104,7 @@ function StrategyCard({ row, index, open, onToggle, data, activeKeys, now, cardS
   return (
     <article
       aria-label={name}
-      className={`glass animate-fade-in-up overflow-hidden ${open ? 'ring-1 ring-prism-400/40' : ''}`}
+      className={`card glass animate-fade-in-up overflow-hidden wr-card${open ? ' open' : ''}`}
       style={{ animationDelay: `${Math.min(index, 8) * 60}ms` }}
     >
       {/* ⚠ 开合按钮**铺满整行、垫在内容底下**，而不是把内容包进按钮里。
@@ -135,18 +135,18 @@ function StrategyCard({ row, index, open, onToggle, data, activeKeys, now, cardS
           // offset, but this button fills the card and an outside ring is clipped
           // by the article's overflow-hidden. Inset 3px and follow the card radius
           // so the corners survive too.
-          className="peer absolute inset-0 z-0 w-full rounded-[22px] focus-visible:outline-offset-[-3px]"
+          className="peer absolute inset-0 z-0 w-full rounded-[24px] focus-visible:outline-offset-[-3px]"
         >
           <span className="sr-only">
             {open ? t('admin.winrate.strategies.collapse') : t('admin.winrate.strategies.expand')}｜{name}
           </span>
         </button>
 
-        <div className="pointer-events-none relative z-10 grid w-full items-center gap-x-6 gap-y-4 p-5 text-left transition peer-active:scale-[0.995] md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1.6fr)_auto] md:p-6">
-          <span className="block min-w-0">
-            <span className="block truncate text-base font-semibold text-neutral-100">{name}</span>
+        <div className="pointer-events-none relative z-10 w-full transition peer-active:scale-[0.995] wr-card-row">
+          <span className="wr-card-cell">
+            <span className="wr-card-name font-display">{name}</span>
             {facts.length > 0 && (
-              <span className="mt-1 block text-xs tabular-nums text-neutral-500">{facts.join(' · ')}</span>
+              <span className="wr-card-fact">{facts.join(' · ')}</span>
             )}
           </span>
 
@@ -154,12 +154,12 @@ function StrategyCard({ row, index, open, onToggle, data, activeKeys, now, cardS
               按钮、把卡片折叠掉。
               This cell must take pointer events back, or a click falls through to
               the toggle button underneath and collapses the card. */}
-          <span className="pointer-events-auto block min-w-0">
-            <span className="block text-2xs uppercase tracking-wider text-neutral-500">
+          <span className="pointer-events-auto wr-card-cell">
+            <span className="wr-cap">
               {t('admin.winrate.strategies.symbolLabel')}
             </span>
             {symbol ? (
-              <span className="mt-1.5 block">
+              <span className="block">
                 <Select
                   className="tabular-nums"
                   ariaLabel={t('dashboard.sessionWinrate.pickSymbol')}
@@ -169,7 +169,7 @@ function StrategyCard({ row, index, open, onToggle, data, activeKeys, now, cardS
                 />
               </span>
             ) : (
-              <span className="mt-1.5 block text-sm text-neutral-600">{t('admin.winrate.strategies.tooThin')}</span>
+              <span className="wr-thin">{t('admin.winrate.strategies.tooThin')}</span>
             )}
           </span>
 
@@ -182,13 +182,14 @@ function StrategyCard({ row, index, open, onToggle, data, activeKeys, now, cardS
             ))}
           />
 
-          <span className="flex items-center gap-1.5 text-xs text-neutral-500 md:justify-self-end">
-            <span className="md:hidden">{open ? t('admin.winrate.strategies.collapse') : t('admin.winrate.strategies.expand')}</span>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6"
-                 strokeLinecap="round" strokeLinejoin="round" aria-hidden
-                 className={`transition-transform duration-300 ${open ? 'rotate-180' : ''}`}>
-              <path d="m4 6 4 4 4-4" />
-            </svg>
+          <span className="wr-chev lg:justify-self-end">
+            <span className="lg:hidden">{open ? t('admin.winrate.strategies.collapse') : t('admin.winrate.strategies.expand')}</span>
+            <i>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6"
+                   strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="m4 6 4 4 4-4" />
+              </svg>
+            </i>
           </span>
         </div>
       </div>
@@ -232,7 +233,7 @@ export default function StrategyList({ data, selected, onSelect, activeKeys, now
   // One symbol governs every card; see useCardSymbol.
   const { symbol: cardSymbol, choose: onSymbol } = useCardSymbol()
   return (
-    <div className="space-y-3">
+    <div className="wr-list">
       {data.strategies.map((row, i) => (
         <StrategyCard
           key={row.strategy}

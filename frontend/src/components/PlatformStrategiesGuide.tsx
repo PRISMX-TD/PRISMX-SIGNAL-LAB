@@ -9,6 +9,11 @@
 // 全量记录。这里只描述策略的设计特征——适用行情、持仓时长、风险回报比设计值、
 // 所用指标。风险回报比是策略参数（下单时的止损止盈之比），不是业绩承诺。
 //
+// 2026-09-08 版式重做：原来是两列小卡片（三行灰字事实 + 三行标签），三条内容
+// 时第三张孤零零挂在第二行。改成**整行目录牌**：每条策略一整行，左边策略名用
+// 展示字宽放到 26px、一句话简介、品种身份芯片 / 周期轨道 / 指标；右边三项设计
+// 参数，风险回报比用与信号牌同一条风险｜回报尺画出来。整行不受条目数影响。
+//
 // Platform strategy write-ups (read-only), the second tab of the signals page.
 //
 // Content is admin-maintained (Admin page → Strategy write-ups) rather than
@@ -22,38 +27,20 @@
 // and a complete record. This describes design characteristics only — market
 // regime, holding time, designed risk:reward, indicators used. Risk:reward is a
 // strategy parameter (the SL/TP ratio at order time), not a performance claim.
+//
+// Relaid 2026-09-08 as full-width catalogue rows (name at display width, one-line
+// summary, symbol chips / timeframe track / indicators on the left; three design
+// facts on the right with the R:R drawn as the signal card's risk|reward rule).
+// A row layout does not orphan the third entry the way a two-column grid did.
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { signalApi } from '../api/client'
 import { localizeApiError } from '../api/utils'
-import { pick } from './strategyGuide'
+import { IndicatorList, RiskRewardFigure, SpecFact, SymbolChips, TimeframeTrack, pick } from './strategyGuide'
+import { SkeletonBlock } from './Skeleton'
 import type { PlatformStrategy } from '../api/types'
 import { safeHttpUrl } from '../utils/safeUrl'
-
-function TagRow({ label, values }: { label: string; values: string[] }) {
-  if (values.length === 0) return null
-  return (
-    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1.5">
-      <span className="text-xs text-neutral-500">{label}</span>
-      {values.map((v) => (
-        <span key={v} className="rounded-md bg-white/5 px-2 py-0.5 text-xs text-neutral-300">
-          {v}
-        </span>
-      ))}
-    </div>
-  )
-}
-
-function FactRow({ label, value }: { label: string; value: string }) {
-  if (!value) return null
-  return (
-    <div className="flex items-baseline gap-2">
-      <span className="shrink-0 text-xs text-neutral-500">{label}</span>
-      <span className="text-xs text-neutral-300">{value}</span>
-    </div>
-  )
-}
 
 export default function PlatformStrategiesGuide() {
   const { t, i18n } = useTranslation()
@@ -82,83 +69,90 @@ export default function PlatformStrategiesGuide() {
     }
   }, [])
 
-  if (loading) {
-    return (
-      <div className="glass flat-card flex items-center justify-center py-16">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-prism-600/30 border-t-prism-500" />
-      </div>
-    )
-  }
-
-  if (error) {
-    return <div className="glass flat-card py-12 text-center text-sm text-down">{error}</div>
-  }
-
-  if (items.length === 0) {
-    return (
-      <div className="glass flat-card py-12 text-center text-sm text-neutral-500">
-        {t('signals.guide.empty')}
-      </div>
-    )
-  }
-
   return (
     <div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        {items.map((s) => {
-          const name = pick(s.nameZh, s.nameEn, isZh)
-          const summary = pick(s.summaryZh, s.summaryEn, isZh)
-          const regime = pick(s.marketRegimeZh, s.marketRegimeEn, isZh)
-          const holding = pick(s.holdingTimeZh, s.holdingTimeEn, isZh)
-
-          // 整卡是一个链接，而不是卡内再放一个「查看详情」按钮：整卡可点的命中
-          // 区域大得多，移动端尤其明显；而卡内嵌按钮又会让卡片本身该不该可点变
-          // 得含混。/ The whole card is one link rather than carrying a "view
-          // details" button: a full-card target is far easier to hit, especially
-          // on mobile, and a nested button muddies whether the card itself is
-          // clickable.
-          return (
-            <Link
-              key={s.id}
-              to={`/app/strategy/${s.id}`}
-              className="glass flat-card group overflow-hidden p-0 transition-colors hover:bg-white/[0.04]"
-            >
-              {safeHttpUrl(s.imageUrl) && (
-                <img
-                  src={safeHttpUrl(s.imageUrl)}
-                  alt={name}
-                  loading="lazy"
-                  className="h-36 w-full object-cover"
-                />
-              )}
-              <div className="p-5">
-                <h3 className="font-display text-base font-bold text-neutral-100">{name}</h3>
-                {summary && <p className="mt-1.5 text-sm text-neutral-400">{summary}</p>}
-
-                <div className="mt-4 space-y-1.5">
-                  <FactRow label={t('signals.guide.marketRegime')} value={regime} />
-                  <FactRow label={t('signals.guide.holdingTime')} value={holding} />
-                  {/* 风险回报比是下单参数（止损:止盈），不是历史业绩
-                      Risk:reward is an order parameter (SL:TP), not past performance */}
-                  <FactRow label={t('signals.guide.riskReward')} value={s.riskReward} />
-                </div>
-
-                <div className="mt-3 space-y-2">
-                  <TagRow label={t('signals.guide.symbols')} values={s.symbols} />
-                  <TagRow label={t('signals.guide.timeframes')} values={s.timeframes} />
-                  <TagRow label={t('signals.guide.indicators')} values={s.indicators} />
-                </div>
-
-                <span className="mt-4 inline-block text-xs text-prism-300 transition-colors group-hover:text-prism-200">
-                  {t('signals.guide.readMore')} →
-                </span>
-              </div>
-            </Link>
-          )
-        })}
+      {/* 页头与信号板同一套：标题 + 计数 + 副题。/ Same head recipe as the board. */}
+      <div className="sig-board-head">
+        <div className="sig-board-title">
+          <h2 className="font-display">
+            {t('signals.tabs.platformStrategies')}
+            {!loading && !error && items.length > 0 && (
+              <span className="sig-board-count">
+                <b className="num">{items.length}</b>
+                <span>{t('signals.guide.countUnit')}</span>
+              </span>
+            )}
+          </h2>
+          <p>{t('signals.guide.subtitle')}</p>
+        </div>
       </div>
 
-      <p className="mt-5 text-xs leading-relaxed text-neutral-500">{t('signals.guide.disclaimer')}</p>
+      {loading ? (
+        // 骨架贴合最终形状（两整行牌），不用转圈。/ Skeleton in the final shape.
+        <div className="guide-list" aria-busy="true">
+          <SkeletonBlock height={188} radius={24} />
+          <SkeletonBlock height={188} radius={24} />
+        </div>
+      ) : error ? (
+        <div className="sig-empty text-down">{error}</div>
+      ) : items.length === 0 ? (
+        <div className="sig-empty">{t('signals.guide.empty')}</div>
+      ) : (
+        <div className="guide-list">
+          {items.map((s) => {
+            const name = pick(s.nameZh, s.nameEn, isZh)
+            const summary = pick(s.summaryZh, s.summaryEn, isZh)
+            const regime = pick(s.marketRegimeZh, s.marketRegimeEn, isZh)
+            const holding = pick(s.holdingTimeZh, s.holdingTimeEn, isZh)
+            const img = safeHttpUrl(s.imageUrl)
+
+            // 整牌是一个链接，而不是牌内再放一个「查看详情」按钮：整牌可点的命中
+            // 区域大得多，移动端尤其明显；而牌内嵌按钮又会让牌本身该不该可点变
+            // 得含混。/ The whole card is one link rather than carrying a "view
+            // details" button: a full-card target is far easier to hit, especially
+            // on mobile, and a nested button muddies whether the card itself is
+            // clickable.
+            return (
+              <Link
+                key={s.id}
+                to={`/app/strategy/${s.id}`}
+                className={`card glass guide-row${img ? ' has-img' : ''}`}
+              >
+                {img && (
+                  <img src={img} alt="" loading="lazy" className="guide-row-img" />
+                )}
+                <div className="guide-row-main">
+                  <h3 className="font-display">{name}</h3>
+                  {summary && <p>{summary}</p>}
+                  <div className="guide-row-meta">
+                    <SymbolChips symbols={s.symbols} />
+                    <TimeframeTrack timeframes={s.timeframes} />
+                    <IndicatorList indicators={s.indicators} />
+                  </div>
+                </div>
+
+                {/* 三项设计参数。风险回报比是下单参数（止损:止盈），不是历史业绩。
+                    Three design facts. Risk:reward is an order parameter (SL:TP),
+                    not past performance. */}
+                <div className="guide-row-spec">
+                  <SpecFact caption={t('signals.guide.marketRegime')} value={regime} />
+                  <SpecFact caption={t('signals.guide.holdingTime')} value={holding} />
+                  <RiskRewardFigure raw={s.riskReward} caption={t('signals.guide.riskReward')} />
+                </div>
+
+                <span className="guide-row-more">
+                  {t('signals.guide.readMore')}
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6" /></svg>
+                </span>
+              </Link>
+            )
+          })}
+        </div>
+      )}
+
+      {!loading && !error && items.length > 0 && (
+        <p className="guide-disclaimer">{t('signals.guide.disclaimer')}</p>
+      )}
     </div>
   )
 }

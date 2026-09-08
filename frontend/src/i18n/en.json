@@ -312,6 +312,8 @@
     },
     "guide": {
       "empty": "Strategy write-ups are being prepared.",
+      "subtitle": "How each strategy is designed: market regime, holding time, risk:reward and the indicators it uses.",
+      "countUnit": "strategies",
       "marketRegime": "Market",
       "holdingTime": "Holding time",
       "riskReward": "Risk:reward",

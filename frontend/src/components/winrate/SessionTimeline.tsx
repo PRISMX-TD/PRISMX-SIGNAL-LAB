@@ -25,7 +25,7 @@ const W = 1440 // 1 分钟 = 1 单位 / one unit per minute
 // lines thin out from every 3h to every 6h; at ~300px wide, eight of them blur
 // into a grey wash.
 const SIZE = {
-  full: { h: 30, band: 6, y: { asia: 2, europe: 12, newyork: 22 }, gridEvery: 180, ticks: [0, 360, 720, 1080], showNow: true },
+  full: { h: 36, band: 8, y: { asia: 2, europe: 14, newyork: 26 }, gridEvery: 180, ticks: [0, 360, 720, 1080], showNow: true },
   compact: { h: 20, band: 5, y: { asia: 0, europe: 7, newyork: 14 }, gridEvery: 360, ticks: [0, 360, 720, 1080], showNow: false },
 } as const
 // 0.7：在 --surface 上合成后三条带色度够、又不压过白色游标（见 git 历史里的 dataviz 校验）。
@@ -45,19 +45,18 @@ export default function SessionTimeline({
   return (
     <div>
       {variant === 'full' && (
-      <ul className="space-y-2">
+      <ul className="wr-tl-rows">
         {sessions.map((s) => {
           const win = localWindow(s, now)
           const color = SESSION_COLORS[s.key] ?? SESSION_COLORS.outside
           const active = sessionStatus(s, now).state === 'active'
           return (
-            <li key={s.key} className="flex items-center justify-between gap-3 text-sm">
-              <span className={`flex items-center gap-2 ${active ? 'text-neutral-100' : 'text-neutral-400'}`}>
-                <i className={`h-2 w-2 shrink-0 rounded-full ${active ? 'animate-breathe' : ''}`}
-                   style={{ backgroundColor: color }} />
+            <li key={s.key} className={`wr-tl-row${active ? ' on' : ''}`}>
+              <span className="nm">
+                <i className={active ? 'animate-breathe' : ''} style={{ backgroundColor: color }} />
                 {t(`admin.winrate.session.${s.key}`)}
               </span>
-              <span className="tabular-nums text-neutral-500">
+              <span className="win num">
                 {t('admin.winrate.timeline.yourTime', { start: win.start, end: win.end })}
               </span>
             </li>
@@ -66,7 +65,7 @@ export default function SessionTimeline({
       </ul>
       )}
 
-      <div className={variant === 'full' ? 'mt-4' : ''}>
+      <div className={variant === 'full' ? 'wr-tl-strip' : ''}>
         <svg viewBox={`0 0 ${W} ${H}`} className="block w-full" style={{ height: H }}
              preserveAspectRatio="none" role="group" aria-label={t('admin.winrate.timeline.label')}>
           {gridLines.map((x) => (
@@ -95,7 +94,7 @@ export default function SessionTimeline({
           {/* 当前时刻游标 / the now cursor */}
           <line x1={nowX} y1={0} x2={nowX} y2={H} stroke="#fff" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
         </svg>
-        <div className="relative mt-1 h-4 text-2xs tabular-nums text-neutral-500">
+        <div className="wr-tl-ticks num">
           {sz.ticks.map((m) => (
             <span key={m} className="absolute" style={{ left: `${(m / W) * 100}%` }}>{fmtClock(m)}</span>
           ))}

@@ -108,11 +108,11 @@ const pickHours = (
 function Group({ label, hint, children }: { label: string; hint: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-2xs uppercase tracking-wider text-neutral-500">
+      <p className="wr-cap">
         {label}
-        <span className="ml-2 normal-case tracking-normal text-neutral-600">{hint}</span>
+        <span className="hint">{hint}</span>
       </p>
-      <div className="mt-2">{children}</div>
+      {children}
     </div>
   )
 }
@@ -140,14 +140,13 @@ function SessionBlock({ data, symbolRow, sessionKey, title, minutesLeft, now, pi
     <div>
       {/* 真正的标题用 h3：读屏器按标题跳转时能落到"现在：欧洲盘"上。
           A real h3 so heading navigation lands on "Now: European". */}
-      <h3 className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className="flex items-center gap-2 font-display text-xl font-semibold text-neutral-50">
-          <i className={`h-2.5 w-2.5 shrink-0 rounded-full ${minutesLeft !== undefined ? 'animate-breathe' : ''}`}
-             style={{ backgroundColor: color }} />
+      <h3 className="wr-now-title">
+        <span className="name font-display">
+          <i className={minutesLeft !== undefined ? 'animate-breathe' : ''} style={{ backgroundColor: color }} />
           {title}
         </span>
         {minutesLeft !== undefined && (
-          <span className="text-sm font-medium tabular-nums" style={{ color: 'var(--up)' }}>
+          <span className="left">
             {t('admin.winrate.watch.nowLeft', { time: fmtDurationHm(minutesLeft) })}
           </span>
         )}
@@ -160,19 +159,18 @@ function SessionBlock({ data, symbolRow, sessionKey, title, minutesLeft, now, pi
           not belong in front of it. */}
       {pickers}
 
-      <div className="mt-3 space-y-4">
+      <div className="wr-groups">
         <Group label={t('admin.winrate.watch.hoursGood')} hint={t('admin.winrate.watch.hoursHint', { days: data.days })}>
           {hours.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
+            <div className="wr-chips">
               {hours.map((h) => (
                 <RateChip key={h.localMinutes} kind={h.kind} name={fmtClock(h.localMinutes)} rate={h.rate} />
               ))}
             </div>
           ) : (
-            <p className="text-sm text-neutral-500">{t('admin.winrate.watch.hoursNone', { days: data.days })}</p>
+            <p className="wr-none">{t('admin.winrate.watch.hoursNone', { days: data.days })}</p>
           )}
         </Group>
-
       </div>
     </div>
   )
@@ -200,7 +198,7 @@ export default function WatchNow({ data, now }: { data: AdminStrategyWinRate; no
   // hour rate pooled over every strategy and symbol points at no action anyone can
   // take.
   const pickers = pick && row ? (
-    <div className="mt-3 flex flex-wrap items-center gap-2">
+    <div className="wr-pickers">
       <Select
         className="min-w-0"
         ariaLabel={t('dashboard.sessionWinrate.pickStrategy')}
@@ -225,12 +223,12 @@ export default function WatchNow({ data, now }: { data: AdminStrategyWinRate; no
     .filter((x): x is { s: typeof x.s; st: { state: 'upcoming'; minutesToStart: number } } => x.st.state === 'upcoming')
     .sort((a, b) => a.st.minutesToStart - b.st.minutesToStart)[0]
   return (
-    <section className="glass animate-fade-in-up p-6 md:p-8">
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+    <section className="card glass animate-fade-in-up wr-now">
+      <div className="wr-now-grid">
         <div className="min-w-0">
-          <h2 className="text-2xs uppercase tracking-wider text-neutral-500">{t('admin.winrate.watch.title')}</h2>
+          <h2 className="wr-cap">{t('admin.winrate.watch.title')}</h2>
 
-          <div className="mt-3 space-y-6">
+          <div className="space-y-8">
             {active.length > 0 ? (
               active.map(({ s, st }, i) => (
                 <SessionBlock key={s.key} data={data} symbolRow={symbolRow} sessionKey={s.key} now={now}
@@ -252,8 +250,8 @@ export default function WatchNow({ data, now }: { data: AdminStrategyWinRate; no
               single number answers; when that session is actually good is said by
               the block above, once it opens. */}
           {next && (
-            <p className="mt-6 flex flex-wrap items-center gap-x-2 border-t border-white/5 pt-4 text-sm text-neutral-200">
-              <i className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: SESSION_COLORS[next.s.key] }} />
+            <p className="wr-next">
+              <i style={{ backgroundColor: SESSION_COLORS[next.s.key] }} />
               {t('admin.winrate.watch.next', {
                 name: t(`admin.winrate.session.${next.s.key}`), time: fmtDurationHm(next.st.minutesToStart),
               })}
@@ -261,8 +259,8 @@ export default function WatchNow({ data, now }: { data: AdminStrategyWinRate; no
           )}
         </div>
 
-        <aside className="min-w-0 lg:border-l lg:border-white/5 lg:pl-8">
-          <h3 className="mb-3 text-2xs uppercase tracking-wider text-neutral-500">{t('admin.winrate.watch.timelineTitle')}</h3>
+        <aside className="wr-aside">
+          <h3 className="wr-cap">{t('admin.winrate.watch.timelineTitle')}</h3>
           <SessionTimeline sessions={data.sessions} now={now} />
         </aside>
       </div>

@@ -1,4 +1,4 @@
-// 平台策略详情页（/app/strategy/:id）。从信号面板页的「平台策略」标签点进来。
+// 平台策略详情页（/app/strategy/:id）。从信号面板页的「策略介绍」标签点进来。
 //
 // 数据来源是同一个只读端点 GET /signals/platform-strategies（只返回已发布条目），
 // 拉全量后按 id 取。没有做单条端点：整个清单是管理员手工维护的十几条内容，一次
@@ -7,8 +7,12 @@
 // 刻意不展示胜率、盈亏比等业绩数字：真实战绩的唯一来源是信号自身的 result 判定
 //（后端 services/signal_resolution.py）。这里只描述策略的设计特征。
 //
-// Platform strategy detail page (/app/strategy/:id), reached from the "Platform
-// strategies" tab on the signals page.
+// 2026-09-08 版式重做：大标题（40px 展示字宽）+ 一句话；正文在左，右侧一栏
+// **规格栏**（风险回报比大数字 + 风险｜回报尺、适用行情、典型持仓、品种、周期、
+// 指标）在桌面端随滚动吸顶——读长文时设计参数一直在手边。窄屏规格栏排在正文前。
+//
+// Platform strategy detail page (/app/strategy/:id), reached from the "Strategy
+// guide" tab on the signals page.
 //
 // Data comes from the same read-only GET /signals/platform-strategies (published
 // entries only); the list is fetched whole and the entry picked by id. There is
@@ -19,39 +23,22 @@
 // Deliberately shows no win-rate or profit-factor figures: the only source of
 // real performance is each signal's own result adjudication (backend
 // services/signal_resolution.py). This describes design characteristics only.
+//
+// Relaid 2026-09-08: display headline plus lede; article on the left, a sticky
+// spec column on the right (R:R figure over the risk|reward rule, regime,
+// holding time, symbols, timeframes, indicators). Narrow screens put the spec
+// column first.
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { safeHttpUrl } from '../utils/safeUrl'
 import { signalApi } from '../api/client'
 import { localizeApiError } from '../api/utils'
-import { pick, StrategyDetail } from '../components/strategyGuide'
+import {
+  IndicatorList, RiskRewardFigure, SpecFact, StrategyDetail, SymbolChips, TimeframeTrack, pick,
+} from '../components/strategyGuide'
 import { SkeletonPage } from '../components/Skeleton'
 import type { PlatformStrategy } from '../api/types'
-
-function TagRow({ label, values }: { label: string; values: string[] }) {
-  if (!values || values.length === 0) return null
-  return (
-    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1.5">
-      <span className="text-xs text-neutral-500">{label}</span>
-      {values.map((v) => (
-        <span key={v} className="rounded-md bg-white/5 px-2 py-0.5 text-xs text-neutral-300">
-          {v}
-        </span>
-      ))}
-    </div>
-  )
-}
-
-function Fact({ label, value }: { label: string; value: string }) {
-  if (!value) return null
-  return (
-    <div>
-      <div className="text-xs text-neutral-500">{label}</div>
-      <div className="mt-0.5 text-sm text-neutral-200">{value}</div>
-    </div>
-  )
-}
 
 export default function StrategyGuidePage() {
   const { t, i18n } = useTranslation()
@@ -90,7 +77,7 @@ export default function StrategyGuidePage() {
 
   if (loading) {
     return (
-      <div className="max-w-[900px] mx-auto">
+      <div className="guide-detail">
         <SkeletonPage cards={2} />
       </div>
     )
@@ -104,7 +91,7 @@ export default function StrategyGuidePage() {
     return (
       <div className="mx-auto max-w-2xl py-16 text-center">
         <p className="text-sm text-neutral-400">{error || t('signals.guide.notFound')}</p>
-        <Link to="/app" className="btn-ghost mt-5 inline-block px-4 py-2 text-sm">
+        <Link to="/app?tab=strategies" className="btn btn-ghost mt-5 inline-flex">
           {t('signals.guide.backToList')}
         </Link>
       </div>
@@ -113,72 +100,79 @@ export default function StrategyGuidePage() {
 
   const name = pick(strategy.nameZh, strategy.nameEn, isZh)
   const summary = pick(strategy.summaryZh, strategy.summaryEn, isZh)
+  const img = safeHttpUrl(strategy.imageUrl)
   const prev = index > 0 ? sorted[index - 1] : null
   const next = index < sorted.length - 1 ? sorted[index + 1] : null
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <Link to="/app" className="text-xs text-neutral-400 transition-colors hover:text-neutral-200">
-        ← {t('signals.guide.backToList')}
+    <div className="guide-detail">
+      {/* 返回到策略介绍页签本身，而不是信号板：来处就是那个页签。
+          Back to the guide tab itself, not the board: that is where the reader came from. */}
+      <Link to="/app?tab=strategies" className="guide-back">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+        {t('signals.guide.backToList')}
       </Link>
 
-      <h1 className="mt-4 font-display text-2xl font-bold text-neutral-100 sm:text-3xl">{name}</h1>
-      {summary && <p className="mt-2 text-sm leading-relaxed text-neutral-400">{summary}</p>}
+      <header className="guide-detail-head">
+        <h1 className="font-display-xl">{name}</h1>
+        {summary && <p className="lede">{summary}</p>}
+      </header>
 
-      {safeHttpUrl(strategy.imageUrl) && (
-        <img
-          src={safeHttpUrl(strategy.imageUrl)}
-          alt={name}
-          className="mt-6 max-h-72 w-full rounded-2xl border border-white/10 object-contain"
-        />
-      )}
+      <div className="guide-detail-body">
+        <article className="guide-article">
+          {img && <img src={img} alt={name} className="guide-hero-img" />}
+          <StrategyDetail strategy={strategy} isZh={isZh} />
+        </article>
 
-      {/* 设计参数概览。风险回报比是下单时的止损止盈之比，属于策略参数，不是业绩。
-          Design parameters. Risk:reward is the SL/TP ratio at order time — a
-          strategy parameter, not performance. */}
-      <div className="glass mt-6 grid gap-4 p-5 sm:grid-cols-3">
-        <Fact label={t('signals.guide.marketRegime')} value={pick(strategy.marketRegimeZh, strategy.marketRegimeEn, isZh)} />
-        <Fact label={t('signals.guide.holdingTime')} value={pick(strategy.holdingTimeZh, strategy.holdingTimeEn, isZh)} />
-        <Fact label={t('signals.guide.riskReward')} value={strategy.riskReward} />
+        {/* 规格栏。风险回报比是下单时的止损止盈之比，属于策略参数，不是业绩。
+            Spec column. Risk:reward is the SL/TP ratio at order time — a strategy
+            parameter, not performance. */}
+        <aside className="card glass guide-aside" aria-label={t('signals.guide.riskReward')}>
+          <RiskRewardFigure raw={strategy.riskReward} caption={t('signals.guide.riskReward')} />
+          <div className="guide-aside-row">
+            <SpecFact caption={t('signals.guide.marketRegime')} value={pick(strategy.marketRegimeZh, strategy.marketRegimeEn, isZh)} />
+            <SpecFact caption={t('signals.guide.holdingTime')} value={pick(strategy.holdingTimeZh, strategy.holdingTimeEn, isZh)} />
+          </div>
+          {strategy.symbols.length > 0 && (
+            <div className="guide-aside-grp">
+              <span className="cap">{t('signals.guide.symbols')}</span>
+              <SymbolChips symbols={strategy.symbols} />
+            </div>
+          )}
+          {strategy.timeframes.length > 0 && (
+            <div className="guide-aside-grp">
+              <span className="cap">{t('signals.guide.timeframes')}</span>
+              <TimeframeTrack timeframes={strategy.timeframes} />
+            </div>
+          )}
+          {strategy.indicators.length > 0 && (
+            <div className="guide-aside-grp">
+              <span className="cap">{t('signals.guide.indicators')}</span>
+              <IndicatorList indicators={strategy.indicators} />
+            </div>
+          )}
+        </aside>
       </div>
 
-      <div className="mt-4 space-y-2">
-        <TagRow label={t('signals.guide.symbols')} values={strategy.symbols} />
-        <TagRow label={t('signals.guide.timeframes')} values={strategy.timeframes} />
-        <TagRow label={t('signals.guide.indicators')} values={strategy.indicators} />
-      </div>
-
-      <article className="mt-8">
-        <StrategyDetail strategy={strategy} isZh={isZh} />
-      </article>
-
-      <p className="mt-10 border-t border-white/10 pt-5 text-xs leading-relaxed text-neutral-500">
-        {t('signals.guide.disclaimer')}
-      </p>
+      <p className="guide-disclaimer">{t('signals.guide.disclaimer')}</p>
 
       {(prev || next) && (
-        <nav className="mt-6 flex justify-between gap-4">
+        <nav className="guide-pager" aria-label={`${t('signals.guide.prev')} / ${t('signals.guide.next')}`}>
           {prev ? (
-            <Link
-              to={`/app/strategy/${prev.id}`}
-              className="glass flex-1 p-4 text-left transition-colors hover:bg-white/5"
-            >
-              <div className="text-xs text-neutral-500">{t('signals.guide.prev')}</div>
-              <div className="mt-1 text-sm text-neutral-200">{pick(prev.nameZh, prev.nameEn, isZh)}</div>
+            <Link to={`/app/strategy/${prev.id}`} className="card glass prev">
+              <span className="cap">{t('signals.guide.prev')}</span>
+              <b className="font-display">{pick(prev.nameZh, prev.nameEn, isZh)}</b>
             </Link>
           ) : (
-            <div className="flex-1" />
+            <span />
           )}
           {next ? (
-            <Link
-              to={`/app/strategy/${next.id}`}
-              className="glass flex-1 p-4 text-right transition-colors hover:bg-white/5"
-            >
-              <div className="text-xs text-neutral-500">{t('signals.guide.next')}</div>
-              <div className="mt-1 text-sm text-neutral-200">{pick(next.nameZh, next.nameEn, isZh)}</div>
+            <Link to={`/app/strategy/${next.id}`} className="card glass next">
+              <span className="cap">{t('signals.guide.next')}</span>
+              <b className="font-display">{pick(next.nameZh, next.nameEn, isZh)}</b>
             </Link>
           ) : (
-            <div className="flex-1" />
+            <span />
           )}
         </nav>
       )}
