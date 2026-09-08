@@ -1,0 +1,417 @@
+/* ═════════════ 连接 MT5 / connect MT5 ═════════════
+   2026-09-08 视觉重做（页面结构与数据流不变：开户福利 → 直连 → 已绑定账号 → 折叠的桥接方案）。
+   · 直连面板分两栏：左边是券商身份（紫色圆形字母标 + 标题 + 一句话 + 一条说明），
+     右边是表单——标签在输入框上方、48px 药丸输入与按钮、报错 / 提醒 / 通过三种消息行。
+   · 已绑定账号从表格改成账本行：登录号 20px 等宽是每行的锚点，账户名与券商作署名，
+     余额 / 净值 / 杠杆三格等宽 17px，状态是一个真实语义的点 + 字，解绑是一枚安静的药丸。
+   · 桥接方案仍是折叠块，开合用 32px 圆形箭头，打开时转品牌紫。
+   材质同全站：实色面、无模糊无光晕；紫只落在字母标、计数、说明刻度与主按钮上。
+   Relaid 2026-09-08; structure and data flow unchanged. The connect panel splits
+   into broker identity (violet monogram, title, hint, one note) and a form with
+   labels above 48px pill inputs. Bound accounts move from a table to ledger rows
+   anchored by a 20px tabular login; balance / equity / leverage are three 17px
+   tabular cells; status is a real-state dot; unbind is a quiet pill. */
+
+.bind-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── 直连面板 / connect panel ── */
+.bind-connect {
+  display: grid;
+  gap: 24px;
+  padding: 28px;
+}
+.bind-broker {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.bind-broker-id {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+/* 券商字母标：与全站身份芯片同形（圆），用品牌紫实色——这是「颜料」用法，不发光。
+   Broker monogram: the identity-chip circle in flat brand violet, pigment not glow. */
+.bind-mark {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--purple);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.bind-broker-id h3 {
+  font-size: 20px;
+  line-height: 1.15;
+  font-weight: 700;
+  color: #fff;
+}
+.bind-broker-id p {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+/* 说明：一段 2px 品牌紫刻度起头（同策略详情的列表项）。
+   Note: led by a 2px violet tick, like the guide's list items. */
+.bind-note {
+  display: flex;
+  gap: 12px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-2);
+  max-width: 44ch;
+}
+.bind-note::before {
+  content: '';
+  flex: none;
+  width: 2px;
+  height: 14px;
+  margin-top: 3px;
+  border-radius: 1px;
+  background: var(--purple-hi);
+}
+.bind-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: end;
+  min-width: 0;
+}
+.bind-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.bind-field label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+.bind-field .input {
+  height: 48px;
+  padding: 0 18px;
+  border-radius: 999px;
+  font-size: 15px;
+}
+.bind-submit {
+  grid-column: 1 / -1;
+  height: 48px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.bind-msgs {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bind-msg {
+  padding: 12px 16px;
+  border-radius: var(--r-tile);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.bind-msg.err { background: var(--down-bg); color: var(--down); }
+.bind-msg.ok { background: var(--up-bg); color: var(--up); }
+.bind-msg.warn { background: var(--mid-bg); color: var(--mid); }
+
+/* ── 已绑定账号：账本行 / bound accounts as ledger rows ── */
+.bind-accts {
+  padding: 0;
+  overflow: hidden;
+}
+.bind-accts-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 24px 28px 4px;
+}
+.bind-accts-head h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+}
+.bind-accts-head b {
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--purple-hi);
+}
+.bind-acct {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) repeat(3, minmax(0, 1fr)) auto auto;
+  gap: 16px 24px;
+  align-items: center;
+  padding: 20px 28px;
+  animation: fade-in-up 0.45s var(--ease-out) both;
+}
+.bind-acct + .bind-acct {
+  border-top: 1px solid var(--line);
+}
+.bind-acct-id {
+  min-width: 0;
+}
+.bind-acct-id .login {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.bind-acct-id .login b {
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 700;
+  color: #fff;
+}
+.bind-acct-id .who {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bind-acct-id .who span {
+  color: var(--text-2);
+  font-weight: 500;
+}
+.bind-acct .k {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+.bind-acct .v {
+  display: block;
+  margin-top: 6px;
+  font-size: 17px;
+  line-height: 1;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+}
+.bind-acct .v small {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+/* 状态：点是真实状态（在线才呼吸），字跟着点走。
+   Status: a real-state dot (breathes only when online) with a matching word. */
+.bind-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.bind-state i {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.bind-state.on { color: var(--up); }
+.bind-state.on i { background: var(--up); animation: breathe 2.4s ease-in-out infinite; }
+.bind-state.off { color: var(--text-3); }
+.bind-state.warn { color: var(--mid); }
+.bind-state.warn i { background: var(--mid); }
+/* 解绑：安静的描边药丸，悬停才转跌色——它是破坏性操作，但不该在每一行都喊。
+   Unbind: a quiet outlined pill that turns down-tone only on hover. */
+.bind-unbind {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line-hi);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.bind-unbind:hover {
+  color: var(--down);
+  border-color: var(--down);
+}
+.bind-unbind:active {
+  transform: translateY(1px);
+}
+
+/* ── 桥接方案（折叠）/ bridge fallback (collapsed) ── */
+.bind-bridge {
+  padding: 0;
+  overflow: hidden;
+}
+.bind-bridge summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 28px;
+  cursor: pointer;
+  list-style: none;
+}
+.bind-bridge summary::-webkit-details-marker {
+  display: none;
+}
+.bind-bridge summary:hover {
+  background: var(--surface-2);
+}
+.bind-bridge .t {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+.bind-bridge[open] .t {
+  color: #fff;
+}
+.bind-bridge .h {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.bind-bridge .chev {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  color: var(--text-2);
+  transition: transform var(--dur-base) var(--ease-out), background-color var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out);
+}
+.bind-bridge[open] .chev {
+  transform: rotate(180deg);
+  background: var(--purple);
+  border-color: transparent;
+  color: #fff;
+}
+.bind-bridge-body {
+  border-top: 1px solid var(--line);
+  padding: 24px 28px 28px;
+}
+.bind-bridge-body h3 {
+  font-size: 17px;
+  line-height: 1.2;
+  font-weight: 700;
+  color: #fff;
+}
+.bind-bridge-body p {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-2);
+  max-width: 64ch;
+}
+.bind-feats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 0;
+  margin-top: 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.bind-feats span + span::before {
+  content: '';
+  display: inline-block;
+  width: 1px;
+  height: 12px;
+  margin: 0 12px;
+  vertical-align: -1px;
+  background: var(--line-hi);
+}
+.bind-bridge-cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+}
+.bind-bridge-cta .ver {
+  font-size: 12px;
+  opacity: 0.8;
+}
+.bind-bridge-cta .guide {
+  font-size: 13px;
+  color: var(--text-3);
+  text-decoration: none;
+}
+.bind-bridge-cta .guide:hover {
+  color: #fff;
+}
+.bind-platform {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+@media (min-width: 1024px) {
+  .bind-connect {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    gap: 40px;
+  }
+}
+@media (max-width: 1023px) {
+  .bind-acct {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .bind-acct-id {
+    grid-column: 1 / -1;
+  }
+  /* 两列时：余额｜净值 一行，杠杆｜状态 一行，解绑独占一行靠右。
+     Two columns: balance | equity, leverage | status, unbind on its own row, right. */
+  .bind-acct .bind-state {
+    justify-self: start;
+  }
+  .bind-acct .bind-unbind {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+}
+@media (max-width: 639px) {
+  .bind-connect,
+  .bind-bridge-body {
+    padding: 20px;
+  }
+  .bind-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .bind-accts-head,
+  .bind-acct {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+  .bind-bridge summary {
+    padding: 18px 20px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bind-acct { animation: none; }
+  .bind-state.on i { animation: none; }
+  .bind-bridge .chev { transition: none; }
+}
