@@ -33,7 +33,7 @@ import { SUPPORT_EMAIL } from '../config/site'
 import Logo from '../components/Logo'
 import BadgeIcon from '../components/badges/BadgeIcon'
 import PedestalStage from '../components/badges/PedestalStage'
-import type { GamificationBadge } from '../api/types'
+import type { BadgeShelf, GamificationBadge } from '../api/types'
 import PublicLanguageToggle from '../components/PublicLanguageToggle'
 import FaqSection from '../components/landing/FaqSection'
 import MobileStickyCta from '../components/landing/MobileStickyCta'
@@ -440,16 +440,16 @@ function Foot({ t }: { t: T }) {
    bug, ticker, giant outlined placings with only the champion in gold). The
    landing page draws nothing of its own here. Sample data. */
 const LEVEL_KEYS = ['novice', 'junior', 'elite', 'senior', 'chief', 'legend'] as const
-const CURRENT_LEVEL = 3
+const CURRENT_LEVEL = 5
 
-function sampleBadge(id: string, tier: number): GamificationBadge {
+function sampleBadge(id: string, tier: number, shelf: BadgeShelf = 'tiered'): GamificationBadge {
   return {
     id,
     category: '',
-    shelf: 'tiered',
+    shelf,
     closesAt: null,
     progress: null,
-    maxTier: 3,
+    maxTier: shelf === 'tiered' ? 3 : 0,
     tier,
     earned: true,
     awardedAt: null,
@@ -459,13 +459,13 @@ function sampleBadge(id: string, tier: number): GamificationBadge {
   }
 }
 // 首枚是默认（C 位），与成就页一致 / the first one is the default, centre stage
-const WORN = [sampleBadge('starter', 3), sampleBadge('winning_hand', 2), sampleBadge('arena', 1)]
+const WORN = [sampleBadge('comp_back_to_back', 0, 'special'), sampleBadge('winning_hand', 2), sampleBadge('arena', 1)]
 
 const BOARD = [
-  { r: 1, n: 'Mo***ch', a: '600 402', s: 14.2, badge: 'comp_back_to_back', tier: 0 },
+  { r: 1, n: 'Mo***ch', a: '600 402', s: 14.2, badge: 'board_return', tier: 3 },
   { r: 2, n: 'Ka***en', a: '600 118', s: 9.4, badge: 'evergreen', tier: 2 },
   { r: 3, n: 'Li***ng', a: '600 077', s: 7.8, badge: 'winning_hand', tier: 1 },
-  { r: 7, n: 'Tr***er', a: '600 231', s: 4.9, badge: 'starter', tier: 3, me: true },
+  { r: 7, n: 'Tr***er', a: '600 231', s: 4.9, badge: 'comp_back_to_back', tier: 0, me: true },
 ]
 
 function GrowthStage({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate> }) {
@@ -493,10 +493,10 @@ function GrowthStage({ t, navigate }: { t: T; navigate: ReturnType<typeof useNav
           <div className="ach-stage-l">
             <h4 className="ach-title">
               <span className="ach-lv num">L{CURRENT_LEVEL}</span>
-              <span>{t('gamification.titles.elite')}</span>
+              <span>{t('gamification.titles.chief')}</span>
             </h4>
             <p className="ach-sub">
-              {t('gamification.remainingToNext', { count: 2 })} · {t('gamification.groups.moli')}
+              {t('gamification.remainingToNext', { count: 2 })} · {t('gamification.groups.fengshen')}
             </p>
             <ol className="ach-rail" aria-label={t('gamification.levelLabel')}>
               {LEVEL_KEYS.map((key, i) => {
@@ -513,7 +513,7 @@ function GrowthStage({ t, navigate }: { t: T; navigate: ReturnType<typeof useNav
             <div className="ach-stats">
               <div>
                 <small>{t('gamification.winRateCard.combinedShort')}</small>
-                <strong className="num text-up">52.8%</strong>
+                <strong className="num text-up">58.4%</strong>
               </div>
               <div>
                 <small>{t('gamification.stage.collected')}</small>
@@ -525,7 +525,7 @@ function GrowthStage({ t, navigate }: { t: T; navigate: ReturnType<typeof useNav
               </div>
             </div>
           </div>
-          <PedestalStage badges={WORN} defaultId="starter" busy={false} onOpen={noop} onMakeDefault={noop} />
+          <PedestalStage badges={WORN} defaultId="comp_back_to_back" busy={false} onOpen={noop} onMakeDefault={noop} />
         </div>
       </div>
 
