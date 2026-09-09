@@ -297,10 +297,10 @@
     "scrToastBadge": "On the Board · Bronze",
     "ggTitle": "Growth system",
     "ggSubtitle": "Level shows tenure, badges show skill, boards show form, contests crown. All four count only live trades placed through the platform.",
-    "ggCompName": "September Live Contest",
     "ggClimb": "Climb · levels and badges",
     "ggCrown": "Crown · boards and contests",
-    "ggPrize": "12 months of PRO, plus Arena Gold"
+    "ggPrize": "The champion takes 12 months of PRO plus Arena Gold",
+    "ggArena": "Competitive contests"
   },
   "auth": {
     "loginTitle": "Sign in",

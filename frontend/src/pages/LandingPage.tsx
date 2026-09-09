@@ -544,13 +544,12 @@ function GrowthStage({ t, navigate }: { t: T; navigate: ReturnType<typeof useNav
               {t('competition.status.regOpen')}
             </span>
           </span>
-          <h3 className="cmp-hero-name">{t('landing.ggCompName')}</h3>
+          <h3 className="cmp-hero-name">{t('landing.ggArena')}</h3>
           <div className="cmp-hero-sub">
             <span className="cmp-hero-prize">
               <small>{t('competition.prizeLabel')}</small>
               {t('landing.ggPrize')}
             </span>
-            <span className="cmp-hero-when num">2026.09.15 - 2026.09.30</span>
             <span className="cmp-hero-cta">{t('competition.enterArena')}</span>
           </div>
           {/* 与比赛页同构：div 在 button 里，.cmp-ticker > div 的跑马灯规则才接得上。

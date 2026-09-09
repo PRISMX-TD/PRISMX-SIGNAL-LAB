@@ -297,10 +297,10 @@
     "scrToastBadge": "榜上有名 · 铜",
     "ggTitle": "成长体系",
     "ggSubtitle": "等级看资历，勋章看实力，榜单看状态，比赛加冕。四样都只认经平台下的实盘单。",
-    "ggCompName": "九月实盘赛",
     "ggClimb": "进阶 · 等级与勋章",
     "ggCrown": "加冕 · 排行榜与比赛",
-    "ggPrize": "PRO 12 个月，另发「赛场 · 金」"
+    "ggPrize": "冠军得 PRO 12 个月，另发「赛场 · 金」",
+    "ggArena": "竞技比赛"
   },
   "auth": {
     "loginTitle": "登录账户",
