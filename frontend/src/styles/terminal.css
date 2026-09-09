@@ -1317,6 +1317,15 @@
   }
   .ind-dlg::before { content: ""; grid-column: 1; width: 36px; height: 4px; margin: 10px auto 0; border-radius: 2px; background: var(--line-hi); }
   .ind-hd { grid-column: 1; flex-wrap: wrap; gap: 10px; padding: 10px 16px 12px; }
+  /* 搜索框在窄屏独占第二行（order 3），关闭键留在第一行——但它按文档流排在计数之后，
+     会紧贴着「已开 3 / 15」而不是靠右。这里把它推到行尾：靠右是关闭键唯一该在的位置，
+     手指也只在那一侧。桌面端 .ind-srch 自带 margin-left:auto，本来就把它顶到了右端。
+     The search box takes its own second row on narrow screens (order 3) while the close
+     button stays on the first — but in document order it follows the count and ends up
+     hugging it instead of the right edge. Push it to the end of the row: right is the only
+     place a close button belongs, and it's the side the thumb is on. On desktop
+     .ind-srch's margin-left:auto already pushes it there. */
+  .ind-close { margin-left: auto; }
   .ind-srch { order: 3; width: 100%; margin-left: 0; }
   .ind-cat { border-right: 0; }
   .ind-ed { display: none; }
