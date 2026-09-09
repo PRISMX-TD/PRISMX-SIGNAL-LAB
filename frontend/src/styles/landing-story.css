@@ -492,7 +492,12 @@
    Sized in cqw so the desktop phone and the full-bleed mobile card share one set.
    Cone and floor pool borrow the achievements stage's violet vocabulary (the one
    sanctioned use of light on the site); the reflection is a flipped, masked copy. */
-.scr-rank { padding-top: 20cqw; }
+.scr-rank {
+  /* justify-content 居中：.scr 是 flex 列，默认 normal 会让内容从顶部排下来。
+     A centred flex column; the default would stack from the top. */
+  justify-content: center;
+  padding-top: 20cqw;
+}
 .rk-stage {
   position: relative;
   flex: 0 0 auto;
@@ -557,21 +562,6 @@
 }
 @keyframes rk-float { to { transform: translateY(-1.6cqw); } }
 @media (prefers-reduced-motion: reduce) { .rk-hero { animation: none; } }
-/* 真机全出血时文字面板压在屏幕下半，称号必须落在面板上缘（约 400px）之上：
-   实测 375 宽下顶部留白 60px + 舞台 225px 会让称号顶到 364px、底到 448px，压进
-   面板 50px。收顶部留白、压舞台高度、缩主勋章，称号底缘回到约 380px（第二轮再收 4cqw，首轮 410px 仍压进面板 11px）。
-   On full-bleed phones the copy panel covers the lower half, so the title has to
-   end above the panel's top edge (about 400px). Measured at 375 wide: 60px top
-   padding plus a 225px stage put the title at 364-448px, 50px into the panel.
-   Tighter padding, a shorter stage and a smaller hero badge bring it back to ~386px. */
-@media (max-width: 1023px) {
-  .scr-rank { padding-top: 8cqw; }
-  .rk-stage { height: 46cqw; }
-  .rk-hero > .cq-svg { width: 36cqw; }
-  .rk-refl { height: 11cqw; }
-  .rk-title { margin-top: 0; }
-  .rk-side { width: 13cqw; }
-}
 
 .rk-title {
   margin-top: 1cqw;
@@ -644,7 +634,13 @@
   position: relative;
   display: grid;
   grid-template-columns: repeat(6, 1fr);
-  margin: auto 0 0;
+  /* 不用 margin-top: auto 把轨顶到屏底：那会在铭牌与轨之间留一段死白（实测
+     83px），上下两头都贴边、中间空。改成固定间距 + 容器竖向居中，整叠内容
+     一起收到画面中段。
+     No auto margin pushing the rail to the bottom: it left 83px of dead space
+     between plaque and rail, with content hugging both edges. A fixed gap plus a
+     vertically centred container gathers the whole stack into the middle. */
+  margin: 5.5cqw 0 0;
   padding: 0 1cqw;
   list-style: none;
 }
@@ -686,6 +682,36 @@
 }
 .rk-rail .on b { color: #a1a1aa; }
 .rk-rail .cur b { color: #f4f4f5; font-weight: 700; }
+
+/* ── 幕 0 的真机版式 / scene 0 on real devices ──
+   全出血时文案面板从下方压上来（面板高度随文案折行变化，375 宽实测顶边 399、
+   494 宽 432），称号必须完整落在面板上缘之上（连副标一起，实测 494 宽下要再收约 25px）。三处一起收：顶部内边距、舞台
+   高度、主勋章尺寸。padding 用 .scr.scr-rank 两个类写，否则会被文件后面那条
+   为旧首幕留的 [data-scr='0'] 单属性选择器盖掉（同权重、更靠后）。
+   同时改回顶部对齐——竖向居中会把整叠内容推到面板底下。
+   On full-bleed phones the copy panel rises from below (its height follows the
+   copy's wrapping: measured top edge 399 at 375 wide, 432 at 494), so the title
+   has to sit entirely above that edge. Three values tighten together. The padding
+   needs two classes to beat the legacy [data-scr='0'] rule further down the file,
+   and alignment returns to the top: centring would push the stack under the panel. */
+@media (max-width: 1023px) {
+  .scr.scr-rank {
+    justify-content: flex-start;
+    padding-top: 9cqw;
+  }
+  .rk-stage { height: 38cqw; }
+  .rk-hero > .cq-svg { width: 32cqw; }
+  .rk-refl { height: 10cqw; }
+  .rk-side { width: 13cqw; }
+  /* 铭牌整块不出现在真机上：面板顶边落在它中间，露出来的那半截读成"被裁掉的卡"
+     （375 宽实测露出约 50px，正好切在第一行数字上）。它本来是给桌面那块空白补
+     的料，真机这块空白被面板占满，不需要。
+     The plaque is dropped on real devices: the panel's top edge lands mid-card and
+     the exposed sliver reads as a cropped card (about 50px at 375 wide, cutting
+     through the first row of figures). It exists to fill the desktop void, and on a
+     phone the panel already fills that space. */
+  .rk-plaque { display: none; }
+}
 
 /* ── 文字面板 / text panels ── */
 .story-panel {
