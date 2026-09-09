@@ -992,6 +992,18 @@
     background: var(--line-hi);
   }
   .term-sheet .term-ph { height: 40px; padding: 0 16px; border: 0; }
+  /* 抽屉头：左侧标题 + 副信息一组，右侧 32px 圆形关闭键。
+     Sheet head: title + meta grouped left, a 32px round close button right. */
+  .term-sheet-ph { height: 48px; padding: 0 12px 0 16px; }
+  .term-sheet-ttl { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+  .term-sheet-ttl span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .term-sheet-x {
+    display: grid; place-items: center; flex: none;
+    width: 32px; height: 32px; border-radius: 50%;
+    border: 1px solid var(--line); background: var(--nest); color: var(--text-2);
+    cursor: pointer; transition: color var(--dur-fast), background-color var(--dur-fast);
+  }
+  .term-sheet-x:active { color: #fff; background: var(--nest-hi); }
   .term-sheet-body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; }
   /* 抽屉里的面用再抬一档，与抽屉底色分开。/ Inner planes step up once more. */
   .term-sheet .term-wls input, .term-sheet .term-side button, .term-sheet .term-step,

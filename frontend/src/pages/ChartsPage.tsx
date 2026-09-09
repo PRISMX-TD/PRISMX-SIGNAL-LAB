@@ -492,9 +492,18 @@ export default function ChartsPage() {
         <>
           <div className="term-scrim" onClick={() => setSheet(null)} />
           <div className="term-sheet" role="dialog" aria-modal="true">
-            <div className="term-ph">
-              <h3>{sheet === 'watchlist' ? t('charts.watchlist.title') : sheet === 'trade' ? t('charts.sheetTicket') : t('charts.openPositions')}</h3>
-              <span>{sheet === 'watchlist' ? activeSymbols.length : sheet === 'trade' ? `${symbol} · ${activeAccount ? `#${activeAccount.login}` : ''}` : accountPositions.length}</span>
+            {/* 抽屉头：标题与副信息靠左成一组，右侧是关闭按钮——抽屉本身没有别的退出手势
+                提示，点遮罩关闭对不少用户并不显然。
+                Sheet head: title and meta grouped on the left, a close button on the right —
+                the sheet offers no other visible way out, and tapping the scrim isn't obvious. */}
+            <div className="term-ph term-sheet-ph">
+              <div className="term-sheet-ttl">
+                <h3>{sheet === 'watchlist' ? t('charts.watchlist.title') : sheet === 'trade' ? t('charts.sheetTicket') : t('charts.openPositions')}</h3>
+                <span>{sheet === 'watchlist' ? activeSymbols.length : sheet === 'trade' ? `${symbol} · ${activeAccount ? `#${activeAccount.login}` : ''}` : accountPositions.length}</span>
+              </div>
+              <button type="button" className="term-sheet-x" onClick={() => setSheet(null)} aria-label={t('common.close')}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              </button>
             </div>
             <div className="term-sheet-body no-sb">
               {sheet === 'watchlist' && (
