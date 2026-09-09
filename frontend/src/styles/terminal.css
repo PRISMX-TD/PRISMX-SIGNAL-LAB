@@ -20,8 +20,13 @@
 :root {
   /* 顶栏 65px（40 logo + 24 padding + 1 border）；手机底栏 = 底栏本体 + 12px 悬浮间距。
      Header is 65px; the mobile tab bar clearance includes its 12px float gap. */
-  --term-hdr: 65px;
-  --term-tabbar: calc(92px + env(safe-area-inset-bottom, 0px));
+  /* 65px / 92px 只是兜底：Layout.tsx 实测顶栏底边与底栏占位后写入 --app-hdr / --app-tabbar
+     （含安全区与悬浮间距）。全屏 / PWA 下顶栏会多出刘海安全区，硬写 65 会让壳比屏幕高。
+     65px / 92px are only fallbacks; Layout.tsx measures the header's bottom edge and the tab
+     bar's footprint (safe areas and float gap included) into --app-hdr / --app-tabbar. In
+     fullscreen / PWA the header grows by the notch inset, and a hard 65 overruns the screen. */
+  --term-hdr: var(--app-hdr, calc(65px + env(safe-area-inset-top, 0px)));
+  --term-tabbar: var(--app-tabbar, calc(92px + env(safe-area-inset-bottom, 0px)));
 }
 
 .no-sb { scrollbar-width: none; }
@@ -33,7 +38,15 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  height: calc(100dvh - var(--term-hdr) - var(--term-tabbar));
+  /* 视口高度优先用 Layout.tsx 实测的 --app-vh（= window.innerHeight，fixed 元素真正贴的底边）；
+     没有时退到 dvh，再退到 vh。部分安卓 / 内嵌浏览器的 dvh 不扣工具栏，会让壳比屏幕高，
+     底部交易条被压到底栏下面点不到。
+     Viewport height prefers the measured --app-vh (window.innerHeight, the edge fixed
+     elements actually sit on), then dvh, then vh. Some Android / in-app browsers don't
+     subtract their toolbar from dvh, making the shell taller than the screen and pushing
+     the trade bar under the tab bar. */
+  height: calc(100vh - var(--term-hdr) - var(--term-tabbar));
+  height: calc(var(--app-vh, 100dvh) - var(--term-hdr) - var(--term-tabbar));
   background: var(--bg);
 }
 .term-col {
@@ -54,7 +67,8 @@
     display: grid;
     grid-template-columns: 248px minmax(0, 1fr) 312px;
     grid-template-rows: minmax(0, 1fr);
-    height: calc(100dvh - var(--term-hdr));
+    height: calc(100vh - var(--term-hdr));
+    height: calc(var(--app-vh, 100dvh) - var(--term-hdr));
   }
   .term-col { display: flex; }
   .term-col-left { border-right: 1px solid var(--line); }
@@ -913,6 +927,11 @@
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
+    /* 兜底：万一壳仍比屏幕高，交易条压在底栏（z-40）之上，买卖至少永远点得到。
+       Safety net: if the shell still overruns, the trade bar stacks above the tab bar
+       (z-40) so buy / sell stay tappable no matter what. */
+    position: relative;
+    z-index: 41;
     padding: 8px 12px;
     border-top: 1px solid var(--line);
     background: var(--bg);

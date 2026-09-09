@@ -1,6 +1,6 @@
 // 主布局：顶部导航 + 内容区 + 移动端底部 Tab 栏
 // Main layout: top nav + content + mobile bottom tab bar.
-import { Suspense, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { LiveProvider, useLive } from '../store/live'
@@ -340,6 +340,71 @@ export default function Layout() {
   // scrollbar is present, and it would bury a layout decision inside a 2,200-line
   // page component where nobody would find it again.
   const isTerminal = location.pathname === '/charts'
+  // 顶栏与手机底栏的真实占位、真实视口高度，写成 CSS 变量给行情图表页用（.term-shell 的
+  // 高度 = 视口 − 顶栏 − 底栏）。此前顶栏按 65px、底栏按 92px 硬写、视口用 100dvh：全屏 / PWA
+  // 下顶栏多出安全区（刘海机 44–59px），字体放大 / 中文行高又让底栏更高，部分安卓与内嵌浏览器
+  // 的 dvh 还不扣工具栏——叠起来就是「买卖按钮被底栏压住点不到」。这里改为实测：顶栏占位 =
+  // 顶栏底边，底栏占位 = innerHeight − 底栏顶边（自带悬浮间距与安全区），视口 = 可视视口高度；
+  // 元素尺寸变化与窗口变化时重算。桌面端底栏 display:none，测得 0。
+  // 用回调 ref 而不是 useEffect 里读 ref：Layout 首次渲染时这两个元素可能还没挂上，
+  // effect 只跑一次会永远观察不到它们。
+  // The header's and mobile tab bar's real footprints plus the real viewport height, published
+  // as CSS variables for the chart page (.term-shell height = viewport − header − tab bar). It
+  // used to hard-code 65px / 92px and 100dvh: in fullscreen / PWA the header grows by the safe
+  // area (44–59px on notch phones), font scaling / CJK line height make the bar taller, and
+  // some Android and in-app browsers don't subtract their toolbar from dvh — together that put
+  // the trade bar under the nav. Measure instead: header = its bottom edge, bar = innerHeight −
+  // its top (float gap and safe area included), viewport = visual viewport height; recomputed on
+  // element resize and window resize. Hidden on desktop → 0. Callback refs rather than reading
+  // refs in a one-shot effect: on first render these elements may not be mounted yet.
+  const hdrEl = useRef<HTMLElement | null>(null)
+  const tabbarEl = useRef<HTMLElement | null>(null)
+  const chromeRO = useRef<ResizeObserver | null>(null)
+  const measureChrome = useCallback(() => {
+    const root = document.documentElement
+    const vh = window.visualViewport?.height ?? window.innerHeight
+    root.style.setProperty('--app-vh', `${Math.round(vh)}px`)
+    const h = hdrEl.current?.getBoundingClientRect()
+    if (h && h.height > 0) root.style.setProperty('--app-hdr', `${Math.round(h.bottom)}px`)
+    const b = tabbarEl.current?.getBoundingClientRect()
+    const occupied = b && b.height > 0 ? Math.max(0, Math.round(window.innerHeight - b.top)) : 0
+    root.style.setProperty('--app-tabbar', `${occupied}px`)
+  }, [])
+  const observeChrome = useCallback(() => {
+    chromeRO.current?.disconnect()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measureChrome)
+    // border-box：顶栏的安全区是 padding，content-box 不变就不会触发。
+    // border-box: the header's safe-area inset is padding; content-box alone would never fire.
+    if (hdrEl.current) ro.observe(hdrEl.current, { box: 'border-box' })
+    if (tabbarEl.current) ro.observe(tabbarEl.current, { box: 'border-box' })
+    chromeRO.current = ro
+  }, [measureChrome])
+  const setHdrRef = useCallback((el: HTMLElement | null) => { hdrEl.current = el; observeChrome(); measureChrome() }, [observeChrome, measureChrome])
+  const setTabbarRef = useCallback((el: HTMLElement | null) => { tabbarEl.current = el; observeChrome(); measureChrome() }, [observeChrome, measureChrome])
+  useEffect(() => {
+    // 观察器在这里（再）建一次：StrictMode 的 mount → cleanup → mount 会把回调 ref 建好的
+    // 观察器断开，不重建就永远收不到尺寸变化。
+    // (Re)create the observer here: StrictMode's mount → cleanup → mount disconnects the one
+    // the callback refs built, and without rebuilding it no size change is ever delivered.
+    observeChrome()
+    measureChrome()
+    // 网页字体到位后底栏高度会变一次 / the bar's height shifts once web fonts land
+    document.fonts?.ready.then(measureChrome).catch(() => {})
+    window.addEventListener('resize', measureChrome)
+    window.addEventListener('orientationchange', measureChrome)
+    window.visualViewport?.addEventListener('resize', measureChrome)
+    return () => {
+      chromeRO.current?.disconnect()
+      window.removeEventListener('resize', measureChrome)
+      window.removeEventListener('orientationchange', measureChrome)
+      window.visualViewport?.removeEventListener('resize', measureChrome)
+      const root = document.documentElement
+      root.style.removeProperty('--app-vh')
+      root.style.removeProperty('--app-hdr')
+      root.style.removeProperty('--app-tabbar')
+    }
+  }, [observeChrome, measureChrome])
 
   // 手机底部 4 个主入口，其余收进「其他」/ 4 primary mobile tabs, the rest go under "More"
   const mobileTabs = [
@@ -571,7 +636,7 @@ export default function Layout() {
             uses in the app. Opacity raised from 0.60 to 0.88: at 0.60 the live
             quotes underneath bled through the nav labels while scrolling and the
             two layers of figures interfered. */}
-        <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-ink-950/90 pt-[env(safe-area-inset-top)] backdrop-blur-lg">
+        <header ref={setHdrRef} className="sticky top-0 z-30 border-b border-white/[0.07] bg-ink-950/90 pt-[env(safe-area-inset-top)] backdrop-blur-lg">
           <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:gap-4 sm:px-6">
             <div className="flex items-center gap-2.5">
               <Logo size={40} />
@@ -766,7 +831,7 @@ export default function Layout() {
         )}
 
         {/* 移动端底部导航栏 / mobile bottom nav */}
-        <nav className="lg-tabbar lg:hidden">
+        <nav ref={setTabbarRef} className="lg-tabbar lg:hidden">
           <div className="lg-tabbar-inner">
             {mobileTabs.map((tab) => (
               <TabItem key={tab.to} to={tab.to} icon={tab.icon} label={tab.label} />
