@@ -487,7 +487,7 @@ def gamification_leaderboard(request: Request, board: str, period: str,
     return build_leaderboard_payload(db, user, board, period)
 
 
-# ---- 公开主页 / public profile（2026-09-07 设计：docs/superpowers/specs/2026-09-07-public-profile-design.md）----
+# ---- 公开主页 / public profile（2026-09-07；设计与取舍见 .trae 文档：技术架构 21.21 + 设计决策档案第二章）----
 # 交易画像是 365 天整仓聚合，重；只在对方开了 stats_public（或本人自看）时算，
 # 并按 public_id 缓存 60 秒——与仪表盘胜率摘要同一手法。其余块都是按 user_id
 # 索引的单表查询，不缓存。
