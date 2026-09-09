@@ -600,6 +600,46 @@
 }
 .rk-sub { font-size: 3cqw; color: #8f8c9e; }
 
+/* 铭牌 / the plaque：一圈发丝线框 + 2×2 大号等宽数字，中缝与横缝各一道更淡的线。
+   扫光 9 秒一趟、峰值 5%，是"玻璃盖板反了点光"，不是发光。
+   Hairline frame, 2x2 tabular figures, fainter inner rules. The 9s sweep peaks at
+   5%: a cover glass catching light, not a glow. */
+.rk-plaque {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin: 4.5cqw 0 0;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 3cqw;
+  background: rgba(255, 255, 255, 0.025);
+  overflow: hidden;
+}
+.rk-plaque > div { min-width: 0; padding: 3.6cqw 4cqw 3.4cqw; }
+.rk-plaque > div:nth-child(odd) { border-right: 1px solid rgba(255, 255, 255, 0.08); }
+.rk-plaque > div:nth-child(n + 3) { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.rk-plaque dt { font-size: 2.6cqw; letter-spacing: 0.06em; color: #71717a; }
+.rk-plaque dd {
+  margin: 1.2cqw 0 0;
+  font-size: 6.4cqw;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: #f4f4f5;
+}
+.rk-plaque dd small { margin-left: 0.8cqw; font-size: 2.8cqw; font-weight: 500; letter-spacing: 0; color: #a1a1aa; }
+.rk-plaque::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 40%, rgba(255, 255, 255, 0.05) 50%, transparent 60%);
+  transform: translateX(-120%);
+  animation: rk-sweep 9s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes rk-sweep { 0%, 55% { transform: translateX(-120%); } 85%, 100% { transform: translateX(120%); } }
+@media (prefers-reduced-motion: reduce) { .rk-plaque::after { animation: none; } }
+
 .rk-rail {
   position: relative;
   display: grid;

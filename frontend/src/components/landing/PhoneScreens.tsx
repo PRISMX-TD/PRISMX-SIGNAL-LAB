@@ -430,6 +430,30 @@ export function ScreenRank({ t, on }: { t: T; on: boolean }) {
           {t('gamification.remainingToNext', { count: 2 })} · {t('gamification.titles.legend')}
         </span>
       </div>
+      {/* 铭牌：四个大号等宽数字压在一圈发丝线框里，像奖杯下面那块刻字的牌。
+          数字全部落在首席这一级的门槛之上（1000 笔 / 1000 手 / 胜率 > 55%），
+          连续盈利 6 个月对应常青 · 银。示例数据。
+          The plaque: four large tabular figures inside a hairline frame, like the
+          engraved plate under a trophy. Every figure clears the Chief tier's
+          thresholds; the six-month streak matches Evergreen silver. Sample data. */}
+      <dl className="rk-plaque">
+        <div>
+          <dt>{t('gamification.winRateCard.combinedShort')}</dt>
+          <dd className="num">58.4<small>%</small></dd>
+        </div>
+        <div>
+          <dt>{t('landing.scrStatTrades')}</dt>
+          <dd className="num">1,246<small>{t('landing.scrUnitTrades')}</small></dd>
+        </div>
+        <div>
+          <dt>{t('landing.scrStatLots')}</dt>
+          <dd className="num">1,137<small>{t('landing.scrUnitLots')}</small></dd>
+        </div>
+        <div>
+          <dt>{t('landing.scrStatStreak')}</dt>
+          <dd className="num">6<small>{t('landing.scrUnitMonths')}</small></dd>
+        </div>
+      </dl>
       <ol className="rk-rail" aria-label={t('gamification.levelLabel')}>
         {RANK_LEVELS.map((k, i) => {
           const lv = i + 1

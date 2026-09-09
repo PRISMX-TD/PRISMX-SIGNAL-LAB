@@ -290,7 +290,13 @@
     "ggClimb": "进阶 · 等级与勋章",
     "ggCrown": "加冕 · 排行榜与比赛",
     "ggPrize": "冠军得 PRO 12 个月，另发「赛场 · 金」",
-    "ggArena": "竞技比赛"
+    "ggArena": "竞技比赛",
+    "scrStatTrades": "实盘平仓",
+    "scrStatLots": "累计手数",
+    "scrStatStreak": "连续盈利",
+    "scrUnitTrades": "笔",
+    "scrUnitLots": "手",
+    "scrUnitMonths": "个月"
   },
   "auth": {
     "loginTitle": "登录账户",

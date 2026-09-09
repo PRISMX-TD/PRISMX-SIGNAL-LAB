@@ -290,7 +290,13 @@
     "ggClimb": "Climb · levels and badges",
     "ggCrown": "Crown · boards and contests",
     "ggPrize": "The champion takes 12 months of PRO plus Arena Gold",
-    "ggArena": "Competitive contests"
+    "ggArena": "Competitive contests",
+    "scrStatTrades": "Live closes",
+    "scrStatLots": "Lots traded",
+    "scrStatStreak": "Profit streak",
+    "scrUnitTrades": "trades",
+    "scrUnitLots": "lots",
+    "scrUnitMonths": "months"
   },
   "auth": {
     "loginTitle": "Sign in",
