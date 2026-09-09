@@ -30,7 +30,7 @@ import { useEffect, useState } from 'react'
 import BadgeIcon from '../badges/BadgeIcon'
 import RankCoin from '../badges/RankCoin'
 
-type T = (k: string) => string
+type T = (k: string, opts?: Record<string, unknown>) => string
 
 // 按剩余百分比推一个 mm:ss 展示值（信号满时长 8:45，同 scrTtl 示例）。
 // Derive a display mm:ss from the remaining percentage (full lifespan 8:45,
@@ -397,78 +397,51 @@ export function ScreenRecord({ t, on }: { t: T; on: boolean }) {
   )
 }
 
-/* ═════ 幕 0（Hero）：成就陈列台 / scene 0: the achievements stage ═════
-   镜像 /achievements 的三样东西：等级药丸（UserMenu 同款 L3 · 称号）、佩戴的
-   三枚勋章（真实 BadgeIcon，首枚居中放大，同 PedestalStage）、当前关卡的条件
-   清单（同 .tk-title 的「勾 / 进度 / 毕业考锁定」三态）。首屏就把「加冕」这个
-   目标摆出来，后面四幕再讲它是怎么一笔一笔挣来的。
-   Mirrors three things from /achievements: the level pill (as UserMenu),
-   the three equipped badges (real BadgeIcon, first one centred and larger as
-   in PedestalStage) and the current stage's condition list with its three
-   states. The opening shows the goal; the next four scenes show how it is
-   earned one trade at a time. */
+/* ═════ 幕 0（Hero）：段位揭晓 / scene 0: the rank reveal ═════
+   刻意不复刻成就页——首屏要的是「加冕」的分量，不是任务清单。一枚佩戴的默认
+   勋章立在光锥里，脚下有倒影，两侧各一枚副戴退到暗处；下面只有等级药丸、称号、
+   一句「距下一级」和六级关卡轨，其余全部让位。勋章、称号、文案都是站内真实资产
+   （BadgeIcon / gamification 文案键），换掉的只是陈列方式。
+   Deliberately not a copy of the achievements page: the opening needs the weight
+   of a coronation, not a checklist. The worn default badge stands in a light cone
+   with its reflection, the two side badges recede into the dark; below it only the
+   level pill, the title, a "to next tier" line and the six-tier rail. Assets are
+   the product's own; only the staging changes. */
+const RANK_LEVELS = ['novice', 'junior', 'elite', 'senior', 'chief', 'legend'] as const
+const RANK_NOW = 5
+
 export function ScreenRank({ t, on }: { t: T; on: boolean }) {
-  const tasks = [
-    { k: 'scrTask1', state: 'done' as const },
-    { k: 'scrTask2', state: 'done' as const },
-    { k: 'scrTask3', state: 'pending' as const, pct: 71 },
-    { k: 'scrTask4', state: 'done' as const },
-    { k: 'scrTask5', state: 'locked' as const },
-  ]
   return (
-    <div className={`scr ${on ? 'on' : ''}`} data-scr="0">
-      <div className="mb-[3cqw] flex items-center justify-between">
-        <b className="text-[5cqw] font-bold text-white">{t('landing.scrRankTitle')}</b>
-        <span className="rounded-[1.6cqw] bg-prism-600 px-[2cqw] py-[0.7cqw] text-[2.8cqw] font-bold text-white">
-          {t('landing.scrRankLv')} · {t('landing.scrRankLevel')}
+    <div className={`scr scr-rank ${on ? 'on' : ''}`} data-scr="0">
+      <div className="rk-stage">
+        <span className="rk-cone" aria-hidden />
+        <span className="rk-side rk-side-l cq-svg" aria-hidden><BadgeIcon id="winning_hand" tier={2} earned size={64} /></span>
+        <span className="rk-side rk-side-r cq-svg" aria-hidden><BadgeIcon id="arena" tier={1} earned size={64} /></span>
+        <div className="rk-hero">
+          <span className="cq-svg block w-[44cqw]"><BadgeIcon id="comp_back_to_back" earned size={160} spin /></span>
+          <span className="rk-refl cq-svg block w-[44cqw]" aria-hidden><BadgeIcon id="comp_back_to_back" earned size={160} /></span>
+        </div>
+        <span className="rk-floor" aria-hidden />
+      </div>
+      <div className="rk-title">
+        <span className="rk-lv num">L{RANK_NOW}</span>
+        <b>{t('gamification.titles.chief')}</b>
+        <span className="rk-sub">
+          {t('gamification.remainingToNext', { count: 2 })} · {t('gamification.titles.legend')}
         </span>
       </div>
-      <div className="rounded-[3.4cqw] border border-white/[0.09] bg-white/[0.035] px-[3.8cqw] pb-[3.4cqw] pt-[3.6cqw] text-center">
-        <div className="text-[5.4cqw] font-bold leading-none text-white">{t('landing.scrRankLevel')}</div>
-        <div className="mt-[3.2cqw] flex items-end justify-center gap-[3cqw]">
-          <span className="cq-svg w-[15cqw]"><BadgeIcon id="winning_hand" tier={2} earned /></span>
-          <span className="cq-svg w-[21cqw]"><BadgeIcon id="starter" tier={3} earned /></span>
-          <span className="cq-svg w-[15cqw]"><BadgeIcon id="arena" tier={1} earned /></span>
-        </div>
-      </div>
-      <div className="mt-[3cqw] flex flex-col">
-        <div className="flex items-baseline justify-between border-b border-white/[0.08] pb-[1.8cqw] text-[2.9cqw] text-neutral-500">
-          <span>{t('landing.scrRankStage')}</span>
-          <span className="num text-prism-300">{t('landing.scrRankProgress')}</span>
-        </div>
-        {tasks.map((x) => (
-          <div
-            key={x.k}
-            className={`flex items-center gap-[2.4cqw] border-b border-white/[0.06] py-[2.4cqw] text-[3.1cqw] last:border-0 ${
-              x.state === 'locked' ? 'text-neutral-500' : 'text-neutral-200'
-            }`}
-          >
-            <span
-              className={`grid h-[3.8cqw] w-[3.8cqw] flex-none place-items-center rounded-full ${
-                x.state === 'done' ? 'bg-up' : 'border border-white/20'
-              }`}
-            >
-              {x.state === 'done' && (
-                <svg viewBox="0 0 12 12" className="h-[2.4cqw] w-[2.4cqw]" fill="none" stroke="#06301a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M2.5 6.5l2.5 2.5 4.5-5" />
-                </svg>
-              )}
-            </span>
-            <span className="min-w-0 flex-1 truncate">{t(`landing.${x.k}`)}</span>
-            {x.state === 'pending' && (
-              <span className="h-[1.1cqw] w-[16cqw] flex-none overflow-hidden rounded-full bg-white/[0.09]">
-                <span className="block h-full rounded-full bg-prism-600" style={{ width: `${x.pct}%` }} />
-              </span>
-            )}
-            {x.state === 'locked' && (
-              <svg viewBox="0 0 24 24" className="h-[3cqw] w-[3cqw] flex-none" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="4" y="11" width="16" height="10" rx="2" />
-                <path d="M8 11V7a4 4 0 018 0v4" />
-              </svg>
-            )}
-          </div>
-        ))}
-      </div>
+      <ol className="rk-rail" aria-label={t('gamification.levelLabel')}>
+        {RANK_LEVELS.map((k, i) => {
+          const lv = i + 1
+          const cls = lv < RANK_NOW ? 'on' : lv === RANK_NOW ? 'on cur' : ''
+          return (
+            <li key={k} className={cls}>
+              <i aria-hidden />
+              <b>{t(`gamification.levelShort.${k}`)}</b>
+            </li>
+          )
+        })}
+      </ol>
     </div>
   )
 }

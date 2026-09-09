@@ -486,6 +486,167 @@
   opacity: 1;
 }
 
+/* ── 幕 0：段位揭晓 / scene 0: the rank reveal ──
+   全部 cqw 定尺，桌面 330px 与真机全出血共用一套。光锥与地光沿用成就页陈列台
+   的紫色语汇（那是站内唯一被认可的"光"），倒影用翻转 + 遮罩，不另画资产。
+   Sized in cqw so the desktop phone and the full-bleed mobile card share one set.
+   Cone and floor pool borrow the achievements stage's violet vocabulary (the one
+   sanctioned use of light on the site); the reflection is a flipped, masked copy. */
+.scr-rank { padding-top: 20cqw; }
+.rk-stage {
+  position: relative;
+  flex: 0 0 auto;
+  height: 60cqw;
+  display: grid;
+  place-items: center;
+}
+.rk-cone {
+  position: absolute;
+  left: 50%;
+  top: -24cqw;
+  width: 74cqw;
+  height: 86cqw;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse 50% 62% at 50% 0%, rgba(110, 66, 255, 0.22), transparent 72%);
+  clip-path: polygon(40% 0, 60% 0, 100% 100%, 0 100%);
+  pointer-events: none;
+}
+.rk-floor {
+  position: absolute;
+  left: 50%;
+  bottom: 1cqw;
+  width: 60cqw;
+  height: 11cqw;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 50%, rgba(110, 66, 255, 0.26), transparent 70%);
+  pointer-events: none;
+}
+.rk-side {
+  position: absolute;
+  top: 50%;
+  width: 15cqw;
+  opacity: 0.55;
+  filter: saturate(0.75) brightness(0.85);
+}
+.rk-side-l { left: 5cqw; transform: translateY(-40%) rotate(-8deg); }
+.rk-side-r { right: 5cqw; transform: translateY(-40%) rotate(8deg); }
+.rk-hero {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: rk-float 6s ease-in-out infinite alternate;
+}
+/* 倒影：容器整体翻转，svg 贴容器底，遮罩在翻转前"底部实、顶部虚"，翻转后就是
+   靠近勋章处实、远处虚。/ Reflection: the box flips as a whole, the svg sits at the
+   box's bottom, and a mask that is opaque at the bottom before flipping reads as
+   opaque next to the badge after. */
+.rk-refl {
+  height: 15cqw;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  margin-top: 1cqw;
+  transform: scaleY(-1);
+  opacity: 0.3;
+  filter: blur(0.3cqw);
+  -webkit-mask-image: linear-gradient(0deg, #000, transparent 85%);
+  mask-image: linear-gradient(0deg, #000, transparent 85%);
+}
+@keyframes rk-float { to { transform: translateY(-1.6cqw); } }
+@media (prefers-reduced-motion: reduce) { .rk-hero { animation: none; } }
+/* 真机全出血时文字面板压在屏幕下半，称号必须落在面板上缘（约 400px）之上：
+   实测 375 宽下顶部留白 60px + 舞台 225px 会让称号顶到 364px、底到 448px，压进
+   面板 50px。收顶部留白、压舞台高度、缩主勋章，称号底缘回到约 380px（第二轮再收 4cqw，首轮 410px 仍压进面板 11px）。
+   On full-bleed phones the copy panel covers the lower half, so the title has to
+   end above the panel's top edge (about 400px). Measured at 375 wide: 60px top
+   padding plus a 225px stage put the title at 364-448px, 50px into the panel.
+   Tighter padding, a shorter stage and a smaller hero badge bring it back to ~386px. */
+@media (max-width: 1023px) {
+  .scr-rank { padding-top: 8cqw; }
+  .rk-stage { height: 46cqw; }
+  .rk-hero > .cq-svg { width: 36cqw; }
+  .rk-refl { height: 11cqw; }
+  .rk-title { margin-top: 0; }
+  .rk-side { width: 13cqw; }
+}
+
+.rk-title {
+  margin-top: 1cqw;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.4cqw;
+  text-align: center;
+}
+.rk-lv {
+  font-size: 2.8cqw;
+  letter-spacing: 0.16em;
+  color: #d9ceff;
+  padding: 0.8cqw 2.6cqw;
+  border: 1px solid rgba(139, 108, 255, 0.55);
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 30%, rgba(139, 108, 255, 0.32), rgba(110, 66, 255, 0.06) 70%);
+}
+.rk-title b {
+  font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
+  font-size: 8.4cqw;
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: #f4f4f5;
+}
+.rk-sub { font-size: 3cqw; color: #8f8c9e; }
+
+.rk-rail {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  margin: auto 0 0;
+  padding: 0 1cqw;
+  list-style: none;
+}
+.rk-rail::before {
+  content: "";
+  position: absolute;
+  left: 9.3%;
+  right: 9.3%;
+  top: 1.7cqw;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+}
+.rk-rail li { position: relative; }
+.rk-rail i {
+  display: block;
+  position: relative;
+  width: 3.4cqw;
+  height: 3.4cqw;
+  margin: 0 auto;
+  border-radius: 999px;
+  background: #0d0d11;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+.rk-rail .on i { background: #6e42ff; border-color: #8b6cff; }
+.rk-rail .cur i::after {
+  content: "";
+  position: absolute;
+  inset: 0.8cqw;
+  border-radius: 999px;
+  background: #fff;
+}
+.rk-rail b {
+  display: block;
+  margin-top: 2cqw;
+  text-align: center;
+  font-size: 2.6cqw;
+  font-weight: 500;
+  color: #71717a;
+}
+.rk-rail .on b { color: #a1a1aa; }
+.rk-rail .cur b { color: #f4f4f5; font-weight: 700; }
+
 /* ── 文字面板 / text panels ── */
 .story-panel {
   position: absolute;
