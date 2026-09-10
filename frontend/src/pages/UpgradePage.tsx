@@ -469,7 +469,7 @@ export default function UpgradePage() {
             对已付费的 PRO 隐藏——送他们一个月「PRO」没有意义，只会让人以为
             自己刚才那笔钱花亏了。试用中的用户仍然看得到（他们正是该转化的人，
             而开户是比掏钱更低的门槛）。
-            Partner-broker bonus: the path to a free month of PRO, placed ahead of
+            Partner-broker bonus: the path to free PRO, placed ahead of
             the paid cards. Hidden from paid PRO users — offering them a month of
             what they just bought only makes the purchase look like a mistake.
             Trialing users still see it: they're the conversion target, and opening

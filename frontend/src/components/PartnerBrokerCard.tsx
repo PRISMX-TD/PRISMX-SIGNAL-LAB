@@ -6,7 +6,7 @@
 // 「下载桥接程序 → 装在一台不能关机的电脑上」，那是给非合作券商用户准备的
 // 兜底方案，却站在了最显眼的位置。
 //
-// 这张卡把顺序倒过来：先推「用我们的链接开户 → 直连 MT5 → 送 1 个月 PRO」，
+// 这张卡把顺序倒过来：先推「用我们的链接开户 → 直连 MT5 → 免费用 PRO」，
 // 桥接退到折叠区。两个变体：
 //   · full    升级 PRO 页用，完整卖点 + 双 CTA
 //   · compact 连接 MT5 页用，只保留一句话和开户按钮（直连表单就在下面，
@@ -22,7 +22,7 @@
 // the most prominent placement.
 //
 // This card inverts that: lead with "open an account through our link → connect
-// MT5 directly → get a month of PRO", and demote the bridge into a collapsed
+// MT5 directly → use PRO free", and demote the bridge into a collapsed
 // section. Two variants: `full` for the upgrade page (full pitch, two CTAs) and
 // `compact` for the connect page (one line plus the button — repeating "no
 // install needed" right above the direct-connect form would be noise).
