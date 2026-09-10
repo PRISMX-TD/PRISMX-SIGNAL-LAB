@@ -575,20 +575,24 @@ export default function AccountPage() {
 
       {/* ── 账本 / ledger ── */}
       <div className="acct-ledger">
-        {/* 个人资料（游戏化）/ Profile (gamification identity fields) */}
-        {/* 内测门控：功能整体未开放时（gamificationVisible=false）不展示昵称/
-            榜单展示/退出排行榜——这些榜单当下并不存在。管理员的 gamificationVisible
-            恒为 true，自测入口不受影响。
-            Beta wall: while the feature is off for this user
-            (gamificationVisible=false), hide nickname / leaderboard-display /
-            leaderboard-opt-out — those leaderboards don't exist yet. Admins
-            always get gamificationVisible=true, so admin self-testing is unaffected. */}
-        {info.gamificationVisible && (
-          <section className="acct-row" style={{ ["--i" as string]: rowIndex++ }}>
+        {/* 个人资料 / Profile */}
+        {/* 昵称这一栏不受内测门控：它是全员必填的（进站时被守卫拦着填过），
+            填完总得有个地方能改——门控住就等于逼人设一个再也改不了的名字。
+            三个开关仍然只在游戏化开放后才出现：榜单展示 / 退出排行榜 / 公开
+            主页，都是在描述当下并不存在的东西。管理员恒为 true，自测不受影响。
+            The nickname field is outside the beta wall: it's required of everyone
+            (the guard collects it on the way in), so there must be somewhere to
+            change it — walling it off would force a name nobody can ever edit.
+            The three switches stay behind the wall: leaderboard display, board
+            opt-out and public profile all describe things that don't exist yet.
+            Admins are always visible=true, so self-testing is unaffected. */}
+        <section className="acct-row" style={{ ["--i" as string]: rowIndex++ }}>
             <div>
               <h2 className="font-display acct-row-h">{t("gamification.profile.sectionTitle")}</h2>
-              <p className="acct-row-p">{t("account.profileDesc")}</p>
-              {info.publicId && (
+              <p className="acct-row-p">
+                {info.gamificationVisible ? t("account.profileDesc") : t("account.profileDescBasic")}
+              </p>
+              {info.gamificationVisible && info.publicId && (
                 <Link to={`/u/${info.publicId}`} className="acct-row-link">
                   {t("publicProfile.viewMine")} →
                 </Link>
@@ -610,6 +614,7 @@ export default function AccountPage() {
                 />
                 <span className="acct-field-help">{t("account.nicknameHelp")}</span>
               </div>
+              {info.gamificationVisible && (
               <div className="acct-settings mt-5">
                 <div className="acct-setting">
                   <label htmlFor="profile-nickname-public" className="acct-setting-l">
@@ -633,6 +638,7 @@ export default function AccountPage() {
                   <Switch id="profile-stats-public" checked={statsPublicDraft} onChange={setStatsPublicDraft} />
                 </div>
               </div>
+              )}
               <div className="acct-actions">
                 <button onClick={handleProfileSave} className="btn btn-primary" disabled={profileSaving}>
                   {profileSaving ? t("common.loading") : t("gamification.profile.save")}
@@ -640,8 +646,7 @@ export default function AccountPage() {
                 {profileMsg && <p className={`acct-msg ${profileMsg.kind}`}>{profileMsg.text}</p>}
               </div>
             </div>
-          </section>
-        )}
+        </section>
 
         {/* 安全 / Security */}
         <section className="acct-row" style={{ ["--i" as string]: rowIndex++ }}>

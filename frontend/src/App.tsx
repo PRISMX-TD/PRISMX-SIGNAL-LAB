@@ -45,13 +45,15 @@ const CompleteProfilePage = lazy(() => import('./pages/CompleteProfilePage'))
 function Protected({ children }: { children: ReactNode }) {
   const { isAuthed, user } = useAuth()
   if (!isAuthed) return <Navigate to="/login" replace />
-  // 还欠手机号的账号一律先去补录（目前只有 Google 注册的新用户会命中）。
-  // 放在这一层而不是各页面自己判断：漏一个页面就等于开了个后门，而这里是
-  // 所有登录后页面的唯一入口。
-  // Accounts still owing a phone are routed to the completion page first. Gated
-  // here rather than per-page: this is the single entry point to every
-  // logged-in page, so nothing can slip past it.
-  if (user?.needsPhone) return <Navigate to="/complete-profile" replace />
+  // 还欠手机号或昵称的账号一律先去补全（手机号目前只有 Google 注册的新用户会
+  // 命中；昵称是全员必填，存量用户没设过的也会被拦一次）。放在这一层而不是各
+  // 页面自己判断：漏一个页面就等于开了个后门，而这里是所有登录后页面的唯一入口。
+  // Accounts still owing a phone or a nickname are routed to the completion page
+  // first (phone only bites Google-created accounts; the nickname is required of
+  // everyone, including existing users who never set one). Gated here rather than
+  // per-page: this is the single entry point to every logged-in page, so nothing
+  // can slip past it.
+  if (user?.needsPhone || user?.needsNickname) return <Navigate to="/complete-profile" replace />
   return <>{children}</>
 }
 

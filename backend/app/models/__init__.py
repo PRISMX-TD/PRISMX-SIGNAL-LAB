@@ -156,6 +156,16 @@ class User(Base):
     # bug reported 2026-07.
     google_linked_at = Column(DateTime, nullable=True)
     nickname = Column(String, nullable=True)            # 2-20 字，展示时默认打码；保留词校验在写入端
+    # 重名判定用的归一形式（NFKC + 去空白 + 小写，见 gamification.nickname_key），
+    # 唯一索引建在它上面而不是 nickname：显示要保留用户敲的原样大小写与空格，
+    # 但「Alice」「alice」「a l i c e」必须算同一个名字。两列永远同写，nickname
+    # 为空时它也为空（NULL 在两种库里都不参与唯一性，所以未设昵称的人不互相冲突）。
+    # Normalized form used for uniqueness (see gamification.nickname_key). The
+    # unique index sits here rather than on nickname so display keeps the user's
+    # own casing and spacing while "Alice" / "alice" / "a l i c e" still collide.
+    # Always written together with nickname; NULL when unset, and NULL doesn't
+    # participate in uniqueness on either backend, so unset users never clash.
+    nickname_key = Column(String, nullable=True)
     nickname_public = Column(Boolean, nullable=False, default=False)
     leaderboard_opt_out = Column(Boolean, nullable=False, default=False)
     equipped_badge = Column(String, nullable=True)      # 佩戴的勋章 id，只能佩戴已获得的

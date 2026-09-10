@@ -21,6 +21,20 @@ def display_name(nickname, email, nickname_public: bool) -> str:
     return mask_name(local)             # 邮箱是登录凭据的一半：永远打码
 
 
+def nickname_key(nick: str) -> str:
+    """昵称的重名比较口径：NFKC 归一 + 去掉所有空白 + 转小写。
+
+    存进 users.nickname_key 并加唯一索引，展示仍用用户原样输入的 nickname。
+    与保留词检查共用同一套归一，免得出现「同一个名字在保留词那关算撞、在重名
+    这关算不撞」的两套口径——归一分叉是这类校验最典型的裂缝。
+
+    Comparison form for nickname uniqueness: NFKC, whitespace stripped,
+    lowercased. Stored in users.nickname_key under a unique index while the
+    display value stays exactly as the user typed it. Shared with the reserved
+    word check so the two never normalize differently.
+    """
+    return "".join(unicodedata.normalize("NFKC", nick or "").lower().split())
+
+
 def nickname_reserved(nick: str) -> bool:
-    norm = unicodedata.normalize("NFKC", nick or "").lower().replace(" ", "")
-    return any(w in norm for w in RESERVED_WORDS)
+    return any(w in nickname_key(nick) for w in RESERVED_WORDS)

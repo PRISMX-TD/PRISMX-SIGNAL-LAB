@@ -118,7 +118,10 @@ def _hash_legacy_api_tokens() -> None:
 #         旧行由桥接 / 网关一次性回扫补齐。
 # rev 18 — users.public_id（公开主页的不透明标识；回填：存量用户逐个生成）
 #          + users.stats_public（交易画像公开开关，默认 false）
-CURRENT_SCHEMA_REV = 18
+# rev 19 — users.nickname_key（昵称重名判定的归一形式）+ uq_users_nickname_key 唯一索引。
+#          回填：给已有昵称的行算 key；同名组只保留 id 最小的那个，其余两列一起清空
+#          （被清的人下次登录会撞上「必须设昵称」的守卫，当场重设，不会静默顶着空名字）
+CURRENT_SCHEMA_REV = 19
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -692,6 +695,7 @@ def _migrate_columns() -> None:
             "equipped_badges": "VARCHAR",
             "public_id": "VARCHAR(16)",
             "stats_public": "BOOLEAN",
+            "nickname_key": "VARCHAR",
         }
         with engine.begin() as conn:
             for name, col_type in user_new.items():
@@ -803,6 +807,50 @@ def _migrate_columns() -> None:
                     pid = new_public_id()
                 taken.add(pid)
                 conn.execute(text("UPDATE users SET public_id = :p WHERE id = :u"), {"p": pid, "u": uid})
+            # rev 19：昵称重名。先给存量昵称算归一 key，再消歧——同一个 key 下
+            # 保留 id 最小（注册最早）的那个，其余的 nickname 与 nickname_key
+            # 一起清空。不能只清 key：留着重复的 nickname 而没有 key，那个人
+            # 就再也不会被重名检查看见，而下一个想用这个名字的人会拿到它，同一
+            # 个显示名同时挂在两个账号上——正是这次要根除的情况。被清空的人下次
+            # 登录会被「必须设昵称」的守卫拦下当场重设，不会顶着空名字晃。
+            # 这一段必须跑在下面建唯一索引之前，否则索引在有重复的库上直接建失败，
+            # 而失败点在 uvicorn bind 之前 —— 整个服务起不来。
+            #
+            # rev 19: nickname collisions. Compute the normalized key for existing
+            # nicknames, then de-duplicate: within a key the lowest id (earliest
+            # registration) keeps it and every other row has *both* columns
+            # cleared. Clearing only the key would leave a duplicate nickname
+            # invisible to the uniqueness check and re-issuable to someone else —
+            # the very situation this revision exists to end. Cleared users are
+            # stopped by the "nickname required" guard on their next login.
+            # Must run before the unique index below: on a database with
+            # duplicates the CREATE would fail, and it fails before uvicorn binds.
+            from app.services.gamification import nickname_key as _nick_key
+            rows = conn.execute(text(
+                "SELECT id, nickname FROM users WHERE nickname IS NOT NULL AND nickname <> ''"
+            )).fetchall()
+            seen: dict[str, int] = {}
+            for uid, nick in sorted(rows, key=lambda r: r[0]):
+                key = _nick_key(nick)
+                if not key:
+                    # 全空白的昵称：没有可比的 key，当成没设过。
+                    # All-whitespace nickname: no comparable key, treat as unset.
+                    conn.execute(text(
+                        "UPDATE users SET nickname = NULL, nickname_key = NULL WHERE id = :u"
+                    ), {"u": uid})
+                    continue
+                if key in seen:
+                    conn.execute(text(
+                        "UPDATE users SET nickname = NULL, nickname_key = NULL WHERE id = :u"
+                    ), {"u": uid})
+                    logger.warning(
+                        "rev 19：昵称 %r 与用户 %s 重名，清空用户 %s 的昵称待其重设",
+                        nick, seen[key], uid,
+                    )
+                    continue
+                seen[key] = uid
+                conn.execute(text(
+                    "UPDATE users SET nickname_key = :k WHERE id = :u"), {"k": key, "u": uid})
 
     # user_strategies 表：止损止盈从"百分比距离 + R 倍数"一种固定组合改成
     # 两个方式独立可选，外加策略命名。已启用的策略要按原逻辑等价换算成新
@@ -1113,6 +1161,15 @@ def _migrate_columns() -> None:
         # rev 18: unique index on public_id — ADD COLUMN can't carry UNIQUE on an
         # existing table, so it is added here.
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_public_id ON users(public_id)"))
+        # rev 19：昵称唯一。建在归一后的 nickname_key 上，同款「ADD COLUMN 带不上
+        # UNIQUE」的原因所以放这里。NULL 不参与唯一性（SQLite 与 Postgres 一致），
+        # 未设昵称的人不会互撞。上面的消歧回填保证了这条建得起来。
+        # rev 19: nickname uniqueness, on the normalized key, added here for the
+        # same "ADD COLUMN can't carry UNIQUE" reason. NULLs don't participate in
+        # uniqueness on either backend, so users without a nickname never clash.
+        # The de-duplication backfill above is what lets this CREATE succeed.
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_nickname_key ON users(nickname_key)"))
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_signals_status_expire ON signals(status, expire_at)"
         ))

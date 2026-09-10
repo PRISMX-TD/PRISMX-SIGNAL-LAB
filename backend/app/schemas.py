@@ -112,6 +112,14 @@ class UserOut(BaseModel):
     # also have an empty phone but are exempt, a distinction only the backend
     # can make (see User.phone_required).
     needsPhone: bool = False
+    # 昵称是全员必填（2026-09-10 起）：没设的人一律拦在补全资料页，存量用户也
+    # 不豁免——手机号那次靠 phone_required 放过了老用户，这次没有对应的豁免列，
+    # 就是「空即欠」。后端算而不是前端判 `!nickname`，理由同上：口径只有一处。
+    # Nickname is required of everyone (from 2026-09-10); unlike the phone
+    # rollout there is no grandfathering column — empty simply means owed.
+    # Computed here rather than as `!nickname` on the client so the rule lives
+    # in exactly one place.
+    needsNickname: bool = False
 
 
 class AuthResponse(BaseModel):

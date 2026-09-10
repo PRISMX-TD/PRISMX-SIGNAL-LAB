@@ -3,6 +3,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
@@ -41,6 +42,16 @@ class AccountInfoOut(BaseModel):
     leaderboardVisible: bool = False
     competitionsVisible: bool = False
     nickname: str | None = None
+    # 昵称是否还欠着。登录响应里也有同名字段，这里再下发一次是为了存量会话：
+    # 强制上线时已经登录的人，本地缓存的 user 里根本没有这个键（undefined 即
+    # 假），不会被守卫拦住，要等 token 过期重新登录才补上。前端每次进应用都
+    # 会 refreshUser()，让它搭这趟车，那批人下一次打开就能被拦。
+    # Whether a nickname is still owed. Also present on the login response;
+    # repeated here for sessions that predate the rollout — their cached user
+    # object has no such key (undefined, hence falsy) and would slip past the
+    # guard until the token expires. refreshUser() runs on every app load, so
+    # riding along here catches them on their next visit.
+    needsNickname: bool = False
     nicknamePublic: bool = False
     leaderboardOptOut: bool = False
     equippedBadge: str | None = None
@@ -123,6 +134,7 @@ def get_account(
             else bool(get_gamification_settings(db).get("competitions_visible"))
         ),
         nickname=current_user.nickname,
+        needsNickname=not (current_user.nickname or "").strip(),
         nicknamePublic=bool(current_user.nickname_public),
         leaderboardOptOut=bool(current_user.leaderboard_opt_out),
         equippedBadge=current_user.equipped_badge,
@@ -152,7 +164,9 @@ def _apply_profile_patch(db: Session, user: User, body: ProfilePatchIn) -> User:
     the caller only sees the error response, never a half-applied write.
     """
     from app.models import UserBadge
-    from app.services.gamification import EQUIP_SLOTS, nickname_reserved, set_equipped_list
+    from app.services.gamification import (
+        EQUIP_SLOTS, nickname_key, nickname_reserved, set_equipped_list,
+    )
 
     sent = body.model_fields_set
     if "nickname" in sent:
@@ -161,7 +175,23 @@ def _apply_profile_patch(db: Session, user: User, body: ProfilePatchIn) -> User:
             raise HTTPException(400, "昵称需 2-20 个字符 / Nickname must be 2-20 characters")
         if nickname_reserved(nick):
             raise HTTPException(400, "昵称包含保留词 / Nickname contains a reserved word")
+        # 重名检查按归一后的 key（大小写、空格、全半角都算同一个名字），排除
+        # 自己那一行——否则原样重新提交一次自己的昵称会被判成撞名。数据库上还有
+        # uq_users_nickname_key 兜底：这里查完到 commit 之间存在竞态窗口，两个
+        # 人同时抢同一个名字时先落地的赢，后一个撞唯一索引 → IntegrityError，
+        # 由下面的 except 翻译成同一句 400，两条路径的错误对用户是一样的。
+        # Uniqueness is checked on the normalized key (case, spacing and
+        # full/half-width all collapse), excluding this user's own row so
+        # re-submitting one's current nickname isn't a collision. The DB unique
+        # index is the backstop for the race between this SELECT and the commit;
+        # the loser hits IntegrityError, translated below into the same 400.
+        key = nickname_key(nick)
+        taken = db.query(User.id).filter(
+            User.nickname_key == key, User.id != user.id).first()
+        if taken:
+            raise HTTPException(400, "该昵称已被使用 / Nickname already taken")
         user.nickname = nick
+        user.nickname_key = key
     if "nicknamePublic" in sent and body.nicknamePublic is not None:
         user.nickname_public = body.nicknamePublic
     if "leaderboardOptOut" in sent and body.leaderboardOptOut is not None:
@@ -197,7 +227,14 @@ def _apply_profile_patch(db: Session, user: User, body: ProfilePatchIn) -> User:
             if any(b not in owned for b in ids):
                 raise HTTPException(400, "尚未获得该勋章 / Badge not earned yet")
         set_equipped_list(user, ids)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # 唯一索引兜底（见上面昵称那段）。回滚后按「已被使用」回，与预检同一句话。
+        # Unique-index backstop (see the nickname block above): roll back and
+        # answer with the same message the pre-check would have given.
+        db.rollback()
+        raise HTTPException(400, "该昵称已被使用 / Nickname already taken")
     db.refresh(user)
     return user
 
@@ -215,6 +252,9 @@ def patch_profile(
     u = _apply_profile_patch(db, current_user, body)
     return {
         "nickname": u.nickname,
+        # 补全资料页据此把本地 user 上的 needsNickname 落下来，不用再多请求一次 /account/me。
+        # The completion page clears its local needsNickname off this, no extra round trip.
+        "needsNickname": not (u.nickname or "").strip(),
         "nicknamePublic": u.nickname_public,
         "leaderboardOptOut": u.leaderboard_opt_out,
         "equippedBadge": u.equipped_badge,
@@ -266,6 +306,7 @@ def set_phone(
         plan=current_user.plan,
         phone=current_user.phone,
         needsPhone=False,
+        needsNickname=not (current_user.nickname or "").strip(),
     )
 
 

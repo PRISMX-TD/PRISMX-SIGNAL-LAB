@@ -11,6 +11,7 @@ interface AuthContextValue {
   // 补录手机号成功后就地更新登录态，让路由守卫立刻放行（不必重新登录）
   // Updates auth state in place so the route guard releases immediately
   submitPhone: (phoneCountry: string, phone: string) => Promise<void>
+  submitNickname: (nickname: string) => Promise<void>
   loginWithGoogle: (credential: string) => Promise<void>
   logout: () => void
   refreshUser: () => Promise<void>
@@ -131,6 +132,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(USER_KEY, JSON.stringify(updated))
   }
 
+  // 补全资料页提交昵称。走的是账户页那个 PATCH，校验（长度/保留词/重名）只有
+  // 一份；这里只负责把返回的 needsNickname 落到本地 user 上，让守卫放行。
+  // Submits the nickname from the completion page through the same PATCH the
+  // account page uses, so length / reserved-word / uniqueness validation lives
+  // in one place; this only lands the returned needsNickname so the guard opens.
+  const submitNickname = async (nickname: string) => {
+    const res = await userApi.updateProfile({ nickname })
+    setUser((prev) => (prev ? { ...prev, needsNickname: res.needsNickname } : prev))
+    const stored = localStorage.getItem(USER_KEY)
+    if (stored) {
+      const parsed = JSON.parse(stored)
+      parsed.needsNickname = res.needsNickname
+      localStorage.setItem(USER_KEY, JSON.stringify(parsed))
+    }
+  }
+
   const loginWithGoogle = async (credential: string) => {
     const res = await authApi.google(credential)
     persist(res.user, res.token)
@@ -183,6 +200,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // UserMenu's badge renders off these two fields with no extra request.
           gamificationLevel: me.gamificationLevel,
           gamificationTitle: me.gamificationTitle,
+          // 昵称欠费标记：这一趟是强制上线前那批会话唯一的补票机会——他们缓存
+          // 的 user 里根本没有这个键，不刷新就永远绕过守卫。
+          // The nickname flag: this trip is the only chance for sessions that
+          // predate the rollout, whose cached user has no such key and would
+          // otherwise slip past the guard forever.
+          needsNickname: me.needsNickname,
         }
       })
       const stored = localStorage.getItem(USER_KEY)
@@ -196,6 +219,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         parsed.competitionsVisible = me.competitionsVisible
         parsed.gamificationLevel = me.gamificationLevel
         parsed.gamificationTitle = me.gamificationTitle
+        parsed.needsNickname = me.needsNickname
         localStorage.setItem(USER_KEY, JSON.stringify(parsed))
       }
     } catch {
@@ -204,7 +228,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, isAuthed: !!user, login, register, submitPhone, loginWithGoogle, logout, refreshUser }}>
+    <AuthContext.Provider value={{ user, isAuthed: !!user, login, register, submitPhone, submitNickname, loginWithGoogle, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   )

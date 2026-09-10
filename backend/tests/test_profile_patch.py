@@ -99,3 +99,40 @@ def test_set_equipped_list_dedupes_and_caps(db_session):
     kept = set_equipped_list(u, ["a", "a", "b", "c", "d", "", "e"])
     assert kept == ["a", "b", "c"] and len(kept) == EQUIP_SLOTS
     assert u.equipped_badges == "a,b,c" and u.equipped_badge == "a"
+
+
+# ── 昵称唯一（rev 19）/ nickname uniqueness ──────────────────────────────────
+
+def test_nickname_must_be_unique_ignoring_case_and_spacing(db_session):
+    a = _user(db_session)
+    b = User(email="pp2@t.co", api_token="tok_pp2"); db_session.add(b); db_session.commit()
+    _apply_profile_patch(db_session, a, ProfilePatchIn(nickname="Trader Joe"))
+    # 大小写、空格、全角都归一到同一个 key，所以下面三个都算撞名。
+    for taken in ("Trader Joe", "trader joe", "TraderJoe", "Ｔｒａｄｅｒ Ｊｏｅ"):
+        with pytest.raises(HTTPException) as e:
+            _apply_profile_patch(db_session, b, ProfilePatchIn(nickname=taken))
+        assert e.value.status_code == 400
+    _apply_profile_patch(db_session, b, ProfilePatchIn(nickname="Trader Jane"))
+    assert b.nickname == "Trader Jane"
+
+
+def test_resubmitting_own_nickname_is_not_a_collision(db_session):
+    u = _user(db_session)
+    _apply_profile_patch(db_session, u, ProfilePatchIn(nickname="Solo"))
+    _apply_profile_patch(db_session, u, ProfilePatchIn(nickname="Solo"))   # 不该报"已被使用"
+    _apply_profile_patch(db_session, u, ProfilePatchIn(nickname="SOLO"))   # 只改大小写同理
+    assert u.nickname == "SOLO"
+
+
+def test_nickname_key_written_alongside_nickname(db_session):
+    u = _user(db_session)
+    _apply_profile_patch(db_session, u, ProfilePatchIn(nickname="  Ada Lovelace "))
+    assert u.nickname == "Ada Lovelace"
+    assert u.nickname_key == "adalovelace"
+
+
+def test_unset_nicknames_do_not_collide(db_session):
+    """两个都没设昵称的人不能互相撞——NULL 不参与唯一性。"""
+    a = _user(db_session)
+    b = User(email="pp3@t.co", api_token="tok_pp3"); db_session.add(b); db_session.commit()
+    assert a.nickname_key is None and b.nickname_key is None

@@ -35,6 +35,7 @@ def _user_out(user: User) -> UserOut:
         # Both conditions: required *and* still missing, or users who
         # already filled it in would be gated again on every login.
         needsPhone=bool(user.phone_required) and not user.phone,
+        needsNickname=not (user.nickname or "").strip(),
     )
 
 

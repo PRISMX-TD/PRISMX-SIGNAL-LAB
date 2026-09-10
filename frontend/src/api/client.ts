@@ -545,6 +545,11 @@ export const userApi = {
       // refreshUser(); same precedent as gamificationVisible/leaderboardVisible.
       competitionsVisible: boolean
       nickname: string | null
+      // 是否还欠一个昵称（全员必填）。搭这趟车是为了强制上线时已经登录的会话——
+      // 他们缓存的 user 里没有这个键，只有 refreshUser() 能补上（见后端注释）。
+      // Whether a nickname is still owed (required of everyone). Rides along to
+      // catch sessions that predate the rollout, whose cached user lacks the key.
+      needsNickname: boolean
       nicknamePublic: boolean
       leaderboardOptOut: boolean
       equippedBadge: string | null

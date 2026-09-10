@@ -54,6 +54,11 @@ export interface User {
   // Whether a phone is still owed; computed server-side because grandfathered
   // users also have an empty phone but are exempt.
   needsPhone?: boolean
+  // 是否还欠一个昵称。与 needsPhone 并列，同一个守卫（App 的 Protected）读这两个。
+  // 可选是因为强制上线前签发的本地缓存 user 没有这个键；refreshUser() 会补上。
+  // Whether a nickname is still owed. Read by the same guard as needsPhone.
+  // Optional because users cached before the rollout lack the key; refreshUser fills it in.
+  needsNickname?: boolean
   // 当前 PRO 是否为免费试用；登录/注册响应不带这个字段（未知），
   // 只有 refreshUser()（调 GET /auth/me）之后才会补上。
   // Whether the current PRO is a free trial; absent (unknown) on the
@@ -1159,6 +1164,9 @@ export interface ProfilePatch {
 
 export interface ProfileOut {
   nickname: string | null
+  // 改完还欠不欠昵称。补全资料页据此清掉本地 user 上的标记。
+  // Whether a nickname is still owed after this write; the completion page clears its flag off it.
+  needsNickname: boolean
   nicknamePublic: boolean
   leaderboardOptOut: boolean
   equippedBadge: string | null
