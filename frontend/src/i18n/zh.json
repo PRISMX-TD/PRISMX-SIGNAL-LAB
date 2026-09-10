@@ -861,7 +861,8 @@
       "count": "{{n}} 笔"
     },
     "acct": {
-      "login": "登录号"
+      "login": "登录号",
+      "section": "账户"
     },
     "perf": {
       "winRate": "胜率",

@@ -861,7 +861,8 @@
       "count": "{{n}} orders"
     },
     "acct": {
-      "login": "Login"
+      "login": "Login",
+      "section": "Account"
     },
     "perf": {
       "winRate": "Win rate",

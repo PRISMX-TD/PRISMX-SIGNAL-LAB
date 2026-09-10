@@ -428,6 +428,22 @@
   color: var(--text-3);
 }
 
+/* ── 持仓与账户：排版容器 ──
+   .ord-ptab / .ord-pos / .ord-acctwrap 在 ≥768px 上是 display:contents——桌面的
+   顺序与间距一点没变；它们只为手机存在（见文件末尾的 max-width:767px 段），在那里
+   变成 flex 列并用 order 把「当前持仓」抬到账本条前面。
+   These three wrappers are display:contents above 768px, so the desktop rhythm is
+   byte-identical; they exist only so the phone layout can reorder with flex. */
+.ord-ptab,
+.ord-pos,
+.ord-acctwrap {
+  display: contents;
+}
+/* 账本条的小标题只在手机出现：那里它落到持仓之后，需要一句话说明自己是什么。
+   The ledger heading shows on phones only, where the strip sits after the
+   positions and needs to name itself. */
+.ord-acct-h { display: none; }
+
 /* ── 持仓与账户：账本条 / account strip ── */
 .ord-strip {
   display: flex;
@@ -714,6 +730,133 @@
 }
 
 @media (max-width: 767px) {
+  /* ── 手机版排列（2026-09-11）──
+     改之前：26px 标题 + 两行副题 + 折成两行的账号药丸 + 页签 + 六格竖着摊开的账本条
+     + 一句作用范围小字，加起来 ~660px，一屏 600px 的手机要滑一整屏才看见自己的仓位。
+     现在这一屏只回答"我的单子怎么样"：副题让位、账号药丸压成一条横滑、账本条搬到
+     仓位卡之后并改成发丝线账本行（六行标签左值右），作用范围小字压到卡片下面。
+     数据一条没少，只是换了顺序与密度；桌面完全不变。
+     Before: title + two-line subtitle + wrapped account pills + tabs + a six-cell
+     ledger stacked vertically + a scope note ≈ 660px, so a 600px phone screen had
+     to be scrolled past entirely before the user's own positions appeared. Now the
+     first screen answers only "how are my positions": the subtitle steps aside,
+     the pills collapse into one horizontal scroller, the ledger moves below the
+     cards as a hairline row list, and the scope note follows the cards. Nothing is
+     dropped — only reordered and tightened. Desktop is untouched. */
+  .ord-head { margin-bottom: 14px; }
+  .ord-head .page-head-title p { display: none; }
+
+  /* 账号药丸：不折行，整条横滑；未选中的药丸不带余额——余额在下面的账本条里有，
+     药丸只需要认出是哪个号。负外边距出血试过又撤了：父级 .page-head-actions 是
+     flex，负边距会把整页撑出横向滚动条。
+     Pills: one horizontal scroller, no wrapping; unselected pills drop the
+     balance, which the ledger below already carries. Edge-bleeding with negative
+     margins was tried and reverted — the flex parent lets it push the page into a
+     horizontal scrollbar. */
+  .ord-accts {
+    flex-wrap: nowrap;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+    padding: 2px 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .ord-accts::-webkit-scrollbar { display: none; }
+  .ord-acct {
+    height: 32px;
+    padding: 0 12px 0 10px;
+    gap: 8px;
+    font-size: 12.5px;
+    flex: none;
+  }
+  .ord-acct:not(.on) .ord-acct-bal { display: none; }
+
+  /* 持仓提到账本条之前；作用范围小字压到卡片之后 /
+     positions first, scope note last */
+  .ord-ptab,
+  .ord-pos {
+    display: flex;
+    flex-direction: column;
+  }
+  .ord-ptab > .ord-pos { order: 1; }
+  .ord-ptab > .ord-acctwrap { order: 2; }
+  .ord-ptab > .ord-lrow { order: 3; }
+  .ord-pos > .ord-sec { order: 1; }
+  .ord-pos > .ord-pos-grid,
+  .ord-pos > .ord-pos-none { order: 2; }
+  .ord-pos > .ord-pos-hint { order: 3; }
+  .ord-sec {
+    margin: 0 0 2px;
+    gap: 2px 14px;
+  }
+  .ord-sec h3 { font-size: 16px; }
+  .ord-sec-sum {
+    flex-wrap: wrap;
+    gap: 2px 14px;
+  }
+  .ord-pos-hint { margin-top: 16px; }
+  .ord-pos-none { padding: 20px 0 4px; }
+
+  /* 账本条：手机上六格横排会摊成六段两行高的柱子（~330px），改成一行一条的发丝线
+     账本行——标签左、值右，六行 ~230px，且此时它已经在仓位卡之后。
+     The six cells stacked into ~330px of columns; on phones they become one
+     hairline row each (label left, value right, ~230px total), and by now the
+     strip sits below the position cards anyway. */
+  .ord-acctwrap {
+    display: block;
+    margin-top: 30px;
+    padding-top: 26px;
+    border-top: 1px solid var(--line);
+  }
+  .ord-acct-h {
+    display: block;
+    margin: 0 0 4px;
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .ord-strip {
+    display: block;
+    padding: 0;
+    border: 0;
+  }
+  .ord-strip .ord-cell {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .ord-strip .ord-cell .ord-k { flex: none; }
+  .ord-strip .ord-cell .ord-v {
+    min-width: 0;
+    margin-top: 0;
+    justify-content: flex-end;
+    font-size: 14px;
+  }
+  /* 账户名是券商那串长评估账号名，右对齐单行省略 / the long prop-firm name, ellipsised */
+  .ord-cell-wide .ord-v {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    text-align: right;
+  }
+
+  /* 状态芯片：同样压成一条横滑，六个芯片不再折成两行 /
+     status chips: one horizontal scroller instead of two wrapped rows */
+  .ord-chips {
+    flex-wrap: nowrap;
+    width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .ord-chips::-webkit-scrollbar { display: none; }
+  .ord-chip { flex: none; }
+
   .ord-tb-r {
     width: 100%;
     margin-left: 0;
