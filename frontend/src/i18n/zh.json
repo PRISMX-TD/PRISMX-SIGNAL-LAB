@@ -864,6 +864,10 @@
       "login": "登录号",
       "section": "账户"
     },
+    "mast": {
+      "floating": "浮动盈亏",
+      "switch": "切换账号"
+    },
     "perf": {
       "winRate": "胜率",
       "record": "盈利 {{w}} · 亏损 {{l}} · 已判定 {{n}} 笔",

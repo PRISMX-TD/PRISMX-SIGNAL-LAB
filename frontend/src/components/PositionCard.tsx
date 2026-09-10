@@ -1,5 +1,17 @@
 // 持仓卡片：展示盈亏并支持平仓/部分平仓/改 SL·TP
 // Position card: shows P&L and supports close / partial close / modify SL·TP
+//
+// 两种形态，同一套数据与动作：
+//   · 卡片（默认，桌面）：品种 + 盈亏抬头、四格价格、三个动作按钮常驻。
+//   · 行（compact，手机版订单页）：一行一仓——头像 / 品种 / 方向 / 手数 / 入场 → 现价，
+//     右侧盈亏；点行展开止损止盈与三个动作。手机一屏原来只放得下两张卡，现在能放
+//     五六行，先看全再动手。动作面板（部分平仓 / 改单表单、全平确认）两形态共用。
+// Two shapes over one set of data and actions. Card (default, desktop): symbol +
+// P&L header, four price cells, three actions always visible. Row (compact, the
+// orders page on phones): one line per position — avatar / symbol / side / lots /
+// entry → current with P&L at the right; tapping expands SL·TP and the actions.
+// A phone screen fit two cards; it fits five or six rows. The action panels are
+// shared by both shapes.
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { orderApi } from '../api/client'
@@ -12,15 +24,19 @@ import { symbolMeta } from '../utils/symbolMeta'
 interface Props {
   position: Position
   onActionDone?: (msg: string, kind: 'success' | 'error' | 'info') => void
+  // 手机版的「行」形态 / the phone "row" shape
+  compact?: boolean
 }
 
 type Mode = 'view' | 'close' | 'modify'
 
-export default function PositionCard({ position: p, onActionDone }: Props) {
+export default function PositionCard({ position: p, onActionDone, compact = false }: Props) {
   const { t } = useTranslation()
   const [mode, setMode] = useState<Mode>('view')
   const [busy, setBusy] = useState(false)
   const [confirmCloseAll, setConfirmCloseAll] = useState(false)
+  // 行形态的展开态 / expanded state of the row shape
+  const [open, setOpen] = useState(false)
   // 全屏确认弹窗，手机上划返回应该先关掉它、而不是直接退出当前页面
   // （见 useBackToClose 的说明）。/ A full-screen confirm modal; on mobile,
   // swiping back should close it first rather than exiting the current page
@@ -33,6 +49,7 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
   const isBuy = p.side === 'BUY'
   const profitUp = p.profit >= 0
   const canAct = !!p.ticket
+  const meta = symbolMeta(p.symbol)
 
   // 改止损止盈的方向校验：买单止损须低于现价、止盈须高于现价，卖单相反。
   // 和开仓弹窗（SlideOrderModal）同样的规则——此前改单表单完全不校验，方向
@@ -117,22 +134,185 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
     }
   }
 
+  // ── 两形态共用的动作区 / action area shared by both shapes ──
+  const actions = canAct && mode === 'view' && (
+    <div className="mt-3 flex gap-2">
+      <button
+        onClick={() => setConfirmCloseAll(true)}
+        disabled={busy}
+        className="flex-1 rounded-lg border border-down/40 bg-down/10 py-1.5 text-xs font-medium text-down transition hover:bg-down/20 disabled:opacity-50"
+      >
+        {t('positions.closeAll')}
+      </button>
+      <button
+        onClick={() => setMode('close')}
+        disabled={busy}
+        className="flex-1 rounded-lg border border-white/10 bg-white/[0.04] py-1.5 text-xs font-medium text-neutral-300 transition hover:bg-white/[0.08] disabled:opacity-50"
+      >
+        {t('positions.partialClose')}
+      </button>
+      <button
+        onClick={() => setMode('modify')}
+        disabled={busy}
+        className="flex-1 rounded-lg border border-prism-600/40 bg-prism-600/10 py-1.5 text-xs font-medium text-prism-300 transition hover:bg-prism-600/20 disabled:opacity-50"
+      >
+        {t('positions.editSlTp')}
+      </button>
+    </div>
+  )
+
+  const closeForm = canAct && mode === 'close' && (
+    <div className="mt-3 space-y-2 rounded-lg border border-white/10 bg-ink-950/40 p-3">
+      <label className="text-xs text-neutral-400">
+        {t('positions.closeVolume')} (max {p.volume})
+      </label>
+      <input
+        type="number"
+        step="0.01"
+        min="0.01"
+        max={p.volume}
+        className="input font-mono text-sm"
+        value={closeVol}
+        onChange={(e) => setCloseVol(e.target.value)}
+      />
+      <div className="flex gap-2">
+        <button onClick={() => setMode('view')} className="btn-ghost flex-1 py-1.5 text-xs">
+          {t('common.cancel')}
+        </button>
+        <button
+          onClick={() => doClose(false)}
+          disabled={busy}
+          className="btn-primary flex-1 py-1.5 text-xs"
+        >
+          {t('positions.confirmClose')}
+        </button>
+      </div>
+    </div>
+  )
+
+  const modifyForm = canAct && mode === 'modify' && (
+    <div className="mt-3 space-y-2 rounded-lg border border-white/10 bg-ink-950/40 p-3">
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-xs text-down">{t('positions.sl')}</label>
+          <input
+            type="number"
+            step="0.00001"
+            className={`input font-mono text-sm ${slInvalid ? 'border-down' : ''}`}
+            placeholder={t('positions.clearHint')}
+            value={sl}
+            onChange={(e) => setSl(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="text-xs text-up">{t('positions.tp')}</label>
+          <input
+            type="number"
+            step="0.00001"
+            className={`input font-mono text-sm ${tpInvalid ? 'border-down' : ''}`}
+            placeholder={t('positions.clearHint')}
+            value={tp}
+            onChange={(e) => setTp(e.target.value)}
+          />
+        </div>
+      </div>
+      {(slInvalid || tpInvalid) && (
+        <p className="text-xs text-down">
+          {slInvalid ? t('order.slWrongSide') : t('order.tpWrongSide')}
+        </p>
+      )}
+      <div className="flex gap-2">
+        <button onClick={() => setMode('view')} className="btn-ghost flex-1 py-1.5 text-xs">
+          {t('common.cancel')}
+        </button>
+        <button
+          onClick={doModify}
+          disabled={busy || slInvalid || tpInvalid}
+          className="btn-primary flex-1 py-1.5 text-xs disabled:opacity-50"
+        >
+          {t('positions.confirmModify')}
+        </button>
+      </div>
+    </div>
+  )
+
+  const confirm = confirmCloseAll && (
+    <ConfirmModal
+      title={t('positions.closeAllConfirmTitle')}
+      message={t('positions.closeAllConfirm', { symbol: displaySymbol(p.symbol), volume: p.volume })}
+      confirmLabel={t('positions.closeAll')}
+      danger
+      busy={busy}
+      onConfirm={() => { setConfirmCloseAll(false); doClose(true) }}
+      onCancel={() => setConfirmCloseAll(false)}
+    />
+  )
+
+  const sideTag = (
+    <span className={`tag ${isBuy ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
+      {isBuy ? t('common.buy') : t('common.sell')}
+    </span>
+  )
+  const ava = (
+    <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>
+      {meta.letter}
+    </span>
+  )
+
+  // ── 行形态（手机）/ row shape (phones) ──
+  if (compact) {
+    return (
+      <article className={`pos-row ${open ? 'open' : ''}`}>
+        <button
+          type="button"
+          className="pos-row-hd"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {ava}
+          <span className="pos-row-id">
+            <span className="pos-row-sym">
+              <b>{displaySymbol(p.symbol)}</b>
+              {sideTag}
+            </span>
+            <span className="pos-row-sub">
+              {p.volume}<small>{t('positions.lots')}</small>
+              <i />
+              {fmt(p.entryPrice)}<span className="pos-row-arr">→</span>{fmt(p.currentPrice)}
+            </span>
+          </span>
+          <span className={`pos-row-pnl ${profitUp ? 'text-up' : 'text-down'}`}>
+            <b>{profitUp ? '+' : ''}{p.profit.toFixed(2)}</b>
+            {pnlPct != null && <small>{pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%</small>}
+          </span>
+        </button>
+        {open && (
+          <div className="pos-row-bd">
+            <div className="pos-row-lv">
+              <span><span className="ord-k">{t('positions.sl')}</span><b className="text-down">{p.stopLoss ? fmt(p.stopLoss) : '—'}</b></span>
+              <span><span className="ord-k">{t('positions.tp')}</span><b className="text-up">{p.takeProfit ? fmt(p.takeProfit) : '—'}</b></span>
+              {p.ticket && <span className="pos-row-tk">#{p.ticket}</span>}
+            </div>
+            {actions}
+            {closeForm}
+            {modifyForm}
+          </div>
+        )}
+        {confirm}
+      </article>
+    )
+  }
+
+  // ── 卡片形态（桌面）/ card shape (desktop) ──
   return (
     <div className="glass-neon pos-card p-4">
       {/* 头部：品种 + 方向 + 盈亏 / header: symbol + side + P&L */}
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <span
-              className="sym-ava"
-              style={{ background: symbolMeta(p.symbol).color + '33', color: symbolMeta(p.symbol).ink }}
-            >
-              {symbolMeta(p.symbol).letter}
-            </span>
+            {ava}
             <span className="font-mono text-base font-semibold text-neutral-100">{displaySymbol(p.symbol)}</span>
-            <span className={`tag ${isBuy ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
-              {isBuy ? t('common.buy') : t('common.sell')}
-            </span>
+            {sideTag}
           </div>
           <div className="mt-1 font-mono text-xs text-neutral-500">
             {p.volume} {t('positions.lots')}
@@ -173,119 +353,10 @@ export default function PositionCard({ position: p, onActionDone }: Props) {
         </div>
       </div>
 
-      {/* PLACEHOLDER_ACTIONS */}
-      {canAct && mode === 'view' && (
-        <div className="mt-3 flex gap-2">
-          <button
-            onClick={() => setConfirmCloseAll(true)}
-            disabled={busy}
-            className="flex-1 rounded-lg border border-down/40 bg-down/10 py-1.5 text-xs font-medium text-down transition hover:bg-down/20 disabled:opacity-50"
-          >
-            {t('positions.closeAll')}
-          </button>
-          <button
-            onClick={() => setMode('close')}
-            disabled={busy}
-            className="flex-1 rounded-lg border border-white/10 bg-white/[0.04] py-1.5 text-xs font-medium text-neutral-300 transition hover:bg-white/[0.08] disabled:opacity-50"
-          >
-            {t('positions.partialClose')}
-          </button>
-          <button
-            onClick={() => setMode('modify')}
-            disabled={busy}
-            className="flex-1 rounded-lg border border-prism-600/40 bg-prism-600/10 py-1.5 text-xs font-medium text-prism-300 transition hover:bg-prism-600/20 disabled:opacity-50"
-          >
-            {t('positions.editSlTp')}
-          </button>
-        </div>
-      )}
-
-      {canAct && mode === 'close' && (
-        <div className="mt-3 space-y-2 rounded-lg border border-white/10 bg-ink-950/40 p-3">
-          <label className="text-xs text-neutral-400">
-            {t('positions.closeVolume')} (max {p.volume})
-          </label>
-          <input
-            type="number"
-            step="0.01"
-            min="0.01"
-            max={p.volume}
-            className="input font-mono text-sm"
-            value={closeVol}
-            onChange={(e) => setCloseVol(e.target.value)}
-          />
-          <div className="flex gap-2">
-            <button onClick={() => setMode('view')} className="btn-ghost flex-1 py-1.5 text-xs">
-              {t('common.cancel')}
-            </button>
-            <button
-              onClick={() => doClose(false)}
-              disabled={busy}
-              className="btn-primary flex-1 py-1.5 text-xs"
-            >
-              {t('positions.confirmClose')}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {canAct && mode === 'modify' && (
-        <div className="mt-3 space-y-2 rounded-lg border border-white/10 bg-ink-950/40 p-3">
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-xs text-down">{t('positions.sl')}</label>
-              <input
-                type="number"
-                step="0.00001"
-                className={`input font-mono text-sm ${slInvalid ? 'border-down' : ''}`}
-                placeholder={t('positions.clearHint')}
-                value={sl}
-                onChange={(e) => setSl(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="text-xs text-up">{t('positions.tp')}</label>
-              <input
-                type="number"
-                step="0.00001"
-                className={`input font-mono text-sm ${tpInvalid ? 'border-down' : ''}`}
-                placeholder={t('positions.clearHint')}
-                value={tp}
-                onChange={(e) => setTp(e.target.value)}
-              />
-            </div>
-          </div>
-          {(slInvalid || tpInvalid) && (
-            <p className="text-xs text-down">
-              {slInvalid ? t('order.slWrongSide') : t('order.tpWrongSide')}
-            </p>
-          )}
-          <div className="flex gap-2">
-            <button onClick={() => setMode('view')} className="btn-ghost flex-1 py-1.5 text-xs">
-              {t('common.cancel')}
-            </button>
-            <button
-              onClick={doModify}
-              disabled={busy || slInvalid || tpInvalid}
-              className="btn-primary flex-1 py-1.5 text-xs disabled:opacity-50"
-            >
-              {t('positions.confirmModify')}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {confirmCloseAll && (
-        <ConfirmModal
-          title={t('positions.closeAllConfirmTitle')}
-          message={t('positions.closeAllConfirm', { symbol: displaySymbol(p.symbol), volume: p.volume })}
-          confirmLabel={t('positions.closeAll')}
-          danger
-          busy={busy}
-          onConfirm={() => { setConfirmCloseAll(false); doClose(true) }}
-          onCancel={() => setConfirmCloseAll(false)}
-        />
-      )}
+      {actions}
+      {closeForm}
+      {modifyForm}
+      {confirm}
     </div>
   )
 }

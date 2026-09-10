@@ -9,17 +9,17 @@
 // net P&L, win rate, P&L by symbol plus the closed-trade list; the account bar
 // became a ledger strip. Data flow, filtering and paging are unchanged.
 //
-// 2026-09-11 手机版重排（只动 ≤767px，桌面不变）：持仓页签第一屏原来要滑过标题副题、
-// 折成两行的账号药丸和六格竖着摊开的账本条才看得见自己的仓位。现在页头副题在手机上
-// 隐藏、账号药丸与状态芯片压成一条横滑、账本条搬到仓位卡之后并改成发丝线账本行，
-// 作用范围小字跟到卡片下面。顺序靠 .ord-ptab / .ord-pos 两层包裹的 flex order 换，
-// 桌面上这两层是 display:contents。
-// Mobile rearrangement 2026-09-11 (≤767px only): the positions tab used to bury
-// the user's own positions under the head, a two-row pill wrap and a six-cell
-// ledger. The subtitle now hides on phones, pills and status chips became single
-// horizontal scrollers, and the ledger moved below the position cards as a
-// hairline row list with the scope note trailing the cards. The reordering rides
-// on flex order in .ord-ptab / .ord-pos, which are display:contents on desktop.
+// 2026-09-11 手机版重设计（≤767px 走另一棵 DOM，桌面不变）：手机上页头药丸 + 六格
+// 账本条 + 两张就占满一屏的仓位卡，第一屏见不到自己的单子。现在手机版是
+//   页头（只有标题）→ 账户抬头（AccountMast：切换 / 净值大数 / 余额·浮动·杠杆 / 账户名）
+//   → 页签 → 一行一仓的持仓行（PositionCard compact，点开才见止损止盈与动作）→ 作用范围小字
+//   → 自动仓管。
+// 分支靠 utils/useMediaQuery 的 useIsPhone；桌面仍是页头药丸 + 账本条 + 仓位卡。
+// Mobile redesign 2026-09-11 (≤767px renders a different tree; desktop unchanged):
+// head (title only) → AccountMast (switcher / big equity / balance·floating·leverage /
+// account name) → tabs → one-row-per-position list (PositionCard compact, tap to
+// reveal SL·TP and actions) → scope note → auto-manage. Branching via useIsPhone;
+// desktop keeps the head pills, the ledger strip and the position cards.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -36,6 +36,8 @@ import ClosedTradesList from '../components/ClosedTradesList'
 import AutoManageCard from '../components/AutoManageCard'
 import OnboardingCard from '../components/OnboardingCard'
 import PageHead from '../components/PageHead'
+import AccountMast from '../components/AccountMast'
+import { useIsPhone } from '../utils/useMediaQuery'
 import { usePartnerBroker } from '../components/PartnerBrokerCard'
 import { symbolMeta } from '../utils/symbolMeta'
 
@@ -130,22 +132,9 @@ export default function OrdersPage() {
   }, [accounts, selectedLogin, rememberedLogin])
   const activeAccount = accounts.find((a) => a.login === selectedLogin) ?? accounts[0]
 
-  // 手机上账号药丸压成了一条横滑（styles/orders.css 的 ≤767px 段），四个账号里选中的
-  // 那个常常在屏幕外——横滑条自己不会跟着选中态走。这里把它滚进视野中间；只动容器的
-  // scrollLeft，不用 scrollIntoView（那会连页面一起纵向滚，把持仓卡顶掉）。
-  // The account pills collapse into one horizontal scroller on phones, where the
-  // selected one is often off-screen. Bring it into view by setting the container's
-  // scrollLeft only — scrollIntoView would also scroll the page vertically and push
-  // the position cards out of the first screen.
-  const pillsRef = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    const box = pillsRef.current
-    if (!box || box.scrollWidth <= box.clientWidth) return
-    const on = box.querySelector<HTMLElement>('.ord-acct.on')
-    if (!on) return
-    const left = on.offsetLeft - (box.clientWidth - on.offsetWidth) / 2
-    box.scrollLeft = Math.max(0, left)
-  }, [selectedLogin, accounts.length])
+  // 手机 / 桌面渲染不同的账号区与持仓形态（见文件头注释）
+  // Phone and desktop render different account blocks and position shapes (see header comment)
+  const isPhone = useIsPhone()
 
   const [tab, setTab] = useState<OrdersTab>(() => {
     const saved = localStorage.getItem(TAB_STORAGE_KEY)
@@ -497,8 +486,8 @@ export default function OrdersPage() {
         as="h1"
         title={t('orders.title')}
         subtitle={t('orders.subtitle')}
-        actions={accounts.length > 1 ? (
-          <div ref={pillsRef} className="ord-accts" role="tablist">
+        actions={!isPhone && accounts.length > 1 ? (
+          <div className="ord-accts" role="tablist">
             {accounts.map((a) => (
               <button
                 key={a.login}
@@ -517,6 +506,18 @@ export default function OrdersPage() {
         ) : undefined}
       />
 
+      {/* 手机版账户抬头：替代页头药丸 + 账本条，三个页签共用 /
+          phone masthead: replaces the head pills and the ledger strip; shared by all tabs */}
+      {isPhone && activeAccount && (
+        <AccountMast
+          accounts={accounts}
+          active={activeAccount}
+          onChoose={chooseLogin}
+          floating={posSummary.pnl}
+          brokerName={brokerName}
+        />
+      )}
+
       {/* Tab 导航 / tab navigation */}
       <div className="seg-tabs mb-4 md:mb-6" role="tablist">
         {TABS.map((key) => (
@@ -533,7 +534,7 @@ export default function OrdersPage() {
       </div>
 
       {tab === 'positions' && (
-        <div className="ord-ptab">
+        <>
           {/* 一个账号都没绑时，这个 Tab 原本只剩「暂无持仓」和一张用不了的自动
               仓管卡，账户横条因为 activeAccount 为 undefined 干脆不渲染——页面
               等于什么都没说。引导卡补上「下一步做什么」。
@@ -543,74 +544,74 @@ export default function OrdersPage() {
               onboarding card supplies the next step. */}
           <OnboardingCard />
 
-          {/* 账户账本条：详细的账号管理在 /account 页，这里只回答"这个账号现在什么
-              状态"。两种连接方式展示同一组信息：登录号、状态、账户名、券商、余额、
+          {/* 账户账本条（桌面）：详细的账号管理在 /account 页，这里只回答"这个账号现在
+              什么状态"。两种连接方式展示同一组信息：登录号、状态、账户名、券商、余额、
               净值、杠杆；bridge 账号原来多带的 "@server" 后缀去掉，券商列已经回答了
-              "这是哪家"。
-              Account ledger strip: detailed account management lives on /account;
-              this only answers "how is this account doing". Both connection types
-              show one identical info set; the bridge-only "@server" suffix is gone
-              because the broker column already answers "which broker". */}
-          {activeAccount && (
-            <div className="ord-acctwrap">
-              <h3 className="ord-acct-h">{t('orders.acct.section')}</h3>
-              <div className="ord-strip">
-                <div className="ord-cell">
-                  <div className="ord-k">{t('orders.acct.login')}</div>
-                  <div className="ord-v">
-                    {activeAccount.login}
-                    <span className={activeAccount.online ? 'ord-pill-on' : 'ord-pill-off'}>
-                      {activeAccount.online ? t('common.online') : t('common.offline')}
-                    </span>
-                  </div>
+              "这是哪家"。手机上这七项都在页头下的账户抬头里，不再重复。
+              Account ledger strip (desktop): detailed account management lives on
+              /account; this only answers "how is this account doing". Both connection
+              types show one identical info set; the bridge-only "@server" suffix is
+              gone because the broker column already answers "which broker". On phones
+              all seven facts live in the masthead under the head, so nothing repeats. */}
+          {!isPhone && activeAccount && (
+            <div className="ord-strip">
+              <div className="ord-cell">
+                <div className="ord-k">{t('orders.acct.login')}</div>
+                <div className="ord-v">
+                  {activeAccount.login}
+                  <span className={activeAccount.online ? 'ord-pill-on' : 'ord-pill-off'}>
+                    {activeAccount.online ? t('common.online') : t('common.offline')}
+                  </span>
                 </div>
-                <div className="ord-cell ord-cell-wide">
-                  <div className="ord-k">{t('bind.accountName')}</div>
-                  <div className="ord-v sans">{activeAccount.accountName || '—'}</div>
+              </div>
+              <div className="ord-cell">
+                <div className="ord-k">{t('bind.accountName')}</div>
+                <div className="ord-v sans">{activeAccount.accountName || '—'}</div>
+              </div>
+              <div className="ord-cell">
+                <div className="ord-k">{t('bind.company')}</div>
+                <div className="ord-v sans">{activeAccount.company || (activeAccount.source === 'gateway' ? brokerName : '—')}</div>
+              </div>
+              <div className="ord-cell">
+                <div className="ord-k">{t('account.balance')}</div>
+                <div className="ord-v">
+                  {money2(activeAccount.balance)}
+                  {activeAccount.accountCurrency && <small>{activeAccount.accountCurrency}</small>}
                 </div>
-                <div className="ord-cell">
-                  <div className="ord-k">{t('bind.company')}</div>
-                  <div className="ord-v sans">{activeAccount.company || (activeAccount.source === 'gateway' ? brokerName : '—')}</div>
+              </div>
+              <div className="ord-cell">
+                <div className="ord-k">{t('account.equity')}</div>
+                <div className="ord-v">
+                  {money2(activeAccount.equity)}
+                  {activeAccount.accountCurrency && <small>{activeAccount.accountCurrency}</small>}
                 </div>
-                <div className="ord-cell">
-                  <div className="ord-k">{t('account.balance')}</div>
-                  <div className="ord-v">
-                    {money2(activeAccount.balance)}
-                    {activeAccount.accountCurrency && <small>{activeAccount.accountCurrency}</small>}
-                  </div>
-                </div>
-                <div className="ord-cell">
-                  <div className="ord-k">{t('account.equity')}</div>
-                  <div className="ord-v">
-                    {money2(activeAccount.equity)}
-                    {activeAccount.accountCurrency && <small>{activeAccount.accountCurrency}</small>}
-                  </div>
-                </div>
-                <div className="ord-cell">
-                  <div className="ord-k">{t('account.leverage')}</div>
-                  <div className="ord-v">{activeAccount.leverage ? `1:${activeAccount.leverage}` : '—'}</div>
-                </div>
+              </div>
+              <div className="ord-cell">
+                <div className="ord-k">{t('account.leverage')}</div>
+                <div className="ord-v">{activeAccount.leverage ? `1:${activeAccount.leverage}` : '—'}</div>
               </div>
             </div>
           )}
 
-          {/* 持仓概览 / positions overview。手机上这一块靠 .ord-pos 的 flex order
-              抬到账本条前面，作用范围小字则压到仓位卡下面——手机一屏只有 ~600px，
-              先看到自己的单子比先读一句解释要紧。
-              On phones this block is lifted above the account ledger by flex order
-              on .ord-pos, and the scope note drops below the cards: a phone screen
-              is ~600px, so the user's own positions come before the explanation. */}
-          <div className="ord-pos">
-            <div className="ord-sec">
-              <h3>{t('orders.positions')}</h3>
-              {visiblePositions.length > 0 && (
-                <div className="ord-sec-sum">
-                  <span>{t('orders.summary.positions')} <b>{posSummary.total}</b></span>
-                  <span>
-                    {t('common.buy')} <b className="text-up">{posSummary.buy}</b>
-                    {' '}/{' '}
-                    {t('common.sell')} <b className="text-down">{posSummary.sell}</b>
-                  </span>
+          {/* 持仓概览 / positions overview。手机上总浮动盈亏已在抬头里，这里只留
+              持仓数与买卖各几笔；作用范围小字压到列表之后——先看到单子再读解释。
+              On phones the floating total already sits in the masthead, so the
+              section head keeps only the count and the buy/sell split, and the
+              scope note follows the list — positions before explanation. */}
+          <div className="ord-sec">
+            <h3>
+              {t('orders.positions')}
+              {isPhone && visiblePositions.length > 0 && <span className="ord-sec-n">{posSummary.total}</span>}
+            </h3>
+            {visiblePositions.length > 0 && (
+              <div className="ord-sec-sum">
+                {!isPhone && <span>{t('orders.summary.positions')} <b>{posSummary.total}</b></span>}
+                <span>
+                  {t('common.buy')} <b className="text-up">{posSummary.buy}</b>
+                  {' '}/{' '}
+                  {t('common.sell')} <b className="text-down">{posSummary.sell}</b>
+                </span>
+                {!isPhone && (
                   <span>
                     {t('orders.summary.totalPnl')}{' '}
                     <b className={posSummary.pnl >= 0 ? 'text-up' : 'text-down'}>
@@ -618,20 +619,27 @@ export default function OrdersPage() {
                       {posSummary.pnl.toFixed(2)}
                     </b>
                   </span>
-                </div>
-              )}
-            </div>
-            <p className="ord-p ord-pos-hint">{t('orders.positionsScopeHint')}</p>
-            {visiblePositions.length === 0 ? (
-              <p className="ord-pos-none py-8 text-sm text-neutral-500">{t('orders.noPositions')}</p>
-            ) : (
-              <div className="ord-pos-grid mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {visiblePositions.map((p, i) => (
-                  <PositionCard key={p.ticket ?? i} position={p} onActionDone={showToast} />
-                ))}
+                )}
               </div>
             )}
           </div>
+          {!isPhone && <p className="ord-p">{t('orders.positionsScopeHint')}</p>}
+          {visiblePositions.length === 0 ? (
+            <p className="py-8 text-sm text-neutral-500">{t('orders.noPositions')}</p>
+          ) : isPhone ? (
+            <div className="pos-list">
+              {visiblePositions.map((p, i) => (
+                <PositionCard key={p.ticket ?? i} position={p} onActionDone={showToast} compact />
+              ))}
+            </div>
+          ) : (
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {visiblePositions.map((p, i) => (
+                <PositionCard key={p.ticket ?? i} position={p} onActionDone={showToast} />
+              ))}
+            </div>
+          )}
+          {isPhone && <p className="ord-p ord-p-after">{t('orders.positionsScopeHint')}</p>}
 
           {/* 自动仓位管理：放在持仓下方（管理对象就是上面这些仓位，挨着看最直观），
               但必须显式划出来——它是每用户一条的全局配置（AutoManageSettings 的
@@ -648,7 +656,7 @@ export default function OrdersPage() {
               values and reasonably concludes it leaked across accounts or
               failed to save. Hence the divider plus an explicit scope note. */}
           <AutoManageCard isPro={isPro} scopeHint={t('orders.autoManageScopeHint')} />
-        </div>
+        </>
       )}
 
       {/* 绩效分析：净盈亏 / 胜率 / 品种盈亏 + 已平仓明细，都跟着页头选中的账号

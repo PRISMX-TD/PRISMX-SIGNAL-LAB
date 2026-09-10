@@ -428,22 +428,6 @@
   color: var(--text-3);
 }
 
-/* ── 持仓与账户：排版容器 ──
-   .ord-ptab / .ord-pos / .ord-acctwrap 在 ≥768px 上是 display:contents——桌面的
-   顺序与间距一点没变；它们只为手机存在（见文件末尾的 max-width:767px 段），在那里
-   变成 flex 列并用 order 把「当前持仓」抬到账本条前面。
-   These three wrappers are display:contents above 768px, so the desktop rhythm is
-   byte-identical; they exist only so the phone layout can reorder with flex. */
-.ord-ptab,
-.ord-pos,
-.ord-acctwrap {
-  display: contents;
-}
-/* 账本条的小标题只在手机出现：那里它落到持仓之后，需要一句话说明自己是什么。
-   The ledger heading shows on phones only, where the strip sits after the
-   positions and needs to name itself. */
-.ord-acct-h { display: none; }
-
 /* ── 持仓与账户：账本条 / account strip ── */
 .ord-strip {
   display: flex;
@@ -527,6 +511,317 @@
   font-variant-numeric: tabular-nums;
   color: var(--text);
 }
+
+/* ── 持仓区标题里的计数 / count in the section title ── */
+.ord-sec-n {
+  margin-left: 8px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--purple-hi);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 手机版账户抬头 / phone account masthead（components/AccountMast.tsx）──
+   一块靠左对齐的抬头：第一行是账号切换（登录号 + 券商 + 折角），中间是整页唯一的
+   大数——净值，下面一行三个小事实（余额 / 浮动盈亏 / 杠杆），末行账户名单行省略。
+   不套卡，只有底边一条发丝线把它和页签隔开；紫只落在切换行的折角与计数上。
+   Left-aligned masthead: switcher line (login + broker + chevron), the page's one
+   big figure (equity), a facts line (balance / floating / leverage), then the
+   account name ellipsised. No card — a single hairline separates it from the tab
+   bar; violet only on the chevron and the count. */
+.ord-mast {
+  margin: 0 0 16px;
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+.ord-mast-sw {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  height: 28px;
+  margin: 0 0 0 -8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.ord-mast-sw:not(:disabled):active { background: var(--nest); }
+.ord-mast-sw:disabled { cursor: default; }
+.ord-mast-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.ord-mast-dot.on {
+  background: var(--up);
+  animation: breathe 2.4s ease-in-out infinite;
+}
+.ord-mast-login {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.ord-mast-broker {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-3);
+}
+.ord-mast-broker::before {
+  content: "·";
+  margin-right: 8px;
+}
+.ord-mast-chev {
+  display: inline-flex;
+  flex: none;
+  color: var(--purple-hi);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.ord-mast-chev.open { transform: rotate(180deg); }
+
+/* 账号列表：从切换行下面展开，一行一个账号（状态点 / 登录号 / 名字 / 净值）。
+   不做弹层——.page-enter 的 transform 会劫持 fixed 定位，内联展开最稳。
+   Account list expands inline below the switcher, one row per account. No
+   popover: .page-enter's transform hijacks fixed positioning; inline is safest. */
+.ord-mast-list {
+  margin: 6px 0 14px;
+  padding: 4px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  animation: ord-in var(--dur-base) var(--ease-out) both;
+}
+.ord-mast-opt {
+  display: grid;
+  grid-template-columns: 6px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.ord-mast-opt + .ord-mast-opt { border-top: 1px solid var(--line); }
+.ord-mast-opt:active { background: var(--nest); }
+.ord-mast-opt.on .ord-mast-opt-login { color: var(--purple-hi); }
+.ord-mast-opt-login {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.ord-mast-opt-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.ord-mast-opt-eq {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.ord-mast-eq {
+  margin-top: 8px;
+}
+.ord-mast-eq .ord-k { display: block; }
+.ord-mast-eq b {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 2px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 34px;
+  line-height: 1.05;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+.ord-mast-eq small {
+  font-family: Archivo, "Noto Sans SC", system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+.ord-mast-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  margin-top: 12px;
+}
+.ord-mast-facts > span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ord-mast-facts b {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.ord-mast-name {
+  margin-top: 10px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+/* ── 手机版持仓行 / phone position rows（PositionCard compact）──
+   一行一仓，发丝线分隔、不套卡：头像 / 品种 + 方向 / 手数 · 入场 → 现价，右侧盈亏
+   大字 + 百分比。点整行展开：止损 / 止盈 / 单号一行，下面是与卡片同一套的三个动作与
+   表单。展开时行面略抬（--surface）标出"正在操作的那一仓"。
+   One line per position, hairline-separated, no card. Tapping the row expands
+   SL / TP / ticket plus the same actions and forms as the card; the open row's
+   surface lifts slightly to mark "the one you're acting on". */
+.pos-list {
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+}
+.pos-row {
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  transition: background-color var(--dur-fast) var(--ease-out);
+  animation: ord-in var(--dur-base) var(--ease-out) both;
+}
+.pos-row.open {
+  margin: 0 -12px;
+  padding: 0 12px;
+  border-radius: var(--r-panel);
+  border-bottom-color: transparent;
+  background: var(--surface);
+}
+.pos-row.open + .pos-row { border-top: 1px solid var(--line); }
+.pos-row-hd {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.pos-row-hd:active { transform: scale(0.99); }
+.pos-row-id {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.pos-row-sym {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pos-row-sym b {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+}
+.pos-row-sub {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+.pos-row-sub small {
+  margin-left: 2px;
+  font-family: Archivo, "Noto Sans SC", system-ui, sans-serif;
+  font-size: 11px;
+}
+.pos-row-sub i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-3);
+  opacity: 0.6;
+  align-self: center;
+}
+.pos-row-arr {
+  margin: 0 4px;
+  color: var(--text-3);
+  opacity: 0.7;
+}
+.pos-row-pnl {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.pos-row-pnl b {
+  font-size: 16px;
+  font-weight: 600;
+}
+.pos-row-pnl small { font-size: 11px; opacity: 0.85; }
+.pos-row-bd {
+  padding: 0 0 14px;
+  animation: ord-in var(--dur-base) var(--ease-out) both;
+}
+.pos-row-lv {
+  display: flex;
+  align-items: baseline;
+  gap: 22px;
+  padding-top: 2px;
+}
+.pos-row-lv > span {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.pos-row-lv b {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.pos-row-tk {
+  margin-left: auto;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text-3);
+}
+/* 行内的三个动作按钮沿用卡片样式；卡片那条「按钮下沉」规则是 .pos-card 作用域，
+   行里没有面可下沉，保持透明底。
+   The row reuses the card's action buttons; the card-scoped recessed background
+   doesn't apply here. */
 
 /* ── 绩效分析 / performance ──
    页头只有一行：左边胜率（大数 + 胜负条 + 记录），右边统计范围。净盈亏与品种盈亏
@@ -730,120 +1025,21 @@
 }
 
 @media (max-width: 767px) {
-  /* ── 手机版排列（2026-09-11）──
-     改之前：26px 标题 + 两行副题 + 折成两行的账号药丸 + 页签 + 六格竖着摊开的账本条
-     + 一句作用范围小字，加起来 ~660px，一屏 600px 的手机要滑一整屏才看见自己的仓位。
-     现在这一屏只回答"我的单子怎么样"：副题让位、账号药丸压成一条横滑、账本条搬到
-     仓位卡之后并改成发丝线账本行（六行标签左值右），作用范围小字压到卡片下面。
-     数据一条没少，只是换了顺序与密度；桌面完全不变。
-     Before: title + two-line subtitle + wrapped account pills + tabs + a six-cell
-     ledger stacked vertically + a scope note ≈ 660px, so a 600px phone screen had
-     to be scrolled past entirely before the user's own positions appeared. Now the
-     first screen answers only "how are my positions": the subtitle steps aside,
-     the pills collapse into one horizontal scroller, the ledger moves below the
-     cards as a hairline row list, and the scope note follows the cards. Nothing is
-     dropped — only reordered and tightened. Desktop is untouched. */
-  .ord-head { margin-bottom: 14px; }
+  /* ── 手机版（2026-09-11 重设计）──
+     手机上 ≤767px 渲染的是另一棵 DOM（OrdersPage 的 isPhone 分支）：页头只有标题，
+     账号药丸与账本条合成一块「账户抬头」（.ord-mast，见下），仓位改成一行一仓的
+     .pos-row（PositionCard compact）。这一段只放手机专有的尺寸。
+     Phones render a different tree (OrdersPage's isPhone branch): title-only
+     head, pills + ledger merged into the account masthead (.ord-mast below),
+     positions as one .pos-row each (PositionCard compact). Phone-only sizing here. */
+  .ord-head { margin-bottom: 16px; }
   .ord-head .page-head-title p { display: none; }
-
-  /* 账号药丸：不折行，整条横滑；未选中的药丸不带余额——余额在下面的账本条里有，
-     药丸只需要认出是哪个号。负外边距出血试过又撤了：父级 .page-head-actions 是
-     flex，负边距会把整页撑出横向滚动条。
-     Pills: one horizontal scroller, no wrapping; unselected pills drop the
-     balance, which the ledger below already carries. Edge-bleeding with negative
-     margins was tried and reverted — the flex parent lets it push the page into a
-     horizontal scrollbar. */
-  .ord-accts {
-    flex-wrap: nowrap;
-    gap: 6px;
-    min-width: 0;
-    max-width: 100%;
-    padding: 2px 0;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  .ord-accts::-webkit-scrollbar { display: none; }
-  .ord-acct {
-    height: 32px;
-    padding: 0 12px 0 10px;
-    gap: 8px;
-    font-size: 12.5px;
-    flex: none;
-  }
-  .ord-acct:not(.on) .ord-acct-bal { display: none; }
-
-  /* 持仓提到账本条之前；作用范围小字压到卡片之后 /
-     positions first, scope note last */
-  .ord-ptab,
-  .ord-pos {
-    display: flex;
-    flex-direction: column;
-  }
-  .ord-ptab > .ord-pos { order: 1; }
-  .ord-ptab > .ord-acctwrap { order: 2; }
-  .ord-ptab > .ord-lrow { order: 3; }
-  .ord-pos > .ord-sec { order: 1; }
-  .ord-pos > .ord-pos-grid,
-  .ord-pos > .ord-pos-none { order: 2; }
-  .ord-pos > .ord-pos-hint { order: 3; }
   .ord-sec {
-    margin: 0 0 2px;
+    margin: 22px 0 10px;
     gap: 2px 14px;
   }
   .ord-sec h3 { font-size: 16px; }
-  .ord-sec-sum {
-    flex-wrap: wrap;
-    gap: 2px 14px;
-  }
-  .ord-pos-hint { margin-top: 16px; }
-  .ord-pos-none { padding: 20px 0 4px; }
-
-  /* 账本条：手机上六格横排会摊成六段两行高的柱子（~330px），改成一行一条的发丝线
-     账本行——标签左、值右，六行 ~230px，且此时它已经在仓位卡之后。
-     The six cells stacked into ~330px of columns; on phones they become one
-     hairline row each (label left, value right, ~230px total), and by now the
-     strip sits below the position cards anyway. */
-  .ord-acctwrap {
-    display: block;
-    margin-top: 30px;
-    padding-top: 26px;
-    border-top: 1px solid var(--line);
-  }
-  .ord-acct-h {
-    display: block;
-    margin: 0 0 4px;
-    font-size: 16px;
-    font-weight: 700;
-    color: #fff;
-  }
-  .ord-strip {
-    display: block;
-    padding: 0;
-    border: 0;
-  }
-  .ord-strip .ord-cell {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 11px 0;
-    border-bottom: 1px solid var(--line);
-  }
-  .ord-strip .ord-cell .ord-k { flex: none; }
-  .ord-strip .ord-cell .ord-v {
-    min-width: 0;
-    margin-top: 0;
-    justify-content: flex-end;
-    font-size: 14px;
-  }
-  /* 账户名是券商那串长评估账号名，右对齐单行省略 / the long prop-firm name, ellipsised */
-  .ord-cell-wide .ord-v {
-    display: block;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    text-align: right;
-  }
+  .ord-p-after { margin-top: 16px; }
 
   /* 状态芯片：同样压成一条横滑，六个芯片不再折成两行 /
      status chips: one horizontal scroller instead of two wrapped rows */
@@ -928,7 +1124,12 @@
   .ord-stamp.land,
   .ord-acct.online .ord-acct-dot,
   .ord-pill-on::before,
+  .ord-mast-dot.on,
+  .ord-mast-list,
+  .pos-row,
+  .pos-row-bd,
   .ord-slip[data-status="PENDING"] .ord-stamp {
     animation: none;
   }
+  .pos-row-hd:active { transform: none; }
 }

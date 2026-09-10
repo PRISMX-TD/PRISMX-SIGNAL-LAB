@@ -864,6 +864,10 @@
       "login": "Login",
       "section": "Account"
     },
+    "mast": {
+      "floating": "Floating P&L",
+      "switch": "Switch account"
+    },
     "perf": {
       "winRate": "Win rate",
       "record": "{{w}} wins · {{l}} losses · {{n}} resolved",
