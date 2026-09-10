@@ -1419,14 +1419,23 @@
       "page": {
         "/dashboard": "Dashboard",
         "/app": "Signals",
+        "/app/strategy/:id": "Strategy guide",
         "/charts": "Charts",
         "/bind": "Connect MT5",
+        "/bind/bridge": "Bridge setup",
         "/orders": "Orders",
         "/strategies": "Strategies",
+        "/achievements": "Achievements",
+        "/leaderboard": "Leaderboard",
+        "/competitions": "Competitions",
+        "/u/:publicId": "Public profile",
+        "/announcements": "Announcements",
+        "/announcements/:id": "Announcement",
+        "/support": "Support",
         "/upgrade": "Upgrade",
         "/account": "Account",
         "/download": "Bridge download",
-        "/simulator": "Simulator"
+        "/simulator": "Signal replay"
       }
     },
     "searchPlaceholder": "Search by email or phone…",

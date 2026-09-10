@@ -57,7 +57,17 @@ function fmtMetric(metric: Metric, value: number): string {
 // is immediately obvious which one is missing.
 function usePageName() {
   const { t } = useTranslation()
-  return (path: string) => t(`admin.pageStats.page.${path}`, { defaultValue: path })
+  // nsSeparator: false 是必须的，不是可有可无的保险。带参路由的 key 里有冒号
+  // （`admin.pageStats.page./u/:publicId`），而 i18next 默认把 `:` 当命名空间
+  // 分隔符——它会把这个 key 拆成命名空间 `admin.pageStats.page./u/` + key
+  // `publicId`，查不到，然后静默回退到 defaultValue 显示原始路径。表现就是
+  // 三条带参路由在管理页上只显示路径不显示中文名，翻译明明是有的。
+  //
+  // Required, not belt-and-braces: parameterised keys contain a colon
+  // (`…page./u/:publicId`) and i18next's default nsSeparator is `:`, so it
+  // splits the key into a namespace plus `publicId`, misses, and silently falls
+  // back to the raw path — the translation exists but never renders.
+  return (path: string) => t(`admin.pageStats.page.${path}`, { defaultValue: path, nsSeparator: false })
 }
 
 // 可选窗口。上界 90 天与后端 Query 约束一致，别在这里放更大的值——后端会

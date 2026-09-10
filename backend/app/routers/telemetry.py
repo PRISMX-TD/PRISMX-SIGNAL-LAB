@@ -68,13 +68,30 @@ CSP_REPORT_FIELDS = (
 # /admin is deliberately excluded: only admins ever open it, so counting it just
 # measures how often you check your own stats while taking a slot in the ranking
 # away from real user-facing pages.
+# 带参路由用**模板**登记（`/u/:publicId` 而不是 `/u/gebnck49j5`）。前端在上报前
+# 就归一成模板（`pageTracking.normalizePath`），所以这里只需要把模板列进来。
+# 逐个 id 各占一行既会让表随内容增长（正是白名单要防的），也答不上真正的问题
+# ——想知道的是"公告详情页有多少人看"，不是"第 7 号公告有多少人看"。
+# Parameterised routes are registered as templates (`/u/:publicId`, not
+# `/u/gebnck49j5`); the client normalises before reporting. Per-id rows would
+# grow the table with content — the very thing the whitelist prevents — and
+# answer the wrong question anyway.
 ALLOWED_PATHS = frozenset({
     "/dashboard",
     "/app",
+    "/app/strategy/:id",
     "/charts",
     "/bind",
+    "/bind/bridge",
     "/orders",
     "/strategies",
+    "/achievements",
+    "/leaderboard",
+    "/competitions",
+    "/u/:publicId",
+    "/announcements",
+    "/announcements/:id",
+    "/support",
     "/upgrade",
     "/account",
     "/download",

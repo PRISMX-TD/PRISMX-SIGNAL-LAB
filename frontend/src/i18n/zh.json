@@ -1419,14 +1419,23 @@
       "page": {
         "/dashboard": "仪表盘",
         "/app": "信号面板",
+        "/app/strategy/:id": "策略详解",
         "/charts": "行情图表",
         "/bind": "连接 MT5",
+        "/bind/bridge": "桥接设置",
         "/orders": "订单回执",
         "/strategies": "自定义策略",
+        "/achievements": "成就",
+        "/leaderboard": "排行榜",
+        "/competitions": "比赛",
+        "/u/:publicId": "他人主页",
+        "/announcements": "公告列表",
+        "/announcements/:id": "公告详情",
+        "/support": "客服工单",
         "/upgrade": "升级 PRO",
         "/account": "账户设置",
         "/download": "下载桥接",
-        "/simulator": "模拟器"
+        "/simulator": "信号回放"
       }
     },
     "searchPlaceholder": "按邮箱或手机号搜索…",

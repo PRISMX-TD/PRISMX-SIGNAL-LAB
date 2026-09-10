@@ -34,15 +34,52 @@ import { API_BASE, getToken } from '../api/client'
 const TRACKED_PATHS = new Set([
   '/dashboard',
   '/app',
+  '/app/strategy/:id',
   '/charts',
   '/bind',
+  '/bind/bridge',
   '/orders',
   '/strategies',
+  '/achievements',
+  '/leaderboard',
+  '/competitions',
+  '/u/:publicId',
+  '/announcements',
+  '/announcements/:id',
+  '/support',
   '/upgrade',
   '/account',
   '/download',
   '/simulator',
 ])
+
+// 带参路由归一成模板再上报：`/u/gebnck49j5` → `/u/:publicId`。
+//
+// 为什么不按实际路径统计：统计表的体积之所以恒定，靠的是 path 取值集合有限，
+// 而带参路径的取值集合跟着内容长——每发一条公告、每多一个用户主页就多一行。
+// 而且要回答的问题本来就是「公告详情页有多少人看」，不是「第 7 号公告有多少
+// 人看」；后者是内容运营的问题，要做也该单独做，不该挤在这张表里。
+//
+// 顺序有讲究：`/app/strategy/:id` 必须在 `/app` 之前判，否则前缀短的先命中。
+// 这里用精确的正则而不是 startsWith，就是为了不让 `/appfoo` 之类的路径误命中。
+//
+// Parameterised routes are normalised to a template before reporting. Counting
+// real paths would grow the table with content (one row per announcement, per
+// profile) and answers the wrong question — "how many people open an
+// announcement", not "how many opened #7". Order matters: the strategy detail
+// pattern must be tested before plain `/app`.
+const PATH_TEMPLATES: Array<[RegExp, string]> = [
+  [/^\/app\/strategy\/[^/]+$/, '/app/strategy/:id'],
+  [/^\/u\/[^/]+$/, '/u/:publicId'],
+  [/^\/announcements\/[^/]+$/, '/announcements/:id'],
+]
+
+export function normalizePath(pathname: string): string {
+  for (const [pattern, template] of PATH_TEMPLATES) {
+    if (pattern.test(pathname)) return template
+  }
+  return pathname
+}
 
 // 低于这个秒数不上报：路由跳转途中的一闪而过（例如登录后自动重定向）不是
 // 真正的"访问"，计进去会把平均停留时长压低。
@@ -50,7 +87,8 @@ const TRACKED_PATHS = new Set([
 // post-login bounce) isn't a real visit and would drag the average down.
 const MIN_DWELL_SECONDS = 1
 
-export function reportPageView(path: string, seconds: number) {
+export function reportPageView(rawPath: string, seconds: number) {
+  const path = normalizePath(rawPath)
   if (!TRACKED_PATHS.has(path)) return
   if (seconds < MIN_DWELL_SECONDS) return
 
