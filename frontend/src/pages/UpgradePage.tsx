@@ -125,8 +125,8 @@ export default function UpgradePage() {
   const clockRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // 免费试用状态：独立请求 + 独立 catch，失败只当"不可用"处理，绝不能因为
-  // 这一个次要请求失败就拖垮套餐/支付区的渲染（2026-07-16 账户页的部署时序
-  // 教训——见产品需求文档 6.17 节"上线注意"）。
+  // 这一个次要请求失败就拖垮套餐/支付区的渲染（一次账户页的部署时序教训：
+  // 前端先上线、后端端点还没部署时，共用 catch 会让整块区域白屏）。
   // Free-trial status: its own request with its own catch — a failure here
   // only means "treat as unavailable", it must never take down the plans/
   // payment area's rendering (the 2026-07-16 Account-page deploy-timing

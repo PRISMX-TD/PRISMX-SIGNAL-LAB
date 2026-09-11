@@ -44,7 +44,7 @@ function fmtMoney(v: number): string {
 }
 
 // 本金输入框：自己维护一份文本缓冲，只在失焦（或回车）时才解析+夹紧+回传。
-// 沿用指标设置弹窗踩过的坑（见产品需求文档 6.18 节第四步）：每敲一键就解析
+// 沿用指标设置弹窗踩过的坑（见《技术架构》§3.2 的偏好写入约定）：每敲一键就解析
 // 夹紧会让用户清空重打时被强制弹回旧值，根本敲不进新数字。
 // Capital input: keeps its own text buffer, parsing/clamping/propagating only
 // on blur (or Enter). Mirrors the fix from the indicator settings modal —

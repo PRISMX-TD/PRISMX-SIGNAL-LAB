@@ -732,7 +732,7 @@ def backtest_strategy(
         # 单测走的正常路径永远碰不到它。一旦 run_backtest 抛出任何非 BacktestBusy
         # 的异常，Python 求值这个不存在的名字会抛 NameError，用户拿到的是 500 而
         # 不是本该有的 400；更糟的是 500 会绕过 CORS 中间件、响应不带跨域头，浏览器
-        # 一律报成 CORS 错误（同《部署与上线进度》踩坑记录 #27 的现象），排查方向
+        # 一律报成 CORS 错误（同《运维手册》第九节踩坑 #27 的现象），排查方向
         # 会被直接带偏到 nginx 和 CORS_ORIGINS 上去。
         #
         # Evaluation-time errors — too-short indicator series (data gaps), no ATR
