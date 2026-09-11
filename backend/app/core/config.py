@@ -343,6 +343,16 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
         "https://prismxsignallab.com",
         "https://www.prismxsignallab.com",
+        # Android App（Capacitor WebView）的页面 origin。App 出厂自带完整前端，
+        # 不是加载线上网站，所以它对后端而言是一个独立的跨域来源；不放行则 App 内
+        # 所有接口调用都会被 CORS 拦下。鉴权走 Bearer 头而非 cookie，放行不引入
+        # 凭证跨域风险。
+        # Origin of the Android app's Capacitor WebView. The app ships its own
+        # frontend rather than loading the website, so to the backend it is a
+        # distinct cross-origin caller; without this every API call from the app
+        # is blocked by CORS. Auth is a Bearer header, not a cookie, so allowing
+        # it adds no credentialed-cross-origin exposure.
+        "https://localhost",
     ]
     # 额外放行的精确预览域名（如某个固定 Vercel 部署）。默认空；按需在 .env 配置。
     # 不再用通配正则放行所有 *.vercel.app，避免任意人部署前端即可携带凭证跨域。
