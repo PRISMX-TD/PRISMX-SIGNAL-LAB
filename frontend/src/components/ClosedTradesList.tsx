@@ -18,7 +18,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Pager from './Pager'
-import { displaySymbol, fmtTime } from '../api/utils'
+import { displaySymbol, fmtLots, fmtTime } from '../api/utils'
 import type { ClosedTrade } from '../api/types'
 
 const PAGE_SIZE = 10
@@ -220,7 +220,7 @@ export default function ClosedTradesList({ trades }: Props) {
                         <td className="px-2 py-2 font-mono text-neutral-400">{row.positionTicket}</td>
                         <td className="px-2 py-2 font-mono text-neutral-100">{displaySymbol(row.symbol)}</td>
                         <td className="px-2 py-2">{sideTag(row.side)}</td>
-                        <td className="px-2 py-2 text-right font-mono text-neutral-200">{row.volume}</td>
+                        <td className="px-2 py-2 text-right font-mono text-neutral-200">{fmtLots(row.volume)}</td>
                         <td className="px-2 py-2 text-right font-mono text-neutral-200">{price(row.openPrice)}</td>
                         <td className="px-2 py-2 text-right font-mono text-down/90">{price(row.sl)}</td>
                         <td className="px-2 py-2 text-right font-mono text-up/90">{price(row.tp)}</td>
@@ -256,7 +256,7 @@ export default function ClosedTradesList({ trades }: Props) {
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-sm font-semibold text-neutral-100">{displaySymbol(row.symbol)}</span>
                       {sideTag(row.side)}
-                      <span className="font-mono text-xs text-neutral-500">{row.volume} {t('positions.lots')}</span>
+                      <span className="font-mono text-xs text-neutral-500">{fmtLots(row.volume)} {t('positions.lots')}</span>
                     </div>
                     <span className={`font-mono text-sm font-semibold ${pnlClass(row.net)}`}>{money(row.net)}</span>
                   </div>

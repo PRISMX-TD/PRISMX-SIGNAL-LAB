@@ -347,6 +347,22 @@ function parseVersion(v: string): number[] {
     .filter((n) => !Number.isNaN(n))
 }
 
+// 手数展示：抹掉浮点噪音。手数在链路里经过步长规整 / 分批平仓的减法后会带出
+// 1.1400000000001 这类尾巴（2026-09-11 用户截到），MT5 的手数步长最小 0.001，
+// 所以先按千分之一取整再格式化，最多 3 位小数。所有展示手数的地方都走这里，
+// 表单输入框的默认值也用它——把带噪音的数原样填进去再发回 MT5 会被拒。
+// Lot display: strips float noise (1.1400000000001 → 1.14, seen 2026-09-11).
+// Volume step is at most 0.001 in MT5, so round to thousandths first, then
+// format with up to 3 decimals. Every lot display goes through this, and so
+// do form defaults — echoing a noisy value back to MT5 gets it rejected.
+export function roundLots(n: number): number {
+  return Math.round(n * 1000) / 1000
+}
+export function fmtLots(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return '—'
+  return roundLots(n).toLocaleString('en-US', { maximumFractionDigits: 3 })
+}
+
 export function isNewerVersion(latest: string, current: string): boolean {
   const lv = parseVersion(latest)
   const cv = parseVersion(current)

@@ -28,7 +28,7 @@ import { useAuth } from '../store/auth'
 import { useLive, usePositions } from '../store/live'
 import { usePrefs } from '../store/prefs'
 import { orderApi } from '../api/client'
-import { baseSymbol, displaySymbol, localizeApiError } from '../api/utils'
+import { baseSymbol, displaySymbol, fmtLots, localizeApiError } from '../api/utils'
 import type { ClosedTrade, Order, OrderStatus } from '../api/types'
 import PositionCard from '../components/PositionCard'
 import PerformanceSummary from '../components/PerformanceSummary'
@@ -420,7 +420,7 @@ export default function OrdersPage() {
             <span className={`tag ${o.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
               {o.side === 'BUY' ? t('common.buy') : t('common.sell')}
             </span>
-            <span className="ord-vol">{o.volume}<small>{t('positions.lots')}</small></span>
+            <span className="ord-vol">{fmtLots(o.volume)}<small>{t('positions.lots')}</small></span>
           </div>
           {msg && <div className={`ord-msg ${bad ? 'bad' : ''}`}>{msg}</div>}
         </div>

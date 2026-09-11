@@ -19,7 +19,7 @@ import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { orderApi } from '../api/client'
-import { clientOrderId, displaySymbol, localizeApiError } from '../api/utils'
+import { clientOrderId, displaySymbol, fmtLots, localizeApiError, roundLots } from '../api/utils'
 import type { Position } from '../api/types'
 import ConfirmModal from './ConfirmModal'
 import { useBackToClose } from '../utils/useBackToClose'
@@ -44,7 +44,7 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
   // swiping back should close it first rather than exiting the current page
   // outright (see useBackToClose's comment).
   useBackToClose(confirmCloseAll, () => setConfirmCloseAll(false))
-  const [closeVol, setCloseVol] = useState(String(p.volume))
+  const [closeVol, setCloseVol] = useState(String(roundLots(p.volume)))
   const [sl, setSl] = useState(p.stopLoss ? String(p.stopLoss) : '')
   const [tp, setTp] = useState(p.takeProfit ? String(p.takeProfit) : '')
 
@@ -166,13 +166,13 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
   const closeForm = canAct && mode === 'close' && (
     <div className="mt-3 space-y-2 rounded-lg border border-white/10 bg-ink-950/40 p-3">
       <label className="text-xs text-neutral-400">
-        {t('positions.closeVolume')} (max {p.volume})
+        {t('positions.closeVolume')} (max {fmtLots(p.volume)})
       </label>
       <input
         type="number"
         step="0.01"
         min="0.01"
-        max={p.volume}
+        max={roundLots(p.volume)}
         className="input font-mono text-sm"
         value={closeVol}
         onChange={(e) => setCloseVol(e.target.value)}
@@ -294,7 +294,7 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
               {sideTag}
             </div>
             <div className="pos-mc-sub">
-              {p.volume}<small>{t('positions.lots')}</small>
+              {fmtLots(p.volume)}<small>{t('positions.lots')}</small>
               {p.ticket ? <> · #{p.ticket}</> : null}
             </div>
           </div>
@@ -350,7 +350,7 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
             {sideTag}
           </div>
           <div className="mt-1 font-mono text-xs text-neutral-500">
-            {p.volume} {t('positions.lots')}
+            {fmtLots(p.volume)} {t('positions.lots')}
             {p.ticket ? ` · #${p.ticket}` : ''}
           </div>
         </div>

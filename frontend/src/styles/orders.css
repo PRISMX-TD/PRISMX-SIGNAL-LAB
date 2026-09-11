@@ -708,7 +708,9 @@
 }
 .pos-mc {
   padding: 14px 14px 12px;
-  border-radius: var(--r-panel);
+  /* 与全站卡片同一档（.glass 用 --r-lg），不要 --r-panel 那档——负责人一眼看出不齐 /
+     same step as every other card (.glass uses --r-lg); the panel step read as off */
+  border-radius: var(--r-lg);
   background: var(--surface);
   animation: ord-in var(--dur-base) var(--ease-out) both;
 }
@@ -828,6 +830,7 @@
   border-radius: 50%;
   box-shadow: 0 0 0 2px var(--surface);
 }
+/* 卡面 24px 圆角，三个动作按钮的 8px 才与之同心（24 − 14 内边距 ≈ 10）——沿用 rounded-lg 不改 */
 .pos-mc.up .pos-mc-fill,
 .pos-mc.up .pos-mc-dot { background: var(--up); }
 .pos-mc.down .pos-mc-fill,
