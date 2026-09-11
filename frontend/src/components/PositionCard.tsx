@@ -2,17 +2,21 @@
 // Position card: shows P&L and supports close / partial close / modify SL·TP
 //
 // 两种形态，同一套数据与动作：
-//   · 卡片（默认，桌面）：品种 + 盈亏抬头、四格价格、三个动作按钮常驻。
-//   · 行（compact，手机版订单页）：一行一仓——头像 / 品种 / 方向 / 手数 / 入场 → 现价，
-//     右侧盈亏；点行展开止损止盈与三个动作。手机一屏原来只放得下两张卡，现在能放
-//     五六行，先看全再动手。动作面板（部分平仓 / 改单表单、全平确认）两形态共用。
-// Two shapes over one set of data and actions. Card (default, desktop): symbol +
-// P&L header, four price cells, three actions always visible. Row (compact, the
-// orders page on phones): one line per position — avatar / symbol / side / lots /
-// entry → current with P&L at the right; tapping expands SL·TP and the actions.
-// A phone screen fit two cards; it fits five or six rows. The action panels are
-// shared by both shapes.
+//   · 桌面卡（默认）：品种 + 盈亏抬头、四格价格、三个动作按钮常驻。
+//   · 手机卡（mobile，手机版订单页）：同样是卡，但按手机重排——抬头（头像 / 品种 / 方向 /
+//     手数·单号，右侧盈亏大字）下面不是四格表，而是一条「价格轨」：上方入场 → 现价，
+//     轨道两端是止损 / 止盈，轨上一个点标出现价在止损与止盈之间的位置、入场到现价之间
+//     按盈亏着色。止损止盈缺一个就退回四格。三个动作按钮照旧。动作面板两形态共用。
+//     试过一行一仓（点开才见动作），产品负责人要卡片，2026-09-11 换回卡。
+// Two shapes over one set of data and actions. Desktop card (default): symbol +
+// P&L header, four price cells, three actions. Phone card (mobile): still a card,
+// re-laid for phones — the header, then a "price rail" instead of the 2×2 grid:
+// entry → current above, SL / TP at the two ends, a dot marking where price sits
+// between them with the entry→current span tinted by P&L. Falls back to the grid
+// when SL or TP is missing. A row-per-position shape was tried and the product
+// owner asked for cards (2026-09-11).
 import { useState } from 'react'
+import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { orderApi } from '../api/client'
 import { clientOrderId, displaySymbol, localizeApiError } from '../api/utils'
@@ -24,19 +28,17 @@ import { symbolMeta } from '../utils/symbolMeta'
 interface Props {
   position: Position
   onActionDone?: (msg: string, kind: 'success' | 'error' | 'info') => void
-  // 手机版的「行」形态 / the phone "row" shape
-  compact?: boolean
+  // 手机版卡 / the phone card shape
+  mobile?: boolean
 }
 
 type Mode = 'view' | 'close' | 'modify'
 
-export default function PositionCard({ position: p, onActionDone, compact = false }: Props) {
+export default function PositionCard({ position: p, onActionDone, mobile = false }: Props) {
   const { t } = useTranslation()
   const [mode, setMode] = useState<Mode>('view')
   const [busy, setBusy] = useState(false)
   const [confirmCloseAll, setConfirmCloseAll] = useState(false)
-  // 行形态的展开态 / expanded state of the row shape
-  const [open, setOpen] = useState(false)
   // 全屏确认弹窗，手机上划返回应该先关掉它、而不是直接退出当前页面
   // （见 useBackToClose 的说明）。/ A full-screen confirm modal; on mobile,
   // swiping back should close it first rather than exiting the current page
@@ -259,45 +261,78 @@ export default function PositionCard({ position: p, onActionDone, compact = fals
     </span>
   )
 
-  // ── 行形态（手机）/ row shape (phones) ──
-  if (compact) {
+  // ── 手机卡 / phone card ──
+  if (mobile) {
+    // 价格轨：止损与止盈是两端，现价与入场落在其间。做空时止盈在下、止损在上，轨道
+    // 按价格从低到高排，两端的标签跟着几何走，不按"左止损右止盈"硬排。
+    // The rail spans min..max of SL/TP; for a short the TP is the lower end, so
+    // the end labels follow the geometry rather than a fixed left-SL/right-TP.
+    const rail = (() => {
+      const { stopLoss: sl, takeProfit: tp, entryPrice: en, currentPrice: cu } = p
+      if (!sl || !tp || !en || !cu || sl === tp) return null
+      const lo = Math.min(sl, tp)
+      const hi = Math.max(sl, tp)
+      const pct = (x: number) => Math.min(1, Math.max(0, (x - lo) / (hi - lo)))
+      const ent = pct(en)
+      const cur = pct(cu)
+      return {
+        ent,
+        cur,
+        fillLeft: Math.min(ent, cur),
+        fillWidth: Math.abs(cur - ent),
+        left: sl < tp ? { k: t('positions.sl'), v: sl, cls: 'text-down' } : { k: t('positions.tp'), v: tp, cls: 'text-up' },
+        right: sl < tp ? { k: t('positions.tp'), v: tp, cls: 'text-up' } : { k: t('positions.sl'), v: sl, cls: 'text-down' },
+      }
+    })()
     return (
-      <article className={`pos-row ${open ? 'open' : ''}`}>
-        <button
-          type="button"
-          className="pos-row-hd"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-        >
+      <article className={`pos-mc ${profitUp ? 'up' : 'down'}`}>
+        <header className="pos-mc-hd">
           {ava}
-          <span className="pos-row-id">
-            <span className="pos-row-sym">
+          <div className="pos-mc-id">
+            <div className="pos-mc-sym">
               <b>{displaySymbol(p.symbol)}</b>
               {sideTag}
-            </span>
-            <span className="pos-row-sub">
+            </div>
+            <div className="pos-mc-sub">
               {p.volume}<small>{t('positions.lots')}</small>
-              <i />
-              {fmt(p.entryPrice)}<span className="pos-row-arr">→</span>{fmt(p.currentPrice)}
-            </span>
-          </span>
-          <span className={`pos-row-pnl ${profitUp ? 'text-up' : 'text-down'}`}>
+              {p.ticket ? <> · #{p.ticket}</> : null}
+            </div>
+          </div>
+          <div className={`pos-mc-pnl ${profitUp ? 'text-up' : 'text-down'}`}>
             <b>{profitUp ? '+' : ''}{p.profit.toFixed(2)}</b>
             {pnlPct != null && <small>{pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%</small>}
-          </span>
-        </button>
-        {open && (
-          <div className="pos-row-bd">
-            <div className="pos-row-lv">
-              <span><span className="ord-k">{t('positions.sl')}</span><b className="text-down">{p.stopLoss ? fmt(p.stopLoss) : '—'}</b></span>
-              <span><span className="ord-k">{t('positions.tp')}</span><b className="text-up">{p.takeProfit ? fmt(p.takeProfit) : '—'}</b></span>
-              {p.ticket && <span className="pos-row-tk">#{p.ticket}</span>}
+          </div>
+        </header>
+
+        {rail ? (
+          <div className="pos-mc-rail" style={{ '--ent': rail.ent, '--cur': rail.cur, '--fl': rail.fillLeft, '--fw': rail.fillWidth } as CSSProperties}>
+            <div className="pos-mc-path">
+              <span><span className="ord-k">{t('positions.entry')}</span><b>{fmt(p.entryPrice)}</b></span>
+              <span className="pos-mc-arr" aria-hidden="true">→</span>
+              <span><span className="ord-k">{t('positions.current')}</span><b>{fmt(p.currentPrice)}</b></span>
             </div>
-            {actions}
-            {closeForm}
-            {modifyForm}
+            <div className="pos-mc-track" aria-hidden="true">
+              <i className="pos-mc-fill" />
+              <i className="pos-mc-ent" />
+              <i className="pos-mc-dot" />
+            </div>
+            <div className="pos-mc-ends">
+              <span className={rail.left.cls}><span className="ord-k">{rail.left.k}</span><b>{fmt(rail.left.v)}</b></span>
+              <span className={rail.right.cls}><span className="ord-k">{rail.right.k}</span><b>{fmt(rail.right.v)}</b></span>
+            </div>
+          </div>
+        ) : (
+          <div className="pos-mc-grid">
+            <span><span className="ord-k">{t('positions.entry')}</span><b>{fmt(p.entryPrice)}</b></span>
+            <span><span className="ord-k">{t('positions.current')}</span><b>{fmt(p.currentPrice)}</b></span>
+            <span><span className="ord-k">{t('positions.sl')}</span><b className="text-down">{p.stopLoss ? fmt(p.stopLoss) : '—'}</b></span>
+            <span><span className="ord-k">{t('positions.tp')}</span><b className="text-up">{p.takeProfit ? fmt(p.takeProfit) : '—'}</b></span>
           </div>
         )}
+
+        {actions}
+        {closeForm}
+        {modifyForm}
         {confirm}
       </article>
     )

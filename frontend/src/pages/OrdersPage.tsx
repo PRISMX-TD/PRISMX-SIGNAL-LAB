@@ -12,13 +12,13 @@
 // 2026-09-11 手机版重设计（≤767px 走另一棵 DOM，桌面不变）：手机上页头药丸 + 六格
 // 账本条 + 两张就占满一屏的仓位卡，第一屏见不到自己的单子。现在手机版是
 //   页头（只有标题）→ 账户抬头（AccountMast：切换 / 净值大数 / 余额·浮动·杠杆 / 账户名）
-//   → 页签 → 一行一仓的持仓行（PositionCard compact，点开才见止损止盈与动作）→ 作用范围小字
+//   → 页签 → 手机卡（PositionCard mobile：抬头 + 价格轨 + 动作）→ 作用范围小字
 //   → 自动仓管。
 // 分支靠 utils/useMediaQuery 的 useIsPhone；桌面仍是页头药丸 + 账本条 + 仓位卡。
 // Mobile redesign 2026-09-11 (≤767px renders a different tree; desktop unchanged):
 // head (title only) → AccountMast (switcher / big equity / balance·floating·leverage /
-// account name) → tabs → one-row-per-position list (PositionCard compact, tap to
-// reveal SL·TP and actions) → scope note → auto-manage. Branching via useIsPhone;
+// account name) → tabs → phone cards (PositionCard mobile: header + price rail +
+// actions) → scope note → auto-manage. Branching via useIsPhone;
 // desktop keeps the head pills, the ledger strip and the position cards.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
@@ -627,9 +627,9 @@ export default function OrdersPage() {
           {visiblePositions.length === 0 ? (
             <p className="py-8 text-sm text-neutral-500">{t('orders.noPositions')}</p>
           ) : isPhone ? (
-            <div className="pos-list">
+            <div className="pos-mlist">
               {visiblePositions.map((p, i) => (
-                <PositionCard key={p.ticket ?? i} position={p} onActionDone={showToast} compact />
+                <PositionCard key={p.ticket ?? i} position={p} onActionDone={showToast} mobile />
               ))}
             </div>
           ) : (

@@ -690,95 +690,64 @@
   color: var(--text-3);
 }
 
-/* ── 手机版持仓行 / phone position rows（PositionCard compact）──
-   一行一仓，发丝线分隔、不套卡：头像 / 品种 + 方向 / 手数 · 入场 → 现价，右侧盈亏
-   大字 + 百分比。点整行展开：止损 / 止盈 / 单号一行，下面是与卡片同一套的三个动作与
-   表单。展开时行面略抬（--surface）标出"正在操作的那一仓"。
-   One line per position, hairline-separated, no card. Tapping the row expands
-   SL / TP / ticket plus the same actions and forms as the card; the open row's
-   surface lifts slightly to mark "the one you're acting on". */
-.pos-list {
-  margin-top: 4px;
-  border-top: 1px solid var(--line);
+/* ── 手机卡 / phone position card（PositionCard mobile）──
+   还是卡（产品负责人要卡，一行一仓的形态撤了），但按手机重排：抬头一行（头像 /
+   品种 + 方向 / 手数·单号，右侧盈亏大字）；下面一条「价格轨」代替四格表——轨道两端
+   是止损与止盈（按价格低→高排，做空时止盈在左），轨上一个点是现价，入场到现价那段
+   按盈亏着色；轨上方一行「入场 → 现价」。一眼看出离止损止盈各多远。止损止盈缺一
+   个就退回 2×2 四格。卡面用 --surface、14px 圆角，卡与卡 10px。
+   Still a card (the product owner asked for cards; the row shape is gone), re-laid
+   for phones: header line, then a price rail instead of the 2×2 grid — SL and TP at
+   the ends (sorted low→high, so a short puts TP on the left), a dot for the current
+   price, the entry→current span tinted by P&L, and "entry → current" above it.
+   Falls back to the grid when SL or TP is missing. */
+.pos-mlist {
+  display: grid;
+  gap: 10px;
+  margin-top: 6px;
 }
-.pos-row {
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  transition: background-color var(--dur-fast) var(--ease-out);
+.pos-mc {
+  padding: 14px 14px 12px;
+  border-radius: var(--r-panel);
+  background: var(--surface);
   animation: ord-in var(--dur-base) var(--ease-out) both;
 }
-.pos-row.open {
-  margin: 0 -12px;
-  padding: 0 12px;
-  border-radius: var(--r-panel);
-  border-bottom-color: transparent;
-  background: var(--surface);
-}
-.pos-row.open + .pos-row { border-top: 1px solid var(--line); }
-.pos-row-hd {
+.pos-mc-hd {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  width: 100%;
-  padding: 13px 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
 }
-.pos-row-hd:active { transform: scale(0.99); }
-.pos-row-id {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
+.pos-mc-hd .sym-ava {
+  width: 32px;
+  height: 32px;
+  font-size: 11px;
 }
-.pos-row-sym {
+.pos-mc-id { min-width: 0; }
+.pos-mc-sym {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.pos-row-sym b {
+.pos-mc-sym b {
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   color: #fff;
 }
-.pos-row-sub {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+.pos-mc-sub {
+  margin-top: 3px;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text-3);
 }
-.pos-row-sub small {
+.pos-mc-sub small {
   margin-left: 2px;
   font-family: Archivo, "Noto Sans SC", system-ui, sans-serif;
   font-size: 11px;
 }
-.pos-row-sub i {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: var(--text-3);
-  opacity: 0.6;
-  align-self: center;
-}
-.pos-row-arr {
-  margin: 0 4px;
-  color: var(--text-3);
-  opacity: 0.7;
-}
-.pos-row-pnl {
+.pos-mc-pnl {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -786,42 +755,92 @@
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
 }
-.pos-row-pnl b {
-  font-size: 16px;
+.pos-mc-pnl b {
+  font-size: 20px;
+  line-height: 1.1;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
-.pos-row-pnl small { font-size: 11px; opacity: 0.85; }
-.pos-row-bd {
-  padding: 0 0 14px;
-  animation: ord-in var(--dur-base) var(--ease-out) both;
+.pos-mc-pnl small { font-size: 11px; opacity: 0.85; }
+
+/* 价格轨 / the price rail */
+.pos-mc-rail { margin-top: 14px; }
+.pos-mc-path,
+.pos-mc-ends {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
 }
-.pos-row-lv {
+.pos-mc-path > span,
+.pos-mc-ends > span,
+.pos-mc-grid > span {
   display: flex;
   align-items: baseline;
-  gap: 22px;
-  padding-top: 2px;
+  gap: 7px;
+  min-width: 0;
 }
-.pos-row-lv > span {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.pos-row-lv b {
+.pos-mc-path b,
+.pos-mc-ends b,
+.pos-mc-grid b {
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 13px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
+  color: var(--text);
 }
-.pos-row-tk {
-  margin-left: auto;
+.pos-mc-ends b { color: inherit; }
+.pos-mc-arr {
+  flex: 1;
+  text-align: center;
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-3);
+  opacity: 0.7;
 }
-/* 行内的三个动作按钮沿用卡片样式；卡片那条「按钮下沉」规则是 .pos-card 作用域，
-   行里没有面可下沉，保持透明底。
-   The row reuses the card's action buttons; the card-scoped recessed background
-   doesn't apply here. */
+.pos-mc-track {
+  position: relative;
+  height: 3px;
+  margin: 9px 0 8px;
+  border-radius: 2px;
+  background: var(--nest-hi);
+}
+.pos-mc-track i { position: absolute; }
+.pos-mc-fill {
+  top: 0;
+  bottom: 0;
+  left: calc(var(--fl) * 100%);
+  width: calc(var(--fw) * 100%);
+  border-radius: 2px;
+}
+.pos-mc-ent {
+  top: -3px;
+  left: calc(var(--ent) * 100%);
+  width: 1px;
+  height: 9px;
+  background: var(--text-3);
+}
+.pos-mc-dot {
+  top: -3.5px;
+  left: calc(var(--cur) * 100% - 5px);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.pos-mc.up .pos-mc-fill,
+.pos-mc.up .pos-mc-dot { background: var(--up); }
+.pos-mc.down .pos-mc-fill,
+.pos-mc.down .pos-mc-dot { background: var(--down); }
+
+/* 止损止盈缺一个时的四格 / the 2×2 fallback */
+.pos-mc-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 16px;
+  margin-top: 12px;
+}
+.pos-mc-grid > span { justify-content: space-between; }
 
 /* ── 绩效分析 / performance ──
    页头只有一行：左边胜率（大数 + 胜负条 + 记录），右边统计范围。净盈亏与品种盈亏
@@ -1028,10 +1047,10 @@
   /* ── 手机版（2026-09-11 重设计）──
      手机上 ≤767px 渲染的是另一棵 DOM（OrdersPage 的 isPhone 分支）：页头只有标题，
      账号药丸与账本条合成一块「账户抬头」（.ord-mast，见下），仓位改成一行一仓的
-     .pos-row（PositionCard compact）。这一段只放手机专有的尺寸。
+     手机卡 .pos-mc（PositionCard mobile）。这一段只放手机专有的尺寸。
      Phones render a different tree (OrdersPage's isPhone branch): title-only
      head, pills + ledger merged into the account masthead (.ord-mast below),
-     positions as one .pos-row each (PositionCard compact). Phone-only sizing here. */
+     positions as phone cards (.pos-mc, PositionCard mobile). Phone-only sizing here. */
   .ord-head { margin-bottom: 16px; }
   .ord-head .page-head-title p { display: none; }
   .ord-sec {
@@ -1126,10 +1145,8 @@
   .ord-pill-on::before,
   .ord-mast-dot.on,
   .ord-mast-list,
-  .pos-row,
-  .pos-row-bd,
+  .pos-mc,
   .ord-slip[data-status="PENDING"] .ord-stamp {
     animation: none;
   }
-  .pos-row-hd:active { transform: none; }
 }
