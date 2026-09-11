@@ -328,13 +328,13 @@ def test_push_status_names_the_channel_without_leaking_the_token(db_session):
 
 @pytest.fixture(autouse=True)
 def _reset_fcm_process_state(monkeypatch):
-    """FCM 的凭证与"只警告一次"都是进程级状态，用例之间必须清干净。
-    The credentials cache and the warn-once flag are process state."""
+    """FCM 的凭证缓存与"每类只警告一次"都是进程级状态，用例之间必须清干净。
+    The credentials cache and the warn-once keys are process state."""
     monkeypatch.setattr(push_dispatch, "_fcm_ctx", None, raising=False)
-    monkeypatch.setattr(push_dispatch, "_fcm_warned", False, raising=False)
+    monkeypatch.setattr(push_dispatch, "_fcm_warned", set(), raising=False)
     yield
     push_dispatch._fcm_ctx = None
-    push_dispatch._fcm_warned = False
+    push_dispatch._fcm_warned = set()
 
 
 class _FakeResponse:
@@ -432,16 +432,28 @@ def test_fcm_message_carries_no_web_push_key_material(monkeypatch):
 
 
 @pytest.mark.parametrize("status,err,expect_prune", [
-    (404, {"error": {"status": "NOT_FOUND", "message": "Requested entity was not found."}}, True),
+    # 只有错误体明确指认令牌才清理 / only a token-specific error prunes
     (404, {"error": {"details": [{"errorCode": "UNREGISTERED"}]}}, True),
     (400, {"error": {"status": "INVALID_ARGUMENT",
                      "message": "The registration token is not a valid FCM registration token"}}, True),
+    # 光秃秃的 404 不清理：这个 URL 里除了令牌还有项目路径，FCM_PROJECT_ID 配错
+    # 或服务账号没权限时每条订阅都会 404。/ a bare 404 can come from the project
+    # path (wrong FCM_PROJECT_ID, service account without access), not the token.
+    (404, {}, False),
+    (404, {"error": {"status": "NOT_FOUND", "message": "Requested entity was not found."}}, False),
+    (404, {"error": {"status": "PERMISSION_DENIED"}}, False),
     # 我们自己把消息体发错了也会 400 INVALID_ARGUMENT——那是服务端 bug，
     # 不能因此把用户的设备踢掉。/ our own malformed body 400s too; don't prune.
     (400, {"error": {"status": "INVALID_ARGUMENT", "message": "Invalid JSON payload received."}}, False),
     (401, {"error": {"status": "UNAUTHENTICATED"}}, False),
     (500, {"error": {"status": "INTERNAL"}}, False),
     (503, {}, False),
+    # 外部服务给回的 JSON 形状不受我们控制：details 不是列表也不能把判定函数搞崩，
+    # 否则异常会一路逃到派发循环外面。/ the external JSON's shape isn't ours to
+    # trust; a non-list details must not crash the predicate.
+    (404, {"error": {"details": "UNREGISTERED"}}, False),
+    (400, {"error": {"details": {"errorCode": "UNREGISTERED"}, "status": "INVALID_ARGUMENT"}}, False),
+    (404, {"error": "not-an-object"}, False),
 ])
 def test_fcm_failure_prune_semantics(monkeypatch, status, err, expect_prune):
     client = _FakeHttpClient(responses=[_FakeResponse(status, err)])
@@ -462,6 +474,161 @@ def test_fcm_transport_error_never_prunes(monkeypatch):
 
     _configure_fcm(monkeypatch, _Boom())
     assert push_dispatch._fcm_one(_mk_sub(FCM_ENDPOINT, PLACEHOLDER, PLACEHOLDER), "{}") == (False, False)
+
+
+def test_project_level_404_warns_about_the_project_and_prunes_nothing(monkeypatch, caplog):
+    """FCM_PROJECT_ID 打错一个字符会让**每条**订阅都收 404。按 404 就删的话，配错
+    之后第一次派发就把全部 App 订阅清空，而那些设备完全正常。
+    A one-character typo in FCM_PROJECT_ID 404s every row; pruning on that would
+    wipe every app subscription on the first dispatch, all of them healthy."""
+    client = _FakeHttpClient(responses=[
+        _FakeResponse(404, {"error": {"status": "NOT_FOUND", "message": "Requested entity was not found."}}),
+        _FakeResponse(404, {"error": {"status": "NOT_FOUND", "message": "Requested entity was not found."}}),
+    ])
+    _configure_fcm(monkeypatch, client, project_id="typo-project")
+
+    with caplog.at_level("WARNING", logger="push"):
+        first = push_dispatch._fcm_one(_mk_sub(FCM_ENDPOINT, PLACEHOLDER, PLACEHOLDER, sub_id="a"), "{}")
+        second = push_dispatch._fcm_one(_mk_sub(FCM_ENDPOINT, PLACEHOLDER, PLACEHOLDER, sub_id="b"), "{}")
+
+    assert first == (False, False) and second == (False, False)
+    hints = [r.getMessage() for r in caplog.records if "FCM_PROJECT_ID" in r.getMessage()]
+    assert len(hints) == 1, "项目级提示按类去重，不刷屏 / the project hint is deduped"
+    assert "typo-project" in hints[0]
+
+
+def test_fcm_one_never_raises(monkeypatch):
+    """硬契约：无论底下出什么事，_fcm_one 都只返回 (False, False)。
+    异常逃出去的代价不是"这条失败"，而是整批中断 + 清理记账作废。
+    Hard contract: whatever happens underneath, _fcm_one returns (False, False).
+    An escaping exception aborts the whole batch and voids its pruning."""
+    class _Exploding:
+        def post(self, *a, **kw):
+            raise RuntimeError("boom")
+
+        def __getattr__(self, name):
+            raise RuntimeError("boom")
+
+    _configure_fcm(monkeypatch, _Exploding())
+    assert push_dispatch._fcm_one(_mk_sub(FCM_ENDPOINT, PLACEHOLDER, PLACEHOLDER), "{}") == (False, False)
+
+    # 连响应对象都坏掉（status_code 取不到）也一样
+    class _BadResponseClient(_FakeHttpClient):
+        def post(self, url, json=None, headers=None):
+            return object()
+
+    push_dispatch._fcm_ctx = None
+    _configure_fcm(monkeypatch, _BadResponseClient())
+    assert push_dispatch._fcm_one(_mk_sub(FCM_ENDPOINT, PLACEHOLDER, PLACEHOLDER), "{}") == (False, False)
+
+
+def test_an_exploding_http_client_constructor_does_not_take_the_batch_down(monkeypatch, tmp_path):
+    """httpx.Client() 的构造会读环境里的代理与 CA 设置，畸形的 HTTPS_PROXY 或坏的
+    SSL_CERT_FILE 会让它当场抛。这个异常必须止步于 _fcm_one——否则同一批里还没轮到
+    的**浏览器订阅**一条都发不出去，清理记账也跟着作废，而且每次派发都重演。
+    httpx.Client() reads proxy and CA settings from the environment and a
+    malformed HTTPS_PROXY or bad SSL_CERT_FILE makes it raise. That must stop at
+    _fcm_one, or the browser rows behind it in the same batch go unsent."""
+    import httpx
+    from google.oauth2 import service_account
+
+    sa_file = tmp_path / "sa.json"
+    sa_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        service_account.Credentials, "from_service_account_file",
+        staticmethod(lambda path, scopes=None: SimpleNamespace(valid=True, token="t", project_id="p")),
+    )
+
+    def _exploding_client(*args, **kwargs):
+        raise ValueError("Unknown scheme for proxy URL")
+
+    monkeypatch.setattr(httpx, "Client", _exploding_client)
+    monkeypatch.setattr(push_dispatch.settings, "FCM_SERVICE_ACCOUNT_FILE", str(sa_file), raising=False)
+    monkeypatch.setattr(push_dispatch.settings, "FCM_PROJECT_ID", "p", raising=False)
+
+    assert push_dispatch._fcm_one(_mk_sub(FCM_ENDPOINT, PLACEHOLDER, PLACEHOLDER), "{}") == (False, False)
+
+
+def test_a_broken_fcm_config_leaves_the_browser_rows_untouched(monkeypatch, db_session, tmp_path):
+    """同一批里 FCM 侧彻底坏掉时，https 行照常经 webpush 发出、清理记账照常。
+    With the FCM side broken, the https row in the same batch still goes through
+    webpush and the pruning bookkeeping still lands."""
+    import httpx
+    from google.oauth2 import service_account
+
+    user = _mk_user(db_session, email="broken-fcm@example.com")
+    # App 行故意排在前面：异常若逃出去，后面的浏览器行就永远轮不到——这正是要钉住
+    # 的那个爆炸半径。/ The app row goes first on purpose: an escaping exception
+    # would mean the browser row behind it is never reached, which is the blast
+    # radius being pinned.
+    _subscribe(db_session, user, FCM_ENDPOINT, PLACEHOLDER, PLACEHOLDER)
+    _subscribe(db_session, user, ALLOWED_ENDPOINT)
+
+    sa_file = tmp_path / "sa.json"
+    sa_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        service_account.Credentials, "from_service_account_file",
+        staticmethod(lambda path, scopes=None: SimpleNamespace(valid=True, token="t", project_id="p")),
+    )
+    monkeypatch.setattr(httpx, "Client", lambda *a, **k: (_ for _ in ()).throw(ValueError("bad proxy")))
+    monkeypatch.setattr(push_dispatch.settings, "FCM_SERVICE_ACCOUNT_FILE", str(sa_file), raising=False)
+
+    rec = _WebpushRecorder()
+    monkeypatch.setattr(push_dispatch, "webpush", rec)
+
+    result = _drive_test_push(monkeypatch, db_session, user.id)
+
+    assert result == {"sent": 1, "failed": 1, "pruned": 0}
+    assert [c["subscription_info"]["endpoint"] for c in rec.calls] == [ALLOWED_ENDPOINT]
+    assert db_session.query(PushSubscription).count() == 2, "一条都不该被删 / nothing pruned"
+
+
+def test_a_config_warning_does_not_silence_a_later_credential_failure(monkeypatch, caplog):
+    """警告按类去重，不是一个全局开关：密钥被吊销（取令牌失败）是后来才出现的
+    新问题，不能被早先那条配置警告顺手静音，否则 App 推送全停却毫无日志。
+    Warnings dedupe per kind, not globally: a revoked key surfacing later must
+    not be muted by an earlier config warning, or app push dies silently."""
+    creds = _configure_fcm(monkeypatch, _FakeHttpClient())
+    creds.valid = False
+
+    def _boom(request):
+        raise RuntimeError("invalid_grant: account not found")
+
+    creds.refresh = _boom
+    monkeypatch.setattr(
+        "google.auth.transport.requests.Request", lambda *a, **k: SimpleNamespace()
+    )
+    # 先让一条别的类别的警告响过 / let a different kind fire first
+    push_dispatch._warn_fcm_once("unconfigured", "[push] FCM 未配置 …")
+
+    with caplog.at_level("WARNING", logger="push"):
+        assert push_dispatch._fcm_one(_mk_sub(FCM_ENDPOINT, PLACEHOLDER, PLACEHOLDER), "{}") == (False, False)
+
+    assert any("取令牌失败" in r.getMessage() for r in caplog.records), "新问题必须有自己的一行 / must still be logged"
+
+
+def test_a_failed_context_is_cached_not_retried_per_row(monkeypatch, tmp_path):
+    """配置坏了就是坏了，重试不会变好。派发是逐订阅调用的，不缓存失败的话一条
+    坏路径会被每条 App 订阅各读一次盘。
+    A broken configuration doesn't heal on retry, and this runs per subscription:
+    without caching the failure, one bad path costs a disk read per app row."""
+    from google.oauth2 import service_account
+
+    attempts = []
+
+    def _counting(path, scopes=None):
+        attempts.append(path)
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(service_account.Credentials, "from_service_account_file", staticmethod(_counting))
+    monkeypatch.setattr(
+        push_dispatch.settings, "FCM_SERVICE_ACCOUNT_FILE", str(tmp_path / "missing.json"), raising=False
+    )
+
+    for _ in range(5):
+        assert push_dispatch._fcm_one(_mk_sub(FCM_ENDPOINT, PLACEHOLDER, PLACEHOLDER), "{}") == (False, False)
+
+    assert len(attempts) == 1, "每进程只尝试一次 / one attempt per process"
 
 
 def test_fcm_logs_only_a_token_prefix(monkeypatch, caplog):
@@ -557,6 +724,33 @@ def _drive_test_push(monkeypatch, db_session, user_id):
     )
     monkeypatch.setattr(push_dispatch.settings, "VAPID_PUBLIC_KEY", "the-public-key", raising=False)
     return push_dispatch.dispatch_test_push(user_id)
+
+
+def test_send_one_forwards_the_webpush_arguments_verbatim(monkeypatch):
+    """分流器在 https 那一支上必须是纯转发：pem / vapid_claims / headers 一字不改
+    地交给 _webpush_one。它是所有派发循环的必经之路，这里漏掉一个参数等于全站
+    Web Push 出错。
+    On the https branch the chooser must be a pure forward: pem, vapid_claims
+    and headers reach _webpush_one untouched. Every dispatch loop goes through
+    it, so dropping one argument here breaks Web Push everywhere."""
+    rec = _WebpushRecorder()
+    monkeypatch.setattr(push_dispatch, "webpush", rec)
+
+    payload = json.dumps({"title": "t", "body": "b"})
+    claims = {"sub": "mailto:admin@example.com"}
+    headers = {"Urgency": "normal", "TTL": "86400"}
+
+    assert push_dispatch._send_one(_mk_sub(ALLOWED_ENDPOINT), payload, "the-pem", claims, headers) == (True, False)
+
+    call = rec.calls[0]
+    assert call["subscription_info"] == {
+        "endpoint": ALLOWED_ENDPOINT,
+        "keys": {"p256dh": REAL_P256DH, "auth": REAL_AUTH},
+    }
+    assert call["data"] == payload
+    assert call["vapid_private_key"] == "the-pem"
+    assert call["vapid_claims"] == claims and call["vapid_claims"] is not claims
+    assert call["headers"] == headers
 
 
 def test_mixed_batch_routes_each_row_to_its_own_channel(monkeypatch, db_session):

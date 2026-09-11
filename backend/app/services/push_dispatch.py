@@ -390,32 +390,56 @@ _FCM_TIMEOUT = 10.0
 # object refreshes its own token; the client keeps a connection pool). Guarded
 # by a lock because dispatch runs on thread-pool workers.
 _fcm_lock = threading.Lock()
-_fcm_ctx: tuple | None = None
-_fcm_warned = False
+# None = 本进程还没尝试过；_FCM_UNAVAILABLE = 尝试过、配置不可用（失败也缓存，
+# 否则每条 App 订阅都要重读一次服务账号文件）；元组 = 可用。
+# None = not attempted yet in this process; _FCM_UNAVAILABLE = attempted and
+# unusable (failures are cached too, otherwise every app row re-reads the
+# service-account file); a tuple = ready.
+_FCM_UNAVAILABLE = object()
+_fcm_ctx: object | None = None
+# 已经喊过的警告种类。一个全局布尔不行：配置类警告响过一次之后，"取令牌失败"
+# （密钥被吊销 → App 推送全停）这种后来才出现的问题会被一并静音，只剩一行旧日志。
+# Warning kinds already emitted. A single global flag won't do: once a config
+# warning has fired, a later and different problem — "failed to obtain access
+# token", i.e. a revoked key silently killing every app push — would be muted
+# too, leaving one stale line and no further signal.
+_fcm_warned: set[str] = set()
 
 
-def _warn_fcm_once(msg: str, *args) -> None:
-    """FCM 相关的配置性问题每个进程只喊一次：派发是逐订阅调用的，照实打会把
-    日志刷爆，而这类问题的信息量只有第一条。
-    Configuration-level FCM problems warn once per process: dispatch calls this
-    per subscription, and repeats carry no information beyond the first."""
-    global _fcm_warned
-    if _fcm_warned:
+def _warn_fcm_once(key: str, msg: str, *args) -> None:
+    """同一类 FCM 问题每个进程只喊一次（按 key 去重）：派发是逐订阅调用的，照实
+    打会把日志刷爆，而同一类问题的信息量只有第一条；不同类之间互不影响。
+    Warn once per process per kind (deduped by key): dispatch calls this per
+    subscription and repeats of one kind carry no information beyond the first,
+    but one kind must never silence another."""
+    if key in _fcm_warned:
         return
-    _fcm_warned = True
+    _fcm_warned.add(key)
     logger.warning(msg, *args)
 
 
 def _fcm_context() -> tuple | None:
     """返回 (credentials, httpx client, project_id)；未配置或配置有问题返回 None。
+
+    失败同样缓存：配置坏了就是坏了，重试不会变好，而派发是逐订阅调用的——不缓存
+    的话一条坏路径会被每条 App 订阅各读一次盘。代价是运维改完配置要重启进程才
+    生效，这与本项目其它 .env 配置项的行为一致。
+
     Returns (credentials, httpx client, project_id), or None when FCM isn't
-    configured or the configuration is unusable."""
+    configured or the configuration is unusable. Failures are cached as well: a
+    broken configuration doesn't heal on retry, and this is called per
+    subscription, so without caching one bad path costs a disk read per app row.
+    The trade-off — a config fix needs a process restart — matches how every
+    other .env setting in this project behaves.
+    """
     global _fcm_ctx
-    if _fcm_ctx is not None:
-        return _fcm_ctx
+    cached = _fcm_ctx
+    if cached is not None:
+        return None if cached is _FCM_UNAVAILABLE else cached  # type: ignore[return-value]
     with _fcm_lock:
-        if _fcm_ctx is not None:
-            return _fcm_ctx
+        cached = _fcm_ctx
+        if cached is not None:
+            return None if cached is _FCM_UNAVAILABLE else cached  # type: ignore[return-value]
         path = (settings.FCM_SERVICE_ACCOUNT_FILE or "").strip()
         if not path:
             # 没配就是没配：网页端一切照旧，App 订阅静默跳过（不清理——用户装着
@@ -424,26 +448,46 @@ def _fcm_context() -> tuple | None:
             # skipped, never pruned — the device is fine, the server just isn't
             # wired up yet, and deleting the row would require a reinstall.
             _warn_fcm_once(
-                "[push] FCM 未配置，App 订阅本次跳过 / FCM not configured, app subscriptions skipped"
+                "unconfigured",
+                "[push] FCM 未配置，App 订阅本次跳过 / FCM not configured, app subscriptions skipped",
             )
+            _fcm_ctx = _FCM_UNAVAILABLE
             return None
+        # 整段都在 try 里，httpx.Client() 的构造也算——它会读环境里的代理与 CA
+        # 设置，畸形的 HTTPS_PROXY / 坏的 SSL_CERT_FILE 会让构造本身抛异常。这个
+        # 异常一旦逃出去，只会被派发函数最外层的 except Exception 接住，那一整批
+        # 推送（**包括还没轮到的浏览器订阅**）当场中断、清理记账全部作废。
+        # Everything is inside the try, httpx.Client() construction included: it
+        # reads proxy and CA settings from the environment, and a malformed
+        # HTTPS_PROXY or a bad SSL_CERT_FILE makes the constructor itself raise.
+        # Escaping here would be caught only by the dispatcher's outermost
+        # except Exception, aborting the whole batch — browser subscriptions
+        # that hadn't been reached yet included — and discarding its pruning.
         try:
             from google.oauth2 import service_account
             import httpx
 
             creds = service_account.Credentials.from_service_account_file(path, scopes=_FCM_SCOPES)
+            project_id = (settings.FCM_PROJECT_ID or "").strip() or (getattr(creds, "project_id", "") or "")
+            if not project_id:
+                _warn_fcm_once(
+                    "no-project",
+                    "[push] FCM project_id 缺失（配置与服务账号 JSON 里都没有）"
+                    " / FCM project_id missing from both config and the service-account JSON",
+                )
+                _fcm_ctx = _FCM_UNAVAILABLE
+                return None
+            client = httpx.Client(timeout=_FCM_TIMEOUT)
         except Exception as e:
-            _warn_fcm_once("[push] FCM 服务账号加载失败 / failed to load FCM service account: %s", e)
-            return None
-        project_id = (settings.FCM_PROJECT_ID or "").strip() or (getattr(creds, "project_id", "") or "")
-        if not project_id:
             _warn_fcm_once(
-                "[push] FCM project_id 缺失（配置与服务账号 JSON 里都没有）"
-                " / FCM project_id missing from both config and the service-account JSON"
+                "load-failed",
+                "[push] FCM 初始化失败，App 订阅跳过 / FCM init failed, app subscriptions skipped: %s",
+                e,
             )
+            _fcm_ctx = _FCM_UNAVAILABLE
             return None
-        _fcm_ctx = (creds, httpx.Client(timeout=_FCM_TIMEOUT), project_id)
-        return _fcm_ctx
+        _fcm_ctx = (creds, client, project_id)
+        return _fcm_ctx  # type: ignore[return-value]
 
 
 def _fcm_access_token(creds) -> str:
@@ -460,26 +504,36 @@ def _fcm_access_token(creds) -> str:
 def _fcm_should_prune(status: int, err: dict) -> bool:
     """FCM 的这次失败是否说明「这个令牌已经死了」，对应 webpush 的 410/404。
 
-    UNREGISTERED（App 被卸载、令牌被轮换）与 404 是明确的死亡证明。400
-    INVALID_ARGUMENT 则要当心：它同样会由**我们自己**发错消息体触发，那种情况下
-    清理订阅等于因为服务端的 bug 把用户的设备踢掉，所以只认错误信息里确实提到
-    令牌的那一类。
+    判据只有一个：错误体明确把**令牌**指认为原因——details 里的 UNREGISTERED
+    （App 被卸载、令牌被轮换），或 400 INVALID_ARGUMENT 且错误信息确实提到令牌。
+
+    光凭 HTTP 404 清理是错的，这与 Web Push 不同：webpush 的 404 来自那台设备
+    专属的 endpoint，而这里的 URL 里带的是**项目**路径——FCM_PROJECT_ID 写错一个
+    字符、或服务账号没有该项目的权限，`projects/<id>/messages:send` 会对**每一条**
+    订阅都回 404/NOT_FOUND。按 404 就删的话，配错之后的第一次派发会把全部 App
+    订阅清空，而这些设备其实完全正常。同理，我们自己把消息体发错也会 400
+    INVALID_ARGUMENT，那是服务端 bug，不能让用户的设备陪葬。
 
     Whether this failure means the token is dead — the FCM counterpart of
-    410/404. UNREGISTERED (app uninstalled, token rotated) and 404 are
-    unambiguous. A 400 INVALID_ARGUMENT is not: our own malformed message body
-    raises it too, and pruning then would drop a healthy device over a
-    server-side bug — so only the variants that actually name the token count.
+    410/404. One criterion only: the error body names the *token* as the cause
+    (UNREGISTERED in details, or a 400 INVALID_ARGUMENT whose message mentions
+    the token). A bare 404 must not prune, unlike Web Push: there the 404 comes
+    from that device's own endpoint, while this URL carries the *project* path —
+    a one-character typo in FCM_PROJECT_ID, or a service account without access,
+    returns 404/NOT_FOUND for every row, and pruning on it would wipe every app
+    subscription on the first dispatch after the typo, all of them healthy.
     """
     error = err.get("error") if isinstance(err.get("error"), dict) else {}
+    # details 来自外部服务的 JSON，形状不保证是列表；这个函数被放在返回值路径上，
+    # 不能自己抛。/ details comes from an external service's JSON and isn't
+    # guaranteed to be a list; this sits on the return path and must not throw.
+    details = error.get("details")
     codes = {
         d.get("errorCode")
-        for d in (error.get("details") or [])
+        for d in (details if isinstance(details, list) else [])
         if isinstance(d, dict)
     }
     if "UNREGISTERED" in codes:
-        return True
-    if status == 404:
         return True
     if status == 400 and error.get("status") == "INVALID_ARGUMENT":
         msg = str(error.get("message") or "").lower()
@@ -488,8 +542,35 @@ def _fcm_should_prune(status: int, err: dict) -> bool:
 
 
 def _fcm_one(sub: PushSubscription, payload: str) -> tuple[bool, bool]:
-    """向单个 App 订阅（fcm:// 行）推送一条消息。返回 (是否发送成功, 是否应清理)，
-    与 _webpush_one 同一份契约，好让派发循环两边一视同仁。
+    """向单个 App 订阅推送一条消息，**保证不抛异常**——这是本函数的硬契约。
+
+    派发循环外面只有一层 `except Exception`，异常从这里逃出去的后果不是"这条推送
+    失败"，而是"整批中断"：同一批里还没轮到的**浏览器订阅**一条都不发，已经攒下
+    的清理记账（failed_ids）连同事务一起作废，而且每次派发都会重演。App 通道的任
+    何问题都不该有这么大的爆炸半径，所以整个函数体包在兜底里，未预期的异常一律
+    降级成 (False, False) 加一行警告。
+
+    Push one message to a single app subscription, and **never raise** — that is
+    this function's hard contract. The dispatch loops have only one outer
+    `except Exception`, so an exception escaping here doesn't mean "this push
+    failed" but "the batch aborted": every browser subscription not yet reached
+    in the same batch goes unsent, the pruning bookkeeping collected so far is
+    discarded with the transaction, and it repeats on every dispatch. No problem
+    on the app channel may have that blast radius, hence the blanket guard:
+    anything unexpected degrades to (False, False) plus one warning.
+    """
+    try:
+        return _fcm_send(sub, payload)
+    except Exception as e:
+        logger.warning("[push] fcm unexpected error sub=%s: %s", sub.id, e)
+        return False, False
+
+
+def _fcm_send(sub: PushSubscription, payload: str) -> tuple[bool, bool]:
+    """实际发送。返回 (是否发送成功, 是否应清理)，与 _webpush_one 同一份契约，
+    好让派发循环两边一视同仁。只经由 _fcm_one 调用（它负责兜底）。
+    The actual send, under the same (sent, should prune) contract as
+    _webpush_one. Only ever called through _fcm_one, which guards it.
 
     消息体的取舍：notification 只给 title/body（系统托盘要显示的两行），完整的原始
     payload 原样塞进 data.payload——App 里的处理逻辑与网页 Service Worker 共用同一份
@@ -511,7 +592,12 @@ def _fcm_one(sub: PushSubscription, payload: str) -> tuple[bool, bool]:
     try:
         access_token = _fcm_access_token(creds)
     except Exception as e:
-        _warn_fcm_once("[push] FCM 取令牌失败 / failed to obtain FCM access token: %s", e)
+        _warn_fcm_once(
+            "access-token",
+            "[push] FCM 取令牌失败（密钥被吊销 / 系统时钟偏移？）"
+            " / failed to obtain FCM access token (revoked key, clock skew?): %s",
+            e,
+        )
         return False, False
 
     try:
@@ -563,6 +649,21 @@ def _fcm_one(sub: PushSubscription, payload: str) -> tuple[bool, bool]:
         "[push] fcm failed sub=%s token=%s status=%s stale=%s",
         sub.id, _token_hint(token), resp.status_code, stale,
     )
+    if resp.status_code == 404 and not stale:
+        # 404 但错误体没有指认令牌：URL 里除了令牌就只有项目路径，所以这几乎一定
+        # 是 FCM_PROJECT_ID 写错或服务账号没有该项目的权限——一条订阅都发不出去，
+        # 但一条也不该删。按类去重，免得整批刷屏。
+        # A 404 that doesn't name the token: the URL contains only the token and
+        # the project path, so this is almost certainly a wrong FCM_PROJECT_ID or
+        # a service account without access — nothing will deliver, and nothing
+        # should be deleted. Deduped by kind so a whole batch doesn't spam.
+        _warn_fcm_once(
+            "project-404",
+            "[push] FCM 404 未指明令牌失效，多半是 FCM_PROJECT_ID 配错或服务账号无权访问该项目"
+            "（project_id=%s）；不清理订阅 / FCM 404 without a token error — likely a wrong"
+            " FCM_PROJECT_ID or a service account lacking access (project_id=%s); not pruning",
+            project_id, project_id,
+        )
     return False, stale
 
 
