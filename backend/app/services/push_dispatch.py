@@ -10,6 +10,7 @@ the event loop.
 import json
 import logging
 import re
+import threading
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -65,6 +66,65 @@ def is_allowed_push_endpoint(endpoint: str) -> bool:
     # 也会被 endswith 放行。/ The dot boundary matters: a bare endswith would
     # also accept "…googleapis.com.attacker.tld".
     return any(host == s or host.endswith("." + s) for s in _PUSH_HOST_SUFFIXES)
+
+
+# ---------- App 端订阅（FCM）/ app-side subscriptions (FCM) ----------
+# 安卓 App 是 Capacitor WebView，里面没有 Web Push。App 内的桥接把自己伪装成一条
+# 普通订阅上报给未改动的前端：endpoint = "fcm://<FCM 注册令牌>"，keys 用占位串。
+#
+# 这个 endpoint **不是 URL，服务端永远不会对它发起 HTTP 请求**——真正的请求固定
+# 打向 FCM_ENDPOINT_TMPL 这一个写死的 googleapis.com 地址，令牌只作为请求体里的
+# 一个字段。所以它不在 is_allowed_push_endpoint 的管辖范围内：那个白名单回答的
+# 是「服务端能不能去请求这个用户给的 URL」（SSRF 面），而这里根本没有用户给的
+# URL。故意写成两个独立谓词、在调用点显式分支，而不是把 fcm:// 塞进白名单函数
+# ——后者会让那个函数的名字开始撒谎，日后读代码的人会以为 fcm:// 也被请求过。
+#
+# The Android app is a Capacitor WebView with no Web Push, so its bridge reports
+# itself to the unchanged frontend as an ordinary subscription: endpoint =
+# "fcm://<registration token>", placeholder keys.
+#
+# That endpoint is NOT a URL and the server never issues a request to it — the
+# request always goes to the one hard-coded googleapis.com address below, with
+# the token as a body field. Hence it stays outside is_allowed_push_endpoint,
+# which answers a different question ("may the server fetch this user-supplied
+# URL?", the SSRF surface) that simply doesn't arise here. Two separate
+# predicates with explicit branching at the call sites, deliberately: widening
+# the allowlist would make its name lie to the next reader.
+FCM_SCHEME = "fcm://"
+# 桥接上报的占位密钥。Web Push 的 p256dh/auth 在 FCM 路径上没有对应物，但订阅接口
+# 的形状不变（前端未改动），所以桥接填这个字面量，服务端据此确认「这确实是 App
+# 报上来的行」而不是谁手工构造的。
+# The bridge's placeholder keys: Web Push's p256dh/auth have no counterpart on
+# the FCM path, but the subscribe API's shape is unchanged (the frontend wasn't
+# touched), so the bridge sends this literal and the server uses it to confirm
+# the row really came from the app rather than being hand-crafted.
+FCM_PLACEHOLDER_KEY = "fcm"
+# 令牌形状取保守值：FCM 注册令牌很长，由 base64url 字符加 ":" 组成，绝不含
+# "/" 或空白——把这两类挡在外面，等于从形状上排除掉「看起来像路径/URL」的输入。
+# Conservative token shape: FCM registration tokens are long, made of base64url
+# characters plus ":", and never contain "/" or whitespace — excluding those
+# rules out anything path- or URL-shaped by construction.
+_FCM_TOKEN_RE = re.compile(r"^[A-Za-z0-9_:\-]{50,4096}$")
+
+
+def is_fcm_endpoint(endpoint: str) -> bool:
+    """endpoint 是否是 App 桥接上报的 fcm:// 订阅（令牌形状也要合法）。
+    Whether this is an app-bridge fcm:// subscription with a well-formed token."""
+    if not isinstance(endpoint, str) or not endpoint.startswith(FCM_SCHEME):
+        return False
+    return bool(_FCM_TOKEN_RE.match(endpoint[len(FCM_SCHEME):]))
+
+
+def fcm_token(endpoint: str) -> str:
+    """取出 fcm:// 后面的注册令牌 / the registration token behind fcm://."""
+    return endpoint[len(FCM_SCHEME):]
+
+
+def _token_hint(token: str) -> str:
+    """日志里只出现令牌前缀：完整令牌等同于一把可以向该设备发推送的钥匙。
+    Logs only ever carry a prefix — a full token is a key to push to that device."""
+    return f"{token[:8]}…({len(token)})" if token else "?"
+
 
 # 事件类通知的合法取值：订单成交/拒绝、自动仓管触发、Bridge 掉线。
 # 此前推送只有"新信号"一种，账户/交易层面发生的事都是静默的——包括自动仓管
@@ -311,6 +371,214 @@ def _webpush_one(
         return False, stale
 
 
+# ---------- FCM HTTP v1 发送（App 端）/ FCM HTTP v1 send (app side) ----------
+# 不引入 firebase-admin：这条路径要的只是「用服务账号换一个 OAuth2 令牌」+「一次
+# HTTPS POST」，requirements 里已有的 google-auth 与 httpx 就够了，多一个重依赖只
+# 会多一份要跟着 Firebase 升级的东西。
+# No firebase-admin: this path needs an OAuth2 token from the service account and
+# one HTTPS POST, both covered by google-auth and httpx, already in requirements.
+FCM_ENDPOINT_TMPL = "https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
+_FCM_SCOPES = ["https://www.googleapis.com/auth/firebase.messaging"]
+# 派发是逐订阅的阻塞 IO（跑在线程池里），单次不能挂太久，否则一个不响应的请求
+# 会拖住整批推送。/ Dispatch is blocking per-subscription IO on a thread-pool
+# worker; one unresponsive request must not stall the whole batch.
+_FCM_TIMEOUT = 10.0
+
+# 凭证与 HTTP 连接都按进程缓存一次：Credentials 对象自己管理令牌过期与刷新，
+# httpx.Client 复用连接池。用锁是因为派发跑在线程池里，可能被并发调用。
+# Credentials and the HTTP client are built once per process (the credentials
+# object refreshes its own token; the client keeps a connection pool). Guarded
+# by a lock because dispatch runs on thread-pool workers.
+_fcm_lock = threading.Lock()
+_fcm_ctx: tuple | None = None
+_fcm_warned = False
+
+
+def _warn_fcm_once(msg: str, *args) -> None:
+    """FCM 相关的配置性问题每个进程只喊一次：派发是逐订阅调用的，照实打会把
+    日志刷爆，而这类问题的信息量只有第一条。
+    Configuration-level FCM problems warn once per process: dispatch calls this
+    per subscription, and repeats carry no information beyond the first."""
+    global _fcm_warned
+    if _fcm_warned:
+        return
+    _fcm_warned = True
+    logger.warning(msg, *args)
+
+
+def _fcm_context() -> tuple | None:
+    """返回 (credentials, httpx client, project_id)；未配置或配置有问题返回 None。
+    Returns (credentials, httpx client, project_id), or None when FCM isn't
+    configured or the configuration is unusable."""
+    global _fcm_ctx
+    if _fcm_ctx is not None:
+        return _fcm_ctx
+    with _fcm_lock:
+        if _fcm_ctx is not None:
+            return _fcm_ctx
+        path = (settings.FCM_SERVICE_ACCOUNT_FILE or "").strip()
+        if not path:
+            # 没配就是没配：网页端一切照旧，App 订阅静默跳过（不清理——用户装着
+            # App，只是服务端还没开这条路，把行删了会让他重装才能恢复）。
+            # Not configured: the browser path is unaffected and app rows are
+            # skipped, never pruned — the device is fine, the server just isn't
+            # wired up yet, and deleting the row would require a reinstall.
+            _warn_fcm_once(
+                "[push] FCM 未配置，App 订阅本次跳过 / FCM not configured, app subscriptions skipped"
+            )
+            return None
+        try:
+            from google.oauth2 import service_account
+            import httpx
+
+            creds = service_account.Credentials.from_service_account_file(path, scopes=_FCM_SCOPES)
+        except Exception as e:
+            _warn_fcm_once("[push] FCM 服务账号加载失败 / failed to load FCM service account: %s", e)
+            return None
+        project_id = (settings.FCM_PROJECT_ID or "").strip() or (getattr(creds, "project_id", "") or "")
+        if not project_id:
+            _warn_fcm_once(
+                "[push] FCM project_id 缺失（配置与服务账号 JSON 里都没有）"
+                " / FCM project_id missing from both config and the service-account JSON"
+            )
+            return None
+        _fcm_ctx = (creds, httpx.Client(timeout=_FCM_TIMEOUT), project_id)
+        return _fcm_ctx
+
+
+def _fcm_access_token(creds) -> str:
+    """取当前访问令牌，过期时就地刷新（google-auth 自己管有效期）。
+    The current access token, refreshed in place when stale (google-auth owns
+    the expiry bookkeeping)."""
+    if not creds.valid:
+        from google.auth.transport.requests import Request
+
+        creds.refresh(Request())
+    return creds.token
+
+
+def _fcm_should_prune(status: int, err: dict) -> bool:
+    """FCM 的这次失败是否说明「这个令牌已经死了」，对应 webpush 的 410/404。
+
+    UNREGISTERED（App 被卸载、令牌被轮换）与 404 是明确的死亡证明。400
+    INVALID_ARGUMENT 则要当心：它同样会由**我们自己**发错消息体触发，那种情况下
+    清理订阅等于因为服务端的 bug 把用户的设备踢掉，所以只认错误信息里确实提到
+    令牌的那一类。
+
+    Whether this failure means the token is dead — the FCM counterpart of
+    410/404. UNREGISTERED (app uninstalled, token rotated) and 404 are
+    unambiguous. A 400 INVALID_ARGUMENT is not: our own malformed message body
+    raises it too, and pruning then would drop a healthy device over a
+    server-side bug — so only the variants that actually name the token count.
+    """
+    error = err.get("error") if isinstance(err.get("error"), dict) else {}
+    codes = {
+        d.get("errorCode")
+        for d in (error.get("details") or [])
+        if isinstance(d, dict)
+    }
+    if "UNREGISTERED" in codes:
+        return True
+    if status == 404:
+        return True
+    if status == 400 and error.get("status") == "INVALID_ARGUMENT":
+        msg = str(error.get("message") or "").lower()
+        return "token" in msg or "registration" in msg
+    return False
+
+
+def _fcm_one(sub: PushSubscription, payload: str) -> tuple[bool, bool]:
+    """向单个 App 订阅（fcm:// 行）推送一条消息。返回 (是否发送成功, 是否应清理)，
+    与 _webpush_one 同一份契约，好让派发循环两边一视同仁。
+
+    消息体的取舍：notification 只给 title/body（系统托盘要显示的两行），完整的原始
+    payload 原样塞进 data.payload——App 里的处理逻辑与网页 Service Worker 共用同一份
+    JSON（icon/tag/url/data 都在里面），这里不做裁剪也不做翻译。FCM 的 data 值必须
+    是字符串，所以放的是整串 JSON 文本而不是对象。
+
+    Push one message to a single app subscription, under the same (sent, should
+    prune) contract as _webpush_one so the dispatch loops can treat both alike.
+    notification carries only title/body (what the tray shows); the full original
+    payload rides along verbatim in data.payload, because the app reuses the same
+    JSON the web service worker consumes (icon/tag/url/data all live in it). FCM
+    data values must be strings, hence the raw JSON text rather than an object.
+    """
+    ctx = _fcm_context()
+    if ctx is None:
+        return False, False
+    creds, client, project_id = ctx
+    token = fcm_token(sub.endpoint)
+    try:
+        access_token = _fcm_access_token(creds)
+    except Exception as e:
+        _warn_fcm_once("[push] FCM 取令牌失败 / failed to obtain FCM access token: %s", e)
+        return False, False
+
+    try:
+        parsed = json.loads(payload)
+        if not isinstance(parsed, dict):
+            parsed = {}
+    except (ValueError, TypeError):
+        parsed = {}
+    notification = {
+        "title": str(parsed.get("title") or ""),
+        "body": str(parsed.get("body") or ""),
+    }
+    message = {
+        "message": {
+            "token": token,
+            "notification": notification,
+            "data": {"payload": payload},
+            # 与 Web Push 的 Urgency: high 对齐：信号与账户事件都有时效，要求系统
+            # 尽快下发（含 Doze 休眠期间尝试唤醒）。
+            # Mirrors Web Push's Urgency: high — signals and account events are
+            # time-sensitive, so ask the system to deliver ASAP (Doze included).
+            "android": {"priority": "high"},
+        }
+    }
+    url = FCM_ENDPOINT_TMPL.format(project_id=project_id)
+    try:
+        resp = client.post(
+            url,
+            json=message,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json; charset=UTF-8",
+            },
+        )
+    except Exception as e:
+        # 网络层异常（超时、DNS）与推送服务无关，绝不能据此清理订阅。
+        # A transport-level failure says nothing about the token — never prune.
+        logger.warning("[push] fcm request failed sub=%s token=%s: %s", sub.id, _token_hint(token), e)
+        return False, False
+
+    if 200 <= resp.status_code < 300:
+        return True, False
+    try:
+        err = resp.json()
+    except Exception:
+        err = {}
+    stale = _fcm_should_prune(resp.status_code, err if isinstance(err, dict) else {})
+    logger.warning(
+        "[push] fcm failed sub=%s token=%s status=%s stale=%s",
+        sub.id, _token_hint(token), resp.status_code, stale,
+    )
+    return False, stale
+
+
+def _send_one(
+    sub: PushSubscription, payload: str, pem: str, vapid_claims: dict, headers: dict
+) -> tuple[bool, bool]:
+    """按订阅的 endpoint 形态选择通道：App 的 fcm:// 行走 FCM，其余一律原样走
+    Web Push。契约（是否发送成功, 是否应清理）两边相同，调用方的清理记账不变。
+    Pick the channel by endpoint shape: app fcm:// rows go to FCM, everything
+    else takes the unchanged Web Push path. Same (sent, should prune) contract
+    on both sides, so callers' pruning bookkeeping is untouched."""
+    if is_fcm_endpoint(sub.endpoint):
+        return _fcm_one(sub, payload)
+    return _webpush_one(sub, payload, pem, vapid_claims, headers)
+
+
 def dispatch_push(signal: Signal) -> None:
     """对一条新生成的信号，找出匹配的通知偏好用户并推送到其所有设备。
     Match a newly generated signal against users' notification prefs, then
@@ -355,7 +623,7 @@ def dispatch_push(signal: Signal) -> None:
             "TTL": str(settings.SIGNAL_EXPIRE_MINUTES * 60),
         }
         for sub in subs:
-            ok, stale = _webpush_one(sub, payload, pem, vapid_claims, push_headers)
+            ok, stale = _send_one(sub, payload, pem, vapid_claims, push_headers)
             if ok:
                 sent += 1
             if stale:
@@ -434,7 +702,7 @@ def dispatch_event_push(user_id: str, event_type: str, title: str, body: str) ->
         push_headers = {"Urgency": "high", "TTL": str(3600)}
         failed_ids: list[str] = []
         for sub in subs:
-            _ok, stale = _webpush_one(sub, payload, pem, vapid_claims, push_headers)
+            _ok, stale = _send_one(sub, payload, pem, vapid_claims, push_headers)
             if stale:
                 failed_ids.append(sub.id)
         if failed_ids:
@@ -504,7 +772,7 @@ def dispatch_ticket_reply(ticket_id: str, recipient_id: str, replier_email: str)
         push_headers = {"Urgency": "high", "TTL": str(3600)}
         failed_ids: list[str] = []
         for sub in subs:
-            _ok, stale = _webpush_one(sub, payload, pem, vapid_claims, push_headers)
+            _ok, stale = _send_one(sub, payload, pem, vapid_claims, push_headers)
             if stale:
                 failed_ids.append(sub.id)
         if failed_ids:
@@ -554,7 +822,7 @@ def dispatch_announcement_push(announcement_id: str, title: str, body: str) -> N
                 continue
             subs = db.query(PushSubscription).filter(PushSubscription.user_id == uid).all()
             for sub in subs:
-                ok, stale = _webpush_one(sub, payload, pem, vapid_claims, push_headers)
+                ok, stale = _send_one(sub, payload, pem, vapid_claims, push_headers)
                 sent += int(ok)
                 if stale:
                     failed_ids.append(sub.id)
@@ -630,7 +898,7 @@ def dispatch_test_push(user_id: str) -> dict:
             # _webpush_one 内部对 vapid_claims 做 per-subscription 复制，
             # 继承 aud 复用修复 / _webpush_one copies vapid_claims per
             # subscription, inheriting the aud-reuse fix.
-            ok, stale = _webpush_one(sub, payload, pem, vapid_claims, push_headers)
+            ok, stale = _send_one(sub, payload, pem, vapid_claims, push_headers)
             if ok:
                 sent += 1
             else:

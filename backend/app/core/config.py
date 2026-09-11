@@ -497,6 +497,29 @@ class Settings(BaseSettings):
     VAPID_PUBLIC_KEY: str = ""
     VAPID_SUBJECT: str = "mailto:admin@prismxsignallab.com"
 
+    # FCM（App 端推送）：安卓 App 是 Capacitor WebView，里面没有 Web Push，只能
+    # 走 FCM。App 内的桥接把自己伪装成一条订阅上报（endpoint = fcm://<token>），
+    # 派发时改用 FCM HTTP v1 发送。**网页端 Web Push 完全不受影响**：不配这两项，
+    # 后端行为与现在逐字节相同，fcm:// 行只会被跳过并打一行警告，绝不清理。
+    #
+    # FCM_SERVICE_ACCOUNT_FILE 是服务器上那份 Firebase 服务账号 JSON 的路径（只
+    # 放路径不放内容：密钥不该进 .env、更不该进日志）。FCM_PROJECT_ID 留空时从该
+    # JSON 的 project_id 读取，只有在同一份凭证要发往另一个项目时才需要显式配置。
+    #
+    # FCM (app-side push): the Android app is a Capacitor WebView with no Web
+    # Push, so it has to go through FCM. Its bridge reports itself as an ordinary
+    # subscription (endpoint = fcm://<token>) and dispatch sends those over FCM
+    # HTTP v1 instead. The browser Web Push path is untouched: with neither value
+    # set the backend behaves exactly as before and fcm:// rows are skipped with
+    # a single warning, never pruned.
+    #
+    # FCM_SERVICE_ACCOUNT_FILE is a path to the Firebase service-account JSON on
+    # the server (a path, not the contents — the key belongs in neither .env nor
+    # any log). FCM_PROJECT_ID falls back to the JSON's own project_id and only
+    # needs setting when one credential targets a different project.
+    FCM_SERVICE_ACCOUNT_FILE: str | None = None
+    FCM_PROJECT_ID: str | None = None
+
     @property
     def vapid_private_key(self) -> str:
         """返回可直接传给 pywebpush 的私钥（urlsafe-base64 的 PKCS8 DER）。

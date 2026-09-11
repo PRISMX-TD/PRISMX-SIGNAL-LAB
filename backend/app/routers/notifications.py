@@ -19,9 +19,12 @@ from app.services.plans import can_use_push
 from app.utils.indicator import indicator_category
 from app.services.push_dispatch import (
     EVENT_TYPES,
+    FCM_PLACEHOLDER_KEY,
+    FCM_SCHEME,
     _parse_event_types,
     dispatch_test_push,
     is_allowed_push_endpoint,
+    is_fcm_endpoint,
 )
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -241,11 +244,49 @@ def push_subscribe(
     # has to be confined to known push services — otherwise this table becomes a
     # registry of "URLs I'd like the server to fetch for me" (SSRF). See
     # push_dispatch.is_allowed_push_endpoint.
-    if not is_allowed_push_endpoint(body.endpoint):
-        raise HTTPException(
-            status_code=400,
-            detail="订阅地址不是已知的推送服务 / subscription endpoint is not a known push service",
-        )
+    if body.endpoint.startswith(FCM_SCHEME):
+        # App 端订阅（安卓 Capacitor WebView 里没有 Web Push）：endpoint 是
+        # fcm://<注册令牌>，服务端派发时走 FCM HTTP v1，**不会**对它发起任何
+        # HTTP 请求，因此不经过上面那条防 SSRF 的域名白名单（见
+        # push_dispatch 里 is_fcm_endpoint 上方的说明）。
+        #
+        # 占位密钥必须严格等于字面量：这两个字段在 FCM 路径上没有用处，只用来
+        # 确认这条订阅确实出自 App 桥接。放松成"随便填"会让 fcm:// 变成一条绕过
+        # 密钥校验的旁路。
+        #
+        # App-side subscription (the Android Capacitor WebView has no Web Push):
+        # the endpoint is fcm://<registration token>, dispatched over FCM HTTP
+        # v1, and never fetched — so it doesn't go through the anti-SSRF host
+        # allowlist above (see the note above is_fcm_endpoint). The placeholder
+        # keys must match exactly: they're useless on the FCM path and serve
+        # only to confirm the row came from the app bridge; accepting anything
+        # would turn fcm:// into a way around key validation.
+        if not is_fcm_endpoint(body.endpoint):
+            raise HTTPException(
+                status_code=400,
+                detail="订阅地址不是已知的推送服务 / subscription endpoint is not a known push service",
+            )
+        if p256dh != FCM_PLACEHOLDER_KEY or auth != FCM_PLACEHOLDER_KEY:
+            raise HTTPException(
+                status_code=400,
+                detail="p256dh 或 auth 密钥格式无效 / invalid p256dh or auth key",
+            )
+    else:
+        # 占位密钥只在 fcm:// 上有意义：浏览器签发的 p256dh 是 87 字符的 base64，
+        # 永远不会是 "fcm"，所以带占位密钥的 https 订阅只可能是伪造出来的。
+        # The placeholders only mean anything on fcm://: a browser's p256dh is
+        # 87 base64 characters and never "fcm", so an https subscription
+        # carrying them can only be forged.
+        if p256dh == FCM_PLACEHOLDER_KEY or auth == FCM_PLACEHOLDER_KEY:
+            raise HTTPException(
+                status_code=400,
+                detail="p256dh 或 auth 密钥格式无效 / invalid p256dh or auth key",
+            )
+        if not is_allowed_push_endpoint(body.endpoint):
+            raise HTTPException(
+                status_code=400,
+                detail="订阅地址不是已知的推送服务 / subscription endpoint is not a known push service",
+            )
 
     existing = (
         db.query(PushSubscription)
@@ -326,7 +367,18 @@ def push_status(
             .first()
             is not None
         )
-    return {"count": count, "current_endpoint_registered": registered}
+    # kind 只说明这台设备走的是哪条通道（App 的 fcm:// 还是网页 Web Push），是
+    # 追加字段，老前端不读它也没有任何变化。注意这里回的是通道名而不是 endpoint
+    # 本身——FCM 注册令牌等同于一把可以向该设备发推送的钥匙，任何响应与日志里都
+    # 不该出现完整令牌。
+    # kind names the channel this device uses (the app's fcm:// or browser Web
+    # Push). Additive: an older frontend that ignores it sees no change. It
+    # deliberately returns the channel, not the endpoint — an FCM registration
+    # token is a key to push to that device and belongs in no response or log.
+    kind = None
+    if endpoint:
+        kind = "app" if endpoint.startswith(FCM_SCHEME) else "web"
+    return {"count": count, "current_endpoint_registered": registered, "kind": kind}
 
 
 # 能触发真实推送，不限流会变成骚扰工具 / can trigger real pushes; unthrottled it becomes a nuisance tool
