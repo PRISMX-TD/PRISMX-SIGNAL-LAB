@@ -38,11 +38,23 @@ export function NumberField({ label, value, min = 1, max = 500, isFloat = false,
   return (
     <label className="flex flex-col gap-1">
       <span className="text-[10px] uppercase tracking-wide text-neutral-500">{label}</span>
+      {/* type="text" + inputMode，不用 type="number"。
+          number 类型会对"还没打完"的中间态做值净化：`2.` 不是合法的浮点字面量，
+          `.value` 直接报成空串。于是用户想把 2 改成 2.5，按下小数点的那一拍
+          setText('')，显示的 `2.` 被擦掉，接着按 5 得到的是 5 而不是 2.5——
+          止损/止盈这两个框 isFloat 为真，正是最常输小数的地方。
+          inputMode 同样能在手机上唤起数字键盘，而且不会自作主张改写内容。
+          （同一处坑在策略条件参数上刚修过，见 ConditionRow.tsx 的 NumParam。）
+          type="text" with inputMode instead of type="number": number inputs
+          sanitise mid-typing values, and `2.` isn't a valid float literal, so
+          `.value` comes back empty — pressing "." while editing wipes the digit
+          you just typed. inputMode still brings up the numeric keypad. */}
       <input
-        type="number"
+        type="text"
+        inputMode={isFloat ? 'decimal' : 'numeric'}
         className={`input ${inputClassName}`}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => setText(e.target.value.replace(isFloat ? /[^0-9.-]/g : /[^0-9-]/g, ''))}
         onBlur={commit}
         onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
       />
