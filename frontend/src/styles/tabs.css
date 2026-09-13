@@ -4,7 +4,21 @@
    种做法——同一层级的切换在同一个产品里有两套语言，统一掉。
    In-page tabs move from a 2px underline to the segmented pill track that
    already exists elsewhere in the product (the signals filter bar uses it),
-   so one level of navigation stops having two visual languages. *//* ═════════════ 开关 / toggle switch ═════════════
+   so one level of navigation stops having two visual languages. */
+
+/* 注意：本文件**只有开关**。页内 Tab 的 .seg-tabs 不在这里——它定义在
+   styles/competitions.css，另有 landing-hero.css（:active 缩放 + ≤1023px 的
+   40px 热区）与 leaderboard.css（压 width:fit-content）两处覆盖。想改 Tab 去
+   那三个文件，别在这里找。上面那段讲 Tab 的说明是重构遗留，两段注释当时被
+   `*//*` 粘在了同一行，于是文件头看着像在描述 .seg-tabs 而文件里根本没有它。
+   样式没有搬过来：styles/index.css 的 @import 顺序就是层叠顺序，挪动文件会
+   改变那两处覆盖的生效关系。
+   NOTE: this file contains only the switch. `.seg-tabs` lives in
+   styles/competitions.css with overrides in landing-hero.css and
+   leaderboard.css. Not moved here because @import order in index.css *is* the
+   cascade order. */
+
+/* ═════════════ 开关 / toggle switch ═════════════
    全站唯一的开关（components/Switch.tsx）。几何全部用 px：轨道 44×24、滑块 20、
    四边留 2px、开态平移 20px。之前五处手写开关用 top-0.5 / left-0.5 当 2px，
    而 tailwind.config 把 0.5 档钉成了 4px（4px 网格），滑块被推到贴底贴右。
