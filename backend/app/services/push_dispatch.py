@@ -680,6 +680,64 @@ def _send_one(
     return _webpush_one(sub, payload, pem, vapid_claims, headers)
 
 
+# ---------- 连不上 FCM 的设备：同一条通知经 WebSocket 再送一份 ----------
+# 大陆网络连不上 Google 的服务器，那些设备永远拿不到 FCM token，也就永远不会有
+# PushSubscription 行——上面每个推送函数里的 `if not subs: return` 对它们恒成立：
+# 无论偏好怎么设，一条都收不到。
+#
+# 这里**不重复任何判定**：就在每个"这个用户该收到这条通知"的结论处，把同一份标题
+# 正文原样经 WebSocket 再发一遍。要不要弹由客户端决定：
+#   · 有正常推送订阅的（Web / PWA / 海外 App）→ 前端直接忽略，行为一个字节不变
+#   · 没有订阅的（App 靠前台服务维持长连接的那条路）→ 前端自己弹一条本地通知
+# 只发给此刻真的连着的用户：WebSocket 本来也只能送到这些人。
+#
+# 任何失败都吞掉：这是兜底，绝不能反过来把正常的推送路径带崩。
+
+WS_PUSH_FALLBACK = "PUSH_FALLBACK"
+
+# 协程只是往内存里的连接队列塞一条消息（多 worker 时多一次 Redis publish），
+# 正常在毫秒级完成。给足 5 秒，超时也只记一条日志。
+_WS_FALLBACK_TIMEOUT = 5.0
+
+
+def _online_user_ids() -> set[str]:
+    """此刻有前端 WebSocket 连接的用户（多 worker 时含连在其它 worker 的）。
+    Users with a live client WebSocket right now (across workers with Redis)."""
+    try:
+        from app.services.connection_manager import manager
+        return set(manager.connected_user_ids())
+    except Exception:
+        logger.exception("[push] 读在线名单失败 / presence read failed")
+        return set()
+
+
+def _ws_fallback(
+    user_ids, title: str, body: str, url: str | None = None, tag: str | None = None
+) -> None:
+    """把一条通知的内容经 WebSocket 发给这些用户里此刻在线的那些。
+    Mirror one notification over WebSocket to whichever of these users are online."""
+    try:
+        from app.services.connection_manager import manager
+        from app.services.gateway_client import run_on_main_loop
+        online = _online_user_ids()
+        # dict.fromkeys 去重且保序：调用方传进来的可能是 set，也可能是有重复的 list。
+        targets = [u for u in dict.fromkeys(user_ids) if u in online]
+        if not targets:
+            return
+        data = {"title": title, "body": body}
+        if url:
+            data["url"] = url
+        if tag:
+            data["tag"] = tag
+        message = {"type": WS_PUSH_FALLBACK, "data": data}
+        for uid in targets:
+            run_on_main_loop(manager.push_to_client(uid, message), timeout=_WS_FALLBACK_TIMEOUT)
+        logger.debug("[push] WS 兜底下发 %d 个在线用户 / mirrored to %d online user(s)",
+                     len(targets), len(targets))
+    except Exception:
+        logger.exception("[push] WS 兜底下发失败（不影响正常推送）/ WS mirror failed (push unaffected)")
+
+
 def dispatch_push(signal: Signal) -> None:
     """对一条新生成的信号，找出匹配的通知偏好用户并推送到其所有设备。
     Match a newly generated signal against users' notification prefs, then
@@ -707,11 +765,15 @@ def dispatch_push(signal: Signal) -> None:
             .all()
         )
 
+        title = f"新信号 {signal.symbol}"
+        body = f"{signal.side} · {cat}"
         payload = json.dumps({
-            "title": f"新信号 {signal.symbol}",
-            "body": f"{signal.side} · {cat}",
+            "title": title,
+            "body": body,
             "icon": "/icons/icon-192.png",
         })
+        # 匹配到的这批人就是"该收到这条信号"的人，与有没有推送订阅无关。
+        _ws_fallback(user_ids, title, body)
 
         failed_ids: list[str] = []
         sent = 0
@@ -793,6 +855,9 @@ def dispatch_event_push(user_id: str, event_type: str, title: str, body: str) ->
     try:
         if not _event_prefs_allow(db, user_id, event_type):
             return
+        # 判定已经过了，先把 WS 兜底发出去——下面那句 `if not subs: return` 正是
+        # 大陆设备永远走不通的地方。
+        _ws_fallback([user_id], title, body)
         subs = db.query(PushSubscription).filter(PushSubscription.user_id == user_id).all()
         if not subs:
             return
@@ -857,13 +922,15 @@ def dispatch_ticket_reply(ticket_id: str, recipient_id: str, replier_email: str)
         pref = db.query(NotificationPref).filter(NotificationPref.user_id == recipient_id).first()
         if pref is not None and not _within_push_window(pref):
             return
+        # 双语标题与正文 / bilingual title and body
+        title = "New ticket reply / 工单有新回复"
+        body = f"{replier_email} replied to your ticket / {replier_email} 回复了你的工单"
+        # 判定已经过了，WS 兜底先发（下面那句 `if not subs: return` 对大陆设备恒成立）。
+        _ws_fallback([recipient_id], title, body, url="/support")
         subs = db.query(PushSubscription).filter(PushSubscription.user_id == recipient_id).all()
         if not subs:
             return
         vapid_claims = {"sub": settings.VAPID_SUBJECT}
-        # 双语标题与正文 / bilingual title and body
-        title = "New ticket reply / 工单有新回复"
-        body = f"{replier_email} replied to your ticket / {replier_email} 回复了你的工单"
         payload = json.dumps({
             "title": title,
             "body": body,
@@ -904,6 +971,13 @@ def dispatch_announcement_push(announcement_id: str, title: str, body: str) -> N
     db = SessionLocal()
     try:
         user_ids = [row[0] for row in db.query(PushSubscription.user_id).distinct().all()]
+        # WS 兜底的名单不能从 PushSubscription 里取：没有订阅的设备（大陆那条路）
+        # 在那张表里根本不存在。改从"此刻在线的人"出发，逐个走同一套 _event_prefs_allow。
+        ws_targets = [u for u in _online_user_ids() if _event_prefs_allow(db, u, EVENT_ANNOUNCEMENT)]
+        if ws_targets:
+            _ws_fallback(ws_targets, title, body,
+                         url=f"/announcements/{announcement_id}",
+                         tag=f"prismx-announcement-{announcement_id}")
         if not user_ids:
             return
         vapid_claims = {"sub": settings.VAPID_SUBJECT}

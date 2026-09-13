@@ -5,6 +5,7 @@ import type { BrokerLock, MT5Account, Order, Position, Quote, Signal, StrategySi
 import { accountApi, orderApi, quoteApi, signalApi, strategyApi, symbolApi, trendApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
 import { usePrefs } from './prefs'
+import { showFallbackNotification } from '../utils/fallbackNotify'
 
 interface LiveContextValue {
   signals: Signal[]
@@ -335,6 +336,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         break
       case 'ANNOUNCEMENT_NEW':
         setAnnouncementTick((n) => n + 1)
+        break
+      case 'PUSH_FALLBACK':
+        // 收不到推送的设备（大陆连不上 FCM）才会真的弹——判定全在后端，这台设备
+        // 有没有推送订阅的判断在 showFallbackNotification 里，见那个文件的头注释。
+        // 有订阅的 Web / PWA 用户走到这里是空操作，行为一个字节不变。
+        void showFallbackNotification(msg.data)
         break
       case 'ORDER_UPDATE': {
         const updated = msg.data as Order
