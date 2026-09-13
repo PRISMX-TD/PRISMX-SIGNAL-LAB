@@ -603,6 +603,14 @@ def resolve_condition(condition: dict) -> dict:
     }
 
 
+def _mirrorless(condition: dict) -> bool:
+    """这个条件有没有交易语义上的反面。没有的（ATR）是闸门不是方向信号。
+    Whether a condition has no trading-wise opposite; those are gates, not
+    directional signals."""
+    spec = USAGES.get(condition.get("usage"))
+    return spec is not None and spec.mirror is None
+
+
 def evaluate_side(
     bars: list[dict], conditions: list[dict], logic: str, memo: dict | None = None
 ) -> list[bool]:
@@ -629,19 +637,39 @@ def evaluate_side(
 def evaluate_conditions(bars: list[dict], payload: dict, memo: dict | None = None) -> list[str | None]:
     """整条策略逐 bar 求值，返回 "BUY" / "SELL" / None。
 
-    两侧同时成立时取多头：ATR 这类无镜像条件会让两侧判定完全一致，此时必须有
-    个确定的偏向，否则同一根 bar 的结果取决于字典遍历顺序。
+    无镜像条件（眼下只有 ATR）**一律以 AND 当闸门，与 logic 无关**。它衡量的是
+    波动幅度而不是方向，多空两侧用的是同一条判定；放进 OR 里就意味着"它一成立
+    这一侧就成立"，而两侧用的是同一条 —— 于是两侧同时为真，再加上下面"同真取
+    多头"，一条本意是「波动率过滤」的条件会退化成**无条件买入信号**，而且不报
+    任何错。logic 为 AND 时本改动与原来逐位相同（AND 的 AND 还是 AND）。
 
-    Evaluate a whole strategy bar by bar into "BUY" / "SELL" / None. When both
-    sides hold, long wins: mirror-less conditions like ATR make both sides
-    identical, and without a fixed preference the verdict for a bar would hinge
-    on iteration order.
+    随之而来的一个边界：若整条策略只有无镜像条件，方向侧就是空列表，
+    evaluate_side 对空列表返回全 False（见那边的说明），于是全程 None —— 没有
+    方向信号就没有方向，这比"高波动就买"诚实。
+
+    两侧同时成立时取多头：闸门分离之后这种情况已经罕见，但 OR 下两条方向相反
+    的条件仍可能同时命中，此时必须有个确定的偏向，否则同一根 bar 的结果取决于
+    字典遍历顺序。
+
+    Evaluate a whole strategy bar by bar into "BUY" / "SELL" / None. Mirror-less
+    conditions (today only ATR) are always ANDed as a gate regardless of `logic`:
+    they measure magnitude, not direction, and both sides share the same verdict,
+    so under OR they would make both sides true at once — which, combined with
+    "long wins ties" below, silently turns a volatility *filter* into an
+    unconditional BUY. Under AND this is bit-for-bit the previous behaviour.
     """
     if not bars:
         return []
     logic = payload.get("logic") or "AND"
-    longs = evaluate_side(bars, payload.get("conditions") or [], logic, memo)
-    shorts = evaluate_side(bars, mirror_conditions(payload), logic, memo)
+    conditions = payload.get("conditions") or []
+    gates = [c for c in conditions if _mirrorless(c)]
+    directional = [c for c in conditions if not _mirrorless(c)]
+    longs = evaluate_side(bars, directional, logic, memo)
+    shorts = evaluate_side(bars, mirror_conditions({"conditions": directional}), logic, memo)
+    if gates:
+        passes = evaluate_side(bars, gates, "AND", memo)
+        longs = [a and b for a, b in zip(longs, passes)]
+        shorts = [a and b for a, b in zip(shorts, passes)]
     out: list[str | None] = []
     for i in range(len(bars)):
         if longs[i]:

@@ -178,14 +178,68 @@ def test_mirror_gives_sell_on_downward_cross():
     assert out[-1] == "SELL"
 
 
-def test_empty_side_is_all_false_and_long_wins_ties():
+def _atr_bars(n=80):
+    """后段波动明显放大，让 atr.volatility_above_average 在尾部成立。"""
+    return [{"t": i, "o": 1.0, "h": 1.0 + (0.5 if i > 60 else 0.1), "l": 1.0, "c": 1.0, "v": 1}
+            for i in range(n)]
+
+
+def test_empty_side_is_all_false():
     bars = _cross_bars()
     assert cond.evaluate_side(bars, [], "AND") == [False] * len(bars)
-    # ATR 条件无镜像 → 两侧判定完全一致 → 必须取多头
-    n = 80
-    bars = [{"t": i, "o": 1.0, "h": 1.0 + (0.5 if i > 60 else 0.1), "l": 1.0, "c": 1.0, "v": 1} for i in range(n)]
-    out = cond.evaluate_conditions(bars, _rules("atr.volatility_above_average", {"period": 5, "mult": 1.0}))
-    assert "SELL" not in out and "BUY" in out
+
+
+def test_mirrorless_only_strategy_has_no_direction():
+    """只有 ATR 这类无镜像条件时，没有方向可言 —— 全程 None。
+
+    这里以前断言的是"必须取多头"，理由写的是"两侧判定完全一致"。但那等于把一条
+    衡量波动幅度的条件当成了买入信号：ATR 高低跟做多做空都没关系。现在无镜像条件
+    一律当闸门，方向侧因此是空列表，evaluate_side 对空列表返回全 False。
+    """
+    out = cond.evaluate_conditions(
+        _atr_bars(), _rules("atr.volatility_above_average", {"period": 5, "mult": 1.0})
+    )
+    assert set(out) == {None}
+
+
+def test_long_wins_when_both_sides_hold():
+    """OR 下两条方向相反的条件同时命中时，必须有确定偏向，否则结果取决于遍历顺序。"""
+    bars = _cross_bars()
+    payload = {"logic": "OR", "interval": "60", "symbol": "XAUUSD", "conditions": [
+        # 上穿那一根：多头侧成立
+        {"indicator": "ma", "usage": "ma.price_cross_above", "params": {"period": 5}},
+        # 平盘序列 RSI 恒为 100，其镜像 rsi.above_level(70) 一路成立：空头侧成立
+        {"indicator": "rsi", "usage": "rsi.below_level", "params": {"period": 14, "level": 30}},
+    ]}
+    out = cond.evaluate_conditions(bars, payload)
+    assert out[-1] == "BUY"          # 两侧同真 → 取多头
+    assert "SELL" in out[:-1]        # 只有空头侧成立的那些 bar 仍是 SELL
+
+
+def test_or_with_volatility_filter_does_not_become_a_buy_signal():
+    """回归：OR + 无镜像条件曾经退化成无条件买入。
+
+    ATR 的多空两侧用的是同一条判定。它若作为 OR 的一个分支，一成立就让两侧同时
+    为真，再叠加"同真取多头"，整条策略在高波动期间每根 bar 都输出 BUY —— 一条
+    本意是波动率过滤的条件变成了买入触发器，而且不报任何错。
+    现在它一律以 AND 当闸门：方向仍由 MA 那条决定，ATR 只负责放行或拦下。
+    """
+    bars = _atr_bars()
+    payload = {"logic": "OR", "interval": "60", "symbol": "XAUUSD", "conditions": [
+        {"indicator": "ma", "usage": "ma.price_cross_above", "params": {"period": 5}},
+        {"indicator": "atr", "usage": "atr.volatility_above_average",
+         "params": {"period": 5, "mult": 1.0}},
+    ]}
+    out = cond.evaluate_conditions(bars, payload)
+    # 这段行情收盘价恒为 1.0，MA 条件从不上穿 → 不该有任何方向信号
+    assert set(out) == {None}
+
+    # AND 下本改动必须与原来逐位相同：闸门的 AND 再 AND 还是 AND
+    and_payload = dict(payload, logic="AND")
+    gate = cond.evaluate_side(bars, [payload["conditions"][1]], "AND")
+    ma_long = cond.evaluate_side(bars, [payload["conditions"][0]], "AND")
+    expected = ["BUY" if a and b else None for a, b in zip(ma_long, gate)]
+    assert cond.evaluate_conditions(bars, and_payload) == expected
 
 
 def test_memo_computes_each_usage_once_per_batch(monkeypatch):
