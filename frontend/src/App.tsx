@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+import { Suspense, useEffect, useState, type ReactNode } from 'react'
+import { lazyRetry } from './utils/lazyRetry'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './store/auth'
 import { PrefsProvider } from './store/prefs'
@@ -14,33 +15,37 @@ import PublicShell from './seo/PublicShell'
 import GrowthHub from './pages/GrowthHub'
 
 // 路由级代码分割：首屏只加载当前页面的代码，其余按需加载（如图表页）。
+// 用 lazyRetry 而不是裸 lazy：chunk 拉失败先重试、再整页重载一次，最后才弹卡。
+// 大陆拉 Vercel 的 chunk 一次失败就弹「重新加载」卡，而用户点重载多半能成——
+// 程序自己先试。见 utils/lazyRetry.ts。
+// lazyRetry, not bare lazy: retry, then one reload, then the error card.
 // Route-level code splitting: only the current page's code loads up front;
 // heavy pages (e.g. the charts page) load on demand.
-const LandingPage = lazy(() => import('./pages/LandingPage'))
-const LoginPage = lazy(() => import('./pages/LoginPage'))
-const SignalsPage = lazy(() => import('./pages/SignalsPage'))
-const DashboardPage = lazy(() => import('./pages/DashboardPage'))
-const ChartsPage = lazy(() => import('./pages/ChartsPage'))
-const BindPage = lazy(() => import('./pages/BindPage'))
-const BridgePage = lazy(() => import('./pages/BridgePage'))
-const OrdersPage = lazy(() => import('./pages/OrdersPage'))
-const UpgradePage = lazy(() => import('./pages/UpgradePage'))
-const DownloadPage = lazy(() => import('./pages/DownloadPage'))
-const AccountPage = lazy(() => import('./pages/AccountPage'))
-const AdminPage = lazy(() => import('./pages/AdminPage'))
-const SimulatorPage = lazy(() => import('./pages/SimulatorPage'))
-const StrategiesPage = lazy(() => import('./pages/StrategiesPage'))
-const AchievementsPage = lazy(() => import('./pages/AchievementsPage'))
-const LeaderboardPage = lazy(() => import('./pages/LeaderboardPage'))
-const CompetitionsPage = lazy(() => import('./pages/CompetitionsPage'))
-const ProfilePage = lazy(() => import('./pages/ProfilePage'))
-const LegalPage = lazy(() => import('./pages/LegalPage'))
-const FaqPage = lazy(() => import('./pages/FaqPage'))
-const SupportPage = lazy(() => import('./pages/SupportPage'))
-const StrategyGuidePage = lazy(() => import('./pages/StrategyGuidePage'))
-const AnnouncementsPage = lazy(() => import('./pages/AnnouncementsPage'))
-const AnnouncementPage = lazy(() => import('./pages/AnnouncementPage'))
-const CompleteProfilePage = lazy(() => import('./pages/CompleteProfilePage'))
+const LandingPage = lazyRetry(() => import('./pages/LandingPage'), 'LandingPage')
+const LoginPage = lazyRetry(() => import('./pages/LoginPage'), 'LoginPage')
+const SignalsPage = lazyRetry(() => import('./pages/SignalsPage'), 'SignalsPage')
+const DashboardPage = lazyRetry(() => import('./pages/DashboardPage'), 'DashboardPage')
+const ChartsPage = lazyRetry(() => import('./pages/ChartsPage'), 'ChartsPage')
+const BindPage = lazyRetry(() => import('./pages/BindPage'), 'BindPage')
+const BridgePage = lazyRetry(() => import('./pages/BridgePage'), 'BridgePage')
+const OrdersPage = lazyRetry(() => import('./pages/OrdersPage'), 'OrdersPage')
+const UpgradePage = lazyRetry(() => import('./pages/UpgradePage'), 'UpgradePage')
+const DownloadPage = lazyRetry(() => import('./pages/DownloadPage'), 'DownloadPage')
+const AccountPage = lazyRetry(() => import('./pages/AccountPage'), 'AccountPage')
+const AdminPage = lazyRetry(() => import('./pages/AdminPage'), 'AdminPage')
+const SimulatorPage = lazyRetry(() => import('./pages/SimulatorPage'), 'SimulatorPage')
+const StrategiesPage = lazyRetry(() => import('./pages/StrategiesPage'), 'StrategiesPage')
+const AchievementsPage = lazyRetry(() => import('./pages/AchievementsPage'), 'AchievementsPage')
+const LeaderboardPage = lazyRetry(() => import('./pages/LeaderboardPage'), 'LeaderboardPage')
+const CompetitionsPage = lazyRetry(() => import('./pages/CompetitionsPage'), 'CompetitionsPage')
+const ProfilePage = lazyRetry(() => import('./pages/ProfilePage'), 'ProfilePage')
+const LegalPage = lazyRetry(() => import('./pages/LegalPage'), 'LegalPage')
+const FaqPage = lazyRetry(() => import('./pages/FaqPage'), 'FaqPage')
+const SupportPage = lazyRetry(() => import('./pages/SupportPage'), 'SupportPage')
+const StrategyGuidePage = lazyRetry(() => import('./pages/StrategyGuidePage'), 'StrategyGuidePage')
+const AnnouncementsPage = lazyRetry(() => import('./pages/AnnouncementsPage'), 'AnnouncementsPage')
+const AnnouncementPage = lazyRetry(() => import('./pages/AnnouncementPage'), 'AnnouncementPage')
+const CompleteProfilePage = lazyRetry(() => import('./pages/CompleteProfilePage'), 'CompleteProfilePage')
 
 function Protected({ children }: { children: ReactNode }) {
   const { isAuthed, user } = useAuth()

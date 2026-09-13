@@ -18,6 +18,7 @@
 // becoming an unhandled rejection.
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { isChunkLoadError, reportClientError } from '../utils/clientErrorReport'
 
 type Props = {
   children: ReactNode
@@ -48,12 +49,17 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    // 接入错误监控后在这里上报（见优化清单 [8]）。在那之前至少留一份控制台
-    // 记录 —— 白屏时用户描述不清，控制台堆栈是唯一能问出来的线索。
-    // Report to error monitoring here once it's wired up (plan item [8]).
-    // Until then keep a console record: users can't describe a blank screen,
-    // and this stack is the only thing we can ask them for.
     console.error('[ErrorBoundary]', error, info.componentStack)
+    // 上报到 /api/telemetry/client-error（后端只写日志）。以前这里只有上面那行
+    // console.error——线上一条数据都没有，用户说"渲染失败"时分不清是大陆拉不到
+    // chunk、是代码 bug、还是 App 特有。kind 区分开：chunk 是网络/发版陈旧，
+    // render 才是代码。lazyRetry 已在自己那边上报过的 chunk 失败这里不会重复——
+    // 它抛给我们的错只有一次，就是重试耗尽那一次。
+    // Reported to the log-only telemetry endpoint. `chunk` = network / stale
+    // deploy, `render` = an actual code bug; that split is the whole point.
+    reportClientError(isChunkLoadError(error) ? 'chunk' : 'render', error, {
+      componentStack: (info.componentStack ?? '').slice(0, 1500),
+    })
   }
 
   componentDidUpdate(prev: Props) {

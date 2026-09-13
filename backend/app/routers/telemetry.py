@@ -55,6 +55,23 @@ CSP_REPORT_FIELDS = (
     "source-file", "line-number", "disposition",
 )
 
+# 前端错误上报：字段白名单 → 各自的截断长度。不在表里的键一律丢弃。
+# stack 给 4000：够看清前十几帧；ua 给 300：够认出机型与 WebView 版本。
+# Client-error report: field whitelist → per-field truncation. Unknown keys dropped.
+CLIENT_ERROR_MAX_BYTES = 16384
+CLIENT_ERROR_FIELDS = {
+    "kind": 40, "name": 100, "message": 500, "stack": 4000, "path": 200,
+    "ua": 300, "app": 8, "online": 8, "lang": 16, "chunk": 80, "retries": 8,
+    "componentStack": 1500,
+}
+# kind 只认这三个：render = 渲染期抛错（代码问题）；chunk = 懒加载 chunk 重试耗尽
+# 仍拉不到（网络 / 发版陈旧）；chunk-reload = 因此触发了一次整页重载。
+# 把它们分开正是这个端点存在的意义——"渲染失败"到底是网络还是代码，靠 kind 答。
+# render = a throw during render (code); chunk = lazy chunk still failing after
+# retries (network / stale deploy); chunk-reload = a full reload was triggered.
+CLIENT_ERROR_KINDS = frozenset({"render", "chunk", "chunk-reload"})
+client_error_logger = logging.getLogger("prismx.client_error")
+
 # 允许上报的前端路由，与 App.tsx 的受保护路由一一对应。新增页面时要同步加，
 # 否则该页的访问不会被统计（宁可漏统计，也不放开任意 path 写入）。
 #
@@ -144,6 +161,50 @@ async def csp_report(request: Request) -> Response:
     if not fields:
         fields = {k: str(v)[:300] for k, v in report.items() if k in ("documentURL", "effectiveDirective", "blockedURL", "disposition")}
     logger.warning("csp violation %s", json.dumps(fields, ensure_ascii=False))
+    return Response(status_code=204)
+
+
+@router.post("/client-error", status_code=204)
+@limiter.limit("30/minute")
+async def client_error(request: Request) -> Response:
+    """接收前端的渲染错误 / chunk 加载失败上报，只写日志。
+
+    **为什么有它**：ErrorBoundary 以前只 console.error，线上一条数据都没有。用户
+    反馈"渲染失败要重新加载"、大陆用户尤其频繁、App 上更甚——这句话对应的至少
+    是两种不同机制（拉不到 chunk 的网络问题 vs 真的渲染期抛错的代码问题），而在
+    有数据之前谁也分不出来。**要不要为大陆用户加香港节点**这个决定，就等这里一
+    周的日志：`journalctl -u prismx | grep 'client error'`，按 kind / app / path
+    数一数。
+
+    **只写日志、不建表**：与 csp-report 同一路线。观察期的问题用 journald 就够，
+    建表意味着 schema_rev、保留期、清理任务一整套；等它证明值得再说。
+
+    匿名端点（ErrorBoundary 可能在未登录的落地页上触发，且上报路径绝不能带上会
+    触发登出的 token 逻辑），所以：按 IP 限流、kind 白名单、字段白名单 + 逐字段
+    截断、正文超 16KB 直接丢、任何格式错误都静默 204。
+
+    Receives frontend render / chunk-load failures and logs them. Before this the
+    ErrorBoundary only wrote to the console, so "the page failed to render" from
+    mainland users could not be split into network (chunk) vs code (render) —
+    the split this endpoint exists to provide, and the input to the "do we need a
+    Hong Kong node" decision. Log-only like csp-report; anonymous, IP rate
+    limited, whitelisted kinds and fields, 16KB cap, always 204.
+    """
+    body = await request.body()
+    if not body or len(body) > CLIENT_ERROR_MAX_BYTES:
+        return Response(status_code=204)
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return Response(status_code=204)
+    if not isinstance(data, dict) or data.get("kind") not in CLIENT_ERROR_KINDS:
+        return Response(status_code=204)
+    fields = {
+        k: str(data[k])[:limit]
+        for k, limit in CLIENT_ERROR_FIELDS.items()
+        if data.get(k) is not None
+    }
+    client_error_logger.warning("client error %s", json.dumps(fields, ensure_ascii=False))
     return Response(status_code=204)
 
 
