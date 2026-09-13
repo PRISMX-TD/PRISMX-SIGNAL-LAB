@@ -120,8 +120,14 @@ export default {
         // stack was Space Grotesk, which has no CJK glyphs, so Chinese silently
         // fell back to the system PingFang/YaHei and mismatched the Latin in both
         // weight and apparent size. That was a real defect, not a taste call.
-        display: ['Archivo', '"Noto Sans SC"', 'system-ui', 'sans-serif'],
-        sans: ['Archivo', '"Noto Sans SC"', 'system-ui', 'sans-serif'],
+        // 2026-09-13 起 Archivo / JetBrains Mono 自托管（src/styles/fonts.css），
+        // Google Fonts 那条 render-blocking 外链已删——它在大陆是黑洞，卡首屏几十秒。
+        // Noto Sans SC 刻意不进包（303 个子集、数 MB），中文交给系统 CJK：Android
+        // 自带 Noto Sans CJK，iOS PingFang，Windows 雅黑。
+        // Self-hosted since 2026-09-13; the Google Fonts link is gone (black-holed
+        // in mainland China). Noto Sans SC deliberately not bundled; system CJK.
+        display: ['Archivo', '"Noto Sans SC"', '"Noto Sans CJK SC"', '"Source Han Sans SC"', '"PingFang SC"', '"Microsoft YaHei"', 'system-ui', 'sans-serif'],
+        sans: ['Archivo', '"Noto Sans SC"', '"Noto Sans CJK SC"', '"Source Han Sans SC"', '"PingFang SC"', '"Microsoft YaHei"', 'system-ui', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
       },
 

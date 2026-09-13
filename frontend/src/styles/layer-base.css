@@ -20,7 +20,11 @@
     @apply antialiased;
     background: var(--bg);
     color: var(--text);
-    /* Archivo 打头、Noto Sans SC 承接中文。上一版是 Space Grotesk 打头，而它
+    /* Archivo 自托管（见 fonts.css）；中文走系统 CJK：Noto Sans SC 只在用户本机装了
+       时命中，否则依次 Noto Sans CJK（Android 自带）/ 思源黑体 / PingFang / 雅黑。
+       Archivo is self-hosted (fonts.css); Chinese uses the system CJK face —
+       Noto Sans CJK on Android, PingFang on iOS, YaHei on Windows.
+       Archivo 打头、Noto Sans SC 承接中文。上一版是 Space Grotesk 打头，而它
        没有汉字字形——本站默认语言是中文，所有中文实际掉到系统 PingFang/雅黑，
        与旁边的拉丁字母在字重、字面大小、基线上都对不齐。显式指定 SC 字体后
        中英两侧字重轴一一对应。
@@ -29,7 +33,7 @@
        Chinese, so all Chinese fell back to the system PingFang/YaHei and
        mismatched the adjacent Latin in weight, apparent size and baseline.
        Declaring the SC face explicitly aligns the two weight axes. */
-    font-family: "Archivo", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    font-family: "Archivo", "Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
     font-size: 13px;
     min-height: 100vh;
     /* 必须用 clip 而不是 hidden：hidden 会让 overflow-y 计算为 auto，把 body 变成
@@ -76,7 +80,7 @@
      One variable family covering both registers costs one fewer font request
      than adding a separate display face. */
   .font-display {
-    font-family: "Archivo", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+    font-family: "Archivo", "Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
     font-variation-settings: "wdth" 112;
     letter-spacing: -0.018em;
   }
@@ -86,7 +90,7 @@
      sizes tracking must go more negative or the gaps scale linearly with the
      type and the line reads loose. */
   .font-display-xl {
-    font-family: "Archivo", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+    font-family: "Archivo", "Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
     font-variation-settings: "wdth" 118;
     font-weight: 700;
     letter-spacing: -0.035em;

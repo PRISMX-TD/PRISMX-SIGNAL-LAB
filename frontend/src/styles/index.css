@@ -19,6 +19,7 @@
  * interleave. To add a section, create a file and slot it by what it must
  * override / be overridden by.
  */
+@import './fonts.css';
 @import 'tailwindcss/base';
 @import './layer-base.css';
 @import 'tailwindcss/components';
