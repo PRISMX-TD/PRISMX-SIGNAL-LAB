@@ -8,6 +8,7 @@ import { chartApi } from '../../api/client'
 import type { Candle } from '../../api/types'
 import type { DayStats } from './SymbolHeader'
 import {
+  FOLLOW_LIVE_SLACK_BARS,
   HISTORY_FIRST_PAGE, HISTORY_PAGE_SIZE, HISTORY_PREFETCH_BARS, MAX_CLIENT_BARS, POLL_MS, STALE_MS,
   SYMBOL_DECIMALS, computeDayStats, toLwPoint,
 } from './chartConfig'
@@ -160,10 +161,19 @@ export function useChartData(symbol: string, interval: string, engine: ChartEngi
 
     const onRangeChange = (range: { from: number; to: number } | null) => {
       if (range && range.from < HISTORY_PREFETCH_BARS) loadOlder()
-      // 跟踪用户是否在最新 bar 附近：右边缘距最新 bar 不到 5 分钟算"跟随实时"
-      // Track whether viewport is near the live edge (~5 min from latest bar)
-      if (range && range.to !== null && lastTimeRef.current > 0) {
-        isFollowingLiveRef.current = (lastTimeRef.current - range.to) < 300
+      // 跟踪用户是否还贴在最新那根上：range.to 是**逻辑下标**，所以要和"总根数"
+      // 比，不是和时间戳比。这里原先写的是 `lastTimeRef.current - range.to < 300`
+      // ——左边是 epoch 秒（约 1.7e9）、右边是几十到几百的下标，差值恒为天文数字，
+      // 于是第一次可视范围变化之后 isFollowingLive 就被钉死在 false，
+      // scrollToRealTime() 再也不会执行：图表不再自动跟随新 K 线。
+      // Track whether the viewport still sits at the live edge. range.to is a
+      // logical index, so it must be compared against the bar count — the old
+      // code subtracted it from an epoch timestamp, which is never small, so
+      // auto-follow silently switched itself off on the first range change.
+      if (range && range.to != null) {
+        const barCount = candlesRef.current.length
+        isFollowingLiveRef.current =
+          barCount === 0 || range.to >= barCount - FOLLOW_LIVE_SLACK_BARS
       }
     }
     chartRef.current?.timeScale().subscribeVisibleLogicalRangeChange(onRangeChange)

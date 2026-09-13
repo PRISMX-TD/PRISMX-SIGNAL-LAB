@@ -25,7 +25,15 @@ export default function IndicatorLegends({ indicators, indicatorSettings, legend
         const v = row[sp.key]
         const text = digits === 0 && v != null ? Math.round(v).toLocaleString() : fmtLegendNum(v, digits)
         return (
-          <span key={sp.key} style={{ color: sp.kind === 'hist' && sp.histColor === 'sign' ? (v != null && v >= 0 ? 'var(--up)' : 'var(--down)') : sp.color }}>
+          // key 必须带指标 id 前缀：主图那条图例把所有开启的主图指标平铺在同一个
+          // 父节点下，而 sp.key 只在单个指标内唯一——VWAP 与 SAR 都是 'v'，MA 与
+          // EMA 都是 '0'/'1'/'2'，BOLL 与 DONCH 都有 'upper'/'lower'。同时开这些
+          // 组合就会出现重复 key，React 可能复用错节点（值串到别的指标上）。
+          // Prefix the key with the indicator id: the main legend flattens every
+          // enabled overlay into one parent, and sp.key is only unique within a
+          // single indicator (VWAP and SAR both use 'v', MA and EMA both use
+          // '0'/'1'/'2', BOLL and DONCH both have 'upper'/'lower').
+          <span key={`${id}:${sp.key}`} style={{ color: sp.kind === 'hist' && sp.histColor === 'sign' ? (v != null && v >= 0 ? 'var(--up)' : 'var(--down)') : sp.color }}>
             {INDICATOR_META[id].abbr}{sp.label ? ` ${sp.label}` : ''} {text}
           </span>
         )

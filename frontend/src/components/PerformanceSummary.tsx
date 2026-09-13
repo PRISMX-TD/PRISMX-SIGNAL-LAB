@@ -62,7 +62,13 @@ export default function PerformanceSummary({ login, accountLabel }: Props) {
   return (
     <section className="ord-perf-head">
       <div>
-        <div className="ord-eyebrow">{t('orders.perf.winRate')}</div>
+        {/* 用 .ord-k：订单面全域的标签眉题就是它（AccountMast / PositionCard /
+            OrdersPage 共 20 处）。这里原先写的是 .ord-eyebrow，而那个类在 29 个
+            样式文件里一处定义都没有，也没有 Tailwind 兜底——这行标签一直是以
+            body 默认样式在渲染。
+            Use .ord-k, the established label eyebrow across the orders surface.
+            The previous .ord-eyebrow was never defined anywhere. */}
+        <div className="ord-k">{t('orders.perf.winRate')}</div>
         {data === null ? (
           <SkeletonLine width={140} height={34} className="mt-3" />
         ) : pct == null ? (

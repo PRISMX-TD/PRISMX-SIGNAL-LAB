@@ -88,6 +88,15 @@ export const HISTORY_FIRST_PAGE = 50
 export const HISTORY_PAGE_SIZE = 500
 export const HISTORY_PREFETCH_BARS = 200
 
+// 判定"视图还贴在最新那根上"的容差，单位是**根**（逻辑下标），不是秒。
+// subscribeVisibleLogicalRangeChange 给的 from/to 是逻辑下标（0 起、可越界到
+// 空白区），拿它和 epoch 秒相减永远得到天文数字——这正是"自动跟随实时"长期
+// 失效的原因。3 根给的是"用户只是随手拖了一点点"的余量。
+// Tolerance for "the viewport is still pinned to the newest bar", measured in
+// BARS (logical indices), not seconds: the logical range is an index range, and
+// subtracting an epoch timestamp from it can never be small.
+export const FOLLOW_LIVE_SLACK_BARS = 3
+
 // 涨跌配色（与 SignalView 的 FOCUS_DOT 一致，K 线本身固定用这套，不做客制化）
 // up/down colors (match SignalView's FOCUS_DOT; the candles themselves stay
 // fixed to this palette — only the sub-indicators are user-customizable)
