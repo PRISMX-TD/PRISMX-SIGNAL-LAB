@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.core.rate_limit import (
     clear_failed_mt5_verify,
     is_mt5_verify_locked,
@@ -577,8 +577,12 @@ GATEWAY_MAX_CONCURRENT_USERS = 8
 #
 # 回看窗口的取值理由与 bridge/mt5_worker.py 的 _closed_trades_payload 一致：
 # 宁可反复查到同一笔成交（后端按 (user, deal_ticket) 唯一约束去重，重复上报
-# 无副作用），也不要因为窗口太窄漏掉一笔。但这里不需要 Bridge 那套服务器时区
-# 换算——Manager API 的 DealRequest 直接按 UTC 秒解读，传 Unix 时间戳即可。
+# 无副作用），也不要因为窗口太窄漏掉一笔。
+#
+# ⚠️ 窗口两端与 DealRsp.time 一样，都在券商服务器墙钟的参照系里（本券商 +3h），
+# 所以 _scan_deals 取窗口时要按 cached_server_offset(login) 让出这段差值。这里
+# 原先写的是「不需要 Bridge 那套换算，Manager API 直接按 UTC 秒解读」——错的，
+# 见踩坑 #63。
 #
 # 扫描间隔决定「平仓后多久能在明细里看到」：入库后会立刻推 CLOSED_TRADE_NEW，
 # 前端不必等自己的 45 秒轮询，所以端到端延迟基本就是这个间隔。取 3 秒而非更
@@ -622,6 +626,21 @@ GATEWAY_DEALS_DEEP_BACKFILL_SECONDS = 365 * 24 * 60 * 60
 
 
 def _needs_deep_backfill(user_id: str, login: str) -> bool:
+    """该账号是否还有缺明细列的平仓腿，需要一次回看一年的深扫。
+
+    SessionLocal 必须来自模块级 import。这里曾经只有 gateway_positions_loop()
+    函数体内的那一份局部 import——那是个函数局部名字，本函数根本看不到，于是
+    每次调用都抛 NameError。而调用点在 _scan_deals 的 try/except Exception 里，
+    异常被吞掉只记一行日志；更糟的是那时 scanned_once 已经先一步加过该 login，
+    所以下一拍 first_scan 已是 False——**七天补扫与一年深扫两条都从未真正跑过**，
+    gateway 通道实际只有 15 分钟常规窗口在工作。
+
+    SessionLocal must come from the module-level import. It used to exist only as
+    a function-local import inside gateway_positions_loop(), invisible here, so
+    every call raised NameError. The call site swallows it in a broad except, and
+    scanned_once had already been updated by then — meaning neither the 7-day
+    catch-up nor the 1-year deep rescan ever actually ran.
+    """
     db = SessionLocal()
     try:
         return bool(logins_needing_backfill(db, user_id, [login]))
@@ -975,7 +994,6 @@ async def gateway_positions_loop() -> None:
 
     from starlette.concurrency import run_in_threadpool
 
-    from app.core.database import SessionLocal
     from app.services.auto_manage import evaluate_positions
     from app.services.connection_manager import manager
     from app.services.trade_performance import mark_positions_seen
@@ -1160,6 +1178,7 @@ async def gateway_positions_loop() -> None:
                 # broker's Manager API, attribution done above), hence verified=True.
                 if upsert_leg(db, user_id, login, leg, True) in ("inserted", "enriched"):
                     inserted += 1
+
         finally:
             db.close()
         return inserted

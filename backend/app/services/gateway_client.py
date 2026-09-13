@@ -468,8 +468,19 @@ async def drain_deal_events() -> tuple[list[int], bool]:
 async def get_deals(login: int, from_unix: int, to_unix: int) -> tuple[list[DealRsp], str]:
     """读取一段时间内的成交历史。返回 (列表, 错误信息)。
 
-    时间参数是 Unix 秒（UTC），Manager API 直接按 UTC 秒解读——不存在 Bridge
-    那侧用 MetaTrader5 Python 包时必须换算服务器本地时区的陷阱。
+    ⚠️ 时间参数与返回的 DealRsp.time **都在券商服务器墙钟的参照系里，不是 UTC**
+    （本券商 +3 小时）。这里原样透传、不做任何换算；换算在 routers/gateway.py：
+    观测用 observe_server_offset()，落库在 build_closed_trade_legs() 里减掉偏移。
+
+    这段注释此前写的是「Manager API 直接按 UTC 秒解读，不存在 Bridge 那侧的
+    陷阱」——那句话是错的，2026-09-05 被一笔漂进别场比赛的平仓证伪（踩坑 #63）。
+    留着它的代价不是看着别扭，而是下一个人据此把换算拆掉。
+
+    Both the query bounds and DealRsp.time live in the broker server's wall-clock
+    frame, not UTC (+3h for this broker). This function passes them through
+    untouched; conversion happens in routers/gateway.py. The previous claim that
+    "Manager API reads plain UTC seconds" was wrong and was disproved in
+    production on 2026-09-05.
     """
     data = await _post("/deals", {"login": login, "from": from_unix, "to": to_unix})
     if not data.get("ok"):
