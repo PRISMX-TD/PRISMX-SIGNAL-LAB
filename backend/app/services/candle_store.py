@@ -1066,11 +1066,14 @@ def filter_tradeable_bars_both(
 def persist_closed_bars(
     db, symbol: str, interval: str, bars: list[dict],
     prefiltered: list[dict] | None = None,
-) -> int:
+) -> list[int]:
     """把 `bars` 里通过休市闸门的部分写入数据库,已存在的(symbol, interval, t)跳过。
 
     过滤逻辑全部在 filter_tradeable_bars() 里,这里只负责落库。
-    返回本次新写入的行数(纯观测用,调用方可忽略)。
+    **返回本次新写入那些 bar 的时间戳列表(升序)**,不是行数——调用方要按"这一批
+    到底哪几根是新的"去驱动策略判定,只给个数会在一批补进多根时分不清是哪几根,
+    而拿"最新 N 根"去猜在补空洞的批次里会把早就判过的老 bar 重复计入 bars_held。
+    需要行数的地方取 len() 即可。
 
     `prefiltered` 给已经调过 filter_tradeable_bars() 的调用方复用结果用(routers/chart.py
     要拿同一份结果去更新内存缓存)。过滤过程本身要查两次库(取前序收盘价、取重放基准),
@@ -1080,7 +1083,10 @@ def persist_closed_bars(
     Persist the subset of `bars` that clears the closure gates; rows already
     present for (symbol, interval, t) are skipped. All filtering lives in
     filter_tradeable_bars(); this function only writes.
-    Returns the number of newly-inserted rows (for observability; callers may ignore it).
+    Returns the ascending timestamps of the rows newly inserted by this call (not a
+    count): callers drive strategy resolution off "which bars are new", and a bare
+    count forces them to guess "the latest N", which double-counts bars_held when a
+    batch fills a gap. Use len() where only the count matters.
 
     `prefiltered` lets a caller that already called filter_tradeable_bars() reuse the
     result (routers/chart.py needs the same list to update the in-memory cache).
@@ -1090,7 +1096,7 @@ def persist_closed_bars(
     """
     closed = prefiltered if prefiltered is not None else filter_tradeable_bars(db, symbol, interval, bars)
     if not closed:
-        return 0
+        return []
 
     existing = {
         row[0]
@@ -1102,7 +1108,7 @@ def persist_closed_bars(
         )
         .all()
     }
-    new_count = 0
+    inserted: list[int] = []
     for b in closed:
         if b["t"] in existing:
             continue
@@ -1112,10 +1118,11 @@ def persist_closed_bars(
                 o=b["o"], h=b["h"], l=b["l"], c=b["c"], v=b.get("v", 0),
             )
         )
-        new_count += 1
-    if new_count:
+        inserted.append(b["t"])
+    if inserted:
         db.commit()
-    return new_count
+    inserted.sort()
+    return inserted
 
 
 def cleanup_old_m1(db, retention_days: int) -> int:

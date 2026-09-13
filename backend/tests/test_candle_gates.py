@@ -241,14 +241,19 @@ def test_filter_both_splits_forming_from_closed(db_session):
     assert cs.filter_tradeable_bars_both(db_session, "BTCUSD", "5", []) == ([], [])
 
 
-def test_persist_skips_existing_and_reports_new_count(db_session):
+def test_persist_skips_existing_and_reports_new_timestamps(db_session):
+    """返回的是新写入那几根的时间戳（升序），不是行数。
+
+    策略判定要按"这一批到底哪几根是新的"逐根跑；只给个数的话，补空洞的批次里
+    调用方只能猜"最新 N 根"，会把早就判过的老 bar 重复计入 bars_held。
+    """
     bars = _walk(WED, 3, 60)
     _seed(db_session, "1", bars[:1])
-    assert cs.persist_closed_bars(db_session, SYM, "1", bars) == 2
-    assert cs.persist_closed_bars(db_session, SYM, "1", bars) == 0
+    assert cs.persist_closed_bars(db_session, SYM, "1", bars) == [b["t"] for b in bars[1:]]
+    assert cs.persist_closed_bars(db_session, SYM, "1", bars) == []
     assert db_session.query(Candle).filter_by(symbol=SYM, interval="1").count() == 3
     # prefiltered 直接落库，不再过闸门 / prefiltered bypasses the gates
-    assert cs.persist_closed_bars(db_session, SYM, "1", [], prefiltered=[_bar(WED + 999)]) == 1
+    assert cs.persist_closed_bars(db_session, SYM, "1", [], prefiltered=[_bar(WED + 999)]) == [WED + 999]
 
 
 def test_cleanup_old_m1_touches_only_old_minute_bars(db_session):

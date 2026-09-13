@@ -142,7 +142,7 @@ def _has_pending(db, strategy_id: str) -> bool:
     )
 
 
-def _evaluate_sync(symbol: str, interval: str) -> list[tuple]:
+def _evaluate_sync(symbol: str, interval: str, new_ts: list[int] | None = None) -> list[tuple]:
     """同步评估段：判定 + 开仓 + 一次提交，返回待推送列表。
 
     与推送分开是为了让整段阻塞工作能整体丢进线程池，同时把 async 的推送留在
@@ -203,9 +203,51 @@ def _evaluate_sync(symbol: str, interval: str) -> list[tuple]:
         # Resolution runs first and regardless of candidates: already-fired
         # signals must keep being tracked even if their strategy was disabled
         # since.
-        resolve_strategy_signals(db, symbol, interval, last_bar)
+        #
+        # **本批每一根新收盘 K 线各判一次**，不是只判最新那根。一次喂价可以补进
+        # 多根（EA 断线重连后的 backfill 就是），只拿 bars[-1] 判会有三个后果：
+        # 中间那些 bar 的 TP/SL 命中被整段漏判；bars_held 一批只加 1，超时出场
+        # 因此系统性延后；而且三者都不报错，只是数字悄悄不对。
+        # 按 new_ts（本批真正新写入的那些时间戳）取，而不是"最新 N 根"——补空洞
+        # 的批次里后者会把早就判过的老 bar 重复计入 bars_held，反而提前 TIMEOUT。
+        # new_ts 为 None 时退回旧行为（只判最新一根），供测试与其它调用方使用。
+        #
+        # Resolve once per bar newly closed in this batch, not just the latest.
+        # One feed can add several (an EA reconnect backfill does), and using only
+        # bars[-1] silently drops intermediate TP/SL hits and under-counts
+        # bars_held, delaying timeout exits. Driven by new_ts — the timestamps
+        # actually inserted — rather than "the last N bars", which would
+        # double-count bars_held when a batch fills a gap.
+        if new_ts:
+            fresh = set(new_ts)
+            resolve_bars = [b for b in bars if b["t"] in fresh]
+        else:
+            resolve_bars = [last_bar]
+        for i, rb in enumerate(resolve_bars):
+            if i:
+                # 上一根刚判出结果的信号必须先 flush，否则下一根的 PENDING 查询
+                # 还会把它捞回来（SessionLocal 是 autoflush=False，改动没落到库里，
+                # 而 SQL 的 result='PENDING' 仍然命中那一行），于是 bars_held 多加
+                # 一次、甚至被重新判定一遍。单根的老路径不受影响。
+                # Flush between bars: with autoflush off, a signal resolved on the
+                # previous bar would still match the next bar's PENDING query and
+                # get counted — and re-resolved — a second time.
+                db.flush()
+            resolve_strategy_signals(db, symbol, interval, rb)
 
         if not candidates:
+            db.commit()
+            return pushes
+
+        # 开仓只在最新那根上判，哪怕本批补进了多根。策略信号的语义是"现在按这个
+        # 价位进场"，给几十分钟前的历史 bar 补发信号既会用过时的入场价，又会给
+        # 用户推一串过期通知——这正是 history 模式刻意不触发本函数的同一个理由。
+        # 若本批新写入的都是空洞里的老 bar（最新那根不是新的），那就只判定、不开仓。
+        # Entries are only evaluated on the newest bar even when several arrived.
+        # Back-filling signals onto bars from an hour ago would use stale entry
+        # prices and push a burst of expired notifications — the same reason the
+        # history feed mode deliberately skips this function altogether.
+        if new_ts and last_bar["t"] not in fresh:
             db.commit()
             return pushes
 
@@ -287,8 +329,13 @@ def _evaluate_sync(symbol: str, interval: str) -> list[tuple]:
     return pushes
 
 
-async def evaluate_new_candle(symbol: str, interval: str) -> None:
-    """某 (品种, 周期) 刚有一根 K 线收盘时调用。
+async def evaluate_new_candle(
+    symbol: str, interval: str, new_ts: list[int] | None = None
+) -> None:
+    """某 (品种, 周期) 刚有 K 线收盘时调用。
+
+    `new_ts` 是本批真正新写入库的那些 bar 时间戳（persist_closed_bars 的返回值）。
+    判定会对其中每一根各跑一次；开仓仍只在最新那根上判。省略则退回"只判最新一根"。
 
     同步段走 run_in_threadpool——整段工作是同步 SQLAlchemy 查询 + 纯 Python
     指标循环，留在事件循环里会拖住 WebSocket 推送与桥接轮询（生产是 2 核单
@@ -303,7 +350,7 @@ async def evaluate_new_candle(symbol: str, interval: str) -> None:
     """
     from starlette.concurrency import run_in_threadpool
 
-    pushes = await run_in_threadpool(_evaluate_sync, symbol, interval)
+    pushes = await run_in_threadpool(_evaluate_sync, symbol, interval, new_ts)
 
     # 推送在提交之后：推送失败不该回滚已落库的信号（用户仍能在列表里看到它）。
     # Pushes come after the commit: a failed push must not roll back a stored

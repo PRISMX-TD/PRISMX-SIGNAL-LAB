@@ -298,7 +298,7 @@ def _feed_lock(key: tuple[str, str]) -> asyncio.Lock:
     return lock
 
 
-def _persist_history_sync(db: Session, symbol: str, interval: str, bars: list[dict]) -> int:
+def _persist_history_sync(db: Session, symbol: str, interval: str, bars: list[dict]) -> list[int]:
     """history 批次落库：不带 prefiltered，闸门由 persist_closed_bars 内部自行跑。
     整段是同步 SQLAlchemy（两次闸门查库 + 一次存在性查询 + 一次 commit）。
     History batch persist; the gates run inside persist_closed_bars itself."""
@@ -307,7 +307,7 @@ def _persist_history_sync(db: Session, symbol: str, interval: str, bars: list[di
 
 def _persist_live_sync(
     db: Session, symbol: str, interval: str, bars: list[dict], tradeable: list[dict]
-) -> int:
+) -> list[int]:
     """实时批次落库。**必须**带 prefiltered=tradeable。
 
     不带的话 persist_closed_bars 会把休市/停滞/重放三道闸门重跑一遍，等于每次
@@ -388,12 +388,12 @@ async def feed_candles(
         if req.mode == "history":
             bars = _apply_cached_skew(bars, (symbol, s.interval), interval_seconds)
             async with _feed_lock((symbol, s.interval)):
-                new_count = await run_in_threadpool(
+                new_ts = await run_in_threadpool(
                     _persist_history_sync, db, symbol, s.interval, bars
                 )
             logger.info(
                 "feed_candles: %s/%s history batch stored %d/%d bar(s)",
-                symbol, s.interval, new_count, len(bars),
+                symbol, s.interval, len(new_ts), len(bars),
             )
             continue
         bars, skew, is_new_regime = _correct_future_skew(bars, now, (symbol, s.interval), interval_seconds)
@@ -469,10 +469,10 @@ async def feed_candles(
                     chart_store.replace_series(symbol, s.interval, cacheable)
             else:
                 chart_store.merge_bars(symbol, s.interval, cacheable)
-            new_count = await run_in_threadpool(
+            new_ts = await run_in_threadpool(
                 _persist_live_sync, db, symbol, s.interval, bars, tradeable
             )
-        if new_count:
+        if new_ts:
             # 策略评估是同步 SQLAlchemy + 纯 Python 指标循环：留在事件循环里会
             # 拖住 WebSocket 推送与桥接轮询（生产 2 核单进程）。推送部分本身是
             # 异步的，由 live 内部在提交之后自行 await（见 strategy/live.py）。
@@ -481,7 +481,7 @@ async def feed_candles(
             # pushes and bridge polling it shares (2 cores, single process in
             # production). The push half is async and awaited inside live after
             # the commit.
-            await strategy_live.evaluate_new_candle(symbol, s.interval)
+            await strategy_live.evaluate_new_candle(symbol, s.interval, new_ts)
     return {"ok": True}
 
 

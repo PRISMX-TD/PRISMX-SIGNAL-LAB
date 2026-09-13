@@ -489,6 +489,72 @@ def test_live_evaluation_emits_signal_once_and_resolves(monkeypatch, db_session)
     assert db_session.query(StrategySignal).one().result == "HIT_TP"
 
 
+def test_batch_backfill_resolves_every_new_bar(monkeypatch, db_session):
+    """一次喂价补进多根时，中间那些 bar 也必须各判一次。
+
+    回归：以前只拿 bars[-1] 判，于是中间 bar 的止盈止损命中被整段漏掉，
+    bars_held 一批只加 1、超时出场因此系统性延后。EA 断线重连后的 backfill
+    就是最容易触发的场景，而三个后果都不报错，只是数字悄悄不对。
+    """
+    from sqlalchemy.orm import sessionmaker
+    monkeypatch.setattr(live, "SessionLocal", sessionmaker(bind=db_session.get_bind(), autoflush=False))
+    u = _user(db_session)
+    s = _strategy(db_session, u, _rules("ma.rising"))
+    base = 1_700_000_000
+    for i in range(5):  # _evaluate_sync 要求至少 5 根
+        db_session.add(Candle(symbol="XAUUSD", interval="60", t=base + i * 3600,
+                              o=100, h=100.5, l=99.5, c=100, v=1))
+    db_session.add(StrategySignal(strategy_id=s.id, user_id=u.id, symbol="XAUUSD", interval="60",
+                                  side="BUY", entry=100, stop_loss=90, take_profit=105, bar_t=base))
+    db_session.commit()
+
+    live._evaluate_sync("XAUUSD", "60", [base + 4 * 3600])   # 首次观测只记基线
+    db_session.expire_all()
+    assert db_session.query(StrategySignal).one().result == "PENDING"
+
+    # 补进三根：止盈落在**中间**那根，最后一根又缩回去
+    new_ts = []
+    for i, hi in enumerate((101.0, 106.0, 101.0), start=5):
+        t = base + i * 3600
+        db_session.add(Candle(symbol="XAUUSD", interval="60", t=t, o=100, h=hi, l=99.5, c=100, v=1))
+        new_ts.append(t)
+    db_session.commit()
+
+    live._evaluate_sync("XAUUSD", "60", new_ts)
+    db_session.expire_all()
+    got = db_session.query(StrategySignal).one()
+    assert got.result == "HIT_TP"   # 只判最后一根的话这里会停在 PENDING
+    assert got.bars_held == 3       # 首次观测 1 根 + 本批走到命中那根为止 2 根
+
+
+def test_batch_backfill_of_old_bars_does_not_open_new_positions(monkeypatch, db_session):
+    """本批新写入的若都是空洞里的老 bar（最新那根不是新的），只判定、不开仓。
+
+    策略信号的语义是"现在按这个价位进场"。给几十分钟前的历史 bar 补发信号既会
+    用过时的入场价，又会推一串过期通知 —— 这与 history 喂价模式刻意不触发策略
+    求值是同一个理由。
+    """
+    from sqlalchemy.orm import sessionmaker
+    monkeypatch.setattr(live, "SessionLocal", sessionmaker(bind=db_session.get_bind(), autoflush=False))
+    u = _user(db_session)
+    _strategy(db_session, u, _rules("ma.price_cross_above", {"period": 5}),
+              stop_loss_method="percent", stop_loss_value=1.0,
+              take_profit_method="rr", take_profit_value=1.0)
+    bars = _cross_bars(n_flat=30, jump=10.0)   # 最后一根上穿，本会触发
+    for b in bars:
+        db_session.add(Candle(symbol="XAUUSD", interval="60", t=b["t"], o=b["o"],
+                              h=b["h"], l=b["l"], c=b["c"], v=1))
+    db_session.commit()
+
+    # 谎称"本批新写入的是更早的一根"，最新那根不在其中
+    assert live._evaluate_sync("XAUUSD", "60", [bars[3]["t"]]) == []
+    db_session.expire_all()
+    assert db_session.query(StrategySignal).count() == 0
+
+    # 最新那根确实是新的时候照常开仓
+    assert len(live._evaluate_sync("XAUUSD", "60", [bars[-1]["t"]])) == 1
+
+
 def test_resolve_strategy_signals_timeout_needs_a_prior_observation(db_session):
     u = _user(db_session)
     s = _strategy(db_session, u, _rules("ma.rising"), exit_timeout_bars=2)
