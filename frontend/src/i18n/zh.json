@@ -564,7 +564,8 @@
     "notifStateLocked": "PRO 专属",
     "notifWindowAllDay": "全天",
     "statsPublic": "公开交易画像",
-    "statsPublicDesc": "允许别人在你的主页看到综合胜率与考核笔数"
+    "statsPublicDesc": "允许别人在你的主页看到综合胜率与考核笔数",
+    "notifDeviceFailed": "已开启。但这台设备暂时连不上推送服务器，后台通知可能收不到；连上后会自动恢复。"
   },
   "charts": {
     "footer": "UTC+8 · 数据源自平台自有喂价，仅供参考",

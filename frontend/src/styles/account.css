@@ -341,6 +341,11 @@
 .acct-msg.err {
   color: var(--down);
 }
+/* 既不是成功也不是失败：开是开了，但这台设备可能收不到后台通知。
+   用中间色（--mid）而不是红色——它不是一次失败，红色会让人以为没开成。 */
+.acct-msg.warn {
+  color: var(--mid);
+}
 
 /* 开关行 / switch rows */
 .acct-settings {

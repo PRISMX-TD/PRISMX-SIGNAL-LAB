@@ -7,6 +7,7 @@
 // out here so the two don't drift.
 import { notificationApi, pushApi } from "../api/client"
 import { subscribePush, unsubscribePush, getSWReg, pushSupported } from "./push"
+import { recordDiag } from "./pushDiag"
 
 // 白名单哨兵值：不限（命中任意取值，含以后才出现的品种）。与后端
 // push_dispatch.py 的 ALL_SENTINEL 保持一致。
@@ -104,7 +105,7 @@ export async function disableNotifications(): Promise<void> {
  */
 export async function enableNotifications(
   getCurrent: () => Promise<Pick<NotifPrefs, "selected_categories" | "selected_symbols" | "event_types">>,
-): Promise<{ cats: string[]; syms: string[]; events: string[] }> {
+): Promise<{ cats: string[]; syms: string[]; events: string[]; deviceSubscribed: boolean }> {
   if (!pushSupported()) throw new NotifEnableError("unsupported")
   if (Notification.permission === "default") {
     const granted = await Notification.requestPermission()
@@ -142,15 +143,34 @@ export async function enableNotifications(
   // strategy_signal, and the full set mirrors the backend's NULL default.
   const events = current.event_types?.length > 0 ? current.event_types : [...EVENT_TYPES]
 
+  // 落库与"给这台设备建订阅"是两件事，成败必须分开报。
+  //
+  // 此前两者一起 await：订阅失败（拿不到推送通道）会让整个开启流程抛错，调用方把开关
+  // 弹回「关」并显示一句红色的失败 —— 而偏好其实**已经落库成功**，服务端记的是「开」。
+  // 于是开关显示「关」、刷新一次又变回「开」，用户看到的是一个自相矛盾的界面；
+  // 更糟的是在拿不到 Google 推送通道的网络里（中国大陆），这条路上通知**其实是通的**
+  // （App 会走后台长连接兜底），却被一句"开启失败"劝退。
+  //
+  // 现在：落库失败照旧抛（那才是真的没开成），订阅失败只报一个标志位，由调用方决定
+  // 怎么说。**不吞掉、不假装成功**——调用方拿到 deviceSubscribed=false 必须如实告诉用户
+  // 这台设备可能收不到后台通知。
   const vapidPromise = pushApi.getVapidKey()
-  await Promise.all([
-    notificationApi.putPrefs(true, cats, events, syms),
-    (async () => {
+  let deviceSubscribed = true
+  const subscribeThisDevice = async () => {
+    try {
       const [vapid] = await Promise.all([vapidPromise, getSWReg()])
       const sub = await subscribePush(vapid.publicKey)
       if (sub) await pushApi.subscribe(sub.endpoint, sub.keys)
-    })(),
+      else deviceSubscribed = false
+    } catch (err) {
+      deviceSubscribed = false
+      recordDiag("subscribe", err)
+    }
+  }
+  await Promise.all([
+    notificationApi.putPrefs(true, cats, events, syms),
+    subscribeThisDevice(),
   ])
 
-  return { cats, syms, events }
+  return { cats, syms, events, deviceSubscribed }
 }

@@ -564,7 +564,8 @@
     "notifStateLocked": "PRO only",
     "notifWindowAllDay": "All day",
     "statsPublic": "Show trading stats publicly",
-    "statsPublicDesc": "Let others see your win rate and trade count on your profile"
+    "statsPublicDesc": "Let others see your win rate and trade count on your profile",
+    "notifDeviceFailed": "Enabled. This device cannot reach the push server right now, so background notifications may not arrive; it recovers automatically once it can."
   },
   "charts": {
     "footer": "UTC+8 · Data from platform feed, for reference only",

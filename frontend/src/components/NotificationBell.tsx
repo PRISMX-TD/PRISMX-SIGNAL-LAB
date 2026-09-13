@@ -49,6 +49,8 @@ export default function NotificationBell() {
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  // 与 err 分开：这一条不是失败，是"开了，但这台设备可能收不到后台通知"。
+  const [note, setNote] = useState<string | null>(null)
   const [anns, setAnns] = useState<Announcement[] | null>(null)
   const [unread, setUnread] = useState(0)
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -101,6 +103,7 @@ export default function NotificationBell() {
 
   async function handleToggle(on: boolean) {
     setErr(null)
+    setNote(null)
     setBusy(true)
     try {
       if (!on) {
@@ -116,7 +119,7 @@ export default function NotificationBell() {
         // whatever filters the user already picked. This fetch must happen
         // inside enableNotifications, after the permission request; an await
         // before it keeps iOS Safari from showing the permission sheet at all.
-        await enableNotifications(() =>
+        const r = await enableNotifications(() =>
           notificationApi.getPrefs().then((prefs) => ({
             selected_categories: prefs.selected_categories,
             selected_symbols: prefs.selected_symbols,
@@ -124,6 +127,11 @@ export default function NotificationBell() {
           })),
         )
         setEnabled(true)
+        // 偏好已经落库=账号层面确实开了，开关就该是「开」。这台设备没能建起推送订阅
+        // 是另一件事，如实说一句，但不能把开关弹回「关」——弹回去会和服务端状态对不上，
+        // 刷新一次又变回「开」；而在拿不到 Google 推送通道的网络里（中国大陆），
+        // 通知其实是通的（App 走后台长连接兜底），一句"开启失败"会白白把人劝退。
+        if (!r.deviceSubscribed) setNote(t("account.notifDeviceFailed"))
       }
     } catch (e: unknown) {
       setEnabled(!on)
@@ -220,6 +228,7 @@ export default function NotificationBell() {
             </div>
             {status === "attention" && <p className="warn">{t(hintKey ?? "account.notifUnsupported")}</p>}
             {err && <p className="err">{err}</p>}
+            {note && <p className="warn">{note}</p>}
           </section>
         </div>
       )}

@@ -81,7 +81,7 @@ export default function AccountPage() {
   const [notifWinOn, setNotifWinOn] = useState(false)
   const [notifWinStart, setNotifWinStart] = useState("08:00")
   const [notifWinEnd, setNotifWinEnd] = useState("22:00")
-  const [notifMsg, setNotifMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
+  const [notifMsg, setNotifMsg] = useState<{ kind: "ok" | "err" | "warn"; text: string } | null>(null)
   const [notifLoading, setNotifLoading] = useState(false)
   const hintKey = PUSH_ENV_HINT_KEYS[detectPushEnv()]
   // 分类/品种/事件/时段偏好防抖落库 / debounce saving category, symbol, event & window prefs
@@ -292,7 +292,7 @@ export default function AccountPage() {
     // Turn on: after permission, flip optimistically; run prefs save + push subscription in parallel.
     setNotifLoading(true)
     try {
-      const { cats, syms, events } = await enableNotifications(() =>
+      const { cats, syms, events, deviceSubscribed } = await enableNotifications(() =>
         Promise.resolve({
           selected_categories: notifCats,
           selected_symbols: notifSymbols,
@@ -303,6 +303,11 @@ export default function AccountPage() {
       setNotifCats(cats)
       setNotifSymbols(syms)
       setNotifEvents(events)
+      // 偏好落库成功 = 账号层面确实开了，开关就该留在「开」。这台设备没能建起推送订阅
+      // 是另一件事：如实说一句，但不回滚开关——回滚会和服务端状态对不上（刷新一次又变
+      // 回「开」），而在拿不到 Google 推送通道的网络里通知其实是通的（App 走后台长连接
+      // 兜底），一句"开启失败"会白白把人劝退。
+      if (!deviceSubscribed) setNotifMsg({ kind: "warn", text: t("account.notifDeviceFailed") })
     } catch (err: unknown) {
       // 失败回滚开关 / roll back the switch on failure
       setNotifEnabled(false)
