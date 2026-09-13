@@ -4,3 +4,15 @@
 *.sh text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+# Python 源码一律按文本处理，行尾在库里归一为 LF。
+# 显式声明是必需的，不能依赖 git 的自动判定：它的二进制启发式会把
+# "非 ASCII 字节数 > 可打印字节数/128" 的文件判成 binary，而本仓库的注释是
+# 中英双语、中文密度高——routers/gateway.py 就恰好越过了那条线，长期被当成
+# 二进制文件：不做行尾归一（库里存的是 CRLF，其余 .py 都是 LF）、diff 不可读、
+# blame 与合并也都失效。加一行英文注释就可能让判定翻回来，于是同一个文件时而
+# 文本时而二进制，改动量看着毫无道理。
+# Force text handling for Python sources. Git's binary heuristic flags files
+# whose non-ASCII byte count exceeds printable/128 — dense Chinese comments push
+# routers/gateway.py over that line, so it was stored unnormalised and diffed as
+# binary. Explicit attribute, not auto-detection.
+*.py text

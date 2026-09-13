@@ -1159,7 +1159,7 @@ async def gateway_positions_loop() -> None:
                 # channel is inherently verifiable (history straight from the
                 # broker's Manager API, attribution done above), hence verified=True.
                 if upsert_leg(db, user_id, login, leg, True) in ("inserted", "enriched"):
-                    inserted += 1
+                    inserted += 1
         finally:
             db.close()
         return inserted
