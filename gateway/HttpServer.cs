@@ -184,6 +184,14 @@ namespace Prismx.Mt5Gateway
                     // from this. False isn't a fault — it's the pre-change polling pace.
                     .Field("dealSubscribed", _link.DealSubscribed)
                     .Field("dealEventBacklog", (uint)_link.DealEventBacklog)
+                    // 服务器推过来的持仓 UPDATE 事件数。平仓/改单先读本地 pump 快照,
+                    // 这个数一直是 0 就说明快照跟不上部分平仓/改 SL·TP,只能靠手数被拒后
+                    // 的服务器重读兜底(见 Mt5Link.ClosePosition)。
+                    // Count of position UPDATE events pushed by the server. Close/modify
+                    // read the local pump snapshot first; a permanent 0 here means the
+                    // snapshot cannot track partial closes / SL·TP edits and the
+                    // server-reread fallback in ClosePosition is what keeps closes working.
+                    .Field("positionUpdateEvents", (uint)_link.PositionUpdateEvents)
                  .EndObject();
                 // 这里刻意不报 server 与 managerLogin。/health 是唯一不鉴权的接口,
                 // 而那两个字段恰好是攻击 manager 账号所需的两个前提(接入地址 + 登录号),
@@ -700,8 +708,13 @@ namespace Prismx.Mt5Gateway
                 TradeResult r = _link.OpenPosition(login, symbol, side == "BUY", volume,
                     stopLoss, takeProfit, tag);
 
-                Log.Info("开仓 login={0} {1} {2} {3} 手 -> {4} {5}",
-                    login, symbol, side, volume, r.Ok ? "成交" : "失败", r.Retcode);
+                // 两个耗时并排打:总耗时减 dealer 等待就是网关自己花的时间(取价、
+                // 反查、核对),一眼能看出"慢"在哪一侧。
+                // Both timings side by side: total minus dealer wait is the gateway's
+                // own share (quote, lookups), so the log shows which side is slow.
+                Log.Info("开仓 login={0} {1} {2} {3} 手 -> {4} {5} 耗时 {6}ms(其中 dealer {7}ms)",
+                    login, symbol, side, volume, r.Ok ? "成交" : "失败", r.Retcode,
+                    r.ElapsedMs, r.DealerMs);
 
                 return r;
             });
@@ -733,8 +746,8 @@ namespace Prismx.Mt5Gateway
             {
                 TradeResult r = _link.ClosePosition(login, ticket, closeVolume, closeTag);
 
-                Log.Info("平仓 login={0} ticket={1} -> {2} {3}",
-                    login, ticket, r.Ok ? "成交" : "失败", r.Retcode);
+                Log.Info("平仓 login={0} ticket={1} -> {2} {3} 耗时 {4}ms(其中 dealer {5}ms)",
+                    login, ticket, r.Ok ? "成交" : "失败", r.Retcode, r.ElapsedMs, r.DealerMs);
 
                 return r;
             });
@@ -760,9 +773,9 @@ namespace Prismx.Mt5Gateway
             TradeResult r = _link.ModifyPosition(login, ticket,
                 body.GetDouble("stopLoss"), body.GetDouble("takeProfit"));
 
-            Log.Info("改单 login={0} ticket={1} SL={2} TP={3} -> {4} {5}",
+            Log.Info("改单 login={0} ticket={1} SL={2} TP={3} -> {4} {5} 耗时 {6}ms(其中 dealer {7}ms)",
                 login, ticket, body.GetDouble("stopLoss"), body.GetDouble("takeProfit"),
-                r.Ok ? "成功" : "失败", r.Retcode);
+                r.Ok ? "成功" : "失败", r.Retcode, r.ElapsedMs, r.DealerMs);
 
             // 改单天然幂等(同样的 SL/TP 设两次结果一样),不走缓存。
             // Modify is naturally idempotent; no cache needed.
@@ -815,6 +828,14 @@ namespace Prismx.Mt5Gateway
                 // 这次回复是不是同一 clientOrderId 的缓存回放(见 ExecuteIdempotent)。
                 // Whether this is a replay for a previously seen clientOrderId.
                 .Field("replayed", replayed)
+                // 耗时(毫秒):网关这一侧的总耗时,以及其中等券商 dealer 回执的部分。
+                // 后端把它们记进日志,"下单慢"就能拆成网关内 / 券商侧两段看。回放的
+                // 缓存结果带的是首次执行时的数字。
+                // Timings in ms: the gateway's total and the dealer wait within it, so
+                // the backend can split "slow orders" into gateway vs broker. A replayed
+                // result carries the numbers from the original execution.
+                .Field("elapsedMs", (ulong)Math.Max(0, r.ElapsedMs))
+                .Field("dealerMs", (ulong)Math.Max(0, r.DealerMs))
              .EndObject();
 
             // 交易被拒是业务结果而非服务故障,统一用 200 返回,

@@ -38,6 +38,15 @@ namespace Prismx.Mt5Gateway
         // 成交回执等待上限
         public int DealerTimeoutMs = 60000;
 
+        // 启动与重连后立即选中的品种(券商真实品种名,含后缀)。Manager 只收"已选中"
+        // 品种的行情,没选中的品种第一笔单要先选中再等首个 tick 推过来;这里点名的
+        // 品种把这一步提前到启动时做。留空 = 不预选,只靠下过单的品种自动记住。
+        // Symbols selected right after connect/reconnect (broker names, suffix
+        // included). The manager only receives ticks for selected symbols, so the
+        // first order on an unselected symbol waits for its first tick; listing them
+        // here moves that wait to startup. Empty = rely on remembering traded symbols.
+        public List<string> PreselectSymbols = new List<string>();
+
         // 下单时写入 comment 的前缀。Manager API 没有 magic 字段,
         // 只能靠 comment 认"哪些仓位是本平台开的"。
         public string CommentPrefix = "PRISMX";
@@ -100,6 +109,15 @@ namespace Prismx.Mt5Gateway
                         break;
                     case "comment_prefix":
                         cfg.CommentPrefix = val;
+                        break;
+                    case "preselect_symbols":
+                        cfg.PreselectSymbols.Clear();
+                        foreach (string s in val.Split(','))
+                        {
+                            string t = s.Trim();
+                            if (t.Length > 0)
+                                cfg.PreselectSymbols.Add(t);
+                        }
                         break;
                 }
             }

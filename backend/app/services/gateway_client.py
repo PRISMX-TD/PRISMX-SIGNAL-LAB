@@ -113,6 +113,12 @@ class TradeRsp:
     # Transport-level error class from _post; "timeout" means the gateway may have
     # executed the request, so the caller must re-ask with the same clientOrderId.
     error: str = ""
+    # 网关侧耗时（毫秒）：整个开仓/平仓调用，以及其中等券商 dealer 回执的部分。
+    # 2026-09-14 起网关随回执返回；只进日志，不落库。旧网关没有这两个字段，缺省 0。
+    # Gateway-side timings in ms: the whole call and the dealer wait within it.
+    # Returned by the gateway since 2026-09-14; logged only. Older gateways omit them.
+    elapsed_ms: int = 0
+    dealer_ms: int = 0
 
 
 @dataclass
@@ -518,6 +524,8 @@ def _trade_rsp(data: dict) -> TradeRsp:
         position=data.get("position", 0) or 0,
         replayed=bool(data.get("replayed", False)),
         error=str(data.get("error", "") or ""),
+        elapsed_ms=int(data.get("elapsedMs", 0) or 0),
+        dealer_ms=int(data.get("dealerMs", 0) or 0),
     )
 
 

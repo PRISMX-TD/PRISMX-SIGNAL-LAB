@@ -225,10 +225,15 @@ def try_gateway_execute(db: Session, order: Order) -> dict | None:
         db.commit()
         db.refresh(order)
 
+        # 网关耗时并排打出来（gateway_ms 是网关侧总耗时，dealer_ms 是其中等券商回执
+        # 的部分）：用户说"下单慢"时，这一行就能分出是网关内部慢还是券商 dealer 慢。
+        # 后端自己这一段（落库、HTTP 往返）的耗时看 uvicorn 访问日志里同一请求的时长。
+        # Gateway timings side by side (gateway_ms = gateway total, dealer_ms = broker
+        # wait within it) so a slow-order report can be split gateway vs broker.
         logger.info(
-            "Gateway 执行完成: %s %s mt5=%s -> %s deal=%s order=%s",
+            "Gateway 执行完成: %s %s mt5=%s -> %s deal=%s order=%s gateway_ms=%s dealer_ms=%s",
             order.action, order.client_order_id, order.mt5_login,
-            order.status, rsp.deal, rsp.order,
+            order.status, rsp.deal, rsp.order, rsp.elapsed_ms, rsp.dealer_ms,
         )
         return order_update_payload(order)
 
