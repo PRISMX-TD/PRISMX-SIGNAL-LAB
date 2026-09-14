@@ -2618,5 +2618,41 @@
     "windowDays": "Last {{n}} days",
     "statsPrivateSelf": "Only you can see this; not public",
     "viewMine": "View my public profile"
+  },
+  "cashflowRules": {
+    "title": "How deposits and withdrawals count",
+    "hint": "Withdrawing never erases what you earned; depositing can't inflate your rank",
+    "lead": "Return = profit ÷ how much was in the account at the time. Every trade is scored on its own, against the capital in the account while that trade was open — not the balance at the start or end of the period.",
+    "formula": "A trade's capital = the larger of what was in the account when it opened and when it closed",
+    "case1": {
+      "t": "Earn, then withdraw",
+      "s": "10,000 capital → earn 1,000 → withdraw 9,000",
+      "r": "10%",
+      "w": "The account held 10,000 while trading; the withdrawal came later and doesn't touch a finished result."
+    },
+    "case2": {
+      "t": "Withdraw, then trade",
+      "s": "10,000 → withdraw 8,000, 2,000 left → earn 500",
+      "r": "25%",
+      "w": "The money you took out never backed this trade, so it isn't used as a denominator to hold you down."
+    },
+    "case3": {
+      "t": "Withdraw while a position is open",
+      "s": "10,000 at open → withdraw 9,000 → close for 500",
+      "r": "5%",
+      "w": "Scored on the 10,000 it opened with — the larger moment wins, so moving money mid-trade changes nothing."
+    },
+    "case4": {
+      "t": "Deposit while a position is open",
+      "s": "1,000 at open → top up to 10,000 → close for 500",
+      "r": "5%",
+      "w": "Scored on the 10,000 it closed with — the larger moment again, so a deposit can't make the return look better."
+    },
+    "noteSmall": "Small drops aren't withdrawals: commission, swap and similar odds and ends are ignored. A drop counts as a withdrawal only when it exceeds both 100 USD and 5% of the account's capital.",
+    "noteFloor": "An account below {{usd}} USD of capital doesn't rank — this keeps figures like \"earned 500 on 300, up 167%\" off the board.",
+    "noteWinRate": "The win-rate board is unaffected by cash flows: it only counts how many trades you won and lost.",
+    "noteSealedBoard": "Once a period ends its results are sealed; no later deposit, withdrawal or trade can change a finished ranking.",
+    "noteSealedComp": "Once a competition ends, the settled result is final; later deposits, withdrawals and trades no longer move it.",
+    "noteNoFlow": "For accounts that never deposit or withdraw, the calculation is exactly what it always was."
   }
 }

@@ -23,6 +23,7 @@ import { useLive } from '../store/live'
 import { SkeletonPage } from '../components/Skeleton'
 import BadgeIcon from '../components/badges/BadgeIcon'
 import RankCoin from '../components/badges/RankCoin'
+import CashflowRules from '../components/CashflowRules'
 import type {
   CompetitionDetail,
   CompetitionTrack,
@@ -782,6 +783,12 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
             <li>{t('competition.rules.minSamples')}</li>
             <li>{t('competition.rules.final')}</li>
           </ul>
+          {/* 出入金计分说明（默认收起，与排行榜同一个组件）：本金门槛取本场榜负载里的
+              gates，不是全局设置——单场比赛可以覆盖它。
+              Same collapsed explainer as the leaderboard; the capital floor comes from
+              this competition's own board gates, since a competition may override the
+              global setting. */}
+          <CashflowRules minBaselineUsd={detail.board.gates.minBaselineUsd} variant="competition" />
         </main>
       </div>
 

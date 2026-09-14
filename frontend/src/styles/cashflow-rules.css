@@ -1,0 +1,153 @@
+/* ═══════ 出入金计分说明（components/CashflowRules.tsx）· 排行榜 / 比赛共用 ═══════
+   折叠头沿用 BindPage 桥接块那套（左边标题 + 一句提示，右边 32px 圆形箭头），
+   两处折叠块在同一套语言里，用户第二次见到就知道它能点开。
+   展开后是三段：一句核心规则 → 四个例子 → 几条补充。例子用发丝线分行而不是
+   四张小卡：它们是同一把尺上的四个读数，卡片会把它们读成四件独立的事。
+
+   Shared deposit/withdrawal explainer. The disclosure head reuses BindPage's
+   bridge pattern so the two read as one affordance. The body is rule → four
+   examples → notes; examples are hairline-separated rows, not four tiles, since
+   they are four readings on one scale rather than four separate things. */
+.cf-rules {
+  padding: 0;
+  overflow: hidden;
+}
+.cf-rules summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  cursor: pointer;
+  list-style: none;
+}
+.cf-rules summary::-webkit-details-marker {
+  display: none;
+}
+.cf-rules summary:hover {
+  background: var(--surface-2);
+}
+.cf-rules .t {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+.cf-rules[open] .t {
+  color: #fff;
+}
+.cf-rules .h {
+  display: block;
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.cf-rules .chev {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--line-hi);
+  color: var(--text-3);
+  transition: transform var(--dur-base) var(--ease-out),
+              background-color var(--dur-base) var(--ease-out),
+              color var(--dur-base) var(--ease-out);
+}
+.cf-rules[open] .chev {
+  transform: rotate(180deg);
+  background: var(--purple);
+  border-color: transparent;
+  color: #fff;
+}
+
+.cf-body {
+  border-top: 1px solid var(--line);
+  padding: 20px;
+}
+.cf-lead {
+  max-width: 62ch;
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--text-2);
+}
+/* 核心公式单独成条：这是整块唯一需要被记住的一句话，给它一条紫色左边界当锚点。
+   The one sentence worth remembering gets a violet rule as its anchor. */
+.cf-formula {
+  margin-top: 12px;
+  border-left: 2px solid var(--purple);
+  padding: 2px 0 2px 12px;
+  font-size: 13.5px;
+  line-height: 1.7;
+  font-weight: 600;
+  color: #fff;
+}
+
+.cf-cases {
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+.cf-cases li {
+  display: grid;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+  padding: 12px 0;
+}
+.cf-case-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+.cf-case-t {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.cf-case-r {
+  flex: none;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--up);
+}
+.cf-case-s,
+.cf-case-w {
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-3);
+}
+.cf-case-s {
+  color: var(--text-2);
+}
+
+.cf-notes {
+  margin: 18px 0 0;
+  padding: 0 0 0 16px;
+  list-style: disc;
+}
+.cf-notes li {
+  max-width: 74ch;
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--text-3);
+}
+
+@media (max-width: 640px) {
+  .cf-rules summary {
+    padding: 14px 16px;
+  }
+  .cf-body {
+    padding: 16px;
+  }
+  /* 手机端标题与百分比换行堆叠：两者挤在一行时长标题会被压成两行、把百分比
+     顶到孤立的一行，反而更乱。
+     On phones the label and figure stack: squeezing both onto one line wraps
+     the label and orphans the figure. */
+  .cf-case-head {
+    flex-wrap: wrap;
+    gap: 4px 10px;
+  }
+}

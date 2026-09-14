@@ -30,6 +30,7 @@ import { gamificationApi } from '../api/client'
 import { SkeletonBlock, SkeletonLine } from '../components/Skeleton'
 import BadgeIcon from '../components/badges/BadgeIcon'
 import RankCoin from '../components/badges/RankCoin'
+import CashflowRules from '../components/CashflowRules'
 import type { LeaderboardBoard, LeaderboardPayload, LeaderboardRow } from '../api/types'
 
 const BOARDS: LeaderboardBoard[] = ['return_pct', 'win_rate']
@@ -941,6 +942,15 @@ export default function LeaderboardPage() {
       ) : (
         <BoardSkeleton />
       )}
+
+      {/* 出入金计分说明（默认收起）。放在榜单之后而不是榜规芯片旁边：芯片那一行
+          是「入榜条件」的速查，这块是「我提了款成绩会怎样」的解释，两者节奏不同，
+          挤在页头会把本来一眼可扫的芯片行压成一段读物。
+          Collapsed cash-flow explainer, placed after the board rather than beside
+          the gate chips: the chip row is a scannable list of entry conditions,
+          this is an explanation, and folding it into the header would turn that
+          row into prose. */}
+      <CashflowRules minBaselineUsd={gates.minBaselineUsd} variant="board" />
     </div>
   )
 }

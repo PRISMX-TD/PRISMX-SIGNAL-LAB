@@ -17,6 +17,10 @@ RECONCILE_TOLERANCE = 0.01
 # Withdrawal threshold: a balance drop counts as a withdrawal only when it clears
 # both lines (the larger wins). Commission / swap / rebates are single- to
 # double-digit noise and stay ignored; a real withdrawal is hundreds and up.
+# 这两个数字在用户端是明写出来的（前端 i18n 的 cashflowRules.noteSmall，中英各一条，
+# 排行榜与比赛详情页的折叠说明里）——改这里要一并改那两条文案。
+# Both numbers are stated verbatim to users in the frontend i18n key
+# cashflowRules.noteSmall (zh + en); changing them here means changing that copy.
 WITHDRAWAL_MIN_ABS = 100.0
 WITHDRAWAL_MIN_FRAC = 0.05
 REAL = 2
