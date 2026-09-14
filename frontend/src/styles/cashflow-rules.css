@@ -151,3 +151,83 @@
     gap: 4px 10px;
   }
 }
+
+/* ── 安静版（.is-plain，比赛详情用）───────────────────────────────────────
+   比赛详情右栏的规则清单是 11.5px 灰字 + 发丝线，卡片形态在那里比周围重出一
+   个量级。这一档把面、圆钮、内边距全撤掉，只留一条上边线和一个小箭头，字号
+   往清单那边靠：它读起来是"规则的第四条，可以点开"，不是掉进去的另一个组件。
+   Quiet register for the competition detail's right column, whose rule list is
+   11.5px muted text on hairlines. Surface, round button and padding are dropped
+   for one top rule and a small caret, with type scaled toward that list: it
+   reads as a fourth, expandable rule rather than a foreign component. */
+.cf-rules.is-plain {
+  display: block;
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  background: none;
+  border-radius: 0;
+}
+.cf-rules.is-plain summary {
+  padding: 12px 0;
+  gap: 12px;
+}
+.cf-rules.is-plain summary:hover {
+  background: none;
+}
+.cf-rules.is-plain summary:hover .t {
+  color: #fff;
+}
+.cf-rules.is-plain .t {
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.cf-rules.is-plain .h {
+  margin-top: 2px;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.cf-rules.is-plain .chev {
+  width: 20px;
+  height: 20px;
+  border: 0;
+}
+.cf-rules.is-plain[open] .chev {
+  background: none;
+  color: var(--text-2);
+}
+.cf-rules.is-plain .cf-body {
+  border-top: 0;
+  padding: 0 0 4px;
+}
+.cf-rules.is-plain .cf-lead {
+  font-size: 12.5px;
+  line-height: 1.8;
+}
+.cf-rules.is-plain .cf-formula {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.cf-rules.is-plain .cf-cases {
+  margin-top: 16px;
+}
+.cf-rules.is-plain .cf-cases li {
+  padding: 10px 0;
+}
+.cf-rules.is-plain .cf-cases li:last-child {
+  border-bottom: 0;
+}
+.cf-rules.is-plain .cf-case-t {
+  font-size: 12.5px;
+}
+.cf-rules.is-plain .cf-case-r {
+  font-size: 13.5px;
+}
+.cf-rules.is-plain .cf-case-s,
+.cf-rules.is-plain .cf-case-w,
+.cf-rules.is-plain .cf-notes li {
+  font-size: 11.5px;
+}
+.cf-rules.is-plain .cf-notes {
+  margin-top: 14px;
+}

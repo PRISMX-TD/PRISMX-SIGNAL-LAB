@@ -41,21 +41,32 @@ export default function CashflowRules({
   variant,
 }: {
   minBaselineUsd: number
-  // 封存那一条两边说法不同：周期榜是"周期结束即封存"，比赛是"以终审结果为准"。
-  // The sealing note differs: a period seals itself, a competition settles.
+  // variant 管两件事：
+  //  ① 封存那一条的说法——周期榜是"周期结束即封存"，比赛是"以终审结果为准"；
+  //  ② 外观档位。排行榜上下都是卡片，这里也做成卡片才不突兀；比赛详情的右栏是
+  //     发丝线 + 11.5px 灰字的规则清单，一张实色卡加 32px 圆钮压在它下面像掉进去
+  //     的另一个组件，所以那边降成"规则清单的第四条可展开项"：无面、无边框，
+  //     只有一条上边线和一个小箭头，字号也跟着那份清单走。
+  // variant drives two things: the wording of the sealing note (a period seals
+  // itself, a competition settles), and the visual register. The leaderboard is
+  // surrounded by cards, so a card belongs there; the competition detail's right
+  // column is a hairline list of 11.5px muted rules, where a filled card with a
+  // 32px round button reads as a foreign object — there it degrades to a fourth,
+  // expandable item of that same list.
   variant: 'board' | 'competition'
 }) {
   const { t } = useTranslation()
+  const plain = variant === 'competition'
 
   return (
-    <details className="card glass cf-rules">
+    <details className={plain ? 'cf-rules is-plain' : 'card glass cf-rules'}>
       <summary>
         <span className="min-w-0">
           <span className="t">{t('cashflowRules.title')}</span>
           <span className="h">{t('cashflowRules.hint')}</span>
         </span>
         <span className="chev" aria-hidden="true">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width={plain ? 14 : 16} height={plain ? 14 : 16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="m6 9 6 6 6-6" />
           </svg>
         </span>
