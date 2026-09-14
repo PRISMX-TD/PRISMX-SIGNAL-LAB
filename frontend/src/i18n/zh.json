@@ -777,6 +777,9 @@
       "placeFailed": "下单失败",
       "points": "点",
       "spreadUnit": "点差",
+      "waitingFill": "等待券商回执",
+      "filledAt": "已成交 @ {{price}}",
+      "accepted": "已受理，等待桥接执行",
       "footnote": "市价单，经 PRISMX Bridge 送达 MT5，回执落在订单页。"
     },
     "account": {
@@ -826,6 +829,10 @@
       "cancelSent": "已撤销挂单",
       "cancelFailed": "撤销失败",
       "confirmCloseTitle": "全部平仓",
+      "closing": "平仓中",
+      "closed": "已平仓 @ {{price}}",
+      "partialClosed": "已平掉 {{lots}} 手 @ {{price}}",
+      "modified": "止损止盈已更新",
       "confirmCloseMsg": "确认平掉 {{symbol}} {{side}} {{volume}} 手？"
     }
   },
@@ -988,6 +995,9 @@
     "invalidVolume": "平仓手数无效",
     "clearHint": "0 = 清除",
     "closeAllConfirmTitle": "确认全部平仓",
+    "closed": "已平仓 @ {{price}}",
+    "closeFailed": "平仓失败",
+    "modified": "止损止盈已更新",
     "closeAllConfirm": "确认平掉 {{symbol}} 的全部 {{volume}} 手持仓？此操作不可撤销。"
   },
   "bind": {

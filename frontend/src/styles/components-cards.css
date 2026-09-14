@@ -1141,3 +1141,31 @@
     border-radius: var(--r-lg);
   }
 }
+
+/* 持仓卡「平仓中」：指令已被接受、等持仓推送把卡拿掉的这一两秒里，卡压暗、动作
+   禁用、顶边一道来回扫的细光。桌面卡与手机卡（.pos-mc）同一套。/ Position card
+   while a close is in flight: dimmed, inert, a sweeping hairline along the top
+   edge until the positions feed removes it. Shared by the desktop and phone cards. */
+.pos-card.closing,
+.pos-mc.closing {
+  position: relative;
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity 0.2s ease-out;
+}
+.pos-card.closing::after,
+.pos-mc.closing::after {
+  content: "";
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--mid), transparent) no-repeat;
+  background-size: 40% 100%;
+  animation: pos-closing-sweep 1.1s linear infinite;
+}
+@keyframes pos-closing-sweep { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .pos-card.closing::after, .pos-mc.closing::after { animation: none; }
+}

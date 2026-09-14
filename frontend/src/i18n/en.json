@@ -777,6 +777,9 @@
       "placeFailed": "Order failed",
       "points": "pts",
       "spreadUnit": "spread",
+      "waitingFill": "Waiting for the broker",
+      "filledAt": "Filled @ {{price}}",
+      "accepted": "Accepted, waiting for the bridge to execute",
       "footnote": "Market order, delivered to MT5 via PRISMX Bridge; the receipt lands on the Orders page."
     },
     "account": {
@@ -826,6 +829,10 @@
       "cancelSent": "Pending order cancelled",
       "cancelFailed": "Cancel failed",
       "confirmCloseTitle": "Close all",
+      "closing": "Closing",
+      "closed": "Closed @ {{price}}",
+      "partialClosed": "Closed {{lots}} lots @ {{price}}",
+      "modified": "SL/TP updated",
       "confirmCloseMsg": "Close {{symbol}} {{side}} {{volume}} lots?"
     }
   },
@@ -988,6 +995,9 @@
     "invalidVolume": "Invalid close volume",
     "clearHint": "0 = clear",
     "closeAllConfirmTitle": "Confirm close all",
+    "closed": "Closed @ {{price}}",
+    "closeFailed": "Close failed",
+    "modified": "SL/TP updated",
     "closeAllConfirm": "Close all {{volume}} lots of {{symbol}}? This cannot be undone."
   },
   "bind": {

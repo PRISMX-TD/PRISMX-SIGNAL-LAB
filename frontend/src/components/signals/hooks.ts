@@ -99,13 +99,17 @@ export function useOrderPlacement() {
       // API 错误向上抛给下单弹窗展示 / API errors propagate to the modal
       const placed = await orderApi.place(payload)
       refreshAll()
+      // 把回执原样交回调用方：图表页的下单票要按 FILLED / PENDING / REJECTED 在按钮
+      // 下面就地给出不同的回执（成交价、耗时），而不是只有一句"已提交"。
+      // Hand the receipt back to the caller: the charts ticket renders a
+      // status-specific inline receipt (fill price, elapsed) under the button.
       if (placed.status === 'FILLED') {
         showToast(t('order.filled', { price: placed.filledPrice ?? '-' }), 'success')
-        return
+        return placed
       }
       if (placed.status === 'REJECTED' || placed.status === 'FAILED') {
         showToast(t('order.rejected', { msg: placed.message ? localizeApiError(placed.message) : '-' }), 'error')
-        return
+        return placed
       }
       showToast(t('order.submitted'), 'info', 8000)
       pendingId.current = placed.id
@@ -116,6 +120,7 @@ export function useOrderPlacement() {
           showToast(t('order.ackTimeout'), 'info')
         }
       }, RECEIPT_FALLBACK_MS)
+      return placed
     },
     [refreshAll, showToast, t]
   )

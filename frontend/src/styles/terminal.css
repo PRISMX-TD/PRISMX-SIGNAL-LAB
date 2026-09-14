@@ -574,11 +574,49 @@
 .term-pa button.warn { color: var(--down); }
 .term-pa button.on { background: var(--purple); color: #fff; }
 .term-pa button:disabled { opacity: 0.4; cursor: not-allowed; }
+/* 平仓中：行压暗、动作换成一枚转圈的"平仓中"、底边一道来回扫的细光。点下去的
+   那一刻就进入这个态，不等接口——之后行随持仓推送消失。/ Closing: dimmed row, a
+   spinning "closing" tag in place of the actions, a sweeping hairline along the
+   bottom edge. Entered on the click itself; the row leaves with the next push. */
+.term-pr.closing { position: relative; opacity: 0.55; }
+.term-pr.closing::after {
+  content: "";
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--mid), transparent) no-repeat;
+  background-size: 40% 100%;
+  animation: term-sweep 1.1s linear infinite;
+}
+.term-closing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px;
+  font: 500 11px "JetBrains Mono", ui-monospace, monospace;
+  color: var(--mid);
+  white-space: nowrap;
+}
+.term-closing i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid var(--mid-bg);
+  border-top-color: var(--mid);
+  animation: term-spin 0.7s linear infinite;
+}
+/* 新成交的仓位行：进场动画之外再闪一下底色，让"仓位已经开出来了"被看见。
+   首屏加载进来的行不闪（见 PositionsDock 的 FRESH_GRACE_MS）。/ A freshly filled
+   row flashes its background once on top of the entrance; initial-load rows don't. */
+.term-pr.fresh { animation: term-in 0.45s var(--ease-out) both, term-flash 1.4s var(--ease-out) both; }
 /* 有悬停能力的设备才把操作藏到悬停；触屏一直显示。
    Hide actions until hover only where hover exists; touch shows them always. */
 @media (hover: hover) {
   .term-pr .term-pa { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
-  .term-pr:hover .term-pa, .term-pr.open .term-pa, .term-pr:focus-within .term-pa { opacity: 1; }
+  .term-pr:hover .term-pa, .term-pr.open .term-pa, .term-pr:focus-within .term-pa, .term-pr.closing .term-pa { opacity: 1; }
 }
 /* 管理展开：部分平仓 + 改止损止盈。/ Manage panel: partial close + modify SL/TP. */
 .term-pr-x {
@@ -846,11 +884,29 @@
 .term-cta:hover:not(:disabled) { filter: brightness(1.06); }
 .term-cta:active:not(:disabled) { transform: translateY(1px); }
 .term-cta:disabled { opacity: 0.45; cursor: not-allowed; }
+/* 等回执中：按钮不再是"变灰的禁用态"，而是保持本色、转圈 + 跑秒。用户看到的是
+   "在办"，不是"点不动"。/ Waiting for the fill: keep the colour, spin and tick
+   instead of greying out — reads as "working", not "disabled". */
+.term-cta.busy:disabled { opacity: 0.9; cursor: progress; }
+.term-cta-spin {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(11, 11, 14, 0.25);
+  border-top-color: #0b0b0e;
+  animation: term-spin 0.7s linear infinite;
+}
 .term-ctah { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-3); text-align: center; }
 .term-receipt { margin: 8px 0 0; font-size: 12px; text-align: center; }
 .term-receipt.ok { color: var(--up); }
 .term-receipt.error { color: var(--down); }
 .term-receipt.info { color: var(--text-2); }
+.term-receipt .px {
+  margin-left: 6px;
+  font: 500 11px "JetBrains Mono", ui-monospace, monospace;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
 
 /* ── 账户条 / account ── */
 .term-ac {
@@ -1040,11 +1096,15 @@
 }
 
 @keyframes term-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes term-spin { to { transform: rotate(360deg); } }
+@keyframes term-sweep { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+@keyframes term-flash { from { background-color: var(--up-bg); } to { background-color: transparent; } }
 @keyframes term-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes term-sheet-in { from { transform: translateY(100%); } to { transform: none; } }
 @media (prefers-reduced-motion: reduce) {
   .term-pr, .term-scrim, .term-sheet { animation: none; }
   .term-qs-live i { animation: none; }
+  .term-pr.closing::after, .term-closing i, .term-cta-spin { animation: none; }
 }
 
 /* ── 指标库 / indicator library ──

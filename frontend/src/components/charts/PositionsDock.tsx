@@ -11,7 +11,7 @@
 // (full close, with a confirm); cancel reuses orderApi.cancel. Since 2026-09-08
 // this is hairline rows rather than a table: actions appear on hover (always on
 // touch) and "manage" expands partial-close / modify SL·TP under the row.
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Order, Position } from '../../api/types'
 import { orderApi } from '../../api/client'
@@ -29,6 +29,21 @@ interface Props {
 
 type Tab = 'positions' | 'orders'
 
+// 一条正在平仓的仓位：发出时刻、发出时的手数、是否部分平仓。行在这段时间里压暗并
+// 显示"平仓中"，直到持仓推送里它消失（全平）或手数变小（部分），或超时兜底放开。
+// A close in flight: when it went out, the volume then, and whether partial. The
+// row stays dimmed with a "closing" tag until the positions feed drops it (full)
+// or shrinks it (partial), or the timeout releases it.
+type Closing = { at: number; volume: number; partial: boolean }
+// 兜底：桥接离线、回执丢失等情况下不能让一行永远"平仓中"。
+// Safety net so a lost receipt never leaves a row closing forever.
+const CLOSING_TIMEOUT_MS = 12000
+// 新出现的仓位行高亮多久（与 term-flash 动画时长一致）/ how long a new row flashes
+const FRESH_MS = 1400
+// 挂载后这段时间内出现的仓位视为首屏加载，不算"新成交"，不高亮。
+// Rows arriving this soon after mount are the initial load, not a fresh fill.
+const FRESH_GRACE_MS = 3000
+
 export default function PositionsDock({ positions, orders, digitsFor, onToast, className = '' }: Props) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<Tab>('positions')
@@ -38,6 +53,78 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
   // partial-close / modify, plus its form values
   const [expanded, setExpanded] = useState<number | null>(null)
   const [form, setForm] = useState<{ vol: string; sl: string; tp: string }>({ vol: '', sl: '', tp: '' })
+  const [closing, setClosing] = useState<Record<number, Closing>>({})
+  const [fresh, setFresh] = useState<Record<number, true>>({})
+  const seenTickets = useRef<Set<number> | null>(null)
+  const mountedAt = useRef(Date.now())
+
+  // 持仓推送到达：① 平仓中的行若已消失 / 手数已变小就放开；② 新出现的 ticket 高亮一下。
+  // On each positions push: release closing rows that are gone or shrunk; flash new tickets.
+  useEffect(() => {
+    const now = Date.now()
+    setClosing((prev) => {
+      const keys = Object.keys(prev)
+      if (keys.length === 0) return prev
+      let changed = false
+      const next: Record<number, Closing> = { ...prev }
+      for (const k of keys) {
+        const ticket = Number(k)
+        const c = next[ticket]
+        const p = positions.find((x) => x.ticket === ticket)
+        if (!p || (c.partial && p.volume < c.volume - 1e-9) || now - c.at > CLOSING_TIMEOUT_MS) {
+          delete next[ticket]
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+
+    const current = new Set<number>()
+    for (const p of positions) if (p.ticket) current.add(p.ticket)
+    const seen = seenTickets.current
+    if (seen && now - mountedAt.current > FRESH_GRACE_MS) {
+      const newcomers: number[] = []
+      current.forEach((tk) => { if (!seen.has(tk)) newcomers.push(tk) })
+      if (newcomers.length > 0) {
+        setFresh((prev) => {
+          const next = { ...prev }
+          for (const tk of newcomers) next[tk] = true
+          return next
+        })
+        window.setTimeout(() => {
+          setFresh((prev) => {
+            const next = { ...prev }
+            for (const tk of newcomers) delete next[tk]
+            return next
+          })
+        }, FRESH_MS)
+      }
+    }
+    seenTickets.current = current
+  }, [positions])
+
+  const markClosing = (ticket: number, volume: number, partial: boolean) => {
+    setClosing((prev) => ({ ...prev, [ticket]: { at: Date.now(), volume, partial } }))
+    // 超时放开：持仓推送不来（桥接掉线）时也不能永远压着这一行。
+    // Timed release for when no positions push ever arrives (bridge offline).
+    window.setTimeout(() => {
+      setClosing((prev) => {
+        const c = prev[ticket]
+        if (!c || Date.now() - c.at < CLOSING_TIMEOUT_MS) return prev
+        const next = { ...prev }
+        delete next[ticket]
+        return next
+      })
+    }, CLOSING_TIMEOUT_MS + 50)
+  }
+  const unmarkClosing = (ticket: number) => {
+    setClosing((prev) => {
+      if (!prev[ticket]) return prev
+      const next = { ...prev }
+      delete next[ticket]
+      return next
+    })
+  }
 
   // 未完成的开仓挂单（等待桥接拉取执行）/ open-orders still pending execution
   const pendingOrders = orders.filter((o) => o.status === 'PENDING' && (o.action ?? 'ORDER') === 'ORDER')
@@ -55,19 +142,43 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
 
   const closePosition = async (p: Position, volume?: number) => {
     if (!p.ticket) return
-    setBusyId(`p-${p.ticket}`)
+    const ticket = p.ticket
+    const partial = volume != null
+    setBusyId(`p-${ticket}`)
+    // 点下去的这一刻行就进入"平仓中"，不等接口回来——用户看到的第一反应要是即时的。
+    // The row enters "closing" the instant the click lands, not when the API returns.
+    markClosing(ticket, p.volume, partial)
+    setExpanded(null)
     try {
-      await orderApi.close({
+      const res = await orderApi.close({
         clientOrderId: clientOrderId(),
-        ticket: p.ticket,
+        ticket,
         symbol: p.symbol,
         side: p.side,
         mt5Login: p.login ?? null,
         volume,
       })
-      onToast(volume != null ? String(t('charts.dock.partialCloseSent')) : String(t('charts.dock.closeSent')), 'info')
-      setExpanded(null)
+      // 网关账号当场回成交：提示里给成交价，行随下一拍持仓推送消失；桥接账号只是
+      // 收单，提示"已发出"，行保持"平仓中"直到桥接执行完、持仓推送把它拿掉。
+      // A gateway account fills synchronously: toast the price, the row goes with
+      // the next positions push. A bridge account is only accepted: keep "closing"
+      // until the bridge executes and the feed drops the row.
+      if (res.status === 'FILLED') {
+        const px = res.filledPrice != null ? res.filledPrice.toFixed(digitsFor(p.symbol)) : '—'
+        onToast(
+          partial
+            ? String(t('charts.dock.partialClosed', { lots: volume, price: px }))
+            : String(t('charts.dock.closed', { price: px })),
+          'success',
+        )
+      } else if (res.status === 'REJECTED' || res.status === 'FAILED') {
+        unmarkClosing(ticket)
+        onToast(res.message ? localizeApiError(res.message) : String(t('charts.dock.closeFailed')), 'error')
+      } else {
+        onToast(partial ? String(t('charts.dock.partialCloseSent')) : String(t('charts.dock.closeSent')), 'info')
+      }
     } catch (e) {
+      unmarkClosing(ticket)
       onToast(e instanceof Error ? localizeApiError(e.message) : String(t('charts.dock.closeFailed')), 'error')
     } finally {
       setBusyId(null)
@@ -78,7 +189,7 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
     if (!p.ticket) return
     setBusyId(`p-${p.ticket}`)
     try {
-      await orderApi.modify({
+      const res = await orderApi.modify({
         clientOrderId: clientOrderId(),
         ticket: p.ticket,
         symbol: p.symbol,
@@ -87,7 +198,9 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
         stopLoss: sl,
         takeProfit: tp,
       })
-      onToast(String(t('charts.dock.modifySent')), 'info')
+      if (res.status === 'FILLED') onToast(String(t('charts.dock.modified')), 'success')
+      else if (res.status === 'REJECTED' || res.status === 'FAILED') onToast(res.message ? localizeApiError(res.message) : String(t('charts.dock.modifyFailed')), 'error')
+      else onToast(String(t('charts.dock.modifySent')), 'info')
       setExpanded(null)
     } catch (e) {
       onToast(e instanceof Error ? localizeApiError(e.message) : String(t('charts.dock.modifyFailed')), 'error')
@@ -142,8 +255,10 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
               const d = digitsFor(p.symbol)
               const up = p.profit >= 0
               const isBuy = p.side === 'BUY'
-              const busy = busyId === `p-${p.ticket}`
-              const isOpen = expanded === p.ticket && !!p.ticket
+              const isClosing = !!p.ticket && !!closing[p.ticket]
+              const busy = busyId === `p-${p.ticket}` || isClosing
+              const isOpen = expanded === p.ticket && !!p.ticket && !isClosing
+              const isFresh = !!p.ticket && !!fresh[p.ticket]
               const meta = symbolMeta(p.symbol)
               // 部分平仓手数校验：[0.01, 持仓量] / partial-close volume must be in [0.01, size]
               const volNum = parseFloat(form.vol)
@@ -156,7 +271,7 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
               const tpBad = tpN != null && !Number.isNaN(tpN) && ref != null && ref > 0 && (isBuy ? tpN <= ref : tpN >= ref)
               return (
                 <Fragment key={p.ticket ?? i}>
-                  <div className={`term-pr ${isOpen ? 'open' : ''}`} style={{ animationDelay: `${i * 40}ms` }}>
+                  <div className={`term-pr ${isOpen ? 'open' : ''} ${isClosing ? 'closing' : ''} ${isFresh ? 'fresh' : ''}`} style={{ animationDelay: `${i * 40}ms` }}>
                     <div className="term-pr-id">
                       <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
                       <b>{displaySymbol(p.symbol)}</b>
@@ -168,12 +283,18 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
                     <Cell area="c-tp" k={String(t('charts.dock.colTp'))} v={p.takeProfit ? fmt(p.takeProfit, d) : '—'} tone={p.takeProfit ? 'up' : undefined} />
                     <div className={`term-pnl pnl ${up ? 'up' : 'down'}`}>{up ? '+' : ''}{p.profit.toFixed(2)}</div>
                     <div className="term-pa">
-                      <button type="button" className="warn" disabled={!p.ticket || busy} onClick={() => setConfirmClose(p)}>
-                        {t('charts.dock.close')}
-                      </button>
-                      <button type="button" className={isOpen ? 'on' : ''} aria-expanded={isOpen} disabled={!p.ticket || busy} onClick={() => toggleExpand(p)}>
-                        {t('charts.dock.manage')}
-                      </button>
+                      {isClosing ? (
+                        <span className="term-closing" role="status"><i aria-hidden="true" />{t('charts.dock.closing')}</span>
+                      ) : (
+                        <>
+                          <button type="button" className="warn" disabled={!p.ticket || busy} onClick={() => setConfirmClose(p)}>
+                            {t('charts.dock.close')}
+                          </button>
+                          <button type="button" className={isOpen ? 'on' : ''} aria-expanded={isOpen} disabled={!p.ticket || busy} onClick={() => toggleExpand(p)}>
+                            {t('charts.dock.manage')}
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                   {isOpen && (

@@ -11,10 +11,10 @@
 // this component owns layout and the inline receipt only. The head (title +
 // symbol) is rendered by the caller: the pane head on desktop, the sheet
 // handle row on mobile. Accounts are a plain online filter here.
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Select from '../Select'
-import type { MT5Account, Quote } from '../../api/types'
+import type { MT5Account, Order, Quote } from '../../api/types'
 import { localizeApiError } from '../../api/utils'
 import { QUICK_LOTS, QUICK_RISK_PCTS, formatMoney } from '../order/orderMath'
 import { useOrderForm, type Side } from '../order/useOrderForm'
@@ -38,7 +38,7 @@ interface Props {
     stopLoss: number | null,
     takeProfit: number | null,
     clientOrderId: string,
-  ) => Promise<void>
+  ) => Promise<Order | void>
   // 受控的选中账户 login（由父级 ChartsPage 持有，用于联动账户摘要/持仓/挂单）。
   // Controlled selected-account login (owned by ChartsPage to sync the summary/positions/orders).
   selectedLogin?: string
@@ -47,6 +47,23 @@ interface Props {
   initialSide?: Side
   className?: string
 }
+
+// 从 since 起每 100ms 走一格的已用时间（毫秒）。下单按钮在等回执期间显示它：
+// 一个在走的数字比静止的"提交中…"更能说明程序没卡住，而且事后回执里的耗时就是它。
+// Elapsed ms since `since`, ticking every 100ms while non-null. Shown on the CTA
+// while waiting for the fill: a moving number reads as "working", not "stuck".
+function useElapsedMs(since: number | null): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (since == null) return
+    setNow(Date.now())
+    const id = window.setInterval(() => setNow(Date.now()), 100)
+    return () => window.clearInterval(id)
+  }, [since])
+  return since == null ? 0 : Math.max(0, now - since)
+}
+
+type Receipt = { kind: 'ok' | 'error' | 'info'; msg: string; detail?: string }
 
 // 价格末两位加粗：交易员盯的是点位，不是大手。/ Bold the last two digits: the pips.
 function PipPrice({ v, digits }: { v: number | null; digits: number }) {
@@ -73,7 +90,10 @@ export default function OrderTicket({
   })
   const { isBuy, selected } = form
   const [submitting, setSubmitting] = useState(false)
-  const [receipt, setReceipt] = useState<{ kind: 'ok' | 'error' | 'info'; msg: string } | null>(null)
+  // 本次提交发出的时刻；等回执期间按钮上跑秒 / when this submit went out; the CTA ticks while waiting
+  const [sentAt, setSentAt] = useState<number | null>(null)
+  const elapsedMs = useElapsedMs(sentAt)
+  const [receipt, setReceipt] = useState<Receipt | null>(null)
 
   const canSubmit = form.hasAccounts && !form.slTpInvalid && !submitting
   const ccy = selected?.accountCurrency ?? ''
@@ -84,21 +104,37 @@ export default function OrderTicket({
       setReceipt({ kind: 'error', msg: String(t('charts.ticket.invalidVolume')) })
       return
     }
+    const startedAt = Date.now()
     setSubmitting(true)
-    setReceipt({ kind: 'info', msg: String(t('charts.ticket.submitting')) })
+    setSentAt(startedAt)
+    setReceipt(null)
     try {
       // 幂等号在成功前固定不变：失败后再点一次复用同一个号，"已收单但没收到回执"
       // 不会变成两笔。成功后换新号，下一单是新的。
       // The idempotency key stays fixed until a success, so a retry after "received
       // but no receipt" can't double-place; rotated after success for the next order.
-      await onPlace(side, vol, form.login || null, form.slNum, form.tpNum, form.orderId)
+      const placed = await onPlace(side, vol, form.login || null, form.slNum, form.tpNum, form.orderId)
       form.rotateOrderId()
-      setReceipt({ kind: 'ok', msg: String(t('charts.ticket.submitted')) })
-      setTimeout(() => setReceipt(null), 2500)
+      const secs = `${((Date.now() - startedAt) / 1000).toFixed(1)}s`
+      // 回执按状态分三种：网关账号当场成交给成交价和耗时；桥接账号后端只是收单，
+      // 说"已受理"而不是"已成交"；被拒直接给原因。以前三种情况都是同一句"已提交"。
+      // Three receipts by status: a gateway fill shows price and elapsed; a bridge
+      // account is merely accepted (not filled); a rejection shows its reason.
+      if (placed && placed.status === 'FILLED') {
+        const px = placed.filledPrice != null ? placed.filledPrice.toFixed(digits) : '—'
+        setReceipt({ kind: 'ok', msg: String(t('charts.ticket.filledAt', { price: px })), detail: secs })
+        setTimeout(() => setReceipt(null), 4000)
+      } else if (placed && (placed.status === 'REJECTED' || placed.status === 'FAILED')) {
+        setReceipt({ kind: 'error', msg: placed.message ? localizeApiError(placed.message) : String(t('charts.ticket.placeFailed')) })
+      } else {
+        setReceipt({ kind: 'info', msg: String(t('charts.ticket.accepted')) })
+        setTimeout(() => setReceipt(null), 6000)
+      }
     } catch (e) {
       setReceipt({ kind: 'error', msg: e instanceof Error ? localizeApiError(e.message) : String(t('charts.ticket.placeFailed')) })
     } finally {
       setSubmitting(false)
+      setSentAt(null)
     }
   }
 
@@ -203,9 +239,13 @@ export default function OrderTicket({
         <p className="term-warn">{accounts.length === 0 ? t('charts.ticket.noBridge') : t('charts.ticket.offline')}</p>
       )}
 
-      <button type="button" className={`term-cta ${isBuy ? 'buy' : 'sell'}`} disabled={!canSubmit} onClick={submit}>
+      <button type="button" className={`term-cta ${isBuy ? 'buy' : 'sell'} ${submitting ? 'busy' : ''}`} disabled={!canSubmit} onClick={submit}>
         {submitting ? (
-          t('charts.ticket.submitting')
+          <>
+            <span className="term-cta-spin" aria-hidden="true" />
+            {t('charts.ticket.waitingFill')}
+            <span className="px">{(elapsedMs / 1000).toFixed(1)}s</span>
+          </>
         ) : (
           <>
             {t('charts.ticket.place', { side: sideLabel, volume: (form.parsedVolume ?? 0).toFixed(2) })}
@@ -214,7 +254,10 @@ export default function OrderTicket({
         )}
       </button>
       {receipt ? (
-        <p className={`term-receipt ${receipt.kind}`}>{receipt.msg}</p>
+        <p className={`term-receipt ${receipt.kind}`}>
+          {receipt.msg}
+          {receipt.detail && <span className="px">{receipt.detail}</span>}
+        </p>
       ) : (
         <p className="term-ctah">{t('charts.ticket.footnote')}</p>
       )}

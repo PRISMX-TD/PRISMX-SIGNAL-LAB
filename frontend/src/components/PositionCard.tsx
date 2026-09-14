@@ -15,7 +15,7 @@
 // between them with the entry→current span tinted by P&L. Falls back to the grid
 // when SL or TP is missing. A row-per-position shape was tried and the product
 // owner asked for cards (2026-09-11).
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { orderApi } from '../api/client'
@@ -38,6 +38,20 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
   const { t } = useTranslation()
   const [mode, setMode] = useState<Mode>('view')
   const [busy, setBusy] = useState(false)
+  // 平仓指令已被接受、正在等持仓推送把这张卡拿掉：卡压暗、动作全部禁用。
+  // 卡随持仓消失而卸载，所以正常路径下不需要复位；只留一个超时兜底，防止回执
+  // 丢失时卡永远压着。
+  // A close has been accepted and the card is waiting for the positions feed to
+  // remove it: dimmed, actions disabled. The card unmounts with the position, so
+  // only a timeout release is needed for the lost-receipt case.
+  const [closing, setClosing] = useState(false)
+  const closingTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => { if (closingTimer.current) window.clearTimeout(closingTimer.current) }, [])
+  const enterClosing = () => {
+    setClosing(true)
+    if (closingTimer.current) window.clearTimeout(closingTimer.current)
+    closingTimer.current = window.setTimeout(() => { setClosing(false); setBusy(false) }, 12000)
+  }
   const [confirmCloseAll, setConfirmCloseAll] = useState(false)
   // 全屏确认弹窗，手机上划返回应该先关掉它、而不是直接退出当前页面
   // （见 useBackToClose 的说明）。/ A full-screen confirm modal; on mobile,
@@ -92,8 +106,12 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
       return
     }
     setBusy(true)
+    // 点下去就进入"平仓中"，不等接口——第一反应要即时。被拒或出错再退回来。
+    // Enter "closing" on the click itself, not on the response; revert on rejection.
+    enterClosing()
+    setMode('view')
     try {
-      await orderApi.close({
+      const res = await orderApi.close({
         clientOrderId: clientOrderId(),
         ticket: p.ticket,
         symbol: p.symbol,
@@ -101,12 +119,25 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
         mt5Login: p.login ?? null,
         volume: full ? undefined : vol,
       })
-      onActionDone?.(t('positions.closeSent'), 'info')
-      setMode('view')
+      // 网关账号当场成交：给成交价；桥接账号只是收单：说"已发出"。卡保持压暗，
+      // 直到持仓推送把它拿掉（全平）或手数更新（部分平仓时下一拍就放开）。
+      // Gateway fills synchronously (show the price); bridge merely accepts. The
+      // card stays dimmed until the positions feed removes or updates it.
+      if (res.status === 'FILLED') {
+        onActionDone?.(t('positions.closed', { price: res.filledPrice != null ? res.filledPrice : '—' }), 'success')
+        if (!full) { setClosing(false); setBusy(false) }
+      } else if (res.status === 'REJECTED' || res.status === 'FAILED') {
+        setClosing(false)
+        setBusy(false)
+        onActionDone?.(res.message ? localizeApiError(res.message) : t('positions.closeFailed'), 'error')
+      } else {
+        onActionDone?.(t('positions.closeSent'), 'info')
+        if (!full) { setClosing(false); setBusy(false) }
+      }
     } catch (e) {
-      onActionDone?.(e instanceof Error ? localizeApiError(e.message) : 'error', 'error')
-    } finally {
+      setClosing(false)
       setBusy(false)
+      onActionDone?.(e instanceof Error ? localizeApiError(e.message) : 'error', 'error')
     }
   }
 
@@ -118,7 +149,7 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
     }
     setBusy(true)
     try {
-      await orderApi.modify({
+      const res = await orderApi.modify({
         clientOrderId: clientOrderId(),
         ticket: p.ticket,
         symbol: p.symbol,
@@ -127,7 +158,9 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
         stopLoss: parseFloat(sl) || 0,
         takeProfit: parseFloat(tp) || 0,
       })
-      onActionDone?.(t('positions.modifySent'), 'info')
+      if (res.status === 'FILLED') onActionDone?.(t('positions.modified'), 'success')
+      else if (res.status === 'REJECTED' || res.status === 'FAILED') onActionDone?.(res.message ? localizeApiError(res.message) : 'error', 'error')
+      else onActionDone?.(t('positions.modifySent'), 'info')
       setMode('view')
     } catch (e) {
       onActionDone?.(e instanceof Error ? localizeApiError(e.message) : 'error', 'error')
@@ -285,7 +318,7 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
       }
     })()
     return (
-      <article className={`pos-mc ${profitUp ? 'up' : 'down'}`}>
+      <article className={`pos-mc ${profitUp ? 'up' : 'down'} ${closing ? 'closing' : ''}`}>
         <header className="pos-mc-hd">
           {ava}
           <div className="pos-mc-id">
@@ -340,7 +373,7 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
 
   // ── 卡片形态（桌面）/ card shape (desktop) ──
   return (
-    <div className="glass-neon pos-card p-4">
+    <div className={`glass-neon pos-card p-4 ${closing ? 'closing' : ''}`}>
       {/* 头部：品种 + 方向 + 盈亏 / header: symbol + side + P&L */}
       <div className="flex items-start justify-between">
         <div>
