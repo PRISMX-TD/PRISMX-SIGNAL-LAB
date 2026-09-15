@@ -55,7 +55,10 @@
     "errorBoundary": {
       "title": "Something went wrong on this page",
       "desc": "The page hit an error while rendering. Your account and positions are unaffected — reload to continue.",
-      "reload": "Reload"
+      "reload": "Reload",
+      "chunkDesc": "Part of this page failed to download, most likely an unstable connection. Check your network and reload; if it keeps happening, try another network.",
+      "oldBrowserTitle": "Your browser is too old",
+      "oldBrowserDesc": "This page uses features your browser (or the system WebView) doesn't support, so reloading won't help. Update Chrome or the system WebView and try again; Android app users can update 'Android System WebView' from the app store."
     }
   },
   "landing": {

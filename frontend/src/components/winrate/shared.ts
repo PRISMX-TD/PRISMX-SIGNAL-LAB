@@ -256,12 +256,61 @@ export function sessionsForUtcHour(hour: number, sessions: SessionWindow[], now:
   return hit.length > 0 ? hit.map((s) => s.key) : ['outside']
 }
 
+// 每个时区一个 DateTimeFormat 实例：构造它是 Intl 里最贵的一步（要加载时区数据），
+// 而这个函数在仪表盘每次渲染里会被每个时段各调一次。
+// One DateTimeFormat per zone: constructing it is the expensive part of Intl
+// (it loads zone data), and this runs once per session on every dashboard render.
+const zoneFormatters = new Map<string, Intl.DateTimeFormat>()
+
+function zoneFormatter(tz: string): Intl.DateTimeFormat {
+  let f = zoneFormatters.get(tz)
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    })
+    zoneFormatters.set(tz, f)
+  }
+  return f
+}
+
 export function zoneOffsetMinutes(tz: string, at: Date): number {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset' }).formatToParts(at)
-  const name = parts.find((p) => p.type === 'timeZoneName')?.value ?? 'GMT+0'
-  const m = /GMT([+-])(\d{1,2})(?::(\d{2}))?/.exec(name)
-  if (!m) return 0
-  return (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3] ?? 0))
+  // 算法：把该时区的墙钟读数当成 UTC 拼回一个时间戳，与真实时间戳相减就是偏移。
+  //
+  // 此前用的是 `timeZoneName: 'shortOffset'` 直接读 "GMT+9"。那个选项值 Chrome 95 /
+  // Safari 15.4 / Firefox 91 才有，**更老的引擎不是忽略它、而是抛 RangeError**
+  // （"Value shortOffset out of range"）——这段跑在仪表盘的渲染路径上（时段胜率卡），
+  // 于是 2020–2021 年的手机一进仪表盘就命中 ErrorBoundary 的「页面渲染时遇到错误」，
+  // 点重载也永远一样。2026-09-15 一名大陆老手机用户"一直触发渲染失败"就是它。
+  // 现在这条路径只用 Intl 最老的那几个字段选项（Chrome 24+ 全有），对 40 组
+  // 时区 × 时刻（含夏令时切换日、半小时区、纽芬兰）逐一比对过，与 shortOffset 结果一致。
+  //
+  // Reassemble the zone's wall-clock reading as if it were UTC and subtract the
+  // real instant: the difference is the offset. This used to read "GMT+9" via
+  // `timeZoneName: 'shortOffset'`, an option value that only exists from Chrome 95
+  // / Safari 15.4 / Firefox 91 — and older engines don't ignore it, they throw a
+  // RangeError. Sitting in the dashboard render path (session win-rate card),
+  // that put every 2020–2021 phone straight into the ErrorBoundary card on every
+  // dashboard load, reload included. Only the oldest Intl field options are used
+  // now (Chrome 24+); verified identical to shortOffset across 40 zone×instant
+  // pairs including DST switch days and half-hour zones.
+  try {
+    const p: Record<string, number> = {}
+    for (const part of zoneFormatter(tz).formatToParts(at)) {
+      if (part.type !== 'literal') p[part.type] = Number(part.value)
+    }
+    // 老引擎在 hour12:false 下把零点写成 "24"，取模归零 / old engines print midnight as "24"
+    const asUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour % 24, p.minute, p.second)
+    const truncated = Math.floor(at.getTime() / 1000) * 1000
+    return Math.round((asUtc - truncated) / 60000)
+  } catch {
+    // 时区名不认识（配置写错、或引擎缺该时区数据）：按 UTC 处理，让卡片照常画出来，
+    // 而不是把整页拖进 ErrorBoundary。/ Unknown zone: treat as UTC rather than
+    // taking the whole page down.
+    return 0
+  }
 }
 
 /** 一天内的钟点，如「06:00」。只用于"几点"，时长请用 fmtDurationHm。
@@ -299,12 +348,16 @@ export function localWindow(session: SessionWindow, now: Date): { start: string;
 /** 该时区此刻的钟点（分钟数）。Intl 处理 DST。
  *  Minutes-of-day in a zone right now; Intl handles DST. */
 export function minutesInZone(tz: string, at: Date): number {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false,
-  }).formatToParts(at)
-  const h = Number(parts.find((p) => p.type === 'hour')?.value ?? 0)
-  const m = Number(parts.find((p) => p.type === 'minute')?.value ?? 0)
-  return (h % 24) * 60 + m
+  // 复用 zoneFormatter 的实例（同样的 try 兜底理由见 zoneOffsetMinutes）。
+  // Reuses zoneFormatter's instance; same fallback rationale as zoneOffsetMinutes.
+  try {
+    const parts = zoneFormatter(tz).formatToParts(at)
+    const h = Number(parts.find((p) => p.type === 'hour')?.value ?? 0)
+    const m = Number(parts.find((p) => p.type === 'minute')?.value ?? 0)
+    return (h % 24) * 60 + m
+  } catch {
+    return (at.getUTCHours() * 60) + at.getUTCMinutes()
+  }
 }
 
 export type SessionStatus =

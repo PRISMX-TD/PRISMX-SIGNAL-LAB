@@ -55,7 +55,10 @@
     "errorBoundary": {
       "title": "这个页面出了点问题",
       "desc": "页面渲染时遇到错误。你的账户和持仓不受影响，重新加载即可继续。",
-      "reload": "重新加载"
+      "reload": "重新加载",
+      "chunkDesc": "页面资源没有加载完整，多半是网络不稳定。请检查网络后重新加载；若反复出现，可切换网络再试。",
+      "oldBrowserTitle": "你的浏览器版本过旧",
+      "oldBrowserDesc": "这个页面用到的功能你当前的浏览器（或系统 WebView）不支持，重新加载也没有用。请更新 Chrome 或系统 WebView 后再打开；安卓 App 用户请到应用商店更新「Android System WebView」。"
     }
   },
   "landing": {

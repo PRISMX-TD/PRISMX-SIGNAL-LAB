@@ -126,7 +126,12 @@ self.addEventListener("push", (event) => {
 // had to wait until the next site visit for Layout's ensure logic to catch
 // up, potentially losing notifications for days after a Chrome rotation.
 self.addEventListener("pushsubscriptionchange", (event) => {
-  const key = event.oldSubscription?.options?.applicationServerKey
+  // 不用 ?. / ??：这份文件不经 Vite 转译、原样跑在浏览器引擎上，Chrome 80 以下
+  // 见到这两个运算符会整份语法错误、注册失败，推送与离线壳一起没了。
+  // No ?. / ?? here: this file is served as-is (not transpiled by Vite), and a
+  // syntax error on Chrome < 80 fails registration — push and offline shell alike.
+  const oldSub = event.oldSubscription
+  const key = oldSub && oldSub.options ? oldSub.options.applicationServerKey : undefined
   if (!key) return
   event.waitUntil(
     self.registration.pushManager.subscribe({
@@ -169,7 +174,8 @@ function safeNotificationUrl(raw) {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close()
-  const url = safeNotificationUrl(event.notification.data?.url)
+  const data = event.notification.data
+  const url = safeNotificationUrl(data ? data.url : undefined)
   const target = new URL(url, self.location.origin).href
   event.waitUntil(
     self.clients
@@ -218,8 +224,8 @@ self.addEventListener("notificationclick", (event) => {
 // was likely killed by the OS and re-spawned — the frontend uses this to
 // decide whether to silently re-subscribe.
 self.addEventListener("message", (event) => {
-  if (event.data?.type === "PING_PUSH_HEARTBEAT") {
-    const p = event.ports?.[0]
+  if (event.data && event.data.type === "PING_PUSH_HEARTBEAT") {
+    const p = event.ports ? event.ports[0] : undefined
     if (p) p.postMessage({ lastPushAt: _lastPushAt })
   }
 })

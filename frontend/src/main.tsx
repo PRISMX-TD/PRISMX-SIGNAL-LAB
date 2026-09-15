@@ -1,3 +1,6 @@
+// 必须是第一条 import：给老引擎补 Promise.allSettled 等运行时 API（见文件头说明）。
+// Must stay the first import: runtime API shims for older engines (see its header).
+import './polyfills'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import './styles/index.css'

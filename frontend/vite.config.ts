@@ -12,6 +12,30 @@ export default defineConfig({
     },
   },
   build: {
+    // 产物的语法下限：Chrome / 安卓 WebView 70（2018 年 10 月）、Safari 12、Firefox 68。
+    //
+    // Vite 默认是 'modules'（≈ Chrome 87），会把 `??` / `?.` / 类字段原样留在产物里——
+    // 2020 年以前的引擎见到 `??` 直接语法错误，整个入口跑不起来，用户看到的是永久白屏；
+    // 更新一点但不够新的（Chrome 80–94）能跑起来，却会在别处崩（见 winrate/shared.ts
+    // 的 zoneOffsetMinutes）。大陆老手机（EMUI 9/10 的华为、没有 Play 服务因而 WebView
+    // 停在出厂版本的机器）正是这个区间。esbuild 只降语法，运行时 API 由 src/polyfills.ts
+    // 补，两者缺一不可。
+    //
+    // 代价：产物大约多几个百分点（可选链展开成 != null 判断、类字段展开成构造函数赋值）。
+    // 不用 @vitejs/plugin-legacy：那是给不支持 ES 模块的浏览器（Chrome < 61）准备的双份
+    // 产物 + SystemJS，体积和复杂度都翻倍，而这里要救的机器都支持模块，只是缺几个语法。
+    //
+    // Syntax floor for the build output: Chrome / Android WebView 70 (Oct 2018),
+    // Safari 12, Firefox 68. Vite's default 'modules' (≈ Chrome 87) leaves `??` /
+    // `?.` / class fields in place; pre-2020 engines hit a SyntaxError on `??` and
+    // the entry never runs — a permanent blank page. Engines from Chrome 80–94 run
+    // but break elsewhere (zoneOffsetMinutes in winrate/shared.ts). Older mainland
+    // phones (Huawei on EMUI 9/10, devices without Play services whose WebView is
+    // frozen at the factory build) sit exactly in that range. esbuild lowers syntax
+    // only; runtime APIs come from src/polyfills.ts. Not plugin-legacy: that is for
+    // browsers without ES modules (Chrome < 61), doubling output with SystemJS,
+    // while every device we care about has modules and only lacks a few features.
+    target: ['es2018', 'chrome70', 'safari12', 'firefox68', 'edge79'],
     rollupOptions: {
       output: {
         // 手动分包：把体积巨大的第三方库拆成独立、可长期缓存的 chunk，避免它们

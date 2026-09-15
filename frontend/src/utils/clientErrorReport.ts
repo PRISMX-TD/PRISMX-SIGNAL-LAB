@@ -24,8 +24,28 @@ const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? '').r
 // 与 lazyRetry 共用同一份判据：这几句是 Chromium / Safari / Firefox 对「动态
 // import 的模块脚本拉不下来」的原话，以及旧 webpack 时代留下的 ChunkLoadError。
 // Shared with lazyRetry: the browsers' own wording for a failed dynamic import.
+// `Unable to preload` 是 Vite 预取助手对「依赖的 CSS 拉不下来」的原话——它同样是网络
+// 而不是代码，漏掉它会让 lazyRetry 把一次丢包当成 bug 直接弹卡、不重试。
+// `Unable to preload` is Vite's preload helper wording for a dependency CSS that
+// failed to load — network, not code; without it lazyRetry treats a dropped
+// packet as a bug and shows the card with no retry.
 const CHUNK_ERROR_RE =
-  /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Loading (?:CSS )?chunk|ChunkLoadError/i
+  /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Loading (?:CSS )?chunk|ChunkLoadError|Unable to preload/i
+
+// 引擎太老、连 chunk 的语法都解析不了：动态 import 会以 SyntaxError 拒绝。这不是网络
+// 也不是我们的 bug（重试、重载都没用），要给用户的提示是「更新浏览器 / 系统 WebView」。
+// build.target 已降到 Chrome 70，正常不该再出现；留着是为了真出现时说对话。
+// The engine is too old to parse the chunk: a dynamic import rejects with a
+// SyntaxError. Neither network nor our bug (retry and reload can't help); the
+// user needs "update your browser / system WebView". build.target is Chrome 70 so
+// this should be rare now; kept so the message is right when it does happen.
+const OLD_ENGINE_RE = /Unexpected token|Invalid or unexpected token|Unexpected identifier|Unexpected end of input|Unexpected string|Unexpected number|Unexpected reserved word/i
+
+export function isOldEngineError(err: unknown): boolean {
+  if (err instanceof Error && err.name === 'SyntaxError') return true
+  const msg = err instanceof Error ? `${err.name} ${err.message}` : String(err)
+  return OLD_ENGINE_RE.test(msg)
+}
 
 export function isChunkLoadError(err: unknown): boolean {
   const msg = err instanceof Error ? `${err.name} ${err.message}` : String(err)
