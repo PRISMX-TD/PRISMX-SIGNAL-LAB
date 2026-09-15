@@ -5,6 +5,23 @@
     cd backend
     python -m scripts.update_disposable_domains            # 只看差异，不写文件
     python -m scripts.update_disposable_domains --write    # 确认无误后再写
+    python -m scripts.update_disposable_domains --write --mirror   # 完全照抄上游（慎用）
+
+默认是**并集**，不是覆盖
+------------------------
+上游列表不是我们这份的超集：2026-09-15 实测，上游 8857 条里**没有**我们手写的
+17 条，而那 17 条全是真的一次性邮箱服务（temp-mail.io、burnermail.io、
+24mail.chacuo.net、spamgourmet.com、cool.fr.nf 这类）。照抄上游等于让闸门倒退，
+所以默认把「上游 ∪ 本地已有」写回去，并单独打印「上游没有、本地保留」那批给人
+过目。
+
+真想完全对齐上游（例如怀疑本地混进了误判条目）时加 `--mirror`，它会按上游原样
+覆盖、丢掉本地独有的条目。
+
+Union by default, not replace: upstream is not a superset of this file — as of
+2026-09-15 it lacks 17 entries we hand-added, all of them genuine disposable
+services. Mirroring upstream would weaken the gate, so the default merges and
+prints the local-only entries for review. `--mirror` opts into a pure overwrite.
 
 为什么要有"只看差异"这一步
 --------------------------
@@ -74,6 +91,7 @@ def _read_current() -> set[str]:
 
 def main() -> int:
     write = "--write" in sys.argv
+    mirror = "--mirror" in sys.argv
 
     print(f"拉取 / fetching {UPSTREAM}")
     resp = requests.get(UPSTREAM, timeout=30)
@@ -98,11 +116,12 @@ def main() -> int:
 
     current = _read_current()
     added = sorted(fetched - current)
-    removed = sorted(current - fetched)
+    local_only = sorted(current - fetched)
     conflicts = sorted(d for d in fetched if d in ALLOW_DOMAINS)
 
     print(f"\n上游 {len(fetched)} 条；本地 {len(current)} 条")
-    print(f"新增 {len(added)} 条，移除 {len(removed)} 条")
+    print(f"新增 {len(added)} 条；上游没有、本地独有 {len(local_only)} 条"
+          + ("（--mirror：这些会被丢掉）" if mirror else "（默认保留）"))
 
     if rejected:
         print(f"\n!! 丢弃 {len(rejected)} 条非法条目（裸 TLD / 带空格 / 没有点）:")
@@ -121,10 +140,12 @@ def main() -> int:
         print(f"\n新增前 20 条 / first 20 added:")
         for d in added[:20]:
             print(f"   + {d}")
-    if removed:
-        print(f"\n移除前 20 条 / first 20 removed:")
-        for d in removed[:20]:
-            print(f"   - {d}")
+    if local_only:
+        # 这批必须全印，不截断：它们是人工加的，有没有被误丢是要逐条确认的事。
+        verb = "将被丢弃" if mirror else "保留"
+        print(f"\n上游没有、本地独有（{verb}）{len(local_only)} 条：")
+        for d in local_only:
+            print(f"   · {d}")
 
     if not write:
         print("\n（未写入。确认无误后加 --write）")
@@ -134,7 +155,8 @@ def main() -> int:
     # 文件时以为我们真的在拦 qq.com。
     # Conflicting entries are dropped from the snapshot — allow wins at runtime
     # anyway, and keeping them would mislead the next person reading the file.
-    final = sorted(fetched - ALLOW_DOMAINS)
+    merged = fetched if mirror else (fetched | current)
+    final = sorted(merged - ALLOW_DOMAINS)
     with open(_DATA_PATH, "w", encoding="utf-8", newline="\n") as f:
         f.write(_HEADER.format(upstream=UPSTREAM))
         for d in final:
