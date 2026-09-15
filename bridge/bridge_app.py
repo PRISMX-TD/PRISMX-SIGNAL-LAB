@@ -15,6 +15,7 @@ import http.client
 import json
 import logging
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -1002,6 +1003,91 @@ def is_newer_version(latest: str, current: str) -> bool:
     return bool(lv) and lv > cv
 
 
+# ---------- 一键自更新 / one-click self-update ----------
+# 以前点提示条只是把浏览器打开到安装包直链：用户要自己下载、关掉旧的、把新 exe 放回原处
+# 再打开、再等它重连。一个版本一套动作，落后几版就得来几遍。现在点一下：程序自己把最新
+# 安装包下载到旁边、把自己换掉、重新拉起新版本并自动重连——一次到最新版，不管中间隔了
+# 几个版本（安装包直链取的本来就是 releases/latest）。
+# Clicking the banner used to open a browser download; the user then had to quit,
+# replace the exe and relaunch — once per version. Now one click downloads the latest
+# installer next to the running exe, swaps it in, relaunches and auto-reconnects.
+#
+# 换文件的手法：Windows 不允许覆盖或删除正在运行的 exe，但允许给它改名。于是把自己改成
+# `<exe>.old`，再把下载好的新版挪到原路径，启动新版后退出；新版启动时删掉 `.old`。
+# Windows lets a running exe be renamed (not overwritten or deleted): rename self to
+# `.old`, move the download into place, launch it, exit; the new build deletes `.old`.
+
+UPDATE_MIN_BYTES = 5 * 1024 * 1024  # 安装包正常 30 MB 上下，小于这个数一定是残缺的 / a real build is ~30 MB
+
+
+def frozen_exe_path() -> str | None:
+    """打包态下自己的 exe 路径；源码态返回 None（源码态不做自更新）。
+    The running exe's path when frozen by PyInstaller; None when run from source."""
+    if getattr(sys, "frozen", False):
+        return os.path.abspath(sys.executable)
+    return None
+
+
+def cleanup_old_binary() -> None:
+    """启动时删掉上一版自更新留下的 `.old`。上一进程还没退干净时删不掉，下次启动再删。
+    Remove the previous build left behind by a self-update; retried on the next launch."""
+    exe = frozen_exe_path()
+    if not exe:
+        return
+    old = exe + ".old"
+    if os.path.exists(old):
+        try:
+            os.remove(old)
+            logger.info("已清理上一版本 / removed previous build: %s", old)
+        except OSError:
+            pass
+
+
+def download_release(url: str, dest: str, progress, timeout: float = 30.0) -> None:
+    """流式下载安装包到 dest，每收到一块调一次 progress(done, total)。下载完校验是完整的
+    Windows 可执行文件（MZ 头 + 体积下限），不是就抛异常，让调用方回退到手动下载。
+    Stream the installer to dest with progress callbacks, then sanity-check it."""
+    req = request.Request(url, method="GET")
+    req.add_header("User-Agent", f"PRISMX-Bridge/{APP_VERSION}")
+    with request.urlopen(req, timeout=timeout) as resp, open(dest, "wb") as f:
+        total = int(resp.headers.get("Content-Length") or 0)
+        done = 0
+        while True:
+            chunk = resp.read(256 * 1024)
+            if not chunk:
+                break
+            f.write(chunk)
+            done += len(chunk)
+            progress(done, total)
+    size = os.path.getsize(dest)
+    with open(dest, "rb") as f:
+        head = f.read(2)
+    if head != b"MZ" or size < UPDATE_MIN_BYTES:
+        raise ValueError(f"下载的文件不是完整的安装包 / downloaded file is not a complete installer ({size} bytes)")
+
+
+def swap_in_update(new_path: str) -> str:
+    """把下载好的新版换到自己的位置，返回新 exe 路径。挪不进去就把自己改回来。
+    Rename self to .old and move the download into place; roll back on failure."""
+    exe = frozen_exe_path()
+    if not exe:
+        raise RuntimeError("源码态不做自更新 / self-update only applies to the packaged exe")
+    old = exe + ".old"
+    if os.path.exists(old):
+        try:
+            os.remove(old)
+        except OSError:
+            # 上上次的 .old 还被占着：换个名字让路 / still locked: park it under another name
+            os.rename(old, f"{exe}.old.{int(time.time())}")
+    os.rename(exe, old)
+    try:
+        os.replace(new_path, exe)
+    except Exception:
+        os.rename(old, exe)
+        raise
+    return exe
+
+
 # ---------- GUI ----------
 class BridgeGUI:
     """tkinter 界面：先要 Token，连接后显示多账号状态。
@@ -1210,7 +1296,10 @@ class BridgeGUI:
         )
         close_lbl.pack(side="right")
         for w in (self.update_bar, bar_lbl):
-            w.bind("<Button-1>", lambda _e: self._open_update_page())
+            w.bind("<Button-1>", lambda _e: self._on_update_click())
+        self._update_release: dict | None = None
+        self._updating = False
+        self._update_failed = False
         close_lbl.bind("<Button-1>", lambda _e: self.update_bar.pack_forget())
 
         # 连接卡片：Token 输入 + 操作按钮 / connection card
@@ -1335,13 +1424,106 @@ class BridgeGUI:
         # Prefer downloading the installer directly; fall back to the releases
         # page only if no matching asset was found.
         self._update_url = release.get("download_url") or RELEASES_PAGE
+        self._update_release = release
+        can_self_update = frozen_exe_path() is not None and bool(release.get("download_url"))
         self.update_var.set(
+            f"发现新版本 {latest}（当前 v{APP_VERSION}），点击一键更新并重启  /  "
+            f"Update {latest} available — click to update and restart"
+            if can_self_update else
             f"发现新版本 {latest}（当前 v{APP_VERSION}），点击直接下载安装包  /  "
             f"Update {latest} available — click to download the installer"
         )
         # 插在标题行之后、连接卡片之前 / place it right below the header
         self.update_bar.pack(fill="x", padx=22, pady=(0, 6), after=self._title_row)
         logger.info("发现新版本 / update available: %s (current %s)", latest, APP_VERSION)
+
+    def _on_update_click(self):
+        """点提示条：打包态且有安装包直链就一键自更新；否则（源码态 / 没找到资产 / 上次自更新
+        失败）退回打开浏览器下载。
+        Banner click: self-update when packaged and a direct link exists; otherwise
+        (source checkout / no asset / previous self-update failed) open the browser."""
+        if self._updating:
+            return
+        release = self._update_release or {}
+        if self._update_failed or frozen_exe_path() is None or not release.get("download_url"):
+            self._open_update_page()
+            return
+        self._updating = True
+        threading.Thread(target=self._self_update_worker, args=(release,), daemon=True).start()
+
+    def _self_update_worker(self, release: dict):
+        """后台下载 → 换文件 → 回 UI 线程重启。任何一步失败都把提示条改成"点击手动下载"。
+        Download → swap → restart on the UI thread; any failure degrades to manual download."""
+        latest = release.get("tag", "")
+        url = release["download_url"]
+        exe = frozen_exe_path()
+        tmp = exe + ".new"
+
+        def progress(done: int, total: int):
+            if total > 0:
+                text = f"正在下载新版本 {latest}… {done * 100 // total}%  /  Downloading {latest}… {done * 100 // total}%"
+            else:
+                text = f"正在下载新版本 {latest}… {done // (1024 * 1024)} MB  /  Downloading {latest}…"
+            self.root.after(0, lambda t=text: self.update_var.set(t))
+
+        try:
+            logger.info("自更新开始 / self-update start: %s -> %s", url, tmp)
+            download_release(url, tmp, progress)
+            new_exe = swap_in_update(tmp)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("自更新失败 / self-update failed: %s", e)
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+
+            def failed():
+                self._updating = False
+                self._update_failed = True
+                self.update_var.set(
+                    "自动更新失败，点击改为手动下载安装包  /  "
+                    "Auto-update failed — click to download the installer instead"
+                )
+            self.root.after(0, failed)
+            return
+        self.root.after(0, lambda: self._restart_into(new_exe))
+
+    def _restart_into(self, new_exe: str):
+        """停掉桥接与托盘，拉起新版本（带 --autoconnect 让它一开就重连），然后退出。
+        Stop the engine and tray, launch the new build with --autoconnect, exit."""
+        self.update_var.set("下载完成，正在重启到新版本…  /  Restarting into the new version…")
+        self.root.update_idletasks()
+        if self.engine:
+            self.engine.stop()
+            self.engine = None
+        if self.tray_icon is not None:
+            try:
+                self.tray_icon.stop()
+            except Exception:
+                pass
+        logger.info("自更新：启动新版本并退出 / self-update: launching %s", new_exe)
+        try:
+            subprocess.Popen(
+                [new_exe, "--autoconnect"],
+                cwd=os.path.dirname(new_exe),
+                close_fds=True,
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.exception("启动新版本失败 / failed to launch new build: %s", e)
+            self._updating = False
+            self._update_failed = True
+            self.update_var.set("新版本已就位但启动失败，请手动重新打开程序  /  Updated, please relaunch the app manually")
+            return
+        self.root.after(400, self._exit_now)
+
+    def _exit_now(self):
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
+        os._exit(0)
 
     def _open_update_page(self):
         """打开安装包直链（触发浏览器直接下载）；无直链则退回发布页。
@@ -1544,6 +1726,9 @@ class BridgeGUI:
 
 
 def main():
+    # 自更新留下的上一版 exe：新版本起来后顺手删掉（见 swap_in_update）。
+    # Remove the previous build left behind by a self-update.
+    cleanup_old_binary()
     root = tk.Tk()
     gui = BridgeGUI(root)
     root.protocol("WM_DELETE_WINDOW", gui.on_close)
