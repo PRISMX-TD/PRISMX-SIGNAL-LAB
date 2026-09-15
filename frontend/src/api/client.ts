@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUsers, SocialLinks } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminEmailGateSettings, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUsers, SocialLinks } from './types'
 import type { Announcement, AnnouncementInput, AnnouncementList } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 
@@ -802,6 +802,12 @@ export const adminApi = {
     getTrial: () => request<AdminTrialSettings>('/admin/trial'),
     updateTrial: (payload: AdminTrialSettings) =>
       request<AdminTrialSettings>('/admin/trial', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+    getEmailGate: () => request<AdminEmailGateSettings>('/admin/email-gate'),
+    updateEmailGate: (payload: AdminEmailGateSettings) =>
+      request<AdminEmailGateSettings>('/admin/email-gate', {
         method: 'PUT',
         body: JSON.stringify(payload),
       }),

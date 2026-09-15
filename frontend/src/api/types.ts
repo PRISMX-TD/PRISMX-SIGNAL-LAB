@@ -371,6 +371,19 @@ export interface AdminTrialSettings {
 
 // 官方社交主页地址（管理后台）。留空 = 不展示该平台的入口。
 // Official social links (admin side). Empty = that platform gets no entry point.
+export interface AdminEmailGateSettings {
+  /** 总开关。关掉 = 谁都不拦，误伤失控时的即时止血阀，不用发版。
+   *  Master switch; off means nothing is blocked — the no-deploy escape hatch. */
+  disposableBlockEnabled: boolean
+  /** 在内置快照之外**额外**拦的域名。内置的那份在后端代码里，这里看不到也删不掉。
+   *  Extra blocked domains, on top of the vendored snapshot (which lives in
+   *  backend code and is neither visible nor removable here). */
+  extraBlockedDomains: string[]
+  /** 误伤时的救火通道：这里填的域名一定放行，赢过所有拦截规则。
+   *  Rescue hatch: these always pass, beating every block rule. */
+  extraAllowedDomains: string[]
+}
+
 export interface AdminSocialSettings {
   facebookUrl: string
   instagramUrl: string

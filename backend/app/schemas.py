@@ -550,6 +550,44 @@ class AdminSocialSettings(BaseModel):
         return v
 
 
+class AdminEmailGateSettings(BaseModel):
+    """一次性邮箱闸门设置（管理后台读写用同一形状）。
+
+    两个增补名单是「在内置规则之外」的手工干预，不是内置规则的副本：内置放行表
+    （services/email_domains.ALLOW_DOMAINS）和打包的黑名单快照都在代码里，后台
+    看不到也改不了。这么分是故意的——国内主流邮箱的放行不该依赖某次后台操作
+    没被人误删。
+
+    条目在写入前统一规范化（小写、去掉粘贴时常带的 @ 前缀与结尾的点），并去重。
+    非法条目直接丢弃而不是报错：管理员在一个多行输入框里贴一串域名，为其中一行
+    的空白或笔误让整次保存失败，只会让人改半天不知道错在哪。
+
+    Disposable-email gate settings (same shape for admin read & write). The two
+    supplementary lists sit *on top of* the built-in rules rather than replacing
+    them: the allowlist and the vendored blocklist live in code, invisible and
+    unremovable from the panel — deliberately, so that letting Chinese mailboxes
+    through never depends on an admin action not being undone. Entries are
+    normalised and de-duplicated on write; malformed ones are dropped rather than
+    failing the whole save, since these are pasted in bulk into a textarea.
+    """
+
+    disposableBlockEnabled: bool = True
+    extraBlockedDomains: list[str] = Field(default_factory=list, max_length=500)
+    extraAllowedDomains: list[str] = Field(default_factory=list, max_length=500)
+
+    @field_validator("extraBlockedDomains", "extraAllowedDomains")
+    @classmethod
+    def _clean_domains(cls, v: list[str]) -> list[str]:
+        from app.services.email_domains import normalize_domain
+
+        out: list[str] = []
+        for raw in v or []:
+            d = normalize_domain(str(raw)[:253])
+            if d and d not in out:
+                out.append(d)
+        return out
+
+
 class AdminCandleSettings(BaseModel):
     """K 线历史保留策略设置 / Candle-history retention settings."""
 

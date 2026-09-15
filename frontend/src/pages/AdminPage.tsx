@@ -17,7 +17,7 @@ import InviteLinksPanel from '../components/admin/InviteLinksPanel'
 import StrategyWinratePanel from '../components/admin/StrategyWinratePanel'
 import GamificationPanel from '../components/admin/GamificationPanel'
 import CompetitionsPanel from '../components/admin/CompetitionsPanel'
-import type { AdminBrokerSettings, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
+import type { AdminBrokerSettings, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminEmailGateSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
 const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
@@ -376,6 +376,22 @@ export default function AdminPage() {
   const [savedTrialEnabled, setSavedTrialEnabled] = useState(false)
 
 
+  // 注册邮箱限制（一次性邮箱闸门）/ signup email gate
+  //
+  // 两个名单在界面上是多行文本框，state 里也就存文本而不是数组：管理员正在
+  // 敲的中间状态（空行、还没打完的域名）如果每次 onChange 都往数组里塞，光标
+  // 会因为重新渲染跳走，空行也会被吃掉。保存时才切成数组，和券商锁那个
+  // brokerPatternsText 是同一个先例。
+  //
+  // The two lists are textareas, so the draft lives as text rather than an
+  // array: parsing on every keystroke eats the blank line the admin is typing
+  // through and moves the caret. Split on save — same precedent as
+  // brokerPatternsText above.
+  const [emailGate, setEmailGate] = useState<AdminEmailGateSettings | null>(null)
+  const [emailBlockedText, setEmailBlockedText] = useState('')
+  const [emailAllowedText, setEmailAllowedText] = useState('')
+  const [savingEmailGate, setSavingEmailGate] = useState(false)
+
   // 官方社交主页 / official social links
   const [social, setSocial] = useState<AdminSocialSettings | null>(null)
   const [savingSocial, setSavingSocial] = useState(false)
@@ -405,10 +421,10 @@ export default function AdminPage() {
   const load = async (opts: { q?: string; plan?: string } = {}) => {
     setLoading(true)
     try {
-      // 九个接口分区加载：以前是一个 Promise.all，任一失败整页报错、其余八块
+      // 十个接口分区加载：以前是一个 Promise.all，任一失败整页报错、其余八块
       // 明明拿到了数据也不显示。现在各自成败各自算，失败的块保留旧值（首屏就是
       // 空态），只提示"N 项没加载出来"。其它页面早就吃过这个教训。
-      // Nine endpoints settle independently: a single Promise.all used to fail the
+      // Ten endpoints settle independently: a single Promise.all used to fail the
       // whole page when any one of them failed, hiding data the other eight had
       // already returned. Each section now keeps its previous value on failure
       // and one toast says how many didn't load.
@@ -420,10 +436,11 @@ export default function AdminPage() {
         adminApi.getPricing(),
         adminApi.getTrial(),
         adminApi.getSocial(),
+        adminApi.getEmailGate(),
         adminApi.getCandleHistory(),
         adminApi.getStrategySettings(),
       ])
-      const [usersRes, metricsRes, pageStatsRes, settingsRes, pricingRes, trialRes, socialRes, candleRes, strategyRes] = results
+      const [usersRes, metricsRes, pageStatsRes, settingsRes, pricingRes, trialRes, socialRes, emailGateRes, candleRes, strategyRes] = results
       let failed = 0
       const ok = <T,>(r: PromiseSettledResult<T>): T | null => {
         if (r.status === 'fulfilled') return r.value
@@ -454,6 +471,12 @@ export default function AdminPage() {
       }
       const socialVal = ok(socialRes)
       if (socialVal) setSocial(socialVal)
+      const emailGateVal = ok(emailGateRes)
+      if (emailGateVal) {
+        setEmailGate(emailGateVal)
+        setEmailBlockedText(emailGateVal.extraBlockedDomains.join('\n'))
+        setEmailAllowedText(emailGateVal.extraAllowedDomains.join('\n'))
+      }
       const candleVal = ok(candleRes)
       if (candleVal) setCandleSettings(candleVal)
       const strategyVal = ok(strategyRes)
@@ -554,6 +577,33 @@ export default function AdminPage() {
       showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
     } finally {
       setSavingSocial(false)
+    }
+  }
+
+  const saveEmailGate = async () => {
+    if (!emailGate) return
+    setSavingEmailGate(true)
+    try {
+      const split = (text: string) =>
+        text.split('\n').map((d) => d.trim()).filter(Boolean)
+      const updated = await adminApi.updateEmailGate({
+        ...emailGate,
+        extraBlockedDomains: split(emailBlockedText),
+        extraAllowedDomains: split(emailAllowedText),
+      })
+      setEmailGate(updated)
+      // 回填后端规范化后的结果：后端会去掉粘贴时带的 @、结尾的点并去重，不回填
+      // 的话框里留着的还是管理员刚敲的原样，下次保存又要被规范化一遍，看着像没存上。
+      // Reflect the server's normalisation (stripped @ prefixes, trailing dots,
+      // duplicates) — otherwise the box still shows the raw input and the next
+      // save looks like it didn't take.
+      setEmailBlockedText(updated.extraBlockedDomains.join('\n'))
+      setEmailAllowedText(updated.extraAllowedDomains.join('\n'))
+      showToast('ok', t('admin.saved'))
+    } catch (err) {
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
+    } finally {
+      setSavingEmailGate(false)
     }
   }
 
@@ -929,6 +979,54 @@ export default function AdminPage() {
             onClick={saveTrial}
           >
             {savingTrial ? t('common.loading') : t('common.save')}
+          </button>
+        </div>
+      )}
+
+      {/* 注册邮箱限制 / signup email gate */}
+      {emailGate && (
+        <div className="glass mb-5 p-5">
+          <div className="mb-1.5 flex flex-wrap items-center justify-between gap-3">
+            <h3 className="font-display text-lg font-semibold text-neutral-100">{t('admin.emailGateTitle')}</h3>
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
+              <Switch
+                checked={emailGate.disposableBlockEnabled}
+                onChange={(v) => setEmailGate({ ...emailGate, disposableBlockEnabled: v })}
+              />
+              {t('admin.emailGateEnabled')}
+            </label>
+          </div>
+          <p className="mb-4 text-xs text-neutral-500">{t('admin.emailGateHint')}</p>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <label className="label">{t('admin.emailGateExtraBlocked')}</label>
+              <textarea
+                className="input min-h-28 font-mono text-xs"
+                spellCheck={false}
+                value={emailBlockedText}
+                onChange={(e) => setEmailBlockedText(e.target.value)}
+                placeholder={'mailinator.com\n10minutemail.com'}
+              />
+              <p className="mt-1.5 text-xs text-neutral-500">{t('admin.emailGateListHint')}</p>
+            </div>
+            <div>
+              <label className="label">{t('admin.emailGateExtraAllowed')}</label>
+              <textarea
+                className="input min-h-28 font-mono text-xs"
+                spellCheck={false}
+                value={emailAllowedText}
+                onChange={(e) => setEmailAllowedText(e.target.value)}
+                placeholder={'mycompany.com\nuniversity.edu.cn'}
+              />
+              <p className="mt-1.5 text-xs text-neutral-500">{t('admin.emailGateAllowedHint')}</p>
+            </div>
+          </div>
+          <button
+            className="btn-primary mt-4 px-5 py-2 text-sm disabled:opacity-40"
+            disabled={savingEmailGate}
+            onClick={saveEmailGate}
+          >
+            {savingEmailGate ? t('common.loading') : t('common.save')}
           </button>
         </div>
       )}

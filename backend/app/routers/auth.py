@@ -18,6 +18,7 @@ from app.core.security import (
 from app.models import AdminAuditLog, User
 from app.routers.invite import apply_invite
 from app.schemas import AuthRequest, AuthResponse, GoogleAuthRequest, RegisterRequest, UserOut
+from app.services.email_domains import is_disposable_email
 from app.services.phone import compose_phone
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -58,6 +59,28 @@ def register(request: Request, req: RegisterRequest, db: Session = Depends(get_d
         raise HTTPException(
             status_code=422,
             detail="手机号格式不正确，请检查区号与号码 / Invalid phone number — check the dial code and number",
+        )
+    # 一次性邮箱（temp mail）拦在这里，和上面手机号校验同一个道理：这是用户
+    # 当场能改的输入问题，得给一句说得明白的话。放到下面邮箱重复检查之后的话，
+    # 用一次性邮箱的人会先撞上那句为防枚举而刻意含糊的「无法完成注册」，完全
+    # 不知道该换个邮箱。
+    #
+    # 只拦新注册，存量用户一个不动——他们不再走这个接口（登录不查），所以
+    # "存量豁免"不需要任何标记列或迁移，是这条路径天然的结果。Google 登录那条
+    # 路也不查：一次性邮箱域名本来就注册不出 Google 账号，那边多一道判定只会
+    # 徒增误伤面。
+    #
+    # Disposable addresses are rejected here, for the same reason the phone check
+    # sits above the duplicate-email lookup: it's a fixable input problem and
+    # deserves a clear message, not the deliberately vague anti-enumeration one.
+    # New registrations only — existing users never hit this endpoint again, so
+    # grandfathering them needs no flag column and no migration. The Google path
+    # is deliberately not gated: you can't create a Google account on a
+    # disposable domain anyway, so a check there would only add false positives.
+    if is_disposable_email(db, email):
+        raise HTTPException(
+            status_code=400,
+            detail="请使用常用邮箱注册，暂不支持一次性邮箱 / Disposable email addresses aren't supported — please use a regular mailbox",
         )
     existing = db.query(User).filter(User.email == email).first()
     if existing:

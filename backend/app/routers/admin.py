@@ -23,13 +23,14 @@ from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
 from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
 from app.services.audit import log_change
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
 from app.services.strategy_winrate import compute_strategy_session_winrate
 from app.utils.timeutil import aware as _aware
 from app.services.settings_store import (
     get_broker_settings,
     get_candle_settings,
+    get_email_gate_settings,
     get_platform_strategies,
     get_pricing_settings,
     get_social_settings,
@@ -38,6 +39,7 @@ from app.services.settings_store import (
     get_trial_settings,
     get_winrate_settings,
     invalidate_candle_cache,
+    invalidate_email_gate_cache,
     invalidate_platform_strategies_cache,
     invalidate_pricing_cache,
     invalidate_settings_cache,
@@ -47,6 +49,7 @@ from app.services.settings_store import (
     invalidate_trial_cache,
     invalidate_winrate_settings_cache,
     save_candle_settings,
+    save_email_gate_settings,
     save_platform_strategies,
     save_pricing_settings,
     save_social_settings,
@@ -706,6 +709,41 @@ def put_trial(
     db.commit()
     invalidate_trial_cache()
     return get_trial(db, admin)
+
+
+# ---------- 一次性邮箱闸门 / disposable-email gate ----------
+
+@router.get("/email-gate", response_model=AdminEmailGateSettings)
+def get_email_gate(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """读取一次性邮箱闸门设置。Read the disposable-email gate settings."""
+    g = get_email_gate_settings(db)
+    return AdminEmailGateSettings(
+        disposableBlockEnabled=bool(g["disposable_block_enabled"]),
+        extraBlockedDomains=list(g["extra_blocked_domains"]),
+        extraAllowedDomains=list(g["extra_allowed_domains"]),
+    )
+
+
+@router.put("/email-gate", response_model=AdminEmailGateSettings)
+def put_email_gate(
+    body: AdminEmailGateSettings,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """保存一次性邮箱闸门设置。Save the disposable-email gate settings."""
+    data = {
+        "disposable_block_enabled": body.disposableBlockEnabled,
+        "extra_blocked_domains": body.extraBlockedDomains,
+        "extra_allowed_domains": body.extraAllowedDomains,
+    }
+    save_email_gate_settings(db, data)
+    _log_change(db, admin.id, admin.id, "setting:email_gate", None, json.dumps(data, ensure_ascii=False))
+    db.commit()
+    invalidate_email_gate_cache()
+    return get_email_gate(db, admin)
 
 
 # ---------- 官方社交主页 / official social links ----------

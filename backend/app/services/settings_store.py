@@ -970,3 +970,87 @@ def save_gamification_settings(db, data: dict) -> None:
         db.add(PlatformSetting(key="gamification", value=encoded))
     else:
         row.value = encoded
+
+
+# 一次性邮箱闸门默认值。DB 无记录时使用，管理员在后台修改后写入
+# PlatformSetting（key="email_gate"）。
+#
+# 默认开启（disposable_block_enabled=True）：这是产品决定的"硬拒"，新部署
+# 就该是拦着的。真出了误伤，后台把开关关掉比发一次版快得多——这也是它做成
+# 设置项而不是常量的全部理由。
+#
+# 两个增补名单都默认为空：内置放行表（email_domains.ALLOW_DOMAINS）和打包
+# 快照已经覆盖了绝大多数情况，空列表意味着"没人手工干预过"，排查时一眼能看出
+# 当前行为完全来自代码，而不是某次后台误操作。
+#
+# Disposable-email gate defaults (PlatformSetting key="email_gate"). Blocking is
+# on by default — the product decision is a hard reject. Both supplementary lists
+# start empty so that an empty value provably means "nobody has hand-tuned this",
+# which makes incidents far easier to reason about.
+EMAIL_GATE_DEFAULTS: dict = {
+    "disposable_block_enabled": True,
+    "extra_blocked_domains": [],
+    "extra_allowed_domains": [],
+}
+
+_email_gate_cache: dict = {}
+_email_gate_cache_at: float = 0.0
+
+
+def invalidate_email_gate_cache() -> None:
+    global _email_gate_cache_at
+    with _lock:
+        _email_gate_cache_at = 0.0
+
+
+def _load_email_gate_from_db(db) -> dict:
+    """从 DB 读一次性邮箱闸门设置，缺失的 key 回落到默认值。"""
+    data = dict(EMAIL_GATE_DEFAULTS)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "email_gate").first()
+    if row:
+        try:
+            stored = json.loads(row.value)
+            if isinstance(stored, dict):
+                for k in EMAIL_GATE_DEFAULTS:
+                    if k in stored:
+                        data[k] = stored[k]
+        except (ValueError, TypeError):
+            logger.warning("platform_settings: invalid JSON for email_gate, using defaults")
+    # 两个名单在别处会被当序列遍历；存坏了（比如手改数据库写成字符串）不能
+    # 让调用方拿到一个会把每个字符当域名的 str。
+    # Both lists are iterated by callers; a hand-edited string in the DB must not
+    # reach them as a str whose characters would each read as a domain.
+    for k in ("extra_blocked_domains", "extra_allowed_domains"):
+        if not isinstance(data[k], list):
+            logger.warning("platform_settings: email_gate.%s is not a list, using []", k)
+            data[k] = []
+    return data
+
+
+def get_email_gate_settings(db) -> dict:
+    """读取一次性邮箱闸门设置（独立缓存）。
+    Read the disposable-email gate settings (separate cache)."""
+    global _email_gate_cache, _email_gate_cache_at
+    now = time.time()
+    with _lock:
+        if _email_gate_cache and now - _email_gate_cache_at < _CACHE_TTL_SECONDS:
+            return dict(_email_gate_cache)
+    data = _load_email_gate_from_db(db)
+    with _lock:
+        _email_gate_cache = data
+        _email_gate_cache_at = now
+    return dict(data)
+
+
+def save_email_gate_settings(db, data: dict) -> None:
+    """写入一次性邮箱闸门设置（不提交，调用方 commit 后 invalidate）。
+    Write the disposable-email gate settings (no commit; caller commits then
+    invalidates cache)."""
+    merged = _load_email_gate_from_db(db)
+    merged.update(data)
+    encoded = json.dumps(merged, ensure_ascii=False)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "email_gate").first()
+    if row is None:
+        db.add(PlatformSetting(key="email_gate", value=encoded))
+    else:
+        row.value = encoded
