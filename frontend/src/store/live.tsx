@@ -5,6 +5,7 @@ import type { BrokerLock, MT5Account, Order, Position, Quote, Signal, StrategySi
 import { accountApi, orderApi, quoteApi, signalApi, strategyApi, symbolApi, trendApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
 import { usePrefs } from './prefs'
+import { useAuth } from './auth'
 import { showFallbackNotification } from '../utils/fallbackNotify'
 
 interface LiveContextValue {
@@ -110,6 +111,21 @@ const MAX_EXPIRED = 30
 // account list plus subscription config, so it's relaxed to 15s.
 const ACCOUNTS_POLL_MS = 15000
 
+// 切回前台时，隐藏了至少这么久才整份重拉。短暂切走（回条消息、看一眼通知）连接
+// 多半还活着、什么都没漏，不值得七个请求；隐藏够久则一切都可能变了：后台期间
+// WS 被系统掐断而 onclose 没来（见 useClientSocket 的心跳说明）、套餐到期被降级、
+// 另一台设备改了东西。网页版从不需要这条——手机浏览器会把后台标签页整页丢掉再
+// 重载；安卓 App 的 WebView 被保活撑着一直活着，从不重载，只有它会撞上。
+// On returning to the foreground, resync everything only if hidden at least
+// this long. A brief switch-away (answering a message, glancing at a
+// notification) most likely kept the socket alive and missed nothing, not worth
+// seven requests; a long absence means anything may have changed: the socket
+// cut by the OS with no onclose (see the heartbeat notes in useClientSocket),
+// the plan downgraded on expiry, edits from another device. The web never needs
+// this — mobile browsers discard and reload background tabs — but the Android
+// WebView is kept alive and never reloads, so it is the one that hits it.
+const RESUME_RESYNC_AFTER_MS = 60_000
+
 // 连续多少次轮询失败才判定后端不可达。间隔从 5 秒放宽到 15 秒后，仍按 3 次会
 // 让红条推迟到 45 秒才出现，太迟；降到 2 次即约 30 秒。不降到 1 次是因为部署时
 // 的一两秒 502、偶发网络抖动都会失败一次，据此弹红条只会制造噪音。
@@ -168,6 +184,11 @@ function capExpired(signals: Signal[]): Signal[] {
 
 export function LiveProvider({ children }: { children: ReactNode }) {
   const { applyRemotePrefs } = usePrefs()
+  // 只用它的 refreshUser；套餐与信号一起重拉（见下面 resync 的说明）。
+  // Only refreshUser is used here; the plan is resynced alongside the signals.
+  const { refreshUser } = useAuth()
+  const refreshUserRef = useRef(refreshUser)
+  refreshUserRef.current = refreshUser
   const [signals, setSignals] = useState<Signal[]>([])
   const [strategySignals, setStrategySignals] = useState<StrategySignal[]>([])
   const [orders, setOrders] = useState<Order[]>([])
@@ -245,6 +266,30 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     refreshAll()
+  }, [refreshAll])
+
+  // 「掉过线」之后的整份重拉。此前所有数据只在挂载时拉一次，之后全靠 WS 增量推送：
+  // 断线期间推过来的 SIGNAL_NEW / SIGNAL_EXPIRED / ORDER_UPDATE 全部丢失，重连后
+  // 服务端只补推持仓与报价（ws.py），信号列表就此停在断线前那一刻。网页版每次打开
+  // 都重新挂载，撞不上；安卓 App 的页面一活好几天，后台期间产生的信号在 App 里永远
+  // 看不到，用户看到的就是"网页有信号、App 没有"。
+  // 套餐搭同一趟车：`user.plan` 同样只在 Layout 挂载时刷过一次（PlanExpiryBanner），
+  // 试用到期后 App 里缓存的仍是 PRO，而后端已按 FREE 只回过期信号，前端再按 PRO 把
+  // 过期的全部藏掉——网格直接为空，这是同一类"从不重载"的病。
+  // Full resync after having been disconnected. Everything used to be fetched
+  // once on mount and then live on WS deltas alone: every SIGNAL_NEW /
+  // SIGNAL_EXPIRED / ORDER_UPDATE pushed while disconnected is lost, and on
+  // reconnect the server re-pushes only positions and quotes (ws.py), so the
+  // signal list stays frozen at the moment the socket died. The web remounts on
+  // every open and never hits this; the Android WebView lives for days, so any
+  // signal fired while it was backgrounded never shows up there — "the web has
+  // signals, the app doesn't". The plan rides along: `user.plan` was likewise
+  // refreshed once on Layout mount (PlanExpiryBanner); after a trial expires the
+  // app still holds PRO while the backend serves FREE's expired-only list, which
+  // the PRO-side filter hides entirely — an empty grid from the same
+  // never-reloads disease.
+  const resync = useCallback(async () => {
+    await Promise.all([refreshAll(), refreshUserRef.current()])
   }, [refreshAll])
 
   // 兜底轮询：每 20 秒刷新一次活跃品种列表——EA 在 InpSymbols 里增删品种后，
@@ -459,6 +504,41 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   }, [applyRemotePrefs])
 
   const wsConnected = useClientSocket(handleMessage)
+
+  // 重连成功（不是首次连上）就整份重拉——首次连接由挂载那次 refreshAll 覆盖。
+  // 心跳判死的僵尸连接也走这里：dropDeadConnection → 新连接 AUTH_OK → 此处。
+  // Resync on every reconnect (not the first connection — mount already fetched).
+  // A zombie declared dead by the heartbeat lands here too: dropDeadConnection →
+  // fresh AUTH_OK → this effect.
+  const sawConnection = useRef(false)
+  useEffect(() => {
+    if (!wsConnected) return
+    if (sawConnection.current) void resync()
+    sawConnection.current = true
+  }, [wsConnected, resync])
+
+  // 切回前台且隐藏够久（RESUME_RESYNC_AFTER_MS）也整份重拉。与上面那条会在同一次
+  // 回前台时先后各跑一次（先这条，几秒后重连那条），两轮都是轻请求；不去合并，
+  // 因为两者的语义不同：这条兜的是"连接没断但世界变了"（套餐到期、别的设备改了
+  // 东西），上面那条兜的是"断线期间漏掉的推送"。
+  // Also resync on returning to the foreground after a long enough absence. On
+  // one resume both may run (this one first, the reconnect one seconds later);
+  // both are light, and they are deliberately not merged because they cover
+  // different things: this one "the socket held but the world changed" (plan
+  // expiry, edits elsewhere), the other "pushes missed while disconnected".
+  useEffect(() => {
+    let hiddenAt: number | null = null
+    const onVisibility = () => {
+      if (document.hidden) {
+        hiddenAt = Date.now()
+        return
+      }
+      if (hiddenAt != null && Date.now() - hiddenAt >= RESUME_RESYNC_AFTER_MS) void resync()
+      hiddenAt = null
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [resync])
 
   // 曾经连上过之后又断开，才提示"已断线"，避免首次连接前的瞬间误报。
   // Only flag "disconnected" after having connected at least once, so the

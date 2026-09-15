@@ -138,3 +138,82 @@ def test_query_param_token_is_not_accepted(monkeypatch):
     assert ws.sent == [{"type": "AUTH_FAIL", "reason": "invalid token"}], (
         "query 里的 token 被接受了——`?token=` 回退不能重新出现"
     )
+
+
+# ---------- 应用层心跳 / app-level heartbeat ----------
+
+
+class _FakeManager:
+    """够用的假 connection_manager：只记录注册/注销，不碰 Redis 与在线名单。"""
+
+    def __init__(self):
+        self.registered: list[str] = []
+        self.unregistered: list[str] = []
+
+    async def register_client(self, user_id, ws):
+        self.registered.append(user_id)
+
+    async def unregister_client(self, user_id, ws):
+        self.unregistered.append(user_id)
+
+    def get_positions(self, user_id):
+        return []
+
+    def get_quotes(self, user_id):
+        return []
+
+    @staticmethod
+    def account_funds_from_positions(positions):
+        return []
+
+
+class _ScriptedWS(_FakeWS):
+    """鉴权通过后按脚本逐帧交出 receive_text 的内容，脚本耗尽即断开。"""
+
+    def __init__(self, frames: list[str]):
+        super().__init__(first_frame={"type": "AUTH", "token": "valid"})
+        self._frames = list(frames)
+
+    async def receive_text(self):
+        if not self._frames:
+            raise WebSocketDisconnect(code=1000)
+        return self._frames.pop(0)
+
+
+def _authed(monkeypatch) -> _FakeManager:
+    fake = _FakeManager()
+    monkeypatch.setattr(ws_mod, "_authenticate", lambda token: "user-1" if token == "valid" else None)
+    monkeypatch.setattr(ws_mod, "manager", fake)
+    monkeypatch.setattr(ws_mod.quotes_store, "get_all", lambda: [])
+    return fake
+
+
+def test_ping_frame_is_answered_with_pong(monkeypatch):
+    """客户端的 {"type":"PING"} 必须得到 {"type":"PONG"}。
+
+    这是前端识别僵尸连接的唯一依据：安卓 App 切后台再回来，TCP 已断而
+    readyState 仍是 OPEN，只有「发 PING 等 PONG 超时」能把它认出来并重连。
+    服务端不回 PONG，前端会在每个心跳周期把好连接也当僵尸断掉重连。
+    """
+    fake = _authed(monkeypatch)
+    ws = _ScriptedWS(['{"type":"PING"}', '{"type":"PING"}'])
+    _run(ws)
+    assert ws.sent[0] == {"type": "AUTH_OK", "userId": "user-1"}
+    assert ws.sent[1:] == [{"type": "PONG"}, {"type": "PONG"}]
+    assert fake.registered == ["user-1"]
+    assert fake.unregistered == ["user-1"], "断开后没有注销连接"
+
+
+@pytest.mark.parametrize("frame", [
+    "",                       # 空帧
+    "not json",               # 非 JSON
+    "[1, 2]",                 # JSON 但不是对象
+    '{"type":"HELLO"}',       # 对象但不是 PING
+    '{"type":"AUTH","token":"valid"}',  # 重复鉴权帧也不回应
+])
+def test_non_ping_frames_are_ignored(monkeypatch, frame):
+    """PING 之外的任何客户端帧都静默忽略——老版本前端一帧不发，行为也不能变。"""
+    _authed(monkeypatch)
+    ws = _ScriptedWS([frame])
+    _run(ws)
+    assert ws.sent == [{"type": "AUTH_OK", "userId": "user-1"}], f"对 {frame!r} 回了帧"

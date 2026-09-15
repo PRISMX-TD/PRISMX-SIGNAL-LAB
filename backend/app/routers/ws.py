@@ -7,6 +7,7 @@ MT5 execution goes exclusively through the PRISMX Bridge HTTP polling
 (/api/bridge/*); the legacy /ws/ea EA channel has been removed.
 """
 import asyncio
+import json
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -54,6 +55,16 @@ def _authenticate(token: str) -> str | None:
     if current_tv is None or token_tv != (current_tv or 0):
         return None
     return user_id
+
+
+def _is_ping(raw: str) -> bool:
+    """客户端帧是不是应用层心跳 {"type":"PING"}。非 JSON、非对象一律不是。
+    Whether a client frame is the app-level heartbeat; anything unparseable isn't."""
+    try:
+        frame = json.loads(raw)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(frame, dict) and frame.get("type") == "PING"
 
 
 # ---------- 前端通道 / Client channel ----------
@@ -153,8 +164,32 @@ async def ws_client(websocket: WebSocket):
         await websocket.send_json({"type": "GLOBAL_QUOTES", "data": cached_global_quotes})
     try:
         while True:
-            # 前端通道以服务端推送为主，这里仅保活 / mainly server-push; keep alive
-            await websocket.receive_text()
+            # 前端通道以服务端推送为主。客户端唯一会主动发的帧是应用层心跳
+            # {"type":"PING"}，这里回一帧 PONG；其它内容一律忽略（老版本前端不发
+            # 任何帧，行为不变）。
+            #
+            # 为什么需要应用层心跳而不是靠 uvicorn 的协议层 ping：协议层 ping/pong
+            # 由浏览器自动应答，页面 JS 完全看不到，所以它只能帮**服务端**发现死连接，
+            # 帮不了客户端。而客户端这一侧才是问题所在——安卓 App 切后台再回来，TCP
+            # 早被运营商 NAT 或系统休眠掐断，WebSocket 的 readyState 却仍是 OPEN，
+            # 前端永远不会重连，报价冻住、新信号一条都收不到（2026-09-15 两名用户
+            # 反馈"同一手机网页有信号 App 没有"，根因就是这条僵尸连接）。客户端定时发
+            # PING、在时限内收不到任何帧就主动断开重连，才能从页面这一侧把僵尸认出来。
+            #
+            # The only frame the client ever sends after AUTH is the app-level
+            # heartbeat {"type":"PING"}; answer with PONG and ignore anything else
+            # (older frontends send nothing, so their behaviour is unchanged).
+            # Protocol-level ping/pong is answered by the browser and invisible to
+            # page JS, so it only lets the *server* detect dead connections. The
+            # client side is where it matters: an Android WebView resumed from the
+            # background may hold a socket whose TCP was long cut by carrier NAT or
+            # device sleep, yet readyState still says OPEN — no reconnect, frozen
+            # quotes, no new signals (the 2026-09-15 "web shows signals, app
+            # doesn't" reports). A client-driven PING with a reply deadline is the
+            # only way the page can tell a zombie from a quiet connection.
+            raw = await websocket.receive_text()
+            if _is_ping(raw):
+                await websocket.send_json({"type": "PONG"})
     except WebSocketDisconnect:
         await manager.unregister_client(user_id, websocket)
     except Exception:
