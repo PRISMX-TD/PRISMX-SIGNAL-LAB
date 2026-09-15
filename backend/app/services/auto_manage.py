@@ -384,6 +384,10 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
         logger.info(
             "auto_manage: user=%s enqueued %d command(s)", user_id, len(created_orders)
         )
+        # 桥接账号：叫醒长轮询中的桥接，追踪止损 / 分批止盈的指令不再等下一拍。
+        # Bridge accounts: wake the long-polling bridge so the command goes out now.
+        from app.services import bridge_wake
+        bridge_wake.notify(user_id)
         # Gateway 账号没有桥接来取这些指令，提交后由本函数直接执行。
         # Gateway accounts have no bridge to fetch these; execute them here.
         _execute_gateway_orders(db, user_id, created_orders)

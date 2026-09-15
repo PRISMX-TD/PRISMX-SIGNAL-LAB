@@ -11,6 +11,7 @@ On launch the first thing it asks for is the user's API token.
 """
 import base64
 import ctypes
+import http.client
 import json
 import logging
 import os
@@ -24,8 +25,9 @@ from ctypes import wintypes
 from logging.handlers import RotatingFileHandler
 from tkinter import messagebox, ttk
 from urllib import error, request
+from urllib.parse import urlparse
 
-from mt5_worker import poll_terminal
+from mt5_worker import poll_terminal, read_positions
 
 # 系统托盘：可选依赖，缺失时静默降级为"点 X 直接退出"的旧行为，不影响主功能。
 # System tray: optional dependency; missing it silently falls back to the old
@@ -40,7 +42,7 @@ except Exception:
     _TRAY_AVAILABLE = False
 
 # ---------- 版本 / Version ----------
-APP_VERSION = "1.3.24"
+APP_VERSION = "1.4.0"
 
 # ---------- 更新检测 / Update check ----------
 # 通过 GitHub Releases 检查是否有更新的安装包版本。
@@ -64,7 +66,15 @@ UPDATE_CHECK_INTERVAL = 600
 DEFAULT_BACKEND = "https://api.prismxsignallab.com"
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".prismx_bridge.json")
 LOG_PATH = os.path.join(os.path.expanduser("~"), ".prismx_bridge.log")
-POLL_INTERVAL = 1.5  # 后端轮询间隔（秒）/ backend poll interval (seconds)
+POLL_INTERVAL = 1.5  # 状态上报间隔（秒）/ status report interval (seconds)
+
+# 指令长轮询：/api/bridge/poll 在没有指令时最多挂这么久，后端一有指令落库立即返回。
+# 上限由后端定（5 秒）——账号在线看 7 秒内的心跳，而心跳就是这个请求刷的，不能挂太久。
+# 以前指令要等下一拍 1.5 秒轮询才被取走（平均 0.75 秒），现在是落库即取。
+# Command long poll: /api/bridge/poll holds up to this long with nothing to deliver
+# and returns the instant a command is committed. The backend caps it at 5s because
+# liveness is a 7-second heartbeat window refreshed by this very request.
+COMMAND_WAIT_SECONDS = 5.0
 
 # 单次平仓明细上报的最大条数。重连补扫可能一次产出几百条，整包发容易超时，
 # 而超时的整包会原样退回重试队列反复重发。见 _post_trades。
@@ -376,15 +386,113 @@ def scan_terminals() -> list[str]:
 
 
 # ---------- 后端 HTTP 客户端 / Backend HTTP client ----------
-def _post_json(url: str, payload: dict, token: str, timeout: float = 10.0) -> dict:
-    """带 API Token 的 POST 请求 / POST with the API token header."""
-    data = json.dumps(payload).encode("utf-8")
-    req = request.Request(url, data=data, method="POST")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("X-API-Token", token)
-    with request.urlopen(req, timeout=timeout) as resp:
-        body = resp.read().decode("utf-8")
-        return json.loads(body) if body else {}
+class BackendClient:
+    """复用连接的后端 POST 客户端。
+
+    以前每次请求都用 urllib 新开一条连接：一拍三次请求（持仓、poll、报价）就是三次
+    TCP + TLS 握手，大陆到新加坡每次握手 2~3 个 RTT，一拍光握手就要一秒上下。这里用
+    http.client 保持一条 keep-alive 连接，握手只在启动和连接断掉时发生。
+
+    一个实例一条连接、一把锁：http.client 的连接不能并发使用。状态上报循环和指令
+    长轮询循环各持一个实例——否则挂着的 5 秒长轮询会把持仓上报堵在锁外。
+
+    直连失败时退回 urllib（它会读系统代理设置）并从此固定走 urllib：有用户的机器必须
+    经代理才出得去，不能因为省握手把他们挡在门外。
+
+    Keep-alive POST client. urllib opened a fresh connection per request: three
+    requests per tick meant three TCP+TLS handshakes, 2-3 RTTs each from mainland
+    China to Singapore. One connection and one lock per instance (http.client
+    connections are not concurrency-safe); the status loop and the command loop each
+    own one so a held long poll never blocks a positions report. Falls back to urllib
+    (which honours system proxy settings) when a direct connection cannot be made.
+    """
+
+    def __init__(self, backend: str, token: str):
+        self._base = backend.rstrip("/")
+        u = urlparse(self._base)
+        self._https = u.scheme == "https"
+        self._host = u.hostname or ""
+        self._port = u.port
+        self._token = token
+        self._conn: http.client.HTTPConnection | None = None
+        self._lock = threading.Lock()
+        self._use_urllib = False
+
+    def _open(self, timeout: float) -> http.client.HTTPConnection:
+        if self._https:
+            return http.client.HTTPSConnection(self._host, self._port, timeout=timeout)
+        return http.client.HTTPConnection(self._host, self._port, timeout=timeout)
+
+    def _drop(self) -> None:
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
+
+    def close(self) -> None:
+        with self._lock:
+            self._drop()
+
+    def _post_urllib(self, path: str, data: bytes, timeout: float) -> dict:
+        req = request.Request(self._base + path, data=data, method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("X-API-Token", self._token)
+        with request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8")
+            return json.loads(body) if body else {}
+
+    def post(self, path: str, payload: dict, timeout: float = 10.0) -> dict:
+        """POST JSON，返回 JSON dict。HTTP 4xx/5xx 抛 urllib.error.HTTPError（带 code /
+        reason），与旧实现一致，调用方的错误分支不用改。
+        POST JSON; raises urllib.error.HTTPError on 4xx/5xx like the old implementation."""
+        data = json.dumps(payload).encode("utf-8")
+        if self._use_urllib:
+            return self._post_urllib(path, data, timeout)
+
+        headers = {
+            "Content-Type": "application/json",
+            "Content-Length": str(len(data)),
+            "X-API-Token": self._token,
+            "Connection": "keep-alive",
+        }
+        last: Exception | None = None
+        with self._lock:
+            # 第一次失败多半是服务端已经关掉了这条空闲连接（keep-alive 到期），重连再发
+            # 一次；这里的请求都是幂等的（持仓/报价是快照，回执按 clientOrderId 去重）。
+            # A first failure is usually the server having closed the idle connection;
+            # reconnect and retry once. Every request here is idempotent.
+            for attempt in range(2):
+                try:
+                    if self._conn is None:
+                        self._conn = self._open(timeout)
+                    elif self._conn.sock is not None:
+                        self._conn.sock.settimeout(timeout)
+                    self._conn.request("POST", path, body=data, headers=headers)
+                    resp = self._conn.getresponse()
+                    body = resp.read()
+                    if (resp.getheader("Connection") or "").lower() == "close":
+                        self._drop()
+                    if resp.status >= 400:
+                        raise error.HTTPError(self._base + path, resp.status, resp.reason, resp.headers, None)
+                    return json.loads(body.decode("utf-8")) if body else {}
+                except error.HTTPError:
+                    raise
+                except (http.client.HTTPException, OSError) as e:
+                    self._drop()
+                    last = e
+                    if attempt == 0:
+                        continue
+        # 直连两次都不成：可能这台机器要走系统代理。urllib 会读代理设置，成了就固定走它。
+        # Direct connection failed twice: maybe this machine needs the system proxy.
+        try:
+            out = self._post_urllib(path, data, timeout)
+        except Exception:
+            raise last if last is not None else RuntimeError("backend unreachable")
+        self._use_urllib = True
+        logger.warning("直连后端失败(%s)，已改走系统代理(urllib) / direct connection failed, using urllib with system proxy", last)
+        return out
 
 
 class BridgeEngine:
@@ -431,14 +539,127 @@ class BridgeEngine:
         # whichever broker account is selected, and different brokers can
         # legitimately quote the same symbol differently.
         self._last_quotes: dict[tuple, tuple] = {}
+        # 两条循环各一条 keep-alive 连接（见 BackendClient 的说明）。
+        # One keep-alive connection per loop (see BackendClient).
+        self._http = BackendClient(self.backend, token)
+        self._cmd_http = BackendClient(self.backend, token)
+        # MetaTrader5 包附着的是进程级单连接，两条循环不能同时碰它。
+        # The MetaTrader5 module is one process-wide attachment; the two loops
+        # must not touch it concurrently.
+        self._mt5_lock = threading.Lock()
+        # 状态循环每拍留下的快照，指令循环拿来发 poll、路由指令、合并持仓上报。
+        # Snapshots the status loop leaves for the command loop.
+        self._accounts_snapshot: list = []
+        self._login_to_path: dict[str, str] = {}
+        self._positions_by_path: dict[str, list] = {}
+        self._state_lock = threading.Lock()
+        self._cmd_thread: threading.Thread | None = None
 
     def start(self):
         self._stop.clear()
-        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread = threading.Thread(target=self._loop, daemon=True, name="bridge-status")
         self._thread.start()
+        self._cmd_thread = threading.Thread(target=self._command_loop, daemon=True, name="bridge-commands")
+        self._cmd_thread.start()
 
     def stop(self):
         self._stop.set()
+        self._http.close()
+        self._cmd_http.close()
+
+    # ---------- 指令循环 / command loop ----------
+    def _command_loop(self):
+        """长轮询领指令、立刻执行。
+
+        与状态上报循环分开跑：① 挂着等指令的 5 秒不拖慢持仓 / 报价上报；② 指令一到就
+        执行，不再排在"读账号 + 持仓 + 报价 + 扫平仓明细"整轮之后；③ 执行完立刻重读
+        持仓上报，网页上仓位成交即出现、平仓即消失。
+        对旧版后端（不认识 waitSeconds、立即返回）自动退回 1.5 秒定频，不会空转。
+
+        Long-poll for commands and execute them at once, on its own thread so the held
+        request never delays status reports and execution never queues behind a full
+        terminal read. Falls back to the 1.5s cadence against an old backend.
+        """
+        while not self._stop.is_set():
+            accounts = self._accounts_snapshot
+            if not accounts:
+                self._stop.wait(0.5)
+                continue
+            t0 = time.monotonic()
+            try:
+                resp = self._cmd_http.post(
+                    "/api/bridge/poll",
+                    {
+                        "accounts": accounts,
+                        "bridgeVersion": APP_VERSION,
+                        "waitSeconds": COMMAND_WAIT_SECONDS,
+                        "fetchCommands": True,
+                    },
+                    timeout=COMMAND_WAIT_SECONDS + 10.0,
+                )
+                commands = resp.get("commands", [])
+                commands = [c for c in commands if isinstance(c, dict)] if isinstance(commands, list) else []
+            except Exception as e:
+                logger.warning("指令长轮询失败 / command poll failed: %s", e)
+                self._stop.wait(POLL_INTERVAL)
+                continue
+            if commands:
+                try:
+                    self._execute_commands(commands, self._cmd_http)
+                except Exception as e:
+                    logger.exception("执行指令异常 / command execution error: %s", e)
+            elapsed = time.monotonic() - t0
+            if not commands and elapsed < 1.0:
+                # 后端没把请求挂住（旧版后端）：退回定频，别把后端打满。
+                # The backend returned at once (older backend): fall back to the fixed cadence.
+                self._stop.wait(max(0.2, POLL_INTERVAL - elapsed))
+
+    def _execute_commands(self, commands: list, http: "BackendClient") -> None:
+        """按 login 分组执行指令并回报；已执行过的只重报缓存结果，不重复下单。
+        执行完立刻重读该终端持仓并上报（与其它终端的最近快照合并成整表）。
+        Execute by login, report results; re-report cached results for re-deliveries.
+        Then re-read that terminal's positions and report them right away."""
+        by_path: dict[str, list] = {}
+        for cmd in commands:
+            coid = str(cmd.get("clientOrderId"))
+            if coid in self._executed:
+                # 重发的指令：直接重报缓存结果 / re-delivered: re-report cached result
+                self._report_result(self._executed[coid], http)
+                continue
+            path = self._login_to_path.get(str(cmd.get("login")))
+            if path:
+                by_path.setdefault(path, []).append(cmd)
+            else:
+                logger.warning("指令目标账号不在本机 / command for a login not attached here: %s", cmd.get("login"))
+        for path, cmds in by_path.items():
+            with self._mt5_lock:
+                res = poll_terminal(path, orders=cmds, read_state=False)
+            if res.get("error"):
+                logger.warning("poll_terminal(%s) 执行指令报错 / error: %s", path, res["error"])
+            for r in res.get("results", []):
+                coid = str(r.get("clientOrderId"))
+                if coid:
+                    # 缓存并落盘，以备幂等重报（重启后仍有效）
+                    # cache & persist for idempotent retry (survives restarts)
+                    self._remember_executed(coid, r)
+                logger.info(
+                    "下单结果 / order result: coid=%s success=%s ticket=%s price=%s msg=%s",
+                    coid, r.get("success"), r.get("mt5Ticket"),
+                    r.get("filledPrice"), r.get("message"),
+                )
+                self._report_result(r, http)
+            # 成交后立刻重读持仓并上报，不等下一拍 1.5 秒的常规上报。
+            # Report positions immediately after the fill, not on the next status tick.
+            try:
+                with self._mt5_lock:
+                    fresh = read_positions(path)
+                if fresh is not None:
+                    with self._state_lock:
+                        self._positions_by_path[path] = fresh
+                        merged = [pos for lst in self._positions_by_path.values() for pos in lst]
+                    http.post("/api/bridge/positions", {"data": merged})
+            except Exception as e:
+                logger.warning("成交后即时上报持仓失败 / immediate positions report failed: %s", e)
 
     def _loop(self):
         while not self._stop.is_set():
@@ -453,6 +674,9 @@ class BridgeEngine:
     def _tick(self):
         paths = scan_terminals()
         if not paths:
+            # 终端没了：清掉快照，指令循环随即停止发 poll（否则会拿着旧账号列表继续挂着）。
+            # No terminal: drop the snapshot so the command loop stops polling with stale accounts.
+            self._accounts_snapshot = []
             self.on_status([], "未检测到正在运行的 MT5 终端 / No running MT5 terminal found")
             return
 
@@ -468,7 +692,8 @@ class BridgeEngine:
             deep = login_hint is not None and login_hint in _backfill_requested and login_hint not in _backfill_done
             if deep:
                 _backfill_done.add(login_hint)
-            res = poll_terminal(path, deep_backfill=deep)
+            with self._mt5_lock:
+                res = poll_terminal(path, deep_backfill=deep)
             if res.get("error"):
                 worker_errors.append(res["error"])
                 # 只要账号在线（accounts 非空），这个错误此前完全不会展示在状态栏
@@ -486,6 +711,8 @@ class BridgeEngine:
                 login_to_path[acc["login"]] = path
                 _path_login[path] = acc["login"]
                 positions.extend(res.get("positions", []))
+                with self._state_lock:
+                    self._positions_by_path[path] = list(res.get("positions", []))
                 # 按账户上报，不跨终端合并——下单确认页要按选中账户取对应
                 # 交易商的报价。/ report per account, no cross-terminal merge —
                 # the order-confirmation page needs the selected account's own
@@ -496,8 +723,17 @@ class BridgeEngine:
 
         if not accounts:
             msg = worker_errors[0] if worker_errors else "已连接终端但未读到已登录账号 / terminal attached but no logged-in account"
+            self._accounts_snapshot = []
             self.on_status([], msg)
             return
+
+        # 给指令循环留快照：它用这份账号列表发长轮询、按 login 找终端。
+        # Snapshots for the command loop: accounts for its poll, login -> terminal for routing.
+        self._login_to_path = dict(login_to_path)
+        self._accounts_snapshot = accounts
+        with self._state_lock:
+            for stale in [k for k in self._positions_by_path if k not in paths]:
+                self._positions_by_path.pop(stale, None)
 
         # 2) 先上报持仓（触发自动仓位管理评估，命令立即入队），
         #    再拉指令（同一拍即可拿到刚入队的命令），比先 poll 再 positions
@@ -510,18 +746,22 @@ class BridgeEngine:
         # the price or missing it.
         # 3) 上报持仓 / report positions
         try:
-            _post_json(f"{self.backend}/api/bridge/positions", {"data": positions}, self.token)
+            self._http.post("/api/bridge/positions", {"data": positions})
         except Exception:
             pass
 
-        # 4) 上报账号 + 拉取待执行指令 / report accounts + fetch commands
+        # 4) 上报账号（刷心跳、收后端对账号的裁决）。指令不在这里领：fetchCommands=False，
+        #    由指令循环的长轮询去领并立刻执行。旧版后端不认识这个字段会照旧把指令给过来，
+        #    下面第 8 步仍会执行它们，所以新桥接配旧后端也不会丢单。
+        # Report accounts (heartbeat + the backend's verdicts). Commands are not taken
+        # here (fetchCommands=False) but by the command loop's long poll. An older backend
+        # ignores the flag and still hands commands over; step 8 below still runs them.
         commands = []
         warning = None
         try:
-            resp = _post_json(
-                f"{self.backend}/api/bridge/poll",
-                {"accounts": accounts, "bridgeVersion": APP_VERSION},
-                self.token,
+            resp = self._http.post(
+                "/api/bridge/poll",
+                {"accounts": accounts, "bridgeVersion": APP_VERSION, "fetchCommands": False},
             )
             commands = resp.get("commands", [])
             # 仅接受 list[dict]，过滤畸形元素，防止后续执行链异常。
@@ -594,7 +834,7 @@ class BridgeEngine:
                     self._last_quotes[key] = val
                     changed.append(q)
             if changed:
-                _post_json(f"{self.backend}/api/bridge/quotes", {"data": changed}, self.token)
+                self._http.post("/api/bridge/quotes", {"data": changed})
         except Exception:
             pass
 
@@ -617,72 +857,58 @@ class BridgeEngine:
         self._flush_reports()
         self._flush_trades()
 
-        # 8) 按 login 分组指令执行；已执行过的只重报缓存结果，不重复下单。
-        #    Group commands by login & execute; for already-executed ones just
-        #    re-report the cached result instead of placing the order again.
+        # 8) 旧版后端会在这里把指令给过来（新后端对 fetchCommands=False 回空列表）：
+        #    照常执行，与指令循环共用同一套执行 / 回报 / 幂等缓存。
+        # An older backend still hands commands over here (a new one returns none for
+        # fetchCommands=False): run them through the same path as the command loop.
         if commands:
-            by_path: dict[str, list] = {}
-            for cmd in commands:
-                coid = str(cmd.get("clientOrderId"))
-                if coid in self._executed:
-                    # 重发的指令：直接重报缓存结果 / re-delivered: re-report cached result
-                    self._report_result(self._executed[coid])
-                    continue
-                path = login_to_path.get(str(cmd.get("login")))
-                if path:
-                    by_path.setdefault(path, []).append(cmd)
-            for path, cmds in by_path.items():
-                res = poll_terminal(path, orders=cmds)
-                for r in res.get("results", []):
-                    coid = str(r.get("clientOrderId"))
-                    if coid:
-                        # 缓存并落盘，以备幂等重报（重启后仍有效）
-                        # cache & persist for idempotent retry (survives restarts)
-                        self._remember_executed(coid, r)
-                    logger.info(
-                        "下单结果 / order result: coid=%s success=%s ticket=%s price=%s msg=%s",
-                        coid, r.get("success"), r.get("mt5Ticket"),
-                        r.get("filledPrice"), r.get("message"),
-                    )
-                    self._report_result(r)
+            self._execute_commands(commands, self._http)
 
         # 6) 通知 GUI 刷新 / notify GUI to refresh
         self.on_status(accounts, self.last_error, warning)
 
     def _remember_executed(self, coid: str, result: dict) -> None:
-        """记录一条已执行结果并落盘，同时清理超龄条目。
+        """记录一条已执行结果并落盘，同时清理超龄条目。两条循环都会调，加锁。
         Record one executed result, persist to disk and prune stale entries."""
         now = time.time()
-        self._executed[coid] = result
-        self._executed_at[coid] = now
-        stale = [k for k, ts in self._executed_at.items() if now - ts > EXECUTED_CACHE_TTL]
-        for k in stale:
-            self._executed.pop(k, None)
-            self._executed_at.pop(k, None)
-        _save_executed_cache(self._executed, self._executed_at)
+        with self._state_lock:
+            self._executed[coid] = result
+            self._executed_at[coid] = now
+            stale = [k for k, ts in self._executed_at.items() if now - ts > EXECUTED_CACHE_TTL]
+            for k in stale:
+                self._executed.pop(k, None)
+                self._executed_at.pop(k, None)
+            _save_executed_cache(self._executed, self._executed_at)
 
-    def _report_result(self, result: dict):
+    def _report_result(self, result: dict, http: "BackendClient | None" = None):
         """回报单条结果，失败则入队下一轮重试 / report one result, queue on failure."""
         try:
-            _post_json(f"{self.backend}/api/bridge/result", result, self.token)
+            (http or self._http).post("/api/bridge/result", result)
         except Exception:
-            if result not in self._pending_reports:
-                self._pending_reports.append(result)
-                _save_pending_reports(self._pending_reports)
+            with self._state_lock:
+                if result not in self._pending_reports:
+                    self._pending_reports.append(result)
+                    _save_pending_reports(self._pending_reports)
 
     def _flush_reports(self):
         """重试此前未成功回报的结果 / retry previously failed reports."""
-        if not self._pending_reports:
+        with self._state_lock:
+            pending = list(self._pending_reports)
+        if not pending:
             return
         still_pending = []
-        for r in self._pending_reports:
+        for r in pending:
             try:
-                _post_json(f"{self.backend}/api/bridge/result", r, self.token)
+                self._http.post("/api/bridge/result", r)
             except Exception:
                 still_pending.append(r)
-        if still_pending != self._pending_reports:
-            _save_pending_reports(still_pending)
-        self._pending_reports = still_pending
+        with self._state_lock:
+            # 重试期间指令循环可能又排进了新的失败回执，别把它们冲掉。
+            # The command loop may have queued new failures meanwhile; keep them.
+            newer = [r for r in self._pending_reports if r not in pending]
+            self._pending_reports = still_pending + newer
+            if self._pending_reports != pending:
+                _save_pending_reports(self._pending_reports)
 
     def _post_trades(self, legs: list) -> list:
         """分批上报平仓明细，返回**没能上报成功**的那些。
@@ -703,7 +929,7 @@ class BridgeEngine:
             chunk = legs[i:i + _TRADES_PER_POST]
             tickets = [t.get("dealTicket") for t in chunk]
             try:
-                _post_json(f"{self.backend}/api/bridge/trade-history", {"data": chunk}, self.token)
+                self._http.post("/api/bridge/trade-history", {"data": chunk})
                 logger.info("已上报平仓明细 / reported closed trades: dealTickets=%s", tickets)
             except Exception as e:
                 logger.warning(

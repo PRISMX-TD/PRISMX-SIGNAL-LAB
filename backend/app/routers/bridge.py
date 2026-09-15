@@ -32,7 +32,7 @@ from app.services.push_dispatch import (
     EVENT_ORDER_REJECTED,
     dispatch_event_push_async,
 )
-from app.services import bridge_version_check
+from app.services import bridge_version_check, bridge_wake
 from app.services.account_type import SOURCE_SELF, apply_self_reported, classify_account_with_source
 from app.services.settings_store import (
     get_account_type_settings,
@@ -333,6 +333,20 @@ class BridgePollRequest(BaseModel):
     # web app's update notice — see bridge_version_check.py. Older Bridge
     # builds don't send this field, so it's optional.
     bridgeVersion: str | None = Field(default=None, max_length=32)
+    # 长轮询（桥接 v1.4 起）：没有待执行指令时最多挂这么久，期间有指令落库立即返回。
+    # 0 = 立即返回，旧版桥接不带这个字段就是这个行为。上限 5 秒是硬约束：账号在线
+    # 判定看 7 秒内的心跳（deps.ONLINE_WINDOW），而心跳正是每次 /poll 刷的，等待必须
+    # 明显短于这个窗口，否则桥接一边挂着一边被判离线。
+    # Long-poll budget (bridge >= 1.4): hold the request this long when there is
+    # nothing to deliver, return at once when a command lands. 0 = immediate (older
+    # bridges). Capped at 5s because liveness is a 7-second heartbeat window and the
+    # heartbeat is refreshed by this very call.
+    waitSeconds: float = Field(default=0.0, ge=0, le=5)
+    # 是否领取指令。桥接 v1.4 拆成两条循环：状态上报循环每 1.5 秒上报账号（刷心跳）
+    # 但不领指令，指令循环用长轮询领指令并立刻执行。旧版桥接不带这个字段 → True。
+    # Whether to fetch commands. Bridge 1.4 runs two loops: a status loop that reports
+    # accounts every 1.5s without taking commands, and a long-polling command loop.
+    fetchCommands: bool = True
 
 
 def _upsert_account(
@@ -519,6 +533,14 @@ def _poll_db_work(
         user.bridge_version = req.bridgeVersion  # 同步缓存实例，避免下拍重复 UPDATE / keep the cached instance in sync
     db.commit()
 
+    # 只上报状态的那条循环到此为止：指令由带长轮询的那条循环领，这里若也领走，
+    # 指令就落到了"先读完整轮终端再执行"的慢路径上。陈旧指令的作废另有
+    # stale_order_monitor_loop 每 10 秒兜底，不靠这里。
+    # The status-only loop stops here: commands go to the long-polling loop, which
+    # executes them immediately instead of after a full terminal read.
+    if not req.fetchCommands:
+        return [], [], online_logins, balances, rejected_logins, broker_rejected
+
     # 2) 取该用户、目标账号匹配的待执行订单 / fetch matching pending orders.
     #    包含两类：从未下发的；以及已下发但超时未回执的（可能回执丢失，需重发）。
     #    Includes: never-delivered orders, and delivered-but-unacked orders past
@@ -675,12 +697,31 @@ async def bridge_poll(
     Blocking DB work runs in a thread pool so it can't stall the event loop
     (shared with the WS pushes); pushes happen back on the loop afterwards.
     """
+    # 长轮询：先清唤醒再查库（顺序见 bridge_wake.arm），没指令就挂起等落库的那一刻。
+    # 等待期间**不占数据库连接**——几十个桥接同时挂着，连接池早就被占满了。
+    # Long poll: arm the wake before the read, then hold the request until a command
+    # lands. The DB connection is released before waiting so idle polls never pin the pool.
+    long_poll = req.fetchCommands and req.waitSeconds > 0
+    if long_poll:
+        bridge_wake.arm(user.id)
+
     (
         commands, voided_payloads, online_logins, balances,
         rejected_logins, broker_rejected,
     ) = await run_in_threadpool(
         _poll_db_work, db, user, req
     )
+
+    if long_poll and not commands:
+        db.close()
+        if await bridge_wake.wait(user.id, req.waitSeconds):
+            (
+                commands, voided_again, online_logins, balances,
+                rejected_logins, broker_rejected,
+            ) = await run_in_threadpool(
+                _poll_db_work, db, user, req
+            )
+            voided_payloads = voided_payloads + voided_again
 
     # 推送被作废订单的状态给前端 / push voided orders' status to the client
     for payload in voided_payloads:

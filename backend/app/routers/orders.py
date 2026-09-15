@@ -27,6 +27,7 @@ from app.schemas import (
 )
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user, is_account_online, validate_order, validate_sl_tp_direction
+from app.services import bridge_wake
 from app.services.gateway_binding import not_removed
 from app.services.gateway_client import run_on_main_loop
 # 网关执行与订单载荷都搬到了 services（2026-09-06）：自动仓管与 routers/bridge 现在
@@ -318,6 +319,10 @@ def _commit_order_or_existing(db: Session, order: Order, user_id: str, client_or
             return _serialize(existing)
         raise
     db.refresh(order)
+    # 落库成功就叫醒长轮询中的桥接（gateway 账号的单也会叫一声，桥接那边查一次
+    # 发现没有自己的指令就继续等，代价可忽略）。
+    # Wake a long-polling bridge as soon as the row is committed.
+    bridge_wake.notify(user_id)
     return _serialize(order)
 
 

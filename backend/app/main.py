@@ -102,6 +102,8 @@ async def lifespan(app: FastAPI):
     from app.services.gateway_client import init_client, set_main_loop, close_client
     set_main_loop(asyncio.get_running_loop())
     init_client()
+    from app.services import bridge_wake
+    bridge_wake.bind_loop(asyncio.get_running_loop())
     
     # 后台循环统一交给 BackgroundLoops：单 worker 直接全部起（与从前一样）；配了
     # REDIS_URL 时每个 worker 只起一个监督协程去抢领导锁，抢到的那个跑全部循环
@@ -137,7 +139,7 @@ async def lifespan(app: FastAPI):
     app.state.background_loops = loops
     # 多 worker 时每个进程都要跑的 WS 转发订阅与在线名单续期（单 worker 为空）。
     # Per-worker WS fan-out subscriber and presence refresh (empty on a single worker).
-    cross_worker_tasks = manager.start_cross_worker_tasks()
+    cross_worker_tasks = manager.start_cross_worker_tasks() + bridge_wake.start_tasks()
     yield
     # 关闭：停止后台任务（多 worker 时顺带释放领导锁）/ shutdown: stop background tasks
     loops.shutdown()

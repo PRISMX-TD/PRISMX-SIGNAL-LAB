@@ -1448,9 +1448,21 @@ def _dispatch_command(cmd: dict, suffix: str = "") -> dict:
         }
 
 
-def poll_terminal(path: str, orders: list[dict] | None = None, deep_backfill: bool = False) -> dict:
+def poll_terminal(
+    path: str,
+    orders: list[dict] | None = None,
+    deep_backfill: bool = False,
+    read_state: bool = True,
+) -> dict:
     """连接一个终端，读取账号/持仓，并执行传入的下单指令。
     Attach to one terminal, read account/positions, execute given orders.
+
+    read_state=False 只执行指令：不读账号、持仓、报价，也不扫平仓明细。指令循环拿到
+    指令后用它立刻下单——以前每条指令都要先等一整轮终端读取（账号 + 持仓 + 7 个报价 +
+    15 分钟平仓扫描）才轮到 order_send，这一整轮在下单路径上是纯等待。
+    read_state=False executes commands only: no account / positions / quotes / closed
+    trade scan. The command loop uses it so an order goes out immediately instead of
+    after a full terminal read that contributed nothing to the order itself.
 
     返回 / returns:
       {
@@ -1478,13 +1490,17 @@ def poll_terminal(path: str, orders: list[dict] | None = None, deep_backfill: bo
 
     try:
         suffix = _detect_suffix()
-        out["account"] = _account_payload(suffix)
-        out["positions"] = _positions_payload()
-        out["quotes"] = _quotes_payload(QUOTE_SYMBOLS, suffix)
+        if read_state:
+            out["account"] = _account_payload(suffix)
+            out["positions"] = _positions_payload()
+            out["quotes"] = _quotes_payload(QUOTE_SYMBOLS, suffix)
         for cmd in orders or []:
             out["results"].append(_dispatch_command(cmd, suffix))
     except Exception as e:
         out["error"] = str(e)
+
+    if not read_state:
+        return out
 
     # 已平仓明细检测独立成一个 try，不与上面账号/持仓/报价/下单共用同一个
     # 失败开关——以前四者中任何一个抛异常都会让整个 try 提前中断，"已平仓
@@ -1505,3 +1521,19 @@ def poll_terminal(path: str, orders: list[dict] | None = None, deep_backfill: bo
         if not out["error"]:
             out["error"] = str(e)
     return out
+
+
+def read_positions(path: str) -> list | None:
+    """只读当前持仓（不读账号、报价、平仓明细）。读不到返回 None。
+
+    指令执行完立刻调用它并上报，让网页上的仓位"成交即出现 / 平仓即消失"，不等下一拍
+    1.5 秒的常规上报。
+    Positions only, for the immediate report right after a command executes so the
+    web shows the fill / close without waiting for the next 1.5s status tick.
+    """
+    if mt5 is None or not _ensure_attached(path):
+        return None
+    try:
+        return _positions_payload()
+    except Exception:
+        return None
