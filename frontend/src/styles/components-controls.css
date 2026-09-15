@@ -244,6 +244,30 @@
     bottom: calc(env(safe-area-inset-bottom) + 12px);
     z-index: 40;
   }
+  /* ── 停在底栏之上 / sitting above the tab bar ──
+     凡是要停在手机底栏上方的东西（footer 的下留白、toast、榜单名次栏、桥接更新提示）
+     都读同一个实测值 --app-tabbar：Layout 量出来的「底栏顶边到屏幕底边」的距离，
+     已含 12px 悬浮间距与 env(safe-area-inset-bottom)，底栏尺寸或字体变化时重量。
+     此前各处各写一个像素数（96px / 100px）：全面屏手机的手势条 24–34px 加上底栏
+     本体约 76px 已经超过 110px，写死的数字只在没有手势条的老机型上够用，别的机型
+     就是「footer 被压住一半」。var() 的回落值只在 Layout 之外（变量未设）时生效。
+     桌面端底栏 display:none，量得 0，页面用 lg: 工具类覆盖回桌面间距。
+     Everything that must sit above the mobile tab bar (footer clearance, toasts,
+     the leaderboard rank bar, the bridge-update notice) reads one measured value,
+     --app-tabbar: the distance from the bar's top edge to the screen bottom as
+     measured by Layout, float gap and env(safe-area-inset-bottom) included,
+     re-measured whenever the bar resizes. Each spot used to hard-code its own
+     pixel count (96px / 100px); on gesture-nav phones the 24–34px bar plus the
+     ~76px tab bar already exceeds 110px, so the fixed numbers only fit older
+     phones without a gesture bar. The var() fallback applies only outside Layout.
+     On desktop the bar is display:none and measures 0; pages restore desktop
+     spacing with lg: utilities. */
+  .above-tabbar {
+    bottom: calc(var(--app-tabbar, calc(env(safe-area-inset-bottom, 0px) + 100px)) + 12px);
+  }
+  .clears-tabbar {
+    padding-bottom: calc(var(--app-tabbar, calc(env(safe-area-inset-bottom, 0px) + 100px)) + 16px);
+  }
   .lg-tabbar-inner {
     display: flex;
     align-items: stretch;

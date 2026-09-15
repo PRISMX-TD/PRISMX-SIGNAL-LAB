@@ -311,7 +311,7 @@ export default function BridgePage() {
         />
       )}
       {deleteError && (
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-down/40 bg-down/15 px-5 py-3 text-sm text-down">
+        <div className="fixed above-tabbar left-1/2 z-50 -translate-x-1/2 rounded-xl border border-down/40 lg:bottom-6 bg-down/15 px-5 py-3 text-sm text-down">
           {deleteError}
         </div>
       )}

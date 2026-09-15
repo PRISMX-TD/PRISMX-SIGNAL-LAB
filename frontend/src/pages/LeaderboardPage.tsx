@@ -358,16 +358,18 @@ function ListRowMobile({ row, board }: { row: LeaderboardRow; board: Leaderboard
 
 // 名次栏钉在底栏上方：背景/模糊照抄 .lg-tabbar-inner 的例外做法——它也是常驻
 // 悬浮在滚动内容之上的一层，模糊在这里同样"有功能"（见 index.css 该组件的
-// 注释）。bottom 的 100px = 底栏自身离屏幕底边 12px + 底栏自身高度（约
-// 78px：8 内边距×2 + 26 图标 + 4 间距 + 约 13 文字）+ 10px 间隙，整体再叠上
-// env(safe-area-inset-bottom)。
+// 注释）。bottom 读 Layout 实测的底栏占位 --app-tabbar（底栏顶边到屏幕底边，
+// 含 12px 悬浮间距与手势条安全区）再加 10px 间隙。此前写死 100px + 安全区，
+// 底栏因字体/行高变高时名次栏就压到它上面；回落值只在变量未设时用。
 // The rank bar pinned above the tab bar: background/blur copies the one
 // exception at .lg-tabbar-inner — it's also a persistent layer floating over
 // scrolling content, so blur is functional there too (see that rule's own
-// comment in index.css). The 100px in `bottom` = the tab bar's own 12px gap
-// from the screen edge + its own ~78px height (8+8 padding, 26 icon, 4 gap,
-// ~13 label) + a 10px clearance, stacked on top of the safe-area inset.
-const MY_RANK_BAR_BOTTOM = 'calc(env(safe-area-inset-bottom) + 100px)'
+// comment in index.css). `bottom` reads Layout's measured tab-bar footprint,
+// --app-tabbar (bar top edge to screen bottom, 12px float gap and gesture-bar
+// safe area included), plus a 10px clearance. It used to hard-code 100px plus
+// the inset, so a taller bar (font / line-height) overlapped it; the fallback
+// only applies when the variable is unset.
+const MY_RANK_BAR_BOTTOM = 'calc(var(--app-tabbar, calc(env(safe-area-inset-bottom, 0px) + 90px)) + 10px)'
 
 // 用 Portal 挂到 body：页面内容外层 .page-enter 有 transform 动画（见
 // SlideOrderModal.tsx/ChartOrderModal.tsx/ConfirmModal.tsx 同一条注释），会

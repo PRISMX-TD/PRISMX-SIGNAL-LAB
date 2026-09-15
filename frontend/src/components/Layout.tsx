@@ -821,9 +821,14 @@ export default function Layout() {
             Deliberately featherweight — one line of small text that doesn't
             compete with the bottom tab bar. The bottom padding clears the fixed
             mobile tab bar (.lg-tabbar is lg:hidden, so every width below lg needs
-            the room) or the last row ends up trapped under it and untappable. */}
+            the room) or the last row ends up trapped under it and untappable.
+            .clears-tabbar 读的是实测的底栏占位（含手势条安全区），不再写死 96px——
+            那个数在全面屏手机上不够，footer 折成两行后下半行被底栏压住。
+            .clears-tabbar reads the measured tab-bar footprint (gesture-bar safe
+            area included) instead of a hard-coded 96px, which fell short on
+            full-screen phones and left the footer's second row under the bar. */}
         {!isTerminal && (
-        <footer className="mx-auto w-full max-w-7xl px-4 pb-24 sm:px-6 lg:pb-6">
+        <footer className="clears-tabbar mx-auto w-full max-w-7xl px-4 sm:px-6 lg:pb-6">
           {/* slate → neutral：slate 是带蓝调的灰，与本设计系统的中性 zinc 灰不同族，
               两者同屏时冷暖不一致。全站统一到 neutral。
               slate → neutral: slate is a blue-tinted grey from a different family than
