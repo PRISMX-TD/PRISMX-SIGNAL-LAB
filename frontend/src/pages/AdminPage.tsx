@@ -17,7 +17,7 @@ import InviteLinksPanel from '../components/admin/InviteLinksPanel'
 import StrategyWinratePanel from '../components/admin/StrategyWinratePanel'
 import GamificationPanel from '../components/admin/GamificationPanel'
 import CompetitionsPanel from '../components/admin/CompetitionsPanel'
-import type { AdminBrokerSettings, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
+import type { AdminBrokerSettings, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
 const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
@@ -47,6 +47,21 @@ const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
 // folding it into data would bury the operating metrics and page stats.
 type AdminTab = 'data' | 'winrate' | 'users' | 'invites' | 'ops' | 'system' | 'guide' | 'announcements' | 'tickets' | 'gamification' | 'competitions'
 const ADMIN_TABS: AdminTab[] = ['data', 'winrate', 'users', 'invites', 'ops', 'system', 'guide', 'announcements', 'tickets', 'gamification', 'competitions']
+
+// 社交平台字段表：数组顺序就是后台表单顺序。平台名是品牌名，不进 i18n；
+// placeholder 给出该平台「官方主页」的典型形状，省得填的人去猜要放个人页、
+// 分享短链还是 App 内跳转链接——这五个平台的链接形态差别不小。
+// Social field table; array order is the form order. Platform names are brands
+// and stay out of i18n. Each placeholder shows what that platform's official
+// page URL normally looks like, so nobody has to guess between a profile page,
+// a share shortlink and an in-app deep link — the five differ a fair amount.
+const SOCIAL_FIELDS: { key: keyof AdminSocialSettings; label: string; placeholder: string }[] = [
+  { key: 'facebookUrl', label: 'Facebook', placeholder: 'https://www.facebook.com/yourpage' },
+  { key: 'instagramUrl', label: 'Instagram', placeholder: 'https://www.instagram.com/youraccount' },
+  { key: 'xUrl', label: 'X', placeholder: 'https://x.com/youraccount' },
+  { key: 'discordUrl', label: 'Discord', placeholder: 'https://discord.gg/xxxxxxx' },
+  { key: 'telegramUrl', label: 'Telegram', placeholder: 'https://t.me/yourchannel' },
+]
 
 interface Draft {
   role: UserRole
@@ -361,6 +376,10 @@ export default function AdminPage() {
   const [savedTrialEnabled, setSavedTrialEnabled] = useState(false)
 
 
+  // 官方社交主页 / official social links
+  const [social, setSocial] = useState<AdminSocialSettings | null>(null)
+  const [savingSocial, setSavingSocial] = useState(false)
+
   // K 线历史保留策略设置 / candle-history retention settings
   const [candleSettings, setCandleSettings] = useState<AdminCandleSettings | null>(null)
   const [savingCandle, setSavingCandle] = useState(false)
@@ -400,10 +419,11 @@ export default function AdminPage() {
         adminApi.getSettings(),
         adminApi.getPricing(),
         adminApi.getTrial(),
+        adminApi.getSocial(),
         adminApi.getCandleHistory(),
         adminApi.getStrategySettings(),
       ])
-      const [usersRes, metricsRes, pageStatsRes, settingsRes, pricingRes, trialRes, candleRes, strategyRes] = results
+      const [usersRes, metricsRes, pageStatsRes, settingsRes, pricingRes, trialRes, socialRes, candleRes, strategyRes] = results
       let failed = 0
       const ok = <T,>(r: PromiseSettledResult<T>): T | null => {
         if (r.status === 'fulfilled') return r.value
@@ -432,6 +452,8 @@ export default function AdminPage() {
         setTrial(trialVal)
         setSavedTrialEnabled(trialVal.trialEnabled)
       }
+      const socialVal = ok(socialRes)
+      if (socialVal) setSocial(socialVal)
       const candleVal = ok(candleRes)
       if (candleVal) setCandleSettings(candleVal)
       const strategyVal = ok(strategyRes)
@@ -505,6 +527,33 @@ export default function AdminPage() {
       showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
     } finally {
       setSavingTrial(false)
+    }
+  }
+
+  const saveSocial = async () => {
+    if (!social) return
+    // 先在本地挡一道协议错误。后端也校验，但那是一条英文 422，管理员看到的是
+    // 一串字段名而不是"Telegram 这一行填错了"——填五个框的表单必须说清是哪个。
+    // Catch the scheme error locally first. The backend validates too, but its
+    // 422 names the raw field, not "the Telegram row is wrong" — on a five-box
+    // form the message has to say which box.
+    const bad = SOCIAL_FIELDS.find((f) => {
+      const v = (social[f.key] || '').trim()
+      return v !== '' && !/^https?:\/\//i.test(v)
+    })
+    if (bad) {
+      showToast('err', t('admin.socialInvalidUrl', { platform: bad.label }))
+      return
+    }
+    setSavingSocial(true)
+    try {
+      const updated = await adminApi.updateSocial(social)
+      setSocial(updated)
+      showToast('ok', t('admin.saved'))
+    } catch (err) {
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
+    } finally {
+      setSavingSocial(false)
     }
   }
 
@@ -880,6 +929,38 @@ export default function AdminPage() {
             onClick={saveTrial}
           >
             {savingTrial ? t('common.loading') : t('common.save')}
+          </button>
+        </div>
+      )}
+
+      {/* 官方社交主页 / official social links */}
+      {social && (
+        <div className="glass mb-5 p-5">
+          <h3 className="mb-1.5 font-display text-lg font-semibold text-neutral-100">{t('admin.socialTitle')}</h3>
+          <p className="mb-4 text-xs text-neutral-500">{t('admin.socialHint')}</p>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {SOCIAL_FIELDS.map((f) => (
+              <div key={f.key}>
+                <label className="label">{f.label}</label>
+                <input
+                  className="input"
+                  type="url"
+                  inputMode="url"
+                  spellCheck={false}
+                  maxLength={512}
+                  value={social[f.key]}
+                  onChange={(e) => setSocial({ ...social, [f.key]: e.target.value })}
+                  placeholder={f.placeholder}
+                />
+              </div>
+            ))}
+          </div>
+          <button
+            className="btn-primary mt-4 px-5 py-2 text-sm disabled:opacity-40"
+            disabled={savingSocial}
+            onClick={saveSocial}
+          >
+            {savingSocial ? t('common.loading') : t('common.save')}
           </button>
         </div>
       )}

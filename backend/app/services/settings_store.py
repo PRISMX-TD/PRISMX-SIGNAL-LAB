@@ -563,6 +563,98 @@ def save_platform_strategies(db, items: list) -> None:
         row.value = encoded
 
 
+# ---------- 官方社交主页 / official social links ----------
+#
+# 五个官方账号地址。空字符串 = 这个平台我们还没有（或不想露出），前端按
+# "填了才显示"渲染，不会留一个点不开的图标。默认全空：新部署在管理员填之前
+# 一个社交入口都不会出现。
+# Five official account URLs. An empty string means "we have no such account
+# (or don't want it shown)" — the UI renders on a filled-means-shown basis
+# rather than leaving a dead icon. All empty by default, so a fresh deployment
+# shows no social entry point until an admin fills one in.
+SOCIAL_DEFAULTS: dict = {
+    "facebook_url": "",
+    "instagram_url": "",
+    "x_url": "",
+    "discord_url": "",
+    "telegram_url": "",
+}
+
+_social_cache: dict = {}
+_social_cache_at: float = 0.0
+
+
+def invalidate_social_cache() -> None:
+    global _social_cache_at
+    with _lock:
+        _social_cache_at = 0.0
+
+
+def _load_social_from_db(db) -> dict:
+    """读社交主页 JSON；非字符串或非 http(s) 的值一律丢弃回落到空。
+
+    这些值最终会变成页面上的 href，所以读的时候再过一遍协议白名单，而不是
+    只信写入时的校验——写入路径不止管理端一条（运维直接改库、旧数据、将来
+    的导入脚本），而 `javascript:` 开头的一行就够在页脚上挂一个脚本执行点。
+    往严格的方向兜底：不认识的值当作没填。
+
+    Read the social-links JSON; any non-string or non-http(s) value is dropped
+    back to empty. These end up as hrefs on the page, so the scheme allowlist is
+    re-applied on read rather than trusting write-time validation alone — the
+    write path is not only the admin panel (direct DB edits, old rows, future
+    import scripts), and one `javascript:` value would hang a script-execution
+    point off the footer. Fail closed: anything unrecognised counts as unset.
+    """
+    data = dict(SOCIAL_DEFAULTS)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "social").first()
+    if row:
+        try:
+            stored = json.loads(row.value)
+            if isinstance(stored, dict):
+                for k in SOCIAL_DEFAULTS:
+                    if k in stored:
+                        data[k] = stored[k]
+        except (ValueError, TypeError):
+            logger.warning("platform_settings: invalid JSON for social, using defaults")
+    for k in SOCIAL_DEFAULTS:
+        v = data.get(k)
+        if not isinstance(v, str):
+            data[k] = ""
+            continue
+        v = v.strip()
+        low = v.lower()
+        data[k] = v if (low.startswith("http://") or low.startswith("https://")) else ""
+    return data
+
+
+def get_social_settings(db) -> dict:
+    """读取官方社交主页地址（独立缓存）。
+    Read the official social links (its own cache)."""
+    global _social_cache, _social_cache_at
+    now = time.time()
+    with _lock:
+        if _social_cache and now - _social_cache_at < _CACHE_TTL_SECONDS:
+            return dict(_social_cache)
+    data = _load_social_from_db(db)
+    with _lock:
+        _social_cache = data
+        _social_cache_at = now
+    return dict(data)
+
+
+def save_social_settings(db, data: dict) -> None:
+    """写入官方社交主页地址（不提交，调用方 commit 后 invalidate）。
+    Write the social links (no commit; caller commits then invalidates)."""
+    merged = _load_social_from_db(db)
+    merged.update(data)
+    encoded = json.dumps(merged, ensure_ascii=False)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "social").first()
+    if row is None:
+        db.add(PlatformSetting(key="social", value=encoded))
+    else:
+        row.value = encoded
+
+
 def set_setting(db, key: str, value) -> None:
     """写入单个设置项（不提交事务，调用方负责 commit 后再 invalidate）。
     Write one setting (no commit; caller commits, then invalidates the cache)."""

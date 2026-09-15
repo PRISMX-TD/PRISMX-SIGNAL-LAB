@@ -16,7 +16,7 @@ from app.core.rate_limit import limiter
 from app.core.strategy_limits import user_limiter
 from app.services.deps import require_admin
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
-from app.routers import account, admin, announcements, auth, automation, bridge, chart, competitions, ea, gamification, gateway, invite, notifications, orders, payments, sentiment, signals, strategies, telemetry, tickets, trends, webhook, ws
+from app.routers import account, admin, announcements, auth, automation, bridge, chart, competitions, ea, gamification, gateway, invite, notifications, orders, payments, sentiment, signals, site, strategies, telemetry, tickets, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
@@ -207,6 +207,7 @@ app.include_router(notifications.router, prefix=settings.API_PREFIX)
 app.include_router(admin.router, prefix=settings.API_PREFIX)
 app.include_router(automation.router, prefix=settings.API_PREFIX)
 app.include_router(sentiment.router, prefix=settings.API_PREFIX)
+app.include_router(site.router, prefix=settings.API_PREFIX)
 app.include_router(payments.router, prefix=settings.API_PREFIX)
 app.include_router(strategies.router, prefix=settings.API_PREFIX)
 app.include_router(telemetry.router, prefix=settings.API_PREFIX)

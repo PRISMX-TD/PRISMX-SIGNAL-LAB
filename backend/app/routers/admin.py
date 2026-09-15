@@ -23,7 +23,7 @@ from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
 from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
 from app.services.audit import log_change
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
 from app.services.strategy_winrate import compute_strategy_session_winrate
 from app.utils.timeutil import aware as _aware
@@ -32,6 +32,7 @@ from app.services.settings_store import (
     get_candle_settings,
     get_platform_strategies,
     get_pricing_settings,
+    get_social_settings,
     get_strategy_costs,
     get_strategy_settings,
     get_trial_settings,
@@ -40,6 +41,7 @@ from app.services.settings_store import (
     invalidate_platform_strategies_cache,
     invalidate_pricing_cache,
     invalidate_settings_cache,
+    invalidate_social_cache,
     invalidate_strategy_costs_cache,
     invalidate_strategy_settings_cache,
     invalidate_trial_cache,
@@ -47,6 +49,7 @@ from app.services.settings_store import (
     save_candle_settings,
     save_platform_strategies,
     save_pricing_settings,
+    save_social_settings,
     save_strategy_costs,
     save_strategy_settings,
     save_trial_settings,
@@ -703,6 +706,45 @@ def put_trial(
     db.commit()
     invalidate_trial_cache()
     return get_trial(db, admin)
+
+
+# ---------- 官方社交主页 / official social links ----------
+
+@router.get("/social", response_model=AdminSocialSettings)
+def get_social(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """读取官方社交主页地址。Read the official social links."""
+    s = get_social_settings(db)
+    return AdminSocialSettings(
+        facebookUrl=s["facebook_url"],
+        instagramUrl=s["instagram_url"],
+        xUrl=s["x_url"],
+        discordUrl=s["discord_url"],
+        telegramUrl=s["telegram_url"],
+    )
+
+
+@router.put("/social", response_model=AdminSocialSettings)
+def put_social(
+    body: AdminSocialSettings,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """保存官方社交主页地址。Save the official social links."""
+    data = {
+        "facebook_url": body.facebookUrl,
+        "instagram_url": body.instagramUrl,
+        "x_url": body.xUrl,
+        "discord_url": body.discordUrl,
+        "telegram_url": body.telegramUrl,
+    }
+    save_social_settings(db, data)
+    _log_change(db, admin.id, admin.id, "setting:social", None, json.dumps(data))
+    db.commit()
+    invalidate_social_cache()
+    return get_social(db, admin)
 
 
 # ---------- K 线历史保留策略设置 / candle-history retention settings ----------

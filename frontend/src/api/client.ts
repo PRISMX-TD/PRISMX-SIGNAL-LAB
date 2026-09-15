@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUsers } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUsers, SocialLinks } from './types'
 import type { Announcement, AnnouncementInput, AnnouncementList } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 
@@ -805,6 +805,12 @@ export const adminApi = {
         method: 'PUT',
         body: JSON.stringify(payload),
       }),
+    getSocial: () => request<AdminSocialSettings>('/admin/social'),
+    updateSocial: (payload: AdminSocialSettings) =>
+      request<AdminSocialSettings>('/admin/social', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
     getCandleHistory: () => request<AdminCandleSettings>('/admin/candle-history'),
     updateCandleHistory: (payload: AdminCandleSettings) =>
       request<AdminCandleSettings>('/admin/candle-history', {
@@ -1035,6 +1041,16 @@ export const paymentApi = {
     request<{ ok: boolean; planExpiresAt: string; days: number }>('/payments/trial/claim', {
       method: 'POST',
     }),
+}
+
+// 站点公开配置：不需要登录就能读的那部分平台设置（目前只有官方社交主页）。
+// Public site config: platform settings readable without a login (today: social links).
+export const siteApi = {
+  // 后端只返回填了的平台，所以拿到的对象可能是空的——调用方用"有没有键"判断
+  // 要不要渲染入口，不用再逐个比对空字符串。
+  // The backend omits unset platforms, so this may come back empty — callers
+  // decide whether to render by key presence, not by comparing empty strings.
+  getSocial: () => request<SocialLinks>('/site/social'),
 }
 
 // 邀请链接的公开查询。只有 offer 一个方法——点击打点在 RefCapture 里用裸

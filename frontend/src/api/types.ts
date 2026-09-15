@@ -369,6 +369,25 @@ export interface AdminTrialSettings {
   trialDays: number
 }
 
+// 官方社交主页地址（管理后台）。留空 = 不展示该平台的入口。
+// Official social links (admin side). Empty = that platform gets no entry point.
+export interface AdminSocialSettings {
+  facebookUrl: string
+  instagramUrl: string
+  xUrl: string
+  discordUrl: string
+  telegramUrl: string
+}
+
+// 社交主页的平台标识；渲染顺序与图标都按这个列表走。
+// Social platform keys; render order and icons follow this list.
+export const SOCIAL_PLATFORMS = ['facebook', 'instagram', 'x', 'discord', 'telegram'] as const
+export type SocialPlatform = (typeof SOCIAL_PLATFORMS)[number]
+
+// 公开的社交主页地址：后端只返回填了的平台，所以每个键都是可选的。
+// Public social links: the backend omits unset platforms, hence every key optional.
+export type SocialLinks = Partial<Record<SocialPlatform, string>>
+
 // 免费试用当前状态（用户端）/ current free-trial status (user-facing)
 export interface TrialStatus {
   enabled: boolean
