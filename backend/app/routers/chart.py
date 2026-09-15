@@ -269,7 +269,7 @@ def _apply_cached_skew(bars: list[dict], cache_key: tuple[str, str], interval_se
 # —— 单台 EA 就能造出重叠请求，且专挑后端最慢的时候造。
 #
 # 这把锁只是把改造前就有的串行语义原样还原，不改变任何对外行为，也不新增任何
-# 查询（顺带消掉了并发下 _baseline_cache 缓存击穿多发的那条基线查询）。
+# 查询。它同时也是 candle_store 内存窗口「同一序列同一时刻只有一个写者」的前提。
 #
 # One lock per (symbol, interval). Before this change the "filter → write cache
 # → persist" block ran synchronously on the event loop with no await inside, so

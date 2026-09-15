@@ -9,34 +9,69 @@ cleared on restart) — this module stores finished bars only; `chart_store`
 also holds the still-forming bar.
 """
 import asyncio
+import bisect
 import logging
+import threading
 import time
 from datetime import datetime, timezone
 from math import gcd
 
+from sqlalchemy.exc import IntegrityError
 from starlette.concurrency import run_in_threadpool
 
 from app.core.database import SessionLocal
 from app.models import Candle
+from app.services import shared_state
 from app.services.page_stats import prune_visitor_days, purge_admin_visitors
 from app.services.settings_store import get_candle_settings
 
 logger = logging.getLogger("prismx.candle_store")
 
-# 重放基线查询的内存缓存：(symbol, interval) -> (baseline: set, cached_at: float)
-# 60 秒 TTL，避免 tick 模式每秒都查几千行。
-# Replay baseline cache: (symbol, interval) -> (baseline: set, cached_at: float)
-# 60s TTL to avoid querying thousands of rows every second in tick mode.
-# 重放基线缓存：(symbol, interval) -> (指纹集合, 存入时刻, 这份基线对应的 batch_floor)。
-# batch_floor 必须进缓存：基线是「batch_floor 之前那段」的指纹，60 秒内先来一批实时
-# tick、再来一批几天前的 backfill，后者若复用前者的基线，拿到的是**晚于它自己**的
-# bar 做对照——与"只和更早的 bar 比"的语义相反。floor 不同就重查，不复用。
-# Replay baseline cache: (symbol, interval) -> (fingerprints, stored_at, batch_floor).
-# The floor is part of the entry: the baseline is "everything before batch_floor",
-# and a backfill batch arriving within 60s of a live tick would otherwise reuse a
-# baseline that lies *after* its own bars — the opposite of "compare with earlier".
-_baseline_cache: dict[tuple[str, str], tuple[set, float, int]] = {}
-_BASELINE_CACHE_TTL = 60
+# 闸门要读库的三样东西——重放基线（回看窗内每根 bar 的 OHLCV 指纹）、前序收盘价
+# （本批之前紧邻的 12 个收盘价）、落库去重（哪些时间戳已经存过）——现在都从每个
+# (品种, 周期) 的**内存窗口**（_SeriesWindow）回答，不再逐次查 Supabase。
+#
+# **为什么**：这三条查询是全库 Egress 的绝对大头。2026-08-08 到 09-15 的 38 天里，
+# 重放基线一条就读了 27.6 亿行（M1 回看 5 天 = 一次 7200 行 × 5 列 ≈ 480 KB），
+# 约占总出站流量 63%；前序收盘价 1.01 亿次、去重 t IN 约 2 亿次。而它们回答的
+# 问题只关乎 candles 表里**最近几天**的内容，且这张表在生产里只有本进程一个写入者
+# （EA 喂价全部经过 persist_closed_bars）——一份随写入同步维护的内存镜像就能给出
+# 与查库逐字节相同的答案。
+#
+# 09-06（203292a）曾给基线的 60 秒缓存加上「批次起点必须一致」的校验：语义是对的
+# （回填批不能拿实时批的基线比），但 EA 每秒的 2 根增量批与每 60 秒的 500 根回填
+# 批起点必然不同，交替到来把缓存反复作废，M1 从每分钟最多读一次变成两三次，
+# Egress 09-07 起由 3 GB/天跳到 10-14 GB/天（运维手册踩坑 #83）。内存窗口按批次
+# 起点在内存里切区间，这条校验自然成立、不再有缓存可被作废。
+#
+# **精确性边界**：窗口只保证 `covered_from` 之后与库一致。批次起点早于它（一次性
+# 历史回填、EA 重连后送来几天前的数据）就退回原来的查库路径，语义一字不改。
+# 多 worker（配了 REDIS_URL）时别的进程也在写库，每次读窗口前先拉「比内存最新一根
+# 更晚」的行补齐；别的进程往更早处补洞的行会漏掉，这是已接受的取舍——
+# 生产是单 worker，去重那一步另有唯一约束兜底（撞了就回库重查）。
+#
+# The three DB reads inside the gates — the replay baseline (OHLCV fingerprints
+# across the lookback window), the preceding closes (12 closes right before the
+# batch) and the persist dedup (which timestamps already exist) — are now answered
+# from an in-memory window per (symbol, interval) instead of hitting Supabase on
+# every push. They were the dominant egress source (the baseline query alone read
+# 2.76 billion rows in 38 days, ~63% of all outbound bytes). They only concern the
+# last few days of `candles`, and this process is the table's sole writer in
+# production, so a mirror maintained alongside the writes gives byte-identical
+# answers. The 2026-09-06 floor check on the old 60s cache was semantically right
+# but let the EA's alternating tick/backfill batches invalidate it constantly,
+# tripling egress from 09-07; slicing the in-memory window by batch floor keeps
+# that semantics with nothing left to invalidate. Batches whose floor predates
+# `covered_from` fall back to the original queries unchanged. With REDIS_URL set
+# (multi-worker), rows newer than the in-memory tail are pulled before each read;
+# rows another worker back-fills further in the past are not — an accepted
+# trade-off, with the unique constraint as the dedup backstop.
+
+# 窗口比最长回看还要多留这么多根：EA 的 backfill 批一次 500 根，它的 floor 在 500 根
+# 之前，基线要从那再往前看一个 lookback。多留 100 根余量。
+# The window keeps this many bars beyond the longest lookback: a 500-bar backfill
+# batch has its floor 500 bars back and needs one more lookback before that.
+WINDOW_EXTRA_BARS = 600
 
 # 各周期的秒数,用于判断一根 K 线是否已经走完(t + 秒数 <= 当前时间)。
 # Seconds per interval, used to decide whether a bar has closed (t + seconds <= now).
@@ -554,6 +589,184 @@ def _is_replayed_duplicate(bar: dict, recent: set[tuple]) -> bool:
     return _replay_key(bar) in recent
 
 
+# ---- 内存窗口 / in-memory window -----------------------------------------------------
+
+def _window_span_seconds(interval: str) -> int:
+    """该周期的内存窗口跨度：最长回看 + WINDOW_EXTRA_BARS 根。
+    Window span for an interval: the lookback plus WINDOW_EXTRA_BARS bars."""
+    seconds = INTERVAL_SECONDS.get(interval, 60)
+    lookback = REPLAY_LOOKBACK_SECONDS_BY_INTERVAL.get(interval, REPLAY_LOOKBACK_SECONDS)
+    return lookback + WINDOW_EXTRA_BARS * seconds
+
+
+class _SeriesWindow:
+    """一个 (品种, 周期) 最近一段已落库 bar 的内存镜像。
+
+    三个索引各答一个问题：`ts`（升序时间戳）答"哪些 t 已存在 / 紧邻某时刻之前的
+    几根是谁"；`rows`（t → 收盘价与指纹）答前序收盘价；`t_by_key` 答"这个 OHLCV
+    指纹在哪些时刻出现过"，重放判定只需看其中有没有落在 [floor - lookback, floor) 的。
+    `covered_from` 之后与库一致；之前的问题一律回答 None，让调用方回库。
+
+    A mirror of a series' recently persisted bars. `ts` answers existence and
+    "the n bars right before t", `rows` the preceding closes, `t_by_key`
+    "when did this fingerprint occur" (replay = any occurrence inside
+    [floor - lookback, floor)). Exact from `covered_from` on; anything earlier
+    returns None so the caller falls back to the database.
+    """
+
+    __slots__ = ("lock", "ts", "rows", "t_by_key", "covered_from")
+
+    def __init__(self) -> None:
+        self.lock = threading.RLock()
+        self.ts: list[int] = []
+        self.rows: dict[int, tuple[float, tuple]] = {}      # t -> (close, 指纹 / fingerprint)
+        self.t_by_key: dict[tuple, set[int]] = {}
+        self.covered_from: int | None = None
+
+    def add(self, t: int, o: float, h: float, l: float, c: float, v) -> None:
+        if t in self.rows:
+            return
+        key = _replay_key({"o": o, "h": h, "l": l, "c": c, "v": v})
+        bisect.insort(self.ts, t)
+        self.rows[t] = (c, key)
+        self.t_by_key.setdefault(key, set()).add(t)
+
+    def has_t(self, t: int) -> bool:
+        with self.lock:
+            return t in self.rows
+
+    def evict_below(self, cutoff: int) -> None:
+        """丢掉 cutoff 之前的行并把一致性下界抬到 cutoff。
+        Drop rows before cutoff and raise the consistency floor to it."""
+        if self.covered_from is not None and cutoff <= self.covered_from:
+            return
+        idx = bisect.bisect_left(self.ts, cutoff)
+        for t in self.ts[:idx]:
+            _c, key = self.rows.pop(t)
+            hits = self.t_by_key.get(key)
+            if hits is not None:
+                hits.discard(t)
+                if not hits:
+                    del self.t_by_key[key]
+        del self.ts[:idx]
+        self.covered_from = cutoff if self.covered_from is None else max(self.covered_from, cutoff)
+
+    def previous_closes(self, before_t: int, n: int) -> list[float] | None:
+        """紧邻 before_t 之前的 n 个收盘价（升序）。内存里不足 n 根、或 before_t 早于
+        一致性下界时返回 None——库里可能还有更早的行，交给调用方查。
+        The n closes right before before_t, ascending; None when memory can't be
+        sure it holds all of them."""
+        with self.lock:
+            if self.covered_from is None or before_t < self.covered_from:
+                return None
+            idx = bisect.bisect_left(self.ts, before_t)
+            if idx < n:
+                return None
+            return [self.rows[t][0] for t in self.ts[idx - n:idx]]
+
+    def baseline(self, floor: int, lookback: int, max_rows: int):
+        """[floor - lookback, floor) 这段的指纹视图；区间起点早于一致性下界时返回 None。
+        A fingerprint view over [floor - lookback, floor); None if the window can't cover it."""
+        lo = floor - lookback
+        with self.lock:
+            if self.covered_from is None or lo < self.covered_from:
+                return None
+            hi_idx = bisect.bisect_left(self.ts, floor)
+            lo_idx = bisect.bisect_left(self.ts, lo)
+            # 与查库的 LIMIT 同义：只看 floor 之前最近的 max_rows 根。
+            # Same as the query's LIMIT: only the max_rows most recent bars before floor.
+            if hi_idx - lo_idx > max_rows:
+                lo = self.ts[hi_idx - max_rows]
+        return _BaselineView(self, lo, floor)
+
+
+class _BaselineView:
+    """把窗口的一段时间区间伪装成指纹集合：`key in view` 问"这个指纹在区间内出现过吗"，
+    `add` 记本批已接受的 bar（批内连锁判定），不写回窗口。
+    A time slice of the window posing as a fingerprint set for _is_replayed_duplicate:
+    membership asks whether the fingerprint occurred inside the slice; `add` records
+    bars accepted earlier in this batch without touching the window."""
+
+    __slots__ = ("_win", "_lo", "_hi", "_extra")
+
+    def __init__(self, win: _SeriesWindow, lo: int, hi: int) -> None:
+        self._win, self._lo, self._hi = win, lo, hi
+        self._extra: set[tuple] = set()
+
+    def __contains__(self, key) -> bool:
+        if key in self._extra:
+            return True
+        with self._win.lock:
+            hits = self._win.t_by_key.get(key)
+            return bool(hits) and any(self._lo <= t < self._hi for t in hits)
+
+    def add(self, key) -> None:
+        self._extra.add(key)
+
+
+_windows: dict[tuple[str, str], _SeriesWindow] = {}
+_windows_lock = threading.Lock()
+
+
+def reset_windows_for_tests() -> None:
+    """清空全部内存窗口（测试用：每个用例一套库，窗口也得跟着换）。
+    Drop every window; tests use a fresh database per case and must reset this too."""
+    with _windows_lock:
+        _windows.clear()
+
+
+def _window(db, symbol: str, interval: str) -> _SeriesWindow:
+    """取该序列的内存窗口，首次使用时从库加载最近一段；配了 REDIS_URL 时顺带拉取
+    别的 worker 落下的更新的行。每次调用都把一致性下界推进到 now - span 并丢弃更早的行。
+    Fetch the window, loading the recent span from the database on first use; with
+    REDIS_URL also pull rows newer than the in-memory tail written by other workers.
+    Each call advances the consistency floor to now - span and evicts older rows."""
+    key = (symbol, interval)
+    with _windows_lock:
+        win = _windows.get(key)
+        if win is None:
+            win = _SeriesWindow()
+            _windows[key] = win
+    span = _window_span_seconds(interval)
+    now = int(time.time())
+    with win.lock:
+        if win.covered_from is None:
+            start = now - span
+            rows = (
+                db.query(Candle.t, Candle.o, Candle.h, Candle.l, Candle.c, Candle.v)
+                .filter(Candle.symbol == symbol, Candle.interval == interval, Candle.t >= start)
+                .order_by(Candle.t.asc())
+                .all()
+            )
+            win.covered_from = start
+            for r in rows:
+                win.add(*r)
+            logger.info("candle window loaded: %s/%s %d bar(s) since %d", symbol, interval, len(rows), start)
+        elif shared_state.enabled():
+            top = win.ts[-1] if win.ts else win.covered_from - 1
+            rows = (
+                db.query(Candle.t, Candle.o, Candle.h, Candle.l, Candle.c, Candle.v)
+                .filter(Candle.symbol == symbol, Candle.interval == interval, Candle.t > top)
+                .order_by(Candle.t.asc())
+                .all()
+            )
+            for r in rows:
+                win.add(*r)
+        win.evict_below(now - span)
+    return win
+
+
+def _evict_interval_below(interval: str, cutoff: int) -> None:
+    """保留期清扫删了库里的行之后，让所有该周期的窗口同步丢掉它们。
+    After the retention sweep deletes rows, drop them from every window of that interval."""
+    with _windows_lock:
+        wins = [w for (_s, i), w in _windows.items() if i == interval]
+    for w in wins:
+        with w.lock:
+            if w.covered_from is not None:
+                w.evict_below(cutoff)
+
+
 def filter_tradeable_bars(
     db, symbol: str, interval: str, bars: list[dict],
     include_forming: bool = False,
@@ -835,32 +1048,29 @@ def filter_tradeable_bars(
     closed.sort(key=lambda b: b["t"])
     earliest_t = min(b["t"] for b in closed)
 
-    # 这条查询刻意不加缓存：它只取 1 个 float 列、单次 12 行,按 Postgres 线协议算
-    # 约 17 字节/行,28.4 万次合计仅约 0.1 GB——占 rows_read 的 21%,占字节数不到 6%。
-    # 而缓存它需要把键退化成 (symbol, interval)、丢掉 earliest_t,那样 prior 与本批之
-    # 间会出现时间空隙,series 不再连续,游程统计会静静地算错——正是本模块反复吃过亏
-    # 的那类失败。收益不足 6% 而风险落在一道会丢弃真实行情的闸门上,不值得。
-    #
-    # Deliberately not cached: this reads a single float column, 12 rows per call
-    # (~17 bytes/row on the Postgres wire), so 284k calls total only ~0.1 GB — 21% of
-    # rows_read but under 6% of bytes. Caching it would force the key to degrade to
-    # (symbol, interval), dropping earliest_t, which puts a time gap between `prior`
-    # and this batch: `series` is no longer contiguous and the run-length count
-    # quietly computes the wrong answer — the exact failure class this module has been
-    # bitten by. Under 6% upside is not worth that risk on a gate that discards real
-    # market data.
-    previous_closes = [
-        r[0]
-        for r in db.query(Candle.c)
-        .filter(
-            Candle.symbol == symbol,
-            Candle.interval == interval,
-            Candle.t < earliest_t,
-        )
-        .order_by(Candle.t.desc())
-        .limit(STALLED_CLOSE_BARS * 2)
-        .all()
-    ][::-1]  # 查询是倒序,反转回时间升序 / query is descending; restore ascending order
+    # 前序收盘价先问内存窗口：它按 earliest_t 精确切片,prior 与本批之间没有时间空隙,
+    # 游程统计拿到的 series 与查库一字不差。窗口答不了（earliest_t 早于一致性下界、
+    # 或窗口里不足 12 根）才回库——这条查询曾一天跑 260 万次。
+    # Ask the in-memory window first: it slices exactly at earliest_t, so `prior`
+    # joins the batch with no gap and the run-length count sees the same series the
+    # query would return. Only when the window can't answer (earliest_t predates its
+    # consistency floor, or it holds fewer than 12 bars) do we query — a read that
+    # used to run 2.6 million times a day.
+    win = _window(db, symbol, interval)
+    previous_closes = win.previous_closes(earliest_t, STALLED_CLOSE_BARS * 2)
+    if previous_closes is None:
+        previous_closes = [
+            r[0]
+            for r in db.query(Candle.c)
+            .filter(
+                Candle.symbol == symbol,
+                Candle.interval == interval,
+                Candle.t < earliest_t,
+            )
+            .order_by(Candle.t.desc())
+            .limit(STALLED_CLOSE_BARS * 2)
+            .all()
+        ][::-1]  # 查询是倒序,反转回时间升序 / query is descending; restore ascending order
     stalled_count = _stalled_tail_length(closed, previous_closes)
     if stalled_count:
         # 与周末闸门同理记 info:节假日休市是预期行为,不是故障。
@@ -958,26 +1168,16 @@ def filter_tradeable_bars(
     # bar's own earlier version, not an original it copied. Genuine replays have
     # strictly older originals and are unaffected; copies within one batch are
     # still caught by appending accepted bars to the baseline in the loop below.
-    # 基线查询走 60 秒 TTL 内存缓存：tick 模式每秒推一次，而这个查询要读几千行
-    # （1 分钟线 5 天 = 7200 行 × 5 列），每秒重查是 Egress 的主要来源之一。
-    # 60 秒内基线的变化不影响判定语义——重放副本的原件必然是更早的 bar，
-    # 新落库的那几根由下面循环里 baseline.add() 覆盖批内连锁判定。
-    #
-    # The baseline query goes through a 60s TTL cache: tick mode pushes every
-    # second while this query reads thousands of rows (5 days of M1 = 7200 rows
-    # × 5 columns), making it a top egress source. A 60s staleness window is
-    # semantically safe — a replay's original is always an older bar, and rows
-    # persisted within the window are covered by baseline.add() in the loop below.
-    cache_key = (symbol, interval)
-    now_mono = time.monotonic()
-    cached = _baseline_cache.get(cache_key)
-    if (
-        cached is not None
-        and now_mono - cached[1] < _BASELINE_CACHE_TTL
-        and cached[2] == batch_floor
-    ):
-        baseline = set(cached[0])  # 复制：下面会往里加本批 bar，不能污染缓存
-    else:
+    # 基线先问内存窗口：按 [baseline_floor, batch_floor) 在内存里切区间，实时批与
+    # 回填批各用各的起点,再没有缓存可被交替作废（这正是 09-07 起 Egress 翻三倍的
+    # 机制,见模块头注释）。区间起点早于窗口一致性下界时回库,查询原样保留。
+    # The in-memory window answers first, sliced at [baseline_floor, batch_floor):
+    # live and backfill batches each get their own floor, so there is no cache left
+    # for their alternation to invalidate (the mechanism behind the 3x egress jump
+    # from 09-07, see the module header). Floors older than the window's consistency
+    # floor fall back to the unchanged query.
+    baseline = win.baseline(batch_floor, lookback, REPLAY_BASELINE_MAX_ROWS)
+    if baseline is None:
         baseline = {
             _replay_key({"o": r[0], "h": r[1], "l": r[2], "c": r[3], "v": r[4]})
             for r in db.query(Candle.o, Candle.h, Candle.l, Candle.c, Candle.v)
@@ -991,7 +1191,6 @@ def filter_tradeable_bars(
             .limit(REPLAY_BASELINE_MAX_ROWS)
             .all()
         }
-        _baseline_cache[cache_key] = (set(baseline), now_mono, batch_floor)
     accepted: list[dict] = []
     replay_count = 0
     for b in closed:
@@ -1098,30 +1297,58 @@ def persist_closed_bars(
     if not closed:
         return []
 
-    existing = {
-        row[0]
-        for row in db.query(Candle.t)
-        .filter(
-            Candle.symbol == symbol,
-            Candle.interval == interval,
-            Candle.t.in_([b["t"] for b in closed]),
-        )
-        .all()
-    }
-    inserted: list[int] = []
-    for b in closed:
-        if b["t"] in existing:
-            continue
-        db.add(
-            Candle(
-                symbol=symbol, interval=interval, t=b["t"],
-                o=b["o"], h=b["h"], l=b["l"], c=b["c"], v=b.get("v", 0),
+    def _existing_in_db(ts: list[int]) -> set[int]:
+        return {
+            row[0]
+            for row in db.query(Candle.t)
+            .filter(
+                Candle.symbol == symbol,
+                Candle.interval == interval,
+                Candle.t.in_(ts),
             )
+            .all()
+        }
+
+    def _insert_missing(existing: set[int]) -> list[dict]:
+        new_bars = [b for b in closed if b["t"] not in existing]
+        for b in new_bars:
+            db.add(
+                Candle(
+                    symbol=symbol, interval=interval, t=b["t"],
+                    o=b["o"], h=b["h"], l=b["l"], c=b["c"], v=b.get("v", 0),
+                )
+            )
+        if new_bars:
+            db.commit()
+        return new_bars
+
+    # 去重先问内存窗口：一致性下界之后的时间戳,内存知道有没有;更早的（一次性历史
+    # 回填）仍回库查。窗口只镜像本进程写过的行,多 worker 时别的进程可能已经落了同一
+    # 根——撞唯一约束就回滚、全部回库重查一遍再补,结果与从前逐字节相同。
+    # Dedup asks the window first: timestamps past its consistency floor are known
+    # locally, older ones (one-off history seeding) still go to the database. The
+    # window only mirrors this process's writes, so with several workers another one
+    # may already hold a bar — on a unique-constraint hit, roll back, re-check every
+    # timestamp against the database and insert the rest; the outcome is unchanged.
+    win = _window(db, symbol, interval)
+    ts = [b["t"] for b in closed]
+    below = [t for t in ts if t < win.covered_from]
+    existing = _existing_in_db(below) if below else set()
+    existing.update(t for t in ts if t >= win.covered_from and win.has_t(t))
+    try:
+        new_bars = _insert_missing(existing)
+    except IntegrityError:
+        db.rollback()
+        logger.info(
+            "persist_closed_bars: %s/%s hit the unique constraint (another writer); "
+            "re-checking against the database", symbol, interval,
         )
-        inserted.append(b["t"])
-    if inserted:
-        db.commit()
-    inserted.sort()
+        new_bars = _insert_missing(_existing_in_db(ts))
+    with win.lock:
+        for b in new_bars:
+            if b["t"] >= win.covered_from:
+                win.add(b["t"], b["o"], b["h"], b["l"], b["c"], b.get("v", 0))
+    inserted = sorted(b["t"] for b in new_bars)
     return inserted
 
 
@@ -1137,6 +1364,10 @@ def cleanup_old_m1(db, retention_days: int) -> int:
     )
     if deleted:
         db.commit()
+        # 内存窗口是库的镜像,库里删了内存也得丢,否则去重会以为这些 t 还在。
+        # The window mirrors the table: rows deleted here must leave memory too, or
+        # the dedup would still consider those timestamps present.
+        _evict_interval_below("1", int(cutoff))
     return deleted
 
 

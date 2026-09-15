@@ -27,10 +27,12 @@ SYM = "XAUUSD"
 
 
 @pytest.fixture(autouse=True)
-def _clear_baseline_cache():
-    cs._baseline_cache.clear()
+def _clear_windows():
+    """每个用例一套内存 SQLite，candle_store 的内存窗口也得跟着换。
+    One database per test, so the in-memory candle windows must reset too."""
+    cs.reset_windows_for_tests()
     yield
-    cs._baseline_cache.clear()
+    cs.reset_windows_for_tests()
 
 
 def _ts(y, mo, d, h=0, mi=0):
@@ -42,10 +44,15 @@ def _bar(t, o=2000.0, h=2005.0, l=1995.0, c=2002.0, v=100):
 
 
 def _seed(db, interval, bars, symbol=SYM):
+    """绕过 candle_store 直接往库里写行，模拟"别的写者"。窗口只镜像本进程经
+    persist_closed_bars 写的行，所以这里写完顺手把窗口清掉，下次使用时重新从库加载。
+    Writes rows behind candle_store's back (another writer). The window only mirrors
+    rows persisted through persist_closed_bars, so reset it to reload from the DB."""
     for b in bars:
         db.add(Candle(symbol=symbol, interval=interval, t=b["t"],
                       o=b["o"], h=b["h"], l=b["l"], c=b["c"], v=b.get("v", 0)))
     db.commit()
+    cs.reset_windows_for_tests()
 
 
 # 2026-07-22 是周三，远在过去，收盘判定不受干扰 / a Wednesday well in the past
@@ -216,7 +223,6 @@ def test_replay_baseline_respects_lookback_window(db_session):
     _seed(db_session, "240", [old])
     got = cs.filter_tradeable_bars(db_session, SYM, "240", [dict(old, t=WED)])
     assert [b["t"] for b in got] == [WED]
-    cs._baseline_cache.clear()
     recent = _bar(WED - 8 * 3600, o=1.0, h=2.0, l=0.5, c=1.5, v=9)
     _seed(db_session, "240", [recent])
     assert cs.filter_tradeable_bars(db_session, SYM, "240", [dict(old, t=WED + 4 * 3600)]) == []
@@ -267,16 +273,149 @@ def test_cleanup_old_m1_touches_only_old_minute_bars(db_session):
     assert left == {("1", fresh), ("5", old)}
 
 
-def test_replay_baseline_cache_is_not_reused_for_an_older_batch(db_session):
-    """先来一批实时 bar，60 秒内再来一批更早的回填：回填不能借用前者的基线——那份
-    基线里的 bar 比回填自己还晚，与"只和更早的比"相反。同批 floor 相同才复用。"""
+def test_replay_baseline_is_sliced_by_each_batch_floor(db_session):
+    """先来一批实时 bar，紧接着来一批更早的回填：回填只能和**比它自己更早**的 bar 比，
+    不能拿实时批那份基线——那里面的 bar 比回填还晚。旧实现靠"floor 变了就重查"保证
+    这一点，代价是缓存被交替作废（09-07 Egress 翻三倍的机制）；现在按 floor 切内存区间。"""
     real = _bar(WED, o=1.0, h=2.0, l=0.5, c=1.5, v=9)
     _seed(db_session, "5", [real])
     live = [_bar(WED + 3600, o=1.1, h=2.1, l=0.6, c=1.6, v=10)]
     assert len(cs.filter_tradeable_bars(db_session, SYM, "5", live)) == 1
-    assert cs._baseline_cache[(SYM, "5")][2] == WED + 3600
-    # 回填批：floor 在 real 之前，若复用上面的基线会把 real 当"更早的副本"误杀
+    # 回填批：floor 在 real 之前，若拿上面的基线会把 real 当"更早的副本"误杀
     backfill = [dict(real, t=WED - 300)]
     got = cs.filter_tradeable_bars(db_session, SYM, "5", backfill)
     assert [b["t"] for b in got] == [WED - 300]
-    assert cs._baseline_cache[(SYM, "5")][2] == WED - 300
+
+
+# ---- 内存窗口 / in-memory window ---------------------------------------------------
+
+def _now_grid(seconds):
+    now = int(datetime.now(timezone.utc).timestamp())
+    return now - now % seconds
+
+
+def _count_selects(db_session):
+    """挂在会话引擎上的 SELECT 计数器（只数 candles 表）。
+    Counts SELECTs against the candles table on this session's engine."""
+    from sqlalchemy import event
+    counter = {"n": 0}
+
+    def _hook(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT") and "candles" in statement:
+            counter["n"] += 1
+
+    event.listen(db_session.get_bind(), "before_cursor_execute", _hook)
+    return counter
+
+
+def test_window_serves_gates_without_querying_after_warmup(db_session):
+    """预热之后，实时批的三条读（前序收盘价、重放基线、去重）全部由内存回答，
+    candles 表零 SELECT；真实数据只在落库时写。这是本次 Egress 修复的核心断言。
+    After warm-up a live batch costs zero SELECTs on candles: preceding closes, replay
+    baseline and dedup are all answered from memory. The core assertion of the fix."""
+    cur = _now_grid(60)
+    # 库里先有 20 根，且窗口已加载（首次调用会读一次库）
+    history = _walk(cur - 30 * 60, 20, 60)
+    _seed(db_session, "1", history, symbol="BTCUSD")
+    cs.filter_tradeable_bars(db_session, "BTCUSD", "1", history[-2:])  # 预热 / warm up
+    counter = _count_selects(db_session)
+
+    # 实时批：2 根新 bar（tick 模式的形态）
+    # 价位与 history 错开，免得第一根恰好与 history[0] 同指纹被当成重放
+    # Different price level from history so bar 0 isn't a genuine fingerprint match
+    batch = [_bar(cur - 600, o=2100, h=2101, l=2099, c=2100.3, v=300),
+             _bar(cur - 540, o=2100.7, h=2101.7, l=2099.7, c=2101.0, v=301)]
+    cacheable, tradeable = cs.filter_tradeable_bars_both(db_session, "BTCUSD", "1", batch)
+    assert [b["t"] for b in tradeable] == [b["t"] for b in batch]
+    assert cs.persist_closed_bars(db_session, "BTCUSD", "1", batch, prefiltered=tradeable) == [b["t"] for b in batch]
+    # 同一批再推一次（tick 模式每秒重复）：全部已存在，也不查库
+    assert cs.persist_closed_bars(db_session, "BTCUSD", "1", batch, prefiltered=tradeable) == []
+    assert counter["n"] == 0
+
+    # 内存里的基线照样拦重放：复制一根刚落库的 bar 换个时间戳
+    copy = dict(batch[0], t=cur - 5 * 60)
+    assert cs.filter_tradeable_bars(db_session, "BTCUSD", "1", [copy]) == []
+    assert counter["n"] == 0
+
+
+def test_window_stalled_gate_uses_in_memory_previous_closes(db_session):
+    """前序收盘价来自内存时,停滞判定与查库结果一致：库里 5 根同价 + 本批 1 根同价 = 6 根，丢。"""
+    cur = _now_grid(60)
+    # 库里 12 根：前 7 根收盘各不同，后 5 根收盘都是 1.0
+    stored = [_bar(cur - (17 - i) * 60, c=2.0 + i, h=3.0 + i, l=0.5) for i in range(7)]
+    stored += [_bar(cur - (10 - i) * 60, c=1.0, h=2.0, l=0.5) for i in range(5)]
+    _seed(db_session, "1", stored, symbol="BTCUSD")
+    cs.filter_tradeable_bars(db_session, "BTCUSD", "1", stored[-1:])   # 预热
+    counter = _count_selects(db_session)
+    batch = [_bar(cur - 5 * 60, c=1.0, h=2.5, l=0.4)]
+    assert cs.filter_tradeable_bars(db_session, "BTCUSD", "1", batch) == []
+    assert counter["n"] == 0
+
+
+def test_window_falls_back_to_db_for_batches_older_than_its_floor(db_session):
+    """一次性历史回填送来几周前的数据：起点早于窗口一致性下界,走原来的查库路径,
+    重放判定照常成立。"""
+    old = _bar(WED, o=1.0, h=2.0, l=0.5, c=1.5, v=9)
+    _seed(db_session, "15", [old])
+    cs.filter_tradeable_bars(db_session, SYM, "15", [_bar(_now_grid(900) - 900)])   # 加载窗口
+    counter = _count_selects(db_session)
+    assert cs.filter_tradeable_bars(db_session, SYM, "15", [dict(old, t=WED + 900)]) == []
+    assert counter["n"] >= 1
+
+
+def test_window_pulls_other_workers_rows_only_when_shared_state_enabled(db_session, monkeypatch):
+    """多 worker（配了 REDIS_URL）时每次读窗口前拉"比内存最新一根更晚"的行；单 worker 不拉。"""
+    cur = _now_grid(300)
+    first = _bar(cur - 3000, o=1.0, h=2.0, l=0.5, c=1.5, v=9)
+    _seed(db_session, "5", [first], symbol="BTCUSD")
+    cs.filter_tradeable_bars(db_session, "BTCUSD", "5", [first])          # 加载窗口
+    other = _bar(cur - 1500, o=3.0, h=4.0, l=2.5, c=3.5, v=11)
+    # 别的写者直接落库（不经 candle_store）,且不重置窗口
+    db_session.add(Candle(symbol="BTCUSD", interval="5", t=other["t"], o=other["o"], h=other["h"],
+                          l=other["l"], c=other["c"], v=other["v"]))
+    db_session.commit()
+    copy = [dict(other, t=cur - 300)]
+    monkeypatch.setattr(cs.shared_state, "enabled", lambda: False)
+    assert len(cs.filter_tradeable_bars(db_session, "BTCUSD", "5", copy)) == 1   # 单 worker：看不见
+    monkeypatch.setattr(cs.shared_state, "enabled", lambda: True)
+    assert cs.filter_tradeable_bars(db_session, "BTCUSD", "5", copy) == []       # 多 worker：补齐后拦下
+
+
+def test_window_dedup_survives_unique_constraint_from_another_writer(db_session):
+    """内存说没有、库里其实有（别的 worker 落的）：撞唯一约束后回库重查,结果与从前一致。"""
+    cur = _now_grid(60)
+    bars = _walk(cur - 10 * 60, 3, 60)
+    cs.persist_closed_bars(db_session, "BTCUSD", "1", [], prefiltered=[_bar(cur - 20 * 60)])   # 加载窗口
+    # 别的写者直接落了 bars[1]，窗口不知道 / another writer stored bars[1]; the window doesn't know
+    db_session.add(Candle(symbol="BTCUSD", interval="1", t=bars[1]["t"], o=1, h=2, l=0.5, c=1.5, v=1))
+    db_session.commit()
+    assert cs.persist_closed_bars(db_session, "BTCUSD", "1", bars, prefiltered=bars) == [bars[0]["t"], bars[2]["t"]]
+    assert db_session.query(Candle).filter_by(symbol="BTCUSD", interval="1").count() == 4
+
+
+def test_cleanup_old_m1_evicts_window_rows_too(db_session):
+    """保留期清扫删掉的 M1 行也从窗口消失,去重不会再以为它们还在。"""
+    now = datetime.now(timezone.utc)
+    fresh = int((now - timedelta(days=1)).timestamp()) // 60 * 60
+    cs.persist_closed_bars(db_session, "BTCUSD", "1", [], prefiltered=[_bar(fresh)])
+    win = cs._windows[("BTCUSD", "1")]
+    assert win.has_t(fresh)
+    cs.cleanup_old_m1(db_session, 0)      # 保留 0 天：全部删掉
+    assert not win.has_t(fresh)
+    assert win.covered_from >= fresh
+
+
+def test_series_window_evicts_and_keeps_indexes_consistent():
+    win = cs._SeriesWindow()
+    win.covered_from = 0
+    for i in range(5):
+        win.add(i * 60, 1.0 + i, 2.0 + i, 0.5, 1.5 + i, 10 + i)
+    win.add(600, 1.0, 2.0, 0.5, 1.5, 10)          # 与 t=0 同指纹 / same fingerprint as t=0
+    key0 = cs._replay_key({"o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5, "v": 10})
+    assert win.t_by_key[key0] == {0, 600}
+    win.evict_below(120)
+    assert win.ts == [120, 180, 240, 600]
+    assert win.t_by_key[key0] == {600}
+    assert win.previous_closes(600, 3) == [3.5, 4.5, 5.5]
+    assert win.previous_closes(600, 5) is None    # 不够 5 根：回库 / not enough, fall back
+    assert win.covered_from == 120
