@@ -5,6 +5,7 @@
 // styles/support.css (.sup-*).
 import { useEffect, useState, type FormEvent } from 'react'
 import PageHead from '../components/PageHead'
+import SocialLinks from '../components/SocialLinks'
 import { useTranslation } from 'react-i18next'
 import { ticketApi } from '../api/client'
 import Select from '../components/Select'
@@ -324,6 +325,18 @@ export default function SupportPage() {
           ))
         )}
       </section>
+
+      {/* 工单之外的联系方式。放在列表下方而不是页头：工单才是这一页的主路径，
+          社群入口是「这里没解决的话还可以去哪」，抢在提交工单之前出现反而会把
+          人从有记录、可追踪的渠道推到没记录的渠道去。
+          Contact routes beyond tickets. Below the list rather than in the header:
+          filing a ticket is this page's main path, and the community links answer
+          "where else, if that didn't work" — surfacing them first would push
+          people off a tracked channel onto an untracked one. */}
+      <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-white/[0.06] pt-5 text-[13px] text-neutral-500">
+        <span>{t('social.findUs')}</span>
+        <SocialLinks size={17} />
+      </div>
     </div>
   )
 }

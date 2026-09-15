@@ -9,6 +9,7 @@ import { notificationApi, pushApi } from '../api/client'
 import { ensurePushSubscription, pushSupported } from '../utils/push'
 import { recordDiag } from '../utils/pushDiag'
 import Logo from './Logo'
+import SocialLinks from './SocialLinks'
 import PlanExpiryBanner from './PlanExpiryBanner'
 import LanguageToggle from './LanguageToggle'
 import EAStatusBadge from './EAStatusBadge'
@@ -838,6 +839,15 @@ export default function Layout() {
             <NavLink to="/support" className="transition-colors hover:text-neutral-300">
               {t('nav.support')}
             </NavLink>
+            {/* 社交入口接在这一行末尾而不是自成一行：这排图标在信息层级上和
+                「条款/客服」是同一档的次要链接，另起一行会把它抬成一个独立区块，
+                与这条页脚刻意做轻的初衷相反。一个都没配时组件自己不渲染。
+                The social row joins this line rather than getting its own: these
+                icons sit at the same level as the terms/support links, and a
+                separate row would promote them into a block of their own, against
+                the point of a deliberately featherweight footer. The component
+                renders nothing when no platform is configured. */}
+            <SocialLinks className="gap-3" size={15} />
           </div>
         </footer>
         )}

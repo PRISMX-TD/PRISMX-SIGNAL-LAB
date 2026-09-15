@@ -31,6 +31,7 @@ import { useTranslation } from 'react-i18next'
 import { paymentApi, inviteApi, readRef } from '../api/client'
 import { SUPPORT_EMAIL } from '../config/site'
 import Logo from '../components/Logo'
+import SocialLinks from '../components/SocialLinks'
 import BadgeIcon from '../components/badges/BadgeIcon'
 import PedestalStage from '../components/badges/PedestalStage'
 import type { BadgeShelf, GamificationBadge } from '../api/types'
@@ -366,6 +367,14 @@ function Foot({ t }: { t: T }) {
             <span className="font-display text-[15px] font-bold tracking-tight text-white">Signal Lab</span>
           </div>
           <p className="mt-3 text-[12px] uppercase tracking-[0.14em] text-neutral-500">by PRISMX</p>
+          {/* 社交入口放在品牌栏下方，不进上面的导航区：这几个链接是把人带出站的，
+              而页脚导航（#pricing / #faq）承担的是最后一次把人拉回转化路径。
+              两者挨着会互相稀释。一个都没配时组件自己不渲染。
+              The social row sits under the brand block, not in the nav column
+              above: these links take people off the site, while the footer nav
+              (#pricing / #faq) is the last pull back toward converting. Adjacent,
+              they dilute each other. Renders nothing when nothing is configured. */}
+          <SocialLinks className="mt-5" size={18} />
         </div>
 
         <nav className="md:col-span-3">

@@ -2,6 +2,7 @@
 // Download page: PRISMX Bridge download, usage guide and important notes.
 import { useEffect, useState } from 'react'
 import PageHead from '../components/PageHead'
+import SocialLinks, { useHasSocialLinks } from '../components/SocialLinks'
 import { useTranslation } from 'react-i18next'
 import { bridgeVersionApi } from '../api/client'
 
@@ -50,6 +51,13 @@ export default function DownloadPage() {
       .catch(() => {})
     return () => { alive = false }
   }, [])
+
+  // 这张卡有标题和说明文字，一个平台都没配时整张卡都不该出现——只让 SocialLinks
+  // 自己不渲染的话，留下的是一个「加入社群」标题底下什么都没有的空卡。
+  // This card has a heading and body copy, so with no platform configured the
+  // whole card must go: letting SocialLinks render nothing on its own would leave
+  // a "Join the community" heading over an empty box.
+  const social = useHasSocialLinks()
 
   const guide = [
     { title: t('download.g1Title'), desc: t('download.g1Desc') },
@@ -137,6 +145,24 @@ export default function DownloadPage() {
             </h3>
             <p className="mt-2 text-sm leading-relaxed text-neutral-400">{t('download.whatDesc')}</p>
           </div>
+
+          {/* 加入社群。放在右栏「桥接是什么」之后、注意事项之前：装完之后的下一步
+              是找人问和看更新，而注意事项是装之前要读的——但注意事项那块带左侧
+              琥珀边、视觉最重，压在最后才不会把这张安静的卡挤没。
+              Join-the-community card, in the right column after "what the bridge
+              does" and before the notes: once installed, the next step is asking
+              people and following updates. The notes block carries the amber rule
+              and the most visual weight, so it stays last rather than burying
+              this quieter card. */}
+          {social && (
+            <div className="glass p-6">
+              <h3 className="font-display text-lg font-semibold text-neutral-100">
+                {t('social.communityTitle')}
+              </h3>
+              <p className="mt-2 text-sm leading-relaxed text-neutral-400">{t('social.communityDesc')}</p>
+              <SocialLinks className="mt-4" size={20} />
+            </div>
+          )}
 
           {/* 注意事项 / important notes */}
           <div className="glass border-l-2 border-amber-400/50 p-6">

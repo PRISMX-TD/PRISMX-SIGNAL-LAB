@@ -1843,6 +1843,11 @@
     "q13": "Why do I have to use the partner broker's MT5 account?",
     "a13": "Because the win-rate scoring must reconcile with your actual fills. Signals are scored, priced and executed against one quote source; a different broker's spread and pricing quirks would open a gap of \"the record won but my account didn't\". Locking one quote source is what makes the public record auditable."
   },
+  "social": {
+    "communityTitle": "Join the community",
+    "communityDesc": "Release notes, tips, and other people already using it.",
+    "findUs": "You can also find us here"
+  },
   "legal": {
     "backHome": "Back to home",
     "lastUpdated": "Last updated",
