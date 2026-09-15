@@ -19,6 +19,7 @@ export default function UserMenu({
   email,
   showUpgrade,
   isAdmin,
+  isAgent = false,
   gamificationVisible,
   gamificationLevel,
   gamificationTitle,
@@ -27,6 +28,8 @@ export default function UserMenu({
   email: string | undefined
   showUpgrade: boolean
   isAdmin: boolean
+  // 邀请链接代理入口（见 User.isAgent）/ invite-link agent entry (see User.isAgent)
+  isAgent?: boolean
   gamificationVisible: boolean
   // 等级/称号：随 /auth/me 一起下发（见 store/auth.tsx refreshUser），角标
   // 只在两者都有值时渲染——gamificationVisible 为假时后端本就不算，值是 null。
@@ -122,6 +125,11 @@ export default function UserMenu({
           {showUpgrade && (
             <Link to="/upgrade" onClick={() => setOpen(false)} className={`${linkClass} text-prism-300`}>
               {t("nav.upgrade")}
+            </Link>
+          )}
+          {isAgent && (
+            <Link to="/agent" onClick={() => setOpen(false)} className={linkClass}>
+              {t("nav.agent")}
             </Link>
           )}
           {isAdmin && (

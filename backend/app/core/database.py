@@ -121,7 +121,10 @@ def _hash_legacy_api_tokens() -> None:
 # rev 19 — users.nickname_key（昵称重名判定的归一形式）+ uq_users_nickname_key 唯一索引。
 #          回填：给已有昵称的行算 key；同名组只保留 id 最小的那个，其余两列一起清空
 #          （被清的人下次登录会撞上「必须设昵称」的守卫，当场重设，不会静默顶着空名字）
-CURRENT_SCHEMA_REV = 19
+# rev 20 — 新表 invite_link_agents（邀请链接指派给「代理」用户；派生身份，不动 users.role）。
+#          全靠 create_all 建表建索引，无 ADD COLUMN、无回填；+1 只为让老库启动时走一次
+#          完整迁移而不是快速通道。
+CURRENT_SCHEMA_REV = 20
 
 _SCHEMA_REV_KEY = "schema_rev"
 

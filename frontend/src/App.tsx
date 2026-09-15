@@ -46,6 +46,7 @@ const StrategyGuidePage = lazyRetry(() => import('./pages/StrategyGuidePage'), '
 const AnnouncementsPage = lazyRetry(() => import('./pages/AnnouncementsPage'), 'AnnouncementsPage')
 const AnnouncementPage = lazyRetry(() => import('./pages/AnnouncementPage'), 'AnnouncementPage')
 const CompleteProfilePage = lazyRetry(() => import('./pages/CompleteProfilePage'), 'CompleteProfilePage')
+const AgentPage = lazyRetry(() => import('./pages/AgentPage'), 'AgentPage')
 
 function Protected({ children }: { children: ReactNode }) {
   const { isAuthed, user } = useAuth()
@@ -70,6 +71,17 @@ function Protected({ children }: { children: ReactNode }) {
 function AdminOnly({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   return user?.role === 'admin' ? <>{children}</> : <Navigate to="/dashboard" replace />
+}
+
+// 代理专属路由：要求 /auth/me 下发的 isAgent（至少持有一条被指派的邀请链接）。
+// 与 AdminOnly 同款：真正的边界在后端（/agent/* 按链接归属校验），这里只藏入口。
+// 不看 role——代理不是角色，普通用户权益不变。
+// Agent-only route: requires the isAgent flag from /auth/me (holds at least one
+// assigned invite link). Same shape as AdminOnly: the real boundary is the
+// backend's per-link ownership check; this only hides the entry. Not role-based.
+function AgentOnly({ children }: { children: ReactNode }) {
+  const { user } = useAuth()
+  return user?.isAgent ? <>{children}</> : <Navigate to="/dashboard" replace />
 }
 
 // 未登录访问根路径展示主页，已登录则进入仪表盘
@@ -250,6 +262,14 @@ export default function App() {
               <Route path="/support" element={<SupportPage />} />
               <Route path="/announcements" element={<AnnouncementsPage />} />
               <Route path="/announcements/:id" element={<AnnouncementPage />} />
+              <Route
+                path="/agent"
+                element={
+                  <AgentOnly>
+                    <AgentPage />
+                  </AgentOnly>
+                }
+              />
               <Route
                 path="/admin"
                 element={

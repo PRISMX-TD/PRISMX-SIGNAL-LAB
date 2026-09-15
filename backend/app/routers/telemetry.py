@@ -113,6 +113,7 @@ ALLOWED_PATHS = frozenset({
     "/account",
     "/download",
     "/simulator",
+    "/agent",
 })
 
 # 单次停留上限（秒）：30 分钟。超过基本可以断定是挂着页面没在看。

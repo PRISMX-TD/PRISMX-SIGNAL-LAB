@@ -9,13 +9,15 @@
 // attribution code. Links are built from ORIGIN, not window.location.origin —
 // copied URLs must stay canonical even when the admin works on a preview host.
 import { useEffect, useState, type FormEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '../../utils/useToast'
 import { adminApi } from '../../api/client'
 import { fmtTime, localizeApiError } from '../../api/utils'
 import { SkeletonLine } from '../Skeleton'
 import { ORIGIN } from '../../seo/meta'
-import type { InviteLink } from '../../api/types'
+import { useBackToClose } from '../../utils/useBackToClose'
+import type { AdminUser, InviteLink } from '../../api/types'
 
 const linkUrl = (code: string) => `${ORIGIN}/?ref=${code}`
 
@@ -29,6 +31,8 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
   const [busyId, setBusyId] = useState<string | null>(null)
   const [labelDrafts, setLabelDrafts] = useState<Record<string, string>>({})
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  // 正在为哪条链接指派代理（弹窗打开态）/ which link the assign sheet is open for
+  const [assignFor, setAssignFor] = useState<InviteLink | null>(null)
 
   const { toast, showToast } = useToast()
 
@@ -100,6 +104,38 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
     try {
       const updated = await adminApi.updateInviteLink(l.id, { grantsTrial: !l.grantsTrial })
       setLinks((prev) => prev.map((x) => (x.id === l.id ? updated : x)))
+      showToast('ok', t('admin.saved'))
+    } catch (err) {
+      showErr(err, 'admin.saveError')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  // 指派 / 移除代理：后端两边都回整条链接（含最新 agents），直接替换那一行。
+  // Assign / remove an agent: both return the full link, so the row is swapped whole.
+  const assignAgent = async (l: InviteLink, userId: string) => {
+    if (busyId) return
+    setBusyId(l.id)
+    try {
+      const updated = await adminApi.assignInviteAgent(l.id, userId)
+      setLinks((prev) => prev.map((x) => (x.id === l.id ? updated : x)))
+      setAssignFor(updated)
+      showToast('ok', t('admin.saved'))
+    } catch (err) {
+      showErr(err, 'admin.saveError')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const unassignAgent = async (l: InviteLink, userId: string) => {
+    if (busyId) return
+    setBusyId(l.id)
+    try {
+      const updated = await adminApi.unassignInviteAgent(l.id, userId)
+      setLinks((prev) => prev.map((x) => (x.id === l.id ? updated : x)))
+      setAssignFor((cur) => (cur && cur.id === l.id ? updated : cur))
       showToast('ok', t('admin.saved'))
     } catch (err) {
       showErr(err, 'admin.saveError')
@@ -185,7 +221,7 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
             {t('admin.invite.empty')}
           </div>
         ) : (
-          <table className="w-full min-w-[1020px] text-left text-sm">
+          <table className="w-full min-w-[1240px] text-left text-sm">
             <thead>
               <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-neutral-500">
                 <th className="px-4 py-3 font-medium">{t('admin.invite.colLabel')}</th>
@@ -194,6 +230,7 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
                 <th className="px-4 py-3 font-medium">{t('admin.invite.colRegistrations')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.invite.colStatus')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.invite.colGrantsTrial')}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.invite.colAgents')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.invite.colCreated')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.colAction')}</th>
               </tr>
@@ -261,6 +298,40 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
                         </p>
                       )}
                     </td>
+                    {/* 代理：一人一枚小标签（昵称优先，没有就邮箱），× 移除；「指派」开搜索弹窗。
+                        代理不是角色，这里不动 role——见后端 InviteLinkAgent 模型注释。
+                        Agents: one chip per user (nickname, else email) with × to remove;
+                        Assign opens the search sheet. Not a role — see the model's comment. */}
+                    <td className="px-4 py-3">
+                      <div className="flex max-w-[16rem] flex-wrap items-center gap-1.5">
+                        {(l.agents ?? []).map((a) => (
+                          <span
+                            key={a.userId}
+                            className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-xs text-neutral-200"
+                            title={a.email}
+                          >
+                            {a.nickname || a.email}
+                            <button
+                              type="button"
+                              className="text-neutral-500 hover:text-down disabled:opacity-40"
+                              aria-label={t('admin.invite.unassign')}
+                              disabled={busyId !== null}
+                              onClick={() => void unassignAgent(l, a.userId)}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                        <button
+                          type="button"
+                          className="btn-ghost px-2 py-0.5 text-xs disabled:opacity-40"
+                          disabled={busyId !== null}
+                          onClick={() => setAssignFor(l)}
+                        >
+                          + {t('admin.invite.assign')}
+                        </button>
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-xs text-neutral-400">{fmtTime(l.createdAt)}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
@@ -292,6 +363,154 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
           </table>
         )}
       </div>
+
+      {assignFor && (
+        <AssignAgentSheet
+          link={assignFor}
+          busy={busyId !== null}
+          onAssign={(userId) => void assignAgent(assignFor, userId)}
+          onUnassign={(userId) => void unassignAgent(assignFor, userId)}
+          onClose={() => setAssignFor(null)}
+        />
+      )}
     </div>
+  )
+}
+
+// 指派代理的搜索弹窗：复用管理员用户搜索接口（邮箱 / 手机号模糊），点一行即指派。
+// portal 到 body（.glass 卡片会成为 fixed 的包含块，见 ConfirmModal 的注释）；接住
+// 手机返回手势（useBackToClose）。300ms 防抖，空查询不打接口。
+// Agent-assignment sheet: reuses the admin user search (email / phone fuzzy); one
+// click on a row assigns. Portaled to body (see ConfirmModal's containing-block
+// note) and claims the phone back gesture. 300ms debounce; empty query = no request.
+function AssignAgentSheet({
+  link,
+  busy,
+  onAssign,
+  onUnassign,
+  onClose,
+}: {
+  link: InviteLink
+  busy: boolean
+  onAssign: (userId: string) => void
+  onUnassign: (userId: string) => void
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  const [q, setQ] = useState('')
+  const [results, setResults] = useState<AdminUser[] | null>(null)
+  const [searching, setSearching] = useState(false)
+  useBackToClose(true, onClose)
+
+  useEffect(() => {
+    const term = q.trim()
+    if (!term) {
+      setResults(null)
+      return
+    }
+    let alive = true
+    const timer = window.setTimeout(() => {
+      setSearching(true)
+      adminApi
+        .listUsers({ q: term, limit: 20 })
+        .then((res) => {
+          if (alive) setResults(res.users)
+        })
+        .catch(() => {
+          if (alive) setResults([])
+        })
+        .finally(() => {
+          if (alive) setSearching(false)
+        })
+    }, 300)
+    return () => {
+      alive = false
+      window.clearTimeout(timer)
+    }
+  }, [q])
+
+  const assigned = new Set((link.agents ?? []).map((a) => a.userId))
+
+  return createPortal(
+    <div className="slide-overlay" onClick={onClose}>
+      <div className="slide-sheet sm:w-[420px]" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-bold text-white">{t('admin.invite.assignTitle')}</h3>
+        <p className="mt-1 text-xs text-neutral-400">{link.label}</p>
+        <p className="mt-3 text-xs leading-relaxed text-neutral-500">{t('admin.invite.assignHint')}</p>
+
+        {(link.agents ?? []).length > 0 && (
+          <div className="mt-4 flex flex-wrap gap-1.5">
+            {(link.agents ?? []).map((a) => (
+              <span
+                key={a.userId}
+                className="inline-flex items-center gap-1 rounded-full bg-prism-500/15 px-2 py-0.5 text-xs text-prism-200"
+                title={a.email}
+              >
+                {a.nickname || a.email}
+                <button
+                  type="button"
+                  className="text-prism-300/70 hover:text-down disabled:opacity-40"
+                  aria-label={t('admin.invite.unassign')}
+                  disabled={busy}
+                  onClick={() => onUnassign(a.userId)}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        <input
+          className="input mt-4 w-full"
+          autoFocus
+          placeholder={t('admin.invite.assignSearch')}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+
+        <div className="mt-3 max-h-64 overflow-y-auto">
+          {searching && results == null ? (
+            <div className="space-y-2 p-1">
+              <SkeletonLine height={14} />
+              <SkeletonLine width="70%" height={14} />
+            </div>
+          ) : results && results.length === 0 ? (
+            <p className="p-2 text-sm text-neutral-500">{t('admin.invite.assignNoResult')}</p>
+          ) : (
+            <ul className="divide-y divide-white/5">
+              {(results ?? []).map((u) => {
+                const done = assigned.has(u.id)
+                return (
+                  <li key={u.id}>
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2 text-left text-sm transition hover:bg-white/5 disabled:opacity-50 disabled:hover:bg-transparent"
+                      disabled={busy || done}
+                      onClick={() => onAssign(u.id)}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-neutral-100">{u.email}</span>
+                        {u.phone && <span className="num block text-xs text-neutral-500">{u.phone}</span>}
+                      </span>
+                      <span className="shrink-0 text-xs text-neutral-500">
+                        {done ? t('admin.invite.assignAlready') : `${u.role} · ${u.plan}`}
+                      </span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+
+        <div className="mt-5 flex">
+          <button type="button" onClick={onClose} className="btn-ghost flex-1 py-2 text-sm">
+            {t('common.close')}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }

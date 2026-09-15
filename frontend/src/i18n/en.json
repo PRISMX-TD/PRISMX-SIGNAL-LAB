@@ -31,7 +31,8 @@
     "growth": "Growth",
     "growthBadges": "Level & Badges",
     "support": "Contact support",
-    "announcements": "Announcements"
+    "announcements": "Announcements",
+    "agent": "Agent view"
   },
   "common": {
     "loading": "Loading…",
@@ -1328,7 +1329,16 @@
       "inactive": "Disabled",
       "enable": "Enable",
       "disable": "Disable",
-      "empty": "No invite links yet — create one above"
+      "empty": "No invite links yet — create one above",
+      "colAgents": "Agents",
+      "assign": "Assign",
+      "assignTitle": "Assign an agent",
+      "assignHint": "The assigned user gets an extra \"Agent view\" page showing this link's clicks, signups and the list of users who registered through it (read-only; no phone numbers or full emails). Role and entitlements are unchanged.",
+      "assignSearch": "Search by email or phone",
+      "assignNoResult": "No matching users",
+      "assignAlready": "Assigned",
+      "unassign": "Remove agent",
+      "noAgents": "None"
     },
     "announcements": {
       "hint": "Write and publish announcements here. Users see published ones in the bell panel and on the Announcements page; drafts are admin-only. Fill in both languages; if only one is filled, the other language falls back to it.",
@@ -1451,7 +1461,8 @@
         "/upgrade": "Upgrade",
         "/account": "Account",
         "/download": "Bridge download",
-        "/simulator": "Signal replay"
+        "/simulator": "Signal replay",
+        "/agent": "Agent view"
       }
     },
     "searchPlaceholder": "Search by email or phone…",
@@ -2058,6 +2069,29 @@
     "s3Desc": "Once the account shows online, one-click orders from the signal panel execute straight on your MT5.",
     "bridgeNote": "Trading with a broker other than {{name}}? You'll need to keep the PRISMX Bridge app running on your own PC.",
     "bridgeCta": "See the Bridge setup"
+  },
+  "agent": {
+    "title": "Agent view",
+    "subtitle": "Invite links assigned to you, and the users who registered through them. Read-only.",
+    "empty": "No invite links have been assigned to you yet.",
+    "clicks": "Clicks",
+    "registrations": "Signups",
+    "clicksNote": "Clicks are indicative only — not abuse-proof, and cross-device clicks are invisible. Signups reflect real accounts.",
+    "active": "Active",
+    "inactive": "Disabled",
+    "copy": "Copy link",
+    "copied": "Copied",
+    "copyFailed": "Copy failed — select and copy manually",
+    "usersTitle": "Users who registered through this link",
+    "usersEmpty": "Nobody has registered through this link yet.",
+    "colUser": "User",
+    "colPlan": "Tier",
+    "colRegistered": "Registered",
+    "noNickname": "No nickname",
+    "prev": "Previous",
+    "next": "Next",
+    "pageOf": "Page {{page}} of {{pages}}",
+    "totalUnit": "users"
   },
   "announcements": {
     "title": "Announcements",

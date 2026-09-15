@@ -27,10 +27,20 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter
-from app.models import InviteLink, User
-from app.routers.admin import _log_change
-from app.schemas import InviteClickRequest, InviteLinkCreate, InviteLinkOut, InviteLinkUpdate
-from app.services.deps import require_admin
+from app.models import InviteLink, InviteLinkAgent, User
+from app.routers.admin import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, _log_change
+from app.schemas import (
+    AgentLinkOut,
+    AgentLinkUserOut,
+    AgentLinkUsersOut,
+    InviteClickRequest,
+    InviteLinkAgentOut,
+    InviteLinkAssignAgent,
+    InviteLinkCreate,
+    InviteLinkOut,
+    InviteLinkUpdate,
+)
+from app.services.deps import get_current_user, require_admin
 from app.services.settings_store import get_trial_settings
 
 router = APIRouter(prefix="/invite", tags=["invite"])
@@ -48,6 +58,14 @@ router = APIRouter(prefix="/invite", tags=["invite"])
 # costs no extra DB work. Do not rewrite this as "declared at mount only" — that
 # reads as if the per-endpoint deps were redundant and invites deleting them.
 admin_router = APIRouter(prefix="/admin/invite-links", tags=["admin"])
+# 代理页：只要求登录，不要求管理员。「是不是代理」不看 role，看 invite_link_agents
+# 里有没有这个人的行（见 is_agent）；每个端点再各自按 link 归属校验，不属于自己
+# 的链接一律 404——不给「链接存在但不是你的」这种信号。
+# Agent view: login only, no admin. Agent-ness is not a role but the presence of
+# a row in invite_link_agents (see is_agent); every endpoint re-checks ownership
+# per link and answers 404 for links that aren't the caller's — no "exists but
+# not yours" signal.
+agent_router = APIRouter(prefix="/agent", tags=["agent"])
 
 # 短码字符集：剔除易混淆的 0/O/1/l/I。8 位 ≈ 31^8 ≈ 8.5 千亿组合，随机碰撞
 # 由唯一查询兜底、生成时重试。
@@ -243,7 +261,9 @@ def apply_invite(db: Session, user: User, ref: str | None) -> int | None:
     return days
 
 
-def _link_out(link: InviteLink, registrations: int) -> InviteLinkOut:
+def _link_out(
+    link: InviteLink, registrations: int, agents: list[InviteLinkAgentOut] | None = None
+) -> InviteLinkOut:
     return InviteLinkOut(
         id=link.id,
         code=link.code,
@@ -253,6 +273,153 @@ def _link_out(link: InviteLink, registrations: int) -> InviteLinkOut:
         isActive=link.is_active,
         grantsTrial=bool(link.grants_trial),
         createdAt=link.created_at,
+        agents=agents or [],
+    )
+
+
+# ---------- 代理指派 / agent assignment ----------
+
+
+def is_agent(db: Session, user_id: str) -> bool:
+    """该用户是否至少持有一条被指派的链接。/auth/me 靠它下发 isAgent 给前端露入口。
+    Whether the user holds at least one assigned link; /auth/me ships it as isAgent."""
+    return (
+        db.query(InviteLinkAgent.id).filter(InviteLinkAgent.user_id == user_id).first()
+        is not None
+    )
+
+
+def _agents_by_link(db: Session, link_ids: list[str]) -> dict[str, list[InviteLinkAgentOut]]:
+    """一次 join 取出这批链接各自的代理，避免每行一查。One join for all links, no N+1."""
+    out: dict[str, list[InviteLinkAgentOut]] = {}
+    if not link_ids:
+        return out
+    rows = (
+        db.query(InviteLinkAgent, User.email, User.nickname)
+        .join(User, User.id == InviteLinkAgent.user_id)
+        .filter(InviteLinkAgent.link_id.in_(link_ids))
+        .order_by(InviteLinkAgent.created_at)
+        .all()
+    )
+    for a, email, nickname in rows:
+        out.setdefault(a.link_id, []).append(
+            InviteLinkAgentOut(userId=a.user_id, email=email, nickname=nickname, assignedAt=a.created_at)
+        )
+    return out
+
+
+def _registrations(db: Session, codes: list[str]) -> dict[str, int]:
+    """注册人数按 users.invite_code 一条 GROUP BY 全查出来（管理列表与代理列表共用）。
+    Signup counts by users.invite_code in one GROUP BY (shared by admin and agent lists)."""
+    if not codes:
+        return {}
+    return dict(
+        db.query(User.invite_code, func.count(User.id))
+        .filter(User.invite_code.in_(codes))
+        .group_by(User.invite_code)
+        .all()
+    )
+
+
+def assign_agent(db: Session, admin: User, link: InviteLink, target: User) -> InviteLinkAgent:
+    """把链接指派给用户。已指派返回 409。审计行的 target 是被指派的真实用户——
+    这是 invite:* 审计里唯一能填真目标的地方（链接本身不是 users 行）。
+    Assign a link to a user; 409 if already assigned. The audit target is the
+    assigned user — the one invite:* audit row that can carry a real target."""
+    exists = (
+        db.query(InviteLinkAgent.id)
+        .filter(InviteLinkAgent.link_id == link.id, InviteLinkAgent.user_id == target.id)
+        .first()
+    )
+    if exists is not None:
+        raise HTTPException(
+            status_code=409, detail="该用户已是此链接的代理 / User is already an agent of this link"
+        )
+    row = InviteLinkAgent(link_id=link.id, user_id=target.id, assigned_by=admin.id)
+    db.add(row)
+    _log_change(db, admin.id, target.id, f"invite:{link.code}:agent", None, "assigned")
+    db.commit()
+    return row
+
+
+def unassign_agent(db: Session, admin: User, link: InviteLink, user_id: str) -> None:
+    row = (
+        db.query(InviteLinkAgent)
+        .filter(InviteLinkAgent.link_id == link.id, InviteLinkAgent.user_id == user_id)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="指派不存在 / Assignment not found")
+    db.delete(row)
+    _log_change(db, admin.id, user_id, f"invite:{link.code}:agent", "assigned", None)
+    db.commit()
+
+
+def mask_email(email: str) -> str:
+    """ab***@example.com：本地部分留前两位（不足两位留一位），域名原样。
+    Keep the first two characters of the local part (one if shorter), domain intact."""
+    local, _, domain = email.partition("@")
+    keep = local[:2] if len(local) > 2 else local[:1]
+    return f"{keep}***@{domain}" if domain else f"{keep}***"
+
+
+def agent_links(db: Session, user: User) -> list[AgentLinkOut]:
+    """当前用户持有的全部链接（含已停用——停用后名单仍是他的，数据不该消失）。
+    Every link the user holds, disabled ones included: the list stays theirs."""
+    links = (
+        db.query(InviteLink)
+        .join(InviteLinkAgent, InviteLinkAgent.link_id == InviteLink.id)
+        .filter(InviteLinkAgent.user_id == user.id)
+        .order_by(InviteLink.created_at.desc())
+        .all()
+    )
+    counts = _registrations(db, [l.code for l in links])
+    return [
+        AgentLinkOut(
+            id=l.id,
+            code=l.code,
+            label=l.label,
+            clicks=l.clicks,
+            registrations=counts.get(l.code, 0),
+            isActive=l.is_active,
+            createdAt=l.created_at,
+        )
+        for l in links
+    ]
+
+
+def _owned_link(db: Session, user: User, link_id: str) -> InviteLink:
+    link = (
+        db.query(InviteLink)
+        .join(InviteLinkAgent, InviteLinkAgent.link_id == InviteLink.id)
+        .filter(InviteLink.id == link_id, InviteLinkAgent.user_id == user.id)
+        .first()
+    )
+    if link is None:
+        # 不存在与不是你的同一个 404 / not-found and not-yours are the same 404
+        raise HTTPException(status_code=404, detail="链接不存在 / Link not found")
+    return link
+
+
+def agent_link_users(
+    db: Session, user: User, link_id: str, limit: int = PAGE_SIZE_DEFAULT, offset: int = 0
+) -> AgentLinkUsersOut:
+    """经某条链接注册的用户名单，只读，字段见 AgentLinkUserOut。
+    The read-only signup list for one link; fields per AgentLinkUserOut."""
+    link = _owned_link(db, user, link_id)
+    q = db.query(User).filter(User.invite_code == link.code)
+    total = q.count()
+    rows = q.order_by(User.created_at.desc()).offset(offset).limit(limit).all()
+    return AgentLinkUsersOut(
+        users=[
+            AgentLinkUserOut(
+                nickname=u.nickname, emailMasked=mask_email(u.email), plan=u.plan, createdAt=u.created_at
+            )
+            for u in rows
+        ],
+        total=total,
+        limit=limit,
+        offset=offset,
     )
 
 
@@ -326,9 +493,11 @@ def list_invite_links(
         .all()
     )
     links = db.query(InviteLink).order_by(InviteLink.created_at.desc()).all()
+    agents = _agents_by_link(db, [l.id for l in links])
     return {
         "links": [
-            _link_out(l, counts.get(l.code, 0)).model_dump(mode="json") for l in links
+            _link_out(l, counts.get(l.code, 0), agents.get(l.id)).model_dump(mode="json")
+            for l in links
         ]
     }
 
@@ -390,7 +559,70 @@ def update_invite_link(
     _log_change(db, admin.id, admin.id, f"invite:{link.code}", old, _audit_value(link))
     db.commit()
     db.refresh(link)
+    return _link_out_full(db, link)
+
+
+def _admin_link(db: Session, link_id: str) -> InviteLink:
+    link = db.query(InviteLink).filter(InviteLink.id == link_id).first()
+    if link is None:
+        raise HTTPException(status_code=404, detail="链接不存在 / Link not found")
+    return link
+
+
+def _link_out_full(db: Session, link: InviteLink) -> InviteLinkOut:
     registrations = (
         db.query(func.count(User.id)).filter(User.invite_code == link.code).scalar() or 0
     )
-    return _link_out(link, registrations)
+    return _link_out(link, registrations, _agents_by_link(db, [link.id]).get(link.id))
+
+
+@admin_router.post("/{link_id}/agents", response_model=InviteLinkOut)
+def assign_invite_agent(
+    link_id: str,
+    body: InviteLinkAssignAgent,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """把链接指派给一个用户，让他成为这条链接的「代理」（只读视图，权益不变）。
+    Assign the link to a user, making them its agent (read-only view, same entitlements)."""
+    link = _admin_link(db, link_id)
+    target = db.query(User).filter(User.id == body.userId).first()
+    if target is None:
+        raise HTTPException(status_code=404, detail="用户不存在 / User not found")
+    assign_agent(db, admin, link, target)
+    return _link_out_full(db, link)
+
+
+@admin_router.delete("/{link_id}/agents/{user_id}", response_model=InviteLinkOut)
+def unassign_invite_agent(
+    link_id: str,
+    user_id: str,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    link = _admin_link(db, link_id)
+    unassign_agent(db, admin, link, user_id)
+    return _link_out_full(db, link)
+
+
+# ---------- 代理端点 / agent endpoints ----------
+
+
+@agent_router.get("/links", response_model=dict)
+def my_agent_links(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """我持有的链接：点击、注册人数、状态。非代理拿到空数组，不是 403——
+    前端入口本就按 isAgent 隐藏，这里不必再多一种错误形态。
+    Links I hold. Non-agents get an empty list rather than 403: the entry point
+    is already hidden by isAgent, no need for one more error shape."""
+    return {"links": [l.model_dump(mode="json") for l in agent_links(db, user)]}
+
+
+@agent_router.get("/links/{link_id}/users", response_model=AgentLinkUsersOut)
+def my_agent_link_users(
+    link_id: str,
+    limit: int = Query(default=PAGE_SIZE_DEFAULT, ge=1, le=PAGE_SIZE_MAX),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return agent_link_users(db, user, link_id, limit, offset)

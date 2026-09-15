@@ -1139,3 +1139,52 @@ class InviteLinkOut(BaseModel):
     # greys the column out when that gate is closed.
     grantsTrial: bool = False
     createdAt: datetime | None = None
+    # 被指派为这条链接「代理」的用户（见 InviteLinkAgent 模型注释）。
+    # Users assigned as this link's agents (see the InviteLinkAgent model).
+    agents: list["InviteLinkAgentOut"] = []
+
+
+class InviteLinkAgentOut(BaseModel):
+    userId: str
+    email: str
+    nickname: str | None = None
+    assignedAt: datetime | None = None
+
+
+class InviteLinkAssignAgent(BaseModel):
+    userId: str = Field(min_length=1, max_length=64)
+
+
+# ---------- 代理页 / Agent view ----------
+class AgentLinkOut(BaseModel):
+    """代理看到的一条链接。刻意**不含** grantsTrial：送不送试用是管理员与全局总闸
+    之间的事，代理只需要知道链接是否还在用。
+    One link as seen by its agent. grantsTrial is deliberately absent: whether a
+    link grants trials is between the admin and the global gate; the agent only
+    needs to know whether the link is still live."""
+    id: str
+    code: str
+    label: str
+    clicks: int
+    registrations: int = 0
+    isActive: bool
+    createdAt: datetime | None = None
+
+
+class AgentLinkUserOut(BaseModel):
+    """代理名单里的一个用户：昵称、打码邮箱、注册时间、等级——只有这四项。
+    不给手机号、不给完整邮箱、不给 id（id 对代理没用，且少一个可被拿去撞其他
+    接口的标识）。One user on an agent's list: nickname, masked email, signup
+    time, tier — nothing else. No phone, no full email, no id (useless to the
+    agent, and one less identifier to probe other endpoints with)."""
+    nickname: str | None = None
+    emailMasked: str
+    plan: str
+    createdAt: datetime | None = None
+
+
+class AgentLinkUsersOut(BaseModel):
+    users: list[AgentLinkUserOut]
+    total: int
+    limit: int
+    offset: int

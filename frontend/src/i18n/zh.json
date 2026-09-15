@@ -31,7 +31,8 @@
     "growth": "成长",
     "growthBadges": "等级勋章",
     "support": "联系客服",
-    "announcements": "公告"
+    "announcements": "公告",
+    "agent": "代理页面"
   },
   "common": {
     "loading": "加载中…",
@@ -1328,7 +1329,16 @@
       "inactive": "已停用",
       "enable": "启用",
       "disable": "停用",
-      "empty": "还没有邀请链接，先在上方生成一条"
+      "empty": "还没有邀请链接，先在上方生成一条",
+      "colAgents": "代理",
+      "assign": "指派",
+      "assignTitle": "指派代理",
+      "assignHint": "被指派的用户会多出一个「代理页面」，能看到这条链接的点击数、注册人数与经它注册的用户名单（只读，看不到手机号与完整邮箱）。不改角色、不改权益。",
+      "assignSearch": "搜邮箱或手机号",
+      "assignNoResult": "没有匹配的用户",
+      "assignAlready": "已指派",
+      "unassign": "移除代理",
+      "noAgents": "未指派"
     },
     "announcements": {
       "hint": "在这里撰写并发布公告。用户会在顶栏铃铛面板与「公告」页看到已发布的公告；草稿只有管理员可见。中英文都填写；只填一种时，另一种语言的界面会回落显示已填的那一份。",
@@ -1451,7 +1461,8 @@
         "/upgrade": "升级 PRO",
         "/account": "账户设置",
         "/download": "下载桥接",
-        "/simulator": "信号回放"
+        "/simulator": "信号回放",
+        "/agent": "代理页面"
       }
     },
     "searchPlaceholder": "按邮箱或手机号搜索…",
@@ -2056,6 +2067,29 @@
     "s3Desc": "账户状态变为在线后，信号面板的一键下单会直接打到你的 MT5 执行。",
     "bridgeNote": "用的是 {{name}} 以外的券商？那就需要在自己的电脑上常驻运行 PRISMX 桥接程序。",
     "bridgeCta": "查看桥接方案"
+  },
+  "agent": {
+    "title": "代理页面",
+    "subtitle": "你名下的邀请链接，以及经它们注册的用户。数据只读。",
+    "empty": "还没有指派给你的邀请链接。",
+    "clicks": "点击",
+    "registrations": "注册",
+    "clicksNote": "点击数为参考值：无法防刷，跨设备点击不计；注册数以实际创建的账号为准。",
+    "active": "启用中",
+    "inactive": "已停用",
+    "copy": "复制链接",
+    "copied": "已复制",
+    "copyFailed": "复制失败，请手动选中复制",
+    "usersTitle": "经此链接注册的用户",
+    "usersEmpty": "还没有人经这条链接注册。",
+    "colUser": "用户",
+    "colPlan": "等级",
+    "colRegistered": "注册时间",
+    "noNickname": "未设昵称",
+    "prev": "上一页",
+    "next": "下一页",
+    "pageOf": "第 {{page}} / {{pages}} 页",
+    "totalUnit": "人"
   },
   "announcements": {
     "title": "公告",

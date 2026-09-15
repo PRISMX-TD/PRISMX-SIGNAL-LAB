@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult } from './types'
+import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminPricingSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUsers } from './types'
 import type { Announcement, AnnouncementInput, AnnouncementList } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 
@@ -564,6 +564,8 @@ export const userApi = {
       // Public profile: publicId builds the "view my public profile" link; statsPublic is the stats switch.
       publicId: string | null
       statsPublic: boolean
+      // 邀请链接「代理」入口开关（见 User.isAgent）/ invite-link agent entry flag
+      isAgent: boolean
     }>('/auth/me'),
   // 游戏化资料局部更新：昵称/榜单展示/退出排行榜/佩戴勋章，只改传了的字段。
   // Partial update of the gamification profile: nickname / leaderboard display /
@@ -772,6 +774,17 @@ export const adminApi = {
     request<InviteLink>(`/admin/invite-links/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
+    }),
+  // 代理指派：两边都回整条链接（含最新 agents），面板直接替换那一行。
+  // Agent assignment: both return the full link (fresh agents) so the panel swaps the row.
+  assignInviteAgent: (id: string, userId: string) =>
+    request<InviteLink>(`/admin/invite-links/${encodeURIComponent(id)}/agents`, {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    }),
+  unassignInviteAgent: (id: string, userId: string) =>
+    request<InviteLink>(`/admin/invite-links/${encodeURIComponent(id)}/agents/${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
     }),
   metrics: () => request<AdminMetrics>('/admin/metrics'),
   getSettings: () => request<AdminBrokerSettings>('/admin/settings'),
@@ -1068,4 +1081,19 @@ export const pushApi = {
     request<{ sent: number; failed: number; pruned: number }>('/notifications/push/test', {
       method: 'POST',
     }),
+}
+
+// 代理页（/agent）：只读。链接列表 + 某条链接的注册用户名单（分页）。
+// 不是代理的人拿到空列表；不属于自己的链接一律 404。
+// Agent view (/agent), read-only: my links + one link's paginated signup list.
+// Non-agents get an empty list; links that aren't mine answer 404.
+export const agentApi = {
+  links: () => request<{ links: AgentLink[] }>('/agent/links'),
+  linkUsers: (id: string, params: { limit?: number; offset?: number } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.limit) qs.set('limit', String(params.limit))
+    if (params.offset) qs.set('offset', String(params.offset))
+    const q = qs.toString()
+    return request<AgentLinkUsers>(`/agent/links/${encodeURIComponent(id)}/users${q ? `?${q}` : ''}`)
+  },
 }

@@ -1197,6 +1197,40 @@ class InviteLink(Base):
     created_at = Column(DateTime, default=_now)
 
 
+class InviteLinkAgent(Base):
+    """邀请链接的「代理」指派：管理员把一条链接指派给某个用户，该用户就能在
+    /agent 页看到这条链接的点击数、注册人数与经它注册的用户名单（只读）。
+
+    「代理」不是角色。users.role 不改、权益不变——代理身份完全由「本表里有没有
+    这个人的行」派生（见 routers/invite.py 的 is_agent）。这样后端所有 require_admin
+    判定与前端所有 role === 'admin' 判定都不必碰，也不会出现代理被误当成半个
+    管理员的可能。一条链接可指派给多人，一个人也可持有多条链接；取消指派删本表
+    的行即可，invite_links 那边「行永不删除」的规则不受影响。
+
+    An invite link's "agent" assignment: an admin assigns a link to a user, who
+    can then see that link's clicks, signups and the (read-only) list of users
+    it brought in on the /agent page. "Agent" is not a role: users.role is
+    untouched and entitlements are unchanged — agent-ness is derived purely from
+    having a row here (see is_agent in routers/invite.py), so no require_admin
+    or role === 'admin' check anywhere needs to know about it. Many agents per
+    link, many links per agent; unassigning deletes the row here and leaves the
+    never-delete rule on invite_links intact.
+    """
+    __tablename__ = "invite_link_agents"
+    __table_args__ = (UniqueConstraint("link_id", "user_id", name="uq_invite_link_agent"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    link_id = Column(String, ForeignKey("invite_links.id"), nullable=False, index=True)
+    # 代理页每次打开都按 user_id 查「我的链接」，所以单独建索引。
+    # The agent page looks up "my links" by user_id on every open, hence the index.
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    # 指派人（管理员）。审计行另有一份，这里留着是为了列表里能直接显示，不必反查。
+    # The assigning admin. The audit log has its own copy; kept here so the list
+    # can show it without a reverse lookup.
+    assigned_by = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=_now)
+
+
 class UserTask(Base):
     """升级条件完成记录。等级由本表派生（连续完整完成的组数），不单独存等级列。"""
     __tablename__ = "user_tasks"

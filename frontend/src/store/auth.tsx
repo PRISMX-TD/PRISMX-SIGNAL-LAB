@@ -206,6 +206,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // predate the rollout, whose cached user has no such key and would
           // otherwise slip past the guard forever.
           needsNickname: me.needsNickname,
+          // 代理入口开关，搭同一趟车（见 User.isAgent）/ agent entry flag, same trip
+          isAgent: me.isAgent,
         }
       })
       const stored = localStorage.getItem(USER_KEY)
@@ -220,6 +222,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         parsed.gamificationLevel = me.gamificationLevel
         parsed.gamificationTitle = me.gamificationTitle
         parsed.needsNickname = me.needsNickname
+        parsed.isAgent = me.isAgent
         localStorage.setItem(USER_KEY, JSON.stringify(parsed))
       }
     } catch {

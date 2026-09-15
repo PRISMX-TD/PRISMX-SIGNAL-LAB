@@ -112,6 +112,12 @@ export interface User {
   // visibility flags above.
   gamificationLevel?: number | null
   gamificationTitle?: string | null
+  // 邀请链接「代理」：是否至少持有一条被管理员指派的链接。不是角色、权益不变，
+  // 只决定 /agent 入口露不露。同样只在 refreshUser() 之后才有值，先例同上。
+  // Invite-link agent: whether this user holds at least one admin-assigned link.
+  // Not a role, no entitlement change — only gates the /agent entry. Likewise
+  // filled in by refreshUser() only; same precedent as the flags above.
+  isAgent?: boolean
 }
 
 // 管理后台：用户列表条目 / admin: one row in the user list
@@ -146,6 +152,43 @@ export interface InviteLink {
   // that switch is off.
   grantsTrial: boolean
   createdAt: string | null
+  // 被指派为这条链接「代理」的用户 / users assigned as this link's agents
+  agents: InviteLinkAgent[]
+}
+
+export interface InviteLinkAgent {
+  userId: string
+  email: string
+  nickname: string | null
+  assignedAt: string | null
+}
+
+// 代理页（/agent）：我持有的一条链接。刻意不含 grantsTrial（那是管理员与全局总闸之间的事）。
+// Agent view: one link I hold. grantsTrial is deliberately absent.
+export interface AgentLink {
+  id: string
+  code: string
+  label: string
+  clicks: number
+  registrations: number
+  isActive: boolean
+  createdAt: string | null
+}
+
+// 代理名单里的一个用户：只有这四项，没有手机号、完整邮箱与 id。
+// One user on the agent's list: these four fields only — no phone, full email or id.
+export interface AgentLinkUser {
+  nickname: string | null
+  emailMasked: string
+  plan: UserPlan
+  createdAt: string | null
+}
+
+export interface AgentLinkUsers {
+  users: AgentLinkUser[]
+  total: number
+  limit: number
+  offset: number
 }
 
 // 管理后台：基础运营指标 / admin: basic operating metrics

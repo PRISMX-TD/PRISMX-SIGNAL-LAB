@@ -17,6 +17,7 @@ from app.services.gamification.conditions import LEVEL_TITLES, level_of
 from app.services.phone import compose_phone
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user
+from app.routers.invite import is_agent
 from app.services.settings_store import get_gamification_settings
 
 router = APIRouter(prefix="/auth", tags=["account"])
@@ -67,6 +68,13 @@ class AccountInfoOut(BaseModel):
     # profile" link; statsPublic is the trading-stats switch.
     publicId: str | None = None
     statsPublic: bool = False
+    # 邀请链接「代理」：是否至少持有一条被指派的链接（见 InviteLinkAgent 模型注释）。
+    # 与上面几个可见性开关同一趟车、同一先例：不在登录响应里，refreshUser() 之后
+    # 才有值，前端据此露出 /agent 入口。不是角色，不改 role。
+    # Invite-link agent: whether this user holds at least one assigned link (see
+    # the InviteLinkAgent model). Rides the same /auth/me trip as the visibility
+    # switches above; the frontend shows the /agent entry off it. Not a role.
+    isAgent: bool = False
     class Config:
         from_attributes = True
 
@@ -140,6 +148,7 @@ def get_account(
         equippedBadge=current_user.equipped_badge,
         publicId=current_user.public_id,
         statsPublic=bool(current_user.stats_public),
+        isAgent=is_agent(db, current_user.id),
     )
 
 

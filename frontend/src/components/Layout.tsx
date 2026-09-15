@@ -177,6 +177,14 @@ function TabIcon({ name }: { name: string }) {
           <path d="M9.5 12l1.8 1.8L14.5 10" />
         </svg>
       )
+    case 'agent':
+      // 两环相扣的链接图标 / interlocked-links icon
+      return (
+        <svg className={c} viewBox="0 0 24 24" {...p}>
+          <path d="M10 13a5 5 0 0 0 7.1.5l3-3a5 5 0 0 0-7.1-7.1L11.5 5" />
+          <path d="M14 11a5 5 0 0 0-7.1-.5l-3 3a5 5 0 0 0 7.1 7.1L12.5 19" />
+        </svg>
+      )
     case 'upgrade':
       return (
         <svg className={c} viewBox="0 0 24 24" {...p}>
@@ -454,6 +462,9 @@ export default function Layout() {
     ...(user?.competitionsVisible
       ? [{ to: '/competitions', icon: 'competitions', label: t('competition.title') }]
       : []),
+    // 代理页：按 /auth/me 下发的 isAgent 露入口（见 User.isAgent），入口判断先例同上。
+    // Agent view: shown off the isAgent flag from /auth/me; same entry-hiding precedent.
+    ...(user?.isAgent ? [{ to: '/agent', icon: 'agent', label: t('nav.agent') }] : []),
     ...(isAdmin ? [{ to: '/admin', icon: 'admin', label: t('nav.admin') }] : []),
   ]
   const moreActive = moreItems.some((m) => location.pathname === m.to)
@@ -703,6 +714,7 @@ export default function Layout() {
                   email={user?.email}
                   showUpgrade={user?.plan !== 'PRO'}
                   isAdmin={isAdmin}
+                  isAgent={!!user?.isAgent}
                   gamificationVisible={!!user?.gamificationVisible}
                   gamificationLevel={user?.gamificationLevel}
                   gamificationTitle={user?.gamificationTitle}
