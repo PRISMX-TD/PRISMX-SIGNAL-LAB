@@ -1,13 +1,13 @@
 // 代理页（/agent）：管理员把邀请链接指派给某个用户后，该用户在这里看到名下每条
 // 链接的点击数、注册人数、状态，以及经它注册的用户名单。全程只读——后端 /agent/*
-// 没有任何写端点，名单里也没有手机号、完整邮箱与 id（见后端 AgentLinkUserOut）。
+// 没有任何写端点，名单里也没有手机号与用户 id（见后端 AgentLinkUserOut）。
 // 「代理」不是角色：入口由 /auth/me 的 isAgent 派生（至少持有一条被指派的链接），
 // role 与权益都不动。链接 URL 拼 ORIGIN 而不是 window.location.origin，理由同
 // 管理面板（预览域名上复制出去的仍要是正式域名）。
 // Agent view (/agent): after an admin assigns invite links to a user, they see
 // each link's clicks, signups and status here, plus the list of users who
 // registered through it. Read-only end to end — /agent/* has no write endpoint
-// and the list carries no phone, full email or id (see AgentLinkUserOut).
+// and the list carries no phone or user id (see AgentLinkUserOut).
 // "Agent" is not a role: the entry is derived from /auth/me's isAgent; role and
 // entitlements are untouched. URLs are built from ORIGIN for the same reason as
 // the admin panel.
@@ -240,12 +240,12 @@ export default function AgentPage() {
                     </thead>
                     <tbody>
                       {page.users.map((u, i) => (
-                        <tr key={`${u.emailMasked}-${i}`} className="border-b border-white/5 last:border-0">
+                        <tr key={`${u.email}-${i}`} className="border-b border-white/5 last:border-0">
                           <td className="px-4 py-3">
                             <span className="block text-neutral-100">
                               {u.nickname || <span className="text-neutral-500">{t('agent.noNickname')}</span>}
                             </span>
-                            <span className="num block text-xs text-neutral-500">{u.emailMasked}</span>
+                            <span className="num block break-all text-xs text-neutral-400">{u.email}</span>
                           </td>
                           <td className="px-4 py-3">
                             <span
@@ -264,12 +264,12 @@ export default function AgentPage() {
                 </div>
                 <ul className="divide-y divide-white/5 sm:hidden">
                   {page.users.map((u, i) => (
-                    <li key={`${u.emailMasked}-${i}`} className="flex items-center justify-between gap-3 px-4 py-3">
+                    <li key={`${u.email}-${i}`} className="flex items-center justify-between gap-3 px-4 py-3">
                       <div className="min-w-0">
                         <p className="truncate text-sm text-neutral-100">
                           {u.nickname || <span className="text-neutral-500">{t('agent.noNickname')}</span>}
                         </p>
-                        <p className="num truncate text-xs text-neutral-500">{u.emailMasked}</p>
+                        <p className="num break-all text-xs text-neutral-400">{u.email}</p>
                       </div>
                       <div className="shrink-0 text-right">
                         <span

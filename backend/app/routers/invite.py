@@ -355,14 +355,6 @@ def unassign_agent(db: Session, admin: User, link: InviteLink, user_id: str) -> 
     db.commit()
 
 
-def mask_email(email: str) -> str:
-    """ab***@example.com：本地部分留前两位（不足两位留一位），域名原样。
-    Keep the first two characters of the local part (one if shorter), domain intact."""
-    local, _, domain = email.partition("@")
-    keep = local[:2] if len(local) > 2 else local[:1]
-    return f"{keep}***@{domain}" if domain else f"{keep}***"
-
-
 def agent_links(db: Session, user: User) -> list[AgentLinkOut]:
     """当前用户持有的全部链接（含已停用——停用后名单仍是他的，数据不该消失）。
     Every link the user holds, disabled ones included: the list stays theirs."""
@@ -413,7 +405,7 @@ def agent_link_users(
     return AgentLinkUsersOut(
         users=[
             AgentLinkUserOut(
-                nickname=u.nickname, emailMasked=mask_email(u.email), plan=u.plan, createdAt=u.created_at
+                nickname=u.nickname, email=u.email, plan=u.plan, createdAt=u.created_at
             )
             for u in rows
         ],

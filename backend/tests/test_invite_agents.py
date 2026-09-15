@@ -11,7 +11,6 @@ from app.routers.invite import (
     agent_links,
     assign_agent,
     is_agent,
-    mask_email,
     unassign_agent,
 )
 
@@ -109,10 +108,11 @@ def test_user_list_is_read_only_and_masked(db_session):
     assert page.total == 1
     row = page.users[0].model_dump()
     assert row["nickname"] == "小王"
-    assert row["emailMasked"] == "re***@example.com"
+    # 邮箱给完整值（2026-09-15 产品决定）；手机号与 id 仍然不出网。
+    # The email is the real one (product decision, 2026-09-15); phone and id stay in.
+    assert row["email"] == "registered@example.com"
     assert row["plan"] == "PRO"
-    # 不出网的字段一个都不能有 / nothing that must stay in stays out
-    for forbidden in ("email", "phone", "id", "userId"):
+    for forbidden in ("phone", "id", "userId"):
         assert forbidden not in row
 
 
@@ -158,16 +158,3 @@ def test_assignment_writes_audit_with_real_target(db_session):
     assert all(r.field == f"invite:{link.code}:agent" for r in rows)
     assert (rows[0].old_value or "") == "" and rows[0].new_value == "assigned"
     assert rows[1].old_value == "assigned" and (rows[1].new_value or "") == ""
-
-
-@pytest.mark.parametrize(
-    "email,expected",
-    [
-        ("alice@example.com", "al***@example.com"),
-        ("ab@example.com", "a***@example.com"),
-        ("a@example.com", "a***@example.com"),
-        ("noatsign", "no***"),
-    ],
-)
-def test_mask_email(email, expected):
-    assert mask_email(email) == expected

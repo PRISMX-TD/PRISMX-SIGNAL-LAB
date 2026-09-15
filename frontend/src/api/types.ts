@@ -175,11 +175,13 @@ export interface AgentLink {
   createdAt: string | null
 }
 
-// 代理名单里的一个用户：只有这四项，没有手机号、完整邮箱与 id。
-// One user on the agent's list: these four fields only — no phone, full email or id.
+// 代理名单里的一个用户：只有这四项。邮箱是完整值（2026-09-15 产品决定），
+// 手机号与用户 id 仍然不下发。
+// One user on the agent's list: these four fields only. The email is the real one
+// (product decision, 2026-09-15); phone and user id are still withheld.
 export interface AgentLinkUser {
   nickname: string | null
-  emailMasked: string
+  email: string
   plan: UserPlan
   createdAt: string | null
 }

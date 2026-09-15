@@ -522,6 +522,34 @@ class AdminTrialSettings(BaseModel):
     trialDays: int = Field(default=7, ge=1, le=90)
 
 
+class AdminSocialSettings(BaseModel):
+    """官方社交主页地址（管理后台读写用同一形状）。
+
+    五个字段各自独立，留空 = 不展示该平台的入口。校验只认 http(s)：这些值
+    会直接变成页面上的 href，`javascript:` 之类的协议必须挡在写入之前（读取
+    侧还有一道，见 settings_store._load_social_from_db）。
+
+    Official social links (same shape for admin read & write). Each field is
+    independent; empty means that platform gets no entry point. Only http(s)
+    passes validation — these become hrefs, so schemes like `javascript:` are
+    rejected at write time (and again on read, see settings_store).
+    """
+
+    facebookUrl: str = Field(default="", max_length=512)
+    instagramUrl: str = Field(default="", max_length=512)
+    xUrl: str = Field(default="", max_length=512)
+    discordUrl: str = Field(default="", max_length=512)
+    telegramUrl: str = Field(default="", max_length=512)
+
+    @field_validator("facebookUrl", "instagramUrl", "xUrl", "discordUrl", "telegramUrl")
+    @classmethod
+    def _http_only(cls, v: str) -> str:
+        v = (v or "").strip()
+        if v and not re.match(r"^https?://", v, re.IGNORECASE):
+            raise ValueError("链接必须以 http(s):// 开头 / link must start with http(s)://")
+        return v
+
+
 class AdminCandleSettings(BaseModel):
     """K 线历史保留策略设置 / Candle-history retention settings."""
 
@@ -1172,13 +1200,19 @@ class AgentLinkOut(BaseModel):
 
 
 class AgentLinkUserOut(BaseModel):
-    """代理名单里的一个用户：昵称、打码邮箱、注册时间、等级——只有这四项。
-    不给手机号、不给完整邮箱、不给 id（id 对代理没用，且少一个可被拿去撞其他
-    接口的标识）。One user on an agent's list: nickname, masked email, signup
-    time, tier — nothing else. No phone, no full email, no id (useless to the
-    agent, and one less identifier to probe other endpoints with)."""
+    """代理名单里的一个用户：昵称、邮箱、注册时间、等级——只有这四项。
+
+    邮箱给完整值（2026-09-15 产品决定，此前是打码的 `ab***@域名`）：代理要能联系
+    到自己带来的人，打码等于这一列没用。**手机号与用户 id 仍然不给**——手机号是
+    另一个量级的个人信息，id 则是能拿去撞其他接口的标识，代理页一个都用不上。
+
+    One user on an agent's list: nickname, email, signup time, tier — these four
+    only. The email is the real one (product decision on 2026-09-15; it used to be
+    masked), because an agent has to be able to reach the people they brought in.
+    Phone and user id are still withheld: a phone is a different order of personal
+    data, and an id is an identifier that could be used to probe other endpoints."""
     nickname: str | None = None
-    emailMasked: str
+    email: str
     plan: str
     createdAt: datetime | None = None
 
