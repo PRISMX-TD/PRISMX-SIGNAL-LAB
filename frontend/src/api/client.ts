@@ -161,6 +161,24 @@ export const authApi = {
       method: 'POST',
       body: JSON.stringify({ phoneCountry, phone }),
     }),
+  // 找回密码：申请链接。后端无论邮箱存不存在都返回同一句话（防邮箱枚举），
+  // 所以这里拿到的 message 不代表"这个邮箱是我们的用户"。
+  // Request a reset link. The backend replies identically whether or not the
+  // address exists, so this message never means "that email is one of ours".
+  forgotPassword: (email: string) =>
+    request<{ message: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+  // 用邮件里的令牌设新密码。**刻意不返回 token**：后端不拿邮件链接换会话，
+  // 改完要用户自己去登录页登一次。
+  // Set a new password with the emailed token. Deliberately returns no session
+  // token: the backend never trades an emailed link for a live session.
+  resetPassword: (token: string, password: string) =>
+    request<{ message: string }>('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, password }),
+    }),
   login: (email: string, password: string) =>
     request<{ token: string; user: User }>('/auth/login', {
       method: 'POST',

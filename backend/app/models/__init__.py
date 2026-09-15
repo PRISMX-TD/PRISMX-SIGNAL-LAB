@@ -1352,3 +1352,43 @@ class CompetitionParticipant(Base):
     final_rank = Column(Integer, nullable=True)
     disqualified = Column(Boolean, nullable=False, default=False)
     disqualify_reason = Column(String, nullable=True)
+
+
+class PasswordResetToken(Base):
+    """找回密码的一次性令牌。
+
+    **只存哈希，不存明文**——和 `users.api_token` 同一个道理：这张表落在
+    Supabase 上，备份、只读副本、任何一次误导出都会带走它。存明文等于把「谁都
+    能改任意账号密码」这件事写进了数据库；存哈希则即使整表泄露，攻击者手里也
+    只有一堆改不回去的摘要。明文只在生成那一刻出现在发出去的那封邮件里。
+
+    **不复用 JWT。** JWT 做不到这里必须有的三件事：单次使用（用过即作废）、
+    可撤销（改完密码把这个人其余未用的令牌一起作废）、可审计（什么时候申请的、
+    用没用过）。无状态正是它在这个场景下的缺点。
+
+    `used_at` 而不是删行：留着才看得出「这个链接被用过了」与「这个链接根本不
+    存在」的区别——排查用户报「链接点了没反应」时，这两种情况的处理完全不同。
+    过期与已用的行由申请新链接时顺手清理（见 routers/auth.py）。
+
+    One-time password-reset tokens. Only the hash is stored, for the same reason
+    as users.api_token: this table lives in a managed Postgres with backups and
+    replicas, and a plaintext token there would mean anyone holding a dump can
+    change any password. The plaintext exists only inside the email that was
+    sent. Deliberately not a JWT — statelessness costs the three properties that
+    matter here: single use, revocability, and an audit trail. Rows are marked
+    used rather than deleted so "already used" stays distinguishable from "never
+    existed" when a user reports a dead link.
+    """
+
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    # 明文令牌的 SHA-256 / SHA-256 of the plaintext token
+    token_hash = Column(String, unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_now)
+    # 申请来源 IP，仅用于事后排查滥用；不参与任何判定。
+    # Requesting IP, for abuse forensics only; never part of any decision.
+    requested_ip = Column(String, nullable=True)

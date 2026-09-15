@@ -23,6 +23,7 @@ import GrowthHub from './pages/GrowthHub'
 // heavy pages (e.g. the charts page) load on demand.
 const LandingPage = lazyRetry(() => import('./pages/LandingPage'), 'LandingPage')
 const LoginPage = lazyRetry(() => import('./pages/LoginPage'), 'LoginPage')
+const ResetPasswordPage = lazyRetry(() => import('./pages/ResetPasswordPage'), 'ResetPasswordPage')
 const SignalsPage = lazyRetry(() => import('./pages/SignalsPage'), 'SignalsPage')
 const DashboardPage = lazyRetry(() => import('./pages/DashboardPage'), 'DashboardPage')
 const ChartsPage = lazyRetry(() => import('./pages/ChartsPage'), 'ChartsPage')
@@ -156,6 +157,13 @@ export default function App() {
             <Route path="/" element={<PublicShell lang="zh" page="home"><Home /></PublicShell>} />
             <Route path="/en" element={<PublicShell lang="en" page="home"><Home /></PublicShell>} />
             <Route path="/login" element={<LoginPage />} />
+            {/* 找回密码：两条路径同一个组件，按 ?token= 切换阶段（见该页顶部说明）。
+                必须在 Protected 之外——来这里的人正是登不进去的那批。
+                Password reset: one component on both paths, switching on ?token=.
+                Outside Protected by necessity — the people who need it are the ones
+                who cannot sign in. */}
+            <Route path="/forgot-password" element={<ResetPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/complete-profile" element={<CompleteProfilePage />} />
             {/* 法务文本：必须放在 Protected 之外，公开可访问。
                 ① 访客要能在注册前读到条款，否则「注册即视为同意」不成立；

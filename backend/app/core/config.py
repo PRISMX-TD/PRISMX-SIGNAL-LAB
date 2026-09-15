@@ -205,6 +205,12 @@ class Settings(BaseSettings):
     # verifies the old one, so a leaked token could be used to brute-force it —
     # this throttle closes that path. Keyed by client IP.
     RATE_LIMIT_PASSWORD: str = "10/minute"
+    # 找回密码比改密码严得多：这个端点匿名、会往用户邮箱发信，放宽等于把平台
+    # 变成一个免费的邮件轰炸器（受害者是那个真实邮箱的主人，不是攻击者）。
+    # Much stricter than changing a password: this endpoint is anonymous and
+    # sends mail to a third party, so a loose limit turns the platform into a
+    # free mail bomber aimed at whoever actually owns that address.
+    RATE_LIMIT_PASSWORD_RESET: str = "3/minute"
     # 创建支付订单限流：每次都会真实调用一次 NOWPayments 接口并插一条 Payment
     # 记录，不限流则登录用户可反复刷、把第三方调用成本与数据库写入转嫁给我们。
     # 正常用户一分钟内不会创建很多支付单，设得足够宽。按客户端 IP 计。
@@ -336,6 +342,39 @@ class Settings(BaseSettings):
     # a trusted proxy); empty disables the rewrite entirely (back to the raw peer
     # IP). Comma-separated.
     TRUSTED_PROXY_IPS: str = "127.0.0.1"
+
+    # ---------- 邮件发送（Resend）/ outbound email (Resend) ----------
+    #
+    # 走 Resend 的 HTTP API，不引入任何新依赖——发信用的是仓库里已有的 httpx。
+    # 这不是偏好问题：这个项目的部署流程是服务器上 git pull + 重启，新增 pip
+    # 依赖会让某次部署在装包那步静默起不来（见《运维手册》）。
+    #
+    # Sent through Resend's HTTP API using the httpx already in the tree — no new
+    # pip dependency, because the deploy flow is git pull + restart on the server
+    # and a new requirement would silently break a deploy at the install step.
+    RESEND_API_KEY: str = ""
+    # 发信地址必须属于已在 Resend 验证过 DNS（SPF/DKIM）的域名，否则对方直接拒收。
+    # The From address must be on a domain verified in Resend, or it bounces.
+    MAIL_FROM: str = "noreply@prismxsignallab.com"
+    MAIL_FROM_NAME: str = "PRISMX Signal Lab"
+    # 邮件里那条链接指向的站点。**永远是网站，不是 App** —— 安卓 App 的 WebView
+    # origin 是 https://localhost，写进邮件谁都打不开。
+    # Where the emailed link points. Always the website: the Android WebView's
+    # origin is https://localhost, which is meaningless in an email.
+    PUBLIC_WEB_URL: str = "https://prismxsignallab.com"
+
+    # 本地开发时把重置链接打进日志，省去配发信商。**默认关闭，且必须在 .env 里
+    # 显式打开**——打开后任何拿到日志的人都能改任意账号的密码，生产绝不能开。
+    # Logs the reset link instead of needing a mail provider, for local dev only.
+    # Off by default and must be switched on explicitly: with it on, anyone who
+    # can read the logs can reset any account.
+    MAIL_DEBUG_LOG_LINKS: bool = False
+
+    # 找回密码链接的有效期。短到让邮箱被短暂窥视的窗口不够用，长到用户从手机
+    # 切到电脑再点开还来得及。
+    # Reset-link lifetime: short enough that a brief peek at someone's inbox
+    # isn't enough, long enough to switch from phone to desktop and click it.
+    PASSWORD_RESET_TTL_MINUTES: int = 30
 
     # 跨域 / CORS（本地开发 + 生产前端域名 / local dev + production frontend origins）
     CORS_ORIGINS: list[str] = [

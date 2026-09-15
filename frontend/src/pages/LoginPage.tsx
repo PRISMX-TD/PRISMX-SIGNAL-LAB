@@ -225,6 +225,20 @@ export default function LoginPage() {
               <button type="submit" disabled={loading} className="btn btn-primary w-full">
                 {loading ? t('common.loading') : mode === 'login' ? t('auth.login') : t('auth.register')}
               </button>
+
+              {/* 只在登录模式下出现：注册表单里放「忘记密码」没有意义，还会让
+                  刚要注册的人以为自己曾经注册过。
+                  Login mode only — a "forgot password" link on a signup form is
+                  meaningless and makes a new user wonder if they already have an
+                  account. */}
+              {mode === 'login' && (
+                <Link
+                  to="/forgot-password"
+                  className="block text-center text-xs text-neutral-500 transition-colors hover:text-neutral-300"
+                >
+                  {t('auth.forgotLink')}
+                </Link>
+              )}
             </form>
 
             <div className="my-5 flex items-center gap-3">

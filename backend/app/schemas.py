@@ -52,6 +52,35 @@ class RegisterRequest(AuthRequest):
     ref: str | None = Field(default=None, max_length=32)
 
 
+class ForgotPasswordRequest(BaseModel):
+    """申请找回密码。只要邮箱——**故意不要任何别的字段**。
+
+    加上手机号/验证码之类的"二次确认"看着更安全，实际是反的：它把这个接口变成
+    一个校验器（"这个邮箱配这个手机号对不对"），而响应无论如何都得保持一致才能
+    防枚举，于是那个字段既拦不住攻击者，又让忘了当初填什么号码的真用户彻底进不去。
+    """
+
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    """用邮件里的令牌设置新密码。
+
+    密码长度约束与 `AuthRequest` 保持一致（8-128）。不在这里加复杂度规则——全站
+    只有注册和这里两个设密码的入口，两处规则必须一样，否则用户会遇到"注册时能用
+    的密码，重置时被拒"。
+    """
+
+    token: str = Field(min_length=16, max_length=256)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class MessageOut(BaseModel):
+    """只带一句话的响应。用于那些**刻意不透露结果**的端点。"""
+
+    message: str
+
+
 class PhoneRequest(BaseModel):
     """补录手机号（Google 注册的用户首次登录后走这条）。字段含义同 RegisterRequest。"""
 

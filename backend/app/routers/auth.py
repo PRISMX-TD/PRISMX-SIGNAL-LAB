@@ -1,7 +1,7 @@
 """认证路由：注册与登录 / Auth router: register & login."""
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -17,8 +17,18 @@ from app.core.security import (
 )
 from app.models import AdminAuditLog, User
 from app.routers.invite import apply_invite
-from app.schemas import AuthRequest, AuthResponse, GoogleAuthRequest, RegisterRequest, UserOut
+from app.schemas import (
+    AuthRequest,
+    AuthResponse,
+    ForgotPasswordRequest,
+    GoogleAuthRequest,
+    MessageOut,
+    RegisterRequest,
+    ResetPasswordRequest,
+    UserOut,
+)
 from app.services.email_domains import is_disposable_email
+from app.services.password_reset import consume_token, issue_token, send_reset_email
 from app.services.phone import compose_phone
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -244,3 +254,95 @@ def login(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
     clear_failed_logins(email)
     token = create_access_token(user.id, user.token_version)
     return AuthResponse(token=token, user=_user_out(user))
+
+
+# ---------- 找回密码 / password reset ----------
+
+# 无论邮箱存不存在都返回这一句。措辞刻意说"如果这个邮箱已注册"——既不确认也不
+# 否认，用户看得懂该去收信，攻击者读不出这个邮箱在不在库里。
+# Returned regardless of whether the address exists. The wording confirms
+# nothing either way while still telling a real user to go check their inbox.
+_FORGOT_REPLY = (
+    "如果这个邮箱已注册，我们已经把重置链接发过去了，请查收（含垃圾邮件箱）。 / "
+    "If that email is registered, we've sent a reset link — check your inbox and spam folder."
+)
+
+
+@router.post("/forgot-password", response_model=MessageOut)
+@limiter.limit(settings.RATE_LIMIT_PASSWORD_RESET)
+def forgot_password(
+    request: Request,
+    req: ForgotPasswordRequest,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """申请重置密码链接。
+
+    **永远返回同一句话、同一个状态码**，不论这个邮箱在不在库里——否则这个匿名
+    端点就成了一个免费的"这个邮箱是不是你们用户"查询器。注册那边也是同一口径
+    （见 register() 里那句刻意含糊的「无法完成注册」）。
+
+    发信放进 BackgroundTasks，不是为了快，是为了**让两种情况的响应时间一样**。
+    同步发信的话，邮箱存在时要等发信商往返几百毫秒、不存在时立刻返回——响应体
+    再怎么一致，这个时间差本身就把答案说出去了。
+
+    没有密码的 Google 用户照样能走这条路，走完等于给账号设置了一个密码。挡住
+    他们没有意义：能收这个邮箱的人本来就能用它登录 Google，挡住只是让真用户在
+    "Google 登不上了"的时候彻底没有退路。
+
+    Always the same body and status, whatever the address — otherwise this
+    anonymous endpoint answers "is this person a user of yours". The send runs in
+    a background task so both cases take the same wall-clock time: a synchronous
+    send would leak the answer through latency no matter how identical the body
+    is. Google-only accounts are deliberately eligible; whoever receives that
+    mailbox could sign in with Google anyway, so refusing them only removes the
+    fallback for a real user locked out of Google.
+    """
+    email = req.email.lower()
+    user = db.query(User).filter(User.email == email).first()
+    if user is not None:
+        raw = issue_token(db, user, requested_ip=request.client.host if request.client else None)
+        db.commit()
+        # 明文令牌只传给发信函数，不进日志、不进响应。
+        background.add_task(send_reset_email, user.email, raw)
+    return MessageOut(message=_FORGOT_REPLY)
+
+
+@router.post("/reset-password", response_model=MessageOut)
+@limiter.limit(settings.RATE_LIMIT_PASSWORD_RESET)
+def reset_password(request: Request, req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """用邮件里的令牌设置新密码。
+
+    **不自动登录。** 改完让用户自己去登录页用新密码登一次——邮件链接是会被转发、
+    被留在浏览器历史、被公司邮件网关预抓取的东西，凭它直接签发一个会话等于把
+    "点开链接"和"拿到账号"划等号。多登一次的代价很小。
+
+    改完把 token_version 加一，与 account.py 的 change_password 同一处理：申请
+    找回密码的场景里，"别人可能正拿着我的旧 token"是主要担心的事之一，只改密码
+    不动版本号的话那些会话会继续有效。
+
+    顺手清掉这个邮箱的登录失败计数：被撞库锁了 15 分钟的人来重置密码，改完还
+    登不进去会以为没改成功。
+
+    Deliberately does not sign the user in: reset links get forwarded, sit in
+    browser history, and are pre-fetched by corporate mail gateways, so turning
+    one into a live session equates "opened the link" with "owns the account".
+    Bumps token_version exactly like change_password — in a reset flow "someone
+    may be holding my old token" is one of the main worries, and changing the
+    password alone would leave those sessions live. Also clears the failed-login
+    lockout, or someone who reset *because* they were locked out still can't log in.
+    """
+    user = consume_token(db, req.token)
+    if user is None:
+        # 不区分"没见过这个令牌""已经用过""过期了"——三种情况对合法用户的下一步
+        # 完全一样（重新申请一封），而区分开来只会告诉攻击者他猜的令牌存不存在。
+        raise HTTPException(
+            status_code=400,
+            detail="链接无效或已过期，请重新申请 / This link is invalid or has expired — please request a new one",
+        )
+
+    user.password_hash = hash_password(req.password)
+    user.token_version = (user.token_version or 0) + 1
+    db.commit()
+    clear_failed_logins(user.email)
+    return MessageOut(message="密码已重置，请用新密码登录 / Password updated — please sign in with it")

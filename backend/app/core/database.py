@@ -124,7 +124,10 @@ def _hash_legacy_api_tokens() -> None:
 # rev 20 — 新表 invite_link_agents（邀请链接指派给「代理」用户；派生身份，不动 users.role）。
 #          全靠 create_all 建表建索引，无 ADD COLUMN、无回填；+1 只为让老库启动时走一次
 #          完整迁移而不是快速通道。
-CURRENT_SCHEMA_REV = 20
+# rev 21 — 新表 password_reset_tokens（找回密码的一次性令牌，只存哈希）。同 rev 20：
+#          全靠 create_all 建表建索引，无 ADD COLUMN、无回填；+1 只为让老库启动时走一次
+#          完整迁移而不是快速通道。
+CURRENT_SCHEMA_REV = 21
 
 _SCHEMA_REV_KEY = "schema_rev"
 
