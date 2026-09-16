@@ -202,10 +202,83 @@ export interface AdminMetrics {
   signupsLast7d: Array<{ date: string; count: number }>
 }
 
+// 管理后台：数据看板。全部按 STATS_TZ（北京时间）切天、剔除管理员；
+// "活跃"= 当天打开过任一页面。口径见 docs/superpowers/specs/2026-09-16-admin-overview-dashboard-design.md
+// admin: overview dashboard, day-bucketed in STATS_TZ, admins excluded.
+export type OverviewRangePreset = 'week' | 'month' | 'last_month' | 'quarter' | 'year'
+export type StatsRangeQuery = { preset: OverviewRangePreset } | { from: string; to: string }
+
+export interface Compare {
+  current: number
+  previous: number // 紧邻本期之前、等长的一段 / equal-length window right before
+}
+
+export interface AdminOverviewRange {
+  start: string // YYYY-MM-DD
+  end: string
+  days: number
+  compareStart: string
+  compareEnd: string
+}
+
+export interface AdminOverviewHeadline {
+  totalUsers: number
+  activeToday: number
+  activeWeek: number
+  activeMonth: number
+  signups: Compare
+}
+
+export interface AdminActivityDay {
+  date: string
+  active: number
+  signups: number
+}
+
+export interface AdminFunnelSteps {
+  registered: number
+  bound: number
+  traded: number
+  trialed: number
+  paid: number
+}
+export interface AdminFunnelWeek extends AdminFunnelSteps {
+  weekStart: string
+}
+
+export interface AdminRetentionPoint {
+  rate: number | null // cohort 为空为 null / null when the cohort is empty
+  cohortSize: number
+  cohortFrom: string | null
+  cohortTo: string | null
+}
+
+export interface AdminStrategyUsage {
+  template: string // 预设键或 'custom' / preset key or 'custom'
+  users: number
+  enabledUsers: number
+}
+
+export interface AdminTradingDay {
+  date: string
+  fills: number
+}
+
+export interface AdminOverview {
+  range: AdminOverviewRange
+  headline: AdminOverviewHeadline
+  activityDaily: AdminActivityDay[]
+  funnel: { overall: AdminFunnelSteps; byWeek: AdminFunnelWeek[] }
+  retention: { d2: AdminRetentionPoint; d7: AdminRetentionPoint; d30: AdminRetentionPoint }
+  plans: Record<string, number> // FREE / PRO_PAID / PRO_TRIAL
+  strategies: AdminStrategyUsage[]
+  trading: { traders: Compare; fills: Compare; daily: AdminTradingDay[] }
+}
+
 // 管理后台：页面访问统计（每页每天的人数/次数/平均停留）
 // admin: page stats (visitors/views/avg dwell per page per day)
 export interface AdminPageDayPoint {
-  date: string // YYYY-MM-DD (UTC)
+  date: string // YYYY-MM-DD（STATS_TZ）
   visitors: number
   views: number
   avgSeconds: number
@@ -222,6 +295,8 @@ export interface AdminPageStat {
 }
 
 export interface AdminPageStats {
+  start: string
+  end: string
   days: number
   totalViews: number
   totalVisitors: number
