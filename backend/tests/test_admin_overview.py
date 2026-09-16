@@ -133,3 +133,73 @@ def test_signups_boundary_at_stats_tz_midnight(db_session):
     rows = ov.activity_daily(db_session, SPEC)
     by = {r.date: r for r in rows}
     assert by["2026-09-01"].signups == 1  # u1 registered at exactly midnight, counts in 9/1
+
+
+# ── funnel ─────────────────────────────────────────────────────────────────
+
+def test_funnel_overall_steps_are_independent(db_session):
+    a = _user(db_session, "a@t.co"); b = _user(db_session, "b@t.co"); c = _user(db_session, "c@t.co")
+    adm = _admin(db_session)
+    _bind(db_session, a); _bind(db_session, a, login="1002")   # 两个账号算 1 人
+    _fill(db_session, a, date(2026, 9, 3))
+    _fill(db_session, b, date(2026, 9, 3), status="REJECTED")   # 没成交不算
+    _pay(db_session, c)                                  # 跳过试用直接付费
+    _pay(db_session, b, status="EXPIRED")                # 没付成不算
+    _bind(db_session, adm); _fill(db_session, adm, TODAY); _pay(db_session, adm)
+    f = ov.funnel(db_session, TODAY).overall
+    assert (f.registered, f.bound, f.traded, f.trialed, f.paid) == (3, 1, 1, 0, 1)
+
+
+def test_funnel_trialed_uses_trial_used_at(db_session):
+    _user(db_session, "a@t.co", trial_used=True); _user(db_session, "b@t.co")
+    assert ov.funnel(db_session, TODAY).overall.trialed == 1
+
+
+def test_funnel_by_week_is_8_monday_weeks_ascending(db_session):
+    # TODAY 9/16 周三 → 本周 9/14；8 周 = 7/27..9/14
+    a = _user(db_session, "a@t.co", created=date(2026, 9, 14))   # 本周
+    b = _user(db_session, "b@t.co", created=date(2026, 9, 13))   # 上周日 → 9/7 那周
+    _user(db_session, "old@t.co", created=date(2026, 7, 26))     # 8 周之前，不在表里
+    _bind(db_session, a)
+    weeks = ov.funnel(db_session, TODAY).byWeek
+    assert [w.weekStart for w in weeks][-2:] == ["2026-09-07", "2026-09-14"]
+    assert weeks[0].weekStart == "2026-07-27" and len(weeks) == 8
+    last, prev = weeks[-1], weeks[-2]
+    assert (last.registered, last.bound) == (1, 1)
+    assert (prev.registered, prev.bound) == (1, 0)
+    assert sum(w.registered for w in weeks) == 2
+
+
+# ── retention ──────────────────────────────────────────────────────────────
+
+def test_retention_d2_counts_exact_next_day_only(db_session):
+    a = _user(db_session, "a@t.co", created=date(2026, 9, 10))
+    b = _user(db_session, "b@t.co", created=date(2026, 9, 10))
+    c = _user(db_session, "c@t.co", created=date(2026, 9, 10))
+    _visit(db_session, a, date(2026, 9, 11))   # 第 2 天 → 留存
+    _visit(db_session, b, date(2026, 9, 12))   # 第 3 天 → 不算 d2
+    _visit(db_session, c, date(2026, 9, 10))   # 注册当天 → 不算
+    r = ov.retention(db_session, TODAY).d2
+    assert (r.cohortSize, r.rate) == (3, pytest.approx(1 / 3))
+    assert (r.cohortFrom, r.cohortTo) == ("2026-09-10", "2026-09-10")
+
+
+def test_retention_cohort_only_includes_users_whose_day_n_has_passed(db_session):
+    # d7：第 7 天 = 注册日 + 6，必须 <= 昨天(9/15) → 注册日 <= 9/9
+    _user(db_session, "in@t.co", created=date(2026, 9, 9))
+    _user(db_session, "out@t.co", created=date(2026, 9, 10))
+    _admin(db_session)
+    r = ov.retention(db_session, TODAY).d7
+    assert (r.cohortSize, r.rate) == (1, 0.0)
+
+
+def test_retention_empty_cohort_is_null(db_session):
+    _user(db_session, "new@t.co", created=date(2026, 9, 15))
+    r = ov.retention(db_session, TODAY).d30
+    assert (r.cohortSize, r.rate, r.cohortFrom, r.cohortTo) == (0, None, None, None)
+
+
+def test_retention_ignores_users_older_than_retention_window(db_session):
+    _user(db_session, "ancient@t.co", created=TODAY - timedelta(days=401))
+    _user(db_session, "ok@t.co", created=TODAY - timedelta(days=400))
+    assert ov.retention(db_session, TODAY).d2.cohortSize == 1

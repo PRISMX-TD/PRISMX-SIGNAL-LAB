@@ -94,3 +94,112 @@ def activity_daily(db: Session, spec: RangeSpec) -> list[ActivityDayOut]:
 def _iso(value) -> str:
     """Date 列在 SQLite 下可能回字符串，统一成 YYYY-MM-DD。"""
     return value.isoformat() if hasattr(value, "isoformat") else str(value)[:10]
+
+
+# ── 漏斗 / funnel ──────────────────────────────────────────────────────────
+FUNNEL_WEEKS = 8
+
+
+def _step_user_ids(db: Session) -> dict[str, set[str]]:
+    """每一步"至少做过一次"的非管理员 user_id 集合。
+
+    用集合而不是逐步 COUNT：分批表要按注册周切同一批人，集合交一次就出来；
+    用户量到万级时集合也只有几万个字符串，远比 8 周 × 4 步 = 32 次 JOIN 查询便宜。
+    Sets rather than per-step COUNTs: the by-week table intersects the same sets
+    with each cohort, and even at 10k users the sets stay cheap.
+    """
+    def ids(q) -> set[str]:
+        return {row[0] for row in q.all()}
+
+    return {
+        "bound": ids(db.query(MT5Account.user_id).join(User, User.id == MT5Account.user_id).filter(NOT_ADMIN).distinct()),
+        "traded": ids(db.query(Order.user_id).join(User, User.id == Order.user_id).filter(NOT_ADMIN, Order.status == "FILLED").distinct()),
+        "trialed": ids(_non_admin_users(db).with_entities(User.id).filter(User.trial_used_at.isnot(None))),
+        "paid": ids(db.query(Payment.user_id).join(User, User.id == Payment.user_id).filter(NOT_ADMIN, Payment.status == "FINISHED").distinct()),
+    }
+
+
+def _steps_for(cohort: set[str], steps: dict[str, set[str]]) -> dict[str, int]:
+    return {
+        "registered": len(cohort),
+        "bound": len(cohort & steps["bound"]),
+        "traded": len(cohort & steps["traded"]),
+        "trialed": len(cohort & steps["trialed"]),
+        "paid": len(cohort & steps["paid"]),
+    }
+
+
+def funnel(db: Session, today: date) -> FunnelOut:
+    steps = _step_user_ids(db)
+    all_ids = {row[0] for row in _non_admin_users(db).with_entities(User.id).all()}
+
+    this_monday = today - timedelta(days=today.weekday())
+    week_starts = [this_monday - timedelta(weeks=i) for i in range(FUNNEL_WEEKS - 1, -1, -1)]
+    cohorts: dict[date, set[str]] = {ws: set() for ws in week_starts}
+    rows = (
+        _non_admin_users(db)
+        .with_entities(User.id, User.created_at)
+        .filter(User.created_at >= day_start_utc(week_starts[0]))
+        .all()
+    )
+    for uid, created in rows:
+        if created is None:
+            continue
+        d = local_day(created)
+        ws = d - timedelta(days=d.weekday())
+        if ws in cohorts:
+            cohorts[ws].add(uid)
+
+    return FunnelOut(
+        overall=FunnelStepsOut(**_steps_for(all_ids, steps)),
+        byWeek=[FunnelWeekOut(weekStart=ws.isoformat(), **_steps_for(cohorts[ws], steps)) for ws in week_starts],
+    )
+
+
+# ── 留存 / retention ───────────────────────────────────────────────────────
+RETENTION_DAYS = (2, 7, 30)
+
+
+def retention(db: Session, today: date) -> RetentionOut:
+    """dN 留存 = 注册日 + (N-1) 那天打开过页面的比例。
+
+    cohort 只收"第 N 天已经完整过去"的人（注册日 + N - 1 <= 昨天），否则最近
+    注册的人还没机会回来就被算成流失，比例假低。再往前只看 MAX_RANGE_DAYS 内注册的，
+    更早的人他们的访问标记已经被保留期清掉，算出来必然是 0。
+    Only users whose day N has fully elapsed enter the cohort, and only those
+    registered within the visitor retention window (older markers are pruned).
+    """
+    earliest = today - timedelta(days=MAX_RANGE_DAYS)
+    rows = (
+        _non_admin_users(db)
+        .with_entities(User.id, User.created_at)
+        .filter(User.created_at >= day_start_utc(earliest))
+        .all()
+    )
+    signup_day = {uid: local_day(created) for uid, created in rows if created is not None}
+    if signup_day:
+        visits = {
+            (uid, _iso(day))
+            for uid, day in db.query(PageVisitorDay.user_id, PageVisitorDay.day)
+            .filter(PageVisitorDay.user_id.in_(list(signup_day)))
+            .distinct()
+            .all()
+        }
+    else:
+        visits = set()
+
+    def point(n: int) -> RetentionPointOut:
+        offset = n - 1
+        cohort = {uid: d for uid, d in signup_day.items() if d + timedelta(days=offset) <= today - timedelta(days=1)}
+        if not cohort:
+            return RetentionPointOut(rate=None, cohortSize=0, cohortFrom=None, cohortTo=None)
+        retained = sum(1 for uid, d in cohort.items() if (uid, (d + timedelta(days=offset)).isoformat()) in visits)
+        return RetentionPointOut(
+            rate=retained / len(cohort),
+            cohortSize=len(cohort),
+            cohortFrom=min(cohort.values()).isoformat(),
+            cohortTo=max(cohort.values()).isoformat(),
+        )
+
+    d2, d7, d30 = (point(n) for n in RETENTION_DAYS)
+    return RetentionOut(d2=d2, d7=d7, d30=d30)
