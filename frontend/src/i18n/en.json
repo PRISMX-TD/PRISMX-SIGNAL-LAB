@@ -1477,6 +1477,17 @@
         "d2": "Day-2", "d7": "Day-7", "d30": "Day-30",
         "cohort": "{{n}} users signed up {{from}} – {{to}}",
         "emptyCohort": "No users old enough yet"
+      },
+      "strategies": {
+        "title": "Strategy usage",
+        "hint": "Per preset template: created = at least one strategy; enabled = currently has one running and evaluating. Admins excluded.",
+        "empty": "No strategies created yet.",
+        "colTemplate": "Template", "colUsers": "Created by", "colEnabled": "Enabled by"
+      },
+      "trading": {
+        "title": "Trading usage",
+        "hint": "FILLED orders only, by fill time (Beijing) within the selected range. Admins excluded.",
+        "traders": "Users with fills", "fills": "Fills"
       }
     },
     "pageStats": {

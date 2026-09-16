@@ -57,21 +57,7 @@ import {
 import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
 import { useBackToClose } from '../utils/useBackToClose'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
-
-// 模板名称仍需要：从预设起步的策略 template 非 null，未命名时用模板名作显示名。
-// 模板的参数表单已被条件编辑器取代，所以这里只留标签映射。
-// Template names are still needed: a strategy started from a preset has a
-// non-null template, and an unnamed one displays its template's name. The
-// per-template param form is gone (replaced by the condition editor), so only the
-// label map remains.
-const TEMPLATE_LABEL_KEYS: Record<StrategyTemplateKey, string> = {
-  ma_trend: 'strategy.templateMaTrend',
-  macd_cross: 'strategy.templateMacdCross',
-  rsi_reversal: 'strategy.templateRsiReversal',
-  bollinger_breakout: 'strategy.templateBollingerBreakout',
-  donchian_breakout: 'strategy.templateDonchianBreakout',
-  macd_rsi_combo: 'strategy.templateMacdRsiCombo',
-}
+import { TEMPLATE_LABEL_KEYS } from '../utils/strategyTemplates'
 
 // 每个预设的一句话说明。这些文案 i18n 里一直有（templateXxxDesc），但自从模板
 // 参数表单被条件编辑器取代后就没有出口了——预设选择器只显示名字，"MACD 金叉死叉"
