@@ -20,11 +20,10 @@ from sqlalchemy.orm import Session
 
 from app.models import PageVisitorDay, User
 
-# 保留天数。后台查询窗口上限是 90 天（见 admin.page_stats 的 Query 约束），
-# 留一点余量后，更早的行对任何查询都已无用。
-# Retention window. The admin query caps at 90 days (see the Query constraint on
-# admin.page_stats); with some slack, older rows serve no query.
-VISITOR_RETENTION_DAYS = 100
+# 保留天数。看板范围上限 400 天（stats_time.MAX_RANGE_DAYS），要能看"今年"；
+# 更早的行对任何查询都已无用。
+# Retention window. The dashboard range caps at 400 days so "this year" works.
+VISITOR_RETENTION_DAYS = 400
 
 
 def prune_visitor_days(db: Session) -> int:

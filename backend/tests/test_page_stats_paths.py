@@ -175,3 +175,31 @@ def test_same_user_same_day_counts_once_as_a_visitor(db_session):
         report_pageview(PageViewIn(path="/competitions", seconds=5), db_session, u)
     assert db_session.query(PageViewStat).one().views == 3      # 次数累加
     assert db_session.query(PageVisitorDay).count() == 1        # 人数去重
+
+
+def test_visitor_day_is_recorded_in_stats_tz(db_session, monkeypatch):
+    """UTC 9/15 23:30 上报的访问，人数标记要记在北京时间 9/16。"""
+    from datetime import date, datetime, timezone
+    import app.routers.telemetry as telemetry
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "STATS_TZ", "Asia/Shanghai")
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 9, 15, 23, 30, tzinfo=timezone.utc).astimezone(tz) if tz else datetime(2026, 9, 15, 23, 30)
+
+    monkeypatch.setattr(telemetry, "datetime", _FixedDatetime)
+    u = _user(db_session, "tz@t.co")
+    report_pageview(PageViewIn(path="/dashboard", seconds=5), db_session, u)
+    marker = db_session.query(PageVisitorDay).one()
+    assert marker.day == date(2026, 9, 16)
+    # 次数桶仍是 UTC 整点，不受影响 / hourly bucket stays UTC
+    assert db_session.query(PageViewStat).one().time_bucket == datetime(2026, 9, 15, 23, 0)
+
+
+def test_visitor_retention_is_400_days():
+    from app.services.page_stats import VISITOR_RETENTION_DAYS
+    from app.services.stats_time import MAX_RANGE_DAYS
+    assert VISITOR_RETENTION_DAYS == MAX_RANGE_DAYS == 400

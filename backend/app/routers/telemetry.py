@@ -43,6 +43,7 @@ from app.core.rate_limit import limiter
 from app.models import PageVisitorDay, PageViewStat, User
 from app.schemas import PageViewIn
 from app.services.deps import get_current_user
+from app.services.stats_time import local_day
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
 logger = logging.getLogger("prismx.csp")
@@ -252,8 +253,14 @@ def report_pageview(
         return
 
     seconds = min(max(payload.seconds, 0.0), MAX_DWELL_SECONDS)
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now_utc = datetime.now(timezone.utc)
+    now = now_utc.replace(tzinfo=None)
     bucket = now.replace(minute=0, second=0, microsecond=0)
+    # 人数标记按看板时区记日（北京时间），次数桶仍是 UTC 整点。两者口径不同是
+    # 有意的：桶只是累加容器，查询时再按时区归天；标记只有"日"这一个粒度，
+    # 写入时就得切对。/ Visitor markers use the dashboard day; hourly buckets
+    # stay UTC and are re-bucketed at query time.
+    visitor_day = local_day(now_utc)
 
     # 先尝试更新已有桶，没有再插。并发下两个请求可能都发现"没有"然后同时插，
     # 唯一约束会让后到的那个报 IntegrityError——回滚后改成更新即可，行为等价。
@@ -278,7 +285,7 @@ def report_pageview(
             # 新桶已建好，计数部分到此结束；人数登记仍要走，别在这里直接 return。
             # Bucket created, counting done; the visitor marker still needs
             # writing — don't return early here.
-            _mark_visitor(db, payload.path, bucket.date(), user.id)
+            _mark_visitor(db, payload.path, visitor_day, user.id)
             return
         except IntegrityError:
             db.rollback()
@@ -291,7 +298,7 @@ def report_pageview(
     row.views = (row.views or 0) + 1
     row.total_seconds = (row.total_seconds or 0.0) + seconds
     db.commit()
-    _mark_visitor(db, payload.path, bucket.date(), user.id)
+    _mark_visitor(db, payload.path, visitor_day, user.id)
 
 
 def _mark_visitor(db: Session, path: str, day, user_id: str) -> None:
