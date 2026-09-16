@@ -1463,7 +1463,21 @@
       "delta": { "none": "上一期无数据", "vsPrev": "比上一期 {{pct}}" },
       "headline": { "activeToday": "今日活跃", "activeWeek": "周活跃 (7 天)", "activeMonth": "月活跃 (30 天)", "signups": "本期新注册" },
       "activity": { "title": "活跃趋势", "hint": "活跃 = 当天打开过任一页面的人数（不含管理员）。按北京时间切天。", "active": "日活跃", "signups": "新注册" },
-      "plans": { "FREE": "FREE", "PRO_PAID": "PRO · 付费", "PRO_TRIAL": "PRO · 试用" }
+      "plans": { "FREE": "FREE", "PRO_PAID": "PRO · 付费", "PRO_TRIAL": "PRO · 试用" },
+      "funnel": {
+        "title": "转化漏斗",
+        "hint": "全部用户（不含管理员）。五步各自独立统计，允许跳步（例如没试用直接付费），所以后一步不一定比前一步少。百分比是相对上一步。",
+        "step": { "registered": "注册", "bound": "绑定 MT5", "traded": "下过单", "trialed": "开过试用", "paid": "付费 PRO" },
+        "byWeek": "最近 8 周注册的人各走到哪一步（百分比相对该周注册数）",
+        "weekOf": "注册周（周一）"
+      },
+      "retention": {
+        "title": "留存",
+        "hint": "注册后第 N 天（按北京时间）打开过页面的比例。只算已经过了第 N 天的人。",
+        "d2": "次日留存", "d7": "7 日留存", "d30": "30 日留存",
+        "cohort": "{{from}} 至 {{to}} 注册的 {{n}} 人",
+        "emptyCohort": "还没有满足天数的用户"
+      }
     },
     "pageStats": {
       "title": "页面访问统计（近 {{days}} 天）",
