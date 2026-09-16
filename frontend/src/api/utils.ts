@@ -330,23 +330,6 @@ export function calcCountdown(
   }
 }
 
-// 版本号解析/比较：与 bridge_app.py 的 _parse_version/is_newer_version 逻辑对齐
-// （去掉前缀 v、按 "." 拆段、每段只取数字前缀、忽略非数字段）。
-// Version parsing/comparison, mirroring bridge_app.py's
-// _parse_version/is_newer_version (strip a leading "v", split on ".", take
-// each segment's leading digits, drop non-numeric segments).
-function parseVersion(v: string): number[] {
-  return v
-    .trim()
-    .replace(/^v/i, '')
-    .split('.')
-    .map((part) => {
-      const digits = part.replace(/[^0-9]/g, '')
-      return digits === '' ? NaN : parseInt(digits, 10)
-    })
-    .filter((n) => !Number.isNaN(n))
-}
-
 // 手数展示：抹掉浮点噪音。手数在链路里经过步长规整 / 分批平仓的减法后会带出
 // 1.1400000000001 这类尾巴（2026-09-11 用户截到），MT5 的手数步长最小 0.001，
 // 所以先按千分之一取整再格式化，最多 3 位小数。所有展示手数的地方都走这里，
@@ -361,17 +344,4 @@ export function roundLots(n: number): number {
 export function fmtLots(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '—'
   return roundLots(n).toLocaleString('en-US', { maximumFractionDigits: 3 })
-}
-
-export function isNewerVersion(latest: string, current: string): boolean {
-  const lv = parseVersion(latest)
-  const cv = parseVersion(current)
-  if (lv.length === 0) return false
-  const len = Math.max(lv.length, cv.length)
-  for (let i = 0; i < len; i++) {
-    const l = lv[i] ?? 0
-    const c = cv[i] ?? 0
-    if (l !== c) return l > c
-  }
-  return false
 }

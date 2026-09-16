@@ -72,7 +72,7 @@ export default function NotifDeviceBanner() {
         <button
           type="button"
           onClick={onDismiss}
-          aria-label={t("bridgeUpdate.dismiss")}
+          aria-label={t("common.close")}
           className="text-amber-400/70 hover:text-amber-300"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">

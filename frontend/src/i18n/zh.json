@@ -1,10 +1,4 @@
 {
-  "bridgeUpdate": {
-    "title": "Bridge 有新版本",
-    "body": "当前 v{{current}}，最新 v{{latest}}，建议更新以获得最新修复。",
-    "update": "去更新",
-    "dismiss": "不再提醒"
-  },
   "notifPanel": {
     "title": "通知",
     "unread": "未读",
