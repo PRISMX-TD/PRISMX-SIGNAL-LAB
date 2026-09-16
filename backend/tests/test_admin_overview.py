@@ -186,9 +186,12 @@ def test_retention_d2_counts_exact_next_day_only(db_session):
 
 def test_retention_cohort_only_includes_users_whose_day_n_has_passed(db_session):
     # d7：第 7 天 = 注册日 + 6，必须 <= 昨天(9/15) → 注册日 <= 9/9
-    _user(db_session, "in@t.co", created=date(2026, 9, 9))
+    in_user = _user(db_session, "in@t.co", created=date(2026, 9, 9))
     _user(db_session, "out@t.co", created=date(2026, 9, 10))
     _admin(db_session)
+    # 最早访问标记要落在 in_user 注册日或更早，否则新的 cohort 下限（F1）会把他
+    # 排除在外；标记打在注册当天本身，不影响 d7 要看的第 7 天（9/15）判定。
+    _visit(db_session, in_user, date(2026, 9, 9))
     r = ov.retention(db_session, TODAY).d7
     assert (r.cohortSize, r.rate) == (1, 0.0)
 
@@ -201,8 +204,29 @@ def test_retention_empty_cohort_is_null(db_session):
 
 def test_retention_ignores_users_older_than_retention_window(db_session):
     _user(db_session, "ancient@t.co", created=TODAY - timedelta(days=401))
-    _user(db_session, "ok@t.co", created=TODAY - timedelta(days=400))
+    ok = _user(db_session, "ok@t.co", created=TODAY - timedelta(days=400))
+    # 最早访问标记要落在 ok 的注册日或更早，否则 F1 的 cohort 下限会以"最早标记"
+    # 收紧到今天，把两人都挡在外面；打在注册当天本身，不影响 d2 判定（注册日+1）。
+    _visit(db_session, ok, TODAY - timedelta(days=400))
     assert ov.retention(db_session, TODAY).d2.cohortSize == 1
+
+
+def test_retention_cohort_starts_at_first_visitor_marker(db_session):
+    # 访问标记从 9/1 开始；8/20 注册的人分子必为 0，不该进 cohort
+    old = _user(db_session, "old@t.co", created=date(2026, 8, 20))
+    new = _user(db_session, "new@t.co", created=date(2026, 9, 2))
+    _visit(db_session, new, date(2026, 9, 1))          # 最早标记 = 9/1
+    _visit(db_session, new, date(2026, 9, 3))          # 第 2 天回来
+    r = ov.retention(db_session, TODAY).d2
+    assert (r.cohortSize, r.rate, r.cohortFrom) == (1, 1.0, "2026-09-02")
+    assert ov.build_overview(db_session, SPEC, TODAY).visitorDataSince == "2026-09-01"
+
+
+def test_retention_with_no_markers_is_all_null(db_session):
+    _user(db_session, "a@t.co", created=date(2026, 8, 1))
+    out = ov.build_overview(db_session, SPEC, TODAY)
+    assert out.visitorDataSince is None
+    assert out.retention.d2.rate is None and out.retention.d2.cohortSize == 0
 
 
 # ── plans / strategies / trading / build ───────────────────────────────────
@@ -303,7 +327,10 @@ def test_overview_route_resolves_preset_and_returns_shape(db_session):
     res = _client(db_session, adm).get("/admin/overview?range=month")
     assert res.status_code == 200, res.text
     body = res.json()
-    assert set(body) == {"range", "headline", "activityDaily", "funnel", "retention", "plans", "strategies", "trading"}
+    assert set(body) == {
+        "range", "headline", "activityDaily", "funnel", "retention", "plans", "strategies", "trading",
+        "visitorDataSince",
+    }
     assert body["range"]["start"].endswith("-01")
     assert body["headline"]["totalUsers"] == 1
 
@@ -341,3 +368,21 @@ def test_page_stats_route_uses_same_range_params_and_stats_tz_days(db_session):
     assert body["dates"] == ["2026-09-16"]
     # 老参数不再接受 / legacy param no longer accepted
     assert _client(db_session, adm).get("/admin/page-stats?days=7").status_code == 200  # 未知参数被忽略，走默认本月
+
+
+def test_funnel_week_assignment_uses_stats_tz_day(db_session):
+    # UTC 周日 9/13 16:30 = 北京周一 9/14 00:30 → 落在 9/14 那周
+    u = User(email="wk@t.co", api_token="tok_wk", created_at=datetime(2026, 9, 13, 16, 30))
+    db_session.add(u); db_session.commit()
+    weeks = {w.weekStart: w.registered for w in ov.funnel(db_session, TODAY).byWeek}
+    assert weeks["2026-09-14"] == 1 and weeks["2026-09-07"] == 0
+
+
+def test_page_stats_excludes_bucket_that_falls_on_next_stats_tz_day(db_session):
+    from app.models import PageViewStat
+    adm = _admin(db_session)
+    # UTC 9/16 16:00 桶 = 北京 9/17 00:00 → 不属于 9/16
+    db_session.add(PageViewStat(path="/dashboard", time_bucket=datetime(2026, 9, 16, 16, 0), views=1, total_seconds=10.0))
+    db_session.commit()
+    body = _client(db_session, adm).get("/admin/page-stats?from=2026-09-16&to=2026-09-16").json()
+    assert body["pages"] == []

@@ -13,12 +13,13 @@ rows/day), so it can be left alone. PageVisitorDay grows with active users ×
 pages visited × days with no ceiling, and would otherwise be the one stats table
 that grows forever.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import PageVisitorDay, User
+from app.services.stats_time import today
 
 # 保留天数。看板范围上限 400 天（stats_time.MAX_RANGE_DAYS），要能看"今年"；
 # 更早的行对任何查询都已无用。
@@ -31,7 +32,7 @@ def prune_visitor_days(db: Session) -> int:
 
     Deletes dedup markers past the retention window; returns rows deleted.
     """
-    cutoff = datetime.now(timezone.utc).date() - timedelta(days=VISITOR_RETENTION_DAYS)
+    cutoff = today() - timedelta(days=VISITOR_RETENTION_DAYS)
     deleted = (
         db.query(PageVisitorDay)
         .filter(PageVisitorDay.day < cutoff)

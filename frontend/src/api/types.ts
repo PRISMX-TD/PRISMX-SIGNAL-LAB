@@ -264,6 +264,7 @@ export interface AdminOverview {
   plans: Record<string, number> // FREE / PRO_PAID / PRO_TRIAL
   strategies: AdminStrategyUsage[]
   trading: { traders: Compare; fills: Compare; daily: AdminTradingDay[] }
+  visitorDataSince: string | null // 最早一条访问标记（STATS_TZ 日期）；无数据为 null
 }
 
 // 管理后台：页面访问统计（每页每天的人数/次数/平均停留）

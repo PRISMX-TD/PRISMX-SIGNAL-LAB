@@ -380,6 +380,8 @@ class AdminOverviewOut(BaseModel):
     plans: dict[str, int]  # FREE / PRO_PAID / PRO_TRIAL（其它等级原样）
     strategies: list[StrategyUsageOut]
     trading: TradingOut
+    visitorDataSince: str | None  # 最早一条访问标记（STATS_TZ 日期）；没有数据则 None
+    # / earliest page_visitor_days marker (STATS_TZ date); None if the table is empty
 
 
 class PageViewIn(BaseModel):
@@ -408,7 +410,7 @@ class PageDayPointOut(BaseModel):
     would be drawn as a straight line across the gap.
     """
 
-    date: str  # ISO 日期 YYYY-MM-DD（UTC）
+    date: str  # ISO 日期 YYYY-MM-DD（STATS_TZ）
     visitors: int  # 当天访问过该页的去重用户数
     views: int
     avgSeconds: float

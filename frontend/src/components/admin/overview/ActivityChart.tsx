@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import type { AdminActivityDay } from '../../../api/types'
 import LineChart, { SERIES_COLORS } from './LineChart'
 
-export default function ActivityChart({ daily }: { daily: AdminActivityDay[] }) {
+export default function ActivityChart({ daily, dataSince }: { daily: AdminActivityDay[]; dataSince?: string | null }) {
   const { t } = useTranslation()
   const dates = useMemo(() => daily.map((d) => d.date), [daily])
   const series = useMemo(() => [
@@ -15,7 +15,10 @@ export default function ActivityChart({ daily }: { daily: AdminActivityDay[] }) 
   return (
     <div className="glass mb-5 p-5">
       <h2 className="mb-1 text-sm font-semibold text-white">{t('admin.overview.activity.title')}</h2>
-      <p className="mb-3 text-xs text-neutral-500">{t('admin.overview.activity.hint')}</p>
+      <p className="mb-3 text-xs text-neutral-500">
+        {t('admin.overview.activity.hint')}
+        {dataSince ? ` ${t('admin.overview.dataSince', { since: dataSince })}` : null}
+      </p>
       <LineChart dates={dates} series={series} format={String} ariaLabel={t('admin.overview.activity.title')}
                  peakLabel={(v) => t('admin.pageStats.peak', { value: v })} />
     </div>

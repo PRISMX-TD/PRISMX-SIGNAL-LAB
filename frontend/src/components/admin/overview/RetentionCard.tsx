@@ -7,12 +7,21 @@ import type { AdminRetentionPoint } from '../../../api/types'
 
 const KEYS = ['d2', 'd7', 'd30'] as const
 
-export default function RetentionCard({ retention }: { retention: Record<(typeof KEYS)[number], AdminRetentionPoint> }) {
+export default function RetentionCard({
+  retention,
+  dataSince,
+}: {
+  retention: Record<(typeof KEYS)[number], AdminRetentionPoint>
+  dataSince?: string | null
+}) {
   const { t } = useTranslation()
   return (
     <div className="glass mb-5 p-5">
       <h2 className="mb-1 text-sm font-semibold text-white">{t('admin.overview.retention.title')}</h2>
-      <p className="mb-4 text-xs text-neutral-500">{t('admin.overview.retention.hint')}</p>
+      <p className="mb-4 text-xs text-neutral-500">
+        {t('admin.overview.retention.hint')}
+        {dataSince ? ` ${t('admin.overview.dataSince', { since: dataSince })}` : null}
+      </p>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {KEYS.map((k) => {
           const p = retention[k]

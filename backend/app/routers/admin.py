@@ -12,7 +12,7 @@ field, from what, to what, when), so once more than one person has admin
 access there's a record to check against.
 """
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import func, or_
@@ -26,7 +26,6 @@ from app.services.audit import log_change
 from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminOverviewOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
 from app.services.strategy_winrate import compute_strategy_session_winrate
-from app.utils.timeutil import aware as _aware
 from app.services.admin_overview import build_overview
 from app.services.stats_time import RangeError, RangeSpec, day_start_utc, local_day, resolve_range, today as stats_today
 from app.services.settings_store import (
@@ -431,10 +430,12 @@ def page_stats(
         or 0
     )
 
-    # 按 (path, day) 归拢两张表的结果。func.date() 在 SQLite 下返回字符串、
-    # 在其他驱动下可能返回 date 对象，统一成 ISO 字符串再当键用。
-    # Merge both tables keyed by (path, day). func.date() yields a string on
-    # SQLite but may yield a date elsewhere, so normalise to an ISO string.
+    # 按 (path, day) 归拢两张表的结果。_day_key 只是把 PageVisitorDay.day 统一成
+    # ISO 字符串——SQLite 下这一列可能回字符串，其他驱动可能回 date 对象。
+    # view_rows 那边走的是 local_day(bucket)，本来就是 date，不需要它。
+    # Merge both tables keyed by (path, day). _day_key only normalises
+    # PageVisitorDay.day (SQLite may return a str, other drivers a date); the
+    # view_rows side already goes through local_day(bucket) and needs no help.
     def _day_key(value) -> str:
         return value.isoformat() if hasattr(value, "isoformat") else str(value)[:10]
 

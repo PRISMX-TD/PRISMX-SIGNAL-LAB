@@ -82,7 +82,8 @@
 
 ```
 {
-  "range": { "from", "to", "days", "compareFrom", "compareTo" },
+  "range": { "start", "end", "days", "compareStart", "compareEnd" },
+  "visitorDataSince": str|null,
   "headline": {
     "totalUsers": int,
     "activeToday": int, "activeWeek": int, "activeMonth": int,

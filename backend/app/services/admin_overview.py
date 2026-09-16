@@ -96,6 +96,15 @@ def _iso(value) -> str:
     return value.isoformat() if hasattr(value, "isoformat") else str(value)[:10]
 
 
+def _as_date(value) -> date | None:
+    """同 _iso，但回 date 对象而不是字符串；None 原样传回。"""
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
+
+
 # ── 漏斗 / funnel ──────────────────────────────────────────────────────────
 FUNNEL_WEEKS = 8
 
@@ -160,16 +169,33 @@ def funnel(db: Session, today: date) -> FunnelOut:
 RETENTION_DAYS = (2, 7, 30)
 
 
-def retention(db: Session, today: date) -> RetentionOut:
+def retention(db: Session, today: date, data_since: date | None = None) -> RetentionOut:
     """dN 留存 = 注册日 + (N-1) 那天打开过页面的比例。
 
     cohort 只收"第 N 天已经完整过去"的人（注册日 + N - 1 <= 昨天），否则最近
-    注册的人还没机会回来就被算成流失，比例假低。再往前只看 MAX_RANGE_DAYS 内注册的，
-    更早的人他们的访问标记已经被保留期清掉，算出来必然是 0。
-    Only users whose day N has fully elapsed enter the cohort, and only those
-    registered within the visitor retention window (older markers are pruned).
+    注册的人还没机会回来就被算成流失，比例假低。cohort 下限取两者中较晚的一个：
+    MAX_RANGE_DAYS 之前（更早的访问标记已被保留期清掉，算出来必然是 0）、以及
+    page_visitor_days 里最早的一条访问标记——这张表只从访问统计上线那天才开始
+    有数据，再早注册的人分子永远是 0，会把留存率拉假低。data_since 为 None 时
+    这里现查一次最早标记；build_overview 已经查过一次，会把结果传进来避免
+    重复查询。
+
+    Only users whose day N has fully elapsed enter the cohort. The cohort floor
+    is whichever is LATER: MAX_RANGE_DAYS ago (older markers are pruned, so an
+    older cohort is guaranteed 0 retention), or the earliest page_visitor_days
+    row (rows only exist since telemetry went live, so anyone who signed up
+    before that can never have a marker and would show a falsely-low rate).
+    data_since is looked up here when omitted; build_overview passes its own
+    lookup so the table isn't scanned twice per request.
     """
-    earliest = today - timedelta(days=MAX_RANGE_DAYS)
+    if data_since is None:
+        data_since = _as_date(db.query(func.min(PageVisitorDay.day)).scalar())
+
+    if data_since is None:
+        earliest = today  # 没有任何访问标记 → cohort 必空 / no markers at all → cohort stays empty
+    else:
+        earliest = max(today - timedelta(days=MAX_RANGE_DAYS), data_since)
+
     rows = (
         _non_admin_users(db)
         .with_entities(User.id, User.created_at)
@@ -181,7 +207,7 @@ def retention(db: Session, today: date) -> RetentionOut:
         visits = {
             (uid, _iso(day))
             for uid, day in db.query(PageVisitorDay.user_id, PageVisitorDay.day)
-            .filter(PageVisitorDay.user_id.in_(list(signup_day)))
+            .filter(PageVisitorDay.user_id.in_(list(signup_day)), PageVisitorDay.day >= earliest)
             .distinct()
             .all()
         }
@@ -282,6 +308,7 @@ def trading(db: Session, spec: RangeSpec) -> TradingOut:
 # ── 总装 / assembly ────────────────────────────────────────────────────────
 
 def build_overview(db: Session, spec: RangeSpec, today: date) -> AdminOverviewOut:
+    first_marker = _as_date(db.query(func.min(PageVisitorDay.day)).scalar())
     return AdminOverviewOut(
         range=OverviewRangeOut(
             start=spec.start.isoformat(),
@@ -293,8 +320,9 @@ def build_overview(db: Session, spec: RangeSpec, today: date) -> AdminOverviewOu
         headline=headline(db, spec, today),
         activityDaily=activity_daily(db, spec),
         funnel=funnel(db, today),
-        retention=retention(db, today),
+        retention=retention(db, today, first_marker),
         plans=plans(db),
         strategies=strategies(db),
         trading=trading(db, spec),
+        visitorDataSince=first_marker.isoformat() if first_marker else None,
     )

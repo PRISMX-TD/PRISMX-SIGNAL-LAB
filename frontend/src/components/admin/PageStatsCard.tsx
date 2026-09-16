@@ -5,6 +5,7 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AdminPageStats } from '../../api/types'
+import { SkeletonLine } from '../Skeleton'
 import LineChart, { SERIES_COLORS } from './overview/LineChart'
 
 // 三个指标量纲差太多，一次只画一个 / three metrics, wildly different scales: one at a time
@@ -28,7 +29,7 @@ function usePageName() {
   return (path: string) => t(`admin.pageStats.page.${path}`, { defaultValue: path, nsSeparator: false })
 }
 
-export default function PageStatsCard({ stats }: { stats: AdminPageStats | null }) {
+export default function PageStatsCard({ stats, loading }: { stats: AdminPageStats | null; loading?: boolean }) {
   const { t } = useTranslation()
   const pageName = usePageName()
   const [metric, setMetric] = useState<Metric>('visitors')
@@ -58,7 +59,10 @@ export default function PageStatsCard({ stats }: { stats: AdminPageStats | null 
       </div>
       <p className="mb-3 text-xs text-neutral-500">{t('admin.pageStats.privacyHint')}</p>
 
-      {!hasData ? (
+      {/* 加载中不能显示"暂无数据"文案——那是空状态该说的话，加载态另有骨架屏 / loading must not show empty-state copy (project convention) */}
+      {loading && stats == null ? (
+        <SkeletonLine height={96} />
+      ) : !hasData ? (
         <p className="py-3 text-sm text-neutral-500">{t('admin.pageStats.empty')}</p>
       ) : (
         <>

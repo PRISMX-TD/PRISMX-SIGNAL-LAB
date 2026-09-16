@@ -1067,7 +1067,7 @@ class PageVisitorDay(Base):
 
     id = Column(String, primary_key=True, default=_uuid)
     path = Column(String, nullable=False)
-    day = Column(Date, nullable=False)  # UTC 日期 / UTC calendar date
+    day = Column(Date, nullable=False)  # STATS_TZ 日期（2026-09-16 之前写入的是 UTC 日）/ STATS_TZ calendar date (rows before 2026-09-16 are UTC days)
     # 不加外键：用户注销后这行留着也无妨（它只是个去重标记，不含任何个人信息），
     # 反而避免删用户时被外键挡住。
     # No FK: leaving the row after a user is deleted is harmless (it is a dedup

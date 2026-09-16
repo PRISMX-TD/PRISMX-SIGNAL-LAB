@@ -1490,7 +1490,8 @@
         "traders": "有成交的人数", "fills": "成交笔数"
       },
       "loadFailed": "加载失败",
-      "retry": "重试"
+      "retry": "重试",
+      "dataSince": "访问数据自 {{since}} 起记录，之前注册的用户不计入留存。"
     },
     "pageStats": {
       "title": "页面访问统计",

@@ -1490,7 +1490,8 @@
         "traders": "Users with fills", "fills": "Fills"
       },
       "loadFailed": "Failed to load",
-      "retry": "Retry"
+      "retry": "Retry",
+      "dataSince": "Visit data starts {{since}}; users who signed up earlier are not counted in retention."
     },
     "pageStats": {
       "title": "Page views",

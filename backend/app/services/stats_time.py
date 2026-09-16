@@ -63,6 +63,8 @@ class RangeSpec:
 
 
 def _preset_bounds(preset: str, today_: date) -> tuple[date, date]:
+    if preset not in RANGE_PRESETS:
+        raise RangeError(f"unknown range preset: {preset}")
     if preset == "week":
         return today_ - timedelta(days=today_.weekday()), today_
     if preset == "month":
@@ -75,7 +77,6 @@ def _preset_bounds(preset: str, today_: date) -> tuple[date, date]:
         return today_.replace(month=first_month, day=1), today_
     if preset == "year":
         return today_.replace(month=1, day=1), today_
-    raise RangeError(f"unknown range preset: {preset}")
 
 
 def resolve_range(preset: str | None, start: date | None, end: date | None, today: date) -> RangeSpec:

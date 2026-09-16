@@ -88,9 +88,9 @@ export default function OverviewPanel() {
       ) : (
         <>
           <HeadlineCards headline={overview.data.headline} />
-          <ActivityChart daily={overview.data.activityDaily} />
+          <ActivityChart daily={overview.data.activityDaily} dataSince={overview.data.visitorDataSince} />
           <FunnelCard funnel={overview.data.funnel} />
-          <RetentionCard retention={overview.data.retention} />
+          <RetentionCard retention={overview.data.retention} dataSince={overview.data.visitorDataSince} />
           <PlanBreakdown plans={overview.data.plans} />
           <div className="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
             <StrategyUsageCard rows={overview.data.strategies} />
@@ -102,7 +102,7 @@ export default function OverviewPanel() {
       {pageStats.error ? (
         <FailedCard message={pageStats.error} onRetry={pageStats.reload} />
       ) : (
-        <PageStatsCard stats={pageStats.data} />
+        <PageStatsCard stats={pageStats.data} loading={pageStats.loading} />
       )}
     </>
   )
