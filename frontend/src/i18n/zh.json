@@ -1243,9 +1243,6 @@
     "title": "管理者页面",
     "subtitle": "用户等级、角色与基础运营指标",
     "totalUsers": "总用户数",
-    "dau": "日活跃 (24h)",
-    "wau": "周活跃 (7d)",
-    "signupsLast7d": "近 7 天注册",
     "planBreakdown": "等级分布",
     "tab": {
       "data": "数据看板",
@@ -1462,7 +1459,11 @@
         "apply": "应用",
         "shown": "{{start}} 至 {{end}} · 共 {{days}} 天 · 对比 {{compareStart}} 至 {{compareEnd}}",
         "error": { "order": "开始日期不能晚于结束日期", "future": "结束日期不能是未来", "tooLong": "最多 400 天" }
-      }
+      },
+      "delta": { "none": "上一期无数据", "vsPrev": "比上一期 {{pct}}" },
+      "headline": { "activeToday": "今日活跃", "activeWeek": "周活跃 (7 天)", "activeMonth": "月活跃 (30 天)", "signups": "本期新注册" },
+      "activity": { "title": "活跃趋势", "hint": "活跃 = 当天打开过任一页面的人数（不含管理员）。按北京时间切天。", "active": "日活跃", "signups": "新注册" },
+      "plans": { "FREE": "FREE", "PRO_PAID": "PRO · 付费", "PRO_TRIAL": "PRO · 试用" }
     },
     "pageStats": {
       "title": "页面访问统计（近 {{days}} 天）",

@@ -1243,9 +1243,6 @@
     "title": "Admin",
     "subtitle": "User roles, subscription plans and basic operating metrics",
     "totalUsers": "Total users",
-    "dau": "DAU (24h)",
-    "wau": "WAU (7d)",
-    "signupsLast7d": "Signups (7d)",
     "planBreakdown": "Plan breakdown",
     "tab": {
       "data": "Dashboard",
@@ -1462,7 +1459,11 @@
         "apply": "Apply",
         "shown": "{{start}} – {{end}} · {{days}} days · vs {{compareStart}} – {{compareEnd}}",
         "error": { "order": "Start must not be after end", "future": "End must not be in the future", "tooLong": "At most 400 days" }
-      }
+      },
+      "delta": { "none": "no data in previous period", "vsPrev": "{{pct}} vs previous" },
+      "headline": { "activeToday": "Active today", "activeWeek": "Active (7d)", "activeMonth": "Active (30d)", "signups": "Signups in range" },
+      "activity": { "title": "Activity trend", "hint": "Active = opened at least one page that day (admins excluded). Days follow Beijing time.", "active": "Daily active", "signups": "Signups" },
+      "plans": { "FREE": "FREE", "PRO_PAID": "PRO · paid", "PRO_TRIAL": "PRO · trial" }
     },
     "pageStats": {
       "title": "Page views (last {{days}} days)",
