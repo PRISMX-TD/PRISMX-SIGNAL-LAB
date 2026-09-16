@@ -494,6 +494,7 @@ export default function Layout() {
   // - pagehide：关标签页/切到别的网站时上报（这种情况 React 不会跑 cleanup，
   //   只靠上面那个会永久丢掉每个会话的最后一个页面）。用 pagehide 而不是
   //   unload，因为移动端 Safari 把页面放进后台缓存时根本不触发 unload。
+  // - visibilitychange：切后台即上报、回前台重计（见 effect 内注释）。
   //
   // Dwell reporting: Layout is the common parent of every protected route, so
   // this single hook covers all tracked pages. The start timestamp lives in a
@@ -506,6 +507,7 @@ export default function Layout() {
   //   React never runs cleanup — without it every session would permanently
   //   lose its final page. pagehide rather than unload, because mobile Safari
   //   doesn't fire unload when putting a page into the back/forward cache.
+  // - visibilitychange: report on entering background; reset timing on returning to foreground.
   // done 标记防重复上报：pagehide 之后 React 仍可能跑 cleanup（例如从后台缓存
   // 恢复再跳转），两条路径都调 flush 就会把同一次访问算两遍，把访问量和总时长
   // 一起抬高。每个 effect 周期只允许上报一次。
@@ -525,9 +527,26 @@ export default function Layout() {
       const seconds = (Date.now() - dwellStartRef.current) / 1000
       reportPageView(path, seconds)
     }
+    // 切到后台（换标签页 / App 切走）立刻上报这一次访问；回到前台重新开始计一次新访问。
+    // 这样"停留"只算屏幕亮着的时间，App 被系统杀掉也不会丢最后一页——以前是一直
+    // 计时到下次路由切换，切后台几小时都算停留（靠 30 分钟封顶兜底），App 被杀则整条丢。
+    // 代价是频繁切前后台的人访问次数会多几次；比丢数据和虚高时长合理。
+    // On hidden: report this visit now; on visible: start a fresh visit. Dwell then
+    // counts only foreground time, and a killed App loses nothing. Cost: frequent
+    // switchers register more views — preferable to lost data and inflated dwell.
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        flush()
+      } else {
+        dwellStartRef.current = Date.now()
+        done = false
+      }
+    }
     window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       window.removeEventListener('pagehide', flush)
+      document.removeEventListener('visibilitychange', onVisibility)
       flush()
     }
   }, [location.pathname])
