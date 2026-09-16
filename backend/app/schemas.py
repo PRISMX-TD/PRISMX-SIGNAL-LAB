@@ -291,14 +291,6 @@ class AdminBulkUserUpdate(AdminUserUpdate):
     userIds: list[str] = Field(min_length=1, max_length=500)
 
 
-class AdminMetricsOut(BaseModel):
-    totalUsers: int
-    dau: int  # 近 24 小时活跃 / active within the last 24h
-    wau: int  # 近 7 天活跃 / active within the last 7 days
-    planCounts: dict[str, int]
-    signupsLast7d: list[dict]  # [{date, count}]
-
-
 # ── 管理后台看板 / admin overview dashboard ──────────────────────────────────
 # 全部按 STATS_TZ 切天、剔除管理员；"活跃"= 当天打开过任一页面（page_visitor_days）。
 # 口径见 docs/superpowers/specs/2026-09-16-admin-overview-dashboard-design.md §3/§5。
@@ -435,6 +427,8 @@ class PageStatOut(BaseModel):
 
 
 class AdminPageStatsOut(BaseModel):
+    start: str  # 范围起止（STATS_TZ 日期）/ range bounds
+    end: str
     days: int  # 统计窗口天数 / window size in days
     totalViews: int
     totalVisitors: int  # 全站去重人数，同样不是各页人数之和（一个人可看多页）

@@ -12,7 +12,7 @@ field, from what, to what, when), so once more than one person has admin
 access there's a record to check against.
 """
 import json
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import func, or_
@@ -23,10 +23,12 @@ from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
 from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
 from app.services.audit import log_change
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminMetricsOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
+from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminOverviewOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
 from app.services.strategy_winrate import compute_strategy_session_winrate
 from app.utils.timeutil import aware as _aware
+from app.services.admin_overview import build_overview
+from app.services.stats_time import RangeError, RangeSpec, day_start_utc, local_day, resolve_range, today as stats_today
 from app.services.settings_store import (
     get_broker_settings,
     get_candle_settings,
@@ -310,58 +312,37 @@ def put_settings(
     return _broker_settings_out(get_broker_settings(db))
 
 
-@router.get("/metrics", response_model=AdminMetricsOut)
-def metrics(
+def _resolve_range_or_422(range_: str | None, from_: date | None, to: date | None) -> RangeSpec:
+    """看板的时间范围参数。预设由后端解析（见 stats_time），非法一律 422。"""
+    try:
+        return resolve_range(range_, from_, to, stats_today())
+    except RangeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.get("/overview", response_model=AdminOverviewOut)
+def overview(
+    range_: str | None = Query(None, alias="range"),
+    from_: date | None = Query(None, alias="from"),
+    to: date | None = Query(None),
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
-    """基础运营指标：总用户数、DAU/WAU（按 last_active_at）、各等级人数、近 7 天注册量。
-    Basic operating metrics: total users, DAU/WAU (by last_active_at), plan
-    breakdown, and signups over the last 7 days."""
-    now = datetime.now(timezone.utc)
-    total_users = db.query(func.count(User.id)).scalar() or 0
+    """管理页看板：头部指标、活跃趋势、漏斗、留存、等级、策略与交易使用，一次返回。
 
-    dau_cutoff = now - timedelta(hours=24)
-    wau_cutoff = now - timedelta(days=7)
-    dau = db.query(func.count(User.id)).filter(User.last_active_at >= dau_cutoff).scalar() or 0
-    wau = db.query(func.count(User.id)).filter(User.last_active_at >= wau_cutoff).scalar() or 0
-
-    plan_counts: dict[str, int] = {}
-    for plan_value, cnt in db.query(User.plan, func.count(User.id)).group_by(User.plan).all():
-        plan_counts[plan_value or "FREE"] = cnt
-
-    # 近 7 天每日注册量（含今天，按 UTC 日期分组，Python 侧分组以跨数据库一致）
-    # Daily signups for the last 7 days (incl. today, grouped in Python for
-    # cross-DB consistency, same approach as signals.signal_stats)
-    start_date = (now - timedelta(days=6)).date()
-    rows = db.query(User.created_at).filter(
-        User.created_at >= datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
-    ).all()
-    counts: dict[str, int] = {}
-    for i in range(7):
-        day = start_date + timedelta(days=i)
-        counts[day.isoformat()] = 0
-    for (created_at,) in rows:
-        ts = _aware(created_at)
-        if ts is None:
-            continue
-        key = ts.date().isoformat()
-        if key in counts:
-            counts[key] += 1
-    signups_last_7d = [{"date": d, "count": c} for d, c in counts.items()]
-
-    return AdminMetricsOut(
-        totalUsers=total_users,
-        dau=dau,
-        wau=wau,
-        planCounts=plan_counts,
-        signupsLast7d=signups_last_7d,
-    )
+    口径全部在 services/admin_overview.py；这里只解析范围。预设 `range=` 与自定义
+    `from=&to=` 同时给时自定义优先；都不给默认本月。
+    Admin dashboard in one call; all semantics live in services/admin_overview.
+    """
+    spec = _resolve_range_or_422(range_, from_, to)
+    return build_overview(db, spec, stats_today())
 
 
 @router.get("/page-stats", response_model=AdminPageStatsOut)
 def page_stats(
-    days: int = Query(7, ge=1, le=90),
+    range_: str | None = Query(None, alias="range"),
+    from_: date | None = Query(None, alias="from"),
+    to: date | None = Query(None),
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
@@ -393,14 +374,13 @@ def page_stats(
     daily figures (one person visiting 7 days running is 7 by day, 1 distinct) —
     two different questions; don't "fix" the mismatch by summing.
     """
-    today = datetime.now(timezone.utc).date()
-    # 含今天在内的 days 天，所以起点回退 days-1 天。用日期而非"当前时刻减 N×24h"，
-    # 否则窗口边界会落在半天中间，首尾两天的数据都是残缺的、折线图看着像是掉了。
-    # A window of `days` days including today, so the start is days-1 back. Date
-    # based rather than "now minus N×24h", which would cut the first and last day
-    # mid-way and make the line chart look like a dip at both ends.
-    start_day = today - timedelta(days=days - 1)
-    cutoff = datetime.combine(start_day, time.min)
+    spec = _resolve_range_or_422(range_, from_, to)
+    start_day, end_day = spec.start, spec.end
+    # 桶是 UTC 整点，范围是 STATS_TZ 日；边界换成 naive UTC 再过滤，归日在 Python 侧做
+    # Buckets are UTC hours, the range is STATS_TZ days: convert the bounds and
+    # re-bucket per day in Python.
+    cutoff = day_start_utc(start_day)
+    cutoff_end = day_start_utc(end_day + timedelta(days=1))
 
     # 排除后台自己：/admin 已从上报白名单移除，但库里还有之前累积的行，
     # 查询侧也要滤掉，否则历史数据会一直挂在排行里。
@@ -408,14 +388,8 @@ def page_stats(
     # previously accumulated rows remain in the DB, so filter here too or the
     # historical data would sit in the ranking forever.
     view_rows = (
-        db.query(
-            PageViewStat.path,
-            func.date(PageViewStat.time_bucket).label("day"),
-            func.sum(PageViewStat.views),
-            func.sum(PageViewStat.total_seconds),
-        )
-        .filter(PageViewStat.time_bucket >= cutoff, PageViewStat.path != "/admin")
-        .group_by(PageViewStat.path, func.date(PageViewStat.time_bucket))
+        db.query(PageViewStat.path, PageViewStat.time_bucket, PageViewStat.views, PageViewStat.total_seconds)
+        .filter(PageViewStat.time_bucket >= cutoff, PageViewStat.time_bucket < cutoff_end, PageViewStat.path != "/admin")
         .all()
     )
     # 三个人数查询共用同一组过滤条件。抽出来是因为漏掉任何一个的 path != "/admin"
@@ -423,7 +397,7 @@ def page_stats(
     # The three visitor queries share one filter. Extracted because omitting the
     # path != "/admin" clause anywhere fails silently, just quietly folding the
     # admin page into one of the numbers.
-    visitor_window = (PageVisitorDay.day >= start_day, PageVisitorDay.path != "/admin")
+    visitor_window = (PageVisitorDay.day >= start_day, PageVisitorDay.day <= end_day, PageVisitorDay.path != "/admin")
     visitor_rows = (
         db.query(
             PageVisitorDay.path,
@@ -465,9 +439,9 @@ def page_stats(
         return value.isoformat() if hasattr(value, "isoformat") else str(value)[:10]
 
     per_page: dict[str, dict[str, dict]] = {}
-    for path, day, views, seconds in view_rows:
+    for path, bucket, views, seconds in view_rows:
         cell = per_page.setdefault(path, {}).setdefault(
-            _day_key(day), {"views": 0, "seconds": 0.0, "visitors": 0}
+            local_day(bucket).isoformat(), {"views": 0, "seconds": 0.0, "visitors": 0}
         )
         cell["views"] += int(views or 0)
         cell["seconds"] += float(seconds or 0.0)
@@ -482,7 +456,7 @@ def page_stats(
     # Backfill empty days with zeros: the line chart needs a contiguous date
     # series, otherwise a day with no traffic gets skipped and reads as "traffic
     # never dropped".
-    day_keys = [(start_day + timedelta(days=i)).isoformat() for i in range(days)]
+    day_keys = spec.day_keys()
 
     pages: list[PageStatOut] = []
     for path, by_day in per_page.items():
@@ -515,7 +489,9 @@ def page_stats(
     total_views = sum(p.views for p in pages)
     total_seconds = sum(c["seconds"] for by_day in per_page.values() for c in by_day.values())
     return AdminPageStatsOut(
-        days=days,
+        start=start_day.isoformat(),
+        end=end_day.isoformat(),
+        days=spec.days,
         totalViews=total_views,
         totalVisitors=total_visitors,
         avgSecondsOverall=round(total_seconds / total_views, 1) if total_views else 0.0,

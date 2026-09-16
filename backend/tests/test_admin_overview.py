@@ -268,3 +268,76 @@ def test_build_overview_assembles_everything(db_session):
     assert [(s.template, s.users, s.enabledUsers) for s in out.strategies] == [("ma_trend", 1, 1)]
     assert out.trading.fills.current == 1 and out.trading.traders.current == 1
     assert {d.date: d.fills for d in out.trading.daily}["2026-09-05"] == 1
+
+
+# ── 路由 / routes ──────────────────────────────────────────────────────────
+
+def _client(db_session, admin: User):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.core.database import get_db
+    from app.routers import admin as admin_router
+    from app.services.deps import require_admin
+
+    # TestClient 的同步路由经 anyio 线程池在另一个线程执行；db_session 的引擎是
+    # SQLite 内存库 + SingletonThreadPool（conftest.py 没配 StaticPool），换线程会
+    # 拿到全新的空库。这里先把连接签出、开一个不提交的事务钉住，后续跨线程查询
+    # 复用同一个 Connection 对象，不再按线程向池子要新连接。
+    # TestClient runs sync routes on a worker thread via anyio's threadpool;
+    # db_session's engine is in-memory SQLite with SingletonThreadPool (no
+    # StaticPool in conftest.py), so a different thread gets a brand new, empty
+    # database. Pin the session to an already-checked-out connection so later
+    # cross-thread queries reuse that same Connection instead of asking the pool
+    # for a per-thread one.
+    db_session.connection()
+
+    app = FastAPI()
+    app.include_router(admin_router.router)
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[require_admin] = lambda: admin
+    return TestClient(app)
+
+
+def test_overview_route_resolves_preset_and_returns_shape(db_session):
+    adm = _admin(db_session); _user(db_session, "a@t.co")
+    res = _client(db_session, adm).get("/admin/overview?range=month")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert set(body) == {"range", "headline", "activityDaily", "funnel", "retention", "plans", "strategies", "trading"}
+    assert body["range"]["start"].endswith("-01")
+    assert body["headline"]["totalUsers"] == 1
+
+
+@pytest.mark.parametrize("qs", [
+    "from=2026-09-12&to=2026-09-10",
+    "from=2025-01-01&to=2026-09-16",
+    "range=fortnight",
+    "from=2026-09-10",
+    "from=2099-01-01&to=2099-01-02",
+])
+def test_overview_route_rejects_bad_ranges_with_422(db_session, qs):
+    adm = _admin(db_session)
+    assert _client(db_session, adm).get(f"/admin/overview?{qs}").status_code == 422
+
+
+def test_metrics_route_is_gone(db_session):
+    adm = _admin(db_session)
+    assert _client(db_session, adm).get("/admin/metrics").status_code == 404
+
+
+def test_page_stats_route_uses_same_range_params_and_stats_tz_days(db_session):
+    from app.models import PageViewStat
+    adm = _admin(db_session); u = _user(db_session, "a@t.co")
+    # UTC 9/15 20:00 桶 = 北京 9/16 04:00 → 归到 9/16
+    db_session.add(PageViewStat(path="/dashboard", time_bucket=datetime(2026, 9, 15, 20, 0), views=3, total_seconds=90.0))
+    _visit(db_session, u, date(2026, 9, 16))
+    db_session.commit()
+    res = _client(db_session, adm).get("/admin/page-stats?from=2026-09-16&to=2026-09-16")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert (body["start"], body["end"], body["days"]) == ("2026-09-16", "2026-09-16", 1)
+    page = body["pages"][0]
+    assert (page["path"], page["views"], page["visitors"], page["avgSeconds"]) == ("/dashboard", 3, 1, 30.0)
+    assert body["dates"] == ["2026-09-16"]
+    # 老参数不再接受 / legacy param no longer accepted
+    assert _client(db_session, adm).get("/admin/page-stats?days=7").status_code == 200  # 未知参数被忽略，走默认本月
