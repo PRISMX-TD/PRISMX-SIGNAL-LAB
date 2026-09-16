@@ -249,9 +249,22 @@ def test_trading_counts_fills_in_range_with_compare_and_daily(db_session):
 
 
 def test_build_overview_assembles_everything(db_session):
-    _user(db_session, "a@t.co")
+    a = _user(db_session, "a@t.co", plan="PRO", trial=True)
+    b = _user(db_session, "b@t.co")
+    _admin(db_session)
+    _visit(db_session, a, TODAY)
+    _bind(db_session, a)
+    _fill(db_session, a, date(2026, 9, 5))
+    db_session.add(UserStrategy(user_id=b.id, template="ma_trend", symbol="XAUUSD", interval="15m", enabled=True))
+    db_session.commit()
+
     out = ov.build_overview(db_session, SPEC, TODAY)
     assert out.range.start == "2026-09-01" and out.range.compareEnd == "2026-08-31" and out.range.days == 16
-    assert out.headline.totalUsers == 1
-    assert len(out.activityDaily) == 16 and len(out.funnel.byWeek) == 8
+    assert out.headline.totalUsers == 2 and out.headline.activeToday == 1
+    assert len(out.activityDaily) == 16 and out.activityDaily[-1].active == 1
+    assert out.funnel.overall.bound == 1 and out.funnel.overall.traded == 1 and len(out.funnel.byWeek) == 8
     assert out.retention.d30.rate is None
+    assert out.plans == {"FREE": 1, "PRO_TRIAL": 1}
+    assert [(s.template, s.users, s.enabledUsers) for s in out.strategies] == [("ma_trend", 1, 1)]
+    assert out.trading.fills.current == 1 and out.trading.traders.current == 1
+    assert {d.date: d.fills for d in out.trading.daily}["2026-09-05"] == 1
