@@ -299,6 +299,97 @@ class AdminMetricsOut(BaseModel):
     signupsLast7d: list[dict]  # [{date, count}]
 
 
+# ── 管理后台看板 / admin overview dashboard ──────────────────────────────────
+# 全部按 STATS_TZ 切天、剔除管理员；"活跃"= 当天打开过任一页面（page_visitor_days）。
+# 口径见 docs/superpowers/specs/2026-09-16-admin-overview-dashboard-design.md §3/§5。
+
+class CompareOut(BaseModel):
+    current: int
+    previous: int  # 紧邻本期之前、等长的对比期 / equal-length window right before
+
+
+class OverviewRangeOut(BaseModel):
+    start: str  # YYYY-MM-DD（STATS_TZ）
+    end: str
+    days: int
+    compareStart: str
+    compareEnd: str
+
+
+class OverviewHeadlineOut(BaseModel):
+    totalUsers: int
+    activeToday: int   # 今天打开过页面的人 / opened a page today
+    activeWeek: int    # 近 7 天 / last 7 days incl. today
+    activeMonth: int   # 近 30 天 / last 30 days incl. today
+    signups: CompareOut
+
+
+class ActivityDayOut(BaseModel):
+    date: str
+    active: int
+    signups: int
+
+
+class FunnelStepsOut(BaseModel):
+    """五步互相独立（"至少做过一次"），允许跳步，后一步不保证 ≤ 前一步。
+    Independent steps; skipping is allowed so later steps need not be smaller."""
+    registered: int
+    bound: int     # 有 MT5 账号 / has an mt5_accounts row
+    traded: int    # 有 FILLED 订单 / has a FILLED order
+    trialed: int   # trial_used_at 非空 / used the trial
+    paid: int      # 有 FINISHED 付款 / has a FINISHED payment
+
+
+class FunnelWeekOut(FunnelStepsOut):
+    weekStart: str  # 该周周一（STATS_TZ）/ Monday of that week
+
+
+class FunnelOut(BaseModel):
+    overall: FunnelStepsOut
+    byWeek: list[FunnelWeekOut]  # 最近 8 周，升序 / last 8 weeks ascending
+
+
+class RetentionPointOut(BaseModel):
+    rate: float | None  # cohort 为空时 None / None when the cohort is empty
+    cohortSize: int
+    cohortFrom: str | None  # cohort 内最早/最晚注册日 / earliest & latest signup day in cohort
+    cohortTo: str | None
+
+
+class RetentionOut(BaseModel):
+    d2: RetentionPointOut
+    d7: RetentionPointOut
+    d30: RetentionPointOut
+
+
+class StrategyUsageOut(BaseModel):
+    template: str      # 预设键；无模板归 "custom" / preset key or "custom"
+    users: int         # 建过 / created at least one
+    enabledUsers: int  # 当前启用中 / currently enabled
+
+
+class TradingDayOut(BaseModel):
+    date: str
+    fills: int
+
+
+class TradingOut(BaseModel):
+    traders: CompareOut  # 有成交的人数 / distinct users with a fill
+    fills: CompareOut    # 成交笔数 / fill count
+    daily: list[TradingDayOut]
+
+
+class AdminOverviewOut(BaseModel):
+    range: OverviewRangeOut
+    headline: OverviewHeadlineOut
+    activityDaily: list[ActivityDayOut]
+    funnel: FunnelOut
+    retention: RetentionOut
+    plans: dict[str, int]  # FREE / PRO_PAID / PRO_TRIAL（其它等级原样）
+    strategies: list[StrategyUsageOut]
+    trading: TradingOut
+
+
 class PageViewIn(BaseModel):
     """页面访问上报体。seconds 是本次在该页的停留秒数。
 
