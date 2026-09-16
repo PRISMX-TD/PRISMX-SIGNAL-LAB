@@ -203,3 +203,98 @@ def retention(db: Session, today: date) -> RetentionOut:
 
     d2, d7, d30 = (point(n) for n in RETENTION_DAYS)
     return RetentionOut(d2=d2, d7=d7, d30=d30)
+
+
+# ── 等级 / plans ───────────────────────────────────────────────────────────
+
+def plans(db: Session) -> dict[str, int]:
+    out: dict[str, int] = {}
+    rows = (
+        _non_admin_users(db)
+        .with_entities(User.plan, User.plan_is_trial, func.count(User.id))
+        .group_by(User.plan, User.plan_is_trial)
+        .all()
+    )
+    for plan, is_trial, n in rows:
+        plan = plan or "FREE"
+        key = ("PRO_TRIAL" if is_trial else "PRO_PAID") if plan == "PRO" else plan
+        out[key] = out.get(key, 0) + int(n or 0)
+    return out
+
+
+# ── 策略 / strategies ──────────────────────────────────────────────────────
+
+def strategies(db: Session) -> list[StrategyUsageOut]:
+    rows = (
+        db.query(UserStrategy.template, UserStrategy.enabled, UserStrategy.user_id)
+        .join(User, User.id == UserStrategy.user_id)
+        .filter(NOT_ADMIN)
+        .all()
+    )
+    users: dict[str, set[str]] = defaultdict(set)
+    enabled: dict[str, set[str]] = defaultdict(set)
+    for template, is_enabled, uid in rows:
+        key = template or "custom"
+        users[key].add(uid)
+        if is_enabled:
+            enabled[key].add(uid)
+    out = [StrategyUsageOut(template=k, users=len(v), enabledUsers=len(enabled[k])) for k, v in users.items()]
+    out.sort(key=lambda r: (-r.users, r.template))
+    return out
+
+
+# ── 交易 / trading ─────────────────────────────────────────────────────────
+
+def trading(db: Session, spec: RangeSpec) -> TradingOut:
+    rows = (
+        db.query(Order.user_id, Order.created_at)
+        .join(User, User.id == Order.user_id)
+        .filter(
+            NOT_ADMIN,
+            Order.status == "FILLED",
+            Order.created_at >= day_start_utc(spec.compare_start),
+            Order.created_at < day_start_utc(spec.end + timedelta(days=1)),
+        )
+        .all()
+    )
+    fills_by_day: dict[str, int] = defaultdict(int)
+    traders_cur: set[str] = set()
+    traders_prev: set[str] = set()
+    fills_cur = fills_prev = 0
+    for uid, created in rows:
+        if created is None:
+            continue
+        d = local_day(created)
+        if spec.start <= d <= spec.end:
+            fills_cur += 1
+            traders_cur.add(uid)
+            fills_by_day[d.isoformat()] += 1
+        elif spec.compare_start <= d <= spec.compare_end:
+            fills_prev += 1
+            traders_prev.add(uid)
+    return TradingOut(
+        traders=CompareOut(current=len(traders_cur), previous=len(traders_prev)),
+        fills=CompareOut(current=fills_cur, previous=fills_prev),
+        daily=[TradingDayOut(date=key, fills=fills_by_day.get(key, 0)) for key in spec.day_keys()],
+    )
+
+
+# ── 总装 / assembly ────────────────────────────────────────────────────────
+
+def build_overview(db: Session, spec: RangeSpec, today: date) -> AdminOverviewOut:
+    return AdminOverviewOut(
+        range=OverviewRangeOut(
+            start=spec.start.isoformat(),
+            end=spec.end.isoformat(),
+            days=spec.days,
+            compareStart=spec.compare_start.isoformat(),
+            compareEnd=spec.compare_end.isoformat(),
+        ),
+        headline=headline(db, spec, today),
+        activityDaily=activity_daily(db, spec),
+        funnel=funnel(db, today),
+        retention=retention(db, today),
+        plans=plans(db),
+        strategies=strategies(db),
+        trading=trading(db, spec),
+    )

@@ -203,3 +203,55 @@ def test_retention_ignores_users_older_than_retention_window(db_session):
     _user(db_session, "ancient@t.co", created=TODAY - timedelta(days=401))
     _user(db_session, "ok@t.co", created=TODAY - timedelta(days=400))
     assert ov.retention(db_session, TODAY).d2.cohortSize == 1
+
+
+# ── plans / strategies / trading / build ───────────────────────────────────
+
+def test_plans_split_pro_into_paid_and_trial(db_session):
+    _user(db_session, "f@t.co")
+    _user(db_session, "p@t.co", plan="PRO")
+    _user(db_session, "t@t.co", plan="PRO", trial=True)
+    _admin(db_session)
+    assert ov.plans(db_session) == {"FREE": 1, "PRO_PAID": 1, "PRO_TRIAL": 1}
+
+
+def test_strategies_group_by_template_and_enabled(db_session):
+    a = _user(db_session, "a@t.co"); b = _user(db_session, "b@t.co"); adm = _admin(db_session)
+    db_session.add_all([
+        UserStrategy(user_id=a.id, template="ma_trend", symbol="XAUUSD", interval="15m", enabled=True),
+        UserStrategy(user_id=a.id, template="ma_trend", symbol="EURUSD", interval="1h", enabled=True),   # 同人两条算 1
+        UserStrategy(user_id=b.id, template="ma_trend", symbol="XAUUSD", interval="15m", enabled=False),
+        UserStrategy(user_id=b.id, template=None, symbol="XAUUSD", interval="15m", enabled=True),        # 无模板 → custom
+        UserStrategy(user_id=adm.id, template="rsi_reversal", symbol="XAUUSD", interval="15m", enabled=True),
+    ])
+    db_session.commit()
+    rows = {r.template: r for r in ov.strategies(db_session)}
+    assert set(rows) == {"ma_trend", "custom"}
+    assert (rows["ma_trend"].users, rows["ma_trend"].enabledUsers) == (2, 1)
+    assert (rows["custom"].users, rows["custom"].enabledUsers) == (1, 1)
+    assert [r.template for r in ov.strategies(db_session)] == ["ma_trend", "custom"]  # users 降序
+
+
+def test_trading_counts_fills_in_range_with_compare_and_daily(db_session):
+    a = _user(db_session, "a@t.co"); b = _user(db_session, "b@t.co"); adm = _admin(db_session)
+    _fill(db_session, a, date(2026, 9, 2)); _fill(db_session, a, date(2026, 9, 2), status="FAILED")
+    db_session.add(Order(user_id=a.id, client_order_id="c2", symbol="XAUUSD", side="SELL", volume=0.1,
+                         status="FILLED", created_at=_at(date(2026, 9, 2), hour=9)))
+    db_session.commit()
+    _fill(db_session, b, date(2026, 9, 16))
+    _fill(db_session, b, date(2026, 8, 20))      # 对比期
+    _fill(db_session, adm, date(2026, 9, 5))     # 管理员不算
+    t = ov.trading(db_session, SPEC)
+    assert (t.traders.current, t.traders.previous) == (2, 1)
+    assert (t.fills.current, t.fills.previous) == (3, 1)
+    by = {d.date: d.fills for d in t.daily}
+    assert len(t.daily) == 16 and by["2026-09-02"] == 2 and by["2026-09-03"] == 0 and by["2026-09-16"] == 1
+
+
+def test_build_overview_assembles_everything(db_session):
+    _user(db_session, "a@t.co")
+    out = ov.build_overview(db_session, SPEC, TODAY)
+    assert out.range.start == "2026-09-01" and out.range.compareEnd == "2026-08-31" and out.range.days == 16
+    assert out.headline.totalUsers == 1
+    assert len(out.activityDaily) == 16 and len(out.funnel.byWeek) == 8
+    assert out.retention.d30.rate is None
