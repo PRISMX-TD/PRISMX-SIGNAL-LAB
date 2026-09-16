@@ -128,22 +128,32 @@ def get_popup_announcement(
 ):
     """当前该给这个用户弹的那条公告，没有则返回 null。
 
-    四道条件：已发布、开了弹窗、有封面图（弹窗主体就是图）、这个用户既没读过也
-    没按「7 天不再提醒」。读过就不再弹是刻意的——弹窗的目的是把人带到详情页，
-    人已经去过了就没有理由再拦一次。多条候选取最新发布的一条：同时弹两张图没有
-    意义，晚发的那条也更可能是当下在推的活动。
+    四道条件：已发布、开了弹窗、有封面图（弹窗主体就是图）、这个用户既没**打开过
+    详情页**也没按「7 天不再提醒」。打开过就不再弹是刻意的——弹窗的目的是把人带到
+    详情页，人已经去过了就没有理由再拦一次；但「全部已读」不算打开过（见
+    AnnouncementRead.source）。多条候选取最新发布的一条：同时弹两张图没有意义，
+    晚发的那条也更可能是当下在推的活动。
 
     The announcement to pop for this user, or null. Four conditions: published,
     popup enabled, has a cover image (the image *is* the popup), and this user has
-    neither read it nor snoozed it. "Read ⇒ never pop" is deliberate: the popup
-    exists to send people to the detail page, and they have already been. With
+    neither *opened the detail page* nor snoozed it. "Opened ⇒ never pop" is
+    deliberate: the popup exists to send people there and they have been. Pressing
+    mark-all-read does not count as opening it (see AnnouncementRead.source). With
     several candidates the newest wins — two modals at once is pointless, and the
     later one is likelier to be the campaign actually running.
     """
     now = datetime.now(timezone.utc)
-    read_ids = {
+    # 只认 source == "open" 的已读行。按过「全部已读」（read_all）的人并没有看过
+    # 这条公告的内容，那一按是为了清角标，不该顺手把一个还没看过的活动弹窗永久关掉。
+    # Only `open` rows count. Someone who pressed mark-all-read has not seen this
+    # announcement's content — that press was about clearing a badge, and it should
+    # not silently retire a campaign popup they never looked at.
+    opened_ids = {
         r[0] for r in db.query(AnnouncementRead.announcement_id)
-        .filter(AnnouncementRead.user_id == user.id).all()
+        .filter(
+            AnnouncementRead.user_id == user.id,
+            AnnouncementRead.source == "open",
+        ).all()
     }
     snoozed_ids = {
         r[0] for r in db.query(AnnouncementPopupSnooze.announcement_id)
@@ -161,7 +171,7 @@ def get_popup_announcement(
         )
         .all()
     )
-    skip = read_ids | snoozed_ids
+    skip = opened_ids | snoozed_ids
     candidates = [a for a in rows if a.id not in skip]
     if not candidates:
         return None
@@ -230,9 +240,19 @@ def get_announcement(
         .filter(AnnouncementRead.user_id == user.id, AnnouncementRead.announcement_id == a.id)
         .first()
     )
-    if a.published and not already:
-        db.add(AnnouncementRead(user_id=user.id, announcement_id=a.id))
-        db.commit()
+    if a.published:
+        if not already:
+            db.add(AnnouncementRead(user_id=user.id, announcement_id=a.id, source="open"))
+            db.commit()
+        elif already.source != "open":
+            # 先按过「全部已读」、现在真的点进来了。已读状态是一行，不能因为行已经
+            # 存在就把「真读了」这件事丢掉——丢了的话这条公告的弹窗会一直弹下去。
+            # They pressed mark-all-read earlier and have now actually opened it.
+            # Read state is one row, and "actually read" must not be lost just
+            # because a row exists — losing it keeps this announcement's popup
+            # coming back forever.
+            already.source = "open"
+            db.commit()
     return _to_out(a, read=True)
 
 

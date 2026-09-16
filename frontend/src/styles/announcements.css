@@ -422,11 +422,18 @@
 .nb-readall:disabled { opacity: 0.5; cursor: default; }
 
 /* ── 公告弹窗 ── */
-/* 整张图就是内容，所以卡片不加内边距、不加标题栏：任何包边都会把一张为社交媒体
-   裁好的海报框成"网页里的一个区块"。宽度跟着图走，最宽 420px。
-   The image is the content, so the card has no padding and no title bar: any
-   chrome would frame a poster cropped for social media as "a block in a web
-   page". Width follows the image, capped at 420px. */
+/* 这是一张海报，不是一个对话框。第一版做成「图 + 一条分割线 + 一排整宽按钮」，
+   那个形状读起来就是浏览器的 alert()：上下两段等宽对称、按钮像表单提交。现在整张
+   卡就是图，操作浮在图底的渐隐层上，一条分割线都没有；主按钮是自动宽度的胶囊、
+   靠左，免打扰是右侧一行安静的小字——两者重量差开，眼睛才知道先看哪个。
+   海报比例不定，底下垫一层同图的放大模糊副本当底色，竖图左右不再是两条死黑边。
+   This is a poster, not a dialog. The first version was "image + divider + one
+   full-width button", which reads as a browser alert(): two symmetrical bands and
+   a submit button. Now the card *is* the image, the actions float on a bottom
+   gradient with no divider anywhere, the primary action is an auto-width pill on
+   the left and the snooze is quiet text on the right — different weights, so the
+   eye knows what to read first. Poster aspect ratios vary, so a blurred, scaled
+   copy of the same image backs it: a tall image no longer sits between dead bars. */
 .ann-pop-overlay {
   position: fixed;
   inset: 0;
@@ -435,105 +442,212 @@
      Same layer as the order-confirmation scrim (.slide-overlay): they never
      coexist, and 80 already clears the top bar (40) and the bell panel. */
   z-index: 80;
-  background: rgba(9, 9, 11, 0.72);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: rgba(9, 9, 11, 0.74);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   display: grid;
   place-items: center;
-  padding: 24px;
-  animation: fade-in-up var(--dur-base) var(--ease-out) both;
+  padding: 20px;
+  animation: ann-pop-veil-in var(--dur-base) var(--ease-out) both;
 }
 .ann-pop {
   position: relative;
   width: 100%;
-  max-width: 420px;
-  border: 1px solid var(--line-hi);
-  border-radius: 20px;
-  background: var(--surface);
-  overflow: hidden;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
-  animation: pop var(--dur-base) var(--ease-out) both;
+  max-width: 400px;
+  /* 卡片本身不画背景也不裁剪：光晕要溢出到卡外去。可见的那张卡是 .ann-pop-art。
+     The card paints nothing and clips nothing — the halo has to spill past its
+     edges. The visible card is .ann-pop-art. */
+  animation: ann-pop-in 0.52s var(--spring) both;
 }
-.ann-pop-x {
+/* 卡背后一团很淡的品牌色光，缓慢呼吸。不是描边发光——它在卡的下面、糊得看不出
+   形状，只负责让这张卡从背景里浮起来。
+   A faint brand-tinted glow behind the card, breathing slowly. Not an outline
+   glow: it sits behind, blurred past recognition, and only lifts the card off the
+   background. */
+.ann-pop::before {
+  content: "";
   position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border: none;
+  inset: -12% -8%;
+  z-index: -1;
   border-radius: 50%;
-  /* 关闭键压在图上，所以自带底色——海报的右上角可能是亮的也可能是暗的。
-     The close button sits on the image, so it carries its own scrim: a poster's
-     top-right corner can be light or dark. */
-  background: rgba(9, 9, 11, 0.55);
-  backdrop-filter: blur(4px);
-  color: #fff;
-  cursor: pointer;
-  transition: background-color var(--dur-fast) var(--ease-out);
+  background: radial-gradient(58% 55% at 50% 48%, rgba(110, 66, 255, 0.4), transparent 72%);
+  filter: blur(46px);
+  animation: ann-pop-halo 7s var(--ease-in-out) infinite;
+  pointer-events: none;
 }
-.ann-pop-x:hover { background: rgba(9, 9, 11, 0.8); }
-.ann-pop-img {
-  display: block;
-  width: 100%;
-  padding: 0;
-  border: none;
-  background: none;
-  cursor: pointer;
-}
-.ann-pop-img img {
-  display: block;
-  width: 100%;
-  /* 海报比例不定，给一个上限免得竖图把按钮挤出屏幕；contain 而不是 cover，
-     宁可留边也不裁掉文案——被裁的往往正是优惠码那一行。
-     Poster aspect ratios vary; cap the height so a tall image can't push the
-     buttons off-screen. contain rather than cover: letterboxing beats cropping,
-     since what gets cropped is usually the line with the code on it. */
-  max-height: min(62vh, 520px);
-  object-fit: contain;
-  background: var(--bg);
-}
-.ann-pop-foot {
+/* 整张图都可以点。这个容器刻意不可聚焦：键盘用户 Tab 到里面那颗真按钮，走的是
+   同一个动作，不必为鼠标的便利再造一个焦点位。
+   The whole image is clickable. This container is deliberately not focusable:
+   keyboard users tab to the real button inside, which does the same thing — no
+   need to invent a second focus stop for a mouse convenience. */
+.ann-pop-art {
+  position: relative;
+  /* 居中 + 兜底高度：横幅比例的海报（1200×520 这种）在纯 block 下只有一百多像素
+     高，底下那条操作栏几乎盖满画面。给个下限让图居中、上下露出模糊底色，按钮就有
+     自己的地方待着，海报也还看得见。竖图不受影响——它早就高过这个下限了。
+     Centered with a floor height: a banner-shaped poster (1200×520) is barely
+     170px tall as a plain block, and the action bar then covers most of the
+     artwork. The floor centers the image with the blurred wash showing above and
+     below, giving the buttons their own space while the poster stays readable.
+     Tall posters are unaffected — they clear the floor on their own. */
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  border-top: 1px solid var(--line);
+  justify-content: center;
+  min-height: 248px;
+  overflow: hidden;
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #0b0b0f;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 32px 70px -24px rgba(0, 0, 0, 0.8);
+  cursor: pointer;
+}
+.ann-pop-wash {
+  position: absolute;
+  inset: -12%;
+  width: 124%;
+  height: 124%;
+  object-fit: cover;
+  filter: blur(30px) saturate(1.25);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.ann-pop-photo {
+  position: relative;
+  display: block;
+  width: 100%;
+  /* contain 而不是 cover：宁可留边也不裁掉文案——被裁的往往正是优惠码那一行。
+     上限防止竖图把操作条顶出屏幕。
+     contain, not cover: letterboxing beats cropping, since what gets cropped is
+     usually the line with the code on it. The cap keeps a tall poster from
+     pushing the action bar off-screen. */
+  max-height: min(58vh, 480px);
+  object-fit: contain;
+  transition: transform 0.6s var(--ease-out);
+}
+.ann-pop-art:hover .ann-pop-photo { transform: scale(1.035); }
+.ann-pop-veil {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 44%;
+  background: linear-gradient(to top, rgba(6, 6, 9, 0.94) 6%, rgba(6, 6, 9, 0.7) 42%, transparent 100%);
+  pointer-events: none;
+}
+.ann-pop-bar {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  animation: ann-pop-rise 0.42s var(--ease-out) 0.18s both;
 }
 .ann-pop-cta {
-  flex: 1;
-  padding: 9px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 18px;
   border: none;
-  border-radius: 12px;
+  border-radius: 999px;
   background: var(--purple-vivid);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 10px 22px -10px rgba(110, 66, 255, 0.7);
   font-size: 13px;
   font-weight: 600;
   color: #fff;
   cursor: pointer;
-  transition: background-color var(--dur-fast) var(--ease-out);
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
 .ann-pop-cta:hover { background: var(--purple-hi); }
+.ann-pop-cta:active { transform: translateY(1px) scale(0.985); }
+.ann-pop-cta svg { transition: transform var(--dur-base) var(--ease-out); }
+.ann-pop-cta:hover svg { transform: translateX(3px); }
 .ann-pop-snooze {
-  padding: 9px 4px;
+  margin-left: auto;
+  padding: 6px 1px;
   border: none;
+  border-bottom: 1px solid transparent;
   background: none;
   font-size: 12px;
-  color: var(--text-3);
+  color: rgba(255, 255, 255, 0.55);
   cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
 }
-.ann-pop-snooze:hover:not(:disabled) { color: var(--text-2); }
+.ann-pop-snooze:hover:not(:disabled) {
+  color: #fff;
+  border-bottom-color: rgba(255, 255, 255, 0.35);
+}
 .ann-pop-snooze:disabled { opacity: 0.5; cursor: default; }
+.ann-pop-x {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  /* 关闭键压在图上，所以自带底色与一圈 1px 亮边——海报的右上角可能是亮的也可能
+     是暗的，只靠 currentColor 会在一半的图上看不见。
+     The close button sits on the image, so it carries its own scrim and a 1px
+     bright edge: a poster's top-right corner can be light or dark, and
+     currentColor alone disappears on half of them. */
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  background: rgba(10, 10, 14, 0.5);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  animation: ann-pop-rise 0.42s var(--ease-out) 0.26s both;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.ann-pop-x:hover {
+  background: rgba(10, 10, 14, 0.78);
+  color: #fff;
+}
+@keyframes ann-pop-veil-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes ann-pop-in {
+  from { opacity: 0; transform: translateY(24px) scale(0.94) rotate(-1.4deg); }
+  to { opacity: 1; transform: translateY(0) scale(1) rotate(0deg); }
+}
+@keyframes ann-pop-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes ann-pop-halo {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.07); }
+}
 @media (max-width: 639px) {
-  .ann-pop-foot { flex-wrap: wrap; }
-  .ann-pop-cta { flex-basis: 100%; }
-  .ann-pop-snooze { margin: 0 auto; }
+  .ann-pop-bar {
+    left: 14px;
+    right: 14px;
+  }
+  .ann-pop-photo { max-height: min(56vh, 460px); }
 }
 @media (prefers-reduced-motion: reduce) {
   .nb-panel,
   .ann-row,
   .ann-pop-overlay,
-  .ann-pop { animation: none; }
+  .ann-pop,
+  .ann-pop::before,
+  .ann-pop-bar,
+  .ann-pop-x { animation: none; }
+  .ann-pop-art:hover .ann-pop-photo { transform: none; }
 }

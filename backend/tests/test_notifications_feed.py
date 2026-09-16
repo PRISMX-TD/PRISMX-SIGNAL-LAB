@@ -1,15 +1,18 @@
 """站内通知（铃铛面板的「消息」段）、一键已读、公告弹窗。
 
 三件事互相独立，但共用同一条前提：**用户看到的是一个「通知」面板**。所以这里重点
-验的是跨系统的那几处——一键已读必须同时清掉公告与站内通知；弹窗必须同时尊重「读过」
-与「7 天不再提醒」两种状态；工单的站内通知必须与回复同一个事务，不能跟着系统推送
-一起失败。
+验的是跨系统的那几处——一键已读必须同时清掉公告与站内通知，但**不能**顺手把一个还
+没看过的活动弹窗关掉（两种已读在 announcement_reads.source 上分开）；弹窗要同时尊重
+「打开过详情」与「7 天不再提醒」；工单的站内通知必须与回复同一个事务，不能跟着系统
+推送一起失败。
 
 In-app notifications, mark-all-read and the announcement popup. Three separate
 features sharing one premise — the user sees a single "notifications" panel — so
-the cases that matter are the cross-cutting ones: mark-all-read has to clear both
-sides, the popup has to respect both "read" and "snoozed", and a ticket's in-app
-row has to ride the reply's transaction rather than fail with the tray push.
+the cases that matter are the cross-cutting ones: mark-all-read clears both sides
+but must *not* retire a campaign popup nobody looked at (the two kinds of read are
+split by announcement_reads.source), the popup honours both "opened the detail"
+and "snoozed", and a ticket's in-app row rides the reply's transaction rather than
+failing with the tray push.
 """
 from datetime import datetime, timedelta, timezone
 
@@ -23,7 +26,7 @@ from app.models import (
     User,
     UserNotification,
 )
-from app.routers.announcements import get_popup_announcement, snooze_popup
+from app.routers.announcements import get_announcement, get_popup_announcement, snooze_popup
 from app.routers.notifications import mark_all_read, mark_notification_read, notification_feed
 from app.routers.tickets import admin_reply_to_ticket, create_ticket
 from app.schemas import AdminTicketReplyCreate, AnnouncementIn, TicketCreate
@@ -242,6 +245,19 @@ def test_mark_read_cannot_touch_someone_elses_row(db_session):
 # ---------- 一键已读 ----------
 
 
+def test_read_all_never_downgrades_an_opened_row(db_session):
+    """已经真读过的公告，再按一次全部已读不该把 source 打回 read_all——
+    那会让一条读过的公告重新具备弹窗资格。"""
+    u = _user(db_session)
+    a = _ann(db_session, popup=True)
+    get_announcement(a.id, db_session, u)
+
+    mark_all_read(db_session, u)
+
+    assert db_session.query(AnnouncementRead).one().source == "open"
+    assert get_popup_announcement(db_session, u) is None
+
+
 def test_read_all_clears_both_sides(db_session):
     u = _user(db_session)
     db_session.add(UserNotification(user_id=u.id, kind="ticket_reply", text="x"))
@@ -325,13 +341,44 @@ def test_popup_picks_the_newest_candidate(db_session):
     assert got is not None and got.id == newer.id
 
 
-def test_popup_stops_once_read(db_session):
-    """读过就不再弹：弹窗的目的是把人带到详情页，人已经去过了。"""
+def test_popup_stops_once_the_detail_is_opened(db_session):
+    """打开过详情就不再弹：弹窗的目的是把人带过去，人已经去过了。"""
     u = _user(db_session)
     a = _ann(db_session, popup=True)
-    db_session.add(AnnouncementRead(user_id=u.id, announcement_id=a.id))
-    db_session.commit()
 
+    get_announcement(a.id, db_session, u)
+
+    assert db_session.query(AnnouncementRead).one().source == "open"
+    assert get_popup_announcement(db_session, u) is None
+
+
+def test_read_all_does_not_retire_the_popup(db_session):
+    """「全部已读」是为了清角标，不是「我看过了」。按一下不该把一个还没看过的
+    活动弹窗永久关掉——这两种已读在 announcement_reads.source 上是分开的。"""
+    u = _user(db_session)
+    a = _ann(db_session, popup=True)
+
+    out = mark_all_read(db_session, u)
+
+    # 角标确实清了：公告在铃铛/列表里算已读
+    assert out.announcements == 1
+    assert db_session.query(AnnouncementRead).one().source == "read_all"
+    # 但弹窗还在
+    got = get_popup_announcement(db_session, u)
+    assert got is not None and got.id == a.id
+
+
+def test_opening_after_read_all_upgrades_the_row_and_retires_the_popup(db_session):
+    """先按全部已读、后来真的点进去了：已读行只有一行，不能因为行已经存在就把
+    「真读了」丢掉——丢了的话这条公告会一直弹下去。"""
+    u = _user(db_session)
+    a = _ann(db_session, popup=True)
+    mark_all_read(db_session, u)
+
+    get_announcement(a.id, db_session, u)
+
+    rows = db_session.query(AnnouncementRead).all()
+    assert len(rows) == 1 and rows[0].source == "open"
     assert get_popup_announcement(db_session, u) is None
 
 

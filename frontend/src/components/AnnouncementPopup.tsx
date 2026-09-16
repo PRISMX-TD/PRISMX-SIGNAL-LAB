@@ -6,7 +6,9 @@
 //   × —— 这次不看。只记在 sessionStorage，浏览器标签关掉就忘，下次进来还会弹。
 //   7 天不再提醒 —— 记在服务端（POST /announcements/{id}/popup-snooze）。跨设备，
 //     因为同一个人在手机 App 与网页上各按一次才安静，本身就是弹窗最招人烦的形态。
-// 读过（进过详情页）之后后端也不会再返回它——弹窗的目的是把人带过去，人已经去过了。
+// 打开过详情页之后后端也不会再返回它——弹窗的目的是把人带过去，人已经去过了。
+// 注意「全部已读」不算打开过：那一按是为了清角标，不该顺手把一个还没看过的活动
+// 弹窗永久关掉（后端按 announcement_reads.source 区分这两种已读）。
 //
 // Announcement popup: when an admin ticks "show as popup", users get a full-card
 // image that links straight to that announcement's detail page. The image *is* the
@@ -19,6 +21,9 @@
 //     the account across devices: making someone dismiss the same popup once in
 //     the app and again on the web is exactly what makes a popup obnoxious.
 // Opening the detail also retires it: the popup exists to send people there.
+// Mark-all-read does not count as opening — that press clears a badge and must not
+// silently retire a campaign nobody looked at (the backend splits the two kinds of
+// read by announcement_reads.source).
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
@@ -123,32 +128,51 @@ export default function AnnouncementPopup() {
 
   return createPortal(
     <div className="ann-pop-overlay" onClick={close}>
-      <div
-        className="ann-pop"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title || t('announcements.title')}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button type="button" className="ann-pop-x" onClick={close} aria-label={t('common.close')}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
-        <button type="button" className="ann-pop-img" onClick={open}>
+      <div className="ann-pop" role="dialog" aria-modal="true" aria-label={title || t('announcements.title')}>
+        {/* 整张图可点，但这个容器刻意不是 button、也不可聚焦：里面那颗「查看详情」
+            才是真控件，键盘用户 Tab 到它、走同一个动作。做成嵌套 button 既是非法
+            HTML，也会给键盘多出一个什么都不多做的焦点位。
+            The whole image is clickable, but this container is deliberately not a
+            button and not focusable: the "see details" pill inside is the real
+            control and does the same thing. Nesting buttons would be invalid HTML
+            and would hand keyboard users a second focus stop that adds nothing. */}
+        <div className="ann-pop-art" onClick={open}>
+          {/* 同一张图的放大模糊副本当底色（同 URL，走缓存）：海报比例不定，竖图
+              在 contain 下左右本来是两条死黑边。
+              A blurred, scaled copy of the same image as the backing (same URL, so
+              it is cached): poster aspect ratios vary, and a tall one would
+              otherwise sit between two dead black bars under contain. */}
+          <img className="ann-pop-wash" src={data.coverImageUrl} alt="" aria-hidden="true" />
           {/* alt 用公告标题：这张图承载全部内容，读屏用户只有这一句可听。
               alt is the announcement title — the image carries everything, and it
               is all a screen-reader user gets. */}
-          <img src={data.coverImageUrl} alt={title} />
-        </button>
-        <div className="ann-pop-foot">
-          <button type="button" className="ann-pop-cta" onClick={open}>
-            {t('announcements.popupOpen')}
-          </button>
-          <button type="button" className="ann-pop-snooze" onClick={snooze} disabled={busy}>
-            {t('announcements.popupSnooze')}
-          </button>
+          <img className="ann-pop-photo" src={data.coverImageUrl} alt={title} />
+          <span className="ann-pop-veil" aria-hidden="true" />
+          <div className="ann-pop-bar">
+            <button type="button" className="ann-pop-cta" onClick={open}>
+              {t('announcements.popupOpen')}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M5 12h13M12 5l7 7-7 7" />
+              </svg>
+            </button>
+            {/* 免打扰在可点的图里面，点它不该顺带把详情页也打开。
+                The snooze lives inside the clickable image; pressing it must not
+                also open the detail page. */}
+            <button
+              type="button"
+              className="ann-pop-snooze"
+              onClick={(e) => { e.stopPropagation(); void snooze() }}
+              disabled={busy}
+            >
+              {t('announcements.popupSnooze')}
+            </button>
+          </div>
         </div>
+        <button type="button" className="ann-pop-x" onClick={close} aria-label={t('common.close')}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
       </div>
     </div>,
     document.body,

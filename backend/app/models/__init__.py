@@ -1156,8 +1156,23 @@ class Announcement(Base):
 
 
 class AnnouncementRead(Base):
-    """用户 × 公告 的已读标记：打开详情页即写入一行。
-    Per-user read marks: one row written when the detail page is opened."""
+    """用户 × 公告 的已读标记：打开详情页，或按了「全部已读」，即写入一行。
+
+    source 记的是这行怎么来的，因为这两种「已读」在别处含义不同：真的点进去看过
+    （open）才算看过内容，「全部已读」（read_all）只是把角标清掉，人并没有读。
+    公告弹窗据此判定——按一下「全部已读」不该顺手把一个还没看过的活动弹窗永久
+    关掉。先按了全部已读、后来又点进详情的，get_announcement 会把 source 升级成
+    open（已读状态本来就是一行，不能因为已经有行就把「真读了」这件事丢掉）。
+
+    Per-user read marks, written when the detail page is opened or when
+    mark-all-read is pressed. `source` records which, because the two mean
+    different things elsewhere: only `open` means the content was actually seen,
+    while `read_all` merely clears a badge. The announcement popup keys off this
+    — pressing "mark all read" shouldn't silently retire a campaign popup nobody
+    has looked at. Someone who pressed mark-all-read and later opens the detail
+    gets their row upgraded to `open` by get_announcement (read state is one row,
+    and "actually read" must not be lost just because a row already exists).
+    """
     __tablename__ = "announcement_reads"
     __table_args__ = (UniqueConstraint("user_id", "announcement_id", name="uq_announcement_read"),)
 
@@ -1165,6 +1180,9 @@ class AnnouncementRead(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     announcement_id = Column(String, ForeignKey("announcements.id"), nullable=False, index=True)
     read_at = Column(DateTime, default=_now)
+    # open = 打开过详情页；read_all = 只是按了「全部已读」。
+    # open = the detail page was opened; read_all = mark-all-read was pressed.
+    source = Column(String, nullable=False, default="open")
 
 
 class AnnouncementPopupSnooze(Base):

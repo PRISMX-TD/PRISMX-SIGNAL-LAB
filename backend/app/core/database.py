@@ -130,7 +130,10 @@ def _hash_legacy_api_tokens() -> None:
 # rev 22 — 站内通知 + 公告弹窗：新表 user_notifications、announcement_popup_snoozes
 #          （create_all 建），外加 announcements.popup 一列（ADD COLUMN + 回填 FALSE，
 #          理由同 invite_links.grants_trial：留 NULL 行为不错，但管理页开关会渲染成未定态）。
-CURRENT_SCHEMA_REV = 22
+# rev 23 — announcement_reads.source（open = 真打开过详情；read_all = 只按了「全部已读」）。
+#          回填 'open'：这一列加之前，写这张表的只有 get_announcement 一处，存量行
+#          全都是真打开过的。回填成 read_all 会让所有人的历史已读公告重新具备弹窗资格。
+CURRENT_SCHEMA_REV = 23
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -1079,6 +1082,22 @@ def _migrate_columns() -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE announcements ADD COLUMN popup BOOLEAN"))
                 conn.execute(text("UPDATE announcements SET popup = FALSE WHERE popup IS NULL"))
+
+    # rev 23：已读行记来源。这一列加进来之前，写 announcement_reads 的只有「打开
+    # 详情页」一处（rev 22 的一键已读与它同一版发布，生产上还没有 read_all 行），
+    # 所以存量行一律回填 'open'。反过来回填会让所有人历史上读过的公告重新具备弹窗
+    # 资格——一次迁移把整批旧公告变成待弹的弹窗。
+    # rev 23: record where a read row came from. Before this column, the only
+    # writer was "opened the detail page" (mark-all-read shipped in rev 22 and has
+    # no production rows yet), so every existing row backfills to 'open'. The other
+    # way round would re-arm the popup for every announcement anyone ever read —
+    # one migration turning a batch of old announcements into pending popups.
+    if "announcement_reads" in inspector.get_table_names():
+        read_cols = {c["name"] for c in inspector.get_columns("announcement_reads")}
+        if "source" not in read_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE announcement_reads ADD COLUMN source VARCHAR"))
+                conn.execute(text("UPDATE announcement_reads SET source = 'open' WHERE source IS NULL"))
 
     # rev 16：勋章改制。user_badges 加 tier；旧 id 按 badges.LEGACY_BADGE_MAP 并成
     # "新 id + 档位"（同一人同一新 id 只留最高档，先删输家再改赢家——唯一约束

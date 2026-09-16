@@ -517,11 +517,20 @@ def mark_all_read(
     没读过就是没有行。只对 published 的公告补——草稿对用户不存在，给它写已读行
     会让它在将来发布时直接是已读状态，那条公告等于没发过。
 
+    补的行记 source="read_all"，与"真打开过详情页"（source="open"）分开。这一按
+    是为了清角标，不是"我看过了"：公告弹窗只认 open，所以按一下全部已读不会顺手
+    把一个还没看过的活动弹窗永久关掉（见 models.AnnouncementRead）。
+
     Mark everything read: every feed row gets a timestamp, every published
     announcement gets a read row. Announcements use insertion rather than a flag
     because read state *is* a (user, announcement) relation — unread means no row.
     Only published ones: a draft doesn't exist for users, and marking it read now
     would publish it pre-read, i.e. invisibly.
+
+    Rows are stamped source="read_all", distinct from "actually opened the detail"
+    (source="open"). This press clears a badge; it does not mean "I've seen it".
+    The announcement popup only honours `open`, so mark-all-read never silently
+    retires a campaign popup nobody looked at (see models.AnnouncementRead).
     """
     now = datetime.now(timezone.utc)
     feed_n = (
@@ -541,7 +550,7 @@ def mark_all_read(
     }
     missing = published_ids - already
     for aid in missing:
-        db.add(AnnouncementRead(user_id=current_user.id, announcement_id=aid))
+        db.add(AnnouncementRead(user_id=current_user.id, announcement_id=aid, source="read_all"))
     try:
         db.commit()
     except IntegrityError:
@@ -561,7 +570,7 @@ def mark_all_read(
         }
         missing = published_ids - done
         for aid in missing:
-            db.add(AnnouncementRead(user_id=current_user.id, announcement_id=aid))
+            db.add(AnnouncementRead(user_id=current_user.id, announcement_id=aid, source="read_all"))
             try:
                 db.commit()
             except IntegrityError:
