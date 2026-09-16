@@ -193,15 +193,6 @@ export interface AgentLinkUsers {
   offset: number
 }
 
-// 管理后台：基础运营指标 / admin: basic operating metrics
-export interface AdminMetrics {
-  totalUsers: number
-  dau: number
-  wau: number
-  planCounts: Record<string, number>
-  signupsLast7d: Array<{ date: string; count: number }>
-}
-
 // 管理后台：数据看板。全部按 STATS_TZ（北京时间）切天、剔除管理员；
 // "活跃"= 当天打开过任一页面。口径见 docs/superpowers/specs/2026-09-16-admin-overview-dashboard-design.md
 // admin: overview dashboard, day-bucketed in STATS_TZ, admins excluded.

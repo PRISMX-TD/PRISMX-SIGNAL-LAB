@@ -3,7 +3,7 @@
 // Range picker: five preset pills plus a custom from/to with apply.
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { PRESETS, customRangeError, todayIso, type RangeState } from './rangeUtils'
+import { PRESETS, customRangeError, rangeKey, todayIso, type RangeState } from './rangeUtils'
 import type { OverviewRangePreset } from '../../../api/types'
 
 export default function RangePicker({ value, onChange }: { value: RangeState; onChange: (next: RangeState) => void }) {
@@ -25,7 +25,12 @@ export default function RangePicker({ value, onChange }: { value: RangeState; on
     } else {
       setCustomOpen(false)
     }
-  }, [value])
+    // key 字符串才是 range 的稳定身份；value 对象每次渲染都可能是新引用，
+    // 用它当依赖会在无关重渲染时也重跑这个效果。
+    // The key string is the range's stable identity; value is a fresh object on
+    // some re-renders, and depending on it would re-run this effect needlessly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rangeKey(value)])
 
   const error = customOpen && (from || to) ? customRangeError(from, to) : null
   const canApply = customOpen && !!from && !!to && error === null

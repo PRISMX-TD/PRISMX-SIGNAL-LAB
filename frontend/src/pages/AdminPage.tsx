@@ -10,14 +10,14 @@ import { adminApi } from '../api/client'
 import { fmtTime, localizeApiError } from '../api/utils'
 import Select from '../components/Select'
 import { SkeletonLine } from '../components/Skeleton'
-import PageStatsCard from '../components/admin/PageStatsCard'
+import OverviewPanel from '../components/admin/overview/OverviewPanel'
 import PlatformStrategiesPanel from '../components/admin/PlatformStrategiesPanel'
 import AnnouncementsPanel from '../components/admin/AnnouncementsPanel'
 import InviteLinksPanel from '../components/admin/InviteLinksPanel'
 import StrategyWinratePanel from '../components/admin/StrategyWinratePanel'
 import GamificationPanel from '../components/admin/GamificationPanel'
 import CompetitionsPanel from '../components/admin/CompetitionsPanel'
-import type { AdminBrokerSettings, AdminMetrics, AdminPageStats, AdminPricingSettings, AdminEmailGateSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
+import type { AdminBrokerSettings, AdminPricingSettings, AdminEmailGateSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
 const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
@@ -83,11 +83,6 @@ function isDirty(u: AdminUser, d: Draft | undefined): boolean {
   if (!d) return false
   const origExpiry = u.planExpiresAt ? u.planExpiresAt.slice(0, 10) : ''
   return d.role !== u.role || d.plan !== u.plan || d.planExpiresAt !== origExpiry || d.planNote !== (u.planNote ?? '')
-}
-
-const planChipClass: Record<UserPlan, string> = {
-  FREE: 'bg-white/5 text-neutral-400',
-  PRO: 'bg-prism-600/20 text-prism-300',
 }
 
 // ---- 工单管理面板 / Ticket Management Panel ----
@@ -349,13 +344,6 @@ export default function AdminPage() {
   const { t } = useTranslation()
   const [users, setUsers] = useState<AdminUser[]>([])
   const [total, setTotal] = useState(0)
-  const [metrics, setMetrics] = useState<AdminMetrics | null>(null)
-  const [pageStats, setPageStats] = useState<AdminPageStats | null>(null)
-  // 统计窗口天数。切换时只重取这一个接口，不走整页 load()——那会顺带重拉用户
-  // 列表和 7 组配置，只为换个天数拉七八个接口不合适。
-  // Stats window in days. Switching refetches only this endpoint rather than the
-  // whole load(), which would also re-pull the user list and seven config groups.
-  const [pageStatsDays, setPageStatsDays] = useState(7)
   // 当前分类页签。初值读 ?tab=——站内通知要能一步落到工单页签上，而页签本身
   // 是状态不是路由，所以只在首次挂载时取一次；之后点页签不写回地址栏（那会给
   // 每次切页签留一条历史记录，划返回变成在页签之间来回走）。
@@ -448,17 +436,15 @@ export default function AdminPage() {
   const load = async (opts: { q?: string; plan?: string } = {}) => {
     setLoading(true)
     try {
-      // 十个接口分区加载：以前是一个 Promise.all，任一失败整页报错、其余八块
+      // 八个接口分区加载：以前是一个 Promise.all，任一失败整页报错、其余几块
       // 明明拿到了数据也不显示。现在各自成败各自算，失败的块保留旧值（首屏就是
       // 空态），只提示"N 项没加载出来"。其它页面早就吃过这个教训。
-      // Ten endpoints settle independently: a single Promise.all used to fail the
-      // whole page when any one of them failed, hiding data the other eight had
+      // Eight endpoints settle independently: a single Promise.all used to fail the
+      // whole page when any one of them failed, hiding data the others had
       // already returned. Each section now keeps its previous value on failure
       // and one toast says how many didn't load.
       const results = await Promise.allSettled([
         adminApi.listUsers({ q: (opts.q ?? query) || undefined, plan: (opts.plan ?? planFilter) || undefined, limit: 100 }),
-        adminApi.metrics(),
-        adminApi.pageStats(pageStatsDays),
         adminApi.getSettings(),
         adminApi.getPricing(),
         adminApi.getTrial(),
@@ -467,7 +453,7 @@ export default function AdminPage() {
         adminApi.getCandleHistory(),
         adminApi.getStrategySettings(),
       ])
-      const [usersRes, metricsRes, pageStatsRes, settingsRes, pricingRes, trialRes, socialRes, emailGateRes, candleRes, strategyRes] = results
+      const [usersRes, settingsRes, pricingRes, trialRes, socialRes, emailGateRes, candleRes, strategyRes] = results
       let failed = 0
       const ok = <T,>(r: PromiseSettledResult<T>): T | null => {
         if (r.status === 'fulfilled') return r.value
@@ -480,10 +466,6 @@ export default function AdminPage() {
         setTotal(users.total)
         setDrafts(Object.fromEntries(users.users.map((u) => [u.id, toDraft(u)])))
       }
-      const metrics = ok(metricsRes)
-      if (metrics) setMetrics(metrics)
-      const pageStatsVal = ok(pageStatsRes)
-      if (pageStatsVal) setPageStats(pageStatsVal)
       const settings = ok(settingsRes)
       if (settings) {
         setBrokerSettings(settings)
@@ -516,20 +498,6 @@ export default function AdminPage() {
       }
     } finally {
       setLoading(false)
-    }
-  }
-
-  // 切换统计窗口：立刻更新天数（按钮马上有反馈），再单独重取统计接口。
-  // 失败时不清空已有数据——保留旧图比让整块变空白有用，只提示一下。
-  // Switching the stats window: update the day count first so the button responds
-  // immediately, then refetch just this endpoint. On failure keep the existing
-  // data rather than blanking the card; a stale chart beats an empty one.
-  const changePageStatsDays = async (days: number) => {
-    setPageStatsDays(days)
-    try {
-      setPageStats(await adminApi.pageStats(days))
-    } catch (err) {
-      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.loadError'))
     }
   }
 
@@ -752,8 +720,6 @@ export default function AdminPage() {
     }
   }
 
-  const planCounts = metrics?.planCounts ?? {}
-
   return (
     <div>
       <PageHead as="h1" title={t('admin.title')} subtitle={t('admin.subtitle')} />
@@ -787,49 +753,7 @@ export default function AdminPage() {
         ))}
       </div>
 
-      {tab === 'data' && (
-        <>
-      {/* 运营指标 / operating metrics */}
-      <div className="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div className="glass px-4 py-4">
-          <div className="text-xs text-neutral-400">{t('admin.totalUsers')}</div>
-          <div className="num mt-1 font-display text-2xl font-bold text-neutral-50">{metrics?.totalUsers ?? '-'}</div>
-        </div>
-        <div className="glass px-4 py-4">
-          <div className="text-xs text-neutral-400">{t('admin.dau')}</div>
-          <div className="num mt-1 font-display text-2xl font-bold text-up">{metrics?.dau ?? '-'}</div>
-        </div>
-        <div className="glass px-4 py-4">
-          <div className="text-xs text-neutral-400">{t('admin.wau')}</div>
-          <div className="num mt-1 font-display text-2xl font-bold text-prism-300">{metrics?.wau ?? '-'}</div>
-        </div>
-        <div className="glass px-4 py-4">
-          <div className="text-xs text-neutral-400">{t('admin.signupsLast7d')}</div>
-          <div className="num mt-1 font-display text-2xl font-bold text-neutral-50">
-            {metrics?.signupsLast7d.reduce((s, d) => s + d.count, 0) ?? '-'}
-          </div>
-        </div>
-      </div>
-
-      {/* 各等级人数 / plan breakdown */}
-      <div className="glass mb-5 flex flex-wrap items-center gap-2 p-4">
-        <span className="text-xs text-neutral-400">{t('admin.planBreakdown')}</span>
-        {PLAN_OPTIONS.map((p) => (
-          <span key={p} className={`tag ${planChipClass[p]}`}>
-            {p} · {planCounts[p] ?? 0}
-          </span>
-        ))}
-      </div>
-
-      {/* 页面访问统计：按天折线图 + 各页面明细表，见 admin/PageStatsCard.tsx。
-          Page stats: per-day line chart plus per-page table; see admin/PageStatsCard.tsx */}
-      <PageStatsCard
-        stats={pageStats}
-        days={pageStatsDays}
-        onDaysChange={changePageStatsDays}
-      />
-        </>
-      )}
+      {tab === 'data' && <OverviewPanel />}
 
       {tab === 'ops' && (
         <>
