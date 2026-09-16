@@ -430,7 +430,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 3: overview 响应模型 + 头部指标与活跃趋势
 
 **Files:**
-- Modify: `backend/app/schemas.py:294-300`（删 `AdminMetricsOut`，加 overview 模型）
+- Modify: `backend/app/schemas.py:294-300`（在 `AdminMetricsOut` 之后加 overview 模型；`AdminMetricsOut` 本任务**不删**，Task 6 连同路由一起删，保证每个提交后端都能正常 import）
 - Create: `backend/app/services/admin_overview.py`
 - Test: `backend/tests/test_admin_overview.py`
 
@@ -568,7 +568,7 @@ Expected: ERROR，`cannot import name 'admin_overview'`
 
 - [ ] **Step 3: 写 schemas**
 
-在 `backend/app/schemas.py` 把 `class AdminMetricsOut` 整段删掉，原位置换成：
+在 `backend/app/schemas.py` 的 `class AdminMetricsOut` 之后（`class PageViewIn` 之前）插入：
 
 ```python
 # ── 管理后台看板 / admin overview dashboard ──────────────────────────────────
@@ -769,10 +769,10 @@ def _iso(value) -> str:
 Run: `cd backend; $env:PYTHONUTF8=1; python -m pytest tests/test_admin_overview.py -q`
 Expected: 全部 PASS
 
-同时确认删 `AdminMetricsOut` 没有把别处弄坏：
+同时确认后端仍能正常 import：
 
-Run: `cd backend; $env:PYTHONUTF8=1; python -c "import app.routers.admin"`
-Expected: `ImportError: cannot import name 'AdminMetricsOut'` —— **预期报错**，Task 6 会把 `admin.py` 的 import 与 `metrics` 路由一起删掉。本任务先不动 `admin.py`。
+Run: `cd backend; $env:PYTHONUTF8=1; python -c "import app.routers.admin; print('ok')"`
+Expected: `ok`
 
 - [ ] **Step 6: 提交**
 
@@ -1267,9 +1267,9 @@ def test_page_stats_route_uses_same_range_params_and_stats_tz_days(db_session):
 Run: `cd backend; $env:PYTHONUTF8=1; python -m pytest tests/test_admin_overview.py -q -k route`
 Expected: ERROR/FAIL（`admin.py` 目前还 import 不到 `AdminMetricsOut`）
 
-- [ ] **Step 3: 改 `AdminPageStatsOut`**
+- [ ] **Step 3: 改 `schemas.py`：删 `AdminMetricsOut`，改 `AdminPageStatsOut`**
 
-`backend/app/schemas.py` 里：
+删掉 `class AdminMetricsOut(BaseModel): ...` 整段（5 个字段）。`AdminPageStatsOut` 改为：
 
 ```python
 class AdminPageStatsOut(BaseModel):
@@ -1423,11 +1423,12 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Produces（types）：`OverviewRangePreset`, `StatsRangeQuery`, `Compare`, `AdminOverviewRange`, `AdminOverviewHeadline`, `AdminActivityDay`, `AdminFunnelSteps`, `AdminFunnelWeek`, `AdminRetentionPoint`, `AdminStrategyUsage`, `AdminTradingDay`, `AdminOverview`；`AdminPageStats` 增 `start`/`end`
-- Produces（client）：`adminApi.overview(range: StatsRangeQuery)`, `adminApi.pageStats(range: StatsRangeQuery)`；删 `adminApi.metrics`
+- Produces（client）：`adminApi.overview(range: StatsRangeQuery)`, `adminApi.pageStatsByRange(range: StatsRangeQuery)`
+- **本任务只做加法**：`AdminMetrics`、`adminApi.metrics`、旧签名 `adminApi.pageStats(days)` 暂时保留，Task 13 接入新面板时一起删 / 改名，这样每个提交 `tsc -b` 都是绿的。
 
 - [ ] **Step 1: 改 types**
 
-把 `types.ts` 里 `// 管理后台：基础运营指标` 到 `export interface AdminMetrics {...}` 整段替换为：
+在 `types.ts` 里 `export interface AdminMetrics {...}` 之后（保留它）插入：
 
 ```ts
 // 管理后台：数据看板。全部按 STATS_TZ（北京时间）切天、剔除管理员；
@@ -1521,7 +1522,7 @@ export interface AdminPageStats {
 
 - [ ] **Step 2: 改 client**
 
-`client.ts` 顶部 type import 里加 `AdminOverview, StatsRangeQuery`（去掉 `AdminMetrics`）。在 `export const adminApi = {` 之前加：
+`client.ts` 顶部 type import 里加 `AdminOverview, StatsRangeQuery`（`AdminMetrics` 暂留）。在 `export const adminApi = {` 之前加：
 
 ```ts
 // 看板与页面统计共用的时间范围参数：预设传 range=，自定义传 from=&to=。
@@ -1538,37 +1539,35 @@ function statsRangeQs(range: StatsRangeQuery): string {
 }
 ```
 
-把 `pageStats: (days = 7) => request<AdminPageStats>(\`/admin/page-stats?days=${days}\`),` 改为：
+在 `pageStats: (days = 7) => ...` 这一行**之后**加两行（旧的 `pageStats` 与 `metrics` 先留着）：
 
 ```ts
-  pageStats: (range: StatsRangeQuery) => request<AdminPageStats>(`/admin/page-stats${statsRangeQs(range)}`),
+  pageStatsByRange: (range: StatsRangeQuery) => request<AdminPageStats>(`/admin/page-stats${statsRangeQs(range)}`),
   overview: (range: StatsRangeQuery) => request<AdminOverview>(`/admin/overview${statsRangeQs(range)}`),
 ```
 
-删掉 `metrics: () => request<AdminMetrics>('/admin/metrics'),` 这一行。
-
-- [ ] **Step 3: 类型检查（预期先红）**
+- [ ] **Step 3: 类型检查**
 
 Run: `cd frontend; npx tsc -b`
-Expected: 报错集中在 `AdminPage.tsx`（`adminApi.metrics` 不存在、`AdminMetrics` 类型不存在、`pageStats(number)` 签名不符）与 `PageStatsCard.tsx`。这是预期，Task 8–12 会修。**不要为了过检查在这里打补丁。**
+Expected: 0 错误（本任务只做加法）
 
 - [ ] **Step 4: 提交**
 
 ```bash
 git add frontend/src/api/types.ts frontend/src/api/client.ts
-git commit -m "feat(api): 看板类型与 adminApi.overview；pageStats 改 StatsRangeQuery；删 metrics
+git commit -m "feat(api): 看板类型、adminApi.overview 与 pageStatsByRange（旧接口暂留）
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 8: 通用折线 `LineChart.tsx`，`PageStatsCard` 改用并去掉天数开关
+### Task 8: 通用折线 `LineChart.tsx`
 
 **Files:**
 - Create: `frontend/src/components/admin/overview/LineChart.tsx`
-- Modify: `frontend/src/components/admin/PageStatsCard.tsx`
-- Modify: `frontend/src/i18n/zh.json:1455-1459`、`frontend/src/i18n/en.json:1455-1459`
+
+（`PageStatsCard` 改用它、去掉天数开关的改动放在 Task 13，与新面板一起接入，保证中间每个提交 `tsc -b` 都绿。）
 
 **Interfaces:**
 - Produces:
@@ -1583,7 +1582,6 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
   }): JSX.Element
   export const SERIES_COLORS: string[]  // 与旧 LINE_COLORS 相同的 6 色
   ```
-- `PageStatsCard` 新 props：`{ stats: AdminPageStats | null }`（不再接收 `days`/`onDaysChange`）
 
 - [ ] **Step 1: 写 `LineChart.tsx`**（逻辑从 `PageStatsCard` 原样搬，只把"页面 × 指标"换成通用"多条序列"）
 
@@ -1710,139 +1708,16 @@ export default function LineChart({
 }
 ```
 
-- [ ] **Step 2: 改写 `PageStatsCard.tsx`**
-
-整文件替换为（保留原文件头部的"为什么手写 SVG"注释可删，因已搬到 LineChart）：
-
-```tsx
-// 管理后台的页面访问统计卡：按天折线图 + 各页面明细表。
-// 时间范围由父级 OverviewPanel 统一管理，这里不再有自己的天数开关。
-// Admin page-stats card: per-day line chart plus a per-page table. The range
-// is owned by OverviewPanel; this card no longer has its own window picker.
-import { useMemo, useState } from 'react'
-import { useTranslation } from 'react-i18next'
-import type { AdminPageStats } from '../../api/types'
-import LineChart, { SERIES_COLORS } from './overview/LineChart'
-
-// 三个指标量纲差太多，一次只画一个 / three metrics, wildly different scales: one at a time
-type Metric = 'visitors' | 'views' | 'avgSeconds'
-const METRICS: Metric[] = ['visitors', 'views', 'avgSeconds']
-
-// 折线只画访问量前 6 的页面，明细表列全部 / chart the top 6, table lists all
-const MAX_LINES = 6
-
-export function fmtDwell(seconds: number): string {
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  const m = Math.floor(seconds / 60)
-  const s = Math.round(seconds % 60)
-  return s > 0 ? `${m}m ${s}s` : `${m}m`
-}
-
-// 页面名走 i18n；nsSeparator: false 是必须的——带参路由的 key 里有冒号。
-// Page names via i18n; nsSeparator:false is required (parameterised keys contain ':').
-function usePageName() {
-  const { t } = useTranslation()
-  return (path: string) => t(`admin.pageStats.page.${path}`, { defaultValue: path, nsSeparator: false })
-}
-
-export default function PageStatsCard({ stats }: { stats: AdminPageStats | null }) {
-  const { t } = useTranslation()
-  const pageName = usePageName()
-  const [metric, setMetric] = useState<Metric>('visitors')
-
-  const series = useMemo(() => {
-    if (!stats) return []
-    return stats.pages.slice(0, MAX_LINES).map((page, i) => ({
-      key: page.path,
-      label: pageName(page.path),
-      color: SERIES_COLORS[i % SERIES_COLORS.length],
-      values: page.daily.map((d) => d[metric]),
-    }))
-  }, [stats, metric, pageName])
-
-  const hasData = stats != null && stats.pages.length > 0
-  const format = (v: number) => (metric === 'avgSeconds' ? fmtDwell(v) : String(v))
-
-  return (
-    <div className="glass mb-5 p-5">
-      <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-white">{t('admin.pageStats.title')}</h2>
-        {hasData && (
-          <span className="text-xs text-neutral-400">
-            {t('admin.pageStats.summary', { visitors: stats.totalVisitors, views: stats.totalViews, avg: fmtDwell(stats.avgSecondsOverall) })}
-          </span>
-        )}
-      </div>
-      <p className="mb-3 text-xs text-neutral-500">{t('admin.pageStats.privacyHint')}</p>
-
-      {!hasData ? (
-        <p className="py-3 text-sm text-neutral-500">{t('admin.pageStats.empty')}</p>
-      ) : (
-        <>
-          <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label={t('admin.pageStats.metricLabel')}>
-            {METRICS.map((key) => (
-              <button key={key} type="button" role="tab" aria-selected={metric === key} onClick={() => setMetric(key)}
-                className={`rounded-full px-3 py-1 text-xs transition ${metric === key ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40' : 'text-neutral-400 hover:text-neutral-200'}`}>
-                {t(`admin.pageStats.metric.${key}`)}
-              </button>
-            ))}
-          </div>
-
-          <LineChart
-            dates={stats.dates}
-            series={series}
-            format={format}
-            ariaLabel={t(`admin.pageStats.metric.${metric}`)}
-            peakLabel={(v) => t('admin.pageStats.peak', { value: v })}
-          />
-
-          <div className="mt-5 overflow-x-auto">
-            <table className="w-full min-w-[420px] text-xs">
-              <thead>
-                <tr className="text-left text-neutral-500">
-                  <th className="pb-2 font-medium">{t('admin.pageStats.colPage')}</th>
-                  <th className="pb-2 text-right font-medium">{t('admin.pageStats.metric.visitors')}</th>
-                  <th className="pb-2 text-right font-medium">{t('admin.pageStats.metric.views')}</th>
-                  <th className="pb-2 text-right font-medium">{t('admin.pageStats.metric.avgSeconds')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stats.pages.map((p) => (
-                  <tr key={p.path} className="border-t border-white/5">
-                    <td className="py-1.5">
-                      <span className="text-neutral-200">{pageName(p.path)}</span>
-                      <code className="ml-2 text-[10px] text-neutral-500">{p.path}</code>
-                    </td>
-                    <td className="py-1.5 text-right tabular-nums text-neutral-200">{p.visitors}</td>
-                    <td className="py-1.5 text-right tabular-nums text-neutral-200">{p.views}</td>
-                    <td className="py-1.5 text-right tabular-nums text-neutral-400">{fmtDwell(p.avgSeconds)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-```
-
-- [ ] **Step 3: 改 i18n 的 pageStats 文案**
-
-`zh.json` 的 `admin.pageStats`：`"title": "页面访问统计（近 {{days}} 天）"` → `"title": "页面访问统计"`；删掉 `"daysLabel"` 与 `"daysOption"` 两行。
-`en.json` 同样：`"title": "Page views"`；删 `daysLabel`、`daysOption`。
-
-- [ ] **Step 4: 类型检查**
+- [ ] **Step 2: 类型检查**
 
 Run: `cd frontend; npx tsc -b`
-Expected: `PageStatsCard.tsx` 与 `LineChart.tsx` 无错；剩余错误只在 `AdminPage.tsx`（下个任务处理）
+Expected: 0 错误
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 3: 提交**
 
 ```bash
-git add frontend/src/components/admin/overview/LineChart.tsx frontend/src/components/admin/PageStatsCard.tsx frontend/src/i18n/zh.json frontend/src/i18n/en.json
-git commit -m "refactor(admin): 抽出通用 LineChart；页面统计卡去掉自己的天数开关
+git add frontend/src/components/admin/overview/LineChart.tsx
+git commit -m "feat(admin): 看板通用多线 SVG 折线组件 LineChart
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
@@ -2034,7 +1909,7 @@ export default function RangePicker({ value, onChange }: { value: RangeState; on
 - [ ] **Step 4: 类型检查**
 
 Run: `cd frontend; npx tsc -b`
-Expected: 新文件无错；剩余只有 `AdminPage.tsx`
+Expected: 0 错误
 
 - [ ] **Step 5: 提交**
 
@@ -2190,7 +2065,7 @@ export default function PlanBreakdown({ plans }: { plans: Record<string, number>
 - [ ] **Step 5: 类型检查**
 
 Run: `cd frontend; npx tsc -b`
-Expected: 新文件无错
+Expected: 0 错误
 
 - [ ] **Step 6: 提交**
 
@@ -2372,7 +2247,7 @@ export default function RetentionCard({ retention }: { retention: Record<(typeof
 - [ ] **Step 4: 类型检查**
 
 Run: `cd frontend; npx tsc -b`
-Expected: 新文件无错
+Expected: 0 错误
 
 - [ ] **Step 5: 提交**
 
@@ -2542,7 +2417,7 @@ export default function TradingUsageCard({ trading }: { trading: AdminOverview['
 - [ ] **Step 5: 类型检查**
 
 Run: `cd frontend; npx tsc -b`
-Expected: 新文件与 `StrategiesPage.tsx` 无错
+Expected: 0 错误
 
 - [ ] **Step 6: 提交**
 
@@ -2559,8 +2434,10 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Files:**
 - Create: `frontend/src/components/admin/overview/OverviewPanel.tsx`
+- Modify: `frontend/src/components/admin/PageStatsCard.tsx`（改用 `LineChart`，去掉天数开关）
+- Modify: `frontend/src/api/client.ts`、`frontend/src/api/types.ts`（删 `metrics`/`AdminMetrics`/旧 `pageStats(days)`，`pageStatsByRange` 改名 `pageStats`）
 - Modify: `frontend/src/pages/AdminPage.tsx:13,20,352-358,460-486,527-534,790-832`
-- Modify: `zh.json`、`en.json`（`admin.overview.loadFailed`、`.retry`）
+- Modify: `zh.json`、`en.json`（`admin.overview.loadFailed`、`.retry`；`admin.pageStats.title` 改、删 `daysLabel`/`daysOption`）
 
 **Interfaces:**
 - Consumes: 前面所有卡片组件、`rangeUtils`、`adminApi.overview / pageStats`
@@ -2676,7 +2553,132 @@ export default function OverviewPanel() {
 
 `SkeletonLine` 签名为 `{ width?, height?, className?, style? }`（`frontend/src/components/Skeleton.tsx:14`），上面用 `height={96}`。
 
-- [ ] **Step 2: 改 `AdminPage.tsx`**
+- [ ] **Step 2: 改写 `PageStatsCard.tsx`**（新 props `{ stats: AdminPageStats | null }`，不再接收 `days`/`onDaysChange`）
+
+整文件替换为（保留原文件头部的"为什么手写 SVG"注释可删，因已搬到 LineChart）：
+
+```tsx
+// 管理后台的页面访问统计卡：按天折线图 + 各页面明细表。
+// 时间范围由父级 OverviewPanel 统一管理，这里不再有自己的天数开关。
+// Admin page-stats card: per-day line chart plus a per-page table. The range
+// is owned by OverviewPanel; this card no longer has its own window picker.
+import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { AdminPageStats } from '../../api/types'
+import LineChart, { SERIES_COLORS } from './overview/LineChart'
+
+// 三个指标量纲差太多，一次只画一个 / three metrics, wildly different scales: one at a time
+type Metric = 'visitors' | 'views' | 'avgSeconds'
+const METRICS: Metric[] = ['visitors', 'views', 'avgSeconds']
+
+// 折线只画访问量前 6 的页面，明细表列全部 / chart the top 6, table lists all
+const MAX_LINES = 6
+
+export function fmtDwell(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  const m = Math.floor(seconds / 60)
+  const s = Math.round(seconds % 60)
+  return s > 0 ? `${m}m ${s}s` : `${m}m`
+}
+
+// 页面名走 i18n；nsSeparator: false 是必须的——带参路由的 key 里有冒号。
+// Page names via i18n; nsSeparator:false is required (parameterised keys contain ':').
+function usePageName() {
+  const { t } = useTranslation()
+  return (path: string) => t(`admin.pageStats.page.${path}`, { defaultValue: path, nsSeparator: false })
+}
+
+export default function PageStatsCard({ stats }: { stats: AdminPageStats | null }) {
+  const { t } = useTranslation()
+  const pageName = usePageName()
+  const [metric, setMetric] = useState<Metric>('visitors')
+
+  const series = useMemo(() => {
+    if (!stats) return []
+    return stats.pages.slice(0, MAX_LINES).map((page, i) => ({
+      key: page.path,
+      label: pageName(page.path),
+      color: SERIES_COLORS[i % SERIES_COLORS.length],
+      values: page.daily.map((d) => d[metric]),
+    }))
+  }, [stats, metric, pageName])
+
+  const hasData = stats != null && stats.pages.length > 0
+  const format = (v: number) => (metric === 'avgSeconds' ? fmtDwell(v) : String(v))
+
+  return (
+    <div className="glass mb-5 p-5">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold text-white">{t('admin.pageStats.title')}</h2>
+        {hasData && (
+          <span className="text-xs text-neutral-400">
+            {t('admin.pageStats.summary', { visitors: stats.totalVisitors, views: stats.totalViews, avg: fmtDwell(stats.avgSecondsOverall) })}
+          </span>
+        )}
+      </div>
+      <p className="mb-3 text-xs text-neutral-500">{t('admin.pageStats.privacyHint')}</p>
+
+      {!hasData ? (
+        <p className="py-3 text-sm text-neutral-500">{t('admin.pageStats.empty')}</p>
+      ) : (
+        <>
+          <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label={t('admin.pageStats.metricLabel')}>
+            {METRICS.map((key) => (
+              <button key={key} type="button" role="tab" aria-selected={metric === key} onClick={() => setMetric(key)}
+                className={`rounded-full px-3 py-1 text-xs transition ${metric === key ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40' : 'text-neutral-400 hover:text-neutral-200'}`}>
+                {t(`admin.pageStats.metric.${key}`)}
+              </button>
+            ))}
+          </div>
+
+          <LineChart
+            dates={stats.dates}
+            series={series}
+            format={format}
+            ariaLabel={t(`admin.pageStats.metric.${metric}`)}
+            peakLabel={(v) => t('admin.pageStats.peak', { value: v })}
+          />
+
+          <div className="mt-5 overflow-x-auto">
+            <table className="w-full min-w-[420px] text-xs">
+              <thead>
+                <tr className="text-left text-neutral-500">
+                  <th className="pb-2 font-medium">{t('admin.pageStats.colPage')}</th>
+                  <th className="pb-2 text-right font-medium">{t('admin.pageStats.metric.visitors')}</th>
+                  <th className="pb-2 text-right font-medium">{t('admin.pageStats.metric.views')}</th>
+                  <th className="pb-2 text-right font-medium">{t('admin.pageStats.metric.avgSeconds')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.pages.map((p) => (
+                  <tr key={p.path} className="border-t border-white/5">
+                    <td className="py-1.5">
+                      <span className="text-neutral-200">{pageName(p.path)}</span>
+                      <code className="ml-2 text-[10px] text-neutral-500">{p.path}</code>
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums text-neutral-200">{p.visitors}</td>
+                    <td className="py-1.5 text-right tabular-nums text-neutral-200">{p.views}</td>
+                    <td className="py-1.5 text-right tabular-nums text-neutral-400">{fmtDwell(p.avgSeconds)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+```
+
+- [ ] **Step 3: 改 i18n 的 pageStats 文案 + 收尾 API**
+
+`zh.json` 的 `admin.pageStats`：`"title": "页面访问统计（近 {{days}} 天）"` → `"title": "页面访问统计"`；删掉 `"daysLabel"` 与 `"daysOption"` 两行。
+`en.json` 同样：`"title": "Page views"`；删 `daysLabel`、`daysOption`。
+
+`frontend/src/api/client.ts`：删 `metrics: () => request<AdminMetrics>('/admin/metrics'),` 与旧的 `pageStats: (days = 7) => ...`，把 `pageStatsByRange` **改名为 `pageStats`**；type import 里去掉 `AdminMetrics`。`frontend/src/api/types.ts`：删 `export interface AdminMetrics {...}` 及其上方注释。
+
+- [ ] **Step 4: 改 `AdminPage.tsx`**
 
 1. import 区：删 `import PageStatsCard from '../components/admin/PageStatsCard'`；加 `import OverviewPanel from '../components/admin/overview/OverviewPanel'`；type import 里删 `AdminMetrics, AdminPageStats`。
 2. 状态区：删掉
@@ -2702,12 +2704,12 @@ export default function OverviewPanel() {
    ```
 7. 若 `planChipClass` 与 `PLAN_OPTIONS` 在文件其它地方（用户表单的等级下拉、标签）仍被引用则保留；只在不再被引用时删除（`grep -n "planChipClass\|PLAN_OPTIONS" frontend/src/pages/AdminPage.tsx` 确认）。
 
-- [ ] **Step 3: i18n**
+- [ ] **Step 5: i18n**
 
 `zh.json` `admin.overview` 追加：`"loadFailed": "加载失败", "retry": "重试"`
 `en.json`：`"loadFailed": "Failed to load", "retry": "Retry"`
 
-- [ ] **Step 4: 类型检查与构建**
+- [ ] **Step 6: 类型检查与构建**
 
 Run: `cd frontend; npx tsc -b`
 Expected: 0 错误
@@ -2715,7 +2717,7 @@ Expected: 0 错误
 Run: `cd frontend; npm run build`
 Expected: 构建成功
 
-- [ ] **Step 5: 本地预览验证**
+- [ ] **Step 7: 本地预览验证**
 
 按记忆 `local-preview-fixture` 起本地后端（`PYTHONUTF8=1`）与前端预览，用 preview 管理员账号打开管理页「数据看板」：
 - 五个预设逐个点，头部数字与"{{start}} 至 {{end}}"说明随之变化；URL 出现 `?tab=data&range=...`。
@@ -2725,11 +2727,11 @@ Expected: 构建成功
 - 手机宽度（resize 375px）：卡片单列，指标卡两列。
 - 截图留证。
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 8: 提交**
 
 ```bash
-git add frontend/src/components/admin/overview/OverviewPanel.tsx frontend/src/pages/AdminPage.tsx frontend/src/i18n/zh.json frontend/src/i18n/en.json
-git commit -m "feat(admin): 数据看板总装 OverviewPanel 接入管理页；范围写 URL、两个请求各自成败
+git add frontend/src/components/admin/overview/OverviewPanel.tsx frontend/src/components/admin/PageStatsCard.tsx frontend/src/api/client.ts frontend/src/api/types.ts frontend/src/pages/AdminPage.tsx frontend/src/i18n/zh.json frontend/src/i18n/en.json
+git commit -m "feat(admin): 数据看板总装 OverviewPanel 接入管理页；页面统计卡接新范围；删 metrics 接口封装
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
