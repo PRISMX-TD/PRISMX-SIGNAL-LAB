@@ -1452,6 +1452,18 @@
       "indicators": "所用指标（逗号分隔）"
     },
     "staff": "客服",
+    "overview": {
+      "range": {
+        "label": "时间范围",
+        "preset": { "week": "本周", "month": "本月", "last_month": "上个月", "quarter": "本季度", "year": "今年" },
+        "custom": "自定义",
+        "from": "开始日期",
+        "to": "结束日期",
+        "apply": "应用",
+        "shown": "{{start}} 至 {{end}} · 共 {{days}} 天 · 对比 {{compareStart}} 至 {{compareEnd}}",
+        "error": { "order": "开始日期不能晚于结束日期", "future": "结束日期不能是未来", "tooLong": "最多 400 天" }
+      }
+    },
     "pageStats": {
       "title": "页面访问统计（近 {{days}} 天）",
       "daysLabel": "统计天数",

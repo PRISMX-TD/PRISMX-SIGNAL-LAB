@@ -1452,6 +1452,18 @@
       "indicators": "Indicators (comma-separated)"
     },
     "staff": "Staff",
+    "overview": {
+      "range": {
+        "label": "Range",
+        "preset": { "week": "This week", "month": "This month", "last_month": "Last month", "quarter": "This quarter", "year": "This year" },
+        "custom": "Custom",
+        "from": "From",
+        "to": "To",
+        "apply": "Apply",
+        "shown": "{{start}} – {{end}} · {{days}} days · vs {{compareStart}} – {{compareEnd}}",
+        "error": { "order": "Start must not be after end", "future": "End must not be in the future", "tooLong": "At most 400 days" }
+      }
+    },
     "pageStats": {
       "title": "Page views (last {{days}} days)",
       "daysLabel": "Window",
