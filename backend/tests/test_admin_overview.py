@@ -102,12 +102,34 @@ def test_signups_by_stats_tz_day_with_compare(db_session):
 # ── activityDaily ──────────────────────────────────────────────────────────
 
 def test_activity_daily_is_contiguous_and_zero_filled(db_session):
-    a = _user(db_session, "a@t.co", created=date(2026, 9, 2)); _admin(db_session)
+    a = _user(db_session, "a@t.co", created=date(2026, 9, 2)); adm = _admin(db_session)
     _visit(db_session, a, date(2026, 9, 2)); _visit(db_session, a, date(2026, 9, 2), path="/orders")
     _visit(db_session, a, date(2026, 9, 5))
+    # 管理员访问应当被剔除，管理员注册也不计
+    _visit(db_session, adm, date(2026, 9, 3))
     rows = ov.activity_daily(db_session, SPEC)
     assert len(rows) == 16
     by = {r.date: r for r in rows}
     assert (by["2026-09-02"].active, by["2026-09-02"].signups) == (1, 1)
-    assert (by["2026-09-03"].active, by["2026-09-03"].signups) == (0, 0)
+    assert (by["2026-09-03"].active, by["2026-09-03"].signups) == (0, 0)  # admin visit and signup excluded
     assert by["2026-09-05"].active == 1
+    assert by["2026-09-10"].signups == 0  # admin signup on 9/10 excluded
+
+
+def test_signups_boundary_at_stats_tz_midnight(db_session):
+    """注册时间恰好在北京零点的边界条件。
+
+    UTC 8/31 16:00 = Beijing 9/1 00:00:00 → should count in current period (9/1..9/16)
+    UTC 8/31 15:59:59 = Beijing 8/31 23:59:59 → should count in compare period (8/16..8/31)
+    """
+    u1 = User(email="at_midnight@t.co", api_token="t_midnight", created_at=datetime(2026, 8, 31, 16, 0))
+    u2 = User(email="just_before@t.co", api_token="t_before", created_at=datetime(2026, 8, 31, 15, 59, 59))
+    db_session.add_all([u1, u2]); db_session.commit()
+    _admin(db_session)
+
+    h = ov.headline(db_session, SPEC, TODAY)
+    assert (h.signups.current, h.signups.previous) == (1, 1)
+
+    rows = ov.activity_daily(db_session, SPEC)
+    by = {r.date: r for r in rows}
+    assert by["2026-09-01"].signups == 1  # u1 registered at exactly midnight, counts in 9/1
