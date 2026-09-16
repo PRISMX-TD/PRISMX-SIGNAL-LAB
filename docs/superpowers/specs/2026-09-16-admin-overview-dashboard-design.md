@@ -1,7 +1,7 @@
 # 管理页「数据看板」重做 — 设计文档
 
 日期：2026-09-16
-状态：待负责人审阅
+状态：已实施（2026-09-16）
 范围：管理页第一个页签「数据看板」的后端接口、前端卡片、页面访问计时修正
 
 ---
@@ -77,6 +77,8 @@
 
 ### 5.1 `GET /admin/overview?range|from&to`（新增）
 一次返回全部卡片数据。替代并删除 `GET /admin/metrics`。
+
+响应里范围对象字段实际命名为 start / end / compareStart / compareEnd（避开 Python 关键字 from）；查询参数仍是 from / to。
 
 ```
 {
