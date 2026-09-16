@@ -1,3 +1,7 @@
+// 留存：次日 / 7 日 / 30 日三个数字，每个写清楚"算的是哪批人"。
+// cohort 只含"第 N 天已经过去"的注册者，所以三个数字的分母不同，这是正确的。
+// Retention: d2 / d7 / d30, each with its cohort spelled out. Cohorts differ
+// per N by design (only users whose day N has elapsed).
 import { useTranslation } from 'react-i18next'
 import type { AdminRetentionPoint } from '../../../api/types'
 

@@ -1,3 +1,7 @@
+// 转化漏斗：五根横柱（注册 → 绑 MT5 → 下过单 → 开过试用 → 付费）+ 最近 8 周分批表。
+// 五步互相独立、允许跳步，所以后一根不一定比前一根短；柱宽按"占注册人数比例"画。
+// Conversion funnel: five independent steps (skipping allowed), bar width is the
+// share of registered users; plus the last 8 signup weeks.
 import { useTranslation } from 'react-i18next'
 import type { AdminFunnelSteps, AdminFunnelWeek } from '../../../api/types'
 
@@ -21,7 +25,7 @@ export default function FunnelCard({ funnel }: { funnel: { overall: AdminFunnelS
         {STEPS.map((step, i) => {
           const n = overall[step]
           const prev = i > 0 ? overall[STEPS[i - 1]] : null
-          const width = base > 0 ? Math.max(2, (n / base) * 100) : 0
+          const width = base > 0 && n > 0 ? Math.max(2, (n / base) * 100) : 0
           return (
             <li key={step} className="grid grid-cols-[7rem_1fr_5rem] items-center gap-3 text-xs">
               <span className="text-neutral-300">{t(`admin.overview.funnel.step.${step}`)}</span>
