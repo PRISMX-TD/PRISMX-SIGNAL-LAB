@@ -272,6 +272,12 @@ class Settings(BaseSettings):
     # App log level. Set to DEBUG temporarily when diagnosing background loops.
     LOG_LEVEL: str = "INFO"
 
+    # 看板统计切"天"的时区。后台人员在北京时间看数据，"今天"不该从早上 8 点开始。
+    # 只在 services/stats_time.py 读取；其它地方一律用那里的 local_day()/today()。
+    # Timezone for day bucketing on the admin dashboard. Read only by
+    # services/stats_time.py; everything else goes through its helpers.
+    STATS_TZ: str = "Asia/Shanghai"
+
     # 数据库 / Database（默认 SQLite，生产用环境变量 DATABASE_URL 覆盖为 Postgres）
     # Database (defaults to SQLite; override via DATABASE_URL env for Postgres in prod)
     DATABASE_URL: str = "sqlite:///./prismx.db"
