@@ -489,7 +489,7 @@ export default function Layout() {
   // 需要统计的页面。计时起点存在 ref 里而不是 state——它每次路由切换都要重置，
   // 用 state 会多触发一轮渲染，而这个值从不参与渲染。
   //
-  // 两个触发点缺一不可：
+  // 三个触发点缺一不可：
   // - cleanup：路由切换时上报上一个页面（站内跳转走这里）；
   // - pagehide：关标签页/切到别的网站时上报（这种情况 React 不会跑 cleanup，
   //   只靠上面那个会永久丢掉每个会话的最后一个页面）。用 pagehide 而不是
@@ -501,7 +501,7 @@ export default function Layout() {
   // ref, not state — it resets on every navigation and never participates in
   // rendering, so state would only cost an extra render.
   //
-  // Both triggers are required:
+  // All three triggers are required:
   // - cleanup: reports the previous page on in-app navigation;
   // - pagehide: reports when the tab closes or the user leaves the site, where
   //   React never runs cleanup — without it every session would permanently
@@ -520,6 +520,11 @@ export default function Layout() {
     const path = location.pathname
     dwellStartRef.current = Date.now()
     let done = false
+    // 进入页面时若标签页本来就在后台（例如后台里被程序化跳转），这一段不算停留：
+    // 先标 done，等 visibilitychange → visible 时再重置起点、开始计。
+    // If the tab is already hidden when this page mounts, count nothing until it
+    // becomes visible — otherwise the hidden stretch would be reported as dwell.
+    if (document.visibilityState === 'hidden') done = true
 
     const flush = () => {
       if (done) return
