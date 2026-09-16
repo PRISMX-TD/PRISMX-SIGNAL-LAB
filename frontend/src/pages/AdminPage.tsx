@@ -5,7 +5,7 @@ import PageHead from '../components/PageHead'
 import { useTranslation } from 'react-i18next'
 import Switch from '../components/Switch'
 import { useToast } from '../utils/useToast'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { adminApi } from '../api/client'
 import { fmtTime, localizeApiError } from '../api/utils'
 import Select from '../components/Select'
@@ -120,6 +120,23 @@ function AdminTicketsPanel() {
   }
 
   useEffect(() => { load() }, [statusFilter, categoryFilter])
+
+  // 通知里的深链：?ticket=<id> 直接打开那条工单（新工单通知会带上）。参数打开后
+  // 就抹掉，避免在页内退回列表后一刷新又被弹回详情；页签参数由 AdminPage 自己
+  // 消费，这里只动 ticket 这一个键。
+  // Deep link from a notification: ?ticket=<id> opens that thread (the new-ticket
+  // notification carries one). The param is cleared once used, so backing out to
+  // the list and refreshing doesn't bounce back into the detail. The tab param is
+  // consumed by AdminPage itself; only the ticket key is touched here.
+  const [searchParams, setSearchParams] = useSearchParams()
+  useEffect(() => {
+    const id = searchParams.get('ticket')
+    if (!id) return
+    const next = new URLSearchParams(searchParams)
+    next.delete('ticket')
+    setSearchParams(next, { replace: true })
+    adminApi.getTicket(id).then(setDetail).catch(() => {})
+  }, [])
 
   const openDetail = async (id: string) => {
     try {
@@ -339,8 +356,18 @@ export default function AdminPage() {
   // Stats window in days. Switching refetches only this endpoint rather than the
   // whole load(), which would also re-pull the user list and seven config groups.
   const [pageStatsDays, setPageStatsDays] = useState(7)
-  // 当前分类页签 / active section tab
-  const [tab, setTab] = useState<AdminTab>('data')
+  // 当前分类页签。初值读 ?tab=——站内通知要能一步落到工单页签上，而页签本身
+  // 是状态不是路由，所以只在首次挂载时取一次；之后点页签不写回地址栏（那会给
+  // 每次切页签留一条历史记录，划返回变成在页签之间来回走）。
+  // Active section tab. The initial value comes from ?tab= so a notification can
+  // land straight on the tickets tab; tabs are state rather than routes, so it is
+  // read once on mount and never written back — writing it would add a history
+  // entry per tab click and turn "back" into tab-hopping.
+  const [searchParams] = useSearchParams()
+  const [tab, setTab] = useState<AdminTab>(() => {
+    const wanted = searchParams.get('tab')
+    return (ADMIN_TABS as string[]).includes(wanted ?? '') ? (wanted as AdminTab) : 'data'
+  })
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
   const [planFilter, setPlanFilter] = useState('')

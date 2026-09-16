@@ -6,7 +6,8 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import PageHead from '../components/PageHead'
-import { announcementApi } from '../api/client'
+import { announcementApi, notificationApi } from '../api/client'
+import { useLive } from '../store/live'
 import { localizeApiError, parseTime } from '../api/utils'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
 import type { Announcement } from '../api/types'
@@ -26,6 +27,36 @@ export default function AnnouncementsPage() {
   const [items, setItems] = useState<Announcement[] | null>(null)
   const [unread, setUnread] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [readingAll, setReadingAll] = useState(false)
+  const { refreshNotifications } = useLive()
+
+  // 一键已读与铃铛面板里那颗按钮是同一个接口：站内通知与已发布公告一起清。
+  // 这一页只看得见公告，但用户按的是「全部已读」，清一半会让铃铛角标还挂着数字。
+  // 乐观更新，失败就把列表拉回来。
+  // Same endpoint as the bell's button: it clears the feed and published
+  // announcements together. This page only shows announcements, but the user
+  // pressed "mark all read" — clearing half would leave a number on the bell.
+  // Optimistic, with a refetch on failure.
+  const markAllRead = async () => {
+    if (readingAll) return
+    setReadingAll(true)
+    const before = items
+    setUnread(0)
+    setItems((prev) => (prev ? prev.map((a) => ({ ...a, read: true })) : prev))
+    try {
+      await notificationApi.readAll()
+      // 这一按同时清掉了站内通知，铃铛得知道——不然它的角标会继续挂着一个
+      // 服务端已经不存在的数字。/ The same press cleared the feed; tell the bell,
+      // or its badge keeps showing a number the server no longer has.
+      refreshNotifications()
+    } catch (err: unknown) {
+      setItems(before)
+      announcementApi.list().then((res) => { setItems(res.items); setUnread(res.unreadCount) }).catch(() => {})
+      setError(localizeApiError(err instanceof Error ? err.message : String(err)))
+    } finally {
+      setReadingAll(false)
+    }
+  }
 
   useEffect(() => {
     let alive = true
@@ -50,6 +81,11 @@ export default function AnnouncementsPage() {
         count={unread > 0 ? unread : null}
         countUnit={t('announcements.unread')}
         subtitle={t('announcements.subtitle')}
+        actions={unread > 0 ? (
+          <button type="button" className="btn-ghost px-3 py-1.5 text-xs" onClick={markAllRead} disabled={readingAll}>
+            {t('notifPanel.markAllRead')}
+          </button>
+        ) : undefined}
       />
       {error && <div className="sup-msg err" role="alert">{error}</div>}
 

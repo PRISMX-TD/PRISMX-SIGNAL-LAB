@@ -17,6 +17,7 @@ import NotificationBell from './NotificationBell'
 import UserMenu from './UserMenu'
 import AuroraBackground from './AuroraBackground'
 import ConfirmModal from './ConfirmModal'
+import AnnouncementPopup from './AnnouncementPopup'
 import { useBackToClose } from '../utils/useBackToClose'
 import { reportPageView } from '../utils/pageTracking'
 
@@ -910,6 +911,8 @@ export default function Layout() {
             onCancel={() => setConfirmLogout(false)}
           />
         )}
+
+        <AnnouncementPopup />
       </div>
     </LiveProvider>
   )

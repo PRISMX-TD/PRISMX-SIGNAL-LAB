@@ -2,11 +2,17 @@
   "notifPanel": {
     "title": "Notifications",
     "unread": "unread",
+    "messages": "Messages",
+    "markAllRead": "Mark all read",
     "announcements": "Announcements",
     "allAnnouncements": "All announcements",
     "noAnnouncements": "No announcements yet",
     "push": "Push",
     "fullSettings": "Full settings"
+  },
+  "notifFeed": {
+    "ticket_reply": "New reply on your ticket",
+    "ticket_new": "New ticket to handle"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -1376,6 +1382,10 @@
       "publishedLabel": "Published (visible to users)",
       "notifyLabel": "Push a notification on publish",
       "notifyHint": "Sends one Web Push to users with notifications on; only when this save turns a draft into a published post.",
+      "popupLabel": "Show as popup",
+      "popupHint": "Once published, users arriving on the site see this cover image as a popup that opens the announcement. It stops once they read it or choose \"don't remind me for 7 days\".",
+      "popupNeedsCover": "Upload a cover image first — the popup is that image.",
+      "popupTag": "Popup",
       "translateToEn": "Translate to English",
       "translateToZh": "Translate to Chinese",
       "translating": "Translating…",
@@ -2131,6 +2141,8 @@
     "emptyHint": "New announcements appear here and in the bell at the top.",
     "pinned": "Pinned",
     "unread": "unread",
+    "popupOpen": "See details",
+    "popupSnooze": "Don't remind me for 7 days",
     "publishedAt": "Published",
     "back": "All announcements",
     "notFound": "This announcement doesn't exist or was taken down",

@@ -396,7 +396,144 @@
   .ann-skel,
   .ann-empty { padding-left: 20px; padding-right: 20px; }
 }
+
+/* ── 铃铛面板：一键已读 ── */
+/* 靠右、弱对比：它是面板里的第三顺位动作（先看消息、再看公告，最后才是"都清掉"），
+   做成和标题同级的按钮会让人先看见清空再看见内容。
+   Right-aligned and low-contrast: it is the panel's third action (read the
+   messages, scan the announcements, then clear), and a title-weight button would
+   have people see "clear" before they see anything worth clearing. */
+.nb-readall {
+  margin-left: auto;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.nb-readall:hover:not(:disabled) {
+  color: #fff;
+  border-color: var(--line-hi);
+}
+.nb-readall:disabled { opacity: 0.5; cursor: default; }
+
+/* ── 公告弹窗 ── */
+/* 整张图就是内容，所以卡片不加内边距、不加标题栏：任何包边都会把一张为社交媒体
+   裁好的海报框成"网页里的一个区块"。宽度跟着图走，最宽 420px。
+   The image is the content, so the card has no padding and no title bar: any
+   chrome would frame a poster cropped for social media as "a block in a web
+   page". Width follows the image, capped at 420px. */
+.ann-pop-overlay {
+  position: fixed;
+  inset: 0;
+  /* 80 与下单确认弹窗（.slide-overlay）同层：两者不会同时出现，而 80 已经在
+     顶栏（40）与铃铛面板之上。
+     Same layer as the order-confirmation scrim (.slide-overlay): they never
+     coexist, and 80 already clears the top bar (40) and the bell panel. */
+  z-index: 80;
+  background: rgba(9, 9, 11, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  animation: fade-in-up var(--dur-base) var(--ease-out) both;
+}
+.ann-pop {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  border: 1px solid var(--line-hi);
+  border-radius: 20px;
+  background: var(--surface);
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  animation: pop var(--dur-base) var(--ease-out) both;
+}
+.ann-pop-x {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 50%;
+  /* 关闭键压在图上，所以自带底色——海报的右上角可能是亮的也可能是暗的。
+     The close button sits on the image, so it carries its own scrim: a poster's
+     top-right corner can be light or dark. */
+  background: rgba(9, 9, 11, 0.55);
+  backdrop-filter: blur(4px);
+  color: #fff;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.ann-pop-x:hover { background: rgba(9, 9, 11, 0.8); }
+.ann-pop-img {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+.ann-pop-img img {
+  display: block;
+  width: 100%;
+  /* 海报比例不定，给一个上限免得竖图把按钮挤出屏幕；contain 而不是 cover，
+     宁可留边也不裁掉文案——被裁的往往正是优惠码那一行。
+     Poster aspect ratios vary; cap the height so a tall image can't push the
+     buttons off-screen. contain rather than cover: letterboxing beats cropping,
+     since what gets cropped is usually the line with the code on it. */
+  max-height: min(62vh, 520px);
+  object-fit: contain;
+  background: var(--bg);
+}
+.ann-pop-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--line);
+}
+.ann-pop-cta {
+  flex: 1;
+  padding: 9px 14px;
+  border: none;
+  border-radius: 12px;
+  background: var(--purple-vivid);
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.ann-pop-cta:hover { background: var(--purple-hi); }
+.ann-pop-snooze {
+  padding: 9px 4px;
+  border: none;
+  background: none;
+  font-size: 12px;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.ann-pop-snooze:hover:not(:disabled) { color: var(--text-2); }
+.ann-pop-snooze:disabled { opacity: 0.5; cursor: default; }
+@media (max-width: 639px) {
+  .ann-pop-foot { flex-wrap: wrap; }
+  .ann-pop-cta { flex-basis: 100%; }
+  .ann-pop-snooze { margin: 0 auto; }
+}
 @media (prefers-reduced-motion: reduce) {
   .nb-panel,
-  .ann-row { animation: none; }
+  .ann-row,
+  .ann-pop-overlay,
+  .ann-pop { animation: none; }
 }

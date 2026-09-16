@@ -1,21 +1,28 @@
-// 顶栏通知铃铛：2026-09-08 重做。面板上段是最近的公告（账本行，未读点 / 置顶 ｜
-// 标题与摘要 ｜ 日期，点进详情页），下段仍是信号推送的主开关 + 「完整设置」入口，
-// 开关逻辑原样保留。角标：有未读公告显示紫色数字；没有未读时才退回推送状态点
-// （琥珀 = 需要处理）。样式在 styles/announcements.css（.nb-*）。
-// 公告列表在面板打开时与收到 ANNOUNCEMENT_NEW 广播（useLive().announcementTick）时重拉。
-// Top-bar bell, redone 2026-09-08. The panel's upper section lists recent
-// announcements as ledger rows (unread dot / pinned | title and summary | date)
-// linking to the detail page; the lower section keeps the push master switch and
-// the full-settings link, logic unchanged. Badge: a violet unread count wins; with
+// 顶栏通知铃铛：2026-09-08 重做，2026-09-16 加入「消息」段与一键已读。
+// 面板三段：上段是站内通知（发生在你身上的事——工单有人回了；管理员还会收到新工单），
+// 中段是最近的公告（账本行，未读点 / 置顶 ｜ 标题与摘要 ｜ 日期，点进详情页），
+// 下段仍是信号推送的主开关 + 「完整设置」入口，开关逻辑原样保留。
+// 角标：有未读（通知 + 公告）显示紫色数字；没有未读时才退回推送状态点（琥珀 = 需要处理）。
+// 样式在 styles/announcements.css（.nb-*）。
+// 两份列表在面板打开时重拉，另外各自跟着自己的 WS 计数器走：公告是广播、站内通知
+// 是点对点，合用一个计数器会让每条公告都白白触发一次 feed 重拉。
+// Top-bar bell, redone 2026-09-08; "messages" section and mark-all-read added
+// 2026-09-16. Three sections: in-app notifications (things that happened to you —
+// a reply on your ticket; admins also get new tickets), recent announcements as
+// ledger rows (unread dot / pinned | title and summary | date) linking to the
+// detail page, and the push master switch plus full-settings link, logic
+// unchanged. Badge: a violet unread count (feed + announcements) wins; with
 // nothing unread the push status dot shows (amber = needs attention). Styled by
-// styles/announcements.css (.nb-*). The list refetches when the panel opens and on
-// every ANNOUNCEMENT_NEW broadcast (useLive().announcementTick).
+// styles/announcements.css (.nb-*). Both lists refetch when the panel opens and
+// each follows its own WS counter — announcements broadcast, notifications are
+// point-to-point, so one shared counter would refetch the feed for every
+// announcement.
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
 import { announcementApi, notificationApi } from "../api/client"
 import { parseTime } from "../api/utils"
-import type { Announcement } from "../api/types"
+import type { Announcement, NotificationFeedItem } from "../api/types"
 import { useLive } from "../store/live"
 import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
 import { disableNotifications, enableNotifications, ENABLE_ERROR_KEYS, NotifEnableError } from "../utils/notifications"
@@ -24,6 +31,7 @@ import Switch from "./Switch"
 
 type Status = "off" | "on" | "attention"
 const PANEL_ITEMS = 5
+const PANEL_MESSAGES = 4
 
 function fmtDay(iso: string | null): string {
   const d = iso ? parseTime(iso) : null
@@ -35,7 +43,7 @@ function fmtDay(iso: string | null): string {
 export default function NotificationBell() {
   const { t, i18n } = useTranslation()
   const isZh = i18n.language !== "en"
-  const { announcementTick } = useLive()
+  const { announcementTick, notificationTick } = useLive()
   const [open, setOpen] = useState(false)
   // 弹层不是全屏遮罩，理论上打开时还能点穿到别的导航链接——useBackToClose
   // 内部已经对"打开期间发生了别的真实导航"这种情况做了防护（不会误把那次
@@ -53,6 +61,9 @@ export default function NotificationBell() {
   const [note, setNote] = useState<string | null>(null)
   const [anns, setAnns] = useState<Announcement[] | null>(null)
   const [unread, setUnread] = useState(0)
+  const [feed, setFeed] = useState<NotificationFeedItem[]>([])
+  const [feedUnread, setFeedUnread] = useState(0)
+  const [readingAll, setReadingAll] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
 
   const refresh = () => {
@@ -71,6 +82,15 @@ export default function NotificationBell() {
       })
       .catch(() => setAnns((prev) => prev ?? []))
   }
+  const loadFeed = () => {
+    notificationApi
+      .feed(PANEL_MESSAGES)
+      .then((res) => {
+        setFeed(res.items)
+        setFeedUnread(res.unreadCount)
+      })
+      .catch(() => {})
+  }
 
   useEffect(() => {
     refresh()
@@ -82,7 +102,13 @@ export default function NotificationBell() {
     loadAnns()
   }, [announcementTick])
   useEffect(() => {
-    if (open) loadAnns()
+    loadFeed()
+  }, [notificationTick])
+  useEffect(() => {
+    if (open) {
+      loadAnns()
+      loadFeed()
+    }
   }, [open])
 
   // 面板打开时：点击外部关闭 / close on outside click while the panel is open
@@ -141,8 +167,43 @@ export default function NotificationBell() {
     }
   }
 
+  // 一键已读：先乐观地把面板清干净，再落库。失败就把两份列表重拉回来——
+  // 让界面短暂说了假话，好过让用户对着一个点了没反应的按钮再点第二次。
+  // Mark-all-read: clear the panel optimistically, then persist. On failure both
+  // lists are refetched — a UI that briefly lied beats a button that looks dead
+  // and gets pressed again.
+  async function handleReadAll() {
+    if (readingAll) return
+    setReadingAll(true)
+    setUnread(0)
+    setFeedUnread(0)
+    setAnns((prev) => (prev ? prev.map((a) => ({ ...a, read: true })) : prev))
+    setFeed((prev) => prev.map((n) => ({ ...n, read: true })))
+    try {
+      await notificationApi.readAll()
+    } catch {
+      loadAnns()
+      loadFeed()
+    } finally {
+      setReadingAll(false)
+    }
+  }
+
+  // 点开一条通知即已读。不等接口返回、也不处理失败：用户已经在跳页了，
+  // 下次拉 feed 时以服务端为准。
+  // Following a notification marks it read. Not awaited and failures are ignored:
+  // the user is already navigating away, and the next feed fetch is authoritative.
+  const followFeedItem = (item: NotificationFeedItem) => {
+    setOpen(false)
+    if (item.read) return
+    setFeed((prev) => prev.map((n) => (n.id === item.id ? { ...n, read: true } : n)))
+    setFeedUnread((n) => Math.max(0, n - 1))
+    void notificationApi.markFeedRead(item.id).catch(() => {})
+  }
+
   const pick = (zh: string, en: string) => (isZh ? zh || en : en || zh)
   const shown = (anns ?? []).slice(0, PANEL_ITEMS)
+  const totalUnread = unread + feedUnread
 
   return (
     <div ref={rootRef} className="nb">
@@ -157,8 +218,8 @@ export default function NotificationBell() {
           <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
           <path d="M13.73 21a2 2 0 0 1-3.46 0" />
         </svg>
-        {unread > 0 ? (
-          <span className="nb-count num">{unread > 9 ? "9+" : unread}</span>
+        {totalUnread > 0 ? (
+          <span className="nb-count num">{totalUnread > 9 ? "9+" : totalUnread}</span>
         ) : (
           status !== "off" && <i className="nb-dot" aria-hidden="true" />
         )}
@@ -168,13 +229,43 @@ export default function NotificationBell() {
         <div className="card glass nb-panel" role="dialog" aria-label={t("notifPanel.title")}>
           <div className="nb-head">
             <h3>{t("notifPanel.title")}</h3>
-            {unread > 0 && (
+            {totalUnread > 0 && (
               <>
-                <b className="num">{unread}</b>
+                <b className="num">{totalUnread}</b>
                 <span>{t("notifPanel.unread")}</span>
               </>
             )}
+            {totalUnread > 0 && (
+              <button type="button" className="nb-readall" onClick={handleReadAll} disabled={readingAll}>
+                {t("notifPanel.markAllRead")}
+              </button>
+            )}
           </div>
+
+          {feed.length > 0 && (
+            <section aria-label={t("notifPanel.messages")}>
+              <div className="nb-sec-head">
+                <span className="cap">{t("notifPanel.messages")}</span>
+              </div>
+              {feed.map((n) => (
+                <Link
+                  key={n.id}
+                  to={n.link || "/support"}
+                  onClick={() => followFeedItem(n)}
+                  className={`nb-ann${n.read ? "" : " unread"}`}
+                >
+                  <i className="nb-ann-dot" aria-hidden="true" />
+                  <span className="nb-ann-main">
+                    <span className="nb-ann-title">
+                      <b>{t(`notifFeed.${n.kind}`)}</b>
+                    </span>
+                    {n.text && <span className="nb-ann-sum">{n.text}</span>}
+                  </span>
+                  <time className="num" dateTime={n.createdAt}>{fmtDay(n.createdAt)}</time>
+                </Link>
+              ))}
+            </section>
+          )}
 
           <section aria-label={t("notifPanel.announcements")}>
             <div className="nb-sec-head">

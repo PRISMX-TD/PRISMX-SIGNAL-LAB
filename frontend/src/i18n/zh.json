@@ -2,11 +2,17 @@
   "notifPanel": {
     "title": "通知",
     "unread": "未读",
+    "messages": "消息",
+    "markAllRead": "全部已读",
     "announcements": "公告",
     "allAnnouncements": "全部公告",
     "noAnnouncements": "暂无公告",
     "push": "推送",
     "fullSettings": "完整设置"
+  },
+  "notifFeed": {
+    "ticket_reply": "工单有新回复",
+    "ticket_new": "有新工单待处理"
   },
   "nav": {
     "dashboard": "仪表盘",
@@ -1376,6 +1382,10 @@
       "publishedLabel": "发布（对用户可见）",
       "notifyLabel": "发布时推送通知",
       "notifyHint": "给开启了通知的用户发一条 Web Push，只在本次由草稿变为发布时生效。",
+      "popupLabel": "弹窗展示",
+      "popupHint": "发布后用户进站时会看到这张封面图的弹窗，点图直接进本条公告。用户读过、或按了「7 天不再提醒」之后就不再弹。",
+      "popupNeedsCover": "先上传封面图才能开启弹窗——弹窗展示的就是这张图。",
+      "popupTag": "弹窗",
       "translateToEn": "一键翻译成英文",
       "translateToZh": "一键翻译成中文",
       "translating": "翻译中…",
@@ -2129,6 +2139,8 @@
     "emptyHint": "有新公告时会在这里和顶栏的铃铛里出现。",
     "pinned": "置顶",
     "unread": "未读",
+    "popupOpen": "查看详情",
+    "popupSnooze": "7 天内不再提醒",
     "publishedAt": "发布于",
     "back": "全部公告",
     "notFound": "公告不存在或已下线",

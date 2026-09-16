@@ -1,12 +1,20 @@
 // 客服工单：列表 → 表单 → 详情对话，三个视图由 view 状态切换（不走路由）。
 // 2026-09-08 视觉重做，数据流与接口调用不变；样式在 styles/support.css（.sup-*）。
+// 例外是 ?ticket=<id>：站内通知「工单有新回复」要能一步落到那条工单上，而视图
+// 是状态不是路由，所以进页时读一次查询参数把对应工单打开，随即把参数从地址栏
+// 抹掉（replace，不留历史记录）——否则用户在页内退回列表后一刷新又被弹回详情。
 // Support tickets: list → form → thread, switched by the `view` state (not routes).
 // Relaid 2026-09-08 with the data flow and API calls unchanged; styled by
-// styles/support.css (.sup-*).
+// styles/support.css (.sup-*). One exception: ?ticket=<id>, so the "new reply on
+// your ticket" notification can land on that thread in one step. Views are state
+// rather than routes, so the param is read once on entry and then stripped from
+// the URL (replace, no history entry) — otherwise backing out to the list and
+// refreshing would bounce the user into the thread again.
 import { useEffect, useState, type FormEvent } from 'react'
 import PageHead from '../components/PageHead'
 import SocialLinks from '../components/SocialLinks'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router-dom'
 import { ticketApi } from '../api/client'
 import Select from '../components/Select'
 import { parseTime } from '../api/utils'
@@ -104,6 +112,19 @@ export default function SupportPage() {
   }
 
   useEffect(() => { loadTickets() }, [])
+
+  // 通知里的深链：?ticket=<id> 直接打开那条工单。取不到（被删、不是自己的）就
+  // 静静留在列表——从通知点进来发现"工单不存在"的红条没有任何用处。
+  // Deep link from a notification: ?ticket=<id> opens that thread. A miss
+  // (deleted, someone else's) quietly leaves the list up — arriving from a
+  // notification onto a red "ticket not found" banner helps nobody.
+  const [searchParams, setSearchParams] = useSearchParams()
+  useEffect(() => {
+    const id = searchParams.get('ticket')
+    if (!id) return
+    setSearchParams(new URLSearchParams(), { replace: true })
+    ticketApi.get(id).then((ticket) => setView({ ticket })).catch(() => {})
+  }, [])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()

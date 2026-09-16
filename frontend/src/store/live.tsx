@@ -71,6 +71,20 @@ interface LiveContextValue {
   // 新公告发布的计数器：每收到一条 ANNOUNCEMENT_NEW 加一，铃铛据此重新拉列表。
   // Bumps on every ANNOUNCEMENT_NEW so the bell refetches its list.
   announcementTick: number
+  // 站内通知的同款计数器。与公告分开而不是共用一个：公告是广播给所有人的，
+  // 站内通知只发给一个人，合并会让每条公告都白白触发一次 feed 重拉。
+  // Same idea for in-app notifications, kept separate from announcementTick:
+  // announcements are broadcast to everyone while a notification targets one
+  // user, so sharing a counter would refetch the feed on every announcement.
+  notificationTick: number
+  // 本页自己改了通知的已读状态后调用它（一键已读就走这条），把两个计数器一起
+  // 推一格，让铃铛重拉。没有它的话，在公告页按「全部已读」之后铃铛角标还挂着
+  // 数字，直到下一次打开面板才对得上——服务端早就清了，界面在说假话。
+  // Call after this page changed read state itself (mark-all-read does), bumping
+  // both counters so the bell refetches. Without it, pressing "mark all read" on
+  // the announcements page leaves a number on the bell until the panel is next
+  // opened: the server is already clear and the UI is lying.
+  refreshNotifications: () => void
 }
 
 const LiveContext = createContext<LiveContextValue | null>(null)
@@ -205,6 +219,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [backendUnreachable, setBackendUnreachable] = useState(false)
   const [closedTradeTick, setClosedTradeTick] = useState(0)
   const [announcementTick, setAnnouncementTick] = useState(0)
+  const [notificationTick, setNotificationTick] = useState(0)
+  const refreshNotifications = useCallback(() => {
+    setAnnouncementTick((n) => n + 1)
+    setNotificationTick((n) => n + 1)
+  }, [])
 
   const refreshAll = useCallback(async () => {
     // 关键请求单独包一层，除了拿数据还要拿到「这条到底成没成」。其余请求
@@ -381,6 +400,13 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         break
       case 'ANNOUNCEMENT_NEW':
         setAnnouncementTick((n) => n + 1)
+        break
+      case 'NOTIFICATION_NEW':
+        // 帧里不带内容，只是「去重拉一次」的信号——渲染字段由 /notifications/feed
+        // 一处提供，不在 WS 帧里再抄一份。
+        // The frame carries no payload: it's a "refetch now" signal, keeping the
+        // render fields in /notifications/feed alone rather than duplicated here.
+        setNotificationTick((n) => n + 1)
         break
       case 'PUSH_FALLBACK':
         // 收不到推送的设备（大陆连不上 FCM）才会真的弹——判定全在后端，这台设备
@@ -560,11 +586,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     () => ({
       signals, strategySignals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
       anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected, backendUnreachable,
-      closedTradeTick, announcementTick,
+      closedTradeTick, announcementTick, notificationTick, refreshNotifications,
     }),
     [signals, strategySignals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
      anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected, backendUnreachable,
-     closedTradeTick, announcementTick]
+     closedTradeTick, announcementTick, notificationTick, refreshNotifications]
   )
 
   return (

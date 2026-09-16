@@ -1,18 +1,41 @@
-"""通知路由：偏好、指标类别列表、推送订阅、VAPID 公钥。
-Notification router: prefs, indicator categories, push subscriptions, VAPID key."""
+"""通知路由：偏好、指标类别列表、推送订阅、VAPID 公钥，以及铃铛面板里的站内通知。
+
+站内通知（feed）与公告是铃铛面板的两段：公告是发给所有人的内容（自己一张表、
+自带详情页），feed 是发生在这个用户身上的事（目前只有工单回复）。「一键已读」
+要同时清掉两边，所以 read-all 放在这里而不是公告路由里——按下按钮的人看到的是
+一个「通知」面板，不是两套东西。
+
+Notification router: prefs, indicator categories, push subscriptions, the VAPID
+key, and the bell panel's in-app feed. The panel has two sections: announcements
+(platform-wide content with its own table and detail pages) and the feed (things
+that happened to this user — currently only ticket replies). Mark-all-read has to
+clear both, which is why it lives here rather than in the announcements router:
+what the user pressed the button on is one "notifications" panel, not two systems.
+"""
 import json
 import re
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter
-from app.models import NotificationPref, PushSubscription, Signal, User
+from app.models import (
+    Announcement,
+    AnnouncementRead,
+    NotificationPref,
+    PushSubscription,
+    Signal,
+    User,
+    UserNotification,
+)
+from app.schemas import NotificationFeedItem, NotificationFeedOut, ReadAllOut
 from app.services import quotes_store
 from app.services.deps import get_current_user
 from app.services.plans import can_use_push
@@ -409,3 +432,138 @@ async def push_test(
         if str(e) == "vapid-not-configured":
             raise HTTPException(status_code=503, detail="服务端未配置推送密钥 / server has no push keys configured")
         raise
+
+# ---- 站内通知 / in-app notification feed ----
+
+
+@router.get("/feed", response_model=NotificationFeedOut)
+def notification_feed(
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """本人的站内通知，最新在前。unreadCount 数的是全部未读而不是本页未读——
+    角标必须在只取 20 条的情况下也报对数。
+    This user's notifications, newest first. unreadCount counts every unread row,
+    not just the returned page: the badge has to be right while the list is capped.
+    """
+    limit = max(1, min(limit, 100))
+    rows = (
+        db.query(UserNotification)
+        .filter(UserNotification.user_id == current_user.id)
+        .order_by(UserNotification.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    unread = (
+        db.query(UserNotification)
+        .filter(
+            UserNotification.user_id == current_user.id,
+            UserNotification.read_at.is_(None),
+        )
+        .count()
+    )
+    return NotificationFeedOut(
+        items=[
+            NotificationFeedItem(
+                id=r.id,
+                kind=r.kind,
+                text=r.text or "",
+                link=r.link or "",
+                read=r.read_at is not None,
+                createdAt=r.created_at,
+            )
+            for r in rows
+        ],
+        unreadCount=unread,
+    )
+
+
+@router.post("/feed/{notification_id}/read", response_model=dict)
+def mark_notification_read(
+    notification_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """点开一条通知即已读。找不到就当已经读过——这个动作在用户眼里是"点了一下
+    某条消息"，为一条已被删/不属于自己的 id 回 404 只会让前端多一个没人处理的
+    错误分支，而按 user_id 过滤已经保证了读不到别人的行。
+    Following a notification marks it read. A miss is treated as already-read: to
+    the user this is just "tapped a row", and 404 here would only add an error
+    branch nobody handles — the user_id filter already prevents touching someone
+    else's row."""
+    row = (
+        db.query(UserNotification)
+        .filter(
+            UserNotification.id == notification_id,
+            UserNotification.user_id == current_user.id,
+        )
+        .first()
+    )
+    if row and row.read_at is None:
+        row.read_at = datetime.now(timezone.utc)
+        db.commit()
+    return {"ok": True}
+
+
+@router.post("/read-all", response_model=ReadAllOut)
+def mark_all_read(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """一键已读：站内通知全部标已读，已发布公告全部补上已读行。
+
+    公告用"补行"而不是"标记"：已读状态本来就是一张 (user, announcement) 关系表，
+    没读过就是没有行。只对 published 的公告补——草稿对用户不存在，给它写已读行
+    会让它在将来发布时直接是已读状态，那条公告等于没发过。
+
+    Mark everything read: every feed row gets a timestamp, every published
+    announcement gets a read row. Announcements use insertion rather than a flag
+    because read state *is* a (user, announcement) relation — unread means no row.
+    Only published ones: a draft doesn't exist for users, and marking it read now
+    would publish it pre-read, i.e. invisibly.
+    """
+    now = datetime.now(timezone.utc)
+    feed_n = (
+        db.query(UserNotification)
+        .filter(
+            UserNotification.user_id == current_user.id,
+            UserNotification.read_at.is_(None),
+        )
+        .update({UserNotification.read_at: now}, synchronize_session=False)
+    )
+    published_ids = {
+        r[0] for r in db.query(Announcement.id).filter(Announcement.published.is_(True)).all()
+    }
+    already = {
+        r[0] for r in db.query(AnnouncementRead.announcement_id)
+        .filter(AnnouncementRead.user_id == current_user.id).all()
+    }
+    missing = published_ids - already
+    for aid in missing:
+        db.add(AnnouncementRead(user_id=current_user.id, announcement_id=aid))
+    try:
+        db.commit()
+    except IntegrityError:
+        # 同一个人在两处同时按（铃铛 + 公告页），或按的同时另一个标签页打开了详情：
+        # (user, announcement) 上的唯一约束会撞。这里要达成的结论——"这些都算读过
+        # 了"——已经被另一次写入部分达成，逐行重试把剩下的补上，比让一个「全部已读」
+        # 回 500 好。
+        # The same person pressing in two places (bell + list page), or opening a
+        # detail in another tab at that moment, collides on the (user, announcement)
+        # unique constraint. The end state this wants — all of these count as read —
+        # is already partly reached by the other write, so retry row by row rather
+        # than answering a "mark all read" with a 500.
+        db.rollback()
+        done = {
+            r[0] for r in db.query(AnnouncementRead.announcement_id)
+            .filter(AnnouncementRead.user_id == current_user.id).all()
+        }
+        missing = published_ids - done
+        for aid in missing:
+            db.add(AnnouncementRead(user_id=current_user.id, announcement_id=aid))
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+    return ReadAllOut(announcements=len(missing), notifications=feed_n)

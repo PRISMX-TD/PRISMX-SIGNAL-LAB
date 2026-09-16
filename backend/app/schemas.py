@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from app.services.strategy.presets import TEMPLATE_KEYS as STRATEGY_TEMPLATES
 
@@ -773,6 +773,14 @@ class AnnouncementIn(BaseModel):
     coverImageUrl: str = Field(default="", max_length=500)
     pinned: bool = False
     published: bool = False
+    # 弹窗展示：发布后给用户弹一张整图卡片。没有封面图就没有弹窗——弹窗主体就是
+    # 那张图，所以这里直接把"勾了但没图"归一成 False，而不是留给取弹窗的查询去
+    # 兜底：让库里的值自己就是真话，管理页重新打开时看到的开关才与实际行为一致。
+    # Show as a popup after publishing. No cover image, no popup — the image *is*
+    # the popup — so "ticked without an image" is normalised to False right here
+    # instead of being filtered out later by the query: the stored value stays
+    # truthful, and the toggle the admin sees on reopening matches reality.
+    popup: bool = False
     # 发布时是否给开启了推送的用户发一条 Web Push；只在本次请求把 published 由
     # false 翻到 true 时生效，编辑已发布的公告不会再推。
     # Whether to Web Push subscribed users on publish; only acts when this request
@@ -786,6 +794,12 @@ class AnnouncementIn(BaseModel):
         if v and not re.match(r"^https?://", v, re.IGNORECASE):
             raise ValueError("图片地址必须以 http(s):// 开头 / image URL must start with http(s)://")
         return v
+
+    @model_validator(mode="after")
+    def _popup_needs_cover(self) -> "AnnouncementIn":
+        if self.popup and not self.coverImageUrl:
+            self.popup = False
+        return self
 
 
 class AnnouncementOut(BaseModel):
@@ -801,6 +815,7 @@ class AnnouncementOut(BaseModel):
     coverImageUrl: str
     pinned: bool
     published: bool
+    popup: bool = False
     publishedAt: datetime | None
     createdAt: datetime
     updatedAt: datetime
@@ -813,6 +828,48 @@ class AnnouncementListOut(BaseModel):
     items: list[AnnouncementOut]
     unreadCount: int = 0
     total: int = 0
+
+
+class AnnouncementPopupOut(BaseModel):
+    """当前该弹的那条公告；没有就整个响应为 null。
+    只带渲染弹窗要用的字段——弹窗里除了图就是标题，正文块留给详情页。
+    The one announcement to pop right now, or a null response. Carries only what
+    the modal renders (image plus title); the body blocks belong to the detail page."""
+
+    id: str
+    titleZh: str
+    titleEn: str
+    coverImageUrl: str
+
+
+# ---------- 站内通知 / in-app notifications ----------
+
+
+class NotificationFeedItem(BaseModel):
+    """一条站内通知。title 不在这里——前端按 kind 取 i18n 文案，见
+    models.UserNotification 的说明。
+    One in-app notification. No title field: the frontend renders it from `kind`
+    via i18n (see models.UserNotification)."""
+
+    id: str
+    kind: str
+    text: str
+    link: str
+    read: bool
+    createdAt: datetime
+
+
+class NotificationFeedOut(BaseModel):
+    items: list[NotificationFeedItem]
+    unreadCount: int = 0
+
+
+class ReadAllOut(BaseModel):
+    """一键已读的结果：分别报公告与站内通知各清掉了多少条。
+    Mark-all-read result, counted separately for announcements and notifications."""
+
+    announcements: int = 0
+    notifications: int = 0
 
 
 class TranslateIn(BaseModel):

@@ -1137,6 +1137,15 @@ class Announcement(Base):
     blocks = Column(Text, nullable=False, default="[]")  # JSON 数组 / JSON array of blocks
     cover_image_url = Column(String, nullable=False, default="")
     pinned = Column(Boolean, nullable=False, default=False)
+    # 弹窗展示：发布后在用户端弹一张整图卡片（大促海报那种），点图进详情页。
+    # 只对填了封面图的公告有意义——弹窗主体就是这张图，没有图就没有弹窗，
+    # 所以取弹窗的查询里带着 cover_image_url != "" 的条件，管理页也会按这条禁用开关。
+    # Popup: after publishing, show the cover image as a full-card modal
+    # (promo-poster style) that links to the detail page. Meaningful only with a
+    # cover image — the image *is* the popup — so the query that picks one
+    # requires a non-empty cover_image_url, and the admin toggle is disabled
+    # without one.
+    popup = Column(Boolean, nullable=False, default=False)
     published = Column(Boolean, nullable=False, default=False, index=True)
     # 首次发布时间；取消发布再发布不重置，未读判定与排序都用它。
     # Set on first publish and kept across unpublish/republish; ordering and unread use it.
@@ -1156,6 +1165,69 @@ class AnnouncementRead(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     announcement_id = Column(String, ForeignKey("announcements.id"), nullable=False, index=True)
     read_at = Column(DateTime, default=_now)
+
+
+class AnnouncementPopupSnooze(Base):
+    """公告弹窗的「7 天不再提醒」：点了就写一行，到期后自动重新弹。
+
+    单独一张表而不是复用 announcement_reads：已读与免打扰是两件事——用户可以
+    在没打开过详情的情况下按掉弹窗（那时它仍然是未读，铃铛里的紫点要留着），
+    也可以读过之后再也不想看见弹窗。行到期不清理，下次取弹窗时按时间判定即可。
+
+    Per-user popup snooze ("don't remind me for 7 days"): one row per dismissal,
+    re-armed automatically once it expires. Its own table rather than reusing
+    announcement_reads, because read and snoozed are different states — a user
+    can dismiss the popup without ever opening the detail (it stays unread, and
+    the bell keeps its violet dot). Expired rows aren't swept; the popup query
+    compares timestamps.
+    """
+    __tablename__ = "announcement_popup_snoozes"
+    __table_args__ = (UniqueConstraint("user_id", "announcement_id", name="uq_announcement_popup_snooze"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    announcement_id = Column(String, ForeignKey("announcements.id"), nullable=False, index=True)
+    snooze_until = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=_now)
+
+
+class UserNotification(Base):
+    """站内通知：发给某一个具体用户的一条消息，与全站公告并排显示在铃铛面板里。
+
+    与公告的分工：公告是一条内容发给所有人（自带详情页、按人记已读），站内通知
+    是一件"发生在你身上的事"（工单有人回了），没有正文页，点进去是那件事本身。
+
+    文案不入库：只存 kind（哪类事）+ text（那件事的名字，例如工单标题）+ link，
+    标题由前端按 kind 取 i18n 文案。存中英两份标题会让语言切换只对新通知生效，
+    存一份则会把发生时的界面语言永久钉在这一行上。
+
+    In-app notification addressed to one user, shown alongside platform-wide
+    announcements in the bell panel. Division of labour: an announcement is one
+    piece of content for everyone (own detail page, per-user read marks); a
+    notification is something that happened to *you* (someone replied to your
+    ticket) with no body page — following it takes you to the thing itself.
+
+    Wording is not stored: only kind (what happened), text (what it happened to,
+    e.g. the ticket title) and link. The frontend renders the title from kind via
+    i18n. Storing both languages would leave a language switch applying only to
+    new rows; storing one pins whatever UI language was active at the time.
+    """
+    __tablename__ = "user_notifications"
+    __table_args__ = (Index("ix_user_notifications_user_created", "user_id", "created_at"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    kind = Column(String, nullable=False)  # ticket_reply
+    # 来源对象 id（工单 id 等），用于去重/跳转，渲染不依赖它。
+    # Source object id (a ticket id, …) for dedupe and navigation; rendering doesn't use it.
+    ref_id = Column(String, nullable=True)
+    text = Column(String, nullable=False, default="")
+    link = Column(String, nullable=False, default="")
+    # NULL = 未读。用时间而不是布尔：将来要按"最近读过"排序或做保留期清理都不用再迁移。
+    # NULL = unread. A timestamp rather than a boolean so "recently read" ordering
+    # or retention sweeps never need another migration.
+    read_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_now, index=True)
 
 
 class InviteLink(Base):

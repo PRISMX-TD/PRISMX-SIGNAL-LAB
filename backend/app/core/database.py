@@ -127,7 +127,10 @@ def _hash_legacy_api_tokens() -> None:
 # rev 21 — 新表 password_reset_tokens（找回密码的一次性令牌，只存哈希）。同 rev 20：
 #          全靠 create_all 建表建索引，无 ADD COLUMN、无回填；+1 只为让老库启动时走一次
 #          完整迁移而不是快速通道。
-CURRENT_SCHEMA_REV = 21
+# rev 22 — 站内通知 + 公告弹窗：新表 user_notifications、announcement_popup_snoozes
+#          （create_all 建），外加 announcements.popup 一列（ADD COLUMN + 回填 FALSE，
+#          理由同 invite_links.grants_trial：留 NULL 行为不错，但管理页开关会渲染成未定态）。
+CURRENT_SCHEMA_REV = 22
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -1062,6 +1065,20 @@ def _migrate_columns() -> None:
                 conn.execute(text(
                     "UPDATE invite_links SET grants_trial = FALSE WHERE grants_trial IS NULL"
                 ))
+
+    # rev 22：公告的「弹窗展示」开关。存量公告一律不弹——这一列是新行为的入口，
+    # 回填成 TRUE 等于给所有历史公告追发一轮弹窗。两张配套新表（user_notifications、
+    # announcement_popup_snoozes）由 create_all 建，这里无事可做。
+    # rev 22: the announcement "show as popup" switch. Existing rows are backfilled
+    # to FALSE — this column gates new behaviour, and TRUE would retro-fire a popup
+    # for every announcement ever published. The two companion tables
+    # (user_notifications, announcement_popup_snoozes) come from create_all.
+    if "announcements" in inspector.get_table_names():
+        ann_cols = {c["name"] for c in inspector.get_columns("announcements")}
+        if "popup" not in ann_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE announcements ADD COLUMN popup BOOLEAN"))
+                conn.execute(text("UPDATE announcements SET popup = FALSE WHERE popup IS NULL"))
 
     # rev 16：勋章改制。user_badges 加 tier；旧 id 按 badges.LEGACY_BADGE_MAP 并成
     # "新 id + 档位"（同一人同一新 id 只留最高档，先删输家再改赢家——唯一约束

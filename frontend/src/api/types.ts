@@ -688,6 +688,10 @@ export interface Announcement {
   coverImageUrl: string
   pinned: boolean
   published: boolean
+  // 发布后弹一张整图卡片。只对填了封面图的公告成立——弹窗主体就是那张图。
+  // Show the cover image as a full-card modal after publishing; only meaningful
+  // with a cover image, since the image is the popup.
+  popup: boolean
   publishedAt: string | null
   createdAt: string
   updatedAt: string
@@ -699,6 +703,15 @@ export interface AnnouncementList {
   items: Announcement[]
   unreadCount: number
   total: number
+}
+
+// 当前该弹的那条公告；没有可弹的就是 null。只带弹窗渲染要用的字段。
+// The announcement to pop right now, or null. Only what the modal renders.
+export interface AnnouncementPopup {
+  id: string
+  titleZh: string
+  titleEn: string
+  coverImageUrl: string
 }
 
 // 管理员新建 / 修改用；notify 只在本次把 published 翻到 true 时生效。
@@ -713,6 +726,9 @@ export interface AnnouncementInput {
   pinned: boolean
   published: boolean
   notify: boolean
+  // 没填封面图时后端会把它归一成 false —— 弹窗主体就是那张图。
+  // Normalised to false by the backend without a cover image: the image is the popup.
+  popup: boolean
 }
 
 export interface PlatformStrategy {
@@ -1029,12 +1045,35 @@ export interface AccountFunds {
 }
 
 export interface WSMessage {
-  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'QUOTES' | 'GLOBAL_QUOTES' | 'TREND_UPDATE' | 'PREFS_UPDATE' | 'STRATEGY_SIGNAL' | 'CLOSED_TRADE_NEW' | 'ANNOUNCEMENT_NEW' | 'PUSH_FALLBACK' | 'PONG'
+  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'QUOTES' | 'GLOBAL_QUOTES' | 'TREND_UPDATE' | 'PREFS_UPDATE' | 'STRATEGY_SIGNAL' | 'CLOSED_TRADE_NEW' | 'ANNOUNCEMENT_NEW' | 'NOTIFICATION_NEW' | 'PUSH_FALLBACK' | 'PONG'
   data?: unknown
   // 仅 POSITIONS 携带 / only present on POSITIONS
   funds?: AccountFunds[]
   reason?: string
   userId?: string
+}
+
+// 站内通知（铃铛面板的「消息」段）。标题不在数据里——按 kind 取 i18n 文案，
+// 后端刻意不存文案，否则切语言只对新通知生效。
+// In-app notifications (the bell panel's "messages" section). No title in the
+// data: it comes from `kind` via i18n. The backend deliberately stores no copy,
+// otherwise switching language would only affect newly created rows.
+export type NotificationKind = 'ticket_reply' | 'ticket_new'
+
+export interface NotificationFeedItem {
+  id: string
+  kind: NotificationKind
+  // 这件事发生在什么上面（工单标题等），作为副标题显示。
+  // What it happened to (a ticket title, …), rendered as the subtitle.
+  text: string
+  link: string
+  read: boolean
+  createdAt: string
+}
+
+export interface NotificationFeed {
+  items: NotificationFeedItem[]
+  unreadCount: number
 }
 
 // 工单系统 / ticket system

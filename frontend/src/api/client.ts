@@ -1,6 +1,6 @@
 // REST 客户端封装 / REST client wrapper
 import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminMetrics, AdminPageStats, AdminStrategyWinRate, AdminEmailGateSettings, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUsers, SocialLinks } from './types'
-import type { Announcement, AnnouncementInput, AnnouncementList } from './types'
+import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 
 const TOKEN_KEY = 'prismx_token'
@@ -671,6 +671,19 @@ export const notificationApi = {
     }),
   getIndicators: () => request<string[]>('/notifications/indicators'),
   getSymbols: () => request<string[]>('/notifications/symbols'),
+  // 站内通知（铃铛面板的「消息」段）。unreadCount 数的是全部未读，不是本页——
+  // 角标在只取 20 条时也得是对的。
+  // In-app feed for the bell panel. unreadCount covers every unread row, not just
+  // the returned page: the badge must be right while the list is capped.
+  feed: (limit = 20) => request<NotificationFeed>(`/notifications/feed?limit=${limit}`),
+  markFeedRead: (id: string) =>
+    request<{ ok: boolean }>(`/notifications/feed/${encodeURIComponent(id)}/read`, { method: 'POST' }),
+  // 一键已读：站内通知与已发布公告一起清。两者在用户眼里是同一个「通知」面板，
+  // 所以是一个接口而不是两个。
+  // Mark all read across both the feed and published announcements — one endpoint,
+  // because the user pressed the button on one "notifications" panel.
+  readAll: () =>
+    request<{ announcements: number; notifications: number }>('/notifications/read-all', { method: 'POST' }),
 }
 
 // 游戏化（设计 §6/§11）：等级/任务/勋章/胜率一次性拿全 / gamification: level,
@@ -733,6 +746,14 @@ export const announcementApi = {
   list: () => request<AnnouncementList>('/announcements'),
   // 打开详情即记已读，由后端完成 / opening marks it read on the backend
   get: (id: string) => request<Announcement>(`/announcements/${encodeURIComponent(id)}`),
+  // 当前该弹的那条；没有可弹的时候后端回 null，不是 404。
+  // The one to pop right now; the backend answers null, not 404, when there is none.
+  popup: () => request<AnnouncementPopup | null>('/announcements/popup'),
+  // 「7 天不再提醒」。天数由后端定死，前端不传——传了就等于把静音时长交给客户端。
+  // "Don't remind me for 7 days". The server owns the number; sending one from
+  // here would hand the client control of how long it stays quiet.
+  snoozePopup: (id: string) =>
+    request<{ ok: boolean; days: number }>(`/announcements/${encodeURIComponent(id)}/popup-snooze`, { method: 'POST' }),
 }
 
 // 管理后台 / Admin

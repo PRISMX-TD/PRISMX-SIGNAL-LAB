@@ -33,7 +33,7 @@ function emptyDraft(): Draft {
   return {
     id: null,
     titleZh: '', titleEn: '', summaryZh: '', summaryEn: '',
-    blocks: [], coverImageUrl: '', pinned: false, published: false, notify: false,
+    blocks: [], coverImageUrl: '', pinned: false, published: false, notify: false, popup: false,
   }
 }
 
@@ -42,6 +42,7 @@ function toDraft(a: Announcement): Draft {
     id: a.id,
     titleZh: a.titleZh, titleEn: a.titleEn, summaryZh: a.summaryZh, summaryEn: a.summaryEn,
     blocks: a.blocks, coverImageUrl: a.coverImageUrl, pinned: a.pinned, published: a.published, notify: false,
+    popup: a.popup,
   }
 }
 
@@ -209,7 +210,18 @@ export default function AnnouncementsPanel() {
           </div>
 
           <div className="mt-3">
-            <ImageField label={t('admin.announcements.cover')} value={draft.coverImageUrl} onChange={(url) => patch({ coverImageUrl: url })} />
+            {/* 去掉封面图时顺手把弹窗开关也关掉：弹窗主体就是这张图，后端保存时
+                同样会归一。在这里先关，是为了让管理员立刻看到"没图就没弹窗"，
+                而不是保存后重新打开才发现开关自己弹回去了。
+                Clearing the cover also clears the popup switch — the image *is* the
+                popup, and the backend normalises it on save anyway. Doing it here
+                shows "no image, no popup" immediately instead of after a save and
+                reopen. */}
+            <ImageField
+              label={t('admin.announcements.cover')}
+              value={draft.coverImageUrl}
+              onChange={(url) => patch({ coverImageUrl: url, ...(url ? {} : { popup: false }) })}
+            />
           </div>
 
           <div className="mt-4">
@@ -233,8 +245,18 @@ export default function AnnouncementsPanel() {
               <Switch checked={draft.notify} disabled={!draft.published} onChange={(v) => patch({ notify: v })} />
               {t('admin.announcements.notifyLabel')}
             </label>
+            <label
+              className="flex items-center gap-2 text-sm text-neutral-300"
+              title={draft.coverImageUrl ? t('admin.announcements.popupHint') : t('admin.announcements.popupNeedsCover')}
+            >
+              <Switch checked={draft.popup} disabled={!draft.coverImageUrl} onChange={(v) => patch({ popup: v })} />
+              {t('admin.announcements.popupLabel')}
+            </label>
           </div>
           <p className="mt-2 text-xs text-neutral-500">{t('admin.announcements.notifyHint')}</p>
+          <p className="mt-1 text-xs text-neutral-500">
+            {draft.coverImageUrl ? t('admin.announcements.popupHint') : t('admin.announcements.popupNeedsCover')}
+          </p>
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <button type="button" onClick={save} disabled={saving} className="btn-primary px-5 py-1.5 text-sm disabled:opacity-40">
@@ -258,6 +280,7 @@ export default function AnnouncementsPanel() {
                 {(a.summaryZh || a.summaryEn) && <div className="mt-0.5 truncate text-xs text-neutral-500">{a.summaryZh || a.summaryEn}</div>}
               </div>
               {a.pinned && <span className="tag bg-prism-600/20 text-prism-200">{t('admin.announcements.pinned')}</span>}
+              {a.popup && <span className="tag bg-amber-400/15 text-amber-300">{t('admin.announcements.popupTag')}</span>}
               <span className={`tag ${a.published ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-400'}`}>
                 {a.published ? t('admin.announcements.published') : t('admin.announcements.draft')}
               </span>

@@ -8,28 +8,38 @@
 发布动作在管理端：把 published 由 false 翻到 true 时记 published_at（只记一次），
 向在线用户广播 ANNOUNCEMENT_NEW 让铃铛角标实时更新，勾了 notify 再走 Web Push。
 
+弹窗（popup）是第三种触达：勾了它的公告会在用户端弹一张整图卡片，点图进详情页。
+只对填了封面图的公告成立——弹窗主体就是那张图。读过或按了「7 天不再提醒」就不再弹，
+两种状态分别记在 announcement_reads 与 announcement_popup_snoozes。
+
 Users read published announcements (pinned first, then newest) with per-row read
 flags and an unread total in one response; announcements are rare content, so one
 fetch shared by the bell panel and the list page beats pagination plus a separate
 unread endpoint. Opening a detail marks it read, the agreed definition of "read".
 Publishing (false → true) stamps published_at once, broadcasts ANNOUNCEMENT_NEW so
-open sessions update their bell badge, and Web Pushes if `notify` was ticked.
+open sessions update their bell badge, and Web Pushes if `notify` was ticked. The
+popup is a third channel: an announcement with it enabled shows its cover image as
+a full-card modal linking to the detail page, so it only applies to rows that have
+one — the image *is* the popup. Reading it, or pressing "don't remind me for 7
+days", stops it; those two states live in announcement_reads and
+announcement_popup_snoozes respectively.
 """
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.core.database import get_db
-from app.models import Announcement, AnnouncementRead, User
+from app.models import Announcement, AnnouncementPopupSnooze, AnnouncementRead, User
 from app.schemas import (
     AnnouncementBlock,
     AnnouncementIn,
     AnnouncementListOut,
     AnnouncementOut,
+    AnnouncementPopupOut,
     TranslateIn,
     TranslateOut,
 )
@@ -72,7 +82,7 @@ def _to_out(a: Announcement, read: bool = True) -> AnnouncementOut:
         summaryZh=a.summary_zh or "", summaryEn=a.summary_en or "",
         blocks=_blocks_out(a.blocks),
         coverImageUrl=a.cover_image_url or "",
-        pinned=bool(a.pinned), published=bool(a.published),
+        pinned=bool(a.pinned), published=bool(a.published), popup=bool(a.popup),
         publishedAt=a.published_at, createdAt=a.created_at, updatedAt=a.updated_at,
         read=read,
     )
@@ -105,6 +115,103 @@ def list_announcements(
         unreadCount=unread,
         total=len(rows),
     )
+
+
+# 这两条必须排在 /{announcement_id} 之前：路由按声明顺序匹配，放在后面的话
+# "popup" 会被当成一个公告 id 吃掉，永远 404。
+# Both must precede /{announcement_id}: routes match in declaration order, and
+# "popup" would otherwise be swallowed as an announcement id and 404 forever.
+@router.get("/popup", response_model=AnnouncementPopupOut | None)
+def get_popup_announcement(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """当前该给这个用户弹的那条公告，没有则返回 null。
+
+    四道条件：已发布、开了弹窗、有封面图（弹窗主体就是图）、这个用户既没读过也
+    没按「7 天不再提醒」。读过就不再弹是刻意的——弹窗的目的是把人带到详情页，
+    人已经去过了就没有理由再拦一次。多条候选取最新发布的一条：同时弹两张图没有
+    意义，晚发的那条也更可能是当下在推的活动。
+
+    The announcement to pop for this user, or null. Four conditions: published,
+    popup enabled, has a cover image (the image *is* the popup), and this user has
+    neither read it nor snoozed it. "Read ⇒ never pop" is deliberate: the popup
+    exists to send people to the detail page, and they have already been. With
+    several candidates the newest wins — two modals at once is pointless, and the
+    later one is likelier to be the campaign actually running.
+    """
+    now = datetime.now(timezone.utc)
+    read_ids = {
+        r[0] for r in db.query(AnnouncementRead.announcement_id)
+        .filter(AnnouncementRead.user_id == user.id).all()
+    }
+    snoozed_ids = {
+        r[0] for r in db.query(AnnouncementPopupSnooze.announcement_id)
+        .filter(
+            AnnouncementPopupSnooze.user_id == user.id,
+            AnnouncementPopupSnooze.snooze_until > now,
+        ).all()
+    }
+    rows = (
+        db.query(Announcement)
+        .filter(
+            Announcement.published.is_(True),
+            Announcement.popup.is_(True),
+            Announcement.cover_image_url != "",
+        )
+        .all()
+    )
+    skip = read_ids | snoozed_ids
+    candidates = [a for a in rows if a.id not in skip]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda a: a.published_at or a.created_at or datetime.min, reverse=True)
+    a = candidates[0]
+    return AnnouncementPopupOut(
+        id=a.id,
+        titleZh=a.title_zh or "",
+        titleEn=a.title_en or "",
+        coverImageUrl=a.cover_image_url or "",
+    )
+
+
+# 免打扰天数写死在服务端：前端传天数就等于把"多久不再提醒"交给客户端决定，
+# 一个改过的请求可以把自己静音十年。
+# The snooze length lives on the server: letting the client send a number hands
+# it control of "how long", and one edited request mutes the popup for a decade.
+POPUP_SNOOZE_DAYS = 7
+
+
+@router.post("/{announcement_id}/popup-snooze", response_model=dict)
+def snooze_popup(
+    announcement_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """「7 天不再提醒」。记在服务端而不是浏览器：同一个人的手机 App 与网页各
+    按一次才安静，本身就是这个弹窗最招人烦的形态。重复按只把到期时间往后推。
+    "Don't remind me for 7 days", stored server-side rather than in the browser:
+    making someone dismiss the same popup once in the app and again on the web is
+    exactly what makes a popup obnoxious. Pressing it again just pushes the
+    expiry out."""
+    a = db.query(Announcement).filter(Announcement.id == announcement_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="公告不存在 / announcement not found")
+    until = datetime.now(timezone.utc) + timedelta(days=POPUP_SNOOZE_DAYS)
+    row = (
+        db.query(AnnouncementPopupSnooze)
+        .filter(
+            AnnouncementPopupSnooze.user_id == user.id,
+            AnnouncementPopupSnooze.announcement_id == a.id,
+        )
+        .first()
+    )
+    if row:
+        row.snooze_until = until
+    else:
+        db.add(AnnouncementPopupSnooze(user_id=user.id, announcement_id=a.id, snooze_until=until))
+    db.commit()
+    return {"ok": True, "days": POPUP_SNOOZE_DAYS}
 
 
 @router.get("/{announcement_id}", response_model=AnnouncementOut)
@@ -146,6 +253,9 @@ def _apply(a: Announcement, body: AnnouncementIn) -> None:
     a.blocks = json.dumps([b.model_dump() for b in body.blocks], ensure_ascii=False)
     a.cover_image_url = body.coverImageUrl
     a.pinned = body.pinned
+    # schema 已经把"勾了弹窗但没图"归一成 False，这里照抄即可。
+    # The schema already normalises "popup ticked, no image" to False.
+    a.popup = body.popup
 
 
 def _require_title(body: AnnouncementIn) -> None:
@@ -226,6 +336,9 @@ def admin_delete_announcement(
     if not a:
         raise HTTPException(status_code=404, detail="公告不存在 / announcement not found")
     db.query(AnnouncementRead).filter(AnnouncementRead.announcement_id == a.id).delete(synchronize_session=False)
+    db.query(AnnouncementPopupSnooze).filter(
+        AnnouncementPopupSnooze.announcement_id == a.id
+    ).delete(synchronize_session=False)
     db.delete(a)
     log_change(db, admin.id, admin.id, "announcement:delete", a.title_zh or a.title_en, None)
     db.commit()
