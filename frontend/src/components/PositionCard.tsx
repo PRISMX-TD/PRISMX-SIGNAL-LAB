@@ -19,7 +19,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { orderApi } from '../api/client'
-import { clientOrderId, displaySymbol, fmtLots, isLotOnStep, localizeApiError, roundLots } from '../api/utils'
+import { clientOrderId, displaySymbol, fmtLots, isLotOnStep, localizeApiError,
+         lotStep, minLot, roundLots, snapLot } from '../api/utils'
 import type { Position } from '../api/types'
 import ConfirmModal from './ConfirmModal'
 import { useBackToClose } from '../utils/useBackToClose'
@@ -59,6 +60,10 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
   // outright (see useBackToClose's comment).
   useBackToClose(confirmCloseAll, () => setConfirmCloseAll(false))
   const [closeVol, setCloseVol] = useState(String(roundLots(p.volume)))
+  // 手数步长按品种取（原油 0.1，其余 0.01）：步长决定输入框的 step/min，
+  // 也决定失焦时往下吸附到哪一档。/ Per-symbol lot step drives the input.
+  const step = lotStep(p.symbol)
+  const minVol = minLot(p.symbol)
   const [sl, setSl] = useState(p.stopLoss ? String(p.stopLoss) : '')
   const [tp, setTp] = useState(p.takeProfit ? String(p.takeProfit) : '')
 
@@ -104,8 +109,8 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
     // 还要卡手数步长：非整数倍的手数会被券商收下却永不成交，并锁死这张仓位。
     // Also gate on the lot step: an off-step volume is accepted but never fills,
     // and then locks the position (see isLotOnStep).
-    if (!full && (vol == null || Number.isNaN(vol) || vol < 0.01 || vol > p.volume
-                  || !isLotOnStep(vol))) {
+    if (!full && (vol == null || Number.isNaN(vol) || vol < minVol || vol > p.volume
+                  || !isLotOnStep(vol, p.symbol))) {
       onActionDone?.(t('positions.invalidVolume'), 'error')
       return
     }
@@ -207,13 +212,26 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
       </label>
       <input
         type="number"
-        step="0.01"
-        min="0.01"
+        step={step}
+        min={minVol}
         max={roundLots(p.volume)}
         className="input font-mono text-sm"
         value={closeVol}
+        // 失焦就把手数吸附到该品种的步长上。只校验不吸附的话，用户得自己猜哪个
+        // 数合法；不是整数倍的手数发出去不会被当场拒绝，而是锁死这张仓位。
+        // Snap to the symbol's step on blur: an off-step volume is accepted by the
+        // broker and then locks the position, so don't leave the user guessing.
+        onBlur={() => {
+          const v = parseFloat(closeVol)
+          if (Number.isFinite(v) && v > 0) {
+            setCloseVol(String(Math.min(roundLots(p.volume), snapLot(v, p.symbol))))
+          }
+        }}
         onChange={(e) => setCloseVol(e.target.value)}
       />
+      <p className="text-[11px] text-neutral-500">
+        {t('positions.lotStepHint', { step, min: minVol })}
+      </p>
       <div className="flex gap-2">
         <button onClick={() => setMode('view')} className="btn-ghost flex-1 py-1.5 text-xs">
           {t('common.cancel')}

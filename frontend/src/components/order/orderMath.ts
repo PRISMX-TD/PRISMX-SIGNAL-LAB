@@ -10,40 +10,61 @@
 // copy of these formulas; merged 2026-09-06 so a rule change lands everywhere at
 // once. No React here — state orchestration lives in useOrderForm.ts.
 import type { Quote } from '../../api/types'
-import { contractSize, suggestVolumeByRisk, usdMarginBasis } from '../../api/utils'
+import { contractSize, lotStep, minLot, roundLots, suggestVolumeByRisk, usdMarginBasis } from '../../api/utils'
 
-export const QUICK_LOTS = [0.01, 0.1, 0.5, 1.0]
+const QUICK_LOTS_BASE = [0.01, 0.1, 0.5, 1.0]
 export const QUICK_RISK_PCTS = [0.5, 1, 2, 3]
 export const VOLUME_MIN = 0.01
 export const VOLUME_MAX = 10
-export const VOLUME_STEP = 0.01
+
+/** 快捷手数按品种过滤：步长 0.1 的品种（原油）填不出 0.01，别给用户一个点了就报错的按钮。
+ *  Quick-lot chips filtered by the symbol's step: a 0.1-step symbol cannot take 0.01. */
+export function quickLots(symbol?: string | null): number[] {
+  const step = lotStep(symbol)
+  const list = QUICK_LOTS_BASE.filter((v) => Math.abs(v - Math.round(v / step) * step) <= step * 1e-6)
+  return list.length > 0 ? list : [minLot(symbol)]
+}
+
+/** 手数小数位数：由步长决定（0.01 → 2 位，0.1 → 1 位）。 */
+function lotDigits(symbol?: string | null): number {
+  return lotStep(symbol) >= 0.1 ? 1 : 2
+}
 
 /** 默认手数：用户上次自己设的手数（usePrefs 记忆，跨设备），没有就 0.01。
  *  以前按净值 ÷ 200 推一个——一万美元的账户一打开就是 1.00 手，用户每次都得
  *  改回去；现在从最小手数起步、记住上次的值。
  *  Default lots: the user's last explicitly-set volume (remembered via prefs),
  *  else 0.01. The old equity/200 heuristic opened a $10k account at 1.00 lot. */
-export function defaultVolume(remembered?: number | string | null): string {
+export function defaultVolume(remembered?: number | string | null, symbol?: string | null): string {
   const v = typeof remembered === 'number' ? remembered : parseFloat(remembered ?? '')
-  return v > 0 ? Math.min(VOLUME_MAX, v).toFixed(2) : VOLUME_MIN.toFixed(2)
+  const d = lotDigits(symbol)
+  if (!(v > 0)) return minLot(symbol).toFixed(d)
+  return clampLots(Math.min(VOLUME_MAX, v), symbol).toFixed(d)
 }
 
-/** 手数夹到 0.01～10、向下取到 0.01 / clamp lots to 0.01–10, floored to 0.01 */
-function clampLots(raw: number): number {
-  return Math.max(VOLUME_MIN, Math.min(VOLUME_MAX, Math.floor(raw * 100) / 100))
+/** 手数夹到 [最小手数, 10]，并向下吸附到该品种的步长上。
+ *  原先写死按 0.01 取整，对步长 0.1 的原油会产出 0.13 这种永远不会成交的手数。
+ *  Clamp to [minLot, 10] and floor onto the symbol's step. The old hardcoded 0.01
+ *  floor produced volumes like 0.13 on WTI, which can never fill. */
+function clampLots(raw: number, symbol?: string | null): number {
+  const step = lotStep(symbol)
+  const floored = Math.floor(raw / step + 1e-6) * step
+  return roundLots(Math.max(minLot(symbol), Math.min(VOLUME_MAX, floored)))
 }
 
 /** 失焦时把输入框里的手数收敛到合法范围（空 / 非法 → 0.01，上限 10）。
  *  Normalize the typed volume on blur (empty / invalid → 0.01, capped at 10). */
-export function normalizeVolume(raw: string): string {
+export function normalizeVolume(raw: string, symbol?: string | null): string {
   const v = parseFloat(raw)
-  return (!v || v <= 0 ? VOLUME_MIN : Math.min(VOLUME_MAX, v)).toFixed(2)
+  if (!v || v <= 0) return minLot(symbol).toFixed(lotDigits(symbol))
+  return clampLots(v, symbol).toFixed(lotDigits(symbol))
 }
 
-/** ± 一步（0.01 手），夹在 0.01～10。/ Step by 0.01 lot, clamped to 0.01–10. */
-export function stepVolume(raw: string, dir: 1 | -1): string {
-  const v = parseFloat(raw) || VOLUME_MIN
-  return String(Math.max(VOLUME_MIN, Math.min(VOLUME_MAX, +(v + dir * VOLUME_STEP).toFixed(2))))
+/** ± 一步（该品种的步长），夹在 [最小手数, 10]。/ Step by the symbol's lot step. */
+export function stepVolume(raw: string, dir: 1 | -1, symbol?: string | null): string {
+  const step = lotStep(symbol)
+  const v = parseFloat(raw) || minLot(symbol)
+  return clampLots(v + dir * step, symbol).toFixed(lotDigits(symbol))
 }
 
 /** 只留数字和小数点 / keep digits and the decimal point only. */
@@ -194,10 +215,10 @@ export function suggestVolumeForRisk(symbol: string, equity: number | null | und
   const pct = parseFloat(riskPctRaw) || 0
   if (hasTickSpec(spec)) {
     if (!equity || equity <= 0 || distance <= 0 || pct <= 0) return null
-    return clampLots((equity * pct / 100) / lossPerLot(distance, spec)).toFixed(2)
+    return clampLots((equity * pct / 100) / lossPerLot(distance, spec), symbol).toFixed(lotDigits(symbol))
   }
   const suggested = suggestVolumeByRisk(symbol, equity, pct, distance, entryRef, specContractSize(spec))
-  return suggested != null ? suggested.toFixed(2) : null
+  return suggested != null ? clampLots(suggested, symbol).toFixed(lotDigits(symbol)) : null
 }
 
 export function formatMoney(n?: number | null, dash = '-'): string {

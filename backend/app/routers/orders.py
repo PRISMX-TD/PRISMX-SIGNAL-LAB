@@ -26,8 +26,9 @@ from app.schemas import (
     OrderRequest,
 )
 from app.services.connection_manager import manager
-from app.services.deps import (get_current_user, is_account_online, is_volume_on_step,
+from app.services.deps import (get_current_user, is_account_online,
                                validate_order, validate_sl_tp_direction)
+from app.services.symbol_aliases import is_volume_on_step, lot_step, min_lot
 from app.services import bridge_wake
 from app.services.gateway_binding import not_removed
 from app.services.gateway_client import run_on_main_loop
@@ -473,10 +474,10 @@ def close_position(
     # A partial-close volume must not fall below the per-order minimum (omit or
     # 0 means full close, which is exempt). Otherwise an un-fillable tiny close
     # gets dispatched only to be rejected by MT5, wasting an error receipt.
-    if req.volume is not None and 0 < req.volume < settings.MIN_VOLUME_PER_ORDER:
+    if req.volume is not None and 0 < req.volume < min_lot(req.symbol):
         raise HTTPException(
             status_code=400,
-            detail=f"低于单笔最小手数 {settings.MIN_VOLUME_PER_ORDER} / Below min volume",
+            detail=f"低于 {req.symbol} 的最小手数 {min_lot(req.symbol)} / Below min volume",
         )
 
     # 部分平仓手数必须落在手数步长上。不是整数倍的手数（黄金 0.015）不会被 MT5
@@ -485,10 +486,10 @@ def close_position(
     # 全平（省略或 0）不受此限：仓位自身的手数必然合法。
     # An off-step partial close is not rejected by MT5; it becomes an order that can
     # never fill and blocks every later close on that position. A full close is exempt.
-    if req.volume is not None and req.volume > 0 and not is_volume_on_step(req.volume):
+    if req.volume is not None and req.volume > 0 and not is_volume_on_step(req.volume, req.symbol):
         raise HTTPException(
             status_code=400,
-            detail=f"手数必须是 {settings.VOLUME_STEP} 的整数倍 / Volume must be a multiple of {settings.VOLUME_STEP}",
+            detail=f"手数必须是 {lot_step(req.symbol)} 的整数倍 / Volume must be a multiple of {lot_step(req.symbol)}",
         )
 
     # 幂等 / idempotency by clientOrderId

@@ -113,6 +113,56 @@ _BROKER_NAME: dict[str, str] = {
 }
 
 
+# 每手手数步长 —— 按品种（键是 broker_symbol 归一后的基础名）。合作券商实测：
+# 除原油 WTI 是 0.1 外，其余品种都是 0.01。步长同时决定最小手数：步长 0.1 的品种
+# 填不出 0.01，最小就是 0.1。
+#
+# 为什么必须卡：不是整数倍的手数**不会被 MT5 当场拒绝**，而是被接受成一张永远不会
+# 成交的订单，挂在仓位上把该仓位后续的平仓全部挡掉。2026-09-17 有用户对一张黄金
+# 仓位提交 0.015 手的部分平仓，此后三个半小时平不掉，最后爆仓。
+#
+# 这张表是兜底，与前端 api/utils.ts 的 LOT_STEP 一一对应；真正权威的是券商品种表，
+# 由 gateway 在发单前逐笔校验（Mt5Link.ValidateVolumeForSymbol）。
+#
+# Lot step per symbol, keyed by the normalized broker base name: 0.1 for WTI crude,
+# 0.01 for everything else. An off-step volume is not rejected by MT5 — it becomes an
+# order that can never fill and blocks every later close on that position. Mirrors
+# LOT_STEP in the frontend; the gateway holds the authoritative per-symbol check.
+_LOT_STEP: dict[str, float] = {
+    "WTI": 0.1,
+}
+_DEFAULT_LOT_STEP = 0.01
+
+
+def lot_step(symbol: str | None) -> float:
+    """该品种的每手手数步长。"""
+    if not symbol:
+        return _DEFAULT_LOT_STEP
+    base = broker_symbol(symbol.strip().upper()).split(".")[0]
+    return _LOT_STEP.get(base, _DEFAULT_LOT_STEP)
+
+
+def min_lot(symbol: str | None) -> float:
+    """该品种的最小手数：步长比 0.01 粗时，最小手数就是步长本身。"""
+    return max(_DEFAULT_LOT_STEP, lot_step(symbol))
+
+
+def is_volume_on_step(volume: float, symbol: str | None = None) -> bool:
+    """手数是否为该品种步长的整数倍。
+
+    不能直接取模：浮点下 0.03 % 0.01 得到 0.009999999999999998，合法手数会被误判。
+    改成除完取整再比残差，容差取步长的百万分之一。
+
+    A plain modulo is unusable: 0.03 % 0.01 is 0.009999999999999998 in floating point,
+    which would reject a valid volume. Divide, round, compare the residual.
+    """
+    step = lot_step(symbol)
+    if step <= 0:
+        return True
+    n = round(volume / step)
+    return abs(volume - n * step) <= step * 1e-6
+
+
 def broker_symbol(symbol: str) -> str:
     """把平台/信号侧的品种名换成券商 MT5 侧的基础名（不含后缀）。
 

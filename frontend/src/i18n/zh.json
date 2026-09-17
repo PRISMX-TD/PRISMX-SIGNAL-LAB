@@ -1021,7 +1021,8 @@
     "closed": "已平仓 @ {{price}}",
     "closeFailed": "平仓失败",
     "modified": "止损止盈已更新",
-    "closeAllConfirm": "确认平掉 {{symbol}} 的全部 {{volume}} 手持仓？此操作不可撤销。"
+    "closeAllConfirm": "确认平掉 {{symbol}} 的全部 {{volume}} 手持仓？此操作不可撤销。",
+    "lotStepHint": "步长 {{step}} 手，最小 {{min}} 手"
   },
   "bind": {
     "title": "连接 MT5",
@@ -1453,29 +1454,66 @@
     "overview": {
       "range": {
         "label": "时间范围",
-        "preset": { "week": "本周", "month": "本月", "last_month": "上个月", "quarter": "本季度", "year": "今年" },
+        "preset": {
+          "week": "本周",
+          "month": "本月",
+          "last_month": "上个月",
+          "quarter": "本季度",
+          "year": "今年"
+        },
         "custom": "自定义",
         "from": "开始日期",
         "to": "结束日期",
         "apply": "应用",
         "shown": "{{start}} 至 {{end}} · 共 {{days}} 天 · 对比 {{compareStart}} 至 {{compareEnd}}",
-        "error": { "order": "开始日期不能晚于结束日期", "future": "结束日期不能是未来", "tooLong": "最多 400 天" }
+        "error": {
+          "order": "开始日期不能晚于结束日期",
+          "future": "结束日期不能是未来",
+          "tooLong": "最多 400 天"
+        }
       },
-      "delta": { "none": "上一期无数据", "vsPrev": "比上一期 {{pct}}" },
-      "headline": { "activeToday": "今日活跃", "activeWeek": "周活跃 (7 天)", "activeMonth": "月活跃 (30 天)", "signups": "本期新注册" },
-      "activity": { "title": "活跃趋势", "hint": "活跃 = 当天打开过任一页面的人数（不含管理员）。按北京时间切天。", "active": "日活跃", "signups": "新注册" },
-      "plans": { "FREE": "FREE", "PRO_PAID": "PRO · 付费", "PRO_TRIAL": "PRO · 试用" },
+      "delta": {
+        "none": "上一期无数据",
+        "vsPrev": "比上一期 {{pct}}"
+      },
+      "headline": {
+        "activeToday": "今日活跃",
+        "activeWeek": "周活跃 (7 天)",
+        "activeMonth": "月活跃 (30 天)",
+        "signups": "本期新注册"
+      },
+      "activity": {
+        "title": "活跃趋势",
+        "hint": "活跃 = 当天打开过任一页面的人数（不含管理员）。按北京时间切天。",
+        "active": "日活跃",
+        "signups": "新注册"
+      },
+      "plans": {
+        "FREE": "FREE",
+        "PRO_PAID": "PRO · 付费",
+        "PRO_TRIAL": "PRO · 试用"
+      },
       "funnel": {
         "title": "转化漏斗",
         "hint": "全部用户（不含管理员）。五步各自独立统计，允许跳步（例如没试用直接付费），所以后一步不一定比前一步少。百分比是相对上一步；\"真仓 / 模拟仓\"是绑定 MT5 的拆分（模拟含比赛仓与未判定），同时绑了两种的人两边都算。",
-        "step": { "registered": "注册", "bound": "绑定 MT5", "boundReal": "其中：真仓", "boundDemo": "其中：模拟仓", "traded": "下过单", "trialed": "开过试用", "paid": "付费 PRO" },
+        "step": {
+          "registered": "注册",
+          "bound": "绑定 MT5",
+          "boundReal": "其中：真仓",
+          "boundDemo": "其中：模拟仓",
+          "traded": "下过单",
+          "trialed": "开过试用",
+          "paid": "付费 PRO"
+        },
         "byWeek": "最近 8 周注册的人各走到哪一步（百分比相对该周注册数；真仓 / 模拟仓相对该周绑定数）",
         "weekOf": "注册周（周一）"
       },
       "retention": {
         "title": "留存",
         "hint": "注册后第 N 天（按北京时间）打开过页面的比例。只算已经过了第 N 天的人。",
-        "d2": "次日留存", "d7": "7 日留存", "d30": "30 日留存",
+        "d2": "次日留存",
+        "d7": "7 日留存",
+        "d30": "30 日留存",
         "cohort": "{{from}} 至 {{to}} 注册的 {{n}} 人",
         "emptyCohort": "还没有满足天数的用户"
       },
@@ -1483,12 +1521,15 @@
         "title": "策略使用",
         "hint": "按预设模板统计：建过 = 至少建过一条；启用中 = 当前有一条开着、在持续评估出信号。不含管理员。",
         "empty": "还没有人创建策略。",
-        "colTemplate": "模板", "colUsers": "建过的人", "colEnabled": "启用中的人"
+        "colTemplate": "模板",
+        "colUsers": "建过的人",
+        "colEnabled": "启用中的人"
       },
       "trading": {
         "title": "交易使用",
         "hint": "只算状态为已成交的订单，按成交时间（北京时间）落在所选范围内。不含管理员。",
-        "traders": "有成交的人数", "fills": "成交笔数"
+        "traders": "有成交的人数",
+        "fills": "成交笔数"
       },
       "loadFailed": "加载失败",
       "retry": "重试",

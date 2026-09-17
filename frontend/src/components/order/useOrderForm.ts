@@ -150,14 +150,14 @@ export function useOrderForm({
   // successful submit) are remembered; risk-mode auto-sizing fills the form
   // but never the memory — the user chose "1% risk", not that lot number.
   const { lastVolume, rememberVolume } = useLastVolume()
-  const [volume, setVolumeState] = useState(() => defaultVolume(lastVolume))
+  const [volume, setVolumeState] = useState(() => defaultVolume(lastVolume, symbol))
   const [sizeMode, setSizeMode] = useState<SizeMode>('quick')
   const [riskPct, setRiskPct] = useState('1')
   const touchedRef = useRef(false)
   const setVolume = (v: string) => { touchedRef.current = true; setVolumeState(v); rememberVolume(v) }
   const typeVolume = (raw: string) => { touchedRef.current = true; setVolumeState(sanitizeDecimal(raw)) }
-  const blurVolume = () => setVolume(normalizeVolume(volume))
-  const stepLot = (dir: 1 | -1) => setVolume(stepVolume(volume, dir))
+  const blurVolume = () => setVolume(normalizeVolume(volume, symbol))
+  const stepLot = (dir: 1 | -1) => setVolume(stepVolume(volume, dir, symbol))
   const parsedVolumeRaw = parseFloat(volume)
   const parsedVolume = parsedVolumeRaw > 0 ? parsedVolumeRaw : null
 
@@ -166,7 +166,7 @@ export function useOrderForm({
   // the remembered lots as long as the user hasn't touched the field yet.
   useEffect(() => {
     if (touchedRef.current || sizeMode !== 'quick') return
-    setVolumeState(defaultVolume(lastVolume))
+    setVolumeState(defaultVolume(lastVolume, symbol))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastVolume])
 
@@ -215,7 +215,7 @@ export function useOrderForm({
   // 失焦的情况也能记住。/ A successful submit also settles the lots (lots mode
   // only), covering "type then slide" flows that never blur the input.
   const rotateOrderId = () => {
-    if (sizeMode === 'quick') rememberVolume(normalizeVolume(volume))
+    if (sizeMode === 'quick') rememberVolume(normalizeVolume(volume, symbol))
     orderIdRef.current = clientOrderId()
     setOrderId(orderIdRef.current)
   }

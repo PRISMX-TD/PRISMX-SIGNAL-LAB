@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.core.security import create_access_token, decode_token_payload
 from app.models import User, UserActiveDay
 from app.services.plan_expiry import downgrade_if_expired
+from app.services.symbol_aliases import is_volume_on_step, lot_step, min_lot
 
 # 滑动续期响应头：token 剩余有效期不足一半时，经此头下发新 token，
 # 前端收到后自动替换本地 token，实现无感续期（不再每天被踢下线）。
@@ -30,21 +31,6 @@ ONLINE_WINDOW = 7
 # day-level precision, so there's no need to UPDATE on every single request.
 LAST_ACTIVE_THROTTLE_SECONDS = 300
 
-
-def is_volume_on_step(volume: float) -> bool:
-    """手数是否为 VOLUME_STEP 的整数倍。
-
-    为什么不能直接取模：浮点下 0.03 % 0.01 得到的是 0.009999999999999998 而不是 0，
-    合法手数会被误判。改成除完取整再比差值，容差取步长的百万分之一。
-
-    Why not a plain modulo: 0.03 % 0.01 is 0.009999999999999998 in floating point,
-    which would reject a perfectly valid volume. Divide, round, compare the residual.
-    """
-    step = settings.VOLUME_STEP
-    if step <= 0:
-        return True
-    n = round(volume / step)
-    return abs(volume - n * step) <= step * 1e-6
 
 
 def is_account_online(row) -> bool:
@@ -200,6 +186,11 @@ def validate_order(symbol: str, side: str, volume: float, equity: float | None =
         raise HTTPException(status_code=400, detail="方向无效 / Invalid side")
     if not symbol or len(symbol) > 20:
         raise HTTPException(status_code=400, detail="品种无效 / Invalid symbol")
+    if volume < min_lot(symbol):
+        raise HTTPException(
+            status_code=400,
+            detail=f"低于 {symbol} 的最小手数 {min_lot(symbol)} / Below min volume for {symbol}",
+        )
     if volume < settings.MIN_VOLUME_PER_ORDER:
         raise HTTPException(
             status_code=400,
@@ -210,10 +201,12 @@ def validate_order(symbol: str, side: str, volume: float, equity: float | None =
             status_code=400,
             detail=f"超过单笔最大手数 {settings.MAX_VOLUME_PER_ORDER} / Exceeds max volume",
         )
-    if not is_volume_on_step(volume):
+    # 手数必须落在该品种的步长上。不是整数倍的手数不会被 MT5 当场拒绝，而是被
+    # 接受成一张永远不会成交的订单，挂在仓位上把后续平仓全挡掉（2026-09-17 事故）。
+    if not is_volume_on_step(volume, symbol):
         raise HTTPException(
             status_code=400,
-            detail=f"手数必须是 {settings.VOLUME_STEP} 的整数倍 / Volume must be a multiple of {settings.VOLUME_STEP}",
+            detail=f"手数必须是 {lot_step(symbol)} 的整数倍 / Volume must be a multiple of {lot_step(symbol)}",
         )
     # 按净值粗估手数上限 / rough equity-based lot cap
     if equity is not None and equity > 0 and settings.EQUITY_PER_LOT > 0:

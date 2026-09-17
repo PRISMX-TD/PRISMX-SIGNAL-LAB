@@ -341,27 +341,59 @@ export function calcCountdown(
 export function roundLots(n: number): number {
   return Math.round(n * 1000) / 1000
 }
+// 每手手数步长 —— 按品种。合作券商实测（2026-09-17 负责人确认）：除原油 WTI 是
+// 0.1 以外，其余品种都是 0.01。步长同时决定了最小手数：步长 0.1 的品种填不出
+// 0.01，最小就是 0.1。
+//
+// 为什么非管不可：不是整数倍的手数**不会被 MT5 当场拒绝**，而是被接受成一张永远
+// 不会成交的订单，挂在仓位上把这张仓位后续的平仓全部挡掉。2026-09-17 有用户对一张
+// 黄金仓位提交了 0.015 手的部分平仓，此后三个半小时平不掉，最后爆仓。
+//
+// 这张表是**兜底**，与 CONTRACT_SIZE 同一性质：真正权威的是券商品种表，由 gateway
+// 在下单前逐笔校验。这里管的是"别让用户填错"，让错误停在输入框而不是交易所。
+//
+// Lot step per symbol. Verified at the partner broker: 0.1 for WTI crude, 0.01 for
+// everything else. The step also sets the minimum: a 0.1-step symbol cannot take 0.01.
+// An off-step volume is NOT rejected by MT5 — it becomes an order that can never fill
+// and then blocks every later close on that position. This table is the fallback; the
+// gateway validates against the broker's real symbol table. Its job is to stop the
+// mistake at the input box.
+const LOT_STEP: Record<string, number> = {
+  WTI: 0.1,
+}
+const DEFAULT_LOT_STEP = 0.01
+
+export function lotStep(symbol: string | null | undefined): number {
+  if (!symbol) return DEFAULT_LOT_STEP
+  return LOT_STEP[baseSymbol(symbol)] ?? DEFAULT_LOT_STEP
+}
+
+/** 该品种的最小手数：步长比 0.01 粗时，最小手数就是步长本身。 */
+export function minLot(symbol: string | null | undefined): number {
+  return Math.max(DEFAULT_LOT_STEP, lotStep(symbol))
+}
+
 /**
- * 手数是否落在手数步长上（平台统一 0.01）。
- *
- * 不是整数倍的手数（黄金 0.015）不会被 MT5 当场拒绝，而是被接受成一张永远不会
- * 成交的订单，挂在仓位上把这张仓位后续的平仓全部挡掉——2026-09-17 有用户因此
- * 三个半小时平不掉仓，最后爆仓。真正的步长按品种而定，由 gateway 用券商的品种表
- * 做权威校验；这里只是把错误挡在提交之前，让用户当场看见。
+ * 手数是否落在该品种的步长上。
  *
  * 不能直接取模：浮点下 0.03 % 0.01 得到 0.009999999999999998，合法手数会被误判。
+ * 一律除完取整再比残差，容差取步长的百万分之一。
  *
- * An off-step volume is not rejected by MT5; it becomes an order that can never fill
- * and blocks every later close on that position. The authoritative per-symbol check
- * is in the gateway — this one just fails fast, in front of the user. A plain modulo
- * is unusable: 0.03 % 0.01 is 0.009999999999999998.
+ * A plain modulo is unusable: 0.03 % 0.01 is 0.009999999999999998 in binary floating
+ * point, which would reject a valid volume. Divide, round, compare the residual.
  */
-export const LOT_STEP = 0.01
-
-export function isLotOnStep(n: number): boolean {
+export function isLotOnStep(n: number, symbol?: string | null): boolean {
   if (!Number.isFinite(n)) return false
-  const k = Math.round(n / LOT_STEP)
-  return Math.abs(n - k * LOT_STEP) <= LOT_STEP * 1e-6
+  const step = lotStep(symbol)
+  const k = Math.round(n / step)
+  return Math.abs(n - k * step) <= step * 1e-6
+}
+
+/** 把手数向下吸附到该品种的步长上，并保证不低于最小手数。 */
+export function snapLot(n: number, symbol?: string | null): number {
+  const step = lotStep(symbol)
+  const floored = Math.floor(n / step + 1e-6) * step
+  return roundLots(Math.max(step, floored))
 }
 
 export function fmtLots(n: number | null | undefined): string {

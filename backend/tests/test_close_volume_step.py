@@ -21,29 +21,55 @@ from app.core.config import settings
 from app.models import MT5Account, Order, User
 from app.services import gateway_client
 from app.services import gateway_execute as gx
-from app.services.deps import is_volume_on_step
+from app.services.symbol_aliases import is_volume_on_step, lot_step, min_lot
 
 LOGIN = "603689"
 
 
 # ---------- 步长判定本身 / the step predicate ----------
 
+def test_lot_step_is_per_symbol():
+    """合作券商实测：原油 0.1，其余 0.01。步长同时决定最小手数。"""
+    assert lot_step("XAUUSD") == 0.01
+    assert lot_step("XAUUSD.s") == 0.01
+    assert lot_step("EURUSD") == 0.01
+    assert lot_step("BTCUSDT") == 0.01          # 归一到 BTCUSD
+    for name in ("WTI", "USOIL", "XTIUSD", "WTICOUSD"):
+        assert lot_step(name) == 0.1, name      # 原油的各种别名都要命中
+    assert min_lot("WTI") == 0.1
+    assert min_lot("XAUUSD") == 0.01
+
+
 @pytest.mark.parametrize("vol", [0.01, 0.02, 0.03, 0.1, 0.25, 1.0, 2.5, 10.0])
 def test_multiples_of_step_pass(vol):
-    assert is_volume_on_step(vol)
+    assert is_volume_on_step(vol, "XAUUSD")
 
 
 @pytest.mark.parametrize("vol", [0.015, 0.025, 0.005, 0.123, 0.0101])
 def test_off_step_volumes_fail(vol):
-    assert not is_volume_on_step(vol)
+    assert not is_volume_on_step(vol, "XAUUSD")
+
+
+@pytest.mark.parametrize("vol", [0.1, 0.2, 0.5, 1.0, 2.0])
+def test_wti_accepts_tenths(vol):
+    assert is_volume_on_step(vol, "WTI")
+
+
+@pytest.mark.parametrize("vol", [0.01, 0.05, 0.15, 0.23])
+def test_wti_rejects_finer_than_tenths(vol):
+    """原油步长 0.1——黄金上合法的 0.01 / 0.15 在这里都是非法手数。"""
+    assert not is_volume_on_step(vol, "WTI")
+    # 同一个数在黄金上未必非法，证明判定确实按品种走
+    assert is_volume_on_step(0.01, "XAUUSD")
 
 
 def test_float_noise_does_not_reject_valid_volumes():
     """0.03 % 0.01 在浮点下是 0.009999999999999998——直接取模会把合法手数判错。"""
     assert 0.03 % 0.01 != 0            # 取模不可用的证据 / why modulo is unusable
-    assert is_volume_on_step(0.03)
-    assert is_volume_on_step(0.07)
-    assert is_volume_on_step(1.14)
+    assert is_volume_on_step(0.03, "XAUUSD")
+    assert is_volume_on_step(0.07, "XAUUSD")
+    assert is_volume_on_step(1.14, "XAUUSD")
+    assert is_volume_on_step(0.3, "WTI")
 
 
 # ---------- 平仓接口的闸门 / the close endpoint ----------
@@ -56,7 +82,7 @@ def _user(db):
     return u
 
 
-def _close(db, monkeypatch, volume):
+def _close(db, monkeypatch, volume, symbol="XAUUSD"):
     """直接调 /orders/close 的实现函数。
 
     本仓库的路由测试惯例是 service 级：Depends 全部按普通参数显式传进去，不起
@@ -70,8 +96,8 @@ def _close(db, monkeypatch, volume):
     monkeypatch.setattr(orders, "_try_gateway_execute", lambda _db, _o: None)
 
     req = orders.ClosePositionRequest(
-        mt5Login=LOGIN, ticket=36109204, symbol="XAUUSD", side="SELL",
-        volume=volume, clientOrderId=f"co_{volume}",
+        mt5Login=LOGIN, ticket=36109204, symbol=symbol, side="SELL",
+        volume=volume, clientOrderId=f"co_{symbol}_{volume}",
     )
     return orders.close_position(request=None, req=req, user=db.get(User, "u1"), db=db)
 
@@ -95,6 +121,25 @@ def test_close_allows_full_close_with_zero_volume(db_session, monkeypatch):
     """全平用 0 表示，不受步长限制：仓位自身的手数必然合法。"""
     _user(db_session)
     _close(db_session, monkeypatch, 0)
+    assert db_session.query(Order).filter(Order.action == "CLOSE").count() == 1
+
+
+def test_close_rejects_sub_step_volume_on_wti(db_session, monkeypatch):
+    """原油步长 0.1：0.05 手在黄金上合法，在这里必须被拒。"""
+    from fastapi import HTTPException
+
+    _user(db_session)
+
+    with pytest.raises(HTTPException) as e:
+        _close(db_session, monkeypatch, 0.05, symbol="WTI")
+
+    assert e.value.status_code == 400
+    assert db_session.query(Order).filter(Order.action == "CLOSE").count() == 0
+
+
+def test_close_allows_tenths_on_wti(db_session, monkeypatch):
+    _user(db_session)
+    _close(db_session, monkeypatch, 0.2, symbol="WTI")
     assert db_session.query(Order).filter(Order.action == "CLOSE").count() == 1
 
 

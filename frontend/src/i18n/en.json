@@ -1021,7 +1021,8 @@
     "closed": "Closed @ {{price}}",
     "closeFailed": "Close failed",
     "modified": "SL/TP updated",
-    "closeAllConfirm": "Close all {{volume}} lots of {{symbol}}? This cannot be undone."
+    "closeAllConfirm": "Close all {{volume}} lots of {{symbol}}? This cannot be undone.",
+    "lotStepHint": "Step {{step}} lots, min {{min}}"
   },
   "bind": {
     "title": "Connect MT5",
@@ -1453,29 +1454,66 @@
     "overview": {
       "range": {
         "label": "Range",
-        "preset": { "week": "This week", "month": "This month", "last_month": "Last month", "quarter": "This quarter", "year": "This year" },
+        "preset": {
+          "week": "This week",
+          "month": "This month",
+          "last_month": "Last month",
+          "quarter": "This quarter",
+          "year": "This year"
+        },
         "custom": "Custom",
         "from": "From",
         "to": "To",
         "apply": "Apply",
         "shown": "{{start}} – {{end}} · {{days}} days · vs {{compareStart}} – {{compareEnd}}",
-        "error": { "order": "Start must not be after end", "future": "End must not be in the future", "tooLong": "At most 400 days" }
+        "error": {
+          "order": "Start must not be after end",
+          "future": "End must not be in the future",
+          "tooLong": "At most 400 days"
+        }
       },
-      "delta": { "none": "no data in previous period", "vsPrev": "{{pct}} vs previous" },
-      "headline": { "activeToday": "Active today", "activeWeek": "Active (7d)", "activeMonth": "Active (30d)", "signups": "Signups in range" },
-      "activity": { "title": "Activity trend", "hint": "Active = opened at least one page that day (admins excluded). Days follow Beijing time.", "active": "Daily active", "signups": "Signups" },
-      "plans": { "FREE": "FREE", "PRO_PAID": "PRO · paid", "PRO_TRIAL": "PRO · trial" },
+      "delta": {
+        "none": "no data in previous period",
+        "vsPrev": "{{pct}} vs previous"
+      },
+      "headline": {
+        "activeToday": "Active today",
+        "activeWeek": "Active (7d)",
+        "activeMonth": "Active (30d)",
+        "signups": "Signups in range"
+      },
+      "activity": {
+        "title": "Activity trend",
+        "hint": "Active = opened at least one page that day (admins excluded). Days follow Beijing time.",
+        "active": "Daily active",
+        "signups": "Signups"
+      },
+      "plans": {
+        "FREE": "FREE",
+        "PRO_PAID": "PRO · paid",
+        "PRO_TRIAL": "PRO · trial"
+      },
       "funnel": {
         "title": "Conversion funnel",
         "hint": "All users (admins excluded). Steps are independent and may be skipped (e.g. paid without a trial), so a later step can exceed an earlier one. Percentages are relative to the previous step; \"real / demo\" splits Linked MT5 (demo includes contest and unclassified accounts), and a user with both kinds counts in both.",
-        "step": { "registered": "Registered", "bound": "Linked MT5", "boundReal": "of which: real", "boundDemo": "of which: demo", "traded": "Placed a trade", "trialed": "Started trial", "paid": "Paid PRO" },
+        "step": {
+          "registered": "Registered",
+          "bound": "Linked MT5",
+          "boundReal": "of which: real",
+          "boundDemo": "of which: demo",
+          "traded": "Placed a trade",
+          "trialed": "Started trial",
+          "paid": "Paid PRO"
+        },
         "byWeek": "Where each of the last 8 signup weeks got to (percent of that week's signups; real / demo as percent of that week's linked)",
         "weekOf": "Signup week (Mon)"
       },
       "retention": {
         "title": "Retention",
         "hint": "Share of users who opened a page on day N after signup (Beijing time). Only users whose day N has passed are counted.",
-        "d2": "Day-2", "d7": "Day-7", "d30": "Day-30",
+        "d2": "Day-2",
+        "d7": "Day-7",
+        "d30": "Day-30",
         "cohort": "{{n}} users signed up {{from}} – {{to}}",
         "emptyCohort": "No users old enough yet"
       },
@@ -1483,12 +1521,15 @@
         "title": "Strategy usage",
         "hint": "Per preset template: created = at least one strategy; enabled = currently has one running and evaluating. Admins excluded.",
         "empty": "No strategies created yet.",
-        "colTemplate": "Template", "colUsers": "Created by", "colEnabled": "Enabled by"
+        "colTemplate": "Template",
+        "colUsers": "Created by",
+        "colEnabled": "Enabled by"
       },
       "trading": {
         "title": "Trading usage",
         "hint": "FILLED orders only, by fill time (Beijing) within the selected range. Admins excluded.",
-        "traders": "Users with fills", "fills": "Fills"
+        "traders": "Users with fills",
+        "fills": "Fills"
       },
       "loadFailed": "Failed to load",
       "retry": "Retry",

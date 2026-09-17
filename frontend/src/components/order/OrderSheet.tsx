@@ -18,7 +18,7 @@ import { displaySymbol, localizeApiError } from '../../api/utils'
 import { useBackToClose } from '../../utils/useBackToClose'
 import OrderConnectNotice from '../OrderConnectNotice'
 import SlideToConfirm from './SlideToConfirm'
-import { QUICK_LOTS, QUICK_RISK_PCTS, formatMoney } from './orderMath'
+import { quickLots, QUICK_RISK_PCTS, formatMoney } from './orderMath'
 import type { OrderForm } from './useOrderForm'
 
 export type OrderConfirm = (
@@ -194,7 +194,7 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
             <div className="slide-row">
               <span className="k" />
               <div className="flex gap-1.5">
-                {QUICK_LOTS.map((q) => (
+                {quickLots(symbol).map((q) => (
                   <button key={q} onClick={() => form.setVolume(q.toFixed(2))} className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-xs text-neutral-300 hover:border-prism-500/50 hover:text-prism-300 font-mono">
                     {q.toFixed(2)}
                   </button>

@@ -16,7 +16,7 @@ import { useTranslation } from 'react-i18next'
 import Select from '../Select'
 import type { MT5Account, Order, Quote } from '../../api/types'
 import { localizeApiError } from '../../api/utils'
-import { QUICK_LOTS, QUICK_RISK_PCTS, formatMoney } from '../order/orderMath'
+import { quickLots, QUICK_RISK_PCTS, formatMoney } from '../order/orderMath'
 import { useOrderForm, type Side } from '../order/useOrderForm'
 
 interface Props {
@@ -199,7 +199,7 @@ export default function OrderTicket({
       </div>
       {form.sizeMode === 'quick' ? (
         <div className="term-pre">
-          {QUICK_LOTS.map((q) => (
+          {quickLots(symbol).map((q) => (
             <button key={q} type="button" onClick={() => form.setVolume(q.toFixed(2))}>{q.toFixed(2)}</button>
           ))}
         </div>
