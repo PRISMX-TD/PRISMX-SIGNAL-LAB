@@ -2170,6 +2170,9 @@ namespace Prismx.Mt5Gateway
         /// <summary>手数比较用的容差。MT5 手数以 1/10000 手为整数单位,1e-9 远小于它。</summary>
         private const double VolumeEpsilon = 1e-9;
 
+        /// <summary>确认平仓时两次重读仓位之间的间隔,见 ConfirmClose。</summary>
+        private const int ConfirmRecheckDelayMs = 250;
+
         /// <summary>
         /// value 是否为 step 的整数倍。step<=0(拿不到步长)时一律通过。
         /// 浮点直接取模不可靠:0.03/0.01 在二进制里是 2.9999999999999996。
@@ -2212,32 +2215,44 @@ namespace Prismx.Mt5Gateway
                 return;
             }
 
-            PositionSnapshot after;
-            bool ignored;
-            MTRetCode res;
-
-            if (!ReadPosition(ticket, true, out after, out ignored, out res))
+            // 向服务器重读仓位。读到「手数没变」不能立刻定罪:成交订阅整个断开时
+            // WaitRecentFill 是立即返回的,这一读会紧贴着 dealer 回执发出,完全可能
+            // 读到还没更新的仓位。所以复核一次,两次都说没变才判定没成交。
+            // Re-read from the server. "Unchanged" on the first read is not proof: with
+            // the subscription down WaitRecentFill returns instantly, so this read can
+            // race the server's own update. Only a second, later read settles it.
+            for (int attempt = 0; attempt < 2; attempt++)
             {
-                if (res == MTRetCode.MT_RET_ERR_NOTFOUND)
+                if (attempt > 0)
+                    System.Threading.Thread.Sleep(ConfirmRecheckDelayMs);
+
+                PositionSnapshot after;
+                bool ignored;
+                MTRetCode res;
+
+                if (!ReadPosition(ticket, true, out after, out ignored, out res))
                 {
-                    Log.Info("仓位 #{0} 已不存在,确认全平成交", ticket);
+                    if (res == MTRetCode.MT_RET_ERR_NOTFOUND)
+                    {
+                        Log.Info("仓位 #{0} 已不存在,确认全平成交", ticket);
+                        return;
+                    }
+
+                    Log.Warn("平仓后重读仓位 #{0} 失败({1}),无法确认是否成交,按成交处理", ticket, res);
                     return;
                 }
 
-                Log.Warn("平仓后重读仓位 #{0} 失败({1}),无法确认是否成交,按成交处理", ticket, res);
-                return;
+                if (after.Volume < volumeBefore - VolumeEpsilon)
+                {
+                    Log.Info("仓位 #{0} 手数 {1} -> {2},确认成交", ticket, volumeBefore, after.Volume);
+                    return;
+                }
             }
 
-            if (after.Volume < volumeBefore - VolumeEpsilon)
-            {
-                Log.Info("仓位 #{0} 手数 {1} -> {2},确认部分成交", ticket, volumeBefore, after.Volume);
-                return;
-            }
-
-            // 订单建立了,仓位却纹丝不动:这笔平仓没有成交。
+            // 两次重读手数都纹丝不动:订单建立了,但这笔平仓没有成交。
             Log.Warn("平仓请求被接受但未成交:ticket={0} order={1} 仓位手数仍是 {2},"
                      + "该订单可能挂在券商队列里并挡住后续平仓",
-                     ticket, r.Order, after.Volume);
+                     ticket, r.Order, volumeBefore);
 
             r.Ok = false;
             r.Retcode = PlacedUnconfirmed;
