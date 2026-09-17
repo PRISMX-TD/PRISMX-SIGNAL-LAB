@@ -1466,9 +1466,9 @@
       "plans": { "FREE": "FREE", "PRO_PAID": "PRO · paid", "PRO_TRIAL": "PRO · trial" },
       "funnel": {
         "title": "Conversion funnel",
-        "hint": "All users (admins excluded). Steps are independent and may be skipped (e.g. paid without a trial), so a later step can exceed an earlier one. Percentages are relative to the previous step.",
-        "step": { "registered": "Registered", "bound": "Linked MT5", "traded": "Placed a trade", "trialed": "Started trial", "paid": "Paid PRO" },
-        "byWeek": "Where each of the last 8 signup weeks got to (percent of that week's signups)",
+        "hint": "All users (admins excluded). Steps are independent and may be skipped (e.g. paid without a trial), so a later step can exceed an earlier one. Percentages are relative to the previous step; \"real / demo\" splits Linked MT5 (demo includes contest and unclassified accounts), and a user with both kinds counts in both.",
+        "step": { "registered": "Registered", "bound": "Linked MT5", "boundReal": "of which: real", "boundDemo": "of which: demo", "traded": "Placed a trade", "trialed": "Started trial", "paid": "Paid PRO" },
+        "byWeek": "Where each of the last 8 signup weeks got to (percent of that week's signups; real / demo as percent of that week's linked)",
         "weekOf": "Signup week (Mon)"
       },
       "retention": {

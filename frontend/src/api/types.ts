@@ -229,6 +229,8 @@ export interface AdminActivityDay {
 export interface AdminFunnelSteps {
   registered: number
   bound: number
+  boundReal: number // 其中绑了真仓 / of which linked a real account
+  boundDemo: number // 其中绑了模拟仓（含比赛/未判定）/ of which linked a demo (incl. contest / unclassified)
   traded: number
   trialed: number
   paid: number

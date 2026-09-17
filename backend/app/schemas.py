@@ -327,6 +327,8 @@ class FunnelStepsOut(BaseModel):
     Independent steps; skipping is allowed so later steps need not be smaller."""
     registered: int
     bound: int     # 有 MT5 账号 / has an mt5_accounts row
+    boundReal: int  # 其中有真仓（trade_mode == REAL）/ of which linked a real account
+    boundDemo: int  # 其中有模拟仓（含比赛仓与未判定）/ of which linked a demo (incl. contest / unclassified)
     traded: int    # 有 FILLED 订单 / has a FILLED order
     trialed: int   # trial_used_at 非空 / used the trial
     paid: int      # 有 FINISHED 付款 / has a FINISHED payment

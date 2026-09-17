@@ -5,7 +5,22 @@
 import { useTranslation } from 'react-i18next'
 import type { AdminFunnelSteps, AdminFunnelWeek } from '../../../api/types'
 
-const STEPS: (keyof AdminFunnelSteps)[] = ['registered', 'bound', 'traded', 'trialed', 'paid']
+// 主步骤五个；"绑定 MT5" 下面挂两个子行：真仓 / 模拟仓，百分比相对"绑定 MT5"而不是上一行。
+// Five main steps; two sub-rows under "Linked MT5" (real / demo) whose
+// percentages are relative to the bound total, not the row above.
+type Step = keyof AdminFunnelSteps
+const STEPS: Step[] = ['registered', 'bound', 'boundReal', 'boundDemo', 'traded', 'trialed', 'paid']
+const SUB_STEPS = new Set<Step>(['boundReal', 'boundDemo'])
+// 每一步的百分比分母：子行分母是 bound，主步骤分母是上一主步骤，注册无分母。
+// Denominator per step: sub-rows use bound, main steps use the previous main step.
+const PCT_BASE: Partial<Record<Step, Step>> = {
+  bound: 'registered',
+  boundReal: 'bound',
+  boundDemo: 'bound',
+  traded: 'bound',
+  trialed: 'traded',
+  paid: 'trialed',
+}
 
 function pct(part: number, whole: number): string {
   return whole > 0 ? `${Math.round((part / whole) * 100)}%` : '—'
@@ -22,15 +37,17 @@ export default function FunnelCard({ funnel }: { funnel: { overall: AdminFunnelS
       <p className="mb-4 text-xs text-neutral-500">{t('admin.overview.funnel.hint')}</p>
 
       <ol className="space-y-2">
-        {STEPS.map((step, i) => {
+        {STEPS.map((step) => {
           const n = overall[step]
-          const prev = i > 0 ? overall[STEPS[i - 1]] : null
+          const baseKey = PCT_BASE[step]
+          const prev = baseKey ? overall[baseKey] : null
+          const sub = SUB_STEPS.has(step)
           const width = base > 0 && n > 0 ? Math.max(2, (n / base) * 100) : 0
           return (
             <li key={step} className="grid grid-cols-[7rem_1fr_5rem] items-center gap-3 text-xs">
-              <span className="text-neutral-300">{t(`admin.overview.funnel.step.${step}`)}</span>
-              <div className="h-5 rounded bg-white/5">
-                <div className="h-5 rounded bg-prism-500/50" style={{ width: `${width}%` }} />
+              <span className={sub ? 'pl-4 text-neutral-500' : 'text-neutral-300'}>{t(`admin.overview.funnel.step.${step}`)}</span>
+              <div className={sub ? 'h-3 rounded bg-white/5' : 'h-5 rounded bg-white/5'}>
+                <div className={sub ? 'h-3 rounded bg-prism-500/30' : 'h-5 rounded bg-prism-500/50'} style={{ width: `${width}%` }} />
               </div>
               <span className="text-right tabular-nums text-neutral-100">
                 {n}
@@ -43,7 +60,7 @@ export default function FunnelCard({ funnel }: { funnel: { overall: AdminFunnelS
 
       <h3 className="mb-2 mt-5 text-xs font-medium text-neutral-400">{t('admin.overview.funnel.byWeek')}</h3>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] text-xs">
+        <table className="w-full min-w-[680px] text-xs">
           <thead>
             <tr className="text-left text-neutral-500">
               <th className="pb-2 font-medium">{t('admin.overview.funnel.weekOf')}</th>
@@ -57,7 +74,9 @@ export default function FunnelCard({ funnel }: { funnel: { overall: AdminFunnelS
                 {STEPS.map((s) => (
                   <td key={s} className="py-1.5 text-right tabular-nums text-neutral-200">
                     {w[s]}
-                    {s !== 'registered' && <span className="ml-1 text-[10px] text-neutral-500">{pct(w[s], w.registered)}</span>}
+                    {s !== 'registered' && (
+                      <span className="ml-1 text-[10px] text-neutral-500">{pct(w[s], SUB_STEPS.has(s) ? w.bound : w.registered)}</span>
+                    )}
                   </td>
                 ))}
               </tr>

@@ -44,9 +44,9 @@ def _visit(db, user: User, d: date, path="/dashboard"):
     db.add(PageVisitorDay(path=path, day=d, user_id=user.id)); db.commit()
 
 
-def _bind(db, user: User, login="1001"):
+def _bind(db, user: User, login="1001", trade_mode=None):
     # 唯一约束是 (user_id, login, server)，同一人两个账号要换 login
-    db.add(MT5Account(user_id=user.id, login=login)); db.commit()
+    db.add(MT5Account(user_id=user.id, login=login, trade_mode=trade_mode)); db.commit()
 
 
 def _fill(db, user: User, d: date, status="FILLED"):
@@ -148,6 +148,22 @@ def test_funnel_overall_steps_are_independent(db_session):
     _bind(db_session, adm); _fill(db_session, adm, TODAY); _pay(db_session, adm)
     f = ov.funnel(db_session, TODAY).overall
     assert (f.registered, f.bound, f.traded, f.trialed, f.paid) == (3, 1, 1, 0, 1)
+
+
+def test_funnel_bound_splits_real_and_demo(db_session):
+    from app.services.account_type import CONTEST, DEMO, REAL
+    a = _user(db_session, "a@t.co"); b = _user(db_session, "b@t.co"); c = _user(db_session, "c@t.co")
+    d = _user(db_session, "d@t.co"); adm = _admin(db_session)
+    _bind(db_session, a, trade_mode=REAL)
+    _bind(db_session, a, login="1002", trade_mode=DEMO)      # 两种都有 → 两边都算
+    _bind(db_session, b, trade_mode=DEMO)
+    _bind(db_session, c, trade_mode=CONTEST)                  # 比赛仓归模拟
+    _bind(db_session, d)                                      # 未判定归模拟
+    _bind(db_session, adm, trade_mode=REAL)                   # 管理员不算
+    f = ov.funnel(db_session, TODAY).overall
+    assert (f.bound, f.boundReal, f.boundDemo) == (4, 1, 4)
+    week = ov.funnel(db_session, TODAY).byWeek[-3]            # 9/1 注册 → 8/31 那周
+    assert (week.weekStart, week.boundReal, week.boundDemo) == ("2026-08-31", 1, 4)
 
 
 def test_funnel_trialed_uses_trial_used_at(db_session):

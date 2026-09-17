@@ -14,10 +14,11 @@ parity), admins excluded everywhere, "active" means a page_visitor_days row.
 from collections import defaultdict
 from datetime import date, timedelta
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Query, Session
 
 from app.models import MT5Account, Order, PageVisitorDay, Payment, User, UserStrategy
+from app.services.account_type import REAL as TRADE_MODE_REAL
 from app.schemas import (
     ActivityDayOut, AdminOverviewOut, CompareOut, FunnelOut, FunnelStepsOut, FunnelWeekOut,
     OverviewHeadlineOut, OverviewRangeOut, RetentionOut, RetentionPointOut, StrategyUsageOut,
@@ -122,6 +123,19 @@ def _step_user_ids(db: Session) -> dict[str, set[str]]:
 
     return {
         "bound": ids(db.query(MT5Account.user_id).join(User, User.id == MT5Account.user_id).filter(NOT_ADMIN).distinct()),
+        # 真仓 / 模拟仓拆分：真仓 = trade_mode 判定为 REAL；其余（模拟、比赛、未判定）都归模拟仓，
+        # 与 account_type.is_real 的"未知按非实盘"一致。一个人两种账号都有就两边都算。
+        # Real vs demo split: real = trade_mode REAL; everything else (demo, contest,
+        # unclassified) counts as demo, matching account_type.is_real. A user with both
+        # kinds appears in both.
+        "bound_real": ids(
+            db.query(MT5Account.user_id).join(User, User.id == MT5Account.user_id)
+            .filter(NOT_ADMIN, MT5Account.trade_mode == TRADE_MODE_REAL).distinct()
+        ),
+        "bound_demo": ids(
+            db.query(MT5Account.user_id).join(User, User.id == MT5Account.user_id)
+            .filter(NOT_ADMIN, or_(MT5Account.trade_mode.is_(None), MT5Account.trade_mode != TRADE_MODE_REAL)).distinct()
+        ),
         "traded": ids(db.query(Order.user_id).join(User, User.id == Order.user_id).filter(NOT_ADMIN, Order.status == "FILLED").distinct()),
         "trialed": ids(_non_admin_users(db).with_entities(User.id).filter(User.trial_used_at.isnot(None))),
         "paid": ids(db.query(Payment.user_id).join(User, User.id == Payment.user_id).filter(NOT_ADMIN, Payment.status == "FINISHED").distinct()),
@@ -132,6 +146,8 @@ def _steps_for(cohort: set[str], steps: dict[str, set[str]]) -> dict[str, int]:
     return {
         "registered": len(cohort),
         "bound": len(cohort & steps["bound"]),
+        "boundReal": len(cohort & steps["bound_real"]),
+        "boundDemo": len(cohort & steps["bound_demo"]),
         "traded": len(cohort & steps["traded"]),
         "trialed": len(cohort & steps["trialed"]),
         "paid": len(cohort & steps["paid"]),
