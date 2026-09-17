@@ -41,4 +41,4 @@ export const SUPPORT_EMAIL = ''
 // 法务文本的生效日期，三份文档共用。改动任何一份的实质内容时同步更新这里。
 // Effective date shown on all three legal documents. Bump it whenever any of
 // them changes substantively.
-export const LEGAL_UPDATED = '2026-07-28'
+export const LEGAL_UPDATED = '2026-09-17'
