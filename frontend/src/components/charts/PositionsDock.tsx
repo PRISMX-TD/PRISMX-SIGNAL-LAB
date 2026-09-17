@@ -16,7 +16,7 @@ import { useTranslation } from 'react-i18next'
 import type { Order, Position } from '../../api/types'
 import { orderApi } from '../../api/client'
 import { clientOrderId, displaySymbol, isLotOnStep, localizeApiError,
-         lotStep, minLot, snapLot } from '../../api/utils'
+         limitLotInput, lotStep, minLot, snapLot } from '../../api/utils'
 import { symbolMeta } from '../../utils/symbolMeta'
 import ConfirmModal from '../ConfirmModal'
 
@@ -322,7 +322,7 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
                               if (!Number.isFinite(v) || v <= 0) return f
                               return { ...f, vol: String(Math.min(p.volume, snapLot(v, p.symbol))) }
                             })}
-                            onChange={(e) => setForm((f) => ({ ...f, vol: e.target.value.replace(/[^0-9.]/g, '') }))}
+                            onChange={(e) => setForm((f) => ({ ...f, vol: limitLotInput(e.target.value, p.symbol) }))}
                           />
                           <button type="button" className="term-pr-btn" disabled={busy || volBad} onClick={() => closePosition(p, volNum)}>
                             {t('charts.dock.closeLots', { lots: volBad ? '' : volNum })}

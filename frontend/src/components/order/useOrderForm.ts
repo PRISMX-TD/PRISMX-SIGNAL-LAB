@@ -17,7 +17,7 @@
 // online for the docked ticket) — that difference is intentional.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MT5Account, Quote } from '../../api/types'
-import { brokerSymbol, clientOrderId } from '../../api/utils'
+import { brokerSymbol, limitLotInput, snapLot, clientOrderId } from '../../api/utils'
 import { pickDefaultAccount, useLastAccount } from '../../utils/useLastAccount'
 import { useLastVolume } from '../../utils/useLastVolume'
 import {
@@ -28,7 +28,6 @@ import {
   normalizeVolume,
   parseOptionalNumber,
   previewRisk,
-  sanitizeDecimal,
   stepVolume,
   suggestVolumeForRisk,
 } from './orderMath'
@@ -155,11 +154,17 @@ export function useOrderForm({
   const [riskPct, setRiskPct] = useState('1')
   const touchedRef = useRef(false)
   const setVolume = (v: string) => { touchedRef.current = true; setVolumeState(v); rememberVolume(v) }
-  const typeVolume = (raw: string) => { touchedRef.current = true; setVolumeState(sanitizeDecimal(raw)) }
+  const typeVolume = (raw: string) => { touchedRef.current = true; setVolumeState(limitLotInput(raw, symbol)) }
   const blurVolume = () => setVolume(normalizeVolume(volume, symbol))
   const stepLot = (dir: 1 | -1) => setVolume(stepVolume(volume, dir, symbol))
+  // 提交用的手数必须落在该品种的步长上。输入时已按位数截断、失焦还会吸附，但手机上
+  // 滑动确认可能不先失焦，所以这里再吸附一次兜底——按钮上显示的也是这个值，用户在
+  // 滑之前就能看到最终手数，不会被"悄悄改了"。
+  // The submitted volume must sit on the symbol's step. Typing is truncated and blur
+  // snaps, but the mobile slider can fire without a blur, so snap here too. The button
+  // label reads this value, so the user sees the final lots before confirming.
   const parsedVolumeRaw = parseFloat(volume)
-  const parsedVolume = parsedVolumeRaw > 0 ? parsedVolumeRaw : null
+  const parsedVolume = parsedVolumeRaw > 0 ? snapLot(parsedVolumeRaw, symbol) : null
 
   // 偏好从云端晚到（本地缓存为空的新设备 / 新浏览器）：用户还没碰过手数时补应用记忆值。
   // Prefs arriving late from the cloud (fresh device, empty local cache): apply

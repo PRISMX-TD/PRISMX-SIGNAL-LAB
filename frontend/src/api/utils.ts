@@ -389,6 +389,35 @@ export function isLotOnStep(n: number, symbol?: string | null): boolean {
   return Math.abs(n - k * step) <= step * 1e-6
 }
 
+/** 该品种手数允许的小数位数：步长 0.1 → 1 位，步长 0.01 → 2 位。 */
+export function lotDecimals(symbol?: string | null): number {
+  return lotStep(symbol) >= 0.1 ? 1 : 2
+}
+
+/**
+ * 手数输入框的实时过滤：只留数字和小数点，并把小数位数截到该品种允许的位数。
+ *
+ * 只在失焦时吸附是不够的——用户能一路把 0.8902 打进去，看着像个合法手数，直到
+ * 提交才被拒；而且在手机上滑动确认时输入框未必先失焦。这里让多余的位数根本
+ * 打不进去：黄金最多两位，原油最多一位。
+ *
+ * 中间态必须放行，否则输入框没法用："" / "0" / "0." / "0.8" 都要能停留。
+ *
+ * Live filter for the lot input: digits and one dot, with decimals truncated to what
+ * the symbol allows. Snapping only on blur lets 0.8902 sit there looking valid until
+ * submit, and on mobile the slider may fire without blurring first. Intermediate
+ * states ("", "0", "0.", "0.8") must pass through or the field becomes unusable.
+ */
+export function limitLotInput(raw: string, symbol?: string | null): string {
+  const cleaned = raw.replace(/[^0-9.]/g, '')
+  const firstDot = cleaned.indexOf('.')
+  if (firstDot < 0) return cleaned
+  // 多打的小数点直接丢掉，别让 "0.8.9" 这种串留在框里
+  const head = cleaned.slice(0, firstDot)
+  const tail = cleaned.slice(firstDot + 1).replace(/\./g, '')
+  return head + '.' + tail.slice(0, lotDecimals(symbol))
+}
+
 /** 把手数向下吸附到该品种的步长上，并保证不低于最小手数。 */
 export function snapLot(n: number, symbol?: string | null): number {
   const step = lotStep(symbol)

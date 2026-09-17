@@ -20,7 +20,7 @@ import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { orderApi } from '../api/client'
 import { clientOrderId, displaySymbol, fmtLots, isLotOnStep, localizeApiError,
-         lotStep, minLot, roundLots, snapLot } from '../api/utils'
+         limitLotInput, lotStep, minLot, roundLots, snapLot } from '../api/utils'
 import type { Position } from '../api/types'
 import ConfirmModal from './ConfirmModal'
 import { useBackToClose } from '../utils/useBackToClose'
@@ -227,7 +227,8 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
             setCloseVol(String(Math.min(roundLots(p.volume), snapLot(v, p.symbol))))
           }
         }}
-        onChange={(e) => setCloseVol(e.target.value)}
+        // 实时截掉超出该品种步长的小数位，多余的位数根本打不进去。
+        onChange={(e) => setCloseVol(limitLotInput(e.target.value, p.symbol))}
       />
       <p className="text-[11px] text-neutral-500">
         {t('positions.lotStepHint', { step, min: minVol })}
