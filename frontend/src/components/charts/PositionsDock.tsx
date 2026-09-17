@@ -15,7 +15,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Order, Position } from '../../api/types'
 import { orderApi } from '../../api/client'
-import { clientOrderId, displaySymbol, localizeApiError } from '../../api/utils'
+import { clientOrderId, displaySymbol, isLotOnStep, localizeApiError } from '../../api/utils'
 import { symbolMeta } from '../../utils/symbolMeta'
 import ConfirmModal from '../ConfirmModal'
 
@@ -262,7 +262,10 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
               const meta = symbolMeta(p.symbol)
               // 部分平仓手数校验：[0.01, 持仓量] / partial-close volume must be in [0.01, size]
               const volNum = parseFloat(form.vol)
+              // 手数步长同样要卡：非整数倍的手数会被券商收下却永不成交，并把这张
+              // 仓位锁死，后续平仓全部被拒（见 isLotOnStep）。
               const volBad = Number.isNaN(volNum) || volNum < 0.01 || volNum > p.volume
+                || !isLotOnStep(volNum)
               // 改止损止盈方向校验（现价缺失时跳过）/ SL/TP direction check (skipped without a price)
               const slN = form.sl.trim() === '' ? null : parseFloat(form.sl)
               const tpN = form.tp.trim() === '' ? null : parseFloat(form.tp)

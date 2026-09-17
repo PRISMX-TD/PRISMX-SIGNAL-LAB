@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { orderApi } from '../api/client'
-import { clientOrderId, displaySymbol, fmtLots, localizeApiError, roundLots } from '../api/utils'
+import { clientOrderId, displaySymbol, fmtLots, isLotOnStep, localizeApiError, roundLots } from '../api/utils'
 import type { Position } from '../api/types'
 import ConfirmModal from './ConfirmModal'
 import { useBackToClose } from '../utils/useBackToClose'
@@ -101,7 +101,11 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
     // Partial close volume must be within [0.01, position size]. Below 0.01
     // lots MT5 can't fill; the old check only blocked ≤0, letting an
     // un-fillable tiny close get sent only to be rejected.
-    if (!full && (vol == null || Number.isNaN(vol) || vol < 0.01 || vol > p.volume)) {
+    // 还要卡手数步长：非整数倍的手数会被券商收下却永不成交，并锁死这张仓位。
+    // Also gate on the lot step: an off-step volume is accepted but never fills,
+    // and then locks the position (see isLotOnStep).
+    if (!full && (vol == null || Number.isNaN(vol) || vol < 0.01 || vol > p.volume
+                  || !isLotOnStep(vol))) {
       onActionDone?.(t('positions.invalidVolume'), 'error')
       return
     }

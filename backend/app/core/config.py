@@ -498,6 +498,15 @@ class Settings(BaseSettings):
     # 风控 / Risk control
     MAX_VOLUME_PER_ORDER: float = 10.0  # 单笔最大手数 / max lots per order
     MIN_VOLUME_PER_ORDER: float = 0.01  # 单笔最小手数 / min lots per order
+    # 手数步长。手数必须是它的整数倍——不是整数倍的手数(例如黄金 0.015)不会被
+    # MT5 当场拒绝,而是被接受成一张永远不会成交的订单,挂在仓位上把后续平仓全部
+    # 挡掉(2026-09-17 事故)。真正的步长按品种而定,由 gateway 用券商的品种表做
+    # 权威校验;这里是全平台的粗粒度闸门,挡在下单之前,错误信息也更早、更清楚。
+    # Volumes must be whole multiples of this. An off-step volume is not rejected by
+    # MT5 — it becomes an order that can never fill and blocks every later close on
+    # that position. The authoritative per-symbol check lives in the gateway; this is
+    # the coarse platform-wide gate that fails fast, before the order is placed.
+    VOLUME_STEP: float = 0.01
     # 按账户净值粗估的手数上限：每手所需净值（账户币种）。净值/该值 = 允许的最大手数。
     # Rough equity-based lot cap: required equity per lot (account currency).
     EQUITY_PER_LOT: float = 200.0

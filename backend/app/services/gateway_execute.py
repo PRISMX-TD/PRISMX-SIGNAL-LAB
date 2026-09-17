@@ -56,6 +56,13 @@ def gateway_account(db: Session, mt5_login: str | None, user_id: str | None = No
     return acc
 
 
+# 网关自己的返回码（不是 MT5 原生码）：dealer 答了 PLACED，但网关确认后发现仓位
+# 手数没变，这笔平仓并未成交。与 gateway/Mt5Link.cs 的 Mt5Link.PlacedUnconfirmed 同值。
+# Gateway-issued retcode: the dealer answered PLACED but the position never changed,
+# so the close did not execute. Mirrors Mt5Link.PlacedUnconfirmed on the gateway side.
+PLACED_UNCONFIRMED = "MT_RET_REQUEST_PLACED_UNCONFIRMED"
+
+
 def apply_trade_result(order: Order, rsp: TradeRsp) -> None:
     """根据 gateway 回执更新订单状态。"""
     if rsp.ok:
@@ -70,6 +77,15 @@ def apply_trade_result(order: Order, rsp: TradeRsp) -> None:
             order.mt5_position = rsp.position
         order.filled_price = rsp.price or None
         order.message = ""
+    elif rsp.retcode == PLACED_UNCONFIRMED:
+        # 网关判定「服务器收下了但没成交」。这既不是成交也不是拒绝：订单确实建立了，
+        # 可能还挂在券商队列里，而且会挡住对同一仓位的后续平仓。落 FAILED 而不是
+        # REJECTED，界面据此提示「先核对持仓」，不要诱导用户重复提交。
+        # Neither a fill nor a rejection: the order exists, may still be queued, and
+        # blocks further closes on that position. FAILED, so the UI says "check your
+        # positions" instead of inviting a retry.
+        order.status = "FAILED"
+        order.message = rsp.retcode + (": " + rsp.message if rsp.message else "")
     elif rsp.error == "timeout":
         # 网关没回话不等于拒绝：这笔可能已经执行（见 call_gateway_idempotent）。
         # 落 FAILED 而不是 REJECTED，界面文案据此提示"先核对持仓"。

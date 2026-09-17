@@ -31,6 +31,22 @@ ONLINE_WINDOW = 7
 LAST_ACTIVE_THROTTLE_SECONDS = 300
 
 
+def is_volume_on_step(volume: float) -> bool:
+    """手数是否为 VOLUME_STEP 的整数倍。
+
+    为什么不能直接取模：浮点下 0.03 % 0.01 得到的是 0.009999999999999998 而不是 0，
+    合法手数会被误判。改成除完取整再比差值，容差取步长的百万分之一。
+
+    Why not a plain modulo: 0.03 % 0.01 is 0.009999999999999998 in floating point,
+    which would reject a perfectly valid volume. Divide, round, compare the residual.
+    """
+    step = settings.VOLUME_STEP
+    if step <= 0:
+        return True
+    n = round(volume / step)
+    return abs(volume - n * step) <= step * 1e-6
+
+
 def is_account_online(row) -> bool:
     """判断一个 MT5 账号是否在线 / whether an MT5 account is online.
 
@@ -193,6 +209,11 @@ def validate_order(symbol: str, side: str, volume: float, equity: float | None =
         raise HTTPException(
             status_code=400,
             detail=f"超过单笔最大手数 {settings.MAX_VOLUME_PER_ORDER} / Exceeds max volume",
+        )
+    if not is_volume_on_step(volume):
+        raise HTTPException(
+            status_code=400,
+            detail=f"手数必须是 {settings.VOLUME_STEP} 的整数倍 / Volume must be a multiple of {settings.VOLUME_STEP}",
         )
     # 按净值粗估手数上限 / rough equity-based lot cap
     if equity is not None and equity > 0 and settings.EQUITY_PER_LOT > 0:

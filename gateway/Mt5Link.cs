@@ -446,6 +446,20 @@ namespace Prismx.Mt5Gateway
         public long ElapsedMs;   // 整个开仓/平仓/改单调用 / the whole call
         public long DealerMs;    // 其中等 dealer 回执的部分 / of which: waiting for the dealer
 
+        // dealer 只答了 MT_RET_REQUEST_PLACED:请求被接受、订单已建立——但这条答复
+        // 本身**不证明它成交了**。DONE/DONE_PARTIAL 才是服务器认账的成交。
+        // 2026-09-17 的事故就出在这个差别上:一笔 0.015 手的平仓拿到 PLACED,被当成
+        // 成交回给用户,实际订单挂在仓位上从未执行,此后该仓位的每一次平仓都被
+        // MT_RET_REQUEST_CLOSE_ORDER_EXIST 挡下,持续三个半小时直到爆仓。
+        // 调用方看到这个标志,就必须自己确认成交,不能直接当成功。
+        //
+        // The dealer answered PLACED: accepted and an order was created — which does
+        // not prove it executed. Only DONE/DONE_PARTIAL are fills the server stands
+        // behind. A 0.015-lot close that answered PLACED was reported as filled while
+        // its order sat on the position, blocking every later close for 3.5 hours
+        // until stop-out. Callers seeing this flag must confirm the fill themselves.
+        public bool Placed;
+
         public static TradeResult Fail(string retcode, string message)
         {
             return new TradeResult { Ok = false, Retcode = retcode, Message = message };
@@ -1875,6 +1889,19 @@ namespace Prismx.Mt5Gateway
             // 自动补后缀:不同组需要不同后缀品种(如 EURUSD.s)
             symbol = ResolveSymbol(login, symbol);
 
+            // 手数校验必须在补完后缀之后做,否则查不到品种、校验白写(详见
+            // ValidateVolumeForSymbol 的注释)。非法手数不会被服务器当场拒绝,
+            // 而是变成一张永不成交的订单,后患远大于一次明确的报错。
+            string volErr = ValidateVolumeForSymbol(symbol, lots, "开仓");
+
+            if (volErr != null)
+            {
+                Log.Warn("开仓手数不合法,已拦下:login={0} {1} lots={2} -> {3}",
+                    login, symbol, lots, volErr);
+                return TradeResult.Fail(
+                    MTRetCode.MT_RET_REQUEST_INVALID_VOLUME.ToString(), volErr);
+            }
+
             // 先取价:买用 ask,卖用 bid
             double bid, ask;
             MTRetCode qres;
@@ -2055,6 +2082,178 @@ namespace Prismx.Mt5Gateway
         //| 平仓要先读出原仓位:方向要反,而且必须带 TA_FLAG_CLOSE 标记,      |
         //| 否则服务器会当成反向开新仓(变成对锁),不是平仓。                 |
         //+------------------------------------------------------------------+
+        /// <summary>
+        /// 按品种的手数限制校验手数(最小、最大、步长)。返回 null 表示通过。
+        ///
+        /// symbol 必须是**已补后缀的真实品种名**。这一点踩过坑:原先开仓的校验写在
+        /// HttpServer.HandleOpen 里,拿的是请求里的基础名(XAUUSD),而券商真实品种是
+        /// XAUUSD.s,SymbolGet 查不到就直接跳过校验——那段校验对本券商从来没生效过。
+        /// 现在两条路径都在补完后缀之后才校验:开仓在 ResolveSymbol 之后,平仓用仓位
+        /// 快照里的品种名(本来就是真实名)。
+        ///
+        /// Validates a volume against the symbol's min/max/step. `symbol` must be the
+        /// resolved broker name: the old check lived in HandleOpen and used the base
+        /// name (XAUUSD) while the real symbol is XAUUSD.s, so SymbolGet missed and the
+        /// check silently did nothing. Both paths now validate after resolution.
+        /// </summary>
+        private string ValidateVolumeForSymbol(string symbol, double lots, string what)
+        {
+            double volMin, volMax, volStep;
+            MTRetCode sres;
+
+            if (!GetSymbolLimits(symbol, out volMin, out volMax, out volStep, out sres))
+            {
+                Log.Warn("读不到 {0} 的手数限制({1}),跳过{2}手数校验", symbol, sres, what);
+                return null;
+            }
+
+            if (volMin > 0 && lots < volMin - VolumeEpsilon)
+                return string.Format("{0}手数 {1} 低于 {2} 的最小手数 {3}",
+                    what, lots, symbol, volMin);
+
+            if (volMax > 0 && lots > volMax + VolumeEpsilon)
+                return string.Format("{0}手数 {1} 超过 {2} 的最大手数 {3}",
+                    what, lots, symbol, volMax);
+
+            if (!IsMultipleOf(lots, volStep))
+                return string.Format("{0}手数 {1} 不是 {2} 手数步长 {3} 的整数倍",
+                    what, lots, symbol, volStep);
+
+            return null;
+        }
+
+        /// <summary>
+        /// 平仓手数是否合法。返回 null 表示通过,否则返回给用户看的原因。
+        ///
+        /// 全平(lots<=0)不校验:仓位自身的手数必然是合法的。部分平仓才需要,
+        /// 而且要卡三件事——不超过仓位手数、不低于品种最小手数、是手数步长的
+        /// 整数倍,外加平完之后的**剩余**手数也得能独立成立。
+        ///
+        /// 为什么非卡不可:非法手数不会被服务器当场拒绝,而是被接受成一张永远
+        /// 不会成交的订单(答复 MT_RET_REQUEST_PLACED),然后挂在仓位上,让这张
+        /// 仓位再也平不掉。2026-09-17 就是这么爆的——0.015 手,黄金步长 0.01。
+        /// 拿不到品种限制时不拦,维持旧行为交给服务器裁决。
+        ///
+        /// Validates a partial-close volume. A full close is exempt: the position's
+        /// own volume is valid by definition. An out-of-step volume is not rejected
+        /// outright by the server — it is accepted as an order that can never fill
+        /// (answered PLACED) and then blocks every further close on that position.
+        /// </summary>
+        private string ValidateCloseVolume(PositionSnapshot pos, double lots)
+        {
+            if (lots <= 0)
+                return null;
+
+            if (lots > pos.Volume + VolumeEpsilon)
+                return string.Format("平仓手数 {0} 超过仓位手数 {1}", lots, pos.Volume);
+
+            string err = ValidateVolumeForSymbol(pos.Symbol, lots, "平仓");
+            if (err != null)
+                return err;
+
+            double volMin, volMax, volStep;
+            MTRetCode sres;
+
+            if (!GetSymbolLimits(pos.Symbol, out volMin, out volMax, out volStep, out sres))
+                return null;
+
+            // 剩余手数同样要能独立成立,否则服务器一样不会执行这笔部分平仓。
+            double rest = pos.Volume - lots;
+
+            if (rest > VolumeEpsilon && volMin > 0 && rest < volMin - VolumeEpsilon)
+                return string.Format("平掉 {0} 手后仅剩 {1} 手,低于 {2} 的最小手数 {3},请改为全平",
+                    lots, rest, pos.Symbol, volMin);
+
+            return null;
+        }
+
+        /// <summary>手数比较用的容差。MT5 手数以 1/10000 手为整数单位,1e-9 远小于它。</summary>
+        private const double VolumeEpsilon = 1e-9;
+
+        /// <summary>
+        /// value 是否为 step 的整数倍。step<=0(拿不到步长)时一律通过。
+        /// 浮点直接取模不可靠:0.03/0.01 在二进制里是 2.9999999999999996。
+        /// Whether value is a whole multiple of step; a plain modulo is unreliable
+        /// because 0.03/0.01 evaluates to 2.9999999999999996 in binary floating point.
+        /// </summary>
+        private static bool IsMultipleOf(double value, double step)
+        {
+            if (step <= 0)
+                return true;
+
+            double n = Math.Round(value / step);
+            return Math.Abs(value - n * step) <= step * 1e-6 + VolumeEpsilon;
+        }
+
+        /// <summary>
+        /// 确认一笔答复为 PLACED 的平仓是否真的成交了,没成交就把结果改成失败。
+        ///
+        /// 两级确认,都不成立才判定没成交:
+        ///   1. 成交订阅——平仓成交与开仓成交同源,按成交号/订单号就地认领,正常
+        ///      路径 150~200ms 内到,不必往服务器跑。
+        ///   2. 向服务器重读仓位——订阅没建立或事件晚到时的权威依据。仓位没了
+        ///      =全平成交;手数变小=部分成交;手数一点没动=这张订单没执行。
+        ///
+        /// 重读失败(网络/权限)时不改判:宁可维持旧的"当成交"行为,也不要把一笔
+        /// 真成交报成失败——那会诱导用户重复平仓。
+        ///
+        /// Confirms a PLACED close actually executed, downgrading the result if not.
+        /// Deal subscription first, then an authoritative re-read of the position. A
+        /// failed re-read leaves the result alone: reporting a real fill as a failure
+        /// would invite a duplicate close, which is the worse error.
+        /// </summary>
+        private void ConfirmClose(ulong ticket, double volumeBefore, ref TradeResult r)
+        {
+            FillInfo fill = WaitRecentFill(r.Deal, r.Order);
+
+            if (fill != null)
+            {
+                Log.Info("平仓成交事件已到,确认成交:ticket={0} deal={1}", ticket, fill.Deal);
+                return;
+            }
+
+            PositionSnapshot after;
+            bool ignored;
+            MTRetCode res;
+
+            if (!ReadPosition(ticket, true, out after, out ignored, out res))
+            {
+                if (res == MTRetCode.MT_RET_ERR_NOTFOUND)
+                {
+                    Log.Info("仓位 #{0} 已不存在,确认全平成交", ticket);
+                    return;
+                }
+
+                Log.Warn("平仓后重读仓位 #{0} 失败({1}),无法确认是否成交,按成交处理", ticket, res);
+                return;
+            }
+
+            if (after.Volume < volumeBefore - VolumeEpsilon)
+            {
+                Log.Info("仓位 #{0} 手数 {1} -> {2},确认部分成交", ticket, volumeBefore, after.Volume);
+                return;
+            }
+
+            // 订单建立了,仓位却纹丝不动:这笔平仓没有成交。
+            Log.Warn("平仓请求被接受但未成交:ticket={0} order={1} 仓位手数仍是 {2},"
+                     + "该订单可能挂在券商队列里并挡住后续平仓",
+                     ticket, r.Order, after.Volume);
+
+            r.Ok = false;
+            r.Retcode = PlacedUnconfirmed;
+            r.Message = "平仓请求已被服务器接受,但未在确认时限内成交,仓位手数没有变化。"
+                      + "这张订单可能仍挂在券商的交易队列里,并会挡住对同一仓位的后续平仓。"
+                      + "请不要重复提交,稍后核对持仓,必要时联系券商。";
+        }
+
+        /// <summary>
+        /// 「服务器收下了但没成交」的返回码。不是 MT5 的原生码,是网关自己的判定,
+        /// 后端据此把订单落成 FAILED 而不是 REJECTED——它既不是成交也不是拒绝。
+        /// Gateway-issued retcode (not an MT5 one) for "accepted but never executed",
+        /// which the backend records as FAILED rather than REJECTED: it is neither.
+        /// </summary>
+        public const string PlacedUnconfirmed = "MT_RET_REQUEST_PLACED_UNCONFIRMED";
+
         public TradeResult ClosePosition(ulong login, ulong ticket, double lots, string tag)
         {
             Stopwatch sw = Stopwatch.StartNew();
@@ -2073,6 +2272,25 @@ namespace Prismx.Mt5Gateway
             if (pos.Login != login)
                 return TradeResult.Fail("MT_RET_ERR_PERMISSIONS",
                     "仓位 #" + ticket + " 不属于账号 " + login);
+
+            // 手数先过一遍本地校验。非法手数发出去不会被当场拒绝,而是变成一张
+            // 挂在仓位上、永远不会成交的订单,把这张仓位彻底锁死(见 ValidateCloseVolume)。
+            string volErr = ValidateCloseVolume(pos, lots);
+
+            if (volErr != null)
+            {
+                Log.Warn("平仓手数不合法,已拦下:login={0} ticket={1} lots={2} -> {3}",
+                    login, ticket, lots, volErr);
+
+                TradeResult bad = TradeResult.Fail(
+                    MTRetCode.MT_RET_REQUEST_INVALID_VOLUME.ToString(), volErr);
+                bad.ElapsedMs = sw.ElapsedMilliseconds;
+                return bad;
+            }
+
+            // 确认成交时要拿"发请求之前"的仓位手数做对照。下面手数过期重发那条
+            // 分支会换用服务器读回来的手数,所以这里是个变量而不是常量。
+            double volumeBefore = pos.Volume;
 
             TradeResult r = SendClose(login, ticket, pos, lots, tag);
 
@@ -2098,9 +2316,17 @@ namespace Prismx.Mt5Gateway
                     Log.Warn("本地仓位快照手数过期(本地 {0} / 服务器 {1}),按服务器数据重发平仓:login={2} ticket={3}",
                         pos.Volume, fresh.Volume, login, ticket);
 
+                    volumeBefore = fresh.Volume;
                     r = SendClose(login, ticket, fresh, lots, tag);
                 }
             }
+
+            // dealer 答 PLACED 只说明订单已建立,不等于成交。必须确认,否则一笔
+            // 从未执行的平仓会被当成成功回给用户,而它还会挡住后续所有平仓。
+            // A PLACED answer is not a fill; confirm it, or an unexecuted close is
+            // reported as success while it blocks every further close.
+            if (r.Ok && r.Placed)
+                ConfirmClose(ticket, volumeBefore, ref r);
 
             r.ElapsedMs = sw.ElapsedMilliseconds;
             return r;
@@ -2391,7 +2617,9 @@ namespace Prismx.Mt5Gateway
                             Order = result.ResultOrder(),
                             Price = result.ResultPrice(),
                             Message = result.ResultComment() ?? "",
-                            DealerMs = dealerMs
+                            DealerMs = dealerMs,
+                            // PLACED 要调用方再确认一次,见 TradeResult.Placed。
+                            Placed = res == MTRetCode.MT_RET_REQUEST_PLACED
                         };
                     }
                 }

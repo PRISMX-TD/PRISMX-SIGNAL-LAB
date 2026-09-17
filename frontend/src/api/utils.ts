@@ -341,6 +341,29 @@ export function calcCountdown(
 export function roundLots(n: number): number {
   return Math.round(n * 1000) / 1000
 }
+/**
+ * 手数是否落在手数步长上（平台统一 0.01）。
+ *
+ * 不是整数倍的手数（黄金 0.015）不会被 MT5 当场拒绝，而是被接受成一张永远不会
+ * 成交的订单，挂在仓位上把这张仓位后续的平仓全部挡掉——2026-09-17 有用户因此
+ * 三个半小时平不掉仓，最后爆仓。真正的步长按品种而定，由 gateway 用券商的品种表
+ * 做权威校验；这里只是把错误挡在提交之前，让用户当场看见。
+ *
+ * 不能直接取模：浮点下 0.03 % 0.01 得到 0.009999999999999998，合法手数会被误判。
+ *
+ * An off-step volume is not rejected by MT5; it becomes an order that can never fill
+ * and blocks every later close on that position. The authoritative per-symbol check
+ * is in the gateway — this one just fails fast, in front of the user. A plain modulo
+ * is unusable: 0.03 % 0.01 is 0.009999999999999998.
+ */
+export const LOT_STEP = 0.01
+
+export function isLotOnStep(n: number): boolean {
+  if (!Number.isFinite(n)) return false
+  const k = Math.round(n / LOT_STEP)
+  return Math.abs(n - k * LOT_STEP) <= LOT_STEP * 1e-6
+}
+
 export function fmtLots(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '—'
   return roundLots(n).toLocaleString('en-US', { maximumFractionDigits: 3 })

@@ -26,7 +26,8 @@ from app.schemas import (
     OrderRequest,
 )
 from app.services.connection_manager import manager
-from app.services.deps import get_current_user, is_account_online, validate_order, validate_sl_tp_direction
+from app.services.deps import (get_current_user, is_account_online, is_volume_on_step,
+                               validate_order, validate_sl_tp_direction)
 from app.services import bridge_wake
 from app.services.gateway_binding import not_removed
 from app.services.gateway_client import run_on_main_loop
@@ -476,6 +477,18 @@ def close_position(
         raise HTTPException(
             status_code=400,
             detail=f"低于单笔最小手数 {settings.MIN_VOLUME_PER_ORDER} / Below min volume",
+        )
+
+    # 部分平仓手数必须落在手数步长上。不是整数倍的手数（黄金 0.015）不会被 MT5
+    # 当场拒绝，而是被接受成一张永远不会成交的订单，挂在仓位上把这张仓位后续的
+    # 平仓全部挡掉——2026-09-17 有用户因此三个半小时平不掉仓，最后爆仓。
+    # 全平（省略或 0）不受此限：仓位自身的手数必然合法。
+    # An off-step partial close is not rejected by MT5; it becomes an order that can
+    # never fill and blocks every later close on that position. A full close is exempt.
+    if req.volume is not None and req.volume > 0 and not is_volume_on_step(req.volume):
+        raise HTTPException(
+            status_code=400,
+            detail=f"手数必须是 {settings.VOLUME_STEP} 的整数倍 / Volume must be a multiple of {settings.VOLUME_STEP}",
         )
 
     # 幂等 / idempotency by clientOrderId

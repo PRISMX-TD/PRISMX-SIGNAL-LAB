@@ -684,20 +684,12 @@ namespace Prismx.Mt5Gateway
             if (!EnsureTradableAccount(ctx, login))
                 return;
 
-            // 手数合法性交给服务器最终裁决,但先做一次本地校验,
-            // 可以把明显错误的请求挡在成交之前,错误信息也更清楚。
-            double volMin, volMax, volStep;
-            MTRetCode sres;
-
-            if (_link.GetSymbolLimits(symbol, out volMin, out volMax, out volStep, out sres))
-            {
-                if (volume < volMin || volume > volMax)
-                {
-                    WriteError(ctx, 400, "bad_volume", string.Format(
-                        "手数超出范围:{0} 允许 {1} ~ {2}", symbol, volMin, volMax));
-                    return;
-                }
-            }
+            // 手数校验搬进 Mt5Link.OpenPositionCore 了。这里查不到带后缀的真实品种
+            // (请求里是基础名 XAUUSD,券商是 XAUUSD.s),SymbolGet 必然落空,这段校验
+            // 对本券商从来没生效过;补后缀发生在 ResolveSymbol,只能在那之后校验。
+            // Volume validation moved into Mt5Link.OpenPositionCore: here the symbol is
+            // still the unsuffixed base name, so SymbolGet always missed and this check
+            // never ran. Suffix resolution happens inside, so validation must too.
 
             double stopLoss = body.GetDouble("stopLoss");
             double takeProfit = body.GetDouble("takeProfit");
