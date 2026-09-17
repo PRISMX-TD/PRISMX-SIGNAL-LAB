@@ -33,6 +33,7 @@ manual actions, fully visible on the orders page.
   so omitting it would wipe the take-profit.
 """
 import logging
+import math
 import threading
 import time
 import uuid
@@ -44,6 +45,7 @@ from sqlalchemy.orm import Session
 from app.models import AutoManagedPosition, AutoManageSettings, MT5Account, Order, User
 from app.services.plans import can_auto_manage
 from app.services.push_dispatch import EVENT_AUTO_MANAGE, dispatch_event_push
+from app.services.symbol_aliases import lot_step, min_lot
 
 logger = logging.getLogger("prismx.auto_manage")
 
@@ -345,10 +347,20 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
             and profit_r >= cfg.ptp_trigger_r
             and ticket not in pending_auto_tickets
         ):
-            close_vol = int(volume * cfg.ptp_fraction * 100) / 100.0
-            # 拆不开的小仓不动（平掉部分和剩余部分都得 ≥ 0.01 手）
-            # skip positions too small to split (both legs must be ≥ 0.01 lots)
-            if close_vol >= 0.01 and volume - close_vol >= 0.01:
+            # 手数必须落在该品种的步长上，并且要向下取整——原油步长是 0.1，按
+            # 固定的 0.01 取整会算出 0.05 这种手数。非整数倍的手数不会被 MT5 当场
+            # 拒绝，而是被接受成一张永远不会成交的订单，挂在仓位上把这张仓位后续的
+            # 平仓全部挡掉（2026-09-17 事故就是这么来的，只不过那笔是用户手动下的）。
+            # Floor onto the symbol's step: crude steps by 0.1, and the old fixed 0.01
+            # floor would emit volumes like 0.05. An off-step volume is accepted by MT5
+            # as an order that can never fill, which then blocks every later close.
+            step = lot_step(symbol)
+            close_vol = math.floor(volume * cfg.ptp_fraction / step + 1e-9) * step
+            close_vol = round(close_vol, 3)
+            # 拆不开的小仓不动（平掉部分和剩余部分都得 ≥ 该品种最小手数）
+            # skip positions too small to split (both legs must be >= the symbol's min)
+            min_v = min_lot(symbol)
+            if close_vol >= min_v and volume - close_vol >= min_v - 1e-9:
                 cmd = Order(
                     user_id=user_id,
                     client_order_id=_client_order_id("tp", ticket),

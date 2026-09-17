@@ -176,3 +176,52 @@ def test_placed_unconfirmed_lands_failed_not_filled(monkeypatch, db_session):
     assert o.status == "FAILED"
     assert o.status != "REJECTED"
     assert gx.PLACED_UNCONFIRMED in o.message
+
+
+# ---------- 自动仓位管理的分批止盈 / auto-manage partial take-profit ----------
+
+def _ptp_volume(volume: float, fraction: float, symbol: str):
+    """复刻 auto_manage 里分批止盈的手数算法，用来锁住"按品种步长向下取整"。
+
+    这条路径不经过 /orders/close 的闸门（指令由后台直接落库），所以它自己必须
+    算对：原油步长 0.1，旧实现按固定的 0.01 取整会算出 0.15 这种永远不会成交的
+    手数，挂上去就把仓位锁死。
+    """
+    import math
+
+    from app.services.symbol_aliases import lot_step, min_lot
+
+    step = lot_step(symbol)
+    close_vol = round(math.floor(volume * fraction / step + 1e-9) * step, 3)
+    fires = close_vol >= min_lot(symbol) and volume - close_vol >= min_lot(symbol) - 1e-9
+    return close_vol, fires
+
+
+def test_auto_ptp_volume_lands_on_step_for_wti():
+    """原油 0.3 手平一半：必须是 0.1，不能是旧实现的 0.15。"""
+    vol, fires = _ptp_volume(0.3, 0.5, "WTI")
+    assert fires and vol == 0.1
+    assert is_volume_on_step(vol, "WTI")
+
+
+@pytest.mark.parametrize("volume,fraction", [(1.0, 0.5), (0.5, 0.5), (2.0, 0.3), (0.7, 0.5)])
+def test_auto_ptp_never_emits_off_step_volume_on_wti(volume, fraction):
+    vol, fires = _ptp_volume(volume, fraction, "WTI")
+    if fires:
+        assert is_volume_on_step(vol, "WTI"), vol
+        assert vol >= min_lot("WTI")
+
+
+def test_auto_ptp_skips_positions_too_small_to_split():
+    """原油最小 0.1 手：0.1 手的仓位拆不开，必须整笔跳过而不是发个 0 手出去。"""
+    vol, fires = _ptp_volume(0.1, 0.5, "WTI")
+    assert not fires
+
+    gold_vol, gold_fires = _ptp_volume(0.01, 0.5, "XAUUSD")
+    assert not gold_fires
+
+
+def test_auto_ptp_unchanged_for_gold():
+    """黄金行为不能被这次改动碰到。"""
+    assert _ptp_volume(0.10, 0.5, "XAUUSD") == (0.05, True)
+    assert _ptp_volume(0.03, 0.5, "XAUUSD") == (0.01, True)
