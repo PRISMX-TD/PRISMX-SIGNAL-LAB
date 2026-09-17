@@ -492,6 +492,7 @@
     "planTrialTag": "PRO（试用）",
     "balance": "余额",
     "equity": "净值",
+    "marginLevel": "保证金比例",
     "leverage": "杠杆",
     "changePassword": "修改密码",
     "setPassword": "设置密码",

@@ -1182,6 +1182,11 @@ class MT5AccountOut(BaseModel):
     accountCurrency: str | None = None
     balance: float | None = None
     equity: float | None = None
+    # 已用保证金（账户货币）。网页端拿它和 equity 算保证金比例；None = 还没刷新过
+    # 或桥接版本太旧没上报，前端显示「—」，不要当成 0。
+    # Margin in use; the web app derives the margin level from it and equity.
+    # None = never refreshed / bridge too old to report it — render as "—", not 0.
+    margin: float | None = None
     leverage: int | None = None
     company: str | None = None
     symbolSuffix: str | None = None

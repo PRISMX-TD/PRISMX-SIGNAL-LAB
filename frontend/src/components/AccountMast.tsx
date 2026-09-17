@@ -5,22 +5,24 @@
 // 一屏的三分之二。这里把它们合成一块「抬头」，像手机银行的账户页：
 //   第一行  ● 登录号 · 券商  ▾      —— 点击展开账号列表切换（只有一个账号时不可展开）
 //   大数    净值                    —— 整页唯一的大字
-//   小行    余额 / 浮动盈亏 / 杠杆
+//   小行    余额 / 浮动盈亏 / 杠杆 / 保证金比例
 //   末行    账户名（券商那串长评估账号名，单行省略）
-// 七项信息一项没少，高度从 ~420px 收到 ~130px。它跟页头的账号选择器一样是整页
+// 八项信息一项没少，高度从 ~420px 收到 ~130px 上下。它跟页头的账号选择器一样是整页
 // 的账号上下文，所以摆在页签条上面、三个页签共用。样式在 styles/orders.css
 // 的 .ord-mast-* 段。
 // Desktop splits account info across the head's pills (switching) and the
 // positions tab's six-cell ledger. Stacked on a phone they ate two thirds of the
 // first screen. This masthead merges them the way a banking app does: switcher
-// line, one big equity figure, a facts line (balance / floating P&L / leverage)
-// and the long account name ellipsised. Same seven facts, ~130px instead of
-// ~420px. Like the head's selector it is page-wide context, so it sits above
+// line, one big equity figure, a facts line (balance / floating P&L / leverage /
+// margin level)
+// and the long account name ellipsised. Same facts as desktop, ~130px instead
+// of ~420px. Like the head's selector it is page-wide context, so it sits above
 // the tab bar and is shared by all three tabs. Styled by .ord-mast-* in
 // styles/orders.css.
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { MT5Account } from '../api/types'
+import { formatMarginLevel } from './order/orderMath'
 
 interface Props {
   accounts: MT5Account[]
@@ -107,6 +109,13 @@ export default function AccountMast({ accounts, active, onChoose, floating, brok
         <span>
           <span className="ord-k">{t('account.leverage')}</span>
           <b>{active.leverage ? `1:${active.leverage}` : '—'}</b>
+        </span>
+        {/* 保证金比例（净值 / 已用保证金，MT5 的「预付款比例」）。口径是整个 MT5
+            账号，和左边那个只算本平台开仓的浮动盈亏不同——保证金由券商按全账号收。
+            Margin level; account-wide, unlike the platform-only floating P&L beside it. */}
+        <span>
+          <span className="ord-k">{t('account.marginLevel')}</span>
+          <b>{formatMarginLevel(active.equity, active.margin)}</b>
         </span>
       </div>
 

@@ -465,6 +465,13 @@ def _account_payload(suffix: str) -> dict | None:
         "accountCurrency": info.currency,
         "balance": float(info.balance),
         "equity": float(info.equity),
+        # 已用保证金。网页端拿它和净值算保证金比例（MT5 终端里的「预付款比例」）。
+        # 不自己算比例：空仓时 margin=0，除法在这里算就得先编一个"无穷大/0"的约定，
+        # 交给展示侧按 null 处理更干净。
+        # Margin in use; the web app derives the margin level from it and equity.
+        # The ratio is deliberately not computed here — margin is 0 when flat and
+        # the division would need an invented sentinel.
+        "margin": float(info.margin),
         "leverage": int(info.leverage),
         "company": info.company,
         "detectedSuffix": suffix,

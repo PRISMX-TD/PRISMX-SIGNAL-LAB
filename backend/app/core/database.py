@@ -133,7 +133,10 @@ def _hash_legacy_api_tokens() -> None:
 # rev 23 — announcement_reads.source（open = 真打开过详情；read_all = 只按了「全部已读」）。
 #          回填 'open'：这一列加之前，写这张表的只有 get_announcement 一处，存量行
 #          全都是真打开过的。回填成 read_all 会让所有人的历史已读公告重新具备弹窗资格。
-CURRENT_SCHEMA_REV = 23
+# rev 24 — mt5_accounts.margin（已用保证金，用来算保证金比例）。不回填：猜不出历史
+#          占用，NULL 走「还没刷新过」分支显示「—」；gateway 账号下一轮资金刷新
+#          （15 秒）就有值，bridge 账号要等 1.4.1 及以上的桥接上报。
+CURRENT_SCHEMA_REV = 24
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -535,6 +538,12 @@ def _migrate_columns() -> None:
             # the "never observed" path until the first IN leg is seen.
             if "server_utc_offset" not in acc_cols:
                 conn.execute(text("ALTER TABLE mt5_accounts ADD COLUMN server_utc_offset INTEGER"))
+            # rev 24：已用保证金。同 server_utc_offset 不回填——0 会被读成
+            # 「确定空仓」，NULL 才是「还没刷新过」。
+            # rev 24: margin in use. Not backfilled — 0 would read as "certainly
+            # flat"; NULL is the honest "never refreshed".
+            if "margin" not in acc_cols:
+                conn.execute(text("ALTER TABLE mt5_accounts ADD COLUMN margin FLOAT"))
 
     # rev 15：出入金流水 + 实盘标记来源。flows 不回填——过去的入金没有时间信息，
     # 旧行的 adjust 按「全程生效」读（boards.capital_at 的 residue）。

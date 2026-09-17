@@ -214,6 +214,18 @@ class MT5Account(Base):
     account_currency = Column(String, nullable=True)
     balance = Column(Float, nullable=True)
     equity = Column(Float, nullable=True)
+    # 已用保证金（占用的预付款，账户货币）。网页端拿它和 equity 算保证金比例
+    # （equity / margin × 100%，即 MT5 终端里的「预付款比例」）。
+    # NULL = 还没刷新过（rev 24 之前的存量行、或刚绑完还没走过一轮资金刷新）；
+    # 0 = 券商说的「当前没有占用保证金」，也就是空仓——两者前端都显示「—」，
+    # 但别把 NULL 写成 0：那等于把"不知道"说成"确定空仓"。
+    # gateway 侧每轮资金刷新写；bridge 侧要 1.4.1 及以上才上报，旧版保持 NULL。
+    # Margin in use (account currency). The web app derives the margin level
+    # from it (equity / margin, MT5's "margin level"). NULL = never refreshed
+    # (legacy rows, or a fresh bind before its first funds tick); 0 = the broker
+    # says nothing is tied up. Both render as "—", but NULL must never be
+    # written as 0 — that turns "unknown" into "certainly flat".
+    margin = Column(Float, nullable=True)
     leverage = Column(Integer, nullable=True)
     company = Column(String, nullable=True)
     # 该账号的品种后缀（如 ".sc"）/ symbol suffix for this account

@@ -312,6 +312,11 @@ class BridgeAccount(BaseModel):
     accountCurrency: str | None = Field(default=None, max_length=16)
     balance: float | None = None
     equity: float | None = None
+    # 已用保证金（MT5 的 account_info().margin）。桥接 1.4.1 起上报，旧版不带这个
+    # 字段 → None，服务端不覆盖已有值（也就不会把「未知」写成 0）。
+    # Margin in use; reported by bridge >= 1.4.1. Absent on older builds, in which
+    # case the server keeps whatever it had rather than writing a fake 0.
+    margin: float | None = Field(default=None, ge=0)
     leverage: int | None = Field(default=None, ge=0, le=100000)
     company: str | None = Field(default=None, max_length=128)
     detectedSuffix: str | None = Field(default=None, pattern=SUFFIX_PATTERN)
@@ -391,6 +396,8 @@ def _upsert_account(
         row.balance = acc.balance
     if acc.equity is not None:
         row.equity = acc.equity
+    if acc.margin is not None:
+        row.margin = acc.margin
     if acc.leverage is not None:
         row.leverage = acc.leverage
     if acc.company is not None:
@@ -1159,6 +1166,7 @@ def list_accounts(user: User = Depends(get_current_user), db: Session = Depends(
             accountCurrency=r.account_currency,
             balance=r.balance,
             equity=r.equity,
+            margin=r.margin,
             leverage=r.leverage,
             company=r.company,
             symbolSuffix=r.symbol_suffix or "",

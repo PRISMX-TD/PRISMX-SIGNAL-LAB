@@ -203,3 +203,39 @@ export function suggestVolumeForRisk(symbol: string, equity: number | null | und
 export function formatMoney(n?: number | null, dash = '-'): string {
   return n == null ? dash : n.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
+
+/** 保证金比例（MT5 终端里的「预付款比例」）= 净值 ÷ 已用保证金 × 100%。
+ *
+ * 空仓时券商给的 margin 是 0，MT5 自己在这种情况下也不显示比例——除以 0 得到的
+ * Infinity 不是"比例极高"而是"这个量此刻没有意义"，所以这里返回 null 交给展示侧
+ * 显示「—」。margin 为 null/undefined（存量行还没刷新过、或桥接版本太旧不上报）
+ * 同样返回 null：两种"没有比例"在界面上看起来一样，但绝不能拿 0 去顶替未知。
+ *
+ * MT5's margin level: equity / margin. Returns null when flat (margin 0 —
+ * Infinity would read as "extremely healthy" rather than "not meaningful here")
+ * and when margin is unknown (legacy row or an old bridge). The caller renders
+ * both as an em dash; never substitute 0 for unknown.
+ */
+export function marginLevel(equity?: number | null, margin?: number | null): number | null {
+  if (equity == null || margin == null || margin <= 0) return null
+  return (equity / margin) * 100
+}
+
+/** 保证金比例的显示形式：千分位 + 百分号。
+ *
+ * 小数位分两档。1000% 以下跟 MT5 终端一样留两位——这一档是真正有风险含义的区间
+ * （券商的追加保证金/强平线通常在 100%、50% 上下），差几个点都值得看清。1000% 以上
+ * 只在几乎空仓时出现（0.01 手黄金能算出 46 万%），两位小数全是噪音，还把这一格
+ * 撑得比旁边六格加起来还宽，所以取整。两档的前几位有效数字一致，跟终端上的数字
+ * 对照不会看出矛盾。
+ *
+ * Two decimals below 1000% — the band where margin call / stop-out levels live and
+ * single points matter, same as the MT5 terminal. Above that (only reachable when
+ * all but flat: 0.01 lot of gold yields ~465,000%) the decimals are pure noise and
+ * blow out the cell width, so it rounds. The leading digits agree either way. */
+export function formatMarginLevel(equity?: number | null, margin?: number | null, dash = '—'): string {
+  const lvl = marginLevel(equity, margin)
+  if (lvl == null) return dash
+  const digits = lvl < 1000 ? 2 : 0
+  return `${lvl.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`
+}

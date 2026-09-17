@@ -40,6 +40,7 @@ import AccountMast from '../components/AccountMast'
 import { useIsPhone } from '../utils/useMediaQuery'
 import { usePartnerBroker } from '../components/PartnerBrokerCard'
 import { symbolMeta } from '../utils/symbolMeta'
+import { formatMarginLevel } from '../components/order/orderMath'
 
 type StatusFilter = 'ALL' | OrderStatus
 const STATUS_FILTERS: StatusFilter[] = ['ALL', 'PENDING', 'FILLED', 'REJECTED', 'FAILED', 'CANCELLED']
@@ -546,13 +547,13 @@ export default function OrdersPage() {
 
           {/* 账户账本条（桌面）：详细的账号管理在 /account 页，这里只回答"这个账号现在
               什么状态"。两种连接方式展示同一组信息：登录号、状态、账户名、券商、余额、
-              净值、杠杆；bridge 账号原来多带的 "@server" 后缀去掉，券商列已经回答了
-              "这是哪家"。手机上这七项都在页头下的账户抬头里，不再重复。
+              净值、杠杆、保证金比例；bridge 账号原来多带的 "@server" 后缀去掉，券商列
+              已经回答了"这是哪家"。手机上这些都在页头下的账户抬头里，不再重复。
               Account ledger strip (desktop): detailed account management lives on
               /account; this only answers "how is this account doing". Both connection
               types show one identical info set; the bridge-only "@server" suffix is
               gone because the broker column already answers "which broker". On phones
-              all seven facts live in the masthead under the head, so nothing repeats. */}
+              the same facts live in the masthead under the head, so nothing repeats. */}
           {!isPhone && activeAccount && (
             <div className="ord-strip">
               <div className="ord-cell">
@@ -589,6 +590,19 @@ export default function OrdersPage() {
               <div className="ord-cell">
                 <div className="ord-k">{t('account.leverage')}</div>
                 <div className="ord-v">{activeAccount.leverage ? `1:${activeAccount.leverage}` : '—'}</div>
+              </div>
+              {/* 保证金比例 = 净值 / 已用保证金，就是 MT5 终端状态栏里的「预付款比例」。
+                  这一格算的是**整个 MT5 账号**（含用户在终端手开的仓），不是上面
+                  「当前持仓」那份只统计本平台开仓的口径——保证金是券商按全账号收的，
+                  只算一部分等于报一个券商根本不认的数。空仓或还没刷到值时显示「—」。
+                  Margin level (equity / margin) as shown in the MT5 status bar. Unlike
+                  the positions list above, this covers the whole MT5 account including
+                  manually opened trades — margin is charged account-wide, so a partial
+                  figure would be one the broker doesn't recognise. Em dash when flat or
+                  not yet refreshed. */}
+              <div className="ord-cell">
+                <div className="ord-k">{t('account.marginLevel')}</div>
+                <div className="ord-v">{formatMarginLevel(activeAccount.equity, activeAccount.margin)}</div>
               </div>
             </div>
           )}

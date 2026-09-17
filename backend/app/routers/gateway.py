@@ -470,6 +470,7 @@ def refresh_gateway_account(
 
     row.balance = rsp.balance
     row.equity = rsp.equity
+    row.margin = rsp.margin
     row.leverage = rsp.leverage
     row.account_name = rsp.name
     db.commit()
@@ -1081,6 +1082,7 @@ async def gateway_positions_loop() -> None:
 
             row.balance = rsp.balance
             row.equity = rsp.equity
+            row.margin = rsp.margin
             row.leverage = rsp.leverage
             if rsp.name:
                 row.account_name = rsp.name

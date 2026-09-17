@@ -492,6 +492,7 @@
     "planTrialTag": "PRO (Trial)",
     "balance": "Balance",
     "equity": "Equity",
+    "marginLevel": "Margin level",
     "leverage": "Leverage",
     "changePassword": "Change password",
     "setPassword": "Set password",

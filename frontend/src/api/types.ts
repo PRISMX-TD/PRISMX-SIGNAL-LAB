@@ -639,6 +639,13 @@ export interface MT5Account {
   accountCurrency?: string | null
   balance?: number | null
   equity?: number | null
+  // 已用保证金（账户货币）。保证金比例 = equity / margin（MT5 终端里的「预付款
+  // 比例」），算法见 marginLevel()。null/undefined = 还没刷新过或桥接版本太旧没
+  // 上报，0 = 券商说的空仓——两者都没有比例可言，但不要把前者当成后者。
+  // Margin in use. Margin level = equity / margin (MT5's "margin level"), see
+  // marginLevel(). null = never refreshed or bridge too old; 0 = flat per the
+  // broker. Neither has a ratio, but don't conflate the two.
+  margin?: number | null
   leverage?: number | null
   company?: string | null
   symbolSuffix?: string | null
