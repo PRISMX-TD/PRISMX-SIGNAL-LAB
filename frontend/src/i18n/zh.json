@@ -567,10 +567,9 @@
     "mt5Linked": "已连接 {{count}} 个 MT5 账户",
     "mt5None": "尚未连接 MT5 账户",
     "goBind": "管理连接",
-    "profileDesc": "昵称会出现在排行榜与比赛条目上；未公开时榜单只显示打码后的版本。",
+    "profileDesc": "昵称是你在 PRISMX 的显示名，全站唯一；排行榜与比赛榜不展示昵称，只显示打码后的交易账户号。",
     "profileDescBasic": "昵称是你在 PRISMX 的显示名，全站唯一。",
     "nicknameHelp": "2–20 个字符，全站唯一",
-    "nicknamePublicDesc": "关闭后榜单只显示打码后的昵称",
     "leaderboardOptOutDesc": "你的账户不再出现在任何排行榜上",
     "securityTitle": "安全",
     "securityDesc": "修改密码后，其它设备上的登录会立即失效，需要重新登录。",
@@ -2575,7 +2574,6 @@
     "profile": {
       "sectionTitle": "个人资料",
       "nickname": "昵称",
-      "nicknamePublic": "榜单完整展示昵称",
       "leaderboardOptOut": "退出所有排行榜",
       "save": "保存",
       "saved": "已保存"
@@ -2601,7 +2599,6 @@
       "month": "月榜"
     },
     "colRank": "名次",
-    "colTrader": "交易者",
     "colAccount": "账户",
     "colScore": {
       "return_pct": "收益率",
@@ -2634,7 +2631,7 @@
       "minTradesReturn": "本期 ≥{{n}} 笔完整平仓",
       "minBaseline": "期初本金 ≥{{usd}} USD",
       "deposits": "本金按每笔开仓、平仓时账户里的钱算（取较大者）· 入金出金都算",
-      "identity": "以账户为单位 · 昵称打码 · 账户号明示",
+      "identity": "以账户为单位 · 只显示交易账户号 · 中间两位打码",
       "minTradesWinrate": "本期 ≥{{n}} 笔",
       "positive": "盈亏为正才能上榜"
     },

@@ -37,18 +37,27 @@ export default function AccountPage() {
   const [newPw, setNewPw] = useState("")
   const [pwMsg, setPwMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
 
-  // 游戏化个人资料：昵称 + 榜单展示/退出两个开关（设计 §6/§11）。草稿值只在
+  // 游戏化个人资料：昵称 + 退榜开关（设计 §6/§11）。草稿值只在
   // load() 成功、以及保存成功后从服务端回填，不在本地做长度等预校验——后端
   // 校验（2-20 字/保留词）失败会带回双语错误文案，直接展示即可，不重复一份。
-  // Gamification profile: nickname + the two leaderboard toggles. Drafts are
+  // Gamification profile: nickname + the leaderboard opt-out toggle. Drafts are
   // only seeded from the server on load() and after a successful save — no
   // client-side length pre-check duplicating the backend's (2-20 chars /
   // reserved word), whose failures already carry a ready-to-show bilingual message.
   const [nicknameDraft, setNicknameDraft] = useState("")
-  const [nicknamePublicDraft, setNicknamePublicDraft] = useState(false)
+  // 「榜单完整展示昵称」开关随榜单改版下线：榜上展示的是打码后的交易账户号
+  // （见 identity.mask_account），昵称不再出现，留着开关只会让人以为它还管用。
+  // users.nickname_public 字段与 PATCH 入参都保留不动——公开主页仍在用它，
+  // 存量用户的取值也不该被一次前端改版顺手改写。
+  // The "show full nickname on boards" switch is gone with the board redesign:
+  // boards now show the masked trading account number (see
+  // identity.mask_account) and never a nickname, so leaving the switch would
+  // only imply it still does something. users.nickname_public and the PATCH
+  // field both stay — the public profile still reads it, and a frontend
+  // redesign has no business rewriting stored values.
   const [leaderboardOptOutDraft, setLeaderboardOptOutDraft] = useState(false)
-  // 公开主页的交易画像开关（2026-09-07），与上面两个开关同一条保存路径。
-  // The public-profile trading-stats switch (2026-09-07), saved on the same path as the two above.
+  // 公开主页的交易画像开关（2026-09-07），与上面的开关同一条保存路径。
+  // The public-profile trading-stats switch (2026-09-07), saved on the same path as the one above.
   const [statsPublicDraft, setStatsPublicDraft] = useState(false)
   const [profileSaving, setProfileSaving] = useState(false)
   const [profileMsg, setProfileMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
@@ -156,7 +165,6 @@ export default function AccountPage() {
       const acct = await userApi.me()
       setInfo(acct)
       setNicknameDraft(acct.nickname ?? "")
-      setNicknamePublicDraft(acct.nicknamePublic)
       setLeaderboardOptOutDraft(acct.leaderboardOptOut)
       setStatsPublicDraft(acct.statsPublic)
     } catch (err: unknown) {
@@ -229,7 +237,6 @@ export default function AccountPage() {
     const patch: ProfilePatch = {}
     const trimmedNick = nicknameDraft.trim()
     if (trimmedNick !== (info.nickname ?? "")) patch.nickname = trimmedNick
-    if (nicknamePublicDraft !== info.nicknamePublic) patch.nicknamePublic = nicknamePublicDraft
     if (leaderboardOptOutDraft !== info.leaderboardOptOut) patch.leaderboardOptOut = leaderboardOptOutDraft
     if (statsPublicDraft !== info.statsPublic) patch.statsPublic = statsPublicDraft
     if (Object.keys(patch).length === 0) return
@@ -249,7 +256,6 @@ export default function AccountPage() {
           : prev,
       )
       setNicknameDraft(res.nickname ?? "")
-      setNicknamePublicDraft(res.nicknamePublic)
       setLeaderboardOptOutDraft(res.leaderboardOptOut)
       setStatsPublicDraft(res.statsPublic)
       setProfileMsg({ kind: "ok", text: t("gamification.profile.saved") })
@@ -621,13 +627,6 @@ export default function AccountPage() {
               </div>
               {info.gamificationVisible && (
               <div className="acct-settings mt-5">
-                <div className="acct-setting">
-                  <label htmlFor="profile-nickname-public" className="acct-setting-l">
-                    <div className="acct-setting-t">{t("gamification.profile.nicknamePublic")}</div>
-                    <div className="acct-setting-d">{t("account.nicknamePublicDesc")}</div>
-                  </label>
-                  <Switch id="profile-nickname-public" checked={nicknamePublicDraft} onChange={setNicknamePublicDraft} />
-                </div>
                 <div className="acct-setting">
                   <label htmlFor="profile-leaderboard-opt-out" className="acct-setting-l">
                     <div className="acct-setting-t">{t("gamification.profile.leaderboardOptOut")}</div>

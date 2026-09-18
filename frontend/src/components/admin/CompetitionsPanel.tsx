@@ -956,7 +956,7 @@ export default function CompetitionsPanel() {
                 <thead>
                   <tr className="text-neutral-500">
                     <th className="py-1.5 pr-4 font-medium">{t('leaderboard.colRank')}</th>
-                    <th className="py-1.5 pr-4 font-medium">{t('leaderboard.colTrader')}</th>
+                    <th className="py-1.5 pr-4 font-medium">{t('leaderboard.admin.colIdentity')}</th>
                     <th className="py-1.5 pr-4 font-medium">{t('leaderboard.colAccount')}</th>
                     <th className="py-1.5 pr-4 font-medium">{t(`leaderboard.colScore.${selectedComp.metric}`)}</th>
                     <th className="py-1.5 font-medium">{t('leaderboard.colSample')}</th>
@@ -966,7 +966,15 @@ export default function CompetitionsPanel() {
                   {board.rows.map((row) => (
                     <tr key={row.rank} className="border-t border-white/5">
                       <td className="num py-1.5 pr-4 text-neutral-300">{row.rank}</td>
-                      <td className="py-1.5 pr-4 text-neutral-200">{row.displayName}</td>
+                      {/* 实时榜预览走 reveal=True（见 admin_competition_board）：这里要的
+                          是能跟参赛名单对上的真实身份与完整账户号，不是用户端那份打码值。
+                          The live-board preview is fetched with reveal=True (see
+                          admin_competition_board): this table needs the real identity and
+                          the full account number to reconcile against the entry list, not
+                          the masked values the user side gets. */}
+                      <td className="py-1.5 pr-4 font-mono text-[11px] text-neutral-400">
+                        <span className="block truncate">{row.nickname || row.email || row.displayName}</span>
+                      </td>
                       <td className="num py-1.5 pr-4 text-neutral-400">{row.login}</td>
                       <td className="num py-1.5 pr-4 text-neutral-100">{fmtScorePct(row.score)}</td>
                       <td className="num py-1.5 text-neutral-500">{row.sample}</td>

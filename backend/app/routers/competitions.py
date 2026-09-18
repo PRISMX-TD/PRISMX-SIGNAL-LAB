@@ -85,13 +85,15 @@ def _summary_out(comp: Competition, top: list[dict] | None = None,
 def _leaders(db: Session, comps: list[Competition]) -> dict[str, list[dict]]:
     """各场比赛的前三行 → {comp_id: [{displayName, score, equippedBadge}, ...]}，
     按名次排好。一次 IN 查询取所有 rank<=3 的快照行，再一次取用户，不逐场查；
-    昵称按公开设置打码，与榜单行同一个 identity.display_name（用户端永远看不到
-    真实身份）。只认 board == comp.metric 的行——同一个 period_key 理论上只有
-    一种 board，防御性地过滤一下。
+    展示身份是打码后的交易账户号，与榜单行同一个 identity.mask_account（用户端
+    永远看不到真实身份）——这里不分自己与别人，卡片上的前三名一律打码。只认
+    board == comp.metric 的行——同一个 period_key 理论上只有一种 board，防御性地
+    过滤一下。
     Top-three snapshot rows per competition → {comp_id: [...]} in rank order. One
     IN query for every rank<=3 row, one for the users, no per-competition lookups;
-    names masked per the nickname setting via the same identity.display_name the
-    board rows use (the user side never sees a real identity). Only rows whose
+    the shown identity is the masked trading account number via the same
+    identity.mask_account the board rows use (the user side never sees a real
+    identity), with no self-exception on these card previews. Only rows whose
     board matches comp.metric count; a period_key should only ever carry one
     board, so this is a defensive filter."""
     by_key = {comp_period_key(c.id): c for c in comps}
@@ -112,9 +114,7 @@ def _leaders(db: Session, comps: list[Competition]) -> dict[str, list[dict]]:
             continue
         u = users.get(r.user_id)
         out.setdefault(comp.id, []).append({
-            "displayName": identity.display_name(
-                u.nickname if u else None, u.email if u else None,
-                bool(u.nickname_public) if u else False),
+            "displayName": identity.mask_account(r.mt5_login),
             "score": r.score,
             "equippedBadge": u.equipped_badge if u else None,
             "equippedBadgeTier": badge_tiers.get(r.user_id, 0),
@@ -570,8 +570,18 @@ def admin_competition_board(comp_id: str, db: Session = Depends(get_db),
     校验，所以能直接吃 `comp:<id>` 这种不符合 `_PERIOD_KEY_RE` 的 key，用请求
     管理员本人作 viewer（isSelf/me 块对管理员而言没有实际业务意义，但保持
     与用户端榜单同一套负载形状，前端不用为管理端单独写一套渲染）。
+
+    reveal=True：榜单改版后用户端下发的账户号是打码的，而这张表是运营核查用的
+    ——看不到完整账户号就没法跟参赛名单/成交记录对上。与常设榜的管理端预览
+    （`gamification.admin_leaderboard`）同一个口径，路由本身已在 admin_router
+    上挂了 require_admin。
+    reveal=True: since the board redesign the user-facing payload carries masked
+    account numbers, but this table exists for operational checks — a masked
+    number can't be reconciled against the participant list or the trade log.
+    Same stance as the standing board's admin preview
+    (`gamification.admin_leaderboard`); admin_router already requires admin.
     """
     comp = _get_comp_or_404(db, comp_id)
     refresh_comp_board(db, comp)
     return build_board_rows_payload(db, admin, comp.metric, comp_period_key(comp.id),
-                                     gates_override=_comp_gates(db, comp))
+                                     reveal=True, gates_override=_comp_gates(db, comp))

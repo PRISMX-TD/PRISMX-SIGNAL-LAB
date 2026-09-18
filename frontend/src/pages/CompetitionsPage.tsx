@@ -436,7 +436,6 @@ function Ladder({ board, t }: { board: LeaderboardPayload; t: TFunction }) {
               <ProfileLink profileId={row.profileId} className="truncate">{row.displayName}</ProfileLink>
               {row.isSelf && <span className="cmp-you">{t('leaderboard.youTag')}</span>}
             </b>
-            <span className="num">{row.login}</span>
           </div>
           <i
             className={`cmp-ladder-bar ${row.score < 0 ? 'is-neg' : ''}`}

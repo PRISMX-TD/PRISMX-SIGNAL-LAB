@@ -110,8 +110,9 @@ def test_list_groups_by_status_excludes_draft_and_orders_correctly(db_session):
 
 
 def test_list_carries_champion_for_settled_only(db_session):
-    """荣誉墙数据：已终审比赛带榜首行（昵称打码、分数、佩戴勋章），未终审的
-    ended 与空榜的 settled 都是 None。"""
+    """荣誉墙数据：已终审比赛带榜首行（打码后的交易账户号、分数、佩戴勋章），
+    未终审的 ended 与空榜的 settled 都是 None。冠军展示不带昵称也不带邮箱——
+    昵称公开与否都一样，那个开关已经不参与榜单口径。"""
     _make_visible(db_session)
     viewer = _user(db_session, "listc@t.co")
     winner = _user(db_session, "champion@t.co")
@@ -123,13 +124,14 @@ def test_list_carries_champion_for_settled_only(db_session):
     for comp, uid, rank, score in ((settled, winner.id, 1, 0.093), (settled, viewer.id, 2, 0.041),
                                    (ended, viewer.id, 1, 0.5)):
         db_session.add(LeaderboardSnapshot(board="return_pct", period_key=comp_period_key(comp.id),
-                                           user_id=uid, mt5_login=f"L{rank}", rank=rank, score=score))
+                                           user_id=uid, mt5_login=f"70000{rank}", rank=rank, score=score))
     db_session.commit()
 
     out = list_competitions(request=None, db=db_session, user=viewer)
     by_name = {c["name"]: c for c in out["finished"]}
     champ = by_name["Settled"]["champion"]
     assert champ["score"] == 0.093 and champ["equippedBadge"] == "first_trade"
+    assert champ["displayName"] == "70**01"
     assert champ["displayName"] != "Ace Trader" and "champion@t.co" not in champ["displayName"]
     assert by_name["Ended"]["champion"] is None      # 未终审不挂冠军
     assert by_name["Empty"]["champion"] is None      # 终审了但没人上榜
@@ -176,10 +178,10 @@ def test_detail_board_rows_no_user_id_and_isself(db_session):
     viewer = _user(db_session, "det2@t.co")
     other = _user(db_session, "det3@t.co")
     db_session.add(LeaderboardSnapshot(board=comp.metric, period_key=comp_period_key(comp.id),
-                                       user_id=viewer.id, mt5_login="A", rank=1,
+                                       user_id=viewer.id, mt5_login="800001", rank=1,
                                        score=0.2, sample=10))
     db_session.add(LeaderboardSnapshot(board=comp.metric, period_key=comp_period_key(comp.id),
-                                       user_id=other.id, mt5_login="B", rank=2,
+                                       user_id=other.id, mt5_login="800002", rank=2,
                                        score=0.1, sample=10))
     db_session.commit()
 
@@ -190,11 +192,17 @@ def test_detail_board_rows_no_user_id_and_isself(db_session):
     rows = out["board"]["rows"]
     assert len(rows) == 2
     assert all("userId" not in r for r in rows)
-    by_login = {r["login"]: r for r in rows}
-    assert by_login["A"]["isSelf"] is True
-    assert by_login["B"]["isSelf"] is False
+    by_rank = {r["rank"]: r for r in rows}
+    # 自己那行真号照出，别人那行 login 与 displayName 都是打码值——比赛榜与
+    # 常设榜同一套口径。
+    # The viewer's own row keeps the real number; another entrant's login and
+    # displayName are both masked — competition boards follow the standing ones.
+    assert by_rank[1]["isSelf"] is True
+    assert by_rank[1]["login"] == "800001" and by_rank[1]["displayName"] == "800001"
+    assert by_rank[2]["isSelf"] is False
+    assert by_rank[2]["login"] == "80**02" and by_rank[2]["displayName"] == "80**02"
     assert out["board"]["me"]["rank"] == 1
-    assert out["board"]["me"]["login"] == "A"
+    assert out["board"]["me"]["login"] == "800001"
     # comp:<id> 不是 period_bounds 能解析的自然周/月格式——periodStart/End/
     # sealAt 必须被 build_board_rows_payload 的 guard 整段省略，而不是让
     # 详情页构造抛错。

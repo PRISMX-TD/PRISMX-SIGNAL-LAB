@@ -57,9 +57,16 @@ def test_gate_and_admin_bypass(db_session):
 
 
 def test_payload_masking_isself_and_me(db_session):
+    """榜上的身份是打码后的交易账户号——昵称与 nickname_public 都不再参与：
+    设了昵称的、公开了昵称的、没设昵称的，三种人下发的都是同一套账户号口径，
+    displayName 与 login 同值。真号只在观众自己那行出现。
+    A row's identity is the masked account number; neither the nickname nor
+    nickname_public takes part any more — all three user shapes below get the
+    same masked number in both displayName and login, and only the viewer's own
+    row carries the real one."""
     a = _user(db_session, "top@t.co", nickname="Trader", badge="midas_touch")
-    b = _user(db_session, "second@t.co")           # 无昵称 → 邮箱前缀打码
-    c = _user(db_session, "third@t.co", nickname="Trader", nickname_public=True)  # 昵称公开 → 不打码
+    b = _user(db_session, "second@t.co")           # 无昵称
+    c = _user(db_session, "third@t.co", nickname="Trader", nickname_public=True)  # 昵称公开
     _row(db_session, a, "500123", 1, 0.20)
     _row(db_session, a, "500999", 3, 0.05)         # 同一人第二个账户
     _row(db_session, b, "600001", 2, 0.10)
@@ -67,12 +74,13 @@ def test_payload_masking_isself_and_me(db_session):
     p = build_leaderboard_payload(db_session, b, "return_pct", "2026-W36")
     assert p["periodKey"] == "2026-W36" and len(p["rows"]) == 4
     r1, r2, _r3, r4 = p["rows"]
-    assert r1["displayName"] == "T***r" and r1["login"] == "500123"
+    assert r1["displayName"] == "50**23" and r1["login"] == "50**23"
     assert r1["equippedBadge"] == "midas_touch" and r1["isSelf"] is False
-    assert r2["displayName"] == "s***d" and r2["isSelf"] is True
+    # 观众自己那行：真号照出（自己的账户号自己当然能看）
+    assert r2["displayName"] == "600001" and r2["login"] == "600001" and r2["isSelf"] is True
     assert "userId" not in r1
-    # 昵称公开的用户：displayName 用行自己的 nickname_public 读到的真实值，不打码
-    assert r4["displayName"] == "Trader" and r4["isSelf"] is False
+    # 昵称公开也一样打码——nickname_public 已经不参与榜单口径
+    assert r4["displayName"] == "70**01" and r4["isSelf"] is False
     assert p["me"] == {"rank": 2, "score": 0.10, "sample": 8, "login": "600001"}
     # a 的 me 取最好名次
     pa = build_leaderboard_payload(db_session, a, "return_pct", "2026-W36")
@@ -166,7 +174,7 @@ def test_previous_winner_from_seeded_prior_period(db_session):
 
     p = build_leaderboard_payload(db_session, b, "return_pct", PK)
     assert p["rows"] == []
-    assert p["previousWinner"] == {"displayName": "C***n", "score": 0.087, "profileId": a.public_id}
+    assert p["previousWinner"] == {"displayName": "90**01", "score": 0.087, "profileId": a.public_id}
 
 
 def test_previous_winner_not_computed_when_board_nonempty(db_session):
