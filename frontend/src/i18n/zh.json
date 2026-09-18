@@ -1245,7 +1245,7 @@
     "title": "管理者页面",
     "subtitle": "用户等级、角色与基础运营指标",
     "totalUsers": "总用户数",
-    "planBreakdown": "等级分布",
+    "planBreakdown": "订阅等级",
     "tab": {
       "data": "数据看板",
       "winrate": "策略公开",
@@ -1518,6 +1518,23 @@
         "colSignup": "注册时间",
         "colActiveDays": "活跃天数",
         "colLastSeen": "最后一次"
+      },
+      "levels": {
+        "title": "交易员等级",
+        "hint": "六级闯关的当前分布（不含管理员）。右侧数字是「现有人数」——当前处于该等级的人，不受上面时间范围影响；绿色 +N 是「本期达成」——所选时间段内升到该等级的人数，跟时间范围走，两者口径不同所以不互为子集。等级由升级条件派生：升到第 N 级的时刻 = 前 N−1 组条件里最后完成的那一条；第 1 级没有条件，取注册时间。",
+        "failed": "加载失败",
+        "listToggle": "看名单",
+        "listHide": "收起",
+        "scopeLabel": "名单范围",
+        "scope": { "all": "现在在这一级", "range": "本期升到这一级" },
+        "noteAll": "当前处于「{{level}}」的全部用户，按达成时间倒序。",
+        "noteRange": "{{from}} 至 {{to}} 之间升到「{{level}}」的用户。含之后又继续升级的人，最右列标出他现在的等级。",
+        "empty": "没有符合条件的用户。",
+        "truncated": "共 {{total}} 人，这里只列前 {{shown}} 人。",
+        "colUser": "用户",
+        "colPhone": "手机",
+        "colReachedAt": "达成时间",
+        "colCurrent": "现在等级"
       },
       "retention": {
         "title": "留存",

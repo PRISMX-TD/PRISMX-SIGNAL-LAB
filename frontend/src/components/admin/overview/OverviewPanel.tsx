@@ -16,6 +16,7 @@ import ActivityChart from './ActivityChart'
 import FunnelCard from './FunnelCard'
 import HeadlineCards from './HeadlineCards'
 import PlanBreakdown from './PlanBreakdown'
+import TraderLevelsCard from './TraderLevelsCard'
 import RangePicker from './RangePicker'
 import RetentionCard from './RetentionCard'
 import StrategyUsageCard from './StrategyUsageCard'
@@ -92,6 +93,9 @@ export default function OverviewPanel() {
           <FunnelCard funnel={overview.data.funnel} />
           <RetentionCard retention={overview.data.retention} dataSince={overview.data.visitorDataSince} />
           <PlanBreakdown plans={overview.data.plans} />
+          {/* 交易员等级自己拉数据、自己管展开的名单，与上面的 overview 请求各自成败。
+              Fetches and fails on its own, independently of the overview request. */}
+          <TraderLevelsCard range={range} />
           <div className="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
             <StrategyUsageCard rows={overview.data.strategies} />
             <TradingUsageCard trading={overview.data.trading} />

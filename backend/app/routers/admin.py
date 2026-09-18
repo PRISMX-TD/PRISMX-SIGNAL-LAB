@@ -14,7 +14,7 @@ access there's a record to check against.
 import json
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -23,10 +23,11 @@ from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
 from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
 from app.services.audit import log_change
-from app.schemas import AdminPotentialCustomersOut, AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminOverviewOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
+from app.schemas import AdminTraderLevelsOut, AdminTraderLevelUsersOut, AdminPotentialCustomersOut, AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminOverviewOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
 from app.services.strategy_winrate import compute_strategy_session_winrate
 from app.services.admin_overview import build_overview, potential_customers as build_potential_customers
+from app.services.admin_trader_levels import DEFAULT_USER_LIMIT, LEVEL_COUNT, level_rows, level_users
 from app.services.stats_time import RangeError, RangeSpec, day_start_utc, local_day, resolve_range, today as stats_today
 from app.services.settings_store import (
     get_broker_settings,
@@ -354,6 +355,47 @@ def potential_customers(
     contact now. Shares its definition with the funnel row.
     """
     return build_potential_customers(db, stats_today(), limit=limit)
+
+
+@router.get("/trader-levels", response_model=AdminTraderLevelsOut)
+def trader_levels(
+    range_: str | None = Query(None, alias="range"),
+    from_: date | None = Query(None, alias="from"),
+    to: date | None = Query(None),
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """六级闯关的当前分布：每一级现有多少人 + 本期有多少人升到这一级。
+
+    「现有」不跟时间范围走，「本期达成」跟。口径与名单接口同源
+    （services/admin_trader_levels），所以卡片数字与展开的名单不会漂。
+    Current distribution across the six trader levels: the stock per level plus
+    the flow into it during the selected range.
+    """
+    spec = _resolve_range_or_422(range_, from_, to)
+    return level_rows(db, spec)
+
+
+@router.get("/trader-levels/{level}/users", response_model=AdminTraderLevelUsersOut)
+def trader_level_users(
+    level: int = Path(ge=1, le=LEVEL_COUNT),
+    scope: str = Query("all", pattern="^(all|range)$"),
+    limit: int = Query(DEFAULT_USER_LIMIT, ge=1, le=500),
+    range_: str | None = Query(None, alias="range"),
+    from_: date | None = Query(None, alias="from"),
+    to: date | None = Query(None),
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """某一级的用户名单，带达成时刻（精确到秒）。
+
+    `scope=all` 是当前在这一级的人（时间范围不参与筛选）；`scope=range` 是本期升到
+    这一级的人，含之后又升上去的，所以每行都带 currentLevel。
+    Who is at this level (scope=all) or who reached it during the range
+    (scope=range, including users who have since moved up).
+    """
+    spec = _resolve_range_or_422(range_, from_, to)
+    return level_users(db, level, spec, scope=scope, limit=limit)
 
 
 @router.get("/page-stats", response_model=AdminPageStatsOut)

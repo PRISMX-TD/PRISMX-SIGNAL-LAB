@@ -359,6 +359,45 @@ class PotentialCustomerOut(BaseModel):
     lastActiveDay: str | None = None  # 窗口内最后一次来的日期（STATS_TZ）
 
 
+class TraderLevelRowOut(BaseModel):
+    level: int   # 1~6
+    key: str     # novice / junior / elite / senior / chief / legend
+    # 当前处于该等级的人数。**不跟时间范围走**——回答"现在盘子长什么样"。
+    total: int
+    # 在所选时间段内升到该等级的人数。**不是 total 的子集**：本期升到 3 级的人
+    # 现在可能已经是 4 级。/ Flow in the period, not a subset of the stock.
+    reachedInRange: int
+
+
+class AdminTraderLevelsOut(BaseModel):
+    rangeStart: str
+    rangeEnd: str
+    totalUsers: int              # 非管理员用户总数，六级人数之和
+    levels: list[TraderLevelRowOut]   # 1 级到 6 级，定长 6
+
+
+class TraderLevelUserOut(BaseModel):
+    id: str
+    email: str
+    nickname: str | None = None
+    phone: str | None = None
+    # 该用户**现在**的等级。scope=range 的名单里可能已经高于所查的那一级。
+    currentLevel: int
+    # 升到所查等级的时刻（UTC，精确到微秒；前端按秒显示）。
+    reachedAt: datetime | None = None
+    createdAt: datetime | None = None
+
+
+class AdminTraderLevelUsersOut(BaseModel):
+    level: int
+    key: str
+    scope: str        # all = 当前在这一级；range = 本期升到这一级
+    rangeStart: str
+    rangeEnd: str
+    total: int        # 该 scope 下的总人数，可能大于 users 长度（受 limit 截断）
+    users: list[TraderLevelUserOut]   # 达成时间倒序
+
+
 class AdminPotentialCustomersOut(BaseModel):
     # 本周已过的天数（含今天）。**不是固定值**：周一是 1、周日是 7。低于
     # minActiveDays 时（周一 / 周二）名单必然为空，前端要照实说明而不是显示"没有"。

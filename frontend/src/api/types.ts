@@ -241,6 +241,44 @@ export interface AdminFunnelWeek extends AdminFunnelSteps {
   weekStart: string
 }
 
+// 交易员等级（六级闯关，`GET /admin/trader-levels`）。等级由升级条件派生，不是库里的一列。
+// Trader levels, derived from the progression conditions rather than stored.
+export interface AdminTraderLevelRow {
+  level: number // 1~6
+  key: string // novice / junior / elite / senior / chief / legend
+  total: number // 当前处于该等级的人数，不跟时间范围走 / stock, ignores the range
+  // 所选时间段内升到该等级的人数。**不是 total 的子集**（本期升到 3 级的人现在可能已是 4 级）。
+  // Flow within the range; not a subset of the stock.
+  reachedInRange: number
+}
+
+export interface AdminTraderLevels {
+  rangeStart: string
+  rangeEnd: string
+  totalUsers: number // 六级人数之和 / sums to the six level counts
+  levels: AdminTraderLevelRow[] // 定长 6，1 级到 6 级 / always six, level 1..6
+}
+
+export interface AdminTraderLevelUser {
+  id: string
+  email: string
+  nickname: string | null
+  phone: string | null
+  currentLevel: number // 现在的等级；scope=range 时可能已高于所查的那一级
+  reachedAt: string | null // 升到所查等级的时刻，精确到秒 / to the second
+  createdAt: string | null
+}
+
+export interface AdminTraderLevelUsers {
+  level: number
+  key: string
+  scope: 'all' | 'range' // all = 当前在这一级；range = 本期升到这一级
+  rangeStart: string
+  rangeEnd: string
+  total: number // 可能大于 users 长度（受 limit 截断）
+  users: AdminTraderLevelUser[] // 达成时间倒序
+}
+
 // 潜在转化客户名单（`GET /admin/potential-customers`）。不跟看板时间范围走，
 // 永远是"本周（周一起）到今天"。
 // Warm-lead list; always this calendar week up to today, never the dashboard range.

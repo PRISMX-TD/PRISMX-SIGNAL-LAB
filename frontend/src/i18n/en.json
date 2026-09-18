@@ -1245,7 +1245,7 @@
     "title": "Admin",
     "subtitle": "User roles, subscription plans and basic operating metrics",
     "totalUsers": "Total users",
-    "planBreakdown": "Plan breakdown",
+    "planBreakdown": "Subscription plan",
     "tab": {
       "data": "Dashboard",
       "winrate": "Publication",
@@ -1518,6 +1518,23 @@
         "colSignup": "Signed up",
         "colActiveDays": "Active days",
         "colLastSeen": "Last seen"
+      },
+      "levels": {
+        "title": "Trader levels",
+        "hint": "Current spread across the six progression levels (admins excluded). The number on the right is the stock — users at that level right now, unaffected by the range picker above; the green +N is the flow — users who reached that level within the selected range. Different questions, so the flow is not a subset of the stock. Levels are derived from the progression conditions: reaching level N is the moment the last condition of the preceding groups was completed; level 1 has no conditions, so it uses the signup time.",
+        "failed": "Failed to load",
+        "listToggle": "View list",
+        "listHide": "Hide",
+        "scopeLabel": "List scope",
+        "scope": { "all": "At this level now", "range": "Reached it this period" },
+        "noteAll": "Everyone currently at \"{{level}}\", most recently promoted first.",
+        "noteRange": "Users who reached \"{{level}}\" between {{from}} and {{to}}, including those who have since moved up — the last column shows their current level.",
+        "empty": "No users match.",
+        "truncated": "{{total}} match; showing the first {{shown}}.",
+        "colUser": "User",
+        "colPhone": "Phone",
+        "colReachedAt": "Reached at",
+        "colCurrent": "Current level"
       },
       "retention": {
         "title": "Retention",
