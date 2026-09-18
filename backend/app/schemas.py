@@ -323,15 +323,17 @@ class ActivityDayOut(BaseModel):
 
 
 class FunnelStepsOut(BaseModel):
-    """五步互相独立（"至少做过一次"），允许跳步，后一步不保证 ≤ 前一步。
+    """各步独立统计（"至少做过一次"），允许跳步，后一步不保证 ≤ 前一步。
     Independent steps; skipping is allowed so later steps need not be smaller."""
     registered: int
+    # 潜在转化客户：还没绑 MT5、但最近一周常来的人。口径见
+    # services/admin_overview.POTENTIAL_WINDOW_DAYS / POTENTIAL_MIN_ACTIVE_DAYS。
+    # Warm leads: no MT5 account yet but frequently active in the last week.
+    potential: int
     bound: int     # 有 MT5 账号 / has an mt5_accounts row
     boundReal: int  # 其中有真仓（trade_mode == REAL）/ of which linked a real account
     boundDemo: int  # 其中有模拟仓（含比赛仓与未判定）/ of which linked a demo (incl. contest / unclassified)
     traded: int    # 有 FILLED 订单 / has a FILLED order
-    trialed: int   # trial_used_at 非空 / used the trial
-    paid: int      # 有 FINISHED 付款 / has a FINISHED payment
 
 
 class FunnelWeekOut(FunnelStepsOut):
@@ -341,6 +343,30 @@ class FunnelWeekOut(FunnelStepsOut):
 class FunnelOut(BaseModel):
     overall: FunnelStepsOut
     byWeek: list[FunnelWeekOut]  # 最近 8 周，升序 / last 8 weeks ascending
+
+
+class PotentialCustomerOut(BaseModel):
+    """一名潜在转化客户。带邮箱与手机号是因为这份名单的用途就是主动联系——
+    只给人数没法行动；这两个字段管理端「用户管理」页本来就看得到，受众与权限相同。
+    One warm lead. Email and phone are included because the whole point of this
+    list is outreach; both are already visible on the admin user list."""
+    id: str
+    email: str
+    nickname: str | None = None
+    phone: str | None = None
+    createdAt: datetime | None = None
+    activeDays: int  # 窗口内打开过平台的天数 / days active within the window
+    lastActiveDay: str | None = None  # 窗口内最后一次来的日期（STATS_TZ）
+
+
+class AdminPotentialCustomersOut(BaseModel):
+    windowDays: int      # 窗口长度（天）/ window length in days
+    minActiveDays: int   # 门槛：窗口内至少活跃这么多天 / minimum active days
+    windowFrom: str      # 窗口起始日（STATS_TZ）/ window start
+    # 符合条件的总人数。**可能大于 users 的长度**（受 limit 截断），前端要照实说明。
+    # Total matching users; may exceed len(users) because of the limit.
+    total: int
+    users: list[PotentialCustomerOut]  # 活跃天数降序，同数按注册时间倒序
 
 
 class RetentionPointOut(BaseModel):

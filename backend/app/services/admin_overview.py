@@ -12,17 +12,17 @@ All dashboard numbers. Day bucketing via STATS_TZ (Python-side for cross-DB
 parity), admins excluded everywhere, "active" means a page_visitor_days row.
 """
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Query, Session
 
-from app.models import MT5Account, Order, PageVisitorDay, Payment, User, UserStrategy
+from app.models import MT5Account, Order, PageVisitorDay, User, UserStrategy
 from app.services.account_type import REAL as TRADE_MODE_REAL
 from app.schemas import (
-    ActivityDayOut, AdminOverviewOut, CompareOut, FunnelOut, FunnelStepsOut, FunnelWeekOut,
-    OverviewHeadlineOut, OverviewRangeOut, RetentionOut, RetentionPointOut, StrategyUsageOut,
-    TradingDayOut, TradingOut,
+    ActivityDayOut, AdminOverviewOut, AdminPotentialCustomersOut, CompareOut, FunnelOut,
+    FunnelStepsOut, FunnelWeekOut, OverviewHeadlineOut, OverviewRangeOut, PotentialCustomerOut,
+    RetentionOut, RetentionPointOut, StrategyUsageOut, TradingDayOut, TradingOut,
 )
 from app.services.stats_time import MAX_RANGE_DAYS, RangeSpec, day_start_utc, local_day
 
@@ -109,8 +109,61 @@ def _as_date(value) -> date | None:
 # ── 漏斗 / funnel ──────────────────────────────────────────────────────────
 FUNNEL_WEEKS = 8
 
+# 潜在转化客户：注册了、还没绑 MT5，但最近一周常来的人——后台最该主动联系的一批。
+#
+# **门槛是"活跃天数"而不是"打开次数"**，因为次数根本没存：page_visitor_days 每人
+# 每天每页只有一条去重标记（刻意不记时刻与次数，见模型说明），page_view_stats 记了
+# 次数却不含 user_id。要按次数筛就得先加一张带身份的明细表，那是另一个隐私决策。
+# 活跃天数是现有数据能给的最接近口径，也是这类判断的常规代理指标。
+#
+# Warm leads: registered, no MT5 account yet, but frequently active this week.
+# The threshold counts ACTIVE DAYS, not opens: per-user open counts are not
+# stored anywhere (page_visitor_days keeps one dedup marker per user/page/day
+# with no timestamps; page_view_stats counts views but carries no user_id).
+# Counting opens would require a new identified table — a separate privacy call.
+POTENTIAL_WINDOW_DAYS = 7
+POTENTIAL_MIN_ACTIVE_DAYS = 3
 
-def _step_user_ids(db: Session) -> dict[str, set[str]]:
+
+def _bound_user_ids(db: Session) -> set[str]:
+    """绑过 MT5 账号的非管理员 user_id。"""
+    return {
+        row[0]
+        for row in db.query(MT5Account.user_id)
+        .join(User, User.id == MT5Account.user_id)
+        .filter(NOT_ADMIN)
+        .distinct()
+        .all()
+    }
+
+
+def _potential_window(today: date) -> date:
+    """潜在客户判定窗口的起始日（含）。"""
+    return today - timedelta(days=POTENTIAL_WINDOW_DAYS - 1)
+
+
+def _active_days_in_window(db: Session, today: date) -> dict[str, int]:
+    """窗口内每个非管理员用户打开过平台的天数。"""
+    rows = (
+        db.query(PageVisitorDay.user_id, func.count(func.distinct(PageVisitorDay.day)))
+        .join(User, User.id == PageVisitorDay.user_id)
+        .filter(NOT_ADMIN, PageVisitorDay.day >= _potential_window(today))
+        .group_by(PageVisitorDay.user_id)
+        .all()
+    )
+    return {uid: int(n or 0) for uid, n in rows}
+
+
+def _potential_ids(db: Session, today: date, bound: set[str]) -> tuple[set[str], dict[str, int]]:
+    """（潜在客户 id 集合, 窗口内活跃天数表）。漏斗那一行与名单接口共用这一处，
+    所以柱子上的人数和展开的名单人数不会对不上。
+    Shared by the funnel row and the list endpoint so the two can never drift."""
+    counts = _active_days_in_window(db, today)
+    ids = {uid for uid, n in counts.items() if n >= POTENTIAL_MIN_ACTIVE_DAYS} - bound
+    return ids, counts
+
+
+def _step_user_ids(db: Session, today: date) -> dict[str, set[str]]:
     """每一步"至少做过一次"的非管理员 user_id 集合。
 
     用集合而不是逐步 COUNT：分批表要按注册周切同一批人，集合交一次就出来；
@@ -121,8 +174,9 @@ def _step_user_ids(db: Session) -> dict[str, set[str]]:
     def ids(q) -> set[str]:
         return {row[0] for row in q.all()}
 
+    bound = _bound_user_ids(db)
     return {
-        "bound": ids(db.query(MT5Account.user_id).join(User, User.id == MT5Account.user_id).filter(NOT_ADMIN).distinct()),
+        "bound": bound,
         # 真仓 / 模拟仓拆分：真仓 = trade_mode 判定为 REAL；其余（模拟、比赛、未判定）都归模拟仓，
         # 与 account_type.is_real 的"未知按非实盘"一致。一个人两种账号都有就两边都算。
         # Real vs demo split: real = trade_mode REAL; everything else (demo, contest,
@@ -137,25 +191,23 @@ def _step_user_ids(db: Session) -> dict[str, set[str]]:
             .filter(NOT_ADMIN, or_(MT5Account.trade_mode.is_(None), MT5Account.trade_mode != TRADE_MODE_REAL)).distinct()
         ),
         "traded": ids(db.query(Order.user_id).join(User, User.id == Order.user_id).filter(NOT_ADMIN, Order.status == "FILLED").distinct()),
-        "trialed": ids(_non_admin_users(db).with_entities(User.id).filter(User.trial_used_at.isnot(None))),
-        "paid": ids(db.query(Payment.user_id).join(User, User.id == Payment.user_id).filter(NOT_ADMIN, Payment.status == "FINISHED").distinct()),
+        "potential": _potential_ids(db, today, bound)[0],
     }
 
 
 def _steps_for(cohort: set[str], steps: dict[str, set[str]]) -> dict[str, int]:
     return {
         "registered": len(cohort),
+        "potential": len(cohort & steps["potential"]),
         "bound": len(cohort & steps["bound"]),
         "boundReal": len(cohort & steps["bound_real"]),
         "boundDemo": len(cohort & steps["bound_demo"]),
         "traded": len(cohort & steps["traded"]),
-        "trialed": len(cohort & steps["trialed"]),
-        "paid": len(cohort & steps["paid"]),
     }
 
 
 def funnel(db: Session, today: date) -> FunnelOut:
-    steps = _step_user_ids(db)
+    steps = _step_user_ids(db, today)
     all_ids = {row[0] for row in _non_admin_users(db).with_entities(User.id).all()}
 
     this_monday = today - timedelta(days=today.weekday())
@@ -178,6 +230,61 @@ def funnel(db: Session, today: date) -> FunnelOut:
     return FunnelOut(
         overall=FunnelStepsOut(**_steps_for(all_ids, steps)),
         byWeek=[FunnelWeekOut(weekStart=ws.isoformat(), **_steps_for(cohorts[ws], steps)) for ws in week_starts],
+    )
+
+
+def potential_customers(db: Session, today: date, limit: int = 200) -> AdminPotentialCustomersOut:
+    """潜在转化客户名单。人数与漏斗那一行同源（`_potential_ids`）。
+
+    `total` 是符合条件的全部人数，`users` 只到 limit——名单是给人打电话用的，
+    一次给几百行已经够，剩下的下次再看；两个数字都回传，前端才能照实说明截断。
+    Warm-lead list, sharing its definition with the funnel row. `total` counts
+    everyone matching; `users` is capped at `limit` and the UI says so.
+    """
+    ids, counts = _potential_ids(db, today, _bound_user_ids(db))
+    window_from = _potential_window(today)
+    if not ids:
+        return AdminPotentialCustomersOut(
+            windowDays=POTENTIAL_WINDOW_DAYS,
+            minActiveDays=POTENTIAL_MIN_ACTIVE_DAYS,
+            windowFrom=window_from.isoformat(),
+            total=0,
+            users=[],
+        )
+
+    id_list = list(ids)
+    last_seen = {
+        uid: _as_date(day)
+        for uid, day in db.query(PageVisitorDay.user_id, func.max(PageVisitorDay.day))
+        .filter(PageVisitorDay.user_id.in_(id_list), PageVisitorDay.day >= window_from)
+        .group_by(PageVisitorDay.user_id)
+        .all()
+    }
+    rows = _non_admin_users(db).filter(User.id.in_(id_list)).all()
+    users = [
+        PotentialCustomerOut(
+            id=u.id,
+            email=u.email,
+            nickname=u.nickname,
+            phone=u.phone,
+            createdAt=u.created_at,
+            activeDays=counts.get(u.id, 0),
+            lastActiveDay=last_seen[u.id].isoformat() if last_seen.get(u.id) else None,
+        )
+        for u in rows
+    ]
+    # 两次稳定排序：先注册时间倒序，再活跃天数倒序——最终是「活跃天数多的在前，
+    # 同样活跃的里新注册的在前」。一次 key 里混升降序要靠取负数，注册时间是
+    # datetime 取不了负，分两趟更直白。
+    # Two stable sorts: newest-first within each active-day bucket.
+    users.sort(key=lambda r: r.createdAt or datetime.min, reverse=True)
+    users.sort(key=lambda r: r.activeDays, reverse=True)
+    return AdminPotentialCustomersOut(
+        windowDays=POTENTIAL_WINDOW_DAYS,
+        minActiveDays=POTENTIAL_MIN_ACTIVE_DAYS,
+        windowFrom=window_from.isoformat(),
+        total=len(ids),
+        users=users[:limit],
     )
 
 

@@ -228,6 +228,8 @@ export interface AdminActivityDay {
 
 export interface AdminFunnelSteps {
   registered: number
+  // 潜在转化客户：还没绑 MT5、但最近一周常来的人 / warm leads: unbound but frequently active
+  potential: number
   bound: number
   boundReal: number // 其中绑了真仓 / of which linked a real account
   boundDemo: number // 其中绑了模拟仓（含比赛/未判定）/ of which linked a demo (incl. contest / unclassified)
@@ -237,6 +239,29 @@ export interface AdminFunnelSteps {
 }
 export interface AdminFunnelWeek extends AdminFunnelSteps {
   weekStart: string
+}
+
+// 潜在转化客户名单（`GET /admin/potential-customers`）。不跟看板时间范围走，
+// 永远是"截至今天的最近一周"。
+// Warm-lead list; always the last week up to today, never the dashboard range.
+export interface AdminPotentialCustomer {
+  id: string
+  email: string
+  nickname: string | null
+  phone: string | null
+  createdAt: string | null
+  activeDays: number // 窗口内打开过平台的天数 / days active in the window
+  lastActiveDay: string | null // YYYY-MM-DD（STATS_TZ）
+}
+
+export interface AdminPotentialCustomers {
+  windowDays: number
+  minActiveDays: number
+  windowFrom: string
+  // 符合条件的总人数，可能大于 users 的长度（被 limit 截断）
+  // Total matching; may exceed users.length because of the limit
+  total: number
+  users: AdminPotentialCustomer[]
 }
 
 export interface AdminRetentionPoint {

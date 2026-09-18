@@ -9,9 +9,10 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from app.core.config import settings
-from app.models import MT5Account, Order, PageVisitorDay, Payment, User, UserStrategy
+from app.models import MT5Account, Order, PageVisitorDay, User, UserStrategy
 from app.services.stats_time import RangeSpec, day_start_utc
 from app.services import admin_overview as ov
+from app.services.admin_overview import POTENTIAL_WINDOW_DAYS as POTENTIAL_WINDOW
 
 TODAY = date(2026, 9, 16)
 # 本月 9/1..9/16，对比 8/16..8/31
@@ -52,12 +53,6 @@ def _bind(db, user: User, login="1001", trade_mode=None):
 def _fill(db, user: User, d: date, status="FILLED"):
     db.add(Order(user_id=user.id, client_order_id=f"c-{user.id}-{d}-{status}", symbol="XAUUSD",
                  side="BUY", volume=0.1, status=status, created_at=_at(d)))
-    db.commit()
-
-
-def _pay(db, user: User, status="FINISHED"):
-    db.add(Payment(user_id=user.id, nowpayments_payment_id=f"np-{user.id}-{status}", plan="pro_monthly",
-                   amount_usd=29.0, pay_currency="usdttrc20", status=status))
     db.commit()
 
 
@@ -138,16 +133,14 @@ def test_signups_boundary_at_stats_tz_midnight(db_session):
 # ── funnel ─────────────────────────────────────────────────────────────────
 
 def test_funnel_overall_steps_are_independent(db_session):
-    a = _user(db_session, "a@t.co"); b = _user(db_session, "b@t.co"); c = _user(db_session, "c@t.co")
+    a = _user(db_session, "a@t.co"); b = _user(db_session, "b@t.co"); _user(db_session, "c@t.co")
     adm = _admin(db_session)
     _bind(db_session, a); _bind(db_session, a, login="1002")   # 两个账号算 1 人
     _fill(db_session, a, date(2026, 9, 3))
     _fill(db_session, b, date(2026, 9, 3), status="REJECTED")   # 没成交不算
-    _pay(db_session, c)                                  # 跳过试用直接付费
-    _pay(db_session, b, status="EXPIRED")                # 没付成不算
-    _bind(db_session, adm); _fill(db_session, adm, TODAY); _pay(db_session, adm)
+    _bind(db_session, adm); _fill(db_session, adm, TODAY)       # 管理员不算
     f = ov.funnel(db_session, TODAY).overall
-    assert (f.registered, f.bound, f.traded, f.trialed, f.paid) == (3, 1, 1, 0, 1)
+    assert (f.registered, f.bound, f.traded) == (3, 1, 1)
 
 
 def test_funnel_bound_splits_real_and_demo(db_session):
@@ -166,9 +159,79 @@ def test_funnel_bound_splits_real_and_demo(db_session):
     assert (week.weekStart, week.boundReal, week.boundDemo) == ("2026-08-31", 1, 4)
 
 
-def test_funnel_trialed_uses_trial_used_at(db_session):
-    _user(db_session, "a@t.co", trial_used=True); _user(db_session, "b@t.co")
-    assert ov.funnel(db_session, TODAY).overall.trialed == 1
+def test_potential_is_unbound_and_frequent_this_week(db_session):
+    """潜在客户 = 没绑 MT5 + 窗口内活跃天数达门槛。"""
+    a = _user(db_session, "a@t.co")   # 3 天、没绑 → 算
+    b = _user(db_session, "b@t.co")   # 只 2 天 → 不算
+    c = _user(db_session, "c@t.co")   # 3 天但绑了 → 不算
+    d = _user(db_session, "d@t.co")   # 3 天里有一天在窗口外 → 不算
+    adm = _admin(db_session)
+    for i in range(3):
+        _visit(db_session, a, TODAY - timedelta(days=i))
+        _visit(db_session, c, TODAY - timedelta(days=i))
+        _visit(db_session, adm, TODAY - timedelta(days=i))
+    _bind(db_session, c)
+    for i in range(2):
+        _visit(db_session, b, TODAY - timedelta(days=i))
+    _visit(db_session, d, TODAY); _visit(db_session, d, TODAY - timedelta(days=1))
+    _visit(db_session, d, TODAY - timedelta(days=7))            # 窗口是最近 7 天：第 8 天不算
+    f = ov.funnel(db_session, TODAY).overall
+    assert f.potential == 1
+
+
+def test_potential_window_includes_the_seventh_day_back(db_session):
+    a = _user(db_session, "a@t.co")
+    for delta in (0, 3, POTENTIAL_WINDOW - 1):
+        _visit(db_session, a, TODAY - timedelta(days=delta))
+    assert ov.funnel(db_session, TODAY).overall.potential == 1
+
+
+def test_potential_counts_one_day_once_even_across_pages(db_session):
+    """同一天开好几个页面只算一天——门槛是活跃天数，不是页面数。"""
+    a = _user(db_session, "a@t.co")
+    for path in ("/dashboard", "/charts", "/orders"):
+        _visit(db_session, a, TODAY, path=path)
+    assert ov.funnel(db_session, TODAY).overall.potential == 0
+
+
+def test_potential_customers_list_matches_the_funnel_number(db_session):
+    a = _user(db_session, "a@t.co", created=date(2026, 9, 1))
+    b = _user(db_session, "b@t.co", created=date(2026, 9, 2))
+    _admin(db_session)
+    for i in range(4):
+        _visit(db_session, a, TODAY - timedelta(days=i))
+    for i in range(3):
+        _visit(db_session, b, TODAY - timedelta(days=i))
+    out = ov.potential_customers(db_session, TODAY)
+    assert out.total == ov.funnel(db_session, TODAY).overall.potential == 2
+    assert (out.windowDays, out.minActiveDays, out.windowFrom) == (7, 3, "2026-09-10")
+    assert [u.email for u in out.users] == ["a@t.co", "b@t.co"]   # 活跃天数降序
+    assert (out.users[0].activeDays, out.users[0].lastActiveDay) == (4, "2026-09-16")
+
+
+def test_potential_customers_reports_total_beyond_the_limit(db_session):
+    for n in range(3):
+        u = _user(db_session, f"u{n}@t.co")
+        for i in range(3):
+            _visit(db_session, u, TODAY - timedelta(days=i))
+    out = ov.potential_customers(db_session, TODAY, limit=2)
+    assert (out.total, len(out.users)) == (3, 2)
+
+
+def test_potential_customers_route(db_session):
+    """路由用真实的"今天"，所以用例的访问日也跟着真实今天走——写死日期会随时间失效。"""
+    from app.services.stats_time import today as stats_today
+
+    adm = _admin(db_session)
+    u = _user(db_session, "lead@t.co")
+    real_today = stats_today()
+    for i in range(3):
+        _visit(db_session, u, real_today - timedelta(days=i))
+    res = _client(db_session, adm).get("/admin/potential-customers")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert (body["windowDays"], body["minActiveDays"], body["total"]) == (7, 3, 1)
+    assert body["users"][0]["email"] == "lead@t.co" and body["users"][0]["activeDays"] == 3
 
 
 def test_funnel_by_week_is_8_monday_weeks_ascending(db_session):

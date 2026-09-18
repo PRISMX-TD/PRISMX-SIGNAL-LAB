@@ -1495,18 +1495,28 @@
       },
       "funnel": {
         "title": "Conversion funnel",
-        "hint": "All users (admins excluded). Steps are independent and may be skipped (e.g. paid without a trial), so a later step can exceed an earlier one. Percentages are relative to the previous step; \"real / demo\" splits Linked MT5 (demo includes contest and unclassified accounts), and a user with both kinds counts in both.",
+        "hint": "All users (admins excluded). Steps are counted independently and may be skipped, so a later step can exceed an earlier one. Indented rows split or subset the row above: \"real / demo\" splits Linked MT5 (demo includes contest and unclassified accounts, and a user with both counts in both), while \"warm leads\" are the registered users who have not linked yet.",
         "step": {
           "registered": "Registered",
+          "potential": "of which: warm leads",
           "bound": "Linked MT5",
           "boundReal": "of which: real",
           "boundDemo": "of which: demo",
-          "traded": "Placed a trade",
-          "trialed": "Started trial",
-          "paid": "Paid PRO"
+          "traded": "Placed a trade"
         },
         "byWeek": "Where each of the last 8 signup weeks got to (percent of that week's signups; real / demo as percent of that week's linked)",
-        "weekOf": "Signup week (Mon)"
+        "weekOf": "Signup week (Mon)",
+        "listToggle": "View list",
+        "listHide": "Hide",
+        "listNote": "No MT5 account yet, and opened the platform on {{min}} or more days in the last {{days}} (since {{from}}). Visit stats record which days, not how many opens, so the threshold counts active days. Sorted by active days; independent of the range picker above.",
+        "listEmpty": "No users match right now.",
+        "listFailed": "Failed to load the list",
+        "listTruncated": "{{total}} match; showing the first {{shown}}.",
+        "colUser": "User",
+        "colPhone": "Phone",
+        "colSignup": "Signed up",
+        "colActiveDays": "Active days",
+        "colLastSeen": "Last seen"
       },
       "retention": {
         "title": "Retention",

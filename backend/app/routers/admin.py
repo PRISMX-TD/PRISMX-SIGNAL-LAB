@@ -23,10 +23,10 @@ from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
 from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
 from app.services.audit import log_change
-from app.schemas import AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminOverviewOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
+from app.schemas import AdminPotentialCustomersOut, AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminOverviewOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
 from app.services.strategy_winrate import compute_strategy_session_winrate
-from app.services.admin_overview import build_overview
+from app.services.admin_overview import build_overview, potential_customers as build_potential_customers
 from app.services.stats_time import RangeError, RangeSpec, day_start_utc, local_day, resolve_range, today as stats_today
 from app.services.settings_store import (
     get_broker_settings,
@@ -335,6 +335,25 @@ def overview(
     """
     spec = _resolve_range_or_422(range_, from_, to)
     return build_overview(db, spec, stats_today())
+
+
+@router.get("/potential-customers", response_model=AdminPotentialCustomersOut)
+def potential_customers(
+    limit: int = Query(200, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """潜在转化客户名单：还没绑 MT5、但最近一周常来的人，给后台主动联系用。
+
+    **不跟看板的时间范围走**，永远是"截至今天的最近一周"——这份名单的用途是
+    "现在该联系谁"，按历史区间筛出一批早就冷掉的人没有意义。口径与漏斗那一行
+    同源（services/admin_overview._potential_ids），两处数字不会漂。
+
+    Warm-lead list for outreach. Deliberately ignores the dashboard range: it
+    always means "the last week up to today", because the question is who to
+    contact now. Shares its definition with the funnel row.
+    """
+    return build_potential_customers(db, stats_today(), limit=limit)
 
 
 @router.get("/page-stats", response_model=AdminPageStatsOut)
