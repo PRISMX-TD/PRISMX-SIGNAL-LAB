@@ -12,7 +12,6 @@ from app.core.config import settings
 from app.models import MT5Account, Order, PageVisitorDay, User, UserStrategy
 from app.services.stats_time import RangeSpec, day_start_utc
 from app.services import admin_overview as ov
-from app.services.admin_overview import POTENTIAL_WINDOW_DAYS as POTENTIAL_WINDOW
 
 TODAY = date(2026, 9, 16)
 # 本月 9/1..9/16，对比 8/16..8/31
@@ -160,7 +159,7 @@ def test_funnel_bound_splits_real_and_demo(db_session):
 
 
 def test_potential_is_unbound_and_frequent_this_week(db_session):
-    """潜在客户 = 没绑 MT5 + 窗口内活跃天数达门槛。"""
+    """潜在客户 = 没绑 MT5 + 本周活跃天数达门槛。TODAY 是周三，本周 = 9/14~9/16。"""
     a = _user(db_session, "a@t.co")   # 3 天、没绑 → 算
     b = _user(db_session, "b@t.co")   # 只 2 天 → 不算
     c = _user(db_session, "c@t.co")   # 3 天但绑了 → 不算
@@ -174,16 +173,26 @@ def test_potential_is_unbound_and_frequent_this_week(db_session):
     for i in range(2):
         _visit(db_session, b, TODAY - timedelta(days=i))
     _visit(db_session, d, TODAY); _visit(db_session, d, TODAY - timedelta(days=1))
-    _visit(db_session, d, TODAY - timedelta(days=7))            # 窗口是最近 7 天：第 8 天不算
+    _visit(db_session, d, TODAY - timedelta(days=3))            # 上周日，不算进本周
     f = ov.funnel(db_session, TODAY).overall
     assert f.potential == 1
 
 
-def test_potential_window_includes_the_seventh_day_back(db_session):
-    a = _user(db_session, "a@t.co")
-    for delta in (0, 3, POTENTIAL_WINDOW - 1):
+def test_potential_window_is_the_calendar_week_not_a_rolling_seven_days(db_session):
+    """窗口从本周一算起：周一当天算进来，上周日不算。"""
+    monday = date(2026, 9, 14)
+    assert monday.weekday() == 0 and TODAY.weekday() == 2
+    a = _user(db_session, "a@t.co")   # 周一 + 周二 + 周三 → 算
+    b = _user(db_session, "b@t.co")   # 上周五六日 + 周三 → 本周只有 1 天，不算
+    for delta in (0, 1, 2):
         _visit(db_session, a, TODAY - timedelta(days=delta))
+    _visit(db_session, b, TODAY)
+    for delta in (3, 4, 5):           # 9/13 周日、9/12 周六、9/11 周五
+        _visit(db_session, b, TODAY - timedelta(days=delta))
     assert ov.funnel(db_session, TODAY).overall.potential == 1
+    out = ov.potential_customers(db_session, TODAY)
+    assert (out.windowFrom, out.windowDays) == (monday.isoformat(), 3)
+    assert [u.email for u in out.users] == ["a@t.co"]
 
 
 def test_potential_counts_one_day_once_even_across_pages(db_session):
@@ -195,18 +204,21 @@ def test_potential_counts_one_day_once_even_across_pages(db_session):
 
 
 def test_potential_customers_list_matches_the_funnel_number(db_session):
+    """用周五当"今天"，本周有 5 天，两个人的活跃天数才分得出高低。"""
+    friday = date(2026, 9, 18)
+    assert friday.weekday() == 4
     a = _user(db_session, "a@t.co", created=date(2026, 9, 1))
     b = _user(db_session, "b@t.co", created=date(2026, 9, 2))
     _admin(db_session)
-    for i in range(4):
-        _visit(db_session, a, TODAY - timedelta(days=i))
-    for i in range(3):
-        _visit(db_session, b, TODAY - timedelta(days=i))
-    out = ov.potential_customers(db_session, TODAY)
-    assert out.total == ov.funnel(db_session, TODAY).overall.potential == 2
-    assert (out.windowDays, out.minActiveDays, out.windowFrom) == (7, 3, "2026-09-10")
+    for i in range(5):                                   # 周一到周五
+        _visit(db_session, a, friday - timedelta(days=i))
+    for i in range(3):                                   # 周三到周五
+        _visit(db_session, b, friday - timedelta(days=i))
+    out = ov.potential_customers(db_session, friday)
+    assert out.total == ov.funnel(db_session, friday).overall.potential == 2
+    assert (out.windowDays, out.minActiveDays, out.windowFrom) == (5, 3, "2026-09-14")
     assert [u.email for u in out.users] == ["a@t.co", "b@t.co"]   # 活跃天数降序
-    assert (out.users[0].activeDays, out.users[0].lastActiveDay) == (4, "2026-09-16")
+    assert (out.users[0].activeDays, out.users[0].lastActiveDay) == (5, "2026-09-18")
 
 
 def test_potential_customers_reports_total_beyond_the_limit(db_session):
@@ -218,19 +230,21 @@ def test_potential_customers_reports_total_beyond_the_limit(db_session):
     assert (out.total, len(out.users)) == (3, 2)
 
 
-def test_potential_customers_route(db_session):
-    """路由用真实的"今天"，所以用例的访问日也跟着真实今天走——写死日期会随时间失效。"""
-    from app.services.stats_time import today as stats_today
+def test_potential_customers_route(db_session, monkeypatch):
+    """把路由里的"今天"钉成 TODAY（周三）——否则真实跑到周一时本周只有 1 天，
+    门槛 3 天永远够不着，用例会随星期几时好时坏。"""
+    from app.routers import admin as admin_router
 
+    monkeypatch.setattr(admin_router, "stats_today", lambda: TODAY)
     adm = _admin(db_session)
     u = _user(db_session, "lead@t.co")
-    real_today = stats_today()
     for i in range(3):
-        _visit(db_session, u, real_today - timedelta(days=i))
+        _visit(db_session, u, TODAY - timedelta(days=i))
     res = _client(db_session, adm).get("/admin/potential-customers")
     assert res.status_code == 200, res.text
     body = res.json()
-    assert (body["windowDays"], body["minActiveDays"], body["total"]) == (7, 3, 1)
+    assert (body["windowDays"], body["minActiveDays"], body["total"]) == (3, 3, 1)
+    assert body["windowFrom"] == "2026-09-14"
     assert body["users"][0]["email"] == "lead@t.co" and body["users"][0]["activeDays"] == 3
 
 

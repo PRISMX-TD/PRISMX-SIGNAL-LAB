@@ -119,7 +119,7 @@
   - `bound`：`EXISTS mt5_accounts WHERE user_id`
   - `traded`：`EXISTS orders WHERE user_id AND status = 'FILLED'`
   - `boundReal` / `boundDemo`：`bound` 的拆分，真仓 = `mt5_accounts.trade_mode == REAL`，其余（模拟 / 比赛 / 未判定）归模拟；两种都有的人两边都算
-  - `potential`（潜在转化客户，2026-09-18 加）：没有 `mt5_accounts` 行，且最近 `POTENTIAL_WINDOW_DAYS`(7) 天内 `page_visitor_days` 有 `POTENTIAL_MIN_ACTIVE_DAYS`(3) 个不同日期。**门槛用活跃天数而非打开次数**：每人每天每页只有一条去重标记，次数在无身份的 `page_view_stats` 里，按次数筛需要新建带身份的明细表。名单另有 `GET /admin/potential-customers`（见 §5.1b），与本行共用 `_potential_ids`
+  - `potential`（潜在转化客户，2026-09-18 加）：没有 `mt5_accounts` 行，且**本周**（`stats_time.week_start(today)` 起到今天）`page_visitor_days` 有 `POTENTIAL_MIN_ACTIVE_DAYS`(3) 个不同日期。窗口是自然周不是滚动 7 天（后台按周盘点，滚动窗口每天悄悄换一批人）；代价是周一 / 周二窗口本身不足 3 天、名单必然为空，接口回传 `windowDays` 让前端照实说明。**门槛用活跃天数而非打开次数**：每人每天每页只有一条去重标记，次数在无身份的 `page_view_stats` 里，按次数筛需要新建带身份的明细表。名单另有 `GET /admin/potential-customers`（见 §5.1b），与本行共用 `_potential_ids`
   - 2026-09-18 删除 `trialed` / `paid` 两步（付费与试用人数看等级分布卡）
   - 五步互相独立，允许跳步（未试用直接付费），后一步不保证 ≤ 前一步。
 - `funnel.byWeek`：按注册周（周一起，`STATS_TZ`）分组最近 8 周，每组同上五个数。**不跟范围走**，固定最近 8 周。
@@ -133,7 +133,7 @@
 - `trading`：`orders WHERE status = 'FILLED'`，按 `created_at` 归 `STATS_TZ` 日落在范围内：`traders = COUNT(DISTINCT user_id)`，`fills = COUNT(*)`，`daily` 补零；`previous` 同法算对比期。剔管理员。
 
 ### 5.1b `GET /admin/potential-customers?limit`（2026-09-18 新增）
-潜在转化客户名单，给后台主动联系用：`{ windowDays, minActiveDays, windowFrom, total, users: [{ id, email, nickname, phone, createdAt, activeDays, lastActiveDay }] }`。活跃天数降序、同数按注册时间倒序；`limit` 默认 200、上限 500，`total` 是全量人数（大于 `users` 长度时前端要说明截断）。**不接受范围参数**：口径固定为「截至今天的最近一周」，因为这份名单回答的是"现在该联系谁"。带邮箱与手机号是因为用途就是联系，这两项管理端用户页本来就可见。
+潜在转化客户名单，给后台主动联系用：`{ windowDays, minActiveDays, windowFrom, total, users: [{ id, email, nickname, phone, createdAt, activeDays, lastActiveDay }] }`。`windowFrom` 是本周周一、`windowDays` 是本周已过天数（周一 1 → 周日 7，**不是定值**）。活跃天数降序、同数按注册时间倒序；`limit` 默认 200、上限 500，`total` 是全量人数（大于 `users` 长度时前端要说明截断）。**不接受范围参数**：口径固定为「截至今天的最近一周」，因为这份名单回答的是"现在该联系谁"。带邮箱与手机号是因为用途就是联系，这两项管理端用户页本来就可见。
 
 ### 5.2 `GET /admin/page-stats?range|from&to`（改参数）
 - `days` 参数删除，改为与 5.1 相同的 `range` / `from/to`，解析共用 `stats_time.resolve_range()`。
@@ -197,7 +197,7 @@ frontend/src/components/admin/overview/
 - 管理员在每一项人数里都被剔除。
 - `STATS_TZ` 跨日：UTC 23:30 的注册在北京时间算次日。
 - 漏斗跳步：各步独立计数，后一步可大于前一步。
-- 潜在客户：绑过 MT5 的人不算；窗口内只活跃 2 天不算；同一天开多个页面只算一天；窗口边界（第 7 天算、第 8 天不算）。
+- 潜在客户：绑过 MT5 的人不算；本周只活跃 2 天不算；同一天开多个页面只算一天；周边界（本周一算、上周日不算）；路由用例把 `stats_today` 钉死，否则真跑到周一时门槛永远够不着。
 - 留存：注册不满 N 天的用户不进 cohort；cohort 为空 `rate = null`；恰好第 N 天有访问算留存、第 N+1 天有访问不算。
 - 对比期计算：本月 16 天对比上月前 16 天；跨年、跨月边界。
 - `plans`：PRO 试用与付费拆分正确。

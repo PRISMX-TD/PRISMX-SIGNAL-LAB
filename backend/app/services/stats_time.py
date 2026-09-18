@@ -28,6 +28,14 @@ class RangeError(ValueError):
     """时间范围不合法；路由层转成 422。"""
 
 
+def week_start(d: date) -> date:
+    """d 所在自然周的周一。看板里「本周」只此一解——范围预设、漏斗分批周、
+    潜在客户窗口三处都引用它，免得哪天有人把某一处改成"最近 7 天"。
+    Monday of d's week: the single definition of "this week" on the dashboard,
+    shared by the range preset, the funnel's weekly cohorts and the lead window."""
+    return d - timedelta(days=d.weekday())
+
+
 def stats_tz() -> ZoneInfo:
     return ZoneInfo(settings.STATS_TZ)
 
@@ -66,7 +74,7 @@ def _preset_bounds(preset: str, today_: date) -> tuple[date, date]:
     if preset not in RANGE_PRESETS:
         raise RangeError(f"unknown range preset: {preset}")
     if preset == "week":
-        return today_ - timedelta(days=today_.weekday()), today_
+        return week_start(today_), today_
     if preset == "month":
         return today_.replace(day=1), today_
     if preset == "last_month":

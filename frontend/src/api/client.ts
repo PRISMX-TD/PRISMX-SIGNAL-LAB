@@ -784,9 +784,9 @@ export const adminApi = {
   translateStatus: () => request<{ configured: boolean }>('/admin/announcements/translate/status'),
   pageStats: (range: StatsRangeQuery) => request<AdminPageStats>(`/admin/page-stats${statsRangeQs(range)}`),
   overview: (range: StatsRangeQuery) => request<AdminOverview>(`/admin/overview${statsRangeQs(range)}`),
-  // 潜在转化客户名单。**不带范围参数**：口径固定是"截至今天的最近一周"，
+  // 潜在转化客户名单。**不带范围参数**：口径固定是"本周（周一起）到今天"，
   // 与看板顶部的时间范围无关（历史区间里的冷线索没有联系价值）。
-  // Warm-lead list; deliberately range-free — always the last week up to today.
+  // Warm-lead list; deliberately range-free — always this week up to today.
   potentialCustomers: (limit = 200) =>
     request<AdminPotentialCustomers>(`/admin/potential-customers?limit=${limit}`),
   // 策略 × 交易时段胜率（默认近 7 天）。时段窗口由后端随数据一起返回，前端不

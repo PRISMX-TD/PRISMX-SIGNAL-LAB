@@ -242,8 +242,8 @@ export interface AdminFunnelWeek extends AdminFunnelSteps {
 }
 
 // 潜在转化客户名单（`GET /admin/potential-customers`）。不跟看板时间范围走，
-// 永远是"截至今天的最近一周"。
-// Warm-lead list; always the last week up to today, never the dashboard range.
+// 永远是"本周（周一起）到今天"。
+// Warm-lead list; always this calendar week up to today, never the dashboard range.
 export interface AdminPotentialCustomer {
   id: string
   email: string
@@ -255,6 +255,8 @@ export interface AdminPotentialCustomer {
 }
 
 export interface AdminPotentialCustomers {
+  // 本周已过的天数（含今天）：周一是 1、周日是 7。低于 minActiveDays 时名单必然为空。
+  // Days elapsed this week; below minActiveDays the list is necessarily empty.
   windowDays: number
   minActiveDays: number
   windowFrom: string

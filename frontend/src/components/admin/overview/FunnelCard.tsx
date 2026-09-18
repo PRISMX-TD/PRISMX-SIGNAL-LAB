@@ -130,7 +130,15 @@ export default function FunnelCard({ funnel }: { funnel: { overall: AdminFunnelS
                 })}
               </p>
               {list.users.length === 0 ? (
-                <p className="text-xs text-neutral-500">{t('admin.overview.funnel.listEmpty')}</p>
+                // 周一、周二本周天数还不够门槛，名单必然为空——说清楚是"还没到时候"而不是
+                // "确实没人"，否则看板每周头两天都像坏了。
+                // On Mon/Tue the week is shorter than the threshold, so the list cannot
+                // have anyone yet; say that rather than letting it read as "nobody".
+                <p className="text-xs text-neutral-500">
+                  {list.windowDays < list.minActiveDays
+                    ? t('admin.overview.funnel.listTooEarly', { days: list.windowDays, min: list.minActiveDays })
+                    : t('admin.overview.funnel.listEmpty')}
+                </p>
               ) : (
                 <>
                   <div className="overflow-x-auto">

@@ -327,7 +327,7 @@ class FunnelStepsOut(BaseModel):
     Independent steps; skipping is allowed so later steps need not be smaller."""
     registered: int
     # 潜在转化客户：还没绑 MT5、但最近一周常来的人。口径见
-    # services/admin_overview.POTENTIAL_WINDOW_DAYS / POTENTIAL_MIN_ACTIVE_DAYS。
+    # services/admin_overview 的 _potential_window / POTENTIAL_MIN_ACTIVE_DAYS。
     # Warm leads: no MT5 account yet but frequently active in the last week.
     potential: int
     bound: int     # 有 MT5 账号 / has an mt5_accounts row
@@ -360,9 +360,13 @@ class PotentialCustomerOut(BaseModel):
 
 
 class AdminPotentialCustomersOut(BaseModel):
-    windowDays: int      # 窗口长度（天）/ window length in days
-    minActiveDays: int   # 门槛：窗口内至少活跃这么多天 / minimum active days
-    windowFrom: str      # 窗口起始日（STATS_TZ）/ window start
+    # 本周已过的天数（含今天）。**不是固定值**：周一是 1、周日是 7。低于
+    # minActiveDays 时（周一 / 周二）名单必然为空，前端要照实说明而不是显示"没有"。
+    # Days elapsed this week including today — 1 on Monday, 7 on Sunday. Below
+    # minActiveDays the list is necessarily empty and the UI must say why.
+    windowDays: int
+    minActiveDays: int   # 门槛：本周内至少活跃这么多天 / minimum active days this week
+    windowFrom: str      # 本周周一（STATS_TZ）/ Monday of this week
     # 符合条件的总人数。**可能大于 users 的长度**（受 limit 截断），前端要照实说明。
     # Total matching users; may exceed len(users) because of the limit.
     total: int

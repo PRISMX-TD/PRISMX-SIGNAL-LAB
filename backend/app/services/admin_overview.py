@@ -24,7 +24,7 @@ from app.schemas import (
     FunnelStepsOut, FunnelWeekOut, OverviewHeadlineOut, OverviewRangeOut, PotentialCustomerOut,
     RetentionOut, RetentionPointOut, StrategyUsageOut, TradingDayOut, TradingOut,
 )
-from app.services.stats_time import MAX_RANGE_DAYS, RangeSpec, day_start_utc, local_day
+from app.services.stats_time import MAX_RANGE_DAYS, RangeSpec, day_start_utc, local_day, week_start
 
 NOT_ADMIN = User.role != "admin"
 
@@ -109,7 +109,17 @@ def _as_date(value) -> date | None:
 # ── 漏斗 / funnel ──────────────────────────────────────────────────────────
 FUNNEL_WEEKS = 8
 
-# 潜在转化客户：注册了、还没绑 MT5，但最近一周常来的人——后台最该主动联系的一批。
+# 潜在转化客户：注册了、还没绑 MT5，但**本周**常来的人——后台最该主动联系的一批。
+#
+# 窗口是自然周（周一起到今天），不是滚动 7 天：后台按周盘点，"这周来了几天"
+# 跟周报对得上，而滚动窗口每天都在悄悄换一批人。代价是周一、周二窗口本身还不够
+# POTENTIAL_MIN_ACTIVE_DAYS 天，这两天名单必然为空——接口把 windowDays 一并回传，
+# 前端照实显示"本周已过 N 天"，不让人误以为是坏了。
+# The window is the calendar week (Monday to today), not a rolling 7 days: the
+# back office reviews by week, so "days active this week" lines up with the weekly
+# report, whereas a rolling window quietly swaps the cohort every day. The trade-off
+# is that on Mon/Tue the window is shorter than the threshold and the list is
+# necessarily empty — windowDays ships with the response so the UI can say so.
 #
 # **门槛是"活跃天数"而不是"打开次数"**，因为次数根本没存：page_visitor_days 每人
 # 每天每页只有一条去重标记（刻意不记时刻与次数，见模型说明），page_view_stats 记了
@@ -121,7 +131,6 @@ FUNNEL_WEEKS = 8
 # stored anywhere (page_visitor_days keeps one dedup marker per user/page/day
 # with no timestamps; page_view_stats counts views but carries no user_id).
 # Counting opens would require a new identified table — a separate privacy call.
-POTENTIAL_WINDOW_DAYS = 7
 POTENTIAL_MIN_ACTIVE_DAYS = 3
 
 
@@ -138,8 +147,8 @@ def _bound_user_ids(db: Session) -> set[str]:
 
 
 def _potential_window(today: date) -> date:
-    """潜在客户判定窗口的起始日（含）。"""
-    return today - timedelta(days=POTENTIAL_WINDOW_DAYS - 1)
+    """潜在客户判定窗口的起始日（含）= 本周周一。"""
+    return week_start(today)
 
 
 def _active_days_in_window(db: Session, today: date) -> dict[str, int]:
@@ -210,7 +219,7 @@ def funnel(db: Session, today: date) -> FunnelOut:
     steps = _step_user_ids(db, today)
     all_ids = {row[0] for row in _non_admin_users(db).with_entities(User.id).all()}
 
-    this_monday = today - timedelta(days=today.weekday())
+    this_monday = week_start(today)
     week_starts = [this_monday - timedelta(weeks=i) for i in range(FUNNEL_WEEKS - 1, -1, -1)]
     cohorts: dict[date, set[str]] = {ws: set() for ws in week_starts}
     rows = (
@@ -243,9 +252,10 @@ def potential_customers(db: Session, today: date, limit: int = 200) -> AdminPote
     """
     ids, counts = _potential_ids(db, today, _bound_user_ids(db))
     window_from = _potential_window(today)
+    window_days = (today - window_from).days + 1  # 本周已过的天数（含今天）
     if not ids:
         return AdminPotentialCustomersOut(
-            windowDays=POTENTIAL_WINDOW_DAYS,
+            windowDays=window_days,
             minActiveDays=POTENTIAL_MIN_ACTIVE_DAYS,
             windowFrom=window_from.isoformat(),
             total=0,
@@ -280,7 +290,7 @@ def potential_customers(db: Session, today: date, limit: int = 200) -> AdminPote
     users.sort(key=lambda r: r.createdAt or datetime.min, reverse=True)
     users.sort(key=lambda r: r.activeDays, reverse=True)
     return AdminPotentialCustomersOut(
-        windowDays=POTENTIAL_WINDOW_DAYS,
+        windowDays=window_days,
         minActiveDays=POTENTIAL_MIN_ACTIVE_DAYS,
         windowFrom=window_from.isoformat(),
         total=len(ids),
