@@ -1,6 +1,10 @@
 // 代理页（/agent）：管理员把邀请链接指派给某个用户后，该用户在这里看到名下每条
-// 链接的点击数、注册人数、状态，以及经它注册的用户名单。全程只读——后端 /agent/*
-// 没有任何写端点，名单里也没有手机号与用户 id（见后端 AgentLinkUserOut）。
+// 链接的点击数、注册人数、近 7 日活跃人数、已连 MT5 人数与状态，以及经它注册的
+// 用户名单（含各人的最近活跃日与 MT5 绑定）。全程只读——后端 /agent/* 没有任何
+// 写端点，名单里也没有手机号与用户 id（见后端 AgentLinkUserOut）。
+// 两条口径不在这里算，全部由后端给：活跃 = page_visitor_days 里有行（到天为止，
+// 没有时刻也没有时长），MT5 账户号是后端打好码的。前端只负责显示，别在这里补
+// 任何"推算"——一推算就会和管理看板的数字对不上。
 // 「代理」不是角色：入口由 /auth/me 的 isAgent 派生（至少持有一条被指派的链接），
 // role 与权益都不动。链接 URL 拼 ORIGIN 而不是 window.location.origin，理由同
 // 管理面板（预览域名上复制出去的仍要是正式域名）。
@@ -19,10 +23,76 @@ import { agentApi } from '../api/client'
 import { fmtTime, localizeApiError } from '../api/utils'
 import { ORIGIN } from '../seo/meta'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
-import type { AgentLink, AgentLinkUsers } from '../api/types'
+import type { AgentLink, AgentLinkUsers, AgentMT5Account } from '../api/types'
 
 const PAGE_SIZE = 50
 const linkUrl = (code: string) => `${ORIGIN}/?ref=${code}`
+
+// 「近 7 日」的分界日。后端给的 lastActiveDay 是北京时间的日历日字符串
+// （YYYY-MM-DD），所以这里也按北京时间取当天，再直接比字符串——ISO 日期按
+// 字典序比就是按时间比，不用解析成 Date（解析会把它当 UTC 零点再偏一次时区）。
+// Cut-off day for "last 7 days". lastActiveDay is a Beijing-time calendar date
+// string, so this one is too, and ISO dates compare correctly as strings —
+// parsing them into Date would shift them by a timezone a second time.
+const statsDay = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' })
+const isRecentDay = (day: string) => day >= statsDay(Date.now() - 6 * 86_400_000)
+
+const MT5_TYPE_KEY = { real: 'agent.mt5Real', demo: 'agent.mt5Demo', contest: 'agent.mt5Contest' } as const
+
+function LastActive({ day }: { day: string | null }) {
+  const { t } = useTranslation()
+  if (!day) return <span className="text-neutral-500">{t('agent.neverActive')}</span>
+  // 近 7 日内的亮着，更早的压灰——一眼看出哪些人已经不来了。
+  // Recent days stay bright, older ones grey out: who stopped coming, at a glance.
+  return (
+    <span className={`num whitespace-nowrap ${isRecentDay(day) ? 'text-neutral-100' : 'text-neutral-500'}`}>
+      {day}
+    </span>
+  )
+}
+
+// MT5 绑定：打码账号 + 实盘/模拟 + 服务器 + 最近连接。撤销的绑定照样列出并标
+// 「需重连」——代理看见"绑过但掉了"才知道要去提醒人重新验证。
+// One MT5 binding per line: masked login, real/demo, server, last seen. Revoked
+// ones are listed and flagged rather than hidden, so the agent can nudge.
+function Mt5List({ accounts }: { accounts: AgentMT5Account[] }) {
+  const { t } = useTranslation()
+  if (accounts.length === 0) return <span className="text-neutral-500">{t('agent.mt5None')}</span>
+  return (
+    <ul className="space-y-1.5">
+      {accounts.map((a, i) => (
+        <li key={`${a.login}-${i}`} className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="num text-neutral-100">{a.login}</span>
+            <span
+              className={`rounded-full px-1.5 py-0.5 text-[11px] ${
+                a.accountType === 'real' ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-400'
+              }`}
+            >
+              {t(a.accountType ? MT5_TYPE_KEY[a.accountType] : 'agent.mt5Unknown')}
+            </span>
+            {a.revoked && (
+              <span className="rounded-full bg-down/15 px-1.5 py-0.5 text-[11px] text-down">
+                {t('agent.mt5Revoked')}
+              </span>
+            )}
+          </div>
+          {/* 不用 truncate：手机上这一列很窄，截断正好把"最近连接什么时候"这半句
+              吃掉，等于这行白写。让它换行，桌面上宽度够时仍是一行。
+              No truncate: on a phone this column is narrow and truncation eats
+              exactly the half that carries the time. Wrapping costs one line on
+              a phone and nothing on desktop. */}
+          <p className="break-words text-[11px] text-neutral-500">
+            {a.server ? `${a.server} · ` : ''}
+            {a.lastConnectedAt
+              ? t('agent.mt5Last', { time: fmtTime(a.lastConnectedAt) })
+              : t('agent.mt5Never')}
+          </p>
+        </li>
+      ))}
+    </ul>
+  )
+}
 
 export default function AgentPage() {
   const { t } = useTranslation()
@@ -99,7 +169,7 @@ export default function AgentPage() {
   const pageNo = Math.floor(offset / PAGE_SIZE) + 1
 
   return (
-    <div className="mx-auto max-w-5xl">
+    <div className="mx-auto max-w-6xl">
       <PageHead
         as="h1"
         title={t('agent.title')}
@@ -165,17 +235,24 @@ export default function AgentPage() {
                     {l.isActive ? t('agent.active') : t('agent.inactive')}
                   </span>
                 </div>
-                <div className="mt-4 flex items-end justify-between gap-3">
-                  <div className="flex gap-6">
-                    <div>
-                      <p className="text-[11px] uppercase tracking-wide text-neutral-500">{t('agent.clicks')}</p>
-                      <p className="num text-2xl text-neutral-100">{l.clicks}</p>
+                {/* 四个数字一排：点击 / 注册 / 近 7 日活跃 / 已连 MT5。手机上两列换行，
+                    复制按钮自成一行——四个数字挤在按钮旁边会把数字压到看不清。
+                    Four numbers in a row, wrapping to two columns on phones; the copy
+                    button gets its own row rather than squeezing the figures. */}
+                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  {[
+                    { label: t('agent.clicks'), value: l.clicks },
+                    { label: t('agent.registrations'), value: l.registrations },
+                    { label: t('agent.active7d'), value: l.activeUsers7d },
+                    { label: t('agent.mt5Users'), value: l.mt5Users },
+                  ].map((s) => (
+                    <div key={s.label} className="min-w-0">
+                      <p className="truncate text-[11px] uppercase tracking-wide text-neutral-500">{s.label}</p>
+                      <p className="num text-2xl text-neutral-100">{s.value}</p>
                     </div>
-                    <div>
-                      <p className="text-[11px] uppercase tracking-wide text-neutral-500">{t('agent.registrations')}</p>
-                      <p className="num text-2xl text-neutral-100">{l.registrations}</p>
-                    </div>
-                  </div>
+                  ))}
+                </div>
+                <div className="mt-3 flex justify-end">
                   <button
                     type="button"
                     className="btn-ghost px-3 py-1.5 text-xs"
@@ -198,7 +275,10 @@ export default function AgentPage() {
       )}
 
       {links && links.length > 0 && (
-        <p className="mt-3 text-xs leading-relaxed text-neutral-500">{t('agent.clicksNote')}</p>
+        <div className="mt-3 space-y-1 text-xs leading-relaxed text-neutral-500">
+          <p>{t('agent.clicksNote')}</p>
+          <p>{t('agent.statsNote')}</p>
+        </div>
       )}
 
       {/* 名单：桌面表格、手机卡片（两棵 DOM，按断点切换）。
@@ -235,6 +315,8 @@ export default function AgentPage() {
                       <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-neutral-500">
                         <th className="px-4 py-3 font-medium">{t('agent.colUser')}</th>
                         <th className="px-4 py-3 font-medium">{t('agent.colPlan')}</th>
+                        <th className="px-4 py-3 font-medium">{t('agent.colMt5')}</th>
+                        <th className="px-4 py-3 font-medium">{t('agent.colActive')}</th>
                         <th className="px-4 py-3 font-medium">{t('agent.colRegistered')}</th>
                       </tr>
                     </thead>
@@ -256,7 +338,15 @@ export default function AgentPage() {
                               {u.plan}
                             </span>
                           </td>
-                          <td className="num px-4 py-3 text-xs text-neutral-400">{fmtTime(u.createdAt)}</td>
+                          <td className="px-4 py-3 text-xs">
+                            <Mt5List accounts={u.mt5Accounts} />
+                          </td>
+                          <td className="px-4 py-3 text-xs">
+                            <LastActive day={u.lastActiveDay} />
+                          </td>
+                          <td className="num whitespace-nowrap px-4 py-3 text-xs text-neutral-400">
+                            {fmtTime(u.createdAt)}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -264,22 +354,42 @@ export default function AgentPage() {
                 </div>
                 <ul className="divide-y divide-white/5 sm:hidden">
                   {page.users.map((u, i) => (
-                    <li key={`${u.email}-${i}`} className="flex items-center justify-between gap-3 px-4 py-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm text-neutral-100">
-                          {u.nickname || <span className="text-neutral-500">{t('agent.noNickname')}</span>}
-                        </p>
-                        <p className="num break-all text-xs text-neutral-400">{u.email}</p>
+                    <li key={`${u.email}-${i}`} className="px-4 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm text-neutral-100">
+                            {u.nickname || <span className="text-neutral-500">{t('agent.noNickname')}</span>}
+                          </p>
+                          <p className="num break-all text-xs text-neutral-400">{u.email}</p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-xs ${
+                              u.plan === 'PRO' ? 'bg-prism-500/20 text-prism-200' : 'bg-white/5 text-neutral-400'
+                            }`}
+                          >
+                            {u.plan}
+                          </span>
+                          <p className="num mt-1 text-[11px] text-neutral-500">{fmtTime(u.createdAt)}</p>
+                        </div>
                       </div>
-                      <div className="shrink-0 text-right">
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-xs ${
-                            u.plan === 'PRO' ? 'bg-prism-500/20 text-prism-200' : 'bg-white/5 text-neutral-400'
-                          }`}
-                        >
-                          {u.plan}
+                      {/* 手机上活跃与 MT5 换行放下面：右侧那一列已经被等级与注册时间占满，
+                          再塞就只能压成两三个字。
+                          On phones activity and MT5 go on their own rows — the right column
+                          is already taken by tier and signup time. */}
+                      <div className="mt-2 flex items-baseline gap-2 text-xs">
+                        <span className="shrink-0 text-[11px] uppercase tracking-wide text-neutral-500">
+                          {t('agent.colActive')}
                         </span>
-                        <p className="num mt-1 text-[11px] text-neutral-500">{fmtTime(u.createdAt)}</p>
+                        <LastActive day={u.lastActiveDay} />
+                      </div>
+                      <div className="mt-1.5 flex items-baseline gap-2 text-xs">
+                        <span className="shrink-0 text-[11px] uppercase tracking-wide text-neutral-500">
+                          {t('agent.colMt5')}
+                        </span>
+                        <div className="min-w-0">
+                          <Mt5List accounts={u.mt5Accounts} />
+                        </div>
                       </div>
                     </li>
                   ))}

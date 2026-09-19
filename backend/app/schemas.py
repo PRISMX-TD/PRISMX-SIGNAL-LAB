@@ -1,6 +1,6 @@
 """Pydantic 请求/响应模型 / Pydantic request & response schemas."""
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
@@ -1482,26 +1482,94 @@ class AgentLinkOut(BaseModel):
     label: str
     clicks: int
     registrations: int = 0
+    # 经此链接注册的人里，近 7 天（含今天，按 STATS_TZ 切天）打开过任一页面的人数。
+    # 口径与管理看板完全一致（page_visitor_days 有行 = 活跃），刻意不用
+    # users.last_active_at：那一列任何带凭证的请求都会打（App 在后台静默刷数据也
+    # 算），拿它报给代理会把"手机装着没卸载"说成"还在用"。
+    # Distinct people among this link's signups who opened any page in the last 7
+    # days (today included, STATS_TZ). Same definition as the admin dashboard (a
+    # page_visitor_days row = active); deliberately not users.last_active_at,
+    # which any authenticated request bumps — including the app's background
+    # refreshes — and would report "app still installed" as "still using it".
+    activeUsers7d: int = 0
+    # 经此链接注册的人里，至少还有一个有效 MT5 绑定的人数（已撤销的绑定不算，
+    # 见 MT5Account.revoked_at）。数的是**人**不是账号：一个人绑两个账号仍是 1。
+    # People with at least one live MT5 binding (revoked ones excluded). Counts
+    # people, not accounts: two accounts on one person is still 1.
+    mt5Users: int = 0
     isActive: bool
     createdAt: datetime | None = None
 
 
+class AgentMT5AccountOut(BaseModel):
+    """代理名单里的一个 MT5 绑定：打码账号号、服务器、实盘/模拟、最近连接时间。
+
+    账号号打码（`identity.mask_account`，123**678）与排行榜同一口径：代理需要能对
+    上"这个人到底绑没绑、绑的是不是实盘"，不需要能原样抄走别人的交易账户号。
+
+    **资金一概不下发**——余额、净值、杠杆、保证金都不在这里。用户绑定 MT5 是为了
+    跟单，从没被告知过自己的资金规模会给推荐人看；这条线一旦开了就收不回来。
+
+    One MT5 binding on an agent's list: masked login, server, real/demo, last
+    seen. The login is masked exactly as on the leaderboards — an agent needs to
+    know whether their referral bound an account and whether it is real money,
+    not to be able to copy the number down. No balance, equity, leverage or
+    margin is ever included: users bound MT5 to copy trades and were never told
+    their account size would be shown to whoever referred them.
+    """
+    # 打码后的账户号 / masked account number
+    login: str
+    # 券商服务器名（如 "Broker-Real 3"）；未上报为 null / broker server name
+    server: str | None = None
+    # 'real' / 'demo' / 'contest' / null（未判定）。由 MT5Account.trade_mode 映射，
+    # 不下发 trade_mode_source：「自报还是券商判的」是风控口径，代理看了只会误读。
+    # Mapped from trade_mode; trade_mode_source is withheld — self-reported vs
+    # broker-derived is a risk-control distinction an agent would misread.
+    accountType: Literal["real", "demo", "contest"] | None = None
+    # 最近一次心跳（桥接/网关在线上报）；从未连过为 null。
+    # Last heartbeat from the bridge/gateway; null if it never connected.
+    lastConnectedAt: datetime | None = None
+    # True = 这次绑定已失效，需用户重新验证（见 MT5Account.revoked_at）。列出来而
+    # 不是隐藏：代理看见"绑过但掉了"才知道要去提醒人重连。
+    # True = binding revoked, needs re-verification. Shown rather than hidden so
+    # the agent can tell the person to reconnect.
+    revoked: bool = False
+
+
 class AgentLinkUserOut(BaseModel):
-    """代理名单里的一个用户：昵称、邮箱、注册时间、等级——只有这四项。
+    """代理名单里的一个用户：昵称、邮箱、等级、注册时间、最近活跃日、MT5 绑定。
 
     邮箱给完整值（2026-09-15 产品决定，此前是打码的 `ab***@域名`）：代理要能联系
     到自己带来的人，打码等于这一列没用。**手机号与用户 id 仍然不给**——手机号是
     另一个量级的个人信息，id 则是能拿去撞其他接口的标识，代理页一个都用不上。
 
-    One user on an agent's list: nickname, email, signup time, tier — these four
-    only. The email is the real one (product decision on 2026-09-15; it used to be
-    masked), because an agent has to be able to reach the people they brought in.
-    Phone and user id are still withheld: a phone is a different order of personal
-    data, and an id is an identifier that could be used to probe other endpoints."""
+    2026-09-19 加了活跃与 MT5 两块（产品决定）。加的时候守住两条线，后来者别越过：
+    活跃只到天、不到时刻（源表本来就只存到天），MT5 只说"绑没绑、是不是实盘、还
+    连不连得上"、不说钱。判断新字段该不该加的标准是"代理拿它去做什么"：提醒人
+    重连、跟进不活跃的人，都用不到精确到分钟的行踪或对方的账户余额。
+
+    One user on an agent's list: nickname, email, tier, signup time, last active
+    day and MT5 bindings. The email is real (product decision, 2026-09-15) so the
+    agent can reach the people they brought in; phone and user id stay withheld.
+    Activity and MT5 were added on 2026-09-19 with two lines held that later
+    changes should not cross: activity is day-granular only, and MT5 says whether
+    an account is bound, real, and reachable — never how much money is in it. The
+    test for a new field is what the agent would *do* with it; nudging someone to
+    reconnect needs neither minute-level whereabouts nor their balance."""
     nickname: str | None = None
     email: str
     plan: str
     createdAt: datetime | None = None
+    # 最近活跃日（STATS_TZ 日期，口径同 activeUsers7d）。**只到天**，不给时刻：
+    # page_visitor_days 本来就只存到天，正是为了让"某人几点在看哪个页面"这种问题
+    # 在结构上问不出来（见该模型注释）。超过 400 天的记录会被清理，故老用户可能为 null。
+    # Last active day (STATS_TZ). Day granularity only, by construction: the
+    # source table stores no hour and no dwell time so that "what was this person
+    # looking at at 3pm" cannot be asked. Rows older than 400 days are pruned.
+    lastActiveDay: date | None = None
+    # 该用户名下的 MT5 绑定，最近连接的在前。空数组 = 从未绑过。
+    # This user's MT5 bindings, most recently seen first. Empty = never bound.
+    mt5Accounts: list[AgentMT5AccountOut] = []
 
 
 class AgentLinkUsersOut(BaseModel):

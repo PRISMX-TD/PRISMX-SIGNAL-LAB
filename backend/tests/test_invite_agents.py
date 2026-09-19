@@ -2,10 +2,12 @@
 
 照 test_invite_links.py 的惯例走 service 级测试，用 conftest 的 db_session 内存库。
 """
+from datetime import datetime, timedelta
+
 import pytest
 from fastapi import HTTPException
 
-from app.models import AdminAuditLog, InviteLink, InviteLinkAgent, User
+from app.models import AdminAuditLog, InviteLink, InviteLinkAgent, MT5Account, PageVisitorDay, User
 from app.routers.invite import (
     agent_link_users,
     agent_links,
@@ -13,6 +15,8 @@ from app.routers.invite import (
     is_agent,
     unassign_agent,
 )
+from app.services.account_type import DEMO, REAL
+from app.services.stats_time import today as stats_today
 
 
 def _mk_link(db, code="abcd2345", label="测试渠道", active=True):
@@ -27,6 +31,19 @@ def _mk_user(db, email="u@example.com", **kw):
     db.add(user)
     db.commit()
     return user
+
+
+def _visit(db, user, day, path="/signals"):
+    """给用户记一个活跃日（活跃口径就是这张表里有行）。"""
+    db.add(PageVisitorDay(path=path, day=day, user_id=user.id))
+    db.commit()
+
+
+def _mk_mt5(db, user, login, **kw):
+    acc = MT5Account(user_id=user.id, login=login, **kw)
+    db.add(acc)
+    db.commit()
+    return acc
 
 
 def test_agent_is_derived_not_a_role(db_session):
@@ -158,3 +175,111 @@ def test_assignment_writes_audit_with_real_target(db_session):
     assert all(r.field == f"invite:{link.code}:agent" for r in rows)
     assert (rows[0].old_value or "") == "" and rows[0].new_value == "assigned"
     assert rows[1].old_value == "assigned" and (rows[1].new_value or "") == ""
+
+
+# ---------- 活跃与 MT5（2026-09-19 新增字段）/ activity + MT5 ----------
+
+
+def test_link_counts_actives_within_window_only(db_session):
+    """近 7 日活跃按 page_visitor_days 数人，窗口外的与别人链接下的都不算。"""
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    other = _mk_link(db_session, code="othr2345", label="别人的")
+    assign_agent(db_session, admin, link, agent)
+    today = stats_today()
+
+    recent = _mk_user(db_session, "recent@x.io", invite_code=link.code)
+    stale = _mk_user(db_session, "stale@x.io", invite_code=link.code)
+    never = _mk_user(db_session, "never@x.io", invite_code=link.code)
+    theirs = _mk_user(db_session, "theirs@x.io", invite_code=other.code)
+
+    # 同一个人两天两页 = 仍然一个人 / same person twice is still one person
+    _visit(db_session, recent, today)
+    _visit(db_session, recent, today - timedelta(days=6), path="/orders")
+    _visit(db_session, stale, today - timedelta(days=7))  # 刚好落在窗口外
+    _visit(db_session, theirs, today)
+    assert never is not None
+
+    out = agent_links(db_session, agent)
+    assert len(out) == 1
+    assert out[0].registrations == 3
+    assert out[0].activeUsers7d == 1
+
+
+def test_link_counts_mt5_people_not_bindings(db_session):
+    """已连 MT5 数的是人：一人两号仍是 1，只剩撤销绑定的人不算。"""
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+
+    two = _mk_user(db_session, "two@x.io", invite_code=link.code)
+    _mk_mt5(db_session, two, "10001", server="B-Real 1")
+    _mk_mt5(db_session, two, "10002", server="B-Real 2")
+    dead = _mk_user(db_session, "dead@x.io", invite_code=link.code)
+    _mk_mt5(db_session, dead, "20001", revoked_at=datetime(2026, 9, 1), revoked_reason="password_changed")
+    _mk_user(db_session, "none@x.io", invite_code=link.code)
+
+    out = agent_links(db_session, agent)
+    assert out[0].mt5Users == 1
+
+
+def test_user_row_carries_last_active_day_and_masked_mt5(db_session):
+    """名单行：最近活跃日（到天）、MT5 打码账号 + 服务器 + 实盘/模拟 + 最近连接。"""
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+    today = stats_today()
+
+    u = _mk_user(db_session, "u@x.io", invite_code=link.code, nickname="小王")
+    _visit(db_session, u, today - timedelta(days=3))
+    _visit(db_session, u, today - timedelta(days=1), path="/orders")
+    # 最近连接的排前面；从没心跳过的排最后 / most recent first, never-seen last
+    _mk_mt5(db_session, u, "77777777", server="B-Demo", trade_mode=DEMO)
+    _mk_mt5(db_session, u, "12345678", server="B-Real 3", trade_mode=REAL,
+            last_heartbeat=datetime(2026, 9, 18, 6, 0))
+
+    row = agent_link_users(db_session, agent, link.id).users[0]
+    assert row.lastActiveDay == today - timedelta(days=1)
+    assert [a.login for a in row.mt5Accounts] == ["123**678", "777**777"]
+    first = row.mt5Accounts[0]
+    assert first.server == "B-Real 3"
+    assert first.accountType == "real"
+    assert first.lastConnectedAt == datetime(2026, 9, 18, 6, 0)
+    assert first.revoked is False
+    assert row.mt5Accounts[1].accountType == "demo"
+    assert row.mt5Accounts[1].lastConnectedAt is None
+    # 资金一概不下发 / no money ever leaves
+    for forbidden in ("balance", "equity", "leverage", "margin"):
+        assert forbidden not in first.model_dump()
+
+
+def test_user_row_without_activity_or_mt5_is_empty_not_zero(db_session):
+    """从没活跃过 = null（不是某一天），没绑过 = 空数组。"""
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+    _mk_user(db_session, "quiet@x.io", invite_code=link.code)
+
+    row = agent_link_users(db_session, agent, link.id).users[0]
+    assert row.lastActiveDay is None
+    assert row.mt5Accounts == []
+
+
+def test_revoked_binding_is_listed_and_flagged(db_session):
+    """撤销的绑定仍然列出并标记——代理要看见"绑过但掉了"才会去提醒人重连。"""
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+    u = _mk_user(db_session, "u@x.io", invite_code=link.code)
+    _mk_mt5(db_session, u, "88888888", revoked_at=datetime(2026, 9, 10), revoked_reason="password_changed")
+
+    row = agent_link_users(db_session, agent, link.id).users[0]
+    assert len(row.mt5Accounts) == 1
+    assert row.mt5Accounts[0].revoked is True
+    # 撤销原因不下发：那是风控内部口径 / the reason stays internal
+    assert "revokedReason" not in row.mt5Accounts[0].model_dump()

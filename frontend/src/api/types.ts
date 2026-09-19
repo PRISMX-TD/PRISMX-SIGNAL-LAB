@@ -171,8 +171,26 @@ export interface AgentLink {
   label: string
   clicks: number
   registrations: number
+  // 近 7 日（含今天，按 STATS_TZ 切天）打开过页面的人数；口径同管理看板，
+  // 不是「最近请求过接口」。已连 MT5 数的是人不是账号，撤销的绑定不算。
+  // 7-day actives (page opened, STATS_TZ days), same definition as the admin
+  // dashboard. mt5Users counts people, not bindings, revoked ones excluded.
+  activeUsers7d: number
+  mt5Users: number
   isActive: boolean
   createdAt: string | null
+}
+
+// 代理名单里的一个 MT5 绑定。login 是**后端打过码的**（123**678，与排行榜同一
+// 口径），前端不做二次处理；资金字段后端一概不下发。
+// One MT5 binding on the agent's list. login arrives already masked from the
+// backend (same form as the leaderboards); no money fields are ever sent.
+export interface AgentMT5Account {
+  login: string
+  server: string | null
+  accountType: 'real' | 'demo' | 'contest' | null
+  lastConnectedAt: string | null
+  revoked: boolean
 }
 
 // 代理名单里的一个用户：只有这四项。邮箱是完整值（2026-09-15 产品决定），
@@ -184,6 +202,12 @@ export interface AgentLinkUser {
   email: string
   plan: UserPlan
   createdAt: string | null
+  // 最近活跃日，"YYYY-MM-DD"（已经是 STATS_TZ 的日期，别再丢进 fmtDay 之类的
+  // 时区换算里，那会把它当 UTC 零点再偏一次）。null = 从未活跃或已过留存期。
+  // Last active day, already a STATS_TZ calendar date — do not run it through a
+  // timezone formatter, that would shift it a second time. null = never / pruned.
+  lastActiveDay: string | null
+  mt5Accounts: AgentMT5Account[]
 }
 
 export interface AgentLinkUsers {

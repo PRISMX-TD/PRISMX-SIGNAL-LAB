@@ -18,7 +18,7 @@ the acting admin stands in and the "invite:" field prefix disambiguates.
 """
 import json
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import func
@@ -27,12 +27,13 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter
-from app.models import InviteLink, InviteLinkAgent, User
+from app.models import InviteLink, InviteLinkAgent, MT5Account, PageVisitorDay, User
 from app.routers.admin import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, _log_change
 from app.schemas import (
     AgentLinkOut,
     AgentLinkUserOut,
     AgentLinkUsersOut,
+    AgentMT5AccountOut,
     InviteClickRequest,
     InviteLinkAgentOut,
     InviteLinkAssignAgent,
@@ -40,8 +41,11 @@ from app.schemas import (
     InviteLinkOut,
     InviteLinkUpdate,
 )
+from app.services.account_type import CONTEST, DEMO, REAL
 from app.services.deps import get_current_user, require_admin
+from app.services.gamification import mask_account
 from app.services.settings_store import get_trial_settings
+from app.services.stats_time import today as stats_today
 
 router = APIRouter(prefix="/invite", tags=["invite"])
 # require_admin 是**两处都挂**，不是二选一：main.py 挂载时的 router 级依赖是兜底
@@ -321,6 +325,111 @@ def _registrations(db: Session, codes: list[str]) -> dict[str, int]:
     )
 
 
+# 代理页「活跃」的窗口：近 7 天（含今天）。管理看板用的是可选时间范围，代理页
+# 不给选——多一个控件换不来一个决策，代理只要知道"这批人还在不在用"。
+# The agent view's activity window: last 7 days, today included. The admin
+# dashboard takes a range picker; this page deliberately doesn't — one more
+# control buys no extra decision for an agent.
+ACTIVE_WINDOW_DAYS = 7
+
+# MT5 trade_mode → 对外说法。NULL / 认不出的值一律 None（"未判定"），不猜。
+# trade_mode → wire value; unknown or NULL maps to None rather than a guess.
+_TRADE_MODE_NAME = {DEMO: "demo", CONTEST: "contest", REAL: "real"}
+
+
+def _active_window_start() -> date:
+    return stats_today() - timedelta(days=ACTIVE_WINDOW_DAYS - 1)
+
+
+def _active_users(db: Session, codes: list[str]) -> dict[str, int]:
+    """每条链接名下近 7 天活跃的人数（一条 GROUP BY 全查，不是每条链接一查）。
+
+    活跃口径与管理看板同源：page_visitor_days 里有行 = 当天打开过页面。这里
+    join users 而不是直接按 user_id 数，是因为归因只记在 users.invite_code 上。
+
+    Per-link 7-day active head count in one GROUP BY. "Active" means a
+    page_visitor_days row, same as the admin dashboard; the join to users is
+    needed because attribution lives only on users.invite_code.
+    """
+    if not codes:
+        return {}
+    rows = (
+        db.query(User.invite_code, func.count(func.distinct(PageVisitorDay.user_id)))
+        .join(PageVisitorDay, PageVisitorDay.user_id == User.id)
+        .filter(User.invite_code.in_(codes), PageVisitorDay.day >= _active_window_start())
+        .group_by(User.invite_code)
+        .all()
+    )
+    return {code: int(n) for code, n in rows}
+
+
+def _mt5_users(db: Session, codes: list[str]) -> dict[str, int]:
+    """每条链接名下「至少有一个有效 MT5 绑定」的人数。
+
+    已撤销的绑定（revoked_at 非空）不算：那条连接此刻是断的，算进来会让代理以为
+    人还挂着。COUNT(DISTINCT user_id) 而不是数账号——一人绑两个仍是一个人。
+
+    Per-link count of people holding at least one live MT5 binding. Revoked rows
+    are excluded (that connection is down right now) and the count is DISTINCT on
+    the user, so two accounts on one person still count once.
+    """
+    if not codes:
+        return {}
+    rows = (
+        db.query(User.invite_code, func.count(func.distinct(MT5Account.user_id)))
+        .join(MT5Account, MT5Account.user_id == User.id)
+        .filter(User.invite_code.in_(codes), MT5Account.revoked_at.is_(None))
+        .group_by(User.invite_code)
+        .all()
+    )
+    return {code: int(n) for code, n in rows}
+
+
+def _last_active_days(db: Session, user_ids: list[str]) -> dict[str, date]:
+    """这批用户各自的最近活跃日。名单一页最多 200 人，一条 GROUP BY 拿完。
+    Last active day per user, one GROUP BY for the whole page."""
+    if not user_ids:
+        return {}
+    rows = (
+        db.query(PageVisitorDay.user_id, func.max(PageVisitorDay.day))
+        .filter(PageVisitorDay.user_id.in_(user_ids))
+        .group_by(PageVisitorDay.user_id)
+        .all()
+    )
+    return {uid: day for uid, day in rows if day is not None}
+
+
+def _mt5_accounts(db: Session, user_ids: list[str]) -> dict[str, list[AgentMT5AccountOut]]:
+    """这批用户各自的 MT5 绑定，最近连接的在前；下发前打码，见 AgentMT5AccountOut。
+
+    排序在 Python 侧做：从没连过的行 last_heartbeat 是 NULL，而 NULL 在 ORDER BY
+    DESC 里的位置 SQLite 与 Postgres 正好相反（一个排最后、一个排最前），交给库
+    排会出现"本地看着对、线上顺序全反"。
+
+    MT5 bindings per user, most recently seen first, masked on the way out.
+    Sorted in Python because NULL last_heartbeat sorts opposite ways under
+    SQLite and Postgres in ORDER BY ... DESC — leaving it to the database gives
+    one order locally and the reverse in production.
+    """
+    if not user_ids:
+        return {}
+    rows = db.query(MT5Account).filter(MT5Account.user_id.in_(user_ids)).all()
+    # 从没心跳过的按 datetime.min 排，于是自然落到最后 / never-seen rows sort last
+    rows.sort(key=lambda a: a.last_heartbeat or datetime.min, reverse=True)
+    out: dict[str, list[AgentMT5AccountOut]] = {}
+    for a in rows:
+        out.setdefault(a.user_id, []).append(
+            AgentMT5AccountOut(
+                login=mask_account(a.login),
+                server=a.server,
+                accountType=_TRADE_MODE_NAME.get(a.trade_mode),
+                lastConnectedAt=a.last_heartbeat,
+                revoked=a.revoked_at is not None,
+            )
+        )
+    return out
+
+
 def assign_agent(db: Session, admin: User, link: InviteLink, target: User) -> InviteLinkAgent:
     """把链接指派给用户。已指派返回 409。审计行的 target 是被指派的真实用户——
     这是 invite:* 审计里唯一能填真目标的地方（链接本身不是 users 行）。
@@ -365,7 +474,10 @@ def agent_links(db: Session, user: User) -> list[AgentLinkOut]:
         .order_by(InviteLink.created_at.desc())
         .all()
     )
-    counts = _registrations(db, [l.code for l in links])
+    codes = [l.code for l in links]
+    counts = _registrations(db, codes)
+    active = _active_users(db, codes)
+    connected = _mt5_users(db, codes)
     return [
         AgentLinkOut(
             id=l.id,
@@ -373,6 +485,8 @@ def agent_links(db: Session, user: User) -> list[AgentLinkOut]:
             label=l.label,
             clicks=l.clicks,
             registrations=counts.get(l.code, 0),
+            activeUsers7d=active.get(l.code, 0),
+            mt5Users=connected.get(l.code, 0),
             isActive=l.is_active,
             createdAt=l.created_at,
         )
@@ -402,10 +516,21 @@ def agent_link_users(
     q = db.query(User).filter(User.invite_code == link.code)
     total = q.count()
     rows = q.order_by(User.created_at.desc()).offset(offset).limit(limit).all()
+    # 活跃日与 MT5 绑定各一条批量查询，只针对当前这一页的人——名单可以很长，
+    # 逐行查会让页数一多就变成几百条查询。
+    # One batched query each for activity and bindings, scoped to this page only.
+    ids = [u.id for u in rows]
+    last_active = _last_active_days(db, ids)
+    accounts = _mt5_accounts(db, ids)
     return AgentLinkUsersOut(
         users=[
             AgentLinkUserOut(
-                nickname=u.nickname, email=u.email, plan=u.plan, createdAt=u.created_at
+                nickname=u.nickname,
+                email=u.email,
+                plan=u.plan,
+                createdAt=u.created_at,
+                lastActiveDay=last_active.get(u.id),
+                mt5Accounts=accounts.get(u.id, []),
             )
             for u in rows
         ],
@@ -602,10 +727,12 @@ def unassign_invite_agent(
 
 @agent_router.get("/links", response_model=dict)
 def my_agent_links(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """我持有的链接：点击、注册人数、状态。非代理拿到空数组，不是 403——
-    前端入口本就按 isAgent 隐藏，这里不必再多一种错误形态。
-    Links I hold. Non-agents get an empty list rather than 403: the entry point
-    is already hidden by isAgent, no need for one more error shape."""
+    """我持有的链接：点击、注册人数、近 7 日活跃人数、已连 MT5 人数、状态。
+    非代理拿到空数组，不是 403——前端入口本就按 isAgent 隐藏，这里不必再多一种
+    错误形态。
+    Links I hold, with clicks, signups, 7-day actives, MT5-connected head count
+    and status. Non-agents get an empty list rather than 403: the entry point is
+    already hidden by isAgent, no need for one more error shape."""
     return {"links": [l.model_dump(mode="json") for l in agent_links(db, user)]}
 
 
