@@ -25,6 +25,11 @@ const SWIPE_PX = 36
 // Badges always render at the desktop centre size; sides and phones scale via CSS,
 // so a rotation transitions with transform instead of re-rendering the SVG.
 const RENDER_SIZE = 236
+// 倒影的渲染尺寸：低于 medal.ts 的细节门槛（32），细密装饰整组跳过。
+// 只影响那一层被模糊 + 遮罩掉的装饰影，见下面 .ach-refl 处的说明。
+// Reflection render size: below medal.ts's fine-detail gate (32), so the dense
+// decorations are skipped. Only affects the blurred, masked decorative layer.
+const REFL_SIZE = 24
 
 type DOEWithPermission = typeof DeviceOrientationEvent & {
   requestPermission?: () => Promise<'granted' | 'denied'>
@@ -69,12 +74,61 @@ function useDeviceTilt(target: RefObject<HTMLElement | null>, active: boolean) {
       el.style.setProperty('--gy', gy.toFixed(3))
       raf = requestAnimationFrame(tick)
     }
-    window.addEventListener('deviceorientation', onOrient)
-    raf = requestAnimationFrame(tick)
+
+    /* ── 只在台座真的看得见时才走表 ──
+       安卓上 gyro 一旦判定为 'on'（粗指针 + 未开减少动态，无需授权）就直接开始，
+       此前既没有 IntersectionObserver 也没有 visibilitychange：陀螺仪监听与 rAF
+       从挂载起**永久运行**，每帧往 DOM 写两个 CSS 变量，哪怕成长体系分区早已滚出
+       视口几屏。这不只是成就页的事——**落地页也挂这个组件**（LandingPage 的成长
+       体系分区），而落地页上另外还有两条常驻 rAF（PhoneGL 的机身循环、LandingSpace
+       的空间层），三条叠在一起正好落在最吃力的那类机器上。
+       deviceorientation 监听也一并随可见性装卸：传感器订阅本身是有功耗的，留着
+       一个只为把数值写进两个没人看的变量没有意义。
+
+       Run the clock only while the pedestal is actually visible. On Android the
+       gyro goes straight to 'on' (coarse pointer, no reduced motion, no permission
+       prompt) and there was neither an IntersectionObserver nor a visibilitychange
+       hook, so the listener and the rAF ran forever from mount, writing two CSS
+       variables every frame long after the section had scrolled several screens
+       away. This is not only the achievements page: the landing page mounts this
+       component too, and it already carries two other resident rAF loops (the
+       phone body and the space layer) — three at once, on exactly the hardware
+       least able to afford them.
+       The deviceorientation subscription is attached and detached with visibility
+       as well: subscribing to a sensor costs power, and keeping it alive only to
+       feed two variables nobody can see buys nothing. */
+    let onScreen = true
+    let wired = false
+    const sync = () => {
+      const should = running && onScreen && !document.hidden
+      if (should && !wired) {
+        wired = true
+        window.addEventListener('deviceorientation', onOrient)
+        raf = requestAnimationFrame(tick)
+      } else if (!should && wired) {
+        wired = false
+        window.removeEventListener('deviceorientation', onOrient)
+        if (raf) cancelAnimationFrame(raf)
+        raf = 0
+      }
+    }
+    const io = new IntersectionObserver(
+      ([e]) => {
+        onScreen = e.isIntersecting
+        sync()
+      },
+      { threshold: 0 }
+    )
+    io.observe(el)
+    const onVisibility = () => sync()
+    document.addEventListener('visibilitychange', onVisibility)
+    sync()
+
     return () => {
       running = false
-      window.removeEventListener('deviceorientation', onOrient)
-      if (raf) cancelAnimationFrame(raf)
+      sync()
+      io.disconnect()
+      document.removeEventListener('visibilitychange', onVisibility)
       el.style.removeProperty('--gx')
       el.style.removeProperty('--gy')
     }
@@ -211,10 +265,32 @@ export default function PedestalStage({ badges, defaultId, busy, onOpen, onMakeD
               <span className="ach-slot" />
             </div>
           ))}
+          {/* 倒影：同样三枚勋章再画一遍，所以陈列台的 SVG 节点数是翻倍的
+              （6 枚 236px ≈ 1200+ 个节点），而**落地页也用这个组件**
+              （LandingPage 的成长体系分区），手机上白白多一倍。
+              这一层是纯装饰：aria-hidden、opacity .42（手机 .3）、1px 模糊，
+              再被一条 linear-gradient 遮罩在 45% 高度处完全淡尽——也就是说它连
+              「一枚完整的勋章」都不是，只是底部一小截糊影。
+              所以倒影按 REFL_SIZE 渲染：medal.ts 用 size 决定要不要画细密装饰
+              （齿纹 60 道 / 太阳射线 48 道 / 玑镂 10 椭圆 / 宝石 / 火漆环字），
+              低于 32 这一档就整组跳过，节点数减半。SVG 是 viewBox 驱动的，实际
+              显示尺寸仍由 .ach-hero 的 CSS 决定，几何轮廓一模一样，只是不再在
+              一层糊影里画那些本来就看不见的细线。
+              The reflection redraws the same three medals, doubling the pedestal's
+              SVG node count (six 236px medals, 1200+ nodes) — and the landing page
+              mounts this component too, so phones paid it twice. The layer is pure
+              decoration: aria-hidden, .42 opacity (.3 on phones), a 1px blur, and a
+              gradient mask that fades it to nothing by 45% height, so it is not even
+              a whole medal, just a smeared sliver at the base. Rendering it at
+              REFL_SIZE puts it below medal.ts's fine-detail gate, skipping the 60
+              ticks, 48 rays, 10 guilloche ellipses, gems and wax legend and halving
+              the node count. The SVG is viewBox-driven, so .ach-hero's CSS still
+              controls the displayed size and the silhouette is identical — only
+              invisible hairlines inside a blur are gone. */}
           <div className="ach-refl" aria-hidden>
             {badges.map((b, i) => (
               <span key={b.id} className={`ach-3d ach-3d-${slotOf(i)}`}>
-                <BadgeIcon id={b.id} tier={b.tier} earned size={RENDER_SIZE} className="ach-hero" />
+                <BadgeIcon id={b.id} tier={b.tier} earned size={REFL_SIZE} className="ach-hero" />
               </span>
             ))}
           </div>

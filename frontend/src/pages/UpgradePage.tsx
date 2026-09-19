@@ -5,7 +5,7 @@ import PartnerBrokerCard from "../components/PartnerBrokerCard";
 import { useAuth } from "../store/auth";
 import { paymentApi, userApi } from "../api/client";
 import { useDocumentTitle } from "../utils/useDocumentTitle";
-import { localizeApiError, fmtDate } from "../api/utils";
+import { localizeApiError, fmtDate, parseTime } from "../api/utils";
 import type { TrialStatus } from "../api/types";
 
 type Plan = { id: string; name: string; price_usd: number; original_price_usd?: number | null; days: number; tag?: string };
@@ -158,7 +158,15 @@ export default function UpgradePage() {
     }).catch(() => {});
     paymentApi.getTrial().then(setTrialStatus).catch(() => setTrialStatus(null));
     userApi.me().then((r) => setPlanExpiresAt(r.planExpiresAt)).catch(() => {});
-  }, [t]);
+    // 依赖是空数组，不是 [t]。effect 体内根本没有用到 t——挂着它的后果是每切一次
+    // 界面语言就把这四个请求重发一轮，其中 getCurrencies 还会重置 chosenCoin，
+    // 把用户刚选的网络打回 TRC20。
+    // Empty deps, not [t]: the effect body never uses t, and listing it re-fired
+    // all four requests on every language switch — getCurrencies among them,
+    // which resets chosenCoin and throws the user's just-picked network back to
+    // TRC20.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleClaimTrial = useCallback(async () => {
     setClaimingTrial(true);
@@ -188,7 +196,19 @@ export default function UpgradePage() {
   const startCountdown = useCallback((validUntil: string | null) => {
     if (clockRef.current) clearInterval(clockRef.current);
     if (!validUntil) { setRemaining(null); return; }
-    const deadline = new Date(validUntil).getTime();
+    // parseTime 而不是裸 new Date：后端若给出不带时区标记的时间戳（Postgres 的
+    // TIMESTAMP 读出来常常是这样），裸 new Date 会按**浏览器本地时区**解析，
+    // 非 UTC+8 的用户看到的支付倒计时就整块偏掉——付款窗口本身是有限的，这不是
+    // 显示问题而是会让人错过付款。parseTime 无标记时补 'Z'（见 api/utils）。
+    // parseTime rather than a bare new Date: if the backend emits a timestamp
+    // with no timezone marker (Postgres TIMESTAMP columns commonly read out that
+    // way), a bare new Date parses it in the *browser's* zone and the payment
+    // countdown is wrong by the offset for anyone outside UTC+8. The payment
+    // window is finite, so this is missed payments rather than a display quirk.
+    // parseTime appends 'Z' when unmarked (see api/utils).
+    const parsed = parseTime(validUntil);
+    if (!parsed || Number.isNaN(parsed.getTime())) { setRemaining(null); return; }
+    const deadline = parsed.getTime();
     const tick = () => {
       const secs = Math.max(0, Math.round((deadline - Date.now()) / 1000));
       setRemaining(secs);
@@ -218,6 +238,29 @@ export default function UpgradePage() {
           // showing FREE right after a successful payment until the user
           // navigated to a page that happened to refetch it.
           void refreshUser();
+        } else if (s.status === "FINISHED_MISMATCH") {
+          // 钱收到了，但金额或币种与订单对不上，后端刻意没有发放权益、留给人工核对
+          // （见 backend/app/routers/payments.py 的 FINISHED_MISMATCH）。
+          //
+          // 这一支必须单独处理：它是终局，不能落进下面的"仍在处理中"分支，否则页面
+          // 会一直转圈轮询到倒计时结束——而用户是**真的付了钱**。措辞也不能复用
+          // paymentExpired（"已过期或失败，请重试"），那会把一个已付款的人引去再付一次。
+          //
+          // Money arrived but the amount or currency disagrees with the order, so the
+          // backend deliberately credited nothing and left it for a human. This is a
+          // terminal state and must not fall through to "still processing", which
+          // would spin until the countdown expires even though the user did pay. The
+          // wording must not reuse paymentExpired either — telling someone who has
+          // already paid to "try again" is the worst possible outcome here.
+          if (pollRef.current) clearInterval(pollRef.current);
+          if (clockRef.current) clearInterval(clockRef.current);
+          clearPendingPayment();
+          setState({
+            step: "error",
+            msg: t("upgrade.paymentMismatch"),
+            partialAmount: s.actually_paid ?? undefined,
+            payCurrency: s.pay_currency,
+          });
         } else if (s.status === "EXPIRED" || s.status === "FAILED") {
           if (pollRef.current) clearInterval(pollRef.current);
           if (clockRef.current) clearInterval(clockRef.current);
@@ -255,6 +298,16 @@ export default function UpgradePage() {
         clearPendingPayment();
         setState({ step: "done" });
         void refreshUser();
+      } else if (s.status === "FINISHED_MISMATCH") {
+        // 与 pollPayment 里同一判断：终局，且绝不能说成"已过期，请重试"。
+        // Same call as in pollPayment: terminal, and never worded as "expired, retry".
+        clearPendingPayment();
+        setState({
+          step: "error",
+          msg: t("upgrade.paymentMismatch"),
+          partialAmount: s.actually_paid ?? undefined,
+          payCurrency: s.pay_currency,
+        });
       } else if (s.status === "EXPIRED" || s.status === "FAILED") {
         clearPendingPayment();
         setState({

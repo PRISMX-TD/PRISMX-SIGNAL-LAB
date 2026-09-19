@@ -23,7 +23,17 @@ export const ALL_SENTINEL = "__ALL__"
 // single-user push path) but lives in the "by strategy" group in the UI — to
 // the user it reads as "signals from my own strategies", which belongs next to
 // the platform strategy categories.
-export const ACCOUNT_EVENT_TYPES = ["order_filled", "order_rejected", "auto_manage", "bridge_offline", "account_revoked"] as const
+// 两个分组常量收回成模块私有：全仓只有下面第 40 行的 EVENT_TYPES 在用它们。
+// 账户页那两组逐项开关已于 2026-09-07 撤掉（见 AccountPage 的相应注释），
+// export 从那时起就没有消费者了。不删掉常量本身——EVENT_TYPES 的分组语义与
+// 上面那两段说明还在，把它们摊平进一个数组等于把这段解释一起丢了。
+// Both grouping constants are now module-private: the only user left in the repo
+// is EVENT_TYPES on line 40. The per-event toggles on the account page were
+// removed on 2026-09-07 (see its comment) and the exports have had no consumer
+// since. The constants themselves stay — EVENT_TYPES' grouping semantics and the
+// two explanations above are the point; flattening them into one array would
+// throw that explanation away with them.
+const ACCOUNT_EVENT_TYPES = ["order_filled", "order_rejected", "auto_manage", "bridge_offline", "account_revoked"] as const
 export const EVENT_STRATEGY_SIGNAL = "strategy_signal"
 // 游戏化事件（目前只有 badge_awarded），渲染在独立的「成就提醒」分组——语义
 // 上不是交易/账户提醒，且只在 gamificationVisible 时才展示（见 AccountPage）。
@@ -36,7 +46,7 @@ export const EVENT_STRATEGY_SIGNAL = "strategy_signal"
 // only shown when gamificationVisible (see AccountPage). A NULL backend pref
 // excludes it by default (opt-in, see push_dispatch.EVENT_BADGE_AWARDED), so
 // it must not join ACCOUNT_EVENT_TYPES and inherit that group's default-on story.
-export const GAMIFICATION_EVENT_TYPES = ["badge_awarded"] as const
+const GAMIFICATION_EVENT_TYPES = ["badge_awarded"] as const
 export const EVENT_TYPES = [...ACCOUNT_EVENT_TYPES, EVENT_STRATEGY_SIGNAL, ...GAMIFICATION_EVENT_TYPES] as const
 
 export type NotifPrefs = {

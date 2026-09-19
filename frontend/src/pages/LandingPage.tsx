@@ -77,7 +77,7 @@ function useReveal<T extends HTMLElement = HTMLDivElement>() {
 function Heading({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div className="reveal max-w-3xl">
-      <h2 className="font-display-xl text-[clamp(1.75rem,3.6vw,2.5rem)] text-white">{title}</h2>
+      <h2 className="font-display-xl fs-fluid [--fs-min:1.75rem] [--fs-vw:3.6vw] [--fs-max:2.5rem] text-white">{title}</h2>
       {subtitle && <p className="mt-4 max-w-[52ch] text-[15px] leading-relaxed text-neutral-400">{subtitle}</p>}
     </div>
   )
@@ -257,7 +257,7 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
               what scanning eyes pick up first. Gold is used nowhere else on the
               page. */}
           {trial && (
-            <div className="-mx-7 -mt-7 mb-6 flex items-center justify-center gap-2 rounded-t-card bg-[#E0A83C] px-7 py-3 text-[14px] font-bold text-ink-950">
+            <div className="-mx-7 -mt-7 mb-6 flex items-center justify-center gap-2 rounded-t-card bg-gold px-7 py-3 text-[14px] font-bold text-ink-950">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" />
               </svg>
@@ -333,7 +333,7 @@ function ClosingCta({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavi
       </div>
       <div className="reveal grid grid-cols-1 items-end gap-10 lg:grid-cols-12">
         <div className="lg:col-span-7">
-          <h2 className="font-display-xl text-[clamp(2rem,4.4vw,3.25rem)] text-white">{t('landing.ctaTitle')}</h2>
+          <h2 className="font-display-xl fs-fluid [--fs-min:2rem] [--fs-vw:4.4vw] [--fs-max:3.25rem] text-white">{t('landing.ctaTitle')}</h2>
           <p className="mt-5 max-w-[46ch] text-[15px] leading-relaxed text-neutral-400">{t('landing.ctaSubtitle')}</p>
         </div>
         <div className="lg:col-span-4 lg:col-start-9">
@@ -600,8 +600,15 @@ export default function LandingPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
 
+  // 根容器的 min-h：min-h-screen 在前、min-h-[100dvh] 在后。
+  // dvh 是 Chrome 108+，缺兜底时旧内核上这条 min-height 完全不生效。min-h-screen
+  // 编译成 100vh，所有目标浏览器都认识；认识 dvh 的按源码顺序覆盖上去，渲染不变。
+  // min-h-screen first, min-h-[100dvh] second: dvh is Chrome 108+ and without a
+  // fallback the min-height simply did not apply on older engines. min-h-screen
+  // compiles to 100vh, understood by every target; engines that know dvh override
+  // it by source order and render identically.
   return (
-    <div id="top" className="relative min-h-[100dvh] bg-ink-950 text-white">
+    <div id="top" className="relative min-h-screen min-h-[100dvh] bg-ink-950 text-white">
       {/* 结构层：一个贯穿全页的 3D 空间，静态网格退居为它的基线。
           Structural layer: a 3D space spanning the whole page, with the static
           grid demoted to its baseline. */}

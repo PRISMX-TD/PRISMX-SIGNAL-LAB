@@ -22,7 +22,23 @@ html,
 body {
   overscroll-behavior-y: contain;
 }
-:where(.overflow-auto, .overflow-y-auto, .overflow-scroll) {
+/* 选择器展开成逗号列表，不用 :where()。
+   :where() 是 Chrome 88+，而本项目的下限是 Chrome 70，且 CSS 规范规定无效选择器
+   **废掉整条规则**——旧内核上全站滚动容器的这两条声明一条都不生效。
+   代价说清楚：:where() 的权重恒为 0，展开后变成 (0,1,0)。这意味着如果将来有人在
+   同一个元素上写 Tailwind 的 overscroll-* 工具类，本规则会因为 import 顺序在
+   utilities 之后而反过来压住它。2026-09-19 复查：全仓库 overscroll-* 工具类
+   **零使用**，当下无冲突。要覆盖这里请用更高权重或行内样式。
+   Expanded to a comma list rather than :where(): :where() is Chrome 88+ against a
+   Chrome 70 floor, and an invalid selector voids the whole rule, so neither
+   declaration applied on older engines. The trade-off, stated plainly: :where() has
+   zero specificity and the expansion is (0,1,0), so a future Tailwind overscroll-*
+   utility on the same element would now lose to this rule (motion.css is imported
+   after utilities). Re-checked 2026-09-19: zero overscroll-* utilities exist in the
+   repo, so nothing conflicts today. Override with higher specificity if needed. */
+.overflow-auto,
+.overflow-y-auto,
+.overflow-scroll {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
 }
@@ -35,7 +51,8 @@ body {
    old blanket "contain" made it a chaining boundary vertically too: wheel or
    drag over the table and the page wouldn't move. Keep y as auto so vertical
    scrolling chains to the page. */
-:where(.overflow-x-auto) {
+/* 同上：展开写，理由与权重影响见上一条。/ Same as above; see the note there. */
+.overflow-x-auto {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
   overscroll-behavior-y: auto;
@@ -79,7 +96,10 @@ body {
 .skeleton::after {
   content: '';
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   transform: translateX(-100%);
   background: linear-gradient(
     90deg,

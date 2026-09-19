@@ -18,7 +18,7 @@
 // for tiered badges, a fixed material for standalone ones — see materialOf), not
 // a rarity. Callers pass the tier (board rows use the backend's per-row
 // equippedBadgeTier), so no frontend mirror table is needed any more.
-import { useEffect, useId, useRef } from 'react'
+import { useEffect, useId, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { renderMedalInner } from './medal'
 
@@ -64,7 +64,22 @@ export default function BadgeIcon({ id, tier, earned, size = 56, spin, mint, cla
     return () => clearTimeout(timer)
   }, [mint])
 
-  const inner = renderMedalInner(id, tier ?? 0, size, reactId, { earned, spin })
+  /* 记忆化：renderMedalInner 是纯函数拼字符串，但一次调用要拼出 8–15KB 的 SVG。
+     没有 useMemo 时**每次 render 都重拼一遍**——成就页切一次佩戴会重新生成 11 份，
+     语言切换、父级任何一次状态变化同理。DOM 不会抖（字符串内容不变，React 不重写
+     innerHTML），烧掉的纯粹是 CPU。
+     依赖列出全部入参：id/tier/size/reactId/earned/spin 之外没有其他输入，
+     prefersReducedMotion 在模块内每次调用时现读，不进依赖（它只在 spin 为真时
+     参与，且用户改系统偏好本来就会带来一次重挂载）。
+     renderMedalInner is a pure string builder, but one call assembles 8-15KB of
+     SVG, and without useMemo it re-ran on every render — eleven regenerations for
+     a single equip toggle on the achievements page, and again on any language or
+     parent state change. The DOM never thrashed (identical string, so React skips
+     the innerHTML write); it was pure CPU. Every input is listed. */
+  const inner = useMemo(
+    () => renderMedalInner(id, tier ?? 0, size, reactId, { earned, spin }),
+    [id, tier, size, reactId, earned, spin]
+  )
   const classes = [mint ? 'badge-minting' : null, className ?? null].filter(Boolean).join(' ')
 
   return (

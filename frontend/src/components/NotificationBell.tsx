@@ -21,7 +21,7 @@ import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
 import { announcementApi, notificationApi } from "../api/client"
-import { parseTime } from "../api/utils"
+import { fmtDayShort } from "../api/utils"
 import type { Announcement, NotificationFeedItem } from "../api/types"
 import { useLive } from "../store/live"
 import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
@@ -33,12 +33,16 @@ type Status = "off" | "on" | "attention"
 const PANEL_ITEMS = 5
 const PANEL_MESSAGES = 4
 
-function fmtDay(iso: string | null): string {
-  const d = iso ? parseTime(iso) : null
-  if (!d) return ""
-  const sameYear = d.getFullYear() === new Date().getFullYear()
-  return d.toLocaleDateString(undefined, sameYear ? { month: "2-digit", day: "2-digit" } : { year: "numeric", month: "2-digit", day: "2-digit" })
-}
+// 日期格式化改用 api/utils 的 fmtDayShort（本文件原来自带一份）。
+// 差别在于时区：原来那份走 toLocaleDateString(undefined, …)，即**浏览器本地时区**，
+// 而全站的约定是固定 UTC+8（见 api/utils 头注：不固定时区，国际用户会把它读成
+// 自己的本地时间从而读错实际发生时刻）。欧美时区的管理员看这一列时日期会整天偏移。
+// Date formatting now comes from api/utils' fmtDayShort; this file used to carry
+// its own copy. The difference is the zone: the old copy used
+// toLocaleDateString(undefined, …), i.e. the *browser's* zone, whereas the site
+// fixes everything to UTC+8 (see api/utils' header: an unpinned zone reads as the
+// viewer's own local time and misstates when things happened). For an admin
+// outside UTC+8 this column was off by a whole day.
 
 export default function NotificationBell() {
   const { t, i18n } = useTranslation()
@@ -73,19 +77,45 @@ export default function NotificationBell() {
       .catch(() => {})
       .finally(() => setLoaded(true))
   }
+  // 两个列表各自一个自增序号，只接受最新一次的响应。
+  //
+  // 三个 effect 都会触发拉取（挂载、WS 计数器变化、面板打开），而"收到
+  // ANNOUNCEMENT_NEW 的同一刻打开面板"会让同一份数据有两个在途请求——先发后到的
+  // 那个会把后发的结果盖掉，角标可能因此少一条。用序号而不是 AbortSignal：铃铛是
+  // 常驻组件，这里要挡的是"旧响应盖新响应"，不是"卸载后 setState"，而且中止一个
+  // 已经在路上的请求并不会让答案更早到达。
+  //
+  // One monotonically increasing sequence per list; only the latest response is
+  // accepted. All three effects trigger a fetch (mount, WS counter, panel open),
+  // and opening the panel at the moment an ANNOUNCEMENT_NEW arrives leaves two
+  // in-flight requests for the same data — the earlier one landing last
+  // overwrites the later, which can drop one from the badge. A sequence rather
+  // than an AbortSignal: the bell is always mounted, so the hazard is a stale
+  // response overwriting a fresh one rather than setState-after-unmount, and
+  // aborting a request already on the wire doesn't make the answer arrive sooner.
+  const annsSeq = useRef(0)
+  const feedSeq = useRef(0)
+
   const loadAnns = () => {
+    const seq = ++annsSeq.current
     announcementApi
       .list()
       .then((res) => {
+        if (seq !== annsSeq.current) return
         setAnns(res.items)
         setUnread(res.unreadCount)
       })
-      .catch(() => setAnns((prev) => prev ?? []))
+      .catch(() => {
+        if (seq !== annsSeq.current) return
+        setAnns((prev) => prev ?? [])
+      })
   }
   const loadFeed = () => {
+    const seq = ++feedSeq.current
     notificationApi
       .feed(PANEL_MESSAGES)
       .then((res) => {
+        if (seq !== feedSeq.current) return
         setFeed(res.items)
         setFeedUnread(res.unreadCount)
       })
@@ -261,7 +291,7 @@ export default function NotificationBell() {
                     </span>
                     {n.text && <span className="nb-ann-sum">{n.text}</span>}
                   </span>
-                  <time className="num" dateTime={n.createdAt}>{fmtDay(n.createdAt)}</time>
+                  <time className="num" dateTime={n.createdAt}>{fmtDayShort(n.createdAt)}</time>
                 </Link>
               ))}
             </section>
@@ -297,7 +327,7 @@ export default function NotificationBell() {
                     </span>
                     {(a.summaryZh || a.summaryEn) && <span className="nb-ann-sum">{pick(a.summaryZh, a.summaryEn)}</span>}
                   </span>
-                  <time className="num" dateTime={a.publishedAt ?? undefined}>{fmtDay(a.publishedAt)}</time>
+                  <time className="num" dateTime={a.publishedAt ?? undefined}>{fmtDayShort(a.publishedAt)}</time>
                 </Link>
               ))
             )}

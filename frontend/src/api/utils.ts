@@ -42,9 +42,8 @@ export function localizeApiError(message: string): string {
 // unlabeled time reads as the viewer's own local time and gets misread)
 // still applies; only the fixed timezone being shown has changed.
 export function fmtTime(iso: string | null | undefined): string {
-  if (!iso) return '-'
-  const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)
-  const d = new Date(hasTz ? iso : iso + 'Z')
+  const d = parseTime(iso)
+  if (!d) return '-'
   return d.toLocaleString('en-GB', {
     timeZone: 'Asia/Shanghai',
     month: '2-digit',
@@ -58,9 +57,8 @@ export function fmtTime(iso: string | null | undefined): string {
 // 格式化为含年月日的完整日期时间（用于订阅到期等需要明确年份的场景）
 // Format with full date incl. year (for subscription expiry etc. where the year matters).
 export function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return '-'
-  const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)
-  const d = new Date(hasTz ? iso : iso + 'Z')
+  const d = parseTime(iso)
+  if (!d) return '-'
   return d.toLocaleString('en-GB', {
     timeZone: 'Asia/Shanghai',
     year: 'numeric',
@@ -72,6 +70,23 @@ export function fmtDate(iso: string | null | undefined): string {
 }
 
 // 解析后端时间为带时区的 Date / parse backend time as a tz-aware Date
+//
+// **全站唯一一处**做这个判断。后端的 DateTime 列存的是不带时区的 UTC，经 pydantic
+// 序列化后要么是 `2026-09-19T11:23:45`（无后缀），要么是 `...Z`（带时区的值会被
+// 归一成 Z），所以规则是：认不出时区就当 UTC 补一个 Z。
+//
+// 这段逻辑一度被抄了五份（本文件三处、OrdersPage、AccountPage），而 AccountPage
+// 那份把 `\d` 写成了 `d`，成了一颗只在特定输入下才响的哑弹。2026-09-19 审计后全部
+// 收口到这里——往别处再抄一份就是在重新种下同一个 bug。
+//
+// The single place in the app that makes this decision. Backend DateTime columns
+// hold naive UTC; pydantic emits either `2026-09-19T11:23:45` or `...Z` (aware
+// values are normalised to Z), so the rule is: no recognisable zone means UTC.
+//
+// This logic was copied five times (three here, OrdersPage, AccountPage) and
+// AccountPage's copy had `d` where it needed `\d` — a latent bug waiting on the
+// right input. Consolidated here by the 2026-09-19 audit; copying it again is
+// replanting the same bug.
 export function parseTime(iso: string | null | undefined): Date | null {
   if (!iso) return null
   const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)
@@ -90,6 +105,35 @@ export function fmtDay(iso: string | null | undefined): string {
     month: '2-digit',
     day: '2-digit',
   })
+}
+
+// 同年省略年份的短日期，外加"没有值就返回空串"——列表里的日期列（通知铃铛、
+// 工单列表）本来各写一份，现在共用这一份。
+//
+// 为什么"是不是同一年"要用 UTC+8 的年份而不是 d.getFullYear()：后者读的是**浏览器
+// 本地时区**的年份。跨年那几个小时里，欧美时区的用户会拿本地的 2025 去比一个按
+// UTC+8 渲染成 2026 的日期，于是该省年份的省了、该写的没写——日期本身是对的，
+// 年份却和它不在同一个时区里。判据必须和渲染用的是同一个时区。
+//
+// A short date that drops the year within the current year, and returns an empty
+// string when there is no value — the notification bell and the ticket list each
+// carried their own copy of this.
+// The same-year test uses the UTC+8 year rather than d.getFullYear(), which
+// reads the *browser's* local year: during the hours around New Year a viewer
+// outside UTC+8 would compare their local 2025 against a date rendered as 2026,
+// omitting the year exactly when it is needed (and vice versa). The test has to
+// run in the zone the date is rendered in.
+export function fmtDayShort(iso: string | null | undefined): string {
+  const d = parseTime(iso)
+  if (!d || Number.isNaN(d.getTime())) return ''
+  const yearIn = (x: Date) => x.toLocaleDateString('en-GB', { timeZone: 'Asia/Shanghai', year: 'numeric' })
+  const sameYear = yearIn(d) === yearIn(new Date())
+  return d.toLocaleDateString(
+    'en-GB',
+    sameYear
+      ? { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit' }
+      : { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' },
+  )
 }
 // 每个品种一个 pip 的价格大小，用于把价差换算成点数。
 // 匹配不到的品种返回 null，调用方只显示价差、不显示点数。
@@ -256,7 +300,24 @@ export function suggestVolumeByRisk(
     if (!refPrice || refPrice <= 0) return null
     raw = (riskAmount * refPrice) / (slPriceDistance * size)
   }
-  return Math.max(0.01, Math.min(10, Math.floor(raw * 100) / 100))
+  // 吸附到该品种的步长，而不是写死的 0.01 粒度。
+  //
+  // 原来是 Math.floor(raw * 100) / 100，对 WTI（步长 0.1，见下方 LOT_STEP）会算出
+  // 0.23 这种离步长的手数——而离步长的手数**不会被 MT5 拒绝**，它会变成一张永远不
+  // 成交、并且卡住该持仓后续所有平仓操作的单子。目前线上没事，是因为唯一的调用方
+  // （components/order/orderMath 的 suggestVolumeForRisk）后面又过了一道 clampLots；
+  // 但这是个导出的公共函数，下一个直接用它的人就会踩。步长知识收在这里，别留在调用方。
+  //
+  // Snap to the symbol's lot step instead of a hard-coded 0.01 grid. The old
+  // Math.floor(raw * 100) / 100 produced values like 0.23 for WTI (step 0.1, see
+  // LOT_STEP below) — and an off-step volume is not rejected by MT5: it becomes an
+  // order that can never fill and then blocks every later close on that position.
+  // Nothing breaks today only because the sole caller
+  // (components/order/orderMath's suggestVolumeForRisk) runs the result through
+  // clampLots afterwards. This is an exported helper, so the next caller to use it
+  // directly would step straight into it. Step knowledge belongs here, not at the
+  // call site.
+  return Math.min(10, snapLot(raw, symbol))
 }
 
 // 价差换算为点数；未知品种返回 null / price distance to pips; null if unknown symbol

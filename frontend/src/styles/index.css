@@ -33,7 +33,18 @@
 @import './terminal.css';   /* 行情图表页（交易终端）：三栏骨架 / 工具栏 / 自选 / 账户 / 下单面板 / 持仓停靠 */
 @import './motion.css';   /* 页面切换 / 骨架屏 / 内容淡入 / tap 反馈 */
 @import './landing-story.css';   /* 落地页叙事：手机机身 / 屏幕五幕 / 文字面板 / WebGL 接管 / 判决印章 */
-@import './tabs.css';   /* 页内 Tab（分段药丸轨道） */
+@import './tabs.css';   /* 开关（Switch）。**不含**页内 Tab：.seg-tabs 的基定义在
+                              competitions.css，另有 landing-hero.css 与 leaderboard.css
+                              两处覆盖（见 tabs.css 文件头）。此前这行写的是「页内 Tab
+                              （分段药丸轨道）」，与文件实际内容相反——本清单是全站找样式
+                              的唯一索引，索引说谎比债本身更贵，所以先订正索引；文件不搬动，
+                              搬动会改层叠顺序。
+                              Switch only. NOT page tabs: .seg-tabs is defined in
+                              competitions.css with overrides in landing-hero.css and
+                              leaderboard.css. This line used to claim the opposite, and this
+                              manifest is the only index into the stylesheets, so a lying
+                              index costs more than the debt itself. Index corrected; the file
+                              stays put because moving it would change the cascade. */
 @import './page-head.css';   /* 全站统一页头（components/PageHead.tsx） */
 @import './signals.css';   /* 信号面板：看板页头 / 信号牌面（价格阶梯 + 倒计时环） */
 @import './guide.css';   /* 策略介绍：目录牌 / 详情页（大标题 + 吸顶规格栏） */

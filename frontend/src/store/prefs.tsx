@@ -2,11 +2,12 @@
 // 登录后从后端加载偏好, 改动时按命名空间防抖落库, localStorage 作为离线兜底缓存。
 // After login, load prefs from backend; debounced per-namespace PUT on change;
 // localStorage as offline cache.
-import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from 'react'
 import { useAuth } from './auth'
 import { userApi } from '../api/client'
 import i18n from '../i18n'
 import { langFromPath } from '../seo/meta'
+import { readJson, writeJson, writeStorage } from '../utils/safeStorage'
 
 const PREFS_CACHE_KEY = 'prismx_prefs'
 
@@ -27,14 +28,9 @@ const PrefsContext = createContext<PrefsContextValue | null>(null)
 
 export function PrefsProvider({ children }: { children: ReactNode }) {
   const { user, isAuthed } = useAuth()
-  const [prefs, setPrefsState] = useState<Record<string, unknown>>(() => {
-    try {
-      const cached = localStorage.getItem(PREFS_CACHE_KEY)
-      return cached ? JSON.parse(cached) : {}
-    } catch {
-      return {}
-    }
-  })
+  const [prefs, setPrefsState] = useState<Record<string, unknown>>(() =>
+    readJson<Record<string, unknown>>(PREFS_CACHE_KEY, {}),
+  )
   const [loaded, setLoaded] = useState(false)
   // 按命名空间各自防抖 + 记录各自上次成功落库的数据，避免重复保存未变化的
   // 数据。此前是单一全局字段整份比对/整份落库——两台设备同时改不同命名
@@ -60,8 +56,18 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
       return
     }
     setLoaded(false)
+    // alive 守卫：切换账号（登出再登录另一个人）时，上一个账号的 getPrefs 响应
+    // 可能后到，把新账号的偏好整份覆盖掉**并写进 localStorage 缓存**——共享设备
+    // 上这正是 auth.tsx 那段"登出清干净"要防的事，从另一个门溜了进来。
+    // The alive guard: when switching accounts (sign out, sign in as someone
+    // else), the previous account's getPrefs response can land afterwards and
+    // overwrite the new account's prefs *and its localStorage cache* — on a
+    // shared device that is precisely what auth.tsx's logout teardown exists to
+    // prevent, slipping in through another door.
+    let alive = true
     userApi.getPrefs()
       .then((res) => {
+        if (!alive) return
         const data = (res.data ?? {}) as Record<string, unknown>
         setPrefsState(data)
         const nextLastSaved: Record<string, string> = {}
@@ -69,7 +75,7 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
           nextLastSaved[ns] = JSON.stringify(nsData)
         }
         lastSavedByNs.current = nextLastSaved
-        localStorage.setItem(PREFS_CACHE_KEY, JSON.stringify(data))
+        writeJson(PREFS_CACHE_KEY, data)
         // 同步云端语言偏好 / sync cloud language preference
         // 公开页（含 /en 前缀）语言由 URL 决定，云端偏好不得在这里反向覆盖，
         // 否则已登录用户打开 /en/faq 会在偏好加载完成的瞬间被切回中文。
@@ -79,13 +85,18 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
         const onPublicPage = langFromPath(window.location.pathname) !== null
         if (!onPublicPage && lang && (lang === 'zh' || lang === 'en') && lang !== i18n.language) {
           i18n.changeLanguage(lang)
-          localStorage.setItem('prismx_lang', lang)
+          writeStorage('prismx_lang', lang)
         }
       })
       .catch(() => {
         // 云端加载失败, 继续用 localStorage 缓存 / fallback to cached localStorage
       })
-      .finally(() => setLoaded(true))
+      .finally(() => {
+        if (alive) setLoaded(true)
+      })
+    return () => {
+      alive = false
+    }
   }, [isAuthed, user?.id])
 
   // 按命名空间防抖落库：只 PUT 这一个命名空间的数据，服务端与已存的其它
@@ -117,16 +128,38 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
     return (nsData?.[key] as T) ?? fallback
   }, [prefs])
 
+  // 最新一份 prefs 的镜像，专供 setPref 在**渲染之外**读当前值。
+  // setPref 以前把"算下一状态"和"写缓存 + 发请求"一起塞进 setState 的 updater 里，
+  // 有两个问题：① updater 必须是纯函数，StrictMode 下会被调用两次，于是 saveToCloud
+  // 被触发两遍（防抖恰好吃掉了，所以一直没暴露），React 19 / 并发渲染下 updater 还
+  // 可能被丢弃重放；② localStorage.setItem 在配额满或隐私模式下会抛，而这一抛发生
+  // 在渲染阶段——切页签、改画线这类高频操作会直接把整棵树打挂。
+  // 改法：用 ref 读当前值算出 next，副作用留在调用处（事件处理器里），setState 只
+  // 接一个已经算好的值。
+  // A mirror of the latest prefs, so setPref can read the current value *outside*
+  // rendering. It used to compute the next state and do the cache write plus the
+  // network call inside the setState updater, which is wrong twice over: an
+  // updater must be pure, and StrictMode calls it twice (firing saveToCloud twice
+  // — the debounce happened to absorb it, which is why it never showed), while
+  // React 19 / concurrent rendering may discard and replay it; and
+  // localStorage.setItem throws on a full quota or in private mode, during the
+  // render phase, so a high-frequency action like switching tabs or editing a
+  // drawing would take down the whole tree. Now the next value is computed from
+  // the ref, the side effects stay at the call site (an event handler), and
+  // setState receives a finished value.
+  const prefsRef = useRef(prefs)
+  prefsRef.current = prefs
+
   const setPref = useCallback((ns: string, key: string, value: unknown) => {
-    setPrefsState((prev) => {
-      const prevNs = (prev[ns] as Record<string, unknown>) ?? {}
-      if (prevNs[key] === value) return prev // 值未变, 跳过 / skip if unchanged
-      const nextNs = { ...prevNs, [key]: value }
-      const next = { ...prev, [ns]: nextNs }
-      localStorage.setItem(PREFS_CACHE_KEY, JSON.stringify(next))
-      saveToCloud(ns, nextNs)
-      return next
-    })
+    const prev = prefsRef.current
+    const prevNs = (prev[ns] as Record<string, unknown>) ?? {}
+    if (prevNs[key] === value) return // 值未变, 跳过 / skip if unchanged
+    const nextNs = { ...prevNs, [key]: value }
+    const next = { ...prev, [ns]: nextNs }
+    prefsRef.current = next
+    setPrefsState(next)
+    writeJson(PREFS_CACHE_KEY, next)
+    saveToCloud(ns, nextNs)
   }, [saveToCloud])
 
   // 应用其它设备经 WebSocket 推来的最新偏好（PREFS_UPDATE）：后端现在推送的
@@ -140,7 +173,7 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   // identical-content setPref doesn't trigger a redundant save.
   const applyRemotePrefs = useCallback((data: Record<string, unknown>) => {
     const doc = data ?? {}
-    localStorage.setItem(PREFS_CACHE_KEY, JSON.stringify(doc))
+    writeJson(PREFS_CACHE_KEY, doc)
     setPrefsState(doc)
     for (const [ns, nsData] of Object.entries(doc)) {
       lastSavedByNs.current[ns] = JSON.stringify(nsData)
@@ -150,7 +183,7 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
     const lang = cloudLang?.lang as string | undefined
     if (lang && (lang === 'zh' || lang === 'en') && lang !== i18n.language) {
       i18n.changeLanguage(lang)
-      localStorage.setItem('prismx_lang', lang)
+      writeStorage('prismx_lang', lang)
     }
   }, [])
 
@@ -158,11 +191,18 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   // If authed but prefs haven't loaded, children render with cached localStorage values;
   // they will be overridden once cloud prefs arrive.
 
-  return (
-    <PrefsContext.Provider value={{ prefs, loaded, getPref, setPref, applyRemotePrefs }}>
-      {children}
-    </PrefsContext.Provider>
+  // memo 化 context value，理由同 store/auth.tsx：不 memo 的话每次渲染都换新引用，
+  // 全部 usePrefs() 消费者（几乎每个页面）跟着重渲染，getPref 的身份也每次都变，
+  // 把它写进 useEffect 依赖的组件会反复重跑。
+  // Memoized for the same reason as store/auth.tsx: without it every render hands
+  // out a new identity, re-rendering every usePrefs() consumer (nearly every
+  // page), and getPref's changing identity re-fires any effect that depends on it.
+  const value = useMemo<PrefsContextValue>(
+    () => ({ prefs, loaded, getPref, setPref, applyRemotePrefs }),
+    [prefs, loaded, getPref, setPref, applyRemotePrefs],
   )
+
+  return <PrefsContext.Provider value={value}>{children}</PrefsContext.Provider>
 }
 
 export function usePrefs() {

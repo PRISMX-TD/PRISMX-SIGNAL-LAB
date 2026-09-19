@@ -36,6 +36,7 @@ import Switch from '../Switch'
 import { useToast } from '../../utils/useToast'
 import { adminApi } from '../../api/client'
 import { localizeApiError } from '../../api/utils'
+import ConfirmModal from '../ConfirmModal'
 import ImageField from './ImageField'
 import StrategyBlocksEditor from './StrategyBlocksEditor'
 import type { PlatformStrategy } from '../../api/types'
@@ -144,7 +145,22 @@ export default function PlatformStrategiesPanel() {
     setDirty(true)
   }
 
+  // 删除前确认。这一步只改本地 items 并置 dirty、不立刻落库（这点是对的），但
+  // 管理员随后点一次「保存」整条介绍就没了，中间没有任何提示——而这些是手写的
+  // 长文，误删就得重写。同目录的 AnnouncementsPanel / CompetitionsPanel 的删除
+  // 都走 ConfirmModal，这里对齐。文案 admin.strategyGuide.deleteConfirm 两份语言
+  // 包里早就有，只是一直没有调用方。
+  // Confirm before removing. The removal only mutates local items and sets dirty
+  // rather than persisting (which is right), but the admin's next Save wipes the
+  // write-up for good with nothing in between — and these are long hand-authored
+  // texts that have to be retyped. Deletion in the neighbouring
+  // AnnouncementsPanel / CompetitionsPanel already goes through ConfirmModal;
+  // this matches. The copy at admin.strategyGuide.deleteConfirm has existed in
+  // both language files all along with no caller.
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+
   const removeItem = (id: string) => {
+    setPendingDelete(null)
     setItems((prev) => prev.filter((it) => it.id !== id))
     if (openId === id) setOpenId(null)
     setDirty(true)
@@ -258,7 +274,7 @@ export default function PlatformStrategiesPanel() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => removeItem(s.id)}
+                  onClick={() => setPendingDelete(s.id)}
                   className="rounded px-2 py-1 text-xs text-down hover:bg-down/10"
                 >
                   {t('common.delete')}
@@ -397,6 +413,18 @@ export default function PlatformStrategiesPanel() {
             </div>
           ))}
         </div>
+      )}
+
+      {pendingDelete && (
+        <ConfirmModal
+          center
+          danger
+          title={t('common.delete')}
+          message={t('admin.strategyGuide.deleteConfirm')}
+          confirmLabel={t('common.delete')}
+          onConfirm={() => removeItem(pendingDelete)}
+          onCancel={() => setPendingDelete(null)}
+        />
       )}
     </div>
   )

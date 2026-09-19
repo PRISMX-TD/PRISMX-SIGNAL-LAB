@@ -41,13 +41,31 @@
      舞台高度在滚动途中逐帧改变，三层内容跟着逐帧重排，滚动就是一顿一顿的。
      svh 取的是「地址栏展开时」的高度，是个**在滚动期间不变**的值，代价是
      地址栏收起后底部多出约 60px 背景——两边都是近黑，看不出来，比卡顿划算。
-     （dvh 留作回退：不认识 svh 的浏览器仍拿到可用值。）
+     兜底阶梯是 vh → dvh → svh，**vh 这一级此前漏了**（2026-09-19 补）。
+     原注释写的是「dvh 留作回退：不认识 svh 的浏览器仍拿到可用值」——这句不成立：
+     dvh 与 svh 是同一批视口单位，都在 **Chrome 108** 落地，不认识 svh 的浏览器
+     同样不认识 dvh。于是 Chrome 70–107 上两条声明双双作废，这个 sticky 满屏舞台
+     **完全拿不到高度**，塌成内容高度：520vh 的滚动叙事失去舞台，手机层、遮罩、
+     文案面板（全部相对它绝对定位）一起错位。
+     vh 是 Chrome 20+，任何目标浏览器都认，第一级永远成立，后两级由支持的浏览器
+     逐级覆盖。landing-hero.css:255 写的正是这个阶梯（`height: 320vh; 320svh;`），
+     这里只是漏写。
+
      svh, not dvh: dvh changes continuously as the mobile URL bar collapses, and
      this is a sticky full-screen stage whose phone layer, scrim and copy panel
      are all positioned against it — so every frame of the bar's collapse
      reflows three layers mid-scroll. svh is fixed during scroll; the cost is a
      ~60px strip of background once the bar hides, invisible on a near-black
-     page. dvh stays as the fallback. */
+     page.
+
+     The ladder is vh -> dvh -> svh; the vh rung was missing until 2026-09-19.
+     The old note called dvh "the fallback for browsers that do not know svh",
+     which is not true: dvh and svh shipped together in Chrome 108, so a browser
+     without svh has no dvh either. Both declarations were dead on Chrome 70-107
+     and the stage got no height at all. vh is Chrome 20+ and always resolves;
+     the later rungs override it where supported. landing-hero.css:255 already
+     writes this exact ladder. */
+  height: 100vh;
   height: 100dvh;
   height: 100svh;
   overflow: hidden;
@@ -94,14 +112,55 @@
    Same silhouette per layer, each 2px further back and one step darker: the
    side wall reads continuous within ±40°. This is the entire cost of depth
    without WebGL: eight empty divs. */
+/* 机身宽度：三档媒体阶梯，**不是** clamp()。
+   clamp() 是 Chrome 79+，而本项目的下限是 Chrome 70（见 vite.config.ts 的
+   target 与 src/polyfills.ts）。clamp 失效时 width 回落到 auto，机身连同它里面
+   按比例定尺的一切全部失去宽度。
+
+   这个阶梯与原来的 clamp(240px, 23vw, 330px) 在**每一个视口宽度上取值完全相同**，
+   不是近似：240 ÷ 0.23 = 1043.5px，330 ÷ 0.23 = 1434.8px，所以
+     < 1044px   → 240px（clamp 的下钳位）
+     1044–1434  → 23vw （clamp 的中段，原样照抄）
+     ≥ 1435px   → 330px（clamp 的上钳位）
+   桌面端渲染结果逐像素不变，只是换了一种所有目标浏览器都认识的写法。
+
+   Body width as a three-step media ladder, not clamp(): clamp() is Chrome 79+
+   and this project's floor is Chrome 70 (see vite.config.ts's target and
+   src/polyfills.ts). When clamp fails, width falls back to auto and the body —
+   plus everything sized against it — loses its width entirely.
+   The ladder is exactly equal to clamp(240px, 23vw, 330px) at every viewport
+   width, not an approximation: 240/0.23 = 1043.5 and 330/0.23 = 1434.8, so the
+   three bands reproduce the lower clamp, the raw 23vw middle and the upper
+   clamp. Desktop rendering is pixel-identical; only the spelling changed. */
+:root {
+  --dev-w: 240px;
+}
+@media (min-width: 1044px) {
+  :root { --dev-w: 23vw; }
+}
+@media (min-width: 1435px) {
+  :root { --dev-w: 330px; }
+}
 .dev-body {
   position: relative;
-  width: var(--dev-w, clamp(240px, 23vw, 330px));
-  aspect-ratio: 9 / 19.4;
+  width: var(--dev-w);
+  /* aspect-ratio 是 Chrome 88+，同样在下限之外——失效时高度为 0，连「WebGL 起
+     不来时的 CSS 降级手机」本身都画不出来，等于没有降级。改成显式高度：
+     aspect-ratio: 9 / 19.4 在宽度确定时的结果就是 width × 19.4 ÷ 9，两者等价，
+     而 calc() 是 Chrome 26+。
+     aspect-ratio is Chrome 88+, also outside the floor — when it fails the
+     height is 0, so the CSS fallback phone (the WebGL degradation path) cannot
+     draw either, which means there is no degradation path at all. An explicit
+     height is exactly equivalent once the width is known, and calc() is
+     Chrome 26+. */
+  height: calc(var(--dev-w) * 19.4 / 9);
 }
 .dev-slab {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   border-radius: 16.1% / 7.47%;
   /* 横向金属渐变：两端亮、中间暗。旋转时露出的层边是被光打亮的铝轨。
      中间层不描边（1px 边框旋转时会叠出「年轮」）。
@@ -133,7 +192,10 @@
    and panel (carried by .dev-screen's border below). */
 .dev-face {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   border-radius: 16.1% / 7.47%;
   transform: translateZ(0.5px);
   background:
@@ -159,7 +221,10 @@
 }
 .dev-facelight {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   border-radius: 16.1% / 7.47%;
   overflow: hidden;
   transform: translateZ(0.6px);
@@ -192,19 +257,34 @@
 .dev-key.power { right: -1.2%; top: 26%; height: 9%; }
 .dev-key.vol-a { left: -1.2%; top: 20%; height: 6%; }
 .dev-key.vol-b { left: -1.2%; top: 27.5%; height: 6%; }
-/* 屏幕：真实 DOM 的容器。container-type 让屏幕内文字随机身宽度缩放
-   （cqw 单位），移动端的小手机与桌面大手机共用一份屏幕组件。
-   The screen hosts real DOM. container-type lets in-screen type scale with
-   the body width (cqw units), so the small mobile phone and the large desktop
-   phone share one set of screen components. */
+/* 屏幕：真实 DOM 的容器。container-type 让屏幕内文字随机身宽度缩放，
+   移动端的小手机与桌面大手机共用一份屏幕组件。
+   屏内的每一处字号 / 内距 / 圆角 / 定位都以 --cq 为单位（= 屏幕宽度的 1%，
+   即 1cqw 的等价物）——它的定义与兜底见本文件末尾「--cq」那一节，屏内组件
+   （PhoneScreens.tsx）用的也是同一个变量。
+   The screen hosts real DOM; container-type lets in-screen type scale with the
+   body width, so the small mobile phone and the large desktop phone share one
+   set of screen components. Every in-screen size, inset, radius and offset is
+   expressed in --cq (1% of the screen's width, the equivalent of 1cqw); see the
+   "--cq" section at the end of this file for its definition and fallbacks.
+   PhoneScreens.tsx uses the same variable. */
 .dev-screen {
   position: absolute;
-  inset: 1.6% 3%;
+  /* inset 简写是 Chrome 87+，四条长写法是万年支持；非 0 值（这里是 1.6% 3%）
+     在旧内核上会整条丢失，屏幕就失去定位。
+     The inset shorthand is Chrome 87+; the four longhands are universal. A
+     non-zero value like this one is simply dropped on older engines, which
+     leaves the screen unpositioned. */
+  top: 1.6%;
+  right: 3%;
+  bottom: 1.6%;
+  left: 3%;
   border-radius: 13.9% / 6.28%;
   background: #060608;
   overflow: hidden;
   transform: translateZ(1px);
   container-type: inline-size;
+  --cq: 1cqw;
   /* bezel：包边与发光面板之间的纯黑圈。真机上这一圈永远存在，缺了它屏幕
      会显得「贴」在机身上而不是嵌进去。内圈再补一线 1px 微光：发光面板与
      bezel 的交界在真机上永远有一线亮。
@@ -243,7 +323,10 @@
    ambient light sweeping across a turning body. */
 .dev-sheen {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 30;
   pointer-events: none;
   border-radius: 13.9% / 6.28%;
@@ -288,31 +371,31 @@
      height starting 1.3% down, its lower edge converts to roughly 11cqw against
      the width-based cqw unit. This was 6.5cqw, which put the brand name directly
      under the island (the screenshot shows "Signal Lab" sliced). */
-  top: 13.5cqw;
-  left: 5cqw;
-  right: 5cqw;
+  top: calc(var(--cq) * 13.5);
+  left: calc(var(--cq) * 5);
+  right: calc(var(--cq) * 5);
   z-index: 10;
   display: flex;
   align-items: center;
-  gap: 2.2cqw;
-  padding-bottom: 3cqw;
+  gap: calc(var(--cq) * 2.2);
+  padding-bottom: calc(var(--cq) * 3);
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 .pc-head img {
-  width: 6.5cqw;
-  height: 6.5cqw;
+  width: calc(var(--cq) * 6.5);
+  height: calc(var(--cq) * 6.5);
   object-fit: contain;
 }
 .pc-head b {
-  font-size: 3.9cqw;
+  font-size: calc(var(--cq) * 3.9);
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--text);
 }
 .pc-head .dot {
   margin-left: auto;
-  width: 1.8cqw;
-  height: 1.8cqw;
+  width: calc(var(--cq) * 1.8);
+  height: calc(var(--cq) * 1.8);
   border-radius: 999px;
   background: var(--up);
 }
@@ -355,13 +438,13 @@
    at roughly 10% - the number was not chosen to make the maths work. */
 .pc-tabs {
   position: absolute;
-  left: 3cqw;
-  right: 3cqw;
-  bottom: 3cqw;
+  left: calc(var(--cq) * 3);
+  right: calc(var(--cq) * 3);
+  bottom: calc(var(--cq) * 3);
   z-index: 10;
   display: flex;
-  gap: 1cqw;
-  padding: 2.4cqw;
+  gap: calc(var(--cq) * 1);
+  padding: calc(var(--cq) * 2.4);
   border-radius: 999px;
   overflow: hidden;
   background: rgba(16, 16, 18, 0.92);
@@ -377,18 +460,18 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1.1cqw;
-  padding: 4cqw 0 3.6cqw;
+  gap: calc(var(--cq) * 1.1);
+  padding: calc(var(--cq) * 4) 0 calc(var(--cq) * 3.6);
   border-radius: 999px;
   color: var(--text-3);
-  font-size: 2.9cqw;
+  font-size: calc(var(--cq) * 2.9);
   font-weight: 600;
   line-height: 1;
   transition: background-color 0.35s var(--ease-out), color 0.35s var(--ease-out);
 }
 .pc-tab svg {
-  width: 5.4cqw;
-  height: 5.4cqw;
+  width: calc(var(--cq) * 5.4);
+  height: calc(var(--cq) * 5.4);
 }
 .pc-tab.on {
   color: #fff;
@@ -398,7 +481,10 @@
 /* ── 屏幕内容（五幕）/ screens ── */
 .scr {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: flex;
   flex-direction: column;
   /* 上让品牌条（13.5 起 + 高约 9.5 = 23，留 3 的呼吸），下让 Tab 栏（~17）。
@@ -408,7 +494,7 @@
      breathing room); bottom clears the tab bar. Horizontal padding drops from
      7cqw to 5cqw: on the 380px screen DOM 7cqw is about 27pt against iOS's usual
      16-20pt, and on a screen this narrow those points are worth reclaiming. */
-  padding: 26cqw 5cqw 28cqw;
+  padding: calc(var(--cq) * 26) calc(var(--cq) * 5) calc(var(--cq) * 28);
   opacity: 0;
   visibility: hidden;
 }
@@ -456,7 +542,7 @@
      width while the knob's left is positioned against the padding box, so without
      it the right gap at the end lands 2px short of the left gap at the start
      (measured 4.85 against 6.85). */
-  transform: translateX(calc(var(--knob-travel, 76cqw) - 2px));
+  transform: translateX(calc(var(--knob-travel, calc(var(--cq) * 76)) - 2px));
 }
 /* 填充层与滑块同步推进 / the fill advances in step with the knob */
 .story-root:not(.is-scrub) .js-fill {
@@ -496,21 +582,21 @@
   /* justify-content 居中：.scr 是 flex 列，默认 normal 会让内容从顶部排下来。
      A centred flex column; the default would stack from the top. */
   justify-content: center;
-  padding-top: 20cqw;
+  padding-top: calc(var(--cq) * 20);
 }
 .rk-stage {
   position: relative;
   flex: 0 0 auto;
-  height: 60cqw;
+  height: calc(var(--cq) * 60);
   display: grid;
   place-items: center;
 }
 .rk-cone {
   position: absolute;
   left: 50%;
-  top: -24cqw;
-  width: 74cqw;
-  height: 86cqw;
+  top: calc(var(--cq) * -24);
+  width: calc(var(--cq) * 74);
+  height: calc(var(--cq) * 86);
   transform: translateX(-50%);
   background: radial-gradient(ellipse 50% 62% at 50% 0%, rgba(110, 66, 255, 0.22), transparent 72%);
   clip-path: polygon(40% 0, 60% 0, 100% 100%, 0 100%);
@@ -519,9 +605,9 @@
 .rk-floor {
   position: absolute;
   left: 50%;
-  bottom: 1cqw;
-  width: 60cqw;
-  height: 11cqw;
+  bottom: calc(var(--cq) * 1);
+  width: calc(var(--cq) * 60);
+  height: calc(var(--cq) * 11);
   transform: translateX(-50%);
   border-radius: 50%;
   background: radial-gradient(ellipse at 50% 50%, rgba(110, 66, 255, 0.26), transparent 70%);
@@ -530,12 +616,12 @@
 .rk-side {
   position: absolute;
   top: 50%;
-  width: 15cqw;
+  width: calc(var(--cq) * 15);
   opacity: 0.55;
   filter: saturate(0.75) brightness(0.85);
 }
-.rk-side-l { left: 5cqw; transform: translateY(-40%) rotate(-8deg); }
-.rk-side-r { right: 5cqw; transform: translateY(-40%) rotate(8deg); }
+.rk-side-l { left: calc(var(--cq) * 5); transform: translateY(-40%) rotate(-8deg); }
+.rk-side-r { right: calc(var(--cq) * 5); transform: translateY(-40%) rotate(8deg); }
 .rk-hero {
   position: relative;
   z-index: 1;
@@ -549,46 +635,46 @@
    box's bottom, and a mask that is opaque at the bottom before flipping reads as
    opaque next to the badge after. */
 .rk-refl {
-  height: 15cqw;
+  height: calc(var(--cq) * 15);
   overflow: hidden;
   display: flex;
   align-items: flex-end;
-  margin-top: 1cqw;
+  margin-top: calc(var(--cq) * 1);
   transform: scaleY(-1);
   opacity: 0.3;
-  filter: blur(0.3cqw);
+  filter: blur(calc(var(--cq) * 0.3));
   -webkit-mask-image: linear-gradient(0deg, #000, transparent 85%);
   mask-image: linear-gradient(0deg, #000, transparent 85%);
 }
-@keyframes rk-float { to { transform: translateY(-1.6cqw); } }
+@keyframes rk-float { to { transform: translateY(calc(var(--cq) * -1.6)); } }
 @media (prefers-reduced-motion: reduce) { .rk-hero { animation: none; } }
 
 .rk-title {
-  margin-top: 1cqw;
+  margin-top: calc(var(--cq) * 1);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1.4cqw;
+  gap: calc(var(--cq) * 1.4);
   text-align: center;
 }
 .rk-lv {
-  font-size: 2.8cqw;
+  font-size: calc(var(--cq) * 2.8);
   letter-spacing: 0.16em;
   color: #d9ceff;
-  padding: 0.8cqw 2.6cqw;
+  padding: calc(var(--cq) * 0.8) calc(var(--cq) * 2.6);
   border: 1px solid rgba(139, 108, 255, 0.55);
   border-radius: 999px;
   background: radial-gradient(circle at 35% 30%, rgba(139, 108, 255, 0.32), rgba(110, 66, 255, 0.06) 70%);
 }
 .rk-title b {
   font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
-  font-size: 8.4cqw;
+  font-size: calc(var(--cq) * 8.4);
   font-weight: 800;
   line-height: 1.05;
   letter-spacing: -0.02em;
   color: #f4f4f5;
 }
-.rk-sub { font-size: 3cqw; color: #8f8c9e; }
+.rk-sub { font-size: calc(var(--cq) * 3); color: #8f8c9e; }
 
 /* 铭牌 / the plaque：一圈发丝线框 + 2×2 大号等宽数字，中缝与横缝各一道更淡的线。
    扫光 9 秒一趟、峰值 5%，是"玻璃盖板反了点光"，不是发光。
@@ -598,30 +684,33 @@
   position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  margin: 4.5cqw 0 0;
+  margin: calc(var(--cq) * 4.5) 0 0;
   padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 3cqw;
+  border-radius: calc(var(--cq) * 3);
   background: rgba(255, 255, 255, 0.025);
   overflow: hidden;
 }
-.rk-plaque > div { min-width: 0; padding: 3.6cqw 4cqw 3.4cqw; }
+.rk-plaque > div { min-width: 0; padding: calc(var(--cq) * 3.6) calc(var(--cq) * 4) calc(var(--cq) * 3.4); }
 .rk-plaque > div:nth-child(odd) { border-right: 1px solid rgba(255, 255, 255, 0.08); }
 .rk-plaque > div:nth-child(n + 3) { border-top: 1px solid rgba(255, 255, 255, 0.08); }
-.rk-plaque dt { font-size: 2.6cqw; letter-spacing: 0.06em; color: #71717a; }
+.rk-plaque dt { font-size: calc(var(--cq) * 2.6); letter-spacing: 0.06em; color: #71717a; }
 .rk-plaque dd {
-  margin: 1.2cqw 0 0;
-  font-size: 6.4cqw;
+  margin: calc(var(--cq) * 1.2) 0 0;
+  font-size: calc(var(--cq) * 6.4);
   font-weight: 600;
   line-height: 1;
   letter-spacing: -0.02em;
   color: #f4f4f5;
 }
-.rk-plaque dd small { margin-left: 0.8cqw; font-size: 2.8cqw; font-weight: 500; letter-spacing: 0; color: #a1a1aa; }
+.rk-plaque dd small { margin-left: calc(var(--cq) * 0.8); font-size: calc(var(--cq) * 2.8); font-weight: 500; letter-spacing: 0; color: #a1a1aa; }
 .rk-plaque::after {
   content: "";
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   background: linear-gradient(115deg, transparent 40%, rgba(255, 255, 255, 0.05) 50%, transparent 60%);
   transform: translateX(-120%);
   animation: rk-sweep 9s ease-in-out infinite;
@@ -640,8 +729,8 @@
      No auto margin pushing the rail to the bottom: it left 83px of dead space
      between plaque and rail, with content hugging both edges. A fixed gap plus a
      vertically centred container gathers the whole stack into the middle. */
-  margin: 5.5cqw 0 0;
-  padding: 0 1cqw;
+  margin: calc(var(--cq) * 5.5) 0 0;
+  padding: 0 calc(var(--cq) * 1);
   list-style: none;
 }
 .rk-rail::before {
@@ -649,7 +738,7 @@
   position: absolute;
   left: 9.3%;
   right: 9.3%;
-  top: 1.7cqw;
+  top: calc(var(--cq) * 1.7);
   height: 1px;
   background: rgba(255, 255, 255, 0.12);
 }
@@ -657,8 +746,8 @@
 .rk-rail i {
   display: block;
   position: relative;
-  width: 3.4cqw;
-  height: 3.4cqw;
+  width: calc(var(--cq) * 3.4);
+  height: calc(var(--cq) * 3.4);
   margin: 0 auto;
   border-radius: 999px;
   background: #0d0d11;
@@ -668,15 +757,18 @@
 .rk-rail .cur i::after {
   content: "";
   position: absolute;
-  inset: 0.8cqw;
+  top: calc(var(--cq) * 0.8);
+  right: calc(var(--cq) * 0.8);
+  bottom: calc(var(--cq) * 0.8);
+  left: calc(var(--cq) * 0.8);
   border-radius: 999px;
   background: #fff;
 }
 .rk-rail b {
   display: block;
-  margin-top: 2cqw;
+  margin-top: calc(var(--cq) * 2);
   text-align: center;
-  font-size: 2.6cqw;
+  font-size: calc(var(--cq) * 2.6);
   font-weight: 500;
   color: #71717a;
 }
@@ -697,12 +789,12 @@
 @media (max-width: 1023px) {
   .scr.scr-rank {
     justify-content: flex-start;
-    padding-top: 9cqw;
+    padding-top: calc(var(--cq) * 9);
   }
-  .rk-stage { height: 38cqw; }
-  .rk-hero > .cq-svg { width: 32cqw; }
-  .rk-refl { height: 10cqw; }
-  .rk-side { width: 13cqw; }
+  .rk-stage { height: calc(var(--cq) * 38); }
+  .rk-hero > .cq-svg { width: calc(var(--cq) * 32); }
+  .rk-refl { height: calc(var(--cq) * 10); }
+  .rk-side { width: calc(var(--cq) * 13); }
   /* 铭牌整块不出现在真机上：面板顶边落在它中间，露出来的那半截读成"被裁掉的卡"
      （375 宽实测露出约 50px，正好切在第一行数字上）。它本来是给桌面那块空白补
      的料，真机这块空白被面板占满，不需要。
@@ -789,12 +881,12 @@
      apart the wider the screen gets — measured 557px of void at 1920. Above 1440
      everything composes as if the viewport were 1440. */
   .panel-l {
-    left: calc((100vw - min(100vw, 1440px)) / 2 + 0.07 * min(100vw, 1440px));
+    left: calc((100vw - var(--frame)) / 2 + 0.07 * var(--frame));
     top: 50%;
     max-width: 26rem;
   }
   .panel-r {
-    right: calc((100vw - min(100vw, 1440px)) / 2 + 0.07 * min(100vw, 1440px));
+    right: calc((100vw - var(--frame)) / 2 + 0.07 * var(--frame));
     top: 50%;
     max-width: 26rem;
   }
@@ -922,7 +1014,10 @@
   }
   .story-phone {
     position: absolute;
-    inset: calc(64px + env(safe-area-inset-top)) 0 var(--m-bot) 0;
+    top: calc(64px + env(safe-area-inset-top));
+    right: 0;
+    bottom: var(--m-bot);
+    left: 0;
     transform: none;
     display: flex;
     flex-direction: column;
@@ -987,7 +1082,10 @@
      using. */
   .dev-screen {
     position: relative;
-    inset: auto;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    left: auto;
     flex: 1 1 auto;
     min-width: 0;
     border: 0;
@@ -1021,7 +1119,7 @@
     display: none;
   }
   .scr {
-    padding: 4.5cqw 5cqw 4.5cqw;
+    padding: calc(var(--cq) * 4.5) calc(var(--cq) * 5) calc(var(--cq) * 4.5);
   }
 
   /* 首幕是「今日信号」列表，两张卡的总高本就超过画面区（实测需 453px、可用
@@ -1082,27 +1180,27 @@
        bottom of 483) and lost about half its opacity there, reading as cropped.
        Aligned to the top, the position depends on one padding and holds at any
        height. */
-    padding: 16cqw 5cqw 0;
+    padding: calc(var(--cq) * 16) calc(var(--cq) * 5) 0;
   }
   [data-scr='0'] .sig-card {
-    padding: 5.4cqw;
-    border-radius: 4.4cqw;
+    padding: calc(var(--cq) * 5.4);
+    border-radius: calc(var(--cq) * 4.4);
   }
   [data-scr='0'] .sig-sym {
-    font-size: 6.4cqw;
+    font-size: calc(var(--cq) * 6.4);
   }
   [data-scr='0'] .sig-rr {
-    font-size: 6.4cqw;
+    font-size: calc(var(--cq) * 6.4);
   }
   [data-scr='0'] .sig-tiles {
-    margin-top: 4.4cqw;
-    gap: 2.4cqw;
+    margin-top: calc(var(--cq) * 4.4);
+    gap: calc(var(--cq) * 2.4);
   }
   [data-scr='0'] .sig-key {
-    font-size: 3.4cqw;
+    font-size: calc(var(--cq) * 3.4);
   }
   [data-scr='0'] .sig-val {
-    font-size: 5.4cqw;
+    font-size: calc(var(--cq) * 5.4);
   }
   /* 只剩一张卡就装得下了，「列表还有下文」的渐隐失去依据，留着只会读成截断。
      With a single card everything fits, so the fade that stood for "more below"
@@ -1257,7 +1355,10 @@
    CSS3DRenderer; this rule only governs its own appearance. The 40px radius is
    the pixel equivalent of 7mm at the 0.175 scale, matching the body aperture. */
 .gl-on .dev-screen {
-  inset: auto;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  left: auto;
   border: 0;
   /* 48px 对应机身开孔的圆角（世界坐标 10.2mm ÷ 0.1774 ≈ 57 DOM px）并留有
      余量：屏幕 DOM 的圆角必须**小于等于**开孔圆角，否则四角会露出页面背景。
@@ -1286,7 +1387,10 @@
    ══════════════════════════════════════════════ */
 .landing-space {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 0;
   pointer-events: none;
 }
@@ -1297,7 +1401,10 @@
 }
 .landing-space-grid,
 .landing-space-gl {
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
 }
 /* 基线层同样不用格子：一道自下而上的柔光地平，与 3D 版的扫光地面同一种
    视觉语言。降级应该看起来更简单，而不是换一套语言。
@@ -1359,8 +1466,13 @@
 .mkt-stage {
   position: sticky;
   top: 0;
-  /* 同 .story-stage：svh 在滚动期间不变，dvh 会随地址栏逐帧改高。
-     Same as .story-stage — svh is stable during scroll. */
+  /* 同 .story-stage：svh 在滚动期间不变，dvh 会随地址栏逐帧改高；
+     同样按 vh → dvh → svh 三级兜底（dvh/svh 都是 Chrome 108+，缺 vh 这一级
+     则 Chrome 70–107 上判定幕的 sticky 舞台也拿不到高度）。
+     Same as .story-stage — svh is stable during scroll, and the same
+     vh -> dvh -> svh ladder applies: both dvh and svh are Chrome 108+, so
+     without the vh rung this stage has no height on Chrome 70-107 either. */
+  height: 100vh;
   height: 100dvh;
   height: 100svh;
   overflow: hidden;
@@ -1452,7 +1564,10 @@
   .mkt-stage::before {
     content: '';
     position: absolute;
-    inset: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     z-index: -1;
     pointer-events: none;
     background: radial-gradient(95% 105% at 10% 100%, #09090b 30%, rgba(9, 9, 11, 0.78) 55%, transparent 78%);
@@ -1480,7 +1595,10 @@
 .story-stage::after {
   content: '';
   position: absolute;
-  inset: auto 0 0 0;
+  top: auto;
+  right: 0;
+  bottom: 0;
+  left: 0;
   height: 46%;
   z-index: -1;
   pointer-events: none;
@@ -1502,7 +1620,10 @@
    ══════════════════════════════════════════════ */
 .mkt-wall {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   /* 静态微倾角：墙立在空间里而不是贴在页面上。scrub 模式下由 GSAP 接管并
      缓慢转正。/ A slight static tilt so the wall stands in the space rather
      than sitting on the page; under scrub GSAP takes over and squares it up. */
@@ -1634,12 +1755,18 @@
 .lvl-dn { stroke: var(--down); stroke-opacity: 0.7; }
 .bnd-up { fill: var(--up); }
 .bnd-dn { fill: var(--down); }
-.chip-up { fill: var(--up-bg); stroke: rgba(53, 201, 122, 0.4); stroke-width: 1; }
-.chip-dn { fill: var(--down-bg); stroke: rgba(240, 77, 99, 0.4); stroke-width: 1; }
-.chip-en { fill: rgba(255, 255, 255, 0.04); stroke: rgba(255, 255, 255, 0.12); stroke-width: 1; }
+/* 描边色改用令牌：这两条描边此前硬编码着 rgba(53,201,122,…) 与 rgba(240,77,99,…)，
+   也就是 #35C97A / #F04D63——tailwind 那份**已经作废的**涨跌色副本，而同一条规则的
+   fill 用的却是新值 var(--up-bg)。同一个芯片上填充和描边是两代颜色。
+   （另外三条 .chip-dn / .chip-en / .chip-t-dn / .chip-t-en 是幕 3 改成「战绩」后
+   留下的死样式：MarketStory 只输出 chip-up / chip-t-up，全仓库零引用，已删。）
+   The strokes hardcoded #35C97A / #F04D63 — the now-retired Tailwind copies of the
+   up/down colours — while the fill on the same rule already used the new token, so a
+   chip's fill and stroke were two generations apart. (.chip-dn / .chip-en /
+   .chip-t-dn / .chip-t-en were dead since scene 3 became the record scene:
+   MarketStory only emits chip-up / chip-t-up. Removed.) */
+.chip-up { fill: var(--up-bg); stroke: rgb(var(--up-rgb) / 0.4); stroke-width: 1; }
 .chip-t-up { fill: var(--up); }
-.chip-t-dn { fill: var(--down); }
-.chip-t-en { fill: #ededf0; }
 /* 判决章：描边橡皮章，不发光 / verdict stamps: outlined rubber stamps, no glow */
 .st-win { fill: rgba(9, 9, 11, 0.78); stroke: var(--up); stroke-width: 3.5; }
 .st-win-t { fill: var(--up); }
@@ -1666,27 +1793,11 @@
   transition: none;
 }
 
-/* 背景创意元素层 / the creative backdrop motif layer
-   固定全屏，压在 3D 画布之上、页面内容之下。纯装饰，不接指针事件。
-   Fixed full-screen, above the 3D canvas and below page content. Purely
-   decorative, takes no pointer events. */
-.backdrop-art {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-.backdrop-art svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-.backdrop-art text {
-  font-family: inherit;
-}
-.backdrop-art .tnum,
-.backdrop-art .tnum text {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-}
+/* `.backdrop-art`（背景创意元素层，五条规则）已删：全仓库没有任何 tsx 输出过这个
+   类名。它是 3D 空间层（LandingSpaceLayer / .landing-space）上线前的那一版平面装饰，
+   被取代后规则留了下来。
+   The `.backdrop-art` motif layer (five rules) is gone: no TSX ever emitted that class
+   name. It was the flat decoration that preceded the 3D space layer and outlived it. */
 
 /* 移动端遮罩层序 / mobile scrim stacking
    必须写在 .story-stage::after 基础规则之后：两条选择器权重相同，靠源码顺序
@@ -1762,16 +1873,79 @@
     padding-top: 2vh;
   }
   [data-scr='0'] .sig-card {
-    padding: 4.4cqw;
+    padding: calc(var(--cq) * 4.4);
   }
   [data-scr='0'] .sig-sym,
   [data-scr='0'] .sig-rr {
-    font-size: 5.4cqw;
+    font-size: calc(var(--cq) * 5.4);
   }
   [data-scr='0'] .sig-val {
-    font-size: 4.6cqw;
+    font-size: calc(var(--cq) * 4.6);
   }
   [data-scr='0'] .sig-tiles {
-    margin-top: 3.4cqw;
+    margin-top: calc(var(--cq) * 3.4);
+  }
+}
+
+/* ══════════════════════════════════════════════
+   --cq：容器查询单位的兜底 / the container-query fallback
+   ──────────────────────────────────────────────
+   屏内排版的**全部**尺寸（字号、内距、圆角、绝对定位偏移）都以 --cq 为单位，
+   本文件 87 处 + PhoneScreens.tsx 119 处。--cq 的语义就是 1cqw：屏幕内容宽的 1%。
+
+   为什么不直接写 cqw：`container-type: inline-size` 与 `cqw` 都是 **Chrome 105+**，
+   而本项目的构建下限是 Chrome 70（vite.config.ts 的 target 与 src/polyfills.ts 里
+   有完整论证）。JS 一侧一直守着这条线，CSS 一侧此前没跟上——Chrome 70–104 上这
+   两百多条声明会全部作废，信号卡、滑动下单条、榜单行、勋章台一起失去字号、内距、
+   圆角与定位，退化成默认 16px 的裸文本堆叠，而那正是落地页的主视觉与全部产品证据。
+
+   做法：认识容器查询的浏览器走 1cqw（**渲染与改动前逐像素相同**，上面 .dev-screen
+   里就写着）；不认识的走下面这个 @supports not 分支，按 .dev-screen 在三种上下文里
+   各自的**确定**宽度，用 px / vw 算出等价值。三种上下文互不重叠：
+
+   ① 桌面 CSS 手机（≥1024px，WebGL 未启用或起不来）
+      .dev-screen 是 .dev-body 的绝对定位子元素，left/right 各 3% → 外宽 = 94% × --dev-w；
+      再减去左右各 2px 的 bezel 边框得到内容宽（cqw 按内容盒算）。
+   ② WebGL / CSS3D 模式（.gl-on）
+      PhoneGL.ts 把 screenEl 的宽度硬写成 SCREEN_DOM_W = 380px 且 border 归零，
+      所以 1cqw 恒等于 3.8px——这本来就是屏内所有数值的标定基准。
+   ③ 移动端（<1024px）
+      手机外壳去掉、屏幕全出血，左右边框为 0，内容宽 = 视口宽 → 1cqw = 1vw。
+
+   每个分支都只用 calc() + 自定义属性 + vw，全部 Chrome 26/49 以下就有的能力。
+
+   Every in-screen dimension is expressed in --cq (87 sites here plus 119 in
+   PhoneScreens.tsx). --cq means exactly 1cqw: 1% of the screen's content width.
+   Both `container-type: inline-size` and `cqw` are Chrome 105+, while this
+   project's floor is Chrome 70 — the JS side has always honoured that line and
+   the CSS side had not, so on Chrome 70-104 all ~200 declarations were dead and
+   the phone's contents collapsed to unstyled 16px text.
+   Browsers with container queries keep 1cqw and render pixel-identically to
+   before. Everything else takes the @supports not branch below, which derives
+   the equivalent from each of the three contexts' known widths: the desktop CSS
+   phone (94% of --dev-w less the 2px bezel per side), the WebGL/CSS3D mode
+   (PhoneGL.ts pins screenEl to SCREEN_DOM_W = 380px with no border, so 1cqw is
+   exactly 3.8px — the basis every in-screen number was calibrated against), and
+   mobile (shell removed, screen full-bleed with no side borders, so 1cqw = 1vw).
+   Each branch uses only calc(), custom properties and vw.
+   ══════════════════════════════════════════════ */
+@supports not (container-type: inline-size) {
+  /* ① 桌面 CSS 手机 / desktop CSS phone */
+  .dev-screen {
+    --cq: calc((var(--dev-w) * 0.94 - 4px) / 100);
+  }
+  /* ② WebGL / CSS3D：宽度由 PhoneGL.ts 固定为 380px
+     ——注意这一条的选择器权重高于上下两条，而 .gl-on 只会出现在 scrub 模式
+     （≥1024px），与 ③ 的移动端分支天然不重叠。
+     Higher specificity than the rules around it, but .gl-on only ever exists in
+     scrub mode (>=1024px) so it never overlaps the mobile branch. */
+  .gl-on .dev-screen {
+    --cq: 3.8px;
+  }
+  /* ③ 移动端全出血 / mobile, full bleed */
+  @media (max-width: 1023px) {
+    .dev-screen {
+      --cq: 1vw;
+    }
   }
 }

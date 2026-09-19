@@ -37,15 +37,34 @@ import { recordDiag } from './utils/pushDiag'
 // offline fallback and push, and must not affect the app booting. Deferred to the
 // load event because registration competes with first paint for network and main
 // thread, while what it buys (an offline fallback) only matters afterwards.
+// 2026-09-19：这里是全站**唯一**的注册点。utils/push.ts 的 getSWReg 曾经自己再注册
+// 一遍，两条路径抢着写同一个 sw-register 诊断格子（pushDiag 是 Map，后写覆盖先写），
+// 排查推送时看到的可能是这一次的结果而不是推送路径的；它现在改成等
+// navigator.serviceWorker.ready，不再注册。
+// Since 2026-09-19 this is the only registration site. getSWReg in utils/push.ts
+// used to register again, and the two racing paths wrote the same sw-register
+// diagnostics slot (pushDiag is a Map, last write wins), so the entry seen while
+// debugging push could belong to this call rather than the push path. It now
+// awaits navigator.serviceWorker.ready instead of registering.
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
+  const registerSW = () => {
     navigator.serviceWorker
       .register('/sw.js', { scope: '/' })
       .then(() => recordDiag('sw-register'))
       // 失败仍然不影响启动，但原因记进诊断供面板读取。
       // Still non-fatal to boot, but the reason is recorded for the panel.
       .catch((err) => recordDiag('sw-register', err))
-  })
+  }
+  // load 已经过去就立刻注册，别再挂监听器。既然 getSWReg 现在只等不注册，
+  // 这个注册点要是没跑，推送链路就没有第二条路可走了——而 load 事件一旦错过
+  // （模块被延后执行、从往返缓存恢复），监听器永远不会触发。
+  // Register immediately when load has already fired rather than attaching a
+  // listener. Now that getSWReg only waits, a registration that never happens
+  // leaves the push pipeline with no second route — and a missed load event
+  // (deferred module execution, restoration from the back/forward cache) means
+  // the listener would never fire at all.
+  if (document.readyState === 'complete') registerSW()
+  else window.addEventListener('load', registerSW, { once: true })
 }
 
 // viewport meta 里的 user-scalable=no（见 index.html）覆盖 Android Chrome；

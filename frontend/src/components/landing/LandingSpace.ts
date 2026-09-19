@@ -69,8 +69,16 @@ export async function createLandingSpace(opts: {
   storyEl: HTMLElement
   /** 判定区（第二幕）/ the verdict section, act II */
   marketEl: HTMLElement
+  /**
+   * WebGL 上下文丢失时的回调：调用方应当 dispose 本 handle 并摘掉 .space-on，
+   * 让 SSR 就有的静态基线层重新露出来。触发时渲染循环已经停住。
+   * Called when the WebGL context is lost. The caller should dispose this handle
+   * and drop .space-on so the static baseline layer (present since SSR) shows
+   * again. The render loop is already stopped by then.
+   */
+  onContextLost?: () => void
 }): Promise<SpaceHandle | null> {
-  const { container, storyEl, marketEl } = opts
+  const { container, storyEl, marketEl, onContextLost } = opts
 
   try {
     const probe = document.createElement('canvas')
@@ -85,7 +93,12 @@ export async function createLandingSpace(opts: {
   const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: 'low-power' })
   renderer.setClearAlpha(0)
   renderer.outputColorSpace = THREE.SRGBColorSpace
-  renderer.domElement.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none'
+  // 四条长写法而不是 inset 简写：inset 是 Chrome 87+，在本项目 Chrome 70 的下限之外，
+  // 旧内核上整条作废，画布会掉回静态流位置。
+  // Longhands instead of the `inset` shorthand: `inset` is Chrome 87+, outside the
+  // Chrome 70 floor, and when dropped the canvas falls back into static flow.
+  renderer.domElement.style.cssText =
+    'position:absolute;top:0;right:0;bottom:0;left:0;width:100%;height:100%;pointer-events:none'
   container.appendChild(renderer.domElement)
 
   const scene = new THREE.Scene()
@@ -160,11 +173,24 @@ export async function createLandingSpace(opts: {
     camera.position.copy(_p)
     camera.lookAt(_l)
 
-    /* 判定幕期间地面退到三成：判定终端是唯一主体，大地降为余光里的存在。
-       出终端后回升，随后起雾——定价、FAQ、页脚是整页阅读量最大的一段。
-       Under the verdict terminal the floor drops to 30%: the terminal is the only
-       subject and the ground becomes peripheral. It comes back on the way out,
-       then haze rises for the reading-heavy tail of the page. */
+    /* 【2026-09-19 订正】这里原来写着「判定幕期间地面退到三成：判定终端是唯一主体，
+       大地降为余光里的存在；出终端后回升，随后起雾」——前半句**从来没有实现过**。
+       实际发生的只有后半句：下面那个 haze 从 route 2.02 起把雾密度推上去，给页面
+       尾段（定价 / FAQ / 页脚，整页阅读量最大的一段）加一层灰。判定幕期间碎片与
+       烟雾**不会**让位：BackdropAir / BackdropShards 上确实各有一个 setDim 实现并
+       导出，但全仓库零调用点，今天已连同这条注释一并清掉（见那两个文件）。
+       要不要真的做「判定幕让位」是视觉决策，留给负责人；这里先让注释与代码一致——
+       一条描述着不存在行为的注释，比没有注释更贵。
+       Corrected 2026-09-19. This used to claim the floor drops to 30% under the
+       verdict terminal so the terminal is the only subject. That never existed. What
+       actually happens is only the second half: the haze below raises fog density
+       from route 2.02 onward, greying the page's reading-heavy tail (pricing, FAQ,
+       footer). Shards and smoke do NOT yield during the verdict act — both backdrops
+       did export a setDim for it, with zero call sites anywhere, and those were
+       removed today along with this claim (see those two files). Whether to actually
+       build the yielding behaviour is a visual decision left to its owner; for now
+       the comment matches the code, because a comment describing behaviour that does
+       not exist costs more than no comment at all. */
     /* 背景跟着相机走。定死在世界坐标里时，相机推过判定幕就把它甩在身后了——
        实测 route 1.5 之后地面覆盖率归零，页面下半段身后又变回一片纯黑。
        The backdrop follows the camera. Pinned in world space it got left behind
@@ -194,21 +220,51 @@ export async function createLandingSpace(opts: {
 
   /* ══ 路线：每帧从滚动位置算，不挂 scroll 监听 ══
      三段锚点是真实的分区边界，任何分区高度改动都自动跟随。
-     Route is computed from the sections' own rects once per frame, so any
-     height change is followed automatically. */
+
+     锚点**只在布局真的变了的时候量一次**，帧内只读 window.scrollY。
+     此前 computeRoute 是每帧调的，而它里面有两次 getBoundingClientRect() 加一次
+     document.documentElement.scrollHeight——三项都强制同步布局（forced reflow）。
+     这一层在落地页**全生命周期**运行（只按 document.hidden 起停，没有
+     IntersectionObserver），于是低端安卓的主线程每帧白挨一次 reflow，与 GSAP scrub
+     和 CSS3D 变换叠在一起就是滚动掉帧。滚动本身不会改变这三个文档偏移，改变它们的
+     只有布局，所以按布局事件缓存才是对的口径。
+     ResizeObserver 盯 body：视口 resize 之外，字体落地、图片定高、i18n 换语言导致的
+     高度变化也都要重新量，光挂 window.resize 会漏。ResizeObserver 是 Chrome 64+，
+     在本项目 Chrome 70 的下限之内。
+
+     Anchors are measured only when layout actually changes; the per-frame path
+     reads window.scrollY and nothing else. computeRoute used to run every frame
+     with two getBoundingClientRect() calls plus documentElement.scrollHeight in
+     it — three forced synchronous layouts. This layer runs for the landing page's
+     entire lifetime (started and stopped by document.hidden alone, with no
+     IntersectionObserver), so low-end Android paid a reflow every frame on top of
+     GSAP scrub and the CSS3D transforms, which is where the dropped frames came
+     from. Scrolling never changes these document offsets; only layout does.
+     The ResizeObserver watches body because font swap, late image sizing and an
+     i18n language change all move these offsets without firing window.resize.
+     ResizeObserver is Chrome 64+, inside this project's Chrome 70 floor. */
+  let sTop = 0
+  let mTop = 0
+  let mEnd = 0
+  let docEnd = 1
+  const measureRoute = () => {
+    const y = window.scrollY
+    sTop = storyEl.getBoundingClientRect().top + y
+    mTop = marketEl.getBoundingClientRect().top + y
+    mEnd = marketEl.getBoundingClientRect().bottom + y - vh
+    docEnd = Math.max(mEnd + 1, document.documentElement.scrollHeight - vh)
+  }
   const computeRoute = () => {
     const y = window.scrollY
-    const sr = storyEl.getBoundingClientRect()
-    const mr = marketEl.getBoundingClientRect()
-    const sTop = sr.top + y
-    const mTop = mr.top + y
-    const mEnd = mr.bottom + y - vh
-    const docEnd = Math.max(mEnd + 1, document.documentElement.scrollHeight - vh)
     if (y <= mTop) return clamp01((y - sTop) / Math.max(1, mTop - sTop))
     if (y <= mEnd) return 1 + clamp01((y - mTop) / Math.max(1, mEnd - mTop))
     return 2 + clamp01((y - mEnd) / Math.max(1, docEnd - mEnd))
   }
 
+  // vh 由 resize() 填，锚点依赖它，所以先量视口再量锚点。
+  // resize() fills vh and the anchors depend on it, so viewport first.
+  resize()
+  measureRoute()
   let cur = computeRoute()
   /* 指针视差只在有精确指针的设备上接线：触屏的 pointermove 在滚动中持续触发，
      那不是「看向别处」。/ Pointer parallax only where a fine pointer exists. */
@@ -223,7 +279,6 @@ export async function createLandingSpace(opts: {
     window.addEventListener('pointermove', onPointer, { passive: true })
   }
   applyRoute(cur)
-  resize()
 
   const draw = () => renderer.render(scene, camera)
   draw()
@@ -255,16 +310,47 @@ export async function createLandingSpace(opts: {
     shards.update(t)
     draw()
   }
+  let lost = false
   const pump = () => {
-    if (!document.hidden && !raf) raf = requestAnimationFrame(frame)
-    else if (document.hidden && raf) {
+    if (!document.hidden && !lost && !raf) raf = requestAnimationFrame(frame)
+    else if ((document.hidden || lost) && raf) {
       cancelAnimationFrame(raf)
       raf = 0
     }
   }
+
+  /* ── 上下文丢失：停表并露出静态基线层 ──
+     这是页面上的第二个 WebGL 上下文（另一个是 PhoneGL 的机身），scrub 模式下两个
+     同时活着，低端安卓 WebView 在内存压力/切后台/驱动重置时丢上下文是常态。
+     此前全仓库对 webglcontextlost 零处理：一丢，rAF 仍以 60fps 调 renderer.render，
+     每帧抛 GL 错误，画布永久透明，而 .space-on 还挂在 <html> 上把 SSR 就有的静态
+     网格压着淡出——于是整页背景变成一片空白，**比不启用 WebGL 还糟**。
+     preventDefault() 必须调，否则浏览器根本不会尝试恢复。
+     Second WebGL context on the page (the phone body is the other); scrub mode
+     keeps both alive. Losing it is routine on low-end Android WebViews. There was
+     no handling anywhere in the repo: the rAF kept calling render at 60fps into a
+     dead context while .space-on stayed on <html>, holding the SSR static grid
+     faded out — so the whole page background went blank, strictly worse than never
+     starting WebGL at all. preventDefault() is required or the browser will not
+     even attempt a restore. */
+  const onLost = (e: Event) => {
+    e.preventDefault()
+    lost = true
+    pump()
+    onContextLost?.()
+  }
+  renderer.domElement.addEventListener('webglcontextlost', onLost)
   const onVisibility = () => pump()
   document.addEventListener('visibilitychange', onVisibility)
-  window.addEventListener('resize', resize)
+  const onResize = () => {
+    resize()
+    measureRoute()
+  }
+  window.addEventListener('resize', onResize)
+  /* 布局变化（字体落地、图片定高、换语言）同样要重量锚点，而它们不触发 resize。
+     Layout changes that never fire resize still move the anchors. */
+  const ro = new ResizeObserver(() => measureRoute())
+  ro.observe(document.body)
   pump()
 
   let devApi: unknown = null
@@ -399,12 +485,22 @@ export async function createLandingSpace(opts: {
     dispose() {
       if (raf) cancelAnimationFrame(raf)
       document.removeEventListener('visibilitychange', onVisibility)
-      window.removeEventListener('resize', resize)
+      window.removeEventListener('resize', onResize)
+      ro.disconnect()
+      renderer.domElement.removeEventListener('webglcontextlost', onLost)
       if (onPointer) window.removeEventListener('pointermove', onPointer)
       air.dispose()
       shards.dispose()
       renderer.domElement.remove()
       renderer.dispose()
+      /* 归还上下文：dispose() 只释放 three 的 GPU 资源，不还上下文本身，而浏览器
+         对同时存活的上下文有硬上限。/ Hand the context back: dispose() frees
+         three's resources but not the context, and browsers cap live contexts. */
+      try {
+        renderer.forceContextLoss()
+      } catch {
+        /* noop */
+      }
       scene.traverse((o) => {
         const m = o as { geometry?: { dispose(): void }; material?: { dispose(): void } }
         m.geometry?.dispose()

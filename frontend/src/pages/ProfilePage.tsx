@@ -18,7 +18,7 @@ import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { gamificationApi } from '../api/client'
 import type { PublicProfile } from '../api/types'
-import { localizeApiError } from '../api/utils'
+import { localizeApiError, parseTime } from '../api/utils'
 import BadgeIcon from '../components/badges/BadgeIcon'
 import MedalTilt from '../components/badges/MedalTilt'
 import { materialOf } from '../components/badges/medal'
@@ -36,9 +36,17 @@ function fmtMonth(iso: string | null): string {
   return iso.replace('-', '/')
 }
 
+// 解析走 parseTime：裸 new Date(iso) 不给无时区标记的时间戳补 'Z'，会被当成浏览器
+// 本地时间解析——后面 timeZone: 'Asia/Shanghai' 只管渲染，救不了已经错掉的时刻。
+// 后端目前一律返回带 Z 的串，所以这是预防而不是现成故障（见 api/utils 头注）。
+// Parsing goes through parseTime: a bare new Date(iso) does not append 'Z' to a
+// tz-less timestamp and parses it as browser-local time — the later
+// timeZone: 'Asia/Shanghai' only affects rendering and cannot undo an instant
+// that was already read wrong. The backend currently always emits a Z suffix, so
+// this is prevention rather than a live failure (see api/utils' header).
 function fmtDay(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
+  const d = parseTime(iso)
+  if (!d || Number.isNaN(d.getTime())) return ''
   return d.toLocaleDateString('en-GB', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' })
 }
 
@@ -121,8 +129,17 @@ export default function ProfilePage() {
             <span>{t('publicProfile.memberSince')} <b className="num">{fmtMonth(data.memberSince)}</b></span>
           </div>
         </div>
+        {/* aria-label 原来带 defaultValue: ''，而 gamification.equipSlots.title
+            两份语言包里都不存在——渲染出来的是 aria-label=""，屏幕阅读器读不到这
+            一区是干什么的，同时还把"key 不存在"这件事盖住了。现在两份 JSON 都补
+            了这条文案，defaultValue 随之去掉：真缺 key 就该露出来。
+            This aria-label used to pass defaultValue: '' for a key that existed
+            in neither language file, so it rendered aria-label="" — the badge
+            area had no accessible name and the missing key was hidden at the
+            same time. The string now exists in both JSON files and the
+            defaultValue is gone: a genuinely missing key should show. */}
         {data.equippedBadges.length > 0 && (
-          <div className="pf-equipped" aria-label={t('gamification.equipSlots.title', { defaultValue: '' })}>
+          <div className="pf-equipped" aria-label={t('gamification.equipSlots.title')}>
             {data.equippedBadges.map((b, i) => (
               <MedalTilt key={b.id} ariaLabel={t(`gamification.badges.${b.id}.name`)} className={i === 0 ? 'is-main' : ''}>
                 <BadgeIcon id={b.id} tier={b.tier} earned size={i === 0 ? 104 : 72} spin={i === 0} />

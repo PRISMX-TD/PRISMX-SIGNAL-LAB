@@ -203,9 +203,42 @@ function TaskValue({ task, t }: { task: GamificationTask; t: TFunction }) {
 // 拆不开就整句当标题。
 // Task copy is "short name — condition" (" — " in English); split into a title
 // line and a condition line. If it doesn't split, the whole string is the title.
+/* 分隔符放宽，并且**在开发期把拆不开的情况喊出来**。
+   这里是拿正则从译文里抠字段，也就是把 i18n 文案当数据结构用。正确的解法是把
+   短名与条件拆成两个 i18n 键，但 src/i18n/ 不在本次改动范围内，所以先做两件在
+   范围内的事：
+   ① 补上实际会被译者写出来的那几种破折号写法。原来只认「——」「 — 」「 - 」，
+      译文一旦写成不带空格的「-」、en dash「–」、或者带空格的「— 」等变体，整句
+      就会静默落到标题行、条件行直接消失——而这正是这张瓦片要传达的信息。
+   ② 拆不开时在开发期告警一次。原来失败是完全静默的：页面看上去只是「少了一行」，
+      没有任何线索指向译文。生产不告警（对用户没用，且整句当标题仍然可读）。
+   Loosen the separator and, in development, say something when it fails to split.
+   This parses a field out of a translated string, i.e. treats i18n copy as a data
+   structure. The real fix is two separate i18n keys, but src/i18n/ is outside this
+   change's scope, so: (1) accept the dash variants translators actually write — the
+   old pattern only matched a full-width double dash, a spaced em dash and a spaced
+   hyphen, so an en dash "–" or asymmetric spacing around the em dash silently
+   dropped the whole condition line, which is the tile's actual payload; and (2) warn
+   once in development, since the failure was completely silent and the page just
+   looked like it was missing a line with nothing pointing at the translation.
+   No warning in production: it helps nobody there and the full string still reads
+   fine as a title. */
 function splitTaskName(label: string): { title: string; cond: string } {
-  const m = label.match(/^(.*?)\s*(?:——|\s—\s|\s-\s)\s*(.+)$/)
-  return m ? { title: m[1], cond: m[2] } : { title: label, cond: '' }
+  // 破折号（——/—/–）两侧的空格可有可无：这三个字符不会出现在任务短名内部，无需
+  // 靠空格消歧。半角连字符**仍然要求两侧有空格**：它在短名里合法（如 T-3），
+  // 允许裸连字符会把这类名字从中间劈开。
+  // Spacing around the dashes (——/—/–) is optional: none of them occurs inside a
+  // task's short name, so no whitespace is needed to disambiguate. A plain hyphen
+  // still requires spaces on both sides, because it is legal inside a short name
+  // (T-3) and a bare one would split such names down the middle.
+  const m = label.match(/^(.*?)\s*(?:——|—|–|\s-\s)\s*(.+)$/)
+  if (!m) {
+    if (import.meta.env.DEV) {
+      console.warn('[achievements] task name has no "name — condition" separator:', label)
+    }
+    return { title: label, cond: '' }
+  }
+  return { title: m[1], cond: m[2] }
 }
 
 function TaskTile({ task, index, t }: { task: GamificationTask; index: number; t: TFunction }) {
@@ -276,7 +309,7 @@ function StageRing({ done, total }: { done: number; total: number }) {
 // never shows it at all.
 function PageSkeleton() {
   return (
-    <div className="ach mx-auto max-w-[1100px] space-y-8 lb-skel" aria-hidden>
+    <div className="ach space-y-8 lb-skel" aria-hidden>
       <div className="ach-stage" style={{ minHeight: 420 }}>
         <div className="flex flex-col gap-4 pt-2">
           <SkeletonLine width={90} height={11} />
@@ -297,6 +330,12 @@ function PageSkeleton() {
   )
 }
 
+// 宽度由 GrowthHub 外壳统一约束（mx-auto max-w-[1100px]），本页不再自己套一层。
+// 三条路由都是 <GrowthHub><Page/></GrowthHub>（见 App.tsx），外壳一定在。两个来源时
+// 改壳会漏改这里，且没有任何视觉差别可以提醒人。
+// Width belongs to the GrowthHub shell; all three routes are
+// <GrowthHub><Page/></GrowthHub> (see App.tsx) so the shell is always present. With
+// two sources, changing the shell silently misses this one and nothing looks wrong.
 export default function AchievementsPage() {
   const { t } = useTranslation()
   const [me, setMe] = useState<GamificationMe | null>(null)
@@ -422,7 +461,7 @@ export default function AchievementsPage() {
 
   if (forbidden || !me) {
     return (
-      <div className="mx-auto flex min-h-[40vh] max-w-[1100px] items-center justify-center">
+      <div className="flex min-h-[40vh] items-center justify-center">
         <p className="card glass p-6 text-center text-sm text-neutral-400">
           {t('gamification.admin.visibleOff')}
         </p>
@@ -449,7 +488,7 @@ export default function AchievementsPage() {
     .filter((b): b is GamificationBadge => b != null)
 
   return (
-    <div className="ach mx-auto max-w-[1100px] space-y-8">
+    <div className="ach space-y-8">
       {/* ── 陈列台 / stage ────────────────────────────────────── */}
       <section className="ach-stage" aria-labelledby="ach-title">
         <div className="ach-stage-l">

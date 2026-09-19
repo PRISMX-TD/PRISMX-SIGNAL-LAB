@@ -2,6 +2,7 @@
 import type { Signal, Order, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery } from './types'
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
+import { readJson, readStorage, removeStorage, writeJson, writeStorage } from '../utils/safeStorage'
 
 const TOKEN_KEY = 'prismx_token'
 
@@ -10,13 +11,13 @@ const TOKEN_KEY = 'prismx_token'
 export const API_BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '')
 
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
+  return readStorage(TOKEN_KEY)
 }
 export function setToken(token: string) {
-  localStorage.setItem(TOKEN_KEY, token)
+  writeStorage(TOKEN_KEY, token)
 }
 export function clearToken() {
-  localStorage.removeItem(TOKEN_KEY)
+  removeStorage(TOKEN_KEY)
 }
 
 // ---- 邀请链接归因 / invite-link attribution ----
@@ -30,24 +31,19 @@ const REF_KEY = 'prismx.ref'
 const REF_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 export function storeRef(code: string) {
-  localStorage.setItem(REF_KEY, JSON.stringify({ code, ts: Date.now() }))
+  writeJson(REF_KEY, { code, ts: Date.now() })
 }
 
 export function readRef(): string | null {
-  try {
-    const raw = localStorage.getItem(REF_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as { code?: unknown; ts?: unknown }
-    if (typeof parsed.code !== 'string' || typeof parsed.ts !== 'number') return null
-    if (Date.now() - parsed.ts > REF_TTL_MS) return null
-    return parsed.code
-  } catch {
-    return null
-  }
+  const parsed = readJson<{ code?: unknown; ts?: unknown } | null>(REF_KEY, null)
+  if (!parsed) return null
+  if (typeof parsed.code !== 'string' || typeof parsed.ts !== 'number') return null
+  if (Date.now() - parsed.ts > REF_TTL_MS) return null
+  return parsed.code
 }
 
 export function clearRef() {
-  localStorage.removeItem(REF_KEY)
+  removeStorage(REF_KEY)
 }
 
 // 未授权（401）回调：登录态过期时由 AuthProvider 注册，用于清状态并跳登录页。
@@ -64,7 +60,78 @@ export function setUnauthorizedHandler(fn: (() => void) | null) {
 const RATE_LIMITED =
   '操作过于频繁，已被限流，请稍等一分钟再试 / Too many requests, you have been rate limited — wait a minute and try again'
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+// 请求超时上限。移动网络挂起时 fetch 既不 resolve 也不 reject——连接卡在半开
+// 状态，页面的加载骨架就永久转圈，用户只能自己刷新。30 秒取的是"比任何一条
+// 正常接口都宽裕、又短到用户还愿意等"的位置：本站最慢的是回测与管理页的统计
+// 聚合，实测都在个位数秒。
+// 单次调用可以用 requestTimeoutMs 覆盖（0 表示不设超时，留给将来确实可能长跑
+// 的端点），不传就走这个值。
+// Per-request timeout ceiling. On a suspended mobile connection fetch neither
+// resolves nor rejects — the socket sits half-open and the loading skeleton
+// spins forever until the user reloads. 30s is "comfortably longer than any
+// healthy endpoint, short enough that the user is still waiting": the slowest
+// calls here are backtests and the admin stats aggregation, both single-digit
+// seconds in practice. Override per call with requestTimeoutMs (0 disables,
+// reserved for endpoints that may genuinely run long).
+const DEFAULT_TIMEOUT_MS = 30_000
+
+// 超时/取消的统一错误名。调用方用 isAbortError() 区分"用户离开了这个页面"与
+// "请求真的失败了"——前者不该弹任何提示。
+// The error name used for both timeouts and caller cancellation. Call sites use
+// isAbortError() to tell "the user left this page" from "the request actually
+// failed"; the former must not surface any message.
+export const ABORT_ERROR_NAME = 'AbortError'
+
+/** 判断一个 catch 到的异常是否只是"请求被取消/超时"，据此决定要不要提示用户。
+ *  Whether a caught error is merely a cancelled/timed-out request. */
+export function isAbortError(err: unknown): boolean {
+  return err instanceof Error && (err.name === ABORT_ERROR_NAME || err.name === 'TimeoutError')
+}
+
+// 调用方可在 RequestInit 上多传一个超时覆盖值。单独开个类型而不是加第三个参数，
+// 是为了让全文件几百个 request(...) 调用点一个都不用改——要超时/取消的那几个
+// 自己在 options 里加 signal / requestTimeoutMs 即可。
+// Callers may pass a timeout override alongside the normal RequestInit. Modelled
+// as an extra field rather than a third parameter so that none of the several
+// hundred existing request(...) call sites need touching — the handful that want
+// cancellation just add signal / requestTimeoutMs to their options.
+export interface ApiRequestInit extends RequestInit {
+  /** 毫秒；0 或负数表示不设超时 / milliseconds; 0 or negative disables the timeout */
+  requestTimeoutMs?: number
+}
+
+// 把"调用方传来的 signal"与"本次超时"合成一个 signal。
+//
+// 不用 AbortSignal.any / AbortSignal.timeout：产物语法下限是 Chrome 70（见
+// vite.config.ts 的 target），这两个 API 分别要 Chrome 116 / 103，polyfills.ts
+// 也没有补（见其文件头"新增 API 必须同步补 polyfill"那条）。手写转发是这里唯一
+// 能同时满足下限与功能的做法。
+// Combine the caller's signal with this request's timeout into one signal.
+// Not AbortSignal.any / AbortSignal.timeout: the output syntax floor is Chrome
+// 70 (see vite.config.ts's target) while those need Chrome 116 / 103, and
+// polyfills.ts doesn't shim them (see its "new API ⇒ new polyfill" rule).
+// Forwarding by hand is the only option that meets the floor.
+function withTimeout(external: AbortSignal | null | undefined, timeoutMs: number) {
+  const controller = new AbortController()
+  let timer: number | undefined
+  const onExternalAbort = () => controller.abort()
+
+  if (external) {
+    if (external.aborted) controller.abort()
+    else external.addEventListener('abort', onExternalAbort)
+  }
+  if (timeoutMs > 0) {
+    timer = window.setTimeout(() => controller.abort(), timeoutMs)
+  }
+  const cleanup = () => {
+    if (timer !== undefined) window.clearTimeout(timer)
+    if (external) external.removeEventListener('abort', onExternalAbort)
+  }
+  return { signal: controller.signal, cleanup }
+}
+
+async function request<T>(path: string, options: ApiRequestInit = {}): Promise<T> {
+  const { requestTimeoutMs, signal: callerSignal, ...init } = options
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
@@ -78,12 +145,33 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`
 
-  const res = await fetch(`${API_BASE}/api${path}`, { ...options, headers })
+  const { signal, cleanup } = withTimeout(
+    callerSignal,
+    requestTimeoutMs === undefined ? DEFAULT_TIMEOUT_MS : requestTimeoutMs,
+  )
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE}/api${path}`, { ...init, headers, signal })
+  } finally {
+    // 响应头一到就可以撤掉计时器：超时管的是"服务器迟迟不应答"，不是"响应体
+    // 读得慢"。放在 finally 里保证抛错路径也清得掉，不留悬挂的定时器与监听器。
+    // The timer is dropped as soon as headers arrive: the timeout guards against
+    // a server that never answers, not a slow body. In `finally` so the throwing
+    // path clears it too, leaving no dangling timer or listener.
+    cleanup()
+  }
   // 滑动续期：后端在 token 剩余有效期不足一半时经此头下发新 token，
   // 静默替换本地 token，活跃用户不再每天被踢回登录页。
+  // 写入走 safeStorage：这一行发生在 res.ok 判定**之前**，隐私模式/配额满时
+  // 一个裸 setItem 抛出来，会把一次本来成功的请求变成 reject，用户看到的是
+  // 「明明成功却报错」。续期写不进去顶多是下次重新登录，不该影响本次调用。
   // Sliding renewal: the backend issues a fresh token via this header when the
   // current one is past half-life; swap it in silently so active users never
-  // get kicked back to the login page.
+  // get kicked back to the login page. The write goes through safeStorage
+  // because it happens *before* the res.ok check: a bare setItem throwing in
+  // private mode or on a full quota would turn a successful request into a
+  // rejection — "it worked but reported an error". A failed renewal costs at
+  // worst one extra login later and must not affect this call.
   const refreshed = res.headers.get('X-Refreshed-Token')
   if (refreshed) setToken(refreshed)
   if (!res.ok) {
@@ -432,7 +520,20 @@ export const strategyApi = {
     riskPct: number
     capital: number
     mode: 'compound' | 'flat'
-  }) => request<StrategyBacktestResult>('/strategies/backtest', { method: 'POST', body: JSON.stringify(payload) }),
+  }) =>
+    // 回测是同步返回的重活（后端对并发回测直接回 429），几年 K 线 + 多条件的组合
+    // 明显有可能超过全局 30 秒的默认超时，所以单独放宽到 3 分钟。不是取消超时：
+    // 真卡死时仍然要有一个终点，否则页面上那个"回测中"永远转下去。
+    // A backtest is heavy work returned synchronously (the backend 429s concurrent
+    // ones); several years of candles against a multi-condition strategy can
+    // plainly outrun the global 30s default, so it gets three minutes of its own.
+    // Not unlimited: a genuine hang still needs an end, or the "backtesting"
+    // spinner runs forever.
+    request<StrategyBacktestResult>('/strategies/backtest', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      requestTimeoutMs: 180_000,
+    }),
   // 回测图的 K 线。必须用这条而不是 chartApi.history：后者读的是内存缓存（最近
   // 500 根），与回测按 days 窗口从 Candle 表取的那一段范围不同，交易标记会大量
   // 落在蜡烛范围之外——这条与回测在后端共用同一个取数函数。
@@ -803,7 +904,16 @@ export const adminApi = {
   // windows ship with the payload rather than being duplicated here: only the
   // backend can get DST right.
   strategyWinrate: (days = 7) => request<AdminStrategyWinRate>(`/admin/strategy-winrate?days=${days}`),
-  listUsers: (params: { q?: string; plan?: string; role?: string; limit?: number; offset?: number } = {}) => {
+  // signal 透传：用户表支持搜索 + 翻页，连点时先发的响应后到就会覆盖后发的结果。
+  // 调用方（AdminPage.load）每次发起新查询时中止上一次，从源头消掉这个竞态。
+  // The signal is forwarded because this table is searched and paged: with rapid
+  // clicks an earlier response can land after a later one and overwrite it.
+  // AdminPage.load aborts the previous query on every new one, killing the race
+  // at the source rather than filtering stale results afterwards.
+  listUsers: (
+    params: { q?: string; plan?: string; role?: string; limit?: number; offset?: number } = {},
+    signal?: AbortSignal,
+  ) => {
     const qs = new URLSearchParams()
     if (params.q) qs.set('q', params.q)
     if (params.plan) qs.set('plan', params.plan)
@@ -811,7 +921,7 @@ export const adminApi = {
     if (params.limit) qs.set('limit', String(params.limit))
     if (params.offset) qs.set('offset', String(params.offset))
     const suffix = qs.toString() ? `?${qs.toString()}` : ''
-    return request<{ users: AdminUser[]; total: number; limit: number; offset: number }>(`/admin/users${suffix}`)
+    return request<{ users: AdminUser[]; total: number; limit: number; offset: number }>(`/admin/users${suffix}`, { signal })
   },
   updateUser: (
     userId: string,
@@ -920,17 +1030,36 @@ export const adminApi = {
     uploadImage: (file: File) => {
       const form = new FormData()
       form.append('file', file)
-      return request<{ url: string }>('/admin/upload-image', { method: 'POST', body: form })
+      // 超时放宽到 2 分钟：全局的 30 秒计的是"到响应头为止"，而上传要把整个文件
+      // 推上去才会有响应头——手机热点上一张几 MB 的插图很容易超过 30 秒，那会
+      // 表现成"传了一半说超时"，而文件其实一点问题没有。
+      // Two minutes: the global 30s measures time-to-response-headers, and an
+      // upload only gets headers after the whole body is on the wire — a
+      // multi-megabyte illustration over a phone hotspot passes 30s easily, which
+      // would read as "it timed out halfway" for a perfectly fine file.
+      return request<{ url: string }>('/admin/upload-image', {
+        method: 'POST',
+        body: form,
+        requestTimeoutMs: 120_000,
+      })
     },
     // ---- 工单管理 / Ticket management ----
-    listTickets: (params: { status?: string; category?: string; limit?: number; offset?: number } = {}) => {
+    // signal 透传：两个筛选下拉快速切换时，先发的响应后到会覆盖当前筛选的结果
+    // （表格与筛选条对不上）。同 listUsers。
+    // Signal forwarded for the same reason as listUsers: flipping the two filter
+    // selects quickly lets an earlier response land last and leaves the table
+    // disagreeing with the filter bar.
+    listTickets: (
+      params: { status?: string; category?: string; limit?: number; offset?: number } = {},
+      signal?: AbortSignal,
+    ) => {
       const qs = new URLSearchParams()
       if (params.status) qs.set('status', params.status)
       if (params.category) qs.set('category', params.category)
       if (params.limit) qs.set('limit', String(params.limit))
       if (params.offset) qs.set('offset', String(params.offset))
       const suffix = qs.toString() ? `?${qs.toString()}` : ''
-      return request<TicketListItem[]>(`/admin/tickets${suffix}`)
+      return request<TicketListItem[]>(`/admin/tickets${suffix}`, { signal })
     },
     getTicket: (id: string) => request<Ticket>(`/admin/tickets/${encodeURIComponent(id)}`),
     replyTicket: (id: string, body: string, opts?: { status?: TicketStatus; priority?: TicketPriority }) =>

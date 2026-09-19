@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next'
 import { useToast } from '../../utils/useToast'
 import { adminApi } from '../../api/client'
 import { fmtTime, localizeApiError } from '../../api/utils'
+import ConfirmModal from '../ConfirmModal'
 import { SkeletonLine } from '../Skeleton'
 import { ORIGIN } from '../../seo/meta'
 import { useBackToClose } from '../../utils/useBackToClose'
@@ -33,6 +34,26 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
   const [copiedId, setCopiedId] = useState<string | null>(null)
   // 正在为哪条链接指派代理（弹窗打开态）/ which link the assign sheet is open for
   const [assignFor, setAssignFor] = useState<InviteLink | null>(null)
+  // 待确认的「移除代理」。移除入口是代理标签上那枚 × ——一个极小的点击目标，
+  // 误触就撤销了该用户的 /agent 入口（他下次刷新就看不到代理页，归因数据与 KPI
+  // 也会短暂对不上）。动作本身可逆（重新指派即可），所以用普通确认框而不是危险态。
+  // The pending "remove agent". The entry point is the × on an agent chip — a
+  // very small target whose mis-tap revokes that user's /agent access (the page
+  // disappears on their next refresh and attribution/KPI briefly disagree). The
+  // action is reversible by re-assigning, so this is a plain confirmation rather
+  // than a danger-styled one.
+  const [unassignTarget, setUnassignTarget] = useState<{ link: InviteLink; userId: string } | null>(null)
+
+  // 名字从链接自己的 agents 列表里取，而不是在每个入口各传一份：移除入口有两处
+  // （表格里的 × 和指派弹窗里的那一份），传参就要两处保持一致。
+  // The display name is looked up from the link's own agents list rather than
+  // threaded through each entry point: removal is reachable from two places (the
+  // × in the table and the one inside the assign sheet), and passing it along
+  // would mean keeping two call sites in agreement.
+  const unassignName = (target: { link: InviteLink; userId: string }) => {
+    const a = (target.link.agents ?? []).find((x) => x.userId === target.userId)
+    return a?.nickname || a?.email || target.userId
+  }
 
   const { toast, showToast } = useToast()
 
@@ -131,6 +152,7 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
 
   const unassignAgent = async (l: InviteLink, userId: string) => {
     if (busyId) return
+    setUnassignTarget(null)
     setBusyId(l.id)
     try {
       const updated = await adminApi.unassignInviteAgent(l.id, userId)
@@ -316,7 +338,7 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
                               className="text-neutral-500 hover:text-down disabled:opacity-40"
                               aria-label={t('admin.invite.unassign')}
                               disabled={busyId !== null}
-                              onClick={() => void unassignAgent(l, a.userId)}
+                              onClick={() => setUnassignTarget({ link: l, userId: a.userId })}
                             >
                               ×
                             </button>
@@ -369,8 +391,20 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
           link={assignFor}
           busy={busyId !== null}
           onAssign={(userId) => void assignAgent(assignFor, userId)}
-          onUnassign={(userId) => void unassignAgent(assignFor, userId)}
+          onUnassign={(userId) => setUnassignTarget({ link: assignFor, userId })}
           onClose={() => setAssignFor(null)}
+        />
+      )}
+
+      {unassignTarget && (
+        <ConfirmModal
+          center
+          busy={busyId !== null}
+          title={t('admin.invite.unassignConfirmTitle')}
+          message={t('admin.invite.unassignConfirmBody', { name: unassignName(unassignTarget) })}
+          confirmLabel={t('admin.invite.unassign')}
+          onConfirm={() => void unassignAgent(unassignTarget.link, unassignTarget.userId)}
+          onCancel={() => setUnassignTarget(null)}
         />
       )}
     </div>

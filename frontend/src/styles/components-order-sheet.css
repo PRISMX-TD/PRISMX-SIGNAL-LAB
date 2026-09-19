@@ -9,7 +9,10 @@
      cover the page, not popping in with no motion, closer to a native app. */
   .slide-overlay {
     position: fixed;
-    inset: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     z-index: 80;
     /* 遮罩底色去紫、加深：这是下单确认弹窗的背景，它的职责是把注意力从页面
        上摘下来，不是给页面加一层紫色滤镜。
@@ -157,7 +160,10 @@
   }
   .slide-acct-backdrop {
     position: fixed;
-    inset: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     z-index: 40;
   }
   .slide-acct-menu {

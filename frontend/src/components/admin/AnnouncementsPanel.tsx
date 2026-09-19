@@ -18,7 +18,7 @@ import Switch from '../Switch'
 import ConfirmModal from '../ConfirmModal'
 import { useToast } from '../../utils/useToast'
 import { adminApi } from '../../api/client'
-import { localizeApiError, parseTime } from '../../api/utils'
+import { fmtDay as fmtDayUtc8, localizeApiError } from '../../api/utils'
 import ImageField from './ImageField'
 import StrategyBlocksEditor from './StrategyBlocksEditor'
 import type { Announcement, AnnouncementInput } from '../../api/types'
@@ -46,9 +46,19 @@ function toDraft(a: Announcement): Draft {
   }
 }
 
+// 改走 api/utils 的 fmtDay（固定 UTC+8）。本地那份用的是
+// toLocaleDateString(undefined, …)，即浏览器本地时区——公告的发布日在欧美时区的
+// 管理员那里会整天偏移，且界面上没有任何后缀说明这是哪个时区（见 api/utils 头注）。
+// 这里只多包一层"空值返回空串"：api/utils 的 fmtDay 对空值返回 'Invalid Date'，
+// 那在"尚未发布"的草稿行上会当成一条错误显示出来。
+// Now uses api/utils' fmtDay, which pins UTC+8. The local copy used
+// toLocaleDateString(undefined, …), i.e. the browser's zone, so an announcement's
+// publish date was off by a day for an admin outside UTC+8 with nothing in the UI
+// saying which zone it was (see api/utils' header). The only wrapping left is
+// "empty in, empty out": api/utils' fmtDay renders 'Invalid Date' for a null,
+// which would read as an error on an unpublished draft row.
 function fmtDay(iso: string | null): string {
-  const d = iso ? parseTime(iso) : null
-  return d ? d.toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''
+  return iso ? fmtDayUtc8(iso) : ''
 }
 
 function Field({ label, value, onChange, placeholder, maxLength }: {

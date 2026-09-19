@@ -70,6 +70,34 @@ const LABELS: Record<SocialPlatform, string> = {
 // The configured platforms, in SOCIAL_PLATFORMS order. Used by the component
 // itself and by callers that must hide surrounding copy too (the Download page's
 // card), which would otherwise leave a "Join the community" heading over nothing.
+/* 只放行 http/https。
+   这些地址来自后台运营设置页，写入者只有管理员，所以风险低——但把一个外部可写的
+   字符串直接塞进 href 是没必要的：`javascript:` 开头的值点下去就是在本站上下文里
+   执行脚本，`data:` 同理。校验的成本是一行，不值得为「写的人是可信的」省掉。
+   用 new URL() 而不是正则前缀匹配：URL 解析会先做去空白与大小写归一，
+   `  JaVaScRiPt:alert(1)` 这类绕过在 startsWith 面前能过，在这里过不了。
+   解析失败（相对路径、纯手误）一并丢弃——社交主页一定是绝对地址。
+
+   Only http/https pass. These come from the admin operations settings page, so
+   only an administrator can write them and the risk is low — but there is no
+   reason to drop an externally writable string straight into an href: a
+   `javascript:` value executes in this site's origin the moment it is clicked,
+   and `data:` likewise. The check costs one line, which is cheaper than relying
+   on the author being trusted.
+   new URL() rather than a prefix match, because URL parsing strips whitespace and
+   normalises case first: `  JaVaScRiPt:alert(1)` slips past startsWith and does
+   not slip past this. Anything unparseable (a relative path, a typo) is dropped
+   too — a social profile is always an absolute URL. */
+function isSafeHttpUrl(v: string | undefined): boolean {
+  if (!v) return false
+  try {
+    const p = new URL(v).protocol
+    return p === 'http:' || p === 'https:'
+  } catch {
+    return false
+  }
+}
+
 function useSocialPlatforms(): { links: SocialLinksMap; items: SocialPlatform[] } {
   const [links, setLinks] = useState<SocialLinksMap>({})
 
@@ -83,7 +111,11 @@ function useSocialPlatforms(): { links: SocialLinksMap; items: SocialPlatform[] 
     }
   }, [])
 
-  return { links, items: SOCIAL_PLATFORMS.filter((p) => links[p]) }
+  // 过滤发生在**这一处**，所以 items 为空时「加入社群」整张卡也跟着不渲染——
+  // 被丢弃的链接不会留下一个点不动的图标。
+  // Filtering happens here, so a dropped link also removes the surrounding
+  // "join the community" card instead of leaving a dead icon behind.
+  return { links, items: SOCIAL_PLATFORMS.filter((p) => isSafeHttpUrl(links[p])) }
 }
 
 /** 是否有任何一个平台配置了链接。 / Whether any platform has a link configured. */

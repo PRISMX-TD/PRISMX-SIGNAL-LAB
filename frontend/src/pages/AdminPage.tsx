@@ -6,9 +6,11 @@ import { useTranslation } from 'react-i18next'
 import Switch from '../components/Switch'
 import { useToast } from '../utils/useToast'
 import { Link, useSearchParams } from 'react-router-dom'
-import { adminApi } from '../api/client'
-import { fmtTime, localizeApiError } from '../api/utils'
+import { adminApi, isAbortError } from '../api/client'
+import { fmtDate, fmtDay, fmtTime, localizeApiError } from '../api/utils'
 import Select from '../components/Select'
+import ConfirmModal from '../components/ConfirmModal'
+import Pager from '../components/Pager'
 import { SkeletonLine } from '../components/Skeleton'
 import OverviewPanel from '../components/admin/overview/OverviewPanel'
 import PlatformStrategiesPanel from '../components/admin/PlatformStrategiesPanel'
@@ -21,6 +23,19 @@ import type { AdminBrokerSettings, AdminPricingSettings, AdminEmailGateSettings,
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
 const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
+
+// 用户表每页条数。跟后端 routers/admin.py 的 PAGE_SIZE_DEFAULT 对齐（上限
+// PAGE_SIZE_MAX=200），也跟代理页的 PAGE_SIZE 一致——同一套「上一页/下一页」
+// 控件在两边表现一样，管理员不用重新建立手感。
+// 此前这里写死 limit: 100 且没有任何翻页控件：第 101 位之后的用户在后台只能
+// 靠搜索关键字撞，无法浏览；「全选」也只覆盖那 100 条，却看不出来。
+// Rows per page in the user table, matching the backend's PAGE_SIZE_DEFAULT in
+// routers/admin.py (ceiling PAGE_SIZE_MAX=200) and the agent page's PAGE_SIZE,
+// so the same prev/next control behaves identically in both places. This used
+// to be a hard-coded limit: 100 with no pager at all — user 101 onwards was
+// unreachable except by guessing a search term, and "select all" silently
+// covered only those first 100.
+const PAGE_SIZE = 50
 
 // 后台分为四类，与订单页的 Tab 模式一致：
 // data   看数据（指标、页面访问统计）
@@ -100,21 +115,45 @@ function AdminTicketsPanel() {
   const [sending, setSending] = useState(false)
   const { toast, showToast } = useToast()
 
+  // 每次加载中止上一次：两个筛选下拉是最容易连点的地方，先发的响应后到就会把
+  // 当前筛选的结果覆盖掉，表格与筛选条对不上且没有任何提示。中止之后 fetch 会以
+  // AbortError 拒绝，用 isAbortError 认出来直接忽略——那不是故障，是我们自己取消的。
+  // 组件卸载时也中止，顺带解决卸载后 setState 的告警。
+  // Every load aborts the previous one: the two filter selects are the easiest
+  // thing to click through quickly, and an earlier response landing last
+  // overwrites the current filter's results with no sign that it happened. After
+  // an abort fetch rejects with AbortError, which isAbortError recognises and
+  // drops — that is not a failure, it is our own cancellation. The same
+  // controller aborts on unmount, which also removes the setState-after-unmount
+  // warning.
+  const loadCtrl = useRef<AbortController | null>(null)
+
   const load = async () => {
+    loadCtrl.current?.abort()
+    const ctrl = new AbortController()
+    loadCtrl.current = ctrl
     setLoading(true)
     try {
-      setTickets(await adminApi.listTickets({
+      const rows = await adminApi.listTickets({
         status: statusFilter || undefined,
         category: categoryFilter || undefined,
-      }))
+      }, ctrl.signal)
+      setTickets(rows)
     } catch (err) {
+      if (isAbortError(err)) return
       showToast('err', err instanceof Error ? err.message : 'Load failed')
     } finally {
-      setLoading(false)
+      // 只有仍是最新那一次才收起加载态：被中止的那次在这里把 loading 关掉，
+      // 会让接替它的请求在途中却显示成「加载完了、但表是空的」。
+      // Only the still-current request clears the loading flag: letting an
+      // aborted one do it would show "loaded, but empty" while its replacement
+      // is still in flight.
+      if (loadCtrl.current === ctrl) setLoading(false)
     }
   }
 
   useEffect(() => { load() }, [statusFilter, categoryFilter])
+  useEffect(() => () => loadCtrl.current?.abort(), [])
 
   // 通知里的深链：?ticket=<id> 直接打开那条工单（新工单通知会带上）。参数打开后
   // 就抹掉，避免在页内退回列表后一刷新又被弹回详情；页签参数由 AdminPage 自己
@@ -229,7 +268,14 @@ function AdminTicketsPanel() {
                   <div className="mb-1 flex items-center gap-2 text-[11px] text-neutral-500">
                     <span className="font-medium text-neutral-300">{r.authorEmail}</span>
                     {r.authorRole === 'admin' && <span className="rounded bg-prism-600/20 px-1.5 py-0.5 text-[10px] text-prism-300">{t('admin.staff')}</span>}
-                    <span>{new Date(r.createdAt).toLocaleString()}</span>
+                    {/* 统一走 api/utils 的格式化：裸 toLocaleString 既不补 Z、也按
+                        浏览器本地时区渲染，欧美时区的管理员看到的时刻整段偏移，
+                        而且没有任何后缀说明这是哪个时区（见 api/utils 的头注）。
+                        Formatted through api/utils: a bare toLocaleString neither
+                        appends Z nor pins the zone, so an admin outside UTC+8 sees
+                        shifted times with nothing saying which zone they are in
+                        (see api/utils' header). */}
+                    <span>{fmtDate(r.createdAt)}</span>
                   </div>
                   <p className="whitespace-pre-wrap text-sm text-neutral-200">{r.body}</p>
                 </div>
@@ -327,7 +373,8 @@ function AdminTicketsPanel() {
                       <td className="px-4 py-3">
                         <span className={`tag ${statusClass[ticket.status]}`}>{t(`tickets.status.${ticket.status}`)}</span>
                       </td>
-                      <td className="px-4 py-3 text-xs text-neutral-500">{new Date(ticket.updatedAt).toLocaleDateString()}</td>
+                      {/* 同上：改走 fmtDay（固定 UTC+8）/ same as above: fmtDay pins UTC+8 */}
+                      <td className="px-4 py-3 text-xs text-neutral-500">{fmtDay(ticket.updatedAt)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -344,6 +391,9 @@ export default function AdminPage() {
   const { t } = useTranslation()
   const [users, setUsers] = useState<AdminUser[]>([])
   const [total, setTotal] = useState(0)
+  // 用户表当前页（从 0 起，与 components/Pager 的约定一致）。
+  // Current user-table page, zero-based to match components/Pager's contract.
+  const [page, setPage] = useState(0)
   // 当前分类页签。初值读 ?tab=——站内通知要能一步落到工单页签上，而页签本身
   // 是状态不是路由，所以只在首次挂载时取一次；之后点页签不写回地址栏（那会给
   // 每次切页签留一条历史记录，划返回变成在页签之间来回走）。
@@ -433,7 +483,25 @@ export default function AdminPage() {
   const [bulkSaving, setBulkSaving] = useState(false)
   const headerCheckboxRef = useRef<HTMLInputElement>(null)
 
-  const load = async (opts: { q?: string; plan?: string } = {}) => {
+  // 与工单面板同款的竞态守卫：搜索连点、快速翻页时，先发的响应后到会覆盖后发的
+  // 结果——表格显示的是上一次查询，而搜索框、筛选器和页码显示的是这一次。
+  // Same race guard as the tickets panel: with rapid searches or page flips an
+  // earlier response can land last, leaving the table showing the previous query
+  // while the search box, filter and page number describe the current one.
+  // 卸载时中止并置空：置空之后下面那句 `loadCtrl.current !== ctrl` 的守卫同时
+  // 兼任"组件已经没了，别再 setState"。/ Abort and null on unmount: nulling makes
+  // the `loadCtrl.current !== ctrl` guard below double as "we're gone, don't setState".
+  const loadCtrl = useRef<AbortController | null>(null)
+  useEffect(() => () => {
+    loadCtrl.current?.abort()
+    loadCtrl.current = null
+  }, [])
+
+  const load = async (opts: { q?: string; plan?: string; page?: number } = {}) => {
+    loadCtrl.current?.abort()
+    const ctrl = new AbortController()
+    loadCtrl.current = ctrl
+    const wantedPage = opts.page ?? page
     setLoading(true)
     try {
       // 八个接口分区加载：以前是一个 Promise.all，任一失败整页报错、其余几块
@@ -444,7 +512,15 @@ export default function AdminPage() {
       // already returned. Each section now keeps its previous value on failure
       // and one toast says how many didn't load.
       const results = await Promise.allSettled([
-        adminApi.listUsers({ q: (opts.q ?? query) || undefined, plan: (opts.plan ?? planFilter) || undefined, limit: 100 }),
+        adminApi.listUsers(
+          {
+            q: (opts.q ?? query) || undefined,
+            plan: (opts.plan ?? planFilter) || undefined,
+            limit: PAGE_SIZE,
+            offset: wantedPage * PAGE_SIZE,
+          },
+          ctrl.signal,
+        ),
         adminApi.getSettings(),
         adminApi.getPricing(),
         adminApi.getTrial(),
@@ -453,7 +529,14 @@ export default function AdminPage() {
         adminApi.getCandleHistory(),
         adminApi.getStrategySettings(),
       ])
+      // 这一批已经被后来的一次 load 取代：其余七个接口没有 signal、照样会成功返回，
+      // 若继续往下走就会用上一次的数据把新的一次盖掉——正是这里要防的那件事。
+      // This batch has been superseded by a later load: the other seven calls
+      // carry no signal and still resolve, so falling through would overwrite the
+      // newer load's data with this one's — exactly what the guard is for.
+      if (loadCtrl.current !== ctrl) return
       const [usersRes, settingsRes, pricingRes, trialRes, socialRes, emailGateRes, candleRes, strategyRes] = results
+      setPage(wantedPage)
       let failed = 0
       const ok = <T,>(r: PromiseSettledResult<T>): T | null => {
         if (r.status === 'fulfilled') return r.value
@@ -494,10 +577,17 @@ export default function AdminPage() {
         const firstErr = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
         const reason = firstErr?.reason
         const detail = reason instanceof Error ? localizeApiError(reason.message) : ''
-        showToast('err', t('admin.loadPartialError', { n: failed, total: results.length }) + (detail ? `：${detail}` : ''))
+        // 分隔符用破折号而不是原来那个硬编码的全角「：」——中式标点在英文界面下
+        // 会渲染成「... loaded：detail」。破折号在两种语言里都成立，也就不必按语言
+        // 分叉，更不必为一个标点新开一条 i18n 文案。
+        // An em dash rather than the hard-coded fullwidth colon this used to
+        // carry: Chinese punctuation renders as "... loaded：detail" on the
+        // English UI. A dash reads correctly in both languages, so no
+        // per-language branch and no i18n entry for a punctuation mark.
+        showToast('err', t('admin.loadPartialError', { n: failed, total: results.length }) + (detail ? ` — ${detail}` : ''))
       }
     } finally {
-      setLoading(false)
+      if (loadCtrl.current === ctrl) setLoading(false)
     }
   }
 
@@ -635,10 +725,25 @@ export default function AdminPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // 搜索与翻页都回到第一页并清空勾选。
+  // 清勾选是有意的：批量操作是本页最危险的动作，而"选中的人跨页留着、屏幕上却
+  // 只看得到当前这一页"正是会让人按下确认时算错人数的那种状态。规则统一成
+  // 「你勾的就是你看得见的」，确认框里的 N 与屏幕上的勾一一对上。
+  // Searching and paging both return to page one and clear the selection. The
+  // clearing is deliberate: bulk edits are the most dangerous action on this
+  // page, and a selection that survives across pages while only the current page
+  // is visible is exactly the state in which someone misjudges the count at the
+  // confirm prompt. The rule is "what you ticked is what you can see", so the N
+  // in the dialog always matches the ticks on screen.
   const handleSearch = (e: FormEvent) => {
     e.preventDefault()
     setSelectedIds(new Set())
-    load()
+    load({ page: 0 })
+  }
+
+  const goToPage = (next: number) => {
+    setSelectedIds(new Set())
+    load({ page: next })
   }
 
   const toggleSelected = (id: string) => {
@@ -652,6 +757,7 @@ export default function AdminPage() {
 
   const allSelected = users.length > 0 && users.every((u) => selectedIds.has(u.id))
   const someSelected = users.some((u) => selectedIds.has(u.id))
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   useEffect(() => {
     if (headerCheckboxRef.current) {
@@ -668,14 +774,51 @@ export default function AdminPage() {
     })
   }
 
+  // 批量修改要落的具体字段，同时给确认框当文案素材。
+  // 写成一个函数而不是在两处各拼一遍：确认框里说的必须和真正发出去的 payload
+  // 是同一份东西，分开写迟早对不上——而这正是"确认框说改等级、实际把人提成了
+  // 管理员"这类事故的来源。
+  // The exact fields a bulk edit will write, doubling as the confirm dialog's
+  // copy. One function rather than two parallel constructions: what the dialog
+  // says must be the same thing the payload sends, and two copies eventually
+  // disagree — which is how "the dialog said plan, the request said admin"
+  // happens.
+  const bulkPayload = () => {
+    const payload: Partial<{ role: UserRole; plan: UserPlan; planExpiresAt: string | null }> = {}
+    const changes: string[] = []
+    if (bulkRole) {
+      payload.role = bulkRole as UserRole
+      changes.push(t('admin.changeRole', { value: bulkRole }))
+    }
+    if (bulkPlan) {
+      payload.plan = bulkPlan as UserPlan
+      changes.push(t('admin.changePlan', { value: bulkPlan }))
+    }
+    if (bulkSetExpiry) {
+      payload.planExpiresAt = bulkExpiry ? new Date(`${bulkExpiry}T00:00:00Z`).toISOString() : null
+      changes.push(t('admin.changeExpiry', { value: bulkExpiry || t('admin.neverExpires') }))
+    }
+    return { payload, changes }
+  }
+
+  // 二次确认：一次点击原本就能把最多一整页的账号 role 批量改成 admin，或者把
+  // 套餐整批降级 / 清掉到期日——没有确认、没有撤销、后端也没有降权审计。同一份
+  // 代码库里危险操作一律走 ConfirmModal（公告、比赛、游戏化、邀请链接、代理端
+  // 的会员调整都有），唯独权限最大的这一处没有。
+  // Second confirmation: one click could bulk-set up to a whole page of accounts
+  // to role=admin, or downgrade plans and wipe expiry dates — with no
+  // confirmation, no undo, and no demotion audit on the backend. Every other
+  // dangerous action in this codebase goes through ConfirmModal (announcements,
+  // competitions, gamification, invite links, the agent-side plan change); the
+  // one with the largest blast radius was the exception.
+  const [bulkConfirm, setBulkConfirm] = useState(false)
+
   const applyBulk = async () => {
     if (!bulkRole && !bulkPlan && !bulkSetExpiry) return
+    setBulkConfirm(false)
     setBulkSaving(true)
     try {
-      const payload: Partial<{ role: UserRole; plan: UserPlan; planExpiresAt: string | null }> = {}
-      if (bulkRole) payload.role = bulkRole as UserRole
-      if (bulkPlan) payload.plan = bulkPlan as UserPlan
-      if (bulkSetExpiry) payload.planExpiresAt = bulkExpiry ? new Date(`${bulkExpiry}T00:00:00Z`).toISOString() : null
+      const { payload } = bulkPayload()
       const res = await adminApi.bulkUpdateUsers(Array.from(selectedIds), payload)
       showToast('ok', t('admin.bulkSaved', { n: res.updated }))
       setSelectedIds(new Set())
@@ -699,9 +842,29 @@ export default function AdminPage() {
     setDrafts((prev) => ({ ...prev, [u.id]: toDraft(u) }))
   }
 
+  // 单条保存里唯一需要拦一道的是提权：user → admin 是本页最不可逆的动作（后端
+  // 没有降权审计），而下拉框选错一行 + 点保存就生效。其余字段（等级、到期日、
+  // 备注）改错了当场改回来即可，不值得为它们多一次点击。
+  // The one single-row change worth interrupting is a promotion: user → admin is
+  // the least reversible action here (the backend keeps no demotion audit) and
+  // it takes one mis-picked dropdown plus Save. The other fields (plan, expiry,
+  // note) can be corrected on the spot and don't deserve an extra click.
+  const [promoteTarget, setPromoteTarget] = useState<AdminUser | null>(null)
+
+  const requestSave = (u: AdminUser) => {
+    const d = drafts[u.id]
+    if (!d) return
+    if (d.role === 'admin' && u.role !== 'admin') {
+      setPromoteTarget(u)
+      return
+    }
+    void save(u)
+  }
+
   const save = async (u: AdminUser) => {
     const d = drafts[u.id]
     if (!d) return
+    setPromoteTarget(null)
     setSavingId(u.id)
     try {
       const updated = await adminApi.updateUser(u.id, {
@@ -884,10 +1047,15 @@ export default function AdminPage() {
           </div>
           {pricing.saleEnabled && (
             <div className="mt-4 rounded-lg border border-prism-400/20 bg-prism-500/10 px-4 py-3 text-sm text-prism-300">
+              {/* toFixed(2)：29.9 × 0.85 的浮点结果是 25.414999999999996，而这正是
+                  管理员用来判断"这个折扣要不要保存"的那个数字。
+                  toFixed(2): 29.9 × 0.85 renders as 25.414999999999996 in binary
+                  floating point, and this is the number the admin reads to decide
+                  whether to save the discount. */}
               {t('admin.salePreview')}:{" "}
-              <strong>${pricing.proMonthlyPrice * (1 - pricing.salePercent / 100)}</strong> /{t('upgrade.monthly')}{" "}
+              <strong>${(pricing.proMonthlyPrice * (1 - pricing.salePercent / 100)).toFixed(2)}</strong> /{t('upgrade.monthly')}{" "}
               &middot;{" "}
-              <strong>${pricing.proYearlyPrice * (1 - pricing.salePercent / 100)}</strong> /{t('upgrade.yearly')}
+              <strong>${(pricing.proYearlyPrice * (1 - pricing.salePercent / 100)).toFixed(2)}</strong> /{t('upgrade.yearly')}
             </div>
           )}
           <button
@@ -1156,7 +1324,7 @@ export default function AdminPage() {
           <button
             className="btn-primary px-4 py-1.5 text-xs disabled:opacity-40"
             disabled={(!bulkRole && !bulkPlan && !bulkSetExpiry) || bulkSaving}
-            onClick={applyBulk}
+            onClick={() => setBulkConfirm(true)}
           >
             {bulkSaving ? t('common.loading') : t('admin.bulkApply')}
           </button>
@@ -1266,7 +1434,7 @@ export default function AdminPage() {
                         <button
                           className="btn-primary px-3 py-1.5 text-xs disabled:opacity-40"
                           disabled={!dirty || savingId === u.id}
-                          onClick={() => save(u)}
+                          onClick={() => requestSave(u)}
                         >
                           {savingId === u.id ? t('common.loading') : t('common.save')}
                         </button>
@@ -1284,7 +1452,70 @@ export default function AdminPage() {
           </table>
         )}
       </div>
+
+      {/* 翻页：复用订单页/已平仓列表/回测明细在用的那套 Pager（页码从 0 起）。
+          总数走后端返回的 total，所以"共 N 位用户"与页数是同一个来源。
+          Paging reuses the same Pager as the orders page, closed-trades list and
+          backtest detail (zero-based). Page count comes from the backend's
+          `total`, so the "N users total" caption and the page count agree. */}
+      {totalPages > 1 && (
+        <Pager
+          page={page}
+          totalPages={totalPages}
+          total={total}
+          loading={loading}
+          onPrev={() => goToPage(page - 1)}
+          onNext={() => goToPage(page + 1)}
+        />
+      )}
         </>
+      )}
+
+      {/* 批量修改的二次确认。文案里把受影响人数与每一条具体改动都列出来——
+          「确定吗？」式的空确认框只会被训练成条件反射，真正拦住误操作的是让人
+          在按下去之前读到「12 位用户 · 角色 → admin」。
+          Bulk-edit confirmation. The copy spells out the affected count and every
+          individual change: a content-free "are you sure?" only trains reflexive
+          clicking, whereas reading "12 users · role → admin" before pressing is
+          what actually stops the mistake. */}
+      {bulkConfirm && (() => {
+        const { changes } = bulkPayload()
+        const promoting = bulkRole === 'admin'
+        return (
+          <ConfirmModal
+            center
+            danger
+            busy={bulkSaving}
+            title={t('admin.bulkConfirmTitle')}
+            message={
+              t('admin.bulkConfirmBody', { n: selectedIds.size, changes: changes.join(' · ') }) +
+              // 拼成一段而不是换行：ConfirmModal 的 message 渲染在普通 <p> 里，
+              // 不保留换行符，写了也是白写（要保留就得改 ConfirmModal 的样式，
+              // 而那会影响它全部十来个调用点）。
+              // Joined into one paragraph rather than split by newlines:
+              // ConfirmModal renders `message` in a plain <p> that collapses
+              // them. Preserving them would mean changing ConfirmModal's styling,
+              // which every one of its dozen call sites would inherit.
+              (promoting ? ' ' + t('admin.bulkConfirmAdminWarn') : '')
+            }
+            confirmLabel={t('admin.bulkApply')}
+            onConfirm={() => void applyBulk()}
+            onCancel={() => setBulkConfirm(false)}
+          />
+        )
+      })()}
+
+      {/* 单条提权的确认（user → admin）/ single-row promotion confirmation */}
+      {promoteTarget && (
+        <ConfirmModal
+          center
+          danger
+          busy={savingId === promoteTarget.id}
+          title={t('admin.promoteTitle')}
+          message={t('admin.promoteBody', { email: promoteTarget.email })}
+          onConfirm={() => void save(promoteTarget)}
+          onCancel={() => setPromoteTarget(null)}
+        />
       )}
 
       {/* 历史信号回放：功能内部试用中，暂不对普通用户开放，也不放进主导航或

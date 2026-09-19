@@ -8,7 +8,7 @@ import { Link, useLocation } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { userApi, notificationApi, setToken } from "../api/client"
 import type { ProfilePatch } from "../api/types"
-import { localizeApiError } from "../api/utils"
+import { localizeApiError, parseTime } from "../api/utils"
 import { getSWReg } from "../utils/push"
 import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
 import PushDiagnostics from "../components/PushDiagnostics"
@@ -282,13 +282,31 @@ export default function AccountPage() {
     // 关闭：乐观更新——立即关掉开关，后台并行清理订阅与落库。
     // Turn off: optimistic—flip the switch now, clean up subscription & prefs in background.
     if (!on) {
+      // 三份白名单在乐观清空之前先存一份：失败时必须**连它们一起**回滚。
+      // 以前只回滚开关，于是界面停在"开关是开的、策略/品种/事件三组却空了"这个
+      // 状态——看起来像"通知开着但一条都不推"。更糟的是用户这时随手点一个 chip，
+      // 下面那三个防抖保存会把这份被清空的白名单当成真实意图写进后端，本来只是
+      // 一次失败的关闭，变成真的把用户的筛选全删了。
+      // Snapshot the three whitelists before optimistically clearing them: a
+      // failure has to roll *those* back too. Rolling back only the switch left
+      // the UI showing "notifications on, every category/symbol/event list
+      // empty" — reading as "on but nothing is ever pushed". Worse, one tap on
+      // any chip from there makes the debounced saves below persist the emptied
+      // lists as if they were intended, turning a failed disable into genuinely
+      // wiping the user's filters.
+      const prevCats = notifCats
+      const prevSymbols = notifSymbols
+      const prevEvents = notifEvents
       setNotifEnabled(false)
       setNotifCats([])
       setNotifSymbols([])
       setNotifEvents([])
       void disableNotifications().catch(() => {
-        // 清理失败则回滚开关 / roll back the switch on failure
+        // 清理失败则把开关与三份白名单一并回滚 / roll back the switch and all three lists
         setNotifEnabled(true)
+        setNotifCats(prevCats)
+        setNotifSymbols(prevSymbols)
+        setNotifEvents(prevEvents)
         setNotifMsg({ kind: "err", text: t("account.notifError") })
       })
       return
@@ -341,60 +359,83 @@ export default function AccountPage() {
     return on ? [...withoutAll, value] : withoutAll.filter((v) => v !== value)
   }
 
+  // 三个 chip 处理函数都遵循同一条规矩：**setState 的 updater 必须是纯函数**。
+  //
+  // 它们原来把"起一个防抖定时器发网络请求"写在 updater 里面。React 要求 updater
+  // 只根据 prev 算出 next、不做别的：StrictMode 下它被调用两次（第二次的
+  // clearTimeout 恰好把第一次的定时器清掉了，所以行为侥幸正确），而在 React 19 /
+  // 并发渲染下 updater 可能被丢弃后重放，届时会留下没人清理的定时器，把一份过期
+  // 的偏好发上去。
+  // 改法：从 ref 读"此刻的值"算出 next（那三个 ref 本来就为这件事存在，见它们
+  // 声明处的说明），setState 只收一个算好的值，定时器留在事件处理器这一层。
+  //
+  // All three chip handlers follow one rule: a setState updater must be pure.
+  // They used to start the debounced network save inside the updater. React
+  // requires an updater to derive next from prev and do nothing else: StrictMode
+  // calls it twice (the second call's clearTimeout happened to cancel the
+  // first's, so the behaviour was accidentally correct), and under React 19 /
+  // concurrent rendering an updater can be discarded and replayed, leaving an
+  // orphaned timer that PUTs a stale preference set. Now the next value is
+  // derived from the refs — which exist for exactly this purpose, see their
+  // declaration — setState receives a finished value, and the timer stays at the
+  // event-handler level.
   function handleNotifCatToggle(cat: string, on: boolean) {
     // 乐观更新：先即时更新 UI，再防抖落库 / optimistic UI then debounced save
     setNotifMsg(null)
-    setNotifCats((prev) => {
-      const next = toggleWhitelistValue(prev, cat, on)
-      if (catSaveTimer.current) window.clearTimeout(catSaveTimer.current)
-      catSaveTimer.current = window.setTimeout(() => {
-        // 其它两个维度从 ref 取"此刻最新值"，而不是本次调用时闭包捕获的
-        // notifEvents/notifSymbols——见 refs 声明处的说明。
-        // The other two dimensions come from the refs ("right now"), not the
-        // notifEvents/notifSymbols this call's closure captured — see the
-        // refs' declaration comment.
-        notificationApi.putPrefs(enabledRef.current, next, eventsRef.current, symbolsRef.current).catch(() => {
-          // 落库失败则回滚该项 / roll back this toggle on failure
-          setNotifCats(prev)
-          setNotifMsg({ kind: "err", text: t("account.notifError") })
-        })
-      }, 400)
-      return next
-    })
+    const prev = catsRef.current
+    const next = toggleWhitelistValue(prev, cat, on)
+    catsRef.current = next
+    setNotifCats(next)
+    if (catSaveTimer.current) window.clearTimeout(catSaveTimer.current)
+    catSaveTimer.current = window.setTimeout(() => {
+      // 其它两个维度从 ref 取"此刻最新值"，而不是本次调用时闭包捕获的
+      // notifEvents/notifSymbols——见 refs 声明处的说明。
+      // The other two dimensions come from the refs ("right now"), not the
+      // notifEvents/notifSymbols this call's closure captured — see the
+      // refs' declaration comment.
+      notificationApi.putPrefs(enabledRef.current, next, eventsRef.current, symbolsRef.current).catch(() => {
+        // 落库失败则回滚该项 / roll back this toggle on failure
+        catsRef.current = prev
+        setNotifCats(prev)
+        setNotifMsg({ kind: "err", text: t("account.notifError") })
+      })
+    }, 400)
   }
 
   function handleNotifSymbolToggle(symbol: string, on: boolean) {
     // 乐观更新：先即时更新 UI，再防抖落库 / optimistic UI then debounced save
     setNotifMsg(null)
-    setNotifSymbols((prev) => {
-      const next = toggleWhitelistValue(prev, symbol, on)
-      if (symbolSaveTimer.current) window.clearTimeout(symbolSaveTimer.current)
-      symbolSaveTimer.current = window.setTimeout(() => {
-        notificationApi.putPrefs(enabledRef.current, catsRef.current, eventsRef.current, next).catch(() => {
-          // 落库失败则回滚该项 / roll back this toggle on failure
-          setNotifSymbols(prev)
-          setNotifMsg({ kind: "err", text: t("account.notifError") })
-        })
-      }, 400)
-      return next
-    })
+    const prev = symbolsRef.current
+    const next = toggleWhitelistValue(prev, symbol, on)
+    symbolsRef.current = next
+    setNotifSymbols(next)
+    if (symbolSaveTimer.current) window.clearTimeout(symbolSaveTimer.current)
+    symbolSaveTimer.current = window.setTimeout(() => {
+      notificationApi.putPrefs(enabledRef.current, catsRef.current, eventsRef.current, next).catch(() => {
+        // 落库失败则回滚该项 / roll back this toggle on failure
+        symbolsRef.current = prev
+        setNotifSymbols(prev)
+        setNotifMsg({ kind: "err", text: t("account.notifError") })
+      })
+    }, 400)
   }
 
   function handleNotifEventToggle(eventType: string, on: boolean) {
     // 乐观更新：先即时更新 UI，再防抖落库 / optimistic UI then debounced save
     setNotifMsg(null)
-    setNotifEvents((prev) => {
-      const next = on ? [...prev, eventType] : prev.filter((e) => e !== eventType)
-      if (eventSaveTimer.current) window.clearTimeout(eventSaveTimer.current)
-      eventSaveTimer.current = window.setTimeout(() => {
-        notificationApi.putPrefs(enabledRef.current, catsRef.current, next, symbolsRef.current).catch(() => {
-          // 落库失败则回滚该项 / roll back this toggle on failure
-          setNotifEvents((cur) => (on ? cur.filter((e) => e !== eventType) : [...cur, eventType]))
-          setNotifMsg({ kind: "err", text: t("account.notifError") })
-        })
-      }, 400)
-      return next
-    })
+    const prev = eventsRef.current
+    const next = on ? [...prev, eventType] : prev.filter((e) => e !== eventType)
+    eventsRef.current = next
+    setNotifEvents(next)
+    if (eventSaveTimer.current) window.clearTimeout(eventSaveTimer.current)
+    eventSaveTimer.current = window.setTimeout(() => {
+      notificationApi.putPrefs(enabledRef.current, catsRef.current, next, symbolsRef.current).catch(() => {
+        // 落库失败则回滚该项 / roll back this toggle on failure
+        eventsRef.current = prev
+        setNotifEvents(prev)
+        setNotifMsg({ kind: "err", text: t("account.notifError") })
+      })
+    }, 400)
   }
 
   // 推送时段落库：其余维度的防抖保存不携带时段（后端对未出现的时段字段保持
@@ -513,7 +554,17 @@ export default function AccountPage() {
       {/* ── 顶部：姓名 + 身份牌 / hero ── */}
       <header className="acct-hero">
         <div className="min-w-0">
-          <h1 className="font-display-xl acct-name">{displayName}</h1>
+          {/* 昵称是内容不是标题：上面的 PageHead 已经是本页唯一的 <h1>。两个一级
+              标题会让文档大纲把「账户」和用户昵称并列成两个页面主题，屏幕阅读器
+              的「按标题跳转」读出来就是两个平级的页面名。改成 <p> 不动任何样式
+              （.acct-name 是类选择器，字号字重都在它身上）。
+              The nickname is content, not a heading: the PageHead above is this
+              page's only <h1>. Two level-one headings make the document outline
+              present "Account" and the user's nickname as two co-equal page
+              topics, which is what a screen reader's heading navigation then
+              announces. Switching to <p> changes nothing visually — .acct-name is
+              a class selector and carries the size and weight. */}
+          <p className="font-display-xl acct-name">{displayName}</p>
           <div className="acct-meta">
             <span className="acct-meta-email">{info.email}</span>
           </div>
@@ -915,10 +966,29 @@ export default function AccountPage() {
 // The plate prints calendar days, not clock times: "member since / valid thru"
 // are dates, and a 19:23 suffix only overflows the three columns. The zone is
 // still the site-wide UTC+8; a bare date needs no label.
+// 解析一律借 api/utils 的 parseTime，本页不再自带一份"补 Z"的判断。
+//
+// 这里原本抄了一份时区正则，而且抄错了：`[+-]d{2}:?d{2}$` 漏了两个反斜杠，`\d`
+// 写成了字面量 `d`，于是 `+08:00` 这类偏移量后缀永远匹配不上，只有带 z/Z 的字符
+// 串才被认作"已带时区"。目前不出故障，是因为后端经 pydantic 序列化后一律吐 `Z`，
+// 走的是完好的那半个分支；但序列化格式换一次，这里就会给 `+08:00` 再拼一个 `Z`，
+// `new Date()` 直接 Invalid Date，身份牌上的「加入于 / 有效期至」渲染成一行乱码。
+// 正确的修法不是补那两个反斜杠——那样全仓就有第五份同样的实现等着下一次抄错。
+// 唯一真源是 api/utils 的 parseTime（fmtTime/fmtDate/fmtDay 三个都走它）。
+//
+// Parsing goes through api/utils' parseTime; this page no longer carries its own
+// "append Z" logic. It used to hold a copy of the timezone regex, and the copy
+// was wrong: `[+-]d{2}:?d{2}$` is missing two backslashes, so `\d` became a
+// literal `d` and an offset suffix like `+08:00` could never match — only z/Z
+// counted as "already zoned". Nothing breaks today because pydantic serialises
+// everything as `Z`, which takes the intact half of the branch; but one change
+// to that format and this would append a second `Z` to `+08:00`, producing an
+// Invalid Date and rendering "member since / valid thru" as garbage. The fix is
+// not to add the backslashes — that would leave a fifth copy of the same logic
+// waiting to be miscopied again. parseTime in api/utils is the single source.
 function fmtDay(iso: string | null | undefined): string {
-  if (!iso) return "—"
-  const hasTz = /[zZ]|[+-]d{2}:?d{2}$/.test(iso)
-  const d = new Date(hasTz ? iso : iso + "Z")
+  const d = parseTime(iso)
+  if (!d || Number.isNaN(d.getTime())) return "—"
   return d.toLocaleDateString("en-GB", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" })
 }
 

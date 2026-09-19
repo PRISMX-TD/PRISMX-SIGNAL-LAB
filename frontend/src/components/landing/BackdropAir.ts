@@ -46,8 +46,6 @@ export type AirVariant = 'none' | 'masses' | 'strata'
 
 export interface AirHandle {
   setVariant(v: AirVariant): void
-  /** 整体压暗，与碎片同步 / global dim, in step with the shards */
-  setDim(k: number): void
   /** 每帧调用 / per frame */
   update(t: number, camZ: number): void
   dispose(): void
@@ -132,12 +130,14 @@ export function createBackdropAir(
     return (a * (1 - fx) + b * fx) * (1 - fy) + (c2 * (1 - fx) + d * fx) * fy
   }
 
-  const makeFogTex = (seed: number): TH.Texture | null => {
-    const c = document.createElement('canvas')
-    c.width = S
-    c.height = S
+  // 把噪声画进调用方给的 canvas。原来这个函数自己建 canvas 也自己建 texture
+  // （makeFogTex），拆开之后 texture 可以先建好挂上，像素随后再补。
+  // Paints the noise into a canvas supplied by the caller. This used to create both
+  // the canvas and the texture (makeFogTex); splitting them lets the texture exist
+  // and be wired up before the pixels are computed.
+  const paintFogInto = (c: HTMLCanvasElement, seed: number): void => {
     const g2 = c.getContext('2d')
-    if (!g2) return null
+    if (!g2) return
     const rnd = lcg(seed)
     /* 倍频从 4-32 加到 6-96。上一版最细一层是 32 格，铺到一个 1500 单位的团上，
        一个格子在屏幕上有 27px——那是「大块的浓淡」，不是絮。实测絮状度（3x3
@@ -211,13 +211,64 @@ export function createBackdropAir(
       }
     }
     g2.putImageData(img, 0, 0)
-    const t = new THREE.CanvasTexture(c)
-    t.colorSpace = THREE.SRGBColorSpace
-    return t
   }
   /* 三张不同的噪声：所有雾团用同一张贴图会立刻被看出是复制粘贴。
      Three distinct noise fields: one shared texture would read as copy-paste. */
-  const texes = [makeFogTex(1301), makeFogTex(7717), makeFogTex(4409)]
+
+  /* ── 噪声生成挪出挂载的关键路径 ──
+     三张 320×320，每像素五个倍频的 fbm，合计约 150 万次晶格采样，外加三次
+     createImageData/putImageData。原来这一整摊是在构造函数里**同步**跑完的，也就是
+     落地页挂载的那一瞬间主线程被占住几百毫秒——正落在首屏的交互窗口里（TBT/INP），
+     而这一层**移动端也加载**（LandingSpaceLayer 里写明了这个取舍）。
+
+     现在先给出三张空白 CanvasTexture 挂到材质上（材质与网格的搭建一切照旧，不需要
+     知道贴图什么时候才有内容），噪声本身推到空闲时段再填进同一张 canvas，填完
+     needsUpdate = true 让 three 重新上传。可见结果是雾在挂载后几十毫秒内淡入，
+     而不是页面卡住几百毫秒——后者用户感知为「点不动」，前者感知不到。
+
+     requestIdleCallback 在 Safari 上要到 17 才有（本项目下限含 safari12），所以
+     退到 setTimeout(…, 1)：同样是让出这一帧，只是没有空闲预算的概念。
+
+     The noise generation moves off the mount critical path. Three 320x320 fields at
+     five fbm octaves per pixel is roughly 1.5M lattice samples plus three
+     createImageData/putImageData calls, and it all ran synchronously in the
+     constructor — several hundred milliseconds of blocked main thread at the exact
+     moment the landing page mounts, inside the first-screen interaction window
+     (TBT/INP), on a layer that loads on mobile too (the trade-off is spelled out in
+     LandingSpaceLayer).
+     Blank CanvasTextures are handed to the materials up front so mesh construction
+     is unchanged, the noise is painted into those same canvases when the thread is
+     idle, and needsUpdate re-uploads them. The fog now fades in tens of milliseconds
+     after mount instead of freezing the page for hundreds — the former is
+     imperceptible, the latter reads as "the page is stuck".
+     requestIdleCallback only arrives in Safari 17 and this project's floor includes
+     safari12, so it falls back to setTimeout(..., 1): same yield, no idle budget. */
+  const texes = [1301, 7717, 4409].map((seed) => {
+    const c = document.createElement('canvas')
+    c.width = S
+    c.height = S
+    const t = new THREE.CanvasTexture(c)
+    t.colorSpace = THREE.SRGBColorSpace
+    return { seed, canvas: c, tex: t }
+  })
+  // 卸载标记：空闲回调可能在 dispose 之后才被调度到。
+  // Unmount flag: the idle callback can still fire after dispose.
+  let disposed = false
+  let noisePainted = false
+  const paintNoise = () => {
+    if (noisePainted || disposed) return
+    noisePainted = true
+    for (const e of texes) {
+      paintFogInto(e.canvas, e.seed)
+      e.tex.needsUpdate = true
+    }
+  }
+  const idle = (window as unknown as {
+    requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number
+  }).requestIdleCallback
+  const noiseTimer = idle
+    ? idle(paintNoise, { timeout: 1500 })
+    : window.setTimeout(paintNoise, 1)
 
   const groups: Record<Exclude<AirVariant, 'none'>, TH.Group> = {
     masses: new THREE.Group(),
@@ -286,7 +337,7 @@ export function createBackdropAir(
     drift: number,
     phase: number
   ) => {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat(opacity, color, texes[puffSeq++ % texes.length]))
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat(opacity, color, texes[puffSeq++ % texes.length].tex))
     m.position.set(x, y, z)
     m.renderOrder = -1
     groups[kind].add(m)
@@ -363,7 +414,24 @@ export function createBackdropAir(
      The landscape painter's method: the same thing, each layer higher and fainter
      than the last. Seven bands across the depth, rising and fading with range - no
      object required, the stratification itself is the distance. */
-  {
+  /* 按需构建，不在构造函数里无条件建好。
+     当前剧本永远走不到这个分支：LandingSpaceLayer 的 BACKDROP 是硬编码常量
+     'shardsSmoke'，而 LandingSpace 只会把 variant 设成 'masses' 或 'none'
+     （见 LandingSpace 的 air.setVariant 那行）。原来这七片 PlaneGeometry 与七个
+     材质在构造时就建好并常驻显存，一帧都不会被画到。
+     改成首次 setVariant('strata') 时才建：剧本换回来时行为完全一致，走不到时
+     一个字节的显存都不占。
+     Built on demand rather than unconditionally in the constructor. The current
+     storyboard can never reach this branch — LandingSpaceLayer's BACKDROP is the
+     constant 'shardsSmoke' and LandingSpace only ever sets 'masses' or 'none' —
+     yet the seven PlaneGeometries and seven materials were created up front and
+     sat in VRAM without ever being drawn. Building them on the first
+     setVariant('strata') keeps behaviour identical if the storyboard comes back,
+     and costs nothing while it does not. */
+  let strataBuilt = false
+  const buildStrata = () => {
+    if (strataBuilt) return
+    strataBuilt = true
     const rnd = lcg(51907)
     for (let i = 0; i < 7; i++) {
       const t = i / 6
@@ -383,6 +451,7 @@ export function createBackdropAir(
 
   let current: AirVariant = 'none'
   const setVariant = (v: AirVariant) => {
+    if (v === 'strata') buildStrata()
     current = v
     ;(Object.keys(groups) as Exclude<AirVariant, 'none'>[]).forEach((k) => {
       groups[k].visible = k === v
@@ -423,20 +492,30 @@ export function createBackdropAir(
     }
   }
 
-  const allMats: { m: TH.MeshBasicMaterial; base: number }[] = []
-  Object.values(puffs).forEach((arr) =>
-    arr.forEach((p) => {
-      const m = p.m.material as TH.MeshBasicMaterial
-      allMats.push({ m, base: m.opacity })
-    })
-  )
-
+  /* setDim 已移除（2026-09-19）。
+     它在这里和 BackdropShards 上都实现并导出过，但**全仓库零调用点**——
+     LandingSpace 里那段「判定幕期间碎片/烟雾让位」的注释描述的就是它，而那段
+     行为从来没有接上（见 LandingSpace 里同日订正的注释）。
+     接不接是视觉决策，不是缺陷修复，所以这里只去掉死 API，不自作主张改画面；
+     要恢复的话把这个闭包连同 allMats 加回来即可，一共四行。
+     setDim removed 2026-09-19. It was implemented and exported both here and on
+     BackdropShards with zero call sites anywhere in the repo; the "shards and smoke
+     yield during the verdict act" comment in LandingSpace described it, and that
+     behaviour was never wired up (see the note corrected there the same day).
+     Wiring it is a visual decision rather than a defect fix, so only the dead API
+     goes; restoring it is this closure plus allMats, four lines in total. */
   return {
     setVariant,
-    setDim: (k: number) => allMats.forEach(({ m, base }) => (m.opacity = base * k)),
     update,
     dispose() {
-      texes.forEach((t) => t?.dispose())
+      disposed = true
+      // 还没跑到的空闲回调要撤掉：组件已经卸载，再去画一张没人用的噪声是白烧 CPU。
+      // Cancel a pending idle callback: the component is gone and painting a
+      // texture nobody will use is pure wasted CPU.
+      const cancelIdle = (window as unknown as { cancelIdleCallback?: (h: number) => void }).cancelIdleCallback
+      if (idle && cancelIdle) cancelIdle(noiseTimer)
+      else window.clearTimeout(noiseTimer)
+      texes.forEach((e) => e.tex.dispose())
       Object.values(groups).forEach((g) => {
         g.traverse((o) => {
           const m = o as { geometry?: { dispose(): void }; material?: { dispose(): void } }

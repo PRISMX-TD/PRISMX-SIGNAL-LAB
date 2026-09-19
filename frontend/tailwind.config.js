@@ -19,7 +19,39 @@
 // The canvas moved from violet-tinted black to a neutral zinc black so violet
 // is the only chroma on the page; the contrast does the work that glow used to
 // fake.
+//
 // ─────────────────────────────────────────────────────────────────────────────
+// 颜色的真源在 src/styles/tokens.css，不在本文件。
+//
+// 2026-09-19 之前这里存了一份自己的十六进制，和 tokens.css 那份各自演进，结果
+// 是涨跌色有四个值同时在跑：排行榜同一行里，`text-up`（当时 #35C97A）和它旁边
+// `background: var(--up)`（#3AD584）的幅度条是两种绿；`prism.400` 同理停在被实测
+// 判定为 4.49（不过 AA）的 #8B6CFF，而 `--purple-hi` 早已抬到 #9284FF。
+//
+// 现在凡是**两边都有**的颜色，这里一律用下面的 `token()` 去读 CSS 变量，本文件
+// 不再存值。只有 Tailwind 单独用得到的色阶（prism 的 50/100/200/700/800/950、
+// ink 的中间档、neutral.400）才留十六进制——它们没有 CSS 变量对应物，不构成双轨。
+//
+// Colour's single source of truth is src/styles/tokens.css, not this file.
+// Until 2026-09-19 this file kept its own hex copies and the two drifted: four
+// up/down values were live at once (a leaderboard row rendered `text-up` and a
+// `var(--up)` bar in two different greens), and `prism.400` sat on a tone
+// measured at 4.49 — below AA — long after `--purple-hi` had been lifted.
+// Every colour that exists on both sides now goes through `token()` below.
+// Only Tailwind-exclusive rungs keep literal hex, since they duplicate nothing.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// tokens.css 的每个颜色都带一个通道三元组（`--up-rgb: 58 213 132`）。Tailwind v3
+// 的 `/opacity` 修饰符只有拿到可拆解的颜色才生效——直接给它 `var(--up)` 字符串，
+// `bg-up/15` 会静默丢掉那个 15%（全站约 140 处这种写法）。函数形式两种情况都覆盖：
+// 无修饰符出 `rgb(var(--up-rgb))`，带修饰符出 `rgb(var(--up-rgb) / 0.15)`。
+// Each colour in tokens.css also exposes a channel triplet. Tailwind v3 can only
+// apply an opacity modifier to a colour it can decompose, so a bare
+// `var(--up)` string would make `bg-up/15` silently drop its 15% (~140 call
+// sites). The function form covers both shapes.
+const token = (name) => ({ opacityValue }) =>
+  opacityValue === undefined ? `rgb(var(${name}))` : `rgb(var(${name}) / ${opacityValue})`
+
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
@@ -30,7 +62,8 @@ export default {
         // Warm-ish white instead of pure white: #fff glares over long sessions.
         // Pulled toward neutral zinc so it sits in the same family as the
         // existing neutral-*/zinc-* utilities rather than fighting them.
-        white: '#EDEDF0',
+        // = tokens.css --text
+        white: token('--text-rgb'),
 
         // neutral-400 / 500 跟着卡面一起抬。
         // 这两个键是全站二级 / 三级文字的地板。卡面从 #101012 抬到 #1B1B21
@@ -42,14 +75,16 @@ export default {
         // Both keys are the floor for secondary/tertiary text. They move up with
         // the surface, and now match --text-2 / --text-3 exactly.
         neutral: {
-          300: '#D4D4D8',
+          300: token('--text-2-rgb'),
+          // 400 没有 CSS 变量对应物（--text-2 与 --text-3 之间那一档只有 Tailwind
+          // 用得到），留十六进制。/ No token twin; Tailwind-only rung.
           400: '#B4B4BC',
-          500: '#9C9CA6',
+          500: token('--text-3-rgb'),
         },
 
         // 画布：中性近黑，无紫调。/ canvas: neutral near-black, zero violet tint.
         ink: {
-          950: '#09090B',
+          950: token('--bg-rgb'),
           900: '#0C0C0E',
           850: '#101012',
           800: '#141417',
@@ -64,17 +99,20 @@ export default {
         // violet so it reads as a spot colour, not a framework default. 600 is
         // the primary pigment (buttons, filled fields); 400 is the accent text
         // tone on dark (~5.4:1 against #09090B, passes AA).
+        // 有 CSS 变量对应物的四档走 token()，其余色阶是 Tailwind 独有的，留值。
+        // The four rungs that also exist as tokens read them; the rest are
+        // Tailwind-exclusive and keep their literals.
         prism: {
           50: '#F2EDFF',
           100: '#E3D9FF',
           200: '#C8B6FF',
-          300: '#A88CFF',
-          400: '#8B6CFF',
-          500: '#6E42FF',
-          600: '#5A22EE',
+          300: token('--purple-soft-rgb'),
+          400: token('--purple-hi-rgb'),
+          500: token('--purple-vivid-rgb'),
+          600: token('--purple-rgb'),
           700: '#4715C4',
           800: '#351093',
-          900: '#240B63',
+          900: token('--purple-deep-rgb'),
           950: '#15063B',
         },
 
@@ -85,21 +123,35 @@ export default {
         // is de-neoned: cyan/pink/lime used to form a rainbow, one of the
         // loudest AI signatures. They now either collapse into the brand violet
         // or become low-chroma steel, so they no longer read as a palette.
+        // 2026-09-19 复查：`neon-*` 与 `glow` 在 src/ 与 index.html 里**已经一个
+        // 调用点都没有了**（上面那句「还有引用」是留到过期的注释）。键先不删，
+        // 但值改成跟着 --purple-hi 走，免得哪天有人用回来时又拿到停在 4.49 的旧紫。
+        // Re-checked 2026-09-19: `neon-*` and `glow` now have zero call sites (the
+        // "still referenced" note above had gone stale). The keys stay for now but
+        // track --purple-hi, so a future caller cannot resurrect the sub-AA violet.
         neon: {
-          violet: '#8B6CFF',
+          violet: token('--purple-hi-rgb'),
           cyan: '#7C93B8',
-          pink: '#8B6CFF',
+          pink: token('--purple-hi-rgb'),
           lime: '#8FA88C',
         },
-        glow: '#8B6CFF',
+        glow: token('--purple-hi-rgb'),
 
         // 市场语义色。从霓虹薄荷/糖果玫瑰调深，长时间盯盘不刺眼，且在浅色
         // 与深色面上都过 AA。这两个颜色是**数据**，不是品牌色，永远不参与装饰。
         // Market semantics. Deepened from neon mint / candy rose so they don't
         // sting over a long session, and pass AA on both light and dark fills.
         // These two are *data* colours, never decorative.
-        up: '#35C97A',
-        down: '#F04D63',
+        up: token('--up-rgb'),
+        down: token('--down-rgb'),
+        // 中间档（胜率 40–50%）与金：此前只有 CSS 变量，没有 Tailwind 键，于是
+        // TSX 里出现了 `bg-[#E0A83C]` 这种硬编码（落地页试用金条、登录页提示条），
+        // 注释还写着「既有 token --gold」。补上键，硬编码就有地方归位。
+        // The mid band and gold existed only as CSS variables, so TSX reached for
+        // `bg-[#E0A83C]` literals while the comment next to them claimed a token
+        // was in use. Adding the keys gives those literals somewhere to go.
+        mid: token('--mid-rgb'),
+        gold: token('--gold-rgb'),
 
         card: 'rgba(255,255,255,0.04)',
         line: 'rgba(255,255,255,0.08)',
@@ -304,5 +356,35 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // ── inset 简写降级 / the inset shorthand, spelled out ──
+    // Tailwind 的 `inset-0` 编译成 `inset: 0px`，而 `inset` 简写是 **Chrome 87+**，
+    // 在本项目 Chrome 70 的下限之外。旧内核上整条声明被丢弃，元素只剩
+    // `position: absolute` 而没有任何偏移——于是每一层「铺满父级」的遮罩、背景、
+    // 渲染器画布都掉回静态流的位置。全站 23 处在用 `inset-*`（其中 21 处是
+    // `inset-0`），几乎全是这种铺满层。
+    //
+    // 这里重定义 `inset-*` / `-inset-*` 这一族，改出四条长写法（`inset-x-*` 与
+    // `inset-y-*` 本来就是长写法，`top-*` 等同理，都不受影响）。插件产出的工具类
+    // 排在核心工具类之后、权重相同，靠源码顺序覆盖，调用点一行不用改。
+    //
+    // Tailwind compiles `inset-0` to `inset: 0px`, and the `inset` shorthand is
+    // Chrome 87+, outside this project's Chrome 70 floor. On older engines the
+    // whole declaration is dropped and the element keeps `position: absolute`
+    // with no offsets, so every "cover the parent" scrim, backdrop and renderer
+    // canvas falls back into static flow. 23 call sites use it, 21 of them
+    // `inset-0`, and nearly all are exactly that kind of layer.
+    // This redefines only the shorthand family as four longhands; `inset-x-*`,
+    // `inset-y-*` and `top-*` already emit longhands and are untouched. Plugin
+    // utilities are emitted after the core ones at equal specificity, so source
+    // order wins and no call site changes.
+    ({ matchUtilities, theme }) => {
+      matchUtilities(
+        {
+          inset: (value) => ({ top: value, right: value, bottom: value, left: value }),
+        },
+        { values: theme('inset'), supportsNegativeValues: true }
+      )
+    },
+  ],
 }

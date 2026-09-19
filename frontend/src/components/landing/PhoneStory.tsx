@@ -38,6 +38,7 @@ import { useTranslation } from 'react-i18next'
 import { PhoneChrome, ScreenRank, ScreenPlan, ScreenOrder, ScreenRecord, ScreenBoard } from './PhoneScreens'
 import { createPhoneGL, type PhoneGLHandle } from './PhoneGL'
 import { useSectionProgress } from './useSectionProgress'
+import { onMediaQuery } from './onMediaQuery'
 
 type T = (k: string) => string
 
@@ -69,11 +70,16 @@ export default function PhoneStory() {
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)')
     const apply = () => setMode(desk.matches && !reduce.matches ? 'scrub' : 'steps')
     apply()
-    desk.addEventListener('change', apply)
-    reduce.addEventListener('change', apply)
+    // 经 onMediaQuery 而不是直接 addEventListener：Safari 14 之前 MediaQueryList
+    // 不是 EventTarget，而构建下限含 safari12，直接调会抛 TypeError 白掉整页。
+    // Via onMediaQuery: MediaQueryList was not an EventTarget before Safari 14 and
+    // the build floor includes safari12, where the direct call throws and takes
+    // the whole page down.
+    const offDesk = onMediaQuery(desk, apply)
+    const offReduce = onMediaQuery(reduce, apply)
     return () => {
-      desk.removeEventListener('change', apply)
-      reduce.removeEventListener('change', apply)
+      offDesk()
+      offReduce()
     }
   }, [])
 
@@ -132,7 +138,34 @@ export default function PhoneStory() {
       let gl: PhoneGLHandle | null = null
       if (screenHost) {
         try {
-          gl = await createPhoneGL({ container: stage, screenEl: screenHost })
+          gl = await createPhoneGL({
+            container: stage,
+            screenEl: screenHost,
+            /* 上下文丢失 = 当场退回 CSS 手机。
+               低端安卓 WebView 丢 WebGL 上下文是常态（内存压力、切后台、驱动重置）。
+               此前没有这条路径：上下文一丢，画布永久透明，页面就停在「机身消失、只剩
+               一块悬空屏幕」的状态上，而 CSS 手机明明是现成的降级路径。
+               这里只做三件事——把 gl 置空（applyPose 下一帧起自动改写 CSS transform，
+               姿态数值一份，无需同步）、拆掉渲染器并把屏幕节点还回 React 记得的位置
+               （gl.dispose 负责）、摘掉 .gl-on 让样式回到 CSS 机身。不重建：见
+               PhoneGL.ts 里 onLost 的说明。
+               A lost context falls back to the CSS phone on the spot. Low-end
+               Android WebViews lose the WebGL context routinely, and there was no
+               path for it: the canvas went permanently transparent and the page
+               sat there with the body gone and a screen floating in mid-air, while
+               the CSS phone was available the whole time. Three steps only — null
+               the handle (applyPose writes a CSS transform from the next frame,
+               off the same pose numbers, so nothing needs syncing), tear the
+               renderers down and return the screen node to where React remembers
+               it (gl.dispose does that), and drop .gl-on so the styles revert to
+               the CSS body. No rebuild; see onLost in PhoneGL.ts. */
+            onContextLost: () => {
+              const dead = gl
+              gl = null
+              el.classList.remove('gl-on')
+              dead?.dispose()
+            },
+          })
         } catch {
           gl = null
         }
@@ -529,7 +562,7 @@ export default function PhoneStory() {
                 With the opening now product-first the headline sits over the scrim
                 and has to be the screen's single anchor, heavy enough to hold its
                 own against the enlarged signal card. */}
-            <h1 className="font-display-xl text-[clamp(2.5rem,11vw,4.25rem)]">
+            <h1 className="font-display-xl fs-fluid [--fs-min:2.5rem] [--fs-vw:11vw] [--fs-max:4.25rem]">
               <span className="block text-white">{t('landing.heroTitle1')}</span>
               <span className="mt-1 block text-prism-400">{t('landing.heroTitle2')}</span>
             </h1>
@@ -580,7 +613,7 @@ export default function PhoneStory() {
           >
             <div className="panel-inner">
               <p className="text-[13px] leading-relaxed text-neutral-500">{t(`landing.${p.pain}`)}</p>
-              <h2 className="mt-3 font-display-xl text-[clamp(1.75rem,4.6vw,2.1rem)] text-white">
+              <h2 className="mt-3 font-display-xl fs-fluid [--fs-min:1.75rem] [--fs-vw:4.6vw] [--fs-max:2.1rem] text-white">
                 {t(`landing.${p.title}`)}
               </h2>
               <p className="mt-3 max-w-[46ch] text-[13px] leading-relaxed text-neutral-400 sm:text-[13px]">

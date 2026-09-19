@@ -1,7 +1,8 @@
 // 认证状态 / Auth context
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { User } from '../api/types'
 import { authApi, clearToken, getToken, setToken, setUnauthorizedHandler, userApi } from '../api/client'
+import { readJson, writeJson } from '../utils/safeStorage'
 
 interface AuthContextValue {
   user: User | null
@@ -77,11 +78,39 @@ function clearUserScopedStorage() {
   }
 }
 
+// 缓存用户的读写收口在这两个帮手上，全文件不再出现裸 JSON.parse / setItem。
+// 读走 readJson：解析失败会把那份脏缓存删掉并返回 null，于是按"未登录"处理。
+// 这一点是关键——AuthProvider 位于 ErrorBoundary **外层**（App.tsx 的
+// AuthProvider > BrowserRouter > RouteErrorBoundary），初始化时抛错没有任何
+// 边界接得住；而 localStorage 里的坏值不会自己消失，用户每次打开都是同一个
+// 白屏，只能手动清站点数据，安卓 App 的 WebView 更是不会重装。
+// Cached-user reads and writes funnel through these two helpers; no bare
+// JSON.parse / setItem remains in this file. readJson drops a corrupt entry and
+// yields null, so a bad cache degrades to "logged out" instead of throwing.
+// That matters because AuthProvider sits *outside* the ErrorBoundary (App.tsx:
+// AuthProvider > BrowserRouter > RouteErrorBoundary), so nothing catches a
+// throw from its initialiser — and the bad value persists across reloads, so
+// every future visit is the same blank page until site data is cleared by hand.
+function readCachedUser(): User | null {
+  return readJson<User | null>(USER_KEY, null)
+}
+
+function writeCachedUser(u: User | null): void {
+  if (u) writeJson(USER_KEY, u)
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => {
-    const raw = localStorage.getItem(USER_KEY)
-    return raw ? (JSON.parse(raw) as User) : null
-  })
+  // 初始判据同时要求 token 存在：只看缓存的 user 会在"另一标签页登出/清了
+  // token 但本页 prismx_user 还在"时放行一帧——Protected 通过、受保护页面挂载
+  // 并发出不带 Authorization 的请求、拿一串 401 再被踢回登录页，表现为闪一下
+  // 内页。判据放在初始化里而不是下面的 effect 里，那一帧就不存在。
+  // The initial value also requires a token: judging by the cached user alone
+  // lets one frame through when another tab has signed out (token cleared,
+  // prismx_user still present) — Protected passes, the page mounts and fires
+  // requests with no Authorization header, collects 401s and bounces back to
+  // login, which reads as the app flashing an inner page. Deciding here rather
+  // than in the effect below removes that frame entirely.
+  const [user, setUser] = useState<User | null>(() => (getToken() ? readCachedUser() : null))
 
   useEffect(() => {
     // token 缺失则清空用户 / clear user if token missing
@@ -108,56 +137,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setUnauthorizedHandler(null)
   }, [])
 
-  const persist = (u: User, token: string) => {
+  const persist = useCallback((u: User, token: string) => {
     setToken(token)
-    localStorage.setItem(USER_KEY, JSON.stringify(u))
+    writeCachedUser(u)
     setUser(u)
-  }
+  }, [])
 
-  const login = async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string) => {
     const res = await authApi.login(email, password)
     persist(res.user, res.token)
-  }
+  }, [persist])
 
-  const register = async (email: string, password: string, phoneCountry: string, phone: string) => {
+  const register = useCallback(async (email: string, password: string, phoneCountry: string, phone: string) => {
     const res = await authApi.register(email, password, phoneCountry, phone)
     persist(res.user, res.token)
-  }
+  }, [persist])
 
-  const submitPhone = async (phoneCountry: string, phone: string) => {
+  const submitPhone = useCallback(async (phoneCountry: string, phone: string) => {
     const updated = await authApi.setPhone(phoneCountry, phone)
     // 只换 user，token 不动：这个接口不签发新 token，沿用当前的。
     // Swap the user only; this endpoint issues no new token.
     setUser(updated)
-    localStorage.setItem(USER_KEY, JSON.stringify(updated))
-  }
+    writeCachedUser(updated)
+  }, [])
 
   // 补全资料页提交昵称。走的是账户页那个 PATCH，校验（长度/保留词/重名）只有
   // 一份；这里只负责把返回的 needsNickname 落到本地 user 上，让守卫放行。
   // Submits the nickname from the completion page through the same PATCH the
   // account page uses, so length / reserved-word / uniqueness validation lives
   // in one place; this only lands the returned needsNickname so the guard opens.
-  const submitNickname = async (nickname: string) => {
+  const submitNickname = useCallback(async (nickname: string) => {
     const res = await userApi.updateProfile({ nickname })
     setUser((prev) => (prev ? { ...prev, needsNickname: res.needsNickname } : prev))
-    const stored = localStorage.getItem(USER_KEY)
-    if (stored) {
-      const parsed = JSON.parse(stored)
-      parsed.needsNickname = res.needsNickname
-      localStorage.setItem(USER_KEY, JSON.stringify(parsed))
-    }
-  }
+    // 缓存里没有（或是坏值）就不写：readCachedUser 已经把坏值删掉了，此刻补一份
+    // 半截 user 反而会造出一个缺字段的缓存。下一次 persist/refreshUser 会补全。
+    // Skip when the cache is absent or was corrupt (readCachedUser already
+    // removed it): writing a partial user here would manufacture a
+    // field-missing cache entry. The next persist/refreshUser fills it in.
+    const cached = readCachedUser()
+    if (cached) writeCachedUser({ ...cached, needsNickname: res.needsNickname })
+  }, [])
 
-  const loginWithGoogle = async (credential: string) => {
+  const loginWithGoogle = useCallback(async (credential: string) => {
     const res = await authApi.google(credential)
     persist(res.user, res.token)
-  }
+  }, [persist])
 
-  const logout = () => {
+  const logout = useCallback(() => {
     clearToken()
     clearUserScopedStorage()
     setUser(null)
-  }
+  }, [])
 
   // planExpiresAt 一并带回来：到期横幅（components/PlanExpiryBanner）要靠它算
   // 还剩几天。此前它只存在于 AccountPage / UpgradePage 各自的一次性 userApi.me()
@@ -169,7 +199,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // calls, so any global component wanting it had to issue yet another request.
   // Keeping it on the auth state gives it a single home that stays fresh with
   // refreshUser.
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async () => {
     if (!getToken()) return
     try {
       const me = await userApi.me()
@@ -210,31 +240,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           isAgent: me.isAgent,
         }
       })
-      const stored = localStorage.getItem(USER_KEY)
-      if (stored) {
-        const parsed = JSON.parse(stored)
-        parsed.plan = me.plan
-        parsed.planIsTrial = me.planIsTrial
-        parsed.planExpiresAt = me.planExpiresAt
-        parsed.gamificationVisible = me.gamificationVisible
-        parsed.leaderboardVisible = me.leaderboardVisible
-        parsed.competitionsVisible = me.competitionsVisible
-        parsed.gamificationLevel = me.gamificationLevel
-        parsed.gamificationTitle = me.gamificationTitle
-        parsed.needsNickname = me.needsNickname
-        parsed.isAgent = me.isAgent
-        localStorage.setItem(USER_KEY, JSON.stringify(parsed))
+      const cached = readCachedUser()
+      if (cached) {
+        writeCachedUser({
+          ...cached,
+          plan: me.plan,
+          planIsTrial: me.planIsTrial,
+          planExpiresAt: me.planExpiresAt,
+          gamificationVisible: me.gamificationVisible,
+          leaderboardVisible: me.leaderboardVisible,
+          competitionsVisible: me.competitionsVisible,
+          gamificationLevel: me.gamificationLevel,
+          gamificationTitle: me.gamificationTitle,
+          needsNickname: me.needsNickname,
+          isAgent: me.isAgent,
+        })
       }
     } catch {
       // token 可能已过期，忽略
     }
-  }
+  }, [])
 
-  return (
-    <AuthContext.Provider value={{ user, isAuthed: !!user, login, register, submitPhone, submitNickname, loginWithGoogle, logout, refreshUser }}>
-      {children}
-    </AuthContext.Provider>
+  // memo 化 context value：user 没变时不再制造新引用。
+  //
+  // 此前这里每次渲染都新建一个对象字面量，于是 AuthProvider 的任何一次 setState
+  // （401 清态、refreshUser 回填）都会让全部 useAuth() 消费者重渲染——Layout、
+  // UserMenu、每一层路由守卫。更麻烦的是 login/logout/refreshUser 的函数身份每次
+  // 都变，把它们写进 useEffect 依赖就会反复触发；store/live.tsx 里那个
+  // refreshUserRef 就是被这一点逼出来的绕法。方法全部 useCallback 之后，那类绕法
+  // 可以逐步拆掉。
+  // Memoized context value: no fresh identity while `user` is unchanged.
+  // This used to be an inline object literal, so any AuthProvider setState (401
+  // teardown, refreshUser backfill) re-rendered every useAuth() consumer —
+  // Layout, UserMenu and each route guard. Worse, login/logout/refreshUser got a
+  // new identity per render, so listing them in a useEffect's deps re-fired it
+  // endlessly; the refreshUserRef workaround in store/live.tsx exists because of
+  // exactly that. With the methods wrapped in useCallback those workarounds can
+  // be unwound over time.
+  //
+  // isAuthed 只看 user：token 的存在性已经在上面的 state 初始化里核过一次，
+  // 401 回调也会同时清掉两者，因此不必在渲染期再读一次 localStorage。
+  // isAuthed checks `user` alone: the token's presence is verified in the state
+  // initialiser above and the 401 handler clears both together, so there is no
+  // need to hit localStorage during render.
+  const value = useMemo<AuthContextValue>(
+    () => ({ user, isAuthed: !!user, login, register, submitPhone, submitNickname, loginWithGoogle, logout, refreshUser }),
+    [user, login, register, submitPhone, submitNickname, loginWithGoogle, logout, refreshUser],
   )
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {

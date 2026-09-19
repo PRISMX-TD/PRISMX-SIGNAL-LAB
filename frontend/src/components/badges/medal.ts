@@ -40,7 +40,6 @@ export type BadgeFamily = 'growth' | 'evergreen' | 'performance' | 'competition'
 export type BadgeMaterial = 'plain' | 'bronze' | 'silver' | 'gold' | 'legend' | 'limited' | 'onyx'
 
 interface MaterialDef {
-  name: string
   rim: [string, string, string]
   field: [string, string]
   L: string
@@ -56,14 +55,23 @@ interface MaterialDef {
 
 // exported so RankCoin.tsx can borrow the rim tuples for name-coins without
 // re-declaring the same color values a second time.
+//
+// 2026-09-19：每个材质原来还带一个中文 `name` 字段（'石墨'/'青铜'/'白银'/'足金'/
+// '足金星芒'/'青铜火漆'/'乌金'），而全仓库**从不读取**它——材质名的展示一律走
+// i18n 的 `gamification.material.${material}`（见 BadgeDetailModal）。属死数据，
+// 且是一份不会被翻译、也不会被任何人发现已经过期的中文副本，删掉。
+// Each material used to carry a Chinese `name` field that nothing in the repo ever
+// read: material names are displayed through i18n's gamification.material.* (see
+// BadgeDetailModal). Dead data, and a Chinese copy that would never be translated
+// nor noticed going stale — removed.
 export const MAT: Record<BadgeMaterial, MaterialDef> = {
-  plain:   { name:'石墨',     rim:['#B8BBC4','#73767F','#40434B'], field:['#1D1D25','#0E0E13'], L:'#DEE0E6', D:'#5A5D66', H:'#F6F7FA', tick:'#3A3D45', inlay:null },
-  bronze:  { name:'青铜',     rim:['#F3CBA3','#C18A55','#6B4322'], field:['#221410','#120A07'], L:'#F7D3AC', D:'#7C4E2C', H:'#FFEBD6', tick:'#5C3D27', inlay:'#DBA574' },
-  silver:  { name:'白银',     rim:['#FFFFFF','#BCC1CC','#6C7282'], field:['#1F2028','#0F1015'], L:'#F8F9FC', D:'#7A8090', H:'#FFFFFF', tick:'#4A505E', inlay:'#D5D9E2' },
-  gold:    { name:'足金',     rim:['#FFF0B8','#E4BE6A','#8E6626'], field:['#241E14','#120F0A'], L:'#FFEBB0', D:'#8C672A', H:'#FFFBEA', tick:'#6A4E22', inlay:'#F3D68F', sun:true },
-  legend:  { name:'足金星芒', rim:['#FFF0B8','#E4BE6A','#8E6626'], field:['#241E14','#120F0A'], L:'#FFEBB0', D:'#8C672A', H:'#FFFBEA', tick:'#6A4E22', inlay:'#F3D68F', sun:true, gems:true, rays:true },
-  limited: { name:'青铜火漆', rim:['#F0BE8C','#B8763F','#5E3419'], field:['#2A1612','#170B09'], L:'#F5CFA6', D:'#7A4A2A', H:'#FFE9D2', tick:'#5A3A26', inlay:'#D89A66', sun:true, seal:'#D89A66' },
-  onyx:    { name:'乌金',     rim:['#D9C08A','#8A6F3A','#3A2E17'], field:['#15120C','#0A0806'], L:'#E2C98F', D:'#5C4A22', H:'#F2E2B8', tick:'#3F3418', inlay:'#B8964E', sun:true },
+  plain:   { rim:['#B8BBC4','#73767F','#40434B'], field:['#1D1D25','#0E0E13'], L:'#DEE0E6', D:'#5A5D66', H:'#F6F7FA', tick:'#3A3D45', inlay:null },
+  bronze:  { rim:['#F3CBA3','#C18A55','#6B4322'], field:['#221410','#120A07'], L:'#F7D3AC', D:'#7C4E2C', H:'#FFEBD6', tick:'#5C3D27', inlay:'#DBA574' },
+  silver:  { rim:['#FFFFFF','#BCC1CC','#6C7282'], field:['#1F2028','#0F1015'], L:'#F8F9FC', D:'#7A8090', H:'#FFFFFF', tick:'#4A505E', inlay:'#D5D9E2' },
+  gold:    { rim:['#FFF0B8','#E4BE6A','#8E6626'], field:['#241E14','#120F0A'], L:'#FFEBB0', D:'#8C672A', H:'#FFFBEA', tick:'#6A4E22', inlay:'#F3D68F', sun:true },
+  legend:  { rim:['#FFF0B8','#E4BE6A','#8E6626'], field:['#241E14','#120F0A'], L:'#FFEBB0', D:'#8C672A', H:'#FFFBEA', tick:'#6A4E22', inlay:'#F3D68F', sun:true, gems:true, rays:true },
+  limited: { rim:['#F0BE8C','#B8763F','#5E3419'], field:['#2A1612','#170B09'], L:'#F5CFA6', D:'#7A4A2A', H:'#FFE9D2', tick:'#5A3A26', inlay:'#D89A66', sun:true, seal:'#D89A66' },
+  onyx:    { rim:['#D9C08A','#8A6F3A','#3A2E17'], field:['#15120C','#0A0806'], L:'#E2C98F', D:'#5C4A22', H:'#F2E2B8', tick:'#3F3418', inlay:'#B8964E', sun:true },
 }
 
 // 勋章 + 档位 → 材质。进阶勋章按档位；未获得时按铜画轮廓（灰度由调用方处理）；
@@ -325,6 +333,26 @@ export function renderMedalInner(
   // non-id-safe characters before splicing it into an SVG id.
   const k = 'm' + key.replace(/[^a-zA-Z0-9_-]/g, '')
   const big = size >= 40
+  /* 细密装饰的尺寸门槛。
+     `big` 原来只门控**宝石**与**火漆环字**，而节点数最大的三处（齿纹 60 道、
+     太阳射线 48 道、玑镂 10 个椭圆）完全不看尺寸。榜单与比赛行里的勋章是
+     size 16/18/20，那里每枚仍然输出 120+ 个在该尺寸下**不可能被看见**的 SVG
+     节点——16px 宽的圆周上 60 道齿纹间距不到 0.8px，渲染出来就是一圈灰。
+     一屏 50 行就是约 6000 个纯浪费的节点。
+     `fine` 取 32：这是「细节还看得出来」的下界，也正好把榜单尺寸（≤20）与
+     勋章墙 / 陈列台尺寸（≥40）分开。齿纹不是删掉而是降到 12 道——完全去掉会
+     让圆周边缘变得太干净，12 道在小尺寸下仍读得出「这是个有齿的币」。
+     The size gate for fine detail. `big` used to gate only the gems and the wax
+     legend, while the three highest node-count decorations — 60 tick marks, 48
+     sun rays, 10 guilloche ellipses — ignored size entirely. Leaderboard and
+     competition rows render at size 16/18/20, where each medal still emitted
+     120+ SVG nodes that cannot possibly be seen: 60 ticks around a 16px circle
+     sit under 0.8px apart and render as a grey ring. Fifty rows is ~6000 wasted
+     nodes. `fine` is 32, the floor where detail still reads, and it happens to
+     separate list sizes (<=20) from the wall/pedestal sizes (>=40). Ticks are
+     reduced to 12 rather than removed: dropping them entirely makes the rim read
+     too clean, while 12 still says "toothed coin" at small sizes. */
+  const fine = size >= 32
   const fam = FAMILY[id] ?? FALLBACK_FAMILY
   const sh = SHAPES[fam]
   const enKey = FAM_ENAMEL[fam]
@@ -345,7 +373,9 @@ export function renderMedalInner(
     const R = sh.R as number
     outerD = `M32 ${32 - R}a${R} ${R} 0 1 0 .01 0z`
     let t = ''
-    for (let i = 0; i < 60; i++) { t += `<line x1="32" y1="${f(32 - R + .4)}" x2="32" y2="${f(32 - R + 3)}" transform="rotate(${i * 6} 32 32)"/>` }
+    const nTick = fine ? 60 : 12
+    const dTick = 360 / nTick
+    for (let i = 0; i < nTick; i++) { t += `<line x1="32" y1="${f(32 - R + .4)}" x2="32" y2="${f(32 - R + 3)}" transform="rotate(${f(i * dTick)} 32 32)"/>` }
     ticks = `<g stroke="${m.tick}" stroke-width="1" opacity=".9">${t}</g>`
     bevel = `<circle cx="32" cy="32" r="${R - 2.1}" fill="none" stroke="url(#${k}-b)" stroke-width="1.9"/><circle cx="32" cy="32" r="${R - 3.15}" fill="none" stroke="${m.H}" stroke-width=".45" opacity=".55"/>`
     const fr = R - 3.6
@@ -415,12 +445,14 @@ export function renderMedalInner(
   const field = fieldD ? `<path d="${fieldD}" fill="url(#${k}-f)"/>` : `${inset(sh.d as string, sh.fieldS as number)} fill="url(#${k}-f)"/>`
 
   let sun = ''
-  if (m.sun) {
+  // 射线与玑镂在 32px 以下是纯开销：透明度只有 .10–.16，铺在十几像素上完全看不见。
+  // Rays and guilloche are pure cost under 32px: at .10-.16 opacity they are invisible.
+  if (m.sun && fine) {
     for (let i = 0; i < 48; i++) { sun += `<line x1="32" y1="26" x2="32" y2="6" transform="rotate(${i * 7.5} 32 32)"/>` }
     sun = `<g stroke="${m.L}" stroke-width=".8" opacity="${mat === 'limited' ? '.10' : '.14'}">${sun}</g>`
   }
   let guil = ''
-  if (mat === 'silver' || mat === 'gold') {
+  if ((mat === 'silver' || mat === 'gold') && fine) {
     for (let i = 0; i < 10; i++) { guil += `<ellipse cx="32" cy="32" rx="21" ry="7.5" transform="rotate(${i * 18} 32 32)"/>` }
     guil = `<g fill="none" stroke="${m.inlay}" stroke-width=".45" opacity="${mat === 'gold' ? '.16' : '.10'}">${guil}</g>`
   }

@@ -38,6 +38,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CASES, P_ENTRY, P_SL, P_TP, type Candle } from './verdictData'
 import { useSectionProgress } from './useSectionProgress'
+import { onMediaQuery } from './onMediaQuery'
 
 const BEATS = 5
 
@@ -115,11 +116,16 @@ export default function MarketStory() {
       setNarrow(!desk.matches)
     }
     apply()
-    desk.addEventListener('change', apply)
-    reduce.addEventListener('change', apply)
+    // 经 onMediaQuery 而不是直接 addEventListener：Safari 14 之前 MediaQueryList
+    // 不是 EventTarget，而构建下限含 safari12，直接调会抛 TypeError 白掉整页。
+    // Via onMediaQuery: MediaQueryList was not an EventTarget before Safari 14 and
+    // the build floor includes safari12, where the direct call throws and takes
+    // the whole page down.
+    const offDesk = onMediaQuery(desk, apply)
+    const offReduce = onMediaQuery(reduce, apply)
     return () => {
-      desk.removeEventListener('change', apply)
-      reduce.removeEventListener('change', apply)
+      offDesk()
+      offReduce()
     }
   }, [])
 
@@ -371,7 +377,7 @@ export default function MarketStory() {
         <div className={`story-panel panel-l ${active === 0 ? 'on' : ''}`} data-panel="mkt0">
           <div className="panel-inner">
             <p className="text-[12px] uppercase tracking-[0.16em] text-prism-400">{t('landing.wrEyebrow')}</p>
-            <h2 className="mt-4 max-w-[16ch] font-display-xl text-[clamp(1.9rem,4.8vw,3.1rem)] text-white">
+            <h2 className="mt-4 max-w-[16ch] font-display-xl fs-fluid [--fs-min:1.9rem] [--fs-vw:4.8vw] [--fs-max:3.1rem] text-white">
               {t('landing.wrTitle')}
             </h2>
             <p className="mt-4 max-w-[46ch] text-[13px] leading-relaxed text-neutral-400 sm:text-[15px]">
@@ -386,7 +392,7 @@ export default function MarketStory() {
             data-panel={`mkt${n}`}
           >
             <div className="panel-inner">
-              <h3 className="max-w-[16ch] font-display-xl text-[clamp(1.7rem,3.6vw,2.9rem)] leading-[1.12] text-white">
+              <h3 className="max-w-[16ch] font-display-xl fs-fluid [--fs-min:1.7rem] [--fs-vw:3.6vw] [--fs-max:2.9rem] leading-[1.12] text-white">
                 {t(`landing.wrRule${n}`)}
               </h3>
               <p className="mt-4 max-w-[44ch] text-[13px] leading-relaxed text-neutral-400 sm:text-[15px]">

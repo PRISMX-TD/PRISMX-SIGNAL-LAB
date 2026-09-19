@@ -42,7 +42,6 @@ import type * as TH from 'three'
 export interface ShardsHandle {
   setVisible(v: boolean): void
   /** 整体压暗，判定幕让位给终端 / global dim so the verdict terminal owns its act */
-  setDim(k: number): void
   update(t: number): void
   dispose(): void
 }
@@ -332,33 +331,49 @@ export function createBackdropShards(
     const l = o as TH.LineSegments
     if (l.isLineSegments) edgeMats.push(l.material as TH.LineBasicMaterial)
   })
-  const edgeBase = edgeMats.map((m) => m.opacity)
-  const faceBase = faceMat.opacity
+  // edgeMats 仍然收集：dispose 与将来可能恢复的 setDim 都要它。
+  // 原来这里还会快照一份基准不透明度（edgeBase / faceBase），那是 setDim 唯一的
+  // 用途，随 setDim 一起去掉。/ edgeMats is still collected for dispose; the base
+  // opacity snapshots existed only for setDim and go with it.
+
+  // 上一帧的时间戳，用于算真实 dt（见 update）。/ previous frame time, for the real dt.
+  let lastT: number | null = null
 
   return {
     setVisible: (v: boolean) => {
       group.visible = v
     },
-    /* 判定幕里终端是唯一主体，碎片退到余光。压的是不透明度而不是隐藏——
-       突然消失会被看见，缓慢退场不会。
-       In the verdict act the terminal is the only subject and the shards fall back
-       to peripheral. Dimming rather than hiding: a sudden disappearance registers,
-       a fade does not. */
-    setDim: (k: number) => {
-      faceMat.opacity = faceBase * k
-      edgeMats.forEach((m, i) => (m.opacity = edgeBase[i] * k))
-    },
+    /* setDim 已移除（2026-09-19）：与 BackdropAir 上那个同名方法一样，实现并导出了
+       但全仓库零调用点。LandingSpace 里「判定幕碎片让位」的注释描述的就是它，那段
+       行为从未接上；接不接是视觉决策，这里只去掉死 API。要恢复：
+       `setDim: (k) => { faceMat.opacity = faceBase * k;
+                         edgeMats.forEach((m, i) => (m.opacity = edgeBase[i] * k)) }`
+       setDim removed 2026-09-19: like its namesake on BackdropAir it was implemented
+       and exported with zero call sites. Restoring it is the one closure above. */
     update: (t: number) => {
       if (!group.visible) return
+      /* 帧间隔用真实 dt，不再写死 0.016。
+         写死 60fps 的后果是自转速度随刷新率变：120Hz 设备上转得**正好两倍快**，
+         而掉帧时反而变慢——也就是「越卡转得越慢」，与物理直觉相反。
+         dt 夹到 0.1s 上限：标签页切回前台、或断点停下再继续时 t 会跳一大截，
+         不夹就会看到碎片瞬间转过一大圈。
+         Real frame delta instead of a hardcoded 0.016. Hardcoding 60fps makes the
+         tumble rate track the refresh rate — exactly twice as fast at 120Hz, and
+         slower when frames drop, so it spins down precisely when the page is
+         struggling. dt is capped at 0.1s because t jumps after a tab returns to the
+         foreground or a debugger resumes, and an uncapped delta would snap every
+         shard through a visible arc. */
+      const dt = lastT === null ? 0.016 : Math.min(0.1, Math.max(0, t - lastT))
+      lastT = t
       for (const s of shards) {
         /* 极慢自转。碎片必须一直转，否则棱上那道亮线是死的——玻璃的可信度来自
            「转动时高光沿着棱滑过去」。转速慢到说不出它在转，只觉得画面是活的。
            A very slow tumble. Shards must keep turning or the line along the arris
            is dead: glass is believable because the highlight slides along the edge
            as it moves. Slow enough that nobody would say it is spinning. */
-        s.m.rotation.x += s.spin[0] * 0.016
-        s.m.rotation.y += s.spin[1] * 0.016
-        s.m.rotation.z += s.spin[2] * 0.016
+        s.m.rotation.x += s.spin[0] * dt
+        s.m.rotation.y += s.spin[1] * dt
+        s.m.rotation.z += s.spin[2] * dt
         s.m.position.x = s.baseX + Math.sin(t * 0.05 + s.phase) * s.drift
         s.m.position.y = s.baseY + Math.cos(t * 0.037 + s.phase) * s.drift * 0.6
       }

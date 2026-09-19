@@ -7,6 +7,7 @@ import { useEffect, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '../store/auth'
 import { syncLanguage } from '../i18n'
+import { readStorage } from '../utils/safeStorage'
 import { langFromPath, pageById, ORIGIN, type PageId, type PublicLang } from './meta'
 
 export default function PublicShell({ lang, page, children }: { lang: PublicLang; page: PageId; children: ReactNode }) {
@@ -18,10 +19,15 @@ export default function PublicShell({ lang, page, children }: { lang: PublicLang
     // 首页对已登录用户只是个跳板（Home 立刻重定向去 /dashboard）。但 i18n 在
     // 模块初始化时已按 URL 把 '/' 判成中文（见 i18n/index.ts 的 urlLang 优先），
     // 光跳过同步不够——要把语言还原成用户存储的偏好，别让「中文首页」的 URL
-    // 声明污染登录后的界面语言。localStorage 在这里安全：PublicShell 只在
-    // 客户端渲染（见下方 useAuth 注释）。
+    // 声明污染登录后的界面语言。读走 safeStorage：PublicShell 确实只在客户端
+    // 渲染（见下方 useAuth 注释），但"在客户端"不等于"localStorage 可用"——
+    // Safari 无痕与被策略禁用站点数据的浏览器照样会抛。读不到就退回中文。
+    // The read goes through safeStorage: PublicShell does only render on the
+    // client (see the useAuth note below), but "on the client" is not "storage
+    // works" — Safari private mode and policy-disabled site data still throw. A
+    // failed read falls back to Chinese.
     if (page === 'home' && isAuthed) {
-      syncLanguage(localStorage.getItem('prismx_lang') === 'en' ? 'en' : 'zh')
+      syncLanguage(readStorage('prismx_lang') === 'en' ? 'en' : 'zh')
       return
     }
     syncLanguage(lang)

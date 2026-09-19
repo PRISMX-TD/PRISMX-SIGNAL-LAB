@@ -277,18 +277,18 @@
   .chip-buy {
     background: var(--up-bg);
     color: var(--up);
-    border: 1px solid rgba(53, 201, 122, 0.32);
+    border: 1px solid rgb(var(--up-rgb) / 0.32);
   }
   .chip.sell,
   .chip-sell {
     background: var(--down-bg);
     color: var(--down);
-    border: 1px solid rgba(240, 77, 99, 0.32);
+    border: 1px solid rgb(var(--down-rgb) / 0.32);
   }
   .chip.live {
     background: var(--up-bg);
     color: var(--up);
-    border: 1px solid rgba(53, 201, 122, 0.28);
+    border: 1px solid rgb(var(--up-rgb) / 0.28);
   }
   .chip.dim,
   .chip-dim {
@@ -410,8 +410,8 @@
     height: 36px;
     padding: 0 16px;
     border-radius: 999px;
-    background: rgba(53, 201, 122, 0.10);
-    border: 1px solid rgba(53, 201, 122, 0.35);
+    background: rgb(var(--up-rgb) / 0.10);
+    border: 1px solid rgb(var(--up-rgb) / 0.35);
     color: var(--up);
     font-size: 13px;
     font-weight: 500;
@@ -854,7 +854,10 @@
   }
   .donut-center {
     position: absolute;
-    inset: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     display: grid;
     place-items: center;
     text-align: center;

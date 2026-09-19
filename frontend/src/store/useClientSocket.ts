@@ -173,6 +173,48 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
     }
 
     const connect = () => {
+      // 建新连接之前先把上一条彻底摘干净。
+      //
+      // 上面 reconnectNow 只挡了 CONNECTING 与 OPEN 两态；readyState 为 CLOSING(2)
+      // 时会直接走到这里，而那条旧 socket 的 onclose 仍挂着——它最终关闭时会再跑一次
+      // scheduleReconnect()，于是第二条连接被建出来，两条并存：报价与持仓重复入账、
+      // 后端连接数翻倍。切前台叠加弱网时最容易撞上，而这恰好是 reconnectNow 被调用
+      // 得最频繁的时刻。
+      // 摘钩子的手法与 dropDeadConnection 同源：先卸四个回调再 close()，让浏览器对
+      // 一条已死 TCP 拖很久的关闭握手无论何时结束，都影响不到接替它的那条连接。
+      //
+      // Fully detach the previous socket before opening a new one. reconnectNow
+      // above only short-circuits on CONNECTING and OPEN; readyState CLOSING(2)
+      // falls through to here while the old socket still has its onclose
+      // attached — when it finally closes it runs scheduleReconnect() again and a
+      // second connection appears alongside the first: duplicated quote and
+      // position updates, double the backend connection count. Most likely on
+      // resume over a weak network, which is exactly when reconnectNow fires most
+      // often. Detaching mirrors dropDeadConnection: drop the four callbacks,
+      // then close(), so however long the browser drags out the closing handshake
+      // on a dead TCP connection, its eventual events cannot touch the socket
+      // that replaced it.
+      const previous = ws
+      ws = null
+      // 心跳与它的期限一并停掉：旧连接的期限计时器若在新连接握手期间到点，
+      // 会调用 dropDeadConnection() 再建一条——正是这里要防的那件事本身。
+      // Stop the heartbeat and its deadline too: if the old connection's deadline
+      // timer fires while the new one is still handshaking it calls
+      // dropDeadConnection() and opens yet another socket — the very thing this
+      // block exists to prevent.
+      stopHeartbeat()
+      if (previous) {
+        previous.onopen = null
+        previous.onmessage = null
+        previous.onclose = null
+        previous.onerror = null
+        try {
+          previous.close()
+        } catch {
+          /* 已经关了 / already closed */
+        }
+      }
+
       // 每次(重)连都重新读取 token，而不是在 effect 顶层读一次存进闭包。
       // 该 effect 只在挂载时跑一次（deps=[]），如果 token 只读一次，页面挂着
       // 超过 JWT 有效期（1 天）后，即便滑动续期早把 localStorage 里的 token
@@ -187,8 +229,26 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
       // stopping reconnects below, while the banner kept claiming otherwise.
       const token = getToken()
       if (!token) {
-        // 挂载期间登出：没有 token 就不再尝试连接 / signed out while mounted: nothing to connect with
-        closed = true
+        // 挂载期间没有 token：这一轮不连，但**不封死**本实例。
+        //
+        // 以前这里置 closed = true，而 closed 是 effect 作用域里的一次性开关：置真
+        // 之后 scheduleReconnect / reconnectNow / onclose 全部提前 return，这个 hook
+        // 实例再也不会建立连接。目前靠"登出会跳路由、Layout 卸载、hook 重新挂载"兜
+        // 住；哪天 Layout 变成不卸载的持久外壳（或登出后停在同一棵树上），表现就是
+        // 静默无数据：没有报错、没有断线横幅，只是永远不更新。
+        // 只 return 的话，下一次 online / visibilitychange / 退避计时器都会再试一次，
+        // 那时若 token 已经回来（重新登录）就自然接上。
+        //
+        // No token this round: skip the attempt but do *not* seal this instance.
+        // This used to set closed = true, and `closed` is a one-way switch in the
+        // effect's scope — once true, scheduleReconnect / reconnectNow / onclose
+        // all return early and this hook instance never connects again. Today
+        // that's survivable only because signing out navigates, unmounts Layout
+        // and remounts the hook; the day Layout becomes a persistent shell (or a
+        // logout keeps the same tree alive) the symptom is silent staleness — no
+        // error, no offline banner, just data that never updates again. Simply
+        // returning lets the next online / visibilitychange / backoff tick retry,
+        // which picks up a token that has come back in the meantime.
         return
       }
 
@@ -242,6 +302,25 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
         } catch {
           /* ignore malformed */
         }
+      }
+
+      // onerror 不参与控制流——WebSocket 规范保证 error 之后必然跟一个 close，
+      // 重连一律由 onclose 驱动，这里再调度一次只会建出多余的连接。它的作用是
+      // 让「握手阶段就失败」留下痕迹：那种情况下 onclose 的 code/reason 通常是空的，
+      // 开发期没有这一行就只剩浏览器控制台一条红字，读不出是哪条连接。
+      // 刻意不写进 utils/pushDiag：那是推送链路的诊断格子（注册/订阅/上报），
+      // 诊断面板按步骤渲染，混进一条 WebSocket 记录会让面板说不清自己在说什么。
+      // onerror deliberately drives nothing: the spec guarantees a close event
+      // follows every error, reconnects are driven solely by onclose, and
+      // scheduling here too would just open spare sockets. It exists so a
+      // handshake-stage failure leaves a trace — onclose usually carries an empty
+      // code/reason in that case, and without this line there is nothing but one
+      // red line in the browser console. Deliberately not written into
+      // utils/pushDiag: that map holds the push pipeline's steps (register /
+      // subscribe / report) and the diagnostics panel renders them by step, so a
+      // WebSocket entry would muddle what the panel is reporting.
+      socket.onerror = () => {
+        if (import.meta.env.DEV) console.error('[ws] connection error', { readyState: socket.readyState })
       }
 
       socket.onclose = () => {

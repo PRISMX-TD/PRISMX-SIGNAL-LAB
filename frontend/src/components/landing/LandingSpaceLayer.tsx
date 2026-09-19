@@ -15,15 +15,28 @@
 // （实测 0KB），而这一层会把 three 请回来（约 178KB gzip）。之所以判定值得：判定
 // 走廊是整页的记忆点，把它做成桌面独占等于让一半以上的访客拿到一个平淡版本；
 // 而这一层本身极便宜——没有 CSS3D、没有光照、合并后不到 10 个 draw call、像素比
-// 压到 1.5、滚动停止即停表。真正贵的手机机身（PhoneGL）仍然只在桌面加载。
+// 压到 1.5。真正贵的手机机身（PhoneGL）仍然只在桌面加载。
+//
+// 这里原来写着「滚动停止即停表」，与实现不符：LandingSpace 的 pump() 只按
+// document.hidden 起停，滚动停下后 rAF 照跑——因为极慢正弦漂移与指针视差是**有意
+// 保留**的（见 LandingSpace 的 frame()：「滚动停下时画面仍然是一个地方，不是一张
+// 图」）。停表条件只有一条：标签页切到后台。改文档而不是改行为，那条漂移是设计。
 //
 // This layer loads on real devices too, which is a deliberate trade. The previous
 // pass kept three entirely off mobile (measured at 0KB) and this brings it back at
 // roughly 178KB gzipped. Judged worth it: the corridor is the page's one memorable
 // moment, and making it desktop-only hands more than half the audience the flat
 // version. The layer itself is cheap - no CSS3D, no lighting, under ten draw calls
-// after merging, pixel ratio capped at 1.5, and the clock stops when scrolling
-// does. The expensive phone body still loads on desktop only.
+// after merging, pixel ratio capped at 1.5. The expensive phone body still loads
+// on desktop only.
+//
+// This note used to claim "the clock stops when scrolling does", which the
+// implementation never did: LandingSpace's pump() is driven by document.hidden
+// alone and the rAF keeps running after scrolling stops, because the very slow
+// sine drift and pointer parallax are deliberate (see frame(): "when scrolling
+// stops the frame stays a place, not a picture"). The only stop condition is the
+// tab going to the background. Documentation corrected rather than behaviour —
+// that drift is the design.
 import { useEffect, useRef } from 'react'
 import { createLandingSpace, type SpaceHandle } from './LandingSpace'
 import type { BackdropMode } from './LandingSpace'
@@ -65,7 +78,25 @@ export default function LandingSpaceLayer() {
       const market = document.getElementById('verdict')
       if (!host.current || !story || !market) return
       try {
-        handle = await createLandingSpace({ container: host.current, storyEl: story, marketEl: market })
+        handle = await createLandingSpace({
+          container: host.current,
+          storyEl: story,
+          marketEl: market,
+          /* 上下文丢失 = 退回静态基线层。
+             摘掉 .space-on，SSR 就已经在 DOM 里的静态网格自行淡回来；再 dispose
+             把画布摘掉。不重建：基线层本来就是这一层的降级目标。
+             A lost context reverts to the baseline layer: dropping .space-on lets
+             the static grid (in the DOM since SSR) fade back in, then dispose
+             removes the canvas. No rebuild — the baseline is this layer's
+             intended degradation target. */
+          onContextLost: () => {
+            document.documentElement.classList.remove('space-on')
+            const dead = handle
+            handle = null
+            handleRef.current = null
+            dead?.dispose()
+          },
+        })
       } catch {
         handle = null
       }

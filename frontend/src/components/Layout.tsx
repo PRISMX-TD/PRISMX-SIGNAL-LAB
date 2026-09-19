@@ -471,16 +471,26 @@ export default function Layout() {
   const moreActive = moreItems.some((m) => location.pathname === m.to)
 
   // 「其他」面板打开时：返回手势关闭面板而非切换页面 / back gesture closes the sheet
-  useEffect(() => {
-    if (!moreOpen) return
-    window.history.pushState({ __moreSheet: true }, '')
-    const onPop = () => setMoreOpen(false)
-    window.addEventListener('popstate', onPop)
-    return () => {
-      window.removeEventListener('popstate', onPop)
-      if (window.history.state?.__moreSheet) window.history.back()
-    }
-  }, [moreOpen])
+  //
+  // 改用全站共用的 useBackToClose，不再自己 pushState。自己那一份有个漏洞：从面板里
+  // 点一个导航项时，路由先切换 → 下面那个 effect 把 moreOpen 置 false → cleanup 运行，
+  // 但此时 history 顶端已经是 router 写的那条，`__moreSheet` 那条**假条目留在历史里**。
+  // 用户在新页面按一次返回只是退回那条同 URL 的假条目，看起来像"返回失灵了一次"。
+  // useBackToClose 恰好处理了这一情形（cleanup 里核对 history.state 仍是自己压的那条
+  // 才 back()，否则宁可留一条无害的死条目也不撤销用户刚做的导航），并且同时接进
+  // PwaBackGuard 的弹窗栈——面板打开时的返回不会被误判成"用户想彻底退出"。
+  //
+  // Now uses the site-wide useBackToClose instead of a hand-rolled pushState. The
+  // hand-rolled version had a hole: tapping a nav item inside the sheet navigates
+  // first, the effect below sets moreOpen false, and the cleanup runs — but by
+  // then the top of history is the router's entry, so the `__moreSheet` entry is
+  // left behind. One back press on the new page merely returns to that
+  // same-URL phantom, reading as "back didn't work that time". useBackToClose
+  // handles exactly this (its cleanup only calls back() when history.state is
+  // still its own marker, otherwise it leaves a harmless dead entry rather than
+  // undoing the user's navigation) and registers with PwaBackGuard's modal stack,
+  // so a back press while the sheet is open isn't read as "exit the app".
+  useBackToClose(moreOpen, () => setMoreOpen(false))
 
   // 路由切换时自动关闭面板 / close the sheet on navigation
   useEffect(() => { setMoreOpen(false) }, [location.pathname])
@@ -630,7 +640,15 @@ export default function Layout() {
             )
           }
           lastPerm = Notification.permission
-          if (!cancelled && Notification.permission === "granted") void report()
+          // 这里**不再**单独 report() 一次：紧接着下面那句无条件的
+          // granted → report() 已经覆盖了"权限刚变成 granted"这一支。两处都发的
+          // 结果是那一次连发两遍（两次 getPrefs + 两次 subscribe 上报），而回前台
+          // 本来就要和 live.tsx 的 RESUME_RESYNC 叠在一起。
+          // Deliberately no report() here: the unconditional granted → report()
+          // right below already covers the "permission just became granted"
+          // case. Doing both fired it twice on that transition (two getPrefs,
+          // two subscription reports), on top of live.tsx's RESUME_RESYNC which
+          // already lands at the same moment.
         }
         // 静默重报订阅：修复端点过期或 SW 被浏览器轮换的漏网情况
         // Silently re-report the subscription: catches endpoint expiry / SW
@@ -797,7 +815,19 @@ export default function Layout() {
           className={`w-full flex-1 ${
             isTerminal
               ? 'p-0'
-              : 'mx-auto max-w-7xl px-4 pb-24 pt-6 sm:px-6 sm:pb-6'
+              // pb-24 → .clears-tabbar：那个 96px 正是被 footer 否掉的那个写死值
+              // （见下方 footer 的注释）——全面屏手机的手势条加底栏本体已经超过它。
+              // 这里同一个文件里既有实测值又有被否掉的常量，是最容易在下一次改动
+              // 里复活的那种不一致。sm:pb-6 保留：≥640px 时底栏离手仍远，且
+              // Tailwind 的 utilities 层压得过 components 层里的 .clears-tabbar。
+              // pb-24 → .clears-tabbar: that 96px is the exact hard-coded number
+              // the footer already rejected (see its comment below) — on
+              // gesture-nav phones the bar plus safe area exceeds it. Having the
+              // measured value and the rejected constant side by side in one file
+              // is the kind of inconsistency that comes back on the next edit.
+              // sm:pb-6 stays: above 640px the bar is well clear, and Tailwind's
+              // utilities layer outranks .clears-tabbar in the components layer.
+              : 'mx-auto max-w-7xl px-4 pt-6 sm:px-6 clears-tabbar sm:pb-6'
           }`}
         >
           {/* 懒加载页面切换时导航保持可见 / keep the nav visible while a lazy page loads */}

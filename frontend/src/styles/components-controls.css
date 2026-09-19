@@ -54,7 +54,10 @@
   }
   .select-backdrop {
     position: fixed;
-    inset: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     z-index: 40;
   }
   /* portal 到 <body>，用 fixed 定位（left/top/width/bottom 由组件按触发器坐标
@@ -121,7 +124,10 @@
   }
   .slide-track-label {
     position: absolute;
-    inset: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     display: grid;
     place-items: center;
     font-size: 13px;
@@ -156,15 +162,15 @@
     transition: none;
   }
   .slide-track.done {
-    border-color: rgba(53, 201, 122, 0.5);
+    border-color: rgb(var(--up-rgb) / 0.5);
   }
   .slide-track.done .slide-track-fill {
-    background: rgba(53, 201, 122, 0.16);
+    background: rgb(var(--up-rgb) / 0.16);
     width: 100% !important;
   }
   .slide-track.done .slide-knob {
     background: linear-gradient(130deg, #16a866, #35c97a);
-    box-shadow: 0 4px 18px rgba(53, 201, 122, 0.5);
+    box-shadow: 0 4px 18px rgb(var(--up-rgb) / 0.5);
   }
   .receipt-card {
     margin-top: 12px;
@@ -186,7 +192,7 @@
     background: var(--up-bg);
     color: var(--up);
     font-weight: 700;
-    border: 1px solid rgba(53, 201, 122, 0.3);
+    border: 1px solid rgb(var(--up-rgb) / 0.3);
   }
   .spinner {
     width: 16px;
@@ -367,7 +373,10 @@
   /* 「其他」弹出面板 / "More" liquid-glass sheet */
   .lg-sheet-overlay {
     position: fixed;
-    inset: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     z-index: 50;
     display: flex;
     align-items: flex-end;
@@ -438,8 +447,8 @@
     margin-top: 12px;
     padding: 12px;
     border-radius: 999px;
-    background: rgba(240, 77, 99, 0.12);
-    border: 1px solid rgba(240, 77, 99, 0.32);
+    background: rgb(var(--down-rgb) / 0.12);
+    border: 1px solid rgb(var(--down-rgb) / 0.32);
     color: #ff8095;
     font: inherit;
     font-size: 13px;
@@ -464,12 +473,18 @@
     overflow: hidden;
     /* 防止 iOS Safari 弹性滚动拉出白底 */
     position: fixed;
-    inset: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
   }
   /* 全屏容器：覆盖整个视口，z-60 盖过 header(z-30) 和 tabbar(z-40) */
   .chart-fullscreen-container {
     position: fixed !important;
-    inset: 0 !important;
+    top: 0;
+    right: !important;
+    bottom: 0;
+    left: !important;
     z-index: 60 !important;
     height: 100dvh !important;
     min-height: unset !important;

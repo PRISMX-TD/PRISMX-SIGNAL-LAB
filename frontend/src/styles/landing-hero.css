@@ -45,6 +45,42 @@
   background: rgba(255, 255, 255, 0.025);
 }
 
+/* ⚠ 注意：从这里到「多周期轨道」那一节之前，本文件管的**不是落地页**。
+   下面这几组规则（.seg-pill / .filter-cycle / .seg-tabs / .view-all-btn / .lg-tab /
+   .qt-trade-btn 的按下反馈与移动端触摸热区，以及 .sig-filters、.qt-table）作用的是
+   **登录后全站的通用控件**，落地页一个都用不到。它们当初写在这里只是因为「按下
+   反馈」这一批改动是和落地页首屏一起做的。
+
+   为什么这件事有后果而不只是不整齐：index.css 的 @import 顺序**就是层叠顺序**，
+   而 landing-hero.css 排在第 49 位——晚于 signals / dashboard / orders / achievements /
+   competitions / leaderboard 全部页面样式。也就是说一个名字叫「落地页首屏」的文件，
+   在层叠上**赢过所有业务页**，由它最终决定这些控件的触摸热区、Tab 高度与按下反馈。
+   改这一段时请意识到：动 .seg-tabs 的高度会同时动到订单页、信号页、排行榜。
+
+   没有把它们搬走，是因为搬动**必然改变层叠结果**：这些规则现在能生效，恰恰依赖
+   它们排在那些页面样式之后。搬到「该在的位置」（如 components-controls.css，第 28 位）
+   会让它们反过来被业务页覆盖，那是一次无法靠读代码验证的全站视觉变更。先把边界
+   标出来，真要搬需要逐条回归。
+
+   WARNING: from here down to the multi-timeframe section, this file is not about the
+   landing page. These rules (press feedback and mobile tap targets for .seg-pill,
+   .filter-cycle, .seg-tabs, .view-all-btn, .lg-tab, .qt-trade-btn, plus .sig-filters
+   and .qt-table) govern shared controls in the logged-in app, none of which the
+   landing page uses. They live here only because the press-feedback work shipped
+   alongside the landing hero.
+   Why that has consequences rather than merely being untidy: index.css's @import
+   order IS the cascade order, and landing-hero.css sits at position 49 — after every
+   page stylesheet (signals, dashboard, orders, achievements, competitions,
+   leaderboard). So a file named "landing hero" outranks all of them and has the
+   final say over these controls' tap targets, tab heights and press feedback.
+   Editing this block changes the orders, signals and leaderboard pages too.
+   They were not moved because moving them necessarily changes the outcome: these
+   rules work precisely because they come after those page stylesheets. Relocating
+   them to where they belong (components-controls.css, position 28) would invert
+   that and let page styles override them — a site-wide visual change that cannot be
+   verified by reading. The boundary is marked here; an actual move needs per-rule
+   regression. */
+
 /* 样本 80–84：按下反馈。
    全站 42 条 :hover、16 条 :active——手机上 hover 根本不触发，:active 是
    用户唯一能得到的反馈，而最常按的那几个控件一条都没有。
@@ -229,10 +265,10 @@
      Both sides move together (scenes alternate sides with the phone opposite),
      story section only — the verdict act composes its copy against the wall. */
   .story-section .panel-l {
-    left: calc((100vw - min(100vw, 1440px)) / 2 + 0.12 * min(100vw, 1440px));
+    left: calc((100vw - var(--frame)) / 2 + 0.12 * var(--frame));
   }
   .story-section .panel-r {
-    right: calc((100vw - min(100vw, 1440px)) / 2 + 0.12 * min(100vw, 1440px));
+    right: calc((100vw - var(--frame)) / 2 + 0.12 * var(--frame));
   }
 }
 
@@ -280,18 +316,51 @@
   .mkt-stage .js-tick::after {
     content: '';
     position: absolute;
-    inset: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     background: var(--purple-hi);
     transform-origin: top;
     transform: scaleY(var(--tick-f, 0));
   }
   /* 五段均分：第 i 段在总进度 [i/5, (i+1)/5] 内从 0 填到 1。
-     Five equal segments, each filling across its fifth of the total travel. */
-  :is(.story-stage, .mkt-stage) .js-tick:nth-child(1)::after { --tick-f: clamp(0, calc(var(--sec-p, 0) * 5 - 0), 1); }
-  :is(.story-stage, .mkt-stage) .js-tick:nth-child(2)::after { --tick-f: clamp(0, calc(var(--sec-p, 0) * 5 - 1), 1); }
-  :is(.story-stage, .mkt-stage) .js-tick:nth-child(3)::after { --tick-f: clamp(0, calc(var(--sec-p, 0) * 5 - 2), 1); }
-  :is(.story-stage, .mkt-stage) .js-tick:nth-child(4)::after { --tick-f: clamp(0, calc(var(--sec-p, 0) * 5 - 3), 1); }
-  :is(.story-stage, .mkt-stage) .js-tick:nth-child(5)::after { --tick-f: clamp(0, calc(var(--sec-p, 0) * 5 - 4), 1); }
+     Five equal segments, each filling across its fifth of the total travel.
+
+     这里原来是 `:is(.story-stage, .mkt-stage) …{ --tick-f: clamp(0, calc(var(--sec-p)*5 - i), 1) }`，
+     两处都在 Chrome 70 的下限之外，而且都是**整条规则作废**级别的：
+     · `:is()` 是 Chrome 88+。CSS 规范规定无效选择器废掉整条规则（不是只废那一个
+       分支），所以旧内核上这五条一条都不生效。
+     · `clamp()` 是 Chrome 79+，即便选择器展开了也还要再垮一次。
+     后果正是作者明确要修掉的那个体感：移动端的「滚动温度计」永远填 0，幕与幕之间
+     又回到「推了很久没反应」。
+
+     改法两步：选择器展成逗号列表（`:is()` 的权重取自最具体的那个分支，两个分支都是
+     类，所以展开后权重一模一样，层叠不变）；clamp 那一步交给 JS——
+     useSectionProgress 本来就在每帧算 --sec-p，顺手把五段夹好的值写成 --tk1..--tk5，
+     CSS 这边只剩一次 var() 取值，不再需要任何数学函数。
+
+     Both halves of the original were outside the Chrome 70 floor, and both in the
+     "kills the whole rule" category: `:is()` is Chrome 88+ and an invalid selector
+     voids the entire rule rather than one branch, so none of the five applied; and
+     `clamp()` is Chrome 79+, which would fail again even with the selector expanded.
+     The visible result was exactly the symptom this gauge was built to remove — the
+     mobile scroll thermometer stuck at zero and the dead air back between scenes.
+     Fix is two steps: expand the selector to a comma list (`:is()` takes the
+     specificity of its most specific branch, and both branches are classes, so the
+     expansion is cascade-identical), and move the clamping to JS —
+     useSectionProgress already computes --sec-p every frame, so it now also writes
+     the five pre-clamped values --tk1..--tk5 and CSS is left with a plain var(). */
+  .story-stage .js-tick:nth-child(1)::after,
+  .mkt-stage .js-tick:nth-child(1)::after { --tick-f: var(--tk1, 0); }
+  .story-stage .js-tick:nth-child(2)::after,
+  .mkt-stage .js-tick:nth-child(2)::after { --tick-f: var(--tk2, 0); }
+  .story-stage .js-tick:nth-child(3)::after,
+  .mkt-stage .js-tick:nth-child(3)::after { --tick-f: var(--tk3, 0); }
+  .story-stage .js-tick:nth-child(4)::after,
+  .mkt-stage .js-tick:nth-child(4)::after { --tick-f: var(--tk4, 0); }
+  .story-stage .js-tick:nth-child(5)::after,
+  .mkt-stage .js-tick:nth-child(5)::after { --tick-f: var(--tk5, 0); }
 
   /* ③ 切幕过渡 0.5s → 0.28s，位移 14px → 10px。
      0.5s 是桌面 scrub 前的取值：手机上一次快划 200ms 就能跨过幕边界，切幕

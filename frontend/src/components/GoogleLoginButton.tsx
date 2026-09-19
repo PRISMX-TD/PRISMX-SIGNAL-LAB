@@ -59,6 +59,12 @@ export default function GoogleLoginButton({ onCredential, onError }: Props) {
   const tRef = useRef(t)
   tRef.current = t
   const [ready, setReady] = useState(false)
+  // GSI 脚本没能加载（等到超时仍拿不到 window.google）。大陆访问时
+  // accounts.google.com 不可达，这是**常态**而不是边缘情况。
+  // The GSI script never arrived (window.google still absent at the deadline).
+  // accounts.google.com is unreachable from mainland China, so this is the
+  // normal case there, not an edge case.
+  const [unavailable, setUnavailable] = useState(false)
 
   // 只在挂载时初始化一次；回调/翻译通过 ref 读取最新值，避免依赖变化导致
   // 重复 initialize() 或在 initialize() 之前就 renderButton()。
@@ -91,11 +97,39 @@ export default function GoogleLoginButton({ onCredential, onError }: Props) {
       setReady(true)
     }
 
-    // GSI 脚本可能尚未加载完成，轮询等待 / poll until the async GSI script is ready
+    // GSI 脚本可能尚未加载完成，轮询等待——但必须有上限。
+    //
+    // 原来这个 100ms 定时器拿不到 window.google 就一直空转，没有次数也没有时间上限。
+    // accounts.google.com 在大陆不可达，`window.google` 永远不会出现，于是登录页以
+    // 10Hz 空跑到用户离开为止：纯耗电与主线程噪音，恰好落在"大陆访问慢 + 老机器"
+    // 这条既定痛点上。更糟的是按钮永远停在 opacity-0（ready 恒为 false），那层透明
+    // 覆盖层挡着下面那个装饰按钮，用户点上去毫无反应、也没有任何说明。
+    // 10 秒 / 100 次：GSI 脚本是 async defer 的外链，正常网络下几百毫秒内到位；
+    // 等满 10 秒还没有，就不是"慢"，是根本到不了。
+    //
+    // Poll for the async GSI script — but with a deadline. This 100ms timer used
+    // to spin forever when window.google never appeared, with no attempt or time
+    // limit. accounts.google.com is unreachable from mainland China, so the login
+    // page ran at 10Hz until the user left: pure battery and main-thread noise,
+    // landing squarely on the known "mainland is slow, phones are old" pain
+    // point. Worse, the button stayed at opacity-0 (ready never became true)
+    // while its transparent overlay still covered the decorative button beneath,
+    // so taps did nothing and nothing explained why. 10s / 100 attempts: the GSI
+    // script is an async defer external and lands within a few hundred
+    // milliseconds on a healthy network; ten seconds of silence is not "slow",
+    // it is "cannot be reached".
+    let attempts = 0
+    const MAX_ATTEMPTS = 100 // × 100ms = 10s
     const timer = window.setInterval(() => {
       if (cancelled) return
       const gsi = window.google?.accounts?.id
-      if (!gsi) return
+      if (!gsi) {
+        if (++attempts >= MAX_ATTEMPTS) {
+          window.clearInterval(timer)
+          setUnavailable(true)
+        }
+        return
+      }
       window.clearInterval(timer)
       gsi.initialize({
         client_id: CLIENT_ID,
@@ -127,10 +161,17 @@ export default function GoogleLoginButton({ onCredential, onError }: Props) {
 
   return (
     <div ref={wrapperRef} className="relative w-full">
-      {/* 可见的深色按钮（视觉层，不接收点击）/ visible dark button (decorative) */}
+      {/* 可见的深色按钮（视觉层，不接收点击）/ visible dark button (decorative)
+          GSI 不可用时把它整体压暗：它永远不会真的可点（官方按钮根本没渲染出来），
+          继续保持 hover 高亮就是在骗人。下面那句说明才是用户真正需要的信息。
+          Dimmed when GSI is unavailable: it can never actually be clicked (the
+          real button was never rendered), and keeping the hover highlight would
+          be a lie. The line below is the information the user actually needs. */}
       <div
         aria-hidden
-        className="flex h-11 w-full items-center justify-center gap-2.5 rounded-full border border-white/15 bg-white/[0.06] px-4 text-sm font-medium text-neutral-100 transition hover:border-white/25 hover:bg-white/[0.1]"
+        className={`flex h-11 w-full items-center justify-center gap-2.5 rounded-full border border-white/15 bg-white/[0.06] px-4 text-sm font-medium text-neutral-100 transition ${
+          unavailable ? 'opacity-40' : 'hover:border-white/25 hover:bg-white/[0.1]'
+        }`}
       >
         <GoogleIcon />
         <span>{t('auth.googleContinue')}</span>
@@ -140,6 +181,15 @@ export default function GoogleLoginButton({ onCredential, onError }: Props) {
         ref={containerRef}
         className={`absolute inset-0 flex items-center justify-center overflow-hidden ${ready ? 'opacity-[0.001]' : 'opacity-0'}`}
       />
+      {/* role="status"：这条是异步到达的状态说明（等了 10 秒才出现），不是页面
+          原有内容，屏幕阅读器应当被动播报一次。
+          role="status": this arrives asynchronously (ten seconds in) rather than
+          being part of the original page, so a screen reader should announce it. */}
+      {unavailable && (
+        <p role="status" className="mt-2 text-center text-xs leading-relaxed text-neutral-500">
+          {t('auth.googleUnavailable')}
+        </p>
+      )}
     </div>
   )
 }

@@ -335,6 +335,7 @@
     "or": "or",
     "googleContinue": "Continue with Google",
     "googleError": "Google sign-in failed. Please try again",
+    "googleUnavailable": "Google sign-in is unavailable: this network cannot reach Google’s sign-in service. Please sign in with your email instead.",
     "phone": "Phone number",
     "phonePlaceholder": "Phone number (without dial code)",
     "phoneHint": "Select your region and enter your phone number — used for account security and important notices",
@@ -1159,6 +1160,7 @@
     "copyFailed": "Copy failed — select the address manually",
     "pollingHint": "Waiting for confirmation… keep this page open, upgrade is automatic",
     "paymentExpired": "Payment expired or failed. Please try again.",
+    "paymentMismatch": "Payment received, but the amount or currency does not match the order and needs manual review. Please contact support with your order ID.",
     "successTitle": "Upgrade complete!",
     "successDesc": "You are now a PRO member — all features are unlocked.",
     "goDashboard": "Go to Dashboard",
@@ -1356,7 +1358,9 @@
       "assignNoResult": "No matching users",
       "assignAlready": "Assigned",
       "unassign": "Remove agent",
-      "noAgents": "None"
+      "noAgents": "None",
+      "unassignConfirmTitle": "Confirm removing agent",
+      "unassignConfirmBody": "{{name}} will lose the agent view and this link’s client list. They can be assigned again later."
     },
     "announcements": {
       "hint": "Write and publish announcements here. Users see published ones in the bell panel and on the Announcements page; drafts are admin-only. Fill in both languages; if only one is filled, the other language falls back to it.",
@@ -1524,7 +1528,10 @@
         "listToggle": "View list",
         "listHide": "Hide",
         "scopeLabel": "List scope",
-        "scope": { "all": "At this level now", "range": "Reached it this period" },
+        "scope": {
+          "all": "At this level now",
+          "range": "Reached it this period"
+        },
         "noteAll": "Everyone currently at \"{{level}}\", most recently promoted first.",
         "noteRange": "Users who reached \"{{level}}\" between {{from}} and {{to}}, including those who have since moved up — the last column shows their current level.",
         "empty": "No users match.",
@@ -1620,6 +1627,15 @@
     "bulkApply": "Apply to selected",
     "bulkClear": "Clear selection",
     "bulkSaved": "Updated {{n}} user(s)",
+    "bulkConfirmTitle": "Confirm bulk change",
+    "bulkConfirmBody": "This will apply to the {{n}} selected user(s): {{changes}}. It cannot be undone and leaves no audit trail.",
+    "bulkConfirmAdminWarn": "This includes \"role → admin\": those accounts gain every admin permission, including changing other people’s roles.",
+    "changeRole": "role → {{value}}",
+    "changePlan": "plan → {{value}}",
+    "changeExpiry": "expiry → {{value}}",
+    "neverExpires": "never expires",
+    "promoteTitle": "Confirm admin promotion",
+    "promoteBody": "{{email}} will gain every admin permission, including changing other people’s roles and plans. Demotions are not audited, so undoing it leaves no trace.",
     "brokerTitle": "Partner broker lock",
     "brokerLockEnabled": "Enabled (only partner-broker accounts can connect)",
     "brokerPatterns": "Server match keywords (comma-separated)",
@@ -2237,7 +2253,9 @@
       "extend": "Extend PRO",
       "days": "{{days}} days",
       "extendHint": "Added on top of the current expiry; lapsed or free clients start from now. At most 60 days per change — a year is six clicks.",
-      "downgrade": "Drop to free"
+      "downgrade": "Drop to free",
+      "downgradeConfirmTitle": "Confirm downgrade",
+      "downgradeConfirmBody": "{{email}} immediately loses live signals, push and multiple accounts (currently: {{current}}). Agents have no way to undo this — an admin has to."
     },
     "title": "Agent view",
     "subtitle": "Invite links assigned to you and the clients who registered through them. You can adjust their membership; everything else is read-only.",
@@ -2580,7 +2598,8 @@
       "isDefault": "Default",
       "full": "You can wear {{max}} at a time - unequip one first",
       "count": "{{n}} / {{max}} equipped",
-      "onBoard": "The default one appears on the leaderboard"
+      "onBoard": "The default one appears on the leaderboard",
+      "title": "Equipped badges"
     },
     "levelShort": {
       "novice": "Novice",

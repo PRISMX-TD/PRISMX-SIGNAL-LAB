@@ -17,21 +17,38 @@ import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { ticketApi } from '../api/client'
 import Select from '../components/Select'
-import { parseTime } from '../api/utils'
+import { fmtDayShort, parseTime } from '../api/utils'
 import type { Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 type View = 'list' | 'form' | { ticket: Ticket }
 
 const CATEGORY_OPTIONS: TicketCategory[] = ['account', 'payment', 'technical', 'feature']
 
-// 更新日期：列表里只要「几号」，同一年内省掉年份。/ Updated date: day-level in the list.
-function fmtDay(iso: string): string {
-  const d = parseTime(iso) ?? new Date(iso)
-  const sameYear = d.getFullYear() === new Date().getFullYear()
-  return d.toLocaleDateString(undefined, sameYear ? { month: '2-digit', day: '2-digit' } : { year: 'numeric', month: '2-digit', day: '2-digit' })
-}
+// 更新日期：列表里只要「几号」，同一年内省掉年份。改走 api/utils 的 fmtDayShort，
+// 不再本地实现——原来那份用 toLocaleDateString(undefined, …)，渲染在**浏览器本地
+// 时区**里，而全站约定是固定 UTC+8（见 api/utils 头注）。
+// Updated date: day-level in the list, via api/utils' fmtDayShort rather than a
+// local copy — the old one used toLocaleDateString(undefined, …) and rendered in
+// the browser's zone, while the site fixes everything to UTC+8 (api/utils header).
+const fmtDay = fmtDayShort
+
+// 对话气泡上的时刻：要到分钟，所以不能用 fmtDay/fmtDate（前者没有时分，后者带年份
+// 且拼了 UTC+8 后缀，对一串气泡来说太长）。时区仍显式固定成 Asia/Shanghai，与全站
+// 一致——原来这里是 undefined，等于跟着浏览器走。
+// The timestamp on a thread bubble needs minutes, so neither fmtDay (no time) nor
+// fmtDate (carries the year and a UTC+8 suffix, too long on a run of bubbles)
+// fits. The zone is still pinned to Asia/Shanghai like everywhere else; it used
+// to be undefined, i.e. whatever the browser says.
 function fmtStamp(iso: string): string {
-  return (parseTime(iso) ?? new Date(iso)).toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const d = parseTime(iso)
+  if (!d || Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString('en-GB', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 function initial(email: string): string {
   return (email.trim()[0] || '?').toUpperCase()
@@ -122,7 +139,18 @@ export default function SupportPage() {
   useEffect(() => {
     const id = searchParams.get('ticket')
     if (!id) return
-    setSearchParams(new URLSearchParams(), { replace: true })
+    // 只删 ticket 这一个键，不是把整个查询串清空。
+    // 原来是 setSearchParams(new URLSearchParams())，从带 ?ref=xxx&ticket=yyy 这类
+    // 链接进来时会把 ref 等其它参数一并抹掉。/support 当前确实没有别的参数，所以
+    // 这是一颗埋着的雷而不是现成的故障；AdminPage 那边的同款逻辑写的就是 delete。
+    // Delete only the ticket key rather than wiping the whole query string. This
+    // used to be setSearchParams(new URLSearchParams()), which also dropped ref
+    // and anything else when arriving from a link like ?ref=xxx&ticket=yyy.
+    // /support carries no other params today, so this is a buried mine rather
+    // than a live failure; the equivalent code in AdminPage already uses delete.
+    const next = new URLSearchParams(searchParams)
+    next.delete('ticket')
+    setSearchParams(next, { replace: true })
     ticketApi.get(id).then((ticket) => setView({ ticket })).catch(() => {})
   }, [])
 

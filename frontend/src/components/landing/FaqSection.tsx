@@ -26,7 +26,7 @@ export default function FaqSection() {
     <section id="faq" className="mx-auto w-full max-w-[1240px] scroll-mt-24 px-5 py-20 sm:px-8 sm:py-28">
       <div className="grid grid-cols-1 gap-12 lg:grid-cols-12 lg:gap-8">
         <div className="lg:col-span-4">
-          <h2 className="font-display-xl text-[clamp(1.75rem,3.6vw,2.5rem)] text-white">{t('landing.faqTitle')}</h2>
+          <h2 className="font-display-xl fs-fluid [--fs-min:1.75rem] [--fs-vw:3.6vw] [--fs-max:2.5rem] text-white">{t('landing.faqTitle')}</h2>
         </div>
 
         <div className="lg:col-span-7 lg:col-start-6">

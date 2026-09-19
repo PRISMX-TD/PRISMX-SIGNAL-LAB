@@ -7,6 +7,56 @@
   html { scroll-behavior: smooth; }
 }
 
+/* ── 内容框宽度 / the content frame ──
+   落地页多处要把元素对齐到「视口宽，但最多 1440」这个内容框上，原来各处直接写
+   `min(100vw, 1440px)`——而 min()/max()/clamp() 都是 **Chrome 79+**，在本项目
+   Chrome 70 的下限之外（见 vite.config.ts 的 target）。min() 一旦不认识，外层整个
+   calc() 跟着作废，那几条绝对定位就完全没有 left/right，文案栏落到容器边上。
+   媒体阶梯与 min() **在每个视口宽度上取值完全相同**，且只用到 vw/px：
+     < 1440px → 100vw（min 取前者）· ≥ 1440px → 1440px（min 取后者）
+   A media ladder that is exactly equal to min(100vw, 1440px) at every width, using
+   only vw and px. min()/max()/clamp() are Chrome 79+, outside this project's
+   Chrome 70 floor, and an unrecognised min() voids the whole enclosing calc() —
+   which left those absolutely positioned copy columns with no left/right at all. */
+:root {
+  --frame: 100vw;
+}
+@media (min-width: 1440px) {
+  :root {
+    --frame: 1440px;
+  }
+}
+
+/* ── 流体标题字号 / fluid display sizes ──
+   落地页的大标题原来直接写 Tailwind 任意值 `text-[clamp(1.75rem,3.6vw,2.5rem)]`。
+   clamp() 是 Chrome 79+，旧内核上这条 font-size 整条作废，标题**回落到继承值**
+   （约 16px）——页面最大的那几行字变成正文大小，落地页的排版层级当场消失。
+
+   这里不铺媒体查询阶梯，而是用同一条属性写两遍：
+     font-size: var(--fs-min);                                  ← 谁都认识
+     font-size: clamp(var(--fs-min), var(--fs-vw), var(--fs-max)); ← 认识的覆盖上去
+   旧内核拿到的是**下限值**——也就是这套字号本来为最窄屏准备的那一档，读起来就是
+   「没有随视口放大」，而不是「垮掉」；现代浏览器逐像素不变。这比推算断点安全：
+   不依赖根字号是否被改过，也不会在断点附近算错。
+   三个参数由调用点用 Tailwind 任意属性给（`[--fs-min:1.75rem]` 等），所以一个类
+   覆盖全部六处标题，不必为每种尺寸各起一个类名。
+
+   The landing page's headlines used Tailwind arbitrary values like
+   `text-[clamp(1.75rem,3.6vw,2.5rem)]`. clamp() is Chrome 79+, so on older engines
+   the declaration was void and the headline fell back to its inherited ~16px — the
+   largest type on the page rendering at body size, collapsing the whole hierarchy.
+   Rather than reconstructing breakpoints, the property is simply written twice: the
+   plain minimum first, then the clamp for engines that understand it. Old engines
+   get the value this scale already intended for the narrowest viewport, so it reads
+   as "not scaling up" rather than "broken", and modern rendering is unchanged. This
+   is safer than a derived ladder: it does not depend on whether the root font size
+   was altered and cannot be off near a breakpoint. The three parameters come from
+   the call site as arbitrary properties, so one class covers all six headlines. */
+.fs-fluid {
+  font-size: var(--fs-min);
+  font-size: clamp(var(--fs-min), var(--fs-vw), var(--fs-max));
+}
+
 /* ── 小节眉题 / section eyebrow ──
    类保留，但用法在落地页被严格配额：每三个分区最多一个。此前每个分区头部
    都挂一条紫色全大写宽字距标签，八个分区八条——那是模板化节奏最明显的来源，

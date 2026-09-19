@@ -31,6 +31,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../store/auth'
+import { readStorage, writeStorage } from '../utils/safeStorage'
 
 // 提前多少天开始提醒。7 天足够让人有时间准备一笔加密货币转账（还要等链上确认），
 // 又不至于早到让人看烦然后习惯性忽略。
@@ -75,7 +76,17 @@ function daysUntil(iso: string): number {
 export default function PlanExpiryBanner() {
   const { t } = useTranslation()
   const { user, refreshUser } = useAuth()
-  const [dismissed, setDismissed] = useState<string | null>(() => localStorage.getItem(DISMISS_KEY))
+    // 四处存储访问全部走 safeStorage：其中第一处在 useState 的初始化器里，Safari
+  // 无痕 / 企业策略禁用站点数据时裸 localStorage 会同步抛 SecurityError，而这个
+  // 组件挂在 Layout 里、每个登录后页面都渲染它——抛一次就是登录后整片白屏。
+  // 读不到就是"没关过这条横幅"，写不进就是"这次关闭不记住"，两种降级都无害。
+  // All four storage touches go through safeStorage. The first is inside a
+  // useState initialiser, and a bare localStorage access throws SecurityError
+  // synchronously in Safari private mode or with site data disabled by policy —
+  // and this component lives in Layout, rendered on every logged-in page, so one
+  // throw blanks the entire signed-in app. A failed read means "never dismissed",
+  // a failed write means "this dismissal isn't remembered"; both are harmless.
+  const [dismissed, setDismissed] = useState<string | null>(() => readStorage(DISMISS_KEY))
 
   const plan = user?.plan
   const expiresAt = user?.planExpiresAt
@@ -96,7 +107,7 @@ export default function PlanExpiryBanner() {
   // 记下当前看到的到期时间，供降级之后回溯用（见 LAST_EXPIRY_KEY 的说明）。
   // Record the expiry we can currently see, for use after a downgrade.
   useEffect(() => {
-    if (plan === 'PRO' && expiresAt) localStorage.setItem(LAST_EXPIRY_KEY, expiresAt)
+    if (plan === 'PRO' && expiresAt) writeStorage(LAST_EXPIRY_KEY, expiresAt)
   }, [plan, expiresAt])
 
   // ---- 判定要不要显示、显示哪一种 ----
@@ -116,7 +127,7 @@ export default function PlanExpiryBanner() {
       key = expiresAt
     }
   } else if (plan === 'FREE') {
-    const last = localStorage.getItem(LAST_EXPIRY_KEY)
+    const last = readStorage(LAST_EXPIRY_KEY)
     if (last) {
       const since = -daysUntil(last)
       // 只在「确实已经过去了」且还在解释窗口内时显示。since < 0 说明这条记录指向
@@ -157,7 +168,7 @@ export default function PlanExpiryBanner() {
           : t('planExpiry.soon', { days })
 
   const onDismiss = () => {
-    localStorage.setItem(DISMISS_KEY, key)
+    writeStorage(DISMISS_KEY, key)
     setDismissed(key)
   }
 

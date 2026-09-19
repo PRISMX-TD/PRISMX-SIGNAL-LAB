@@ -23,9 +23,22 @@
 // the scene). All strings come from existing i18n keys, with the sample-data
 // disclaimer fixed under the phone.
 //
-// 尺寸单位是 cqw（.dev-screen 开了 container-type: inline-size）：桌面 330px
-// 与移动端 150px 的手机共用同一份组件。/ Sizing is cqw so the desktop and
-// mobile phones share one component set.
+// 尺寸单位是 --cq：屏幕宽度的 1%，也就是 1cqw 的等价物（.dev-screen 开了
+// container-type: inline-size）。桌面 330px 与移动端全出血的手机共用同一份组件。
+//
+// 为什么写 calc(var(--cq)*N) 而不是直接写 Ncqw：cqw 与 container-type 都是
+// Chrome 105+，而本项目下限是 Chrome 70（见 vite.config.ts 的 target）。旧内核上
+// 直接写 cqw 会让这里 119 处尺寸声明全部作废，屏内退化成裸的 16px 文本。--cq 在
+// 认识容器查询的浏览器上就等于 1cqw（渲染逐像素不变），在旧内核上由
+// styles/landing-story.css 末尾的 @supports not 分支按 px/vw 算出等价值。
+//
+// Sizes are expressed in --cq: 1% of the screen's width, i.e. the equivalent of
+// 1cqw. calc(var(--cq)*N) rather than Ncqw because cqw and container-type are
+// Chrome 105+ while this project's floor is Chrome 70 (see vite.config.ts): on
+// older engines the raw unit would void all 119 size declarations here and leave
+// the screen as bare 16px text. --cq resolves to 1cqw where container queries
+// exist (pixel-identical rendering) and to a px/vw equivalent otherwise, via the
+// @supports not branch at the end of styles/landing-story.css.
 import { useEffect, useState } from 'react'
 import BadgeIcon from '../badges/BadgeIcon'
 import RankCoin from '../badges/RankCoin'
@@ -165,54 +178,54 @@ function MiniSignalCard({
   compact?: boolean
 }) {
   return (
-    <div className="sig-card rounded-[3.4cqw] border border-white/[0.09] bg-white/[0.035] p-[3.8cqw]">
+    <div className="sig-card rounded-[calc(var(--cq)*3.4)] border border-white/[0.09] bg-white/[0.035] p-[calc(var(--cq)*3.8)]">
       <div className="flex items-start justify-between">
-        <div className="flex items-center gap-[2cqw]">
-          <b className="sig-sym text-[4.6cqw] font-bold text-white">{sym}</b>
+        <div className="flex items-center gap-[calc(var(--cq)*2)]">
+          <b className="sig-sym text-[calc(var(--cq)*4.6)] font-bold text-white">{sym}</b>
           <span
-            className={`rounded-[1.6cqw] border px-[2cqw] py-[0.7cqw] text-[2.8cqw] font-bold ${
+            className={`rounded-[calc(var(--cq)*1.6)] border px-[calc(var(--cq)*2)] py-[calc(var(--cq)*0.7)] text-[calc(var(--cq)*2.8)] font-bold ${
               side === 'buy' ? 'border-up/35 bg-up/10 text-up' : 'border-down/35 bg-down/10 text-down'
             }`}
           >
             {t(side === 'buy' ? 'landing.scrBuy' : 'landing.scrSell')}
           </span>
           {fresh && (
-            <span className="rounded-[1.6cqw] bg-prism-600 px-[1.8cqw] py-[0.7cqw] text-[2.6cqw] font-bold text-white">
+            <span className="rounded-[calc(var(--cq)*1.6)] bg-prism-600 px-[calc(var(--cq)*1.8)] py-[calc(var(--cq)*0.7)] text-[calc(var(--cq)*2.6)] font-bold text-white">
               {t('landing.scrNew')}
             </span>
           )}
         </div>
         <div className="text-right">
-          <div className="sig-rr num text-[4.4cqw] font-bold leading-none text-up">{rr}</div>
-          <div className="mt-[0.8cqw] text-[2.9cqw] uppercase text-neutral-500">{t('landing.scrRr')}</div>
+          <div className="sig-rr num text-[calc(var(--cq)*4.4)] font-bold leading-none text-up">{rr}</div>
+          <div className="mt-[calc(var(--cq)*0.8)] text-[calc(var(--cq)*2.9)] uppercase text-neutral-500">{t('landing.scrRr')}</div>
         </div>
       </div>
 
       {/* 三格 tile：中性入场 / 红染止损 / 绿染止盈（同 .tile-sl/.tile-tp）
           Three tiles: neutral entry, red-tinted SL, green-tinted TP. */}
-      <div className="sig-tiles mt-[3cqw] grid grid-cols-3 gap-[1.8cqw]">
-        <div className="rounded-[2.6cqw] border border-white/[0.09] bg-white/[0.03] px-[1cqw] py-[2cqw] text-center">
-          <div className="sig-key text-[3.1cqw] text-neutral-500">{t('landing.scrEntry')}</div>
-          <div className="sig-val num mt-[0.8cqw] text-[3.4cqw] font-bold text-white">{entry}</div>
+      <div className="sig-tiles mt-[calc(var(--cq)*3)] grid grid-cols-3 gap-[calc(var(--cq)*1.8)]">
+        <div className="rounded-[calc(var(--cq)*2.6)] border border-white/[0.09] bg-white/[0.03] px-[calc(var(--cq)*1)] py-[calc(var(--cq)*2)] text-center">
+          <div className="sig-key text-[calc(var(--cq)*3.1)] text-neutral-500">{t('landing.scrEntry')}</div>
+          <div className="sig-val num mt-[calc(var(--cq)*0.8)] text-[calc(var(--cq)*3.4)] font-bold text-white">{entry}</div>
         </div>
-        <div className="rounded-[2.6cqw] border border-down/40 bg-down/[0.07] px-[1cqw] py-[2cqw] text-center">
-          <div className="sig-key text-[3.1cqw] text-neutral-500">{t('landing.scrSl')}</div>
-          <div className="sig-val num mt-[0.8cqw] text-[3.4cqw] font-bold text-down">{sl}</div>
+        <div className="rounded-[calc(var(--cq)*2.6)] border border-down/40 bg-down/[0.07] px-[calc(var(--cq)*1)] py-[calc(var(--cq)*2)] text-center">
+          <div className="sig-key text-[calc(var(--cq)*3.1)] text-neutral-500">{t('landing.scrSl')}</div>
+          <div className="sig-val num mt-[calc(var(--cq)*0.8)] text-[calc(var(--cq)*3.4)] font-bold text-down">{sl}</div>
         </div>
-        <div className="rounded-[2.6cqw] border border-up/40 bg-up/[0.07] px-[1cqw] py-[2cqw] text-center">
-          <div className="sig-key text-[3.1cqw] text-neutral-500">{t('landing.scrTp')}</div>
-          <div className="sig-val num mt-[0.8cqw] text-[3.4cqw] font-bold text-up">{tp}</div>
+        <div className="rounded-[calc(var(--cq)*2.6)] border border-up/40 bg-up/[0.07] px-[calc(var(--cq)*1)] py-[calc(var(--cq)*2)] text-center">
+          <div className="sig-key text-[calc(var(--cq)*3.1)] text-neutral-500">{t('landing.scrTp')}</div>
+          <div className="sig-val num mt-[calc(var(--cq)*0.8)] text-[calc(var(--cq)*3.4)] font-bold text-up">{tp}</div>
         </div>
       </div>
 
       {!compact && (
-        <div className="mt-[2.6cqw]">
-          <div className="flex items-baseline justify-between text-[2.7cqw]">
+        <div className="mt-[calc(var(--cq)*2.6)]">
+          <div className="flex items-baseline justify-between text-[calc(var(--cq)*2.7)]">
             <span className="text-neutral-500">{t('landing.scrTtl').replace(/\s*\d{1,2}:\d{2}\s*/, '')}</span>
             <span className="num text-prism-300">{ttlText(ttlPct)}</span>
           </div>
           {/* TTL 紫条：同 .sig-ttl-bar / the violet TTL bar, as .sig-ttl-bar */}
-          <div className="mt-[1.2cqw] h-[1.3cqw] overflow-hidden rounded-full bg-white/[0.09]">
+          <div className="mt-[calc(var(--cq)*1.2)] h-[calc(var(--cq)*1.3)] overflow-hidden rounded-full bg-white/[0.09]">
             <div className="h-full rounded-full bg-prism-600" style={{ width: `${ttlPct}%` }} />
           </div>
         </div>
@@ -230,23 +243,52 @@ export function ScreenPlan({ t, on }: { t: T; on: boolean }) {
   // ticks. No timer under reduced-motion.
   const raw = t('landing.scrTtl')
   const m = raw.match(/(\d{1,2}):(\d{2})/)
+  /* 从译文里抠 mm:ss，也就是把 i18n 文案当数据结构用；正确解法是把「标签」与
+     「初始秒数」拆成两个 i18n 键，但 src/i18n/ 不在本次改动范围内。
+     兜底值（8:45）本来就有，问题在于**失败是完全静默的**：译文一旦不带 mm:ss，
+     倒计时会悄悄从 8:45 起跳，而它上面那行标签仍然照原样显示译文——两边对不上，
+     页面看起来完全正常。开发期喊一声，生产不喊（对用户没用）。
+     This parses mm:ss out of a translated string, i.e. uses i18n copy as a data
+     structure; the real fix is separate keys for the label and the initial seconds,
+     but src/i18n/ is outside this change's scope. The 8:45 fallback already existed —
+     the problem was that failure was entirely silent: drop the mm:ss from the
+     translation and the countdown quietly starts from 8:45 while the label above it
+     still shows the translation verbatim, disagreeing with it while looking fine.
+     Warned in development only; it helps nobody in production. */
+  if (!m && import.meta.env.DEV) {
+    console.warn('[landing] landing.scrTtl has no mm:ss, countdown falls back to 8:45:', raw)
+  }
   const init = m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : 8 * 60 + 45
   const [left, setLeft] = useState(init)
   useEffect(() => {
+    // 只在这一幕真的亮着时走表。
+    // 五幕屏幕是**始终全部挂载**的（切幕只改 .on 的透明度），所以这个每秒一次的
+    // setState 原来在整个落地页生命周期里一直跑：用户早已滚到定价、FAQ、页脚，它
+    // 仍然每秒触发一次 React 重渲染 + 样式重算，连带那根
+    // `transition: width 1s linear` 的进度条一直在做合成动画。定时器的清理本来就是
+    // 对的，错的只是范围没随可见性收缩——`on` 正是现成的可见性信号。
+    // Tick only while this scene is actually lit. All five screens stay mounted
+    // (switching scenes only changes .on's opacity), so this once-a-second setState
+    // used to run for the landing page's whole lifetime — still re-rendering and
+    // recalculating styles every second while the user was down at pricing, the FAQ
+    // or the footer, with the `transition: width 1s linear` bar compositing along
+    // with it. The cleanup was always correct; only the scope was too wide, and
+    // `on` is the visibility signal already at hand.
+    if (!on) return
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
     const id = setInterval(() => setLeft((s) => (s > 0 ? s - 1 : init)), 1000)
     return () => clearInterval(id)
-  }, [init])
+  }, [init, on])
   const mmss = `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`
 
   return (
     <div className={`scr ${on ? 'on' : ''}`} data-scr="1">
-      <div className="mb-[3cqw] flex items-baseline justify-between">
-        <div className="flex items-baseline gap-[2cqw]">
-          <b className="text-[6cqw] font-bold text-white">XAUUSD</b>
-          <span className="text-[3.2cqw] text-neutral-500">{t('landing.scrGold')}</span>
+      <div className="mb-[calc(var(--cq)*3)] flex items-baseline justify-between">
+        <div className="flex items-baseline gap-[calc(var(--cq)*2)]">
+          <b className="text-[calc(var(--cq)*6)] font-bold text-white">XAUUSD</b>
+          <span className="text-[calc(var(--cq)*3.2)] text-neutral-500">{t('landing.scrGold')}</span>
         </div>
-        <span className="rounded-[1.8cqw] border border-up/40 bg-up/10 px-[2.4cqw] py-[1cqw] text-[3.4cqw] font-bold text-up">
+        <span className="rounded-[calc(var(--cq)*1.8)] border border-up/40 bg-up/10 px-[calc(var(--cq)*2.4)] py-[calc(var(--cq)*1)] text-[calc(var(--cq)*3.4)] font-bold text-up">
           {t('landing.scrBuy')}
         </span>
       </div>
@@ -265,18 +307,18 @@ export function ScreenPlan({ t, on }: { t: T; on: boolean }) {
 
       {/* 活倒计时 + 紫条，放大版 / the live countdown with the violet bar, enlarged */}
       <div className="mt-auto">
-        <div className="flex items-baseline justify-between text-[3.2cqw]">
+        <div className="flex items-baseline justify-between text-[calc(var(--cq)*3.2)]">
           <span className="text-neutral-500">{raw.replace(/\s*\d{1,2}:\d{2}\s*/, '')}</span>
           <span className="num font-semibold text-prism-300">{mmss}</span>
         </div>
-        <div className="mt-[1.6cqw] h-[1.6cqw] overflow-hidden rounded-full bg-white/[0.09]">
+        <div className="mt-[calc(var(--cq)*1.6)] h-[calc(var(--cq)*1.6)] overflow-hidden rounded-full bg-white/[0.09]">
           <div
             className="h-full rounded-full bg-prism-600"
             style={{ width: `${Math.round((left / init) * 100)}%`, transition: 'width 1s linear' }}
           />
         </div>
         {/* 下单入口：产品里这张卡的落点 / the card's real call in the product */}
-        <div className="mt-[3.5cqw] grid place-items-center rounded-[3cqw] bg-prism-600 py-[3.2cqw] text-[3.6cqw] font-bold text-white">
+        <div className="mt-[calc(var(--cq)*3.5)] grid place-items-center rounded-[calc(var(--cq)*3)] bg-prism-600 py-[calc(var(--cq)*3.2)] text-[calc(var(--cq)*3.6)] font-bold text-white">
           {t('landing.scrOrderTitle')}
         </div>
       </div>
@@ -303,25 +345,25 @@ export function ScreenOrder({ t, on }: { t: T; on: boolean }) {
   ]
   return (
     <div className={`scr ${on ? 'on' : ''}`} data-scr="2">
-      <div className="mb-[3.4cqw] border-b border-white/[0.08] pb-[3cqw]">
-        <b className="text-[4.6cqw] font-bold text-white">{t('landing.scrOrderTitle')}</b>
+      <div className="mb-[calc(var(--cq)*3.4)] border-b border-white/[0.08] pb-[calc(var(--cq)*3)]">
+        <b className="text-[calc(var(--cq)*4.6)] font-bold text-white">{t('landing.scrOrderTitle')}</b>
       </div>
       <div className="flex flex-col">
         {rows.map((r) => (
-          <div key={r.k} className="flex items-baseline justify-between border-b border-white/[0.06] py-[3.2cqw] last:border-0">
-            <span className="text-[3.4cqw] text-neutral-400">{t(`landing.${r.k}`)}</span>
-            <span className={`text-[4cqw] ${r.cls}`}>{r.v}</span>
+          <div key={r.k} className="flex items-baseline justify-between border-b border-white/[0.06] py-[calc(var(--cq)*3.2)] last:border-0">
+            <span className="text-[calc(var(--cq)*3.4)] text-neutral-400">{t(`landing.${r.k}`)}</span>
+            <span className={`text-[calc(var(--cq)*4)] ${r.cls}`}>{r.v}</span>
           </div>
         ))}
       </div>
 
       <div className="mt-auto">
         {/* 滑轨 / the track */}
-        <div className="js-track relative h-[14cqw] overflow-hidden rounded-[3.5cqw] border border-white/[0.1] bg-white/[0.05]">
+        <div className="js-track relative h-[calc(var(--cq)*14)] overflow-hidden rounded-[calc(var(--cq)*3.5)] border border-white/[0.1] bg-white/[0.05]">
           {/* 紫色填充层：transform-origin 左缘，scaleX 跟着滑块走。
               The violet fill, scaling from the left edge in step with the knob. */}
           <div className="js-fill absolute inset-0 origin-left scale-x-0 bg-prism-600/30" />
-          <div className="absolute inset-0 grid place-items-center text-[3.2cqw] font-semibold text-neutral-300">
+          <div className="absolute inset-0 grid place-items-center text-[calc(var(--cq)*3.2)] font-semibold text-neutral-300">
             {t('order.slideToConfirm')}
           </div>
           {/* 垂直居中用 top 定位而不是 -translate-y-1/2：transform 是单一属性，
@@ -339,14 +381,14 @@ export function ScreenOrder({ t, on }: { t: T; on: boolean }) {
               track has a 1px border, so a fixed inset left the gaps 2px apart
               (measured 7 against 5). A negative margin is border-agnostic and always
               exactly symmetric. */}
-          <div className="js-knob absolute left-[1.5cqw] top-1/2 -mt-[5.5cqw] grid h-[11cqw] w-[11cqw] place-items-center rounded-[3cqw] bg-prism-600 text-[4.6cqw] font-bold text-white">
+          <div className="js-knob absolute left-[calc(var(--cq)*1.5)] top-1/2 -mt-[calc(var(--cq)*5.5)] grid h-[calc(var(--cq)*11)] w-[calc(var(--cq)*11)] place-items-center rounded-[calc(var(--cq)*3)] bg-prism-600 text-[calc(var(--cq)*4.6)] font-bold text-white">
             <span aria-hidden>››</span>
           </div>
         </div>
         {/* 成交回执 / the fill receipt */}
-        <div className="js-filled mt-[3.2cqw] flex items-center justify-between rounded-[3cqw] border border-up/35 bg-up/10 px-[3.6cqw] py-[3cqw]">
-          <span className="text-[3.4cqw] font-bold text-up">{t('landing.scrFilled')}</span>
-          <span className="num text-[3.4cqw] text-neutral-200">3412.86</span>
+        <div className="js-filled mt-[calc(var(--cq)*3.2)] flex items-center justify-between rounded-[calc(var(--cq)*3)] border border-up/35 bg-up/10 px-[calc(var(--cq)*3.6)] py-[calc(var(--cq)*3)]">
+          <span className="text-[calc(var(--cq)*3.4)] font-bold text-up">{t('landing.scrFilled')}</span>
+          <span className="num text-[calc(var(--cq)*3.4)] text-neutral-200">3412.86</span>
         </div>
       </div>
     </div>
@@ -365,16 +407,16 @@ export function ScreenRecord({ t, on }: { t: T; on: boolean }) {
   ]
   return (
     <div className={`scr ${on ? 'on' : ''}`} data-scr="3">
-      <div className="mb-[3cqw] border-b border-white/[0.08] pb-[3cqw]">
-        <b className="text-[4.6cqw] font-bold text-white">{t('landing.scrRecordTitle')}</b>
+      <div className="mb-[calc(var(--cq)*3)] border-b border-white/[0.08] pb-[calc(var(--cq)*3)]">
+        <b className="text-[calc(var(--cq)*4.6)] font-bold text-white">{t('landing.scrRecordTitle')}</b>
       </div>
       <div className="flex flex-col">
         {rows.map((r) => (
-          <div key={r.sym} className="js-rec flex items-center justify-between border-b border-white/[0.06] py-[3cqw] last:border-0">
-            <div className="flex items-center gap-[2cqw]">
-              <b className="text-[3.8cqw] font-bold text-white">{r.sym}</b>
+          <div key={r.sym} className="js-rec flex items-center justify-between border-b border-white/[0.06] py-[calc(var(--cq)*3)] last:border-0">
+            <div className="flex items-center gap-[calc(var(--cq)*2)]">
+              <b className="text-[calc(var(--cq)*3.8)] font-bold text-white">{r.sym}</b>
               <span
-                className={`rounded-[1.5cqw] border px-[1.6cqw] py-[0.6cqw] text-[2.5cqw] font-bold ${
+                className={`rounded-[calc(var(--cq)*1.5)] border px-[calc(var(--cq)*1.6)] py-[calc(var(--cq)*0.6)] text-[calc(var(--cq)*2.5)] font-bold ${
                   r.side === 'buy' ? 'border-up/35 bg-up/10 text-up' : 'border-down/35 bg-down/10 text-down'
                 }`}
               >
@@ -382,15 +424,15 @@ export function ScreenRecord({ t, on }: { t: T; on: boolean }) {
               </span>
             </div>
             <div className="text-right">
-              <div className={`num text-[4cqw] font-bold leading-none ${r.win ? 'text-up' : 'text-down'}`}>{r.pnl}</div>
-              <div className={`mt-[0.8cqw] text-[2.5cqw] ${r.win ? 'text-up/70' : 'text-down/70'}`}>
+              <div className={`num text-[calc(var(--cq)*4)] font-bold leading-none ${r.win ? 'text-up' : 'text-down'}`}>{r.pnl}</div>
+              <div className={`mt-[calc(var(--cq)*0.8)] text-[calc(var(--cq)*2.5)] ${r.win ? 'text-up/70' : 'text-down/70'}`}>
                 {t(r.win ? 'landing.scrWin' : 'landing.scrLoss')}
               </div>
             </div>
           </div>
         ))}
       </div>
-      <p className="mt-auto border-t border-white/[0.08] pt-[3cqw] text-[2.8cqw] text-neutral-500">
+      <p className="mt-auto border-t border-white/[0.08] pt-[calc(var(--cq)*3)] text-[calc(var(--cq)*2.8)] text-neutral-500">
         {t('landing.scrRecordFoot')}
       </p>
     </div>
@@ -418,8 +460,8 @@ export function ScreenRank({ t, on }: { t: T; on: boolean }) {
         <span className="rk-side rk-side-l cq-svg" aria-hidden><BadgeIcon id="winning_hand" tier={2} earned size={64} /></span>
         <span className="rk-side rk-side-r cq-svg" aria-hidden><BadgeIcon id="arena" tier={1} earned size={64} /></span>
         <div className="rk-hero">
-          <span className="cq-svg block w-[44cqw]"><BadgeIcon id="comp_back_to_back" earned size={160} spin /></span>
-          <span className="rk-refl cq-svg block w-[44cqw]" aria-hidden><BadgeIcon id="comp_back_to_back" earned size={160} /></span>
+          <span className="cq-svg block w-[calc(var(--cq)*44)]"><BadgeIcon id="comp_back_to_back" earned size={160} spin /></span>
+          <span className="rk-refl cq-svg block w-[calc(var(--cq)*44)]" aria-hidden><BadgeIcon id="comp_back_to_back" earned size={160} /></span>
         </div>
         <span className="rk-floor" aria-hidden />
       </div>
@@ -486,46 +528,53 @@ export function ScreenBoard({ t, on }: { t: T; on: boolean }) {
   const rows = [
     { r: 1, n: 'Monarch', a: '6004**02', s: '+14.2%' },
     { r: 2, n: 'Kestrel', a: '6001**18', s: '+9.4%' },
-    { r: 3, n: '临风', a: '6000**77', s: '+7.8%' },
+    // 样例昵称不写具体文字：这里原来硬编码了一个中文昵称，/en 的落地页也会照样
+    // 显示它。榜单示例要表达的是「有人排在你前面」，昵称本身不携带信息，所以改成
+    // 与上下两行同构的打码账号，中英文都成立，也不必为它开 i18n 键。
+    // The sample nickname was a hard-coded Chinese string that the /en landing page
+    // rendered too. The row only needs to say "someone is ahead of you"; the name
+    // carries no information, so it becomes a masked account like its neighbours —
+    // correct in both languages and needing no i18n key.
+    { r: 3, n: '6000**77', a: '6000**77', s: '+7.8%' },
     { r: 4, n: 'Willow', a: '6002**33', s: '+6.1%' },
     { r: 7, n: 'Trailhead', a: '6002**31', s: '+4.9%', me: true },
   ]
   return (
     <div className={`scr ${on ? 'on' : ''}`} data-scr="4">
-      <div className="mb-[2.4cqw] flex items-baseline justify-between border-b border-white/[0.08] pb-[3cqw]">
-        <b className="text-[4.6cqw] font-bold text-white">{t('landing.scrBoardTitle')}</b>
-        <span className="text-[2.7cqw] text-neutral-500">W37</span>
+      <div className="mb-[calc(var(--cq)*2.4)] flex items-baseline justify-between border-b border-white/[0.08] pb-[calc(var(--cq)*3)]">
+        <b className="text-[calc(var(--cq)*4.6)] font-bold text-white">{t('landing.scrBoardTitle')}</b>
+        <span className="text-[calc(var(--cq)*2.7)] text-neutral-500">W37</span>
       </div>
       <div className="flex flex-col">
         {rows.map((x) => (
           <div
             key={x.r}
-            className={`js-row flex items-center gap-[2.6cqw] border-b border-white/[0.06] py-[2.6cqw] last:border-0 ${
-              x.me ? '-mx-[2cqw] rounded-[2cqw] bg-prism-600/20 px-[2cqw]' : ''
+            className={`js-row flex items-center gap-[calc(var(--cq)*2.6)] border-b border-white/[0.06] py-[calc(var(--cq)*2.6)] last:border-0 ${
+              x.me ? '-mx-[calc(var(--cq)*2)] rounded-[calc(var(--cq)*2)] bg-prism-600/20 px-[calc(var(--cq)*2)]' : ''
             }`}
           >
-            <span className="grid w-[7.5cqw] flex-none place-items-center">
+            <span className="grid w-[calc(var(--cq)*7.5)] flex-none place-items-center">
               {x.r <= 3 ? (
-                <span className="cq-svg block w-[7cqw]"><RankCoin rank={x.r} size={28} /></span>
+                <span className="cq-svg block w-[calc(var(--cq)*7)]"><RankCoin rank={x.r} size={28} /></span>
               ) : (
-                <b className={`num text-[3.8cqw] ${x.me ? 'text-prism-300' : 'text-neutral-500'}`}>{x.r}</b>
+                <b className={`num text-[calc(var(--cq)*3.8)] ${x.me ? 'text-prism-300' : 'text-neutral-500'}`}>{x.r}</b>
               )}
             </span>
-            <span className="min-w-0 flex-1 truncate text-[3.4cqw] text-white">
+            <span className="min-w-0 flex-1 truncate text-[calc(var(--cq)*3.4)] text-white">
               <b className="font-semibold">{x.n}</b>
-              <span className="num ml-[1.6cqw] text-[2.7cqw] text-neutral-500">{x.a}</span>
-              {x.me && <span className="ml-[1.6cqw] text-[2.7cqw] font-semibold text-prism-300">{t('landing.scrBoardYou')}</span>}
+              <span className="num ml-[calc(var(--cq)*1.6)] text-[calc(var(--cq)*2.7)] text-neutral-500">{x.a}</span>
+              {x.me && <span className="ml-[calc(var(--cq)*1.6)] text-[calc(var(--cq)*2.7)] font-semibold text-prism-300">{t('landing.scrBoardYou')}</span>}
             </span>
-            <span className="num text-[3.6cqw] font-bold text-up">{x.s}</span>
+            <span className="num text-[calc(var(--cq)*3.6)] font-bold text-up">{x.s}</span>
           </div>
         ))}
       </div>
-      <p className="mt-[2.4cqw] text-[2.8cqw] text-neutral-500">{t('landing.scrBoardGap')}</p>
-      <div className="js-toast mt-auto flex items-center gap-[3cqw] rounded-[3cqw] border border-prism-400/40 bg-prism-600/20 px-[3.4cqw] py-[2.6cqw]">
-        <span className="cq-svg w-[10cqw] flex-none"><BadgeIcon id="board_return" tier={1} earned /></span>
+      <p className="mt-[calc(var(--cq)*2.4)] text-[calc(var(--cq)*2.8)] text-neutral-500">{t('landing.scrBoardGap')}</p>
+      <div className="js-toast mt-auto flex items-center gap-[calc(var(--cq)*3)] rounded-[calc(var(--cq)*3)] border border-prism-400/40 bg-prism-600/20 px-[calc(var(--cq)*3.4)] py-[calc(var(--cq)*2.6)]">
+        <span className="cq-svg w-[calc(var(--cq)*10)] flex-none"><BadgeIcon id="board_return" tier={1} earned /></span>
         <div className="min-w-0">
-          <div className="text-[2.6cqw] uppercase tracking-[0.14em] text-prism-300">{t('landing.scrToast')}</div>
-          <b className="block truncate text-[3.6cqw] font-bold text-white">{t('landing.scrToastBadge')}</b>
+          <div className="text-[calc(var(--cq)*2.6)] uppercase tracking-[0.14em] text-prism-300">{t('landing.scrToast')}</div>
+          <b className="block truncate text-[calc(var(--cq)*3.6)] font-bold text-white">{t('landing.scrToastBadge')}</b>
         </div>
       </div>
     </div>

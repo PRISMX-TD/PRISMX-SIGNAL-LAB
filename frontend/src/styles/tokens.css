@@ -34,13 +34,44 @@
       expensive class of continuous repaint on mobile.
    3. Radii collapsed from six ad-hoc values (18/16/12/11/10/7) into one
       four-step scale obeyed everywhere.
+
+   ───────────────────────────────────────────────────────────────────────────
+   本文件是**颜色的唯一真源**（2026-09-19 起）。
+   在此之前 `tailwind.config.js` 自己也写了一份十六进制，两份各自演进，结果是
+   涨跌色有四个值同时在跑：榜单同一行里 `text-up`（#35C97A）和它旁边那根
+   `background: var(--up)`（#3AD584）的幅度条是两种绿。现在 tailwind 侧改成
+   读下面这些变量，不再存值。
+
+   为什么每个颜色都多一个 `--x-rgb` 通道三元组：Tailwind v3 的 `/opacity`
+   修饰符（`bg-up/15`、`border-down/40`，全站约 140 处）只能作用在**能拆出
+   通道**的颜色上。给它一个 `var(--up)` 字符串，修饰符会被静默丢掉；给它
+   `58 213 132` 才能拼出 `rgb(58 213 132 / 0.15)`。所以真源是三元组，
+   `--up` 自己再包一层 `rgb()` 给 CSS 侧用——两边同一个数，改一次全站走。
+   （`rgb(r g b / a)` 空格加斜杠语法是 Chrome 65+，在本项目 Chrome 70 的
+   下限之内。）
+
+   This file is the single source of truth for colour (since 2026-09-19).
+   `tailwind.config.js` used to keep its own hex copies; the two drifted until
+   four up/down values were live at once — a leaderboard row showed `text-up`
+   (#35C97A) next to a `var(--up)` bar (#3AD584), two different greens. Tailwind
+   now reads these variables instead of storing values.
+
+   Each colour carries an extra `--x-rgb` channel triplet because Tailwind v3's
+   `/opacity` modifier (`bg-up/15`, `border-down/40` — ~140 call sites) can only
+   apply to a colour it can decompose. Handed the string `var(--up)` it silently
+   drops the modifier; handed `58 213 132` it can build
+   `rgb(58 213 132 / 0.15)`. So the triplet is the source and `--up` wraps it in
+   `rgb()` for CSS consumers — one number, both sides.
+   (`rgb(r g b / a)` space-and-slash syntax is Chrome 65+, inside this project's
+   Chrome 70 floor.)
    ═══════════════════════════════════════════════════════════════════════════ */
 :root {
   /* ── 画布 / canvas ──
      中性 zinc 系，与代码里既有的 neutral / zinc 工具类同族，避免冷暖不一。
      Neutral zinc family, matching the neutral/zinc utilities already used
      throughout the codebase so the greys don't fight each other. */
-  --bg: #09090b;
+  --bg-rgb: 9 9 11;
+  --bg: rgb(var(--bg-rgb));
   /* 卡面对底色的亮度台阶从 ΔL* 2.2 抬到 7.5。原值几乎完全靠那条 8% 的发丝线
      撑住卡片边界；去掉外轮廓之后（见 .glass）边界必须由面本身承担。
      实测：#15151A ΔL* 4.5 太弱 / #1B1B21 ΔL* 7.5 可用 / #1E1E25 ΔL* 9 更稳但
@@ -83,9 +114,12 @@
      --text-2 moves to the value the codebase actually uses (#D4D4D8 appears 48
      times hardcoded; the token itself only 8). --text-3 is lifted because the
      surface was. */
-  --text: #ededf0;
-  --text-2: #d4d4d8;
-  --text-3: #9c9ca6;
+  --text-rgb: 237 237 240;
+  --text-2-rgb: 212 212 216;
+  --text-3-rgb: 156 156 166;
+  --text: rgb(var(--text-rgb));
+  --text-2: rgb(var(--text-2-rgb));
+  --text-3: rgb(var(--text-3-rgb));
 
   /* ── 品牌紫（油墨）/ brand violet, as ink ──
      色相比 Tailwind violet 更蓝、明度更低，读起来像印刷专色而不是框架默认值。
@@ -98,14 +132,32 @@
                     White on top scores ~8.4:1.
      --purple-hi    accent text tone on dark, ~5.4:1 against #09090B (WCAG AA).
      --purple-vivid one step brighter, small-area interaction feedback only. */
-  --purple: #5a22ee;
+  --purple-rgb: 90 34 238;
+  --purple: rgb(var(--purple-rgb));
   /* 面抬高之后，压在面上和压在半透明色块上的强调色会整片掉出 AA。
      修法不是逐个补丁，而是把 token 本身推上去，让所有引用点一起走。
      实测 #8B6CFF 在新面上 4.49（不过 AA），#9284FF 为 5.5；紫色芯片底上 4.9。
-     Accent tones move up with the surface — a token change, not per-site patches. */
-  --purple-hi: #9284ff;
-  --purple-vivid: #6e42ff;
-  --purple-deep: #240b63;
+     2026-09-19：tailwind 的 `prism.400` 此前仍停在 #8B6CFF，而它恰好几乎只
+     用在链接文字上（页脚客服邮箱、FAQ「查看全部」、FaqPage 序号）——也就是
+     抬亮这件事唯一还没落地的地方。现在两侧都指向本行。
+     Accent tones move up with the surface — a token change, not per-site
+     patches. Tailwind's `prism.400` was still on the old #8B6CFF, and that key
+     is used almost exclusively for link text, i.e. exactly where the lift was
+     still missing. Both sides now point here. */
+  --purple-hi-rgb: 146 132 255;
+  --purple-hi: rgb(var(--purple-hi-rgb));
+  --purple-vivid-rgb: 110 66 255;
+  --purple-vivid: rgb(var(--purple-vivid-rgb));
+  --purple-deep-rgb: 36 11 99;
+  --purple-deep: rgb(var(--purple-deep-rgb));
+  /* prism 色阶里只有 300 这一档被 CSS 直接引用（成就页的进度点），补一个名字
+     免得再冒出第二份十六进制。其余色阶（50/100/200/700/800/950）只有 Tailwind
+     用得到，留在 tailwind.config.js 里，不构成双轨。
+     Only the 300 rung is referenced from CSS directly (the achievements progress
+     dots), so it gets a name here; the rest of the ramp is Tailwind-only and
+     therefore not a second copy of anything. */
+  --purple-soft-rgb: 168 140 255;
+  --purple-soft: rgb(var(--purple-soft-rgb));
 
   /* ── 市场语义色 / market semantics ──
      这两个颜色是**数据**，不是品牌色。它们从霓虹薄荷/糖果玫瑰调深一档：
@@ -113,12 +165,23 @@
      These two are *data*, not brand. Deepened one step from neon mint / candy
      rose so they don't sting over a long session while still passing AA on
      solid fills. Never used decoratively. */
-  --up: #3ad584;
-  --up-bg: rgba(58, 213, 132, 0.13);
+  /* 2026-09-19 一并收口：各页样式表里原来散着 14 处 rgba(53,201,122,a) /
+     rgba(240,77,99,a) 的硬编码——那是 tailwind 那份**已作废**副本（#35C97A /
+     #F04D63）的手写展开，常常就出现在同一条规则里 var(--up) 的旁边（芯片的
+     fill 用新值、stroke 用旧值）。全部改写成 rgb(var(--up-rgb) / a)。
+     Also closed out 2026-09-19: 14 hardcoded rgba(53,201,122,a) / rgba(240,77,99,a)
+     literals across the page stylesheets — hand-expanded copies of the retired
+     Tailwind values, often sitting in the same rule as var(--up) (a chip filling
+     with the new tone and stroking with the old one). All rewritten to
+     rgb(var(--up-rgb) / a). */
+  --up-rgb: 58 213 132;
+  --up: rgb(var(--up-rgb));
+  --up-bg: rgb(var(--up-rgb) / 0.13);
   /* 跌色同样跟着面抬一档：#F04D63 在新面上的芯片底（14% 红）上只有 4.1。
      Down tone lifted with the surface for the same reason as --purple-hi. */
-  --down: #ff6478;
-  --down-bg: rgba(255, 100, 120, 0.13);
+  --down-rgb: 255 100 120;
+  --down: rgb(var(--down-rgb));
+  --down-bg: rgb(var(--down-rgb) / 0.13);
   /* 中间档：胜率不上不下（40–50%）。也是**数据**，和涨跌同一等级，所以放在
      这里而不是复用 --gold（那是终端里的告警/过期色，语义不同）。亮度按 --up
      配平：卡面上 8.98、自己 13% 底上 6.96，与绿的 9.00 / 7.02 基本同权，
@@ -128,9 +191,11 @@
      tone with a different meaning). Tuned to match --up's weight — 8.98 on the
      card surface and 6.96 on its own 13% tint, against green's 9.00 / 7.02 — so
      the amber does not read a step lighter than the green. */
-  --mid: #ffa85c;
-  --mid-bg: rgba(255, 168, 92, 0.13);
-  --gold: #e0a83c;
+  --mid-rgb: 255 168 92;
+  --mid: rgb(var(--mid-rgb));
+  --mid-bg: rgb(var(--mid-rgb) / 0.13);
+  --gold-rgb: 224 168 60;
+  --gold: rgb(var(--gold-rgb));
 
   /* ── 圆角：三档，全站遵守 / three radii, obeyed everywhere ──
      999 小件与控件（chip/tag/按钮/输入）· 8 内嵌格 · 14 小浮层 · 24 卡片
@@ -141,9 +206,19 @@
      以前的内嵌格（10px）永远比容器还圆，读成「贴上去的贴纸」。
      旧变量名保留，下游 ~2700 行仍在引用。
 
+     （2026-09-19 订正：这段英文原来写的是「Cards move to **26**」，下面 --r-panel
+     那段也跟着说「26px on a 180px menu」，而实际值一直是 24——三处注释描述了两个
+     数。24 才是对的：上面那条同心推导 24 − 16 = 8 与 --r-tile: 8px 严丝合缝，26
+     会得到 10，正是这次要去掉的旧值。英文与 --r-panel 那段已一并改回 24。）
+
      Down from four steps to three. Pills separate "clickable" from "just a
-     plane" by shape alone. Cards move to 26 so concentric radii work out:
-     inner = outer - padding, and 24 - 16 = 8. */
+     plane" by shape alone. Cards move to 24 so concentric radii work out:
+     inner = outer - padding, and 24 - 16 = 8.
+     (Corrected 2026-09-19: this line said 26 and the --r-panel note below said
+     "26px on a 180px menu", while the value has always been 24 — three comments
+     describing two numbers. 24 is the correct one: the concentric derivation above
+     lands on 24 - 16 = 8, which is exactly --r-tile, whereas 26 would give 10, the
+     very value this scale replaced.) */
   --r-xs: 999px;
   --r-md: 999px;
   --r-lg: 24px;
@@ -152,12 +227,48 @@
      Nested tiles get their own step; they used to borrow --r-md. */
   --r-tile: 8px;
   /* 小浮层（下拉菜单、账号选择器）。样本里没有这类元素，是落到生产代码时才
-     发现的第四档：一个 180px 宽的下拉套 26px 圆角会读成胶囊，套 8px 又不像
+     发现的第四档：一个 180px 宽的下拉套 24px 圆角会读成胶囊，套 8px 又不像
      浮层。与其硬塞进三档，不如承认它是独立的一档。
      A fourth step discovered only when porting to production: the sample had no
-     dropdowns. 26px on a 180px menu reads as a capsule; 8px doesn't read as a
+     dropdowns. 24px on a 180px menu reads as a capsule; 8px doesn't read as a
      floating layer. */
   --r-panel: 14px;
+
+  /* ── 层级：五档 / five stacking tiers ──
+     此前 z-index 在样式表里出现 16 种取值（-1/0/1/2/3/10/20/30/40/41/50/60/70/80），
+     tsx 里另有一套 Tailwind 的 z-10/20/30/40/50/60 并行，其中 41 这种是「为了压过
+     隔壁 +1」的魔数。两套体系并行的直接后果是：新加一层浮层时没有任何依据判断该取
+     多少，只能挨个去量邻居——而量出来的数又会变成下一个人要量的邻居。
+     已经出现过一次同层相撞：落地页 header 与勋章详情弹层都是 50，最终谁在上面靠的是
+     portal-to-body 之后的 DOM 顺序，不是层级设计。
+
+     下面五档是**对现状的归纳**，不是新发明的数：每一档都取自现在真的在用的值，
+     所以可以逐步替换而不必一次性全站改，任何一处换成变量都不会改变渲染结果。
+       --z-nav     30  站点顶栏 / 分区导航
+       --z-sticky  40  吸底 CTA、吸顶工具条、浮动操作条
+       --z-overlay 50  遮罩层（弹层背后那张半透明底）
+       --z-modal   60  弹层本体、底部抽屉
+       --z-toast   80  全局提示，永远在最上面
+     0–3 与 -1 是**组件内部**的相对层序（同一张卡里谁压谁），不属于这套全站刻度，
+     保持字面量即可——给它们起名字反而会让人误以为是全站层级。
+
+     z-index used 16 distinct values across the stylesheets with a parallel Tailwind
+     scale in TSX, including magic numbers like 41 that exist only to beat a
+     neighbour by one. The practical cost is that adding a new floating layer offers
+     no basis for choosing a value except measuring the neighbours — and that
+     measurement becomes the next person's neighbour. It has already collided once:
+     the landing header and the badge detail overlay both sit at 50, and which one
+     wins is decided by DOM order after portal-to-body rather than by design.
+     These five tiers are a summary of what is already in use, not new numbers, so
+     call sites can migrate one at a time and no single substitution changes
+     rendering. Values 0-3 and -1 are within-component ordering (who overlaps whom
+     inside one card), deliberately left as literals: naming them would imply they
+     are part of this global scale. */
+  --z-nav: 30;
+  --z-sticky: 40;
+  --z-overlay: 50;
+  --z-modal: 60;
+  --z-toast: 80;
 
   /* ── 动效节奏 / motion tokens ──
      去掉了原来那条弹性过冲曲线（cubic-bezier(0.34,1.45,0.64,1)）作为默认值：

@@ -436,7 +436,10 @@
    copy of the same image backs it: a tall image no longer sits between dead bars. */
 .ann-pop-overlay {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   /* 80 与下单确认弹窗（.slide-overlay）同层：两者不会同时出现，而 80 已经在
      顶栏（40）与铃铛面板之上。
      Same layer as the order-confirmation scrim (.slide-overlay): they never
@@ -467,7 +470,10 @@
 .ann-pop::before {
   content: "";
   position: absolute;
-  inset: -12% -8%;
+  top: -12%;
+  right: -8%;
+  bottom: -12%;
+  left: -8%;
   z-index: -1;
   border-radius: 50%;
   background: radial-gradient(58% 55% at 50% 48%, rgba(110, 66, 255, 0.4), transparent 72%);
@@ -505,7 +511,10 @@
 }
 .ann-pop-wash {
   position: absolute;
-  inset: -12%;
+  top: -12%;
+  right: -12%;
+  bottom: -12%;
+  left: -12%;
   width: 124%;
   height: 124%;
   object-fit: cover;

@@ -96,8 +96,16 @@ export async function createPhoneGL(opts: {
   container: HTMLElement
   /** React 渲染的屏幕节点，将被 CSS3D 接管 / the React-rendered screen node CSS3D takes over */
   screenEl: HTMLElement
+  /**
+   * WebGL 上下文丢失时的回调：调用方应当在这里 dispose 本 handle 并退回 CSS 手机。
+   * 触发时渲染循环已经停住，不会再有一帧画到死掉的上下文上。
+   * Called when the WebGL context is lost. The caller should dispose this handle
+   * and fall back to the CSS phone; the render loop is already stopped by then,
+   * so no further frame is drawn into a dead context.
+   */
+  onContextLost?: () => void
 }): Promise<PhoneGLHandle | null> {
-  const { container, screenEl } = opts
+  const { container, screenEl, onContextLost } = opts
 
   // 早退：没有 WebGL 就别费劲，调用方会回退到 CSS 手机。
   // Bail early without WebGL; the caller falls back to the CSS phone.
@@ -130,8 +138,15 @@ export async function createPhoneGL(opts: {
      CSS3D below, WebGL above: the canvas has alpha and stays transparent at the
      mask aperture so the screen shows through from underneath. Neither layer
      takes pointer events; interaction still belongs to the page. */
+  // 定位写四条长写法而不是 inset 简写：inset 是 Chrome 87+，在本项目 Chrome 70 的
+  // 下限之外，旧内核上整条声明作废，画布只剩 position:absolute 而没有偏移，会落到
+  // 静态流的位置上。/ Longhands rather than the `inset` shorthand: `inset` is
+  // Chrome 87+, outside this project's Chrome 70 floor, and when it is dropped the
+  // canvas keeps position:absolute with no offsets and lands in static flow.
+  const LAYER_CSS = 'position:absolute;top:0;right:0;bottom:0;left:0;pointer-events:none;'
+
   const css3d = new CSS3DRenderer()
-  css3d.domElement.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:1'
+  css3d.domElement.style.cssText = `${LAYER_CSS}z-index:1`
   container.appendChild(css3d.domElement)
 
   const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: 'high-performance' })
@@ -142,7 +157,7 @@ export async function createPhoneGL(opts: {
   // metal edges retain gradation.
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = 1.1
-  renderer.domElement.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:2'
+  renderer.domElement.style.cssText = `${LAYER_CSS}z-index:2`
   container.appendChild(renderer.domElement)
 
   const scene = new THREE.Scene()
@@ -483,10 +498,37 @@ export async function createPhoneGL(opts: {
      ratio is computed once here so setPose can convert a vw offset into world
      units. */
   let pxPerUnit = 1
+  /* 脏标记：姿态或尺寸没变就不画。
+     Hero 停留的 0–10 拍、每一幕中段 12 拍的静止段，姿态是**完全不动**的，而
+     原来的循环只要在视口内、标签页在前台就无条件每帧跑完整的 renderer.render +
+     css3d.render（antialias: true、powerPreference: high-performance、DPR 上限 2
+     三项叠加放大这笔开销）。IntersectionObserver 解决的是「不在视口」，解决不了
+     「在视口但没动」。
+     屏幕里的倒计时、进度条等动效不受影响：它们是 CSS3D 容器里真实 DOM 的自我重绘，
+     不经过这两个 renderer；css3d.render 只在姿态变化时才需要重写一次 transform。
+     A dirty flag: don't draw when neither pose nor size changed. The pose is
+     completely static during Hero's first ten beats and the twelve-beat hold in
+     the middle of each scene, yet the loop used to run both renders every frame
+     whenever the phone was on screen and the tab was in front — with antialias,
+     high-performance and a DPR cap of 2 all multiplying the cost. The
+     IntersectionObserver covers "off screen", not "on screen but still".
+     In-screen motion (countdown, progress bars) is unaffected: that is real DOM
+     repainting itself inside the CSS3D container, not something these renderers
+     drive. css3d.render only needs to rewrite its transform when the pose moves. */
+  let dirty = true
+  let lastPose = ''
   const resize = () => {
     const w = container.clientWidth
     const h = container.clientHeight
     if (!w || !h) return
+    dirty = true
+    // pxPerUnit 会在这里变，而 setPose 用它把 xPx 换算成世界坐标——所以尺寸一变就
+    // 作废姿态缓存，否则「同一组入参」会被当成无事发生，机身停在按旧比例算出的位置。
+    // pxPerUnit changes below and setPose uses it to convert xPx into world
+    // units, so the pose cache must be invalidated here: otherwise an unchanged
+    // set of inputs reads as "nothing happened" and the body stays where the old
+    // ratio put it.
+    lastPose = ''
     camera.aspect = w / h
     camera.updateProjectionMatrix()
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -499,6 +541,13 @@ export async function createPhoneGL(opts: {
 
   const DEG = Math.PI / 180
   const setPose = (p: PhonePose) => {
+    // 姿态没变就不标脏。GSAP 的 ticker 每帧都会调这里，但静止段送进来的是同一组值。
+    // Don't dirty on an unchanged pose: GSAP's ticker calls this every frame, but
+    // during a hold it passes the same numbers each time.
+    const key = `${p.xPx}|${p.rotYdeg}|${p.rotXdeg}|${p.scale}`
+    if (key === lastPose) return
+    lastPose = key
+    dirty = true
     const x = p.xPx / pxPerUnit
     phone.position.x = x
     // 与 CSS 版 translate(-50%,-52%) 的那 2% 上移保持一致
@@ -537,18 +586,64 @@ export async function createPhoneGL(opts: {
      false stops the clock. */
   let raf = 0
   let onScreen = true
+  let lost = false
   const frame = () => {
     raf = requestAnimationFrame(frame)
+    if (!dirty) return
+    dirty = false
     draw()
   }
   const pump = () => {
-    const should = onScreen && !document.hidden
+    const should = onScreen && !document.hidden && !lost
     if (should && !raf) raf = requestAnimationFrame(frame)
     else if (!should && raf) {
       cancelAnimationFrame(raf)
       raf = 0
     }
   }
+
+  /* ── 上下文丢失：停表并交还给 CSS 手机 ──
+     低端安卓 WebView 在内存压力、切后台、驱动重置时丢 WebGL 上下文是常态，而
+     scrub 模式下同一页还活着两个 renderer + 两个 PMREMGenerator，上下文配额更紧。
+     此前这里没有任何处理：上下文一丢，rAF 仍以 60fps 调 renderer.render，每帧抛
+     GL 错误，画布永久透明——用户看到的是「机身消失，只剩一块悬空的屏幕」，而且
+     **不会**退回 CSS 手机，等于这条降级路径在最需要它的机器上失效。
+
+     preventDefault() 是必须的：不调用它，浏览器根本不会去尝试恢复上下文。
+     恢复后不就地重建，而是让调用方 dispose 本 handle 退回 CSS 手机——重建要重跑
+     PMREM 环境贴图烘焙，还要把 CSS3D 容器里的屏幕节点搬回 React 记得的位置再搬
+     回来，而那正是最容易抛 NotFoundError 的一段（见上面 homeParent 的说明）。
+     CSS 手机本来就是一等公民的降级路径，退到它比冒险重建划算。
+
+     Losing the WebGL context is routine on low-end Android WebViews under memory
+     pressure, on backgrounding, or on a driver reset — and scrub mode keeps two
+     renderers and two PMREMGenerators alive on the same page, which tightens the
+     context budget further. There was no handling at all: on loss the rAF kept
+     calling renderer.render at 60fps, throwing a GL error every frame, and the
+     canvas stayed permanently transparent. The user saw the body vanish leaving a
+     screen floating in mid-air, and it did NOT fall back to the CSS phone — so the
+     degradation path failed on exactly the hardware that needs it.
+     preventDefault() is required or the browser will not even try to restore.
+     Rather than rebuilding in place we hand back to the caller, which disposes
+     this handle and reverts to the CSS phone: rebuilding would mean re-baking the
+     PMREM environment map and shuttling the screen node out of the CSS3D
+     container and back, which is the single most NotFoundError-prone step here
+     (see the homeParent note above). The CSS phone is a first-class path already. */
+  const onLost = (e: Event) => {
+    e.preventDefault()
+    lost = true
+    pump()
+    onContextLost?.()
+  }
+  renderer.domElement.addEventListener('webglcontextlost', onLost)
+  /* 恢复事件只用来记一笔：handle 此时通常已被调用方 dispose，页面在 CSS 手机上
+     继续跑，不需要也不应该在这里自行复活。
+     The restore event is observational only: by the time it fires the caller has
+     normally disposed this handle and the page is running on the CSS phone. */
+  const onRestored = () => {
+    lost = false
+  }
+  renderer.domElement.addEventListener('webglcontextrestored', onRestored)
   const io = new IntersectionObserver(
     ([e]) => {
       onScreen = e.isIntersecting
@@ -568,6 +663,8 @@ export async function createPhoneGL(opts: {
       if (raf) cancelAnimationFrame(raf)
       io.disconnect()
       document.removeEventListener('visibilitychange', onVisibility)
+      renderer.domElement.removeEventListener('webglcontextlost', onLost)
+      renderer.domElement.removeEventListener('webglcontextrestored', onRestored)
       // 先把屏幕节点放回 React 记得的位置，再拆渲染器——顺序反了会让 React
       // 卸载时找不到节点。/ Restore the screen node to where React remembers it
       // BEFORE tearing the renderers down; the reverse order leaves React unable
@@ -579,6 +676,22 @@ export async function createPhoneGL(opts: {
       css3d.domElement.remove()
       renderer.domElement.remove()
       renderer.dispose()
+      /* 主动丢弃上下文。renderer.dispose() 只释放 three 自己的 GPU 资源，**不会**
+         归还 WebGL 上下文本身——浏览器对同时存活的上下文有硬上限（桌面 Chrome 16
+         个），超了就把最老的挤掉。本模块只在 ≥1024px 挂载，反复跨 1024px 拖动窗宽
+         会一次次 create/dispose，不还上下文就会一路累积到上限。
+         forceContextLoss() 在极老的实现上可能不存在，包一层。
+         Hand the context back. renderer.dispose() frees three's own GPU resources
+         but not the context, and browsers cap how many can live at once (16 on
+         desktop Chrome), evicting the oldest past that. This module mounts only at
+         >=1024px, so dragging the window across that breakpoint repeatedly
+         creates and disposes in a loop and would walk straight into the cap.
+         Guarded because forceContextLoss may be missing on very old builds. */
+      try {
+        renderer.forceContextLoss()
+      } catch {
+        /* noop */
+      }
       envRT.dispose()
       pmrem.dispose()
       shadowTex?.dispose()

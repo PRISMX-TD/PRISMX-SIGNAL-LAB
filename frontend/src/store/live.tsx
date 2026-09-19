@@ -567,11 +567,24 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   }, [resync])
 
   // 曾经连上过之后又断开，才提示"已断线"，避免首次连接前的瞬间误报。
-  // Only flag "disconnected" after having connected at least once, so the
-  // brief instant before the first connection lands doesn't false-trigger it.
-  const everConnected = useRef(false)
-  if (wsConnected) everConnected.current = true
-  const wsDisconnected = everConnected.current && !wsConnected
+  //
+  // 用 state 而不是「渲染期写 ref」：`if (wsConnected) ref.current = true` 是渲染
+  // 阶段的副作用，StrictMode 的双渲染下结果侥幸正确，但并发特性（useTransition /
+  // Suspense 重放）会在一次被丢弃的渲染里就把它置真，断线横幅因此可能早一拍出现。
+  // 置真是单向的，所以 setState 只在第一次连上时跑一次，不会多出渲染轮次。
+  //
+  // State rather than a ref written during render: `if (wsConnected)
+  // ref.current = true` is a render-phase side effect. It happens to survive
+  // StrictMode's double render, but under concurrent features (useTransition,
+  // Suspense replays) a discarded render would already have flipped it, making
+  // the offline banner appear a beat early. The flag is one-way, so this
+  // setState runs exactly once — on the first successful connection — and adds
+  // no repeated render passes.
+  const [everConnected, setEverConnected] = useState(false)
+  useEffect(() => {
+    if (wsConnected) setEverConnected(true)
+  }, [wsConnected])
+  const wsDisconnected = everConnected && !wsConnected
 
   // 以桥接上报的在线账号作为统一连接状态来源 / unified connection status from bridge accounts
   const onlineAccounts = useMemo(() => accounts.filter((a) => a.online), [accounts])

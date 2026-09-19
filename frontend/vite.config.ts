@@ -57,10 +57,33 @@ export default defineConfig({
         // import inside PhoneStory and only loads in desktop scrub mode, so its
         // own chunk is required - otherwise three would be folded into the
         // initial bundle and negate the lazy loading entirely.
+        // 匹配式一律带包目录边界（`/node_modules/<pkg>/`），不要裸子串。
+        //
+        // 原来是 `id.includes('three')`：那是对**完整路径**做子串匹配，任何路径里
+        // 恰好含 "three" 的依赖都会被塞进 three 块——将来新增的 `three-*` 子包、
+        // 或名字里带 three 的传递依赖都会误伤，而误伤的表现是首屏包里多出一个跟
+        // 3D 毫无关系的库、或者 three 块里少了本该在的东西，两种都很难一眼看出。
+        // lightweight-charts 同理。Rollup 的 id 是规范化过的 posix 路径（Windows
+        // 上也是正斜杠），所以这个判据跨平台成立。
+        // react 那一条刻意保留宽松匹配：react-dom / react-router / react-i18next
+        // 都该跟 react 同块，写死 `/node_modules/react/` 反而会把它们拆出去。
+        //
+        // Match on a package directory boundary (`/node_modules/<pkg>/`), never a
+        // bare substring. This used to be `id.includes('three')`, a substring test
+        // against the *full path*, so any dependency whose path happens to contain
+        // "three" landed in the three chunk — a future `three-*` subpackage or a
+        // transitive dependency with three in its name. The symptom either way is
+        // an unrelated library in the initial bundle, or something missing from
+        // the three chunk; neither is obvious at a glance. Same for
+        // lightweight-charts. Rollup ids are normalised posix paths (forward
+        // slashes on Windows too), so this holds cross-platform.
+        // The react branch deliberately stays loose: react-dom, react-router and
+        // react-i18next all belong in the same chunk, and `/node_modules/react/`
+        // would split them out.
         manualChunks(id: string) {
           if (!id.includes('node_modules')) return
-          if (id.includes('three')) return 'three'
-          if (id.includes('lightweight-charts')) return 'charts'
+          if (id.includes('/node_modules/three/')) return 'three'
+          if (id.includes('/node_modules/lightweight-charts/')) return 'charts'
           if (
             id.includes('react') ||
             id.includes('scheduler') ||

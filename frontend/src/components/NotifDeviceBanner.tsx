@@ -10,13 +10,21 @@ import { Link } from "react-router-dom"
 import { notificationApi } from "../api/client"
 import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
 import { recordDiag } from "../utils/pushDiag"
+import { readStorage, writeStorage } from "../utils/safeStorage"
 
 const DISMISS_KEY = "prismx_notif_banner_dismissed"
 
 export default function NotifDeviceBanner() {
   const { t } = useTranslation()
   const [enabled, setEnabled] = useState(false)
-  const [dismissed, setDismissed] = useState(() => sessionStorage.getItem(DISMISS_KEY) === "1")
+  // sessionStorage 走 safeStorage：这一行在 useState 的初始化器里，Safari 无痕 /
+  // 禁用站点数据时裸访问会同步抛 SecurityError，而本组件渲染在仪表盘上——抛一次
+  // 就是仪表盘白屏。读不到就当"没关过"，最多多显示一次横幅。
+  // sessionStorage via safeStorage: this sits in a useState initialiser, where a
+  // bare access throws SecurityError synchronously in Safari private mode or with
+  // site data disabled — and this renders on the dashboard, so one throw blanks
+  // that page. A failed read means "not dismissed", at worst one extra banner.
+  const [dismissed, setDismissed] = useState(() => readStorage(DISMISS_KEY, "session") === "1")
 
   useEffect(() => {
     let alive = true
@@ -50,7 +58,7 @@ export default function NotifDeviceBanner() {
   if (!shouldShow || dismissed) return null
 
   const onDismiss = () => {
-    sessionStorage.setItem(DISMISS_KEY, "1")
+    writeStorage(DISMISS_KEY, "1", "session")
     setDismissed(true)
   }
 

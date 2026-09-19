@@ -14,8 +14,6 @@ import { pushSupported } from "./pushEnv"
 // forwarding layer would only make "where does this symbol live" harder to answer.
 export { pushSupported } from "./pushEnv"
 
-const SW_URL = "/sw.js"
-
 function urlBase64ToUint8Array(base64: string) {
   const padding = "=".repeat((4 - (base64.length % 4)) % 4)
   const raw = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/")
@@ -27,22 +25,53 @@ function urlBase64ToUint8Array(base64: string) {
 
 let _reg: ServiceWorkerRegistration | null = null
 
+// 只等待注册，不再自己注册一次。
+//
+// 注册统一由 main.tsx 在 load 事件里做一次（SW 现在还管离线壳，对所有人都要生效，
+// 不能只在"用户开推送"这条路径上才存在）。这里原来又 register 了一遍：注册本身是
+// 幂等的，真正的问题是两条路径抢着写同一个诊断格子——pushDiag 是 Map，后写覆盖
+// 先写，于是排查推送故障时看到的 "sw-register" 可能是 main.tsx 那次的结果而不是
+// 推送路径的；而且模块级的 _reg 与 main.tsx 的注册是两份互不知情的状态，谁先谁
+// 后不确定。改成 navigator.serviceWorker.ready 之后，"注册"只有一处、一个写入点。
+// ready 是一个永不 reject 的 promise：SW 注册失败时它永远挂起，所以下面给它加了
+// 时限——没有这道时限，注册失败的设备上整条开启通知的链路会静默卡死在这里，
+// 用户看到的是一个转圈转不完的开关。
+//
+// Wait for the registration; don't perform one. Registration happens once in
+// main.tsx on the load event (the worker now also serves the offline shell, which
+// everyone needs, so it can no longer live only on the "user enabled push" path).
+// This function used to register again: registration is idempotent, but the two
+// paths raced to write the same diagnostics slot — pushDiag is a Map where the
+// later write wins, so the "sw-register" entry seen while debugging push could be
+// main.tsx's outcome rather than the push path's — and the module-level _reg was a
+// second piece of state unaware of main.tsx's registration, with no defined
+// ordering between them. With navigator.serviceWorker.ready there is one
+// registration and one writer.
+// ready never rejects: when registration fails it simply stays pending forever,
+// hence the deadline below. Without it the whole enable-notifications flow would
+// silently hang here on a device where the worker failed to install, and the user
+// would just watch a toggle spin.
+const SW_READY_TIMEOUT_MS = 10_000
+
 export async function getSWReg(): Promise<ServiceWorkerRegistration | null> {
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) return null
   if (_reg) return _reg
   try {
-    _reg = await navigator.serviceWorker.register(SW_URL, { scope: "/" })
-    recordDiag("sw-register")
-    // 等 SW 就绪 / wait until ready
-    await navigator.serviceWorker.ready
+    _reg = await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), SW_READY_TIMEOUT_MS)),
+    ])
+    if (!_reg) {
+      recordDiag("sw-ready", "Service Worker 未在时限内就绪 / worker not ready within the deadline")
+      return null
+    }
     recordDiag("sw-ready")
   } catch (err) {
-    // 仍然吞掉异常（注册不上不该影响应用启动），但原因记进诊断——此前这里的
+    // 仍然吞掉异常（拿不到 SW 不该影响应用启动），但原因记进诊断——此前这里的
     // 静默 catch 让 sw.js 的语法错误藏了很久。
-    // Still swallowed (a failed registration must not break app boot), but the
-    // reason is recorded — the silent catch here hid a syntax error in sw.js
-    // for a long time.
-    recordDiag("sw-register", err)
+    // Still swallowed (no worker must not break app boot), but the reason is
+    // recorded — the silent catch here hid a syntax error in sw.js for a long time.
+    recordDiag("sw-ready", err)
     _reg = null
   }
   return _reg

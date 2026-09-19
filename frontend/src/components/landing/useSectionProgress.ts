@@ -45,6 +45,24 @@ export function useSectionProgress(ref: RefObject<HTMLElement | null>, enabled: 
       if (q !== last) {
         last = q
         el.style.setProperty('--sec-p', String(q))
+        /* 五段刻度的填充比例在这里夹好再写出去。
+           原来这一步在 CSS 里做：`--tick-f: clamp(0, calc(var(--sec-p)*5 - i), 1)`，
+           而 clamp() 是 Chrome 79+，本项目的下限是 Chrome 70——旧内核上五条刻度规则
+           全部作废，温度计永远填 0，正好退回这个 hook 要消掉的那个「推了很久没反应」。
+           夹取本来就是纯算术，放在已经每帧在跑的这里零成本，CSS 那边就只剩一次
+           var() 取值，不依赖任何 CSS 数学函数。
+           写入仍然跟着上面的 0.2% 量化闸走：q 没变就一个字节都不写。
+           The five ticks' fill ratios are clamped here instead of in CSS. That step
+           used to be `clamp(0, calc(var(--sec-p)*5 - i), 1)`, and clamp() is Chrome
+           79+ against this project's Chrome 70 floor, so on older engines all five
+           tick rules were void and the gauge sat at zero — precisely the dead air
+           this hook exists to remove. Clamping is plain arithmetic and free inside
+           a loop that already runs each frame, leaving CSS a bare var() with no
+           dependency on CSS math functions. Writes stay behind the 0.2%
+           quantisation gate above: nothing is written while q is unchanged. */
+        for (let i = 0; i < 5; i++) {
+          el.style.setProperty(`--tk${i + 1}`, Math.min(1, Math.max(0, q * 5 - i)).toFixed(3))
+        }
       }
       raf = requestAnimationFrame(frame)
     }

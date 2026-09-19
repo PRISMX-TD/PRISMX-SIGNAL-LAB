@@ -1,19 +1,23 @@
-// 比赛页（Phase 3）：列表（三组分区：即将开始/进行中/已结束）+ 详情（同页状态
-// 切换，不开子路由——列表和详情共用一次数据加载，切回列表也不必重新拉取）。
+// 比赛页（Phase 3）：列表（三组分区：即将开始/进行中/已结束）+ 详情。
+// 列表 ↔ 详情仍在同一条路由上，但打开哪一场记在查询参数 ?c=<id> 里而不是组件
+// state——这样它进浏览器历史，安卓 App / PWA 的系统返回键才会回到列表而不是
+// 直接离开比赛页（详见下面 useSearchParams 处的说明）。
 // 入口本身按 competitionsVisible 门控（见 Layout/UserMenu），这里只处理直接打
 // URL 绕过入口的情况——理论上只有内测期的普通用户会撞上 403，兜底成一句提示
 // 而不是把接口错误糊在脸上（照 AchievementsPage/LeaderboardPage 的先例）。
 //
 // Competitions page (Phase 3): a list (three sections: upcoming/running/
-// finished) + a detail view (same-page state switch, no sub-route — list and
-// detail load independently, so going back to the list needs no refetch). The
+// finished) + a detail view. Both stay on one route, but which competition is
+// open lives in the ?c=<id> query parameter rather than component state, so it
+// enters browser history and the Android app / PWA back button returns to the
+// list instead of leaving the page (see the useSearchParams note below). The
 // entry point itself is gated on competitionsVisible (see Layout/UserMenu);
 // this only handles someone hitting the URL directly — in practice only a
 // regular user during the beta window, degraded to one line of copy instead
 // of a raw API error (same precedent as AchievementsPage/LeaderboardPage).
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import ProfileLink from '../components/ProfileLink'
 import type { TFunction } from 'i18next'
@@ -162,7 +166,14 @@ const STATUS_TAG_CLASS: Record<string, string> = {
   regOpen: 'bg-prism-600/20 text-prism-300',
   running: 'bg-up/15 text-up',
   finished: 'bg-neutral-500/15 text-neutral-400',
-  settled: 'bg-blue-400/15 text-blue-300',
+  // 结算态此前用 Tailwind 原生 blue-*，是全站状态色里唯一一个外来色相——设计
+  // 令牌写明「紫是整页唯一的彩度」，neon.cyan 等旧键也早已去霓虹化。结算是
+  // 「已封存、不再变动」，语义上就是中性档，与 finished 同族但更亮一级以示区分。
+  // The settled tag used stock Tailwind blue-*, the only foreign hue among the
+  // status colours, against a token set that states violet is the page's only
+  // chroma. Settled means sealed and final, which is semantically the neutral
+  // band — same family as finished, one step brighter to stay distinguishable.
+  settled: 'bg-neutral-300/15 text-neutral-300',
 }
 
 // 报名窗口状态：仅 enrollment=="signup" 且报名窗口两端都有值时才有意义——auto
@@ -208,8 +219,20 @@ function StatusLine({ c, tagKey, t }: { c: CompetitionSummary; tagKey: string; t
 // two lines on a phone, and the list only needs "which days"; minute precision
 // belongs to the detail page. fmtDay itself now lives in api/utils.ts (the
 // limited-badge closing date on the achievements/detail pages needs the same format).
+// 带上时区后缀。fmtDay 走的是 Asia/Shanghai（UTC+8），而同一个「成长」壳下的
+// 排行榜页按 UTC 显示周期区间——两个页签的日期本来就会差一天，此前**两边都没有
+// 标注**，看到的人无从分辨是口径不同还是数据不对。api/utils 的 fmtDate/fmtTime
+// 都已经带 "UTC+8" 后缀，唯独 fmtDay 没有；fmtDay 是共享工具（勋章绝版日等也在
+// 用），不在本次改动范围内，所以后缀加在这个调用点上。
+// Tag the zone. fmtDay renders in Asia/Shanghai (UTC+8) while the leaderboard tab
+// under the same Growth shell shows its period range in UTC, so the two tabs can
+// legitimately differ by a day — and neither was labelled, leaving no way to tell
+// a zone difference from bad data. fmtDate/fmtTime in api/utils already carry a
+// "UTC+8" suffix; fmtDay alone does not, and being a shared helper (limited-badge
+// closing dates use it too) it is out of scope here, so the suffix goes on this
+// call site.
 const fmtRange = (c: CompetitionSummary) =>
-  `${c.startsAt ? fmtDay(c.startsAt) : '—'} → ${c.endsAt ? fmtDay(c.endsAt) : '—'}`
+  `${c.startsAt ? fmtDay(c.startsAt) : '—'} → ${c.endsAt ? fmtDay(c.endsAt) : '—'} UTC+8`
 
 // 转播角标的读数：固定 DD:HH:MM，不足一天也补 00，读数的位置和宽度永远不变。
 // The broadcast bug's readout: always DD:HH:MM, zero-padded under a day, so the
@@ -481,13 +504,74 @@ function AccountPickerModal({
   t: TFunction
 }) {
   const [login, setLogin] = useState<string | null>(accounts[0]?.login ?? null)
+  const panel = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+
+  /* 上面的注释说本弹窗「复用 SlideOrderModal/ConfirmModal 模式」，但此前实际只复用了
+     portal 这一件事：没有 role="dialog"/aria-modal，Escape 关不掉，焦点不进弹窗也不
+     被困住，背景照常滚动，唯一的关闭方式是拿鼠标点遮罩。而这是**报名的唯一入口**，
+     键盘与读屏用户等于进得去出不来。同仓库的 BadgeDetailModal 就有正确实现。
+     这里补齐四件事：Escape 关闭、打开时把焦点移进面板、Tab 在面板内循环、锁住背景
+     滚动。语义标记（role/aria-modal/aria-labelledby）见下面的 JSX。
+
+     The comment above says this reuses the SlideOrderModal/ConfirmModal pattern, but
+     in practice only the portal was reused: no role="dialog"/aria-modal, no Escape,
+     no focus move or trap, no scroll lock — the sole way out was clicking the scrim
+     with a mouse. This is the only entry point for registering, so keyboard and
+     screen-reader users could enter it and not get out. BadgeDetailModal in this
+     same repo does it correctly. Added here: Escape to close, focus moved into the
+     panel on open, Tab cycling inside it, and a background scroll lock. */
+  useEffect(() => {
+    const prevFocus = document.activeElement as HTMLElement | null
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    panel.current?.focus()
+
+    const FOCUSABLE =
+      'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        onCancel()
+        return
+      }
+      if (e.key !== 'Tab' || !panel.current) return
+      const items = Array.from(panel.current.querySelectorAll<HTMLElement>(FOCUSABLE))
+      if (items.length === 0) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      // 焦点跑到面板外（或还停在面板容器本身）时，把它拉回两端。
+      // Pull focus back to an end whenever it would leave the panel.
+      if (e.shiftKey && (document.activeElement === first || !panel.current.contains(document.activeElement))) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prevOverflow
+      prevFocus?.focus?.()
+    }
+  }, [onCancel])
+
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6 backdrop-blur-sm"
       onClick={onCancel}
     >
-      <div className="glass-card w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-lg font-bold text-white">{t('competition.pickAccount')}</h3>
+      <div
+        ref={panel}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="glass-card w-full max-w-sm p-6 outline-none"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 id={titleId} className="text-lg font-bold text-white">{t('competition.pickAccount')}</h3>
         <p className="mt-2 text-xs text-neutral-500">{t('competition.pickAccountHint')}</p>
         <div className="mt-4 max-h-64 space-y-2 overflow-y-auto">
           {accounts.map((a) => (
@@ -572,6 +656,59 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
       cancelled = true
     }
   }, [id])
+
+  /* 「实时榜」要真的会动。
+     详情页的榜单标题在比赛进行中写的是 competition.liveBoard（实时榜），但此前
+     数据**只在挂载时拉一次**，之后永不刷新：useNowTicker 推的只是倒计时。于是开着
+     页面看半小时，倒计时一直在跳而榜单一行不变——倒计时的「活」反而强化了「数据是
+     活的」这个错觉，比干脆写成静态快照更误导人。
+
+     这里补两条最省的刷新路径，不引入轮询以外的任何机制：
+     · 比赛进行中（running）时每 60 秒重拉一次。榜单本身按成交结算，分钟级足够，
+       60 秒既不会让人觉得卡住，也不会给后端压出多余负载。
+     · 标签页从后台切回前台时立刻重拉一次。移动端最常见的用法就是切走一会儿再切
+       回来，这时屏幕上那份数据可能已经过期很久，而定时器在后台本来就被节流。
+     未开赛/已结束/已终审不刷新：那些状态下榜单要么还不存在，要么已经封存不会再变。
+
+     Make the "live board" actually live. The heading reads
+     competition.liveBoard while a competition is running, but the payload was
+     fetched once at mount and never again — useNowTicker only advances the
+     countdown. Leaving the page open for half an hour showed a ticking clock above
+     a frozen board, and that ticking actively reinforced the impression the data
+     was live, which is worse than presenting an honest static snapshot.
+     Two cheap refresh paths, no mechanism beyond an interval: re-fetch every 60s
+     while running (the board settles per trade, so minute granularity is ample and
+     60s adds no meaningful backend load), and re-fetch immediately when the tab
+     returns to the foreground (the common mobile pattern is to switch away and
+     back, by which point the on-screen data can be badly stale and background
+     timers are throttled anyway).
+     Upcoming / ended / settled do not poll: the board either does not exist yet or
+     is sealed and will not change again. */
+  useEffect(() => {
+    if (detail?.status !== 'running') return
+    let cancelled = false
+    const pull = () => {
+      competitionApi
+        .detail(id)
+        .then((res) => {
+          if (!cancelled) setDetail(res)
+        })
+        .catch(() => {
+          /* 静默：屏幕上已有可用数据，网络抖动不该把整页降级。
+             Silent: usable data is already on screen; a blip must not degrade it. */
+        })
+    }
+    const timer = setInterval(pull, 60_000)
+    const onVisibility = () => {
+      if (!document.hidden) pull()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [id, detail?.status])
 
   async function refreshDetail() {
     try {
@@ -807,16 +944,42 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
   )
 }
 
+// 宽度由 GrowthHub 外壳统一约束（mx-auto max-w-[1100px]），本页不再自己套一层。
+// 三条路由都是 <GrowthHub><Page/></GrowthHub>（见 App.tsx），外壳一定在。两个来源时
+// 改壳会漏改这里，且没有任何视觉差别可以提醒人。
+// Width belongs to the GrowthHub shell; all three routes are
+// <GrowthHub><Page/></GrowthHub> (see App.tsx) so the shell is always present. With
+// two sources, changing the shell silently misses this one and nothing looks wrong.
 export default function CompetitionsPage() {
   const { t } = useTranslation()
-  // 同页状态切换，不开子路由（先例同 SupportPage 的 View = 'list' | 'form' |
-  // {ticket}）：列表和详情是两次独立请求，没有必要为一个"看一场比赛详情"的
-  // 动作单独挂一条 /competitions/:id 路由再处理浏览器历史。
-  // Same-page state switch, no sub-route (same precedent as SupportPage's
-  // View = 'list' | 'form' | {ticket}): list and detail are two independent
-  // requests, and viewing one competition's detail doesn't warrant its own
-  // /competitions/:id route plus browser-history handling.
-  const [view, setView] = useState<'list' | { id: string }>('list')
+  /* 列表 ↔ 详情放在查询参数里，而不是纯组件 state。
+     原来是 `useState<'list' | {id}>`，切换不进浏览器历史。本站有安卓 App（WebView）
+     和 PWA standalone，系统返回键/返回手势走的就是 history——在 App 里点开一场比赛
+     详情后按返回，会**直接离开比赛页**（退到上一个页面甚至退出 App），而不是回到
+     比赛列表。这是移动端最容易被当成 bug 的一类行为。
+
+     用 ?c=<id> 而不是新开一条 /competitions/:id 子路由：路由表在 App.tsx 里，而
+     查询参数留在同一条路由上，既拿到了历史记录条目（返回键回列表），又不必改动
+     路由表，也不会与 react-router 的 history 打架——参数的读写全部经由 react-router
+     自己的 useSearchParams。
+     顺带还有一个好处：详情页现在可以被分享和刷新了，以前 URL 永远只是 /competitions。
+
+     List <-> detail lives in a query parameter rather than plain component state.
+     It used to be `useState<'list' | {id}>`, which never entered browser history.
+     This site ships an Android WebView app and a standalone PWA, where the system
+     back button and back gesture drive history — so opening a competition and
+     pressing back left the competitions page entirely instead of returning to the
+     list, which is the classic mobile "that's a bug" behaviour.
+     ?c=<id> rather than a new /competitions/:id child route: the route table lives
+     in App.tsx, while a query parameter stays on the same route, still produces a
+     history entry, and is read and written through react-router's own
+     useSearchParams so nothing fights its history. It also makes a detail view
+     shareable and reload-safe, which it never was. */
+  const [params, setParams] = useSearchParams()
+  const openId = params.get('c')
+  const view: 'list' | { id: string } = openId ? { id: openId } : 'list'
+  const openDetail = (id: string) => setParams({ c: id })
+  const backToList = () => setParams({})
   const [listData, setListData] = useState<CompetitionListGrouped | null>(null)
   const [listLoading, setListLoading] = useState(true)
   const [listForbidden, setListForbidden] = useState(false)
@@ -841,14 +1004,14 @@ export default function CompetitionsPage() {
 
   if (typeof view === 'object') {
     return (
-      <div className="mx-auto max-w-[1100px] pb-10">
-        <DetailView id={view.id} onBack={() => setView('list')} t={t} />
+      <div className="pb-10">
+        <DetailView id={view.id} onBack={backToList} t={t} />
       </div>
     )
   }
 
   return (
-    <div className="mx-auto max-w-[1100px] space-y-6 pb-10">
+    <div className="space-y-6 pb-10">
       {listLoading ? (
         <SkeletonPage cards={3} />
       ) : listForbidden || !listData ? (
@@ -858,7 +1021,7 @@ export default function CompetitionsPage() {
           </p>
         </div>
       ) : (
-        <ListView data={listData} onOpen={(id) => setView({ id })} t={t} />
+        <ListView data={listData} onOpen={openDetail} t={t} />
       )}
     </div>
   )

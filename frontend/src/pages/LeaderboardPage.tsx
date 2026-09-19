@@ -115,9 +115,23 @@ function scoreColorClass(board: LeaderboardBoard, v: number): string {
   if (board !== 'return_pct') return 'text-neutral-100'
   return v >= 0 ? 'text-up' : 'text-down'
 }
-function scoreBarColor(board: LeaderboardBoard, v: number): string {
-  if (board !== 'return_pct') return 'var(--purple-hi)'
-  return v >= 0 ? 'var(--up)' : 'var(--down)'
+/* 幅度条取的是令牌的**通道三元组变量名**，不是成品颜色字符串。
+   这样同一个色既能直接用（rgb(var(x))），又能带透明度用（rgb(var(x) / 0.4)），
+   不必再借 color-mix()——那是 Chrome 111+，本项目的下限是 Chrome 70，而且
+   gradient 里出现一个解析不了的颜色会让**整条 background 声明作废**：领奖台
+   前三名的幅度条因此在旧内核上完全没有填充，只剩一条空槽。
+   rgb(r g b / a) 空格加斜杠语法是 Chrome 65+，在下限之内。
+   三元组的定义见 styles/tokens.css（颜色的唯一真源）。
+   Returns the token's channel-triplet variable NAME rather than a finished colour
+   string, so the same token serves both the solid end (rgb(var(x))) and the faded
+   end (rgb(var(x) / 0.4)) without color-mix(), which is Chrome 111+ against a
+   Chrome 70 floor — and an unparseable colour inside a gradient voids the entire
+   background declaration, which is why the podium's top-three bars rendered as
+   empty slots on older engines. rgb(r g b / a) is Chrome 65+, inside the floor.
+   The triplets live in styles/tokens.css, the single source of truth for colour. */
+function scoreBarTone(board: LeaderboardBoard, v: number): string {
+  if (board !== 'return_pct') return '--purple-hi-rgb'
+  return v >= 0 ? '--up-rgb' : '--down-rgb'
 }
 function fmtScore(board: LeaderboardBoard, v: number): string {
   return board === 'return_pct' ? fmtScoreSigned(v) : fmtScorePct(v)
@@ -171,7 +185,7 @@ function PodiumCard({ row, board, maxAbs }: { row: LeaderboardRow; board: Leader
   const isReturn = board === 'return_pct'
   const big = row.rank === 1
   const barPct = isReturn ? (Math.abs(row.score) / maxAbs) * 100 : row.score * 100
-  const barColor = scoreBarColor(board, row.score)
+  const barTone = scoreBarTone(board, row.score)
 
   return (
     <article
@@ -218,7 +232,7 @@ function PodiumCard({ row, board, maxAbs }: { row: LeaderboardRow; board: Leader
         <GrowBar
           pct={barPct}
           className="h-full rounded-full"
-          style={{ background: `linear-gradient(90deg, ${barColor}, color-mix(in srgb, ${barColor} 40%, transparent))` }}
+          style={{ background: `linear-gradient(90deg, rgb(var(${barTone})), rgb(var(${barTone}) / 0.4))` }}
         />
       </div>
     </article>
@@ -228,7 +242,7 @@ function PodiumCard({ row, board, maxAbs }: { row: LeaderboardRow; board: Leader
 function ListRow({ row, board, maxAbs }: { row: LeaderboardRow; board: LeaderboardBoard; maxAbs: number }) {
   const { t } = useTranslation()
   const isReturn = board === 'return_pct'
-  const barColor = scoreBarColor(board, row.score)
+  const barTone = scoreBarTone(board, row.score)
   const halfPct = isReturn ? (Math.abs(row.score) / maxAbs) * 50 : 0
   const leftOriginPct = isReturn ? 0 : row.score * 100
 
@@ -266,13 +280,13 @@ function ListRow({ row, board, maxAbs }: { row: LeaderboardRow; board: Leaderboa
             <GrowBar
               pct={halfPct}
               className={`absolute inset-y-0 rounded-full opacity-85 ${row.score >= 0 ? 'left-1/2' : 'right-1/2'}`}
-              style={{ background: barColor }}
+              style={{ background: `rgb(var(${barTone}))` }}
             />
           ) : (
             <GrowBar
               pct={leftOriginPct}
               className="absolute inset-y-0 left-0 rounded-full opacity-85"
-              style={{ background: barColor }}
+              style={{ background: `rgb(var(${barTone}))` }}
             />
           )}
         </div>
@@ -722,6 +736,83 @@ function BoardSkeleton() {
   )
 }
 
+/* 分段单选控件（两榜 / 周-月）。
+   原来这两组用的是 role="tablist" + role="tab"，但页面上**没有任何 role="tabpanel"**，
+   也没有接箭头键。读屏会照 ARIA 的约定宣告「标签页 1/2」，用户于是期待箭头键切换、
+   Tab 键跳进面板——两件事都不会发生，等于宣告了一套不存在的交互。
+   这两组本质是「N 选一的筛选器」，对应的模式是 radiogroup：不需要面板存在，语义上
+   也更准确（选中的是一个**选项**，不是一个页签）。
+   radiogroup 的键盘约定一并实现：组内只有选中项可被 Tab 聚焦（roving tabindex），
+   左右/上下箭头在组内循环移动并**立即改选**（单选组的标准行为，与点选一致），
+   Home/End 跳到两端。
+   A segmented single-choice control. These two groups used role="tablist"/role="tab"
+   while the page has no role="tabpanel" anywhere and no arrow-key handling, so a
+   screen reader announced "tab 1 of 2" and the user expected arrow keys to switch and
+   Tab to reach a panel — neither of which existed, i.e. an interaction contract that
+   was announced but not implemented. Both groups are really "pick one of N filters",
+   which is the radiogroup pattern: it needs no panel and is semantically accurate
+   (what is selected is an option, not a page). Its keyboard contract is implemented
+   with it: a roving tabindex so only the checked option takes Tab, arrow keys cycling
+   within the group and selecting as they move (standard for a radio group, matching
+   what a click does), and Home/End jumping to the ends. */
+function SegChoice<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+  renderLabel,
+  className = '',
+}: {
+  /** 组的无障碍名。没有合适的既有 i18n 键时可以省略——单选项本身仍会被正确宣告。
+   *  Accessible name for the group; omit when no suitable i18n key exists (each
+   *  option is still announced correctly on its own). */
+  label?: string
+  options: readonly T[]
+  value: T
+  onChange: (v: T) => void
+  renderLabel: (v: T) => string
+  className?: string
+}) {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const i = options.indexOf(value)
+    let next = -1
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (i + 1) % options.length
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (i - 1 + options.length) % options.length
+    else if (e.key === 'Home') next = 0
+    else if (e.key === 'End') next = options.length - 1
+    if (next < 0) return
+    e.preventDefault()
+    onChange(options[next])
+    // 焦点跟着选中项走，否则下一次箭头键会从旧位置起算。
+    // Focus follows the selection, or the next arrow key would start from the old one.
+    const group = e.currentTarget
+    group.querySelectorAll<HTMLButtonElement>('button')[next]?.focus()
+  }
+  return (
+    <div className={`seg-tabs ${className}`} role="radiogroup" aria-label={label} onKeyDown={onKeyDown}>
+      {options.map((o) => (
+        <button
+          key={o}
+          type="button"
+          role="radio"
+          aria-checked={value === o}
+          tabIndex={value === o ? 0 : -1}
+          onClick={() => onChange(o)}
+          className={`flex-1 sm:flex-none ${value === o ? 'on' : ''}`}
+        >
+          {renderLabel(o)}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// 宽度由 GrowthHub 外壳统一约束（mx-auto max-w-[1100px]），本页不再自己套一层。
+// 三条路由都是 <GrowthHub><Page/></GrowthHub>（见 App.tsx），外壳一定在。两个来源时
+// 改壳会漏改这里，且没有任何视觉差别可以提醒人。
+// Width belongs to the GrowthHub shell; all three routes are
+// <GrowthHub><Page/></GrowthHub> (see App.tsx) so the shell is always present. With
+// two sources, changing the shell silently misses this one and nothing looks wrong.
 export default function LeaderboardPage() {
   const { t } = useTranslation()
   const [board, setBoard] = useState<LeaderboardBoard>('return_pct')
@@ -760,7 +851,7 @@ export default function LeaderboardPage() {
 
   if (forbidden) {
     return (
-      <div className="mx-auto flex min-h-[40vh] max-w-[1100px] items-center justify-center">
+      <div className="flex min-h-[40vh] items-center justify-center">
         <p className="card glass p-6 text-center text-sm text-neutral-400">
           {t('gamification.admin.visibleOff')}
         </p>
@@ -821,7 +912,7 @@ export default function LeaderboardPage() {
     // pb-[76px]: mobile pins the rank bar above the tab bar, so page content
     // needs clearance or the list's last rows end up trapped under it;
     // desktop keeps the original sm:pb-10 unchanged.
-    <div className="mx-auto max-w-[1100px] space-y-6 pb-[76px] sm:pb-10">
+    <div className="space-y-6 pb-[76px] sm:pb-10">
       <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
           {periodSrc?.periodStart && periodSrc.periodEnd && (
@@ -836,12 +927,13 @@ export default function LeaderboardPage() {
                 <span className="num">
                   {fmtUtcShortDate(periodSrc.periodStart)} –{' '}
                   {fmtUtcShortDate(new Date(new Date(periodSrc.periodEnd).getTime() - 86400000).toISOString())}
+                  <span className="ml-1 text-neutral-500">UTC</span>
                 </span>
                 <span className="text-neutral-600">·</span>
                 <span className="chip inline-flex items-center gap-1.5 border border-white/10 text-neutral-300">
                   <i
                     aria-hidden
-                    className={`h-1.5 w-1.5 rounded-full ${sealed ? 'bg-neutral-500' : 'bg-up shadow-[0_0_0_3px_rgba(53,201,122,.15)]'}`}
+                    className={`h-1.5 w-1.5 rounded-full ${sealed ? 'bg-neutral-500' : 'bg-up shadow-[0_0_0_3px_rgb(var(--up-rgb)/0.15)]'}`}
                   />
                   {sealed || !periodSrc.sealAt ? t('leaderboard.sealed') : t('leaderboard.sealRunning', { time: fmtUtcClock(periodSrc.sealAt) })}
                 </span>
@@ -861,12 +953,13 @@ export default function LeaderboardPage() {
                   <span className="num">
                     {fmtUtcShortDate(periodSrc.periodStart)} –{' '}
                     {fmtUtcShortDate(new Date(new Date(periodSrc.periodEnd).getTime() - 86400000).toISOString())}
+                    <span className="text-neutral-500"> UTC</span>
                   </span>
                 </span>
                 <span className="chip inline-flex items-center gap-1.5 border border-white/10 px-2 py-1 text-[11px] text-neutral-300">
                   <i
                     aria-hidden
-                    className={`h-1.5 w-1.5 rounded-full ${sealed ? 'bg-neutral-500' : 'bg-up shadow-[0_0_0_3px_rgba(53,201,122,.15)]'}`}
+                    className={`h-1.5 w-1.5 rounded-full ${sealed ? 'bg-neutral-500' : 'bg-up shadow-[0_0_0_3px_rgb(var(--up-rgb)/0.15)]'}`}
                   />
                   {sealed || !periodSrc.sealAt ? t('leaderboard.sealed') : t('leaderboard.sealRunning', { time: fmtUtcClock(periodSrc.sealAt) })}
                 </span>
@@ -887,34 +980,32 @@ export default function LeaderboardPage() {
           )}
         </div>
         <div className="lb-controls flex flex-row items-center gap-2 sm:flex-wrap sm:gap-2.5">
-          <div className="lb-seg-board seg-tabs w-full sm:w-fit" role="tablist">
-            {BOARDS.map((b) => (
-              <button
-                key={b}
-                type="button"
-                role="tab"
-                aria-selected={board === b}
-                onClick={() => setBoard(b)}
-                className={`flex-1 sm:flex-none ${board === b ? 'on' : ''}`}
-              >
-                {t(`leaderboard.boards.${b}`)}
-              </button>
-            ))}
-          </div>
-          <div className="lb-seg-period seg-tabs w-full sm:w-fit" role="tablist">
-            {PERIODS.map((p) => (
-              <button
-                key={p}
-                type="button"
-                role="tab"
-                aria-selected={period === p}
-                onClick={() => setPeriod(p)}
-                className={`flex-1 sm:flex-none ${period === p ? 'on' : ''}`}
-              >
-                {t(`leaderboard.periods.${p}`)}
-              </button>
-            ))}
-          </div>
+          <SegChoice
+            /* 同下面的周期组：没有现成的组名词条（nav.leaderboard 并不存在），
+               而 i18n 词条不在本次改动范围内，所以不给 aria-label。
+               Same as the period group below: there is no existing key for a group
+               name (nav.leaderboard does not exist) and the i18n catalogue is out of
+               scope here, so no aria-label is set. */
+            options={BOARDS}
+            value={board}
+            onChange={setBoard}
+            renderLabel={(b) => t(`leaderboard.boards.${b}`)}
+            className="lb-seg-board w-full sm:w-fit"
+          />
+          <SegChoice
+            /* 周期组暂无组名：i18n 词条不在本次改动范围内（src/i18n/ 归他人），
+               而临时塞一个英文 defaultValue 会让中文读屏念出一个英文单词，比没有
+               组名更糟。选项本身（周榜 / 月榜）读屏仍会正确宣告。
+               No group name yet: the i18n catalogue is outside this change's scope and
+               an English defaultValue would have a Chinese screen reader speak an
+               English word, which is worse than no name. The options themselves
+               (weekly / monthly) are still announced correctly. */
+            options={PERIODS}
+            value={period}
+            onChange={setPeriod}
+            renderLabel={(p) => t(`leaderboard.periods.${p}`)}
+            className="lb-seg-period w-full sm:w-fit"
+          />
         </div>
       </header>
 
