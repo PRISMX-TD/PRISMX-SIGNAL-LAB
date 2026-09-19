@@ -471,24 +471,24 @@ export function ScreenRank({ t, on }: { t: T; on: boolean }) {
 }
 
 /* ═════ 幕 4：上榜 / scene 4: on the board ═════
-   镜像 /leaderboard 的榜单行：名次币（前三真实 RankCoin）、打码账户号、
+   镜像 /leaderboard 的榜单行：名次币（前三真实 RankCoin）、昵称 + 打码账户号、
    收益率；「你」那一行紫底高亮（同 .lb-row.me）。底部一条勋章到手的提示，
    用真实 BadgeIcon——这一幕是整段叙事的落点：一笔交易最终变成名次和勋章。
    账户号跟真榜同一套口径（中间两位 **，见 identity.mask_account）——样例数据
    也得照着真页面走，否则落地页会承诺一个榜单上并不存在的样子。
    Mirrors the /leaderboard rows: rank coin (real RankCoin for the top three),
-   the masked account number, return; the "you" row highlighted as .lb-row.me.
-   The sample numbers use the real board's masking rule (middle two characters,
-   see identity.mask_account) so the landing page doesn't promise a layout the
-   board doesn't have. A badge-earned toast closes the scene: one trade has
-   become rank and honor. */
+   nickname + masked account number, return; the "you" row highlighted as
+   .lb-row.me. The sample numbers use the real board's masking rule (middle two
+   characters, see identity.mask_account) so the landing page doesn't promise a
+   layout the board doesn't have. A badge-earned toast closes the scene: one
+   trade has become rank and honor. */
 export function ScreenBoard({ t, on }: { t: T; on: boolean }) {
   const rows = [
-    { r: 1, n: '6004**02', s: '+14.2%' },
-    { r: 2, n: '6001**18', s: '+9.4%' },
-    { r: 3, n: '6000**77', s: '+7.8%' },
-    { r: 4, n: '6002**33', s: '+6.1%' },
-    { r: 7, n: '6002**31', s: '+4.9%', me: true },
+    { r: 1, n: 'Monarch', a: '6004**02', s: '+14.2%' },
+    { r: 2, n: 'Kestrel', a: '6001**18', s: '+9.4%' },
+    { r: 3, n: '临风', a: '6000**77', s: '+7.8%' },
+    { r: 4, n: 'Willow', a: '6002**33', s: '+6.1%' },
+    { r: 7, n: 'Trailhead', a: '6002**31', s: '+4.9%', me: true },
   ]
   return (
     <div className={`scr ${on ? 'on' : ''}`} data-scr="4">
@@ -512,7 +512,8 @@ export function ScreenBoard({ t, on }: { t: T; on: boolean }) {
               )}
             </span>
             <span className="min-w-0 flex-1 truncate text-[3.4cqw] text-white">
-              <b className="num font-semibold">{x.n}</b>
+              <b className="font-semibold">{x.n}</b>
+              <span className="num ml-[1.6cqw] text-[2.7cqw] text-neutral-500">{x.a}</span>
               {x.me && <span className="ml-[1.6cqw] text-[2.7cqw] font-semibold text-prism-300">{t('landing.scrBoardYou')}</span>}
             </span>
             <span className="num text-[3.6cqw] font-bold text-up">{x.s}</span>

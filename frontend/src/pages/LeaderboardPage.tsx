@@ -196,7 +196,15 @@ function PodiumCard({ row, board, maxAbs }: { row: LeaderboardRow; board: Leader
             {row.isSelf && (
               <span className="tag shrink-0 bg-prism-600/25 text-[11px] text-prism-300">{t('leaderboard.youTag')}</span>
             )}
+            {/* 手机端把账户号并进同一行，省一行竖直空间；桌面端仍走下面单独一行。
+                账户号已由后端打码（自己那行才是全的，见 LeaderboardRow）。
+                Mobile folds the account number into this same line to save a row
+                of vertical space; desktop keeps it on its own line below. The
+                number is masked server-side (full only on your own row, see
+                LeaderboardRow). */}
+            <span className="num shrink-0 text-xs text-neutral-500 sm:hidden">{row.login}</span>
           </div>
+          <div className="num mt-0.5 hidden text-xs text-neutral-500 sm:block">{row.login}</div>
         </div>
       </div>
       <div className="relative mt-[18px] flex items-baseline gap-2.5">
@@ -226,7 +234,7 @@ function ListRow({ row, board, maxAbs }: { row: LeaderboardRow; board: Leaderboa
 
   return (
     <div
-      className={`lb-row relative grid grid-cols-[40px_minmax(0,1fr)_84px] items-center gap-2 border-t border-white/[0.08] px-3 py-3 md:grid-cols-[56px_minmax(0,1.4fr)_minmax(0,1.2fr)] md:gap-3 md:px-[18px] ${row.isSelf ? 'bg-prism-600/[0.07]' : ''}`}
+      className={`lb-row relative grid grid-cols-[40px_minmax(0,1fr)_84px] items-center gap-2 border-t border-white/[0.08] px-3 py-3 md:grid-cols-[56px_minmax(0,1.4fr)_120px_minmax(0,1.2fr)] md:gap-3 md:px-[18px] ${row.isSelf ? 'bg-prism-600/[0.07]' : ''}`}
     >
       {row.isSelf && <span aria-hidden className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-[3px] bg-prism-400" />}
       <span className={`num text-[15px] ${row.isSelf ? 'font-semibold text-neutral-100' : 'text-neutral-400'}`}>
@@ -247,6 +255,7 @@ function ListRow({ row, board, maxAbs }: { row: LeaderboardRow; board: Leaderboa
           </div>
         </div>
       </div>
+      <span className="num hidden text-[13px] text-neutral-500 md:block">{row.login}</span>
       <div className="hidden items-center gap-3 md:flex">
         <b className={`num min-w-[64px] text-right text-sm font-semibold ${scoreColorClass(board, row.score)}`}>
           {fmtScore(board, row.score)}
@@ -656,14 +665,10 @@ function BoardBody({
               ≥ 640px: the original header row + ListRow, untouched. */}
           {listRows.length > 0 && (
             <section className="glass hidden overflow-hidden p-0 sm:block">
-              <div className="grid grid-cols-[40px_minmax(0,1fr)_84px] gap-2 px-3 pb-2 pt-2.5 text-[11px] uppercase tracking-wider text-neutral-500 md:grid-cols-[56px_minmax(0,1.4fr)_minmax(0,1.2fr)] md:gap-3 md:px-[18px]">
+              <div className="grid grid-cols-[40px_minmax(0,1fr)_84px] gap-2 px-3 pb-2 pt-2.5 text-[11px] uppercase tracking-wider text-neutral-500 md:grid-cols-[56px_minmax(0,1.4fr)_120px_minmax(0,1.2fr)] md:gap-3 md:px-[18px]">
                 <span>{t('leaderboard.colRank')}</span>
-                {/* 身份列现在装的就是打码后的账户号（后端下发，见 LeaderboardRow），
-                    原来「交易者 + 账户」两列合成一列，表头跟着改成「账户」。
-                    The identity column now holds the masked account number itself
-                    (masked server-side, see LeaderboardRow); the old trader +
-                    account pair collapsed into one, so the header follows. */}
-                <span>{t('leaderboard.colAccount')}</span>
+                <span>{t('leaderboard.colTrader')}</span>
+                <span className="hidden md:block">{t('leaderboard.colAccount')}</span>
                 <span>{t(`leaderboard.colScore.${board}`)}</span>
               </div>
               {listRows.map((row) => (

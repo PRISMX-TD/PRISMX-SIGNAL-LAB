@@ -110,9 +110,9 @@ def test_list_groups_by_status_excludes_draft_and_orders_correctly(db_session):
 
 
 def test_list_carries_champion_for_settled_only(db_session):
-    """荣誉墙数据：已终审比赛带榜首行（打码后的交易账户号、分数、佩戴勋章），
-    未终审的 ended 与空榜的 settled 都是 None。冠军展示不带昵称也不带邮箱——
-    昵称公开与否都一样，那个开关已经不参与榜单口径。"""
+    """荣誉墙数据：已终审比赛带榜首行（昵称、分数、佩戴勋章），未终审的 ended
+    与空榜的 settled 都是 None。卡片上不带账户号，昵称原样展示（nickname_public
+    已不参与判定），邮箱任何情况下都不出现。"""
     _make_visible(db_session)
     viewer = _user(db_session, "listc@t.co")
     winner = _user(db_session, "champion@t.co")
@@ -131,8 +131,8 @@ def test_list_carries_champion_for_settled_only(db_session):
     by_name = {c["name"]: c for c in out["finished"]}
     champ = by_name["Settled"]["champion"]
     assert champ["score"] == 0.093 and champ["equippedBadge"] == "first_trade"
-    assert champ["displayName"] == "70**01"
-    assert champ["displayName"] != "Ace Trader" and "champion@t.co" not in champ["displayName"]
+    assert champ["displayName"] == "Ace Trader"      # 昵称原样，开关关着也一样
+    assert "champion@t.co" not in champ["displayName"]
     assert by_name["Ended"]["champion"] is None      # 未终审不挂冠军
     assert by_name["Empty"]["champion"] is None      # 终审了但没人上榜
     assert all(c["champion"] is None for c in out["upcoming"] + out["running"])
@@ -193,14 +193,11 @@ def test_detail_board_rows_no_user_id_and_isself(db_session):
     assert len(rows) == 2
     assert all("userId" not in r for r in rows)
     by_rank = {r["rank"]: r for r in rows}
-    # 自己那行真号照出，别人那行 login 与 displayName 都是打码值——比赛榜与
-    # 常设榜同一套口径。
-    # The viewer's own row keeps the real number; another entrant's login and
-    # displayName are both masked — competition boards follow the standing ones.
-    assert by_rank[1]["isSelf"] is True
-    assert by_rank[1]["login"] == "800001" and by_rank[1]["displayName"] == "800001"
-    assert by_rank[2]["isSelf"] is False
-    assert by_rank[2]["login"] == "80**02" and by_rank[2]["displayName"] == "80**02"
+    # 自己那行真号照出，别人那行账户号打码——比赛榜与常设榜同一套口径。
+    # The viewer's own row keeps the real number, another entrant's is masked —
+    # competition boards follow the standing ones.
+    assert by_rank[1]["isSelf"] is True and by_rank[1]["login"] == "800001"
+    assert by_rank[2]["isSelf"] is False and by_rank[2]["login"] == "80**02"
     assert out["board"]["me"]["rank"] == 1
     assert out["board"]["me"]["login"] == "800001"
     # comp:<id> 不是 period_bounds 能解析的自然周/月格式——periodStart/End/

@@ -567,7 +567,7 @@
     "mt5Linked": "{{count}} MT5 account(s) linked",
     "mt5None": "No MT5 account linked",
     "goBind": "Manage connections",
-    "profileDesc": "Your nickname is your display name on PRISMX, unique across the platform; leaderboards and competition boards show a masked trading account number instead.",
+    "profileDesc": "Your nickname is your display name on PRISMX, unique across the platform, and appears as typed on leaderboards, competition boards and your public profile; the trading account number next to it is shown masked.",
     "profileDescBasic": "Your nickname is your display name on PRISMX, unique across the platform.",
     "nicknameHelp": "2–20 characters, unique across PRISMX",
     "leaderboardOptOutDesc": "Your accounts stop appearing on every leaderboard",
@@ -2601,6 +2601,7 @@
       "month": "Monthly"
     },
     "colRank": "Rank",
+    "colTrader": "Trader",
     "colAccount": "Account",
     "colScore": {
       "return_pct": "Return",
@@ -2633,7 +2634,7 @@
       "minTradesReturn": "≥{{n}} full closes this period",
       "minBaseline": "≥{{usd}} USD starting capital",
       "deposits": "Capital per trade = money in the account when it opened or closed (the larger) · deposits and withdrawals both count",
-      "identity": "Per account · trading account number only · middle two characters masked",
+      "identity": "Per account · nickname public · middle two characters of the account number masked",
       "minTradesWinrate": "≥{{n}} trades this period",
       "positive": "Positive P&L required to rank"
     },

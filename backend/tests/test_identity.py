@@ -10,10 +10,12 @@ def test_mask_rules():
 
 
 def test_display_name_matrix():
-    assert display_name("Trader", "a@b.co", True) == "Trader"
-    assert display_name("Trader", "a@b.co", False) == "T***r"
-    assert display_name(None, "hello@b.co", True) == "h***o"   # 邮箱永远打码，开关无效
-    assert display_name(None, "hello@b.co", False) == "h***o"
+    """昵称原样展示（2026-09-19 起不再按开关打码——藏的换成了账户号）；没设
+    昵称的老账号退回邮箱前缀，那条路径永远打码。"""
+    assert display_name("Trader", "a@b.co") == "Trader"
+    assert display_name("张三丰", "a@b.co") == "张三丰"
+    assert display_name(None, "hello@b.co") == "h***o"         # 邮箱永远打码
+    assert display_name("", "hello@b.co") == "h***o"
 
 
 def test_reserved_words():
@@ -24,10 +26,10 @@ def test_reserved_words():
 
 
 def test_mask_account_covers_exactly_two_middle_chars():
-    """榜单展示口径：中间两位换成 **，长度与首尾保持原样（用户能一眼认出自己
-    的号）。短号也必须盖住两位，绝不能出现「打了码还是全须全尾」。
-    Board display rule: exactly two middle characters become **, the length and
-    the ends stay. Short numbers must still lose two characters."""
+    """榜单账户号列的口径：中间两位换成 **，长度与首尾保持原样（用户能一眼
+    认出自己的号）。短号也必须盖住两位，绝不能出现「打了码还是全须全尾」。
+    The board's account column: exactly two middle characters become **, the
+    length and the ends stay. Short numbers must still lose two characters."""
     assert mask_account("12345678") == "123**678"
     assert mask_account("600402") == "60**02"
     assert mask_account("7001234") == "70**234"

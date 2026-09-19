@@ -147,24 +147,21 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
     for r in top_rows:
         u = users_by_id.get(r.user_id)
         is_self = r.user_id == viewer.id
-        # 榜上的身份就是交易账户号本身（中间两位打码），不再是昵称——昵称与它的
-        # 公开开关退出榜单口径，只剩公开主页在用。displayName 与 login 下发的是
-        # 同一个字符串：前端两处都渲染它，分成两个字段只是为了不动 types.ts 的
-        # 既有形状（login 还当着 React key 和「我的参赛账户」的匹配键用）。
-        # 真号只在两种情况下出现：这行就是观众自己（自己的账户号自己当然能看），
+        # 名字照常展示（昵称原样，没设昵称的退回打码邮箱前缀），打码的是账户号
+        # 这一列：别人的账户号中间两位换成 **。真号只在两种情况下出现：这行就是
+        # 观众自己（自己的账户号自己当然能看，「我的名次」卡上本来也是全的），
         # 或管理端 reveal——两条路径与 §4.3 一样泾渭分明。
-        # A row's identity is now the trading account number itself with its
-        # middle two characters masked, not a nickname — the nickname and its
-        # "public" switch have left the board entirely and only the public
-        # profile still uses them. displayName and login carry the same string;
-        # they stay two fields so types.ts keeps its shape (login also serves as
-        # a React key and as the match key for "my competition entries"). The
-        # real number appears only for the viewer's own row or on the admin
-        # reveal path — the same strict split as §4.3.
+        # The name is shown as usual (the nickname as typed, falling back to a
+        # masked email local part); what's masked is the account column — another
+        # entrant's number keeps everything but its middle two characters. The
+        # real number appears only for the viewer's own row (their own number,
+        # which the "my rank" card already shows in full) or on the admin reveal
+        # path — the same strict split as §4.3.
         shown_login = r.mt5_login if (is_self or reveal) else identity.mask_account(r.mt5_login)
         row = {
             "rank": r.rank,
-            "displayName": shown_login,
+            "displayName": identity.display_name(
+                u.nickname if u else None, u.email if u else None),
             "login": shown_login,
             "score": r.score,
             "sample": r.sample,
@@ -178,12 +175,12 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
             "profileId": u.public_id if u else None,
         }
         # reveal 只由管理端入口传 True（见 admin_leaderboard）。用户端 §4.3 的
-        # 契约不变：不下发 user_id、身份一律打码——这三个字段永远不会出现在
+        # 契约不变：不下发 user_id、账户号一律打码——这三个字段永远不会出现在
         # /gamification/leaderboard 的响应里，管理员看真实身份是运营需要，
         # 与"对用户打码"不冲突，但两条路径必须泾渭分明。
         # reveal is passed True only by the admin entry point (see
         # admin_leaderboard). The user-facing §4.3 contract is unchanged: no
-        # user_id, identities always masked — these three fields never appear in a
+        # user_id, account numbers always masked — these three fields never appear in a
         # /gamification/leaderboard response. Admins seeing real identities is an
         # operational need and doesn't conflict with masking for users, but the
         # two paths must stay strictly separate.
@@ -258,11 +255,8 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
             if prev_row:
                 pu = db.query(User).filter(User.id == prev_row.user_id).first()
                 previous_winner = {
-                    # 上期冠军同口径：打码后的账户号，一律打码不分自己与别人——
-                    # 单独一行没必要多一条只在极少数人身上生效的分支。
-                    # Same rule for the previous champion: the masked account
-                    # number, always — no self-exception for a single row.
-                    "displayName": identity.mask_account(prev_row.mt5_login),
+                    "displayName": identity.display_name(
+                        pu.nickname if pu else None, pu.email if pu else None),
                     "score": prev_row.score,
                     "profileId": pu.public_id if pu else None,
                 }
@@ -581,7 +575,7 @@ def build_profile_payload(db: Session, viewer: User, public_id: str) -> dict:
     stats = _profile_stats(db, target) if (target.stats_public or is_self) else None
     created = target.created_at
     return {
-        "displayName": identity.display_name(target.nickname, target.email, bool(target.nickname_public)),
+        "displayName": identity.display_name(target.nickname, target.email),
         "isSelf": is_self,
         "level": level,
         "title": LEVEL_TITLES[level - 1],

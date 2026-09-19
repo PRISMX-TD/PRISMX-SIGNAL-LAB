@@ -57,16 +57,16 @@ def test_gate_and_admin_bypass(db_session):
 
 
 def test_payload_masking_isself_and_me(db_session):
-    """榜上的身份是打码后的交易账户号——昵称与 nickname_public 都不再参与：
-    设了昵称的、公开了昵称的、没设昵称的，三种人下发的都是同一套账户号口径，
-    displayName 与 login 同值。真号只在观众自己那行出现。
-    A row's identity is the masked account number; neither the nickname nor
-    nickname_public takes part any more — all three user shapes below get the
-    same masked number in both displayName and login, and only the viewer's own
-    row carries the real one."""
+    """名字照常展示（昵称原样，没设昵称的退回打码邮箱前缀），打码的是账户号：
+    别人那行中间两位换成 **，观众自己那行给真号。nickname_public 不再参与任何
+    判定——设了没设都一样展示。
+    The name is shown as usual (the nickname as typed, falling back to a masked
+    email local part) and what's masked is the account number: another entrant's
+    row loses its middle two characters while the viewer's own row keeps the real
+    one. nickname_public no longer takes part in any decision."""
     a = _user(db_session, "top@t.co", nickname="Trader", badge="midas_touch")
-    b = _user(db_session, "second@t.co")           # 无昵称
-    c = _user(db_session, "third@t.co", nickname="Trader", nickname_public=True)  # 昵称公开
+    b = _user(db_session, "second@t.co")           # 无昵称 → 邮箱前缀打码
+    c = _user(db_session, "third@t.co", nickname="Falcon", nickname_public=True)
     _row(db_session, a, "500123", 1, 0.20)
     _row(db_session, a, "500999", 3, 0.05)         # 同一人第二个账户
     _row(db_session, b, "600001", 2, 0.10)
@@ -74,13 +74,14 @@ def test_payload_masking_isself_and_me(db_session):
     p = build_leaderboard_payload(db_session, b, "return_pct", "2026-W36")
     assert p["periodKey"] == "2026-W36" and len(p["rows"]) == 4
     r1, r2, _r3, r4 = p["rows"]
-    assert r1["displayName"] == "50**23" and r1["login"] == "50**23"
+    # 昵称原样（开关关着也一样），账户号打码
+    assert r1["displayName"] == "Trader" and r1["login"] == "50**23"
     assert r1["equippedBadge"] == "midas_touch" and r1["isSelf"] is False
-    # 观众自己那行：真号照出（自己的账户号自己当然能看）
-    assert r2["displayName"] == "600001" and r2["login"] == "600001" and r2["isSelf"] is True
+    # 观众自己那行：名字回落打码邮箱前缀，账户号给真号（自己的号自己当然能看）
+    assert r2["displayName"] == "s***d" and r2["login"] == "600001" and r2["isSelf"] is True
     assert "userId" not in r1
-    # 昵称公开也一样打码——nickname_public 已经不参与榜单口径
-    assert r4["displayName"] == "70**01" and r4["isSelf"] is False
+    # nickname_public 开着也只是原样展示，与上面那行没有区别
+    assert r4["displayName"] == "Falcon" and r4["login"] == "70**01" and r4["isSelf"] is False
     assert p["me"] == {"rank": 2, "score": 0.10, "sample": 8, "login": "600001"}
     # a 的 me 取最好名次
     pa = build_leaderboard_payload(db_session, a, "return_pct", "2026-W36")
@@ -174,7 +175,7 @@ def test_previous_winner_from_seeded_prior_period(db_session):
 
     p = build_leaderboard_payload(db_session, b, "return_pct", PK)
     assert p["rows"] == []
-    assert p["previousWinner"] == {"displayName": "90**01", "score": 0.087, "profileId": a.public_id}
+    assert p["previousWinner"] == {"displayName": "Champion", "score": 0.087, "profileId": a.public_id}
 
 
 def test_previous_winner_not_computed_when_board_nonempty(db_session):

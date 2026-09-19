@@ -45,16 +45,16 @@ export default function AccountPage() {
   // client-side length pre-check duplicating the backend's (2-20 chars /
   // reserved word), whose failures already carry a ready-to-show bilingual message.
   const [nicknameDraft, setNicknameDraft] = useState("")
-  // 「榜单完整展示昵称」开关随榜单改版下线：榜上展示的是打码后的交易账户号
-  // （见 identity.mask_account），昵称不再出现，留着开关只会让人以为它还管用。
-  // users.nickname_public 字段与 PATCH 入参都保留不动——公开主页仍在用它，
-  // 存量用户的取值也不该被一次前端改版顺手改写。
-  // The "show full nickname on boards" switch is gone with the board redesign:
-  // boards now show the masked trading account number (see
-  // identity.mask_account) and never a nickname, so leaving the switch would
-  // only imply it still does something. users.nickname_public and the PATCH
-  // field both stay — the public profile still reads it, and a frontend
-  // redesign has no business rewriting stored values.
+  // 「榜单完整展示昵称」开关已下线（2026-09-19）：昵称现在一律原样展示，藏的
+  // 换成了同一行的交易账户号（后端 identity.mask_account 打码），这个开关没有
+  // 任何作用了，留着只会让人以为它还管用。users.nickname_public 字段与 PATCH
+  // 入参都保留不动，纯为不动存量数据与接口形状（后端已不读它）。
+  // The "show full nickname on boards" switch is gone (2026-09-19): nicknames
+  // are always shown as typed now and what's hidden is the trading account
+  // number on the same row (masked by identity.mask_account), so the switch
+  // does nothing and keeping it would only imply otherwise.
+  // users.nickname_public and the PATCH field both stay, purely to leave stored
+  // data and the API shape untouched — no backend path reads it any more.
   const [leaderboardOptOutDraft, setLeaderboardOptOutDraft] = useState(false)
   // 公开主页的交易画像开关（2026-09-07），与上面的开关同一条保存路径。
   // The public-profile trading-stats switch (2026-09-07), saved on the same path as the one above.

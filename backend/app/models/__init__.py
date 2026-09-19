@@ -155,7 +155,7 @@ class User(Base):
     # which is exactly the "can't use Google login after setting a password"
     # bug reported 2026-07.
     google_linked_at = Column(DateTime, nullable=True)
-    nickname = Column(String, nullable=True)            # 2-20 字，展示时默认打码；保留词校验在写入端
+    nickname = Column(String, nullable=True)            # 2-20 字，榜单/主页原样展示；保留词校验在写入端
     # 重名判定用的归一形式（NFKC + 去空白 + 小写，见 gamification.nickname_key），
     # 唯一索引建在它上面而不是 nickname：显示要保留用户敲的原样大小写与空格，
     # 但「Alice」「alice」「a l i c e」必须算同一个名字。两列永远同写，nickname
@@ -166,6 +166,15 @@ class User(Base):
     # Always written together with nickname; NULL when unset, and NULL doesn't
     # participate in uniqueness on either backend, so unset users never clash.
     nickname_key = Column(String, nullable=True)
+    # 2026-09-19 起不再参与任何展示判定：榜单与公开主页一律展示昵称原样，藏的
+    # 换成了账户号（gamification.identity.mask_account），账户页那个开关也下线了。
+    # 列与 PATCH /auth/profile 的入参保留，纯为不动既有数据与接口形状——谁要重新
+    # 启用它，先确认是不是在推翻那次决定。
+    # No longer read by any display path as of 2026-09-19: boards and public
+    # profiles always show the nickname as typed and what's hidden is the account
+    # number instead (gamification.identity.mask_account); the account-page switch
+    # is gone. The column and the PATCH /auth/profile field stay so stored data and
+    # the API shape are untouched — re-enabling it means reversing that decision.
     nickname_public = Column(Boolean, nullable=False, default=False)
     leaderboard_opt_out = Column(Boolean, nullable=False, default=False)
     equipped_badge = Column(String, nullable=True)      # 佩戴的勋章 id，只能佩戴已获得的

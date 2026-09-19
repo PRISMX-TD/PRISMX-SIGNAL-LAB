@@ -102,7 +102,8 @@ def test_profile_shape_masking_and_stats_hidden_by_default(db_session, monkeypat
                         lambda db, uid, data=None: pytest.fail("stats must not be computed when private"))
 
     p = build_profile_payload(db_session, viewer, target.public_id)
-    assert p["displayName"] == "T***r" and p["isSelf"] is False
+    # 昵称原样展示（2026-09-19 起 nickname_public 不再参与任何判定）
+    assert p["displayName"] == "Trader" and p["isSelf"] is False
     assert p["level"] == 1 and p["title"] == "novice"
     assert p["memberSince"] == "2026-06"
     assert p["equippedBadges"] == [{"id": "founder_2026", "tier": 0}, {"id": "starter", "tier": 2}]

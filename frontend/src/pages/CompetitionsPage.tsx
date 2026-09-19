@@ -436,6 +436,9 @@ function Ladder({ board, t }: { board: LeaderboardPayload; t: TFunction }) {
               <ProfileLink profileId={row.profileId} className="truncate">{row.displayName}</ProfileLink>
               {row.isSelf && <span className="cmp-you">{t('leaderboard.youTag')}</span>}
             </b>
+            {/* 账户号由后端打码（自己那行才是全的）。
+                The account number is masked server-side (full only on your own row). */}
+            <span className="num">{row.login}</span>
           </div>
           <i
             className={`cmp-ladder-bar ${row.score < 0 ? 'is-neg' : ''}`}

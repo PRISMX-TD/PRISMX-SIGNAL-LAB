@@ -85,17 +85,15 @@ def _summary_out(comp: Competition, top: list[dict] | None = None,
 def _leaders(db: Session, comps: list[Competition]) -> dict[str, list[dict]]:
     """各场比赛的前三行 → {comp_id: [{displayName, score, equippedBadge}, ...]}，
     按名次排好。一次 IN 查询取所有 rank<=3 的快照行，再一次取用户，不逐场查；
-    展示身份是打码后的交易账户号，与榜单行同一个 identity.mask_account（用户端
-    永远看不到真实身份）——这里不分自己与别人，卡片上的前三名一律打码。只认
-    board == comp.metric 的行——同一个 period_key 理论上只有一种 board，防御性地
-    过滤一下。
+    名字与榜单行同一个 identity.display_name（昵称原样）；卡片上只有名次、名字
+    与分数，不带账户号，所以这里没有打码一说。只认 board == comp.metric 的行——
+    同一个 period_key 理论上只有一种 board，防御性地过滤一下。
     Top-three snapshot rows per competition → {comp_id: [...]} in rank order. One
     IN query for every rank<=3 row, one for the users, no per-competition lookups;
-    the shown identity is the masked trading account number via the same
-    identity.mask_account the board rows use (the user side never sees a real
-    identity), with no self-exception on these card previews. Only rows whose
-    board matches comp.metric count; a period_key should only ever carry one
-    board, so this is a defensive filter."""
+    names come from the same identity.display_name the board rows use. These card
+    previews carry no account number at all, so nothing needs masking here. Only
+    rows whose board matches comp.metric count; a period_key should only ever
+    carry one board, so this is a defensive filter."""
     by_key = {comp_period_key(c.id): c for c in comps}
     if not by_key:
         return {}
@@ -114,7 +112,8 @@ def _leaders(db: Session, comps: list[Competition]) -> dict[str, list[dict]]:
             continue
         u = users.get(r.user_id)
         out.setdefault(comp.id, []).append({
-            "displayName": identity.mask_account(r.mt5_login),
+            "displayName": identity.display_name(
+                u.nickname if u else None, u.email if u else None),
             "score": r.score,
             "equippedBadge": u.equipped_badge if u else None,
             "equippedBadgeTier": badge_tiers.get(r.user_id, 0),

@@ -1460,16 +1460,16 @@ export interface PublicProfile {
 // Board id: return-rate board / win-rate board — matches backend LEADERBOARD_BOARDS 1:1.
 export type LeaderboardBoard = 'return_pct' | 'win_rate'
 
-// 榜单一行：displayName 与 login 是同一个值——打码后的交易账户号（中间两位
-// 换成 **，后端算好下发，见 identity.mask_account），榜上不再出现昵称。真号
-// 只在 isSelf 的那一行（观众自己）和管理端 reveal 路径上下发，所以 login 仍可
-// 当 React key、也仍能跟「我的参赛账户」对上。
-// One leaderboard row: displayName and login carry the same value — the
+// 榜单一行：displayName 是昵称原样（没设昵称的老账号才退回打码邮箱前缀），
+// login 是**打码后**的交易账户号——中间两位换成 **（后端算好下发，见
+// identity.mask_account）。真实账户号只在 isSelf 那一行（观众自己）和管理端
+// reveal 路径上下发，所以 login 仍可当 React key、也仍能跟「我的参赛账户」对上。
+// One leaderboard row: displayName is the nickname as typed (only legacy
+// accounts without one fall back to a masked email local part), and login is the
 // trading account number with its middle two characters masked (done
-// server-side, see identity.mask_account). Nicknames no longer appear on the
-// board. The real number ships only on the viewer's own row (isSelf) and on the
-// admin reveal path, so login still works as a React key and still matches
-// against "my competition entries".
+// server-side, see identity.mask_account). The real number ships only on the
+// viewer's own row (isSelf) and on the admin reveal path, so login still works
+// as a React key and still matches against "my competition entries".
 export interface LeaderboardRow {
   rank: number
   displayName: string
@@ -1491,13 +1491,13 @@ export interface LeaderboardRow {
   profileId?: string | null
   // 以下三个只在管理端预览（GET /admin/gamification/leaderboard 与
   // GET /admin/competitions/{id}/board）里出现——用户端响应永远不带它们
-  // （身份打码、不下发 user_id 是 §4.3 的契约）。这两条管理端路径同时也是
-  // login/displayName 带真实账户号的唯一场合。
+  // （不下发 user_id、账户号打码是 §4.3 的契约）。这两条管理端路径同时也是
+  // login 带完整账户号的唯一场合。
   // These three appear only in the admin previews (GET
   // /admin/gamification/leaderboard and GET /admin/competitions/{id}/board);
-  // the user-facing response never carries them (masked identities and no
-  // user_id are the §4.3 contract). Those two admin paths are likewise the
-  // only place login/displayName carry the real account number.
+  // the user-facing response never carries them (no user_id and a masked
+  // account number are the §4.3 contract). Those two admin paths are likewise
+  // the only place login carries the full account number.
   userId?: string
   nickname?: string | null
   email?: string
@@ -1547,11 +1547,11 @@ export interface LeaderboardProgress {
 }
 
 // 上期冠军（领奖台/空榜提示用）——上一个自然周/月的第一名，displayName 同样是
-// 打码后的账户号（这一行一律打码，不分自己与别人）。比赛榜（period_key 形如 comp:<id>）没有"上一期"概念，
+// 昵称（这一行不带账户号）。比赛榜（period_key 形如 comp:<id>）没有"上一期"概念，
 // 恒为 null。
 // Previous period's #1 (used by the podium / empty-state hint) — the prior
-// natural week/month's rank-1 row, displayName being the masked account number
-// too (always masked here, with no self-exception). A
+// natural week/month's rank-1 row, displayName being the nickname as well (this
+// row carries no account number). A
 // competition board (period_key like comp:<id>) has no "previous period"
 // concept and this is always null there.
 export interface LeaderboardPreviousWinner {
