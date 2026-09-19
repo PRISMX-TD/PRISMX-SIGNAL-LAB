@@ -961,8 +961,13 @@ class StrategyWatch(Base):
 class AdminAuditLog(Base):
     """管理员操作审计日志：谁在什么时候把哪个用户的哪个字段改成了什么。
 
-    只记录管理后台发起的用户等级/权限变更，不记录一般业务操作。团队不止一人
-    管理时，这是唯一能查清"谁改的、改成了什么"的依据。
+    只记录用户等级/权限这类变更，不记录一般业务操作。团队不止一人管理时，这是
+    唯一能查清"谁改的、改成了什么"的依据。
+
+    2026-09-19 起写入方不止管理后台：邀请链接的**代理**也能调整自己名下客户的
+    会员（见 routers/invite.agent_set_plan），那些行的 admin_user_id 记的是代理
+    本人、field 带 `agent:{链接码}:` 前缀——查"这个等级是谁改的"时按前缀就能分开
+    两种来源。
 
     Admin action audit log: who changed which field on which user, and when.
     Only covers admin-initiated role/plan changes, not general business

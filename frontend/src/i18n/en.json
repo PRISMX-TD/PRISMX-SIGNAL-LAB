@@ -2240,7 +2240,7 @@
       "downgrade": "Drop to free"
     },
     "title": "Agent view",
-    "subtitle": "Invite links assigned to you, and the users who registered through them. Read-only.",
+    "subtitle": "Invite links assigned to you and the clients who registered through them. You can adjust their membership; everything else is read-only.",
     "empty": "No invite links have been assigned to you yet.",
     "clicks": "Clicks",
     "registrations": "Signups",
