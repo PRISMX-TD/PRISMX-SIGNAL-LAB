@@ -197,7 +197,12 @@ export interface AgentMT5Account {
   // because the gateway never writes a heartbeat — never render it as "never
   // connected" on a gateway row.
   channel: 'gateway' | 'bridge'
-  online: boolean
+  // 只有桥接有；直连恒为 null。直连的"在不在线"是平台那台网关的状态、全站共享，
+  // 不是这个客户的状态——别把 null 当成 false 渲染成「离线」。
+  // Bridge only; always null on gateway rows, where "online" would be the
+  // platform's own gateway status shared by every account, not this client's.
+  // Never render null as "offline".
+  online: boolean | null
   lastConnectedAt: string | null
   // 只对直连行成立：券商侧密码变过，这次绑定的授权作废，要用户重新验证主密码。
   // Gateway rows only: the broker-side password changed, so this binding needs

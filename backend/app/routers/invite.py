@@ -411,9 +411,11 @@ def _mt5_accounts(db: Session, user_ids: list[str]) -> dict[str, list[AgentMT5Ac
       说成"需重连"；
     - 「需重连」走 gateway_binding.is_revoked，它对桥接行恒为 False：桥接的凭证
       在用户自己手里，密码改了就是登不上、没有心跳，不套这套语义；
-    - 在线走 deps.is_account_online（账户页同一口径）：直连 = 未撤销且网关可达，
-      桥接 = 心跳在窗口内。**直连从不写 last_heartbeat**，所以那一列不能当作两条
-      通道通用的"最近连接"——首版这么干，结果每个直连账号都显示「从未连接」。
+    - 在线只对桥接下发（deps.is_account_online，账户页同一口径 = 心跳在窗口内）；
+      **直连一律 null**，因为 is_account_online 对直连返回的是平台自己那台网关通不
+      通，全站共享一个值，写在客户那一行上会把平台抖动显示成客户掉线（见
+      AgentMT5AccountOut.online）。**直连也从不写 last_heartbeat**，所以那一列同样
+      不能当两条通道通用的"最近连接"——首版这么干，每个直连账号都显示「从未连接」。
 
     排序在 Python 侧做：从没连过的行 last_heartbeat 是 NULL，而 NULL 在 ORDER BY
     DESC 里的位置 SQLite 与 Postgres 正好相反（一个排最后、一个排最前），交给库
@@ -436,9 +438,16 @@ def _mt5_accounts(db: Session, user_ids: list[str]) -> dict[str, list[AgentMT5Ac
         .filter(MT5Account.user_id.in_(user_ids), not_removed())
         .all()
     )
-    # 在线的排最前，其余按最近心跳倒序（没心跳的按 datetime.min 落到最后）。
-    # Online first, then by most recent heartbeat; never-seen rows sort last.
-    rows.sort(key=lambda a: (is_account_online(a), a.last_heartbeat or datetime.min), reverse=True)
+    # 还连着的排最前（直连=授权还在，桥接=此刻在线），其余按最近心跳倒序
+    # （没心跳的按 datetime.min 落到最后）。
+    # Still-connected rows first (gateway: still authorised; bridge: online now),
+    # then by most recent heartbeat; never-seen rows sort last.
+    def _live(a) -> bool:
+        if getattr(a, "source", None) == "gateway":
+            return not is_revoked(a)
+        return is_account_online(a)
+
+    rows.sort(key=lambda a: (_live(a), a.last_heartbeat or datetime.min), reverse=True)
     out: dict[str, list[AgentMT5AccountOut]] = {}
     for a in rows:
         gateway = getattr(a, "source", None) == "gateway"
@@ -448,7 +457,9 @@ def _mt5_accounts(db: Session, user_ids: list[str]) -> dict[str, list[AgentMT5Ac
                 server=a.server,
                 accountType=_TRADE_MODE_NAME.get(a.trade_mode),
                 channel="gateway" if gateway else "bridge",
-                online=is_account_online(a),
+                # 直连不下发在线状态（null），理由见 AgentMT5AccountOut.online。
+                # No online verdict on gateway rows; see the schema's comment.
+                online=None if gateway else is_account_online(a),
                 # 直连行这一列永远是 NULL，前端也不读；照原样给桥接行用。
                 # Always NULL on gateway rows (and unread there); real for bridge.
                 lastConnectedAt=None if gateway else a.last_heartbeat,

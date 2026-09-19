@@ -1534,12 +1534,27 @@ class AgentMT5AccountOut(BaseModel):
     # user's own desktop app). Shipped deliberately: "still connected?" means two
     # different things on the two channels.
     channel: Literal["gateway", "bridge"]
-    # 此刻是否在线，后端算好（services.deps.is_account_online，与账户页同一口径）：
-    # 直连 = 未撤销且网关可达；桥接 = 心跳在 7 秒窗口内。
-    # Whether it is online right now, computed server-side with the same helper
-    # the account page uses: gateway = not revoked and the gateway is reachable;
-    # bridge = heartbeat within the 7-second window.
-    online: bool = False
+    # 此刻是否在线——**只有桥接有，直连一律 null**（不是 false）。
+    #
+    # 桥接的在线与否是这个人自己的事：他电脑上的程序在不在跑。直连不是——
+    # `deps.is_account_online` 对直连行返回的是 `is_gateway_online()`，探的是**平台
+    # 自己那台网关服务通不通**，全站所有直连账号共享同一个值。把它写在某个客户
+    # 那一行上，网关一抖动，代理名下所有直连账号一起变灰，代理会以为是自己的客户
+    # 掉了。直连的每账号真相只有两种：授权还在（`revoked=False`），或者需重连。
+    #
+    # null 而不是 false，是为了让下一个人一眼看出"这条通道没有这个概念"，而不是
+    # 读成"这个客户掉线了"。
+    #
+    # Online right now — bridge only; always null (never false) on gateway rows.
+    # For a bridge binding this is about the person: their desktop app is running
+    # or not. For a gateway binding, deps.is_account_online returns
+    # is_gateway_online(), i.e. whether *the platform's own* gateway service is
+    # reachable — one value shared by every gateway account on the site. Printed
+    # on a client's row it makes a platform blip look like that client dropping
+    # off. A gateway binding's per-account truth is binary: still authorised, or
+    # needs re-verification. null (not false) so the next reader sees "this
+    # channel has no such concept" instead of "this client is offline".
+    online: bool | None = None
     # 最近一次心跳 —— **只有桥接通道有**。直连从不写这一列（平台直连券商，没有
     # 用户侧心跳这回事），所以对直连行它永远是 null，前端也不拿它说话。
     # 2026-09-19 首版把它当成两条通道通用的"最近连接时间"，于是每个直连账号都被

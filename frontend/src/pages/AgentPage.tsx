@@ -39,24 +39,34 @@ const isRecentDay = (day: string) => day >= statsDay(Date.now() - 6 * 86_400_000
 
 const MT5_TYPE_KEY = { real: 'agent.mt5Real', demo: 'agent.mt5Demo', contest: 'agent.mt5Contest' } as const
 
-// 一条绑定此刻怎么说。分通道，因为「还连着吗」在两条通道上根本不是一回事：
-// 直连由平台与券商保持连接，用户不用开电脑，压根没有"最近连接时间"这个概念
-// （后端也不写心跳）；桥接要用户电脑上的程序在跑，离线时说"上次是什么时候"
-// 才有意义。首版对两条通道一视同仁地读心跳，于是每个直连账号都显示「从未连接」。
-// What one binding says right now, per channel — "still connected?" is not the
-// same question on the two. A gateway binding is held by the platform and has no
-// last-seen concept at all (no heartbeat is ever written); a bridge binding is up
-// only while the user's desktop app runs, so its last-seen time is worth saying.
-// The first cut read the heartbeat on both and called every gateway account
-// "never connected".
+// 一条绑定此刻怎么说。分通道，因为「还连着吗」在两条通道上根本不是一回事。
+//
+// 直连：账号由平台的网关替客户挂在券商那边，客户不用开电脑，所以既没有"最近
+// 连接时间"（后端不写心跳），也**不该显示在线/离线**——那个值探的是平台自己那台
+// 网关通不通、全站所有直连账号共享一个，网关一抖动代理名下的直连账号会一起变灰，
+// 看着像客户全跑了。直连的每账号真相只有两种：授权还在（已接入），或者需重连。
+// 桥接：在线与否确实是这个人自己的事（他电脑上的程序在不在跑），离线时说"上次是
+// 什么时候"才有意义。
+//
+// What one binding says, per channel. A gateway account is held by the platform's
+// own service: no heartbeat, and no online/offline either — that verdict is the
+// platform's gateway health, shared by every gateway account, so a blip would grey
+// out the agent's whole list as if their clients had all left. Its per-account
+// truth is binary: still authorised, or needs re-verification. A bridge account's
+// online state really is that person's (their desktop app is running or not), and
+// its last-seen time is worth saying when it is not.
 type TFn = ReturnType<typeof useTranslation>['t']
 
 function connectionText(a: AgentMT5Account, t: TFn): string {
+  if (a.channel === 'gateway') return t(a.revoked ? 'agent.mt5AuthVoid' : 'agent.mt5Linked')
   if (a.online) return t('agent.mt5Online')
-  if (a.channel === 'gateway') return t('agent.mt5Offline')
   if (a.lastConnectedAt) return t('agent.mt5Last', { time: fmtTime(a.lastConnectedAt) })
   return t('agent.mt5Never')
 }
+
+// 绿色只给"确实连着"的状态：桥接在线、直连已接入。
+// Green marks a genuinely live binding: bridge online, or gateway still linked.
+const isLive = (a: AgentMT5Account) => (a.channel === 'gateway' ? !a.revoked : a.online === true)
 
 function LastActive({ day }: { day: string | null }) {
   const { t } = useTranslation()
@@ -104,7 +114,7 @@ function Mt5List({ accounts }: { accounts: AgentMT5Account[] }) {
           <p className="break-words text-[11px] text-neutral-500">
             {a.server ? `${a.server} · ` : ''}
             {t(a.channel === 'gateway' ? 'agent.mt5Gateway' : 'agent.mt5Bridge')} ·{' '}
-            <span className={a.online ? 'text-up' : undefined}>{connectionText(a, t)}</span>
+            <span className={isLive(a) ? 'text-up' : undefined}>{connectionText(a, t)}</span>
           </p>
         </li>
       ))}

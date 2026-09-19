@@ -2,7 +2,7 @@
 
 照 test_invite_links.py 的惯例走 service 级测试，用 conftest 的 db_session 内存库。
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
@@ -285,7 +285,6 @@ def test_revoked_gateway_binding_is_listed_and_flagged(db_session):
     assert len(row.mt5Accounts) == 1
     assert row.mt5Accounts[0].channel == "gateway"
     assert row.mt5Accounts[0].revoked is True
-    assert row.mt5Accounts[0].online is False
     # 撤销原因不下发：那是风控内部口径 / the reason stays internal
     assert "revokedReason" not in row.mt5Accounts[0].model_dump()
 
@@ -307,6 +306,28 @@ def test_gateway_binding_never_claims_never_connected(db_session):
     assert acc.channel == "gateway"
     assert acc.lastConnectedAt is None
     assert acc.revoked is False
+    # 在线状态对直连是 null，不是 False：那条通道的"在不在线"是平台自己那台网关
+    # 的状态，全站共享，写成 False 会被读成"这个客户掉线了"。
+    # null, not False: the gateway's online state belongs to the platform, not to
+    # this client, and False would read as "this client dropped off".
+    assert acc.online is None
+
+
+def test_bridge_row_reports_online_per_person(db_session):
+    """桥接的在线才是按人算的：心跳在窗口内为 True，过期为 False。"""
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+    u = _mk_user(db_session, "u@x.io", invite_code=link.code)
+    _mk_mt5(db_session, u, "80400001", source="bridge",
+            last_heartbeat=datetime.now(timezone.utc).replace(tzinfo=None))
+    _mk_mt5(db_session, u, "80400002", source="bridge",
+            last_heartbeat=datetime(2026, 9, 10, 6, 0))
+
+    accounts = agent_link_users(db_session, agent, link.id).users[0].mt5Accounts
+    # 在线的排最前 / online sorts first
+    assert [a.online for a in accounts] == [True, False]
 
 
 def test_user_removed_binding_is_not_listed_at_all(db_session):
