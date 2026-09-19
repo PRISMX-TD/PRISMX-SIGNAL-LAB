@@ -2255,6 +2255,7 @@
     "usersEmpty": "还没有人经这条链接注册。",
     "colUser": "用户",
     "colPlan": "等级",
+    "colExpiry": "会员到期",
     "colRegistered": "注册时间",
     "colMt5": "MT5 连接",
     "colActive": "最近活跃",

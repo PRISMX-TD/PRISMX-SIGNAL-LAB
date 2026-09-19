@@ -15,7 +15,7 @@ import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { agentApi } from '../../api/client'
-import { fmtTime, localizeApiError } from '../../api/utils'
+import { fmtDate, localizeApiError } from '../../api/utils'
 import type { AgentLinkUser, AgentPlanChange } from '../../api/types'
 
 const EXTEND_OPTIONS = [7, 30, 60]
@@ -64,7 +64,7 @@ export default function PlanDialog({
             there would read as "this person is a lifetime member". */}
         <p className="mt-3 text-xs text-neutral-400">
           {user.planExpiresAt
-            ? t('agent.plan.current', { plan: user.plan, until: t('agent.plan.until', { time: fmtTime(user.planExpiresAt) }) })
+            ? t('agent.plan.current', { plan: user.plan, until: t('agent.plan.until', { time: fmtDate(user.planExpiresAt) }) })
             : user.plan === 'PRO'
               ? t('agent.plan.current', { plan: user.plan, until: t('agent.plan.noExpiry') })
               : t('agent.plan.currentPlain', { plan: user.plan })}

@@ -2257,6 +2257,7 @@
     "usersEmpty": "Nobody has registered through this link yet.",
     "colUser": "User",
     "colPlan": "Tier",
+    "colExpiry": "Expires",
     "colRegistered": "Registered",
     "colMt5": "MT5",
     "colActive": "Last active",

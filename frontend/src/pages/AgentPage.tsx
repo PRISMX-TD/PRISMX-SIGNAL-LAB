@@ -22,7 +22,7 @@ import { SkeletonLine } from '../components/Skeleton'
 import AgentOverviewPanel from '../components/agent/AgentOverviewPanel'
 import PlanDialog from '../components/agent/PlanDialog'
 import { agentApi } from '../api/client'
-import { fmtTime, localizeApiError } from '../api/utils'
+import { fmtDate, localizeApiError } from '../api/utils'
 import { ORIGIN } from '../seo/meta'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
 import type { AgentLink, AgentLinkUser, AgentLinkUsers, AgentMT5Account } from '../api/types'
@@ -87,28 +87,60 @@ function Mt5List({ accounts }: { accounts: AgentMT5Account[] }) {
   )
 }
 
-// 会员列：等级徽标 + 到期日。不限期（PRO 且没有到期日）是管理员手动给的，代理
-// 改不动，这里直接标出来，免得他点了才吃一个 409。
-// Membership cell: tier badge plus expiry. A PRO row with no expiry is an
-// admin's manual grant that agents cannot change — say so up front rather than
-// letting them find out via a 409.
+function PlanBadge({ plan }: { plan: string }) {
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-xs ${
+        plan === 'PRO' ? 'bg-prism-500/20 text-prism-200' : 'bg-white/5 text-neutral-400'
+      }`}
+    >
+      {plan}
+    </span>
+  )
+}
+
+// 会员到期文案。FREE 没有到期可言（返回 null，调用方整行不画）；不限期（PRO 且
+// 没有到期日）是管理员手动给的，直接说出来，免得代理点了才吃一个 409。
+//
+// **带年份**（fmtDate 而不是 fmtTime）：到期日常常落在明年，只写「31/12」谁也说不清
+// 是哪一年，而这恰恰是代理点「延长」之前最需要看准的一个数。
+// Expiry caption; null for FREE. Uses fmtDate (with the year) rather than
+// fmtTime: an expiry routinely lands in a later year, and "31/12" alone cannot
+// say which — precisely the number an agent checks before extending.
+type TFn = ReturnType<typeof useTranslation>['t']
+
+function planExpiryText(user: AgentLinkUser, t: TFn): string | null {
+  if (user.plan !== 'PRO') return null
+  return user.planExpiresAt ? fmtDate(user.planExpiresAt) : t('agent.plan.noExpiry')
+}
+
+// 桌面表格的「等级」格：徽标 + 到期（带标签，否则与右边的注册时间分不清）。
+// Desktop tier cell: badge plus a labelled expiry — without the label it reads
+// as just another timestamp next to the signup one.
 function PlanCell({ user }: { user: AgentLinkUser }) {
   const { t } = useTranslation()
-  const forever = user.plan === 'PRO' && !user.planExpiresAt
+  const expiry = planExpiryText(user, t)
   return (
     <div className="min-w-0">
-      <span
-        className={`rounded-full px-2 py-0.5 text-xs ${
-          user.plan === 'PRO' ? 'bg-prism-500/20 text-prism-200' : 'bg-white/5 text-neutral-400'
-        }`}
-      >
-        {user.plan}
-      </span>
-      {user.plan === 'PRO' && (
-        <p className="num mt-1 text-[11px] text-neutral-500">
-          {forever ? t('agent.plan.noExpiry') : t('agent.plan.until', { time: fmtTime(user.planExpiresAt) })}
-        </p>
+      <PlanBadge plan={user.plan} />
+      {expiry && (
+        <p className="num mt-1 text-[11px] text-neutral-500">{t('agent.plan.until', { time: expiry })}</p>
       )}
+    </div>
+  )
+}
+
+// 手机卡里的一行「标签 + 值」。四行共用一个组件，标签宽度就自然对齐成一列；
+// 手机上每个时间都必须自带标签——桌面有表头，手机没有，两个时间叠在一起谁也
+// 认不出哪个是到期、哪个是注册（2026-09-19 负责人就是这么发现的）。
+// One labelled row on the phone card. A shared component keeps the label column
+// aligned, and on a phone every timestamp needs its own label: there is no table
+// header here, so two stacked times are indistinguishable.
+function CardRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="mt-1.5 flex items-baseline gap-2 text-xs">
+      <span className="w-16 shrink-0 text-[11px] text-neutral-500">{label}</span>
+      <div className="min-w-0 flex-1">{children}</div>
     </div>
   )
 }
@@ -388,7 +420,7 @@ export default function AgentPage() {
                             <LastActive day={u.lastActiveDay} />
                           </td>
                           <td className="num whitespace-nowrap px-4 py-3 text-xs text-neutral-400">
-                            {fmtTime(u.createdAt)}
+                            {fmtDate(u.createdAt)}
                           </td>
                           <td className="px-4 py-3 text-right">
                             <button
@@ -408,6 +440,12 @@ export default function AgentPage() {
                 <ul className="divide-y divide-white/5 sm:hidden">
                   {page.users.map((u, i) => (
                     <li key={`${u.email}-${i}`} className="px-4 py-3">
+                      {/* 右上角只留等级徽标。两个时间以前裸着叠在这里，没有表头也没有
+                          标签，「至 31/12」和「15/09 04:48」分不清谁是到期谁是注册——
+                          全部挪进下面带标签的行里。
+                          Only the tier badge sits top-right now. The two timestamps used
+                          to stack here unlabelled, with no table header to tell them
+                          apart; they moved into the labelled rows below. */}
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="truncate text-sm text-neutral-100">
@@ -415,29 +453,22 @@ export default function AgentPage() {
                           </p>
                           <p className="num break-all text-xs text-neutral-400">{u.email}</p>
                         </div>
-                        <div className="shrink-0 text-right">
-                          <PlanCell user={u} />
-                          <p className="num mt-1 text-[11px] text-neutral-500">{fmtTime(u.createdAt)}</p>
-                        </div>
+                        <PlanBadge plan={u.plan} />
                       </div>
-                      {/* 手机上活跃与 MT5 换行放下面：右侧那一列已经被等级与注册时间占满，
-                          再塞就只能压成两三个字。
-                          On phones activity and MT5 go on their own rows — the right column
-                          is already taken by tier and signup time. */}
-                      <div className="mt-2 flex items-baseline gap-2 text-xs">
-                        <span className="shrink-0 text-[11px] uppercase tracking-wide text-neutral-500">
-                          {t('agent.colActive')}
-                        </span>
+                      {planExpiryText(u, t) && (
+                        <CardRow label={t('agent.colExpiry')}>
+                          <span className="num text-neutral-300">{planExpiryText(u, t)}</span>
+                        </CardRow>
+                      )}
+                      <CardRow label={t('agent.colActive')}>
                         <LastActive day={u.lastActiveDay} />
-                      </div>
-                      <div className="mt-1.5 flex items-baseline gap-2 text-xs">
-                        <span className="shrink-0 text-[11px] uppercase tracking-wide text-neutral-500">
-                          {t('agent.colMt5')}
-                        </span>
-                        <div className="min-w-0">
-                          <Mt5List accounts={u.mt5Accounts} />
-                        </div>
-                      </div>
+                      </CardRow>
+                      <CardRow label={t('agent.colRegistered')}>
+                        <span className="num text-neutral-400">{fmtDate(u.createdAt)}</span>
+                      </CardRow>
+                      <CardRow label={t('agent.colMt5')}>
+                        <Mt5List accounts={u.mt5Accounts} />
+                      </CardRow>
                       <button
                         type="button"
                         className="btn-ghost mt-2 w-full py-1.5 text-xs disabled:opacity-40"
