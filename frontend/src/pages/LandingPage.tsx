@@ -261,9 +261,7 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" />
               </svg>
-              {inviteDays
-                ? t('landing.prTrialBadgeInvite', { days: inviteDays })
-                : t('landing.prTrialBadge', { days: trial.days })}
+              {inviteDays ? t('landing.prTrialBadgeInvite') : t('landing.prTrialBadge')}
             </div>
           )}
           <div className="flex items-baseline justify-between gap-3">
@@ -271,17 +269,21 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
             <span className="text-[12px] text-white/85">{t('landing.prProTag')}</span>
           </div>
           {/* 价格位是定价卡上眼睛落点的第一站——试用开着时它必须说 $0，
-              而不是让 $49 继续当主角、旁边贴个补丁。原价降级成一行
-              「之后 $N/月」：既诚实（试用后要付费）又把层级让出来。
+              而不是让 $49 继续当主角、旁边贴个补丁。原价降级成一行划掉的
+              「原价 $N/月」：既说清它本来值多少，又把层级让出来。
+              落地页不写任何天数——免费是「符合条件就免费用」，不是倒计时；
+              具体时长由后台开关决定，登录后的升级页再说。
               The price slot is where eyes land first on a pricing card; with
-              the trial on it must read $0, with the real price demoted to a
-              "then $N/mo" line — honest and hierarchically correct. */}
+              free access on it must read $0, with the list price demoted to a
+              struck-through "normally $N/mo" line. The landing page never
+              states a day count — free access is conditional, not a countdown;
+              the actual duration lives behind the admin switch and is spelled
+              out on the post-login upgrade page. */}
           {trial ? (
             <div className="mt-5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <span className="num text-[2.5rem] font-semibold leading-none text-white">$0</span>
-              <span className="text-[15px] font-bold text-white">{t('landing.prTrialFirstDays', { days: trial.days })}</span>
               {monthlyPrice != null && (
-                <span className="text-[13px] text-white/70">{t('landing.prTrialThen', { price: monthlyPrice })}</span>
+                <span className="text-[13px] text-white/70 line-through">{t('landing.prTrialList', { price: monthlyPrice })}</span>
               )}
             </div>
           ) : (
@@ -309,8 +311,8 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
           >
             {trial
               ? inviteDays
-                ? t('landing.prTrialCtaInvite', { days: inviteDays })
-                : t('landing.prTrialCta', { days: trial.days })
+                ? t('landing.prTrialCtaInvite')
+                : t('landing.prTrialCta')
               : t('landing.prCta')}
           </button>
         </div>
