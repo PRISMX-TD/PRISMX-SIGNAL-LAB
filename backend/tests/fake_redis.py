@@ -58,6 +58,27 @@ class FakeRedis:
     def ping(self):
         return True
 
+    # -- Lua：只认 shared_state 里那一条脚本 --
+    def eval(self, script, numkeys, *args):
+        """按脚本原文匹配，不解释 Lua。
+
+        替身的价值在于把真实语义钉住：认得出的脚本照 Redis 的语义执行，认不出的
+        直接报错——将来谁加了第二条脚本，测试会当场说话，而不是静默跳过。
+        Matches the script by its text instead of interpreting Lua. A recognised
+        script runs with Redis's semantics; an unknown one raises, so adding a
+        second script makes the tests speak up instead of silently passing.
+        """
+        from app.services.shared_state import _RELEASE_LOCK_LUA
+
+        keys, argv = list(args[:numkeys]), list(args[numkeys:])
+        if " ".join(script.split()) == " ".join(_RELEASE_LOCK_LUA.split()):
+            key = keys[0]
+            self._gc(key)
+            if self.kv.get(key) == argv[0]:
+                return self.delete(key)
+            return 0
+        raise NotImplementedError(f"FakeRedis 未实现这条 Lua 脚本 / unsupported Lua script: {script!r}")
+
     # -- hashes --
     def hget(self, key, field):
         return self.hashes.get(key, {}).get(field)

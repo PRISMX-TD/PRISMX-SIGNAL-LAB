@@ -24,6 +24,7 @@ from slowapi.util import get_remote_address
 
 from app.core.config import settings
 from app.core.security import decode_access_token
+from app.services import shared_state
 
 
 def user_rate_key(request) -> str:
@@ -50,9 +51,20 @@ def user_rate_key(request) -> str:
 
 # 独立的 Limiter 实例：与 rate_limit.limiter 的 key_func 不同，不能共用。
 # 两个实例各自记账，互不影响。
-# A separate Limiter instance: its key_func differs from rate_limit.limiter's,
-# so they can't be shared. Each keeps its own counters.
-user_limiter = Limiter(key_func=user_rate_key)
+#
+# 存储后端与 rate_limit.limiter 同源（shared_state.redis_url()）。原来这里连
+# storage_uri 参数都没写，意味着按用户的限流**永远**是进程内的：多 worker 下回测
+# 6/min+60/h 这类"一次请求就能占满一个核"的闸门按 worker 数等比稀释，而 config.py
+# 的多 worker 闸门只看 REDIS_URL 配没配，不会发现。
+#
+# A separate Limiter instance: its key_func differs from rate_limit.limiter's, so
+# they can't be shared. Each keeps its own counters. The storage comes from the
+# same place as rate_limit.limiter (shared_state.redis_url()); this call used to
+# pass no storage_uri at all, which made the per-user limits permanently
+# per-process — the backtest caps (6/min + 60/h on requests that can saturate a
+# core) divided by the worker count, with config.py's multi-worker gate none the
+# wiser because it only checks whether REDIS_URL is set.
+user_limiter = Limiter(key_func=user_rate_key, storage_uri=shared_state.redis_url() or None)
 
 
 class BacktestBusy(Exception):

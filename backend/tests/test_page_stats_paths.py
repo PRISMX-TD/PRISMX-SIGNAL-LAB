@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from app.routers.telemetry import ALLOWED_PATHS, MAX_DWELL_SECONDS, report_pageview
+from app.routers.telemetry import ALLOWED_PATHS, MAX_DWELL_SECONDS, record_pageview
 from app.models import PageVisitorDay, PageViewStat, User
 from app.schemas import PageViewIn
 
@@ -144,35 +144,35 @@ def _user(db, email="pv@t.co", role="user"):
 
 def test_unknown_path_is_dropped(db_session):
     u = _user(db_session)
-    report_pageview(PageViewIn(path="/../../etc/passwd", seconds=10), db_session, u)
-    report_pageview(PageViewIn(path="/u/gebnck49j5", seconds=10), db_session, u)  # 未归一的实路径
+    record_pageview(db_session, u, PageViewIn(path="/../../etc/passwd", seconds=10))
+    record_pageview(db_session, u, PageViewIn(path="/u/gebnck49j5", seconds=10))  # 未归一的实路径
     assert db_session.query(PageViewStat).count() == 0
 
 
 def test_template_path_is_counted(db_session):
     u = _user(db_session)
-    report_pageview(PageViewIn(path="/u/:publicId", seconds=12), db_session, u)
+    record_pageview(db_session, u, PageViewIn(path="/u/:publicId", seconds=12))
     row = db_session.query(PageViewStat).one()
     assert row.path == "/u/:publicId" and row.views == 1
 
 
 def test_admin_visits_are_never_recorded(db_session):
     a = _user(db_session, "admin@t.co", role="admin")
-    report_pageview(PageViewIn(path="/leaderboard", seconds=30), db_session, a)
+    record_pageview(db_session, a, PageViewIn(path="/leaderboard", seconds=30))
     assert db_session.query(PageViewStat).count() == 0
     assert db_session.query(PageVisitorDay).count() == 0
 
 
 def test_dwell_is_capped(db_session):
     u = _user(db_session)
-    report_pageview(PageViewIn(path="/leaderboard", seconds=99999), db_session, u)
+    record_pageview(db_session, u, PageViewIn(path="/leaderboard", seconds=99999))
     assert db_session.query(PageViewStat).one().total_seconds == MAX_DWELL_SECONDS
 
 
 def test_same_user_same_day_counts_once_as_a_visitor(db_session):
     u = _user(db_session)
     for _ in range(3):
-        report_pageview(PageViewIn(path="/competitions", seconds=5), db_session, u)
+        record_pageview(db_session, u, PageViewIn(path="/competitions", seconds=5))
     assert db_session.query(PageViewStat).one().views == 3      # 次数累加
     assert db_session.query(PageVisitorDay).count() == 1        # 人数去重
 
@@ -192,7 +192,7 @@ def test_visitor_day_is_recorded_in_stats_tz(db_session, monkeypatch):
 
     monkeypatch.setattr(telemetry, "datetime", _FixedDatetime)
     u = _user(db_session, "tz@t.co")
-    report_pageview(PageViewIn(path="/dashboard", seconds=5), db_session, u)
+    record_pageview(db_session, u, PageViewIn(path="/dashboard", seconds=5))
     marker = db_session.query(PageVisitorDay).one()
     assert marker.day == date(2026, 9, 16)
     # 次数桶仍是 UTC 整点，不受影响 / hourly bucket stays UTC

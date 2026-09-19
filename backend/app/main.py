@@ -167,7 +167,19 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_origin_regex=settings.CORS_ORIGIN_REGEX,
-    allow_credentials=True,
+    # 全站鉴权只有 Bearer 头，一个 cookie 都不用（连 WebSocket 也是先 HTTP 升级再
+    # 在首帧传 token），所以 allow_credentials 对我们没有任何收益，只是白留一条
+    # 「浏览器愿意带上凭证跨域」的通道。白名单里还有 https://localhost（安卓 App 的
+    # WebView origin）——本机任何一个 HTTPS 开发服务都能冒充它，一旦将来引入 cookie
+    # 会话，那就是一个带凭证的跨域入口。关掉是在它还没有代价的时候关掉。
+    # The whole app authenticates with a Bearer header and no cookies at all (even
+    # the WebSocket upgrades over HTTP and sends its token in the first frame), so
+    # allow_credentials buys us nothing and only leaves open a "browsers may attach
+    # credentials cross-origin" channel. The allowlist also contains
+    # https://localhost (the Android WebView's origin), which any local HTTPS dev
+    # server can impersonate — the day a cookie session appears, that becomes a
+    # credentialed cross-origin entry point. Turned off now, while it costs nothing.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
     # 暴露滑动续期头，跨域下前端 JS 才能读取 / expose the sliding-renewal

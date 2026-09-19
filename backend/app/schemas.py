@@ -15,6 +15,47 @@ SUFFIX_PATTERN = r"^[A-Za-z0-9._-]{0,10}$"
 # MT5 登录号：纯数字 / MT5 login: digits only
 LOGIN_PATTERN = r"^[0-9]{1,20}$"
 
+# 密码的真实长度上限，单位是**字节**不是字符：bcrypt 只看前 72 字节（见
+# core/security._to_72），后面的被静默丢弃，于是两个只在第 73 字节之后不同的密码
+# 在登录时完全等价。原来只有 max_length=128（按字符算），而 UTF-8 下一个汉字占
+# 3 字节 —— 24 个汉字就到顶，用户以为"密码越长越安全"，其实后面全白打。
+#
+# 只在**设置密码**的入口卡（注册、重置），登录的 AuthRequest 保持 128 字符不动：
+# 存量里可能已经有超过 72 字节的密码，在登录侧收紧会把这些人直接挡在门外，而
+# bcrypt 本来就能用前 72 字节验通他们。
+#
+# 不改哈希方式（例如先 SHA-256 预哈希再 bcrypt）：那能真正支持任意长度，但要给
+# 存量哈希做迁移，是另一件事，不该混在一次口径对齐里。
+#
+# The real password limit, in *bytes* rather than characters: bcrypt reads only
+# the first 72 (see core/security._to_72) and silently drops the rest, so two
+# passwords differing only past byte 73 are the same password at login. The old
+# max_length=128 counted characters, and a CJK character is 3 bytes in UTF-8 — 24
+# of them reach the cap, and everything the user types after that does nothing.
+#
+# Enforced only where a password is *set* (register, reset). Login's AuthRequest
+# keeps its 128 characters: existing accounts may already have passwords longer
+# than 72 bytes, and tightening the login side would lock those people out of an
+# account bcrypt still authenticates from its first 72 bytes.
+#
+# The hashing itself is left alone (e.g. SHA-256 pre-hashing before bcrypt would
+# genuinely support any length): that needs a migration plan for existing hashes
+# and doesn't belong in a consistency fix.
+MAX_PASSWORD_BYTES = 72
+
+
+def _validate_password_bytes(v: str) -> str:
+    used = len(v.encode("utf-8"))
+    if used > MAX_PASSWORD_BYTES:
+        raise ValueError(
+            f"密码过长：按 UTF-8 编码为 {used} 字节，上限 {MAX_PASSWORD_BYTES} 字节"
+            f"（英文数字每个 1 字节，中文每个 3 字节）。超出部分不会生效，请改短一些。"
+            f" / Password too long: {used} bytes in UTF-8, limit {MAX_PASSWORD_BYTES}"
+            " (1 byte per ASCII character, 3 per CJK character). The excess would be"
+            " ignored, so please shorten it."
+        )
+    return v
+
 
 def _normalize_symbol(v: str) -> str:
     """统一大写、去空白，并按 SYMBOL_PATTERN 校验。
@@ -51,6 +92,13 @@ class RegisterRequest(AuthRequest):
     # are silently ignored and never block registration (see apply_invite).
     ref: str | None = Field(default=None, max_length=32)
 
+    # 注册是"设置密码"的入口之一，按字节卡上限（见 MAX_PASSWORD_BYTES）。
+    # Registration is one of the set-a-password entry points; capped by bytes.
+    @field_validator("password")
+    @classmethod
+    def _password_within_bcrypt_limit(cls, v: str) -> str:
+        return _validate_password_bytes(v)
+
 
 class ForgotPasswordRequest(BaseModel):
     """申请找回密码。只要邮箱——**故意不要任何别的字段**。
@@ -66,13 +114,23 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     """用邮件里的令牌设置新密码。
 
-    密码长度约束与 `AuthRequest` 保持一致（8-128）。不在这里加复杂度规则——全站
-    只有注册和这里两个设密码的入口，两处规则必须一样，否则用户会遇到"注册时能用
-    的密码，重置时被拒"。
+    密码规则与 `RegisterRequest` 保持一致（8 字符起、≤72 字节）。不在这里加复杂度
+    规则——全站只有注册和这里两个设密码的入口，两处规则必须一样，否则用户会遇到
+    "注册时能用的密码，重置时被拒"。
+
+    登录的 `AuthRequest` 刻意更松（仍是 128 字符）：那边不是在设密码，收紧只会把
+    存量里密码超过 72 字节的用户挡在门外。/ Deliberately looser on the login side.
     """
 
     token: str = Field(min_length=16, max_length=256)
     password: str = Field(min_length=8, max_length=128)
+
+    # 同注册：这里也是在"设置"一个新密码，按字节卡上限（见 MAX_PASSWORD_BYTES）。
+    # Same as registration: a new password is being *set* here, so it's capped by bytes.
+    @field_validator("password")
+    @classmethod
+    def _password_within_bcrypt_limit(cls, v: str) -> str:
+        return _validate_password_bytes(v)
 
 
 class MessageOut(BaseModel):
@@ -213,7 +271,7 @@ class GamificationSettingsPatchIn(BaseModel):
     userVisible: bool | None = None
     leaderboardVisible: bool | None = None
     competitionsVisible: bool | None = None
-    minBaselineUsd: float | None = None
+    minBaselineUsd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     minTradesReturn: int | None = None
     minTradesWinrate: int | None = None
     winrateRequireProfit: bool | None = None
@@ -241,7 +299,7 @@ class CompetitionCreateIn(BaseModel):
     # the global settings). Semantic validation lives in the router, as with
     # metric/enrollment; this only declares the field shapes.
     track: str | None = None
-    minBaselineUsd: float | None = None
+    minBaselineUsd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     minTrades: int | None = None
 
 
@@ -265,7 +323,7 @@ class CompetitionPatchIn(BaseModel):
     # 与创建同义；三者都只在 draft 状态可改（见 _NON_DRAFT_ALLOWED）。
     # Same meaning as on create; all three are draft-only (see _NON_DRAFT_ALLOWED).
     track: str | None = None
-    minBaselineUsd: float | None = None
+    minBaselineUsd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     minTrades: int | None = None
 
 
@@ -466,10 +524,22 @@ class PageViewIn(BaseModel):
     The cap is applied by the router's MAX_DWELL_SECONDS rather than a le=
     constraint here: exceeding it means "tab left open", a normal occurrence
     that should be clamped and counted, not 422'd into losing the view entirely.
-    Negatives are floored at zero.
+    负数与 NaN/Inf 则在这里就拒掉。两者的区别在于"是不是可能真的发生"：挂着页面
+    不看是常态，负的或非数值的停留时间没有任何合法产生路径，只能来自坏客户端或
+    刻意构造。而 NaN 尤其必须拦在入口——夹取对它无效（`max(nan, 0.0)` 仍是 nan），
+    累加进小时桶后 `total_seconds` 永久变成 NaN，均值与全站均值跟着 NaN，看板吐出
+    的 JSON 连合法都不是，且随桶累加无法自愈，只能手工改库。
+
+    Negatives and NaN/Inf are rejected here instead. The difference from the cap is
+    whether the value can legitimately occur: a tab left open is normal, a negative
+    or non-numeric dwell time has no legitimate origin. NaN in particular has to be
+    stopped at the door — clamping doesn't touch it (`max(nan, 0.0)` is still nan),
+    and once added to an hourly bucket that bucket's total_seconds is permanently
+    NaN, taking the per-page and site-wide averages with it, emitting invalid JSON,
+    and never recovering on its own.
     """
     path: str = Field(max_length=200)
-    seconds: float
+    seconds: float = Field(ge=0, allow_inf_nan=False)
 
 
 class PageDayPointOut(BaseModel):
@@ -1311,8 +1381,8 @@ class OrderRequest(BaseModel):
     # 目标 MT5 账号 login（多账号时指定）/ target MT5 login (multi-account)
     mt5Login: str | None = Field(default=None, pattern=LOGIN_PATTERN)
     # 自定义止损止盈（绝对价，省略则用信号默认值）/ custom SL·TP (absolute; falls back to signal)
-    stopLoss: float | None = Field(default=None, ge=0)
-    takeProfit: float | None = Field(default=None, ge=0)
+    stopLoss: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    takeProfit: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
 class ClosePositionRequest(BaseModel):
@@ -1332,8 +1402,8 @@ class ModifyPositionRequest(BaseModel):
     side: Literal["BUY", "SELL"]
     mt5Login: str | None = Field(default=None, pattern=LOGIN_PATTERN)
     # 新的止损止盈（绝对价，0 表示清除）/ new SL·TP (absolute; 0 clears)
-    stopLoss: float = Field(default=0.0, ge=0)
-    takeProfit: float = Field(default=0.0, ge=0)
+    stopLoss: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    takeProfit: float = Field(default=0.0, ge=0, allow_inf_nan=False)
 
 
 class OrderOut(BaseModel):

@@ -47,6 +47,33 @@ def _get_or_create(db: Session, user_id: str) -> AutoManageSettings:
     return row
 
 
+def _defaults_out() -> AutoManageSettingsOut:
+    """没有设置行时的应答：出厂默认值，一个字都不落库。
+
+    读路径专用。`get_db` 只 close 不 commit，所以 GET 里 `_get_or_create` 插进去的
+    那一行必定被回滚——每次 GET 都白写一条注定作废的 INSERT，下次 GET 再来一遍。
+    前端每次打开设置页都会调这个接口，纯属浪费库往返（本项目对 Supabase 的 Egress
+    敏感）。"没有行"本来就等于"全是默认值"，直接照默认值答，真正需要落库的是 PUT。
+
+    默认值取自 `AutoManageSettingsIn`（它与模型列上的 default= 一致，有测试钉住），
+    而不是新建一个游离的 AutoManageSettings：列上的 default= 要到落库那一刻才生效，
+    游离对象的这些属性还是 None，拿去序列化会让几个 bool 字段变成 null。
+
+    The answer when no settings row exists: factory defaults, nothing written.
+    get_db closes without committing, so the row _get_or_create inserts during a
+    GET is always rolled back — every GET writes an INSERT guaranteed to be
+    discarded, and the next GET repeats it. The frontend calls this every time the
+    settings page opens. "No row" already means "all defaults", so answer from
+    them; PUT is what actually needs a row.
+
+    Defaults come from AutoManageSettingsIn (kept equal to the model's column
+    defaults, pinned by a test) rather than a detached AutoManageSettings: a
+    column's default= only applies at insert time, so a detached instance still
+    has None in those attributes and the bool fields would serialise as null.
+    """
+    return AutoManageSettingsOut(**AutoManageSettingsIn().model_dump())
+
+
 def _serialize(row: AutoManageSettings) -> AutoManageSettingsOut:
     return AutoManageSettingsOut(
         enabled=row.enabled,
@@ -69,7 +96,10 @@ def get_settings(
     """读取当前用户的自动仓位管理设置（任何等级都可读，方便前端展示锁定态）。
     Read the user's auto-management settings (readable on any plan so the UI
     can render the locked state)."""
-    return _serialize(_get_or_create(db, user.id))
+    row = db.query(AutoManageSettings).filter(AutoManageSettings.user_id == user.id).first()
+    # 查不到不建行，直接答默认值——理由见 _defaults_out。
+    # No row: answer with defaults instead of creating one; see _defaults_out.
+    return _serialize(row) if row is not None else _defaults_out()
 
 
 @router.put("/settings", response_model=AutoManageSettingsOut)

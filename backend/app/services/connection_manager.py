@@ -28,6 +28,36 @@ PRESENCE_KEY = "ws:users"
 PRESENCE_TTL_SECONDS = 90
 PRESENCE_REFRESH_SECONDS = 30
 
+# 单个 socket 的发送超时（秒）。TCP 背压下 send_json 可以长时间不返回：对端还活着
+# 但读得极慢（手机切后台、弱网），内核发送缓冲区一满就卡在那里。持仓每 1.5 秒一拍、
+# 广播要走遍所有在线用户，一个这样的连接足以把整批推送拖住。超时即当作死连接摘掉，
+# 前端本来就会重连并在下一拍拿到完整快照。
+# Per-socket send timeout. Under TCP back-pressure send_json can block for a long
+# time -- the peer is alive but reading very slowly (backgrounded phone, weak
+# network) and stalls once the send buffer fills. Positions tick every 1.5s and a
+# broadcast walks every online user, so one such connection holds up the whole
+# batch. On timeout we drop it as dead; the frontend reconnects and gets a full
+# snapshot on the next tick anyway.
+SEND_TIMEOUT_SECONDS = 2
+
+
+async def _offload(fn, *args):
+    """把一次同步 Redis 调用挪出事件循环。
+
+    shared_state 用的是**同步** redis 客户端（socket_timeout=2 秒）。在 async 函数
+    里直接调，Redis 稍有延迟或断连就会把事件循环整个冻住最多 2 秒——这段时间里
+    所有 HTTP 请求与所有 WebSocket 一起停摆。这里不改写成 redis.asyncio（那要动
+    全部调用方，风险远大于收益），只把阻塞调用丢到线程里，事件循环照常转。
+
+    Run one synchronous Redis call off the event loop. shared_state uses the sync
+    redis client (socket_timeout=2s); calling it directly from a coroutine freezes
+    the entire loop for up to two seconds on any Redis hiccup, stalling every HTTP
+    request and every WebSocket at once. Rather than converting everything to
+    redis.asyncio (a far larger change than the problem warrants), the blocking
+    call is handed to a thread and the loop keeps running.
+    """
+    return await asyncio.to_thread(fn, *args)
+
 
 class ConnectionManager:
     def __init__(self) -> None:
@@ -180,7 +210,6 @@ class ConnectionManager:
     async def register_client(self, user_id: str, ws: WebSocket) -> None:
         async with self._lock:
             self._clients.setdefault(user_id, set()).add(ws)
-            self._mark_present(user_id)
             # 让持仓去重失效：新连接（多开一个标签页也算）还没收到过任何快照，
             # 若沿用旧摘要，内容不变时下一拍会被跳过，新页面就只能干等到持仓
             # 真的发生变化。
@@ -189,6 +218,12 @@ class ConnectionManager:
             # would skip the next unchanged tick and leave the new page waiting
             # until positions actually change.
             self._last_positions_push.pop(user_id, None)
+        # 在线名单登记放到锁外、并丢给线程：它是一次同步 Redis 往返（见
+        # _mark_present），在事件循环里直接调会把整个进程卡住最多一个 socket 超时。
+        # Presence registration happens outside the lock and off the event loop:
+        # it's a synchronous Redis round-trip (see _mark_present), which would
+        # otherwise stall the whole process for up to one socket timeout.
+        await self._mark_present_async(user_id)
 
     async def unregister_client(self, user_id: str, ws: WebSocket) -> None:
         async with self._lock:
@@ -197,9 +232,16 @@ class ConnectionManager:
                 conns.discard(ws)
                 if not conns:
                     self._clients.pop(user_id, None)
-                    # 人都走了，摘要留着只会占内存
-                    # Nobody left; the digest would just leak memory
+                    # 人都走了，这几张按 user_id 存的缓存留着只会占内存：进程不重启
+                    # 就永远保着"曾经连过的每个用户 × 他当时的持仓/报价条数"。
+                    # 重连后下一拍（1.5 秒内）会重新填上，丢掉没有代价。
+                    # Nobody left; these per-user caches would otherwise keep one
+                    # entry per user who *ever* connected, times their positions
+                    # and quotes, until the process restarts. The next tick after
+                    # a reconnect (within 1.5s) refills them, so dropping is free.
                     self._last_positions_push.pop(user_id, None)
+                    self._positions.pop(user_id, None)
+                    self._quotes.pop(user_id, None)
 
     async def push_to_client(self, user_id: str, message: dict) -> None:
         """向指定用户的所有前端连接推送。多 worker 时改为发布到 Redis，由各 worker
@@ -208,7 +250,7 @@ class ConnectionManager:
         deliver locally otherwise."""
         if shared_state.enabled():
             try:
-                shared_state.publish(WS_CHANNEL, {"user": user_id, "message": message})
+                await _offload(shared_state.publish, WS_CHANNEL, {"user": user_id, "message": message})
                 return
             except Exception as e:
                 # Redis 不可达：退回本地投递，至少连在本进程的用户不断流。
@@ -230,14 +272,23 @@ class ConnectionManager:
         branch on the `receive_text()` side never fired (killed process, dropped
         network, proxy timeout). This used to be `except: pass`, which left dead
         sockets in the set forever and re-sent to them on every tick.
+
+        并发发送而不是逐个 await：串行时一个读得慢的客户端会按顺序拖住它后面
+        所有连接，广播还会把这个延迟传导到下一个用户。每个发送单独带超时，
+        超时与报错一样按死连接处理。
+        Sends run concurrently instead of one awaited after another: serially, one
+        slow reader holds up every connection behind it, and in a broadcast that
+        delay carries over to the next user. Each send carries its own timeout,
+        and a timeout is treated exactly like a failure — a dead connection.
         """
         conns = list(self._clients.get(user_id, set()))
-        dead: list[WebSocket] = []
-        for ws in conns:
-            try:
-                await ws.send_json(message)
-            except Exception:
-                dead.append(ws)
+        if not conns:
+            return
+        results = await asyncio.gather(
+            *(asyncio.wait_for(ws.send_json(message), SEND_TIMEOUT_SECONDS) for ws in conns),
+            return_exceptions=True,
+        )
+        dead = [ws for ws, outcome in zip(conns, results) if isinstance(outcome, BaseException)]
         for ws in dead:
             # 复用 unregister_client 而不是直接改集合，保证"最后一个连接走了就删掉
             # user_id 这一项"的清理逻辑只有一份。
@@ -293,15 +344,24 @@ class ConnectionManager:
         """向所有在线前端广播（如新信号）/ broadcast to all clients (e.g. new signals)."""
         if shared_state.enabled():
             try:
-                shared_state.publish(WS_CHANNEL, {"user": None, "message": message})
+                await _offload(shared_state.publish, WS_CHANNEL, {"user": None, "message": message})
                 return
             except Exception as e:
                 logger.warning("WS 跨进程广播失败，退回本地 / broadcast publish failed, delivering locally: %s", e)
         await self._broadcast_local(message)
 
     async def _broadcast_local(self, message: dict) -> None:
-        for user_id in list(self._clients.keys()):
-            await self._deliver_local(user_id, message)
+        # 用户之间也并发：串行时每个用户最坏要等一个发送超时，在线用户一多，
+        # 一条广播的总耗时就是"用户数 × 超时"。
+        # Users run concurrently too: serially each one can cost a full send
+        # timeout, making a broadcast take users x timeout in the worst case.
+        user_ids = list(self._clients.keys())
+        if not user_ids:
+            return
+        await asyncio.gather(
+            *(self._deliver_local(user_id, message) for user_id in user_ids),
+            return_exceptions=True,
+        )
 
     def connected_user_ids(self) -> list[str]:
         """当前有前端连接的用户 id 列表（多 worker 时含连在其它 worker 的），供按等级
@@ -321,21 +381,32 @@ class ConnectionManager:
         return local + [u for u in remote if u not in seen]
 
     # ---------- 多 worker 的转发与在线名单 / cross-worker fan-out & presence ----------
-    def _mark_present(self, user_id: str) -> None:
+    def _mark_present(self, *user_ids: str) -> None:
+        """登记若干用户在线。**同步阻塞**，协程里请走 _mark_present_async。
+        Register users as present. Blocking; coroutines use _mark_present_async."""
         if not shared_state.enabled():
             return
-        try:
-            shared_state.set_add(PRESENCE_KEY, user_id, PRESENCE_TTL_SECONDS)
-        except Exception as e:
-            logger.warning("在线名单写入失败 / presence write failed: %s", e)
+        for user_id in user_ids:
+            try:
+                shared_state.set_add(PRESENCE_KEY, user_id, PRESENCE_TTL_SECONDS)
+            except Exception as e:
+                logger.warning("在线名单写入失败 / presence write failed: %s", e)
+
+    async def _mark_present_async(self, *user_ids: str) -> None:
+        """一次线程往返登记这一批用户：整批在同一个线程里写完，而不是每人一次
+        to_thread——续期循环一跑就是全部在线用户，每人一次线程调度太浪费。
+        One thread hop for the whole batch rather than one per user: the refresh
+        loop walks every online user, and a hop each would be pure overhead."""
+        if not shared_state.enabled() or not user_ids:
+            return
+        await _offload(self._mark_present, *user_ids)
 
     async def refresh_presence_loop(self) -> None:
         """每 30 秒把本进程连着的用户续一次期（90 秒过期），进程死了名单自然掉。
         Renew this worker's users every 30s (90s expiry); a dead worker's entries lapse."""
         while True:
             await asyncio.sleep(PRESENCE_REFRESH_SECONDS)
-            for user_id in list(self._clients.keys()):
-                self._mark_present(user_id)
+            await self._mark_present_async(*list(self._clients.keys()))
 
     async def handle_fanout_message(self, raw: str) -> None:
         """处理一条来自 Redis 频道的转发消息（也供测试直接调用）。
@@ -357,11 +428,12 @@ class ConnectionManager:
         """订阅 Redis 频道并投递到本进程的 socket；断线后 3 秒重连。
         Subscribe to the channel and deliver locally; reconnect 3s after a drop."""
         while True:
+            pubsub = client = None
             try:
-                sub = shared_state.new_async_pubsub(WS_CHANNEL)
+                sub = shared_state.new_async_pubsub(WS_CHANNEL, with_client=True)
                 if sub is None:
                     return
-                pubsub, channel = sub
+                pubsub, channel, client = sub
                 await pubsub.subscribe(channel)
                 async for msg in pubsub.listen():
                     if msg.get("type") != "message":
@@ -372,6 +444,25 @@ class ConnectionManager:
             except Exception as e:
                 logger.warning("WS 转发订阅中断，3 秒后重连 / fan-out subscriber dropped, reconnecting in 3s: %s", e)
                 await asyncio.sleep(3)
+            finally:
+                # 每一轮都新建了一个客户端（连接池），不关掉的话 Redis 每抖动一次
+                # 就多留一组连接——一段不稳定期下来连接数线性堆高，最后撞上
+                # maxclients。异常路径也要走到，所以放在 finally 而不是循环末尾。
+                # Each pass created a fresh client (and pool); leaving it open
+                # means one more set of connections per Redis wobble, growing
+                # linearly through an unstable spell until maxclients is hit. It
+                # has to run on the error path too, hence finally.
+                await self._close_pubsub(pubsub, client)
+
+    @staticmethod
+    async def _close_pubsub(pubsub, client) -> None:
+        for obj in (pubsub, client):
+            if obj is None:
+                continue
+            try:
+                await obj.aclose()
+            except Exception as e:      # 关闭失败不该把订阅循环带下去 / never let cleanup kill the loop
+                logger.debug("关闭 Redis 订阅连接失败 / closing pubsub connection failed: %s", e)
 
     def start_cross_worker_tasks(self) -> list[asyncio.Task]:
         """多 worker 时每个进程都要跑的两条协程；单 worker 返回空列表。

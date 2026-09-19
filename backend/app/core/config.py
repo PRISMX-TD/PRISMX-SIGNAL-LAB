@@ -602,13 +602,15 @@ class Settings(BaseSettings):
             return ""
         return _normalize_vapid_private_key(raw)
 
-    @property
-    def vapid_private_key_pem(self) -> str:
-        """将 base64 编码的私钥解码为 PEM 文本（旧配置）。/ Decode legacy base64 PEM."""
-        import base64
-        if not self.VAPID_PRIVATE_KEY_B64:
-            return ""
-        return base64.b64decode(self.VAPID_PRIVATE_KEY_B64).decode("utf-8")
+    # 曾经这里还有一个 vapid_private_key_pem 属性（把 VAPID_PRIVATE_KEY_B64 当成
+    # base64 的 PEM 解码）。全仓零调用方，且对非 base64 的值会直接抛
+    # binascii.Error——留着只会让人误以为它是另一条受支持的配置路径。私钥的唯一
+    # 出口是上面的 vapid_private_key，它已经把 DER / base64 / PEM 三种写法收成一种。
+    # There used to be a vapid_private_key_pem property here (decoding
+    # VAPID_PRIVATE_KEY_B64 as a base64 PEM). It had no callers anywhere and threw
+    # a bare binascii.Error on non-base64 input; keeping it only suggested a second
+    # supported config path. vapid_private_key above is the single exit, and it
+    # already normalises the DER / base64 / PEM spellings into one.
 
     # 订单回执超时（秒）：已下发但超时未回执的订单，允许重新下发。
     # Order ack timeout (seconds): delivered-but-unacked orders may be re-delivered.
@@ -679,10 +681,30 @@ settings = Settings()
 # mandatory; otherwise tokens signed with the default weak key are forgeable
 # (equivalent to auth bypass). We no longer infer "production" from the DB type.
 _DEFAULT_JWT_SECRET = "prismx-dev-secret-change-in-production"
+# HS256 的安全性完全取决于这一个字符串的熵。只比对"是不是那个默认字面量"挡不住
+# `JWT_SECRET=secret` 这类自己换过、但短到能离线爆破的值——签名一旦被还原，任何
+# 人都能签出任意 sub 的 token，等同认证绕过。32 字符是下限而非建议值：
+# `secrets.token_urlsafe(32)` 生成 43 个字符，照文档做就不会碰到这条。
+# HS256's security rests entirely on this one string's entropy. Comparing against
+# the default literal alone still lets `JWT_SECRET=secret` through — changed, but
+# short enough to brute-force offline, and recovering it means anyone can sign a
+# token for any sub (auth bypass). 32 chars is a floor, not a recommendation:
+# `secrets.token_urlsafe(32)` yields 43, so following the docs never hits this.
+_MIN_JWT_SECRET_LENGTH = 32
 if settings.ENV.lower() == "production" and settings.JWT_SECRET == _DEFAULT_JWT_SECRET:
     raise RuntimeError(
         "JWT_SECRET 仍为默认值，生产环境（ENV=production）必须在 .env 中设置强随机密钥。"
         " / JWT_SECRET is still the default; set a strong random secret in .env when ENV=production."
+    )
+
+if settings.ENV.lower() == "production" and len(settings.JWT_SECRET) < _MIN_JWT_SECRET_LENGTH:
+    raise RuntimeError(
+        f"JWT_SECRET 过短（{len(settings.JWT_SECRET)} 字符），生产环境（ENV=production）至少需要 "
+        f"{_MIN_JWT_SECRET_LENGTH} 字符的强随机密钥；建议用 `python -c \"import secrets;"
+        " print(secrets.token_urlsafe(32))\"` 生成。"
+        f" / JWT_SECRET is too short ({len(settings.JWT_SECRET)} chars); ENV=production requires at"
+        f" least {_MIN_JWT_SECRET_LENGTH}. Generate one with"
+        " `python -c \"import secrets; print(secrets.token_urlsafe(32))\"`."
     )
 
 # Webhook 密钥校验：生产环境必须配置，否则 TradingView 信号来源无法验证，
@@ -725,6 +747,23 @@ if settings.ENV.lower() == "production" and settings.NOWPAYMENTS_SANDBOX:
         "否则支付走的是沙盒测试环境。"
         " / NOWPAYMENTS_SANDBOX is on; set it to false in .env when ENV=production,"
         " or payments run against the sandbox test environment."
+    )
+
+# 重置链接打日志：打开后 services/password_reset.py 会把完整的找回密码链接写进
+# 日志，任何能读到 journald 的人（运维、日志收集、误贴进工单的人）都能改任意账号
+# 的密码。它和上面四项是同一类——「漏配一行 .env 就出事」的危险开关，之前却只靠
+# 字段注释提醒，没有任何机制挡着。生产同样硬拒启动。
+# Logging reset links: with this on, services/password_reset.py writes the full
+# password-reset URL to the log, so anyone who can read journald (ops, a log
+# shipper, whoever pastes it into a ticket) can take over any account. It belongs
+# to the same class as the four above — one missing .env line and it's live — but
+# was guarded only by a comment on the field. Production refuses to start too.
+if settings.ENV.lower() == "production" and settings.MAIL_DEBUG_LOG_LINKS:
+    raise RuntimeError(
+        "MAIL_DEBUG_LOG_LINKS 仍为开启，生产环境（ENV=production）必须在 .env 中设为 false，"
+        "否则找回密码链接会被写进日志，拿到日志即可接管任意账号。"
+        " / MAIL_DEBUG_LOG_LINKS is on; set it to false in .env when ENV=production,"
+        " or password-reset links land in the logs and anyone who reads them can take over any account."
     )
 
 

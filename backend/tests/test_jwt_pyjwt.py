@@ -52,4 +52,10 @@ def test_python_jose_is_gone():
         or not hasattr(security, "JWTError")
     import importlib
     src = importlib.util.find_spec("app.core.security").origin
-    assert "from jose" not in open(src, encoding="utf-8").read()
+    # 用 with 而不是裸 open：裸 open 会把文件句柄留给 GC 关，在
+    # `filterwarnings = error`（见 pytest.ini）下那条 ResourceWarning 会以
+    # PytestUnraisableExceptionWarning 的形式把这条用例判失败。
+    # A bare open() leaves the handle to the GC, and the resulting ResourceWarning
+    # fails this test under pytest.ini's `filterwarnings = error`.
+    with open(src, encoding="utf-8") as fh:
+        assert "from jose" not in fh.read()

@@ -73,7 +73,17 @@ def invalidate_settings_cache() -> None:
 
 def _load_broker_from_db(db) -> dict:
     data = dict(BROKER_DEFAULTS)
-    for row in db.query(PlatformSetting).all():
+    # 只取这几个键，不拉整表：platform_settings 同表里还存着 platform_strategies
+    # （带图文的 JSON）、一次性邮箱名单、account_type 规则这些大值，而这里要的只有
+    # 四个小键。这条路径挂在桥接 1.5 秒轮询后面，每 30 秒回源一次——整表拉回来
+    # 再丢掉 99% 是纯白烧 Supabase 的出网流量（本项目对 Egress 敏感，见运维手册）。
+    # Fetch only the keys we need instead of the whole table: platform_settings
+    # also holds platform_strategies (JSON with rich text), the disposable-email
+    # list and the account_type rules, while this function wants four small keys.
+    # It sits behind the bridge's 1.5s poll and refetches every 30s, so pulling
+    # everything and discarding 99% of it is pure wasted Supabase egress.
+    rows = db.query(PlatformSetting).filter(PlatformSetting.key.in_(tuple(BROKER_DEFAULTS))).all()
+    for row in rows:
         if row.key not in BROKER_DEFAULTS:
             continue  # 未知键忽略，防脏数据 / ignore unknown keys
         try:
@@ -901,8 +911,9 @@ def invalidate_gamification_cache() -> None:
 
 def _load_gamification_from_db(db) -> dict:
     """从 DB 读游戏化设置 JSON，缺失的 key 回落到默认值。
-    按默认值的类型收敛每个键：布尔键用 bool()，整数键用 int()，浮点键用 float()——
-    数值键坏值（无法转换）回退默认，宁缺勿错，不让一个脏值把整组设置读挂。
+    按默认值的类型收敛每个键：布尔键只认真正的 JSON 布尔，整数键用 int()，浮点键
+    用 float()——任何键的坏值（类型不对或无法转换）一律回退默认，宁缺勿错，不让
+    一个脏值把整组设置读挂，也不让它把开关读反。
     ⚠ isinstance(True, int) 为 True，所以 bool 分支必须排在 int 分支前面；
     int 分支同样要像 float 分支那样显式拦一次 bool，否则 JSON 里的 true 会
     被 int() 悄悄变成 1。"""
@@ -916,7 +927,19 @@ def _load_gamification_from_db(db) -> dict:
                     if k not in stored:
                         continue
                     if isinstance(default, bool):
-                        data[k] = bool(stored[k])
+                        # 只接受真正的 JSON 布尔，其余一律回退默认——与数值键同款
+                        # "坏值宁缺勿错"。原来用 bool() 收敛，而 bool("false") 是
+                        # True：手改库或旧数据把开关写成字符串 "false" 时，读出来
+                        # 反而是"开"。这些开关控制的是游戏化内容对用户可见不可见，
+                        # 错的方向恰好是往"更公开"走，属于最不该猜的一类。
+                        # Only a real JSON boolean is accepted; anything else falls
+                        # back to the default, matching the numeric keys' "a bad
+                        # value is worse than no value". The old bool() coercion
+                        # made bool("false") True, so a hand-edited or legacy row
+                        # storing the string "false" read back as *on* — and these
+                        # switches govern whether gamification is visible to users,
+                        # so the wrong guess leans towards more exposure.
+                        data[k] = stored[k] if isinstance(stored[k], bool) else default
                     elif isinstance(default, int):
                         if isinstance(stored[k], bool):
                             data[k] = default   # bool 冒充数值：int(True)==1 会悄悄改值，必须先拦

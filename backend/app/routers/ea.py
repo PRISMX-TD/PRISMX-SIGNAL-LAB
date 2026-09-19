@@ -23,10 +23,11 @@ feed for the whole platform — PRISMX_MarketFeed.mq5 pushes candles and quotes 
 /api/webhook/trend. Stop it and charts, strategy evaluation and signal
 resolution all lose their input at once.
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.core.security import generate_api_token, hash_api_token
 from app.models import MT5Account, User
 from app.routers.bridge import invalidate_auth_cache_for_hash
@@ -56,7 +57,20 @@ def get_token(user: User = Depends(get_current_user), db: Session = Depends(get_
 
 
 @router.post("/token/reset", response_model=EATokenOut)
-def reset_token(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+# 重置只影响调用者自己的 Token，不是安全边界，但每次调用都是一次写库加一次桥接
+# 鉴权缓存失效；正常用法是出事了点一下，5 次/分钟远超任何真实节奏，纯粹挡住
+# 脚本连打。slowapi 要求被装饰的函数签名里有 request。
+# A reset only affects the caller's own token, so this isn't a security boundary,
+# but every call writes to the DB and invalidates a bridge auth-cache entry. Real
+# use is "click once when something leaked"; 5/minute is far above any genuine
+# pace and simply stops a script hammering it. slowapi needs `request` in the
+# decorated signature.
+@limiter.limit("5/minute")
+def reset_token(
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """重置 API Token（旧 Token 立即失效）。明文仅在本响应中出现一次，
     数据库只存哈希。/ Reset the API token (old one invalidated). The plaintext
     appears only in this response; the DB keeps just the hash."""

@@ -13,6 +13,8 @@ broker, and issuing an HTTP request to a URL. Per-IP limits alone don't cover
 either: rotating IPs defeat them, and an unrestricted endpoint is an open
 server-side request relay.
 """
+import time
+
 import pytest
 
 from app.core import rate_limit
@@ -88,10 +90,11 @@ def test_lockout_expires(monkeypatch):
         rate_limit.record_failed_mt5_verify(login)
     assert rate_limit.is_mt5_verify_locked(login)
 
-    real_time = rate_limit.time.time
-    monkeypatch.setattr(
-        rate_limit.time, "time", lambda: real_time() + lockout_seconds + 1
-    )
+    # 过期改由共享状态后端的 TTL 裁定（rate_limit 自己不再算时间），所以往前拨的
+    # 是 time.time 本身。/ Expiry is now decided by the shared-state backend's TTL
+    # rather than by rate_limit itself, so it's time.time that gets moved forward.
+    real_time = time.time
+    monkeypatch.setattr(time, "time", lambda: real_time() + lockout_seconds + 1)
     assert not rate_limit.is_mt5_verify_locked(login)
 
 

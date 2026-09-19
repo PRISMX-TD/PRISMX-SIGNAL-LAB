@@ -149,6 +149,22 @@ def _touch_last_active(db: Session, user: User) -> None:
             last = last.replace(tzinfo=timezone.utc)
         if (now - last).total_seconds() < LAST_ACTIVE_THROTTLE_SECONDS:
             return
+    # TODO(口径统一): 这里按 **UTC** 切天，而 PageVisitorDay.day 与整个看板用的是
+    # STATS_TZ（Asia/Shanghai，见 services/stats_time.py）。北京时间 0-8 点之间两张
+    # "活跃日"表会记成不同的日期，「三日之约」这类按天数判定的游戏化条件也随之
+    # 早一天或晚一天达成。
+    # 刻意不在本次一并改：切天口径一变，user_active_days 的历史行与新行就不同源，
+    # 而游戏化的条件判定直接读这张表——改法要连同"存量是否回填、已发的徽章是否
+    # 复核"一起定，属于跨模块的产品决策，不是一行 strftime 的事。
+    # TODO(day boundary): this cuts days in **UTC**, while PageVisitorDay.day and
+    # the whole dashboard use STATS_TZ (Asia/Shanghai, see services/stats_time.py).
+    # Between 00:00 and 08:00 Beijing time the two "active day" tables record
+    # different dates, and day-counting gamification conditions land a day early or
+    # late with them. Deliberately not changed here: switching the boundary makes
+    # existing user_active_days rows disagree with new ones, and the gamification
+    # conditions read this table directly — the fix has to be decided together with
+    # "do we backfill?" and "do we re-check badges already awarded?", which is a
+    # cross-module product call, not a one-line strftime change.
     today = now.strftime("%Y-%m-%d")
     prev_day = last.strftime("%Y-%m-%d") if last is not None else None
     user.last_active_at = now
