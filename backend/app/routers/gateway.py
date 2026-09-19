@@ -799,6 +799,41 @@ _DEAL_ENTRY_INOUT = 2
 _DEAL_ENTRY_OUT_BY = 3
 
 
+_comment_prefix_warned = False
+
+
+def _warn_if_comment_prefix_empty() -> None:
+    """`GATEWAY_COMMENT_PREFIX` 被配成空串时告警一次。
+
+    空前缀 + 没有已知仓位号 = `build_closed_trade_legs` 完全不做归属过滤，于是用户
+    在 MT5 客户端手动开的每一笔都会被当成平台交易收录。这是一条**改一行配置就静默
+    改变成绩口径**的设置：不会报错，只会让榜单和胜率悄悄变样，而且落库之后很难分辨
+    哪些是这样进来的。所以它值得一条明确的日志。
+
+    只告警一次（模块级标志）：这个函数在每次成交扫描里都会被调到，每 15 分钟一轮，
+    刷屏的日志等于没有日志。
+
+    Warn once if GATEWAY_COMMENT_PREFIX is blank. An empty prefix with no known
+    position ids disables attribution filtering entirely, so every trade the user
+    placed by hand in the MT5 terminal is recorded as a platform trade. It is a
+    one-line config change that silently redefines what counts as a result, raises
+    no error, and is hard to untangle afterwards. Warned once (module flag) because
+    this runs on every deal scan, and a log line every 15 minutes is noise.
+    """
+    global _comment_prefix_warned
+    if _comment_prefix_warned:
+        return
+    if not (settings.GATEWAY_COMMENT_PREFIX or "").strip():
+        _comment_prefix_warned = True
+        logger.warning(
+            "GATEWAY_COMMENT_PREFIX 为空：网关平仓明细将不按注释前缀过滤归属，"
+            "用户在 MT5 客户端手动开的仓位也会被收录为平台交易。"
+            "/ GATEWAY_COMMENT_PREFIX is blank: gateway close legs will not be "
+            "filtered by comment prefix, so manually opened positions are recorded "
+            "as platform trades."
+        )
+
+
 def build_closed_trade_legs(
     deals: list,
     comment_prefix: str,
@@ -858,8 +893,30 @@ def build_closed_trade_legs(
     for pos_id, legs in by_position.items():
         # 归属判定。前缀为空且没有已知仓位号时不过滤（等同于 gateway.ini 没配
         # comment_prefix），会把用户自己在 MT5 客户端开的仓位也记进来。
+        #
+        # 两种归属的可信度差得很远，所以要分开记（2026-09-19 审计）：
+        #   仓位号命中（pos_id in known）——这个仓位号是本平台下单时自己记下来的，
+        #     铁证，verified=True。
+        #   仅注释前缀命中——`comment` 是 MT5 客户端下单时**用户可以自己填**的字段。
+        #     谁在终端里手填一句 "PRISMX" 就能让自己的手动单变成"平台成绩"，而这些
+        #     记录会进榜单、竞赛与等级。另外 (user_id, login) 允许多对多，同一个
+        #     login 上另一个用户开的 PRISMX 单也会被扫进来记到本人名下。
+        #     → 仍然收录（它大概率真是本平台的单，只是窗口太老导致仓位号不在 known
+        #       里），但 verified=False，由下游决定要不要拿它算成绩。
+        #
+        # The two attribution paths differ sharply in trustworthiness (2026-09-19
+        # audit). A position-id hit is proof: that id was recorded by this platform
+        # when it placed the order. A comment-prefix hit is not — `comment` is a
+        # free-text field the user fills in themselves when trading from the MT5
+        # terminal, so typing "PRISMX" there would promote a manual trade into
+        # "platform results" that feed leaderboards, competitions and levels. And
+        # since (user_id, login) is many-to-many, a PRISMX trade another user opened
+        # on the same login would be filed under this one. Such legs are still
+        # recorded (they usually are genuine, just older than the lookback window)
+        # but marked unverified, leaving it to downstream code whether to score them.
+        attributed_by_ticket = pos_id in known
         if prefix or known:
-            is_ours = pos_id in known or any(
+            is_ours = attributed_by_ticket or any(
                 (d.comment or "").upper().startswith(prefix)
                 for d in legs
                 if prefix
@@ -933,6 +990,11 @@ def build_closed_trade_legs(
                 "tp": (getattr(d, "tp", 0.0) or in_tp) or None,
                 "reason": gateway_deal_reason(getattr(d, "reason", None)),
                 "comment": (d.comment or None),
+                # 归属是靠仓位号认出来的（铁证）还是只靠注释前缀（用户可伪造）。
+                # 落库时映射成 verified 列，见调用处。
+                # Whether attribution came from the position id (proof) or only from
+                # the comment prefix (user-forgeable); maps to the verified column.
+                "attributedByTicket": attributed_by_ticket,
             })
 
     return legs_out
@@ -1164,6 +1226,7 @@ async def gateway_positions_loop() -> None:
         finally:
             db.close()
 
+        _warn_if_comment_prefix_empty()
         legs = build_closed_trade_legs(deals, settings.GATEWAY_COMMENT_PREFIX, known, offset)
         if not legs:
             return 0
@@ -1172,13 +1235,23 @@ async def gateway_positions_loop() -> None:
         db = SessionLocal()
         try:
             for leg in legs:
-                # 撞去重键只补空列（回扫补齐旧记录），见 closed_trade_store。这条通道
-                # 天然可核验（成交历史由本服务端直接向券商 Manager API 取，不经用户
-                # 机器；归属已在 build_closed_trade_legs 判定），所以 verified=True。
-                # Duplicate keys only back-fill null columns (deep rescan). This
-                # channel is inherently verifiable (history straight from the
-                # broker's Manager API, attribution done above), hence verified=True.
-                if upsert_leg(db, user_id, login, leg, True) in ("inserted", "enriched"):
+                # 撞去重键只补空列（回扫补齐旧记录），见 closed_trade_store。
+                #
+                # verified 不再一律 True（2026-09-19 审计）：成交历史确实是本服务端
+                # 直接向券商 Manager API 取的、不经用户机器，这部分可信；但**归属**
+                # 未必——仅靠注释前缀认出来的仓位，那个前缀是用户在 MT5 客户端自己
+                # 填得进去的。所以只有仓位号命中的才算已核验，前缀命中的落
+                # verified=False，与桥接通道「只认已知仓位号」的口径对齐。
+                #
+                # verified is no longer unconditionally True (2026-09-19 audit). The
+                # history itself is trustworthy — pulled straight from the broker's
+                # Manager API, never through the user's machine — but the
+                # *attribution* may not be: a comment-prefix match relies on a field
+                # the user can type themselves in the MT5 terminal. Only position-id
+                # matches count as verified, aligning with the bridge channel, which
+                # has always accepted known position ids only.
+                verified = bool(leg.get("attributedByTicket"))
+                if upsert_leg(db, user_id, login, leg, verified) in ("inserted", "enriched"):
                     inserted += 1
 
         finally:
@@ -1516,7 +1589,23 @@ async def gateway_positions_loop() -> None:
                 if events or deal_logins:
                     # 事件里带的是 login，要反查它属于哪个用户才知道推给谁。
                     pairs = await run_in_threadpool(_gateway_accounts)
-                    owner = {lg: uid for uid, lg in pairs}
+                    # 一个 login 可能绑在多个用户名下（`_gateway_accounts` 返回的就是
+                    # 多对多的 (user_id, login) 对），所以这里必须是 login → 用户**列表**。
+                    #
+                    # 原来是 `{lg: uid for uid, lg in pairs}`：同一个 login 的多条记录
+                    # 互相覆盖，只有最后一个用户留得下来。后果是另外那些用户拿不到即时
+                    # 持仓快照（要等慢拍），平仓明细也不会被即时扫描落库——而这两件事
+                    # 恰恰是这段事件泵存在的理由。
+                    #
+                    # A login can be bound to several users (`_gateway_accounts`
+                    # returns many-to-many pairs), so this maps login → list of users.
+                    # The old dict comprehension let later rows overwrite earlier ones,
+                    # keeping only one user per login: everyone else missed the instant
+                    # position snapshot and the immediate closed-trade scan, which are
+                    # the entire point of this event pump.
+                    owner: dict[str, list[str]] = {}
+                    for uid, lg in pairs:
+                        owner.setdefault(str(lg), []).append(uid)
                     by_user = _accounts_by_user(pairs)
                     connected = set(manager.connected_user_ids())
 
@@ -1527,8 +1616,8 @@ async def gateway_positions_loop() -> None:
                     affected: set[str] = set()
                     for e in events:
                         login = str(e.login)
-                        uid = owner.get(login)
-                        if uid is None:
+                        uids = owner.get(login)
+                        if not uids:
                             # 不是本平台管理的账号（同一 MT5 服务器上的其他账号
                             # 也会触发回调），忽略。
                             continue
@@ -1536,8 +1625,9 @@ async def gateway_positions_loop() -> None:
                         # 免得慢拍在下一次读取前一直跳过它。
                         if e.action == "add":
                             known_flat.discard(login)
-                        if uid in connected:
-                            affected.add(uid)
+                        # 绑了这个 login 的每个在线用户都要收到快照，不能只推一个。
+                        # Every online user bound to this login gets the snapshot.
+                        affected.update(uid for uid in uids if uid in connected)
 
                     # 成交事件：立刻去拉这个账号的平仓明细，不等兜底扫描。
                     # 这是本条改造的核心——平仓从「最多等 3 秒被扫到」变成
@@ -1560,10 +1650,12 @@ async def gateway_positions_loop() -> None:
                     deal_scans = []
                     for lg in deal_logins:
                         login = str(lg)
-                        uid = owner.get(login)
-                        if uid is None:
-                            continue
-                        deal_scans.append(_scan_deals(uid, login))
+                        # 同一个 login 绑了几个用户就各扫一次：平仓明细是按 user_id
+                        # 落库的，漏掉谁谁的历史就少一笔。
+                        # One scan per bound user: closed trades are stored per
+                        # user_id, so skipping one loses that user's record.
+                        for uid in owner.get(login, ()):
+                            deal_scans.append(_scan_deals(uid, login))
 
                     if deal_scans:
                         results = await asyncio.gather(*deal_scans, return_exceptions=True)

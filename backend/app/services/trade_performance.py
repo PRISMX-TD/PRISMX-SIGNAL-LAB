@@ -46,9 +46,29 @@ def known_position_ids(db, user_id: str, logins: set[str]) -> set[tuple[str, int
     )
     known: set[tuple[str, int]] = set()
     for login, ticket, position in rows:
-        for pos_id in (ticket, position):
-            if pos_id:
-                known.add((str(login), int(pos_id)))
+        # 每张订单只贡献**一个**仓位号，规则与 position_id_of 完全一致：
+        # gateway 有真实仓位号就用它，没有（bridge，或老版网关没回传）才回落到
+        # mt5_ticket。
+        #
+        # 此前这里是把 ticket 和 position 两个都塞进集合。问题在于 gateway 通道的
+        # mt5_ticket 存的是**订单号或成交号**，与仓位号是两套独立编号——把它当仓位号
+        # 放进集合，等于凭空多出一批假仓位号。数值一旦与某个真实仓位号撞上，那笔
+        # 本不属于本平台的仓位就会被认成"我们的"：平仓明细按它记 verified 成绩，
+        # auto_manage 也会按它去自动改单 / 平仓。概率低，但后果是动别人的仓位。
+        #
+        # Each order contributes exactly one position id, by the same rule as
+        # position_id_of: the gateway's real position id when present, otherwise
+        # mt5_ticket (bridge, or an older gateway that did not return one).
+        #
+        # Both columns used to be added. But a gateway order's mt5_ticket is an
+        # order/deal ticket from a separate numbering space, so feeding it in
+        # invents position ids that were never ours. A numeric collision with a
+        # real position id would make an unrelated position look like ours —
+        # scored as a verified result, and acted on by auto-management. Unlikely,
+        # but the failure is modifying or closing someone else's position.
+        pos_id = position or ticket
+        if pos_id:
+            known.add((str(login), int(pos_id)))
     return known
 
 # 手数浮点误差容忍度 / float tolerance when comparing cumulative volumes

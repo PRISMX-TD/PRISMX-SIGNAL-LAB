@@ -62,6 +62,16 @@ def gateway_account(db: Session, mt5_login: str | None, user_id: str | None = No
 # so the close did not execute. Mirrors Mt5Link.PlacedUnconfirmed on the gateway side.
 PLACED_UNCONFIRMED = "MT_RET_REQUEST_PLACED_UNCONFIRMED"
 
+# 这些 error 值代表「结果未知」，不代表「被拒绝」——两者在界面上的后果完全相反，
+# 前者要说「先核对持仓」，后者才可以说「可以重下」。
+#   timeout        网关没在时限内回话
+#   request_failed 连接层异常（见 gateway_client 的 except 分支）：可能压根没发出去，
+#                  也可能发出去了、执行了，只是读响应时断了。分不清就必须按"已执行"
+#                  的最坏情况处理。
+# These error values mean "outcome unknown", not "rejected" — the UI consequences
+# are opposite, and only a rejection may invite a retry.
+_UNKNOWN_OUTCOME_ERRORS = frozenset({"timeout", "request_failed"})
+
 
 def apply_trade_result(order: Order, rsp: TradeRsp) -> None:
     """根据 gateway 回执更新订单状态。"""
@@ -86,11 +96,27 @@ def apply_trade_result(order: Order, rsp: TradeRsp) -> None:
         # positions" instead of inviting a retry.
         order.status = "FAILED"
         order.message = rsp.retcode + (": " + rsp.message if rsp.message else "")
-    elif rsp.error == "timeout":
-        # 网关没回话不等于拒绝：这笔可能已经执行（见 call_gateway_idempotent）。
-        # 落 FAILED 而不是 REJECTED，界面文案据此提示"先核对持仓"。
-        # No answer is not a rejection — the order may have executed. FAILED, not
-        # REJECTED, so the UI says "check your positions" rather than "declined".
+    elif rsp.error in _UNKNOWN_OUTCOME_ERRORS:
+        # 网关没回话、或连接在半路断了，都不等于拒绝：这笔可能已经执行
+        # （见 call_gateway_idempotent）。落 FAILED 而不是 REJECTED，界面据此提示
+        # "先核对持仓"。
+        #
+        # request_failed 是 2026-09-19 审计补进来的：httpx 的 RemoteProtocolError /
+        # ReadError / ConnectError 此前全落进 else 分支被记成 REJECTED，而其中
+        # "请求已发出、读响应时断线"这一类（WireGuard 隧道抖动、网关重启时的半开
+        # 连接）很可能已经在网关侧执行了。用户看到"已被拒绝"会用**新的**
+        # clientOrderId 重下，而网关的幂等缓存对新键无效——那就是真的重复建仓。
+        #
+        # No answer, or a connection that died mid-flight, is not a rejection: the
+        # order may have executed. FAILED, not REJECTED, so the UI says "check your
+        # positions" rather than "declined".
+        #
+        # request_failed was added by the 2026-09-19 audit: httpx's
+        # RemoteProtocolError / ReadError / ConnectError all used to fall into the
+        # else branch as REJECTED, yet "request sent, connection died while reading
+        # the response" (tunnel flap, gateway restart) very likely did execute. A
+        # user told "declined" re-places under a *new* clientOrderId, which the
+        # gateway's idempotency cache cannot match — a genuine duplicate position.
         order.status = "FAILED"
         order.message = rsp.retcode + (": " + rsp.message if rsp.message else "")
     else:
@@ -133,14 +159,14 @@ def call_gateway_idempotent(order: Order, make_call) -> TradeRsp:
                             deal=0, order=0, price=0.0, error="timeout")
 
     rsp = _once(GATEWAY_TRADE_TIMEOUT)
-    if rsp.error != "timeout" and rsp.retcode != "IN_PROGRESS":
+    if rsp.error not in _UNKNOWN_OUTCOME_ERRORS and rsp.retcode != "IN_PROGRESS":
         return rsp
     logger.warning(
-        "Gateway %s %s 超时/仍在执行，用同一 clientOrderId 再问一次",
-        order.action, order.client_order_id,
+        "Gateway %s %s 结果未知（error=%s retcode=%s），用同一 clientOrderId 再问一次",
+        order.action, order.client_order_id, rsp.error, rsp.retcode,
     )
     again = _once(GATEWAY_RECONCILE_TIMEOUT)
-    if again.error == "timeout" or again.retcode == "IN_PROGRESS":
+    if again.error in _UNKNOWN_OUTCOME_ERRORS or again.retcode == "IN_PROGRESS":
         return TradeRsp(
             ok=False, retcode="GATEWAY_TIMEOUT",
             message=(
@@ -255,8 +281,39 @@ def try_gateway_execute(db: Session, order: Order) -> dict | None:
 
     except Exception as e:
         logger.error("Gateway 执行异常: %s %s", order.client_order_id, e)
-        order.status = "FAILED"
-        order.message = f"Gateway 执行异常: {e}"
-        db.commit()
-        db.refresh(order)
+        # 先回滚再写。异常很可能就是上面那次 commit 抛的（约束冲突、连接断、
+        # 数值越界……），此时事务已经作废，不回滚就直接 commit 会抛
+        # PendingRollbackError，把一个"落 FAILED"的补救动作变成 500——订单留在
+        # PENDING，5 分钟后被 stale 判定作废，而券商那边可能真成交了。
+        #
+        # 这段本身也可能失败（数据库彻底连不上），所以再包一层：宁可日志里留下
+        # "连状态都写不回去"，也不要让异常盖掉上面那条更有信息量的 logger.error。
+        #
+        # Roll back before writing. The exception is quite likely the commit above
+        # (constraint, dropped connection, numeric overflow); the transaction is
+        # then already void and committing again raises PendingRollbackError,
+        # turning this FAILED-recording fallback into a 500. The order would stay
+        # PENDING, get voided by the stale sweep five minutes later — while the
+        # broker may actually have filled it.
+        #
+        # This recovery can itself fail (database unreachable), so it is wrapped:
+        # better a log line saying we could not even record the status than an
+        # exception masking the more informative error above.
+        try:
+            db.rollback()
+            order.status = "FAILED"
+            order.message = f"Gateway 执行异常: {e}"
+            db.commit()
+            db.refresh(order)
+        except Exception as inner:
+            logger.error(
+                "Gateway 执行异常后连状态都没能写回: %s %s",
+                order.client_order_id, inner,
+            )
+            db.rollback()
+            # 内存里的对象仍按 FAILED 返回，让调用方推一帧给前端；库里那条会由
+            # stale 判定兜底。/ Return FAILED from the in-memory object so the caller
+            # still pushes a frame; the row is left to the stale sweep.
+            order.status = "FAILED"
+            order.message = f"Gateway 执行异常: {e}"
         return order_update_payload(order)

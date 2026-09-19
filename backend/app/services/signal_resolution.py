@@ -162,10 +162,31 @@ def sweep_stale_signals(db: Session) -> list[Signal]:
     """
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=settings.SIGNAL_STALE_DAYS)
-    # 时区比较在 Python 侧做（SQLite 存的是不带时区的时间，跟其他后台任务一致）。
-    # Compare timezones in Python (SQLite stores naive datetimes; matches the
-    # convention used by the other background sweeps in this codebase).
-    candidates = db.query(Signal).filter(Signal.result == "PENDING").all()
+    # 先在 SQL 里按时间筛掉绝大多数，再在 Python 侧做最终判定。
+    #
+    # 原来是把**所有** PENDING 信号整行拉回来再逐条比时间。PENDING 是常态（信号没走到
+    # 止盈止损之前都是它），所以这一趟搬的是全部未结信号，而这个清扫每小时跑一次。
+    # 本项目对 Supabase egress 敏感，没必要为了拿一个计数把整批行搬过来。
+    #
+    # 库里这几列存的是不带时区的 UTC（models 的 DateTime 都是 naive UTC），所以
+    # 比较要用去掉时区的 cutoff。Python 侧那段判定原样保留：它把 naive 当 UTC、
+    # 顺带处理 created_at 为空的行，是本函数真正的判据，SQL 这层只负责少搬数据。
+    #
+    # Narrow in SQL first, then make the final call in Python. This used to load
+    # every PENDING signal row — and PENDING is the normal state until a signal
+    # resolves — so an hourly sweep transferred the entire open set just to produce
+    # a count. Supabase egress is a standing concern here.
+    #
+    # The columns store naive UTC (all model DateTimes are naive UTC), so the
+    # comparison uses a tz-stripped cutoff. The Python check below is kept as the
+    # authority — it treats naive as UTC and tolerates a null created_at — with SQL
+    # only reducing how much is fetched.
+    cutoff_naive = cutoff.replace(tzinfo=None)
+    candidates = (
+        db.query(Signal)
+        .filter(Signal.result == "PENDING", Signal.created_at < cutoff_naive)
+        .all()
+    )
     stale = []
     for sig in candidates:
         created = sig.created_at

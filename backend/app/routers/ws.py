@@ -139,30 +139,46 @@ async def ws_client(websocket: WebSocket):
         return
 
     await manager.register_client(user_id, websocket)
-    await websocket.send_json({"type": "AUTH_OK", "userId": user_id})
-    # 连接即补推最近一次持仓快照，避免刷新后持仓短暂消失。
-    # Re-push the latest positions snapshot on connect to avoid a blank gap after refresh.
-    cached = manager.get_positions(user_id)
-    if cached:
-        # 带上 funds，否则刷新后账户卡片要等下一拍推送才能拿到实时浮盈，
-        # 中间那一两秒会退回"净值-余额"的旧口径，数字会跳一下。
-        # Include funds, otherwise the account card would fall back to the old
-        # equity-minus-balance figure until the next push and visibly jump.
-        await websocket.send_json({
-            "type": "POSITIONS",
-            "data": cached,
-            "funds": manager.account_funds_from_positions(cached),
-        })
-    # 连接即补推最近一次报价快照（按交易商账户区分，下单确认页用）
-    # re-push the latest per-account quotes snapshot on connect (order-confirm page)
-    cached_quotes = manager.get_quotes(user_id)
-    if cached_quotes:
-        await websocket.send_json({"type": "QUOTES", "data": cached_quotes})
-    # 连接即补推全站统一报价快照（展示用）/ re-push the site-wide quotes snapshot (display)
-    cached_global_quotes = quotes_store.get_all()
-    if cached_global_quotes:
-        await websocket.send_json({"type": "GLOBAL_QUOTES", "data": cached_global_quotes})
+    # register 之后的一切都必须在 try 里。
+    #
+    # 下面这四帧补推原来在 try 之外：客户端在鉴权成功后立刻断开（移动端切后台、
+    # 页面刷新，都很常见）时，send_json 抛出的异常跳过了所有 unregister，这条死
+    # 连接就永远留在 manager._clients 里。后果不只是内存：connected_user_ids() 把
+    # 该用户算作在线，于是 gateway 的慢拍与事件泵会持续为一个根本没人看的连接去
+    # 券商那边拉持仓——这个项目对 egress 是敏感的。
+    #
+    # Everything after register must live inside the try. These four catch-up
+    # frames used to sit outside it, so a client that disconnected right after
+    # authenticating (backgrounding a mobile app, refreshing the page — both
+    # routine) raised past every unregister and left the dead socket in
+    # manager._clients forever. The cost is not just memory: connected_user_ids()
+    # then counts the user as online, so the gateway's slow tick and event pump
+    # keep pulling positions from the broker for a connection nobody is reading,
+    # and egress on this project is a standing concern.
     try:
+        await websocket.send_json({"type": "AUTH_OK", "userId": user_id})
+        # 连接即补推最近一次持仓快照，避免刷新后持仓短暂消失。
+        # Re-push the latest positions snapshot on connect to avoid a blank gap after refresh.
+        cached = manager.get_positions(user_id)
+        if cached:
+            # 带上 funds，否则刷新后账户卡片要等下一拍推送才能拿到实时浮盈，
+            # 中间那一两秒会退回"净值-余额"的旧口径，数字会跳一下。
+            # Include funds, otherwise the account card would fall back to the old
+            # equity-minus-balance figure until the next push and visibly jump.
+            await websocket.send_json({
+                "type": "POSITIONS",
+                "data": cached,
+                "funds": manager.account_funds_from_positions(cached),
+            })
+        # 连接即补推最近一次报价快照（按交易商账户区分，下单确认页用）
+        # re-push the latest per-account quotes snapshot on connect (order-confirm page)
+        cached_quotes = manager.get_quotes(user_id)
+        if cached_quotes:
+            await websocket.send_json({"type": "QUOTES", "data": cached_quotes})
+        # 连接即补推全站统一报价快照（展示用）/ re-push the site-wide quotes snapshot (display)
+        cached_global_quotes = quotes_store.get_all()
+        if cached_global_quotes:
+            await websocket.send_json({"type": "GLOBAL_QUOTES", "data": cached_global_quotes})
         while True:
             # 前端通道以服务端推送为主。客户端唯一会主动发的帧是应用层心跳
             # {"type":"PING"}，这里回一帧 PONG；其它内容一律忽略（老版本前端不发
@@ -191,7 +207,15 @@ async def ws_client(websocket: WebSocket):
             if _is_ping(raw):
                 await websocket.send_json({"type": "PONG"})
     except WebSocketDisconnect:
-        await manager.unregister_client(user_id, websocket)
+        pass
     except Exception:
         logger.exception("ws_client error (user_id=%s)", user_id)
+    finally:
+        # 改用 finally：两个 except 各自 unregister 一次，等于要求「所有退出路径都
+        # 记得加一行」，而补推那几帧挪进 try 之后退出路径又多了几条。放在 finally 里
+        # 是让"注册过就一定注销"成为结构性保证，而不是靠每处都写对。
+        # A finally instead of one unregister per except: the old shape required
+        # every exit path to remember the call, and moving the catch-up frames into
+        # the try added more of them. This makes "registered implies unregistered"
+        # structural rather than a thing each branch has to get right.
         await manager.unregister_client(user_id, websocket)

@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -176,15 +177,30 @@ def signal_winrate(
     order/close behavior. STALE (tracking interrupted) and PENDING (not yet
     resolved) are excluded from the win-rate denominator.
     """
+    # 在库里聚合，而不是把整张 signals 表的 result 列拉回来在 Python 里数。
+    #
+    # 原来是 `.all()` 之后逐行累加：每次请求都要把**全部历史信号**的一列搬过网络，
+    # 而这个端点是公开展示用的、访问频率不低，行数只增不减。本项目对 Supabase 的
+    # egress 是敏感的（见 2026-09 那次翻三倍的排查），这种"随时间线性变大"的查询
+    # 正是要避免的形状。GROUP BY 之后回来的永远是至多四行。
+    #
+    # Aggregate in the database instead of pulling every signal's result column
+    # over the wire and counting in Python. The old `.all()` transferred the whole
+    # history on every request to a public, frequently-hit endpoint, growing
+    # without bound. Supabase egress is a standing concern on this project, and a
+    # query whose payload grows linearly with table size is exactly the shape to
+    # avoid. The GROUP BY returns at most four rows.
+    counts = {"PENDING": 0, "HIT_TP": 0, "HIT_SL": 0, "STALE": 0}
     rows = (
-        db.query(Signal.result)
+        db.query(Signal.result, func.count())
         .filter(Signal.source == "tradingview")
+        .group_by(Signal.result)
         .all()
     )
-    counts = {"PENDING": 0, "HIT_TP": 0, "HIT_SL": 0, "STALE": 0}
-    for (result,) in rows:
+    for result, n in rows:
+        # 未知/NULL 的 result 与原来一样并进 PENDING / unknown and NULL fold into PENDING
         key = result if result in counts else "PENDING"
-        counts[key] += 1
+        counts[key] += n
 
     resolved = counts["HIT_TP"] + counts["HIT_SL"]
     win_rate = counts["HIT_TP"] / resolved if resolved > 0 else None

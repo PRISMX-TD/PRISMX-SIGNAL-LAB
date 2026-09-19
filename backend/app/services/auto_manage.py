@@ -184,9 +184,29 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
     if not tickets:
         return 0
     reported = set(tickets)
+    # SQL 那层的 or_ 只是个粗筛（拿两列各去撞一次，少读几行），**判定以 Python 这边
+    # 的单值规则为准**：每张订单只认一个仓位号，gateway 有真实仓位号就用
+    # mt5_position，没有（bridge，或老网关没回传）才回落到 mt5_ticket——与
+    # trade_performance.position_id_of 同一条规则。
+    #
+    # 为什么不能像以前那样"两列都算"：gateway 的 mt5_ticket 存的是订单号或成交号，
+    # 和仓位号是两套独立编号。把它当仓位号去撞本次上报的 ticket，一旦数值撞上，
+    # 一个根本不是本平台开的仓位就会被认成"我们的"，而这个函数的下游是**自动改单与
+    # 自动平仓**——误判的代价是动了用户手动开的仓。
+    #
+    # The SQL or_ is only a coarse prefilter; the decision is the single-value rule
+    # below. Each order yields exactly one position id — the gateway's real
+    # mt5_position when present, else mt5_ticket — matching
+    # trade_performance.position_id_of.
+    #
+    # Counting both columns was wrong because a gateway mt5_ticket is an order/deal
+    # number from a different numbering space. A numeric collision with a reported
+    # position ticket would mark a position we never opened as ours, and this
+    # function feeds automatic SL moves and partial closes — the cost of a false
+    # positive is touching a position the user opened by hand.
     platform_tickets = {
-        t
-        for row in db.query(Order.mt5_ticket, Order.mt5_position)
+        pos_id
+        for ticket, position in db.query(Order.mt5_ticket, Order.mt5_position)
         .filter(
             Order.user_id == user_id,
             Order.action == "ORDER",
@@ -194,12 +214,8 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
             or_(Order.mt5_ticket.in_(tickets), Order.mt5_position.in_(tickets)),
         )
         .all()
-        for t in row
-        # 一行里两列都要过一遍 `reported`：命中的可能是其中任一列，另一列的值
-        # （bridge 的 NULL、或 gateway 的成交号）不属于本次上报，不能带进来。
-        # Both columns are filtered against `reported`: only one of them matched,
-        # and the other holds a value that isn't one of the reported positions.
-        if t is not None and t in reported
+        for pos_id in ((position or ticket),)
+        if pos_id is not None and pos_id in reported
     }
     if not platform_tickets:
         return 0

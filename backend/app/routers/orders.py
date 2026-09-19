@@ -28,7 +28,7 @@ from app.schemas import (
 from app.services.connection_manager import manager
 from app.services.deps import (get_current_user, is_account_online,
                                validate_order, validate_sl_tp_direction)
-from app.services.symbol_aliases import is_volume_on_step, lot_step, min_lot
+from app.services.symbol_aliases import is_volume_on_step, lot_step, min_lot, symbol_match_set
 from app.services import bridge_wake
 from app.services.gateway_binding import not_removed
 from app.services.gateway_client import run_on_main_loop
@@ -156,6 +156,35 @@ def place_order(
                     status_code=409,
                     detail="信号已过期，无法下单 / Signal expired, cannot place order",
                 )
+            # 信号必须和这张单说的是同一个品种、同一个方向，否则拒单。
+            #
+            # 不校验的话，可以拿 A 品种的 signalId 去给 B 品种下单：下面两行会把 A 的
+            # 止损止盈原样套到 B 上（黄金的 3900 当成欧元的止损），MT5 多半会以
+            # invalid stops 拒掉，但这笔的 signal_id 已经记在订单上了——信号胜率的
+            # 归因被污染，而那正是平台对外展示的数字。方向对不上同理。
+            #
+            # 用 symbol_match_set 而不是字面相等：同一个品种在信号侧与下单侧可能写法
+            # 不同（BTCUSDT / BTCUSD、带不带券商后缀），直接比字符串会误伤正常下单。
+            #
+            # The signal must be for the same symbol and side as the order. Without
+            # this, symbol A's signalId can be attached to an order on symbol B: the
+            # two lines below then copy A's SL/TP onto B (gold's 3900 as a stop on
+            # EURUSD). MT5 would usually reject it as invalid stops, but the
+            # signal_id is already recorded on the order, polluting signal win-rate
+            # attribution — the number the platform publishes. Same for a mismatched
+            # side. Matching goes through symbol_match_set rather than string
+            # equality because the two sides may legitimately spell a symbol
+            # differently (BTCUSDT vs BTCUSD, broker suffixes).
+            if sig.symbol and req.symbol.upper() not in symbol_match_set(sig.symbol):
+                raise HTTPException(
+                    status_code=400,
+                    detail="信号与下单品种不一致 / signal and order symbol do not match",
+                )
+            if sig.side and req.side.upper() != sig.side.upper():
+                raise HTTPException(
+                    status_code=400,
+                    detail="信号与下单方向不一致 / signal and order side do not match",
+                )
             stop_loss = sig.stop_loss or 0.0
             take_profit = sig.take_profit or 0.0
 
@@ -190,7 +219,13 @@ def place_order(
         mt5_login=req.mt5Login or (target_acc.login if target_acc else None),
         status="PENDING",
     )
-    result = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+    result, created = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+    # 并发撞上同一 clientOrderId：那笔已经存在（且已经或正在被执行），直接把它返回。
+    # 绝不能拿被回滚掉的 order 再去调网关——见 _commit_order_or_existing 的说明。
+    # Lost the race on this clientOrderId: the order already exists and is already
+    # being executed. Never hand the rolled-back object to the gateway.
+    if not created:
+        return result
 
     # Gateway 账号实时执行，不走 bridge 轮询
     gw_payload = _try_gateway_execute(db, order)
@@ -272,14 +307,29 @@ def cancel_order(
 ):
     """撤销一条尚未执行的挂单（PENDING）。
 
-    只能撤销仍处于 PENDING 的指令；一旦桥接已回执（FILLED/REJECTED/FAILED）
-    或已作废，撤销请求直接拒绝。桥接若恰好已把该指令发给 MT5，撤销无法追回
-    那次执行——这是本地队列式下单模型的固有限制。
+    只能撤销仍处于 PENDING **且尚未下发**的指令。
 
-    Cancel a not-yet-executed (PENDING) order. Orders already in a terminal
-    state are rejected. If the bridge already dispatched the command to MT5
-    moments earlier, cancelling here can't undo that fill — an inherent limit
-    of the queued-command model.
+    「尚未下发」这个条件是 2026-09-19 审计补的。此前只看 status：指令已经交给桥接、
+    桥接正在 MT5 里执行、回执还没回来的那个窗口里，status 仍是 PENDING，于是撤销
+    会成功并显示「已撤销」——而几秒后真回执回来，又被 _result_db_work 的 WHERE
+    覆写成 FILLED。用户看到的是先「已撤销」后「已成交」，中间大概率已经按「撤销
+    成功」重下了一笔。这不是本地队列模型的固有限制，是可以拦住的。
+
+    真正的固有限制只剩一条：指令刚下发、这里还没看到 delivered 落库的那一瞬。窗口
+    从「整个 ack 超时」缩到「一次数据库写入」。
+
+    Cancel a PENDING order that has **not yet been delivered**.
+
+    The delivery check was added by the 2026-09-19 audit. Checking status alone
+    left a window: once the command is handed to the bridge and is executing in
+    MT5, its status is still PENDING, so the cancel succeeded and the UI said
+    "cancelled" — until the real result arrived seconds later and _result_db_work's
+    WHERE clause overwrote it to FILLED. The user saw "cancelled" then "filled",
+    having most likely re-placed the order in between. That was preventable.
+
+    The genuinely inherent limit is now only the instant between dispatch and the
+    `delivered` flag being committed — the window shrinks from a full ack timeout
+    to a single database write.
     """
     order = (
         db.query(Order)
@@ -293,6 +343,18 @@ def cancel_order(
             status_code=409,
             detail="订单已不是待执行状态，无法撤销 / Order is no longer pending and cannot be cancelled",
         )
+    if order.delivered and not is_stale_pending(order):
+        # 已下发且还在 ack 窗口内：桥接很可能正在执行它。撤销会给用户一个假的
+        # 「没发生」，而真结果随后就到。/ Delivered and still within the ack window:
+        # the bridge is probably executing it right now. Cancelling would assert a
+        # "nothing happened" that the incoming result is about to contradict.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "指令已下发执行，无法撤销，请等待回执 / "
+                "already dispatched for execution; wait for the result"
+            ),
+        )
     order.status = "CANCELLED"
     order.message = "用户已撤销 / Cancelled by user"
     db.commit()
@@ -300,12 +362,29 @@ def cancel_order(
     return _serialize(order)
 
 
-def _commit_order_or_existing(db: Session, order: Order, user_id: str, client_order_id: str):
+def _commit_order_or_existing(
+    db: Session, order: Order, user_id: str, client_order_id: str
+) -> tuple[dict, bool]:
     """提交新订单；若与并发请求撞上同一 clientOrderId 的唯一约束，回滚后
     返回那个已存在的订单而非把 500 抛给客户端。
-    Commit a new order; if a concurrent request races us on the same
-    clientOrderId's unique constraint, roll back and return the order that
-    won instead of surfacing a raw 500.
+
+    返回 (载荷, created)。**created 必须被调用方检查**：撞约束那条路径 `db.rollback()`
+    之后，传进来的 `order` 变回 transient（没有主键、不在 session 里），此时
+    ① 拿它去调网关等于用同一个 clientOrderId 再执行一次——目前只靠网关的幂等缓存
+       兜住，缓存一过期就是真的重复下单；
+    ② 对它 `db.refresh()` 会抛 InvalidRequestError，把并发重试变成 500，客户端再
+       重试一次，雪上加霜。
+    所以 created=False 时调用方应当直接返回已存在的那笔，不要再走执行分支。
+
+    Commit a new order; on a concurrent race against the clientOrderId unique
+    constraint, roll back and return the winning order instead of a raw 500.
+
+    Returns (payload, created). **Callers must check `created`**: after the
+    rollback the passed-in `order` is transient again, so (1) handing it to the
+    gateway re-executes the same clientOrderId, today caught only by the gateway's
+    idempotency cache and a genuine duplicate once that expires, and (2)
+    `db.refresh()` on it raises InvalidRequestError, turning a concurrent retry
+    into a 500 that invites yet another retry.
     """
     db.add(order)
     try:
@@ -318,14 +397,14 @@ def _commit_order_or_existing(db: Session, order: Order, user_id: str, client_or
             .first()
         )
         if existing:
-            return _serialize(existing)
+            return _serialize(existing), False
         raise
     db.refresh(order)
     # 落库成功就叫醒长轮询中的桥接（gateway 账号的单也会叫一声，桥接那边查一次
     # 发现没有自己的指令就继续等，代价可忽略）。
     # Wake a long-polling bridge as soon as the row is committed.
     bridge_wake.notify(user_id)
-    return _serialize(order)
+    return _serialize(order), True
 
 
 def _resolve_single_online_login(db: Session, user_id: str) -> str | None:
@@ -340,6 +419,59 @@ def _resolve_single_online_login(db: Session, user_id: str) -> str | None:
     accounts = db.query(MT5Account).filter(MT5Account.user_id == user_id, not_removed()).all()
     online = [a for a in accounts if is_account_online(a)]
     return online[0].login if len(online) == 1 else None
+
+
+def _require_close_login(db: Session, user_id: str, requested: str | None) -> str | None:
+    """给 CLOSE / MODIFY 解析目标账号；**只有在「多个账号在线」这一种解析不出来的
+    情况下**当场 400，其余沿用原行为。
+
+    要解决的问题：多个账号同时在线而请求没带 mt5Login 时，指令以 mt5_login=None
+    落库，而 bridge_poll 在下发时同样解析不出目标（`target = o.mt5_login or
+    (唯一在线账号 if 只有一个 else None)`，None 就 continue），于是这条指令**永远**
+    不会被下发，只能在 5 分钟后被 stale 判定作废。开仓单慢 5 分钟只是烦，平仓单
+    慢 5 分钟是要赔钱的——用户以为平仓已经提交，实际从头到尾没人执行，行情还在走。
+    这种情况下前端本来就该带上 ticket 对应的账号，带不上是前端的 bug，当场 400
+    比静默拖 5 分钟诚实。
+
+    为什么「一个账号都不在线」反而不能报错：那种情况下 mt5_login 留 None 是**有用**
+    的。目标账号是在 bridge_poll 里按当时的在线情况重新解析的，所以桥接稍后恢复
+    （比如笔记本从睡眠醒来）、且只有一个账号在线时，这条指令会被正常下发执行。
+    在这里 409 掉等于把「排队等桥接回来」这个正常用法砍掉。
+
+    Resolve the target account for CLOSE / MODIFY. Fails with 400 **only** for the
+    ambiguous case, and otherwise preserves the existing behaviour.
+
+    The bug: with several accounts online and no mt5Login in the request, the row is
+    stored with mt5_login=None, and bridge_poll re-resolves to None as well (it
+    takes the single online account or nothing), so the command is *never*
+    delivered and is simply voided by the stale sweep five minutes later. Five
+    minutes is annoying for an open and expensive for a close. The frontend knows
+    which account the ticket belongs to; failing to send it is a frontend bug, and a
+    400 now beats a silent stall.
+
+    Why "no account online" must NOT fail: there, a null login is useful. The target
+    is re-resolved at poll time, so once the bridge comes back (a laptop waking up)
+    with a single account online, the queued command is delivered and executed.
+    Rejecting here would remove that legitimate "queue until the bridge returns"
+    behaviour.
+    """
+    if requested:
+        return requested
+    accounts = db.query(MT5Account).filter(MT5Account.user_id == user_id, not_removed()).all()
+    online = [a for a in accounts if is_account_online(a)]
+    if len(online) == 1:
+        return online[0].login
+    if len(online) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "有多个账号在线，请指定要操作的 MT5 账号 / "
+                "several accounts are online; specify which MT5 login to act on"
+            ),
+        )
+    # 一个都不在线：留空排队，等桥接回来由 bridge_poll 解析目标。
+    # None online: queue with a null target for bridge_poll to resolve on return.
+    return None
 
 
 def _bound_logins(db: Session, user_id: str) -> list[str]:
@@ -509,10 +641,12 @@ def close_position(
         side=req.side,
         volume=req.volume or 0.0,
         ticket=req.ticket,
-        mt5_login=req.mt5Login or _resolve_single_online_login(db, user.id),
+        mt5_login=_require_close_login(db, user.id, req.mt5Login),
         status="PENDING",
     )
-    result = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+    result, created = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+    if not created:
+        return result
 
     gw_payload = _try_gateway_execute(db, order)
     if gw_payload is not None:
@@ -559,10 +693,12 @@ def modify_position(
         ticket=req.ticket,
         sl=req.stopLoss,
         tp=req.takeProfit,
-        mt5_login=req.mt5Login or _resolve_single_online_login(db, user.id),
+        mt5_login=_require_close_login(db, user.id, req.mt5Login),
         status="PENDING",
     )
-    result = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+    result, created = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+    if not created:
+        return result
 
     gw_payload = _try_gateway_execute(db, order)
     if gw_payload is not None:
