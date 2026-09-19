@@ -11,6 +11,8 @@ On launch the first thing it asks for is the user's API token.
 """
 import base64
 import ctypes
+import hashlib
+import hmac
 import http.client
 import json
 import logging
@@ -60,6 +62,55 @@ BRIDGE_ASSET_FILENAME = "PRISMX-Bridge-Setup.exe"
 # 更新检查间隔（秒）：启动检查一次，之后每 10 分钟复查一次。
 # Update check interval (seconds): once on launch, then every 10 minutes.
 UPDATE_CHECK_INTERVAL = 600
+
+# ---------- 自更新的来源校验 / self-update provenance ----------
+# 为什么需要这一段：自更新是整条链路上**唯一**一处「把远端二进制装到用户机器上并
+# 执行」的地方，而运行它的那台机器上正登录着用户真实的 MT5 交易账号。旧版只检查
+# 下载文件的头两字节是 MZ、体积不小于 5 MB——GitHub 账号被盗、Release 被投毒、
+# 或者用户机器上装了中间人根证书（企业代理、部分国产安全软件；urlopen 默认读系统
+# 信任库与系统代理），都足以让任意 exe 通过这两条检查并被执行。
+# Why this exists: self-update is the only place in the whole system that installs
+# and runs a remote binary on a machine that is signed into the user's real trading
+# account. The old checks (MZ header + 5 MB floor) are passed trivially by any exe.
+#
+# 校验方案：发布方在 Release 里额外附两个资产——
+#   SHA256SUMS      每行 "<64位十六进制>  <文件名>"（sha256sum 的标准输出格式）
+#   SHA256SUMS.sig  对 SHA256SUMS **原始字节**的 Ed25519 签名，base64 单行
+# 桥接硬编码发布公钥，顺序是：先取回清单并验签（证明这份哈希清单确实出自发布方），
+# 再下载安装包并比对哈希（证明拿到手的字节就是清单里认的那一份）。
+# 两步里任何一步失败都**不会**替换自身，一律回退到「请手动下载」。
+# Scheme: the release carries a SHA256SUMS manifest plus an Ed25519 signature over
+# its raw bytes. Verify the signature first (the manifest really is the publisher's),
+# then hash the download and compare (the bytes really are the ones listed). Any
+# failure aborts the swap and degrades to a manual download.
+UPDATE_SUMS_ASSET = "SHA256SUMS"
+UPDATE_SUMS_SIG_ASSET = "SHA256SUMS.sig"
+
+# ⚠⚠⚠ 必须替换成真正的发布公钥，否则自更新**一直是关闭的** ⚠⚠⚠
+# ⚠⚠⚠ REPLACE WITH THE REAL RELEASE PUBLIC KEY — SELF-UPDATE STAYS OFF UNTIL YOU DO ⚠⚠⚠
+# 生成方式见 bridge/README.md「发版签名」一节：私钥只存在发布者手上（离线/密钥库），
+# 这里填的是 Ed25519 公钥的 32 字节原始值的 base64（44 个字符，以 "=" 结尾）。
+# 留着占位符时 update_signing_ready() 恒为 False：提示条只会引导手动下载，
+# 一键自更新的入口整个不出现——「没配公钥」绝不等于「不校验就放行」。
+# Placeholder ⇒ update_signing_ready() is False ⇒ the one-click path is not offered
+# at all. An unconfigured key must never degrade into "skip the check".
+_UPDATE_PUBLIC_KEY_PLACEHOLDER = "!!!-REPLACE-ME-WITH-RELEASE-ED25519-PUBLIC-KEY-BASE64-!!!"
+UPDATE_PUBLIC_KEY_B64 = _UPDATE_PUBLIC_KEY_PLACEHOLDER
+
+# 只接受 GitHub 的下载域名。browser_download_url 会 302 到对象存储，所以请求前的
+# URL 和跟随重定向后的最终 URL 都要查一遍——否则一个被改写的 Release JSON 就能把
+# 下载指到任意主机上（HTTPS 证书只证明「是那台主机」，不证明「是我们的主机」）。
+# Pin downloads to GitHub's hosts, checking both the requested URL and the final
+# URL after redirects: TLS proves who the host is, not that it is ours.
+UPDATE_ALLOWED_HOSTS = (
+    "github.com",
+    "api.github.com",
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
+)
+# 哈希清单与签名都是很小的文本文件，给个上限免得把一个巨大的响应读进内存。
+# Both are tiny text files; cap the read so a huge response can't be slurped in.
+UPDATE_TEXT_ASSET_MAX_BYTES = 256 * 1024
 
 # ---------- 配置 / Configuration ----------
 # 线上后端地址（所有用户默认连接，无需手动填写）。
@@ -642,6 +693,32 @@ class BridgeEngine:
                 if coid:
                     # 缓存并落盘，以备幂等重报（重启后仍有效）
                     # cache & persist for idempotent retry (survives restarts)
+                    #
+                    # status=FAILED（「不知道成没成」，见 mt5_worker._result_from_retcode）
+                    # 同样进缓存，这是**刻意**的：后端重发同一 clientOrderId 时，
+                    # 重报一次 FAILED 是安全的，而重新执行可能开出第二笔仓位——
+                    # 在两者之间只能选前者。
+                    #
+                    # 已知代价：如果那张单后来其实成交了，缓存会让它在后端一直停在
+                    # FAILED（后端把 FAILED 当非终态、允许被更正，但更正永远不会来）。
+                    # 用户不会因此受损——FAILED 的文案就是「请先核对持仓」，而且平仓
+                    # 明细回扫会把真实仓位补进记录——只是订单行看起来停在未确认。
+                    # 更好的做法是重发时**只重跑确认、不重跑执行**，把 FAILED 升级成
+                    # FILLED；那要改动指令循环的形状，留作后续。
+                    #
+                    # FAILED ("outcome unknown") is cached deliberately. When the
+                    # backend re-delivers the same clientOrderId, re-reporting FAILED
+                    # is safe while re-executing could open a second position, and
+                    # that is the whole choice.
+                    #
+                    # Known cost: if the order did fill, the cache pins it at FAILED
+                    # in the backend forever (FAILED is non-terminal there and may be
+                    # corrected, but the correction never arrives). No user harm —
+                    # FAILED reads as "verify your positions", and the closed-trade
+                    # rescan still records the real position — the order row just
+                    # stays unconfirmed. The better fix is to re-run only the
+                    # confirmation on a re-delivery and upgrade FAILED to FILLED,
+                    # which needs the command loop reshaped; left as follow-up.
                     self._remember_executed(coid, r)
                 logger.info(
                     "下单结果 / order result: coid=%s success=%s ticket=%s price=%s msg=%s",
@@ -748,8 +825,12 @@ class BridgeEngine:
         # 3) 上报持仓 / report positions
         try:
             self._http.post("/api/bridge/positions", {"data": positions})
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            # 这一步以前是完全静默的：用户报「网页上仓位不刷新」时，日志里
+            # 连一次失败的痕迹都找不到。与本文件其它上报路径保持一致，记一行。
+            # This used to be silent, leaving "positions aren't refreshing"
+            # reports with no trace in the log at all.
+            logger.warning("上报持仓失败 / failed to report positions: %s", e)
 
         # 4) 上报账号（刷心跳、收后端对账号的裁决）。指令不在这里领：fetchCommands=False，
         #    由指令循环的长轮询去领并立刻执行。旧版后端不认识这个字段会照旧把指令给过来，
@@ -836,8 +917,9 @@ class BridgeEngine:
                     changed.append(q)
             if changed:
                 self._http.post("/api/bridge/quotes", {"data": changed})
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            # 同上：报价不刷新时也要在日志里留下线索 / leave a trace here too
+            logger.warning("上报报价失败 / failed to report quotes: %s", e)
 
         # 6) 上报新检测到的真实平仓明细（个人胜率）；失败则入队下一轮重试。
         # 这一步之前完全不写日志，无论成功失败都看不出"到底有没有尝试上报"，
@@ -987,12 +1069,21 @@ def check_latest_release(timeout: float = 6.0) -> dict | None:
         tag = (data.get("tag_name") or data.get("name") or "").strip()
         if not tag:
             return None
-        download_url = None
+        # 除了安装包本身，还要取回哈希清单与它的签名这两个资产的直链；缺任何一个
+        # 都会让 fetch_expected_sha256() 明确报错，从而退回手动下载（而不是放行）。
+        # Also pick up the manifest and its signature; a missing one makes
+        # fetch_expected_sha256() fail loudly and fall back to a manual download.
+        urls = {BRIDGE_ASSET_FILENAME: None, UPDATE_SUMS_ASSET: None, UPDATE_SUMS_SIG_ASSET: None}
         for asset in data.get("assets", []) or []:
-            if asset.get("name") == BRIDGE_ASSET_FILENAME:
-                download_url = asset.get("browser_download_url")
-                break
-        return {"tag": tag, "download_url": download_url}
+            name = asset.get("name")
+            if name in urls and urls[name] is None:
+                urls[name] = asset.get("browser_download_url")
+        return {
+            "tag": tag,
+            "download_url": urls[BRIDGE_ASSET_FILENAME],
+            "sums_url": urls[UPDATE_SUMS_ASSET],
+            "sums_sig_url": urls[UPDATE_SUMS_SIG_ASSET],
+        }
     except Exception:
         return None
 
@@ -1043,13 +1134,196 @@ def cleanup_old_binary() -> None:
             pass
 
 
-def download_release(url: str, dest: str, progress, timeout: float = 30.0) -> None:
-    """流式下载安装包到 dest，每收到一块调一次 progress(done, total)。下载完校验是完整的
-    Windows 可执行文件（MZ 头 + 体积下限），不是就抛异常，让调用方回退到手动下载。
-    Stream the installer to dest with progress callbacks, then sanity-check it."""
+class UpdateVerificationError(Exception):
+    """来源校验失败。抛出它就意味着**不换文件**，调用方必须退回手动下载。
+    Provenance check failed: never swap the exe; fall back to a manual download."""
+
+
+def _ensure_allowed_host(url: str) -> None:
+    """URL 的主机必须在 UPDATE_ALLOWED_HOSTS 里 / the URL's host must be pinned."""
+    host = (urlparse(url).hostname or "").lower()
+    if host not in UPDATE_ALLOWED_HOSTS:
+        raise UpdateVerificationError(
+            f"更新下载地址不在允许的域名内 / update URL host is not allowed: {host or url!r}"
+        )
+
+
+def _load_update_public_key():
+    """取回硬编码的发布公钥；没配置好就抛异常（调用方据此关闭自更新）。
+    Return the pinned release public key; raise when it isn't usable."""
+    key_b64 = (UPDATE_PUBLIC_KEY_B64 or "").strip()
+    if not key_b64 or key_b64 == _UPDATE_PUBLIC_KEY_PLACEHOLDER:
+        raise UpdateVerificationError(
+            "尚未填入发布公钥，自更新已禁用 / release public key not configured, self-update disabled"
+        )
+    # cryptography 只在这条路径上用到，放在函数里导入：万一打包时漏进包，
+    # 受影响的也只是自更新（会被关掉并提示手动下载），而不是整个程序起不来。
+    # Imported lazily so a packaging miss only disables self-update, not the app.
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    except Exception as e:  # noqa: BLE001
+        raise UpdateVerificationError(
+            f"缺少 cryptography 依赖，无法验签 / cryptography unavailable, cannot verify: {e}"
+        ) from e
+    try:
+        raw = base64.b64decode(key_b64, validate=True)
+    except Exception as e:  # noqa: BLE001
+        raise UpdateVerificationError("发布公钥不是合法的 base64 / public key is not valid base64") from e
+    if len(raw) != 32:
+        raise UpdateVerificationError(
+            f"发布公钥长度不对（Ed25519 应为 32 字节，实为 {len(raw)}）/ bad public key length"
+        )
+    return Ed25519PublicKey.from_public_bytes(raw)
+
+
+def update_signing_ready() -> bool:
+    """公钥是否已正确配置。False 时界面不提供一键更新，只提供手动下载。
+    Whether the pinned key is usable; when False the UI only offers a manual download."""
+    try:
+        _load_update_public_key()
+        return True
+    except UpdateVerificationError as e:
+        logger.warning("自更新不可用 / self-update unavailable: %s", e)
+        return False
+
+
+def verify_sums_signature(sums_bytes: bytes, signature_b64: str) -> None:
+    """用硬编码公钥验证 SHA256SUMS 的 Ed25519 签名，不通过就抛。
+    Verify the Ed25519 signature over the raw SHA256SUMS bytes."""
+    key = _load_update_public_key()
+    try:
+        signature = base64.b64decode((signature_b64 or "").strip(), validate=True)
+    except Exception as e:  # noqa: BLE001
+        raise UpdateVerificationError("签名不是合法的 base64 / signature is not valid base64") from e
+    try:
+        key.verify(signature, sums_bytes)
+    except Exception as e:  # noqa: BLE001
+        # 签名不符、签名长度不对、清单被改过——全都走这里。
+        # Wrong signature, wrong length, tampered manifest: all land here.
+        raise UpdateVerificationError(
+            "哈希清单的签名校验未通过 / SHA256SUMS signature verification failed"
+        ) from e
+
+
+def expected_sha256_from_sums(sums_text: str, filename: str) -> str:
+    """从 SHA256SUMS 文本里取出 filename 那一行的哈希（小写十六进制）。
+    Pull the digest for `filename` out of a sha256sum-format manifest."""
+    found = None
+    for line in sums_text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        digest = parts[0].strip().lower()
+        # sha256sum 的二进制模式会在文件名前加一个 "*" / binary mode prefixes "*"
+        name = os.path.basename(parts[1].strip().lstrip("*"))
+        if name != filename:
+            continue
+        if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            raise UpdateVerificationError(f"哈希清单里 {filename} 的哈希格式不对 / malformed digest")
+        # 同一个文件名出现两条不同哈希，说明清单本身就有歧义，宁可不更新。
+        # Two different digests for one name means an ambiguous manifest: refuse.
+        if found is not None and found != digest:
+            raise UpdateVerificationError(f"哈希清单里 {filename} 有互相冲突的两条记录 / conflicting entries")
+        found = digest
+    if found is None:
+        raise UpdateVerificationError(f"哈希清单里没有 {filename} / {filename} is not listed in the manifest")
+    return found
+
+
+def sha256_file(path: str) -> str:
+    """分块算文件的 SHA-256（安装包 30 MB 上下，不要整包读进内存）。
+    Chunked SHA-256 of a file; the installer is ~30 MB."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _http_get_bytes(url: str, timeout: float = 15.0, max_bytes: int = UPDATE_TEXT_ASSET_MAX_BYTES) -> bytes:
+    """取回一个小文本资产（哈希清单 / 签名），带域名钉死与体积上限。
+    Fetch a small text asset with host pinning and a size cap."""
+    _ensure_allowed_host(url)
+    req = request.Request(url, method="GET")
+    req.add_header("User-Agent", f"PRISMX-Bridge/{APP_VERSION}")
+    with request.urlopen(req, timeout=timeout) as resp:
+        _ensure_allowed_host(resp.geturl())          # 重定向后的最终地址也要查 / check after redirects
+        data = resp.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise UpdateVerificationError(f"{url} 返回的内容过大 / response too large")
+    return data
+
+
+def fetch_expected_sha256(release: dict, filename: str = BRIDGE_ASSET_FILENAME) -> str:
+    """取回并验签哈希清单，返回 filename 应有的 SHA-256。任何问题都抛异常。
+    Fetch + verify the signed manifest, returning the expected digest."""
+    sums_url = release.get("sums_url")
+    sig_url = release.get("sums_sig_url")
+    if not sums_url or not sig_url:
+        raise UpdateVerificationError(
+            f"这个 Release 没有附 {UPDATE_SUMS_ASSET} 与 {UPDATE_SUMS_SIG_ASSET}，"
+            f"无法校验来源 / release is missing the signed checksum manifest"
+        )
+    sums_bytes = _http_get_bytes(sums_url)
+    sig_bytes = _http_get_bytes(sig_url)
+    try:
+        sig_text = sig_bytes.decode("ascii").strip()
+    except UnicodeDecodeError as e:
+        raise UpdateVerificationError("签名文件不是 ASCII 文本 / signature file is not ASCII") from e
+    verify_sums_signature(sums_bytes, sig_text)
+    try:
+        sums_text = sums_bytes.decode("utf-8")
+    except UnicodeDecodeError as e:
+        # 走到这里说明签名验过了但内容不是文本，属于发布流程出错。
+        # Signature verified but the content isn't text: a broken release.
+        raise UpdateVerificationError("哈希清单不是 UTF-8 文本 / manifest is not UTF-8") from e
+    digest = expected_sha256_from_sums(sums_text, filename)
+    logger.info("哈希清单验签通过 / manifest signature ok: %s = %s", filename, digest)
+    return digest
+
+
+def verify_downloaded_installer(dest: str, expected_sha256: str) -> None:
+    """对已下载的文件做两道检查：像不像安装包（给出好读的报错）+ 哈希是否与清单一致。
+    不一致就删掉它并抛异常——绝不能把一个来源不明的 exe 留在原地等着被换进去。
+    Sanity-check the download, then compare its digest with the signed manifest;
+    a mismatch deletes the file and raises."""
+    size = os.path.getsize(dest)
+    with open(dest, "rb") as f:
+        head = f.read(2)
+    if head != b"MZ" or size < UPDATE_MIN_BYTES:
+        raise UpdateVerificationError(
+            f"下载的文件不是完整的安装包 / downloaded file is not a complete installer ({size} bytes)"
+        )
+    actual = sha256_file(dest)
+    # 常量时间比较：这里比的是公开的哈希值，泄漏风险本就很低，但统一用
+    # compare_digest 免得以后有人照抄这段去比对秘密值。
+    # Constant-time compare — the digest isn't secret, but keep the habit.
+    if not hmac.compare_digest(actual, (expected_sha256 or "").lower()):
+        try:
+            os.remove(dest)
+        except OSError:
+            pass
+        raise UpdateVerificationError(
+            f"安装包哈希与已签名的清单不符，已丢弃 / digest mismatch, download discarded "
+            f"(expected {expected_sha256}, got {actual})"
+        )
+
+
+def download_release(url: str, dest: str, progress, expected_sha256: str, timeout: float = 30.0) -> None:
+    """流式下载安装包到 dest，每收到一块调一次 progress(done, total)，下载完比对哈希。
+
+    `expected_sha256` 是**必填**位置参数，来自 fetch_expected_sha256() 验过签的清单：
+    做成必填就没法「忘了传」——少传一个参数是 TypeError，而不是静默地不校验。
+    `expected_sha256` is a required positional arg so it can't be silently omitted.
+    """
+    _ensure_allowed_host(url)
     req = request.Request(url, method="GET")
     req.add_header("User-Agent", f"PRISMX-Bridge/{APP_VERSION}")
     with request.urlopen(req, timeout=timeout) as resp, open(dest, "wb") as f:
+        _ensure_allowed_host(resp.geturl())          # 重定向后的最终地址也要查 / check after redirects
         total = int(resp.headers.get("Content-Length") or 0)
         done = 0
         while True:
@@ -1059,11 +1333,7 @@ def download_release(url: str, dest: str, progress, timeout: float = 30.0) -> No
             f.write(chunk)
             done += len(chunk)
             progress(done, total)
-    size = os.path.getsize(dest)
-    with open(dest, "rb") as f:
-        head = f.read(2)
-    if head != b"MZ" or size < UPDATE_MIN_BYTES:
-        raise ValueError(f"下载的文件不是完整的安装包 / downloaded file is not a complete installer ({size} bytes)")
+    verify_downloaded_installer(dest, expected_sha256)
 
 
 def swap_in_update(new_path: str) -> str:
@@ -1408,12 +1678,24 @@ class BridgeGUI:
         Check once on launch, then re-check every UPDATE_CHECK_INTERVAL seconds.
         """
         def worker():
+            # 以前提示过一次就 return，轮询线程直接结束：用户随手把提示条点掉（或
+            # 一次自更新失败）之后，这个本该 7×24 挂机的程序就永远停在旧版本上，
+            # 连之后发布的更新版也不会再提示。现在改成一直轮询，只是不为**同一个
+            # 版本号**重复提示；出了更新的版本仍然会再弹一次。
+            # This used to return after the first notification, so dismissing the
+            # banner once pinned a 24/7 app to an old build forever. Keep polling;
+            # only suppress repeats of the same tag.
+            notified_tag = None
             while True:
                 release = check_latest_release()
-                if release and is_newer_version(release["tag"], APP_VERSION):
+                if (
+                    release
+                    and is_newer_version(release["tag"], APP_VERSION)
+                    and release["tag"] != notified_tag
+                ):
+                    notified_tag = release["tag"]
                     # 切回 UI 线程更新提示条 / marshal back to the UI thread
                     self.root.after(0, lambda r=release: self._show_update(r))
-                    return  # 已提示则停止轮询 / stop polling once notified
                 time.sleep(UPDATE_CHECK_INTERVAL)
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1423,9 +1705,25 @@ class BridgeGUI:
         # 优先直接下载安装包；找不到匹配资产才退回发布页。
         # Prefer downloading the installer directly; fall back to the releases
         # page only if no matching asset was found.
+        # 换了一个新版本号就把「上次更新失败」的记忆清掉：上一版下载失败不代表
+        # 这一版也会失败，否则一次失败会把之后所有版本都锁在手动下载上。
+        # A new tag clears the previous failure: one bad download must not pin
+        # every future version to the manual path.
+        if (self._update_release or {}).get("tag") != latest:
+            self._update_failed = False
         self._update_url = release.get("download_url") or RELEASES_PAGE
         self._update_release = release
-        can_self_update = frozen_exe_path() is not None and bool(release.get("download_url"))
+        # 一键自更新的三个前提缺一不可：打包态、有安装包直链、**公钥已配置**。
+        # 公钥还是占位符时这里就是 False，界面只会引导手动下载——不校验就换 exe
+        # 这条路根本不存在。同理，Release 里没有签名清单时下一步会抛错回退。
+        # All three must hold: frozen build, a direct asset link, and a configured
+        # key. A placeholder key leaves only the manual path; there is no
+        # "update without verifying" branch at all.
+        can_self_update = (
+            frozen_exe_path() is not None
+            and bool(release.get("download_url"))
+            and update_signing_ready()
+        )
         self.update_var.set(
             f"发现新版本 {latest}（当前 v{APP_VERSION}），点击一键更新并重启  /  "
             f"Update {latest} available — click to update and restart"
@@ -1445,7 +1743,12 @@ class BridgeGUI:
         if self._updating:
             return
         release = self._update_release or {}
-        if self._update_failed or frozen_exe_path() is None or not release.get("download_url"):
+        if (
+            self._update_failed
+            or frozen_exe_path() is None
+            or not release.get("download_url")
+            or not update_signing_ready()      # 公钥没配好就只能手动下载 / no key ⇒ manual only
+        ):
             self._open_update_page()
             return
         self._updating = True
@@ -1468,10 +1771,22 @@ class BridgeGUI:
 
         try:
             logger.info("自更新开始 / self-update start: %s -> %s", url, tmp)
-            download_release(url, tmp, progress)
+            # 顺序很要紧：先把已签名的哈希清单拿回来验签，拿到本次应有的哈希，
+            # 再开始下 30 MB 的安装包。清单不对就根本不用下载了。
+            # Order matters: verify the signed manifest first, then download.
+            self.root.after(0, lambda: self.update_var.set(
+                f"正在校验发布签名…  /  Verifying release signature…"
+            ))
+            expected = fetch_expected_sha256(release)
+            download_release(url, tmp, progress, expected)
             new_exe = swap_in_update(tmp)
         except Exception as e:  # noqa: BLE001
             logger.exception("自更新失败 / self-update failed: %s", e)
+            # 校验失败与「网络断了」是两回事，必须让用户看得出区别：前者意味着
+            # 拿到的包**来源不可信**，这时候引导他去官方发布页手动下载才安全。
+            # Distinguish a failed provenance check from a plain network error:
+            # the former means the bytes were not trustworthy.
+            verification_failed = isinstance(e, UpdateVerificationError)
             try:
                 if os.path.exists(tmp):
                     os.remove(tmp)
@@ -1482,6 +1797,10 @@ class BridgeGUI:
                 self._updating = False
                 self._update_failed = True
                 self.update_var.set(
+                    "更新包来源校验未通过，已阻止自动更新；点击前往官方发布页手动下载  /  "
+                    "Update blocked: signature/checksum check failed — click to download "
+                    "from the official releases page"
+                    if verification_failed else
                     "自动更新失败，点击改为手动下载安装包  /  "
                     "Auto-update failed — click to download the installer instead"
                 )
@@ -1490,8 +1809,15 @@ class BridgeGUI:
         self.root.after(0, lambda: self._restart_into(new_exe))
 
     def _restart_into(self, new_exe: str):
-        """停掉桥接与托盘，拉起新版本（带 --autoconnect 让它一开就重连），然后退出。
-        Stop the engine and tray, launch the new build with --autoconnect, exit."""
+        """停掉桥接与托盘，拉起新版本，然后退出。
+
+        原来这里传了个 `--autoconnect`，但 main() 从来没解析过它——重连其实是由
+        「本地存过 token 就自动连接」那段实现的（见 __init__ 末尾）。留着一个不存在的
+        参数会让人以为自动重连靠它，将来删掉那段自动连接的代码就会踩空，所以去掉。
+        The old `--autoconnect` flag was never parsed; auto-reconnect actually comes
+        from the saved-token branch in __init__. Dropping the flag so nobody relies
+        on a switch that does nothing.
+        """
         self.update_var.set("下载完成，正在重启到新版本…  /  Restarting into the new version…")
         self.root.update_idletasks()
         if self.engine:
@@ -1505,7 +1831,7 @@ class BridgeGUI:
         logger.info("自更新：启动新版本并退出 / self-update: launching %s", new_exe)
         try:
             subprocess.Popen(
-                [new_exe, "--autoconnect"],
+                [new_exe],
                 cwd=os.path.dirname(new_exe),
                 close_fds=True,
                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,

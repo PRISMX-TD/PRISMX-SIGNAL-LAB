@@ -13,6 +13,7 @@ across polls instead of initialize/shutdown on every tick; with multiple
 terminals we only reconnect when switching.
 """
 import logging
+import math
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -370,18 +371,113 @@ def _resolve_broker_symbol(requested: str, suffix: str = "") -> str | None:
             break
     if fallback is None:
         _unresolved_until[key] = time.monotonic() + _SYMBOLS_CACHE_TTL
+    elif fallback is not None:
+        # 走到这里说明：品种确实存在，但对这个账号所在的组是**不可交易**的
+        # （trade_mode = DISABLED，常见于只读组、或该品种只对部分组开放）。
+        # 仍然把它返回，让下单请求发出去、由券商给出权威的拒绝理由；但要在日志里
+        # 点明真正的原因，否则用户只看到一句笼统的「下单被拒绝 (#xxxx)」，而排查
+        # 方向完全不同——不是价格不对、不是手数不对，是这个账号根本不能交易它。
+        # The symbol exists but is non-tradable for this account's group (read-only
+        # group, or listed only for some groups). It is still returned so the broker
+        # gives the authoritative rejection, but the real reason goes in the log:
+        # otherwise the user sees a generic "order rejected (#xxxx)" and looks at
+        # price and volume, when the account simply cannot trade this symbol.
+        logger.warning(
+            "品种 %s 对本账号所在组不可交易（trade_mode=disabled），下单大概率会被拒 / "
+            "%s is not tradable for this account's group; the order will likely be rejected",
+            fallback, fallback,
+        )
     return fallback
 
 
+# 允许的滑点，按**价格的相对比例**表示，而不是写死的 points 数。
+#
+# 为什么不能写死：`deviation` 的单位是 point（1/10^digits），所以同一个 20 在不同
+# 品种上是完全不同的量——5 位的欧美是 2 个点（约 0.02%），2 位的黄金是 0.20 美元
+# （约 0.006%），后者在行情快时太紧、会换来一串 REQUOTE/PRICE_CHANGED 拒单。
+#
+# 0.02% 这个取值是照着"维持外汇上的现有行为"定的：EURUSD ≈ 1.08 时算出来正好约 20
+# points，与改动前一致；同样的比例放到黄金 3350 上是约 0.67 美元，比典型点差
+# （0.2~0.5）宽一档，属于合理放行而不是放任。
+#
+# Slippage allowance expressed as a fraction of price rather than a fixed point
+# count. `deviation` is denominated in points (1/10^digits), so one constant means
+# wildly different tolerances per instrument: 20 is ~2 pips on 5-digit FX (~0.02%)
+# but only $0.20 on 2-digit gold (~0.006%), which is too tight in fast markets and
+# buys a stream of requote rejections. The 0.02% figure is chosen to reproduce
+# today's behaviour on FX (EURUSD ≈ 1.08 → ~20 points) while giving gold ~$0.67,
+# one notch wider than a typical spread.
+_DEVIATION_FRACTION = 0.0002
+_DEVIATION_MIN_POINTS = 10
+_DEVIATION_MAX_POINTS = 300
+
+
+def _alternate_filling(symbol: str, current):
+    """挑一个该品种支持、且与当前不同的成交模式；没有就返回 None。
+
+    `symbol_info.filling_mode` 是位掩码（SYMBOL_FILLING_FOK / SYMBOL_FILLING_IOC），
+    与 order_send 要的 ORDER_FILLING_* 常量不是同一套值，所以要按位判断再映射。
+    RETURN 不在候选里：它对市价单的语义是"没成交的部分挂着"，与本平台"要么按市价
+    成交要么不成交"的模型不符。
+
+    Pick a filling mode this symbol supports and that differs from the current one.
+    filling_mode is a bitmask (SYMBOL_FILLING_*) distinct from the ORDER_FILLING_*
+    constants order_send wants, so it is tested bitwise and then mapped. RETURN is
+    excluded: leaving an unfilled remainder resting contradicts this platform's
+    market-or-nothing model.
+    """
+    if mt5 is None:
+        return None
+    info = mt5.symbol_info(symbol)
+    mask = getattr(info, "filling_mode", 0) if info is not None else 0
+    options = []
+    fok_bit = getattr(mt5, "SYMBOL_FILLING_FOK", 1)
+    ioc_bit = getattr(mt5, "SYMBOL_FILLING_IOC", 2)
+    if mask & fok_bit:
+        options.append(getattr(mt5, "ORDER_FILLING_FOK", None))
+    if mask & ioc_bit:
+        options.append(getattr(mt5, "ORDER_FILLING_IOC", None))
+    for opt in options:
+        if opt is not None and opt != current:
+            return opt
+    return None
+
+
+def _deviation_points(symbol: str, price: float) -> int:
+    """按品种精度把「相对滑点容忍度」折算成 MT5 要的 point 数。
+    Convert the relative slippage tolerance into the point count MT5 expects."""
+    info = mt5.symbol_info(symbol) if mt5 is not None else None
+    point = getattr(info, "point", 0.0) if info is not None else 0.0
+    if not point or not price or price <= 0:
+        return 20  # 拿不到精度时退回原来的固定值 / fall back to the previous constant
+    pts = int(price * _DEVIATION_FRACTION / point)
+    return max(_DEVIATION_MIN_POINTS, min(_DEVIATION_MAX_POINTS, pts))
+
+
 def _normalize_volume(symbol: str, volume: float) -> float:
-    """把手数规整到券商步长与上下限 / clamp volume to broker step & limits."""
+    """把手数规整到券商步长与上下限 / clamp volume to broker step & limits.
+
+    注意这个函数会**静默改变**用户要求的手数（步长对齐、夹到上下限）。调用方有义务
+    把规整后的值放进回执的 `volume` 字段，让网页显示真正成交的手数，而不是让用户
+    以为按自己填的数成交了——0.005 手被抬成 0.01 手是"仓位大了一倍"，不是四舍五入。
+
+    This silently changes the requested size (step alignment, min/max clamping), so
+    callers must report the returned value back in the receipt's `volume` field. A
+    0.005 request becoming 0.01 is a doubled position, not a rounding detail.
+    """
     info = mt5.symbol_info(symbol)
     if info is None:
         return volume
     step = info.volume_step or 0.01
     vmin = info.volume_min or step
     vmax = info.volume_max or volume
-    v = round(volume / step) * step
+    # 用 floor(x/step + 0.5) 而不是内建 round()：Python 的 round() 是银行家舍入
+    # （round(2.5) == 2），于是 0.025 手在 0.01 步长下会变成 0.02 而不是直觉上的
+    # 0.03。手数是用户直接看得见的数字，按直觉的四舍五入走。
+    # floor(x/step + 0.5) rather than round(): Python rounds half to even, so 0.025
+    # on a 0.01 step became 0.02 instead of the expected 0.03. Lot size is a number
+    # the user reads directly, so use the rounding they expect.
+    v = math.floor(volume / step + 0.5) * step
     if v < vmin:
         v = vmin
     if v > vmax:
@@ -1165,6 +1261,104 @@ def _reject_reason(retcode: int) -> str:
     return reasons.get(retcode, f"下单被拒绝 / Order rejected (#{retcode})")
 
 
+# 二次确认的重试节奏：PLACED 之后券商把单子从「已受理」推进到「已成交」通常在
+# 一秒内，但撮合忙时会更久。总预算 3 秒是权衡——后端的桥接回执没有硬超时，但
+# /bridge/poll 的长轮询上限是 5 秒，确认阶段不该把它顶满。
+# Retry cadence for the second-level confirmation: brokers normally move an
+# order from "accepted" to "filled" within a second, busier ones take longer. The
+# 3-second budget is a trade-off — the backend does not hard-timeout a bridge
+# result, but /bridge/poll's long-poll ceiling is 5s and confirmation should not
+# eat all of it.
+_CONFIRM_TOTAL_SECONDS = 3.0
+_CONFIRM_INTERVAL_SECONDS = 0.25
+
+
+def _confirm_order_filled(order_ticket: int) -> bool | None:
+    """PLACED 之后查这张单到底成交了没有。True=确认成交，False=确认没成交，None=查不出来。
+
+    为什么需要这一步：`order_send` 返回 TRADE_RETCODE_PLACED 的意思是「券商收下了这
+    张单」，**不是**「成交了」。此前这里把 PLACED 和 DONE 一视同仁当成交，于是平仓
+    指令在只受理未成交时也会回报成功，网页显示「已平」而仓位还在——和 09-17 那次
+    锁仓是同一类风险。网关那条通道早就有这道确认（gateway_execute 的
+    PLACED_UNCONFIRMED → FAILED），这里是把桥接补齐到同一口径。
+
+    查 history_orders_get 而不是 positions_get：开仓要看这张**订单**的终态，而平仓
+    产生的是反向单，看仓位反而要另写一套判定；订单状态对两种动作都成立。
+
+    After a PLACED result, find out whether the order actually filled. True =
+    confirmed filled, False = confirmed not filled, None = could not tell.
+
+    `order_send` returning TRADE_RETCODE_PLACED means "the broker accepted the
+    order", not "it filled". Treating PLACED as a fill is what made a close report
+    success while the position stayed open — the same class of risk as the 2026-09-17
+    stuck position. The gateway channel has had this confirmation all along
+    (PLACED_UNCONFIRMED → FAILED in gateway_execute); this brings the bridge to the
+    same standard.
+
+    We query history_orders_get rather than positions_get because the order's own
+    terminal state answers the question for opens and closes alike, whereas a close
+    creates an opposite order and would need separate position bookkeeping.
+    """
+    if mt5 is None or not order_ticket:
+        return None
+    deadline = time.time() + _CONFIRM_TOTAL_SECONDS
+    saw_any = False
+    while time.time() < deadline:
+        try:
+            orders = mt5.history_orders_get(ticket=order_ticket)
+        except Exception:
+            orders = None
+        if orders:
+            saw_any = True
+            state = getattr(orders[0], "state", None)
+            if state == mt5.ORDER_STATE_FILLED:
+                return True
+            # 明确的终态且不是成交：券商拒了 / 撤了 / 过期，这才是真的「没成交」。
+            # A terminal state that is not FILLED: rejected, cancelled or expired —
+            # only this counts as a confirmed non-fill.
+            if state in (mt5.ORDER_STATE_REJECTED, mt5.ORDER_STATE_CANCELED,
+                         mt5.ORDER_STATE_EXPIRED):
+                return False
+        time.sleep(_CONFIRM_INTERVAL_SECONDS)
+    # 超时。查到过这张单但一直没到终态 = 还挂着，属于「没成交」；从头到尾查不到
+    # 这张单则是真不知道（历史还没同步 / 连接有问题），必须回 None 让上层落 FAILED。
+    # Timed out. If the order was visible but never reached a terminal state it is
+    # still working, i.e. not filled. If it was never visible at all we genuinely
+    # do not know (history not synced, connection trouble) and must return None so
+    # the caller records FAILED.
+    return False if saw_any else None
+
+
+def _result_from_retcode(result, confirm: bool = True) -> tuple[str, bool]:
+    """把 order_send 的结果映射成三态 (status, filled)。
+
+    status 是要回报给后端的 FILLED / REJECTED / FAILED（见 routers/bridge.py 里
+    BridgeResultRequest.status 的说明），filled 表示能否把它当成交来取成交价与票号。
+
+    Map an order_send result onto the three-state (status, filled) pair. `status`
+    is what the backend is told (see BridgeResultRequest.status in
+    routers/bridge.py); `filled` says whether we may read a fill price and ticket
+    off the result.
+    """
+    if mt5 is None:
+        return "FAILED", False
+    if result.retcode == mt5.TRADE_RETCODE_DONE:
+        return "FILLED", True
+    if result.retcode == mt5.TRADE_RETCODE_PLACED:
+        if not confirm:
+            return "FAILED", False
+        confirmed = _confirm_order_filled(int(getattr(result, "order", 0) or 0))
+        if confirmed is True:
+            return "FILLED", True
+        # 确认没成交、或压根确认不了，都落 FAILED 而不是 REJECTED：REJECTED 在界面上
+        # 的意思是「可以安全重下」，而这里恰恰不能保证。
+        # A confirmed non-fill and an inconclusive check both map to FAILED, never
+        # REJECTED — REJECTED reads as "safe to retry", which is exactly what we
+        # cannot promise here.
+        return "FAILED", False
+    return "REJECTED", False
+
+
 def _execute_order(cmd: dict, suffix: str = "") -> dict:
     """执行单条下单指令 / execute one order command."""
     requested = cmd["symbol"]
@@ -1187,12 +1381,12 @@ def _execute_order(cmd: dict, suffix: str = "") -> dict:
             "message": f"Symbol not available: {requested}",
         }
 
-    volume = _normalize_volume(symbol, float(cmd.get("volume", 0.0)))
+    volume = _normalize_volume(symbol, float(cmd.get("volume", 0.0) or 0.0))
     sl, tp = _compute_stops(
         symbol, side,
-        float(cmd.get("entry", 0.0)),
-        float(cmd.get("stopLoss", 0.0)),
-        float(cmd.get("takeProfit", 0.0)),
+        float(cmd.get("entry", 0.0) or 0.0),
+        float(cmd.get("stopLoss", 0.0) or 0.0),
+        float(cmd.get("takeProfit", 0.0) or 0.0),
     )
 
     tick = mt5.symbol_info_tick(symbol)
@@ -1211,7 +1405,7 @@ def _execute_order(cmd: dict, suffix: str = "") -> dict:
         "volume": volume,
         "type": order_type,
         "price": price,
-        "deviation": 20,
+        "deviation": _deviation_points(symbol, price),
         "magic": PRISMX_MAGIC,
         "comment": "PRISMX",
         "type_time": mt5.ORDER_TIME_GTC,
@@ -1224,12 +1418,48 @@ def _execute_order(cmd: dict, suffix: str = "") -> dict:
 
     result = mt5.order_send(request)
     if result is None:
+        # order_send 返回 None = 请求没能送出去**或者**送出去了但读不到回应，两种
+        # 情况分不开，所以是 FAILED（不知道）而不是 REJECTED（确定被拒）。
+        # A None result means the request either never left or left and we could not
+        # read the reply. The two are indistinguishable, so this is FAILED ("don't
+        # know"), not REJECTED ("definitely refused").
         return {
             "clientOrderId": client_order_id,
             "success": False,
+            "status": "FAILED",
             "message": f"order_send failed: {mt5.last_error()}",
         }
-    success = result.retcode in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED)
+    # 成交模式不被支持时换一种再发一次。
+    #
+    # `type_filling` 上面写死的是 IOC，而是否支持 IOC / FOK / RETURN 完全由券商按品种
+    # 定（`symbol_info.filling_mode` 是位掩码）。只支持 FOK 的券商会把每一笔都回
+    # INVALID_FILL——`_reject_reason` 里早就为这个码备好了文案，说明确实踩到过，只是
+    # 一直没有降级重试，用户那边就是"下单永远失败"。
+    #
+    # 只在 INVALID_FILL 这一个码上重试，且只重试一次：这个码的含义是"这张单没被受理"，
+    # 所以重发不存在重复成交的风险；换成别的失败码就不能这么做了。
+    #
+    # Retry once with a different filling mode when the broker rejects this one.
+    # type_filling is hardcoded to IOC above, but support for IOC / FOK / RETURN is
+    # per-symbol and per-broker (symbol_info.filling_mode is a bitmask). A FOK-only
+    # broker rejects every order with INVALID_FILL — _reject_reason already carries
+    # wording for that code, so it has been hit — and without a fallback the user
+    # simply cannot trade. Retried only on INVALID_FILL, and only once: that code
+    # means the order was not accepted, so re-sending cannot double-fill. No other
+    # failure code is safe to retry this way.
+    invalid_fill = getattr(mt5, "TRADE_RETCODE_INVALID_FILL", None)
+    if invalid_fill is not None and result.retcode == invalid_fill:
+        alt = _alternate_filling(symbol, request["type_filling"])
+        if alt is not None:
+            logger.info(
+                "成交模式 %s 不被支持，改用 %s 重试一次 / filling mode rejected, retrying with %s",
+                request["type_filling"], alt, alt,
+            )
+            request["type_filling"] = alt
+            retried = mt5.order_send(request)
+            if retried is not None:
+                result = retried
+    status, success = _result_from_retcode(result)
     # 成交价回退：部分经纪商在 IOC 成交时 result.price 为 0，
     # 依次回退到成交单(deal)价、请求价，避免回执价显示为 0。
     # Fill-price fallback: some brokers return result.price == 0 on IOC fills;
@@ -1248,11 +1478,33 @@ def _execute_order(cmd: dict, suffix: str = "") -> dict:
     return {
         "clientOrderId": client_order_id,
         "success": success,
-        "mt5Ticket": int(result.order) if success else None,
+        "status": status,
+        # 票号在 FAILED 时也要带上：那正是用户/客服事后去 MT5 核对这张单到底成没成交
+        # 的唯一线索，丢了就只能靠时间去猜。
+        # Send the ticket even on FAILED: it is the only handle for checking after
+        # the fact whether the order filled. Dropping it leaves nothing but guesswork.
+        "mt5Ticket": int(result.order) if getattr(result, "order", 0) else None,
         "filledPrice": filled_price,
-        "message": "Order executed" if success else _reject_reason(result.retcode),
+        # 实际下出去的手数。`_normalize_volume` 会按券商步长与上下限静默改写用户
+        # 填的数（0.005 手在最小 0.01 的品种上会被抬成 0.01，也就是仓位大了一倍），
+        # 不回报的话网页只能显示用户当初填的值，"显示的"和"成交的"对不上。
+        # The volume actually sent. _normalize_volume silently rewrites the request
+        # to the broker's step and limits (0.005 becomes 0.01 — a doubled position),
+        # so without this the UI would keep showing what the user typed.
+        "volume": volume,
+        "message": (
+            "Order executed" if success
+            else _unconfirmed_reason() if status == "FAILED"
+            else _reject_reason(result.retcode)
+        ),
         "login": _current_login(),
     }
+
+
+def _unconfirmed_reason() -> str:
+    """FAILED（不知道成没成）时给用户看的话。措辞刻意不说「被拒绝」。
+    Wording for FAILED (outcome unknown). Deliberately never says "rejected"."""
+    return "执行结果未确认，请先在 MT5 核对持仓 / Outcome unconfirmed — verify the position in MT5 first"
 
 
 def _close_position(cmd: dict) -> dict:
@@ -1265,11 +1517,35 @@ def _close_position(cmd: dict) -> dict:
     client_order_id = cmd["clientOrderId"]
     ticket = int(cmd.get("ticket", 0))
     poss = mt5.positions_get(ticket=ticket)
-    if not poss:
-        # 持仓已不存在，视为已平 / position gone, treat as already closed
+    # `None` 与 `()` 必须分开处理——这是一条曾经会把「没平成」报成「已平」的路径。
+    #
+    # MetaTrader5 包的约定：查询**失败**返回 None，查询成功但**确实没有**返回空元组。
+    # 原来写的是 `if not poss:`，两者都命中，于是终端一次瞬时不可用（重连中、
+    # 未初始化、IPC 抖动）就会让一笔从未执行的平仓被回报成 success=True，还被写进
+    # 24 小时幂等缓存——后端重投也救不回来，仓位继续开着而平台记录显示已平。
+    #
+    # 同文件里判 `mt5.last_error()` 的写法早就有，这里只是没用上。
+    #
+    # Distinguish None from (): the MetaTrader5 package returns None when the query
+    # itself failed and an empty tuple when there is genuinely no such position.
+    # `if not poss:` matched both, so a momentary terminal outage reported a close
+    # that never happened as success — and cached it for 24 hours, so redelivery
+    # could not rescue it. The position stays open while the platform shows it closed.
+    if poss is None:
+        return {
+            "clientOrderId": client_order_id,
+            "success": False,
+            "status": "FAILED",
+            "message": f"positions_get failed: {mt5.last_error()}",
+        }
+    if len(poss) == 0:
+        # 确实查到了、确实没有这个仓位：它已经被平掉（可能是止损触发或用户手动平）。
+        # 这是真正的"已平"，可以回 success。
+        # Confirmed absent: the position really is gone (stop-out, or closed by hand).
         return {
             "clientOrderId": client_order_id,
             "success": True,
+            "status": "FILLED",
             "message": "Position already closed",
         }
     pos = poss[0]
@@ -1319,18 +1595,32 @@ def _close_position(cmd: dict) -> dict:
     }
     result = mt5.order_send(request)
     if result is None:
-        return {"clientOrderId": client_order_id, "success": False,
+        # 平仓路径上这一条尤其要紧：分不清「没送出去」和「送出去了没读到回应」，
+        # 而后者意味着仓位可能已经平掉了。落 FAILED，让用户先去核对再决定。
+        # This matters most on the close path: "never sent" and "sent but no reply"
+        # are indistinguishable, and the latter may mean the position is already
+        # flat. Record FAILED so the user verifies before acting.
+        return {"clientOrderId": client_order_id, "success": False, "status": "FAILED",
                 "message": f"order_send failed: {mt5.last_error()}"}
-    success = result.retcode in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED)
+    status, success = _result_from_retcode(result)
     filled_price = float(result.price) if success else None
     if success and (not filled_price or filled_price <= 0):
         filled_price = price  # 回退到平仓时的请求价 / fall back to the close request price
     return {
         "clientOrderId": client_order_id,
         "success": success,
+        "status": status,
         "mt5Ticket": ticket,
         "filledPrice": filled_price,
-        "message": "Position closed" if success else _reject_reason(result.retcode),
+        # 实际平掉的手数（部分平仓会被步长规整，也可能因为请求量大于持仓量而变成全平）。
+        # The volume actually closed: a partial close is step-aligned, and a request
+        # larger than the position becomes a full close.
+        "volume": volume,
+        "message": (
+            "Position closed" if success
+            else _unconfirmed_reason() if status == "FAILED"
+            else _reject_reason(result.retcode)
+        ),
         "login": _current_login(),
     }
 
@@ -1343,7 +1633,12 @@ def _modify_position(cmd: dict) -> dict:
     client_order_id = cmd["clientOrderId"]
     ticket = int(cmd.get("ticket", 0))
     poss = mt5.positions_get(ticket=ticket)
-    if not poss:
+    # 同 _close_position：None（查询失败）与 ()（确实没有）不是一回事。
+    # As in _close_position: None (query failed) is not the same as () (absent).
+    if poss is None:
+        return {"clientOrderId": client_order_id, "success": False, "status": "FAILED",
+                "message": f"positions_get failed: {mt5.last_error()}"}
+    if len(poss) == 0:
         return {"clientOrderId": client_order_id, "success": False,
                 "message": "Position not found"}
     pos = poss[0]
@@ -1355,8 +1650,31 @@ def _modify_position(cmd: dict) -> dict:
     symbol = pos.symbol
     info = mt5.symbol_info(symbol)
     digits = info.digits if info else 5
-    sl = round(float(cmd.get("stopLoss", 0.0) or 0.0), digits)
-    tp = round(float(cmd.get("takeProfit", 0.0) or 0.0), digits)
+    # 指令里没带的那一侧，保留仓位上的现值，**不要**当成 0 发出去。
+    #
+    # TRADE_ACTION_SLTP 是"把这个仓位的 sl/tp 设成这两个值"，而 0 的语义是清除。
+    # 原来缺字段一律取 0，于是一条只想移动止损的 MODIFY（自动仓管的保本、追踪止损
+    # 都是这么发的，只带 stopLoss 是最自然的写法）会把用户原有的止盈一并抹掉，
+    # 而且没有任何提示。网关那边早就是"只对非 0 的那一侧置 CHANGED 标志"，
+    # 这里对齐同一语义。
+    #
+    # 真要清除某一侧，仍然可以显式传 0——区别在于"没说"和"说了 0"不再是一回事。
+    #
+    # Keep the position's current value for whichever side the command omits; do not
+    # send 0. TRADE_ACTION_SLTP sets both sides, and 0 means "clear". Defaulting a
+    # missing field to 0 meant a MODIFY that only moved the stop — exactly how
+    # auto-management sends break-even and trailing updates — silently wiped the
+    # user's take-profit. The gateway has always flagged only the non-zero side as
+    # CHANGED; this matches that. Passing an explicit 0 still clears a side: the
+    # difference is that "unspecified" and "explicitly zero" are no longer the same.
+    def _side(key: str, current) -> float:
+        raw = cmd.get(key)
+        if raw is None:
+            return round(float(current or 0.0), digits)
+        return round(float(raw or 0.0), digits)
+
+    sl = _side("stopLoss", getattr(pos, "sl", 0.0))
+    tp = _side("takeProfit", getattr(pos, "tp", 0.0))
 
     request = {
         "action": mt5.TRADE_ACTION_SLTP,
@@ -1368,15 +1686,57 @@ def _modify_position(cmd: dict) -> dict:
     }
     result = mt5.order_send(request)
     if result is None:
-        return {"clientOrderId": client_order_id, "success": False,
+        return {"clientOrderId": client_order_id, "success": False, "status": "FAILED",
                 "message": f"order_send failed: {mt5.last_error()}"}
-    success = result.retcode in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED)
+    # 改单不能走 _result_from_retcode：TRADE_ACTION_SLTP 不产生订单，result.order 是 0，
+    # 拿订单历史确认无从谈起。改单的天然确认方式是回读这个仓位的 sl/tp 对不对得上。
+    # Modify cannot use _result_from_retcode: TRADE_ACTION_SLTP creates no order, so
+    # result.order is 0 and order-history confirmation is meaningless. The natural
+    # check for a modify is to read the position back and compare its SL/TP.
+    if result.retcode == mt5.TRADE_RETCODE_DONE:
+        status, success = "FILLED", True
+    elif result.retcode == mt5.TRADE_RETCODE_PLACED:
+        applied = _confirm_stops_applied(ticket, sl, tp, digits)
+        status, success = ("FILLED", True) if applied else ("FAILED", False)
+    else:
+        status, success = "REJECTED", False
     return {
         "clientOrderId": client_order_id,
         "success": success,
+        "status": status,
         "mt5Ticket": ticket,
-        "message": "SL/TP updated" if success else _reject_reason(result.retcode),
+        "message": (
+            "SL/TP updated" if success
+            else _unconfirmed_reason() if status == "FAILED"
+            else _reject_reason(result.retcode)
+        ),
     }
+
+
+def _confirm_stops_applied(ticket: int, sl: float, tp: float, digits: int) -> bool:
+    """回读持仓，确认止损止盈真的改成了请求的值。
+
+    容差取一个最小价格单位：券商会按品种精度取整，逐位相等的比较会假阴性。
+    Read the position back and confirm SL/TP really took. The tolerance is one
+    price step, because brokers round to the symbol's precision and an exact
+    comparison would produce false negatives.
+    """
+    if mt5 is None or not ticket:
+        return False
+    tol = 10 ** (-digits) / 2
+    deadline = time.time() + _CONFIRM_TOTAL_SECONDS
+    while time.time() < deadline:
+        try:
+            poss = mt5.positions_get(ticket=ticket)
+        except Exception:
+            poss = None
+        if poss:
+            pos = poss[0]
+            if (abs(float(getattr(pos, "sl", 0.0) or 0.0) - sl) <= tol
+                    and abs(float(getattr(pos, "tp", 0.0) or 0.0) - tp) <= tol):
+                return True
+        time.sleep(_CONFIRM_INTERVAL_SECONDS)
+    return False
 
 
 def _validate_command(cmd: dict) -> tuple[bool, str]:
@@ -1421,6 +1781,23 @@ def _validate_command(cmd: dict) -> tuple[bool, str]:
         symbol = cmd.get("symbol")
         if not symbol or not isinstance(symbol, str) or len(symbol) > 30:
             return False, "invalid symbol"
+        # 开仓必须有一个真实的正手数。
+        #
+        # 上面那段只拦负数和非有限值，0 与缺字段都能过。而 `_execute_order` 随后会把
+        # 手数交给 `_normalize_volume`，那里 `if v < vmin: v = vmin` 会把 0 抬成该品种
+        # 的最小手数——于是后端一个字段名写错、或序列化时漏了 volume，不会报任何错，
+        # 而是**在用户账户上开出一笔真实仓位**。开仓这件事绝不能有"默认值"。
+        #
+        # An open needs a real, positive volume. The range check above lets 0 and a
+        # missing field through, and _normalize_volume then raises 0 to the symbol's
+        # minimum — so a misspelled field name or a dropped key on the backend opens
+        # a real position instead of failing. An open must never have a default size.
+        try:
+            volume = float(cmd.get("volume", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return False, "invalid volume"
+        if volume <= 0:
+            return False, "missing or non-positive volume for ORDER"
 
     return True, ""
 
@@ -1438,19 +1815,50 @@ def _dispatch_command(cmd: dict, suffix: str = "") -> dict:
         return {
             "clientOrderId": (cmd or {}).get("clientOrderId", ""),
             "success": False,
+            "status": "REJECTED",
             "message": f"Invalid command: {err}",
         }
     action = (cmd.get("action") or "ORDER").upper()
     try:
         if action == "CLOSE":
-            return _close_position(cmd)
-        if action == "MODIFY":
-            return _modify_position(cmd)
-        return _execute_order(cmd, suffix)
+            result = _close_position(cmd)
+        elif action == "MODIFY":
+            result = _modify_position(cmd)
+        else:
+            result = _execute_order(cmd, suffix)
+        # 不变式：**任何走到 order_send 的路径都必须自己写明 status**。到这里还没有
+        # status 的，只可能是 order_send 之前就返回的早退（品种不可用、没有报价、仓位
+        # 不归本平台、手数非法……）——那些确实一个字节都没发给券商，REJECTED（可以
+        # 安全重下）是准确的。
+        #
+        # 兜底放在这一处而不是散在每个早退上，是为了让这条不变式可检查：新增一条
+        # order_send 之后的返回路径而忘了写 status，读这里就知道它会被误判成
+        # REJECTED，而 REJECTED 在界面上等于"请重下"。
+        #
+        # Invariant: every path that reaches order_send sets its own status. Anything
+        # still missing one here can only be a pre-send early return (symbol
+        # unavailable, no tick, position not ours, bad volume) where literally
+        # nothing was sent to the broker, so REJECTED — "safe to retry" — is exact.
+        #
+        # The default lives in this one place rather than on each early return so the
+        # invariant stays checkable: add a post-send return that forgets its status
+        # and this comment tells you it will be mislabelled REJECTED, which the UI
+        # renders as "place it again".
+        result.setdefault("status", "REJECTED")
+        return result
     except Exception as e:
+        # 这个兜底 except 包着整个执行过程，所以异常**可能是在 order_send 成功之后**
+        # 抛的（回读成交价、取 login、拼回执都在后面）。既然分不清，就只能是 FAILED：
+        # 报 REJECTED 会让用户以为什么都没发生而重下，可能变成双倍仓位。
+        # This catch-all wraps the whole execution, so the exception may have been
+        # raised *after* a successful order_send (reading the fill price, the login
+        # and building the reply all come later). Since we cannot tell, it must be
+        # FAILED — reporting REJECTED would tell the user nothing happened and
+        # invite a retry that could double the position.
         return {
             "clientOrderId": cmd.get("clientOrderId", ""),
             "success": False,
+            "status": "FAILED",
             "message": f"Execution error: {e}",
         }
 

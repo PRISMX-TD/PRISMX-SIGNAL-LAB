@@ -6,6 +6,7 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 from threading import Lock
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -664,17 +665,41 @@ def _poll_db_work(
         # mt5_worker._resolve_broker_symbol), which also covers a mis-detected
         # suffix and rarer naming drift; collapsing the name here means older
         # bridge builds get the fix too.
+        action = o.action or "ORDER"
+        # MODIFY 的「没指定」必须发 null，不能发 0。
+        #
+        # MT5 的 TRADE_ACTION_SLTP 是「把这个仓位的止损止盈设成这两个值」，其中 0 的
+        # 语义是**清除**。而自动仓管移动止损时只写 `o.sl`，`o.tp` 是 None——上面那段
+        # 把 None 收敛成 0.0，于是一条「只想把止损挪到保本」的指令会连带把用户的止盈
+        # 抹掉，没有任何提示。这是 2026-09-19 审计查出的 B-04。
+        #
+        # 发 null，桥接侧（mt5_worker._modify_position）会保留仓位上的现值；显式传 0
+        # 仍然表示清除，两者从此不再是一回事。
+        #
+        # 开仓（ORDER）不走这条：那里 0 的意思本来就是「不设止损」，是对的。
+        #
+        # For MODIFY, "unspecified" must go out as null rather than 0. MT5's
+        # TRADE_ACTION_SLTP sets both sides, and 0 means clear — so an
+        # auto-management update that only writes o.sl (leaving o.tp None, collapsed
+        # to 0.0 above) silently wiped the user's take-profit. Sending null makes the
+        # bridge keep the position's current value, while an explicit 0 still clears.
+        # Opens are unaffected: there 0 genuinely means "no stop".
+        if action == "MODIFY":
+            out_sl = o.sl if o.sl is not None else None
+            out_tp = o.tp if o.tp is not None else None
+        else:
+            out_sl, out_tp = stop_loss, take_profit
         commands.append({
             "clientOrderId": o.client_order_id,
-            "action": o.action or "ORDER",
+            "action": action,
             "login": target,
             "symbol": broker_symbol(o.symbol) + suffix,
             "side": o.side,
             "volume": o.volume,
             "ticket": o.ticket or 0,
             "entry": entry,
-            "stopLoss": stop_loss,
-            "takeProfit": take_profit,
+            "stopLoss": out_sl,
+            "takeProfit": out_tp,
         })
         o.delivered = True
         o.delivered_at = now
@@ -779,8 +804,49 @@ def _backfill_logins_cached(db: Session, user_id: str, logins: list[str]) -> lis
 class BridgeResultRequest(BaseModel):
     clientOrderId: str
     success: bool
+    # 执行结果的三态。桥接 1.4.2 起发这个字段；更老的桥接只发 success，那时按
+    # 老口径回落（见 _result_status）。
+    #
+    # 为什么必须有第三态：`success: bool` 表达不了「不知道成没成」，而这正是 MT5
+    # 最常见的一种结局——order_send 返回 TRADE_RETCODE_PLACED（券商收单但还没成交）、
+    # 或者干脆返回 None / 超时。老口径把 PLACED 算成 success=True 落 FILLED，于是
+    # 平仓没真平时订单页显示「已平」而仓位还在；把「不知道」算成 success=False 落
+    # REJECTED，而 REJECTED 在界面上的语义是「已被拒绝，可以重下」，用户重下就可能
+    # 重复建仓。网关那条通道早就有 PLACED_UNCONFIRMED → FAILED（见
+    # services/gateway_execute.py），桥接这条一直没有，两条通道的状态机因此不一致。
+    #
+    # 三态语义：
+    #   FILLED   已确认成交（retcode DONE，或 PLACED 之后二次确认查到了仓位/成交）
+    #   REJECTED 券商明确拒绝（有明确的拒绝 retcode）——可以安全重下
+    #   FAILED   不知道成没成（PLACED 但二次确认没查到、返回 None、超时、异常）
+    #            ——**不可**直接重下，必须先核对持仓
+    #
+    # Three-state execution result. Bridges >= 1.4.2 send this; older ones send
+    # only `success` and fall back to the legacy mapping (see _result_status).
+    #
+    # Why a third state is required: `success: bool` cannot express "we do not
+    # know", which is MT5's most common ambiguous outcome — order_send returning
+    # TRADE_RETCODE_PLACED (accepted, not yet filled), or None, or timing out. The
+    # legacy mapping recorded PLACED as FILLED, so a close that never filled shows
+    # as closed while the position is still open; and it recorded "unknown" as
+    # REJECTED, whose UI meaning is "rejected, safe to retry" — inviting a
+    # duplicate position. The gateway channel has had PLACED_UNCONFIRMED → FAILED
+    # all along (services/gateway_execute.py); the bridge channel had no way to
+    # say it, which is why the two channels' state machines disagreed.
+    status: Literal["FILLED", "REJECTED", "FAILED"] | None = None
     mt5Ticket: int | None = None
     filledPrice: float | None = None
+    # 实际执行的手数（桥接 1.4.2 起上报）。桥接会按券商的步长与上下限规整用户填的
+    # 手数——0.005 手在最小 0.01 的品种上会被抬成 0.01，也就是仓位比用户意图大一倍。
+    # 不把真实值写回去的话，订单行、持仓对账与个人胜率用的都是用户当初填的数。
+    # 老桥接不带这个字段，此时保留原值（不覆盖）。
+    #
+    # The volume actually executed (bridges >= 1.4.2). The bridge aligns the request
+    # to the broker's step and limits, so 0.005 on a 0.01-minimum symbol becomes a
+    # doubled position. Without writing the real value back, the order row,
+    # reconciliation and personal win-rate all use what the user typed. Older
+    # bridges omit it, in which case the stored value is left alone.
+    volume: float | None = Field(default=None, gt=0)
     message: str | None = None
     # 实际执行该指令的 MT5 账号 login。未指定目标账号、靠"唯一在线账号"兜底
     # 路由时，落库的指令本身不知道最终打到了哪个账号；有了这个字段，个人胜率
@@ -791,6 +857,29 @@ class BridgeResultRequest(BaseModel):
     # this field lets personal win-rate matching key on (login, position
     # ticket) without falling over from a missing mt5_login.
     login: str | None = Field(default=None, pattern=LOGIN_PATTERN)
+
+
+def _result_status(req: "BridgeResultRequest") -> str:
+    """把桥接回执映射成订单状态，兼容不带 status 字段的老桥接。
+
+    新桥接（>= 1.4.2）直接给三态，原样采用。老桥接只有 `success`，只能回落到老口径
+    FILLED / REJECTED——这条回落路径是**已知有损**的：老桥接把 TRADE_RETCODE_PLACED
+    也算成 success=True，所以"下单已受理但未成交"仍会被记成 FILLED。修不了，因为那
+    个信息在协议层就没传上来。回落分支保留只是为了不把还没升级的用户挡在门外；
+    升级完这段就该删掉。
+
+    Map a bridge result onto an order status, tolerating bridges that predate the
+    `status` field. New bridges (>= 1.4.2) send all three states and are taken at
+    their word. Older ones only have `success`, so we fall back to the legacy
+    mapping — which is knowingly lossy: those bridges count TRADE_RETCODE_PLACED
+    as success, so "accepted but not filled" still lands as FILLED. It cannot be
+    fixed here because the information never reaches the wire. The fallback exists
+    only so un-upgraded clients keep working, and should be deleted once they are
+    all upgraded.
+    """
+    if req.status is not None:
+        return req.status
+    return "FILLED" if req.success else "REJECTED"
 
 
 def _result_db_work(db: Session, user_id: str, req: "BridgeResultRequest"):
@@ -822,12 +911,17 @@ def _result_db_work(db: Session, user_id: str, req: "BridgeResultRequest"):
     if not order:
         return None, False
 
+    final_status = _result_status(req)
     values = {
-        "status": "FILLED" if req.success else "REJECTED",
+        "status": final_status,
         "mt5_ticket": req.mt5Ticket,
         "filled_price": req.filledPrice,
         "message": req.message,
     }
+    # 真实成交手数覆盖下单时写的意向手数；老桥接不带就保持原值。
+    # The executed volume replaces the intended one; older bridges omit it.
+    if req.volume is not None:
+        values["volume"] = req.volume
     # 兜底路由时补上实际执行账号，指定过目标账号的订单不覆盖已有值。
     # Backfill the actual executing account for fallback-routed orders; never
     # overwrite an order that already specified its target account.
@@ -836,9 +930,11 @@ def _result_db_work(db: Session, user_id: str, req: "BridgeResultRequest"):
         values["mt5_login"] = req.login
 
     # 成交打章：从账号行拷贝 trade_mode 快照（设计 §1.2），失败/拒绝不打章。
+    # 只认 FILLED——FAILED 是「不知道成没成」，打章等于当成交，正是要避免的。
     # Stamp the trade_mode snapshot from the account row on a genuine fill
-    # (design §1.2); rejected orders are left unstamped.
-    if req.success:
+    # (design §1.2); rejected orders are left unstamped. FILLED only — FAILED
+    # means "we don't know", and stamping it would assert a fill we can't prove.
+    if final_status == "FILLED":
         from app.services.gamification.stamp import lookup_trade_mode
         tm = lookup_trade_mode(db, user_id, login)
         if tm is not None:
@@ -891,6 +987,17 @@ async def bridge_result(
                 user.id, EVENT_ORDER_FILLED,
                 f"订单已成交 {order.symbol}",
                 f"{order.side} {order.volume} 手 @ {order.filled_price}",
+            )
+        elif order.status == "FAILED":
+            # FAILED 是「不知道成没成」，措辞绝不能说成「被拒绝」——那是在请用户重下，
+            # 而重下正是这个状态下最危险的动作（可能已经成交，再下就是双倍仓位）。
+            # FAILED means "we don't know". It must never read as "rejected",
+            # which invites a retry — the single most dangerous action here, since
+            # the order may already have filled and a retry doubles the position.
+            await dispatch_event_push_async(
+                user.id, EVENT_ORDER_REJECTED,
+                f"执行结果未确认 {order.symbol}",
+                f"{order.message or '-'}｜请先在 MT5 核对持仓再决定是否重试 / verify the position before retrying",
             )
         else:
             await dispatch_event_push_async(
