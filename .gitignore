@@ -145,3 +145,11 @@ logo/
 
 # Claude Code 个人本地设置（权限放行），不入库
 .claude/settings.local.json
+
+# /brag 生成的宣传视频与素材：几十 MB 的 mp4/jpg，本地产物，不入库。
+# 加这条的理由与上面 MetaTrader5SDK 那段相同——一个 `git add .` 就会把它们提交进
+# 历史，而 git 历史里的大文件事后删不干净。
+# Output of /brag (promo video + stills): tens of MB of local artifacts. Same
+# reason as the MetaTrader5SDK rule above — one `git add .` writes them into
+# history permanently.
+brag-output*/
