@@ -129,6 +129,53 @@ def test_cross_boundary_leg_counts_full_profit(db_session):
     assert abs(ret["A"]["score"] - (50.0 + 50.0) / 2000.0) < 1e-9
 
 
+def test_long_held_position_opened_long_before_period_still_counts(db_session):
+    """开在期初之前很久、平在期内的长持仓照样计分。
+
+    钉住「`created_at` 的**下界**不能下推到 SQL」这条：仓位锚定 lifetime，按期初
+    截 created_at 会把这类单静默地从榜上抹掉（见 stats._filled_orders 的说明）。
+    A position opened long before the period but closed inside it still scores —
+    pins the invariant that the created_at *lower* bound must not be pushed down.
+    """
+    u = _user(db_session, "lh1@t.co"); _acct(db_session, u, "A", balance=2000.0)
+    ensure_baselines(db_session, PK, T0)
+    for i in range(5):
+        t = 300 + i
+        db_session.add(Order(user_id=u.id, client_order_id=f"cA{t}", symbol="X",
+                             side="BUY", volume=0.1, status="FILLED", mt5_login="A",
+                             mt5_ticket=t, trade_mode=2,
+                             created_at=T0 - timedelta(days=400)))   # 一年多以前开的
+        db_session.add(ClosedTrade(user_id=u.id, mt5_login="A", symbol="X", side="BUY",
+                                   close_volume=0.1, close_price=1, profit=10.0,
+                                   position_ticket=t, deal_ticket=t * 10,
+                                   closed_at=IN_WEEK, verified=True))
+    db_session.commit()
+    ret = {r["login"]: r for r in compute_board_rows(db_session, PK)["return_pct"]}
+    assert "A" in ret and ret["A"]["sample"] == 5
+
+
+def test_position_opened_after_period_end_is_excluded(db_session):
+    """开在期末之后的单出不了行——仓位不可能先平后开，所以开仓时刻的**上界**
+    可以安全下推到 SQL。这条钉住下推后口径没变。"""
+    u = _user(db_session, "ae1@t.co"); _acct(db_session, u, "A", balance=2000.0)
+    ensure_baselines(db_session, PK, T0)
+    _mk(db_session, u, "A", 5, 0)                       # 期内 5 笔，本该上榜
+    after_end = T0 + timedelta(days=30)
+    for i in range(5):
+        t = 400 + i
+        db_session.add(Order(user_id=u.id, client_order_id=f"cA{t}", symbol="X",
+                             side="BUY", volume=0.1, status="FILLED", mt5_login="A",
+                             mt5_ticket=t, trade_mode=2, created_at=after_end))
+        db_session.add(ClosedTrade(user_id=u.id, mt5_login="A", symbol="X", side="BUY",
+                                   close_volume=0.1, close_price=1, profit=99.0,
+                                   position_ticket=t, deal_ticket=t * 10,
+                                   closed_at=after_end + timedelta(hours=1), verified=True))
+    db_session.commit()
+    ret = {r["login"]: r for r in compute_board_rows(db_session, PK)["return_pct"]}
+    assert ret["A"]["sample"] == 5                      # 期外那 5 笔一笔都没混进来
+    assert abs(ret["A"]["score"] - 50.0 / 2000.0) < 1e-9
+
+
 def test_opted_out_user_disappears_from_both_boards(db_session):
     """期中退榜（设计 §4.1）：用户基线拍好、已有合格交易，两榜都出行；
     退榜开关一开，下次算行两榜都要立刻不出行——即使基线拍照发生在退榜之前。"""

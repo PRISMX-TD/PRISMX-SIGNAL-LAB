@@ -445,18 +445,20 @@ def build_winrate_summary_payload(db: Session, user: User) -> dict:
                 next_target = WINRATE_CONDITIONS[c]
         break
 
-    # metNext/gapPct 必须跟 conditions.py 的严判口径（wr > target，严格大于）
-    # 一致：卡在 == target 上时不能说"已达标"（那样用户会纳闷为什么条件迟迟不
-    # 完成），而是如实报"还差 0.0%"——数字是 0 但没过线，跟严判的判定结果对得上。
-    # metNext/gapPct must agree with conditions.py's strict judging (wr >
-    # target, strictly greater): sitting exactly at == target must not read as
-    # "met" (the user would be puzzled why the condition never completes) —
-    # instead it truthfully reports "still 0.0% short", a zero that hasn't
-    # actually cleared the bar, matching the judging outcome.
+    # metNext/gapPct 必须跟 conditions.py 的判定口径一致，而那边是 `>=`
+    # （2026-09-19 从严判 `>` 统一过来的：`condition_states` 下发的
+    # progressTarget 就是门槛值本身，胜率恰好等于门槛时进度条满格，严判会让用户
+    # 看着满格的条永远过不了那一关）。三处——判定、进度条、这份摘要——现在同一个
+    # 方向：够到门槛即算达标。
+    # metNext/gapPct must agree with how conditions.py judges, which is `>=` as of
+    # 2026-09-19 (unified from a strict `>`: condition_states hands the frontend
+    # the threshold itself as progressTarget, so exactly-on-the-bar drew a full
+    # bar that never completed). Judging, the progress bar and this summary now
+    # read the same way: reaching the bar counts as met.
     met_next: bool | None = None
     gap_pct: float | None = None
     if next_target is not None and win_rate is not None:
-        met_next = win_rate > next_target
+        met_next = win_rate >= next_target
         gap_pct = 0.0 if met_next else round(max(next_target - win_rate, 0.0) * 100, 1)
 
     payload = {
@@ -556,7 +558,17 @@ def build_profile_payload(db: Session, viewer: User, public_id: str) -> dict:
                       .order_by(LeaderboardSnapshot.rank).all())
             boards.append({
                 "board": board, "period": period, "periodKey": key,
-                "entries": [{"login": r.mt5_login, "rank": r.rank, "score": r.score} for r in rows],
+                # 账户号与榜单行（见 _board_payload 的 shown_login）同一个口径：
+                # 别人的主页只给打码号，本人自看才是真号。主页是「拿到 public_id
+                # 就能看」的入口，比榜单更容易被遍历，口径不能比榜单松。
+                # Same rule as a board row (see shown_login in _board_payload):
+                # another user's profile shows the masked number, only the owner
+                # sees the real one. A profile is reachable by public_id alone, so
+                # it must not be laxer than the board it mirrors.
+                "entries": [{
+                    "login": r.mt5_login if is_self else identity.mask_account(r.mt5_login),
+                    "rank": r.rank, "score": r.score,
+                } for r in rows],
             })
 
     comps = (db.query(CompetitionParticipant, Competition)
@@ -567,8 +579,13 @@ def build_profile_payload(db: Session, viewer: User, public_id: str) -> dict:
                        Competition.status == "settled")
                .order_by(Competition.ends_at.desc(), CompetitionParticipant.final_rank.asc())
                .all())
+    # 参赛账户号同样打码——比赛战绩块和上面的榜单块是同一条泄露面，
+    # 两处必须一起收口，否则从战绩里照样能读出别人的账户号。
+    # The competition block masks the account the same way; it is the same leak
+    # surface as the boards block above and has to be closed together with it.
     competitions = [{
-        "id": c.id, "name": c.name, "login": p.mt5_login,
+        "id": c.id, "name": c.name,
+        "login": p.mt5_login if is_self else identity.mask_account(p.mt5_login),
         "finalRank": p.final_rank, "finalScore": p.final_score,
     } for p, c in comps]
 

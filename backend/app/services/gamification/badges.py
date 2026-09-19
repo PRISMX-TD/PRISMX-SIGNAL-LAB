@@ -139,15 +139,22 @@ def award_badge(db, user_id, badge_id, tier: int = 0) -> bool:
         db.commit()
     # 授予落库后才推送（先例见 auto_manage.py L390-399、gateway.py
     # _notify_revoked）：推送失败不该撤销已经生效的授予，也不该拖垮
-    # 判定循环，所以单独 try/except 兜住、只记日志。事件白名单 NULL 默认不含
-    # badge_awarded（见 push_dispatch.EVENT_BADGE_AWARDED），用户得自己去
-    # 通知设置里勾选才会真的收到。
+    # 判定循环，所以单独 try/except 兜住、只记日志。
+    # 推送归属：badge_awarded 在 `push_dispatch.ALWAYS_ON_EVENTS` 里（2026-09-07
+    # 起），即**只要用户没关推送总开关就会收到**，不需要自己去通知设置里勾选。
+    # 这段注释此前写的是相反的「白名单 NULL 默认不含 badge_awarded、得自己勾」，
+    # 那是 09-07 之前的行为残留——现行为由 tests/test_badge_push_default_off.py
+    # 钉住（该文件名同样是旧行为的残留）。
     # Only push after the award is actually committed (precedent:
-    # auto_manage.py L390-399, gateway.py _notify_revoked): a push
-    # failure must not undo an award that already took effect, nor sink the
-    # judging loop — caught and logged on its own. NULL event whitelists
-    # exclude badge_awarded by default (see push_dispatch.EVENT_BADGE_AWARDED),
-    # so users only get this once they opt in via notification settings.
+    # auto_manage.py L390-399, gateway.py _notify_revoked): a push failure must
+    # not undo an award that already took effect, nor sink the judging loop —
+    # caught and logged on its own. Delivery: badge_awarded is in
+    # push_dispatch.ALWAYS_ON_EVENTS as of 2026-09-07, so anyone who hasn't turned
+    # push off entirely receives it; no per-event opt-in is required. This comment
+    # previously claimed the opposite (a NULL whitelist excluding badge_awarded,
+    # requiring opt-in), which was pre-09-07 behaviour; the current behaviour is
+    # pinned by tests/test_badge_push_default_off.py (whose name is likewise a
+    # leftover from the old behaviour).
     try:
         from app.services.push_dispatch import EVENT_BADGE_AWARDED, dispatch_event_push
         name = badge_display_name(badge_id, tier)

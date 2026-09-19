@@ -111,12 +111,35 @@ def test_profile_shape_masking_and_stats_hidden_by_default(db_session, monkeypat
     assert all("progress" not in b and "owners" not in b for b in p["badges"])
     week_return = next(b for b in p["boards"] if b["board"] == "return_pct" and b["period"] == "week")
     assert [e["rank"] for e in week_return["entries"]] == [2, 7]
+    # 访客看别人的主页：账户号全部打码，与榜单行同一个口径（identity.mask_account）。
+    # A visitor sees every account number masked, exactly as on a board row.
+    assert [e["login"] for e in week_return["entries"]] == ["50**23", "50**99"]
     month_win = next(b for b in p["boards"] if b["board"] == "win_rate" and b["period"] == "month")
-    assert month_win["entries"] == [{"login": "500123", "rank": 1, "score": 0.66}]
+    assert month_win["entries"] == [{"login": "50**23", "rank": 1, "score": 0.66}]
     assert len(p["boards"]) == 4
-    assert p["competitions"] == [{"id": comp.id, "name": "九月杯", "login": "500123",
+    assert p["competitions"] == [{"id": comp.id, "name": "九月杯", "login": "50**23",
                                   "finalRank": 3, "finalScore": 0.09}]
     assert p["stats"] is None and p["statsPublic"] is False
+
+
+def test_profile_self_view_shows_real_account_numbers(db_session):
+    """本人自看走真号——打码是给访客的，不该把用户自己的账户号也糊掉。
+    The owner sees the real numbers: masking is for visitors, not for oneself."""
+    target = _user(db_session, "trader@t.co", nickname="Trader")
+    _row(db_session, target, "500123", 2, 0.12)
+    comp = Competition(name="九月杯", metric="return_pct", status="settled",
+                       starts_at=datetime(2026, 9, 1, tzinfo=UTC),
+                       ends_at=datetime(2026, 9, 7, tzinfo=UTC))
+    db_session.add(comp); db_session.commit()
+    db_session.add(CompetitionParticipant(competition_id=comp.id, user_id=target.id,
+                                          mt5_login="500123", final_rank=1, final_score=0.5))
+    db_session.commit()
+
+    p = build_profile_payload(db_session, target, target.public_id)
+    assert p["isSelf"] is True
+    week_return = next(b for b in p["boards"] if b["board"] == "return_pct" and b["period"] == "week")
+    assert [e["login"] for e in week_return["entries"]] == ["500123"]
+    assert p["competitions"][0]["login"] == "500123"
 
 
 def test_profile_stats_for_self_and_when_public_with_cache(db_session, monkeypatch):

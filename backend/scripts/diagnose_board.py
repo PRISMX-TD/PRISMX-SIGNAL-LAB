@@ -180,10 +180,21 @@ def main() -> int:
         min_baseline = gates["min_baseline_usd"]
         min_ret = gates["min_trades_return"]
         min_wr = gates["min_trades_winrate"]
+        # 「本期盈亏为正」在真榜里是可配开关（boards.compute_board_rows 读
+        # gates["winrate_require_profit"]，默认关）。这里必须一起读出来：写死成
+        # 恒定生效会让诊断报出的入榜人数比真榜少，而本脚本的整个卖点就是「复用
+        # 榜单自己的函数、不出现两套实现的漂移」（见模块 docstring）。
+        # The "period P&L must be positive" gate is a setting on the real board
+        # (boards.compute_board_rows reads gates["winrate_require_profit"], off by
+        # default), so it has to be read here too. Hard-coding it as always-on made
+        # this script report fewer entrants than the live board — the exact
+        # two-implementations drift the module docstring promises not to have.
+        wr_require_profit = gates["winrate_require_profit"]
 
+        wr_desc = f"≥{min_wr} 笔" + ("且本期盈亏为正" if wr_require_profit else "（不要求本期盈亏为正）")
         print(f"周期 {key}：{_fmt(start)} → {_fmt(end)}"
               f"（{'进行中' if end > now else '已封存'}，现在 {_fmt(now)}）")
-        print(f"门槛：收益榜 ≥{min_ret} 笔 · 分母 ≥{min_baseline:g} USD ；胜率榜 ≥{min_wr} 笔且本期盈亏为正")
+        print(f"门槛：收益榜 ≥{min_ret} 笔 · 分母 ≥{min_baseline:g} USD ；胜率榜 {wr_desc}")
         print()
 
         accounts = db.query(MT5Account).all()
@@ -232,7 +243,9 @@ def main() -> int:
                     drop_no_trade.append(row)
                 else:
                     on_ret.append(row)
-                if len(profits) >= min_wr and sum(profits) > 0:
+                # 与 boards.compute_board_rows 同一个条件：
+                # sample >= min_trades_winrate and (total > 0 or not wr_require_profit)
+                if len(profits) >= min_wr and (sum(profits) > 0 or not wr_require_profit):
                     on_wr.append(row)
 
         print("── 有基线账户的计分漏斗 ──")
@@ -240,7 +253,7 @@ def main() -> int:
         print(f"  ├ 分母不达标（<{min_baseline:g} USD）        {len(drop_denom):>4}")
         print(f"  ├ 本期整仓笔数 <{min_ret}                {len(drop_no_trade):>4}")
         print(f"  └ 进入收益榜                      {len(on_ret):>4}")
-        print(f"     其中同时进入胜率榜（≥{min_wr} 笔且盈利为正）  {len(on_wr):>4}")
+        print(f"     其中同时进入胜率榜（{wr_desc}）  {len(on_wr):>4}")
         print()
 
         snap = (db.query(LeaderboardSnapshot)

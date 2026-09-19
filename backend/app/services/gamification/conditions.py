@@ -17,15 +17,25 @@ LEVEL_TITLES = ["novice", "junior", "elite", "senior", "chief", "legend"]  # i18
 
 WINRATE_CONDITIONS = {"winrate_35": 0.35, "winrate_50": 0.50,
                       "winrate_55": 0.55, "winrate_60": 0.60}
-# 条件 id -> (stats 键, 目标值)。胜率条件目标值即门槛小数。
+# 条件 id -> (stats 键, 目标值)。
+# 胜率条件**不在**这张表里：它们走 `judge_and_record_conditions` 的第二遍
+# （毕业考，要同组其余条件全完成才开考），`_judge_plain` 永远见不到它们——
+# 第一遍循环开头就 `continue` 掉了。这里原本躺着 winrate_35/50/55/60 四条，
+# 从来没有被读到过，纯死代码；留着的坏处是它给人一种「胜率也走 _judge_plain」
+# 的错觉，而那条路径用的是 `>=`，与毕业考的判定并不是同一套代码。判定口径统一
+# 由 WINRATE_CONDITIONS 一处提供。
+# Win-rate conditions are deliberately absent: they take the second pass in
+# judge_and_record_conditions (the graduation exam, gated on the rest of the
+# group) and never reach _judge_plain, which `continue`s past them. The four
+# winrate entries that used to sit here were unreachable dead code whose only
+# effect was to suggest a second, `>=`-based code path for win rate that isn't
+# actually used. WINRATE_CONDITIONS is the single source for those thresholds.
 CONDITION_TARGETS = {
     "first_trades_5": ("trades_any", 5),
     "trade_days_30": ("trade_days", 30), "trades_100": ("trades", 100), "lots_10": ("lots", 10),
     "trade_days_100": ("trade_days", 100), "trades_500": ("trades", 500), "lots_100": ("lots", 100),
     "trade_days_180": ("trade_days", 180), "trades_1000": ("trades", 1000), "lots_1000": ("lots", 1000),
     "trades_10000": ("trades", 10000), "lots_10000": ("lots", 10000),
-    "winrate_35": ("win_rate", 0.35), "winrate_50": ("win_rate", 0.50),
-    "winrate_55": ("win_rate", 0.55), "winrate_60": ("win_rate", 0.60),
 }
 
 
@@ -127,7 +137,16 @@ def judge_and_record_conditions(db, user_id, stats: dict | None = None) -> list[
             others = [x for x in conds if x != c]
             if all(x in done for x in others):
                 wr = stats["win_rate"]
-                if wr is not None and wr > WINRATE_CONDITIONS[c] and _record(db, user_id, c):
+                # `>=` 而不是 `>`：`condition_states` 下发的 progressTarget 就是
+                # 这个门槛值本身，胜率**恰好**等于门槛时前端进度条画到 100%，
+                # 严判 `>` 会让用户看着满格的条却拿不到那一关。两处口径必须同一个
+                # 方向，取「够到即算过」这一边（门槛是「达到 35%」不是「超过 35%」）。
+                # `>=`, not `>`: condition_states hands the frontend this very
+                # number as progressTarget, so a win rate exactly on the threshold
+                # draws a full bar. A strict `>` left the user staring at a full
+                # bar that never completed. The two must agree, and "reaching the
+                # bar passes" is the reading the thresholds are named for.
+                if wr is not None and wr >= WINRATE_CONDITIONS[c] and _record(db, user_id, c):
                     done.add(c); newly.append(c)
     return newly
 

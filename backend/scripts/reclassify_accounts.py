@@ -37,13 +37,77 @@ import argparse
 import sys
 
 from app.core.database import SessionLocal
-from app.models import MT5Account, Order
+from app.models import (Competition, CompetitionParticipant, LeaderboardSnapshot,
+                        MT5Account, Order, UserBadge)
 from app.services.account_type import classify_account
 from app.services.settings_store import get_account_type_settings
 
 
 def _label(mode: int | None) -> str:
     return {0: "DEMO(0)", 1: "CONTEST(1)", 2: "REAL(2)", None: "None"}.get(mode, str(mode))
+
+
+def _print_downstream(db, changed) -> None:
+    """列出这批重判会波及、但**脚本不会自动修正**的下游产物。
+
+    为什么必须打出来：`orders.trade_mode` 是榜单与比赛计分的输入，而它们的产物
+    是**封存的**——
+      · `leaderboard_snapshots` 里已封存的周期榜是当时算完就定格的，不会因为
+        订单快照变了而回溯重算；
+      · 已 settled 比赛的 `final_rank` / `final_score` 是永久名次，终审跑过就
+        不再动（settle_competition 以 status 为闸，不可重跑）；
+      · 勋章「发出不收回」（award_badge 只升不降，user_badges 也没有「哪场比赛
+        发的」这一列可供回溯）。
+    把一批账户从 REAL 降成 DEMO 之后，这些历史产物会与现有数据对不上——不是脚本
+    的 bug，是纠错本身的必然代价。这里只负责把「对不上的将会是哪些东西」摊在
+    操作者面前，让他先决定要不要继续，而不是事后才发现榜单和名次说不通。
+
+    Lists what this reclassification will invalidate but will *not* repair.
+    orders.trade_mode feeds board and competition scoring, and those outputs are
+    sealed: archived leaderboard snapshots are never recomputed, a settled
+    competition's final ranks are permanent (settle_competition gates on status
+    and cannot re-run), and badges are never revoked. Downgrading accounts from
+    REAL to DEMO therefore leaves history disagreeing with the data — an
+    unavoidable cost of the correction, not a bug. This puts that cost in front of
+    the operator beforehand instead of leaving it to be discovered later.
+    """
+    pairs = {(row.user_id, row.login) for row, _new in changed}
+    uids = {u for u, _lg in pairs}
+
+    snaps = (db.query(LeaderboardSnapshot)
+               .filter(LeaderboardSnapshot.user_id.in_(uids)).all())
+    hit_snaps = [s for s in snaps if (s.user_id, s.mt5_login) in pairs]
+    periods = sorted({s.period_key for s in hit_snaps})
+
+    parts = (db.query(CompetitionParticipant, Competition)
+               .join(Competition, Competition.id == CompetitionParticipant.competition_id)
+               .filter(CompetitionParticipant.user_id.in_(uids),
+                       Competition.status == "settled").all())
+    hit_comps = [(p, c) for p, c in parts if (p.user_id, p.mt5_login) in pairs]
+
+    badges = db.query(UserBadge).filter(UserBadge.user_id.in_(uids)).count()
+
+    print("\n── 受影响但不会被自动修正的下游产物 ──")
+    if periods:
+        board_periods = sorted({p for p in periods if not p.startswith("comp:")})
+        comp_periods = [p for p in periods if p.startswith("comp:")]
+        print(f"  榜单快照 {len(hit_snaps)} 行，跨 {len(periods)} 个周期键")
+        if board_periods:
+            print(f"    周期榜：{', '.join(board_periods)}")
+        if comp_periods:
+            print(f"    比赛榜：{', '.join(comp_periods)}")
+        print("    → 已封存的周期榜不会回溯重算，名次将与新的 trade_mode 对不上。")
+    else:
+        print("  榜单快照：无")
+    if hit_comps:
+        print(f"  已终审比赛中的参赛条目 {len(hit_comps)} 条：")
+        for p, c in hit_comps:
+            print(f"    「{c.name}」 {c.id} track={c.track} "
+                  f"login={p.mt5_login} final_rank={p.final_rank} final_score={p.final_score}")
+        print("    → final_rank/final_score 是永久名次，终审不可重跑，这里不会改。")
+    else:
+        print("  已终审比赛：无")
+    print(f"  这些用户名下已发放的勋章共 {badges} 枚 → 勋章发出不收回，一律不动。")
 
 
 def main() -> int:
@@ -74,6 +138,12 @@ def main() -> int:
         if not changed:
             print("没有需要变更的账户。")
             return 0
+
+        # 下游影响在写库**之前**打印：预演模式下操作者据此决定要不要 --apply，
+        # --apply 模式下这份清单跟着这次变更一起留在运维日志里。
+        # Printed before writing: in dry-run it informs the decision to apply, and
+        # on --apply it lands in the operator's log next to the change itself.
+        _print_downstream(db, changed)
 
         orders_restamped = 0
         if args.apply:

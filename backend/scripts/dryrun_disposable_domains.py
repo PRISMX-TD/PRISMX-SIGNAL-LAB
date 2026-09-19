@@ -33,7 +33,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.database import SessionLocal  # noqa: E402
 from app.models import User  # noqa: E402
+from app.services.gamification.identity import mask_name  # noqa: E402
 from app.services.email_domains import domain_of, is_disposable_email  # noqa: E402
+
+
+def _masked_email(email: str | None) -> str:
+    """打码的邮箱：本地部分只留首尾（`identity.mask_name`，与榜单展示同一把尺），
+    域名原样——这个脚本的重点本来就是域名。
+
+    为什么要打码：这是只读体检，由运维手动跑，但 stdout 常常被重定向进日志或贴进
+    工单，完整邮箱就这么散出去了。判断「这个域名是不是误伤」看的是域名和人数，
+    不需要看清具体是谁；真要核对到人，直接查库。
+    Masked email: the local part keeps only its first and last character (via
+    identity.mask_name, the same ruler the boards use), the domain is untouched
+    since the domain is what this script is about. The output of this read-only
+    check routinely gets redirected into a log or pasted into a ticket, and
+    deciding whether a domain is a false positive needs the domain and the count,
+    not the identity. Look the person up in the database if you truly need one.
+    """
+    local, _, domain = (email or "").partition("@")
+    return f"{mask_name(local)}@{domain}" if domain else mask_name(local)
 
 
 def main() -> int:
@@ -65,7 +84,7 @@ def main() -> int:
                 print(f"  {d}: {len(us)} 人，其中付费 {paid} 人{flag}")
                 for u in us[:5]:
                     created = u.created_at.strftime("%Y-%m-%d") if u.created_at else "?"
-                    print(f"      {u.email}  plan={u.plan}  注册于 {created}")
+                    print(f"      {_masked_email(u.email)}  plan={u.plan}  注册于 {created}")
                 if len(us) > 5:
                     print(f"      ... 另有 {len(us) - 5} 人")
             print()

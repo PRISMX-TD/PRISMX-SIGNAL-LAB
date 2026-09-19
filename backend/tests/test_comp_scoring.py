@@ -418,18 +418,122 @@ def test_competition_pass_survives_failure(db_session, monkeypatch):
     assert out == {"comps": 0, "rows": 0, "error": True}
 
 
+# ── 状态自动推进 / automatic status advance ──────────────────────────
+
+def test_advance_moves_upcoming_to_running_and_running_to_ended(db_session):
+    """按时钟推进：过了 starts_at 的 upcoming → running，过了 ends_at 的
+    running → ended。以前全靠管理员手点，忘一次整场比赛一行快照都不产生。"""
+    from app.services.gamification.competitions import advance_competition_statuses
+    soon = _comp(db_session, status="upcoming", starts_at=T0, ends_at=ENDS, name="Soon")
+    live = _comp(db_session, status="running", starts_at=T0, ends_at=ENDS, name="Live")
+
+    out = advance_competition_statuses(db_session, T0 + timedelta(hours=1))
+    db_session.refresh(soon); db_session.refresh(live)
+    assert soon.status == "running" and live.status == "running"
+    assert out["started"] == 1 and out["ended"] == 0
+
+    out2 = advance_competition_statuses(db_session, ENDS + timedelta(minutes=1))
+    db_session.refresh(soon); db_session.refresh(live)
+    assert soon.status == "ended" and live.status == "ended"
+    assert out2["ended"] == 2
+
+
+def test_advance_can_cross_two_states_in_one_pass(db_session):
+    """循环停过、或比赛本身很短：一趟要能从 upcoming 一路推到 ended，
+    不是每趟只走一格（那样短比赛会永远卡在 running）。"""
+    from app.services.gamification.competitions import advance_competition_statuses
+    comp = _comp(db_session, status="upcoming", starts_at=T0, ends_at=ENDS, name="Short")
+    out = advance_competition_statuses(db_session, ENDS + timedelta(days=1))
+    db_session.refresh(comp)
+    assert comp.status == "ended"
+    assert out["started"] == 1 and out["ended"] == 1
+
+
+def test_advance_never_touches_draft_or_settled(db_session):
+    """draft 什么时候发布是运营决定、settled 只能由终审写入——自动推进一律不碰。"""
+    from app.services.gamification.competitions import advance_competition_statuses
+    draft = _comp(db_session, status="draft", name="Draft")
+    settled = _comp(db_session, status="settled", name="Settled")
+    advance_competition_statuses(db_session, ENDS + timedelta(days=30))
+    db_session.refresh(draft); db_session.refresh(settled)
+    assert draft.status == "draft" and settled.status == "settled"
+
+
+def test_advance_is_a_noop_before_the_clock(db_session):
+    from app.services.gamification.competitions import advance_competition_statuses
+    comp = _comp(db_session, status="upcoming", starts_at=T0, ends_at=ENDS, name="NotYet")
+    out = advance_competition_statuses(db_session, T0 - timedelta(hours=1))
+    db_session.refresh(comp)
+    assert comp.status == "upcoming" and out == {"started": 0, "ended": 0, "autoEnrolled": 0}
+
+
+def test_advance_auto_enrolls_when_starting_an_auto_competition(db_session):
+    """推成 running 时对 enrollment=auto 的比赛自动入场，与管理端 PATCH 推进
+    状态时同一个时机；已经 running 的不重扫全账户表。"""
+    from app.services.gamification.competitions import advance_competition_statuses
+    comp = _comp(db_session, status="upcoming", starts_at=T0, ends_at=ENDS, name="Auto")
+    comp.enrollment = "auto"
+    db_session.commit()
+    u = _user(db_session, "auto_adv@t.co"); _acct(db_session, u, "A", balance=2000.0)
+
+    out = advance_competition_statuses(db_session, T0 + timedelta(hours=1))
+    assert out["autoEnrolled"] == 1
+    assert db_session.query(CompetitionParticipant).filter_by(
+        competition_id=comp.id).count() == 1
+
+    # 已经 running 了：下一趟不再扫账户表（新开的账户不会被半路拉进来）
+    _acct(db_session, u, "B", balance=2000.0)
+    out2 = advance_competition_statuses(db_session, T0 + timedelta(hours=2))
+    assert out2["autoEnrolled"] == 0
+    assert db_session.query(CompetitionParticipant).filter_by(
+        competition_id=comp.id).count() == 1
+
+
+def test_competition_pass_advances_upcoming_before_the_live_check(db_session, monkeypatch):
+    """状态推进必须发生在「有没有活比赛」那一判之前：一场刚过 starts_at 还挂在
+    upcoming 的比赛在推进前不算活比赛，先判就会被空转的 early return 挡住，
+    永远等不到推进。"""
+    from app.services.gamification import loop as loop_mod
+    monkeypatch.setattr(loop_mod, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(db_session, "close", lambda: None)
+    comp = _comp(db_session, status="upcoming", starts_at=T0, ends_at=ENDS)
+
+    out = loop_mod.run_competition_pass()
+
+    db_session.refresh(comp)
+    assert comp.status == "ended"          # T0/ENDS 都在过去（真实时钟）
+    assert "idle" not in out and out["started"] == 1 and out["ended"] == 1
+
+
+def test_competition_pass_still_snapshots_when_advance_fails(db_session, monkeypatch):
+    """推进炸了不该连带把快照跳过：记日志、回滚、按现有状态照常刷。"""
+    from app.services.gamification import loop as loop_mod
+    from app.services.gamification import competitions as comp_mod
+    monkeypatch.setattr(loop_mod, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(db_session, "close", lambda: None)
+    _comp(db_session, status="running")
+
+    def boom(db, now):
+        raise RuntimeError("advance boom")
+    monkeypatch.setattr(comp_mod, "advance_competition_statuses", boom)
+
+    out = loop_mod.run_competition_pass()
+    assert out["comps"] == 1 and "error" not in out
+
+
 # ── 按需刷新与强制终审 / on-demand refresh and forced settle ─────────
 
 def test_refresh_comp_board_recomputes_and_throttles(db_session):
     """进行中的比赛按需刷新：第一次真算并落盘，节流窗口内第二次直接跳过；
     未开始/已结束的比赛不刷（行不该再动）。"""
+    from app.services import shared_state
     from app.services.gamification import competitions as C
     comp = _comp(db_session)                       # status="running"
     u = _user(db_session, "rf@t.co"); _acct(db_session, u, "A")
     _baseline(db_session, comp, u, "A")
     _participant(db_session, comp, u, "A")
     _mk(db_session, u, "A", 5, 0)
-    C._last_refresh.pop(comp.id, None)
+    shared_state.reset_for_tests()
 
     assert C.refresh_comp_board(db_session, comp) is True
     rows = (db_session.query(LeaderboardSnapshot)
@@ -441,8 +545,48 @@ def test_refresh_comp_board_recomputes_and_throttles(db_session):
     for st in ("upcoming", "ended", "settled"):
         comp.status = st
         db_session.commit()
-        C._last_refresh.pop(comp.id, None)
+        shared_state.reset_for_tests()
         assert C.refresh_comp_board(db_session, comp, force=True) is False
+
+
+def test_refresh_throttle_lives_in_shared_state(db_session):
+    """节流状态在 shared_state 里，不是模块内的进程字典——多 worker 下才谈得上
+    「同一场比赛一个窗口只算一次」。"""
+    from app.services import shared_state
+    from app.services.gamification import competitions as C
+    comp = _comp(db_session)
+    shared_state.reset_for_tests()
+
+    assert not hasattr(C, "_last_refresh")
+    assert C.refresh_comp_board(db_session, comp) is True
+    assert shared_state.kv_get(C._refresh_throttle_key(comp.id)) is not None
+    # 清掉共享状态 = 窗口过期，下一次又能真算
+    shared_state.reset_for_tests()
+    assert C.refresh_comp_board(db_session, comp) is True
+
+
+def test_refresh_comp_board_swallows_integrity_error(db_session, monkeypatch):
+    """并发下 delete-then-insert 撞唯一约束时回滚并返回 False——这条路径挂在
+    用户端 GET /competitions/{id} 上，绝不能把读榜打成 500。且 session 之后仍可用。
+    生产是 Postgres：语句失败后整段事务 abort，不 rollback 就连查询都做不了。"""
+    from sqlalchemy.exc import IntegrityError
+    from app.services import shared_state
+    from app.services.gamification import competitions as C
+    comp = _comp(db_session)
+    shared_state.reset_for_tests()
+    rollbacks = []
+    real_rollback = db_session.rollback
+    monkeypatch.setattr(db_session, "rollback",
+                        lambda: (rollbacks.append(1), real_rollback())[1])
+
+    def boom(db, c):
+        raise IntegrityError("insert", {}, Exception("duplicate key"))
+    monkeypatch.setattr(C, "_snapshot_one_comp", boom)
+
+    assert C.refresh_comp_board(db_session, comp, force=True) is False
+    assert rollbacks, "必须 rollback，否则 Postgres 下 session 已废"
+    # session 仍可用
+    assert db_session.query(Competition).count() >= 1
 
 
 def test_settle_has_no_force_bypass(db_session):

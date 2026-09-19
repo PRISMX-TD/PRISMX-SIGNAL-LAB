@@ -7,7 +7,8 @@ from app.models import (
     User, MT5Account, Competition, CompetitionParticipant, PeriodBaseline,
 )
 from app.services.gamification.competitions import (
-    comp_period_key, register_participant, auto_enroll,
+    MAX_ENTRIES_DEMO, MAX_ENTRIES_REAL, comp_period_key, register_participant, auto_enroll,
+    max_entries_per_user,
 )
 from app.services.gamification.boards import _aware
 
@@ -31,9 +32,9 @@ def _acct(db, u, login, balance=2000.0, tm=2, server="s"):
 
 def _comp(db, enrollment="signup", status="upcoming", starts_at=T0, ends_at=ENDS,
           reg_opens_at=REG_OPENS, reg_closes_at=REG_CLOSES, metric="return_pct",
-          name="Comp A"):
+          name="Comp A", track="real"):
     c = Competition(name=name, metric=metric, enrollment=enrollment, status=status,
-                     starts_at=starts_at, ends_at=ends_at,
+                     starts_at=starts_at, ends_at=ends_at, track=track,
                      reg_opens_at=reg_opens_at, reg_closes_at=reg_closes_at)
     db.add(c); db.commit(); return c
 
@@ -198,6 +199,87 @@ def test_register_recovers_from_orphaned_baseline(db_session):
     assert len(baselines) == 1
     assert baselines[0].baseline == 999.0                       # 原基线值未被覆盖
     assert _aware(baselines[0].taken_at) == orphan_taken_at     # 未重拍
+
+
+# ---- 每人每场条目上限 / per-user entry cap --------------------------------
+
+def test_track_entry_caps(db_session):
+    """demo 赛道 1 个、real 赛道 3 个；未知赛道按 real 兜底。"""
+    assert max_entries_per_user("demo") == MAX_ENTRIES_DEMO == 1
+    assert max_entries_per_user("real") == MAX_ENTRIES_REAL == 3
+    assert max_entries_per_user(None) == MAX_ENTRIES_REAL
+
+
+def test_demo_track_allows_only_one_entry_per_user(db_session):
+    """demo 赛道每人只能报一个账户——模拟账户零成本可批量开，多条目 =
+    反向对冲必有一个夺冠。"""
+    comp = _comp(db_session, track="demo")
+    u = _user(db_session, "dcap@t.co")
+    _acct(db_session, u, "D1", balance=1000.0, tm=0)
+    _acct(db_session, u, "D2", balance=1000.0, tm=0)
+
+    p = register_participant(db_session, comp, u, "D1", IN_WINDOW)
+    assert p.mt5_login == "D1"
+
+    with pytest.raises(HTTPException) as exc:
+        register_participant(db_session, comp, u, "D2", IN_WINDOW)
+    assert exc.value.status_code == 400
+    assert "最多报名 1 个账户" in exc.value.detail
+    assert db_session.query(CompetitionParticipant).filter_by(
+        competition_id=comp.id, user_id=u.id).count() == 1
+
+
+def test_real_track_caps_at_three_entries(db_session):
+    comp = _comp(db_session, track="real")
+    u = _user(db_session, "rcap@t.co")
+    for lg in ("R1", "R2", "R3", "R4"):
+        _acct(db_session, u, lg, balance=1000.0)
+
+    for lg in ("R1", "R2", "R3"):
+        assert register_participant(db_session, comp, u, lg, IN_WINDOW).mt5_login == lg
+
+    with pytest.raises(HTTPException) as exc:
+        register_participant(db_session, comp, u, "R4", IN_WINDOW)
+    assert exc.value.status_code == 400
+    assert "最多报名 3 个账户" in exc.value.detail
+
+
+def test_entry_cap_does_not_break_idempotent_reregistration(db_session):
+    """上限只数「别的 login」：报满之后重复报同一个账户仍走幂等路径，不被误伤。"""
+    comp = _comp(db_session, track="demo")
+    u = _user(db_session, "dcap2@t.co"); _acct(db_session, u, "D1", balance=1000.0, tm=0)
+
+    p1 = register_participant(db_session, comp, u, "D1", IN_WINDOW)
+    p2 = register_participant(db_session, comp, u, "D1", IN_WINDOW + timedelta(hours=1))
+    assert p1.id == p2.id
+
+
+def test_entry_cap_is_per_user_not_per_competition(db_session):
+    """上限是「每人」不是「每场」：别的用户照常能报满自己的名额。"""
+    comp = _comp(db_session, track="demo")
+    a = _user(db_session, "dcapa@t.co"); _acct(db_session, a, "DA", balance=1000.0, tm=0)
+    b = _user(db_session, "dcapb@t.co"); _acct(db_session, b, "DB", balance=1000.0, tm=0)
+
+    register_participant(db_session, comp, a, "DA", IN_WINDOW)
+    register_participant(db_session, comp, b, "DB", IN_WINDOW)
+    assert db_session.query(CompetitionParticipant).filter_by(
+        competition_id=comp.id).count() == 2
+
+
+def test_disqualified_entry_still_occupies_a_slot(db_session):
+    """取消资格不退还名额，否则「报满→故意违规→腾位再报」能绕过上限。"""
+    comp = _comp(db_session, track="demo")
+    u = _user(db_session, "dcap3@t.co")
+    _acct(db_session, u, "D1", balance=1000.0, tm=0)
+    _acct(db_session, u, "D2", balance=1000.0, tm=0)
+
+    p = register_participant(db_session, comp, u, "D1", IN_WINDOW)
+    p.disqualified = True
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        register_participant(db_session, comp, u, "D2", IN_WINDOW)
+    assert exc.value.status_code == 400
 
 
 # ---- auto_enroll ----------------------------------------------------------

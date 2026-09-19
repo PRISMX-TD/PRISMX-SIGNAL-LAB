@@ -93,16 +93,21 @@ def test_gap_zero_when_target_met(db_session):
     assert p["gapPct"] == 0.0
 
 
-def test_gap_exact_at_bar_is_not_met(db_session):
-    """M-2：恰好卡在门槛上（win_rate == target）不算达标——判定口径
-    （conditions.py 的 wr > target，严格大于）与摘要必须一致。exactly-at-bar
-    显示"还差 0.0%"而不是"已达标"：数字是 0，但 metNext 为 False，前端据此
-    渲染 toNext 文案而非 metNext 文案。
-    M-2: sitting exactly at the bar (win_rate == target) does not count as met
-    — judging (conditions.py's wr > target, strictly greater) and the summary
-    must agree. Exactly-at-bar shows "still 0.0% short", not "met": the number
-    is 0 but metNext is False, so the frontend renders the toNext copy, not
-    the metNext copy."""
+def test_gap_exact_at_bar_is_met(db_session):
+    """恰好卡在门槛上（win_rate == target）算达标。
+
+    2026-09-19 起三处统一成 `>=`：判定（conditions.py）、成就页进度条
+    （condition_states 的 progressTarget 就是门槛值本身，等号那一格画满格）、
+    以及这份摘要。之前判定用严判 `>`、进度条用等号，等号那一格的用户会看到
+    满格的进度条配「还差 0.0%」，条件却永远不完成——那是一个自相矛盾的界面，
+    不是一条可以两边各说各话的边界。
+
+    As of 2026-09-19 judging, the achievements progress bar and this summary all
+    use `>=`. Before, judging was strict `>` while the bar's target was the
+    threshold itself, so a user exactly at the bar saw a full bar reading "0.0%
+    short" for a condition that never completed — a self-contradicting UI, not a
+    boundary the two sides could reasonably disagree on.
+    """
     u = _user(db_session, email="exact@t.co", tok="tok_exact")
     _mark_done(db_session, u.id, QICHENG)
     # 7 胜 13 负 => win_rate 恰好 0.35，与锋芒组门槛相等。
@@ -114,7 +119,7 @@ def test_gap_exact_at_bar_is_not_met(db_session):
     p = build_winrate_summary_payload(db_session, u)
     assert p["winRate"] == pytest.approx(0.35)
     assert p["nextWinRateTarget"] == 0.35
-    assert p["metNext"] is False
+    assert p["metNext"] is True
     assert p["gapPct"] == 0.0
 
 

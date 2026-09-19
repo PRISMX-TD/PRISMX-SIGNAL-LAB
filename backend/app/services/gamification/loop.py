@@ -1,5 +1,23 @@
 """每小时游戏化循环（设计 §3.3/§4.2 成本约束：threadpool、串行、打点）。
-生产为单进程（config 多 worker 无共享存储拒启动），无需分布式锁。"""
+
+生产可以是多 worker：`main.py` 把这里的两条循环交给 `services/background.py` 的
+`BackgroundLoops`，多 worker + `REDIS_URL` 时靠 `lock:background-loops` 这把
+Redis 领导锁选主，只有主 worker 真的跑循环。所以「同一趟 pass 被执行多遍」这个
+风险是由领导锁挡住的，不是由「生产只有一个进程」挡住的——这份 docstring 早先
+写的是后者，已经与部署形态不符（改于 2026-09-19 审计）。
+
+注意这条只管住**循环**：按 HTTP 请求触发的按需刷新（`competitions.
+refresh_comp_board`）每个 worker 都会跑，它的节流走 `shared_state`，见那边的说明。
+
+Hourly gamification loop. Production may run several workers: main.py hands both
+loops below to services/background.py's BackgroundLoops, which elects one leader
+via the Redis lock `lock:background-loops` when REDIS_URL is set, so only the
+leader actually runs them. Duplicate execution is prevented by that leader lock,
+not by there being a single process — this docstring used to claim the latter,
+which stopped being true once multi-worker deployment landed. Note this covers
+the *loops* only; the request-triggered refresh (competitions.refresh_comp_board)
+runs on every worker and throttles itself through shared_state.
+"""
 import asyncio
 import logging
 import time
@@ -171,6 +189,15 @@ def run_gamification_pass(full: bool | None = None) -> dict:
     started = datetime.now(timezone.utc)
     if full is None:
         full = _last_pass_started_at is None or _last_full_pass_day != started.date()
+    # 显式传 full=False 而进程刚起（还没有上一趟 pass 的起点）时，没有增量的下界
+    # 可算——`None - timedelta` 会 TypeError。这种情况下退回全量：本来就是「第一趟
+    # 必然全量」的语义，人工/控制台调用不该因为传了个参数就把循环打崩。
+    # An explicit full=False on a fresh process has no previous pass to measure
+    # from, and `None - timedelta` would raise TypeError. Fall back to a full pass —
+    # that's the documented "first pass is always full" behaviour anyway, and a
+    # manual call shouldn't be able to crash on an argument.
+    if not full and _last_pass_started_at is None:
+        full = True
     since = None if full else _last_pass_started_at - CANDIDATE_SLACK
     db = SessionLocal()
     try:
@@ -251,22 +278,46 @@ def run_gamification_pass(full: bool | None = None) -> dict:
 
 
 def run_competition_pass() -> dict:
-    """只重算比赛榜快照（不碰条件/勋章/周期榜）。没有进行中或待终审的比赛时
-    直接返回，不开销任何计算——快循环绝大多数时候走的就是这条路。
+    """先按时钟推进比赛状态，再重算比赛榜快照（不碰条件/勋章/周期榜）。推进完仍
+    没有进行中或待终审的比赛时直接返回，不开销任何计算——快循环绝大多数时候走
+    的就是这条路。
 
-    Recomputes competition board snapshots only (no conditions/badges/period
-    boards). Returns immediately when no competition is running or awaiting
-    settlement, which is what this fast loop does almost all of the time."""
+    状态推进必须在「有没有活比赛」这一判之前：一场刚过 starts_at 还挂在 upcoming
+    的比赛，在推进之前不算活比赛，若先判就会被这条 return 挡住，永远等不到推进
+    （见 competitions.advance_competition_statuses 的说明）。
+
+    Advances competition status by the clock, then recomputes competition board
+    snapshots only (no conditions/badges/period boards). The advance has to happen
+    *before* the "is anything live" check: a competition still sitting in upcoming
+    past its start isn't live yet, so checking first would let this early return
+    keep it from ever advancing.
+    """
     from app.models import Competition
-    from .competitions import snapshot_competitions
+    from .competitions import advance_competition_statuses, snapshot_competitions
     db = SessionLocal()
     try:
+        try:
+            advanced = advance_competition_statuses(db, datetime.now(timezone.utc))
+        except Exception:
+            # 推进失败不该连带把快照也跳过：记日志、回滚残留，本趟按现有状态照常
+            # 刷快照，下一趟（60 秒后）再试推进。
+            # A failed advance must not skip the snapshot too: log, roll back, and
+            # snapshot whatever statuses are current; the next tick retries.
+            log.exception("competition status advance failed")
+            db.rollback()
+            advanced = {"started": 0, "ended": 0}
         live = (db.query(Competition.id)
                   .filter(Competition.status.in_(("running", "ended"))).first())
         if live is None:
+            # 走到这里 advanced 必然全零：推成 running 或 ended 的比赛本身就是
+            # "live"，有任何推进都不会是 idle。所以空转的返回值保持原样，不掺
+            # 三个恒为 0 的键进去。
+            # advanced is necessarily all zeros here: anything advanced to running
+            # or ended *is* live, so an idle tick advanced nothing. Keep the idle
+            # payload unchanged rather than padding it with three constant zeros.
             return {"comps": 0, "rows": 0, "idle": True}
         try:
-            return snapshot_competitions(db, datetime.now(timezone.utc))
+            return {**snapshot_competitions(db, datetime.now(timezone.utc)), **advanced}
         except Exception:
             # 与整趟 pass 里的处理一致：记日志、回滚未提交的残留，下一轮再来。
             # 快循环失败绝不能把循环本身带崩——名次晚一分钟远好过不再更新。

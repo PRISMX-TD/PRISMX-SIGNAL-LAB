@@ -42,6 +42,20 @@ def ensure_baselines(db, period_key: str, now: datetime) -> int:
     accounts = (db.query(MT5Account)
                   .filter(MT5Account.trade_mode == REAL,
                           MT5Account.balance.isnot(None), not_removed()).all())
+    # 循环内**逐账户 commit**：账户上千时这是上千次事务往返，看起来该改成批量。
+    # 保持现状是有意的——幂等手段就是下面那个 IntegrityError：并发的另一趟循环
+    # 先插了同一行，本行静默跳过，其余账户照拍。改成攒一批再 commit 的话，一整
+    # 批里只要有一行撞约束，整批都会回滚，得另外设计「先查后插 + 失败降级逐条
+    # 重试」之类的幂等手段——那是一次真正的重构，风险大于这里省下的往返。
+    # 真要优化先做的是别的：这一趟每小时才跑一次，账户数也远没到瓶颈。
+    # Per-account commit inside the loop: at a thousand accounts that's a thousand
+    # round trips and looks like an obvious batching target. Keeping it is
+    # deliberate — the IntegrityError below *is* the idempotency mechanism (a
+    # concurrent pass inserted this row first; skip it and carry on). Batching
+    # would roll back every row in a batch whenever any one row collided, so it
+    # would need a different idempotency design (probe-then-insert with per-row
+    # retry on failure) — a real refactor, worth more risk than the round trips
+    # cost. This pass runs hourly and the account count is nowhere near the limit.
     for a in accounts:
         if a.user_id in opted_out or (a.user_id, a.login) in existing:
             continue
@@ -230,8 +244,25 @@ def _resolved_in_period(db, user_id, logins, period_key, taken_at_by_login,
     from .stats import _filled_orders, _legs_by_position, _resolve
     from app.services.trade_performance import position_id_of
     start, end = bounds if bounds is not None else period_bounds(period_key)
-    orders = [o for o in _filled_orders(db, user_id, cutoff=None)
-              if o.trade_mode in modes and o.mt5_login in logins]
+    # 账户、trade_mode、开仓时刻上界三个筛子全部下推到 SQL。以前是
+    # `_filled_orders(db, user_id, cutoff=None)` 把这个用户**全生命周期**的
+    # 订单整张读进内存再在 Python 侧筛——而 `compute_board_rows` 对每个有基线的
+    # 用户各调一次、`snapshot_boards` 每趟又要跑 2~4 个周期 key，于是整趟 pass
+    # 的榜单阶段是 O(用户 × 全部订单)，用户和订单一涨就先顶到
+    # SLOW_PASS_WARN_SECONDS。下推之后读的是「这几个账户、这个赛道、开在期末
+    # 之前」的那一小片。
+    # 口径不变：这三个条件本来就是下面 Python 侧在做的同一件事（开仓时刻上界是
+    # 新加的，但仓位不可能先平后开，开在期末之后的单原本也一定过不了窗口那一
+    # 关）。**下界不能下推**，理由见 `_filled_orders` 的 docstring。
+    # Account, trade_mode and an upper bound on the open instant are pushed into
+    # SQL. This used to read every order in the user's lifetime and filter in
+    # Python, once per user with a baseline, times the 2-4 period keys per pass —
+    # O(users × orders), the first thing to blow past SLOW_PASS_WARN_SECONDS as
+    # the tables grow. Semantics are unchanged: those were already the conditions
+    # applied below (the upper bound is new but implied — a position cannot close
+    # before it opens). The lower bound cannot be pushed down; see _filled_orders.
+    orders = _filled_orders(db, user_id, cutoff=None, logins=logins,
+                            modes=modes, before=end)
     keys = {(o.mt5_login, position_id_of(o)) for o in orders if position_id_of(o)}
     legs_map = _legs_by_position(db, user_id, keys)
     out = defaultdict(list)
@@ -361,6 +392,23 @@ def snapshot_boards(db, now: datetime) -> dict:
             reconcile_deposits(db, key, now=now)
         rows_by_board = compute_board_rows(db, key)
         for board, rows in rows_by_board.items():
+            # 排序键 = (分数降序, 笔数降序, 账户号升序)。
+            # **没有并列名次的概念**：同分同笔数时按账户号字典序分先后，两行拿到的
+            # 是 1 和 2，不是并列第 1。这是刻意的设计而非疏漏——名次要唯一，
+            # `settle_competition` 才能按 `rank == 1` 发唯一一枚冠军金牌，快照表也
+            # 才能有稳定可翻页的顺序。tests/test_comp_settle.py 与
+            # tests/test_board_snapshots.py 都把这个行为钉住了（后者刻意让笔数多的
+            # 账户字母序靠后，确保测的是 -sample 那一档而不是巧合命中 login 序）。
+            # 已知代价：奖金场景下同分同笔数时冠军由账户号字典序决定，是否可接受
+            # 属产品判断，代码这一侧先如实记下来。
+            # Sort key = score desc, sample desc, login asc. There is deliberately
+            # no notion of a tie: equal score and sample are broken by login, so
+            # the two rows get ranks 1 and 2, never a shared 1. Ranks must be
+            # unique for settle_competition to award exactly one champion on
+            # `rank == 1` and for the snapshot table to paginate stably. Pinned by
+            # test_comp_settle.py and test_board_snapshots.py. Known cost: with
+            # prize money on the line, an exact tie is decided by account number —
+            # whether that is acceptable is a product call, recorded here as-is.
             rows.sort(key=lambda r: (-r["score"], -r["sample"], r["login"]))
             db.query(LeaderboardSnapshot).filter(
                 LeaderboardSnapshot.board == board,

@@ -6,7 +6,6 @@
 (comp.starts_at, comp.ends_at)，因为比赛 key（`comp:<id>`）不是 `period_bounds`
 能解析的自然周/月格式。
 """
-import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -32,9 +31,38 @@ TRACKS = ("real", "demo")
 # unclassified account to a board scored on capital.
 _TRACK_MODES = {"real": (REAL,), "demo": (DEMO, CONTEST)}
 
+# 每人每场最多能报几个条目（设计 §1.7 的反刷榜闸）。
+#
+# 为什么必须有这道闸：名次是按「条目」（login）出行的，不是按人。同一个人报进
+# N 个账户、两两反向对冲下单，总有一个账户跑出漂亮的收益率——期望为零的操作
+# 却能稳定拿到榜首，奖金场就是被这么套的。
+#
+# 两个赛道给不同的值，因为成本不同：模拟账户可以零成本无限开，所以 demo 赛道
+# 只认一个条目，对冲刷榜在这一侧直接不成立；实盘每开一个账户都要真金白银入金，
+# 对冲的代价是真实的点差与手续费，所以留 3 个——足够覆盖「一个人确实同时在
+# 几家/几个账户上跑不同策略」这类正当用法，又把批量对冲的成本抬到不划算。
+#
+# How many entries one user may have in one competition (the anti-gaming gate
+# from §1.7). Ranks are per entry (login), not per person, so one user entering N
+# accounts and hedging them against each other is guaranteed to leave one account
+# at the top of the board — a zero-expectation trick that reliably wins prizes.
+# The two tracks get different caps because their cost differs: demo accounts are
+# free and unlimited, so the demo track allows exactly one entry and the hedge
+# stops being possible at all; a real account costs real money to fund and the
+# hedge pays real spread and commission, so three entries are allowed — enough
+# for the legitimate "I really do run a few accounts" case while keeping bulk
+# hedging uneconomical.
+MAX_ENTRIES_DEMO = 1
+MAX_ENTRIES_REAL = 3
+_TRACK_MAX_ENTRIES = {"real": MAX_ENTRIES_REAL, "demo": MAX_ENTRIES_DEMO}
+
 
 def track_modes(track: str) -> tuple[int, ...]:
     return _TRACK_MODES.get(track or "real", _TRACK_MODES["real"])
+
+
+def max_entries_per_user(track: str) -> int:
+    return _TRACK_MAX_ENTRIES.get(track or "real", MAX_ENTRIES_REAL)
 
 
 def comp_gates(comp: Competition, gset: dict) -> dict:
@@ -159,6 +187,12 @@ def _snapshot_one_comp(db, comp: Competition) -> list[dict]:
     """
     key = comp_period_key(comp.id)
     rows = compute_comp_rows(db, comp)
+    # 排序键与周期榜完全一致，并列名次同样不存在——理由见 boards.snapshot_boards
+    # 同一处的说明（名次必须唯一，下面 settle_competition 才能按 rank == 1 发出
+    # 恰好一枚冠军金牌）。
+    # Same sort key as the standing board, and likewise no ties — see the note at
+    # the same spot in boards.snapshot_boards (ranks must be unique so
+    # settle_competition awards exactly one champion on rank == 1).
     rows.sort(key=lambda r: (-r["score"], -r["sample"], r["login"]))
     db.query(LeaderboardSnapshot).filter(
         LeaderboardSnapshot.board == comp.metric,
@@ -171,18 +205,36 @@ def _snapshot_one_comp(db, comp: Competition) -> list[dict]:
     return rows
 
 
-# 按需刷新的进程内节流：{comp_id: 上次刷新的 monotonic 秒}。榜单页会被多个用户
-# 同时轮询，每次都重算一遍聚合查询没有意义——同一场比赛 REFRESH_MIN_INTERVAL
-# 秒内只真正算一次，其余请求直接读刚落盘的快照。单进程部署，理由同
-# gamification.py 的 _last_judged；按比赛数封顶，不做淘汰。
-# In-process throttle for on-demand refreshes: {comp_id: last refresh, monotonic
-# seconds}. The board is polled by many users at once and recomputing the whole
-# aggregate每 request would be pointless — one real recompute per competition per
-# REFRESH_MIN_INTERVAL seconds, everyone else reads the snapshot just written.
-# Single-process deployment, same rationale as gamification.py's _last_judged;
-# bounded by the number of competitions, never evicted.
+# 按需刷新的节流：榜单页会被多个用户同时轮询，每次都重算一遍聚合查询没有
+# 意义——同一场比赛 REFRESH_MIN_INTERVAL 秒内只真正算一次，其余请求直接读刚
+# 落盘的快照。
+#
+# 节流状态走 shared_state（配了 REDIS_URL 就跨进程，没配退回进程内内存，行为与
+# 原来的模块级 dict 一致）。原来是进程内 dict，多 worker 下每个 worker 各算各
+# 的：N 个 worker = N 倍重算，而且两个 worker 可以同时进到下面的
+# delete-then-insert，一方 commit 就会撞 leaderboard_snapshots 的唯一约束
+# (board, period_key, user_id, mt5_login)，把用户端的 GET /competitions/{id}
+# 打成 500。
+#
+# 用 incr_with_ttl 而不是「读一次再写一次」：自增在两种后端上都是原子的，先到
+# 的那个请求拿到 1、真的去算，同一窗口内的其余请求拿到 >1 直接读快照——这正是
+# 单靠 get+set 会在并发下漏掉的那一格。
+#
+# Throttle for on-demand refreshes, kept in shared_state (cross-process when
+# REDIS_URL is set, in-process memory otherwise — identical to the module-level
+# dict this replaces). As a per-process dict each worker throttled on its own: N
+# workers meant N recomputes, and two of them could enter the delete-then-insert
+# below at once, so one commit would hit the leaderboard_snapshots unique
+# constraint and turn a user's GET /competitions/{id} into a 500.
+# incr_with_ttl rather than get-then-set: the increment is atomic on both
+# backends, so the first request in a window gets 1 and does the work while the
+# rest get >1 and read the snapshot — exactly the race a get+set pair loses.
 REFRESH_MIN_INTERVAL = 20.0
-_last_refresh: dict[str, float] = {}
+_REFRESH_KEY_PREFIX = "comp-refresh:"
+
+
+def _refresh_throttle_key(comp_id: str) -> str:
+    return f"{_REFRESH_KEY_PREFIX}{comp_id}"
 
 
 def refresh_comp_board(db, comp: Competition, force: bool = False) -> bool:
@@ -197,16 +249,99 @@ def refresh_comp_board(db, comp: Competition, force: bool = False) -> bool:
     from the admin "refresh now" button: it skips the throttle but still respects
     the status guard.
     """
+    from app.services import shared_state
+
     if comp.status != "running":
         return False
-    key = comp.id
-    now = time.monotonic()
-    if not force and now - _last_refresh.get(key, 0.0) < REFRESH_MIN_INTERVAL:
+    if not force:
+        n = shared_state.incr_with_ttl(_refresh_throttle_key(comp.id),
+                                        int(REFRESH_MIN_INTERVAL))
+        if n > 1:
+            return False
+    try:
+        _snapshot_one_comp(db, comp)
+        db.commit()
+    except IntegrityError:
+        # delete-then-insert 撞唯一约束 (board, period_key, user_id, mt5_login)：
+        # 节流已经把常态挡掉，剩下的是「节流键刚过期 + 两个 worker 同时进来」这
+        # 类窄窗口。这条路径挂在用户端的 GET 上，别人已经写好的快照就是我们要写
+        # 的那一份，回滚、报告「这次没算」即可——绝不能让读榜变成 500。
+        # The delete-then-insert hit the unique constraint: the throttle covers
+        # the common case, leaving only the narrow window where it just expired
+        # and two workers entered together. This runs on a user-facing GET and the
+        # snapshot the other worker wrote is the one we were about to write, so
+        # roll back and report "did not run" — reading a board must never 500.
+        db.rollback()
         return False
-    _last_refresh[key] = now
-    _snapshot_one_comp(db, comp)
-    db.commit()
     return True
+
+
+def advance_competition_statuses(db, now: datetime) -> dict:
+    """按 `starts_at` / `ends_at` 自动推进比赛状态：upcoming→running、running→ended。
+
+    **为什么必须自动推进**：`snapshot_competitions` 只处理 running/ended，所以一场
+    过了 `starts_at` 却还挂在 upcoming 的比赛**一行快照都不产生**——用户打开比赛页
+    看到的是一张永远空的榜，而报名窗口照常开着。同理 running 不推到 ended 就永远
+    进不了终审。这两件事此前完全依赖管理员记得手动点一下状态，忘一次就是一场
+    比赛静默失效。
+
+    **哪些状态不碰**：
+      · draft：草稿对用户端根本不存在，什么时候发布是运营决定，不是时间决定；
+      · settled：终局状态，只能由管理员终审（`settle_competition`）写入。
+        自动推进绝不越过 ended→settled 这条线——终审要发勋章、定永久名次，
+        还要守 §5.3 的 24 小时宽限期，那必须是人按下去的。
+
+    推进到 running 时对 `enrollment == "auto"` 的比赛顺带自动入场，与管理端
+    PATCH 推进状态时的行为一致（auto_enroll 幂等，重复调用安全）。
+
+    Advances competition status by the clock: upcoming→running once `starts_at`
+    has passed, running→ended once `ends_at` has. Without this a competition left
+    in upcoming produces no snapshot rows at all (snapshot_competitions only
+    handles running/ended), so entrants stare at a permanently empty board, and a
+    competition left in running can never be settled — both previously depended on
+    an admin remembering to click. draft and settled are never touched: publishing
+    a draft is an operational decision, and settling is a permanent, badge-awarding
+    action that must stay in human hands (see settle_competition and its §5.3
+    grace period). Advancing to running also auto-enrolls, matching what the admin
+    PATCH does; auto_enroll is idempotent.
+    """
+    now = _aware(now)
+    started = ended = 0
+    just_started = []
+    comps = (db.query(Competition)
+               .filter(Competition.status.in_(("upcoming", "running"))).all())
+    for comp in comps:
+        if comp.status == "upcoming" and _aware(comp.starts_at) is not None \
+                and now >= _aware(comp.starts_at):
+            comp.status = "running"
+            started += 1
+            just_started.append(comp)
+        # 不用 elif：一场已经结束的比赛可能整段都没被扫到（循环停过、比赛很短），
+        # 这一趟要能把它从 upcoming 一路推到 ended，而不是每趟只走一格。
+        # Not elif: a short competition, or one whose window elapsed while the loop
+        # was down, must go all the way from upcoming to ended in a single pass.
+        if comp.status == "running" and _aware(comp.ends_at) is not None \
+                and now >= _aware(comp.ends_at):
+            comp.status = "ended"
+            ended += 1
+    if started or ended:
+        db.commit()
+    # 自动入场只对「这一趟刚推成 running」的比赛做，不对全部 running 的比赛做：
+    # auto_enroll 要全表扫一遍 MT5Account，而这条循环 60 秒一趟——对每场进行中
+    # 的比赛每分钟扫一次全账户表不划算。入场时机与管理端 PATCH 推进状态时一致
+    # （都是「刚开赛那一下」）。放在 commit 之后：auto_enroll 内部逐账户 commit，
+    # 状态先落盘，入场中途失败不会把状态推进一起回滚掉。
+    # Auto-enrollment runs only for competitions advanced in *this* pass, not for
+    # every running one: auto_enroll scans the whole MT5Account table and this loop
+    # ticks every 60s. That matches when the admin PATCH path enrolls (the moment
+    # it starts). It runs after the commit because auto_enroll commits per account,
+    # so the status change is already persisted and a mid-enrollment failure can't
+    # roll the advance back with it.
+    enrolled = 0
+    for comp in just_started:
+        if comp.enrollment == "auto":
+            enrolled += auto_enroll(db, comp, now)
+    return {"started": started, "ended": ended, "autoEnrolled": enrolled}
 
 
 def snapshot_competitions(db, now: datetime) -> dict:
@@ -266,6 +401,26 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
         raise HTTPException(status_code=400,
                             detail="账户余额未同步，请先连接账户 / Account balance not synced yet")
 
+    # 每人每场的条目上限（见 _TRACK_MAX_ENTRIES 的说明）。只数「别的 login」——
+    # 重复报同一个账户是幂等路径（下面撞唯一约束后原样返回已有条目），不该被
+    # 上限误伤。被取消资格的条目照数：取消资格不退还名额，否则「报满 → 故意
+    # 违规 → 腾出名额再报」就成了绕过这道闸的后门。
+    # Per-user entry cap (see _TRACK_MAX_ENTRIES). Only *other* logins are
+    # counted: re-registering the same account is the idempotent path below and
+    # must not trip the cap. Disqualified entries still count — a disqualification
+    # does not return a slot, or "fill up, get disqualified on purpose, re-enter"
+    # would walk straight around this gate.
+    cap = max_entries_per_user(comp.track)
+    existing_entries = (db.query(CompetitionParticipant)
+                          .filter(CompetitionParticipant.competition_id == comp.id,
+                                  CompetitionParticipant.user_id == user.id,
+                                  CompetitionParticipant.mt5_login != mt5_login).count())
+    if existing_entries >= cap:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"每人每场最多报名 {cap} 个账户 / "
+                    f"At most {cap} account(s) per person per competition"))
+
     key = comp_period_key(comp.id)
     scoring_from = max(_aware(comp.starts_at), now)
     db.add(CompetitionParticipant(competition_id=comp.id, user_id=user.id, mt5_login=mt5_login,
@@ -319,6 +474,12 @@ def auto_enroll(db, comp: Competition, now: datetime) -> int:
     accounts = (db.query(MT5Account)
                   .filter(MT5Account.trade_mode.in_(track_modes(comp.track)),
                           MT5Account.balance.isnot(None), not_removed()).all())
+    # 逐账户 commit 与 `boards.ensure_baselines` 同一个取舍：下面的 IntegrityError
+    # 就是幂等手段（已入场的静默跳过），批量提交会让一行撞约束毁掉整批，需要
+    # 另设幂等设计——理由详见 ensure_baselines 里的那段说明。
+    # Per-account commit, same trade-off as boards.ensure_baselines: the
+    # IntegrityError below is the idempotency mechanism, and batching would let
+    # one colliding row take out the whole batch. See the note there.
     enrolled = 0
     for acct in accounts:
         if acct.user_id in opted_out or acct.login in already:

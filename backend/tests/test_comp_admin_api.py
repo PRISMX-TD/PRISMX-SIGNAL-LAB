@@ -491,6 +491,54 @@ def test_board_404_when_comp_missing(db_session):
     assert exc.value.status_code == 404
 
 
+# ---- POST "/{id}/refresh" -------------------------------------------------------
+
+def test_admin_refresh_recomputes_running_board_ignoring_throttle(db_session):
+    """管理端「立即刷新」：跳过 20 秒节流，连按两次都真的重算。
+
+    节流是给用户端轮询用的（refresh_comp_board 的默认路径）；管理员按下按钮的
+    语义就是「现在就给我最新的」，被节流挡回去会让人以为按钮坏了。
+    """
+    from app.models import LeaderboardSnapshot
+    from app.routers.competitions import admin_refresh_competition
+    from app.services import shared_state
+    shared_state.reset_for_tests()
+
+    comp = _comp(db_session, status="running")
+    u = _user(db_session, "ref1@t.co"); _acct(db_session, u, "A")
+    _participant(db_session, comp, u, "A")
+    # 手工种一行陈旧快照：真重算会把它删掉（这场比赛没有基线，算不出任何行）
+    db_session.add(LeaderboardSnapshot(board=comp.metric, period_key=comp_period_key(comp.id),
+                                       user_id=u.id, mt5_login="STALE", rank=1,
+                                       score=9.9, sample=99))
+    db_session.commit()
+
+    out = admin_refresh_competition(comp.id, db=db_session)
+    assert out == {"refreshed": True, "status": "running"}
+    assert db_session.query(LeaderboardSnapshot).filter(
+        LeaderboardSnapshot.period_key == comp_period_key(comp.id)).count() == 0
+    # 连按第二次照样真算（force 跳过节流）
+    assert admin_refresh_competition(comp.id, db=db_session)["refreshed"] is True
+
+
+def test_admin_refresh_is_a_noop_outside_running(db_session):
+    """未开始没有行、已结束/已终审的行不该再动——三种状态都返回 refreshed=false。"""
+    from app.routers.competitions import admin_refresh_competition
+    from app.services import shared_state
+    shared_state.reset_for_tests()
+    for st in ("draft", "upcoming", "ended", "settled"):
+        comp = _comp(db_session, status=st, name=f"R-{st}")
+        out = admin_refresh_competition(comp.id, db=db_session)
+        assert out == {"refreshed": False, "status": st}
+
+
+def test_admin_refresh_404_when_comp_missing(db_session):
+    from app.routers.competitions import admin_refresh_competition
+    with pytest.raises(HTTPException) as exc:
+        admin_refresh_competition("nope", db=db_session)
+    assert exc.value.status_code == 404
+
+
 # ── 删除比赛 / deleting a competition ────────────────────────────────
 
 def test_delete_competition_removes_participants_baselines_snapshots(db_session):

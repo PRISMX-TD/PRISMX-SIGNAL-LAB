@@ -57,6 +57,49 @@ def test_winrate_locked_until_group_done(db_session, monkeypatch):
     assert "winrate_35" in done              # 同组其余齐了 → 当轮判定并锁定
 
 
+def test_winrate_exactly_at_bar_passes(db_session, monkeypatch):
+    """胜率恰好等于门槛判过（`>=`）。
+
+    `condition_states` 下发的 progressTarget 就是这个门槛值本身，等号那一格进度
+    条画满格；判定若用严判 `>`，用户会看着满格的条却拿不到那一关。2026-09-19
+    起判定、进度条、胜率摘要三处统一成「够到即算过」。
+    Exactly at the bar passes: condition_states hands the frontend this same
+    number as progressTarget, so a strict `>` left a full bar that never
+    completed. Judging, the bar and the summary all read `>=` since 2026-09-19.
+    """
+    u = _user(db_session, nickname="T")
+    # 锋芒组其余三条已达标，胜率恰好 0.35（门槛值本身）
+    fake = {"trades": 100, "wins": 35, "losses": 65, "win_rate": 0.35, "lots": 10,
+            "trade_days": 30, "profit": 1.0, "trades_any": 100, "per_login": {},
+            "window_days": 365}
+    import app.services.gamification.conditions as C
+    monkeypatch.setattr(C, "compute_comprehensive_stats", lambda db, uid: fake)
+    judge_and_record_conditions(db_session, u.id)
+    done = {t.task_id for t in db_session.query(UserTask).filter_by(user_id=u.id)}
+    assert "winrate_35" in done
+
+    # 差一点点（0.3499）仍然不过——`>=` 放行的只是等号那一格，不是「接近」
+    u2 = _user(db_session, email="below@t.co", tok="tok_below", nickname="T2")
+    fake["win_rate"] = 0.3499
+    judge_and_record_conditions(db_session, u2.id)
+    done2 = {t.task_id for t in db_session.query(UserTask).filter_by(user_id=u2.id)}
+    assert "winrate_35" not in done2
+
+
+def test_condition_targets_has_no_unreachable_winrate_entries(db_session):
+    """CONDITION_TARGETS 里不该再有胜率项：`_judge_plain` 永远见不到胜率条件
+    （第一遍循环就 continue 掉了），那四条是不可达的死代码，且用的是与毕业考
+    不同的判定路径，留着只会误导。"""
+    from app.services.gamification.conditions import CONDITION_TARGETS, WINRATE_CONDITIONS
+    assert not (set(CONDITION_TARGETS) & set(WINRATE_CONDITIONS))
+    # 非胜率条件一条不少：condition_states 的 else 分支要按 id 取值，漏一条就 KeyError
+    non_winrate = {c for _gid, conds in GROUPS for c in conds} - set(WINRATE_CONDITIONS)
+    covered = set(CONDITION_TARGETS) | {
+        "set_nickname", "bind_account", "own_strategy", "streak_3",
+        "profit_positive_5", "profit_positive_6"}
+    assert non_winrate <= covered
+
+
 def test_current_active_streak_anchors_on_today_or_yesterday(db_session):
     from datetime import date
     today = date(2026, 9, 4)

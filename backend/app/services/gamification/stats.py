@@ -51,12 +51,43 @@ def _now():
     return datetime.now(timezone.utc)
 
 
-def _filled_orders(db, user_id, cutoff=None):
+def _filled_orders(db, user_id, cutoff=None, logins=None, modes=None, before=None):
+    """该用户的已成交开仓单。可选的三个过滤条件都是**下推到 SQL 的筛子**，
+    不是新语义——调用方原本就在 Python 侧用同样的条件过滤，只是那样要先把这个
+    用户全生命周期的订单整张读进内存。
+
+    `logins`：只要这几个账户的单（周期榜/比赛榜按账户计分，其余账户的单本来就
+              会被丢掉）。
+    `modes`：`orders.trade_mode` 白名单。NULL（尚未盖章）两侧都不收——SQL 的
+              `IN` 与 Python 的 `in` 对 None 行为一致。
+    `before`：只要 `created_at` 早于这一刻的单。榜单只认「最后一腿落在期末之前」
+              的仓位，而仓位不可能先平后开，所以开仓晚于期末的单必然出不了行。
+              **注意只有上界能下推，下界不能**：仓位锚定 lifetime，一笔 2024 年
+              开的单 2026 年才平，照样算进 2026 年这个周期（见
+              `boards._resolved_in_period` 的 docstring）——按期初截 created_at
+              会把这类长持仓静默地从榜上抹掉。`created_at` 为 NULL 的行一并保留，
+              保证下推前后结果逐行相同。
+
+    The three optional filters are SQL push-downs of conditions the callers
+    already applied in Python; they change nothing but the amount of data read.
+    Only an *upper* bound on created_at can be pushed down: a position cannot
+    close before it opens, so one opened after the period's end can never land in
+    it — but the lower bound cannot, because positions anchor to their lifetime
+    and one opened long before the period still counts when it closes inside it.
+    NULL created_at rows are kept so the push-down is row-for-row equivalent.
+    """
     q = (db.query(Order)
            .filter(Order.user_id == user_id, Order.action == "ORDER",
                    Order.status == "FILLED", Order.mt5_ticket.isnot(None)))
     if cutoff is not None:
         q = q.filter(Order.created_at >= cutoff)
+    if logins is not None:
+        q = q.filter(Order.mt5_login.in_(list(logins)))
+    if modes is not None:
+        q = q.filter(Order.trade_mode.in_(list(modes)))
+    if before is not None:
+        from sqlalchemy import or_
+        q = q.filter(or_(Order.created_at < before, Order.created_at.is_(None)))
     return q.all()
 
 
@@ -162,6 +193,21 @@ def compute_comprehensive_stats(db, user_id, data: dict | None = None) -> dict:
         "trades": n, "wins": wins, "losses": n - wins,
         "win_rate": (wins / n) if n else None,
         "lots": sum(weighted_lots(o) for o in real),
+        # 切天用裸 `created_at`（UTC），**不**走 `services/stats_time.py` 的
+        # STATS_TZ。这是刻意的，不是漏改：整个游戏化链路的日历都在 UTC 上——
+        # `periods.py` 的周/月 key、`UserActiveDay.day`、`longest_active_streak`
+        # 的连续日，全是 UTC 日历日。trade_days 要和 streak_3 / 活跃日同一把尺，
+        # 否则同一个用户「交易了 30 天」和「活跃了 30 天」会按两套日历各算各的。
+        # 后台看板用 STATS_TZ 是另一回事：那边给运营看「本地的今天」，
+        # 与用户闯关进度不是同一个口径。两套并存需知情，不要"顺手统一"。
+        # Days are cut on the raw UTC created_at, deliberately *not* through
+        # services/stats_time.py's STATS_TZ. The whole gamification calendar is
+        # UTC — periods.py's week/month keys, UserActiveDay.day, the streak run —
+        # and trade_days must share that ruler with streak_3, or one user's "traded
+        # 30 days" and "active 30 days" would be counted on two different
+        # calendars. The admin dashboard's STATS_TZ serves a different purpose
+        # (an operator's local "today") and is not this metric. Both exist on
+        # purpose; don't "unify" them in passing.
         "trade_days": len({o.created_at.strftime("%Y-%m-%d") for o in real if o.created_at}),
         "profit": sum(p for _, p in res_real),
         "trades_any": len(res_all),

@@ -312,6 +312,50 @@ def test_settle_badge_award_failure_lands_in_badgeErrors_finality_intact(db_sess
         competition_id=comp.id).count() == 1
 
 
+def test_settle_award_failure_actually_calls_rollback(db_session, monkeypatch):
+    """发奖失败时 `db.rollback()` 必须真的被调到——不是「session 后面还能用」。
+
+    为什么要单独测这一条：测试跑的是内存 SQLite，语句失败后事务并不会 abort，
+    所以「异常之后 session 仍可查询」这个断言在 SQLite 下**恒为真**，把
+    `db.rollback()` 整行删掉它也照样绿。生产是 Postgres：当前语句失败后整段事务
+    进入 aborted 状态，不 rollback 的话后面每一条语句都会被拒——那一串勋章会
+    从第一枚失败开始全军覆没。所以这里直接盯调用，不盯 SQLite 下无意义的后效。
+
+    The rollback has to be observed, not inferred. The suite runs on in-memory
+    SQLite, where a failed statement does not abort the transaction, so "the
+    session still works afterwards" is vacuously true and stays green even if the
+    db.rollback() line is deleted. Production is Postgres, where every later
+    statement is refused until the transaction is rolled back — one failed badge
+    would take out the whole remaining award sequence. So assert on the call.
+    """
+    import app.services.gamification.competitions as comp_mod
+
+    admin = _admin(db_session)
+    comp = _comp(db_session)
+    u = _user(db_session, "rb@t.co")
+    _participant(db_session, comp, u, "A")
+    _stub_compute_rows(monkeypatch, comp,
+                       [{"userId": u.id, "login": "A", "score": 0.5, "sample": 10}])
+
+    def _always_boom(db, user_id, badge_id, tier=0):
+        raise RuntimeError("connection reset mid-commit")
+    monkeypatch.setattr(comp_mod, "award_badge", _always_boom)
+
+    rollbacks = []
+    real_rollback = db_session.rollback
+    monkeypatch.setattr(db_session, "rollback",
+                        lambda: (rollbacks.append(1), real_rollback())[1])
+
+    result = settle_competition(db_session, comp, admin.id)
+
+    # 每一枚发奖失败都要各自 rollback 一次，一枚都不能漏
+    assert len(rollbacks) == len(result["badgeErrors"]) >= 1
+    assert comp.status == "settled"                       # 终局状态不受发奖失败影响
+    # rollback 之后 session 仍能正常查询（Postgres 下这一条才有区分度）
+    assert db_session.query(CompetitionParticipant).filter_by(
+        competition_id=comp.id).count() == 1
+
+
 # ---- back-to-back -----------------------------------------------------------
 
 def test_settle_back_to_back_awarded_when_same_winner(db_session, monkeypatch):
