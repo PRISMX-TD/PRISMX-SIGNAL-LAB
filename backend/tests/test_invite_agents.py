@@ -2,7 +2,7 @@
 
 照 test_invite_links.py 的惯例走 service 级测试，用 conftest 的 db_session 内存库。
 """
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
@@ -248,11 +248,8 @@ def test_user_row_carries_last_active_day_and_masked_mt5(db_session):
     first = row.mt5Accounts[0]
     assert first.server == "B-Real 3"
     assert first.accountType == "real"
-    assert first.channel == "bridge"
-    assert first.lastConnectedAt == datetime(2026, 9, 18, 6, 0)
-    assert first.revoked is False
+    assert first.connected is True
     assert row.mt5Accounts[1].accountType == "demo"
-    assert row.mt5Accounts[1].lastConnectedAt is None
     # 资金一概不下发 / no money ever leaves
     for forbidden in ("balance", "equity", "leverage", "margin"):
         assert forbidden not in first.model_dump()
@@ -283,17 +280,17 @@ def test_revoked_gateway_binding_is_listed_and_flagged(db_session):
 
     row = agent_link_users(db_session, agent, link.id).users[0]
     assert len(row.mt5Accounts) == 1
-    assert row.mt5Accounts[0].channel == "gateway"
-    assert row.mt5Accounts[0].revoked is True
+    assert row.mt5Accounts[0].connected is False
     # 撤销原因不下发：那是风控内部口径 / the reason stays internal
     assert "revokedReason" not in row.mt5Accounts[0].model_dump()
 
 
-def test_gateway_binding_never_claims_never_connected(db_session):
-    """直连账号不写心跳：lastConnectedAt 恒为 null，在线与否由通道自己说了算。
+def test_gateway_binding_is_connected_regardless_of_heartbeat(db_session):
+    """直连账号从不写心跳，但只要授权还在就是「已连接」。
 
     首版拿 last_heartbeat 当两条通道通用的「最近连接」，于是每个直连账号都被显示
-    成「从未连接」——这条用例就是钉这个回归的。
+    成「从未连接」；第二版又拿网关健康当成客户的在线状态，直连全员「离线」。这条
+    用例钉的是最终口径：连没连上只看授权在不在。
     """
     admin = _mk_user(db_session, "a@x.io", role="admin")
     agent = _mk_user(db_session, "agent@x.io")
@@ -303,31 +300,25 @@ def test_gateway_binding_never_claims_never_connected(db_session):
     _mk_mt5(db_session, u, "601129", source="gateway", server="B-Real 3", trade_mode=REAL)
 
     acc = agent_link_users(db_session, agent, link.id).users[0].mt5Accounts[0]
-    assert acc.channel == "gateway"
-    assert acc.lastConnectedAt is None
-    assert acc.revoked is False
-    # 在线状态对直连是 null，不是 False：那条通道的"在不在线"是平台自己那台网关
-    # 的状态，全站共享，写成 False 会被读成"这个客户掉线了"。
-    # null, not False: the gateway's online state belongs to the platform, not to
-    # this client, and False would read as "this client dropped off".
-    assert acc.online is None
+    assert acc.connected is True
+    # 通道、瞬时在线、最近连接时刻都不下发：代理用不上，而且两条通道的口径不同，
+    # 摆在一起只会被误读（见 AgentMT5AccountOut）。
+    # Channel, live online state and last-seen are not shipped at all.
+    payload = acc.model_dump()
+    for gone in ("channel", "online", "lastConnectedAt", "revoked"):
+        assert gone not in payload
 
 
-def test_bridge_row_reports_online_per_person(db_session):
-    """桥接的在线才是按人算的：心跳在窗口内为 True，过期为 False。"""
+def test_bridge_binding_is_connected_even_when_laptop_is_off(db_session):
+    """桥接绑定只要还在就算已连接——客户关电脑是常态，不该显示成"掉了"。"""
     admin = _mk_user(db_session, "a@x.io", role="admin")
     agent = _mk_user(db_session, "agent@x.io")
     link = _mk_link(db_session)
     assign_agent(db_session, admin, link, agent)
     u = _mk_user(db_session, "u@x.io", invite_code=link.code)
-    _mk_mt5(db_session, u, "80400001", source="bridge",
-            last_heartbeat=datetime.now(timezone.utc).replace(tzinfo=None))
-    _mk_mt5(db_session, u, "80400002", source="bridge",
-            last_heartbeat=datetime(2026, 9, 10, 6, 0))
+    _mk_mt5(db_session, u, "80400002", source="bridge", last_heartbeat=datetime(2026, 9, 10, 6, 0))
 
-    accounts = agent_link_users(db_session, agent, link.id).users[0].mt5Accounts
-    # 在线的排最前 / online sorts first
-    assert [a.online for a in accounts] == [True, False]
+    assert agent_link_users(db_session, agent, link.id).users[0].mt5Accounts[0].connected is True
 
 
 def test_user_removed_binding_is_not_listed_at_all(db_session):
@@ -359,5 +350,4 @@ def test_bridge_row_is_never_flagged_for_reverification(db_session):
             revoked_at=datetime(2026, 9, 10), revoked_reason=REASON_PASSWORD_CHANGED)
 
     acc = agent_link_users(db_session, agent, link.id).users[0].mt5Accounts[0]
-    assert acc.channel == "bridge"
-    assert acc.revoked is False
+    assert acc.connected is True

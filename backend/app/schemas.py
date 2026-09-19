@@ -1502,7 +1502,7 @@ class AgentLinkOut(BaseModel):
 
 
 class AgentMT5AccountOut(BaseModel):
-    """代理名单里的一个 MT5 绑定：打码账号号、服务器、实盘/模拟、最近连接时间。
+    """代理名单里的一个 MT5 绑定：打码账号号、服务器、实盘/模拟、还连不连得上。
 
     账号号打码（`identity.mask_account`，123**678）与排行榜同一口径：代理需要能对
     上"这个人到底绑没绑、绑的是不是实盘"，不需要能原样抄走别人的交易账户号。
@@ -1510,12 +1510,25 @@ class AgentMT5AccountOut(BaseModel):
     **资金一概不下发**——余额、净值、杠杆、保证金都不在这里。用户绑定 MT5 是为了
     跟单，从没被告知过自己的资金规模会给推荐人看；这条线一旦开了就收不回来。
 
-    One MT5 binding on an agent's list: masked login, server, real/demo, last
-    seen. The login is masked exactly as on the leaderboards — an agent needs to
-    know whether their referral bound an account and whether it is real money,
-    not to be able to copy the number down. No balance, equity, leverage or
-    margin is ever included: users bound MT5 to copy trades and were never told
-    their account size would be shown to whoever referred them.
+    **只说"连没连上"，不说通道、不说瞬时在线、不说最近连接时刻**（2026-09-19 定）。
+    前一版按通道分了「直连 · 已接入 / 桥接 · 在线 / 最近连接 X」等五六种说法，负责
+    人的判断是代理用不上这些：他要的只是"这个人接进来了没有"。那些区分本身也是
+    麻烦的来源——桥接的在线随客户关电脑闪烁，直连的"在线"其实是平台自己那台网关的
+    健康状态、全站共享（写在客户那一行上等于把平台抖动说成客户掉线）。都删掉了，
+    别再加回来；要加先想清楚代理拿它去做什么。
+
+    One MT5 binding on an agent's list: masked login, server, real/demo, and
+    whether it is usable. No balance, equity, leverage or margin is ever
+    included: users bound MT5 to copy trades and were never told their account
+    size would be shown to whoever referred them.
+
+    It reports connected-or-not and nothing else — no channel, no live/offline,
+    no last-seen timestamp (product decision, 2026-09-19). The previous cut split
+    those five ways by channel; an agent only needs "did this person get set up".
+    The distinctions were also the problem: a bridge account's online state
+    flickers as the client closes their laptop, and a gateway account's "online"
+    is really the platform's own gateway health, shared site-wide, which printed
+    on a client's row turns a platform blip into a client walking away.
     """
     # 打码后的账户号 / masked account number
     login: str
@@ -1526,54 +1539,19 @@ class AgentMT5AccountOut(BaseModel):
     # Mapped from trade_mode; trade_mode_source is withheld — self-reported vs
     # broker-derived is a risk-control distinction an agent would misread.
     accountType: Literal["real", "demo", "contest"] | None = None
-    # 这个账号走哪条通道：gateway = 平台与券商直连（用户不必开电脑），
-    # bridge = 用户自己电脑上的桥接程序上报。**必须下发**：两条通道的"还连着吗"
-    # 是两种东西，只给一个时间或一个布尔值，前端没法说人话（见 lastConnectedAt）。
-    # Which channel this binding uses: gateway (the platform talks to the broker
-    # directly, the user's machine is not involved) or bridge (reported by the
-    # user's own desktop app). Shipped deliberately: "still connected?" means two
-    # different things on the two channels.
-    channel: Literal["gateway", "bridge"]
-    # 此刻是否在线——**只有桥接有，直连一律 null**（不是 false）。
+    # 这条绑定此刻还能不能跟单。直连 = 授权未作废（作废的原因是券商侧改过密码，
+    # 要客户重新验证一次主密码，见 services/gateway_binding）；桥接 = 绑定还在
+    # （软删的行根本不下发，见 invite._mt5_accounts）。
     #
-    # 桥接的在线与否是这个人自己的事：他电脑上的程序在不在跑。直连不是——
-    # `deps.is_account_online` 对直连行返回的是 `is_gateway_online()`，探的是**平台
-    # 自己那台网关服务通不通**，全站所有直连账号共享同一个值。把它写在某个客户
-    # 那一行上，网关一抖动，代理名下所有直连账号一起变灰，代理会以为是自己的客户
-    # 掉了。直连的每账号真相只有两种：授权还在（`revoked=False`），或者需重连。
+    # False 的行仍然列出、由前端压灰标「未连接」，不是隐藏：跟能用的账号长得一样
+    # 会让代理以为客户在跟单，其实没有。
     #
-    # null 而不是 false，是为了让下一个人一眼看出"这条通道没有这个概念"，而不是
-    # 读成"这个客户掉线了"。
-    #
-    # Online right now — bridge only; always null (never false) on gateway rows.
-    # For a bridge binding this is about the person: their desktop app is running
-    # or not. For a gateway binding, deps.is_account_online returns
-    # is_gateway_online(), i.e. whether *the platform's own* gateway service is
-    # reachable — one value shared by every gateway account on the site. Printed
-    # on a client's row it makes a platform blip look like that client dropping
-    # off. A gateway binding's per-account truth is binary: still authorised, or
-    # needs re-verification. null (not false) so the next reader sees "this
-    # channel has no such concept" instead of "this client is offline".
-    online: bool | None = None
-    # 最近一次心跳 —— **只有桥接通道有**。直连从不写这一列（平台直连券商，没有
-    # 用户侧心跳这回事），所以对直连行它永远是 null，前端也不拿它说话。
-    # 2026-09-19 首版把它当成两条通道通用的"最近连接时间"，于是每个直连账号都被
-    # 显示成「从未连接」；别再把这一列当通用信号用。
-    # Last heartbeat — bridge channel only. The gateway never writes it (there is
-    # no user-side heartbeat when the platform talks to the broker itself), so it
-    # is always null on gateway rows and the frontend does not read it there. The
-    # first cut treated it as a channel-agnostic "last connected" and rendered
-    # every gateway account as "never connected"; do not reintroduce that.
-    lastConnectedAt: datetime | None = None
-    # True = 这次直连绑定的授权已作废，需用户重新验证一次主密码（券商侧改过密码 /
-    # 账号转手 / 被重置，见 services/gateway_binding）。**只对直连行成立**：桥接的
-    # 凭证在用户自己手里，密码变了就是登不上、没有心跳，不套这套语义。
-    # 列出来而不是隐藏：代理看见"绑过但掉了"才知道要去提醒人重新验证。
-    # True = this gateway binding's authorisation is void and the user must
-    # re-verify their master password. Gateway rows only — a bridge credential
-    # lives on the user's machine, where a changed password simply stops the
-    # heartbeat. Listed rather than hidden so the agent can nudge them.
-    revoked: bool = False
+    # Whether this binding can currently copy trades: gateway = authorisation not
+    # revoked; bridge = the binding still exists (soft-removed rows are never
+    # sent at all). False rows are still listed and greyed out rather than
+    # hidden — looking identical to a working account would have the agent
+    # believe their client is trading when they are not.
+    connected: bool = True
 
 
 class AgentLinkUserOut(BaseModel):
@@ -1607,8 +1585,8 @@ class AgentLinkUserOut(BaseModel):
     # source table stores no hour and no dwell time so that "what was this person
     # looking at at 3pm" cannot be asked. Rows older than 400 days are pruned.
     lastActiveDay: date | None = None
-    # 该用户名下的 MT5 绑定，最近连接的在前。空数组 = 从未绑过。
-    # This user's MT5 bindings, most recently seen first. Empty = never bound.
+    # 该用户名下的 MT5 绑定，能用的在前。空数组 = 从未绑过（前端显示「未连接」）。
+    # This user's MT5 bindings, usable ones first. Empty = never bound.
     mt5Accounts: list[AgentMT5AccountOut] = []
 
 

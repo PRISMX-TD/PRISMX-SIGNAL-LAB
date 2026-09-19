@@ -39,34 +39,51 @@ const isRecentDay = (day: string) => day >= statsDay(Date.now() - 6 * 86_400_000
 
 const MT5_TYPE_KEY = { real: 'agent.mt5Real', demo: 'agent.mt5Demo', contest: 'agent.mt5Contest' } as const
 
-// 一条绑定此刻怎么说。分通道，因为「还连着吗」在两条通道上根本不是一回事。
+// MT5 绑定：打码账号 + 实盘/模拟 + 服务器，外加「连没连上」。
 //
-// 直连：账号由平台的网关替客户挂在券商那边，客户不用开电脑，所以既没有"最近
-// 连接时间"（后端不写心跳），也**不该显示在线/离线**——那个值探的是平台自己那台
-// 网关通不通、全站所有直连账号共享一个，网关一抖动代理名下的直连账号会一起变灰，
-// 看着像客户全跑了。直连的每账号真相只有两种：授权还在（已接入），或者需重连。
-// 桥接：在线与否确实是这个人自己的事（他电脑上的程序在不在跑），离线时说"上次是
-// 什么时候"才有意义。
+// 这一列只回答代理真正要问的那一句：这个人接进来了没有。通道（直连/桥接）、
+// 此刻在不在线、最近一次连接是什么时候，2026-09-19 全部撤掉——代理拿它们做不了
+// 任何决定，而且两条通道口径不同摆在一起只会被误读（桥接的在线随客户关电脑闪烁；
+// 直连的"在线"其实是平台自己那台网关的健康状态、全站共享）。别再加回来。
 //
-// What one binding says, per channel. A gateway account is held by the platform's
-// own service: no heartbeat, and no online/offline either — that verdict is the
-// platform's gateway health, shared by every gateway account, so a blip would grey
-// out the agent's whole list as if their clients had all left. Its per-account
-// truth is binary: still authorised, or needs re-verification. A bridge account's
-// online state really is that person's (their desktop app is running or not), and
-// its last-seen time is worth saying when it is not.
-type TFn = ReturnType<typeof useTranslation>['t']
-
-function connectionText(a: AgentMT5Account, t: TFn): string {
-  if (a.channel === 'gateway') return t(a.revoked ? 'agent.mt5AuthVoid' : 'agent.mt5Linked')
-  if (a.online) return t('agent.mt5Online')
-  if (a.lastConnectedAt) return t('agent.mt5Last', { time: fmtTime(a.lastConnectedAt) })
-  return t('agent.mt5Never')
+// 不能跟单的绑定（直连授权作废）照样列出，只是压灰标「未连接」：跟能用的账号
+// 长得一样，代理会以为客户在跟单，其实没有。
+//
+// One binding per line: masked login, real/demo, server, and whether it is
+// connected. That last bit is the only question an agent can act on; channel,
+// live online state and last-seen were all removed (see the backend schema).
+// Unusable bindings are greyed out rather than hidden — looking identical to a
+// working account would have the agent believe their client is trading.
+function Mt5List({ accounts }: { accounts: AgentMT5Account[] }) {
+  const { t } = useTranslation()
+  if (accounts.length === 0) return <span className="text-neutral-500">{t('agent.mt5None')}</span>
+  return (
+    <ul className="space-y-1.5">
+      {accounts.map((a, i) => (
+        <li key={`${a.login}-${i}`} className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className={`num ${a.connected ? 'text-neutral-100' : 'text-neutral-500 line-through'}`}>
+              {a.login}
+            </span>
+            <span
+              className={`rounded-full px-1.5 py-0.5 text-[11px] ${
+                a.accountType === 'real' && a.connected ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-400'
+              }`}
+            >
+              {t(a.accountType ? MT5_TYPE_KEY[a.accountType] : 'agent.mt5Unknown')}
+            </span>
+            {!a.connected && (
+              <span className="rounded-full bg-white/5 px-1.5 py-0.5 text-[11px] text-neutral-400">
+                {t('agent.mt5None')}
+              </span>
+            )}
+          </div>
+          {a.server && <p className="break-words text-[11px] text-neutral-500">{a.server}</p>}
+        </li>
+      ))}
+    </ul>
+  )
 }
-
-// 绿色只给"确实连着"的状态：桥接在线、直连已接入。
-// Green marks a genuinely live binding: bridge online, or gateway still linked.
-const isLive = (a: AgentMT5Account) => (a.channel === 'gateway' ? !a.revoked : a.online === true)
 
 function LastActive({ day }: { day: string | null }) {
   const { t } = useTranslation()
@@ -77,48 +94,6 @@ function LastActive({ day }: { day: string | null }) {
     <span className={`num whitespace-nowrap ${isRecentDay(day) ? 'text-neutral-100' : 'text-neutral-500'}`}>
       {day}
     </span>
-  )
-}
-
-// MT5 绑定：打码账号 + 实盘/模拟 + 服务器 + 最近连接。撤销的绑定照样列出并标
-// 「需重连」——代理看见"绑过但掉了"才知道要去提醒人重新验证。
-// One MT5 binding per line: masked login, real/demo, server, last seen. Revoked
-// ones are listed and flagged rather than hidden, so the agent can nudge.
-function Mt5List({ accounts }: { accounts: AgentMT5Account[] }) {
-  const { t } = useTranslation()
-  if (accounts.length === 0) return <span className="text-neutral-500">{t('agent.mt5None')}</span>
-  return (
-    <ul className="space-y-1.5">
-      {accounts.map((a, i) => (
-        <li key={`${a.login}-${i}`} className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="num text-neutral-100">{a.login}</span>
-            <span
-              className={`rounded-full px-1.5 py-0.5 text-[11px] ${
-                a.accountType === 'real' ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-400'
-              }`}
-            >
-              {t(a.accountType ? MT5_TYPE_KEY[a.accountType] : 'agent.mt5Unknown')}
-            </span>
-            {a.revoked && (
-              <span className="rounded-full bg-down/15 px-1.5 py-0.5 text-[11px] text-down">
-                {t('agent.mt5Revoked')}
-              </span>
-            )}
-          </div>
-          {/* 不用 truncate：手机上这一列很窄，截断正好把"最近连接什么时候"这半句
-              吃掉，等于这行白写。让它换行，桌面上宽度够时仍是一行。
-              No truncate: on a phone this column is narrow and truncation eats
-              exactly the half that carries the time. Wrapping costs one line on
-              a phone and nothing on desktop. */}
-          <p className="break-words text-[11px] text-neutral-500">
-            {a.server ? `${a.server} · ` : ''}
-            {t(a.channel === 'gateway' ? 'agent.mt5Gateway' : 'agent.mt5Bridge')} ·{' '}
-            <span className={isLive(a) ? 'text-up' : undefined}>{connectionText(a, t)}</span>
-          </p>
-        </li>
-      ))}
-    </ul>
   )
 }
 

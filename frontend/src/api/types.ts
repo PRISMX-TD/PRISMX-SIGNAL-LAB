@@ -183,37 +183,21 @@ export interface AgentLink {
 
 // 代理名单里的一个 MT5 绑定。login 是**后端打过码的**（123**678，与排行榜同一
 // 口径），前端不做二次处理；资金字段后端一概不下发。
-// One MT5 binding on the agent's list. login arrives already masked from the
-// backend (same form as the leaderboards); no money fields are ever sent.
+// 只说「连没连上」：通道（直连/桥接）、瞬时在线、最近连接时刻都不下发了
+// （2026-09-19 产品决定，理由见后端 AgentMT5AccountOut）。
+// One MT5 binding on the agent's list. login arrives already masked; no money
+// fields are ever sent. It reports connected-or-not only — channel, live online
+// state and last-seen were removed on purpose; see the backend schema.
 export interface AgentMT5Account {
   login: string
   server: string | null
   accountType: 'real' | 'demo' | 'contest' | null
-  // gateway = 平台与券商直连（用户不用开电脑），bridge = 用户电脑上的桥接程序。
-  // 「还连着吗」在两条通道上不是一回事：online 两边都算得准，而 lastConnectedAt
-  // **只有桥接有**——直连根本不写心跳，对直连行它恒为 null，别拿它说"从未连接"。
-  // gateway = the platform talks to the broker directly; bridge = the user's own
-  // desktop app. online is meaningful on both; lastConnectedAt is bridge-only,
-  // because the gateway never writes a heartbeat — never render it as "never
-  // connected" on a gateway row.
-  channel: 'gateway' | 'bridge'
-  // 只有桥接有；直连恒为 null。直连的"在不在线"是平台那台网关的状态、全站共享，
-  // 不是这个客户的状态——别把 null 当成 false 渲染成「离线」。
-  // Bridge only; always null on gateway rows, where "online" would be the
-  // platform's own gateway status shared by every account, not this client's.
-  // Never render null as "offline".
-  online: boolean | null
-  lastConnectedAt: string | null
-  // 只对直连行成立：券商侧密码变过，这次绑定的授权作废，要用户重新验证主密码。
-  // Gateway rows only: the broker-side password changed, so this binding needs
-  // the user to verify their master password again.
-  revoked: boolean
+  // false = 这条绑定当前不能跟单（直连授权作废，要客户重新验证主密码）。
+  // false = this binding cannot copy trades right now (gateway authorisation
+  // revoked; the client must verify their master password again).
+  connected: boolean
 }
 
-// 代理名单里的一个用户：只有这四项。邮箱是完整值（2026-09-15 产品决定），
-// 手机号与用户 id 仍然不下发。
-// One user on the agent's list: these four fields only. The email is the real one
-// (product decision, 2026-09-15); phone and user id are still withheld.
 export interface AgentLinkUser {
   nickname: string | null
   email: string
