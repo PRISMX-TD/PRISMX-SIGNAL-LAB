@@ -712,9 +712,11 @@ def admin_leaderboard(board: str, period: str, db: Session = Depends(get_db),
     is not gated by leaderboard_visible (that gate only guards the
     user-facing /gamification/leaderboard).
 
-    `reveal=True`：管理端看真实身份（user_id / 昵称原文 / 邮箱），不打码——
-    运营需要知道榜上是谁。用户端那条路径永远不传这个参数。
-    `reveal=True`: admins see real identities (user_id / raw nickname / email),
-    unmasked — operations needs to know who is on the board. The user-facing
-    path never passes this flag."""
+    `reveal=True`：管理端额外看到 user_id / 昵称原文 / 邮箱，账户号也给完整值
+    （用户端那份是打码的）——运营需要知道榜上是谁、对得上哪个账户。用户端那条
+    路径永远不传这个参数。
+    `reveal=True`: admins additionally see user_id / raw nickname / email and get
+    the full account number (the user-facing one is masked) — operations needs to
+    know who is on the board and which account it maps to. The user-facing path
+    never passes this flag."""
     return build_leaderboard_payload(db, admin, board, period, reveal=True)

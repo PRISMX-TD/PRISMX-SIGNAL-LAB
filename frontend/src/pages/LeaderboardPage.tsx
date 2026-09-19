@@ -789,7 +789,7 @@ export default function LeaderboardPage() {
   const sealed = periodSrc?.sealAt ? Date.now() >= new Date(periodSrc.sealAt).getTime() : false
 
   // quantitative: true 的几条（笔数/本金/盈亏为正）手机端常显；false 的几条
-  // 是说明性文案（比收益率不比金额、入金并入分母、按账户·打码·明示），手机端
+  // 是说明性文案（比收益率不比金额、入金并入分母、按账户·昵称公开·账户号打码），手机端
   // 用 hidden sm:inline-flex 藏起来腾地方，桌面端仍然全部显示、不变。
   // quantitative: true entries (trade count / baseline / positive P&L) stay
   // visible on mobile; the false ones are descriptive copy (metric framing,

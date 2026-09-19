@@ -1345,6 +1345,11 @@ export interface GamificationMe {
   badges: GamificationBadge[]
   winRate: GamificationWinRate
   nickname: string | null
+  // 2026-09-19 起没有任何展示路径读它（榜单/主页一律展示昵称原样，打码的是账户
+  // 号），账户页那个开关也下线了；字段保留只为不动接口形状。
+  // No display path reads this since 2026-09-19 (boards and profiles always show
+  // the nickname as typed and the account number is what's masked) and the
+  // account-page switch is gone; the field stays only to keep the API shape.
   nicknamePublic: boolean
   leaderboardOptOut: boolean
   // equippedBadge 是列表首枚（榜单/比赛行上画的那枚默认）；equippedBadges 是
@@ -1408,6 +1413,8 @@ export interface GamificationWinRateSummary {
 // change. equippedBadge: null explicitly unequips, distinct from omitting it.
 export interface ProfilePatch {
   nickname?: string
+  // 仍可写入，但已不影响任何展示（见 GamificationMe.nicknamePublic）。
+  // Still writable but no longer affects any display (see GamificationMe).
   nicknamePublic?: boolean
   leaderboardOptOut?: boolean
   equippedBadge?: string | null
@@ -1431,11 +1438,13 @@ export interface ProfileOut {
   statsPublic: boolean
 }
 
-// GET /gamification/profile/{publicId}（2026-09-07 公开主页设计）。名字已按对方
-// 的昵称公开设置打码；stats 仅在对方开了 statsPublic（或本人自看）时非空。
-// Public profile payload. displayName is already masked per the owner's
-// setting; stats is non-null only when the owner has statsPublic on (or the
-// viewer is the owner).
+// GET /gamification/profile/{publicId}（2026-09-07 公开主页设计）。displayName
+// 就是对方的昵称原样（2026-09-19 起不再按开关打码，见 LeaderboardRow）；主页上
+// 不出现账户号，stats 仅在对方开了 statsPublic（或本人自看）时非空。
+// Public profile payload. displayName is the owner's nickname as typed (no
+// per-user masking since 2026-09-19, see LeaderboardRow); the profile carries
+// no account number, and stats is non-null only when the owner has statsPublic
+// on (or the viewer is the owner).
 export interface PublicProfile {
   displayName: string
   isSelf: boolean
@@ -1662,11 +1671,11 @@ export interface CompetitionSummary {
   startsAt: string | null
   endsAt: string | null
   prizeNote: string | null
-  // 已终审比赛的冠军（榜首那一行，昵称按公开设置打码）；未终审或空榜为 null。
+  // 已终审比赛的冠军（榜首那一行，昵称原样，不带账户号）；未终审或空榜为 null。
   // 列表页的荣誉墙靠它把冠军摆出来，不必逐场打开详情。
-  // The champion of a settled competition (its rank-1 row, name masked per the
-  // nickname setting); null while unsettled or when nobody ranked. The list page's
-  // hall of champions shows them without opening each detail.
+  // The champion of a settled competition (its rank-1 row: the nickname as
+  // typed, no account number); null while unsettled or when nobody ranked. The
+  // list page's hall of champions shows them without opening each detail.
   champion?: CompetitionChampion | null
   // 榜首三行（进行中 / 已结束 / 已终审都有；未开赛为空）——列表头版的跑马灯用。
   // Top three rows (running / ended / settled; empty before start), for the list
