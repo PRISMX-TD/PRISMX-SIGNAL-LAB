@@ -4,3 +4,11 @@ psutil>=5.9.0
 numpy<2
 pystray>=0.19.0
 Pillow>=10.0.0
+# 自更新的来源校验（Ed25519 验签）。标准库没有任何非对称签名算法，而这条路径会把
+# 远端二进制装到用户机器上并执行，不适合手写密码学实现 —— 用经过审计的库。
+# 只在 bridge_app._load_update_public_key() 里惰性 import：万一打包漏了它，
+# 受影响的只是自更新（会被自动禁用并提示手动下载），程序本身照常运行。
+# Self-update provenance (Ed25519). The stdlib has no asymmetric signatures, and
+# this path installs and runs a remote binary — not a place for hand-rolled crypto.
+# Imported lazily, so a packaging miss disables self-update rather than the app.
+cryptography>=42.0.0

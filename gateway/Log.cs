@@ -44,6 +44,7 @@ namespace Prismx.Mt5Gateway
         private static string _currentFile;
         private static long _currentBytes;
         private static int _overflowIndex;
+        private static StreamWriter _writer;
 
         public static void Init(string baseDir)
         {
@@ -99,6 +100,7 @@ namespace Prismx.Mt5Gateway
                     DateTime today = DateTime.Now.Date;
                     if (today != _currentDate)
                     {
+                        CloseWriter();
                         // 跨天(或进程刚起来):换文件,顺便清理过期日志。
                         // 清理放在这里而不是单开一个定时器——服务是长驻的,
                         // 跨天是天然的每日触发点,不需要再引入一个线程。
@@ -114,19 +116,64 @@ namespace Prismx.Mt5Gateway
 
                     if (_currentBytes + lineBytes > MaxFileBytes)
                     {
+                        CloseWriter();
                         _overflowIndex++;
                         _currentFile = Path.Combine(_dir,
                             string.Format("gateway-{0:yyyyMMdd}.overflow{1}.log", _currentDate, _overflowIndex));
                         _currentBytes = SafeFileLength(_currentFile);
                     }
 
-                    File.AppendAllText(_currentFile, line + Environment.NewLine, Encoding.UTF8);
+                    // 常开的 StreamWriter,不再每行一次"开-写-关"。
+                    //
+                    // 为什么要改:这把 Gate 锁上会进来券商的回调线程(OnDealerAnswer /
+                    // OnDealAdd 都写日志),每行一次 File.AppendAllText 就是每行三次
+                    // syscall——行情/成交密集时会直接拖慢回调线程本身,而那是交易路径。
+                    // AutoFlush 保留:进程随时可能被 Stop-Process -Force 硬杀,缓冲区里
+                    // 的日志一旦丢掉,恰恰丢的是崩溃前最要紧的那几行。
+                    // A kept-open writer instead of open-write-close per line: broker
+                    // callback threads log under this same lock, and three syscalls per
+                    // line slowed the callback path itself. AutoFlush stays, because the
+                    // process is force-killed on deploy and the last lines matter most.
+                    if (_writer == null)
+                    {
+                        _writer = new StreamWriter(
+                            new FileStream(_currentFile, FileMode.Append, FileAccess.Write, FileShare.ReadWrite),
+                            new UTF8Encoding(false));
+                        _writer.AutoFlush = true;
+                    }
+
+                    _writer.WriteLine(line);
                     _currentBytes += lineBytes;
                 }
                 catch
                 {
-                    // 写日志失败不影响交易
+                    // 写日志失败不影响交易。句柄可能已经坏了,丢掉让下一行重开。
+                    // A broken handle is dropped so the next line reopens it.
+                    CloseWriter();
                 }
+            }
+        }
+
+        /// <summary>关掉当前的日志写入器。调用方持 Gate。
+        /// Closes the current writer; caller holds Gate.</summary>
+        private static void CloseWriter()
+        {
+            if (_writer == null)
+                return;
+
+            try { _writer.Dispose(); }
+            catch { }
+
+            _writer = null;
+        }
+
+        /// <summary>进程退出前把日志句柄收干净。
+        /// Flush and release the log handle before exit.</summary>
+        public static void Shutdown()
+        {
+            lock (Gate)
+            {
+                CloseWriter();
             }
         }
 

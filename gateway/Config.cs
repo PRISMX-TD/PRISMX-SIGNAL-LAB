@@ -51,6 +51,30 @@ namespace Prismx.Mt5Gateway
         // 只能靠 comment 认"哪些仓位是本平台开的"。
         public string CommentPrefix = "PRISMX";
 
+        // --- 额外的防线 ---
+        // 允许调用的来源 IP(逗号分隔,精确匹配)。留空 = 不限制。
+        //
+        // 生产上 listen 常写成 http://+:8800/(见 gateway.ini.example 里绑隧道 IP 会
+        // 503 那段),等于把「读全体客户资料 + 代客下单」的接口绑在所有网卡上,唯一
+        // 的防线是云安全组。安全组一次误配、或换机迁移忘了带规则,这个接口就直接
+        // 到公网上了。填上后端那台机器的隧道地址(如 10.66.0.1),等于在网关自己这层
+        // 再加一道,不必把唯一防线放在云控制台里。
+        // Source-IP allowlist (exact match, empty = no restriction). Production often
+        // binds to all interfaces, leaving a cloud security group as the only barrier;
+        // listing the backend's tunnel address adds a second one inside the gateway.
+        public List<string> AllowedIps = new List<string>();
+
+        // HTTP 处理线程数。一次平仓最坏 = dealer 超时(默认 60 秒)+ 两次确认重读,
+        // 而每个线程处理完一个请求才回去 accept 下一个——线程数就是并发上限。
+        // 原来写死 4:四笔卡住的慢单就能把**所有**接口(含不鉴权的 /health)排到队尾,
+        // 监控于是把网关判成「完全失联」,运维按失联处置去重启,反而撞上重启期间的
+        // 重复下单风险。调大不是根治(根治要改异步 I/O),但把「监控误判」的门槛从
+        // 4 笔抬到这个数,代价只是几个空闲线程。
+        // Handler threads: each serves one request to completion before accepting the
+        // next, so this is the concurrency ceiling. It was hard-coded to 4, and four
+        // stuck closes queued every endpoint including the unauthenticated /health.
+        public int HttpThreads = 16;
+
         public static Config Load(string path)
         {
             if (!File.Exists(path))
@@ -110,6 +134,25 @@ namespace Prismx.Mt5Gateway
                     case "comment_prefix":
                         cfg.CommentPrefix = val;
                         break;
+                    case "allowed_ips":
+                        cfg.AllowedIps.Clear();
+                        foreach (string ip in val.Split(','))
+                        {
+                            string t = ip.Trim();
+                            if (t.Length > 0)
+                                cfg.AllowedIps.Add(t);
+                        }
+                        break;
+                    case "http_threads":
+                        int threads;
+                        if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out threads)
+                            && threads > 0 && threads <= 256)
+                            cfg.HttpThreads = threads;
+                        break;
+                    case "i_know_what_im_doing":
+                        cfg.IKnowWhatImDoing = val.Equals("true", StringComparison.OrdinalIgnoreCase)
+                            || val == "1";
+                        break;
                     case "preselect_symbols":
                         cfg.PreselectSymbols.Clear();
                         foreach (string s in val.Split(','))
@@ -140,6 +183,62 @@ namespace Prismx.Mt5Gateway
             // 空 token 等于任何能访问端口的人都能下单,必须拦住。
             if (string.IsNullOrEmpty(ApiToken) || ApiToken.Length < 16)
                 throw new Exception("api_token 缺失或太短(至少 16 位)。这是下单接口的唯一鉴权,不能留空。");
+
+            // 下面两条以前只在 Program 里打一条 Warn——日志刷过去就没人看见,而它们
+            // 各自都是"最后一道闸"。改成启动时直接拒绝,除非配置里明确写了
+            // i_know_what_im_doing = true,让「我知道我在做什么」成为一次显式选择。
+            // These two used to be a startup warning that scrolled past in the log,
+            // though each is a last line of defence. They now refuse to start unless
+            // the config says so explicitly.
+            if (!IKnowWhatImDoing)
+            {
+                // 空白名单 = 这家券商**所有**账号都能被代客下单。
+                if (AllowedGroups.Count == 0)
+                    throw new Exception(
+                        "allowed_groups 为空,等于允许对这家券商的所有账号代客下单。"
+                        + "请填上允许的组前缀;确实要不限制就在 gateway.ini 里写 i_know_what_im_doing = true");
+
+                // 绑全网卡 + 没有来源 IP 白名单 = 只剩云安全组一道防线。
+                bool bindsAll = ListenPrefix.Contains("//+:")
+                    || ListenPrefix.Contains("//*:")
+                    || ListenPrefix.Contains("//0.0.0.0:");
+
+                if (bindsAll && AllowedIps.Count == 0)
+                    throw new Exception(
+                        "listen 绑在所有网卡上却没有配 allowed_ips,下单接口的唯一防线就只剩云安全组了。"
+                        + "请填 allowed_ips(如后端的隧道地址),或改成只绑具体 IP;"
+                        + "确实要这样就在 gateway.ini 里写 i_know_what_im_doing = true");
+            }
+        }
+
+        /// <summary>显式解除上面两条启动检查。只应在临时排障时打开。
+        /// Explicitly waives the two startup checks above; for temporary triage only.</summary>
+        public bool IKnowWhatImDoing;
+
+        /// <summary>来源 IP 是否被允许。列表为空表示不限制。
+        /// Whether a caller's IP is allowed; an empty list means no restriction.</summary>
+        public bool IsIpAllowed(string ip)
+        {
+            if (AllowedIps.Count == 0)
+                return true;
+
+            if (string.IsNullOrEmpty(ip))
+                return false;
+
+            // IPv6 映射写法 ::ffff:10.66.0.1 要能匹配上 10.66.0.1。
+            // Accept the IPv4-mapped IPv6 spelling of the same address.
+            string bare = ip.StartsWith("::ffff:", StringComparison.OrdinalIgnoreCase)
+                ? ip.Substring(7)
+                : ip;
+
+            foreach (string allowed in AllowedIps)
+            {
+                if (string.Equals(allowed, ip, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(allowed, bare, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
         }
 
         /// <summary>组是否在白名单内。白名单为空表示不限制。</summary>

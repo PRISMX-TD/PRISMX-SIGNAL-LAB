@@ -225,12 +225,24 @@ namespace Prismx.Mt5Gateway
                         case 'n': sb.Append('\n'); break;
                         case 'r': sb.Append('\r'); break;
                         case 't': sb.Append('\t'); break;
+                        case 'b': sb.Append('\b'); break;
+                        case 'f': sb.Append('\f'); break;
+                        case '/': sb.Append('/'); break;
                         case 'u':
-                            if (i + 4 < s.Length)
-                            {
-                                sb.Append((char)Convert.ToInt32(s.Substring(i + 1, 4), 16));
-                                i += 4;
-                            }
+                            // 长度不够时原来什么都不追加也不报错——字符被悄悄吞掉。
+                            // 宁可明确失败:静默改写品种名/comment/tag 比 400 难查得多。
+                            // A short \u used to append nothing and not complain,
+                            // silently rewriting a symbol name, comment or tag.
+                            if (i + 4 >= s.Length)
+                                throw new FormatException("JSON 字符串里的 \\u 转义不完整,位置 " + i);
+
+                            int code;
+                            if (!int.TryParse(s.Substring(i + 1, 4), NumberStyles.HexNumber,
+                                    CultureInfo.InvariantCulture, out code))
+                                throw new FormatException("JSON 字符串里的 \\u 转义不是十六进制,位置 " + i);
+
+                            sb.Append((char)code);
+                            i += 4;
                             break;
                         default: sb.Append(s[i]); break;
                     }
@@ -255,12 +267,76 @@ namespace Prismx.Mt5Gateway
             if (s[i] == '"')
                 return ReadString(s, ref i);
 
+            // 嵌套对象/数组:整段跳过(不解析内容),值记成原文。
+            //
+            // 原来这里是"一路读到 , 或 } 为止":`{"meta":{"a":1},"login":500}` 会把值
+            // 读成 `{"a":1`、停在那个 `}` 上,主循环随即 break,**login 被静默丢掉**;
+            // 数组值则会在下一轮抛"JSON 键必须是字符串"。现状后端只发平坦对象所以
+            // 不触发,但这是一颗定时炸弹:哪天请求里多一个嵌套字段,login 变 0 → 400,
+            // 或者更糟——某个交易参数被悄悄丢成默认值。
+            // Nested objects/arrays are now skipped by bracket matching. The old
+            // "read until , or }" truncated the value at the first inner brace and
+            // silently dropped every field after it — harmless while requests stay
+            // flat, fatal the day one isn't.
+            if (s[i] == '{' || s[i] == '[')
+                return SkipContainer(s, ref i);
+
             // 数字 / true / false / null:读到分隔符为止
             int start = i;
             while (i < s.Length && s[i] != ',' && s[i] != '}')
                 i++;
 
             return s.Substring(start, i - start).Trim();
+        }
+
+        /// <summary>
+        /// 跳过一个 {...} 或 [...],返回它的原文。括号配对,并正确忽略字符串里的括号。
+        /// Skips a balanced container, returning its raw text; braces inside strings
+        /// do not count.
+        /// </summary>
+        private static string SkipContainer(string s, ref int i)
+        {
+            int start = i;
+            int depth = 0;
+            bool inString = false;
+
+            while (i < s.Length)
+            {
+                char ch = s[i];
+
+                if (inString)
+                {
+                    if (ch == '\\')
+                        i++;                 // 跳过被转义的那个字符 / skip the escaped char
+                    else if (ch == '"')
+                        inString = false;
+                }
+                else if (ch == '"')
+                {
+                    inString = true;
+                }
+                else if (ch == '{' || ch == '[')
+                {
+                    depth++;
+                }
+                else if (ch == '}' || ch == ']')
+                {
+                    depth--;
+
+                    if (depth == 0)
+                    {
+                        i++;
+                        return s.Substring(start, i - start);
+                    }
+
+                    if (depth < 0)
+                        break;
+                }
+
+                i++;
+            }
+
+            throw new FormatException("JSON 里有没配对的括号,位置 " + start);
         }
 
         public bool Has(string key)

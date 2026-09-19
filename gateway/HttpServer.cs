@@ -28,9 +28,23 @@ namespace Prismx.Mt5Gateway
         private readonly byte[] _tokenBytes;
         private volatile bool _stopping;
 
-        // 交易幂等缓存,见 Idempotency.cs。24 小时与桥接程序的 clientOrderId 缓存对齐。
-        // Trade idempotency cache (Idempotency.cs); 24h matches the bridge's cache.
-        private readonly IdempotencyCache _idem = new IdempotencyCache(TimeSpan.FromHours(24));
+        // 交易幂等缓存,见 Idempotency.cs。24 小时与桥接程序的 clientOrderId 缓存对齐,
+        // 也远大于后端 GATEWAY_RECONCILE_TIMEOUT(75 秒)加网络余量。
+        // **落盘**:部署方式是硬杀进程,内存缓存挡不住"重启后按同一 clientOrderId 重试"。
+        // Trade idempotency cache; 24h matches the bridge and dwarfs the backend's 75s
+        // reconcile timeout. Persisted, because deployment force-kills this process.
+        private readonly IdempotencyCache _idem =
+            new IdempotencyCache(TimeSpan.FromHours(24), IdempotencyStorePath());
+
+        /// <summary>幂等缓存的落盘位置:与 exe 同目录的 state\ 下,和 logs\ 并列。
+        /// Next to the exe under state\, alongside logs\.</summary>
+        private static string IdempotencyStorePath()
+        {
+            string baseDir = Path.GetDirectoryName(
+                System.Reflection.Assembly.GetExecutingAssembly().Location);
+
+            return Path.Combine(baseDir ?? ".", "state", "idempotency.jsonl");
+        }
 
         public HttpServer(Config cfg, Mt5Link link)
         {
@@ -107,8 +121,10 @@ namespace Prismx.Mt5Gateway
             _listener.Start();
             Log.Info("HTTP 服务已启动:{0}", _cfg.ListenPrefix);
 
-            // 几个并发处理线程就够:MT5 调用本身是串行的
-            for (int i = 0; i < 4; i++)
+            // 处理线程数见 Config.HttpThreads:每个线程处理完一个请求才回去 accept,
+            // 所以这个数就是并发上限,也是「几笔卡住的慢单能把 /health 一起堵死」的门槛。
+            // Each thread serves one request to completion, so this is the ceiling.
+            for (int i = 0; i < _cfg.HttpThreads; i++)
             {
                 Thread t = new Thread(AcceptLoop);
                 t.IsBackground = true;
@@ -206,12 +222,39 @@ namespace Prismx.Mt5Gateway
                 return;
             }
 
+            // 来源 IP 白名单(配了才生效)。排在 token 校验之前:不在白名单里的来源
+            // 连"试 token"的机会都不该有。/health 不受限,监控探活可能来自别处。
+            // Source-IP allowlist, checked before the token so a disallowed source
+            // never gets to guess it. /health is exempt so probes still work.
+            if (!_cfg.IsIpAllowed(RemoteIp(ctx)))
+            {
+                Log.Warn("来源 IP 不在白名单:{0} {1} 来自 {2}", method, path, RemoteIp(ctx));
+                WriteError(ctx, 403, "forbidden", "来源地址不被允许");
+                return;
+            }
+
             if (!Authorized(ctx))
             {
                 Log.Warn("鉴权失败:{0} {1} 来自 {2}", method, path,
                     ctx.Request.RemoteEndPoint);
 
                 WriteError(ctx, 401, "unauthorized", "缺少或错误的 X-Gateway-Token");
+                return;
+            }
+
+            // 请求体上限。HttpListener 自己不限制,而 ReadBody 会把整个 body 读进内存、
+            // JsonObject.Parse 再复制一份——一次大 POST 就能把进程 OOM,而这个进程一崩,
+            // 全体 Gateway 直连用户同时掉线。真实请求都是几百字节量级。
+            // HttpListener imposes no limit and ReadBody buffers the whole body; one
+            // large POST could OOM the process and drop every direct-connect user at
+            // once. Real requests are a few hundred bytes.
+            if (ctx.Request.ContentLength64 > MaxRequestBodyBytes)
+            {
+                Log.Warn("请求体过大已拒绝:{0} {1} {2} 字节 来自 {3}",
+                    method, path, ctx.Request.ContentLength64, RemoteIp(ctx));
+
+                WriteError(ctx, 413, "payload_too_large",
+                    "请求体超过 " + MaxRequestBodyBytes + " 字节上限");
                 return;
             }
 
@@ -874,12 +917,51 @@ namespace Prismx.Mt5Gateway
             return value > 0 ? (ulong)value : 0UL;
         }
 
+        /// <summary>请求体上限(字节)。真实请求是几百字节量级,64 KB 留了两个数量级余量。
+        /// Request body cap; real requests are a few hundred bytes.</summary>
+        private const int MaxRequestBodyBytes = 64 * 1024;
+
+        /// <summary>调用方 IP。取不到时返回空串(会被白名单当成不允许)。
+        /// The caller's IP; "" when unavailable, which the allowlist treats as denied.</summary>
+        private static string RemoteIp(HttpListenerContext ctx)
+        {
+            try
+            {
+                System.Net.IPEndPoint ep = ctx.Request.RemoteEndPoint;
+                return ep == null || ep.Address == null ? "" : ep.Address.ToString();
+            }
+            catch (Exception)
+            {
+                return "";
+            }
+        }
+
         private static string ReadBody(HttpListenerContext ctx)
         {
             using (Stream s = ctx.Request.InputStream)
             using (StreamReader reader = new StreamReader(s, Encoding.UTF8))
             {
-                return reader.ReadToEnd();
+                // 即使 Content-Length 说得小(或分块传输时压根没有这个头),也只读到
+                // 上限为止:上面那次 ContentLength64 检查挡不住撒谎的头。
+                // Even with a small (or absent, on chunked transfers) Content-Length,
+                // read no more than the cap: that header can lie.
+                char[] buf = new char[MaxRequestBodyBytes + 1];
+                int total = 0;
+
+                while (total < buf.Length)
+                {
+                    int n = reader.Read(buf, total, buf.Length - total);
+
+                    if (n <= 0)
+                        break;
+
+                    total += n;
+                }
+
+                if (total > MaxRequestBodyBytes)
+                    throw new FormatException("请求体超过 " + MaxRequestBodyBytes + " 字节上限");
+
+                return new string(buf, 0, total);
             }
         }
 

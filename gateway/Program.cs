@@ -297,7 +297,12 @@ namespace Prismx.Mt5Gateway
                 Console.WriteLine("三步全部通过。可以用 serve 模式正式运行了。");
                 Console.WriteLine();
                 Console.WriteLine("提示:这笔测试仓位还开着,记得手动平掉,");
-                Console.WriteLine("      或用 /trade/close 接口平仓(ticket={0})。", r.Order);
+                // 平仓要的是**仓位号**。净额账号上 Order ≠ Position,照着 Order 敲会
+                // 找不到仓位;OpenPositionCore 已经专门解决了这个区分,提示词跟上。
+                // Closing wants the position id; on netting accounts it differs from
+                // the order ticket, which this hint used to print.
+                Console.WriteLine("      或用 /trade/close 接口平仓(ticket={0})。",
+                    r.Position != 0 ? r.Position : r.Order);
 
                 return 0;
             }
@@ -372,10 +377,38 @@ namespace Prismx.Mt5Gateway
 
             using (Mt5Link link = new Mt5Link(cfg))
             {
-                link.ConnectOnly();
+                // 必须用 Start() 而不是 ConnectOnly():后者的注释就写着"诊断用,只连接,
+                // 不启动 DealerStart",而平仓要走 dealer。以前这里用 ConnectOnly(),
+                // 于是这个「出事时最后的人工兜底手段」实际会在每一笔仓位上空等满
+                // dealer 超时(默认 60 秒)再报失败。
+                // Start(), not ConnectOnly(): the latter deliberately skips DealerStart,
+                // so this emergency tool used to burn a full dealer timeout per position.
+                link.Start();
 
                 MTRetCode res;
                 PositionInfo[] positions = link.GetPositions(clientLogin, out res);
+
+                // 白名单校验:这是唯一一个能绕过 allowed_groups 动真实资金的入口
+                // (selftest 有校验,serve 的每个交易接口也都有)。补上。
+                // The only entry point that could move real money around the
+                // allowed_groups whitelist; selftest and the HTTP paths both check it.
+                string group;
+                MTRetCode gres;
+
+                if (!link.CheckAccountGroup(clientLogin, out group, out gres))
+                {
+                    Console.WriteLine("查不到账号 {0}:{1}", clientLogin, gres);
+                    return 1;
+                }
+
+                if (!cfg.IsGroupAllowed(group))
+                {
+                    Console.WriteLine("账号 {0} 所在组 [{1}] 不在 allowed_groups 白名单内,拒绝操作。",
+                        clientLogin, group);
+                    return 1;
+                }
+
+                Console.WriteLine("账号 {0} 组=[{1}]", clientLogin, group);
 
                 if (positions == null || positions.Length == 0)
                 {
@@ -432,10 +465,14 @@ namespace Prismx.Mt5Gateway
                 http = new HttpServer(cfg, link);
                 http.Start();
 
+                // 空白名单现在由 Config.Validate() 在启动时直接拒绝(除非配置里写了
+                // i_know_what_im_doing)。走到这里还为空,说明是显式放行的,仍然吼一声。
+                // An empty whitelist is now refused at startup unless explicitly waived;
+                // if we got here with one, it was a deliberate choice — still say so.
                 if (cfg.AllowedGroups.Count == 0)
                 {
-                    Log.Warn("allowed_groups 为空:任何账号都可交易。");
-                    Log.Warn("测试阶段建议在 gateway.ini 里限定 demo 组。");
+                    Log.Warn("allowed_groups 为空:任何账号都可交易(已由 i_know_what_im_doing 显式放行)。");
+                    Log.Warn("这是最后一道闸,尽快在 gateway.ini 里限定组。");
                 }
 
                 Log.Info("网关就绪。Ctrl+C 停止。");
@@ -464,6 +501,10 @@ namespace Prismx.Mt5Gateway
                 if (link != null) link.Dispose();
 
                 Log.Info("已停止");
+
+                // 日志现在用常开的 StreamWriter,退出前收干净句柄。
+                // The log keeps a writer open now; release it on the way out.
+                Log.Shutdown();
             }
         }
 

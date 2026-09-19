@@ -137,6 +137,21 @@ if ($Status) {
             Write-Bad "任务处于【已禁用】状态:开机自启与看门狗当前都不生效!"
             Write-Note "  多半是上次 -Stop 后忘了 -Start。执行:  .\install-service.ps1 -Start"
         }
+        # 把看门狗触发器的重复设置打出来。以前看不到这一项,而它恰恰可能静默失效:
+        # Duration 若不是"无限"(Interval 有值而 Duration 为空 = 无限),自愈只在
+        # 那段时间内有效,任务却一直显示 Ready。
+        # Print the repetition settings: a non-infinite duration silently ends the
+        # self-healing while the task still shows as Ready.
+        foreach ($t in $task.Triggers) {
+            $rep = $t.Repetition
+            if ($null -ne $rep -and $rep.Interval) {
+                $dur = if ($rep.Duration) { $rep.Duration } else { "无限(Duration 为空)" }
+                Write-Note "看门狗重复    : 每 $($rep.Interval),持续 $dur"
+                if ($rep.Duration) {
+                    Write-Bad "  看门狗重复时长不是「无限」!到点后进程消失将不再自愈。请重跑安装以修正。"
+                }
+            }
+        }
     } else {
         Write-Note "计划任务      : 未安装"
     }
@@ -303,9 +318,18 @@ $action = New-ScheduledTaskAction -Execute $ExePath -Argument "serve" -WorkingDi
 #   2) 每 2 分钟重复 —— 看门狗。配合下面的 MultipleInstances=IgnoreNew,
 #      进程还活着时新实例直接被忽略,不会起第二份;进程没了才真正拉起。
 #      这一条让"进程因任何原因消失"都能在 2 分钟内自愈,不需要第三方工具。
+#      -RepetitionDuration 必须显式给。不给的时候,不同 Windows 版本对"重复多久"
+#      的默认取值并不一致(「永远」与「1 天」都出现过)。若被解析成 1 天,这个脚本
+#      宣称的"进程消失 2 分钟内自愈"会在装好的第二天悄悄失效,而 -Status 看不出来
+#      (任务仍然是 Ready)——那正是这个脚本要根治的故障本身。
+#      Without an explicit duration, Windows versions disagree on the default
+#      ("forever" and "1 day" have both been observed). If it resolves to 1 day, the
+#      self-healing this script promises silently stops working on day two, and
+#      -Status still shows the task as Ready.
 $trigAtStartup = New-ScheduledTaskTrigger -AtStartup
 $trigWatchdog  = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
-                    -RepetitionInterval (New-TimeSpan -Minutes 2)
+                    -RepetitionInterval (New-TimeSpan -Minutes 2) `
+                    -RepetitionDuration ([TimeSpan]::MaxValue)
 
 # 以 SYSTEM 身份、最高权限运行 —— 这才是"不依赖任何人登录"的关键,
 # 同时不需要在任务里存任何账号密码。
@@ -334,6 +358,27 @@ Register-ScheduledTask -TaskName $TaskName `
     -Description "PRISMX MT5 Gateway - 开机自启,不依赖登录会话,进程消失后 2 分钟内自愈" | Out-Null
 
 Write-Ok "计划任务 '$TaskName' 已创建"
+
+Write-Step "收紧 gateway.ini 与 logs\ 的权限"
+
+# 任务以 SYSTEM 运行,但 gateway.ini 明文存着 Manager 账号密码与 api_token
+# (Config.cs 读的就是它),默认继承目录 ACL 时本机 Users 组可读。这台机器同时
+# 开着 RDP——任何能登上来的账号都能拿到「全券商账号的管理员凭据」+「等同全体
+# 客户下单权限的 token」。装的时候就把继承断掉,只留 SYSTEM 与 Administrators。
+# logs\ 同理:日志里不打密码,但持仓、成交、账号号码都在里面。
+# The task runs as SYSTEM, yet gateway.ini holds the manager password and the API
+# token in cleartext and inherits a directory ACL that lets local Users read it —
+# on a box that also serves RDP. Break inheritance at install time.
+foreach ($target in @($IniPath, (Join-Path $GatewayDir 'logs'))) {
+    if (-not (Test-Path $target)) { continue }
+    try {
+        & icacls.exe $target /inheritance:r /grant:r "SYSTEM:(F)" "Administrators:(F)" /T /C | Out-Null
+        if ($LASTEXITCODE -eq 0) { Write-Ok "已收紧权限:$target(仅 SYSTEM / Administrators)" }
+        else                     { Write-Note "icacls 返回 $LASTEXITCODE,请手工核对 $target 的权限" }
+    } catch {
+        Write-Note "收紧 $target 权限失败:$($_.Exception.Message)。请手工执行 icacls。"
+    }
+}
 
 Write-Step "启动"
 Start-ScheduledTask -TaskName $TaskName

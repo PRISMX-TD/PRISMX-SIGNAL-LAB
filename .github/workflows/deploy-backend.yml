@@ -3,7 +3,9 @@
 # 前端不经过这里：Vercel 自己监听 GitHub 推送。
 #
 # 需要在仓库 Settings → Secrets and variables → Actions 配三个 secret：
-#   VPS_HOST         VPS 公网 IP（43.134.110.47）
+#   VPS_HOST         VPS 公网 IP（具体地址见运维手册 2.2，不写进仓库：把生产源站 IP
+#                    留在可见的仓库里，等于把「绕过 CDN 直打源站」和「对 22 端口定向
+#                    爆破」的第一步白送出去）
 #   VPS_SSH_KEY      专用部署密钥的私钥（ed25519，公钥已放进 VPS 上 ubuntu 用户的 authorized_keys）
 #   VPS_KNOWN_HOSTS  `ssh-keyscan -t ed25519 <VPS_HOST>` 的输出（固定主机指纹，防中间人）
 # VPS 侧的一次性准备见运维手册《部署与上线进度》2.2 节。

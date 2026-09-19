@@ -35,10 +35,44 @@ namespace Prismx.Mt5Gateway
             _result = result;
         }
 
+        /// <summary>
+        /// 弃用这个 sink:之后到达的回调一律不再碰 _result。
+        ///
+        /// 为什么必须有:超时路径上调用方会 DealerUnsubscribe 然后 Dispose 掉 _result,
+        /// 而 DealerUnsubscribe **不保证**等待已经进入回调的那一次调用返回——超时那
+        /// 一刻恰恰是"回执正在路上"的典型场景。托管对象被 Dispose 之后原生层再回调
+        /// 写进来,就是进程级 AccessViolation:catch 不住,直接杀进程,所有在途下单
+        /// 一起中断。
+        ///
+        /// 这个方法本身要拿 _lock,所以它会**等待**正在执行的那次回调做完再返回;
+        /// 返回之后再 Dispose 就是安全的。
+        /// Abandon this sink so later callbacks never touch _result. DealerUnsubscribe
+        /// does not wait for an in-flight callback, and a native callback writing into
+        /// a disposed managed object is an uncatchable AccessViolation. Taking _lock
+        /// here waits for any callback already running, making a later Dispose safe.
+        /// </summary>
+        public void Abandon()
+        {
+            lock (_lock)
+            {
+                _abandoned = true;
+            }
+        }
+
+        private bool _abandoned;
+
         public override void OnDealerAnswer(CIMTRequest request)
         {
             lock (_lock)
             {
+                // 调用方已经放弃等待并即将/已经释放 _result:什么都不能碰。
+                // The caller gave up and is about to dispose _result: touch nothing.
+                if (_abandoned)
+                {
+                    _done.Set();
+                    return;
+                }
+
                 try
                 {
                     // 把服务器答复复制出来,否则回调返回后就读不到了
@@ -632,8 +666,31 @@ namespace Prismx.Mt5Gateway
 
         internal void MarkConnected(bool value)
         {
+            if (!value)
+            {
+                // 断开时服务器侧的订阅就已经清空了。以前这里只翻 _connected,而
+                // watchdog 只在 `!_connected` 的分支里重建订阅——SDK 自己完成一次
+                // 断-连(OnDisconnect 紧跟 OnConnect)时,watchdog 那一秒看到的已经是
+                // _connected==true,于是 _posSubscribed/_dealSubscribed 仍是 true 而
+                // 服务器那边早就没有订阅了:事件永久不再到达,/health 还显示订阅"在"。
+                // 在这里就把标志放倒,并请 watchdog 在"连着"的分支里补订阅。
+                // The server clears our subscriptions on disconnect. This used to only
+                // flip _connected, while resubscription lived in the watchdog's
+                // "not connected" branch — so an SDK-internal reconnect (OnDisconnect
+                // immediately followed by OnConnect) left both flags true with no
+                // server-side subscription: events stop forever and /health still says
+                // they are up. Lower the flags here and ask for a rebuild.
+                _posSubscribed = false;
+                _dealSubscribed = false;
+                _needResubscribe = true;
+            }
+
             _connected = value;
         }
+
+        /// <summary>连接翻转过,订阅需要重建。由 watchdog 在"已连接"分支里消费。
+        /// Set on any disconnect; consumed by the watchdog's connected branch.</summary>
+        private volatile bool _needResubscribe;
 
         //+------------------------------------------------------------------+
         //| 启动 dealer 通道,记录结果。返回是否成功。                        |
@@ -996,6 +1053,35 @@ namespace Prismx.Mt5Gateway
             }
         }
 
+        /// <summary>半开探测的间隔与容忍次数。30 秒一探、连续 3 次失败才动手:
+        /// 一次偶发失败不该把正常连接踢掉,而 90 秒的发现时延远好过"等人工重启"。
+        /// Probe cadence and tolerance; one blip must not kill a healthy link.</summary>
+        private const int HeartbeatEverySec = 30;
+        private const int HeartbeatFailLimit = 3;
+
+        /// <summary>
+        /// 极轻的存活探测:读一次品种总数。
+        ///
+        /// 选它是因为它不发交易请求、不碰 dealer,失败与否只反映"这条 Manager 连接
+        /// 还能不能用"。抛异常或返回 0 都算失败——连着的时候品种表不可能是空的。
+        /// A cheap liveness probe that touches neither the dealer nor any order path.
+        /// </summary>
+        private bool ProbeAlive()
+        {
+            try
+            {
+                lock (_gate)
+                {
+                    return _manager.SymbolTotal() > 0;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("存活探测异常:{0}", ex.Message);
+                return false;
+            }
+        }
+
         /// <summary>断线重连。指数退避,最多 30 秒一次。</summary>
         private void WatchdogLoop()
         {
@@ -1003,6 +1089,8 @@ namespace Prismx.Mt5Gateway
             // dealer 重试节流:连接正常但 dealer 掉了时,每 10 圈(约 10 秒)重试一次。
             // 不用每秒重试——权限类问题重试再密也不会更快好,只会白敲券商接口。
             int dealerRetryTick = 0;
+            int heartbeatTick = 0;
+            int heartbeatFails = 0;
 
             while (!_stopping)
             {
@@ -1011,6 +1099,46 @@ namespace Prismx.Mt5Gateway
                 if (_stopping || _connected)
                 {
                     delaySec = 2;
+
+                    // SDK 自己完成了一次断-连:订阅在服务器侧已被清掉,补回来。
+                    // 这条分支是 G-03 的落点,详见 MarkConnected 里的说明。
+                    // The SDK healed a drop on its own; rebuild the subscriptions.
+                    if (!_stopping && _connected && _needResubscribe)
+                    {
+                        _needResubscribe = false;
+                        Log.Warn("检测到连接曾经中断,重建持仓与成交订阅");
+                        _posSubscribed = false;
+                        SubscribePositions();
+                        _dealSubscribed = false;
+                        SubscribeDeals();
+                    }
+
+                    // 半开连接探测。watchdog 原来唯一的判据是 _connected,而这个标志
+                    // 只由 SDK 的回调翻转——券商侧或 WireGuard 隧道静默断开、SDK 没
+                    // 回调时,网关会一直自称已连接,所有请求超时直到人工重启。
+                    // 每 HeartbeatEverySec 秒做一次极轻的探测(读品种总数,纯本地缓存
+                    // 读,不发交易请求),连续失败 HeartbeatFailLimit 次就主动放倒
+                    // _connected,让下面的重连分支接手。
+                    // Half-open detection: _connected only flips from SDK callbacks, so
+                    // a silent drop leaves the gateway claiming to be connected while
+                    // everything times out. Probe cheaply and force a reconnect.
+                    if (!_stopping && _connected && ++heartbeatTick >= HeartbeatEverySec)
+                    {
+                        heartbeatTick = 0;
+
+                        if (ProbeAlive())
+                        {
+                            heartbeatFails = 0;
+                        }
+                        else if (++heartbeatFails >= HeartbeatFailLimit)
+                        {
+                            heartbeatFails = 0;
+                            Log.Error("连续 {0} 次探测失败,判定连接已半开,主动断开以触发重连",
+                                HeartbeatFailLimit);
+                            MarkConnected(false);
+                            continue;
+                        }
+                    }
 
                     // 连接还在、但 dealer 通道不可用:单独把它拉回来,不去动连接本身。
                     // 这是本分支存在的全部意义——旧代码在这里直接 continue,于是
@@ -1061,6 +1189,7 @@ namespace Prismx.Mt5Gateway
                         _tradableCache.Clear();
                         _groupCache.Clear();
                         _symbolCache.Clear();
+                        _symbolNames = null;   // 品种名快照同样重建 / rebuild the name snapshot too
                         reselect = new List<string>(_everSelected);
                     }
 
@@ -1083,6 +1212,9 @@ namespace Prismx.Mt5Gateway
 
                     // 持仓与成交订阅都要重建:断线时服务器已清掉我们的订阅状态
                     // Both subscriptions must be rebuilt: the server dropped them on disconnect
+                    // 这里已经重建了,把上面那条"请补订阅"的请求一并消掉,免得下一圈重做。
+                    // Clear the pending request here so the connected branch doesn't redo it.
+                    _needResubscribe = false;
                     _posSubscribed = false;
                     SubscribePositions();
                     _dealSubscribed = false;
@@ -1543,23 +1675,10 @@ namespace Prismx.Mt5Gateway
             lock (_gate)
             {
                 // --- 1. lookup group ---
-                string group;
-                TimedString groupHit;
-                if (_groupCache.TryGetValue(login, out groupHit) && Fresh(groupHit))
-                {
-                    group = groupHit.Value;
-                }
-                else
-                {
-                    // 本地 pump 库优先,见 ReadUserGroup。正常开仓路径走不到这里:
-                    // HandleOpen 前一步的 CheckAccountGroup 已经把组填进缓存了。
-                    // Pump first (see ReadUserGroup). The normal open path rarely gets
-                    // here: CheckAccountGroup one step earlier already filled the cache.
-                    MTRetCode r = ReadUserGroup(login, out group);
-                    if (r != MTRetCode.MT_RET_OK)
-                        return baseSymbol;
-                    _groupCache[login] = new TimedString { Value = group, AtTickCount = Environment.TickCount };
-                }
+                string group = GroupForLogin(login);
+
+                if (group.Length == 0)
+                    return baseSymbol;
 
                 string cacheKey = group.ToUpperInvariant() + "|" + baseSymbol.ToUpperInvariant();
 
@@ -1587,30 +1706,30 @@ namespace Prismx.Mt5Gateway
                     }
 
                     // --- 3. scan symbol table for prefixed matches ---
+                    //
+                    // 先用一份**品种名快照**筛出前缀命中的少数几个,再只对这几个做
+                    // SymbolGet 校验组可见性。原来是边遍历边对每个前缀命中的名字
+                    // 现场 SymbolGet:_gate 串行化所有 MT5 调用(含正在进行的下单取价),
+                    // 品种表几千条、三个别名都不命中时,会在锁内做上万次 SymbolGet,
+                    // 期间所有下单/平仓/查询全排队。名字快照只建一次并缓存到重连,
+                    // 之后每次未命中的解析只剩"内存里筛一遍 + 几次 SymbolGet"。
+                    // Filter against a cached snapshot of symbol names first and only
+                    // SymbolGet the few prefix hits. This used to SymbolGet inside the
+                    // scan loop while holding _gate, which serializes every MT5 call —
+                    // thousands of them per miss, with all trading queued behind it.
                     string upper = alias.ToUpperInvariant();
                     List<string> candidates = new List<string>();
-                    uint total = _manager.SymbolTotal();
 
-                    using (CIMTConSymbol scanSym = _manager.SymbolCreate())
+                    foreach (string name in SymbolNamesLocked())
                     {
-                        for (uint i = 0; i < total; i++)
+                        if (!name.ToUpperInvariant().StartsWith(upper))
+                            continue;
+
+                        // Check group access
+                        using (CIMTConSymbol testSym = _manager.SymbolCreate())
                         {
-                            if (_manager.SymbolNext(i, scanSym) != MTRetCode.MT_RET_OK)
-                                continue;
-
-                            string name = scanSym.Symbol();
-                            if (string.IsNullOrEmpty(name))
-                                continue;
-
-                            if (!name.ToUpperInvariant().StartsWith(upper))
-                                continue;
-
-                            // Check group access
-                            using (CIMTConSymbol testSym = _manager.SymbolCreate())
-                            {
-                                if (_manager.SymbolGet(name, group, testSym) == MTRetCode.MT_RET_OK)
-                                    candidates.Add(name);
-                            }
+                            if (_manager.SymbolGet(name, group, testSym) == MTRetCode.MT_RET_OK)
+                                candidates.Add(name);
                         }
                     }
 
@@ -1716,9 +1835,26 @@ namespace Prismx.Mt5Gateway
                 {
                     if (attempt == 0 && _selected.Add(symbol))
                     {
-                        _manager.SelectedAdd(symbol);
-                        _everSelected.Add(symbol);
-                        justSelected = true;
+                        // 返回码原来被直接丢弃:一个写错的品种名会被永久当成"已选中",
+                        // 之后每次取价只等 StaleTickWaitMs(300ms) 而不是 FirstTickWaitMs,
+                        // 而且会被带进重连后的整批重选,日志里没有任何线索。
+                        // 与 PreselectSymbols 一致:失败就回滚并 Warn。
+                        // The return code used to be dropped, so a typo'd symbol was
+                        // remembered as "selected" forever — later quotes waited only
+                        // the short timeout and the name rode along into every
+                        // post-reconnect re-selection, with nothing in the log.
+                        MTRetCode sel = _manager.SelectedAdd(symbol);
+
+                        if (sel != MTRetCode.MT_RET_OK)
+                        {
+                            _selected.Remove(symbol);
+                            Log.Warn("SelectedAdd 失败:{0} -> {1}(品种名是否正确?)", symbol, sel);
+                        }
+                        else
+                        {
+                            _everSelected.Add(symbol);
+                            justSelected = true;
+                        }
                     }
 
                     MTTickShort tick;
@@ -1793,12 +1929,95 @@ namespace Prismx.Mt5Gateway
         }
 
         /// <summary>
-        /// 取品种的手数限制,用于下单前校验。
+        /// 券商品种名的快照,按需建一次。调用方须持有 _gate。
         ///
-        /// 带缓存:命中时不进 MT5,只读字典。手数限制属于品种配置,券商极少改动,
-        /// 断线重连时会连同 Selected 列表一起清空重建。
+        /// 品种表在运行期几乎不变(券商上新品种是罕见操作),而遍历它是 ResolveSymbol
+        /// 未命中时最贵的一步。断线重连会连同其它缓存一起清空(见 WatchdogLoop),
+        /// 所以重连后能看到新上的品种。
+        /// A cached snapshot of broker symbol names; caller holds _gate. Cleared on
+        /// reconnect along with the other caches, so new symbols still show up.
         /// </summary>
-        public bool GetSymbolLimits(string symbol, out double volMin, out double volMax,
+        private List<string> SymbolNamesLocked()
+        {
+            if (_symbolNames != null)
+                return _symbolNames;
+
+            List<string> names = new List<string>();
+            uint total = _manager.SymbolTotal();
+
+            using (CIMTConSymbol scanSym = _manager.SymbolCreate())
+            {
+                for (uint i = 0; i < total; i++)
+                {
+                    if (_manager.SymbolNext(i, scanSym) != MTRetCode.MT_RET_OK)
+                        continue;
+
+                    string name = scanSym.Symbol();
+
+                    if (!string.IsNullOrEmpty(name))
+                        names.Add(name);
+                }
+            }
+
+            _symbolNames = names;
+            Log.Info("品种名快照已建立:{0} 条", names.Count);
+            return _symbolNames;
+        }
+
+        private List<string> _symbolNames;
+
+        /// <summary>
+        /// 取账号所在组(带缓存),读不到返回空串。
+        ///
+        /// 这段原来内联在 ResolveSymbol 里,现在 GetSymbolLimits 也要按组读,所以抽出来。
+        /// _gate 是 Monitor,同线程可重入,调用方持不持锁都能调。
+        /// The account's group (cached), "" when unreadable. Extracted from
+        /// ResolveSymbol now that the volume limits need it too; _gate is re-entrant.
+        /// </summary>
+        private string GroupForLogin(ulong login)
+        {
+            lock (_gate)
+            {
+                TimedString hit;
+                if (_groupCache.TryGetValue(login, out hit) && Fresh(hit))
+                    return hit.Value;
+
+                // 本地 pump 库优先,见 ReadUserGroup。正常开仓路径走不到这里:
+                // HandleOpen 前一步的 CheckAccountGroup 已经把组填进缓存了。
+                // Pump first (see ReadUserGroup). The normal open path rarely gets
+                // here: CheckAccountGroup one step earlier already filled the cache.
+                string group;
+                if (ReadUserGroup(login, out group) != MTRetCode.MT_RET_OK)
+                    return "";
+
+                _groupCache[login] = new TimedString { Value = group, AtTickCount = Environment.TickCount };
+                return group;
+            }
+        }
+
+        /// <summary>
+        /// 取品种在**某个组**下的手数限制,用于下单前校验。
+        ///
+        /// 为什么必须带组:MT5 的组配置可以覆盖品种的 VolumeMin/Max/Step
+        /// (「原油 WTI 步长 0.1、其余 0.01」这条约定本身就说明步长是分档的)。
+        /// 原来这里用的是两参 SymbolGet,读到的是品种的**全局**配置,而同一个文件里
+        /// ResolveSymbol 早就用的是带组的三参重载——两处口径不一致。
+        /// 读错档位的后果不是下单被券商拒绝,而是订单被接受成一张永不成交的单并
+        /// **锁死这张仓位**(2026-09-17 就是这么爆的),所以这里宁可多传一个参数。
+        ///
+        /// 带缓存:命中时不进 MT5,只读字典。缓存键必须带组,否则 A 组先查过
+        /// XAUUSD.s,B 组再查就会拿到 A 组的限制——跨组串味比不缓存更糟。
+        /// 手数限制属于品种/组配置,券商极少改动,断线重连时连同 Selected 列表一起清空重建。
+        ///
+        /// Volume limits for a symbol **as seen by one group**. MT5 groups can override
+        /// VolumeMin/Max/Step, and this used to read the symbol's global config via the
+        /// two-arg SymbolGet while ResolveSymbol already used the group-aware overload.
+        /// An out-of-step volume is not rejected by the server; it is accepted as an
+        /// order that can never fill and then blocks every close on that position.
+        /// The cache key carries the group: without it the first group to look a symbol
+        /// up would answer for every other group.
+        /// </summary>
+        public bool GetSymbolLimits(string symbol, string group, out double volMin, out double volMax,
             out double volStep, out MTRetCode res)
         {
             volMin = 0;
@@ -1806,10 +2025,13 @@ namespace Prismx.Mt5Gateway
             volStep = 0;
             res = MTRetCode.MT_RET_OK;
 
+            string groupKey = string.IsNullOrEmpty(group) ? "" : group.ToUpperInvariant();
+            string cacheKey = groupKey + "|" + symbol.ToUpperInvariant();
+
             lock (_gate)
             {
                 SymbolLimits hit;
-                if (_limitsCache.TryGetValue(symbol, out hit))
+                if (_limitsCache.TryGetValue(cacheKey, out hit))
                 {
                     volMin = hit.VolMin;
                     volMax = hit.VolMax;
@@ -1819,7 +2041,14 @@ namespace Prismx.Mt5Gateway
 
                 using (CIMTConSymbol sym = _manager.SymbolCreate())
                 {
-                    res = _manager.SymbolGet(symbol, sym);
+                    // 组读不出来时(账号查不到/pump 没同步)退回全局配置,与改动前同行为:
+                    // 有一份可能不精确的限制,好过完全不校验。
+                    // With no group (unknown login) fall back to the global config —
+                    // the pre-change behavior. An approximate limit beats none.
+                    res = groupKey.Length > 0
+                        ? _manager.SymbolGet(symbol, group, sym)
+                        : _manager.SymbolGet(symbol, sym);
+
                     if (res != MTRetCode.MT_RET_OK)
                         return false;
 
@@ -1831,7 +2060,7 @@ namespace Prismx.Mt5Gateway
                     entry.VolMin = volMin;
                     entry.VolMax = volMax;
                     entry.VolStep = volStep;
-                    _limitsCache[symbol] = entry;
+                    _limitsCache[cacheKey] = entry;
 
                     return true;
                 }
@@ -1892,7 +2121,9 @@ namespace Prismx.Mt5Gateway
             // 手数校验必须在补完后缀之后做,否则查不到品种、校验白写(详见
             // ValidateVolumeForSymbol 的注释)。非法手数不会被服务器当场拒绝,
             // 而是变成一张永不成交的订单,后患远大于一次明确的报错。
-            string volErr = ValidateVolumeForSymbol(symbol, lots, "开仓");
+            // 手数限制按**账号所在组**读:组配置可以覆盖品种的最小/最大/步长。
+            // Volume limits are read per account group, which can override the symbol's.
+            string volErr = ValidateVolumeForSymbol(symbol, GroupForLogin(login), lots, "开仓");
 
             if (volErr != null)
             {
@@ -2026,6 +2257,15 @@ namespace Prismx.Mt5Gateway
                     r.Position = r.Order;
             }
 
+            // 开仓答 PLACED 时也要确认真的成交了,与平仓路径对齐(见 ConfirmOpen)。
+            // 必须排在补 SL/TP 之前:一张从未成交的订单上补改单毫无意义,
+            // 只会再浪费一个 dealer 请求并可能把一条误导性的 Warn 写进日志。
+            // Confirm a PLACED open actually filled, mirroring the close path. This
+            // must run before the SL/TP repair: repairing levels on a position that
+            // does not exist wastes a dealer request and logs a misleading warning.
+            if (r.Ok && r.Placed)
+                ConfirmOpen(login, symbol, fill, ref r);
+
             // 兜底:确认 SL/TP 真的落在仓位上,没落上才补一次改单。
             //
             // 实测服务器会正确接受开仓请求里的 SL/TP,所以正常路径下这里应该什么都
@@ -2096,12 +2336,12 @@ namespace Prismx.Mt5Gateway
         /// name (XAUUSD) while the real symbol is XAUUSD.s, so SymbolGet missed and the
         /// check silently did nothing. Both paths now validate after resolution.
         /// </summary>
-        private string ValidateVolumeForSymbol(string symbol, double lots, string what)
+        private string ValidateVolumeForSymbol(string symbol, string group, double lots, string what)
         {
             double volMin, volMax, volStep;
             MTRetCode sres;
 
-            if (!GetSymbolLimits(symbol, out volMin, out volMax, out volStep, out sres))
+            if (!GetSymbolLimits(symbol, group, out volMin, out volMax, out volStep, out sres))
             {
                 Log.Warn("读不到 {0} 的手数限制({1}),跳过{2}手数校验", symbol, sres, what);
                 return null;
@@ -2147,14 +2387,19 @@ namespace Prismx.Mt5Gateway
             if (lots > pos.Volume + VolumeEpsilon)
                 return string.Format("平仓手数 {0} 超过仓位手数 {1}", lots, pos.Volume);
 
-            string err = ValidateVolumeForSymbol(pos.Symbol, lots, "平仓");
+            // 按仓位所属账号的组取限制:平仓和开仓必须用同一套档位,否则一边放行
+            // 一边拦下,或者更糟——按别的组的步长放行一笔会锁死仓位的部分平仓。
+            // Use the position owner's group so open and close share one rule set.
+            string group = GroupForLogin(pos.Login);
+
+            string err = ValidateVolumeForSymbol(pos.Symbol, group, lots, "平仓");
             if (err != null)
                 return err;
 
             double volMin, volMax, volStep;
             MTRetCode sres;
 
-            if (!GetSymbolLimits(pos.Symbol, out volMin, out volMax, out volStep, out sres))
+            if (!GetSymbolLimits(pos.Symbol, group, out volMin, out volMax, out volStep, out sres))
                 return null;
 
             // 剩余手数同样要能独立成立,否则服务器一样不会执行这笔部分平仓。
@@ -2189,6 +2434,103 @@ namespace Prismx.Mt5Gateway
         }
 
         /// <summary>
+        /// 确认一笔答复为 PLACED 的**开仓**是否真的成交了,没成交就把结果改成失败。
+        ///
+        /// 为什么需要它:SendDealerRequest 里那段注释论证过「这条路径只发市价单,
+        /// PLACED 没有『已挂单但未成交』的歧义」——平仓腿用的是同一套论证,而生产
+        /// 事故已经把它证伪了(订单挂上去、从未执行,并挡住后续平仓)。开仓腿踩到
+        /// 同一个机制时的表现更糟:网关回 Ok=true,后端落 FILLED,用户看到一张服务器
+        /// 上并不存在的仓位,之后的平仓一律 NOTFOUND。
+        ///
+        /// 两级确认,与 ConfirmClose 同构:
+        ///   1. 成交订阅——开仓成交事件正常 150~200ms 内到,到了就是确认成交;
+        ///   2. 向服务器重读仓位——订阅没建立或事件晚到时的权威依据。读到仓位=成交;
+        ///      两次都读到 NOTFOUND=这张订单没执行。
+        ///
+        /// 重读失败(网络/权限)时不改判,维持"当成交"——与 ConfirmClose 取同一个
+        /// 保守方向:把一笔真成交报成失败会诱导用户重复开仓,那是更贵的错误。
+        ///
+        /// 判定没成交时把 Position 清 0:否则那个"拿不到成交号就拿订单号顶替"的兜底
+        /// 会给后端一个看似合法、服务器上却不存在的仓位号,平仓明细会挂在空号上。
+        ///
+        /// Confirms a PLACED open actually executed, mirroring ConfirmClose: fill
+        /// subscription first, then an authoritative re-read. A failed re-read leaves
+        /// the verdict alone (reporting a real fill as a failure invites a duplicate
+        /// open). On a confirmed non-fill the position id is cleared, because the
+        /// "fall back to the order ticket" path would otherwise hand the backend a
+        /// plausible-looking id for a position that does not exist.
+        /// </summary>
+        private void ConfirmOpen(ulong login, string symbol, FillInfo fill, ref TradeResult r)
+        {
+            if (fill != null)
+            {
+                Log.Info("开仓成交事件已到,确认成交:login={0} {1} deal={2} position={3}",
+                    login, symbol, fill.Deal, fill.Position);
+                return;
+            }
+
+            // 上面那段已经把仓位号解析好了(成交事件 → 反查成交 → 退回订单号)。
+            // 三条路都没给出编号时无从确认,只能维持原判并留一条日志。
+            // The block above already resolved the ticket; with none of its three
+            // sources yielding one there is nothing to re-read.
+            ulong ticket = r.Position;
+
+            if (ticket == 0)
+            {
+                Log.Warn("开仓答复 PLACED 但既无成交号也无订单号,无法确认是否成交:login={0} {1}",
+                    login, symbol);
+                return;
+            }
+
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                if (attempt > 0)
+                    System.Threading.Thread.Sleep(ConfirmRecheckDelayMs);
+
+                PositionSnapshot snap;
+                bool ignored;
+                MTRetCode res;
+
+                // forceServer:本地 pump 快照可能还没收到这笔新仓位,这里要的是权威答案。
+                // forceServer: the local pump may not have this brand-new position yet.
+                if (ReadPosition(ticket, true, out snap, out ignored, out res))
+                {
+                    if (snap.Login == login)
+                    {
+                        Log.Info("仓位 #{0} 已在服务器上,确认开仓成交:login={1} {2} 手数={3}",
+                            ticket, login, snap.Symbol, snap.Volume);
+                        return;
+                    }
+
+                    // 编号存在但不属于这个账号:说明拿订单号顶替仓位号那一步撞号了,
+                    // 这个编号不能交给后端。当成"没确认"处理。
+                    // The id exists but belongs to someone else: the order-ticket
+                    // fallback collided, so this id must not reach the backend.
+                    Log.Warn("仓位 #{0} 属于账号 {1} 而非 {2},开仓仓位号不可信",
+                        ticket, snap.Login, login);
+                    break;
+                }
+
+                if (res != MTRetCode.MT_RET_ERR_NOTFOUND)
+                {
+                    Log.Warn("开仓后重读仓位 #{0} 失败({1}),无法确认是否成交,按成交处理", ticket, res);
+                    return;
+                }
+            }
+
+            Log.Warn("开仓请求被接受但未成交:login={0} {1} order={2} 服务器上查不到仓位 #{3},"
+                     + "该订单可能挂在券商队列里",
+                     login, symbol, r.Order, ticket);
+
+            r.Ok = false;
+            r.Retcode = PlacedUnconfirmed;
+            r.Position = 0;
+            r.Message = "开仓请求已被服务器接受,但未在确认时限内成交,服务器上查不到对应仓位。"
+                      + "这张订单可能仍挂在券商的交易队列里。请不要重复提交,"
+                      + "稍后核对持仓,必要时联系券商。";
+        }
+
+        /// <summary>
         /// 确认一笔答复为 PLACED 的平仓是否真的成交了,没成交就把结果改成失败。
         ///
         /// 两级确认,都不成立才判定没成交:
@@ -2209,10 +2551,25 @@ namespace Prismx.Mt5Gateway
         {
             FillInfo fill = WaitRecentFill(r.Deal, r.Order);
 
-            if (fill != null)
+            // 光"有成交事件"还不够,得是**这个仓位**的成交。
+            // WaitRecentFill 也按订单号索引,而按订单号索引的那份记录在容量淘汰之前
+            // 一直留着、读取也不会消耗它;dealer 回执给出 Deal==0、Order!=0 时,
+            // 命中的可能是同一订单号下更早的一笔成交。所以仓位号对不上就不认,
+            // 退回下面那两次向服务器重读——慢一点,但结论是权威的。
+            // Having *a* fill isn't enough; it must be this position's. Fills are also
+            // indexed by order ticket and reads don't consume them, so a confirmation
+            // with Deal==0 could match an earlier fill under the same order. If the
+            // position id disagrees, fall through to the authoritative re-read.
+            if (fill != null && (fill.Position == 0 || fill.Position == ticket))
             {
                 Log.Info("平仓成交事件已到,确认成交:ticket={0} deal={1}", ticket, fill.Deal);
                 return;
+            }
+
+            if (fill != null)
+            {
+                Log.Warn("收到的成交事件属于仓位 #{0} 而非 #{1},不据此确认,改为向服务器重读",
+                    fill.Position, ticket);
             }
 
             // 向服务器重读仓位。读到「手数没变」不能立刻定罪:成交订阅整个断开时
@@ -2457,8 +2814,18 @@ namespace Prismx.Mt5Gateway
         /// 只比较 stopLoss/takeProfit 中非 0 的那一侧。容差取品种最小报价单位的
         /// 若干倍:券商可能因最小止损距离微调价位,那不算丢失。
         ///
-        /// 读不到仓位时返回 true(视为已生效),避免因为一次查询失败就多发一个
-        /// 无谓的改单请求——真丢了 SL/TP 会在后续持仓推送里暴露。
+        /// 读不到仓位时返回 **false**(视为未生效),让调用方多发一次改单。
+        ///
+        /// 这里原来返回 true,理由是"真丢了 SL/TP 会在后续持仓推送里暴露"——但
+        /// PositionSink 明确不消费 UPDATE(见它的注释),那条兜底并不存在。于是网络
+        /// 抖动或权限问题下,一个真的没落上的止损会被当成已生效,仓位裸奔且日志里
+        /// 一个字都没有。两种错法的代价不对等:多发一次改单只是一个请求,漏掉止损
+        /// 是仓位无保护,所以宁可多发。
+        /// Returns false on a failed read so the caller re-sends the modify. It used
+        /// to return true on the theory that a lost stop would surface in a later
+        /// position push — but PositionSink deliberately ignores UPDATE events, so
+        /// that fallback does not exist. An extra modify request is cheap; an
+        /// unprotected position is not.
         /// </summary>
         private bool PositionHasLevels(ulong ticket, double stopLoss, double takeProfit)
         {
@@ -2468,13 +2835,21 @@ namespace Prismx.Mt5Gateway
                 {
                     using (CIMTPositionArray arr = _manager.PositionCreateArray())
                     {
-                        if (_manager.PositionRequestByTickets(new ulong[] { ticket }, arr)
-                                != MTRetCode.MT_RET_OK || arr.Total() == 0)
-                            return true;
+                        MTRetCode rres = _manager.PositionRequestByTickets(new ulong[] { ticket }, arr);
+
+                        if (rres != MTRetCode.MT_RET_OK || arr.Total() == 0)
+                        {
+                            Log.Warn("核对仓位 #{0} 的 SL/TP 时读不到仓位({1}),按未生效处理并补发改单",
+                                ticket, rres);
+                            return false;
+                        }
 
                         CIMTPosition p = arr.Next(0);
                         if (p == null)
-                            return true;
+                        {
+                            Log.Warn("核对仓位 #{0} 的 SL/TP 时拿到空记录,按未生效处理并补发改单", ticket);
+                            return false;
+                        }
 
                         // 容差按品种精度推算:digits 拿不到时退回一个宽松的相对值
                         uint digits = 0;
@@ -2491,8 +2866,10 @@ namespace Prismx.Mt5Gateway
             }
             catch (Exception ex)
             {
-                Log.Warn("核对仓位 SL/TP 失败,按已生效处理:{0}", ex.Message);
-                return true;
+                // 与上面同理:核对不出来就按"没落上"处理,多发一次改单。
+                // Same reasoning: unknown means re-send, not assume it landed.
+                Log.Warn("核对仓位 SL/TP 失败,按未生效处理并补发改单:{0}", ex.Message);
+                return false;
             }
         }
 
@@ -2545,6 +2922,18 @@ namespace Prismx.Mt5Gateway
         {
             if (!_connected)
                 return TradeResult.Fail("MT_RET_ERR_CONNECTION", "MT5 未连接");
+
+            // dealer 通道没起来时立刻说清楚,而不是白等满 DealerTimeoutMs(默认 60 秒)
+            // 再报一个"超时"。这条以前没有,于是 Program 的 closeall(用 ConnectOnly()
+            // 连接,根本没 DealerStart)会在每一笔仓位上空等 60 秒——而那是出事时最后
+            // 的人工兜底手段,最不该是这个表现。
+            // Fail fast when the dealer channel isn't up instead of waiting out the full
+            // 60s timeout per request — which is exactly what the emergency close-all
+            // tool used to do on every position.
+            if (!_dealerActive)
+                return TradeResult.Fail("MT_RET_ERR_NOTIMPLEMENT",
+                    "dealer 通道未启动,无法代客下单(用 Start() 而不是 ConnectOnly(),"
+                    + "或检查 manager 账号的 RIGHT_TRADES_DEALER 权限)");
 
             CIMTRequest request = null;
             CIMTRequest result = null;
@@ -2652,15 +3041,31 @@ namespace Prismx.Mt5Gateway
             }
             finally
             {
+                // 先退订,确保原生层不再**发起**新的回调。
+                // First unsubscribe so the native layer starts no new callbacks.
                 lock (_gate)
                 {
-                    // 先退订,确保原生层不再回调这个 sink
                     if (sink != null)
                     {
                         try { _manager.DealerUnsubscribe(sink); }
                         catch { }
                     }
+                }
 
+                // 再弃用 sink。这一步会等已经进入回调的那一次执行完——DealerUnsubscribe
+                // 并不保证这件事,而超时路径正是"回执在路上"的典型时刻。不这么做,
+                // 下面的 Dispose 就可能让原生回调写进已释放的托管对象:进程级
+                // AccessViolation,catch 不住,所有在途下单一起中断。
+                // 放在 _gate 之外:Abandon 可能要等回调跑完,而回调里会写日志、不该
+                // 让它和这把全局锁纠缠在一起。
+                // Then abandon the sink, which waits out any callback already running —
+                // something DealerUnsubscribe does not guarantee. Done outside _gate so
+                // waiting for a callback never interleaves with the global lock.
+                if (sink != null)
+                    sink.Abandon();
+
+                lock (_gate)
+                {
                     if (request != null) request.Dispose();
                     if (result != null) result.Dispose();
                 }

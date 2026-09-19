@@ -17,10 +17,26 @@ manager_password = 请填真实密码
 # 重要:不要改成 0.0.0.0 直接暴露公网。这个接口能读全体客户资料、
 # 能代客下单。跨机访问请用 WireGuard 隧道(见 WIREGUARD.md),生产写
 #   listen = http://+:8800/
-# 并靠云安全组不放行 8800 让公网看不到它。**不要**写隧道 IP(如 10.66.0.2):
-# 2026-09-06 实测 HttpListener 绑到 WireGuard 网卡的具体 IP 后 HTTP.SYS 对所有
-# 请求直接回 503,原因未明,改回 + 立即正常。
+# 并**同时**填下面的 allowed_ips,不要把唯一防线放在云控制台里
+# (安全组一次误配、或换机迁移忘了带规则,这个接口就直接到公网上了)。
+#
+# 关于"绑隧道 IP 会 503":2026-09-06 实测 HttpListener 绑到 WireGuard 网卡的具体
+# IP(如 10.66.0.2)后 HTTP.SYS 对所有请求直接回 503,改回 + 立即正常,当时记为
+# 「原因未明」。HTTP.SYS 对**具体 IP 前缀**回 503 的常见原因是 URL 保留(urlacl)
+# 缺失或前缀冲突,而不是 WireGuard 本身——绑 + 时用的是通配前缀,走的是另一条
+# 授权规则,所以只有绑具体 IP 才会被拒。上 VPS 按这个顺序验证一次:
+#   netsh http show urlacl              # 看有没有 http://10.66.0.2:8800/ 的保留
+#   netsh http show servicestate        # 看有没有别的进程占着冲突前缀
+#   netsh http add urlacl url=http://10.66.0.2:8800/ user=SYSTEM
+# 加完再把 listen 改成隧道 IP 复测。能绑住的话,全网卡监听这件事就不必再做了。
 listen = http://127.0.0.1:8800/
+
+# 允许调用的来源 IP,逗号分隔,精确匹配。留空 = 不限制。
+#
+# listen 绑在全网卡(http://+:8800/)时,这一项是网关自己这层的防线,不填的话
+# 启动会直接被拒绝(除非写了 i_know_what_im_doing)。填后端那台机器的隧道地址:
+#   allowed_ips = 10.66.0.1
+allowed_ips =
 
 # 后端调用时必须带的 X-Gateway-Token 头。至少 16 位。
 # 生成一个随机值(PowerShell):
@@ -40,6 +56,15 @@ allowed_groups = demo
 
 # 成交回执等待上限(毫秒)
 dealer_timeout_ms = 60000
+
+# HTTP 处理线程数。每个线程处理完一个请求才回去 accept,所以这就是并发上限。
+# 一次平仓最坏 = dealer_timeout_ms + 两次确认重读;线程数偏小时,几笔卡住的慢单
+# 就会把**所有**接口(含不鉴权的 /health)排到队尾,监控会误判成"网关失联"。
+http_threads = 16
+
+# 显式解除两条启动检查(allowed_groups 为空、绑全网卡却没配 allowed_ips)。
+# 这两条各自都是最后一道闸,只在临时排障时打开,别长期留着。
+# i_know_what_im_doing = true
 
 # 下单时写入 comment 的前缀。
 # Manager API 没有 magic 字段,靠这个前缀识别本平台开的仓位。
