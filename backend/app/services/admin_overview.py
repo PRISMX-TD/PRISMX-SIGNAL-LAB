@@ -26,28 +26,38 @@ from app.schemas import (
 )
 from app.services.stats_time import MAX_RANGE_DAYS, RangeSpec, day_start_utc, local_day, week_start
 
+# 下面几个取数函数都收一个可选的 `*scope`：追加到 users 上的额外过滤条件。
+# 管理看板什么都不传（= 全站）；代理看板传 `User.invite_code == <链接码>`，于是
+# 同一套口径直接算出"我带来的这批人"的数字。**这就是它存在的全部理由**——
+# 代理页另写一份查询的话，两处的"活跃"迟早会漂成两个意思，而页面上谁也看不出来。
+#
+# Each helper below takes an optional `*scope`: extra filters on users. The admin
+# dashboard passes none (site-wide); the agent dashboard passes
+# `User.invite_code == <code>` and gets the same metrics scoped to the people it
+# brought in. That is the whole point: a second copy of these queries would
+# eventually drift into a second meaning of "active" that nobody can see.
 NOT_ADMIN = User.role != "admin"
 
 
-def _non_admin_users(db: Session) -> Query:
-    return db.query(User).filter(NOT_ADMIN)
+def _non_admin_users(db: Session, *scope) -> Query:
+    return db.query(User).filter(NOT_ADMIN, *scope)
 
 
-def _distinct_visitors_since(db: Session, since: date) -> int:
+def _distinct_visitors_since(db: Session, since: date, *scope) -> int:
     """since（含）起打开过页面的去重人数，剔管理员。"""
     return int(
         db.query(func.count(func.distinct(PageVisitorDay.user_id)))
         .join(User, User.id == PageVisitorDay.user_id)
-        .filter(NOT_ADMIN, PageVisitorDay.day >= since)
+        .filter(NOT_ADMIN, PageVisitorDay.day >= since, *scope)
         .scalar()
         or 0
     )
 
 
-def _signup_days(db: Session, first: date, last: date) -> list[date]:
+def _signup_days(db: Session, first: date, last: date, *scope) -> list[date]:
     """[first, last] 内注册的非管理员，每人一个 STATS_TZ 注册日。"""
     rows = (
-        _non_admin_users(db)
+        _non_admin_users(db, *scope)
         .with_entities(User.created_at)
         .filter(User.created_at >= day_start_utc(first), User.created_at < day_start_utc(last + timedelta(days=1)))
         .all()
@@ -59,14 +69,14 @@ def _count_in(days: list[date], first: date, last: date) -> int:
     return sum(1 for d in days if first <= d <= last)
 
 
-def headline(db: Session, spec: RangeSpec, today: date) -> OverviewHeadlineOut:
-    total = _non_admin_users(db).count()
-    signup_days = _signup_days(db, spec.compare_start, spec.end)
+def headline(db: Session, spec: RangeSpec, today: date, *scope) -> OverviewHeadlineOut:
+    total = _non_admin_users(db, *scope).count()
+    signup_days = _signup_days(db, spec.compare_start, spec.end, *scope)
     return OverviewHeadlineOut(
         totalUsers=total,
-        activeToday=_distinct_visitors_since(db, today),
-        activeWeek=_distinct_visitors_since(db, today - timedelta(days=6)),
-        activeMonth=_distinct_visitors_since(db, today - timedelta(days=29)),
+        activeToday=_distinct_visitors_since(db, today, *scope),
+        activeWeek=_distinct_visitors_since(db, today - timedelta(days=6), *scope),
+        activeMonth=_distinct_visitors_since(db, today - timedelta(days=29), *scope),
         signups=CompareOut(
             current=_count_in(signup_days, spec.start, spec.end),
             previous=_count_in(signup_days, spec.compare_start, spec.compare_end),
@@ -74,17 +84,17 @@ def headline(db: Session, spec: RangeSpec, today: date) -> OverviewHeadlineOut:
     )
 
 
-def activity_daily(db: Session, spec: RangeSpec) -> list[ActivityDayOut]:
+def activity_daily(db: Session, spec: RangeSpec, *scope) -> list[ActivityDayOut]:
     active_rows = (
         db.query(PageVisitorDay.day, func.count(func.distinct(PageVisitorDay.user_id)))
         .join(User, User.id == PageVisitorDay.user_id)
-        .filter(NOT_ADMIN, PageVisitorDay.day >= spec.start, PageVisitorDay.day <= spec.end)
+        .filter(NOT_ADMIN, PageVisitorDay.day >= spec.start, PageVisitorDay.day <= spec.end, *scope)
         .group_by(PageVisitorDay.day)
         .all()
     )
     active = {_iso(day): int(n or 0) for day, n in active_rows}
     signups: dict[str, int] = defaultdict(int)
-    for d in _signup_days(db, spec.start, spec.end):
+    for d in _signup_days(db, spec.start, spec.end, *scope):
         signups[d.isoformat()] += 1
     return [
         ActivityDayOut(date=key, active=active.get(key, 0), signups=signups.get(key, 0))

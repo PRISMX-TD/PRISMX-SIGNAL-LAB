@@ -2220,6 +2220,23 @@
     "bridgeCta": "查看桥接方案"
   },
   "agent": {
+    "colAction": "操作",
+    "overview": {
+      "customers": "客户总数",
+      "activityHint": "只统计经这条链接注册的客户。活跃 = 当天打开过任一页面，按北京时间切天。"
+    },
+    "plan": {
+      "adjust": "调整会员",
+      "title": "调整客户会员",
+      "currentPlain": "当前：{{plan}}",
+      "current": "当前：{{plan}} · {{until}}",
+      "until": "至 {{time}}",
+      "noExpiry": "不限期（管理员设置，代理不可调整）",
+      "extend": "延长 PRO",
+      "days": "{{days}} 天",
+      "extendHint": "在现有到期日基础上顺延；已过期或免费用户从此刻起算。一次最多 60 天，开一年就点六次。",
+      "downgrade": "降为免费"
+    },
     "title": "代理页面",
     "subtitle": "你名下的邀请链接，以及经它们注册的用户。数据只读。",
     "empty": "还没有指派给你的邀请链接。",

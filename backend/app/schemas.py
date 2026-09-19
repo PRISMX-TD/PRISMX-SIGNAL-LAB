@@ -1578,6 +1578,11 @@ class AgentLinkUserOut(BaseModel):
     email: str
     plan: str
     createdAt: datetime | None = None
+    # 会员到期时间；FREE 或不限期都是 null。代理能改到期日（见 AgentPlanUpdate），
+    # 不下发这一列他就看不到自己改成了什么。
+    # Membership expiry; null for FREE and for never-expiring grants alike.
+    # Shipped because agents can change it and need to see the result.
+    planExpiresAt: datetime | None = None
     # 最近活跃日（STATS_TZ 日期，口径同 activeUsers7d）。**只到天**，不给时刻：
     # page_visitor_days 本来就只存到天，正是为了让"某人几点在看哪个页面"这种问题
     # 在结构上问不出来（见该模型注释）。超过 400 天的记录会被清理，故老用户可能为 null。
@@ -1595,3 +1600,48 @@ class AgentLinkUsersOut(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class AgentOverviewOut(BaseModel):
+    """代理看板：与管理看板同一套口径，只是把范围收在「这条链接带来的人」上。
+
+    字段类型直接复用管理看板的（OverviewRangeOut / OverviewHeadlineOut /
+    ActivityDayOut），数字也由同一批函数算出（services/admin_overview 的
+    headline / activity_daily，多传一个 scope 条件）。两边共用的理由见那个模块
+    顶部：代理页另写一份查询，"活跃"迟早会漂成两个意思，而页面上看不出来。
+
+    刻意**不含**漏斗、留存、等级分布、策略与交易使用——那些是运营看全站用的，
+    代理拿不到也用不上。
+
+    The agent dashboard: the admin dashboard's semantics, scoped to the people
+    one link brought in. Same types and the same functions produce the numbers
+    (with one extra scope filter), because a second copy would drift. Funnel,
+    retention, plan mix, strategy and trading usage are deliberately absent.
+    """
+    range: OverviewRangeOut
+    headline: OverviewHeadlineOut
+    activity: list[ActivityDayOut]
+
+
+class AgentPlanUpdate(BaseModel):
+    """代理调整自己名下某个客户的会员：延长 PRO，或降回 FREE。
+
+    用邮箱定位而不是 user id：名单里本来就有完整邮箱（2026-09-15 定），而 user id
+    至今没下发过，为了一个写操作把它放出去不值当——服务端按 (链接, 邮箱) 查人，
+    查不到就是 404，和"不是你的人"同一个回答。
+
+    Identifies the target by email rather than user id: the list already shows
+    the real email, and shipping ids just to enable one write is not worth it.
+    The server resolves (link, email) and answers 404 either way.
+    """
+    email: EmailStr
+    # extend = 在现有到期日（已过期或 FREE 则从此刻）基础上往后加 days 天，并置为 PRO；
+    # downgrade = 直接降回 FREE 并清空到期日。
+    # extend adds days on top of the current expiry (or now, if lapsed/FREE) and
+    # sets PRO; downgrade drops to FREE and clears the expiry.
+    action: Literal["extend", "downgrade"]
+    # 单次延长上限 60 天（产品决定，2026-09-19）。要开一年就点六次——**这正是
+    # 想要的摩擦**：防的是一次点出 2099 年，而不是防长期客户。
+    # Hard cap of 60 days per call (product decision). A year takes six clicks;
+    # the friction is the point — it stops a single click reaching year 2099.
+    days: int | None = Field(default=None, ge=1, le=60)

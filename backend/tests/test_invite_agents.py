@@ -2,19 +2,25 @@
 
 照 test_invite_links.py 的惯例走 service 级测试，用 conftest 的 db_session 内存库。
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from app.models import AdminAuditLog, InviteLink, InviteLinkAgent, MT5Account, PageVisitorDay, User
 from app.routers.invite import (
+    AGENT_MAX_EXTEND_DAYS,
     agent_link_users,
     agent_links,
+    agent_overview,
+    agent_set_plan,
     assign_agent,
     is_agent,
     unassign_agent,
 )
+from app.schemas import AgentPlanUpdate
+from app.services.stats_time import resolve_range
 from app.services.account_type import DEMO, REAL
 from app.services.gateway_binding import REASON_PASSWORD_CHANGED, REASON_USER_REMOVED
 from app.services.stats_time import today as stats_today
@@ -351,3 +357,205 @@ def test_bridge_row_is_never_flagged_for_reverification(db_session):
 
     acc = agent_link_users(db_session, agent, link.id).users[0].mt5Accounts[0]
     assert acc.connected is True
+
+
+# ---------- 代理看板 / agent dashboard ----------
+
+
+def test_overview_is_scoped_to_this_links_users(db_session):
+    """看板口径与管理看板同源，但只算这条链接带来的人：别人链接的、管理员都不算。"""
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    mine = _mk_link(db_session, code="mine2345")
+    other = _mk_link(db_session, code="othr2345")
+    assign_agent(db_session, admin, mine, agent)
+    today = stats_today()
+
+    a = _mk_user(db_session, "a1@x.io", invite_code="mine2345")
+    b = _mk_user(db_session, "b1@x.io", invite_code="mine2345")
+    theirs = _mk_user(db_session, "c1@x.io", invite_code="othr2345")
+    _visit(db_session, a, today)
+    _visit(db_session, b, today - timedelta(days=2))
+    _visit(db_session, theirs, today)
+    assert other is not None
+
+    out = agent_overview(db_session, agent, mine.id, resolve_range("month", None, None, today))
+    assert out.headline.totalUsers == 2          # 别人链接带来的那个不算
+    assert out.headline.activeToday == 1
+    assert out.headline.activeWeek == 2
+    assert sum(d.active for d in out.activity) == 2
+    assert sum(d.signups for d in out.activity) == 2
+    assert out.range.start == today.replace(day=1).isoformat()
+
+
+def test_overview_of_unowned_link_is_404(db_session):
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    stranger = _mk_user(db_session, "s@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+    with pytest.raises(HTTPException) as exc:
+        agent_overview(db_session, stranger, link.id, resolve_range("month", None, None, stats_today()))
+    assert exc.value.status_code == 404
+
+
+# ---------- 代理调整客户会员 / agent-side plan changes ----------
+
+
+def _plan(**kw):
+    return AgentPlanUpdate(**kw)
+
+
+def test_extend_upgrades_free_user_from_now(db_session):
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+    target = _mk_user(db_session, "t@x.io", invite_code=link.code)
+
+    row = agent_set_plan(db_session, agent, link.id,
+                         _plan(email="t@x.io", action="extend", days=30))
+    db_session.refresh(target)
+    assert target.plan == "PRO"
+    assert row.plan == "PRO"
+    expected = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=30)
+    assert abs((target.plan_expires_at - expected).total_seconds()) < 60
+    assert row.planExpiresAt == target.plan_expires_at
+
+
+def test_extend_stacks_on_a_future_expiry_but_not_on_a_lapsed_one(db_session):
+    """还没过期的往后接；已经过期的从此刻起算——否则会算出一个仍在过去的到期日。"""
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    future = _mk_user(db_session, "f@x.io", invite_code=link.code, plan="PRO",
+                      plan_expires_at=now + timedelta(days=10))
+    lapsed = _mk_user(db_session, "l@x.io", invite_code=link.code, plan="PRO",
+                      plan_expires_at=now - timedelta(days=40))
+
+    agent_set_plan(db_session, agent, link.id, _plan(email="f@x.io", action="extend", days=30))
+    agent_set_plan(db_session, agent, link.id, _plan(email="l@x.io", action="extend", days=30))
+    db_session.refresh(future)
+    db_session.refresh(lapsed)
+    assert abs((future.plan_expires_at - (now + timedelta(days=40))).total_seconds()) < 60
+    assert abs((lapsed.plan_expires_at - (now + timedelta(days=30))).total_seconds()) < 60
+
+
+def test_extend_clears_the_trial_flag(db_session):
+    """手动调整是权威操作：试用标记必须清掉，否则到期降级那套会按试用处理。"""
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    t = _mk_user(db_session, "t@x.io", invite_code=link.code, plan="PRO",
+                 plan_expires_at=now + timedelta(days=3), plan_is_trial=True)
+
+    agent_set_plan(db_session, agent, link.id, _plan(email="t@x.io", action="extend", days=7))
+    db_session.refresh(t)
+    assert t.plan_is_trial is False
+
+
+def test_downgrade_drops_to_free_and_clears_expiry(db_session):
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    t = _mk_user(db_session, "t@x.io", invite_code=link.code, plan="PRO",
+                 plan_expires_at=now + timedelta(days=30))
+
+    row = agent_set_plan(db_session, agent, link.id, _plan(email="t@x.io", action="downgrade"))
+    db_session.refresh(t)
+    assert t.plan == "FREE" and t.plan_expires_at is None
+    assert row.plan == "FREE" and row.planExpiresAt is None
+
+
+def test_never_expiring_member_is_off_limits(db_session):
+    """不限期 PRO 是管理员手动给的：延长会把永久变有限期，降级等于撤销管理员的决定。"""
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+    t = _mk_user(db_session, "t@x.io", invite_code=link.code, plan="PRO", plan_expires_at=None)
+
+    for action, days in (("extend", 30), ("downgrade", None)):
+        with pytest.raises(HTTPException) as exc:
+            agent_set_plan(db_session, agent, link.id, _plan(email="t@x.io", action=action, days=days))
+        assert exc.value.status_code == 409
+    db_session.refresh(t)
+    assert t.plan == "PRO" and t.plan_expires_at is None
+
+
+def test_cannot_touch_users_of_other_links_or_admins(db_session):
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    mine = _mk_link(db_session, code="mine2345")
+    other = _mk_link(db_session, code="othr2345")
+    assign_agent(db_session, admin, mine, agent)
+    outsider = _mk_user(db_session, "out@x.io", invite_code="othr2345")
+    # 管理员即使真是这条链接注册的也不给动 / an admin who signed up via the link
+    boss = _mk_user(db_session, "boss@x.io", role="admin", invite_code="mine2345")
+    assert other is not None
+
+    for email in ("out@x.io", "boss@x.io", "nobody@x.io"):
+        with pytest.raises(HTTPException) as exc:
+            agent_set_plan(db_session, agent, mine.id, _plan(email=email, action="extend", days=7))
+        assert exc.value.status_code == 404
+    db_session.refresh(outsider)
+    db_session.refresh(boss)
+    assert outsider.plan == "FREE" and boss.plan == "FREE"
+
+
+def test_email_match_is_case_insensitive(db_session):
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+    t = _mk_user(db_session, "mixed@x.io", invite_code=link.code)
+
+    agent_set_plan(db_session, agent, link.id, _plan(email="Mixed@X.io", action="extend", days=7))
+    db_session.refresh(t)
+    assert t.plan == "PRO"
+
+
+def test_extension_is_capped_per_call(db_session):
+    """一次最多 60 天。schema 挡住 >60，服务函数自己也再兜一次（别的调用方绕不过）。"""
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+    _mk_user(db_session, "t@x.io", invite_code=link.code)
+
+    with pytest.raises(ValidationError):
+        _plan(email="t@x.io", action="extend", days=AGENT_MAX_EXTEND_DAYS + 1)
+    with pytest.raises(HTTPException) as exc:
+        agent_set_plan(db_session, agent, link.id,
+                       _plan(email="t@x.io", action="extend").model_copy(update={"days": 999}))
+    assert exc.value.status_code == 422
+    # days 漏传也是 422，不是静默按 0 天处理 / a missing day count is a 422, not a no-op
+    with pytest.raises(HTTPException) as exc2:
+        agent_set_plan(db_session, agent, link.id, _plan(email="t@x.io", action="extend"))
+    assert exc2.value.status_code == 422
+
+
+def test_plan_change_writes_audit_rows_marked_as_agent(db_session):
+    """审计行的操作者是代理本人，field 带 agent:{code}: 前缀——一眼看出不是后台改的。"""
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+    target = _mk_user(db_session, "t@x.io", invite_code=link.code)
+
+    agent_set_plan(db_session, agent, link.id, _plan(email="t@x.io", action="extend", days=14))
+    rows = (
+        db_session.query(AdminAuditLog)
+        .filter(AdminAuditLog.field.like(f"agent:{link.code}:%"))
+        .all()
+    )
+    fields = {r.field for r in rows}
+    assert fields == {f"agent:{link.code}:plan", f"agent:{link.code}:plan_expires_at"}
+    assert all(r.admin_user_id == agent.id and r.target_user_id == target.id for r in rows)

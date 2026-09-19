@@ -2222,6 +2222,23 @@
     "bridgeCta": "See the Bridge setup"
   },
   "agent": {
+    "colAction": "Actions",
+    "overview": {
+      "customers": "Customers",
+      "activityHint": "Counts only clients who registered through this link. Active = opened any page that day, days cut in UTC+8."
+    },
+    "plan": {
+      "adjust": "Membership",
+      "title": "Adjust membership",
+      "currentPlain": "Now: {{plan}}",
+      "current": "Now: {{plan}} · {{until}}",
+      "until": "until {{time}}",
+      "noExpiry": "No expiry (set by an admin; agents cannot change it)",
+      "extend": "Extend PRO",
+      "days": "{{days}} days",
+      "extendHint": "Added on top of the current expiry; lapsed or free clients start from now. At most 60 days per change — a year is six clicks.",
+      "downgrade": "Drop to free"
+    },
     "title": "Agent view",
     "subtitle": "Invite links assigned to you, and the users who registered through them. Read-only.",
     "empty": "No invite links have been assigned to you yet.",

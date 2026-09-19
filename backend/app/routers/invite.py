@@ -28,12 +28,15 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.models import InviteLink, InviteLinkAgent, MT5Account, PageVisitorDay, User
-from app.routers.admin import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, _log_change
+from app.routers.admin import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, _log_change, _resolve_range_or_422
 from app.schemas import (
     AgentLinkOut,
     AgentLinkUserOut,
     AgentLinkUsersOut,
     AgentMT5AccountOut,
+    AgentOverviewOut,
+    AgentPlanUpdate,
+    OverviewRangeOut,
     InviteClickRequest,
     InviteLinkAgentOut,
     InviteLinkAssignAgent,
@@ -42,10 +45,12 @@ from app.schemas import (
     InviteLinkUpdate,
 )
 from app.services.account_type import CONTEST, DEMO, REAL
+from app.services.admin_overview import activity_daily, headline
 from app.services.deps import get_current_user, require_admin
 from app.services.gamification import mask_account
 from app.services.gateway_binding import is_revoked, not_removed
 from app.services.settings_store import get_trial_settings
+from app.services.stats_time import RangeSpec
 from app.services.stats_time import today as stats_today
 
 router = APIRouter(prefix="/invite", tags=["invite"])
@@ -545,6 +550,7 @@ def agent_link_users(
                 email=u.email,
                 plan=u.plan,
                 createdAt=u.created_at,
+                planExpiresAt=u.plan_expires_at,
                 lastActiveDay=last_active.get(u.id),
                 mt5Accounts=accounts.get(u.id, []),
             )
@@ -553,6 +559,146 @@ def agent_link_users(
         total=total,
         limit=limit,
         offset=offset,
+    )
+
+
+def agent_overview(db: Session, user: User, link_id: str, spec: RangeSpec) -> AgentOverviewOut:
+    """代理看板：这条链接带来的人的头部指标 + 活跃/新注册趋势。
+
+    数字由管理看板那两个函数算（headline / activity_daily），只多传一个 scope
+    条件把范围收在 users.invite_code 上——共用的理由见 admin_overview 顶部。
+
+    The agent dashboard for one link, computed by the admin dashboard's own
+    functions with a single extra scope filter on users.invite_code.
+    """
+    link = _owned_link(db, user, link_id)
+    scope = (User.invite_code == link.code,)
+    return AgentOverviewOut(
+        range=OverviewRangeOut(
+            start=spec.start.isoformat(),
+            end=spec.end.isoformat(),
+            days=spec.days,
+            compareStart=spec.compare_start.isoformat(),
+            compareEnd=spec.compare_end.isoformat(),
+        ),
+        headline=headline(db, spec, stats_today(), *scope),
+        activity=activity_daily(db, spec, *scope),
+    )
+
+
+# ---------- 代理调整客户会员 / agent-side plan changes ----------
+
+# 单次延长上限（天）。产品决定：代理能降级也能延长，但一次最多 60 天——要开
+# 一年就点六次。**摩擦是故意的**：防的是一次点到 2099 年，不是防长期客户。
+# Per-call extension cap. Agents may downgrade and extend, but at most 60 days
+# at a time; a year takes six clicks. The friction is deliberate.
+AGENT_MAX_EXTEND_DAYS = 60
+
+
+def _agent_target(db: Session, link: InviteLink, email: str) -> User:
+    """按 (链接, 邮箱) 找人。不是这条链接带来的、或者压根不存在，都是同一个 404。
+
+    邮箱大小写不敏感：名单上显示什么，前端就回传什么，但库里存的是注册时那一份，
+    中间任何一段（复制粘贴、输入法首字母大写）都可能改掉大小写。
+
+    Resolve the target by (link, email); not-yours and not-found are the same
+    404. Case-insensitive, because the address can pass through anything that
+    capitalises it between the list and the request.
+    """
+    target = (
+        db.query(User)
+        .filter(func.lower(User.email) == email.strip().lower(), User.invite_code == link.code)
+        .first()
+    )
+    if target is None or target.role == "admin":
+        # 管理员即使真是这条链接注册的也不给动——代理不该有任何触碰管理员账号的路径。
+        # Admins are untouchable here even if they did sign up through the link.
+        raise HTTPException(status_code=404, detail="用户不存在 / User not found")
+    return target
+
+
+def agent_set_plan(db: Session, agent: User, link_id: str, body: AgentPlanUpdate) -> AgentLinkUserOut:
+    """代理调整自己名下客户的会员等级与到期日。返回改完之后的那一行。
+
+    三条边界：
+    ① 只能动自己名下链接带来的人（_owned_link + _agent_target，都是 404）；
+    ② 一次最多延长 AGENT_MAX_EXTEND_DAYS 天（schema 里已卡 le=60，这里再兜一次——
+       schema 是给 HTTP 的，这个函数本身也会被测试与将来的调用方直接用）；
+    ③ **不限期 PRO 不许碰**。那是管理员手动给的（内部赠送 / KOL 合作，
+       plan_expires_at 为空 = 永久），延长会把永久变成有限期、降级会直接撤销管理员
+       的决定——两种都是代理在覆盖管理员，所以一律 409 让他去找管理员。
+
+    每个真正变化的字段各写一条审计行，field 带 `agent:{code}:` 前缀：这样一眼看出
+    这次改动来自代理页而不是后台，而 admin_user_id 记的就是那个代理。
+
+    Agent-side plan change for one of their own referrals, returning the updated
+    row. Three boundaries: only their own referrals (404 otherwise); at most
+    AGENT_MAX_EXTEND_DAYS per call; and never-expiring PRO is off limits (409) —
+    that is an admin's manual grant, and both extending and downgrading it would
+    have an agent overrule an admin. Every changed field gets its own audit row,
+    prefixed so the agent view is distinguishable from the back office.
+    """
+    link = _owned_link(db, agent, link_id)
+    target = _agent_target(db, link, body.email)
+
+    if target.plan == "PRO" and target.plan_expires_at is None:
+        raise HTTPException(
+            status_code=409,
+            detail="该用户是不限期会员，请联系管理员 / This user's membership has no expiry; contact an admin",
+        )
+
+    old_plan, old_expiry = target.plan, target.plan_expires_at
+    now = datetime.now(timezone.utc)
+
+    if body.action == "extend":
+        days = body.days
+        if not days or days > AGENT_MAX_EXTEND_DAYS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"一次最多延长 {AGENT_MAX_EXTEND_DAYS} 天 / At most {AGENT_MAX_EXTEND_DAYS} days per change",
+            )
+        # 从"还没过期的到期日"往后接，过期或 FREE 则从此刻起算——否则给一个
+        # 上个月就到期的人加 30 天，会算出一个仍然在过去的到期日。
+        # Extend from a still-future expiry, otherwise from now: adding 30 days
+        # to an expiry that lapsed last month would land in the past.
+        base = now
+        if old_expiry is not None:
+            current = old_expiry if old_expiry.tzinfo else old_expiry.replace(tzinfo=timezone.utc)
+            if current > now:
+                base = current
+        target.plan = "PRO"
+        target.plan_expires_at = (base + timedelta(days=days)).replace(tzinfo=None)
+    else:
+        target.plan = "FREE"
+        target.plan_expires_at = None
+
+    # 代理的手动调整与管理员的一样是权威操作，盖掉试用状态：否则一个正在试用的
+    # 人被延长之后，plan_is_trial 还挂着 True，到期降级那套会把他当试用处理。
+    # Like an admin's, a manual change is authoritative and clears the trial flag.
+    target.plan_is_trial = False
+
+    _log_change(db, agent.id, target.id, f"agent:{link.code}:plan", old_plan, target.plan)
+    _log_change(
+        db, agent.id, target.id, f"agent:{link.code}:plan_expires_at", old_expiry, target.plan_expires_at
+    )
+    db.commit()
+    db.refresh(target)
+    return _agent_user_out(db, target)
+
+
+def _agent_user_out(db: Session, u: User) -> AgentLinkUserOut:
+    """一个用户在代理名单里的那一行。列表与改完之后的单行响应共用这一处构造，
+    免得哪天加了字段只补了其中一边（admin._user_out 也是这个理由）。
+    One construction site for the row, shared by the list and the post-change
+    response — the same reason admin._user_out exists."""
+    return AgentLinkUserOut(
+        nickname=u.nickname,
+        email=u.email,
+        plan=u.plan,
+        createdAt=u.created_at,
+        planExpiresAt=u.plan_expires_at,
+        lastActiveDay=_last_active_days(db, [u.id]).get(u.id),
+        mt5Accounts=_mt5_accounts(db, [u.id]).get(u.id, []),
     )
 
 
@@ -750,6 +896,44 @@ def my_agent_links(db: Session = Depends(get_db), user: User = Depends(get_curre
     and status. Non-agents get an empty list rather than 403: the entry point is
     already hidden by isAgent, no need for one more error shape."""
     return {"links": [l.model_dump(mode="json") for l in agent_links(db, user)]}
+
+
+@agent_router.get("/links/{link_id}/overview", response_model=AgentOverviewOut)
+def my_agent_link_overview(
+    link_id: str,
+    range_: str | None = Query(None, alias="range"),
+    from_: date | None = Query(None, alias="from"),
+    to: date | None = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """这条链接的看板：头部指标 + 活跃/新注册趋势。范围参数与管理看板完全一致
+    （预设 `range=` 或自定义 `from=&to=`，都不给默认本月），解析也是同一个函数。
+    One link's dashboard: headline tiles plus the activity/signup trend. Same
+    range parameters and the same parser as the admin dashboard."""
+    return agent_overview(db, user, link_id, _resolve_range_or_422(range_, from_, to))
+
+
+@agent_router.patch("/links/{link_id}/users/plan", response_model=AgentLinkUserOut)
+@limiter.limit("30/minute")
+def my_agent_set_user_plan(
+    request: Request,
+    link_id: str,
+    body: AgentPlanUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """代理调整自己名下客户的会员：延长 PRO（一次最多 60 天）或降回 FREE。
+
+    **这是 /agent/* 唯一的写端点**（2026-09-19 之前这条路径上一个都没有）。边界与
+    审计见 agent_set_plan；限流挂在这里而不是别处：其余代理端点都是只读，只有它
+    能改别人的权益，被脚本连点会把一整批人开成 PRO。
+
+    The only write endpoint under /agent/*. Boundaries and audit live in
+    agent_set_plan; the rate limit sits here because this is the one call that
+    changes someone else's entitlement.
+    """
+    return agent_set_plan(db, user, link_id, body)
 
 
 @agent_router.get("/links/{link_id}/users", response_model=AgentLinkUsersOut)

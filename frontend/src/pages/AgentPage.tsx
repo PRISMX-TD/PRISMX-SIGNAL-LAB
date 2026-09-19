@@ -19,11 +19,13 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import PageHead from '../components/PageHead'
 import { SkeletonLine } from '../components/Skeleton'
+import AgentOverviewPanel from '../components/agent/AgentOverviewPanel'
+import PlanDialog from '../components/agent/PlanDialog'
 import { agentApi } from '../api/client'
 import { fmtTime, localizeApiError } from '../api/utils'
 import { ORIGIN } from '../seo/meta'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
-import type { AgentLink, AgentLinkUsers, AgentMT5Account } from '../api/types'
+import type { AgentLink, AgentLinkUser, AgentLinkUsers, AgentMT5Account } from '../api/types'
 
 const PAGE_SIZE = 50
 const linkUrl = (code: string) => `${ORIGIN}/?ref=${code}`
@@ -85,6 +87,32 @@ function Mt5List({ accounts }: { accounts: AgentMT5Account[] }) {
   )
 }
 
+// 会员列：等级徽标 + 到期日。不限期（PRO 且没有到期日）是管理员手动给的，代理
+// 改不动，这里直接标出来，免得他点了才吃一个 409。
+// Membership cell: tier badge plus expiry. A PRO row with no expiry is an
+// admin's manual grant that agents cannot change — say so up front rather than
+// letting them find out via a 409.
+function PlanCell({ user }: { user: AgentLinkUser }) {
+  const { t } = useTranslation()
+  const forever = user.plan === 'PRO' && !user.planExpiresAt
+  return (
+    <div className="min-w-0">
+      <span
+        className={`rounded-full px-2 py-0.5 text-xs ${
+          user.plan === 'PRO' ? 'bg-prism-500/20 text-prism-200' : 'bg-white/5 text-neutral-400'
+        }`}
+      >
+        {user.plan}
+      </span>
+      {user.plan === 'PRO' && (
+        <p className="num mt-1 text-[11px] text-neutral-500">
+          {forever ? t('agent.plan.noExpiry') : t('agent.plan.until', { time: fmtTime(user.planExpiresAt) })}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function LastActive({ day }: { day: string | null }) {
   const { t } = useTranslation()
   if (!day) return <span className="text-neutral-500">{t('agent.neverActive')}</span>
@@ -111,6 +139,11 @@ export default function AgentPage() {
   const [offset, setOffset] = useState(0)
   const [page, setPage] = useState<AgentLinkUsers | null>(null)
   const [pageError, setPageError] = useState<string | null>(null)
+  // 正在调整会员的那个客户（弹窗开着）。改完就地替换这一行，不重拉整页——
+  // 翻到第 3 页改一个人不该把人弹回第 1 页。
+  // The client whose membership is being changed. The updated row is patched in
+  // place rather than refetching: changing someone on page 3 must not jump back.
+  const [editing, setEditing] = useState<AgentLinkUser | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -151,6 +184,13 @@ export default function AgentPage() {
     if (id === selectedId) return
     setSelectedId(id)
     setOffset(0)
+  }
+
+  const applyUpdated = (updated: AgentLinkUser) => {
+    setPage((cur) =>
+      cur ? { ...cur, users: cur.users.map((u) => (u.email === updated.email ? updated : u)) } : cur,
+    )
+    setEditing(null)
   }
 
   const copy = async (l: AgentLink) => {
@@ -285,6 +325,10 @@ export default function AgentPage() {
         </div>
       )}
 
+      {/* 看板跟着选中的链接走，与下方名单同一条链接——点哪张卡，两块一起切。
+          The dashboard follows the selected link, same as the list below. */}
+      {selected && <AgentOverviewPanel linkId={selected.id} />}
+
       {/* 名单：桌面表格、手机卡片（两棵 DOM，按断点切换）。
           The list: a table on desktop, cards on phones. */}
       {selected && (
@@ -322,6 +366,7 @@ export default function AgentPage() {
                         <th className="px-4 py-3 font-medium">{t('agent.colMt5')}</th>
                         <th className="px-4 py-3 font-medium">{t('agent.colActive')}</th>
                         <th className="px-4 py-3 font-medium">{t('agent.colRegistered')}</th>
+                        <th className="px-4 py-3 font-medium text-right">{t('agent.colAction')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -334,13 +379,7 @@ export default function AgentPage() {
                             <span className="num block break-all text-xs text-neutral-400">{u.email}</span>
                           </td>
                           <td className="px-4 py-3">
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-xs ${
-                                u.plan === 'PRO' ? 'bg-prism-500/20 text-prism-200' : 'bg-white/5 text-neutral-400'
-                              }`}
-                            >
-                              {u.plan}
-                            </span>
+                            <PlanCell user={u} />
                           </td>
                           <td className="px-4 py-3 text-xs">
                             <Mt5List accounts={u.mt5Accounts} />
@@ -350,6 +389,16 @@ export default function AgentPage() {
                           </td>
                           <td className="num whitespace-nowrap px-4 py-3 text-xs text-neutral-400">
                             {fmtTime(u.createdAt)}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              type="button"
+                              className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-40"
+                              disabled={u.plan === 'PRO' && !u.planExpiresAt}
+                              onClick={() => setEditing(u)}
+                            >
+                              {t('agent.plan.adjust')}
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -367,13 +416,7 @@ export default function AgentPage() {
                           <p className="num break-all text-xs text-neutral-400">{u.email}</p>
                         </div>
                         <div className="shrink-0 text-right">
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-xs ${
-                              u.plan === 'PRO' ? 'bg-prism-500/20 text-prism-200' : 'bg-white/5 text-neutral-400'
-                            }`}
-                          >
-                            {u.plan}
-                          </span>
+                          <PlanCell user={u} />
                           <p className="num mt-1 text-[11px] text-neutral-500">{fmtTime(u.createdAt)}</p>
                         </div>
                       </div>
@@ -395,6 +438,14 @@ export default function AgentPage() {
                           <Mt5List accounts={u.mt5Accounts} />
                         </div>
                       </div>
+                      <button
+                        type="button"
+                        className="btn-ghost mt-2 w-full py-1.5 text-xs disabled:opacity-40"
+                        disabled={u.plan === 'PRO' && !u.planExpiresAt}
+                        onClick={() => setEditing(u)}
+                      >
+                        {t('agent.plan.adjust')}
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -423,6 +474,15 @@ export default function AgentPage() {
             ) : null}
           </div>
         </section>
+      )}
+
+      {editing && selected && (
+        <PlanDialog
+          linkId={selected.id}
+          user={editing}
+          onDone={applyUpdated}
+          onClose={() => setEditing(null)}
+        />
       )}
     </div>
   )

@@ -203,6 +203,11 @@ export interface AgentLinkUser {
   email: string
   plan: UserPlan
   createdAt: string | null
+  // 会员到期时间；FREE 与「不限期」都是 null。到期日为 null 的 PRO = 管理员手动
+  // 给的不限期会员，代理改不动（后端 409），前端据此把调整按钮禁掉。
+  // Expiry; null for FREE and for never-expiring grants alike. A PRO row with a
+  // null expiry is an admin's manual grant that agents cannot change (409).
+  planExpiresAt: string | null
   // 最近活跃日，"YYYY-MM-DD"（已经是 STATS_TZ 的日期，别再丢进 fmtDay 之类的
   // 时区换算里，那会把它当 UTC 零点再偏一次）。null = 从未活跃或已过留存期。
   // Last active day, already a STATS_TZ calendar date — do not run it through a
@@ -217,6 +222,20 @@ export interface AgentLinkUsers {
   limit: number
   offset: number
 }
+
+// 代理看板：与管理看板同一套口径与类型，范围收在当前这条链接带来的人上。
+// The agent dashboard: the admin dashboard's types and semantics, scoped to one link.
+export interface AgentOverview {
+  range: AdminOverviewRange
+  headline: AdminOverviewHeadline
+  activity: AdminActivityDay[]
+}
+
+// 代理调整客户会员。extend 需要 days（1–60，后端同样卡上限）；downgrade 不带 days。
+// Agent-side plan change: extend needs days (1–60, capped server-side too).
+export type AgentPlanChange =
+  | { email: string; action: 'extend'; days: number }
+  | { email: string; action: 'downgrade' }
 
 // 管理后台：数据看板。全部按 STATS_TZ（北京时间）切天、剔除管理员；
 // "活跃"= 当天打开过任一页面。口径见 docs/superpowers/specs/2026-09-16-admin-overview-dashboard-design.md
